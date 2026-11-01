@@ -1,0 +1,377 @@
+{
+  "status": "PASS",
+  "engine": "LakefillQ Symbolic k-Inductive Loop-Invariant QSub (Laws U1-U4) Inference",
+  "compiler_module": "compiler/lakefillqc/infer_qsub.py",
+  "lean4_module": "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
+  "total_verification_time_ms": 5213.88,
+  "unit_tests_passed": true,
+  "positive_loop_benchmarks": [
+    {
+      "benchmark": "AES-128",
+      "rounds": 10,
+      "peak_qubits": 290,
+      "state_qubits": 128,
+      "key_qubits": 128,
+      "recycled_scratch_qubits": 34,
+      "total_temp_ands": 12240,
+      "total_mbus": 6120,
+      "inductive_o1": {
+        "well_typed": true,
+        "z3_solver_calls": 3,
+        "xag_nodes_allocated": 816,
+        "and_nodes_allocated": 64,
+        "inference_time_ms": 5.341
+      },
+      "unrolled_oR": {
+        "well_typed": true,
+        "z3_solver_calls": 30,
+        "xag_nodes_allocated": 17896,
+        "and_nodes_allocated": 640,
+        "inference_time_ms": 86.599
+      },
+      "z3_query_speedup_x": 10.0,
+      "wall_time_speedup_x": 16.21,
+      "xag_node_reduction_x": 21.93,
+      "exact_loop_grade_match": true
+    },
+    {
+      "benchmark": "AES-256",
+      "rounds": 14,
+      "peak_qubits": 418,
+      "state_qubits": 128,
+      "key_qubits": 256,
+      "recycled_scratch_qubits": 34,
+      "total_temp_ands": 17024,
+      "total_mbus": 8512,
+      "inductive_o1": {
+        "well_typed": true,
+        "z3_solver_calls": 3,
+        "xag_nodes_allocated": 704,
+        "and_nodes_allocated": 64,
+        "inference_time_ms": 13.508
+      },
+      "unrolled_oR": {
+        "well_typed": true,
+        "z3_solver_calls": 42,
+        "xag_nodes_allocated": 8448,
+        "and_nodes_allocated": 896,
+        "inference_time_ms": 76.536
+      },
+      "z3_query_speedup_x": 14.0,
+      "wall_time_speedup_x": 5.67,
+      "xag_node_reduction_x": 12.0,
+      "exact_loop_grade_match": true
+    },
+    {
+      "benchmark": "Keccak-f[200]",
+      "rounds": 18,
+      "peak_qubits": 245,
+      "state_qubits": 200,
+      "key_qubits": 0,
+      "recycled_scratch_qubits": 45,
+      "total_temp_ands": 3600,
+      "total_mbus": 3600,
+      "inductive_o1": {
+        "well_typed": true,
+        "z3_solver_calls": 2,
+        "xag_nodes_allocated": 360,
+        "and_nodes_allocated": 80,
+        "inference_time_ms": 3.521
+      },
+      "unrolled_oR": {
+        "well_typed": true,
+        "z3_solver_calls": 36,
+        "xag_nodes_allocated": 4141,
+        "and_nodes_allocated": 137,
+        "inference_time_ms": 64.502
+      },
+      "z3_query_speedup_x": 18.0,
+      "wall_time_speedup_x": 18.32,
+      "xag_node_reduction_x": 11.5,
+      "exact_loop_grade_match": true
+    },
+    {
+      "benchmark": "ChaCha20",
+      "rounds": 20,
+      "peak_qubits": 576,
+      "state_qubits": 512,
+      "key_qubits": 0,
+      "recycled_scratch_qubits": 64,
+      "total_temp_ands": 9920,
+      "total_mbus": 9920,
+      "inductive_o1": {
+        "well_typed": true,
+        "z3_solver_calls": 2,
+        "xag_nodes_allocated": 552,
+        "and_nodes_allocated": 16,
+        "inference_time_ms": 3.321
+      },
+      "unrolled_oR": {
+        "well_typed": true,
+        "z3_solver_calls": 40,
+        "xag_nodes_allocated": 10816,
+        "and_nodes_allocated": 24,
+        "inference_time_ms": 65.998
+      },
+      "z3_query_speedup_x": 20.0,
+      "wall_time_speedup_x": 19.87,
+      "xag_node_reduction_x": 19.59,
+      "exact_loop_grade_match": true
+    },
+    {
+      "benchmark": "Iterated-Perm-256-R64",
+      "rounds": 64,
+      "peak_qubits": 288,
+      "state_qubits": 256,
+      "key_qubits": 0,
+      "recycled_scratch_qubits": 32,
+      "total_temp_ands": 32768,
+      "total_mbus": 32768,
+      "inductive_o1": {
+        "well_typed": true,
+        "z3_solver_calls": 2,
+        "xag_nodes_allocated": 320,
+        "and_nodes_allocated": 32,
+        "inference_time_ms": 2.747
+      },
+      "unrolled_oR": {
+        "well_typed": true,
+        "z3_solver_calls": 128,
+        "xag_nodes_allocated": 22016,
+        "and_nodes_allocated": 2048,
+        "inference_time_ms": 203.91
+      },
+      "z3_query_speedup_x": 64.0,
+      "wall_time_speedup_x": 74.23,
+      "xag_node_reduction_x": 68.8,
+      "exact_loop_grade_match": true
+    },
+    {
+      "benchmark": "Iterated-Perm-256-R1000",
+      "rounds": 1000,
+      "peak_qubits": 288,
+      "state_qubits": 256,
+      "key_qubits": 0,
+      "recycled_scratch_qubits": 32,
+      "total_temp_ands": 512000,
+      "total_mbus": 512000,
+      "inductive_o1": {
+        "well_typed": true,
+        "z3_solver_calls": 2,
+        "xag_nodes_allocated": 320,
+        "and_nodes_allocated": 32,
+        "inference_time_ms": 2.801
+      },
+      "unrolled_oR": {
+        "well_typed": true,
+        "z3_solver_calls": 2000,
+        "xag_nodes_allocated": 340992,
+        "and_nodes_allocated": 32000,
+        "inference_time_ms": 4008.893
+      },
+      "z3_query_speedup_x": 1000.0,
+      "wall_time_speedup_x": 1431.48,
+      "xag_node_reduction_x": 1065.6,
+      "exact_loop_grade_match": true
+    }
+  ],
+  "negative_adversarial_loop_checks": [
+    {
+      "bug_id": "Bug1_LoopCarried_TaintedX_Escape",
+      "rounds": 10,
+      "expected_violated_law": "U4",
+      "rejected": true,
+      "u1_scratch_clean_ok": true,
+      "u2_bijective_ok": true,
+      "u4_zero_taint_escape_ok": false,
+      "capability_invariant_ok": false,
+      "z3_solver_calls": 5,
+      "inference_time_ms": 5.251,
+      "counterexample": {
+        "assign_mask": 3,
+        "active_input_wires": [
+          0,
+          1
+        ],
+        "hamming_weight": 2
+      },
+      "violations": [
+        {
+          "law": "U4",
+          "kind": "loop_boundary_uncancelled_u4_kickback",
+          "meas_var": "m_leak_r0",
+          "xag_lit": 34,
+          "counterexample": {
+            "assign_mask": 3,
+            "active_input_wires": [
+              0,
+              1
+            ],
+            "hamming_weight": 2
+          }
+        },
+        {
+          "law": "U4",
+          "kind": "loop_carried_taintedx_escape",
+          "wire": 0,
+          "active_taints": [
+            "m_leak_r0"
+          ],
+          "next_iteration_interference": true,
+          "counterexample": {
+            "assign_mask": 3,
+            "active_input_wires": [
+              0,
+              1
+            ],
+            "hamming_weight": 2
+          }
+        },
+        {
+          "law": "U4",
+          "kind": "loop_carried_taintedx_escape",
+          "wire": 1,
+          "active_taints": [
+            "m_leak_r0"
+          ],
+          "next_iteration_interference": true,
+          "counterexample": {
+            "assign_mask": 3,
+            "active_input_wires": [
+              0,
+              1
+            ],
+            "hamming_weight": 2
+          }
+        },
+        {
+          "law": "CapabilityInvariant",
+          "kind": "loop_capability_invariant_mismatch",
+          "wire": 0,
+          "expected_capability": "Uniq1",
+          "actual_capability": "TaintedX"
+        },
+        {
+          "law": "CapabilityInvariant",
+          "kind": "loop_capability_invariant_mismatch",
+          "wire": 1,
+          "expected_capability": "Uniq1",
+          "actual_capability": "TaintedX"
+        }
+      ]
+    },
+    {
+      "bug_id": "Bug2_Uncleaned_Round_Scratch_Wire",
+      "rounds": 18,
+      "expected_violated_law": "U1",
+      "rejected": true,
+      "u1_scratch_clean_ok": false,
+      "u2_bijective_ok": true,
+      "u4_zero_taint_escape_ok": true,
+      "capability_invariant_ok": true,
+      "z3_solver_calls": 2,
+      "inference_time_ms": 2.875,
+      "counterexample": {
+        "assign_mask": 192,
+        "active_input_wires": [
+          6,
+          7
+        ],
+        "hamming_weight": 2
+      },
+      "violations": [
+        {
+          "law": "U1",
+          "kind": "inductive_step_uncleaned_scratch_wire",
+          "wire": 19,
+          "xag_lit": 36,
+          "counterexample": {
+            "assign_mask": 192,
+            "active_input_wires": [
+              6,
+              7
+            ],
+            "hamming_weight": 2
+          }
+        }
+      ]
+    },
+    {
+      "bug_id": "Bug3_NonBijective_Colliding_Round_Step",
+      "rounds": 20,
+      "expected_violated_law": "U2",
+      "rejected": true,
+      "u1_scratch_clean_ok": true,
+      "u2_bijective_ok": false,
+      "u4_zero_taint_escape_ok": true,
+      "capability_invariant_ok": true,
+      "z3_solver_calls": 2,
+      "inference_time_ms": 2.15,
+      "counterexample": {
+        "state_a_mask": 1,
+        "state_b_mask": 0,
+        "num_bits": 4
+      },
+      "violations": [
+        {
+          "law": "U2",
+          "kind": "non_bijective_round_transition_collision",
+          "substage": "defective_nonbijective_sbox4",
+          "counterexample": {
+            "state_a_mask": 1,
+            "state_b_mask": 0,
+            "num_bits": 4
+          }
+        }
+      ]
+    },
+    {
+      "bug_id": "Bug4_Loop_Capability_Invariant_Drift",
+      "rounds": 14,
+      "expected_violated_law": "CapabilityInvariant",
+      "rejected": true,
+      "u1_scratch_clean_ok": true,
+      "u2_bijective_ok": true,
+      "u4_zero_taint_escape_ok": true,
+      "capability_invariant_ok": false,
+      "z3_solver_calls": 2,
+      "inference_time_ms": 2.051,
+      "counterexample": null,
+      "violations": [
+        {
+          "law": "CapabilityInvariant",
+          "kind": "loop_capability_invariant_mismatch",
+          "wire": 0,
+          "expected_capability": "Uniq1",
+          "actual_capability": "Lin1"
+        }
+      ]
+    }
+  ],
+  "lean4_mechanization": {
+    "lean_file": "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
+    "kernel_verified": true,
+    "compile_time_ms": 621.73,
+    "theorem_count": 14,
+    "small_proof_count": 14,
+    "kernel_violations": 0,
+    "tautologies": 0,
+    "sanitizer_violations": 0,
+    "theorem_names": [
+      "rwire_join_comm_and_idempotent",
+      "rwire_taint_discharge_restores_capability",
+      "inductive_loop_capability_invariant",
+      "inductive_loop_zero_taint_escape",
+      "inductive_loop_u1_scratch_clean",
+      "inductive_loop_u2_bijective_comp",
+      "inductive_loop_u4_bilinear_phase_cancellation",
+      "inductive_loop_grade_scaling",
+      "inductive_loop_ancilla_recycling_width_constant",
+      "inductive_loop_constant_query_bound",
+      "inductive_loop_query_saving_linear_in_rounds",
+      "inductive_loop_k_step_strengthening",
+      "inductive_loop_soundness_implies_unrolled_qsub",
+      "inductive_loop_counterexample_refutes_invariant"
+    ]
+  }
+}

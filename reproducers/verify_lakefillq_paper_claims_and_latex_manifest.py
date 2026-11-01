@@ -1953,6 +1953,36 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
                 "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
                 "external_decoder_pacing_concrete_separation",
             ),
+            (
+                "sec:qsub",
+                "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
+                "inductive_loop_soundness_implies_unrolled_qsub",
+            ),
+            (
+                "sec:qsub",
+                "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
+                "inductive_loop_zero_taint_escape",
+            ),
+            (
+                "sec:qsub",
+                "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
+                "inductive_loop_constant_query_bound",
+            ),
+            (
+                "sec:rq1",
+                "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
+                "lifted_bivariate_early_mbu_law_u4_phase_cancel",
+            ),
+            (
+                "sec:rq1",
+                "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
+                "suzuki_s8_genus_and_quadratic_blocklength_law",
+            ),
+            (
+                "sec:rq1",
+                "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
+                "higher_genus_and_lifted_ag_dominate_rs_mds_ceiling",
+            ),
         ]
     )
 
@@ -2016,6 +2046,8 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
         "proofs/lakefillq_holistic_modular_duoidal_cohesion_proofs.lean",
         "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
         "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
+        "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
+        "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
     ]
 
     env = os.environ.copy()

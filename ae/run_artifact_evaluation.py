@@ -720,7 +720,7 @@ def run_evaluation(mode: str, json_out: Optional[str] = None) -> int:
                         tc,
                         env,
                         "reproducers/verify_lakefillq_paper_claims_and_latex_manifest.py",
-                        "124 JSON claims, 21 formal labels, 29 Lean runs, 120 BibTeX entries PASS",
+                        "124 JSON claims, 21 formal labels, 31 Lean runs, 120 BibTeX entries PASS",
                     ),
                 ),
                 (

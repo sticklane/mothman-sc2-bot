@@ -1,0 +1,129 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/early_mbu_dqi_lifted_bivariate_f4.lfq
+;;
+;; Non-Binary Lifted Bivariate Evaluation Code (`AG / Lifted Surface`) Early-MBU
+;; Decoded Quantum Interferometry (`DQI`) on `GF(4)^2` (`[9, 6, 3]_{GF(4)}`).
+;;
+;; Why Lifted Bivariate & Higher-Genus Codes Matter for DQI:
+;;   - Over `GF(4) = {0, 1, omega, omega^2}` (`omega^2 = omega + 1`), any
+;;     univariate Reed-Solomon code has blocklength bounded by the MDS ceiling
+;;     `n_RS <= |GF(4)| + 1 = 5`, and the genus-1 Hermitian curve `H_2(GF(4))`
+;;     is bounded by `|H_2(GF(4))| = 8`.
+;;   - Evaluating bivariate affine linear forms `{1, x, y}` across a 9-point
+;;     lifted subgrid `P_0 .. P_8 in {0, 1, omega}^2 subset GF(4)^2` yields an
+;;     exact `[9, 6, 3]_{GF(4)}` code (`n = 9 > n_RS = 5`) with `3` `GF(4)`
+;;     syndrome symbols (`6` syndrome qubits) and `9` `GF(4)` error symbols
+;;     (`18` error qubits; `24` data + syndrome qubits total in unitary DQI).
+;;   - Because any two distinct affine points `(x_i, y_i) != (x_j, y_j)` in
+;;     `GF(4)^2` have projectively distinct parity columns `(1, x_j, y_j)^T`,
+;;     every single-symbol error `e_j in GF(4)^*` (`27` non-zero errors + `0` =
+;;     `28` coset leaders) produces a unique syndrome `(s_0, s_1, s_2) =
+;;     (e_j, x_j * e_j, y_j * e_j)`.
+;;
+;; Key LakefillQ Invariants Verified Automatically (`0` Manual Annotations):
+;;   - Early Hadamard-dual `mid-meas-x` measures and resets all `18` error wires
+;;     before syndrome decoding (`24 -> 6` live logical qubits; `51` virtual SSA
+;;     wires chordally recycled onto `24` physical qubits, `Law U1` `EraseBy`).
+;;   - Balanced Braun-tree catamorphism (`fold-braun`) exploits the bivariate
+;;     affine locator relation `(s_1, s_2) = (x_j * s_0, y_j * s_0)` inside
+;;     `within-apply-mbu`, canceling all `3` non-zero `GF(4)^*` error values per
+;;     evaluation point with a single 4-bit zero-test (`27` forward `TempAND`s,
+;;     `0` reverse Toffolis) and Clifford `cond-cz` feed-forward (`Law U4`).
+;; =============================================================================
+
+(target-profile bb-qldpc)
+
+;; The 9 lifted bivariate evaluation points `(x_j, y_j) in {0, 1, omega}^2 subset GF(4)^2`,
+;; encoded as `0 -> (0,0)`, `1 -> (1,0)`, `2 -> omega = (0,1)`, `3 -> omega^2 = (1,1)`:
+(defconst lifted-bivariate-f4-points
+  '((0 0) (0 1) (0 2)
+    (1 0) (1 1) (1 2)
+    (2 0) (2 1) (2 2)))
+
+(defconst lifted-bivariate-f4-meas-syms
+  '((m_e0_0 m_e0_1) (m_e1_0 m_e1_1) (m_e2_0 m_e2_1)
+    (m_e3_0 m_e3_1) (m_e4_0 m_e4_1) (m_e5_0 m_e5_1)
+    (m_e6_0 m_e6_1) (m_e7_0 m_e7_1) (m_e8_0 m_e8_1)))
+
+;; Reversible GF(4) multiply-accumulate `(dst0, dst1) ^= coeff * (src0, src1)`
+;; in polynomial basis `{1, omega}` with `omega^2 = omega + 1`:
+(define (gf4-mac coeff src0 src1 dst0 dst1)
+  (cond
+    [(= coeff 0) skip]
+    [(= coeff 1) (seq (cx src0 dst0) (cx src1 dst1))]
+    [(= coeff 2) (seq (cx src1 dst0) (cx src0 dst1) (cx src1 dst1))]
+    [(= coeff 3) (seq (cx src0 dst0) (cx src1 dst0) (cx src0 dst1))]))
+
+;; Exact GF(4)-symbol Hamming weight <= 1 domain guard over all 9 GF(4) symbols
+;; (`28` coset leaders: `0` plus `9 * 3 = 27` single-symbol `GF(4)^*` errors):
+(define lifted-bivariate-f4-wt-le1-guard
+  (apply g-and
+         (cons (g-all-zero '(18 19 20 21 22 23))
+               (for*/list ([i (in-range 9)]
+                           [j (in-range (add1 i) 9)])
+                 (g-not (g-and (g-or (g-wire (* 2 i)) (g-wire (add1 (* 2 i))))
+                               (g-or (g-wire (* 2 j)) (g-wire (add1 (* 2 j))))))))))
+
+(defq (early-mbu-dqi-lifted-bivariate-f4
+       #:wires ([e18 (range 0 18)]
+                [syn6 (range 18 24)])
+       #:scratch ([v-t0 (range 24 33)]
+                  [v-t1 (range 33 42)]
+                  [v-loc (range 42 51)])
+       #:domain (domain-guard lifted-bivariate-f4-wt-le1-guard))
+  ;; 1. Lifted bivariate parity-check encoding `syn6 ^= H_lift * e18` (`h_j = (1, x_j, y_j)^T`):
+  (for/seq ([j (in-range 9)])
+    (define pt (list-ref lifted-bivariate-f4-points j))
+    (define xj (first pt))
+    (define yj (second pt))
+    (define ej0 (wref e18 (* 2 j)))
+    (define ej1 (wref e18 (add1 (* 2 j))))
+    (seq
+     (gf4-mac 1  ej0 ej1 (wref syn6 0) (wref syn6 1))
+     (gf4-mac xj ej0 ej1 (wref syn6 2) (wref syn6 3))
+     (gf4-mac yj ej0 ej1 (wref syn6 4) (wref syn6 5))))
+
+  ;; 2. Early-MBU `M_X` + reset on all 18 error qubits (`24 -> 6` live logical qubits!):
+  (for/seq ([j (in-range 9)])
+    (define mpair (list-ref lifted-bivariate-f4-meas-syms j))
+    (seq
+     (mid-meas-x (wref e18 (* 2 j)) (first mpair))
+     (mid-meas-x (wref e18 (add1 (* 2 j))) (second mpair))))
+
+  ;; 3. Balanced Braun-tree bivariate affine-locator phase cancellation (`fold-braun`):
+  ;;    For each bivariate point `P_j = (x_j, y_j)`, `(s_1 == x_j * s_0) && (s_2 == y_j * s_0)`
+  ;;    uniquely isolates `P_j` across all three non-zero `GF(4)^*` error magnitudes `s_0`!
+  (fold-braun
+   (lambda (pt j)
+     (define xj (first pt))
+     (define yj (second pt))
+     (define mpair (list-ref lifted-bivariate-f4-meas-syms j))
+     (define s0-0 (wref syn6 0))
+     (define s0-1 (wref syn6 1))
+     (define s1-0 (wref syn6 2))
+     (define s1-1 (wref syn6 3))
+     (define s2-0 (wref syn6 4))
+     (define s2-1 (wref syn6 5))
+     (define t0 (wref v-t0 j))
+     (define t1 (wref v-t1 j))
+     (define loc (wref v-loc j))
+     (within-apply-mbu
+      (seq
+       (gf4-mac xj s0-0 s0-1 s1-0 s1-1)
+       (gf4-mac yj s0-0 s0-1 s2-0 s2-1)
+       (x s1-0) (x s1-1) (x s2-0) (x s2-1)
+       (temp-and s1-0 s1-1 t0)
+       (temp-and s2-0 s2-1 t1)
+       (temp-and t0 t1 loc))
+      (seq
+       (cond-cz (first mpair) s0-0 loc)
+       (cond-cz (second mpair) s0-1 loc))
+      (list loc t1 t0)))
+   lifted-bivariate-f4-points)
+
+  ;; 4. Final GF(4)^3 trace-Fourier / Walsh-Hadamard interference on `syn6`:
+  (focus-zipper [sz syn6 (append e18 syn6)]
+    (for/seq ([r (in-range 6)])
+      (h (wref sz r)))))
