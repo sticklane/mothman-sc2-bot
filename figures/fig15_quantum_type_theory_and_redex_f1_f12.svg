@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 660" width="1320" height="660">
+
+  <defs>
+    <marker id="arrow-black" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-crimson" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1320" height="660" fill="#ffffff"/>
+  <line x1="16.0" y1="16.0" x2="1304.0" y2="16.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <text x="24.0" y="38.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="14.5" font-weight="700" fill="#000000" text-anchor="start">Figure 15.  The LakefillQ Four-Dialect Compiler Architecture &amp; Unified Capability-and-Cost Judgment</text>
+  <text x="24.0" y="57.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">Surface #lang lakefillq → Six-Primitive Kernel → Equality-Saturated RevIR e-Graph → Target MachineISA</text>
+  <line x1="16.0" y1="68.0" x2="1304.0" y2="68.0" stroke="#000000" stroke-width="0.80" stroke-linecap="butt"/>
+  <rect x="16.0" y="94.0" width="1288.0" height="548.0" fill="#ffffff" stroke="#000000" stroke-width="1.00"/>
+  <line x1="16.0" y1="138.0" x2="1304.0" y2="138.0" stroke="#000000" stroke-width="0.75" stroke-linecap="butt"/>
+  <text x="28.0" y="112.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="start">End-to-End Compilation Pipeline Preserving Substructural Wire Capabilities and Six-Component Physical Cost Vectors</text>
+  <text x="28.0" y="129.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">Gamma_in |- t : Q_e(A) -| Gamma_out  with e = (W_peak, W_clean, Phi, alpha, eps, E_ebit) and annotation-free XAG+Z3 cut-sweeping</text>
+  <text x="1292.0" y="112.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="400" fill="#000000" text-anchor="end">[Zero Uncomputation Annotations]</text>
+  <rect x="38.0" y="162.0" width="278.0" height="166.0" fill="#f7f7f7" stroke="#000000" stroke-width="1.20"/>
+  <text x="52.0" y="188.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">1. #lang lakefillq</text>
+  <rect x="52.0" y="198.0" width="250.0" height="22.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="177.0" y="213.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">Functional Surface</text>
+  <text x="52.0" y="244.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• Algebraic zippers &amp; trees</text>
+  <text x="52.0" y="268.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• Zero mbu/reversible tags</text>
+  <text x="52.0" y="292.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• Source provenance spans</text>
+  <line x1="320.0" y1="245.0" x2="350.0" y2="245.0" stroke="#000000" stroke-width="1.80" stroke-linecap="butt" marker-end="url(#arrow-slate)"/>
+  <rect x="360.0" y="162.0" width="278.0" height="166.0" fill="#f7f7f7" stroke="#000000" stroke-width="1.20"/>
+  <text x="374.0" y="188.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">2. lambda_LFQ^kern</text>
+  <rect x="374.0" y="198.0" width="250.0" height="22.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="499.0" y="213.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">6-Primitive Core</text>
+  <text x="374.0" y="244.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• qalloc0 / qfree0 / qfocus</text>
+  <text x="374.0" y="268.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• qunitary / qctrl / qmeas_x</text>
+  <text x="374.0" y="292.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• XAG + FRAIG + Z3 Laws U1-U4</text>
+  <line x1="642.0" y1="245.0" x2="672.0" y2="245.0" stroke="#000000" stroke-width="1.80" stroke-linecap="butt" marker-end="url(#arrow-slate)"/>
+  <rect x="682.0" y="162.0" width="278.0" height="166.0" fill="#f5f5f5" stroke="#000000" stroke-width="1.20"/>
+  <text x="696.0" y="188.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">3. RevIR e-Graph</text>
+  <rect x="696.0" y="198.0" width="250.0" height="22.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="821.0" y="213.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">ZX + MBU Saturation</text>
+  <text x="696.0" y="244.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• Z_8 ZX phase-gadget fusion</text>
+  <text x="696.0" y="268.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• MBU ↔ RCCX ↔ Shared-8T</text>
+  <text x="696.0" y="292.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• MITM 4Q bitboard synthesis</text>
+  <line x1="964.0" y1="245.0" x2="994.0" y2="245.0" stroke="#000000" stroke-width="1.80" stroke-linecap="butt" marker-end="url(#arrow-slate)"/>
+  <rect x="1004.0" y="162.0" width="278.0" height="166.0" fill="#f7f7f7" stroke="#000000" stroke-width="1.20"/>
+  <text x="1018.0" y="188.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">4. MachineISA</text>
+  <rect x="1018.0" y="198.0" width="250.0" height="22.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="1143.0" y="213.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">4 Hardware Targets</text>
+  <text x="1018.0" y="244.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• NISQ Transmon (Shared-8T)</text>
+  <text x="1018.0" y="268.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• Heron r2 / BB qLDPC (MBU)</text>
+  <text x="1018.0" y="292.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• QuEra Zoned AOD (0-T CCZ)</text>
+  <rect x="38.0" y="354.0" width="604.0" height="266.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="56.0" y="380.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">Five-Point Substructural Wire-Capability Lattice:</text>
+  <text x="56.0" y="406.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="11.0" font-weight="700" fill="#000000" text-anchor="start">0  &lt;  BorrowZ  &lt;  TaintedX  &lt;  Lin1  &lt;  Uniq1</text>
+  <text x="56.0" y="434.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• BorrowZ: Read-only Z-control borrow (forbids H/X mutation)</text>
+  <text x="56.0" y="458.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• TaintedX: Phase-entangled wire eligible for M_X + CZ fixup</text>
+  <text x="56.0" y="482.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start">• Lin1 / Uniq1: Owned linear wire / alias-free zipper focus</text>
+  <text x="56.0" y="514.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.0" font-weight="700" fill="#000000" text-anchor="start">Symbolic Cut-Sweeping Inference (Zero Surface Flags):</text>
+  <text x="56.0" y="538.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• Law U1: Unitary Bijectivity   • Law U2: Domain-Guarded Injection</text>
+  <text x="56.0" y="562.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• Law U3: Phase-Up-To MBU       • Law U4: Chordal Wire Recycling</text>
+  <text x="56.0" y="590.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Counterexample witnesses resugared directly to source spans.</text>
+  <rect x="666.0" y="354.0" width="616.0" height="266.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="684.0" y="380.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">Hardware-Parameterized Cost Extraction Across 4 Targets:</text>
+  <text x="684.0" y="406.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.8" font-weight="700" fill="#000000" text-anchor="start">e = (W_peak, W_clean, Phi, alpha, eps, E_ebit),  r |&gt; e</text>
+  <text x="684.0" y="434.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• NISQ High-SPAM Transmon:  Extracts 0-meas Shared-CCZ 8T</text>
+  <text x="684.0" y="458.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• IBM Heron r2 Dynamic:     Extracts 4-T MBU elbow + M_X</text>
+  <text x="684.0" y="482.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• QuEra Zoned Neutral-Atom: Extracts 0-T native Rydberg CCZ</text>
+  <text x="684.0" y="506.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• [[288,12,18]] BB qLDPC:   Extracts 4-T MBU + torus shift</text>
+  <text x="684.0" y="538.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.0" font-weight="700" fill="#000000" text-anchor="start">Mechanized Soundness &amp; Simulator Fidelity:</text>
+  <text x="684.0" y="562.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• 285 Lean 4 + Coq theorems (zero axioms, zero sorry/Admitted)</text>
+  <text x="684.0" y="586.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">• 100% mutant kill rate (30/30) &amp; F = 1.000000 on Aer/Cirq/Stim</text>
+</svg>

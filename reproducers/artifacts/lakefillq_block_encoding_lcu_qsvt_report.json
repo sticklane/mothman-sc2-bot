@@ -1,0 +1,489 @@
+{
+  "aer_hubbard_lcu_qsvt_verification": {
+    "hamiltonian_alpha_ha": 2.0,
+    "hamiltonian_coeffs_ha": [
+      0.75,
+      0.5,
+      0.5,
+      0.25
+    ],
+    "lakefillq_emitted_qasm3_t2_max_error": 9.984500964393446e-16,
+    "lakefillq_emitted_qasm3_t2_trajectory_errors": [
+      9.910930972932833e-16,
+      9.868087128451438e-16,
+      9.837789654792835e-16,
+      9.984500964393446e-16
+    ],
+    "naive_product_d3_comparison": {
+      "ancilla_compression_ratio": 2.0,
+      "naive_ancillas": 6,
+      "naive_cube_frobenius_error": 7.941731176651687e-16,
+      "qsvt_fused_ancillas": 3
+    },
+    "negative_soundness_aer": {
+      "both_exceed_0_45_threshold": true,
+      "dirty_select_u1_frobenius_error": 1.5,
+      "unfixed_berry_gidney_u4_frobenius_error": 3.0000000000000004
+    },
+    "qsvt_chebyshev_fusion": {
+      "T_1": {
+        "degree_d": 1,
+        "frobenius_error_vs_exact_chebyshev": 5.006912274293343e-16,
+        "naive_product_ancillas": 2,
+        "operator_spectral_norm": 0.887377439199098,
+        "qsvt_alpha_out": 1.0,
+        "qsvt_ancillas": 3,
+        "total_circuit_qubits": 5
+      },
+      "T_2": {
+        "degree_d": 2,
+        "frobenius_error_vs_exact_chebyshev": 1.3025290633612863e-15,
+        "naive_product_ancillas": 4,
+        "operator_spectral_norm": 0.9892766952966368,
+        "qsvt_alpha_out": 1.0,
+        "qsvt_ancillas": 3,
+        "total_circuit_qubits": 5
+      },
+      "T_3": {
+        "degree_d": 3,
+        "frobenius_error_vs_exact_chebyshev": 1.9606852826005612e-15,
+        "naive_product_ancillas": 6,
+        "operator_spectral_norm": 0.9694004775053533,
+        "qsvt_alpha_out": 1.0,
+        "qsvt_ancillas": 3,
+        "total_circuit_qubits": 5
+      }
+    },
+    "uh_block_projection_frobenius_error": 1.0013824548586685e-15,
+    "uh_hermitian_error": 3.155383689584837e-15,
+    "uh_involutory_error": 3.3212359425243212e-15
+  },
+  "deliverables": {
+    "aer_verifier": "reproducers/verify_lakefillq_block_encoding_lcu_qsvt_on_aer.py",
+    "lakefillq_hubbard_example": "examples/hubbard_lcu_qsvt_block.lfq",
+    "lean_proof_module": "proofs/lakefillq_block_encoding_lcu_qsvt_proofs.lean",
+    "qblock_qsvt_compiler": "compiler/lakefillq-block-encoding-qsvt.rkt",
+    "report_json": "reproducers/artifacts/lakefillq_block_encoding_lcu_qsvt_report.json"
+  },
+  "elapsed_seconds": 10.833,
+  "lean_proof_verification": {
+    "admit_count": 0,
+    "axiom_count": 0,
+    "lean_version": "4.35.0",
+    "max_proof_lines": 13,
+    "native_decide_count": 0,
+    "proof_path": "proofs/lakefillq_block_encoding_lcu_qsvt_proofs.lean",
+    "sorry_count": 0,
+    "theorem_count": 23,
+    "theorems": [
+      "lcuSum_subnormalization_and_ancillas",
+      "lcu_weighted_block_projection_identity",
+      "naiveProd_subnormalization_and_ancillas",
+      "qsvt_chebyshev_ancilla_compression",
+      "qsvt_hubbard_and_femoco_ancilla_milestones",
+      "chebHom_deg1",
+      "chebHom_deg2",
+      "chebHom_deg3",
+      "int_sq_nonneg",
+      "chebHom_deg2_bounded",
+      "two_p_plus_q_sq_expand",
+      "chebHom_deg3_upper_sos_factor",
+      "chebHom_deg3_lower_sos_factor",
+      "chebHom_deg3_bounded",
+      "lcu_projection_sound_under_u1_u4",
+      "lcu_dirty_select_u1_corrupts_block",
+      "lcu_unfixed_mx_u4_corrupts_block",
+      "diffPhaseBank_exact_mux",
+      "berryGidney_width_independent",
+      "berryGidney_L1024_61_lt_1022",
+      "berryGidney_femoco_L2048_91_lt_2046",
+      "linTong_serial_multishot_ancilla_and_phi1_advantage",
+      "linTong_multishot_restores_phi1_budget"
+    ],
+    "wildcard_count": 0
+  },
+  "racket_and_z3_verification": {
+    "example_lfq_compilation": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 6,
+      "circuit_kind": "defq",
+      "circuit_name": "hubbard-lcu-qsvt-chebyshev-t2",
+      "classical_meas_bits": 6,
+      "forward_temp_and_count": 6,
+      "machine_isa_ops": 121,
+      "mbu_erasure_count": 6,
+      "physical_qubits": 14,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qphys_grade": {
+        "decoherence_action_milli": 67,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "target_profile": "heron-r2",
+      "uncompute_ccx_count": 16,
+      "violations": [],
+      "virtual_wires": 16,
+      "well_typed": true
+    },
+    "racket_qblock_engine_summary": {
+      "berry_gidney_prep_dag_scaling": [
+        {
+          "L_terms": 16,
+          "berry_gidney_u4_temp_ands": 5,
+          "reduction_factor": 2.8,
+          "unitary_sawtooth_ccx": 14,
+          "width_independent_across_32_64_128": true,
+          "word_width_W": 32
+        },
+        {
+          "L_terms": 64,
+          "berry_gidney_u4_temp_ands": 13,
+          "reduction_factor": 4.77,
+          "unitary_sawtooth_ccx": 62,
+          "width_independent_across_32_64_128": true,
+          "word_width_W": 32
+        },
+        {
+          "L_terms": 256,
+          "berry_gidney_u4_temp_ands": 29,
+          "reduction_factor": 8.76,
+          "unitary_sawtooth_ccx": 254,
+          "width_independent_across_32_64_128": true,
+          "word_width_W": 32
+        },
+        {
+          "L_terms": 1024,
+          "berry_gidney_u4_temp_ands": 61,
+          "reduction_factor": 16.75,
+          "unitary_sawtooth_ccx": 1022,
+          "width_independent_across_32_64_128": true,
+          "word_width_W": 32
+        },
+        {
+          "L_terms": 2048,
+          "berry_gidney_u4_temp_ands": 91,
+          "reduction_factor": 22.48,
+          "unitary_sawtooth_ccx": 2046,
+          "width_independent_across_32_64_128": true,
+          "word_width_W": 32
+        }
+      ],
+      "chebyshev_qsvt_egraph_fusion": [
+        {
+          "degree_d": 1,
+          "egraph_optimal_m_anc": 2,
+          "extracted_ast": "(chebyshev-naive 1 (qblock-lcu H_hubbard_2site (0.75 0.5 0.5 0.25) 2 2 4 nested-dyadic-walker-alias berry-gidney-mx-u4 #f))",
+          "fused_qsvt_alpha": 1.0,
+          "fused_temp_ands": 14,
+          "naive_alpha": 1.0,
+          "naive_m_anc": 2,
+          "naive_temp_ands": 15,
+          "qsvt_bus_m_anc": 3
+        },
+        {
+          "degree_d": 2,
+          "egraph_optimal_m_anc": 3,
+          "extracted_ast": "(qsvt-reflection-fused 2 (qblock-lcu H_hubbard_2site (0.75 0.5 0.5 0.25) 2 2 4 nested-dyadic-walker-alias berry-gidney-mx-u4 #f) (0.0 1.5707963267948966))",
+          "fused_qsvt_alpha": 1.0,
+          "fused_temp_ands": 29,
+          "naive_alpha": 3.0,
+          "naive_m_anc": 4,
+          "naive_temp_ands": 32,
+          "qsvt_bus_m_anc": 3
+        },
+        {
+          "degree_d": 3,
+          "egraph_optimal_m_anc": 3,
+          "extracted_ast": "(qsvt-reflection-fused 3 (qblock-lcu H_hubbard_2site (0.75 0.5 0.5 0.25) 2 2 4 nested-dyadic-walker-alias berry-gidney-mx-u4 #f) (0.0 1.5707963267948966 1.5707963267948966))",
+          "fused_qsvt_alpha": 1.0,
+          "fused_temp_ands": 44,
+          "naive_alpha": 7.0,
+          "naive_m_anc": 6,
+          "naive_temp_ands": 49,
+          "qsvt_bus_m_anc": 3
+        }
+      ],
+      "differential_f2_phase_bank_pairs_verified": 8192,
+      "example_lfq_path": "examples/hubbard_lcu_qsvt_block.lfq",
+      "femoco_d16_qsvt_extraction": {
+        "fused_alpha": 1.0,
+        "fused_qsvt_m_anc": 13,
+        "naive_m_anc": 192,
+        "prep_dag_mode": "berry-gidney-mx-u4"
+      },
+      "hubbard_qsvt_t2_compilation": {
+        "annotation_free_flags": 0,
+        "chordal_recycled_wires": 6,
+        "circuit_kind": "defq",
+        "circuit_name": "hubbard-lcu-qsvt-chebyshev-t2",
+        "classical_meas_bits": 6,
+        "forward_temp_and_count": 6,
+        "machine_isa_ops": 121,
+        "mbu_erasure_count": 6,
+        "physical_qubits": 14,
+        "pipeline_dialects": [
+          "LakefillQ",
+          "lambda_LFQ_kern",
+          "RevIR",
+          "MachineISA"
+        ],
+        "qphys_grade": {
+          "decoherence_action_milli": 67,
+          "effective_fault_distance": "unbounded",
+          "exclusion_collisions": 0,
+          "required_fault_distance": 0
+        },
+        "quantum_phase_residuals": 0,
+        "repairs_applied": [],
+        "residual_surface_forms": 0,
+        "target_profile": "heron-r2",
+        "uncompute_ccx_count": 16,
+        "violations": [],
+        "virtual_wires": 16,
+        "well_typed": true
+      },
+      "hubbard_uh_compilation": {
+        "annotation_free_flags": 0,
+        "chordal_recycled_wires": 0,
+        "circuit_kind": "defq",
+        "circuit_name": "hubbard-lcu-block-uh",
+        "classical_meas_bits": 2,
+        "forward_temp_and_count": 2,
+        "machine_isa_ops": 53,
+        "mbu_erasure_count": 2,
+        "physical_qubits": 13,
+        "pipeline_dialects": [
+          "LakefillQ",
+          "lambda_LFQ_kern",
+          "RevIR",
+          "MachineISA"
+        ],
+        "qphys_grade": {
+          "decoherence_action_milli": 24,
+          "effective_fault_distance": "unbounded",
+          "exclusion_collisions": 0,
+          "required_fault_distance": 0
+        },
+        "quantum_phase_residuals": 0,
+        "repairs_applied": [],
+        "residual_surface_forms": 0,
+        "target_profile": "heron-r2",
+        "uncompute_ccx_count": 8,
+        "violations": [],
+        "virtual_wires": 9,
+        "well_typed": true
+      },
+      "negative_soundness_audit": {
+        "dirty_select_u1_rejected": true,
+        "dirty_select_u1_violations": [
+          {
+            "category": "BlockOrthogonality",
+            "code": "BlockProjectionCorrupted-U1-EraseBy",
+            "message": "Off-block ancilla/phase violation corrupts <0^m|U_H|0^m> = H/alpha: Scratch wire q[4] leaked non-zero state at circuit exit (x4*x5)",
+            "witness": {
+              "category": "QSub",
+              "code": "U1-EraseBy",
+              "message": "Scratch wire q[4] leaked non-zero state at circuit exit (x4*x5)",
+              "witness": {
+                "counterexample_basis": {
+                  "q0_in": 0,
+                  "q1_in": 0,
+                  "q2_h": 0,
+                  "q2_in": 0,
+                  "q3_h": 0,
+                  "q3_in": 0
+                },
+                "residual_anf": "x4*x5",
+                "wire": 4
+              }
+            }
+          }
+        ],
+        "noncanonical_walker_u2_rejected": true,
+        "noncanonical_walker_u2_violations": [
+          {
+            "category": "QBlock",
+            "code": "U2-NonCanonicalWalkerAliasPrep",
+            "message": "LCU PREP requires canonical NestedDyadicWalkerAliasBox (Law U2), got noncanonical-raw-alias",
+            "witness": {
+              "prep_kind": "noncanonical-raw-alias"
+            }
+          }
+        ],
+        "unfixed_berry_gidney_u4_rejected": true,
+        "unfixed_berry_gidney_u4_violations": [
+          {
+            "category": "BlockOrthogonality",
+            "code": "BlockProjectionCorrupted-U4-QTainted",
+            "message": "Off-block ancilla/phase violation corrupts <0^m|U_H|0^m> = H/alpha: Uncancelled M_X quantum phase taint on m_tbl_unfixed (x4*x5) entangles interference (h 2)",
+            "witness": {
+              "category": "QSub",
+              "code": "U4-QTainted",
+              "message": "Uncancelled M_X quantum phase taint on m_tbl_unfixed (x4*x5) entangles interference (h 2)",
+              "witness": {
+                "counterexample_basis": {
+                  "q0_in": 0,
+                  "q1_in": 0,
+                  "q2_h": 1,
+                  "q2_in": 0,
+                  "q3_h": 1,
+                  "q3_in": 0
+                },
+                "measurement": "m_tbl_unfixed",
+                "residual_phase_anf": "x4*x5"
+              }
+            }
+          },
+          {
+            "category": "BlockOrthogonality",
+            "code": "BlockProjectionCorrupted-U4-QTainted",
+            "message": "Off-block ancilla/phase violation corrupts <0^m|U_H|0^m> = H/alpha: Uncancelled M_X quantum phase taint on m_tbl_unfixed (x4*x5) entangles interference (h 3)",
+            "witness": {
+              "category": "QSub",
+              "code": "U4-QTainted",
+              "message": "Uncancelled M_X quantum phase taint on m_tbl_unfixed (x4*x5) entangles interference (h 3)",
+              "witness": {
+                "counterexample_basis": {
+                  "q0_in": 0,
+                  "q1_in": 0,
+                  "q2_h": 0,
+                  "q2_in": 0,
+                  "q3_h": 1,
+                  "q3_in": 0
+                },
+                "measurement": "m_tbl_unfixed",
+                "residual_phase_anf": "x4*x5"
+              }
+            }
+          },
+          {
+            "category": "BlockOrthogonality",
+            "code": "BlockProjectionCorrupted-U4-QTainted",
+            "message": "Off-block ancilla/phase violation corrupts <0^m|U_H|0^m> = H/alpha: Mid-circuit measurement m_tbl_unfixed leaves residual quantum phase kickback (x4*x5) at exit",
+            "witness": {
+              "category": "QSub",
+              "code": "U4-QTainted",
+              "message": "Mid-circuit measurement m_tbl_unfixed leaves residual quantum phase kickback (x4*x5) at exit",
+              "witness": {
+                "counterexample_basis": {
+                  "q0_in": 0,
+                  "q1_in": 0,
+                  "q2_h": 0,
+                  "q2_in": 0,
+                  "q3_h": 0,
+                  "q3_in": 0
+                },
+                "measurement": "m_tbl_unfixed",
+                "residual_phase_anf": "x4*x5"
+              }
+            }
+          }
+        ]
+      },
+      "status": "PASS"
+    },
+    "stim_dem_num_error_mechanisms": 11,
+    "stim_detector_error_model_num_detectors": 8,
+    "stim_heron_noisy_detector_clicks_256shots": 7,
+    "stim_ideal_detector_clicks_256shots": 0,
+    "z3_smt_status": "unsat_verified"
+  },
+  "status": "PASS",
+  "three_execution_modes_and_femoco": {
+    "exact_ground_energy_ha": -1.7747548783981963,
+    "femoco_resource_scaling": {
+      "L_terms": 2048,
+      "alpha_ha": 1500.0,
+      "benchmark": "FeMoCo_active_space_qubitization",
+      "keep_alias_word_bits_W": 32,
+      "modes": {
+        "parallel_machine_16_qpus": {
+          "inter_qpu_quantum_links_required": 0,
+          "logical_qubits_per_qpu": 122,
+          "max_coherent_walk_steps_per_qpu": 147263,
+          "qpus": 16,
+          "wall_clock_speedup_vs_single_machine": 16.0
+        },
+        "serial_multishot_lin_tong_reset_all": {
+          "coherent_depth_reduction_vs_single_qpe": 35.95,
+          "coherent_walk_steps_per_shot": 65536,
+          "logical_qubits": 121,
+          "per_shot_temp_ands_berry_gidney": 124387328,
+          "phase_ancillas": 1,
+          "qpus": 1,
+          "serial_reset_all_shots": 1296
+        },
+        "single_machine_coherent_qpe": {
+          "coherent_walk_steps_per_shot": 2356195,
+          "logical_qubits": 143,
+          "qpus": 1,
+          "temp_ands_saved_by_law_u4": 4606361225,
+          "total_temp_ands_berry_gidney": 4472058110,
+          "total_temp_ands_unitary_sawtooth": 9078419335
+        }
+      },
+      "prep_dag_berry_gidney_u4_temp_ands": 91,
+      "prep_dag_reduction_factor": 22.48,
+      "prep_dag_unitary_sawtooth_ccx": 2046,
+      "target_chemical_accuracy_ha": 0.001,
+      "walk_step_ands_berry_gidney_u4": 1898,
+      "walk_step_ands_sawtooth": 3853
+    },
+    "heron_r2_aer_three_modes": {
+      "parallel_machine_4_qpus": {
+        "abs_energy_error_ha": 0.005257108081264006,
+        "active_qubits_per_qpu": 5,
+        "estimated_ground_energy_ha": -1.7800119864794604,
+        "max_circuit_depth_per_qpu": 869,
+        "max_coherent_walk_steps_per_qpu": 4,
+        "max_native_cx_per_qpu": 473,
+        "noisy_chebyshev_moments_k1_to_k4": {
+          "1": -0.717393029048453,
+          "2": 0.353163057880216,
+          "3": -0.06978062880436686,
+          "4": -0.135541700906827
+        },
+        "qpus": 4,
+        "wall_clock_depth_reduction_vs_serialized_moments": 2.5
+      },
+      "serial_multishot_lin_tong_reset_all": {
+        "abs_energy_error_density_matrix_ha": 0.0794778018349327,
+        "abs_energy_error_shot_sampled_ha": 0.08266962699777114,
+        "active_qubits": 5,
+        "calibrated_step_survival_gamma": 0.7737896507770067,
+        "circuit_depth_per_shot": 218,
+        "coherent_walk_steps_per_shot": 1,
+        "estimated_ground_energy_density_matrix_ha": -1.854232680233129,
+        "estimated_ground_energy_shot_sampled_ha": -1.8574245053959675,
+        "native_cx_per_shot": 119,
+        "per_shot_depth_reduction_vs_single_qpe": 6.1,
+        "phase_ancillas": 1,
+        "qpus": 1,
+        "reset_all_slot_z_expectations": [
+          -0.71826171875,
+          -0.7216796875,
+          -0.71435546875,
+          -0.72021484375
+        ]
+      },
+      "single_machine_coherent_qpe": {
+        "abs_energy_error_ha": 0.7540237481167407,
+        "active_qubits": 7,
+        "circuit_depth_per_shot": 1329,
+        "coherent_walk_steps_per_shot": 7,
+        "estimated_ground_energy_ha": -1.0207311302814557,
+        "native_cx_per_shot": 740,
+        "qpus": 1
+      }
+    }
+  }
+}

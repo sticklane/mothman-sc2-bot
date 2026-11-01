@@ -1,0 +1,197 @@
+{
+  "version": "UDIE v2.8 \u2014 All 4 Frontier Priorities Verified",
+  "priority1_and_2_ldlq_and_nested_3b_2b_spec": {
+    "smollm2_135m_30layer_e2e": {
+      "elapsed_sec": 28.71,
+      "bitplane_msb_plus_lsb_max_abs_err": 2.38e-07,
+      "extra_ram_bytes_for_3b_draft_model": 0,
+      "verified_5b_target_token_mismatches": 0,
+      "bf16": {
+        "wikitext2_nll": 2.9699,
+        "wikitext2_ppl": 19.491,
+        "tinystories_nll": 2.5168,
+        "tinystories_ppl": 12.389,
+        "kl_divergence_nats_per_tok": 0.0,
+        "top1_agreement_pct": 100.0,
+        "top5_agreement_pct": 100.0,
+        "lambada_top1_acc_pct": 100.0,
+        "lambada_avg_margin": 2.91,
+        "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+        "per_benchmark_acc_pct": {
+          "PIQA": 0.0,
+          "HellaSwag": 100.0,
+          "ARC-Challenge": 100.0,
+          "MMLU-Physics": 100.0,
+          "MMLU-CS": 0.0,
+          "GSM8K-Math": 100.0
+        },
+        "sample_next_token": " In"
+      },
+      "udie_5b_ldlq": {
+        "wikitext2_nll": 2.9981,
+        "wikitext2_ppl": 20.048,
+        "tinystories_nll": 2.575,
+        "tinystories_ppl": 13.132,
+        "kl_divergence_nats_per_tok": 0.04339,
+        "top1_agreement_pct": 88.01,
+        "top5_agreement_pct": 99.81,
+        "lambada_top1_acc_pct": 100.0,
+        "lambada_avg_margin": 2.9,
+        "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+        "per_benchmark_acc_pct": {
+          "PIQA": 0.0,
+          "HellaSwag": 100.0,
+          "ARC-Challenge": 100.0,
+          "MMLU-Physics": 100.0,
+          "MMLU-CS": 0.0,
+          "GSM8K-Math": 100.0
+        },
+        "sample_next_token": " He",
+        "ppl_delta_pct": 2.86
+      },
+      "udie_hybrid_ldlq": {
+        "wikitext2_nll": 3.0122,
+        "wikitext2_ppl": 20.332,
+        "tinystories_nll": 2.6284,
+        "tinystories_ppl": 13.852,
+        "kl_divergence_nats_per_tok": 0.0588,
+        "top1_agreement_pct": 86.08,
+        "top5_agreement_pct": 99.03,
+        "lambada_top1_acc_pct": 100.0,
+        "lambada_avg_margin": 2.49,
+        "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+        "per_benchmark_acc_pct": {
+          "PIQA": 0.0,
+          "HellaSwag": 100.0,
+          "ARC-Challenge": 100.0,
+          "MMLU-Physics": 100.0,
+          "MMLU-CS": 0.0,
+          "GSM8K-Math": 100.0
+        },
+        "sample_next_token": " He",
+        "ppl_delta_pct": 4.31
+      },
+      "nested_3b_msb_draft_stream": {
+        "wikitext2_nll": 3.772,
+        "wikitext2_ppl": 43.468,
+        "tinystories_nll": 3.6755,
+        "tinystories_ppl": 39.468,
+        "kl_divergence_nats_per_tok": 0.82972,
+        "top1_agreement_pct": 53.12,
+        "top5_agreement_pct": 82.5,
+        "lambada_top1_acc_pct": 60.0,
+        "lambada_avg_margin": 1.08,
+        "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+        "per_benchmark_acc_pct": {
+          "PIQA": 0.0,
+          "HellaSwag": 100.0,
+          "ARC-Challenge": 100.0,
+          "MMLU-Physics": 100.0,
+          "MMLU-CS": 0.0,
+          "GSM8K-Math": 100.0
+        },
+        "sample_next_token": " In",
+        "draft_vs_5b_target_token_accept_pct": 56.61,
+        "expected_tokens_per_verify_step_k4": 2.17,
+        "net_decode_speedup_vs_autoregressive_5b_x": 1.99
+      }
+    },
+    "qwen3_1_7b_layer27_ldlq_and_moe_shared_protection": {
+      "mse_4b_round_baseline": 0.0,
+      "mse_4b_ldlq_feedback": 0.0,
+      "ldlq_4b_mse_reduction_pct": 12.86,
+      "mse_5b_round_baseline": 0.0,
+      "mse_5b_ldlq_feedback": 0.0,
+      "ldlq_5b_mse_reduction_pct": 6.61,
+      "qwen3_nested_msb_plus_lsb_max_abs_err": 5.96e-08,
+      "moe_shared_expert_mla_extra_bits_per_weight": 0.08,
+      "moe_shared_expert_mla_mse_reduction_x": 0.01
+    }
+  },
+  "priority3_live_tcp_ethernet_multinode_ring": {
+    "tested_nodes": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "tcp_waist_max_abs_diff_1_2_4_8": 0,
+    "tcp_rms_max_abs_diff_1_2_4_8": 0,
+    "tcp_mla_seam_max_abs_diff_1_2_4_8": 0,
+    "tcp_4node_fused_64b_us": 17.3,
+    "tcp_8node_fused_64b_us": 25.86,
+    "tcp_8node_naive_8192b_us": 50.38,
+    "tcp_8node_speedup_vs_naive_x": 1.95,
+    "payload_reduction_x": 128.0
+  },
+  "priority4_long_context_4k_to_32k_kv_eval": {
+    "evaluated_context_lengths": [
+      4096,
+      8192,
+      16384,
+      32768
+    ],
+    "results_by_context_length": [
+      {
+        "context_tokens": 4096,
+        "qwen3_32b_kv_bf16_mb": 1073.7,
+        "qwen3_32b_kv_udie_int8_mb": 553.6,
+        "qwen3_32b_kv_udie_int4_mb": 285.2,
+        "qwen3_32b_kv_mla_int4_mb": 71.3,
+        "naive_int4_needle_recall_pct": 0.0,
+        "naive_int4_output_cosine_sim": 0.00456,
+        "udie_fwht16_sink_int4_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int4_output_cosine_sim": 0.99668,
+        "udie_fwht16_sink_int8_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int8_output_cosine_sim": 0.99999,
+        "ring_4node_68b_seam_vs_1node_max_diff": 1.43e-06,
+        "ring_4node_seam_bytes_per_layer": 272
+      },
+      {
+        "context_tokens": 8192,
+        "qwen3_32b_kv_bf16_mb": 2147.5,
+        "qwen3_32b_kv_udie_int8_mb": 1107.3,
+        "qwen3_32b_kv_udie_int4_mb": 570.4,
+        "qwen3_32b_kv_mla_int4_mb": 142.6,
+        "naive_int4_needle_recall_pct": 0.0,
+        "naive_int4_output_cosine_sim": 0.01664,
+        "udie_fwht16_sink_int4_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int4_output_cosine_sim": 0.99658,
+        "udie_fwht16_sink_int8_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int8_output_cosine_sim": 0.99999,
+        "ring_4node_68b_seam_vs_1node_max_diff": 1.91e-06,
+        "ring_4node_seam_bytes_per_layer": 272
+      },
+      {
+        "context_tokens": 16384,
+        "qwen3_32b_kv_bf16_mb": 4295.0,
+        "qwen3_32b_kv_udie_int8_mb": 2214.6,
+        "qwen3_32b_kv_udie_int4_mb": 1140.9,
+        "qwen3_32b_kv_mla_int4_mb": 285.2,
+        "naive_int4_needle_recall_pct": 0.0,
+        "naive_int4_output_cosine_sim": 0.02336,
+        "udie_fwht16_sink_int4_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int4_output_cosine_sim": 0.99623,
+        "udie_fwht16_sink_int8_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int8_output_cosine_sim": 0.99999,
+        "ring_4node_68b_seam_vs_1node_max_diff": 2.38e-06,
+        "ring_4node_seam_bytes_per_layer": 272
+      },
+      {
+        "context_tokens": 32768,
+        "qwen3_32b_kv_bf16_mb": 8589.9,
+        "qwen3_32b_kv_udie_int8_mb": 4429.2,
+        "qwen3_32b_kv_udie_int4_mb": 2281.7,
+        "qwen3_32b_kv_mla_int4_mb": 570.4,
+        "naive_int4_needle_recall_pct": 0.0,
+        "naive_int4_output_cosine_sim": 0.04323,
+        "udie_fwht16_sink_int4_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int4_output_cosine_sim": 0.99646,
+        "udie_fwht16_sink_int8_needle_recall_pct": 100.0,
+        "udie_fwht16_sink_int8_output_cosine_sim": 0.99999,
+        "ring_4node_68b_seam_vs_1node_max_diff": 2.86e-06,
+        "ring_4node_seam_bytes_per_layer": 272
+      }
+    ]
+  }
+}

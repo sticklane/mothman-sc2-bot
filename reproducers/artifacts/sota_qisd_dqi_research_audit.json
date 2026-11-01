@@ -1,0 +1,353 @@
+{
+  "status": "PASS",
+  "deliverables": {
+    "racket_combinator_module": "compiler/lakefillq-sota-qisd-dqi-audit.rkt",
+    "python_aer_z3_reproducer": "reproducers/verify_sota_qisd_and_dqi_research_implementations.py",
+    "audit_artifact_json": "reproducers/artifacts/sota_qisd_dqi_research_audit.json",
+    "lean4_proof_file": "proofs/sota_qisd_dqi_research_correctness_and_opt_proofs.lean"
+  },
+  "inspected_sota_repositories": [
+    {
+      "repo": "paper-codes/2023-TQuantum",
+      "citation": "Perriello, Barenghi & Pelosi, ACM Trans. Quantum Computing 2023",
+      "inspected_files": [
+        "qat/external/qroutines/linalg/gauss_jordan_isd4.py:65-102",
+        "test/test_qroutine_gauss_jordan_isd.py:136-140"
+      ],
+      "finding": "get_rref executes coherent anticipated-X + CCX fake-swap (ROWSWAP) and full ROWADD across all rows i != x in superposition without aborting singular H_I, leaving diag[j] == 0 on rank-deficient pivots and computing unused above-diagonal matrix entries."
+    },
+    {
+      "repo": "paper-codes/2024-ACNS-scripts",
+      "citation": "Perriello, Barenghi & Pelosi, ACNS 2024",
+      "inspected_files": [
+        "measures/prange.py:113-140",
+        "measures/leebrickell_quantum.py:221-223",
+        "measures/esser.py:219-245",
+        "statics/codes.py:1-54"
+      ],
+      "finding": "prange.py:138 documents p_inv = 0.2888 (~71.12% singular rate over GF(2)) and adds r-controlled non_singular guard; ALSO caught a 7.36x Toffoli undercount in leebrickell_quantum.py:221-223 where skip_rightmost=True was copy-pasted from Prange, omitting k=2720 right-hand columns (377,781,248 reported vs 2,781,129,728 true forward Toffolis)."
+    },
+    {
+      "repo": "tigerjack/isd-quantum",
+      "citation": "Perriello et al. Qiskit QISD Reference Implementation",
+      "inspected_files": [
+        "isdquantum/methods/circuits/lee_brickell_bruteforce_circ.py:210-219"
+      ],
+      "finding": "_flip_correct_state kicks back phase solely on lee_eq_q (wt == w - p) with classical pre-RREF matrices; lifting to coherent superposition QGJE without AND_j diag[j] triggers ~71.12% singular-subset false positives."
+    },
+    {
+      "repo": "Crypto-TII/CryptographicEstimators",
+      "citation": "TII CryptographicEstimators (SDEstimator, SDFqEstimator, BIKEEstimator)",
+      "inspected_files": [
+        "cryptographic_estimators/SDEstimator/SDAlgorithms/prange.py:92-119",
+        "cryptographic_estimators/SDEstimator/sd_helper.py:106-112",
+        "cryptographic_estimators/SDFqEstimator/SDFqAlgorithms/leebrickell.py:98-120",
+        "cryptographic_estimators/BIKEEstimator/BIKEAlgorithms/sd_msg_attack.py:66-70"
+      ],
+      "finding": "sd_helper.py:106 models classical M4RI Gray-code elimination r_mem = log2(r); BIKEEstimator/sd_msg_attack.py:66 models log2(sqrt(r)) DOOM cyclic-shift gain."
+    },
+    {
+      "repo": "BankNatchapol/DQI-Circuit",
+      "citation": "Quantum Circuit Design for Decoded Quantum Interferometry (arXiv:2504.18334) & Jordan et al. 2024 (arXiv:2408.08292)",
+      "inspected_files": [
+        "scripts/generate_dqi_circuit_qiskit.py:215-216,298-314",
+        "src/dqi/qiskit/decoding/gates.py:28-55",
+        "src/dqi/qiskit/decoding/algorithms.py:24-66",
+        "src/dqi/qiskit/decoding/usd.py:22-75",
+        "src/dqi/qiskit/initialization/calculate_w.py:13-53"
+      ],
+      "finding": "generate_dqi_circuit_qiskit.py:216 hardcodes ell=2 on random sparse H without checking 2*ell < d_perp, and lines 298-314 use GJEGate(B.T) (which also skips the last column via n = num_cols - 1 in algorithms.py:27), leaving |y> entangled with |s> and forcing postselection on dicke_qregs."
+    }
+  ],
+  "correctness_finding_1_qgje_rank_deficiency": {
+    "z3_verification": {
+      "unguarded_false_positive_z3_status": "sat",
+      "unguarded_witness_matrix": [
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          0,
+          1,
+          0
+        ]
+      ],
+      "unguarded_witness_syndrome": [
+        1,
+        1,
+        1
+      ],
+      "unguarded_witness_diag": [
+        1,
+        1,
+        0
+      ],
+      "unguarded_witness_s_tilde": [
+        0,
+        0,
+        1
+      ],
+      "guarded_unsoundness_z3_status": "unsat",
+      "guarded_universally_sound": true
+    },
+    "aer_grover_qisd_19q_hamming_7_4_3": {
+      "circuit_qubits": 19,
+      "grover_iterations": 2,
+      "candidate_subsets_n": 8,
+      "singular_subsets_in_superposition": 5,
+      "mceliece_348864_r768_singular_probability": 0.7112119049133976,
+      "f2_3x3_singular_probability": 0.671875,
+      "unguarded_idx_probabilities": [
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125
+      ],
+      "guarded_idx_probabilities": [
+        0.9453125,
+        0.0078125,
+        0.0078125,
+        0.0078125,
+        0.0078125,
+        0.0078125,
+        0.0078125,
+        0.0078125
+      ],
+      "unguarded_valid_solution_prob": 0.12500000000000017,
+      "unguarded_singular_false_positive_prob": 0.6249999999999998,
+      "guarded_valid_solution_prob": 0.9453124999999996,
+      "guarded_singular_false_positive_prob_at_oracle": 0.0,
+      "guarded_residual_tail_on_singular_indices": 0.03906250000000022,
+      "valid_amplification_gain_ratio": 7.562499999999987
+    },
+    "exhaustive_3x3_racket_cross_check": {
+      "dim_r": 3,
+      "guarded_exact_inversions": 1344,
+      "guarded_false_positives": 0,
+      "invertible_matrices": 168,
+      "singular_fraction_3x3": 0.671875,
+      "singular_fraction_mceliece_r768": 0.7112119049133976,
+      "singular_matrices": 344,
+      "total_matrices": 512,
+      "unguarded_false_positives": 1376
+    }
+  },
+  "correctness_finding_2_dqi_radius_and_weights": {
+    "hamming_7_4_3": {
+      "m": 7,
+      "n": 3,
+      "d_perp": 3,
+      "max_safe_ell": 1,
+      "in_radius_ell1": {
+        "leak_prob": 0.0,
+        "reduced_syndrome_purity": 1.0,
+        "expected_satisfied_constraints": 6.322875655532295,
+        "satisfied_fraction": 0.9032679507903278
+      },
+      "out_of_radius_ell2_leak": {
+        "leak_prob": 0.31578947368421045,
+        "reduced_syndrome_purity": 0.6272259596359322,
+        "expected_satisfied_constraints": 6.118744542231174,
+        "satisfied_fraction": 0.874106363175882
+      }
+    },
+    "code_8_2_5": {
+      "m": 8,
+      "n": 6,
+      "d_perp": 5,
+      "max_safe_ell": 2,
+      "optimal_semicircular_weights_ell2": [
+        0.42640143271122083,
+        0.7071067811865477,
+        0.564076074817766
+      ],
+      "uniform_dicke_weights_ell2": [
+        0.5773502691896258,
+        0.5773502691896258,
+        0.5773502691896258
+      ],
+      "theoretical_optimal_expected_satisfied": 6.345207879911715,
+      "aer_in_radius_ell2_optimal_w": {
+        "leak_prob": 0.0,
+        "reduced_syndrome_purity": 0.9999999999999997,
+        "expected_satisfied_constraints": 6.345207879911716,
+        "satisfied_fraction": 0.7931509849889645
+      },
+      "aer_in_radius_ell2_uniform_w": {
+        "leak_prob": 0.0,
+        "reduced_syndrome_purity": 1.0000000000000002,
+        "expected_satisfied_constraints": 6.190028170506707,
+        "satisfied_fraction": 0.7737535213133384
+      },
+      "aer_in_radius_ell2_optimal_w_zero_target": {
+        "leak_prob": 0.0,
+        "reduced_syndrome_purity": 0.9999999999999997,
+        "expected_satisfied_constraints": 6.686116970820806,
+        "satisfied_fraction": 0.8357646213526008
+      },
+      "aer_in_radius_ell2_uniform_w_zero_target": {
+        "leak_prob": 0.0,
+        "reduced_syndrome_purity": 1.0000000000000002,
+        "expected_satisfied_constraints": 6.547171027649563,
+        "satisfied_fraction": 0.8183963784561954
+      },
+      "optimal_vs_uniform_satisfied_gain": 0.15517970940500891,
+      "aer_out_of_radius_ell3_leak": {
+        "leak_prob": 0.11328125000000001,
+        "reduced_syndrome_purity": 0.817474365234375,
+        "expected_satisfied_constraints": 6.085937499999998,
+        "satisfied_fraction": 0.7607421874999998
+      }
+    },
+    "early_mbu_syndrome_erasure": {
+      "total_branch_probability": 1.0,
+      "min_branch_fidelity_across_all_128_outcomes": 0.9999999999999998,
+      "max_infidelity": 2.220446049250313e-16,
+      "uncompute_toffoli_gates_early_mbu": 0
+    },
+    "z3_radius_injectivity": {
+      "hamming_7_4_3_ell1_collision_z3": "unsat",
+      "hamming_7_4_3_ell2_collision_z3": "sat",
+      "hamming_7_4_3_ell2_collision_witness": {
+        "y1": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        "y2": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "code_8_2_5_ell2_collision_z3": "unsat",
+      "code_8_2_5_ell3_collision_z3": "sat",
+      "code_8_2_5_ell3_collision_witness": {
+        "y1": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0
+        ],
+        "y2": [
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "optimization_finding_1_qm4ri_mceliece_348864": {
+    "z3_strassen_4x4_and_jordan_split_equivalence": {
+      "strassen_4x4_tempands": 49,
+      "naive_4x4_tempands": 64,
+      "strassen_4x4_z3_inequivalence": "unsat",
+      "jordan_split_4x4_z3_inequivalence": "unsat"
+    },
+    "resource_profile": {
+      "classical_stripe_reduction_factor": 3.218579878559464,
+      "forward_reduction_factor": 2.6204741132168152,
+      "k": 2720,
+      "n": 3488,
+      "perriello_forward_tempands": 377781248,
+      "perriello_lb_true_full_forward": 2781129728,
+      "perriello_lb_undercounted_forward": 377781248,
+      "perriello_roundtrip_ccx": 755562496,
+      "qm4ri_forward_tempands": 144165228,
+      "r": 768,
+      "r_m4ri": 4,
+      "roundtrip_reduction_factor": 5.2409482264336305,
+      "t": 64
+    }
+  },
+  "optimization_finding_2_bike_l1_doom_and_dqi_early_mbu": {
+    "bike_l1_doom_profile": {
+      "amortized_shift_speedup_m_sqrt": 109.24493316084519,
+      "block_r": 12323,
+      "grover_bits_saved_full_doom": 6.794532949213607,
+      "grover_bits_saved_m_sqrt": 3.397207933175053,
+      "grover_iter_reduction_m_sqrt": 10.535653752852738,
+      "m_sqrt_shifts": 111,
+      "n": 24646,
+      "qgje_overhead_pct_m_sqrt": 1.6065430115378996,
+      "qgje_tempands_m1": 1559513863623,
+      "qgje_tempands_m_sqrt": 1584568124613,
+      "t": 134
+    },
+    "dqi_early_mbu_aer": {
+      "total_branch_probability": 1.0,
+      "min_branch_fidelity_across_all_128_outcomes": 0.9999999999999998,
+      "max_infidelity": 2.220446049250313e-16,
+      "uncompute_toffoli_gates_early_mbu": 0
+    }
+  },
+  "lakefillq_compiled_combinators": [
+    {
+      "forward_temp_ands": 5,
+      "mbu_erasures": 5,
+      "name": "non_singular_guarded_qm4ri_qgje",
+      "physical_qubits": 11,
+      "recycled_wires_saved": 0,
+      "residual_surface_forms": 0,
+      "uncompute_ccx": 0,
+      "well_typed": true
+    },
+    {
+      "forward_temp_ands": 6,
+      "mbu_erasures": 6,
+      "name": "bike_doom_cyclic_syndrome_eval",
+      "physical_qubits": 7,
+      "recycled_wires_saved": 0,
+      "residual_surface_forms": 0,
+      "uncompute_ccx": 0,
+      "well_typed": true
+    },
+    {
+      "forward_temp_ands": 1,
+      "mbu_erasures": 1,
+      "name": "radius_checked_early_mbu_dqi",
+      "physical_qubits": 4,
+      "recycled_wires_saved": 0,
+      "residual_surface_forms": 0,
+      "uncompute_ccx": 0,
+      "well_typed": true
+    }
+  ],
+  "lean4_formal_verification": {
+    "file": "proofs/sota_qisd_dqi_research_correctness_and_opt_proofs.lean",
+    "lean_exit_code": 0,
+    "stdout": "",
+    "stderr": "",
+    "theorem_count": 20,
+    "sorry_count": 0,
+    "axiom_count": 0
+  }
+}

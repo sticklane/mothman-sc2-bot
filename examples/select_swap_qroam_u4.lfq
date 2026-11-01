@@ -1,0 +1,146 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/select_swap_qroam_u4.lfq
+;;
+;; Sublinear `Select-SWAP` QROAM + Berry-Gidney `5-TempAND` 1-bit quantum phase uncompute
+;; (`N = 16, W = 4`, PRESENT 4-bit S-box lookup table) in `#lang lakefillq`.
+;; Demonstrates:
+;;   - Forward `Select-SWAP` (`lambda_fwd = 2`) loading `out4 ^= T[addr4]`
+;;   - Destructive `mid-meas-x` freeing all `4` output wires (`out4 -> |0000>`)
+;;   - Berry-Gidney 1-bit `Select-SWAP` phase QROAM (`lambda_uncomp = 4`) using
+;;     ONLY `5` `TempAND`s (`3` unary fanout + `2` sawtooth `Select`, `-64.3%`
+;;     vs `14` sawtooth `TempAND`s) and `0`-Toffoli Clifford `cond-cz` table fixups
+;;   - Chordal SSA live-range wire recycling (`25` virtual wires -> `19` physical)
+;;   - Annotation-free `Law U4` (`QTainted`) + `Law U1` (`EraseBy`) verification
+;; =============================================================================
+
+(target-profile heron-r2)
+
+(defconst present-sbox16
+  '(12 5 6 11 9 0 10 13 3 14 15 8 4 7 1 2))
+
+(defconst out-meas-syms '(m_out0 m_out1 m_out2 m_out3))
+
+;; Pack `16` 4-bit entries into `8` 8-bit wide blocks (`lambda_fwd = 2`):
+(defconst wide-blocks8
+  (for/list ([q (in-range 8)])
+    (+ (list-ref present-sbox16 (* 2 q))
+       (arithmetic-shift (list-ref present-sbox16 (add1 (* 2 q))) 4))))
+
+(define (emit-wide-word-xor hot-w mask8 buf8)
+  (for/seq ([b (in-range 8)] #:when (bitwise-bit-set? mask8 b))
+    (cx hot-w (wref buf8 b))))
+
+;; Sawtooth `Select` over `3`-bit quotient `q3 = (q0 q1 q2)` (`8` blocks, `6` TempANDs):
+(define (sawtooth-wide-select q3 buf8 hot3)
+  (match-define (list q0 q1 q2) q3)
+  (match-define (list h0 h1 h2) hot3)
+  (define (subtree-q1 parent-h base-idx h-cur h-leaf)
+    (within-apply-mbu
+     (seq (x q1) (temp-and parent-h q1 h-cur) (x q1))
+     (seq
+      ;; q1 = 0 branch (`base-idx` and `base-idx + 1`):
+      (within-apply-mbu
+       (seq (x q0) (temp-and h-cur q0 h-leaf) (x q0))
+       (seq (emit-wide-word-xor h-leaf (list-ref wide-blocks8 base-idx) buf8)
+            (cx h-cur h-leaf)
+            (emit-wide-word-xor h-leaf (list-ref wide-blocks8 (add1 base-idx)) buf8)
+            (cx h-cur h-leaf))
+       (list h-leaf))
+      (cx parent-h h-cur)
+      ;; q1 = 1 branch (`base-idx + 2` and `base-idx + 3`):
+      (within-apply-mbu
+       (seq (x q0) (temp-and h-cur q0 h-leaf) (x q0))
+       (seq (emit-wide-word-xor h-leaf (list-ref wide-blocks8 (+ base-idx 2)) buf8)
+            (cx h-cur h-leaf)
+            (emit-wide-word-xor h-leaf (list-ref wide-blocks8 (+ base-idx 3)) buf8)
+            (cx h-cur h-leaf))
+       (list h-leaf))
+      (cx parent-h h-cur))
+     (list h-cur)))
+  (seq (cx q2 h0)
+       (x h0)
+       (subtree-q1 h0 0 h1 h2)
+       (x h0)
+       (subtree-q1 h0 4 h1 h2)
+       (cx q2 h0)))
+
+;; Dynamic Clifford `cond-cz` table fixup for block `q` (`0` TempANDs!):
+(define (emit-berry-gidney-block-cond-cz hot-w block-q u4)
+  (define base (* 4 block-q))
+  (fold-braun
+   (lambda (entry r)
+     (for/seq ([b (in-range 4)] #:when (bitwise-bit-set? entry b))
+       (cond-cz (list-ref out-meas-syms b) hot-w (wref u4 r))))
+   (take (drop present-sbox16 base) 4)))
+
+(defq (select-swap-qroam-u4
+       #:wires ([addr (range 0 4)])
+       #:scratch ([out4 (range 4 8)]
+                  [fwd-hot (range 8 11)]
+                  [fwd-buf (range 11 19)]
+                  [bwd-u (range 19 23)]
+                  [bwd-hot (range 23 25)]))
+  (match-define (list a0 a1 a2 a3) addr)
+  (define slot0 (take fwd-buf 4))
+  (define slot1 (drop fwd-buf 4))
+  (match-define (list u0 u1 u2 u3) bwd-u)
+  (match-define (list bh0 bh1) bwd-hot)
+
+  ;; Prepare uniform address superposition `(1/4) sum_{x=0}^{15} |x>`:
+  (for/seq ([i (in-range 4)]) (h (wref addr i)))
+
+  ;; 1. Forward clean-ancilla `Select-SWAP` (`lambda_fwd = 2`): `out4 ^= T[addr]`
+  (erase-by
+   (seq (sawtooth-wide-select (list a1 a2 a3) fwd-buf fwd-hot)
+        (cswap-word a0 slot0 slot1)
+        (for/seq ([ b (in-range 4)])
+          (cx (wref slot0 b) (wref out4 b))))
+   (seq (cswap-word a0 slot0 slot1)
+        (sawtooth-wide-select (list a1 a2 a3) fwd-buf fwd-hot))
+   fwd-buf)
+
+  ;; 2. Destructive `M_X` + reset on `out4`, freeing physical wires `4..7`:
+  (for/seq ([b (in-range 4)])
+    (mid-meas-x (wref out4 b) (list-ref out-meas-syms b)))
+
+  ;; 3. Berry-Gidney `5-TempAND` 1-bit `Select-SWAP` phase uncomputation (`lambda_uncomp = 4`):
+  ;;    - Unary fanout on `u0..u3` (`3` TempANDs: `u_r == [(a0, a1) == r]`)
+  ;;    - Sawtooth over `(a2, a3)` (`2` TempANDs) with `0`-TempAND `cond-cz` table fixups!
+  (erase-by
+   (seq
+    (x u0)
+    (temp-and a1 u0 u2) (cx u2 u0)
+    (temp-and a0 u0 u1) (cx u1 u0)
+    (temp-and a0 u2 u3) (cx u3 u2)
+    ;; Quotient sawtooth on `(a2, a3)` (`2` TempANDs total!):
+    (cx a3 bh0)
+    (x bh0)
+    (within-apply-mbu
+     (seq (x a2) (temp-and bh0 a2 bh1) (x a2))
+     (seq (emit-berry-gidney-block-cond-cz bh1 0 bwd-u)
+          (cx bh0 bh1)
+          (emit-berry-gidney-block-cond-cz bh1 1 bwd-u)
+          (cx bh0 bh1))
+     (list bh1))
+    (x bh0)
+    (within-apply-mbu
+     (seq (x a2) (temp-and bh0 a2 bh1) (x a2))
+     (seq (emit-berry-gidney-block-cond-cz bh1 2 bwd-u)
+          (cx bh0 bh1)
+          (emit-berry-gidney-block-cond-cz bh1 3 bwd-u)
+          (cx bh0 bh1))
+     (list bh1))
+    (cx a3 bh0))
+   ;; Reverse MBU uncomputation of the 3 unary-fanout TempANDs (`0` uncompute CCXs!):
+   (seq
+    (cx u3 u2) (mid-meas-x u3 'm_u3) (cond-cz 'm_u3 a0 u2)
+    (cx u1 u0) (mid-meas-x u1 'm_u1) (cond-cz 'm_u1 a0 u0)
+    (cx u2 u0) (mid-meas-x u2 'm_u2) (cond-cz 'm_u2 a1 u0)
+    (x u0))
+   (append bwd-u bwd-hot))
+
+  ;; 4. Interference check: Hadamard back `addr` -> deterministic `|0000>` iff all
+  ;;    `2^4 = 16` `M_X` phase kickbacks canceled with `1.000000` fidelity (`Law U4`)!
+  (for/seq ([i (in-range 4)]) (h (wref addr i))))

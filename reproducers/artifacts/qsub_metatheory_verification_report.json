@@ -1,0 +1,73 @@
+{
+  "phase": "Phase 35 (Track 4 / Part 52)",
+  "title": "Formal Soundness, Completeness & Minimality Metatheory of 3-Rule QSub(A, S_Z, Phi_X) and QSub_phys",
+  "lean_proof_file": "proofs/qsub_logical_and_physical_metatheory_proofs.lean",
+  "theorems_verified": [
+    "qsub_rule1_subtyping_and_canonical_quotient_preservation",
+    "qsub_rule2_within_apply_bijection_uncompute_restores_zero_support",
+    "qsub_rule3_hadamard_dual_mx_and_cond_z_erases_phase_taint",
+    "qsub_logical_preservation_and_unit_purity_soundness",
+    "qsub_three_rules_minimality_and_independence_soundness",
+    "qsub_phys_lowering_preservation_and_repair_completeness_universal",
+    "phase35_qsub_logical_and_physical_metatheory_master_closure_theorem"
+  ],
+  "rule1_subtyping_and_quotient_tuples_tested": 24565,
+  "rule2_within_apply_bijection_pairs_tested": 1089,
+  "rule3_hadamard_dual_phase_fixup_pairs_tested": 512,
+  "logical_preservation_derivations_tested": 6000,
+  "logical_preservation_well_typed_count": 55,
+  "three_rule_minimality_qiskit_verification": {
+    "well_typed_all_3_rules_purity": 1.0,
+    "rule3_cond_z_restored_purity": 1.0,
+    "drop_rule1_counterexample": {
+      "judgment": {
+        "supportMaxWeight": 2,
+        "predicateMaxWeight": 2,
+        "hasBijectionInverse": true,
+        "isCanonicalQuotient": false,
+        "phaseTaintMask": 0
+      },
+      "passes_rule1": false,
+      "passes_rule2": true,
+      "passes_rule3": true,
+      "qiskit_reduced_purity_tr_rho2": 0.5,
+      "scaled_purity": 50
+    },
+    "drop_rule2_counterexample": {
+      "judgment": {
+        "supportMaxWeight": 2,
+        "predicateMaxWeight": 2,
+        "hasBijectionInverse": true,
+        "isCanonicalQuotient": true,
+        "phaseTaintMask": 0
+      },
+      "passes_rule1": true,
+      "passes_rule2": false,
+      "passes_rule3": true,
+      "qiskit_reduced_purity_tr_rho2": 0.5,
+      "scaled_purity": 50
+    },
+    "drop_rule3_counterexample": {
+      "judgment": {
+        "supportMaxWeight": 2,
+        "predicateMaxWeight": 2,
+        "hasBijectionInverse": true,
+        "isCanonicalQuotient": true,
+        "phaseTaintMask": 1
+      },
+      "passes_rule1": true,
+      "passes_rule2": true,
+      "passes_rule3": false,
+      "qiskit_reduced_purity_tr_rho2": 0.5,
+      "scaled_purity": 50
+    }
+  },
+  "qsub_phys_repair_completeness": {
+    "random_witnesses_tested": 1000,
+    "initially_unsound_witnesses": 1000,
+    "repaired_sound_witnesses": 1000,
+    "repair_completeness_rate_pct": 100.0
+  },
+  "runtime_ms": 46.44,
+  "all_checks_passed": true
+}

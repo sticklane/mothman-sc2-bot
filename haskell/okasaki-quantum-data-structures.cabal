@@ -1,0 +1,38 @@
+cabal-version:      2.4
+name:               okasaki-quantum-data-structures
+version:            0.8.0.0
+synopsis:           Intrinsic Type-Enforced Okasaki Quantum Data Structures & Today-Available Quantum Hardware Compiler (S1-S20, F1-F32)
+description:
+  Implements Okasaki's purely functional data structures (QDS-1..13) as
+  resource-graded, purity-typed quantum circuits with Simplification Rules
+  S1-S20 and Today-Available 2025-2026 Quantum Hardware Compilation
+  (Google Willow 105Q, IBM Heron R2 156Q, Quantinuum H2 56Q, Bluvstein Neutral Atom 3000Q/48L).
+license:            MIT
+author:             anonymous
+maintainer:         anonymous@noreply.localhost
+category:           Quantum, Data Structures, Compilers
+build-type:         Simple
+
+library
+  exposed-modules:
+      Quantum.DataStructures.Circuit
+      Quantum.DataStructures.Simplify
+      Quantum.DataStructures.TodayHardware
+      Quantum.DataStructures.Types
+      Quantum.DataStructures.Verify
+      Quantum.DataStructures.Synthesize
+  hs-source-dirs:   src
+  default-language: Haskell2010
+  ghc-options:      -Wall -Wno-unticked-promoted-constructors
+  build-depends:
+      base >= 4.14 && < 5
+
+test-suite okasaki-qds-test
+  type:             exitcode-stdio-1.0
+  main-is:          Main.hs
+  hs-source-dirs:   test
+  default-language: Haskell2010
+  ghc-options:      -Wall
+  build-depends:
+      base >= 4.14 && < 5
+    , okasaki-quantum-data-structures

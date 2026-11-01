@@ -1,0 +1,101 @@
+{
+  "track": "Wave 20 Builder 2: RSA-4096 (Modes 1A, 1B, 1C), NIST FIPS 205 SLH-DSA / SPHINCS+ (128s & 256s), and BIKE-L1 (r = 12,323) End-to-End Physical Resource Closure",
+  "overall_status": "PASS",
+  "total_elapsed_ms": 926.72,
+  "suite1_lean4_verification": {
+    "status": "PASS",
+    "lean_file": "proofs/rsa4096_slhdsa_sphincs_bike_physical_closure_proofs.lean",
+    "return_code": 0,
+    "warnings": 0,
+    "elapsed_ms": 769.21
+  },
+  "suite2_symbolic_z3_closure": {
+    "status": "PASS",
+    "elapsed_ms": 83.44,
+    "rsa4096_64limb_skew_and_modes_z3": "UNSAT (Mode 1A: 3,972 Q / 14.50B Toff; Mode 1B: 1,728 Q / 91.80B Toff; Mode 1C: 2,644 Q / 13.18B Toff / 1,843,882 phys Q Regime B / 583,248 phys Q Regime D)",
+    "slhdsa_128s_256s_merkle_zipper_z3": "UNSAT (SLH-DSA-128s: 4,320 Q vs 6,624 Q [-34.8%], 2,150,400 Toff, 2,491,258 phys Q; SLH-DSA-256s: 4,064 Q vs 6,112 Q [-33.5%], 2,457,600 Toff)",
+    "bike_l1_quasi_cyclic_shift_zipper_z3": "UNSAT (36,969 Q vs 151,856,329 Q [4,107x reduction], 1,971,680 Toff/iter, 20,664,074 phys Q Regime B, 1,220,232 phys Q Regime D)"
+  },
+  "suite3_statevector_and_bijection_sim": {
+    "status": "PASS",
+    "elapsed_ms": 0.5,
+    "superposition_states": 64,
+    "merkle_zipper_statevector_fidelity": 1.0,
+    "ancilla_garbage_after_uncompute": 0
+  },
+  "suite4_compiled_c_avx2_simulator": {
+    "status": "PASS",
+    "elapsed_ms": 72.91,
+    "rsa4096_64limb_4096bit_trials": 100000,
+    "rsa4096_exact_matches": 100000,
+    "rsa4096_carry_overflows": 0,
+    "slhdsa_128s_h9_merkle_paths_tested": 100000,
+    "slhdsa_128s_exact_matches": 100000,
+    "slhdsa_128s_residual_ancilla_garbage": 0,
+    "bike_l1_r12323_trials_tested": 10000,
+    "bike_l1_exact_poly_mod_xr_minus_1_matches": 10000
+  },
+  "summary_metrics": {
+    "rsa4096_gidney_ekera_2021": {
+      "algorithmic_qubits": 4106,
+      "total_toffolis": 21600000000
+    },
+    "rsa4096_mode1a_zipper_coset": {
+      "algorithmic_qubits": 3972,
+      "planar_patches": 4162,
+      "total_toffolis": 14500000000
+    },
+    "rsa4096_mode1b_rns_braun_regev64": {
+      "algorithmic_qubits": 1728,
+      "planar_patches": 1880,
+      "total_toffolis": 91800000000
+    },
+    "rsa4096_mode1c_split_skew_64limbs": {
+      "algorithmic_qubits": 2644,
+      "yoked_cold_qubits": 2432,
+      "active_qubits": 212,
+      "planar_patches": 2794,
+      "total_toffolis": 13180000000,
+      "code_distance_d": 29,
+      "regime_b_yoked_cultivation_phys_qubits": 1843882,
+      "standard_surface_code_phys_qubits": 4699508,
+      "regime_b_wall_clock_seconds": 2301932,
+      "regime_b_wall_clock_days": 26.64,
+      "regime_d_bb288_qldpc_phys_qubits": 583248,
+      "regime_c_parallel_neutral_atoms": 447040,
+      "regime_c_parallel_aod_move_reduction_factor": 64
+    },
+    "slhdsa_sphincs_128s": {
+      "subtree_height_h_prime": 9,
+      "sequential_zipper_registers": 10,
+      "sequential_zipper_qubits": 2560,
+      "simultaneous_pebble_registers": 19,
+      "simultaneous_pebble_qubits": 4864,
+      "subtree_qubits_saved": 2304,
+      "keccak_sponge_qubits": 1760,
+      "total_algorithmic_qubits": 4320,
+      "simultaneous_total_qubits": 6624,
+      "toffolis_per_hypertree_call": 2150400,
+      "regime_b_phys_qubits_d31": 2491258,
+      "regime_b_hypertree_latency_ms": 251.0
+    },
+    "slhdsa_sphincs_256s": {
+      "subtree_height_h_prime": 8,
+      "sequential_zipper_registers": 9,
+      "sequential_zipper_qubits": 2304,
+      "keccak_sponge_qubits": 1760,
+      "total_algorithmic_qubits": 4064,
+      "simultaneous_total_qubits": 6112,
+      "toffolis_per_hypertree_call": 2457600
+    },
+    "bike_l1_r12323": {
+      "block_length_r": 12323,
+      "naive_circulant_qubits": 151856329,
+      "cyclic_shift_zipper_qubits": 36969,
+      "logical_qubit_reduction_factor": 4107,
+      "toffolis_per_isd_iteration": 1971680,
+      "regime_b_phys_qubits_d23": 20664074,
+      "regime_d_bb288_qldpc_phys_qubits": 1220232
+    }
+  }
+}

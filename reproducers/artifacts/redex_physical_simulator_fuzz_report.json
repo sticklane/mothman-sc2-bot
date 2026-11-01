@@ -1,0 +1,478 @@
+{
+  "phase": "Phase 34 \u2014 Redex-to-Physical-Simulator Differential Fuzzer & Circuit Fuzzer",
+  "simulators_used": {
+    "qiskit_aer": "0.18.2 (AerSimulator density_matrix + matrix_product_state + NoiseModel)",
+    "qiskit": "2.6.1 (Statevector + DensityMatrix + state_fidelity)",
+    "stim": "1.16.0 (TableauSimulator + DetectorErrorModel + shortest_graphlike_error)",
+    "pymatching": "2.4.0 (MWPM 10,000-shot Monte Carlo decoder)",
+    "pyzx": "0.10.7 (full_reduce + extract_circuit + compare_tensors)"
+  },
+  "total_wall_time_ms": 8672.46,
+  "campaign1_p1_size_and_depth_cliff": {
+    "finding_id": "P1_Size_And_Depth_Decoherence_And_Simulator_Cliff",
+    "total_grid_points_tested": 20,
+    "programs_passing_typecheck_and_ideal_semantics": 20,
+    "programs_failing_physical_bqp_threshold_0_50": 5,
+    "first_physical_failure_cliff": {
+      "first_failing_n_qubits": 6,
+      "first_failing_depth": 48,
+      "first_failing_2q_gates": 120,
+      "f_ideal": 1.0,
+      "f_phys": 0.454969,
+      "active_decoherence_volume": 0.8568
+    },
+    "batch_aer_density_matrix_time_ms": 4106.79,
+    "size_sweep_table": [
+      {
+        "n_qubits": 4,
+        "depth": 4,
+        "n_2q_gates": 6,
+        "circuit_time_ns": 552.0,
+        "active_decoherence_volume": 0.0456,
+        "f_ideal": 1.0,
+        "f_phys": 0.966941,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 4,
+        "depth": 8,
+        "n_2q_gates": 12,
+        "circuit_time_ns": 1104.0,
+        "active_decoherence_volume": 0.0912,
+        "f_ideal": 1.0,
+        "f_phys": 0.929152,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 4,
+        "depth": 16,
+        "n_2q_gates": 24,
+        "circuit_time_ns": 2208.0,
+        "active_decoherence_volume": 0.1824,
+        "f_ideal": 1.0,
+        "f_phys": 0.854933,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 4,
+        "depth": 32,
+        "n_2q_gates": 48,
+        "circuit_time_ns": 4416.0,
+        "active_decoherence_volume": 0.3648,
+        "f_ideal": 1.0,
+        "f_phys": 0.731426,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 4,
+        "depth": 48,
+        "n_2q_gates": 72,
+        "circuit_time_ns": 6624.0,
+        "active_decoherence_volume": 0.5472,
+        "f_ideal": 1.0,
+        "f_phys": 0.627585,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 6,
+        "depth": 4,
+        "n_2q_gates": 10,
+        "circuit_time_ns": 552.0,
+        "active_decoherence_volume": 0.0714,
+        "f_ideal": 1.0,
+        "f_phys": 0.944125,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 6,
+        "depth": 8,
+        "n_2q_gates": 20,
+        "circuit_time_ns": 1104.0,
+        "active_decoherence_volume": 0.1428,
+        "f_ideal": 1.0,
+        "f_phys": 0.875899,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 6,
+        "depth": 16,
+        "n_2q_gates": 40,
+        "circuit_time_ns": 2208.0,
+        "active_decoherence_volume": 0.2856,
+        "f_ideal": 1.0,
+        "f_phys": 0.772216,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 6,
+        "depth": 32,
+        "n_2q_gates": 80,
+        "circuit_time_ns": 4416.0,
+        "active_decoherence_volume": 0.5712,
+        "f_ideal": 1.0,
+        "f_phys": 0.612074,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 6,
+        "depth": 48,
+        "n_2q_gates": 120,
+        "circuit_time_ns": 6624.0,
+        "active_decoherence_volume": 0.8568,
+        "f_ideal": 1.0,
+        "f_phys": 0.454969,
+        "passes_bqp_threshold_0_50": false
+      },
+      {
+        "n_qubits": 8,
+        "depth": 4,
+        "n_2q_gates": 14,
+        "circuit_time_ns": 552.0,
+        "active_decoherence_volume": 0.0972,
+        "f_ideal": 1.0,
+        "f_phys": 0.91304,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 8,
+        "depth": 8,
+        "n_2q_gates": 28,
+        "circuit_time_ns": 1104.0,
+        "active_decoherence_volume": 0.1944,
+        "f_ideal": 1.0,
+        "f_phys": 0.833939,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 8,
+        "depth": 16,
+        "n_2q_gates": 56,
+        "circuit_time_ns": 2208.0,
+        "active_decoherence_volume": 0.3888,
+        "f_ideal": 1.0,
+        "f_phys": 0.696112,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 8,
+        "depth": 32,
+        "n_2q_gates": 112,
+        "circuit_time_ns": 4416.0,
+        "active_decoherence_volume": 0.7776,
+        "f_ideal": 1.0,
+        "f_phys": 0.479378,
+        "passes_bqp_threshold_0_50": false
+      },
+      {
+        "n_qubits": 8,
+        "depth": 48,
+        "n_2q_gates": 168,
+        "circuit_time_ns": 6624.0,
+        "active_decoherence_volume": 1.1664,
+        "f_ideal": 1.0,
+        "f_phys": 0.334127,
+        "passes_bqp_threshold_0_50": false
+      },
+      {
+        "n_qubits": 10,
+        "depth": 4,
+        "n_2q_gates": 18,
+        "circuit_time_ns": 552.0,
+        "active_decoherence_volume": 0.123,
+        "f_ideal": 1.0,
+        "f_phys": 0.907892,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 10,
+        "depth": 8,
+        "n_2q_gates": 36,
+        "circuit_time_ns": 1104.0,
+        "active_decoherence_volume": 0.246,
+        "f_ideal": 1.0,
+        "f_phys": 0.79595,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 10,
+        "depth": 16,
+        "n_2q_gates": 72,
+        "circuit_time_ns": 2208.0,
+        "active_decoherence_volume": 0.492,
+        "f_ideal": 1.0,
+        "f_phys": 0.626286,
+        "passes_bqp_threshold_0_50": true
+      },
+      {
+        "n_qubits": 10,
+        "depth": 32,
+        "n_2q_gates": 144,
+        "circuit_time_ns": 4416.0,
+        "active_decoherence_volume": 0.984,
+        "f_ideal": 1.0,
+        "f_phys": 0.391413,
+        "passes_bqp_threshold_0_50": false
+      },
+      {
+        "n_qubits": 10,
+        "depth": 48,
+        "n_2q_gates": 216,
+        "circuit_time_ns": 6624.0,
+        "active_decoherence_volume": 1.476,
+        "f_ideal": 1.0,
+        "f_phys": 0.246712,
+        "passes_bqp_threshold_0_50": false
+      }
+    ],
+    "large_width_mps_simulator_scaling_12q_to_24q": [
+      {
+        "n_qubits": 12,
+        "mps_runtime_ms": 2.45,
+        "ideal_target_hit_rate": 1.0,
+        "equivalent_density_matrix_ram_mb": 256.0
+      },
+      {
+        "n_qubits": 16,
+        "mps_runtime_ms": 2.42,
+        "ideal_target_hit_rate": 1.0,
+        "equivalent_density_matrix_ram_mb": 65536.0
+      },
+      {
+        "n_qubits": 20,
+        "mps_runtime_ms": 3.85,
+        "ideal_target_hit_rate": 1.0,
+        "equivalent_density_matrix_ram_mb": 16777216.0
+      },
+      {
+        "n_qubits": 24,
+        "mps_runtime_ms": 3.75,
+        "ideal_target_hit_rate": 1.0,
+        "equivalent_density_matrix_ram_mb": 4294967296.0
+      }
+    ]
+  },
+  "campaign2_p2_redex_mbu_spectator_decoherence": {
+    "finding_id": "P2_Redex_MBU_Reduction_Crossover_And_Failure_Under_Spectator_Readout_Stall",
+    "redex_rule": "[R-MBU-Uncompute]: Uncompute_RCCX(c1,c2,anc) --> MX(anc); Reset(anc); Cond-CZ(c1,c2)",
+    "ideal_fidelity_all_trials": 1.0,
+    "spectator_sweep_count": 5,
+    "mbu_wins_at_low_spectator_count": 2,
+    "mbu_hardware_regressions_found": 3,
+    "spectator_sweep_results": [
+      {
+        "n_spectators": 0,
+        "total_qubits": 3,
+        "f_ideal_both": 1.0,
+        "f_phys_pre_reduction_unitary": 0.97987,
+        "f_phys_post_reduction_mbu": 0.984704,
+        "delta_fidelity_mbu_minus_unitary": 0.004834,
+        "redex_mbu_reduction_fails_on_hardware": false
+      },
+      {
+        "n_spectators": 1,
+        "total_qubits": 4,
+        "f_ideal_both": 1.0,
+        "f_phys_pre_reduction_unitary": 0.979558,
+        "f_phys_post_reduction_mbu": 0.980409,
+        "delta_fidelity_mbu_minus_unitary": 0.000851,
+        "redex_mbu_reduction_fails_on_hardware": false
+      },
+      {
+        "n_spectators": 3,
+        "total_qubits": 6,
+        "f_ideal_both": 1.0,
+        "f_phys_pre_reduction_unitary": 0.972882,
+        "f_phys_post_reduction_mbu": 0.965882,
+        "delta_fidelity_mbu_minus_unitary": -0.007,
+        "redex_mbu_reduction_fails_on_hardware": true
+      },
+      {
+        "n_spectators": 5,
+        "total_qubits": 8,
+        "f_ideal_both": 1.0,
+        "f_phys_pre_reduction_unitary": 0.966252,
+        "f_phys_post_reduction_mbu": 0.951571,
+        "delta_fidelity_mbu_minus_unitary": -0.014681,
+        "redex_mbu_reduction_fails_on_hardware": true
+      },
+      {
+        "n_spectators": 7,
+        "total_qubits": 10,
+        "f_ideal_both": 1.0,
+        "f_phys_pre_reduction_unitary": 0.959668,
+        "f_phys_post_reduction_mbu": 0.937473,
+        "delta_fidelity_mbu_minus_unitary": -0.022195,
+        "redex_mbu_reduction_fails_on_hardware": true
+      }
+    ]
+  },
+  "campaign3_p3_redex_commutation_swap_explosion": {
+    "finding_id": "P3_Redex_Commutation_Peephole_Fails_Via_Coupling_Graph_SWAP_Explosion",
+    "redex_rule": "[R-Commute-Cancel]: Local ladder commutation cancels 1 abstract gate but creates dist-d 2Q gate",
+    "distances_tested": 6,
+    "hardware_regressions_found": 5,
+    "routing_sweep_results": [
+      {
+        "coupling_distance_d": 1,
+        "abstract_gate_delta": -1,
+        "physical_swaps_inserted": 0,
+        "extra_physical_cx_gates": 0,
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_local": 0.992871,
+        "f_phys_post_reduction_routed": 0.992871,
+        "physical_error_inflation_ratio": 1.0,
+        "redex_commutation_fails_on_hardware": false
+      },
+      {
+        "coupling_distance_d": 2,
+        "abstract_gate_delta": -1,
+        "physical_swaps_inserted": 2,
+        "extra_physical_cx_gates": 6,
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_local": 0.986425,
+        "f_phys_post_reduction_routed": 0.968339,
+        "physical_error_inflation_ratio": 2.33,
+        "redex_commutation_fails_on_hardware": true
+      },
+      {
+        "coupling_distance_d": 3,
+        "abstract_gate_delta": -1,
+        "physical_swaps_inserted": 4,
+        "extra_physical_cx_gates": 12,
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_local": 0.98002,
+        "f_phys_post_reduction_routed": 0.944426,
+        "physical_error_inflation_ratio": 2.78,
+        "redex_commutation_fails_on_hardware": true
+      },
+      {
+        "coupling_distance_d": 4,
+        "abstract_gate_delta": -1,
+        "physical_swaps_inserted": 6,
+        "extra_physical_cx_gates": 18,
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_local": 0.973657,
+        "f_phys_post_reduction_routed": 0.921138,
+        "physical_error_inflation_ratio": 2.99,
+        "redex_commutation_fails_on_hardware": true
+      },
+      {
+        "coupling_distance_d": 5,
+        "abstract_gate_delta": -1,
+        "physical_swaps_inserted": 8,
+        "extra_physical_cx_gates": 24,
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_local": 0.967336,
+        "f_phys_post_reduction_routed": 0.898461,
+        "physical_error_inflation_ratio": 3.11,
+        "redex_commutation_fails_on_hardware": true
+      },
+      {
+        "coupling_distance_d": 6,
+        "abstract_gate_delta": -1,
+        "physical_swaps_inserted": 10,
+        "extra_physical_cx_gates": 30,
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_local": 0.961055,
+        "f_phys_post_reduction_routed": 0.876375,
+        "physical_error_inflation_ratio": 3.17,
+        "redex_commutation_fails_on_hardware": true
+      }
+    ]
+  },
+  "campaign4_p4_redex_parallelization_zz_crosstalk": {
+    "finding_id": "P4_Redex_Parallelization_Fails_Under_Adjacent_ZZ_Crosstalk_And_Rydberg_Blockade",
+    "redex_rule": "[R-Seq-To-Par]: seq(U(q0,q1), V(q2,q3)) --> par(U(q0,q1), V(q2,q3)) when {q0,q1} cap {q2,q3} = empty",
+    "physical_failure_mechanism": "Simultaneous 2Q gates at coupling-graph distance d_G(q1, q2) = 1 accumulate coherent ZZ phase exp(-i * zeta_ZZ * t * Z_1 Z_2)",
+    "layer_sweep_results": [
+      {
+        "parallel_layers_L": 1,
+        "f_ideal": 1.0,
+        "f_phys_color_isolated_seq": 0.990072,
+        "f_phys_adjacent_par_with_zz_crosstalk": 0.97814,
+        "redex_par_reduction_fails_on_hardware": true
+      },
+      {
+        "parallel_layers_L": 2,
+        "f_ideal": 1.0,
+        "f_phys_color_isolated_seq": 0.985362,
+        "f_phys_adjacent_par_with_zz_crosstalk": 0.938487,
+        "redex_par_reduction_fails_on_hardware": true
+      },
+      {
+        "parallel_layers_L": 3,
+        "f_ideal": 1.0,
+        "f_phys_color_isolated_seq": 0.97723,
+        "f_phys_adjacent_par_with_zz_crosstalk": 0.874787,
+        "redex_par_reduction_fails_on_hardware": true
+      },
+      {
+        "parallel_layers_L": 4,
+        "f_ideal": 1.0,
+        "f_phys_color_isolated_seq": 0.972595,
+        "f_phys_adjacent_par_with_zz_crosstalk": 0.796566,
+        "redex_par_reduction_fails_on_hardware": true
+      },
+      {
+        "parallel_layers_L": 5,
+        "f_ideal": 1.0,
+        "f_phys_color_isolated_seq": 0.964583,
+        "f_phys_adjacent_par_with_zz_crosstalk": 0.701836,
+        "redex_par_reduction_fails_on_hardware": true
+      }
+    ]
+  },
+  "campaign5_p5_direct_circuit_fuzzer_stim_pymatching_pyzx": {
+    "finding_id": "P5_Direct_Circuit_Level_Fuzzer_Stim_PyMatching_And_PyZX",
+    "stim_pymatching_hook_schedule_fuzz": [
+      {
+        "code_distance_d": 3,
+        "noiseless_detector_flips_both": 0,
+        "d_eff_zigzag_schedule": 3,
+        "d_eff_hook_aligned_schedule": 2,
+        "mwpm_ler_zigzag_10k_shots": 0.0005,
+        "mwpm_ler_hook_aligned_10k_shots": 0.0105,
+        "hook_ler_inflation_ratio": 21.0
+      },
+      {
+        "code_distance_d": 5,
+        "noiseless_detector_flips_both": 0,
+        "d_eff_zigzag_schedule": 5,
+        "d_eff_hook_aligned_schedule": 3,
+        "mwpm_ler_zigzag_10k_shots": 0.0001,
+        "mwpm_ler_hook_aligned_10k_shots": 0.0024,
+        "hook_ler_inflation_ratio": 24.0
+      },
+      {
+        "code_distance_d": 7,
+        "noiseless_detector_flips_both": 0,
+        "d_eff_zigzag_schedule": 7,
+        "d_eff_hook_aligned_schedule": 4,
+        "mwpm_ler_zigzag_10k_shots": 0.0,
+        "mwpm_ler_hook_aligned_10k_shots": 0.0005,
+        "hook_ler_inflation_ratio": 500.0
+      }
+    ],
+    "pyzx_random_clifford_t_fuzz_trials": 50,
+    "pyzx_tensor_equivalence_verified": 50,
+    "pyzx_total_t_count_before": 296,
+    "pyzx_total_t_count_after": 192,
+    "ieee754_float64_phase_underflow_exponent_k": 54
+  },
+  "campaign6_200_random_redex_differential_fuzz_summary": {
+    "total_random_redex_programs_fuzzed": 200,
+    "logical_qsub_typecheck_passed": 200,
+    "ideal_statevector_equivalence_passed": 200,
+    "physical_hardware_failures_discovered": 139,
+    "physical_failures_caught_by_hardware_indexed_guard": 139,
+    "zero_silent_physical_failures_after_guard": true,
+    "failure_root_cause_breakdown": {
+      "P1_SizeCliff": 70,
+      "P2_MBUStall": 33,
+      "P3_SwapExplosion": 32,
+      "P4_ZZCrosstalk": 21,
+      "P5_HookSchedule": 25
+    }
+  },
+  "all_5_physical_failure_classes_p1_to_p5_discovered_and_guarded": true
+}

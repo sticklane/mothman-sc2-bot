@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 660" width="1320" height="660">
+
+  <defs>
+    <marker id="arrow-black" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-crimson" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1320" height="660" fill="#ffffff"/>
+  <line x1="16.0" y1="16.0" x2="1304.0" y2="16.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <text x="24.0" y="38.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="14.5" font-weight="700" fill="#000000" text-anchor="start">Figure 10.  Walker-Vose O(1)-Comparison Coherent Alias Table State Preparation</text>
+  <text x="24.0" y="57.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">WalkerVoseAliasTable(w=8, mu=16): Replaces 8-Level Grover-Rudolph Rotations with 1 Comparator + 1 CSWAP (49 Q, 280 CCX)</text>
+  <line x1="16.0" y1="68.0" x2="1304.0" y2="68.0" stroke="#000000" stroke-width="0.80" stroke-linecap="butt"/>
+  <rect x="16.0" y="94.0" width="1288.0" height="548.0" fill="#ffffff" stroke="#000000" stroke-width="1.00"/>
+  <line x1="16.0" y1="138.0" x2="1304.0" y2="138.0" stroke="#000000" stroke-width="0.75" stroke-linecap="butt"/>
+  <text x="28.0" y="112.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="start">Gate-Level Circuit for Coherent Discrete State Preparation  |0⟩  ⟶  SUM_{x=0}^{255} sqrt(p_x) |x⟩ |garbage_x⟩</text>
+  <text x="28.0" y="129.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">Precomputes classical Robin-Hood buckets (Keep[i], Alias[i]) so every equal-probability bucket i in [0, 2^w) contains at most 2 outcomes</text>
+  <text x="1292.0" y="112.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="end">[49 Q | 280 Toffolis | 0 R_y]</text>
+  <line x1="175.0" y1="180.0" x2="1135.0" y2="180.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="167.0" y="184.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|i[0..7]⟩ = |0⟩^8</text>
+  <text x="1143.0" y="184.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|x_out[0..7]⟩ ~ p_x</text>
+  <line x1="190.5" y1="186.5" x2="199.5" y2="173.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="196.0" y="171.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">8</text>
+  <line x1="175.0" y1="240.0" x2="1135.0" y2="240.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="167.0" y="244.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|u[0..15]⟩ = |0⟩^16</text>
+  <text x="1143.0" y="244.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|u[0..15]⟩ (Uniform)</text>
+  <line x1="190.5" y1="246.5" x2="199.5" y2="233.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="196.0" y="231.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">16</text>
+  <line x1="175.0" y1="300.0" x2="1135.0" y2="300.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="167.0" y="304.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|Alias[0..7]⟩ = |0⟩^8</text>
+  <text x="1143.0" y="304.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|i_orig / Alias[i]⟩</text>
+  <line x1="190.5" y1="306.5" x2="199.5" y2="293.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="196.0" y="291.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">8</text>
+  <line x1="175.0" y1="360.0" x2="1135.0" y2="360.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="167.0" y="364.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|Keep[0..15]⟩ = |0⟩^16</text>
+  <text x="1143.0" y="364.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|Keep[i]⟩</text>
+  <line x1="190.5" y1="366.5" x2="199.5" y2="353.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="196.0" y="351.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">16</text>
+  <line x1="175.0" y1="420.0" x2="1135.0" y2="420.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="167.0" y="424.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|swap_flag⟩ = |0⟩^1</text>
+  <text x="1143.0" y="424.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|swap_flag⟩ = [u ≥ Keep]</text>
+  <line x1="190.5" y1="426.5" x2="199.5" y2="413.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="196.0" y="411.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">1</text>
+  <line x1="210.0" y1="170.0" x2="210.0" y2="430.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="210.0" y="166.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Step 1: H Fanout</text>
+  <rect x="228.0" y="164.0" width="64.0" height="32.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="260.0" y="178.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="middle">H^(x8)</text>
+  <text x="260.0" y="190.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">0 CCX</text>
+  <rect x="228.0" y="224.0" width="64.0" height="32.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="260.0" y="238.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="middle">H^(x16)</text>
+  <text x="260.0" y="250.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">0 CCX</text>
+  <line x1="325.0" y1="170.0" x2="325.0" y2="430.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="325.0" y="166.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Step 2: Alias QROAM</text>
+  <circle cx="432.0" cy="180.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="432.0" y1="180.0" x2="432.0" y2="300.0" stroke="#222222" stroke-width="1.80" stroke-linecap="butt"/>
+  <rect x="336.0" y="285.0" width="192.0" height="90.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="432.0" y="319.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Select-SWAP QROAM</text>
+  <text x="432.0" y="333.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">Alias[i] (8b), Keep[i] (16b)</text>
+  <text x="432.0" y="346.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">2^8 = 256 Toffolis</text>
+  <line x1="542.0" y1="170.0" x2="542.0" y2="430.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="542.0" y="166.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Step 3: 16-Bit Comparator</text>
+  <circle cx="648.0" cy="240.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="648.0" y1="240.0" x2="648.0" y2="360.0" stroke="#000000" stroke-width="1.80" stroke-linecap="butt"/>
+  <rect x="552.0" y="345.0" width="192.0" height="90.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="648.0" y="379.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Gidney Comparator</text>
+  <text x="648.0" y="393.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">swap_flag ^= [u ≥ Keep[i]]</text>
+  <text x="648.0" y="406.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">mu = 16 Toffolis</text>
+  <line x1="750.0" y1="170.0" x2="750.0" y2="430.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="750.0" y="166.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Step 4: 8-Bit Fredkin CSWAP</text>
+  <line x1="835.0" y1="180.0" x2="835.0" y2="420.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <circle cx="835.0" cy="420.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="829.8" y1="174.8" x2="840.2" y2="185.2" stroke="#000000" stroke-width="1.30" stroke-linecap="butt"/>
+  <line x1="829.8" y1="185.2" x2="840.2" y2="174.8" stroke="#000000" stroke-width="1.30" stroke-linecap="butt"/>
+  <line x1="829.8" y1="294.8" x2="840.2" y2="305.2" stroke="#000000" stroke-width="1.30" stroke-linecap="butt"/>
+  <line x1="829.8" y1="305.2" x2="840.2" y2="294.8" stroke="#000000" stroke-width="1.30" stroke-linecap="butt"/>
+  <rect x="780.0" y="225.0" width="110.0" height="30.0" fill="#f4f4f4" stroke="#000000" stroke-width="1.20"/>
+  <text x="835.0" y="244.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="700" fill="#000000" text-anchor="middle">w = 8 CSWAPs</text>
+  <line x1="935.0" y1="170.0" x2="935.0" y2="430.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="935.0" y="166.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Step 5: Exact Sample |x⟩</text>
+  <rect x="960.0" y="160.0" width="155.0" height="92.0" fill="#f5f5f5" stroke="#000000" stroke-width="1.20"/>
+  <text x="1037.0" y="182.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="700" fill="#000000" text-anchor="middle">Exact Output on |i⟩:</text>
+  <text x="1037.0" y="202.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">Pr[x] = p_x + O(2^-16)</text>
+  <text x="1037.0" y="222.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">Total = 280 Toffolis</text>
+  <text x="1037.0" y="240.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">Depth = O(w + mu)</text>
+  <rect x="36.0" y="464.0" width="1248.0" height="160.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="54.0" y="490.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="12.0" font-weight="700" fill="#000000" text-anchor="start">Why Walker-Vose Alias Tables Eliminate the Transcendental Rotation Bottleneck (Grover-Rudolph [2002]):</text>
+  <text x="54.0" y="514.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="400" fill="#000000" text-anchor="start">• Grover-Rudolph Binary-Tree State Prep: Requires w = 8 sequential stages of multiplexed controlled-R_y(theta_k) rotations,</text>
+  <text x="70.0" y="534.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.3" font-weight="400" fill="#000000" text-anchor="start">where each arbitrary angle theta_k = 2*arccos(sqrt(P_L / P_parent)) must be synthesized via Ross-Selinger grids (~50 T-gates * 8 = ~400+ T-gates).</text>
+  <text x="54.0" y="558.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="700" fill="#000000" text-anchor="start">• Walker-Vose O(1)-Comparison Alias Method: Classical O(2^w) Robin-Hood preprocessing pairs each sub-average outcome i</text>
+  <text x="70.0" y="578.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.3" font-weight="400" fill="#000000" text-anchor="start">with a super-average donor Alias[i]. On the quantum computer, ONLY Clifford+Toffoli integer operations are executed:</text>
+  <rect x="70.0" y="588.0" width="1190.0" height="28.0" fill="#f5f5f5" stroke="#000000" stroke-width="1.20"/>
+  <text x="665.0" y="606.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.8" font-weight="700" fill="#000000" text-anchor="middle">Qubits: 2*w + 2*mu + 1 = 49 Q   |   Toffolis: 2^w (QROAM) + mu (Cmp) + w (CSWAP) = 256 + 16 + 8 = 280 CCX   |   Arbitrary R_y Gates: ZERO!</text>
+</svg>

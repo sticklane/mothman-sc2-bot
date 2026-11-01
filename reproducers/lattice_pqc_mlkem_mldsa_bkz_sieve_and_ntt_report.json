@@ -1,0 +1,236 @@
+{
+  "wave": "Wave 18 (Step 3) \u2014 Lattice-Based NIST PQC (ML-KEM-512/768/1024 & ML-DSA-44/65/87) BKZ Sieving & QDS-6 Butterfly NTT",
+  "overall_status": "PASS",
+  "suite1_z3_lattice_ntt_and_bkz_proofs": {
+    "status": "PASS",
+    "elapsed_ms": 30298.06,
+    "mlkem_3329_parity_catch_exposed": "SAT (naive shift fails whenever 2*b >= 3329)",
+    "mlkem_3329_odd_half_butterfly_bijection": "UNSAT (exact bijection & 0 parity garbage over all 3329^2 pairs)",
+    "mldsa_8380417_odd_half_butterfly_bijection": "UNSAT (exact bijection & 0 parity garbage over all 8380417^2 pairs)",
+    "bkz_classical_qroam_simhash_zero_catch4_proof": "UNSAT (0 residual QROAM entanglement on classical sieve RAM)",
+    "no_qram_bkz_311_exceeds_classical_292_proof": "UNSAT (0.3112*beta > 0.2920*beta for all beta >= 1)"
+  },
+  "suite2_lattice_pqc_resource_and_security_table": {
+    "status": "PASS",
+    "elapsed_ms": 0.22,
+    "qds6_coherent_ntt_profiles": [
+      {
+        "standard": "ML-KEM-512 (FIPS 203, NIST Level 1)",
+        "ring_parameters": {
+          "n": 256,
+          "q": 3329,
+          "coeff_bits": 12,
+          "k": 2,
+          "ntt_stages": 7,
+          "butterflies_per_poly": 896
+        },
+        "single_poly_streaming_qubits": 3072,
+        "single_poly_with_butterfly_scratch_qubits": 3108,
+        "full_k_vector_qubits": 6180,
+        "toffolis_per_butterfly": 360,
+        "toffolis_per_poly_ntt": 322560,
+        "toffolis_full_k_vector_ntt": 645120,
+        "parity_cleanup": "Exact reversible odd-half division (x + x0*3329) >> 1 uncomputes x0 via 2*b >= 3329 (0 garbage)"
+      },
+      {
+        "standard": "ML-KEM-768 (FIPS 203, NIST Level 3)",
+        "ring_parameters": {
+          "n": 256,
+          "q": 3329,
+          "coeff_bits": 12,
+          "k": 3,
+          "ntt_stages": 7,
+          "butterflies_per_poly": 896
+        },
+        "single_poly_streaming_qubits": 3072,
+        "single_poly_with_butterfly_scratch_qubits": 3108,
+        "full_k_vector_qubits": 9252,
+        "toffolis_per_butterfly": 360,
+        "toffolis_per_poly_ntt": 322560,
+        "toffolis_full_k_vector_ntt": 967680,
+        "parity_cleanup": "Exact reversible odd-half division (x + x0*3329) >> 1 uncomputes x0 via 2*b >= 3329 (0 garbage)"
+      },
+      {
+        "standard": "ML-KEM-1024 (FIPS 203, NIST Level 5)",
+        "ring_parameters": {
+          "n": 256,
+          "q": 3329,
+          "coeff_bits": 12,
+          "k": 4,
+          "ntt_stages": 7,
+          "butterflies_per_poly": 896
+        },
+        "single_poly_streaming_qubits": 3072,
+        "single_poly_with_butterfly_scratch_qubits": 3108,
+        "full_k_vector_qubits": 12324,
+        "toffolis_per_butterfly": 360,
+        "toffolis_per_poly_ntt": 322560,
+        "toffolis_full_k_vector_ntt": 1290240,
+        "parity_cleanup": "Exact reversible odd-half division (x + x0*3329) >> 1 uncomputes x0 via 2*b >= 3329 (0 garbage)"
+      },
+      {
+        "standard": "ML-DSA-44 (FIPS 204, NIST Level 2)",
+        "ring_parameters": {
+          "n": 256,
+          "q": 8380417,
+          "coeff_bits": 23,
+          "k": 4,
+          "l": 4,
+          "ntt_stages": 8,
+          "butterflies_per_poly": 1024
+        },
+        "single_poly_streaming_qubits": 5888,
+        "single_poly_with_butterfly_scratch_qubits": 5957,
+        "full_l_vector_qubits": 23621,
+        "toffolis_per_butterfly": 1196,
+        "toffolis_per_poly_ntt": 1224704,
+        "toffolis_full_l_vector_ntt": 4898816,
+        "parity_cleanup": "Exact reversible odd-half division (x + x0*8380417) >> 1 uncomputes x0 via 2*b >= 8380417 (0 garbage)"
+      },
+      {
+        "standard": "ML-DSA-65 (FIPS 204, NIST Level 3)",
+        "ring_parameters": {
+          "n": 256,
+          "q": 8380417,
+          "coeff_bits": 23,
+          "k": 6,
+          "l": 5,
+          "ntt_stages": 8,
+          "butterflies_per_poly": 1024
+        },
+        "single_poly_streaming_qubits": 5888,
+        "single_poly_with_butterfly_scratch_qubits": 5957,
+        "full_l_vector_qubits": 29509,
+        "toffolis_per_butterfly": 1196,
+        "toffolis_per_poly_ntt": 1224704,
+        "toffolis_full_l_vector_ntt": 6123520,
+        "parity_cleanup": "Exact reversible odd-half division (x + x0*8380417) >> 1 uncomputes x0 via 2*b >= 8380417 (0 garbage)"
+      },
+      {
+        "standard": "ML-DSA-87 (FIPS 204, NIST Level 5)",
+        "ring_parameters": {
+          "n": 256,
+          "q": 8380417,
+          "coeff_bits": 23,
+          "k": 8,
+          "l": 7,
+          "ntt_stages": 8,
+          "butterflies_per_poly": 1024
+        },
+        "single_poly_streaming_qubits": 5888,
+        "single_poly_with_butterfly_scratch_qubits": 5957,
+        "full_l_vector_qubits": 41285,
+        "toffolis_per_butterfly": 1196,
+        "toffolis_per_poly_ntt": 1224704,
+        "toffolis_full_l_vector_ntt": 8572928,
+        "parity_cleanup": "Exact reversible odd-half division (x + x0*8380417) >> 1 uncomputes x0 via 2*b >= 8380417 (0 garbage)"
+      }
+    ],
+    "quantum_bkz_sieve_profiles": [
+      {
+        "standard": "ML-KEM-512",
+        "core_svp_block_size_beta": 406,
+        "classical_sieve_db_log2_vectors": 84.24,
+        "grover_simhash_streaming_oracle_qubits": 669,
+        "full_beta_inner_product_toffolis": 103936,
+        "qds2_simhash_popcount_braun_tree_toffolis": 255,
+        "inner_filter_toffoli_reduction_factor": 407.59,
+        "classical_bdgl_sieve_log2_ops": 118.55,
+        "ideal_hardware_qram_quantum_sieve_log2_ops": 104.34,
+        "no_qram_quantum_select_swap_sieve_log2_ops": 126.37,
+        "quantum_speedup_without_qram": false,
+        "security_verdict": "SECURE: Without hardware QRAM, quantum Grover+Select-SWAP sieving costs 2^126.37 Toffolis > 2^118.55 classical BDGL operations (0x asymptotic speedup); even with idealized unit-cost QRAM, 2^104.34 operations is physically unreachable."
+      },
+      {
+        "standard": "ML-DSA-44",
+        "core_svp_block_size_beta": 423,
+        "classical_sieve_db_log2_vectors": 87.77,
+        "grover_simhash_streaming_oracle_qubits": 672,
+        "full_beta_inner_product_toffolis": 108288,
+        "qds2_simhash_popcount_braun_tree_toffolis": 255,
+        "inner_filter_toffoli_reduction_factor": 424.66,
+        "classical_bdgl_sieve_log2_ops": 123.52,
+        "ideal_hardware_qram_quantum_sieve_log2_ops": 108.71,
+        "no_qram_quantum_select_swap_sieve_log2_ops": 131.66,
+        "quantum_speedup_without_qram": false,
+        "security_verdict": "SECURE: Without hardware QRAM, quantum Grover+Select-SWAP sieving costs 2^131.66 Toffolis > 2^123.52 classical BDGL operations (0x asymptotic speedup); even with idealized unit-cost QRAM, 2^108.71 operations is physically unreachable."
+      },
+      {
+        "standard": "ML-KEM-768",
+        "core_svp_block_size_beta": 623,
+        "classical_sieve_db_log2_vectors": 129.27,
+        "grover_simhash_streaming_oracle_qubits": 714,
+        "full_beta_inner_product_toffolis": 159488,
+        "qds2_simhash_popcount_braun_tree_toffolis": 255,
+        "inner_filter_toffoli_reduction_factor": 625.44,
+        "classical_bdgl_sieve_log2_ops": 181.92,
+        "ideal_hardware_qram_quantum_sieve_log2_ops": 160.11,
+        "no_qram_quantum_select_swap_sieve_log2_ops": 193.91,
+        "quantum_speedup_without_qram": false,
+        "security_verdict": "SECURE: Without hardware QRAM, quantum Grover+Select-SWAP sieving costs 2^193.91 Toffolis > 2^181.92 classical BDGL operations (0x asymptotic speedup); even with idealized unit-cost QRAM, 2^160.11 operations is physically unreachable."
+      },
+      {
+        "standard": "ML-DSA-65",
+        "core_svp_block_size_beta": 638,
+        "classical_sieve_db_log2_vectors": 132.38,
+        "grover_simhash_streaming_oracle_qubits": 717,
+        "full_beta_inner_product_toffolis": 163328,
+        "qds2_simhash_popcount_braun_tree_toffolis": 255,
+        "inner_filter_toffoli_reduction_factor": 640.5,
+        "classical_bdgl_sieve_log2_ops": 186.3,
+        "ideal_hardware_qram_quantum_sieve_log2_ops": 163.97,
+        "no_qram_quantum_select_swap_sieve_log2_ops": 198.58,
+        "quantum_speedup_without_qram": false,
+        "security_verdict": "SECURE: Without hardware QRAM, quantum Grover+Select-SWAP sieving costs 2^198.58 Toffolis > 2^186.3 classical BDGL operations (0x asymptotic speedup); even with idealized unit-cost QRAM, 2^163.97 operations is physically unreachable."
+      },
+      {
+        "standard": "ML-KEM-1024",
+        "core_svp_block_size_beta": 878,
+        "classical_sieve_db_log2_vectors": 182.19,
+        "grover_simhash_streaming_oracle_qubits": 767,
+        "full_beta_inner_product_toffolis": 224768,
+        "qds2_simhash_popcount_braun_tree_toffolis": 255,
+        "inner_filter_toffoli_reduction_factor": 881.44,
+        "classical_bdgl_sieve_log2_ops": 256.38,
+        "ideal_hardware_qram_quantum_sieve_log2_ops": 225.65,
+        "no_qram_quantum_select_swap_sieve_log2_ops": 273.28,
+        "quantum_speedup_without_qram": false,
+        "security_verdict": "SECURE: Without hardware QRAM, quantum Grover+Select-SWAP sieving costs 2^273.28 Toffolis > 2^256.38 classical BDGL operations (0x asymptotic speedup); even with idealized unit-cost QRAM, 2^225.65 operations is physically unreachable."
+      },
+      {
+        "standard": "ML-DSA-87",
+        "core_svp_block_size_beta": 909,
+        "classical_sieve_db_log2_vectors": 188.62,
+        "grover_simhash_streaming_oracle_qubits": 773,
+        "full_beta_inner_product_toffolis": 232704,
+        "qds2_simhash_popcount_braun_tree_toffolis": 255,
+        "inner_filter_toffoli_reduction_factor": 912.56,
+        "classical_bdgl_sieve_log2_ops": 265.43,
+        "ideal_hardware_qram_quantum_sieve_log2_ops": 233.61,
+        "no_qram_quantum_select_swap_sieve_log2_ops": 282.93,
+        "quantum_speedup_without_qram": false,
+        "security_verdict": "SECURE: Without hardware QRAM, quantum Grover+Select-SWAP sieving costs 2^282.93 Toffolis > 2^265.43 classical BDGL operations (0x asymptotic speedup); even with idealized unit-cost QRAM, 2^233.61 operations is physically unreachable."
+      }
+    ]
+  },
+  "suite3_compiled_c_verifier": {
+    "mlkem_exhaustive_pairs_verified": 11082241,
+    "mlkem_total_pairs": 11082241,
+    "naive_shift_failures_caught": 5539456,
+    "passed_trials": 10000,
+    "total_trials": 10000,
+    "parity_and_qroam_leaks": 0,
+    "mutants_killed": 1000,
+    "mutant_trials": 1000,
+    "elapsed_ms": 14.18,
+    "status": "PASS"
+  },
+  "suite4_lean4_verification": {
+    "status": "PASS",
+    "lean4_elapsed_ms": 1091.95,
+    "lean4_file": "proofs/lattice_pqc_mlkem_mldsa_bkz_sieve_and_ntt_proofs.lean",
+    "theorems_verified": 6,
+    "sorry_count": 0,
+    "axiom_count": 0
+  }
+}

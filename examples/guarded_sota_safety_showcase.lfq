@@ -1,0 +1,214 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/guarded_sota_safety_showcase.lfq
+;;
+;; Guarded SOTA Safety Showcase in `#lang lakefillq`.
+;;
+;; Exercises all 7 generalized static type-system & compiler guards directly
+;; inside the `#lang lakefillq -> lambda_LFQ_kern -> RevIR -> MachineISA`
+;; pipeline:
+;;   1. `T-DomImg`    (`erase-by-part-bij`): Z3 bidirectional support-injectivity
+;;      (`Img(f) <= Dom(g)`, injectivity on `Dom(f)`, and exact roundtrip with
+;;      zero residual ancillas) paired with `Law U4` `MBU` scratch erasure.
+;;   2. `T-ValidIf`   (`guard-valid-if`): linear validity-witness modality
+;;      enforcing `v_full_rank in Gamma_ctrl` before `phase-flip-if`, lowering
+;;      to a controlled phase kickback `(cz v_wire pred_wire)`.
+;;   3. `T-AlgPhase`  (`guard-involutory` + `guard-qblock-lcu-phase`): verifies
+;;      two-body `(mu <-> nu)` partner-swap `SELECT` involution (`U^2 = I`) and
+;;      automatically synthesizes `S^2 = Z` phase compensation for `Wx -> R`
+;;      degree-2 Chebyshev `LCU` interference (`(-i)^2 = -1`).
+;;   4. `T-WireBasis` (`guard-wire-basis` + `logical-relabel`): tracks logical
+;;      wire permutations (`0` physical `SWAP`s), `GF(2^8)` field basis tags on
+;;      all 8 basis generators, and simultaneous `Fin[5]` ring stencils.
+;;   5. `T-DriftEps`  (`guard-drift-eps`): enforces `RSA-4096` `QCoset` carry
+;;      runway (`c_pad = 36 > log2(2015560 * 2^15)`), `QRNS` dynamic range, and
+;;      Lipschitz-amplified `mu = 23` alias precision (`d * eps_in <= eps_target`).
+;;   6. `T-SingleIR`  (`guard-single-ir`): derives `TempAND` counts from the
+;;      single `RevIR` AST (`3,489` full `[H | s]` columns), discharges the
+;;      `XAG + Z3` `SHA-2 Ch` pure-spec miter, and checks `AES-128` `r = 2`
+;;      Grover spurious-key margin (`k_key - h_bits = -128 <= -32`).
+;;   7. `T-ParGuard`  (`guard-par-partition`): infers `QParGrade` across
+;;      `ParSliceable` (`RSA-4096`), `ParShotLinear` (`Hubbard-QSVT`), and
+;;      `ParNonPartitionable` (`AES-128` Grover), automatically falling back to
+;;      the `1`-machine Single-Machine schedule (`machines_used = 1`) when
+;;      multi-machine Zalka splitting incurs `sqrt(M)` total-work blowup!
+;; =============================================================================
+
+(target-profile heron-r2)
+
+(defconst kaliski-total-smt2
+  (string-join
+   '("(define-fun inv13 ((a Int)) Int"
+     "  (ite (= a 1) 1 (ite (= a 2) 7 (ite (= a 3) 9 (ite (= a 4) 10"
+     "  (ite (= a 5) 8 (ite (= a 6) 11 (ite (= a 7) 2 (ite (= a 8) 5"
+     "  (ite (= a 9) 3 (ite (= a 10) 4 (ite (= a 11) 6 (ite (= a 12) 12 0)))))))))))))"
+     "(define-fun kaliski_guarded_out ((x Int)) Int (inv13 x))"
+     "(define-fun kaliski_guarded_res ((x Int)) Int 0)")
+   "\n"))
+
+(defq (guarded-sota-safety-showcase
+       #:wires ([v-wire (range 0 1)]
+                [pred-wire (range 1 2)]
+                [lcu-ctrl (range 2 4)]
+                [sys (range 4 6)])
+       #:scratch ([anc (range 6 8)]))
+  (define vw (first v-wire))
+  (define pw (first pred-wire))
+  (define c0 (first lcu-ctrl))
+  (define c1 (second lcu-ctrl))
+  (define s0 (first sys))
+  (define s1 (second sys))
+  (define a0 (first anc))
+  (define a1 (second anc))
+
+  (seq
+   ;; Prepare uniform superposition on LCU branch controls:
+   (h c0)
+   (h c1)
+
+   ;; 1. Rule `T-DomImg`: bidirectional partial bijection + `Law U4` MBU erasure:
+   (erase-by-part-bij
+    `(part-bij-smt2
+      #:label kaliski-zero-guarded-mod13
+      #:vars ((x Int))
+      #:vars-alt ((x2 Int))
+      #:preamble ,kaliski-total-smt2
+      #:dom-f "(and (<= 0 x) (< x 13))"
+      #:f-out ("(kaliski_guarded_out x)")
+      #:dom-g-on-f "(and (<= 0 (kaliski_guarded_out x)) (< (kaliski_guarded_out x) 13))"
+      #:g-of-f ("(kaliski_guarded_out (kaliski_guarded_out x))")
+      #:residual ("(kaliski_guarded_res x)")
+      #:f-out-alt ("(kaliski_guarded_out x2)")
+      #:dom-f-alt "(and (<= 0 x2) (< x2 13))")
+    (seq (temp-and s0 s1 a0)
+         (cx a0 pw))
+    (seq (mid-meas-x a0 'm_dom_img)
+         (cond-cz 'm_dom_img s0 s1))
+    (list a0))
+
+   ;; 2. Rule `T-ValidIf`: rank-guarded phase flip synthesizes `(cz vw pw)`:
+   (guard-valid-if
+    `(valid-if-seq
+      (bind-partial-op v_full_rank ,vw s_tilde (QVec 768 id F2StdBasis) qgje-solve)
+      (with-valid v_full_rank s_tilde
+                  (valid-if-seq
+                   (derive-pred wt_eq_t (s_tilde) ,pw)
+                   (phase-flip-if (wt_eq_t) (,pw) (,a1)))))
+    skip)
+
+   ;; 3. Rule `T-AlgPhase` + `T-DriftEps` (`mu = 23` Chebyshev walk + `S^2 = Z` compensation on `c1`):
+   (guard-involutory
+    'qubitization-walk
+    '(partner-swap-select
+      ((0 1) (1 0))
+      ((branch 0 0 (A_mu A_nu))
+       (branch 1 0 (A_nu A_mu))))
+    (guard-qblock-lcu-phase
+     `(lcu-sum (,c0 ,c1)
+               ((wx->reflection 0 (qblock-exact H_sys 1.0 2 0))
+                (wx->reflection
+                 2
+                 (qsvt-chebyshev
+                  15
+                  interior-walk
+                  (prepare-alias hubbard-lcu 32 17.210129265602045 23 #f)
+                  0.001))))
+     (seq (cx c0 s0)
+          (cx c1 s1))))
+
+   ;; 4. Rule `T-WireBasis`: zero-SWAP logical relabeling + simultaneous `Fin[5]` stencil check:
+   (guard-wire-basis
+    '(wire-basis-prog
+      #:regs ((state 4 (0 1 2 3) AESPolyBasis (0 1 2 3))
+              (rkey  4 (0 1 2 3) AESPolyBasis (4 5 6 7)))
+      #:ops ((plu-linear-op state (1 2 3 0) ((0 1) (2 3)))
+             (relabel-perm state (3 0 1 2))
+             (add-round-key state rkey)
+             (stencil-ring qstencil-ring 5 0 4 (0 1 2) 0 (0 1 2 3 4) (5 6))))
+    (within-apply-mbu
+     (logical-relabel sys '(1 0))
+     (cx s0 s1)
+     '()))
+
+   ;; 5. Rule `T-DriftEps`: `RSA-4096` `c_pad = 36` coset runway + `QRNS` dynamic range:
+   (guard-drift-eps
+    '(drift-bundle
+      (coset-runway-spec #:modulus-bits 4096 #:c-pad 36 #:steps 2015560 #:safety-bits 15)
+      (rns-range-spec #:modulus-n 15 #:power-m 2 #:rns-moduli (13 19)))
+    skip)
+
+   ;; 6. Rule `T-SingleIR`: full-column `RevIR` cost + `XAG + Z3` `SHA-2 Ch` miter + `AES-128 r=2` margin:
+   (guard-single-ir
+    '(single-ir-kernel
+      #:label mceliece-348864-full-slice-and-sha2-ch
+      #:revir-ast (for-matrix-elim #:rows 768 #:total-cols 3489 #:col-lo 0 #:col-hi 3489 #:pivots 768)
+      #:claimed-temp-ands 2781129728
+      #:miter-spec (3 5 (4) ((ccx 0 1 4) (x 0) (ccx 0 2 4) (x 0)) sha2-ch))
+    (guard-single-ir
+     '(grover-search-oracle #:cipher AES-128-r2 #:key-bits 128 #:constraint-bits 256 #:log2-eta-max -32)
+     skip))
+
+   ;; 7. Rule `T-ParGuard`: `ParSliceable` + `ParShotLinear` + Convex `M*` Cluster Optimization
+   ;;    (`ECC-256 -> M*=4`, `RSA-2048 -> M*=6`, `RSA-4096 -> M*=8`) + automatic Single-Machine fallback on Grover:
+   (guard-par-partition
+    `(par-partition-bundle
+      (par-partition-spec #:workload RSA-4096     #:paradigm algebraic-limb #:requested-machines 8  #:q-single 8230 #:q-per-machine 1040 #:q-comm 64 #:bell-cuts 4096 #:max-bell-budget 8192 #:strict-parallel? #f)
+      (par-partition-spec #:workload Hubbard-QSVT #:paradigm shot-sample    #:requested-machines 16 #:q-single 128  #:q-per-machine 128  #:q-comm 0  #:bell-cuts 0    #:max-bell-budget 0    #:strict-parallel? #f)
+      (par-partition-spec #:workload AES-128      #:paradigm grover-amplify #:requested-machines 16 #:q-single 984  #:q-per-machine 980  #:q-comm 0  #:bell-cuts 0    #:max-bell-budget 0    #:strict-parallel? #f)
+      ,(par-cluster-opt-spec #:workload 'ECC-256
+                             #:paradigm 'algebraic-limb
+                             #:max-machines 256
+                             #:q-cap-per-machine 400
+                             #:raw-bell-rate-hz 100000.0
+                             #:raw-per-logical-ebit 30
+                             #:q-single 1298
+                             #:q-data-dist 1024
+                             #:q-local-fixed 38
+                             #:q-peer-sync 6
+                             #:candidate-machines '(1 2 4 6 8 12 16 24 32 48 64 96 128 256)
+                             #:window-bits 5
+                             #:num-windows 112
+                             #:local-toffolis 9824640
+                             #:carry-scheme 'projective-oblivious-runway
+                             #:lookup-scheme 'law-u4-ghz-mx
+                             #:strict-parallel? #f)
+      ,(par-cluster-opt-spec #:workload 'RSA-2048
+                             #:paradigm 'algebraic-limb
+                             #:max-machines 256
+                             #:q-cap-per-machine 400
+                             #:raw-bell-rate-hz 100000.0
+                             #:raw-per-logical-ebit 30
+                             #:q-single 1332
+                             #:q-data-dist 1152
+                             #:q-local-fixed 24
+                             #:q-peer-sync 4
+                             #:candidate-machines '(1 2 4 6 8 12 16 24 32 48 64 96 128 256)
+                             #:window-bits 6
+                             #:num-windows 1038
+                             #:local-toffolis 1180000000
+                             #:carry-scheme 'qrns-zero-carry
+                             #:lookup-scheme 'law-u4-ghz-mx
+                             #:strict-parallel? #f)
+      ,(par-cluster-opt-spec #:workload 'RSA-4096
+                             #:paradigm 'algebraic-limb
+                             #:max-machines 256
+                             #:q-cap-per-machine 400
+                             #:raw-bell-rate-hz 100000.0
+                             #:raw-per-logical-ebit 30
+                             #:q-single 2612
+                             #:q-data-dist 2304
+                             #:q-local-fixed 40
+                             #:q-peer-sync 4
+                             #:candidate-machines '(1 2 4 6 8 12 16 24 32 48 64 96 128 256)
+                             #:window-bits 6
+                             #:num-windows 2076
+                             #:local-toffolis 9440000000
+                             #:carry-scheme 'qrns-zero-carry
+                             #:lookup-scheme 'law-u4-ghz-mx
+                             #:strict-parallel? #f))
+    skip)
+
+   ;; Close LCU interference:
+   (h c1)
+   (h c0)))

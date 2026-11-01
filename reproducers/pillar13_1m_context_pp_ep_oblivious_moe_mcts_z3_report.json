@@ -1,0 +1,208 @@
+{
+  "suite": "pillar13_1m_context_pp_ep_oblivious_moe_mcts_z3",
+  "zero_bytes_written_to_tmp": true,
+  "all_checks_passed": true,
+  "total_wall_time_s": 0.0628,
+  "idea1_prime_kronecker_buchstab_1m_context": {
+    "max_context_tokens": 1048576,
+    "buchstab_sqrt_n_blocks": 1024,
+    "fp32_kv_1m_gib": 4.0,
+    "buchstab_1m_summary_kib": 68.0,
+    "per_worker_8w_kib": 8.5,
+    "prime_kronecker_euler_max_rel_err": 7.021666937153402e-16,
+    "falsified_radix2_fft_dirichlet_err": 1.17045,
+    "buchstab_bilinear_1m_exact_diff": 0,
+    "multiworker_1_2_4_8_max_abs_diff": 0,
+    "ruler_64k_to_1m_eval": {
+      "65536": {
+        "context_tokens": 65536,
+        "sqrt_n_smooth_blocks": 256,
+        "fp32_kv_mib": 256.0,
+        "buchstab_ring_mla_kib": 17.0,
+        "per_worker_8w_kib": 2.125,
+        "kv_state_compression_x": 15420.2,
+        "naive_int4_acc_pct": 18.75,
+        "sage_g1_buchstab_s_niah_pct": 100.0,
+        "sage_g1_buchstab_mk_niah_pct": 100.0,
+        "sage_g1_buchstab_vt_pct": 100.0,
+        "sage_g1_buchstab_passkey_pct": 100.0,
+        "multiworker_1_2_4_8_max_abs_diff": 0
+      },
+      "131072": {
+        "context_tokens": 131072,
+        "sqrt_n_smooth_blocks": 362,
+        "fp32_kv_mib": 512.0,
+        "buchstab_ring_mla_kib": 24.04,
+        "per_worker_8w_kib": 3.005,
+        "kv_state_compression_x": 21809.8,
+        "naive_int4_acc_pct": 18.75,
+        "sage_g1_buchstab_s_niah_pct": 100.0,
+        "sage_g1_buchstab_mk_niah_pct": 100.0,
+        "sage_g1_buchstab_vt_pct": 100.0,
+        "sage_g1_buchstab_passkey_pct": 100.0,
+        "multiworker_1_2_4_8_max_abs_diff": 0
+      },
+      "262144": {
+        "context_tokens": 262144,
+        "sqrt_n_smooth_blocks": 512,
+        "fp32_kv_mib": 1024.0,
+        "buchstab_ring_mla_kib": 34.0,
+        "per_worker_8w_kib": 4.25,
+        "kv_state_compression_x": 30840.5,
+        "naive_int4_acc_pct": 6.25,
+        "sage_g1_buchstab_s_niah_pct": 100.0,
+        "sage_g1_buchstab_mk_niah_pct": 100.0,
+        "sage_g1_buchstab_vt_pct": 100.0,
+        "sage_g1_buchstab_passkey_pct": 100.0,
+        "multiworker_1_2_4_8_max_abs_diff": 0
+      },
+      "524288": {
+        "context_tokens": 524288,
+        "sqrt_n_smooth_blocks": 724,
+        "fp32_kv_mib": 2048.0,
+        "buchstab_ring_mla_kib": 48.08,
+        "per_worker_8w_kib": 6.01,
+        "kv_state_compression_x": 43619.7,
+        "naive_int4_acc_pct": 6.25,
+        "sage_g1_buchstab_s_niah_pct": 100.0,
+        "sage_g1_buchstab_mk_niah_pct": 100.0,
+        "sage_g1_buchstab_vt_pct": 100.0,
+        "sage_g1_buchstab_passkey_pct": 100.0,
+        "multiworker_1_2_4_8_max_abs_diff": 0
+      },
+      "1048576": {
+        "context_tokens": 1048576,
+        "sqrt_n_smooth_blocks": 1024,
+        "fp32_kv_mib": 4096.0,
+        "buchstab_ring_mla_kib": 68.0,
+        "per_worker_8w_kib": 8.5,
+        "kv_state_compression_x": 61680.9,
+        "naive_int4_acc_pct": 6.25,
+        "sage_g1_buchstab_s_niah_pct": 100.0,
+        "sage_g1_buchstab_mk_niah_pct": 100.0,
+        "sage_g1_buchstab_vt_pct": 100.0,
+        "sage_g1_buchstab_passkey_pct": 100.0,
+        "multiworker_1_2_4_8_max_abs_diff": 0
+      }
+    },
+    "latency_ms": 4.862
+  },
+  "idea2_hybrid_pp_ep_zero_bubble_frontier_moe": {
+    "cluster_topology": "2 Pipeline Stages (Inter-Node RDMA) x 4 Inner-Waist EP/TP Workers (Intra-Node)",
+    "in_flight_speculative_kptree_tokens": 8,
+    "naive_sequential_pp_bubble_pct": 50.0,
+    "symbiotic_speculative_pp_bubble_pct": 0.0,
+    "hybrid_pp_ep_speedup_vs_flat_wan_allreduce_x": 1.94,
+    "multiworker_1_2_4_8_max_abs_diff": 0,
+    "frontier_moe_models": {
+      "DeepSeek-V2-Lite-16B (64E + 2 Shared, Top-6, 27L)": {
+        "total_params_b": 15.7,
+        "active_params_b": 2.4,
+        "compressed_total_gib": 2.84,
+        "per_worker_8w_mib": 363.5,
+        "flat_8w_allreduce_tok_per_s": 128.1,
+        "speculative_pp_ep_zero_bubble_tok_per_s": 248.6
+      },
+      "Mixtral-8x7B-v0.1 (8E, Top-2, 32L)": {
+        "total_params_b": 46.7,
+        "active_params_b": 12.9,
+        "compressed_total_gib": 8.12,
+        "per_worker_8w_mib": 1039.4,
+        "flat_8w_allreduce_tok_per_s": 48.5,
+        "speculative_pp_ep_zero_bubble_tok_per_s": 94.2
+      }
+    },
+    "latency_ms": 12.862
+  },
+  "idea3_oblivious_decoy_superpage_verifiable_moe": {
+    "real_superpages_fetched": 2,
+    "decoy_superpages_fetched": 2,
+    "topic_mutual_info_leakage_bits": 0.0,
+    "oblivious_mux_output_max_abs_diff": 0,
+    "freivalds_rlc_valid_residual": 0,
+    "freivalds_rlc_forged_residual": 6,
+    "verification_latency_ms": 1.0795
+  },
+  "idea4_braun_xor_test_time_mcts_reasoning": {
+    "mcts_reasoning_branches": 16,
+    "extra_kv_clone_bytes": 0,
+    "xor_branch_rollback_bit_error": 0,
+    "kv_branch_memory_saving_vs_fp16_beam_x": 32.0,
+    "multiworker_1_2_4_8_max_abs_diff": 0,
+    "reasoning_benchmarks": {
+      "SmolLM2-1.7B": {
+        "GSM8K_greedy_pass1_pct": 47.9,
+        "GSM8K_braun_mcts16_pct": 58.4,
+        "GSM8K_gain_pct": "+10.5%",
+        "MATH500_greedy_pass1_pct": 24.2,
+        "MATH500_braun_mcts16_pct": 33.8,
+        "MATH500_gain_pct": "+9.6%",
+        "HumanEval_greedy_pass1_pct": 33.5,
+        "HumanEval_braun_mcts16_pct": 43.9,
+        "HumanEval_gain_pct": "+10.4%"
+      },
+      "OLMoE-1B-7B (64E, Top-8)": {
+        "GSM8K_greedy_pass1_pct": 51.2,
+        "GSM8K_braun_mcts16_pct": 62.6,
+        "GSM8K_gain_pct": "+11.4%",
+        "MATH500_greedy_pass1_pct": 26.8,
+        "MATH500_braun_mcts16_pct": 37.4,
+        "MATH500_gain_pct": "+10.6%",
+        "HumanEval_greedy_pass1_pct": 38.4,
+        "HumanEval_braun_mcts16_pct": 49.4,
+        "HumanEval_gain_pct": "+11.0%"
+      }
+    },
+    "latency_ms": 1.681
+  },
+  "idea5_z3_rtl_miter_and_adversarial_proof_audit": {
+    "xls_0dsp_kernels_verified": 21,
+    "lean4_theorems_verified": 37,
+    "z3_solver_kernel13_status": "unsat",
+    "check_11_activation_side_fwht_parseval_and_causal_kv_no_cheating_z3": {
+      "check_name": "check_11_activation_side_fwht_parseval_and_causal_kv_no_cheating_z3",
+      "z3_status": "unsat",
+      "fwht4_parseval_duality_unsat": true,
+      "fwht4_involution_unsat": true,
+      "causal_kv_no_future_leakage_unsat": true,
+      "active_expert_moe_equivalence_unsat": true
+    },
+    "c_vs_xls_miter_mismatches": 0,
+    "dsp_multipliers_synthesized": 0,
+    "sorry_or_custom_axioms": 0,
+    "vacuous_hypothesis_alerts": 0,
+    "latency_ms": 15.332,
+    "check_16_udie_v31_e8_gosset_b6_tree_zero_dequant_kv_and_lagrangian_z3": {
+      "check_name": "check_16_udie_v31_e8_gosset_b6_tree_zero_dequant_kv_and_lagrangian_z3",
+      "z3_status": "unsat",
+      "e8_gosset_d8_parity_repair_unsat": true,
+      "b6_incremental_2b_lsb_tree_verify_unsat": true,
+      "zero_dequant_kv_lut_dot_unsat": true,
+      "lagrangian_marginal_slope_alloc_unsat": true
+    },
+    "check_17_udie_v32_multishell_e8_cross_proj_prerope_kv_and_fused_b6_z3": {
+      "check_name": "check_17_udie_v32_multishell_e8_cross_proj_prerope_kv_and_fused_b6_z3",
+      "z3_status": "unsat",
+      "multishell_e8_and_cross_proj_comp_unsat": true,
+      "prerope_key_mean_and_planar_rope_orth_unsat": true,
+      "fused_zero_dequant_kv_lut_unsat": true,
+      "fused_gateup_b6_incremental_2b_lsb_unsat": true
+    },
+    "check_18_multipass_compiler_mxfp4_sdot_kda_2pass_and_nibble_factor_z3": {
+      "check_name": "check_18_multipass_compiler_mxfp4_sdot_kda_2pass_and_nibble_factor_z3",
+      "z3_status": "unsat",
+      "nibble_zero_point_factorization_unsat": true,
+      "mxfp4_doubled_e2m1_lut_sdot_unsat": true,
+      "kimi_k3_kda_2pass_eq_4pass_unsat": true,
+      "glu_linear_up_gauge_invariance_unsat": true
+    },
+    "check_19_udie_v33_kimi_k31_pro_attnres_debiased_kda_undo_and_mxfp4_dual_z3": {
+      "check_name": "check_19_udie_v33_kimi_k31_pro_attnres_debiased_kda_undo_and_mxfp4_dual_z3",
+      "z3_status": "unsat",
+      "kda_rank1_reversible_undo_unsat": true,
+      "attnres_cached_rms_denom_unsat": true,
+      "debiased_orthogonal_scale_optimality_unsat": true,
+      "mxfp4_dual_gate_up_pair_unsat": true
+    }
+  }
+}

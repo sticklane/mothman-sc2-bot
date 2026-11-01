@@ -1,0 +1,309 @@
+{
+  "correctness_finding_1_mixcolumns_plu_miter": {
+    "python_z3": {
+      "exact_slp_ancilla_count": 0,
+      "exact_slp_cx_count": 91,
+      "exact_slp_swap_count": 0,
+      "z3_exact_equivalence_status": "unsat",
+      "z3_exact_solve_ms": 35.7532,
+      "z3_single_wire_perm_bug_cex_hex": "0xefe333b7",
+      "z3_single_wire_perm_bug_solve_ms": 1.4459,
+      "z3_single_wire_perm_bug_status": "sat",
+      "z3_transposed_lu_order_bug_solve_ms": 1.3095,
+      "z3_transposed_lu_order_bug_status": "sat"
+    },
+    "racket_xag_z3": {
+      "exact_miter_ms": 0.2679249999991953,
+      "exact_miter_status": "unsat",
+      "lakefillq_slp_ancillas_per_col": 0,
+      "lakefillq_slp_cx_per_col": 91,
+      "lakefillq_slp_swaps_per_col": 0,
+      "missing_mixedword_perm_bug_cex": {
+        "active_input_wires": [
+          0
+        ],
+        "assign_mask": 1,
+        "hamming_weight": 1
+      },
+      "missing_mixedword_perm_bug_ms": 4.2294459999993705,
+      "missing_mixedword_perm_bug_status": "sat",
+      "single_wire_perm_bug_cex": {
+        "active_input_wires": [
+          1
+        ],
+        "assign_mask": 2,
+        "hamming_weight": 1
+      },
+      "single_wire_perm_bug_ms": 10.780972000000475,
+      "single_wire_perm_bug_status": "sat",
+      "sota_maximov_ancillas_per_col": 62,
+      "sota_maximov_oos_cx_per_col": 376,
+      "sota_quantum_nc_plu_cx_per_col": 277,
+      "transposed_lu_order_bug_cex": {
+        "active_input_wires": [
+          0
+        ],
+        "assign_mask": 1,
+        "hamming_weight": 1
+      },
+      "transposed_lu_order_bug_ms": 5.979732000000695,
+      "transposed_lu_order_bug_status": "sat"
+    }
+  },
+  "correctness_finding_2_spurious_keys_multiplicity": [
+    {
+      "cipher": "AES-128",
+      "key_bits": 128,
+      "pairs_analysis": [
+        {
+          "expected_spurious_keys": 1,
+          "log2_expected_spurious_keys": 0,
+          "r": 1,
+          "spurious_key_probability": 0.6321205588285577,
+          "unique_key_probability": 0.36787944117144233
+        },
+        {
+          "expected_spurious_keys": 2.938735877055719e-39,
+          "log2_expected_spurious_keys": -128,
+          "r": 2,
+          "spurious_key_probability": 0.0,
+          "unique_key_probability": 1.0
+        },
+        {
+          "expected_spurious_keys": 8.636168555094445e-78,
+          "log2_expected_spurious_keys": -256,
+          "r": 3,
+          "spurious_key_probability": 0.0,
+          "unique_key_probability": 1.0
+        }
+      ]
+    },
+    {
+      "cipher": "AES-192",
+      "key_bits": 192,
+      "pairs_analysis": [
+        {
+          "expected_spurious_keys": 1.8446744073709552e+19,
+          "log2_expected_spurious_keys": 64,
+          "r": 1,
+          "spurious_key_probability": 1.0,
+          "unique_key_probability": 0.0
+        },
+        {
+          "expected_spurious_keys": 5.421010862427522e-20,
+          "log2_expected_spurious_keys": -64,
+          "r": 2,
+          "spurious_key_probability": 0.0,
+          "unique_key_probability": 1.0
+        },
+        {
+          "expected_spurious_keys": 1.5930919111324523e-58,
+          "log2_expected_spurious_keys": -192,
+          "r": 3,
+          "spurious_key_probability": 0.0,
+          "unique_key_probability": 1.0
+        }
+      ]
+    },
+    {
+      "cipher": "AES-256",
+      "key_bits": 256,
+      "pairs_analysis": [
+        {
+          "expected_spurious_keys": 3.402823669209385e+38,
+          "log2_expected_spurious_keys": 128,
+          "r": 1,
+          "spurious_key_probability": 1.0,
+          "unique_key_probability": 0.0
+        },
+        {
+          "expected_spurious_keys": 1,
+          "log2_expected_spurious_keys": 0,
+          "r": 2,
+          "spurious_key_probability": 0.6321205588285577,
+          "unique_key_probability": 0.36787944117144233
+        },
+        {
+          "expected_spurious_keys": 2.938735877055719e-39,
+          "log2_expected_spurious_keys": -128,
+          "r": 3,
+          "spurious_key_probability": 0.0,
+          "unique_key_probability": 1.0
+        }
+      ]
+    }
+  ],
+  "correctness_finding_3_keccak_chi5_hazards_and_aer": {
+    "python_z3_and_qiskit_aer": {
+      "inputs_tested": 32,
+      "lakefillq_2ancilla_inplace_aer_exact_inputs": 32,
+      "lakefillq_2ancilla_inplace_max_error": 0.0,
+      "lakefillq_mx_aer_all_32_branches_max_error": 1.3877787807814457e-16,
+      "lakefillq_mx_aer_basis_exact_inputs": 32,
+      "lakefillq_mx_oop_forward_toffolis": 5,
+      "lakefillq_mx_oop_reverse_toffolis": 0,
+      "naive_sequential_aer_corrupted_inputs": 8,
+      "naive_sequential_aer_exact_inputs": 24,
+      "naive_sequential_corrupted_masks": [
+        4,
+        5,
+        8,
+        10,
+        12,
+        13,
+        24,
+        26
+      ]
+    },
+    "racket_xag_and_mbu_branches": {
+      "inputs_tested": 32,
+      "lakefillq_2backup_inplace_exact_inputs": 32,
+      "lakefillq_oop_mbu_exact_inputs": 32,
+      "lakefillq_oop_mbu_measurements": 5,
+      "lakefillq_oop_mbu_reverse_toffolis": 0,
+      "lakefillq_oop_mbu_toffolis": 5,
+      "naive_sequential_overwrite_corrupted_inputs": 8,
+      "naive_sequential_z3_cex": {
+        "active_input_wires": [
+          0,
+          2
+        ],
+        "assign_mask": 5,
+        "hamming_weight": 2
+      },
+      "naive_sequential_z3_status": "sat",
+      "reverc_forward_uncompute_corrupted_inputs": 20
+    }
+  },
+  "correctness_finding_4_tower_field_endianness": {
+    "python_256_bytes": {
+      "exact_tower_bytes_matched": 256,
+      "reversed_endian_basis_at_0x00_hex": "0x63",
+      "reversed_endian_nonzero_byte_mismatches": 240,
+      "reversed_endian_passes_0x00_vector": true,
+      "sbox_0x00_hex": "0x63",
+      "sbox_0x53_hex": "0xed"
+    },
+    "racket_xag_z3": {
+      "buggy_reversed_basis_at_0x00": 99,
+      "buggy_reversed_basis_nonzero_mismatches": 240,
+      "buggy_reversed_basis_passes_0x00_test": true,
+      "exact_tower_bytes_verified": 256,
+      "reversed_basis_z3_cex": {
+        "active_input_wires": [
+          0
+        ],
+        "assign_mask": 1,
+        "hamming_weight": 1
+      },
+      "reversed_basis_z3_ms": 8.317474000000402,
+      "reversed_basis_z3_status": "sat",
+      "tower_vs_bp34_z3_ms": 37.33481699999993,
+      "tower_vs_bp34_z3_status": "unsat"
+    }
+  },
+  "inspected_sota_repositories": [
+    {
+      "authors": "Jaques, Naehrig, Roetteler, Virdia (2020)",
+      "inspected_files": [
+        "aes/QAES.qs (QAES.InPlace.MixWord lines 713-1001: 277 CNOTs; QAES.InPlace.MixedWord lines 1016-1040: 21 REWIRED swaps; QAES.SmartWide.ForwardGroverOracle lines 601-653)",
+        "aes/MaximovMixColumn.qs (lines 33-200: 62 ancillas, 376 CNOTs/col)",
+        "aes/BoyarPeralta12.qs (lines 12-160: 34 LPANDWithAux, MSB-first indexing) & aes/LPS19.qs (lines 14-140)",
+        "lowmc/plu_decomposition.py (lines 1-74: Sage PLU + reverse cycle application)",
+        "parallel_grover.py (lines 90-104, 195-200: spurious_keys_probability(k, n, r, S))"
+      ],
+      "repository": "microsoft/grover-blocks (Quantum-NC / Eurocrypt 2020)"
+    },
+    {
+      "authors": "Huang & Sun (ASIACRYPT 2022), Zou et al. (ASIACRYPT 2020), Xiang et al. (EUROCRYPT 2020)",
+      "inspected_files": [
+        "T-aes/QAES.qs (lines 142-145: QAES.Widest.Round calling InPlace.MixColumn without MixedColumn wire relabeling)",
+        "91-CX s-XOR straight-line MixColumns & 2-step 4-byte shifted-column Grover cone pruning"
+      ],
+      "repository": "lzq192921/T-typeAES & TCHES/ASIACRYPT Quantum AES Literature"
+    },
+    {
+      "authors": "Parent, Roetteler, Svore (2017)",
+      "inspected_files": [
+        "reverc/Examples.fs (keccakf lines 506-522: non-involution forward-formula uncompute hazard; keccakfInPlace lines 603-641: `0..5` 6-iteration stride-3 double-XOR bug & commented theta inverse; SHA2 lines 294 & 348: `e && f && g` bug)"
+      ],
+      "repository": "msr-quarc/ReVerC"
+    },
+    {
+      "authors": "Amy et al. (SAC 2016), Jang et al. (IEEE TC 2025), Preston (2022)",
+      "inspected_files": [
+        "benchmarks/gf2^8_mult.qasm",
+        "SHA-3/AND_Implementation/Shallow_SHA-3.py (lines 371-379: `phi` zero-gate Python list-index permutation for rho/pi)",
+        "FIPS 205 SLH-DSA-SHAKE-128s tweakable hash SHAKE256(PK.seed || ADRS || M) constant-lane sponge layout"
+      ],
+      "repository": "meamy/feynman & starj1023/SHA-2-and-SHA-3 & FIPS 205 (SLH-DSA / SPHINCS+-128s)"
+    }
+  ],
+  "optimization_finding_1_zero_gate_wire_permutations": {
+    "bijection_sizes_verified": [
+      128,
+      32,
+      1600
+    ],
+    "keccak_rho_pi_1600_physical_gates": 0,
+    "mixcolumns_plu_p_32_physical_gates": 0,
+    "shiftrows_128_physical_gates": 0,
+    "within_apply_retargeted_cx": "(cx 0 40)",
+    "within_apply_wmap_restored": true
+  },
+  "optimization_finding_2_aes_cone_and_sphincs_constant_lanes": {
+    "sboxes_baseline_aes128_r2_shared_key": 360,
+    "sboxes_optimized_aes128_r2_shared_key": 336,
+    "sboxes_saved": 24,
+    "second_block_spurious_key_filter_factor": 2.3283064365386963e-10,
+    "sphincs_shake256_initial_step_reduction_percent": 41.5625,
+    "sphincs_shake256_initial_step_tempands_constant_lane_bound": 960,
+    "sphincs_shake256_initial_step_tempands_unspecialized": 1600,
+    "sphincs_shake256_initial_step_tempands_xag_specialized": 935,
+    "target_ciphertext_bytes": [
+      0,
+      7,
+      10,
+      13
+    ],
+    "tempand_22and_tower_baseline": 7920,
+    "tempand_22and_tower_optimized": 7392,
+    "tempand_22and_tower_saved": 528,
+    "tempand_34and_bp12_baseline": 12240,
+    "tempand_34and_bp12_optimized": 11424,
+    "tempand_34and_bp12_saved": 816,
+    "z3_aes_2step_4byte_cone_equivalence": "unsat"
+  },
+  "status": "PASS",
+  "toolchain_and_formal_verification": {
+    "axiom_count": 0,
+    "lean_compile_ms": 928.68,
+    "lean_exit_code": 0,
+    "lean_proof_file": "proofs/sota_symmetric_hash_research_correctness_and_opt_proofs.lean",
+    "lean_theorem_count": 19,
+    "lean_theorem_names": [
+      "evalPhysAppend",
+      "beq_inj_eq",
+      "relabel_emits_zero_phys_gates",
+      "compileZeroSwap_cx_sound",
+      "compileZeroSwap_ccx_sound",
+      "compileZeroSwap_preserves_inj",
+      "compileZeroSwap_sound",
+      "within_apply_wire_perm_restores",
+      "plu_missing_perm_unsound",
+      "plu_transposed_order_unsound",
+      "chi5_seq_overwrite_disagrees",
+      "reverc_chi5_not_involution",
+      "chi5_deg3_left_inverse",
+      "chi5_two_ancilla_inplace_exact",
+      "keccak_chi_mbu_phase_cancels",
+      "tower_zero_blind_spot_all_linear_maps",
+      "bit_reverse_fixes_zero_but_corrupts_nonzero",
+      "aes_shifted_col0_cone_tempand_savings",
+      "sphincs_chi_constant_lane_eliminates_two_ands_per_row"
+    ],
+    "racket_module": "compiler/lakefillq-sota-symmetric-hash-audit.rkt",
+    "racket_runtime_ms": 6124.92,
+    "sorry_count": 0
+  }
+}

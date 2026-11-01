@@ -1,0 +1,5 @@
+(library
+ (name okasaki_qds)
+ (public_name okasaki_quantum_data_structures)
+ (modules circuit simplify today_hardware lib okasaki_qds))
+

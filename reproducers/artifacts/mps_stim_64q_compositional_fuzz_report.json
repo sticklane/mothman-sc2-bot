@@ -1,0 +1,456 @@
+{
+  "phase": "Phase 35 Track 3 \u2014 Scaling the Differential Fuzzer Beyond the 12Q Density-Matrix Cliff (20Q-64Q Hybrid MPS + Stim + PyZX Compositional Fuzzer)",
+  "simulators_used": {
+    "qiskit_aer": "0.18.2 (AerSimulator matrix_product_state at 20Q, 28Q, 36Q, 48Q)",
+    "stim": "1.16.0 (TableauSimulator + noisy Circuit.compile_sampler at 24Q, 32Q, 48Q, 64Q)",
+    "pyzx": "0.10.7 (full_reduce + tcount at 20Q, 32Q, 48Q)"
+  },
+  "total_wall_time_ms": 687.88,
+  "campaign1_mps_20q_to_48q_compositional_within_apply": {
+    "campaign_id": "Campaign1_20Q_To_48Q_MPS_Compositional_Within_Apply_Fuzzer",
+    "simulator": "qiskit_aer.AerSimulator(method='matrix_product_state')",
+    "widths_tested": [
+      20,
+      28,
+      36,
+      48
+    ],
+    "nesting_depths_tested": [
+      3,
+      4,
+      5
+    ],
+    "well_typed_trials": 12,
+    "well_typed_bit_exact_matches": 12,
+    "well_typed_zero_ancilla_leak_count": 12,
+    "max_well_typed_ancilla_leak_prob": 0.0,
+    "injected_violation_trials": 12,
+    "violations_caught_by_qsub_typechecker": 12,
+    "violations_caught_by_mps_simulation": 12,
+    "avg_mps_runtime_per_circuit_ms": 9.89,
+    "total_mps_campaign_wall_ms": 236.42,
+    "density_matrix_48q_memory_bytes": 1.2676506002282294e+30,
+    "mps_48q_bond_dim_16_memory_bytes": 196608,
+    "well_typed_sweep_records": [
+      {
+        "n_qubits": 20,
+        "nesting_depth": 3,
+        "qds_family": "QBraunTree",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 17592186044416.0,
+        "mps_bond_dim_4_bytes": 5120
+      },
+      {
+        "n_qubits": 20,
+        "nesting_depth": 4,
+        "qds_family": "CritBit",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 17592186044416.0,
+        "mps_bond_dim_4_bytes": 5120
+      },
+      {
+        "n_qubits": 20,
+        "nesting_depth": 5,
+        "qds_family": "SkewBinary",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 17592186044416.0,
+        "mps_bond_dim_4_bytes": 5120
+      },
+      {
+        "n_qubits": 28,
+        "nesting_depth": 3,
+        "qds_family": "CritBit",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 1.152921504606847e+18,
+        "mps_bond_dim_4_bytes": 7168
+      },
+      {
+        "n_qubits": 28,
+        "nesting_depth": 4,
+        "qds_family": "SkewBinary",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 1.152921504606847e+18,
+        "mps_bond_dim_4_bytes": 7168
+      },
+      {
+        "n_qubits": 28,
+        "nesting_depth": 5,
+        "qds_family": "QBraunTree",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 1.152921504606847e+18,
+        "mps_bond_dim_4_bytes": 7168
+      },
+      {
+        "n_qubits": 36,
+        "nesting_depth": 3,
+        "qds_family": "SkewBinary",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 7.555786372591432e+22,
+        "mps_bond_dim_4_bytes": 9216
+      },
+      {
+        "n_qubits": 36,
+        "nesting_depth": 4,
+        "qds_family": "QBraunTree",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 7.555786372591432e+22,
+        "mps_bond_dim_4_bytes": 9216
+      },
+      {
+        "n_qubits": 36,
+        "nesting_depth": 5,
+        "qds_family": "CritBit",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 7.555786372591432e+22,
+        "mps_bond_dim_4_bytes": 9216
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 3,
+        "qds_family": "QBraunTree",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 1.2676506002282294e+30,
+        "mps_bond_dim_4_bytes": 12288
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 4,
+        "qds_family": "CritBit",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 1.2676506002282294e+30,
+        "mps_bond_dim_4_bytes": 12288
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 5,
+        "qds_family": "SkewBinary",
+        "qsub_well_typed": true,
+        "data_bit_accuracy": 1.0,
+        "ancilla_leak_prob": 0.0,
+        "density_matrix_bytes_4_pow_n": 1.2676506002282294e+30,
+        "mps_bond_dim_4_bytes": 12288
+      }
+    ],
+    "injected_violation_records": [
+      {
+        "n_qubits": 20,
+        "nesting_depth": 4,
+        "injected_violation": "RULE1_UNCOMPUTE_LEAK_DEPTH3",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": false,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 20,
+        "nesting_depth": 4,
+        "injected_violation": "RULE2_NONZERO_ANCILLA_ALLOC",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 20,
+        "nesting_depth": 4,
+        "injected_violation": "RULE3_MISSING_COND_Z_AFTER_MX",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": true,
+        "rule3_ok": false,
+        "mps_ancilla_leak_prob": 0.0,
+        "mps_phase_flip_error_prob": 1.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 28,
+        "nesting_depth": 4,
+        "injected_violation": "RULE1_UNCOMPUTE_LEAK_DEPTH3",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": false,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 28,
+        "nesting_depth": 4,
+        "injected_violation": "RULE2_NONZERO_ANCILLA_ALLOC",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 28,
+        "nesting_depth": 4,
+        "injected_violation": "RULE3_MISSING_COND_Z_AFTER_MX",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": true,
+        "rule3_ok": false,
+        "mps_ancilla_leak_prob": 0.0,
+        "mps_phase_flip_error_prob": 1.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 36,
+        "nesting_depth": 4,
+        "injected_violation": "RULE1_UNCOMPUTE_LEAK_DEPTH3",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": false,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 36,
+        "nesting_depth": 4,
+        "injected_violation": "RULE2_NONZERO_ANCILLA_ALLOC",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 36,
+        "nesting_depth": 4,
+        "injected_violation": "RULE3_MISSING_COND_Z_AFTER_MX",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": true,
+        "rule3_ok": false,
+        "mps_ancilla_leak_prob": 0.0,
+        "mps_phase_flip_error_prob": 1.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 4,
+        "injected_violation": "RULE1_UNCOMPUTE_LEAK_DEPTH3",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": false,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 4,
+        "injected_violation": "RULE2_NONZERO_ANCILLA_ALLOC",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": false,
+        "rule3_ok": true,
+        "mps_ancilla_leak_prob": 1.0,
+        "mps_phase_flip_error_prob": 0.0,
+        "caught_by_both_typecheck_and_mps": true
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 4,
+        "injected_violation": "RULE3_MISSING_COND_Z_AFTER_MX",
+        "qsub_typecheck_rejected": true,
+        "rule1_ok": true,
+        "rule2_ok": true,
+        "rule3_ok": false,
+        "mps_ancilla_leak_prob": 0.0,
+        "mps_phase_flip_error_prob": 1.0,
+        "caught_by_both_typecheck_and_mps": true
+      }
+    ]
+  },
+  "campaign2_stim_24q_to_64q_noisy_pauli_frame_zipper_cut": {
+    "campaign_id": "Campaign2_24Q_To_64Q_Stim_Noisy_Pauli_Frame_And_Zipper_Cut_Fuzzer",
+    "simulator": "stim 1.16.0 (TableauSimulator + noisy Circuit.compile_sampler)",
+    "widths_tested": [
+      24,
+      32,
+      48,
+      64
+    ],
+    "trajectories_per_circuit": 4096,
+    "monolithic_programs_crossing_bqp_cliff": 4,
+    "zipper_cut_partitioned_programs_below_ln2": 4,
+    "wall_time_ms": 140.65,
+    "sweep_records": [
+      {
+        "n_qubits": 24,
+        "depth": 20,
+        "noiseless_tableau_all_zero_verified": true,
+        "monolithic_active_volume": 1.048,
+        "monolithic_exp_neg_v_pred": 0.3506,
+        "monolithic_stim_f_phys": 0.3511,
+        "monolithic_crosses_bqp_cliff_0_50": true,
+        "zipper_cut_partitions_K": 4,
+        "per_module_qubits": 6,
+        "per_module_active_volume": 0.0924,
+        "per_module_below_ln2_0_693": true,
+        "per_module_exp_neg_v_pred": 0.9117,
+        "per_module_stim_f_phys": 0.9106,
+        "per_module_passes_bqp_0_50": true
+      },
+      {
+        "n_qubits": 32,
+        "depth": 20,
+        "noiseless_tableau_all_zero_verified": true,
+        "monolithic_active_volume": 1.4053,
+        "monolithic_exp_neg_v_pred": 0.2453,
+        "monolithic_stim_f_phys": 0.2449,
+        "monolithic_crosses_bqp_cliff_0_50": true,
+        "zipper_cut_partitions_K": 4,
+        "per_module_qubits": 8,
+        "per_module_active_volume": 0.1248,
+        "per_module_below_ln2_0_693": true,
+        "per_module_exp_neg_v_pred": 0.8827,
+        "per_module_stim_f_phys": 0.8813,
+        "per_module_passes_bqp_0_50": true
+      },
+      {
+        "n_qubits": 48,
+        "depth": 20,
+        "noiseless_tableau_all_zero_verified": true,
+        "monolithic_active_volume": 2.12,
+        "monolithic_exp_neg_v_pred": 0.12,
+        "monolithic_stim_f_phys": 0.1169,
+        "monolithic_crosses_bqp_cliff_0_50": true,
+        "zipper_cut_partitions_K": 4,
+        "per_module_qubits": 12,
+        "per_module_active_volume": 0.1896,
+        "per_module_below_ln2_0_693": true,
+        "per_module_exp_neg_v_pred": 0.8273,
+        "per_module_stim_f_phys": 0.8264,
+        "per_module_passes_bqp_0_50": true
+      },
+      {
+        "n_qubits": 64,
+        "depth": 20,
+        "noiseless_tableau_all_zero_verified": true,
+        "monolithic_active_volume": 2.8347,
+        "monolithic_exp_neg_v_pred": 0.0587,
+        "monolithic_stim_f_phys": 0.0601,
+        "monolithic_crosses_bqp_cliff_0_50": true,
+        "zipper_cut_partitions_K": 8,
+        "per_module_qubits": 8,
+        "per_module_active_volume": 0.0645,
+        "per_module_below_ln2_0_693": true,
+        "per_module_exp_neg_v_pred": 0.9375,
+        "per_module_stim_f_phys": 0.9409,
+        "per_module_passes_bqp_0_50": true
+      }
+    ]
+  },
+  "campaign3_pyzx_20q_to_48q_compositional_t_cancellation": {
+    "campaign_id": "Campaign3_20Q_To_48Q_PyZX_Compositional_T_Cancellation_Fuzzer",
+    "simulator": "pyzx 0.10.7 (full_reduce + tcount)",
+    "widths_tested": [
+      20,
+      32,
+      48
+    ],
+    "total_random_nested_circuits_fuzzed": 30,
+    "well_typed_complete_t_cancellation_count": 30,
+    "rule1_leak_uncancelled_t_detected_count": 30,
+    "total_t_gates_before_well_typed": 672,
+    "total_t_gates_after_well_typed_full_reduce": 0,
+    "total_t_gates_after_rule1_leak_full_reduce": 87,
+    "wall_time_ms": 298.15,
+    "sample_trial_records": [
+      {
+        "n_qubits": 20,
+        "nesting_depth": 3,
+        "seed": 20265700,
+        "tcount_before_well_typed": 18,
+        "tcount_after_well_typed_full_reduce": 0,
+        "tcount_before_rule1_leak": 15,
+        "tcount_after_rule1_leak_full_reduce": 3
+      },
+      {
+        "n_qubits": 20,
+        "nesting_depth": 4,
+        "seed": 20265701,
+        "tcount_before_well_typed": 24,
+        "tcount_after_well_typed_full_reduce": 0,
+        "tcount_before_rule1_leak": 21,
+        "tcount_after_rule1_leak_full_reduce": 3
+      },
+      {
+        "n_qubits": 32,
+        "nesting_depth": 3,
+        "seed": 20266900,
+        "tcount_before_well_typed": 18,
+        "tcount_after_well_typed_full_reduce": 0,
+        "tcount_before_rule1_leak": 15,
+        "tcount_after_rule1_leak_full_reduce": 3
+      },
+      {
+        "n_qubits": 32,
+        "nesting_depth": 4,
+        "seed": 20266901,
+        "tcount_before_well_typed": 24,
+        "tcount_after_well_typed_full_reduce": 0,
+        "tcount_before_rule1_leak": 21,
+        "tcount_after_rule1_leak_full_reduce": 3
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 3,
+        "seed": 20268500,
+        "tcount_before_well_typed": 18,
+        "tcount_after_well_typed_full_reduce": 0,
+        "tcount_before_rule1_leak": 15,
+        "tcount_after_rule1_leak_full_reduce": 3
+      },
+      {
+        "n_qubits": 48,
+        "nesting_depth": 4,
+        "seed": 20268501,
+        "tcount_before_well_typed": 24,
+        "tcount_after_well_typed_full_reduce": 0,
+        "tcount_before_rule1_leak": 21,
+        "tcount_after_rule1_leak_full_reduce": 3
+      }
+    ]
+  },
+  "all_campaigns_passed": true
+}

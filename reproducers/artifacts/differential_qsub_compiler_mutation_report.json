@@ -1,0 +1,289 @@
+{
+  "phase": "Phase 36 Track 4 (Part 56, Suite 149)",
+  "title": "Differential AerSimulator + Stim + PyZX Compiler Equivalence Oracle & 12-Mutant Soundness Kill-Rate Fuzzer",
+  "simulators": {
+    "qiskit_aer": "0.18.2 (AerSimulator density_matrix + matrix_product_state + T1/T2/ZZ NoiseModel)",
+    "stim": "1.16.0 (TableauSimulator + DetectorErrorModel + shortest_graphlike_error)",
+    "pymatching": "2.4.0 (MWPM Monte Carlo decoder)",
+    "pyzx": "0.10.7 (full_reduce + extract_circuit + compare_tensors)"
+  },
+  "canonical_compiler_differential_oracle": {
+    "total_programs_fuzzed": 500,
+    "total_programs_passed": 500,
+    "pass_rate_pct": 100.0,
+    "cohort_4q_12q_count": 50,
+    "cohort_16q_32q_count": 450,
+    "construct_coverage_counts": {
+      "within-apply": 100,
+      "erase-by": 100,
+      "canon-quotient": 100,
+      "match-part": 100,
+      "mid-meas-x-cond-z": 100
+    },
+    "repair_coverage_counts": {
+      "R1": 100,
+      "R2": 100,
+      "R3": 100,
+      "R4": 100,
+      "R5": 100
+    },
+    "way1_pyzx_r1_tensor_equivalence": {
+      "programs_tested": 50,
+      "pyzx_compare_tensors_passed": 50,
+      "pass_rate_pct": 100.0,
+      "total_2q_gates_before_r1": 368,
+      "total_2q_gates_after_r1": 215
+    },
+    "way2_mbu_cond_z_xy4_density_matrix_equivalence": {
+      "programs_tested": 50,
+      "dynamic_mbu_density_matrix_tested": 22,
+      "noiseless_exact_fidelity_passed": 50,
+      "noiseless_trace_fidelity": 1.0,
+      "t2_echoed_circuits_tested": 5,
+      "min_t2_echoed_trace_fidelity": 0.997958,
+      "mean_t2_echoed_trace_fidelity": 0.998363,
+      "t2_fidelity_exceeds_0_99": true
+    },
+    "way3_r3_bridge_swap_and_r4_2color_routing_equivalence": {
+      "cohort_4q_12q_aer_dm_passed": 50,
+      "cohort_16q_32q_stim_stabilizer_passed": 450,
+      "cohort_16q_32q_stim_vs_aer_mps_passed": 450,
+      "total_500_routing_agreement_pct": 100.0
+    },
+    "oracle_wall_time_ms": 4808.79
+  },
+  "compiler_mutation_testing_m1_to_m12": {
+    "total_mutants_injected": 12,
+    "mutants_killed": 12,
+    "mutant_kill_rate_pct": 100.0,
+    "all_12_mutants_killed": true,
+    "mutation_suite_wall_time_ms": 307.23,
+    "mutant_reports": [
+      {
+        "mutant_id": "M1",
+        "description": "Omit cond-Z phase fixup on m_x = 1 branch (U4 violation)",
+        "killed": true,
+        "violated_law": "U4 (Hadamard-Dual Phase-Taint Erasure Phi_X = 0)",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix)",
+          "AerSimulator(MPS)",
+          "Stim"
+        ],
+        "minimal_counterexample_circuit": "3Q: H(q0); X(q1); CCX(q0,q1,anc); H(anc); M(anc)->m_x; [OMITTED if(m_x) CZ(q0,q1)]; Reset(anc)",
+        "simulator_witness": {
+          "canonical_trace_fidelity": 1.0,
+          "mutant_trace_fidelity": 0.480469,
+          "mutant_reduced_purity_tr_rho_sq": 0.500763
+        }
+      },
+      {
+        "mutant_id": "M2",
+        "description": "Measure ancilla in Z-basis instead of X-basis during Gidney uncomputation (U1/U4 collapse bug)",
+        "killed": true,
+        "violated_law": "U1/U4 (Z-Basis Readout Projective Collapse of |a AND b>)",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix)"
+        ],
+        "minimal_counterexample_circuit": "3Q: H(q0); H(q1); CCX(q0,q1,anc); M_Z(anc) [instead of M_X]; Cond-CZ(q0,q1); Reset(anc)",
+        "simulator_witness": {
+          "canonical_trace_fidelity": 1.0,
+          "mutant_trace_fidelity": 0.621582,
+          "mutant_reduced_purity_tr_rho_sq": 0.618258
+        }
+      },
+      {
+        "mutant_id": "M3",
+        "description": "Invert within-apply compute block in forward order (C ; A ; C) instead of reverse (C ; A ; C\u2020)",
+        "killed": true,
+        "violated_law": "Rule 2 / Theorem 56A (Non-Abelian Group Inverse (AB)^-1 = B^-1 A^-1 != A^-1 B^-1)",
+        "caught_by_simulators": [
+          "PyZX(compare_tensors)",
+          "AerSimulator(density_matrix)",
+          "Stim(TableauSimulator)"
+        ],
+        "minimal_counterexample_circuit": "3Q: X(q0); within { CX(q0,q1); CX(q1,q2) } apply { I } -> forward replay CX(q0,q1); CX(q1,q2) leaves |101> != |100>",
+        "simulator_witness": {
+          "abelian_xor_test_masked_bug": true,
+          "pyzx_compare_tensors_equal": false,
+          "aer_basis_100_trace_fidelity": 0.0,
+          "stim_ancilla_q2_leaked_bit": 1
+        }
+      },
+      {
+        "mutant_id": "M4",
+        "description": "Off-by-one wire index in 4-CX bridge decomposition on Heavy-Hex (R3 routing bug)",
+        "killed": true,
+        "violated_law": "R3 / Theorem 56C (4-CX Bridge Commutator [CX_01, CX_12] = CX_02)",
+        "caught_by_simulators": [
+          "PyZX(compare_tensors)",
+          "AerSimulator(density_matrix)",
+          "Stim(TableauSimulator)"
+        ],
+        "minimal_counterexample_circuit": "3Q Heavy-Hex 0-1-2: CX(0,1); CX(1,2); CX(0,1); CX(0,1) [off-by-one wire on 4th CX]",
+        "simulator_witness": {
+          "pyzx_compare_tensors_equal": false,
+          "aer_superposition_trace_fidelity": 0.25,
+          "stim_010_output_bits": [
+            0,
+            1,
+            1
+          ],
+          "expected_010_output_bits": [
+            0,
+            1,
+            0
+          ]
+        }
+      },
+      {
+        "mutant_id": "M5",
+        "description": "Allow canon-quotient bypass before Hadamard coin (U2 quotient-leakage bug)",
+        "killed": true,
+        "violated_law": "Rule 1 / Law U2 (Canonical Quotient Erasure Before Hadamard Interference)",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix)",
+          "PyZX(compare_tensors)"
+        ],
+        "minimal_counterexample_circuit": "2Q: H(coin); CX(coin, q_quot); [BYPASSED canon-quotient CX(coin, q_quot)]; H(coin)",
+        "simulator_witness": {
+          "pyzx_compare_tensors_equal": false,
+          "canonical_coin_trace_fidelity": 1.0,
+          "mutant_coin_trace_fidelity": 0.5,
+          "mutant_coin_purity_tr_rho_sq": 0.5
+        }
+      },
+      {
+        "mutant_id": "M6",
+        "description": "Missing else/remainder branch in match-part (U3 non-exhaustive sub-unitary bug)",
+        "killed": true,
+        "violated_law": "Rule 1 / Law U3 (Exhaustive Reversible Partition Coverage in match-part)",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix)",
+          "PyZX(compare_tensors)"
+        ],
+        "minimal_counterexample_circuit": "3Q: H(s0); H(s1); match-part(s0,s1) { 00=>X(t), 01=>X(t), 10=>X(t), [MISSING else 11] }",
+        "simulator_witness": {
+          "pyzx_compare_tensors_equal": false,
+          "canonical_trace_fidelity": 1.0,
+          "mutant_trace_fidelity_uniform": 0.5625
+        }
+      },
+      {
+        "mutant_id": "M7",
+        "description": "Under-count coupling distance by 1 in Phi1/P3 (dist - 2 instead of dist - 1)",
+        "killed": true,
+        "violated_law": "Phi1 / P3 (Planar Coupling SWAP Routing Cost Bound 6*(d - 1) <= saved)",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix + NoiseModel)",
+          "QSub_phys Cost Oracle"
+        ],
+        "minimal_counterexample_circuit": "3Q path 0-1-2 (d=2, saved=1): M7 predicts 6*(2-2)=0 extra CXs, emitting 2 SWAPs (6 noisy CXs)/round",
+        "simulator_witness": {
+          "predicted_extra_cx_m7": 0,
+          "actual_extra_cx_per_dist2_op": 6,
+          "canonical_r3_noisy_fidelity": 0.994,
+          "mutant_m7_noisy_fidelity": 0.863554
+        }
+      },
+      {
+        "mutant_id": "M8",
+        "description": "Check vertex disjointness instead of edge-neighborhood disjointness in Phi2/P4 (shared coupler ZZ crosstalk)",
+        "killed": true,
+        "violated_law": "Phi2 / P4 / Theorem 56D (Edge-Neighborhood Coupler Disjointness dist_G >= 2)",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix + ZZ Crosstalk)"
+        ],
+        "minimal_counterexample_circuit": "4Q path 0-1-2-3 (L=5 layers): par(CZ(0,1), CZ(2,3)) shares middle coupler (1,2) -> RZZ crosstalk",
+        "simulator_witness": {
+          "vertex_disjoint": true,
+          "edge_neighborhood_disjoint": false,
+          "canonical_r4_2color_fidelity": 1.0,
+          "mutant_m8_crosstalk_fidelity": 0.028889
+        }
+      },
+      {
+        "mutant_id": "M9",
+        "description": "Omit XY4 echo X pulse parity restoration (odd 3 pulses flips spectator bit)",
+        "killed": true,
+        "violated_law": "R2 / Theorem 56B (XY4 4-Pulse Even Bit-Flip Parity Restoration)",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix)",
+          "Stim(TableauSimulator)",
+          "PyZX(compare_tensors)"
+        ],
+        "minimal_counterexample_circuit": "1Q spectator wire |0>: X(q0); Y(q0); X(q0) [3 pulses instead of 4] -> flips |0> to -i|1>",
+        "simulator_witness": {
+          "pyzx_compare_tensors_equal": false,
+          "canonical_4pulse_trace_fidelity": 1.0,
+          "mutant_3pulse_trace_fidelity": 0.0,
+          "stim_spectator_output_bit": 1
+        }
+      },
+      {
+        "mutant_id": "M10",
+        "description": "Linearize stabilizer CNOT order into parallel-to-logical-axis Z-hook (R5 hook-alignment regression)",
+        "killed": true,
+        "violated_law": "R5 / P5 (Hook-Orthogonal Zig-Zag Stabilizer CNOT Schedule d_eff == d)",
+        "caught_by_simulators": [
+          "Stim(shortest_graphlike_error)",
+          "PyMatching(MWPM 4096-shot Monte Carlo)"
+        ],
+        "minimal_counterexample_circuit": "9Q (d=5 data + 4 syndrome ancillas): linearized hook-aligned CNOT order halves d_eff 5 -> 3",
+        "simulator_witness": {
+          "canonical_graphlike_distance": 5,
+          "mutant_m10_graphlike_distance": 3,
+          "canonical_mwpm_ler": 0.00146,
+          "mutant_m10_mwpm_ler": 0.01489
+        }
+      },
+      {
+        "mutant_id": "M11",
+        "description": "Truncate dyadic Rz rotation to 3-bit coarse angle on BCH(7,4,3) (R5 precision regression)",
+        "killed": true,
+        "violated_law": "R5 / P5 (Exact Dyadic Z[1/2^k] Phase Promotion on BCH(7,4,3))",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix)",
+          "PyZX(compare_tensors)"
+        ],
+        "minimal_counterexample_circuit": "7Q BCH(7,4,3) block: 4x Rz(pi/2^4) truncated to 0 rad under 3-bit coarse angle quantization",
+        "simulator_witness": {
+          "pyzx_compare_tensors_equal": false,
+          "exact_angle_rad": 0.19635,
+          "mutant_3bit_truncated_angle_rad": 0.0,
+          "canonical_trace_fidelity": 1.0,
+          "mutant_m11_trace_fidelity": 0.330077
+        }
+      },
+      {
+        "mutant_id": "M12",
+        "description": "Forget to reset active volume only when classical reset/measurement actually occurs (fake checkpoint bug)",
+        "killed": true,
+        "violated_law": "P1 / R1 / Theorem 56E (Physical Checkpoint Requires Reset/Measurement: v1 + v2 vs max(v1, v2))",
+        "caught_by_simulators": [
+          "AerSimulator(density_matrix + T1/T2 Thermal Relaxation NoiseModel)"
+        ],
+        "minimal_counterexample_circuit": "6Q, D=48 coherent within-apply with fake_checkpoint(no reset): V_actual=840 > 693 collapses F_phys < 0.50",
+        "simulator_witness": {
+          "fake_checkpoint_reported_volume_milli": 420,
+          "actual_coherent_accumulated_volume_milli": 840,
+          "bqp_volume_cliff_milli": 693,
+          "canonical_r1_physical_fidelity": 0.953929,
+          "mutant_m12_physical_fidelity": 0.492594
+        }
+      }
+    ]
+  },
+  "lean4_formal_proof_module": "proofs/differential_compiler_mutation_soundness_proofs.lean",
+  "theorems_mechanized": [
+    "Theorem 56A: non_abelian_within_apply_reverse_adjoint_vs_m3_forward_bug",
+    "Theorem 56B: xy4_dynamical_decoupling_pulse_parity_vs_m9_odd_flip_soundness",
+    "Theorem 56C: four_cx_bridge_exact_routing_over_bitvec3_vs_m4_off_by_one",
+    "Theorem 56D: edge_neighborhood_vs_vertex_disjointness_m8_separation",
+    "Theorem 56E: physical_checkpoint_requires_reset_vs_m12_fake_checkpoint",
+    "Theorem 56F: complete_12_of_12_compiler_mutant_kill_rate_soundness",
+    "Theorem 56G: phase36_differential_compiler_mutation_master_closure"
+  ],
+  "total_wall_time_ms": 5122.47,
+  "under_7s_budget": true,
+  "all_checks_passed": true
+}

@@ -1,0 +1,147 @@
+{
+  "track": "Wave 16 \u2014 Adversarial Red-Team Catch Audit & State-of-the-Art Comparison",
+  "overall_status": "PASS",
+  "total_elapsed_ms": 18137.52,
+  "lean4_verification": {
+    "status": "PASS",
+    "lean_file": "proofs/adversarial_catch_audit_and_sota_comparison_proofs.lean",
+    "return_code": 0,
+    "warnings": 0,
+    "elapsed_ms": 973.71
+  },
+  "suite1_symbolic_z3_catch_proofs": {
+    "status": "PASS",
+    "elapsed_ms": 68.87,
+    "catch1_clifford_cz_degree3_barrier_z3": "UNSAT (no quadratic CZ polynomial matches degree-3 CCX cascade)",
+    "catch1_pebble_multiplier_269x_vs_false_169x_z3": "UNSAT (true multiplier is 2.5375x-2.6875x, refuting 1.6875x)",
+    "catch2_litinski_fig11_and_perimeter_bus_z3": "UNSAT (Fig. 11 adds +1027 Q = +50%; dense perimeter bus = +117 Q; d=27->29 adds +15.36% phys Q)",
+    "catch3_binary_divsteps_collision_without_history_z3": "SAT (collision witness found: binary divsteps is non-injective without branch history)",
+    "catch3_ecc256_1168q_and_22_63m_toffolis_z3": "UNSAT (fixes +336 Q missing reg/pebbles in 832 Q and 16x single-slice conflation in 1.48M)",
+    "catch4_sota_and_nonconstructive_bounds_z3": "UNSAT (Gidney-Ekera 1971 Q and Chevignard 1050 Q beat 2178 Q on RSA-2048; Mitigation 5 is 0.034% of ECC Toffolis)"
+  },
+  "suite2_degree_barrier_statevector_simulation": {
+    "status": "PASS",
+    "elapsed_ms": 5.06,
+    "degree2_single_and_clifford_cz_fidelity": 0.9999999999999996,
+    "degree3_cascade_max_clifford_cz_fidelity_across_all_128_frames": 0.5624999999999997,
+    "degree3_min_statevector_infidelity_without_toffoli_recompute": 0.4375,
+    "toffoli_recompute_required_for_macro_pebble_windows": true
+  },
+  "suite3_compiled_c_exhaustive_divsteps_history_audit": {
+    "status": "PASS",
+    "elapsed_ms": 17088.59,
+    "jump16_states_tested": 65536,
+    "exact_reversals_with_16bit_branch_history_pebble": 65536,
+    "preimage_collisions_without_branch_history_pebble": 32768
+  },
+  "sota_and_nonconstructive_comparison_table": [
+    {
+      "problem": "ECC-256 (secp256k1 / P-256)",
+      "work": "Roetteler, Naehrig, Svore, Lauter [2017, Asiacrypt]",
+      "type": "Constructive",
+      "algorithmic_qubits": 2124,
+      "planar_logical_qubits": 2655,
+      "total_toffolis": "180.0M (~1.26B T-gates)",
+      "notes": "Kaliski binary GCD with full 512 Q history bitvector + Montgomery multiplier"
+    },
+    {
+      "problem": "ECC-256 (secp256k1 / P-256)",
+      "work": "Haner, Jaques, Naehrig, Roetteler, Soeken [2020, PQCrypto] (Low-Width)",
+      "type": "Constructive",
+      "algorithmic_qubits": 1098,
+      "planar_logical_qubits": 1373,
+      "total_toffolis": "135.0M (~540M T-gates)",
+      "notes": "Pebbles Kaliski 1-bit GCD history + Karlsson in-place multiplier (5n + O(sqrt(n)))"
+    },
+    {
+      "problem": "ECC-256 (secp256k1 / P-256)",
+      "work": "Haner et al. [2020, PQCrypto] (Low-T / Windowed)",
+      "type": "Constructive",
+      "algorithmic_qubits": 2871,
+      "planar_logical_qubits": 3589,
+      "total_toffolis": "38.0M (~152M T-gates)",
+      "notes": "Windowed point addition + Karatsuba multiplication"
+    },
+    {
+      "problem": "ECC-256 (secp256k1 / P-256)",
+      "work": "Litinski [2023, ePrint 2023/996] (Projective Windowed Lookup)",
+      "type": "Constructive",
+      "algorithmic_qubits": 2100,
+      "planar_logical_qubits": 2625,
+      "total_toffolis": "22.4M",
+      "notes": "Avoids online Euclidean inversion via projective precomputed lookup tables"
+    },
+    {
+      "problem": "ECC-256 (secp256k1)",
+      "work": "Ours (Wave 15 Unaudited Claim \u2014 WITH BUGS)",
+      "type": "Audited-Buggy",
+      "algorithmic_qubits": 832,
+      "planar_logical_qubits": 893,
+      "total_toffolis": "0.93M (claimed) / 1.48M (1 slice)",
+      "notes": "BUGS: (1) Omitted 4th 256Q reg + 80Q branch pebbles (-336Q); (2) Double-counted MBU on macro pebbles (1.69x vs 2.69x); (3) Reported 1 slice (1/16) as full 16-slice total!"
+    },
+    {
+      "problem": "ECC-256 (secp256k1)",
+      "work": "Ours (Wave 16 Audited & Bug-Fixed, M=1 QPU)",
+      "type": "Constructive (Bug-Fixed)",
+      "algorithmic_qubits": 1168,
+      "planar_logical_qubits": 1285,
+      "total_toffolis": "22.63M (16 shots x 1.414M/shot)",
+      "notes": "Includes 4x256Q regs + 80Q (s=5 Jump-16 branch pebbles) + 64Q focus + 36Q factory + 81Q perimeter/active routing; 86/32 pebble multiplier across all 16 slices"
+    },
+    {
+      "problem": "ECC-256 (Generic / Black-Box Group)",
+      "work": "Holevo [1973] / Cleve-Mayers-Mosca / Shoup-Nechaev Lower Bound",
+      "type": "Non-Constructive / Info-Theoretic Floor",
+      "algorithmic_qubits": 256,
+      "planar_logical_qubits": 256,
+      "total_toffolis": "Omega(n) group ops (Shor) / Omega(2^{128}) generic classical",
+      "notes": "Representing an injective 256-bit group state requires >= 256 Q by Holevo's bound; zero-ancilla permutation synthesis requires O(2^{512}) gates (Shannon/Lupanov)"
+    },
+    {
+      "problem": "RSA-2048",
+      "work": "Gidney & Ekera [2021, Quantum 5, 433]",
+      "type": "Constructive",
+      "algorithmic_qubits": 1971,
+      "planar_logical_qubits": 2058,
+      "total_toffolis": "2,700.0M (2.7e9)",
+      "notes": "Windowed modular exponentiation + coset representation (< 1.0n algorithmic qubits!)"
+    },
+    {
+      "problem": "RSA-2048",
+      "work": "Chevignard, Fouque, Schrottenloher [2024, Eurocrypt / ePrint 2024/222]",
+      "type": "Constructive",
+      "algorithmic_qubits": 1050,
+      "planar_logical_qubits": 1313,
+      "total_toffolis": "15,000.0M (~1.5e10 across 45 Regev shots)",
+      "notes": "RNS (Residue Number System) + Regev [2023] factoring achieves ~0.51n logical qubits (868-1,050 Q)"
+    },
+    {
+      "problem": "RSA-2048",
+      "work": "Gidney [2025, Yoked Surface Codes & Magic State Cultivation]",
+      "type": "Constructive",
+      "algorithmic_qubits": 1399,
+      "planar_logical_qubits": 1730,
+      "total_toffolis": "3,200.0M (3.2e9)",
+      "notes": "High-density yoked cold storage + cultivation (< 1M physical noisy qubits)"
+    },
+    {
+      "problem": "RSA-2048",
+      "work": "Ours (Wave 15 Unaudited Claim \u2014 WITH CATCHES)",
+      "type": "Audited-Buggy",
+      "algorithmic_qubits": 2178,
+      "planar_logical_qubits": 2239,
+      "total_toffolis": "587.9M (omitted QROAM table uncompute)",
+      "notes": "CATCHES: (1) 2,178 Q is +207 Q LARGER than Gidney-Ekera (1,971 Q) and 2.07x LARGER than Chevignard (1,050 Q); (2) Omitted +92 Q perimeter bus & +15.4% d=27->29 serialization penalty; (3) Omitted ~1.28B QROAM lookup Toffolis"
+    },
+    {
+      "problem": "RSA-2048",
+      "work": "Ours (Wave 16 Audited & Bug-Fixed, M=1 QPU)",
+      "type": "Constructive (Bug-Fixed)",
+      "algorithmic_qubits": 2178,
+      "planar_logical_qubits": 2331,
+      "total_toffolis": "1,870.0M (32 shots x 58.4M/shot)",
+      "notes": "Includes +117 Q perimeter+active routing, d=27->29 (+15.36% phys Q/patch) for 32x limb serialization, and full Select-SWAP QROAM lookup Toffolis"
+    }
+  ]
+}

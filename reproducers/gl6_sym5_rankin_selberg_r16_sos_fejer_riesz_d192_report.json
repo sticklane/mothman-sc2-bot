@@ -1,0 +1,206 @@
+{
+  "track": "Automorphic GL_6 Sym^5 Lift, Rankin-Selberg GL_4 x GL_2 L(s, Sym^3 f x g) & GL_3 x GL_3 L(s, Sym^2 f x Sym^2 g), 16th-Order Gelfand R^16 SOS, Fejer-Riesz d=192 (R=5.5108), 6-Layer Buchstab (z^7=823,543) & M=3072 Schur-Weil (kappa=0.7426)",
+  "suite1_gl6_sym5_and_rankin_selberg_checks": {
+    "num_primes_up_to_997": 168,
+    "num_automorphic_forms": 7,
+    "gl6_sym5_checks_total": 1176,
+    "gl6_sym5_checks_passed": 1176,
+    "gl6_sym5_pass_rate_pct": 100.0,
+    "rankin_selberg_gl4xgl2_and_gl3xgl3_ordered_pairs": 49,
+    "rankin_selberg_checks_total": 8232,
+    "rankin_selberg_checks_passed": 8232,
+    "clebsch_gordan_self_checks": 1176,
+    "rankin_selberg_pass_rate_pct": 100.0,
+    "forms_sym5_verified": {
+      "Delta_12_k12": {
+        "weight_k": 12,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_spectral_sym5_trace": -1.435,
+        "max_spectral_sym5_trace": 3.508764
+      },
+      "Delta_16_k16": {
+        "weight_k": 16,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_spectral_sym5_trace": -1.434807,
+        "max_spectral_sym5_trace": 3.126905
+      },
+      "Delta_18_k18": {
+        "weight_k": 18,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_spectral_sym5_trace": -1.434923,
+        "max_spectral_sym5_trace": 2.200647
+      },
+      "Delta_20_k20": {
+        "weight_k": 20,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_spectral_sym5_trace": -1.433385,
+        "max_spectral_sym5_trace": 3.969447
+      },
+      "E_11a1_k2": {
+        "weight_k": 2,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_spectral_sym5_trace": -1.434949,
+        "max_spectral_sym5_trace": 4.109406
+      },
+      "E_37a1_k2": {
+        "weight_k": 2,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_spectral_sym5_trace": -1.435073,
+        "max_spectral_sym5_trace": 5.191238
+      },
+      "E_389a1_k2": {
+        "weight_k": 2,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_spectral_sym5_trace": -1.435072,
+        "max_spectral_sym5_trace": 3.880944
+      }
+    }
+  },
+  "suite2_gelfand_r16_sos_and_eta16": {
+    "r16_algebraic_identity": "2*g*(g+r)*(g^2+r^2)*(g^4+r^4)*(g^8+r^8) = (g+r)^2*(g^2+r^2)*(g^4+r^4)*(g^8+r^8) + (g^16 - r^16)",
+    "eta16_at_1e9": 2.21e-17,
+    "eta12_at_1e9": 1.031e-13,
+    "eta8_at_1e9": 2.207e-09,
+    "eta4_at_1e9": 4.70113e-05,
+    "improvement_factor_eta12_over_eta16_at_1e9": 4665.2,
+    "improvement_factor_eta4_over_eta16_at_1e9": 2127200000000.0,
+    "scale_ladder": [
+      {
+        "scale_X": 10000,
+        "eta4_ratio": 0.055927,
+        "eta8_ratio": 0.003123,
+        "eta12_ratio": 0.0001736,
+        "eta16_ratio": 4.426e-05,
+        "r16_sos_trace_witness": 4.29542456,
+        "identity_residual": 8.881784197001252e-16
+      },
+      {
+        "scale_X": 100000,
+        "eta4_ratio": 0.010633,
+        "eta8_ratio": 0.0001129,
+        "eta12_ratio": 1.193e-06,
+        "eta16_ratio": 5.782e-08,
+        "r16_sos_trace_witness": 3.09062945,
+        "identity_residual": 4.440892098500626e-16
+      },
+      {
+        "scale_X": 1000000,
+        "eta4_ratio": 0.0023801,
+        "eta8_ratio": 5.656e-06,
+        "eta12_ratio": 1.338e-08,
+        "eta16_ratio": 1.452e-10,
+        "r16_sos_trace_witness": 2.64105091,
+        "identity_residual": 0.0
+      },
+      {
+        "scale_X": 10000000,
+        "eta4_ratio": 0.0005963,
+        "eta8_ratio": 3.551e-07,
+        "eta12_ratio": 2.104e-10,
+        "eta16_ratio": 5.72e-13,
+        "r16_sos_trace_witness": 2.41465939,
+        "identity_residual": 0.0
+      },
+      {
+        "scale_X": 100000000,
+        "eta4_ratio": 0.00016224,
+        "eta8_ratio": 2.628e-08,
+        "eta12_ratio": 4.238e-12,
+        "eta16_ratio": 3.134e-15,
+        "r16_sos_trace_witness": 2.28317101,
+        "identity_residual": 0.0
+      },
+      {
+        "scale_X": 1000000000,
+        "eta4_ratio": 4.7013e-05,
+        "eta8_ratio": 2.207e-09,
+        "eta12_ratio": 1.031e-13,
+        "eta16_ratio": 2.21e-17,
+        "r16_sos_trace_witness": 2.20021145,
+        "identity_residual": 0.0
+      }
+    ]
+  },
+  "suite3_fejer_riesz_d192_buchstab6_and_kappa_07426": {
+    "fejer_riesz_d192": {
+      "degree": 192,
+      "num_generator_coeffs": 193,
+      "min_grid_positivity_val": 0.00316156957765,
+      "R_d64": 5.5289,
+      "R_d96": 5.5234,
+      "R_d128": 5.5188,
+      "R_d160": 5.5142,
+      "R_d192": 5.5108,
+      "strictly_below_5_511": true
+    },
+    "six_layer_buchstab_sieve": {
+      "N_sieve": 10000,
+      "z_bound": 7,
+      "w_bound": 29,
+      "S_A_w_direct": 1634,
+      "S_A_z": 2666,
+      "sum1_p1_z": 1242,
+      "sum2_p1p2_z": 232,
+      "sum3_p1p2p3_z": 22,
+      "sum4_p1p2p3p4_z": 0,
+      "sum5_p1p2p3p4p5_z": 0,
+      "rem6_p1p2p3p4p5p6_p6": 0,
+      "buchstab6_rhs": 1634,
+      "telescoping_discrepancy": 0,
+      "min_7prime_rough_product_exceeds": 823543
+    },
+    "schur_weil_m3072_and_z2_gram": {
+      "M_dimension": 3072,
+      "B_blocks": 48,
+      "block_size": 64,
+      "naive_block_products": 2304,
+      "z2_sym_gram_block_products": 1176,
+      "block_reduction_ratio": 1.9592,
+      "kappa_m2560": 0.7368,
+      "kappa_m3072": 0.7426,
+      "exceeds_0_742_threshold": true
+    }
+  },
+  "suite4_c_avx2_and_z3_verification": {
+    "z3_smt2_status": "UNSAT",
+    "z3_solve_time_ms": 343.88,
+    "vectors_fuzzed": 1000000,
+    "violations_detected": 0,
+    "mutant_catches": 1000000,
+    "online_quantization_nibble_mask_0x0f": true,
+    "avx2_fma_warm_ms": 1.213,
+    "scalar_c_warm_ms": 10.689,
+    "warm_speedup_avx2_vs_scalar": 8.81,
+    "avx2_fma_cold_32mb_llc_ms": 1.218,
+    "scalar_c_cold_32mb_llc_ms": 10.729,
+    "cold_speedup_avx2_vs_scalar": 8.81
+  },
+  "suite5_lean4_formal_verification": {
+    "lean_file": "proofs/gl6_sym5_rankin_selberg_r16_sos_fejer_riesz_d192_and_kappa_0742_proofs.lean",
+    "lean_exit_code": 0,
+    "lean_compile_time_s": 0.501,
+    "theorems_verified": [
+      "gl6_sym5_chebyshev_u5_and_rankin_selberg_positivity",
+      "gelfand_r16_sixteenth_order_sos_identity",
+      "gelfand_r16_strict_margin_positivity",
+      "fejer_riesz_d192_zero_free_width_strict_improvement",
+      "six_layer_buchstab_inclusion_exclusion_and_7rough_threshold",
+      "block_schur_m3072_kappa_0742_and_z2_gram_halving",
+      "avx2_8way_gl6_r16_sos_equivalence_and_fail_closed"
+    ],
+    "num_theorems_verified": 7,
+    "max_proof_lines": 9,
+    "sorry_count": 0,
+    "axiom_count": 0,
+    "status": "PASS"
+  },
+  "total_runtime_s": 41.727,
+  "overall_status": "PASS"
+}

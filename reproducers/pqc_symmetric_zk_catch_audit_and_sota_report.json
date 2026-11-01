@@ -1,0 +1,90 @@
+{
+  "wave": "Wave 15 \u2014 Adversarial Red-Team Audit Track 2 (PQC, Symmetric & ZK SOTA Catches)",
+  "overall_status": "PASS",
+  "suite1_z3_catch_and_bug_proofs": {
+    "status": "PASS",
+    "elapsed_ms": 656.66,
+    "catch4_qroam_quantum_table_entanglement_proof": "UNSAT (exact) / SAT (leak witness)",
+    "catch5a_one_way_pivot_xor_uncompute_failure_proof": "UNSAT (s_p_residual == s_p always) / SAT (garbage witness)",
+    "catch5b_downward_elim_self_control_garbage_proof": "UNSAT",
+    "catch6a_aes_k4_intra_round_uncompute_proof": "UNSAT (clean 2x ANDs) / SAT (dirty 1x reuse witness)",
+    "catch6b_zhandry_compressed_oracle_canonical_sort_proof": "UNSAT"
+  },
+  "suite2_sota_and_zk_comparison_audit": {
+    "status": "PASS",
+    "elapsed_ms": 0.01,
+    "catches_audited": 5,
+    "adversarial_catch_and_sota_table": [
+      {
+        "id": "CATCH_4_SELECT_SWAP_QROAM_CLASSICAL_VS_QUANTUM_TABLE",
+        "target_claim": "Mitigation 3A & QDS-8: Select-SWAP (QROAM) with B=8 reduces M=512, w=32 scan from 16,384 to 576 Toffolis (28.4x) in CSIDH-512 / UOV / BIKE.",
+        "the_catch_or_bug": "Low-Kliuchnikov-Schaeffer [2018] QROAM ((M/B) + 2Bw Toffolis) ONLY works when the M-word table is CLASSICAL (so the Select step uses 0-Toffoli CNOT fan-out from unary address lines). When the M words are QUANTUM registers in superposition (e.g., QDS-8 dynamic Patricia Crit-Bit Trie mutated during UOV/BIKE/Kuperberg sieving), copying a quantum word into the B-word buffer requires CCX (Toffoli) gates on EVERY bit (M*w = 16,384 Toffolis) PLUS another M*w = 16,384 Toffolis to uncompute the entangled table (33,280 Toffolis total \u2014 2.03x WORSE than direct full-scan CSWAP!). Furthermore, CSIDH-512 only has M = 74 static odd primes (not 512), costing 10 + 512 = 522 Toffolis via classical QROAM.",
+        "naive_claimed_toffolis": 576,
+        "actual_classical_table_toffolis_m512": 576,
+        "actual_csidh512_74primes_classical_qroam_toffolis": 522,
+        "actual_quantum_table_select_swap_toffolis_m512": 33280,
+        "actual_quantum_table_direct_cswap_toffolis_m512": 16384,
+        "false_speedup_factor_on_quantum_memory": 28.44
+      },
+      {
+        "id": "CATCH_5A_5B_ONE_WAY_PIVOT_XOR_OVERWRITE_AND_GARBAGE",
+        "target_claim": "Mitigation 3B & QDS-7: One-Way Pivot-XOR R_i <- R_i ^ (s_p & R_p) + elimination cuts McEliece ISD Toffolis by 1/3 (536M -> 358M) with 0 history matrix.",
+        "the_catch_or_bug": "1) Overwrite Bug: s_p = (~M_{i,i}) & ... & M_{p,i} depends on M_{i,i}. Executing R_i <- R_i ^ (s_p & R_p) overwrites M'_{i,i} = 1, destroying the original M_{i,i} so s_p CANNOT be uncomputed from column i in-place! 2) Self-Control Bug: Downward elimination R_p <- R_p ^ (M_{p,i} & R_i) cannot simultaneously control on M_{p,i} and clear M_{p,i} <- 0 without copying M_{p,i} to an ancilla or preserving it in L. 3) Ancilla Explosion: Retaining the uncomputable pivot-selection indicators s_{i,p} until the end of the Grover oracle requires r(r-1)/2 = 768*767/2 = 294,528 ancilla qubits for Classic McEliece-348864 (r = 768)!",
+        "in_place_uncomputable": false,
+        "retained_pivot_indicator_qubits_r64": 2016,
+        "retained_pivot_indicator_qubits_r768": 294528
+      },
+      {
+        "id": "CATCH_5C_MCELIECE_348864_R64_TOY_VS_R768_SCALE_BUG",
+        "target_claim": "QDS-7 & Mitigation 3B: Classic McEliece-348864 Prange/Bruhat ISD runs in 4,820 Q (or 768 Q) and 358M Toffolis.",
+        "the_catch_or_bug": "Scale Mismatch Bug: Classic McEliece-348864 has n = 3488, k = 2720, so codimension r = n - k = 768. Storing a single 768 x 768 binary submatrix in quantum registers requires 768^2 = 589,824 qubits (590,592 Q with syndrome/latch, matching Perriello et al. [2023, ePrint 2023/1065] and Esser et al. [2022, Eurocrypt], or 884,352 Q if retaining 294,528 One-Way Pivot-XOR indicators). Our 4,820 Q number was for a reduced r = 64 toy submatrix (64^2 + 724 = 4,820 Q), undercounting full r = 768 matrix qubits by 122.37x while pairing it with r = 768 Toffoli counts!",
+        "toy_r64_qubits": 4820,
+        "full_r768_submatrix_qubits": 589824,
+        "full_r768_with_syndrome_qubits_sota": 590592,
+        "full_r768_with_one_way_pivot_history_qubits": 884352,
+        "qubit_undercount_ratio": 122.37
+      },
+      {
+        "id": "CATCH_6A_AES256_AND_SHA3_SUB_PIPELINING_VS_PUBLISHED_SOTA",
+        "target_claim": "Mitigation 4: K=4 sub-pipelining achieves 378 Q compute on AES-256 at 4x depth penalty; K=32 achieves 1,826 Q on SHA3-256 at 10x depth penalty.",
+        "the_catch_or_bug": "1) Published SOTA Comparison: Zou et al. [2020, ASIACRYPT] and Huang & Sun [2022, ASIACRYPT] ALREADY achieve 376 Q - 400 Q for AES-256 at 1x round depth (NO 4x intra-round depth penalty!) by using rolling in-place key expansion and uncomputing round ancillas at the round boundary. 2) Hidden 1.75x S-Box Toffoli Overhead in K=4 Sub-Pipelining: Reusing K=4 Boyar-Peralta S-Box scratch blocks (88 Q) across the 4 columns of a single AES round requires uncomputing the 22 Q intermediate ANDs after Columns 0, 1, and 2 (costing 2 * 34 = 68 ANDs/byte on 12 bytes + 34 ANDs/byte on 4 bytes = 952 ANDs/round vs. 544 ANDs/round = 1.75x gate blowup!).",
+        "our_k4_aes256_qubits": 378,
+        "our_k4_aes256_depth_mult": 4,
+        "our_k4_aes_round_and_gates": 952,
+        "parallel_16sbox_round_and_gates": 544,
+        "sota_zou2020_huang2022_aes256_qubits": 376,
+        "sota_zou2020_huang2022_depth_mult": 1
+      },
+      {
+        "id": "CATCH_6B_SOTA_ZK_AND_EXISTENCE_PROOF_CONSTRUCTIVE_BLOWUP",
+        "target_claim": "SOTA Non-Constructive / Zero-Knowledge / QROM Existence Proofs (Zhandry 2019, Watrous 2009, Unruh 2012, Kuperberg 2005/2013).",
+        "the_catch_or_bug": "1) Zhandry [2019, Crypto] Compressed Random Oracle (QROM): Existence proofs count Q queries using O(Q*w) database qubits. Constructively without QRAM, the compressed database is a dynamic quantum superposition table (Catch 4 Case 2), so query q must scan and CSWAP-sort all q active slots, costing sum_{q=1}^Q 2*q*w = Q(Q+1)w Toffolis (537,395,200 Toffolis for Q=1024, w=512 \u2014 a 1,025x per-query gate blowup!). 2) Watrous [2009] vs. Unruh [2012] Quantum ZK: Watrous coherent rewinding requires 2k+1 coherent executions of V* and (V*)^dag with 0 intermediate measurement; Unruh's QROM NIZK transform avoids inverting V* but requires t*M_open = 128*3 = 384 parallel hash commitments (14,745,600 SHA3-256 Toffolis). 3) Kuperberg [2005, 2013] CSIDH-512 Sieve: While the M=74 static primes use classical QROAM (522 Toffolis), collimating a quantum sieve table of L=1,024 superposition states (w=512 bits) costs L*w = 524,288 Toffolis per step (1,004x higher than classical QROAM!).",
+        "zhandry_q1024_w512_nonconstructive_queries": 1024,
+        "zhandry_q1024_w512_constructive_toffolis": 537395200,
+        "unruh_nizk_384_sha3_commit_toffolis": 14745600,
+        "kuperberg_l1024_w512_collimation_toffolis_per_step": 524288,
+        "csidh512_m74_classical_qroam_toffolis": 522
+      }
+    ]
+  },
+  "suite3_compiled_c_adversarial_verifier": {
+    "gl4_matrices_verified": 20160,
+    "zero_diag_naive_uncompute_failures": 16064,
+    "bruhat_with_retained_history_restored": 20160,
+    "passed_trials": 10000,
+    "total_trials": 10000,
+    "ancilla_leaks": 0,
+    "mutants_killed": 1000,
+    "mutant_trials": 1000,
+    "elapsed_ms": 1.32,
+    "status": "PASS"
+  },
+  "suite4_lean4_verification": {
+    "status": "PASS",
+    "lean4_elapsed_ms": 460.72,
+    "lean4_file": "proofs/pqc_symmetric_zk_catch_audit_and_sota_proofs.lean",
+    "theorems_verified": 6,
+    "sorry_count": 0,
+    "axiom_count": 0
+  }
+}

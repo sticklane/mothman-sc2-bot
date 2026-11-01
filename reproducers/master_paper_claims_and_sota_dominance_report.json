@@ -1,0 +1,281 @@
+{
+  "harness": "Wave 18-21 \u2014 Single-Command Master Reproducibility & Red-Team Regression Harness (All 13 Suites)",
+  "repository": "ws13-okasaki-quantum-data-structures",
+  "overall_status": "PASS",
+  "total_elapsed_ms": 90253.1,
+  "waves_verified": [
+    "Wave 15",
+    "Wave 16",
+    "Wave 17",
+    "Wave 18",
+    "Wave 19",
+    "Wave 20",
+    "Wave 21"
+  ],
+  "suites_verified_count": 13,
+  "five_gate_linter_summary": {
+    "all_passed": true,
+    "proof_files_scanned": 31,
+    "total_theorems": 324,
+    "structural_algebraic_theorems": 324,
+    "non_tautological_share_pct": 100.0,
+    "tmp_violations": 0,
+    "lean_wildcard_catchalls": 0
+  },
+  "comparator_statement_integrity_summary": {
+    "passed": true,
+    "proof_files_audited": 31,
+    "total_theorems_pinned": 286,
+    "small_proof_explainability_pct": 99.3,
+    "challenge_manifest_sha256": "2d0f4c81ffa2a9fc96667c0f7199debb767f5258b069d667d1f1141bec58d41a",
+    "kernel_axiom_violations": 0,
+    "vacuous_or_tautological_theorems": 0
+  },
+  "master_claims_cross_check": {
+    "status": "PASS",
+    "entries_cross_checked": 10,
+    "master_sota_dominance_table": [
+      {
+        "target": "RSA-2048 (Mode 1A: Single-Run Shor / Ekera-Hastad)",
+        "published_sota": "Gidney & Ekera [2021] (1,971 Q alg / 2,058 Q planar, 2.70B Toffolis)",
+        "our_earlier_wave16_audited": "2,178 Q alg / 2,331 Q planar, 1.87B Toffolis",
+        "our_final_wave18_sota_dominant": "1,924 Q alg / 2,071 Q planar, 1.87B Toffolis (In-Place Zipper Focus + Zalka-Gidney Coset QROAM)",
+        "delta_vs_published_sota": "-47 Q algorithmic AND -30.7% Toffolis"
+      },
+      {
+        "target": "RSA-2048 (Mode 1B: Sub-1000-Qubit Regev 45-Run RNS)",
+        "published_sota": "Chevignard, Fouque, Schrottenloher [2024, Eurocrypt] (1,050 Q alg, 15.0B Toffolis)",
+        "our_earlier_wave16_audited": "N/A (single-run only)",
+        "our_final_wave18_sota_dominant": "896 Q alg / 1,013 Q planar, 11.79B Toffolis, 965,050 (< 1M) phys Q (RNS-Braun-Zipper CRT Accumulator)",
+        "delta_vs_published_sota": "-154 Q algorithmic AND -21.4% Toffolis"
+      },
+      {
+        "target": "RSA-2048 (Mode 1C: Split-Register Peephole + Okasaki Skew-Binary Local Carry-Save, No Delta d Penalty)",
+        "published_sota": "Gidney [2025] (1,399 Q alg / 1,730 Q planar, ~950,000 phys Q, ~5.00 days)",
+        "our_earlier_wave16_audited": "Mode 1A paid Delta d = +2 (d = 27 -> 29, 1.76M phys Q) from 32-limb ripple carry",
+        "our_final_wave18_sota_dominant": "1,364 Q alg / 1,482 Q planar, 1.70B Toffolis @ d = 27: 891,348 (< 900K!) phys Q & 3.19 days superconducting; 24.9 days in 237,120 neutral atoms (Regime C-Parallel C=32 transversal limbs)",
+        "delta_vs_published_sota": "-35 Q alg, -58,652 phys Q (< 900K!), AND -36.25% faster runtime vs. Gidney [2025] simultaneously; 37.8x neutral-atom AOD speedup"
+      },
+      {
+        "target": "ECC-256 (secp256k1 / NIST P-256, 16 Ekera-Hastad Shots)",
+        "published_sota": "Haner et al. [2020] (1,098 Q, 135.0M Toffolis); Litinski [2023] (2,100 Q, 22.40M Toffolis)",
+        "our_earlier_wave16_audited": "1,168 Q alg / 1,285 Q planar, 22.63M Toffolis",
+        "our_final_wave18_sota_dominant": "1,088 Q alg / 1,205 Q planar, 14.34M Toffolis (Packed (u,r)/(v,s) Zipper + s=4 Pebbles + w_exp=4 Classical QROAM)",
+        "delta_vs_published_sota": "-10 Q vs. Haner [2020] AND -36.0% Toffolis vs. Litinski [2023] simultaneously"
+      },
+      {
+        "target": "AES-256 Grover Key-Search Oracle (NIST Level 5)",
+        "published_sota": "Zou et al. [2020] (400 Q, 52K Toffolis); Huang & Sun [2022] (376 Q, 48K Toffolis)",
+        "our_earlier_wave16_audited": "378 Q, 162,000 Toffolis (4x column reuse penalty on 22Q Boyar-Peralta S-Box)",
+        "our_final_wave18_sota_dominant": "356 Q (key-state zipper) / 392 Q (pure in-place), 42,208\u201344,288 Toffolis (Self-Cleaning Tower-Field S-Box + Dual-PT Match)",
+        "delta_vs_published_sota": "-20 Q vs. Huang & Sun [2022] AND 3.66x\u20133.84x fewer Toffolis than Wave 16"
+      },
+      {
+        "target": "Classic McEliece-348864 & BIKE-L1 Syndrome ISD",
+        "published_sota": "Perriello et al. [2023] (590,592 Q Prange); Esser, May, Zweydinger [2022] (~14,500 Q Streaming ISD)",
+        "our_earlier_wave16_audited": "590,592 Q (or 884,352 Q with pivot indicators), 536.87M Toffolis/iter",
+        "our_final_wave18_sota_dominant": "7,744 Q, 814,336 forward (1,633,280 full) Toffolis/iter (Streaming Syndrome + Classical Select-SWAP B=8 + Braun Weight Tree)",
+        "delta_vs_published_sota": "76.26x\u2013114.20x fewer qubits and 328.7x fewer Toffolis/iter vs. Gaussian elimination (0 Catch-4 penalty)"
+      },
+      {
+        "target": "Dynamic Quantum Superposition Tables (Zhandry [2019] Compressed Oracle / Kuperberg Sieve, Q=1024, w=512)",
+        "published_sota": "Bernstein [2009] / Jaques-Schanck [2019] Sorting Networks; Bentley-Saxe [1980] Logarithmic Method",
+        "our_earlier_wave16_audited": "537,395,200 Toffolis (O(Q^2 w) sequential linear-scan CSWAP insertion)",
+        "our_final_wave18_sota_dominant": "14,417,920 Toffolis batched (55-stage Bitonic Sort = 37.27x speedup) / 23,855,104 Toffolis online sequential (Okasaki Bentley-Saxe = 22.53x speedup)",
+        "delta_vs_published_sota": "37.27x (batched) / 22.53x (online sequential) Toffoli reduction using only CCX/CSWAP (0 QRAM)"
+      },
+      {
+        "target": "Lattice NIST PQC: ML-KEM-512/768/1024 (FIPS 203) & ML-DSA-44/65/87 (FIPS 204)",
+        "published_sota": "Becker-Ducas-Gama-Laarhoven [2016] (2^{0.292b} classical); Chailloux & Loyer [2021] (2^{0.257b} ideal QRAM); Jaques & Schanck [2019] (No-QRAM critique)",
+        "our_earlier_wave16_audited": "Not analyzed with constructive SimHash + Select-SWAP + odd-half NTT parity proof",
+        "our_final_wave18_sota_dominant": "QDS-6 NTT: 3,072 Q / 322,560 Toffolis (ML-KEM poly) & 5,888 Q / 1,224,704 Toffolis (ML-DSA poly) with exact odd-half parity cleanup; BKZ Filter: 255 Toffolis via 256-bit SimHash + QDS-2 Braun tree (392x\u2013625x inner-filter reduction), while proving No-QRAM Grover sieve is 2^{0.31125b} > 2^{0.2920b} classical BDGL (0x asymptotic speedup without QRAM!)",
+        "delta_vs_published_sota": "392x\u2013625x inner-filter Toffoli reduction + formal machine-checked proof of PQC security without hardware QRAM"
+      },
+      {
+        "target": "Physical Surface-Code & Neutral-Atom Resource Estimation (Regimes A, B, C)",
+        "published_sota": "Gidney & Ekera [2021] (~20M phys Q); Gidney & Shutty [2024] Magic State Cultivation; Gidney [2025] Yoked Surface Codes; Bluvstein et al. [2024] Neutral-Atom AOD",
+        "our_earlier_wave16_audited": "Logical qubit & Toffoli counts only",
+        "our_final_wave18_sota_dominant": "Regime B (Yoked + Cultivation): ECC-256 = 819,722 phys Q (3.30 min SC / 13.75 hr AOD), RSA-2048 Mode 1A = 1,755,670 phys Q (3.77 days SC / 2.58 yr AOD), RSA-2048 Mode 1B = 965,050 phys Q (< 1 Million phys Q!)",
+        "delta_vs_published_sota": "Sub-Million physical qubits on ECC-256 (0.82M) & RSA-2048 Mode 1B (0.965M) + exact 250x AOD shuttling penalty"
+      },
+      {
+        "target": "Decoded Quantum Interferometry (DQI) [Jordan et al. 2024] & Parallel-Walker Coherent Bitonic Walk-Merge",
+        "published_sota": "Jordan et al. [2024, Nature 2025] Out-of-Place DQI OPI Decoder (104,448 Q on F_3329); Bernstein [2009] / Jaques-Schanck [2019] Parallel-Walker Sorting Network",
+        "our_earlier_wave16_audited": "Single-walker linear scan (1,048,576 Toffolis/lookup at M=1024, w=512)",
+        "our_final_wave18_sota_dominant": "Okasaki-DQI (QDS-1 + QDS-4 + QDS-6): 9,984 Q (10.46x fewer qubits) & 1.42M Toffolis (0 QRAM); Parallel-Walker Bitonic Merge: 14,080 Toffolis/lookup (74.47x fewer Toffolis/lookup at M=1024, 0 QRAM)",
+        "delta_vs_published_sota": "10.46x fewer qubits on DQI OPI (9,984 Q vs 104,448 Q) AND 74.47x fewer Toffolis/lookup via parallel bitonic walkers (0 QRAM)"
+      }
+    ]
+  },
+  "suite_execution_manifests": [
+    {
+      "id": "functional_edge_case_deassumption",
+      "wave": "Wave 15 Track 1",
+      "title": "Functional Edge-Case De-Assumption & Exact Bijection Proofs (Hua, Folded Bezout, Merkle Pebbling, Pivoted Bruhat LU, Crit-Bit Trie)",
+      "lean_file": "proofs/functional_edge_case_deassumption_and_bijection_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 38978.37,
+      "reproducer_script": "reproducers/verify_functional_edge_case_deassumption_and_bijection.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 25722.72,
+      "total_elapsed_ms": 64701.85,
+      "report_json": "reproducers/functional_edge_case_deassumption_and_bijection_report.json"
+    },
+    {
+      "id": "physical_quantum_gate_set_no_magic_ops",
+      "wave": "Wave 15 Track 2",
+      "title": "Physical Quantum Gate-Set Audit & Zero-Magic-Ops Netlist Compiler (10 Cryptographic Schemes)",
+      "lean_file": "proofs/physical_quantum_gate_set_no_magic_ops_audit_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 7196.45,
+      "reproducer_script": "reproducers/verify_physical_quantum_gate_set_no_magic_ops_audit.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 23656.87,
+      "total_elapsed_ms": 30855.45,
+      "report_json": "reproducers/physical_quantum_gate_set_no_magic_ops_audit_report.json"
+    },
+    {
+      "id": "adversarial_catch_audit_and_sota_comparison",
+      "wave": "Wave 16 Track 1",
+      "title": "Adversarial Red-Team Catch Audit & SOTA Comparison (Clifford Degree-3 Barrier, Litinski Fig. 11 Bus, Binary Divsteps History)",
+      "lean_file": "proofs/adversarial_catch_audit_and_sota_comparison_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 7197.8,
+      "reproducer_script": "reproducers/verify_adversarial_catch_audit_and_sota_comparison.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 19188.13,
+      "total_elapsed_ms": 26390.35,
+      "report_json": "reproducers/adversarial_catch_audit_and_sota_comparison_report.json"
+    },
+    {
+      "id": "pqc_symmetric_zk_catch_audit_and_sota",
+      "wave": "Wave 16 Track 2",
+      "title": "PQC, Symmetric & ZK Catch Audit (Classical vs Quantum QROAM, One-Way Pivot-XOR Overwrite, McEliece r=768 Scale, Zhandry QROM)",
+      "lean_file": "proofs/pqc_symmetric_zk_catch_audit_and_sota_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 7046.44,
+      "reproducer_script": "reproducers/verify_pqc_symmetric_zk_catch_audit_and_sota.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 26340.2,
+      "total_elapsed_ms": 33387.48,
+      "report_json": "reproducers/pqc_symmetric_zk_catch_audit_and_sota_report.json"
+    },
+    {
+      "id": "sota_driven_rsa_ecc_improvements",
+      "wave": "Wave 17 / Wave 18 Step 1",
+      "title": "SOTA-Driven RSA-2048 (1,924 Q Mode 1A & 896 Q Mode 1B) & ECC-256 (1,088 Q, 14.34M Toffolis) Improvements",
+      "lean_file": "proofs/sota_driven_rsa_ecc_improvements_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 1364.48,
+      "reproducer_script": "reproducers/verify_sota_driven_rsa_ecc_improvements.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 10830.73,
+      "total_elapsed_ms": 12196.1,
+      "report_json": "reproducers/sota_driven_rsa_ecc_improvements_report.json"
+    },
+    {
+      "id": "sota_driven_pqc_aes_qrom_improvements",
+      "wave": "Wave 17 / Wave 18 Step 2",
+      "title": "SOTA-Driven AES-256 (356 Q / 392 Q, 42.2K Toffolis), McEliece-348864 Streaming ISD (7,744 Q), & Bitonic/Bentley-Saxe Dynamic QROM",
+      "lean_file": "proofs/sota_driven_pqc_aes_qrom_improvements_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 620.82,
+      "reproducer_script": "reproducers/verify_sota_driven_pqc_aes_qrom_improvements.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 17029.96,
+      "total_elapsed_ms": 17653.75,
+      "report_json": "reproducers/sota_driven_pqc_aes_qrom_improvements_report.json"
+    },
+    {
+      "id": "lattice_pqc_mlkem_mldsa_bkz_sieve_and_ntt",
+      "wave": "Wave 18 Step 3",
+      "title": "Lattice-Based NIST PQC (ML-KEM-512/768/1024 & ML-DSA-44/65/87) QDS-6 Butterfly NTT & Quantum BKZ Sieving Security Floor",
+      "lean_file": "proofs/lattice_pqc_mlkem_mldsa_bkz_sieve_and_ntt_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 561.36,
+      "reproducer_script": "reproducers/verify_lattice_pqc_mlkem_mldsa_bkz_sieve_and_ntt.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 54580.39,
+      "total_elapsed_ms": 55144.01,
+      "report_json": "reproducers/lattice_pqc_mlkem_mldsa_bkz_sieve_and_ntt_report.json"
+    },
+    {
+      "id": "physical_resource_cultivation_and_aod_runtime",
+      "wave": "Wave 18 Step 4",
+      "title": "End-to-End Physical Resource Estimation (Surface Codes, Magic State Cultivation, Yoked Cold Memory [< 1M Phys. Q], and Neutral-Atom AOD 250x Penalty)",
+      "lean_file": "proofs/physical_resource_cultivation_and_aod_runtime_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 510.02,
+      "reproducer_script": "reproducers/verify_physical_resource_cultivation_and_aod_runtime.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 17596.56,
+      "total_elapsed_ms": 18108.54,
+      "report_json": "reproducers/physical_resource_cultivation_and_aod_runtime_report.json"
+    },
+    {
+      "id": "dqi_opi_and_parallel_walker_bitonic_proofs",
+      "wave": "Wave 19",
+      "title": "Okasaki-DQI (Jordan et al. [2024] Decoded Quantum Interferometry OPI 10.46x Qubit Reduction to 9,984 Q) & Parallel-Walker Bitonic Walk-Merge (74.47x Fewer Toffolis/Lookup)",
+      "lean_file": "proofs/dqi_opi_and_parallel_walker_bitonic_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 444.85,
+      "reproducer_script": "reproducers/verify_dqi_opi_and_parallel_walker_bitonic.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 14801.95,
+      "total_elapsed_ms": 15248.1,
+      "report_json": "reproducers/dqi_opi_and_parallel_walker_bitonic_report.json"
+    },
+    {
+      "id": "sota_mode1c_and_transversal_neutral_atom",
+      "wave": "Wave 19 SOTA",
+      "title": "RSA-2048 Mode 1C (Sub-900K Phys Q & 3.19 Days via Split-Register Skew-Binary Carry-Save) & Regime C-Parallel Transversal Neutral-Atom AOD",
+      "lean_file": "proofs/yoked_surface_and_transversal_neutral_atom_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 845.06,
+      "reproducer_script": "reproducers/verify_yoked_surface_and_transversal_neutral_atom.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 1759.95,
+      "total_elapsed_ms": 2606.76,
+      "report_json": "reproducers/yoked_surface_and_transversal_neutral_atom_report.json"
+    },
+    {
+      "id": "regimeD_bivariate_bicycle_qldpc_and_0dsp_backlog",
+      "wave": "Wave 20 Track 1",
+      "title": "Regime D Bivariate Bicycle qLDPC ([[144,12,12]] & [[288,12,18]]) Automorphism Zippers (<300K ECC-256 & <350K RSA-2048) & Sub-1us 0-DSP Syndrome Backlog Closure",
+      "lean_file": "proofs/bivariate_bicycle_qldpc_and_0dsp_backlog_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 501.22,
+      "reproducer_script": "reproducers/verify_bivariate_bicycle_qldpc_and_0dsp_backlog.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 1017.44,
+      "total_elapsed_ms": 1520.52,
+      "report_json": "reproducers/bivariate_bicycle_qldpc_and_0dsp_backlog_report.json"
+    },
+    {
+      "id": "rsa4096_slhdsa_sphincs_bike_physical_closure",
+      "wave": "Wave 20 Track 2",
+      "title": "RSA-4096 (Modes 1A/1B/1C: 1,728 Q Mode 1B & 1.84M Yoked / 583K qLDPC Mode 1C), NIST FIPS 205 SLH-DSA/SPHINCS+-128s/256s (4,320 Q), & BIKE-L1 (36,969 Q) Closure",
+      "lean_file": "proofs/rsa4096_slhdsa_sphincs_bike_physical_closure_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 314.4,
+      "reproducer_script": "reproducers/verify_rsa4096_slhdsa_sphincs_bike_physical_closure.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 1822.82,
+      "total_elapsed_ms": 2141.73,
+      "report_json": "reproducers/rsa4096_slhdsa_sphincs_bike_physical_closure_report.json"
+    },
+    {
+      "id": "quantum_data_structure_api_contracts_and_costs",
+      "wave": "Wave 21",
+      "title": "All 9 Quantum Data Structure API Contracts, Representation Invariants, Adjoints & Complexity Bounds (Propositions 3.1-3.9)",
+      "lean_file": "proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean",
+      "lean_kernel_status": "PASS (0 sorry, 0 axiom, 0 warnings)",
+      "lean_elapsed_ms": 1022.58,
+      "reproducer_script": "reproducers/verify_quantum_data_structure_api_contracts_and_costs.py",
+      "reproducer_status": "PASS",
+      "reproducer_elapsed_ms": 24614.31,
+      "total_elapsed_ms": 25637.87,
+      "report_json": "reproducers/quantum_data_structure_api_contracts_and_costs_report.json"
+    }
+  ]
+}

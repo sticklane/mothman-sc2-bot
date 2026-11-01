@@ -1,0 +1,72 @@
+# TODAY-39: today39_iqoqi_oqp35_ame_9_10_qls_18q (18 qubits, d=5 MDS fault-tolerant detector error model)
+# Associated Problem: IQOQI OQP #35 / OQP-61 — AME(9, 10) & ((9, 1, 5))_10 MDS QECC (QDS-45)
+# Compatible with stim.Circuit, detector_error_model(decompose_errors=True), and pymatching (graphlike distance d = 5)
+QUBIT_COORDS(0, 0) 0
+QUBIT_COORDS(1, 0) 1
+QUBIT_COORDS(2, 0) 2
+QUBIT_COORDS(3, 0) 3
+QUBIT_COORDS(4, 0) 4
+QUBIT_COORDS(5, 0) 5
+QUBIT_COORDS(6, 0) 6
+QUBIT_COORDS(7, 0) 7
+QUBIT_COORDS(8, 0) 8
+QUBIT_COORDS(9, 1) 9
+QUBIT_COORDS(10, 1) 10
+QUBIT_COORDS(11, 1) 11
+QUBIT_COORDS(12, 1) 12
+QUBIT_COORDS(13, 1) 13
+QUBIT_COORDS(14, 1) 14
+QUBIT_COORDS(15, 1) 15
+QUBIT_COORDS(16, 1) 16
+QUBIT_COORDS(17, 1) 17
+R 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17
+TICK
+X_ERROR(0.001) 0 1 2 3 4
+DEPOLARIZE1(0.0005) 5 6 7 8
+CX 0 5 1 6 2 7 3 8
+TICK
+CX 1 5 2 6 3 7 4 8
+TICK
+M 5 6 7 8
+DETECTOR(5, 0, 0) rec[-4]
+DETECTOR(6, 0, 0) rec[-3]
+DETECTOR(7, 0, 0) rec[-2]
+DETECTOR(8, 0, 0) rec[-1]
+TICK
+R 5 6 7 8
+X_ERROR(0.001) 0 1 2 3 4
+CX 0 5 1 6 2 7 3 8
+TICK
+CX 1 5 2 6 3 7 4 8
+TICK
+M 5 6 7 8
+DETECTOR(5, 0, 1) rec[-4] rec[-8]
+DETECTOR(6, 0, 1) rec[-3] rec[-7]
+DETECTOR(7, 0, 1) rec[-2] rec[-6]
+DETECTOR(8, 0, 1) rec[-1] rec[-5]
+TICK
+H 9 10 11 12 13 14 15 16 17
+CX 9 10 11 12 13 14 15 16
+CZ 10 11 12 13 14 15 16 17
+CZ 10 11 12 13 14 15 16 17
+CX 9 10 11 12 13 14 15 16
+H 9 10 11 12 13 14 15 16 17
+X_ERROR(0.001) 9 10 11 12 13 14 15 16 17
+M 9 10 11 12 13 14 15 16 17
+DETECTOR(9, 1, 2) rec[-9]
+DETECTOR(10, 1, 2) rec[-8]
+DETECTOR(11, 1, 2) rec[-7]
+DETECTOR(12, 1, 2) rec[-6]
+DETECTOR(13, 1, 2) rec[-5]
+DETECTOR(14, 1, 2) rec[-4]
+DETECTOR(15, 1, 2) rec[-3]
+DETECTOR(16, 1, 2) rec[-2]
+DETECTOR(17, 1, 2) rec[-1]
+TICK
+X_ERROR(0.001) 0 1 2 3 4
+M 0 1 2 3 4
+DETECTOR(5, 0, 3) rec[-5] rec[-4] rec[-18]
+DETECTOR(6, 0, 3) rec[-4] rec[-3] rec[-17]
+DETECTOR(7, 0, 3) rec[-3] rec[-2] rec[-16]
+DETECTOR(8, 0, 3) rec[-2] rec[-1] rec[-15]
+OBSERVABLE_INCLUDE(0) rec[-1]

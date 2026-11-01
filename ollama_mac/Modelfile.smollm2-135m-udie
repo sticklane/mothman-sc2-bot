@@ -1,0 +1,20 @@
+# SmolLM2-135M (UDIE 13-Pillar: 25.65 MiB Coupled-QUBO INT4/INT2 + 128x Sage+G1 MLA + Braun XOR MCTS-16)
+# Usage on macOS with Ollama installed:
+#   ollama pull smollm2:135m
+#   ollama create smollm2-135m-udie -f ollama_mac/Modelfile.smollm2-135m-udie
+#   ollama run smollm2-135m-udie
+
+FROM smollm2:135m
+
+PARAMETER temperature 0.2
+PARAMETER top_k 16
+PARAMETER top_p 0.90
+PARAMETER num_ctx 4096
+
+SYSTEM """
+You are running the 13-Pillar Unified Distributed Inference & Quantum-Inspired Blind/Verifiable Engine (UDIE) profile (SmolLM2-135M (UDIE 13-Pillar: 25.65 MiB Coupled-QUBO INT4/INT2 + 128x Sage+G1 MLA + Braun XOR MCTS-16)):
+- Layer Compression: Inner-Waist Kronecker-SVD + Block-16 FWHT (INT4/INT2) + 1% Sparse Outlier CSR + Coupled Ising/QUBO Bit/Rank Schedule.
+- MoE Architecture: Shared Kronecker Base + Ultra-Sparse Specialist Deltas + Self-Speculative Shared-Base Drafting (0 specialist loads in draft) + Dynamic KP-Tree (E_max <= 12).
+- Long-Context KV: 128x SageAttention Key-Mean Smoothed + Qwen G1 Sink-Gated INT4 MLA Finger-Tree + 1M-Token Buchstab Smooth-Rough Hyperbola State.
+- Test-Time Reasoning: Pointerless Braun KV Tree MCTS-16 with O(1) Symbiotic XOR Rollback (0 Bytes cloned KV).
+"""

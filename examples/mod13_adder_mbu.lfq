@@ -1,0 +1,70 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/mod13_adder_mbu.lfq
+;;
+;; Asymmetric `9-TempAND` Modular Adder `out ^= (a + b) mod 13` on `21` Qubits.
+;; Demonstrates `defqfree`, `focus-zipper`, `within-apply-mbu`, zero-ancilla
+;; distinct-pivot linear fan-in (`temp-and-lin`), `Law U1` (`EraseBy`), and
+;; `Law U4` (`QTainted` dynamic `M_X` + `if (m[k] == 1) cz` uncomputation
+;; cutting `CCX` / `TempAND` count by `-50%` from `18` down to `9`).
+;; =============================================================================
+
+(target-profile heron-r2)
+
+(defqfree (mod13-adder-mbu
+           #:wires ([a (range 0 4)]
+                    [b (range 4 8)]
+                    [out (range 8 12)])
+           #:scratch ([and9 (range 12 21)]))
+  (match-define (list a0 a1 a2 a3) a)
+  (match-define (list b0 b1 b2 b3) b)
+  (match-define (list o0 o1 o2 o3) out)
+  (match-define (list u0 u1 u2 u3 g0w g1w g2w g3w g4w) and9)
+
+  (define c0 (list u0))
+  (define c1 (list u1))
+  (define c2 (list u2))
+  (define s4 (list u3))
+
+  (define s0 (list a0 b0))
+  (define s1 (lin-xor (list a1 b1) c0))
+  (define s2 (lin-xor (list a2 b2) c1))
+  (define s3 (lin-xor (list a3 b3) c2))
+
+  (define g0 (list g0w))
+  (define g1 (list g1w))
+  (define g2 (list g2w))
+  (define g3 (list g3w))
+  (define g4 (list g4w))
+
+  (define r0-form (lin-xor s0 s1 s2 s3 g0 g1 g2 g4))
+  (define r1-form (lin-xor s0 s2 s4 g2 g4))
+  (define r2-form (lin-xor s1 s2 s3 s4 g0 g1 g2))
+  (define r3-form (lin-xor s0 s4 g0 g1 g3))
+
+  (within-apply-mbu
+   (seq
+    ;; 4-bit ripple carry chain (`4` forward TempANDs)
+    (temp-and a0 b0 u0)
+    (temp-and-lin (lin-xor (list a1) c0) (lin-xor (list b1) c0) u1)
+    (cx u0 u1)
+    (temp-and-lin (lin-xor (list a2) c1) (lin-xor (list b2) c1) u2)
+    (cx u1 u2)
+    (temp-and-lin (lin-xor (list a3) c2) (lin-xor (list b3) c2) u3)
+    (cx u2 u3)
+    ;; Modulo-13 boolean reduction SLP (`5` forward TempANDs)
+    (temp-and-lin s3 (lin-xor s2 s3) g0w)
+    (temp-and-lin (lin-xor s3 s4 g0) s0 g1w #t #t)
+    (temp-and-lin (lin-xor s1 g1) (lin-xor s0 s1) g2w #t #f)
+    (temp-and-lin (lin-xor s1 s3 s4 g0 g1 g2) (lin-xor s0 s1 s2 g1 g2) g3w #t #t)
+    (temp-and-lin (lin-xor s0 s1 s3 g0 g2 g3) (lin-xor s1 s2 s3 s4 g0 g1 g2) g4w #t #f))
+   (focus-zipper [out-z out (append a b out)]
+     (for/seq ([w (in-list r0-form)]) (cx w (wref out-z 0)))
+     (x (wref out-z 1))
+     (for/seq ([w (in-list r1-form)]) (cx w (wref out-z 1)))
+     (x (wref out-z 2))
+     (for/seq ([w (in-list r2-form)]) (cx w (wref out-z 2)))
+     (x (wref out-z 3))
+     (for/seq ([w (in-list r3-form)]) (cx w (wref out-z 3))))
+   and9))

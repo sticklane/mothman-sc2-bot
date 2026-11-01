@@ -1,0 +1,195 @@
+{
+  "track": "Track 6: PLT Redex (`REDEX-NEW-2..3`) & Phase-17 3-Tier Quantum Compiler Pass Confluence (`F73-F78`, `M27-M30`)",
+  "total_differential_trials": 100000,
+  "canonical_m27_to_m30_pipeline_errors": 0,
+  "unpatched_hazards_caught": 100000,
+  "unpatched_hazard_detection_rate_pct": 100.0,
+  "elapsed_ms": 612.48,
+  "overall_status": "PASS",
+  "redex_new_2": {
+    "bug_id": "REDEX-NEW-2",
+    "module": "redex-lib/redex/private/matcher.rkt",
+    "description": "Nested `(in-hole C_1 (in-hole C_2 e))` + `(name cap (hide-hole p))` context decomposition binding leak in `remove-bindings/filter` & Hash-Consed ZAM/NbE (`zam-use-hc?`) depth-18 diamond DAG soundness",
+    "trials": 15000,
+    "diamond_dag_depth": 18,
+    "virtual_tree_nodes_per_dag": 262144,
+    "shared_dag_nodes_per_trial": 19,
+    "unpatched_binding_leaks_caught": 15000,
+    "unpatched_catch_rate_pct": 100.0,
+    "patched_binding_leak_errors": 0,
+    "hc_zam_dag18_alpha_shift_divergences": 0,
+    "status": "PASS"
+  },
+  "redex_new_3": {
+    "bug_id": "REDEX-NEW-3",
+    "module": "redex-lib/redex/private/rg.rkt",
+    "description": "Cross-scope nested mismatch ellipsis `((p ..._!_1) ..._2)` exclusion table reset causing duplicate witnesses rejected by `redex-match`",
+    "trials": 15000,
+    "unpatched_duplicate_witnesses_caught": 15000,
+    "unpatched_catch_rate_pct": 100.0,
+    "patched_duplicate_witness_errors": 0,
+    "patched_starvation_retries": 0,
+    "status": "PASS"
+  },
+  "f73_m27_commutativity": {
+    "hazard_id": "F73",
+    "mitigation_pass": "M27 (`pass_m27_flush_virtual_reset_before_unitary_demotion`)",
+    "tier": "HLQdsIR -> MLRevIR",
+    "trials": 10000,
+    "unpatched_m1_after_m4_corruptions_caught": 10000,
+    "unpatched_catch_rate_pct": 100.0,
+    "patched_m27_commutation_errors": 0,
+    "commutation_identity": "M1 o M27 o M4 == M4 o M1",
+    "status": "PASS"
+  },
+  "f74_m28_idempotence": {
+    "hazard_id": "F74",
+    "mitigation_pass": "M28 (`pass_m28_epoch_tagged_rzz_conjugation`)",
+    "tier": "MLRevIR",
+    "trials": 10000,
+    "unpatched_non_idempotent_double_negations_caught": 10000,
+    "unpatched_catch_rate_pct": 100.0,
+    "patched_m28_idempotence_errors": 0,
+    "idempotence_identity": "M28(M28(C)) == M28(C)",
+    "status": "PASS"
+  },
+  "f75_m29_cross_seam_erasure": {
+    "hazard_id": "F75",
+    "mitigation_pass": "M29 (`pass_m29_coupled_cross_seam_erasure_discharge`)",
+    "tier": "MLRevIR -> Multi-QPU Zipper-Cut Seam",
+    "trials": 10000,
+    "unpatched_remote_qpu1_purity": 0.5,
+    "patched_remote_qpu1_purity": 1.0,
+    "unpatched_seam_decoherence_caught": 10000,
+    "unpatched_catch_rate_pct": 100.0,
+    "patched_m29_purity_errors": 0,
+    "status": "PASS"
+  },
+  "f76_to_f78_m30_8target_confluence": {
+    "hazard_ids": [
+      "F76",
+      "F77",
+      "F78"
+    ],
+    "mitigation_pass": "M30 (`pass_m30_dependency_dag_topological_confluence_normalizer`)",
+    "tier": "HLQdsIR -> MLRevIR -> LLMachineISA (All 8 Hardware Targets)",
+    "targets_tested": [
+      "willow105",
+      "heronR2_156",
+      "quantinuumH2_56",
+      "neutralAtomBluvstein",
+      "catQubit Alice&Bob",
+      "floquetHoneycomb",
+      "xzzxSurface",
+      "bbQldpc288"
+    ],
+    "trials_per_target": 5000,
+    "total_trials": 40000,
+    "unnormalized_divergences_caught": 40000,
+    "unnormalized_catch_rate_pct": 100.0,
+    "hazard_trigger_counts": {
+      "F73": 19981,
+      "F74": 20082,
+      "F76": 20825,
+      "F77": 19936,
+      "F78": 26617
+    },
+    "m30_confluence_divergences": 0,
+    "per_target_summary": {
+      "willow105": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      },
+      "heronR2_156": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      },
+      "quantinuumH2_56": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      },
+      "neutralAtomBluvstein": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      },
+      "catQubit Alice&Bob": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      },
+      "floquetHoneycomb": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      },
+      "xzzxSurface": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      },
+      "bbQldpc288": {
+        "trials": 5000,
+        "unnormalized_divergences_caught": 5000,
+        "m30_confluence_divergences": 0,
+        "confluence_rate_pct": 100.0
+      }
+    },
+    "status": "PASS"
+  },
+  "lean4_proof_audit": {
+    "lean_file": "proofs/redex_matcher_and_pass_confluence_proofs.lean",
+    "theorem_count": 6,
+    "all_theorems_le_12_lines": true,
+    "kernel_or_axiom_violations": [],
+    "theorems": [
+      {
+        "name": "redex_new2_nested_in_hole_hide_hole_hygiene_and_hc_zam_sound",
+        "statement_sha256_16": "4805a0af1ab3e3ff",
+        "proof_lines": 3,
+        "le_12_lines": true
+      },
+      {
+        "name": "redex_new3_nested_mismatch_ellipsis_cross_scope_disjoint",
+        "statement_sha256_16": "5331ed2df114b321",
+        "proof_lines": 5,
+        "le_12_lines": true
+      },
+      {
+        "name": "m27_frame_flush_before_rccx_demotion_commutes",
+        "statement_sha256_16": "8469d2bc9c07e1c7",
+        "proof_lines": 1,
+        "le_12_lines": true
+      },
+      {
+        "name": "m28_epoch_tagged_rzz_conjugation_idempotent",
+        "statement_sha256_16": "6fb9c53cbc12440d",
+        "proof_lines": 6,
+        "le_12_lines": true
+      },
+      {
+        "name": "m29_coupled_cross_seam_erasure_discharge_pure",
+        "statement_sha256_16": "a19ff951f5223681",
+        "proof_lines": 1,
+        "le_12_lines": true
+      },
+      {
+        "name": "m30_pass_schedule_diamond_confluence_all_8_targets",
+        "statement_sha256_16": "6c2ffcff807fe95e",
+        "proof_lines": 2,
+        "le_12_lines": true
+      }
+    ],
+    "status": "PASS"
+  }
+}

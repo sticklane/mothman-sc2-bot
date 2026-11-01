@@ -1,0 +1,810 @@
+{
+  "overall_pass": true,
+  "unified_judgment": "Gamma_in |- t : Q_e(A) -| Gamma_out",
+  "projected_rules": [
+    "T-DomImg",
+    "T-BorrowZ",
+    "T-PhaseClean",
+    "T-CounitU4",
+    "T-SubNorm",
+    "T-QubitCap",
+    "T-ParGuard"
+  ],
+  "summary_metrics": {
+    "buggy_circuits_tested": 16,
+    "buggy_true_positives": 16,
+    "true_positive_rate": 1.0,
+    "clean_circuits_tested": 14,
+    "clean_false_positives": 0,
+    "false_positive_rate": 0.0,
+    "rules_covered_by_buggy_witnesses": [
+      "T-BorrowZ",
+      "T-CounitU4",
+      "T-DomImg",
+      "T-ParGuard",
+      "T-PhaseClean",
+      "T-QubitCap",
+      "T-SubNorm"
+    ],
+    "input_formats_verified": [
+      "openqasm3",
+      "qiskit"
+    ],
+    "aer_statevector_pairs_verified": 7,
+    "aer_statevector_pairs_total": 7,
+    "cluster_presets_verified": 12,
+    "cluster_presets_total": 12,
+    "cli_checks_passed": true,
+    "wall_clock_sec": 2.3628,
+    "peak_rss_mb": 139.5
+  },
+  "buggy_circuit_results": [
+    {
+      "id": "BUG-01-DOMIMG-QASM-READONLY-MUTATION",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-DomImg",
+      "expected_code": "E-DOMIMG-READONLY-ALIASED-MUTATION",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "input_int": 4,
+        "input_hex": "0x4",
+        "input_bitstring_msb_to_lsb": "100",
+        "input_bitstring_lsb_to_msb": "001",
+        "wire_assignment": {
+          "q[0]": 0,
+          "q[1]": 0,
+          "q[2]": 1
+        },
+        "corrupted_readonly_wires": [
+          "q[0]"
+        ]
+      },
+      "elapsed_ms": 10.523,
+      "verified": true
+    },
+    {
+      "id": "BUG-02-DOMIMG-QISKIT-GF2K-ALIAS",
+      "source_kind": "qiskit",
+      "expected_rule": "T-DomImg",
+      "expected_code": "E-DOMIMG-GF2K-ALIAS-CORRUPTION",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "input_int": 34,
+        "input_hex": "0x22",
+        "input_bitstring_msb_to_lsb": "100010",
+        "input_bitstring_lsb_to_msb": "010001",
+        "wire_assignment": {
+          "q[0]": 0,
+          "q[1]": 1,
+          "q[2]": 0,
+          "q[3]": 0,
+          "q[4]": 0,
+          "q[5]": 1
+        },
+        "lhs_poly_hex": "0x2",
+        "rhs_poly_hex": "0x4",
+        "actual_product_hex": "0x5",
+        "expected_product_hex": "0x3",
+        "aliased_io_wires": [
+          "q[0]"
+        ]
+      },
+      "elapsed_ms": 2.763,
+      "verified": true
+    },
+    {
+      "id": "BUG-03-DOMIMG-QASM-UNCOMPUTE-ROUNDTRIP",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-DomImg",
+      "expected_code": "E-DOMIMG-ROUNDTRIP-RESIDUAL",
+      "well_typed": false,
+      "error_count": 2,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "input_int": 3,
+        "input_hex": "0x3",
+        "input_bitstring_msb_to_lsb": "11",
+        "input_bitstring_lsb_to_msb": "11",
+        "wire_assignment": {
+          "q[0]": 1,
+          "q[1]": 1
+        },
+        "corrupted_wires": [
+          "q[2]"
+        ]
+      },
+      "elapsed_ms": 5.056,
+      "verified": true
+    },
+    {
+      "id": "BUG-04-BORROWZ-QASM-HADAMARD-POLLUTION",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-BorrowZ",
+      "expected_code": "E-BORROWZ-BASIS-POLLUTION",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "borrowed_wires": [
+          "q[0]"
+        ],
+        "borrowed_z_initial_bit": 0,
+        "polluting_gates": [
+          0,
+          2
+        ]
+      },
+      "elapsed_ms": 1.639,
+      "verified": true
+    },
+    {
+      "id": "BUG-05-BORROWZ-QISKIT-UNRESTORED-CONTROL",
+      "source_kind": "qiskit",
+      "expected_rule": "T-BorrowZ",
+      "expected_code": "E-BORROWZ-UNRESTORED-MUTATION",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "input_int": 0,
+        "input_hex": "0x0",
+        "input_bitstring_msb_to_lsb": "00",
+        "input_bitstring_lsb_to_msb": "00",
+        "wire_assignment": {
+          "q[0]": 0,
+          "q[1]": 0
+        },
+        "unrestored_borrowed_wires": [
+          "q[0]"
+        ]
+      },
+      "elapsed_ms": 0.912,
+      "verified": true
+    },
+    {
+      "id": "BUG-06-BORROWZ-QASM-UNGUARDED-PHASE",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-BorrowZ",
+      "expected_code": "E-BORROWZ-UNGUARDED-PHASE-FLIP",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "input_int": 2,
+        "input_hex": "0x2",
+        "input_bitstring_msb_to_lsb": "010",
+        "input_bitstring_lsb_to_msb": "010",
+        "wire_assignment": {
+          "q[0]": 0,
+          "q[1]": 1,
+          "q[2]": 0
+        },
+        "validity_witness_wire": "q[2]",
+        "validity_witness_value": 0,
+        "spurious_phase_kickback_gates": [
+          1
+        ]
+      },
+      "elapsed_ms": 2.257,
+      "verified": true
+    },
+    {
+      "id": "BUG-07-PHASECLEAN-QASM-DIRTY-ANCILLA",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-PhaseClean",
+      "expected_code": "E-PHASECLEAN-DIRTY-ANCILLA",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "input_int": 3,
+        "input_hex": "0x3",
+        "input_bitstring_msb_to_lsb": "11",
+        "input_bitstring_lsb_to_msb": "11",
+        "wire_assignment": {
+          "q[0]": 1,
+          "q[1]": 1
+        },
+        "dirty_ancilla_wires": [
+          "q[2]"
+        ]
+      },
+      "elapsed_ms": 1.201,
+      "verified": true
+    },
+    {
+      "id": "BUG-08-PHASECLEAN-QISKIT-RESIDUAL-PHASE",
+      "source_kind": "qiskit",
+      "expected_rule": "T-PhaseClean",
+      "expected_code": "E-PHASECLEAN-RESIDUAL-PHASE",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "lhs_domain_input": {
+          "input_int": 1,
+          "input_hex": "0x1",
+          "input_bitstring_msb_to_lsb": "1",
+          "input_bitstring_lsb_to_msb": "1",
+          "wire_assignment": {
+            "q[0]": 1
+          }
+        },
+        "rhs_domain_input": {
+          "input_int": 0,
+          "input_hex": "0x0",
+          "input_bitstring_msb_to_lsb": "0",
+          "input_bitstring_lsb_to_msb": "0",
+          "wire_assignment": {
+            "q[0]": 0
+          }
+        },
+        "residual_phase_gates": [
+          1
+        ]
+      },
+      "elapsed_ms": 2.569,
+      "verified": true
+    },
+    {
+      "id": "BUG-09-COUNITU4-QASM-MISSING-CZ-FIXUP",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-CounitU4",
+      "expected_code": "E-COUNITU4-TAINTED-PHASE",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "input_int": 3,
+        "input_hex": "0x3",
+        "input_bitstring_msb_to_lsb": "11",
+        "input_bitstring_lsb_to_msb": "11",
+        "wire_assignment": {
+          "q[0]": 1,
+          "q[1]": 1
+        },
+        "measurement_outcomes": {
+          "gate_2_q[2]": 1
+        }
+      },
+      "elapsed_ms": 1.998,
+      "verified": true
+    },
+    {
+      "id": "BUG-10-COUNITU4-QISKIT-REDUNDANT-REMOTE-UNCOMPUTE",
+      "source_kind": "qiskit",
+      "expected_rule": "T-CounitU4",
+      "expected_code": "E-COUNITU4-REDUNDANT-REMOTE-DISENTANGLER",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "gate_index": 2,
+        "wire_qpu_map": {
+          "q[0]": 0,
+          "q[1]": 1
+        },
+        "disentangled_wire": "q[1]",
+        "branch_0_input": {
+          "input_int": 0,
+          "input_hex": "0x0",
+          "input_bitstring_msb_to_lsb": "00",
+          "input_bitstring_lsb_to_msb": "00",
+          "wire_assignment": {
+            "q[0]": 0,
+            "q[2]": 0
+          }
+        },
+        "branch_1_input": {
+          "input_int": 1,
+          "input_hex": "0x1",
+          "input_bitstring_msb_to_lsb": "01",
+          "input_bitstring_lsb_to_msb": "10",
+          "wire_assignment": {
+            "q[0]": 1,
+            "q[2]": 0
+          }
+        }
+      },
+      "elapsed_ms": 2.731,
+      "verified": true
+    },
+    {
+      "id": "BUG-11-SUBNORM-QISKIT-ALPHA-OVERFLOW",
+      "source_kind": "qiskit",
+      "expected_rule": "T-SubNorm",
+      "expected_code": "E-SUBNORM-ALPHA-OVERFLOW",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "alpha_actual": 1.2,
+        "alpha_declared": 0.75,
+        "overflow_ratio": 1.6
+      },
+      "elapsed_ms": 1.056,
+      "verified": true
+    },
+    {
+      "id": "BUG-12-SUBNORM-QASM-BLOCK-ERR-AND-CHEBYSHEV",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-SubNorm",
+      "expected_code": "E-SUBNORM-BLOCK-ENCODING-ERROR",
+      "well_typed": false,
+      "error_count": 2,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "block_spectral_error": 0.0995529,
+        "eps_0_declared": 0.01,
+        "alpha_declared": 1.0
+      },
+      "elapsed_ms": 2.738,
+      "verified": true
+    },
+    {
+      "id": "BUG-13-QUBITCAP-QASM-SINGLE-QPU-OVERFLOW",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-QubitCap",
+      "expected_code": "E-QUBITCAP-EXCEEDS-SINGLE-QPU",
+      "well_typed": false,
+      "error_count": 2,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "allocated_qubits": 8,
+        "live_qubit_width": 5,
+        "q_cap": 6,
+        "overflow_qubits": 2,
+        "chordal_reclaimable_ancillas": 3,
+        "width_after_chordal_reset_reuse": 5
+      },
+      "elapsed_ms": 3.028,
+      "verified": true
+    },
+    {
+      "id": "BUG-14-QUBITCAP-QISKIT-DETACHED-COST",
+      "source_kind": "qiskit",
+      "expected_rule": "T-QubitCap",
+      "expected_code": "E-QUBITCAP-DETACHED-COST-MISMATCH",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "claimed_temp_ands": 1,
+        "ast_total_and_toffoli_equiv": 2,
+        "ast_temp_and_mx": 0,
+        "ast_unitary_ccx": 2,
+        "discrepancy_ratio": 2.0
+      },
+      "elapsed_ms": 0.661,
+      "verified": true
+    },
+    {
+      "id": "BUG-15-PARGUARD-QASM-SUBOPTIMAL-ECC256-M16",
+      "source_kind": "openqasm3",
+      "expected_rule": "T-ParGuard",
+      "expected_code": "E-PARGUARD-SUBOPTIMAL-M",
+      "well_typed": false,
+      "error_count": 1,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "requested_machines": 16,
+        "optimal_machines_m_star": 4,
+        "qpar_grade": "ParSliceable",
+        "optimal_wall_clock_sec": 51.5582592,
+        "requested_wall_clock_sec": 211.124256,
+        "requested_q_per_machine": 192,
+        "requested_logical_ebits": 48720
+      },
+      "elapsed_ms": 1.956,
+      "verified": true
+    },
+    {
+      "id": "BUG-16-PARGUARD-QISKIT-ZALKA-GROVER-M8",
+      "source_kind": "qiskit",
+      "expected_rule": "T-ParGuard",
+      "expected_code": "E-PARGUARD-ZALKA-GROVER-SUBLINEAR",
+      "well_typed": false,
+      "error_count": 2,
+      "matched_rule_and_code": true,
+      "has_concrete_witness": true,
+      "counterexample": {
+        "requested_machines": 256,
+        "zalka_total_work_blowup_factor": 16.0,
+        "max_key_width_bits_saved": 8
+      },
+      "elapsed_ms": 1.614,
+      "verified": true
+    }
+  ],
+  "clean_circuit_results": [
+    {
+      "id": "CLEAN-01-DOMIMG-QASM-READONLY",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 0.705,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-02-DOMIMG-QISKIT-GF2K-EXACT",
+      "source_kind": "qiskit",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 2.007,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-03-DOMIMG-QASM-EXACT-INVERSE",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 5.323,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-04-BORROWZ-QASM-NEGCTRL",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 0.836,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-05-BORROWZ-QISKIT-GUARDED-ORACLE",
+      "source_kind": "qiskit",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 1.503,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-06-PHASECLEAN-QASM-BENNET",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 0.848,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-07-PHASECLEAN-QISKIT-PHASE-CANCELLED",
+      "source_kind": "qiskit",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 3.735,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-08-COUNITU4-QASM-GIDNEY-MX-CZ",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 2.056,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-09-COUNITU4-QASM-REMOTE-MX-DISENTANGLE",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 2.796,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-10-SUBNORM-QISKIT-EXACT-LCU",
+      "source_kind": "qiskit",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 0.347,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-11-QUBITCAP-QASM-RESET-REUSE",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 1.989,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-12-QUBITCAP-QISKIT-SLICE-AND-MARGIN",
+      "source_kind": "qiskit",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 0.857,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-13-PARGUARD-QASM-ECC256-M4",
+      "source_kind": "openqasm3",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 1.452,
+      "verified": true
+    },
+    {
+      "id": "CLEAN-14-PARGUARD-QISKIT-SEQ-DOMINATED-M1",
+      "source_kind": "qiskit",
+      "well_typed": true,
+      "error_count": 0,
+      "warning_count": 0,
+      "elapsed_ms": 2.07,
+      "verified": true
+    }
+  ],
+  "aer_statevector_verification": [
+    {
+      "pair_id": "AER-01-DOMIMG-GF2K-MULTIPLIER",
+      "rule": "T-DomImg",
+      "qubits_repaired": 9,
+      "buggy_output_bits": [
+        0,
+        0,
+        0
+      ],
+      "expected_output_bits": [
+        1,
+        1,
+        0
+      ],
+      "buggy_fidelity": 0.0,
+      "repaired_fidelity": 1.0,
+      "verified": true
+    },
+    {
+      "pair_id": "AER-02-BORROWZ-CONTROL-PURITY",
+      "rule": "T-BorrowZ",
+      "qubits_repaired": 2,
+      "buggy_fidelity": 0.25,
+      "repaired_fidelity": 1.0,
+      "verified": true
+    },
+    {
+      "pair_id": "AER-03-PHASECLEAN-BENNET-ANCILLA",
+      "rule": "T-PhaseClean",
+      "qubits_repaired": 4,
+      "buggy_fidelity": 0.5625,
+      "repaired_fidelity": 1.0,
+      "verified": true
+    },
+    {
+      "pair_id": "AER-04-PHASECLEAN-RELATIVE-PHASE",
+      "rule": "T-PhaseClean",
+      "qubits_repaired": 2,
+      "buggy_fidelity": 0.5,
+      "repaired_fidelity": 1.0,
+      "verified": true
+    },
+    {
+      "pair_id": "AER-05-COUNITU4-MX-MINUS-BRANCH",
+      "rule": "T-CounitU4",
+      "qubits_repaired": 3,
+      "buggy_fidelity": 0.25,
+      "repaired_fidelity": 1.0,
+      "verified": true
+    },
+    {
+      "pair_id": "AER-06-SUBNORM-BLOCK-PROJECTION",
+      "rule": "T-SubNorm",
+      "qubits_repaired": 2,
+      "buggy_subblock_error": 0.900447102353,
+      "repaired_subblock_error": 0.0,
+      "verified": true
+    },
+    {
+      "pair_id": "AER-07-QUBITCAP-CHORDAL-RESET-REUSE",
+      "rule": "T-QubitCap",
+      "qubits_unfolded": 5,
+      "qubits_repaired": 4,
+      "unfolded_target_prob": 1.0,
+      "repaired_target_prob": 1.0,
+      "verified": true
+    }
+  ],
+  "convex_m_star_cluster_sizing": {
+    "m_max_tested": 256,
+    "presets_verified": 12,
+    "presets_total": 12,
+    "all_presets_match": true,
+    "sequential_m1_fallback_verified": true,
+    "ucurve_knee_pruning_verified": true,
+    "preset_results": [
+      {
+        "workload": "ECC-256",
+        "paradigm": "algebraic-limb",
+        "qpar_grade": "ParSliceable",
+        "expected_m_star_peers": 4,
+        "actual_m_star_peers": 4,
+        "q_per_machine_peers": 312,
+        "logical_ebits_peers": 9744,
+        "m_star_optical_tree": 4,
+        "q_per_machine_optical_tree": 306,
+        "pruned_ucurve_count_peers": 8,
+        "verified": true
+      },
+      {
+        "workload": "RSA-2048",
+        "paradigm": "algebraic-limb",
+        "qpar_grade": "ParSliceable",
+        "expected_m_star_peers": 6,
+        "actual_m_star_peers": 6,
+        "q_per_machine_peers": 236,
+        "logical_ebits_peers": 31140,
+        "m_star_optical_tree": 6,
+        "q_per_machine_optical_tree": 228,
+        "pruned_ucurve_count_peers": 7,
+        "verified": true
+      },
+      {
+        "workload": "RSA-4096",
+        "paradigm": "algebraic-limb",
+        "qpar_grade": "ParSliceable",
+        "expected_m_star_peers": 8,
+        "actual_m_star_peers": 8,
+        "q_per_machine_peers": 356,
+        "logical_ebits_peers": 87192,
+        "m_star_optical_tree": 8,
+        "q_per_machine_optical_tree": 340,
+        "pruned_ucurve_count_peers": 6,
+        "verified": true
+      },
+      {
+        "workload": "AES-128",
+        "paradigm": "grover-amplify",
+        "qpar_grade": "ParNonPartitionable",
+        "expected_m_star_peers": 1,
+        "actual_m_star_peers": 1,
+        "q_per_machine_peers": 261,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 1,
+        "q_per_machine_optical_tree": 261,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "AES-256",
+        "paradigm": "grover-amplify",
+        "qpar_grade": "ParNonPartitionable",
+        "expected_m_star_peers": 1,
+        "actual_m_star_peers": 1,
+        "q_per_machine_peers": 389,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 1,
+        "q_per_machine_optical_tree": 389,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "SHA3-256",
+        "paradigm": "grover-amplify",
+        "qpar_grade": "ParNonPartitionable",
+        "expected_m_star_peers": 1,
+        "actual_m_star_peers": 1,
+        "q_per_machine_peers": 3200,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 1,
+        "q_per_machine_optical_tree": 3200,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "SLH-DSA-128s",
+        "paradigm": "grover-amplify",
+        "qpar_grade": "ParNonPartitionable",
+        "expected_m_star_peers": 1,
+        "actual_m_star_peers": 1,
+        "q_per_machine_peers": 3264,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 1,
+        "q_per_machine_optical_tree": 3264,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "McEliece-348864",
+        "paradigm": "isd-search",
+        "qpar_grade": "ParNonPartitionable",
+        "expected_m_star_peers": 1,
+        "actual_m_star_peers": 1,
+        "q_per_machine_peers": 4258,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 1,
+        "q_per_machine_optical_tree": 4258,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "BIKE-L1",
+        "paradigm": "isd-search",
+        "qpar_grade": "ParNonPartitionable",
+        "expected_m_star_peers": 1,
+        "actual_m_star_peers": 1,
+        "q_per_machine_peers": 24646,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 1,
+        "q_per_machine_optical_tree": 24646,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "DQI",
+        "paradigm": "shot-sample",
+        "qpar_grade": "ParShotLinear",
+        "expected_m_star_peers": 256,
+        "actual_m_star_peers": 256,
+        "q_per_machine_peers": 228,
+        "logical_ebits_peers": 12288,
+        "m_star_optical_tree": 256,
+        "q_per_machine_optical_tree": 224,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "Hubbard-QSVT",
+        "paradigm": "shot-sample",
+        "qpar_grade": "ParShotLinear",
+        "expected_m_star_peers": 256,
+        "actual_m_star_peers": 256,
+        "q_per_machine_peers": 128,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 256,
+        "q_per_machine_optical_tree": 128,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      },
+      {
+        "workload": "FeMoCo-THC",
+        "paradigm": "shot-sample",
+        "qpar_grade": "ParShotLinear",
+        "expected_m_star_peers": 64,
+        "actual_m_star_peers": 64,
+        "q_per_machine_peers": 2196,
+        "logical_ebits_peers": 0,
+        "m_star_optical_tree": 64,
+        "q_per_machine_optical_tree": 2196,
+        "pruned_ucurve_count_peers": 0,
+        "verified": true
+      }
+    ]
+  },
+  "cli_verification": {
+    "cli_verified": true,
+    "self_test_exit_code": 0,
+    "buggy_qasm_exit_code": 1,
+    "clean_qasm_exit_code": 0,
+    "rsa4096_sizer_exit_code": 0,
+    "rsa4096_optimal_machines": 8,
+    "scratch_dir_used": "~/toolchains/tmp/linter_verify"
+  }
+}

@@ -1,0 +1,366 @@
+{
+  "total_modules": 72,
+  "total_parts": 72,
+  "parts": [
+    {
+      "part": 1,
+      "title": "Intrinsic Canonical Skew-Binary Numerals",
+      "sha256_16": "9904769b18d6e9d3"
+    },
+    {
+      "part": 2,
+      "title": "Borrow-Phase-Indexed Symbiotic Quantum Zipper",
+      "sha256_16": "d90a042ed4210621"
+    },
+    {
+      "part": 3,
+      "title": "Step-Ticked Real-Time Rotation Schedules",
+      "sha256_16": "7f71baec6052340c"
+    },
+    {
+      "part": 4,
+      "title": "Tombstone-Free Non-Empty Crit-Bit Radix Trees",
+      "sha256_16": "af3fa008d300348d"
+    },
+    {
+      "part": 5,
+      "title": "Size-Indexed Pointerless Braun Trees & Rank-Indexed Skew Random-Access Lists",
+      "sha256_16": "39947989af3fc714"
+    },
+    {
+      "part": 6,
+      "title": "Resource-Graded & Purity-Typed Quantum Circuit Calculus",
+      "sha256_16": "8d89090860e03b40"
+    },
+    {
+      "part": 7,
+      "title": "Algebraic-Degree-Guarded Mid-Circuit Uncomputation & Hardware Zone Coeffects",
+      "sha256_16": "da9823418599e064"
+    },
+    {
+      "part": 8,
+      "title": "Quotient Equivalence for Carry-Save Arithmetics & Linear Zipper Derivatives",
+      "sha256_16": "b706b82a7d4c4d9e"
+    },
+    {
+      "part": 9,
+      "title": "Quantum Separation Logic Frame Law & Commutative Diagonal Parallel Tensor",
+      "sha256_16": "4f2b8db2bd5baf81"
+    },
+    {
+      "part": 10,
+      "title": "Guarded Clocked Recursion & Timed Choreographic Multi-QPU Sessions",
+      "sha256_16": "342205635f7d22b7"
+    },
+    {
+      "part": 11,
+      "title": "Bundled Resource-Grade Monoids, Hoare-Threaded Circuits & Ornamental Spines",
+      "sha256_16": "325792677619fa77"
+    },
+    {
+      "part": 12,
+      "title": "Conjugate-Phase Uncomputation Soundness & Unified Wire Restoration",
+      "sha256_16": "b11a10accab9af9b"
+    },
+    {
+      "part": 13,
+      "title": "Non-Malleable History-Independent Deletion & Cat-State Bridge Soundness",
+      "sha256_16": "c25823a07c90e513"
+    },
+    {
+      "part": 14,
+      "title": "Compositional Grade Homomorphisms & Canonical Container Quotients",
+      "sha256_16": "be84ecac5ec38d85"
+    },
+    {
+      "part": 15,
+      "title": "Certifying Indexed Quantum Monad to Bivariate-Bicycle qLDPC Lowering",
+      "sha256_16": "fdf23ff2b3e4cb3a"
+    },
+    {
+      "part": 16,
+      "title": "Refinement-Typed Quantum Specification & Liquid/Gospel Contract Soundness",
+      "sha256_16": "89a314389f690206"
+    },
+    {
+      "part": 17,
+      "title": "Quantitative Polynomial Container Algebra & Normalization by Evaluation",
+      "sha256_16": "905dd3956717edb3"
+    },
+    {
+      "part": 18,
+      "title": "Multi-Feature Resource, Purity & Borrowing Interaction Soundness",
+      "sha256_16": "ebb5a72ebb62b174"
+    },
+    {
+      "part": 19,
+      "title": "Fault-Tolerant Quantum Error Correction & Transversal Lattice Surgery",
+      "sha256_16": "e0caeb64c539c923"
+    },
+    {
+      "part": 20,
+      "title": "Deep Quantum AST & Fault-Tolerant Syndrome Extraction Soundness",
+      "sha256_16": "6dcfdaa64c79ce64"
+    },
+    {
+      "part": 21,
+      "title": "64-Bit Bitboard Reversible Superoptimization & Optimal Gadget Synthesis",
+      "sha256_16": "e39a5a5f56a1fd92"
+    },
+    {
+      "part": 22,
+      "title": "Multi-Objective Space-Time Pebbling & Chordal Live-Range Qubit Packing",
+      "sha256_16": "e8039169fa205461"
+    },
+    {
+      "part": 23,
+      "title": "Native Hardware Gate Calibration & Relative-Phase Toffoli Uncomputation",
+      "sha256_16": "fc2054cf0fed8941"
+    },
+    {
+      "part": 24,
+      "title": "Three-Tier Multi-Dialect Quantum IR & Six-Kind Measurement Taxonomy",
+      "sha256_16": "f1f05d8e87cd9300"
+    },
+    {
+      "part": 25,
+      "title": "Multi-Layer IR Pass Commutativity & Delayed-Uncomputation Region Fusion",
+      "sha256_16": "d7ad1efe1b82e797"
+    },
+    {
+      "part": 26,
+      "title": "Spatial Blockade Safety, Telescoping Survival Bounds & Code-Distance Step-Down",
+      "sha256_16": "5b29349440cb26a0"
+    },
+    {
+      "part": 27,
+      "title": "Biased-Noise Cat-Qubit Modalities, ZipperCut Seam Cutting & Speculative Rollback",
+      "sha256_16": "7a1a90e3eb350a31"
+    },
+    {
+      "part": 28,
+      "title": "Orthogonal Quantum Case-Splitting, Catalyst Towers & Acyclic E-Graph Rewriting",
+      "sha256_16": "f0373ed8e2208857"
+    },
+    {
+      "part": 29,
+      "title": "Compositional Pauli/Echo Frame Grades & Hardware Exclusion Invariants",
+      "sha256_16": "466f9c1e3ee81e65"
+    },
+    {
+      "part": 30,
+      "title": "Systematic Quantum Compiler Counterexample & Invariant Discovery",
+      "sha256_16": "dbce7ec40a96af49"
+    },
+    {
+      "part": 31,
+      "title": "Linear Closure Capture Safety & Cross-Layer Hardware Lowering Invariants",
+      "sha256_16": "5601549a4259b2c0"
+    },
+    {
+      "part": 32,
+      "title": "CoreQDS Unified Source Calculus & Three-Loop Classical-Quantum Latency Hierarchy",
+      "sha256_16": "0c30b0ee9b305b1f"
+    },
+    {
+      "part": 33,
+      "title": "High-Level Quantum Programming Language Calculus Synthesis",
+      "sha256_16": "ed8b296ccf48be98"
+    },
+    {
+      "part": 34,
+      "title": "HUGR Regional Port Graphs, Direct-Sum Pattern Isometries & Pointer Heaps",
+      "sha256_16": "9a9b6c45000e39a6"
+    },
+    {
+      "part": 35,
+      "title": "End-to-End CoreQDS to HUGR, ML-RevIR & OpenQASM 3.0 Lowering",
+      "sha256_16": "b93179eb155fb669"
+    },
+    {
+      "part": 36,
+      "title": "CoreQDS 2.0 Lexical Substitution, First-Class Pebbling & Presburger Slice Borrowing",
+      "sha256_16": "71273168cb95616a"
+    },
+    {
+      "part": 37,
+      "title": "Translation-Validated CoreQDS 2.0 Circuit Compilation & Cost Optimality",
+      "sha256_16": "e34f9e2926b3c30d"
+    },
+    {
+      "part": 38,
+      "title": "Dyadic Statevector Semantics, Phase-Polynomial Synthesis & Coupling-Graph Routing",
+      "sha256_16": "f245382b7d5fb4f9"
+    },
+    {
+      "part": 39,
+      "title": "Constructive Measurement-Based Multi-Shot Rewriting, TeleGate & Native-ISA Rebasing",
+      "sha256_16": "2e31bfba0e9cb266"
+    },
+    {
+      "part": 40,
+      "title": "Scalable ZX-Calculus Spider/Hopf Reduction, Gridsynth & Minimal Kernel Calculus",
+      "sha256_16": "9129b65f2831d9b5"
+    },
+    {
+      "part": 41,
+      "title": "Graph-Like ZX Local Complementation, gflow Extraction & Magic-State Cultivation",
+      "sha256_16": "82f97943a34f6097"
+    },
+    {
+      "part": 42,
+      "title": "Post-Route Euler Peephole Fusion, Chordal Compaction & Clean-Ancilla Compression",
+      "sha256_16": "07b00359a96793cf"
+    },
+    {
+      "part": 43,
+      "title": "Commutation-Aware DAG Peephole, ASAP Critical-Path Scheduling & XY4 Decoupling",
+      "sha256_16": "41c56f797d1e8951"
+    },
+    {
+      "part": 44,
+      "title": "Multi-Basis Cross-Target Equivalence, OpenQASM Round-Trip & Chordal Ancilla Recycling",
+      "sha256_16": "ed2f04a8c9a87add"
+    },
+    {
+      "part": 45,
+      "title": "Ten-Dimensional AME(9, 10) QECC Singleton Saturation & Dual-Polarity SafeVerify",
+      "sha256_16": "2f88bf649f09f08b"
+    },
+    {
+      "part": 46,
+      "title": "Composite-Dimension AME(n, 6) & AME(10, 10) Euler Obstruction vs Hexad MDS Boundary",
+      "sha256_16": "c8578fb09a3f73ac"
+    },
+    {
+      "part": 47,
+      "title": "Universal Quantum Substructural Laws U1\u2013U4 (EraseBy, Canonical, TotalOn, QTainted)",
+      "sha256_16": "73e64beef5f2c1b5"
+    },
+    {
+      "part": 48,
+      "title": "Physical-Simulator Noise Findings & Hardware-Indexed QSub_phys Soundness Guard",
+      "sha256_16": "8bd3a4ece81c3126"
+    },
+    {
+      "part": 49,
+      "title": "Counterexample-Guided Automatic Physical Repair Synthesis",
+      "sha256_16": "3edc5e5d0b01f8fa"
+    },
+    {
+      "part": 50,
+      "title": "Hardware-Indexed QSub_phys Cryptographic & Coding Lowering",
+      "sha256_16": "e0110663985358ae"
+    },
+    {
+      "part": 51,
+      "title": "Compositional Hybrid MPS, Stabilizer & ZX Equivalence Verification",
+      "sha256_16": "ba58735b270acd36"
+    },
+    {
+      "part": 52,
+      "title": "Soundness, Completeness & Minimality Metatheory of Three-Rule QSub and QSub_phys",
+      "sha256_16": "19fa05da15d3406c"
+    },
+    {
+      "part": 53,
+      "title": "Physical Resource Semiring QPhysGrade (Decoherence, Crosstalk & Fault Distance)",
+      "sha256_16": "86c8048fd2cf2866"
+    },
+    {
+      "part": 54,
+      "title": "Reversible Cryptographic & Algebraic Primitives (AES, Keccak, Gidney MBU & BCH)",
+      "sha256_16": "b6d16ef1a2abb7b7"
+    },
+    {
+      "part": 55,
+      "title": "Calibrated Superconducting/Neutral-Atom Noise & Zero-DSP Decoder Backlog Bounds",
+      "sha256_16": "8d6b8073e6885261"
+    },
+    {
+      "part": 56,
+      "title": "Differential Multi-Simulator Equivalence & Compiler Mutation Kill-Rate Soundness",
+      "sha256_16": "d2046587b3ed809f"
+    },
+    {
+      "part": 57,
+      "title": "Annotation-Free Wire-Level Symbolic ANF & Phase-Polynomial Inference",
+      "sha256_16": "f5592ac115c4be6e"
+    },
+    {
+      "part": 58,
+      "title": "Asymmetric MBU Adjoints, 91-CX SLP MixColumns & Pareto Narrow-Width In-Place AES",
+      "sha256_16": "8ad7c6a29a40cbda"
+    },
+    {
+      "part": 59,
+      "title": "Early-Measurement Phase-Only Decoded Quantum Interferometry (DQI)",
+      "sha256_16": "d70a8de53d339344"
+    },
+    {
+      "part": 60,
+      "title": "Select-SWAP QROAM Sublinear MBU Uncomputation & Kawamura RNS-CRT Canonicality",
+      "sha256_16": "bf76cbd295544948"
+    },
+    {
+      "part": 61,
+      "title": "LakefillQ Unified Kernel Elaboration & Dynamic OpenQASM 3.0 Feedforward",
+      "sha256_16": "ece2a6c58c31292b"
+    },
+    {
+      "part": 62,
+      "title": "Hash-Consed XAG/FRAIG Multi-Round Symbolic QSub & Bilinear Phase Inference",
+      "sha256_16": "71c0b49949f7b777"
+    },
+    {
+      "part": 63,
+      "title": "Congruence-Closed RevIR e-Graph Saturation & Bellman-Knuth QPhysGrade Extraction",
+      "sha256_16": "386cd9b40e3bff1d"
+    },
+    {
+      "part": 64,
+      "title": "Multiplierless 500 MHz 0-DSP BraunTree Union-Find RTL & Stim Zero-Backlog Co-Simulation",
+      "sha256_16": "011e072a19c020db"
+    },
+    {
+      "part": 65,
+      "title": "Unified Lakefill QSub & QPhys Architectural Closure",
+      "sha256_16": "8c2b03b97f02e589"
+    },
+    {
+      "part": 66,
+      "title": "Block-Encoded Linear Algebra (LCU, QSVT & Qubitization) in LakefillQ",
+      "sha256_16": "80a7d8d0a15666ec"
+    },
+    {
+      "part": 67,
+      "title": "Deep Algorithmic Circuit Optimizations & Three-Mode Scaling Laws",
+      "sha256_16": "39571c44f0eebb62"
+    },
+    {
+      "part": 68,
+      "title": "Signed Odd-Window Elliptic-Curve & Coset/RNS Modular Arithmetic Proofs",
+      "sha256_16": "6f618b5850a9a998"
+    },
+    {
+      "part": 69,
+      "title": "Zero-Gate Wire-Permutation Tracking & Symmetric/Hash Uncomputation Proofs",
+      "sha256_16": "06ecac282c892290"
+    },
+    {
+      "part": 70,
+      "title": "Quantum Information Set Decoding (QM4RI, DOOM) & DQI Injectivity Proofs",
+      "sha256_16": "243ad232d5e9f0be"
+    },
+    {
+      "part": 71,
+      "title": "Qubitization Involution Guards, Phase Compensation & THC Walk Synthesis",
+      "sha256_16": "98eeec03be5ed50e"
+    },
+    {
+      "part": 72,
+      "title": "Generalized Type-System Bug-Class Prevention & Cluster Guards",
+      "sha256_16": "989f3341ec9eadfb"
+    }
+  ]
+}

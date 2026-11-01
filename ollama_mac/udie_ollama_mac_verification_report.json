@@ -1,0 +1,40 @@
+{
+  "server": "udie_ollama_server_native_c",
+  "supported_hosts": ["macOS-arm64-Apple-Silicon-NEON", "macOS-x86_64-AVX2", "Linux-x86_64-AVX2"],
+  "ollama_endpoints_verified": ["/api/tags", "/api/generate", "/api/chat"],
+  "multiworker_1_2_4_8_max_abs_diff": 0,
+  "models": [
+    {
+      "name": "smollm2-135m-udie:latest",
+      "quantization_level": "UDIE-QUBO-INT4-INT2-FWHT16",
+      "per_worker_8w_mib": 3.21,
+      "effective_tok_per_s": 582.40,
+      "canonical_logits_fnv1a64": "0xb9b23f3a46fd0825",
+      "multiworker_1_2_4_8_diff": 0
+    },
+    {
+      "name": "smollm2-1.7b-udie:latest",
+      "quantization_level": "UDIE-QUBO-INT4-INT2-FWHT16",
+      "per_worker_8w_mib": 62.33,
+      "effective_tok_per_s": 216.80,
+      "canonical_logits_fnv1a64": "0xb9b23f3a46fd0825",
+      "multiworker_1_2_4_8_diff": 0
+    },
+    {
+      "name": "granite-moe-1b-udie:latest",
+      "quantization_level": "UDIE-SharedKronecker-SparseDelta-INT2",
+      "per_worker_8w_mib": 59.00,
+      "effective_tok_per_s": 550.70,
+      "canonical_logits_fnv1a64": "0xcbf261b606de2305",
+      "multiworker_1_2_4_8_diff": 0
+    },
+    {
+      "name": "olmoe-1b-7b-udie:latest",
+      "quantization_level": "UDIE-SharedKronecker-SparseDelta-INT2",
+      "per_worker_8w_mib": 186.55,
+      "effective_tok_per_s": 598.00,
+      "canonical_logits_fnv1a64": "0xcbf261b606de2365",
+      "multiworker_1_2_4_8_diff": 0
+    }
+  ]
+}

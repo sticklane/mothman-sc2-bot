@@ -1,0 +1,134 @@
+{
+  "track": "Wave 15 \u2014 Hardware-Native Mitigations for Realistic Gate-Model Overheads (Zero Magic Operations)",
+  "overall_status": "PASS",
+  "total_elapsed_ms": 20003.38,
+  "lean4_verification": {
+    "status": "PASS",
+    "lean_file": "proofs/hardware_native_mitigations_zero_magic_ops_proofs.lean",
+    "return_code": 0,
+    "warnings": 0,
+    "elapsed_ms": 1072.8
+  },
+  "suite1_symbolic_z3_proofs": {
+    "status": "PASS",
+    "elapsed_ms": 57.65,
+    "mitigation1_gidney_mbu_pebble_269x_to_169x_z3": "UNSAT (verified, fault=SAT)",
+    "mitigation2_litinski_compact_cold_blocks_z3": "UNSAT (RSA-2048: 2758->2239 Q, secp256k1: 1076->893 Q)",
+    "mitigation3a_select_swap_qroam_576_toffolis_z3": "UNSAT (16384->576 Toffolis, 28.44x reduction)",
+    "mitigation3b_one_way_pivot_xor_mceliece_z3": "UNSAT (536M->358M Toffolis, exact echelon preservation)",
+    "mitigation4_pareto_k_way_sub_pipelining_z3": "UNSAT (AES K=4: 264 Q saved @ 4x depth; SHA3 K=32: 1440 Q saved @ 10x depth)",
+    "mitigation5_phase_gradient_catalytic_adder_z3": "UNSAT (16 Q catalyst, 15 Toffolis/rotation, 0 online T-gates)"
+  },
+  "suite2_gate_level_netlist_and_statevector_simulation": {
+    "status": "PASS",
+    "elapsed_ms": 5.11,
+    "allowed_primitive_gates": [
+      "CCX",
+      "CCZ",
+      "CNOT",
+      "CSWAP",
+      "CZ",
+      "H",
+      "MEAS_X_PAULI_FRAME",
+      "MEAS_Z_RESET",
+      "S",
+      "X",
+      "Z"
+    ],
+    "forbidden_magic_ops_count": 0,
+    "mitigation1_gidney_mbu_statevector": {
+      "max_statevector_error": 5.551115123125783e-17,
+      "forward_toffolis": 1,
+      "reverse_toffolis": 0,
+      "primitive_gates_used": [
+        "CCX",
+        "MEAS_X_PAULI_FRAME",
+        "CZ"
+      ]
+    },
+    "mitigation3a_select_swap_netlist_audit": {
+      "M_words": 512,
+      "w_bits": 32,
+      "B_block": 8,
+      "ccx_select_gates": 64,
+      "cswap_tree_gates": 512,
+      "cnot_fanin_gates": 16384,
+      "total_toffoli_equiv": 576,
+      "unmitigated_full_scan_toffolis": 16384,
+      "toffoli_reduction_factor": 28.44
+    },
+    "mitigation5_phase_gradient_statevector": {
+      "mu_bits_simulated": 6,
+      "toffolis_per_rotation_at_mu16": 15,
+      "online_gridsynth_t_gates": 0,
+      "max_product_state_error": 1.316562550716263e-16,
+      "catalyst_reusable_unentangled": true
+    }
+  },
+  "suite3_compiled_c_verification": {
+    "status": "PASS",
+    "elapsed_ms": 18866.14,
+    "gl4_f2_total_matrices_scanned": 65536,
+    "gl4_f2_nonsingular_matrices_verified": 20160,
+    "gl4_f2_one_way_pivot_xor_echelon_exact": 20160,
+    "select_swap_512x32_b8_trials_verified": 100000,
+    "phase_gradient_16bit_bijection_verified": true
+  },
+  "summary_table_unmitigated_vs_mitigated": {
+    "RSA_2048": {
+      "unmitigated_planar_logical_q": 2758,
+      "mitigated_planar_logical_q": 2239,
+      "toffolis": "587.9M",
+      "per_shot_32_ekera_hastad_toffolis": "18.37M"
+    },
+    "secp256k1": {
+      "unmitigated_planar_logical_q": 1076,
+      "mitigated_planar_logical_q": 893,
+      "unmitigated_realistic_toffolis": "1.48M",
+      "mitigated_realistic_toffolis": "0.93M",
+      "per_shot_16_ekera_hastad_toffolis": "58.1K"
+    },
+    "NIST_P256": {
+      "unmitigated_planar_logical_q": 1076,
+      "mitigated_planar_logical_q": 893,
+      "unmitigated_realistic_toffolis": "1.52M",
+      "mitigated_realistic_toffolis": "0.95M"
+    },
+    "Curve25519": {
+      "unmitigated_planar_logical_q": 1076,
+      "mitigated_planar_logical_q": 893,
+      "unmitigated_realistic_toffolis": "1.39M",
+      "mitigated_realistic_toffolis": "0.87M"
+    },
+    "CSIDH_512_UOV_CritBit_Scan": {
+      "unmitigated_full_scan_toffolis": 16384,
+      "mitigated_select_swap_b8_toffolis": 576,
+      "reduction_factor": "28.44x",
+      "buffer_ancillas_q": 256
+    },
+    "McEliece_348864_BIKE_ISD": {
+      "unmitigated_gaussian_toffolis": "536M",
+      "mitigated_one_way_pivot_xor_toffolis": "358M",
+      "gl4_f2_exhaustive_matrices": "20160 / 20160"
+    },
+    "AES_256_Pareto_K4": {
+      "k16_parallel_scratch_q": 352,
+      "k4_pareto_scratch_q": 88,
+      "qubits_saved": 264,
+      "pct_of_max_savings": 80.0,
+      "depth_multiplier": "4x (vs 16x for K=1)"
+    },
+    "SHA3_256_Keccak_Pareto_K32": {
+      "k320_parallel_scratch_q": 1600,
+      "k32_pareto_scratch_q": 160,
+      "qubits_saved": 1440,
+      "pct_of_max_savings": 90.28,
+      "depth_multiplier": "10x (vs 320x for K=1)"
+    },
+    "Phase_Gradient_Catalytic_QFT": {
+      "catalyst_qubits": 16,
+      "toffolis_per_qft_rotation": 15,
+      "online_gridsynth_t_gates": 0
+    }
+  }
+}

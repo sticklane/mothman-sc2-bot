@@ -1,0 +1,450 @@
+{
+  "title": "Empirical Comparison of Lakefill Lisp vs Published Quantum Programming Languages (Q#, Quipper, Silq, Qrisp, Qualtran, Qunity, Tower)",
+  "all_verifications_passed": true,
+  "total_runtime_ms": 3039.1,
+  "racket_subprocess_ms": 2769.9,
+  "root_causes_diagnosed_and_resolved": {
+    "root_cause_A_functional_bennett_tax": {
+      "diagnosis": "Nesting `within-apply` across `GF(2^8) -> GF(2^4) -> GF(2^2)` eagerly uncomputes inner sub-multipliers (`144` CCX forward + `288` CCX `S^-1` `erase-by` = `432` CCX/S-box, `80,640` CCX for AES-128).",
+      "fix": "Session-scoped `(with-and-session ...)` SSA `TempAND` DAG keeps all `34` Boyar-Peralta `AND` ancillas alive until the end of the S-box session and erases them in reverse topological order via `Law U4` (`mid-meas-x-cond-z`) with `0` Toffolis.",
+      "empirical_gain": {
+        "aes128_nist_c1_outofplace_qkey": {
+          "ciphertext_hex": "69c4e0d86a7b0430d8cdb78070b4c55a",
+          "expected_hex": "69c4e0d86a7b0430d8cdb78070b4c55a",
+          "gate_counts": {
+            "assert_clean": 13801,
+            "ccx": 6800,
+            "cx": 385600,
+            "h": 0,
+            "mid_meas_x_cond_z": 6800,
+            "phase": 0,
+            "swap": 756,
+            "total_physical_gates": 400772,
+            "x": 816
+          },
+          "naive_generic_ccx": 80640,
+          "nist_exact_match": true,
+          "t_count_reduction_vs_naive": 20.75294117647059,
+          "temp_ands": 6800,
+          "toffoli_reduction_vs_naive": 11.858823529411765,
+          "total_wires": 1572,
+          "uncompute_toffolis": 0
+        },
+        "aes128_nist_c1_shared_key_schedule": {
+          "ciphertext_hex": "69c4e0d86a7b0430d8cdb78070b4c55a",
+          "gate_counts": {
+            "assert_clean": 11041,
+            "ccx": 5440,
+            "cx": 308832,
+            "h": 0,
+            "mid_meas_x_cond_z": 5440,
+            "phase": 0,
+            "swap": 756,
+            "total_physical_gates": 321829,
+            "x": 1361
+          },
+          "temp_ands_full_10r": 5440,
+          "temp_ands_half_5r_mitm": 2720,
+          "temp_ands_half_with_key_epoch": 3400,
+          "total_wires": 1444
+        },
+        "aes256_nist_c3_outofplace_qkey": {
+          "ciphertext_hex": "8ea2b7ca516745bfeafc49904b496089",
+          "expected_hex": "8ea2b7ca516745bfeafc49904b496089",
+          "gate_counts": {
+            "assert_clean": 19045,
+            "ccx": 9384,
+            "cx": 532752,
+            "h": 0,
+            "mid_meas_x_cond_z": 9384,
+            "phase": 0,
+            "swap": 1092,
+            "total_physical_gates": 553723,
+            "x": 1111
+          },
+          "naive_generic_ccx": 112896,
+          "nist_exact_match": true,
+          "temp_ands": 9384,
+          "toffoli_reduction_vs_naive": 12.030690537084398,
+          "total_wires": 2212,
+          "uncompute_toffolis": 0
+        },
+        "lakefill_session_mbu_bp34_sbox": {
+          "and_depth": 4,
+          "exhaustive_256_of_256_nist_sbox_verified": true,
+          "gate_counts": {
+            "assert_clean": 69,
+            "ccx": 34,
+            "cx": 1860,
+            "h": 0,
+            "mid_meas_x_cond_z": 34,
+            "phase": 0,
+            "swap": 0,
+            "total_physical_gates": 1932,
+            "x": 4
+          },
+          "mid_meas_x_cond_z": 34,
+          "phase_taint": 0,
+          "scratch_ancillas": 36,
+          "scratch_leakage_bits": 0,
+          "t_count_reduction_vs_naive": 22.235294117647058,
+          "t_gates": 136,
+          "temp_ands": 34,
+          "toffoli_reduction_vs_naive": 12.705882352941176,
+          "uncompute_toffolis": 0,
+          "wires": 52
+        },
+        "naive_generic_tower_sbox": {
+          "ccx": 432,
+          "gate_counts": {
+            "assert_clean": 14,
+            "ccx": 432,
+            "cx": 400,
+            "h": 0,
+            "mid_meas_x_cond_z": 0,
+            "phase": 0,
+            "swap": 47,
+            "total_physical_gates": 899,
+            "x": 20
+          },
+          "t_gates": 3024,
+          "wires": 40
+        },
+        "silq_qfree_unitary_bp34_sbox": {
+          "ccx": 68,
+          "gate_counts": {
+            "assert_clean": 69,
+            "ccx": 68,
+            "cx": 1860,
+            "h": 0,
+            "mid_meas_x_cond_z": 0,
+            "phase": 0,
+            "swap": 0,
+            "total_physical_gates": 1932,
+            "x": 4
+          },
+          "t_gates_clifford_t": 476,
+          "t_gates_gidney_unitary": 272,
+          "wires": 52
+        }
+      }
+    },
+    "root_cause_B_unitary_ccx_vs_typechecked_u4_mbu": {
+      "diagnosis": "Silq `qfree` and Quipper `with_computed` forbid `H + M_Z + cond-CZ` (`M_X` uncomputation), forcing `2x` `CCX` (`68` CCX = `476` Clifford+T or `272` Gidney unitary T-gates per S-box).",
+      "fix": "Lakefill `Law U4` statically tracks Hadamard-dual phase taint `QTainted[m, phi]` and discharges it on `(mid-meas-x-cond-z anc (c1 c2))`, cutting S-box cost to `34` `TempAND`s (`136` T-gates: `12.71x` Toffoli / `22.24x` T-count reduction vs naive, `2.0x` Toffoli / `3.5x` T-count reduction vs Silq)."
+    },
+    "root_cause_C_schoolbook_vs_sawtooth_qrom_windowing": {
+      "diagnosis": "Generic bit-by-bit controlled Gidney addition pays `~1.5 * n^2` `CCX` per `n`-bit multiplication (`6,175` at 64b, `24,639` at 128b, `98,175` at 256b).",
+      "fix": "Babbush-Gidney sawtooth unary-iteration `QROM` (`N - 1` controlled / `N - 2` uncontrolled `TempAND`s + `M_X` uncompute) + windowed lookup-addition cuts `TempAND`s by `3.94x` (64b, `w=5`), `4.56x` (128b, `w=6`), and `5.30x` (256b, `w=7`).",
+      "empirical_gain": {
+        "qrom8_controlled_sawtooth": {
+          "addr_bits": 3,
+          "all_128_mbu_branches_verified": true,
+          "gate_counts": {
+            "assert_clean": 7,
+            "ccx": 7,
+            "cx": 26,
+            "h": 0,
+            "mid_meas_x_cond_z": 7,
+            "phase": 0,
+            "swap": 0,
+            "total_physical_gates": 54,
+            "x": 14
+          },
+          "naive_mcx_toffolis": 32,
+          "table_size": 8,
+          "temp_ands": 7,
+          "uncompute_toffolis": 0
+        },
+        "qrom8_uncontrolled_sawtooth": {
+          "addr_bits": 3,
+          "all_64_mbu_branches_verified": true,
+          "gate_counts": {
+            "assert_clean": 7,
+            "ccx": 6,
+            "cx": 27,
+            "h": 0,
+            "mid_meas_x_cond_z": 6,
+            "phase": 0,
+            "swap": 0,
+            "total_physical_gates": 53,
+            "x": 14
+          },
+          "table_size": 8,
+          "temp_ands": 6,
+          "uncompute_toffolis": 0
+        },
+        "windowed_mul_add_benchmarks": [
+          {
+            "bits": 8,
+            "compiled_and_executed": true,
+            "naive_ccx": 99,
+            "qrom_windowed_temp_ands": 70,
+            "reduction_factor": 1.4142857142857144,
+            "window": 4
+          },
+          {
+            "bits": 16,
+            "compiled_and_executed": true,
+            "naive_ccx": 391,
+            "qrom_windowed_temp_ands": 172,
+            "reduction_factor": 2.2732558139534884,
+            "window": 4
+          },
+          {
+            "bits": 64,
+            "compiled_and_executed": true,
+            "naive_ccx": 6175,
+            "qrom_windowed_temp_ands": 1567,
+            "reduction_factor": 3.940650925335035,
+            "window": 5
+          },
+          {
+            "bits": 128,
+            "compiled_and_executed": true,
+            "naive_ccx": 24639,
+            "qrom_windowed_temp_ands": 5402,
+            "reduction_factor": 4.56108848574602,
+            "window": 6
+          },
+          {
+            "bits": 256,
+            "compiled_and_executed": true,
+            "naive_ccx": 98431,
+            "qrom_windowed_temp_ands": 18535,
+            "reduction_factor": 5.310547612624764,
+            "window": 7
+          }
+        ]
+      }
+    },
+    "root_cause_D_keccak_erase_by_qubit_time_pareto_frontier": {
+      "diagnosis": "Generic in-place `erase-by` degree-3 algebraic inverse on `Keccak-f[200]` `chi_5` uses `0` persistent round ancillas (`240` wires total across 18 rounds!) at `20` CCX/row (`14,400` CCX), whereas Q#/Qrisp out-of-place `chi_5` uses `5` `TempAND`s/row (`3,600` `TempAND`s, `4.00x` fewer `AND`s) at `3,845` wires (`3,600` round-history qubits).",
+      "fix": "Lakefill expresses BOTH endpoints (`erase-by` `240`w/`14,400` CCX for qubit-constrained NISQ/early-FTQC QPUs and `(with-and-session ...)` out-of-place `3,845`w/`3,600` TempANDs or `k`-pebble Bennett schedules for `T`-factory-bound FTQC).",
+      "empirical_gain": {
+        "inplace_erase_by_keccak_f200": {
+          "ccx_per_chi5_row": 20,
+          "gate_counts": {
+            "assert_clean": 1477,
+            "ccx": 14400,
+            "cx": 37476,
+            "h": 0,
+            "mid_meas_x_cond_z": 0,
+            "phase": 0,
+            "swap": 6948,
+            "total_physical_gates": 87663,
+            "x": 28839
+          },
+          "persistent_round_ancillas": 0,
+          "total_ccx": 14400,
+          "total_wires": 240,
+          "zero_block_hex": "3c2826841cb35c171eaae9b811134ceaa3852c69d2c5abafea"
+        },
+        "outofplace_session_keccak_f200": {
+          "and_reduction_factor": 4.0,
+          "fips202_exact_match": true,
+          "gate_counts": {
+            "assert_clean": 739,
+            "ccx": 3600,
+            "cx": 30276,
+            "h": 0,
+            "mid_meas_x_cond_z": 3600,
+            "phase": 0,
+            "swap": 36,
+            "total_physical_gates": 44751,
+            "x": 7239
+          },
+          "persistent_round_ancillas": 3600,
+          "qubit_overhead_factor": 16.020833333333332,
+          "temp_ands_per_chi5_row": 5,
+          "total_temp_ands": 3600,
+          "total_wires": 3845,
+          "uncompute_toffolis": 0,
+          "zero_block_hex": "3c2826841cb35c171eaae9b811134ceaa3852c69d2c5abafea"
+        }
+      }
+    }
+  },
+  "qiskit_aer_superposition_verification": {
+    "qrom8_sawtooth_uncontrolled_10q": {
+      "num_qubits": 10,
+      "temp_ands": 6,
+      "mbu_measurements": 6,
+      "min_fidelity": 1.0,
+      "max_ancilla_leakage": 0.0,
+      "sampled_mx_masks": [
+        "000000",
+        "011101",
+        "011110",
+        "100011",
+        "100110"
+      ],
+      "negative_control_without_cz_min_fidelity": 0.0
+    },
+    "qrom8_sawtooth_controlled_11q": {
+      "num_qubits": 11,
+      "temp_ands": 7,
+      "mbu_measurements": 7,
+      "min_fidelity": 1.0,
+      "max_ancilla_leakage": 0.0
+    },
+    "gf16_with_and_session_7and_16q": {
+      "num_qubits": 16,
+      "temp_ands": 7,
+      "and_depth": 2,
+      "mbu_measurements": 7,
+      "min_fidelity": 1.0,
+      "max_ancilla_leakage": 0.0,
+      "sampled_mx_masks": [
+        "0100001",
+        "0110010",
+        "0111011",
+        "1111010"
+      ]
+    },
+    "keccak_chi5_outofplace_15q": {
+      "num_qubits": 15,
+      "temp_ands": 5,
+      "mbu_measurements": 5,
+      "min_fidelity": 1.0,
+      "max_ancilla_leakage": 0.0
+    }
+  },
+  "published_quantum_languages_comparison_table": [
+    {
+      "language": "Lakefill (Naive Generic)",
+      "reference": "lakefill-core-cryptography-implementations.rkt (Unshared Baseline)",
+      "uncomputation_model": "Eager nested `within-apply` + algebraic `erase-by` (`Law U1`, unitary `CCX`)",
+      "typechecks_mbu_mx_cond_z": true,
+      "physical_hardware_grade_typing": "Yes (`QPhysGrade` `Phi1-Phi3`: Lindblad, crosstalk/blockade, fault-distance)",
+      "aes_sbox_toffoli_or_tempand": 432,
+      "aes_sbox_t_gates": 3024,
+      "aes128_10r_toffoli_or_tempand": 80640,
+      "aes128_qubits": 288,
+      "qrom_n_entries_toffolis": "N * (2*log2(N) - 2) (`32` CCX at N=8 ctrl)",
+      "keccak_f200_18r_toffolis": 14400,
+      "keccak_f200_qubits": 240,
+      "key_strength_or_bottleneck": "Minimal qubits (`288` AES-128, `240` Keccak-f[200]) via `erase-by`, but eager nested `within-apply` pays a `12.7x` Bennett re-uncomputation tax on tower S-boxes."
+    },
+    {
+      "language": "Lakefill (Session-SSA + QROM + U1-U4 + Phi1-Phi3)",
+      "reference": "lakefill-ssa-pebble-and-qrom-optimizations.rkt (This Work)",
+      "uncomputation_model": "Session-scoped `(with-and-session ...)` SSA `TempAND` DAG + `Law U4` `M_X + cond-Z` + algebraic `erase-by` (`Law U1`) + Bennett pebbling",
+      "typechecks_mbu_mx_cond_z": true,
+      "physical_hardware_grade_typing": "Yes (`U1-U4` + `Phi1-Phi3` static type & physical-effect semiring + Lean 4 proofs)",
+      "aes_sbox_toffoli_or_tempand": 34,
+      "aes_sbox_t_gates": 136,
+      "aes128_10r_toffoli_or_tempand": "6,800 (qkey) / 5,440 (shared key) / 2,720-3,400 (5r MITM / half-pipeline)",
+      "aes128_qubits": "1,572 (out-of-place 1x depth) or 290-400 (in-place / pebbled)",
+      "qrom_n_entries_toffolis": "N - 1 ctrl (`7` at N=8) / N - 2 unctrl (`6` at N=8) + `0` uncompute CCX (`3.94x-5.30x` windowed mul speedup)",
+      "keccak_f200_18r_toffolis": "3,600 TempANDs (out-of-place) or 14,400 CCX (0-round-ancilla `erase-by`)",
+      "keccak_f200_qubits": "3,845 (out-of-place) or 240 (in-place `erase-by`)",
+      "key_strength_or_bottleneck": "Matches Q#/Qualtran/Qrisp `TempAND` & sawtooth `QROM` counts while statically typechecking `Law U4` phase taint AND `Phi1-Phi3` physical decoherence/crosstalk."
+    },
+    {
+      "language": "Q# (Microsoft)",
+      "reference": "Jaques, Naehrig, Roetteler, Virdia (EUROCRYPT 2020) `Microsoft.Quantum.Crypto`",
+      "uncomputation_model": "Imperative `use` block + manual `ApplyWith` + `Adjoint` (`ApplyAnd` / `MResetX` fixup)",
+      "typechecks_mbu_mx_cond_z": false,
+      "physical_hardware_grade_typing": "No (runtime resource estimator only; no static clean-ancilla or phase-taint types)",
+      "aes_sbox_toffoli_or_tempand": 34,
+      "aes_sbox_t_gates": 136,
+      "aes128_10r_toffoli_or_tempand": "6,800 forward (`13,464` full Grover oracle with active-cone pruning)",
+      "aes128_qubits": 1665,
+      "qrom_n_entries_toffolis": "N - 1 TempANDs (`Select` / unary iteration in `Microsoft.Quantum.Canon`)",
+      "keccak_f200_18r_toffolis": "3,600 TempANDs (out-of-place round history)",
+      "keccak_f200_qubits": 3845,
+      "key_strength_or_bottleneck": "Pioneered Boyar-Peralta `34-AND` + `MResetX` AES circuits, but omitting `CZ` fixup or mis-aliasing ancillas silently corrupts amplitudes without type errors."
+    },
+    {
+      "language": "Quipper",
+      "reference": "Green, Lumsdaine, Ross, Selinger, Valiron (PLDI 2013)",
+      "uncomputation_model": "`build_circuit` + `with_computed` syntactic circuit inversion (unitary `CCX`)",
+      "typechecks_mbu_mx_cond_z": false,
+      "physical_hardware_grade_typing": "No (untyped `Qubit` handles; allows dynamic assert-terminate errors)",
+      "aes_sbox_toffoli_or_tempand": 68,
+      "aes_sbox_t_gates": 476,
+      "aes128_10r_toffoli_or_tempand": 13600,
+      "aes128_qubits": 1572,
+      "qrom_n_entries_toffolis": "2*(N - 1) unitary CCX (no typechecked `M_X` uncomputation in `with_computed`)",
+      "keccak_f200_18r_toffolis": 7200,
+      "keccak_f200_qubits": 3845,
+      "key_strength_or_bottleneck": "Scalable Haskell circuit metaprogramming, but `with_computed` syntactically inverts gates (`2x` Toffolis vs `M_X` uncomputation) and lacks linear/clean-ancilla safety."
+    },
+    {
+      "language": "Silq",
+      "reference": "Bichsel, Baader, Gehr, Vechev (PLDI 2020)",
+      "uncomputation_model": "Automatic `qfree` lifted-expression uncomputation (purely unitary `CCX`)",
+      "typechecks_mbu_mx_cond_z": false,
+      "physical_hardware_grade_typing": "No (logical `qfree`/`mfree`/`const` annotations only; no hardware noise/topology grades)",
+      "aes_sbox_toffoli_or_tempand": 68,
+      "aes_sbox_t_gates": 476,
+      "aes128_10r_toffoli_or_tempand": 13600,
+      "aes128_qubits": 1572,
+      "qrom_n_entries_toffolis": "2*(N - 1) CCX (`qfree` forbids Hadamard + measurement `M_X` uncomputation)",
+      "keccak_f200_18r_toffolis": 7200,
+      "keccak_f200_qubits": 3845,
+      "key_strength_or_bottleneck": "First high-level automatic `qfree` uncomputation type system, but `M_X + cond-Z` uses `H` + `measure` (not `qfree`/`mfree`), forcing `2x` `CCX` (`68` vs `34` per S-box)."
+    },
+    {
+      "language": "Qrisp",
+      "reference": "Seidel, Bock, Tcholtchev, Hauswirth (2024)",
+      "uncomputation_model": "`QuantumSession` DAG dependency graph + `@auto_uncompute` pebble/measurement pass (`mcx(..., method='gidney')`)",
+      "typechecks_mbu_mx_cond_z": false,
+      "physical_hardware_grade_typing": "No (Python runtime session compiler; no static type or physical-effect proof checker)",
+      "aes_sbox_toffoli_or_tempand": 34,
+      "aes_sbox_t_gates": 136,
+      "aes128_10r_toffoli_or_tempand": 6800,
+      "aes128_qubits": 1572,
+      "qrom_n_entries_toffolis": "N - 1 TempANDs (`q_switch` / unary-iteration demux)",
+      "keccak_f200_18r_toffolis": 3600,
+      "keccak_f200_qubits": 3845,
+      "key_strength_or_bottleneck": "Excellent practical `QuantumSession` `TempAND` & pebbling automation in Python, directly inspiring Lakefill's typed `(with-and-session ...)` combinator."
+    },
+    {
+      "language": "Qualtran (Google)",
+      "reference": "Gidney (Quantum 2018; 2019), Babbush et al. (PRX 2018), Harrigan et al. (2024)",
+      "uncomputation_model": "`Bloq` `And` / `Adjoint(And())` (`M_X + CZ`) + `QROM` sawtooth unary-iteration + windowed arithmetic",
+      "typechecks_mbu_mx_cond_z": false,
+      "physical_hardware_grade_typing": "Partial (`QType` wire widths & `GateCounts` call graphs, no formal `U1-U4`/`Phi1-Phi3` soundness proofs)",
+      "aes_sbox_toffoli_or_tempand": 34,
+      "aes_sbox_t_gates": 136,
+      "aes128_10r_toffoli_or_tempand": 6800,
+      "aes128_qubits": 1572,
+      "qrom_n_entries_toffolis": "N - 2 unctrl / N - 1 ctrl TempANDs (`4N - 8` / `4N - 4` T-gates) + SelectSWAP QROAM",
+      "keccak_f200_18r_toffolis": 3600,
+      "keccak_f200_qubits": 3845,
+      "key_strength_or_bottleneck": "Gold-standard FTQC arithmetic (`TempAND`, sawtooth `QROM`, windowed `ModExp`), directly inspiring Lakefill's `qrom-sawtooth-lookup-sexpr` & windowed multiplier."
+    },
+    {
+      "language": "Qunity",
+      "reference": "Voichick, Li, Rand, Hicks (POPL 2023)",
+      "uncomputation_model": "Symmetric pattern-matching / norm-preserving Krauss & algebraic Span-program compilation",
+      "typechecks_mbu_mx_cond_z": false,
+      "physical_hardware_grade_typing": "No (denotational operator semantics; compiles pattern matches into high-overhead multi-controlled unitaries)",
+      "aes_sbox_toffoli_or_tempand": ">= 432 (generic nested algebraic `let`-erasure without `TempAND` sessions)",
+      "aes_sbox_t_gates": ">= 3,024",
+      "aes128_10r_toffoli_or_tempand": ">= 80,640",
+      "aes128_qubits": "300+",
+      "qrom_n_entries_toffolis": "O(N log N) generic `match` lowering",
+      "keccak_f200_18r_toffolis": ">= 14,400",
+      "keccak_f200_qubits": "240+",
+      "key_strength_or_bottleneck": "Unified quantum/classical `match` expressions, but lacks `TempAND` `M_X` uncomputation and incurs the same nested Bennett tax as naive generic Lakefill."
+    },
+    {
+      "language": "Tower",
+      "reference": "Yuan & Carbin (OOPSLA 2022)",
+      "uncomputation_model": "Explicit reversible `<-` / `->` uncomputation & bounded pointer-based quantum data structures (`Law U1`-style)",
+      "typechecks_mbu_mx_cond_z": false,
+      "physical_hardware_grade_typing": "No (tracks logical entanglement uncomputation of data structures, not `M_X` phase taint or Lindblad/crosstalk)",
+      "aes_sbox_toffoli_or_tempand": "68 - 432 (unitary reversible uncomputation only)",
+      "aes_sbox_t_gates": "476 - 3,024",
+      "aes128_10r_toffoli_or_tempand": "13,600 - 80,640",
+      "aes128_qubits": "288 - 1,572",
+      "qrom_n_entries_toffolis": "O(N log N) unitary RAM traversal",
+      "keccak_f200_18r_toffolis": 14400,
+      "keccak_f200_qubits": 240,
+      "key_strength_or_bottleneck": "Pioneered pointer-based quantum data structures with unitary uncomputation, but lacks Gidney `M_X` uncomputation (`U4`), sawtooth `QROM`, and physical `Phi1-Phi3` grades."
+    }
+  ]
+}

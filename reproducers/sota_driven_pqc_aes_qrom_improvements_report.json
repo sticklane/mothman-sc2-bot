@@ -1,0 +1,116 @@
+{
+  "wave": "Wave 15 \u2014 SOTA-Driven Constructive Improvements (AES-256, McEliece-348864, Dynamic QROM)",
+  "overall_status": "PASS",
+  "suite1_z3_sota_improvement_proofs": {
+    "status": "PASS",
+    "elapsed_ms": 150.02,
+    "imp3_tower_field_sbox_self_cleaning_proof": "UNSAT (0 residual ancilla garbage)",
+    "imp3_aes256_in_place_key_schedule_proof": "UNSAT (0 key-history pebbles)",
+    "imp3_sequential_dual_plaintext_reuse_proof": "UNSAT (exact dual match in 128Q state)",
+    "imp4_mceliece_classical_qroam_streaming_syndrome_proof": "UNSAT (0 QROAM buffer entanglement)",
+    "imp5_bitonic_network_vs_canonical_insertion_sort_proof": "UNSAT (bit-exact canonical order)"
+  },
+  "suite2_sota_improvements_comparison_table": {
+    "status": "PASS",
+    "elapsed_ms": 0.01,
+    "improvements_verified": 3,
+    "sota_improvements_table": [
+      {
+        "id": "IMPROVEMENT_3_AES256_TOWER_FIELD_SBOX_AND_KEY_STATE_ZIPPER",
+        "target": "AES-256 Grover Key-Search Oracle (NIST Level 5)",
+        "previous_design": {
+          "architecture": "K=4 Sub-Pipelined Out-of-Place Boyar-Peralta S-Box (22Q scratch/S-Box)",
+          "logical_qubits": 378,
+          "toffoli_gates": 162000,
+          "round_depth_multiplier": 4.0,
+          "bottleneck": "Reusing 22Q Boyar-Peralta AND scratch across 4 columns incurred 1.75x intra-round uncomputation penalty (952 vs 544 ANDs/round) and 4x serial column depth."
+        },
+        "published_sota_reference": {
+          "citations": "Zou et al. [2020, Asiacrypt] (400 Q, 52K Toffolis); Huang & Sun [2022, Asiacrypt] (376 Q, 48K Toffolis, 1.5x depth)",
+          "sota_qubits": 376,
+          "sota_toffolis": 48000
+        },
+        "improved_design": {
+          "architecture": "Self-Cleaning Tower-Field F_{2^4}^2 S-Box (4Q-6Q internal ancillas) + In-Place Rolling Key Schedule + Sequential Dual-Plaintext Match + Key-State Column Zipper",
+          "logical_qubits_zipper_profile": 356,
+          "logical_qubits_pure_in_place_profile": 392,
+          "logical_qubits_parallel_k4_profile": 410,
+          "toffoli_gates_zou38": 42208,
+          "toffoli_gates_huang40": 44288,
+          "round_depth_multiplier_k4": 1.0,
+          "round_depth_multiplier_zipper": 1.5,
+          "toffoli_reduction_vs_previous": 3.66,
+          "zero_free_lunch_verification": "Norm ancillas (4Q-6Q) are uncomputed inside each 38-40 Toffoli S-Box before moving to the next byte; rolling key W_i ^= SubWord(RotWord(W_{i-1})) is inverted in-place from intact W_{i-1}; Pair 1 is fully uncomputed after flipping 1Q match flag |m_1> before Pair 2 reuses the 128Q state."
+        }
+      },
+      {
+        "id": "IMPROVEMENT_4_MCELIECE_348864_STREAMING_SYNDROME_QROAM_ISD",
+        "target": "Classic McEliece-348864 (n=3488, k=2720, r=768, w=64) & BIKE-L1 ISD",
+        "previous_design": {
+          "architecture": "QDS-7 Full 768x768 Quantum Gaussian Elimination (Bruhat LU / One-Way Pivot-XOR)",
+          "logical_qubits_submatrix_only": 590592,
+          "logical_qubits_with_pivot_history": 884352,
+          "toffoli_gates_per_iteration": 536870912,
+          "bottleneck": "Storing and inverting an r x r = 768 x 768 binary submatrix in superposition requires 768^2 = 589,824 matrix qubits + 294,528 pivot-history ancillas."
+        },
+        "published_sota_reference": {
+          "citations": "Esser, May, Zweydinger [2022, Eurocrypt] (~14,500 Q Streaming Lee-Brickell / Stern ISD); Perriello et al. [2023] (590,592 Q Prange ISD)",
+          "sota_streaming_qubits": 14500,
+          "sota_prange_qubits": 590592
+        },
+        "improved_design": {
+          "architecture": "Esser-May-Zweydinger [2022] Streaming Syndrome Accumulator + Classical Select-SWAP (QROAM, B=8) + QDS-2 Braun Weight Tree",
+          "logical_qubits": 7744,
+          "register_breakdown": "768Q (64x12b error indices) + 768Q (syndrome accumulator) + 6,144Q (B=8 x 768b QROAM buffer) + 64Q (Braun weight tree)",
+          "forward_streaming_toffolis_per_iter": 814336,
+          "full_oracle_toffolis_per_iter": 1633280,
+          "qubit_reduction_vs_gaussian_elim": 76.26,
+          "qubit_reduction_vs_one_way_pivot_history": 114.2,
+          "per_iter_toffoli_reduction_vs_gaussian_elim": 328.71,
+          "zero_free_lunch_verification": "Parity-check matrix H in F_2^{768 x 3488} is 100% CLASSICAL (public key), so Select-SWAP (QROAM) has ZERO Catch-4 quantum-table entanglement penalty. Outer-loop Grover iteration tradeoff vs Prange ISD is explicitly accounted per Esser et al. [2022]."
+        }
+      },
+      {
+        "id": "IMPROVEMENT_5_DYNAMIC_QROM_BERNSTEIN_BITONIC_AND_OKASAKI_BENTLEY_SAXE",
+        "target": "Dynamic Quantum Superposition Tables (Zhandry [2019] Compressed Oracle / Kuperberg Sieve, Q=1024, w=512)",
+        "previous_design": {
+          "architecture": "Per-Query Sequential O(q*w) Linear-Scan CSWAP Insertion",
+          "toffoli_gates": 537395200,
+          "serial_comparator_stages": 1024,
+          "bottleneck": "Scanning and CSWAP-sorting all q active slots on each query costs sum_{q=1}^Q 2*q*w = Q(Q+1)w = 537.4M Toffolis."
+        },
+        "published_sota_reference": {
+          "citations": "Bernstein [2009] / Childs-Jao-Soukharev [2014] / Jaques-Schanck [2019] Quantum Sorting Networks; Bentley-Saxe [1980] Logarithmic Method"
+        },
+        "improved_design": {
+          "architecture_batched": "Reversible Batcher Bitonic / Odd-Even Merge Sorting Network (55 parallel stages)",
+          "batched_bitonic_toffolis": 14417920,
+          "batched_bitonic_parallel_stages": 55,
+          "batched_toffoli_reduction_factor": 37.27,
+          "architecture_sequential_online": "Okasaki Binomial / Bentley-Saxe Power-of-Two Level-Sorted Runs (L_0..L_9)",
+          "sequential_bentley_saxe_toffolis": 23855104,
+          "sequential_toffoli_reduction_factor": 22.53,
+          "zero_free_lunch_verification": "Uses ONLY standard CCX and CSWAP gates (0 hardware QRAM). Comparator direction bits are stored in 14,080 ancillas during the forward sort and uncomputed in reverse once the phase/collimation check completes."
+        }
+      }
+    ]
+  },
+  "suite3_compiled_c_verifier": {
+    "f256_sbox_bijective_verified": 256,
+    "passed_trials": 10000,
+    "total_trials": 10000,
+    "ancilla_leaks": 0,
+    "mutants_killed": 1000,
+    "mutant_trials": 1000,
+    "elapsed_ms": 71.65,
+    "status": "PASS"
+  },
+  "suite4_lean4_verification": {
+    "status": "PASS",
+    "lean4_elapsed_ms": 2612.28,
+    "lean4_file": "proofs/sota_driven_pqc_aes_qrom_improvements_proofs.lean",
+    "theorems_verified": 6,
+    "sorry_count": 0,
+    "axiom_count": 0
+  }
+}

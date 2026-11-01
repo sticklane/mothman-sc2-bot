@@ -1,0 +1,240 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/aes_sbox_bp34.lfq
+;;
+;; Boyar-Peralta `34-TempAND` FIPS-197 AES S-Box (`y ^= S(x)`) in `#lang lakefillq`.
+;; Combines:
+;;   - Zero-SWAP `SL_8(GF(2))` basis-change synthesis (`aes-to-tower-mat`)
+;;   - `34` forward `TempAND`s + `0` uncompute `CCX`s (`within-apply-mbu` &
+;;     `with-and-session` dynamic `M_X` + `if (m[k] == 1) cz` uncomputation)
+;;   - Zero-ancilla distinct-pivot linear fan-in (`temp-and-lin`)
+;;   - Chordal SSA live-range wire recycling (`50` virtual SSA wires -> `41`
+;;     physical qubits on `heron-r2`)
+;; =============================================================================
+
+(target-profile heron-r2)
+
+;; Pure functional `GF(2)` `8x8` matrix algebra for the Boyar-Peralta tower basis
+(define (cols->gf2-rows m col-masks)
+  (for/list ([r (in-range m)])
+    (for/list ([c (in-range m)])
+      (if (bitwise-bit-set? (list-ref col-masks c) r) 1 0))))
+
+(define (gf2-row-xor r1 r2)
+  (map bitwise-xor r1 r2))
+
+(define (list-set-idx xs idx val)
+  (for/list ([x (in-list xs)] [i (in-naturals)])
+    (if (= i idx) val x)))
+
+(define (gf2-matmul A B)
+  (define m (length A))
+  (for/list ([r (in-range m)])
+    (define row-a (list-ref A r))
+    (for/list ([c (in-range m)])
+      (bitwise-and
+       1
+       (foldl + 0
+              (for/list ([k (in-range m)])
+                (* (list-ref row-a k)
+                   (list-ref (list-ref B k) c))))))))
+
+(define (gf2-matinv M)
+  (define m (length M))
+  (define aug0
+    (for/list ([r (in-range m)])
+      (append (list-ref M r)
+              (for/list ([c (in-range m)]) (if (= r c) 1 0)))))
+  (define reduced
+    (foldl
+     (lambda (col aug)
+       (define piv
+         (first (filter (lambda (r) (= (list-ref (list-ref aug r) col) 1))
+                        (range col m))))
+       (define swapped
+         (if (= piv col)
+             aug
+             (let ([rc (list-ref aug col)]
+                   [rp (list-ref aug piv)])
+               (list-set-idx (list-set-idx aug col rp) piv rc))))
+       (define piv-row (list-ref swapped col))
+       (for/list ([row (in-list swapped)] [r (in-naturals)])
+         (if (and (not (= r col)) (= (list-ref row col) 1))
+             (gf2-row-xor row piv-row)
+             row)))
+     aug0
+     (range m)))
+  (for/list ([row (in-list reduced)])
+    (drop row m)))
+
+;; Zero-SWAP `SL_8(GF(2))` Gauss-Jordan factorization into pure `(cx c t)` gates:
+(define (gf2-mat->cx-seq mat wires)
+  (define m (length mat))
+  (define final-state
+    (foldl
+     (lambda (col st)
+       (match-define (list rows pairs) st)
+       (define pivot-step
+         (if (zero? (list-ref (list-ref rows col) col))
+             (let* ([piv (first (filter (lambda (r)
+                                          (= (list-ref (list-ref rows r) col) 1))
+                                        (range (add1 col) m)))]
+                    [new-col-row (gf2-row-xor (list-ref rows col)
+                                              (list-ref rows piv))])
+               (list (list-set-idx rows col new-col-row)
+                     (cons (list piv col) pairs)))
+             (list rows pairs)))
+       (match-define (list rows1 pairs1) pivot-step)
+       (define c-row (list-ref rows1 col))
+       (foldl
+        (lambda (r st2)
+          (match-define (list rws prs) st2)
+          (if (and (not (= r col))
+                   (= (list-ref (list-ref rws r) col) 1))
+              (list (list-set-idx rws r (gf2-row-xor (list-ref rws r) c-row))
+                    (cons (list col r) prs))
+              st2))
+        (list rows1 pairs1)
+        (range m)))
+     (list mat '())
+     (range m)))
+  (define cx-pairs (second final-state))
+  (for/seq ([p (in-list cx-pairs)])
+    (cx (wref wires (first p)) (wref wires (second p)))))
+
+(defconst tower-to-aes-mat
+  (cols->gf2-rows 8 '(#x01 #xbc #x5c #xb0 #xf2 #x5b #x5f #x6f)))
+(defconst aes-to-tower-mat (gf2-matinv tower-to-aes-mat))
+(defconst aes-affine-mat
+  (for/list ([r (in-range 8)])
+    (for/list ([c (in-range 8)])
+      (if (<= (modulo (- r c) 8) 4) 1 0))))
+(defconst post-sbox-mat (gf2-matmul aes-affine-mat tower-to-aes-mat))
+(defconst aes-sbox-const #x63)
+
+(define (karatsuba-gf16-forms pool a4 b4)
+  (match-define (list a0 a1 a2 a3) a4)
+  (match-define (list b0 b1 b2 b3) b4)
+  (define p0 (wref pool 0))
+  (define p1 (wref pool 1))
+  (define p2 (wref pool 2))
+  (define p3 (wref pool 3))
+  (define p4 (wref pool 4))
+  (define p5 (wref pool 5))
+  (define p6 (wref pool 6))
+  (define p7 (wref pool 7))
+  (define p8 (wref pool 8))
+  (define a02 (lin-xor a0 a2))
+  (define a13 (lin-xor a1 a3))
+  (define b02 (lin-xor b0 b2))
+  (define b13 (lin-xor b1 b3))
+  (define steps
+    (seq (temp-and-lin a0 b0 p0)
+         (temp-and-lin a1 b1 p1)
+         (temp-and-lin (lin-xor a0 a1) (lin-xor b0 b1) p2)
+         (temp-and-lin a2 b2 p3)
+         (temp-and-lin a3 b3 p4)
+         (temp-and-lin (lin-xor a2 a3) (lin-xor b2 b3) p5)
+         (temp-and-lin a02 b02 p6)
+         (temp-and-lin a13 b13 p7)
+         (temp-and-lin (lin-xor a02 a13) (lin-xor b02 b13) p8)))
+  (define m0-0 (list p0 p1))
+  (define m0-1 (list p2 p0))
+  (define m1-0 (list p3 p4))
+  (define m1-1 (list p5 p3))
+  (define m2-0 (list p6 p7))
+  (define m2-1 (list p8 p6))
+  (list steps
+        (list (lin-xor m0-0 m1-1)
+              (lin-xor m0-1 m1-0 m1-1)
+              (lin-xor m2-0 m0-0)
+              (lin-xor m2-1 m0-1))))
+
+(defqfree (aes-sbox-bp34
+           #:wires ([in8 (range 0 8)]
+                    [out8 (range 8 16)])
+           #:scratch ([sc-top-inv (range 16 32)]
+                      [sc-low-mul (range 32 41)]
+                      [sc-high-mul (range 41 50)]))
+  (define xt (for/list ([w (in-list in8)]) (list w)))
+  (define xL (take xt 4))
+  (define xH (drop xt 4))
+  (define c4 (map lin-xor xL xH))
+
+  ;; Top nonlinear GF(2^4) Karatsuba multiplier (`9` TempANDs on `sc-top-inv[0..8]`):
+  (match-define (list top-steps prod-d)
+    (karatsuba-gf16-forms (take sc-top-inv 9) xL c4))
+  (define uv-sq
+    (list (third xH)
+          (lin-xor (third xH) (fourth xH))
+          (lin-xor (second xH) (third xH) (fourth xH))
+          (lin-xor (first xH) (fourth xH))))
+  (define d4 (map lin-xor prod-d uv-sq))
+
+  ;; GF(2^4) field inversion (`7` TempANDs on `sc-top-inv[9..15]`):
+  (match-define (list d0 d1 d2 d3) d4)
+  (match-define (list g0w g1w g2w g3w g4w g5w g6w) (drop sc-top-inv 9))
+  (define g0 (list g0w))
+  (define g1 (list g1w))
+  (define g2 (list g2w))
+  (define g3 (list g3w))
+  (define g4 (list g4w))
+  (define g5 (list g5w))
+  (define g6 (list g6w))
+  (define inv-steps
+    (seq (temp-and-lin d1 d2 g0w)
+         (temp-and-lin d0 d3 g1w)
+         (temp-and-lin d0 d2 g2w)
+         (temp-and-lin g0 d3 g3w)
+         (temp-and-lin g1 d2 g4w)
+         (temp-and-lin g1 d1 g5w)
+         (temp-and-lin d1 (lin-xor d3 g2) g6w)))
+  (define dinv4
+    (list (lin-xor d0 d1 d2 g0 g1 g6 g5 g4 g3)
+          (lin-xor d1 d2 d3 g2 g5 g3)
+          (lin-xor d2 g0 g1 g4 g3)
+          (lin-xor d2 d3 g1 g3)))
+
+  ;; Bottom GF(2^4) multipliers (`9 + 9 = 18` TempANDs on virtual SSA pools
+  ;; `sc-low-mul` and `sc-high-mul`, chordally recycled onto `9` physical wires!):
+  (match-define (list oL-steps oL-forms)
+    (karatsuba-gf16-forms sc-low-mul c4 dinv4))
+  (match-define (list oH-steps oH-forms)
+    (karatsuba-gf16-forms sc-high-mul xH dinv4))
+
+  (multishot-reset
+   4
+   (within-apply
+    (gf2-mat->cx-seq aes-to-tower-mat in8)
+    (within-apply-mbu
+     (seq top-steps inv-steps)
+     (seq
+      (within-apply-mbu
+       oL-steps
+       (focus-zipper [yz out8 (append in8 out8)]
+         (for/seq ([r (in-range 8)])
+           (define row (list-ref post-sbox-mat r))
+           (define form
+             (apply lin-xor
+                    (for/list ([c (in-range 4)] #:when (= (list-ref row c) 1))
+                      (list-ref oL-forms c))))
+           (for/seq ([sw (in-list form)])
+             (cx sw (wref yz r)))))
+       sc-low-mul)
+      (within-apply-mbu
+       oH-steps
+       (focus-zipper [yz out8 (append in8 out8)]
+         (for/seq ([r (in-range 8)])
+           (define row (list-ref post-sbox-mat r))
+           (define form
+             (apply lin-xor
+                    (for/list ([c (in-range 4)] #:when (= (list-ref row (+ 4 c)) 1))
+                      (list-ref oH-forms c))))
+           (for/seq ([sw (in-list form)])
+             (cx sw (wref yz r)))))
+       sc-high-mul)
+      (for/seq ([r (in-range 8)] #:when (bitwise-bit-set? aes-sbox-const r))
+        (x (wref out8 r))))
+     sc-top-inv)
+    '())))

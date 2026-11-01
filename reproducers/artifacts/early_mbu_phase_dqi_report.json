@@ -1,0 +1,212 @@
+{
+  "module": "Early-MBU Phase-Only Decoded Quantum Interferometry (Law U1 + Law U4)",
+  "title": "Closing Lesson 5 \u2014 Early Stage-2 MBU + Stage-3 Phase-Only Decoding in DQI (Khattar-Babbush 2025 Unified Under Law U1 + Law U4)",
+  "status": "PASS",
+  "total_wall_time_s": 4.5507,
+  "runtime_budget_under_6s": true,
+  "deliverables": {
+    "racket_module": "lakefill-early-mbu-phase-dqi.rkt",
+    "aer_reproducer": "reproducers/verify_early_mbu_phase_dqi_bch7_bch15_on_aer.py",
+    "lean4_proof_module": "proofs/early_mbu_phase_only_dqi_proofs.lean"
+  },
+  "racket_lakefill_verification": {
+    "bch_15_7_5_early_mbu_dqi": {
+      "ancilla_leakage_bits": 0,
+      "code": "BCH(15, 7, 5)",
+      "dicke_patterns": 121,
+      "dqi_optimal_prob_standard": 0.13639591942148735,
+      "early_mbu_live_data_syndrome_qubits": 8,
+      "early_mbu_patterns_exact_parity": 121,
+      "early_mbu_stage3_half_weight_gate_counts": {
+        "assert_clean": 38,
+        "ccx": 208,
+        "cx": 588,
+        "h": 0,
+        "mid_meas_x_cond_z": 0,
+        "phase": 1,
+        "swap": 6,
+        "total_physical_gates": 963,
+        "x": 160
+      },
+      "early_mbu_total_stage3_wires": 35,
+      "k_syndrome_qubits": 8,
+      "law_u1_violation_avg_dqi_fidelity": 0.19823327186212175,
+      "law_u1_violation_corrupted_pct": "86.78",
+      "law_u1_violation_wt1_stub_corrupted_patterns": 105,
+      "law_u1_violation_wt1_stub_exact_patterns": 16,
+      "law_u4_violation_avg_dqi_fidelity": 0.17601256744757832,
+      "law_u4_violation_expected_uniform_prob": 0.00390625,
+      "live_data_syndrome_width_reduction_pct": "65.22",
+      "live_error_qubits_during_decoding": 0,
+      "min_dqi_interference_fidelity_peterson_berlekamp": 0.9999999999999942,
+      "mx_masks_tested_per_pattern": 24,
+      "n_error_qubits": 15,
+      "optimal_solution_x_star": 173,
+      "standard_dqi_live_data_syndrome_qubits": 23,
+      "standard_dqi_total_stage3_wires": 49,
+      "standard_stage3_gate_counts": {
+        "assert_clean": 36,
+        "ccx": 203,
+        "cx": 572,
+        "h": 0,
+        "mid_meas_x_cond_z": 0,
+        "phase": 0,
+        "swap": 6,
+        "total_physical_gates": 931,
+        "x": 150
+      },
+      "standard_stage3_patterns_clean": 121,
+      "t_radius": 2,
+      "total_gate_level_runs": 2904
+    },
+    "bch_7_4_3_early_mbu_dqi": {
+      "code": "BCH(7, 4, 3)",
+      "dicke_patterns": 8,
+      "dqi_optimal_prob_early_mbu": 0.5714285714285708,
+      "dqi_optimal_prob_law_u4_violated": 0.12499999999999979,
+      "dqi_optimal_prob_standard": 0.5714285714285708,
+      "early_mbu_avg_stage3_ccx_count": 10.5,
+      "early_mbu_live_data_syndrome_qubits": 3,
+      "early_mbu_total_stage3_wires": 5,
+      "k_syndrome_qubits": 3,
+      "live_data_syndrome_width_reduction_pct": 70.0,
+      "live_error_qubits_during_decoding": 0,
+      "max_branch_l2_norm_diff": 1.0007415106216802e-16,
+      "min_branch_statevector_fidelity": 0.9999999999999987,
+      "mx_branches_exact_fidelity_1": 128,
+      "mx_branches_tested": 128,
+      "n_error_qubits": 7,
+      "optimal_solution_x_star": 5,
+      "standard_dqi_live_data_syndrome_qubits": 10,
+      "standard_dqi_total_stage3_wires": 11,
+      "standard_stage3_ccx_count": 21,
+      "t_radius": 1
+    },
+    "qsub_static_type_judgments": [
+      {
+        "circuit": "BCH(7,4,3)_EarlyMBU_PhaseOnly_DQI",
+        "decoder_invertible_radius": 1,
+        "dicke_max_weight": 1,
+        "law_u1_erase_by_ok": true,
+        "law_u4_zero_taint_before_hadamard_ok": true,
+        "qsub_well_typed": true,
+        "syndrome_wire_type_before_h": "QClean (QTainted[m, e] canceled by (-1)^{m . D(s)})"
+      },
+      {
+        "circuit": "BCH(15,7,5)_PetersonBerlekamp_EarlyMBU_PhaseOnly_DQI",
+        "decoder_invertible_radius": 2,
+        "dicke_max_weight": 2,
+        "law_u1_erase_by_ok": true,
+        "law_u4_zero_taint_before_hadamard_ok": true,
+        "qsub_well_typed": true,
+        "syndrome_wire_type_before_h": "QClean (QTainted[m, e] canceled by (-1)^{m . D(s)})"
+      },
+      {
+        "circuit": "BCH(15,7,5)_Wt1HammingStub_EarlyMBU_DQI",
+        "decoder_invertible_radius": 1,
+        "dicke_max_weight": 2,
+        "law_u1_erase_by_ok": false,
+        "law_u4_zero_taint_before_hadamard_ok": false,
+        "qsub_well_typed": false,
+        "syndrome_wire_type_before_h": "QTainted[m, e ^ D_stub(H e)] (REJECTED: residual wt-2 taint)"
+      },
+      {
+        "circuit": "EarlyMBU_Without_ParityPhaseFixup_DQI",
+        "decoder_invertible_radius": 2,
+        "dicke_max_weight": 2,
+        "law_u1_erase_by_ok": true,
+        "law_u4_zero_taint_before_hadamard_ok": false,
+        "qsub_well_typed": false,
+        "syndrome_wire_type_before_h": "QTainted[m, e] (REJECTED before H^k)"
+      }
+    ],
+    "racket_version": "9.1",
+    "status": "PASS",
+    "suite": "Lakefill Early-MBU Phase-Only DQI (Law U1 + Law U4)",
+    "wall_time_ms": "36.38",
+    "subprocess_wall_time_s": 1.6113
+  },
+  "qiskit_aer_noiseless_dynamic_feedforward": {
+    "bch_7_4_3": {
+      "code": "BCH(7, 4, 3)",
+      "standard_live_data_syndrome_qubits": 10,
+      "early_mbu_live_data_syndrome_qubits": 3,
+      "live_error_qubits_during_decoding": 0,
+      "dynamic_feedforward_trajectories_tested": 8,
+      "unique_mx_masks_sampled": 8,
+      "min_dynamic_trajectory_state_fidelity": 1.0,
+      "frustrated_6of7_optimal_prob_standard": 0.571428571429,
+      "frustrated_6of7_optimal_prob_early_mbu": 0.571428571429,
+      "planted_7of7_optimal_prob_early_mbu": 1.0,
+      "law_u4_violated_aer_8192shot_optimal_prob": 0.122681,
+      "law_u4_violated_exact_uniform_prob": 0.125
+    },
+    "bch_15_7_5": {
+      "code": "BCH(15, 7, 5)",
+      "standard_live_data_syndrome_qubits": 23,
+      "early_mbu_live_data_syndrome_qubits": 8,
+      "live_error_qubits_during_decoding": 0,
+      "live_width_reduction_pct": 65.22,
+      "aer_sampled_15bit_mx_mask": 2516,
+      "aer_sampled_15bit_mx_hex": "0x09d4",
+      "peterson_berlekamp_aer_state_fidelity": 1.0,
+      "peterson_berlekamp_scratch_clean_prob": 1.0,
+      "optimal_prob_standard_dqi": 0.136395919421,
+      "optimal_prob_early_mbu_dqi": 0.13639591943,
+      "law_u1_stub_corrupted_patterns": 105,
+      "law_u1_stub_corrupted_pct": 86.78,
+      "law_u1_stub_aer_state_fidelity": 0.042688,
+      "law_u1_stub_optimal_prob": 0.00933,
+      "law_u4_omitted_single_branch_fidelity": 6.8e-05,
+      "law_u4_omitted_mx_averaged_optimal_prob": 0.00390625
+    }
+  },
+  "qiskit_aer_calibrated_ibm_heron_r2_noisy_density_matrix": {
+    "hardware_profile": {
+      "name": "IBM Heron r2 (Calibrated Superconducting Tunable-Coupler Profile)",
+      "t1_ns": 220000.0,
+      "t2_ns": 150000.0,
+      "tau_1q_ns": 24.0,
+      "tau_2q_ns": 68.0,
+      "tau_meas_echo_eff_ns": 130.0,
+      "tau_routed_decoder_ns": 12000.0,
+      "p_1q": 0.0002,
+      "p_2q": 0.0018
+    },
+    "phi1_stage3_idle_volume_milli_nats_at_12us": {
+      "standard_10_live_qubits_milli_nats": 800,
+      "early_mbu_3_live_qubits_milli_nats": 240,
+      "eliminated_7_error_qubits_milli_nats": 560,
+      "idle_volume_reduction_pct": 70.0
+    },
+    "direct_unrouted_gate_noise_regime": {
+      "decoder_window_ns": 0.0,
+      "standard_dqi_survival_fidelity": 0.764095,
+      "early_mbu_dqi_survival_fidelity": 0.845694,
+      "survival_fidelity_gain_abs": 0.081598,
+      "survival_fidelity_gain_ratio": 1.1068,
+      "infidelity_reduction_pct": 34.59,
+      "standard_dqi_optimal_hit_prob": 0.764095,
+      "early_mbu_dqi_optimal_hit_prob": 0.845694
+    },
+    "routed_12us_algebraic_decoder_regime": {
+      "decoder_window_ns": 12000.0,
+      "standard_dqi_survival_fidelity": 0.594596,
+      "early_mbu_dqi_survival_fidelity": 0.733836,
+      "survival_fidelity_gain_abs": 0.13924,
+      "survival_fidelity_gain_ratio": 1.2342,
+      "infidelity_reduction_pct": 34.35,
+      "standard_dqi_optimal_hit_prob": 0.594596,
+      "early_mbu_dqi_optimal_hit_prob": 0.733836
+    }
+  },
+  "asymptotic_khattar_babbush_opi_scaling": {
+    "code": "OPI over GF(2^12) (Khattar-Babbush 2025, arXiv:2510.10967)",
+    "n_error_qubits": 4095,
+    "k_syndrome_qubits": 840,
+    "standard_dqi_stage3_live_data_syndrome_qubits": 4935,
+    "early_mbu_dqi_stage3_live_data_syndrome_qubits": 840,
+    "freed_error_qubits_during_decoding": 4095,
+    "live_data_syndrome_width_reduction_pct": 82.98
+  }
+}

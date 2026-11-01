@@ -1,0 +1,375 @@
+{
+  "phase": "Phase 35 Track 1 \u2014 Automatic Physical Repair Synthesis (QSub_phys Counterexample-Guided Lowering for P1\u2013P5)",
+  "simulators_used": {
+    "qiskit_aer": "0.18.2 (AerSimulator density_matrix + NoiseModel)",
+    "qiskit": "2.6.1 (Statevector + DensityMatrix + Operator + state_fidelity)",
+    "stim": "1.16.0 (TableauSimulator + DetectorErrorModel + shortest_graphlike_error)",
+    "pymatching": "2.4.0 (MWPM 10,000-shot Monte Carlo decoder)",
+    "pyzx": "0.10.7 (full_reduce + extract_circuit + compare_tensors)"
+  },
+  "total_wall_time_ms": 4184.08,
+  "repair_r1_active_volume_compression_and_checkpoint_splitting": {
+    "repair_id": "R1_PyZX_Peephole_And_Bennett_2Stage_Checkpoint_Uncomputation",
+    "target_failure_mode": "P1_Size_And_Depth_Decoherence_Cliff",
+    "configs_repaired": 4,
+    "all_repaired_below_ln2_active_volume": true,
+    "all_repaired_exceed_0_65_physical_fidelity": true,
+    "repair_results": [
+      {
+        "n_qubits": 6,
+        "original_depth": 48,
+        "repaired_depth": 16,
+        "original_n_2q_gates": 120,
+        "repaired_n_2q_gates": 40,
+        "original_circ_time_ns": 6624,
+        "repaired_circ_time_ns": 2208,
+        "f_ideal_before_and_after": 1.0,
+        "active_volume_milli_unrepaired": 856,
+        "active_volume_milli_repaired": 285,
+        "f_phys_unrepaired": 0.411212,
+        "f_phys_repaired": 0.843467,
+        "fidelity_gain_after_r1": 0.432255,
+        "passes_bqp_threshold_before": false,
+        "passes_bqp_threshold_after": true
+      },
+      {
+        "n_qubits": 8,
+        "original_depth": 32,
+        "repaired_depth": 12,
+        "original_n_2q_gates": 112,
+        "repaired_n_2q_gates": 42,
+        "original_circ_time_ns": 4416,
+        "repaired_circ_time_ns": 1656,
+        "f_ideal_before_and_after": 1.0,
+        "active_volume_milli_unrepaired": 777,
+        "active_volume_milli_repaired": 291,
+        "f_phys_unrepaired": 0.451161,
+        "f_phys_repaired": 0.82938,
+        "fidelity_gain_after_r1": 0.378219,
+        "passes_bqp_threshold_before": false,
+        "passes_bqp_threshold_after": true
+      },
+      {
+        "n_qubits": 8,
+        "original_depth": 48,
+        "repaired_depth": 12,
+        "original_n_2q_gates": 168,
+        "repaired_n_2q_gates": 42,
+        "original_circ_time_ns": 6624,
+        "repaired_circ_time_ns": 1656,
+        "f_ideal_before_and_after": 1.0,
+        "active_volume_milli_unrepaired": 1166,
+        "active_volume_milli_repaired": 291,
+        "f_phys_unrepaired": 0.286461,
+        "f_phys_repaired": 0.834223,
+        "fidelity_gain_after_r1": 0.547762,
+        "passes_bqp_threshold_before": false,
+        "passes_bqp_threshold_after": true
+      },
+      {
+        "n_qubits": 10,
+        "original_depth": 32,
+        "repaired_depth": 12,
+        "original_n_2q_gates": 144,
+        "repaired_n_2q_gates": 54,
+        "original_circ_time_ns": 4416,
+        "repaired_circ_time_ns": 1656,
+        "f_ideal_before_and_after": 1.0,
+        "active_volume_milli_unrepaired": 984,
+        "active_volume_milli_repaired": 369,
+        "f_phys_unrepaired": 0.366536,
+        "f_phys_repaired": 0.785502,
+        "fidelity_gain_after_r1": 0.418966,
+        "passes_bqp_threshold_before": false,
+        "passes_bqp_threshold_after": true
+      }
+    ]
+  },
+  "repair_r2_spectator_xy4_dd_and_unitary_demotion": {
+    "repair_id": "R2_Spectator_Aware_XY4_Dynamical_Decoupling_And_Adaptive_Unitary_Demotion",
+    "target_failure_mode": "P2_Redex_MBU_Spectator_Readout_Decoherence",
+    "spectator_counts_tested": [
+      0,
+      1,
+      3,
+      5,
+      7
+    ],
+    "all_repaired_non_regressing_vs_pre": true,
+    "repair_results": [
+      {
+        "n_spectators": 0,
+        "total_qubits": 3,
+        "repair_strategy": "Keep_MBU_Readout",
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_unitary": 0.97987,
+        "f_phys_unrepaired_mbu_with_drift": 0.946093,
+        "f_phys_xy4_dynamical_decoupling": 0.990505,
+        "f_phys_repaired_r2": 0.984704,
+        "repaired_beats_or_equals_pre": true
+      },
+      {
+        "n_spectators": 1,
+        "total_qubits": 4,
+        "repair_strategy": "XY4_DD_Or_Adaptive_Unitary_RCCX_Demotion",
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_unitary": 0.979558,
+        "f_phys_unrepaired_mbu_with_drift": 0.923417,
+        "f_phys_xy4_dynamical_decoupling": 0.988299,
+        "f_phys_repaired_r2": 0.979558,
+        "repaired_beats_or_equals_pre": true
+      },
+      {
+        "n_spectators": 3,
+        "total_qubits": 6,
+        "repair_strategy": "XY4_DD_Or_Adaptive_Unitary_RCCX_Demotion",
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_unitary": 0.972882,
+        "f_phys_unrepaired_mbu_with_drift": 0.87432,
+        "f_phys_xy4_dynamical_decoupling": 0.977829,
+        "f_phys_repaired_r2": 0.972882,
+        "repaired_beats_or_equals_pre": true
+      },
+      {
+        "n_spectators": 5,
+        "total_qubits": 8,
+        "repair_strategy": "XY4_DD_Or_Adaptive_Unitary_RCCX_Demotion",
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_unitary": 0.966252,
+        "f_phys_unrepaired_mbu_with_drift": 0.827834,
+        "f_phys_xy4_dynamical_decoupling": 0.96747,
+        "f_phys_repaired_r2": 0.966252,
+        "repaired_beats_or_equals_pre": true
+      },
+      {
+        "n_spectators": 7,
+        "total_qubits": 10,
+        "repair_strategy": "XY4_DD_Or_Adaptive_Unitary_RCCX_Demotion",
+        "f_ideal": 1.0,
+        "f_phys_pre_reduction_unitary": 0.959668,
+        "f_phys_unrepaired_mbu_with_drift": 0.783819,
+        "f_phys_xy4_dynamical_decoupling": 0.957221,
+        "f_phys_repaired_r2": 0.959668,
+        "repaired_beats_or_equals_pre": true
+      }
+    ]
+  },
+  "repair_r3_coupling_cost_guarded_extraction_and_bridge": {
+    "repair_id": "R3_Coupling_Cost_Guarded_Commutation_Reversion_And_4CX_Bridge_Synthesis",
+    "target_failure_mode": "P3_Redex_Commutation_Planar_SWAP_Explosion",
+    "distances_tested": [
+      1,
+      2,
+      3,
+      4,
+      6
+    ],
+    "d6_unrepaired_fidelity": 0.876375,
+    "d6_repaired_fidelity": 0.961055,
+    "d2_bridge_4cx_vs_swap_7cx": {
+      "f_ideal": 1.0,
+      "f_phys_swap_7cx": 0.975846,
+      "f_phys_bridge_4cx": 0.985473,
+      "cx_gates_saved": 3
+    },
+    "repair_results": [
+      {
+        "coupling_distance_d": 1,
+        "extra_cx_unrepaired": 0,
+        "extra_cx_repaired": 0,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_routed": 0.992871,
+        "f_phys_repaired_r3": 0.992871,
+        "fidelity_restored": 0.0
+      },
+      {
+        "coupling_distance_d": 2,
+        "extra_cx_unrepaired": 6,
+        "extra_cx_repaired": 0,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_routed": 0.968339,
+        "f_phys_repaired_r3": 0.986425,
+        "fidelity_restored": 0.018086
+      },
+      {
+        "coupling_distance_d": 3,
+        "extra_cx_unrepaired": 12,
+        "extra_cx_repaired": 0,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_routed": 0.944426,
+        "f_phys_repaired_r3": 0.98002,
+        "fidelity_restored": 0.035595
+      },
+      {
+        "coupling_distance_d": 4,
+        "extra_cx_unrepaired": 18,
+        "extra_cx_repaired": 0,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_routed": 0.921138,
+        "f_phys_repaired_r3": 0.973657,
+        "fidelity_restored": 0.052519
+      },
+      {
+        "coupling_distance_d": 6,
+        "extra_cx_unrepaired": 30,
+        "extra_cx_repaired": 0,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_routed": 0.876375,
+        "f_phys_repaired_r3": 0.961055,
+        "fidelity_restored": 0.08468
+      }
+    ]
+  },
+  "repair_r4_two_color_coupler_conflict_graph_scheduling": {
+    "repair_id": "R4_TwoColor_Coupler_Conflict_Graph_And_Blockade_Scheduler",
+    "target_failure_mode": "P4_Redex_SeqToPar_Adjacent_ZZ_Crosstalk_And_Blockade",
+    "layers_tested": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "l5_unrepaired_fidelity": 0.701836,
+    "l5_repaired_fidelity": 0.964583,
+    "repair_results": [
+      {
+        "parallel_layers_L": 1,
+        "coupler_conflict_chromatic_number": 2,
+        "repaired_min_active_coupler_dist_d_G": 2,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_adjacent_par": 0.97814,
+        "f_phys_repaired_2color_schedule": 0.990072,
+        "fidelity_gain_after_r4": 0.011932
+      },
+      {
+        "parallel_layers_L": 2,
+        "coupler_conflict_chromatic_number": 2,
+        "repaired_min_active_coupler_dist_d_G": 2,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_adjacent_par": 0.938487,
+        "f_phys_repaired_2color_schedule": 0.985362,
+        "fidelity_gain_after_r4": 0.046875
+      },
+      {
+        "parallel_layers_L": 3,
+        "coupler_conflict_chromatic_number": 2,
+        "repaired_min_active_coupler_dist_d_G": 2,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_adjacent_par": 0.874787,
+        "f_phys_repaired_2color_schedule": 0.97723,
+        "fidelity_gain_after_r4": 0.102443
+      },
+      {
+        "parallel_layers_L": 4,
+        "coupler_conflict_chromatic_number": 2,
+        "repaired_min_active_coupler_dist_d_G": 2,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_adjacent_par": 0.796566,
+        "f_phys_repaired_2color_schedule": 0.972595,
+        "fidelity_gain_after_r4": 0.176029
+      },
+      {
+        "parallel_layers_L": 5,
+        "coupler_conflict_chromatic_number": 2,
+        "repaired_min_active_coupler_dist_d_G": 2,
+        "f_ideal": 1.0,
+        "f_phys_unrepaired_adjacent_par": 0.701836,
+        "f_phys_repaired_2color_schedule": 0.964583,
+        "fidelity_gain_after_r4": 0.262747
+      }
+    ]
+  },
+  "repair_r5_hook_orthogonal_cnot_rotation_and_dyadic_promotion": {
+    "repair_id": "R5_Hook_Orthogonal_CNOT_Schedule_Rotation_And_Exact_Dyadic_Promotion",
+    "target_failure_mode": "P5_Stim_Hook_Distance_Drop_And_Float64_Mantissa_Underflow",
+    "stim_hook_repair_results": [
+      {
+        "code_distance_d": 3,
+        "d_eff_unrepaired_hook": 2,
+        "d_eff_repaired_zigzag": 3,
+        "mwpm_ler_unrepaired_10k_shots": 0.0105,
+        "mwpm_ler_repaired_10k_shots": 0.0005,
+        "ler_suppression_factor_x": 21.0
+      },
+      {
+        "code_distance_d": 5,
+        "d_eff_unrepaired_hook": 3,
+        "d_eff_repaired_zigzag": 5,
+        "mwpm_ler_unrepaired_10k_shots": 0.0024,
+        "mwpm_ler_repaired_10k_shots": 0.0001,
+        "ler_suppression_factor_x": 24.0
+      },
+      {
+        "code_distance_d": 7,
+        "d_eff_unrepaired_hook": 4,
+        "d_eff_repaired_zigzag": 7,
+        "mwpm_ler_unrepaired_10k_shots": 0.0005,
+        "mwpm_ler_repaired_10k_shots": 0.0,
+        "ler_suppression_factor_x": 500.0
+      }
+    ],
+    "dyadic_promotion_results": [
+      {
+        "exponent_k": 48,
+        "float64_underflows_to_zero": false,
+        "promoted_to_exact_dyadic_ring": false,
+        "dyadic_exact_numerator_delta": 1
+      },
+      {
+        "exponent_k": 52,
+        "float64_underflows_to_zero": false,
+        "promoted_to_exact_dyadic_ring": false,
+        "dyadic_exact_numerator_delta": 1
+      },
+      {
+        "exponent_k": 53,
+        "float64_underflows_to_zero": false,
+        "promoted_to_exact_dyadic_ring": true,
+        "dyadic_exact_numerator_delta": 1
+      },
+      {
+        "exponent_k": 54,
+        "float64_underflows_to_zero": true,
+        "promoted_to_exact_dyadic_ring": true,
+        "dyadic_exact_numerator_delta": 1
+      },
+      {
+        "exponent_k": 64,
+        "float64_underflows_to_zero": true,
+        "promoted_to_exact_dyadic_ring": true,
+        "dyadic_exact_numerator_delta": 1
+      },
+      {
+        "exponent_k": 128,
+        "float64_underflows_to_zero": true,
+        "promoted_to_exact_dyadic_ring": true,
+        "dyadic_exact_numerator_delta": 1
+      }
+    ]
+  },
+  "campaign6_200_trial_closed_loop_repair_fuzzer": {
+    "total_trials": 200,
+    "physical_regressions_detected_before_repair": 139,
+    "circuits_passing_qsub_phys_after_repair": 200,
+    "ideal_equivalence_verified_count": 200,
+    "physical_non_regression_verified_count": 200,
+    "unrepaired_failures_remaining": 0,
+    "closed_loop_repair_success_rate_pct": 100.0,
+    "repairs_synthesized_by_kind": {
+      "R1_PyZX_Peephole_And_Bennett_Checkpoint_Split": 70,
+      "R2_XY4_Dynamical_Decoupling_And_Unitary_Demotion": 33,
+      "R3_Revert_Distal_Commutation_Or_4CX_Bridge": 32,
+      "R4_TwoColor_Coupler_Conflict_Graph_Schedule": 21,
+      "R5_ZigZag_CNOT_Schedule_And_Exact_Dyadic_Promotion": 25
+    },
+    "rule_family_distribution": {
+      "R_Safe_Local_Peephole": 34,
+      "R_MBU_Uncompute": 33,
+      "R_Commute_Distal": 42,
+      "R_Seq_To_Par": 45,
+      "R_Syndrome_Schedule": 46
+    }
+  },
+  "all_repairs_r1_to_r5_verified_100pct_on_simulators": true
+}

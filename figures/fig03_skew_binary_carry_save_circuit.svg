@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 680" width="1320" height="680">
+
+  <defs>
+    <marker id="arrow-black" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-crimson" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1320" height="680" fill="#ffffff"/>
+  <line x1="16.0" y1="16.0" x2="1304.0" y2="16.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <text x="24.0" y="38.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="14.5" font-weight="700" fill="#000000" text-anchor="start">Figure 3.  Skew-Binary Carry-Save Numeral: O(1)-Depth Lazy Carry Absorption Circuit</text>
+  <text x="24.0" y="57.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">SkewBinaryCarrySaveNumeral(C=32, w=64): 2-Qubit Skew Carry Rail d_k in {0,1,2} Eliminates 32x Ripple Stretch</text>
+  <line x1="16.0" y1="68.0" x2="1304.0" y2="68.0" stroke="#000000" stroke-width="0.80" stroke-linecap="butt"/>
+  <rect x="16.0" y="94.0" width="636.0" height="568.0" fill="#ffffff" stroke="#000000" stroke-width="1.00"/>
+  <line x1="16.0" y1="138.0" x2="652.0" y2="138.0" stroke="#000000" stroke-width="0.75" stroke-linecap="butt"/>
+  <text x="28.0" y="112.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="start">Panel (a): Gate-Level Intra-Limb Adder + 2-Qubit Skew Carry Rail Absorption</text>
+  <text x="28.0" y="129.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">All C=32 limbs execute in parallel (1 limb-depth round); carry-out b_k absorbed into d_k[0..1]</text>
+  <text x="640.0" y="112.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="400" fill="#000000" text-anchor="end">[1 Toffoli + 1 CNOT / Limb]</text>
+  <line x1="152.0" y1="175.0" x2="456.0" y2="175.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="144.0" y="179.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|L_k[0..63]⟩</text>
+  <text x="464.0" y="179.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|L'_k[0..63]⟩</text>
+  <line x1="167.5" y1="181.5" x2="176.5" y2="168.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="173.0" y="166.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">64</text>
+  <line x1="152.0" y1="225.0" x2="456.0" y2="225.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="144.0" y="229.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|A_k[0..63]⟩</text>
+  <text x="464.0" y="229.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|A_k[0..63]⟩</text>
+  <line x1="167.5" y1="231.5" x2="176.5" y2="218.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="173.0" y="216.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">64</text>
+  <line x1="152.0" y1="275.0" x2="456.0" y2="275.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="144.0" y="279.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|b_k⟩ = |0⟩</text>
+  <text x="464.0" y="279.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|b_k⟩ (Carry-out)</text>
+  <line x1="152.0" y1="335.0" x2="456.0" y2="335.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="144.0" y="339.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|d_k[0]⟩ (LSB)</text>
+  <text x="464.0" y="339.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|d'_k[0]⟩ = d_k[0]^b_k</text>
+  <line x1="152.0" y1="385.0" x2="456.0" y2="385.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="144.0" y="389.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|d_k[1]⟩ (MSB)</text>
+  <text x="464.0" y="389.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|d'_k[1]⟩ = d_k[1]^(b_k&amp;d_k[0])</text>
+  <line x1="152.0" y1="455.0" x2="456.0" y2="455.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="144.0" y="459.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|L_{k+1}[0..63]⟩</text>
+  <text x="464.0" y="459.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|L'_{k+1}⟩ (Parallel!)</text>
+  <line x1="167.5" y1="461.5" x2="176.5" y2="448.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="173.0" y="446.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">64</text>
+  <rect x="178.0" y="160.0" width="108.0" height="130.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="232.0" y="214.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Cuccaro-Gidney</text>
+  <text x="232.0" y="228.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">w=64 Adder</text>
+  <text x="232.0" y="241.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">(64 CCX, 1 Round)</text>
+  <rect x="178.0" y="440.0" width="108.0" height="30.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="232.0" y="453.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="middle">Limb k+1 Add</text>
+  <text x="232.0" y="465.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">(Simultaneous)</text>
+  <rect x="304.0" y="152.0" width="144.0" height="260.0" fill="none" stroke="#333333" stroke-width="0.90" stroke-dasharray="4,3"/>
+  <text x="376.0" y="168.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">Skew d_k ← d_k + b_k</text>
+  <line x1="350.0" y1="275.0" x2="350.0" y2="385.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <circle cx="350.0" cy="275.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <circle cx="350.0" cy="335.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <circle cx="350.0" cy="385.0" r="9.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <line x1="341.0" y1="385.0" x2="359.0" y2="385.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <line x1="350.0" y1="376.0" x2="350.0" y2="394.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <text x="350.0" y="407.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">CCX</text>
+  <line x1="408.0" y1="275.0" x2="408.0" y2="335.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <circle cx="408.0" cy="275.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <circle cx="408.0" cy="335.0" r="9.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <line x1="399.0" y1="335.0" x2="417.0" y2="335.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <line x1="408.0" y1="326.0" x2="408.0" y2="344.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <text x="408.0" y="357.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">CNOT</text>
+  <line x1="152.0" y1="424.0" x2="456.0" y2="424.0" stroke="#111111" stroke-width="1.80" stroke-linecap="butt" stroke-dasharray="6,4"/>
+  <rect x="200.0" y="413.0" width="240.0" height="22.0" fill="#f2f2f2" stroke="#000000" stroke-width="1.20"/>
+  <text x="320.0" y="428.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="middle">ZERO CROSS-LIMB RIPPLE WIRE</text>
+  <rect x="34.0" y="488.0" width="600.0" height="156.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="50.0" y="512.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">Skew-Binary Redundant Carry-Save Representation Invariant:</text>
+  <rect x="50.0" y="522.0" width="568.0" height="30.0" fill="#f5f5f5" stroke="#000000" stroke-width="1.20"/>
+  <text x="334.0" y="542.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="middle">Val(L, d)  =  SUM_{k=0}^{C-1} ( L_k + d_k * 2^w ) * 2^{k*w},    d_k in {0, 1, 2}</text>
+  <text x="50.0" y="574.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="400" fill="#000000" text-anchor="start">• Pre-condition: Inter-window fold resets d_k in {0, 1} before each addition.</text>
+  <text x="50.0" y="594.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="700" fill="#000000" text-anchor="start">• Step: Adding carry-out b_k in {0, 1} produces d'_k = d_k + b_k in {0, 1, 2} (zero overflow!).</text>
+  <text x="50.0" y="614.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="400" fill="#000000" text-anchor="start">• Qubit Overhead: Only 2*C = 64 qubits across RSA-2048 (128 Q on RSA-4096).</text>
+  <text x="50.0" y="634.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="700" fill="#000000" text-anchor="start">• Depth Reduction: Collapses 32 sequential limb rounds → 1 parallel intra-limb round!</text>
+  <rect x="668.0" y="94.0" width="636.0" height="568.0" fill="#ffffff" stroke="#000000" stroke-width="1.00"/>
+  <line x1="668.0" y1="138.0" x2="1304.0" y2="138.0" stroke="#000000" stroke-width="0.75" stroke-linecap="butt"/>
+  <text x="680.0" y="112.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="start">Panel (b): Inter-Window Local Carry-Save Fold &amp; Terminal Canonical Collapse</text>
+  <text x="680.0" y="129.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">1-Limb local fold (d_k → L_{k+1}[0..1]) keeps d_k in {0,1}; canonical ripple runs ONCE before QFT</text>
+  <text x="1292.0" y="112.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="400" fill="#000000" text-anchor="end">[32x → 1x Depth Stretch]</text>
+  <line x1="805.0" y1="180.0" x2="1185.0" y2="180.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="797.0" y="184.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|d_k[0]⟩ (2^0)</text>
+  <text x="1193.0" y="184.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|0⟩ (Cleared)</text>
+  <line x1="805.0" y1="230.0" x2="1185.0" y2="230.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="797.0" y="234.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|d_k[1]⟩ (2^1)</text>
+  <text x="1193.0" y="234.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|0⟩ (Cleared)</text>
+  <line x1="805.0" y1="290.0" x2="1185.0" y2="290.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="797.0" y="294.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|L_{k+1}[0]⟩</text>
+  <text x="1193.0" y="294.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|L'_{k+1}[0]⟩</text>
+  <line x1="805.0" y1="340.0" x2="1185.0" y2="340.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="797.0" y="344.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|L_{k+1}[1]⟩</text>
+  <text x="1193.0" y="344.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|L'_{k+1}[1]⟩</text>
+  <line x1="805.0" y1="390.0" x2="1185.0" y2="390.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="797.0" y="394.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|L_{k+1}[2..63]⟩</text>
+  <text x="1193.0" y="394.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|L'_{k+1}[2..63]⟩</text>
+  <line x1="820.5" y1="396.5" x2="829.5" y2="383.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="826.0" y="381.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">62</text>
+  <rect x="840.0" y="165.0" width="110.0" height="190.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="895.0" y="256.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">2-Bit Add</text>
+  <text x="895.0" y="270.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">L_{k+1}[0..1] += d_k</text>
+  <rect x="965.0" y="275.0" width="110.0" height="130.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="1020.0" y="336.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Intra-Limb</text>
+  <text x="1020.0" y="350.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Ripple → d'_{k+1}</text>
+  <rect x="1092.0" y="165.0" width="76.0" height="80.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="1130.0" y="201.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Reset d_k</text>
+  <text x="1130.0" y="215.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">d'_{k+1} in {0,1}</text>
+  <rect x="686.0" y="428.0" width="600.0" height="216.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="702.0" y="452.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.5" font-weight="700" fill="#000000" text-anchor="start">Two-Stage Lifecycle Across 1,024 Windowed Modular Multiplications (RSA-2048):</text>
+  <text x="702.0" y="474.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.8" font-weight="700" fill="#000000" text-anchor="start">1. During 40,960 Modular Additions (Per Window): Local 1-Limb Fold (Above)</text>
+  <text x="718.0" y="493.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">• Propagates d_k into L_{k+1} locally in O(1) limb hops; resets d_k in {0, 1}.</text>
+  <text x="702.0" y="515.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.8" font-weight="700" fill="#000000" text-anchor="start">2. Terminal Canonical Collapse (Once at End of Period Finding Before QFT):</text>
+  <text x="718.0" y="534.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">• Sequential sweep k = 0 .. C-2 ripples all d_k → 0, restoring unique binary Val(L).</text>
+  <text x="718.0" y="552.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">• Uncomputes high-water comparison history so |d_0..d_{C-1}⟩ = |0⟩^{2C} cleanly.</text>
+  <rect x="702.0" y="566.0" width="568.0" height="64.0" fill="#fafafa" stroke="#000000" stroke-width="1.20"/>
+  <text x="716.0" y="586.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Arch A (Sequential Zipper Ripple):  32x Limb Stretch  |  d = 29  |  50.1 Hours (2D)  |  1.92M Phys Q</text>
+  <text x="716.0" y="606.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Arch C (Skew-Binary Carry-Save):     1x Limb Stretch  |  d = 27  |  3.19 Days (2D)   |  891,348 Yoked Q</text>
+  <text x="716.0" y="623.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Neutral-Atom Parallel AOD / BB qLDPC: 32 Limbs Parallel =&gt; 24.9 Days vs 2.58 Yrs Serial (37.8x Faster)</text>
+</svg>

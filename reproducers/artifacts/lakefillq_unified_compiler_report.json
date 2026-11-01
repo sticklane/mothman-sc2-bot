@@ -1,0 +1,585 @@
+{
+  "all_annotation_free_flags_zero": true,
+  "all_residual_surface_forms_zero": true,
+  "compiler_driver": "compiler/lakefillqc.rkt",
+  "intrinsic_dialects": [
+    "LakefillQ",
+    "lambda_LFQ_kern",
+    "RevIR",
+    "MachineISA"
+  ],
+  "logical_laws_qsub": [
+    "U1-EraseBy",
+    "U2-Canonical",
+    "U3-TotalOn",
+    "U4-QTainted"
+  ],
+  "mechanized_lean_proofs": {
+    "axiom_count": 0,
+    "exit_code": 0,
+    "lean_compiler": "4.35.0",
+    "lean_file": "proofs/lakefillq_unified_compiler_elaboration_and_qasm3_proofs.lean",
+    "max_proof_lines": 15,
+    "native_decide_count": 0,
+    "sorry_count": 0,
+    "theorem_count": 15,
+    "theorems_proved": [
+      "elaborateToKern_zero_residual_forms",
+      "openqasm3_mbu_feedforward_sound",
+      "chordal_ssa_wire_recycling_sound",
+      "zero_ancilla_distinct_pivot_fanin_sound",
+      "domain_guard_ideal_zero_iff",
+      "isWellTyped_sound",
+      "rejects_u1_violation",
+      "rejects_u2_violation",
+      "rejects_u3_violation",
+      "rejects_u4_violation",
+      "rejects_phi1_violation",
+      "rejects_phi2_violation",
+      "rejects_phi3_violation",
+      "div_succ_quot_le_693",
+      "repairPhysGrade_restores_wellTyped"
+    ],
+    "wildcard_arm_count": 0
+  },
+  "negative_and_repair_checks": [
+    {
+      "counterexample_witness": {
+        "counterexample_basis": {
+          "q0_in": 1,
+          "q1_in": 1,
+          "q2_in": 0
+        },
+        "residual_anf": "x0*x1",
+        "wire": 3
+      },
+      "detected_codes": [
+        "U1-EraseBy",
+        "U1-EraseBy"
+      ],
+      "expected_violation": "U1-EraseBy",
+      "program": "neg_u1_erase_by.lfq",
+      "rejected": true,
+      "repaired_well_typed": false
+    },
+    {
+      "counterexample_witness": {
+        "counterexample_basis": {
+          "q0_h": 1,
+          "q0_in": 0,
+          "q1_in": 1,
+          "q2_in": 0
+        },
+        "quotient_wire": 2,
+        "residual_anf": "x1*x3 ^ x0*x1*x3 ^ x1*x2*x3 ^ x0*x1*x2*x3"
+      },
+      "detected_codes": [
+        "U2-Canonical",
+        "U2-Canonical",
+        "U2-Canonical"
+      ],
+      "expected_violation": "U2-Canonical",
+      "program": "neg_u2_canonical.lfq",
+      "rejected": true,
+      "repaired_well_typed": false
+    },
+    {
+      "counterexample_witness": {
+        "counterexample_basis": {
+          "q0_in": 0,
+          "q1_in": 1,
+          "q2_in": 0
+        },
+        "uncovered_anf": "x1 ^ x0*x1"
+      },
+      "detected_codes": [
+        "U3-TotalOn"
+      ],
+      "expected_violation": "U3-TotalOn",
+      "program": "neg_u3_total_on.lfq",
+      "rejected": true,
+      "repaired_well_typed": false
+    },
+    {
+      "counterexample_witness": {
+        "counterexample_basis": {
+          "q0_h": 1,
+          "q0_in": 0,
+          "q1_h": 1,
+          "q1_in": 0,
+          "q2_in": 0
+        },
+        "measurement": "m_leak",
+        "residual_phase_anf": "x3*x4"
+      },
+      "detected_codes": [
+        "U4-QTainted",
+        "U4-QTainted"
+      ],
+      "expected_violation": "U4-QTainted",
+      "program": "neg_u4_qtainted.lfq",
+      "rejected": true,
+      "repaired_well_typed": false
+    },
+    {
+      "counterexample_witness": {
+        "live_spectators": 3,
+        "mbu_excess_ns": 23500,
+        "meas_reset_ns": 5000,
+        "measured_wire": 3
+      },
+      "detected_codes": [
+        "Phi1-DecoherenceAction",
+        "Phi1-DecoherenceAction"
+      ],
+      "expected_violation": "Phi1-DecoherenceAction",
+      "program": "neg_phi1_decoherence.lfq",
+      "rejected": true,
+      "repaired_well_typed": true,
+      "repairs_applied": [
+        {
+          "detail": "Inserted XY4 dynamical decoupling echo on mid-meas-x q[3]",
+          "repair": "xy4-spectator-echo"
+        }
+      ]
+    },
+    {
+      "counterexample_witness": {
+        "blockade_radius_um": 8,
+        "colliding_wire_pairs": [
+          [
+            1,
+            2
+          ]
+        ],
+        "site_spacing_um": 5
+      },
+      "detected_codes": [
+        "Phi2-ExclusionGraph"
+      ],
+      "expected_violation": "Phi2-ExclusionGraph",
+      "program": "neg_phi2_exclusion.lfq",
+      "rejected": true,
+      "repaired_well_typed": true,
+      "repairs_applied": [
+        {
+          "detail": "Sequentialized colliding parallel supports (0 1) and (2 3) into 2 colors",
+          "repair": "two-color-coupler-exclusion-schedule"
+        }
+      ]
+    },
+    {
+      "counterexample_witness": {
+        "effective_fault_distance": 3,
+        "nominal_code_distance": 5,
+        "plaquette_wires": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "required_fault_distance": 5
+      },
+      "detected_codes": [
+        "Phi3-FaultExponent",
+        "Phi3-FaultExponent"
+      ],
+      "expected_violation": "Phi3-FaultExponent",
+      "program": "neg_phi3_fault_exponent.lfq",
+      "rejected": true,
+      "repaired_well_typed": true,
+      "repairs_applied": [
+        {
+          "detail": "Reordered plaquette (0 1 2 3 4) to N-Z-S-W hook-orthogonal schedule (d=5)",
+          "repair": "nzsw-hook-orthogonal-schedule"
+        },
+        {
+          "detail": "Promoted rz-dyadic(k=60) on q[0] from float64 to exact dyadic",
+          "repair": "exact-dyadic-angle-promotion"
+        }
+      ]
+    }
+  ],
+  "negative_programs_rejected": 7,
+  "physical_grades_qphys": [
+    "Phi1-DecoherenceAction",
+    "Phi2-ExclusionGraph",
+    "Phi3-FaultExponent"
+  ],
+  "positive_benchmarks": {
+    "aes_sbox_bp34": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 9,
+      "circuit_kind": "defqfree",
+      "circuit_name": "aes-sbox-bp34",
+      "classical_meas_bits": 34,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 34,
+      "machine_isa_ops": 1332,
+      "machines_used": 1,
+      "mbu_erasure_count": 34,
+      "module_circuits_checked": [
+        "aes-sbox-bp34"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 41,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 25,
+        "dirty_leak": 0,
+        "peak": 41,
+        "phi1_action": 441,
+        "phi2_collisions": 0,
+        "w_in": 16,
+        "w_out": 16
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 441,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "in8",
+          "width": 8
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "out8",
+          "width": 8
+        }
+      ],
+      "stim_verification": {
+        "dem_error_mechanisms": 25,
+        "num_detectors": 25,
+        "num_qubits": 41,
+        "parsed_ok": true
+      },
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "heron-r2",
+      "uncompute_ccx_count": 0,
+      "verification": {
+        "aer_superposition_fidelity": 1.0,
+        "classical_vectors_verified": "256/256",
+        "fips197_0x53_to_0xed_aer": true
+      },
+      "violations": [],
+      "virtual_wires": 50,
+      "well_typed": true
+    },
+    "early_mbu_dqi_bch7": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 14,
+      "circuit_kind": "defq",
+      "circuit_name": "early-mbu-dqi-bch7",
+      "classical_meas_bits": 21,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 14,
+      "machine_isa_ops": 127,
+      "machines_used": 1,
+      "mbu_erasure_count": 21,
+      "module_circuits_checked": [
+        "early-mbu-dqi-bch7"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 10,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 0,
+        "dirty_leak": 0,
+        "peak": 10,
+        "phi1_action": 336,
+        "phi2_collisions": 0,
+        "w_in": 10,
+        "w_out": 10
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 336,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "e7",
+          "width": 7
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "syn3",
+          "width": 3
+        }
+      ],
+      "stim_verification": {
+        "dem_error_mechanisms": 2,
+        "num_detectors": 2,
+        "num_qubits": 10,
+        "parsed_ok": true
+      },
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "bluvstein-aod",
+      "uncompute_ccx_count": 0,
+      "verification": {
+        "aer_density_matrix_fidelity": 1.0,
+        "analytical_4_over_7": 0.571429,
+        "output_purity": 1.0,
+        "prob_optimal_xstar_5": 0.571429
+      },
+      "violations": [],
+      "virtual_wires": 24,
+      "well_typed": true
+    },
+    "kawamura_rns_crt_u2": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 3,
+      "circuit_kind": "defq",
+      "circuit_name": "kawamura-rns-crt-u2",
+      "classical_meas_bits": 26,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 10,
+      "machine_isa_ops": 279,
+      "machines_used": 1,
+      "mbu_erasure_count": 26,
+      "module_circuits_checked": [
+        "kawamura-rns-crt-u2"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 27,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 19,
+        "dirty_leak": 0,
+        "peak": 27,
+        "phi1_action": 437,
+        "phi2_collisions": 0,
+        "w_in": 8,
+        "w_out": 8
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 437,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "ctrl",
+          "width": 1
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "r3",
+          "width": 2
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "q-crt",
+          "width": 2
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "r5",
+          "width": 3
+        }
+      ],
+      "stim_verification": {
+        "dem_error_mechanisms": 56,
+        "num_detectors": 19,
+        "num_qubits": 27,
+        "parsed_ok": true
+      },
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "bluvstein-aod",
+      "uncompute_ccx_count": 53,
+      "verification": {
+        "aer_superposition_fidelity": 1.0,
+        "rns_residues_canonicalized": "15/15"
+      },
+      "violations": [],
+      "virtual_wires": 26,
+      "well_typed": true
+    },
+    "mod13_adder_mbu": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 0,
+      "circuit_kind": "defqfree",
+      "circuit_name": "mod13-adder-mbu",
+      "classical_meas_bits": 9,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 9,
+      "machine_isa_ops": 353,
+      "machines_used": 1,
+      "mbu_erasure_count": 9,
+      "module_circuits_checked": [
+        "mod13-adder-mbu"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 21,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 9,
+        "dirty_leak": 0,
+        "peak": 21,
+        "phi1_action": 437,
+        "phi2_collisions": 0,
+        "w_in": 12,
+        "w_out": 12
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 437,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "a",
+          "width": 4
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "b",
+          "width": 4
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "out",
+          "width": 4
+        }
+      ],
+      "stim_verification": {
+        "dem_error_mechanisms": 9,
+        "num_detectors": 9,
+        "num_qubits": 21,
+        "parsed_ok": true
+      },
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "heron-r2",
+      "uncompute_ccx_count": 0,
+      "verification": {
+        "aer_superposition_fidelity": 1.0,
+        "classical_pairs_verified": "169/169"
+      },
+      "violations": [],
+      "virtual_wires": 21,
+      "well_typed": true
+    },
+    "select_swap_qroam_u4": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 6,
+      "circuit_kind": "defq",
+      "circuit_name": "select-swap-qroam-u4",
+      "classical_meas_bits": 21,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 17,
+      "machine_isa_ops": 274,
+      "machines_used": 1,
+      "mbu_erasure_count": 21,
+      "module_circuits_checked": [
+        "select-swap-qroam-u4"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 19,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 15,
+        "dirty_leak": 0,
+        "peak": 19,
+        "phi1_action": 383,
+        "phi2_collisions": 0,
+        "w_in": 4,
+        "w_out": 4
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 383,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "addr",
+          "width": 4
+        }
+      ],
+      "stim_verification": {
+        "dem_error_mechanisms": 51,
+        "num_detectors": 15,
+        "num_qubits": 19,
+        "parsed_ok": true
+      },
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "heron-r2",
+      "uncompute_ccx_count": 8,
+      "verification": {
+        "aer_interference_fidelity": 1.0,
+        "berry_gidney_uncompute_temp_ands": 5,
+        "sawtooth_baseline_temp_ands": 14
+      },
+      "violations": [],
+      "virtual_wires": 25,
+      "well_typed": true
+    }
+  },
+  "positive_programs_verified": 5,
+  "surface_reader": "#lang lakefillq"
+}

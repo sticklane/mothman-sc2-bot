@@ -1,0 +1,705 @@
+{
+  "track": "Wave 14 \u2014 Track SingleQPU-Seq-1 (ws09, ws10, ws13 & ws14)",
+  "weight_origin": "PUBLIC_CRYPTO_STANDARDS_10_FAMILIES_SINGLE_QPU_SEQUENTIAL_ALGORITHMS",
+  "all_suites_passed": true,
+  "total_elapsed_ms": 68470.56,
+  "suite1_symbolic_z3_single_qpu_proofs": {
+    "IterativeQFTFeedforward": "UNSAT",
+    "IterativeQFTFeedforwardFaultCaught": "SAT",
+    "SerialComputeZoneSweep_4Limb": "UNSAT",
+    "SerialComputeZoneSweep_32Limb_RSA2048": "UNSAT",
+    "SerialComputeZoneDirtyScratchFaultCaught": "SAT",
+    "SequentialEHvsRegevCrossover": "UNSAT",
+    "CoherenceBoundedGroverQuadratic": "UNSAT",
+    "elapsed_ms": 383.98
+  },
+  "suite2_composed_serial_zone_wire_verifier": {
+    "total_trials_verified": "50/50",
+    "total_mutants_killed": "200/200",
+    "fault_classes_tested": [
+      "corrupted_qft_feedforward_phase",
+      "dirty_serial_compute_scratch_between_limbs",
+      "missing_bezout_uncompute_cnot",
+      "flipped_gidney_mbu_cz_phase"
+    ],
+    "per_scheme_results": [
+      {
+        "scheme": "Curve25519/Ed25519",
+        "category": "ECC-Shor",
+        "bits": 255,
+        "cold_memory_limbs_C": 4,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 256,
+        "routing_ancilla_reduction": "4.0x",
+        "iterative_qft_control_qubits": 8,
+        "serial_zone_swaps_per_call": 5528,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "secp256k1",
+        "category": "ECC-Shor",
+        "bits": 256,
+        "cold_memory_limbs_C": 4,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 256,
+        "routing_ancilla_reduction": "4.0x",
+        "iterative_qft_control_qubits": 8,
+        "serial_zone_swaps_per_call": 5356,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "NIST P-256 (secp256r1)",
+        "category": "ECC-Shor",
+        "bits": 256,
+        "cold_memory_limbs_C": 4,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 256,
+        "routing_ancilla_reduction": "4.0x",
+        "iterative_qft_control_qubits": 8,
+        "serial_zone_swaps_per_call": 5396,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "BN254 (alt_bn128)",
+        "category": "Pairing-Shor",
+        "bits": 254,
+        "cold_memory_limbs_C": 4,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 256,
+        "routing_ancilla_reduction": "4.0x",
+        "iterative_qft_control_qubits": 8,
+        "serial_zone_swaps_per_call": 5248,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "BLS12-381",
+        "category": "Pairing-Shor",
+        "bits": 381,
+        "cold_memory_limbs_C": 6,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 384,
+        "routing_ancilla_reduction": "6.0x",
+        "iterative_qft_control_qubits": 8,
+        "serial_zone_swaps_per_call": 12102,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "RSA-2048",
+        "category": "RSA-EkeraHastad",
+        "bits": 2048,
+        "cold_memory_limbs_C": 32,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 2048,
+        "routing_ancilla_reduction": "32.0x",
+        "iterative_qft_control_qubits": 8,
+        "serial_zone_swaps_per_call": 8154,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "RSA-4096",
+        "category": "RSA-EkeraHastad",
+        "bits": 4096,
+        "cold_memory_limbs_C": 64,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 4096,
+        "routing_ancilla_reduction": "64.0x",
+        "iterative_qft_control_qubits": 8,
+        "serial_zone_swaps_per_call": 7926,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "AES-256",
+        "category": "Symmetric-Grover",
+        "bits": 256,
+        "cold_memory_limbs_C": 4,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 256,
+        "routing_ancilla_reduction": "4.0x",
+        "iterative_qft_control_qubits": 0,
+        "serial_zone_swaps_per_call": 5504,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "SHA-256 / SHA3-256",
+        "category": "Hash-Grover",
+        "bits": 256,
+        "cold_memory_limbs_C": 4,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 256,
+        "routing_ancilla_reduction": "4.0x",
+        "iterative_qft_control_qubits": 0,
+        "serial_zone_swaps_per_call": 5304,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      },
+      {
+        "scheme": "SPHINCS+ / ML-KEM-768",
+        "category": "PQC-Grover",
+        "bits": 256,
+        "cold_memory_limbs_C": 4,
+        "active_compute_zones_serial": 1,
+        "active_routing_ancillas_serial": 64,
+        "active_routing_ancillas_parallel": 256,
+        "routing_ancilla_reduction": "4.0x",
+        "iterative_qft_control_qubits": 0,
+        "serial_zone_swaps_per_call": 5572,
+        "trials_verified": "5/5",
+        "mutants_killed": "20/20"
+      }
+    ],
+    "elapsed_ms": 591.55
+  },
+  "suite3_c_avx2_vs_scalar_benchmarks": {
+    "total_trials_verified": "10000/10000",
+    "total_fail_closed_mutants_rejected": "1000/1000",
+    "per_scheme_benchmarks": [
+      {
+        "scheme": "Curve25519/Ed25519",
+        "category": "ECC-Shor",
+        "limbs_C": 4,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 151.2,
+        "cold_avx2_ns_per_op": 164.9,
+        "warm_scalar_ns_per_op": 129.2,
+        "cold_scalar_ns_per_op": 158.8
+      },
+      {
+        "scheme": "secp256k1",
+        "category": "ECC-Shor",
+        "limbs_C": 4,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 152.5,
+        "cold_avx2_ns_per_op": 151.0,
+        "warm_scalar_ns_per_op": 131.2,
+        "cold_scalar_ns_per_op": 172.3
+      },
+      {
+        "scheme": "NIST P-256 (secp256r1)",
+        "category": "ECC-Shor",
+        "limbs_C": 4,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 140.4,
+        "cold_avx2_ns_per_op": 148.5,
+        "warm_scalar_ns_per_op": 129.8,
+        "cold_scalar_ns_per_op": 135.0
+      },
+      {
+        "scheme": "BN254 (alt_bn128)",
+        "category": "Pairing-Shor",
+        "limbs_C": 4,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 147.0,
+        "cold_avx2_ns_per_op": 150.0,
+        "warm_scalar_ns_per_op": 123.1,
+        "cold_scalar_ns_per_op": 158.8
+      },
+      {
+        "scheme": "BLS12-381",
+        "category": "Pairing-Shor",
+        "limbs_C": 6,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 165.8,
+        "cold_avx2_ns_per_op": 163.3,
+        "warm_scalar_ns_per_op": 142.8,
+        "cold_scalar_ns_per_op": 152.9
+      },
+      {
+        "scheme": "RSA-2048",
+        "category": "RSA-EkeraHastad",
+        "limbs_C": 32,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 187.1,
+        "cold_avx2_ns_per_op": 191.3,
+        "warm_scalar_ns_per_op": 173.1,
+        "cold_scalar_ns_per_op": 204.0
+      },
+      {
+        "scheme": "RSA-4096",
+        "category": "RSA-EkeraHastad",
+        "limbs_C": 64,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 183.7,
+        "cold_avx2_ns_per_op": 221.6,
+        "warm_scalar_ns_per_op": 166.0,
+        "cold_scalar_ns_per_op": 195.5
+      },
+      {
+        "scheme": "AES-256",
+        "category": "Symmetric-Grover",
+        "limbs_C": 4,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 138.9,
+        "cold_avx2_ns_per_op": 155.3,
+        "warm_scalar_ns_per_op": 133.9,
+        "cold_scalar_ns_per_op": 143.3
+      },
+      {
+        "scheme": "SHA-256 / SHA3-256",
+        "category": "Hash-Grover",
+        "limbs_C": 4,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 141.7,
+        "cold_avx2_ns_per_op": 158.3,
+        "warm_scalar_ns_per_op": 120.4,
+        "cold_scalar_ns_per_op": 159.7
+      },
+      {
+        "scheme": "SPHINCS+ / ML-KEM-768",
+        "category": "PQC-Grover",
+        "limbs_C": 4,
+        "verified_trials": "1000/1000",
+        "fail_closed_mutants": "100/100",
+        "warm_avx2_ns_per_op": 146.3,
+        "cold_avx2_ns_per_op": 177.5,
+        "warm_scalar_ns_per_op": 130.2,
+        "cold_scalar_ns_per_op": 167.9
+      }
+    ],
+    "elapsed_ms": 66567.17
+  },
+  "suite4_architecture_table_and_lean4": {
+    "single_qpu_sequential_architecture_table": [
+      {
+        "scheme": "Curve25519/Ed25519",
+        "category": "ECC-Shor",
+        "bits": 255,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 4,
+          "cultivation_factories_36q": 4,
+          "active_routing_ancillas": 256,
+          "parallel_qft_control_qubits": 512,
+          "logical_data_and_seam_qubits": 268,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 3,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "4.0x",
+          "iterative_qft_control_qubits": 8,
+          "qft_control_qubits_saved": 504,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 16,
+          "total_sequential_toffolis_on_1qpu": 8120000,
+          "continuous_coherence_toffolis_per_shot": 507500,
+          "coherence_depth_reduction_factor": "16.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "1.00x",
+          "coherent_iters_per_shot_gain": "1.00x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "1.00x"
+        }
+      },
+      {
+        "scheme": "secp256k1",
+        "category": "ECC-Shor",
+        "bits": 256,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 4,
+          "cultivation_factories_36q": 4,
+          "active_routing_ancillas": 256,
+          "parallel_qft_control_qubits": 512,
+          "logical_data_and_seam_qubits": 268,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 3,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "4.0x",
+          "iterative_qft_control_qubits": 8,
+          "qft_control_qubits_saved": 504,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 16,
+          "total_sequential_toffolis_on_1qpu": 8420000,
+          "continuous_coherence_toffolis_per_shot": 526250,
+          "coherence_depth_reduction_factor": "16.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "1.00x",
+          "coherent_iters_per_shot_gain": "1.00x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "1.00x"
+        }
+      },
+      {
+        "scheme": "NIST P-256 (secp256r1)",
+        "category": "ECC-Shor",
+        "bits": 256,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 4,
+          "cultivation_factories_36q": 4,
+          "active_routing_ancillas": 256,
+          "parallel_qft_control_qubits": 512,
+          "logical_data_and_seam_qubits": 268,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 3,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "4.0x",
+          "iterative_qft_control_qubits": 8,
+          "qft_control_qubits_saved": 504,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 16,
+          "total_sequential_toffolis_on_1qpu": 8560000,
+          "continuous_coherence_toffolis_per_shot": 535000,
+          "coherence_depth_reduction_factor": "16.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "1.00x",
+          "coherent_iters_per_shot_gain": "1.00x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "1.00x"
+        }
+      },
+      {
+        "scheme": "BN254 (alt_bn128)",
+        "category": "Pairing-Shor",
+        "bits": 254,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 4,
+          "cultivation_factories_36q": 4,
+          "active_routing_ancillas": 256,
+          "parallel_qft_control_qubits": 512,
+          "logical_data_and_seam_qubits": 266,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 3,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "4.0x",
+          "iterative_qft_control_qubits": 8,
+          "qft_control_qubits_saved": 504,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 16,
+          "total_sequential_toffolis_on_1qpu": 8350000,
+          "continuous_coherence_toffolis_per_shot": 521875,
+          "coherence_depth_reduction_factor": "16.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "1.00x",
+          "coherent_iters_per_shot_gain": "1.00x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "1.00x"
+        }
+      },
+      {
+        "scheme": "BLS12-381",
+        "category": "Pairing-Shor",
+        "bits": 381,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 6,
+          "cultivation_factories_36q": 6,
+          "active_routing_ancillas": 384,
+          "parallel_qft_control_qubits": 768,
+          "logical_data_and_seam_qubits": 1158,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 5,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "6.0x",
+          "iterative_qft_control_qubits": 8,
+          "qft_control_qubits_saved": 760,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 16,
+          "total_sequential_toffolis_on_1qpu": 18640000,
+          "continuous_coherence_toffolis_per_shot": 1165000,
+          "coherence_depth_reduction_factor": "16.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "1.00x",
+          "coherent_iters_per_shot_gain": "1.00x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "1.00x"
+        }
+      },
+      {
+        "scheme": "RSA-2048",
+        "category": "RSA-EkeraHastad",
+        "bits": 2048,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 32,
+          "cultivation_factories_36q": 32,
+          "active_routing_ancillas": 2048,
+          "parallel_qft_control_qubits": 4096,
+          "logical_data_and_seam_qubits": 2085,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 31,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "32.0x",
+          "iterative_qft_control_qubits": 8,
+          "qft_control_qubits_saved": 4088,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 32,
+          "total_sequential_toffolis_on_1qpu": 580400000,
+          "continuous_coherence_toffolis_per_shot": 18137500,
+          "coherence_depth_reduction_factor": "32.0x",
+          "total_work_overhead_pct": 0.0,
+          "sequential_regev_shots_S": 45,
+          "sequential_regev_total_toffolis_on_1qpu": 1440000000,
+          "eh_vs_regev_1qpu_sequential_advantage": "Ekera-Hastad 2.48x faster on 1 sequential QPU"
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "1.00x",
+          "coherent_iters_per_shot_gain": "1.00x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "1.00x"
+        }
+      },
+      {
+        "scheme": "RSA-4096",
+        "category": "RSA-EkeraHastad",
+        "bits": 4096,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 64,
+          "cultivation_factories_36q": 64,
+          "active_routing_ancillas": 4096,
+          "parallel_qft_control_qubits": 8192,
+          "logical_data_and_seam_qubits": 4133,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 63,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "64.0x",
+          "iterative_qft_control_qubits": 8,
+          "qft_control_qubits_saved": 8184,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 64,
+          "total_sequential_toffolis_on_1qpu": 4643200000,
+          "continuous_coherence_toffolis_per_shot": 72550000,
+          "coherence_depth_reduction_factor": "64.0x",
+          "total_work_overhead_pct": 0.0,
+          "sequential_regev_shots_S": 64,
+          "sequential_regev_total_toffolis_on_1qpu": 8192000000,
+          "eh_vs_regev_1qpu_sequential_advantage": "Ekera-Hastad 1.76x faster on 1 sequential QPU"
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "1.00x",
+          "coherent_iters_per_shot_gain": "1.00x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "1.00x"
+        }
+      },
+      {
+        "scheme": "AES-256",
+        "category": "Symmetric-Grover",
+        "bits": 256,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 4,
+          "cultivation_factories_36q": 4,
+          "active_routing_ancillas": 256,
+          "parallel_qft_control_qubits": 0,
+          "logical_data_and_seam_qubits": 844,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 3,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "4.0x",
+          "iterative_qft_control_qubits": 0,
+          "qft_control_qubits_saved": 0,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 1,
+          "total_sequential_toffolis_on_1qpu": 20880,
+          "continuous_coherence_toffolis_per_shot": 20880,
+          "coherence_depth_reduction_factor": "1.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "6.53x",
+          "coherent_iters_per_shot_gain": "6.53x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "42.64x"
+        }
+      },
+      {
+        "scheme": "SHA-256 / SHA3-256",
+        "category": "Hash-Grover",
+        "bits": 256,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 4,
+          "cultivation_factories_36q": 4,
+          "active_routing_ancillas": 256,
+          "parallel_qft_control_qubits": 0,
+          "logical_data_and_seam_qubits": 784,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 3,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "4.0x",
+          "iterative_qft_control_qubits": 0,
+          "qft_control_qubits_saved": 0,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 1,
+          "total_sequential_toffolis_on_1qpu": 28600,
+          "continuous_coherence_toffolis_per_shot": 28600,
+          "coherence_depth_reduction_factor": "1.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "3.43x",
+          "coherent_iters_per_shot_gain": "3.43x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "11.76x"
+        }
+      },
+      {
+        "scheme": "SPHINCS+ / ML-KEM-768",
+        "category": "PQC-Grover",
+        "bits": 256,
+        "arch1_m1_parallel_zone_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 4,
+          "cultivation_factories_36q": 4,
+          "active_routing_ancillas": 256,
+          "parallel_qft_control_qubits": 0,
+          "logical_data_and_seam_qubits": 1024,
+          "optical_bell_pairs": 0
+        },
+        "arch2_m1_serial_zone_streaming_qpu": {
+          "machines_M": 1,
+          "active_compute_zones": 1,
+          "passive_cold_memory_zones": 3,
+          "cultivation_factories_36q": 1,
+          "active_routing_ancillas": 64,
+          "active_routing_ancilla_reduction": "4.0x",
+          "iterative_qft_control_qubits": 0,
+          "qft_control_qubits_saved": 0,
+          "jump16_sweeps_vs_bit_serial_reduction": "16.0x",
+          "optical_bell_pairs": 0
+        },
+        "arch3_m1_sequential_multishot_eh_vs_regev": {
+          "machines_M": 1,
+          "sequential_shots_S": 1,
+          "total_sequential_toffolis_on_1qpu": 457600,
+          "continuous_coherence_toffolis_per_shot": 457600,
+          "coherence_depth_reduction_factor": "1.0x",
+          "total_work_overhead_pct": 0.0
+        },
+        "arch4_m1_coherence_bounded_sequential_grover": {
+          "machines_M": 1,
+          "single_iter_toffoli_reduction_kappa": "4.76x",
+          "coherent_iters_per_shot_gain": "4.76x",
+          "sequential_bbht_restarts_reduction_kappa_sq": "22.66x"
+        }
+      }
+    ],
+    "lean4_proof_verification": {
+      "proof_file": "proofs/single_qpu_sequential_algorithms_and_coherence_bounds_proofs.lean",
+      "theorems_verified": 6,
+      "sorry_count": 0,
+      "axiom_count": 0,
+      "warnings_count": 0,
+      "elapsed_ms": 925.75
+    },
+    "elapsed_ms": 926.93
+  }
+}

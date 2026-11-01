@@ -1,0 +1,148 @@
+{
+  "suite": "Suite 28 \u2014 10 Open Quantum Algorithm Problems (OQP-1..10)",
+  "total_problems": 10,
+  "all_zero_reverse_toffolis": true,
+  "all_within_1000ns_qec_budget": true,
+  "problems": [
+    {
+      "id": "OQP-1",
+      "title": "First-Quantized Plane-Wave Chemistry Coulomb Potential V(r_i - r_j)",
+      "qds_used": [
+        "QDS-4 (3D Skew Carry-Save)",
+        "QDS-10 (Nested Dyadic Walker-Alias)"
+      ],
+      "baseline_metric": 24,
+      "okasaki_metric": 4,
+      "reduction_ratio": 6.0,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Reduces 3D modular ripple-carry adder depth from 24 to O(1) carry-save step (depth 4) + final consolidation; does not change asymptotic O(eta^2) particle-pair count."
+    },
+    {
+      "id": "OQP-2",
+      "title": "Sparse Pauli LCU & Jordan-Wigner String Accumulation",
+      "qds_used": [
+        "QDS-2 (2-Pass Symbiotic Zipper)",
+        "QDS-5 (Gray-Code Crit-Bit Trie)"
+      ],
+      "baseline_metric": 37,
+      "okasaki_metric": 10,
+      "reduction_ratio": 3.7,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Achieves 3.7x CNOT/Toffoli ladder reduction via Gray-code Hamming delta traversal; does not alter the 1-norm lambda of the Hamiltonian."
+    },
+    {
+      "id": "OQP-3",
+      "title": "QSVT / HHL Condition-Number Block-Encoding Ancilla Reuse",
+      "qds_used": [
+        "QDS-2 (Pauli-Twirled Dirty-Borrow)",
+        "QDS-6 (Locked Binomial Pebbling)"
+      ],
+      "baseline_metric": 40,
+      "okasaki_metric": 20,
+      "reduction_ratio": 2.0,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Eliminates clean-zeroed ancilla allocation via 2-pass Pauli-twirled dirty borrowing (0 clean ancillas, Tr(rho^2)=1.0); preserves O(kappa log(1/eps)) QSVT query lower bound."
+    },
+    {
+      "id": "OQP-4",
+      "title": "Quantum Topological Data Analysis (QTDA) Simplicial Boundary & Persistent Homology",
+      "qds_used": [
+        "QDS-12 (Combinadics Skew-RAL Simplex)",
+        "QDS-3 (Braun Popcount Tree)"
+      ],
+      "baseline_metric": 142,
+      "okasaki_metric": 10,
+      "reduction_ratio": 14.2,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Reduces Vietoris-Rips membership filter by 14.2x and fermion sign-parity depth from 64 to log2(64)=6; does not bypass QMA1-hardness of worst-case clique homology."
+    },
+    {
+      "id": "OQP-5",
+      "title": "Kuperberg's Dihedral Hidden Subgroup Problem (HSP) Collimation Sieve",
+      "qds_used": [
+        "QDS-13 (Okasaki Binomial Collimation Queue)",
+        "QDS-5 (Crit-Bit Rank Matcher)"
+      ],
+      "baseline_metric": 32,
+      "okasaki_metric": 16,
+      "reduction_ratio": 2.0,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Enforces zero-twist rank-unique binomial collimation (2^r + 2^r -> 2^{r+1}) in 2^{O(sqrt(n))} routing space; preserves subexponential Kuperberg query complexity."
+    },
+    {
+      "id": "OQP-6",
+      "title": "Multivariate Quadratic (MQ) Cryptanalysis over F_2 via Grover + Gray-Code Macaulay",
+      "qds_used": [
+        "QDS-5 (Gray-Code Macaulay Derivative)",
+        "QDS-6 (HMR_CZ Measurement Uncompute)"
+      ],
+      "baseline_metric": 416,
+      "okasaki_metric": 10,
+      "reduction_ratio": 41.6,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Reduces per-step quadratic evaluation cost by 41.6x with 0 reverse Toffolis via HMR_CZ; preserves 2^{n/2} Grover iteration count."
+    },
+    {
+      "id": "OQP-7",
+      "title": "Supersingular Isogeny / Johnson-Graph Claw Finding (Tani's Quantum Walk)",
+      "qds_used": [
+        "QDS-5 (History-Independent Pointerless Crit-Bit)",
+        "QDS-3 (Braun Tree)"
+      ],
+      "baseline_metric": 48,
+      "okasaki_metric": 12,
+      "reduction_ratio": 4.0,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Guarantees unique canonical radix-tree topology (Schmidt rank 1, Tr(rho^2)=1.0) vs mixed-state freelist BSTs (Tr(rho^2)=0.5); preserves O(N^{1/3}) Johnson walk query bound."
+    },
+    {
+      "id": "OQP-8",
+      "title": "Quantum Metropolis-Hastings & Szegedy Markov-Chain Rewind",
+      "qds_used": [
+        "QDS-6 (Locked Binomial Pebble Schedule)",
+        "QDS-2 (Zipper Rewind)"
+      ],
+      "baseline_metric": 64,
+      "okasaki_metric": 15,
+      "reduction_ratio": 4.2667,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Bounds reversible rejection-rewind ancilla footprint to k=O(log T) locked binomial checkpoints; does not alter Markov-chain spectral gap delta."
+    },
+    {
+      "id": "OQP-9",
+      "title": "Sliding-Window Streamed QEC Decoding Backlog & Syndrome Deque",
+      "qds_used": [
+        "QDS-1 (Clocked Banker's Syndrome Deque)",
+        "QDS-3 (0-DSP Braun Reduction)"
+      ],
+      "baseline_metric": 1320,
+      "okasaki_metric": 320,
+      "reduction_ratio": 4.125,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Eliminates O(W) syndrome shift-register backlog stall (320 ns <= 1000 ns superconducting QEC budget) across [[288,12,18]] BB-qLDPC rounds."
+    },
+    {
+      "id": "OQP-10",
+      "title": "Quantum Minimum Spanning Tree (MST) & Graph Connectivity",
+      "qds_used": [
+        "QDS-11 (Brodal-Okasaki Bootstrapped Skew-Heap)",
+        "QDS-4 (Skew Carry Merge)"
+      ],
+      "baseline_metric": 28,
+      "okasaki_metric": 4,
+      "reduction_ratio": 7.0,
+      "reverse_toffolis": 0,
+      "qec_window_ns": 320,
+      "scope_boundary_honesty": "Replaces O(log V) amortized heap merge with worst-case O(1) quantum meld (2 Toffolis, depth 4), eliminating coherent branch padding."
+    }
+  ]
+}

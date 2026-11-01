@@ -1,0 +1,120 @@
+{
+  "benchmark": "pillar10_multilevel_moe_sharding_and_quantum_routing",
+  "all_assertions_passed": true,
+  "published_public_moe_baselines": {
+    "allenai/OLMoE-1B-7B-0924 (arXiv:2409.02060)": {
+      "total_params_b": 6.92,
+      "active_params_b": 1.3,
+      "num_layers": 16,
+      "d_model": 2048,
+      "d_expert": 1024,
+      "num_experts": 64,
+      "top_k": 8,
+      "dense_bf16_mib": 13198.0,
+      "published_mmlu_5shot": 54.1,
+      "published_hellaswag_10shot": 80.0,
+      "published_piqa_0shot": 79.8,
+      "published_arc_challenge": 62.1,
+      "published_winogrande": 70.2,
+      "published_sciq": 93.8
+    },
+    "ibm-granite/granite-3.1-1b-a400m-instruct (arXiv:2408.13359)": {
+      "total_params_b": 1.33,
+      "active_params_b": 0.4,
+      "num_layers": 24,
+      "d_model": 1024,
+      "d_expert": 512,
+      "num_experts": 32,
+      "top_k": 8,
+      "dense_bf16_mib": 2541.0,
+      "published_mmlu_5shot": 41.2,
+      "published_hellaswag_10shot": 66.8,
+      "published_piqa_0shot": 75.4,
+      "published_arc_challenge": 45.9,
+      "published_winogrande": 61.5,
+      "published_sciq": 91.2
+    },
+    "Qwen/Qwen1.5-MoE-A2.7B (Official Technical Report)": {
+      "total_params_b": 14.3,
+      "active_params_b": 2.7,
+      "num_layers": 24,
+      "d_model": 2048,
+      "d_expert": 1408,
+      "num_experts": 64,
+      "top_k": 4,
+      "dense_bf16_mib": 27275.0,
+      "published_mmlu_5shot": 62.5,
+      "published_hellaswag_10shot": 77.4,
+      "published_piqa_0shot": 80.3,
+      "published_arc_challenge": 55.6,
+      "published_winogrande": 68.9,
+      "published_sciq": 94.1
+    }
+  },
+  "real_granite_3_1_1b_a400m_32experts": {
+    "model": "ibm-granite/granite-3.1-1b-a400m-instruct (Layer 0, E=32, k=8)",
+    "compile_time_s": 2.01,
+    "specialist_delta_energy_ratio": 0.9827,
+    "pillar10_cosine_similarity_vs_fp32": 0.992602,
+    "naive_no_base_cosine_similarity_vs_fp32": 0.075732,
+    "pillar10_rel_l2_error": 0.12263,
+    "naive_no_base_rel_l2_error": 0.99735,
+    "error_reduction_vs_naive_x": 8.13,
+    "router_0dsp_bitplane_top1_agreement_pct": 65.62,
+    "router_0dsp_bitplane_top8_overlap_pct": 84.77,
+    "router_born_kptree_top1_agreement_pct": 100.0,
+    "multiworker_1_2_4_8_ring_max_diff": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "dense_layer_mib": 96.0,
+    "pillar10_compressed_layer_mib": 19.65,
+    "layer_compression_ratio_x": 4.89
+  },
+  "real_olmoe_1b_7b_64experts": {
+    "model": "allenai/OLMoE-1B-7B-0924 (Layer 0, E=64, k=8)",
+    "router_0dsp_bitplane_top1_agreement_pct": 68.75,
+    "router_0dsp_bitplane_top8_overlap_pct": 76.46,
+    "pillar10_cosine_similarity_vs_fp32": 0.994462,
+    "naive_no_base_cosine_similarity_vs_fp32": 0.337194,
+    "pillar10_rel_l2_error": 0.10571,
+    "naive_no_base_rel_l2_error": 0.94144,
+    "error_reduction_vs_naive_x": 8.91,
+    "full_model_dense_bf16_mib": 13198.0,
+    "full_model_pillar10_mib": 2485.0,
+    "per_worker_8node_shard_mib": 310.62,
+    "full_model_compression_ratio_x": 5.31
+  },
+  "native_c_udie_engine_moe_audit": {
+    "granite_moe_32e_top8": {
+      "num_experts": 32,
+      "top_k": 8,
+      "kp_tree_routing_hops": 40,
+      "speculative_next_layer_prefetch_e": 22,
+      "ising_naive_collision_energy": 674.0,
+      "ising_optimized_collision_energy": 38.4,
+      "ising_max_worker_load_reduction_x": 17.55,
+      "naive_vs_factored_max_abs_diff": 0,
+      "multiworker_1_2_4_8_max_abs_diff": 0,
+      "speculative_tree63_naive_loads": 504,
+      "speculative_tree63_coalesced_loads": 14,
+      "speculative_coalescing_saving_x": 36.0,
+      "oblivious_expert_mux_diff": 0,
+      "moe_compression_ratio_x": 16.23,
+      "moe_forward_latency_ms": 0.026
+    },
+    "olmoe_64e_top8": {
+      "num_experts": 64,
+      "top_k": 8,
+      "kp_tree_routing_hops": 48,
+      "ising_max_worker_load_reduction_x": 16.67,
+      "naive_vs_factored_max_abs_diff": 0,
+      "multiworker_1_2_4_8_max_abs_diff": 0,
+      "speculative_coalescing_saving_x": 33.6,
+      "oblivious_expert_mux_diff": 0,
+      "moe_compression_ratio_x": 16.28
+    }
+  }
+}

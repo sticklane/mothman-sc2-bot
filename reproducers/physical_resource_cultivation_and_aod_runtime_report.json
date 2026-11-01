@@ -1,0 +1,105 @@
+{
+  "track": "Wave 18 \u2014 End-to-End Physical Resource Estimation (Surface Codes, Magic State Cultivation, Yoked Memory, and Neutral-Atom AOD Arrays)",
+  "overall_status": "PASS",
+  "total_elapsed_ms": 16929.66,
+  "lean4_verification": {
+    "status": "PASS",
+    "lean_file": "proofs/physical_resource_cultivation_and_aod_runtime_proofs.lean",
+    "return_code": 0,
+    "warnings": 0,
+    "elapsed_ms": 545.8
+  },
+  "suite1_symbolic_z3_physical_resource_proofs": {
+    "status": "PASS",
+    "elapsed_ms": 63.13,
+    "regimeA_standard_surface_code_z3": "UNSAT (ECC-256 = 1,274,890 phys Q; RSA Mode 1A = 3,483,422 phys Q; RSA Mode 1B = 1,703,866 phys Q)",
+    "regimeB_cultivation_and_yoked_memory_z3": "UNSAT (ECC-256 = 819,722 phys Q; RSA Mode 1A = 1,755,670 phys Q; RSA Mode 1B = 965,050 phys Q [< 1M!])",
+    "regimeC_aod_shuttling_250x_penalty_z3": "UNSAT (ECC-256: 3.30 min -> 13.75 hr; RSA-2048 Mode 1A: 3.77 days -> 2.58 years)"
+  },
+  "suite2_cultivation_and_yoked_statevector_simulation": {
+    "status": "PASS",
+    "elapsed_ms": 2.38,
+    "cultivation_t_gate_teleportation_fidelity": 1.0,
+    "yoked_cold_memory_parity_uncompute_fidelity": 1.0
+  },
+  "suite3_compiled_c_surface_code_and_aod_simulator": {
+    "status": "PASS",
+    "elapsed_ms": 16317.61,
+    "rsa2048_parallel_distance": 27,
+    "rsa2048_serialized_distance": 29,
+    "serialization_delta_d": 2,
+    "rsa2048_mode1a_std_phys_qubits": 3483422,
+    "rsa2048_mode1a_yoked_phys_qubits": 1755670,
+    "rsa2048_mode1a_sc_wall_days": 3.77,
+    "rsa2048_mode1a_aod_wall_years": 2.58,
+    "mutants_killed": 1000
+  },
+  "physical_resource_estimation_table": [
+    {
+      "workload": "ECC-256 (Wave 17 Packed (u,r)/(v,s) Zipper + s=4 Pebbles + w_exp=4 QROAM)",
+      "algorithmic_qubits": 1088,
+      "planar_logical_patches": 1205,
+      "total_toffolis": "14.34M (896.5K/shot across 16 shots)",
+      "code_distance_d": "21 -> 23 (Delta d = +2 serialization)",
+      "regimeA_standard_surface_code_phys_qubits": "1,274,890 (1.27M)",
+      "regimeB_yoked_cultivation_phys_qubits": "819,722 (0.82M)",
+      "superconducting_wall_clock_1us": "12.37 sec/shot (3.30 min across 16 shots)",
+      "regimeC_neutral_atom_aod_250us": "51.5 min/shot (13.75 hours across 16 shots)"
+    },
+    {
+      "workload": "RSA-2048 Mode 1A (In-Place Zipper Focus + Zalka-Gidney Coset QROAM)",
+      "algorithmic_qubits": 1924,
+      "planar_logical_patches": 2071,
+      "total_toffolis": "1.87B (58.44M/shot across 32 shots)",
+      "code_distance_d": "27 -> 29 (Delta d = +2 serialization)",
+      "regimeA_standard_surface_code_phys_qubits": "3,483,422 (3.48M)",
+      "regimeB_yoked_cultivation_phys_qubits": "1,755,670 (1.76M)",
+      "superconducting_wall_clock_1us": "2.82 hours/shot (3.77 days across 32 shots)",
+      "regimeC_neutral_atom_aod_250us": "29.4 days/shot (2.58 years across 32 shots)"
+    },
+    {
+      "workload": "RSA-2048 Mode 1B (Sub-1000-Qubit RNS-Braun-Zipper + Regev 45 Runs)",
+      "algorithmic_qubits": 896,
+      "planar_logical_patches": 1013,
+      "total_toffolis": "11.79B (262M/run across 45 runs)",
+      "code_distance_d": "29",
+      "regimeA_standard_surface_code_phys_qubits": "1,703,866 (1.70M)",
+      "regimeB_yoked_cultivation_phys_qubits": "965,050 (0.965M \u2014 < 1 Million phys. Q!)",
+      "superconducting_wall_clock_1us": "12.66 hours/run (23.74 days across 45 runs on 1 QPU)",
+      "regimeC_neutral_atom_aod_250us": "131.9 days/run (16.25 years across 45 runs on 1 QPU)"
+    },
+    {
+      "workload": "AES-256 (Self-Cleaning Tower-Field S-Box + Key-State Column Zipper)",
+      "algorithmic_qubits": 356,
+      "planar_logical_patches": 433,
+      "total_toffolis": "42.2K / Grover oracle call",
+      "code_distance_d": "19 (single oracle) / 31 (NIST MAXDEPTH=2^40)",
+      "regimeA_standard_surface_code_phys_qubits": "312,626 (0.31M @ d=19) / 832,226 (0.83M @ d=31)",
+      "regimeB_yoked_cultivation_phys_qubits": "217,394 (0.22M @ d=19) / 536,158 (0.54M @ d=31)",
+      "superconducting_wall_clock_1us": "4.81 ms/call (@ d=19) / 7.85 ms/call (@ d=31)",
+      "regimeC_neutral_atom_aod_250us": "1.20 sec/call (@ d=19) / 1.96 sec/call (@ d=31)"
+    },
+    {
+      "workload": "SHA3-256 / Keccak-f[1600] (K=32 Rotary Slice)",
+      "algorithmic_qubits": 1760,
+      "planar_logical_patches": 1899,
+      "total_toffolis": "38.4K / Grover oracle call",
+      "code_distance_d": "19 (single oracle) / 31 (NIST MAXDEPTH=2^40)",
+      "regimeA_standard_surface_code_phys_qubits": "1,371,078 (1.37M @ d=19) / 3,649,878 (3.65M @ d=31)",
+      "regimeB_yoked_cultivation_phys_qubits": "835,398 (0.84M @ d=19) / 1,947,918 (1.95M @ d=31)",
+      "superconducting_wall_clock_1us": "4.38 ms/call (@ d=19) / 7.14 ms/call (@ d=31)",
+      "regimeC_neutral_atom_aod_250us": "1.09 sec/call (@ d=19) / 1.79 sec/call (@ d=31)"
+    },
+    {
+      "workload": "Classic McEliece-348864 (Streaming Syndrome + Classical QROAM B=8)",
+      "algorithmic_qubits": 7744,
+      "planar_logical_patches": 7945,
+      "total_toffolis": "1.63M / full ISD Grover iteration (0.81M forward)",
+      "code_distance_d": "23",
+      "regimeA_standard_surface_code_phys_qubits": "8,405,810 (8.41M)",
+      "regimeB_yoked_cultivation_phys_qubits": "4,894,514 (4.89M)",
+      "superconducting_wall_clock_1us": "0.225 sec/iter (parallel B=8) / 225.4 sec (serial)",
+      "regimeC_neutral_atom_aod_250us": "56.3 sec/iter (parallel B=8)"
+    }
+  ]
+}

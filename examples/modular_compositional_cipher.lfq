@@ -1,0 +1,81 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/modular_compositional_cipher.lfq
+;;
+;; Idiomatic Zero-Raw-Integer Modular Feistel Cipher in `#lang lakefillq`
+;;
+;; Demonstrates holistic cohesion across the single unified typing judgment
+;;   Gamma_in |- t : Q_e(A) -| Gamma_out
+;; without a single raw integer wire literal or hand-duplicated cost constant:
+;;   1. Symbolic disjoint register allocation via `(qvec n)`
+;;   2. Multi-`defqfree` modular subcircuit composition via `(call-q ...)` with
+;;      inferred `RWire` port signatures `(BorrowZ, BorrowZ, Uniq1)`
+;;   3. Ordered partial duoidal wire capabilities `(R_wire, ;;, (x), <=)`:
+;;      - Parallel `BorrowZ (+) BorrowZ = BorrowZ` diagonal sharing contracts
+;;        repeated controls via `Delta_Z(|b>) = |b, b>`
+;;      - Sequential `Uniq1 ;; BorrowZ = Uniq1` permits mutating `left_lane` in
+;;        Round 2 and borrowing it read-only in Round 3
+;;   4. Automatic chordal SSA scratch recycling across sequential `(call-q ...)`
+;;      invocations (`14` virtual wires -> `10` physical qubits, `4` recycled)
+;;   5. AST-derived `'auto` cluster costing (`#:verify-circuit-match? #t`)
+;; =============================================================================
+
+(target-profile heron-r2)
+
+(define-cluster-profile modular-feistel-cluster
+  #:workload 'Modular-Compositional-Feistel-10Q
+  #:paradigm 'grover-amplify
+  #:max-machines 64
+  #:q-cap 400
+  #:r-bell-hz 100000.0
+  #:q-single 'auto
+  #:local-toffolis 'auto
+  #:verify-circuit-match? #t)
+
+;; Reusable non-linear round mixer:
+;; Inferred port capabilities:
+;;   - `rk0`         : BorrowZ (width 2, diagonal read-only)
+;;   - `rk1`         : BorrowZ (width 2, diagonal read-only)
+;;   - `target_lane` : Uniq1   (width 2, basis-preserving in-place XOR target)
+;; Local `and_tmp` (`qvec 2`) is cleanly erased via `with-and-session` (`Law U1` + `Law U4`).
+(defqfree (nonlinear-key-mix
+           #:wires ([rk0 (qvec 2)]
+                    [rk1 (qvec 2)]
+                    [target_lane (qvec 2)])
+           #:scratch ([and_tmp (qvec 2)]))
+  (with-and-session
+   ([(wref and_tmp 0) (wref rk0 0) (wref rk1 0)]
+    [(wref and_tmp 1) (wref rk0 1) (wref rk1 1)])
+   (seq
+    (cx (wref and_tmp 0) (wref target_lane 0))
+    (cx (wref and_tmp 1) (wref target_lane 1)))))
+
+;; Reusable in-place linear lane diffusion:
+;; Inferred port capability:
+;;   - `lane` : Uniq1 (width 2, basis-preserving CNOT mixing)
+(defqfree (linear-lane-permute
+           #:wires ([lane (qvec 2)]))
+  (cx (wref lane 0) (wref lane 1))
+  (cx (wref lane 1) (wref lane 0)))
+
+;; Composed 3-round Feistel network (`8` data qubits + `2` auto-recycled subcircuit
+;; scratch qubits = `10` physical qubits from `14` virtual SSA wires):
+(defqfree (modular-compositional-cipher
+           #:wires ([master_key (qvec 2)]
+                    [round_tweak (qvec 2)]
+                    [left_lane (qvec 2)]
+                    [right_lane (qvec 2)]))
+  ;; Round 1: Borrow `master_key` and `round_tweak` (`BorrowZ`), update `right_lane` (`Uniq1`)
+  (call-q nonlinear-key-mix master_key round_tweak right_lane)
+  (call-q linear-lane-permute right_lane)
+
+  ;; Round 2: Diagonal `BorrowZ (+) BorrowZ = BorrowZ` self-contraction on `master_key`
+  ;; (`temp-and k[i] k[i] anc` contracts to `cx k[i] anc`), mutating `left_lane` (`Uniq1`)
+  (call-q nonlinear-key-mix master_key master_key left_lane)
+  (call-q linear-lane-permute left_lane)
+
+  ;; Round 3: Ordered duoidal `Uniq1 ;; BorrowZ = Uniq1` sequentially borrows `left_lane`
+  ;; (mutated in Round 2) alongside `round_tweak` to update `right_lane`, while chordal
+  ;; SSA coloring recycles `nonlinear-key-mix.and_tmp` onto the same 2 physical qubits!
+  (call-q nonlinear-key-mix left_lane round_tweak right_lane))

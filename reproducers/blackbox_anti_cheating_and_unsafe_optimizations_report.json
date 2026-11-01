@@ -1,0 +1,117 @@
+{
+  "suite": "Black-Box Adversarial Anti-Cheating, Anti-Overstatement & Unsafe-Optimization Falsification Suite",
+  "audit1_vocab_shortlist_overstatement_caught_and_fixed": {
+    "model_id": "Qwen/Qwen3-1.7B (V=151,936, d=2048)",
+    "unsafe_64d_subspace_shortlist_recall_on_embedding_rows_pct": 100.0,
+    "unsafe_64d_subspace_shortlist_recall_on_blackbox_hidden_states_pct": 18.75,
+    "safe_full_vocab_int8_plus_top64_fp32_rescore_recall_pct": 100.0,
+    "safe_full_vocab_int8_top1_logit_max_abs_err": 5.7220458984375e-06,
+    "fp32_full_vocab_16queries_ms": 281.35,
+    "safe_int8_rescore_16queries_ms": 753.12,
+    "lm_head_memory_reduction_x": 4.0
+  },
+  "audit2_self_speculative_slowdown_caught_and_fixed": {
+    "naive_early_exit_recompute_base_layers_slowdown_caught": true,
+    "layer_resumed_shared_prefix_wasted_base_layer_evals": 0,
+    "confidence_margin_gate_threshold": 2.5,
+    "exact_greedy_token_match_verified": true
+  },
+  "audit3_4_blackbox_8domain_free_running_generation": {
+    "model_id": "HuggingFaceTB/SmolLM2-135M (30 Layers, 100% Weight-Intrinsic AOT)",
+    "domains_tested": 8,
+    "udie_v1_first_token_exact_match_count": "0/8",
+    "udie_v25_first_token_exact_match_count": "4/8",
+    "domain_generations": [
+      {
+        "domain": "Physics",
+        "prompt": "The first law of thermodynamics states that energy cannot be created or destroyed, only",
+        "bf16_output": " transformed from one form to another. This means that",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": " in the same way as the same way as the",
+        "bf16_mean_logprob": -0.59,
+        "udie_v1_mean_logprob": -1.369,
+        "udie_v25_mean_logprob": -1.234
+      },
+      {
+        "domain": "Python-Code",
+        "prompt": "def factorial(n):\n    if n <= 1:\n        return 1\n    return n *",
+        "bf16_output": " factorial(n - 1)\n\n",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": " factorial(n)\n    return 1\n",
+        "bf16_mean_logprob": -0.113,
+        "udie_v1_mean_logprob": -1.371,
+        "udie_v25_mean_logprob": -0.702
+      },
+      {
+        "domain": "SQL-Query",
+        "prompt": "SELECT customer_id, COUNT(*) AS order_count FROM orders GROUP BY",
+        "bf16_output": " customer_id)\n\nSELECT * FROM orders",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": " customer_id;\n\n--\n\n--",
+        "bf16_mean_logprob": -0.963,
+        "udie_v1_mean_logprob": -1.37,
+        "udie_v25_mean_logprob": -0.94
+      },
+      {
+        "domain": "Medicine",
+        "prompt": "Insulin is a peptide hormone produced by beta cells of the pancreatic",
+        "bf16_output": " islets. It is secreted by beta cells in",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": "\n\npancreas. It is also produced by",
+        "bf16_mean_logprob": -0.822,
+        "udie_v1_mean_logprob": -1.367,
+        "udie_v25_mean_logprob": -1.033
+      },
+      {
+        "domain": "Arithmetic",
+        "prompt": "Question: What is 15 multiplied by 4 plus 10? Answer: 15 * 4 = 60, and 60 + 10 =",
+        "bf16_output": " 70.\n\n## How do you",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": " 10\n\n(1) 1",
+        "bf16_mean_logprob": -0.695,
+        "udie_v1_mean_logprob": -1.372,
+        "udie_v25_mean_logprob": -0.896
+      },
+      {
+        "domain": "JSON-API",
+        "prompt": "{\"status\": \"success\", \"http_code\": 200, \"authenticated\":",
+        "bf16_output": " true, \"body\": \"Hello World!\"}",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": " \"success\", \"http_code\"\n\n",
+        "bf16_mean_logprob": -0.916,
+        "udie_v1_mean_logprob": -1.368,
+        "udie_v25_mean_logprob": -0.839
+      },
+      {
+        "domain": "Logic",
+        "prompt": "All mammals are warm-blooded. All whales are mammals. Therefore, all whales are",
+        "bf16_output": " warm-blooded.\n\nThe fact that whales",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": " warm-blooded.\n\n(1)\n",
+        "bf16_mean_logprob": -0.969,
+        "udie_v1_mean_logprob": -1.369,
+        "udie_v25_mean_logprob": -1.002
+      },
+      {
+        "domain": "History",
+        "prompt": "The Apollo 11 spacecraft landed the first humans on the Moon in July of the year",
+        "bf16_output": " 1969. The Apollo 1",
+        "udie_v1_output": "\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0\u02d0",
+        "udie_v25_output": ".\n\nThe first humans on the Moon\n",
+        "bf16_mean_logprob": -0.461,
+        "udie_v1_mean_logprob": -1.373,
+        "udie_v25_mean_logprob": -0.912
+      }
+    ]
+  },
+  "audit5_qwen3_1_7b_rmsnorm_outlier_and_mixed_precision_protection": {
+    "model_id": "Qwen/Qwen3-1.7B (28 Layers, QK-Norm)",
+    "max_pretrained_rmsnorm_channel_gain": 153.0,
+    "down_proj_unweighted_3bit_mse": 0.001235,
+    "down_proj_swiglu_gain_aot_3bit_mse": 0.001119,
+    "down_proj_4bit_protected_aot_mse": 0.00027,
+    "mse_reduction_vs_unweighted_pct": 78.17
+  },
+  "zero_bytes_written_to_tmp": true,
+  "elapsed_s": 78.45
+}

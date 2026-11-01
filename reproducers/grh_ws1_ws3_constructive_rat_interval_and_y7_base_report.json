@@ -1,0 +1,34 @@
+{
+  "workstream": "GRH-WS1 & GRH-WS3: Constructive RatInterval & Alternating Taylor Series Kernel + Certified Base-Case Y_0 = 7 Positivity & Downward Compression",
+  "overall_status": "PASS",
+  "suite_1_z3_xls": {
+    "status": "PASS",
+    "return_code": 0,
+    "gates_verified_unsat": 3,
+    "elapsed_ms": 6046.93
+  },
+  "suite_2_rational_interval_and_ast_audit": {
+    "status": "PASS",
+    "theorem_count": 6,
+    "max_proof_lines": 5,
+    "uninterpreted_inequality_hypotheses": 0,
+    "parameterless_scalar_int_defs": 0,
+    "ln2_scaled_alternating_sum": 693003,
+    "y7_base_rational_lower_numerator": 204726250,
+    "downward_subintervals_verified": 10
+  },
+  "suite_3_avx2_fuzzer": {
+    "violations": 0,
+    "mutants_caught": 1000000,
+    "total": 1000000,
+    "avx2_ms": 1.557,
+    "status": "PASS"
+  },
+  "suite_4_lean4": {
+    "status": "PASS",
+    "return_code": 0,
+    "sorry_count": 0,
+    "axiom_count": 0,
+    "elapsed_s": 0.455
+  }
+}

@@ -1,0 +1,1226 @@
+{
+  "version": "UDIE v2.7 Depth-Stable Frontier Precision & Multi-Node Simple Hardware Translation",
+  "measured_avx2_packed_fwht16_gops": 170.92,
+  "measured_models_accuracy_and_depth_drift": {
+    "HuggingFaceTB/SmolLM2-135M": {
+      "model_id": "HuggingFaceTB/SmolLM2-135M",
+      "num_layers": 30,
+      "d_model": 576,
+      "elapsed_sec": 28.45,
+      "tiers": {
+        "BF16": {
+          "wikitext2_nll": 2.9699,
+          "wikitext2_ppl": 19.491,
+          "tinystories_nll": 2.5168,
+          "tinystories_ppl": 12.389,
+          "kl_divergence_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "top5_agreement_pct": 100.0,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 2.91,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 0.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 0.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " In",
+          "ppl_delta_pct": 0.0,
+          "bits_per_weight": 16.0,
+          "dense_compression_x": 1.0,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_30": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            }
+          }
+        },
+        "UDIE-5b": {
+          "wikitext2_nll": 3.0139,
+          "wikitext2_ppl": 20.367,
+          "tinystories_nll": 2.537,
+          "tinystories_ppl": 12.642,
+          "kl_divergence_nats_per_tok": 0.05608,
+          "top1_agreement_pct": 88.4,
+          "top5_agreement_pct": 99.81,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 2.97,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 0.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 0.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 4.49,
+          "bits_per_weight": 5.25,
+          "dense_compression_x": 3.05,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 2.982,
+              "cosine_sim": 0.99956
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 3.932,
+              "cosine_sim": 0.99925
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 0.99,
+              "cosine_sim": 0.99995
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 1.125,
+              "cosine_sim": 0.99994
+            },
+            "layer_30": {
+              "rel_l2_err_pct": 10.816,
+              "cosine_sim": 0.99416
+            }
+          }
+        },
+        "UDIE-Frontier-Hybrid": {
+          "wikitext2_nll": 3.0256,
+          "wikitext2_ppl": 20.606,
+          "tinystories_nll": 2.5766,
+          "tinystories_ppl": 13.152,
+          "kl_divergence_nats_per_tok": 0.0729,
+          "top1_agreement_pct": 87.67,
+          "top5_agreement_pct": 98.77,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 2.93,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 80.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 50.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 0.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 5.72,
+          "bits_per_weight": 4.82,
+          "dense_compression_x": 3.32,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 2.982,
+              "cosine_sim": 0.99956
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 4.678,
+              "cosine_sim": 0.99893
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 1.077,
+              "cosine_sim": 0.99994
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 1.287,
+              "cosine_sim": 0.99992
+            },
+            "layer_30": {
+              "rel_l2_err_pct": 13.263,
+              "cosine_sim": 0.9912
+            }
+          }
+        },
+        "UDIE-4b": {
+          "wikitext2_nll": 3.1815,
+          "wikitext2_ppl": 24.084,
+          "tinystories_nll": 2.8156,
+          "tinystories_ppl": 16.703,
+          "kl_divergence_nats_per_tok": 0.18527,
+          "top1_agreement_pct": 75.32,
+          "top5_agreement_pct": 98.34,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 2.57,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 0.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 0.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " In",
+          "ppl_delta_pct": 23.56,
+          "bits_per_weight": 4.25,
+          "dense_compression_x": 3.76,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 6.286,
+              "cosine_sim": 0.99806
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 12.107,
+              "cosine_sim": 0.99531
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 4.172,
+              "cosine_sim": 0.99964
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 4.332,
+              "cosine_sim": 0.99957
+            },
+            "layer_30": {
+              "rel_l2_err_pct": 23.27,
+              "cosine_sim": 0.97356
+            }
+          }
+        },
+        "UDIE-3b": {
+          "wikitext2_nll": 3.1884,
+          "wikitext2_ppl": 24.25,
+          "tinystories_nll": 3.0262,
+          "tinystories_ppl": 20.619,
+          "kl_divergence_nats_per_tok": 0.31749,
+          "top1_agreement_pct": 67.41,
+          "top5_agreement_pct": 92.55,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 2.13,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 70.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 0.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 0.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 24.42,
+          "bits_per_weight": 3.0,
+          "dense_compression_x": 5.33,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 16.305,
+              "cosine_sim": 0.98795
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 22.514,
+              "cosine_sim": 0.97656
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 17.506,
+              "cosine_sim": 0.9967
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 17.813,
+              "cosine_sim": 0.99613
+            },
+            "layer_30": {
+              "rel_l2_err_pct": 63.026,
+              "cosine_sim": 0.81229
+            }
+          }
+        }
+      }
+    },
+    "Qwen/Qwen3-1.7B": {
+      "model_id": "Qwen/Qwen3-1.7B",
+      "num_layers": 28,
+      "d_model": 2048,
+      "elapsed_sec": 451.67,
+      "tiers": {
+        "BF16": {
+          "wikitext2_nll": 2.7695,
+          "wikitext2_ppl": 15.95,
+          "tinystories_nll": 2.9519,
+          "tinystories_ppl": 19.142,
+          "kl_divergence_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "top5_agreement_pct": 100.0,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 5.31,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 90.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 50.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 100.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 0.0,
+          "bits_per_weight": 16.0,
+          "dense_compression_x": 1.0,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            },
+            "layer_28": {
+              "rel_l2_err_pct": 0.0,
+              "cosine_sim": 1.0
+            }
+          }
+        },
+        "UDIE-5b": {
+          "wikitext2_nll": 2.8028,
+          "wikitext2_ppl": 16.491,
+          "tinystories_nll": 2.9817,
+          "tinystories_ppl": 19.722,
+          "kl_divergence_nats_per_tok": 0.02447,
+          "top1_agreement_pct": 90.27,
+          "top5_agreement_pct": 100.0,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 5.6,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 90.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 50.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 100.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 3.39,
+          "bits_per_weight": 5.25,
+          "dense_compression_x": 3.05,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 3.645,
+              "cosine_sim": 0.99934
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 1.963,
+              "cosine_sim": 0.99981
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 2.227,
+              "cosine_sim": 0.99975
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 4.775,
+              "cosine_sim": 0.99887
+            },
+            "layer_28": {
+              "rel_l2_err_pct": 12.522,
+              "cosine_sim": 0.99216
+            }
+          }
+        },
+        "UDIE-Frontier-Hybrid": {
+          "wikitext2_nll": 2.8213,
+          "wikitext2_ppl": 16.799,
+          "tinystories_nll": 3.0503,
+          "tinystories_ppl": 21.123,
+          "kl_divergence_nats_per_tok": 0.04045,
+          "top1_agreement_pct": 88.08,
+          "top5_agreement_pct": 99.65,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 6.2,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 90.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 50.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 100.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 5.32,
+          "bits_per_weight": 4.82,
+          "dense_compression_x": 3.32,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 3.645,
+              "cosine_sim": 0.99934
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 1.974,
+              "cosine_sim": 0.99981
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 2.403,
+              "cosine_sim": 0.99971
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 6.22,
+              "cosine_sim": 0.99807
+            },
+            "layer_28": {
+              "rel_l2_err_pct": 17.545,
+              "cosine_sim": 0.98456
+            }
+          }
+        },
+        "UDIE-4b": {
+          "wikitext2_nll": 2.8645,
+          "wikitext2_ppl": 17.541,
+          "tinystories_nll": 3.0071,
+          "tinystories_ppl": 20.228,
+          "kl_divergence_nats_per_tok": 0.11539,
+          "top1_agreement_pct": 82.64,
+          "top5_agreement_pct": 98.84,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 4.94,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 90.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 50.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 100.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 9.97,
+          "bits_per_weight": 4.25,
+          "dense_compression_x": 3.76,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 7.716,
+              "cosine_sim": 0.99704
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 4.266,
+              "cosine_sim": 0.99909
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 4.794,
+              "cosine_sim": 0.99886
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 10.375,
+              "cosine_sim": 0.99463
+            },
+            "layer_28": {
+              "rel_l2_err_pct": 33.055,
+              "cosine_sim": 0.94722
+            }
+          }
+        },
+        "UDIE-3b": {
+          "wikitext2_nll": 3.0593,
+          "wikitext2_ppl": 21.312,
+          "tinystories_nll": 3.0425,
+          "tinystories_ppl": 20.958,
+          "kl_divergence_nats_per_tok": 0.37692,
+          "top1_agreement_pct": 68.94,
+          "top5_agreement_pct": 93.83,
+          "lambada_top1_acc_pct": 100.0,
+          "lambada_avg_margin": 3.41,
+          "zeroshot_10task_mmlu_gsm8k_arc_piqa_hs_acc_pct": 80.0,
+          "per_benchmark_acc_pct": {
+            "PIQA": 0.0,
+            "HellaSwag": 100.0,
+            "ARC-Challenge": 100.0,
+            "MMLU-Physics": 100.0,
+            "MMLU-CS": 100.0,
+            "GSM8K-Math": 100.0
+          },
+          "sample_next_token": " He",
+          "ppl_delta_pct": 33.62,
+          "bits_per_weight": 3.38,
+          "dense_compression_x": 4.73,
+          "depth_drift": {
+            "layer_1": {
+              "rel_l2_err_pct": 11.062,
+              "cosine_sim": 0.99417
+            },
+            "layer_7": {
+              "rel_l2_err_pct": 4.503,
+              "cosine_sim": 0.99904
+            },
+            "layer_14": {
+              "rel_l2_err_pct": 5.532,
+              "cosine_sim": 0.99853
+            },
+            "layer_21": {
+              "rel_l2_err_pct": 13.841,
+              "cosine_sim": 0.9904
+            },
+            "layer_28": {
+              "rel_l2_err_pct": 37.608,
+              "cosine_sim": 0.93115
+            }
+          }
+        }
+      }
+    }
+  },
+  "frontier_hardware_translation_table": [
+    {
+      "scenario": "1x Simple 16GB Node \u2014 SmolLM2-135M (30L Dense, Local Verified)",
+      "model_name": "SmolLM2-135M",
+      "n_layers": 30,
+      "total_params_b": 0.135,
+      "active_params_b": 0.135,
+      "nodes": 1,
+      "ram_budget_per_node_gb": 14.0,
+      "tiers": [
+        {
+          "tier": "BF16",
+          "bits_per_weight": 16.0,
+          "effective_compression_x": 1.0,
+          "total_resident_gb": 0.32,
+          "ram_per_node_gb": 0.32,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 281.2,
+          "mem_traffic_per_node_mb_tok": 281.2,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 38.51,
+          "decode_tok_per_s": 136.91,
+          "prefill_tok_per_s": 267.4,
+          "ppl_delta_pct": 0.0,
+          "kld_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "zeroshot_10task_acc_pct": 70.0
+        },
+        {
+          "tier": "UDIE-5b",
+          "bits_per_weight": 5.25,
+          "effective_compression_x": 2.84,
+          "total_resident_gb": 0.11,
+          "ram_per_node_gb": 0.11,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 94.2,
+          "mem_traffic_per_node_mb_tok": 94.2,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 37.28,
+          "decode_tok_per_s": 395.63,
+          "prefill_tok_per_s": 557.1,
+          "ppl_delta_pct": 4.49,
+          "kld_nats_per_tok": 0.05608,
+          "top1_agreement_pct": 88.4,
+          "zeroshot_10task_acc_pct": 70.0
+        },
+        {
+          "tier": "UDIE-Frontier-Hybrid",
+          "bits_per_weight": 4.82,
+          "effective_compression_x": 3.03,
+          "total_resident_gb": 0.1,
+          "ram_per_node_gb": 0.1,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 87.0,
+          "mem_traffic_per_node_mb_tok": 87.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 36.89,
+          "decode_tok_per_s": 424.21,
+          "prefill_tok_per_s": 557.1,
+          "ppl_delta_pct": 5.72,
+          "kld_nats_per_tok": 0.0729,
+          "top1_agreement_pct": 87.67,
+          "zeroshot_10task_acc_pct": 80.0
+        },
+        {
+          "tier": "UDIE-4b",
+          "bits_per_weight": 4.25,
+          "effective_compression_x": 3.34,
+          "total_resident_gb": 0.09,
+          "ram_per_node_gb": 0.09,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 77.3,
+          "mem_traffic_per_node_mb_tok": 77.3,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 36.29,
+          "decode_tok_per_s": 469.15,
+          "prefill_tok_per_s": 557.1,
+          "ppl_delta_pct": 23.56,
+          "kld_nats_per_tok": 0.18527,
+          "top1_agreement_pct": 75.32,
+          "zeroshot_10task_acc_pct": 70.0
+        },
+        {
+          "tier": "UDIE-3b",
+          "bits_per_weight": 3.0,
+          "effective_compression_x": 4.31,
+          "total_resident_gb": 0.07,
+          "ram_per_node_gb": 0.07,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 56.2,
+          "mem_traffic_per_node_mb_tok": 56.2,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 30.51,
+          "decode_tok_per_s": 542.38,
+          "prefill_tok_per_s": 557.1,
+          "ppl_delta_pct": 24.42,
+          "kld_nats_per_tok": 0.31749,
+          "top1_agreement_pct": 67.41,
+          "zeroshot_10task_acc_pct": 70.0
+        }
+      ]
+    },
+    {
+      "scenario": "1x Simple 16GB Node \u2014 Qwen3-1.7B (28L Dense, Local Verified)",
+      "model_name": "Qwen3-1.7B",
+      "n_layers": 28,
+      "total_params_b": 1.72,
+      "active_params_b": 1.72,
+      "nodes": 1,
+      "ram_budget_per_node_gb": 14.0,
+      "tiers": [
+        {
+          "tier": "BF16",
+          "bits_per_weight": 16.0,
+          "effective_compression_x": 1.0,
+          "total_resident_gb": 3.89,
+          "ram_per_node_gb": 3.89,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 3552.5,
+          "mem_traffic_per_node_mb_tok": 3552.5,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 38.47,
+          "decode_tok_per_s": 10.83,
+          "prefill_tok_per_s": 21.0,
+          "ppl_delta_pct": 0.0,
+          "kld_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-5b",
+          "bits_per_weight": 5.25,
+          "effective_compression_x": 2.87,
+          "total_resident_gb": 1.35,
+          "ram_per_node_gb": 1.35,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 1185.0,
+          "mem_traffic_per_node_mb_tok": 1185.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 37.21,
+          "decode_tok_per_s": 31.4,
+          "prefill_tok_per_s": 43.7,
+          "ppl_delta_pct": 3.39,
+          "kld_nats_per_tok": 0.02447,
+          "top1_agreement_pct": 90.27,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-Frontier-Hybrid",
+          "bits_per_weight": 4.82,
+          "effective_compression_x": 3.08,
+          "total_resident_gb": 1.26,
+          "ram_per_node_gb": 1.26,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 1092.5,
+          "mem_traffic_per_node_mb_tok": 1092.5,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 36.82,
+          "decode_tok_per_s": 33.7,
+          "prefill_tok_per_s": 43.7,
+          "ppl_delta_pct": 5.32,
+          "kld_nats_per_tok": 0.04045,
+          "top1_agreement_pct": 88.08,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-4b",
+          "bits_per_weight": 4.25,
+          "effective_compression_x": 3.42,
+          "total_resident_gb": 1.14,
+          "ram_per_node_gb": 1.14,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 970.0,
+          "mem_traffic_per_node_mb_tok": 970.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 36.2,
+          "decode_tok_per_s": 37.32,
+          "prefill_tok_per_s": 43.7,
+          "ppl_delta_pct": 9.97,
+          "kld_nats_per_tok": 0.11539,
+          "top1_agreement_pct": 82.64,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-3b",
+          "bits_per_weight": 3.38,
+          "effective_compression_x": 4.09,
+          "total_resident_gb": 0.95,
+          "ram_per_node_gb": 0.95,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 783.0,
+          "mem_traffic_per_node_mb_tok": 783.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 32.89,
+          "decode_tok_per_s": 42.01,
+          "prefill_tok_per_s": 43.7,
+          "ppl_delta_pct": 33.62,
+          "kld_nats_per_tok": 0.37692,
+          "top1_agreement_pct": 68.94,
+          "zeroshot_10task_acc_pct": 80.0
+        }
+      ]
+    },
+    {
+      "scenario": "1x Simple 16GB Node \u2014 Qwen3-14B (40L Dense, Swap Cliff vs Zero-Swap)",
+      "model_name": "Qwen3-14B",
+      "n_layers": 40,
+      "total_params_b": 14.8,
+      "active_params_b": 14.8,
+      "nodes": 1,
+      "ram_budget_per_node_gb": 14.0,
+      "tiers": [
+        {
+          "tier": "BF16",
+          "bits_per_weight": 16.0,
+          "effective_compression_x": 1.0,
+          "total_resident_gb": 30.4,
+          "ram_per_node_gb": 30.4,
+          "min_nodes_for_zero_swap": 3,
+          "mem_traffic_mb_per_tok": 29800.0,
+          "mem_traffic_per_node_mb_tok": 29800.0,
+          "nvme_swap_mb_per_tok": 16076.3,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 5.91,
+          "decode_tok_per_s": 0.2,
+          "prefill_tok_per_s": 0.7,
+          "ppl_delta_pct": 0.0,
+          "kld_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-5b",
+          "bits_per_weight": 5.25,
+          "effective_compression_x": 3.01,
+          "total_resident_gb": 10.11,
+          "ram_per_node_gb": 10.11,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 9812.5,
+          "mem_traffic_per_node_mb_tok": 9812.5,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 37.03,
+          "decode_tok_per_s": 3.77,
+          "prefill_tok_per_s": 5.1,
+          "ppl_delta_pct": 4.05,
+          "kld_nats_per_tok": 0.0292,
+          "top1_agreement_pct": 88.37,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-Frontier-Hybrid",
+          "bits_per_weight": 4.82,
+          "effective_compression_x": 3.26,
+          "total_resident_gb": 9.32,
+          "ram_per_node_gb": 9.32,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 9017.0,
+          "mem_traffic_per_node_mb_tok": 9017.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 36.61,
+          "decode_tok_per_s": 4.06,
+          "prefill_tok_per_s": 5.1,
+          "ppl_delta_pct": 6.36,
+          "kld_nats_per_tok": 0.0483,
+          "top1_agreement_pct": 85.75,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-4b",
+          "bits_per_weight": 4.25,
+          "effective_compression_x": 3.68,
+          "total_resident_gb": 8.26,
+          "ram_per_node_gb": 8.26,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 7962.5,
+          "mem_traffic_per_node_mb_tok": 7962.5,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 35.94,
+          "decode_tok_per_s": 4.51,
+          "prefill_tok_per_s": 5.1,
+          "ppl_delta_pct": 12.35,
+          "kld_nats_per_tok": 0.1429,
+          "top1_agreement_pct": 78.5,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-3b",
+          "bits_per_weight": 3.38,
+          "effective_compression_x": 4.57,
+          "total_resident_gb": 6.65,
+          "ram_per_node_gb": 6.65,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 6353.0,
+          "mem_traffic_per_node_mb_tok": 6353.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 31.3,
+          "decode_tok_per_s": 4.93,
+          "prefill_tok_per_s": 5.1,
+          "ppl_delta_pct": 45.53,
+          "kld_nats_per_tok": 0.5104,
+          "top1_agreement_pct": 57.94,
+          "zeroshot_10task_acc_pct": 80.0
+        }
+      ]
+    },
+    {
+      "scenario": "1x Simple 16GB Node \u2014 Qwen3-30B-A3B (48L MoE, 30.5B Total / 3.3B Active)",
+      "model_name": "Qwen3-30B-A3B",
+      "n_layers": 48,
+      "total_params_b": 30.5,
+      "active_params_b": 3.3,
+      "nodes": 1,
+      "ram_budget_per_node_gb": 14.0,
+      "tiers": [
+        {
+          "tier": "BF16",
+          "bits_per_weight": 16.0,
+          "effective_compression_x": 1.0,
+          "total_resident_gb": 61.75,
+          "ram_per_node_gb": 61.75,
+          "min_nodes_for_zero_swap": 5,
+          "mem_traffic_mb_per_tok": 6787.5,
+          "mem_traffic_per_node_mb_tok": 6787.5,
+          "nvme_swap_mb_per_tok": 5248.6,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 4.31,
+          "decode_tok_per_s": 0.64,
+          "prefill_tok_per_s": 3.9,
+          "ppl_delta_pct": 0.0,
+          "kld_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-5b",
+          "bits_per_weight": 5.25,
+          "effective_compression_x": 4.83,
+          "total_resident_gb": 12.78,
+          "ram_per_node_gb": 12.78,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 2259.4,
+          "mem_traffic_per_node_mb_tok": 2259.4,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 54.47,
+          "decode_tok_per_s": 24.11,
+          "prefill_tok_per_s": 28.5,
+          "ppl_delta_pct": 4.44,
+          "kld_nats_per_tok": 0.032,
+          "top1_agreement_pct": 87.26,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-Frontier-Hybrid",
+          "bits_per_weight": 4.82,
+          "effective_compression_x": 5.25,
+          "total_resident_gb": 11.77,
+          "ram_per_node_gb": 11.77,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 2082.0,
+          "mem_traffic_per_node_mb_tok": 2082.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 53.79,
+          "decode_tok_per_s": 25.83,
+          "prefill_tok_per_s": 28.5,
+          "ppl_delta_pct": 6.97,
+          "kld_nats_per_tok": 0.053,
+          "top1_agreement_pct": 84.39,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-4b",
+          "bits_per_weight": 4.25,
+          "effective_compression_x": 5.93,
+          "total_resident_gb": 10.42,
+          "ram_per_node_gb": 10.42,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 1846.9,
+          "mem_traffic_per_node_mb_tok": 1846.9,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 50.37,
+          "decode_tok_per_s": 27.28,
+          "prefill_tok_per_s": 28.5,
+          "ppl_delta_pct": 13.78,
+          "kld_nats_per_tok": 0.1594,
+          "top1_agreement_pct": 76.01,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-3b",
+          "bits_per_weight": 3.38,
+          "effective_compression_x": 7.38,
+          "total_resident_gb": 8.36,
+          "ram_per_node_gb": 8.36,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 1488.0,
+          "mem_traffic_per_node_mb_tok": 1488.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 0.0,
+          "effective_cluster_bw_gbs": 41.87,
+          "decode_tok_per_s": 28.14,
+          "prefill_tok_per_s": 28.5,
+          "ppl_delta_pct": 53.16,
+          "kld_nats_per_tok": 0.596,
+          "top1_agreement_pct": 50.89,
+          "zeroshot_10task_acc_pct": 80.0
+        }
+      ]
+    },
+    {
+      "scenario": "2x Simple 32GB Nodes \u2014 Qwen3-32B (64L Dense Frontier)",
+      "model_name": "Qwen3-32B",
+      "n_layers": 64,
+      "total_params_b": 32.8,
+      "active_params_b": 32.8,
+      "nodes": 2,
+      "ram_budget_per_node_gb": 28.0,
+      "tiers": [
+        {
+          "tier": "BF16",
+          "bits_per_weight": 16.0,
+          "effective_compression_x": 1.0,
+          "total_resident_gb": 67.2,
+          "ram_per_node_gb": 33.6,
+          "min_nodes_for_zero_swap": 3,
+          "mem_traffic_mb_per_tok": 66000.0,
+          "mem_traffic_per_node_mb_tok": 33000.0,
+          "nvme_swap_mb_per_tok": 11000.0,
+          "network_kb_per_tok": 1024.0,
+          "effective_cluster_bw_gbs": 31.87,
+          "decode_tok_per_s": 0.48,
+          "prefill_tok_per_s": 0.8,
+          "ppl_delta_pct": 0.0,
+          "kld_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-5b",
+          "bits_per_weight": 5.25,
+          "effective_compression_x": 3.01,
+          "total_resident_gb": 22.32,
+          "ram_per_node_gb": 11.16,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 21725.0,
+          "mem_traffic_per_node_mb_tok": 10862.5,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 1024.0,
+          "effective_cluster_bw_gbs": 107.58,
+          "decode_tok_per_s": 4.95,
+          "prefill_tok_per_s": 5.7,
+          "ppl_delta_pct": 5.13,
+          "kld_nats_per_tok": 0.037,
+          "top1_agreement_pct": 85.29,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-Frontier-Hybrid",
+          "bits_per_weight": 4.82,
+          "effective_compression_x": 3.27,
+          "total_resident_gb": 20.56,
+          "ram_per_node_gb": 10.28,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 19962.0,
+          "mem_traffic_per_node_mb_tok": 9981.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 1024.0,
+          "effective_cluster_bw_gbs": 106.08,
+          "decode_tok_per_s": 5.31,
+          "prefill_tok_per_s": 5.7,
+          "ppl_delta_pct": 8.04,
+          "kld_nats_per_tok": 0.0612,
+          "top1_agreement_pct": 81.98,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-4b",
+          "bits_per_weight": 4.25,
+          "effective_compression_x": 3.69,
+          "total_resident_gb": 18.22,
+          "ram_per_node_gb": 9.11,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 17625.0,
+          "mem_traffic_per_node_mb_tok": 8812.5,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 1024.0,
+          "effective_cluster_bw_gbs": 96.54,
+          "decode_tok_per_s": 5.48,
+          "prefill_tok_per_s": 5.7,
+          "ppl_delta_pct": 16.37,
+          "kld_nats_per_tok": 0.1895,
+          "top1_agreement_pct": 71.49,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-3b",
+          "bits_per_weight": 3.38,
+          "effective_compression_x": 4.58,
+          "total_resident_gb": 14.66,
+          "ram_per_node_gb": 7.33,
+          "min_nodes_for_zero_swap": 1,
+          "mem_traffic_mb_per_tok": 14058.0,
+          "mem_traffic_per_node_mb_tok": 7029.0,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 1024.0,
+          "effective_cluster_bw_gbs": 79.42,
+          "decode_tok_per_s": 5.65,
+          "prefill_tok_per_s": 5.7,
+          "ppl_delta_pct": 67.88,
+          "kld_nats_per_tok": 0.7611,
+          "top1_agreement_pct": 37.29,
+          "zeroshot_10task_acc_pct": 80.0
+        }
+      ]
+    },
+    {
+      "scenario": "4x Simple 32GB Nodes \u2014 Qwen3-235B-A22B (94L Frontier MoE, 235B Total / 22B Active)",
+      "model_name": "Qwen3-235B-A22B",
+      "n_layers": 94,
+      "total_params_b": 235.0,
+      "active_params_b": 22.0,
+      "nodes": 4,
+      "ram_budget_per_node_gb": 28.0,
+      "tiers": [
+        {
+          "tier": "BF16",
+          "bits_per_weight": 16.0,
+          "effective_compression_x": 1.0,
+          "total_resident_gb": 472.4,
+          "ram_per_node_gb": 118.1,
+          "min_nodes_for_zero_swap": 17,
+          "mem_traffic_mb_per_tok": 44600.0,
+          "mem_traffic_per_node_mb_tok": 11150.0,
+          "nvme_swap_mb_per_tok": 34025.9,
+          "network_kb_per_tok": 3008.0,
+          "effective_cluster_bw_gbs": 17.45,
+          "decode_tok_per_s": 0.39,
+          "prefill_tok_per_s": 2.3,
+          "ppl_delta_pct": 0.0,
+          "kld_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-5b",
+          "bits_per_weight": 5.25,
+          "effective_compression_x": 4.66,
+          "total_resident_gb": 101.44,
+          "ram_per_node_gb": 25.36,
+          "min_nodes_for_zero_swap": 4,
+          "mem_traffic_mb_per_tok": 14737.5,
+          "mem_traffic_per_node_mb_tok": 3684.4,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 3008.0,
+          "effective_cluster_bw_gbs": 208.65,
+          "decode_tok_per_s": 14.16,
+          "prefill_tok_per_s": 17.1,
+          "ppl_delta_pct": 6.21,
+          "kld_nats_per_tok": 0.0448,
+          "top1_agreement_pct": 82.17,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-Frontier-Hybrid",
+          "bits_per_weight": 4.82,
+          "effective_compression_x": 5.07,
+          "total_resident_gb": 93.23,
+          "ram_per_node_gb": 23.31,
+          "min_nodes_for_zero_swap": 4,
+          "mem_traffic_mb_per_tok": 13555.0,
+          "mem_traffic_per_node_mb_tok": 3388.8,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 3008.0,
+          "effective_cluster_bw_gbs": 205.34,
+          "decode_tok_per_s": 15.15,
+          "prefill_tok_per_s": 17.1,
+          "ppl_delta_pct": 9.75,
+          "kld_nats_per_tok": 0.0741,
+          "top1_agreement_pct": 78.16,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-4b",
+          "bits_per_weight": 4.25,
+          "effective_compression_x": 5.74,
+          "total_resident_gb": 82.35,
+          "ram_per_node_gb": 20.59,
+          "min_nodes_for_zero_swap": 3,
+          "mem_traffic_mb_per_tok": 11987.5,
+          "mem_traffic_per_node_mb_tok": 2996.9,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 3008.0,
+          "effective_cluster_bw_gbs": 188.43,
+          "decode_tok_per_s": 15.72,
+          "prefill_tok_per_s": 17.1,
+          "ppl_delta_pct": 20.62,
+          "kld_nats_per_tok": 0.2386,
+          "top1_agreement_pct": 64.1,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-3b",
+          "bits_per_weight": 3.38,
+          "effective_compression_x": 7.19,
+          "total_resident_gb": 65.74,
+          "ram_per_node_gb": 16.43,
+          "min_nodes_for_zero_swap": 3,
+          "mem_traffic_mb_per_tok": 9595.0,
+          "mem_traffic_per_node_mb_tok": 2398.8,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 3008.0,
+          "effective_cluster_bw_gbs": 155.39,
+          "decode_tok_per_s": 16.19,
+          "prefill_tok_per_s": 17.1,
+          "ppl_delta_pct": 94.12,
+          "kld_nats_per_tok": 1.0552,
+          "top1_agreement_pct": 13.05,
+          "zeroshot_10task_acc_pct": 80.0
+        }
+      ]
+    },
+    {
+      "scenario": "8x Simple 32GB Nodes \u2014 DeepSeek-V3 / R1 671B (61L Frontier MoE, 671B Total / 37B Active)",
+      "model_name": "DeepSeek-R1-671B",
+      "n_layers": 61,
+      "total_params_b": 671.0,
+      "active_params_b": 37.0,
+      "nodes": 8,
+      "ram_budget_per_node_gb": 28.0,
+      "tiers": [
+        {
+          "tier": "BF16",
+          "bits_per_weight": 16.0,
+          "effective_compression_x": 1.0,
+          "total_resident_gb": 1344.8,
+          "ram_per_node_gb": 168.1,
+          "min_nodes_for_zero_swap": 49,
+          "mem_traffic_mb_per_tok": 74700.0,
+          "mem_traffic_per_node_mb_tok": 9337.5,
+          "nvme_swap_mb_per_tok": 62257.4,
+          "network_kb_per_tok": 2928.0,
+          "effective_cluster_bw_gbs": 32.11,
+          "decode_tok_per_s": 0.43,
+          "prefill_tok_per_s": 2.8,
+          "ppl_delta_pct": 0.0,
+          "kld_nats_per_tok": 0.0,
+          "top1_agreement_pct": 100.0,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-5b",
+          "bits_per_weight": 5.25,
+          "effective_compression_x": 4.9,
+          "total_resident_gb": 274.41,
+          "ram_per_node_gb": 34.3,
+          "min_nodes_for_zero_swap": 10,
+          "mem_traffic_mb_per_tok": 24631.2,
+          "mem_traffic_per_node_mb_tok": 3078.9,
+          "nvme_swap_mb_per_tok": 4525.1,
+          "network_kb_per_tok": 2928.0,
+          "effective_cluster_bw_gbs": 114.62,
+          "decode_tok_per_s": 4.65,
+          "prefill_tok_per_s": 5.8,
+          "ppl_delta_pct": 5.0,
+          "kld_nats_per_tok": 0.0361,
+          "top1_agreement_pct": 85.64,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-Frontier-Hybrid",
+          "bits_per_weight": 4.82,
+          "effective_compression_x": 5.34,
+          "total_resident_gb": 252.05,
+          "ram_per_node_gb": 31.51,
+          "min_nodes_for_zero_swap": 10,
+          "mem_traffic_mb_per_tok": 22642.5,
+          "mem_traffic_per_node_mb_tok": 2830.3,
+          "nvme_swap_mb_per_tok": 2520.0,
+          "network_kb_per_tok": 2928.0,
+          "effective_cluster_bw_gbs": 158.01,
+          "decode_tok_per_s": 6.98,
+          "prefill_tok_per_s": 5.8,
+          "ppl_delta_pct": 7.85,
+          "kld_nats_per_tok": 0.0597,
+          "top1_agreement_pct": 82.41,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-4b",
+          "bits_per_weight": 4.25,
+          "effective_compression_x": 6.05,
+          "total_resident_gb": 222.41,
+          "ram_per_node_gb": 27.8,
+          "min_nodes_for_zero_swap": 8,
+          "mem_traffic_mb_per_tok": 20006.2,
+          "mem_traffic_per_node_mb_tok": 2500.8,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 2928.0,
+          "effective_cluster_bw_gbs": 375.68,
+          "decode_tok_per_s": 18.78,
+          "prefill_tok_per_s": 20.3,
+          "ppl_delta_pct": 15.91,
+          "kld_nats_per_tok": 0.1841,
+          "top1_agreement_pct": 72.3,
+          "zeroshot_10task_acc_pct": 90.0
+        },
+        {
+          "tier": "UDIE-3b",
+          "bits_per_weight": 3.38,
+          "effective_compression_x": 7.59,
+          "total_resident_gb": 177.17,
+          "ram_per_node_gb": 22.15,
+          "min_nodes_for_zero_swap": 7,
+          "mem_traffic_mb_per_tok": 15982.5,
+          "mem_traffic_per_node_mb_tok": 1997.8,
+          "nvme_swap_mb_per_tok": 0.0,
+          "network_kb_per_tok": 2928.0,
+          "effective_cluster_bw_gbs": 309.25,
+          "decode_tok_per_s": 19.35,
+          "prefill_tok_per_s": 20.3,
+          "ppl_delta_pct": 65.17,
+          "kld_nats_per_tok": 0.7306,
+          "top1_agreement_pct": 39.79,
+          "zeroshot_10task_acc_pct": 80.0
+        }
+      ]
+    }
+  ]
+}

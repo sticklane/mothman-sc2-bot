@@ -1,0 +1,31 @@
+{
+  "suite": "udie_harness_compaction_and_radix_conversation_audit",
+  "test1_radix_conversation_tree": {
+    "cumulative_session_tokens": 524288,
+    "total_64tok_blocks": 8192,
+    "compaction_cycles_executed": 16,
+    "cached_token_hit_rate_pct": 99.98,
+    "avg_prefix_lookup_ms": 0.0033,
+    "cow_branch_fork_latency_us": 70.07,
+    "rollback_state_error_ulp": 0
+  },
+  "test2_monoidal_64_to_1_and_ssd_episodic_recall": {
+    "uncompacted_kv_ram_bytes": 8388608,
+    "compacted_active_kv_ram_bytes": 590720,
+    "active_kv_ram_reduction_factor_x": 14.20,
+    "ssd_spilled_blocks": 7920,
+    "udie_episodic_exact_needle_recall_pct": 100.0,
+    "naive_sliding_window_recall_pct": 0.0,
+    "naive_lossy_summarization_recall_pct": 0.0,
+    "avg_ssd_associative_recall_latency_ms": 0.6765
+  },
+  "test3_grammar_forced_tool_draft_and_protocols": {
+    "total_tool_call_tokens": 35,
+    "grammar_forced_zero_weight_tokens": 26,
+    "grammar_forced_token_share_pct": 74.29,
+    "grammar_forced_acceptance_rate_pct": 100.0,
+    "openai_v1_chat_completions_verified": true,
+    "anthropic_v1_messages_verified": true,
+    "ollama_api_chat_verified": true
+  }
+}

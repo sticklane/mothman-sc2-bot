@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 710" width="1320" height="710">
+
+  <defs>
+    <marker id="arrow-black" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-slate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-crimson" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M 0 1.8 L 8.5 5 L 0 8.2 z" fill="#000000"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1320" height="710" fill="#ffffff"/>
+  <line x1="16.0" y1="16.0" x2="1304.0" y2="16.0" stroke="#000000" stroke-width="1.20" stroke-linecap="butt"/>
+  <text x="24.0" y="38.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="14.5" font-weight="700" fill="#000000" text-anchor="start">Figure 11.  Complete 1,088-Qubit Shor ECDLP Architecture &amp; 6-Stage Point-Addition Pipeline (ECC-256)</text>
+  <text x="24.0" y="57.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">Breaks Roetteler et al. (2,338 Q) &amp; Häner et al. (2,124 Q) by 53.5% via Packed Bézout Shift-Zipper + s=4 Binomial Pebbling</text>
+  <line x1="16.0" y1="68.0" x2="1304.0" y2="68.0" stroke="#000000" stroke-width="0.80" stroke-linecap="butt"/>
+  <rect x="16.0" y="94.0" width="1288.0" height="598.0" fill="#ffffff" stroke="#000000" stroke-width="1.00"/>
+  <line x1="16.0" y1="138.0" x2="1304.0" y2="138.0" stroke="#000000" stroke-width="0.75" stroke-linecap="butt"/>
+  <text x="28.0" y="112.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="start">Full 1,088-Qubit Register Allocation Map &amp; 6-Stage Reversible Elliptic Curve Group Law Pipeline  |(X_1, Y_1)⟩  ⟶  |(X_1, Y_1) + T[e_m]⟩</text>
+  <text x="28.0" y="129.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="start" font-style="italic">Reuses |UR[256]⟩ &amp; |VS[256]⟩ for Select-SWAP lookup of T[e_m] = (X_2, Y_2), Direct-Quotient GCD, and Totalized Hua Squaring</text>
+  <text x="1292.0" y="112.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="400" fill="#000000" text-anchor="end">[1,088 Logical Qubits (ECC-256)]</text>
+  <line x1="185.0" y1="172.0" x2="1165.0" y2="172.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="176.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|Phi[0..15]⟩ (16 Q)</text>
+  <text x="1173.0" y="176.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|Phi⟩ (Phase Runway)</text>
+  <line x1="192.5" y1="178.5" x2="201.5" y2="165.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="163.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">16</text>
+  <line x1="185.0" y1="214.0" x2="1165.0" y2="214.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="218.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|e_m[0..3]⟩ (4 Q)</text>
+  <text x="1173.0" y="218.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|e_m⟩ → M_X</text>
+  <line x1="192.5" y1="220.5" x2="201.5" y2="207.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="205.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">4</text>
+  <line x1="185.0" y1="258.0" x2="1165.0" y2="258.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="262.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|X_1[0..255]⟩ (256 Q)</text>
+  <text x="1173.0" y="262.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|X_3⟩ = lam^2-X1-X2</text>
+  <line x1="192.5" y1="264.5" x2="201.5" y2="251.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="249.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">256</text>
+  <line x1="185.0" y1="302.0" x2="1165.0" y2="302.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="306.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|Y_1[0..255]⟩ (256 Q)</text>
+  <text x="1173.0" y="306.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|Y_3⟩ = lam(X1-X3)-Y1</text>
+  <line x1="192.5" y1="308.5" x2="201.5" y2="295.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="293.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">256</text>
+  <line x1="185.0" y1="348.0" x2="1165.0" y2="348.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="352.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|UR[0..255]⟩ (256 Q)</text>
+  <text x="1173.0" y="352.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|0⟩^256 (Clean!)</text>
+  <line x1="192.5" y1="354.5" x2="201.5" y2="341.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="339.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">256</text>
+  <line x1="185.0" y1="394.0" x2="1165.0" y2="394.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="398.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|VS[0..255]⟩ (256 Q)</text>
+  <text x="1173.0" y="398.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|0⟩^256 (Clean!)</text>
+  <line x1="192.5" y1="400.5" x2="201.5" y2="387.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="385.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">256</text>
+  <line x1="185.0" y1="440.0" x2="1165.0" y2="440.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="444.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|P_1..P_4⟩ (64 Q)</text>
+  <text x="1173.0" y="444.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|0⟩^64 (Pebbles)</text>
+  <line x1="192.5" y1="446.5" x2="201.5" y2="433.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="431.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">64</text>
+  <line x1="185.0" y1="482.0" x2="1165.0" y2="482.0" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="177.0" y="486.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="end">|Focus+Flag⟩ (40 Q)</text>
+  <text x="1173.0" y="486.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.2" font-weight="400" fill="#000000" text-anchor="start">|0⟩^40 (Scratch)</text>
+  <line x1="192.5" y1="488.5" x2="201.5" y2="475.5" stroke="#000000" stroke-width="1.15" stroke-linecap="butt"/>
+  <text x="198.0" y="473.5" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">40</text>
+  <line x1="228.0" y1="162.0" x2="228.0" y2="492.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="228.0" y="158.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">S1: Lookup</text>
+  <circle cx="275.0" cy="214.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="275.0" y1="214.0" x2="275.0" y2="348.0" stroke="#000000" stroke-width="1.80" stroke-linecap="butt"/>
+  <rect x="227.0" y="333.0" width="96.0" height="76.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="275.0" y="360.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Select-SWAP</text>
+  <text x="275.0" y="374.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">T[e_m]→(X2,Y2)</text>
+  <text x="275.0" y="387.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">in (UR, VS)</text>
+  <line x1="338.0" y1="162.0" x2="338.0" y2="492.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="338.0" y="158.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Stage 2: Sub</text>
+  <circle cx="392.0" cy="258.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <circle cx="392.0" cy="302.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="392.0" y1="258.0" x2="392.0" y2="394.0" stroke="#222222" stroke-width="1.80" stroke-linecap="butt"/>
+  <rect x="348.0" y="333.0" width="88.0" height="76.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="392.0" y="360.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">ModSub</text>
+  <text x="392.0" y="374.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">u0=p, v0=dX</text>
+  <text x="392.0" y="387.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">s0 = dY</text>
+  <line x1="450.0" y1="162.0" x2="450.0" y2="492.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="450.0" y="158.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Stage 3: Packed Shift-Zipper GCD</text>
+  <rect x="464.0" y="333.0" width="162.0" height="164.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="545.0" y="404.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">PackedBezoutShiftZipper</text>
+  <text x="545.0" y="418.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">32 Jump-16 Windows (77 Fwd)</text>
+  <text x="545.0" y="431.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">UR → lambda = dY/dX mod p</text>
+  <line x1="642.0" y1="162.0" x2="642.0" y2="492.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="642.0" y="158.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Stage 4: X_3 Update</text>
+  <circle cx="715.0" cy="348.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="715.0" y1="258.0" x2="715.0" y2="348.0" stroke="#333333" stroke-width="1.80" stroke-linecap="butt"/>
+  <rect x="657.0" y="243.0" width="116.0" height="74.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="715.0" y="269.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Hua Square</text>
+  <text x="715.0" y="283.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">X_3 = lam^2-X1-X2</text>
+  <text x="715.0" y="296.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">+64b Exc Tag</text>
+  <line x1="788.0" y1="162.0" x2="788.0" y2="492.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="788.0" y="158.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Stage 5: Y_3</text>
+  <circle cx="855.0" cy="348.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="855.0" y1="258.0" x2="855.0" y2="348.0" stroke="#000000" stroke-width="1.80" stroke-linecap="butt"/>
+  <rect x="801.0" y="243.0" width="108.0" height="74.0" fill="#ffffff" stroke="#000000" stroke-width="1.15"/>
+  <text x="855.0" y="276.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Slope Mul</text>
+  <text x="855.0" y="290.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Y_3 = lam(X1-X3)-Y1</text>
+  <line x1="924.0" y1="162.0" x2="924.0" y2="492.0" stroke="#000000" stroke-width="0.90" stroke-linecap="butt" stroke-dasharray="4,3"/>
+  <text x="924.0" y="158.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Stage 6: Binomial Adjoint</text>
+  <rect x="939.0" y="333.0" width="152.0" height="164.0" fill="#efefef" stroke="#000000" stroke-width="1.15"/>
+  <text x="1015.0" y="404.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">Binomial Adjoint GCD†</text>
+  <text x="1015.0" y="418.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle">32 Rev Windows (s=4)</text>
+  <text x="1015.0" y="431.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Restores UR,VS,P → |0⟩</text>
+  <circle cx="1125.0" cy="214.0" r="3.6" fill="#000000" stroke="#000000" stroke-width="1.00"/>
+  <line x1="1125.0" y1="214.0" x2="1125.0" y2="394.0" stroke="#000000" stroke-width="1.80" stroke-linecap="butt"/>
+  <rect x="1096.0" y="333.0" width="58.0" height="76.0" fill="#efefef" stroke="#000000" stroke-width="1.15"/>
+  <text x="1125.0" y="367.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.2" font-weight="700" fill="#000000" text-anchor="middle">T[e_m]†</text>
+  <text x="1125.0" y="381.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.0" font-weight="400" fill="#000000" text-anchor="middle" font-style="italic">Clean</text>
+  <rect x="36.0" y="514.0" width="1248.0" height="160.0" fill="#ffffff" stroke="#000000" stroke-width="1.20"/>
+  <text x="52.0" y="538.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="11.8" font-weight="700" fill="#000000" text-anchor="start">Exact 1,088-Qubit Budget Verification &amp; ECC-256 Literature Comparison (N = 256 Bits):</text>
+  <text x="52.0" y="562.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.3" font-weight="700" fill="#000000" text-anchor="start">• 4 Field Registers (4 * 256 Q):   X_1 (256) + Y_1 (256) + UR (256) + VS (256)  =  1,024 Q</text>
+  <text x="52.0" y="582.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.3" font-weight="700" fill="#000000" text-anchor="start">• Binomial Pebbles (s = 4 * 16 Q): P_1 (16) + P_2 (16) + P_3 (16) + P_4 (16)    =     64 Q  (Reused for 60-Q Window / Runway!)</text>
+  <text x="52.0" y="602.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="700" fill="#000000" text-anchor="start">• Total Logical Qubits:            1,024 + 64                                   =  1,088 Q  (Zero leaked garbage qubits!)</text>
+  <text x="52.0" y="624.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.1" font-weight="400" fill="#000000" text-anchor="start">• Point-Addition Exception Handling: Coherent 64-bit random linear hash tag (e_m == 0, P == +/-T[e_m]) → delta_tot &lt; 2^{-50}.</text>
+  <text x="52.0" y="644.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.3" font-weight="700" fill="#000000" text-anchor="start">• Physical Qubits (d = 21): 819,722 Q on Yoked 2D Surface Code  |  288,216 Q on [[288,12,18]] Bivariate Bicycle qLDPC.</text>
+  <rect x="835.0" y="526.0" width="430.0" height="134.0" fill="#fafafa" stroke="#000000" stroke-width="1.20"/>
+  <text x="847.0" y="546.0" font-family="'Latin Modern Roman', 'CMU Serif', 'STIX Two Text', 'Times New Roman', Georgia, serif" font-size="10.5" font-weight="700" fill="#000000" text-anchor="start">ECC-256 Logical Width Comparison:</text>
+  <text x="847.0" y="570.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Litinski [2023] Fast:</text>
+  <rect x="1023.0" y="556.0" width="168.0" height="18.0" fill="#cbd5e1" stroke="#000000" stroke-width="1.20"/>
+  <text x="1197.0" y="569.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">2,820 Q</text>
+  <text x="847.0" y="594.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Roetteler et al. [2017]:</text>
+  <rect x="1023.0" y="580.0" width="139.3" height="18.0" fill="#e0e0e0" stroke="#000000" stroke-width="1.20"/>
+  <text x="1168.3" y="593.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">2,338 Q</text>
+  <text x="847.0" y="618.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Häner et al. [2020] Low-W:</text>
+  <rect x="1023.0" y="604.0" width="126.5" height="18.0" fill="#e5e5e5" stroke="#000000" stroke-width="1.20"/>
+  <text x="1155.5" y="617.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">2,124 Q</text>
+  <text x="847.0" y="642.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">Ours (Packed Zipper):</text>
+  <rect x="1023.0" y="628.0" width="64.8" height="18.0" fill="#d4dce6" stroke="#000000" stroke-width="1.20"/>
+  <text x="1093.8" y="641.0" font-family="'Latin Modern Mono', 'CMU Typewriter Text', 'JetBrains Mono', 'Courier New', monospace" font-size="10.0" font-weight="700" fill="#000000" text-anchor="start">1,088 Q</text>
+</svg>

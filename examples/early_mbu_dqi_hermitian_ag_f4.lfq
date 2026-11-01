@@ -1,0 +1,119 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/early_mbu_dqi_hermitian_ag_f4.lfq
+;;
+;; Non-Binary Algebraic-Geometry (`AG`) Early-MBU Decoded Quantum Interferometry
+;; (`DQI`) on the One-Point Hermitian Curve Code `H_2 : x^3 = y^2 + y` over
+;; `GF(4) = {0, 1, omega, omega^2}` (`omega^2 = omega + 1`), `[8, 5, 3]_{GF(4)}`.
+;;
+;; Why Algebraic-Geometry Codes Matter for DQI (Jordan et al., Nature 2025):
+;;   - Over `GF(4)`, any Reed-Solomon code has blocklength bounded by
+;;     `n_RS <= |GF(4)| + 1 = 5`.
+;;   - The genus-1 Hermitian curve `H_2(GF(4))` achieves `n = q^3 = 8 > 5`
+;;     rational affine points `P_0 .. P_7` with parity-check basis `{1, x, y}`
+;;     (`3` `GF(4)` symbols = `6` syndrome qubits; `8` `GF(4)` error symbols =
+;;     `16` error qubits; `22` qubits total in unitary DQI).
+;;
+;; Key LakefillQ Invariants Verified Automatically (`0` Manual Annotations):
+;;   - Early Hadamard-dual `mid-meas-x` measures and resets all `16` error wires
+;;     before syndrome decoding (`22 -> 6` live logical qubits; `48` virtual SSA
+;;     wires chordally recycled onto `22` physical qubits, `Law U1` `EraseBy`).
+;;   - Balanced Braun-tree catamorphism (`fold-braun`) exploits the Hermitian
+;;     locator relation `(s_1, s_2) = (x_j * s_0, y_j * s_0)` inside
+;;     `within-apply-mbu`, canceling all `3` non-zero `GF(4)^*` error values per
+;;     curve point with a single 4-bit zero-test (`3` forward `TempAND`s, `0`
+;;     reverse Toffolis) and Clifford `cond-cz` feed-forward (`Law U4` `QTainted`).
+;; =============================================================================
+
+(target-profile bb-qldpc)
+
+;; The 8 GF(4)-rational affine points `(x_j, y_j)` of `H_2 : x^3 = y^2 + y`,
+;; encoded as `0 -> (0,0)`, `1 -> (1,0)`, `2 -> omega = (0,1)`, `3 -> omega^2 = (1,1)`:
+(defconst hermitian-h2-points
+  '((0 0) (0 1) (1 2) (1 3) (2 2) (2 3) (3 2) (3 3)))
+
+(defconst hermitian-h2-meas-syms
+  '((m_e0_0 m_e0_1) (m_e1_0 m_e1_1) (m_e2_0 m_e2_1) (m_e3_0 m_e3_1)
+    (m_e4_0 m_e4_1) (m_e5_0 m_e5_1) (m_e6_0 m_e6_1) (m_e7_0 m_e7_1)))
+
+;; Reversible GF(4) multiply-accumulate `(dst0, dst1) ^= coeff * (src0, src1)`
+;; in polynomial basis `{1, omega}` with `omega^2 = omega + 1`:
+(define (gf4-mac coeff src0 src1 dst0 dst1)
+  (cond
+    [(= coeff 0) skip]
+    [(= coeff 1) (seq (cx src0 dst0) (cx src1 dst1))]
+    [(= coeff 2) (seq (cx src1 dst0) (cx src0 dst1) (cx src1 dst1))]
+    [(= coeff 3) (seq (cx src0 dst0) (cx src1 dst0) (cx src0 dst1))]))
+
+;; Exact GF(4)-symbol Hamming weight <= 1 domain guard over all 8 GF(4) symbols
+;; (`25` coset leaders: `0` plus `8 * 3 = 24` single-symbol `GF(4)^*` errors):
+(define hermitian-f4-wt-le1-guard
+  (apply g-and
+         (cons (g-all-zero '(16 17 18 19 20 21))
+               (for*/list ([i (in-range 8)]
+                           [j (in-range (add1 i) 8)])
+                 (g-not (g-and (g-or (g-wire (* 2 i)) (g-wire (add1 (* 2 i))))
+                               (g-or (g-wire (* 2 j)) (g-wire (add1 (* 2 j))))))))))
+
+(defq (early-mbu-dqi-hermitian-ag-f4
+       #:wires ([e16 (range 0 16)]
+                [syn6 (range 16 22)])
+       #:scratch ([v-t0 (range 22 30)]
+                  [v-t1 (range 30 38)]
+                  [v-loc (range 38 46)])
+       #:domain (domain-guard hermitian-f4-wt-le1-guard))
+  ;; 1. Hermitian curve parity-check encoding `syn6 ^= H_{H2} * e16` (`h_j = (1, x_j, y_j)^T`):
+  (for/seq ([j (in-range 8)])
+    (define pt (list-ref hermitian-h2-points j))
+    (define xj (first pt))
+    (define yj (second pt))
+    (define ej0 (wref e16 (* 2 j)))
+    (define ej1 (wref e16 (add1 (* 2 j))))
+    (seq
+     (gf4-mac 1  ej0 ej1 (wref syn6 0) (wref syn6 1))
+     (gf4-mac xj ej0 ej1 (wref syn6 2) (wref syn6 3))
+     (gf4-mac yj ej0 ej1 (wref syn6 4) (wref syn6 5))))
+
+  ;; 2. Early-MBU `M_X` + reset on all 16 error qubits (`22 -> 6` live logical qubits!):
+  (for/seq ([j (in-range 8)])
+    (define mpair (list-ref hermitian-h2-meas-syms j))
+    (seq
+     (mid-meas-x (wref e16 (* 2 j)) (first mpair))
+     (mid-meas-x (wref e16 (add1 (* 2 j))) (second mpair))))
+
+  ;; 3. Balanced Braun-tree Hermitian curve-locator phase cancellation (`fold-braun`):
+  ;;    For each rational point `P_j = (x_j, y_j)`, `(s_1 == x_j * s_0) && (s_2 == y_j * s_0)`
+  ;;    uniquely isolates `P_j` across all three non-zero `GF(4)^*` error magnitudes `s_0`!
+  (fold-braun
+   (lambda (pt j)
+     (define xj (first pt))
+     (define yj (second pt))
+     (define mpair (list-ref hermitian-h2-meas-syms j))
+     (define s0-0 (wref syn6 0))
+     (define s0-1 (wref syn6 1))
+     (define s1-0 (wref syn6 2))
+     (define s1-1 (wref syn6 3))
+     (define s2-0 (wref syn6 4))
+     (define s2-1 (wref syn6 5))
+     (define t0 (wref v-t0 j))
+     (define t1 (wref v-t1 j))
+     (define loc (wref v-loc j))
+     (within-apply-mbu
+      (seq
+       (gf4-mac xj s0-0 s0-1 s1-0 s1-1)
+       (gf4-mac yj s0-0 s0-1 s2-0 s2-1)
+       (x s1-0) (x s1-1) (x s2-0) (x s2-1)
+       (temp-and s1-0 s1-1 t0)
+       (temp-and s2-0 s2-1 t1)
+       (temp-and t0 t1 loc))
+      (seq
+       (cond-cz (first mpair) s0-0 loc)
+       (cond-cz (second mpair) s0-1 loc))
+      (list loc t1 t0)))
+   hermitian-h2-points)
+
+  ;; 4. Final GF(4)^3 trace-Fourier / Walsh-Hadamard interference on `syn6`:
+  (focus-zipper [sz syn6 (append e16 syn6)]
+    (for/seq ([r (in-range 6)])
+      (h (wref sz r)))))

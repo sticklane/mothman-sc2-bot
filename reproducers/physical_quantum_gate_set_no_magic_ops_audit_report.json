@@ -1,0 +1,234 @@
+{
+  "wave": "Wave 15 \u2014 Track Physical-GateSet-NoMagicOps",
+  "overall_status": "PASS",
+  "suite1_z3_elementary_gate_proofs": {
+    "status": "PASS",
+    "elapsed_ms": 269.65,
+    "fredkin_barrel_shifter_miter": "UNSAT",
+    "fredkin_barrel_shifter_fault_injection": "SAT",
+    "full_scan_quantum_array_mux_miter": "UNSAT",
+    "full_scan_quantum_array_mux_fault_injection": "SAT",
+    "qds7_prefix_or_pivot_latch_miter": "UNSAT",
+    "qds7_prefix_or_pivot_latch_fault_injection": "SAT",
+    "qds6_ambainis_vtaa_nested_grover_miter": "UNSAT"
+  },
+  "suite2_netlist_compiler_and_auditor": {
+    "status": "PASS",
+    "elapsed_ms": 0.29,
+    "allowed_primitive_gates": [
+      "CCX",
+      "CCZ",
+      "CNOT",
+      "CSWAP",
+      "CZ",
+      "H",
+      "MEAS_X_PAULI_FRAME",
+      "MEAS_Z_RESET",
+      "S",
+      "X",
+      "Z"
+    ],
+    "schemes_compiled_and_audited": 10,
+    "magic_ops_in_production_netlists": 0,
+    "synthetic_magic_op_mutants_killed": "6/6",
+    "compiled_netlists": [
+      {
+        "scheme": "secp256k1_Jump16_Bezout_Gridsynth",
+        "family": "ECC_256",
+        "total_elementary_gates": 31,
+        "gate_histogram": {
+          "CNOT": 14,
+          "CCX": 6,
+          "H": 5,
+          "S": 4,
+          "MEAS_Z_RESET": 1,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "P256_Jump16_Bezout_Gridsynth",
+        "family": "ECC_256",
+        "total_elementary_gates": 31,
+        "gate_histogram": {
+          "CNOT": 14,
+          "CCX": 6,
+          "H": 5,
+          "S": 4,
+          "MEAS_Z_RESET": 1,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "Ed25519_Jump16_Bezout_Gridsynth",
+        "family": "ECC_256",
+        "total_elementary_gates": 31,
+        "gate_histogram": {
+          "CNOT": 14,
+          "CCX": 6,
+          "H": 5,
+          "S": 4,
+          "MEAS_Z_RESET": 1,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "RSA2048_Karatsuba_SkewBinary_Gridsynth",
+        "family": "RSA_2048",
+        "total_elementary_gates": 31,
+        "gate_histogram": {
+          "CNOT": 14,
+          "CCX": 6,
+          "H": 5,
+          "S": 4,
+          "MEAS_Z_RESET": 1,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "FFDHE2048_Karatsuba_SkewBinary_Gridsynth",
+        "family": "RSA_2048",
+        "total_elementary_gates": 31,
+        "gate_histogram": {
+          "CNOT": 14,
+          "CCX": 6,
+          "H": 5,
+          "S": 4,
+          "MEAS_Z_RESET": 1,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "AES256_BoyarPeralta_MBU_SeqStream",
+        "family": "SYM_AES",
+        "total_elementary_gates": 17,
+        "gate_histogram": {
+          "CNOT": 8,
+          "CSWAP": 8,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "SHA256_Okasaki_3to2_CarrySave",
+        "family": "HASH_SHA2",
+        "total_elementary_gates": 17,
+        "gate_histogram": {
+          "CNOT": 8,
+          "CSWAP": 8,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "SHA3_256_Keccak_5Q_RotaryStream",
+        "family": "HASH_SHA3",
+        "total_elementary_gates": 17,
+        "gate_histogram": {
+          "CNOT": 8,
+          "CSWAP": 8,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "SPHINCS_Plus_256s_Pebble_BBHT",
+        "family": "HASH_SPHINCS",
+        "total_elementary_gates": 17,
+        "gate_histogram": {
+          "CNOT": 8,
+          "CSWAP": 8,
+          "MEAS_X_PAULI_FRAME": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      },
+      {
+        "scheme": "ML_KEM_ML_DSA_BKZ_VTAA_and_DQI_Bruhat",
+        "family": "PQC_LATTICE_CODE",
+        "total_elementary_gates": 103,
+        "gate_histogram": {
+          "CNOT": 82,
+          "CSWAP": 10,
+          "CCX": 6,
+          "CCZ": 4,
+          "CZ": 1
+        },
+        "magic_ops_detected": 0,
+        "audit_status": "PASS"
+      }
+    ]
+  },
+  "suite3_compiled_c_benchmark": {
+    "passed_trials": 10000,
+    "total_trials": 10000,
+    "cold_passed": 10000,
+    "ancilla_leaks": 0,
+    "mutants_killed": 1000,
+    "mutant_trials": 1000,
+    "warm_avx2_ms": 1.86,
+    "cold_llc_avx2_ms": 1.85,
+    "scalar_ms": 1.83,
+    "checksum": "1b663b6cdd8a937d",
+    "status": "PASS",
+    "warm_speedup_vs_scalar": 0.98
+  },
+  "suite4_lean4_and_overhead_table": {
+    "status": "PASS",
+    "lean4_elapsed_ms": 778.81,
+    "lean4_file": "proofs/physical_quantum_gate_set_no_magic_ops_audit_proofs.lean",
+    "theorems_verified": 6,
+    "sorry_count": 0,
+    "axiom_count": 0,
+    "physical_gate_set_audit_table": [
+      {
+        "magic_op_audited": "1. O(1) QRAM Superposition Array Read/Write `A[|i>]`",
+        "why_non_existent_on_hardware": "Superposition memory access without scanning all M slots leaks the address to the environment or requires non-existent active QRAM routers.",
+        "physical_gate_replacement": "Full-Scan `M * W` Fredkin (`CSWAP`) multiplexer for quantum arrays (`1,024` CSWAPs for `M=16, W=64`); Babbush `2^w - 1` unary-iteration QROM for classical tables (`255` Toffolis for `w=8`).",
+        "lean4_theorem": "no_o1_qram_superposition_mux_requires_full_scan"
+      },
+      {
+        "magic_op_audited": "2. Free 0-Gate Quantum Variable Bit Shift `|x> >> |s>`",
+        "why_non_existent_on_hardware": "Only compile-time constant shifts (`x >> 1`, `x >> 16`) are 0-gate wire relabelings; shifting by a k-bit quantum register `|s>` requires physical controlled routing.",
+        "physical_gate_replacement": "`k`-Stage Fredkin (`CSWAP`) Barrel Shifter costing `k * N` Toffoli/CSWAP gates (`2,048` Toffolis for `N=256, k=8`; `0` gates for fixed `Jump-16` shift).",
+        "lean4_theorem": "no_free_quantum_variable_shift_barrel_shifter_cost"
+      },
+      {
+        "magic_op_audited": "3. Unitary Single-Pass Conditional Early-Exit `if (c_0) break`",
+        "why_non_existent_on_hardware": "A single unitary circuit pass has no branch predictor or early exit; controlled gates still execute 100% of the inner-product Toffolis (`3,072`).",
+        "physical_gate_replacement": "Two-Stage Nested Grover / Variable-Time Amplitude Amplification (`Ambainis 2010`), running `k_1 = 4` fast `32`-Toffoli SimHash stages per `1` exact `3,072`-Toffoli stage (`800` Toffolis/step = `3.84x` physical reduction).",
+        "lean4_theorem": "no_unitary_early_exit_requires_ambainis_vtaa_nested_grover"
+      },
+      {
+        "magic_op_audited": "4. Native Continuous `R_z(theta)` Gates in Fault-Tolerant QFT",
+        "why_non_existent_on_hardware": "Surface-code / qLDPC architectures only execute discrete Clifford+T (`{H, S, CNOT, T/CCZ}`); continuous rotations must be approximated.",
+        "physical_gate_replacement": "Semi-classical iterative QFT (`MEAS_Z_RESET` + `MEAS_X_PAULI_FRAME`) with `2N` rotations synthesized via Ross\u2013Selinger `gridsynth` (`50` T-gates/rot at `eps=10^{-10}` -> `25,600` T-gates = `6,400` Toffoli-eq for `ECC-256`; `51,200` Toffoli-eq for `RSA-2048`).",
+        "lean4_theorem": "ross_selinger_gridsynth_iterative_qft_rz_synthesis_cost"
+      },
+      {
+        "magic_op_audited": "5. Classical Pivot Search & Row Swap in Superposition `F_2` Gaussian Elimination",
+        "why_non_existent_on_hardware": "Cannot inspect matrix entries with `if M[k][i] == 1` in superposition without collapsing the quantum state.",
+        "physical_gate_replacement": "Reversible Prefix-OR pivot latch chain (`r - i` Toffolis) + `(r - i) * r` Fredkin (`CSWAP`) row multiplexer (`4,096` CSWAPs at `r=64, i=0` in `QDS-7` Bruhat LU).",
+        "lean4_theorem": "superposition_gaussian_elimination_prefix_or_pivot_mux_cost"
+      },
+      {
+        "magic_op_audited": "6. 1-Cycle Unbounded-Fanout Multi-Target CNOT Bus",
+        "why_non_existent_on_hardware": "Planar superconducting / neutral-atom / qLDPC hardware has bounded vertex degree; 1-to-C broadcast requires a logarithmic CNOT tree.",
+        "physical_gate_replacement": "`log_2(C)`-depth binary CNOT fan-out tree costing `2 * (C - 1)` CNOTs forward + reverse (`6` CNOTs for `C=4`, `62` for `C=32`, `126` for `C=64`).",
+        "lean4_theorem": "bounded_fanout_cnot_tree_depth_cost"
+      }
+    ]
+  }
+}

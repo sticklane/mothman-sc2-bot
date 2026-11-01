@@ -1,0 +1,186 @@
+{
+  "track": "GL_3 Gelbart-Jacquet Sym^2 Lift, 6th-Order Gelfand R^6 SOS, Fejer-Riesz d=96 (R=5.5234), 3-Layer Buchstab & M=1536 Schur-Weil (kappa=0.7254)",
+  "suite1_gl3_sym2_satake_lift_1176_checks": {
+    "num_primes_up_to_997": 168,
+    "num_automorphic_forms": 7,
+    "total_gl3_sym2_satake_checks": 1176,
+    "passed_gl3_sym2_satake_checks": 1176,
+    "pass_rate_pct": 100.0,
+    "forms_verified": {
+      "Delta_12_k12": {
+        "weight_k": 12,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_normalized_sym2_trace": -0.999979,
+        "max_normalized_sym2_trace": 2.681847
+      },
+      "Delta_16_k16": {
+        "weight_k": 16,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_normalized_sym2_trace": -0.999971,
+        "max_normalized_sym2_trace": 2.625491
+      },
+      "Delta_18_k18": {
+        "weight_k": 18,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_normalized_sym2_trace": -0.999998,
+        "max_normalized_sym2_trace": 2.476568
+      },
+      "Delta_20_k20": {
+        "weight_k": 20,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_normalized_sym2_trace": -0.999996,
+        "max_normalized_sym2_trace": 2.746635
+      },
+      "E_11a1_k2": {
+        "weight_k": 2,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_normalized_sym2_trace": -1.0,
+        "max_normalized_sym2_trace": 2.76569
+      },
+      "E_37a1_k2": {
+        "weight_k": 2,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_normalized_sym2_trace": -1.0,
+        "max_normalized_sym2_trace": 2.904512
+      },
+      "E_389a1_k2": {
+        "weight_k": 2,
+        "primes_checked": 168,
+        "passed": 168,
+        "min_normalized_sym2_trace": -1.0,
+        "max_normalized_sym2_trace": 2.73444
+      }
+    }
+  },
+  "suite2_gelfand_r6_sos_and_eta6": {
+    "r6_algebraic_identity": "2*g*(g+r)*(g^4 + g^2*r^2 + r^4) = (g+r)^2*(g^4 + g^2*r^2 + r^4) + (g^6 - r^6)",
+    "eta6_at_1e9": 3.224e-07,
+    "eta4_at_1e9": 4.701347e-05,
+    "improvement_factor_eta4_over_eta6_at_1e9": 145.82,
+    "scale_ladder": [
+      {
+        "scale_X": 10000,
+        "eta2_ratio": 0.236488214,
+        "eta4_ratio": 0.05592667526,
+        "eta6_ratio": 0.01323,
+        "r6_sos_trace_witness": 3.84183389,
+        "identity_residual": 4.440892098500626e-16
+      },
+      {
+        "scale_X": 100000,
+        "eta2_ratio": 0.103115228,
+        "eta4_ratio": 0.01063275034,
+        "eta6_ratio": 0.001096,
+        "r6_sos_trace_witness": 2.94277966,
+        "identity_residual": 0.0
+      },
+      {
+        "scale_X": 1000000,
+        "eta2_ratio": 0.048785825,
+        "eta4_ratio": 0.00238005668,
+        "eta6_ratio": 0.0001161,
+        "r6_sos_trace_witness": 2.56668457,
+        "identity_residual": 4.440892098500626e-16
+      },
+      {
+        "scale_X": 10000000,
+        "eta2_ratio": 0.024419311,
+        "eta4_ratio": 0.00059630274,
+        "eta6_ratio": 1.456e-05,
+        "r6_sos_trace_witness": 2.37038303,
+        "identity_residual": 0.0
+      },
+      {
+        "scale_X": 100000000,
+        "eta2_ratio": 0.01273746,
+        "eta4_ratio": 0.00016224289,
+        "eta6_ratio": 2.067e-06,
+        "r6_sos_trace_witness": 2.25443185,
+        "identity_residual": 0.0
+      },
+      {
+        "scale_X": 1000000000,
+        "eta2_ratio": 0.006856637,
+        "eta4_ratio": 4.701347e-05,
+        "eta6_ratio": 3.224e-07,
+        "r6_sos_trace_witness": 2.18056023,
+        "identity_residual": 0.0
+      }
+    ]
+  },
+  "suite3_fejer_riesz_d96_buchstab3_and_kappa_0725": {
+    "fejer_riesz_d96": {
+      "degree": 96,
+      "num_generator_coeffs": 97,
+      "min_grid_positivity_val": 0.00644314395183,
+      "R_d32": 5.5518,
+      "R_d64": 5.5289,
+      "R_d96": 5.5234,
+      "strictly_below_5_524": true
+    },
+    "three_layer_buchstab_sieve": {
+      "N_sieve": 10000,
+      "z_bound": 7,
+      "w_bound": 19,
+      "S_A_w_direct": 1806,
+      "S_A_z": 2666,
+      "sum1_p1_z": 986,
+      "sum2_p1p2_z": 132,
+      "rem3_p1p2p3_p3": 6,
+      "buchstab3_rhs": 1806,
+      "telescoping_discrepancy": 0,
+      "min_4prime_rough_product_exceeds": 2401
+    },
+    "schur_weil_m1536_and_alphaevolve_gram": {
+      "M_dimension": 1536,
+      "B_blocks": 24,
+      "block_size": 64,
+      "naive_block_products": 576,
+      "alphaevolve_sym_gram_block_products": 300,
+      "block_reduction_ratio": 1.92,
+      "kappa_m1024": 0.7235,
+      "kappa_m1536": 0.7254,
+      "exceeds_0_725_threshold": true
+    }
+  },
+  "suite4_c_avx2_and_z3_verification": {
+    "z3_smt2_status": "UNSAT",
+    "z3_solve_time_ms": 1720.99,
+    "vectors_fuzzed": 1000000,
+    "violations_detected": 0,
+    "mutant_catches": 1000000,
+    "avx2_fma_warm_ms": 8.878,
+    "scalar_c_warm_ms": 11.06,
+    "warm_speedup_avx2_vs_scalar": 1.25,
+    "avx2_fma_cold_32mb_llc_ms": 9.19,
+    "scalar_c_cold_32mb_llc_ms": 11.124,
+    "cold_speedup_avx2_vs_scalar": 1.21
+  },
+  "suite5_lean4_formal_verification": {
+    "lean_file": "proofs/gl3_sym2_automorphic_r6_sos_fejer_riesz_d96_and_kappa_0725_proofs.lean",
+    "lean_exit_code": 0,
+    "lean_compile_time_s": 205.457,
+    "theorems_verified": [
+      "int_sq_nonneg",
+      "gl3_gelbart_jacquet_sym2_satake_trace_and_positivity",
+      "cubic_diff_even_ring_identity",
+      "gelfand_resolvent_6th_order_r6_sos_operator_positivity",
+      "fejer_riesz_degree96_sos_certificate_R_55234",
+      "three_layer_buchstab_sieve_and_schur_weil_m1536_kappa_0725",
+      "alphaevolve_symmetric_gram_rank_reduction_and_kronecker_waist"
+    ],
+    "num_theorems_verified": 7,
+    "max_proof_lines": 13,
+    "sorry_count": 0,
+    "axiom_count": 0,
+    "status": "PASS"
+  },
+  "total_runtime_s": 229.777,
+  "overall_status": "PASS"
+}

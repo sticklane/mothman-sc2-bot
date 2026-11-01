@@ -1,0 +1,237 @@
+{
+  "all_passed": true,
+  "error_clarity_probes": [
+    {
+      "case_id": "01_u1_chordal_recycle_leak",
+      "expected_code": "U1-EraseBy",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "02_u2_quotient_noncanonical",
+      "expected_code": "U2-Canonical",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "03_u3_qmatch_nonexhaustive",
+      "expected_code": "U3-TotalOn",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "04_u4_phase_taint_interference",
+      "expected_code": "U4-QTainted",
+      "leaks_found": [],
+      "origin_col": 2,
+      "origin_line": 8,
+      "passed": true
+    },
+    {
+      "case_id": "05_phi1_unshielded_mbu_spectators",
+      "expected_code": "Phi1-DecoherenceAction",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "06_phi2_parallel_blockade_collision",
+      "expected_code": "Phi2-ExclusionGraph",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "07_phi3_aligned_plaquette_hook",
+      "expected_code": "Phi3-FaultExponent",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "08_phi3_dyadic_float64_collapse",
+      "expected_code": "Phi3-FaultExponent",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "09_t_domimg_noninjective_support",
+      "expected_code": "E-DOMIMG-NON-INJECTIVE",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "10_t_parguard_strict_grover_rejected",
+      "expected_code": "E-PARGUARD-ZALKA-GROVER-SUBLINEAR",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "11_qfree_hadamard_violation",
+      "expected_code": "LFQ-E-QFREE-BASIS",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "12_intra_gate_self_aliasing",
+      "expected_code": "LFQ-E-GATE-ALIAS",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "13_undeclared_raw_wire_escape",
+      "expected_code": "LFQ-E-UNDECLARED-WIRE",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "14_nonunitary_invert_measurement",
+      "expected_code": "LFQ-E-NONUNITARY-INVERT",
+      "leaks_found": [],
+      "origin_col": 2,
+      "origin_line": 8,
+      "passed": true
+    },
+    {
+      "case_id": "15_wref_out_of_bounds",
+      "expected_code": "LFQ-E-REGISTER-BOUNDS",
+      "leaks_found": [],
+      "origin_col": 5,
+      "origin_line": 5,
+      "passed": true
+    },
+    {
+      "case_id": "16_manual_register_wire_overlap",
+      "expected_code": "LFQ-E-WIRE-ALIAS",
+      "leaks_found": [],
+      "origin_col": 20,
+      "origin_line": 4,
+      "passed": true
+    },
+    {
+      "case_id": "17_call_q_port_aliasing_conflict",
+      "expected_code": "LFQ-E-CALL-ALIAS",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "18_cluster_profile_cost_drift",
+      "expected_code": "LFQ-E-CLUSTER-COST-DRIFT",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 10,
+      "passed": true
+    },
+    {
+      "case_id": "19_helper_circuit_u1_attribution",
+      "expected_code": "U1-EraseBy",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "20_malformed_defq_header_syntax",
+      "expected_code": "LFQ-E-SURFACE-ELAB",
+      "leaks_found": [],
+      "origin_col": 6,
+      "origin_line": 3,
+      "passed": true
+    },
+    {
+      "case_id": "21_unknown_target_profile",
+      "expected_code": "LFQ-E-TARGET-PROFILE",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 2,
+      "passed": true
+    },
+    {
+      "case_id": "22_malformed_guard_spec",
+      "expected_code": "LFQ-E-GUARD-SPEC",
+      "leaks_found": [],
+      "origin_col": 0,
+      "origin_line": 3,
+      "passed": true
+    }
+  ],
+  "holistic_seams_closed": 5,
+  "internal_leaks_detected": 0,
+  "modular_and_auto_cluster": {
+    "aes_sbox_auto_cluster": {
+      "optimal_machines": 1,
+      "physical_qubits": 13,
+      "q_single_derived": 13
+    },
+    "modular_cipher": {
+      "aer_superposition_fidelity": 0.9999999999999998,
+      "basis_inputs_verified": 256,
+      "chordal_recycled_wires": 4,
+      "physical_qubits": 10,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": true,
+          "grade": "BorrowZ",
+          "port": "master_key",
+          "width": 2
+        },
+        {
+          "diagonal_read_only": true,
+          "grade": "BorrowZ",
+          "port": "round_tweak",
+          "width": 2
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "left_lane",
+          "width": 2
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "right_lane",
+          "width": 2
+        }
+      ],
+      "virtual_wires": 14
+    }
+  },
+  "raco_and_lean": {
+    "lean_cohesion_proofs_verified": true,
+    "lean_file": "proofs/lakefillq_holistic_modular_duoidal_cohesion_proofs.lean",
+    "raco_tests_passed": true
+  },
+  "real_error_programs_verified": 22,
+  "verifier": "verify_lakefillq_holistic_language_cohesion.py",
+  "zero_flag_xag_escalation": {
+    "clean_circuit_engine": "xag-fraig-z3",
+    "clean_well_typed": true,
+    "leak_circuit_engine": "xag-fraig-z3",
+    "leak_detected_code": "U1-EraseBy",
+    "leak_surface_wire": "s[8]"
+  }
+}

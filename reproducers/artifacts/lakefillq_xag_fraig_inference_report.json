@@ -1,0 +1,863 @@
+{
+  "status": "PASS",
+  "deliverable": "Hash-Consed XAG/FRAIG + Z3 Cut-Sweeping Symbolic QSub (Laws U1-U4) Inference for LakefillQ",
+  "racket_xag_fraig_z3_benchmark": {
+    "aes128_fips197_c1_xag_ciphertext_hex": "69c4e0d86a7b0430d8cdb78070b4c55a",
+    "aes128_round_1_to_10_scaling": [
+      {
+        "explicit_anf": {
+          "aborted_reason": "none",
+          "completed": true,
+          "elapsed_ms": "493.746",
+          "gates_completed_before_stop": 7269,
+          "peak_single_wire_monomials": 545,
+          "total_final_or_abort_monomials": 63504
+        },
+        "rounds": 1,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "203.086",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 928,
+            "live_reachable_and_nodes": 680,
+            "live_reachable_xag_nodes": 7612,
+            "mbu_sessions_checked": 1224,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 1224,
+            "total_and_nodes_allocated": 680,
+            "total_xag_nodes_allocated": 10521,
+            "verified_cut_lemma_reuses": 15,
+            "z3_cut_sweep_queries": 1
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "monomial_cap_exceeded",
+          "completed": false,
+          "elapsed_ms": "525.573",
+          "gates_completed_before_stop": 7298,
+          "peak_single_wire_monomials": 35204,
+          "total_final_or_abort_monomials": 63561
+        },
+        "rounds": 2,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "578.236",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 1856,
+            "live_reachable_and_nodes": 1360,
+            "live_reachable_xag_nodes": 15059,
+            "mbu_sessions_checked": 2448,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 2448,
+            "total_and_nodes_allocated": 1360,
+            "total_xag_nodes_allocated": 20091,
+            "verified_cut_lemma_reuses": 20,
+            "z3_cut_sweep_queries": 12
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 3,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "975.827",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 2784,
+            "live_reachable_and_nodes": 2040,
+            "live_reachable_xag_nodes": 21901,
+            "mbu_sessions_checked": 3672,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 3672,
+            "total_and_nodes_allocated": 2040,
+            "total_xag_nodes_allocated": 29150,
+            "verified_cut_lemma_reuses": 26,
+            "z3_cut_sweep_queries": 22
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 4,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "1257.938",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 3712,
+            "live_reachable_and_nodes": 2720,
+            "live_reachable_xag_nodes": 28732,
+            "mbu_sessions_checked": 4896,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 4896,
+            "total_and_nodes_allocated": 2720,
+            "total_xag_nodes_allocated": 37820,
+            "verified_cut_lemma_reuses": 37,
+            "z3_cut_sweep_queries": 27
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 5,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "1449.406",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 4640,
+            "live_reachable_and_nodes": 3400,
+            "live_reachable_xag_nodes": 35408,
+            "mbu_sessions_checked": 6120,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 6120,
+            "total_and_nodes_allocated": 3400,
+            "total_xag_nodes_allocated": 46076,
+            "verified_cut_lemma_reuses": 48,
+            "z3_cut_sweep_queries": 32
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 6,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "1848.238",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 5568,
+            "live_reachable_and_nodes": 4080,
+            "live_reachable_xag_nodes": 41871,
+            "mbu_sessions_checked": 7344,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 7344,
+            "total_and_nodes_allocated": 4080,
+            "total_xag_nodes_allocated": 53477,
+            "verified_cut_lemma_reuses": 60,
+            "z3_cut_sweep_queries": 36
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 7,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "1978.020",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 6496,
+            "live_reachable_and_nodes": 4760,
+            "live_reachable_xag_nodes": 48242,
+            "mbu_sessions_checked": 8568,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 8568,
+            "total_and_nodes_allocated": 4760,
+            "total_xag_nodes_allocated": 61290,
+            "verified_cut_lemma_reuses": 76,
+            "z3_cut_sweep_queries": 36
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 8,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "2495.271",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 7424,
+            "live_reachable_and_nodes": 5440,
+            "live_reachable_xag_nodes": 54692,
+            "mbu_sessions_checked": 9792,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 9792,
+            "total_and_nodes_allocated": 5440,
+            "total_xag_nodes_allocated": 69184,
+            "verified_cut_lemma_reuses": 86,
+            "z3_cut_sweep_queries": 42
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 9,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "2864.160",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 8352,
+            "live_reachable_and_nodes": 6120,
+            "live_reachable_xag_nodes": 61212,
+            "mbu_sessions_checked": 11016,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 11016,
+            "total_and_nodes_allocated": 6120,
+            "total_xag_nodes_allocated": 77460,
+            "verified_cut_lemma_reuses": 96,
+            "z3_cut_sweep_queries": 48
+          }
+        }
+      },
+      {
+        "explicit_anf": {
+          "aborted_reason": "exponential_blowup_already_exceeded_at_r2",
+          "completed": false,
+          "elapsed_ms": "0.000",
+          "peak_single_wire_monomials": "> 35000 (binom(128,64) ~ 2^124)",
+          "theoretical_degree_lower_bound": 127
+        },
+        "rounds": 10,
+        "total_qubits": 290,
+        "xag_fraig_z3": {
+          "inference_time_ms": "3057.884",
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 9280,
+            "live_reachable_and_nodes": 6800,
+            "live_reachable_xag_nodes": 66280,
+            "mbu_sessions_checked": 12240,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 12240,
+            "total_and_nodes_allocated": 6800,
+            "total_xag_nodes_allocated": 82980,
+            "verified_cut_lemma_reuses": 112,
+            "z3_cut_sweep_queries": 48
+          }
+        }
+      }
+    ],
+    "deep_multiround_bug_injections": [
+      {
+        "counterexample": {
+          "active_input_wires": [
+            0
+          ],
+          "assign_mask": 1,
+          "hamming_weight": 1
+        },
+        "id": "Bug_A_AES128_round7_sbox9_missing_cond_z",
+        "inference_time_ms": "3484.825",
+        "u1_clean_blind_spot": true,
+        "violated_law": "U4",
+        "xag_stats": {
+          "fraig_pivot_substitutions": 9280,
+          "live_reachable_and_nodes": 6800,
+          "live_reachable_xag_nodes": 66280,
+          "mbu_sessions_checked": 12241,
+          "nonzero_u4_coeffs_at_exit": 1,
+          "temp_and_gates_checked": 12241,
+          "total_and_nodes_allocated": 6801,
+          "total_xag_nodes_allocated": 82981,
+          "verified_cut_lemma_reuses": 112,
+          "z3_cut_sweep_queries": 49
+        },
+        "z3_miter_status": "SAT"
+      },
+      {
+        "counterexample": {
+          "active_input_wires": [
+            1
+          ],
+          "assign_mask": 2,
+          "hamming_weight": 1
+        },
+        "id": "Bug_B_Keccak_f200_round11_uncomputed_temp_and",
+        "inference_time_ms": "16723.986",
+        "violated_law": "U1",
+        "xag_stats": {
+          "fraig_pivot_substitutions": 0,
+          "live_reachable_and_nodes": 3600,
+          "live_reachable_xag_nodes": 37657,
+          "mbu_sessions_checked": 3599,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 3600,
+          "total_and_nodes_allocated": 3600,
+          "total_xag_nodes_allocated": 38798,
+          "verified_cut_lemma_reuses": 0,
+          "z3_cut_sweep_queries": 2
+        },
+        "z3_miter_status": "SAT"
+      },
+      {
+        "counterexample": {
+          "active_input_wires": [
+            2,
+            3,
+            4,
+            5,
+            8,
+            10,
+            12,
+            14,
+            15,
+            16,
+            17,
+            20,
+            22,
+            23,
+            25,
+            26,
+            27,
+            28,
+            31,
+            34,
+            37,
+            40,
+            46,
+            50,
+            52,
+            55,
+            60,
+            61,
+            65,
+            67,
+            73,
+            74,
+            77,
+            78,
+            81,
+            83,
+            84,
+            85,
+            86,
+            87,
+            89,
+            91,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            104,
+            105,
+            107,
+            108,
+            109,
+            110,
+            111,
+            113,
+            114,
+            115,
+            117,
+            118,
+            121,
+            122,
+            124,
+            125
+          ],
+          "assign_mask": 72354556572779448081633001766680515900,
+          "hamming_weight": 65
+        },
+        "id": "Bug_C_Gidney_64bit_adder_bit47_premature_mbu",
+        "inference_time_ms": "56.774",
+        "u1_clean_blind_spot": true,
+        "violated_law": "U4",
+        "xag_stats": {
+          "fraig_pivot_substitutions": 0,
+          "live_reachable_and_nodes": 63,
+          "live_reachable_xag_nodes": 819,
+          "mbu_sessions_checked": 63,
+          "nonzero_u4_coeffs_at_exit": 1,
+          "temp_and_gates_checked": 63,
+          "total_and_nodes_allocated": 63,
+          "total_xag_nodes_allocated": 868,
+          "verified_cut_lemma_reuses": 0,
+          "z3_cut_sweep_queries": 1
+        },
+        "z3_miter_status": "SAT"
+      },
+      {
+        "counterexample": {
+          "active_input_wires": [
+            3,
+            14
+          ],
+          "assign_mask": 16392,
+          "hamming_weight": 2
+        },
+        "id": "Bug_D_BCH_15_7_5_incomplete_wt1_decoder",
+        "inference_time_ms": "143.584",
+        "violated_law": "U1",
+        "xag_stats": {
+          "fraig_pivot_substitutions": 0,
+          "live_reachable_and_nodes": 0,
+          "live_reachable_xag_nodes": 59,
+          "mbu_sessions_checked": 0,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 75,
+          "total_and_nodes_allocated": 45,
+          "total_xag_nodes_allocated": 203,
+          "verified_cut_lemma_reuses": 0,
+          "z3_cut_sweep_queries": 32
+        },
+        "z3_miter_status": "SAT"
+      }
+    ],
+    "engine": "LakefillQ Hash-Consed XAG/FRAIG + Z3 Cut-Sweeping Symbolic QSub (U1-U4) Inference",
+    "manual_boolean_witness_flags": 0,
+    "multiblock_sound_benchmarks": [
+      {
+        "id": "AES128_10round_pareto_290q",
+        "inference_time_ms": "3057.884",
+        "qubits": 290,
+        "rounds": 10,
+        "temp_and_gates": 12240,
+        "u1_ok": true,
+        "u4_ok": true,
+        "xag_stats": {
+          "fraig_pivot_substitutions": 9280,
+          "live_reachable_and_nodes": 6800,
+          "live_reachable_xag_nodes": 66280,
+          "mbu_sessions_checked": 12240,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 12240,
+          "total_and_nodes_allocated": 6800,
+          "total_xag_nodes_allocated": 82980,
+          "verified_cut_lemma_reuses": 112,
+          "z3_cut_sweep_queries": 48
+        },
+        "z3_miter_status": "UNSAT"
+      },
+      {
+        "id": "AES256_14round_pareto_418q",
+        "inference_time_ms": "4249.601",
+        "qubits": 418,
+        "rounds": 14,
+        "temp_and_gates": 17000,
+        "u1_ok": true,
+        "u4_ok": true,
+        "xag_stats": {
+          "fraig_pivot_substitutions": 12992,
+          "live_reachable_and_nodes": 9384,
+          "live_reachable_xag_nodes": 94529,
+          "mbu_sessions_checked": 17000,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 17000,
+          "total_and_nodes_allocated": 9384,
+          "total_xag_nodes_allocated": 118736,
+          "verified_cut_lemma_reuses": 165,
+          "z3_cut_sweep_queries": 59
+        },
+        "z3_miter_status": "UNSAT"
+      },
+      {
+        "explicit_anf_3round_probe": {
+          "aborted_reason": "monomial_cap_exceeded",
+          "completed": false,
+          "elapsed_ms": "160.214",
+          "gates_completed_before_stop": 3568,
+          "peak_single_wire_monomials": 35912,
+          "total_final_or_abort_monomials": 260732
+        },
+        "id": "Keccak_f200_18round_session_3845q",
+        "inference_time_ms": "9315.375",
+        "qubits": 3845,
+        "rounds": 18,
+        "temp_and_gates": 3600,
+        "u1_ok": true,
+        "u4_ok": true,
+        "xag_stats": {
+          "fraig_pivot_substitutions": 0,
+          "live_reachable_and_nodes": 3600,
+          "live_reachable_xag_nodes": 37657,
+          "mbu_sessions_checked": 3600,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 3600,
+          "total_and_nodes_allocated": 3600,
+          "total_xag_nodes_allocated": 38798,
+          "verified_cut_lemma_reuses": 0,
+          "z3_cut_sweep_queries": 0
+        },
+        "z3_miter_status": "UNSAT"
+      },
+      {
+        "bits": 64,
+        "explicit_anf_probe": {
+          "aborted_reason": "timeout_cap_exceeded",
+          "completed": false,
+          "elapsed_ms": "300.231",
+          "gates_completed_before_stop": 44,
+          "peak_single_wire_monomials": 3070,
+          "total_final_or_abort_monomials": 12377
+        },
+        "id": "Gidney_64bit_ripple_adder_191q",
+        "inference_time_ms": "3.386",
+        "qubits": 191,
+        "temp_and_gates": 63,
+        "u1_ok": true,
+        "u4_ok": true,
+        "xag_stats": {
+          "fraig_pivot_substitutions": 0,
+          "live_reachable_and_nodes": 63,
+          "live_reachable_xag_nodes": 819,
+          "mbu_sessions_checked": 63,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 63,
+          "total_and_nodes_allocated": 63,
+          "total_xag_nodes_allocated": 868,
+          "verified_cut_lemma_reuses": 0,
+          "z3_cut_sweep_queries": 0
+        },
+        "z3_miter_status": "UNSAT"
+      },
+      {
+        "bits": 64,
+        "id": "Gidney_64bit_modular_adder_mod_2p64m59_259q",
+        "inference_time_ms": "16464.902",
+        "modulus_str": "2^64 - 59",
+        "qubits": 259,
+        "temp_and_gates": 447,
+        "u1_ok": true,
+        "u4_ok": true,
+        "xag_stats": {
+          "fraig_pivot_substitutions": 0,
+          "live_reachable_and_nodes": 190,
+          "live_reachable_xag_nodes": 1511,
+          "mbu_sessions_checked": 191,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 447,
+          "total_and_nodes_allocated": 254,
+          "total_xag_nodes_allocated": 2162,
+          "verified_cut_lemma_reuses": 0,
+          "z3_cut_sweep_queries": 2
+        },
+        "z3_miter_status": "UNSAT"
+      },
+      {
+        "domain": "wt <= 2",
+        "id": "BCH_15_7_5_peterson_berlekamp_wt2_49q",
+        "inference_time_ms": "23.282",
+        "qubits": 49,
+        "u1_ok": true,
+        "u4_ok": true,
+        "xag_stats": {
+          "fraig_pivot_substitutions": 0,
+          "live_reachable_and_nodes": 0,
+          "live_reachable_xag_nodes": 59,
+          "mbu_sessions_checked": 0,
+          "nonzero_u4_coeffs_at_exit": 0,
+          "temp_and_gates_checked": 295,
+          "total_and_nodes_allocated": 99,
+          "total_xag_nodes_allocated": 581,
+          "verified_cut_lemma_reuses": 0,
+          "z3_cut_sweep_queries": 1
+        },
+        "z3_miter_status": "UNSAT"
+      }
+    ],
+    "status": "PASS",
+    "total_wall_time_ms": "70312.23"
+  },
+  "racket_subprocess_wall_ms": 73601.57,
+  "independent_python_z3_cross_check": {
+    "status": "PASS",
+    "elapsed_ms": 76.103,
+    "gidney_64bit_sound_z3": "unsat",
+    "gidney_64bit_bit47_bug_z3": "sat",
+    "aes128_round7_sbox9_post_subbytes_hex": "0x27",
+    "keccak_round11_chi_dirty_bit": 1,
+    "bch15_bug_d_witness_mask": 16392,
+    "bch15_bug_d_witness_weight": 2
+  },
+  "qiskit_aer_mps_counterexample_reproductions": {
+    "status": "PASS",
+    "Bug_A_AES128_round7_sbox9": {
+      "sound": {
+        "dirty_ancilla_shots": 0,
+        "quantum_phase_error_shots": 0,
+        "shots": 128
+      },
+      "buggy": {
+        "dirty_ancilla_shots": 0,
+        "quantum_phase_error_shots": 69,
+        "shots": 128
+      }
+    },
+    "Bug_B_Keccak_f200_round11_tempand": {
+      "sound": {
+        "dirty_ancilla_shots": 0,
+        "ramsey_error_shots": 0,
+        "shots": 128
+      },
+      "buggy": {
+        "dirty_ancilla_shots": 69,
+        "ramsey_error_shots": 61,
+        "shots": 128
+      }
+    },
+    "Bug_C_Gidney_64bit_adder_192q_bit47": {
+      "sound": {
+        "qubits": 192,
+        "dirty_carry_shots": 0,
+        "quantum_phase_error_shots": 0,
+        "shots": 32,
+        "sim_ms": 3807.08
+      },
+      "buggy": {
+        "qubits": 192,
+        "dirty_carry_shots": 0,
+        "quantum_phase_error_shots": 18,
+        "shots": 32,
+        "sim_ms": 3832.75
+      }
+    },
+    "Bug_D_BCH_15_7_5_wt2_witness": {
+      "sound": {
+        "residual_error_leakage_shots": 0,
+        "ramsey_error_shots": 0,
+        "shots": 128
+      },
+      "buggy": {
+        "residual_error_leakage_shots": 71,
+        "ramsey_error_shots": 76,
+        "shots": 128
+      }
+    }
+  },
+  "lean4_mechanized_proof_verification": {
+    "status": "PASS",
+    "lean_version": "4.35.0",
+    "compile_time_ms": 1407.25,
+    "zero_warnings": true,
+    "zero_wildcards": true,
+    "theorem_count": 20,
+    "max_proof_lines": 22,
+    "kernel_violations": [],
+    "vacuous_or_tautological": [],
+    "theorems": [
+      {
+        "kind": "theorem",
+        "name": "xag_lit_not_involution_and_semantics",
+        "statement_sha256_16": "09b763bca9b3c668",
+        "proof_lines": 4,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "xag_smart_xor_self_cancels",
+        "statement_sha256_16": "3d48c70da37d6511",
+        "proof_lines": 11,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "xag_smart_xor_preserves_semantics",
+        "statement_sha256_16": "7f6b6da6a04d7749",
+        "proof_lines": 15,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "xag_smart_and_zero_self_and_not_self",
+        "statement_sha256_16": "4be7a7d18598fa5d",
+        "proof_lines": 18,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "evalXagLit_zero_and_one",
+        "statement_sha256_16": "871f6aa3c90975ad",
+        "proof_lines": 1,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "xag_smart_and_preserves_semantics",
+        "statement_sha256_16": "3151706c129da456",
+        "proof_lines": 22,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "sim_signature_mismatch_refutes_xag_equivalence",
+        "statement_sha256_16": "524c332a9e13dd61",
+        "proof_lines": 10,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "kickbackSign_xor_homomorphism",
+        "statement_sha256_16": "7b35344e811f69c8",
+        "proof_lines": 1,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "bilinear_xag_mbu_collapses_arbitrary_degree_to_zero",
+        "statement_sha256_16": "fc345225959d0219",
+        "proof_lines": 7,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "bilinear_xag_zero_coeff_implies_unit_quantum_phase",
+        "statement_sha256_16": "664674fccd6cf572",
+        "proof_lines": 2,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "multiround_mbu_session_total_quantum_phase_unit",
+        "statement_sha256_16": "8dca29138dc506c9",
+        "proof_lines": 10,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "xag_circuit_linear_node_bound",
+        "statement_sha256_16": "2dbec7741e8402a7",
+        "proof_lines": 8,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "gidney_carry_explicit_anf_exponential_closed_form",
+        "statement_sha256_16": "f7e44e40918c647e",
+        "proof_lines": 10,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "central_binom_step_ge_double",
+        "statement_sha256_16": "5d5fcd130a0d8157",
+        "proof_lines": 8,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "central_binomial_anf_exponential_lower_bound",
+        "statement_sha256_16": "d1f5bd0c6e8cc9d1",
+        "proof_lines": 8,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "evalTseitinDag_prefix_invariant",
+        "statement_sha256_16": "6809568af9232481",
+        "proof_lines": 2,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "tseitin_dag_model_agrees_with_semantics",
+        "statement_sha256_16": "7a3cca01f4a8ba3d",
+        "proof_lines": 20,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "tseitin_canonical_eval_satisfies_defs",
+        "statement_sha256_16": "8fdf8667e87282ee",
+        "proof_lines": 21,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "tseitin_miter_unsat_iff_xag_domain_equivalence",
+        "statement_sha256_16": "c38304793e87bcdc",
+        "proof_lines": 11,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      },
+      {
+        "kind": "theorem",
+        "name": "cut_sweeping_local_unsat_implies_global_multiround_soundness",
+        "statement_sha256_16": "26cc0fbb86cce371",
+        "proof_lines": 2,
+        "small_proof_explainable": true,
+        "vacuous_or_bare_tautology": false
+      }
+    ]
+  }
+}

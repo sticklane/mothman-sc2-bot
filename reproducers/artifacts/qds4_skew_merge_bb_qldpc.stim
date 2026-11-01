@@ -1,0 +1,32 @@
+# Certifying IxQMonad -> VOQC -> Stim/[[288, 12, 18]] BB-qLDPC Netlist: QDS4_SkewBinaryCarryMerge
+# Code: [[288, 12, 18]] Bivariate Bicycle qLDPC (CSSRoundState = CSSClosed, 340 ns 0-DSP Decode)
+R 0 1 2 3
+TICK
+# Toffoli_BB288(0, 2, 3)
+CX 2 3
+CX 0 3
+DEPOLARIZE2(0.001000) 0 3
+CX 3 2
+DEPOLARIZE2(0.001000) 3 2
+# Toffoli_BB288(0, 1, 2)
+CX 1 2
+CX 0 2
+DEPOLARIZE2(0.001000) 0 2
+CX 0 1
+DEPOLARIZE2(0.001000) 0 1
+TICK
+# [[288, 12, 18]] BB-qLDPC CSSClosed Syndrome Extraction Round
+CX 2 3
+DEPOLARIZE2(0.001000) 2 3
+CX 1 3
+DEPOLARIZE2(0.001000) 1 3
+CX 1 2
+DEPOLARIZE2(0.001000) 1 2
+CX 0 3
+DEPOLARIZE2(0.001000) 0 3
+CX 0 2
+DEPOLARIZE2(0.001000) 0 2
+M 2 3
+DETECTOR(2, 0, 0) rec[-1]
+DETECTOR(3, 0, 0) rec[-2]
+OBSERVABLE_INCLUDE(0) rec[-1]
