@@ -104,7 +104,7 @@ help:
 	@printf "  make examples  Compile all .lfq modules in examples/ to dynamic OpenQASM 3.0 and Stim\n"
 	@printf "  make proofs    Kernel-check standalone LakefillQ and master Lean 4.35.0 proof modules\n"
 	@printf "  make rtl       Run 500 MHz 0-DSP SystemVerilog/DSLX Z3 miters and 80k-cycle Stim cosim\n"
-	@printf "  make paper     Cross-check 125 quantitative claims, 21 formal labels, and LaTeX/BibTeX\n"
+	@printf "  make paper     Cross-check 124 quantitative claims, 21 formal labels, and LaTeX/BibTeX\n"
 	@printf "  make explore   Launch terminal explorer summary of SOTA tables, QPhysGrade, and proofs\n"
 	@printf "  make full      Complete reproduction across all compiler, simulator, RTL, & proof checks\n"
 	@printf "  make clean     Remove workspace-local scratch directories and bytecode caches\n"

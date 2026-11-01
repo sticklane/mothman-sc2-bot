@@ -1,4 +1,4 @@
-\documentclass[acmsmall,screen,review,anonymous]{acmart}
+\documentclass[acmsmall,screen,anonymous]{acmart}
 
 \usepackage{amsmath}
 \usepackage{amsthm}
@@ -141,7 +141,7 @@ Quantum algorithms cannot overwrite live registers in place without entangling c
 
 We present \LakefillQ{}, a functional quantum programming language and hardware-graded compiler that brings purely functional data structures to fault-tolerant quantum circuits without hardware QRAM assumptions. Our central insight is that wire sharing and physical resource consumption must be governed by a single compositional typing judgment, $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$, pairing a five-point ordered duoidal wire-capability algebra ($\CapZero < \CapBorrowZ < \CapTaintedX < \CapLin < \CapUniq$) with a hardware-graded cost vector $e = (W_{\mathrm{peak}}, W_{\mathrm{clean}}, \Phi, \alpha, \varepsilon, E_{\mathrm{ebit}})$ and nonlinear repetition/partition action $r \triangleright e$. Without user proof annotations, \LakefillQ{} discharges domain-restricted erasure, quotient canonicality, and bilinear $X$-basis phase-taint obligations via XOR-AND graph equivalence sweeping and SMT solving, lowers programs through non-Clifford ZX phase-polynomial e-graph saturation and chordal register coloring, and emits dynamic OpenQASM~3.0 and Stim circuits across single-processor, multi-chiplet, and serial multishot regimes.
 
-Across 60 compiled benchmarks and nine audited open-source quantum repositories, \LakefillQ{} uncovers 14 latent correctness bugs while establishing new Pareto frontiers on open problems: 256-bit elliptic-curve discrete logarithms in 1,088 logical qubits and $14.34 \times 10^6$ Toffolis; RSA-2048 factoring in 1,364 logical qubits without incurring the $\Delta d = +2$ code-distance penalty of sequential carry rippling; a $10.46\times$ width reduction (to 9,984 qubits) for coherent Decoded Quantum Interferometry (DQI), extended to non-binary Hermitian algebraic-geometry codes exceeding Reed--Solomon blocklength bounds; and a $22.48\times$ state-preparation Toffoli reduction for FeMoCo tensor-hypercontracted QSVT. All metatheory, data-structure invariants, and lowering passes are mechanized in 2,305 Lean~4.35.0 theorems across 82 modules with zero axioms or incomplete proofs.
+Across 60 compiled benchmarks, \LakefillQ{} establishes new Pareto frontiers on open problems: 256-bit elliptic-curve discrete logarithms in 1,088 logical qubits and $14.34 \times 10^6$ Toffolis; RSA-2048 factoring in 1,364 logical qubits without incurring the $\Delta d = +2$ code-distance penalty of sequential carry rippling; a $10.46\times$ width reduction (to 9,984 qubits) for coherent Decoded Quantum Interferometry (DQI), extended to non-binary Hermitian algebraic-geometry codes exceeding Reed--Solomon blocklength bounds; and a $22.48\times$ state-preparation Toffoli reduction for FeMoCo tensor-hypercontracted QSVT. All metatheory, data-structure invariants, and lowering passes are mechanized in 2,305 Lean~4.35.0 theorems across 82 modules with zero axioms or incomplete proofs.
 \end{abstract}
 
 \maketitle
@@ -174,7 +174,7 @@ This paper makes four main contributions:
   \item \textbf{A Unified Substructural and Hardware-Graded Quantum Calculus (\S\ref{sec:overview}--\S\ref{sec:calculus}).} We formalize $\lambda_{\mathrm{LFQ}}$ and its six-primitive kernel $\lambda_{\mathrm{LFQ}}^{\mathrm{kern}}$, showing how domain-restricted erasure ($\mathsf{U1}$), quotient canonicality ($\mathsf{U2}$), orthogonal branching ($\mathsf{U3}$), bilinear $X$-basis phase cancellation ($\mathsf{U4}$), hardware error/decoder/crosstalk grades ($\Phi_1$--$\Phi_3$), Chebyshev block-encoding fusion ($\QBlock$), and three-span error diagnostics all arise as projections of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$, scaled to multi-round ciphers via automatic XOR-AND graph (XAG/FRAIG) and Z3 cut-sweeping.
   \item \textbf{Purely Functional Quantum Data Structures (\S\ref{sec:qds}).} Grounded in two sharp uncomputation laws---an exact degree-$2$ characterization of Clifford MBU (Proposition~\ref{prop:p1}) and an $h+1$ register bound for two-pass tree pebbling (Proposition~\ref{prop:p2})---we design nine core and four bootstrapped functional quantum data structures in \texttt{\#lang lakefillq} that confine non-Clifford work to narrow foci, decouple carry chains, and guarantee history-independent state representations without QRAM.
   \item \textbf{ZX Phase-Polynomial e-Graph Lowering and Multi-QPU Partitioning (\S\ref{sec:compiler}).} We build a three-dialect compiler ($\LakefillQ{} \to \RevIR{} \to \MachineISA{}$) combining chordal SSA wire reuse, congruence-closed e-graph saturation with non-Clifford ZX phase-polynomial spider fusion and shared-control twin-CCZ rules~\cite{kissinger2020tcount}, Bellman--Knuth hardware extraction across four QEC/NISQ profiles, 64-bit bitboard Meet-in-the-Middle (MITM) leaf synthesis, and convex $M^* \le 256$ multi-QPU partitioning with Law-$\mathsf{U4}$ GHZ cat-disentangling.
-  \item \textbf{Open-Problem Advances, Wild Bug Discovery, and Mechanized Proofs (\S\ref{sec:eval}).} Across 60 workloads, \LakefillQ{} achieves simultaneous width-and-Toffoli Pareto improvements on ECC-256 (1,088 qubits, $14.34\times 10^6$ Toffolis), code-distance-preserving RSA-2048/4096 factoring ($d=27$ vs.\ $d=29$), $10.46\times$ narrower OPI DQI plus non-binary Hermitian algebraic-geometry Early-MBU DQI beating Reed--Solomon length bounds, and $22.48\times$ cheaper FeMoCo QSVT uncomputation; catches 14 real bugs across nine open-source quantum repositories; passes six-engine differential fuzzing and 12/12 mutation kills; and is mechanized in 2,305 zero-axiom Lean~4.35.0 theorems across 82 modules.
+  \item \textbf{Empirical Validation, Open-Problem Advances, and Mechanized Proofs (\S\ref{sec:eval}).} Across 60 workloads, \LakefillQ{} achieves simultaneous width-and-Toffoli Pareto improvements on ECC-256 (1,088 qubits, $14.34\times 10^6$ Toffolis), code-distance-preserving RSA-2048/4096 factoring ($d=27$ vs.\ $d=29$), $10.46\times$ narrower OPI DQI plus non-binary Hermitian algebraic-geometry Early-MBU DQI beating Reed--Solomon length bounds, and $22.48\times$ cheaper FeMoCo QSVT uncomputation; confirms across nine third-party quantum libraries (14 concrete violations) that $\lambda_{\mathrm{LFQ}}$'s side conditions rule out real-world circuit hazards rather than artificial pathologies; passes six-engine differential fuzzing and 12/12 mutation kills; and is mechanized in 2,305 zero-axiom Lean~4.35.0 theorems across 82 modules.
 \end{enumerate}
 
 % ============================================================================
@@ -192,17 +192,17 @@ Before formalizing $\lambda_{\mathrm{LFQ}}$, we walk through two concrete progra
   arr/.style={-{Latex[length=2.2mm,width=1.6mm]}, thick, draw=black!75}
 ]
   \node[pipebox, minimum width=3.1cm] (surf) {\textbf{Surface \texttt{\#lang lakefillq}}\\[2pt]Zippers, \texttt{fold-braun},\\\texttt{within-apply-mbu}};
-  \node[pipebox, right=0.65cm of surf, minimum width=3.1cm] (kern) {\textbf{Kernel $\lambda_{\mathrm{LFQ}}^{\mathrm{kern}}$}\\[2pt]6 primitives, 0 residual\\surface constructors};
-  \node[pipebox, right=0.65cm of kern, minimum width=3.4cm] (revir) {\textbf{Typed \RevIR{} \& e-Graph}\\[2pt]Chordal SSA reuse, ZX phase\\fusion, Bellman--Knuth};
-  \node[pipebox, right=0.65cm of revir, minimum width=3.2cm] (isa) {\textbf{\MachineISA{} Codegen}\\[2pt]Dynamic OpenQASM 3.0,\\Stim, Multi-QPU $M^*$};
+  \node[pipebox, right=0.85cm of surf, minimum width=3.1cm] (kern) {\textbf{Kernel $\lambda_{\mathrm{LFQ}}^{\mathrm{kern}}$}\\[2pt]6 primitives, 0 residual\\surface constructors};
+  \node[pipebox, right=0.85cm of kern, minimum width=3.4cm] (revir) {\textbf{Typed \RevIR{} \& e-Graph}\\[2pt]Chordal SSA reuse, ZX phase\\fusion, Bellman--Knuth};
+  \node[pipebox, right=0.85cm of revir, minimum width=3.2cm] (isa) {\textbf{\MachineISA{} Codegen}\\[2pt]Dynamic OpenQASM 3.0,\\Stim, Multi-QPU $M^*$};
   \draw[arr] (surf) -- node[above, font=\scriptsize]{Elaborate} (kern);
   \draw[arr] (kern) -- node[above, font=\scriptsize]{Typecheck} (revir);
   \draw[arr] (revir) -- node[above, font=\scriptsize]{Extract} (isa);
-  \node[checknox, below=0.55cm of kern, minimum width=6.4cm] (judg) {\textbf{Unified Judgment} $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$\\[2pt]Capabilities ($\CapZero < \CapBorrowZ < \CapTaintedX < \CapLin < \CapUniq$) + XAG/FRAIG + Z3 ($\mathsf{U1}$--$\mathsf{U4}$)};
-  \node[checknox, below=0.55cm of revir, minimum width=6.2cm] (phys) {\textbf{Hardware \& Continuous Projections}\\[2pt]$\QPhysGrade$ ($\Phi_1$ pacing $\tau_{\mathrm{dec}}$, $\Phi_2$ exclusion, $\Phi_3$ distance) + $\QBlock$};
-  \draw[arr, <->] (kern.south) -- ([xshift=-1.4cm]judg.north);
+  \node[checknox, anchor=north west, text width=6.75cm] (judg) at ([yshift=-0.55cm]surf.south west) {\textbf{Unified Judgment} $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$\\[2pt]Capabilities ($\CapZero < \CapBorrowZ < \CapTaintedX < \CapLin < \CapUniq$) + XAG/FRAIG + Z3 ($\mathsf{U1}$--$\mathsf{U4}$)};
+  \node[checknox, anchor=north east, text width=7.15cm] (phys) at ([yshift=-0.55cm]isa.south east) {\textbf{Hardware \& Continuous Projections}\\[2pt]$\QPhysGrade$ ($\Phi_1$ pacing $\tau_{\mathrm{dec}}$, $\Phi_2$ exclusion, $\Phi_3$ distance) + $\QBlock$};
+  \draw[arr, <->] (kern.south) -- (kern.south |- judg.north);
   \draw[arr] (judg.east) -- (phys.west);
-  \draw[arr, <->] (revir.south) -- ([xshift=-1.2cm]phys.north);
+  \draw[arr, <->] (revir.south) -- (revir.south |- phys.north);
 \end{tikzpicture}}
 \caption{Architecture of the \LakefillQ{} compiler ($\LakefillQ{} \to \RevIR{} \to \MachineISA{}$). All logical uncomputation laws ($\mathsf{U1}$--$\mathsf{U4}$), hardware grades ($\Phi_1$--$\Phi_3$), block-encoding bounds ($\QBlock$), and three-span diagnostics project from one typing judgment.}
 \label{fig:f15}
@@ -343,7 +343,7 @@ tracking peak live width $W_{\mathrm{peak}}$, reclaimed $|0\rangle$ ancillas $W_
 \[
   W_{\mathrm{peak}}(e_1 \mathbin{;;} e_2) = \max\!\bigl(W_{\mathrm{peak}}(e_1),\, (W_{\mathrm{peak}}(e_1) - W_{\mathrm{clean}}(e_1)) + W_{\mathrm{peak}}(e_2)\bigr), \quad \varepsilon(e_1 \mathbin{;;} e_2) = \varepsilon_1 + \varepsilon_2.
 \]
-Two genuinely quantum nonlinearities enter through a single modal operator $r \triangleright e$~\cite{orchard2019granule,gaboardi2016combining}: degree-$d$ Chebyshev QSVT iteration $\mathsf{cheb}(d) \triangleright e$ fuses reflection ancillas ($W_{\mathrm{clean}} \mapsto m_{\mathrm{anc}} + 1$) while accounting for quadratic coherent phase-angle drift ($4 d \varepsilon_0 + d^2 \varepsilon_{\mathrm{rot}}^2$), and $M$-way cluster partitioning $\mathsf{par}(M) \triangleright e$ scales per-QPU width ($\lceil W_{\mathrm{loc}}/M \rceil + 2 E_{\mathrm{cut}}$) while charging Zalka's $\sqrt{M}$ Grover work factor~\cite{zalka1999} on unstructured search (\texttt{'auto} derives cluster parameters directly from the typed AST without user metadata). Figure~\ref{fig:typing_rules} displays the core typing rules; seven static projections (\textsf{T-DomImg}, \textsf{T-BorrowZ}, \textsf{T-PhaseClean}, \textsf{T-CounitU4}, \textsf{T-SubNorm}, \textsf{T-QubitCap}, \textsf{T-ParGuard}) enforce every language invariant.
+Two genuinely quantum nonlinearities enter through a single modal operator $r \triangleright e$~\cite{orchard2019granule,gaboardi2016combining}: degree-$d$ Chebyshev QSVT iteration $\mathsf{cheb}(d) \triangleright e$ fuses reflection ancillas ($W_{\mathrm{clean}} \mapsto m_{\mathrm{anc}} + 1$) while accounting for quadratic coherent phase-angle drift ($4 d \varepsilon_0 + d^2 \varepsilon_{\mathrm{rot}}^2$), and $M$-way cluster partitioning $\mathsf{par}(M) \triangleright e$ scales per-QPU width ($\lceil W_{\mathrm{loc}}/M \rceil + 2 E_{\mathrm{cut}}$) while charging Zalka's $\sqrt{M}$ Grover work factor~\cite{zalka1999} on unstructured search (\texttt{'auto} derives cluster parameters directly from the typed AST without user metadata). Figure~\ref{fig:typing_rules} displays the core typing rules; seven static projections (\textsf{T-DomImg}, \textsf{T-BorrowZ}, \textsf{T-PhaseClean}, \textsf{T-CounitU4}, \textsf{T-SubNorm}, \textsf{T-QubitCap}, \textsf{T-ParGuard}) enforce every language invariant, and \S\ref{sec:audit} verifies empirically that each side condition rules out concrete hazards observed in third-party quantum circuit libraries.
 
 \begin{figure}[t]
 \centering
@@ -797,7 +797,7 @@ When a circuit exceeds single-chip capacity $Q_{\mathrm{cap}}$ (\texttt{lakefill
 \section{Evaluation}
 \label{sec:eval}
 
-We evaluate \LakefillQ{} across six research questions examining algebraic exactness and non-binary AG DQI (\textbf{RQ1}), differential fuzzing (\textbf{RQ2}), mutation testing and error diagnostics (\textbf{RQ3}), mechanized metatheory (\textbf{RQ4}), open-source bug discovery (\textbf{RQ5}), and open-problem Pareto advances across execution regimes (\textbf{RQ6}).
+We evaluate \LakefillQ{} across six research questions examining algebraic exactness and non-binary AG DQI (\textbf{RQ1}), differential fuzzing (\textbf{RQ2}), mutation testing and error diagnostics (\textbf{RQ3}), mechanized metatheory (\textbf{RQ4}), empirical relevance of our typing side conditions on third-party circuits (\textbf{RQ5}), and open-problem Pareto advances across execution regimes (\textbf{RQ6}).
 
 \subsection{RQ1: Cryptographic Oracles and Non-Binary Algebraic-Geometry DQI}
 \label{sec:rq1}
@@ -844,19 +844,19 @@ Every formal claim in this paper is mechanized in Lean~4.35.0 across 82 standalo
 \end{itemize}
 Appendix~\ref{app:audit} indexes the exact Lean~4.35.0 declaration names machine-checked against this manuscript.
 
-\subsection{RQ5: Nine-Repository Open-Source Bug Audit and Standalone Linter}
+\subsection{RQ5: Do Real-World Circuits Hit $\lambda_{\mathrm{LFQ}}$'s Side Conditions?}
 \label{sec:audit}
 
-To test whether the hazards captured by $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ occur in practice, we audited nine open-source quantum algorithm and compiler repositories---spanning elliptic-curve/RSA arithmetic~\cite{roetteler2017,haner2020,gidneyekera2021}, symmetric/hash circuits~\cite{parent2017reverc,zou2020}, code-based ISD and DQI~\cite{jaques2020,esser2022,jordan2024}, and block-encoded QSVT libraries~\cite{harrigan2024,cobble2026}. As summarized in Table~\ref{tab:t17_summary} (full repository-by-repository breakdown in Appendix~\ref{app:audit}), \LakefillQ{}'s seven typing projections statically catch \textbf{14 latent correctness bugs}, including unguarded $x=0$ Kaliski modular-inversion garbage ($\mathsf{U1}$), missing PLU permutation uncomputation ($\mathsf{U2}$), non-involutive ReVerC $\chi_5$ uncomputation ($\mathsf{U1}$), unguarded $d=2$ QSVT walk sign flips when $U^2 \neq I$ (\textsf{T-SubNorm}), and uncanceled MBU phase kickbacks ($\mathsf{U4}$). Our standalone Python linter (\texttt{ae/lakefillq\_lint.py}) lifts these same checks onto external OpenQASM~3.0 and Qiskit circuits, catching $16/16$ bug kernels ($100\%$ recall) with $0/14$ false positives on verified clean circuits.
+A fair question for any substructural quantum type system~\cite{bichsel2020,yuan2022twist,cobble2026} is whether its side conditions target hazards that actually arise in practice, rather than exotic corner cases invented to showcase the formalism. To answer this question empirically, we checked representative arithmetic, symmetric-cipher, decoding, and block-encoding circuits drawn from nine published open-source quantum libraries~\cite{roetteler2017,haner2020,gidneyekera2021,parent2017reverc,zou2020,jaques2020,esser2022,jordan2024,harrigan2024,cobble2026} against the projections of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$. As Table~\ref{tab:t17_summary} summarizes (witnesses in Appendix~\ref{app:audit}), third-party implementations violate every logical side condition of $\lambda_{\mathrm{LFQ}}$ across 14 concrete instances---including unguarded $x=0$ Kaliski modular-inversion garbage ($\mathsf{U1}$), missing Bruhat PLU permutation cleanup ($\mathsf{U2}$), non-involutive $\chi_5^2 \neq I$ reverse uncomputation ($\mathsf{U1}$), singular QGJE submatrix undercounting ($\mathsf{U1}$), and degree-$2$ Chebyshev walk shortcuts applied when $U^2 \neq I$ (\textsf{T-SubNorm}).
 
 \begin{table}[t]
 \centering
-\caption{Summary of 14 latent correctness bugs uncovered across nine open-source quantum repositories, grouped by the projection of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ that statically prevents them.}
+\caption{Empirical relevance of $\lambda_{\mathrm{LFQ}}$'s typing side conditions across nine third-party quantum circuit libraries: 14 real-world failure patterns ruled out statically by projections of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$.}
 \label{tab:t17_summary}
 \footnotesize
 \resizebox{\textwidth}{!}{\begin{tabular}{lllr}
 \toprule
-Domain Audited (Repos) & Representative Wild Bug Uncovered & Catching Rule & Bugs \\
+Circuit Family (Libraries) & Observed Hazard in Third-Party Circuits & Enforcing Rule & Hits \\
 \midrule
 Public-Key Crypto (3) & Kaliski $x=0$ dirty ancilla; $\mathbb{F}_{13}$ offset reverse-uncompute; coset overflow & \textsf{T-DomImg} ($\mathsf{U1}$), $\mathsf{U2}$ & $4$ \\
 Symmetric \& Hash (2) & ReVerC $\chi_5^2 \neq I$ assumption; missing Bruhat PLU pivot cleanup & \textsf{T-DomImg}, \textsf{T-BorrowZ} & $4$ \\
@@ -1050,20 +1050,20 @@ FeMoCo THC QSVT & $2,142$ & $85,156,250$ & $64 \times 2,142$ (shots) & $0$ (shot
 \end{table}
 
 % ============================================================================
-\section{Open-Source Bug Catalog, Mutation Matrix, and Lean 4.35.0 Index}
+\section{Empirical Side-Condition Witnesses, Mutation Matrix, and Lean 4.35.0 Index}
 \label{app:audit}
 
-\paragraph{Open-Source Audit and Seven Projected Guards.}
-Seven general static guards projected from $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ (Tables~\ref{tab:t17} and~\ref{tab:t17b}) catch all 14 latent correctness bugs across the nine audited repositories, including 20/32 corrupted basis rows from assuming $\chi_5^2 = I$ in ReVerC, missing PLU permutation uncomputation (4.23~ms XAG check), $7.36\times$ QuantumISD skip-rightmost undercounting (94.53\% guarded Aer success probability), and 1.1796 spectral error from applying the degree-2 Chebyshev walk shortcut when $U^2 \neq I$ in Qualtran THC. Full diagnostic and Redex fuzzer artifacts are recorded in \texttt{lakefillq\_holistic\_language\_cohesion\_report.json} and \texttt{lakefillq\_redex\_surface\_diagnostic\_fuzzer\_report.json}.
+\paragraph{Side-Condition Validation Witnesses and Seven Projected Obligations.}
+Seven general static obligations projected from $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ (Tables~\ref{tab:t17} and~\ref{tab:t17b}) rule out all 14 concrete correctness hazards observed across the nine third-party quantum circuit libraries in \S\ref{sec:audit}, including 20/32 corrupted basis rows from assuming $\chi_5^2 = I$ in ReVerC, missing PLU permutation uncomputation (4.23~ms XAG check), $7.36\times$ QuantumISD skip-rightmost undercounting (94.53\% guarded Aer success probability), and 1.1796 spectral error from applying the degree-2 Chebyshev walk shortcut when $U^2 \neq I$ in Qualtran THC. Full diagnostic and Redex fuzzer artifacts are recorded in \texttt{lakefillq\_holistic\_language\_cohesion\_report.json} and \texttt{lakefillq\_redex\_surface\_diagnostic\_fuzzer\_report.json}.
 
 \begin{table}[h]
 \centering
-\caption{Detailed breakdown of representative bugs uncovered across nine open-source quantum repositories.}
+\caption{Per-family empirical witnesses showing how third-party circuit implementations violate $\lambda_{\mathrm{LFQ}}$'s side conditions.}
 \label{tab:t17}
 \footnotesize
 \resizebox{\textwidth}{!}{\begin{tabular}{llll}
 \toprule
-Repository Family & Bug Pattern & Empirical Failure Witness & Static Guard \\
+Library Family & Violated Assumption & Empirical Failure Witness & Enforcing Rule \\
 \midrule
 ECC / Kaliski / Factoring & $x=0$ inversion; $\mathbb{F}_{13}$ offset; coset carry & Dirty ancilla / wrap-around & \textsf{T-DomImg}, $\mathsf{U2}$ \\
 ReVerC / T-Type AES & $\chi_5^2 \neq I$ (20/32 rows); missing PLU perm & Corrupted state (4.23~ms catch) & \textsf{T-DomImg}, \textsf{T-BorrowZ} \\
@@ -1075,12 +1075,12 @@ Qualtran / Cobble & $d=2$ walk on $U^2 \neq I$; $\mathrm{PREP}^\dagger$ sign & 1
 
 \begin{table}[h]
 \centering
-\caption{Correspondence between the seven coordinate projections of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ and the standalone Python OpenQASM~3.0 / Qiskit linter (\texttt{ae/lakefillq\_lint.py}, $16/16$ recall, $0\%$ false positives).}
+\caption{The seven coordinate projections of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ in \LakefillQ{} and the concrete circuit hazards each projection statically rules out.}
 \label{tab:t17b}
 \footnotesize
 \resizebox{\textwidth}{!}{\begin{tabular}{lll}
 \toprule
-Judgment Projection & Static Obligation Enforced & Wild Bugs Prevented \\
+Judgment Projection & Static Obligation Enforced & Circuit Hazards Ruled Out \\
 \midrule
 \textsf{T-DomImg} ($\mathsf{U1}$) & Domain-restricted inverse $g(x,f(x))=x$ on $\mathcal{D}$ & Kaliski $x=0$, ReVerC $\chi_5$, singular QGJE, DQI \\
 \textsf{T-BorrowZ} & Read-only $\CapBorrowZ$ context non-interference & In-place PLU alias, cold-limb overwrite \\
@@ -1188,7 +1188,7 @@ Every formal claim in this paper maps to zero-\texttt{sorry}, zero-\texttt{axiom
   \texttt{spanning\_tree\_peel\_commutation\_Hc\_eq\_s},
   \texttt{lakefillq\_grade\_phi1\_lindley\_zero\_backlog},
   \texttt{unpaced\_mwpm\_lindley\_backlog\_divergence}.
-  \item \textbf{Diagnostics, Fuzzing, Audits, \& Distributed $M^*$ (\S\ref{sec:eval}):}
+  \item \textbf{Diagnostics, Fuzzing, Side-Condition Witnesses, \& Distributed $M^*$ (\S\ref{sec:eval}):}
   \texttt{complete\_12\_of\_12\_compiler\_mutant\_kill\_rate\_soundness},
   \texttt{multipass\_pipeline\_preserves\_caller\_span},
   \texttt{buildProvenanceChain\_preserves\_user\_anchoring},

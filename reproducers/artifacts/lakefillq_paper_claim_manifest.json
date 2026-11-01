@@ -2,7 +2,7 @@
   "manuscript_title": "LakefillQ: Purely Functional Data Structures, Substructural Typing, and Graded Physical Compilation for Low-Width Fault-Tolerant Quantum Circuits",
   "compiler_system": "LakefillQ",
   "overall_status": "PASS",
-  "total_verification_seconds": 90.233,
+  "total_verification_seconds": 83.487,
   "deliverables": {
     "latex_manuscript": "paper/lakefillq_paper.tex",
     "bibtex_database": "paper/references.bib",
@@ -11,8 +11,8 @@
   },
   "quantitative_artifact_crosscheck": {
     "status": "PASS",
-    "artifacts_loaded": 39,
-    "claims_verified": 125,
+    "artifacts_loaded": 38,
+    "claims_verified": 124,
     "failure_count": 0,
     "claims": [
       {
@@ -1372,18 +1372,6 @@
         "verified": true
       },
       {
-        "claim_id": "c114_python_qasm_linter_buggy_true_positives",
-        "category": "lakefillq_python_qasm_linter",
-        "artifact_relpath": "reproducers/artifacts/lakefillq_python_qasm_linter_report.json",
-        "measured_value": 16,
-        "expected_value": 16,
-        "markdown_token": "lakefillq_lint.py",
-        "latex_token": "lakefillq\\_lint.py",
-        "markdown_matched": true,
-        "latex_matched": true,
-        "verified": true
-      },
-      {
         "claim_id": "c115_noisy_optical_stim_d3_p005_ddist_131",
         "category": "lakefillq_noisy_optical_link_stim",
         "artifact_relpath": "reproducers/artifacts/lakefillq_noisy_optical_link_stim_report.json",
@@ -2142,160 +2130,160 @@
       {
         "lean_file": "proofs/adversarial_catch_audit_and_sota_comparison_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 921.1
+        "elapsed_ms": 541.26
       },
       {
         "lean_file": "proofs/bivariate_bicycle_qldpc_and_0dsp_backlog_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 565.18
+        "elapsed_ms": 461.11
       },
       {
         "lean_file": "proofs/dqi_opi_and_parallel_walker_bitonic_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 648.22
+        "elapsed_ms": 378.22
       },
       {
         "lean_file": "proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 941.23
+        "elapsed_ms": 417.33
       },
       {
         "lean_file": "proofs/wire_level_symbolic_type_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1860.24
+        "elapsed_ms": 1506.71
       },
       {
         "lean_file": "proofs/select_swap_qroam_crt_kawamura_u2_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3989.35
+        "elapsed_ms": 2322.13
       },
       {
         "lean_file": "proofs/pareto_inplace_aes_slp_asymmetric_mbu_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 10215.65
+        "elapsed_ms": 7930.66
       },
       {
         "lean_file": "proofs/early_mbu_phase_only_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 23487.6
+        "elapsed_ms": 16831.45
       },
       {
         "lean_file": "proofs/qphys_graded_resource_semiring_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2960.17
+        "elapsed_ms": 2318.01
       },
       {
         "lean_file": "proofs/differential_compiler_mutation_soundness_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2210.93
+        "elapsed_ms": 1438.67
       },
       {
         "lean_file": "proofs/lakefillq_unified_compiler_elaboration_and_qasm3_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3990.6
+        "elapsed_ms": 2244.08
       },
       {
         "lean_file": "proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1948.28
+        "elapsed_ms": 1325.45
       },
       {
         "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2135.25
+        "elapsed_ms": 1564.38
       },
       {
         "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1344.47
+        "elapsed_ms": 1240.55
       },
       {
         "lean_file": "proofs/lakefillq_block_encoding_lcu_qsvt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 724.4
+        "elapsed_ms": 686.39
       },
       {
         "lean_file": "proofs/lakefillq_bug_class_prevention_type_system_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1657.42
+        "elapsed_ms": 1604.12
       },
       {
         "lean_file": "proofs/lakefillq_algorithmic_optimizations_and_3mode_scaling_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 60635.11
+        "elapsed_ms": 62427.24
       },
       {
         "lean_file": "proofs/sota_ecc_rsa_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 993.27
+        "elapsed_ms": 1322.24
       },
       {
         "lean_file": "proofs/sota_symmetric_hash_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 931.32
+        "elapsed_ms": 1200.95
       },
       {
         "lean_file": "proofs/sota_qisd_dqi_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 834.01
+        "elapsed_ms": 1001.16
       },
       {
         "lean_file": "proofs/sota_qualtran_cobble_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 964.88
+        "elapsed_ms": 918.72
       },
       {
         "lean_file": "proofs/lakefillq_graded_coeffect_uniqueness_place_effect_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 6812.52
+        "elapsed_ms": 6633.11
       },
       {
         "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2382.37
+        "elapsed_ms": 2417.67
       },
       {
         "lean_file": "proofs/lakefillq_qasm_python_linter_lifting_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3645.13
+        "elapsed_ms": 3105.27
       },
       {
         "lean_file": "proofs/lakefillq_noisy_optical_link_distillation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1905.73
+        "elapsed_ms": 1483.5
       },
       {
         "lean_file": "proofs/lakefillq_multipass_diagnostic_provenance_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1228.58
+        "elapsed_ms": 1065.43
       },
       {
         "lean_file": "proofs/lakefillq_holistic_modular_duoidal_cohesion_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1660.04
+        "elapsed_ms": 1527.08
       },
       {
         "lean_file": "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2072.42
+        "elapsed_ms": 2048.7
       },
       {
         "lean_file": "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3210.18
+        "elapsed_ms": 2300.44
       }
     ]
   },
   "latex_and_bibtex_structural_linter": {
     "status": "PASS",
-    "documentclass": "acmart (acmsmall,screen,review,anonymous)",
+    "documentclass": "acmart (acmsmall,screen,anonymous)",
     "anonymous_author_verified": true,
     "sections_verified": 11,
     "tabular_tables_verified": 13,
     "quantikz_circuits_verified": 2,
     "algorithm_listings_verified": 8,
     "labels_defined": 79,
-    "references_resolved": 54,
+    "references_resolved": 55,
     "dangling_references": 0,
     "bibtex_entries": 120,
     "citations_resolved": 120,

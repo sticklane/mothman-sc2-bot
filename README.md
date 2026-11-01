@@ -205,7 +205,7 @@ make quick
 # Terminal explorer across Single-Machine, Parallel-Machine, & Serial-Multishot SOTA results, RTL, and proofs
 make explore
 
-# Cross-check 125 quantitative claims, formal Lean 4.35.0 theorem bindings, and acmart LaTeX / 120 BibTeX entries
+# Cross-check 124 quantitative claims, formal Lean 4.35.0 theorem bindings, and acmart LaTeX / 120 BibTeX entries
 make paper
 
 # Complete end-to-end reproduction (native or inside Docker: docker build -t lakefillq-ae . && docker run --rm lakefillq-ae)
@@ -245,7 +245,7 @@ Always set `TMPDIR=/home/antigravity/toolchains/tmp` before invoking toolchains 
 export TMPDIR=/home/antigravity/toolchains/tmp
 
 # 1. Run the 5-gate proof hygiene, benchmark fairness, metric discipline, GFM & link linter
-#    and the 125-claim / 29-module Lean 4.35.0 / LaTeX & 120-entry BibTeX manifest verifier
+#    and the 124-claim / 29-module Lean 4.35.0 / LaTeX & 120-entry BibTeX manifest verifier
 python3 reproducers/lint_proofs_benchmarks_and_gfm.py
 python3 reproducers/verify_lakefillq_paper_claims_and_latex_manifest.py
 

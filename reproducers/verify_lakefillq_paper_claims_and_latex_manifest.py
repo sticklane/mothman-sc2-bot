@@ -1325,15 +1325,6 @@ def verify_quantitative_claims(md_text: str, tex_text: str) -> Dict[str, Any]:
             r"distributed\_qrns\_shor\_u4.lfq",
         ),
         (
-            "c114_python_qasm_linter_buggy_true_positives",
-            "lakefillq_python_qasm_linter",
-            "reproducers/artifacts/lakefillq_python_qasm_linter_report.json",
-            lambda: get_doc("reproducers/artifacts/lakefillq_python_qasm_linter_report.json")["summary_metrics"]["buggy_true_positives"],
-            16,
-            "lakefillq_lint.py",
-            r"lakefillq\_lint.py",
-        ),
-        (
             "c115_noisy_optical_stim_d3_p005_ddist_131",
             "lakefillq_noisy_optical_link_stim",
             "reproducers/artifacts/lakefillq_noisy_optical_link_stim_report.json",
@@ -2423,9 +2414,9 @@ def lint_latex_and_bibtex(tex_text: str, bib_text: str) -> Dict[str, Any]:
         )
     )
 
-    # Confirm anonymous double-blind acmart header and LakefillQ naming
-    if "\\documentclass[acmsmall,screen,review,anonymous]{acmart}" not in tex_text:
-        errors.append("Missing required acmart anonymous review documentclass")
+    # Confirm anonymous double-blind acmart header without review margin line numbers
+    if "\\documentclass[acmsmall,screen,anonymous]{acmart}" not in tex_text:
+        errors.append("Missing required acmart anonymous documentclass (without review line numbers)")
     if "\\author{Anonymous Author(s)}" not in tex_text:
         errors.append("Missing required \\author{Anonymous Author(s)}")
 
@@ -2442,7 +2433,7 @@ def lint_latex_and_bibtex(tex_text: str, bib_text: str) -> Dict[str, Any]:
 
     return {
         "status": "PASS",
-        "documentclass": "acmart (acmsmall,screen,review,anonymous)",
+        "documentclass": "acmart (acmsmall,screen,anonymous)",
         "anonymous_author_verified": True,
         "sections_verified": sections_found,
         "tabular_tables_verified": tabular_count,
