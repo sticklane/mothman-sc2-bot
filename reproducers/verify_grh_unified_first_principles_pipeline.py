@@ -147,12 +147,25 @@ def run_suite_2_ast_and_algebraic_audit() -> dict:
             assert mod_q_orthogonal_weight_py(q, n, 7) == 0
             conductor_pairs_checked += 1
 
+    eight_primes = [2, 3, 5, 7, 11, 13, 17, 19]
+    unbaked_y3_weights = [
+        dirichlet_char_mod4_py(p) if is_prime_py(p) else 0 for p in eight_primes
+    ]
+    unbaked_y3_schur = (1 << (2 * 3)) - sum(w * w for w in unbaked_y3_weights)
+    assert unbaked_y3_schur == 57
+    has_unbaked_thm = (
+        "theorem unbaked_paley_wiener_reserve_short_last_schur_nonneg" in code_no_block_comments
+        and "theorem chi4PrimeShellWeights_sumSq_le_length" in code_no_block_comments
+    )
+
     return {
         "status": "PASS" if (
             uninterpreted_hyps == 0
             and parameterless_int_defs == 0
             and max_lines <= 5
-            and len(thm_blocks) == 9
+            and len(thm_blocks) == 13
+            and has_unbaked_thm
+            and unbaked_y3_schur == 57
             and states_checked == 1089
             and conductor_pairs_checked == 2016
         ) else "FAIL",
@@ -160,6 +173,7 @@ def run_suite_2_ast_and_algebraic_audit() -> dict:
         "max_proof_lines": max_lines,
         "uninterpreted_inequality_hypotheses": uninterpreted_hyps,
         "parameterless_scalar_int_defs": parameterless_int_defs,
+        "unbaked_y3_prime_shell_schur_margin": unbaked_y3_schur,
         "sobolev_collar_states_verified": states_checked,
         "mod_q_conductor_pairs_verified": conductor_pairs_checked,
     }
@@ -301,7 +315,8 @@ def main() -> None:
     base_env = os.environ.copy()
     base_env["TMPDIR"] = str(BUILD_CACHE)
     lean_env = base_env.copy()
-    lean_env["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
+    if Path("/home/antigravity/toolchains/fix_proc_exe.so").exists():
+        lean_env["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
 
     try:
         s1 = run_suite_1_z3_xls(base_env)

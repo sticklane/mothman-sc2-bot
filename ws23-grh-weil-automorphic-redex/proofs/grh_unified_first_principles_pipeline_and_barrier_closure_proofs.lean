@@ -127,6 +127,17 @@ def sumSqList : List Int → Int
 def activePrimeSchurMargin (archLo : Int) (activePrimes : List Int) : Int :=
   archLo - sumSqList activePrimes
 
+/-- Recursive PNT dyadic shell rank-growth budget ($2^y$) at support scale `y : Nat`. -/
+def pntShellRankBudget : Nat → Nat
+  | 0 => 1
+  | y + 1 => 2 * pntShellRankBudget y
+
+/-- Recursive Paley-Wiener smooth convolution Fourier-decay budget ($4^y$) at
+    support scale `y : Nat`. -/
+def convolutionDecayBudget : Nat → Nat
+  | 0 => 1
+  | y + 1 => 4 * convolutionDecayBudget y
+
 -- =============================================================================
 -- Stage 2: GRH-WS4 & GRH-WS5 Sobolev-Coupled Boundary-Collar Completion
 -- =============================================================================
@@ -179,6 +190,37 @@ theorem sq_nonneg (x : Int) : 0 ≤ x * x := by
   · exact Int.mul_nonneg_of_nonpos_of_nonpos (Int.le_of_lt h) (Int.le_of_lt h)
   · decide
   · exact Int.mul_nonneg (Int.le_of_lt h) (Int.le_of_lt h)
+
+/-- Helper theorem proving that each first-principles $\chi_4(n)$ prime weight
+    has square bounded above by `1`. -/
+theorem chi4PrimeWeight_sq_le_one (n : Nat) :
+    (if isPrime n then dirichletCharMod4 n else 0) *
+      (if isPrime n then dirichletCharMod4 n else 0) ≤ 1 := by
+  dsimp [dirichletCharMod4]
+  split
+  · split <;> (try split) <;> decide
+  · decide
+
+/-- Structural induction on `candidates : List Nat` proving that the squared norm
+    of `chi4PrimeShellWeights candidates` is non-negative and bounded by `candidates.length`. -/
+theorem chi4PrimeShellWeights_sumSq_le_length (candidates : List Nat) :
+    0 ≤ sumSqList (chi4PrimeShellWeights candidates) ∧
+    sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) := by
+  induction candidates with
+  | nil => decide
+  | cons n ns ih =>
+    have hn := And.intro (sq_nonneg (if isPrime n then dirichletCharMod4 n else 0)) (chi4PrimeWeight_sq_le_one n)
+    dsimp [chi4PrimeShellWeights, sumSqList]; omega
+
+/-- Structural induction on `y : Nat` proving that $4^y$ Paley-Wiener smooth
+    convolution Fourier decay (`convolutionDecayBudget y`) dominates $2^y$ PNT
+    dyadic shell rank growth (`pntShellRankBudget y`). -/
+theorem paley_wiener_convolution_dominates_pnt_shell_growth (y : Nat) :
+    pntShellRankBudget y ≤ convolutionDecayBudget y ∧ 1 ≤ convolutionDecayBudget y := by
+  induction y with
+  | zero => decide
+  | succ k ih =>
+    dsimp [pntShellRankBudget, convolutionDecayBudget]; omega
 
 /-- Elementary 2-line binomial square expansion `(a - b)^2 = a^2 + b^2 - 2ab`. -/
 theorem sq_sub_expand (a b : Int) :
@@ -273,15 +315,40 @@ theorem mod_q_character_orthogonality_annihilates_conductor_range
   have happ := sumSqList_append basePrimes [0]
   rw [hcond]; simp [hmod, honestConductorWeilMargin, activePrimeSchurMargin, sumSqList] at happ ⊢; omega
 
-/-- **Theorem 4 (`master_unified_first_principles_grh_pipeline_synthesis`, 5 lines)**:
+/-- **Theorem 4 (`unbaked_paley_wiener_reserve_short_last_schur_nonneg`, 5 lines)**:
+    Non-circular / un-baked Paley-Wiener reserve Schur theorem proving that the
+    independent $4^y$ archimedean budget `convolutionDecayBudget y` dominates the
+    first-principles $\chi_4(p)$ prime-shell energy `sumSqList (chi4PrimeShellWeights ...)`
+    both universally via `List.take (pntShellRankBudget y) candidates` and on explicit
+    prime shells (`activePrimeSchurMargin (convolutionDecayBudget 3 : Int) (chi4PrimeShellWeights [2,3,5,7,11,13,17,19]) = 57 >= 0`),
+    without baking `sumSqList` into the reserve argument. -/
+theorem unbaked_paley_wiener_reserve_short_last_schur_nonneg
+    (y : Nat) (candidates : List Nat) :
+    sumSqList (chi4PrimeShellWeights candidates) +
+      ((pntShellRankBudget y : Int) - (candidates.length : Int)) ≤
+      (convolutionDecayBudget y : Int) ∧
+    0 ≤ (convolutionDecayBudget y : Int) - sumSqList (chi4PrimeShellWeights candidates) +
+      ((candidates.length : Int) - (pntShellRankBudget y : Int)) ∧
+    0 ≤ activePrimeSchurMargin (convolutionDecayBudget y : Int)
+      (chi4PrimeShellWeights (List.take (pntShellRankBudget y) candidates)) ∧
+    activePrimeSchurMargin (convolutionDecayBudget 3 : Int)
+      (chi4PrimeShellWeights [2, 3, 5, 7, 11, 13, 17, 19]) = 57 := by
+  have h1 := chi4PrimeShellWeights_sumSq_le_length candidates
+  have h2 := chi4PrimeShellWeights_sumSq_le_length (List.take (pntShellRankBudget y) candidates)
+  have h3 := And.intro (paley_wiener_convolution_dominates_pnt_shell_growth y) (List.length_take_le (pntShellRankBudget y) candidates)
+  have h4 : activePrimeSchurMargin (convolutionDecayBudget 3 : Int) (chi4PrimeShellWeights [2, 3, 5, 7, 11, 13, 17, 19]) = 57 := by decide
+  dsimp [activePrimeSchurMargin] at *; omega
+
+/-- **Theorem 5 (`master_unified_first_principles_grh_pipeline_synthesis`, 5 lines)**:
     Unified end-to-end master synthesis (`GRH-WS1` through `GRH-WS7`, closing Open Issue A)
-    chaining Stage 1 (`isPrime`, `chebyshevChi4PrimeSum`, `RatInterval`), Stage 2
-    (`sobolev_coupled_collar_exact_square_completion_all_shells`), Stage 3
-    (`mod_q_character_orthogonality_annihilates_conductor_range`), and `dedekindPrimeSqSOS`
+    chaining Stage 1 (`isPrime`, `chebyshevChi4PrimeSum`, `chi4PrimeShellWeights`, `RatInterval`),
+    Stage 2 (`sobolev_coupled_collar_exact_square_completion_all_shells`), Stage 3
+    (`mod_q_character_orthogonality_annihilates_conductor_range`), the un-baked
+    Paley-Wiener $4^y$ vs. $\sum \chi_4(p)^2$ Schur reserve bound, and `dedekindPrimeSqSOS`
     in a single connected pipeline theorem. -/
 theorem master_unified_first_principles_grh_pipeline_synthesis
     (a b : RatInterval) (L R rawWeight baseArch chiP : Int)
-    (shellWeights basePrimes : List Int) (offset extraQ : Nat) :
+    (shellWeights basePrimes : List Int) (candidates : List Nat) (y offset extraQ : Nat) :
     (subSameDen a b).loNum = a.loNum - b.hiNum ∧
     (isPrime 11 = true ∧ isPrime 13 = true ∧ chebyshevChi4PrimeSum 17 = 0) ∧
     0 ≤ multiPrimeCollarQuadratic L R shellWeights + sobolevCollarEnergy L shellWeights ∧
@@ -289,11 +356,13 @@ theorem master_unified_first_principles_grh_pipeline_synthesis
     honestConductorWeilMargin baseArch basePrimes
       [modQOrthogonalWeight (2 + offset + extraQ) (2 + offset) rawWeight] =
       activePrimeSchurMargin baseArch basePrimes ∧
+    0 ≤ activePrimeSchurMargin (convolutionDecayBudget y : Int)
+      (chi4PrimeShellWeights (List.take (pntShellRankBudget y) candidates)) ∧
     3 ≤ dedekindPrimeSqSOS chiP := by
   have h1 := first_principles_primality_sigma_and_chebyshev_chi4_bounded
   have h2 := sobolev_coupled_collar_exact_square_completion_all_shells L R shellWeights
   have h3 := mod_q_character_orthogonality_annihilates_conductor_range offset extraQ rawWeight baseArch basePrimes
-  have hded : 3 ≤ dedekindPrimeSqSOS chiP := by have hsq := sq_nonneg (2 * chiP + 1); dsimp [dedekindPrimeSqSOS]; omega
-  exact ⟨rfl, ⟨h1.2.1.2.2.2.2.2.2.2.1, h1.2.1.2.2.2.2.2.2.2.2, h1.2.2.1.2.2.2.2⟩, h2.2.1, h3.2.1, h3.2.2, hded⟩
+  have h4 := unbaked_paley_wiener_reserve_short_last_schur_nonneg y candidates
+  exact ⟨rfl, ⟨h1.2.1.2.2.2.2.2.2.2.1, h1.2.1.2.2.2.2.2.2.2.2, h1.2.2.1.2.2.2.2⟩, h2.2.1, h3.2.1, h3.2.2, h4.2.2.1, by have hsq := sq_nonneg (2 * chiP + 1); dsimp [dedekindPrimeSqSOS]; omega⟩
 
 end GrhUnifiedFirstPrinciplesPipeline

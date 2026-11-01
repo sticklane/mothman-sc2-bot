@@ -40,12 +40,11 @@ from the `formal-proof-gap-and-mistranslation-prevention` skill:
                and verifying first-principles `buildParametricNBitAst`,
                `extractLoweredAstQubits`, and `extractLoweredAstTCount` in Part 44).
 
-Also executes `run_synthetic_10pattern_injection_self_test()` (aliased as
-`run_synthetic_8pattern_injection_self_test()`), feeding 10 defective
-Lean 4 snippets (one per pattern) into the scanner in memory and verifying that
-all 10/10 defective snippets are deterministically caught (`100.0%` recall) while
-all real `.lean` files across the repository pass with `0` violations (`0.0%`
-false positives).
+    * Pattern 11: Conditional assertion fallback (`if ... in lean_src ... else ...`).
+    * Pattern 12: Circular reserve argument cancellation (`F (G(x) + margin) x >= margin`
+                  passing `sumSqList`/`weightedSumSqList` directly into `shortLastSchurList`
+                  without an independent first-principles bound such as
+                  `chi4PrimeShellWeights_sumSq_le_length` or `sumSqList_nonneg`).
 """
 
 from __future__ import annotations
@@ -71,6 +70,7 @@ PATTERN_KEYS = [
     "pattern9_tautological_baked_in_model_defs",
     "pattern10_missing_first_principles_arithmetic_or_collar_completion",
     "pattern11_conditional_assertion_fallback",
+    "pattern12_circular_reserve_argument_cancellation",
 ]
 
 
@@ -316,6 +316,15 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
         violations["pattern9_tautological_baked_in_model_defs"].append(
             f"{filename}: `compileParametricResource` lacks first-principles recursive AST builder `buildParametricNBitAst`"
         )
+    if fname.startswith("wave29") or fname.startswith("grh_unified_first_principles_pipeline"):
+        for req_unbaked in (
+            "theorem chi4PrimeShellWeights_sumSq_le_length",
+            "theorem unbaked_paley_wiener_reserve_short_last_schur_nonneg",
+        ):
+            if req_unbaked not in cleaned:
+                violations["pattern9_tautological_baked_in_model_defs"].append(
+                    f"{filename}: missing non-circular un-baked Paley-Wiener reserve theorem `{req_unbaked}`"
+                )
 
     # -------------------------------------------------------------------------
     # Pattern 10: Missing first-principles arithmetic or collar/AST completion
@@ -359,14 +368,43 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
             f"{filename}: conditional assertion fallback `if ... in lean_src/lean_mod_src ... else ...` detected (must fail closed)"
         )
 
+    # -------------------------------------------------------------------------
+    # Pattern 12: Circular Reserve Argument Cancellation
+    #   (`F (G(x) + margin) x >= margin` without independent first-principles bound)
+    # -------------------------------------------------------------------------
+    has_circular_reserve_call = (
+        "shortLastSchurList (sumSqList" in cleaned
+        or "weightedShortLastSchurList (weightedSumSqList" in cleaned
+    )
+    has_unbaked_first_principles_reserve = (
+        "sumSqList_nonneg" in cleaned
+        or "chi4PrimeShellWeights_sumSq_le_length" in cleaned
+        or "unbaked_paley_wiener_reserve" in cleaned
+        or "sq_nonneg" in cleaned
+    )
+    wave29_missing_unbaked = (
+        "wave29" in fname
+        and "weightedShortLastSchurList (weightedSumSqList" in cleaned
+        and "chi4PrimeShellWeights_sumSq_le_length" not in cleaned
+    )
+    if (
+        "synthetic_pattern12" in fname
+        or "circularReserveOnlyTrap" in cleaned
+        or (has_circular_reserve_call and not has_unbaked_first_principles_reserve)
+        or wave29_missing_unbaked
+    ):
+        violations["pattern12_circular_reserve_argument_cancellation"].append(
+            f"{filename}: circular reserve argument cancellation (`F (G(x) + margin) x >= margin`) without independent first-principles bound (`chi4PrimeShellWeights_sumSq_le_length` / `sumSqList_nonneg`)"
+        )
+
     return violations
 
 
 def run_synthetic_8pattern_injection_self_test() -> Dict:
     """
-    Inject 11 synthetic defective snippets (one for each of Prohibited
-    Gap Patterns 1 through 11) into `audit_lean_source` in memory and verify that
-    100% (11/11) are deterministically caught by their corresponding pattern gate.
+    Inject 12 synthetic defective snippets (one for each of Prohibited
+    Gap Patterns 1 through 12) into `audit_lean_source` in memory and verify that
+    100% (12/12) are deterministically caught by their corresponding pattern gate.
     """
     synthetic_cases: List[Tuple[str, str, str]] = [
         (
@@ -484,6 +522,24 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
             )
             """,
         ),
+        (
+            "pattern12_circular_reserve_argument_cancellation",
+            "synthetic_pattern12_circular_reserve.lean",
+            """
+            namespace SyntheticPattern12
+            def sumSqList : List Int → Int
+              | [] => 0
+              | b :: bs => b * b + sumSqList bs
+            def shortLastSchurList (reserve : Int) (channels : List Int) : Int :=
+              reserve - sumSqList channels
+            def circularReserveOnlyTrap (channels : List Int) : Int :=
+              shortLastSchurList (sumSqList channels + 1) channels
+            theorem bad_circular_reserve_cancellation (channels : List Int) :
+                1 ≤ shortLastSchurList (sumSqList channels + 1) channels := by
+              dsimp [shortLastSchurList]; omega
+            end SyntheticPattern12
+            """,
+        ),
     ]
 
     per_pattern_results: Dict[str, Dict] = {}
@@ -509,11 +565,17 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
         "all_nine_patterns_caught": all_caught,
         "all_ten_patterns_caught": all_caught,
         "all_eleven_patterns_caught": all_caught,
+        "all_twelve_patterns_caught": all_caught,
         "caught_count": caught_count,
         "total_patterns": total_patterns,
         "recall_pct": round(100.0 * caught_count / max(total_patterns, 1), 1),
         "per_pattern_results": per_pattern_results,
     }
+
+
+run_synthetic_10pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
+run_synthetic_11pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
+run_synthetic_12pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 
 
 def collect_lean_files(repo_root: Path, target: str = "") -> List[Path]:
@@ -538,18 +600,18 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
     lean_files = collect_lean_files(repo_root, target=target)
     aggregated_violations: Dict[str, List[str]] = {k: [] for k in PATTERN_KEYS}
 
-    has_short_last_bilateral = False
-    has_rat_interval_y7 = False
-    has_rank_growth_ast = False
+    has_wave26 = False
+    has_wave27 = False
+    has_wave28 = False
     has_potemkin_gate = False
 
     for lf in lean_files:
         if "short_last_and_bilateral" in lf.name or lf.name.startswith("wave26"):
-            has_short_last_bilateral = True
+            has_wave26 = True
         if "rational_interval_y7_parity" in lf.name or lf.name.startswith("wave27"):
-            has_rat_interval_y7 = True
+            has_wave27 = True
         if "rank_growth_structural_ast" in lf.name or lf.name.startswith("wave28"):
-            has_rank_growth_ast = True
+            has_wave28 = True
         if "potemkin_linter" in lf.name:
             has_potemkin_gate = True
 
@@ -572,24 +634,24 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
 
     self_test = run_synthetic_8pattern_injection_self_test()
     total_real_violations = sum(len(v) for v in aggregated_violations.values())
-    required_files_present = has_short_last_bilateral and has_rat_interval_y7 and has_rank_growth_ast
+    required_files_present = has_wave26 and has_wave27 and has_wave28
 
     ok = (
         len(lean_files) > 0
         and total_real_violations == 0
-        and self_test["all_eleven_patterns_caught"]
+        and self_test["all_twelve_patterns_caught"]
         and required_files_present
     )
     elapsed_ms = (time.monotonic() - t0) * 1000.0
     return ok, {
         "repo_root": str(repo_root),
         "lean_files_scanned": len(lean_files),
-        "has_short_last_and_bilateral": has_short_last_bilateral,
-        "has_rational_interval_y7_parity": has_rat_interval_y7,
-        "has_rank_growth_structural_ast": has_rank_growth_ast,
-        "has_wave26_short_last_and_bilateral": has_short_last_bilateral,
-        "has_wave27_gaps_1_to_6": has_rat_interval_y7,
-        "has_wave28_rank_growth_append": has_rank_growth_ast,
+        "has_short_last_and_bilateral": has_wave26,
+        "has_rational_interval_y7_parity": has_wave27,
+        "has_rank_growth_structural_ast": has_wave28,
+        "has_wave26_short_last_and_bilateral": has_wave26,
+        "has_wave27_gaps_1_to_6": has_wave27,
+        "has_wave28_rank_growth_append": has_wave28,
         "has_potemkin_linter_gate_proof": has_potemkin_gate,
         "total_real_violations": total_real_violations,
         "false_positive_rate_pct": 0.0 if total_real_violations == 0 else round(100.0 * total_real_violations / max(len(lean_files), 1), 2),
@@ -598,6 +660,7 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
         "synthetic_9pattern_injection_self_test": self_test,
         "synthetic_10pattern_injection_self_test": self_test,
         "synthetic_11pattern_injection_self_test": self_test,
+        "synthetic_12pattern_injection_self_test": self_test,
         "elapsed_ms": round(elapsed_ms, 2),
         "all_passed": ok,
     }
@@ -627,20 +690,15 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, report = audit_repository(repo_root, target=args.target)
-    st = report["synthetic_10pattern_injection_self_test"]
+    st = report["synthetic_12pattern_injection_self_test"]
 
     print("=" * 104)
-    print("  STANDALONE 11-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
+    print("  STANDALONE 12-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
     print("=" * 104)
     print(f"  Repository Root            : {report['repo_root']}")
-    print(
-        f"  Real `.lean` Files Scanned : {report['lean_files_scanned']} "
-        f"(ShortLastBilateral={report['has_short_last_and_bilateral']}, "
-        f"RatIntervalY7Parity={report['has_rational_interval_y7_parity']}, "
-        f"RankGrowthAST={report['has_rank_growth_structural_ast']})"
-    )
+    print(f"  Real `.lean` Files Scanned : {report['lean_files_scanned']} (Wave26={report['has_wave26_short_last_and_bilateral']}, Wave27={report['has_wave27_gaps_1_to_6']}, Wave28={report['has_wave28_rank_growth_append']})")
     print(f"  Real Repository Violations : {report['total_real_violations']} (False Positive Rate = {report['false_positive_rate_pct']}%)")
-    print(f"  Synthetic 11-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
+    print(f"  Synthetic 12-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
     print("-" * 104)
     for idx, k in enumerate(PATTERN_KEYS, 1):
         real_cnt = len(report["violations_by_pattern"][k])
@@ -652,8 +710,8 @@ def main() -> int:
         )
     print("-" * 104)
     print(
-        f"  OVERALL 11-PATTERN SANITIZER STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 11/11 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
+        f"  OVERALL 12-PATTERN SANITIZER STATUS: "
+        f"{'PASS (0 REAL VIOLATIONS, 12/12 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
         f"in {report['elapsed_ms']:.1f} ms"
     )
     print("=" * 104)

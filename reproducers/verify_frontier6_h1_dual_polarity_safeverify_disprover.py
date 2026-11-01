@@ -498,6 +498,76 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         }
     )
 
+    # Case 13: Category 7 — FRACTRAN multi-prime 2-adic causal horizon & 0-ancilla reversibility over-generalization
+    def fractran_step(n: int, fractions: List[Tuple[int, int]]) -> Tuple[int, Tuple[int, int]]:
+        for num, den in fractions:
+            if (n * num) % den == 0:
+                return (n * num) // den, (num, den)
+        return n, (1, 1)
+
+    # Positive witness: single-prime p=2 unimodular `divsteps` (`denom_primes == {2}`)
+    # (f1, g1) = (3, 2) == (7, 6) = (f2, g2) mod 4 share identical 2-bit 2-adic parity (g even -> halve g)
+    pos_denom_primes_c13 = {2}
+    c13_pos_p = pos_denom_primes_c13 == {2}
+    c13_pos_q = ((3 % 4 == 7 % 4) and (2 % 4 == 6 % 4) and ((2 % 2) == (6 % 2) == 0))
+
+    # Negative counterexample: multi-prime FRACTRAN (`denom_primes == {2, 3}`)
+    # 1) 2-adic horizon failure: N1=2 and N2=6 satisfy 2 == 6 (mod 4) and v_2(2)=v_2(6)=1,
+    #    yet under [(1, 3), (3, 2)], 6 -> 2 (selects 1/3) while 2 -> 3 (selects 3/2).
+    # 2) 0-ancilla reversibility failure: under [(3, 2), (1, 3)], distinct states N1=2 -> 3 and N2=9 -> 3 merge!
+    neg_denom_primes_c13 = {2, 3}
+    c13_neg_p = neg_denom_primes_c13 == {2}
+    n1_hor, frac1_hor = fractran_step(2, [(1, 3), (3, 2)])
+    n2_hor, frac2_hor = fractran_step(6, [(1, 3), (3, 2)])
+    two_adic_horizon_holds = (2 % 4 == 6 % 4) and (frac1_hor == frac2_hor)
+    n1_merge, _ = fractran_step(2, [(3, 2), (1, 3)])
+    n2_merge, _ = fractran_step(9, [(3, 2), (1, 3)])
+    zero_ancilla_injective = (2 != 9) and (n1_merge != n2_merge)
+    c13_neg_q = bool(two_adic_horizon_holds and zero_ancilla_injective)
+    c13_caught = verify_dual_polarity_implication_witness(c13_pos_p, c13_pos_q, c13_neg_p, c13_neg_q)
+    cases.append(
+        {
+            "case_id": 13,
+            "category": "fractran_multiprime_2adic_horizon_and_reversibility_overgeneralization",
+            "conjecture_label": "Over-generalized 2-adic `mod 2^k` causal horizon & `0`-ancilla reversibility on multi-prime FRACTRAN without single-prime (`p = 2`) restriction",
+            "positive_witness": f"Single-prime p=2 divsteps: (3,2)==(7,6) mod 4 (P={c13_pos_p}, Q={c13_pos_q}: identical 2-adic parity & unimodular bijection)",
+            "negative_disproof_witness": f"Multi-prime p in {{2,3}} FRACTRAN: 2==6 mod 4 yet 6->2 (via 1/3) != 2->3 (via 3/2), and 2->3 == 9->3 state merge (P={c13_neg_p}, Q={c13_neg_q})",
+            "disproved_and_dual_polarity_verified": c13_caught,
+        }
+    )
+
+    # Case 14: Category 8 — Circular Schur reserve cancellation (`Pattern 12`) vs un-baked fixed reserve `4^y` on FRACTRAN spike `[9]`
+    def sum_sq_list(xs: List[int]) -> int:
+        return sum(x * x for x in xs)
+
+    def short_last_schur_list(reserve: int, xs: List[int]) -> int:
+        return reserve - sum_sq_list(xs)
+
+    y_shell = 2
+    r_arch_fixed = 4 ** y_shell  # 16
+    xs_pos_chi4 = [-1, 1, -1, 1]
+    xs_neg_fractran_spike = [9]
+
+    c14_pos_p = all(w * w <= 1 for w in xs_pos_chi4) and len(xs_pos_chi4) < r_arch_fixed
+    c14_pos_q = short_last_schur_list(r_arch_fixed, xs_pos_chi4) >= 1
+    c14_neg_p = all(w * w <= 1 for w in xs_neg_fractran_spike) and len(xs_neg_fractran_spike) < r_arch_fixed
+    c14_neg_q = short_last_schur_list(r_arch_fixed, xs_neg_fractran_spike) >= 1
+    circular_trap_falsely_passes = short_last_schur_list(sum_sq_list(xs_neg_fractran_spike) + 1, xs_neg_fractran_spike) >= 1
+    c14_caught = bool(
+        circular_trap_falsely_passes
+        and verify_dual_polarity_implication_witness(c14_pos_p, c14_pos_q, c14_neg_p, c14_neg_q)
+    )
+    cases.append(
+        {
+            "case_id": 14,
+            "category": "circular_schur_reserve_diverging_fractran_channel_evasion",
+            "conjecture_label": "Circular Schur reserve `shortLastSchurList (sumSqList xs + 1) xs >= 1` (`Pattern 12`) disproved against un-baked `R_arch = 4^y = 16` on FRACTRAN spike `xs = [9]`",
+            "positive_witness": f"chi4PrimeShellWeights(2) = {xs_pos_chi4} at R_arch=16 (P={c14_pos_p}, Q={c14_pos_q}: 16 - 4 = 12 >= 1)",
+            "negative_disproof_witness": f"Unconstrained FRACTRAN spike xs = {xs_neg_fractran_spike} at R_arch=16 (P={c14_neg_p}, Q={c14_neg_q}: 16 - 81 = -65 < 1, whereas circular reserve falsely gives +1)",
+            "disproved_and_dual_polarity_verified": c14_caught,
+        }
+    )
+
     caught_count = sum(1 for c in cases if c["disproved_and_dual_polarity_verified"])
     total_cases = len(cases)
     return {
@@ -505,8 +575,12 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         "caught_count": caught_count,
         "recall_pct": round(100.0 * caught_count / max(total_cases, 1), 1),
         "all_12_cases_caught": caught_count == total_cases,
+        "all_14_cases_caught": caught_count == total_cases,
         "cases": cases,
     }
+
+
+run_14case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 
 
 def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool, Dict[str, Any]]:
@@ -586,7 +660,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         and len(all_vacuous_violations) == 0
         and len(pattern11_real_violations) == 0
         and part45_lean_verified
-        and disproof_suite["all_12_cases_caught"]
+        and disproof_suite["all_14_cases_caught"]
     )
 
     summary: Dict[str, Any] = {
@@ -601,6 +675,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         "pattern11_conditional_fallback_violations": pattern11_real_violations,
         "frontier6_lean_theorems_verified": part45_lean_verified,
         "synthetic_12case_disproof_suite": disproof_suite,
+        "synthetic_14case_disproof_suite": disproof_suite,
         "elapsed_ms": elapsed_ms,
         "all_passed": ok,
     }
@@ -625,7 +700,7 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, summary = run_frontier6_dual_polarity_safeverify_audit(repo_root)
-    suite = summary["synthetic_12case_disproof_suite"]
+    suite = summary["synthetic_14case_disproof_suite"]
 
     print("=" * 108)
     print(
@@ -643,7 +718,7 @@ def main() -> int:
     print(f"  Pattern 11 Fallback Violations        : {len(summary['pattern11_conditional_fallback_violations'])}")
     print(f"  Frontier 6 Lean Theorems Verified     : {summary['frontier6_lean_theorems_verified']}")
     print(
-        f"  12-Case Disproof Suite Recall         : "
+        f"  14-Case Disproof Suite Recall         : "
         f"{suite['caught_count']}/{suite['total_cases'] if 'total_cases' in suite else suite['total_synthetic_cases']} "
         f"({suite['recall_pct']}% disproof & non-vacuity recall)"
     )
@@ -654,7 +729,7 @@ def main() -> int:
     print("-" * 108)
     print(
         f"  OVERALL FRONTIER 6 DUAL-POLARITY SAFEVERIFY STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 12/12 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
+        f"{'PASS (0 REAL VIOLATIONS, 14/14 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
         f"in {summary['elapsed_ms']:.1f} ms"
     )
     print("=" * 108)

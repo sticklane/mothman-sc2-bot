@@ -36,7 +36,8 @@ BASE_ENV = os.environ.copy()
 BASE_ENV["TMPDIR"] = str(BUILD_CACHE)
 
 LEAN_ENV = BASE_ENV.copy()
-LEAN_ENV["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
+if Path("/home/antigravity/toolchains/fix_proc_exe.so").exists():
+    LEAN_ENV["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
 
 
 def run_suite_1_z3_xls() -> dict:
@@ -88,12 +89,34 @@ def run_suite_2_paley_wiener_vs_pnt_audit() -> dict:
             ]
             max_lines = max(max_lines, len(body_lines))
 
-    # Verify dyadic shell hierarchy y in 0..15 and weighted prime-shell identities
+    # Verify dyadic shell hierarchy y in 0..15, weighted prime-shell identities,
+    # and un-baked chi4PrimeShellWeights Schur reserve
+    def is_prime_py(n: int) -> bool:
+        return n >= 2 and sum(d for d in range(1, n + 1) if n % d == 0) == n + 1
+
+    def chi4_prime_weight_py(n: int) -> int:
+        if not is_prime_py(n) or n % 2 == 0:
+            return 0
+        return 1 if (n % 4 == 1) else -1
+
+    eight_primes = [2, 3, 5, 7, 11, 13, 17, 19]
+    unbaked_y3_weights = [chi4_prime_weight_py(p) for p in eight_primes]
+    unbaked_y3_schur = (1 << (2 * 3)) - sum(w * w for w in unbaked_y3_weights)
+    assert unbaked_y3_schur == 57
+
+    has_unbaked_thm = (
+        "theorem unbaked_paley_wiener_reserve_short_last_schur_nonneg" in code_no_block_comments
+        and "theorem chi4PrimeShellWeights_sumSq_le_length" in code_no_block_comments
+    )
+
     shells_verified = 0
     for y in range(16):
         pnt_b = 1 << y
         conv_b = 1 << (2 * y)
         assert 1 <= pnt_b <= conv_b
+        cand_slice = list(range(2, 2 + min(pnt_b, 32)))
+        cand_sq = sum(chi4_prime_weight_py(n) ** 2 for n in cand_slice)
+        assert 0 <= cand_sq <= len(cand_slice) <= pnt_b <= conv_b
         for w in (1, 2, 4, 8):
             for l1 in ([2, 1], [3, 2, 1]):
                 for l2 in ([2, 2], [4, 1, 1]):
@@ -109,12 +132,16 @@ def run_suite_2_paley_wiener_vs_pnt_audit() -> dict:
             uninterpreted_hyps == 0
             and parameterless_int_defs == 0
             and max_lines <= 5
+            and len(thm_blocks) == 9
+            and has_unbaked_thm
+            and unbaked_y3_schur == 57
             and shells_verified == 256
         ) else "FAIL",
         "theorem_count": len(thm_blocks),
         "max_proof_lines": max_lines,
         "uninterpreted_inequality_hypotheses": uninterpreted_hyps,
         "parameterless_scalar_int_defs_waves_26_to_29": parameterless_int_defs,
+        "unbaked_y3_prime_shell_schur_margin": unbaked_y3_schur,
         "dyadic_shells_verified": shells_verified,
     }
 
@@ -245,10 +272,15 @@ def run_suite_4_lean() -> dict:
 
 
 def main() -> None:
-    s1 = run_suite_1_z3_xls()
-    s2 = run_suite_2_paley_wiener_vs_pnt_audit()
-    s3 = run_suite_3_avx2_fuzzer()
-    s4 = run_suite_4_lean()
+    import shutil
+    BUILD_CACHE.mkdir(parents=True, exist_ok=True)
+    try:
+        s1 = run_suite_1_z3_xls()
+        s2 = run_suite_2_paley_wiener_vs_pnt_audit()
+        s3 = run_suite_3_avx2_fuzzer()
+        s4 = run_suite_4_lean()
+    finally:
+        shutil.rmtree(BUILD_CACHE, ignore_errors=True)
     overall = "PASS" if all(s["status"] == "PASS" for s in (s1, s2, s3, s4)) else "FAIL"
     report = {
         "wave": "Wave 29: Smooth-Test Paley-Wiener Convolution Decay vs. PNT New-Prime Rank-Growth Balance",
