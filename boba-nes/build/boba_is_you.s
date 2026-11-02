@@ -37,14 +37,50 @@ boot_pal_loop:
   INX
   CPX #$20
   BNE boot_pal_loop
+  BIT $2002
+  LDA #$20
+  STA $2006
+  LDA #$00
+  STA $2006
+  LDX #$40
+  LDA #$00
+clear_hud_nt_loop:
+  STA $2007
+  DEX
+  BNE clear_hud_nt_loop
+  LDY #$03
+  LDA #$08
+fill_grid_pages:
+  LDX #$00
+fill_grid_inner:
+  STA $2007
+  INX
+  BNE fill_grid_inner
+  DEY
+  BNE fill_grid_pages
+  LDX #$80
+fill_grid_rem:
+  STA $2007
+  DEX
+  BNE fill_grid_rem
+  LDX #$40
+  LDA #$00
+clear_attr_loop:
+  STA $2007
+  DEX
+  BNE clear_attr_loop
   JSR load_current_stage
   JSR scan_boba_rules
   JSR pack_oam_sprites
+  LDA #$00
+  STA $2003
+  LDA #$02
+  STA $4014
   BIT $2002
   LDA #$00
   STA $2005
   STA $2005
-  LDA #$88
+  LDA #$80
   STA $2000
   LDA #$1e
   STA $2001
@@ -81,7 +117,7 @@ nmi_handler:
   LDA $25
   STA $2007
   BIT $2002
-  LDA #$88
+  LDA #$80
   STA $2000
   LDA $1a
   STA $2005
@@ -396,7 +432,7 @@ shift_back_loop:
   ASL A
   ASL A
   CLC
-  ADC #$10
+  ADC #$14
   STA $17
   LDA #$0c
   STA $18
@@ -441,6 +477,7 @@ trigger_stage_win:
   LDA #$01
   STA $14
   RTS
+  .align 256
 pack_oam_sprites:
   LDA #$f8
   LDX #$00
@@ -453,17 +490,26 @@ clear_oam_loop:
   BNE clear_oam_loop
   LDA #$00
   STA $1c
-  LDA $18
+  LDA $14
   BEQ oam_scan_board
-  DEC $18
   LDY $1c
-  LDA $17
+  LDA $1d
+  AND #$f0
+  CLC
+  ADC #$0c
   STA $0200, Y
-  LDA #$06
+  LDA #$07
   STA $0201, Y
   LDA #$02
   STA $0202, Y
-  LDA $16
+  LDA $1d
+  AND #$0f
+  ASL A
+  ASL A
+  ASL A
+  ASL A
+  CLC
+  ADC #$04
   STA $0203, Y
   TYA
   CLC
@@ -476,28 +522,41 @@ oam_board_loop:
   BEQ oam_board_next
   STA $33
   LDY $1c
-  CPY #$f8
-  BCS oam_pack_done
+  CPY #$f4
+  BCS check_dust_oam
   TXA
   AND #$f0
   CLC
-  ADC #$10
+  ADC #$14
+  STA $34
   STA $0200, Y
+  STA $0204, Y
   LDA $33
   STA $0201, Y
+  ORA #$40
+  STA $0205, Y
+  LDA $33
   CMP #$20
-  BCS oam_pal_verb
+  BCS oam_pal_2
+  CMP #$18
+  BEQ oam_pal_3
   CMP #$10
-  BCS oam_pal_noun
+  BCS oam_pal_1
+  CMP #$04
+  BCS oam_pal_3
   LDA #$00
   JMP oam_store_attr
-oam_pal_noun:
+oam_pal_1:
   LDA #$01
   JMP oam_store_attr
-oam_pal_verb:
+oam_pal_2:
   LDA #$02
+  JMP oam_store_attr
+oam_pal_3:
+  LDA #$03
 oam_store_attr:
   STA $0202, Y
+  STA $0206, Y
   TXA
   AND #$0f
   ASL A
@@ -505,31 +564,53 @@ oam_store_attr:
   ASL A
   ASL A
   STA $0203, Y
+  CLC
+  ADC #$08
+  STA $0207, Y
   TYA
   CLC
-  ADC #$04
+  ADC #$08
   STA $1c
 oam_board_next:
   INX
   CPX #$e0
   BNE oam_board_loop
+check_dust_oam:
+  LDA $18
+  BEQ oam_pack_done
+  DEC $18
+  LDY $1c
+  CPY #$fc
+  BCS oam_pack_done
+  LDA $17
+  STA $0200, Y
+  LDA #$06
+  STA $0201, Y
+  LDA #$00
+  STA $0202, Y
+  LDA $16
+  STA $0203, Y
+  TYA
+  CLC
+  ADC #$04
+  STA $1c
 oam_pack_done:
   RTS
   .align 256
 bitmask_table:
   .byte $01, $02, $04, $08, $10, $20, $40, $80
 palette_rom_table:
-  .byte $0f, $30, $16, $27, $0f, $2a, $1a, $0a, $0f, $21, $11, $31, $0f, $28, $18, $08, $0f, $30, $27, $16, $0f, $30, $2a, $1a, $0f, $30, $28, $12, $0f, $30, $15, $05
+  .byte $0f, $01, $21, $30, $0f, $2a, $1a, $0a, $0f, $21, $11, $31, $0f, $28, $18, $08, $0f, $37, $27, $07, $0f, $0c, $2c, $30, $0f, $04, $28, $30, $0f, $00, $16, $30
 stage_1_data:
-  .byte $a2, $11, $a3, $18, $a4, $21, $82, $14, $83, $18, $84, $24, $65, $04, $66, $04, $67, $04, $68, $04, $69, $04, $35, $12, $36, $18, $38, $28, $3a, $02, $87, $01, $ff
+  .byte $a2, $11, $a3, $18, $a4, $21, $82, $14, $83, $18, $84, $24, $65, $04, $66, $04, $67, $04, $68, $04, $35, $12, $36, $18, $38, $28, $3a, $02, $87, $01, $ff
 stage_2_data:
   .byte $a2, $14, $a3, $18, $a4, $21, $82, $12, $83, $18, $84, $24, $66, $02, $67, $02, $68, $02, $35, $12, $36, $18, $38, $28, $87, $04, $ff
 stage_3_data:
-  .byte $11, $11, $12, $18, $13, $21, $21, $12, $22, $18, $23, $28, $31, $13, $32, $18, $33, $22, $2b, $15, $2c, $18, $2d, $30, $85, $05, $87, $05, $86, $03, $76, $03, $96, $01, $5a, $02, $ff
+  .byte $11, $11, $12, $18, $13, $21, $21, $12, $22, $18, $23, $28, $31, $13, $32, $18, $33, $22, $1c, $15, $2c, $18, $3c, $30, $85, $05, $87, $05, $86, $03, $76, $03, $96, $01, $5a, $02, $ff
 stage_4_data:
   .byte $55, $11, $56, $18, $57, $21, $46, $12, $76, $28, $86, $01, $5b, $02, $ff
 stage_5_data:
-  .byte $11, $11, $12, $18, $13, $21, $21, $12, $22, $18, $23, $28, $55, $14, $56, $18, $58, $11, $59, $01, $5b, $04, $5c, $02, $ff
+  .byte $11, $11, $12, $18, $13, $21, $21, $12, $22, $18, $23, $28, $55, $14, $56, $18, $58, $11, $59, $01, $88, $04, $8b, $02, $ff
 stage_ptr_lo:
   .byte <(stage_1_data), <(stage_2_data), <(stage_3_data), <(stage_4_data), <(stage_5_data)
 stage_ptr_hi:

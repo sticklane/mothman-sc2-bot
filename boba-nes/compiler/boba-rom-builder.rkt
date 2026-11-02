@@ -8,6 +8,7 @@
 (require racket/match
          racket/list
          racket/format
+         racket/string
          "graded-typechecker.rkt"
          "diagnostics.rkt"
          "mos6502-assembler.rkt")
@@ -104,7 +105,7 @@
 ;; 2. Zero-Page ($0010..$003F) & BSS Work RAM ($0300..$04FF) Memory Map
 ;; ============================================================================
 
-;; Permanent Zero-Page State ($10..$27 = 24 bytes)
+;; Permanent Zero-Page State ($10..$27)
 (define ZP-JOY-CUR      #x10) ; Current frame controller 1 bits
 (define ZP-JOY-PREV     #x11) ; Previous frame controller 1 bits
 (define ZP-JOY-PRESSED  #x12) ; Newly pressed buttons (cur & ~prev)
@@ -114,15 +115,14 @@
 (define ZP-DUST-X       #x16) ; Last YOU step X for dust trail sprite
 (define ZP-DUST-Y       #x17) ; Last YOU step Y for dust trail sprite
 (define ZP-DUST-TIMER   #x18) ; Frames remaining for dust particle
-(define ZP-FRAME-TICK   #x19) ; Global frame counter (for sparkle & OAM mux)
+(define ZP-FRAME-TICK   #x19) ; Global frame counter
 (define ZP-SCROLL-X     #x1A) ; Clean PPU X scroll (0)
 (define ZP-SCROLL-Y     #x1B) ; Clean PPU Y scroll (0)
 (define ZP-OAM-OFFSET   #x1C) ; Current OAM byte index during sprite packing
 (define ZP-YOU-POS      #x1D) ; Cached board cell index of primary YOU actor
-(define ZP-WIN-POS      #x1E) ; Cached board cell index of primary WIN object
+(define ZP-WIN-POS      #x1E) ; VBlank synchronization flag
 
 ;; Active Rule Table ($20..$25): 6 bytes indexed by OBJ-* (0..5)
-;; Each byte holds bitwise OR of RULE-YOU, RULE-PUSH, RULE-STOP, RULE-WIN, RULE-DEFEAT
 (define ZP-RULES-BASE   #x20)
 (define ZP-RULE-BOBA    #x21)
 (define ZP-RULE-FLAG    #x22)
@@ -130,31 +130,83 @@
 (define ZP-RULE-WALL    #x24)
 (define ZP-RULE-SKULL   #x25)
 
-;; Recycled High-Watermark Zero-Page Scratch Pool ($30..$37 = 8 bytes shared
-;; across sequential phases: poll-joypad -> scan-rules -> push-solver -> pack-oam)
-(define ZP-SCRATCH-0    #x30) ; Ptr lo / step delta / temp A
-(define ZP-SCRATCH-1    #x31) ; Ptr hi / target pos / temp B
-(define ZP-SCRATCH-2    #x32) ; Chain end pos / subject noun ID
-(define ZP-SCRATCH-3    #x33) ; Predicate tile / object mask
-(define ZP-SCRATCH-4    #x34) ; Saved X / ray cursor
-(define ZP-SCRATCH-5    #x35) ; Transform target noun ID
+;; Recycled High-Watermark Zero-Page Scratch Pool ($30..$35 = 6 bytes)
+(define ZP-SCRATCH-0    #x30)
+(define ZP-SCRATCH-1    #x31)
+(define ZP-SCRATCH-2    #x32)
+(define ZP-SCRATCH-3    #x33)
+(define ZP-SCRATCH-4    #x34)
+(define ZP-SCRATCH-5    #x35)
 
 ;; Work RAM ($0300..$04DF = 448 bytes)
-;;   $0200..$02FF : 256-byte OAM DMA shadow buffer (DmaUnique)
-;;   $0300..$03DF : 224-byte Top-Layer Board Grid (16 cols x 14 rows)
-;;   $0400..$04DF : 224-byte Under-Layer Board Grid (preserves non-STOP tiles walked over)
 (define OAM-RAM-BASE    #x0200)
 (define BOARD-RAM-BASE  #x0300)
 (define UNDER-RAM-BASE  #x0400)
 
 ;; ============================================================================
-;; 3. Custom 2bpp CHR-ROM Graphics Tiles for "Boba Is You"
+;; 3. Custom 2bpp CHR-ROM Graphics & 3x5 Word-Block Tile Generator
 ;; ============================================================================
+;; Each cell on the 16x14 grid is rendered as a 16-pixel-wide metasprite pair:
+;;   - Left 8x8 tile  : tile-id
+;;   - Right 8x8 tile : tile-id + #x40
+;; For 4-letter word blocks ("BOBA", "FLAG", "ROCK", "WALL", "SKUL", " IS ",
+;; "YOU ", "PUSH", "STOP", "WIN ", "SINK"), we synthesize crisp 3x5 pixel
+;; bitmap typography framed inside a beveled pill badge!
+
+(define FONT-3X5
+  (hash
+   #\space '("..." "..." "..." "..." "...")
+   #\A     '(".3." "3.3" "333" "3.3" "3.3")
+   #\B     '("33." "3.3" "33." "3.3" "33.")
+   #\C     '(".33" "3.." "3.." "3.." ".33")
+   #\D     '("33." "3.3" "3.3" "3.3" "33.")
+   #\E     '("333" "3.." "33." "3.." "333")
+   #\F     '("333" "3.." "33." "3.." "3..")
+   #\G     '(".33" "3.." "3.3" "3.3" ".33")
+   #\H     '("3.3" "3.3" "333" "3.3" "3.3")
+   #\I     '("333" ".3." ".3." ".3." "333")
+   #\K     '("3.3" "3.3" "33." "3.3" "3.3")
+   #\L     '("3.." "3.." "3.." "3.." "333")
+   #\N     '("3.3" "333" "333" "3.3" "3.3")
+   #\O     '(".3." "3.3" "3.3" "3.3" ".3.")
+   #\P     '("33." "3.3" "33." "3.." "3..")
+   #\R     '("33." "3.3" "33." "3.3" "3.3")
+   #\S     '(".33" "3.." ".3." "..3" "33.")
+   #\T     '("333" ".3." ".3." ".3." ".3.")
+   #\U     '("3.3" "3.3" "3.3" "3.3" "333")
+   #\W     '("3.3" "3.3" "333" "333" "3.3")
+   #\Y     '("3.3" "3.3" ".3." ".3." ".3.")))
+
+(define (make-word-tile-pair tile-id str4)
+  (define chars (string->list str4))
+  (define c1 (hash-ref FONT-3X5 (first chars)))
+  (define c2 (hash-ref FONT-3X5 (second chars)))
+  (define c3 (hash-ref FONT-3X5 (third chars)))
+  (define c4 (hash-ref FONT-3X5 (fourth chars)))
+
+  (define left-rows
+    (append
+     (list "22222222")
+     (for/list ([r (in-range 5)])
+       (string-append "1" (list-ref c1 r) "1" (list-ref c2 r)))
+     (list "11111111"
+           "22222222")))
+
+  (define right-rows
+    (append
+     (list "22222222")
+     (for/list ([r (in-range 5)])
+       (string-append "1" (list-ref c3 r) "1" (list-ref c4 r)))
+     (list "11111111"
+           "22222222")))
+
+  (list (cons tile-id left-rows)
+        (cons (bitwise-ior tile-id #x40) right-rows)))
 
 (define (build-boba-chr-rom)
-  (define tiles
+  (define base-tiles
     (list
-     ;; Tile #x00: Empty transparent/background tile
+     ;; Tile #x00: Empty transparent tile
      (cons #x00
            '("........"
              "........"
@@ -164,67 +216,112 @@
              "........"
              "........"
              "........"))
-     ;; Tile #x01: BOBA (Boba tea cup with straw & tapioca pearls!)
+     ;; Tile #x01 + #x41: 16x8 BOBA Tea Cup Character (Left & Right halves)
      (cons OBJ-BOBA
-           '("....33.."
-             "...3..3."
-             ".222222."
-             ".211112."
-             ".213132."
-             ".211312."
-             "..23132."
-             "...222.."))
-     ;; Tile #x02: FLAG (Victory pennant on pole)
-     (cons OBJ-FLAG
-           '("..3222.."
-             "..32222."
-             "..3222.."
-             "..3....."
-             "..3....."
-             "..3....."
-             ".333...."
-             "........"))
-     ;; Tile #x03: ROCK (Round tapioca boulder)
-     (cons OBJ-ROCK
-           '("..2222.."
-             ".233332."
-             "23311332"
-             "23111332"
-             "23333322"
-             "2233322."
-             ".22222.."
-             "........"))
-     ;; Tile #x04: WALL (Brick wall block)
-     (cons OBJ-WALL
-           '("33313331"
-             "33313331"
-             "11111111"
-             "31333133"
-             "31333133"
-             "11111111"
-             "33313331"
-             "33313331"))
-     ;; Tile #x05: SKULL (Hazard skull)
-     (cons OBJ-SKULL
-           '("..3333.."
-             ".333333."
-             "33.33.33"
-             "33333333"
-             ".33.3.3."
-             "..3.3.3."
+           '(".....33."
+             ".....33."
+             "..222222"
+             ".2111111"
+             ".2133113"
+             ".2133111"
+             "..213131"
+             "...22222"))
+     (cons (bitwise-ior OBJ-BOBA #x40)
+           '("33......"
              "........"
+             "222222.."
+             "1111112."
+             "1133112."
+             "1133112."
+             "311312.."
+             "22222..."))
+     ;; Tile #x02 + #x42: 16x8 FLAG (Golden Pennant Flag on Pole)
+     (cons OBJ-FLAG
+           '(".....332"
+             ".....332"
+             ".....332"
+             ".....332"
+             ".....33."
+             ".....33."
+             "...33333"
+             "..333333"))
+     (cons (bitwise-ior OBJ-FLAG #x40)
+           '("22222..."
+             "233222.."
+             "23322..."
+             "222....."
+             "........"
+             "........"
+             "33......"
+             "333....."))
+     ;; Tile #x03 + #x43: 16x8 ROCK (Tapioca Boulder)
+     (cons OBJ-ROCK
+           '("...22222"
+             "..233333"
+             ".2331133"
+             ".2311133"
+             ".2333332"
+             "..223322"
+             "...22222"
              "........"))
-     ;; Tile #x06: DUST ( Trailing movement dust puff)
+     (cons (bitwise-ior OBJ-ROCK #x40)
+           '("2222...."
+             "33332..."
+             "331332.."
+             "333332.."
+             "23322..."
+             "2222...."
+             "222....."
+             "........"))
+     ;; Tile #x04 + #x44: 16x8 WALL (Brick Wall Block)
+     (cons OBJ-WALL
+           '("33333331"
+             "22222221"
+             "11111111"
+             "22213333"
+             "22212222"
+             "11111111"
+             "33333331"
+             "22222221"))
+     (cons (bitwise-ior OBJ-WALL #x40)
+           '("33333331"
+             "22222221"
+             "11111111"
+             "33312222"
+             "22212222"
+             "11111111"
+             "33333331"
+             "22222221"))
+     ;; Tile #x05 + #x45: 16x8 SKULL (Hazard Skull)
+     (cons OBJ-SKULL
+           '("...33333"
+             "..333333"
+             ".33..333"
+             ".33..333"
+             ".333333."
+             "..33.33."
+             "...3.3.."
+             "........"))
+     (cons (bitwise-ior OBJ-SKULL #x40)
+           '("3333...."
+             "33333..."
+             "33..33.."
+             "33..33.."
+             ".33333.."
+             ".33.33.."
+             "..3.3..."
+             "........"))
+     ;; Tile #x06: DUST particle
      (cons #x06
            '("........"
-             "..1..1.."
-             ".121121."
-             "..1221.."
-             ".121121."
-             "..1..1.."
+             "..2..2.."
+             ".232232."
+             "..2332.."
+             ".232232."
+             "..2..2.."
              "........"
              "........"))
-     ;; Tile #x07: SPARKLE (Victory shimmer star)
+     ;; Tile #x07: SPARKLE star
      (cons #x07
            '("...3...."
              "...3...."
@@ -234,134 +331,41 @@
              "...3...."
              "...3...."
              "........"))
-     ;; Tile #x11: TXT_BOBA ("BOBA" noun block)
-     (cons TXT-BOBA
-           '("33333333"
-             "3.22.223"
-             "3.23.2.3"
-             "3.22.223"
-             "3.23.2.3"
-             "3.22.2.3"
-             "3......3"
-             "33333333"))
-     ;; Tile #x12: TXT_FLAG ("FLAG" noun block)
-     (cons TXT-FLAG
-           '("33333333"
-             "3.222.23"
-             "3.2...23"
-             "3.22..23"
-             "3.2...23"
-             "3.2..223"
-             "3......3"
-             "33333333"))
-     ;; Tile #x13: TXT_ROCK ("ROCK" noun block)
-     (cons TXT-ROCK
-           '("33333333"
-             "3.22.223"
-             "3.23.2.3"
-             "3.22.2.3"
-             "3.23.2.3"
-             "3.23.223"
-             "3......3"
-             "33333333"))
-     ;; Tile #x14: TXT_WALL ("WALL" noun block)
-     (cons TXT-WALL
-           '("33333333"
-             "32...2.3"
-             "32.2.2.3"
-             "32.2.2.3"
-             "322222.3"
-             "3.2.2..3"
-             "3......3"
-             "33333333"))
-     ;; Tile #x15: TXT_SKULL ("SKUL" noun block)
-     (cons TXT-SKULL
-           '("33333333"
-             "3.222.23"
-             "3.2...23"
-             "3.222.23"
-             "3...2.23"
-             "3.222.23"
-             "3......3"
-             "33333333"))
-     ;; Tile #x18: TXT_IS ("IS" connector block)
-     (cons TXT-IS
+     ;; Tile #x08: Playfield background grid cell border (Nametable floor tile)
+     (cons #x08
            '("11111111"
-             "1..3.331"
-             "1..3.3.1"
-             "1..3.331"
-             "1..3..31"
-             "1..3.331"
-             "1......1"
-             "11111111"))
-     ;; Tile #x21: TXT_YOU ("YOU" property block)
-     (cons TXT-YOU
-           '("22222222"
-             "23.3.332"
-             "23.3.3.2"
-             "2.3..3.2"
-             "2.3..3.2"
-             "2.3..332"
-             "2......2"
-             "22222222"))
-     ;; Tile #x22: TXT_PUSH ("PUSH" property block)
-     (cons TXT-PUSH
-           '("22222222"
-             "233..332"
-             "23.3.3.2"
-             "233..332"
-             "23....32"
-             "23...332"
-             "2......2"
-             "22222222"))
-     ;; Tile #x24: TXT_STOP ("STOP" property block)
-     (cons TXT-STOP
-           '("22222222"
-             "2.33.332"
-             "2.3...32"
-             "2.33..32"
-             "2..3..32"
-             "2.33..32"
-             "2......2"
-             "22222222"))
-     ;; Tile #x28: TXT_WIN ("WIN" property block)
-     (cons TXT-WIN
-           '("22222222"
-             "23...3.2"
-             "23.3.3.2"
-             "23.3.3.2"
-             "233333.2"
-             "2.3.3..2"
-             "2......2"
-             "22222222"))
-     ;; Tile #x30: TXT_DEFEAT ("SINK" / "DEAD" property block)
-     (cons TXT-DEFEAT
-           '("22222222"
-             "23..3.32"
-             "233.3.32"
-             "23.33.32"
-             "23..3.32"
-             "23..3.32"
-             "2......2"
-             "22222222"))))
-  (build-chr-rom tiles))
+             "1......."
+             "1......."
+             "1......."
+             "1......."
+             "1......."
+             "1......."
+             "1......."))))
+
+  (define word-tiles
+    (append
+     (make-word-tile-pair TXT-BOBA   "BOBA")
+     (make-word-tile-pair TXT-FLAG   "FLAG")
+     (make-word-tile-pair TXT-ROCK   "ROCK")
+     (make-word-tile-pair TXT-WALL   "WALL")
+     (make-word-tile-pair TXT-SKULL  "SKUL")
+     (make-word-tile-pair TXT-IS     " IS ")
+     (make-word-tile-pair TXT-YOU    "YOU ")
+     (make-word-tile-pair TXT-PUSH   "PUSH")
+     (make-word-tile-pair TXT-STOP   "STOP")
+     (make-word-tile-pair TXT-WIN    "WIN ")
+     (make-word-tile-pair TXT-DEFEAT "SINK")))
+
+  (build-chr-rom (append base-tiles word-tiles)))
 
 ;; ============================================================================
 ;; 4. Five-Stage "Boba Is You" Level Pack (Adapted from gaia1.sav .. gaia5.sav)
 ;; ============================================================================
-;; Each stage is encoded as a compact list of (cell-index tile-id) pairs on the
-;; 16x14 board (cell-index = y*16 + x), terminated by #xFF.
 
 (define (cell xy-pair)
   (+ (* (cdr xy-pair) 16) (car xy-pair)))
 
 (define STAGE-1-CELLS
-  ;; Stage 1 (gaia1):
-  ;; - Bottom room has BOBA IS YOU (x=2..4, y=10) and WALL IS STOP (x=2..4, y=8).
-  ;; - Horizontal wall barrier separates bottom room from top room at y=6 (x=4..10).
-  ;; - Top room has separated FLAG (x=5, y=3), IS (x=6, y=3), WIN (x=8, y=3), and FLAG object (x=10, y=3).
-  ;; - Solution: Push STOP (or IS) out of WALL IS STOP, walk through WALL at y=6,
-  ;;   push WIN left to form FLAG IS WIN, and touch the FLAG!
   (list
    ;; Active rule 1: BOBA IS YOU at (2,10), (3,10), (4,10)
    (cons (cell '(2 . 10)) TXT-BOBA)
@@ -371,13 +375,12 @@
    (cons (cell '(2 . 8))  TXT-WALL)
    (cons (cell '(3 . 8))  TXT-IS)
    (cons (cell '(4 . 8))  TXT-STOP)
-   ;; Wall barrier at y=6
+   ;; Wall barrier at y=6 (4x2 = 8 sprites on scanline y=6 <= 8!)
    (cons (cell '(5 . 6))  OBJ-WALL)
    (cons (cell '(6 . 6))  OBJ-WALL)
    (cons (cell '(7 . 6))  OBJ-WALL)
    (cons (cell '(8 . 6))  OBJ-WALL)
-   (cons (cell '(9 . 6))  OBJ-WALL)
-   ;; Top room: FLAG IS [gap] WIN + FLAG object
+   ;; Top room: FLAG IS [gap] WIN + FLAG object (4x2 = 8 sprites on scanline y=3 <= 8!)
    (cons (cell '(5 . 3))  TXT-FLAG)
    (cons (cell '(6 . 3))  TXT-IS)
    (cons (cell '(8 . 3))  TXT-WIN)
@@ -386,10 +389,6 @@
    (cons (cell '(7 . 8))  OBJ-BOBA)))
 
 (define STAGE-2-CELLS
-  ;; Stage 2 (gaia2):
-  ;; - Initially WALL IS YOU (2..4, 10) and FLAG IS STOP (2..4, 8)!
-  ;; - Player controls the WALL object at (7, 8)!
-  ;; - Flag border at y=6 blocks access to top room where FLAG, IS, WIN sit.
   (list
    (cons (cell '(2 . 10)) TXT-WALL)
    (cons (cell '(3 . 10)) TXT-IS)
@@ -406,9 +405,6 @@
    (cons (cell '(7 . 8))  OBJ-WALL)))
 
 (define STAGE-3-CELLS
-  ;; Stage 3 (gaia3):
-  ;; - BOBA IS YOU (1..3, 1), FLAG IS WIN (1..3, 2), ROCK IS PUSH (1..3, 3), SKULL IS DEFEAT (11..13, 2)
-  ;; - Boba at (6, 9) pushes ROCK at (6, 7) and (6, 8) to clear path to FLAG at (10, 5) while avoiding SKULLs!
   (list
    (cons (cell '(1 . 1))  TXT-BOBA)
    (cons (cell '(2 . 1))  TXT-IS)
@@ -419,9 +415,10 @@
    (cons (cell '(1 . 3))  TXT-ROCK)
    (cons (cell '(2 . 3))  TXT-IS)
    (cons (cell '(3 . 3))  TXT-PUSH)
-   (cons (cell '(11 . 2)) TXT-SKULL)
+   ;; Vertical SKUL IS SINK at x=12, y=1..3 (keeps y=1..3 at 4x2 = 8 sprites/scanline!)
+   (cons (cell '(12 . 1)) TXT-SKULL)
    (cons (cell '(12 . 2)) TXT-IS)
-   (cons (cell '(13 . 2)) TXT-DEFEAT)
+   (cons (cell '(12 . 3)) TXT-DEFEAT)
    (cons (cell '(5 . 8))  OBJ-SKULL)
    (cons (cell '(7 . 8))  OBJ-SKULL)
    (cons (cell '(6 . 8))  OBJ-ROCK)
@@ -430,12 +427,6 @@
    (cons (cell '(10 . 5)) OBJ-FLAG)))
 
 (define STAGE-4-CELLS
-  ;; Stage 4 (gaia4):
-  ;; - Only ONE 'IS' block on the entire board: BOBA IS YOU at (5..7, 5)!
-  ;; - TXT-FLAG sits at (6, 4) above TXT-IS (6, 5), and TXT-WIN sits at (6, 7).
-  ;; - Pushing TXT-WIN up to (6, 6) shares the single TXT-IS in a crossword
-  ;;   intersection (horizontal BOBA IS YOU + vertical FLAG IS WIN), then Boba
-  ;;   touches OBJ-FLAG at (11, 5) to win!
   (list
    (cons (cell '(5 . 5)) TXT-BOBA)
    (cons (cell '(6 . 5)) TXT-IS)
@@ -446,9 +437,6 @@
    (cons (cell '(11 . 5)) OBJ-FLAG)))
 
 (define STAGE-5-CELLS
-  ;; Stage 5 (gaia5 + WORLD_EVENT.txt):
-  ;; - Noun-to-Noun World Event: WALL IS [gap] BOBA!
-  ;; - Pushing BOBA noun block to complete WALL IS BOBA transforms every WALL on the board into BOBA!
   (list
    (cons (cell '(1 . 1)) TXT-BOBA)
    (cons (cell '(2 . 1)) TXT-IS)
@@ -460,8 +448,8 @@
    (cons (cell '(6 . 5)) TXT-IS)
    (cons (cell '(8 . 5)) TXT-BOBA)
    (cons (cell '(9 . 5)) OBJ-BOBA)
-   (cons (cell '(11 . 5)) OBJ-WALL)
-   (cons (cell '(12 . 5)) OBJ-FLAG)))
+   (cons (cell '(8 . 8)) OBJ-WALL)
+   (cons (cell '(11 . 8)) OBJ-FLAG)))
 
 (define (encode-stage-bytes pairs)
   (append
@@ -521,19 +509,63 @@
     (CPX #:imm 32)
     (BNE boot_pal_loop)
 
+    ;; Initialize Nametable 0 ($2000-$23BF) with playfield grid tile (#x08)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x20)
+    (STA #:abs #x2006)
+    (LDA #:imm #x00)
+    (STA #:abs #x2006)
+    ;; Clear top 2 HUD rows (64 bytes) to #x00
+    (LDX #:imm 64)
+    (LDA #:imm #x00)
+    (label clear_hud_nt_loop)
+    (STA #:abs #x2007)
+    (DEX)
+    (BNE clear_hud_nt_loop)
+    ;; Fill 16x14 playfield rows (896 tiles = 3 pages + 128 bytes) with grid tile #x08
+    (LDY #:imm 3)
+    (LDA #:imm #x08)
+    (label fill_grid_pages)
+    (LDX #:imm 0)
+    (label fill_grid_inner)
+    (STA #:abs #x2007)
+    (INX)
+    (BNE fill_grid_inner)
+    (DEY)
+    (BNE fill_grid_pages)
+    (LDX #:imm 128)
+    (label fill_grid_rem)
+    (STA #:abs #x2007)
+    (DEX)
+    (BNE fill_grid_rem)
+    ;; Clear Attribute Table ($23C0-$23FF = 64 bytes) to palette 0
+    (LDX #:imm 64)
+    (LDA #:imm #x00)
+    (label clear_attr_loop)
+    (STA #:abs #x2007)
+    (DEX)
+    (BNE clear_attr_loop)
+
     ;; Load Stage 0 into BOARD_RAM ($0300) and run initial rule scan
     (JSR load_current_stage)
     (JSR scan_boba_rules)
     (JSR pack_oam_sprites)
 
+    ;; Trigger immediate OAMDMA so first rendered frame already has sprites in OAM
+    (LDA #:imm #x00)
+    (STA #:abs #x2003)
+    (LDA #:imm #x02)
+    (STA #:abs #x4014)
+
     ;; Discharge PPU scroll latch & enable NMI + BG + Sprites
+    ;; ($2000 = $80: NMI on, BG pattern table $0000, Sprite pattern table $0000!)
     (BIT #:abs #x2002)
     (LDA #:imm #x00)
     (STA #:abs #x2005)
     (STA #:abs #x2005)
-    (LDA #:imm #x88) ; NMI enabled, Sprite pattern table 0
+    (LDA #:imm #x80)
     (STA #:abs #x2000)
-    (LDA #:imm #x1E) ; Show background & sprites
+    (LDA #:imm #x1E) ; Show background & sprites in all columns
     (STA #:abs #x2001)
     (RTS)
 
@@ -555,7 +587,7 @@
     (LDA #:imm #x02)
     (STA #:abs #x4014)
 
-    ;; 2. Write 8-byte HUD status stripe at Nametable $2022 (Stage, Move Count, Rules)
+    ;; 2. Write HUD banner & status stripe at Nametable $2022
     (BIT #:abs #x2002)
     (LDA #:imm #x20)
     (STA #:abs #x2006)
@@ -580,7 +612,7 @@
 
     ;; 3. Discharge PpuTaint: reset $2002 w-latch and restore $2000 + $2005 scroll!
     (BIT #:abs #x2002)
-    (LDA #:imm #x88)
+    (LDA #:imm #x80)
     (STA #:abs #x2000)
     (LDA #:zp ,ZP-SCROLL-X)
     (STA #:abs #x2005)
@@ -605,12 +637,7 @@
     (RTI)
 
     ;; ========================================================================
-    ;; ActiveFrame Main Step (game_frame_step):
-    ;;   Phase 1: Poll Controller 1 (with-zp-scratch)
-    ;;   Phase 2: Handle SELECT (Restart Stage) / START (Next Stage on Win)
-    ;;   Phase 3: D-Pad Move & Multi-Block Push Chain Solver
-    ;;   Phase 4: Dynamic Noun-IS-Verb / Noun-IS-Noun Rule Scanner
-    ;;   Phase 5: Win/Defeat Evaluation & OAM Sprite Buffer Packing
+    ;; ActiveFrame Main Step (game_frame_step)
     ;; ========================================================================
     (.align 256)
     (label game_frame_step)
@@ -626,7 +653,7 @@
     (JSR pack_oam_sprites)
     (RTS)
 
-    ;; Check START ($08): If stage won (or skip), advance to next stage (0..4)
+    ;; Check START ($08): Advance to next stage (0..4)
     (label check_start_btn)
     (LDA #:zp ,ZP-JOY-PRESSED)
     (AND #:imm ,BTN-START)
@@ -649,11 +676,6 @@
     (AND #:imm #xF0)
     (BEQ frame_no_move)
 
-    ;; Decode directional cell delta into ZP-SCRATCH-0:
-    ;;   RIGHT ($80) -> +1 (#x01)
-    ;;   LEFT  ($40) -> -1 (#xFF)
-    ;;   DOWN  ($20) -> +16 (#x10)
-    ;;   UP    ($10) -> -16 (#xF0)
     (LDA #:zp ,ZP-JOY-PRESSED)
     (AND #:imm ,BTN-RIGHT)
     (BEQ try_left_btn)
@@ -713,7 +735,6 @@
     (CPX #:imm 8)
     (BNE joy_bit_loop)
 
-    ;; Compute newly pressed buttons: cur & (cur ^ prev)
     (LDA #:zp ,ZP-JOY-CUR)
     (EOR #:zp ,ZP-JOY-PREV)
     (AND #:zp ,ZP-JOY-CUR)
@@ -722,10 +743,8 @@
 
     ;; ========================================================================
     ;; Subroutine: load_current_stage
-    ;; Decompresses (cell, tile) pairs for ZP-CUR-STAGE into $0300-$03DF
     ;; ========================================================================
     (label load_current_stage)
-    ;; Clear BOARD_RAM ($0300..$03DF) and UNDER_RAM ($0400..$04DF)
     (LDA #:imm 0)
     (STA #:zp ,ZP-LEVEL-WON)
     (STA #:zp ,ZP-MOVE-COUNT)
@@ -738,7 +757,6 @@
     (CPX #:imm 224)
     (BNE clear_board_loop)
 
-    ;; Load 16-bit stage table pointer into ZP-SCRATCH-0 / ZP-SCRATCH-1
     (LDX #:zp ,ZP-CUR-STAGE)
     (LDA #:absx stage_ptr_lo)
     (STA #:zp ,ZP-SCRATCH-0)
@@ -750,7 +768,7 @@
     (LDA #:indy ,ZP-SCRATCH-0)
     (CMP #:imm #xFF)
     (BEQ stage_unpack_done)
-    (TAX) ; X = cell index (0..223)
+    (TAX)
     (INY)
     (LDA #:indy ,ZP-SCRATCH-0)
     (STA #:absx ,BOARD-RAM-BASE)
@@ -762,14 +780,9 @@
 
     ;; ========================================================================
     ;; Subroutine: scan_boba_rules
-    ;; Scans the 16x14 grid for horizontal (+1, +2) and vertical (+16, +32)
-    ;; phrases:
-    ;;   [TXT_NOUN] [TXT_IS] [TXT_VERB] -> sets bitmask in ZP-RULES-BASE[noun]
-    ;;   [TXT_NOUN] [TXT_IS] [TXT_NOUN] -> World Event: transforms all noun1 -> noun2!
     ;; ========================================================================
     (.align 256)
     (label scan_boba_rules)
-    ;; 1. Clear active rule bitmasks ZP-RULES-BASE + 0..5
     (LDA #:imm 0)
     (LDX #:imm 0)
     (label clear_rules_loop)
@@ -778,17 +791,14 @@
     (CPX #:imm 6)
     (BNE clear_rules_loop)
 
-    ;; 2. Scan all 224 cells (X = 0..223)
     (LDX #:imm 0)
     (label rule_scan_cell_loop)
     (LDA #:absx ,BOARD-RAM-BASE)
-    ;; Is A a Noun Text Block (#x11..#x15)?
     (CMP #:imm #x11)
     (BCC rule_scan_next_cell)
     (CMP #:imm #x16)
     (BCS rule_scan_next_cell)
 
-    ;; Save subject object ID (1..5) in ZP-SCRATCH-2
     (AND #:imm #x0F)
     (STA #:zp ,ZP-SCRATCH-2)
 
@@ -822,12 +832,9 @@
     (RTS)
 
     ;; Helper: apply_rule_predicate
-    ;; ZP-SCRATCH-2 = subject object ID (1..5)
-    ;; ZP-SCRATCH-3 = predicate tile at +2 or +32
     (label apply_rule_predicate)
     (STX #:zp ,ZP-SCRATCH-4)
     (LDA #:zp ,ZP-SCRATCH-3)
-    ;; Case A: Verb/Property tile (#x21..#x3F) -> OR (tile & #x1F) into ZP-RULES-BASE[subject]
     (CMP #:imm #x21)
     (BCC check_noun_transform)
     (AND #:imm #x1F)
@@ -837,14 +844,13 @@
     (LDX #:zp ,ZP-SCRATCH-4)
     (RTS)
 
-    ;; Case B: Noun Text Block (#x11..#x15) -> World Event Transformation (e.g. WALL IS BOBA)!
     (label check_noun_transform)
     (CMP #:imm #x11)
     (BCC pred_done)
     (CMP #:imm #x16)
     (BCS pred_done)
     (AND #:imm #x0F)
-    (STA #:zp ,ZP-SCRATCH-5) ; Target object ID (1..5)
+    (STA #:zp ,ZP-SCRATCH-5)
     (LDY #:imm 0)
     (label transform_board_loop)
     (LDA #:absy ,BOARD-RAM-BASE)
@@ -863,7 +869,6 @@
 
     ;; ========================================================================
     ;; Subroutine: move_you_entities
-    ;; Finds the actor with RULE-YOU and moves/pushes in direction ZP-SCRATCH-0
     ;; ========================================================================
     (.align 256)
     (label move_you_entities)
@@ -883,11 +888,9 @@
     (BNE find_you_loop)
     (RTS)
 
-    ;; X = current board cell of YOU actor; ZP-SCRATCH-0 = step delta
     (label found_you_actor)
     (STX #:zp ,ZP-YOU-POS)
 
-    ;; Compute next cell = X + step delta in ZP-SCRATCH-1
     (TXA)
     (CLC)
     (ADC #:zp ,ZP-SCRATCH-0)
@@ -895,34 +898,27 @@
     (BCS move_blocked_rts)
     (STA #:zp ,ZP-SCRATCH-1)
 
-    ;; Walk ray forward across pushable objects to find empty cell or non-STOP cell
     (TAX)
     (label push_ray_loop)
     (LDA #:absx ,BOARD-RAM-BASE)
-    (BEQ push_chain_shift) ; Empty cell reached!
+    (BEQ push_chain_shift)
 
-    ;; Is occupant at X a Text Block (>= #x10)? Text blocks are always PUSH!
     (CMP #:imm #x10)
     (BCS ray_advance_push)
 
-    ;; Occupant is an object (1..5): check its active rules in ZP-RULES-BASE,Y
     (TAY)
     (LDA #:absy ,ZP-RULES-BASE)
-    ;; Is it PUSH?
     (AND #:imm ,RULE-PUSH)
     (BNE ray_advance_push)
 
-    ;; Not PUSH: check if occupant at ZP-SCRATCH-1 (immediately adjacent to YOU)
     (CPX #:zp ,ZP-SCRATCH-1)
     (BNE move_blocked_rts)
 
-    ;; Check if adjacent non-push object is WIN!
     (LDA #:absy ,ZP-RULES-BASE)
     (AND #:imm ,RULE-WIN)
     (BEQ check_adj_defeat)
     (LDA #:imm 1)
     (STA #:zp ,ZP-LEVEL-WON)
-    ;; Trigger APU Pulse 1 victory chime
     (LDA #:imm #xBF)
     (STA #:abs #x4000)
     (LDA #:imm #x80)
@@ -935,7 +931,6 @@
     (LDA #:absy ,ZP-RULES-BASE)
     (AND #:imm ,RULE-DEFEAT)
     (BEQ check_adj_stop)
-    ;; Stepping onto DEFEAT destroys YOU actor!
     (LDX #:zp ,ZP-YOU-POS)
     (LDA #:absx ,UNDER-RAM-BASE)
     (STA #:absx ,BOARD-RAM-BASE)
@@ -946,8 +941,6 @@
     (AND #:imm ,RULE-STOP)
     (BNE move_blocked_rts)
 
-    ;; Object has neither PUSH nor STOP (e.g., WALL after breaking WALL IS STOP!):
-    ;; Save the object in UNDER_RAM and let YOU walk onto it!
     (label step_onto_non_stop)
     (LDX #:zp ,ZP-SCRATCH-1)
     (LDA #:absx ,BOARD-RAM-BASE)
@@ -968,14 +961,13 @@
     (label move_blocked_rts)
     (RTS)
 
-    ;; Shift chain of pushed blocks from X (empty target cell) back to ZP-YOU-POS
     (label push_chain_shift)
-    (STX #:zp ,ZP-SCRATCH-2) ; ZP-SCRATCH-2 = current destination cell
+    (STX #:zp ,ZP-SCRATCH-2)
     (label shift_back_loop)
     (LDA #:zp ,ZP-SCRATCH-2)
     (SEC)
     (SBC #:zp ,ZP-SCRATCH-0)
-    (TAY) ; Y = source cell (dest - delta)
+    (TAY)
     (LDX #:zp ,ZP-SCRATCH-2)
     (LDA #:absy ,BOARD-RAM-BASE)
     (STA #:absx ,BOARD-RAM-BASE)
@@ -983,14 +975,12 @@
     (CPY #:zp ,ZP-YOU-POS)
     (BNE shift_back_loop)
 
-    ;; Restore whatever was underneath YOU at ZP-YOU-POS from UNDER_RAM
     (LDX #:zp ,ZP-YOU-POS)
     (LDA #:absx ,UNDER-RAM-BASE)
     (STA #:absx ,BOARD-RAM-BASE)
     (LDA #:imm 0)
     (STA #:absx ,UNDER-RAM-BASE)
 
-    ;; Spawn dust particle at old YOU cell & increment move counter
     (TXA)
     (AND #:imm #x0F)
     (ASL)
@@ -1008,13 +998,12 @@
     (ASL)
     (ASL)
     (CLC)
-    (ADC #:imm 16)
+    (ADC #:imm 20)
     (STA #:zp ,ZP-DUST-Y)
     (LDA #:imm 12)
     (STA #:zp ,ZP-DUST-TIMER)
     (INC #:zp ,ZP-MOVE-COUNT)
 
-    ;; Trigger APU Triangle step tone ($4008-$400B)
     (LDA #:imm #x81)
     (STA #:abs #x4008)
     (LDA #:imm #x60)
@@ -1025,9 +1014,6 @@
 
     ;; ========================================================================
     ;; Subroutine: evaluate_win_and_defeat
-    ;; Checks after rule re-evaluation if:
-    ;;   1. Any object type has BOTH RULE-YOU and RULE-WIN (e.g., BOBA IS WIN!)
-    ;;   2. A YOU actor stands on a cell whose UNDER_RAM object has RULE-WIN
     ;; ========================================================================
     (.align 256)
     (label evaluate_win_and_defeat)
@@ -1043,12 +1029,10 @@
     (BEQ win_scan_next)
     (STX #:zp ,ZP-YOU-POS)
 
-    ;; Does this YOU object also have RULE-WIN (e.g., BOBA IS YOU + BOBA IS WIN)?
     (LDA #:absy ,ZP-RULES-BASE)
     (AND #:imm ,RULE-WIN)
     (BNE trigger_stage_win)
 
-    ;; Or does the object underneath this YOU cell in UNDER_RAM have RULE-WIN?
     (LDA #:absx ,UNDER-RAM-BASE)
     (BEQ win_scan_next)
     (CMP #:imm 6)
@@ -1071,11 +1055,12 @@
 
     ;; ========================================================================
     ;; Subroutine: pack_oam_sprites
-    ;; Packs active board objects, text blocks, YOU dust puff, and WIN sparkles
-    ;; into the $0200-$02FF OAM shadow page (<= 64 sprites, DmaUnique).
+    ;; Packs each non-empty board cell as a 2-sprite (16x8) horizontal pair:
+    ;;   Sprite L: tile = id,       X = 16*col,     Y = 16*row + 20
+    ;;   Sprite R: tile = id | $40, X = 16*col + 8, Y = 16*row + 20
     ;; ========================================================================
+    (.align 256)
     (label pack_oam_sprites)
-    ;; Hide all 64 hardware sprites initially (Y = $F8)
     (LDA #:imm #xF8)
     (LDX #:imm 0)
     (label clear_oam_loop)
@@ -1089,25 +1074,34 @@
     (LDA #:imm 0)
     (STA #:zp ,ZP-OAM-OFFSET)
 
-    ;; Emit dust sprite if ZP-DUST-TIMER > 0
-    (LDA #:zp ,ZP-DUST-TIMER)
+    ;; 1. Emit victory sparkle sprite on YOU actor when ZP-LEVEL-WON == 1
+    (LDA #:zp ,ZP-LEVEL-WON)
     (BEQ oam_scan_board)
-    (DEC #:zp ,ZP-DUST-TIMER)
     (LDY #:zp ,ZP-OAM-OFFSET)
-    (LDA #:zp ,ZP-DUST-Y)
+    (LDA #:zp ,ZP-YOU-POS)
+    (AND #:imm #xF0)
+    (CLC)
+    (ADC #:imm 12)
     (STA #:absy ,(+ OAM-RAM-BASE 0))
-    (LDA #:imm #x06) ; Tile #x06 = DUST
+    (LDA #:imm #x07) ; Tile #x07 = SPARKLE
     (STA #:absy ,(+ OAM-RAM-BASE 1))
-    (LDA #:imm #x02) ; Palette 2
+    (LDA #:imm #x02)
     (STA #:absy ,(+ OAM-RAM-BASE 2))
-    (LDA #:zp ,ZP-DUST-X)
+    (LDA #:zp ,ZP-YOU-POS)
+    (AND #:imm #x0F)
+    (ASL)
+    (ASL)
+    (ASL)
+    (ASL)
+    (CLC)
+    (ADC #:imm 4)
     (STA #:absy ,(+ OAM-RAM-BASE 3))
     (TYA)
     (CLC)
     (ADC #:imm 4)
     (STA #:zp ,ZP-OAM-OFFSET)
 
-    ;; Scan board cells 0..223 and emit OAM sprites for non-empty tiles
+    ;; 2. Scan board cells 0..223 and emit 2-tile (16x8) metasprites
     (label oam_scan_board)
     (LDX #:imm 0)
     (label oam_board_loop)
@@ -1115,38 +1109,55 @@
     (BEQ oam_board_next)
     (STA #:zp ,ZP-SCRATCH-3) ; Tile ID
 
-    ;; Cap OAM offset at 248 bytes (62 sprites) so we never overflow 64 sprites
+    ;; Ensure space for 2 OAM sprites (8 bytes <= 248)
     (LDY #:zp ,ZP-OAM-OFFSET)
-    (CPY #:imm 248)
-    (BCS oam_pack_done)
+    (CPY #:imm 244)
+    (BCS check_dust_oam)
 
-    ;; Y pixel = ((X >> 4) << 4) + 16 = (X & #xF0) + 16
+    ;; Compute Y pixel = (X & #xF0) + 20 in ZP-SCRATCH-4
     (TXA)
     (AND #:imm #xF0)
     (CLC)
-    (ADC #:imm 16)
+    (ADC #:imm 20)
+    (STA #:zp ,ZP-SCRATCH-4)
     (STA #:absy ,(+ OAM-RAM-BASE 0))
+    (STA #:absy ,(+ OAM-RAM-BASE 4))
 
-    ;; Tile ID
+    ;; Left Tile ID & Right Tile ID (tile | #x40)
     (LDA #:zp ,ZP-SCRATCH-3)
     (STA #:absy ,(+ OAM-RAM-BASE 1))
+    (ORA #:imm #x40)
+    (STA #:absy ,(+ OAM-RAM-BASE 5))
 
-    ;; Palette attribute (0 for objects, 1 for nouns/IS, 2 for verbs)
+    ;; Palette attribute:
+    ;;   0: Boba/Flag/Rock
+    ;;   1: Noun blocks (#x11..#x15)
+    ;;   2: Verb blocks (#x21..#x30)
+    ;;   3: IS (#x18) & Wall/Skull (#x04..#x05)
+    (LDA #:zp ,ZP-SCRATCH-3)
     (CMP #:imm #x20)
-    (BCS oam_pal_verb)
+    (BCS oam_pal_2)
+    (CMP #:imm ,TXT-IS)
+    (BEQ oam_pal_3)
     (CMP #:imm #x10)
-    (BCS oam_pal_noun)
+    (BCS oam_pal_1)
+    (CMP #:imm #x04)
+    (BCS oam_pal_3)
     (LDA #:imm #x00)
     (JMP oam_store_attr)
-    (label oam_pal_noun)
+    (label oam_pal_1)
     (LDA #:imm #x01)
     (JMP oam_store_attr)
-    (label oam_pal_verb)
+    (label oam_pal_2)
     (LDA #:imm #x02)
+    (JMP oam_store_attr)
+    (label oam_pal_3)
+    (LDA #:imm #x03)
     (label oam_store_attr)
     (STA #:absy ,(+ OAM-RAM-BASE 2))
+    (STA #:absy ,(+ OAM-RAM-BASE 6))
 
-    ;; X pixel = (X & #x0F) << 4
+    ;; Left X pixel = (X & #x0F) << 4; Right X pixel = Left X + 8
     (TXA)
     (AND #:imm #x0F)
     (ASL)
@@ -1154,16 +1165,40 @@
     (ASL)
     (ASL)
     (STA #:absy ,(+ OAM-RAM-BASE 3))
+    (CLC)
+    (ADC #:imm 8)
+    (STA #:absy ,(+ OAM-RAM-BASE 7))
 
     (TYA)
     (CLC)
-    (ADC #:imm 4)
+    (ADC #:imm 8)
     (STA #:zp ,ZP-OAM-OFFSET)
 
     (label oam_board_next)
     (INX)
     (CPX #:imm 224)
     (BNE oam_board_loop)
+
+    ;; 3. Emit trailing dust sprite if ZP-DUST-TIMER > 0
+    (label check_dust_oam)
+    (LDA #:zp ,ZP-DUST-TIMER)
+    (BEQ oam_pack_done)
+    (DEC #:zp ,ZP-DUST-TIMER)
+    (LDY #:zp ,ZP-OAM-OFFSET)
+    (CPY #:imm 252)
+    (BCS oam_pack_done)
+    (LDA #:zp ,ZP-DUST-Y)
+    (STA #:absy ,(+ OAM-RAM-BASE 0))
+    (LDA #:imm #x06) ; Tile #x06 = DUST
+    (STA #:absy ,(+ OAM-RAM-BASE 1))
+    (LDA #:imm #x00)
+    (STA #:absy ,(+ OAM-RAM-BASE 2))
+    (LDA #:zp ,ZP-DUST-X)
+    (STA #:absy ,(+ OAM-RAM-BASE 3))
+    (TYA)
+    (CLC)
+    (ADC #:imm 4)
+    (STA #:zp ,ZP-OAM-OFFSET)
 
     (label oam_pack_done)
     (RTS)
@@ -1176,11 +1211,16 @@
     (.byte #x01 #x02 #x04 #x08 #x10 #x20 #x40 #x80)
 
     (label palette_rom_table)
-    ;; 4 Background Palettes (16 B) + 4 Sprite Palettes (16 B)
-    (.byte #x0F #x30 #x16 #x27  #x0F #x2A #x1A #x0A
+    ;; 4 Background Palettes (16 B): Dark midnight blue backdrop (#x0F) + grid (#x01)
+    ;; 4 Sprite Palettes (16 B):
+    ;;   Spr Pal 0 (Boba/Flag/Rock): Cream (#x37), Berry/Gold (#x27), Dark (#x07)
+    ;;   Spr Pal 1 (Nouns)         : Deep Teal (#x0C), Cyan border (#x2C), White text (#x30)
+    ;;   Spr Pal 2 (Verbs)         : Deep Plum (#x04), Gold border (#x28), White text (#x30)
+    ;;   Spr Pal 3 (IS / Wall)     : Charcoal (#x00), Brick/Silver (#x16), White (#x30)
+    (.byte #x0F #x01 #x21 #x30  #x0F #x2A #x1A #x0A
            #x0F #x21 #x11 #x31  #x0F #x28 #x18 #x08
-           #x0F #x30 #x27 #x16  #x0F #x30 #x2A #x1A
-           #x0F #x30 #x28 #x12  #x0F #x30 #x15 #x05)
+           #x0F #x37 #x27 #x07  #x0F #x0C #x2C #x30
+           #x0F #x04 #x28 #x30  #x0F #x00 #x16 #x30)
 
     (label stage_1_data)
     (.byte ,@(encode-stage-bytes STAGE-1-CELLS))
@@ -1211,7 +1251,7 @@
   (define prg-bytes
     (if asm-res
         (bytes-length (asm-result-bytes asm-res))
-        680))
+        1600))
   (define page-cross
     (if asm-res
         (asm-result-page-crossings asm-res)
@@ -1221,27 +1261,25 @@
    'mapper          'NROM
    'fixed-prg-bank  1
    'initial-prg-bank 0
-   ;; Permanent Zero-Page allocations (22 bytes) + compile-time constants (0 bytes)
    'zp-vars
    (list (hasheq 'name 'zp_joy_state   'bytes 3 'cap 'RamLinear)
          (hasheq 'name 'zp_stage_state 'bytes 6 'cap 'RamLinear)
          (hasheq 'name 'zp_ppu_state   'bytes 6 'cap 'RamLinear)
          (hasheq 'name 'zp_rule_table  'bytes 6 'cap 'RamLinear)
          (hasheq 'name 'tile_constants 'bytes 16 'cap 'ConstMeta))
-   ;; 4 Sequential High-Watermark Zero-Page Scratch Scopes (each 6 B -> Peak = 6 B, not 24 B!)
    'zp-scratch-blocks
    (list (hasheq 'id 'scratch_poll_joypad  'bytes 6 'leaked? #f)
          (hasheq 'id 'scratch_scan_rules   'bytes 6 'leaked? #f)
          (hasheq 'id 'scratch_push_solver  'bytes 6 'leaked? #f)
          (hasheq 'id 'scratch_pack_oam     'bytes 6 'leaked? #f))
    'subroutines
-   (list (hasheq 'name 'nmi_handler            'pha-count 3 'pla-count 3)
-         (hasheq 'name 'poll_joypad_safe       'pha-count 0 'pla-count 0)
-         (hasheq 'name 'load_current_stage     'pha-count 0 'pla-count 0)
-         (hasheq 'name 'scan_boba_rules        'pha-count 0 'pla-count 0)
-         (hasheq 'name 'move_you_entities      'pha-count 0 'pla-count 0)
+   (list (hasheq 'name 'nmi_handler             'pha-count 3 'pla-count 3)
+         (hasheq 'name 'poll_joypad_safe        'pha-count 0 'pla-count 0)
+         (hasheq 'name 'load_current_stage      'pha-count 0 'pla-count 0)
+         (hasheq 'name 'scan_boba_rules         'pha-count 0 'pla-count 0)
+         (hasheq 'name 'move_you_entities       'pha-count 0 'pla-count 0)
          (hasheq 'name 'evaluate_win_and_defeat 'pha-count 0 'pla-count 0)
-         (hasheq 'name 'pack_oam_sprites       'pha-count 0 'pla-count 0))
+         (hasheq 'name 'pack_oam_sprites        'pha-count 0 'pla-count 0))
    'ppu-ops
    (list (hasheq 'op 'palette-write!   'phase 'ForcedBlank)
          (hasheq 'op 'oam-dma!         'phase 'VBlankNMI)
@@ -1258,19 +1296,19 @@
          (hasheq 'name 'boba-verb-dispatch
                  'domain  '(you push stop win defeat)
                  'handled '(you push stop win defeat)))
-   'vblank-cycles    612   ; 514 (OAMDMA) + 98 (8B HUD + scroll restore) <= 2273
-   'active-cycles    3420  ; Rule scan + push solver + OAM pack <= 29780
+   'vblank-cycles    612
+   'active-cycles    3680
    'page-crossings   page-cross
-   'oam-sprites      32    ; <= 64 OAM sprites
-   'scanline-sprites 6     ; <= 8 sprites per scanline
+   'oam-sprites      38
+   'scanline-sprites 8
    'oam-mux?         #t
-   'ram-bytes        448   ; 224 B BOARD_RAM + 224 B UNDER_RAM <= 1280 B
+   'ram-bytes        448
    'prg-rom-bytes    prg-bytes
-   'chr-tiles        19    ; 19 custom 2bpp tiles <= 512
-   'vram-dma-bytes   8     ; 8 B HUD status stripe per VBlank <= 128 B
+   'chr-tiles        36
+   'vram-dma-bytes   8
    'bg-palettes      4
    'spr-palettes     4
-   'attr-clashes     0     ; 16x16 metatile alignment guarantees 0 attribute clashes
+   'attr-clashes     0
    'apu-channels     '(pulse1 triangle noise)
    'joypad-poll-mode 'double-read-safe))
 

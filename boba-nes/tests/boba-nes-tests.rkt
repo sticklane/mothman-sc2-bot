@@ -438,13 +438,13 @@
   ;; Advance to Stage 5 (index 4: World Event WALL IS BOBA)
   (tap-button! BTN-START)
   (check-equal? (nes-zp-ref emu ZP-CUR-STAGE) 4)
-  (check-equal? (nes-ram-ref emu (+ BOARD-RAM-BASE (+ (* 5 16) 11))) OBJ-WALL)
+  (check-equal? (nes-ram-ref emu (+ BOARD-RAM-BASE (+ (* 8 16) 8))) OBJ-WALL)
 
   ;; Boba at (9, 5) steps LEFT to (8, 5), pushing TXT-BOBA into (7, 5) to form WALL IS BOBA!
   (tap-button! BTN-LEFT)
 
-  ;; World Event check: OBJ-WALL at (11, 5) has transformed into OBJ-BOBA (#x01)!
-  (check-equal? (nes-ram-ref emu (+ BOARD-RAM-BASE (+ (* 5 16) 11))) OBJ-BOBA)
+  ;; World Event check: OBJ-WALL at (8, 8) has transformed into OBJ-BOBA (#x01)!
+  (check-equal? (nes-ram-ref emu (+ BOARD-RAM-BASE (+ (* 8 16) 8))) OBJ-BOBA)
 
   ;; Verify hardware OAM DMA ($4014) populated valid sprites and Nametable HUD at $2022 updated!
   (define spr0 (nes-oam-sprite-ref emu 0))
