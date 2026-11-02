@@ -220,14 +220,14 @@
     ],
     "configurations_verified": 5
   },
-  "elapsed_seconds": 16.6878,
+  "elapsed_seconds": 71.029,
   "lean_4_35_0_mechanization": {
     "lean_exit_code": 0,
     "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
     "lean_warnings": 0,
     "max_proof_block_lines": 17,
     "terminology_audit_passed": true,
-    "theorem_count": 21,
+    "theorem_count": 30,
     "theorem_names": [
       "emitEbitSchedule_seq",
       "countForwardEbits_append",
@@ -249,7 +249,16 @@
       "monolithic_fits_qcap_selects_single_qpu",
       "partition_schedule_preserves_zero_rev_and_carry",
       "buildGhzBitBroadcast_forward_ebits",
-      "multi_bit_ghz_window_ebit_scaling"
+      "multi_bit_ghz_window_ebit_scaling",
+      "bool_xor_and_distrib_right",
+      "u4_bilinear_phase_poly_factoring",
+      "u4_tele_phase_mbu_cone_denotational_equiv",
+      "naiveCrossQpuMbuConeSchedule_forward_ebits",
+      "naiveCrossQpuMbuConeSchedule_reverse_ebits",
+      "u4UnbatchedTelePhaseSchedule_forward_ebits",
+      "u4UnbatchedTelePhaseSchedule_reverse_ebits",
+      "naive_cross_qpu_mbu_cone_consumes_two_ebits_per_wire",
+      "u4_bilinear_tele_phase_reduces_ebits_and_preserves_typing"
     ],
     "zero_sorry_axiom_native_decide_wildcards": true
   },
@@ -257,8 +266,117 @@
     "direct_aes_sbox_dlog5_machines_used": 1,
     "direct_distributed_qrns_machines_used": 4,
     "raco_test_cluster_codegen_passed": true,
-    "raco_test_lakefillqc_passed": true
+    "raco_test_lakefillqc_passed": true,
+    "raco_test_optical_stim_passed": true
   },
   "scratch_directory": "/home/antigravity/toolchains/tmp/cluster_qasm3_verify",
-  "status": "PASS"
+  "status": "PASS",
+  "u4_tele_phase_reduction": {
+    "bilinear_phase_polynomial": "Phi_X(m, x^(p1), x^(p2)) = sum_k m_k * l_1(x^(p1)) * l_2(x^(p2))",
+    "compiled_3wire_mbu_cone_verification": {
+      "joint_qasm3_purity": 1.0,
+      "joint_qasm3_statevector_overlap": 1.0,
+      "naive_ebits_2_per_wire": 6,
+      "reconstructed_purity": 1.0,
+      "reconstructed_statevector_overlap": 1.0,
+      "reverse_ebits": 0,
+      "u4_batched_cone_ebits": 1,
+      "u4_unbatched_ebits_1_per_wire": 3
+    },
+    "cone_branch_simulations": [
+      {
+        "batched_ebit_reduction_pct": 50.0,
+        "k_mbu_wires": 1,
+        "min_reduced_density_matrix_purity": 1.0,
+        "min_statevector_overlap": 1.0,
+        "mx_branches_verified": 2,
+        "naive_ebits_2_per_wire": 2,
+        "reverse_ebits": 0,
+        "total_branch_subpaths_verified": 4,
+        "u4_batched_cone_ebits": 1,
+        "u4_unbatched_ebits_1_per_wire": 1,
+        "unbatched_ebit_reduction_pct": 50.0
+      },
+      {
+        "batched_ebit_reduction_pct": 75.0,
+        "k_mbu_wires": 2,
+        "min_reduced_density_matrix_purity": 1.0,
+        "min_statevector_overlap": 1.0,
+        "mx_branches_verified": 4,
+        "naive_ebits_2_per_wire": 4,
+        "reverse_ebits": 0,
+        "total_branch_subpaths_verified": 8,
+        "u4_batched_cone_ebits": 1,
+        "u4_unbatched_ebits_1_per_wire": 2,
+        "unbatched_ebit_reduction_pct": 50.0
+      },
+      {
+        "batched_ebit_reduction_pct": 83.33,
+        "k_mbu_wires": 3,
+        "min_reduced_density_matrix_purity": 1.0,
+        "min_statevector_overlap": 1.0,
+        "mx_branches_verified": 8,
+        "naive_ebits_2_per_wire": 6,
+        "reverse_ebits": 0,
+        "total_branch_subpaths_verified": 16,
+        "u4_batched_cone_ebits": 1,
+        "u4_unbatched_ebits_1_per_wire": 3,
+        "unbatched_ebit_reduction_pct": 50.0
+      },
+      {
+        "batched_ebit_reduction_pct": 87.5,
+        "k_mbu_wires": 4,
+        "min_reduced_density_matrix_purity": 1.0,
+        "min_statevector_overlap": 1.0,
+        "mx_branches_verified": 16,
+        "naive_ebits_2_per_wire": 8,
+        "reverse_ebits": 0,
+        "total_branch_subpaths_verified": 32,
+        "u4_batched_cone_ebits": 1,
+        "u4_unbatched_ebits_1_per_wire": 4,
+        "unbatched_ebit_reduction_pct": 50.0
+      }
+    ],
+    "ecc_256_zipper_partition": {
+      "m_star_at_p005": 2,
+      "m_star_at_qcap400": 4,
+      "naive_ebits_per_win_cut": 46,
+      "naive_logical_ebits_m2": 5152,
+      "naive_logical_ebits_m4": 15456,
+      "num_windows": 112,
+      "reverse_cond_cz_ebits": 0,
+      "u4_batched_cat_ebit_reduction_pct": 45.65,
+      "u4_batched_cat_ebits_per_win_cut": 25,
+      "u4_batched_cat_logical_ebits_m2": 2800,
+      "u4_batched_cat_logical_ebits_m4": 8400,
+      "u4_tele_phase_ebit_reduction_pct": 36.96,
+      "u4_tele_phase_ebits_per_win_cut": 29,
+      "u4_tele_phase_logical_ebits_m2": 3248,
+      "u4_tele_phase_logical_ebits_m4": 9744,
+      "workload": "ECC-256"
+    },
+    "factored_cone_polynomial": "sum_r l_{1,r}(x^(p1)) * (xor_{k in cone(r)} m_k * l_{2,k}(x^(p2)))",
+    "min_reduced_density_matrix_purity": 1.0,
+    "min_statevector_overlap_vs_single_qpu": 1.0,
+    "pass_name": "u4-cross-qpu-tele-phase-opt",
+    "shor_2048_zipper_partition": {
+      "canonical_alias": "RSA-2048",
+      "m_star_at_p005": 6,
+      "m_star_at_qcap400": 4,
+      "naive_ebits_per_win_cut": 12,
+      "naive_logical_ebits_m4": 37368,
+      "naive_logical_ebits_m6": 62280,
+      "naive_raw_bell_pairs_m6_p005": 8158680,
+      "num_windows": 1038,
+      "reverse_cond_cz_ebits": 0,
+      "u4_tele_phase_ebit_reduction_pct": 50.0,
+      "u4_tele_phase_ebits_per_win_cut": 6,
+      "u4_tele_phase_logical_ebits_m4": 18684,
+      "u4_tele_phase_logical_ebits_m6": 31140,
+      "u4_tele_phase_raw_bell_pairs_m6_p005": 4079340,
+      "workload": "Shor-2048"
+    },
+    "total_mx_branches_simulated": 30,
+    "within_35_to_50_pct_band": true
+  }
 }

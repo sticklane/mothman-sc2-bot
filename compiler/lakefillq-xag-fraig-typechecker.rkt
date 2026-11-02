@@ -64,10 +64,13 @@
          xag-and
          xag-cofactor
          xag-eval-lit
+         xag-cone-canonical-signature
          xag-export-tseitin-smt2
          xag-z3-cut-sweep-miter!
+         z3-exec-push-pop!
          close-persistent-z3!
          infer-lakefillq-xag-circuit
+         infer-lakefillq-for-fold-loop
          run-bounded-explicit-anf-benchmark
          build-lakefillq-aes-rounds-sexpr
          build-lakefillq-keccak-f200-sexpr
@@ -128,11 +131,11 @@
       (subprocess-wait current-z3-proc))
     (set! current-z3-proc #f)))
 
-;; Send SMT-LIB2 commands expecting single-line token replies (e.g. "sat" / "unsat")
-;; plus optional s-expression model read `(read out)`.
-(define (z3-exec-script! smt2-commands-str #:read-sexpr-on-sat? [read-model? #f] #:model-vars [mvars '()])
+;; Incremental `(push 1)` / `(pop 1)` SMT-LIB2 execution on persistent `z3 -in -smt2`:
+;; Reuses the live solver context without full `(reset)` re-initialization.
+(define (z3-exec-push-pop! smt2-commands-str #:read-sexpr-on-sat? [read-model? #f] #:model-vars [mvars '()])
   (define-values (z3-in z3-out) (ensure-persistent-z3!))
-  (display "(reset)\n" z3-in)
+  (display "(push 1)\n" z3-in)
   (display smt2-commands-str z3-in)
   (newline z3-in)
   (display "(check-sat)\n" z3-in)
@@ -141,21 +144,66 @@
     (let loop ()
       (define ln (read-line z3-out 'any))
       (cond
-        [(eof-object? ln) (error 'z3-exec-script! "Unexpected EOF from z3")]
+        [(eof-object? ln) (error 'z3-exec-push-pop! "Unexpected EOF from z3")]
         [(string=? (string-trim ln) "") (loop)]
         [else (string-trim ln)])))
   (cond
     [(and (string=? status-line "sat") read-model? (not (null? mvars)))
-     (fprintf z3-in "(get-value (~a))\n" (string-join mvars " "))
+     (fprintf z3-in "(get-value (~a))\n(pop 1)\n" (string-join mvars " "))
      (flush-output z3-in)
      (define model-sexpr (read z3-out))
      (values 'sat model-sexpr)]
     [(string=? status-line "sat")
+     (display "(pop 1)\n" z3-in)
+     (flush-output z3-in)
      (values 'sat '())]
     [(string=? status-line "unsat")
+     (display "(pop 1)\n" z3-in)
+     (flush-output z3-in)
      (values 'unsat '())]
     [else
-     (error 'z3-exec-script! "Unexpected z3 response: ~a" status-line)]))
+     (display "(pop 1)\n" z3-in)
+     (flush-output z3-in)
+     (error 'z3-exec-push-pop! "Unexpected z3 response: ~a" status-line)]))
+
+;; Send SMT-LIB2 commands expecting single-line token replies (e.g. "sat" / "unsat")
+;; plus optional s-expression model read `(read out)`.
+(define (z3-exec-script! smt2-commands-str #:read-sexpr-on-sat? [read-model? #f] #:model-vars [mvars '()]
+                         #:incremental? [incremental? #t])
+  (if incremental?
+      (z3-exec-push-pop! smt2-commands-str #:read-sexpr-on-sat? read-model? #:model-vars mvars)
+      (let ()
+        (define-values (z3-in z3-out) (ensure-persistent-z3!))
+        (display "(reset)\n" z3-in)
+        (display smt2-commands-str z3-in)
+        (newline z3-in)
+        (display "(check-sat)\n" z3-in)
+        (flush-output z3-in)
+        (define status-line
+          (let loop ()
+            (define ln (read-line z3-out 'any))
+            (cond
+              [(eof-object? ln) (error 'z3-exec-script! "Unexpected EOF from z3")]
+              [(string=? (string-trim ln) "") (loop)]
+              [else (string-trim ln)])))
+        (cond
+          [(and (string=? status-line "sat") read-model? (not (null? mvars)))
+           (fprintf z3-in "(get-value (~a))\n(reset)\n" (string-join mvars " "))
+           (flush-output z3-in)
+           (define model-sexpr (read z3-out))
+           (values 'sat model-sexpr)]
+          [(string=? status-line "sat")
+           (display "(reset)\n" z3-in)
+           (flush-output z3-in)
+           (values 'sat '())]
+          [(string=? status-line "unsat")
+           (display "(reset)\n" z3-in)
+           (flush-output z3-in)
+           (values 'unsat '())]
+          [else
+           (display "(reset)\n" z3-in)
+           (flush-output z3-in)
+           (error 'z3-exec-script! "Unexpected z3 response: ~a" status-line)]))))
 
 ;; =============================================================================
 ;; SECTION 2: Structural Hash-Consed `XAG` / `FRAIG` with 256-Bit Signatures
@@ -653,39 +701,139 @@
     [else
      (values #f #f)]))
 
-;; Canonical structural digest of a local cut cone `(cut-nids, cone-nids, target-lits)`:
-;; Renumbers cut leaves `0..|C|-1` and internal cone nodes `|C|..|C|+|Cone|-1` so
-;; topologically identical sub-DAGs (only after `Z3` proves the prototype `UNSAT`!)
-;; reuse the `Z3`-proved lemma in `O(|Cone|)`.
-(define (xag-canonical-cut-digest mgr cut-nids cone-nids target-lits)
+;; Canonical structural signature of an `XAG` sub-DAG cone modulo input-wire relabeling:
+;; Computes leaf-relabeling-invariant node colors via 1-WL (bottom-up structural hash +
+;; top-down parent-context refinement), then traverses the cone in canonical root-down DFS
+;; order to assign leaf indices `1..|C|` and internal node indices `|C|+1..|C|+|Cone|`
+;; completely independently of raw variable/node numbering.
+(define (xag-cone-canonical-signature mgr target-lits [cut-nids #f] [cone-nids #f])
   (define kv (xag-manager-kind-vec mgr))
   (define a1v (xag-manager-arg1-vec mgr))
   (define a2v (xag-manager-arg2-vec mgr))
+  (define-values (eff-cuts eff-cone)
+    (if (and cut-nids cone-nids)
+        (values cut-nids cone-nids)
+        (let ([reach (let ([visited (mutable-set)])
+                       (define (dfs nid)
+                         (when (and (> nid 0) (not (set-member? visited nid)))
+                           (set-add! visited nid)
+                           (match (vector-ref kv nid)
+                             ['var (void)]
+                             ['xor (dfs (vector-ref a1v nid)) (dfs (vector-ref a2v nid))]
+                             ['and (dfs (lit-id (vector-ref a1v nid))) (dfs (lit-id (vector-ref a2v nid)))])))
+                       (for ([rl (in-list target-lits)]) (dfs (lit-id rl)))
+                       (sort (set->list visited) <))])
+          (partition (lambda (nid) (eq? (vector-ref kv nid) 'var)) reach))))
+  (define cut-set (list->set eff-cuts))
+  ;; 1. Bottom-up leaf-symmetric structural hash (`cid -> 1`, `'const0 -> 0`)
+  (define bu-col (make-hasheqv))
+  (hash-set! bu-col 0 0)
+  (for ([cid (in-list eff-cuts)])
+    (hash-set! bu-col cid 1))
+  (define (bcol nid) (hash-ref bu-col nid 1))
+  (for ([nid (in-list (sort eff-cone <))])
+    (match (vector-ref kv nid)
+      ['xor
+       (define cu (bcol (vector-ref a1v nid)))
+       (define cv (bcol (vector-ref a2v nid)))
+       (hash-set! bu-col nid (equal-hash-code (list 'x (min cu cv) (max cu cv))))]
+      ['and
+       (define l1 (vector-ref a1v nid))
+       (define l2 (vector-ref a2v nid))
+       (define c1 (equal-hash-code (cons (bcol (lit-id l1)) (lit-inv-bit l1))))
+       (define c2 (equal-hash-code (cons (bcol (lit-id l2)) (lit-inv-bit l2))))
+       (hash-set! bu-col nid (equal-hash-code (list 'a (min c1 c2) (max c1 c2))))]
+      [_ (hash-set! bu-col nid 1)]))
+  ;; 2. Top-down parent-context 1-WL refinement
+  (define pctx (make-hasheqv))
+  (define (add-ctx! nid ctx-val)
+    (hash-set! pctx nid (cons ctx-val (hash-ref pctx nid '()))))
+  (for ([tl (in-list target-lits)])
+    (add-ctx! (lit-id tl) (equal-hash-code (list 'root (lit-inv-bit tl)))))
+  (for ([nid (in-list (sort eff-cone >))])
+    (define p-c (bcol nid))
+    (match (vector-ref kv nid)
+      ['xor
+       (define u (vector-ref a1v nid))
+       (define v (vector-ref a2v nid))
+       (add-ctx! u (equal-hash-code (list 'px p-c (bcol v))))
+       (add-ctx! v (equal-hash-code (list 'px p-c (bcol u))))]
+      ['and
+       (define l1 (vector-ref a1v nid))
+       (define l2 (vector-ref a2v nid))
+       (define u (lit-id l1))
+       (define v (lit-id l2))
+       (add-ctx! u (equal-hash-code (list 'pa p-c (lit-inv-bit l1) (bcol v) (lit-inv-bit l2))))
+       (add-ctx! v (equal-hash-code (list 'pa p-c (lit-inv-bit l2) (bcol u) (lit-inv-bit l1))))]
+      [_ (void)]))
+  (define wl-col (make-hasheqv))
+  (hash-set! wl-col 0 0)
+  (for ([nid (in-list (append eff-cuts eff-cone))])
+    (hash-set! wl-col nid
+               (equal-hash-code (cons (bcol nid) (sort (hash-ref pctx nid '()) <)))))
+  (define (wcol nid) (hash-ref wl-col nid 0))
+  ;; 3. Canonical root-down DFS assigning leaf IDs `1..|C|` and internal IDs `|C|+1..|C|+|Cone|`
   (define relabel (make-hasheqv))
   (hash-set! relabel 0 0)
-  (for ([cid (in-list cut-nids)] [idx (in-naturals 1)])
-    (hash-set! relabel cid idx))
-  (define base-id (add1 (length cut-nids)))
-  (define defs
-    (for/list ([nid (in-list cone-nids)] [k (in-naturals)])
-      (define new-id (+ base-id k))
-      (hash-set! relabel nid new-id)
-      (match (vector-ref kv nid)
-        ['xor
-         (define ru (hash-ref relabel (vector-ref a1v nid)))
-         (define rv (hash-ref relabel (vector-ref a2v nid)))
-         (list 'x (min ru rv) (max ru rv))]
-        ['and
-         (define l1 (vector-ref a1v nid))
-         (define l2 (vector-ref a2v nid))
-         (define rl1 (make-lit (hash-ref relabel (lit-id l1)) (lit-inv-bit l1)))
-         (define rl2 (make-lit (hash-ref relabel (lit-id l2)) (lit-inv-bit l2)))
-         (list 'a (min rl1 rl2) (max rl1 rl2))])))
+  (define next-leaf-id 1)
+  (define next-int-id (add1 (length eff-cuts)))
+  (define rev-defs '())
+  (define (visit-nid! nid)
+    (cond
+      [(hash-has-key? relabel nid) (hash-ref relabel nid)]
+      [(or (set-member? cut-set nid) (eq? (vector-ref kv nid) 'var))
+       (define lid next-leaf-id)
+       (set! next-leaf-id (add1 next-leaf-id))
+       (hash-set! relabel nid lid)
+       lid]
+      [else
+       (match (vector-ref kv nid)
+         ['xor
+          (define u (vector-ref a1v nid))
+          (define v (vector-ref a2v nid))
+          (define-values (c1 c2)
+            (if (<= (wcol u) (wcol v)) (values u v) (values v u)))
+          (define ru (visit-nid! c1))
+          (define rv (visit-nid! c2))
+          (define my-id next-int-id)
+          (set! next-int-id (add1 next-int-id))
+          (hash-set! relabel nid my-id)
+          (set! rev-defs (cons (list 'x (min ru rv) (max ru rv)) rev-defs))
+          my-id]
+         ['and
+          (define l1 (vector-ref a1v nid))
+          (define l2 (vector-ref a2v nid))
+          (define k1 (+ (* 2 (wcol (lit-id l1))) (lit-inv-bit l1)))
+          (define k2 (+ (* 2 (wcol (lit-id l2))) (lit-inv-bit l2)))
+          (define-values (cl1 cl2)
+            (if (<= k1 k2) (values l1 l2) (values l2 l1)))
+          (define r1 (make-lit (visit-nid! (lit-id cl1)) (lit-inv-bit cl1)))
+          (define r2 (make-lit (visit-nid! (lit-id cl2)) (lit-inv-bit cl2)))
+          (define my-id next-int-id)
+          (set! next-int-id (add1 next-int-id))
+          (hash-set! relabel nid my-id)
+          (set! rev-defs (cons (list 'a (min r1 r2) (max r1 r2)) rev-defs))
+          my-id])]))
+  (define sorted-roots
+    (sort target-lits
+          (lambda (a b)
+            (< (+ (* 2 (wcol (lit-id a))) (lit-inv-bit a))
+               (+ (* 2 (wcol (lit-id b))) (lit-inv-bit b))))))
+  (for ([tl (in-list sorted-roots)])
+    (visit-nid! (lit-id tl)))
+  (for ([cid (in-list eff-cuts)] #:unless (hash-has-key? relabel cid))
+    (visit-nid! cid))
   (define rel-targets
     (sort (for/list ([tl (in-list target-lits)])
             (make-lit (hash-ref relabel (lit-id tl)) (lit-inv-bit tl)))
           <))
-  (list (length cut-nids) defs rel-targets))
+  (list (length eff-cuts) (reverse rev-defs) rel-targets))
+
+;; Canonical structural digest of a local cut cone `(cut-nids, cone-nids, target-lits)`:
+;; Delegates to `xag-cone-canonical-signature` so isomorphic sub-DAGs modulo input-wire
+;; relabeling share a single canonical Z3-verified lemma!
+(define (xag-canonical-cut-digest mgr cut-nids cone-nids target-lits)
+  (xag-cone-canonical-signature mgr target-lits cut-nids cone-nids))
 
 ;; Format an `XAG` literal reference inside SMT-LIB2 Tseitin encoding (`1` Bool var per node!)
 (define (smt2-lit-expr lit)
@@ -862,9 +1010,10 @@
        (for/and ([tl (in-list nonzero-targets)])
          (xag-lit-sim-zero? mgr tl)))
 
-     ;; 1. Local Bottleneck Cut-Sweeping (`UNSAT` candidate when `sim256 == 0`)
+     ;; 1. Local Bottleneck Cut-Sweeping (`UNSAT` candidate when `sim256 == 0` and unconstrained domain)
      (define cut-proved?
        (and all-sim-zero?
+            (eq? domain-pred 'all)
             (let-values ([(cut-nids cone-nids)
                           (if scope-pre-size
                               (let-values ([(sc scone)
@@ -885,7 +1034,7 @@
                                                    #:cut-nids cut-nids
                                                    #:cone-nids cone-nids))
                         (set-xag-manager-z3-queries! mgr (add1 (xag-manager-z3-queries mgr)))
-                        (define-values (st _) (z3-exec-script! smt2))
+                        (define-values (st _) (z3-exec-push-pop! smt2))
                         (when (eq? st 'unsat)
                           (set-add! (xag-manager-verified-cut-set mgr) digest))
                         (eq? st 'unsat)]))))))
@@ -933,7 +1082,7 @@
                                       #:extra-assumptions sim-assumps))
            (set-xag-manager-z3-queries! mgr (add1 (xag-manager-z3-queries mgr)))
            (define-values (st-sim mod-sim)
-             (z3-exec-script! smt-sim #:read-sexpr-on-sat? #t #:model-vars mvars))
+             (z3-exec-script! smt-sim #:read-sexpr-on-sat? #t #:model-vars mvars #:incremental? #f))
            (if (eq? st-sim 'sat)
                (values 'sat (parse-z3-model-to-cex mod-sim input-wires) 'primary-miter)
                ;; Full unconstrained fallback (completeness!)
@@ -945,7 +1094,7 @@
                                             #:domain-pred domain-pred))
                  (set-xag-manager-z3-queries! mgr (add1 (xag-manager-z3-queries mgr)))
                  (define-values (st-f mod-f)
-                   (z3-exec-script! smt-full #:read-sexpr-on-sat? #t #:model-vars mvars))
+                   (z3-exec-script! smt-full #:read-sexpr-on-sat? #t #:model-vars mvars #:incremental? #f))
                  (if (eq? st-f 'sat)
                      (values 'sat (parse-z3-model-to-cex mod-f input-wires) 'primary-miter)
                      (values 'unsat #f 'domain-global))))]
@@ -958,7 +1107,7 @@
                                       #:domain-pred domain-pred))
            (set-xag-manager-z3-queries! mgr (add1 (xag-manager-z3-queries mgr)))
            (define-values (st-f mod-f)
-             (z3-exec-script! smt-full #:read-sexpr-on-sat? #t #:model-vars mvars))
+             (z3-exec-script! smt-full #:read-sexpr-on-sat? #t #:model-vars mvars #:incremental? #f))
            (cond
              [(eq? st-f 'unsat)
               (values 'unsat #f 'domain-global)]
@@ -975,7 +1124,7 @@
                                                #:domain-pred `(wt-le ,target-w)))
                     (set-xag-manager-z3-queries! mgr (add1 (xag-manager-z3-queries mgr)))
                     (define-values (st-m mod-m)
-                      (z3-exec-script! smt-min #:read-sexpr-on-sat? #t #:model-vars mvars))
+                      (z3-exec-script! smt-min #:read-sexpr-on-sat? #t #:model-vars mvars #:incremental? #f))
                     (if (eq? st-m 'sat)
                         (set! best-cex (parse-z3-model-to-cex mod-m input-wires))
                         (tighten (add1 target-w))))))
@@ -1173,47 +1322,128 @@
     (inst-lit sl)))
 
 ;; Collect logical wires touched by a pure reversible/MBU sub-block (`#f` if non-cut-sweepable)
+;; Preserves canonical first-appearance order so isomorphic sub-blocks (even after `logical-relabel`
+;; wire permutations in `ShiftRows` / `SLP91` `MixColumns`) order their port wires identically!
 (define (collect-cut-sweep-wires expr)
-  (define ws (mutable-set))
+  (define seen (mutable-set))
+  (define ordered '())
+  (define (add-w! w)
+    (unless (set-member? seen w)
+      (set-add! seen w)
+      (set! ordered (cons w ordered))))
   (define ok? #t)
   (let walk ([e expr])
     (when ok?
       (match e
         ['skip (void)]
-        [`(x ,w) (set-add! ws w)]
-        [(or `(cx ,c ,t) `(cx ,c ,t ,_)) (set-add! ws c) (set-add! ws t)]
+        [`(x ,w) (add-w! w)]
+        [(or `(cx ,c ,t) `(cx ,c ,t ,_)) (add-w! c) (add-w! t)]
         [(or `(ccx ,c1 ,c2 ,t) `(ccx ,c1 ,c2 ,t ,_) `(temp-and ,c1 ,c2 ,t))
-         (set-add! ws c1) (set-add! ws c2) (set-add! ws t)]
-        [`(swap ,a ,b) (set-add! ws a) (set-add! ws b)]
+         (add-w! c1) (add-w! c2) (add-w! t)]
+        [`(swap ,a ,b) (add-w! a) (add-w! b)]
         [`(temp-and-lin ,lhs ,rhs ,anc ,_ ,_)
-         (for ([w (in-list lhs)]) (set-add! ws w))
-         (for ([w (in-list rhs)]) (set-add! ws w))
-         (set-add! ws anc)]
+         (for ([w (in-list lhs)]) (add-w! w))
+         (for ([w (in-list rhs)]) (add-w! w))
+         (add-w! anc)]
         [`(temp-and-lin ,lhs ,rhs ,anc)
-         (for ([w (in-list lhs)]) (set-add! ws w))
-         (for ([w (in-list rhs)]) (set-add! ws w))
-         (set-add! ws anc)]
+         (for ([w (in-list lhs)]) (add-w! w))
+         (for ([w (in-list rhs)]) (add-w! w))
+         (add-w! anc)]
         [`(temp-and-lin-adj-mbu ,lhs ,rhs ,anc ,_ ,_ ,_)
-         (for ([w (in-list lhs)]) (set-add! ws w))
-         (for ([w (in-list rhs)]) (set-add! ws w))
-         (set-add! ws anc)]
+         (for ([w (in-list lhs)]) (add-w! w))
+         (for ([w (in-list rhs)]) (add-w! w))
+         (add-w! anc)]
         [(or `(mx ,anc ,_) `(mid-meas-x ,anc -> ,_) `(mid-meas-x ,anc ,_))
-         (set-add! ws anc)]
-        [`(cond-z ,_ ,t) (set-add! ws t)]
+         (add-w! anc)]
+        [`(cond-z ,_ ,t) (add-w! t)]
         [(or `(cond-z ,_ ,c1 ,c2) `(cond-cz ,_ ,c1 ,c2))
-         (set-add! ws c1) (set-add! ws c2)]
+         (add-w! c1) (add-w! c2)]
         [`(mid-meas-x-cond-z ,anc (,c1 ,c2))
-         (set-add! ws anc) (set-add! ws c1) (set-add! ws c2)]
+         (add-w! anc) (add-w! c1) (add-w! c2)]
         [`(mid-meas-x-cond-z ,anc ,c1)
-         (set-add! ws anc) (set-add! ws c1)]
+         (add-w! anc) (add-w! c1)]
         [`(seq ,es ...) (for ([sub (in-list es)]) (walk sub))]
         [(or `(within-apply ,u ,b ,erased) `(within-apply-raw ,u ,b ,erased)
              `(within-apply-mbu ,u ,b ,erased) `(erase-by ,u ,b ,erased) `(erase-by-raw ,u ,b ,erased))
-         (walk u) (walk b) (for ([w (in-list erased)]) (set-add! ws w))]
+         (walk u) (walk b) (for ([w (in-list erased)]) (add-w! w))]
         [(or `(within-apply ,u ,b) `(within-apply-raw ,u ,b))
          (walk u) (walk b)]
         [_ (set! ok? #f)])))
-  (and ok? (sort (set->list ws) <)))
+  (and ok? (reverse ordered)))
+
+;; Canonicalize a sub-block AST modulo physical wire relabeling `pw -> port-idx (0..k-1)`
+;; and local measurement symbol numbering so isomorphic sub-blocks (e.g., 16 parallel AES
+;; S-boxes, key-schedule S-boxes, or 18 Keccak theta blocks) map to an identical canonical key
+;; iff their gate DAG and clean/active port partition are structurally isomorphic!
+(define (canonicalize-subblock-cone-ast expr phys-fn port-map)
+  (define m-map (make-hasheq))
+  (define next-m 0)
+  (define budget 48)
+  (define leaf-ops 0)
+  (define (canon-w lw)
+    (hash-ref port-map (phys-fn lw) -1))
+  (define (canon-m msym)
+    (hash-ref! m-map msym
+               (lambda ()
+                 (define id next-m)
+                 (set! next-m (add1 next-m))
+                 id)))
+  (define prefix-tree
+    (let walk ([e expr])
+      (set! leaf-ops (add1 leaf-ops))
+      (if (<= budget 0)
+          'trunc
+          (match e
+            ['skip 'skip]
+            [`(x ,w) (set! budget (sub1 budget)) `(x ,(canon-w w))]
+            [(or `(cx ,c ,t) `(cx ,c ,t ,_))
+             (set! budget (sub1 budget))
+             `(cx ,(canon-w c) ,(canon-w t))]
+            [(or `(ccx ,c1 ,c2 ,t) `(ccx ,c1 ,c2 ,t ,_))
+             (set! budget (sub1 budget))
+             `(ccx ,(canon-w c1) ,(canon-w c2) ,(canon-w t))]
+            [`(temp-and ,c1 ,c2 ,t)
+             (set! budget (sub1 budget))
+             `(ta ,(canon-w c1) ,(canon-w c2) ,(canon-w t))]
+            [`(swap ,a ,b)
+             (set! budget (sub1 budget))
+             `(sw ,(canon-w a) ,(canon-w b))]
+            [`(temp-and-lin ,lhs ,rhs ,anc ,nl? ,nr?)
+             (set! budget (sub1 budget))
+             `(tal ,(map canon-w lhs) ,(map canon-w rhs) ,(canon-w anc) ,nl? ,nr?)]
+            [`(temp-and-lin ,lhs ,rhs ,anc)
+             (set! budget (sub1 budget))
+             `(tal ,(map canon-w lhs) ,(map canon-w rhs) ,(canon-w anc) #f #f)]
+            [`(temp-and-lin-adj-mbu ,lhs ,rhs ,anc ,nl? ,nr? ,msym)
+             (set! budget (sub1 budget))
+             `(tala ,(map canon-w lhs) ,(map canon-w rhs) ,(canon-w anc) ,nl? ,nr? ,(canon-m msym))]
+            [(or `(mx ,anc ,msym) `(mid-meas-x ,anc -> ,msym) `(mid-meas-x ,anc ,msym))
+             (set! budget (sub1 budget))
+             `(mx ,(canon-w anc) ,(canon-m msym))]
+            [`(cond-z ,msym ,t)
+             (set! budget (sub1 budget))
+             `(cz1 ,(canon-m msym) ,(canon-w t))]
+            [(or `(cond-z ,msym ,c1 ,c2) `(cond-cz ,msym ,c1 ,c2))
+             (set! budget (sub1 budget))
+             `(cz2 ,(canon-m msym) ,(canon-w c1) ,(canon-w c2))]
+            [`(mid-meas-x-cond-z ,anc (,c1 ,c2))
+             (set! budget (sub1 budget))
+             `(mbu2 ,(canon-w anc) ,(canon-w c1) ,(canon-w c2))]
+            [`(mid-meas-x-cond-z ,anc ,c1)
+             (set! budget (sub1 budget))
+             `(mbu1 ,(canon-w anc) ,(canon-w c1))]
+            [`(seq ,es ...)
+             `(seq ,(length es) ,@(for/list ([s (in-list es)] #:when (> budget 0)) (walk s)))]
+            [(or `(within-apply ,u ,b ,erased) `(within-apply-raw ,u ,b ,erased))
+             `(wa ,(walk u) ,(walk b) ,(map canon-w erased))]
+            [(or `(within-apply ,u ,b) `(within-apply-raw ,u ,b))
+             `(wa2 ,(walk u) ,(walk b))]
+            [`(within-apply-mbu ,u ,b ,erased)
+             `(wambu ,(walk u) ,(walk b) ,(map canon-w erased))]
+            [(or `(erase-by ,u ,b ,erased) `(erase-by-raw ,u ,b ,erased))
+             `(eb ,(walk u) ,(walk b) ,(map canon-w erased))]
+            [_ e]))))
+  (list leaf-ops prefix-tree))
 
 ;; Detect purely affine/linear `LakefillQ` subcircuits (e.g., 200-wire Keccak `theta` `40x40` GF(2) inverse)
 (define (purely-linear-cut-expr? expr)
@@ -1236,15 +1466,17 @@
 (define (infer-lakefillq-xag-circuit hw input-wires scratch-wires domain-pred raw-sexpr
                                      #:enforce-phi1? [enforce-phi1? #t]
                                      #:shared-cut-cache [shared-cut-cache #f]
+                                     #:shared-subcone-cache [shared-subcone-cache #f]
                                      #:initial-wmap [initial-wmap #f]
                                      #:allow-local-cut? [allow-local-cut? #t])
   (define num-inputs (length input-wires))
   (define mgr-basis-cap
     (cond
       [shared-cut-cache 256]
-      [(<= num-inputs 128) 64]
+      [(<= num-inputs 128) 128]
       [else 24]))
   (define mgr (make-xag-manager (if shared-cut-cache 1024 8192) shared-cut-cache mgr-basis-cap))
+  (define subcone-cache (or shared-subcone-cache (make-hash)))
   (define input-var-map
     (for/hasheqv ([w (in-list input-wires)] [idx (in-naturals)])
       (values w idx)))
@@ -1447,10 +1679,13 @@
                     u4-viols)))
       (hash-set! u4-coeffs m-sym lit-zero)))
 
+  ;; Preserve first-appearance order when cancelling even-multiplicity wires so
+  ;; `distinct-pivot-fanin-cxs` chooses the exact same logical pivot wire across
+  ;; all relabeled S-boxes (`ShiftRows` / `SLP91` `MixColumns`).
   (define (dedup-odd-wires ws)
     (define h (make-hasheqv))
     (for ([w (in-list ws)]) (hash-update! h w add1 0))
-    (sort (for/list ([(w c) (in-hash h)] #:when (odd? c)) w) <))
+    (remove-duplicates (filter (lambda (w) (odd? (hash-ref h w 0))) ws)))
 
   ;; Recursive `LakefillQ` symbolic abstract interpreter
   (define (step-expr! expr)
@@ -1764,8 +1999,8 @@
          (and touched-pws
               (filter (lambda (pw) (not (= (get-phys-lit pw) lit-zero))) touched-pws)))
        (cond
-         ;; Local Bottleneck Cut-Sweeping + FRAIG Pivot Pruning when `1 <= |active-pws| <= 16`
-         ;; or purely linear GF(2) inverse block up to `256` active wires (e.g., 200-wire Keccak `theta`)!
+         ;; Local Bottleneck Cut-Sweeping + Canonical Sub-DAG Cone Memoization + FRAIG Pivot Pruning
+         ;; when `1 <= |active-pws| <= 16` or purely linear GF(2) inverse block up to `256` active wires!
          [(and active-pws
                (>= (length active-pws) 1)
                (or (<= (length active-pws) 16)
@@ -1776,72 +2011,122 @@
             (filter (lambda (pw) (= (get-phys-lit pw) lit-zero)) touched-pws))
           (define orig-lits-vec
             (for/vector ([pw (in-list active-pws)]) (get-phys-lit pw)))
-          (define sub-res
-            (infer-lakefillq-xag-circuit hw
-                                         active-pws
-                                         clean-pws
-                                         'all
-                                         `(erase-by-raw ,fwd-e ,bwd-e ,erased-ws)
-                                         #:enforce-phi1? #f
-                                         #:shared-cut-cache (xag-manager-verified-cut-set mgr)
-                                         #:initial-wmap wmap
-                                         #:allow-local-cut? #f))
-          (define sub-mgr (xag-inference-result-manager sub-res))
-          (define sub-stats (xag-inference-result-xag-stats sub-res))
-          (set-xag-manager-z3-queries! mgr
-                                       (+ (xag-manager-z3-queries mgr)
-                                          (xag-manager-z3-queries sub-mgr)))
-          (set-xag-manager-cut-cache-hits! mgr
-                                           (+ (xag-manager-cut-cache-hits mgr)
-                                              (xag-manager-cut-cache-hits sub-mgr)))
-          (set-xag-manager-fraig-merges! mgr
-                                         (+ (xag-manager-fraig-merges mgr)
-                                            (xag-manager-fraig-merges sub-mgr)))
-          (define sub-quad-ok?
-            (for/and ([v (in-list (xag-inference-result-u4-violations sub-res))])
-              (not (equal? (hash-ref v 'trigger "") "non_quadratic_mx_session_ancilla"))))
+          (define erased-pws (map phys erased-ws))
+          (define erased-pset (list->set erased-pws))
+          (define kept-pws
+            (filter (lambda (pw) (not (set-member? erased-pset pw))) touched-pws))
+          (define port-map
+            (for/hasheqv ([pw (in-list (append active-pws clean-pws))]
+                          [idx (in-naturals)])
+              (values pw idx)))
+          (define subcone-key
+            (and (not enforce-phi1?)
+                 (list (length active-pws)
+                       (length clean-pws)
+                       (canonicalize-subblock-cone-ast
+                        `(erase-by-raw ,fwd-e ,bwd-e ,erased-ws)
+                        phys
+                        port-map))))
           (cond
-            [(and (xag-inference-result-u1-ok? sub-res)
-                  (xag-inference-result-u2-ok? sub-res)
-                  (xag-inference-result-u3-ok? sub-res)
-                  sub-quad-ok?)
-             ;; Update `temp-and-count`, `mbu-count`, and `qura` wire liveness
-             (set! temp-and-count (+ temp-and-count (hash-ref sub-stats 'temp_and_gates_checked)))
-             (set! mbu-count (+ mbu-count (hash-ref sub-stats 'mbu_sessions_checked)))
-             (for ([pw (in-list clean-pws)]) (touch-phys! pw #t))
-             (define erased-pws (map phys erased-ws))
-             (define erased-pset (list->set erased-pws))
-             (define kept-pws
-               (filter (lambda (pw) (not (set-member? erased-pset pw))) touched-pws))
-             (define sub-wxag (xag-inference-result-final-wire-xag sub-res))
-             (define sub-u4 (xag-inference-result-final-u4-coeffs sub-res))
-             (define nonzero-sub-u4
-               (for/list ([(ms sl) (in-hash sub-u4)] #:unless (= sl lit-zero))
-                 (cons ms sl)))
-             (define inst-all
-               (xag-instantiate-lits!
-                mgr
-                sub-mgr
-                orig-lits-vec
-                (append (for/list ([pw (in-list kept-pws)])
-                          (hash-ref sub-wxag pw lit-zero))
-                        (map cdr nonzero-sub-u4))))
-             (define inst-kept (take inst-all (length kept-pws)))
-             (define inst-u4   (drop inst-all (length kept-pws)))
-             (for ([pw (in-list kept-pws)] [ilit (in-list inst-kept)])
-               (hash-set! wire-xag pw ilit))
-             (for ([pair (in-list nonzero-sub-u4)] [uglit (in-list inst-u4)])
-               (hash-set! u4-coeffs (fresh-m-sym!) uglit))
-             (for ([pw (in-list erased-pws)])
-               (free-phys! pw))
-             (xag-inference-result-phys-grade sub-res)]
+            [(and subcone-key (hash-ref subcone-cache subcone-key #f))
+             =>
+             (lambda (cached-entry)
+               ;; Verified Canonical Sub-DAG Cone Cache Hit (`O(1)` Z3 queries!):
+               (match-define (list c-mgr c-kept-lits c-u4-lits c-tands c-mbus c-hits c-fraig c-grade)
+                 cached-entry)
+               (set-xag-manager-cut-cache-hits! mgr (+ (xag-manager-cut-cache-hits mgr) c-hits))
+               (set-xag-manager-fraig-merges! mgr (+ (xag-manager-fraig-merges mgr) c-fraig))
+               (set! temp-and-count (+ temp-and-count c-tands))
+               (set! mbu-count (+ mbu-count c-mbus))
+               (for ([pw (in-list clean-pws)]) (touch-phys! pw #t))
+               (define inst-all
+                 (xag-instantiate-lits! mgr c-mgr orig-lits-vec (append c-kept-lits c-u4-lits)))
+               (define inst-kept (take inst-all (length kept-pws)))
+               (define inst-u4   (drop inst-all (length kept-pws)))
+               (for ([pw (in-list kept-pws)] [ilit (in-list inst-kept)])
+                 (hash-set! wire-xag pw ilit))
+               (for ([uglit (in-list inst-u4)])
+                 (hash-set! u4-coeffs (fresh-m-sym!) uglit))
+               (for ([pw (in-list erased-pws)])
+                 (free-phys! pw))
+               c-grade)]
             [else
-             ;; Local cut not unconditionally clean -> run directly in global `mgr` for exact CEX!
-             (define pre-sz (xag-manager-size mgr))
-             (define gf (step-expr! fwd-e))
-             (define gb (step-expr! bwd-e))
-             (verify-and-free-erased-phys! 'erase-by-raw (map phys erased-ws) pre-sz)
-             (grade-seq gf gb)])]
+             (define sub-res
+               (infer-lakefillq-xag-circuit hw
+                                            active-pws
+                                            clean-pws
+                                            'all
+                                            `(erase-by-raw ,fwd-e ,bwd-e ,erased-ws)
+                                            #:enforce-phi1? #f
+                                            #:shared-cut-cache (xag-manager-verified-cut-set mgr)
+                                            #:shared-subcone-cache subcone-cache
+                                            #:initial-wmap wmap
+                                            #:allow-local-cut? #f))
+             (define sub-mgr (xag-inference-result-manager sub-res))
+             (define sub-stats (xag-inference-result-xag-stats sub-res))
+             (set-xag-manager-z3-queries! mgr
+                                          (+ (xag-manager-z3-queries mgr)
+                                             (xag-manager-z3-queries sub-mgr)))
+             (set-xag-manager-cut-cache-hits! mgr
+                                              (+ (xag-manager-cut-cache-hits mgr)
+                                                 (xag-manager-cut-cache-hits sub-mgr)))
+             (set-xag-manager-fraig-merges! mgr
+                                            (+ (xag-manager-fraig-merges mgr)
+                                               (xag-manager-fraig-merges sub-mgr)))
+             (define sub-quad-ok?
+               (for/and ([v (in-list (xag-inference-result-u4-violations sub-res))])
+                 (not (equal? (hash-ref v 'trigger "") "non_quadratic_mx_session_ancilla"))))
+             (cond
+               [(and (xag-inference-result-u1-ok? sub-res)
+                     (xag-inference-result-u2-ok? sub-res)
+                     (xag-inference-result-u3-ok? sub-res)
+                     sub-quad-ok?)
+                ;; Update `temp-and-count`, `mbu-count`, and `qura` wire liveness
+                (define sub-tands (hash-ref sub-stats 'temp_and_gates_checked))
+                (define sub-mbus  (hash-ref sub-stats 'mbu_sessions_checked))
+                (set! temp-and-count (+ temp-and-count sub-tands))
+                (set! mbu-count (+ mbu-count sub-mbus))
+                (for ([pw (in-list clean-pws)]) (touch-phys! pw #t))
+                (define sub-wxag (xag-inference-result-final-wire-xag sub-res))
+                (define sub-u4 (xag-inference-result-final-u4-coeffs sub-res))
+                (define nonzero-sub-u4
+                  (for/list ([(ms sl) (in-hash sub-u4)] #:unless (= sl lit-zero))
+                    (cons ms sl)))
+                (define kept-src-lits
+                  (for/list ([pw (in-list kept-pws)])
+                    (hash-ref sub-wxag pw lit-zero)))
+                (define u4-src-lits (map cdr nonzero-sub-u4))
+                (when subcone-key
+                  (define hit-inc
+                    (+ (xag-manager-z3-queries sub-mgr)
+                       (xag-manager-cut-cache-hits sub-mgr)))
+                  (hash-set! subcone-cache subcone-key
+                             (list sub-mgr
+                                   kept-src-lits
+                                   u4-src-lits
+                                   sub-tands
+                                   sub-mbus
+                                   hit-inc
+                                   (xag-manager-fraig-merges sub-mgr)
+                                   (xag-inference-result-phys-grade sub-res))))
+                (define inst-all
+                  (xag-instantiate-lits! mgr sub-mgr orig-lits-vec (append kept-src-lits u4-src-lits)))
+                (define inst-kept (take inst-all (length kept-pws)))
+                (define inst-u4   (drop inst-all (length kept-pws)))
+                (for ([pw (in-list kept-pws)] [ilit (in-list inst-kept)])
+                  (hash-set! wire-xag pw ilit))
+                (for ([pair (in-list nonzero-sub-u4)] [uglit (in-list inst-u4)])
+                  (hash-set! u4-coeffs (fresh-m-sym!) uglit))
+                (for ([pw (in-list erased-pws)])
+                  (free-phys! pw))
+                (xag-inference-result-phys-grade sub-res)]
+               [else
+                ;; Local cut not unconditionally clean -> run directly in global `mgr` for exact CEX!
+                (define pre-sz (xag-manager-size mgr))
+                (define gf (step-expr! fwd-e))
+                (define gb (step-expr! bwd-e))
+                (verify-and-free-erased-phys! 'erase-by-raw (map phys erased-ws) pre-sz)
+                (grade-seq gf gb)])])]
          [else
           (define pre-sz (xag-manager-size mgr))
           (define gf (step-expr! fwd-e))
@@ -1925,6 +2210,15 @@
                         [idle-milli (quotient (qphys-grade-idle-milli gb) shots-k)]
                         [gate-milli (quotient (qphys-grade-gate-milli gb) shots-k)]
                         [duration-ns (quotient (qphys-grade-duration-ns gb) shots-k)]))]
+
+      ;; Native Racket `(for/fold-loop ...)` AST construct:
+      [`(for/fold-loop ([,_ ,num-rounds]) ,round-fn-or-sexpr)
+       (define round-fn
+         (if (procedure? round-fn-or-sexpr)
+             round-fn-or-sexpr
+             (lambda (_r) round-fn-or-sexpr)))
+       (for/fold ([g-acc qphys-zero-grade]) ([r (in-range num-rounds)])
+         (grade-seq g-acc (step-expr! (round-fn r))))]
 
       [_ (error 'infer-lakefillq-xag-circuit "Unrecognized LakefillQ AST: ~a" expr)]))
 
@@ -2092,6 +2386,126 @@
    u4-coeffs
    wmap
    mgr))
+
+;; Zero-Flag Automatic Loop-Invariant Escalation (`k=1 -> k=2 -> k=R`)
+;;
+;; Given a `(for/fold-loop ([r R]) round-fn)` specification (or `num-rounds` + `round-fn`),
+;; automatically attempts:
+;;   - Stage 1 (`k = 1`): 1-round inductive step on symbolic inputs + clean scratch wires
+;;     when all rounds `0 .. R-1` share an isomorphic uncomputation skeleton.
+;;   - Stage 2 (`k = 2`): 2-round ping-pong inductive step when `k = 1` leaves scratch
+;;     wires dirty (e.g., even rounds allocate/compute temporary ancillas and odd rounds
+;;     uncompute/erase them) and all 2-round pairs `(2j, 2j+1)` share an isomorphic skeleton.
+;;   - Stage 3 (`k = R`): Full `R`-round unrolled symbolic execution with canonical
+;;     sub-DAG cone memoization (`xag-cone-canonical-signature`) when rounds are
+;;     structurally heterogeneous or when `k = 1` / `k = 2` fails.
+(define (round-skeleton-modulo-pauli-x expr)
+  (let loop ([e expr])
+    (match e
+      ['skip 'skip]
+      [`(x ,_) 'skip]
+      [`(mx ,w ,_) `(mx ,w m_canon)]
+      [`(cond-z ,_ ,w1 ,w2) `(cond-z m_canon ,w1 ,w2)]
+      [`(cond-cz ,_ ,w1 ,w2) `(cond-cz m_canon ,w1 ,w2)]
+      [`(seq ,es ...)
+       (define filtered
+         (for/list ([s (in-list es)]
+                    #:unless (eq? (loop s) 'skip))
+           (loop s)))
+       `(seq ,@filtered)]
+      [(? list?) (map loop e)]
+      [_ e])))
+
+(define (infer-lakefillq-for-fold-loop hw
+                                       input-wires
+                                       scratch-wires
+                                       domain-pred
+                                       num-rounds
+                                       round-fn-or-sexpr
+                                       #:assert-clean-wires [clean-wires scratch-wires]
+                                       #:enforce-phi1? [enforce-phi1? #f])
+  (define t0 (current-inexact-milliseconds))
+  (define round-fn
+    (if (procedure? round-fn-or-sexpr)
+        round-fn-or-sexpr
+        (lambda (_r) round-fn-or-sexpr)))
+  (define round-exprs
+    (for/list ([r (in-range num-rounds)])
+      (round-fn r)))
+  (define round-skeletons
+    (map round-skeleton-modulo-pauli-x round-exprs))
+  (define k1-uniform?
+    (or (<= num-rounds 1)
+        (let ([s0 (first round-skeletons)])
+          (for/and ([s (in-list (rest round-skeletons))])
+            (equal? s s0)))))
+  (define k2-uniform?
+    (and (even? num-rounds)
+         (>= num-rounds 2)
+         (let ([p0 (list (first round-skeletons) (second round-skeletons))])
+           (for/and ([j (in-range 1 (quotient num-rounds 2))])
+             (equal? (list (list-ref round-skeletons (* 2 j))
+                           (list-ref round-skeletons (add1 (* 2 j))))
+                     p0)))))
+
+  ;; Stage 1: Try `k = 1` single-round invariant check
+  (define k1-sexpr `(seq ,(first round-exprs) (assert-clean ,clean-wires)))
+  (define k1-res
+    (infer-lakefillq-xag-circuit hw input-wires scratch-wires domain-pred k1-sexpr
+                                 #:enforce-phi1? enforce-phi1?))
+  (cond
+    [(and k1-uniform? (xag-inference-result-logical-well-typed? k1-res))
+     (define ms (- (current-inexact-milliseconds) t0))
+     (hasheq 'escalation_stage "k=1"
+             'k1_attempted #t
+             'k2_attempted #f
+             'kR_attempted #f
+             'logical_well_typed #t
+             'u1_ok (xag-inference-result-u1-ok? k1-res)
+             'u4_ok (xag-inference-result-u4-ok? k1-res)
+             'inference_time_ms (real->decimal-string ms 3)
+             'xag_stats (xag-inference-result-xag-stats k1-res)
+             'result k1-res)]
+    [else
+     ;; Stage 2: Try `k = 2` two-round ping-pong invariant check if `num-rounds >= 2`
+     (define k2-res
+       (and (>= num-rounds 2)
+            (infer-lakefillq-xag-circuit
+             hw input-wires scratch-wires domain-pred
+             `(seq ,(first round-exprs) ,(second round-exprs) (assert-clean ,clean-wires))
+             #:enforce-phi1? enforce-phi1?)))
+     (cond
+       [(and k2-res k2-uniform? (xag-inference-result-logical-well-typed? k2-res))
+        (define ms (- (current-inexact-milliseconds) t0))
+        (hasheq 'escalation_stage "k=2"
+                'k1_attempted #t
+                'k2_attempted #t
+                'kR_attempted #f
+                'logical_well_typed #t
+                'u1_ok (xag-inference-result-u1-ok? k2-res)
+                'u4_ok (xag-inference-result-u4-ok? k2-res)
+                'inference_time_ms (real->decimal-string ms 3)
+                'xag_stats (xag-inference-result-xag-stats k2-res)
+                'result k2-res)]
+       [else
+        ;; Stage 3: Automatic fallback to full `k = R` unrolled verification with canonical cone caching
+        (define kR-sexpr
+          `(seq (for/fold-loop ([r ,num-rounds]) ,round-fn)
+                (assert-clean ,clean-wires)))
+        (define kR-res
+          (infer-lakefillq-xag-circuit hw input-wires scratch-wires domain-pred kR-sexpr
+                                       #:enforce-phi1? enforce-phi1?))
+        (define ms (- (current-inexact-milliseconds) t0))
+        (hasheq 'escalation_stage "k=R"
+                'k1_attempted #t
+                'k2_attempted (>= num-rounds 2)
+                'kR_attempted #t
+                'logical_well_typed (xag-inference-result-logical-well-typed? kR-res)
+                'u1_ok (xag-inference-result-u1-ok? kR-res)
+                'u4_ok (xag-inference-result-u4-ok? kR-res)
+                'inference_time_ms (real->decimal-string ms 3)
+                'xag_stats (xag-inference-result-xag-stats kR-res)
+                'result kR-res)])]))
 
 ;; =============================================================================
 ;; SECTION 5: Multi-Round Cryptographic Builders, Deep Bug Injections & ANF Cap
@@ -2708,6 +3122,51 @@
   (unless (= (hash-ref bug-d-cex 'hamming_weight) 2)
     (error 'bug-d-bch15-wt "Expected minimal counterexample weight 2, got ~a" bug-d-cex))
 
+  ;; ---------------------------------------------------------------------------
+  ;; 6. Zero-Flag Automatic Loop-Invariant Escalation (`k=1 -> k=2 -> k=R`)
+  ;; ---------------------------------------------------------------------------
+  ;; (6a) Stage `k=1`: Uniform 10-round AES-128 round loop
+  (define aes128-uniform-round-sexpr
+    (build-lakefillq-aes-rounds-sexpr 128 1 aes128-state aes128-key aes128-sc34))
+  (define esc-k1-summary
+    (infer-lakefillq-for-fold-loop
+     hw (append aes128-state aes128-key) aes128-sc34 'all 10
+     (lambda (_r) aes128-uniform-round-sexpr)))
+  (unless (and (equal? (hash-ref esc-k1-summary 'escalation_stage) "k=1")
+               (hash-ref esc-k1-summary 'logical_well_typed))
+    (error 'esc-k1 "Expected k=1 escalation to verify uniform 10-round AES-128 loop!"))
+
+  ;; (6b) Stage `k=2`: 10-round 2-phase ping-pong loop where even rounds allocate/compute
+  ;;      into scratch wire `sc[0]` and odd rounds uncompute `sc[0]` via MBU (`mx` + `cond-z`)
+  (define pp-inputs '(0 1 2 3))
+  (define pp-scratch '(4))
+  (define esc-k2-summary
+    (infer-lakefillq-for-fold-loop
+     hw pp-inputs pp-scratch 'all 10
+     (lambda (r)
+       (if (even? r)
+           `(seq (temp-and 0 1 4) (cx 4 2))
+           `(seq (cx 4 3) (mx 4 ,(string->symbol (format "m_pp_~a" r)))
+                 (cond-z ,(string->symbol (format "m_pp_~a" r)) 0 1))))))
+  (unless (and (equal? (hash-ref esc-k2-summary 'escalation_stage) "k=2")
+               (hash-ref esc-k2-summary 'logical_well_typed))
+    (error 'esc-k2 "Expected k=2 escalation to verify 2-round ping-pong loop!"))
+
+  ;; (6c) Stage `k=R`: Heterogeneous 6-round loop with Round-5 missing `cond-z` fixup
+  (define esc-kR-summary
+    (infer-lakefillq-for-fold-loop
+     hw pp-inputs pp-scratch 'all 6
+     (lambda (r)
+       (if (= r 4)
+           `(seq (temp-and 0 1 4) (cx 4 2) (mx 4 m_het_r4))
+           `(seq (temp-and 0 1 4) (cx 4 2)
+                 (mx 4 ,(string->symbol (format "m_het_~a" r)))
+                 (cond-z ,(string->symbol (format "m_het_~a" r)) 0 1))))))
+  (unless (and (equal? (hash-ref esc-kR-summary 'escalation_stage) "k=R")
+               (not (hash-ref esc-kR-summary 'logical_well_typed))
+               (not (hash-ref esc-kR-summary 'u4_ok)))
+    (error 'esc-kR "Expected k=R escalation to catch Round-5 missing cond-z bug in heterogeneous loop!"))
+
   (close-persistent-z3!)
   (define total-ms (- (current-inexact-milliseconds) total-t0))
 
@@ -2718,6 +3177,10 @@
    'total_wall_time_ms (real->decimal-string total-ms 2)
    'aes128_fips197_c1_xag_ciphertext_hex c1-got-hex
    'aes128_round_1_to_10_scaling aes128-round-scaling
+   'canonical_cone_and_loop_escalation
+   (hasheq 'k1_uniform_aes128_loop (hash-remove esc-k1-summary 'result)
+           'k2_ping_pong_loop (hash-remove esc-k2-summary 'result)
+           'kR_heterogeneous_buggy_loop (hash-remove esc-kR-summary 'result))
    'multiblock_sound_benchmarks
    (list
     (hasheq 'id "AES128_10round_pareto_290q"

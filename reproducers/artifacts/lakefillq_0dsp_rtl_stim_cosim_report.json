@@ -3,8 +3,8 @@
   "zero_dsp_static_audit": {
     "sv_file": "hardware/lakefillq_0dsp_braun_uf_decoder.sv",
     "dslx_file": "hardware/lakefillq_0dsp_braun_uf_decoder.x",
-    "sv_lines": 1094,
-    "dslx_lines": 776,
+    "sv_lines": 1687,
+    "dslx_lines": 916,
     "sv_mul_div_mod_operators": 0,
     "dslx_mul_div_mod_operators": 0,
     "dsp48_or_umul_primitives": 0,
@@ -170,6 +170,46 @@
         "asap7_7nm_arrival_ps": 254,
         "asap7_7nm_slack_ps": 1746
       }
+    },
+    "subblocks_fastpath_opt5": {
+      "lakefillq_ortree_xor_sparse_fastpath12": {
+        "aig_and2_gates": 396,
+        "lut6_count": 107,
+        "carry4_primitives": 9,
+        "dsp48_primitives": 0,
+        "aig_logic_levels": 20,
+        "lut6_logic_levels": 4,
+        "fpga_500mhz_arrival_ps": 884,
+        "fpga_500mhz_slack_ps": 1116,
+        "fpga_fmax_mhz": 1131.22,
+        "asap7_7nm_arrival_ps": 566,
+        "asap7_7nm_slack_ps": 1434
+      },
+      "lakefillq_ortree_xor_sparse_fastpath24": {
+        "aig_and2_gates": 1214,
+        "lut6_count": 292,
+        "carry4_primitives": 33,
+        "dsp48_primitives": 0,
+        "aig_logic_levels": 37,
+        "lut6_logic_levels": 8,
+        "fpga_500mhz_arrival_ps": 1628,
+        "fpga_500mhz_slack_ps": 372,
+        "fpga_fmax_mhz": 614.25,
+        "asap7_7nm_arrival_ps": 1008,
+        "asap7_7nm_slack_ps": 992
+      }
+    },
+    "hybrid_fastpath_top_module_synthesis": {
+      "top_module": "lakefillq_0dsp_hybrid_fastpath_uf_decoder",
+      "post_mapping_lut6_total": 7854,
+      "post_mapping_carry4_total": 83,
+      "post_mapping_fdre_flip_flops": 791,
+      "post_mapping_dsp48_slices": 0,
+      "post_mapping_aig_and2_total": 28680,
+      "zero_defect_fastpath_clocks": 1,
+      "zero_defect_fastpath_ns_at_400mhz": 2.5,
+      "isolated_weight2_fastpath_clocks": 2,
+      "isolated_weight2_fastpath_ns_at_400mhz": 5.0
     }
   },
   "z3_qfbv_equivalence_miters": {
@@ -177,13 +217,13 @@
       "status": "UNSAT",
       "fault_injection_sanity": "SAT",
       "dag_wire_nodes": 978,
-      "solve_time_s": 0.3031
+      "solve_time_s": 1.1976
     },
     "miter2_shiloach_vishkin_jump_and_parity_merge": {
       "status": "UNSAT",
       "star_contraction_4step_status": "UNSAT",
       "dag_wire_nodes": 25480,
-      "solve_time_s": 23.0597
+      "solve_time_s": 31.6143
     },
     "miter3_spanning_tree_peel_commutation_Hc_eq_s": {
       "subblock_sv_aig_dslx_equiv_status": "UNSAT",
@@ -191,11 +231,121 @@
       "all_weight1_and_weight2_d5_logical_exact_status": "UNSAT",
       "dag_wire_nodes": 41518,
       "pipeline_register_vars": 82,
-      "subblock_equiv_time_s": 0.1868,
-      "universal_Hc_eq_s_time_s": 7.5914,
-      "weight1_weight2_fault_clearance_time_s": 0.9925,
-      "total_time_s": 9.8134
+      "subblock_equiv_time_s": 0.2206,
+      "universal_Hc_eq_s_time_s": 11.4485,
+      "weight1_weight2_fault_clearance_time_s": 1.5738,
+      "total_time_s": 14.5423
+    },
+    "miter4_ortree_xor_sparse_fastpath_vs_full_uf_peel": {
+      "fastpath12_sv_aig_dslx_equiv_status": "UNSAT",
+      "fastpath_vs_full_uf_peel_corr25_and_lflip_equiv_status": "UNSAT",
+      "fastpath_stabilizer_commutation_Hc_eq_s_status": "UNSAT",
+      "dag_wire_nodes": 1372,
+      "subblock_equiv_time_s": 0.1451,
+      "fastpath_vs_uf_equiv_time_s": 0.6837,
+      "total_time_s": 0.8288
     }
+  },
+  "optimization5_sparse_syndrome_fastpath_10k_benchmark": {
+    "clock_frequency_mhz": 400.0,
+    "clock_period_ns": 2.5,
+    "weight0_resolution_clocks": 1,
+    "weight0_resolution_ns": 2.5,
+    "isolated_weight2_resolution_clocks": 2,
+    "isolated_weight2_resolution_ns": 5.0,
+    "dsp48e2_slices": 0,
+    "exhaustive_12bit_lane_fastpath_syndromes_verified": 28,
+    "monte_carlo_rounds_per_family": 10000,
+    "d5_baseline_tau_dec_ns": 180.0,
+    "d5_fastpath_tau_dec_ns": 64.17,
+    "d5_tau_dec_reduction_factor": 2.81,
+    "d5_syndrome_weight_le_2_pct": 97.49,
+    "d5_bit_exact_correction_agreement_pct": 100.0,
+    "families": {
+      "rotated_surface_code_d3": {
+        "monte_carlo_rounds": 10000,
+        "physical_error_rate_p": 0.001,
+        "syndrome_weight_le_2_rounds": 9973,
+        "syndrome_weight_le_2_pct": 99.73,
+        "weight0_1cycle_bypass_rounds": 9298,
+        "weight0_1cycle_bypass_pct": 92.98,
+        "isolated_wt2_2cycle_fastpath_rounds": 615,
+        "isolated_wt2_2cycle_fastpath_pct": 6.15,
+        "combined_fastpath_1_or_2_cycle_pct": 99.13,
+        "full_uf_fallback_rounds": 87,
+        "full_uf_fallback_pct": 0.87,
+        "baseline_mean_core_latency_ns": 80.0,
+        "fastpath_mean_core_latency_ns": 3.33,
+        "core_latency_speedup_factor": 24.02,
+        "baseline_mean_tau_dec_ns": 120.0,
+        "fastpath_mean_tau_dec_ns": 43.33,
+        "tau_dec_reduction_factor": 2.77,
+        "bit_exact_syndrome_correction_agreement_rounds": 10000,
+        "bit_exact_syndrome_correction_agreement_pct": 100.0
+      },
+      "rotated_surface_code_d5": {
+        "monte_carlo_rounds": 10000,
+        "physical_error_rate_p": 0.001,
+        "syndrome_weight_le_2_rounds": 9749,
+        "syndrome_weight_le_2_pct": 97.49,
+        "weight0_1cycle_bypass_rounds": 7711,
+        "weight0_1cycle_bypass_pct": 77.11,
+        "isolated_wt2_2cycle_fastpath_rounds": 1781,
+        "isolated_wt2_2cycle_fastpath_pct": 17.81,
+        "combined_fastpath_1_or_2_cycle_pct": 94.92,
+        "full_uf_fallback_rounds": 508,
+        "full_uf_fallback_pct": 5.08,
+        "baseline_mean_core_latency_ns": 125.0,
+        "fastpath_mean_core_latency_ns": 9.17,
+        "core_latency_speedup_factor": 13.63,
+        "baseline_mean_tau_dec_ns": 180.0,
+        "fastpath_mean_tau_dec_ns": 64.17,
+        "tau_dec_reduction_factor": 2.81,
+        "bit_exact_syndrome_correction_agreement_rounds": 10000,
+        "bit_exact_syndrome_correction_agreement_pct": 100.0
+      },
+      "rotated_surface_code_d7": {
+        "monte_carlo_rounds": 10000,
+        "physical_error_rate_p": 0.001,
+        "syndrome_weight_le_2_rounds": 9258,
+        "syndrome_weight_le_2_pct": 92.58,
+        "weight0_1cycle_bypass_rounds": 5986,
+        "weight0_1cycle_bypass_pct": 59.86,
+        "isolated_wt2_2cycle_fastpath_rounds": 3023,
+        "isolated_wt2_2cycle_fastpath_pct": 30.23,
+        "combined_fastpath_1_or_2_cycle_pct": 90.09,
+        "full_uf_fallback_rounds": 991,
+        "full_uf_fallback_pct": 9.91,
+        "baseline_mean_core_latency_ns": 140.0,
+        "fastpath_mean_core_latency_ns": 16.88,
+        "core_latency_speedup_factor": 8.29,
+        "baseline_mean_tau_dec_ns": 200.0,
+        "fastpath_mean_tau_dec_ns": 76.88,
+        "tau_dec_reduction_factor": 2.6,
+        "bit_exact_syndrome_correction_agreement_rounds": 10000,
+        "bit_exact_syndrome_correction_agreement_pct": 100.0
+      },
+      "bivariate_bicycle_144_12_12_qldpc": {
+        "monte_carlo_rounds": 10000,
+        "syndrome_weight_le_2_rounds": 9274,
+        "syndrome_weight_le_2_pct": 92.74,
+        "weight0_1cycle_bypass_rounds": 8953,
+        "weight0_1cycle_bypass_pct": 89.53,
+        "isolated_wt2_2cycle_fastpath_rounds": 318,
+        "isolated_wt2_2cycle_fastpath_pct": 3.18,
+        "combined_fastpath_1_or_2_cycle_pct": 92.71,
+        "full_uf_fallback_rounds": 729,
+        "full_uf_fallback_pct": 7.29,
+        "baseline_mean_core_latency_ns": 130.0,
+        "fastpath_mean_core_latency_ns": 11.87,
+        "baseline_mean_tau_dec_ns": 185.0,
+        "fastpath_mean_tau_dec_ns": 66.87,
+        "tau_dec_reduction_factor": 2.77,
+        "bit_exact_syndrome_correction_agreement_rounds": 10000,
+        "bit_exact_syndrome_correction_agreement_pct": 100.0
+      }
+    },
+    "benchmark_wall_time_s": 66.43
   },
   "stim_2000_burst_cycle_accurate_cosim": {
     "total_stim_bursts": 2000,
@@ -297,20 +447,20 @@
         "heron_r2_mwpm_backlog_survival_fidelity": 0.5718
       }
     },
-    "cosim_wall_time_s": 58.96
+    "cosim_wall_time_s": 65.076
   },
   "lean4_mechanized_proofs": {
     "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
-    "lean_binary": "/home/antigravity/toolchains/lean4-p36t4/lean-4.35.0-linux/bin/lean",
-    "theorems_verified": 21,
+    "lean_binary": "/home/antigravity/.elan/bin/lean",
+    "theorems_verified": 25,
     "max_proof_body_lines": 22,
     "sorry_count": 0,
     "axiom_count": 0,
     "native_decide_count": 0,
     "wildcard_branch_count": 0,
     "exit_code": 0,
-    "compile_time_s": 1.194
+    "compile_time_s": 1.624
   },
-  "total_verification_wall_time_s": 93.668,
+  "total_verification_wall_time_s": 182.702,
   "all_checks_passed": true
 }

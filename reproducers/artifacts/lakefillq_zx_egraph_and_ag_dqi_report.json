@@ -1,7 +1,7 @@
 {
   "title": "Non-Clifford ZX Phase-Polynomial Saturation, Hermitian AG Early-MBU DQI, and External Cryo-CMOS Pacing",
   "all_verifications_passed": true,
-  "elapsed_seconds": 32.679,
+  "elapsed_seconds": 44.356,
   "lean4_mechanization_audit": {
     "lean_file": "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
     "theorem_count": 17,

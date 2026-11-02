@@ -1092,3 +1092,596 @@ module lakefillq_0dsp_braun_uf_decoder (
   assign zero_bypass_out   = zero_byp_pipe_reg;
   assign core_clocks_used  = clks_used_pipe_reg;
 endmodule
+
+// =============================================================================
+// 8. Optimization 5: Zero-DSP Hierarchical OR-Tree Popcount + Direct XOR-Address
+//    Sparse-Syndrome Fast-Path (1-Cycle w=0, 2-Cycle Isolated w<=2 Fast-Path)
+// =============================================================================
+module lakefillq_ortree_xor_sparse_fastpath12 (
+  input  wire [11:0] syn12,
+  input  wire        is_mode0,
+  output wire [3:0]  wt12,
+  output wire        is_zero,
+  output wire        is_adj_wt2,
+  output wire        fast_hit,
+  output wire [3:0]  xor_edge_sig,
+  output wire [24:0] corr_fast,
+  output wire        logical_flip_fast
+);
+  // 1. 4-Level Hierarchical OR-Tree Zero-Defect Detector (w = 0 in 1 clock cycle)
+  wire or_l1_0 = syn12[0]  | syn12[1];
+  wire or_l1_1 = syn12[2]  | syn12[3];
+  wire or_l1_2 = syn12[4]  | syn12[5];
+  wire or_l1_3 = syn12[6]  | syn12[7];
+  wire or_l1_4 = syn12[8]  | syn12[9];
+  wire or_l1_5 = syn12[10] | syn12[11];
+
+  wire or_l2_0 = or_l1_0 | or_l1_1;
+  wire or_l2_1 = or_l1_2 | or_l1_3;
+  wire or_l2_2 = or_l1_4 | or_l1_5;
+
+  wire or_l3_0    = or_l2_0 | or_l2_1;
+  wire any_defect = or_l3_0 | or_l2_2;
+  assign is_zero  = ~any_defect;
+
+  // 2. Balanced 0-DSP Braun-Tree 12-Bit Popcount Reducer
+  wire [1:0] p1_0 = {1'b0, syn12[0]}  + {1'b0, syn12[1]};
+  wire [1:0] p1_1 = {1'b0, syn12[2]}  + {1'b0, syn12[3]};
+  wire [1:0] p1_2 = {1'b0, syn12[4]}  + {1'b0, syn12[5]};
+  wire [1:0] p1_3 = {1'b0, syn12[6]}  + {1'b0, syn12[7]};
+  wire [1:0] p1_4 = {1'b0, syn12[8]}  + {1'b0, syn12[9]};
+  wire [1:0] p1_5 = {1'b0, syn12[10]} + {1'b0, syn12[11]};
+
+  wire [2:0] p2_0 = {1'b0, p1_0} + {1'b0, p1_1};
+  wire [2:0] p2_1 = {1'b0, p1_2} + {1'b0, p1_3};
+  wire [2:0] p2_2 = {1'b0, p1_4} + {1'b0, p1_5};
+
+  wire [3:0] p3_0 = {1'b0, p2_0} + {1'b0, p2_1};
+  assign wt12     = p3_0 + {1'b0, p2_2};
+
+  // 3. Dual Priority Encoders (idx_lo, idx_hi) & Direct XOR-Address Signature (idx_lo ^ idx_hi)
+  wire [3:0] idx_lo;
+  lakefillq_ffs12_u4 u_ffs_lo (.m(syn12), .min_idx(idx_lo));
+
+  wire [11:0] rev_syn12 = {
+    syn12[0], syn12[1], syn12[2], syn12[3], syn12[4], syn12[5],
+    syn12[6], syn12[7], syn12[8], syn12[9], syn12[10], syn12[11]
+  };
+  wire [3:0] rev_idx;
+  lakefillq_ffs12_u4 u_ffs_hi (.m(rev_syn12), .min_idx(rev_idx));
+  wire [3:0] idx_hi = 4'd11 - rev_idx;
+  assign xor_edge_sig = idx_lo ^ idx_hi;
+
+  // 4. Direct Bitwise XOR-Address Comparison for 15 Interior Stabilizer Edges e0..e14
+  wire adj_e0  = ((syn12 ^ 12'd257)  == 12'd0);
+  wire adj_e1  = ((syn12 ^ 12'd5)    == 12'd0);
+  wire adj_e2  = ((syn12 ^ 12'd6)    == 12'd0);
+  wire adj_e3  = ((syn12 ^ 12'd10)   == 12'd0);
+  wire adj_e4  = ((syn12 ^ 12'd1032) == 12'd0);
+  wire adj_e5  = ((syn12 ^ 12'd272)  == 12'd0);
+  wire adj_e6  = ((syn12 ^ 12'd20)   == 12'd0);
+  wire adj_e7  = ((syn12 ^ 12'd36)   == 12'd0);
+  wire adj_e8  = ((syn12 ^ 12'd40)   == 12'd0);
+  wire adj_e9  = ((syn12 ^ 12'd2056) == 12'd0);
+  wire adj_e10 = ((syn12 ^ 12'd528)  == 12'd0);
+  wire adj_e11 = ((syn12 ^ 12'd80)   == 12'd0);
+  wire adj_e12 = ((syn12 ^ 12'd96)   == 12'd0);
+  wire adj_e13 = ((syn12 ^ 12'd160)  == 12'd0);
+  wire adj_e14 = ((syn12 ^ 12'd2176) == 12'd0);
+
+  // 5. Direct XOR-Address Comparison for 12 Weight-1 Single-Defect Syndromes s1_0..s1_11
+  wire s1_0  = ((syn12 ^ 12'd1)    == 12'd0);
+  wire s1_1  = ((syn12 ^ 12'd2)    == 12'd0);
+  wire s1_2  = ((syn12 ^ 12'd4)    == 12'd0);
+  wire s1_3  = ((syn12 ^ 12'd8)    == 12'd0);
+  wire s1_4  = ((syn12 ^ 12'd16)   == 12'd0);
+  wire s1_5  = ((syn12 ^ 12'd32)   == 12'd0);
+  wire s1_6  = ((syn12 ^ 12'd64)   == 12'd0);
+  wire s1_7  = ((syn12 ^ 12'd128)  == 12'd0);
+  wire s1_8  = ((syn12 ^ 12'd256)  == 12'd0);
+  wire s1_9  = ((syn12 ^ 12'd512)  == 12'd0);
+  wire s1_10 = ((syn12 ^ 12'd1024) == 12'd0);
+  wire s1_11 = ((syn12 ^ 12'd2048) == 12'd0);
+
+  wire adj_g0 = (adj_e0  | adj_e1)  | (adj_e2  | adj_e3);
+  wire adj_g1 = (adj_e4  | adj_e5)  | (adj_e6  | adj_e7);
+  wire adj_g2 = (adj_e8  | adj_e9)  | (adj_e10 | adj_e11);
+  wire adj_g3 = (adj_e12 | adj_e13) | adj_e14;
+  assign is_adj_wt2 = (adj_g0 | adj_g1) | (adj_g2 | adj_g3);
+
+  wire is_wt1 = (wt12 == 4'd1);
+  assign fast_hit = is_zero | is_wt1 | is_adj_wt2;
+
+  // 6. Direct 25-Bit Pauli Edge Correction & Logical Flip Synthesis (0-DSP)
+  wire c0  = s1_0 | s1_2 | s1_8;
+  wire c1  = 1'b0;
+  wire c2  = s1_1 | s1_3;
+  wire c3  = 1'b0;
+  wire c4  = s1_10;
+  wire c5  = adj_e0  | s1_8;
+  wire c6  = adj_e1  | s1_2;
+  wire c7  = adj_e2;
+  wire c8  = adj_e3  | s1_3;
+  wire c9  = adj_e4;
+  wire c10 = adj_e5;
+  wire c11 = adj_e6  | (s1_4  & is_mode0);
+  wire c12 = adj_e7  | (s1_5  & is_mode0);
+  wire c13 = adj_e8;
+  wire c14 = adj_e9  | (s1_11 & is_mode0);
+  wire c15 = adj_e10;
+  wire c16 = adj_e11 | (s1_4  & (~is_mode0));
+  wire c17 = adj_e12 | (s1_5  & (~is_mode0));
+  wire c18 = adj_e13;
+  wire c19 = adj_e14 | (s1_11 & (~is_mode0));
+  wire c20 = s1_9;
+  wire c21 = s1_6 | (s1_4 & (~is_mode0)) | (s1_5 & (~is_mode0));
+  wire c22 = 1'b0;
+  wire c23 = s1_7 | (s1_11 & (~is_mode0));
+  wire c24 = 1'b0;
+
+  assign corr_fast = {
+    c24, c23, c22, c21, c20,
+    c19, c18, c17, c16, c15, c14, c13, c12, c11, c10, c9, c8, c7, c6, c5,
+    c4,  c3,  c2,  c1,  c0
+  };
+  assign logical_flip_fast = (c0 ^ c1) ^ (c2 ^ c3) ^ c4;
+endmodule
+
+module lakefillq_ortree_xor_sparse_fastpath24 (
+  input  wire [23:0] cur_syn,
+  input  wire [23:0] prev_syn,
+  input  wire [1:0]  prev_pauli_frame,
+  input  wire [1:0]  code_mode,
+  input  wire [1:0]  autdec_shift_sel,
+  output wire [23:0] delta_syn,
+  output wire [4:0]  defect_weight,
+  output wire        zero_cycle1_bypass,
+  output wire        sparse_cycle2_fastpath,
+  output wire [24:0] corr_z_fast,
+  output wire [24:0] corr_x_fast,
+  output wire [1:0]  pauli_frame_fast
+);
+  wire ing_zero_byp;
+  lakefillq_ingress_xor_bypass24 u_ing24 (
+    .cur_syn(cur_syn),
+    .prev_syn(prev_syn),
+    .autdec_shift_sel(autdec_shift_sel),
+    .delta_syn(delta_syn),
+    .defect_weight(defect_weight),
+    .zero_defect_bypass(ing_zero_byp)
+  );
+
+  wire is_mode0 = (code_mode == 2'd0);
+
+  wire [3:0] z_wt12, x_wt12;
+  wire       z_zero, x_zero;
+  wire       z_adj2, x_adj2;
+  wire       z_hit,  x_hit;
+  wire [3:0] z_xsig, x_xsig;
+  wire       z_lflip, x_lflip;
+
+  lakefillq_ortree_xor_sparse_fastpath12 u_fp_z (
+    .syn12(delta_syn[11:0]),
+    .is_mode0(is_mode0),
+    .wt12(z_wt12),
+    .is_zero(z_zero),
+    .is_adj_wt2(z_adj2),
+    .fast_hit(z_hit),
+    .xor_edge_sig(z_xsig),
+    .corr_fast(corr_z_fast),
+    .logical_flip_fast(z_lflip)
+  );
+
+  lakefillq_ortree_xor_sparse_fastpath12 u_fp_x (
+    .syn12(delta_syn[23:12]),
+    .is_mode0(is_mode0),
+    .wt12(x_wt12),
+    .is_zero(x_zero),
+    .is_adj_wt2(x_adj2),
+    .fast_hit(x_hit),
+    .xor_edge_sig(x_xsig),
+    .corr_fast(corr_x_fast),
+    .logical_flip_fast(x_lflip)
+  );
+
+  assign zero_cycle1_bypass     = z_zero & x_zero;
+  assign sparse_cycle2_fastpath = (~zero_cycle1_bypass) & z_hit & x_hit & (defect_weight <= 5'd2);
+  assign pauli_frame_fast       = prev_pauli_frame ^ {x_lflip, z_lflip};
+endmodule
+
+module lakefillq_0dsp_hybrid_fastpath_uf_decoder (
+  input  wire        clk,
+  input  wire        rst,
+  input  wire        in_valid,
+  input  wire [23:0] cur_syn,
+  input  wire [23:0] prev_syn,
+  input  wire [1:0]  prev_pauli_frame,
+  input  wire [1:0]  code_mode,
+  input  wire [1:0]  autdec_shift_sel,
+  output wire        out_valid,
+  output wire [1:0]  pauli_frame_flip,
+  output wire [24:0] corr_z_out,
+  output wire [24:0] corr_x_out,
+  output wire [4:0]  defect_weight_out,
+  output wire        zero_bypass_out,
+  output wire        sparse_wt2_bypass_out,
+  output wire [5:0]  core_clocks_used
+);
+  localparam [3:0] OP_IDLE       = 4'd0;
+  localparam [3:0] OP_UF_GROW    = 4'd1;
+  localparam [3:0] OP_SV_HOOK    = 4'd2;
+  localparam [3:0] OP_SV_PJUMP   = 4'd3;
+  localparam [3:0] OP_BFS_SEED   = 4'd4;
+  localparam [3:0] OP_BFS_STEP   = 4'd5;
+  localparam [3:0] OP_PEEL_STEP  = 4'd6;
+  localparam [3:0] OP_SEAM_ALIGN = 4'd7;
+  localparam [3:0] OP_EGRESS     = 4'd8;
+  localparam [3:0] OP_FAST_WT2   = 4'd9;
+
+  localparam [47:0] ROOT_IDENTITY = {
+    4'd11, 4'd10, 4'd9, 4'd8, 4'd7, 4'd6,
+    4'd5,  4'd4,  4'd3, 4'd2, 4'd1, 4'd0
+  };
+
+  wire [23:0] fp_delta_syn;
+  wire [4:0]  fp_defect_wt;
+  wire        fp_zero_byp;
+  wire        fp_sparse_wt2;
+  wire [24:0] fp_corr_z;
+  wire [24:0] fp_corr_x;
+  wire [1:0]  fp_pf_fast;
+
+  lakefillq_ortree_xor_sparse_fastpath24 u_fastpath24 (
+    .cur_syn(cur_syn),
+    .prev_syn(prev_syn),
+    .prev_pauli_frame(prev_pauli_frame),
+    .code_mode(code_mode),
+    .autdec_shift_sel(autdec_shift_sel),
+    .delta_syn(fp_delta_syn),
+    .defect_weight(fp_defect_wt),
+    .zero_cycle1_bypass(fp_zero_byp),
+    .sparse_cycle2_fastpath(fp_sparse_wt2),
+    .corr_z_fast(fp_corr_z),
+    .corr_x_fast(fp_corr_x),
+    .pauli_frame_fast(fp_pf_fast)
+  );
+
+  reg [3:0]  fsm_pipe_reg;
+  reg [1:0]  mode_pipe_reg;
+  reg [1:0]  prev_pf_pipe_reg;
+  reg [4:0]  wt_pipe_reg;
+  reg [2:0]  grow_iter_pipe_reg;
+  reg [1:0]  hook_cnt_pipe_reg;
+  reg [2:0]  lvl_pipe_reg;
+  reg [1:0]  seam_cnt_pipe_reg;
+  reg [5:0]  clk_cnt_pipe_reg;
+
+  reg [11:0] z_syn_pipe_reg,  x_syn_pipe_reg;
+  reg [47:0] z_root_pipe_reg, x_root_pipe_reg;
+  reg [11:0] z_odd_pipe_reg,  x_odd_pipe_reg;
+  reg [11:0] z_bhit_pipe_reg, x_bhit_pipe_reg;
+  reg [29:0] z_elen_pipe_reg, x_elen_pipe_reg;
+  reg [11:0] z_blen_pipe_reg, x_blen_pipe_reg;
+  reg [14:0] z_full_pipe_reg, x_full_pipe_reg;
+  reg [11:0] z_vis_pipe_reg,  x_vis_pipe_reg;
+  reg [47:0] z_pe_pipe_reg,   x_pe_pipe_reg;
+  reg [47:0] z_pv_pipe_reg,   x_pv_pipe_reg;
+  reg [35:0] z_lv_pipe_reg,   x_lv_pipe_reg;
+  reg [11:0] z_rem_pipe_reg,  x_rem_pipe_reg;
+  reg [24:0] z_corr_pipe_reg, x_corr_pipe_reg;
+
+  reg [24:0] fast_cz_pipe_reg, fast_cx_pipe_reg;
+  reg [1:0]  fast_pf_pipe_reg;
+
+  reg        out_valid_pipe_reg;
+  reg [1:0]  pauli_frame_pipe_reg;
+  reg [24:0] corr_z_pipe_reg;
+  reg [24:0] corr_x_pipe_reg;
+  reg [4:0]  wt_out_pipe_reg;
+  reg        zero_byp_pipe_reg;
+  reg        sparse_byp_pipe_reg;
+  reg [5:0]  clks_used_pipe_reg;
+
+  wire [29:0] z_elen_nxt, x_elen_nxt;
+  wire [11:0] z_blen_nxt, x_blen_nxt;
+  wire [14:0] z_full_nxt, x_full_nxt;
+  wire [11:0] z_act_mask, x_act_mask;
+
+  lakefillq_uf_half_edge_grow12 u_hz_grow (
+    .root_vec(z_root_pipe_reg), .cluster_odd(z_odd_pipe_reg), .boundary_hit(z_bhit_pipe_reg),
+    .elen_vec(z_elen_pipe_reg), .blen_vec(z_blen_pipe_reg),
+    .elen_next(z_elen_nxt), .blen_next(z_blen_nxt), .full_edge(z_full_nxt), .active_mask(z_act_mask)
+  );
+  lakefillq_uf_half_edge_grow12 u_hx_grow (
+    .root_vec(x_root_pipe_reg), .cluster_odd(x_odd_pipe_reg), .boundary_hit(x_bhit_pipe_reg),
+    .elen_vec(x_elen_pipe_reg), .blen_vec(x_blen_pipe_reg),
+    .elen_next(x_elen_nxt), .blen_next(x_blen_nxt), .full_edge(x_full_nxt), .active_mask(x_act_mask)
+  );
+
+  wire [47:0] z_root_hk, x_root_hk;
+  lakefillq_sv_hook_step12 u_hz_hook (.root_vec(z_root_pipe_reg), .full_edge(z_full_pipe_reg), .root_next(z_root_hk));
+  lakefillq_sv_hook_step12 u_hx_hook (.root_vec(x_root_pipe_reg), .full_edge(x_full_pipe_reg), .root_next(x_root_hk));
+
+  wire [47:0] z_root_jp, x_root_jp;
+  wire [11:0] z_odd_jp,  x_odd_jp;
+  wire [11:0] z_bhit_jp, x_bhit_jp;
+  lakefillq_sv_pointer_jump_parity12 u_hz_pjump (
+    .root_vec(z_root_pipe_reg), .syn12(z_syn_pipe_reg), .blen_vec(z_blen_pipe_reg),
+    .root_jump(z_root_jp), .cluster_odd(z_odd_jp), .boundary_hit(z_bhit_jp)
+  );
+  lakefillq_sv_pointer_jump_parity12 u_hx_pjump (
+    .root_vec(x_root_pipe_reg), .syn12(x_syn_pipe_reg), .blen_vec(x_blen_pipe_reg),
+    .root_jump(x_root_jp), .cluster_odd(x_odd_jp), .boundary_hit(x_bhit_jp)
+  );
+
+  wire [11:0] z_vis_seed, x_vis_seed;
+  lakefillq_bfs_seed_init12 u_hz_seed (.root_vec(z_root_pipe_reg), .blen_vec(z_blen_pipe_reg), .vis_init(z_vis_seed));
+  lakefillq_bfs_seed_init12 u_hx_seed (.root_vec(x_root_pipe_reg), .blen_vec(x_blen_pipe_reg), .vis_init(x_vis_seed));
+
+  wire [11:0] z_vis_nxt, x_vis_nxt;
+  wire [47:0] z_pe_nxt,  x_pe_nxt;
+  wire [47:0] z_pv_nxt,  x_pv_nxt;
+  wire [35:0] z_lv_nxt,  x_lv_nxt;
+  lakefillq_bfs_forest_step12 u_hz_bfs (
+    .vis(z_vis_pipe_reg), .pe_vec(z_pe_pipe_reg), .pv_vec(z_pv_pipe_reg), .lv_vec(z_lv_pipe_reg),
+    .full_edge(z_full_pipe_reg), .cur_lvl(lvl_pipe_reg),
+    .vis_next(z_vis_nxt), .pe_next(z_pe_nxt), .pv_next(z_pv_nxt), .lv_next(z_lv_nxt)
+  );
+  lakefillq_bfs_forest_step12 u_hx_bfs (
+    .vis(x_vis_pipe_reg), .pe_vec(x_pe_pipe_reg), .pv_vec(x_pv_pipe_reg), .lv_vec(x_lv_pipe_reg),
+    .full_edge(x_full_pipe_reg), .cur_lvl(lvl_pipe_reg),
+    .vis_next(x_vis_nxt), .pe_next(x_pe_nxt), .pv_next(x_pv_nxt), .lv_next(x_lv_nxt)
+  );
+
+  wire [11:0] z_rem_nxt,  x_rem_nxt;
+  wire [24:0] z_corr_nxt, x_corr_nxt;
+  lakefillq_peel_level_step12 u_hz_peel (
+    .rem_syn(z_rem_pipe_reg), .corr(z_corr_pipe_reg), .pe_vec(z_pe_pipe_reg),
+    .pv_vec(z_pv_pipe_reg), .lv_vec(z_lv_pipe_reg), .cur_lvl(lvl_pipe_reg),
+    .rem_syn_next(z_rem_nxt), .corr_next(z_corr_nxt)
+  );
+  lakefillq_peel_level_step12 u_hx_peel (
+    .rem_syn(x_rem_pipe_reg), .corr(x_corr_pipe_reg), .pe_vec(x_pe_pipe_reg),
+    .pv_vec(x_pv_pipe_reg), .lv_vec(x_lv_pipe_reg), .cur_lvl(lvl_pipe_reg),
+    .rem_syn_next(x_rem_nxt), .corr_next(x_corr_nxt)
+  );
+
+  wire [11:0] z_res_syn,  x_res_syn;
+  wire [24:0] z_corr_fin, x_corr_fin;
+  wire        z_log_flip, x_log_flip;
+  lakefillq_peel_boundary_egress12 u_hz_egress (
+    .rem_syn(z_rem_pipe_reg), .corr(z_corr_pipe_reg),
+    .residual_syn(z_res_syn), .corr_final(z_corr_fin), .logical_flip(z_log_flip)
+  );
+  lakefillq_peel_boundary_egress12 u_hx_egress (
+    .rem_syn(x_rem_pipe_reg), .corr(x_corr_pipe_reg),
+    .residual_syn(x_res_syn), .corr_final(x_corr_fin), .logical_flip(x_log_flip)
+  );
+
+  wire [2:0] max_bfs_lvl = (mode_pipe_reg == 2'd0) ? 3'd3 : 3'd7;
+  wire [2:0] max_grow_it = (mode_pipe_reg == 2'd0) ? 3'd2 : 3'd4;
+  wire       any_active  = ((z_act_mask | x_act_mask) != 12'd0);
+
+  always_ff @(posedge clk) begin
+    if (rst) begin
+      fsm_pipe_reg         <= OP_IDLE;
+      mode_pipe_reg        <= 2'd0;
+      prev_pf_pipe_reg     <= 2'd0;
+      wt_pipe_reg          <= 5'd0;
+      grow_iter_pipe_reg   <= 3'd0;
+      hook_cnt_pipe_reg    <= 2'd0;
+      lvl_pipe_reg         <= 3'd0;
+      seam_cnt_pipe_reg    <= 2'd0;
+      clk_cnt_pipe_reg     <= 6'd0;
+      z_syn_pipe_reg       <= 12'd0;
+      x_syn_pipe_reg       <= 12'd0;
+      z_root_pipe_reg      <= ROOT_IDENTITY;
+      x_root_pipe_reg      <= ROOT_IDENTITY;
+      z_odd_pipe_reg       <= 12'd0;
+      x_odd_pipe_reg       <= 12'd0;
+      z_bhit_pipe_reg      <= 12'd0;
+      x_bhit_pipe_reg      <= 12'd0;
+      z_elen_pipe_reg      <= 30'd0;
+      x_elen_pipe_reg      <= 30'd0;
+      z_blen_pipe_reg      <= 12'd0;
+      x_blen_pipe_reg      <= 12'd0;
+      z_full_pipe_reg      <= 15'd0;
+      x_full_pipe_reg      <= 15'd0;
+      z_vis_pipe_reg       <= 12'd0;
+      x_vis_pipe_reg       <= 12'd0;
+      z_pe_pipe_reg        <= 48'd0;
+      x_pe_pipe_reg        <= 48'd0;
+      z_pv_pipe_reg        <= ROOT_IDENTITY;
+      x_pv_pipe_reg        <= ROOT_IDENTITY;
+      z_lv_pipe_reg        <= 36'd0;
+      x_lv_pipe_reg        <= 36'd0;
+      z_rem_pipe_reg       <= 12'd0;
+      x_rem_pipe_reg       <= 12'd0;
+      z_corr_pipe_reg      <= 25'd0;
+      x_corr_pipe_reg      <= 25'd0;
+      fast_cz_pipe_reg     <= 25'd0;
+      fast_cx_pipe_reg     <= 25'd0;
+      fast_pf_pipe_reg     <= 2'd0;
+      out_valid_pipe_reg   <= 1'b0;
+      pauli_frame_pipe_reg <= 2'd0;
+      corr_z_pipe_reg      <= 25'd0;
+      corr_x_pipe_reg      <= 25'd0;
+      wt_out_pipe_reg      <= 5'd0;
+      zero_byp_pipe_reg    <= 1'b0;
+      sparse_byp_pipe_reg  <= 1'b0;
+      clks_used_pipe_reg   <= 6'd0;
+    end else begin
+      out_valid_pipe_reg <= 1'b0;
+      if (fsm_pipe_reg == OP_IDLE) begin
+        if (in_valid) begin
+          if (fp_zero_byp) begin
+            // 1-clock (2.5 ns @ 400 MHz / 2.0 ns @ 500 MHz) hierarchical OR-tree w=0 bypass
+            out_valid_pipe_reg   <= 1'b1;
+            pauli_frame_pipe_reg <= prev_pauli_frame;
+            corr_z_pipe_reg      <= 25'd0;
+            corr_x_pipe_reg      <= 25'd0;
+            wt_out_pipe_reg      <= 5'd0;
+            zero_byp_pipe_reg    <= 1'b1;
+            sparse_byp_pipe_reg  <= 1'b0;
+            clks_used_pipe_reg   <= 6'd1;
+          end else if (fp_sparse_wt2) begin
+            // 2-clock (5.0 ns @ 400 MHz / 4.0 ns @ 500 MHz) direct XOR-address w<=2 fast-path
+            wt_pipe_reg         <= fp_defect_wt;
+            fast_cz_pipe_reg    <= fp_corr_z;
+            fast_cx_pipe_reg    <= fp_corr_x;
+            fast_pf_pipe_reg    <= fp_pf_fast;
+            clk_cnt_pipe_reg    <= 6'd1;
+            fsm_pipe_reg        <= OP_FAST_WT2;
+          end else begin
+            // Weight > 2 (or non-adjacent w=2): full deterministic Union-Find + shift-add path
+            mode_pipe_reg      <= code_mode;
+            prev_pf_pipe_reg   <= prev_pauli_frame;
+            wt_pipe_reg        <= fp_defect_wt;
+            grow_iter_pipe_reg <= 3'd0;
+            clk_cnt_pipe_reg   <= 6'd1;
+            z_syn_pipe_reg     <= fp_delta_syn[11:0];
+            x_syn_pipe_reg     <= fp_delta_syn[23:12];
+            z_root_pipe_reg    <= ROOT_IDENTITY;
+            x_root_pipe_reg    <= ROOT_IDENTITY;
+            z_odd_pipe_reg     <= fp_delta_syn[11:0];
+            x_odd_pipe_reg     <= fp_delta_syn[23:12];
+            z_bhit_pipe_reg    <= 12'd0;
+            x_bhit_pipe_reg    <= 12'd0;
+            z_elen_pipe_reg    <= 30'd0;
+            x_elen_pipe_reg    <= 30'd0;
+            z_blen_pipe_reg    <= 12'd0;
+            x_blen_pipe_reg    <= 12'd0;
+            z_full_pipe_reg    <= 15'd0;
+            x_full_pipe_reg    <= 15'd0;
+            fsm_pipe_reg       <= OP_UF_GROW;
+          end
+        end
+      end else if (fsm_pipe_reg == OP_FAST_WT2) begin
+        out_valid_pipe_reg   <= 1'b1;
+        pauli_frame_pipe_reg <= fast_pf_pipe_reg;
+        corr_z_pipe_reg      <= fast_cz_pipe_reg;
+        corr_x_pipe_reg      <= fast_cx_pipe_reg;
+        wt_out_pipe_reg      <= wt_pipe_reg;
+        zero_byp_pipe_reg    <= 1'b0;
+        sparse_byp_pipe_reg  <= 1'b1;
+        clks_used_pipe_reg   <= 6'd2;
+        fsm_pipe_reg         <= OP_IDLE;
+      end else if (fsm_pipe_reg == OP_UF_GROW) begin
+        clk_cnt_pipe_reg <= clk_cnt_pipe_reg + 6'd1;
+        if ((grow_iter_pipe_reg >= max_grow_it) | (~any_active)) begin
+          fsm_pipe_reg <= OP_BFS_SEED;
+        end else begin
+          z_elen_pipe_reg   <= z_elen_nxt;
+          x_elen_pipe_reg   <= x_elen_nxt;
+          z_blen_pipe_reg   <= z_blen_nxt;
+          x_blen_pipe_reg   <= x_blen_nxt;
+          z_full_pipe_reg   <= z_full_nxt;
+          x_full_pipe_reg   <= x_full_nxt;
+          hook_cnt_pipe_reg <= 2'd0;
+          fsm_pipe_reg      <= OP_SV_HOOK;
+        end
+      end else if (fsm_pipe_reg == OP_SV_HOOK) begin
+        clk_cnt_pipe_reg <= clk_cnt_pipe_reg + 6'd1;
+        z_root_pipe_reg  <= z_root_hk;
+        x_root_pipe_reg  <= x_root_hk;
+        if (hook_cnt_pipe_reg == 2'd2) begin
+          fsm_pipe_reg <= OP_SV_PJUMP;
+        end else begin
+          hook_cnt_pipe_reg <= hook_cnt_pipe_reg + 2'd1;
+        end
+      end else if (fsm_pipe_reg == OP_SV_PJUMP) begin
+        clk_cnt_pipe_reg   <= clk_cnt_pipe_reg + 6'd1;
+        z_root_pipe_reg    <= z_root_jp;
+        x_root_pipe_reg    <= x_root_jp;
+        z_odd_pipe_reg     <= z_odd_jp;
+        x_odd_pipe_reg     <= x_odd_jp;
+        z_bhit_pipe_reg    <= z_bhit_jp;
+        x_bhit_pipe_reg    <= x_bhit_jp;
+        grow_iter_pipe_reg <= grow_iter_pipe_reg + 3'd1;
+        if ((grow_iter_pipe_reg + 3'd1) >= max_grow_it) begin
+          fsm_pipe_reg <= OP_BFS_SEED;
+        end else begin
+          fsm_pipe_reg <= OP_UF_GROW;
+        end
+      end else if (fsm_pipe_reg == OP_BFS_SEED) begin
+        clk_cnt_pipe_reg <= clk_cnt_pipe_reg + 6'd1;
+        z_vis_pipe_reg   <= z_vis_seed;
+        x_vis_pipe_reg   <= x_vis_seed;
+        z_pe_pipe_reg    <= 48'd0;
+        x_pe_pipe_reg    <= 48'd0;
+        z_pv_pipe_reg    <= ROOT_IDENTITY;
+        x_pv_pipe_reg    <= ROOT_IDENTITY;
+        z_lv_pipe_reg    <= 36'd0;
+        x_lv_pipe_reg    <= 36'd0;
+        lvl_pipe_reg     <= 3'd1;
+        fsm_pipe_reg     <= OP_BFS_STEP;
+      end else if (fsm_pipe_reg == OP_BFS_STEP) begin
+        clk_cnt_pipe_reg <= clk_cnt_pipe_reg + 6'd1;
+        z_vis_pipe_reg   <= z_vis_nxt;
+        x_vis_pipe_reg   <= x_vis_nxt;
+        z_pe_pipe_reg    <= z_pe_nxt;
+        x_pe_pipe_reg    <= x_pe_nxt;
+        z_pv_pipe_reg    <= z_pv_nxt;
+        x_pv_pipe_reg    <= x_pv_nxt;
+        z_lv_pipe_reg    <= z_lv_nxt;
+        x_lv_pipe_reg    <= x_lv_nxt;
+        if (lvl_pipe_reg == max_bfs_lvl) begin
+          z_rem_pipe_reg  <= z_syn_pipe_reg;
+          x_rem_pipe_reg  <= x_syn_pipe_reg;
+          z_corr_pipe_reg <= 25'd0;
+          x_corr_pipe_reg <= 25'd0;
+          lvl_pipe_reg    <= max_bfs_lvl;
+          fsm_pipe_reg    <= OP_PEEL_STEP;
+        end else begin
+          lvl_pipe_reg <= lvl_pipe_reg + 3'd1;
+        end
+      end else if (fsm_pipe_reg == OP_PEEL_STEP) begin
+        clk_cnt_pipe_reg <= clk_cnt_pipe_reg + 6'd1;
+        z_rem_pipe_reg   <= z_rem_nxt;
+        x_rem_pipe_reg   <= x_rem_nxt;
+        z_corr_pipe_reg  <= z_corr_nxt;
+        x_corr_pipe_reg  <= x_corr_nxt;
+        if (lvl_pipe_reg == 3'd1) begin
+          if (mode_pipe_reg == 2'd2) begin
+            seam_cnt_pipe_reg <= 2'd2;
+            fsm_pipe_reg      <= OP_SEAM_ALIGN;
+          end else if (mode_pipe_reg == 2'd3) begin
+            seam_cnt_pipe_reg <= 2'd0;
+            fsm_pipe_reg      <= OP_SEAM_ALIGN;
+          end else begin
+            fsm_pipe_reg <= OP_EGRESS;
+          end
+        end else begin
+          lvl_pipe_reg <= lvl_pipe_reg - 3'd1;
+        end
+      end else if (fsm_pipe_reg == OP_SEAM_ALIGN) begin
+        clk_cnt_pipe_reg <= clk_cnt_pipe_reg + 6'd1;
+        if (seam_cnt_pipe_reg == 2'd0) begin
+          fsm_pipe_reg <= OP_EGRESS;
+        end else begin
+          seam_cnt_pipe_reg <= seam_cnt_pipe_reg - 2'd1;
+        end
+      end else begin
+        out_valid_pipe_reg   <= 1'b1;
+        pauli_frame_pipe_reg <= prev_pf_pipe_reg ^ {x_log_flip, z_log_flip};
+        corr_z_pipe_reg      <= z_corr_fin;
+        corr_x_pipe_reg      <= x_corr_fin;
+        wt_out_pipe_reg      <= wt_pipe_reg;
+        zero_byp_pipe_reg    <= 1'b0;
+        sparse_byp_pipe_reg  <= 1'b0;
+        clks_used_pipe_reg   <= clk_cnt_pipe_reg + 6'd1;
+        fsm_pipe_reg         <= OP_IDLE;
+      end
+    end
+  end
+
+  assign out_valid             = out_valid_pipe_reg;
+  assign pauli_frame_flip      = pauli_frame_pipe_reg;
+  assign corr_z_out            = corr_z_pipe_reg;
+  assign corr_x_out            = corr_x_pipe_reg;
+  assign defect_weight_out     = wt_out_pipe_reg;
+  assign zero_bypass_out       = zero_byp_pipe_reg;
+  assign sparse_wt2_bypass_out = sparse_byp_pipe_reg;
+  assign core_clocks_used      = clks_used_pipe_reg;
+endmodule
+

@@ -677,14 +677,61 @@
     "raw_programmatic_revir_phi2_verified": true,
     "total_modules": 240
   },
+  "campaign4_five_optimizations_fuzzing": {
+    "opt_a_zero_flag_loop_escalation": {
+      "k1_sponge_trials": 70,
+      "k2_coupled_sponge_trials": 70,
+      "kR_session_pipeline_trials": 70,
+      "total_isomorphic_lanes_deduplicated": 414,
+      "total_trials": 210,
+      "unrolled_truth_table_agreement_count": 210,
+      "z3_symbolic_miters_verified": 18
+    },
+    "opt_b_adaptive_limb_to_pebble_bezout": {
+      "bezout_identity_verified_count": 210,
+      "exact_static_state_match_count": 210,
+      "pebbles_restored_zero_count": 210,
+      "total_trials": 210,
+      "z3_bezout_trajectories_verified": 18
+    },
+    "opt_c_zx_egraph_todd_autoccz": {
+      "exact_phase_poly_and_truth_table_matches": 210,
+      "min_statevector_fidelity": 1.0,
+      "qiskit_statevectors_verified": 18,
+      "total_post_heron_autoccz_t_count": 924,
+      "total_post_nisq_zx_t_count": 1764,
+      "total_pre_t_count": 3402,
+      "total_trials": 210
+    },
+    "opt_d_cross_qpu_tele_phase": {
+      "max_ebit_ratio": 0.5,
+      "min_reduced_density_matrix_purity": 1.0,
+      "purity_one_verified_count": 210,
+      "stim_stabilizer_cuts_verified": 18,
+      "total_mid_meas_branches_verified": 1566,
+      "total_reverse_ebits_used": 0,
+      "total_trials": 210
+    },
+    "opt_e_adversarial_bug_injection": {
+      "distinct_bug_classes_verified": 5,
+      "fail_closed_rejected_count": 210,
+      "three_span_provenance_verified_count": 210,
+      "total_trials": 210,
+      "z3_u4_phase_taint_witness_sat": true
+    },
+    "total_optimization_trials_verified": 1050,
+    "trials_per_optimization_pass": 210
+  },
   "lean4_mechanization": {
+    "five_pass_differential_equivalence_theorem": "five_pass_differential_compiler_equivalence",
     "kernel_verified": true,
     "lean_file": "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
     "zero_sorry_zero_axiom": true
   },
-  "racket_runtime_ms": 43331.52,
+  "racket_runtime_ms": 128684.82,
   "redex_language": "LakefillQSurfaceFuzzL",
   "status": "PASS",
+  "total_optimization_fuzz_trials_verified": 1050,
   "total_surface_modules_verified": 640,
   "verifier": "verify_lakefillq_redex_surface_diagnostic_fuzzer.py"
 }

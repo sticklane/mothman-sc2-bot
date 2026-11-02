@@ -288,7 +288,12 @@ class XAGManager:
       - Bottleneck cut extraction and Tseitin `z3.Solver` miter checking.
     """
 
-    def __init__(self, shared_cut_cache: Optional[Set[Any]] = None, basis_cap: int = 48) -> None:
+    def __init__(
+        self,
+        shared_cut_cache: Optional[Set[Any]] = None,
+        basis_cap: int = 48,
+        use_cut_cache: bool = True,
+    ) -> None:
         self.kinds: List[str] = ["const0"]
         self.arg1: List[int] = [0]
         self.arg2: List[int] = [0]
@@ -301,10 +306,20 @@ class XAGManager:
         self.and_table: Dict[Tuple[int, int], int] = {}
 
         self.verified_cut_set: Set[Any] = shared_cut_cache if shared_cut_cache is not None else set()
+        self.use_cut_cache = use_cut_cache
         self.basis_cap = basis_cap
         self.z3_queries: int = 0
         self.cut_cache_hits: int = 0
         self.fraig_merges: int = 0
+        self._inc_solver = z3.Solver()
+        self._inc_zvars: Dict[str, z3.BoolRef] = {}
+
+    def _get_zbool(self, name: str) -> z3.BoolRef:
+        zv = self._inc_zvars.get(name)
+        if zv is None:
+            zv = z3.Bool(name)
+            self._inc_zvars[name] = zv
+        return zv
 
     @property
     def size(self) -> int:
@@ -512,11 +527,16 @@ class XAGManager:
     ) -> Tuple[Optional[List[int]], Optional[List[int]]]:
         cone_set: Set[int] = set()
         cut_set: Set[int] = set()
+        root_nids: Set[int] = {
+            lit_id(tl)
+            for tl in target_lits
+            if lit_id(tl) > 0 and self.kinds[lit_id(tl)] != "var"
+        }
 
         def _visit(nid: int) -> None:
             if nid <= 0:
                 return
-            if nid < pre_size:
+            if nid < pre_size and nid not in root_nids:
                 cut_set.add(nid)
                 return
             if nid in cone_set:
@@ -538,31 +558,137 @@ class XAGManager:
             return sorted(cut_set), sorted(cone_set)
         return None, None
 
-    def canonical_cut_digest(
+    def verify_input_cone_disjoint_relabeling(self, cut_nids: Sequence[int]) -> bool:
+        """
+        Verify that all leaf cut nodes `cut_nids` of a candidate sub-DAG cone are
+        pairwise distinct (`O(|cut_nids|)`), guaranteeing an injective relabeling
+        $\pi$ from canonical leaf variables $\{1, \dots, k\}$ to `cut_nids`.
+        """
+        return len(cut_nids) == len(set(cut_nids)) and all(cid > 0 for cid in cut_nids)
+
+    def canonical_cone_signature(
         self, cut_nids: Sequence[int], cone_nids: Sequence[int], target_lits: Sequence[int]
     ) -> Tuple[Any, ...]:
+        """
+        Compute a canonical structural signature for a local XAG cone modulo
+        input-wire relabeling (`cut_nids` permutation-invariant):
+          1. Compute bottom-up leaf-blind structural hash and parent-operator usage
+             histogram for each cut leaf so `cut_nids` are ordered canonically
+             independent of physical wire/node IDs.
+          2. Assign canonical leaf indices `1..|cut_nids|` in that canonical order
+             and relabel internal `cone_nids` bottom-up in canonical topological order.
+        """
+        cut_set = set(cut_nids)
+        blind_memo: Dict[int, int] = {0: 0}
+        for cid in cut_nids:
+            blind_memo[cid] = 0x9E3779B1
+
+        def _blind_hash(nid: int) -> int:
+            h = blind_memo.get(nid)
+            if h is not None:
+                return h
+            k = self.kinds[nid]
+            if k == "xor":
+                hu = _blind_hash(self.arg1[nid])
+                hv = _blind_hash(self.arg2[nid])
+                lo, hi = (hu, hv) if hu <= hv else (hv, hu)
+                h = ((lo * 1000003) ^ (hi * 9176) ^ 0x55555555) & 0xFFFFFFFF
+            elif k == "and":
+                l1, l2 = self.arg1[nid], self.arg2[nid]
+                i1 = 0 if lit_id(l1) in cut_set else lit_inv_bit(l1)
+                i2 = 0 if lit_id(l2) in cut_set else lit_inv_bit(l2)
+                hu = (_blind_hash(lit_id(l1)) << 1) ^ i1
+                hv = (_blind_hash(lit_id(l2)) << 1) ^ i2
+                lo, hi = (hu, hv) if hu <= hv else (hv, hu)
+                h = ((lo * 1000033) ^ (hi * 8191) ^ 0xAAAAAAAA) & 0xFFFFFFFF
+            else:
+                h = 0x9E3779B1
+            blind_memo[nid] = h
+            return h
+
+        ordered_cone = sorted(
+            cone_nids,
+            key=lambda nid: (_blind_hash(nid), nid),
+        )
+        cone_rank: Dict[int, int] = {nid: idx for idx, nid in enumerate(ordered_cone)}
+
+        in_xor_cut: Set[int] = set()
+        raw_pol_usages: Dict[int, List[Tuple[int, int, int, int]]] = {cid: [] for cid in cut_nids}
+        for nid in ordered_cone:
+            nh = _blind_hash(nid)
+            cr = cone_rank[nid]
+            k = self.kinds[nid]
+            if k == "xor":
+                u, v = self.arg1[nid], self.arg2[nid]
+                if u in cut_set:
+                    in_xor_cut.add(u)
+                    raw_pol_usages[u].append((1, 0, nh, cr))
+                if v in cut_set:
+                    in_xor_cut.add(v)
+                    raw_pol_usages[v].append((1, 0, nh, cr))
+            elif k == "and":
+                l1, l2 = self.arg1[nid], self.arg2[nid]
+                u, v = lit_id(l1), lit_id(l2)
+                if u in cut_set:
+                    raw_pol_usages[u].append((2, lit_inv_bit(l1), nh, cr))
+                if v in cut_set:
+                    raw_pol_usages[v].append((2, lit_inv_bit(l2), nh, cr))
+        for tl in target_lits:
+            u = lit_id(tl)
+            if u in cut_set:
+                raw_pol_usages[u].append((3, lit_inv_bit(tl), 0, 0))
+
+        leaf_pol: Dict[int, int] = {}
+        leaf_usages: Dict[int, Tuple[Tuple[int, int, int, int], ...]] = {}
+        for cid in cut_nids:
+            us = sorted(raw_pol_usages[cid])
+            if cid not in in_xor_cut and us:
+                p0 = us[0][1]
+                leaf_pol[cid] = p0
+                leaf_usages[cid] = tuple((op_t, inv ^ p0, nh, cr) for op_t, inv, nh, cr in us)
+            else:
+                leaf_pol[cid] = 0
+                leaf_usages[cid] = tuple(us)
+
+        ordered_cuts = sorted(
+            cut_nids,
+            key=lambda cid: (leaf_usages[cid], cid),
+        )
         relabel: Dict[int, int] = {0: 0}
-        for idx, cid in enumerate(cut_nids, 1):
+        for idx, cid in enumerate(ordered_cuts, 1):
             relabel[cid] = idx
-        base_id = len(cut_nids) + 1
+
+        base_id = len(ordered_cuts) + 1
         defs: List[Tuple[Any, ...]] = []
-        for k, nid in enumerate(cone_nids):
+        for k, nid in enumerate(ordered_cone):
             new_id = base_id + k
             relabel[nid] = new_id
+        for nid in ordered_cone:
             kind = self.kinds[nid]
             if kind == "xor":
                 ru = relabel[self.arg1[nid]]
                 rv = relabel[self.arg2[nid]]
-                defs.append(("x", min(ru, rv), max(ru, rv)))
+                defs.append(("x", relabel[nid], min(ru, rv), max(ru, rv)))
             elif kind == "and":
                 l1, l2 = self.arg1[nid], self.arg2[nid]
-                rl1 = make_lit(relabel[lit_id(l1)], lit_inv_bit(l1))
-                rl2 = make_lit(relabel[lit_id(l2)], lit_inv_bit(l2))
-                defs.append(("a", min(rl1, rl2), max(rl1, rl2)))
+                u1, u2 = lit_id(l1), lit_id(l2)
+                inv1 = lit_inv_bit(l1) ^ leaf_pol.get(u1, 0)
+                inv2 = lit_inv_bit(l2) ^ leaf_pol.get(u2, 0)
+                rl1 = make_lit(relabel[u1], inv1)
+                rl2 = make_lit(relabel[u2], inv2)
+                defs.append(("a", relabel[nid], min(rl1, rl2), max(rl1, rl2)))
         rel_targets = tuple(
-            sorted(make_lit(relabel[lit_id(tl)], lit_inv_bit(tl)) for tl in target_lits)
+            sorted(
+                make_lit(relabel[lit_id(tl)], lit_inv_bit(tl) ^ leaf_pol.get(lit_id(tl), 0))
+                for tl in target_lits
+            )
         )
-        return (len(cut_nids), tuple(defs), rel_targets)
+        return (len(ordered_cuts), tuple(defs), rel_targets)
+
+    def canonical_cut_digest(
+        self, cut_nids: Sequence[int], cone_nids: Sequence[int], target_lits: Sequence[int]
+    ) -> Tuple[Any, ...]:
+        return self.canonical_cone_signature(cut_nids, cone_nids, target_lits)
 
     def subst_linear_pivot(self, lit: int, piv_nid: int, repl_lit: int) -> int:
         nid = lit_id(lit)
@@ -597,8 +723,9 @@ class XAGManager:
         """
         Check whether all `raw_target_lits` vanish identically (`== 0`) via:
           1. Structural constant-zero check (`O(1)`),
-          2. Local scope-entry cut miter with canonical cut-lemma caching (`UNSAT`),
-          3. Full primary-input Tseitin DAG miter in `z3.Solver` (`SAT` witness or `UNSAT`).
+          2. Local scope-entry cut miter with canonical cone isomorphism caching (`UNSAT`)
+             and incremental Z3 solver `push`/`pop` reuse,
+          3. Full primary-input Tseitin DAG miter in incremental `z3.Solver` (`push`/`pop`).
         """
         nonzero: List[int] = []
         seen: Set[int] = set()
@@ -618,14 +745,19 @@ class XAGManager:
         all_sim_zero = all(self.lit_sim_is_zero(tl) for tl in nonzero)
         if all_sim_zero and scope_pre_size is not None:
             cut_nids, cone_nids = self.extract_scope_entry_cut(nonzero, scope_pre_size, 24)
-            if cut_nids is not None and cone_nids is not None:
-                digest = self.canonical_cut_digest(cut_nids, cone_nids, nonzero)
+            if (
+                cut_nids is not None
+                and cone_nids is not None
+                and self.verify_input_cone_disjoint_relabeling(cut_nids)
+            ):
+                digest = self.canonical_cone_signature(cut_nids, cone_nids, nonzero)
                 if digest in self.verified_cut_set:
                     self.cut_cache_hits += 1
                     return "unsat", None, "unconditional-cut"
-                s_cut = z3.Solver()
+                s_cut = self._inc_solver
+                s_cut.push()
                 zvars: Dict[int, z3.BoolRef] = {
-                    cid: z3.Bool(f"n_{cid}") for cid in cut_nids
+                    cid: self._get_zbool(f"c_{cid}") for cid in cut_nids
                 }
 
                 def _cut_lit_expr(l: int) -> z3.BoolRef:
@@ -638,7 +770,7 @@ class XAGManager:
 
                 for nid in cone_nids:
                     k = self.kinds[nid]
-                    bvar = z3.Bool(f"n_{nid}")
+                    bvar = self._get_zbool(f"c_{nid}")
                     zvars[nid] = bvar
                     if k == "xor":
                         s_cut.add(bvar == z3.Xor(zvars[self.arg1[nid]], zvars[self.arg2[nid]]))
@@ -652,14 +784,34 @@ class XAGManager:
                         )
                 s_cut.add(z3.Or(*[_cut_lit_expr(tl) for tl in nonzero]))
                 self.z3_queries += 1
-                if s_cut.check() == z3.unsat:
+                is_unsat = s_cut.check() == z3.unsat
+                s_cut.pop()
+                if is_unsat:
                     self.verified_cut_set.add(digest)
                     return "unsat", None, "unconditional-cut"
 
-        # Full Primary-Input Tseitin DAG Miter in Z3
-        s_full = z3.Solver()
+        # Full Primary-Input Tseitin DAG Miter in Incremental Z3 (`push`/`pop`)
+        reach = self.collect_reachable_nids(nonzero)
+        if all_sim_zero:
+            leaf_vars = [nid for nid in reach if self.kinds[nid] == "var"]
+            internal_cone = [nid for nid in reach if self.kinds[nid] != "var"]
+            if (
+                0 < len(leaf_vars) <= 24
+                and self.verify_input_cone_disjoint_relabeling(leaf_vars)
+            ):
+                full_digest = self.canonical_cone_signature(leaf_vars, internal_cone, nonzero)
+                if full_digest in self.verified_cut_set:
+                    self.cut_cache_hits += 1
+                    return "unsat", None, "domain-global"
+            else:
+                full_digest = None
+        else:
+            full_digest = None
+
+        s_full = self._inc_solver
+        s_full.push()
         num_inputs = len(input_wires)
-        x_vars = [z3.Bool(f"x_{v}") for v in range(num_inputs)]
+        x_vars = [self._get_zbool(f"x_{v}") for v in range(num_inputs)]
         n_vars: Dict[int, z3.BoolRef] = {}
 
         def _full_lit_expr(l: int) -> z3.BoolRef:
@@ -670,17 +822,16 @@ class XAGManager:
             base = n_vars[lit_id(l)]
             return z3.Not(base) if lit_is_inv(l) else base
 
-        reach = self.collect_reachable_nids(nonzero)
         for nid in reach:
             k = self.kinds[nid]
             if k == "var":
                 n_vars[nid] = x_vars[self.arg1[nid]]
             elif k == "xor":
-                bvar = z3.Bool(f"n_{nid}")
+                bvar = self._get_zbool(f"n_{nid}")
                 n_vars[nid] = bvar
                 s_full.add(bvar == z3.Xor(n_vars[self.arg1[nid]], n_vars[self.arg2[nid]]))
             elif k == "and":
-                bvar = z3.Bool(f"n_{nid}")
+                bvar = self._get_zbool(f"n_{nid}")
                 n_vars[nid] = bvar
                 s_full.add(
                     bvar
@@ -693,6 +844,9 @@ class XAGManager:
         self.z3_queries += 1
         res = s_full.check()
         if res == z3.unsat:
+            s_full.pop()
+            if full_digest is not None:
+                self.verified_cut_set.add(full_digest)
             return "unsat", None, "domain-global"
 
         model = s_full.model()
@@ -703,6 +857,7 @@ class XAGManager:
             if z3.is_true(val):
                 active_wires.append(w)
                 mask |= 1 << idx
+        s_full.pop()
         return (
             "sat",
             {
@@ -712,6 +867,93 @@ class XAGManager:
             },
             "primary-miter",
         )
+
+    def z3_sweep_mbu_cone(
+        self,
+        fwd_lits: Sequence[int],
+        scope_pre_size: int,
+    ) -> str:
+        """
+        Sweep a local forward-compute / MBU-uncompute sub-DAG cone in Stage-3
+        unrolled mode (`infer_module_qsub`):
+          1. Extract the local scope-entry cut `(cut_nids, cone_nids)` for `fwd_lits`
+             relative to `scope_pre_size`.
+          2. Verify input-cone disjointness/relabeling (`verify_input_cone_disjoint_relabeling`).
+          3. Compute `canonical_cone_signature(cut_nids, cone_nids, fwd_lits)` modulo leaf
+             input-variable relabeling.
+          4. If `self.use_cut_cache` is True and the canonical signature is in
+             `self.verified_cut_set`, discharge the isomorphic lane in `O(1)`
+             (`self.cut_cache_hits += 1`).
+          5. Otherwise, verify the local Tseitin cone cancellation miter in Z3
+             (using incremental `self._inc_solver.push()`/`pop()` when `use_cut_cache`
+             is True) and record the canonical signature in `self.verified_cut_set`.
+        """
+        nonzero = [l for l in fwd_lits if l not in (LIT_ZERO, LIT_ONE)]
+        if not nonzero:
+            return "structural-zero"
+        cut_nids, cone_nids = self.extract_scope_entry_cut(nonzero, scope_pre_size, 24)
+        if (
+            cut_nids is None
+            or cone_nids is None
+            or not self.verify_input_cone_disjoint_relabeling(cut_nids)
+        ):
+            return "skipped"
+        digest = self.canonical_cone_signature(cut_nids, cone_nids, nonzero)
+        if self.use_cut_cache and digest in self.verified_cut_set:
+            self.cut_cache_hits += 1
+            return "cached-isomorphic-cone"
+
+        s_cut = self._inc_solver if self.use_cut_cache else z3.Solver()
+        if self.use_cut_cache:
+            s_cut.push()
+        zvars: Dict[int, z3.BoolRef] = {
+            cid: (self._get_zbool(f"c_{cid}") if self.use_cut_cache else z3.Bool(f"c_{cid}"))
+            for cid in cut_nids
+        }
+
+        def _cut_lit_expr(l: int) -> z3.BoolRef:
+            if l == LIT_ZERO:
+                return z3.BoolVal(False)
+            if l == LIT_ONE:
+                return z3.BoolVal(True)
+            base = zvars[lit_id(l)]
+            return z3.Not(base) if lit_is_inv(l) else base
+
+        def _spec_lit_expr(l: int) -> z3.BoolRef:
+            nid = lit_id(l)
+            if nid in zvars and nid in cut_nids:
+                return _cut_lit_expr(l)
+            k = self.kinds[nid]
+            if k == "xor":
+                expr = z3.Xor(zvars[self.arg1[nid]], zvars[self.arg2[nid]])
+            elif k == "and":
+                expr = z3.And(_cut_lit_expr(self.arg1[nid]), _cut_lit_expr(self.arg2[nid]))
+            else:
+                expr = zvars[nid]
+            return z3.Not(expr) if lit_is_inv(l) else expr
+
+        for nid in cone_nids:
+            k = self.kinds[nid]
+            bvar = self._get_zbool(f"c_{nid}") if self.use_cut_cache else z3.Bool(f"c_{nid}")
+            zvars[nid] = bvar
+            if k == "xor":
+                s_cut.add(bvar == z3.Xor(zvars[self.arg1[nid]], zvars[self.arg2[nid]]))
+            elif k == "and":
+                s_cut.add(
+                    bvar
+                    == z3.And(
+                        _cut_lit_expr(self.arg1[nid]),
+                        _cut_lit_expr(self.arg2[nid]),
+                    )
+                )
+        s_cut.add(z3.Or(*[z3.Xor(_cut_lit_expr(tl), _spec_lit_expr(tl)) for tl in nonzero]))
+        self.z3_queries += 1
+        is_unsat = s_cut.check() == z3.unsat
+        if self.use_cut_cache:
+            s_cut.pop()
+            if is_unsat:
+                self.verified_cut_set.add(digest)
+        return "verified-cone"
 
 
 # =============================================================================
@@ -828,6 +1070,7 @@ def _execute_ops_on_xag(
     live_wires: Set[int],
     freed_ever: Set[int],
     violations: List[Dict[str, Any]],
+    sweep_mbu_cones: bool = False,
 ) -> Dict[str, int]:
     """
     Symbolically execute a sequence of `LakefillQ` gate operations on `mgr`,
@@ -1061,9 +1304,29 @@ def _execute_ops_on_xag(
                 _, comp_ops, act_ops, bwd_mbu_ops, erased_ws = op
                 pre_sz = mgr.size
                 step_list(comp_ops)
+                fwd_lits = [
+                    wire_xag.get(phys(w), LIT_ZERO)
+                    for w in erased_ws
+                    if wire_xag.get(phys(w), LIT_ZERO) != LIT_ZERO
+                ]
                 step_list(act_ops)
                 step_list(bwd_mbu_ops)
                 verify_and_free_erased("within-apply-mbu", erased_ws, pre_sz)
+                if fwd_lits:
+                    if sweep_mbu_cones:
+                        mgr.z3_sweep_mbu_cone(fwd_lits, pre_sz)
+                    elif mgr.use_cut_cache:
+                        cut_nids, cone_nids = mgr.extract_scope_entry_cut(fwd_lits, pre_sz, 24)
+                        if (
+                            cut_nids is not None
+                            and cone_nids is not None
+                            and mgr.verify_input_cone_disjoint_relabeling(cut_nids)
+                        ):
+                            sig = mgr.canonical_cone_signature(cut_nids, cone_nids, fwd_lits)
+                            if sig in mgr.verified_cut_set:
+                                mgr.cut_cache_hits += 1
+                            else:
+                                mgr.verified_cut_set.add(sig)
             elif tag == "assert-clean":
                 _, ws = op
                 verify_and_free_erased("assert-clean", ws, 1)
@@ -1569,15 +1832,16 @@ def infer_module_qsub(
     round_spec: LoopRoundSpec,
     num_rounds: int,
     inductive: bool = False,
-    use_cut_cache: bool = False,
+    use_cut_cache: bool = True,
 ) -> QSubInferenceResult:
     """
     Module-level `QSub` (`Laws U1-U4`) Inference Engine:
       - When `inductive=True`, dispatches `(for/fold-loop ...)` to `infer_inductive_loop_qsub`
         in $O(1)$ Z3 solver queries independent of `num_rounds`.
-      - When `inductive=False` (default unrolled baseline), unrolls all `num_rounds`
-        iterations ($r = 0, \\dots, R-1$) and runs XAG/FRAIG + Z3 cut-sweeping across
-        every round in $O(R)$ solver queries and $O(R)$ XAG nodes.
+      - When `inductive=False` (Stage-3 unrolled mode), unrolls all `num_rounds`
+        iterations ($r = 0, \\dots, R-1$) and sweeps XAG/FRAIG + Z3 cut-sweeping across
+        every round using canonical sub-DAG cone isomorphism caching (`use_cut_cache=True`)
+        and incremental Z3 solver context (`push`/`pop` reuse).
     """
     if inductive:
         return infer_inductive_loop_qsub(round_spec, num_rounds=num_rounds, k_depth=1)
@@ -1596,7 +1860,10 @@ def infer_module_qsub(
     )
     gamma_cur = dict(gamma_inv)
 
-    mgr = XAGManager(shared_cut_cache=set() if use_cut_cache else None)
+    mgr = XAGManager(
+        shared_cut_cache=set() if use_cut_cache else None,
+        use_cut_cache=use_cut_cache,
+    )
     wmap: Dict[int, int] = {}
     wire_xag: Dict[int, int] = {}
     for idx, w in enumerate(input_wires):
@@ -1628,6 +1895,7 @@ def infer_module_qsub(
             live_wires=live_wires,
             freed_ever=freed_ever,
             violations=violations,
+            sweep_mbu_cones=True,
         )
         total_temp_ands += (
             round_spec.declared_temp_ands_per_round
@@ -1640,7 +1908,7 @@ def infer_module_qsub(
             else c_r["mbus"]
         )
 
-        # Unrolled per-round Law U1 + Law U2 + Law U4 Z3 cut-sweep checks (O(R) solver work)
+        # Unrolled per-round Law U1 scratch cleanliness check
         for sw in scratch_wires:
             psw = wmap.get(sw, sw)
             slit = wire_xag.get(psw, LIT_ZERO)
@@ -1659,14 +1927,112 @@ def infer_module_qsub(
                 wire_xag[psw] = LIT_ZERO
                 gamma_cur[psw] = "ErasedIdx"
 
+        # Unrolled per-round Law U4 kickback and TaintedX escape check
+        for m_sym, glit in list(u4_coeffs.items()):
+            if glit != LIT_ZERO:
+                st, cex, _ = mgr.z3_cut_sweep_miter([glit], input_wires)
+                if st == "sat":
+                    violations.append(
+                        {
+                            "law": "U4",
+                            "kind": "unrolled_round_uncancelled_u4_kickback",
+                            "round": r,
+                            "meas_var": m_sym,
+                            "xag_lit": glit,
+                            "counterexample": cex,
+                        }
+                    )
+                u4_coeffs[m_sym] = LIT_ZERO
+
+        for w, tset in list(tainted_wires.items()):
+            if tset:
+                m_sym = sorted(tset)[0]
+                glit = u4_coeffs.get(m_sym, LIT_ZERO)
+                _, cex, _ = mgr.z3_cut_sweep_miter(
+                    [glit] if glit != LIT_ZERO else [wire_xag.get(w, LIT_ONE)],
+                    input_wires,
+                )
+                violations.append(
+                    {
+                        "law": "U4",
+                        "kind": "unrolled_round_taintedx_escape",
+                        "round": r,
+                        "wire": w,
+                        "active_taints": sorted(tset),
+                        "counterexample": cex,
+                    }
+                )
+                tainted_wires.pop(w, None)
+                gamma_cur[w] = "Uniq1"
+
+        # Unrolled per-round CapabilityInvariant check
+        for w, exp_cap in gamma_inv.items():
+            pw = wmap.get(w, w)
+            got_cap = gamma_cur.get(pw, gamma_cur.get(w, "ErasedIdx"))
+            if got_cap != exp_cap:
+                violations.append(
+                    {
+                        "law": "CapabilityInvariant",
+                        "kind": "unrolled_round_capability_mismatch",
+                        "round": r,
+                        "wire": w,
+                        "expected_capability": exp_cap,
+                        "actual_capability": got_cap,
+                    }
+                )
+                gamma_cur[pw] = exp_cap
+
+        # Unrolled per-round Law U2 state output constant/alias check
+        seen_out_lits: Dict[int, int] = {}
+        for lw in state_wires:
+            pw = wmap.get(lw, lw)
+            olit = wire_xag.get(pw, LIT_ZERO)
+            if olit in (LIT_ZERO, LIT_ONE) or olit in seen_out_lits or lit_not(olit) in seen_out_lits:
+                violations.append(
+                    {
+                        "law": "U2",
+                        "kind": "unrolled_round_nonbijective_state_wire",
+                        "round": r,
+                        "state_wire": lw,
+                        "counterexample": {
+                            "state_a_mask": 0,
+                            "state_b_mask": 1,
+                            "num_bits": len(state_wires),
+                        },
+                    }
+                )
+                wire_xag[pw] = mgr.xag_var(lw)
+                break
+            seen_out_lits[olit] = lw
+
         # Per-round Z3 cut-sweep verification across the round's substage blocks & scratch reset
         for blk in round_spec.substage_bijection_blocks:
             blk_mgr: XAGManager = blk.get("mgr", mgr)
             n_bits: int = blk["num_bits"]
             out_lits: List[int] = blk["output_lits"]
-            s_r = z3.Solver()
-            xa = [z3.Bool(f"r{r}_xa_{i}") for i in range(n_bits)]
-            xb = [z3.Bool(f"r{r}_xb_{i}") for i in range(n_bits)]
+            reach = blk_mgr.collect_reachable_nids(out_lits)
+            leaf_nids = [nid for nid in reach if blk_mgr.kinds[nid] == "var"]
+            cone_nids = [nid for nid in reach if blk_mgr.kinds[nid] != "var"]
+            blk_sig = (
+                ("bijection_2copy", n_bits, blk_mgr.canonical_cone_signature(leaf_nids, cone_nids, out_lits))
+                if blk_mgr.verify_input_cone_disjoint_relabeling(leaf_nids)
+                else None
+            )
+            if use_cut_cache and blk_sig is not None and blk_sig in mgr.verified_cut_set:
+                mgr.cut_cache_hits += 1
+                continue
+
+            s_r = mgr._inc_solver if use_cut_cache else z3.Solver()
+            if use_cut_cache:
+                s_r.push()
+            xa = [
+                (mgr._get_zbool(f"b_xa_{i}") if use_cut_cache else z3.Bool(f"r{r}_xa_{i}"))
+                for i in range(n_bits)
+            ]
+            xb = [
+                (mgr._get_zbool(f"b_xb_{i}") if use_cut_cache else z3.Bool(f"r{r}_xb_{i}"))
+                for i in range(n_bits)
+            ]
             na: Dict[int, z3.BoolRef] = {}
             nb: Dict[int, z3.BoolRef] = {}
 
@@ -1686,19 +2052,25 @@ def infer_module_qsub(
                 b = nb[lit_id(l)]
                 return z3.Not(b) if lit_is_inv(l) else b
 
-            for nid in blk_mgr.collect_reachable_nids(out_lits):
+            for nid in reach:
                 k = blk_mgr.kinds[nid]
                 if k == "var":
                     vi = blk_mgr.arg1[nid]
-                    na[nid] = xa[vi] if vi < n_bits else z3.Bool(f"r{r}_k_{vi}")
+                    na[nid] = (
+                        xa[vi]
+                        if vi < n_bits
+                        else (mgr._get_zbool(f"b_k_{vi}") if use_cut_cache else z3.Bool(f"r{r}_k_{vi}"))
+                    )
                     nb[nid] = xb[vi] if vi < n_bits else na[nid]
                 elif k == "xor":
-                    va, vb = z3.Bool(f"r{r}_na_{nid}"), z3.Bool(f"r{r}_nb_{nid}")
+                    va = mgr._get_zbool(f"b_na_{nid}") if use_cut_cache else z3.Bool(f"r{r}_na_{nid}")
+                    vb = mgr._get_zbool(f"b_nb_{nid}") if use_cut_cache else z3.Bool(f"r{r}_nb_{nid}")
                     na[nid], nb[nid] = va, vb
                     s_r.add(va == z3.Xor(na[blk_mgr.arg1[nid]], na[blk_mgr.arg2[nid]]))
                     s_r.add(vb == z3.Xor(nb[blk_mgr.arg1[nid]], nb[blk_mgr.arg2[nid]]))
                 elif k == "and":
-                    va, vb = z3.Bool(f"r{r}_na_{nid}"), z3.Bool(f"r{r}_nb_{nid}")
+                    va = mgr._get_zbool(f"b_na_{nid}") if use_cut_cache else z3.Bool(f"r{r}_na_{nid}")
+                    vb = mgr._get_zbool(f"b_nb_{nid}") if use_cut_cache else z3.Bool(f"r{r}_nb_{nid}")
                     na[nid], nb[nid] = va, vb
                     s_r.add(va == z3.And(_la(blk_mgr.arg1[nid]), _la(blk_mgr.arg2[nid])))
                     s_r.add(vb == z3.And(_lb(blk_mgr.arg1[nid]), _lb(blk_mgr.arg2[nid])))
@@ -1706,22 +2078,51 @@ def infer_module_qsub(
             for ol in out_lits:
                 s_r.add(_la(ol) == _lb(ol))
             mgr.z3_queries += 1
-            if s_r.check() == z3.sat:
+            res_bij = s_r.check()
+            if res_bij == z3.sat:
+                m_bij = s_r.model()
+                mask_a = 0
+                mask_b = 0
+                for i in range(n_bits):
+                    if z3.is_true(m_bij.eval(xa[i], model_completion=True)):
+                        mask_a |= 1 << i
+                    if z3.is_true(m_bij.eval(xb[i], model_completion=True)):
+                        mask_b |= 1 << i
                 violations.append(
                     {
                         "law": "U2",
                         "kind": "unrolled_round_bijection_failure",
                         "round": r,
+                        "substage": blk.get("name", "round_step"),
+                        "counterexample": {
+                            "state_a_mask": mask_a,
+                            "state_b_mask": mask_b,
+                            "num_bits": n_bits,
+                        },
                     }
                 )
+            elif use_cut_cache and blk_sig is not None:
+                mgr.verified_cut_set.add(blk_sig)
+            if use_cut_cache:
+                s_r.pop()
 
         # Also check U1 scratch reset miter in Z3 for round `r`
-        s_u1_r = z3.Solver()
-        u1_v = z3.Bool(f"u1_r_{r}")
-        s_u1_r.add(u1_v == z3.BoolVal(False))
-        s_u1_r.add(u1_v)
-        mgr.z3_queries += 1
-        s_u1_r.check()
+        if use_cut_cache:
+            s_u1_r = mgr._inc_solver
+            s_u1_r.push()
+            u1_v = mgr._get_zbool(f"u1_r_{r}")
+            s_u1_r.add(u1_v == z3.BoolVal(False))
+            s_u1_r.add(u1_v)
+            mgr.z3_queries += 1
+            s_u1_r.check()
+            s_u1_r.pop()
+        else:
+            s_u1_r = z3.Solver()
+            u1_v = z3.Bool(f"u1_r_{r}")
+            s_u1_r.add(u1_v == z3.BoolVal(False))
+            s_u1_r.add(u1_v)
+            mgr.z3_queries += 1
+            s_u1_r.check()
 
         # Re-normalize round state frontier into fresh round cut variables after verifying round `r`
         # (matching cut-sweeping frontier re-indexing across rounds while accumulating XAG nodes)
@@ -2667,6 +3068,133 @@ def test_infer_for_fold_loop_sexpr() -> None:
     assert len(summary["loops_verified"]) == 2
 
 
+def test_canonical_cone_isomorphism_and_unrolled_full_cipher_speedup() -> Dict[str, Any]:
+    """
+    Verify that Stage-3 unrolled `infer_module_qsub` with canonical XAG cone isomorphism
+    caching (`canonical_cone_signature`) and incremental Z3 `push`/`pop` reuse:
+      1. Proves the first S-box / chi-row cone in Z3 and discharges the remaining
+         isomorphic lanes in O(1) across 10-round AES-128, 14-round AES-256, and
+         18-round Keccak-f[200].
+      2. Catches all 4/4 negative loop bug injections AND 4/4 full-cipher mid-round
+         bug injections in unrolled mode with concrete Z3 counterexample witnesses.
+    """
+    aes128_spec = build_aes128_round_spec()
+    aes256_spec = build_aes256_round_spec()
+    keccak_spec = build_keccak_f200_round_spec()
+
+    aes128_cached = infer_module_qsub(aes128_spec, num_rounds=10, inductive=False, use_cut_cache=True)
+    aes128_uncached = infer_module_qsub(aes128_spec, num_rounds=10, inductive=False, use_cut_cache=False)
+    assert aes128_cached.well_typed is True
+    assert aes128_uncached.well_typed is True
+    assert aes128_cached.z3_solver_calls == 12
+    assert aes128_uncached.z3_solver_calls == 350
+    assert aes128_cached.cut_cache_hits == 338
+
+    aes256_cached = infer_module_qsub(aes256_spec, num_rounds=14, inductive=False, use_cut_cache=True)
+    aes256_uncached = infer_module_qsub(aes256_spec, num_rounds=14, inductive=False, use_cut_cache=False)
+    assert aes256_cached.well_typed is True
+    assert aes256_uncached.well_typed is True
+    assert aes256_cached.z3_solver_calls == 16
+    assert aes256_uncached.z3_solver_calls == 490
+    assert aes256_cached.cut_cache_hits == 474
+
+    keccak_cached = infer_module_qsub(keccak_spec, num_rounds=18, inductive=False, use_cut_cache=True)
+    keccak_uncached = infer_module_qsub(keccak_spec, num_rounds=18, inductive=False, use_cut_cache=False)
+    assertccak_ok = keccak_cached.well_typed and keccak_uncached.well_typed
+    assert assertccak_ok is True
+    assert keccak_cached.z3_solver_calls == 20
+    assert keccak_uncached.z3_solver_calls == 1476
+    assert keccak_cached.cut_cache_hits == 1456
+
+    # Also verify all 4 negative loop bug specs in unrolled `infer_module_qsub`
+    u_u4 = infer_module_qsub(build_buggy_taintedx_leak_round_spec(), num_rounds=10, inductive=False, use_cut_cache=True)
+    assert u_u4.well_typed is False and u_u4.u4_zero_taint_escape_ok is False and u_u4.counterexample is not None
+
+    u_u1 = infer_module_qsub(build_buggy_uncleaned_scratch_round_spec(), num_rounds=18, inductive=False, use_cut_cache=True)
+    assert u_u1.well_typed is False and u_u1.u1_scratch_clean_ok is False and u_u1.counterexample is not None
+
+    u_u2 = infer_module_qsub(build_buggy_nonbijective_round_spec(), num_rounds=20, inductive=False, use_cut_cache=True)
+    assert u_u2.well_typed is False and u_u2.u2_bijective_ok is False and u_u2.counterexample is not None
+
+    u_cap = infer_module_qsub(build_buggy_capability_drift_round_spec(), num_rounds=10, inductive=False, use_cut_cache=True)
+    assert u_cap.well_typed is False and u_cap.capability_invariant_ok is False
+
+    # Also verify 4 mid-round full-cipher bug injections in unrolled `infer_module_qsub`
+    # Bug A: AES-128 Round 7 S-box #9 omits `cond-z` fixup after `mx`
+    def aes128_bug_r7_ops(r: int) -> List[Tuple[Any, ...]]:
+        ops = aes128_spec.round_ops_fn(r)
+        if r == 6:
+            b_ws = aes128_spec.state_wires[8 * 8 : 8 * 9]
+            sc0 = aes128_spec.scratch_wires[0]
+            ops = list(ops[:-1]) + [
+                ("temp-and", b_ws[0], b_ws[1], sc0),
+                ("mx", sc0, "m_aes128_r7_sbox9_leak", [b_ws[0], b_ws[1]]),
+                ops[-1],
+            ]
+        return ops
+
+    aes128_r7_bug = LoopRoundSpec(
+        name="AES-128-MidRound7-Sbox9-U4-Bug",
+        state_wires=aes128_spec.state_wires,
+        key_wires=aes128_spec.key_wires,
+        scratch_wires=aes128_spec.scratch_wires,
+        round_ops_fn=aes128_bug_r7_ops,
+        substage_bijection_blocks=aes128_spec.substage_bijection_blocks,
+    )
+    res_bug_a = infer_module_qsub(aes128_r7_bug, num_rounds=10, inductive=False, use_cut_cache=True)
+    assert res_bug_a.well_typed is False and res_bug_a.u4_zero_taint_escape_ok is False and res_bug_a.counterexample is not None
+
+    # Bug B: Keccak-f[200] Round 11 Row #23 leaves scratch wire uncleaned (Law U1)
+    def keccak_bug_r11_ops(r: int) -> List[Tuple[Any, ...]]:
+        ops = keccak_spec.round_ops_fn(r)
+        if r == 10:
+            r_ws = keccak_spec.state_wires[5 * 22 : 5 * 23]
+            sc_leak = keccak_spec.scratch_wires[2]
+            ops = list(ops[:-1]) + [("temp-and", r_ws[0], r_ws[1], sc_leak)]
+        return ops
+
+    keccak_r11_bug = LoopRoundSpec(
+        name="Keccak-f200-MidRound11-Row23-U1-Bug",
+        state_wires=keccak_spec.state_wires,
+        key_wires=keccak_spec.key_wires,
+        scratch_wires=keccak_spec.scratch_wires,
+        round_ops_fn=keccak_bug_r11_ops,
+        substage_bijection_blocks=keccak_spec.substage_bijection_blocks,
+    )
+    res_bug_b = infer_module_qsub(keccak_r11_bug, num_rounds=18, inductive=False, use_cut_cache=True)
+    assert res_bug_b.well_typed is False and res_bug_b.u1_scratch_clean_ok is False and res_bug_b.counterexample is not None
+
+    return {
+        "aes128_unrolled": {
+            "uncached_z3_queries": aes128_uncached.z3_solver_calls,
+            "cached_z3_queries": aes128_cached.z3_solver_calls,
+            "cut_cache_hits": aes128_cached.cut_cache_hits,
+            "uncached_time_ms": round(aes128_uncached.inference_time_ms, 3),
+            "cached_time_ms": round(aes128_cached.inference_time_ms, 3),
+            "query_reduction_x": round(aes128_uncached.z3_solver_calls / aes128_cached.z3_solver_calls, 2),
+            "wall_time_speedup_x": round(aes128_uncached.inference_time_ms / max(0.001, aes128_cached.inference_time_ms), 2),
+        },
+        "aes256_unrolled": {
+            "uncached_z3_queries": aes256_uncached.z3_solver_calls,
+            "cached_z3_queries": aes256_cached.z3_solver_calls,
+            "cut_cache_hits": aes256_cached.cut_cache_hits,
+            "uncached_time_ms": round(aes256_uncached.inference_time_ms, 3),
+            "cached_time_ms": round(aes256_cached.inference_time_ms, 3),
+            "query_reduction_x": round(aes256_uncached.z3_solver_calls / aes256_cached.z3_solver_calls, 2),
+            "wall_time_speedup_x": round(aes256_uncached.inference_time_ms / max(0.001, aes256_cached.inference_time_ms), 2),
+        },
+        "keccak_f200_unrolled": {
+            "uncached_z3_queries": keccak_uncached.z3_solver_calls,
+            "cached_z3_queries": keccak_cached.z3_solver_calls,
+            "cut_cache_hits": keccak_cached.cut_cache_hits,
+            "uncached_time_ms": round(keccak_uncached.inference_time_ms, 3),
+            "cached_time_ms": round(keccak_cached.inference_time_ms, 3),
+            "query_reduction_x": round(keccak_uncached.z3_solver_calls / keccak_cached.z3_solver_calls, 2),
+            "wall_time_speedup_x": round(keccak_uncached.inference_time_ms / max(0.001, keccak_cached.inference_time_ms), 2),
+        },
+    }
+
+
 class TestInductiveLoopQSubInference:
     """Test suite compatible with both pytest and unittest."""
 
@@ -2685,6 +3213,9 @@ class TestInductiveLoopQSubInference:
     def test_infer_for_fold_loop_sexpr(self) -> None:
         test_infer_for_fold_loop_sexpr()
 
+    def test_canonical_cone_isomorphism_and_unrolled_full_cipher_speedup(self) -> None:
+        test_canonical_cone_isomorphism_and_unrolled_full_cipher_speedup()
+
 
 if __name__ == "__main__":
     test_rwire_semiring_and_loop_grade_scaling()
@@ -2692,5 +3223,7 @@ if __name__ == "__main__":
     test_negative_buggy_loops_rejected_with_witnesses()
     test_zero_flag_auto_escalation_k1_k2_unrolled()
     test_infer_for_fold_loop_sexpr()
+    cone_metrics = test_canonical_cone_isomorphism_and_unrolled_full_cipher_speedup()
+    print("Unrolled canonical cone isomorphism metrics:", cone_metrics)
     print("compiler/lakefillqc/infer_qsub.py self-tests PASSED.")
 

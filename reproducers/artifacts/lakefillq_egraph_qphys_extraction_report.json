@@ -1,11 +1,11 @@
 {
   "title": "QPhysGrade-Guided e-Graph Equality Saturation Over RevIR for LakefillQ",
   "all_verifications_passed": true,
-  "elapsed_seconds": 88.888,
+  "elapsed_seconds": 329.248,
   "lean4_mechanization_audit": {
     "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
     "lean_eval_sanity": true,
-    "theorem_count": 25,
+    "theorem_count": 27,
     "max_proof_lines": 18,
     "kernel_violations": [],
     "vacuous_or_tautological": []

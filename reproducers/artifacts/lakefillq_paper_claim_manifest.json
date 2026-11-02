@@ -2,7 +2,7 @@
   "manuscript_title": "LakefillQ: Purely Functional Data Structures, Substructural Typing, and Graded Physical Compilation for Low-Width Fault-Tolerant Quantum Circuits",
   "compiler_system": "LakefillQ",
   "overall_status": "PASS",
-  "total_verification_seconds": 83.931,
+  "total_verification_seconds": 85.074,
   "deliverables": {
     "latex_manuscript": "paper/lakefillq_paper.tex",
     "bibtex_database": "paper/references.bib",
@@ -2166,157 +2166,157 @@
       {
         "lean_file": "proofs/adversarial_catch_audit_and_sota_comparison_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 777.66
+        "elapsed_ms": 591.89
       },
       {
         "lean_file": "proofs/bivariate_bicycle_qldpc_and_0dsp_backlog_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 604.94
+        "elapsed_ms": 526.4
       },
       {
         "lean_file": "proofs/dqi_opi_and_parallel_walker_bitonic_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 381.21
+        "elapsed_ms": 359.52
       },
       {
         "lean_file": "proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 459.26
+        "elapsed_ms": 496.11
       },
       {
         "lean_file": "proofs/wire_level_symbolic_type_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1435.94
+        "elapsed_ms": 1509.58
       },
       {
         "lean_file": "proofs/select_swap_qroam_crt_kawamura_u2_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2215.44
+        "elapsed_ms": 2398.24
       },
       {
         "lean_file": "proofs/pareto_inplace_aes_slp_asymmetric_mbu_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 10363.38
+        "elapsed_ms": 7493.48
       },
       {
         "lean_file": "proofs/early_mbu_phase_only_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 18399.48
+        "elapsed_ms": 17348.63
       },
       {
         "lean_file": "proofs/qphys_graded_resource_semiring_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1982.79
+        "elapsed_ms": 2387.47
       },
       {
         "lean_file": "proofs/differential_compiler_mutation_soundness_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1241.15
+        "elapsed_ms": 1609.66
       },
       {
         "lean_file": "proofs/lakefillq_unified_compiler_elaboration_and_qasm3_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2186.38
+        "elapsed_ms": 2238.79
       },
       {
         "lean_file": "proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1463.85
+        "elapsed_ms": 1480.61
       },
       {
         "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1656.45
+        "elapsed_ms": 1699.07
       },
       {
         "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1304.36
+        "elapsed_ms": 1646.58
       },
       {
         "lean_file": "proofs/lakefillq_block_encoding_lcu_qsvt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 853.59
+        "elapsed_ms": 777.5
       },
       {
         "lean_file": "proofs/lakefillq_bug_class_prevention_type_system_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2049.56
+        "elapsed_ms": 1683.55
       },
       {
         "lean_file": "proofs/lakefillq_algorithmic_optimizations_and_3mode_scaling_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 60965.28
+        "elapsed_ms": 63191.09
       },
       {
         "lean_file": "proofs/sota_ecc_rsa_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1413.57
+        "elapsed_ms": 1801.92
       },
       {
         "lean_file": "proofs/sota_symmetric_hash_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1174.52
+        "elapsed_ms": 1317.95
       },
       {
         "lean_file": "proofs/sota_qisd_dqi_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1190.08
+        "elapsed_ms": 1016.22
       },
       {
         "lean_file": "proofs/sota_qualtran_cobble_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1095.47
+        "elapsed_ms": 645.92
       },
       {
         "lean_file": "proofs/lakefillq_graded_coeffect_uniqueness_place_effect_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 6896.6
+        "elapsed_ms": 6018.68
       },
       {
         "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2313.32
+        "elapsed_ms": 2872.98
       },
       {
         "lean_file": "proofs/lakefillq_qasm_python_linter_lifting_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3298.09
+        "elapsed_ms": 3412.78
       },
       {
         "lean_file": "proofs/lakefillq_noisy_optical_link_distillation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2253.06
+        "elapsed_ms": 1640.03
       },
       {
         "lean_file": "proofs/lakefillq_multipass_diagnostic_provenance_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1706.86
+        "elapsed_ms": 1305.35
       },
       {
         "lean_file": "proofs/lakefillq_holistic_modular_duoidal_cohesion_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1561.15
+        "elapsed_ms": 1238.68
       },
       {
         "lean_file": "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1655.16
+        "elapsed_ms": 2387.71
       },
       {
         "lean_file": "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2677.69
+        "elapsed_ms": 2474.44
       },
       {
         "lean_file": "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1067.91
+        "elapsed_ms": 1250.24
       },
       {
         "lean_file": "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2756.44
+        "elapsed_ms": 2477.2
       }
     ]
   },

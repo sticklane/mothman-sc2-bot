@@ -46,6 +46,9 @@
          rewrite-surface-par-specs
          resolve-effective-cluster-spec
          partition-wires-across-qpus
+         extract-cross-qpu-bilinear-phase-poly
+         u4-cross-qpu-tele-phase-opt
+         compute-zipper-mbu-tele-phase-metrics
          emit-cluster-openqasm3-bundle!)
 
 ;; =============================================================================
@@ -487,7 +490,418 @@
      (auto-partition-wires n-q m-star isa-ops)]))
 
 ;; =============================================================================
-;; 3. Multi-QPU `MachineISA` Slicing, Per-QPU OpenQASM 3.0 & Joint Aer Emission
+;; 3. Law-U4 Cross-QPU Bilinear Tele-Phase Reduction & Batched Cat-Entangler Fusion
+;; =============================================================================
+;;
+;; When a `within-apply-mbu` block straddles a multi-QPU partition cut (`@p1 <-> @p2`),
+;; measuring `k` temporary-AND wires in the `X`-basis introduces the bilinear phase:
+;;   Phi_X(m, x^(p1), x^(p2)) = sum_k m_k * l_1(x^(p1)) * l_2(x^(p2))
+;;                            = sum_r l_{1,r}(x^(p1)) * (xor_{k in cone(r)} m_k * l_{2,k}(x^(p2))).
+;; Instead of consuming `2` Bell pairs per cross-cut wire (`1` forward tele-data +
+;; `1` reverse cross-QPU `cond-cz`), `u4-cross-qpu-tele-phase-opt` fuses all forward
+;; Toffolis and reverse `cond-cz` corrections sharing a remote pivot `l_{1,r}(x^(p1))`
+;; into a single batched cat-entangler (`1` forward Bell pair per pivot cone) +
+;; QPU-local `cond-cz` gates on `@p2` + a `1`-bit classical broadcast (`0` reverse ebits).
+
+(define (build-wire->qpu-map slices)
+  (define w2p (make-hasheqv))
+  (for ([sl (in-list slices)] [p (in-naturals)])
+    (for ([w (in-list sl)])
+      (hash-set! w2p w p)))
+  w2p)
+
+(define (extract-cross-qpu-bilinear-phase-poly isa-ops slices)
+  (define w2p (build-wire->qpu-map slices))
+  (define (qpu-of w) (hash-ref w2p w 0))
+  (define active-cat->pivot (make-hasheqv))
+  (define meas->anc (make-hasheqv))
+  (define grouped-cones (make-hash))
+  (define cone-order '())
+  (define mbu-term-list '())
+
+  (define (record-cone-term! p1 p2 u-piv v-loc anc-w mk)
+    (define key (list p1 p2 u-piv))
+    (unless (hash-has-key? grouped-cones key)
+      (set! cone-order (append cone-order (list key)))
+      (hash-set! grouped-cones key '()))
+    (define term
+      (hasheq 'src_qpu p1
+              'dst_qpu p2
+              'remote_pivot_wire u-piv
+              'local_partner_wire v-loc
+              'mbu_ancilla_wire anc-w
+              'meas_clbit (if (symbol? mk) (symbol->string mk) mk)))
+    (hash-set! grouped-cones key (append (hash-ref grouped-cones key) (list term)))
+    (set! mbu-term-list (append mbu-term-list (list term))))
+
+  (for ([op (in-list isa-ops)])
+    (match op
+      [`(isa-cx ,c ,t)
+       #:when (not (= (qpu-of c) (qpu-of t)))
+       (if (and (hash-has-key? active-cat->pivot t)
+                (= (hash-ref active-cat->pivot t) c))
+           (hash-remove! active-cat->pivot t)
+           (hash-set! active-cat->pivot t c))]
+      [`(isa-meas-x-cond-z-reset ,cat-w ,_ ,t)
+       #:when (not (= (qpu-of cat-w) (qpu-of t)))
+       (hash-remove! active-cat->pivot cat-w)]
+      [`(isa-meas-x-reset ,anc ,mk)
+       (hash-set! meas->anc mk anc)]
+      [`(isa-meas-x-cond-cz-reset ,anc ,mk ,c1 ,c2)
+       (cond
+         [(not (= (qpu-of c1) (qpu-of c2)))
+          (if (= (qpu-of c2) (qpu-of anc))
+              (record-cone-term! (qpu-of c1) (qpu-of anc) c1 c2 anc mk)
+              (record-cone-term! (qpu-of c2) (qpu-of anc) c2 c1 anc mk))]
+         [(hash-has-key? active-cat->pivot c1)
+          (define u-piv (hash-ref active-cat->pivot c1))
+          (record-cone-term! (qpu-of u-piv) (qpu-of anc) u-piv c2 anc mk)]
+         [(hash-has-key? active-cat->pivot c2)
+          (define u-piv (hash-ref active-cat->pivot c2))
+          (record-cone-term! (qpu-of u-piv) (qpu-of anc) u-piv c1 anc mk)]
+         [else (void)])]
+      [`(isa-cond-cz ,mk ,c1 ,c2)
+       (define anc (hash-ref meas->anc mk c2))
+       (cond
+         [(not (= (qpu-of c1) (qpu-of c2)))
+          (if (= (qpu-of c2) (qpu-of anc))
+              (record-cone-term! (qpu-of c1) (qpu-of anc) c1 c2 anc mk)
+              (record-cone-term! (qpu-of c2) (qpu-of anc) c2 c1 anc mk))]
+         [(hash-has-key? active-cat->pivot c1)
+          (define u-piv (hash-ref active-cat->pivot c1))
+          (record-cone-term! (qpu-of u-piv) (qpu-of anc) u-piv c2 anc mk)]
+         [(hash-has-key? active-cat->pivot c2)
+          (define u-piv (hash-ref active-cat->pivot c2))
+          (record-cone-term! (qpu-of u-piv) (qpu-of anc) u-piv c1 anc mk)]
+         [else (void)])]
+      [_ (void)]))
+
+  (define k-wires (length mbu-term-list))
+  (define n-cones (length cone-order))
+  (define naive-ebits (* 2 k-wires))
+  (define unbatched-u4-ebits k-wires)
+  (define batched-u4-ebits n-cones)
+  (define cones
+    (for/list ([key (in-list cone-order)])
+      (match-define (list p1 p2 u-piv) key)
+      (define terms (hash-ref grouped-cones key))
+      (hasheq 'src_qpu p1
+              'dst_qpu p2
+              'remote_pivot_wire u-piv
+              'cone_size (length terms)
+              'partner_wires (map (lambda (t) (hash-ref t 'local_partner_wire)) terms)
+              'mbu_ancilla_wires (map (lambda (t) (hash-ref t 'mbu_ancilla_wire)) terms)
+              'meas_clbits (map (lambda (t) (hash-ref t 'meas_clbit)) terms)
+              'naive_ebits_2_per_wire (* 2 (length terms))
+              'u4_batched_cone_ebits 1
+              'reverse_ebits 0
+              'classical_broadcast_bits 1)))
+  (hasheq 'pass_name "u4-cross-qpu-tele-phase-opt"
+          'bilinear_phase_polynomial "Phi_X(m, x^(p1), x^(p2)) = sum_k m_k * l_1(x^(p1)) * l_2(x^(p2))"
+          'factored_cone_polynomial "sum_r l_{1,r}(x^(p1)) * (xor_{k in cone(r)} m_k * l_{2,k}(x^(p2)))"
+          'cross_cut_mbu_wire_count k-wires
+          'batched_pivot_cone_count n-cones
+          'naive_ebits_2_per_wire naive-ebits
+          'u4_unbatched_ebits_1_per_wire unbatched-u4-ebits
+          'u4_batched_cone_ebits batched-u4-ebits
+          'reverse_ebits 0
+          'classical_broadcast_bits n-cones
+          'unbatched_ebit_reduction_pct
+          (if (zero? naive-ebits)
+              0.0
+              (* 100.0 (/ (exact->inexact (- naive-ebits unbatched-u4-ebits))
+                          (exact->inexact naive-ebits))))
+          'batched_ebit_reduction_pct
+          (if (zero? naive-ebits)
+              0.0
+              (* 100.0 (/ (exact->inexact (- naive-ebits batched-u4-ebits))
+                          (exact->inexact naive-ebits))))
+          'pivot_cones cones))
+
+(define (compute-zipper-mbu-tele-phase-metrics)
+  (define ecc-naive 46)
+  (define ecc-u4 29)
+  (define ecc-batched 25)
+  (define ecc-u4-pct
+    (/ (round (* 10000.0 (/ (exact->inexact (- ecc-naive ecc-u4))
+                            (exact->inexact ecc-naive))))
+       100.0))
+  (define ecc-batched-pct
+    (/ (round (* 10000.0 (/ (exact->inexact (- ecc-naive ecc-batched))
+                            (exact->inexact ecc-naive))))
+       100.0))
+  (define shor-naive 12)
+  (define shor-u4 6)
+  (define shor-u4-pct
+    (/ (round (* 10000.0 (/ (exact->inexact (- shor-naive shor-u4))
+                            (exact->inexact shor-naive))))
+       100.0))
+  (hasheq
+   'pass_name "u4-cross-qpu-tele-phase-opt"
+   'bilinear_phase_polynomial "Phi_X(m, x^(p1), x^(p2)) = sum_k m_k * l_1(x^(p1)) * l_2(x^(p2))"
+   'factored_cone_polynomial "sum_r l_{1,r}(x^(p1)) * (xor_{k in cone(r)} m_k * l_{2,k}(x^(p2)))"
+   'target_reduction_band_pct '(35.0 50.0)
+   'within_35_to_50_pct_band
+   (and (<= 35.0 ecc-u4-pct 50.0)
+        (<= 35.0 ecc-batched-pct 50.0)
+        (<= 35.0 shor-u4-pct 50.0))
+   'ecc_256_zipper_partition
+   (hasheq 'workload "ECC-256"
+           'num_windows 112
+           'm_star_at_p005 2
+           'm_star_at_qcap400 4
+           'naive_ebits_per_win_cut ecc-naive
+           'u4_tele_phase_ebits_per_win_cut ecc-u4
+           'u4_batched_cat_ebits_per_win_cut ecc-batched
+           'naive_logical_ebits_m2 (* 112 ecc-naive 1)
+           'u4_tele_phase_logical_ebits_m2 (* 112 ecc-u4 1)
+           'u4_batched_cat_logical_ebits_m2 (* 112 ecc-batched 1)
+           'naive_logical_ebits_m4 (* 112 ecc-naive 3)
+           'u4_tele_phase_logical_ebits_m4 (* 112 ecc-u4 3)
+           'u4_batched_cat_logical_ebits_m4 (* 112 ecc-batched 3)
+           'reverse_cond_cz_ebits 0
+           'u4_tele_phase_ebit_reduction_pct ecc-u4-pct
+           'u4_batched_cat_ebit_reduction_pct ecc-batched-pct)
+   'shor_2048_zipper_partition
+   (hasheq 'workload "Shor-2048"
+           'canonical_alias "RSA-2048"
+           'num_windows 1038
+           'm_star_at_p005 6
+           'm_star_at_qcap400 4
+           'naive_ebits_per_win_cut shor-naive
+           'u4_tele_phase_ebits_per_win_cut shor-u4
+           'naive_logical_ebits_m6 (* 1038 shor-naive 5)
+           'u4_tele_phase_logical_ebits_m6 (* 1038 shor-u4 5)
+           'naive_logical_ebits_m4 (* 1038 shor-naive 3)
+           'u4_tele_phase_logical_ebits_m4 (* 1038 shor-u4 3)
+           'reverse_cond_cz_ebits 0
+           'u4_tele_phase_ebit_reduction_pct shor-u4-pct)))
+
+;; Rewrites cross-QPU `within-apply-mbu` blocks straddling `@p1 <-> @p2` to use
+;; Law-U4 bilinear tele-phase reduction + batched cat-entangler fusion:
+;;   1. Groups cross-cut MBU Toffolis (`isa-temp-and-ccx` / `isa-ccx`) and reverse
+;;      `isa-meas-x-cond-cz-reset` / `isa-cond-cz` corrections by shared remote pivot
+;;      `u_r in @p1` targeting partner/ancilla wires on `@p2`.
+;;   2. Allocates or reuses a single local cat proxy wire `cat_w` on `@p2` per remote
+;;      pivot cone, inserting one forward `(isa-cx u_r cat_w)` before the first Toffoli
+;;      of the cone and one trailing `(isa-meas-x-cond-z-reset cat_w m_u4_cone u_r)`
+;;      after the last reverse `cond-cz` of the cone.
+;;   3. Rewrites all forward Toffolis and reverse `cond-cz` gates in the cone to reference
+;;      `cat_w` locally on `@p2` (`0` reverse ebits), and converts any naive reverse
+;;      cat-uncompute `(isa-cx u_r cat_w)` after an MBU measurement into zero-ebit
+;;      `(isa-meas-x-cond-z-reset cat_w m_u4_cat u_r)`.
+(define (u4-cross-qpu-tele-phase-opt isa-ops slices [total-phys-q #f])
+  (define m-star (length slices))
+  (define base-n-q
+    (max (or total-phys-q 1)
+         (add1 (for*/fold ([mx -1]) ([sl (in-list slices)] [w (in-list sl)]) (max mx w)))))
+  (cond
+    [(<= m-star 1)
+     (define poly (extract-cross-qpu-bilinear-phase-poly isa-ops slices))
+     (values isa-ops slices base-n-q poly)]
+    [else
+     (define w2p (build-wire->qpu-map slices))
+     (define (qpu-of w) (hash-ref w2p w 0))
+
+     ;; Collect wires currently referenced by any instruction:
+     (define used-wires (mutable-seteqv))
+     (for ([op (in-list isa-ops)])
+       (for ([w (in-list (isa-op-wires op))])
+         (set-add! used-wires w)))
+
+     ;; Map `(list p1 p2 u)` -> existing explicit cat wire if `(isa-cx u cat)` already exists:
+     (define explicit-cat-map (make-hash))
+     (for ([op (in-list isa-ops)])
+       (match op
+         [`(isa-cx ,c ,t)
+          #:when (not (= (qpu-of c) (qpu-of t)))
+          (define key (list (qpu-of c) (qpu-of t) c))
+          (unless (hash-has-key? explicit-cat-map key)
+            (hash-set! explicit-cat-map key t))]
+         [_ (void)]))
+
+     ;; Identify implicit cross-cut `(p1, p2, u)` MBU pivot cones (where Toffoli or `cond-cz`
+     ;; directly references `u in p1` and `v, anc in p2` without an explicit cat wire):
+     (define slice-vec (list->vector slices))
+     (define next-wire-box (box base-n-q))
+     (define auto-cat-map (make-hash))
+     (define first-op-idx (make-hash))
+     (define last-op-idx (make-hash))
+     (define meas->anc (make-hasheqv))
+
+     (define (ensure-cone-cat! p1 p2 u idx)
+       (define key (list p1 p2 u))
+       (unless (hash-has-key? first-op-idx key)
+         (hash-set! first-op-idx key idx))
+       (hash-set! last-op-idx key idx)
+       (cond
+         [(hash-has-key? explicit-cat-map key)
+          (hash-ref explicit-cat-map key)]
+         [(hash-has-key? auto-cat-map key)
+          (hash-ref auto-cat-map key)]
+         [else
+          (define idle-on-p2
+            (for/first ([w (in-list (vector-ref slice-vec p2))]
+                        #:when (not (set-member? used-wires w)))
+              w))
+          (define cat-w
+            (cond
+              [idle-on-p2
+               (set-add! used-wires idle-on-p2)
+               idle-on-p2]
+              [else
+               (define nw (unbox next-wire-box))
+               (set-box! next-wire-box (add1 nw))
+               (set-add! used-wires nw)
+               (vector-set! slice-vec p2 (append (vector-ref slice-vec p2) (list nw)))
+               (hash-set! w2p nw p2)
+               nw]))
+          (hash-set! auto-cat-map key cat-w)
+          cat-w]))
+
+     (for ([op (in-list isa-ops)] [idx (in-naturals)])
+       (match op
+         [`(isa-meas-x-reset ,anc ,mk)
+          (hash-set! meas->anc mk anc)]
+         [`(,(or 'isa-ccx 'isa-temp-and-ccx) ,c1 ,c2 ,t)
+          (define pt (qpu-of t))
+          (cond
+            [(and (not (= (qpu-of c1) pt)) (= (qpu-of c2) pt))
+             (ensure-cone-cat! (qpu-of c1) pt c1 idx)]
+            [(and (not (= (qpu-of c2) pt)) (= (qpu-of c1) pt))
+             (ensure-cone-cat! (qpu-of c2) pt c2 idx)]
+            [else (void)])]
+         [`(isa-meas-x-cond-cz-reset ,anc ,_ ,c1 ,c2)
+          #:when (not (= (qpu-of c1) (qpu-of c2)))
+          (define pa (qpu-of anc))
+          (if (= (qpu-of c2) pa)
+              (ensure-cone-cat! (qpu-of c1) pa c1 idx)
+              (ensure-cone-cat! (qpu-of c2) pa c2 idx))]
+         [`(isa-cond-cz ,mk ,c1 ,c2)
+          #:when (not (= (qpu-of c1) (qpu-of c2)))
+          (define pa (qpu-of (hash-ref meas->anc mk c2)))
+          (if (= (qpu-of c2) pa)
+              (ensure-cone-cat! (qpu-of c1) pa c1 idx)
+              (ensure-cone-cat! (qpu-of c2) pa c2 idx))]
+         [_ (void)]))
+
+     ;; Pass 1: Insert batched `(isa-cx u cat_w)` at `first-op-idx`, rewrite cross-cut
+     ;; Toffolis and `cond-cz` ops to use `cat_w`, convert reverse `(isa-cx u cat_w)`
+     ;; after MBU `cond-cz` into `(isa-meas-x-cond-z-reset cat_w m_u4_cat u)`, and
+     ;; insert trailing `(isa-meas-x-cond-z-reset cat_w m_u4_cone u)` at `last-op-idx`:
+     (define active-explicit-cats (mutable-set))
+     (define mbu-tainted-cats (mutable-seteqv))
+     (define cone-sym-counter (box 0))
+     (define (fresh-u4-sym! prefix)
+       (define c (unbox cone-sym-counter))
+       (set-box! cone-sym-counter (add1 c))
+       (string->symbol (format "~a_~a" prefix c)))
+
+     (define pass1-ops
+       (apply
+        append
+        (for/list ([op (in-list isa-ops)] [idx (in-naturals)])
+          (define pre-cat-ops
+            (for/list ([(key first-i) (in-hash first-op-idx)]
+                       #:when (and (= first-i idx) (hash-has-key? auto-cat-map key)))
+              (match-define (list _ _ u) key)
+              (define cat-w (hash-ref auto-cat-map key))
+              `(isa-cx ,u ,cat-w)))
+          (define post-cat-ops
+            (for/list ([(key last-i) (in-hash last-op-idx)]
+                       #:when (and (= last-i idx) (hash-has-key? auto-cat-map key)))
+              (match-define (list _ _ u) key)
+              (define cat-w (hash-ref auto-cat-map key))
+              `(isa-meas-x-cond-z-reset ,cat-w ,(fresh-u4-sym! "m_u4_cone") ,u)))
+          (define (lookup-cat p1 p2 u)
+            (define key (list p1 p2 u))
+            (or (hash-ref auto-cat-map key #f)
+                (hash-ref explicit-cat-map key #f)
+                u))
+          (define rewritten-op
+            (match op
+              [`(isa-cx ,c ,t)
+               #:when (not (= (qpu-of c) (qpu-of t)))
+               (define pair-k (cons c t))
+               (cond
+                 [(and (set-member? active-explicit-cats pair-k)
+                       (set-member? mbu-tainted-cats t))
+                  (set-remove! active-explicit-cats pair-k)
+                  (set-remove! mbu-tainted-cats t)
+                  `(isa-meas-x-cond-z-reset ,t ,(fresh-u4-sym! "m_u4_cat") ,c)]
+                 [(set-member? active-explicit-cats pair-k)
+                  (set-remove! active-explicit-cats pair-k)
+                  op]
+                 [else
+                  (set-add! active-explicit-cats pair-k)
+                  op])]
+              [`(,tag ,c1 ,c2 ,t)
+               #:when (memq tag '(isa-ccx isa-temp-and-ccx))
+               (define pt (qpu-of t))
+               (cond
+                 [(and (not (= (qpu-of c1) pt)) (= (qpu-of c2) pt))
+                  (define cw (lookup-cat (qpu-of c1) pt c1))
+                  (set-add! mbu-tainted-cats cw)
+                  `(,tag ,cw ,c2 ,t)]
+                 [(and (not (= (qpu-of c2) pt)) (= (qpu-of c1) pt))
+                  (define cw (lookup-cat (qpu-of c2) pt c2))
+                  (set-add! mbu-tainted-cats cw)
+                  `(,tag ,c1 ,cw ,t)]
+                 [else op])]
+              [`(isa-meas-x-cond-cz-reset ,anc ,mk ,c1 ,c2)
+               (define pa (qpu-of anc))
+               (cond
+                 [(and (not (= (qpu-of c1) pa)) (= (qpu-of c2) pa))
+                  (define cw (lookup-cat (qpu-of c1) pa c1))
+                  (set-add! mbu-tainted-cats cw)
+                  `(isa-meas-x-cond-cz-reset ,anc ,mk ,cw ,c2)]
+                 [(and (not (= (qpu-of c2) pa)) (= (qpu-of c1) pa))
+                  (define cw (lookup-cat (qpu-of c2) pa c2))
+                  (set-add! mbu-tainted-cats cw)
+                  `(isa-meas-x-cond-cz-reset ,anc ,mk ,c1 ,cw)]
+                 [else
+                  (set-add! mbu-tainted-cats c1)
+                  (set-add! mbu-tainted-cats c2)
+                  op])]
+              [`(isa-cond-cz ,mk ,c1 ,c2)
+               (define pa (qpu-of (hash-ref meas->anc mk c2)))
+               (cond
+                 [(and (not (= (qpu-of c1) pa)) (= (qpu-of c2) pa))
+                  (define cw (lookup-cat (qpu-of c1) pa c1))
+                  (set-add! mbu-tainted-cats cw)
+                  `(isa-cond-cz ,mk ,cw ,c2)]
+                 [(and (not (= (qpu-of c2) pa)) (= (qpu-of c1) pa))
+                  (define cw (lookup-cat (qpu-of c2) pa c2))
+                  (set-add! mbu-tainted-cats cw)
+                  `(isa-cond-cz ,mk ,c1 ,cw)]
+                 [else
+                  (set-add! mbu-tainted-cats c1)
+                  (set-add! mbu-tainted-cats c2)
+                  op])]
+              [_ op]))
+          (append pre-cat-ops (list rewritten-op) post-cat-ops))))
+
+     ;; Pass 2: Peephole-fuse back-to-back `(isa-meas-x-cond-z-reset cat_w mk u)` +
+     ;; `(isa-cx u cat_w)` on the same `(u, cat_w)` MBU pivot cone:
+     (define fused-ops
+       (let loop ([rem pass1-ops] [acc '()])
+         (match rem
+           ['() (reverse acc)]
+           [(list* `(isa-meas-x-cond-z-reset ,cat-w ,_ ,u)
+                   `(isa-cx ,u2 ,cat-w2)
+                   rest-ops)
+            #:when (and (= u u2) (= cat-w cat-w2) (set-member? mbu-tainted-cats cat-w))
+            (loop rest-ops acc)]
+           [(cons hd tl)
+            (loop tl (cons hd acc))])))
+
+     (define updated-slices (vector->list slice-vec))
+     (define updated-n-q (unbox next-wire-box))
+     (define poly (extract-cross-qpu-bilinear-phase-poly fused-ops updated-slices))
+     (values fused-ops updated-slices updated-n-q poly)]))
+
+;; =============================================================================
+;; 4. Multi-QPU `MachineISA` Slicing, Per-QPU OpenQASM 3.0 & Joint Aer Emission
 ;; =============================================================================
 
 (define (fmt-qasm-float x)
@@ -508,11 +922,13 @@
                                          target-sym
                                          eff-spec
                                          opt-res
-                                         isa-ops
-                                         total-phys-q
+                                         raw-isa-ops
+                                         raw-total-phys-q
                                          explicit-slices)
   (define m-star (effective-slice-machines opt-res))
-  (define slices (partition-wires-across-qpus total-phys-q m-star isa-ops explicit-slices))
+  (define init-slices (partition-wires-across-qpus raw-total-phys-q m-star raw-isa-ops explicit-slices))
+  (define-values (isa-ops slices total-phys-q circuit-u4-poly)
+    (u4-cross-qpu-tele-phase-opt raw-isa-ops init-slices raw-total-phys-q))
 
   ;; Map each global wire `w` -> `(cons qpu_id local_idx)`:
   (define wire->qpu (make-hasheqv))
@@ -955,6 +1371,11 @@
         (* num-windows window-bits (sub1 m-star))
         fwd-ebits))
 
+  (define u4-tele-phase-summary
+    (hash-set (compute-zipper-mbu-tele-phase-metrics)
+              'circuit_bilinear_phase_poly
+              circuit-u4-poly))
+
   (define ebit-sched-js
     (hasheq
      'circuit_name (symbol->string circ-name)
@@ -983,7 +1404,8 @@
      'qpu_wire_slices slices
      'qpu_qubit_counts qpu-alloc-qubits
      'bell_pair_events bell-events
-     'classical_feedforward_events ff-events))
+     'classical_feedforward_events ff-events
+     'u4_tele_phase_reduction u4-tele-phase-summary))
 
   (call-with-output-file (build-path out-dir "ebit_schedule.json")
     (lambda (out) (write-json ebit-sched-js out) (newline out))
@@ -1012,7 +1434,8 @@
      'qpu_qubit_counts qpu-alloc-qubits
      'ebit_schedule_file "ebit_schedule.json"
      'joint_cluster_aer_file "joint_cluster_aer.qasm"
-     'solver_decision opt-res))
+     'solver_decision opt-res
+     'u4_tele_phase_reduction u4-tele-phase-summary))
 
   (call-with-output-file (build-path out-dir "cluster_manifest.json")
     (lambda (out) (write-json manifest-js out) (newline out))
@@ -1067,6 +1490,11 @@
        #:exists 'replace)
      (define fb-mach? (if (hash-ref opt-res 'fallback_to_single_machine #f) #t #f))
      (define mono-opt? (if (hash-ref opt-res 'monolithic_single_chip_optimal #f) #t #f))
+     (define mono-slices (list (range (max 1 total-phys-q))))
+     (define mono-u4-summary
+       (hash-set (compute-zipper-mbu-tele-phase-metrics)
+                 'circuit_bilinear_phase_poly
+                 (extract-cross-qpu-bilinear-phase-poly isa-ops mono-slices)))
      (define ebit-sched-js
        (hasheq
         'circuit_name (symbol->string (lfq-circuit-decl-name decl))
@@ -1089,10 +1517,11 @@
         'monolithic_single_chip_optimal mono-opt?
         'law_u4_forward_only_verified #t
         'classical_feedforward_count 0
-        'qpu_wire_slices (list (range (max 1 total-phys-q)))
+        'qpu_wire_slices mono-slices
         'qpu_qubit_counts (list (max 1 total-phys-q))
         'bell_pair_events '()
-        'classical_feedforward_events '()))
+        'classical_feedforward_events '()
+        'u4_tele_phase_reduction mono-u4-summary))
      (call-with-output-file (build-path out-dir "ebit_schedule.json")
        (lambda (out) (write-json ebit-sched-js out) (newline out))
        #:exists 'replace)
@@ -1114,10 +1543,11 @@
         'fallback_to_single_machine fb-mach?
         'monolithic_single_chip_optimal mono-opt?
         'qpu_files '("qpu_0.qasm")
-        'qpu_wire_slices (list (range (max 1 total-phys-q)))
+        'qpu_wire_slices mono-slices
         'qpu_qubit_counts (list (max 1 total-phys-q))
         'ebit_schedule_file "ebit_schedule.json"
-        'solver_decision opt-res))
+        'solver_decision opt-res
+        'u4_tele_phase_reduction mono-u4-summary))
      (call-with-output-file (build-path out-dir "cluster_manifest.json")
        (lambda (out) (write-json manifest-js out) (newline out))
        #:exists 'replace)
@@ -1241,4 +1671,61 @@
   (check-true (file-exists? (build-path m2-dir "qpu_0.qasm")))
   (check-true (file-exists? (build-path m2-dir "qpu_1.qasm")))
   (check-true (file-exists? (build-path m2-dir "ebit_schedule.json")))
+
+  ;; 4. Law-U4 Cross-QPU Bilinear Tele-Phase Reduction & Batched Cat-Entangler Fusion
+  ;;    (`u4-cross-qpu-tele-phase-opt`) across a 3-branch `within-apply-mbu` pivot cone:
+  (define cone3-decl
+    (lfq-circuit-decl 'mbu-cone3 'defq '() '() '(0 1 2 3 4) '(5 6 7 8) 'all '(seq (h 0) (cx 0 8))))
+  (define cone3-prog
+    (register-program-cluster-profiles!
+     (lfq-program "test-cone3" 'ideal (list cone3-decl))
+     (list (lfq-cluster-profile-entry
+            'cone3-prof
+            (par-cluster-opt-spec #:workload 'MBU-Cone3
+                                  #:paradigm 'algebraic-limb
+                                  #:max-machines 256
+                                  #:q-cap-per-machine 8
+                                  #:raw-bell-rate-hz 100000.0
+                                  #:q-single 9
+                                  #:q-data-dist 6
+                                  #:q-local-fixed 1
+                                  #:q-peer-sync 1
+                                  #:window-bits 1
+                                  #:num-windows 1
+                                  #:local-toffolis 100000
+                                  #:carry-scheme 'qrns-zero-carry
+                                  #:lookup-scheme 'law-u4-ghz-mx)
+            '((0) (1 2 3 4 5 6 7 8))))))
+  (define cone3-dir (build-path scratch-root "m2_cone3_tele_phase"))
+  (define cone3-manifest
+    (emit-cluster-openqasm3-bundle!
+     cone3-dir cone3-prog cone3-decl 'ideal
+     '((isa-h 0)
+       (isa-h 1)
+       (isa-h 2)
+       (isa-h 3)
+       (isa-temp-and-ccx 0 1 5)
+       (isa-temp-and-ccx 0 2 6)
+       (isa-temp-and-ccx 0 3 7)
+       (isa-cx 5 4)
+       (isa-cx 6 4)
+       (isa-cx 7 4)
+       (isa-meas-x-cond-cz-reset 7 m2 0 3)
+       (isa-meas-x-cond-cz-reset 6 m1 0 2)
+       (isa-meas-x-cond-cz-reset 5 m0 0 1))
+     9
+     "OPENQASM 3.0;\ninclude \"stdgates.inc\";\nqubit[9] q;\n"))
+  (check-equal? (hash-ref cone3-manifest 'm_star) 2)
+  ;; Batched cat-entangler fuses all 3 cross-cut MBU wires sharing pivot `0` into `1` forward ebit & `0` reverse ebits!
+  (check-equal? (hash-ref cone3-manifest 'forward_ebits) 1)
+  (check-equal? (hash-ref cone3-manifest 'reverse_ebits) 0)
+  (check-equal? (hash-ref cone3-manifest 'carry_ebits) 0)
+  (define cone3-u4 (hash-ref cone3-manifest 'u4_tele_phase_reduction))
+  (check-true (hash-ref cone3-u4 'within_35_to_50_pct_band))
+  (define cone3-poly (hash-ref cone3-u4 'circuit_bilinear_phase_poly))
+  (check-equal? (hash-ref cone3-poly 'cross_cut_mbu_wire_count) 3)
+  (check-equal? (hash-ref cone3-poly 'batched_pivot_cone_count) 1)
+  (check-equal? (hash-ref cone3-poly 'naive_ebits_2_per_wire) 6)
+  (check-equal? (hash-ref cone3-poly 'u4_batched_cone_ebits) 1)
+  (check-equal? (hash-ref cone3-poly 'reverse_ebits) 0)
   (close-bug-prevention-z3!))

@@ -494,4 +494,48 @@ theorem cut_sweeping_local_unsat_implies_global_multiround_soundness
   intro env _hdom
   exact hcutUnsat (upstreamCone env)
 
+-- ============================================================================
+-- Section 6: Canonical Sub-DAG Cone Isomorphism & Zero-Flag Loop Escalation
+-- ============================================================================
+
+/-- Evaluate a relabeled Tseitin DAG where primary inputs are permuted by `perm : Nat → Nat`. -/
+def relabelEnv (perm : Nat → Nat) (env : Nat → Bool) : Nat → Bool :=
+  fun v => env (perm v)
+
+/-- Soundness of Canonical Sub-DAG Cone Isomorphism Modulo Input-Wire Relabeling:
+    If two cut cones `dag1` and `dag2` have identical internal XAG topology up to
+    cut-variable relabeling `perm` (`evalTseitinDag env dag2 r = evalTseitinDag (relabelEnv perm env) dag1 r`),
+    and the prototype cone `dag1` is proved `UNSAT` (`= false`) across all cut assignments,
+    then `dag2` vanishes across any upstream multi-round circuit `upstream` and domain `dom`. -/
+theorem cone_isomorphism_relabeling_soundness
+    (dag1 dag2 : List TseitinNodeDef) (r : Nat) (perm : Nat → Nat)
+    (upstream : (Nat → Bool) → (Nat → Bool)) (dom : (Nat → Bool) → Bool)
+    (hiso : ∀ cutEnv, evalTseitinDag cutEnv dag2 r = evalTseitinDag (relabelEnv perm cutEnv) dag1 r)
+    (hprotoUnsat : ∀ cutEnv, evalTseitinDag cutEnv dag1 r = false) :
+    ∀ env, dom env = true → evalTseitinDag (upstream env) dag2 r = false := by
+  intro env _hdom
+  rw [hiso (upstream env)]
+  exact hprotoUnsat (relabelEnv perm (upstream env))
+
+/-- Zero-flag automatic loop-invariant escalation decision (`k=1 -> k=2 -> k=R`). -/
+def autoEscalateLoopDecision (k1Ok k2Ok kROk evenRounds : Bool) : Bool :=
+  if k1Ok then true
+  else if evenRounds && k2Ok then true
+  else kROk
+
+/-- Soundness of Zero-Flag `k=1 → k=2 → k=R` Escalation:
+    When 1-round invariance (`k1Ok = true`), 2-round ping-pong invariance on even round counts
+    (`evenRounds && k2Ok = true`), and full `R`-round unrolled verification (`kROk = true`)
+    each imply global `R`-round `QSub` validity (`u1Clean && u4Clean = true`), the automatic
+    escalation ladder guarantees `u1Clean = true ∧ u4Clean = true` whenever it accepts. -/
+theorem zero_flag_k1_k2_unrolled_escalation_soundness
+    (k1Ok k2Ok kROk evenRounds u1Clean u4Clean : Bool)
+    (hk1Sound : k1Ok = true → (u1Clean && u4Clean) = true)
+    (hk2Sound : (evenRounds && k2Ok) = true → (u1Clean && u4Clean) = true)
+    (hkRSound : kROk = true → (u1Clean && u4Clean) = true)
+    (hacc : autoEscalateLoopDecision k1Ok k2Ok kROk evenRounds = true) :
+    u1Clean = true ∧ u4Clean = true := by
+  cases k1Ok <;> cases evenRounds <;> cases k2Ok <;>
+    simp_all [autoEscalateLoopDecision]
+
 end LakefillQXagFraigSymbolicInferenceProofs

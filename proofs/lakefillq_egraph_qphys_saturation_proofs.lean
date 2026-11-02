@@ -701,6 +701,95 @@ theorem four_target_pareto_separation_and_qroam_dominance (wordW : Nat) :
   unfold qroamBerryGidneyTempAnds qroamSymmetricTempAnds
   omega
 
+-- ============================================================================
+-- Section 5: F_2-Cubic Phase-Polynomial TODD Rank Reduction & AutoCCZ Fusion
+-- ============================================================================
+
+/-- Boolean to `{0, 1}` injection for $\mathbb{Z}_8$-valued Reed–Muller $\mathcal{RM}(3, n)$ phase polynomials. -/
+def boolBit (b : Bool) : Nat :=
+  match b with
+  | false => 0
+  | true => 1
+
+/-- Exact $\mathbb{Z}_8$ cubic phase contribution $(4 \cdot x_{c_1} x_{c_2} x_t) \bmod 8$ of a $\mathrm{CCZ}(c_1, c_2, t)$ gate. -/
+def cczCubicPhaseMod8 (c1 c2 t : Bool) : Nat :=
+  (4 * boolBit c1 * boolBit c2 * boolBit t) % 8
+
+/-- Standard 7-$T$ positive-polarity $\mathbb{Z}_8$ parity-spider decomposition of $\mathrm{CCZ}(c_1, c_2, t)$. -/
+def cczSevenSpiderPhaseMod8 (c1 c2 t : Bool) : Nat :=
+  (boolBit c1 + boolBit c2 + boolBit t +
+   7 * boolBit (xor c1 c2) + 7 * boolBit (xor c1 t) + 7 * boolBit (xor c2 t) +
+   boolBit (xor (xor c1 c2) t)) % 8
+
+/-- Naive 14-$T$ phase polynomial of a shared-control twin-$\mathrm{CCZ}$ pair $\mathrm{CCZ}(c_1, c_2, t_1) \cdot \mathrm{CCZ}(c_1, c_2, t_2)$. -/
+def twinCczNaive14TPhaseMod8 (c1 c2 t1 t2 : Bool) : Nat :=
+  (cczSevenSpiderPhaseMod8 c1 c2 t1 + cczSevenSpiderPhaseMod8 c1 c2 t2) % 8
+
+/-- AutoCCZ / Gray-code 8-$T$ fused phase polynomial canceling the 6 shared control spiders on $\{c_1\}, \{c_2\}, \{c_1 \oplus c_2\}$. -/
+def twinCczToddAutoCcz8TPhaseMod8 (c1 c2 t1 t2 : Bool) : Nat :=
+  (boolBit t1 + 7 * boolBit t2 +
+   7 * boolBit (xor c1 t1) + boolBit (xor c1 t2) +
+   7 * boolBit (xor c2 t1) + boolBit (xor c2 t2) +
+   boolBit (xor (xor c1 c2) t1) + 7 * boolBit (xor (xor c1 c2) t2)) % 8
+
+/-- Pre-TODD 22-$T$ phase polynomial of a 3-$\mathrm{CCZ}$ + parity cone (`CCZ(a,b,t1) · CCZ(b,c,t2) · CCZ(a,c,t3) · P(a⊕b, 1)`). -/
+def toddThreeConePrePhaseMod8 (a b c t1 t2 t3 : Bool) : Nat :=
+  (cczSevenSpiderPhaseMod8 a b t1 +
+   cczSevenSpiderPhaseMod8 b c t2 +
+   cczSevenSpiderPhaseMod8 a c t3 +
+   boolBit (xor a b)) % 8
+
+/-- Post-TODD $\mathcal{RM}(3, n)$ rank-reduced 14-$T$ + 1-Clifford ($S^\dagger(c)$) phase polynomial after destroying
+    colliding spiders on $\{a\}, \{b\}, \{c\}, \{a \oplus b\}$ via opposite cubic polarities $(+1, -1, -1)$. -/
+def toddThreeConePostPhaseMod8 (a b c t1 t2 t3 : Bool) : Nat :=
+  (boolBit t1 + 7 * boolBit (xor a t1) + 7 * boolBit (xor b t1) + boolBit (xor (xor a b) t1) +
+   7 * boolBit t2 + boolBit (xor b c) + boolBit (xor b t2) + boolBit (xor c t2) + 7 * boolBit (xor (xor b c) t2) +
+   7 * boolBit t3 + boolBit (xor a c) + boolBit (xor a t3) + boolBit (xor c t3) + 7 * boolBit (xor (xor a c) t3) +
+   6 * boolBit c) % 8
+
+/-- `QPhysGrade` cost of a Phase-Clean (`U2`/`U4`-certified) `focus-zipper` phase-polynomial cone. -/
+def toddAutoCczConeQPhysCost (tCount tDepth twoQCount eps2Q tCultMicro gateNs : Nat) : EGraphQPhysCost :=
+  ⟨0, 0, twoQCount * eps2Q + tCount * tCultMicro, tDepth * gateNs⟩
+
+/-- **Theorem 9 (`f2_cubic_todd_rank_reduction_and_autocc_pair_fusion_soundness`)**:
+    Proves that (1) AutoCCZ / Gray-code pair fusion (`14 T -> 8 T`, `0` ancillas) preserves the exact
+    $\mathbb{Z}_8$ cubic phase polynomial across all $2^4 = 16$ basis states `(c1, c2, t1, t2)`, and
+    (2) $\mathcal{RM}(3, n)$ TODD third-order spider destruction (`22 T -> 14 T` + Clifford $S^\dagger(c)$ fixup)
+    preserves the exact $\mathbb{Z}_8$ phase polynomial across all $2^6 = 64$ basis states `(a, b, c, t1, t2, t3)`. -/
+theorem f2_cubic_todd_rank_reduction_and_autocc_pair_fusion_soundness
+    (c1 c2 t1 t2 a b c u1 u2 u3 : Bool) :
+    twinCczToddAutoCcz8TPhaseMod8 c1 c2 t1 t2 = twinCczNaive14TPhaseMod8 c1 c2 t1 t2 ∧
+    twinCczToddAutoCcz8TPhaseMod8 c1 c2 t1 t2 =
+      (cczCubicPhaseMod8 c1 c2 t1 + cczCubicPhaseMod8 c1 c2 t2) % 8 ∧
+    toddThreeConePostPhaseMod8 a b c u1 u2 u3 = toddThreeConePrePhaseMod8 a b c u1 u2 u3 := by
+  refine ⟨?_, ?_, ?_⟩
+  · cases c1 <;> cases c2 <;> cases t1 <;> cases t2 <;> decide
+  · cases c1 <;> cases c2 <;> cases t1 <;> cases t2 <;> decide
+  · cases a <;> cases b <;> cases c <;> cases u1 <;> cases u2 <;> cases u3 <;> decide
+
+/-- **Theorem 10 (`todd_autocc_phase_poly_qphys_grade_monotonicity`)**:
+    Whenever $\mathcal{RM}(3, n)$ TODD tensor rank reduction and AutoCCZ parallel layer packing reduce
+    active $T$-count (`tPost ≤ tPre`), $T$-depth (`dPost ≤ dPre`), and two-qubit gate count (`twoQPost ≤ twoQPre`),
+    the rewritten `focus-zipper` cone dominates the pre-rewrite cone in both `qphysCostLeq` and `qphysLexLeq`
+    inside any surrounding `e-graph` context `ctx`. -/
+theorem todd_autocc_phase_poly_qphys_grade_monotonicity
+    (ctx : EGraphQPhysCost) (tPost dPost twoQPost dT dD d2Q eps2Q tCultMicro gateNs : Nat) :
+    qphysCostLeq
+      (qphysCostSeq ctx (toddAutoCczConeQPhysCost tPost dPost twoQPost eps2Q tCultMicro gateNs))
+      (qphysCostSeq ctx (toddAutoCczConeQPhysCost (tPost + dT) (dPost + dD) (twoQPost + d2Q) eps2Q tCultMicro gateNs)) ∧
+    qphysLexLeq
+      (qphysCostSeq ctx (toddAutoCczConeQPhysCost tPost dPost twoQPost eps2Q tCultMicro gateNs))
+      (qphysCostSeq ctx (toddAutoCczConeQPhysCost (tPost + dT) (dPost + dD) (twoQPost + d2Q) eps2Q tCultMicro gateNs)) := by
+  have hCone :
+      qphysCostLeq
+        (toddAutoCczConeQPhysCost tPost dPost twoQPost eps2Q tCultMicro gateNs)
+        (toddAutoCczConeQPhysCost (tPost + dT) (dPost + dD) (twoQPost + d2Q) eps2Q tCultMicro gateNs) := by
+    dsimp [qphysCostLeq, toddAutoCczConeQPhysCost]
+    rw [Nat.add_mul, Nat.add_mul, Nat.add_mul]
+    exact ⟨Nat.le_refl 0, Nat.le_refl 0, by omega, by omega⟩
+  have hSeq := (qphys_seq_and_par_strictly_monotone 0 ctx ctx _ _ (qphysCostLeq_refl ctx) hCone).1
+  exact ⟨hSeq, qphysCostLeq_implies_lex _ _ hSeq⟩
+
 #eval verifyLakefillQEGraphSaturationSanity ()
 
 end LakefillQEGraphQPhysSaturationProofs

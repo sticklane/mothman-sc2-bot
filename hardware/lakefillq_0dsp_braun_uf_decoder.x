@@ -774,3 +774,143 @@ pub fn lakefillq_0dsp_braun_uf_decoder_top(
         (pauli_frame_flip, corr_z, corr_x, defect_weight, u1:0, u6:37)
     }
 }
+
+// -----------------------------------------------------------------------------
+// 5. Optimization 5: Zero-DSP Hierarchical OR-Tree Popcount + Direct XOR-Address
+//    Sparse-Syndrome Fast-Path (1-Cycle w=0, 2-Cycle Isolated w<=2 Fast-Path)
+// -----------------------------------------------------------------------------
+pub fn lakefillq_ortree_xor_sparse_fastpath12(
+    syn12: u12,
+    is_mode0: u1
+) -> (u4, u1, u1, u1, u4, u25, u1) {
+    let or_l1_0: u1 = syn12[0:1] | syn12[1:2];
+    let or_l1_1: u1 = syn12[2:3] | syn12[3:4];
+    let or_l1_2: u1 = syn12[4:5] | syn12[5:6];
+    let or_l1_3: u1 = syn12[6:7] | syn12[7:8];
+    let or_l1_4: u1 = syn12[8:9] | syn12[9:10];
+    let or_l1_5: u1 = syn12[10:11] | syn12[11:12];
+
+    let or_l2_0: u1 = or_l1_0 | or_l1_1;
+    let or_l2_1: u1 = or_l1_2 | or_l1_3;
+    let or_l2_2: u1 = or_l1_4 | or_l1_5;
+
+    let or_l3_0: u1 = or_l2_0 | or_l2_1;
+    let any_defect: u1 = or_l3_0 | or_l2_2;
+    let is_zero: u1 = !any_defect;
+
+    let p1_0: u2 = (u1:0 ++ syn12[0:1]) + (u1:0 ++ syn12[1:2]);
+    let p1_1: u2 = (u1:0 ++ syn12[2:3]) + (u1:0 ++ syn12[3:4]);
+    let p1_2: u2 = (u1:0 ++ syn12[4:5]) + (u1:0 ++ syn12[5:6]);
+    let p1_3: u2 = (u1:0 ++ syn12[6:7]) + (u1:0 ++ syn12[7:8]);
+    let p1_4: u2 = (u1:0 ++ syn12[8:9]) + (u1:0 ++ syn12[9:10]);
+    let p1_5: u2 = (u1:0 ++ syn12[10:11]) + (u1:0 ++ syn12[11:12]);
+
+    let p2_0: u3 = (u1:0 ++ p1_0) + (u1:0 ++ p1_1);
+    let p2_1: u3 = (u1:0 ++ p1_2) + (u1:0 ++ p1_3);
+    let p2_2: u3 = (u1:0 ++ p1_4) + (u1:0 ++ p1_5);
+
+    let p3_0: u4 = (u1:0 ++ p2_0) + (u1:0 ++ p2_1);
+    let wt12: u4 = p3_0 + (u1:0 ++ p2_2);
+
+    let idx_lo: u4 = ffs12_u4(syn12);
+    let rev_syn12: u12 =
+        syn12[0:1] ++ syn12[1:2] ++ syn12[2:3] ++ syn12[3:4] ++
+        syn12[4:5] ++ syn12[5:6] ++ syn12[6:7] ++ syn12[7:8] ++
+        syn12[8:9] ++ syn12[9:10] ++ syn12[10:11] ++ syn12[11:12];
+    let rev_idx: u4 = ffs12_u4(rev_syn12);
+    let idx_hi: u4 = u4:11 - rev_idx;
+    let xor_edge_sig: u4 = idx_lo ^ idx_hi;
+
+    let adj_e0: u1  = if (syn12 ^ u12:257)  == u12:0 { u1:1 } else { u1:0 };
+    let adj_e1: u1  = if (syn12 ^ u12:5)    == u12:0 { u1:1 } else { u1:0 };
+    let adj_e2: u1  = if (syn12 ^ u12:6)    == u12:0 { u1:1 } else { u1:0 };
+    let adj_e3: u1  = if (syn12 ^ u12:10)   == u12:0 { u1:1 } else { u1:0 };
+    let adj_e4: u1  = if (syn12 ^ u12:1032) == u12:0 { u1:1 } else { u1:0 };
+    let adj_e5: u1  = if (syn12 ^ u12:272)  == u12:0 { u1:1 } else { u1:0 };
+    let adj_e6: u1  = if (syn12 ^ u12:20)   == u12:0 { u1:1 } else { u1:0 };
+    let adj_e7: u1  = if (syn12 ^ u12:36)   == u12:0 { u1:1 } else { u1:0 };
+    let adj_e8: u1  = if (syn12 ^ u12:40)   == u12:0 { u1:1 } else { u1:0 };
+    let adj_e9: u1  = if (syn12 ^ u12:2056) == u12:0 { u1:1 } else { u1:0 };
+    let adj_e10: u1 = if (syn12 ^ u12:528)  == u12:0 { u1:1 } else { u1:0 };
+    let adj_e11: u1 = if (syn12 ^ u12:80)   == u12:0 { u1:1 } else { u1:0 };
+    let adj_e12: u1 = if (syn12 ^ u12:96)   == u12:0 { u1:1 } else { u1:0 };
+    let adj_e13: u1 = if (syn12 ^ u12:160)  == u12:0 { u1:1 } else { u1:0 };
+    let adj_e14: u1 = if (syn12 ^ u12:2176) == u12:0 { u1:1 } else { u1:0 };
+
+    let s1_0: u1  = if (syn12 ^ u12:1)    == u12:0 { u1:1 } else { u1:0 };
+    let s1_1: u1  = if (syn12 ^ u12:2)    == u12:0 { u1:1 } else { u1:0 };
+    let s1_2: u1  = if (syn12 ^ u12:4)    == u12:0 { u1:1 } else { u1:0 };
+    let s1_3: u1  = if (syn12 ^ u12:8)    == u12:0 { u1:1 } else { u1:0 };
+    let s1_4: u1  = if (syn12 ^ u12:16)   == u12:0 { u1:1 } else { u1:0 };
+    let s1_5: u1  = if (syn12 ^ u12:32)   == u12:0 { u1:1 } else { u1:0 };
+    let s1_6: u1  = if (syn12 ^ u12:64)   == u12:0 { u1:1 } else { u1:0 };
+    let s1_7: u1  = if (syn12 ^ u12:128)  == u12:0 { u1:1 } else { u1:0 };
+    let s1_8: u1  = if (syn12 ^ u12:256)  == u12:0 { u1:1 } else { u1:0 };
+    let s1_9: u1  = if (syn12 ^ u12:512)  == u12:0 { u1:1 } else { u1:0 };
+    let s1_10: u1 = if (syn12 ^ u12:1024) == u12:0 { u1:1 } else { u1:0 };
+    let s1_11: u1 = if (syn12 ^ u12:2048) == u12:0 { u1:1 } else { u1:0 };
+
+    let adj_g0: u1 = (adj_e0 | adj_e1) | (adj_e2 | adj_e3);
+    let adj_g1: u1 = (adj_e4 | adj_e5) | (adj_e6 | adj_e7);
+    let adj_g2: u1 = (adj_e8 | adj_e9) | (adj_e10 | adj_e11);
+    let adj_g3: u1 = (adj_e12 | adj_e13) | adj_e14;
+    let is_adj_wt2: u1 = (adj_g0 | adj_g1) | (adj_g2 | adj_g3);
+
+    let is_wt1: u1 = if wt12 == u4:1 { u1:1 } else { u1:0 };
+    let fast_hit: u1 = is_zero | is_wt1 | is_adj_wt2;
+
+    let c0: u1  = s1_0 | s1_2 | s1_8;
+    let c1: u1  = u1:0;
+    let c2: u1  = s1_1 | s1_3;
+    let c3: u1  = u1:0;
+    let c4: u1  = s1_10;
+    let c5: u1  = adj_e0 | s1_8;
+    let c6: u1  = adj_e1 | s1_2;
+    let c7: u1  = adj_e2;
+    let c8: u1  = adj_e3 | s1_3;
+    let c9: u1  = adj_e4;
+    let c10: u1 = adj_e5;
+    let c11: u1 = adj_e6 | (s1_4 & is_mode0);
+    let c12: u1 = adj_e7 | (s1_5 & is_mode0);
+    let c13: u1 = adj_e8;
+    let c14: u1 = adj_e9 | (s1_11 & is_mode0);
+    let c15: u1 = adj_e10;
+    let c16: u1 = adj_e11 | (s1_4 & (!is_mode0));
+    let c17: u1 = adj_e12 | (s1_5 & (!is_mode0));
+    let c18: u1 = adj_e13;
+    let c19: u1 = adj_e14 | (s1_11 & (!is_mode0));
+    let c20: u1 = s1_9;
+    let c21: u1 = s1_6 | (s1_4 & (!is_mode0)) | (s1_5 & (!is_mode0));
+    let c22: u1 = u1:0;
+    let c23: u1 = s1_7 | (s1_11 & (!is_mode0));
+    let c24: u1 = u1:0;
+
+    let corr_fast: u25 =
+        c24 ++ c23 ++ c22 ++ c21 ++ c20 ++
+        c19 ++ c18 ++ c17 ++ c16 ++ c15 ++ c14 ++ c13 ++ c12 ++ c11 ++ c10 ++ c9 ++ c8 ++ c7 ++ c6 ++ c5 ++
+        c4 ++ c3 ++ c2 ++ c1 ++ c0;
+    let logical_flip_fast: u1 = (c0 ^ c1) ^ (c2 ^ c3) ^ c4;
+    (wt12, is_zero, is_adj_wt2, fast_hit, xor_edge_sig, corr_fast, logical_flip_fast)
+}
+
+pub fn lakefillq_ortree_xor_sparse_fastpath24(
+    cur_syn: u24,
+    prev_syn: u24,
+    prev_pauli_frame: u2,
+    code_mode: u2,
+    autdec_shift_sel: u2
+) -> (u24, u5, u1, u1, u25, u25, u2) {
+    let (delta_syn, defect_weight, _ing_zero_byp) =
+        lakefillq_ingress_xor_bypass24(cur_syn, prev_syn, autdec_shift_sel);
+    let is_mode0: u1 = if code_mode == u2:0 { u1:1 } else { u1:0 };
+    let (_z_wt, z_zero, _z_adj2, z_hit, _z_xsig, corr_z_fast, z_lflip) =
+        lakefillq_ortree_xor_sparse_fastpath12(delta_syn[0:12], is_mode0);
+    let (_x_wt, x_zero, _x_adj2, x_hit, _x_xsig, corr_x_fast, x_lflip) =
+        lakefillq_ortree_xor_sparse_fastpath12(delta_syn[12:24], is_mode0);
+    let zero_cycle1_bypass: u1 = z_zero & x_zero;
+    let wt_le2: u1 = if defect_weight <= u5:2 { u1:1 } else { u1:0 };
+    let sparse_cycle2_fastpath: u1 = (!zero_cycle1_bypass) & z_hit & x_hit & wt_le2;
+    let pauli_frame_fast: u2 = prev_pauli_frame ^ (x_lflip ++ z_lflip);
+    (delta_syn, defect_weight, zero_cycle1_bypass, sparse_cycle2_fastpath, corr_z_fast, corr_x_fast, pauli_frame_fast)
+}
+
