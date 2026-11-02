@@ -27,6 +27,7 @@ from compiler.lakefillqc.infer_qsub import (
     LoopRoundSpec,
     infer_for_fold_loop_sexpr,
     infer_inductive_loop_qsub,
+    infer_loop_qsub_auto_escalate,
 )
 from compiler.lakefillqc.parser import (
     LFQParsedModule,
@@ -53,8 +54,6 @@ def _build_env() -> Dict[str, str]:
 def typecheck_lfq_module(
     input_path: str | Path,
     target_override: Optional[str] = None,
-    inductive_loop_qsub: bool = True,
-    k_induction_depth: int = 1,
     emit_json_path: Optional[str | Path] = None,
     emit_qasm3_path: Optional[str | Path] = None,
     emit_stim_path: Optional[str | Path] = None,
@@ -63,11 +62,12 @@ def typecheck_lfq_module(
     emit_repaired_lfq_path: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     """
-    Typecheck and compile a `#lang lakefillq` (`.lfq`) module, running symbolic
-    $k$-inductive loop-invariant `QSub` inference on `(for/fold ...)` loops when
-    `inductive_loop_qsub=True` and attaching the verified summary fields
-    (`k_induction_depth`, `z3_queries`, `round_invariant_status`,
-    `single_round_mbu_deg_le_2`) to the returned typecheck report.
+    Typecheck and compile a `#lang lakefillq` (`.lfq`) module, automatically
+    running zero-flag $k$-inductive loop-invariant `QSub` inference ($k=1 \\to
+    k=2 \\to k=R$ unrolled XAG/FRAIG escalation) on `(for/fold ...)` loops and
+    attaching the verified summary fields (`k_induction_depth`, `escalation_stage`,
+    `z3_queries`, `round_invariant_status`, `single_round_mbu_deg_le_2`) to the
+    returned typecheck report.
     """
     in_path = Path(input_path).resolve()
     parsed: LFQParsedModule = parse_lfq_file(in_path)
@@ -124,14 +124,11 @@ def typecheck_lfq_module(
     if proc.stderr:
         report["diagnostics_stderr"] = proc.stderr
 
-    # Invoke O(1)-query symbolic k-inductive QSub inference when `(for/fold ...)`
-    # or round-iterated cryptographic sponge is present and `inductive_loop_qsub` is enabled
-    if inductive_loop_qsub and parsed.has_inductive_loop:
-        loop_summary = infer_for_fold_loop_sexpr(
-            parsed.raw_source,
-            k_depth=k_induction_depth,
-        )
+    # Zero-flag automatic loop-invariant QSub inference (k=1 -> k=2 -> k=R escalation)
+    if parsed.has_inductive_loop:
+        loop_summary = infer_for_fold_loop_sexpr(parsed.raw_source)
         report["k_induction_depth"] = loop_summary["k_induction_depth"]
+        report["escalation_stage"] = loop_summary.get("escalation_stage", "k=1")
         report["z3_queries"] = loop_summary["z3_queries"]
         report["round_invariant_status"] = loop_summary["round_invariant_status"]
         report["single_round_mbu_deg_le_2"] = loop_summary["single_round_mbu_deg_le_2"]
@@ -156,19 +153,23 @@ def typecheck_lfq_module(
 def typecheck_for_fold_spec(
     spec_or_sexpr: LoopRoundSpec | str,
     num_rounds: Optional[int] = None,
-    k_induction_depth: int = 1,
+    k_induction_depth: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Directly run $O(1)$-query symbolic $k$-inductive `QSub` inference on a
-    `LoopRoundSpec` or `#lang lakefillq` `(for/fold ...)` S-expression.
+    Directly run symbolic $k$-inductive `QSub` inference (defaulting to zero-flag
+    $k=1 \\to k=2 \\to k=R$ automatic escalation when `k_induction_depth is None`)
+    on a `LoopRoundSpec` or `#lang lakefillq` `(for/fold ...)` S-expression.
     """
     if isinstance(spec_or_sexpr, LoopRoundSpec):
         r_cnt = num_rounds if num_rounds is not None else 10
-        res = infer_inductive_loop_qsub(
-            spec_or_sexpr,
-            num_rounds=r_cnt,
-            k_depth=k_induction_depth,
-        )
+        if k_induction_depth is None:
+            res = infer_loop_qsub_auto_escalate(spec_or_sexpr, num_rounds=r_cnt)
+        else:
+            res = infer_inductive_loop_qsub(
+                spec_or_sexpr,
+                num_rounds=r_cnt,
+                k_depth=k_induction_depth,
+            )
         deg_le_2 = (
             res.u1_scratch_clean_ok
             and res.u4_zero_taint_escape_ok
@@ -177,6 +178,7 @@ def typecheck_for_fold_spec(
         return {
             "well_typed": res.well_typed,
             "k_induction_depth": res.k_depth,
+            "escalation_stage": res.escalation_stage,
             "z3_queries": res.z3_solver_calls,
             "round_invariant_status": (
                 "VERIFIED_INDUCTIVE_INVARIANT"

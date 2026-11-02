@@ -1327,25 +1327,30 @@ def infer_inductive_loop_qsub(
     freed_ever: Set[int] = set()
     violations: List[Dict[str, Any]] = []
 
-    # Execute 1 symbolic round step (and if k_depth > 1 or inter-round interference is present,
-    # test loop back-edge into the next iteration's entry interference barriers)
-    ops_step = spec.round_ops_fn(0)
-    counts = _execute_ops_on_xag(
-        mgr=mgr,
-        ops=ops_step,
-        wire_xag=wire_xag,
-        wmap=wmap,
-        gamma=gamma_cur,
-        u4_coeffs=u4_coeffs,
-        tainted_wires=tainted_wires,
-        input_wires=input_wires,
-        scratch_set=scratch_set,
-        live_wires=live_wires,
-        freed_ever=freed_ever,
-        violations=violations,
-    )
+    # Execute `k_depth` consecutive symbolic round steps (`step_idx = 0 .. k_depth - 1`)
+    # before checking loop-boundary invariant obligations (U1, U2, U3, U4, Gamma_out == Gamma_inv)
+    eff_k = max(1, min(k_depth, max(1, num_rounds)))
+    counts = {"temp_ands": 0, "mbus": 0}
+    for step_idx in range(eff_k):
+        ops_step = spec.round_ops_fn(step_idx)
+        c_step = _execute_ops_on_xag(
+            mgr=mgr,
+            ops=ops_step,
+            wire_xag=wire_xag,
+            wmap=wmap,
+            gamma=gamma_cur,
+            u4_coeffs=u4_coeffs,
+            tainted_wires=tainted_wires,
+            input_wires=input_wires,
+            scratch_set=scratch_set,
+            live_wires=live_wires,
+            freed_ever=freed_ever,
+            violations=violations,
+        )
+        counts["temp_ands"] += c_step["temp_ands"]
+        counts["mbus"] += c_step["mbus"]
 
-    # Obligation 2: Law U1 — Verify all scratch wires reset cleanly to |0> at end of round step
+    # Obligation 2: Law U1 — Verify all scratch wires reset cleanly to |0> at end of k-step block
     dirty_scratch: List[Tuple[int, int]] = []
     for sw in scratch_wires:
         psw = wmap.get(sw, sw)
@@ -1380,7 +1385,7 @@ def infer_inductive_loop_qsub(
         assert s_u1.check() == z3.unsat
 
     # Obligation 4: Law U4 — Check for uncancelled bilinear kickback or residual `TaintedX`
-    # escaping across the loop back-edge into iteration t+1's H/interference gates
+    # escaping across the loop back-edge into iteration t+k's H/interference gates
     for m_sym, glit in list(u4_coeffs.items()):
         if glit != LIT_ZERO:
             st, cex, _ = mgr.z3_cut_sweep_miter([glit], input_wires)
@@ -1433,7 +1438,7 @@ def infer_inductive_loop_qsub(
                 }
             )
 
-    # Obligation 3: Law U2 — Single-round state transition bijectivity check via Z3
+    # Obligation 3: Law U2 — State transition bijectivity check via Z3
     u2_ok, bij_z3_calls, bij_viols = _verify_bijectivity_z3(
         mgr=mgr,
         state_wires=state_wires,
@@ -1453,12 +1458,12 @@ def infer_inductive_loop_qsub(
     temp_ands_step = (
         spec.declared_temp_ands_per_round
         if spec.declared_temp_ands_per_round is not None
-        else counts["temp_ands"]
+        else (counts["temp_ands"] // eff_k)
     )
     mbus_step = (
         spec.declared_mbus_per_round
         if spec.declared_mbus_per_round is not None
-        else counts["mbus"]
+        else (counts["mbus"] // eff_k)
     )
     dirty_cnt = sum(1 for v in violations if v.get("law") == "U1")
 
@@ -1484,11 +1489,17 @@ def infer_inductive_loop_qsub(
     )
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
+    mode_str = (
+        "inductive_k_loop"
+        if eff_k == 1
+        else ("inductive_k2_loop" if eff_k == 2 and eff_k < num_rounds else "unrolled_cut_sweep")
+    )
+
     return QSubInferenceResult(
         well_typed=well_typed,
-        mode="inductive_k_loop",
+        mode=mode_str,
         num_rounds=num_rounds,
-        k_depth=k_depth,
+        k_depth=eff_k,
         capability_invariant_ok=cap_ok,
         u1_scratch_clean_ok=u1_ok,
         u2_bijective_ok=u2_ok,
@@ -1507,6 +1518,51 @@ def infer_inductive_loop_qsub(
         violations=violations,
         counterexample=first_cex,
     )
+
+
+def infer_loop_qsub_auto_escalate(
+    round_spec: LoopRoundSpec,
+    num_rounds: int,
+) -> QSubInferenceResult:
+    """
+    Zero-Flag Automatic Loop `QSub` Escalation Ladder (`k = 1 -> k = 2 -> k = R`):
+      1. Try $k = 1$ symbolic 1-round invariant (`O(1)` Z3 queries). Succeeds immediately
+         whenever each round is self-closing ($\\Delta W_{\\mathrm{dirty}} = 0$ and
+         $\\Phi_X^{\\mathrm{escape}} \\equiv 0$).
+      2. If $k = 1$ fails on a boundary obligation ($\\mathsf{U1}, \\mathsf{U4}$, or
+         $\\Gamma_{\\mathrm{out}} \\neq \\Gamma_{\\mathrm{inv}}$) and $R \\ge 2$ is even,
+         automatically escalate to $k = 2$ (`O(1)` Z3 queries) to verify 2-round coupled
+         involution / block-2 cones.
+      3. If $k = 2$ still fails and $R > 2$, automatically escalate to $k = R$ full unrolled
+         XAG/FRAIG + Z3 cut-sweeping (`O(R)` work) to verify cross-loop session pipelines
+         (such as forward-compute / reverse-uncompute half-cipher sessions), rejecting the
+         program if and only if the unrolled circuit is genuinely ill-typed.
+    """
+    res_k1 = infer_inductive_loop_qsub(round_spec, num_rounds=num_rounds, k_depth=1)
+    if res_k1.well_typed or num_rounds <= 1:
+        return res_k1
+
+    # If single-round state transition bijectivity (U2) or branch orthogonality (U3) already
+    # failed on an explicit substage block, unrolling further rounds cannot fix a non-bijective step
+    if not res_k1.u2_bijective_ok or not res_k1.u3_orthogonal_branches_ok:
+        return res_k1
+
+    if num_rounds >= 2 and (num_rounds % 2 == 0):
+        res_k2 = infer_inductive_loop_qsub(round_spec, num_rounds=num_rounds, k_depth=2)
+        if res_k2.well_typed or num_rounds == 2:
+            return res_k2
+
+    if num_rounds > 2:
+        res_unrolled = infer_inductive_loop_qsub(
+            round_spec,
+            num_rounds=num_rounds,
+            k_depth=num_rounds,
+        )
+        if res_unrolled.well_typed:
+            return res_unrolled
+
+    # If the unrolled circuit is also ill-typed, return the minimal 1-step witness
+    return res_k1
 
 
 def infer_module_qsub(
@@ -2236,26 +2292,111 @@ def build_buggy_capability_drift_round_spec() -> LoopRoundSpec:
     )
 
 
+def build_two_round_coupled_sponge_spec() -> LoopRoundSpec:
+    """
+    2-Round Coupled Block-2 Sponge (`R = 12` or `18`, `16` state wires + `2` scratch wires):
+      - Even rounds (`r % 2 == 0`) compute `temp-and` into `scratch_wires[0..1]` and XOR
+        into `state_wires`, leaving `scratch_wires[0..1]` live across the even->odd boundary.
+      - Odd rounds (`r % 2 == 1`) apply a second coupled XOR and uncompute `scratch_wires[0..1]`
+        via `mid-meas-x-cond-z`.
+    Single-step ($k = 1$) induction fails at `r = 0` (`u1_scratch_clean_ok = False`), whereas
+    zero-flag automatic escalation promotes $k = 1 \\to k = 2$ and verifies the loop in $O(1)$
+    Z3 queries (`2` queries total).
+    """
+    state_wires = list(range(0, 16))
+    scratch_wires = list(range(16, 18))
+
+    def round_ops(r: int) -> List[Tuple[Any, ...]]:
+        if r % 2 == 0:
+            return [
+                ("temp-and", state_wires[0], state_wires[1], scratch_wires[0]),
+                ("temp-and", state_wires[2], state_wires[3], scratch_wires[1]),
+                ("cx", scratch_wires[0], state_wires[4]),
+                ("cx", scratch_wires[1], state_wires[5]),
+            ]
+        return [
+            ("cx", scratch_wires[0], state_wires[6]),
+            ("cx", scratch_wires[1], state_wires[7]),
+            ("mid-meas-x-cond-z", scratch_wires[1], state_wires[2], state_wires[3], f"m_blk2_r{r}_1"),
+            ("mid-meas-x-cond-z", scratch_wires[0], state_wires[0], state_wires[1], f"m_blk2_r{r}_0"),
+        ]
+
+    return LoopRoundSpec(
+        name="Block2-Coupled-Sponge",
+        state_wires=state_wires,
+        key_wires=[],
+        scratch_wires=scratch_wires,
+        round_ops_fn=round_ops,
+        substage_bijection_blocks=[_build_bijective_4bit_sbox_substage("block2_coupled_substage")],
+        declared_temp_ands_per_round=1,
+        declared_mbus_per_round=1,
+    )
+
+
+def build_cross_loop_session_pipeline_spec(num_rounds: int = 6) -> LoopRoundSpec:
+    """
+    Cross-Loop Forward-Compute / Reverse-Uncompute Session Pipeline (`R = 6`, `16` state wires
+    + `3` session scratch wires):
+      - Forward half (`r in 0 .. R/2 - 1`): round `r` allocates `scratch_wires[r]` via `temp-and`
+        and keeps it live across the entire forward half of the loop.
+      - Reverse half (`r in R/2 .. R - 1`): round `r` uncomputes `scratch_wires[R - 1 - r]` in
+        reverse topological order via `mid-meas-x-cond-z`.
+    Both $k = 1$ and $k = 2$ induction fail because session ancillas remain live across the
+    loop midpoint; zero-flag automatic escalation promotes $k = 1 \\to k = 2 \\to k = R$ and
+    verifies the full unrolled circuit.
+    """
+    half = max(1, num_rounds // 2)
+    state_wires = list(range(0, 16))
+    scratch_wires = list(range(16, 16 + half))
+
+    def round_ops(r: int) -> List[Tuple[Any, ...]]:
+        if r < half:
+            sc = scratch_wires[r]
+            c0 = state_wires[2 * r]
+            c1 = state_wires[2 * r + 1]
+            tgt = state_wires[8 + r]
+            return [
+                ("temp-and", c0, c1, sc),
+                ("cx", sc, tgt),
+            ]
+        rev_idx = (2 * half - 1) - r
+        sc = scratch_wires[rev_idx]
+        c0 = state_wires[2 * rev_idx]
+        c1 = state_wires[2 * rev_idx + 1]
+        return [
+            ("mid-meas-x-cond-z", sc, c0, c1, f"m_sess_r{r}_{rev_idx}"),
+        ]
+
+    return LoopRoundSpec(
+        name="Cross-Loop-Session-Pipeline",
+        state_wires=state_wires,
+        key_wires=[],
+        scratch_wires=scratch_wires,
+        round_ops_fn=round_ops,
+        substage_bijection_blocks=[_build_bijective_4bit_sbox_substage("session_pipeline_substage")],
+        declared_temp_ands_per_round=1,
+        declared_mbus_per_round=1,
+    )
+
+
 def infer_for_fold_loop_sexpr(
     sexpr_or_source: Any,
     num_rounds: Optional[int] = None,
-    k_depth: int = 1,
+    k_depth: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Elaborate and verify a `#lang lakefillq` `(for/fold ...)` loop S-expression,
-    module source string, or `LoopRoundSpec` via $O(1)$-query symbolic $k$-inductive
-    `QSub` (`Laws U1-U4`) inference (`infer_inductive_loop_qsub`).
+    module source string, or `LoopRoundSpec` via zero-flag automatic escalation
+    ($k = 1 \\to k = 2 \\to k = R$ unrolled XAG/FRAIG + Z3 cut-sweeping).
 
-    Recognizes surface `(for/fold ([state : (QVec N) @ Cap init_state]) ([r (in-range R)]) ...)`
-    cryptographic round uncomputation loops (including AES-128 Boyar-Peralta degree-2
-    round cleanup, AES-256, Keccak-f[200] $\\chi_5$ round sponge, ChaCha20 ARX, and
-    custom `within-apply-mbu` loop bodies) and returns the verified $O(1)$-query
-    symbolic $k$-inductive `QSub` summary:
-      - `k_induction_depth`: exact $k$-induction depth ($k \\ge 1$)
-      - `z3_queries`: total Z3 solver calls ($O(1)$ independent of loop bound $R$)
-      - `round_invariant_status`: `"VERIFIED_INDUCTIVE_INVARIANT"` or `"VIOLATED_INDUCTIVE_INVARIANT"`
-      - `single_round_mbu_deg_le_2`: `True` iff all intra-round `TempAND`/`MBU` kickbacks
-        have Boolean degree $\\le 2$ and cancel identically within the round step
+    When `k_depth is None` (the default zero-flag mode), dispatches through
+    `infer_loop_qsub_auto_escalate`:
+      - Round-closed loops ($\\Delta W_{\\mathrm{dirty}} = 0$, $\\Phi_X^{\\mathrm{escape}} \\equiv 0$)
+        succeed immediately at $k = 1$ in $O(1)$ Z3 solver queries.
+      - 2-round coupled block-2 / involution loops automatically escalate $k = 1 \\to k = 2$
+        and succeed in $O(1)$ Z3 solver queries.
+      - Cross-loop forward-compute / reverse-uncompute session pipelines automatically
+        escalate $k = 1 \\to k = 2 \\to k = R$ unrolled XAG/FRAIG cut-sweeping.
     """
     from dataclasses import asdict
     import re
@@ -2323,9 +2464,20 @@ def infer_for_fold_loop_sexpr(
     all_well_typed = True
     all_deg_le_2 = True
     all_violations: List[Dict[str, Any]] = []
+    max_k_used = 1
 
     for spec, r_cnt, surface_header in specs_and_rounds:
-        ind_res = infer_inductive_loop_qsub(spec, num_rounds=r_cnt, k_depth=k_depth)
+        if k_depth is None:
+            ind_res = infer_loop_qsub_auto_escalate(spec, num_rounds=r_cnt)
+        else:
+            ind_res = infer_inductive_loop_qsub(spec, num_rounds=r_cnt, k_depth=k_depth)
+        eff_k_loop = ind_res.k_depth
+        max_k_used = max(max_k_used, eff_k_loop)
+        escalation_stage = (
+            "k1_inductive"
+            if eff_k_loop == 1
+            else ("k2_inductive" if eff_k_loop == 2 and eff_k_loop < r_cnt else "unrolled_xag_fraig")
+        )
         # Unrolled O(R) query count is R * (len(substage_bijection_blocks) + 1)
         unrolled_queries_est = r_cnt * (len(spec.substage_bijection_blocks) + 1)
         deg_le_2 = (
@@ -2345,7 +2497,8 @@ def infer_for_fold_loop_sexpr(
                 "loop_name": spec.name,
                 "surface_for_fold": surface_header,
                 "num_rounds": r_cnt,
-                "k_induction_depth": k_depth,
+                "k_induction_depth": eff_k_loop,
+                "escalation_stage": escalation_stage,
                 "well_typed": ind_res.well_typed,
                 "z3_queries": ind_res.z3_solver_calls,
                 "unrolled_z3_queries": unrolled_queries_est,
@@ -2374,9 +2527,10 @@ def infer_for_fold_loop_sexpr(
     primary = loop_reports[0]
     return {
         "enabled": True,
-        "mode": "inductive_k_loop",
+        "mode": "auto_escalating_k_inductive_loop",
         "well_typed": all_well_typed,
-        "k_induction_depth": k_depth,
+        "k_induction_depth": max_k_used,
+        "escalation_stage": primary["escalation_stage"],
         "z3_queries": total_z3_queries,
         "unrolled_z3_queries": total_unrolled_z3_queries,
         "z3_query_speedup_x": round(total_unrolled_z3_queries / max(1, total_z3_queries), 2),
@@ -2446,26 +2600,54 @@ def test_inductive_loop_qsub_constant_queries_across_rounds() -> None:
 
 
 def test_negative_buggy_loops_rejected_with_witnesses() -> None:
-    r_u4 = infer_inductive_loop_qsub(build_buggy_taintedx_leak_round_spec(), num_rounds=10)
+    r_u4 = infer_loop_qsub_auto_escalate(build_buggy_taintedx_leak_round_spec(), num_rounds=10)
     assert r_u4.well_typed is False
     assert r_u4.u1_scratch_clean_ok is True
     assert r_u4.u4_zero_taint_escape_ok is False
     assert r_u4.counterexample is not None
 
-    r_u1 = infer_inductive_loop_qsub(build_buggy_uncleaned_scratch_round_spec(), num_rounds=18)
+    r_u1 = infer_loop_qsub_auto_escalate(build_buggy_uncleaned_scratch_round_spec(), num_rounds=18)
     assert r_u1.well_typed is False
     assert r_u1.u1_scratch_clean_ok is False
     assert r_u1.counterexample is not None
 
-    r_u2 = infer_inductive_loop_qsub(build_buggy_nonbijective_round_spec(), num_rounds=20)
+    r_u2 = infer_loop_qsub_auto_escalate(build_buggy_nonbijective_round_spec(), num_rounds=20)
     assert r_u2.well_typed is False
     assert r_u2.u2_bijective_ok is False
     assert r_u2.counterexample is not None
     assert r_u2.counterexample["state_a_mask"] != r_u2.counterexample["state_b_mask"]
 
-    r_cap = infer_inductive_loop_qsub(build_buggy_capability_drift_round_spec(), num_rounds=10)
+    r_cap = infer_loop_qsub_auto_escalate(build_buggy_capability_drift_round_spec(), num_rounds=10)
     assert r_cap.well_typed is False
     assert r_cap.capability_invariant_ok is False
+
+
+def test_zero_flag_auto_escalation_k1_k2_unrolled() -> None:
+    # 1. k=1 fast path: AES-128 succeeds at k=1 without escalation
+    s_k1 = infer_for_fold_loop_sexpr(build_aes128_round_spec(), num_rounds=10)
+    assert s_k1["well_typed"] is True
+    assert s_k1["k_induction_depth"] == 1
+    assert s_k1["escalation_stage"] == "k1_inductive"
+
+    # 2. k=1 -> k=2 automatic escalation: 2-round coupled sponge fails at k=1, succeeds at k=2
+    coupled_spec = build_two_round_coupled_sponge_spec()
+    r1_fail = infer_inductive_loop_qsub(coupled_spec, num_rounds=18, k_depth=1)
+    assert r1_fail.well_typed is False
+    assert r1_fail.u1_scratch_clean_ok is False
+    s_k2 = infer_for_fold_loop_sexpr(coupled_spec, num_rounds=18)
+    assert s_k2["well_typed"] is True
+    assert s_k2["k_induction_depth"] == 2
+    assert s_k2["escalation_stage"] == "k2_inductive"
+    assert s_k2["z3_queries"] == 2
+
+    # 3. k=1 -> k=2 -> k=R automatic escalation: cross-loop session pipeline succeeds at k=R=6
+    sess_spec = build_cross_loop_session_pipeline_spec(num_rounds=6)
+    r2_fail = infer_inductive_loop_qsub(sess_spec, num_rounds=6, k_depth=2)
+    assert r2_fail.well_typed is False
+    s_unrolled = infer_for_fold_loop_sexpr(sess_spec, num_rounds=6)
+    assert s_unrolled["well_typed"] is True
+    assert s_unrolled["k_induction_depth"] == 6
+    assert s_unrolled["escalation_stage"] == "unrolled_xag_fraig"
 
 
 def test_infer_for_fold_loop_sexpr() -> None:
@@ -2475,9 +2657,10 @@ def test_infer_for_fold_loop_sexpr() -> None:
     (for/fold ([sponge : (QVec 200) @ Lin1 init_sponge]) ([r (in-range 18)])
       (keccak-f200-chi-round sponge r))
     """
-    summary = infer_for_fold_loop_sexpr(sexpr_src, k_depth=1)
+    summary = infer_for_fold_loop_sexpr(sexpr_src)
     assert summary["well_typed"] is True
     assert summary["k_induction_depth"] == 1
+    assert summary["escalation_stage"] == "k1_inductive"
     assert summary["z3_queries"] == 5
     assert summary["round_invariant_status"] == "VERIFIED_INDUCTIVE_INVARIANT"
     assert summary["single_round_mbu_deg_le_2"] is True
@@ -2496,6 +2679,9 @@ class TestInductiveLoopQSubInference:
     def test_negative_buggy_loops_rejected_with_witnesses(self) -> None:
         test_negative_buggy_loops_rejected_with_witnesses()
 
+    def test_zero_flag_auto_escalation_k1_k2_unrolled(self) -> None:
+        test_zero_flag_auto_escalation_k1_k2_unrolled()
+
     def test_infer_for_fold_loop_sexpr(self) -> None:
         test_infer_for_fold_loop_sexpr()
 
@@ -2504,6 +2690,7 @@ if __name__ == "__main__":
     test_rwire_semiring_and_loop_grade_scaling()
     test_inductive_loop_qsub_constant_queries_across_rounds()
     test_negative_buggy_loops_rejected_with_witnesses()
+    test_zero_flag_auto_escalation_k1_k2_unrolled()
     test_infer_for_fold_loop_sexpr()
     print("compiler/lakefillqc/infer_qsub.py self-tests PASSED.")
 

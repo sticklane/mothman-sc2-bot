@@ -894,7 +894,6 @@ def run_examples_target() -> int:
             s0 = time.perf_counter()
             rep, qasm_txt, stim_txt = compile_and_emit(
                 input_path=fpath,
-                inductive_loop_qsub=True,
                 emit_qasm3_path=qasm_out,
                 emit_stim_path=stim_out,
             )

@@ -28,7 +28,8 @@ def _annotate_qasm3_with_metadata(qasm_text: str, report: Dict[str, Any]) -> str
         ind = report["inductive_loop_qsub"]
         extra_comments.append(
             f"// LakefillQ Symbolic k-Inductive QSub: status={ind['round_invariant_status']} "
-            f"k={ind['k_induction_depth']} z3_queries={ind['z3_queries']} "
+            f"k={ind['k_induction_depth']} stage={ind.get('escalation_stage', 'k=1')} "
+            f"z3_queries={ind['z3_queries']} "
             f"single_round_mbu_deg_le_2={ind['single_round_mbu_deg_le_2']}"
         )
     if "ag_dqi_curve_summary" in report:
@@ -58,7 +59,8 @@ def _annotate_stim_with_metadata(stim_text: str, report: Dict[str, Any]) -> str:
         ind = report["inductive_loop_qsub"]
         extra_comments.append(
             f"# LakefillQ Symbolic k-Inductive QSub: status={ind['round_invariant_status']} "
-            f"k={ind['k_induction_depth']} z3_queries={ind['z3_queries']} "
+            f"k={ind['k_induction_depth']} stage={ind.get('escalation_stage', 'k=1')} "
+            f"z3_queries={ind['z3_queries']} "
             f"single_round_mbu_deg_le_2={ind['single_round_mbu_deg_le_2']}"
         )
     if "ag_dqi_curve_summary" in report:
@@ -77,8 +79,6 @@ def _annotate_stim_with_metadata(stim_text: str, report: Dict[str, Any]) -> str:
 def compile_and_emit(
     input_path: str | Path,
     target_override: Optional[str] = None,
-    inductive_loop_qsub: bool = True,
-    k_induction_depth: int = 1,
     emit_json_path: Optional[str | Path] = None,
     emit_qasm3_path: Optional[str | Path] = None,
     emit_stim_path: Optional[str | Path] = None,
@@ -109,8 +109,6 @@ def compile_and_emit(
     report = typecheck_lfq_module(
         input_path=in_path,
         target_override=target_override,
-        inductive_loop_qsub=inductive_loop_qsub,
-        k_induction_depth=k_induction_depth,
         emit_json_path=emit_json_path,
         emit_qasm3_path=qasm_out,
         emit_stim_path=stim_out,

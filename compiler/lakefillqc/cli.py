@@ -2,10 +2,11 @@
 """
 compiler/lakefillqc/cli.py
 ==========================
-Command-Line Interface (`lakefillqc`) for `#lang lakefillq` with $O(1)$-Query
-Symbolic $k$-Inductive Loop-Invariant `QSub` Inference (`--inductive-loop-qsub`)
-and Higher-Genus Algebraic-Geometry / Deligne-Lusztig Suzuki `S(8)` Early-MBU DQI
-Lowering to Dynamic OpenQASM 3.0 (`--emit-qasm3`) and Stim (`--emit-stim`).
+Command-Line Interface (`lakefillqc`) for `#lang lakefillq` with Zero-Flag
+Automatic $k$-Inductive Loop-Invariant `QSub` Inference ($k=1 \to k=2 \to k=R$
+unrolled XAG/FRAIG escalation) and Higher-Genus Algebraic-Geometry /
+Deligne-Lusztig Suzuki `S(8)` Early-MBU DQI Lowering to Dynamic OpenQASM 3.0
+(`--emit-qasm3`) and Stim (`--emit-stim`).
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         prog="lakefillqc",
         description=(
             "LakefillQ Unified Compiler CLI (`#lang lakefillq -> RevIR -> MachineISA -> "
-            "OpenQASM 3.0 / Stim`) with symbolic k-inductive loop-invariant QSub inference."
+            "OpenQASM 3.0 / Stim`) with zero-flag automatic k-inductive loop-invariant QSub inference."
         ),
     )
     parser.add_argument(
@@ -56,28 +57,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Hardware target profile override (`heron-r2`, `bluvstein-aod`, `bb-qldpc`, `ideal`).",
-    )
-    parser.add_argument(
-        "--inductive-loop-qsub",
-        dest="inductive_loop_qsub",
-        action="store_true",
-        default=True,
-        help=(
-            "Enable O(1)-query symbolic k-inductive loop-invariant QSub (Laws U1-U4) "
-            "inference on `(for/fold ...)` loops and round-iterated sponges (default: enabled)."
-        ),
-    )
-    parser.add_argument(
-        "--no-inductive-loop-qsub",
-        dest="inductive_loop_qsub",
-        action="store_false",
-        help="Disable symbolic k-inductive loop-invariant QSub inference.",
-    )
-    parser.add_argument(
-        "--k-induction-depth",
-        type=int,
-        default=1,
-        help="Induction depth k >= 1 for symbolic k-inductive loop QSub inference (default: 1).",
     )
     parser.add_argument(
         "--emit-json",
@@ -128,8 +107,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         report, _qasm_txt, _stim_txt = compile_and_emit(
             input_path=input_file,
             target_override=args.target,
-            inductive_loop_qsub=args.inductive_loop_qsub,
-            k_induction_depth=args.k_induction_depth,
             emit_json_path=args.emit_json,
             emit_qasm3_path=args.emit_qasm3,
             emit_stim_path=args.emit_stim,
@@ -141,8 +118,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         report = typecheck_lfq_module(
             input_path=input_file,
             target_override=args.target,
-            inductive_loop_qsub=args.inductive_loop_qsub,
-            k_induction_depth=args.k_induction_depth,
             emit_json_path=args.emit_json,
             diagnostics_human=args.diagnostics_human,
             repair=args.repair,

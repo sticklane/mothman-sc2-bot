@@ -8,8 +8,8 @@
 ;;
 ;; Verified via O(1)-Query Symbolic k-Inductive `QSub` (`Laws U1-U4`) Inference:
 ;;   - Instead of unrolling all R rounds into an O(R)-depth symbolic DAG,
-;;     `lakefillqc --inductive-loop-qsub` verifies the loop-invariant typing
-;;     judgment (`T-Loop-Inductive`):
+;;     `lakefillqc` automatically verifies the loop-invariant typing
+;;     judgment (`T-Loop-Inductive`, escalating k=1 -> k=2 -> k=R with zero flags):
 ;;       1. Capability Invariance (`Gamma_out == Gamma_inv`): state registers
 ;;          preserve `Lin1`/`Uniq1` and recycled scratch registers return to `ErasedIdx`.
 ;;       2. Single-Round Scratch Erasure (`Law U1` `EraseBy`): every intra-round

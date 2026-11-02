@@ -35,6 +35,7 @@ from compiler.lakefillqc.infer_qsub import (  # noqa: E402
     test_infer_for_fold_loop_sexpr,
     test_negative_buggy_loops_rejected_with_witnesses,
     test_rwire_semiring_and_loop_grade_scaling,
+    test_zero_flag_auto_escalation_k1_k2_unrolled,
 )
 from compiler.lakefillqc.parser import parse_lfq_file  # noqa: E402
 from compiler.lakefillqc.typecheck import typecheck_lfq_module  # noqa: E402
@@ -69,7 +70,7 @@ def verify_inductive_loop_and_suzuki_cli() -> Dict[str, Any]:
     work = PERSISTENT_TMP / f"verify_lfqc_cli_{os.getpid()}"
     work.mkdir(parents=True, exist_ok=True)
 
-    # 1. Verify `examples/inductive_loop_aes_keccak.lfq` via `cli.py --inductive-loop-qsub`
+    # 1. Verify `examples/inductive_loop_aes_keccak.lfq` via `cli.py` (zero QSub CLI flags)
     aes_keccak_lfq = REPO_ROOT / "examples" / "inductive_loop_aes_keccak.lfq"
     aes_json = work / "inductive_loop_aes_keccak.json"
     aes_qasm = work / "inductive_loop_aes_keccak.qasm"
@@ -79,7 +80,6 @@ def verify_inductive_loop_and_suzuki_cli() -> Dict[str, Any]:
         [
             "--input",
             str(aes_keccak_lfq),
-            "--inductive-loop-qsub",
             "--emit-json",
             str(aes_json),
             "--emit-qasm3",
@@ -97,6 +97,7 @@ def verify_inductive_loop_and_suzuki_cli() -> Dict[str, Any]:
     assert rep_aes["residual_surface_forms"] == 0
     assert rep_aes["uncompute_ccx_count"] == 0
     assert rep_aes["k_induction_depth"] == 1
+    assert rep_aes["escalation_stage"] == "k1_inductive"
     assert rep_aes["z3_queries"] == 5
     assert rep_aes["round_invariant_status"] == "VERIFIED_INDUCTIVE_INVARIANT"
     assert rep_aes["single_round_mbu_deg_le_2"] is True
@@ -114,7 +115,6 @@ def verify_inductive_loop_and_suzuki_cli() -> Dict[str, Any]:
         [
             "--input",
             str(suzuki_lfq),
-            "--inductive-loop-qsub",
             "--emit-json",
             str(suzuki_json),
             "--emit-qasm3",
@@ -153,6 +153,7 @@ def verify_inductive_loop_and_suzuki_cli() -> Dict[str, Any]:
             "mbu_erasure_count": rep_aes["mbu_erasure_count"],
             "uncompute_ccx_count": rep_aes["uncompute_ccx_count"],
             "k_induction_depth": rep_aes["k_induction_depth"],
+            "escalation_stage": rep_aes["escalation_stage"],
             "z3_queries": rep_aes["z3_queries"],
             "round_invariant_status": rep_aes["round_invariant_status"],
             "single_round_mbu_deg_le_2": rep_aes["single_round_mbu_deg_le_2"],
@@ -200,6 +201,7 @@ def main() -> int:
     # 1. Run embedded unit tests in `compiler/lakefillqc/infer_qsub.py`
     test_rwire_semiring_and_loop_grade_scaling()
     test_inductive_loop_qsub_constant_queries_across_rounds()
+    test_zero_flag_auto_escalation_k1_k2_unrolled()
     test_negative_buggy_loops_rejected_with_witnesses()
     test_infer_for_fold_loop_sexpr()
 
