@@ -435,6 +435,77 @@ theorem lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120 :
   decide
 
 -- ============================================================================
+-- PILLAR 9: Gödel Prime-Register $L^1$/$L^\infty$ Norm $\leftrightarrow$
+--           Liouville $\lambda(N)$, Möbius $\mu(N)$, and Mertens Cancellation
+-- ============================================================================
+
+/-- Pillar 9: $L^1$ prime-register norm $\Omega(2^{r_2} 3^{r_3} 5^{r_5} 7^{r_7}) = r_2 + r_3 + r_5 + r_7$. -/
+def goedelBigOmega4 (r2 r3 r5 r7 : Nat) : Nat :=
+  r2 + r3 + r5 + r7
+
+/-- Pillar 9: Liouville parity character $\lambda(N) = (-1)^{\Omega(N)} \in \{-1, +1\}$ on the 4-prime Gödel state. -/
+def goedelLiouville4 (r2 r3 r5 r7 : Nat) : Int :=
+  if (goedelBigOmega4 r2 r3 r5 r7) % 2 == 0 then 1 else -1
+
+/-- Pillar 9: $L^\infty$ squarefree register predicate $\|\mathbf{r}\|_\infty \le 1$ ($r_p \le 1$ for all $p \in \{2, 3, 5, 7\}$). -/
+def goedelIsSquarefree4 (r2 r3 r5 r7 : Nat) : Bool :=
+  (r2 <= 1) && (r3 <= 1) && (r5 <= 1) && (r7 <= 1)
+
+/-- Pillar 9: Möbius character $\mu(N)$ via the $L^\infty$-guarded Liouville parity of the 4-prime Gödel state. -/
+def goedelMobius4 (r2 r3 r5 r7 : Nat) : Int :=
+  if goedelIsSquarefree4 r2 r3 r5 r7 then goedelLiouville4 r2 r3 r5 r7 else 0
+
+/-- Pillar 9: Recursive sum of `goedelMobius4` over a list of 4-register exponent tuples. -/
+def sumGoedelMobius4 : List (Nat × Nat × Nat × Nat) → Int
+  | [] => 0
+  | (b2, b3, b5, b7) :: rest => goedelMobius4 b2 b3 b5 b7 + sumGoedelMobius4 rest
+
+/-- Pillar 9: All $2^4 = 16$ vertices of the Boolean hypercube $\{0, 1\}^4$
+    (encoding the 16 squarefree divisors of $2 \cdot 3 \cdot 5 \cdot 7 = 210$). -/
+def booleanHypercube4 : List (Nat × Nat × Nat × Nat) :=
+  [(0,0,0,0), (0,0,0,1), (0,0,1,0), (0,0,1,1),
+   (0,1,0,0), (0,1,0,1), (0,1,1,0), (0,1,1,1),
+   (1,0,0,0), (1,0,0,1), (1,0,1,0), (1,0,1,1),
+   (1,1,0,0), (1,1,0,1), (1,1,1,0), (1,1,1,1)]
+
+/-- **Theorem 15 (`goedel_liouville_fractran_parity_flip_universal`, 5 lines)**:
+    Proves universally for all register states `(r2, r3, r5, r7 : Nat)` that the
+    odd-$\Delta\Omega$ Minsky/FRACTRAN transition `(r2 + 1, r3, r5 + 1, r7) -> (r2, r3 + 2, r5, r7 + 1)`
+    increments $\Omega$ by $+1$ (`-1 + 2 - 1 + 1 = +1`), flips the Liouville sign
+    $\lambda(N') = -\lambda(N)$, and satisfies the involution $\lambda(N)^2 = 1$. -/
+theorem goedel_liouville_fractran_parity_flip_universal (r2 r3 r5 r7 : Nat) :
+    goedelBigOmega4 r2 (r3 + 2) r5 (r7 + 1) =
+      goedelBigOmega4 (r2 + 1) r3 (r5 + 1) r7 + 1 ∧
+    goedelLiouville4 r2 (r3 + 2) r5 (r7 + 1) =
+      - goedelLiouville4 (r2 + 1) r3 (r5 + 1) r7 ∧
+    (goedelLiouville4 r2 r3 r5 r7) * (goedelLiouville4 r2 r3 r5 r7) = 1 := by
+  have h_om : goedelBigOmega4 r2 (r3 + 2) r5 (r7 + 1) = goedelBigOmega4 (r2 + 1) r3 (r5 + 1) r7 + 1 := by dsimp [goedelBigOmega4]; omega
+  have h_p1 : (goedelBigOmega4 (r2 + 1) r3 (r5 + 1) r7 % 2 = 0 ∧ (goedelBigOmega4 (r2 + 1) r3 (r5 + 1) r7 + 1) % 2 = 1) ∨ (goedelBigOmega4 (r2 + 1) r3 (r5 + 1) r7 % 2 = 1 ∧ (goedelBigOmega4 (r2 + 1) r3 (r5 + 1) r7 + 1) % 2 = 0) := by omega
+  have h_p2 : goedelBigOmega4 r2 r3 r5 r7 % 2 = 0 ∨ goedelBigOmega4 r2 r3 r5 r7 % 2 = 1 := by omega
+  dsimp [goedelLiouville4]; rw [h_om]
+  rcases h_p1 with ⟨ha, hb⟩ | ⟨ha, hb⟩ <;> rcases h_p2 with hc | hc <;> rw [ha, hb, hc] <;> exact ⟨rfl, by decide⟩
+
+/-- **Theorem 16 (`goedel_mobius_squarefree_boolean_hypercube_cancellation_exact`, 5 lines)**:
+    Proves that:
+      1. Summing `goedelMobius4 b2 b3 b5 b7` over all $2^4 = 16$ vertices of the
+         Boolean hypercube $\{0, 1\}^4$ equals `0` ($\sum_{d \mid 210} \mu(d) = 0$);
+      2. At $N = 2^2 = 4$ (`(2, 0, 0, 0)`), $\lambda(4) = +1 \ne 0 = \mu(4)$;
+      3. For every non-squarefree state `(r2 + 2, r3, r5, r7)`, the $L^\infty$ guard
+         annihilates `goedelMobius4 (r2 + 2) r3 r5 r7 = 0`. -/
+theorem goedel_mobius_squarefree_boolean_hypercube_cancellation_exact (r2 r3 r5 r7 : Nat) :
+    booleanHypercube4.length = 16 ∧
+    sumGoedelMobius4 booleanHypercube4 = 0 ∧
+    goedelLiouville4 2 0 0 0 = 1 ∧
+    goedelMobius4 2 0 0 0 = 0 ∧
+    goedelIsSquarefree4 (r2 + 2) r3 r5 r7 = false ∧
+    goedelMobius4 (r2 + 2) r3 r5 r7 = 0 := by
+  have h_nsq : ¬ (r2 + 2 ≤ 1) := by omega
+  have h_sf : goedelIsSquarefree4 (r2 + 2) r3 r5 r7 = false := by dsimp [goedelIsSquarefree4]; simp [h_nsq]
+  have h_mu : goedelMobius4 (r2 + 2) r3 r5 r7 = 0 := by dsimp [goedelMobius4]; rw [h_sf]; rfl
+  have h_dec : booleanHypercube4.length = 16 ∧ sumGoedelMobius4 booleanHypercube4 = 0 ∧ goedelLiouville4 2 0 0 0 = 1 ∧ goedelMobius4 2 0 0 0 = 0 := by decide
+  exact ⟨h_dec.1, h_dec.2.1, h_dec.2.2.1, h_dec.2.2.2, h_sf, h_mu⟩
+
+-- ============================================================================
 -- PILLAR 4: Okasaki Binomial Pebble Capacity & Master Dichotomy Synthesis
 -- ============================================================================
 
@@ -451,7 +522,7 @@ def pascalBinom : Nat → Nat → Nat
 def okasakiPebbleCapacity (s t : Nat) : Nat :=
   pascalBinom (s + t) s
 
-/-- **Theorem 15 (`pascalBinom_step_identity`, 1 line)**:
+/-- **Theorem 17 (`pascalBinom_step_identity`, 1 line)**:
     Proves the structural Pascal recurrence `pascalBinom (n + 1) (k + 1) =
     pascalBinom n k + pascalBinom n (k + 1)` and base boundary `pascalBinom n 0 = 1`. -/
 theorem pascalBinom_step_identity (n k : Nat) :
@@ -459,7 +530,7 @@ theorem pascalBinom_step_identity (n k : Nat) :
     pascalBinom n 0 = 1 := by
   cases n <;> simp [pascalBinom]
 
-/-- **Theorem 16 (`master_fractran_vs_2adic_divsteps_dichotomy_synthesis`, 5 lines)**:
+/-- **Theorem 18 (`master_fractran_vs_2adic_divsteps_dichotomy_synthesis`, 5 lines)**:
     Master synthesis of Pillars 1–6 contrasting 2-adic `divsteps` (`2^k` low-bit
     causal horizon + `0`-ancilla Bézout cofactor reversibility) against multi-prime
     FRACTRAN (`2^k` horizon breakdown, many-to-one state merge, Conway's 14-fraction
@@ -487,24 +558,31 @@ theorem master_fractran_vs_2adic_divsteps_dichotomy_synthesis
   have h4 : (evalConwayPrimeGame 2 19 = 4 ∧ evalConwayPrimeGame 4 50 = 8 ∧ evalConwayPrimeGame 8 212 = 32 ∧ evalConwayPrimeGame 32 429 = 128) ∧ (sumDivisors 120 = 360 ∧ harmonicNumScaled 60 6 = 147 ∧ okasakiPebbleCapacity 8 5 = 1287 ∧ 741 ≤ okasakiPebbleCapacity 8 5) := by decide
   exact ⟨h1.2.1, h2.1, h2.2.1, h3.1.2.2.2.2, h3.2.1.2.2.2, h4.1, h4.2⟩
 
-/-- **Theorem 17 (`fractran_2adic_causal_horizon_master_closure`, 5 lines)**:
-    End-to-end 8-Pillar master closure unifying 2-adic `divsteps` causal-horizon
+/-- **Theorem 19 (`fractran_2adic_causal_horizon_master_closure`, 5 lines)**:
+    End-to-end 9-Pillar master closure unifying 2-adic `divsteps` causal-horizon
     invariance, `0`-ancilla Bézout reversibility, multi-prime FRACTRAN horizon
-    breakdown, the universal Gödel–Minsky prime-register homomorphism, first-principles
-    `chi4PrimeShellWeights` energy bounds, and the Lagarias–Robin Diophantine halting search. -/
+    breakdown, the universal Gödel–Minsky prime-register homomorphism, Gödel
+    $L^1$/$L^\infty$ Liouville parity flip & Boolean-hypercube Möbius cancellation,
+    first-principles `chi4PrimeShellWeights` energy bounds, and the Lagarias–Robin
+    Diophantine halting search. -/
 theorem fractran_2adic_causal_horizon_master_closure
     (f g m1 m2 k b r2 r3 r5 r7 : Nat) (R r t : Int) (candidates : List Nat) :
     (divstep2AdicLowBitHorizon (f + m1 * 4) (g + m2 * 4) = divstep2AdicLowBitHorizon f g ∧
      bezoutReverseR (bezoutForwardR R r b) r (bezoutDecodeBranch (bezoutForwardT t k b) t) = R) ∧
     fractranStep [(63, 10)] (goedelEncode4 (r2 + 1) r3 (r5 + 1) r7) =
       some (goedelEncode4 r2 (r3 + 2) r5 (r7 + 1)) ∧
+    (goedelLiouville4 r2 (r3 + 2) r5 (r7 + 1) =
+      - goedelLiouville4 (r2 + 1) r3 (r5 + 1) r7 ∧
+     goedelMobius4 (r2 + 2) r3 r5 r7 = 0 ∧
+     sumGoedelMobius4 booleanHypercube4 = 0) ∧
     sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) ∧
     robinCounterexampleSearch 120 = none := by
   have h16 := master_fractran_vs_2adic_divsteps_dichotomy_synthesis f g m1 m2 k b R r t
   have h7 := goedel_minsky_fractran_step_homomorphism_universal r2 r3 r5 r7
-  have h8a := chi4PrimeShellWeights_sumSq_le_length candidates
-  have h8b := lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120
-  exact ⟨⟨h16.1, h16.2.2.1⟩, h7, h8a.2, h8b.1⟩
+  have h9 := And.intro (goedel_liouville_fractran_parity_flip_universal r2 r3 r5 r7) (goedel_mobius_squarefree_boolean_hypercube_cancellation_exact r2 r3 r5 r7)
+  have h8 := And.intro (chi4PrimeShellWeights_sumSq_le_length candidates) lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120
+  exact ⟨⟨h16.1, h16.2.2.1⟩, h7, ⟨h9.1.2.1, h9.2.2.2.2.2.2, h9.2.2.1⟩, h8.1.2, h8.2.1⟩
 
 end Fractran2AdicCausalHorizonAndBezoutReversibilityDichotomy
+
 

@@ -5,7 +5,7 @@
     "status": "PASS",
     "lean_file": "proofs/fractran_2adic_causal_horizon_and_bezout_reversibility_dichotomy_proofs.lean",
     "return_code": 0,
-    "theorem_count": 17,
+    "theorem_count": 19,
     "max_proof_body_lines": 5,
     "sorry_count": 0,
     "axiom_count": 0,
@@ -33,21 +33,22 @@
       "120": 360
     },
     "goedel_minsky_homomorphism_verified": true,
+    "goedel_liouville_mobius_boolean_hypercube_cancellation": 0,
     "robin_counterexample_search_120": null,
     "okasaki_pebble_capacity_8_5": 1287,
-    "elapsed_s": 3.283
+    "elapsed_s": 3.337
   },
   "suite_2_xls_dslx_and_z3_qf_bv": {
     "status": "PASS",
     "dslx_file": "reproducers/fractran_2adic_vs_multiprime_horizon_gate.x",
     "xls_interpreter_unit_tests_passed": 1,
     "xls_quickcheck_gates_verified_unsat": 3,
-    "xls_elapsed_ms": 60.12,
+    "xls_elapsed_ms": 64.81,
     "z3_jump16_2adic_horizon_invariance": "unsat",
     "z3_bezout_zero_ancilla_bijection": "unsat",
     "z3_multiprime_fractran_horizon_break": "sat",
     "z3_multiprime_fractran_state_merge": "sat",
-    "z3_elapsed_ms": 79.84
+    "z3_elapsed_ms": 81.91
   },
   "suite_3_avx2_vs_scalar_benchmark": {
     "status": "PASS",
@@ -57,16 +58,16 @@
     "state_merges_verified": 1000000,
     "primegame_primes_hit": 4,
     "lagarias_robin_n_10000_checked": 10000,
-    "avx2_warm_2adic_ms": 0.617,
-    "avx2_cold_32mb_llc_2adic_ms": 0.605,
-    "scalar_warm_2adic_ms": 2.387,
-    "scalar_cold_32mb_llc_2adic_ms": 2.348,
-    "unwindowed_multiprime_history_warm_ms": 3.815,
-    "unwindowed_multiprime_history_cold_32mb_llc_ms": 3.761,
-    "avx2_vs_scalar_warm_speedup": 3.87,
-    "avx2_vs_scalar_cold_speedup": 3.88,
-    "jump16_2adic_vs_multiprime_warm_speedup": 6.18,
-    "jump16_2adic_vs_multiprime_cold_speedup": 6.22,
+    "avx2_warm_2adic_ms": 0.534,
+    "avx2_cold_32mb_llc_2adic_ms": 0.525,
+    "scalar_warm_2adic_ms": 2.246,
+    "scalar_cold_32mb_llc_2adic_ms": 2.2,
+    "unwindowed_multiprime_history_warm_ms": 3.558,
+    "unwindowed_multiprime_history_cold_32mb_llc_ms": 3.609,
+    "avx2_vs_scalar_warm_speedup": 4.21,
+    "avx2_vs_scalar_cold_speedup": 4.19,
+    "jump16_2adic_vs_multiprime_warm_speedup": 6.66,
+    "jump16_2adic_vs_multiprime_cold_speedup": 6.87,
     "history_bits_2adic_bezout": 0,
     "okasaki_pebble_capacity_8_5": 1287
   }

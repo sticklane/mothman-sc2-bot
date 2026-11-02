@@ -49,6 +49,11 @@ from the `formal-proof-gap-and-mistranslation-prevention` skill:
                   `% den == 0` guard, frozen constant Satake trace (`def satakeTrace (p : Nat) : Int := 2`),
                   or missing `goedel_minsky_fractran_step_homomorphism_universal` in
                   `fractran_2adic_causal_horizon*.lean`.
+    * Pattern 14: Constant or square-blind Möbius/Liouville parity stub (`def mobius (n : Nat) : Int := 1`,
+                  `def liouville (n : Nat) : Int := 1`, `def badMobiusStub ...`), or missing
+                  `goedel_liouville_fractran_parity_flip_universal` /
+                  `goedel_mobius_squarefree_boolean_hypercube_cancellation_exact` in
+                  `fractran_2adic_causal_horizon*.lean`.
 """
 
 from __future__ import annotations
@@ -76,6 +81,7 @@ PATTERN_KEYS = [
     "pattern11_conditional_assertion_fallback",
     "pattern12_circular_reserve_argument_cancellation",
     "pattern13_unguarded_divisibility_or_frozen_satake_trace",
+    "pattern14_constant_mobius_or_liouville_parity_stub",
 ]
 
 
@@ -110,7 +116,7 @@ def strip_lean_comments(src: str) -> str:
 
 def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
     """
-    Audit a single Lean 4 source file or in-memory snippet against all 10
+    Audit a single Lean 4 source file or in-memory snippet against all 14
     Prohibited Gap Patterns from `formal-proof-gap-and-mistranslation-prevention`.
     Returns a dictionary mapping each pattern key to a list of violation strings.
     """
@@ -125,6 +131,21 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
         or fname.startswith("universal_inductive_grh")
         or fname.startswith("open_automorphic")
         or fname.startswith("automorphic_and_h1_h2_h3")
+        or fname.startswith("failed_grh_proof_obstructions")
+        or fname.startswith("cohomology1_paley_wiener_h1_prim")
+        or fname.startswith("paley_wiener_h1_prim")
+        or fname.startswith("synth1_kronecker_weil_ldl")
+        or fname.startswith("kronecker_weil_ldl")
+        or fname.startswith("closure1_gershgorin_binomial_sos")
+        or fname.startswith("gershgorin_binomial_sos")
+        or fname.startswith("grh1_gelfand_r4_sos")
+        or fname.startswith("gelfand_r4_sos")
+        or fname.startswith("rh1_redheffer_mertens")
+        or fname.startswith("rh2_guth_maynard")
+        or fname.startswith("next1_arithmetic_weil_ldl_sos")
+        or fname.startswith("arithmetic_weil_ldl_sos")
+        or fname.startswith("short_last_and_bilateral")
+        or fname.startswith("rational_interval_y7_parity")
         or "potemkin_linter" in fname
         or "synthetic_pattern" in fname
     )
@@ -338,8 +359,25 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
         fname.startswith("universal_inductive_grh")
         or fname.startswith("open_automorphic")
         or fname.startswith("automorphic_and_h1_h2_h3")
+        or fname.startswith("failed_grh_proof_obstructions")
         or fname.startswith("wave25")
+        or fname.startswith("wave26")
+        or fname.startswith("wave27")
+        or fname.startswith("short_last_and_bilateral")
+        or fname.startswith("rational_interval_y7_parity")
         or fname.startswith("grh_ws4_ws5")
+        or fname.startswith("cohomology1_paley_wiener_h1_prim")
+        or fname.startswith("paley_wiener_h1_prim")
+        or fname.startswith("synth1_kronecker_weil_ldl")
+        or fname.startswith("kronecker_weil_ldl")
+        or fname.startswith("closure1_gershgorin_binomial_sos")
+        or fname.startswith("gershgorin_binomial_sos")
+        or fname.startswith("grh1_gelfand_r4_sos")
+        or fname.startswith("gelfand_r4_sos")
+        or fname.startswith("rh1_redheffer_mertens")
+        or fname.startswith("rh2_guth_maynard")
+        or fname.startswith("next1_arithmetic_weil_ldl_sos")
+        or fname.startswith("arithmetic_weil_ldl_sos")
         or bool(re.match(r"^gl[3456]_sym.*\.lean$", fname))
     ):
         if "theorem chi4PrimeShellWeights_sumSq_le_length" not in cleaned:
@@ -453,14 +491,46 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
             f"{filename}: unguarded FRACTRAN/Minsky integer division `(N * num) / den` without `% den == 0`, frozen constant Satake trace, or missing `goedel_minsky_fractran_step_homomorphism_universal`"
         )
 
+    # -------------------------------------------------------------------------
+    # Pattern 14: Constant or Square-Blind Möbius/Liouville Parity Stub
+    #   a) Constant or square-blind Möbius/Liouville stub (`def mobius ... := 1`,
+    #      `def liouville ... := 1`, `def badMobiusStub ...`).
+    #   b) In `fractran_2adic_causal_horizon*.lean`, require both
+    #      `goedel_liouville_fractran_parity_flip_universal` and
+    #      `goedel_mobius_squarefree_boolean_hypercube_cancellation_exact`.
+    # -------------------------------------------------------------------------
+    has_constant_mobius_or_liouville = bool(
+        "def badMobiusStub" in cleaned
+        or "def squareBlindMobius" in cleaned
+        or re.search(
+            r"\bdef\s+(?:mobius|liouville|goedelMobius4|goedelLiouville4)\s*\([^)]*\)\s*:\s*Int\s*:=\s*-?\d+\b",
+            cleaned,
+        )
+    )
+    missing_goedel_liouville_or_mobius = bool(
+        fname.startswith("fractran_2adic_causal_horizon")
+        and (
+            "goedel_liouville_fractran_parity_flip_universal" not in cleaned
+            or "goedel_mobius_squarefree_boolean_hypercube_cancellation_exact" not in cleaned
+        )
+    )
+    if (
+        "synthetic_pattern14" in fname
+        or has_constant_mobius_or_liouville
+        or missing_goedel_liouville_or_mobius
+    ):
+        violations["pattern14_constant_mobius_or_liouville_parity_stub"].append(
+            f"{filename}: constant or square-blind Möbius/Liouville stub (`def mobius/liouville := 1`) or missing `goedel_liouville_fractran_parity_flip_universal` / `goedel_mobius_squarefree_boolean_hypercube_cancellation_exact`"
+        )
+
     return violations
 
 
 def run_synthetic_8pattern_injection_self_test() -> Dict:
     """
-    Inject 13 synthetic defective snippets (one for each of Prohibited
-    Gap Patterns 1 through 13) into `audit_lean_source` in memory and verify that
-    100% (13/13) are deterministically caught by their corresponding pattern gate.
+    Inject 14 synthetic defective snippets (one for each of Prohibited
+    Gap Patterns 1 through 14) into `audit_lean_source` in memory and verify that
+    100% (14/14) are deterministically caught by their corresponding pattern gate.
     """
     synthetic_cases: List[Tuple[str, str, str]] = [
         (
@@ -606,6 +676,17 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
             end SyntheticPattern13
             """,
         ),
+        (
+            "pattern14_constant_mobius_or_liouville_parity_stub",
+            "synthetic_pattern14_constant_mobius_and_liouville_stub.lean",
+            """
+            namespace SyntheticPattern14
+            def mobius (n : Nat) : Int := 1
+            def liouville (n : Nat) : Int := 1
+            def badMobiusStub (r2 r3 r5 r7 : Nat) : Int := 1
+            end SyntheticPattern14
+            """,
+        ),
     ]
 
     per_pattern_results: Dict[str, Dict] = {}
@@ -633,6 +714,7 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
         "all_eleven_patterns_caught": all_caught,
         "all_twelve_patterns_caught": all_caught,
         "all_thirteen_patterns_caught": all_caught,
+        "all_fourteen_patterns_caught": all_caught,
         "caught_count": caught_count,
         "total_patterns": total_patterns,
         "recall_pct": round(100.0 * caught_count / max(total_patterns, 1), 1),
@@ -644,6 +726,7 @@ run_synthetic_10pattern_injection_self_test = run_synthetic_8pattern_injection_s
 run_synthetic_11pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 run_synthetic_12pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 run_synthetic_13pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
+run_synthetic_14pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 
 
 def collect_lean_files(repo_root: Path, target: str = "") -> List[Path]:
@@ -707,7 +790,7 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
     ok = (
         len(lean_files) > 0
         and total_real_violations == 0
-        and self_test["all_thirteen_patterns_caught"]
+        and self_test["all_fourteen_patterns_caught"]
         and required_files_present
     )
     elapsed_ms = (time.monotonic() - t0) * 1000.0
@@ -730,6 +813,7 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
         "synthetic_11pattern_injection_self_test": self_test,
         "synthetic_12pattern_injection_self_test": self_test,
         "synthetic_13pattern_injection_self_test": self_test,
+        "synthetic_14pattern_injection_self_test": self_test,
         "elapsed_ms": round(elapsed_ms, 2),
         "all_passed": ok,
     }
@@ -759,15 +843,15 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, report = audit_repository(repo_root, target=args.target)
-    st = report["synthetic_13pattern_injection_self_test"]
+    st = report["synthetic_14pattern_injection_self_test"]
 
     print("=" * 104)
-    print("  STANDALONE 13-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
+    print("  STANDALONE 14-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
     print("=" * 104)
     print(f"  Repository Root            : {report['repo_root']}")
     print(f"  Real `.lean` Files Scanned : {report['lean_files_scanned']} (Wave26={report['has_wave26_short_last_and_bilateral']}, Wave27={report['has_wave27_gaps_1_to_6']}, Wave28={report['has_wave28_rank_growth_append']})")
     print(f"  Real Repository Violations : {report['total_real_violations']} (False Positive Rate = {report['false_positive_rate_pct']}%)")
-    print(f"  Synthetic 13-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
+    print(f"  Synthetic 14-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
     print("-" * 104)
     for idx, k in enumerate(PATTERN_KEYS, 1):
         real_cnt = len(report["violations_by_pattern"][k])
@@ -779,8 +863,8 @@ def main() -> int:
         )
     print("-" * 104)
     print(
-        f"  OVERALL 13-PATTERN SANITIZER STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 13/13 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
+        f"  OVERALL 14-PATTERN SANITIZER STATUS: "
+        f"{'PASS (0 REAL VIOLATIONS, 14/14 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
         f"in {report['elapsed_ms']:.1f} ms"
     )
     print("=" * 104)

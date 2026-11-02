@@ -267,7 +267,9 @@ def main() -> None:
     base_env = os.environ.copy()
     base_env["TMPDIR"] = str(BUILD_CACHE)
     lean_env = base_env.copy()
-    lean_env["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
+    fix_so = Path("/home/antigravity/toolchains/fix_proc_exe.so")
+    if fix_so.exists():
+        lean_env["LD_PRELOAD"] = str(fix_so)
 
     try:
         s1 = run_suite_1_z3_xls(base_env)

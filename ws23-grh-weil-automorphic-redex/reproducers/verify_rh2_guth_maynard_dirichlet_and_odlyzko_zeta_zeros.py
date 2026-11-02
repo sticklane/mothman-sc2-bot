@@ -53,6 +53,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+if "/home/antigravity/toolchains/zig-venv/lib/python3.11/site-packages" not in sys.path:
+    sys.path.insert(0, "/home/antigravity/toolchains/zig-venv/lib/python3.11/site-packages")
+
 import numpy as np
 
 TMP_DIR = Path("/home/antigravity/toolchains/tmp")
@@ -851,6 +854,8 @@ def compile_and_benchmark_rh2_c_kernels() -> Dict:
     c_path.write_text(C_RH2_BENCH_SOURCE, encoding="utf-8")
 
     gcc_bin = shutil.which("gcc")
+    if not gcc_bin and Path("/home/antigravity/.local/bin/gcc").exists():
+        gcc_bin = "/home/antigravity/.local/bin/gcc"
     if gcc_bin:
         cc_cmd = [gcc_bin]
     else:
@@ -1047,6 +1052,47 @@ def compile_and_benchmark_rh2_c_kernels() -> Dict:
     }
 
 
+def verify_lean4_rh2_proofs() -> Dict:
+    import re
+    repo_root = Path(__file__).resolve().parents[1]
+    lean_file = repo_root / "proofs" / "rh2_guth_maynard_trace_and_chebyshev_zeta_proofs.lean"
+    lean_bin = "/home/antigravity/.local/bin/lean"
+    t0 = time.monotonic()
+    proc = subprocess.run([lean_bin, str(lean_file)], capture_output=True, text=True, check=False)
+    elapsed_ms = (time.monotonic() - t0) * 1000.0
+    src = lean_file.read_text(encoding="utf-8")
+    clean_src = re.sub(r"/-.*?-/", "", src, flags=re.S)
+    thm_blocks = re.findall(r"(theorem\s+\w+.*?)(?=\n(?:theorem|def|structure|end)\b|\Z)", clean_src, flags=re.S)
+    max_lines = 0
+    uninterpreted_hyps = 0
+    for blk in thm_blocks:
+        if ":= by" in blk:
+            sig, body = blk.split(":= by", 1)
+            uninterpreted_hyps += len(re.findall(r"\(\w+\s*:\s*[^)]*[<>≤≥][^)]*\)", sig))
+            body_lines = [ln for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("--")]
+            max_lines = max(max_lines, len(body_lines))
+    required_tokens = [
+        "def divisorSumAcc",
+        "def divisorSum",
+        "def sumDivisors",
+        "def isPrime",
+        "sumDivisors n == n + 1",
+        "def chi4",
+        "def chi4PrimeShellWeights",
+        "theorem chi4PrimeShellWeights_sumSq_le_length",
+        "theorem rh2_unbaked_guth_maynard_chi4_shell_reserve_nonneg",
+    ]
+    tokens_ok = all(tok in clean_src for tok in required_tokens)
+    return {
+        "return_code": proc.returncode,
+        "theorem_count": len(thm_blocks),
+        "max_proof_lines": max_lines,
+        "uninterpreted_hyps": uninterpreted_hyps,
+        "unbaked_tokens_present": tokens_ok,
+        "elapsed_ms": round(elapsed_ms, 1),
+    }
+
+
 def main() -> int:
     t0 = time.monotonic()
     print("=" * 100)
@@ -1110,11 +1156,23 @@ def main() -> int:
         f"({bench_res['cold_scalar_speedup']}x speedup)"
     )
 
+    lean_res = verify_lean4_rh2_proofs()
+    print(
+        f"\n[4] Lean 4.35.0 Formal Verification (`rh2_guth_maynard_trace_and_chebyshev_zeta_proofs.lean`):\n"
+        f"    - Return Code : {lean_res['return_code']}, Theorems : {lean_res['theorem_count']}, "
+        f"Max Proof Lines : {lean_res['max_proof_lines']} (<= 5), Uninterpreted Hyps : {lean_res['uninterpreted_hyps']} "
+        f"({lean_res['elapsed_ms']} ms)"
+    )
+
     assert zeros_res["verified_count"] == 100
     assert zeros_res["lehmer_pair_finger_tree_needle_guard_recall_pct"] == 100.0
     assert zeros_res["finger_tree_needle_guard_detects_g126_127_double_root"] is True
     assert bench_res["warm_avx2_speedup"] > 1.5
     assert bench_res["cold_avx2_speedup"] > 1.5
+    assert lean_res["return_code"] == 0
+    assert lean_res["max_proof_lines"] <= 5
+    assert lean_res["uninterpreted_hyps"] == 0
+    assert lean_res["unbaked_tokens_present"] is True
 
     elapsed_ms = (time.monotonic() - t0) * 1000.0
     print("=" * 100)

@@ -50,7 +50,7 @@ def run_suite_1_z3_xls() -> dict:
 def run_suite_2_bastounis_hansen_and_short_last_audit() -> dict:
     src = LEAN_FILE.read_text(encoding="utf-8")
     clean_src = re.sub(r"/-.*?-/", "", src, flags=re.S)
-    # Extract theorem blocks and verify max proof lines <= 6 and 0 uninterpreted inequality hypotheses
+    # Extract theorem blocks and verify max proof lines <= 5 and 0 uninterpreted inequality hypotheses
     thm_blocks = re.findall(r"(theorem\s+\w+.*?)(?=\n(?:theorem|def|end)\b|\Z)", clean_src, flags=re.S)
     max_lines = 0
     uninterpreted_hyps = 0
@@ -63,6 +63,19 @@ def run_suite_2_bastounis_hansen_and_short_last_audit() -> dict:
                 if ln.strip() and not ln.strip().startswith("--")
             ]
             max_lines = max(max_lines, len(body_lines))
+
+    required_tokens = [
+        "def divisorSumAcc",
+        "def divisorSum",
+        "def sumDivisors",
+        "def isPrime",
+        "sumDivisors n == n + 1",
+        "def chi4",
+        "def chi4PrimeShellWeights",
+        "theorem chi4PrimeShellWeights_sumSq_le_length",
+        "theorem wave26_unbaked_chi4_short_last_bilateral_reserve_nonneg",
+    ]
+    unbaked_tokens_present = all(tok in clean_src for tok in required_tokens)
 
     # Verify Beholder double-charging counterexample vs Short-Last single-reserve across 16 channels
     beholder_trap_verified = (5 - 2 * 2 == 1) and (5 * 1 - 4 * 2 - 4 * 2 + 4 + 4 == -3)
@@ -79,10 +92,11 @@ def run_suite_2_bastounis_hansen_and_short_last_audit() -> dict:
                 bilateral_sign_checks += 1
 
     return {
-        "status": "PASS" if (uninterpreted_hyps == 0 and max_lines <= 6 and beholder_trap_verified) else "FAIL",
+        "status": "PASS" if (uninterpreted_hyps == 0 and max_lines <= 5 and beholder_trap_verified and unbaked_tokens_present) else "FAIL",
         "theorem_count": len(thm_blocks),
         "max_proof_lines": max_lines,
         "uninterpreted_inequality_hypotheses": uninterpreted_hyps,
+        "unbaked_first_principles_tokens_present": unbaked_tokens_present,
         "beholder_double_charging_trap_verified": beholder_trap_verified,
         "bilateral_sign_invariance_checks": bilateral_sign_checks,
     }
@@ -189,7 +203,9 @@ int main(void) {
 def run_suite_4_lean() -> dict:
     t0 = time.perf_counter()
     lean_env = ENV.copy()
-    lean_env["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
+    fix_so = Path("/home/antigravity/toolchains/fix_proc_exe.so")
+    if fix_so.exists():
+        lean_env["LD_PRELOAD"] = str(fix_so)
     res = subprocess.run(
         ["/home/antigravity/.local/bin/lean", str(LEAN_FILE)],
         env=lean_env,

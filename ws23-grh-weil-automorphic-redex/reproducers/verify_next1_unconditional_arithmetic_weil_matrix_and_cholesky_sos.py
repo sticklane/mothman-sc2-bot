@@ -80,8 +80,28 @@ import sys
 import time
 from typing import Dict, List, Tuple
 
+if "/home/antigravity/toolchains/zig-venv/lib/python3.11/site-packages" not in sys.path:
+    sys.path.insert(0, "/home/antigravity/toolchains/zig-venv/lib/python3.11/site-packages")
+
 import numpy as np
-import scipy.special as sps
+try:
+    import scipy.special as sps
+except ImportError:
+    class _DigammaFallback:
+        @staticmethod
+        def digamma(z: np.ndarray) -> np.ndarray:
+            z_shift = z + 8.0
+            acc = np.zeros_like(z, dtype=np.complex128)
+            for k in range(8):
+                acc -= 1.0 / (z + float(k))
+            inv_z2 = 1.0 / (z_shift * z_shift)
+            return (
+                acc
+                + np.log(z_shift)
+                - 0.5 / z_shift
+                - inv_z2 * (1.0 / 12.0 - inv_z2 * (1.0 / 120.0 - inv_z2 / 252.0))
+            )
+    sps = _DigammaFallback()
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -343,6 +363,7 @@ def compile_next1_c_libraries() -> Tuple[ctypes.CDLL, ctypes.CDLL]:
     env["TMPDIR"] = str(TMP_DIR)
     gcc_bin = "gcc"
     for cand in (
+        "/home/antigravity/.local/bin/gcc",
         "/shared/user/toolchains/cargo/bin/gcc",
         "/home/antigravity/toolchains/cargo/bin/gcc",
         "/usr/bin/gcc",
@@ -356,7 +377,7 @@ def compile_next1_c_libraries() -> Tuple[ctypes.CDLL, ctypes.CDLL]:
         "-shared", "-fPIC", str(c_path), "-o", str(so_avx2), "-lm",
     ]
     cmd_scalar = [
-        gcc_bin, "-O3", "-mno-avx", "-mno-sse", "-mpopcnt",
+        gcc_bin, "-O3", "-fno-tree-vectorize", "-mno-avx", "-mno-avx2", "-mno-sse4.2", "-mpopcnt",
         "-shared", "-fPIC", str(c_path), "-o", str(so_scalar), "-lm",
     ]
     subprocess.run(cmd_avx2, check=True, env=env)
@@ -887,6 +908,7 @@ def run_suite3_c_avx2_vs_scalar_benchmarks(
 # =============================================================================
 
 def run_suite4_lean4_proof_verification() -> Dict:
+    import re
     lean_bin = "/home/antigravity/toolchains/lean4-bin/lean-4.35.0-linux/bin/lean"
     fix_so = "/home/antigravity/toolchains/fix_proc_exe.so"
     proof_file = REPO_ROOT / "proofs" / "next1_arithmetic_weil_ldl_sos_and_bombieri_lagarias_proofs.lean"
@@ -906,15 +928,41 @@ def run_suite4_lean4_proof_verification() -> Dict:
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
     src = proof_file.read_text(encoding="utf-8")
+    clean_src = re.sub(r"/-.*?-/", "", src, flags=re.S)
+    thm_blocks = re.findall(r"(theorem\s+\w+.*?)(?=\n(?:theorem|def|end)\b|\Z)", clean_src, flags=re.S)
+    max_lines = 0
+    uninterpreted_hyps = 0
+    for blk in thm_blocks:
+        if ":= by" in blk:
+            sig, body = blk.split(":= by", 1)
+            uninterpreted_hyps += len(re.findall(r"\(\w+\s*:\s*[^)]*[<>≤≥][^)]*\)", sig))
+            body_lines = [ln for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("--")]
+            max_lines = max(max_lines, len(body_lines))
+
     theorems = [
         "int_sq_nonneg_universal",
+        "chi4PrimeWeight_sq_le_one",
+        "chi4PrimeShellWeights_sumSq_le_length",
+        "paley_wiener_convolution_dominates_pnt_shell_growth",
         "int_sq_pos_of_ne_zero",
+        "posPivot_mul_sq_ge_sq",
         "ldl_sos_weighted_sum_nonneg_universal",
         "ldl_rank1_expansion_matches_weighted_squares_2x2",
         "concrete_4x4_arithmetic_weil_ldl_certificate_and_offline_rejection",
         "bombieri_lagarias_li_conformal_unit_circle_equivalence",
+        "next1_unbaked_bombieri_lagarias_chi4_shell_reserve_nonneg",
     ]
     present = [t for t in theorems if f"theorem {t}" in src]
+    required_defs = [
+        "def divisorSumAcc",
+        "def divisorSum",
+        "def sumDivisors",
+        "def isPrime",
+        "sumDivisors n == n + 1",
+        "def chi4",
+        "def chi4PrimeShellWeights",
+    ]
+    defs_present = all(d in clean_src for d in required_defs)
 
     return {
         "proof_file": str(proof_file.relative_to(REPO_ROOT)),
@@ -923,6 +971,9 @@ def run_suite4_lean4_proof_verification() -> Dict:
         "stderr": proc.stderr.strip(),
         "theorems_verified": len(present),
         "theorem_names": present,
+        "max_proof_lines": max_lines,
+        "uninterpreted_hyps": uninterpreted_hyps,
+        "unbaked_defs_present": defs_present,
         "elapsed_ms": round(elapsed_ms, 2),
     }
 
@@ -988,10 +1039,10 @@ def main() -> int:
 
     # Suite 4: Lean 4.35.0 Formal Machine-Checked Proof Verification
     s4 = run_suite4_lean4_proof_verification()
-    print("\n[Suite 4] Lean 4.35.0 Formal Proof Verification (`0 sorry`, `0 axiom`, `< 30 lines/theorem`):")
+    print("\n[Suite 4] Lean 4.35.0 Formal Proof Verification (`0 sorry`, `0 axiom`, `<= 5 lines/theorem`, `0` hyps):")
     print(
         f"  * File: {s4['proof_file']} -> return_code={s4['return_code']}, "
-        f"theorems_verified={s4['theorems_verified']}/6 in {s4['elapsed_ms']:.1f} ms"
+        f"theorems_verified={s4['theorems_verified']}/11, max_lines={s4['max_proof_lines']}, hyps={s4['uninterpreted_hyps']} in {s4['elapsed_ms']:.1f} ms"
     )
 
     all_passed = (
@@ -1007,7 +1058,10 @@ def main() -> int:
         and s2["sos_random_vector_identities_100"] == 100
         and s3["ldlt_certified_avx2"] == s3["ldlt_batch_size"]
         and s4["return_code"] == 0
-        and s4["theorems_verified"] == 6
+        and s4["theorems_verified"] == 11
+        and s4["max_proof_lines"] <= 5
+        and s4["uninterpreted_hyps"] == 0
+        and s4["unbaked_defs_present"]
     )
 
     print("\n" + "=" * 100)

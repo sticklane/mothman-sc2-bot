@@ -615,6 +615,7 @@ def compile_cohomology1_c_libraries() -> Tuple[ctypes.CDLL, ctypes.CDLL]:
     env["TMPDIR"] = str(TMP_DIR)
     gcc_bin = "gcc"
     for cand in (
+        "/home/antigravity/.local/bin/gcc",
         "/shared/user/toolchains/cargo/bin/gcc",
         "/home/antigravity/toolchains/cargo/bin/gcc",
         "/usr/bin/gcc",
@@ -633,7 +634,7 @@ def compile_cohomology1_c_libraries() -> Tuple[ctypes.CDLL, ctypes.CDLL]:
     )
     subprocess.run(
         [
-            gcc_bin, "-O3", "-mno-avx", "-mno-sse", "-mpopcnt",
+            gcc_bin, "-O3", "-mno-avx", "-mno-avx2", "-mpopcnt",
             "-shared", "-fPIC", str(c_path), "-lm", "-o", str(so_scalar),
         ],
         check=True,
@@ -1302,8 +1303,68 @@ def run_experiment_3_hardware_benchmark_1e9(
 # =============================================================================
 
 def run_experiment_4_lean_proof_verification() -> Dict:
-    lean_bin = Path("/home/antigravity/toolchains/lean4-custom/build/release/stage1/bin/lean")
-    proof_file = REPO_ROOT / "proofs" / "paley_wiener_h1_prim_and_resolvent_sos_proofs.lean"
+    lean_candidates = [
+        Path("/home/antigravity/toolchains/elan/toolchains/leanprover--lean4---v4.35.0/bin/lean"),
+        Path("/home/antigravity/.elan/bin/lean"),
+        Path("/home/antigravity/toolchains/lean4-custom/build/release/stage1/bin/lean"),
+    ]
+    lean_bin = next((p for p in lean_candidates if p.exists()), lean_candidates[0])
+    proof_file = REPO_ROOT / "proofs" / "cohomology1_paley_wiener_h1_prim_and_resolvent_sos_proofs.lean"
+    src = proof_file.read_text(encoding="utf-8")
+
+    required_defs = [
+        "divisorSumAcc",
+        "divisorSum",
+        "sumDivisors",
+        "isPrime",
+        "chi4",
+        "chi4PrimeShellWeights",
+        "sumSqList",
+        "shortLastSchurList",
+    ]
+    for d in required_defs:
+        assert f"def {d}" in src, f"Missing required first-principles definition: {d}"
+
+    expected_theorems = [
+        "int_sq_nonneg",
+        "chi4PrimeWeight_sq_le_one",
+        "chi4PrimeShellWeights_sumSq_le_length",
+        "paley_wiener_convolution_dominates_pnt_shell_growth",
+        "cohomology1_unbaked_chi4_prime_shell_schur_reserve_nonneg",
+        "resolvent_coord_identity",
+        "paley_wiener_single_tail_vanishes",
+        "paley_wiener_compact_support_zero_prime_tail",
+        "dual_pole_h1_prim_castelnuovo_severi_annihilation",
+        "resolvent_bilinear_matrix_symm_2x2",
+        "second_order_resolvent_large_sieve_sos_identity_2x2",
+        "second_order_resolvent_large_sieve_sos_identity_3x3",
+        "certified_h1_prim_resolvent_sos_x1e9_k64",
+    ]
+    for thm in expected_theorems:
+        assert f"theorem {thm}" in src, f"Missing expected theorem: {thm}"
+
+    import re
+    clean_src = re.sub(r"/-.*?-/", "", src, flags=re.DOTALL)
+    clean_src = "\n".join(line.split("--")[0] for line in clean_src.splitlines())
+    thm_matches = list(re.finditer(r"\b(?:theorem|lemma)\s+([A-Za-z0-9_']+)", clean_src))
+    max_proof_lines = 0
+    ineq_hyp_count = 0
+    for idx, m in enumerate(thm_matches):
+        start = m.start()
+        end = thm_matches[idx + 1].start() if idx + 1 < len(thm_matches) else len(clean_src)
+        block = clean_src[start:end]
+        if ":=" in block:
+            header, body = block.split(":=", 1)
+            for binder in re.findall(r"\(([^()]*?:[^()]*)\)", header):
+                if any(op in binder for op in ("<", "≤", ">", "≥", "<=", ">=")):
+                    ineq_hyp_count += 1
+            body = re.sub(r"^\s*by\b", "", body)
+            chunk = re.split(r"\n(?:def |abbrev |structure |inductive |theorem |lemma |end )", body)[0]
+            body_lines = [ln for ln in chunk.splitlines() if ln.strip()]
+            max_proof_lines = max(max_proof_lines, len(body_lines))
+            assert len(body_lines) <= 5, f"Theorem {m.group(1)} exceeds 5 lines ({len(body_lines)} lines)"
+    assert ineq_hyp_count == 0, f"Found {ineq_hyp_count} uninterpreted inequality hypotheses"
+
     env = os.environ.copy()
     env["TMPDIR"] = str(TMP_DIR)
 
@@ -1321,19 +1382,10 @@ def run_experiment_4_lean_proof_verification() -> Dict:
     return {
         "proof_file": str(proof_file.relative_to(REPO_ROOT)),
         "lean_toolchain": "Lean 4.35.0",
-        "theorems_verified": [
-            "int_sq_nonneg",
-            "resolvent_coord_identity",
-            "paley_wiener_single_tail_vanishes",
-            "paley_wiener_compact_support_zero_prime_tail",
-            "dual_pole_h1_prim_castelnuovo_severi_annihilation",
-            "resolvent_bilinear_matrix_symm_2x2",
-            "second_order_resolvent_large_sieve_sos_identity_2x2",
-            "second_order_resolvent_large_sieve_sos_identity_3x3",
-            "certified_h1_prim_resolvent_sos_x1e9_k64",
-        ],
-        "total_theorems": 9,
-        "max_proof_lines": 14,
+        "theorems_verified": expected_theorems,
+        "total_theorems": len(expected_theorems),
+        "max_proof_lines": max_proof_lines,
+        "inequality_hypotheses": ineq_hyp_count,
         "sorry_count": 0,
         "axiom_count": 0,
         "verification_ms": round(elapsed_ms, 2),
@@ -1397,7 +1449,7 @@ def main() -> int:
     )
     print(
         f"  [7] Lean 4.35.0 Formal Proof Suite    : {exp4['total_theorems']}/{exp4['total_theorems']} theorems "
-        f"(max {exp4['max_proof_lines']} lines, 0 sorry, 0 axiom) verified in {exp4['verification_ms']:.1f} ms"
+        f"(max {exp4['max_proof_lines']} lines <= 5, 0 ineq hyps, 0 sorry, 0 axiom) verified in {exp4['verification_ms']:.1f} ms"
     )
     print("-" * 112)
     print(f"  OVERALL STATUS: COHOMOLOGY-1 WAVE 8 VERIFIED (0 DISCREPANCIES) in {total_ms:.1f} ms")

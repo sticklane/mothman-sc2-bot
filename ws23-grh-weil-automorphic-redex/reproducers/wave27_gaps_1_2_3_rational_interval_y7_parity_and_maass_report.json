@@ -5,12 +5,12 @@
     "status": "PASS",
     "return_code": 0,
     "gates_verified_unsat": 3,
-    "elapsed_ms": 5126.47
+    "elapsed_ms": 40.97
   },
   "suite_2_all_six_gaps_rational_audit": {
     "status": "PASS",
-    "theorem_count": 9,
-    "max_proof_lines": 6,
+    "theorem_count": 13,
+    "max_proof_lines": 5,
     "uninterpreted_inequality_hypotheses": 0,
     "parameterless_scalar_int_defs": 0,
     "inline_magic_number_hits": 0,
@@ -21,7 +21,7 @@
     "violations": 0,
     "mutants_caught": 1000000,
     "total": 1000000,
-    "avx2_ms": 1.6,
+    "avx2_ms": 2.822,
     "status": "PASS"
   },
   "suite_4_lean4": {
@@ -29,6 +29,6 @@
     "return_code": 0,
     "sorry_count": 0,
     "axiom_count": 0,
-    "elapsed_s": 0.498
+    "elapsed_s": 0.571
   }
 }

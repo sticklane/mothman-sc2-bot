@@ -237,10 +237,40 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
     # Pillar 8: Lagarias-Robin Diophantine Halting Search & chi4PrimeShellWeights
     assert robin_counterexample_search(120) is None
 
+    # Pillar 9: Goedel Prime-Register L^1/L^inf Norm <-> Liouville lambda(N), Mobius mu(N) & Mertens Cancellation
+    def goedel_big_omega4(r2: int, r3: int, r5: int, r7: int) -> int:
+        return r2 + r3 + r5 + r7
+
+    def goedel_liouville4(r2: int, r3: int, r5: int, r7: int) -> int:
+        return 1 if (goedel_big_omega4(r2, r3, r5, r7) % 2) == 0 else -1
+
+    def goedel_is_squarefree4(r2: int, r3: int, r5: int, r7: int) -> bool:
+        return (r2 <= 1) and (r3 <= 1) and (r5 <= 1) and (r7 <= 1)
+
+    def goedel_mobius4(r2: int, r3: int, r5: int, r7: int) -> int:
+        return goedel_liouville4(r2, r3, r5, r7) if goedel_is_squarefree4(r2, r3, r5, r7) else 0
+
+    for r2 in range(3):
+        for r3 in range(3):
+            for r5 in range(3):
+                for r7 in range(3):
+                    assert goedel_liouville4(r2, r3 + 2, r5, r7 + 1) == -goedel_liouville4(r2 + 1, r3, r5 + 1, r7)
+                    assert goedel_liouville4(r2, r3, r5, r7) ** 2 == 1
+                    assert goedel_mobius4(r2 + 2, r3, r5, r7) == 0
+    hypercube_mobius_sum = sum(
+        goedel_mobius4(b2, b3, b5, b7)
+        for b2 in (0, 1)
+        for b3 in (0, 1)
+        for b5 in (0, 1)
+        for b7 in (0, 1)
+    )
+    assert hypercube_mobius_sum == 0
+    assert goedel_liouville4(2, 0, 0, 0) == 1 and goedel_mobius4(2, 0, 0, 0) == 0
+
     cap_8_5 = okasaki_pebble_capacity(8, 5)
     assert cap_8_5 == 1287 and cap_8_5 >= 741 >= 710
 
-    has_pillars_5_to_8 = (
+    has_pillars_5_to_9 = (
         "def conwayPrimeGameProg" in code_no_comments
         and "theorem conway_primegame_first_primes_2_3_5_7_trajectory_exact"
         in code_no_comments
@@ -259,6 +289,13 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         and "def robinCounterexampleSearch" in code_no_comments
         and "theorem lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120"
         in code_no_comments
+        and "def goedelBigOmega4" in code_no_comments
+        and "def goedelLiouville4" in code_no_comments
+        and "def goedelIsSquarefree4" in code_no_comments
+        and "def goedelMobius4" in code_no_comments
+        and "theorem goedel_liouville_fractran_parity_flip_universal" in code_no_comments
+        and "theorem goedel_mobius_squarefree_boolean_hypercube_cancellation_exact"
+        in code_no_comments
         and "theorem fractran_2adic_causal_horizon_master_closure" in code_no_comments
     )
 
@@ -273,7 +310,7 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         and uninterpreted_ineq_hyps == 0
         and max_proof_lines <= 5
         and len(thm_blocks) >= 12
-        and has_pillars_5_to_8
+        and has_pillars_5_to_9
     )
     return {
         "status": "PASS" if passed else "FAIL",
@@ -290,6 +327,7 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         "conway_primegame_cumulative_steps": [19, 69, 281, 710],
         "lagarias_robin_superabundant_ladder": dict(sa_ladder),
         "goedel_minsky_homomorphism_verified": True,
+        "goedel_liouville_mobius_boolean_hypercube_cancellation": hypercube_mobius_sum,
         "robin_counterexample_search_120": None,
         "okasaki_pebble_capacity_8_5": cap_8_5,
         "elapsed_s": round(elapsed_s, 3),
