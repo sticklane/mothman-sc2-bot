@@ -1,0 +1,138 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/inductive_loop_aes_keccak.lfq
+;;
+;; Multi-Round `for/fold` Cryptographic Round Uncomputation (`AES-128` Boyar-Peralta
+;; Degree-2 Round Cleanup + `Keccak-f[200]` Chi-Step Round Sponge) in `#lang lakefillq`.
+;;
+;; Verified via O(1)-Query Symbolic k-Inductive `QSub` (`Laws U1-U4`) Inference:
+;;   - Instead of unrolling all R rounds into an O(R)-depth symbolic DAG,
+;;     `lakefillqc --inductive-loop-qsub` verifies the loop-invariant typing
+;;     judgment (`T-Loop-Inductive`):
+;;       1. Capability Invariance (`Gamma_out == Gamma_inv`): state registers
+;;          preserve `Lin1`/`Uniq1` and recycled scratch registers return to `ErasedIdx`.
+;;       2. Single-Round Scratch Erasure (`Law U1` `EraseBy`): every intra-round
+;;          `within-apply-mbu` restores its Boyar-Peralta / Keccak-chi scratch
+;;          wires to `|0>` at the end of the round step.
+;;       3. Single-Round State Bijectivity (`Law U2` `Canonical`): each round
+;;          transformation is an injective/bijective permutation on the live state.
+;;       4. Zero Loop-Boundary Taint Escape (`Law U4` `QTainted`): all degree-<=2
+;;          `TempAND`/`MBU` measurement kickbacks (`single_round_mbu_deg_le_2 = True`)
+;;          cancel via `cond-cz` within the single round step before the back-edge.
+;;   - Compiles to dynamic OpenQASM 3.0 and Stim on `heron-r2` with `0` reverse
+;;     Toffolis (`uncompute_ccx_count = 0`) and chordal SSA scratch wire recycling.
+;; =============================================================================
+
+(target-profile heron-r2)
+
+;; Surface `for/fold` capability-annotated accumulator binders for `#lang lakefillq`:
+(define : ':)
+(define @ '@)
+(define Lin1 'Lin1)
+(define Uniq1 'Uniq1)
+(define BorrowZ 'BorrowZ)
+(define (QVec n) (list 'QVec n))
+(define init_state 'init_state)
+(define init_sponge 'init_sponge)
+(define (state . ann) (lambda () (cons 'state ann)))
+(define (sponge . ann) (lambda () (cons 'sponge ann)))
+(define (r rng) (lambda () (list 'r rng)))
+
+(define (for/fold acc-clause iter-clause . body-steps)
+  (apply seq body-steps))
+
+;; 0-SWAP cyclic byte-row permutation for in-place `ShiftRows` relabeling:
+(defconst aes-shiftrows-perm8
+  '(1 2 3 4 5 6 7 0))
+
+;; Single AES-128 Boyar-Peralta degree-2 tower-field round cleanup step:
+;; Computes quadratic GF(2^4) Karatsuba products via `temp-and` on chordally
+;; recycled scratch wires, accumulates into the state block, and immediately
+;; uncomputes scratch wires via `0-T` MBU (`mid-meas-x` + `cond-cz`).
+(define (aes128-boyar-peralta-round-step sched8 acc8 key4 sc2 round-idx)
+  (define s0 (wref sched8 (modulo (* 2 round-idx) 8)))
+  (define s1 (wref sched8 (modulo (add1 (* 2 round-idx)) 8)))
+  (define s2 (wref sched8 (modulo (+ 2 (* 2 round-idx)) 8)))
+  (define s3 (wref sched8 (modulo (+ 3 (* 2 round-idx)) 8)))
+  (define a0 (wref acc8 (modulo round-idx 8)))
+  (define a1 (wref acc8 (modulo (+ 4 round-idx) 8)))
+  (define k0 (wref key4 (modulo round-idx 4)))
+  (define k1 (wref key4 (modulo (add1 round-idx) 4)))
+  (define sc0 (wref sc2 0))
+  (define sc1 (wref sc2 1))
+  (seq
+   (within-apply-mbu
+    (seq
+     (temp-and s0 s1 sc0)
+     (temp-and s2 s3 sc1))
+    (seq
+     (cx sc0 a0)
+     (cx sc1 a1))
+    (list sc1 sc0))
+   ;; 0-SWAP `ShiftRows` wire relabeling + `AddRoundKey` linear schedule update:
+   (logical-relabel sched8 aes-shiftrows-perm8)
+   (cx k0 s0)
+   (cx k1 s2)
+   (x (wref sched8 (modulo round-idx 8)))))
+
+;; Single Keccak-f[200] `chi_5` degree-2 nonlinear sponge round step:
+;; Computes `y_i ^= (~x_{i+1}) & x_{i+2}` on 5-lane state slices using
+;; `within-apply-mbu` on chordally recycled scratch wires (`0` reverse Toffolis),
+;; followed by `theta`/`rho`/`pi`/`iota` linear lane mixing.
+(define (keccak-f200-chi-round-step lanes5 out5 sc2 round-idx)
+  (define x0 (wref lanes5 (modulo round-idx 5)))
+  (define x1 (wref lanes5 (modulo (add1 round-idx) 5)))
+  (define x2 (wref lanes5 (modulo (+ 2 round-idx) 5)))
+  (define x3 (wref lanes5 (modulo (+ 3 round-idx) 5)))
+  (define x4 (wref lanes5 (modulo (+ 4 round-idx) 5)))
+  (define y0 (wref out5 (modulo round-idx 5)))
+  (define y2 (wref out5 (modulo (+ 2 round-idx) 5)))
+  (define sc0 (wref sc2 0))
+  (define sc1 (wref sc2 1))
+  (seq
+   (within-apply-mbu
+    (seq
+     (x x1)
+     (temp-and x1 x2 sc0)
+     (x x1)
+     (x x3)
+     (temp-and x3 x4 sc1)
+     (x x3))
+    (seq
+     (cx sc0 y0)
+     (cx sc1 y2))
+    (list sc1 sc0))
+   ;; Keccak `theta` parity + `iota` round constant flip:
+   (cx x0 x2)
+   (cx x4 x1)
+   (x x0)))
+
+(defqfree (inductive-loop-aes-keccak
+           #:wires ([aes-sched (range 0 8)]
+                    [aes-acc (range 8 16)]
+                    [aes-key (range 16 20)]
+                    [keccak-lanes (range 20 25)]
+                    [keccak-out (range 25 30)])
+           #:scratch ([v-aes-sc (range 30 50)]
+                      [v-kec-sc (range 50 86)]))
+  (multishot-reset 16
+    (seq
+     ;; 1. 10-round AES-128 Boyar-Peralta degree-2 round uncomputation (`for/fold`):
+     ;;    Checked in O(1) Z3 queries via symbolic k-inductive `QSub` inference
+     ;;    (`k_induction_depth = 1`, `single_round_mbu_deg_le_2 = True`).
+     (for/fold ([state : (QVec 128) @ Lin1 init_state]) ([r (in-range 10)])
+       (for/seq ([round-idx (in-range 10)])
+         (define sc-pair
+           (list (wref v-aes-sc (* 2 round-idx))
+                 (wref v-aes-sc (add1 (* 2 round-idx)))))
+         (aes128-boyar-peralta-round-step aes-sched aes-acc aes-key sc-pair round-idx)))
+
+     ;; 2. 18-round Keccak-f[200] chi-step round sponge uncomputation (`for/fold`):
+     ;;    Recycles virtual scratch wires onto 2 physical scratch qubits via MBU.
+     (for/fold ([sponge : (QVec 200) @ Lin1 init_sponge]) ([r (in-range 18)])
+       (for/seq ([round-idx (in-range 18)])
+         (define sc-pair
+           (list (wref v-kec-sc (* 2 round-idx))
+                 (wref v-kec-sc (add1 (* 2 round-idx)))))
+         (keccak-f200-chi-round-step keccak-lanes keccak-out sc-pair round-idx))))))

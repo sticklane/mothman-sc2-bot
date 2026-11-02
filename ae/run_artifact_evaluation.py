@@ -860,6 +860,12 @@ def _combined_repo_and_ae_lint(tc: ToolchainPaths, env: Dict[str, str]) -> Tuple
 
 
 def run_examples_target() -> int:
+    from concurrent.futures import ThreadPoolExecutor
+
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from compiler.lakefillqc.codegen import compile_and_emit
+
     tc = discover_toolchains()
     env = build_clean_env(tc)
     local_tmp = REPO_ROOT / ".lakefillq_tmp"
@@ -879,50 +885,58 @@ def run_examples_target() -> int:
 
         lfq_files = sorted((REPO_ROOT / "examples").glob("*.lfq"))
         print("=" * 104)
-        print(f"  Compiling {len(lfq_files)} #lang lakefillq (.lfq) Modules via compiler/lakefillqc.rkt")
+        print(f"  Compiling {len(lfq_files)} #lang lakefillq (.lfq) Modules via compiler/lakefillqc")
         print("=" * 104)
-        passed = 0
-        for fpath in lfq_files:
+
+        def _compile_one(fpath: Path) -> Tuple[Path, float, Dict[str, Any], str, str]:
             qasm_out = work / f"{fpath.stem}.qasm"
             stim_out = work / f"{fpath.stem}.stim"
             s0 = time.perf_counter()
-            proc = run_subproc(
-                [
-                    tc.racket,
-                    str(REPO_ROOT / "compiler" / "lakefillqc.rkt"),
-                    "--input",
-                    str(fpath),
-                    "--emit-json",
-                    "--emit-qasm3",
-                    str(qasm_out),
-                    "--emit-stim",
-                    str(stim_out),
-                ],
-                env,
+            rep, qasm_txt, stim_txt = compile_and_emit(
+                input_path=fpath,
+                inductive_loop_qsub=True,
+                emit_qasm3_path=qasm_out,
+                emit_stim_path=stim_out,
             )
-            dt = time.perf_counter() - s0
-            if proc.returncode != 0:
-                print(f"  [FAIL] {fpath.name:<30} ({dt:5.2f}s) compiler exited {proc.returncode}")
-                print(proc.stdout + proc.stderr, file=sys.stderr)
-                continue
-            rep = json.loads(proc.stdout.strip())
-            qasm_txt = qasm_out.read_text(encoding="utf-8") if qasm_out.exists() else ""
-            stim_txt = stim_out.read_text(encoding="utf-8") if stim_out.exists() else ""
-            ok = (
-                rep.get("well_typed") is True
-                and rep.get("residual_surface_forms") == 0
-                and qasm_txt.startswith("OPENQASM 3.0;")
-                and len(stim_txt.strip()) > 0
-            )
-            if ok:
-                passed += 1
-                print(
-                    f"  [PASS] {fpath.name:<30} ({dt:5.2f}s) target={rep['target_profile']:<14} "
-                    f"phys_q={rep['physical_qubits']:<3} temp_and={rep['forward_temp_and_count']:<3} "
-                    f"mbu={rep['mbu_erasure_count']:<3} isa_ops={rep['machine_isa_ops']}"
+            return fpath, time.perf_counter() - s0, rep, qasm_txt, stim_txt
+
+        passed = 0
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for fpath, dt, rep, qasm_txt, stim_txt in pool.map(_compile_one, lfq_files):
+                if rep.get("compiler_returncode", 0) != 0:
+                    print(
+                        f"  [FAIL] {fpath.name:<34} ({dt:5.2f}s) compiler exited {rep.get('compiler_returncode')}"
+                    )
+                    if rep.get("diagnostics_stderr"):
+                        print(rep["diagnostics_stderr"], file=sys.stderr)
+                    continue
+                ok = (
+                    rep.get("well_typed") is True
+                    and rep.get("residual_surface_forms") == 0
+                    and qasm_txt.startswith("OPENQASM 3.0;")
+                    and len(stim_txt.strip()) > 0
                 )
-            else:
-                print(f"  [FAIL] {fpath.name:<30} ({dt:5.2f}s) failed output contract")
+                if ok:
+                    passed += 1
+                    extra = ""
+                    if "inductive_loop_qsub" in rep:
+                        extra = (
+                            f"  [k={rep['k_induction_depth']} z3={rep['z3_queries']} "
+                            f"{rep['round_invariant_status']}]"
+                        )
+                    elif "ag_dqi_curve_summary" in rep:
+                        ag = rep["ag_dqi_curve_summary"]
+                        extra = (
+                            f"  [{ag['code_parameters']} g={ag['genus_g']} N={ag['rational_points_N']} "
+                            f"{ag['uncompressed_unitary_peak_qubits']}Q->{ag['early_mbu_peak_qubits']}Q]"
+                        )
+                    print(
+                        f"  [PASS] {fpath.name:<34} ({dt:5.2f}s) target={rep['target_profile']:<14} "
+                        f"phys_q={rep['physical_qubits']:<3} temp_and={rep['forward_temp_and_count']:<3} "
+                        f"mbu={rep['mbu_erasure_count']:<3} isa_ops={rep['machine_isa_ops']}{extra}"
+                    )
+                else:
+                    print(f"  [FAIL] {fpath.name:<34} ({dt:5.2f}s) failed output contract")
         print("-" * 104)
         print(
             f"  Examples Result: {passed}/{len(lfq_files)} modules verified "
