@@ -11,7 +11,8 @@
          "../compiler/diagnostics.rkt"
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
-         "../examples/boba_is_you.bnes")
+         "../examples/boba_is_you.bnes"
+         "../examples/boba_200_levels_cartridge.bnes")
 
 (define total-checks 0)
 
@@ -451,5 +452,132 @@
   (check-true (< (hash-ref spr0 'y) #xF0))
   (check-equal? (nes-vram-ref emu #x2022) 4))
 
-(printf "\nAll #lang boba-nes graded typechecker, repair, and 5-stage 6502 ROM gameplay tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 5. Multi-Bank Cartridges (UNROM / MMC1 / MMC3), WRAM, CHR-RAM & Turn Coroutines
+;; ============================================================================
+(test-case "Detects and repairs UNROM bus conflicts, MMC1 serial reentrancy, WRAM hazards, and 231-level overflows"
+  (check-equal? (nes-budget-prg-rom-bytes-max NTSC-UNROM-128-BUDGET) 131072)
+  (check-equal? (nes-budget-prg-rom-bytes-max NTSC-MMC1-SXROM-BUDGET) 262144)
+  (check-equal? (nes-budget-ram-bytes-max NTSC-MMC1-SXROM-BUDGET) (+ 1280 8192))
+  (check-equal? (nes-budget-prg-rom-bytes-max NTSC-MMC3-TXROM-BUDGET) 524288)
+
+  ;; Module with UNROM bus conflict, unmapped WRAM access on UNROM, single-bank overflow,
+  ;; active-frame lag (> 29780 cyc), and > 512 CHR tiles in CHR-ROM mode:
+  (define broken-unrom-mod
+    (hasheq
+     'name 'broken-unrom-231
+     'mapper 'UNROM
+     'fixed-prg-bank 7
+     'initial-prg-bank 0
+     'bank-calls
+     (list (hasheq 'target 'unpack_lvl 'caller-bank 7 'target-bank 2
+                   'trampoline? #t 'bus-conflict-table? #f))
+     'wram-bytes 4096          ; Hazard: UNROM has no $6000-$7FFF WRAM by default!
+     'wram-enabled? #f
+     'vblank-cycles 1400
+     'active-cycles 44000      ; Hazard: exceeds 29,780-cycle single-frame budget!
+     'turn-slices 1
+     'ram-bytes 768
+     'prg-rom-bytes 53248
+     'prg-banks (list (hasheq 'bank 0 'bytes 18500 'limit 16384)) ; Single-bank > 16 KB!
+     'chr-mode 'chr-rom
+     'chr-tiles 580            ; Hazard: > 512 tiles in fixed 8 KB CHR-ROM!
+     'active-chr-tiles 580))
+
+  (define bad-unrom-res (typecheck-nes-module broken-unrom-mod NTSC-UNROM-128-BUDGET))
+  (check-false (nes-type-result-well-typed? bad-unrom-res))
+  (define unrom-cats (map nes-violation-category (nes-type-result-violations bad-unrom-res)))
+  (check-not-false (memq 'unrom-bus-conflict-hazard unrom-cats))
+  (check-not-false (memq 'unmapped-wram-access unrom-cats))
+  (check-not-false (memq 'active-frame-cycle-lag unrom-cats))
+  (check-not-false (memq 'prg-single-bank-overflow unrom-cats))
+  (check-not-false (memq 'chr-rom-tile-overflow unrom-cats))
+
+  ;; Also verify MMC1 serial shift register reentrancy hazard detection:
+  (define broken-mmc1-mod
+    (hasheq
+     'name 'broken-mmc1
+     'mapper 'MMC1
+     'fixed-prg-bank 15
+     'mmc1-atomic-guard? #f
+     'wram-bytes 4096
+     'wram-enabled? #f
+     'bank-calls (list (hasheq 'target 'unpack_lvl 'caller-bank 15 'target-bank 1 'trampoline? #t))))
+  (define bad-mmc1-res (typecheck-nes-module broken-mmc1-mod NTSC-MMC1-SXROM-BUDGET))
+  (define mmc1-cats (map nes-violation-category (nes-type-result-violations bad-mmc1-res)))
+  (check-not-false (memq 'mmc1-serial-reentrancy-hazard mmc1-cats))
+  (check-not-false (memq 'wram-chip-select-disabled mmc1-cats))
+
+  ;; Run automated repair on broken-unrom-mod under MMC1 SXROM budget (which supports 8 KB WRAM):
+  (define-values (repaired-cartridge-mod cart-repairs repaired-cart-res)
+    (repair-nes-module broken-unrom-mod NTSC-MMC1-SXROM-BUDGET))
+  (check-true (nes-type-result-well-typed? repaired-cart-res))
+  (check-equal? (hash-ref repaired-cartridge-mod 'chr-mode) 'chr-ram)
+  (check-true (> (hash-ref repaired-cartridge-mod 'turn-slices) 1)))
+
+;; ============================================================================
+;; 6. Static 6502 Instruction-Level WCET Cycle Analyzer
+;; ============================================================================
+(test-case "Static 6502 WCET analyzer computes exact loop bounds and OAMDMA stall cycles"
+  (define wcet-prog
+    `((label test_loop)
+      (LDX #:imm 16)                ; 2 cyc
+      (loop-bound 16                ; 16 iterations of (4 + 2 + 3 = 9 cyc) = 144 cyc
+        (LDA #:absx #x8000)         ; 4 cyc
+        (DEX)                       ; 2 cyc
+        (BNE test_loop))            ; 3 cyc (taken branch WCET)
+      (LDA #:imm #x02)              ; 2 cyc
+      (STA #:abs #x4014)            ; 4 + 514 OAMDMA stall = 518 cyc
+      (RTS)))                       ; 6 cyc
+  (define report (analyze-6502-wcet wcet-prog #:origin #xC000))
+  (check-equal? (hash-ref report 'wcet-cycles) (+ 2 144 2 518 6))
+  (check-equal? (hash-ref report 'page-crossings) 0))
+
+;; ============================================================================
+;; 7. 231-Level Banked Cartridge 6502 Execution: Far-Calls, WRAM & Dynamic CHR-RAM
+;; ============================================================================
+(test-case "231-Level Banked ROM executes cross-bank far-calls, $6000-$7FFF WRAM, and dynamic CHR-RAM synthesis"
+  (check-true (nes-type-result-well-typed? res-231))
+  ;; 16-byte iNES header + 2 switchable 16KB banks + 1 fixed 16KB bank = 49,168 bytes
+  (check-equal? (bytes-length banked-rom-bytes) (+ 16 (* 3 16384)))
+  ;; Byte 5 == 0 signals 8 KB writable CHR-RAM on the cartridge
+  (check-equal? (bytes-ref banked-rom-bytes 5) 0)
+
+  (define banked-emu (make-nes-emulator-from-rom banked-rom-bytes))
+  (define fixed-labels (asm-result-labels fixed-engine-asm))
+  (define reset-addr (hash-ref fixed-labels 'reset_handler))
+
+  ;; Execute reset_handler in Fixed Bank ($C000-$FFFF):
+  ;;   1. Synthesizes "KEKE" (tiles $16-$17 -> CHR-RAM $0160-$017F) and
+  ;;      "MELT" (tiles $26-$27 -> CHR-RAM $0260-$027F) into writable CHR-RAM via $2006/$2007
+  ;;   2. Far-calls Switchable Bank 0 ($8000: bank0_unpack_world1) -> writes $6000, $6300, $6301
+  ;;   3. Far-calls Switchable Bank 1 ($8000: bank1_unpack_meta_world) -> writes $6001, $6F00, $7F17
+  ;;   4. Restores caller PRG bank (0) before RTS
+  (nes-run-until-rts! banked-emu reset-addr)
+
+  ;; Verify caller PRG bank 0 was restored by far_call_trampoline!
+  (check-equal? (nes-zp-ref banked-emu #x0E) 0)
+  (check-equal? (nes-emulator-active-prg-bank banked-emu) 0)
+
+  ;; Verify Switchable Bank 0 wrote Level 17 header (#x11) and stacked entities into $6000-$7FFF WRAM!
+  (check-equal? (nes-wram-ref banked-emu #x6000) #x11)
+  (check-equal? (nes-wram-ref banked-emu #x6300) OBJ-BOBA)
+  (check-equal? (nes-wram-ref banked-emu #x6301) OBJ-FLAG)
+
+  ;; Verify Switchable Bank 1 wrote Level 184 header (#xB8), UNDO delta (#x5A), and battery save (#x01)!
+  (check-equal? (nes-wram-ref banked-emu #x6001) #xB8)
+  (check-equal? (nes-wram-ref banked-emu #x6F00) #x5A)
+  (check-equal? (nes-wram-ref banked-emu #x7F17) #x01)
+
+  ;; Verify dynamic 3x5 word tiles ("KEKE" at $0160 and "MELT" at $0260) were uploaded into CHR-RAM!
+  (define keke-left (compile-chr-tile (cdr (first (make-word-tile-pair #x16 "KEKE")))))
+  (define melt-left (compile-chr-tile (cdr (first (make-word-tile-pair #x26 "MELT")))))
+  (for ([i (in-range 16)])
+    (check-equal? (nes-chr-ref banked-emu (+ #x0160 i))
+                  (bytes-ref keke-left i))
+    (check-equal? (nes-chr-ref banked-emu (+ #x0260 i))
+                  (bytes-ref melt-left i))))
+
+(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)
+

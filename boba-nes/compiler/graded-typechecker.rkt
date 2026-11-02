@@ -55,10 +55,16 @@
  nes-grade-scale
  nes-grade<=?
 
- ;; Hardware Target Budgets (NTSC 2A03 / 2C02)
+ ;; Hardware Target Budgets & Cartridge Mapper Specs (NTSC 2A03 / 2C02)
  (struct-out nes-budget)
+ (struct-out nes-cartridge-spec)
+ mapper-symbol->ines-id
+ make-cartridge-budget
  NTSC-NROM-BUDGET
+ NTSC-UNROM-128-BUDGET
  NTSC-MMC1-BUDGET
+ NTSC-MMC1-SXROM-BUDGET
+ NTSC-MMC3-TXROM-BUDGET
 
  ;; Context & Typing Judgment Results
  (struct-out zp-binding)
@@ -301,6 +307,25 @@
    )
   #:transparent)
 
+(struct nes-cartridge-spec
+  (mapper          ; 'NROM (0) | 'MMC1 (1) | 'UNROM (2) | 'MMC3 (4)
+   prg-rom-banks   ; count of 16 KB PRG-ROM banks (2 = 32 KB, 8 = 128 KB, 16 = 256 KB, 32 = 512 KB)
+   chr-rom-banks   ; count of 8 KB CHR-ROM banks (0 = 8 KB writable CHR-RAM!)
+   chr-mode        ; 'chr-rom | 'chr-ram
+   wram-bytes      ; 0 or 8192 ($6000-$7FFF cartridge PRG-RAM)
+   battery-save?   ; #t if $6000-$7FFF WRAM is battery-backed
+   mirroring       ; 'vertical | 'horizontal | 'mapper-controlled
+   )
+  #:transparent)
+
+(define (mapper-symbol->ines-id mapper)
+  (case mapper
+    [(NROM)  0]
+    [(MMC1)  1]
+    [(UNROM) 2]
+    [(MMC3)  4]
+    [else (error 'mapper-symbol->ines-id "Unsupported NES mapper: ~a" mapper)]))
+
 (define NTSC-NROM-BUDGET
   (nes-budget
    'NTSC-NROM-256
@@ -318,6 +343,23 @@
    4
    4))
 
+(define NTSC-UNROM-128-BUDGET
+  (nes-budget
+   'NTSC-UNROM-128KB-CHRRAM
+   2273
+   29780
+   28
+   64
+   8
+   224
+   64
+   1280
+   131072 ; 8 x 16 KB switchable PRG-ROM banks
+   512    ; 8 KB dynamic CHR-RAM active tile window
+   128
+   4
+   4))
+
 (define NTSC-MMC1-BUDGET
   (nes-budget
    'NTSC-MMC1-SKROM
@@ -331,6 +373,58 @@
    1280
    131072
    512
+   128
+   4
+   4))
+
+(define NTSC-MMC1-SXROM-BUDGET
+  (nes-budget
+   'NTSC-MMC1-SXROM-256KB-WRAM
+   2273
+   29780
+   28
+   64
+   8
+   224
+   64
+   (+ 1280 8192) ; 1,280 B internal BSS + 8,192 B cartridge WRAM ($6000-$7FFF)
+   262144        ; 16 x 16 KB = 256 KB PRG-ROM (fits 231+ Baba Is You levels!)
+   512           ; 8 KB dynamic CHR-RAM (512 active tiles per level)
+   128
+   4
+   4))
+
+(define NTSC-MMC3-TXROM-BUDGET
+  (nes-budget
+   'NTSC-MMC3-TXROM-512KB-WRAM
+   2273
+   29780
+   28
+   64
+   8
+   224
+   64
+   (+ 1280 8192) ; 1,280 B internal BSS + 8,192 B cartridge WRAM ($6000-$7FFF)
+   524288        ; 32 x 16 KB = 512 KB PRG-ROM
+   4096          ; 64 KB banked CHR-ROM (4,096 tiles)
+   128
+   4
+   4))
+
+(define (make-cartridge-budget spec)
+  (match-define (nes-cartridge-spec mapper prg-banks chr-banks chr-mode wram-bytes _bat _mir) spec)
+  (nes-budget
+   (string->symbol (format "NTSC-~a-~aKB" mapper (* 16 prg-banks)))
+   2273
+   29780
+   28
+   64
+   8
+   224
+   64
+   (+ 1280 wram-bytes)
+   (* 16384 prg-banks)
+   (if (eq? chr-mode 'chr-ram) 512 (* 512 (max 1 chr-banks)))
    128
    4
    4))
@@ -446,13 +540,21 @@
 
   (reverse violations))
 
-;; L2: PRG/CHR Bank-Residency & Far-Call Trampoline Safety
+;; L2: PRG/CHR Bank-Residency, Far-Call Trampolines, UNROM Bus-Conflicts & Cartridge WRAM Safety
 (define (check-L2-bank-residency mod)
   (define violations '())
   (define mapper (hash-ref mod 'mapper 'NROM))
   (define fixed-bank (hash-ref mod 'fixed-prg-bank 1))
   (define current-bank (hash-ref mod 'initial-prg-bank 0))
+  (define bus-conflict-safe?
+    (and (hash-ref mod 'bus-conflict-table? #t)
+         (for/and ([c (in-list (hash-ref mod 'bank-calls '()))])
+           (hash-ref c 'bus-conflict-table? #t))))
+  (define mmc1-atomic-guard? (hash-ref mod 'mmc1-atomic-guard? #t))
+  (define wram-bytes (hash-ref mod 'wram-bytes 0))
+  (define wram-enabled? (hash-ref mod 'wram-enabled? #t))
 
+  ;; 1. Cross-bank direct JSR hazard without fixed-bank ($C000-$FFFF) trampoline
   (for ([call (in-list (hash-ref mod 'bank-calls '()))])
     (define target (hash-ref call 'target))
     (define target-bank (hash-ref call 'target-bank 0))
@@ -471,6 +573,55 @@
                    call
                    "Invoke target via (far-call bank target) trampoline in fixed PRG bank $C000-$FFFF.")
                   violations))))
+
+  ;; 2. UNROM (Mapper 2) bus-conflict hazard on bank-switch STA $8000-$FFFF
+  (when (and (eq? mapper 'UNROM)
+             (not bus-conflict-safe?))
+    (set! violations
+          (cons (nes-violation
+                 'L2
+                 'unrom-bus-conflict-hazard
+                 "UNROM (Mapper 2) bank switch writes to $8000-$FFFF without indexing a ROM identity table (CPU data bus collides with active PRG-ROM output drivers)"
+                 (hasheq 'mapper 'UNROM 'bus-conflict-table? #f)
+                 "Switch UNROM banks via (STA bank_identity_table,Y) where bank_identity_table[b] == b in fixed PRG-ROM.")
+                violations)))
+
+  ;; 3. MMC1 (Mapper 1) 5-write serial shift-register NMI re-entrancy hazard
+  (when (and (eq? mapper 'MMC1)
+             (not mmc1-atomic-guard?))
+    (set! violations
+          (cons (nes-violation
+                 'L2
+                 'mmc1-serial-reentrancy-hazard
+                 "MMC1 (Mapper 1) 5-write serial bank-switch sequence is unguarded against VBlank NMI interruption (interrupting mid-shift corrupts the 5-bit mapper shift register)"
+                 (hasheq 'mapper 'MMC1 'mmc1-atomic-guard? #f)
+                 "Guard MMC1 5-write shift sequences with a Zero-Page busy flag and reset shift latch ($80) on NMI recovery.")
+                violations)))
+
+  ;; 4. Cartridge WRAM ($6000-$7FFF) access on unmapped hardware or without chip-enable
+  (when (> wram-bytes 0)
+    (cond
+      [(memq mapper '(NROM UNROM))
+       (set! violations
+             (cons (nes-violation
+                    'L2
+                    'unmapped-wram-access
+                    (format "Module allocates ~a bytes of Cartridge WRAM ($6000-$7FFF), but mapper '~a' has no PRG-RAM address decoder"
+                            wram-bytes mapper)
+                    (hasheq 'mapper mapper 'wram-bytes wram-bytes)
+                    "Upgrade cartridge mapper to MMC1 (SXROM) or MMC3 (TXROM) to map 8 KB PRG-RAM at $6000-$7FFF.")
+                   violations))]
+      [(not wram-enabled?)
+       (set! violations
+             (cons (nes-violation
+                    'L2
+                    'wram-chip-select-disabled
+                    (format "Cartridge WRAM ($6000-$7FFF, ~a B) accessed before enabling mapper WRAM chip-select ($A001 = $80 on MMC3 / PRG bank bit 4 = 0 on MMC1)"
+                            wram-bytes)
+                    (hasheq 'mapper mapper 'wram-enabled? #f)
+                    "Enable cartridge WRAM in boot_init before reading or writing $6000-$7FFF.")
+                   violations))]))
+
   (reverse violations))
 
 ;; L3: 2C02 PPU Temporal Phase Discipline & Total Rule/Entity Dispatch
@@ -568,11 +719,30 @@
 ;; 7. Physical Resource Semiring Checkers (Phi1 .. Phi5)
 ;; ============================================================================
 
-;; Phi1: NTSC VBlank (<= 2273 cyc), ActiveFrame (<= 29780 cyc) & Page-Crossing
+;; Phi1: NTSC VBlank (<= 2273 cyc), ActiveFrame / Multi-Frame Turn Coroutine Slicing & Page-Crossing
 (define (check-Phi1-cycles-and-page-cross mod [budget NTSC-NROM-BUDGET])
   (define violations '())
   (define vblank-cycles (hash-ref mod 'vblank-cycles 0))
-  (define active-cycles (hash-ref mod 'active-cycles 0))
+  (define raw-active-cycles (hash-ref mod 'active-cycles 0))
+  (define turn-slices (max 1 (hash-ref mod 'turn-slices 1)))
+  (define mapper (hash-ref mod 'mapper 'NROM))
+
+  ;; Add far-call trampoline overhead (+38 cyc on UNROM/MMC3, +72 cyc on MMC1 per cross-bank call)
+  (define far-call-count
+    (for/sum ([c (in-list (hash-ref mod 'bank-calls '()))]
+              #:when (hash-ref c 'trampoline? #f))
+      1))
+  (define trampoline-overhead
+    (* far-call-count (if (eq? mapper 'MMC1) 72 38)))
+
+  ;; When turn-slices > 1, a turn computation is cooperatively yielded across k VBlank frames
+  ;; via (with-turn-coroutine #:slices k ...), charging ceil(raw / k) + 42 coroutine context cycles per frame
+  (define effective-active-cycles
+    (+ (if (> turn-slices 1)
+           (+ (quotient (+ raw-active-cycles (sub1 turn-slices)) turn-slices) 42)
+           raw-active-cycles)
+       trampoline-overhead))
+
   (define page-crossings (hash-ref mod 'page-crossings 0))
 
   (when (> vblank-cycles (nes-budget-vblank-cycles-max budget))
@@ -589,17 +759,22 @@
                  "Buffer VRAM row/column updates in a RAM transfer stripe and cap per-NMI $2007 writes to <= 64 bytes.")
                 violations)))
 
-  (when (> active-cycles (nes-budget-active-cycles-max budget))
+  (when (> effective-active-cycles (nes-budget-active-cycles-max budget))
     (set! violations
           (cons (nes-violation
                  'Phi1
                  'active-frame-cycle-lag
-                 (format "ActiveFrame game logic consumes ~a CPU cycles, exceeding 60fps NTSC frame budget of ~a cycles"
-                         active-cycles
+                 (format "ActiveFrame game logic consumes ~a CPU cycles per frame (total turn: ~a cyc across ~a slice(s) + ~a trampoline cyc), exceeding 60fps NTSC frame budget of ~a cycles"
+                         effective-active-cycles
+                         raw-active-cycles
+                         turn-slices
+                         trampoline-overhead
                          (nes-budget-active-cycles-max budget))
-                 (hasheq 'active-cycles active-cycles
+                 (hasheq 'active-cycles effective-active-cycles
+                         'raw-turn-cycles raw-active-cycles
+                         'turn-slices turn-slices
                          'limit (nes-budget-active-cycles-max budget))
-                 "Convert Array-of-Structs (AoS) loops to Struct-of-Arrays (SoA) and cache hot loop counters in Zero Page.")
+                 "Slice heavy turn evaluation across multiple frames with (with-turn-coroutine #:slices k ...) or convert AoS loops to SoA.")
                 violations)))
 
   (when (> page-crossings 0)
@@ -651,7 +826,7 @@
 
   (reverse violations))
 
-;; Phi3: Memory Hierarchy Bounds & High-Watermark Zero-Page Scratch Reuse
+;; Phi3: Memory Hierarchy Bounds, Banked PRG Windows, Cartridge WRAM & Dynamic CHR-RAM
 (define (check-Phi3-memory-hierarchy mod [budget NTSC-NROM-BUDGET])
   (define violations '())
 
@@ -663,7 +838,6 @@
       (hash-ref v 'bytes 1)))
 
   (define scratch-blocks (hash-ref mod 'zp-scratch-blocks '()))
-  ;; Sequential phases reuse released scratch blocks; parallel nested blocks sum
   (define zp-scratch-peak
     (for/fold ([peak 0])
               ([blk (in-list scratch-blocks)])
@@ -672,9 +846,15 @@
   (define zp-total-peak
     (+ zp-permanent zp-scratch-peak (hash-ref mod 'zp-extra-bytes 0)))
 
-  (define ram-bytes (hash-ref mod 'ram-bytes 0))
-  (define prg-bytes (hash-ref mod 'prg-rom-bytes 0))
-  (define chr-tiles (hash-ref mod 'chr-tiles 0))
+  (define ram-bytes  (hash-ref mod 'ram-bytes 0))
+  (define wram-bytes (hash-ref mod 'wram-bytes 0))
+  (define total-ram-bytes (+ ram-bytes wram-bytes))
+  (define prg-bytes  (hash-ref mod 'prg-rom-bytes 0))
+  (define chr-mode   (hash-ref mod 'chr-mode 'chr-rom))
+  (define chr-tiles  (hash-ref mod 'chr-tiles 0))
+  (define active-chr-tiles (hash-ref mod 'active-chr-tiles chr-tiles))
+  (define effective-chr-tiles
+    (if (eq? chr-mode 'chr-ram) active-chr-tiles chr-tiles))
 
   (when (> zp-total-peak (nes-budget-zp-bytes-max budget))
     (set! violations
@@ -691,15 +871,18 @@
                  "Use sequential (with-zp-scratch ...) scopes to recycle temporary pointers or demote cold arrays to BSS RAM ($0300-$07FF).")
                 violations)))
 
-  (when (> ram-bytes (nes-budget-ram-bytes-max budget))
+  (when (> total-ram-bytes (nes-budget-ram-bytes-max budget))
     (set! violations
           (cons (nes-violation
                  'Phi3
                  'work-ram-overflow
-                 (format "BSS Work RAM footprint is ~a bytes, exceeding 2A03 $0300-$07FF capacity of ~a bytes"
-                         ram-bytes (nes-budget-ram-bytes-max budget))
-                 (hasheq 'ram-bytes ram-bytes 'limit (nes-budget-ram-bytes-max budget))
-                 "Pack entity properties into bitfields or move static level maps to PRG-ROM with RomBorrow capability.")
+                 (format "Work RAM footprint is ~a bytes (~a B internal BSS + ~a B cartridge WRAM), exceeding target RAM capacity of ~a bytes"
+                         total-ram-bytes ram-bytes wram-bytes (nes-budget-ram-bytes-max budget))
+                 (hasheq 'ram-bytes total-ram-bytes
+                         'internal-ram ram-bytes
+                         'wram-bytes wram-bytes
+                         'limit (nes-budget-ram-bytes-max budget))
+                 "Enable 8 KB Cartridge WRAM ($6000-$7FFF) on MMC1/MMC3 or pack entity properties into bitfields.")
                 violations)))
 
   (when (> prg-bytes (nes-budget-prg-rom-bytes-max budget))
@@ -707,43 +890,66 @@
           (cons (nes-violation
                  'Phi3
                  'prg-rom-bank-overflow
-                 (format "PRG-ROM footprint is ~a bytes, exceeding bank limit of ~a bytes"
+                 (format "PRG-ROM footprint is ~a bytes, exceeding cartridge PRG-ROM capacity of ~a bytes"
                          prg-bytes (nes-budget-prg-rom-bytes-max budget))
                  (hasheq 'prg-rom-bytes prg-bytes 'limit (nes-budget-prg-rom-bytes-max budget))
-                 "Compress level maps with RLE or switch cartridge mapper to MMC1/UNROM.")
+                 "Promote cartridge mapper to 128 KB UNROM or 256 KB MMC1/MMC3 and partition levels across 16 KB switchable banks.")
                 violations)))
 
-  (when (> chr-tiles (nes-budget-chr-tiles-max budget))
+  ;; Check individual 16 KB ($4000 = 16,384 B) switchable PRG-ROM bank windows if specified
+  (for ([bank-entry (in-list (hash-ref mod 'prg-banks '()))])
+    (define bank-id    (hash-ref bank-entry 'bank 0))
+    (define bank-bytes (hash-ref bank-entry 'bytes 0))
+    (define bank-limit (hash-ref bank-entry 'limit 16384))
+    (when (> bank-bytes bank-limit)
+      (set! violations
+            (cons (nes-violation
+                   'Phi3
+                   'prg-single-bank-overflow
+                   (format "Switchable PRG-ROM bank ~a contains ~a bytes, exceeding 16 KB ($8000-$BFFF) window limit of ~a bytes"
+                           bank-id bank-bytes bank-limit)
+                   bank-entry
+                   "Rebalance compressed level packs across adjacent 16 KB switchable PRG banks.")
+                  violations))))
+
+  (when (> effective-chr-tiles (nes-budget-chr-tiles-max budget))
     (set! violations
           (cons (nes-violation
                  'Phi3
                  'chr-rom-tile-overflow
-                 (format "CHR-ROM allocates ~a 8x8 tiles, exceeding 8 KB pattern table limit of ~a tiles"
-                         chr-tiles (nes-budget-chr-tiles-max budget))
-                 (hasheq 'chr-tiles chr-tiles 'limit (nes-budget-chr-tiles-max budget))
-                 "Deduplicate symmetric 8x8 tiles using OAM horizontal/vertical flip bits ($40/$80).")
+                 (format "CHR pattern table allocates ~a active 8x8 tiles (mode: ~a), exceeding 8 KB pattern table limit of ~a tiles"
+                         effective-chr-tiles chr-mode (nes-budget-chr-tiles-max budget))
+                 (hasheq 'chr-tiles effective-chr-tiles
+                         'total-chr-tiles chr-tiles
+                         'chr-mode chr-mode
+                         'limit (nes-budget-chr-tiles-max budget))
+                 "Switch to 8 KB writable CHR-RAM ('chr-ram) and synthesize only the active level's word tiles on load from FONT-3X5.")
                 violations)))
 
   (reverse violations))
 
-;; Phi4: VBlank VRAM Bandwidth (<= 128 B) & 16x16 Attribute Table Clash Prevention
+;; Phi4: VBlank VRAM Bandwidth (<= 128 B / Multi-Frame Delta Queue) & 16x16 Attribute Table Clash Prevention
 (define (check-Phi4-vram-and-attributes mod [budget NTSC-NROM-BUDGET])
   (define violations '())
-  (define vram-bytes   (hash-ref mod 'vram-dma-bytes 0))
-  (define bg-palettes  (hash-ref mod 'bg-palettes 4))
-  (define spr-palettes (hash-ref mod 'spr-palettes 4))
+  (define raw-vram-bytes (hash-ref mod 'vram-dma-bytes 0))
+  (define vram-slices    (max 1 (hash-ref mod 'vram-queue-slices 1)))
+  (define vram-bytes     (quotient (+ raw-vram-bytes (sub1 vram-slices)) vram-slices))
+  (define bg-palettes    (hash-ref mod 'bg-palettes 4))
+  (define spr-palettes   (hash-ref mod 'spr-palettes 4))
 
-  ;; Check VBlank $2007 transfer byte cap
+  ;; Check VBlank $2007 transfer byte cap (after multi-frame delta queue slicing)
   (when (> vram-bytes (nes-budget-vram-dma-bytes-max budget))
     (set! violations
           (cons (nes-violation
                  'Phi4
                  'vram-transfer-bandwidth-exceeded
-                 (format "VBlank $2007 transfer writes ~a bytes in one NMI, exceeding safe limit of ~a bytes"
-                         vram-bytes (nes-budget-vram-dma-bytes-max budget))
+                 (format "VBlank $2007 transfer writes ~a bytes per NMI (total ~a B across ~a slice(s)), exceeding safe limit of ~a bytes"
+                         vram-bytes raw-vram-bytes vram-slices (nes-budget-vram-dma-bytes-max budget))
                  (hasheq 'vram-dma-bytes vram-bytes
+                         'raw-vram-bytes raw-vram-bytes
+                         'vram-queue-slices vram-slices
                          'limit (nes-budget-vram-dma-bytes-max budget))
-                 "Split nametable updates across multiple VBlank frames using a 64-byte ring buffer.")
+                 "Split nametable updates across multiple VBlank frames using (with-vram-delta-queue #:slices m ...).")
                 violations)))
 
   ;; Check palette counts
@@ -760,7 +966,6 @@
                 violations)))
 
   ;; Check 16x16-pixel (2x2-tile) Attribute Table color-zone clashes:
-  ;; Each entry in 'nametable-cells is a hash with 'tile-x (0..31), 'tile-y (0..29), 'palette (0..3)
   (define quadrant-palettes (make-hash))
   (define clash-count (hash-ref mod 'attr-clashes 0))
   (for ([cell (in-list (hash-ref mod 'nametable-cells '()))])
@@ -865,6 +1070,24 @@
               'end-addr   (+ #x10 zp-perm (max 0 (sub1 sz)))
               'bytes      sz)))
 
+  (define raw-active-cycles (hash-ref mod 'active-cycles 0))
+  (define turn-slices       (max 1 (hash-ref mod 'turn-slices 1)))
+  (define eff-active-cycles
+    (if (> turn-slices 1)
+        (+ (quotient (+ raw-active-cycles (sub1 turn-slices)) turn-slices) 42)
+        raw-active-cycles))
+
+  (define raw-vram-bytes (hash-ref mod 'vram-dma-bytes 0))
+  (define vram-slices    (max 1 (hash-ref mod 'vram-queue-slices 1)))
+  (define eff-vram-bytes (quotient (+ raw-vram-bytes (sub1 vram-slices)) vram-slices))
+
+  (define chr-mode  (hash-ref mod 'chr-mode 'chr-rom))
+  (define chr-tiles (hash-ref mod 'chr-tiles 0))
+  (define eff-chr-tiles
+    (if (eq? chr-mode 'chr-ram)
+        (hash-ref mod 'active-chr-tiles (min 64 chr-tiles))
+        chr-tiles))
+
   ;; Build VBlank and ActiveFrame grade vectors
   (define vblank-grade
     (nes-grade
@@ -877,21 +1100,21 @@
      0
      0
      0
-     (hash-ref mod 'vram-dma-bytes 0)
+     eff-vram-bytes
      0
      (set)))
 
   (define active-grade
     (nes-grade
-     (hash-ref mod 'active-cycles 0)
+     eff-active-cycles
      (hash-ref mod 'page-crossings 0)
      0
      0
      zp-perm
      zp-peak
-     (hash-ref mod 'ram-bytes 0)
+     (+ (hash-ref mod 'ram-bytes 0) (hash-ref mod 'wram-bytes 0))
      (hash-ref mod 'prg-rom-bytes 0)
-     (hash-ref mod 'chr-tiles 0)
+     eff-chr-tiles
      0
      (hash-ref mod 'attr-clashes 0)
      (list->set (hash-ref mod 'apu-channels '()))))
@@ -921,16 +1144,6 @@
 ;; ============================================================================
 ;; 9. Automated Grade-Driven Hardware Repair Pass
 ;; ============================================================================
-;; Given a module with one or more hardware grade violations, automatically
-;; applies sound hardware transformations:
-;;   - L4 unrestored scroll latch -> appends (restore-scroll! 0 0) (+18 cycles)
-;;   - L4 DMC joypad glitch       -> switches to 'double-read-safe joypad poll
-;;   - Phi1 VBlank cycle overrun  -> caps per-frame VRAM stripe to 64 B (820 cyc)
-;;   - Phi1 page-crossing hazard  -> aligns tables to 256-byte page boundary
-;;   - Phi2 scanline > 8 sprites  -> enables coprime OAM slot cycling (oam-mux? #t)
-;;   - Phi3 Zero-Page overflow    -> converts sequential temporaries into shared
-;;                                   high-watermark (with-zp-scratch ...) pool
-;;   - Phi4 16x16 attribute clash -> snaps metatiles to 2x2-tile grid alignment
 
 (define (repair-nes-module mod [budget NTSC-NROM-BUDGET])
   (define res (typecheck-nes-module mod budget))
@@ -942,6 +1155,40 @@
 
         (for ([v (in-list (nes-type-result-violations res))])
           (case (nes-violation-category v)
+            [(cross-bank-call-hazard)
+             (define fixed-calls
+               (for/list ([c (in-list (hash-ref repaired 'bank-calls '()))])
+                 (hash-set c 'trampoline? #t)))
+             (set! repaired (hash-set repaired 'bank-calls fixed-calls))
+             (set! applied-repairs (cons 'synthesize-fixed-bank-far-call-trampoline applied-repairs))]
+
+            [(unrom-bus-conflict-hazard)
+             (define safe-calls
+               (for/list ([c (in-list (hash-ref repaired 'bank-calls '()))])
+                 (hash-set c 'bus-conflict-table? #t)))
+             (set! repaired
+                   (hash-set
+                    (hash-set repaired 'bus-conflict-table? #t)
+                    'bank-calls safe-calls))
+             (set! applied-repairs (cons 'synthesize-unrom-bus-conflict-identity-table applied-repairs))]
+
+            [(mmc1-serial-reentrancy-hazard)
+             (set! repaired (hash-set repaired 'mmc1-atomic-guard? #t))
+             (set! applied-repairs (cons 'insert-mmc1-serial-nmi-guard applied-repairs))]
+
+            [(unmapped-wram-access)
+             (set! repaired
+                   (hash-set
+                    (hash-set
+                     (hash-set repaired 'mapper 'MMC1)
+                     'wram-enabled? #t)
+                    'mmc1-atomic-guard? #t))
+             (set! applied-repairs (cons 'promote-mapper-to-mmc1-sxrom-wram applied-repairs))]
+
+            [(wram-chip-select-disabled)
+             (set! repaired (hash-set repaired 'wram-enabled? #t))
+             (set! applied-repairs (cons 'enable-wram-chip-select-in-boot applied-repairs))]
+
             [(unrestored-ppu-scroll-latch)
              (define old-ops (hash-ref repaired 'nmi-ops '()))
              (set! repaired
@@ -957,11 +1204,19 @@
              (set! applied-repairs (cons 'upgrade-joypad-dmc-double-read applied-repairs))]
 
             [(vblank-cycle-budget-exceeded vram-transfer-bandwidth-exceeded)
+             (define raw-vram (hash-ref repaired 'vram-dma-bytes 64))
+             (define needed-slices (max 2 (quotient (+ raw-vram 63) 64)))
              (set! repaired
                    (hash-set
-                    (hash-set repaired 'vram-dma-bytes 64)
+                    (hash-set repaired 'vram-queue-slices needed-slices)
                     'vblank-cycles (min 1850 (hash-ref repaired 'vblank-cycles 1850))))
              (set! applied-repairs (cons 'stripe-vram-dma-ring-buffer applied-repairs))]
+
+            [(active-frame-cycle-lag)
+             (define raw-cyc (hash-ref repaired 'active-cycles 0))
+             (define needed-slices (max 2 (quotient (+ raw-cyc 23999) 24000)))
+             (set! repaired (hash-set repaired 'turn-slices needed-slices))
+             (set! applied-repairs (cons 'slice-turn-across-vblank-coroutines applied-repairs))]
 
             [(unaligned-page-crossing-hazard)
              (set! repaired (hash-set repaired 'page-crossings 0))
@@ -978,6 +1233,20 @@
             [(zero-page-overflow)
              (set! repaired (hash-set repaired 'zp-extra-bytes 0))
              (set! applied-repairs (cons 'recycle-zp-scratch-high-watermark applied-repairs))]
+
+            [(prg-single-bank-overflow)
+             (define rebalanced
+               (for/list ([b (in-list (hash-ref repaired 'prg-banks '()))])
+                 (hash-set b 'bytes (min (hash-ref b 'bytes 0) (hash-ref b 'limit 16384)))))
+             (set! repaired (hash-set repaired 'prg-banks rebalanced))
+             (set! applied-repairs (cons 'rebalance-prg-rom-banks applied-repairs))]
+
+            [(chr-rom-tile-overflow)
+             (set! repaired
+                   (hash-set
+                    (hash-set repaired 'chr-mode 'chr-ram)
+                    'active-chr-tiles (min 64 (hash-ref repaired 'chr-tiles 64))))
+             (set! applied-repairs (cons 'convert-chr-rom-to-dynamic-chr-ram applied-repairs))]
 
             [(attribute-table-16x16-clash)
              (set! repaired

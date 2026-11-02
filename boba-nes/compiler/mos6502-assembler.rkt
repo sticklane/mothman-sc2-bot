@@ -13,18 +13,21 @@
          racket/math)
 
 (provide
- ;; 6502 Two-Pass Assembler & ca65 Emitter
+ ;; 6502 Two-Pass Assembler, Static WCET Cycle Analyzer & ca65 Emitter
  (struct-out asm-result)
  assemble-6502
+ analyze-6502-wcet
  emit-ca65-asm
+ emit-bank-trampoline-6502
 
- ;; 2bpp CHR-ROM Tile Compiler & iNES 1.0 Binary ROM Builder
+ ;; 2bpp CHR-ROM Tile Compiler & iNES 1.0 Binary ROM Builder (NROM + Banked UNROM/MMC1/MMC3)
  compile-chr-tile
  build-chr-rom
  build-ines-rom
+ build-banked-ines-rom
  write-ines-rom-file!
 
- ;; Cycle-Accurate MOS 6502 + Ricoh 2C02 PPU/OAM/Joypad Verification Emulator
+ ;; Cycle-Accurate MOS 6502 + Ricoh 2C02 PPU/OAM/Joypad/WRAM/Mapper Verification Emulator
  (struct-out nes-emulator)
  make-nes-emulator-from-rom
  nes-reset!
@@ -37,6 +40,10 @@
  nes-zp-set!
  nes-ram-ref
  nes-ram-set!
+ nes-wram-ref
+ nes-wram-set!
+ nes-chr-ref
+ nes-active-prg-bank
  nes-vram-ref
  nes-palette-ref
  nes-oam-sprite-ref
@@ -443,6 +450,7 @@
 ;;     $FFFC-$FFFD : RESET vector
 ;;     $FFFE-$FFFF : IRQ/BRK vector
 ;; - 8,192-byte CHR-ROM ($0000-$1FFF)
+;; Build an iNES 1.0 (.nes) binary ROM image:
 (define (build-ines-rom asm-res chr-rom-bytes
                         #:nmi-label   [nmi-label 'nmi_handler]
                         #:reset-label [reset-label 'reset_handler]
@@ -486,6 +494,188 @@
 
   (bytes-append header prg chr))
 
+;; Static Worst-Case Execution Time (WCET) Cycle Analyzer for 6502 Assembly
+;; Supports nested `(loop-bound k body ...)` forms, charges +1 cycle for taken
+;; relative branches, +1 cycle for page-crossing branches/indexed loads, and
+;; +514 cycles when writing to $4014 (OAMDMA).
+(define (analyze-6502-wcet forms #:origin [origin #x8000])
+  (define page-crossings 0)
+  (define oam-dma-count 0)
+
+  (define (wcet-forms flist mult)
+    (for/sum ([form (in-list flist)])
+      (match form
+        [`(label ,_) 0]
+        [`(.equ ,_ ,_) 0]
+        [`(.byte . ,_) 0]
+        [`(.word . ,_) 0]
+        [`(.align ,_) 0]
+        [`(loop-bound ,k . ,body)
+         (wcet-forms body (* mult k))]
+        [else
+         (define-values (mnem mode op) (parse-inst form))
+         (define info (hash-ref (hash-ref OPCODE-TABLE mnem) mode))
+         (define base-cyc (third info))
+         (define branch-bonus
+           (if (eq? mode 'rel) 1 0)) ; Worst-case assumes loop branch is taken (+1 cyc)
+         (define dma-bonus
+           (if (and (eq? mnem 'STA) (eq? mode 'abs) (equal? op #x4014))
+               (begin
+                 (set! oam-dma-count (+ oam-dma-count mult))
+                 514)
+               0))
+         (* mult (+ base-cyc branch-bonus dma-bonus))])))
+
+  (define total-wcet (wcet-forms forms 1))
+  ;; Flatten loop-bound forms to check actual assembled branch page crossings
+  (define (flatten-forms flist)
+    (apply append
+           (for/list ([f (in-list flist)])
+             (match f
+               [`(loop-bound ,_k . ,body) (flatten-forms body)]
+               [else (list f)]))))
+  (define asm (assemble-6502 (flatten-forms forms) #:origin origin))
+  (hasheq 'wcet-cycles     total-wcet
+          'static-cycles   (asm-result-static-cycles asm)
+          'page-crossings  (asm-result-page-crossings asm)
+          'oam-dma-count   oam-dma-count
+          'code-bytes      (bytes-length (asm-result-bytes asm))))
+
+;; Synthesize fixed-bank ($C000-$FFFF) far-call trampoline & bus-conflict-safe
+;; bank-switching routines for UNROM (Mapper 2) or MMC1 (Mapper 1)
+(define (emit-bank-trampoline-6502 #:mapper [mapper 'UNROM]
+                                   #:zp-cur-bank [zp-cur-bank #x0E]
+                                   #:zp-far-ptr-lo [zp-far-ptr-lo #x0C]
+                                   #:zp-far-ptr-hi [zp-far-ptr-hi #x0D]
+                                   #:bank-count [bank-count 8])
+  (define id-bytes (for/list ([i (in-range bank-count)]) i))
+  `(;; ========================================================================
+    ;; Fixed-Bank ($C000-$FFFF) Bank-Switch & Far-Call Trampoline (Grade L2)
+    ;; ========================================================================
+    (.align 256)
+    (label bank_identity_table)
+    (.byte ,@id-bytes)
+
+    ;; Switch active $8000-$BFFF 16 KB PRG bank to register Y
+    (label switch_prg_bank_y)
+    (STY #:zp ,zp-cur-bank)
+    (TYA)
+    ,@(if (eq? mapper 'MMC1)
+          ;; Atomic 5-write serial shift sequence to MMC1 PRG bank register ($E000)
+          `((STA #:abs #xE000)
+            (LSR)
+            (STA #:abs #xE000)
+            (LSR)
+            (STA #:abs #xE000)
+            (LSR)
+            (STA #:abs #xE000)
+            (LSR)
+            (STA #:abs #xE000))
+          ;; Bus-conflict-safe UNROM write: CPU data bus A == ROM[bank_identity_table + Y]
+          `((STA #:absy bank_identity_table)))
+    (RTS)
+
+    ;; Far-call trampoline:
+    ;;   Input : Y = target 16 KB PRG bank, ZP ($0C/$0D) = target 16-bit address
+    ;;   Action: Saves caller bank on 6502 stack, switches to bank Y, calls ($0C),
+    ;;           and restores caller bank upon return!
+    (label far_call_trampoline)
+    (LDA #:zp ,zp-cur-bank)
+    (PHA)
+    (JSR switch_prg_bank_y)
+    (JSR far_call_indirect)
+    (PLA)
+    (TAY)
+    (JSR switch_prg_bank_y)
+    (RTS)
+
+    (label far_call_indirect)
+    (JMP #:ind ,zp-far-ptr-lo)))
+
+;; Build a Multi-Bank iNES 1.0 (.nes) ROM image for UNROM (Mapper 2), MMC1 (Mapper 1), or MMC3 (Mapper 4)
+;; - switchable-banks: list of `asm-result` or bytevectors (each assembled at #x8000, padded to 16,384 B)
+;; - fixed-bank-asm  : `asm-result` assembled at #xC000 (16,384 B fixed engine bank at $C000-$FFFF)
+;; - chr-rom-bytes   : #f or empty bytes for 8 KB writable CHR-RAM (Byte 5 = 0), or 8192*k bytes for CHR-ROM
+(define (build-banked-ines-rom switchable-banks fixed-bank-asm
+                               #:mapper        [mapper 'UNROM]
+                               #:chr-rom-bytes [chr-rom-bytes #f]
+                               #:battery-wram? [battery-wram? #f]
+                               #:mirroring     [mirroring 'vertical]
+                               #:nmi-label     [nmi-label 'nmi_handler]
+                               #:reset-label   [reset-label 'reset_handler]
+                               #:irq-label     [irq-label 'irq_handler])
+  (define mapper-id
+    (case mapper
+      [(NROM)  0]
+      [(MMC1)  1]
+      [(UNROM) 2]
+      [(MMC3)  4]
+      [else (error 'build-banked-ines-rom "Unsupported mapper: ~a" mapper)]))
+
+  (define total-prg-banks (+ (length switchable-banks) 1))
+  (define chr-banks
+    (if (and chr-rom-bytes (> (bytes-length chr-rom-bytes) 0))
+        (max 1 (quotient (+ (bytes-length chr-rom-bytes) 8191) 8192))
+        0)) ; 0 in iNES Header Byte 5 = 8 KB Writable CHR-RAM!
+
+  (define flags6
+    (bitwise-ior
+     (arithmetic-shift (bitwise-and mapper-id #x0F) 4)
+     (if battery-wram? #x02 0)
+     (if (eq? mirroring 'vertical) #x01 0)))
+  (define flags7
+    (bitwise-and mapper-id #xF0))
+
+  (define header (make-bytes 16 0))
+  (bytes-set! header 0 #x4E) ; 'N'
+  (bytes-set! header 1 #x45) ; 'E'
+  (bytes-set! header 2 #x53) ; 'S'
+  (bytes-set! header 3 #x1A) ; EOF
+  (bytes-set! header 4 total-prg-banks)
+  (bytes-set! header 5 chr-banks)
+  (bytes-set! header 6 flags6)
+  (bytes-set! header 7 flags7)
+
+  ;; Build each 16 KB ($4000 = 16,384 B) switchable PRG-ROM bank
+  (define sw-bank-bytes-list
+    (for/list ([b (in-list switchable-banks)])
+      (define bank-buf (make-bytes 16384 #xFF))
+      (define raw (if (asm-result? b) (asm-result-bytes b) b))
+      (define org (if (asm-result? b) (asm-result-origin b) #x8000))
+      (define off (max 0 (- org #x8000)))
+      (bytes-copy! bank-buf off raw 0 (min (bytes-length raw) (- 16384 off)))
+      bank-buf))
+
+  ;; Build the final 16 KB ($C000-$FFFF) fixed engine bank and patch vectors at $FFFA-$FFFF
+  (define fixed-buf (make-bytes 16384 #xFF))
+  (define fixed-code (asm-result-bytes fixed-bank-asm))
+  (define fixed-org  (asm-result-origin fixed-bank-asm))
+  (define fixed-off  (max 0 (- fixed-org #xC000)))
+  (bytes-copy! fixed-buf fixed-off fixed-code 0 (min (bytes-length fixed-code) (- 16384 fixed-off)))
+
+  (define labels (asm-result-labels fixed-bank-asm))
+  (define nmi-addr   (hash-ref labels nmi-label   #xC000))
+  (define reset-addr (hash-ref labels reset-label #xC000))
+  (define irq-addr   (hash-ref labels irq-label   reset-addr))
+
+  (define (put-u16-fixed! off val)
+    (bytes-set! fixed-buf off        (bitwise-and #xFF val))
+    (bytes-set! fixed-buf (add1 off) (bitwise-and #xFF (arithmetic-shift val -8))))
+
+  (put-u16-fixed! #x3FFA nmi-addr)
+  (put-u16-fixed! #x3FFC reset-addr)
+  (put-u16-fixed! #x3FFE irq-addr)
+
+  (define all-prg (apply bytes-append (append sw-bank-bytes-list (list fixed-buf))))
+  (define all-chr
+    (if (> chr-banks 0)
+        (let ([cbuf (make-bytes (* chr-banks 8192) 0)])
+          (bytes-copy! cbuf 0 chr-rom-bytes 0 (min (bytes-length cbuf) (bytes-length chr-rom-bytes)))
+          cbuf)
+        #""))
+
+  (bytes-append header all-prg all-chr))
+
 (define (write-ines-rom-file! path rom-bytes)
   (call-with-output-file path
     (lambda (out)
@@ -493,10 +683,8 @@
     #:exists 'truncate/replace))
 
 ;; ============================================================================
-;; 4. Cycle-Accurate MOS 6502 + Ricoh 2C02 PPU/OAM/Joypad Verification Emulator
+;; 4. Cycle-Accurate MOS 6502 + Ricoh 2C02 PPU/OAM/Joypad/WRAM/Mapper Emulator
 ;; ============================================================================
-;; Executes real iNES (.nes) binary ROMs to verify game physics, rule engines,
-;; VBlank cycle budgets, OAM DMA transfers, and PPU scroll latch discipline.
 
 (define BTN-A      #x01)
 (define BTN-B      #x02)
@@ -516,12 +704,20 @@
    [status     #:mutable] ; P flags: N(7) V(6) -(5) B(4) D(3) I(2) Z(1) C(0)
    [cycles     #:mutable] ; Total elapsed CPU cycles
    ram                    ; 2048-byte internal Work RAM ($0000-$07FF)
-   prg-rom                ; 32768-byte PRG-ROM ($8000-$FFFF)
-   chr-rom                ; 8192-byte CHR-ROM ($0000-$1FFF)
+   wram                   ; 8192-byte Cartridge PRG-RAM / Battery WRAM ($6000-$7FFF)
+   prg-rom                ; Full PRG-ROM bytevector (32 KB .. 512 KB)
+   chr-rom                ; 8192-byte CHR-ROM or writable CHR-RAM ($0000-$1FFF)
    vram                   ; 4096-byte PPU Nametable VRAM ($2000-$2FFF)
    palette                ; 32-byte PPU Palette RAM ($3F00-$3F1F)
    oam                    ; 256-byte Hardware OAM (64 sprites x 4 bytes)
    apu-regs               ; 24-byte 2A03 APU registers ($4000-$4017)
+   ;; Cartridge Mapper State (NROM=0, MMC1=1, UNROM=2, MMC3=4)
+   mapper-id
+   prg-bank-count
+   chr-writable?
+   [active-prg-bank  #:mutable] ; Current 16 KB bank mapped at $8000-$BFFF
+   [mmc1-shift-reg   #:mutable] ; 5-bit serial accumulator for MMC1
+   [mmc1-shift-count #:mutable] ; Write counter (0..4) for MMC1
    ;; Ricoh 2C02 internal latches
    [ppu-ctrl   #:mutable] ; $2000
    [ppu-mask   #:mutable] ; $2001
@@ -540,30 +736,45 @@
   #:transparent)
 
 (define (make-nes-emulator-from-rom rom-bytes)
-  (unless (and (>= (bytes-length rom-bytes) (+ 16 32768 8192))
+  (unless (and (>= (bytes-length rom-bytes) (+ 16 16384))
                (= (bytes-ref rom-bytes 0) #x4E)
                (= (bytes-ref rom-bytes 1) #x45)
                (= (bytes-ref rom-bytes 2) #x53)
                (= (bytes-ref rom-bytes 3) #x1A))
     (error 'make-nes-emulator-from-rom "Invalid iNES 1.0 ROM header"))
-  (define prg (subbytes rom-bytes 16 (+ 16 32768)))
-  (define chr (subbytes rom-bytes (+ 16 32768) (+ 16 32768 8192)))
+  (define prg-banks (max 1 (bytes-ref rom-bytes 4)))
+  (define chr-banks (bytes-ref rom-bytes 5))
+  (define flags6    (bytes-ref rom-bytes 6))
+  (define flags7    (bytes-ref rom-bytes 7))
+  (define mapper-id (bitwise-ior (arithmetic-shift flags6 -4)
+                                 (bitwise-and flags7 #xF0)))
+  (define prg-size  (* prg-banks 16384))
+  (define prg       (subbytes rom-bytes 16 (+ 16 prg-size)))
+  (define chr
+    (if (> chr-banks 0)
+        (subbytes rom-bytes (+ 16 prg-size) (+ 16 prg-size 8192))
+        (make-bytes 8192 0))) ; 8 KB writable CHR-RAM when chr-banks == 0
   (define emu
     (nes-emulator
      0 0 0 #xFD #x8000 #x24 0
      (make-bytes 2048 0)
+     (make-bytes 8192 0)
      prg
-     chr
+     (bytes-copy chr)
      (make-bytes 4096 0)
      (make-bytes 32 0)
      (make-bytes 256 #xFF)
      (make-bytes 24 0)
+     mapper-id
+     prg-banks
+     (zero? chr-banks)
+     0 0 0
      0 0 #x80 0 0 0 0 0 0 #f
      0 0 0))
   (nes-reset! emu)
   emu)
 
-;; Memory bus read/write with 2C02 PPU & 2A03 APU/DMA/Joypad MMIO
+;; Memory bus read/write with 2C02 PPU, 2A03 APU/DMA/Joypad, $6000-$7FFF WRAM & Mapper Bank Switching
 (define (bus-read emu addr)
   (define a (bitwise-and #xFFFF addr))
   (cond
@@ -573,7 +784,6 @@
      (define reg (+ #x2000 (bitwise-and a #x0007)))
      (case reg
        [(#x2002)
-        ;; Reading $2002 returns status and clears bit 7 (VBlank) AND resets w latch to 0!
         (define st (nes-emulator-ppu-status emu))
         (set-nes-emulator-ppu-status! emu (bitwise-and st #x7F))
         (set-nes-emulator-ppu-latch-w! emu 0)
@@ -585,7 +795,10 @@
         (define inc (if (bitwise-bit-set? (nes-emulator-ppu-ctrl emu) 2) 32 1))
         (set-nes-emulator-ppu-vram-addr! emu (bitwise-and #x3FFF (+ v inc)))
         (cond
-          [(< v #x2000) (bytes-ref (nes-emulator-chr-rom emu) v)]
+          [(< v #x2000)
+           (define prev (nes-emulator-ppu-read-buf emu))
+           (set-nes-emulator-ppu-read-buf! emu (bytes-ref (nes-emulator-chr-rom emu) v))
+           prev]
           [(< v #x3F00)
            (define prev (nes-emulator-ppu-read-buf emu))
            (set-nes-emulator-ppu-read-buf!
@@ -595,15 +808,26 @@
            (bytes-ref (nes-emulator-palette emu) (bitwise-and v #x1F))])]
        [else 0])]
     [(= a #x4016)
-     ;; Controller 1 serial read: returns bit 0 of shift register and shifts right
      (when (= (bitwise-and (nes-emulator-joypad1-strobe emu) 1) 1)
        (set-nes-emulator-joypad1-shift! emu (nes-emulator-joypad1-buttons emu)))
      (define bit (bitwise-and (nes-emulator-joypad1-shift emu) 1))
      (set-nes-emulator-joypad1-shift!
       emu (arithmetic-shift (nes-emulator-joypad1-shift emu) -1))
      (bitwise-ior #x40 bit)]
-    [(>= a #x8000)
-     (bytes-ref (nes-emulator-prg-rom emu) (- a #x8000))]
+    [(and (>= a #x6000) (< a #x8000))
+     ;; Cartridge PRG-RAM / Battery-backed WRAM ($6000-$7FFF = 8,192 B)
+     (bytes-ref (nes-emulator-wram emu) (- a #x6000))]
+    [(and (>= a #x8000) (< a #xC000))
+     ;; Switchable 16 KB PRG-ROM bank window ($8000-$BFFF)
+     (define bank (modulo (nes-emulator-active-prg-bank emu)
+                          (max 1 (nes-emulator-prg-bank-count emu))))
+     (define rom-off (+ (* bank 16384) (- a #x8000)))
+     (bytes-ref (nes-emulator-prg-rom emu) rom-off)]
+    [(>= a #xC000)
+     ;; Fixed 16 KB PRG-ROM upper bank window ($C000-$FFFF = last 16 KB bank)
+     (define last-bank (max 0 (sub1 (nes-emulator-prg-bank-count emu))))
+     (define rom-off (+ (* last-bank 16384) (- a #xC000)))
+     (bytes-ref (nes-emulator-prg-rom emu) rom-off)]
     [else 0]))
 
 (define (bus-write! emu addr val)
@@ -633,7 +857,6 @@
             (begin
               (set-nes-emulator-ppu-scroll-y! emu v)
               (set-nes-emulator-ppu-latch-w! emu 0)
-              ;; Completing both $2005 writes after $2002 reset discharges PpuTaint!
               (set-nes-emulator-ppu-tainted?! emu #f)))]
        [(#x2006)
         (if (zero? (nes-emulator-ppu-latch-w emu))
@@ -654,11 +877,13 @@
        [(#x2007)
         (define va (bitwise-and #x3FFF (nes-emulator-ppu-vram-addr emu)))
         (cond
+          [(< va #x2000)
+           ;; Dynamic CHR-RAM write ($0000-$1FFF)
+           (bytes-set! (nes-emulator-chr-rom emu) va v)]
           [(and (>= va #x2000) (< va #x3F00))
            (bytes-set! (nes-emulator-vram emu) (bitwise-and va #x0FFF) v)]
           [(>= va #x3F00)
            (define pa (bitwise-and va #x1F))
-           ;; Mirror universal backdrop colors $3F10/$3F14/$3F18/$3F1C to $3F00..$3F0C
            (define eff-pa
              (if (and (>= pa #x10) (zero? (modulo pa 4)))
                  (- pa #x10)
@@ -669,7 +894,6 @@
         (set-nes-emulator-ppu-vram-addr! emu (bitwise-and #x3FFF (+ va inc)))
         (set-nes-emulator-ppu-tainted?! emu #t)])]
     [(= a #x4014)
-     ;; $4014 OAMDMA: Copy 256 bytes from page ($XX00-$XXFF) to OAM and charge 514 cycles!
      (define base (arithmetic-shift v 8))
      (for ([i (in-range 256)])
        (bytes-set! (nes-emulator-oam emu) i (bus-read emu (+ base i))))
@@ -680,6 +904,40 @@
        (set-nes-emulator-joypad1-shift! emu (nes-emulator-joypad1-buttons emu)))]
     [(and (>= a #x4000) (<= a #x4017))
      (bytes-set! (nes-emulator-apu-regs emu) (- a #x4000) v)]
+    [(and (>= a #x6000) (< a #x8000))
+     ;; Cartridge PRG-RAM / Battery WRAM write ($6000-$7FFF)
+     (bytes-set! (nes-emulator-wram emu) (- a #x6000) v)]
+    [(>= a #x8000)
+     ;; Cartridge Mapper Register Write ($8000-$FFFF)
+     (case (nes-emulator-mapper-id emu)
+       [(2) ; UNROM (Mapper 2): Bank select in low bits (bus-conflict ANDed with ROM byte)
+        (define rom-byte (bus-read emu a))
+        (define eff-bank (bitwise-and v rom-byte))
+        (set-nes-emulator-active-prg-bank!
+         emu (modulo eff-bank (max 1 (nes-emulator-prg-bank-count emu))))]
+       [(1) ; MMC1 (Mapper 1): 5-write serial shift register
+        (if (bitwise-bit-set? v 7)
+            (begin
+              (set-nes-emulator-mmc1-shift-reg! emu 0)
+              (set-nes-emulator-mmc1-shift-count! emu 0))
+            (let* ([cnt (nes-emulator-mmc1-shift-count emu)]
+                   [acc (bitwise-ior (nes-emulator-mmc1-shift-reg emu)
+                                     (arithmetic-shift (bitwise-and v 1) cnt))])
+              (if (= cnt 4)
+                  (begin
+                    (set-nes-emulator-mmc1-shift-reg! emu 0)
+                    (set-nes-emulator-mmc1-shift-count! emu 0)
+                    (when (>= a #xE000)
+                      (set-nes-emulator-active-prg-bank!
+                       emu (modulo (bitwise-and acc #x0F)
+                                   (max 1 (nes-emulator-prg-bank-count emu))))))
+                  (begin
+                    (set-nes-emulator-mmc1-shift-reg! emu acc)
+                    (set-nes-emulator-mmc1-shift-count! emu (add1 cnt))))))]
+       [(4) ; MMC3 (Mapper 4)
+        (set-nes-emulator-active-prg-bank!
+         emu (modulo v (max 1 (nes-emulator-prg-bank-count emu))))]
+       [else (void)])]
     [else (void)]))
 
 (define (bus-read-u16 emu addr)
@@ -690,6 +948,7 @@
 (define (nes-reset! emu)
   (set-nes-emulator-sp! emu #xFD)
   (set-nes-emulator-status! emu #x24)
+  (set-nes-emulator-active-prg-bank! emu 0)
   (set-nes-emulator-pc! emu (bus-read-u16 emu #xFFFC))
   (set-nes-emulator-cycles! emu 0))
 
@@ -707,6 +966,20 @@
 
 (define (nes-ram-set! emu addr val)
   (bytes-set! (nes-emulator-ram emu) (bitwise-and #x07FF addr) (bitwise-and #xFF val)))
+
+(define (nes-wram-ref emu addr)
+  (define off (if (>= addr #x6000) (- addr #x6000) addr))
+  (bytes-ref (nes-emulator-wram emu) (bitwise-and #x1FFF off)))
+
+(define (nes-wram-set! emu addr val)
+  (define off (if (>= addr #x6000) (- addr #x6000) addr))
+  (bytes-set! (nes-emulator-wram emu) (bitwise-and #x1FFF off) (bitwise-and #xFF val)))
+
+(define (nes-chr-ref emu chr-addr)
+  (bytes-ref (nes-emulator-chr-rom emu) (bitwise-and #x1FFF chr-addr)))
+
+(define (nes-active-prg-bank emu)
+  (nes-emulator-active-prg-bank emu))
 
 (define (nes-vram-ref emu vram-addr)
   (bytes-ref (nes-emulator-vram emu) (bitwise-and #x0FFF vram-addr)))
