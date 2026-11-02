@@ -12,6 +12,10 @@
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
          "../compiler/nes-games-builder.rkt"
+         "../lib/nes-chr-assets.rkt"
+         "../lib/boba-badge-style.rkt"
+         "../lib/genre-libraries.rkt"
+         "../tools/nes-resource-tool.rkt"
          "../examples/boba_is_you.bnes"
          "../examples/boba_200_levels_cartridge.bnes"
          "../examples/mario_platformer.bnes"
@@ -776,7 +780,96 @@
     (check-false (nes-emulator-ppu-tainted? t-emu)))
   (check-equal? (nes-zp-ref t-emu TETRIS-ZP-DIRTY-ROW) 20))
 
-(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, and 6502 ROM tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 12. Resource Separation, Authentic Commercial CHR Loaders, Metasprite Orders,
+;;     Compiler CHR Deduplication/Flip-Folding & External ROM Patching Tools
+;; ============================================================================
+(test-case "Authentic Commercial CHR Loaders (SMB, Zelda, Tetris) & Zero-Offset BCD Typography Maps"
+  (define smb-chr    (load-authentic-smb-chr-rom))
+  (define zelda-chr  (load-authentic-zelda-chr-rom))
+  (define tetris-chr (load-authentic-tetris-chr-rom))
+
+  (check-equal? (bytes-length smb-chr) 8192)
+  (check-equal? (bytes-length zelda-chr) 8192)
+  (check-equal? (bytes-length tetris-chr) 8192)
+
+  (check-equal? (count-nonblank-chr-tiles smb-chr) 510)
+  (check-equal? (count-nonblank-chr-tiles zelda-chr) 413)
+  (check-equal? (count-nonblank-chr-tiles tetris-chr) 382)
+
+  ;; Zero-offset BCD property: '0'..'9' map to tile IDs 0..9, 'A'..'Z' map to 10..35
+  (check-equal? (encode-char-map-string NINTENDO-STD-CHAR-MAP "019AZ ")
+                '(#x00 #x01 #x09 #x0A #x23 #x24))
+  (check-equal? (encode-char-map-string TETRIS-CHAR-MAP "TETRIS-0 ")
+                '(#x1D #x0E #x1D #x1B #x12 #x1C #x24 #x00 #xFF)))
+
+(test-case "Metasprite Ordering Modes (row-major, col-major, symmetric-col-major) & Compiler CHR Flip-Folding"
+  ;; 1. row-major (Mario: #x32, #x33, #x34, #x35)
+  (check-equal? (hash-ref mario-metasprite 'tl) #x32)
+  (check-equal? (hash-ref mario-metasprite 'tr) #x33)
+  (check-equal? (hash-ref mario-metasprite 'bl) #x34)
+  (check-equal? (hash-ref mario-metasprite 'br) #x35)
+  (check-equal? (hash-ref mario-metasprite 'tr-attr) #x00)
+
+  ;; 2. col-major (Zelda Link: TL=#x00, BL=#x01, TR=#x02, BR=#x03)
+  (check-equal? (hash-ref link-metasprite 'tl) #x00)
+  (check-equal? (hash-ref link-metasprite 'bl) #x01)
+  (check-equal? (hash-ref link-metasprite 'tr) #x02)
+  (check-equal? (hash-ref link-metasprite 'br) #x03)
+
+  ;; 3. symmetric-col-major (Zelda Octorok: left=#x70/#x71, right=#x70/#x71 with OAM H-Flip #x40!)
+  (check-equal? (hash-ref octorok-metasprite 'tl) #x70)
+  (check-equal? (hash-ref octorok-metasprite 'tr) #x70)
+  (check-equal? (hash-ref octorok-metasprite 'bl) #x71)
+  (check-equal? (hash-ref octorok-metasprite 'br) #x71)
+  (check-equal? (hash-ref octorok-metasprite 'attr) #x02)
+  (check-equal? (hash-ref octorok-metasprite 'tr-attr) (bitwise-ior #x02 #x40))
+  (check-equal? (hash-ref octorok-metasprite 'br-attr) (bitwise-ior #x02 #x40))
+
+  ;; 4. Compiler CHR Tile Deduplication & Horizontal Mirror Flip-Folding
+  (define left-half (subbytes (load-authentic-zelda-chr-rom) (* #x70 16) (* #x71 16)))
+  (define right-half (flip-chr-tile-horizontal left-half))
+  ;; Flipping twice is an involution
+  (check-equal? (flip-chr-tile-horizontal right-half) left-half)
+  ;; Deduplicating [(0 . left-half), (1 . left-half), (2 . right-half)] folds all 3 into 1 unique 16-byte CHR tile!
+  (define dedup-res
+    (deduplicate-chr-tiles (list (cons 0 left-half)
+                                 (cons 1 left-half)
+                                 (cons 2 right-half))))
+  (check-equal? (hash-ref dedup-res 'deduped-count) 1)
+  (check-equal? (hash-ref dedup-res 'total-tiles-saved) 2)
+  (define remap-tbl (hash-ref dedup-res 'remap-table))
+  (check-equal? (hash-ref (hash-ref remap-tbl 0) 'hflip?) #f)
+  (check-equal? (hash-ref (hash-ref remap-tbl 1) 'hflip?) #f)
+  (check-equal? (hash-ref (hash-ref remap-tbl 2) 'hflip?) #t))
+
+(test-case "External ROM Resource Inspection & Level-Editor Stage Hot-Patching without Recompilation"
+  (define mario-info (inspect-ines-rom "build/mario_nes.nes"))
+  (check-equal? (hash-ref mario-info 'prg-bytes) 32768)
+  (check-equal? (hash-ref mario-info 'chr-bytes) 8192)
+  (check-equal? (hash-ref mario-info 'nonblank-chr-tiles) 510)
+
+  ;; Validate and compile an external sparse (col row TOKEN) stage specification (64-byte 8x8 table)
+  (define ext-cells
+    '((1 1 WORD-BOBA) (2 1 WORD-IS) (3 1 WORD-YOU)
+      (4 1 WORD-FLAG) (5 1 WORD-IS) (6 1 WORD-WIN)
+      (2 4 BOBA)      (5 4 FLAG)))
+  (check-true (validate-external-boba-stage ext-cells))
+  (define stage-bytes (compile-external-boba-stage-bytes ext-cells))
+  (check-equal? (bytes-length stage-bytes) 64)
+  (check-equal? (bytes-ref stage-bytes (+ (* 1 8) 1)) TXT-BOBA)
+  (check-equal? (bytes-ref stage-bytes (+ (* 1 8) 2)) TXT-IS)
+  (check-equal? (bytes-ref stage-bytes (+ (* 1 8) 3)) TXT-YOU)
+  (check-equal? (bytes-ref stage-bytes (+ (* 4 8) 2)) OBJ-BOBA)
+  (check-equal? (bytes-ref stage-bytes (+ (* 4 8) 5)) OBJ-FLAG)
+
+  ;; Binary-patch stage 0 inside an in-memory copy of boba-rom-bytes without recompiling 6502 code!
+  (define stage0-addr (hash-ref (asm-result-labels boba-asm-result) 'stage_1_data))
+  (define patched-rom (patch-boba-rom-stage! boba-rom-bytes stage0-addr 0 ext-cells))
+  (check-equal? (bytes-length patched-rom) (bytes-length boba-rom-bytes)))
+
+(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)
+
 
 

@@ -14,7 +14,8 @@
          "graded-typechecker.rkt"
          "diagnostics.rkt"
          "mos6502-assembler.rkt"
-         "boba-rom-builder.rkt")
+         "boba-rom-builder.rkt"
+         "../lib/nes-chr-assets.rkt")
 
 (provide
  ;; 1. Super Mario Bros. (World 1-1 Platformer)
@@ -93,76 +94,24 @@
 (define MARIO-ZP-WON          #x24) ; 1 = touched Flagpole at X >= 340!
 (define MARIO-ZP-VRAM-PENDING #x25) ; 1 = NMI should update bonked ? block tile in VRAM
 
+;; Loads the authentic 8 KB CHR-ROM from `assets/roms/super_mario_bros.nes`:
+;;   - Pattern Table 0 ($0000-$0FFF, Sprites): Small Mario (#x32..#x35 row-major),
+;;     Goomba (#x70..#x73 row-major), Coin (#x60), Sprite-0 Coin-Bottom Anchor (#xFF)
+;;   - Pattern Table 1 ($1000-$1FFF, BG via PPUCTRL=#x90): Digits 0-9 (#x00..#x09),
+;;     Letters A-Z (#x0A..#x23), Blank Sky (#x24), HUD Coin (#x2E), '?' Block (#x53..#x56),
+;;     Empty Block (#x57..#x5A), Brick (#x45/#x47), Warp Pipe (#x60..#x65), Ground (#xB4..#xB7)
 (define (build-mario-chr-rom)
-  (define tiles
-    (append
-     (list
-      ;; #x00: Empty sky tile
-      (cons #x00 '("........" "........" "........" "........" "........" "........" "........" "........"))
-      ;; #x01: Cracked Ground Brick (SMB1 iconic ground tile)
-      (cons #x01 '("22222221" "23332231" "23222221" "22211221" "11122111" "22322321" "22222221" "11111111"))
-      ;; #x02: Solid Masonry Brick
-      (cons #x02 '("33313331" "22212221" "22212221" "11111111" "31333133" "21222122" "21222122" "11111111"))
-      ;; #x03: '?' Question Block (Unbonked, golden shimmer)
-      (cons #x03 '("13333331" "31222213" "32.33.23" "32...323" "32..3.23" "32....23" "31223213" "13333331"))
-      ;; #x04: Empty Bonked Block
-      (cons #x04 '("12222221" "23....32" "2......2" "2......2" "2......2" "2......2" "23....32" "12222221"))
-      ;; #x05: Warp Pipe Top-Left
-      (cons #x05 '("11111111" "13322222" "13322212" "13322212" "11111111" ".1332222" ".1332212" ".1332212"))
-      ;; #x06: Warp Pipe Top-Right
-      (cons #x06 '("11111111" "22221121" "21111221" "21111221" "11111111" "2221121." "2111221." "2111221."))
-      ;; #x07: Warp Pipe Shaft-Left
-      (cons #x07 '(".1332222" ".1332212" ".1332212" ".1332222" ".1332212" ".1332212" ".1332222" ".1332212"))
-      ;; #x08: Warp Pipe Shaft-Right
-      (cons #x08 '("2221121." "2111221." "2111221." "2221121." "2111221." "2111221." "2221121." "2111221."))
-      ;; #x09: Flagpole Shaft
-      (cons #x09 '("...23..." "...23..." "...23..." "...23..." "...23..." "...23..." "...23..." "...23..."))
-      ;; #x0A: Flagpole Top Orb
-      (cons #x0A '("..2332.." ".233332." ".233332." "..2332.." "...23..." "...23..." "...23..." "...23..."))
-      ;; #x0B: Cloud / Bush Fluffy Tile
-      (cons #x0B '("..3333.." ".322223." "32233223" "32222223" "32222223" ".322223." "..3333.." "........"))
-      ;; #x0C: Castle Battlement Brick
-      (cons #x0C '("22.22.22" "22.22.22" "22222222" "21111112" "21....12" "21....12" "21....12" "22222222"))
-      ;; #x0F: Solid HUD Coin / Bar Tile for guaranteed Sprite 0 Hit overlap!
-      (cons #x0F '("33333333" "32222223" "32333323" "32333323" "32333323" "32333323" "32222223" "33333333"))
+  (load-authentic-smb-chr-rom))
 
-      ;; #x10..#x13: Mario 16x16 Metasprite (TL=CapL, TR=Cap/FaceR, BL=OverallsL, BR=OverallsR)
-      (cons #x10 '("..111111" ".1111111" ".222332." "22323332" "22322333" ".222233." "..11211." ".2221222"))
-      (cons #x11 '("1111...." "111111.." "3313...." "33133..." "331133.." "1111...." "11211..." "221222.."))
-      (cons #x12 '("22211211" "22111111" "33121111" "33111111" "..1111.." ".2222..." "22222..." "........"))
-      (cons #x13 '("121122.." "111122.." "112133.." "111133.." "1111...." ".2222..." ".22222.." "........"))
+(define MARIO-SMALL-METASPRITE
+  (make-metasprite-desc 'mario-small '(#x32 #x33 #x34 #x35) #:order 'row-major #:attr #x00))
 
-      ;; #x14..#x17: Goomba 16x16 Metasprite (Mushroom Enemy)
-      (cons #x14 '("....1111" "..111111" ".1311111" "11331111" "11131111" "11111111" ".1111111" "..222222"))
-      (cons #x15 '("1111...." "111111.." "1111131." "11113311" "11113111" "11111111" "1111111." "222222.."))
-      (cons #x16 '("..222222" "...22222" "..333..." ".3333..." ".333...." "........" "........" "........"))
-      (cons #x17 '("222222.." "22222..." "...333.." "...3333." "....333." "........" "........" "........"))
-
-      ;; #x18: Spinning Coin Sprite
-      (cons #x18 '("..2332.." ".232232." ".232232." ".232232." ".232232." ".232232." "..2332.." "........"))
-      ;; #x19: Flagpole Victory Pennant
-      (cons #x19 '("3333333." "322223.." "32333..." "322223.." "3333333." "........" "........" "........")))
-     (make-word-tile-pair #x30 "MARI")
-     (make-word-tile-pair #x32 "COIN")
-     (make-word-tile-pair #x34 "W1 1")
-     ;; Digits 0..9 at #x20..#x29
-     (for/list ([d (in-range 10)])
-       (cons (+ #x20 d)
-             (list "........"
-                   (if (memv d '(0 2 3 5 6 7 8 9)) "..3333.." "....3...")
-                   (if (memv d '(0 4 8 9))         ".3....3."
-                       (if (memv d '(5 6))         ".3......" "......3."))
-                   (if (memv d '(0 1 7))           ".3....3." "..3333..")
-                   (if (memv d '(0 6 8))           ".3....3."
-                       (if (= d 2)                 ".3......" "......3."))
-                   (if (memv d '(0 2 3 5 6 8 9))   "..3333.." "....3...")
-                   "........"
-                   "........")))))
-  (build-chr-rom tiles))
+(define GOOMBA-METASPRITE
+  (make-metasprite-desc 'goomba '(#x70 #x71 #x72 #x73) #:order 'row-major #:attr #x01))
 
 (define (emit-mario-6502-program)
   `(;; ========================================================================
-    ;; Super Mario Bros. (World 1-1) in #lang boba-nes
+    ;; Super Mario Bros. (World 1-1) in #lang boba-nes (Authentic SMB1 CHR-ROM)
     ;; ========================================================================
     (label reset_handler)
     (SEI)
@@ -215,13 +164,14 @@
     (BNE load_pal_m)
 
     ;; Clear both Nametable 0 ($2000-$23FF) and Nametable 1 ($2400-$27FF)
+    ;; to SMB1's Blank Sky Tile (#x24, since #x00 in SMB1 PT1 is the digit '0'!)
     (BIT #:abs #x2002)
     (LDA #:imm #x20)
     (STA #:abs #x2006)
     (LDA #:imm #x00)
     (STA #:abs #x2006)
     (LDY #:imm 8)
-    (LDA #:imm #x00)
+    (LDA #:imm #x24)
     (LDX #:imm 0)
     (label clr_nt_m)
     (STA #:abs #x2007)
@@ -230,41 +180,30 @@
     (DEY)
     (BNE clr_nt_m)
 
-    ;; Draw Stationary Status Bar HUD at Row 2 of Nametable 0 ($2042..$205D):
-    ;;   "MARI" (#x30,#x70) + "COIN" (#x32,#x72) + ":0" + "W1 1" (#x34,#x74)
-    ;;   And place solid tile #x0F at (X=24, Y=24 -> $2063) for Sprite 0 Hit!
+    ;; Zero both Attribute Tables ($23C0-$23FF and $27C0-$27FF) after #x24 fill
     (BIT #:abs #x2002)
-    (LDA #:imm #x20)
-    (STA #:abs #x2006)
-    (LDA #:imm #x42)
-    (STA #:abs #x2006)
-    (LDA #:imm #x30) (STA #:abs #x2007)
-    (LDA #:imm #x70) (STA #:abs #x2007)
-    (LDA #:imm #x00) (STA #:abs #x2007)
-    (LDA #:imm #x32) (STA #:abs #x2007)
-    (LDA #:imm #x72) (STA #:abs #x2007)
-    (LDA #:imm #x20) (STA #:abs #x2007) ; '0' coins
-    (LDA #:imm #x00) (STA #:abs #x2007)
-    (LDA #:imm #x34) (STA #:abs #x2007)
-    (LDA #:imm #x74) (STA #:abs #x2007)
+    (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xC0) (STA #:abs #x2006)
+    (LDA #:imm #x00) (LDX #:imm 64)
+    (label clr_attr_nt0_m) (STA #:abs #x2007) (DEX) (BNE clr_attr_nt0_m)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x27) (STA #:abs #x2006) (LDA #:imm #xC0) (STA #:abs #x2006)
+    (LDA #:imm #x00) (LDX #:imm 64)
+    (label clr_attr_nt1_m) (STA #:abs #x2007) (DEX) (BNE clr_attr_nt1_m)
 
-    ;; Write opaque Sprite-0-Hit anchor tile (#x0F) at Nametable 0 row 3, col 3 ($2063 -> pixel X=24, Y=24)
-    (BIT #:abs #x2002)
-    (LDA #:imm #x20)
-    (STA #:abs #x2006)
-    (LDA #:imm #x63)
-    (STA #:abs #x2006)
-    (LDA #:imm #x0F)
-    (STA #:abs #x2007)
+    ;; Draw Stationary Status Bar HUD at Row 2 of Nametable 0 ($2043..$2057)
+    ;; using NINTENDO-STD-CHAR-MAP ("MARIO  *x0  WORLD 1-1", where '*' = #x2E HUD Coin at $204A,
+    ;; '0' is at $204C -> tile #x00!):
+    ,@(emit-nametable-string-6502 #x2043 NINTENDO-STD-CHAR-MAP "MARIO  *x0  WORLD 1-1")
 
     ;; Draw World 1-1 Ground Rows (Rows 24..27 -> $2300-$237F in NT0 and $2700-$277F in NT1)
+    ;; using SMB1's authentic Cracked Ground Brick tiles (#xB4/#xB5)
     (BIT #:abs #x2002)
     (LDA #:imm #x23)
     (STA #:abs #x2006)
     (LDA #:imm #x00)
     (STA #:abs #x2006)
     (LDX #:imm 128)
-    (LDA #:imm #x01) ; Cracked Ground Brick
+    (LDA #:imm #xB4)
     (label fill_gnd_nt0)
     (STA #:abs #x2007)
     (DEX)
@@ -276,94 +215,103 @@
     (LDA #:imm #x00)
     (STA #:abs #x2006)
     (LDX #:imm 128)
-    (LDA #:imm #x01)
+    (LDA #:imm #xB4)
     (label fill_gnd_nt1)
     (STA #:abs #x2007)
     (DEX)
     (BNE fill_gnd_nt1)
 
-    ;; Draw World 1-1 Landmarks in Nametable 0 ($2000):
-    ;; 1. '?' Question Block & Brick Row at Row 15 (Y=120 -> $21E8..$21EE, cols 8..14)
+    ;; Draw World 1-1 Landmarks in Nametable 0 ($2000) using authentic SMB1 PT1 tiles:
+    ;; 1. 2x2 '?' Question Block (#x53,#x54 / #x55,#x56) & Brick Row (#x45/#x47) at Rows 14..15 ($21C8..$21ED)
+    ;;    (Aligned to 16x16 metatile rows 14..15 so top & bottom share Attribute Row $23D8..$23DF!)
     (BIT #:abs #x2002)
-    (LDA #:imm #x21)
-    (STA #:abs #x2006)
-    (LDA #:imm #xE8)
-    (STA #:abs #x2006)
-    (LDA #:imm #x02) (STA #:abs #x2007) ; Brick
-    (LDA #:imm #x03) (STA #:abs #x2007) ; '?' Question Block at col 9..10 (X=72..87)!
-    (LDA #:imm #x03) (STA #:abs #x2007)
-    (LDA #:imm #x02) (STA #:abs #x2007) ; Brick
-    (LDA #:imm #x03) (STA #:abs #x2007) ; '?' Question Block
-    (LDA #:imm #x02) (STA #:abs #x2007)
+    (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xC8) (STA #:abs #x2006)
+    (LDA #:imm #x45) (STA #:abs #x2007) ; Brick top (col 8)
+    (LDA #:imm #x53) (STA #:abs #x2007) ; '?' Block TL at col 9 ($21C9)
+    (LDA #:imm #x54) (STA #:abs #x2007) ; '?' Block TR at col 10 ($21CA)
+    (LDA #:imm #x45) (STA #:abs #x2007) ; Brick top (col 11)
+    (LDA #:imm #x53) (STA #:abs #x2007) ; '?' Block TL (col 12)
+    (LDA #:imm #x54) (STA #:abs #x2007) ; '?' Block TR (col 13)
 
-    ;; 2. Green Warp Pipe at Cols 20..21, Rows 20..23 ($2294..$22F5, X=160..175, Y=160..191)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xE8) (STA #:abs #x2006)
+    (LDA #:imm #x47) (STA #:abs #x2007) ; Brick bottom (col 8)
+    (LDA #:imm #x55) (STA #:abs #x2007) ; '?' Block BL at col 9 ($21E9)
+    (LDA #:imm #x56) (STA #:abs #x2007) ; '?' Block BR at col 10 ($21EA)
+    (LDA #:imm #x47) (STA #:abs #x2007) ; Brick bottom (col 11)
+    (LDA #:imm #x55) (STA #:abs #x2007) ; '?' Block BL (col 12)
+    (LDA #:imm #x56) (STA #:abs #x2007) ; '?' Block BR (col 13)
+
+    ;; 2. Authentic Green Warp Pipe at Cols 20..21, Rows 20..23 ($2294..$22F5)
     (BIT #:abs #x2002)
     (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #x94) (STA #:abs #x2006)
-    (LDA #:imm #x05) (STA #:abs #x2007) (LDA #:imm #x06) (STA #:abs #x2007)
+    (LDA #:imm #x60) (STA #:abs #x2007) (LDA #:imm #x63) (STA #:abs #x2007)
     (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #xB4) (STA #:abs #x2006)
-    (LDA #:imm #x07) (STA #:abs #x2007) (LDA #:imm #x08) (STA #:abs #x2007)
+    (LDA #:imm #x64) (STA #:abs #x2007) (LDA #:imm #x67) (STA #:abs #x2007)
     (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #xD4) (STA #:abs #x2006)
-    (LDA #:imm #x07) (STA #:abs #x2007) (LDA #:imm #x08) (STA #:abs #x2007)
+    (LDA #:imm #x68) (STA #:abs #x2007) (LDA #:imm #x6A) (STA #:abs #x2007)
     (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #xF4) (STA #:abs #x2006)
-    (LDA #:imm #x07) (STA #:abs #x2007) (LDA #:imm #x08) (STA #:abs #x2007)
-
-    ;; 3. Clouds at Row 7 ($20E4..$20E6, $20F2..$20F4)
-    (BIT #:abs #x2002)
-    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xE4) (STA #:abs #x2006)
-    (LDA #:imm #x0B) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x68) (STA #:abs #x2007) (LDA #:imm #x6A) (STA #:abs #x2007)
 
     ;; Draw World 1-1 Landmarks in Nametable 1 ($2400 - Scrolled Second Screen!):
-    ;; 1. Brick Staircase at Row 21..23 ($26A4..$26E7)
+    ;; 1. Brick Staircase at Row 21..23 ($26A4..$26E7) using SMB1 Hard Block (#x57)
     (BIT #:abs #x2002)
     (LDA #:imm #x26) (STA #:abs #x2006) (LDA #:imm #xE4) (STA #:abs #x2006)
-    (LDA #:imm #x04) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x57) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
     (LDA #:imm #x26) (STA #:abs #x2006) (LDA #:imm #xC5) (STA #:abs #x2006)
-    (LDA #:imm #x04) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x57) (STA #:abs #x2007) (STA #:abs #x2007)
     (LDA #:imm #x26) (STA #:abs #x2006) (LDA #:imm #xA6) (STA #:abs #x2006)
-    (LDA #:imm #x04) (STA #:abs #x2007)
+    (LDA #:imm #x57) (STA #:abs #x2007)
 
     ;; 2. Flagpole at Col 12 of Nametable 1 (World X = 256 + 96 = 352! $250C..$26EC)
+    ;;    using SMB1 Flagpole Orb (#x2F) and Shaft (#xA2)
     (BIT #:abs #x2002)
     (LDA #:imm #x25) (STA #:abs #x2006) (LDA #:imm #x0C) (STA #:abs #x2006)
-    (LDA #:imm #x0A) (STA #:abs #x2007) ; Flagpole Orb
+    (LDA #:imm #x2F) (STA #:abs #x2007) ; Flagpole Orb
     (LDA #:imm #x25) (STA #:abs #x2006) (LDA #:imm #x2C) (STA #:abs #x2006)
-    (LDA #:imm #x09) (STA #:abs #x2007)
+    (LDA #:imm #xA2) (STA #:abs #x2007)
     (LDA #:imm #x25) (STA #:abs #x2006) (LDA #:imm #x4C) (STA #:abs #x2006)
-    (LDA #:imm #x09) (STA #:abs #x2007)
+    (LDA #:imm #xA2) (STA #:abs #x2007)
     (LDA #:imm #x25) (STA #:abs #x2006) (LDA #:imm #x6C) (STA #:abs #x2006)
-    (LDA #:imm #x09) (STA #:abs #x2007)
+    (LDA #:imm #xA2) (STA #:abs #x2007)
     (LDA #:imm #x25) (STA #:abs #x2006) (LDA #:imm #x8C) (STA #:abs #x2006)
-    (LDA #:imm #x09) (STA #:abs #x2007)
+    (LDA #:imm #xA2) (STA #:abs #x2007)
     (LDA #:imm #x25) (STA #:abs #x2006) (LDA #:imm #xAC) (STA #:abs #x2006)
-    (LDA #:imm #x09) (STA #:abs #x2007)
+    (LDA #:imm #xA2) (STA #:abs #x2007)
     (LDA #:imm #x25) (STA #:abs #x2006) (LDA #:imm #xCC) (STA #:abs #x2006)
-    (LDA #:imm #x09) (STA #:abs #x2007)
+    (LDA #:imm #xA2) (STA #:abs #x2007)
 
-    ;; 3. Castle at Col 18..22 of Nametable 1 ($2692..$26F6)
+    ;; 3. Castle at Col 18..21 of Nametable 1 ($2692..$26D5) using SMB1 Masonry Bricks (#x45/#x47)
     (BIT #:abs #x2002)
     (LDA #:imm #x26) (STA #:abs #x2006) (LDA #:imm #x92) (STA #:abs #x2006)
-    (LDA #:imm #x0C) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x45) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
     (LDA #:imm #x26) (STA #:abs #x2006) (LDA #:imm #xB2) (STA #:abs #x2006)
-    (LDA #:imm #x02) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x47) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
     (LDA #:imm #x26) (STA #:abs #x2006) (LDA #:imm #xD2) (STA #:abs #x2006)
-    (LDA #:imm #x02) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x47) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
 
-    ;; Set Attribute Tables ($23C0-$23FF and $27C0-$27FF):
-    ;;   Top rows = Palette 1 (Gold/White HUD & ? blocks), Pipe rows = Palette 2 (Green), Ground = Palette 0 (Brick Red)
+    ;; Set Attribute Tables ($23C0-$23FF):
+    ;;   $23C0..$23C7 (Rows 0..3)   = #x55 (Palette 1 Gold/White HUD)
+    ;;   $23D8..$23DF (Rows 12..15) = #x55 (Palette 1 Gold/Cream Question Blocks & Bricks)
+    ;;   $23ED        (Rows 20..23, Cols 20..23) = #xAA (Palette 2 Lime/Forest Green Warp Pipe!)
+    ;;   $27D2..$27EB (Flagpole Shaft in NT1)    = #xAA (Palette 2 Green Flagpole Shaft!)
     (BIT #:abs #x2002)
-    (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xD0) (STA #:abs #x2006)
-    (LDA #:imm #x55) ; Palette 1 for Question Blocks row
-    (LDX #:imm 16)
+    (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xC0) (STA #:abs #x2006)
+    (LDA #:imm #x55)
+    (LDX #:imm 8)
+    (label attr_hud_m) (STA #:abs #x2007) (DEX) (BNE attr_hud_m)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xD8) (STA #:abs #x2006)
+    (LDA #:imm #x55) ; Palette 1 for Question Blocks row (Rows 12..15)
+    (LDX #:imm 8)
     (label attr_qb_m)
     (STA #:abs #x2007)
     (DEX)
     (BNE attr_qb_m)
-    (LDA #:imm #xAA) ; Palette 2 (Green) for Pipe & Bushes
-    (LDX #:imm 16)
-    (label attr_pipe_m)
-    (STA #:abs #x2007)
-    (DEX)
-    (BNE attr_pipe_m)
+    ;; Set $23ED (Rows 20..23, Cols 20..23) to #xAA (Palette 2 Green) for the Warp Pipe!
+    (BIT #:abs #x2002)
+    (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xED) (STA #:abs #x2006)
+    (LDA #:imm #xAA) (STA #:abs #x2007)
 
     ;; Initialize Mario & World 1-1 State:
     ;; Mario starts at World X = 40, Y = 176 (standing on ground), Goomba at X = 120
@@ -390,22 +338,24 @@
     (LDA #:imm 120)
     (STA #:zp ,MARIO-ZP-GOOMBA-X)
 
-    ;; Place OAM Sprite 0 at (X=24, Y=23, Tile=#x0F, Attr=#x20 behind BG) for HUD split!
-    (LDA #:imm 23)   (STA #:abs #x0200)
-    (LDA #:imm #x0F) (STA #:abs #x0201)
-    (LDA #:imm #x01) (STA #:abs #x0202)
-    (LDA #:imm 24)   (STA #:abs #x0203)
+    ;; Place OAM Sprite 0 at (X=80, Y=15, Tile=#xFF, Attr=#x02) directly overlapping the bottom
+    ;; of the HUD Coin ($204A = #x2E at X=80, Y=16) for authentic invisible Sprite 0 Hit!
+    (LDA #:imm 15)   (STA #:abs #x0200)
+    (LDA #:imm #xFF) (STA #:abs #x0201)
+    (LDA #:imm #x02) (STA #:abs #x0202)
+    (LDA #:imm 80)   (STA #:abs #x0203)
 
     ;; Enable 2A03 APU Pulse 1 + Pulse 2 + Triangle
     (LDA #:imm #x07)
     (STA #:abs #x4015)
 
-    ;; Reset PPU scroll latch and enable NMI + BG + Sprites
+    ;; Reset PPU scroll latch and enable NMI + BG Pattern Table 1 ($1000) + Sprite Pattern Table 0 ($0000):
+    ;; PPUCTRL = #$90 (bit 7 NMI=1, bit 4 BG_PT=1, bit 3 SPR_PT=0)
     (BIT #:abs #x2002)
     (LDA #:imm 0)
     (STA #:abs #x2005)
     (STA #:abs #x2005)
-    (LDA #:imm #x80)
+    (LDA #:imm #x90)
     (STA #:abs #x2000)
     (LDA #:imm #x1E)
     (STA #:abs #x2001)
@@ -422,22 +372,29 @@
     (label game_frame_step)
     (INC #:zp ,MARIO-ZP-FRAME-CNT)
 
-    ;; 1. Perform Mid-Frame Sprite-0-Hit Raster Split at Y=24!
-    ;;    Top HUD stays at scroll (0,0); playfield below Y=24 scrolls by (SCROLL_NT, SCROLL_X)
+    ;; 1. Perform Mid-Frame Sprite-0-Hit Raster Split at HUD Coin bottom scanline!
+    ;;    Top HUD stays at scroll (0,0); playfield below Y=29 scrolls by (SCROLL_NT, SCROLL_X)
+    ;;    keeping PPUCTRL bit 4 = 1 (#x90) so Background stays on Pattern Table 1 ($1000)!
     (label m_s0_clear)
     (BIT #:abs #x2002)
     (BVS m_s0_clear)
     (label m_s0_hit)
     (BIT #:abs #x2002)
     (BVC m_s0_hit)
+    ;; Wait ~180 CPU cycles (~540 PPU dots) so scanlines 22..23 of the HUD finish rendering before scroll split!
+    (LDX #:imm 36)
+    (label m_s0_hblank)
+    (DEX)
+    (BNE m_s0_hblank)
     (LDA #:zp ,MARIO-ZP-SCROLL-NT)
     (AND #:imm #x01)
-    (ORA #:imm #x80)
+    (ORA #:imm #x90)
     (STA #:abs #x2000)
     (LDA #:zp ,MARIO-ZP-SCROLL-X)
     (STA #:abs #x2005)
     (LDA #:imm 0)
     (STA #:abs #x2005)
+
 
     ;; 2. Poll Controller 1 ($4016)
     (LDA #:zp ,MARIO-ZP-BUTTONS)
@@ -659,43 +616,23 @@
     (RTS)
 
     ;; ========================================================================
-    ;; Build OAM Sprite Buffer ($0200-$02FF)
-    ;;   Slot 0 ($0200)    : Sprite 0 HUD Split Anchor (X=24, Y=23, Tile=#x0F)
-    ;;   Slots 1..4 ($0204): Mario 16x16 Metasprite (#x10..#x13, Palette 0)
-    ;;   Slots 5..8 ($0214): Goomba 16x16 Metasprite (#x14..#x17, Palette 1)
-    ;;   Slot 9 ($0224)    : Popping Coin Sprite (#x18, Palette 2)
-    ;;   Slot 10 ($0228)   : Flagpole Pennant Sprite (#x19, Palette 3)
+    ;; Build OAM Sprite Buffer ($0200-$02FF) using Authentic SMB1 PT0 Tiles:
+    ;;   Slot 0 ($0200)    : Sprite 0 HUD Coin-Bottom Anchor (X=24, Y=23, Tile=#xFF)
+    ;;   Slots 1..4 ($0204): Small Mario 16x16 Metasprite (#x32..#x35, row-major, Pal 0)
+    ;;   Slots 5..8 ($0214): Goomba 16x16 Metasprite (#x70..#x73, row-major, Pal 1)
+    ;;   Slot 9 ($0224)    : Spinning Coin Sprite (#x60, Pal 2)
     ;; ========================================================================
     (label build_mario_oam)
-    ;; Keep Slot 0 anchored for Sprite 0 Hit
-    (LDA #:imm 23)   (STA #:abs #x0200)
-    (LDA #:imm #x0F) (STA #:abs #x0201)
-    (LDA #:imm #x01) (STA #:abs #x0202)
-    (LDA #:imm 24)   (STA #:abs #x0203)
+    ;; Keep Slot 0 anchored at (X=80, Y=15, Tile=#xFF, Attr=#x02) over HUD Coin ($204A = #x2E) for Sprite 0 Hit
+    (LDA #:imm 15)   (STA #:abs #x0200)
+    (LDA #:imm #xFF) (STA #:abs #x0201)
+    (LDA #:imm #x02) (STA #:abs #x0202)
+    (LDA #:imm 80)   (STA #:abs #x0203)
 
-    ;; Emit Mario 16x16 Metasprite at $0204..$0213
-    (LDA #:zp ,MARIO-ZP-Y-PX)
-    (STA #:abs #x0204)
-    (STA #:abs #x0208)
-    (CLC)
-    (ADC #:imm 8)
-    (STA #:abs #x020C)
-    (STA #:abs #x0210)
-    (LDA #:imm #x10) (STA #:abs #x0205)
-    (LDA #:imm #x11) (STA #:abs #x0209)
-    (LDA #:imm #x12) (STA #:abs #x020D)
-    (LDA #:imm #x13) (STA #:abs #x0211)
-    (LDA #:imm #x00)
-    (STA #:abs #x0206) (STA #:abs #x020A) (STA #:abs #x020E) (STA #:abs #x0212)
-    (LDA #:zp ,MARIO-ZP-SCREEN-X)
-    (STA #:abs #x0207)
-    (STA #:abs #x020F)
-    (CLC)
-    (ADC #:imm 8)
-    (STA #:abs #x020B)
-    (STA #:abs #x0213)
+    ;; Emit Authentic Small Mario 16x16 Metasprite (#x32, #x33, #x34, #x35) at $0204..$0213
+    ,@(emit-metasprite-oam-6502 MARIO-SMALL-METASPRITE MARIO-ZP-SCREEN-X MARIO-ZP-Y-PX #x04)
 
-    ;; Emit Goomba 16x16 Metasprite at $0214..$0223 (if alive)
+    ;; Emit Authentic Goomba 16x16 Metasprite (#x70, #x71, #x72, #x73) at $0214..$0223 (if alive)
     (LDA #:zp ,MARIO-ZP-GOOMBA-ALIVE)
     (BNE draw_goomba_oam)
     (LDA #:imm #xF8)
@@ -706,10 +643,10 @@
     (STA #:abs #x0214) (STA #:abs #x0218)
     (LDA #:imm 184)
     (STA #:abs #x021C) (STA #:abs #x0220)
-    (LDA #:imm #x14) (STA #:abs #x0215)
-    (LDA #:imm #x15) (STA #:abs #x0219)
-    (LDA #:imm #x16) (STA #:abs #x021D)
-    (LDA #:imm #x17) (STA #:abs #x0221)
+    (LDA #:imm #x70) (STA #:abs #x0215)
+    (LDA #:imm #x71) (STA #:abs #x0219)
+    (LDA #:imm #x72) (STA #:abs #x021D)
+    (LDA #:imm #x73) (STA #:abs #x0221)
     (LDA #:imm #x01)
     (STA #:abs #x0216) (STA #:abs #x021A) (STA #:abs #x021E) (STA #:abs #x0222)
     (LDA #:zp ,MARIO-ZP-GOOMBA-X)
@@ -720,7 +657,7 @@
     (ADC #:imm 8)
     (STA #:abs #x021B) (STA #:abs #x0223)
 
-    ;; Emit Popping Coin Sprite at $0224..$0227
+    ;; Emit Authentic Spinning Coin Sprite (#x60) at $0224..$0227
     (label draw_coin_oam)
     (LDA #:zp ,MARIO-ZP-COIN-ANIM-Y)
     (BNE show_coin_spr)
@@ -729,7 +666,7 @@
     (JMP done_mario_oam)
     (label show_coin_spr)
     (STA #:abs #x0224)
-    (LDA #:imm #x18) (STA #:abs #x0225)
+    (LDA #:imm #x60) (STA #:abs #x0225)
     (LDA #:imm #x02) (STA #:abs #x0226)
     (LDA #:imm 76)
     (SEC)
@@ -742,8 +679,9 @@
     ;; ========================================================================
     ;; VBlank NMI Handler (Grade Phi1 <= 2273 cyc, Grade L4 Scroll Restore)
     ;;   1. Executes $4014 OAMDMA (514 cyc)
-    ;;   2. Updates HUD Coin digit ($2047) and bonked '?' block ($21E9) if pending
-    ;;   3. Restores PPU scroll to (0, 0) for top stationary HUD bar before RTI!
+    ;;   2. Updates HUD Coin digit ($204C -> tile #x00..#x09, ZERO offset addition!)
+    ;;      and bonked 2x2 '?' block ($21C9..$21CA, $21E9..$21EA -> #x57..#x5A)
+    ;;   3. Restores PPU scroll to (0, 0) & PPUCTRL = #$90 before RTI!
     ;; ========================================================================
     (label nmi_handler)
     (PHA)
@@ -757,37 +695,35 @@
     (LDA #:imm #x02)
     (STA #:abs #x4014)
 
-    ;; Update Coin Counter digit in HUD ($2047)
+    ;; Update Coin Counter digit in HUD ($204C):
+    ;; In authentic SMB1 PT1, digits '0'..'9' are at #x00..#x09!
     (BIT #:abs #x2002)
     (LDA #:imm #x20)
     (STA #:abs #x2006)
-    (LDA #:imm #x47)
+    (LDA #:imm #x4C)
     (STA #:abs #x2006)
     (LDA #:zp ,MARIO-ZP-COINS)
     (AND #:imm #x07)
-    (CLC)
-    (ADC #:imm #x20)
     (STA #:abs #x2007)
 
-    ;; If '?' Question Block was bonked, turn $21E9..$21EA into Empty Block (#x04)
+    ;; If '?' Question Block was bonked, turn 2x2 block ($21C9..$21CA & $21E9..$21EA)
+    ;; into SMB1's authentic 2x2 Empty Block (#x57, #x58 / #x59, #x5A)!
     (LDA #:zp ,MARIO-ZP-VRAM-PENDING)
     (BEQ nmi_restore_hud_scroll)
     (LDA #:imm 0)
     (STA #:zp ,MARIO-ZP-VRAM-PENDING)
     (BIT #:abs #x2002)
-    (LDA #:imm #x21)
-    (STA #:abs #x2006)
-    (LDA #:imm #xE9)
-    (STA #:abs #x2006)
-    (LDA #:imm #x04)
-    (STA #:abs #x2007)
-    (STA #:abs #x2007)
+    (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xC9) (STA #:abs #x2006)
+    (LDA #:imm #x57) (STA #:abs #x2007)
+    (LDA #:imm #x58) (STA #:abs #x2007)
+    (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xE9) (STA #:abs #x2006)
+    (LDA #:imm #x59) (STA #:abs #x2007)
+    (LDA #:imm #x5A) (STA #:abs #x2007)
 
-    ;; Lock top of screen to Nametable 0 at scroll (0, 0) for the stationary HUD!
-    ;; (ActiveFrame will split the scroll at scanline 24 via Sprite 0 Hit!)
+    ;; Lock top of screen to Nametable 0 at scroll (0, 0) with PPUCTRL = #$90 (BG=PT1, SPR=PT0)
     (label nmi_restore_hud_scroll)
     (BIT #:abs #x2002)
-    (LDA #:imm #x80)
+    (LDA #:imm #x90)
     (STA #:abs #x2000)
     (LDA #:imm 0)
     (STA #:abs #x2005)
@@ -807,24 +743,24 @@
 
     (.align 256)
     (label mario_palette_table)
-    ;; 4 Background Palettes (Universal Sky Blue #x22):
-    ;; Pal 0: Brick Red / Ground (#x22, #x0F, #x16, #x37)
-    ;; Pal 1: Golden '?' Block / HUD (#x22, #x0F, #x27, #x30)
-    ;; Pal 2: Emerald Warp Pipe & Bushes (#x22, #x0F, #x19, #x29)
-    ;; Pal 3: Castle Stone (#x22, #x0F, #x00, #x10)
-    (.byte #x22 #x0F #x16 #x37
-           #x22 #x0F #x27 #x30
-           #x22 #x0F #x19 #x29
-           #x22 #x0F #x00 #x10
+    ;; Authentic 1985 Super Mario Bros. Overworld Palette ($3F00-$3F1F):
+    ;;   BG Pal 0 (Ground / Bricks): Sky #x22, Peach #x36, Brick Red #x17, Black #x0F
+    ;;   BG Pal 1 (HUD & '?' Block): Sky #x22, Gold #x27, Cream #x37, Black #x0F
+    ;;   BG Pal 2 (Green Warp Pipe): Sky #x22, Lime #x29, Forest Green #x19, Black #x0F
+    ;;   BG Pal 3 (Castle Stone)   : Sky #x22, Silver #x30, Gray #x10, Black #x0F
+    (.byte #x22 #x36 #x17 #x0F
+           #x22 #x27 #x37 #x0F
+           #x22 #x29 #x19 #x0F
+           #x22 #x30 #x10 #x0F
            ;; 4 Sprite Palettes:
-           ;; Spr 0: Mario Red/Brown/Peach (#x22, #x16, #x27, #x18)
-           ;; Spr 1: Goomba Chestnut/Cream (#x22, #x0F, #x17, #x37)
-           ;; Spr 2: Coin Gold (#x22, #x0F, #x27, #x30)
-           ;; Spr 3: Flag Pennant Green (#x22, #x0F, #x19, #x30)
-           #x22 #x16 #x36 #x17
-           #x22 #x0F #x17 #x37
-           #x22 #x0F #x27 #x30
-           #x22 #x0F #x19 #x30)))
+           ;;   Spr 0 (Small Mario): Sky #x22, Red #x16, Tan Skin #x27, Brown Overalls #x18
+           ;;   Spr 1 (Goomba)     : Sky #x22, Black #x0F, Cream Stem #x36, Chestnut #x17
+           ;;   Spr 2 (Coin)       : Sky #x22, Red-Gold #x16, White #x30, Bright Gold #x27
+           ;;   Spr 3 (Pennant)    : Sky #x22, Lime #x29, White #x30, Forest Green #x19
+           #x22 #x16 #x27 #x18
+           #x22 #x0F #x36 #x17
+           #x22 #x16 #x30 #x27
+           #x22 #x29 #x30 #x19)))
 
 (define (compile-mario-nes-rom! #:nes-out-path [nes-out-path #f])
   (define forms (emit-mario-6502-program))
@@ -856,7 +792,7 @@
             'scanline-sprites 5
             'ram-bytes 256
             'prg-rom-bytes (bytes-length (asm-result-bytes asm-res))
-            'chr-tiles 40
+            'chr-tiles 510
             'vram-dma-bytes 12
             'attr-clashes 0
             'apu-channels '(pulse1 pulse2 triangle)))
@@ -889,64 +825,24 @@
 (define ZELDA-ZP-OAM-CURSOR   #x24) ; Coprime OAM flicker rotation cursor
 (define ZELDA-ZP-ROOM-DIRTY   #x25) ; 1 = NMI updates room doorway/HUD
 
+;; Loads the authentic 8 KB CHR bank assembled from `assets/roms/legend_of_zelda.nes`:
+;;   - PT0 ($0000-$06FF): CommonSpritePatterns (Link #x00..#x03 col-major, Sword #x20, Key #x28, Triforce #x2E)
+;;   - PT0 ($0700-$0E1F): PatternBlockOWSP (Red Octorok #x70, #x71 symmetric-col-major)
+;;   - PT1 ($1000-$16FF): CommonBackgroundPatterns (0-9 at #x00..#x09, A-Z at #x0A..#x23, Blank #x24, Heart #x65)
+;;   - PT1 ($1700-$1F1F): PatternBlockOWBG (Overworld Craggy Rocks #x70..#x73, Ground #x84..#x87)
 (define (build-zelda-chr-rom)
-  (define tiles
-    (append
-     (list
-      ;; #x00: Floor tile
-      (cons #x00 '("........" "........" "........" "........" "........" "........" "........" "........"))
-      ;; #x01: Overworld Craggy Mountain / Tree Rock Metatile
-      (cons #x01 '("12233221" "23322332" "23211232" "32111123" "32122123" "23211232" "23322332" "12233221"))
-      ;; #x02: Carved Dungeon Temple Block
-      (cons #x02 '("33333331" "32222211" "32111211" "32121211" "32111211" "32222211" "31111111" "11111111"))
-      ;; #x03: Locked Dungeon Door (Keyhole gate)
-      (cons #x03 '("13333331" "32111123" "31.33.13" "31.33.13" "31..3.13" "31.33.13" "32111123" "13333331"))
-      ;; #x04: Sanctum Pedestal Tile
-      (cons #x04 '("33333333" "12222221" ".133331." ".132231." ".132231." ".133331." "12222221" "33333333"))
-      ;; #x05: HUD Heart Icon
-      (cons #x05 '(".22..22." "23222222" "23222222" "22222222" ".222222." "..2222.." "...22..." "........"))
+  (load-authentic-zelda-chr-rom))
 
-      ;; #x10..#x13: Link 16x16 Metasprite (Green Tunic, Pointed Cap & Hylian Shield)
-      (cons #x10 '("....1111" "..111111" ".1122222" ".2222332" ".2222223" ".3333111" "32323111" "33233111"))
-      (cons #x11 '("1111...." "111111.." "2222211." "2332222." "3222222." "1111122." "1111122." "111111.."))
-      (cons #x12 '("32323111" ".3333111" "..111111" "...2222." "...2222." "..22222." "........" "........"))
-      (cons #x13 '("111111.." "111111.." "111111.." ".2222..." ".2222..." ".22222.." "........" "........"))
+(define ZELDA-LINK-METASPRITE
+  (make-metasprite-desc 'zelda-link '(#x00 #x01 #x02 #x03) #:order 'col-major #:attr #x00))
 
-      ;; #x14: Vertical Sword Blade
-      (cons #x14 '("...33..." "...33..." "...33..." "...33..." "...33..." ".123321." "...22..." "...22..."))
-      ;; #x15: Horizontal Sword Blade
-      (cons #x15 '("........" ".....1.." "33333222" "33333222" ".....1.." "........" "........" "........"))
-
-      ;; #x16..#x19: Red Octorok 16x16 Metasprite
-      (cons #x16 '("...11111" "..122222" ".1222222" ".1223312" ".1223312" ".1222223" "..122221" ".11.11.1"))
-      (cons #x17 '("11111..." "222221.." "2222221." "2133221." "2133221." "3222221." "122221.." "1.11.11."))
-      (cons #x18 '("11..11.." "1...11.." "........" "........" "........" "........" "........" "........"))
-      (cons #x19 '("..11..11" "..11...1" "........" "........" "........" "........" "........" "........"))
-
-      ;; #x1C: Golden Dungeon Key Sprite
-      (cons #x1C '("..2332.." ".23..32." "..2332.." "...33..." "...333.." "...33..." "...333.." "........"))
-      ;; #x1D: Glowing Triforce of Wisdom Sprite
-      (cons #x1D '("...33..." "..3223.." ".323323." "32222223" ".33..33." "32233223" "33333333" "........")))
-     (make-word-tile-pair #x30 "LIFE")
-     (make-word-tile-pair #x32 "KEY ")
-     ;; Digits 0..9 at #x20..#x29
-     (for/list ([d (in-range 10)])
-       (cons (+ #x20 d)
-             (list "........"
-                   (if (memv d '(0 2 3 5 6 7 8 9)) "..3333.." "....3...")
-                   (if (memv d '(0 4 8 9))         ".3....3."
-                       (if (memv d '(5 6))         ".3......" "......3."))
-                   (if (memv d '(0 1 7))           ".3....3." "..3333..")
-                   (if (memv d '(0 6 8))           ".3....3."
-                       (if (= d 2)                 ".3......" "......3."))
-                   (if (memv d '(0 2 3 5 6 8 9))   "..3333.." "....3...")
-                   "........"
-                   "........")))))
-  (build-chr-rom tiles))
+(define ZELDA-OCTOROK-METASPRITE
+  (make-metasprite-desc 'zelda-octorok '(#x70 #x71) #:order 'symmetric-col-major #:attr #x02))
 
 (define (emit-zelda-6502-program)
   `(;; ========================================================================
     ;; The Legend of Zelda (Overworld & Triforce Sanctum) in #lang boba-nes
+    ;; Uses Authentic CHR Pattern Blocks from `legend_of_zelda.nes`!
     ;; ========================================================================
     (label reset_handler)
     (SEI)
@@ -992,11 +888,11 @@
     (CPX #:imm 32)
     (BNE load_pal_z)
 
-    ;; Clear Nametable 0 ($2000-$23FF)
+    ;; Clear Nametable 0 ($2000-$23FF) to Zelda's Blank Space Tile (#x24, since #x00 is '0'!)
     (BIT #:abs #x2002)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x00) (STA #:abs #x2006)
     (LDY #:imm 4)
-    (LDA #:imm #x00)
+    (LDA #:imm #x24)
     (LDX #:imm 0)
     (label clr_nt_z)
     (STA #:abs #x2007)
@@ -1005,57 +901,73 @@
     (DEY)
     (BNE clr_nt_z)
 
-    ;; Draw Subscreen HUD at Row 2 ($2042..$205A):
-    ;;   "KEY " (#x32,#x72) + "0" + "LIFE" (#x30,#x70) + 3 Hearts (#x05 #x05 #x05)
+    ;; Zero Attribute Table ($23C0-$23FF) after #x24 fill
     (BIT #:abs #x2002)
-    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x42) (STA #:abs #x2006)
-    (LDA #:imm #x32) (STA #:abs #x2007)
-    (LDA #:imm #x72) (STA #:abs #x2007)
-    (LDA #:imm #x20) (STA #:abs #x2007) ; Key count '0' at $2044
-    (LDA #:imm #x00) (STA #:abs #x2007)
-    (LDA #:imm #x30) (STA #:abs #x2007)
-    (LDA #:imm #x70) (STA #:abs #x2007)
-    (LDA #:imm #x05) (STA #:abs #x2007) ; 3 Red Hearts
-    (STA #:abs #x2007)
-    (STA #:abs #x2007)
+    (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xC0) (STA #:abs #x2006)
+    (LDA #:imm #x00) (LDX #:imm 64)
+    (label clr_attr_z) (STA #:abs #x2007) (DEX) (BNE clr_attr_z)
 
-    ;; Draw Overworld Room Border Walls:
-    ;;   Top wall at Rows 6..7 ($20C0-$20FF) with Locked Dungeon Door at cols 15..16 ($20CF..$20D0, $20EF..$20F0)
+    ;; Draw Subscreen HUD at Row 2 ($2043..$2053) using Zelda's authentic PT1 font:
+    ;;   "KEY 0  -LIFE- ===" (where '0' = #x00, '-' = #x62 hyphen, '=' = #x66 Full Red Heart!)
+    ,@(emit-nametable-string-6502
+       #x2043
+       (make-char-map #:digit-base #x00 #:alpha-base #x0A #:space-tile #x24
+                      #:extra (list (cons #\- #x62) (cons #\= #x66)))
+       "KEY 0  -LIFE- ===")
+
+    ;; Draw Overworld Room Border Walls using Zelda's authentic Overworld Bush/Tree tiles (#xD8..#xDB):
+    ;;   Top wall at Rows 6..7 ($20C0-$20FF)
     (BIT #:abs #x2002)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xC0) (STA #:abs #x2006)
-    (LDX #:imm 64)
-    (LDA #:imm #x01)
-    (label top_wall_z)
-    (STA #:abs #x2007)
+    (LDX #:imm 16)
+    (label top_wall_z0)
+    (LDA #:imm #xD8) (STA #:abs #x2007)
+    (LDA #:imm #xDA) (STA #:abs #x2007)
     (DEX)
-    (BNE top_wall_z)
+    (BNE top_wall_z0)
+    (LDX #:imm 16)
+    (label top_wall_z1)
+    (LDA #:imm #xD9) (STA #:abs #x2007)
+    (LDA #:imm #xDB) (STA #:abs #x2007)
+    (DEX)
+    (BNE top_wall_z1)
 
-    ;; Carve Locked Dungeon Door (#x03) at North Gate ($20CF, $20D0, $20EF, $20F0)
+    ;; Carve Locked Dungeon Gate (#xE0/#xE2, #xE1/#xE3 Armos Gate) at North Door ($20CF, $20D0, $20EF, $20F0)
     (BIT #:abs #x2002)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xCF) (STA #:abs #x2006)
-    (LDA #:imm #x03) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #xE0) (STA #:abs #x2007) (LDA #:imm #xE2) (STA #:abs #x2007)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xEF) (STA #:abs #x2006)
-    (LDA #:imm #x03) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #xE1) (STA #:abs #x2007) (LDA #:imm #xE3) (STA #:abs #x2007)
 
     ;; Bottom wall at Rows 26..27 ($2340-$237F)
     (BIT #:abs #x2002)
     (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #x40) (STA #:abs #x2006)
-    (LDX #:imm 64)
-    (LDA #:imm #x01)
-    (label bot_wall_z)
-    (STA #:abs #x2007)
+    (LDX #:imm 16)
+    (label bot_wall_z0)
+    (LDA #:imm #xD8) (STA #:abs #x2007)
+    (LDA #:imm #xDA) (STA #:abs #x2007)
     (DEX)
-    (BNE bot_wall_z)
+    (BNE bot_wall_z0)
+    (LDX #:imm 16)
+    (label bot_wall_z1)
+    (LDA #:imm #xD9) (STA #:abs #x2007)
+    (LDA #:imm #xDB) (STA #:abs #x2007)
+    (DEX)
+    (BNE bot_wall_z1)
 
-    ;; Decorative central rock pillars at ($21CC..$21CD, $21F2..$21F3)
+    ;; Authentic Overworld Armos Statues (#xE0,#xE2 / #xE1,#xE3) at ($21C8..$21E9 and $21D6..$21F7)
     (BIT #:abs #x2002)
     (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xC8) (STA #:abs #x2006)
-    (LDA #:imm #x02) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #xE0) (STA #:abs #x2007) (LDA #:imm #xE2) (STA #:abs #x2007)
+    (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xE8) (STA #:abs #x2006)
+    (LDA #:imm #xE1) (STA #:abs #x2007) (LDA #:imm #xE3) (STA #:abs #x2007)
     (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xD6) (STA #:abs #x2006)
-    (LDA #:imm #x02) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #xE0) (STA #:abs #x2007) (LDA #:imm #xE2) (STA #:abs #x2007)
+    (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #xF6) (STA #:abs #x2006)
+    (LDA #:imm #xE1) (STA #:abs #x2007) (LDA #:imm #xE3) (STA #:abs #x2007)
 
-    ;; Attribute Table: Top HUD uses Palette 1 (Crimson Hearts / White Text),
-    ;; Overworld walls use Palette 0 (Forest Green) & Palette 2 (Gold Door)
+    ;; Attribute Table: Top HUD uses Palette 1 (White Text color 1 + Crimson Hearts color 3!),
+    ;; Overworld walls use Palette 0 (Forest Green & Earth Brown)
     (BIT #:abs #x2002)
     (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xC0) (STA #:abs #x2006)
     (LDA #:imm #x55)
@@ -1093,11 +1005,12 @@
     (LDA #:imm #x07)
     (STA #:abs #x4015)
 
+    ;; Enable NMI + BG Pattern Table 1 ($1000) + Sprite Pattern Table 0 ($0000): PPUCTRL = #$90
     (BIT #:abs #x2002)
     (LDA #:imm 0)
     (STA #:abs #x2005)
     (STA #:abs #x2005)
-    (LDA #:imm #x80)
+    (LDA #:imm #x90)
     (STA #:abs #x2000)
     (LDA #:imm #x1E)
     (STA #:abs #x2001)
@@ -1344,30 +1257,17 @@
     (RTS)
 
     ;; ========================================================================
-    ;; Build Zelda OAM Buffer ($0200-$02FF)
-    ;;   Slots 1..4 ($0204): Link 16x16 Metasprite (#x10..#x13, Palette 0)
-    ;;   Slot 5 ($0214)    : Sword Blade (#x14/#x15, Palette 1)
-    ;;   Slots 6..9 ($0218): Red Octorok 16x16 Metasprite (#x16..#x19, Palette 2)
-    ;;   Slot 10 ($0228)   : Dropped Key (#x1C) or Glowing Triforce (#x1D, Palette 3)
+    ;; Build Zelda OAM Buffer ($0200-$02FF) using Authentic Zelda PT0 Tiles:
+    ;;   Slots 1..4 ($0204): Link 16x16 Metasprite (#x00..#x03, col-major, Pal 0)
+    ;;   Slot 5 ($0214)    : Sword Blade (#x20, Pal 1)
+    ;;   Slots 6..9 ($0218): Red Octorok 16x16 Metasprite (#x70..#x71, symmetric-col-major, Pal 2)
+    ;;   Slots 10..11 ($0228..$022F): Dropped Key (#x2E/#x2F) or Symmetric Golden Triforce (#x2A, Pal 3)
     ;; ========================================================================
     (label build_zelda_oam)
-    ;; Link 16x16 Metasprite at $0204..$0213
-    (LDA #:zp ,ZELDA-ZP-LINK-Y)
-    (STA #:abs #x0204) (STA #:abs #x0208)
-    (CLC) (ADC #:imm 8)
-    (STA #:abs #x020C) (STA #:abs #x0210)
-    (LDA #:imm #x10) (STA #:abs #x0205)
-    (LDA #:imm #x11) (STA #:abs #x0209)
-    (LDA #:imm #x12) (STA #:abs #x020D)
-    (LDA #:imm #x13) (STA #:abs #x0211)
-    (LDA #:imm #x00)
-    (STA #:abs #x0206) (STA #:abs #x020A) (STA #:abs #x020E) (STA #:abs #x0212)
-    (LDA #:zp ,ZELDA-ZP-LINK-X)
-    (STA #:abs #x0207) (STA #:abs #x020F)
-    (CLC) (ADC #:imm 8)
-    (STA #:abs #x020B) (STA #:abs #x0213)
+    ;; Emit Authentic Link 16x16 Metasprite (col-major: TL=#x00, BL=#x01, TR=#x02, BR=#x03)
+    ,@(emit-metasprite-oam-6502 ZELDA-LINK-METASPRITE ZELDA-ZP-LINK-X ZELDA-ZP-LINK-Y #x04)
 
-    ;; Sword Sprite at $0214..$0217
+    ;; Authentic Sword Blade Sprite (#x20) at $0214..$0217
     (LDA #:zp ,ZELDA-ZP-SWORD-TIMER)
     (BNE show_sword_oam)
     (LDA #:imm #xF8)
@@ -1375,11 +1275,11 @@
     (JMP draw_octo_oam)
     (label show_sword_oam)
     (LDA #:zp ,ZELDA-ZP-SWORD-Y) (STA #:abs #x0214)
-    (LDA #:imm #x14)             (STA #:abs #x0215)
+    (LDA #:imm #x20)             (STA #:abs #x0215)
     (LDA #:imm #x01)             (STA #:abs #x0216)
     (LDA #:zp ,ZELDA-ZP-SWORD-X) (STA #:abs #x0217)
 
-    ;; Red Octorok 16x16 Metasprite at $0218..$0227
+    ;; Authentic Red Octorok 16x16 Metasprite (#x70, #x71 + H-Flip on right half) at $0218..$0227
     (label draw_octo_oam)
     (LDA #:zp ,ZELDA-ZP-OCTO-ALIVE)
     (BNE show_octo_oam)
@@ -1387,42 +1287,36 @@
     (STA #:abs #x0218) (STA #:abs #x021C) (STA #:abs #x0220) (STA #:abs #x0224)
     (JMP draw_item_oam)
     (label show_octo_oam)
-    (LDA #:zp ,ZELDA-ZP-OCTO-Y)
-    (STA #:abs #x0218) (STA #:abs #x021C)
-    (CLC) (ADC #:imm 8)
-    (STA #:abs #x0220) (STA #:abs #x0224)
-    (LDA #:imm #x16) (STA #:abs #x0219)
-    (LDA #:imm #x17) (STA #:abs #x021D)
-    (LDA #:imm #x18) (STA #:abs #x0221)
-    (LDA #:imm #x19) (STA #:abs #x0225)
-    (LDA #:imm #x02)
-    (STA #:abs #x021A) (STA #:abs #x021E) (STA #:abs #x0222) (STA #:abs #x0226)
-    (LDA #:zp ,ZELDA-ZP-OCTO-X)
-    (STA #:abs #x021B) (STA #:abs #x0223)
-    (CLC) (ADC #:imm 8)
-    (STA #:abs #x021F) (STA #:abs #x0227)
+    ,@(emit-metasprite-oam-6502 ZELDA-OCTOROK-METASPRITE ZELDA-ZP-OCTO-X ZELDA-ZP-OCTO-Y #x18)
 
-    ;; Key or Triforce Sprite at $0228..$022B
+    ;; Authentic Key (#x2E/#x2F) or 16-px Symmetric Triforce (#x2A H-flip + #x2A) at $0228..$022F
     (label draw_item_oam)
     (LDA #:zp ,ZELDA-ZP-ROOM-ID)
     (BNE show_triforce_oam)
     (LDA #:zp ,ZELDA-ZP-KEY-X)
     (BEQ hide_item_oam)
     (LDA #:zp ,ZELDA-ZP-KEY-Y) (STA #:abs #x0228)
-    (LDA #:imm #x1C)           (STA #:abs #x0229)
+    (LDA #:imm #x2E)           (STA #:abs #x0229)
     (LDA #:imm #x03)           (STA #:abs #x022A)
     (LDA #:zp ,ZELDA-ZP-KEY-X) (STA #:abs #x022B)
+    (LDA #:imm #xF8)           (STA #:abs #x022C)
     (RTS)
 
     (label show_triforce_oam)
+    ;; Left half of Golden Triforce (#x2C unflipped: attr = #x03) at (X=120, Y=104)
     (LDA #:imm 104)  (STA #:abs #x0228)
-    (LDA #:imm #x1D) (STA #:abs #x0229)
+    (LDA #:imm #x2C) (STA #:abs #x0229)
     (LDA #:imm #x03) (STA #:abs #x022A)
-    (LDA #:imm 124)  (STA #:abs #x022B)
+    (LDA #:imm 120)  (STA #:abs #x022B)
+    ;; Right half of Golden Triforce (#x2C horizontally flipped: attr = #x43) at (X=128, Y=104)
+    (LDA #:imm 104)  (STA #:abs #x022C)
+    (LDA #:imm #x2C) (STA #:abs #x022D)
+    (LDA #:imm #x43) (STA #:abs #x022E)
+    (LDA #:imm 128)  (STA #:abs #x022F)
     (RTS)
 
     (label hide_item_oam)
-    (LDA #:imm #xF8) (STA #:abs #x0228)
+    (LDA #:imm #xF8) (STA #:abs #x0228) (STA #:abs #x022C)
     (RTS)
 
     ;; ========================================================================
@@ -1438,31 +1332,31 @@
     (LDA #:imm #x00) (STA #:abs #x2003)
     (LDA #:imm #x02) (STA #:abs #x4014)
 
-    ;; Update HUD Key Counter ($2044)
+    ;; Update HUD Key Counter ($2047 -> tile #x00..#x07 directly!)
     (BIT #:abs #x2002)
-    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x44) (STA #:abs #x2006)
+    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x47) (STA #:abs #x2006)
     (LDA #:zp ,ZELDA-ZP-KEYS)
     (AND #:imm #x07)
-    (CLC) (ADC #:imm #x20)
     (STA #:abs #x2007)
 
-    ;; If Room transitioned to Sanctum (ROOM_ID == 1), open North Door & draw Pedestal!
+    ;; If Room transitioned to Sanctum (ROOM_ID == 1), open North Door (#x24) & draw Pedestal (#xE0..#xE3)!
     (LDA #:zp ,ZELDA-ZP-ROOM-DIRTY)
     (BEQ z_nmi_restore)
     (LDA #:imm 0)
     (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
     (BIT #:abs #x2002)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xCF) (STA #:abs #x2006)
-    (LDA #:imm #x00) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x24) (STA #:abs #x2007) (STA #:abs #x2007)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xEF) (STA #:abs #x2006)
-    (LDA #:imm #x00) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x24) (STA #:abs #x2007) (STA #:abs #x2007)
     ;; Draw Triforce Pedestal at ($218E..$2191)
     (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #x8E) (STA #:abs #x2006)
-    (LDA #:imm #x04) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #xE0) (STA #:abs #x2007) (LDA #:imm #xE2) (STA #:abs #x2007)
+    (LDA #:imm #xE0) (STA #:abs #x2007) (LDA #:imm #xE2) (STA #:abs #x2007)
 
     (label z_nmi_restore)
     (BIT #:abs #x2002)
-    (LDA #:imm #x80) (STA #:abs #x2000)
+    (LDA #:imm #x90) (STA #:abs #x2000)
     (LDA #:imm 0)    (STA #:abs #x2005) (STA #:abs #x2005)
     (LDA #:imm 1)    (STA #:zp #x0F)
 
@@ -1476,24 +1370,24 @@
 
     (.align 256)
     (label zelda_palette_table)
-    ;; 4 BG Palettes (Deep Dungeon/Overworld Black #x0F):
-    ;; Pal 0: Overworld Forest Green / Tan (#x0F, #x19, #x29, #x37)
-    ;; Pal 1: Subscreen HUD Crimson Hearts & White Text (#x0F, #x16, #x27, #x30)
-    ;; Pal 2: Dungeon Stone Blue (#x0F, #x02, #x12, #x22)
-    ;; Pal 3: Golden Door / Triforce Pedestal (#x0F, #x17, #x27, #x38)
-    (.byte #x0F #x19 #x29 #x37
-           #x0F #x16 #x27 #x30
-           #x0F #x02 #x12 #x22
-           #x0F #x17 #x27 #x38
+    ;; Authentic 1986 Legend of Zelda Palette ($3F00-$3F1F):
+    ;;   BG Pal 0 (Overworld Rocks): Black #x0F, Forest Green #x29, Earth Brown #x17, Sand #x37
+    ;;   BG Pal 1 (Subscreen HUD)  : Black #x0F, White Text #x30 (color 1), Gold #x27, Crimson Heart #x16 (color 3)
+    ;;   BG Pal 2 (Sanctum Stone)  : Black #x0F, Royal Blue #x12, Sky Blue #x22, Ice #x30
+    ;;   BG Pal 3 (Golden Gate)    : Black #x0F, Gold #x28, Amber #x17, Cream #x38
+    (.byte #x0F #x29 #x17 #x37
+           #x0F #x30 #x27 #x16
+           #x0F #x12 #x22 #x30
+           #x0F #x28 #x17 #x38
            ;; 4 Sprite Palettes:
-           ;; Spr 0: Link Tunic Green / Tan / Brown (#x0F, #x29, #x27, #x17)
-           ;; Spr 1: Steel Sword Blade (#x0F, #x12, #x22, #x30)
-           ;; Spr 2: Red Octorok (#x0F, #x16, #x26, #x30)
-           ;; Spr 3: Golden Key & Triforce (#x0F, #x17, #x28, #x38)
+           ;;   Spr 0 (Link)   : Black #x0F, Tunic Green #x29 (c1), Tan Skin #x27 (c2), Brown Shield #x17 (c3)
+           ;;   Spr 1 (Sword)  : Black #x0F, Blue #x12, Cyan #x22, Steel White #x30 (c3)
+           ;;   Spr 2 (Octorok): Black #x0F, White Eye #x30 (c1), Orange #x27 (c2), Crimson #x16 (c3)
+           ;;   Spr 3 (Key/Tri): Black #x0F, Amber #x17 (c1), Bright Gold #x28 (c2), White Shine #x38 (c3)
            #x0F #x29 #x27 #x17
            #x0F #x12 #x22 #x30
-           #x0F #x16 #x26 #x30
-           #x0F #x17 #x28 #x38)))
+           #x0F #x30 #x27 #x16
+           #x0F #x28 #x27 #x38)))
 
 (define (compile-zelda-nes-rom! #:nes-out-path [nes-out-path #f])
   (define forms (emit-zelda-6502-program))
@@ -1521,7 +1415,7 @@
             'scanline-sprites 10 ; > 8 scanline sprites safely multiplexed via oam-mux? #t!
             'ram-bytes 256
             'prg-rom-bytes (bytes-length (asm-result-bytes asm-res))
-            'chr-tiles 38
+            'chr-tiles 413
             'vram-dma-bytes 14
             'attr-clashes 0
             'apu-channels '(pulse1 triangle)))
@@ -1553,40 +1447,13 @@
 (define TETRIS-ZP-SCRATCH-PTR #x20) ; 16-bit pointer ($20/$21)
 
 (define (build-tetris-chr-rom)
-  (define tiles
-    (append
-     (list
-      ;; #x00: Empty well background tile
-      (cons #x00 '("........" "........" "........" "........" "........" "........" "........" "........"))
-      ;; #x01: Beveled Cyan/White Tetromino Block (I / O / T)
-      (cons #x01 '("33333331" "33333321" "33222221" "33222221" "33222221" "33222221" "32222211" "11111111"))
-      ;; #x02: Beveled Solid Accent Tetromino Block (J / S)
-      (cons #x02 '("11111111" "13333321" "13111121" "13122121" "13122121" "13111121" "12222221" "11111111"))
-      ;; #x03: Beveled Highlight Tetromino Block (Z / L)
-      (cons #x03 '("11111111" "13333331" "13222231" "13233231" "13233231" "13222231" "13333331" "11111111"))
-      ;; #x04: Playfield Well Border Pillar Tile
-      (cons #x04 '("23222231" "23111131" "23122131" "23122131" "23122131" "23122131" "23111131" "23222231")))
-     (make-word-tile-pair #x30 "LINE")
-     (make-word-tile-pair #x32 "NEXT")
-     (make-word-tile-pair #x34 "TETR")
-     ;; Digits 0..9 at #x20..#x29
-     (for/list ([d (in-range 10)])
-       (cons (+ #x20 d)
-             (list "........"
-                   (if (memv d '(0 2 3 5 6 7 8 9)) "..3333.." "....3...")
-                   (if (memv d '(0 4 8 9))         ".3....3."
-                       (if (memv d '(5 6))         ".3......" "......3."))
-                   (if (memv d '(0 1 7))           ".3....3." "..3333..")
-                   (if (memv d '(0 6 8))           ".3....3."
-                       (if (= d 2)                 ".3......" "......3."))
-                   (if (memv d '(0 2 3 5 6 8 9))   "..3333.." "....3...")
-                   "........"
-                   "........")))))
-  (build-chr-rom tiles))
+  ;; Load authentic 4 KB CHR Bank 3 from Nintendo NES Tetris (assets/roms/tetris.nes)
+  ;; mirrored across both Pattern Table 0 ($0000) and Pattern Table 1 ($1000).
+  (load-authentic-tetris-chr-rom))
 
 (define (emit-tetris-6502-program)
   `(;; ========================================================================
-    ;; Nintendo NES Tetris in #lang boba-nes
+    ;; Nintendo NES Tetris in #lang boba-nes (Authentic CHR Bank 3)
     ;;   - 10x20 RAM Well ($0400-$04C7 = 200 B)
     ;;   - Staged VBlank Dirty-Row Copier (flushes 2 rows = 20 B per NMI)
     ;;   - 7 Tetrominoes x 4 Rotations Lookup Table in PRG-ROM
@@ -1635,11 +1502,12 @@
     (CPX #:imm 32)
     (BNE load_pal_t)
 
-    ;; Clear Nametable 0 ($2000-$23FF)
+    ;; Clear Nametable 0 ($2000-$23BF = 960 bytes) to #xFF (Tetris Bank 3 Empty Tile)
+    ;; and Attribute Table ($23C0-$23FF = 64 bytes) to #x00
     (BIT #:abs #x2002)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x00) (STA #:abs #x2006)
-    (LDY #:imm 4)
-    (LDA #:imm #x00)
+    (LDY #:imm 3)
+    (LDA #:imm #xFF)
     (LDX #:imm 0)
     (label clr_nt_t)
     (STA #:abs #x2007)
@@ -1647,32 +1515,32 @@
     (BNE clr_nt_t)
     (DEY)
     (BNE clr_nt_t)
+    (LDX #:imm 192)
+    (label clr_nt_t_rem)
+    (STA #:abs #x2007)
+    (DEX)
+    (BNE clr_nt_t_rem)
+    (LDA #:imm #x00)
+    (LDX #:imm 64)
+    (label clr_attr_t)
+    (STA #:abs #x2007)
+    (DEX)
+    (BNE clr_attr_t)
 
-    ;; Draw Top HUD ("TETR" + "LINE" + ":0" at Row 2, $204B..$2055)
-    ;; and "NEXT" label at Row 8, Col 24 ($2118..$2119)
-    (BIT #:abs #x2002)
-    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x4B) (STA #:abs #x2006)
-    (LDA #:imm #x34) (STA #:abs #x2007)
-    (LDA #:imm #x74) (STA #:abs #x2007)
-    (LDA #:imm #x00) (STA #:abs #x2007)
-    (LDA #:imm #x30) (STA #:abs #x2007)
-    (LDA #:imm #x70) (STA #:abs #x2007)
-    (LDA #:imm #x20) (STA #:abs #x2007) ; Lines cleared digit '0' at $2050
-
-    (BIT #:abs #x2002)
-    (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #x18) (STA #:abs #x2006)
-    (LDA #:imm #x32) (STA #:abs #x2007)
-    (LDA #:imm #x72) (STA #:abs #x2007)
+    ;; Draw Top HUD ("TETRIS LINES-0" at Row 2, Col 9 -> $2049..$2056, so '0' is at $2056)
+    ;; and "NEXT" label at Row 8, Col 24 ($2118..$211B) using TETRIS-CHAR-MAP
+    ,@(emit-nametable-string-6502 #x2049 TETRIS-CHAR-MAP "TETRIS LINES-0")
+    ,@(emit-nametable-string-6502 #x2118 TETRIS-CHAR-MAP "NEXT")
 
     ;; Draw 10x20 Playfield Well Frame (Left wall at Col 10, Right wall at Col 21, Rows 5..24, Floor at Row 25):
-    ;; Use PPUCTRL bit 2 = 1 (+32 vertical increment!) to draw Left & Right well walls in 2 passes!
+    ;; Use PPUCTRL bit 2 = 1 (+32 vertical increment!) and authentic border block tile #x7D!
     (LDA #:imm #x04)
     (STA #:abs #x2000) ; +32 vertical address increment!
     ;; Left Wall (Col 10, Row 5 -> $20AA)
     (BIT #:abs #x2002)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xAA) (STA #:abs #x2006)
     (LDX #:imm 20)
-    (LDA #:imm #x04)
+    (LDA #:imm #x7D)
     (label left_well_wall)
     (STA #:abs #x2007)
     (DEX)
@@ -1681,7 +1549,7 @@
     (BIT #:abs #x2002)
     (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xB5) (STA #:abs #x2006)
     (LDX #:imm 20)
-    (LDA #:imm #x04)
+    (LDA #:imm #x7D)
     (label right_well_wall)
     (STA #:abs #x2007)
     (DEX)
@@ -1692,7 +1560,7 @@
     (BIT #:abs #x2002)
     (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #x2A) (STA #:abs #x2006)
     (LDX #:imm 12)
-    (LDA #:imm #x04)
+    (LDA #:imm #x7D)
     (label floor_well_wall)
     (STA #:abs #x2007)
     (DEX)
@@ -1855,10 +1723,11 @@
     (ADC #:zp ,TETRIS-ZP-PIECE-X)
     (ADC #:absx tetromino_offset_table)
     (TAY)
-    ;; Write tile (#x01 + (piece_id & 1)) into $0400 + Y
+    ;; Write authentic Tetris mino tile (#x7B + (piece_id & 1)) into $0400 + Y
+    ;;   #x7B = white-centered mino, #x7C = solid cyan mino with top-left specular gleam
     (LDA #:zp ,TETRIS-ZP-PIECE-ID)
     (AND #:imm #x01)
-    (CLC) (ADC #:imm #x01)
+    (CLC) (ADC #:imm #x7B)
     (STA #:absy ,TETRIS-WELL-RAM-BASE)
     (LDY #:zp #x22)
     (INX) (INX)
@@ -1928,8 +1797,8 @@
 
     ;; ========================================================================
     ;; Build Tetris OAM Buffer ($0200-$02FF)
-    ;;   Slots 1..4 ($0204..$0213): Active Falling Tetromino (4 minoes)
-    ;;   Slots 5..8 ($0214..$0223): NEXT Preview Tetromino (4 minoes at X=196, Y=88)
+    ;;   Slots 1..4 ($0204..$0213): Active Falling Tetromino (4 minoes, tile #x7B)
+    ;;   Slots 5..8 ($0214..$0223): NEXT Preview Tetromino (4 minoes, tile #x7C)
     ;; ========================================================================
     (label build_tetris_oam)
     ;; 1. Active Tetromino (4 minoes at $0204..$0213):
@@ -1941,15 +1810,15 @@
     (TAX)
     (LDY #:imm 0)
     (label oam_active_loop)
-    ;; Y coordinate = ((piece_y + dy) << 3) + 40
+    ;; Y coordinate = ((piece_y + dy) << 3) + 39
     (CLC)
     (LDA #:zp ,TETRIS-ZP-PIECE-Y)
     (ADC #:absx (+ tetromino_offset_table 1))
     (ASL) (ASL) (ASL)
     (CLC) (ADC #:imm 39)
     (STA #:absy #x0204)
-    ;; Tile ID (#x01)
-    (LDA #:imm #x01)
+    ;; Authentic Tetris white-centered mino Tile ID (#x7B)
+    (LDA #:imm #x7B)
     (STA #:absy #x0205)
     ;; Palette attribute (piece_id & 3)
     (LDA #:zp ,TETRIS-ZP-PIECE-ID)
@@ -1967,7 +1836,7 @@
     (CPY #:imm 16)
     (BNE oam_active_loop)
 
-    ;; 2. NEXT Preview Tetromino (4 minoes at $0214..$0223, centered at X=196, Y=88)
+    ;; 2. NEXT Preview Tetromino (4 minoes at $0214..$0223, centered at X=200, Y=88)
     (LDA #:zp ,TETRIS-ZP-NEXT-ID)
     (ASL) (ASL) (ASL) (ASL) (ASL) ; next_id * 32 (rot 0)
     (TAX)
@@ -1978,7 +1847,8 @@
     (ADC #:absx (+ tetromino_offset_table 1))
     (ASL) (ASL) (ASL)
     (STA #:absy #x0214)
-    (LDA #:imm #x02)
+    ;; Authentic Tetris solid mino Tile ID (#x7C)
+    (LDA #:imm #x7C)
     (STA #:absy #x0215)
     (LDA #:zp ,TETRIS-ZP-NEXT-ID)
     (AND #:imm #x03)
@@ -2009,12 +1879,11 @@
     (LDA #:imm #x00) (STA #:abs #x2003)
     (LDA #:imm #x02) (STA #:abs #x4014)
 
-    ;; Update HUD Lines Cleared digit ($2050)
+    ;; Update HUD Lines Cleared digit ($2056) — zero-offset BCD: tile #x00 is '0'!
     (BIT #:abs #x2002)
-    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x50) (STA #:abs #x2006)
+    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x56) (STA #:abs #x2006)
     (LDA #:zp ,TETRIS-ZP-LINES)
     (AND #:imm #x07)
-    (CLC) (ADC #:imm #x20)
     (STA #:abs #x2007)
 
     ;; Staged Dirty-Row Copier: If DIRTY_ROW < 20, flush 2 rows (20 bytes) to Nametable $2000!
@@ -2040,6 +1909,7 @@
     (RTI)
 
     ;; Flush 10 bytes of well row `TETRIS-ZP-DIRTY-ROW` from $0400 to Nametable ($20AB + row*32)
+    ;; Converts RAM byte 0 (empty cell) to #xFF (Tetris Bank 3 empty black tile) since #x00 is digit '0'!
     (label flush_one_well_row_vram)
     (LDX #:zp ,TETRIS-ZP-DIRTY-ROW)
     (BIT #:abs #x2002)
@@ -2052,6 +1922,9 @@
     (LDX #:imm 10)
     (label copy_10_cols)
     (LDA #:absy ,TETRIS-WELL-RAM-BASE)
+    (BNE write_well_tile)
+    (LDA #:imm #xFF)
+    (label write_well_tile)
     (STA #:abs #x2007)
     (INY)
     (DEX)
@@ -2117,16 +1990,19 @@
             0 -1   0  0   0  1   0  2)
 
     (label tetris_palette_table)
-    ;; 4 BG Palettes:
-    (.byte #x0F #x11 #x21 #x30
-           #x0F #x16 #x26 #x30
-           #x0F #x19 #x29 #x30
-           #x0F #x00 #x10 #x30
-           ;; 4 Sprite Palettes (Cyan, Crimson, Emerald, Gold):
-           #x0F #x11 #x21 #x30
-           #x0F #x16 #x27 #x30
-           #x0F #x19 #x29 #x30
-           #x0F #x17 #x28 #x30)))
+    ;; Authentic Nintendo NES Tetris Level 0 Palettes:
+    ;;   Color 1 = #x30 (Pure White center of #x7B & specular gleam of #x7C/#x7D)
+    ;;   Color 2 = #x21 (Sky Cyan body of #x7C)
+    ;;   Color 3 = #x28 / #x12 (Gold / Royal Blue frame of #x7B, body of #x7D & HUD font)
+    (.byte #x0F #x30 #x21 #x28
+           #x0F #x30 #x29 #x1A
+           #x0F #x30 #x24 #x14
+           #x0F #x30 #x27 #x16
+           ;; 4 Sprite Palettes (Level 0 Cyan/Blue, Level 1 Green, Level 2 Magenta, Level 6 Crimson):
+           #x0F #x30 #x21 #x12
+           #x0F #x30 #x29 #x1A
+           #x0F #x30 #x24 #x14
+           #x0F #x30 #x27 #x16)))
 
 (define (compile-tetris-nes-rom! #:nes-out-path [nes-out-path #f])
   (define forms (emit-tetris-6502-program))
@@ -2153,7 +2029,7 @@
             'scanline-sprites 4
             'ram-bytes 200 ; 10x20 Playfield Well at $0400-$04C7
             'prg-rom-bytes (bytes-length (asm-result-bytes asm-res))
-            'chr-tiles 26
+            'chr-tiles 382
             'vram-dma-bytes 200    ; 200-byte well update on Tetris line clear
             'vram-queue-slices 10  ; Flushed 2 rows (20 B) per VBlank across 10 frames!
             'attr-clashes 0

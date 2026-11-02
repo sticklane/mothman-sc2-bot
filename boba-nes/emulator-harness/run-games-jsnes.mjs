@@ -93,9 +93,9 @@ function createHarness(romRelPath) {
   const { nes, saveScreenshot } = createHarness('../build/zelda_nes.nes');
   for (let i = 0; i < 6; i++) nes.frame();
 
-  // Walk Link UP toward the Red Octorok and thrust the Sword ('A' button)!
+  // Walk Link UP toward the Red Octorok and thrust the Sword ('A' button) face-to-face!
   nes.buttonDown(1, Controller.BUTTON_UP);
-  for (let i = 0; i < 7; i++) nes.frame();
+  for (let i = 0; i < 4; i++) nes.frame();
   nes.buttonUp(1, Controller.BUTTON_UP);
 
   nes.buttonDown(1, Controller.BUTTON_A);
@@ -104,15 +104,15 @@ function createHarness(romRelPath) {
   nes.buttonUp(1, Controller.BUTTON_A);
   saveScreenshot('13_zelda_sword_combat_octorok.png');
 
-  // Defeat Octorok, pick up the dropped Key, and unlock the North Door into the Sanctum!
+  // Step closer, slay Octorok, pick up the dropped Key, and unlock the North Door into the Sanctum!
   nes.buttonDown(1, Controller.BUTTON_UP);
-  for (let i = 0; i < 2; i++) nes.frame();
+  for (let i = 0; i < 4; i++) nes.frame();
   nes.buttonUp(1, Controller.BUTTON_UP);
   nes.buttonDown(1, Controller.BUTTON_A);
   nes.frame();
   nes.buttonUp(1, Controller.BUTTON_A);
   nes.buttonDown(1, Controller.BUTTON_UP);
-  for (let i = 0; i < 22; i++) nes.frame();
+  for (let i = 0; i < 23; i++) nes.frame();
   nes.buttonUp(1, Controller.BUTTON_UP);
   saveScreenshot('14_zelda_triforce_sanctum.png');
 }

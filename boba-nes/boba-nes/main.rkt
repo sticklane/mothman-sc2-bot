@@ -13,7 +13,11 @@
          "../compiler/diagnostics.rkt"
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
-         "../compiler/nes-games-builder.rkt")
+         "../compiler/nes-games-builder.rkt"
+         "../lib/nes-chr-assets.rkt"
+         "../lib/boba-badge-style.rkt"
+         "../lib/genre-libraries.rkt"
+         "../tools/nes-resource-tool.rkt")
 
 (provide
  (all-from-out racket/base)
@@ -22,6 +26,10 @@
  (all-from-out "../compiler/mos6502-assembler.rkt")
  (all-from-out "../compiler/boba-rom-builder.rkt")
  (all-from-out "../compiler/nes-games-builder.rkt")
+ (all-from-out "../lib/nes-chr-assets.rkt")
+ (all-from-out "../lib/boba-badge-style.rkt")
+ (all-from-out "../lib/genre-libraries.rkt")
+ (all-from-out "../tools/nes-resource-tool.rkt")
 
  ;; Declarative #lang boba-nes Surface DSL Forms
  defnes-module
@@ -31,11 +39,11 @@
  with-turn-coroutine
  with-vram-delta-queue
  emit-chr-ram-word-upload-6502
+ defchr-layout
+ defchar-map
+ defsprite-tile
  defmetasprite
  emit-oam-metasprite-6502
- emit-oam-coprime-flicker-6502
- emit-fixed-point-8.8-step-6502
- emit-sprite0-hud-split-6502
  defzp-var
  with-zp-scratch
  defchr-tile
@@ -117,138 +125,67 @@
     body ...
     vram-queue-grade))
 
-;; Emit 6502 instructions to dynamically synthesize and upload 16x8 (2-tile) word badges
-;; into writable 8 KB CHR-RAM ($0000-$1FFF) during ForcedBlank level load
-(define (emit-chr-ram-word-upload-6502 word-alist)
-  (define tile-pairs
-    (apply append
-           (for/list ([entry (in-list word-alist)])
-             (make-word-tile-pair (car entry) (cdr entry)))))
-  (apply append
-         (for/list ([tp (in-list tile-pairs)])
-           (define tile-id (car tp))
-           (define tbytes  (compile-chr-tile (cdr tp)))
-           (define vram-addr (* tile-id 16))
-           (append
-            `((BIT #:abs #x2002)
-              (LDA #:imm ,(bitwise-and #xFF (arithmetic-shift vram-addr -8)))
-              (STA #:abs #x2006)
-              (LDA #:imm ,(bitwise-and #xFF vram-addr))
-              (STA #:abs #x2006))
-            (apply append
-                   (for/list ([b (in-bytes tbytes)])
-                     `((LDA #:imm ,b)
-                       (STA #:abs #x2007))))))))
+;; Backward-compatible alias delegating to lib/boba-badge-style.rkt
+(define emit-chr-ram-word-upload-6502 emit-boba-badge-chr-ram-upload-6502)
 
-;; Surface DSL macro for declaring a 16x16 (2x2 hardware 8x8 tile) composite metasprite
-(define-syntax-rule (defmetasprite ms-id
-                      #:tl tl-tile #:tr tr-tile
-                      #:bl bl-tile #:br br-tile
-                      #:attr attr-byte)
-  (define ms-id
-    (hasheq 'name 'ms-id
-            'tl tl-tile 'tr tr-tile
-            'bl bl-tile 'br br-tile
+;; Surface DSL macro for declaring a PPU Pattern Table layout ($0000 vs $1000)
+;; Computes PPUCTRL ($2000) value:
+;;   - bit 7 (#x80): NMI enable
+;;   - bit 4 (#x10): Background pattern table ($0000 = 0, $1000 = 1)
+;;   - bit 3 (#x08): Sprite pattern table ($0000 = 0, $1000 = 1)
+(define-syntax-rule (defchr-layout layout-id
+                      #:sprite-pt sprite-pt-num
+                      #:bg-pt bg-pt-num
+                      #:blank-tile blank-tile-id)
+  (define layout-id
+    (hasheq 'name       'layout-id
+            'sprite-pt  sprite-pt-num
+            'bg-pt      bg-pt-num
+            'blank-tile blank-tile-id
+            'ppuctrl    (bitwise-ior #x80
+                                     (if (zero? bg-pt-num) 0 #x10)
+                                     (if (zero? sprite-pt-num) 0 #x08)))))
+
+;; Surface DSL macro for declaring a character-to-tile typography map (0..9, A..Z, punctuation)
+(define-syntax-rule (defchar-map cmap-id
+                      #:digit-base digit-base-num
+                      #:alpha-base alpha-base-num
+                      #:space-tile space-tile-num
+                      #:extra extra-alist-expr)
+  (define cmap-id
+    (make-char-map #:digit-base digit-base-num
+                   #:alpha-base alpha-base-num
+                   #:space-tile space-tile-num
+                   #:extra extra-alist-expr)))
+
+;; Surface DSL macro for binding a single 8x8 hardware sprite tile & OAM attribute byte
+(define-syntax-rule (defsprite-tile spr-id #:tile tile-id #:attr attr-byte)
+  (define spr-id
+    (hasheq 'name 'spr-id
+            'tile tile-id
             'attr attr-byte
-            'oam-sprites 4
-            'scanline-sprites 2)))
+            'oam-sprites 1
+            'scanline-sprites 1)))
+
+;; Surface DSL macro for declaring a 16x16 (2x2 hardware 8x8 tile) composite metasprite.
+;; Supports both:
+;;   1. Explicit quadrant form: (defmetasprite id #:tl t0 #:tr t1 #:bl t2 #:br t3 #:attr a)
+;;   2. Order-aware form      : (defmetasprite id #:tiles (list ...) #:order 'row-major/'col-major/'symmetric-col-major #:attr a)
+(define-syntax (defmetasprite stx)
+  (syntax-case stx ()
+    [(_ ms-id #:tl tl-tile #:tr tr-tile #:bl bl-tile #:br br-tile #:attr attr-byte)
+     #'(define ms-id
+         (make-metasprite-desc 'ms-id (list tl-tile tr-tile bl-tile br-tile)
+                               #:order 'row-major
+                               #:attr attr-byte))]
+    [(_ ms-id #:tiles tile-list-expr #:order order-expr #:attr attr-byte)
+     #'(define ms-id
+         (make-metasprite-desc 'ms-id tile-list-expr
+                               #:order order-expr
+                               #:attr attr-byte))]))
 
 ;; Emit 6502 instructions to write a 16x16 (4-sprite) metasprite into OAM page $0200
-;; starting at static OAM byte offset `oam-base` from Zero-Page coordinates `zp-x` and `zp-y`.
-(define (emit-oam-metasprite-6502 ms-desc zp-x zp-y oam-base)
-  (define tl   (hash-ref ms-desc 'tl))
-  (define tr   (hash-ref ms-desc 'tr))
-  (define bl   (hash-ref ms-desc 'bl))
-  (define br   (hash-ref ms-desc 'br))
-  (define attr (hash-ref ms-desc 'attr 0))
-  `((LDA #:zp ,zp-y)
-    (STA #:abs ,(+ #x0200 oam-base 0))
-    (STA #:abs ,(+ #x0200 oam-base 4))
-    (CLC)
-    (ADC #:imm 8)
-    (STA #:abs ,(+ #x0200 oam-base 8))
-    (STA #:abs ,(+ #x0200 oam-base 12))
-    (LDA #:imm ,tl)
-    (STA #:abs ,(+ #x0200 oam-base 1))
-    (LDA #:imm ,tr)
-    (STA #:abs ,(+ #x0200 oam-base 5))
-    (LDA #:imm ,bl)
-    (STA #:abs ,(+ #x0200 oam-base 9))
-    (LDA #:imm ,br)
-    (STA #:abs ,(+ #x0200 oam-base 13))
-    (LDA #:imm ,attr)
-    (STA #:abs ,(+ #x0200 oam-base 2))
-    (STA #:abs ,(+ #x0200 oam-base 6))
-    (STA #:abs ,(+ #x0200 oam-base 10))
-    (STA #:abs ,(+ #x0200 oam-base 14))
-    (LDA #:zp ,zp-x)
-    (STA #:abs ,(+ #x0200 oam-base 3))
-    (STA #:abs ,(+ #x0200 oam-base 11))
-    (CLC)
-    (ADC #:imm 8)
-    (STA #:abs ,(+ #x0200 oam-base 7))
-    (STA #:abs ,(+ #x0200 oam-base 15))))
-
-;; Emit 6502 instructions to advance a Zero-Page OAM slot index by a coprime stride
-;; (+20 bytes = 5 sprite slots, gcd(5, 64) = 1, keeping Slot 0 reserved for Sprite 0 Hit)
-(define (emit-oam-coprime-flicker-6502 zp-oam-cursor #:stride-sprites [stride 5])
-  (define byte-stride (* 4 stride))
-  `((LDA #:zp ,zp-oam-cursor)
-    (CLC)
-    (ADC #:imm ,byte-stride)
-    ;; Keep Slot 0 ($00..$03) reserved when wrapping to 0
-    (BNE __oam_mux_ok)
-    (LDA #:imm 4)
-    (label __oam_mux_ok)
-    (STA #:zp ,zp-oam-cursor)))
-
-;; Emit 6502 instructions for 16-bit signed 8.8 fixed-point velocity + gravity integration:
-;;   vel += accel (16-bit signed), pos += vel (16-bit signed)
-(define (emit-fixed-point-8.8-step-6502 zp-pos-lo zp-pos-hi zp-vel-lo zp-vel-hi
-                                        #:accel-lo [accel-lo 0]
-                                        #:accel-hi [accel-hi 0])
-  (append
-   (if (and (zero? accel-lo) (zero? accel-hi))
-       '()
-       `((CLC)
-         (LDA #:zp ,zp-vel-lo)
-         (ADC #:imm ,(bitwise-and #xFF accel-lo))
-         (STA #:zp ,zp-vel-lo)
-         (LDA #:zp ,zp-vel-hi)
-         (ADC #:imm ,(bitwise-and #xFF accel-hi))
-         (STA #:zp ,zp-vel-hi)))
-   `((CLC)
-     (LDA #:zp ,zp-pos-lo)
-     (ADC #:zp ,zp-vel-lo)
-     (STA #:zp ,zp-pos-lo)
-     (LDA #:zp ,zp-pos-hi)
-     (ADC #:zp ,zp-vel-hi)
-     (STA #:zp ,zp-pos-hi))))
-
-;; Emit 6502 instructions for a mid-frame Sprite-0-Hit HUD raster split:
-;;   1. Waits for previous frame's Sprite 0 Hit flag ($2002 bit 6) to clear
-;;   2. Waits for current frame's Sprite 0 Hit flag ($2002 bit 6) to set at HUD bottom scanline
-;;   3. Updates $2000 (base nametable bit 0) and $2005 (horizontal camera scroll_x) during HBlankSplit
-(define (emit-sprite0-hud-split-6502 zp-scroll-x zp-scroll-nt
-                                     #:base-ppuctrl [base-ppuctrl #x88]
-                                     #:label-prefix [prefix 'hud_split])
-  (define lbl-clear (string->symbol (format "~a_wait_clear" prefix)))
-  (define lbl-hit   (string->symbol (format "~a_wait_hit" prefix)))
-  `((label ,lbl-clear)
-    (BIT #:abs #x2002)
-    (BVS ,lbl-clear)
-    (label ,lbl-hit)
-    (BIT #:abs #x2002)
-    (BVC ,lbl-hit)
-    ;; Apply horizontal camera scroll_x and nametable bit below the HUD!
-    (LDA #:zp ,zp-scroll-nt)
-    (AND #:imm #x01)
-    (ORA #:imm ,base-ppuctrl)
-    (STA #:abs #x2000)
-    (LDA #:zp ,zp-scroll-x)
-    (STA #:abs #x2005)
-    (LDA #:imm 0)
-    (STA #:abs #x2005)))
+(define emit-oam-metasprite-6502 emit-metasprite-oam-6502)
 
 ;; Surface DSL macro for declaring and typechecking a graded NES module
 (define-syntax-rule (defnes-module mod-id budget-expr spec-hash-expr)
@@ -264,4 +201,5 @@
 
 (define (verify-nes-grades! mod [budget NTSC-NROM-BUDGET])
   (typecheck-nes-module mod budget))
+
 

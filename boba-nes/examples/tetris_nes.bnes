@@ -3,26 +3,42 @@
 ;; ============================================================================
 ;; examples/tetris_nes.bnes : Nintendo NES Tetris in #lang boba-nes
 ;; ============================================================================
-;; Exercises the #lang boba-nes extensions for real-time falling-block puzzle games:
-;;   1. 10x20 Playfield Well in Work RAM ($0400-$04C7 = 200 bytes)
-;;   2. Staged VBlank Dirty-Row Copier (flushes 2 rows = 20 B per NMI across 10 slices,
-;;      preventing the 200-byte line-clear VBlank overflow on Phi1 & Phi4!)
-;;   3. 7 Tetrominoes x 4 Rotations Signed Offset Table & ROW10_TABLE (multiply-free 6502)
-;;   4. Galois LFSR PRNG, Active + NEXT OAM Sprites, Line Clear & Row Gravity Collapse
+;; Exercises the #lang boba-nes resource-separation constructs & genre libraries:
+;;   1. Authentic 4 KB Gameplay CHR Bank 3 from Nintendo NES Tetris
+;;      (Zero-offset font '0'..'9' at #x00..#x09, 'A'..'Z' at #x0A..#x23,
+;;       hyphen '-' at #x24, empty tile at #xFF, minoes at #x7B/#x7C/#x7D)
+;;   2. 10x20 Playfield Well in Work RAM ($0400-$04C7 = 200 bytes)
+;;   3. Staged VBlank Dirty-Row Copier (flushes 2 rows = 20 B per NMI across 10 slices,
+;;      translating empty cell 0 -> #xFF and preventing Phi1/Phi4 VBlank overflow!)
+;;   4. 7 Tetrominoes x 4 Rotations Signed Offset Table & ROW10_TABLE (multiply-free 6502)
 ;; ============================================================================
 
-(require racket/runtime-path
-         racket/file)
+(defchr-layout tetris-chr-layout
+  #:sprite-pt  0
+  #:bg-pt      0
+  #:blank-tile #xFF)
 
-(define-runtime-path build-dir "../build")
+(defchar-map tetris-hud-font
+  #:digit-base #x00
+  #:alpha-base #x0A
+  #:space-tile #xFF
+  #:extra      (list (cons #\- #x24)))
 
-(provide tetris-rom-bytes
+(defsprite-tile tetris-mino-hollow-tile #:tile #x7B #:attr #x00)
+(defsprite-tile tetris-mino-solid-tile  #:tile #x7C #:attr #x00)
+(defsprite-tile tetris-mino-border-tile #:tile #x7D #:attr #x00)
+
+(provide tetris-chr-layout
+         tetris-hud-font
+         tetris-mino-hollow-tile
+         tetris-mino-solid-tile
+         tetris-mino-border-tile
+         tetris-rom-bytes
          tetris-asm-result
          tetris-type-result
          tetris-module-desc)
 
-(make-directory* build-dir)
-(define tetris-rom-path (build-path build-dir "tetris_nes.nes"))
+(define tetris-rom-path "build/tetris_nes.nes")
 
 (define-values (tetris-rom-bytes tetris-asm-result tetris-type-result tetris-module-desc)
   (compile-tetris-nes-rom! #:nes-out-path tetris-rom-path))
@@ -34,6 +50,7 @@
   (printf "  #lang boba-nes : Nintendo NES Tetris ROM Report\n")
   (printf "================================================================\n")
   (printf "  Well-Typed Hardware Module : ~a\n" (nes-type-result-well-typed? tetris-type-result))
+  (printf "  CHR Resource Layout        : Authentic Tetris CHR Bank 3 (#x7B/#x7C/#x7D Minoes)\n")
   (printf "  Playfield Well Architecture: 10x20 RAM Well ($0400-$04C7) + Staged VBlank Row Flush\n")
   (printf "  Phi1 VBlank NMI Cycles     : ~a / 2273 cycles (2 rows = 20 B flushed per NMI)\n" (nes-grade-cycles vb))
   (printf "  Phi1 ActiveFrame Cycles    : ~a / 29780 cycles\n" (nes-grade-cycles act))
@@ -41,7 +58,8 @@
           (nes-grade-vram-dma-bytes vb))
   (printf "  Phi3 Zero-Page Live / Peak : ~a B live / ~a B peak (<= 224 B)\n"
           (nes-grade-zp-bytes-live act) (nes-grade-zp-bytes-peak act))
-  (printf "  Phi3 PRG-ROM Code + Tables : ~a / 32768 B\n" (nes-grade-prg-rom-bytes act))
+  (printf "  Phi3 PRG-ROM Code + Tables : ~a / 32768 B (~a CHR tiles)\n"
+          (nes-grade-prg-rom-bytes act) (nes-grade-chr-tiles act))
   (printf "  Output iNES 1.0 ROM        : ~a (~a bytes)\n"
           tetris-rom-path (bytes-length tetris-rom-bytes))
   (printf "================================================================\n"))
