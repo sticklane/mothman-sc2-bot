@@ -12,7 +12,8 @@
          "../compiler/graded-typechecker.rkt"
          "../compiler/diagnostics.rkt"
          "../compiler/mos6502-assembler.rkt"
-         "../compiler/boba-rom-builder.rkt")
+         "../compiler/boba-rom-builder.rkt"
+         "../compiler/nes-games-builder.rkt")
 
 (provide
  (all-from-out racket/base)
@@ -20,6 +21,7 @@
  (all-from-out "../compiler/diagnostics.rkt")
  (all-from-out "../compiler/mos6502-assembler.rkt")
  (all-from-out "../compiler/boba-rom-builder.rkt")
+ (all-from-out "../compiler/nes-games-builder.rkt")
 
  ;; Declarative #lang boba-nes Surface DSL Forms
  defnes-module
@@ -29,6 +31,11 @@
  with-turn-coroutine
  with-vram-delta-queue
  emit-chr-ram-word-upload-6502
+ defmetasprite
+ emit-oam-metasprite-6502
+ emit-oam-coprime-flicker-6502
+ emit-fixed-point-8.8-step-6502
+ emit-sprite0-hud-split-6502
  defzp-var
  with-zp-scratch
  defchr-tile
@@ -133,6 +140,116 @@
                      `((LDA #:imm ,b)
                        (STA #:abs #x2007))))))))
 
+;; Surface DSL macro for declaring a 16x16 (2x2 hardware 8x8 tile) composite metasprite
+(define-syntax-rule (defmetasprite ms-id
+                      #:tl tl-tile #:tr tr-tile
+                      #:bl bl-tile #:br br-tile
+                      #:attr attr-byte)
+  (define ms-id
+    (hasheq 'name 'ms-id
+            'tl tl-tile 'tr tr-tile
+            'bl bl-tile 'br br-tile
+            'attr attr-byte
+            'oam-sprites 4
+            'scanline-sprites 2)))
+
+;; Emit 6502 instructions to write a 16x16 (4-sprite) metasprite into OAM page $0200
+;; starting at static OAM byte offset `oam-base` from Zero-Page coordinates `zp-x` and `zp-y`.
+(define (emit-oam-metasprite-6502 ms-desc zp-x zp-y oam-base)
+  (define tl   (hash-ref ms-desc 'tl))
+  (define tr   (hash-ref ms-desc 'tr))
+  (define bl   (hash-ref ms-desc 'bl))
+  (define br   (hash-ref ms-desc 'br))
+  (define attr (hash-ref ms-desc 'attr 0))
+  `((LDA #:zp ,zp-y)
+    (STA #:abs ,(+ #x0200 oam-base 0))
+    (STA #:abs ,(+ #x0200 oam-base 4))
+    (CLC)
+    (ADC #:imm 8)
+    (STA #:abs ,(+ #x0200 oam-base 8))
+    (STA #:abs ,(+ #x0200 oam-base 12))
+    (LDA #:imm ,tl)
+    (STA #:abs ,(+ #x0200 oam-base 1))
+    (LDA #:imm ,tr)
+    (STA #:abs ,(+ #x0200 oam-base 5))
+    (LDA #:imm ,bl)
+    (STA #:abs ,(+ #x0200 oam-base 9))
+    (LDA #:imm ,br)
+    (STA #:abs ,(+ #x0200 oam-base 13))
+    (LDA #:imm ,attr)
+    (STA #:abs ,(+ #x0200 oam-base 2))
+    (STA #:abs ,(+ #x0200 oam-base 6))
+    (STA #:abs ,(+ #x0200 oam-base 10))
+    (STA #:abs ,(+ #x0200 oam-base 14))
+    (LDA #:zp ,zp-x)
+    (STA #:abs ,(+ #x0200 oam-base 3))
+    (STA #:abs ,(+ #x0200 oam-base 11))
+    (CLC)
+    (ADC #:imm 8)
+    (STA #:abs ,(+ #x0200 oam-base 7))
+    (STA #:abs ,(+ #x0200 oam-base 15))))
+
+;; Emit 6502 instructions to advance a Zero-Page OAM slot index by a coprime stride
+;; (+20 bytes = 5 sprite slots, gcd(5, 64) = 1, keeping Slot 0 reserved for Sprite 0 Hit)
+(define (emit-oam-coprime-flicker-6502 zp-oam-cursor #:stride-sprites [stride 5])
+  (define byte-stride (* 4 stride))
+  `((LDA #:zp ,zp-oam-cursor)
+    (CLC)
+    (ADC #:imm ,byte-stride)
+    ;; Keep Slot 0 ($00..$03) reserved when wrapping to 0
+    (BNE __oam_mux_ok)
+    (LDA #:imm 4)
+    (label __oam_mux_ok)
+    (STA #:zp ,zp-oam-cursor)))
+
+;; Emit 6502 instructions for 16-bit signed 8.8 fixed-point velocity + gravity integration:
+;;   vel += accel (16-bit signed), pos += vel (16-bit signed)
+(define (emit-fixed-point-8.8-step-6502 zp-pos-lo zp-pos-hi zp-vel-lo zp-vel-hi
+                                        #:accel-lo [accel-lo 0]
+                                        #:accel-hi [accel-hi 0])
+  (append
+   (if (and (zero? accel-lo) (zero? accel-hi))
+       '()
+       `((CLC)
+         (LDA #:zp ,zp-vel-lo)
+         (ADC #:imm ,(bitwise-and #xFF accel-lo))
+         (STA #:zp ,zp-vel-lo)
+         (LDA #:zp ,zp-vel-hi)
+         (ADC #:imm ,(bitwise-and #xFF accel-hi))
+         (STA #:zp ,zp-vel-hi)))
+   `((CLC)
+     (LDA #:zp ,zp-pos-lo)
+     (ADC #:zp ,zp-vel-lo)
+     (STA #:zp ,zp-pos-lo)
+     (LDA #:zp ,zp-pos-hi)
+     (ADC #:zp ,zp-vel-hi)
+     (STA #:zp ,zp-pos-hi))))
+
+;; Emit 6502 instructions for a mid-frame Sprite-0-Hit HUD raster split:
+;;   1. Waits for previous frame's Sprite 0 Hit flag ($2002 bit 6) to clear
+;;   2. Waits for current frame's Sprite 0 Hit flag ($2002 bit 6) to set at HUD bottom scanline
+;;   3. Updates $2000 (base nametable bit 0) and $2005 (horizontal camera scroll_x) during HBlankSplit
+(define (emit-sprite0-hud-split-6502 zp-scroll-x zp-scroll-nt
+                                     #:base-ppuctrl [base-ppuctrl #x88]
+                                     #:label-prefix [prefix 'hud_split])
+  (define lbl-clear (string->symbol (format "~a_wait_clear" prefix)))
+  (define lbl-hit   (string->symbol (format "~a_wait_hit" prefix)))
+  `((label ,lbl-clear)
+    (BIT #:abs #x2002)
+    (BVS ,lbl-clear)
+    (label ,lbl-hit)
+    (BIT #:abs #x2002)
+    (BVC ,lbl-hit)
+    ;; Apply horizontal camera scroll_x and nametable bit below the HUD!
+    (LDA #:zp ,zp-scroll-nt)
+    (AND #:imm #x01)
+    (ORA #:imm ,base-ppuctrl)
+    (STA #:abs #x2000)
+    (LDA #:zp ,zp-scroll-x)
+    (STA #:abs #x2005)
+    (LDA #:imm 0)
+    (STA #:abs #x2005)))
+
 ;; Surface DSL macro for declaring and typechecking a graded NES module
 (define-syntax-rule (defnes-module mod-id budget-expr spec-hash-expr)
   (begin
@@ -147,3 +264,4 @@
 
 (define (verify-nes-grades! mod [budget NTSC-NROM-BUDGET])
   (typecheck-nes-module mod budget))
+

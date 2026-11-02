@@ -11,8 +11,12 @@
          "../compiler/diagnostics.rkt"
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
+         "../compiler/nes-games-builder.rkt"
          "../examples/boba_is_you.bnes"
-         "../examples/boba_200_levels_cartridge.bnes")
+         "../examples/boba_200_levels_cartridge.bnes"
+         "../examples/mario_platformer.bnes"
+         "../examples/zelda_adventure.bnes"
+         "../examples/tetris_nes.bnes")
 
 (define total-checks 0)
 
@@ -578,6 +582,201 @@
     (check-equal? (nes-chr-ref banked-emu (+ #x0260 i))
                   (bytes-ref melt-left i))))
 
+;; ============================================================================
+;; 8. 6502 Long-Branch & Page-Crossing Relaxation + Sprite 0 / Scroll Repairs
+;; ============================================================================
+(test-case "6502 assembler automatically relaxes >127-byte and page-crossing branches and repairs Sprite 0 / mirroring clashes"
+  ;; Build a 6502 subroutine with a BNE spanning 160 NOP bytes (> +127 signed 8-bit limit!)
+  (define long-branch-prog
+    `((label long_entry)
+      (LDA #:imm 1)
+      (BNE far_target)
+      ,@(for/list ([_ (in-range 160)]) '(NOP))
+      (LDA #:imm #x99)
+      (STA #:zp #x30)
+      (RTS)
+      (label far_target)
+      (LDA #:imm #x42)
+      (STA #:zp #x30)
+      (RTS)))
+  (define lb-asm (assemble-6502 long-branch-prog #:origin #x8000))
+  (check-equal? (asm-result-page-crossings lb-asm) 0)
+  (define lb-rom (build-ines-rom lb-asm (make-bytes 8192 0)))
+  (define lb-emu (make-nes-emulator-from-rom lb-rom))
+  (nes-run-until-rts! lb-emu #x8000)
+  (check-equal? (nes-zp-ref lb-emu #x30) #x42)
+
+  ;; Verify L3 sprite0-missing-opaque-overlap and Phi4 scroll-mirroring-seam-clash detection + automated repair
+  (define broken-scroll-mod
+    (hasheq 'name 'broken-scroll-and-sprite0
+            'mapper 'NROM
+            'scroll-mode 'horizontal
+            'mirroring 'horizontal
+            'sprite0-split? #t
+            'sprite0-opaque-overlap? #f))
+  (define broken-scroll-res (typecheck-nes-module broken-scroll-mod NTSC-NROM-BUDGET))
+  (check-false (nes-type-result-well-typed? broken-scroll-res))
+  (define scroll-v-kinds (list->set (map nes-violation-category (nes-type-result-violations broken-scroll-res))))
+  (check-true (set-member? scroll-v-kinds 'sprite0-missing-opaque-overlap))
+  (check-true (set-member? scroll-v-kinds 'scroll-mirroring-seam-clash))
+
+  (define-values (repaired-scroll-mod scroll-repairs repaired-scroll-res)
+    (repair-nes-module broken-scroll-mod NTSC-NROM-BUDGET))
+  (check-true (nes-type-result-well-typed? repaired-scroll-res))
+  (check-equal? (hash-ref repaired-scroll-mod 'mirroring) 'vertical)
+  (check-true (hash-ref repaired-scroll-mod 'sprite0-opaque-overlap?))
+  (check-true (set-member? (list->set scroll-repairs) 'place-sprite0-on-opaque-hud-tile))
+  (check-true (set-member? (list->set scroll-repairs) 'align-nametable-mirroring-to-scroll-axis)))
+
+;; ============================================================================
+;; 9. Super Mario Bros. (World 1-1) 6502 Execution: Sprite 0 Split, 8.8 Jump,
+;;    Question Block Coin, Goomba Stomp, Horizontal Scroll & Flagpole Victory
+;; ============================================================================
+(test-case "Super Mario Bros. (World 1-1) 6502 Execution: Sprite 0 HUD split, 8.8 jump, ? block coin, Goomba stomp & Flagpole win"
+  (check-true (nes-type-result-well-typed? mario-type-result))
+  (check-equal? (asm-result-page-crossings mario-asm-result) 0)
+  (check-equal? (bytes-length mario-rom-bytes) (+ 16 32768 8192))
+
+  (define m-emu (make-nes-emulator-from-rom mario-rom-bytes))
+  (define m-labels (asm-result-labels mario-asm-result))
+  (define m-boot  (hash-ref m-labels 'boot_init))
+  (define m-frame (hash-ref m-labels 'game_frame_step))
+
+  (nes-run-until-rts! m-emu m-boot)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-X-WORLD-LO) 40)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-Y-PX) 176)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-ON-GROUND) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-GOOMBA-ALIVE) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-COINS) 0)
+
+  ;; 1. Walk right 12 frames to X=76 (under '?' Question Block) and jump ('A') to bonk a Coin!
+  (for ([_ (in-range 12)])
+    (define-values (_act vb) (nes-step-frame! m-emu m-frame BTN-RIGHT))
+    (check-true (<= vb 2273)))
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-X-WORLD-LO) 76)
+
+  (nes-step-frame! m-emu m-frame BTN-A)
+  (for ([_ (in-range 25)])
+    (nes-step-frame! m-emu m-frame 0))
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-QBLOCK-HIT) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-COINS) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-ON-GROUND) 1)
+
+  ;; 2. Walk right 14 frames to X=118 and stomp the Goomba at X=120!
+  (for ([_ (in-range 14)])
+    (nes-step-frame! m-emu m-frame BTN-RIGHT))
+  (nes-step-frame! m-emu m-frame BTN-A)
+  (for ([_ (in-range 35)])
+    (nes-step-frame! m-emu m-frame 0))
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-GOOMBA-ALIVE) 0)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-SCORE) 2)
+
+  ;; 3. Run right across Nametable 0 -> Nametable 1 to the Flagpole (World X >= 340) to win!
+  (for ([_ (in-range 85)])
+    (define-values (_act vb) (nes-step-frame! m-emu m-frame BTN-RIGHT))
+    (check-true (<= vb 2273))
+    (check-false (nes-emulator-ppu-tainted? m-emu)))
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-X-WORLD-HI) 1)
+  (check-true (> (nes-zp-ref m-emu MARIO-ZP-SCROLL-X) 0))
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-WON) 1))
+
+;; ============================================================================
+;; 10. The Legend of Zelda 6502 Execution: Coprime OAM Flicker, Sword Combat,
+;;     Octorok Key Drop, Locked North Door & Triforce of Wisdom
+;; ============================================================================
+(test-case "The Legend of Zelda 6502 Execution: Coprime OAM flicker, Sword thrust vs Octorok, Key drop, Door unlock & Triforce"
+  (check-true (nes-type-result-well-typed? zelda-type-result))
+  (check-equal? (asm-result-page-crossings zelda-asm-result) 0)
+  (check-equal? (bytes-length zelda-rom-bytes) (+ 16 32768 8192))
+
+  (define z-emu (make-nes-emulator-from-rom zelda-rom-bytes))
+  (define z-labels (asm-result-labels zelda-asm-result))
+  (define z-boot  (hash-ref z-labels 'boot_init))
+  (define z-frame (hash-ref z-labels 'game_frame_step))
+
+  (nes-run-until-rts! z-emu z-boot)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-LINK-X) 120)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-LINK-Y) 144)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OCTO-ALIVE) 1)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-HEARTS) 3)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OAM-CURSOR) 4)
+
+  ;; 1. Walk Link UP 9 frames to Y=108 and thrust Sword ('A') to defeat the Red Octorok at (120, 96)!
+  (for ([_ (in-range 9)])
+    (define-values (_act vb) (nes-step-frame! z-emu z-frame BTN-UP))
+    (check-true (<= vb 2273)))
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-LINK-Y) 108)
+  ;; Verify Coprime OAM cursor rotated by +20 bytes per frame
+  (check-not-false (not (= (nes-zp-ref z-emu ZELDA-ZP-OAM-CURSOR) 4)))
+
+  (nes-step-frame! z-emu z-frame BTN-A)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OCTO-ALIVE) 0)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-RUPEES) 1)
+
+  ;; 2. Walk UP 16 frames to collect the dropped Key at (120, 96) and unlock the North Door into Room 1 (Sanctum)!
+  (for ([_ (in-range 16)])
+    (nes-step-frame! z-emu z-frame BTN-UP))
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-ROOM-ID) 1)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-KEYS) 0) ; Key consumed unlocking door
+
+  ;; 3. Walk UP 18 frames in the Sanctum to the Pedestal at (120, 104) to claim the Triforce of Wisdom!
+  (for ([_ (in-range 18)])
+    (define-values (_act vb) (nes-step-frame! z-emu z-frame BTN-UP))
+    (check-true (<= vb 2273))
+    (check-false (nes-emulator-ppu-tainted? z-emu)))
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-TRIFORCE-WON) 1))
+
+;; ============================================================================
+;; 11. Nintendo NES Tetris 6502 Execution: 10x20 Well, Rotation, Line Clear &
+;;     Staged VBlank Dirty-Row Stripe Copier (2 rows = 20 B / NMI)
+;; ============================================================================
+(test-case "Nintendo NES Tetris 6502 Execution: 10x20 well, rotation, line clear, gravity collapse & 2-row/NMI VBlank flush"
+  (check-true (nes-type-result-well-typed? tetris-type-result))
+  (check-equal? (asm-result-page-crossings tetris-asm-result) 0)
+  (check-equal? (bytes-length tetris-rom-bytes) (+ 16 32768 8192))
+
+  (define t-emu (make-nes-emulator-from-rom tetris-rom-bytes))
+  (define t-labels (asm-result-labels tetris-asm-result))
+  (define t-boot  (hash-ref t-labels 'boot_init))
+  (define t-frame (hash-ref t-labels 'game_frame_step))
+
+  (nes-run-until-rts! t-emu t-boot)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-PIECE-ID) 0)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-PIECE-ROT) 0)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-PIECE-X) 4)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-DIRTY-ROW) 20)
+
+  ;; 1. Test clockwise rotation ('A' button) and horizontal shift ('LEFT' button)
+  (nes-step-frame! t-emu t-frame BTN-A)
+  (nes-step-frame! t-emu t-frame 0)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-PIECE-ROT) 1)
+  (nes-step-frame! t-emu t-frame BTN-LEFT)
+  (nes-step-frame! t-emu t-frame 0)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-PIECE-X) 3)
+
+  ;; 2. Pre-fill row 18 ($04B4..$04BD) cols 0,1,2,6,7,8,9 so hard-dropping a T-piece
+  ;;    (ID=0, Rot=0, X=4 -> cols 3,4,5 at row 18) completes a full 10-block row!
+  (for ([col (in-list '(0 1 2 6 7 8 9))])
+    (nes-ram-set! t-emu (+ TETRIS-WELL-RAM-BASE 180 col) 1))
+  (nes-ram-set! t-emu TETRIS-ZP-PIECE-ID 0)
+  (nes-ram-set! t-emu TETRIS-ZP-PIECE-ROT 0)
+  (nes-ram-set! t-emu TETRIS-ZP-PIECE-X 4)
+
+  (define-values (_act-drop vb-drop) (nes-step-frame! t-emu t-frame BTN-B))
+  ;; Verify VBlank NMI stayed strictly inside 2,273 cycles while flushing the first 2 rows (20 B)!
+  (check-true (<= vb-drop 2273))
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LINES) 1)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-SCORE) 1)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-DIRTY-ROW) 2)
+
+  ;; 3. Step 9 more frames and verify the staged VBlank copier flushes all 20 rows (2 rows/NMI -> 20)
+  (for ([_ (in-range 9)])
+    (define-values (_a vb) (nes-step-frame! t-emu t-frame 0))
+    (check-true (<= vb 2273))
+    (check-false (nes-emulator-ppu-tainted? t-emu)))
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-DIRTY-ROW) 20))
+
 (printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)
+
 

@@ -673,6 +673,18 @@
                    "Add branches for all declared entity/rule variants in the dispatch table.")
                   violations))))
 
+  ;; 3. Check Sprite-0-Hit mid-frame raster split opaque overlap invariant
+  (when (and (hash-ref mod 'sprite0-split? #f)
+             (not (hash-ref mod 'sprite0-opaque-overlap? #t)))
+    (set! violations
+          (cons (nes-violation
+                 'L3
+                 'sprite0-missing-opaque-overlap
+                 "Mid-frame HBlankSplit polls $2002 bit 6 (Sprite 0 Hit), but OAM Sprite 0 does not overlap a guaranteed non-transparent background pixel (risks infinite CPU hang in BIT $2002 / BVC loop)"
+                 (hasheq 'sprite0-split? #t 'sprite0-opaque-overlap? #f)
+                 "Place OAM Sprite 0 over a solid non-zero HUD background tile (e.g. coin/bomb icon at Y=22..30) before polling $2002 bit 6.")
+                violations)))
+
   (reverse violations))
 
 ;; L4: $2006/$2007 Shared Scroll-Latch Taint & 2A03 DMC Joypad Glitch Safety
@@ -990,6 +1002,23 @@
                  "Align board metatiles to 2x2-tile (16x16-pixel) boundaries so each grid cell occupies a dedicated Attribute Table quadrant.")
                 violations)))
 
+  ;; Check Cartridge Nametable Mirroring vs. Camera Scroll Axis Compatibility:
+  ;; - Horizontal scrolling across $2000 & $2400 requires 'vertical mirroring (or 'four-screen / 'dynamic-mmc1)
+  ;; - Vertical scrolling across $2000 & $2800 requires 'horizontal mirroring (or 'four-screen / 'dynamic-mmc1)
+  (define scroll-mode (hash-ref mod 'scroll-mode 'none))
+  (define mirroring   (hash-ref mod 'mirroring 'vertical))
+  (when (or (and (eq? scroll-mode 'horizontal) (eq? mirroring 'horizontal))
+            (and (eq? scroll-mode 'vertical)   (eq? mirroring 'vertical)))
+    (set! violations
+          (cons (nes-violation
+                 'Phi4
+                 'scroll-mirroring-seam-clash
+                 (format "Camera scroll mode '~a' clashes with cartridge nametable mirroring '~a' (off-screen seam column/row streaming overwrites visible $2000 playfield)"
+                         scroll-mode mirroring)
+                 (hasheq 'scroll-mode scroll-mode 'mirroring mirroring)
+                 "Set #:mirroring 'vertical for horizontal ($2000/$2400) scrolling, 'horizontal for vertical ($2000/$2800) scrolling, or 'dynamic-mmc1 for 4-way room transitions.")
+                violations)))
+
   (reverse violations))
 
 ;; Phi5: 2A03 5-Channel APU Disjointness
@@ -1253,7 +1282,17 @@
                    (hash-set
                     (hash-set repaired 'attr-clashes 0)
                     'nametable-cells '()))
-             (set! applied-repairs (cons 'align-16x16-metatile-quadrants applied-repairs))]))
+             (set! applied-repairs (cons 'align-16x16-metatile-quadrants applied-repairs))]
+
+            [(sprite0-missing-opaque-overlap)
+             (set! repaired (hash-set repaired 'sprite0-opaque-overlap? #t))
+             (set! applied-repairs (cons 'place-sprite0-on-opaque-hud-tile applied-repairs))]
+
+            [(scroll-mirroring-seam-clash)
+             (define sm (hash-ref repaired 'scroll-mode 'horizontal))
+             (define fixed-mir (if (eq? sm 'horizontal) 'vertical 'horizontal))
+             (set! repaired (hash-set repaired 'mirroring fixed-mir))
+             (set! applied-repairs (cons 'align-nametable-mirroring-to-scroll-axis applied-repairs))]))
 
         (define final-res (typecheck-nes-module repaired budget))
         (values repaired (reverse (remove-duplicates applied-repairs)) final-res))))

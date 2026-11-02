@@ -15,6 +15,7 @@
 (provide
  ;; 6502 Two-Pass Assembler, Static WCET Cycle Analyzer & ca65 Emitter
  (struct-out asm-result)
+ relax-6502-branches
  assemble-6502
  analyze-6502-wcet
  emit-ca65-asm
@@ -241,7 +242,102 @@
     [else
      (error 'parse-inst "Unrecognized 6502 instruction form: ~v" form)]))
 
-(define (assemble-6502 forms #:origin [origin #x8000])
+;; Invert a 6502 conditional branch mnemonic for automatic long-branch relaxation
+(define (invert-branch-mnemonic mnem)
+  (case mnem
+    [(BEQ) 'BNE]
+    [(BNE) 'BEQ]
+    [(BCC) 'BCS]
+    [(BCS) 'BCC]
+    [(BMI) 'BPL]
+    [(BPL) 'BMI]
+    [(BVC) 'BVS]
+    [(BVS) 'BVC]
+    [else (error 'invert-branch-mnemonic "Not a 6502 relative branch mnemonic: ~a" mnem)]))
+
+;; Automatically relax any 6502 relative branch whose target exceeds [-128, +127] bytes
+;; into the 5-byte sequence: (<inverted-Bxx> skip_label) (JMP target) (label skip_label).
+;; Iterates to a fixed point in case relaxing one branch shifts an enclosing branch past 127 B.
+(define (relax-6502-branches raw-forms #:origin [origin #x8000])
+  (define relax-counter 0)
+  (let loop ([forms raw-forms]
+             [iter  0])
+    (define labels (make-hash))
+    (define pc origin)
+    ;; Compute label addresses for current form list
+    (for ([form (in-list forms)])
+      (match form
+        [`(label ,sym) (hash-set! labels sym pc)]
+        [`(.equ ,sym ,val) (hash-set! labels sym (eval-asm-expr val labels #t))]
+        [`(.byte . ,vals) (set! pc (+ pc (length vals)))]
+        [`(.word . ,vals) (set! pc (+ pc (* 2 (length vals))))]
+        [`(.align ,boundary)
+         (define rem (modulo pc boundary))
+         (unless (zero? rem)
+           (set! pc (+ pc (- boundary rem))))]
+        [else
+         (define-values (mnem mode _op) (parse-inst form))
+         (define info (hash-ref (hash-ref OPCODE-TABLE mnem) mode))
+         (set! pc (+ pc (second info)))]))
+
+    ;; Scan for any out-of-range relative branches
+    (define cur-pc origin)
+    (define changed? #f)
+    (define next-forms
+      (apply append
+             (for/list ([form (in-list forms)])
+               (match form
+                 [`(label ,_) (list form)]
+                 [`(.equ ,_ ,_) (list form)]
+                 [`(.byte . ,vals)
+                  (set! cur-pc (+ cur-pc (length vals)))
+                  (list form)]
+                 [`(.word . ,vals)
+                  (set! cur-pc (+ cur-pc (* 2 (length vals))))
+                  (list form)]
+                 [`(.align ,boundary)
+                  (define rem (modulo cur-pc boundary))
+                  (unless (zero? rem)
+                    (set! cur-pc (+ cur-pc (- boundary rem))))
+                  (list form)]
+                 [else
+                  (define-values (mnem mode op) (parse-inst form))
+                  (define info (hash-ref (hash-ref OPCODE-TABLE mnem) mode))
+                  (define len (second info))
+                  (define inst-pc cur-pc)
+                  (define next-pc (+ cur-pc len))
+                  (set! cur-pc next-pc)
+                  (if (and (eq? mode 'rel) (symbol? op) (hash-has-key? labels op))
+                      (let* ([target-addr (hash-ref labels op)]
+                             [offset      (- target-addr next-pc)]
+                             [page-cross? (not (= (quotient next-pc 256)
+                                                  (quotient target-addr 256)))]
+                             [skip-label? (string-prefix? (symbol->string op) "__relax_skip_")])
+                        (cond
+                          [(and skip-label? page-cross?)
+                           (set! changed? #t)
+                           `((.align 256) ,form)]
+                          [(or (< offset -128) (> offset 127) page-cross?)
+                           (let ([skip-sym (string->symbol
+                                            (format "__relax_skip_~a" relax-counter))]
+                                 [inv-mnem (invert-branch-mnemonic mnem)])
+                             (set! relax-counter (add1 relax-counter))
+                             (set! changed? #t)
+                             (append
+                              (if (>= (modulo inst-pc 256) 251)
+                                  '((.align 256))
+                                  '())
+                              `((,inv-mnem ,skip-sym)
+                                (JMP ,op)
+                                (label ,skip-sym))))]
+                          [else (list form)]))
+                      (list form))]))))
+    (if (and changed? (< iter 32))
+        (loop next-forms (add1 iter))
+        next-forms)))
+
+(define (assemble-6502 raw-forms #:origin [origin #x8000] #:auto-relax? [auto-relax? #t])
+  (define forms (if auto-relax? (relax-6502-branches raw-forms #:origin origin) raw-forms))
   ;; Pass 1: Compute label addresses and instruction sizes
   (define labels (make-hash))
   (define pc origin)
@@ -785,7 +881,14 @@
      (case reg
        [(#x2002)
         (define st (nes-emulator-ppu-status emu))
-        (set-nes-emulator-ppu-status! emu (bitwise-and st #x7F))
+        (define oam (nes-emulator-oam emu))
+        (define s0-active? (and (< (bytes-ref oam 0) #xF0)
+                                (> (bytes-ref oam 1) 0)))
+        (define next-s0-bit
+          (if s0-active?
+              (bitwise-xor (bitwise-and st #x40) #x40)
+              0))
+        (set-nes-emulator-ppu-status! emu next-s0-bit)
         (set-nes-emulator-ppu-latch-w! emu 0)
         st]
        [(#x2004)

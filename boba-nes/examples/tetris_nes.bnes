@@ -1,0 +1,47 @@
+#lang boba-nes
+
+;; ============================================================================
+;; examples/tetris_nes.bnes : Nintendo NES Tetris in #lang boba-nes
+;; ============================================================================
+;; Exercises the #lang boba-nes extensions for real-time falling-block puzzle games:
+;;   1. 10x20 Playfield Well in Work RAM ($0400-$04C7 = 200 bytes)
+;;   2. Staged VBlank Dirty-Row Copier (flushes 2 rows = 20 B per NMI across 10 slices,
+;;      preventing the 200-byte line-clear VBlank overflow on Phi1 & Phi4!)
+;;   3. 7 Tetrominoes x 4 Rotations Signed Offset Table & ROW10_TABLE (multiply-free 6502)
+;;   4. Galois LFSR PRNG, Active + NEXT OAM Sprites, Line Clear & Row Gravity Collapse
+;; ============================================================================
+
+(require racket/runtime-path
+         racket/file)
+
+(define-runtime-path build-dir "../build")
+
+(provide tetris-rom-bytes
+         tetris-asm-result
+         tetris-type-result
+         tetris-module-desc)
+
+(make-directory* build-dir)
+(define tetris-rom-path (build-path build-dir "tetris_nes.nes"))
+
+(define-values (tetris-rom-bytes tetris-asm-result tetris-type-result tetris-module-desc)
+  (compile-tetris-nes-rom! #:nes-out-path tetris-rom-path))
+
+(module+ main
+  (define vb  (nes-type-result-vblank-grade tetris-type-result))
+  (define act (nes-type-result-active-grade tetris-type-result))
+  (printf "================================================================\n")
+  (printf "  #lang boba-nes : Nintendo NES Tetris ROM Report\n")
+  (printf "================================================================\n")
+  (printf "  Well-Typed Hardware Module : ~a\n" (nes-type-result-well-typed? tetris-type-result))
+  (printf "  Playfield Well Architecture: 10x20 RAM Well ($0400-$04C7) + Staged VBlank Row Flush\n")
+  (printf "  Phi1 VBlank NMI Cycles     : ~a / 2273 cycles (2 rows = 20 B flushed per NMI)\n" (nes-grade-cycles vb))
+  (printf "  Phi1 ActiveFrame Cycles    : ~a / 29780 cycles\n" (nes-grade-cycles act))
+  (printf "  Phi4 VBlank Delta Queue    : ~a / 128 B per NMI (200 B well drained over 10 slices)\n"
+          (nes-grade-vram-dma-bytes vb))
+  (printf "  Phi3 Zero-Page Live / Peak : ~a B live / ~a B peak (<= 224 B)\n"
+          (nes-grade-zp-bytes-live act) (nes-grade-zp-bytes-peak act))
+  (printf "  Phi3 PRG-ROM Code + Tables : ~a / 32768 B\n" (nes-grade-prg-rom-bytes act))
+  (printf "  Output iNES 1.0 ROM        : ~a (~a bytes)\n"
+          tetris-rom-path (bytes-length tetris-rom-bytes))
+  (printf "================================================================\n"))

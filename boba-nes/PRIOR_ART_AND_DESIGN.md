@@ -108,4 +108,30 @@ Our flagship target is **Boba Is You**, a complete NES adaptation of the *Baba I
    - If an empty cell is reached, all blocks along the chain shift forward by 1 cell, rules are immediately re-scanned, `DEFEAT`/`SINK` overlaps destroy defeated actors, and overlapping any object with `BIT_WIN` triggers the victory fanfare and advances to the next level!
 4. **Hardware OAM Rendering & VBlank NMI Pipeline**:
    - Dynamic actors and movable word tiles are rendered as $16\times 16$ hardware metasprites (4 OAM entries per $16\times 16$ entity), while static walls/floors sit in the PPU Nametable (`$2000`), keeping total OAM sprites $\le 64$ and scanline sprites $\le 8$ ($\Phi_2$).
-   - The `NMI` handler executes `$4014` `OAMDMA` ($514$ cycles), updates the HUD level/rule status bar via `$2006`/`$2007`, and discharges $\mathsf{PpuTaint}$ via `(restore-scroll! 0 0)` in **$742$ total cycles** ($\le 2,273$ NTSC VBlank limit, $\Phi_1$).
+   - The `NMI` handler executes `$4014` `OAMDMA` ($514$ cycles), updates the HUD level/rule status bar via `$2006`/`$2007`, and discharges $\mathsf{PpuTaint}$ via `(restore-scroll! 0 0)` in **$612$ total cycles** ($\le 2,273$ NTSC VBlank limit, $\Phi_1$).
+
+---
+
+## 5. How Real NES Games Work & What Implementing *Mario*, *Zelda*, and *Tetris* Taught Us
+
+### 5.1 Real Commercial NES Architectures Across Genres
+
+| Game / Genre | Mapper & Memory | PPU / Scroll / Raster Architecture | Physics, State & Entity Architecture |
+| :--- | :--- | :--- | :--- |
+| **Super Mario Bros.** (1985, Action Platformer) | `NROM-256` (`32 KB` PRG, `8 KB` CHR-ROM, Vertical Mirroring) | **Sprite 0 Hit (`$2002` bit 6)** at bottom of HUD coin icon splits stationary status bar (`X=0`) from horizontal camera (`$2000`/`$2400`). Uses `VRAM_Buffer1` (`$0301`) stripe command queue (`[HI LO LEN DATA... 00]`) with `+32` vertical increment (`PPUCTRL` bit 2) for seam column streaming. | `8.8` fixed-point subpixel positions/velocities (`Player_Y_Speed` `$009F`, `Player_Y_MoveForce` `$0433`); 3-tier gravity table (`Jumping`/`Falling`); two $16\times 13$ (`416 B`) RAM metatile collision buffers at `$0500–$069F`. |
+| **The Legend of Zelda** (1986, Action-Adventure) | `MMC1` (`128 KB` PRG, `8 KB` CHR-RAM, `8 KB` `$6000` Battery WRAM) | **Dynamic `MMC1` Mirroring Switch (`$8000` bits 0–1)**: switches to Vertical Mirroring during East/West transitions and Horizontal Mirroring during North/South transitions so the 2 KB CIRAM always forms a seamless 2-screen scroll axis; Sprite 0 bomb icon keeps top 64px HUD stationary. | 12-slot Struct-of-Arrays (`SoA`) object pool (`ObjX`, `ObjY`, `ObjState`, `ObjTimer`); 8-pixel sub-grid alignment on Link (`X & 7 == 0` / `Y & 7 == 0`) for smooth doorway corner-sliding; Coprime OAM slot shuffling. |
+| **Nintendo NES Tetris** (1989, Real-Time Puzzle) | `MMC1` (`32 KB` PRG, `16 KB` CHR-ROM) | **Staged VBlank Dirty-Row Copier (`vramRow` `$0049`)**: never copies the 200-byte well in one VBlank; flushes at most 2–4 rows (`20–40 B`) per NMI (`RowY * 32 + $206C`). | $10\times 20$ (`200 B`) RAM well at `$0400–$04C7` (Player 1); 19 orientation IDs $\times$ 12 signed `(dy, dx, tile)` bytes; 16-bit Fibonacci LFSR PRNG (`$0017–$0018`, taps bits 1 & 9); Level 29 (`1 G`) NMI overrun hazard. |
+| **Mega Man 2** (1988) & **Contra** (1987) (Run-and-Gun) | `UNROM` (`128–256 KB` PRG, `8 KB` CHR-RAM) | Fixed Bank 7 (`$C000–$FFFF`) holds engine/NMI/physics; Banks 0–5 hold stages/bosses; Bank 6 holds music. | 16–24 parallel 1D `SoA` arrays indexed by `X`; 64-entry `sin`/`cos` velocity tables (`RomBorrow`) for aimed projectiles without runtime trig/division. |
+| **Super Mario Bros. 3** (1988) & **Kirby's Adventure** (1993) | `MMC3` (`TXROM`, `A12` scanline IRQ + `8 KB` `$6000` WRAM) | Hardware `MMC3` `A12` scanline counter (`$C000/$C001/$E001`) fires an `IRQ` at scanline 192 (0 CPU spin-wait cycles!) and executes the `$2006/$2005/$2005/$2006` "Loopy" split for a bottom HUD + 8-way scrolling (`$6000–$794F` `WRAM` tilemap). | Fine $1\text{ KB}/2\text{ KB}$ CHR-ROM bankswitching (`$8000/$8001`) animates background tiles (`?` blocks, coins, water) in **0 CPU cycles**. |
+| **Battletoads** (1991, High-Bandwidth Action) | `AxROM` (`256 KB` PRG, `8 KB` CHR-RAM, 1-Screen Mirroring) | **"Popslide" Stack-Page VBlank Blitter**: redirects `S` (`TXS`) to `$0100` VRAM buffer and runs unrolled `PLA; STA $2007` ($8\text{ cyc/byte}$) + late forced blanking to stream CHR-RAM animations every frame. | Strict `WCET` cycle budgets so NMI never misses the extended VBlank window. |
+
+### 5.2 Seven Language & Compiler Problems Discovered via *Mario*, *Zelda*, and *Tetris*
+
+1. **6502 Relative Branch Range (`[-128, +127]` B) & Page-Crossing Jitter ($\Phi_1$)**: Solved via iterative fixed-point branch relaxation (`relax-6502-branches` in `compiler/mos6502-assembler.rkt`).
+2. **Mid-Frame `Sprite 0 Hit` (`$2002` Bit 6) Deadlock ($\mathcal{L}_3$)**: Solved via `sprite0-missing-opaque-overlap` check, `place-sprite0-on-opaque-hud-tile` repair, `emit-sprite0-hud-split-6502`, and `$2002` bit 6 simulation in `nes-emulator`.
+3. **Nametable Mirroring vs. Scroll Axis Seam Clash ($\Phi_4$)**: Solved via `scroll-mirroring-seam-clash` check and `align-nametable-mirroring-to-scroll-axis` repair.
+4. **$16\times 16$ Metasprite Scanline Overflow ($\Phi_2$)**: Solved via `defmetasprite`, `emit-oam-metasprite-6502`, and Coprime OAM Flicker Multiplexing (`emit-oam-coprime-flicker-6502`).
+5. **Subpixel Physics on an 8-Bit ALU**: Solved via `emit-fixed-point-8.8-step-6502`.
+6. **Tetris Line-Clear VBlank Bandwidth Explosion ($\Phi_1$ & $\Phi_4$)**: Solved via a staged VBlank dirty-row stripe copier (`2 rows = 20 B / NMI`).
+7. **Alphanumeric HUD Glyph Coverage (`FONT-3X5`)**: Extended `FONT-3X5` with digits `0–9` and punctuation (`-`, `:`, `?`, `!`).
+
