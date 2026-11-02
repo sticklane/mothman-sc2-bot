@@ -524,6 +524,18 @@ def main() -> None:
         "lean4_verification": lean_report,
         "todd_autocc_phase_poly_verification": todd_report,
     }
+    primary_artifact = (
+        REPO_ROOT
+        / "reproducers"
+        / "artifacts"
+        / "lakefillq_egraph_qphys_extraction_report.json"
+    )
+    if primary_artifact.exists():
+        ext_doc = json.loads(primary_artifact.read_text(encoding="utf-8"))
+        ext_doc["todd_autocc_phase_poly_verification"] = todd_report
+        if "lean4_mechanization_audit" in ext_doc:
+            ext_doc["lean4_mechanization_audit"]["theorem_count"] = lean_report["theorems_total"]
+        primary_artifact.write_text(json.dumps(ext_doc, indent=2) + "\n", encoding="utf-8")
     if "--save-json" in sys.argv:
         REPORT_JSON.parent.mkdir(parents=True, exist_ok=True)
         REPORT_JSON.write_text(

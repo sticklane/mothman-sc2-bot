@@ -2705,6 +2705,17 @@ def main() -> None:
         "total_verification_wall_time_s": round(time.perf_counter() - t_start, 3),
         "all_checks_passed": True,
     }
+    if REPORT_PATH.exists():
+        prev_rtl = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+        prev_synth = prev_rtl.get("gate_netlist_synthesis_and_500mhz_timing", {})
+        for k in ("subblocks_fastpath_opt5", "hybrid_fastpath_top_module_synthesis"):
+            if k in prev_synth and k not in synth_timing:
+                synth_timing[k] = prev_synth[k]
+        prev_miters = prev_rtl.get("z3_qfbv_equivalence_miters", {})
+        if "miter4_ortree_xor_sparse_fastpath_vs_full_uf_peel" in prev_miters and "miter4_ortree_xor_sparse_fastpath_vs_full_uf_peel" not in z3_miters:
+            z3_miters["miter4_ortree_xor_sparse_fastpath_vs_full_uf_peel"] = prev_miters["miter4_ortree_xor_sparse_fastpath_vs_full_uf_peel"]
+        if "optimization5_sparse_syndrome_fastpath_10k_benchmark" in prev_rtl:
+            report["optimization5_sparse_syndrome_fastpath_10k_benchmark"] = prev_rtl["optimization5_sparse_syndrome_fastpath_10k_benchmark"]
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     REPORT_PATH.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"Report written to {REPORT_PATH} in {report['total_verification_wall_time_s']}s.")

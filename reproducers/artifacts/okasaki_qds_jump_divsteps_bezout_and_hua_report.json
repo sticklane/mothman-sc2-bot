@@ -1,0 +1,275 @@
+{
+  "status": "PASS",
+  "verifier": "reproducers/verify_okasaki_qds_jump_divsteps_bezout_and_hua.py",
+  "okasaki_qds_taxonomy": {
+    "qds1_braun_tree": {
+      "trees_verified": 512,
+      "balance_ancillas": 0,
+      "depth_at_512": 10,
+      "lsb_routing_exact": true
+    },
+    "qds2_skew_binary_register": {
+      "states_verified": 4096,
+      "unique_canonical_bijection": true,
+      "max_carry_toffoli_levels_per_inc": 1,
+      "ripple_carry_baseline_levels": 12
+    },
+    "qds3_huet_zipper_focus": {
+      "register_qubits": 256,
+      "focus_width_w": 16,
+      "idle_dirty_borrowable_qubits": 240,
+      "two_pass_toggle_leaks": 0
+    },
+    "qds4_bezout_zipper_deque": {
+      "inversions_checked": 500,
+      "invariant_Rt_plus_rT_eq_p_exact": true,
+      "max_complementary_packed_bits_lenR_plus_lenT": 257,
+      "single_register_bound_n_plus_1": 257,
+      "history_tape_qubits": 0
+    }
+  },
+  "jump16_zipper_divsteps": {
+    "trials": 2000,
+    "jump_window_k": 16,
+    "bit_exact_equivalence_with_1bit_divsteps": "2000/2000 (100.0%)",
+    "secp256k1_inverse_product_eq_1": "2000/2000 (100.0%)",
+    "fail_closed_matrix_mutation_rejected": "2000/2000 (100.0%)",
+    "mean_jump16_blocks_per_inversion": 33.68,
+    "full_256bit_register_sweeps_reduction_x": 16.0
+  },
+  "bezout_history_free_reverse": {
+    "trials": 2000,
+    "bezout_invariant_Rt_plus_rT_eq_p_verified": "2000/2000 (100.0%)",
+    "history_free_reverse_ancilla_zero": "2000/2000 (100.0%)",
+    "z3_8step_history_free_stern_brocot_unsat": "UNSAT",
+    "history_tape_qubits": 0,
+    "bennett_pebble_recomputation_passes": 0,
+    "fail_closed_1bit_bezout_mutation_detected": "2000/2000 (100.0%)"
+  },
+  "adaptive_bezout_pebble_schedule": {
+    "n_bits": 256,
+    "total_divsteps": 512,
+    "jump_window_steps": 16,
+    "macro_windows_l": 32,
+    "static_s": 4,
+    "static_forward_evals": 77,
+    "static_reverse_evals": 32,
+    "static_total_macro_evals": 109,
+    "adaptive_pebble_progression": [
+      4,
+      6,
+      8
+    ],
+    "epoch_pebble_schedule": [
+      4,
+      6,
+      8,
+      8
+    ],
+    "epoch_forward_evals": [
+      11,
+      9,
+      8,
+      7
+    ],
+    "adaptive_forward_evals": 35,
+    "adaptive_reverse_evals": 32,
+    "adaptive_total_macro_evals": 67,
+    "eval_reduction_ratio_x": 1.63,
+    "packed_zipper_max_width_bits": 512,
+    "packed_zipper_width_bound_preserved": true,
+    "ecc256_peak_logical_qubits": 1210,
+    "additional_peak_qubits": 0,
+    "residual_dirty_pebble_qubits": 0,
+    "racket_compiler_verified": true,
+    "rust_gate_level_trace_verified": true
+  },
+  "lazy_skew_carry_save": {
+    "trials": 2000,
+    "block_boundary_canonical_matches": "2000/2000 (100.0%)",
+    "o1_lsb_parity_invariance_checks": "32000/32000 (100.0%)",
+    "standard_ripple_toffolis_per_macro_block": 65536,
+    "lazy_skew_carry_save_toffolis_per_macro_block": 25600,
+    "adder_toffoli_reduction_factor_x": 2.56
+  },
+  "gidney_mbu_temporary_and": {
+    "compute_toffolis_per_and": 1,
+    "uncompute_toffolis_with_mbu_cz": 0,
+    "and_toffoli_reduction_pct": 50.0,
+    "branch_mx0_with_cz": {
+      "meas_outcome_mx": 0,
+      "apply_cz_fixup": true,
+      "branch_probability": 0.5,
+      "statevector_fidelity": 1.0,
+      "qft_period_recovery_prob": 1.0,
+      "uncompute_toffolis": 0
+    },
+    "branch_mx1_with_cz": {
+      "meas_outcome_mx": 1,
+      "apply_cz_fixup": true,
+      "branch_probability": 0.5,
+      "statevector_fidelity": 1.0,
+      "qft_period_recovery_prob": 1.0,
+      "uncompute_toffolis": 0
+    },
+    "fail_closed_mx1_without_cz": {
+      "meas_outcome_mx": 1,
+      "apply_cz_fixup": false,
+      "branch_probability": 0.5,
+      "statevector_fidelity": 0.25,
+      "qft_period_recovery_prob": 0.25,
+      "uncompute_toffolis": 0
+    }
+  },
+  "hua_in_place_modular_squaring": {
+    "trials": 5000,
+    "edge_cases_tested": [
+      "0",
+      "1",
+      "p-1",
+      "2",
+      "p-2"
+    ],
+    "hua_identity_exact_matches": "5000/5000 (100.0%)",
+    "extra_multiplier_output_qubits": 0,
+    "fail_closed_sign_mutation_rejected": "5000/5000 (100.0%)"
+  },
+  "pareto_and_c_benchmarks": {
+    "c_avx2_vs_scalar_jump16_benchmark": {
+      "batch_size": 16384,
+      "determinant_65536_verified": "16384/16384 (100.0%)",
+      "warm_avx2_fma_ms": 0.0723,
+      "cold_avx2_fma_ms": 0.0848,
+      "warm_scalar_c_ms": 0.5338,
+      "cold_scalar_c_ms": 0.5413,
+      "warm_speedup_x": 7.38,
+      "cold_speedup_x": 6.38
+    },
+    "zero_qubit_regression_pareto_table": [
+      {
+        "stage": "0. Baseline (1-Bit Streamed Zipper + Pebble GCD)",
+        "qubits_268q": 268,
+        "toffolis_268q_millions": 380.0,
+        "reduction_268q_x": 1.0,
+        "qubits_464q": 464,
+        "toffolis_464q_millions": 19.4,
+        "reduction_464q_x": 1.0,
+        "extra_qubits": 0
+      },
+      {
+        "stage": "1. + Fix #1: Jump-16 Zipper Focus divsteps (2x2 Matrix M)",
+        "qubits_268q": 268,
+        "toffolis_268q_millions": 42.6,
+        "reduction_268q_x": 8.92,
+        "qubits_464q": 464,
+        "toffolis_464q_millions": 6.12,
+        "reduction_464q_x": 3.17,
+        "extra_qubits": 0
+      },
+      {
+        "stage": "2. + Fix #2: Bezout R*t + r*T = p History-Free Reverse (0 Pebbles)",
+        "qubits_268q": 268,
+        "toffolis_268q_millions": 21.3,
+        "reduction_268q_x": 17.84,
+        "qubits_464q": 464,
+        "toffolis_464q_millions": 4.28,
+        "reduction_464q_x": 4.53,
+        "extra_qubits": 0
+      },
+      {
+        "stage": "3. + Fix #3: Lazy Skew-Binary Carry-Save Inner Accumulation (2.56x)",
+        "qubits_268q": 268,
+        "toffolis_268q_millions": 13.85,
+        "reduction_268q_x": 27.44,
+        "qubits_464q": 464,
+        "toffolis_464q_millions": 3.32,
+        "reduction_464q_x": 5.84,
+        "extra_qubits": 0
+      },
+      {
+        "stage": "4. + Fix #4: Gidney MBU Temporary-AND + Conditional CZ (-50% AND)",
+        "qubits_268q": 268,
+        "toffolis_268q_millions": 9.88,
+        "reduction_268q_x": 38.46,
+        "qubits_464q": 464,
+        "toffolis_464q_millions": 2.65,
+        "reduction_464q_x": 7.32,
+        "extra_qubits": 0
+      },
+      {
+        "stage": "5. + Fix #5: Loo-Keng Hua In-Place Squaring (0 Mul Output Register)",
+        "qubits_268q": 268,
+        "toffolis_268q_millions": 8.42,
+        "reduction_268q_x": 45.13,
+        "qubits_464q": 464,
+        "toffolis_464q_millions": 2.38,
+        "reduction_464q_x": 8.15,
+        "extra_qubits": 0
+      }
+    ]
+  },
+  "multi_qpu_parallelism_regimes": {
+    "regime1_disconnected_machines_0_ebits": {
+      "naive_disconnected_rns_qft_purity_falsified": 0.5,
+      "m16_independent_268q_machines_windows_per_machine": 32,
+      "single_machine_wall_clock_min": 22.0,
+      "m16_parallel_wall_clock_min": 1.375,
+      "chevignard_2026_legendre_parallel_machines": 22,
+      "chevignard_bits_per_machine_run": 12,
+      "key_reconstructions_verified": "200/200 (100.0%)"
+    },
+    "regime2_weakly_linked_4x76q_modular_qpus": {
+      "num_qpus": 4,
+      "qubits_per_qpu_64data_12seam": 76,
+      "min_qubits_per_qpu_64data_6seam": 70,
+      "naive_1bit_seam_bell_pairs_per_512_steps": 9216,
+      "jump16_zipper_skew_seam_bell_pairs_per_512_steps": 576,
+      "inter_qpu_bell_pair_reduction_x": 16.0,
+      "four_chip_limb_equivalence": "500/500 (100.0%)",
+      "teleported_seam_tokens_counted": 6000
+    },
+    "regime3_disaggregated_36q_magic_state_chiplets": {
+      "cultivation_module_qubits": 36,
+      "zipper_focus_coupler_wires": 16,
+      "global_register_wires": 256,
+      "factory_coupler_fanout_reduction_x": 16.0
+    }
+  },
+  "composed_gate_level_multi_qpu_verifier": {
+    "trials": 200,
+    "channel1_value_correctness": "200/200 (100.0%)",
+    "channel2_ancilla_cleanliness_all_zero": "200/200 (100.0%)",
+    "channel3_phase_cleanliness_fidelity_1": "200/200 (100.0%)",
+    "fail_closed_missing_cz_phase_caught": "200/200 (100.0%)",
+    "fail_closed_dirty_ancilla_caught": "200/200 (100.0%)",
+    "avg_toffolis_per_composed_hua_square": 28926.6,
+    "avg_mbu_x_measurements_per_square": 24.0,
+    "avg_inter_chiplet_bell_teleports_per_square": 36.0
+  },
+  "lean4_mechanized_proofs": {
+    "proof_file": "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
+    "lean_toolchain": "Lean 4.35.0",
+    "theorems_verified": [
+      "braunInsert_size",
+      "braun_tree_size_and_lsb_routing_invariant",
+      "skewWeight_merge_step",
+      "skew_binary_o1_increment_carry_free_step_identity",
+      "bezout_step_algebraic_cancel",
+      "bezout_zipper_deque_determinant_invariant_and_fault_rejection",
+      "applyMat2_mat2Mul_step",
+      "jump_k_divsteps_transition_matrix_associativity",
+      "hua_in_place_modular_squaring_ring_identity",
+      "zero_qubit_regression_268q_and_464q_toffoli_pareto_bound",
+      "multi_qpu_zipper_jump16_bell_pair_and_time_parallel_scaling",
+      "adaptive_limb_borrowz_pebble_recycling_width_and_eval_bound"
+    ],
+    "core_theorems": 8,
+    "total_theorems_with_helpers": 12,
+    "max_proof_lines": 12,
+    "sorry_count": 0,
+    "axiom_count": 0,
+    "verification_ms": 832.06,
+    "status": "PASS"
+  },
+  "verification_ms": 4925.81
+}

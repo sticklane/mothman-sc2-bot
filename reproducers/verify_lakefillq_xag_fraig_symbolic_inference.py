@@ -189,6 +189,14 @@ def main() -> None:
         },
         "python_infer_qsub": python_rep,
     }
+    artifact_json = REPO_ROOT / "reproducers" / "artifacts" / "lakefillq_xag_fraig_inference_report.json"
+    if artifact_json.exists():
+        doc = json.loads(artifact_json.read_text(encoding="utf-8"))
+    else:
+        doc = {"status": "PASS"}
+    doc["canonical_cone_isomorphism_optimization"] = summary
+    artifact_json.parent.mkdir(parents=True, exist_ok=True)
+    artifact_json.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2))
 
 

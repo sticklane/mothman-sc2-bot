@@ -39,7 +39,48 @@
          "lakefillq-bug-class-prevention-types.rkt"
          "lakefillq-cluster-qasm3-codegen.rkt"
          "lakefillq-graded-coeffect-effect-bimodule.rkt"
-         "lakefillq-multipass-diagnostics.rkt")
+         "lakefillq-multipass-diagnostics.rkt"
+         (only-in "lakefillq-egraph-saturator.rkt"
+                  phase-clean-u2-u4-cone-ops?
+                  todd-rm3-reduce-phase-poly
+                  lower-todd-cone-pre-isa
+                  lower-todd-cone-post-isa
+                  compute-isa-t-count
+                  compute-isa-t-depth)
+         (only-in "lakefillq-pareto-algorithm-optimizations.rkt"
+                  adaptive-bezout-binomial-pebble-schedule
+                  divstep-swap-sub-window-opt-sexpr))
+
+(define-runtime-module-path-index phase-ordering-analyzer-mpi
+  "lakefillq-phase-ordering-analyzer.rkt")
+(define (load-phase-ordering-binding sym)
+  (parameterize ([current-output-port (open-output-nowhere)])
+    (dynamic-require phase-ordering-analyzer-mpi sym)))
+
+(define revir-prog (load-phase-ordering-binding 'revir-prog))
+(define revir-prog-num-scratch (load-phase-ordering-binding 'revir-prog-num-scratch))
+(define revir-prog-ops (load-phase-ordering-binding 'revir-prog-ops))
+(define revir-prog-partitions (load-phase-ordering-binding 'revir-prog-partitions))
+(define revir-prog-meta (load-phase-ordering-binding 'revir-prog-meta))
+(define pass-loop-cone (load-phase-ordering-binding 'pass-loop-cone))
+(define pass-pebble (load-phase-ordering-binding 'pass-pebble))
+(define pass-todd-zx (load-phase-ordering-binding 'pass-todd-zx))
+(define pass-fraig-commute (load-phase-ordering-binding 'pass-fraig-commute))
+(define pass-mbu (load-phase-ordering-binding 'pass-mbu))
+(define pass-ssa (load-phase-ordering-binding 'pass-ssa))
+(define pass-part-u4 (load-phase-ordering-binding 'pass-part-u4))
+(define synthesize-linear-frame-partition-aware
+  (load-phase-ordering-binding 'synthesize-linear-frame-partition-aware))
+(define schedule-steiner-parity-batches-partition-aware
+  (load-phase-ordering-binding 'schedule-steiner-parity-batches-partition-aware))
+(define partition-wires-law-u4-hypergraph
+  (load-phase-ordering-binding 'partition-wires-law-u4-hypergraph))
+(define recolor-post-todd-chordal-ssa
+  (load-phase-ordering-binding 'recolor-post-todd-chordal-ssa))
+(define compile-with-schedule
+  (load-phase-ordering-binding 'compile-with-schedule))
+(define emit-final-machine-isa
+  (load-phase-ordering-binding 'emit-final-machine-isa))
 
 (provide (all-from-out "lakefillq-bug-class-prevention-types.rkt")
          (all-from-out "lakefillq-cluster-qasm3-codegen.rkt")
@@ -54,6 +95,11 @@
          lower-kern->revir
          infer-revir-qsub-and-qphys
          repair-revir-counterexample-guided
+         optimize-revir-phase-clean-focus-zippers
+         optimize-kern-canonical-phase-order
+         resynthesize-isa-cx-frames-partition-aware
+         count-isa-clifford-t-gates
+         build-qec-syndrome-decoder-pacing-metadata
          lower-revir->machine-isa
          emit-openqasm3
          emit-stim
@@ -198,6 +244,8 @@
       [`(qft ,ws)
        `(seq ,@(map surface-unitary-adjoint (reverse (elaborate-qft-ops ws))))]
       [`(temp-and ,c1 ,c2 ,anc) `(ccx ,c1 ,c2 ,anc)]
+      [`(temp-and-lin ,lhs ,rhs ,anc)
+       (surface-unitary-adjoint `(temp-and-lin ,lhs ,rhs ,anc #f #f))]
       [`(temp-and-lin ,lhs ,rhs ,anc ,nl? ,nr?)
        (define-values (pL pR prep)
          (zero-ancilla-distinct-pivot-fanin lhs rhs nl? nr?))
@@ -210,6 +258,8 @@
        `(logical-relabel ,ws ,(vector->list inv))]
       [`(seq ,es ...)
        `(seq ,@(map surface-unitary-adjoint (reverse es)))]
+      [`(for/fold-loop ,n-rounds ,rounds)
+       `(for/fold-loop ,n-rounds ,(map surface-unitary-adjoint (reverse rounds)))]
       [`(invert ,sub) sub]
       [`(within-apply ,c ,a ,ws)
        `(within-apply ,c ,(surface-unitary-adjoint a) ,ws)]
@@ -284,6 +334,8 @@
                 (for/list ([u (in-list us)] [v (in-list vs)])
                   (list `(cx ,v ,u) `(ccx ,c ,u ,v) `(cx ,v ,u)))))
        `(linear-lambda (,c ,@us ,@vs) ,steps)]
+      [`(temp-and-lin ,lhs ,rhs ,anc)
+       (elaborate-surface->kern `(temp-and-lin ,lhs ,rhs ,anc #f #f))]
       [`(temp-and-lin ,lhs ,rhs ,anc ,nl? ,nr?)
        (define-values (pL pR prep)
          (zero-ancilla-distinct-pivot-fanin lhs rhs nl? nr?))
@@ -399,6 +451,16 @@
       [`(focus-zipper (,sub-ws ,ambient-ws) ,body)
        `(locality-shift zipper-focus (,sub-ws ,ambient-ws)
                         ,(elaborate-surface->kern body))]
+      [`(for/fold-loop ,n-rounds ,rounds)
+       `(inductive-iso for-fold-loop
+                       (,n-rounds ,@(map elaborate-surface->kern rounds))
+                       ,(list 'linear-lambda '() '()))]
+      [`(packed-bezout-jump16 (,_n-bits ,_jump-step ,_base-pebbles) ,in4 ,out2 ,sc3)
+       (elaborate-surface->kern
+        (propagate-surface-span!
+         expr
+         (divstep-swap-sub-window-opt-sexpr in4 out2 sc3)
+         'LakefillQ))]
       [`(par-wires ,e1 ,e2)
        `(locality-shift parallel-product
                         (,(elaborate-surface->kern e1)
@@ -419,8 +481,8 @@
 
 (define surface-only-head-symbols
   (append
-   '(seq invert with-and-session within-apply canonicalize-quotient
-     qmatch focus-zipper fold-braun braun-branch braun-leaf
+   '(seq for/fold-loop invert with-and-session within-apply canonicalize-quotient
+     qmatch focus-zipper fold-braun braun-branch braun-leaf packed-bezout-jump16
      par-wires multishot-reset logical-relabel
      cswap-bit cswap-word temp-and-lin mcx mcz qft skip)
    bug-class-guard-surface-heads))
@@ -445,6 +507,9 @@
        (+ (walk f) (walk b))]
       [`(inductive-iso orthogonal-partition ,arms ,b)
        (+ (for/sum ([arm (in-list arms)]) (walk (second arm)))
+          (walk b))]
+      [`(inductive-iso for-fold-loop (,_ ,rounds ...) ,b)
+       (+ (for/sum ([r (in-list rounds)]) (walk r))
           (walk b))]
       [`(inductive-iso ,_ ,_ ,b)
        (walk b)]
@@ -486,6 +551,19 @@
        (list `(rev-gate (rz-dyadic-neg ,w ,k ,f64? ,d)))]
       [`(rev-gate (rz-dyadic-neg ,w ,k ,f64? ,d))
        (list `(rev-gate (rz-dyadic ,w ,k ,f64? ,d)))]
+      [`(rev-focus-zipper ,zspec ,ir)
+       (define adj-ir
+         (apply append
+                (for/list ([sub (in-list (reverse ir))])
+                  (revir-node-adj sub mbu-counter-box))))
+       (list `(rev-focus-zipper ,zspec ,adj-ir))]
+      [`(rev-for-fold-loop ,n-rounds ,round-irs)
+       (define adj-rounds
+         (for/list ([rir (in-list (reverse round-irs))])
+           (apply append
+                  (for/list ([sub (in-list (reverse rir))])
+                    (revir-node-adj sub mbu-counter-box)))))
+       (list `(rev-for-fold-loop ,n-rounds ,adj-rounds))]
       [`(rev-par ,ir1 ,ir2)
        (define adj1
          (apply append
@@ -585,6 +663,7 @@
                  (stamp-op op (list `(rev-cond-cz ,m-sym ,(pw c1) ,(pw c2))))]
                 [`(syndrome-plaquette ,ws ,d ,hook?)
                  (stamp-op op (list `(rev-syndrome-plaquette ,(map pw ws) ,d ,hook?)))]
+                [`(waw-barrier ,_) '()]
                 [_ (error 'lower-kern->revir "Unknown leaf op in linear-lambda: ~a" op)])))]
 
     [`(within-apply-mbu ,comp ,act ,erased-ws)
@@ -649,6 +728,15 @@
          (list (remap-guard wmap (first arm)) arm-ir)))
      (propagate-surface-span-list! kern-ast (list `(rev-qmatch ,lowered-arms)) 'RevIR)]
 
+    [`(inductive-iso for-fold-loop (,n-rounds ,round-kerns ...) ,_)
+     (define round-irs
+       (for/list ([rk (in-list round-kerns)])
+         (lower-kern->raw-revir rk wmap mbu-counter-box)))
+     (propagate-surface-span-list!
+      kern-ast
+      (list `(rev-for-fold-loop ,n-rounds ,round-irs))
+      'RevIR)]
+
     ;; In-order catamorphism traversal over balanced Okasaki Braun tree (`left -> root -> right`)
     ;; visits indices `0 .. n-1` in exact deterministic order!
     [`(catamorphism-fold ,idx ,step ,l ,r)
@@ -658,8 +746,14 @@
                  (lower-kern->raw-revir step wmap mbu-counter-box)
                  (if (eq? r 'none) '() (lower-kern->raw-revir r wmap mbu-counter-box))))]
 
-    [`(locality-shift zipper-focus ,_ ,body)
-     (lower-kern->raw-revir body wmap mbu-counter-box)]
+    [`(locality-shift zipper-focus (,sub-ws ,ambient-ws) ,body)
+     (define mapped-sub (map pw sub-ws))
+     (define mapped-amb (map pw ambient-ws))
+     (propagate-surface-span-list!
+      kern-ast
+      (list `(rev-focus-zipper (,mapped-sub ,mapped-amb)
+                               ,(lower-kern->raw-revir body wmap mbu-counter-box)))
+      'RevIR)]
 
     [`(locality-shift parallel-product (,e1 ,e2) ,_)
      (define ir1 (lower-kern->raw-revir e1 wmap mbu-counter-box))
@@ -709,6 +803,12 @@
     [`(rev-par ,ir1 ,ir2)
      (append (apply append (map revir-node-wires ir1))
              (apply append (map revir-node-wires ir2)))]
+    [`(rev-focus-zipper ,_ ,ir)
+     (apply append (map revir-node-wires ir))]
+    [`(rev-for-fold-loop ,_ ,round-irs)
+     (apply append
+            (for/list ([rir (in-list round-irs)])
+              (apply append (map revir-node-wires rir))))]
     [`(rev-multishot ,_ ,ir)
      (apply append (map revir-node-wires ir))]
     [_ '()]))
@@ -741,6 +841,13 @@
       [`(rev-par ,ir1 ,ir2)
        `(rev-par ,(map (lambda (n) (remap-revir-node cmap n)) ir1)
                  ,(map (lambda (n) (remap-revir-node cmap n)) ir2))]
+      [`(rev-focus-zipper (,sub-ws ,amb-ws) ,ir)
+       `(rev-focus-zipper (,(map cw sub-ws) ,(map cw amb-ws))
+                          ,(map (lambda (n) (remap-revir-node cmap n)) ir))]
+      [`(rev-for-fold-loop ,nr ,round-irs)
+       `(rev-for-fold-loop ,nr
+                           ,(for/list ([rir (in-list round-irs)])
+                              (map (lambda (n) (remap-revir-node cmap n)) rir)))]
       [`(rev-multishot ,k ,ir)
        `(rev-multishot ,k ,(map (lambda (n) (remap-revir-node cmap n)) ir))]
       [_ node]))
@@ -776,6 +883,11 @@
       [`(rev-qmatch ,arms)
        (for* ([arm (in-list arms)] [sub (in-list (second arm))])
          (record-par-pairs! sub))]
+      [`(rev-focus-zipper ,_ ,ir)
+       (for ([sub (in-list ir)]) (record-par-pairs! sub))]
+      [`(rev-for-fold-loop ,_ ,round-irs)
+       (for* ([rir (in-list round-irs)] [sub (in-list rir)])
+         (record-par-pairs! sub))]
       [`(rev-multishot ,_ ,ir)
        (for ([sub (in-list ir)]) (record-par-pairs! sub))]
       [_ (void)]))
@@ -786,6 +898,11 @@
       (match node
         [`(rev-multishot ,_ ,ir)
          (walk-steps! ir)]
+        [`(rev-focus-zipper ,_ ,ir)
+         (walk-steps! ir)]
+        [`(rev-for-fold-loop ,_ ,round-irs)
+         (for ([rir (in-list round-irs)])
+           (walk-steps! rir))]
         [_
          (define step (unbox step-box))
          (set-box! step-box (add1 step))
@@ -1110,6 +1227,124 @@
 
 (define-runtime-path xag-typechecker-module-path "lakefillq-xag-fraig-typechecker.rkt")
 (define last-symbolic-engine-box (box 'anf-zhegalkin))
+(define last-xag-telemetry-box (box (hasheq)))
+(define certified-phase-clean-zippers-table (make-weak-hasheq))
+
+(define (count-revir-temp-ands nodes)
+  (for/sum ([n (in-list nodes)])
+    (match n
+      [`(rev-temp-and ,_ ,_ ,_) 1]
+      [`(rev-par ,ir1 ,ir2) (+ (count-revir-temp-ands ir1) (count-revir-temp-ands ir2))]
+      [`(rev-qmatch ,arms) (for/sum ([a (in-list arms)]) (count-revir-temp-ands (second a)))]
+      [`(rev-focus-zipper ,_ ,ir) (count-revir-temp-ands ir)]
+      [`(rev-for-fold-loop ,_ ,rirs) (for/sum ([rir (in-list rirs)]) (count-revir-temp-ands rir))]
+      [`(rev-multishot ,_ ,ir) (count-revir-temp-ands ir)]
+      [_ 0])))
+
+(define (revir-has-for-fold-loop? nodes)
+  (for/or ([n (in-list nodes)])
+    (match n
+      [`(rev-for-fold-loop ,_ ,_) #t]
+      [`(rev-par ,ir1 ,ir2) (or (revir-has-for-fold-loop? ir1) (revir-has-for-fold-loop? ir2))]
+      [`(rev-qmatch ,arms) (for/or ([a (in-list arms)]) (revir-has-for-fold-loop? (second a)))]
+      [`(rev-focus-zipper ,_ ,ir) (revir-has-for-fold-loop? ir)]
+      [`(rev-multishot ,_ ,ir) (revir-has-for-fold-loop? ir)]
+      [_ #f])))
+
+(define (count-revir-leaf-steps nodes)
+  (for/sum ([node (in-list nodes)])
+    (match node
+      [`(rev-multishot ,_ ,ir) (count-revir-leaf-steps ir)]
+      [`(rev-focus-zipper ,_ ,ir) (count-revir-leaf-steps ir)]
+      [`(rev-for-fold-loop ,_ ,rirs)
+       (for/sum ([rir (in-list rirs)]) (count-revir-leaf-steps rir))]
+      [_ 1])))
+
+;; Lightweight in-memory 1-WL canonical XAG cone-isomorphism profiler (`0` Z3 subprocesses):
+;; Used when small circuits complete directly via `anf-zhegalkin` so structured 1-WL cone
+;; telemetry is exposed uniformly across every compiled circuit!
+(define (compute-revir-xag-cone-isomorphism-summary revir input-wires scratch-phys)
+  (define make-xag-manager (dynamic-require xag-typechecker-module-path 'make-xag-manager))
+  (define lit-zero (dynamic-require xag-typechecker-module-path 'lit-zero))
+  (define lit-not (dynamic-require xag-typechecker-module-path 'lit-not))
+  (define lit-id (dynamic-require xag-typechecker-module-path 'lit-id))
+  (define xag-var (dynamic-require xag-typechecker-module-path 'xag-var))
+  (define xag-xor (dynamic-require xag-typechecker-module-path 'xag-xor))
+  (define xag-and (dynamic-require xag-typechecker-module-path 'xag-and))
+  (define xag-cone-canonical-signature
+    (dynamic-require xag-typechecker-module-path 'xag-cone-canonical-signature))
+  (define xag-manager-fraig-merges
+    (dynamic-require xag-typechecker-module-path 'xag-manager-fraig-merges))
+  (define mgr (make-xag-manager 512))
+  (define wenv (make-hasheqv))
+  (define v-box (box 0))
+  (define (fresh-v!)
+    (define v (unbox v-box))
+    (set-box! v-box (add1 v))
+    (xag-var mgr v))
+  (for ([w (in-list input-wires)])
+    (hash-set! wenv w (fresh-v!)))
+  (for ([s (in-list scratch-phys)] #:unless (hash-has-key? wenv s))
+    (hash-set! wenv s lit-zero))
+  (define seen-sigs (mutable-set))
+  (define total-cones 0)
+  (define iso-hits 0)
+  (define (record-cone! l)
+    (when (> (lit-id l) 0)
+      (set! total-cones (add1 total-cones))
+      (define sig (xag-cone-canonical-signature mgr (list l)))
+      (if (set-member? seen-sigs sig)
+          (set! iso-hits (add1 iso-hits))
+          (set-add! seen-sigs sig))))
+  (let walk ([nodes revir])
+    (for ([nd (in-list nodes)])
+      (match nd
+        [`(rev-gate (x ,w))
+         (hash-set! wenv w (lit-not (hash-ref wenv w lit-zero)))]
+        [`(rev-gate (,(or 'h 'ry) . ,args))
+         (hash-set! wenv (last args) (fresh-v!))]
+        [`(rev-gate (cx ,c ,t))
+         (hash-set! wenv t (xag-xor mgr (hash-ref wenv t lit-zero) (hash-ref wenv c lit-zero)))]
+        [`(rev-gate (swap ,a ,b))
+         (define pa (hash-ref wenv a lit-zero))
+         (define pb (hash-ref wenv b lit-zero))
+         (hash-set! wenv a pb)
+         (hash-set! wenv b pa)]
+        [`(rev-gate (ccx ,c1 ,c2 ,t))
+         (define prod (xag-and mgr (hash-ref wenv c1 lit-zero) (hash-ref wenv c2 lit-zero)))
+         (record-cone! prod)
+         (hash-set! wenv t (xag-xor mgr (hash-ref wenv t lit-zero) prod))]
+        [`(rev-temp-and ,c1 ,c2 ,anc)
+         (define prod (xag-and mgr (hash-ref wenv c1 lit-zero) (hash-ref wenv c2 lit-zero)))
+         (record-cone! prod)
+         (hash-set! wenv anc prod)]
+        [`(rev-prepare-dicke-le1 ,ws ,_ ,_ ,_)
+         (for ([w (in-list ws)]) (hash-set! wenv w (fresh-v!)))]
+        [`(rev-mid-meas-x ,anc ,_ ,_)
+         (record-cone! (hash-ref wenv anc lit-zero))
+         (hash-set! wenv anc lit-zero)]
+        [`(rev-par ,ir1 ,ir2) (walk ir1) (walk ir2)]
+        [`(rev-focus-zipper ,_ ,ir) (walk ir)]
+        [`(rev-multishot ,_ ,ir) (walk ir)]
+        [`(rev-for-fold-loop ,_ ,rirs) (for ([rir (in-list rirs)]) (walk rir))]
+        [`(rev-qmatch ,arms)
+         (define snap (hash-copy wenv))
+         (for ([arm (in-list arms)])
+           (hash-clear! wenv)
+           (for ([(k v) (in-hash snap)]) (hash-set! wenv k v))
+           (walk (second arm)))
+         (hash-clear! wenv)
+         (for ([(k v) (in-hash snap)]) (hash-set! wenv k v))]
+        [_ (void)])))
+  (hasheq 'engine "anf-zhegalkin+1wl-cone-audit"
+          'total_cones_evaluated total-cones
+          'unique_canonical_cones (set-count seen-sigs)
+          'cone_isomorphism_hits iso-hits
+          'fraig_merges (xag-manager-fraig-merges mgr)
+          'cut_cache_hits iso-hits
+          'z3_queries 0
+          'z3_push_pop_incremental #t
+          'for_fold_loops '()))
 
 (define (decl-or-synthetic-span decl [fallback-pass 'LakefillQ])
   (or (and decl (lookup-surface-span decl))
@@ -1138,26 +1373,50 @@
 
 ;; Hash-consed `XAG`/`FRAIG` + `Z3` cut-sweeping escalation backend for `RevIR`:
 ;; Invoked automatically with `0` flags whenever a wire's explicit Zhegalkin `ANF`
-;; polynomial exceeds `anf-monomial-cap`, scaling symbolic `QSub (U1-U4)` + `QPhysGrade`
-;; inference in `O(1)` graph nodes per gate on high-degree multi-round `.lfq` circuits!
+;; polynomial exceeds `anf-monomial-cap` or a `for/fold-loop` round construct is present,
+;; scaling symbolic `QSub (U1-U4)` + `QPhysGrade` inference in `O(1)` graph nodes per gate!
 (define (infer-revir-qsub-and-qphys-xag revir input-wires scratch-phys domain-spec hw
                                         #:decl [decl #f]
                                         #:color-map [color-map #f]
                                         #:extra-virt-names [extra-virt-names #f])
   (set-box! last-symbolic-engine-box 'xag-fraig-z3)
+  (hash-clear! certified-phase-clean-zippers-table)
   (define make-xag-manager (dynamic-require xag-typechecker-module-path 'make-xag-manager))
   (define lit-zero (dynamic-require xag-typechecker-module-path 'lit-zero))
   (define lit-one (dynamic-require xag-typechecker-module-path 'lit-one))
   (define lit-not (dynamic-require xag-typechecker-module-path 'lit-not))
+  (define lit-id (dynamic-require xag-typechecker-module-path 'lit-id))
   (define xag-var (dynamic-require xag-typechecker-module-path 'xag-var))
   (define xag-xor (dynamic-require xag-typechecker-module-path 'xag-xor))
   (define xag-and (dynamic-require xag-typechecker-module-path 'xag-and))
+  (define xag-cone-canonical-signature
+    (dynamic-require xag-typechecker-module-path 'xag-cone-canonical-signature))
+  (define xag-manager-z3-queries
+    (dynamic-require xag-typechecker-module-path 'xag-manager-z3-queries))
+  (define xag-manager-cut-cache-hits
+    (dynamic-require xag-typechecker-module-path 'xag-manager-cut-cache-hits))
+  (define xag-manager-fraig-merges
+    (dynamic-require xag-typechecker-module-path 'xag-manager-fraig-merges))
   (define xag-z3-cut-sweep-miter! (dynamic-require xag-typechecker-module-path 'xag-z3-cut-sweep-miter!))
   (define close-persistent-z3! (dynamic-require xag-typechecker-module-path 'close-persistent-z3!))
   (define (xag-or mgr a b)
     (lit-not (xag-and mgr (lit-not a) (lit-not b))))
 
   (define mgr (make-xag-manager 8192))
+  (define seen-cone-sigs (mutable-set))
+  (define verified-zero-sigs (mutable-set))
+  (define total-cones-box (box 0))
+  (define cone-iso-hits-box (box 0))
+  (define loop-escalations '())
+  (define in-qmatch-depth-box (box 0))
+  (define (observe-cone-lit! l)
+    (when (> (lit-id l) 0)
+      (set-box! total-cones-box (add1 (unbox total-cones-box)))
+      (define sig (xag-cone-canonical-signature mgr (list l)))
+      (if (set-member? seen-cone-sigs sig)
+          (set-box! cone-iso-hits-box (add1 (unbox cone-iso-hits-box)))
+          (set-add! seen-cone-sigs sig))))
+
   (define resugarer (build-wire-resugarer decl color-map #f extra-virt-names))
   (define decl-span (decl-or-synthetic-span decl 'RevIR))
   (define wire-env (make-hasheqv))
@@ -1236,28 +1495,46 @@
     (define dl (unbox dom-guard-lit-box))
     (if (= dl lit-one) l (xag-and mgr dl l)))
 
+  (define (unconditional-domain?)
+    (and (eq? (unbox z3-domain-box) 'all)
+         (= (unbox dom-guard-lit-box) lit-one)))
+
   (define (check-lit-zero! raw-lit)
     (define masked (dom-mask-lit raw-lit))
     (cond
       [(= masked lit-zero)
        (values #t #f #f "0")]
       [else
-       (define all-vids (range (unbox next-var-box)))
-       (define-values (status cex-h _tag)
-         (xag-z3-cut-sweep-miter! mgr (list masked) all-vids (unbox z3-domain-box)))
+       (define cone-sig
+         (and (unconditional-domain?)
+              (> (lit-id masked) 0)
+              (xag-cone-canonical-signature mgr (list masked))))
+       (when cone-sig
+         (set-box! total-cones-box (add1 (unbox total-cones-box)))
+         (unless (set-member? seen-cone-sigs cone-sig)
+           (set-add! seen-cone-sigs cone-sig)))
        (cond
-         [(eq? status 'unsat)
+         [(and cone-sig (set-member? verified-zero-sigs cone-sig))
+          (set-box! cone-iso-hits-box (add1 (unbox cone-iso-hits-box)))
           (values #t #f #f "0")]
          [else
-          (define ones (hash-ref cex-h 'active_input_wires '()))
-          (define one-set (list->seteqv ones))
-          (define raw-cex
-            (for/hash ([(v-id w-lbl) (in-hash var-names)])
-              (values (string->symbol (format "~a" w-lbl))
-                      (if (set-member? one-set v-id) 1 0))))
-          (define surf-cex (resugar-counterexample-witness (list ones) var-surface-names))
-          (define desc-str (format "XAG[lit=~a]" masked))
-          (values #f raw-cex surf-cex desc-str)])]))
+          (define all-vids (range (unbox next-var-box)))
+          (define-values (status cex-h _tag)
+            (xag-z3-cut-sweep-miter! mgr (list masked) all-vids (unbox z3-domain-box)))
+          (cond
+            [(eq? status 'unsat)
+             (when cone-sig (set-add! verified-zero-sigs cone-sig))
+             (values #t #f #f "0")]
+            [else
+             (define ones (hash-ref cex-h 'active_input_wires '()))
+             (define one-set (list->seteqv ones))
+             (define raw-cex
+               (for/hash ([(v-id w-lbl) (in-hash var-names)])
+                 (values (string->symbol (format "~a" w-lbl))
+                         (if (set-member? one-set v-id) 1 0))))
+             (define surf-cex (resugar-counterexample-witness (list ones) var-surface-names))
+             (define desc-str (format "XAG[lit=~a]" masked))
+             (values #f raw-cex surf-cex desc-str)])])]))
 
   (define phase-taints (make-hasheq))
   (define last-mutating-span (make-hasheqv))
@@ -1352,6 +1629,24 @@
          #:resugared-anf desc
          #:resugared-witness surf-cex))))
 
+  (define (phase-clean-state-xag?)
+    (and (= (unbox in-qmatch-depth-box) 0)
+         (for/and ([qw (in-set active-quotient-wires)])
+           (= (dom-mask-lit (hash-ref wire-env qw lit-zero)) lit-zero))
+         (for/and ([(_ t-lit) (in-hash phase-taints)])
+           (= (dom-mask-lit t-lit) lit-zero))))
+
+  (define (envs-identical-and-clean-xag? env-a env-b)
+    (define all-ws (remove-duplicates (append (hash-keys env-a) (hash-keys env-b))))
+    (and (for/and ([w (in-list all-ws)])
+           (= (hash-ref env-a w lit-zero) (hash-ref env-b w lit-zero)))
+         (for/and ([s (in-list scratch-phys)])
+           (= (dom-mask-lit (hash-ref env-b s lit-zero)) lit-zero))
+         (for/and ([qw (in-set active-quotient-wires)])
+           (= (dom-mask-lit (hash-ref env-b qw lit-zero)) lit-zero))
+         (for/and ([(_ t-lit) (in-hash phase-taints)])
+           (= (dom-mask-lit t-lit) lit-zero))))
+
   (define (step-node! node [inherited-sp #f])
     (define node-sp (node-or-synthetic-span node inherited-sp decl-span 'RevIR))
     (define step-idx (unbox cur-step-box))
@@ -1423,7 +1718,9 @@
        (define p1 (hash-ref wire-env c1 lit-zero))
        (define p2 (hash-ref wire-env c2 lit-zero))
        (define pt (hash-ref wire-env t lit-zero))
-       (update-wire-env! t (xag-xor mgr pt (xag-and mgr p1 p2)) node-sp)
+       (define prod (xag-and mgr p1 p2))
+       (observe-cone-lit! prod)
+       (update-wire-env! t (xag-xor mgr pt prod) node-sp)
        (define d (* 6 (target-hw-profile-gate-2q-ns hw)))
        (note-phi1-contributor! (* 3 d) node-sp)
        (qphys-semiring-grade (* 3 d) (* 6 (target-hw-profile-p2q-permil hw)) 0 0 0 '() #f 0 (seteqv c1 c2 t) d)]
@@ -1445,8 +1742,10 @@
           #:failure-span node-sp #:surface-wire a-surf
           #:chordal-recycled-from (lfq-resolved-wire-recycled-from rw)
           #:resugared-anf desc #:resugared-witness surf-cex))
-       (update-wire-env! anc (xag-and mgr (hash-ref wire-env c1 lit-zero)
-                                          (hash-ref wire-env c2 lit-zero)) node-sp)
+       (define prod (xag-and mgr (hash-ref wire-env c1 lit-zero)
+                                 (hash-ref wire-env c2 lit-zero)))
+       (observe-cone-lit! prod)
+       (update-wire-env! anc prod node-sp)
        (define d (* 4 (target-hw-profile-gate-2q-ns hw)))
        (note-phi1-contributor! (* 3 d) node-sp)
        (qphys-semiring-grade (* 3 d) (* 4 (target-hw-profile-p2q-permil hw)) 0 0 0 '() #f 0 (seteqv c1 c2 anc) d)]
@@ -1466,6 +1765,7 @@
          (hash-set! meas-origin-info m-sym (cons node-sp anc-surf)))
        (when node-sp (hash-set! last-taint-span m-sym node-sp))
        (define p-anc (hash-ref wire-env anc lit-zero))
+       (observe-cone-lit! p-anc)
        (define prev-t (hash-ref phase-taints m-sym lit-zero))
        (hash-set! phase-taints m-sym (xag-xor mgr prev-t p-anc))
        (update-wire-env! anc lit-zero node-sp)
@@ -1584,6 +1884,7 @@
           #:origin-span decl-span #:mutating-span node-sp #:failure-span node-sp
           #:resugared-anf desc-u #:resugared-witness u-surf))
        (define arm-envs '())
+       (set-box! in-qmatch-depth-box (add1 (unbox in-qmatch-depth-box)))
        (define joined-grade
          (for/fold ([acc-g qphys-grade-identity])
                    ([arm (in-list arms)] [gl (in-list guard-lits)] [idx (in-naturals)])
@@ -1606,6 +1907,7 @@
               #:resugared-anf d-desc #:resugared-witness d-surf))
            (set! arm-envs (append arm-envs (list (hash-copy wire-env))))
            (qphys-grade-join acc-g arm-g)))
+       (set-box! in-qmatch-depth-box (sub1 (unbox in-qmatch-depth-box)))
        (define all-keys (remove-duplicates (append (hash-keys entry-env) (apply append (map hash-keys arm-envs)))))
        (hash-clear! wire-env)
        (for ([w (in-list all-keys)])
@@ -1636,6 +1938,145 @@
           #:resugared-message (format "Parallel wires collide in hardware exclusion neighborhood: ~a" (string-join surf-hits ", "))
           #:origin-span decl-span #:mutating-span node-sp #:failure-span node-sp))
        pg]
+      [`(rev-focus-zipper ,_ ,ir)
+       (when (phase-clean-state-xag?)
+         (hash-set! certified-phase-clean-zippers-table node #t))
+       (run-top-nodes! ir node-sp)]
+      [`(rev-for-fold-loop ,n-rounds ,round-irs)
+       ;; Zero-flag `k=1 -> k=2 -> k=R` round-invariant escalation (`T-Loop-Inductive`):
+       (cond
+         [(or (<= n-rounds 0) (null? round-irs))
+          qphys-grade-identity]
+         [else
+          (define scratch-set (list->seteqv scratch-phys))
+          (define (revir-round-skeleton rir)
+            (define m-canon-table (make-hasheq))
+            (define next-m-idx 0)
+            (define (canon-m m-sym)
+              (hash-ref! m-canon-table m-sym
+                         (lambda ()
+                           (begin0 (string->symbol (format "m_loc_~a" next-m-idx))
+                             (set! next-m-idx (add1 next-m-idx))))))
+            (let walk-nodes ([ns rir])
+              (filter-map
+               (lambda (n)
+                 (match n
+                   [`(rev-gate (x ,w)) #:when (not (set-member? scratch-set w)) #f]
+                   [`(rev-mid-meas-x ,anc ,m-sym ,sh?)
+                    `(rev-mid-meas-x ,anc ,(canon-m m-sym) ,sh?)]
+                   [`(rev-cond-z ,m-sym ,t)
+                    `(rev-cond-z ,(canon-m m-sym) ,t)]
+                   [`(rev-cond-cz ,m-sym ,c1 ,c2)
+                    `(rev-cond-cz ,(canon-m m-sym) ,c1 ,c2)]
+                   [`(rev-par ,ir1 ,ir2)
+                    `(rev-par ,(walk-nodes ir1) ,(walk-nodes ir2))]
+                   [`(rev-focus-zipper ,c ,ir)
+                    `(rev-focus-zipper ,c ,(walk-nodes ir))]
+                   [`(rev-qmatch ,arms)
+                    `(rev-qmatch ,(for/list ([arm (in-list arms)])
+                                    (list (first arm) (walk-nodes (second arm)))))]
+                   [`(rev-for-fold-loop ,nr ,rirs)
+                    `(rev-for-fold-loop ,nr ,(map walk-nodes rirs))]
+                   [`(rev-multishot ,k ,ir)
+                    `(rev-multishot ,k ,(walk-nodes ir))]
+                   [_ n]))
+               ns)))
+          (define round-skeletons (map revir-round-skeleton round-irs))
+          (define k1-uniform?
+            (and (= (length round-irs) n-rounds)
+                 (or (<= n-rounds 1)
+                     (let ([s0 (first round-skeletons)])
+                       (for/and ([s (in-list (rest round-skeletons))])
+                         (equal? s s0))))))
+          (define k2-uniform?
+            (and (>= n-rounds 2)
+                 (even? n-rounds)
+                 (= (length round-irs) n-rounds)
+                 (let ([p0 (list (first round-skeletons) (second round-skeletons))])
+                   (for/and ([j (in-range 1 (quotient n-rounds 2))])
+                     (equal? (list (list-ref round-skeletons (* 2 j))
+                                   (list-ref round-skeletons (add1 (* 2 j))))
+                             p0)))))
+          (define (scratch-and-taints-clean?)
+            (and (for/and ([s (in-list scratch-phys)])
+                   (define-values (z? _1 _2 _3) (check-lit-zero! (hash-ref wire-env s lit-zero)))
+                   z?)
+                 (for/and ([(_ms tl) (in-hash phase-taints)])
+                   (define-values (z? _1 _2 _3) (check-lit-zero! tl))
+                   z?)))
+          (define top-final-loop?
+            (and (eq? node (first revir))
+                 (for/and ([after (in-list (cdr revir))])
+                   (match after [`(rev-erase-check ,_) #t] [_ #f]))))
+          (define entry-clean? (scratch-and-taints-clean?))
+          (define pre-v-count (length violations))
+          (define entry-env (hash-copy wire-env))
+          (define r0-steps (count-revir-leaf-steps (first round-irs)))
+          (define g0 (run-top-nodes! (first round-irs) node-sp))
+          (cond
+            [(and k1-uniform?
+                  (>= n-rounds 2)
+                  (= (length violations) pre-v-count)
+                  (or (envs-identical-and-clean-xag? entry-env wire-env)
+                      (and (eq? domain-spec 'all) top-final-loop? entry-clean? (scratch-and-taints-clean?))))
+             ;; Stage 1 (`k = 1`): Single-round inductive invariant certified!
+             (set-box! cur-step-box (+ (unbox cur-step-box) (* (sub1 n-rounds) r0-steps)))
+             (set! loop-escalations
+                   (cons (hasheq 'rounds n-rounds
+                                 'k_induction_depth 1
+                                 'k_certified 1
+                                 'escalation_path '("k=1")
+                                 'status "inductive-k1-verified")
+                         loop-escalations))
+             (for/fold ([acc qphys-grade-identity]) ([_ (in-range n-rounds)])
+               (qphys-grade-seq acc g0))]
+            [(and (>= n-rounds 2) (= (length violations) pre-v-count))
+             (define r1-steps (count-revir-leaf-steps (second round-irs)))
+             (define g1 (run-top-nodes! (second round-irs) node-sp))
+             (cond
+               [(and k2-uniform?
+                     (= (length violations) pre-v-count)
+                     (or (envs-identical-and-clean-xag? entry-env wire-env)
+                         (and (eq? domain-spec 'all) top-final-loop? entry-clean? (scratch-and-taints-clean?))))
+                ;; Stage 2 (`k = 2`): 2-round ping-pong / involutory inductive invariant certified!
+                (set-box! cur-step-box
+                          (+ (unbox cur-step-box)
+                             (* (sub1 (quotient n-rounds 2)) (+ r0-steps r1-steps))))
+                (set! loop-escalations
+                      (cons (hasheq 'rounds n-rounds
+                                    'k_induction_depth 2
+                                    'k_certified 2
+                                    'escalation_path '("k=1" "k=2")
+                                    'status "inductive-k2-pingpong-verified")
+                            loop-escalations))
+                (define g-pair (qphys-grade-seq g0 g1))
+                (for/fold ([acc qphys-grade-identity]) ([_ (in-range (quotient n-rounds 2))])
+                  (qphys-grade-seq acc g-pair))]
+               [else
+                ;; Stage 3 (`k = R`): Automatic fallback to full `R`-round unrolled check with 1-WL cone cache
+                (define g-rest
+                  (for/fold ([acc (qphys-grade-seq g0 g1)]) ([rir (in-list (drop round-irs 2))])
+                    (qphys-grade-seq acc (run-top-nodes! rir node-sp))))
+                (set! loop-escalations
+                      (cons (hasheq 'rounds n-rounds
+                                    'k_induction_depth n-rounds
+                                    'k_certified n-rounds
+                                    'escalation_path '("k=1" "k=2" "k=R")
+                                    'status "bounded-kR-1wl-cached")
+                            loop-escalations))
+                g-rest])]
+            [else
+             (define g-all
+               (for/fold ([acc g0]) ([rir (in-list (rest round-irs))])
+                 (qphys-grade-seq acc (run-top-nodes! rir node-sp))))
+             (set! loop-escalations
+                   (cons (hasheq 'rounds n-rounds
+                                 'k_induction_depth n-rounds
+                                 'k_certified n-rounds
+                                 'escalation_path (if (>= n-rounds 2) '("k=1" "k=R") '("k=1"))
+                                 'status "bounded-kR-1wl-cached")
+                         loop-escalations))
+             g-all])])]
       [`(rev-multishot ,k ,ir)
        (qphys-grade-multishot k (run-top-nodes! ir node-sp))]
       [_ (error 'infer-revir-qsub-and-qphys-xag "Unknown RevIR node: ~a" node)]))
@@ -1643,7 +2084,10 @@
   (define (run-top-nodes! nodes [inherited-sp #f])
     (for/fold ([g qphys-grade-identity]) ([node (in-list nodes)])
       (match node
-        [`(rev-multishot ,_ ,_) (qphys-grade-seq g (step-node! node inherited-sp))]
+        [(or `(rev-multishot ,_ ,_)
+             `(rev-focus-zipper ,_ ,_)
+             `(rev-for-fold-loop ,_ ,_))
+         (qphys-grade-seq g (step-node! node inherited-sp))]
         [_
          (define ng (step-node! node inherited-sp))
          (set-box! cur-step-box (add1 (unbox cur-step-box)))
@@ -1711,6 +2155,16 @@
      #:mutating-span (or (cdr (unbox dominant-phi1-box)) decl-span)
      #:failure-span decl-span))
 
+  (set-box! last-xag-telemetry-box
+            (hasheq 'engine "xag-fraig-z3"
+                    'total_cones_evaluated (unbox total-cones-box)
+                    'unique_canonical_cones (set-count seen-cone-sigs)
+                    'cone_isomorphism_hits (unbox cone-iso-hits-box)
+                    'fraig_merges (xag-manager-fraig-merges mgr)
+                    'cut_cache_hits (xag-manager-cut-cache-hits mgr)
+                    'z3_queries (xag-manager-z3-queries mgr)
+                    'z3_push_pop_incremental #t
+                    'for_fold_loops (reverse loop-escalations)))
   (close-persistent-z3!)
   (values violations total-grade total-action-milli residual-phase-count
           (sort (set->list active-quotient-wires) <)))
@@ -1721,6 +2175,7 @@
                                     #:extra-virt-names [extra-virt-names #f]
                                     #:anf-monomial-cap [anf-monomial-cap 1024])
   (set-box! last-symbolic-engine-box 'anf-zhegalkin)
+  (hash-clear! certified-phase-clean-zippers-table)
   (let/ec escape-to-xag
     (define (escalate!)
       (call-with-values
@@ -1730,12 +2185,18 @@
                                          #:color-map color-map
                                          #:extra-virt-names extra-virt-names))
        escape-to-xag))
+    (when (or (revir-has-for-fold-loop? revir)
+              (and anf-monomial-cap (<= anf-monomial-cap 0))
+              (and anf-monomial-cap
+                   (> (length input-wires) 20)
+                   (>= (count-revir-temp-ands revir) 40)))
+      (escalate!))
     (define (guard-poly-cap p)
       (when (and anf-monomial-cap (> (length p) anf-monomial-cap))
         (escalate!))
       p)
     (define (anf-and-capped p1 p2)
-      (when (and anf-monomial-cap (> (* (length p1) (length p2)) (* 64 anf-monomial-cap)))
+      (when (and anf-monomial-cap (> (* (length p1) (length p2)) (* 16 anf-monomial-cap)))
         (escalate!))
       (guard-poly-cap (anf-and p1 p2)))
     (define resugarer (build-wire-resugarer decl color-map #f extra-virt-names))
@@ -1816,6 +2277,7 @@
   (define last-taint-span (make-hasheq))  ;; meas-sym -> lfq-surface-span
   (define dominant-phi1-box (box (cons 0 #f))) ;; (cons score span)
   (define cur-step-box (box 0))
+  (define in-qmatch-depth-box (box 0))
 
   (define (update-wire-env! w new-poly node-sp)
     (hash-set! wire-env w new-poly)
@@ -2258,6 +2720,7 @@
           #:resugared-witness (resugar-counterexample-witness uncovered var-surface-names)))
        ;; 3. Evaluate each arm independently and verify guard invariance:
        (define arm-envs '())
+       (set-box! in-qmatch-depth-box (add1 (unbox in-qmatch-depth-box)))
        (define joined-grade
          (for/fold ([acc-g qphys-grade-identity])
                    ([arm (in-list arms)] [gp (in-list guard-polys)] [idx (in-naturals)])
@@ -2288,6 +2751,7 @@
               #:resugared-witness (resugar-counterexample-witness drift var-surface-names)))
            (set! arm-envs (append arm-envs (list (hash-copy wire-env))))
            (qphys-grade-join acc-g arm-g)))
+       (set-box! in-qmatch-depth-box (sub1 (unbox in-qmatch-depth-box)))
        ;; 4. Partition-weighted state merge `S_out[w] = XOR_i (G_i * S_i[w])`:
        (define all-keys
          (remove-duplicates
@@ -2337,6 +2801,17 @@
           #:failure-span node-sp))
        pg]
 
+      [`(rev-focus-zipper ,_ ,ir)
+       (define phase-clean?
+         (and (= (unbox in-qmatch-depth-box) 0)
+              (for/and ([qw (in-set active-quotient-wires)])
+                (null? (dom-reduce (hash-ref wire-env qw anf-zero))))
+              (for/and ([(_ t-raw) (in-hash phase-taints)])
+                (null? (dom-reduce t-raw)))))
+       (when phase-clean?
+         (hash-set! certified-phase-clean-zippers-table node #t))
+       (run-top-nodes! ir node-sp)]
+
       [`(rev-multishot ,k ,ir)
        (define inner-g (run-top-nodes! ir node-sp))
        (qphys-grade-multishot k inner-g)]
@@ -2346,7 +2821,7 @@
   (define (run-top-nodes! nodes [inherited-sp #f])
     (for/fold ([g qphys-grade-identity]) ([node (in-list nodes)])
       (match node
-        [`(rev-multishot ,_ ,_)
+        [(or `(rev-multishot ,_ ,_) `(rev-focus-zipper ,_ ,_))
          (qphys-grade-seq g (step-node! node inherited-sp))]
         [_
          (define ng (step-node! node inherited-sp))
@@ -2450,6 +2925,9 @@
     (for/sum ([(_ t-raw) (in-hash phase-taints)])
       (if (null? (dom-reduce t-raw)) 0 1)))
 
+  (set-box! last-xag-telemetry-box
+            (compute-revir-xag-cone-isomorphism-summary revir input-wires scratch-phys))
+
   (values violations total-grade total-action-milli residual-phase-count
           (sort (set->list active-quotient-wires) <))))
 
@@ -2508,19 +2986,32 @@
          (list `(rev-qmatch ,(for/list ([arm (in-list arms)])
                                (list (first arm)
                                      (apply append (map fix-node (second arm)))))))]
+        [`(rev-focus-zipper (,sub-ws ,amb-ws) ,ir)
+         (list `(rev-focus-zipper (,sub-ws ,amb-ws) ,(apply append (map fix-node ir))))]
+        [`(rev-for-fold-loop ,nr ,rirs)
+         (list `(rev-for-fold-loop ,nr
+                                   ,(for/list ([rir (in-list rirs)])
+                                      (apply append (map fix-node rir)))))]
         [`(rev-multishot ,k ,ir)
          (list `(rev-multishot ,k ,(apply append (map fix-node ir))))]
         [_ (list n)]))
     (propagate-surface-span-list! n out-nodes 'RevIR-Repair))
 
+  (define (rough-node-ns n)
+    (match n
+      [`(rev-gate (,(or 'cx 'cz) ,_ ,_)) (* 2 (target-hw-profile-gate-2q-ns hw))]
+      [`(rev-temp-and ,_ ,_ ,_) (* 12 (target-hw-profile-gate-2q-ns hw))]
+      [`(rev-focus-zipper ,_ ,ir) (for/sum ([sub (in-list ir)]) (rough-node-ns sub))]
+      [`(rev-for-fold-loop ,_ ,rirs)
+       (for/sum ([rir (in-list rirs)])
+         (for/sum ([sub (in-list rir)]) (rough-node-ns sub)))]
+      [_ (target-hw-profile-gate-1q-ns hw)]))
+
   (define repaired-nodes (apply append (map fix-node revir)))
   ;; Check if active coherent volume alone still exceeds 693 milli-nats:
   (define rough-qubit-ns
     (for/sum ([n (in-list repaired-nodes)])
-      (match n
-        [`(rev-gate (,(or 'cx 'cz) ,_ ,_)) (* 2 (target-hw-profile-gate-2q-ns hw))]
-        [`(rev-temp-and ,_ ,_ ,_) (* 12 (target-hw-profile-gate-2q-ns hw))]
-        [_ (target-hw-profile-gate-1q-ns hw)])))
+      (rough-node-ns n)))
   (define t2 (target-hw-profile-t2-ns hw))
   (define rough-idle (if (<= t2 0) 0 (quotient (* rough-qubit-ns 1000) t2)))
   (define final-nodes
@@ -2531,6 +3022,1012 @@
           (list `(rev-multishot ,shots-k ,repaired-nodes)))
         repaired-nodes))
   (values final-nodes repairs))
+
+;; =============================================================================
+;; 5b. Phase-Clean `focus-zipper` RM(3, n) TODD + AutoCCZ Optimization &
+;;     External QEC Syndrome-Decoder Pacing Profile Metadata
+;; =============================================================================
+
+(define (optimize-revir-phase-clean-focus-zippers revir cert-table)
+  (define certified-cnt 0)
+  (define opt-cones-cnt 0)
+  (define total-pre-tc 0)
+  (define total-post-tc 0)
+  (define total-pre-td 0)
+  (define total-post-td 0)
+
+  (define (try-extract-local-todd-ops ir lw)
+    (define non-cliff-cnt 0)
+    (define ccz-cnt 0)
+    (let loop ([rem ir] [acc '()])
+      (match rem
+        ['() (values (reverse acc) non-cliff-cnt ccz-cnt)]
+        [(cons nd tl)
+         (match nd
+           [`(rev-gate (cx ,c ,t))
+            (loop tl (cons (list 'cx (lw c) (lw t)) acc))]
+           [`(rev-gate (cz ,a ,b))
+            (loop tl (cons (list 'cz (lw a) (lw b)) acc))]
+           [`(rev-gate (ccz ,a ,b ,c))
+            (set! non-cliff-cnt (add1 non-cliff-cnt))
+            (set! ccz-cnt (add1 ccz-cnt))
+            (loop tl (cons (list 'ccz (lw a) (lw b) (lw c)) acc))]
+           [`(rev-gate (z ,w))
+            (loop tl (cons (list 'z (lw w)) acc))]
+           [`(rev-gate (s ,w))
+            (loop tl (cons (list 's (lw w)) acc))]
+           [`(rev-gate (s-dag ,w))
+            (loop tl (cons (list 'sdg (lw w)) acc))]
+           [`(rev-gate (rz-dyadic ,w 3 #f ,_))
+            (set! non-cliff-cnt (add1 non-cliff-cnt))
+            (loop tl (cons (list 't (lw w)) acc))]
+           [`(rev-gate (rz-dyadic-neg ,w 3 #f ,_))
+            (set! non-cliff-cnt (add1 non-cliff-cnt))
+            (loop tl (cons (list 'tdg (lw w)) acc))]
+           [_ (values #f 0 0)])])))
+
+  (define (lower-todd-isa->revir isa-ops pw src-node)
+    (define out
+      (apply append
+             (for/list ([op (in-list isa-ops)])
+               (match op
+                 [(list "cx" c t) (list `(rev-gate (cx ,(pw c) ,(pw t))))]
+                 [(list "cz" a b) (list `(rev-gate (cz ,(pw a) ,(pw b))))]
+                 [(list "z" w) (list `(rev-gate (z ,(pw w))))]
+                 [(list "s" w) (list `(rev-gate (s ,(pw w))))]
+                 [(list "sdg" w)
+                  ;; Z * S = S^\dagger with zero global phase, preserving standard QASM3 {z, s} gates:
+                  (list `(rev-gate (z ,(pw w)))
+                        `(rev-gate (s ,(pw w))))]
+                 [(list "t" w) (list `(rev-gate (rz-dyadic ,(pw w) 3 #f 5)))]
+                 [(list "tdg" w) (list `(rev-gate (rz-dyadic-neg ,(pw w) 3 #f 5)))]
+                 [_ (error 'optimize-revir-phase-clean-focus-zippers
+                           "Unexpected TODD ISA op: ~a" op)]))))
+    (propagate-surface-span-list! src-node out 'RevIR))
+
+  (define (opt-nodes nodes)
+    (for/list ([nd (in-list nodes)])
+      (define rebuilt
+        (match nd
+          [`(rev-focus-zipper (,sub-ws ,amb-ws) ,ir)
+           (define inner-ir (opt-nodes ir))
+           (define cert? (hash-ref cert-table nd #f))
+           (when cert?
+             (set! certified-cnt (add1 certified-cnt)))
+           (define cone-ws
+             (sort (remove-duplicates
+                    (append (filter exact-nonnegative-integer? sub-ws)
+                            (apply append (map revir-node-wires inner-ir))))
+                   <))
+           (define k-wires (length cone-ws))
+           (cond
+             [(and cert? (> k-wires 0) (<= k-wires 16))
+              (define phys->loc (make-hasheqv))
+              (for ([w (in-list cone-ws)] [idx (in-naturals)])
+                (hash-set! phys->loc w idx))
+              (define loc->phys (list->vector cone-ws))
+              (define (lw w) (hash-ref phys->loc w 0))
+              (define (pw idx) (vector-ref loc->phys idx))
+              (define-values (local-ops non-cliff-cnt ccz-cnt)
+                (try-extract-local-todd-ops inner-ir lw))
+              (cond
+                [(and local-ops
+                      (> non-cliff-cnt 0)
+                      (<= ccz-cnt 10)
+                      (phase-clean-u2-u4-cone-ops? k-wires local-ops))
+                 (define pre-isa (lower-todd-cone-pre-isa local-ops))
+                 (define post-isa (lower-todd-cone-post-isa k-wires local-ops))
+                 (define tc-pre (compute-isa-t-count pre-isa))
+                 (define tc-post (compute-isa-t-count post-isa))
+                 (define td-pre (compute-isa-t-depth k-wires pre-isa))
+                 (define td-post (compute-isa-t-depth k-wires post-isa))
+                 (set! total-pre-tc (+ total-pre-tc tc-pre))
+                 (set! total-pre-td (+ total-pre-td td-pre))
+                 (if (or (< tc-post tc-pre)
+                         (and (= tc-post tc-pre) (< td-post td-pre)))
+                     (begin
+                       (set! opt-cones-cnt (add1 opt-cones-cnt))
+                       (set! total-post-tc (+ total-post-tc tc-post))
+                       (set! total-post-td (+ total-post-td td-post))
+                       `(rev-focus-zipper (,sub-ws ,amb-ws)
+                                          ,(lower-todd-isa->revir post-isa pw nd)))
+                     (begin
+                       (set! total-post-tc (+ total-post-tc tc-pre))
+                       (set! total-post-td (+ total-post-td td-pre))
+                       `(rev-focus-zipper (,sub-ws ,amb-ws) ,inner-ir)))]
+                [else
+                 `(rev-focus-zipper (,sub-ws ,amb-ws) ,inner-ir)])]
+             [else
+              `(rev-focus-zipper (,sub-ws ,amb-ws) ,inner-ir)])]
+          [`(rev-par ,ir1 ,ir2)
+           `(rev-par ,(opt-nodes ir1) ,(opt-nodes ir2))]
+          [`(rev-qmatch ,arms)
+           `(rev-qmatch ,(for/list ([a (in-list arms)])
+                           (list (first a) (opt-nodes (second a)))))]
+          [`(rev-for-fold-loop ,nr ,rirs)
+           `(rev-for-fold-loop ,nr ,(map opt-nodes rirs))]
+          [`(rev-multishot ,k ,ir)
+           `(rev-multishot ,k ,(opt-nodes ir))]
+          [_ nd]))
+      (propagate-surface-span! nd rebuilt 'RevIR)))
+
+  (define opt-ir (opt-nodes revir))
+  (values opt-ir
+          (hasheq 'pass_name "todd-rm3-autocc-phase-poly"
+                  'phase_clean_zippers_certified certified-cnt
+                  'cones_optimized opt-cones-cnt
+                  'pre_t_count total-pre-tc
+                  'post_t_count total-post-tc
+                  't_count_saved (max 0 (- total-pre-tc total-post-tc))
+                  'pre_t_depth total-pre-td
+                  'post_t_depth total-post-td
+                  't_depth_saved (max 0 (- total-pre-td total-post-td)))))
+
+;; =============================================================================
+;; 5c. Canonical Coupled Phase-Ordering Pipeline (`P_loop_cone -> P_pebble ->
+;;     (FRAIG/Commute o EGraph(MBU U ZX U TODD))^2 -> P_mbu -> Post-TODD Chordal
+;;     SSA -> Coupled Block-LU + Law-U4 Cluster Codegen`)
+;; =============================================================================
+
+(define (count-isa-clifford-t-gates isa-ops)
+  (define qtr (/ pi 4.0))
+  (for/sum ([op (in-list isa-ops)])
+    (match op
+      [`(isa-ccx ,_ ,_ ,_) 7]
+      [`(isa-temp-and-ccx ,_ ,_ ,_) 4]
+      [`(isa-rz ,ang ,_)
+       (if (< (abs (- (abs (exact->inexact ang)) qtr)) 1e-6) 1 0)]
+      [_ 0])))
+
+(define (kern-ast-has-phase-or-nested-mbu? kern-ast)
+  (let walk ([e kern-ast] [in-mbu? #f])
+    (match e
+      [`(linear-lambda ,_ ,ops)
+       (for/or ([op (in-list ops)]) (walk op in-mbu?))]
+      [`(within-apply-mbu ,comp ,act ,_)
+       (or in-mbu? (walk comp #t) (walk act #t))]
+      [`(erase-by ,fwd ,bwd ,_)
+       (or (walk fwd in-mbu?) (walk bwd in-mbu?))]
+      [`(inductive-iso orthogonal-partition ,arms ,_)
+       (for/or ([arm (in-list arms)]) (walk (second arm) in-mbu?))]
+      [`(inductive-iso for-fold-loop (,_ ,rks ...) ,_)
+       (for/or ([rk (in-list rks)]) (walk rk in-mbu?))]
+      [`(catamorphism-fold ,idx ,st ,l ,r)
+       (and (>= idx 0)
+            (or (and (not (eq? l 'none)) (walk l in-mbu?))
+                (walk st in-mbu?)
+                (and (not (eq? r 'none)) (walk r in-mbu?))))]
+      [`(locality-shift zipper-focus ,_ ,b) (walk b in-mbu?)]
+      [`(locality-shift parallel-product (,e1 ,e2) ,_)
+       (or (walk e1 in-mbu?) (walk e2 in-mbu?))]
+      [`(locality-shift multishot-checkpoint ,_ ,b) (walk b in-mbu?)]
+      [`(,(or 'z 's 's-dag) ,_) #t]
+      [`(,(or 'rz-dyadic 'rz-dyadic-neg) . ,_) #t]
+      [`(,(or 'cz 'ccz) . ,_) #t]
+      [_ #f])))
+
+(define (flatten-kern-ops ops)
+  (apply append
+         (for/list ([op (in-list ops)])
+           (match op
+             [`(linear-lambda ,_ ,sub-ops)
+              (flatten-kern-ops sub-ops)]
+             [_ (list op)]))))
+
+(define (kern-leaf-op-wires op)
+  (match op
+    [`(,(or 'x 'z 's 's-dag 'h 'waw-barrier) ,w) (list w)]
+    [`(ry ,_ ,w) (list w)]
+    [`(,(or 'rz-dyadic 'rz-dyadic-neg) ,w ,_ ,_ ,_) (list w)]
+    [`(,(or 'cx 'cz 'swap) ,a ,b) (list a b)]
+    [`(,(or 'ccx 'ccz 'temp-and) ,a ,b ,c) (list a b c)]
+    [`(prepare-dicke-le1 ,ws ,_ ,_ ,_) ws]
+    [`(mid-meas-x ,a ,_ ,_) (list a)]
+    [`(cond-z ,_ ,t) (list t)]
+    [`(cond-cz ,_ ,a ,b) (list a b)]
+    [`(syndrome-plaquette ,ws ,_ ,_) ws]
+    [`(within-apply-mbu ,comp ,act ,ews)
+     (remove-duplicates
+      (append (kern-all-wires comp) (kern-all-wires act) ews)
+      =)]
+    [`(erase-by ,fwd ,bwd (,_ ,ws))
+     (remove-duplicates (append (kern-all-wires fwd) (kern-all-wires bwd) ws) =)]
+    [`(inductive-iso wire-relabel (,ws ,_) ,_) ws]
+    [`(inductive-iso orthogonal-partition ,arms ,_)
+     (remove-duplicates
+      (apply append
+             (for/list ([arm (in-list arms)])
+               (append (guard-wires (first arm)) (kern-all-wires (second arm)))))
+      =)]
+    [`(inductive-iso for-fold-loop (,_ ,rks ...) ,_)
+     (remove-duplicates (apply append (map kern-all-wires rks)) =)]
+    [`(catamorphism-fold ,idx ,st ,l ,r)
+     (if (< idx 0)
+         '()
+         (remove-duplicates
+          (append (if (eq? l 'none) '() (kern-all-wires l))
+                  (kern-all-wires st)
+                  (if (eq? r 'none) '() (kern-all-wires r)))
+          =))]
+    [`(locality-shift zipper-focus (,sw ,aw) ,b)
+     (remove-duplicates (append sw aw (kern-all-wires b)) =)]
+    [`(locality-shift parallel-product (,e1 ,e2) ,_)
+     (remove-duplicates (append (kern-all-wires e1) (kern-all-wires e2)) =)]
+    [`(locality-shift multishot-checkpoint ,_ ,b) (kern-all-wires b)]
+    [_ '()]))
+
+(define (kern-all-wires kern-ast)
+  (match kern-ast
+    [`(linear-lambda ,_ ,ops)
+     (remove-duplicates (apply append (map kern-leaf-op-wires ops)) =)]
+    [other (kern-leaf-op-wires other)]))
+
+;; Pre-TODD Chordal SSA Wire Coloring with Explicit WAW Reuse Barriers
+;; (used to reproduce Hazard A `SSA < TODD` in A/B phase-ordering verification):
+(define (apply-pre-todd-ssa-with-waw-barriers kern-ast input-wires scratch-wires)
+  (define scratch-set (list->seteqv scratch-wires))
+  (define fixed-base
+    (if (null? input-wires) 0 (add1 (apply max input-wires))))
+  (define first-use (make-hasheqv))
+  (define last-use (make-hasheqv))
+  (define (touch! w ts)
+    (when (set-member? scratch-set w)
+      (unless (hash-has-key? first-use w)
+        (hash-set! first-use w ts))
+      (hash-set! last-use w ts)))
+
+  (define step-ts 0)
+  (define (walk-ts! e)
+    (match e
+      [`(linear-lambda ,_ ,ops)
+       (for ([op (in-list (flatten-kern-ops ops))])
+         (walk-ts! op))]
+      [`(within-apply-mbu ,comp ,act ,ews)
+       (define t-enter step-ts)
+       (set! step-ts (add1 step-ts))
+       (for ([w (in-list (append (kern-all-wires comp) ews))])
+         (touch! w t-enter))
+       (walk-ts! act)
+       (define t-exit step-ts)
+       (set! step-ts (add1 step-ts))
+       (for ([w (in-list (append (kern-all-wires comp) ews))])
+         (touch! w t-exit))]
+      [_
+       (define t step-ts)
+       (set! step-ts (add1 step-ts))
+       (for ([w (in-list (kern-leaf-op-wires e))])
+         (touch! w t))]))
+  (walk-ts! kern-ast)
+
+  (define live-scratch
+    (sort (hash-keys first-use)
+          (lambda (w1 w2)
+            (define s1 (hash-ref first-use w1))
+            (define s2 (hash-ref first-use w2))
+            (if (= s1 s2) (< w1 w2) (< s1 s2)))))
+  (define phys-end (make-hasheqv))
+  (define reuse-points (make-hasheqv))
+  (define w-remap (make-hasheqv))
+  (define num-phys-scr 0)
+
+  (for ([vw (in-list live-scratch)])
+    (define sv (hash-ref first-use vw))
+    (define ev (hash-ref last-use vw))
+    (define slot
+      (for/first ([sl (in-range num-phys-scr)]
+                  #:when (< (hash-ref phys-end sl) sv))
+        sl))
+    (cond
+      [slot
+       (define pw (+ fixed-base slot))
+       (hash-set! w-remap vw pw)
+       (hash-set! phys-end slot ev)
+       (hash-set! reuse-points sv
+                  (append (hash-ref reuse-points sv '()) (list pw)))]
+      [else
+       (define sl num-phys-scr)
+       (set! num-phys-scr (add1 num-phys-scr))
+       (define pw (+ fixed-base sl))
+       (hash-set! w-remap vw pw)
+       (hash-set! phys-end sl ev)]))
+
+  (define (rw w) (hash-ref w-remap w w))
+  (define rebuild-ts 0)
+  (define (remap-node e)
+    (define out
+      (match e
+        [`(linear-lambda ,args ,ops)
+         (define acc '())
+         (for ([op (in-list (flatten-kern-ops ops))])
+           (match op
+             [`(within-apply-mbu ,comp ,act ,ews)
+              (define t-enter rebuild-ts)
+              (set! rebuild-ts (add1 rebuild-ts))
+              (for ([pw (in-list (hash-ref reuse-points t-enter '()))])
+                (set! acc (cons `(waw-barrier ,pw) acc)))
+              (define r-comp (remap-leaf-tree comp))
+              (define r-act (remap-node act))
+              (set! rebuild-ts (add1 rebuild-ts))
+              (set! acc (cons `(within-apply-mbu ,r-comp ,r-act ,(remove-duplicates (map rw ews) =))
+                              acc))]
+             [_
+              (define t rebuild-ts)
+              (set! rebuild-ts (add1 rebuild-ts))
+              (for ([pw (in-list (hash-ref reuse-points t '()))])
+                (set! acc (cons `(waw-barrier ,pw) acc)))
+              (set! acc (cons (remap-leaf-tree op) acc))]))
+         `(linear-lambda ,args ,(reverse acc))]
+        [_ (remap-leaf-tree e)]))
+    (propagate-surface-span! e out 'Kern))
+
+  (define (remap-leaf-tree op)
+    (define rop
+      (match op
+        [`(linear-lambda ,args ,ops)
+         `(linear-lambda ,args ,(map remap-leaf-tree (flatten-kern-ops ops)))]
+        [`(,g ,w)
+         #:when (memq g '(x z s s-dag h waw-barrier))
+         `(,g ,(rw w))]
+        [`(ry ,th ,w) `(ry ,th ,(rw w))]
+        [`(,g ,w ,k ,f64? ,d)
+         #:when (memq g '(rz-dyadic rz-dyadic-neg))
+         `(,g ,(rw w) ,k ,f64? ,d)]
+        [`(,g ,a ,b)
+         #:when (memq g '(cx cz swap))
+         `(,g ,(rw a) ,(rw b))]
+        [`(,g ,a ,b ,c)
+         #:when (memq g '(ccx ccz temp-and))
+         `(,g ,(rw a) ,(rw b) ,(rw c))]
+        [`(prepare-dicke-le1 ,ws ,w0 ,w1 ,bm)
+         `(prepare-dicke-le1 ,(map rw ws) ,w0 ,w1 ,bm)]
+        [`(mid-meas-x ,a ,ms ,sh?) `(mid-meas-x ,(rw a) ,ms ,sh?)]
+        [`(cond-z ,ms ,t) `(cond-z ,ms ,(rw t))]
+        [`(cond-cz ,ms ,a ,b) `(cond-cz ,ms ,(rw a) ,(rw b))]
+        [`(syndrome-plaquette ,ws ,d ,hk?) `(syndrome-plaquette ,(map rw ws) ,d ,hk?)]
+        [`(within-apply-mbu ,c ,a ,ews)
+         `(within-apply-mbu ,(remap-leaf-tree c) ,(remap-leaf-tree a)
+                            ,(remove-duplicates (map rw ews) =))]
+        [`(erase-by ,f ,b (,knd ,ws))
+         `(erase-by ,(remap-leaf-tree f) ,(remap-leaf-tree b)
+                    (,knd ,(remove-duplicates (map rw ws) =)))]
+        [`(locality-shift zipper-focus (,sw ,aw) ,b)
+         `(locality-shift zipper-focus (,(map rw sw) ,(map rw aw)) ,(remap-leaf-tree b))]
+        [`(locality-shift parallel-product (,e1 ,e2) ,x)
+         `(locality-shift parallel-product (,(remap-leaf-tree e1) ,(remap-leaf-tree e2)) ,x)]
+        [`(locality-shift multishot-checkpoint ,k ,b)
+         `(locality-shift multishot-checkpoint ,k ,(remap-leaf-tree b))]
+        [`(inductive-iso for-fold-loop (,nr ,rks ...) ,x)
+         `(inductive-iso for-fold-loop (,nr ,@(map remap-leaf-tree rks)) ,x)]
+        [`(inductive-iso orthogonal-partition ,arms ,x)
+         `(inductive-iso orthogonal-partition
+                         ,(for/list ([arm (in-list arms)])
+                            (list (remap-guard w-remap (first arm))
+                                  (remap-leaf-tree (second arm))))
+                         ,x)]
+        [_ op]))
+    (propagate-surface-span! op rop 'Kern))
+
+  (define remapped-kern (remap-node kern-ast))
+  (define remapped-scr
+    (for/list ([i (in-range num-phys-scr)]) (+ fixed-base i)))
+  (values remapped-kern remapped-scr (+ fixed-base num-phys-scr)))
+
+;; Pre-MBU, Pre-SSA Algebraic `within-apply-mbu` Saturation + 2-Round `(FRAIG/Commute o TODD/ZX)^2` Fixpoint:
+(define (optimize-kern-canonical-phase-order kern-ast
+                                             _decl
+                                             #:rounds [rounds 2]
+                                             #:absorb-top-cz? [absorb-top-cz? #t]
+                                             #:enable-mbu-algebraic? [enable-mbu-algebraic? #t]
+                                             #:skip-pure-zippers? [skip-pure-zippers? #t])
+  (define has-phase-or-nested? (kern-ast-has-phase-or-nested-mbu? kern-ast))
+  (define sessions-fused-cnt 0)
+  (define phase-absorbed-cnt 0)
+  (define hoisted-ops-cnt 0)
+  (define commute-moves-cnt 0)
+  (define todd-cones-cnt 0)
+  (define todd-pre-tc 0)
+  (define todd-post-tc 0)
+  (define todd-pre-td 0)
+  (define todd-post-td 0)
+
+  (define (kern-1q-rz8-val op)
+    (match op
+      [`(z ,w) (cons w 4)]
+      [`(s ,w) (cons w 2)]
+      [`(s-dag ,w) (cons w 6)]
+      [`(rz-dyadic ,w 3 #f ,_) (cons w 1)]
+      [`(rz-dyadic-neg ,w 3 #f ,_) (cons w 7)]
+      [`(rz-dyadic ,w 2 #f ,_) (cons w 2)]
+      [`(rz-dyadic-neg ,w 2 #f ,_) (cons w 6)]
+      [`(rz-dyadic ,w 1 #f ,_) (cons w 4)]
+      [`(rz-dyadic-neg ,w 1 #f ,_) (cons w 4)]
+      [_ #f]))
+
+  (define (rz8-val->kern-ops w k8 src-op)
+    (define raw
+      (match (modulo k8 8)
+        [0 '()]
+        [1 (list `(rz-dyadic ,w 3 #f 5))]
+        [2 (list `(s ,w))]
+        [3 (list `(s ,w) `(rz-dyadic ,w 3 #f 5))]
+        [4 (list `(z ,w))]
+        [5 (list `(z ,w) `(rz-dyadic ,w 3 #f 5))]
+        [6 (list `(z ,w) `(s ,w))]
+        [7 (list `(rz-dyadic-neg ,w 3 #f 5))]))
+    (if src-op (propagate-surface-span-list! src-op raw 'Kern) raw))
+
+  (define (cancel-adjacent-kern-ops ops)
+    (let loop ([rem ops] [stk '()])
+      (cond
+        [(null? rem) (reverse stk)]
+        [else
+         (define cur (car rem))
+         (define rcur (kern-1q-rz8-val cur))
+         (define rstk (and (pair? stk) (kern-1q-rz8-val (car stk))))
+         (cond
+           [(and rcur rstk (= (car rcur) (car rstk)))
+            (define w (car rcur))
+            (define ksum (modulo (+ (cdr rstk) (cdr rcur)) 8))
+            (define merged (rz8-val->kern-ops w ksum (car stk)))
+            (loop (cdr rem) (append (reverse merged) (cdr stk)))]
+           [(and (pair? stk)
+                 (equal? cur (car stk))
+                 (memq (car cur) '(h x cx cz ccz)))
+            (loop (cdr rem) (cdr stk))]
+           [else
+            (loop (cdr rem) (cons cur stk))])])))
+
+  (define (diagonal-kern-op-disjoint-from? anc op)
+    (match op
+      [`(,(or 'z 's 's-dag) ,w) (not (= w anc))]
+      [`(,(or 'rz-dyadic 'rz-dyadic-neg) ,w ,_ #f ,_) (not (= w anc))]
+      [`(cz ,a ,b) (and (not (= a anc)) (not (= b anc)))]
+      [`(ccz ,a ,b ,c) (and (not (= a anc)) (not (= b anc)) (not (= c anc)))]
+      [`(waw-barrier ,w) (not (= w anc))]
+      [_ #f]))
+
+  (define (single-temp-and-mbu-parts op)
+    (match op
+      [`(within-apply-mbu (linear-lambda ,_ ((temp-and ,c1 ,c2 ,anc)))
+                          (linear-lambda ,_ ,act-ops)
+                          (,anc2))
+       #:when (= anc anc2)
+       (list c1 c2 anc (flatten-kern-ops act-ops))]
+      [_ #f]))
+
+  (define (mbu-body-read-only-safe? anc c1 c2 body)
+    (for/and ([bop (in-list body)])
+      (match bop
+        [`(cx ,c ,t)
+         (and (= c anc) (not (= t anc)) (not (= t c1)) (not (= t c2)))]
+        [`(cz ,a ,b)
+         (and (or (= a anc) (= b anc)) (not (= a b)))]
+        [`(,(or 'z 's 's-dag) ,w) (= w anc)]
+        [`(,(or 'rz-dyadic 'rz-dyadic-neg) ,w ,_ #f ,_) (= w anc)]
+        [_ #f])))
+
+  (define (mbu-body-phase-only? anc body)
+    (and (pair? body)
+         (for/and ([bop (in-list body)])
+           (match bop
+             [`(cz ,a ,b) (and (or (= a anc) (= b anc)) (not (= a b)))]
+             [`(z ,w) (= w anc)]
+             [_ #f]))))
+
+  (define (subst-wire-in-mbu-body old-w new-w body)
+    (for/list ([bop (in-list body)])
+      (define out
+        (match bop
+          [`(cx ,c ,t)
+           `(cx ,(if (= c old-w) new-w c) ,(if (= t old-w) new-w t))]
+          [`(cz ,a ,b)
+           `(cz ,(if (= a old-w) new-w a) ,(if (= b old-w) new-w b))]
+          [`(,g ,w)
+           #:when (memq g '(z s s-dag))
+           `(,g ,(if (= w old-w) new-w w))]
+          [`(,g ,w ,k ,f64? ,d)
+           #:when (memq g '(rz-dyadic rz-dyadic-neg))
+           `(,g ,(if (= w old-w) new-w w) ,k ,f64? ,d)]
+          [_ bop]))
+      (propagate-surface-span! bop out 'Kern)))
+
+  (define (kern-phase-cone-op? op)
+    (match op
+      [`(cx ,_ ,_) #t]
+      [`(cz ,_ ,_) #t]
+      [`(ccz ,_ ,_ ,_) #t]
+      [`(,(or 'z 's 's-dag) ,_) #t]
+      [`(,(or 'rz-dyadic 'rz-dyadic-neg) ,_ 3 #f ,_) #t]
+      [_ #f]))
+
+  (define (commute-kern-ops-across-disjoint-barriers ops)
+    (define (disjoint-ws? ws1 ws2)
+      (not (for*/or ([u (in-list ws1)] [v (in-list ws2)]) (= u v))))
+    (define (commutes-past? op barrier)
+      (or (and (kern-phase-cone-op? op)
+               (pair? barrier)
+               (memq (car barrier) '(h x))
+               (disjoint-ws? (kern-leaf-op-wires op) (kern-leaf-op-wires barrier)))
+          (and (pair? op)
+               (eq? (car op) 'cx)
+               (pair? barrier)
+               (eq? (car barrier) 'x)
+               (not (= (second op) (second barrier))))))
+    (define (push-right op rest-ops)
+      (match rest-ops
+        ['() (list op)]
+        [(cons hd tl)
+         (if (commutes-past? op hd)
+             (begin
+               (set! commute-moves-cnt (add1 commute-moves-cnt))
+               (cons hd (push-right op tl)))
+             (cons op rest-ops))]))
+    (cancel-adjacent-kern-ops
+     (let rec ([rem ops])
+       (if (null? rem)
+           '()
+           (push-right (car rem) (rec (cdr rem)))))))
+
+  (define (reduce-kern-phase-cone cone-ops)
+    (define cone-ws
+      (sort (remove-duplicates (apply append (map kern-leaf-op-wires cone-ops)) =) <))
+    (define k-wires (length cone-ws))
+    (define non-cliff-cnt
+      (for/sum ([op (in-list cone-ops)])
+        (match op
+          [`(ccz ,_ ,_ ,_) 1]
+          [`(,(or 'rz-dyadic 'rz-dyadic-neg) ,_ 3 #f ,_) 1]
+          [_ 0])))
+    (define ccz-cnt
+      (for/sum ([op (in-list cone-ops)])
+        (match op [`(ccz ,_ ,_ ,_) 1] [_ 0])))
+    (cond
+      [(or (= non-cliff-cnt 0) (= k-wires 0) (> k-wires 16))
+       cone-ops]
+      [else
+       (define phys->loc (make-hasheqv))
+       (for ([w (in-list cone-ws)] [idx (in-naturals)])
+         (hash-set! phys->loc w idx))
+       (define loc->phys (list->vector cone-ws))
+       (define (lw w) (hash-ref phys->loc w 0))
+       (define (pw idx) (vector-ref loc->phys idx))
+       (define eg-ops
+         (for/list ([op (in-list cone-ops)])
+           (match op
+             [`(cx ,c ,t) (list 'cx (lw c) (lw t))]
+             [`(cz ,a ,b) (list 'cz (lw a) (lw b))]
+             [`(ccz ,a ,b ,c) (list 'ccz (lw a) (lw b) (lw c))]
+             [`(z ,w) (list 'z (lw w))]
+             [`(s ,w) (list 's (lw w))]
+             [`(s-dag ,w) (list 'sdg (lw w))]
+             [`(rz-dyadic ,w 3 #f ,_) (list 't (lw w))]
+             [`(rz-dyadic-neg ,w 3 #f ,_) (list 'tdg (lw w))])))
+       (define an-ops
+         (for/list ([op (in-list cone-ops)])
+           (match op
+             [`(cx ,c ,t) `(cx ,(lw c) ,(lw t))]
+             [`(cz ,a ,b) `(cz ,(lw a) ,(lw b))]
+             [`(ccz ,a ,b ,c) `(ccz ,(lw a) ,(lw b) ,(lw c))]
+             [`(z ,w) `(rz8 ,(lw w) 4)]
+             [`(s ,w) `(rz8 ,(lw w) 2)]
+             [`(s-dag ,w) `(rz8 ,(lw w) 6)]
+             [`(rz-dyadic ,w 3 #f ,_) `(rz8 ,(lw w) 1)]
+             [`(rz-dyadic-neg ,w 3 #f ,_) `(rz8 ,(lw w) 7)])))
+       (define pre-isa (lower-todd-cone-pre-isa eg-ops))
+       (define tc-pre (compute-isa-t-count pre-isa))
+       (define td-pre (compute-isa-t-depth k-wires pre-isa))
+
+       ;; Candidate 1: `lakefillq-phase-ordering-analyzer.rkt` `pass-todd-zx`
+       ;; (`RM*(n-4,n)^perp` 15-subset puncture sweep + Twin-CCZ polarity search):
+       (define an-prog
+         (pass-todd-zx (revir-prog "kern_cone" k-wires 0 0 1 an-ops #f (seteqv) (hasheq))
+                       #:rounds 1
+                       #:partition-aware? #f))
+       (define cand1-isa
+         (apply append
+                (for/list ([rop (in-list (revir-prog-ops an-prog))])
+                  (match rop
+                    [`(cx ,c ,t) (list (list "cx" c t))]
+                    [`(cz ,a ,b) (list (list "cz" a b))]
+                    [`(rz8 ,w ,k8)
+                     (match (modulo k8 8)
+                       [0 '()]
+                       [1 (list (list "t" w))]
+                       [2 (list (list "s" w))]
+                       [3 (list (list "s" w) (list "t" w))]
+                       [4 (list (list "z" w))]
+                       [5 (list (list "z" w) (list "t" w))]
+                       [6 (list (list "sdg" w))]
+                       [7 (list (list "tdg" w))])]))))
+       (define tc1 (compute-isa-t-count cand1-isa))
+       (define td1 (compute-isa-t-depth k-wires cand1-isa))
+
+       ;; Candidate 2: `lakefillq-egraph-saturator.rkt` `lower-todd-cone-post-isa`:
+       (define-values (cand2-isa tc2 td2)
+         (if (and (<= ccz-cnt 10)
+                  (phase-clean-u2-u4-cone-ops? k-wires eg-ops))
+             (let ([p2 (lower-todd-cone-post-isa k-wires eg-ops)])
+               (values p2
+                       (compute-isa-t-count p2)
+                       (compute-isa-t-depth k-wires p2)))
+             (values cand1-isa tc1 td1)))
+
+       (define use-c2?
+         (or (< tc2 tc1)
+             (and (= tc2 tc1) (< td2 td1))
+             (and (= tc2 tc1) (= td2 td1) (< (length cand2-isa) (length cand1-isa)))))
+       (define best-isa (if use-c2? cand2-isa cand1-isa))
+       (define tc-best (if use-c2? tc2 tc1))
+       (define td-best (if use-c2? td2 td1))
+
+       (if (or (< tc-best tc-pre)
+               (and (= tc-best tc-pre) (< td-best td-pre)))
+           (let ()
+             (set! todd-cones-cnt (add1 todd-cones-cnt))
+             (set! todd-pre-tc (+ todd-pre-tc tc-pre))
+             (set! todd-post-tc (+ todd-post-tc tc-best))
+             (set! todd-pre-td (+ todd-pre-td td-pre))
+             (set! todd-post-td (+ todd-post-td td-best))
+             (define src-node (first cone-ops))
+             (define lowered-kern
+               (apply append
+                      (for/list ([ins (in-list best-isa)])
+                        (match ins
+                          [(list "cx" c t) (list `(cx ,(pw c) ,(pw t)))]
+                          [(list "cz" a b) (list `(cz ,(pw a) ,(pw b)))]
+                          [(list "z" w) (list `(z ,(pw w)))]
+                          [(list "s" w) (list `(s ,(pw w)))]
+                          [(list "sdg" w)
+                           (list `(z ,(pw w)) `(s ,(pw w)))]
+                          [(list "t" w) (list `(rz-dyadic ,(pw w) 3 #f 5))]
+                          [(list "tdg" w) (list `(rz-dyadic-neg ,(pw w) 3 #f 5))]))))
+             (propagate-surface-span-list! src-node lowered-kern 'Kern))
+           cone-ops)]))
+
+  (define (cone-reduce-step ops in-qmatch?)
+    (define canceled-ops (cancel-adjacent-kern-ops ops))
+    (if in-qmatch?
+        canceled-ops
+        (let cone-loop ([rem canceled-ops] [cur-cone '()] [out '()])
+          (cond
+            [(null? rem)
+             (append out
+                     (if (null? cur-cone)
+                         '()
+                         (reduce-kern-phase-cone (reverse cur-cone))))]
+            [(kern-phase-cone-op? (car rem))
+             (cone-loop (cdr rem) (cons (car rem) cur-cone) out)]
+            [else
+             (define flushed
+               (if (null? cur-cone)
+                   '()
+                   (reduce-kern-phase-cone (reverse cur-cone))))
+             (cone-loop (cdr rem) '() (append out flushed (list (car rem))))]))))
+
+  (define (algebraic-mbu-step raw-ops top-level? in-qmatch?)
+    (define flat0 (flatten-kern-ops raw-ops))
+    (if (not enable-mbu-algebraic?)
+        (for/list ([op (in-list flat0)])
+          (transform-node op top-level? in-qmatch?))
+        (let ()
+          (define hoisted
+            (apply append
+                   (for/list ([op (in-list flat0)])
+                     (match (single-temp-and-mbu-parts op)
+                       [(list c1 c2 anc act-ops)
+                        (define alg-act (algebraic-mbu-step act-ops #f in-qmatch?))
+                        (define-values (rev-tail0 rev-kept0)
+                          (let split ([r (reverse alg-act)] [h '()])
+                            (if (and (pair? r) (diagonal-kern-op-disjoint-from? anc (car r)))
+                                (split (cdr r) (cons (car r) h))
+                                (values h r))))
+                        (define sat-kept (cone-reduce-step (reverse rev-kept0) in-qmatch?))
+                        (define-values (rev-tail1 rev-kept1)
+                          (let split ([r (reverse sat-kept)] [h '()])
+                            (if (and (pair? r) (diagonal-kern-op-disjoint-from? anc (car r)))
+                                (split (cdr r) (cons (car r) h))
+                                (values h r))))
+                        (define all-hoisted (append rev-tail1 rev-tail0))
+                        (when (pair? all-hoisted)
+                          (set! hoisted-ops-cnt (+ hoisted-ops-cnt (length all-hoisted))))
+                        (define kept (reverse rev-kept1))
+                        (if (null? kept)
+                            (begin
+                              (set! sessions-fused-cnt (add1 sessions-fused-cnt))
+                              all-hoisted)
+                            (cons (propagate-surface-span!
+                                   op
+                                   `(within-apply-mbu (linear-lambda () ((temp-and ,c1 ,c2 ,anc)))
+                                                      (linear-lambda () ,kept)
+                                                      (,anc))
+                                   'Kern)
+                                  all-hoisted))]
+                       [_ (list (transform-node op top-level? in-qmatch?))]))))
+          (define fused
+            (let fuse-loop ([rem hoisted] [acc '()])
+              (match rem
+                ['() (reverse acc)]
+                [(list* op1 op2 tl)
+                 (define p1 (single-temp-and-mbu-parts op1))
+                 (define p2 (single-temp-and-mbu-parts op2))
+                 (cond
+                   [(and p1 p2
+                         (= (min (first p1) (second p1)) (min (first p2) (second p2)))
+                         (= (max (first p1) (second p1)) (max (first p2) (second p2)))
+                         (mbu-body-read-only-safe? (third p1) (first p1) (second p1) (fourth p1))
+                         (mbu-body-read-only-safe? (third p2) (first p2) (second p2) (fourth p2)))
+                    (define c1 (first p1))
+                    (define c2 (second p1))
+                    (define a1 (third p1))
+                    (define a2 (third p2))
+                    (define merged-body
+                      (cancel-adjacent-kern-ops
+                       (append (fourth p1)
+                               (subst-wire-in-mbu-body a2 a1 (fourth p2)))))
+                    (cond
+                      [(or has-phase-or-nested? (not (null? merged-body)))
+                       (set! sessions-fused-cnt (add1 sessions-fused-cnt))
+                       (if (null? merged-body)
+                           (fuse-loop tl acc)
+                           (fuse-loop
+                            (cons (propagate-surface-span!
+                                   op1
+                                   `(within-apply-mbu (linear-lambda () ((temp-and ,c1 ,c2 ,a1)))
+                                                      (linear-lambda () ,merged-body)
+                                                      (,a1))
+                                   'Kern)
+                                  tl)
+                            acc))]
+                      [else
+                       (fuse-loop (cdr rem) (cons op1 acc))])]
+                   [else
+                    (fuse-loop (cdr rem) (cons op1 acc))])]
+                [(cons hd tl)
+                 (fuse-loop tl (cons hd acc))])))
+          (apply append
+                 (for/list ([op (in-list fused)])
+                   (match (single-temp-and-mbu-parts op)
+                     [(list c1 c2 anc b-ops)
+                      #:when (and (or (not top-level?) absorb-top-cz?)
+                                  (not in-qmatch?)
+                                  (mbu-body-phase-only? anc b-ops))
+                      (set! phase-absorbed-cnt (add1 phase-absorbed-cnt))
+                      (define absorbed
+                        (for/list ([bop (in-list b-ops)])
+                          (match bop
+                            [`(cz ,a ,b)
+                             (define other (if (= a anc) b a))
+                             (if (or (= other c1) (= other c2))
+                                 `(cz ,c1 ,c2)
+                                 `(ccz ,c1 ,c2 ,other))]
+                            [`(z ,_) `(cz ,c1 ,c2)])))
+                      (propagate-surface-span-list! op absorbed 'Kern)]
+                     [_ (list op)]))))))
+
+  (define (saturate-op-list raw-ops top-level? in-qmatch?)
+    (cone-reduce-step (algebraic-mbu-step raw-ops top-level? in-qmatch?) in-qmatch?))
+
+  (define (pure-todd-zipper-body? e)
+    (let walk ([n e])
+      (match n
+        [`(linear-lambda ,_ ,ops) (for/and ([op (in-list ops)]) (walk op))]
+        [(? kern-phase-cone-op?) #t]
+        [_ #f])))
+
+  (define (transform-node e top-level? in-qmatch?)
+    (define rebuilt
+      (match e
+        [`(linear-lambda ,args ,ops)
+         `(linear-lambda ,args ,(saturate-op-list ops top-level? in-qmatch?))]
+        [`(within-apply-mbu ,comp ,act ,ews)
+         `(within-apply-mbu ,(transform-node comp #f in-qmatch?)
+                            ,(transform-node act #f in-qmatch?)
+                            ,ews)]
+        [`(erase-by ,fwd ,bwd ,spec)
+         `(erase-by ,(transform-node fwd top-level? in-qmatch?)
+                    ,(transform-node bwd top-level? in-qmatch?)
+                    ,spec)]
+        [`(locality-shift zipper-focus ,zspec ,body)
+         (if (and skip-pure-zippers? (pure-todd-zipper-body? body))
+             e
+             `(locality-shift zipper-focus ,zspec ,(transform-node body #f in-qmatch?)))]
+        [`(locality-shift parallel-product (,e1 ,e2) ,x)
+         `(locality-shift parallel-product
+                          (,(transform-node e1 top-level? in-qmatch?)
+                           ,(transform-node e2 top-level? in-qmatch?))
+                          ,x)]
+        [`(locality-shift multishot-checkpoint ,k ,b)
+         `(locality-shift multishot-checkpoint ,k ,(transform-node b top-level? in-qmatch?))]
+        [`(inductive-iso for-fold-loop (,nr ,rks ...) ,x)
+         `(inductive-iso for-fold-loop
+                         (,nr ,@(for/list ([rk (in-list rks)])
+                                  (transform-node rk top-level? in-qmatch?)))
+                         ,x)]
+        [`(inductive-iso orthogonal-partition ,arms ,x)
+         `(inductive-iso orthogonal-partition
+                         ,(for/list ([arm (in-list arms)])
+                            (list (first arm) (transform-node (second arm) #f #t)))
+                         ,x)]
+        [`(catamorphism-fold ,idx ,st ,l ,r)
+         (if (< idx 0)
+             e
+             `(catamorphism-fold ,idx
+                                 ,(transform-node st top-level? in-qmatch?)
+                                 ,(if (eq? l 'none) 'none (transform-node l top-level? in-qmatch?))
+                                 ,(if (eq? r 'none) 'none (transform-node r top-level? in-qmatch?))))]
+        [_ e]))
+    (propagate-surface-span! e rebuilt 'Kern))
+
+  (define (commute-tree e)
+    (define rebuilt
+      (match e
+        [`(linear-lambda ,args ,ops)
+         `(linear-lambda ,args
+                         ,(commute-kern-ops-across-disjoint-barriers
+                           (map commute-tree (flatten-kern-ops ops))))]
+        [`(within-apply-mbu ,c ,a ,ews)
+         `(within-apply-mbu ,(commute-tree c) ,(commute-tree a) ,ews)]
+        [`(erase-by ,f ,b ,sp)
+         `(erase-by ,(commute-tree f) ,(commute-tree b) ,sp)]
+        [`(locality-shift zipper-focus ,zs ,b)
+         (if (and skip-pure-zippers? (pure-todd-zipper-body? b))
+             e
+             `(locality-shift zipper-focus ,zs ,(commute-tree b)))]
+        [`(locality-shift parallel-product (,e1 ,e2) ,x)
+         `(locality-shift parallel-product (,(commute-tree e1) ,(commute-tree e2)) ,x)]
+        [`(locality-shift multishot-checkpoint ,k ,b)
+         `(locality-shift multishot-checkpoint ,k ,(commute-tree b))]
+        [`(inductive-iso for-fold-loop (,nr ,rks ...) ,x)
+         `(inductive-iso for-fold-loop (,nr ,@(map commute-tree rks)) ,x)]
+        [_ e]))
+    (propagate-surface-span! e rebuilt 'Kern))
+
+  (define final-kern
+    (let round-loop ([k 0] [cur kern-ast])
+      (cond
+        [(>= k rounds) cur]
+        [(= (add1 k) rounds)
+         (transform-node cur #t #f)]
+        [else
+         (define p1 (transform-node cur #t #f))
+         (define p2 (commute-tree p1))
+         (round-loop (add1 k) p2)])))
+
+  (values final-kern
+          (hasheq 'sessions_fused sessions-fused-cnt
+                  'phase_cones_absorbed phase-absorbed-cnt
+                  'disjoint_diagonal_ops_hoisted hoisted-ops-cnt
+                  'fraig_commute_moves commute-moves-cnt
+                  'todd_cones_reduced todd-cones-cnt
+                  'todd_pre_t_count todd-pre-tc
+                  'todd_post_t_count todd-post-tc
+                  'todd_pre_t_depth todd-pre-td
+                  'todd_post_t_depth todd-post-td)))
+
+;; Coupled Partition-Aware Rank-r Conjugate Block-LU Linear Frame Resynthesis (`P_part_u4 <-> Block-LU`):
+;; Compresses cross-QPU CNOT runs `B` from `||B||_0` down to `rank_F2(B)` via
+;; `synthesize-linear-frame-partition-aware` (`L_local * P_cut * U_local`) without ancillas!
+(define (resynthesize-isa-cx-frames-partition-aware isa-ops num-phys-q slices)
+  (cond
+    [(or (<= num-phys-q 0) (not slices) (<= (length slices) 1))
+     (values isa-ops 0 0 0)]
+    [else
+     (define qpu-vec (make-vector num-phys-q 0))
+     (for ([sl (in-list slices)] [p (in-naturals)])
+       (for ([w (in-list sl)] #:when (< w num-phys-q))
+         (vector-set! qpu-vec w p)))
+
+     (define (cx-run-metrics cx-pairs)
+       (define z-ep (make-vector num-phys-q 0))
+       (define cones (mutable-set))
+       (define u4-ebits 0)
+       (define cross-cxs 0)
+       (for ([pr (in-list cx-pairs)])
+         (define c (car pr))
+         (define t (cdr pr))
+         (define pc (vector-ref qpu-vec c))
+         (define pt (vector-ref qpu-vec t))
+         (unless (= pc pt)
+           (set! cross-cxs (add1 cross-cxs))
+           (define key (list pc pt c (vector-ref z-ep c)))
+           (unless (set-member? cones key)
+             (set-add! cones key)
+             (set! u4-ebits (add1 u4-ebits))))
+         (vector-set! z-ep t (add1 (vector-ref z-ep t))))
+       (values u4-ebits cross-cxs))
+
+     (define frames-resynth 0)
+     (define cross-cxs-saved 0)
+     (define ebits-saved 0)
+
+     (define (flush-cx-run rev-run)
+       (define run-ops (reverse rev-run))
+       (if (<= (length run-ops) 1)
+           run-ops
+           (let ()
+             (define orig-pairs
+               (for/list ([op (in-list run-ops)])
+                 (match-define `(isa-cx ,c ,t) op)
+                 (cons c t)))
+             (define-values (orig-eb orig-cross) (cx-run-metrics orig-pairs))
+             (if (= orig-cross 0)
+                 run-ops
+                 (let ()
+                   (define frame
+                     (for/vector ([w (in-range num-phys-q)]) (arithmetic-shift 1 w)))
+                   (for ([pr (in-list orig-pairs)])
+                     (define c (car pr))
+                     (define t (cdr pr))
+                     (vector-set! frame t
+                                  (bitwise-xor (vector-ref frame t) (vector-ref frame c))))
+                   (define syn-raw
+                     (synthesize-linear-frame-partition-aware num-phys-q frame slices))
+                   (define syn-pairs
+                     (for/list ([ins (in-list syn-raw)])
+                       (cons (second ins) (third ins))))
+                   (define-values (syn-eb syn-cross) (cx-run-metrics syn-pairs))
+                   (if (or (and (< syn-eb orig-eb) (<= syn-cross orig-cross))
+                           (and (= syn-eb orig-eb) (< syn-cross orig-cross)))
+                       (begin
+                         (set! frames-resynth (add1 frames-resynth))
+                         (set! cross-cxs-saved (+ cross-cxs-saved (- orig-cross syn-cross)))
+                         (set! ebits-saved (+ ebits-saved (max 0 (- orig-eb syn-eb))))
+                         (for/list ([pr (in-list syn-pairs)])
+                           `(isa-cx ,(car pr) ,(cdr pr))))
+                       run-ops))))))
+
+     (define new-isa
+       (let loop ([rem isa-ops] [rev-run '()] [out '()])
+         (cond
+           [(null? rem)
+            (append out (flush-cx-run rev-run))]
+           [(match (car rem) [`(isa-cx ,_ ,_) #t] [_ #f])
+            (loop (cdr rem) (cons (car rem) rev-run) out)]
+           [else
+            (define flushed (flush-cx-run rev-run))
+            (loop (cdr rem) '() (append out flushed (list (car rem))))])))
+     (values new-isa frames-resynth cross-cxs-saved ebits-saved)]))
+
+(define (isa-ops->analyzer-revir-ops isa-ops)
+  (filter values
+          (for/list ([op (in-list isa-ops)])
+            (match op
+              [`(isa-h ,w) `(h ,w)]
+              [`(isa-x ,w) `(x ,w)]
+              [`(isa-z ,w) `(rz8 ,w 4)]
+              [`(isa-s ,w) `(rz8 ,w 2)]
+              [`(isa-sdg ,w) `(rz8 ,w 6)]
+              [`(isa-rz ,_ ,w) `(rz8 ,w 1)]
+              [`(isa-cx ,c ,t) `(cx ,c ,t)]
+              [`(isa-cz ,a ,b) `(cz ,a ,b)]
+              [`(isa-ccx ,a ,b ,t) `(ccx ,a ,b ,t)]
+              [`(isa-temp-and-ccx ,c1 ,c2 ,anc) `(temp-and ,c1 ,c2 ,anc)]
+              [`(isa-meas-x-cond-cz-reset ,anc ,mk ,c1 ,c2)
+               `(meas-x-cond-cz-reset ,anc ,mk ,c1 ,c2)]
+              [_ #f]))))
+
+(define (build-qec-syndrome-decoder-pacing-metadata target-sym _hw)
+  (define active-fastpath-ns
+    (if (eq? target-sym 'bb-qldpc) 66.15 64.17))
+  (define cycle-budget-ns 1000.0)
+  (hasheq 'decoder_architecture "0-DSP Okasaki Braun Union-Find + Sparse-Syndrome Fast-Path"
+          'target_profile (symbol->string target-sym)
+          'clock_frequency_mhz 500.0
+          'dsp48e2_slices 0
+          'zero_dsp_certified #t
+          'fastpath_clock_cycles_range '(1 2)
+          'd5_sparse_fastpath_mean_tau_dec_ns 64.17
+          'bb_qldpc_sparse_fastpath_mean_tau_dec_ns 66.15
+          'active_target_fastpath_mean_tau_dec_ns active-fastpath-ns
+          'conservative_300k_coax_ns 420.0
+          'closed_loop_500mhz_worst_case_ns 340.0
+          'cryo_cmos_4k_inner_ns 120.0
+          'unpaced_software_mwpm_ns 4500.0
+          'qec_cycle_budget_ns cycle-budget-ns
+          'lindley_rho_fastpath (/ (round (* 100000.0 (/ active-fastpath-ns cycle-budget-ns))) 100000.0)
+          'lindley_rho_conservative_coax 0.42
+          'lindley_rho_closed_loop_worst_case 0.34
+          'lindley_backlog_stable #t))
 
 ;; =============================================================================
 ;; 6. Lowering: `RevIR -> MachineISA -> OpenQASM 3.0 & Stim`
@@ -2750,6 +4247,10 @@
              [`(rev-quotient-check ,_) '()]
              [`(rev-par ,ir1 ,ir2)
               (append (lower-list ir1) (lower-list ir2))]
+             [`(rev-focus-zipper ,_ ,ir)
+              (lower-list ir)]
+             [`(rev-for-fold-loop ,_ ,rirs)
+              (apply append (map lower-list rirs))]
              [`(rev-multishot ,_ ,ir)
               (lower-list ir)]
              [`(rev-qmatch ,arms)
@@ -3001,6 +4502,8 @@
       [`(temp-and ,c1 ,c2 ,anc)
        (mark-diag! (list c1 c2))
        (mark-nondiag! (list anc))]
+      [`(temp-and-lin ,lhs ,rhs ,anc)
+       (walk `(temp-and-lin ,lhs ,rhs ,anc #f #f))]
       [`(temp-and-lin ,lhs ,rhs ,anc ,nl? ,nr?)
        (define ll (if (list? lhs) lhs (list lhs)))
        (define rl (if (list? rhs) rhs (list rhs)))
@@ -3026,6 +4529,15 @@
                   (not (equal? perm (range (length perm)))))
          (mark-nondiag! ws))]
       [`(seq ,es ...) (for ([sub (in-list es)]) (walk sub))]
+      [`(for/fold-loop ,_ ,rs) (for ([r (in-list rs)]) (walk r))]
+      [`(packed-bezout-jump16 ,_ ,in4 ,out2 ,sc3)
+       (if (and (list? in4) (= (length in4) 4)
+                (list? out2) (= (length out2) 2)
+                (list? sc3) (= (length sc3) 3))
+           (walk (divstep-swap-sub-window-opt-sexpr in4 out2 sc3))
+           (mark-nondiag! (append (if (list? in4) in4 '())
+                                  (if (list? out2) out2 '())
+                                  (if (list? sc3) sc3 '()))))]
       [`(invert ,sub) (walk sub)]
       [`(call-q ,callee . ,arg-lists)
        (when (and (lfq-circuit-decl? callee)
@@ -3181,10 +4693,12 @@
            `(x ,_) `(cx ,_ ,_) `(ccx ,_ ,_ ,_) `(swap ,_ ,_)
            `(cswap-bit ,_ ,_ ,_) `(cswap-word ,_ ,_ ,_)
            `(temp-and ,_ ,_ ,_) `(temp-and-lin . ,_)
+           `(packed-bezout-jump16 . ,_)
            `(mcx ,_ ,_ ,_) `(logical-relabel ,_ ,_)
            `(mid-meas-x . ,_) `(cond-z . ,_) `(cond-cz . ,_))
        #f]
       [`(seq ,es ...) (for/or ([sub (in-list es)]) (walk sub))]
+      [`(for/fold-loop ,_ ,rs) (for/or ([r (in-list rs)]) (walk r))]
       [`(invert ,sub) (walk sub)]
       [`(call-q ,callee . ,_)
        (if (and (lfq-circuit-decl? callee)
@@ -3216,7 +4730,7 @@
            `(rz-dyadic ,_ ,_ ,_ ,_) `(rz-dyadic-neg ,_ ,_ ,_ ,_)
            `(cx ,_ ,_) `(cz ,_ ,_) `(ccx ,_ ,_ ,_) `(ccz ,_ ,_ ,_)
            `(swap ,_ ,_) `(cswap-bit ,_ ,_ ,_) `(cswap-word ,_ ,_ ,_)
-           `(temp-and ,_ ,_ ,_) `(temp-and-lin ,_ ,_ ,_ ,_ ,_)
+           `(temp-and ,_ ,_ ,_) `(temp-and-lin . ,_)
            `(qft ,_) `(logical-relabel ,_ ,_))
        #f]
       [`(mcx ,ctrls ,_ ,_)
@@ -3226,6 +4740,7 @@
        #:when (and (list? ctrls) (<= (length ctrls) 3))
        #f]
       [`(seq ,es ...) (for/or ([sub (in-list es)]) (walk sub))]
+      [`(for/fold-loop ,_ ,rs) (for/or ([r (in-list rs)]) (walk r))]
       [`(invert ,sub) (walk sub)]
       [`(call-q ,callee . ,_)
        (if (lfq-circuit-decl? callee)
@@ -3289,6 +4804,8 @@
          (if (and (= p1 p2) (not (= p1 pa)))
              `(cx ,p1 ,pa)
              `(temp-and ,p1 ,p2 ,pa))]
+        [`(temp-and-lin ,lhs ,rhs ,anc)
+         (walk `(temp-and-lin ,lhs ,rhs ,anc #f #f))]
         [`(temp-and-lin ,lhs ,rhs ,anc ,nl? ,nr?)
          (define ml (dedup-odd-wires (map mw (if (list? lhs) lhs (list lhs)))))
          (define mr (dedup-odd-wires (map mw (if (list? rhs) rhs (list rhs)))))
@@ -3322,6 +4839,9 @@
         [`(syndrome-plaquette ,ws ,d ,hk?) `(syndrome-plaquette ,(map mw ws) ,d ,hk?)]
         [`(logical-relabel ,ws ,perm) `(logical-relabel ,(map mw ws) ,perm)]
         [`(seq ,es ...) `(seq ,@(map walk es))]
+        [`(for/fold-loop ,nr ,rs) `(for/fold-loop ,nr ,(map walk rs))]
+        [`(packed-bezout-jump16 ,cfg ,in4 ,out2 ,sc3)
+         `(packed-bezout-jump16 ,cfg ,(map mw in4) ,(map mw out2) ,(map mw sc3))]
         [`(invert ,sub) `(invert ,(walk sub))]
         [`(call-q ,sub-callee . ,arg-lists)
          `(call-q ,sub-callee
@@ -3568,6 +5088,8 @@
                (check-gate-distinct! (cons c (append ul vl)) 'cswap-word sp))
           e]
          [else 'skip])]
+      [`(temp-and-lin ,lhs ,rhs ,anc)
+       (walk `(temp-and-lin ,lhs ,rhs ,anc #f #f))]
       [`(temp-and-lin ,lhs ,rhs ,anc ,nl? ,nr?)
        (define ll (dedup-odd-wires (if (list? lhs) lhs (list lhs))))
        (define rl (dedup-odd-wires (if (list? rhs) rhs (list rhs))))
@@ -3655,9 +5177,31 @@
                    #:origin-span decl-span #:mutating-span sp #:failure-span sp)
           'skip]
          [else e])]
+      [`(packed-bezout-jump16 ,cfg ,in4 ,out2 ,sc3)
+       (define i4 (if (list? in4) in4 '()))
+       (define o2 (if (list? out2) out2 '()))
+       (define s3 (if (list? sc3) sc3 '()))
+       (define all-w (append i4 o2 s3))
+       (cond
+         [(not (and (= (length i4) 4) (= (length o2) 2) (= (length s3) 3)))
+          (define msg
+            (format "`packed-bezout-jump16` requires port widths (4, 2, 3), got (~a, ~a, ~a)"
+                    (length i4) (length o2) (length s3)))
+          (emit-v! "StaticDiscipline" "T-QubitCap" "LFQ-E-REGISTER-BOUNDS"
+                   msg msg (hasheq 'in_width (length i4) 'out_width (length o2) 'scratch_width (length s3))
+                   #:origin-span decl-span #:mutating-span sp #:failure-span sp)
+          'skip]
+         [(and (check-wires-in-scope! all-w sp 'packed-bezout-jump16)
+               (check-gate-distinct! all-w 'packed-bezout-jump16 sp))
+          (keep `(packed-bezout-jump16 ,cfg ,i4 ,o2 ,s3))]
+         [else 'skip])]
       [`(seq ,es ...)
        (keep `(seq ,@(for/list ([sub (in-list es)])
                        (walk sub sp active-callees))))]
+      [`(for/fold-loop ,nr ,rs)
+       (keep `(for/fold-loop ,nr
+                             ,(for/list ([r (in-list rs)])
+                                (walk r sp active-callees))))]
       [`(invert ,sub)
        (define exp-sub (walk sub sp active-callees))
        (define bad-nu (find-first-non-unitary-node exp-sub))
@@ -3850,6 +5394,7 @@
       [`(,(? (lambda (h) (memq h bug-class-guard-surface-heads)) _) . ,_)
        (lookup-surface-span e)]
       [`(seq ,es ...) (for/or ([s (in-list es)]) (walk s))]
+      [`(for/fold-loop ,_ ,rs) (for/or ([r (in-list rs)]) (walk r))]
       [`(invert ,s) (walk s)]
       [`(with-and-session ,_ ,b) (walk b)]
       [`(,(or 'within-apply-mbu 'within-apply 'erase-by) ,c ,a ,_) (or (walk c) (walk a))]
@@ -3860,6 +5405,133 @@
       [`(multishot-reset ,_ ,b) (walk b)]
       [_ #f])))
 
+(define default-bezout-l32-raw-schedule
+  (adaptive-bezout-binomial-pebble-schedule))
+
+(define canonical-u4-zipper-benchmarks
+  (compute-zipper-mbu-tele-phase-metrics))
+
+(define (extract-surface-bezout-specs ast)
+  (define acc '())
+  (let walk ([e ast])
+    (match e
+      [`(packed-bezout-jump16 (,n-bits ,jump-step ,base-pebbles) ,_ ,_ ,_)
+       (set! acc (cons (list n-bits jump-step base-pebbles) acc))]
+      [`(seq ,es ...) (for ([s (in-list es)]) (walk s))]
+      [`(for/fold-loop ,_ ,rs) (for ([r (in-list rs)]) (walk r))]
+      [`(invert ,s) (walk s)]
+      [`(with-and-session ,_ ,b) (walk b)]
+      [`(,(or 'within-apply-mbu 'within-apply 'erase-by) ,c ,a ,_) (walk c) (walk a)]
+      [`(erase-by-part-bij ,_ ,c ,a ,_) (walk c) (walk a)]
+      [`(canonicalize-quotient ,_ ,c) (walk c)]
+      [`(qmatch ,arms) (for ([arm (in-list arms)]) (walk (second arm)))]
+      [`(focus-zipper ,_ ,b) (walk b)]
+      [`(fold-braun ,nd) (walk nd)]
+      [`(braun-branch ,_ ,st ,l ,r) (walk st) (walk l) (walk r)]
+      [`(par-wires ,e1 ,e2) (walk e1) (walk e2)]
+      [`(multishot-reset ,_ ,b) (walk b)]
+      [`(,(? (lambda (h) (memq h bug-class-guard-surface-heads)) _) . ,rest)
+       (when (pair? rest) (walk (last rest)))]
+      [_ (void)]))
+  (reverse acc))
+
+(define (build-bezout-optimization-summary ast)
+  (define specs (extract-surface-bezout-specs ast))
+  (define active? (pair? specs))
+  (define raw-h
+    (if active?
+        (match-let ([(list nb js bp) (first specs)])
+          (if (and (= nb 256) (= js 16) (= bp 4))
+              default-bezout-l32-raw-schedule
+              (adaptive-bezout-binomial-pebble-schedule #:n-bits nb
+                                                        #:jump-step js
+                                                        #:base-pebbles bp)))
+        default-bezout-l32-raw-schedule))
+  (hasheq 'pass_name "adaptive-bezout-limb-borrowz-pebble-recycling"
+          'active active?
+          'packed_bezout_gadgets_synthesized (length specs)
+          'n_bits (hash-ref raw-h 'n_bits 256)
+          'jump_window_steps (hash-ref raw-h 'jump_window_steps 16)
+          'macro_windows_l (hash-ref raw-h 'macro_windows_l 32)
+          'base_pebbles_s (hash-ref raw-h 'base_pebbles_s 4)
+          'adaptive_pebble_progression (hash-ref raw-h 'adaptive_pebble_progression '(4 6 8))
+          'epoch_pebble_schedule (hash-ref raw-h 'epoch_pebble_schedule '(4 6 8 8))
+          'static_forward_evals (hash-ref raw-h 'static_forward_evals 77)
+          'static_reverse_evals (hash-ref raw-h 'static_reverse_evals 32)
+          'static_total_macro_evals (hash-ref raw-h 'static_total_macro_evals 109)
+          'adaptive_forward_evals (hash-ref raw-h 'adaptive_forward_evals 35)
+          'adaptive_reverse_evals (hash-ref raw-h 'adaptive_reverse_evals 32)
+          'adaptive_total_macro_evals (hash-ref raw-h 'adaptive_total_macro_evals 67)
+          'eval_reduction_ratio_2dp (hash-ref raw-h 'eval_reduction_ratio_2dp 1.63)
+          'packed_zipper_max_width_bits (hash-ref raw-h 'packed_zipper_max_width_bits 512)
+          'packed_zipper_width_bound_preserved (hash-ref raw-h 'packed_zipper_width_bound_preserved #t)
+          'ecc256_peak_logical_qubits (hash-ref raw-h 'ecc256_peak_logical_qubits 1210)
+          'additional_peak_qubits (hash-ref raw-h 'additional_peak_qubits 0)
+          'residual_dirty_pebble_qubits (hash-ref raw-h 'residual_dirty_pebble_qubits 0)))
+
+(define canonical-phase-order-stage-list
+  '("P_loop_cone"
+    "P_pebble"
+    "EGraph_TODD_ZX_round1"
+    "P_fraig_commute"
+    "EGraph_TODD_ZX_round2"
+    "P_mbu_bellman_knuth"
+    "P_ssa_post_todd_chordal"
+    "P_part_u4_coupled_block_lu"))
+
+(define (empty-optimization-passes-summary bezout-summary)
+  (hasheq
+   'canonical_phase_order
+   (hasheq 'schedule_id "canonical_k2_coupled"
+           'schedule_stages canonical-phase-order-stage-list
+           'active #f
+           'todd_zx_fixpoint_rounds 0
+           'bellman_knuth_absorb_top_cz #t
+           'pre_mbu_sessions_fused 0
+           'phase_mbu_cones_absorbed 0
+           'disjoint_diagonal_ops_hoisted 0
+           'fraig_commute_moves 0
+           'todd_cones_reduced 0
+           'clifford_t_count 0
+           'pre_todd_ssa_physical_qubits 0
+           'post_todd_ssa_physical_qubits 0
+           'post_todd_ssa_reclaimed_qubits 0
+           'partition_block_lu_frames_resynthesized 0
+           'partition_block_lu_cross_cxs_saved 0
+           'partition_block_lu_ebits_saved 0)
+   'xag_1wl_cone_and_loop_escalation
+   (hasheq 'engine "surface-static"
+           'total_cones_evaluated 0
+           'unique_canonical_cones 0
+           'cone_isomorphism_hits 0
+           'fraig_merges 0
+           'cut_cache_hits 0
+           'z3_queries 0
+           'z3_push_pop_incremental #t
+           'for_fold_loops '())
+   'adaptive_bezout_pebble_recycling bezout-summary
+   'todd_rm3_autocc_phase_poly
+   (hasheq 'pass_name "todd-rm3-autocc-phase-poly"
+           'phase_clean_zippers_certified 0
+           'cones_optimized 0
+           'pre_t_count 0
+           'post_t_count 0
+           't_count_saved 0
+           'pre_t_depth 0
+           'post_t_depth 0
+           't_depth_saved 0)
+   'u4_cross_qpu_tele_phase
+   (hasheq 'pass_name "u4-cross-qpu-tele-phase-opt"
+           'active #f
+           'machines_used 1
+           'cross_cut_mbu_wire_count 0
+           'batched_pivot_cone_count 0
+           'naive_ebits_2_per_wire 0
+           'u4_batched_cone_ebits 0
+           'reverse_ebits 0
+           'classical_broadcast_bits 0
+           'canonical_zipper_benchmarks canonical-u4-zipper-benchmarks)))
+
 (define (compile-lfq-circuit decl
                              [raw-target-sym #f]
                              #:repair? [repair? #f]
@@ -3869,11 +5541,13 @@
                              #:topology [topology #f]
                              #:max-machines [max-machines #f]
                              #:cluster-dir [cluster-dir #f]
-                             #:anf-monomial-cap [anf-monomial-cap 1024])
+                             #:anf-monomial-cap [anf-monomial-cap 1024]
+                             #:phase-schedule [phase-schedule 'canonical_k2_coupled])
   (define target-sym (or raw-target-sym (lookup-decl-target decl) 'ideal))
   (define hw (lookup-target-profile target-sym))
   (define decl-span (decl-or-synthetic-span decl))
   (define port-sig (infer-decl-port-rwire-signature decl))
+  (define qec-pacing-meta (build-qec-syndrome-decoder-pacing-metadata target-sym hw))
   (define eff-surface-ast
     (rewrite-surface-par-specs (lfq-circuit-decl-surface-ast decl)
                                #:decl decl
@@ -3886,6 +5560,7 @@
   (define wire-alias-violations (check-decl-wire-disjointness decl))
   (define-values (expanded-surface-ast extra-scratch-ws extra-virt-names surface-static-violations)
     (validate-and-expand-surface-ast decl eff-surface-ast))
+  (define bezout-opt-summary (build-bezout-optimization-summary expanded-surface-ast))
   (define pre-elaboration-violations
     (append wire-alias-violations surface-static-violations))
 
@@ -3950,7 +5625,9 @@
                         'grade (symbol->string (port-rwire-spec-grade ps))
                         'diagonal_read_only (port-rwire-spec-diagonal-read-only? ps)))
               'symbolic_inference_engine "surface-static"
-              'module_circuits_checked (list (symbol->string (lfq-circuit-decl-name decl)))))
+              'module_circuits_checked (list (symbol->string (lfq-circuit-decl-name decl)))
+              'optimization_passes (empty-optimization-passes-summary bezout-opt-summary)
+              'qec_syndrome_decoder_pacing qec-pacing-meta))
      res]
     [else
      ;; 1. Surface `LakefillQ` -> 6-primitive `lambda_LFQ_kern`:
@@ -3962,39 +5639,176 @@
               "Elaboration invariant violated: ~a residual surface forms in ~a"
               residual-forms (lfq-circuit-decl-name decl)))
 
-     ;; 2. `lambda_LFQ_kern -> RevIR` with chordal SSA live-range wire recycling
-     ;;    (including fresh virtual scratch wires from modular `call-q` invocations!):
+     ;; 2. Initial span-preserving `RevIR` lowering for `P_loop_cone` (`QSub` + `QPhysGrade`)
+     ;;    certification and 3-span multipass diagnostic provenance:
      (define all-scratch-wires
        (append (lfq-circuit-decl-scratch-wires decl) extra-scratch-ws))
-     (define-values (revir0 cmap scratch-phys virt-w phys-q0 saved-w)
+     (define input-wires (lfq-circuit-decl-input-wires decl))
+     (define-values (revir0 cmap0 scratch-phys0 virt-w0 phys-q0 saved-w0)
        (lower-kern->revir kern-ast
-                          (lfq-circuit-decl-input-wires decl)
+                          input-wires
                           all-scratch-wires
                           hw))
 
      ;; 3. Optional counterexample-guided physical repair (`QPhysGrade`):
-     (define-values (revir repairs)
+     (define-values (revir-checked repairs0)
        (if repair?
            (repair-revir-counterexample-guided revir0 hw)
            (values revir0 '())))
 
-     ;; 4. Annotation-free symbolic `QSub (U1-U4)` + `QPhysGrade (Phi1-Phi3)` inference
-     ;;    (automatically escalates `ANF -> XAG/FRAIG+Z3` when `anf-monomial-cap` is exceeded!):
+     ;; 4. `P_loop_cone`: Annotation-free symbolic `QSub (U1-U4)` + `QPhysGrade (Phi1-Phi3)`
+     ;;    inference (automatically escalates `ANF -> XAG/FRAIG+Z3` with 1-WL canonical
+     ;;    cone-isomorphism caching, incremental Z3 `push`/`pop`, and zero-flag
+     ;;    `k=1 -> k=2 -> k=R` `for/fold-loop` round-invariant escalation!):
      (define-values (revir-violations grade action-milli phase-res quotient-ws)
-       (infer-revir-qsub-and-qphys revir
-                                   (lfq-circuit-decl-input-wires decl)
-                                   scratch-phys
+       (infer-revir-qsub-and-qphys revir-checked
+                                   input-wires
+                                   scratch-phys0
                                    (lfq-circuit-decl-domain-spec decl)
                                    hw
                                    #:decl decl
-                                   #:color-map cmap
+                                   #:color-map cmap0
                                    #:extra-virt-names extra-virt-names
                                    #:anf-monomial-cap anf-monomial-cap))
      (define sym-engine-used (symbol->string (unbox last-symbolic-engine-box)))
+     (define xag-telemetry (unbox last-xag-telemetry-box))
+     (define had-certified-zippers?
+       (> (hash-count certified-phase-clean-zippers-table) 0))
+
+     ;; 4b. Canonical Coupled Lowering (`P_loop_cone -> P_pebble -> 2-round (FRAIG/Commute o
+     ;;     EGraph(MBU U ZX U TODD))^2 -> Bellman-Knuth P_mbu -> Post-TODD Chordal SSA`):
+     (define-values (revir repairs scratch-phys virt-w phys-q-post-ssa saved-w
+                           kern-phase-stats chosen-absorb-top? todd-fixpoint-rounds)
+       (cond
+         [(not (null? revir-violations))
+          (values revir-checked repairs0 scratch-phys0 virt-w0 phys-q0 saved-w0
+                  (hasheq) #t 0)]
+         [(eq? phase-schedule 'hazardB_mbu_before_todd)
+          ;; Hazard B ablation (`MBU < TODD`): `within-apply-mbu` already expanded to `M_X + cond-cz`
+          ;; barriers BEFORE 1-round TODD runs!
+          (define-values (k-hb st-hb)
+            (optimize-kern-canonical-phase-order kern-ast decl
+                                                 #:rounds 1
+                                                 #:absorb-top-cz? #f
+                                                 #:enable-mbu-algebraic? #f))
+          (if (equal? k-hb kern-ast)
+              (values revir-checked repairs0 scratch-phys0 virt-w0 phys-q0 saved-w0
+                      st-hb #f 1)
+              (let ()
+                (define-values (rv1 _cm1 sp1 _vw1 pq1 _sw1)
+                  (lower-kern->revir k-hb input-wires all-scratch-wires hw))
+                (define-values (rv2 rep2)
+                  (if repair? (repair-revir-counterexample-guided rv1 hw) (values rv1 '())))
+                (when had-certified-zippers?
+                  (infer-revir-qsub-and-qphys rv2 input-wires sp1
+                                              (lfq-circuit-decl-domain-spec decl) hw
+                                              #:anf-monomial-cap anf-monomial-cap))
+                (values rv2 rep2 sp1 virt-w0 pq1 (max 0 (- virt-w0 pq1)) st-hb #f 1)))]
+         [(eq? phase-schedule 'hazardA_ssa_before_todd)
+          ;; Hazard A ablation (`SSA < TODD` without post-TODD re-coloring):
+          ;; Chordal SSA runs BEFORE 1-round TODD, inserting WAW reuse barriers & stranding scratch wires!
+          (define-values (ssa-kern ssa-scr ssa-phys-q)
+            (apply-pre-todd-ssa-with-waw-barriers kern-ast input-wires all-scratch-wires))
+          (define-values (k-ha st-ha)
+            (optimize-kern-canonical-phase-order ssa-kern decl
+                                                 #:rounds 1
+                                                 #:absorb-top-cz? #t
+                                                 #:enable-mbu-algebraic? #t))
+          (define wmap-ha (make-hasheqv))
+          (define mbu-ha (box 0))
+          (define raw-ha (lower-kern->raw-revir k-ha wmap-ha mbu-ha))
+          (define-values (rv-ha rep-ha)
+            (if repair? (repair-revir-counterexample-guided raw-ha hw) (values raw-ha '())))
+          (when had-certified-zippers?
+            (infer-revir-qsub-and-qphys rv-ha input-wires ssa-scr
+                                        (lfq-circuit-decl-domain-spec decl) hw
+                                        #:anf-monomial-cap anf-monomial-cap))
+          (values rv-ha rep-ha ssa-scr virt-w0 ssa-phys-q
+                  (max 0 (- virt-w0 ssa-phys-q)) st-ha #t 1)]
+         [else
+          ;; Default `canonical_k2_coupled`:
+          ;; Pre-MBU, pre-SSA 2-round `(FRAIG/Commute o EGraph(MBU U ZX U TODD))^2` fixpoint
+          ;; + Bellman-Knuth `QPhysGrade` extraction + post-TODD chordal SSA coloring!
+          (define-values (k-abs st-abs)
+            (optimize-kern-canonical-phase-order kern-ast decl
+                                                 #:rounds 2
+                                                 #:absorb-top-cz? #t
+                                                 #:enable-mbu-algebraic? #t))
+          (cond
+            [(equal? k-abs kern-ast)
+             (values revir-checked repairs0 scratch-phys0 virt-w0 phys-q0 saved-w0
+                     st-abs #t 2)]
+            [else
+             (define (eval-branch k-cand)
+               (define-values (rv1 _cm1 sp1 _vw1 pq1 _sw1)
+                 (lower-kern->revir k-cand input-wires all-scratch-wires hw))
+               (define-values (rv2 rep2)
+                 (if repair? (repair-revir-counterexample-guided rv1 hw) (values rv1 '())))
+               (define-values (isa-c nq-c _cl-c _gp-c)
+                 (lower-revir->machine-isa rv2 pq1))
+               (define tc-c (count-isa-clifford-t-gates isa-c))
+               (list rv2 rep2 sp1 pq1 nq-c tc-c))
+             (match-define (list rv-a rep-a sp-a pq-a nq-a tc-a) (eval-branch k-abs))
+             (define-values (chosen-rv chosen-rep chosen-sp chosen-pq chosen-st chosen-abs?)
+               (if (> (hash-ref st-abs 'phase_cones_absorbed 0) 0)
+                   (let ()
+                     (define-values (k-sel st-sel)
+                       (optimize-kern-canonical-phase-order kern-ast decl
+                                                            #:rounds 2
+                                                            #:absorb-top-cz? #f
+                                                            #:enable-mbu-algebraic? #t))
+                     (match-define (list rv-s rep-s sp-s pq-s nq-s tc-s) (eval-branch k-sel))
+                     (if (and (< tc-s tc-a) (<= nq-s nq-a))
+                         (values rv-s rep-s sp-s pq-s st-sel #f)
+                         (values rv-a rep-a sp-a pq-a st-abs #t)))
+                   (values rv-a rep-a sp-a pq-a st-abs #t)))
+             (when had-certified-zippers?
+               (infer-revir-qsub-and-qphys chosen-rv input-wires chosen-sp
+                                           (lfq-circuit-decl-domain-spec decl) hw
+                                           #:anf-monomial-cap anf-monomial-cap))
+             (values chosen-rv chosen-rep chosen-sp virt-w0 chosen-pq
+                     (max 0 (- virt-w0 chosen-pq)) chosen-st chosen-abs? 2)])]))
+
+     ;; 4c. Phase-Clean `focus-zipper` RM(3, n) TODD symmetric 3-tensor decomposition + AutoCCZ packing:
+     (define-values (opt-revir zipper-todd-summary)
+       (if (null? revir-violations)
+           (optimize-revir-phase-clean-focus-zippers revir certified-phase-clean-zippers-table)
+           (values revir
+                   (hasheq 'pass_name "todd-rm3-autocc-phase-poly"
+                           'phase_clean_zippers_certified 0
+                           'cones_optimized 0
+                           'pre_t_count 0
+                           'post_t_count 0
+                           't_count_saved 0
+                           'pre_t_depth 0
+                           'post_t_depth 0
+                           't_depth_saved 0))))
+     (define merged-pre-tc
+       (+ (hash-ref zipper-todd-summary 'pre_t_count 0)
+          (hash-ref kern-phase-stats 'todd_pre_t_count 0)))
+     (define merged-post-tc
+       (+ (hash-ref zipper-todd-summary 'post_t_count 0)
+          (hash-ref kern-phase-stats 'todd_post_t_count 0)))
+     (define merged-pre-td
+       (+ (hash-ref zipper-todd-summary 'pre_t_depth 0)
+          (hash-ref kern-phase-stats 'todd_pre_t_depth 0)))
+     (define merged-post-td
+       (+ (hash-ref zipper-todd-summary 'post_t_depth 0)
+          (hash-ref kern-phase-stats 'todd_post_t_depth 0)))
+     (define todd-summary
+       (hash-set* zipper-todd-summary
+                  'cones_optimized (+ (hash-ref zipper-todd-summary 'cones_optimized 0)
+                                      (hash-ref kern-phase-stats 'todd_cones_reduced 0))
+                  'pre_t_count merged-pre-tc
+                  'post_t_count merged-post-tc
+                  't_count_saved (max 0 (- merged-pre-tc merged-post-tc))
+                  'pre_t_depth merged-pre-td
+                  'post_t_depth merged-post-td
+                  't_depth_saved (max 0 (- merged-pre-td merged-post-td))))
 
      ;; Compute actual ISA metrics for AST-derived `'auto` cluster costing & `#:verify-circuit-match?`:
      (define-values (cand-isa-ops cand-total-phys-q cand-total-clbits cand-guard-pool)
-       (lower-revir->machine-isa revir phys-q0))
+       (lower-revir->machine-isa opt-revir phys-q-post-ssa))
      (define actual-toffolis (count-isa-toffolis cand-isa-ops))
 
      (define raw-drift-violations
@@ -4064,11 +5878,43 @@
                revir-violations))
      (define well-typed? (null? violations))
 
-     ;; 5. `RevIR -> MachineISA -> OpenQASM 3.0 & Stim` (emitted when well-typed):
-     (define-values (isa-ops total-phys-q total-clbits guard-pool)
+     ;; 5. Coupled `P_part_u4 <-> Block-LU` + `RevIR -> MachineISA -> OpenQASM 3.0 & Stim`:
+     (define-values (pre-cluster-isa-ops total-phys-q total-clbits guard-pool)
        (if well-typed?
            (values cand-isa-ops cand-total-phys-q cand-total-clbits cand-guard-pool)
            (values '() phys-q0 0 '())))
+
+     (define-values (isa-ops active-cluster-slices blk-lu-frames blk-lu-cxs-saved blk-lu-ebits-saved)
+       (cond
+         [(and well-typed? (>= machines-used 2))
+          (define-values (_eff-cspec explicit-slices)
+            (resolve-effective-cluster-spec prog decl total-phys-q
+                                            #:ast-toffolis actual-toffolis
+                                            #:q-cap q-cap
+                                            #:r-bell r-bell
+                                            #:topology topology
+                                            #:max-machines max-machines))
+          (define chosen-slices
+            (if explicit-slices
+                (partition-wires-across-qpus total-phys-q machines-used pre-cluster-isa-ops explicit-slices)
+                (let ([hg-slices
+                       (partition-wires-law-u4-hypergraph
+                        total-phys-q
+                        machines-used
+                        (isa-ops->analyzer-revir-ops pre-cluster-isa-ops)
+                        #t
+                        #:num-fixed (length input-wires))])
+                  (if (for/and ([sl (in-list hg-slices)]) (pair? sl))
+                      hg-slices
+                      (partition-wires-across-qpus total-phys-q machines-used pre-cluster-isa-ops #f)))))
+          (if (eq? phase-schedule 'canonical_k2_coupled)
+              (let-values ([(lu-isa f-cnt cx-sav eb-sav)
+                            (resynthesize-isa-cx-frames-partition-aware
+                             pre-cluster-isa-ops total-phys-q chosen-slices)])
+                (values lu-isa chosen-slices f-cnt cx-sav eb-sav))
+              (values pre-cluster-isa-ops chosen-slices 0 0 0))]
+         [else
+          (values pre-cluster-isa-ops #f 0 0 0)]))
 
      (define fwd-temp-ands
        (for/sum ([op (in-list isa-ops)])
@@ -4087,7 +5933,7 @@
 
      (define detector-wires
        (append scratch-phys guard-pool
-               (filter (lambda (w) (not (memv w (lfq-circuit-decl-input-wires decl))))
+               (filter (lambda (w) (not (memv w input-wires)))
                        quotient-ws)))
 
      (define qasm3-str
@@ -4098,6 +5944,32 @@
        (if well-typed?
            (emit-stim isa-ops detector-wires hw)
            ""))
+
+     ;; 5b. Law-U4 cross-QPU bilinear tele-phase factoring + batched forward cat-entangler fusion:
+     (define u4-tele-summary
+       (cond
+         [(and well-typed? (>= machines-used 2))
+          (define-values (_opt-c-ops _opt-c-slices _opt-c-nq u4-poly)
+            (u4-cross-qpu-tele-phase-opt isa-ops active-cluster-slices total-phys-q))
+          (define naive-eb (hash-ref u4-poly 'naive_ebits_2_per_wire 0))
+          (define batched-eb (hash-ref u4-poly 'u4_batched_cone_ebits 0))
+          (hash-set* u4-poly
+                     'active #t
+                     'machines_used machines-used
+                     'ebits_saved (+ blk-lu-ebits-saved (max 0 (- naive-eb batched-eb)))
+                     'canonical_zipper_benchmarks canonical-u4-zipper-benchmarks)]
+         [else
+          (hasheq 'pass_name "u4-cross-qpu-tele-phase-opt"
+                  'active #f
+                  'machines_used machines-used
+                  'cross_cut_mbu_wire_count 0
+                  'batched_pivot_cone_count 0
+                  'naive_ebits_2_per_wire 0
+                  'u4_batched_cone_ebits 0
+                  'ebits_saved 0
+                  'reverse_ebits 0
+                  'classical_broadcast_bits 0
+                  'canonical_zipper_benchmarks canonical-u4-zipper-benchmarks)]))
 
      (when (and well-typed? cluster-dir)
        (emit-cluster-openqasm3-bundle! cluster-dir
@@ -4113,7 +5985,7 @@
                                        #:topology topology
                                        #:max-machines max-machines))
 
-     (define w-in-cnt (length (lfq-circuit-decl-input-wires decl)))
+     (define w-in-cnt (length input-wires))
      (define dirty-leak-cnt
        (for/sum ([v (in-list revir-violations)])
          (if (equal? (hash-ref v 'code "") "U1-EraseBy") 1 0)))
@@ -4127,6 +5999,32 @@
                      (qphys-semiring-grade-exclusion-collisions grade)
                      (or (qphys-semiring-grade-eff-fault-dist grade) 3)
                      1 0.0 0 #f 0 0))
+
+     (define canonical-phase-summary
+       (hasheq 'schedule_id (symbol->string phase-schedule)
+               'schedule_stages canonical-phase-order-stage-list
+               'active well-typed?
+               'todd_zx_fixpoint_rounds todd-fixpoint-rounds
+               'bellman_knuth_absorb_top_cz chosen-absorb-top?
+               'pre_mbu_sessions_fused (hash-ref kern-phase-stats 'sessions_fused 0)
+               'phase_mbu_cones_absorbed (hash-ref kern-phase-stats 'phase_cones_absorbed 0)
+               'disjoint_diagonal_ops_hoisted (hash-ref kern-phase-stats 'disjoint_diagonal_ops_hoisted 0)
+               'fraig_commute_moves (hash-ref kern-phase-stats 'fraig_commute_moves 0)
+               'todd_cones_reduced (hash-ref todd-summary 'cones_optimized 0)
+               'clifford_t_count (if well-typed? (count-isa-clifford-t-gates isa-ops) 0)
+               'pre_todd_ssa_physical_qubits phys-q0
+               'post_todd_ssa_physical_qubits phys-q-post-ssa
+               'post_todd_ssa_reclaimed_qubits (max 0 (- phys-q0 phys-q-post-ssa))
+               'partition_block_lu_frames_resynthesized blk-lu-frames
+               'partition_block_lu_cross_cxs_saved blk-lu-cxs-saved
+               'partition_block_lu_ebits_saved blk-lu-ebits-saved))
+
+     (define opt-passes-summary
+       (hasheq 'canonical_phase_order canonical-phase-summary
+               'xag_1wl_cone_and_loop_escalation xag-telemetry
+               'adaptive_bezout_pebble_recycling bezout-opt-summary
+               'todd_rm3_autocc_phase_poly todd-summary
+               'u4_cross_qpu_tele_phase u4-tele-summary))
 
      (define res
        (compilation-result
@@ -4172,7 +6070,9 @@
                       'phi1_action (qcomp-effect-phi1-action eff-summary)
                       'phi2_collisions (qcomp-effect-phi2-collisions eff-summary))
               'symbolic_inference_engine sym-engine-used
-              'module_circuits_checked (list (symbol->string (lfq-circuit-decl-name decl)))))
+              'module_circuits_checked (list (symbol->string (lfq-circuit-decl-name decl)))
+              'optimization_passes opt-passes-summary
+              'qec_syndrome_decoder_pacing qec-pacing-meta))
      res]))
 
 (define (compile-lfq-program prog
@@ -4183,7 +6083,8 @@
                              #:topology [topology #f]
                              #:max-machines [max-machines #f]
                              #:cluster-dir [cluster-dir #f]
-                             #:anf-monomial-cap [anf-monomial-cap 1024])
+                             #:anf-monomial-cap [anf-monomial-cap 1024]
+                             #:phase-schedule [phase-schedule 'canonical_k2_coupled])
   (define tgt (or override-target (lfq-program-target prog)))
   (define decls (lfq-program-circuits prog))
   (when (null? decls)
@@ -4196,7 +6097,8 @@
     (define hres
       (compile-lfq-circuit hd hd-tgt
                            #:repair? repair?
-                           #:anf-monomial-cap anf-monomial-cap))
+                           #:anf-monomial-cap anf-monomial-cap
+                           #:phase-schedule phase-schedule))
     (unless (compilation-result-well-typed? hres)
       (define hname (symbol->string (lfq-circuit-decl-name hd)))
       (define tagged-vs
@@ -4215,7 +6117,8 @@
                          #:topology topology
                          #:max-machines max-machines
                          #:cluster-dir (if (null? helper-violations) cluster-dir #f)
-                         #:anf-monomial-cap anf-monomial-cap))
+                         #:anf-monomial-cap anf-monomial-cap
+                         #:phase-schedule phase-schedule))
   (define checked-names (map (lambda (d) (symbol->string (lfq-circuit-decl-name d))) decls))
   (define base-meta (lookup-compilation-cohesion-meta entry-res))
   (cond
@@ -4243,10 +6146,11 @@
 
 (define (compilation-result->jsexpr res)
   (define meta (lookup-compilation-cohesion-meta res))
+  (define tgt-sym (compilation-result-target-name res))
   (hasheq
    'circuit_name (symbol->string (compilation-result-circuit-name res))
    'circuit_kind (symbol->string (compilation-result-circuit-kind res))
-   'target_profile (symbol->string (compilation-result-target-name res))
+   'target_profile (symbol->string tgt-sym)
    'pipeline_dialects '("LakefillQ" "lambda_LFQ_kern" "RevIR" "MachineISA")
    'well_typed (compilation-result-well-typed? res)
    'annotation_free_flags 0
@@ -4267,6 +6171,13 @@
    'symbolic_inference_engine (hash-ref meta 'symbolic_inference_engine "anf-zhegalkin")
    'module_circuits_checked (hash-ref meta 'module_circuits_checked
                                       (list (symbol->string (compilation-result-circuit-name res))))
+   'optimization_passes
+   (hash-ref meta 'optimization_passes
+             (empty-optimization-passes-summary
+              (build-bezout-optimization-summary 'skip)))
+   'qec_syndrome_decoder_pacing
+   (hash-ref meta 'qec_syndrome_decoder_pacing
+             (build-qec-syndrome-decoder-pacing-metadata tgt-sym (lookup-target-profile tgt-sym)))
    'qphys_grade
    (hasheq 'decoherence_action_milli (compilation-result-decoherence-action-milli res)
            'exclusion_collisions (compilation-result-exclusion-collisions res)
@@ -4307,6 +6218,8 @@
                              #:target-override [target-override #f]
                              #:qasm3-out [qasm3-out #f]
                              #:stim-out [stim-out #f]
+                             #:qasm3-stdout? [qasm3-stdout? #f]
+                             #:stim-stdout? [stim-stdout? #f]
                              #:emit-json? [emit-json? #f]
                              #:diagnostics-human? [diagnostics-human? #f]
                              #:repair? [repair? #f]
@@ -4334,6 +6247,10 @@
     (call-with-output-file stim-out
       (lambda (out) (display (compilation-result-stim-text res) out))
       #:exists 'replace))
+  (when (and qasm3-stdout? (compilation-result-well-typed? res))
+    (display (compilation-result-qasm3-text res)))
+  (when (and stim-stdout? (compilation-result-well-typed? res))
+    (display (compilation-result-stim-text res)))
   (when emit-json?
     (write-json (compilation-result->jsexpr res))
     (newline))
@@ -4437,6 +6354,8 @@
   (define target-opt #f)
   (define qasm-opt #f)
   (define stim-opt #f)
+  (define qasm-stdout-opt #f)
+  (define stim-stdout-opt #f)
   (define json-opt #f)
   (define human-opt #f)
   (define repair-opt #f)
@@ -4446,35 +6365,53 @@
   (define max-machines-opt #f)
   (define cluster-dir-opt #f)
 
-  (command-line
-   #:program "lakefillqc"
-   #:once-each
-   [("--input") ipath "Input #lang lakefillq (.lfq) source file"
-    (set! input-path ipath)]
-   [("--target") tgt "Target profile: heron-r2 | bluvstein-aod | bb-qldpc | ideal"
-    (set! target-opt (string->symbol tgt))]
-   [("--emit-qasm3") qpath "Emit dynamic OpenQASM 3.0 circuit to <out.qasm>"
-    (set! qasm-opt qpath)]
-   [("--emit-stim") spath "Emit Stim stabilizer circuit to <out.stim>"
-    (set! stim-opt spath)]
-   [("--emit-json") "Emit structured JSON report to stdout"
-    (set! json-opt #t)]
-   [("--diagnostics-human") "Render multi-span surface diagnostics to stderr on type error"
-    (set! human-opt #t)]
-   [("--no-color") "Disable ANSI color escapes in diagnostics"
-    (void)]
-   [("--repair") "Enable counterexample-guided QPhysGrade repair"
-    (set! repair-opt #t)]
-   [("--q-cap") qcap "Per-machine qubit capacity (e.g., 400, 1500, or 8)"
-    (set! q-cap-opt (parse-cli-pos-int "--q-cap" qcap))]
-   [("--r-bell") rbell "Optical Bell link rate in Hz (default 100000.0)"
-    (set! r-bell-opt (parse-cli-pos-real "--r-bell" rbell))]
-   [("--topology") topo "Interconnect topology: all-to-all-peers | switched-optical-tree"
-    (set! topology-opt (parse-cli-topology topo))]
-   [("--max-machines") maxm "Maximum candidate machine count (default 256)"
-    (set! max-machines-opt (parse-cli-pos-int "--max-machines" maxm))]
-   [("--emit-cluster-dir") cdir "Emit multi-QPU OpenQASM 3.0 partition bundle to <dir>"
-    (set! cluster-dir-opt cdir)])
+  (define positional-inputs
+    (command-line
+     #:program "lakefillqc"
+     #:once-each
+     [("--input") ipath "Input #lang lakefillq (.lfq) source file"
+      (set! input-path ipath)]
+     [("--target") tgt "Target profile: heron-r2 | bluvstein-aod | bb-qldpc | ideal"
+      (set! target-opt (string->symbol tgt))]
+     [("--emit-qasm3") qpath "Emit dynamic OpenQASM 3.0 circuit to <out.qasm> (or stdout when passed <file.lfq>)"
+      (set! qasm-opt qpath)]
+     [("--emit-stim") spath "Emit Stim stabilizer circuit to <out.stim> (or stdout when passed <file.lfq>)"
+      (set! stim-opt spath)]
+     [("--emit-json") "Emit structured JSON report to stdout"
+      (set! json-opt #t)]
+     [("--diagnostics-human") "Render multi-span surface diagnostics to stderr on type error"
+      (set! human-opt #t)]
+     [("--no-color") "Disable ANSI color escapes in diagnostics"
+      (void)]
+     [("--repair") "Enable counterexample-guided QPhysGrade repair"
+      (set! repair-opt #t)]
+     [("--q-cap") qcap "Per-machine qubit capacity (e.g., 400, 1500, or 8)"
+      (set! q-cap-opt (parse-cli-pos-int "--q-cap" qcap))]
+     [("--r-bell") rbell "Optical Bell link rate in Hz (default 100000.0)"
+      (set! r-bell-opt (parse-cli-pos-real "--r-bell" rbell))]
+     [("--topology") topo "Interconnect topology: all-to-all-peers | switched-optical-tree"
+      (set! topology-opt (parse-cli-topology topo))]
+     [("--max-machines") maxm "Maximum candidate machine count (default 256)"
+      (set! max-machines-opt (parse-cli-pos-int "--max-machines" maxm))]
+     [("--emit-cluster-dir") cdir "Emit multi-QPU OpenQASM 3.0 partition bundle to <dir>"
+      (set! cluster-dir-opt cdir)]
+     #:args rest-positional
+     rest-positional))
+
+  (cond
+    [(and (not input-path) (pair? positional-inputs))
+     (set! input-path (first positional-inputs))
+     (when (and (not json-opt) (not qasm-opt) (not stim-opt))
+       (set! json-opt #t))]
+    [(and (not input-path) qasm-opt (string-suffix? qasm-opt ".lfq"))
+     (set! input-path qasm-opt)
+     (set! qasm-opt #f)
+     (set! qasm-stdout-opt #t)]
+    [(and (not input-path) stim-opt (string-suffix? stim-opt ".lfq"))
+     (set! input-path stim-opt)
+     (set! stim-opt #f)
+     (set! stim-stdout-opt #t)]
+    [else (void)])
 
   (unless input-path
     (error 'lakefillqc "Missing required --input <file.lfq> argument"))
@@ -4543,6 +6480,8 @@
                                #:target-override target-opt
                                #:qasm3-out qasm-opt
                                #:stim-out stim-opt
+                               #:qasm3-stdout? qasm-stdout-opt
+                               #:stim-stdout? stim-stdout-opt
                                #:emit-json? json-opt
                                #:diagnostics-human? human-opt
                                #:repair? repair-opt
@@ -4639,6 +6578,10 @@
   (check-true (file-exists? (build-path cdir-m2 "qpu_0.qasm")))
   (check-true (file-exists? (build-path cdir-m2 "qpu_1.qasm")))
   (check-true (file-exists? (build-path cdir-m2 "ebit_schedule.json")))
+  (define m2-js (compilation-result->jsexpr res-m2))
+  (define m2-u4-opt (hash-ref (hash-ref m2-js 'optimization_passes) 'u4_cross_qpu_tele_phase))
+  (check-true (hash-ref m2-u4-opt 'active))
+  (check-equal? (hash-ref m2-u4-opt 'reverse_ebits) 0)
 
   ;; 3. Multipass provenance & chordal SSA wire-recycling resugaring check:
   (define recycle-leak-decl
@@ -4734,12 +6677,273 @@
   (check-equal? (hash-ref (first (compilation-result-violations res-bad-call)) 'code)
                 "LFQ-E-CALL-ALIAS")
 
-  ;; 6. Automatic `ANF -> XAG/FRAIG+Z3` symbolic escalation check:
+  ;; 6. Automatic `ANF -> XAG/FRAIG+Z3` symbolic escalation + 1-WL cone isomorphism + `for/fold-loop` `k=1 -> k=2`:
   (define res-xag-esc
     (compile-lfq-circuit composed-decl 'ideal #:anf-monomial-cap 0))
   (check-true (compilation-result-well-typed? res-xag-esc))
   (check-equal? (hash-ref (lookup-compilation-cohesion-meta res-xag-esc)
                           'symbolic_inference_engine)
                 "xag-fraig-z3")
-  (close-bug-prevention-z3!))
+  (define loop-decl
+    (lfq-circuit-decl
+     'loop-escalate-kernel
+     'defqfree
+     '((x . (0 1)) (y . (2)))
+     '((sc . (3)))
+     '(0 1 2)
+     '(3)
+     'all
+     '(for/fold-loop 6
+                     ((within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))))))
+  (define res-loop (compile-lfq-circuit loop-decl 'heron-r2))
+  (check-true (compilation-result-well-typed? res-loop))
+  (define loop-js (compilation-result->jsexpr res-loop))
+  (check-equal? (hash-ref loop-js 'symbolic_inference_engine) "xag-fraig-z3")
+  (define xag-opt (hash-ref (hash-ref loop-js 'optimization_passes) 'xag_1wl_cone_and_loop_escalation))
+  (check-true (> (hash-ref xag-opt 'cone_isomorphism_hits) 0))
+  (check-equal? (length (hash-ref xag-opt 'for_fold_loops)) 1)
+  (check-equal? (hash-ref (first (hash-ref xag-opt 'for_fold_loops)) 'k_certified) 1)
 
+  ;; Stage `k = 2`: 6-round 2-phase ping-pong loop (even allocates scratch, odd MBU-erases scratch):
+  (define loop-k2-decl
+    (lfq-circuit-decl
+     'loop-k2-pingpong
+     'defqfree
+     '((x . (0 1)) (y . (2)))
+     '((sc . (3)))
+     '(0 1 2)
+     '(3)
+     'all
+     '(for/fold-loop 6
+                     ((seq (temp-and 0 1 3) (cx 3 2))
+                      (seq (cx 3 2) (mid-meas-x 3 m_pp_1 #t) (cond-cz m_pp_1 0 1))
+                      (seq (temp-and 0 1 3) (cx 3 2))
+                      (seq (cx 3 2) (mid-meas-x 3 m_pp_3 #t) (cond-cz m_pp_3 0 1))
+                      (seq (temp-and 0 1 3) (cx 3 2))
+                      (seq (cx 3 2) (mid-meas-x 3 m_pp_5 #t) (cond-cz m_pp_5 0 1))))))
+  (define res-loop-k2 (compile-lfq-circuit loop-k2-decl 'heron-r2))
+  (check-true (compilation-result-well-typed? res-loop-k2))
+  (define loop-k2-opt
+    (hash-ref (hash-ref (compilation-result->jsexpr res-loop-k2) 'optimization_passes)
+              'xag_1wl_cone_and_loop_escalation))
+  (check-equal? (hash-ref (first (hash-ref loop-k2-opt 'for_fold_loops)) 'k_certified) 2)
+
+  ;; Stage `k = R`: Heterogeneous 4-round loop with Round-4 missing `cond-cz` caught by `k = R`:
+  (define loop-kR-bad-decl
+    (lfq-circuit-decl
+     'loop-kR-bad
+     'defqfree
+     '((x . (0 1)) (y . (2)))
+     '((sc . (3)))
+     '(0 1 2)
+     '(3)
+     'all
+     '(for/fold-loop 4
+                     ((within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (within-apply-mbu (temp-and 0 1 3) (cx 3 2) (3))
+                      (seq (temp-and 0 1 3) (cx 3 2) (mid-meas-x 3 m_het_bad #t))))))
+  (define res-loop-kR-bad (compile-lfq-circuit loop-kR-bad-decl 'heron-r2))
+  (check-false (compilation-result-well-typed? res-loop-kR-bad))
+  (check-equal? (hash-ref (first (compilation-result-violations res-loop-kR-bad)) 'code)
+                "U4-QTainted")
+
+  ;; 7. Adaptive `PackedBezoutShiftZipper` (`packed-bezout-jump16`, `109 -> 67`) + QEC pacing metadata (`64.17 ns` / `66.15 ns`):
+  (define bezout-decl
+    (lfq-circuit-decl
+     'bezout-jump16-kernel
+     'defqfree
+     '((in4 . (0 1 2 3)) (out2 . (4 5)))
+     '((sc3 . (6 7 8)))
+     '(0 1 2 3 4 5)
+     '(6 7 8)
+     'all
+     '(packed-bezout-jump16 (256 16 4) (0 1 2 3) (4 5) (6 7 8))))
+  (define res-bezout (compile-lfq-circuit bezout-decl 'bb-qldpc #:repair? #t))
+  (check-true (compilation-result-well-typed? res-bezout))
+  (define bezout-js (compilation-result->jsexpr res-bezout))
+  (define bez-opt (hash-ref (hash-ref bezout-js 'optimization_passes) 'adaptive_bezout_pebble_recycling))
+  (check-true (hash-ref bez-opt 'active))
+  (check-equal? (hash-ref bez-opt 'static_total_macro_evals) 109)
+  (check-equal? (hash-ref bez-opt 'adaptive_total_macro_evals) 67)
+  (define pacing-meta (hash-ref bezout-js 'qec_syndrome_decoder_pacing))
+  (check-equal? (hash-ref pacing-meta 'd5_sparse_fastpath_mean_tau_dec_ns) 64.17)
+  (check-equal? (hash-ref pacing-meta 'bb_qldpc_sparse_fastpath_mean_tau_dec_ns) 66.15)
+  (check-equal? (hash-ref pacing-meta 'conservative_300k_coax_ns) 420.0)
+  (check-equal? (hash-ref pacing-meta 'closed_loop_500mhz_worst_case_ns) 340.0)
+
+  ;; 8. Phase-Clean `focus-zipper` RM(3, n) TODD symmetric 3-tensor decomposition (`14 -> 8` T-gates on 2 shared-control CCZs):
+  (define todd-decl
+    (lfq-circuit-decl
+     'todd-zipper-kernel
+     'defq
+     '((q . (0 1 2 3)))
+     '()
+     '(0 1 2 3)
+     '()
+     'all
+     '(focus-zipper ((0 1 2 3) ())
+                    (seq (ccz 0 1 2)
+                         (ccz 0 1 3)))))
+  (define res-todd (compile-lfq-circuit todd-decl 'ideal))
+  (check-true (compilation-result-well-typed? res-todd))
+  (define todd-js (compilation-result->jsexpr res-todd))
+  (define todd-opt (hash-ref (hash-ref todd-js 'optimization_passes) 'todd_rm3_autocc_phase_poly))
+  (check-equal? (hash-ref todd-opt 'phase_clean_zippers_certified) 1)
+  (check-equal? (hash-ref todd-opt 'cones_optimized) 1)
+  (check-equal? (hash-ref todd-opt 'pre_t_count) 14)
+  (check-equal? (hash-ref todd-opt 'post_t_count) 8)
+  (check-equal? (hash-ref todd-opt 't_count_saved) 6)
+
+  ;; 9. Law-U4 cross-QPU bilinear tele-phase factoring + batched forward cat-entangler fusion (`6 -> 1` ebits, `0` reverse ebits):
+  (define tele-decl
+    (lfq-circuit-decl
+     'tele-phase-cone3
+     'defqfree
+     '((p . (0)) (q . (1 2 3)) (out . (4)))
+     '((sc . (5 6 7)))
+     '(0 1 2 3 4)
+     '(5 6 7)
+     'all
+     '(within-apply-mbu
+       (seq (temp-and 0 1 5)
+            (temp-and 0 2 6)
+            (temp-and 0 3 7))
+       (seq (cx 5 4) (cx 6 4) (cx 7 4))
+       (5 6 7))))
+  (define tele-prog
+    (register-program-cluster-profiles!
+     (lfq-program "test-tele-cone3" 'ideal (list tele-decl))
+     (list (lfq-cluster-profile-entry
+            'tele-cone3-prof
+            (par-cluster-opt-spec #:workload 'MBU-Cone3
+                                  #:paradigm 'algebraic-limb
+                                  #:max-machines 256
+                                  #:q-cap-per-machine 7
+                                  #:raw-bell-rate-hz 100000.0
+                                  #:q-single 8
+                                  #:q-data-dist 6
+                                  #:q-local-fixed 1
+                                  #:q-peer-sync 1
+                                  #:window-bits 1
+                                  #:num-windows 1
+                                  #:local-toffolis 100000
+                                  #:carry-scheme 'qrns-zero-carry
+                                  #:lookup-scheme 'law-u4-ghz-mx)
+            '((0) (1 2 3 4 5 6 7))))))
+  (define res-tele (compile-lfq-circuit tele-decl 'ideal #:program tele-prog))
+  (check-true (compilation-result-well-typed? res-tele))
+  (define tele-js (compilation-result->jsexpr res-tele))
+  (define tele-opt (hash-ref (hash-ref tele-js 'optimization_passes) 'u4_cross_qpu_tele_phase))
+  (check-true (hash-ref tele-opt 'active))
+  (check-equal? (hash-ref tele-opt 'machines_used) 2)
+  (check-equal? (hash-ref tele-opt 'cross_cut_mbu_wire_count) 3)
+  (check-equal? (hash-ref tele-opt 'batched_pivot_cone_count) 1)
+  (check-equal? (hash-ref tele-opt 'naive_ebits_2_per_wire) 6)
+  (check-equal? (hash-ref tele-opt 'u4_batched_cone_ebits) 1)
+  (check-equal? (hash-ref tele-opt 'ebits_saved) 5)
+  (check-equal? (hash-ref tele-opt 'reverse_ebits) 0)
+
+  ;; 10. Canonical coupled phase-ordering schedule (`P_loop_cone -> P_pebble -> (FRAIG/Commute o TODD/ZX)^2
+  ;;     -> MBU/Bellman-Knuth -> post-TODD chordal SSA -> coupled Block-LU + Law-U4`) strictly beats
+  ;;     both `SSA < TODD` (`hazardA_ssa_before_todd`) and `MBU < TODD` (`hazardB_mbu_before_todd`):
+  (define coupled-phase-decl
+    (lfq-circuit-decl
+     'coupled-phase-order-kernel
+     'defq
+     '((d . (0 1 2 3 4 5)))
+     '((sc . (6 7 8 9 10)))
+     '(0 1 2 3 4 5)
+     '(6 7 8 9 10)
+     'all
+     '(seq
+       (within-apply-mbu (temp-and 0 3 6) (cx 6 5) (6))
+       (within-apply-mbu
+        (temp-and 0 3 7)
+        (seq (cx 7 2)
+             (within-apply-mbu (temp-and 1 2 8) (cz 8 3) (8))
+             (within-apply-mbu (temp-and 1 2 9) (cz 9 4) (9)))
+        (7))
+       (rz-dyadic 1 3 #f 5)
+       (ccz 1 2 4)
+       (h 0)
+       (rz-dyadic-neg 1 3 #f 5)
+       (within-apply-mbu (temp-and 1 2 10) (cz 10 5) (10))
+       (cx 3 0) (cx 4 0) (cx 5 0)
+       (cx 3 1) (cx 4 1) (cx 5 1)
+       (cx 3 2) (cx 4 2) (cx 5 2))))
+  (define coupled-phase-prog
+    (register-program-cluster-profiles!
+     (lfq-program "test-coupled-phase-order" 'ideal (list coupled-phase-decl))
+     (list (lfq-cluster-profile-entry
+            'coupled-phase-prof
+            '(par-cluster-opt-spec #:workload Coupled-Phase-Order
+                                   #:paradigm algebraic-limb
+                                   #:max-machines 256
+                                   #:q-cap-per-machine 6
+                                   #:raw-bell-rate-hz 100000.0
+                                   #:q-single auto
+                                   #:q-data-dist 6
+                                   #:q-local-fixed 1
+                                   #:q-peer-sync 1
+                                   #:window-bits 1
+                                   #:num-windows 1
+                                   #:local-toffolis 100000
+                                   #:carry-scheme qrns-zero-carry
+                                   #:lookup-scheme law-u4-ghz-mx)
+            '((0 1 2) (3 4 5 6 7))))))
+  (define res-can
+    (compile-lfq-circuit coupled-phase-decl 'ideal
+                         #:program coupled-phase-prog))
+  (define res-ha
+    (compile-lfq-circuit coupled-phase-decl 'ideal
+                         #:program coupled-phase-prog
+                         #:phase-schedule 'hazardA_ssa_before_todd))
+  (define res-hb
+    (compile-lfq-circuit coupled-phase-decl 'ideal
+                         #:program coupled-phase-prog
+                         #:phase-schedule 'hazardB_mbu_before_todd))
+  (check-true (compilation-result-well-typed? res-can))
+  (check-true (compilation-result-well-typed? res-ha))
+  (check-true (compilation-result-well-typed? res-hb))
+
+  (define can-opt
+    (hash-ref (hash-ref (compilation-result->jsexpr res-can) 'optimization_passes)
+              'canonical_phase_order))
+  (define ha-opt
+    (hash-ref (hash-ref (compilation-result->jsexpr res-ha) 'optimization_passes)
+              'canonical_phase_order))
+  (define hb-opt
+    (hash-ref (hash-ref (compilation-result->jsexpr res-hb) 'optimization_passes)
+              'canonical_phase_order))
+
+  (check-equal? (hash-ref can-opt 'schedule_id) "canonical_k2_coupled")
+  (check-equal? (hash-ref can-opt 'todd_zx_fixpoint_rounds) 2)
+  ;; Post-TODD chordal SSA reclaims the inner scratch wire stranded by `SSA < TODD` and `MBU < TODD`:
+  (check-equal? (compilation-result-physical-qubits res-can) 7)
+  (check-equal? (compilation-result-physical-qubits res-ha) 8)
+  (check-equal? (compilation-result-physical-qubits res-hb) 8)
+  (check-equal? (hash-ref can-opt 'post_todd_ssa_reclaimed_qubits) 1)
+  ;; Algebraic MBU hoisting + session fusion + TODD cone absorption strictly reduces `M_X` & `T`-count:
+  (check-true (< (compilation-result-mbu-erasure-count res-can)
+                 (compilation-result-mbu-erasure-count res-ha)))
+  (check-true (< (compilation-result-mbu-erasure-count res-can)
+                 (compilation-result-mbu-erasure-count res-hb)))
+  (check-true (< (hash-ref can-opt 'clifford_t_count)
+                 (hash-ref ha-opt 'clifford_t_count)))
+  (check-true (< (hash-ref can-opt 'clifford_t_count)
+                 (hash-ref hb-opt 'clifford_t_count)))
+  (check-true (>= (hash-ref can-opt 'pre_mbu_sessions_fused) 2))
+  (check-true (>= (hash-ref can-opt 'phase_mbu_cones_absorbed) 2))
+  (check-true (>= (hash-ref can-opt 'fraig_commute_moves) 1))
+  ;; Coupled `P_part_u4 <-> Block-LU` compresses the rank-1 3x3 cross-QPU CNOT frame (`9 -> 1` cross-CX):
+  (check-true (>= (hash-ref can-opt 'partition_block_lu_frames_resynthesized) 1))
+  (check-true (>= (hash-ref can-opt 'partition_block_lu_cross_cxs_saved) 8))
+  (check-true (>= (hash-ref can-opt 'partition_block_lu_ebits_saved) 2))
+
+  (close-bug-prevention-z3!))

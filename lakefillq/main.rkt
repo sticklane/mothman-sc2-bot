@@ -141,6 +141,7 @@
          skip
          seq
          for/seq
+         for/fold-loop
          invert
          call-q
          with-and-session
@@ -161,6 +162,7 @@
          qmatch
          focus-zipper
          fold-braun
+         packed-bezout-jump16
          par-wires
          multishot-reset
          logical-relabel
@@ -169,6 +171,9 @@
          z
          s
          s-dag
+         t
+         tdg
+         t-dag
          h
          ry
          rz-dyadic
@@ -541,6 +546,22 @@
             (apply proc-seq (for/list clauses (lfq-seq-block body ...)))
             (lfq-surface-span s l c f 'LakefillQ))))]))
 
+(define-syntax (for/fold-loop stx)
+  (syntax-parse stx
+    [(_ ([r-id:id num-rounds-e:expr]) body ...)
+     (let-values ([(src ln col frm) (stx->span-parts stx)])
+       (with-syntax ([s src] [l ln] [c col] [f frm])
+         #'(let ([n-rounds num-rounds-e])
+             (unless (exact-nonnegative-integer? n-rounds)
+               (error 'for/fold-loop
+                      "Expected exact nonnegative integer round count, got: ~a" n-rounds))
+             (attach-surface-span-deep!
+              (list 'for/fold-loop
+                    n-rounds
+                    (for/list ([r-id (in-range n-rounds)])
+                      (lfq-seq-block body ...)))
+              (lfq-surface-span s l c f 'LakefillQ)))))]))
+
 (define (proc-invert e) (list 'invert e))
 (define-spanned-op invert proc-invert)
 
@@ -675,14 +696,14 @@
 
 (begin-for-syntax
   (define lfq-surface-operator-symbols
-    '(x z s s-dag h ry rz-dyadic
+    '(x z s s-dag t tdg t-dag h ry rz-dyadic
       cx cz ccx ccz swap cswap-bit cswap-word mcx mcz qft
       temp-and temp-and-lin prepare-dicke-le1
       mid-meas-x mid-meas-x-unshielded mid-meas-x-cond-z cond-z cond-cz
       syndrome-plaquette
-      seq for/seq invert call-q with-and-session within-apply-mbu within-apply
+      seq for/seq for/fold-loop invert call-q with-and-session within-apply-mbu within-apply
       erase-by erase-by-part-bij canonicalize-quotient qmatch focus-zipper
-      fold-braun par-wires multishot-reset logical-relabel
+      fold-braun packed-bezout-jump16 par-wires multishot-reset logical-relabel
       guard-valid-if guard-involutory guard-qblock-lcu-phase guard-wire-basis
       guard-drift-eps guard-single-ir guard-par-partition
       qvec wref lin-xor
@@ -741,6 +762,15 @@
   (list 'fold-braun (render-node btree)))
 (define-spanned-op fold-braun proc-fold-braun)
 
+(define (proc-packed-bezout-jump16 in4 out2 sc3
+                                   #:n-bits [n-bits 256]
+                                   #:jump-step [jump-step 16]
+                                   #:base-pebbles [base-pebbles 4])
+  (list 'packed-bezout-jump16
+        (list n-bits jump-step base-pebbles)
+        in4 out2 sc3))
+(define-spanned-op packed-bezout-jump16 proc-packed-bezout-jump16)
+
 (define (proc-par-wires e1 e2) (list 'par-wires e1 e2))
 (define-spanned-op par-wires proc-par-wires)
 
@@ -762,6 +792,13 @@
 
 (define (proc-s-dag w) (list 's-dag w))
 (define-spanned-op s-dag proc-s-dag)
+
+(define (proc-t w) (list 'rz-dyadic w 3 #f 5))
+(define-spanned-op t proc-t)
+
+(define (proc-tdg w) (list 'rz-dyadic-neg w 3 #f 5))
+(define-spanned-op tdg proc-tdg)
+(define-spanned-op t-dag proc-tdg)
 
 (define (proc-h w) (list 'h w))
 (define-spanned-op h proc-h)
@@ -854,10 +891,12 @@
       [(or `(x ,_) `(cx ,_ ,_) `(ccx ,_ ,_ ,_) `(swap ,_ ,_)
            `(cswap-bit ,_ ,_ ,_) `(cswap-word ,_ ,_ ,_)
            `(mcx ,_ ,_ ,_) `(temp-and ,_ ,_ ,_) `(temp-and-lin . ,_)
+           `(packed-bezout-jump16 . ,_)
            `(logical-relabel ,_ ,_)
            `(mid-meas-x . ,_) `(cond-z . ,_) `(cond-cz . ,_))
        (void)]
-      [(or `(h ,_) `(qft ,_) `(ry . ,_) `(rz-dyadic . ,_) `(z ,_) `(s ,_) `(s-dag ,_)
+      [(or `(h ,_) `(qft ,_) `(ry . ,_) `(rz-dyadic . ,_) `(rz-dyadic-neg . ,_)
+           `(z ,_) `(s ,_) `(s-dag ,_)
            `(cz ,_ ,_) `(ccz ,_ ,_ ,_) `(mcz . ,_) `(syndrome-plaquette . ,_)
            `(prepare-dicke-le1 . ,_)
            `(guard-valid-if . ,_) `(guard-qblock-lcu-phase . ,_))
@@ -865,6 +904,7 @@
               "Non-basis quantum gate ~a forbidden inside defqfree circuit `~a`"
               e circ-name)]
       [`(seq ,es ...) (for ([sub (in-list es)]) (walk sub))]
+      [`(for/fold-loop ,_ ,rounds) (for ([sub (in-list rounds)]) (walk sub))]
       [`(invert ,sub) (walk sub)]
       [`(call-q ,callee . ,_)
        (unless (and (lfq-circuit-decl? callee)

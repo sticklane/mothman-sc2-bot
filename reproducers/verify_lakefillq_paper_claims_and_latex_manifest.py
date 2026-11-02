@@ -4,8 +4,8 @@ Mechanical Claim-to-Artifact & LaTeX Integrity Verifier for the LakefillQ Manusc
 (`reproducers/verify_lakefillq_paper_claims_and_latex_manifest.py`).
 
 Verifies three end-to-end properties with zero failures allowed:
-  1. Quantitative Claim-to-JSON Artifact Cross-Check (112 Core Numerical & Vector Claims):
-     Loads 31 on-disk JSON reports in `reproducers/artifacts/`, `reproducers/`, and
+  1. Quantitative Claim-to-JSON Artifact Cross-Check (162 Core Numerical & Vector Claims):
+     Loads 39 on-disk JSON reports in `reproducers/artifacts/`, `reproducers/`, and
      `artifacts/pcqb/` and asserts that the measured JSON values match the exact numbers
      and NIST test vectors reported in both `PAPER_OKASAKI_QUANTUM_DATA_STRUCTURES.md`
      and `paper/lakefillq_paper.tex`.
@@ -13,15 +13,16 @@ Verifies three end-to-end properties with zero failures allowed:
      Verifies that all 21 formal environments in `paper/lakefillq_paper.tex`
      (Propositions 1, 2, 3, and 3.1-3.9; Lemmas 1-2; Theorems 1-6; Corollary 1) plus
      the 12-mutant soundness, 0-DSP RTL decoder, 9-repo SOTA audit, 7-rule static guard,
-     and 3-mode distributed M* scaling theorems map to existing, zero-`sorry`, zero-`axiom`
-     Lean 4.35.0 declarations in `proofs/*.lean`, and runs the Lean 4.35.0 kernel binary
-     across all 21 standalone proof modules.
+     5 compiler/hardware optimizations, 1,690-module Redex fuzzer, and 3-mode distributed M*
+     scaling theorems map to existing, zero-`sorry`, zero-`axiom` Lean 4.35.0 declarations
+     in `proofs/*.lean`, and runs the Lean 4.35.0 kernel binary across all 32 standalone
+     proof modules.
   3. Strict LaTeX & BibTeX Structural Compiler-Grade Linter:
      Verifies balanced `{...}` braces per paragraph and document-wide (plus per BibTeX
      entry), balanced `\\begin{env}...\\end{env}` stack, balanced `$` / `\\[...\\]` math
-     delimiters, exact column counts across all 20 `tabular` tables and all `quantikz`
+     delimiters, exact column counts across all `tabular` tables and all `quantikz`
      circuits, zero unescaped `%` or `_` outside math/listings/identifiers, 100%
-     `\\ref`/`\\eqref` resolution, 100% `\\cite` resolution against all 96 `references.bib`
+     `\\ref`/`\\eqref` resolution, 100% `\\cite` resolution against all 120 `references.bib`
      entries (with zero uncited BibTeX entries), zero work-iteration jargon tokens, and
      zero personal username leaks.
 
@@ -63,7 +64,7 @@ def _load_json(rel_path: str) -> Dict[str, Any]:
 
 
 def verify_quantitative_claims(md_text: str, tex_text: str) -> Dict[str, Any]:
-    """Cross-checks 112 quantitative claims from 31 JSON reports against MD and LaTeX."""
+    """Cross-checks 162 quantitative claims from 39 JSON reports against MD and LaTeX."""
     cache: Dict[str, Dict[str, Any]] = {}
 
     def get_doc(rel: str) -> Dict[str, Any]:
@@ -1432,6 +1433,454 @@ def verify_quantitative_claims(md_text: str, tex_text: str) -> Dict[str, Any]:
             "0.9984",
             "0.9984",
         ),
+        (
+            "c126_xag_1wl_aes128_z3_queries",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: row_by_key(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["racket_xag_fraig_typechecker"]["multiblock_sound_benchmarks"],
+                "id",
+                "AES128_10round_pareto_290q",
+            )["xag_stats"]["z3_cut_sweep_queries"],
+            1,
+            "from 48 to 1",
+            r"48 \to 1",
+        ),
+        (
+            "c127_xag_1wl_aes128_lemma_reuses",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: row_by_key(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["racket_xag_fraig_typechecker"]["multiblock_sound_benchmarks"],
+                "id",
+                "AES128_10round_pareto_290q",
+            )["xag_stats"]["verified_cut_lemma_reuses"],
+            159,
+            "159 isomorphic",
+            r"$159$ isomorphic",
+        ),
+        (
+            "c128_xag_1wl_aes128_time_ms",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: round(
+                float(
+                    row_by_key(
+                        get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["racket_xag_fraig_typechecker"]["multiblock_sound_benchmarks"],
+                        "id",
+                        "AES128_10round_pareto_290q",
+                    )["inference_time_ms"]
+                ),
+                1,
+            ),
+            915.7,
+            "915.7 ms",
+            r"915.7\text{ ms}",
+        ),
+        (
+            "c129_xag_1wl_aes256_z3_queries",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: row_by_key(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["racket_xag_fraig_typechecker"]["multiblock_sound_benchmarks"],
+                "id",
+                "AES256_14round_pareto_418q",
+            )["xag_stats"]["z3_cut_sweep_queries"],
+            1,
+            "59 to 1",
+            r"59 \to 1",
+        ),
+        (
+            "c130_xag_1wl_aes256_lemma_reuses",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: row_by_key(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["racket_xag_fraig_typechecker"]["multiblock_sound_benchmarks"],
+                "id",
+                "AES256_14round_pareto_418q",
+            )["xag_stats"]["verified_cut_lemma_reuses"],
+            223,
+            "223 reuses",
+            r"$223$ reuses",
+        ),
+        (
+            "c131_xag_1wl_aes256_time_ms",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: round(
+                float(
+                    row_by_key(
+                        get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["racket_xag_fraig_typechecker"]["multiblock_sound_benchmarks"],
+                        "id",
+                        "AES256_14round_pareto_418q",
+                    )["inference_time_ms"]
+                ),
+                1,
+            ),
+            1382.7,
+            "1,382.7 ms",
+            r"1{,}382.7\text{ ms}",
+        ),
+        (
+            "c132_xag_1wl_unrolled_aes128_ms",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: round(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["python_infer_qsub"]["unrolled_canonical_cone_isomorphism_metrics"]["aes128_unrolled"]["cached_time_ms"],
+                1,
+            ),
+            65.6,
+            "65.6 ms on AES-128",
+            r"$65.6\text{ ms}$ on AES-128",
+        ),
+        (
+            "c133_xag_1wl_unrolled_aes256_ms",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: round(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["python_infer_qsub"]["unrolled_canonical_cone_isomorphism_metrics"]["aes256_unrolled"]["cached_time_ms"],
+                1,
+            ),
+            44.8,
+            "44.8 ms on AES-256",
+            r"$44.8\text{ ms}$ on AES-256",
+        ),
+        (
+            "c134_xag_1wl_unrolled_keccak_ms",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: round(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["python_infer_qsub"]["unrolled_canonical_cone_isomorphism_metrics"]["keccak_f200_unrolled"]["cached_time_ms"],
+                1,
+            ),
+            61.4,
+            "61.4 ms on Keccak",
+            r"$61.4\text{ ms}$ on Keccak",
+        ),
+        (
+            "c135_xag_1wl_unrolled_keccak_query_red_x",
+            "lakefillq_xag_fraig_cone_isomorphism",
+            "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+            lambda: round(
+                get_doc("reproducers/artifacts/lakefillq_xag_fraig_inference_report.json")["canonical_cone_isomorphism_optimization"]["python_infer_qsub"]["unrolled_canonical_cone_isomorphism_metrics"]["keccak_f200_unrolled"]["query_reduction_x"],
+                2,
+            ),
+            73.8,
+            "73.80x fewer Z3 queries",
+            r"73.80\times$ fewer Z3 queries",
+        ),
+        (
+            "c136_bezout_adaptive_macro_evals",
+            "okasaki_qds_adaptive_bezout_pebbles",
+            "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+            lambda: get_doc("reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json")["adaptive_bezout_pebble_schedule"]["adaptive_total_macro_evals"],
+            67,
+            "109 down to 67",
+            r"from $109$ to $67$",
+        ),
+        (
+            "c137_bezout_adaptive_forward_evals",
+            "okasaki_qds_adaptive_bezout_pebbles",
+            "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+            lambda: get_doc("reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json")["adaptive_bezout_pebble_schedule"]["adaptive_forward_evals"],
+            35,
+            "35 forward",
+            r"$35$ forward",
+        ),
+        (
+            "c138_bezout_adaptive_reverse_evals",
+            "okasaki_qds_adaptive_bezout_pebbles",
+            "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+            lambda: get_doc("reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json")["adaptive_bezout_pebble_schedule"]["adaptive_reverse_evals"],
+            32,
+            "32 reverse",
+            r"+ 32$ reverse",
+        ),
+        (
+            "c139_bezout_adaptive_eval_reduction_x",
+            "okasaki_qds_adaptive_bezout_pebbles",
+            "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+            lambda: get_doc("reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json")["adaptive_bezout_pebble_schedule"]["eval_reduction_ratio_x"],
+            1.63,
+            "1.63x reduction",
+            r"1.63\times$ reduction",
+        ),
+        (
+            "c140_bezout_adaptive_extra_peak_qubits",
+            "okasaki_qds_adaptive_bezout_pebbles",
+            "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+            lambda: get_doc("reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json")["adaptive_bezout_pebble_schedule"]["additional_peak_qubits"],
+            0,
+            "zero additional peak qubits",
+            "zero additional peak qubits",
+        ),
+        (
+            "c141_egraph_todd_total_post_t_count",
+            "lakefillq_egraph_todd_autoccz",
+            "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json")["todd_autocc_phase_poly_verification"]["aggregate_summary"]["total_post_t_count"],
+            58,
+            r"78 \to 58\text{ }T",
+            r"78 \to 58\text{ }T",
+        ),
+        (
+            "c142_egraph_todd_t_count_reduction_pct",
+            "lakefillq_egraph_todd_autoccz",
+            "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json")["todd_autocc_phase_poly_verification"]["aggregate_summary"]["aggregate_t_count_reduction_pct"],
+            25.64,
+            "25.64%",
+            r"25.64\%",
+        ),
+        (
+            "c143_egraph_todd_aes_sbox_post_t",
+            "lakefillq_egraph_todd_autoccz",
+            "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+            lambda: row_by_key(
+                get_doc("reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json")["todd_autocc_phase_poly_verification"]["cones"],
+                "benchmark_name",
+                "bp-aes-sbox-phase-cone",
+            )["post_t_count"],
+            19,
+            r"25 \to 19\text{ }T",
+            r"25 \to 19\text{ }T",
+        ),
+        (
+            "c144_egraph_todd_keccak_chi_post_t",
+            "lakefillq_egraph_todd_autoccz",
+            "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+            lambda: row_by_key(
+                get_doc("reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json")["todd_autocc_phase_poly_verification"]["cones"],
+                "benchmark_name",
+                "keccak-f200-chi-row-cone",
+            )["post_t_count"],
+            18,
+            r"24 \to 18\text{ }T",
+            r"24 \to 18\text{ }T",
+        ),
+        (
+            "c145_egraph_todd_suzuki_dqi_post_t",
+            "lakefillq_egraph_todd_autoccz",
+            "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+            lambda: row_by_key(
+                get_doc("reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json")["todd_autocc_phase_poly_verification"]["cones"],
+                "benchmark_name",
+                "suzuki-hermitian-dqi-syndrome-cone",
+            )["post_t_count"],
+            21,
+            r"29 \to 21\text{ }T",
+            r"29 \to 21\text{ }T",
+        ),
+        (
+            "c146_egraph_todd_total_post_t_depth",
+            "lakefillq_egraph_todd_autoccz",
+            "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json")["todd_autocc_phase_poly_verification"]["aggregate_summary"]["total_post_t_depth"],
+            17,
+            r"33 \to 17",
+            r"33 \to 17",
+        ),
+        (
+            "c147_egraph_todd_t_depth_reduction_pct",
+            "lakefillq_egraph_todd_autoccz",
+            "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json")["todd_autocc_phase_poly_verification"]["aggregate_summary"]["aggregate_t_depth_reduction_pct"],
+            48.48,
+            "48.48%",
+            r"48.48\%",
+        ),
+        (
+            "c148_cluster_u4_ecc256_batched_ebits",
+            "lakefillq_cluster_u4_tele_phase",
+            "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json")["u4_tele_phase_reduction"]["ecc_256_zipper_partition"]["u4_batched_cat_ebits_per_win_cut"],
+            25,
+            r"46 \to 25$ ebits/window",
+            r"46 \to 25$ ebits/window",
+        ),
+        (
+            "c149_cluster_u4_ecc256_ebit_reduction_pct",
+            "lakefillq_cluster_u4_tele_phase",
+            "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json")["u4_tele_phase_reduction"]["ecc_256_zipper_partition"]["u4_batched_cat_ebit_reduction_pct"],
+            45.65,
+            "36.96%–45.65%",
+            r"36.96\%$--$45.65\%",
+        ),
+        (
+            "c150_cluster_u4_shor2048_ebits",
+            "lakefillq_cluster_u4_tele_phase",
+            "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json")["u4_tele_phase_reduction"]["shor_2048_zipper_partition"]["u4_tele_phase_ebits_per_win_cut"],
+            6,
+            r"12 \to 6$ ebits/window",
+            r"12 \to 6$ ebits/window",
+        ),
+        (
+            "c151_cluster_u4_shor2048_ebit_reduction_pct",
+            "lakefillq_cluster_u4_tele_phase",
+            "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json")["u4_tele_phase_reduction"]["shor_2048_zipper_partition"]["u4_tele_phase_ebit_reduction_pct"],
+            50.0,
+            "50.0% ($12",
+            r"50.0\%$ ($12",
+        ),
+        (
+            "c152_cluster_u4_shor2048_reverse_ebits",
+            "lakefillq_cluster_u4_tele_phase",
+            "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json")["u4_tele_phase_reduction"]["shor_2048_zipper_partition"]["reverse_cond_cz_ebits"],
+            0,
+            "0 reverse ebits",
+            r"$0$ reverse ebits",
+        ),
+        (
+            "c153_rtl_0dsp_hybrid_fastpath_lut6",
+            "qldpc_and_zero_dsp_decoder",
+            "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json")["gate_netlist_synthesis_and_500mhz_timing"]["hybrid_fastpath_top_module_synthesis"]["post_mapping_lut6_total"],
+            7854,
+            "7,854 LUT6",
+            "7,854 LUT6",
+        ),
+        (
+            "c154_rtl_0dsp_fastpath_d3_tau_dec_ns",
+            "qldpc_and_zero_dsp_decoder",
+            "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json")["optimization5_sparse_syndrome_fastpath_10k_benchmark"]["families"]["rotated_surface_code_d3"]["fastpath_mean_tau_dec_ns"],
+            43.33,
+            r"120.0 \to 43.33\text{ ns}",
+            r"120.0 \to 43.33\text{ ns}",
+        ),
+        (
+            "c155_rtl_0dsp_fastpath_d5_tau_dec_ns",
+            "qldpc_and_zero_dsp_decoder",
+            "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json")["optimization5_sparse_syndrome_fastpath_10k_benchmark"]["families"]["rotated_surface_code_d5"]["fastpath_mean_tau_dec_ns"],
+            64.17,
+            r"180.0 \to 64.17\text{ ns}",
+            r"180.0 \to 64.17\text{ ns}",
+        ),
+        (
+            "c156_rtl_0dsp_fastpath_d7_tau_dec_ns",
+            "qldpc_and_zero_dsp_decoder",
+            "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json")["optimization5_sparse_syndrome_fastpath_10k_benchmark"]["families"]["rotated_surface_code_d7"]["fastpath_mean_tau_dec_ns"],
+            76.88,
+            r"200.0 \to 76.88\text{ ns}",
+            r"200.0 \to 76.88\text{ ns}",
+        ),
+        (
+            "c157_rtl_0dsp_fastpath_bb144_tau_dec_ns",
+            "qldpc_and_zero_dsp_decoder",
+            "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json")["optimization5_sparse_syndrome_fastpath_10k_benchmark"]["families"]["bivariate_bicycle_144_12_12_qldpc"]["fastpath_mean_tau_dec_ns"],
+            66.87,
+            r"185.0 \to 66.87\text{ ns}",
+            r"185.0 \to 66.87\text{ ns}",
+        ),
+        (
+            "c158_redex_fuzzer_opt_trials_verified",
+            "lakefillq_redex_surface_diagnostic_fuzzer",
+            "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json")["total_optimization_fuzz_trials_verified"],
+            1050,
+            "1,050/1,050",
+            r"1{,}050/1{,}050",
+        ),
+        (
+            "c159_redex_fuzzer_total_modules_1690",
+            "lakefillq_redex_surface_diagnostic_fuzzer",
+            "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+            lambda: (
+                get_doc("reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json")["total_surface_modules_verified"]
+                + get_doc("reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json")["total_optimization_fuzz_trials_verified"]
+            ),
+            1690,
+            "1,690 total fuzzed modules",
+            r"1{,}690$ total fuzzed modules",
+        ),
+        (
+            "c160_redex_fuzzer_todd_pre_t_count",
+            "lakefillq_redex_surface_diagnostic_fuzzer",
+            "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json")["campaign4_five_optimizations_fuzzing"]["opt_c_zx_egraph_todd_autoccz"]["total_pre_t_count"],
+            3402,
+            "from 3,402 to 924",
+            r"from $3{,}402$ to $924$",
+        ),
+        (
+            "c161_redex_fuzzer_todd_post_t_count",
+            "lakefillq_redex_surface_diagnostic_fuzzer",
+            "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json")["campaign4_five_optimizations_fuzzing"]["opt_c_zx_egraph_todd_autoccz"]["total_post_heron_autoccz_t_count"],
+            924,
+            "to 924",
+            r"to $924$",
+        ),
+        (
+            "c162_redex_fuzzer_tele_phase_mx_branches",
+            "lakefillq_redex_surface_diagnostic_fuzzer",
+            "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json")["campaign4_five_optimizations_fuzzing"]["opt_d_cross_qpu_tele_phase"]["total_mid_meas_branches_verified"],
+            1566,
+            "1,566 $M_X$ branches",
+            r"$1{,}566$ $M_X$ branches",
+        ),
+        (
+            "c163_redex_fuzzer_adversarial_bugs_caught",
+            "lakefillq_redex_surface_diagnostic_fuzzer",
+            "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json")["campaign4_five_optimizations_fuzzing"]["opt_e_adversarial_bug_injection"]["fail_closed_rejected_count"],
+            210,
+            "210/210 adversarial",
+            r"$210/210$ adversarial",
+        ),
+        (
+            "c164_pass_order_permutations_720",
+            "lakefillq_pass_ordering_noncommutativity",
+            "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_phase_ordering_report.json")["permutation_matrix_720"]["total_permutations"],
+            720,
+            "6! = 720",
+            r"6! = 720",
+        ),
+        (
+            "c165_pass_order_machine_isa_circuits_1960",
+            "lakefillq_pass_ordering_noncommutativity",
+            "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_phase_ordering_report.json")["python_qiskit_kraus_verification"]["total_machine_isa_circuits_verified"],
+            1960,
+            "1,960 lowered",
+            r"1{,}960$ lowered",
+        ),
+        (
+            "c166_pass_order_canonical_t_count_8230",
+            "lakefillq_pass_ordering_noncommutativity",
+            "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_phase_ordering_report.json")["fuzzed_corpus_summary"]["aggregate_by_schedule"]["canonical_k2_coupled"]["total_t_count"],
+            8230,
+            "8,230 $T$-gates",
+            r"8{,}230\text{ }T$",
+        ),
+        (
+            "c167_pass_order_ssa_first_t_count_13725",
+            "lakefillq_pass_ordering_noncommutativity",
+            "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_phase_ordering_report.json")["fuzzed_corpus_summary"]["aggregate_by_schedule"]["hazardA_ssa_before_todd"]["total_t_count"],
+            13725,
+            "13,725 $T$-gates",
+            r"13{,}725\text{ }T$",
+        ),
+        (
+            "c168_pass_order_canonical_ebits_2124",
+            "lakefillq_pass_ordering_noncommutativity",
+            "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_phase_ordering_report.json")["fuzzed_corpus_summary"]["aggregate_by_schedule"]["canonical_k2_coupled"]["total_cross_qpu_ebits"],
+            2124,
+            "2,124 ebits",
+            r"2{,}124$ ebits",
+        ),
     ]
 
     verified_claims: List[Dict[str, Any]] = []
@@ -1539,6 +1988,7 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
             "statement_kind": "Proposition 3.5",
             "lean_declarations": [
                 ("proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean", "api5_binomial_pebble_schedule_contract_and_cost"),
+                ("proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean", "adaptive_limb_borrowz_pebble_recycling_width_and_eval_bound"),
             ],
         },
         {
@@ -1599,6 +2049,8 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
                 ("proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean", "bilinear_xag_mbu_collapses_arbitrary_degree_to_zero"),
                 ("proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean", "multiround_mbu_session_total_quantum_phase_unit"),
                 ("proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean", "cut_sweeping_local_unsat_implies_global_multiround_soundness"),
+                ("proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean", "cone_isomorphism_relabeling_soundness"),
+                ("proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean", "zero_flag_k1_k2_unrolled_escalation_soundness"),
             ],
         },
         {
@@ -1610,6 +2062,8 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
                 ("proofs/lakefillq_egraph_qphys_saturation_proofs.lean", "rccx_paired_within_and_phase_cancellation"),
                 ("proofs/lakefillq_egraph_qphys_saturation_proofs.lean", "knuth_dijkstra_optimal_acyclic_egraph_extraction"),
                 ("proofs/lakefillq_egraph_qphys_saturation_proofs.lean", "four_target_pareto_separation_and_qroam_dominance"),
+                ("proofs/lakefillq_egraph_qphys_saturation_proofs.lean", "f2_cubic_todd_rank_reduction_and_autocc_pair_fusion_soundness"),
+                ("proofs/lakefillq_egraph_qphys_saturation_proofs.lean", "todd_autocc_phase_poly_qphys_grade_monotonicity"),
             ],
         },
         {
@@ -1983,6 +2437,73 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
                 "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
                 "higher_genus_and_lifted_ag_dominate_rs_mds_ceiling",
             ),
+            # Include Law-U4 cross-QPU tele-phase, 0-DSP sparse fast-path, and 5-pass fuzzer theorems
+            (
+                "sec:cluster",
+                "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
+                "u4_bilinear_phase_poly_factoring",
+            ),
+            (
+                "sec:cluster",
+                "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
+                "u4_tele_phase_mbu_cone_denotational_equiv",
+            ),
+            (
+                "sec:cluster",
+                "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
+                "u4_bilinear_tele_phase_reduces_ebits_and_preserves_typing",
+            ),
+            (
+                "sec:fpga",
+                "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+                "braun_ortree_zero_iff_popcount_zero",
+            ),
+            (
+                "sec:fpga",
+                "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+                "direct_xor_adj_pair_peel_exact_agreement",
+            ),
+            (
+                "sec:fpga",
+                "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+                "hybrid_fastpath_uf_correction_and_cycle_exactness",
+            ),
+            (
+                "sec:fpga",
+                "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+                "sparse_fastpath_10k_latency_2_8x_reduction_and_zero_backlog",
+            ),
+            (
+                "sec:fuzzing",
+                "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
+                "five_pass_differential_compiler_equivalence",
+            ),
+            # Include 6! = 720 pass-ordering non-commutativity, fixpoint, and canonical optimality theorems
+            (
+                "sec:egraph",
+                "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+                "evalPassSeq_preserves_semantics",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+                "hazardA_ssa_todd_strict_noncommutativity",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+                "hazardB_mbu_todd_strict_noncommutativity",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+                "hazardC_rank1_conjugate_block_lu_soundness_and_ebit_saving",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+                "canonical_pipeline_strictly_dominates_suboptimal_schedules",
+            ),
         ]
     )
 
@@ -2048,6 +2569,8 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
         "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
         "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
         "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
+        "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
+        "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
     ]
 
     env = os.environ.copy()

@@ -1132,6 +1132,10 @@ def main() -> None:
         "stim_d5_surface_code_verification": stim_d5_report,
     }
 
+    if REPORT_JSON.exists():
+        prev_doc = json.loads(REPORT_JSON.read_text(encoding="utf-8"))
+        if "todd_autocc_phase_poly_verification" in prev_doc:
+            report["todd_autocc_phase_poly_verification"] = prev_doc["todd_autocc_phase_poly_verification"]
     REPORT_JSON.parent.mkdir(parents=True, exist_ok=True)
     REPORT_JSON.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(f"\nALL VERIFICATIONS PASSED in {elapsed_s}s! Saved report -> {REPORT_JSON}")

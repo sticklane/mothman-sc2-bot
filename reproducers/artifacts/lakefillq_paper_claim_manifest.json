@@ -2,7 +2,7 @@
   "manuscript_title": "LakefillQ: Purely Functional Data Structures, Substructural Typing, and Graded Physical Compilation for Low-Width Fault-Tolerant Quantum Circuits",
   "compiler_system": "LakefillQ",
   "overall_status": "PASS",
-  "total_verification_seconds": 85.074,
+  "total_verification_seconds": 108.343,
   "deliverables": {
     "latex_manuscript": "paper/lakefillq_paper.tex",
     "bibtex_database": "paper/references.bib",
@@ -11,8 +11,8 @@
   },
   "quantitative_artifact_crosscheck": {
     "status": "PASS",
-    "artifacts_loaded": 38,
-    "claims_verified": 124,
+    "artifacts_loaded": 40,
+    "claims_verified": 167,
     "failure_count": 0,
     "claims": [
       {
@@ -1502,6 +1502,522 @@
         "markdown_matched": true,
         "latex_matched": true,
         "verified": true
+      },
+      {
+        "claim_id": "c126_xag_1wl_aes128_z3_queries",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 1,
+        "expected_value": 1,
+        "markdown_token": "from 48 to 1",
+        "latex_token": "48 \\to 1",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c127_xag_1wl_aes128_lemma_reuses",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 159,
+        "expected_value": 159,
+        "markdown_token": "159 isomorphic",
+        "latex_token": "$159$ isomorphic",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c128_xag_1wl_aes128_time_ms",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 915.7,
+        "expected_value": 915.7,
+        "markdown_token": "915.7 ms",
+        "latex_token": "915.7\\text{ ms}",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c129_xag_1wl_aes256_z3_queries",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 1,
+        "expected_value": 1,
+        "markdown_token": "59 to 1",
+        "latex_token": "59 \\to 1",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c130_xag_1wl_aes256_lemma_reuses",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 223,
+        "expected_value": 223,
+        "markdown_token": "223 reuses",
+        "latex_token": "$223$ reuses",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c131_xag_1wl_aes256_time_ms",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 1382.7,
+        "expected_value": 1382.7,
+        "markdown_token": "1,382.7 ms",
+        "latex_token": "1{,}382.7\\text{ ms}",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c132_xag_1wl_unrolled_aes128_ms",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 65.6,
+        "expected_value": 65.6,
+        "markdown_token": "65.6 ms on AES-128",
+        "latex_token": "$65.6\\text{ ms}$ on AES-128",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c133_xag_1wl_unrolled_aes256_ms",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 44.8,
+        "expected_value": 44.8,
+        "markdown_token": "44.8 ms on AES-256",
+        "latex_token": "$44.8\\text{ ms}$ on AES-256",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c134_xag_1wl_unrolled_keccak_ms",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 61.4,
+        "expected_value": 61.4,
+        "markdown_token": "61.4 ms on Keccak",
+        "latex_token": "$61.4\\text{ ms}$ on Keccak",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c135_xag_1wl_unrolled_keccak_query_red_x",
+        "category": "lakefillq_xag_fraig_cone_isomorphism",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_xag_fraig_inference_report.json",
+        "measured_value": 73.8,
+        "expected_value": 73.8,
+        "markdown_token": "73.80x fewer Z3 queries",
+        "latex_token": "73.80\\times$ fewer Z3 queries",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c136_bezout_adaptive_macro_evals",
+        "category": "okasaki_qds_adaptive_bezout_pebbles",
+        "artifact_relpath": "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+        "measured_value": 67,
+        "expected_value": 67,
+        "markdown_token": "109 down to 67",
+        "latex_token": "from $109$ to $67$",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c137_bezout_adaptive_forward_evals",
+        "category": "okasaki_qds_adaptive_bezout_pebbles",
+        "artifact_relpath": "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+        "measured_value": 35,
+        "expected_value": 35,
+        "markdown_token": "35 forward",
+        "latex_token": "$35$ forward",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c138_bezout_adaptive_reverse_evals",
+        "category": "okasaki_qds_adaptive_bezout_pebbles",
+        "artifact_relpath": "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+        "measured_value": 32,
+        "expected_value": 32,
+        "markdown_token": "32 reverse",
+        "latex_token": "+ 32$ reverse",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c139_bezout_adaptive_eval_reduction_x",
+        "category": "okasaki_qds_adaptive_bezout_pebbles",
+        "artifact_relpath": "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+        "measured_value": 1.63,
+        "expected_value": 1.63,
+        "markdown_token": "1.63x reduction",
+        "latex_token": "1.63\\times$ reduction",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c140_bezout_adaptive_extra_peak_qubits",
+        "category": "okasaki_qds_adaptive_bezout_pebbles",
+        "artifact_relpath": "reproducers/artifacts/okasaki_qds_jump_divsteps_bezout_and_hua_report.json",
+        "measured_value": 0,
+        "expected_value": 0,
+        "markdown_token": "zero additional peak qubits",
+        "latex_token": "zero additional peak qubits",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c141_egraph_todd_total_post_t_count",
+        "category": "lakefillq_egraph_todd_autoccz",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+        "measured_value": 58,
+        "expected_value": 58,
+        "markdown_token": "78 \\to 58\\text{ }T",
+        "latex_token": "78 \\to 58\\text{ }T",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c142_egraph_todd_t_count_reduction_pct",
+        "category": "lakefillq_egraph_todd_autoccz",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+        "measured_value": 25.64,
+        "expected_value": 25.64,
+        "markdown_token": "25.64%",
+        "latex_token": "25.64\\%",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c143_egraph_todd_aes_sbox_post_t",
+        "category": "lakefillq_egraph_todd_autoccz",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+        "measured_value": 19,
+        "expected_value": 19,
+        "markdown_token": "25 \\to 19\\text{ }T",
+        "latex_token": "25 \\to 19\\text{ }T",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c144_egraph_todd_keccak_chi_post_t",
+        "category": "lakefillq_egraph_todd_autoccz",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+        "measured_value": 18,
+        "expected_value": 18,
+        "markdown_token": "24 \\to 18\\text{ }T",
+        "latex_token": "24 \\to 18\\text{ }T",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c145_egraph_todd_suzuki_dqi_post_t",
+        "category": "lakefillq_egraph_todd_autoccz",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+        "measured_value": 21,
+        "expected_value": 21,
+        "markdown_token": "29 \\to 21\\text{ }T",
+        "latex_token": "29 \\to 21\\text{ }T",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c146_egraph_todd_total_post_t_depth",
+        "category": "lakefillq_egraph_todd_autoccz",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+        "measured_value": 17,
+        "expected_value": 17,
+        "markdown_token": "33 \\to 17",
+        "latex_token": "33 \\to 17",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c147_egraph_todd_t_depth_reduction_pct",
+        "category": "lakefillq_egraph_todd_autoccz",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_egraph_qphys_extraction_report.json",
+        "measured_value": 48.48,
+        "expected_value": 48.48,
+        "markdown_token": "48.48%",
+        "latex_token": "48.48\\%",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c148_cluster_u4_ecc256_batched_ebits",
+        "category": "lakefillq_cluster_u4_tele_phase",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+        "measured_value": 25,
+        "expected_value": 25,
+        "markdown_token": "46 \\to 25$ ebits/window",
+        "latex_token": "46 \\to 25$ ebits/window",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c149_cluster_u4_ecc256_ebit_reduction_pct",
+        "category": "lakefillq_cluster_u4_tele_phase",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+        "measured_value": 45.65,
+        "expected_value": 45.65,
+        "markdown_token": "36.96%\u201345.65%",
+        "latex_token": "36.96\\%$--$45.65\\%",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c150_cluster_u4_shor2048_ebits",
+        "category": "lakefillq_cluster_u4_tele_phase",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+        "measured_value": 6,
+        "expected_value": 6,
+        "markdown_token": "12 \\to 6$ ebits/window",
+        "latex_token": "12 \\to 6$ ebits/window",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c151_cluster_u4_shor2048_ebit_reduction_pct",
+        "category": "lakefillq_cluster_u4_tele_phase",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+        "measured_value": 50.0,
+        "expected_value": 50.0,
+        "markdown_token": "50.0% ($12",
+        "latex_token": "50.0\\%$ ($12",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c152_cluster_u4_shor2048_reverse_ebits",
+        "category": "lakefillq_cluster_u4_tele_phase",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_cluster_qasm3_codegen_report.json",
+        "measured_value": 0,
+        "expected_value": 0,
+        "markdown_token": "0 reverse ebits",
+        "latex_token": "$0$ reverse ebits",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c153_rtl_0dsp_hybrid_fastpath_lut6",
+        "category": "qldpc_and_zero_dsp_decoder",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+        "measured_value": 7854,
+        "expected_value": 7854,
+        "markdown_token": "7,854 LUT6",
+        "latex_token": "7,854 LUT6",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c154_rtl_0dsp_fastpath_d3_tau_dec_ns",
+        "category": "qldpc_and_zero_dsp_decoder",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+        "measured_value": 43.33,
+        "expected_value": 43.33,
+        "markdown_token": "120.0 \\to 43.33\\text{ ns}",
+        "latex_token": "120.0 \\to 43.33\\text{ ns}",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c155_rtl_0dsp_fastpath_d5_tau_dec_ns",
+        "category": "qldpc_and_zero_dsp_decoder",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+        "measured_value": 64.17,
+        "expected_value": 64.17,
+        "markdown_token": "180.0 \\to 64.17\\text{ ns}",
+        "latex_token": "180.0 \\to 64.17\\text{ ns}",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c156_rtl_0dsp_fastpath_d7_tau_dec_ns",
+        "category": "qldpc_and_zero_dsp_decoder",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+        "measured_value": 76.88,
+        "expected_value": 76.88,
+        "markdown_token": "200.0 \\to 76.88\\text{ ns}",
+        "latex_token": "200.0 \\to 76.88\\text{ ns}",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c157_rtl_0dsp_fastpath_bb144_tau_dec_ns",
+        "category": "qldpc_and_zero_dsp_decoder",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_0dsp_rtl_stim_cosim_report.json",
+        "measured_value": 66.87,
+        "expected_value": 66.87,
+        "markdown_token": "185.0 \\to 66.87\\text{ ns}",
+        "latex_token": "185.0 \\to 66.87\\text{ ns}",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c158_redex_fuzzer_opt_trials_verified",
+        "category": "lakefillq_redex_surface_diagnostic_fuzzer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+        "measured_value": 1050,
+        "expected_value": 1050,
+        "markdown_token": "1,050/1,050",
+        "latex_token": "1{,}050/1{,}050",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c159_redex_fuzzer_total_modules_1690",
+        "category": "lakefillq_redex_surface_diagnostic_fuzzer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+        "measured_value": 1690,
+        "expected_value": 1690,
+        "markdown_token": "1,690 total fuzzed modules",
+        "latex_token": "1{,}690$ total fuzzed modules",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c160_redex_fuzzer_todd_pre_t_count",
+        "category": "lakefillq_redex_surface_diagnostic_fuzzer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+        "measured_value": 3402,
+        "expected_value": 3402,
+        "markdown_token": "from 3,402 to 924",
+        "latex_token": "from $3{,}402$ to $924$",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c161_redex_fuzzer_todd_post_t_count",
+        "category": "lakefillq_redex_surface_diagnostic_fuzzer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+        "measured_value": 924,
+        "expected_value": 924,
+        "markdown_token": "to 924",
+        "latex_token": "to $924$",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c162_redex_fuzzer_tele_phase_mx_branches",
+        "category": "lakefillq_redex_surface_diagnostic_fuzzer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+        "measured_value": 1566,
+        "expected_value": 1566,
+        "markdown_token": "1,566 $M_X$ branches",
+        "latex_token": "$1{,}566$ $M_X$ branches",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c163_redex_fuzzer_adversarial_bugs_caught",
+        "category": "lakefillq_redex_surface_diagnostic_fuzzer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_redex_surface_diagnostic_fuzzer_report.json",
+        "measured_value": 210,
+        "expected_value": 210,
+        "markdown_token": "210/210 adversarial",
+        "latex_token": "$210/210$ adversarial",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c164_pass_order_permutations_720",
+        "category": "lakefillq_pass_ordering_noncommutativity",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+        "measured_value": 720,
+        "expected_value": 720,
+        "markdown_token": "6! = 720",
+        "latex_token": "6! = 720",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c165_pass_order_machine_isa_circuits_1960",
+        "category": "lakefillq_pass_ordering_noncommutativity",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+        "measured_value": 1960,
+        "expected_value": 1960,
+        "markdown_token": "1,960 lowered",
+        "latex_token": "1{,}960$ lowered",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c166_pass_order_canonical_t_count_8230",
+        "category": "lakefillq_pass_ordering_noncommutativity",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+        "measured_value": 8230,
+        "expected_value": 8230,
+        "markdown_token": "8,230 $T$-gates",
+        "latex_token": "8{,}230\\text{ }T$",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c167_pass_order_ssa_first_t_count_13725",
+        "category": "lakefillq_pass_ordering_noncommutativity",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+        "measured_value": 13725,
+        "expected_value": 13725,
+        "markdown_token": "13,725 $T$-gates",
+        "latex_token": "13{,}725\\text{ }T$",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c168_pass_order_canonical_ebits_2124",
+        "category": "lakefillq_pass_ordering_noncommutativity",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_phase_ordering_report.json",
+        "measured_value": 2124,
+        "expected_value": 2124,
+        "markdown_token": "2,124 ebits",
+        "latex_token": "2{,}124$ ebits",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
       }
     ]
   },
@@ -1509,9 +2025,9 @@
     "status": "PASS",
     "lean_version": "4.35.0",
     "formal_statements_verified": 21,
-    "lean_declarations_verified": 108,
-    "lean_files_scanned_zero_sorry_axiom": 26,
-    "lean_kernel_modules_executed": 31,
+    "lean_declarations_verified": 126,
+    "lean_files_scanned_zero_sorry_axiom": 28,
+    "lean_kernel_modules_executed": 33,
     "mappings": [
       {
         "paper_label": "prop:p1",
@@ -1583,6 +2099,12 @@
         "paper_label": "prop:p3_5",
         "lean_file": "proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean",
         "declaration": "api5_binomial_pebble_schedule_contract_and_cost",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "prop:p3_5",
+        "lean_file": "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
+        "declaration": "adaptive_limb_borrowz_pebble_recycling_width_and_eval_bound",
         "zero_sorry_admit_axiom": true
       },
       {
@@ -1694,6 +2216,18 @@
         "zero_sorry_admit_axiom": true
       },
       {
+        "paper_label": "thm:t2",
+        "lean_file": "proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean",
+        "declaration": "cone_isomorphism_relabeling_soundness",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "thm:t2",
+        "lean_file": "proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean",
+        "declaration": "zero_flag_k1_k2_unrolled_escalation_soundness",
+        "zero_sorry_admit_axiom": true
+      },
+      {
         "paper_label": "thm:t3",
         "lean_file": "proofs/quantum_type_theory_and_intrinsic_qds_proofs.lean",
         "declaration": "qphys_grade_seq_associative_and_identity",
@@ -1721,6 +2255,18 @@
         "paper_label": "thm:t3",
         "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
         "declaration": "four_target_pareto_separation_and_qroam_dominance",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "thm:t3",
+        "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
+        "declaration": "f2_cubic_todd_rank_reduction_and_autocc_pair_fusion_soundness",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "thm:t3",
+        "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
+        "declaration": "todd_autocc_phase_poly_qphys_grade_monotonicity",
         "zero_sorry_admit_axiom": true
       },
       {
@@ -2160,163 +2706,251 @@
         "lean_file": "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
         "declaration": "higher_genus_and_lifted_ag_dominate_rs_mds_ceiling",
         "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:cluster",
+        "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
+        "declaration": "u4_bilinear_phase_poly_factoring",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:cluster",
+        "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
+        "declaration": "u4_tele_phase_mbu_cone_denotational_equiv",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:cluster",
+        "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
+        "declaration": "u4_bilinear_tele_phase_reduces_ebits_and_preserves_typing",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:fpga",
+        "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+        "declaration": "braun_ortree_zero_iff_popcount_zero",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:fpga",
+        "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+        "declaration": "direct_xor_adj_pair_peel_exact_agreement",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:fpga",
+        "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+        "declaration": "hybrid_fastpath_uf_correction_and_cycle_exactness",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:fpga",
+        "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
+        "declaration": "sparse_fastpath_10k_latency_2_8x_reduction_and_zero_backlog",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:fuzzing",
+        "lean_file": "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
+        "declaration": "five_pass_differential_compiler_equivalence",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+        "declaration": "evalPassSeq_preserves_semantics",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+        "declaration": "hazardA_ssa_todd_strict_noncommutativity",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+        "declaration": "hazardB_mbu_todd_strict_noncommutativity",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+        "declaration": "hazardC_rank1_conjugate_block_lu_soundness_and_ebit_saving",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+        "declaration": "canonical_pipeline_strictly_dominates_suboptimal_schedules",
+        "zero_sorry_admit_axiom": true
       }
     ],
     "kernel_runs": [
       {
         "lean_file": "proofs/adversarial_catch_audit_and_sota_comparison_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 591.89
+        "elapsed_ms": 939.6
       },
       {
         "lean_file": "proofs/bivariate_bicycle_qldpc_and_0dsp_backlog_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 526.4
+        "elapsed_ms": 762.31
       },
       {
         "lean_file": "proofs/dqi_opi_and_parallel_walker_bitonic_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 359.52
+        "elapsed_ms": 677.75
       },
       {
         "lean_file": "proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 496.11
+        "elapsed_ms": 869.06
       },
       {
         "lean_file": "proofs/wire_level_symbolic_type_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1509.58
+        "elapsed_ms": 2391.18
       },
       {
         "lean_file": "proofs/select_swap_qroam_crt_kawamura_u2_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2398.24
+        "elapsed_ms": 3060.33
       },
       {
         "lean_file": "proofs/pareto_inplace_aes_slp_asymmetric_mbu_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 7493.48
+        "elapsed_ms": 10455.15
       },
       {
         "lean_file": "proofs/early_mbu_phase_only_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 17348.63
+        "elapsed_ms": 25523.96
       },
       {
         "lean_file": "proofs/qphys_graded_resource_semiring_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2387.47
+        "elapsed_ms": 1816.54
       },
       {
         "lean_file": "proofs/differential_compiler_mutation_soundness_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1609.66
+        "elapsed_ms": 1312.47
       },
       {
         "lean_file": "proofs/lakefillq_unified_compiler_elaboration_and_qasm3_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2238.79
+        "elapsed_ms": 3106.39
       },
       {
         "lean_file": "proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1480.61
+        "elapsed_ms": 1766.48
       },
       {
         "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1699.07
+        "elapsed_ms": 2829.98
       },
       {
         "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1646.58
+        "elapsed_ms": 3100.36
       },
       {
         "lean_file": "proofs/lakefillq_block_encoding_lcu_qsvt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 777.5
+        "elapsed_ms": 1760.79
       },
       {
         "lean_file": "proofs/lakefillq_bug_class_prevention_type_system_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1683.55
+        "elapsed_ms": 2384.87
       },
       {
         "lean_file": "proofs/lakefillq_algorithmic_optimizations_and_3mode_scaling_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 63191.09
+        "elapsed_ms": 77635.96
       },
       {
         "lean_file": "proofs/sota_ecc_rsa_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1801.92
+        "elapsed_ms": 1677.31
       },
       {
         "lean_file": "proofs/sota_symmetric_hash_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1317.95
+        "elapsed_ms": 1838.8
       },
       {
         "lean_file": "proofs/sota_qisd_dqi_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1016.22
+        "elapsed_ms": 1675.71
       },
       {
         "lean_file": "proofs/sota_qualtran_cobble_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 645.92
+        "elapsed_ms": 1362.98
       },
       {
         "lean_file": "proofs/lakefillq_graded_coeffect_uniqueness_place_effect_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 6018.68
+        "elapsed_ms": 10284.4
       },
       {
         "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2872.98
+        "elapsed_ms": 4204.42
       },
       {
         "lean_file": "proofs/lakefillq_qasm_python_linter_lifting_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3412.78
+        "elapsed_ms": 4539.93
       },
       {
         "lean_file": "proofs/lakefillq_noisy_optical_link_distillation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1640.03
+        "elapsed_ms": 1672.32
       },
       {
         "lean_file": "proofs/lakefillq_multipass_diagnostic_provenance_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1305.35
+        "elapsed_ms": 1182.69
       },
       {
         "lean_file": "proofs/lakefillq_holistic_modular_duoidal_cohesion_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1238.68
+        "elapsed_ms": 1726.8
       },
       {
         "lean_file": "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2387.71
+        "elapsed_ms": 2595.32
       },
       {
         "lean_file": "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2474.44
+        "elapsed_ms": 2801.12
       },
       {
         "lean_file": "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1250.24
+        "elapsed_ms": 1239.71
       },
       {
         "lean_file": "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2477.2
+        "elapsed_ms": 2928.64
+      },
+      {
+        "lean_file": "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
+        "return_code": 0,
+        "elapsed_ms": 3389.09
+      },
+      {
+        "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+        "return_code": 0,
+        "elapsed_ms": 9123.25
       }
     ]
   },

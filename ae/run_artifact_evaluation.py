@@ -12,7 +12,7 @@ Supports two execution modes:
                  statement-integrity auditing, and 5-gate GFM/link/AE hygiene.
   --mode full  : Complete end-to-end reproduction executing all LakefillQ
                  compiler, multi-block XAG/FRAIG, e-graph simulator, 0-DSP RTL
-                 Z3 + 80,000-cycle Stim co-simulation, 124-claim LaTeX/BibTeX
+                 Z3 + 80,000-cycle Stim co-simulation, 167-claim LaTeX/BibTeX
                  manifest, master Lean 4.35.0 proof kernel, and Haskell/OCaml
                  quantum type-theory & simulator verifiers.
 """
@@ -715,12 +715,12 @@ def run_evaluation(mode: str, json_out: Optional[str] = None) -> int:
         steps.extend(
             [
                 (
-                    "Paper 124-Claim & LaTeX/BibTeX Manifest",
+                    "Paper 167-Claim & LaTeX/BibTeX Manifest",
                     lambda: check_python_verifier(
                         tc,
                         env,
                         "reproducers/verify_lakefillq_paper_claims_and_latex_manifest.py",
-                        "124 JSON claims, 21 formal labels, 31 Lean runs, 120 BibTeX entries PASS",
+                        "167 JSON claims, 21 formal labels, 33 Lean runs, 120 BibTeX entries PASS",
                     ),
                 ),
                 (

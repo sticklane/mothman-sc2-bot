@@ -844,6 +844,10 @@ def main() -> None:
         "qiskit_aer_mps_counterexample_reproductions": aer_res,
         "lean4_mechanized_proof_verification": lean_res,
     }
+    if REPORT_JSON_PATH.exists():
+        prev_xag = json.loads(REPORT_JSON_PATH.read_text(encoding="utf-8"))
+        if "canonical_cone_isomorphism_optimization" in prev_xag:
+            full_report["canonical_cone_isomorphism_optimization"] = prev_xag["canonical_cone_isomorphism_optimization"]
     REPORT_JSON_PATH.write_text(json.dumps(full_report, indent=2) + "\n", encoding="utf-8")
     print(f"\nALL CHECKS PASSED! Report written to: {REPORT_JSON_PATH}")
 

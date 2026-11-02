@@ -859,5 +859,298 @@
         "vacuous_or_bare_tautology": false
       }
     ]
+  },
+  "canonical_cone_isomorphism_optimization": {
+    "status": "PASS",
+    "lean4_verification": {
+      "lean_file": "proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean",
+      "kernel_verified": true,
+      "compile_time_ms": 1134.9,
+      "theorem_count": 22,
+      "small_proof_count": 22,
+      "kernel_violations": 0,
+      "tautologies": 0,
+      "sanitizer_violations": 0,
+      "theorems": [
+        "xag_lit_not_involution_and_semantics",
+        "xag_smart_xor_self_cancels",
+        "xag_smart_xor_preserves_semantics",
+        "xag_smart_and_zero_self_and_not_self",
+        "evalXagLit_zero_and_one",
+        "xag_smart_and_preserves_semantics",
+        "sim_signature_mismatch_refutes_xag_equivalence",
+        "kickbackSign_xor_homomorphism",
+        "bilinear_xag_mbu_collapses_arbitrary_degree_to_zero",
+        "bilinear_xag_zero_coeff_implies_unit_quantum_phase",
+        "multiround_mbu_session_total_quantum_phase_unit",
+        "xag_circuit_linear_node_bound",
+        "gidney_carry_explicit_anf_exponential_closed_form",
+        "central_binom_step_ge_double",
+        "central_binomial_anf_exponential_lower_bound",
+        "evalTseitinDag_prefix_invariant",
+        "tseitin_dag_model_agrees_with_semantics",
+        "tseitin_canonical_eval_satisfies_defs",
+        "tseitin_miter_unsat_iff_xag_domain_equivalence",
+        "cut_sweeping_local_unsat_implies_global_multiround_soundness",
+        "cone_isomorphism_relabeling_soundness",
+        "zero_flag_k1_k2_unrolled_escalation_soundness"
+      ]
+    },
+    "racket_xag_fraig_typechecker": {
+      "status": "PASS",
+      "multiblock_sound_benchmarks": [
+        {
+          "id": "AES128_10round_pareto_290q",
+          "inference_time_ms": "915.723",
+          "qubits": 290,
+          "rounds": 10,
+          "temp_and_gates": 12240,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 9280,
+            "live_reachable_and_nodes": 6800,
+            "live_reachable_xag_nodes": 66784,
+            "mbu_sessions_checked": 12240,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 12240,
+            "total_and_nodes_allocated": 6800,
+            "total_xag_nodes_allocated": 87901,
+            "verified_cut_lemma_reuses": 159,
+            "z3_cut_sweep_queries": 1
+          },
+          "z3_miter_status": "UNSAT"
+        },
+        {
+          "id": "AES256_14round_pareto_418q",
+          "inference_time_ms": "1382.679",
+          "qubits": 418,
+          "rounds": 14,
+          "temp_and_gates": 17000,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 12992,
+            "live_reachable_and_nodes": 9384,
+            "live_reachable_xag_nodes": 95596,
+            "mbu_sessions_checked": 17000,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 17000,
+            "total_and_nodes_allocated": 9384,
+            "total_xag_nodes_allocated": 125727,
+            "verified_cut_lemma_reuses": 223,
+            "z3_cut_sweep_queries": 1
+          },
+          "z3_miter_status": "UNSAT"
+        },
+        {
+          "explicit_anf_3round_probe": {
+            "aborted_reason": "monomial_cap_exceeded",
+            "completed": false,
+            "elapsed_ms": "149.464",
+            "gates_completed_before_stop": 3568,
+            "peak_single_wire_monomials": 35912,
+            "total_final_or_abort_monomials": 260732
+          },
+          "id": "Keccak_f200_18round_session_3845q",
+          "inference_time_ms": "4709.240",
+          "qubits": 3845,
+          "rounds": 18,
+          "temp_and_gates": 3600,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 0,
+            "live_reachable_and_nodes": 3600,
+            "live_reachable_xag_nodes": 28777,
+            "mbu_sessions_checked": 3600,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 3600,
+            "total_and_nodes_allocated": 3600,
+            "total_xag_nodes_allocated": 30801,
+            "verified_cut_lemma_reuses": 0,
+            "z3_cut_sweep_queries": 0
+          },
+          "z3_miter_status": "UNSAT"
+        },
+        {
+          "bits": 64,
+          "explicit_anf_probe": {
+            "aborted_reason": "timeout_cap_exceeded",
+            "completed": false,
+            "elapsed_ms": "300.134",
+            "gates_completed_before_stop": 44,
+            "peak_single_wire_monomials": 3070,
+            "total_final_or_abort_monomials": 12377
+          },
+          "id": "Gidney_64bit_ripple_adder_191q",
+          "inference_time_ms": "3.821",
+          "qubits": 191,
+          "temp_and_gates": 63,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 0,
+            "live_reachable_and_nodes": 63,
+            "live_reachable_xag_nodes": 819,
+            "mbu_sessions_checked": 63,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 63,
+            "total_and_nodes_allocated": 63,
+            "total_xag_nodes_allocated": 868,
+            "verified_cut_lemma_reuses": 0,
+            "z3_cut_sweep_queries": 0
+          },
+          "z3_miter_status": "UNSAT"
+        },
+        {
+          "bits": 64,
+          "id": "Gidney_64bit_modular_adder_mod_2p64m59_259q",
+          "inference_time_ms": "17286.944",
+          "modulus_str": "2^64 - 59",
+          "qubits": 259,
+          "temp_and_gates": 447,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 0,
+            "live_reachable_and_nodes": 190,
+            "live_reachable_xag_nodes": 1511,
+            "mbu_sessions_checked": 191,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 447,
+            "total_and_nodes_allocated": 254,
+            "total_xag_nodes_allocated": 2162,
+            "verified_cut_lemma_reuses": 0,
+            "z3_cut_sweep_queries": 1
+          },
+          "z3_miter_status": "UNSAT"
+        },
+        {
+          "domain": "wt <= 2",
+          "id": "BCH_15_7_5_peterson_berlekamp_wt2_49q",
+          "inference_time_ms": "22.812",
+          "qubits": 49,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 0,
+            "live_reachable_and_nodes": 0,
+            "live_reachable_xag_nodes": 59,
+            "mbu_sessions_checked": 0,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 295,
+            "total_and_nodes_allocated": 99,
+            "total_xag_nodes_allocated": 581,
+            "verified_cut_lemma_reuses": 0,
+            "z3_cut_sweep_queries": 1
+          },
+          "z3_miter_status": "UNSAT"
+        }
+      ],
+      "deep_multiround_bug_injections_rejected": 4,
+      "canonical_cone_and_loop_escalation": {
+        "k1_uniform_aes128_loop": {
+          "escalation_stage": "k=1",
+          "inference_time_ms": "221.534",
+          "k1_attempted": true,
+          "k2_attempted": false,
+          "kR_attempted": false,
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 928,
+            "live_reachable_and_nodes": 680,
+            "live_reachable_xag_nodes": 7595,
+            "mbu_sessions_checked": 1224,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 1224,
+            "total_and_nodes_allocated": 680,
+            "total_xag_nodes_allocated": 11364,
+            "verified_cut_lemma_reuses": 15,
+            "z3_cut_sweep_queries": 1
+          }
+        },
+        "k2_ping_pong_loop": {
+          "escalation_stage": "k=2",
+          "inference_time_ms": "4.186",
+          "k1_attempted": true,
+          "k2_attempted": true,
+          "kR_attempted": false,
+          "logical_well_typed": true,
+          "u1_ok": true,
+          "u4_ok": true,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 0,
+            "live_reachable_and_nodes": 1,
+            "live_reachable_xag_nodes": 7,
+            "mbu_sessions_checked": 1,
+            "nonzero_u4_coeffs_at_exit": 0,
+            "temp_and_gates_checked": 1,
+            "total_and_nodes_allocated": 1,
+            "total_xag_nodes_allocated": 7,
+            "verified_cut_lemma_reuses": 0,
+            "z3_cut_sweep_queries": 0
+          }
+        },
+        "kR_heterogeneous_buggy_loop": {
+          "escalation_stage": "k=R",
+          "inference_time_ms": "1.871",
+          "k1_attempted": true,
+          "k2_attempted": true,
+          "kR_attempted": true,
+          "logical_well_typed": false,
+          "u1_ok": true,
+          "u4_ok": false,
+          "xag_stats": {
+            "fraig_pivot_substitutions": 0,
+            "live_reachable_and_nodes": 0,
+            "live_reachable_xag_nodes": 4,
+            "mbu_sessions_checked": 6,
+            "nonzero_u4_coeffs_at_exit": 1,
+            "temp_and_gates_checked": 6,
+            "total_and_nodes_allocated": 1,
+            "total_xag_nodes_allocated": 6,
+            "verified_cut_lemma_reuses": 0,
+            "z3_cut_sweep_queries": 1
+          }
+        }
+      }
+    },
+    "python_infer_qsub": {
+      "status": "PASS",
+      "unrolled_canonical_cone_isomorphism_metrics": {
+        "aes128_unrolled": {
+          "uncached_z3_queries": 350,
+          "cached_z3_queries": 12,
+          "cut_cache_hits": 338,
+          "uncached_time_ms": 360.546,
+          "cached_time_ms": 65.579,
+          "query_reduction_x": 29.17,
+          "wall_time_speedup_x": 5.5
+        },
+        "aes256_unrolled": {
+          "uncached_z3_queries": 490,
+          "cached_z3_queries": 16,
+          "cut_cache_hits": 474,
+          "uncached_time_ms": 463.93,
+          "cached_time_ms": 44.769,
+          "query_reduction_x": 30.62,
+          "wall_time_speedup_x": 10.36
+        },
+        "keccak_f200_unrolled": {
+          "uncached_z3_queries": 1476,
+          "cached_z3_queries": 20,
+          "cut_cache_hits": 1456,
+          "uncached_time_ms": 737.241,
+          "cached_time_ms": 61.434,
+          "query_reduction_x": 73.8,
+          "wall_time_speedup_x": 12.0
+        }
+      },
+      "negative_buggy_loops_rejected": "4/4",
+      "mid_round_full_cipher_bugs_rejected": "2/2"
+    }
   }
 }

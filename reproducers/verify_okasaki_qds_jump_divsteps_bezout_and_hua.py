@@ -1561,6 +1561,26 @@ def main() -> int:
         f"  [Lean 4] Formal Proof Suite   : {lean_res['total_theorems_with_helpers']}/{lean_res['total_theorems_with_helpers']} theorems "
         f"(max {lean_res['max_proof_lines']} lines <= 14, 0 sorry, 0 axiom) in {lean_res['verification_ms']:.1f} ms"
     )
+    report_payload = {
+        "status": "PASS",
+        "verifier": "reproducers/verify_okasaki_qds_jump_divsteps_bezout_and_hua.py",
+        "okasaki_qds_taxonomy": part_a,
+        "jump16_zipper_divsteps": fix1,
+        "bezout_history_free_reverse": fix2,
+        "adaptive_bezout_pebble_schedule": opt2,
+        "lazy_skew_carry_save": fix3,
+        "gidney_mbu_temporary_and": fix4,
+        "hua_in_place_modular_squaring": fix5,
+        "pareto_and_c_benchmarks": part_c,
+        "multi_qpu_parallelism_regimes": part_d,
+        "composed_gate_level_multi_qpu_verifier": part_e,
+        "lean4_mechanized_proofs": lean_res,
+        "verification_ms": round(total_ms, 2),
+    }
+    out_json = REPO_ROOT / "reproducers" / "artifacts" / "okasaki_qds_jump_divsteps_bezout_and_hua_report.json"
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(report_payload, indent=2) + "\n", encoding="utf-8")
+
     print("-" * 114)
     print(f"  OVERALL STATUS: OKASAKI-QDS-1 VERIFIED (0 DISCREPANCIES) in {total_ms:.1f} ms")
     print("=" * 114)

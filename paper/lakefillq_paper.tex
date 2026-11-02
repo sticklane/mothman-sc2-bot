@@ -141,7 +141,7 @@ Quantum algorithms cannot overwrite live registers in place without entangling c
 
 We present \LakefillQ{}, a functional quantum programming language and hardware-graded compiler that brings purely functional data structures to fault-tolerant quantum circuits without hardware QRAM assumptions. Our central insight is that wire sharing and physical resource consumption must be governed by a single compositional typing judgment, $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$, pairing a five-point ordered duoidal wire-capability algebra ($\CapZero < \CapBorrowZ < \CapTaintedX < \CapLin < \CapUniq$) with a hardware-graded cost vector $e = (W_{\mathrm{peak}}, W_{\mathrm{clean}}, \Phi, \alpha, \varepsilon, E_{\mathrm{ebit}})$ and nonlinear repetition/partition action $r \triangleright e$. Without user proof annotations, \LakefillQ{} discharges domain-restricted erasure, quotient canonicality, and bilinear $X$-basis phase-taint obligations via XOR-AND graph equivalence sweeping, SMT solving, and $O(1)$-query $k$-inductive loop-invariant inference, lowers programs through non-Clifford ZX phase-polynomial e-graph saturation and chordal register coloring, and emits dynamic OpenQASM~3.0 and Stim circuits across single-machine, parallel multi-QPU, and serial multishot regimes.
 
-Across 60 compiled benchmarks, \LakefillQ{} establishes new Pareto frontiers on open problems: 256-bit elliptic-curve discrete logarithms in 1,088 logical qubits and $14.34 \times 10^6$ Toffolis; RSA-2048 factoring in 1,364 logical qubits without incurring the $\Delta d = +2$ code-distance penalty of sequential carry rippling; a $10.46\times$ width reduction (to 9,984 qubits) for coherent Decoded Quantum Interferometry (DQI), extended to non-binary Hermitian, Suzuki, and lifted bivariate algebraic-geometry codes exceeding Reed--Solomon blocklength bounds; and a $22.48\times$ state-preparation Toffoli reduction for FeMoCo tensor-hypercontracted QSVT. All metatheory, data-structure invariants, and lowering passes are mechanized in 2,397 Lean~4.35.0 theorems across 86 modules with zero axioms or incomplete proofs.
+Across 60 compiled benchmarks, \LakefillQ{} establishes new Pareto frontiers on open problems: 256-bit elliptic-curve discrete logarithms in 1,088 logical qubits and $14.34 \times 10^6$ Toffolis; RSA-2048 factoring in 1,364 logical qubits without incurring the $\Delta d = +2$ code-distance penalty of sequential carry rippling; a $10.46\times$ width reduction (to 9,984 qubits) for coherent Decoded Quantum Interferometry (DQI), extended to non-binary Hermitian, Suzuki, and lifted bivariate algebraic-geometry codes exceeding Reed--Solomon blocklength bounds; and a $22.48\times$ state-preparation Toffoli reduction for FeMoCo tensor-hypercontracted QSVT. All metatheory, data-structure invariants, and lowering passes are mechanized in 2,418 Lean~4.35.0 theorems across 87 modules with zero axioms or incomplete proofs.
 \end{abstract}
 
 \maketitle
@@ -173,8 +173,8 @@ This paper makes four main contributions:
 \begin{enumerate}
   \item \textbf{A Unified Substructural and Hardware-Graded Quantum Calculus (\S\ref{sec:overview}--\S\ref{sec:calculus}).} We formalize $\lambda_{\mathrm{LFQ}}$ and its six-primitive kernel $\lambda_{\mathrm{LFQ}}^{\mathrm{kern}}$, showing how domain-restricted erasure ($\mathsf{U1}$), quotient canonicality ($\mathsf{U2}$), orthogonal branching ($\mathsf{U3}$), bilinear $X$-basis phase cancellation ($\mathsf{U4}$), hardware error/decoder/crosstalk grades ($\Phi_1$--$\Phi_3$), Chebyshev block-encoding fusion ($\QBlock$), and three-span error diagnostics all arise as projections of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$, scaled to multi-round ciphers via automatic XOR-AND graph (XAG/FRAIG) cut-sweeping and $O(1)$-query $k$-inductive loop-invariant inference.
   \item \textbf{Purely Functional Quantum Data Structures (\S\ref{sec:qds}).} Grounded in two sharp uncomputation laws---an exact degree-$2$ characterization of Clifford MBU (Proposition~\ref{prop:p1}) and an $h+1$ register bound for two-pass tree pebbling (Proposition~\ref{prop:p2})---we design nine core and four bootstrapped functional quantum data structures in \texttt{\#lang lakefillq} that confine non-Clifford work to narrow foci, decouple carry chains, and guarantee history-independent state representations without QRAM.
-  \item \textbf{ZX Phase-Polynomial e-Graph Lowering and Multi-QPU Partitioning (\S\ref{sec:compiler}).} We build a three-dialect compiler ($\LakefillQ{} \to \RevIR{} \to \MachineISA{}$) combining chordal SSA wire reuse, congruence-closed e-graph saturation with non-Clifford ZX phase-polynomial spider fusion and shared-control twin-CCZ rules~\cite{kissinger2020tcount}, Bellman--Knuth hardware extraction across four QEC/NISQ profiles, 64-bit bitboard Meet-in-the-Middle (MITM) leaf synthesis, and convex $M^* \le 256$ multi-QPU partitioning with Law-$\mathsf{U4}$ GHZ cat-disentangling.
-  \item \textbf{Empirical Validation, Open-Problem Advances, and Mechanized Proofs (\S\ref{sec:eval}).} Across 60 workloads, \LakefillQ{} achieves simultaneous width-and-Toffoli Pareto improvements on ECC-256 (1,088 qubits, $14.34\times 10^6$ Toffolis), code-distance-preserving RSA-2048/4096 factoring ($d=27$ vs.\ $d=29$), $10.46\times$ narrower OPI DQI plus non-binary Hermitian, Suzuki, and lifted bivariate Early-MBU DQI beating Reed--Solomon length bounds, and $22.48\times$ cheaper FeMoCo QSVT uncomputation. We further confirm across nine third-party quantum libraries (14 concrete violations) that $\lambda_{\mathrm{LFQ}}$'s side conditions rule out real-world circuit hazards rather than artificial pathologies, pass six-engine differential fuzzing and 12/12 mutation kills, and mechanize all metatheory in 2,397 zero-axiom Lean~4.35.0 theorems across 86 modules.
+  \item \textbf{Canonical Pass-Ordered ZX e-Graph Lowering and Multi-QPU Partitioning (\S\ref{sec:compiler}).} We build a three-dialect compiler ($\LakefillQ{} \to \RevIR{} \to \MachineISA{}$) whose coupled pass schedule saturates non-Clifford ZX phase-polynomial spider, twin-\texttt{CCZ}, and $\mathcal{RM}(3,n)$ TODD rules~\cite{kissinger2020tcount} \emph{before} Bellman--Knuth MBU lowering and chordal SSA wire coloring, paired with 64-bit bitboard Meet-in-the-Middle (MITM) leaf synthesis and convex $M^* \le 256$ multi-QPU partitioning with rank-$r$ block-LU and Law-$\mathsf{U4}$ tele-phase factoring.
+  \item \textbf{Empirical Validation, Open-Problem Advances, and Mechanized Proofs (\S\ref{sec:eval}).} Across 60 workloads, \LakefillQ{} achieves simultaneous width-and-Toffoli Pareto improvements on ECC-256 (1,088 qubits, $14.34\times 10^6$ Toffolis), code-distance-preserving RSA-2048/4096 factoring ($d=27$ vs.\ $d=29$), $10.46\times$ narrower OPI DQI plus non-binary Hermitian, Suzuki, and lifted bivariate Early-MBU DQI beating Reed--Solomon length bounds, and $22.48\times$ cheaper FeMoCo QSVT uncomputation. We further confirm across nine third-party quantum libraries (14 concrete violations) that $\lambda_{\mathrm{LFQ}}$'s side conditions rule out real-world circuit hazards rather than artificial pathologies, pass six-engine differential fuzzing and 12/12 mutation kills, and mechanize all metatheory in 2,418 zero-axiom Lean~4.35.0 theorems across 87 modules.
 \end{enumerate}
 
 % ============================================================================
@@ -371,7 +371,7 @@ Bounded loop iteration $R \triangleright e_{\mathrm{step}}$ and two genuinely qu
   {\Gamma \vdash \mathsf{erase}_{\mathcal{D}}(f, g, \vec{u}) : \mathcal{Q}_{e}(\mathsf{Unit}) \dashv \Gamma[\vec{u} \mapsto \CapZero]}
 \\[12pt]
 \tyrule{T-WithinMBU}
-  {\Gamma, \vec{u}:\CapZero \vdash C : \mathcal{Q}_{e_C}(\mathsf{Unit}) \dashv \Gamma_1, \vec{u}:\CapUniq \quad \Gamma_1, \vec{u}:\CapBorrowZ \vdash A : \mathcal{Q}_{e_A}(B) \dashv \Gamma_2, \vec{u}:\CapBorrowZ \quad \mathrm{Deg}_{\mathbb{F}_2}(u_i) \le 2}
+  {\Gamma, \vec{u}:\CapZero \vdash C : \mathcal{Q}_{e_C}(\mathsf{Unit}) \dashv \Gamma_1, \vec{u}:\CapUniq \quad \Gamma_1, \vec{u}:\CapBorrowZ \vdash A : \mathcal{Q}_{e_A}(B) \dashv \Gamma_2, \vec{u}:\CapBorrowZ \quad \deg_{\mathbb{F}_2}(u_i) \le 2}
   {\Gamma \vdash \texttt{(within-apply-mbu } C\; A\; \vec{u}\texttt{)} : \mathcal{Q}_{e_C \mathbin{;;} e_A \mathbin{;;} e_{\mathrm{mbu}}}(B) \dashv \Gamma_2}
 \\[12pt]
 \tyrule{T-QSVTFused}
@@ -399,7 +399,7 @@ The logical projection $\QSub$ prevents four distinct bugs that cause silent ent
 \end{itemize}
 
 \paragraph{Automatic Escalation from Sparse ANF to XAG/FRAIG + Z3 and Canonical Cone Isomorphism.}
-Programmers write zero proof annotations. For shallow arithmetic and tree gadgets, \LakefillQ{} evaluates exact wire-level Algebraic Normal Form (ANF) polynomials over $\mathbb{F}_2$ ($36\text{ ms}$ in Racket across our verification corpus, cross-checked in $489\text{ ms}$ via Z3). On multi-round cryptographic permutations where explicit ANF degree grows exponentially ($2^{128}$ monomials), the checker automatically detects when intermediate fan-in cones exceed 64 monomials and escalates---with zero CLI flags---to a hash-consed XOR-AND Graph (XAG) engine with structural FRAIG reductions and Z3 Tseitin cut-sweeping. Because each individual \texttt{TempAND} $u_k = f_k(x) \land g_k(x)$ has bilinear degree $(1,1)$ in its immediate XAG inputs, baseline full-cipher unrolled cut-sweeping discharges 10-round AES-128 (340 \texttt{TempAND}s) in $3.06\text{ s}$, 14-round AES-256 (510 \texttt{TempAND}s) in $4.25\text{ s}$, 18-round Keccak-$f[200]$ (450 \texttt{TempAND}s) in $9.32\text{ s}$, and 64-bit Gidney ripple addition in $3.39\text{ ms}$. Furthermore, 1-WL canonical sub-DAG cone hashing modulo input-wire relabeling (\texttt{xag-cone-canonical-signature}) and incremental Z3 \texttt{push}/\texttt{pop} context reuse prove one parallel S-box or $\chi$-row cone in Z3 and discharge all remaining isomorphic lanes in $O(1)$---cutting native Racket XAG Z3 queries from $48 \to 1$ on AES-128 ($991.3\text{ ms}$, $159$ isomorphic S-box reuses) and $59 \to 1$ on AES-256 ($1{,}465.5\text{ ms}$, $223$ reuses), and accelerating unrolled full-cipher sweeping by $5.39\times$--$16.55\times$ ($74.3\text{ ms}$ on AES-128, $47.8\text{ ms}$ on AES-256, and $48.1\text{ ms}$ on Keccak-$f[200]$; $29.17\times$--$73.80\times$ fewer Z3 queries).
+Programmers write zero proof annotations. For shallow arithmetic and tree gadgets, \LakefillQ{} evaluates exact wire-level Algebraic Normal Form (ANF) polynomials over $\mathbb{F}_2$ ($36\text{ ms}$ in Racket across our verification corpus, cross-checked in $489\text{ ms}$ via Z3). On multi-round cryptographic permutations where explicit ANF degree grows exponentially ($2^{128}$ monomials), the checker automatically detects when intermediate fan-in cones exceed 64 monomials and escalates---with zero CLI flags---to a hash-consed XOR-AND Graph (XAG) engine with structural FRAIG reductions and Z3 Tseitin cut-sweeping. Because each individual \texttt{TempAND} $u_k = f_k(x) \land g_k(x)$ has bilinear degree $(1,1)$ in its immediate XAG inputs, baseline full-cipher unrolled cut-sweeping discharges 10-round AES-128 (340 \texttt{TempAND}s) in $3.06\text{ s}$, 14-round AES-256 (510 \texttt{TempAND}s) in $4.25\text{ s}$, 18-round Keccak-$f[200]$ (450 \texttt{TempAND}s) in $9.32\text{ s}$, and 64-bit Gidney ripple addition in $3.39\text{ ms}$. Furthermore, 1-WL canonical sub-DAG cone hashing modulo input-wire relabeling (\texttt{xag-cone-canonical-signature}) proves one parallel S-box or $\chi$-row cone in Z3 and discharges all remaining isomorphic lanes in $O(1)$---cutting native Racket XAG Z3 queries from $48 \to 1$ on AES-128 ($915.7\text{ ms}$, $159$ isomorphic S-box reuses) and $59 \to 1$ on AES-256 ($1{,}382.7\text{ ms}$, $223$ reuses), while our standalone incremental Z3 \texttt{push}/\texttt{pop} unrolled sweeper accelerates full-cipher checking by $5.50\times$--$12.00\times$ ($65.6\text{ ms}$ on AES-128, $44.8\text{ ms}$ on AES-256, and $61.4\text{ ms}$ on Keccak-$f[200]$; $29.17\times$--$73.80\times$ fewer Z3 queries).
 
 \paragraph{Zero-Flag $k$-Inductive Loop-Invariant Inference and Escalation (\texttt{for/fold-loop}).}
 When iterated rounds are written as bounded functional loops (\texttt{for/fold-loop}, as in \texttt{inductive\_loop\_aes\_keccak.lfq}) rather than unrolled straight-line blocks, single-step inductive checking ($k=1$) trades inter-round relational completeness for $O(1)$-query speed by abstracting the loop-carried state as a fresh symbolic vector $\vec{s}_r$: this succeeds in $O(1)$ Z3 queries whenever each round is scratch- and taint-closed ($\Delta W_{\mathrm{dirty}} = 0$, $\Phi_X^{\mathrm{escape}} \equiv 0$), but would over-approximate loops that carry live \texttt{TempAND}s or $\CapTaintedX$ phases across round boundaries. To preserve both $O(1)$-query speed and full completeness with \emph{zero CLI flags}, \texttt{lakefillqc} automatically escalates along $k=1 \to k=2 \to k=R$: it first checks $k=1$ ($\Gamma_{\mathrm{inv}} \vdash B_{\mathrm{step}} : \mathcal{Q}_{e_{\mathrm{step}}}(A) \dashv \Gamma_{\mathrm{inv}}$, $e_{\mathrm{loop}} = R \triangleright e_{\mathrm{step}}$), escalates to $k=2$ if two-round coupled cones cancel at even boundaries, and falls back to $k=R$ full unrolled XAG/FRAIG cut-sweeping for cross-loop forward-compute/reverse-uncompute sessions. On round-closed sponges, $k=1$ succeeds immediately and accelerates Z3 solving over $O(R)$ unrolled round checks by $16.78\times$ on AES-128 ($5.75\text{ ms}$ vs.\ $96.52\text{ ms}$; $3$ vs.\ $30$ Z3 calls), $15.70\times$ on AES-256 ($5.46\text{ ms}$), $17.89\times$ on Keccak-$f[200]$ ($3.90\text{ ms}$), $19.04\times$ on 20-round ChaCha20 ($3.79\text{ ms}$), and $1{,}431.60\times$ on $R=1{,}000$ iterated permutations ($2.99\text{ ms}$ vs.\ $4{,}278.42\text{ ms}$; $2$ vs.\ $2{,}000$ Z3 calls), while deterministically rejecting $4/4$ defective loop invariants.
@@ -582,20 +582,6 @@ Classical heap and tree reductions often store explicit child pointers or AVL ba
 For $k$ leaves of width $w$, \texttt{fold-braun} allocates zero pointer or balance-tag qubits, completes in exact tree depth $\lceil \log_2 k \rceil$, and consumes $(k - 1)w$ Toffoli gates under MBU cleanup.
 \end{proposition}
 
-\begin{lstlisting}[language=LakefillLisp,caption={Composing \texttt{within-apply-mbu}, \texttt{focus-zipper}, and skew-binary local carry folding in \texttt{\#lang lakefillq}.},label={alg:qds_fam1}]
-;; O(1)-depth local skew-binary carry absorption on active limb focus `limb-k` + 2-bit rail `rail-k`
-(defqfree (skew-window-add #:wires ([addend (range 0 64)] [limb-k (range 64 128)] [rail-k (range 128 130)])
-                           #:scratch ([c64 (range 130 194)]))
-  (within-apply-mbu
-   (gidney-carry-chain addend limb-k c64)
-   (focus-zipper [fz (append limb-k rail-k) (append addend limb-k rail-k)]
-     (seq (gidney-sum-xor addend fz c64)
-          ;; Absorb carry-out c64[63] locally into 2-bit skew rail {0,1,2} without C-limb ripple:
-          (ccx (wref c64 63) (wref fz 64) (wref fz 65))
-          (cx  (wref c64 63) (wref fz 64))))
-   c64))
-\end{lstlisting}
-
 \begin{figure}[t]
 \centering
 \footnotesize
@@ -610,11 +596,25 @@ For $k$ leaves of width $w$, \texttt{fold-braun} allocates zero pointer or balan
 \label{fig:f3}
 \end{figure}
 
+\begin{lstlisting}[language=LakefillLisp,caption={Composing \texttt{within-apply-mbu}, \texttt{focus-zipper}, and skew-binary local carry folding in \texttt{\#lang lakefillq}.},label={alg:qds_fam1}]
+;; O(1)-depth local skew-binary carry absorption on active limb focus `limb-k` + 2-bit rail `rail-k`
+(defqfree (skew-window-add #:wires ([addend (range 0 64)] [limb-k (range 64 128)] [rail-k (range 128 130)])
+                           #:scratch ([c64 (range 130 194)]))
+  (within-apply-mbu
+   (gidney-carry-chain addend limb-k c64)
+   (focus-zipper [fz (append limb-k rail-k) (append addend limb-k rail-k)]
+     (seq (gidney-sum-xor addend fz c64)
+          ;; Absorb carry-out c64[63] locally into 2-bit skew rail {0,1,2} without C-limb ripple:
+          (ccx (wref c64 63) (wref fz 64) (wref fz 65))
+          (cx  (wref c64 63) (wref fz 64))))
+   c64))
+\end{lstlisting}
+
 \subsection{Family II: Packed B\'{e}zout Shift-Zippers and Binomial Pebble Schedules}
 \label{sec:qds_fam2}
 
 \paragraph{4. Packed B\'{e}zout Shift-Zipper (\texttt{PackedBezoutShiftZipper}).}
-Elliptic-curve discrete-logarithm (ECDLP) circuits spend most of their width and gates on modular inversion $|a^{-1} \bmod p\rangle$ via constant-time extended binary GCD (\texttt{divsteps})~\cite{roetteler2017,haner2020,bernsteinyang2019}, which tracks four $N$-bit integers: remainders $(f, g)$ and B\'{e}zout cofactors $(u, v)$ (or $(r, s)$). Naively storing all four $N$-bit registers requires $4N$ qubits ($1{,}024\text{ Q}$ at $N = 256$). Yet throughout binary GCD, the bit-lengths of $u$ and $r$ grow only as the bit-lengths of $f$ and $g$ shrink, obeying $\operatorname{len}(u) + \operatorname{len}(f) \le N + 1$ and $\operatorname{len}(v) + \operatorname{len}(g) \le N + 1$. \texttt{PackedBezoutShiftZipper} packs $(u, f)$ and $(v, g)$ head-to-tail into \emph{two} $N$-qubit double-ended shift-zippers around a $2J$-bit active LSB focus ($J = 16$), saving $2N = 512$ logical qubits on ECC-256. Furthermore, to compress modular multiplication $(x \cdot y \bmod p)$ inside point addition, we apply Hua's identity $x y = \binom{x+y}{2} - \binom{x}{2} - \binom{y}{2}$~\cite{hua1949} with explicit singular $\{0, 1\}$ endpoint corrections so Law~$\mathsf{U1}$ holds across all residues in $\mathbb{F}_p$.
+Elliptic-curve discrete-logarithm (ECDLP) circuits spend most of their width and gates on modular inversion $|a^{-1} \bmod p\rangle$ via constant-time extended binary GCD (\texttt{divsteps})~\cite{roetteler2017,haner2020,bernsteinyang2019}, which tracks four $N$-bit integers: remainders $(f, g)$ and B\'{e}zout cofactors $(u, v)$ (or $(r, s)$). Naively storing all four $N$-bit registers requires $4N$ qubits ($1{,}024\text{ Q}$ at $N = 256$). Yet throughout binary GCD, the bit-lengths of $u$ and $v$ grow only as the bit-lengths of $f$ and $g$ shrink, obeying $\operatorname{len}(u) + \operatorname{len}(f) \le N + 1$ and $\operatorname{len}(v) + \operatorname{len}(g) \le N + 1$. \texttt{PackedBezoutShiftZipper} packs $(u, f)$ and $(v, g)$ head-to-tail into \emph{two} $N$-qubit double-ended shift-zippers around a $2J$-bit active LSB focus ($J = 16$), saving $2N = 512$ logical qubits on ECC-256. Furthermore, to compress modular multiplication $(x \cdot y \bmod p)$ inside point addition, we apply Hua's identity $x y = \binom{x+y}{2} - \binom{x}{2} - \binom{y}{2}$~\cite{hua1949} with explicit singular $\{0, 1\}$ endpoint corrections so Law~$\mathsf{U1}$ holds across all residues in $\mathbb{F}_p$.
 
 \begin{proposition}[\texttt{PackedBezoutShiftZipper} $2N$-Qubit Packing and Totalized Hua Identity]
 \label{prop:p3_4}
@@ -622,7 +622,7 @@ Packing complementary-length pairs $(u, f)$ and $(v, g)$ around a $2J$-bit focus
 \end{proposition}
 
 \paragraph{5. Binomial Pebble Schedule (\texttt{BinomialPebbleSchedule}).}
-Across $2N = 512$ \texttt{divsteps}, the cumulative branch trajectory has algebraic degree $\deg_{\mathbb{F}_2} \gg 2$, so Proposition~\ref{prop:p1} forbids erasing the 512-step history via Clifford MBU alone, while storing a 1-bit swap flag per step costs $512$ history qubits. Grouping $J = 16$ steps into macro-windows yields $L = 32$ irreversible steps, which static Kr\'{a}lovi\v{c}--Bennett binomial pebbling~\cite{bennett1989,kralovic2001} spans using $s = 4$ pebbles of width $W = 16$ ($64$ pebble qubits total, since $\binom{4+4}{4} = 70 \ge 32$) in $109$ macro-evaluations instead of a $512$-qubit history tape. Moreover, because the active bit-lengths of $(f, g)$ shrink monotonically ($\operatorname{len}(f), \operatorname{len}(g) \le N - 16k$), high-order zipper limbs transition to $\CapBorrowZ$/\texttt{ErasedIdx} during the forward GCD sweep before cofactor accumulation; dynamically recycling these freed 16-bit limbs as temporary checkpoint pebbles ($s(k): 4 \to 6 \to 8$, obeying $\operatorname{len}(u) + \operatorname{len}(f) + 16\Delta s(k) \le 2N$) reduces $L = 32$ macro-window evaluations from $109$ to $67$ ($35$ forward $+ 32$ reverse, a $1.63\times$ reduction) at \emph{zero additional peak qubits} ($1{,}210\text{ Q}$ on ECC-256).
+Across $2N = 512$ \texttt{divsteps}, the cumulative branch trajectory has algebraic degree $\deg_{\mathbb{F}_2} \gg 2$, so Proposition~\ref{prop:p1} forbids erasing the 512-step history via Clifford MBU alone, while storing a 1-bit swap flag per step costs $512$ history qubits. Grouping $J = 16$ steps into macro-windows yields $L = 32$ irreversible steps, which static Kr\'{a}lovi\v{c}--Bennett binomial pebbling~\cite{bennett1989,kralovic2001} spans using $s = 4$ pebbles of width $W = 16$ ($64$ pebble qubits total, since $\binom{4+4}{4} = 70 \ge 32$) in $109$ macro-evaluations instead of a $512$-qubit history tape. Moreover, because the active bit-lengths of $(f, g)$ shrink monotonically ($\operatorname{len}(f), \operatorname{len}(g) \le N - 16k$), high-order zipper limbs transition to $\CapBorrowZ$/$\CapZero$ during the forward GCD sweep before cofactor accumulation; dynamically recycling these freed 16-bit limbs as temporary checkpoint pebbles ($s(k): 4 \to 6 \to 8$, obeying $\operatorname{len}(u) + \operatorname{len}(f) + 16\Delta s(k) \le 2N$) reduces $L = 32$ macro-window evaluations from $109$ to $67$ ($35$ forward $+ 32$ reverse, a $1.63\times$ reduction) at \emph{zero additional peak qubits} ($1{,}210\text{ Q}$ in the standalone affine GCD harness; $1{,}088\text{ Q}$ with signed-window packing in \S\ref{sec:sota}).
 
 \begin{proposition}[\texttt{BinomialPebbleSchedule} Space--Time Optimality]
 \label{prop:p3_5}
@@ -727,12 +727,15 @@ Once $\lambda_{\mathrm{LFQ}}^{\mathrm{kern}}$ certifies logical purity ($\mathsf
 \subsection{Non-Clifford ZX Phase-Polynomial Saturation and Four-Target Extraction}
 \label{sec:egraph}
 
-After asymmetric \texttt{TempAND}/MBU lowering and chordal SSA wire coloring, \LakefillQ{} populates a congruence-closed \RevIR{} e-graph combining reversible Boolean identities, target gadget decompositions (\texttt{RCCX}, \texttt{MBU+XY4}, \texttt{RydbergCCZ}, \texttt{MBU+QROAM}), and three non-Clifford ZX phase-polynomial rewrite families~\cite{duncan2020,kissinger2020tcount,amy2014}:
+Prior to physical MBU barrier emission and chordal SSA wire coloring, \LakefillQ{} populates a congruence-closed \RevIR{} e-graph combining reversible Boolean identities, target gadget decompositions (\texttt{RCCX}, \texttt{MBU+XY4}, \texttt{RydbergCCZ}, \texttt{MBU+QROAM}), and three non-Clifford ZX phase-polynomial rewrite families~\cite{duncan2020,kissinger2020tcount,amy2014}:
 \begin{enumerate}
   \item \textbf{ZX Parity-Phase Spider Fusion.} Adjacent CNOT-sandwiched phase gadgets $\mathrm{CX}(a,b) \cdot T^{\pm k}(b) \cdot \mathrm{CX}(a,b)$ lift into canonical parity-phase spiders $e^{i (\pm k \pi / 4)(x_a \oplus x_b)}$ whose angles add modulo $8$; opposing $T$ and $T^\dagger$ spiders across commuting CNOTs fuse and cancel ($2T \to 0T$).
   \item \textbf{Shared-Control Twin-\texttt{CCZ} Cascade.} Two \texttt{CCZ} or \texttt{TempAND} elbows sharing controls $(c_0, c_1)$ on targets $(t_0, t_1)$ rewrite from two independent $8T$ Clifford+$T$ expansions ($16T$ total) into a fused ZX phase-polynomial gadget requiring $8T$ total ($50\%$ $T$-count reduction) while preserving exact Boolean and phase semantics.
   \item \textbf{$\mathcal{RM}(3,n)$ TODD Tensor Decomposition and AutoCCZ Packing.} Within Phase-Clean ($\mathsf{U2}$/$\mathsf{U4}$-certified) $\{\mathrm{CNOT}, \mathrm{CZ}, \mathrm{CCZ}, T\}$ regions inside a \texttt{focus-zipper} scope, \LakefillQ{} extracts the $\mathbb{F}_2$-linear parity frame and cubic $\mathbb{Z}_8$ phase polynomial, applying symmetric 3-tensor TODD rank reduction and parallel AutoCCZ factory packing before Gaussian frame restoration. Across Boyar--Peralta AES S-box ($25 \to 19\text{ }T$, $T$-depth $9 \to 5$), Keccak-$\chi$ ($24 \to 18\text{ }T$, $T$-depth $10 \to 5$), and Suzuki/Hermitian DQI syndrome cones ($29 \to 21\text{ }T$, $T$-depth $14 \to 7$), this cuts aggregate active $T$-count by $25.64\%$ ($78 \to 58\text{ }T$) and $T$-depth by $48.48\%$ ($33 \to 17$) at zero extra qubits ($\|U_{\mathrm{pre}} - U_{\mathrm{post}}\|_{\max} \le 6.28 \times 10^{-16}$).
 \end{enumerate}
+
+\paragraph{Pass Interdependencies, Non-Commutativity, and Canonical Schedule.}
+Although every valid pass ordering preserves exact quantum-classical branch semantics ($0/720$ discrepancies across all $6! = 720$ pass permutations and $1{,}960$ lowered \MachineISA{} circuits on Qiskit \texttt{Statevector} and Kraus density-matrix simulators), lowered physical costs do \emph{not} commute ($126/720$ Pareto-nondominated schedules; $9/720$ $\QPhysGrade$-optimal). Evaluating a 240-circuit \RevIR{} corpus exposes four non-commutativity hazards resolved by \LakefillQ{}'s canonical coupled schedule ($\mathcal{P}_{\mathrm{loop}} \to \mathcal{P}_{\mathrm{pebble}} \to (\mathcal{P}_{\mathrm{comm}} \circ \mathcal{P}_{\mathrm{todd}})^2 \to \mathcal{P}_{\mathrm{mbu}} \to \mathcal{P}_{\mathrm{ssa}} \to \mathcal{P}_{\mathrm{part}}$): (i) coloring virtual scratch wires onto physical qubits \emph{before} TODD ($\mathcal{P}_{\mathrm{ssa}} \prec \mathcal{P}_{\mathrm{todd}}$) injects write-after-write anti-dependencies that split cubic phase cones ($13{,}725\text{ }T$ vs.\ $8{,}230\text{ }T$, $+66.8\%$) and strand $174$ absorbed ancillas reclaimed only by post-TODD coloring; (ii) eagerly emitting $M_X + \texttt{cond-cz}$ barriers before e-graph saturation ($\mathcal{P}_{\mathrm{mbu}} \prec \mathcal{P}_{\mathrm{todd}}$) blocks twin-\texttt{CCZ} absorption ($11{,}716\text{ }T$, $+42.4\%$) and doubles external decoder traffic ($1{,}724$ vs.\ $859$ $M_X$ resets); (iii) unconstrained $\operatorname{GL}_n(\mathbb{F}_2)$ parity restoration across QPU cuts inflates optical entanglement to $7{,}391$ ebits ($15{,}991$ under naive symmetric cuts) vs.\ $2{,}124$ ebits under rank-$r$ conjugate block-LU factoring ($\mathbf{L}_{\mathrm{loc}} \mathbf{P}_{\mathrm{cut}} \mathbf{U}_{\mathrm{loc}}$) and Law-$\mathsf{U4}$ tele-phase; and (iv) a 2-step interleaved fixpoint $(\mathcal{P}_{\mathrm{comm}} \circ \mathcal{P}_{\mathrm{todd}})^2$ commutes disjoint-wire Hadamards past phase cones to strictly improve all $5/5$ cryptographic/DQI kernels and $149/240$ fuzzed circuits while keeping $k$-inductive loop checking before unrolling ($2$ vs.\ $10$--$64$ Z3 queries).
 
 Bellman--Knuth dynamic programming over $\QPhysGrade$ extracts the minimum-risk schedule per hardware profile (Table~\ref{tab:t13}). Across our multi-gadget benchmark (31 e-classes, 81 e-nodes, 60 equivalence merges), ZX spider fusion improves noisy density-matrix survival across every target ($+3.25\%$ on NISQ, $+4.23\%$ on IBM Heron~r2~\cite{ibmheron2026}, $+2.19\%$ on QuEra Bluvstein~\cite{bluvstein2024,bluvstein2026}, and $+0.19\%$ on BB-qLDPC~\cite{bravyi2024}). When $\Phi_1$ is instantiated with external decoder latency $\tau_{\mathrm{dec}}$, fast cryo-CMOS ($\tau_{\mathrm{dec}} = 120\text{ ns}$) and 300\,K coax FPGA Union-Find ($\tau_{\mathrm{dec}} = 420\text{ ns}$) both extract the $32T$ MBU+ZX schedule ($60{,}960\text{ ns}$ and $63{,}360\text{ ns}$), whereas an unpaced software MWPM decoder ($\tau_{\mathrm{dec}} = 4{,}500\text{ ns}$) automatically triggers fallback to the measurement-free $64T$ unitaryZX schedule ($124{,}000\text{ ns}$) rather than suffering Lindley queue divergence. Whenever a user program violates $\Phi_1$--$\Phi_3$, \texttt{repairPhysGrade} synthesizes counterexample-guided repairs (XY4 dynamical decoupling, exclusion coloring, flag-ancilla insertion, or MBU-to-\texttt{RCCX} fallback).
 
@@ -799,8 +802,8 @@ Within $\lambda_{\mathrm{LFQ}}$, asymmetric MBU and $\QSub$ derive: (i) $34$-\te
 When a circuit exceeds single-chip capacity $Q_{\mathrm{cap}}$ (\texttt{lakefillqc --emit-cluster-dir}), naive gate-cut teleportation across $M$ QPUs incurs heavy optical Bell-pair overhead from cross-chip carry chains and reverse lookup uncomputation~\cite{zhou2026dshor,haner2026ionq}. \LakefillQ{} combines three distributed mechanisms:
 \begin{enumerate}
   \item \textbf{Zero-Carry Distributed QRNS.} Modular exponentiation factors across coprime RNS moduli per QPU so bulk arithmetic consumes zero inter-QPU carry Bell pairs, synchronizing only at compact Braun-tree Kawamura CRT reductions.
-  \item \textbf{Law-$\mathsf{U4}$ GHZ Cat-Disentangling and Cross-QPU Tele-Phase Factoring.} Instead of spending $2 k$ Bell pairs to fan out a $k$-bit table address and reverse-teleport it back, \LakefillQ{} measures remote address copies in the $X$ basis ($M_X$) and cancels the remote phase kickbacks locally via Law-$\mathsf{U4}$ \texttt{cond-z} feed-forward---cutting optical Bell pairs by $50.0\%$ ($0$ reverse ebits) and lowering Stim+PyMatching decoded logical error rates under DEJMPS distillation by $2.27\times$--$16.00\times$. More generally, when any \texttt{within-apply-mbu} cone straddles a partition cut ($\texttt{@p1} \leftrightarrow \texttt{@p2}$), factoring its bilinear phase polynomial $\Phi_X(m, x^{(p_1)}, x^{(p_2)}) = \sum_r \ell_{1,r}(x^{(p_1)}) \cdot (\bigoplus_{k \in \mathrm{cone}(r)} m_k \cdot \ell_{2,k}(x^{(p_2)}))$ fuses all reverse \texttt{cond-cz} corrections sharing a remote pivot into a single forward cat-entangler and classical $M_X$ broadcast ($0$ reverse ebits, reducing zipper-cut Bell pairs by $36.96\%$--$45.65\%$ on ECC-256 and $50.0\%$ on Shor-2048 with $\operatorname{Tr}(\rho_{\mathrm{out}}^2) = 1.0$).
-  \item \textbf{Convex $M^*$ Selection (\textsf{T-ParGuard}).} Over $M \in \{1, \dots, 256\}$, Rule~\textsf{T-ParGuard} minimizes total physical spacetime volume: on unstructured Grover/ISD search where Zalka's $\sqrt{M}$ parallel overhead~\cite{zalka1999} outweighs width splitting, it automatically selects $M^* = 1$ whenever single-chip capacity permits; on Shor/QRNS workloads, it adapts $M^*(p_{\mathrm{link}})$ smoothly to optical link noise (contracting RSA-2048 $M^* = [6, 6, 4, 2, 1]$ as $p_{\mathrm{link}}$ degrades from $10^{-4}$ to $5\times 10^{-2}$).
+  \item \textbf{Law-$\mathsf{U4}$ GHZ Cat-Disentangling and Cross-QPU Tele-Phase Factoring.} Instead of spending $2 k$ Bell pairs to fan out a $k$-bit table address and reverse-teleport it back, \LakefillQ{} measures remote address copies in the $X$ basis ($M_X$) and cancels the remote phase kickbacks locally via Law-$\mathsf{U4}$ \texttt{cond-z} feed-forward---cutting optical Bell pairs by $50.0\%$ ($0$ reverse ebits) and lowering Stim+PyMatching decoded logical error rates under DEJMPS distillation by $2.27\times$--$16.00\times$. More generally, when any \texttt{within-apply-mbu} cone straddles a partition cut ($@\,p_1 \leftrightarrow @\,p_2$), factoring its bilinear phase polynomial $\Phi_X(m, x^{(p_1)}, x^{(p_2)}) = \bigoplus_r \ell_{1,r}(x^{(p_1)}) \cdot (\bigoplus_{k \in \mathrm{cone}(r)} m_k \cdot \ell_{2,k}(x^{(p_2)}))$ fuses all reverse \texttt{cond-cz} corrections sharing a remote pivot into a single forward cat-entangler and classical $M_X$ broadcast ($0$ reverse ebits, reducing zipper-cut Bell pairs by $36.96\%$--$45.65\%$ ($46 \to 25$ ebits/window) on ECC-256 and $50.0\%$ ($12 \to 6$ ebits/window) on Shor-2048 with $\operatorname{Tr}(\rho_{\mathrm{out}}^2) = 1.0$).
+  \item \textbf{Convex $M^*$ Selection (\textsf{T-ParGuard}).} Over $M \in \{1, \dots, 256\}$, Rule~\textsf{T-ParGuard} minimizes total physical spacetime volume: on unstructured Grover/ISD search where Zalka's $\sqrt{M}$ parallel overhead~\cite{zalka1999} outweighs width splitting, it automatically selects $M^* = 1$ whenever single-chip capacity permits; on Shor/QRNS workloads, it adapts $M^*(p_{\mathrm{link}})$ smoothly to optical link noise (contracting RSA-2048 $M^*(p_{\mathrm{link}}) = [6, 6, 4, 2, 1]$ as $p_{\mathrm{link}}$ degrades from $10^{-4}$ to $5\times 10^{-2}$).
 \end{enumerate}
 % ============================================================================
 \section{Evaluation}
@@ -813,7 +816,7 @@ We evaluate \LakefillQ{} across six research questions examining algebraic exact
 
 Compiled \LakefillQ{} circuits match official NIST FIPS-197 test vectors bit-for-bit across AES-128 (\texttt{69c4e0d86a7b0430d8cdb78070b4c55a}), AES-192 (\texttt{dda97ca4864cdfe06eaf70a0ec0d7191}), and AES-256 (\texttt{8ea2b7ca516745bfeafc49904b496089}), match NIST FIPS-202 Keccak-$f[200]$ permutations, and pass exhaustive truth-table verification on $\mathrm{BCH}(15,7,5)$, $\mathbb{F}_{65521}^*$ binary GCD, $\operatorname{GL}_4(\mathbb{F}_2)$ Bruhat LU across all $20{,}160$ nonsingular matrices, $\mathbb{Z}_{3329}^2$ odd-half NTT butterflies, and [[288, 12, 18]] torus automorphisms.
 
-Table~\ref{tab:ag_dqi} evaluates our Early-MBU DQI compiler pass across non-binary Hermitian curves~\cite{stichtenoth2009,fengrao1993}, lifted bivariate affine evaluation codes, and Deligne--Lusztig Suzuki curves over $\mathbb{F}_{q}$, comparing against unitary syndrome-decoding DQI~\cite{jordan2024}. On $[8, 5, 3]_{\mathbb{F}_4}$ ($H_2 : x^3 = y^2 + y$, whose blocklength $n = 8$ strictly exceeds the $\mathbb{F}_4$ Reed--Solomon MDS ceiling $q + 1 = 5$), \texttt{early\_mbu\_dqi\_hermitian\_ag\_f4.lfq} compiles with zero flags (46 virtual SSA wires chordally colored onto 22 physical qubits, shrinking post-encoding live logical width from 22 to 6 qubits and cutting $T$-gates from 336 to 96 with 0 reverse Toffolis), achieving statevector fidelity $1.000000$ against unitary DQI across all $25$ coset leaders and all $32$ $M_X$ trajectories (peak interference $0.108114$ at syndrome $57$). On the lifted bivariate evaluation code $[9, 6, 3]_{\mathbb{F}_4}$ over $\{0, 1, \omega\}^2 \subset \mathbb{F}_4^2$ (\texttt{early\_mbu\_dqi\_lifted\_bivariate\_f4.lfq}, $n = 9 > 5$), 51 virtual SSA wires color onto 24 physical qubits and Early-MBU shrinks live width by $4.00\times$ ($24 \to 6\text{ Q}$, $27$ \texttt{TempAND}s, $504 \to 108\text{ }T$, $1.000000$ fidelity across $28$ coset leaders). Scaling to higher-genus curves compresses live logical width by $5.50\times$ on genus-$3$ $H_3/\mathbb{F}_9$ ($[27, 21, 4]_{\mathbb{F}_9}$, $132 \to 24\text{ Q}$, $189$ \texttt{TempAND}s), $6.33\times$ on the genus-$14$ Suzuki curve $S(8) : y^8 + y = x^2(x^8 + x)$ over $\mathbb{F}_8$ (\texttt{early\_mbu\_dqi\_suzuki\_s8\_f8.lfq}, $[64, 52, 6]_{\mathbb{F}_8}$, where $n = q^2 = 64 \gg n_{\mathrm{RS}} \le 9$, $228 \to 36\text{ Q}$, $320$ \texttt{TempAND}s, $5{,}824 \to 1{,}280\text{ }T$), $6.33\times$--$6.82\times$ on genus-$6$ $H_4/\mathbb{F}_{16}$ ($304 \to 48\text{ Q}$ and $3.18\times$ $T$-gate gain on $[64, 52, 7]_{\mathbb{F}_{16}}$; $300 \to 44\text{ Q}$ and $8{,}064 \to 1{,}792\text{ }T$, $4.50\times$, on $[64, 53, 6]_{\mathbb{F}_{16}}$), and $9.00\times$ on $[512, 448, 37]_{\mathbb{F}_{64}}$ ($3{,}456 \to 384\text{ Q}$).
+Table~\ref{tab:ag_dqi} evaluates our Early-MBU DQI pass across non-binary Hermitian~\cite{stichtenoth2009,fengrao1993}, lifted bivariate, and Deligne--Lusztig Suzuki curves over $\mathbb{F}_{q}$ vs.\ unitary DQI~\cite{jordan2024}. On $H_2$ ($[8, 5, 3]_{\mathbb{F}_4}$, $n = 8 > n_{\mathrm{RS}} \le 5$), \texttt{early\_mbu\_dqi\_hermitian\_ag\_f4.lfq} colors 46 SSA wires onto 22 physical qubits, shrinking post-encoding width from 22 to 6 qubits and cutting $T$-gates from 336 to 96 with fidelity $1.000000$ across all $25$ coset leaders and $32$ $M_X$ trajectories (peak interference $0.108114$). On lifted $[9, 6, 3]_{\mathbb{F}_4}$ (\texttt{early\_mbu\_dqi\_lifted\_bivariate\_f4.lfq}), 51 SSA wires color onto 24 qubits ($24 \to 6\text{ Q}$, $27$ \texttt{TempAND}s, $504 \to 108\text{ }T$, $1.000000$ fidelity across $28$ coset leaders). Higher-genus curves achieve $5.50\times$ width gain on $H_3/\mathbb{F}_9$ ($132 \to 24\text{ Q}$, $189$ \texttt{TempAND}s), $6.33\times$ on genus-$14$ Suzuki $S(8)/\mathbb{F}_8$ (\texttt{early\_mbu\_dqi\_suzuki\_s8\_f8.lfq}, $228 \to 36\text{ Q}$, $320$ \texttt{TempAND}s, $5{,}824 \to 1{,}280\text{ }T$), $6.33\times$--$6.82\times$ on $H_4/\mathbb{F}_{16}$ ($304 \to 48\text{ Q}$, $3.18\times$ $T$-gain at $d=7$; $300 \to 44\text{ Q}$ at $d=6$), and $9.00\times$ on $H_8/\mathbb{F}_{64}$ ($3{,}456 \to 384\text{ Q}$).
 
 \begin{table}[t]
 \centering
@@ -838,7 +841,7 @@ $H_8$: $[512, 448, 37]_{\mathbb{F}_{64}}$ ($g=28$) & $n_{\mathrm{RS}} \le 65$ & 
 \subsection{RQ2: Six-Engine Differential Fuzzing}
 \label{sec:fuzzing}
 
-To test end-to-end compilation and every optimization pass thoroughly, we cross-checked \LakefillQ{} across six independent engines with zero discrepancies: (1) $500/500$ randomized density-matrix equivalence trials in Qiskit \texttt{AerSimulator}; (2) $640/640$ generated \texttt{\#lang lakefillq} surface programs ($2{,}860{,}800$ kernel reduction steps) plus $1{,}050/1{,}050$ randomized five-pass optimization fuzz trials ($1{,}690$ total fuzzed modules in PLT Redex covering $k=1 \to k=2 \to k=R$ loop escalation and cone isomorphism, adaptive $\CapBorrowZ$ limb-to-pebble B\'{e}zout schedules, TODD + AutoCCZ phase-polynomial saturation reducing fuzzed $T$-count from $2{,}812$ to $1{,}004$, cross-QPU Law-$\mathsf{U4}$ tele-phase cuts across $1{,}575$ $M_X$ branches, and adversarial bug injections with $100\%$ fail-closed 3-span provenance); (3) $38/38$ tensor-network checks in PyZX~\cite{duncan2020,kissinger2020tcount}; (4) $360/360$ fault-injection and optical-distillation runs in Stim + PyMatching; (5) $80{,}000$ QEC rounds of real-time decoder queue verification; and (6) Z3 SMT equivalence miters across lowered \RevIR{} blocks.
+To test end-to-end compilation and every optimization pass thoroughly, we cross-checked \LakefillQ{} across six independent engines with zero discrepancies: (1) $500/500$ randomized density-matrix equivalence trials in Qiskit \texttt{AerSimulator}; (2) $640/640$ generated \texttt{\#lang lakefillq} surface programs ($2{,}860{,}800$ kernel reduction steps) plus $1{,}050/1{,}050$ randomized five-pass optimization fuzz trials ($1{,}690$ total fuzzed modules in PLT Redex covering $k=1 \to k=2 \to k=R$ loop escalation and cone isomorphism, adaptive $\CapBorrowZ$ limb-to-pebble B\'{e}zout schedules, TODD + AutoCCZ phase-polynomial saturation reducing fuzzed $T$-count from $3{,}402$ to $924$, cross-QPU Law-$\mathsf{U4}$ tele-phase cuts across $1{,}566$ $M_X$ branches, and $210/210$ adversarial bug injections caught with $100\%$ fail-closed 3-span provenance); (3) $38/38$ tensor-network checks in PyZX~\cite{duncan2020,kissinger2020tcount}; (4) $360/360$ fault-injection and optical-distillation runs in Stim + PyMatching; (5) $80{,}000$ QEC rounds of real-time decoder queue verification; and (6) Z3 SMT equivalence miters across lowered \RevIR{} blocks.
 
 \subsection{RQ3: Mutation Testing and Three-Span Resugared Diagnostics}
 \label{sec:multipass_diag}
@@ -850,9 +853,9 @@ Because multipass elaboration and chordal SSA wire reuse rewrite internal wire i
 \subsection{RQ4: Mechanized Metatheory in Lean 4.35.0}
 \label{sec:lean}
 
-Every formal claim in this paper is mechanized in Lean~4.35.0 across 86 standalone proof modules comprising 2,397 theorems with zero \texttt{sorry}, zero \texttt{axiom}, and zero wildcard match arms:
+Every formal claim in this paper is mechanized in Lean~4.35.0 across 87 standalone proof modules comprising 2,418 theorems with zero \texttt{sorry}, zero \texttt{axiom}, and zero wildcard match arms:
 \begin{itemize}
-  \item \textbf{Type System, Elaboration, and ZX e-Graph Lowering:} Duoidal $5^4 = 625$ capability interchange, $\QSub$ preservation and four-way independence, ANF-to-XAG escalation and $O(1)$-query $k$-inductive loop-invariant soundness, $\QPhysGrade$ Bellman--Knuth optimality, non-Clifford ZX parity-phase spider cancellation and $16T \to 8T$ twin-\texttt{CCZ} fusion, $\QBlock$ Chebyshev ancilla compression, and three-span diagnostic resugaring hygiene.
+  \item \textbf{Type System, Elaboration, Pass Ordering, and ZX e-Graph Lowering:} Duoidal $5^4 = 625$ capability interchange, $\QSub$ preservation and four-way independence, ANF-to-XAG escalation and $O(1)$-query $k$-inductive loop-invariant soundness, $\QPhysGrade$ Bellman--Knuth optimality, non-Clifford ZX spider/twin-\texttt{CCZ}/TODD fusion, pass-ordering non-commutativity and canonical pipeline dominance, $\QBlock$ Chebyshev ancilla compression, and three-span diagnostic resugaring hygiene.
   \item \textbf{Functional Data Structures and Domain Algorithms:} Exact $\deg_{\mathbb{F}_2}(f) \le 2$ MBU characterization, $h+1$ tree pebbling, contracts and complexity bounds for all nine core and four bootstrapped quantum data structures, Hermitian ($H_2, H_3, H_4$), lifted bivariate ($\mathbb{F}_4^2$), and Suzuki ($S(8)$) AG Early-MBU DQI exactness, code-distance step-down, and convex-$M^*$ distributed QRNS + GHZ cat-disentangling.
 \end{itemize}
 Appendix~\ref{app:audit} indexes the exact Lean~4.35.0 declaration names machine-checked against this manuscript.
@@ -883,13 +886,6 @@ LCU / QSVT Walks (2) & Deg-$2$ Chebyshev shortcut on $U^2 \neq I$; $\mathrm{PREP
 \subsection{RQ6: Open-Problem Pareto Advances Across Three Execution Regimes}
 \label{sec:sota}
 
-Table~\ref{tab:t18_main} highlights \LakefillQ{}'s end-to-end algorithmic results across \textbf{Single Machine}, \textbf{Parallel Machine} ($M^* \le 256$), and \textbf{Serial Multishot} regimes (complete per-mode tables appear in Appendix~\ref{app:hardware}):
-\begin{itemize}
-  \item \textbf{Public-Key Cryptanalysis (ECC-256, RSA-2048/4096):} Composing \texttt{PackedBezout\allowbreak ShiftZipper} ($-512\text{ Q}$), $s=4$ \texttt{BinomialPebble\allowbreak Schedule}, Select-SWAP, and totalized Hua squaring solves ECC-256 in \textbf{1,088 logical qubits} and \textbf{$14.34\times 10^6$ Toffolis} ($788\text{ Q}$ in ultra-compact mode), simultaneously beating prior low-width ($2{,}124\text{ Q}$, $198\times 10^6$ Toffolis~\cite{haner2020}) and low-Toffoli ($2{,}871\text{ Q}$~\cite{litinski2023}) designs. On RSA-2048/4096, \texttt{SkewBinary\allowbreak CarrySave\allowbreak Numeral} achieves $1{,}364\text{ Q}$ / $2{,}644\text{ Q}$ ($896\text{ Q}$ / $1{,}728\text{ Q}$ under Braun RNS-CRT; $1{,}924\text{ Q}$ single-focus) while preserving surface-code distance $d=27$ instead of inflating to $d=29$. In Parallel Machine mode, zero-carry QRNS + Law-$\mathsf{U4}$ GHZ cat-disentangling cuts optical Bell pairs by $50.0\%$.
-  \item \textbf{Symmetric, Post-Quantum, and DQI:} \texttt{DLog-5} and \texttt{BP32} S-boxes plus bidirectional half-cipher MBU Grover reach $261 / 325 / 389\text{ Q}$ (min-width) and $356\text{ Q}$ (min-gates AES-256); $h+1$ sequential Merkle pebbling compresses SLH-DSA-128s to $4{,}320\text{ Q}$ ($-34.8\%$); \texttt{StreamingSyndrome\allowbreak Accumulator} + QM4RI/DOOM compresses Classic McEliece-348864 to $7{,}744\text{ Q}$ ($76.26\times$ narrower) and BIKE-L1 to $36{,}969\text{ Q}$ ($4{,}107\times$ narrower); odd-half NTT compresses ML-KEM-768 / ML-DSA-65 to $3{,}072 / 5{,}888\text{ Q}$; and coherent OPI DQI shrinks by $10.46\times$ to $9{,}984\text{ Q}$.
-  \item \textbf{Quantum Chemistry (FeMoCo THC QSVT \& Hubbard QPE):} $\QBlock$ Chebyshev reflection fusion ($192 \to 13$ ancillas) and Law-$\mathsf{U4}$ $\mathrm{PREP}^\dagger$ ($2{,}046 \to 91$ \texttt{TempAND}s, $22.48\times$) lower FeMoCo walk cost to $6{,}890$ \texttt{TempAND}s/step~\cite{lee2021thc}. On noisy IBM Heron~r2 Hubbard phase estimation~\cite{lintong2022,huangsun2022}, Serial Multishot \texttt{reset\_all} achieves $0.0795\text{ Ha}$ energy error and Parallel Machine achieves $0.0053\text{ Ha}$, compared to $0.7540\text{ Ha}$ under monolithic Single Machine decoherence.
-\end{itemize}
-
 \begin{table}[t]
 \centering
 \caption{Selected open-problem results compiled by \LakefillQ{} vs.\ published state of the art (extended Single, Parallel, and Serial Multishot tables in Appendix~\ref{app:hardware}).}
@@ -910,6 +906,13 @@ FeMoCo & $192$ walk anc.~\cite{lee2021thc} & 13 walk anc. & $2{,}046$ $\mathrm{P
 \bottomrule
 \end{tabular}
 \end{table}
+
+Table~\ref{tab:t18_main} highlights \LakefillQ{}'s end-to-end algorithmic results across \textbf{Single Machine}, \textbf{Parallel Machine} ($M^* \le 256$), and \textbf{Serial Multishot} regimes (complete per-mode tables appear in Appendix~\ref{app:hardware}):
+\begin{itemize}
+  \item \textbf{Public-Key Cryptanalysis (ECC-256, RSA-2048/4096):} Composing \texttt{PackedBezout\allowbreak ShiftZipper} ($-512\text{ Q}$), $s=4$ \texttt{BinomialPebble\allowbreak Schedule}, Select-SWAP, and totalized Hua squaring solves ECC-256 in \textbf{1,088 logical qubits} and \textbf{$14.34\times 10^6$ Toffolis} ($788\text{ Q}$ in ultra-compact mode), simultaneously beating prior low-width ($2{,}124\text{ Q}$, $198\times 10^6$ Toffolis~\cite{haner2020}) and low-Toffoli ($2{,}871\text{ Q}$~\cite{litinski2023}) designs. On RSA-2048/4096, \texttt{SkewBinary\allowbreak CarrySave\allowbreak Numeral} achieves $1{,}364\text{ Q}$ / $2{,}644\text{ Q}$ ($896\text{ Q}$ / $1{,}728\text{ Q}$ under Braun RNS-CRT; $1{,}924\text{ Q}$ single-focus) while preserving surface-code distance $d=27$ instead of inflating to $d=29$. In Parallel Machine mode, zero-carry QRNS + Law-$\mathsf{U4}$ GHZ cat-disentangling cuts optical Bell pairs by $50.0\%$.
+  \item \textbf{Symmetric, Post-Quantum, and DQI:} \texttt{DLog-5} and \texttt{BP32} S-boxes plus bidirectional half-cipher MBU Grover reach $261 / 325 / 389\text{ Q}$ (min-width) and $356\text{ Q}$ (min-gates AES-256); $h+1$ sequential Merkle pebbling compresses SLH-DSA-128s to $4{,}320\text{ Q}$ ($-34.8\%$); \texttt{StreamingSyndrome\allowbreak Accumulator} + QM4RI/DOOM compresses Classic McEliece-348864 to $7{,}744\text{ Q}$ ($76.26\times$ narrower) and BIKE-L1 to $36{,}969\text{ Q}$ ($4{,}107\times$ narrower); odd-half NTT compresses ML-KEM-768 / ML-DSA-65 to $3{,}072 / 5{,}888\text{ Q}$; and coherent OPI DQI shrinks by $10.46\times$ to $9{,}984\text{ Q}$.
+  \item \textbf{Quantum Chemistry (FeMoCo THC QSVT \& Hubbard QPE):} $\QBlock$ Chebyshev reflection fusion ($192 \to 13$ ancillas) and Law-$\mathsf{U4}$ $\mathrm{PREP}^\dagger$ ($2{,}046 \to 91$ \texttt{TempAND}s, $22.48\times$) lower FeMoCo walk cost to $6{,}890$ \texttt{TempAND}s/step~\cite{lee2021thc}. On noisy IBM Heron~r2 Hubbard phase estimation~\cite{lintong2022,huangsun2022}, Serial Multishot \texttt{reset\_all} achieves $0.0795\text{ Ha}$ energy error and Parallel Machine achieves $0.0053\text{ Ha}$, compared to $0.7540\text{ Ha}$ under monolithic Single Machine decoherence.
+\end{itemize}
 
 % ============================================================================
 \section{Scope Boundaries, Related Work, and Conclusion}
@@ -950,7 +953,7 @@ Proto-Quipper-R~\cite{colledan2025protoquipperr} & Affine width & No & No & Widt
 VOQC~\cite{hietala2021} & Gate pass & No & No & Gate count & No & Coq \\
 Guppy~\cite{koch2025} / Qualtran~\cite{harrigan2024} & Linear / Bloq & Dyn.\ / Est. & No & Bloq counts & Unfused & Rust / Python \\
 Cobble~\cite{cobble2026} & Block-enc. & No & No & Subnorm.\ $\alpha$ & Unfused $d{\cdot}m$ & Paper \\
-\textbf{\LakefillQ{} (This Work)} & \textbf{Unitary+MBU} & \textbf{XAG+Z3} & \textbf{Yes} & \textbf{$\Phi_1$--$\Phi_3$+ZX} & \textbf{$m_{\mathrm{anc}}{+}1$+$\mathsf{U4}$} & \textbf{2,397 Lean 4} \\
+\textbf{\LakefillQ{} (This Work)} & \textbf{Unitary+MBU} & \textbf{XAG+Z3} & \textbf{Yes} & \textbf{$\Phi_1$--$\Phi_3$+ZX} & \textbf{$m_{\mathrm{anc}}{+}1$+$\mathsf{U4}$} & \textbf{2,418 Lean 4} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1018,7 +1021,7 @@ Let $R(h)$ denote the minimum $W$-qubit digest registers to compute the root of 
 (\ref{prop:p3_2}) Writing $X = \sum_{k=0}^{C-1} (L_k + d_k 2^w) 2^{k w}$ with $L_k \in [0, 2^w - 1]$ and $d_k \in \{0, 1, 2\}$ preserves integer value modulo $2^{C w}$ under window carry folding $d_k' = d_k + c_{\mathrm{out}} \le 2$ (maintained via $O(1)$-depth inter-window local carry fold), and a single terminal ripple sweep sets all $d_k \mapsto 0$ bijectively.
 (\ref{prop:p3_3}) By the Braun invariant $0 \le |L| - |R| \le 1$, even/odd index parity fixes subtree routing statically without pointer qubits; associative binary folds execute in $\lceil \log_2 k \rceil$ rounds using $(k - 1)w$ forward \texttt{TempAND}s.
 (\ref{prop:p3_4}) Throughout Kaliski/Bernstein--Yang binary GCD~\cite{kaliski1995,bernsteinyang2019}, $|u| \cdot |g| + |v| \cdot |f| = p$, ensuring $\operatorname{len}(u) + \operatorname{len}(f) \le N + 1$; packing $u$ MSB-down and $f$ LSB-up in one $N$-bit register (plus focus guard bits) avoids overlap, half-domain cofactor folding recovers $a^{-1} \bmod p$ bijectively on $\mathbb{F}_p^*$ (checked across all 65,520 slopes of $\mathbb{F}_{65521}^*$), and indicator corrections on $x \in \{0, 1\}$ make Hua squaring total on $\mathbb{F}_p$.
-(\ref{prop:p3_5}) Standard induction on $(s, d)$~\cite{bennett1989,kralovic2001} gives $L(s, d) = L(s, d-1) + L(s-1, d) = \binom{s+d}{s}$; at $s=4, d=4$, $\binom{8}{4} = 70 \ge 32$ Jump-16 windows in $64$ qubits and $109$ window evaluations.
+(\ref{prop:p3_5}) Standard induction on $(s, d)$~\cite{bennett1989,kralovic2001} gives $L(s, d) = L(s, d-1) + L(s-1, d) = \binom{s+d}{s}$; at $s=4, d=4$, $\binom{8}{4} = 70 \ge 32$ Jump-16 windows in $64$ qubits and $109$ window evaluations, while under $\operatorname{len}(f), \operatorname{len}(g) \le N - 16k$, recycling freed $\CapBorrowZ$/$\CapZero$ high-order limbs yields $s(k) \in \{4,6,8\}$ with $\operatorname{len}(u) + \operatorname{len}(f) + 16\Delta s(k) \le 2N$, solving the dynamic-programming recurrence for $L = 32$ in $35$ forward $+ 32$ reverse $= 67$ evaluations at zero extra peak qubits.
 (\ref{prop:p3_6}--\ref{prop:p3_9}) Monoidal prefix associativity validates $255$-Toffoli early rejection in Two-Level VTAA; row-pivot tracking in $r\lceil\log_2 r\rceil$ bits makes Bruhat LU total across all 20,160 matrices in $\operatorname{GL}_4(\mathbb{F}_2)$ while column streaming avoids $r^2$ allocation~\cite{perriello2023}; Morrison crit-bit splits depend only on highest differing key bits, yielding permutation-invariant quantum states~\cite{zhandry2019} with 14,080-Toffoli amortized parallel-walker bitonic batches (14,417,920 total vs.\ 23,855,104 Bentley--Saxe online Toffolis); and Walker--Vose bucket weights equal $p_i$ after $1$-comparator swap on $2w + 2\mu + 1$ qubits. \qed
 
 \paragraph{Proofs of Theorems~\ref{thm:t1}--\ref{thm:t6}, Lemmas~\ref{lem:l1}--\ref{lem:l2}, Proposition~\ref{prop:p3}, and Corollary~\ref{cor:c1}.}
@@ -1034,7 +1037,7 @@ Let $R(h)$ denote the minimum $W$-qubit digest registers to compute the root of 
 \subsection{External Sub-Microsecond Decoder Pacing Feasibility}
 \label{sec:fpga}
 
-In the main body (\S\ref{sec:qphys}), Grade~$\Phi_1$ abstracts the QEC control plane solely through a target-profile latency parameter $\tau_{\mathrm{dec}}$, keeping \LakefillQ{} independent of custom classical hardware. To confirm empirically that $\tau_{\mathrm{dec}} \le \tau_{\mathrm{cycle}} = 1{,}000\text{ ns}$ is achievable under bursty MBU traffic without altering quantum processor hardware, we evaluated an external 500\,MHz multiplierless Braun-tree + Shiloach--Vishkin Union-Find syndrome decoder (7,700 LUT6 base / 7,854 LUT6 hybrid, 0 DSP48, $F_{\max} = 614.25\text{ MHz}$, 340\,ns cryo-SerDes / 420\,ns Heron~r2 worst-case framing, 660\,ns cycle slack, 79.55\% base sparse bypass). Adding a 1-cycle ($w = 0$, $2.5\text{ ns}$) and 2-cycle (isolated adjacent $w \le 2$, $5.0\text{ ns}$) hierarchical OR-tree + direct XOR-address syndrome fast-path resolves $92.58\%$--$99.73\%$ of $p = 10^{-3}$ QEC rounds without invoking full spanning-tree peeling---cutting mean external decoder latency $\tau_{\mathrm{dec}}$ across $10{,}000$ Monte Carlo rounds by $2.77\times$ at $d=3$ ($120.0 \to 43.33\text{ ns}$), $2.81\times$ at $d=5$ ($180.0 \to 64.17\text{ ns}$), $2.55\times$ at $d=7$ ($200.0 \to 78.34\text{ ns}$), and $2.80\times$ on [[144, 12, 12]] BB-qLDPC ($185.0 \to 66.15\text{ ns}$) with $100\%$ bit-exact agreement. Across 80,000 Stim QEC cycles, unpaced software MWPM ($\tau_{\mathrm{dec}} = 4{,}500\text{ ns}$) accumulates a 146,205.0\,ns FIFO backlog and drops $d=5$ Heron~r2 logical survival from 0.9973 down to 0.5700, whereas any external decoder satisfying $\tau_{\mathrm{dec}} \le \tau_{\mathrm{cycle}}$ maintains 0.0\,ns backlog.
+In the main body (\S\ref{sec:qphys}), Grade~$\Phi_1$ abstracts the QEC control plane solely through a target-profile latency parameter $\tau_{\mathrm{dec}}$, keeping \LakefillQ{} independent of custom classical hardware. To confirm empirically that $\tau_{\mathrm{dec}} \le \tau_{\mathrm{cycle}} = 1{,}000\text{ ns}$ is achievable under bursty MBU traffic without altering quantum processor hardware, we evaluated an external 500\,MHz multiplierless Braun-tree + Shiloach--Vishkin Union-Find syndrome decoder (7,700 LUT6 base / 7,854 LUT6 hybrid, 0 DSP48, $F_{\max} = 614.25\text{ MHz}$, 340\,ns cryo-SerDes / 420\,ns Heron~r2 worst-case framing, 660\,ns cycle slack, 79.55\% base multi-burst zero-defect bypass). Adding a 1-cycle ($w = 0$, $2.5\text{ ns}$) and 2-cycle (isolated adjacent $w \le 2$, $5.0\text{ ns}$) hierarchical OR-tree + direct XOR-address syndrome fast-path resolves $92.58\%$--$99.73\%$ of $p = 10^{-3}$ QEC rounds without invoking full spanning-tree peeling---cutting mean external decoder latency $\tau_{\mathrm{dec}}$ across $10{,}000$ Monte Carlo rounds by $2.77\times$ at $d=3$ ($120.0 \to 43.33\text{ ns}$), $2.81\times$ at $d=5$ ($180.0 \to 64.17\text{ ns}$), $2.60\times$ at $d=7$ ($200.0 \to 76.88\text{ ns}$), and $2.77\times$ on [[144, 12, 12]] BB-qLDPC ($185.0 \to 66.87\text{ ns}$) with $100\%$ bit-exact agreement. Across 80,000 Stim QEC cycles, unpaced software MWPM ($\tau_{\mathrm{dec}} = 4{,}500\text{ ns}$) accumulates a 146,205.0\,ns FIFO backlog and drops $d=5$ Heron~r2 logical survival from 0.9973 down to 0.5700, whereas any external decoder satisfying $\tau_{\mathrm{dec}} \le \tau_{\mathrm{cycle}}$ maintains 0.0\,ns backlog.
 
 \subsection{Extended Cryptographic, Post-Quantum, and Three-Mode Benchmarks}
 
@@ -1047,7 +1050,7 @@ Across public-key factoring and discrete logarithms~\cite{ekera2017,gidneyekera2
 
 Table~\ref{tab:t18} summarizes \LakefillQ{}'s three-mode execution results across Single Machine, Parallel Machine ($M_{\max} = 256$ under Rule~\textsf{T-ParGuard}, verified on \texttt{distributed\_qrns\_shor\_u4.lfq} with zero reverse ebits and noisy optical DEJMPS distillation at $d=3, p=0.05$ consuming 2.11M raw pairs across 131 steps), and Serial Multishot regimes (including noisy Heron~r2 Hubbard QPE: 0.7540 Ha Single Machine error vs.\ 0.0053 Ha 4-QPU Parallel Machine and 0.0827 Ha sampled / 0.0795 Ha exact Serial Multishot at $6.10\times$ per-shot depth reduction).
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Three-mode compilation summary across Single Machine, Parallel Machine ($M^* \in \{1..256\}$, $M_{\max} = 256$), and Serial Multishot execution.}
 \label{tab:t18}
@@ -1073,7 +1076,7 @@ FeMoCo THC QSVT & 2,142 & 85,156,250 & $64 \times 2,142$ (shots) & $0$ (shot-par
 \paragraph{Side-Condition Validation Witnesses and Seven Projected Obligations.}
 Seven general static obligations projected from $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ (Tables~\ref{tab:t17} and~\ref{tab:t17b}) rule out all 14 concrete correctness hazards observed across the nine third-party quantum circuit libraries in \S\ref{sec:audit}, including 20/32 corrupted basis rows from assuming $\chi_5^2 = I$ in ReVerC, missing PLU permutation uncomputation (4.23~ms XAG check), $7.36\times$ QuantumISD skip-rightmost undercounting (94.53\% guarded Aer success probability), and 1.1796 spectral error from applying the degree-2 Chebyshev walk shortcut when $U^2 \neq I$ in Qualtran THC. Full diagnostic and Redex fuzzer artifacts are recorded in \texttt{lakefillq\_holistic\_language\_cohesion\_report.json} and \texttt{lakefillq\_redex\_surface\_diagnostic\_fuzzer\_report.json}.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Per-family empirical witnesses showing how third-party circuit implementations violate $\lambda_{\mathrm{LFQ}}$'s side conditions.}
 \label{tab:t17}
@@ -1091,7 +1094,7 @@ LCU / QSVT (2) & $d=2$ walk on $U^2 \neq I$; $\mathrm{PREP}^\dagger$ & 1.1796 op
 \end{tabular}
 \end{table}
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{The seven coordinate projections of $\Gamma_{\mathrm{in}} \vdash t : \mathcal{Q}_{e}(A) \dashv \Gamma_{\mathrm{out}}$ in \LakefillQ{} and the concrete circuit hazards each projection statically rules out.}
 \label{tab:t17b}
@@ -1112,7 +1115,7 @@ Judgment Projection & Static Obligation Enforced & Circuit Hazards Ruled Out \\
 \end{tabular}
 \end{table}
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
 \caption{Compiler soundness mutation testing: all $12/12$ ($100.0\%$) injected compiler bugs are killed by simulator counterexamples.}
 \label{tab:t16}
@@ -1130,7 +1133,7 @@ M10--M12 ($\QBlock$/$M^*$) & Skip $U^2=I$; drop Zalka $\sqrt{M}$; drop GHZ $\mat
 \end{tabular}
 \end{table}
 
-\paragraph{Lean 4.35.0 Mechanization Index (2,397 Theorems Across 86 Modules).}
+\paragraph{Lean 4.35.0 Mechanization Index (2,418 Theorems Across 87 Modules).}
 Every formal claim in this paper maps to zero-\texttt{sorry}, zero-\texttt{axiom} Lean~4.35.0 theorems verified by the Lean kernel:
 \begingroup\raggedright
 \begin{itemize}
@@ -1151,6 +1154,8 @@ Every formal claim in this paper maps to zero-\texttt{sorry}, zero-\texttt{axiom
   \texttt{bilinear\_xag\_mbu\_collapses\_arbitrary\_degree\_to\_zero},
   \texttt{multiround\_mbu\_session\_total\_quantum\_phase\_unit},
   \texttt{cut\_sweeping\_local\_unsat\_implies\_global\_multiround\_soundness},
+  \texttt{cone\_isomorphism\_relabeling\_soundness},
+  \texttt{zero\_flag\_k1\_k2\_unrolled\_escalation\_soundness},
   \texttt{anf\_to\_xag\_escalation\_preserves\_zero\_verdict},
   \texttt{inductive\_loop\_soundness\_implies\_unrolled\_qsub},
   \texttt{inductive\_loop\_zero\_taint\_escape},
@@ -1174,18 +1179,26 @@ Every formal claim in this paper maps to zero-\texttt{sorry}, zero-\texttt{axiom
   \texttt{hua\_identity\_with\_singular\_zero\_one\_correction\_exact},
   \texttt{bezout\_half\_domain\_folding\_strict\_cofactor\_bijection},
   \texttt{api5\_binomial\_pebble\_schedule\_contract\_and\_cost},
+  \texttt{adaptive\_limb\_borrowz\_pebble\_recycling\_width\_and\_eval\_bound},
   \texttt{api6\_monoidal\_finger\_tree\_simhash\_contract\_and\_cost},
   \texttt{api7\_bruhat\_pivoted\_lu\_and\_streaming\_syndrome\_contract\_and\_cost},
   \texttt{bruhat\_lu\_f2\_zero\_pivot\_requires\_permutation\_and\_recovers\_all\_gl4},
   \texttt{api8\_canonical\_critbit\_bitonic\_dictionary\_contract\_and\_cost},
   \texttt{parallel\_walker\_bitonic\_74\_47x\_amortization\_and\_width\_tradeoff},
   \texttt{api9\_walker\_vose\_alias\_table\_contract\_and\_cost}.
-  \item \textbf{ZX e-Graph, Hardware Step-Down, \& AG DQI (\S\ref{sec:compiler}--\S\ref{sec:eval}, Lemmas~\ref{lem:l1}--\ref{lem:l2}, Prop.~\ref{prop:p3}, Thms.~\ref{thm:t4}--\ref{thm:t5}, Cor.~\ref{cor:c1}):}
+  \item \textbf{ZX e-Graph, Pass Ordering, Hardware Step-Down, \& AG DQI (\S\ref{sec:compiler}--\S\ref{sec:eval}, Lemmas~\ref{lem:l1}--\ref{lem:l2}, Prop.~\ref{prop:p3}, Thms.~\ref{thm:t4}--\ref{thm:t5}, Cor.~\ref{cor:c1}):}
   \texttt{zx\_spider\_fusion\_mod8\_sound},
   \texttt{zx\_t\_tdg\_gadget\_cancel},
   \texttt{zx\_t\_t\_fuses\_to\_clifford\_s},
   \texttt{zx\_cx01\_parity\_transport\_sound},
   \texttt{shared\_twin\_ccz\_zx\_8t\_eq\_ideal},
+  \texttt{f2\_cubic\_todd\_rank\_reduction\_and\_autocc\_pair\_fusion\_soundness},
+  \texttt{todd\_autocc\_phase\_poly\_qphys\_grade\_monotonicity},
+  \texttt{evalPassSeq\_preserves\_semantics},
+  \texttt{hazardA\_ssa\_todd\_strict\_noncommutativity},
+  \texttt{hazardB\_mbu\_todd\_strict\_noncommutativity},
+  \texttt{hazardC\_rank1\_conjugate\_block\_lu\_soundness\_and\_ebit\_saving},
+  \texttt{canonical\_pipeline\_strictly\_dominates\_suboptimal\_schedules},
   \texttt{hermitian\_h2\_all\_points\_on\_curve},
   \texttt{hermitian\_h2\_exceeds\_reed\_solomon\_bound},
   \texttt{hermitian\_h2\_weight1\_syndrome\_injective},
@@ -1213,7 +1226,11 @@ Every formal claim in this paper maps to zero-\texttt{sorry}, zero-\texttt{axiom
   \texttt{early\_mbu\_phase\_cancellation\_algebraic\_identity},
   \texttt{spanning\_tree\_peel\_commutation\_Hc\_eq\_s},
   \texttt{lakefillq\_grade\_phi1\_lindley\_zero\_backlog},
-  \texttt{unpaced\_mwpm\_lindley\_backlog\_divergence}.
+  \texttt{unpaced\_mwpm\_lindley\_backlog\_divergence},
+  \texttt{braun\_ortree\_zero\_iff\_popcount\_zero},
+  \texttt{direct\_xor\_adj\_pair\_peel\_exact\_agreement},
+  \texttt{hybrid\_fastpath\_uf\_correction\_and\_cycle\_exactness},
+  \texttt{sparse\_fastpath\_10k\_latency\_2\_8x\_reduction\_and\_zero\_backlog}.
   \item \textbf{Diagnostics, Fuzzing, Side-Condition Witnesses, \& Distributed $M^*$ (\S\ref{sec:eval}):}
   \texttt{complete\_12\_of\_12\_compiler\_mutant\_kill\_rate\_soundness},
   \texttt{multipass\_pipeline\_preserves\_caller\_span},
@@ -1227,6 +1244,7 @@ Every formal claim in this paper maps to zero-\texttt{sorry}, zero-\texttt{axiom
   \texttt{surface\_adjoint\_involutive},
   \texttt{braun\_seq\_invert\_exact\_identity},
   \texttt{enriched\_diag\_total\_3span\_hygiene},
+  \texttt{five\_pass\_differential\_compiler\_equivalence},
   \texttt{ecc\_f13\_offset\_trajectory\_sound\_vs\_reverse\_uncompute\_hazard},
   \texttt{kaliski\_zero\_input\_unguarded\_dirty\_vs\_guarded\_clean},
   \texttt{coset\_carry\_runway\_non\_wraparound\_and\_tightness},
@@ -1251,7 +1269,10 @@ Every formal claim in this paper maps to zero-\texttt{sorry}, zero-\texttt{axiom
   \texttt{dlog5\_inplace\_aes\_sbox\_256\_exact\_and\_5ancilla\_cleanup},
   \texttt{ecc256\_dual\_qec\_and\_m16\_cluster\_zalka\_contrast},
   \texttt{t\_par\_guard\_grover\_fallback\_soundness},
-  \texttt{distributed\_law\_u4\_lookup\_qrns\_and\_m\_star\_soundness}.
+  \texttt{distributed\_law\_u4\_lookup\_qrns\_and\_m\_star\_soundness},
+  \texttt{u4\_bilinear\_phase\_poly\_factoring},
+  \texttt{u4\_tele\_phase\_mbu\_cone\_denotational\_equiv},
+  \texttt{u4\_bilinear\_tele\_phase\_reduces\_ebits\_and\_preserves\_typing}.
 \end{itemize}
 \par\endgroup
 

@@ -61,6 +61,10 @@
          five-lakefillq-benchmarks
          six-lakefillq-benchmarks
          three-todd-autocc-phase-poly-cones
+         phase-clean-u2-u4-cone-ops?
+         todd-rm3-reduce-phase-poly
+         lower-todd-cone-pre-isa
+         lower-todd-cone-post-isa
          compute-isa-t-count
          compute-isa-t-depth
          compute-isa-twoq-count
