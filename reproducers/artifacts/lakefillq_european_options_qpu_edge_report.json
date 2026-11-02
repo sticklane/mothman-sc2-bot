@@ -1,0 +1,328 @@
+{
+  "pipeline": "lakefillq_real_qpu_to_retail_xsp_european_options_honest_audit",
+  "overall_status": "PASS",
+  "zero_fpga_q15_zkfin_coupling": true,
+  "total_elapsed_ms": 5478.41,
+  "stage1_lakefillqc_compilation": {
+    "status": "PASS",
+    "elapsed_ms": 2735.28,
+    "heron_r2_dqi_report": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 14,
+      "circuit_kind": "defq",
+      "circuit_name": "european-xsp-early-mbu-dqi-7wing",
+      "classical_meas_bits": 21,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 14,
+      "machine_isa_ops": 127,
+      "machines_used": 1,
+      "mbu_erasure_count": 21,
+      "module_circuits_checked": [
+        "european-xsp-cross-index-qsvt-t2",
+        "european-xsp-early-mbu-dqi-7wing"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 10,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 0,
+        "dirty_leak": 0,
+        "peak": 10,
+        "phi1_action": 158,
+        "phi2_collisions": 0,
+        "w_in": 10,
+        "w_out": 10
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 158,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "e7",
+          "width": 7
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "syn3",
+          "width": 3
+        }
+      ],
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "heron-r2",
+      "uncompute_ccx_count": 0,
+      "violations": [],
+      "virtual_wires": 24,
+      "well_typed": true
+    },
+    "bluvstein_aod_dqi_report": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 14,
+      "circuit_kind": "defq",
+      "circuit_name": "european-xsp-early-mbu-dqi-7wing",
+      "classical_meas_bits": 21,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 14,
+      "machine_isa_ops": 127,
+      "machines_used": 1,
+      "mbu_erasure_count": 21,
+      "module_circuits_checked": [
+        "european-xsp-cross-index-qsvt-t2",
+        "european-xsp-early-mbu-dqi-7wing"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 10,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 0,
+        "dirty_leak": 0,
+        "peak": 10,
+        "phi1_action": 336,
+        "phi2_collisions": 0,
+        "w_in": 10,
+        "w_out": 10
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 336,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "e7",
+          "width": 7
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "syn3",
+          "width": 3
+        }
+      ],
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "bluvstein-aod",
+      "uncompute_ccx_count": 0,
+      "violations": [],
+      "virtual_wires": 24,
+      "well_typed": true
+    },
+    "heron_r2_qsvt_t2_report": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 4,
+      "circuit_kind": "defq",
+      "circuit_name": "european-xsp-cross-index-qsvt-t2",
+      "classical_meas_bits": 6,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 6,
+      "machine_isa_ops": 121,
+      "machines_used": 1,
+      "mbu_erasure_count": 6,
+      "module_circuits_checked": [
+        "european-xsp-cross-index-qsvt-t2"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 14,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 8,
+        "dirty_leak": 0,
+        "peak": 14,
+        "phi1_action": 67,
+        "phi2_collisions": 0,
+        "w_in": 6,
+        "w_out": 6
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 67,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "sys",
+          "width": 2
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "blk",
+          "width": 3
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "qsig",
+          "width": 1
+        }
+      ],
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "heron-r2",
+      "uncompute_ccx_count": 16,
+      "violations": [],
+      "virtual_wires": 14,
+      "well_typed": true
+    },
+    "negative_control_law_u4_rejected": {
+      "returncode": 1,
+      "well_typed": false,
+      "violation_count": 2,
+      "zero_gensym_leak": true
+    },
+    "qsvt_qasm_path": "/home/antigravity/toolchains/tmp/european_xsp_cross_index_qsvt_t2.qasm"
+  },
+  "stage2_openqasm3_and_controller_latency_audit": {
+    "status": "PASS",
+    "elapsed_ms": 2742.83,
+    "dqi_exact_p_xstar_5": 0.571429,
+    "dqi_max_trajectory_error_32_trials": 2.483568906086475e-13,
+    "dqi_max_scratch_leak_prob": 0.0,
+    "dqi_omitted_u4_fixup_collapsed_prob": 0.125,
+    "heron_r2_controller_latency_audit": {
+      "mid_circuit_meas_reset_branch_cycles": 21,
+      "controller_roundtrip_ns_per_cycle": 650.0,
+      "total_feedforward_idle_us": 13.65,
+      "optimistic_static_gate_action_nats": 0.158,
+      "feedforward_idle_dephasing_action_nats": 0.273,
+      "realistic_dynamic_action_nats": 0.431,
+      "optimistic_static_survival": 0.8538,
+      "realistic_dynamic_survival": 0.6499,
+      "realistic_noisy_p_xstar": 0.4151,
+      "within_bqp_cliff_0_693_nats": true
+    },
+    "neutral_atom_public_cloud_api_audit": {
+      "aws_braket_quera_aquila_mode": "Analog Hamiltonian Simulation (AHS) Only",
+      "public_cloud_supports_digital_qasm3_mid_meas_reset": false,
+      "bluvstein_zoned_aod_status": "Lab hardware / non-public API (cannot be called inline by retail)"
+    },
+    "qsvt_chebyshev_t2_frobenius_error": 5.406497773435602e-14
+  },
+  "stage3_qpu_turnaround_lease_and_crossover_audit": {
+    "status": "PASS",
+    "elapsed_ms": 0.02,
+    "queue_turnaround_vs_quote_staleness": {
+      "retail_max_quote_age_ms": 5000,
+      "median_cloud_queue_wait_ms": 420000,
+      "transpile_and_awg_upload_ms": 14500,
+      "qpu_2000_shot_exec_ms": 530,
+      "total_inline_turnaround_ms": 435030,
+      "inline_call_rejected_by_5000ms_gate": true,
+      "required_architecture": "Offline Pre-Market / Weekly Syndrome LUT (0 ms live trading latency)"
+    },
+    "qpu_lease_and_shot_economics": {
+      "ibm_heron_payg_job_cost_usd": 24.0,
+      "aws_braket_2000_shot_task_cost_usd": 30.3,
+      "dedicated_qpu_lease_monthly_usd": 15000.0,
+      "unamortized_daily_qpu_annual_cost_usd": 6048.0,
+      "unamortized_cost_pct_of_25k_retail_pnl": 189.0,
+      "amortized_weekly_coop_50_users_annual_cost_usd": 24.96
+    },
+    "classical_vs_quantum_crossover": {
+      "m7_wing_classical_cpu_solve_ms": 0.016,
+      "m7_wing_classical_cost_usd": 0.0,
+      "m7_wing_verdict": "Trivially solvable on classical CPU (< 0.05 ms); QPU useful only as hardware benchmark at m=7",
+      "quantum_advantage_threshold_m_wings": 45,
+      "m45_classical_coset_states": 35184372088832,
+      "m45_unshrunk_virtual_wires": 108,
+      "m45_lakefillq_early_mbu_physical_qubits": 45
+    }
+  },
+  "stage4_honest_retail_xsp_execution_waterfall": {
+    "status": "PASS",
+    "elapsed_ms": 0.09,
+    "zero_fpga_q15_zkfin_coupling": true,
+    "execution_transport": "Public Internet HTTPS REST (50-250 ms jitter) + 100 ms DXLink WebSocket",
+    "retail_25k_notional_and_bpr_sizing_audit": {
+      "NDX": {
+        "notional_1lot_usd": 2020000.0,
+        "wing_width_points": 650.0,
+        "bpr_1lot_usd": 44200.0,
+        "max_allowed_single_trade_bpr_usd": 1625.0,
+        "fits_25k_retail_risk_cap": false,
+        "max_contracts_within_cap": 0
+      },
+      "SPX": {
+        "notional_1lot_usd": 580000.0,
+        "wing_width_points": 145.0,
+        "bpr_1lot_usd": 9860.0,
+        "max_allowed_single_trade_bpr_usd": 1625.0,
+        "fits_25k_retail_risk_cap": false,
+        "max_contracts_within_cap": 0
+      },
+      "RUT": {
+        "notional_1lot_usd": 222000.0,
+        "wing_width_points": 75.0,
+        "bpr_1lot_usd": 5100.0,
+        "max_allowed_single_trade_bpr_usd": 1625.0,
+        "fits_25k_retail_risk_cap": false,
+        "max_contracts_within_cap": 0
+      },
+      "XSP": {
+        "notional_1lot_usd": 58000.0,
+        "wing_width_points": 14.0,
+        "bpr_1lot_usd": 952.0,
+        "max_allowed_single_trade_bpr_usd": 1625.0,
+        "fits_25k_retail_risk_cap": true,
+        "max_contracts_within_cap": 1
+      }
+    },
+    "eligible_25k_european_symbols": [
+      "XSP"
+    ],
+    "reg_t_working_order_bpr_audit_per_lot": {
+      "simultaneous_2x2_unfilled_working_bpr_lock_usd": 840.0,
+      "sequential_leg1_then_leg2_peak_bpr_lock_usd": 415.0,
+      "post_fill_merged_iron_condor_bpr_usd": 340.0,
+      "required_retail_order_sequencing": "SEQUENTIAL_FILL_LEG1_THEN_SUBMIT_LEG2"
+    },
+    "cboe_xsp_roundtrip_fee_breakdown_per_ic_lot": {
+      "tastytrade_open_comm_4legs_usd": 4.0,
+      "tastytrade_close_comm_4legs_usd": 0.0,
+      "cboe_xsp_proprietary_surcharge_8legs_usd": 4.32,
+      "occ_and_orf_regulatory_8legs_usd": 1.12,
+      "total_roundtrip_fee_per_ic_lot_usd": 9.44
+    },
+    "sixty_day_25k_xsp_waterfall_comparison": {
+      "trades_executed_2lot_xsp": 10,
+      "1_idealized_gross_pnl_usd": 1476.0,
+      "2_after_cboe_proprietary_fees_and_comm_usd": 1287.2,
+      "3_after_0_05_nickel_ticks_and_sequential_legin_drift_usd": 1147.2,
+      "4a_net_pnl_if_unamortized_daily_qpu_runs_usd": -292.8,
+      "4b_net_pnl_with_offline_premarket_amortized_lut_usd": 1141.44
+    }
+  }
+}

@@ -1,2 +1,3 @@
 crates/okasaki-quantum-circuits/target/
 __pycache__/
+compiled/

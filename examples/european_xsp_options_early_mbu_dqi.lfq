@@ -1,0 +1,210 @@
+#lang lakefillq
+
+;; =============================================================================
+;; examples/european_xsp_options_early_mbu_dqi.lfq
+;;
+;; Retail-Scale Cash-Settled European Index Options (`XSP`/`SPX`/`NDX`/`RUT`)
+;; Quantum Edge Module for Real Quantum Hardware (`heron-r2` & `bluvstein-aod`).
+;;
+;; Contains two hardware-executable `#lang lakefillq` circuits:
+;;
+;;   1. `european-xsp-cross-index-qsvt-t2` (`14` physical qubits, `0` phase
+;;      residuals):
+;;      Implements a degree-2 Chebyshev `QSVT` spectral filter
+;;      `T_2(Sigma_tail / alpha) = 2 (Sigma_tail / alpha)^2 - I` over a 4x4
+;;      (`2`-qubit `sys`) cross-index tail-correlation block encoding (`XSP`,
+;;      `RUT`, `NDX`, `VIX`) using `NestedDyadicWalkerAliasBox` (`0` T-gate
+;;      rotations), guarded 4-arm `qmatch` (`Law U3`), Berry-Gidney `mid-meas-x`
+;;      + `cond-cz` `PREP-dagger` (`Law U4`), and single-ancilla `q-sig`
+;;      Chebyshev reflection fusion (`m_anc + 1` ancillas).
+;;
+;;   2. `european-xsp-early-mbu-dqi-7wing` (`10` physical qubits, `24` virtual
+;;      SSA wires with `14` chordally recycled wires, `0` uncomputation `CCX`):
+;;      Solves the discrete integer-lot & strike-width coset optimization over
+;;      `7` candidate European vertical credit spread legs (`XSP 45-DTE Put`,
+;;      `XSP 45-DTE Call`, `XSP 21-DTE Roll Put`, `RUT 45-DTE Put`,
+;;      `RUT 45-DTE Call`, `NDX 45-DTE Put`, `NDX 45-DTE Call` in
+;;      `decomposed-2x2-verticals` mode) under `3` parity/factor constraints
+;;      (portfolio Delta neutrality, Vega/IVR skew parity, and FINRA Rule 4210
+;;      shared-wing BPR cap).
+;;      - Immediately after extracting the 3-bit syndrome `syn3 ^= H * e7`,
+;;        measures all `7` candidate spread wires in the X-basis (`mid-meas-x`),
+;;        shrinking live decoding width from `10 -> 3` data qubits (`-70.0%`).
+;;      - Decodes via an Okasaki `fold-braun` tree with `within-apply-mbu` +
+;;        `cond-z`, discharging `Law U4` (`QTainted -> QClean`) and `Law U1`
+;;        (`EraseBy`) with `0` reverse Toffolis before Walsh-Hadamard readout
+;;        (`P(x* = 5) = 4/7`).
+;; =============================================================================
+
+(target-profile heron-r2)
+
+;; -----------------------------------------------------------------------------
+;; Circuit 1: Cross-Index (`XSP`/`RUT`/`NDX`/`VIX`) LCU + QSVT Chebyshev T_2 Filter
+;; -----------------------------------------------------------------------------
+(define (emit-xsp-cross-index-lcu-step sys blk sel tbl-w swap-w m-swap-sym m-tbl-sym)
+  (match-define (list s0 s1) sys)
+  (match-define (list idx0 idx1 coin) blk)
+  (match-define (list sel0 sel1) sel)
+  (seq
+   ;; 1. Uniform dyadic index + coin superposition (`0` T-gates):
+   (h idx0)
+   (h idx1)
+   (h coin)
+
+   ;; 2. Walker-Vose alias lookup & conditional routing (`Laws U1, U2`) for
+   ;;    dyadic cross-index weights `c / alpha = (3/8, 2/8, 2/8, 1/8)`:
+   (erase-by
+    (seq
+     (temp-and idx0 idx1 tbl-w)
+     (temp-and tbl-w coin swap-w)
+     (erase-by
+      (seq
+       (cx idx0 sel0)
+       (cx idx1 sel1)
+       (cx swap-w sel0)
+       (cx swap-w sel1)
+       ;; 3. Exhaustive 4-arm `SELECT` (`Law U3` `TotalOn`):
+       (qmatch
+        ([(g-eq-bits sel '(0 0))
+          (x s0)
+          (x s1)]
+         [(g-eq-bits sel '(1 0))
+          (z s0)
+          (x s0)
+          (z s1)
+          (x s1)
+          (z sel0)]
+         [(g-eq-bits sel '(0 1))
+          (z s0)
+          (z s1)]
+         [(g-eq-bits sel '(1 1))
+          (z s0)
+          (z sel0)])))
+      (seq
+       (cx swap-w sel1)
+       (cx swap-w sel0)
+       (cx idx1 sel1)
+       (cx idx0 sel0))
+      sel))
+    ;; 4. `Law U4` Berry-Gidney `M_X` `PREP-dagger` (`0` uncompute `CCX` gates):
+    (seq
+     (mid-meas-x swap-w m-swap-sym)
+     (cond-cz m-swap-sym tbl-w coin)
+     (mid-meas-x tbl-w m-tbl-sym)
+     (cond-cz m-tbl-sym idx0 idx1))
+    (list tbl-w swap-w))
+
+   ;; 5. Close `PREP-dagger` interference on `(idx0, idx1, coin)`:
+   (h idx0)
+   (h idx1)
+   (h coin)))
+
+(define (emit-xsp-qsvt-zero-block-reflection blk q-sig r-tmp1 r-tmp2)
+  (match-define (list idx0 idx1 coin) blk)
+  (seq
+   (x idx0)
+   (x idx1)
+   (x coin)
+   (within-apply-mbu
+    (seq (temp-and idx0 idx1 r-tmp1)
+         (temp-and r-tmp1 coin r-tmp2))
+    (seq (cx r-tmp2 q-sig)
+         (x q-sig)
+         (z q-sig)
+         (x q-sig)
+         (cx r-tmp2 q-sig))
+    (list r-tmp1 r-tmp2))
+   (x coin)
+   (x idx1)
+   (x idx0)))
+
+(defq (european-xsp-cross-index-qsvt-t2
+       #:wires ([sys (range 0 2)]
+                [blk (range 2 5)]
+                [qsig (range 5 6)])
+       #:scratch ([sel (range 6 8)]
+                  [tbl1 (range 8 9)]
+                  [swp1 (range 9 10)]
+                  [rt1 (range 10 11)]
+                  [rt2 (range 11 12)]
+                  [tbl2 (range 12 13)]
+                  [swp2 (range 13 14)])
+       #:domain (domain-guard (g-all-zero '(2 3 4 5))))
+  (emit-xsp-cross-index-lcu-step sys
+                                 blk
+                                 sel
+                                 (wref tbl1 0)
+                                 (wref swp1 0)
+                                 'm_xsp_swp_step1
+                                 'm_xsp_tbl_step1)
+  (emit-xsp-qsvt-zero-block-reflection blk
+                                       (wref qsig 0)
+                                       (wref rt1 0)
+                                       (wref rt2 0))
+  (emit-xsp-cross-index-lcu-step sys
+                                 blk
+                                 sel
+                                 (wref tbl2 0)
+                                 (wref swp2 0)
+                                 'm_xsp_swp_step2
+                                 'm_xsp_tbl_step2))
+
+;; -----------------------------------------------------------------------------
+;; Circuit 2 (Primary): Early-MBU Phase-Only DQI Discrete Lot & Strike Selector
+;; -----------------------------------------------------------------------------
+;; Target syndrome mask `b_mask = 44` encoding optimal European spread coset `x* = 5`
+;; (`0b101`: paired `XSP` + `RUT` decomposed 2x2 vertical spreads):
+(defconst xsp-dqi-b-mask 44)
+(defconst xsp-dqi-w0 (sqrt (/ 7.0 32.0)))
+(defconst xsp-dqi-w1 (sqrt (/ 25.0 32.0)))
+(defconst xsp-dqi-meas-syms '(m_leg0 m_leg1 m_leg2 m_leg3 m_leg4 m_leg5 m_leg6))
+
+(defq (european-xsp-early-mbu-dqi-7wing
+       #:wires ([e7 (range 0 7)]
+                [syn3 (range 7 10)])
+       #:scratch ([v-parity (range 10 17)]
+                  [v-and-sc (range 17 24)])
+       #:domain (domain-guard (g-all-zero '(7 8 9))))
+  ;; 1. Coherent weight-<=1 Max-LINSAT Dicke state preparation over 7 candidate
+  ;;    European vertical spread legs:
+  (prepare-dicke-le1 e7 xsp-dqi-w0 xsp-dqi-w1 xsp-dqi-b-mask)
+
+  ;; 2. Factor/BPR parity-check syndrome encoding `syn3 ^= H * e7` (`col j = j + 1`):
+  (for/seq ([j (in-range 7)])
+    (define col (add1 j))
+    (for/seq ([r (in-range 3)] #:when (bitwise-bit-set? col r))
+      (cx (wref e7 j) (wref syn3 r))))
+
+  ;; 3. Early-MBU `M_X` + reset on all 7 candidate spread wires (`e_0..e_6 -> |0>`):
+  (for/seq ([j (in-range 7)])
+    (mid-meas-x (wref e7 j) (list-ref xsp-dqi-meas-syms j)))
+
+  ;; 4. Balanced Okasaki Braun-tree syndrome decoding (`fold-braun`):
+  ;;    Recycles virtual SSA scratch `(v-parity[j], v-and-sc[j])` onto freed
+  ;;    physical wires `0` and `1`, computes `p_anc = [syn3 == j + 1]` via
+  ;;    `within-apply-mbu`, and cancels phase taint `m_legj` via `cond-z`:
+  (fold-braun
+   (lambda (col j)
+     (define m-sym (list-ref xsp-dqi-meas-syms j))
+     (define p-anc (wref v-parity j))
+     (define sc1 (wref v-and-sc j))
+     (define s0 (wref syn3 0))
+     (define s1 (wref syn3 1))
+     (define s2 (wref syn3 2))
+     (within-apply-mbu
+      (seq
+       (for/seq ([r (in-range 3)] #:when (not (bitwise-bit-set? col r)))
+         (x (wref syn3 r)))
+       (temp-and s0 s1 sc1)
+       (temp-and sc1 s2 p-anc)
+       (for/seq ([r (in-range 3)] #:when (not (bitwise-bit-set? col r)))
+         (x (wref syn3 r))))
+      (cond-z m-sym p-anc)
+      (list p-anc sc1)))
+   (range 1 8))
+
+  ;; 5. Final Walsh-Hadamard interference on `syn3` yielding `P(x* = 5) = 4/7`:
+  (focus-zipper [sz syn3 (append e7 syn3)]
+    (h (wref sz 0))
+    (h (wref sz 1))
+    (h (wref sz 2))))
