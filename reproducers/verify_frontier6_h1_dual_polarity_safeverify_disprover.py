@@ -781,6 +781,96 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         }
     )
 
+    # Case 21: Category 15 — case21_jacobi_reciprocity_sign_omission_mod4 (`Pattern 16`)
+    # Claiming (a/b) = (b/a) without the (-1)^((a-1)(b-1)/4) reciprocity sign flip on a == b == 3 (mod 4),
+    # disproved by counterexample (a, b) = (3, 7) where (3/7) = -1 != +1 = (7/3).
+    def jacobi_reciprocity_flip_int(a: int, b: int) -> int:
+        return -1 if (a % 4 == 3 and b % 4 == 3) else 1
+
+    def jacobi_two_supplement_int(b: int) -> int:
+        if (b % 8) in (1, 7):
+            return 1
+        if (b % 8) in (3, 5):
+            return -1
+        return 0
+
+    def kronecker_jacobi_2adic_int(fuel: int, a: int, b: int, acc: int = 1) -> int:
+        if fuel == 0:
+            return 0
+        if b == 1:
+            return acc
+        if a == 0 or (b % 2 == 0):
+            return 0
+        if a == 1:
+            return acc
+        if a % 2 == 0:
+            return kronecker_jacobi_2adic_int(
+                fuel - 1, a // 2, b, acc * jacobi_two_supplement_int(b)
+            )
+        return kronecker_jacobi_2adic_int(
+            fuel - 1, b % a, a, acc * jacobi_reciprocity_flip_int(a, b)
+        )
+
+    pos_a21, pos_b21 = 5, 21
+    neg_a21, neg_b21 = 3, 7
+    c21_pos_p = not (pos_a21 % 4 == 3 and pos_b21 % 4 == 3)
+    c21_pos_q = (
+        kronecker_jacobi_2adic_int(8, pos_a21, pos_b21, 1)
+        == kronecker_jacobi_2adic_int(8, pos_b21, pos_a21, 1)
+        == 1
+    )
+    c21_neg_p = not (neg_a21 % 4 == 3 and neg_b21 % 4 == 3)
+    c21_neg_q = kronecker_jacobi_2adic_int(8, neg_a21, neg_b21, 1) == kronecker_jacobi_2adic_int(
+        8, neg_b21, neg_a21, 1
+    )
+    c21_caught = bool(
+        kronecker_jacobi_2adic_int(8, 3, 7, 1) == -1
+        and kronecker_jacobi_2adic_int(8, 7, 3, 1) == 1
+        and verify_dual_polarity_implication_witness(c21_pos_p, c21_pos_q, c21_neg_p, c21_neg_q)
+    )
+    cases.append(
+        {
+            "case_id": 21,
+            "category": "case21_jacobi_reciprocity_sign_omission_mod4",
+            "conjecture_label": "Omitted `(-1)^((a-1)(b-1)/4)` quadratic reciprocity sign flip in `(a/b) = (b/a)` (`Pattern 16`, disproved at `(a, b) = (3, 7)` where `(3/7) = -1 != +1 = (7/3)`)",
+            "positive_witness": f"(a,b)=({pos_a21},{pos_b21}) with 5==1 mod 4: (5/21)=(21/5)=+1 (P={c21_pos_p}, Q={c21_pos_q})",
+            "negative_disproof_witness": f"(a,b)=({neg_a21},{neg_b21}) with 3==7==3 mod 4: (3/7)=-1 != +1=(7/3) (P={c21_neg_p}, Q={c21_neg_q})",
+            "disproved_and_dual_polarity_verified": c21_caught,
+        }
+    )
+
+    # Case 22: Category 16 — case22_composite_jacobi_pseudoprime_euler_criterion (`Pattern 16`)
+    # Claiming (a/n) = +1 => a is a quadratic residue mod n (or n is prime) without `isPrime(n)`,
+    # disproved by composite modulus n = 15 = 3 * 5 and a = 2 where (2/15) = (2/3)(2/5) = (-1)(-1) = +1
+    # yet x^2 == 2 (mod 15) has 0 solutions.
+    def is_prime_int(n: int) -> bool:
+        return n >= 2 and all(n % d != 0 for d in range(2, int(math.isqrt(n)) + 1))
+
+    def has_quadratic_residue_solution(a: int, n: int) -> bool:
+        return any((x * x) % n == (a % n) for x in range(n))
+
+    pos_a22, pos_n22 = 2, 7
+    neg_a22, neg_n22 = 2, 15
+    c22_pos_p = is_prime_int(pos_n22) and kronecker_jacobi_2adic_int(8, pos_a22, pos_n22, 1) == 1
+    c22_pos_q = has_quadratic_residue_solution(pos_a22, pos_n22)
+    c22_neg_p = is_prime_int(neg_n22) and kronecker_jacobi_2adic_int(8, neg_a22, neg_n22, 1) == 1
+    c22_neg_q = has_quadratic_residue_solution(neg_a22, neg_n22)
+    c22_caught = bool(
+        kronecker_jacobi_2adic_int(8, 2, 15, 1) == 1
+        and (not has_quadratic_residue_solution(2, 15))
+        and verify_dual_polarity_implication_witness(c22_pos_p, c22_pos_q, c22_neg_p, c22_neg_q)
+    )
+    cases.append(
+        {
+            "case_id": 22,
+            "category": "case22_composite_jacobi_pseudoprime_euler_criterion",
+            "conjecture_label": "Composite Jacobi pseudoprime obstruction `(a/n) = +1 => exists x, x^2 == a (mod n)` without `isPrime(n)` (`Pattern 16`, disproved at `a = 2, n = 15`)",
+            "positive_witness": f"Prime modulus n={pos_n22}, a={pos_a22}: (2/7)=+1 and 3^2=9==2 mod 7 (P={c22_pos_p}, Q={c22_pos_q})",
+            "negative_disproof_witness": f"Composite modulus n={neg_n22}=3*5, a={neg_a22}: (2/15)=(-1)(-1)=+1 yet x^2==2 mod 15 has 0 solutions (P={c22_neg_p}, Q={c22_neg_q})",
+            "disproved_and_dual_polarity_verified": c22_caught,
+        }
+    )
+
     caught_count = sum(1 for c in cases if c["disproved_and_dual_polarity_verified"])
     total_cases = len(cases)
     return {
@@ -792,6 +882,7 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         "all_16_cases_caught": caught_count == total_cases,
         "all_18_cases_caught": caught_count == total_cases,
         "all_20_cases_caught": caught_count == total_cases,
+        "all_22_cases_caught": caught_count == total_cases,
         "cases": cases,
     }
 
@@ -800,6 +891,7 @@ run_14case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_d
 run_16case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 run_18case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 run_20case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
+run_22case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 
 
 def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool, Dict[str, Any]]:
@@ -879,7 +971,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         and len(all_vacuous_violations) == 0
         and len(pattern11_real_violations) == 0
         and part45_lean_verified
-        and disproof_suite["all_20_cases_caught"]
+        and disproof_suite["all_22_cases_caught"]
     )
 
     summary: Dict[str, Any] = {
@@ -898,6 +990,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         "synthetic_16case_disproof_suite": disproof_suite,
         "synthetic_18case_disproof_suite": disproof_suite,
         "synthetic_20case_disproof_suite": disproof_suite,
+        "synthetic_22case_disproof_suite": disproof_suite,
         "elapsed_ms": elapsed_ms,
         "all_passed": ok,
     }
@@ -922,7 +1015,7 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, summary = run_frontier6_dual_polarity_safeverify_audit(repo_root)
-    suite = summary["synthetic_20case_disproof_suite"]
+    suite = summary["synthetic_22case_disproof_suite"]
 
     print("=" * 108)
     print(
@@ -940,7 +1033,7 @@ def main() -> int:
     print(f"  Pattern 11 Fallback Violations        : {len(summary['pattern11_conditional_fallback_violations'])}")
     print(f"  Frontier 6 Lean Theorems Verified     : {summary['frontier6_lean_theorems_verified']}")
     print(
-        f"  20-Case Disproof Suite Recall         : "
+        f"  22-Case Disproof Suite Recall         : "
         f"{suite['caught_count']}/{suite['total_cases'] if 'total_cases' in suite else suite['total_synthetic_cases']} "
         f"({suite['recall_pct']}% disproof & non-vacuity recall)"
     )
@@ -951,7 +1044,7 @@ def main() -> int:
     print("-" * 108)
     print(
         f"  OVERALL FRONTIER 6 DUAL-POLARITY SAFEVERIFY STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 20/20 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
+        f"{'PASS (0 REAL VIOLATIONS, 22/22 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
         f"in {summary['elapsed_ms']:.1f} ms"
     )
     print("=" * 108)

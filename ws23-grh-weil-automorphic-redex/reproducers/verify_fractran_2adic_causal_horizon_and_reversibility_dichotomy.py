@@ -295,10 +295,51 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
                 rhs_bh = (2 - ap * u) ** 2 + (2 * d * u) ** 2 + 3 * ((ap * u) ** 2)
                 assert lhs_bh == rhs_bh and rhs_bh >= 0
 
+    # Pillar 11: 2-Adic Kronecker-Jacobi Reciprocity Automaton vs. Multi-Prime Factorization
+    def jacobi_reciprocity_flip(a: int, b: int) -> int:
+        return -1 if (a % 4 == 3 and b % 4 == 3) else 1
+
+    def jacobi_two_supplement(b: int) -> int:
+        if (b % 8) in (1, 7):
+            return 1
+        if (b % 8) in (3, 5):
+            return -1
+        return 0
+
+    def kronecker_jacobi_2adic(fuel: int, a: int, b: int, acc: int = 1) -> int:
+        if fuel == 0:
+            return 0
+        if b == 1:
+            return acc
+        if a == 0 or (b % 2 == 0):
+            return 0
+        if a == 1:
+            return acc
+        if a % 2 == 0:
+            return kronecker_jacobi_2adic(
+                fuel - 1, a // 2, b, acc * jacobi_two_supplement(b)
+            )
+        return kronecker_jacobi_2adic(
+            fuel - 1, b % a, a, acc * jacobi_reciprocity_flip(a, b)
+        )
+
+    def chi4_int(n: int) -> int:
+        if n % 2 == 0:
+            return 0
+        return 1 if (n % 4 == 1) else -1
+
+    for b_test in range(32):
+        lhs_flip = jacobi_reciprocity_flip(3, b_test) if (b_test % 2 == 1) else 0
+        assert lhs_flip == chi4_int(b_test)
+    assert kronecker_jacobi_2adic(8, 5, 21, 1) == 1
+    assert kronecker_jacobi_2adic(8, 7, 15, 1) == -1
+    assert kronecker_jacobi_2adic(8, 3, 35, 1) == 1
+    assert kronecker_jacobi_2adic(8, 2, 15, 1) == 1
+
     cap_8_5 = okasaki_pebble_capacity(8, 5)
     assert cap_8_5 == 1287 and cap_8_5 >= 741 >= 710
 
-    has_pillars_5_to_10 = (
+    has_pillars_5_to_11 = (
         "def conwayPrimeGameProg" in code_no_comments
         and "theorem conway_primegame_first_primes_2_3_5_7_trajectory_exact"
         in code_no_comments
@@ -331,6 +372,11 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         in code_no_comments
         and "theorem bass_hashimoto_ramanujan_sos_and_chi4_shell_bridge"
         in code_no_comments
+        and "def jacobiReciprocityFlip" in code_no_comments
+        and "def jacobiTwoSupplement" in code_no_comments
+        and "def kroneckerJacobi2Adic" in code_no_comments
+        and "theorem jacobiReciprocityFlip_three_eq_chi4" in code_no_comments
+        and "theorem kroneckerJacobi2Adic_composite_moduli_exact" in code_no_comments
         and "theorem fractran_2adic_causal_horizon_master_closure" in code_no_comments
     )
 
@@ -344,8 +390,8 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         and parameterless_defs == 0
         and uninterpreted_ineq_hyps == 0
         and max_proof_lines <= 5
-        and len(thm_blocks) == 21
-        and has_pillars_5_to_10
+        and len(thm_blocks) == 23
+        and has_pillars_5_to_11
     )
     return {
         "status": "PASS" if passed else "FAIL",
@@ -365,6 +411,7 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         "goedel_liouville_mobius_boolean_hypercube_cancellation": hypercube_mobius_sum,
         "collatz_27_stopping_time_111_and_peak_9232_verified": True,
         "bass_hashimoto_ramanujan_sos_bridge_verified": True,
+        "kronecker_jacobi_2adic_reciprocity_verified": True,
         "robin_counterexample_search_120": None,
         "okasaki_pebble_capacity_8_5": cap_8_5,
         "elapsed_s": round(elapsed_s, 3),

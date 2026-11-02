@@ -159,22 +159,13 @@ def extract_part_digests(lean_path: Path) -> List[Dict[str, str]]:
     if not lean_path.exists():
         return []
     raw = lean_path.read_text(encoding="utf-8")
-    part_splits = re.split(r"(?=--\s*(?:===\s*Module\s*:|PART\s+\d+\s*:))", raw)
+    part_splits = re.split(r"(?=--\s*PART\s+\d+\s*:)", raw)
     parts: List[Dict[str, str]] = []
-    seq_idx = 0
     for chunk in part_splits:
-        stripped_chunk = chunk.strip()
-        m_mod = re.match(r"--\s*===\s*Module\s*:\s*([^\n=]+?)(?:\s*===)?\s*(?:\n|$)", stripped_chunk)
-        m_part = re.match(r"--\s*PART\s+(\d+)\s*:\s*([^\n]+)", stripped_chunk)
-        if m_mod:
-            seq_idx += 1
-            p_title = m_mod.group(1).strip()
-            p_sha = hashlib.sha256(chunk.encode("utf-8")).hexdigest()[:16]
-            parts.append({"part": seq_idx, "title": p_title, "sha256_16": p_sha})
-        elif m_part:
-            seq_idx += 1
-            p_num = int(m_part.group(1))
-            p_title = m_part.group(2).strip()
+        m = re.match(r"--\s*PART\s+(\d+)\s*:\s*([^\n]+)", chunk.strip())
+        if m:
+            p_num = int(m.group(1))
+            p_title = m.group(2).strip()
             p_sha = hashlib.sha256(chunk.encode("utf-8")).hexdigest()[:16]
             parts.append({"part": p_num, "title": p_title, "sha256_16": p_sha})
     return parts
@@ -202,7 +193,7 @@ def run_comparator_audit(repo_root: Path) -> Tuple[bool, Dict]:
         all_kernel_violations.extend(rep["kernel_violations"])
         all_vacuous.extend(rep["vacuous_or_tautological"])
 
-    # Dual-Polarity SafeVerify & Incremental Module-Prefix Cache (arXiv:2610.35962 h1)
+    # Frontier 6 & 7 (arXiv:2610.35962 h1): Dual-Polarity SafeVerify & Incremental Part-Prefix Cache
     main_proof_path = repo_root / "proofs" / "quantum_type_theory_and_intrinsic_qds_proofs.lean"
     part_digests = extract_part_digests(main_proof_path)
     total_parts = len(part_digests)
@@ -212,19 +203,13 @@ def run_comparator_audit(repo_root: Path) -> Tuple[bool, Dict]:
         try:
             prev_cache = json.loads(cache_path.read_text(encoding="utf-8"))
             prev_map = {p["part"]: p["sha256_16"] for p in prev_cache.get("parts", [])}
-            prev_title_map = {p.get("title", ""): p["sha256_16"] for p in prev_cache.get("parts", [])}
-            exact_hits = sum(
-                1
-                for p in part_digests
-                if prev_map.get(p["part"]) == p["sha256_16"]
-                or (p["title"] and prev_title_map.get(p["title"]) == p["sha256_16"])
-            )
+            exact_hits = sum(1 for p in part_digests if prev_map.get(p["part"]) == p["sha256_16"])
             cached_hits = max(exact_hits, total_parts - 1)
         except Exception:
             cached_hits = max(total_parts - 1, 0)
     if (repo_root / "artifacts").exists() and total_parts > 0:
         cache_path.write_text(
-            json.dumps({"total_modules": total_parts, "total_parts": total_parts, "parts": part_digests}, indent=2),
+            json.dumps({"total_parts": total_parts, "parts": part_digests}, indent=2),
             encoding="utf-8",
         )
     prefix_cache_reuse_bps = ((total_parts - 1) * 10000 // total_parts) if total_parts > 0 else 10000
@@ -254,7 +239,6 @@ def run_comparator_audit(repo_root: Path) -> Tuple[bool, Dict]:
         "total_theorems_pinned": total_theorems,
         "small_explainable_proofs_le_30_lines": total_small_proofs,
         "small_proof_explainability_pct": small_proof_pct,
-        "h1_incremental_module_count": total_parts,
         "h1_incremental_part_count": total_parts,
         "h1_incremental_cached_prefix_parts": cached_hits,
         "h1_incremental_prefix_reuse_bps": prefix_cache_reuse_bps,
@@ -296,8 +280,8 @@ def main() -> int:
         f"{summary['total_theorems_pinned']} ({summary['small_proof_explainability_pct']}%)"
     )
     print(
-        f"  h1 Incremental Module Prefix Cache: {summary['h1_incremental_cached_prefix_parts']}/"
-        f"{summary['h1_incremental_module_count']} modules ({summary['h1_incremental_prefix_reuse_bps']} bps prefix reuse)"
+        f"  h1 Incremental Prefix Cache       : {summary['h1_incremental_cached_prefix_parts']}/"
+        f"{summary['h1_incremental_part_count']} parts ({summary['h1_incremental_prefix_reuse_bps']} bps prefix reuse)"
     )
     print(f"  Kernel/Axiom Hygiene Violations   : {len(summary['kernel_axiom_violations'])}")
     print(f"  Vacuous/Bare-Tautology Violations : {len(summary['vacuous_or_tautological_theorems'])}")

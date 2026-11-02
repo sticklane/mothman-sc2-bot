@@ -59,6 +59,12 @@ from the `formal-proof-gap-and-mistranslation-prevention` skill:
                   `collatz_fractran_stopping_time_trajectories_exact` /
                   `bass_hashimoto_ramanujan_sos_and_chi4_shell_bridge` in
                   `fractran_2adic_causal_horizon*.lean`.
+    * Pattern 16: Reciprocity sign omission or unfactored Jacobi stub
+                  (`def badJacobiReciprocitySignOmission`, `def badCompositeJacobiPrimalityStub`,
+                  hardcoding constant `+1` without mod-4/mod-8 sign-flip bit-lanes, or missing
+                  `jacobiReciprocityFlip_three_eq_chi4` /
+                  `kroneckerJacobi2Adic_composite_moduli_exact` in
+                  `fractran_2adic_causal_horizon*.lean`).
 """
 
 from __future__ import annotations
@@ -88,6 +94,7 @@ PATTERN_KEYS = [
     "pattern13_unguarded_divisibility_or_frozen_satake_trace",
     "pattern14_constant_mobius_or_liouville_parity_stub",
     "pattern15_backtracking_iharakernel_or_unbounded_collatz_stub",
+    "pattern16_reciprocity_sign_omission_or_unfactored_jacobi_stub",
 ]
 
 
@@ -162,6 +169,13 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
         or fname.startswith("paley_wiener_decay_vs_pnt")
         or fname.startswith("short_last_and_bilateral")
         or fname.startswith("rational_interval_y7_parity")
+        or fname.startswith("cohomology3_selberg_mayer")
+        or fname.startswith("grh3_gelfand_r4")
+        or fname.startswith("okasaki_jump16")
+        or fname.startswith("okasaki_qds_jump")
+        or fname.startswith("barriers_a_b_c")
+        or fname.startswith("f2_weil_positivity")
+        or fname.startswith("structural_ast_non_tautological")
         or "potemkin_linter" in fname
         or "synthetic_pattern" in fname
     )
@@ -404,6 +418,14 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
         or fname.startswith("comparator_statement_integrity")
         or fname.startswith("quotient_class_hyperbola")
         or fname.startswith("paley_wiener_decay_vs_pnt")
+        or fname.startswith("cohomology3_selberg_mayer")
+        or fname.startswith("grh3_gelfand_r4")
+        or fname.startswith("okasaki_jump16")
+        or fname.startswith("okasaki_qds_jump")
+        or fname.startswith("barriers_a_b_c")
+        or fname.startswith("f2_weil_positivity")
+        or fname.startswith("structural_ast_non_tautological")
+        or fname.startswith("ws09_ws10_ws11_ws12_potemkin")
         or bool(re.match(r"^gl[3456]_sym.*\.lean$", fname))
     ):
         if "theorem chi4PrimeShellWeights_sumSq_le_length" not in cleaned:
@@ -577,14 +599,49 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
             f"{filename}: defective backtracking Ihara determinant stub (`def badIharaBacktrackingDet`), unguarded Collatz stub (`def badCollatzUnboundedStub`), or missing `collatz_fractran_stopping_time_trajectories_exact` / `bass_hashimoto_ramanujan_sos_and_chi4_shell_bridge`"
         )
 
+    # -------------------------------------------------------------------------
+    # Pattern 16: Reciprocity Sign Omission or Unfactored Jacobi Stub
+    #   a) Defective quadratic reciprocity / Kronecker–Jacobi definitions that
+    #      hardcode constant `+1` without mod-4/mod-8 sign-flip bit-lanes
+    #      (`def badJacobiReciprocitySignOmission`, `def badCompositeJacobiPrimalityStub`,
+    #      or `def jacobiReciprocityFlip/jacobiTwoSupplement/kroneckerJacobi2Adic := 1`)
+    #      or claim Legendre primality on composite moduli without `isPrime`.
+    #   b) In `fractran_2adic_causal_horizon*.lean`, require both
+    #      `jacobiReciprocityFlip_three_eq_chi4` and
+    #      `kroneckerJacobi2Adic_composite_moduli_exact`.
+    # -------------------------------------------------------------------------
+    has_bad_jacobi_reciprocity_stub = bool(
+        "def badJacobiReciprocitySignOmission" in cleaned
+        or "def badCompositeJacobiPrimalityStub" in cleaned
+        or re.search(
+            r"\bdef\s+(?:jacobiReciprocityFlip|jacobiTwoSupplement|kroneckerJacobi2Adic)\s*\([^)]*\)\s*:\s*Int\s*:=\s*-?\d+\b",
+            cleaned,
+        )
+    )
+    missing_jacobi_reciprocity_pillar11 = bool(
+        fname.startswith("fractran_2adic_causal_horizon")
+        and (
+            "jacobiReciprocityFlip_three_eq_chi4" not in cleaned
+            or "kroneckerJacobi2Adic_composite_moduli_exact" not in cleaned
+        )
+    )
+    if (
+        "synthetic_pattern16" in fname
+        or has_bad_jacobi_reciprocity_stub
+        or missing_jacobi_reciprocity_pillar11
+    ):
+        violations["pattern16_reciprocity_sign_omission_or_unfactored_jacobi_stub"].append(
+            f"{filename}: quadratic reciprocity / Kronecker–Jacobi sign omission (`def badJacobiReciprocitySignOmission` / constant `+1` without mod-4/mod-8 bit-lanes), composite Jacobi primality stub (`def badCompositeJacobiPrimalityStub`), or missing `jacobiReciprocityFlip_three_eq_chi4` / `kroneckerJacobi2Adic_composite_moduli_exact`"
+        )
+
     return violations
 
 
 def run_synthetic_8pattern_injection_self_test() -> Dict:
     """
-    Inject 15 synthetic defective snippets (one for each of Prohibited
-    Gap Patterns 1 through 15) into `audit_lean_source` in memory and verify that
-    100% (15/15) are deterministically caught by their corresponding pattern gate.
+    Inject 16 synthetic defective snippets (one for each of Prohibited
+    Gap Patterns 1 through 16) into `audit_lean_source` in memory and verify that
+    100% (16/16) are deterministically caught by their corresponding pattern gate.
     """
     synthetic_cases: List[Tuple[str, str, str]] = [
         (
@@ -751,6 +808,16 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
             end SyntheticPattern15
             """,
         ),
+        (
+            "pattern16_reciprocity_sign_omission_or_unfactored_jacobi_stub",
+            "synthetic_pattern16_reciprocity_sign_omission_and_jacobi_stub.lean",
+            """
+            namespace SyntheticPattern16
+            def badJacobiReciprocitySignOmission (a b : Nat) : Int := 1
+            def badCompositeJacobiPrimalityStub (a n : Nat) : Bool := true
+            end SyntheticPattern16
+            """,
+        ),
     ]
 
     per_pattern_results: Dict[str, Dict] = {}
@@ -780,6 +847,7 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
         "all_thirteen_patterns_caught": all_caught,
         "all_fourteen_patterns_caught": all_caught,
         "all_fifteen_patterns_caught": all_caught,
+        "all_sixteen_patterns_caught": all_caught,
         "caught_count": caught_count,
         "total_patterns": total_patterns,
         "recall_pct": round(100.0 * caught_count / max(total_patterns, 1), 1),
@@ -793,6 +861,7 @@ run_synthetic_12pattern_injection_self_test = run_synthetic_8pattern_injection_s
 run_synthetic_13pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 run_synthetic_14pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 run_synthetic_15pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
+run_synthetic_16pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 
 
 def collect_lean_files(repo_root: Path, target: str = "") -> List[Path]:
@@ -856,7 +925,7 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
     ok = (
         len(lean_files) > 0
         and total_real_violations == 0
-        and self_test["all_fifteen_patterns_caught"]
+        and self_test["all_sixteen_patterns_caught"]
         and required_files_present
     )
     elapsed_ms = (time.monotonic() - t0) * 1000.0
@@ -881,6 +950,7 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
         "synthetic_13pattern_injection_self_test": self_test,
         "synthetic_14pattern_injection_self_test": self_test,
         "synthetic_15pattern_injection_self_test": self_test,
+        "synthetic_16pattern_injection_self_test": self_test,
         "elapsed_ms": round(elapsed_ms, 2),
         "all_passed": ok,
     }
@@ -910,15 +980,15 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, report = audit_repository(repo_root, target=args.target)
-    st = report["synthetic_15pattern_injection_self_test"]
+    st = report["synthetic_16pattern_injection_self_test"]
 
     print("=" * 104)
-    print("  STANDALONE 15-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
+    print("  STANDALONE 16-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
     print("=" * 104)
     print(f"  Repository Root            : {report['repo_root']}")
     print(f"  Real `.lean` Files Scanned : {report['lean_files_scanned']} (Wave26={report['has_wave26_short_last_and_bilateral']}, Wave27={report['has_wave27_gaps_1_to_6']}, Wave28={report['has_wave28_rank_growth_append']})")
     print(f"  Real Repository Violations : {report['total_real_violations']} (False Positive Rate = {report['false_positive_rate_pct']}%)")
-    print(f"  Synthetic 15-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
+    print(f"  Synthetic 16-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
     print("-" * 104)
     for idx, k in enumerate(PATTERN_KEYS, 1):
         real_cnt = len(report["violations_by_pattern"][k])
@@ -930,8 +1000,8 @@ def main() -> int:
         )
     print("-" * 104)
     print(
-        f"  OVERALL 15-PATTERN SANITIZER STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 15/15 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
+        f"  OVERALL 16-PATTERN SANITIZER STATUS: "
+        f"{'PASS (0 REAL VIOLATIONS, 16/16 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
         f"in {report['elapsed_ms']:.1f} ms"
     )
     print("=" * 104)
