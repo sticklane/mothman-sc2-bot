@@ -331,16 +331,16 @@
              "...3...."
              "...3...."
              "........"))
-     ;; Tile #x08: Playfield background grid cell border (Nametable floor tile)
+     ;; Tile #x08: Clean empty background floor tile (gridless backdrop)
      (cons #x08
-           '("11111111"
-             "1......."
-             "1......."
-             "1......."
-             "1......."
-             "1......."
-             "1......."
-             "1......."))))
+           '("........"
+             "........"
+             "........"
+             "........"
+             "........"
+             "........"
+             "........"
+             "........"))))
 
   (define word-tiles
     (append
@@ -522,9 +522,9 @@
     (STA #:abs #x2007)
     (DEX)
     (BNE clear_hud_nt_loop)
-    ;; Fill 16x14 playfield rows (896 tiles = 3 pages + 128 bytes) with grid tile #x08
+    ;; Fill 16x14 playfield rows (896 tiles = 3 pages + 128 bytes) with empty tile #x00
     (LDY #:imm 3)
-    (LDA #:imm #x08)
+    (LDA #:imm #x00)
     (label fill_grid_pages)
     (LDX #:imm 0)
     (label fill_grid_inner)
@@ -1211,13 +1211,13 @@
     (.byte #x01 #x02 #x04 #x08 #x10 #x20 #x40 #x80)
 
     (label palette_rom_table)
-    ;; 4 Background Palettes (16 B): Dark midnight blue backdrop (#x0F) + grid (#x01)
+    ;; 4 Background Palettes (16 B): Clean solid black backdrop (#x0F) without grid lines
     ;; 4 Sprite Palettes (16 B):
     ;;   Spr Pal 0 (Boba/Flag/Rock): Cream (#x37), Berry/Gold (#x27), Dark (#x07)
     ;;   Spr Pal 1 (Nouns)         : Deep Teal (#x0C), Cyan border (#x2C), White text (#x30)
     ;;   Spr Pal 2 (Verbs)         : Deep Plum (#x04), Gold border (#x28), White text (#x30)
     ;;   Spr Pal 3 (IS / Wall)     : Charcoal (#x00), Brick/Silver (#x16), White (#x30)
-    (.byte #x0F #x01 #x21 #x30  #x0F #x2A #x1A #x0A
+    (.byte #x0F #x0F #x0F #x0F  #x0F #x2A #x1A #x0A
            #x0F #x21 #x11 #x31  #x0F #x28 #x18 #x08
            #x0F #x37 #x27 #x07  #x0F #x0C #x2C #x30
            #x0F #x04 #x28 #x30  #x0F #x00 #x16 #x30)
