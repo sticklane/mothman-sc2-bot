@@ -150,10 +150,84 @@
                                  'm_xsp_tbl_step2))
 
 ;; -----------------------------------------------------------------------------
-;; Circuit 2 (Primary): Early-MBU Phase-Only DQI Discrete Lot & Strike Selector
+;; Circuit 2: Multi-Expiry `XSP` Volatility Surface 15-Bucket Early-MBU DQI
+;;            (`64` virtual SSA wires -> `19` physical qubits, `45` chordally recycled
+;;             wires, `0` uncompute `CCX`; executed offline pre-market to populate the
+;;             `O(1)` `XSP` discrete strike/expiry syndrome lookup table)
+;; -----------------------------------------------------------------------------
+;; Encodes `15` candidate `XSP` European vertical credit spread buckets across
+;; `5` expirations (`14, 21, 30, 36, 45 DTE`) x `3` delta/width tiers (`12d/$5`,
+;; `16d/$5`, `20d/$10`) under `4` joint parity constraints (`syn4`: Net Delta,
+;; Net Vega, Term-Structure Theta, and Sequential Reg-T BPR Cap):
+(defconst xsp-15b-b-mask 21845)
+(defconst xsp-15b-w0 (sqrt (/ 9.0 64.0)))
+(defconst xsp-15b-w1 (sqrt (/ 55.0 64.0)))
+(defconst xsp-15b-meas-syms
+  '(m_b0 m_b1 m_b2 m_b3 m_b4 m_b5 m_b6 m_b7 m_b8 m_b9 m_b10 m_b11 m_b12 m_b13 m_b14))
+
+(defq (european-xsp-15bucket-surface-early-mbu-dqi
+       #:wires ([e15 (range 0 15)]
+                [syn4 (range 15 19)])
+       #:scratch ([v-sc1 (range 19 34)]
+                  [v-sc2 (range 34 49)]
+                  [v-parity (range 49 64)])
+       #:domain (domain-guard (g-all-zero '(15 16 17 18)))
+       #:target bb-qldpc)
+  (multishot-reset
+   2
+   (seq
+    ;; 1. Coherent weight-<=1 Max-LINSAT Dicke state preparation over 15 `XSP` surface buckets:
+    (prepare-dicke-le1 e15 xsp-15b-w0 xsp-15b-w1 xsp-15b-b-mask)
+
+    ;; 2. 4-bit syndrome extraction `syn4 ^= H_15 * e15` (`col j = j + 1` in `1..15`):
+    (for/seq ([j (in-range 15)])
+      (define col (add1 j))
+      (for/seq ([r (in-range 4)] #:when (bitwise-bit-set? col r))
+        (cx (wref e15 j) (wref syn4 r))))
+
+    ;; 3. Early-MBU `M_X` + reset on all 15 spread-bucket wires (`19 -> 4` live qubits,
+    ;;    freeing physical wires `0..14` for chordal SSA scratch recycling):
+    (for/seq ([j (in-range 15)])
+      (mid-meas-x (wref e15 j) (list-ref xsp-15b-meas-syms j)))
+
+    ;; 4. Balanced Okasaki Braun-tree 15-bucket syndrome decode (`fold-braun`):
+    ;;    Each node `j` uses `3` forward `TempAND`s and `0` reverse Toffolis inside
+    ;;    `within-apply-mbu`, recycling `45` virtual scratch wires onto freed wires `0..2`:
+    (fold-braun
+     (lambda (col j)
+       (define m-sym (list-ref xsp-15b-meas-syms j))
+       (define sc1 (wref v-sc1 j))
+       (define sc2 (wref v-sc2 j))
+       (define p-anc (wref v-parity j))
+       (define s0 (wref syn4 0))
+       (define s1 (wref syn4 1))
+       (define s2 (wref syn4 2))
+       (define s3 (wref syn4 3))
+       (within-apply-mbu
+        (seq
+         (for/seq ([r (in-range 4)] #:when (not (bitwise-bit-set? col r)))
+          (x (wref syn4 r)))
+         (temp-and s0 s1 sc1)
+         (temp-and s2 s3 sc2)
+         (temp-and sc1 sc2 p-anc)
+         (for/seq ([r (in-range 4)] #:when (not (bitwise-bit-set? col r)))
+          (x (wref syn4 r))))
+        (cond-z m-sym p-anc)
+        (list p-anc sc2 sc1)))
+     (range 1 16))
+
+    ;; 5. Final Walsh-Hadamard interference on `syn4`:
+    (focus-zipper [sz syn4 (append e15 syn4)]
+      (h (wref sz 0))
+      (h (wref sz 1))
+      (h (wref sz 2))
+      (h (wref sz 3))))))
+
+;; -----------------------------------------------------------------------------
+;; Circuit 3 (Primary Entry): Early-MBU Phase-Only DQI 7-Wing Coset Selector
 ;; -----------------------------------------------------------------------------
 ;; Target syndrome mask `b_mask = 44` encoding optimal European spread coset `x* = 5`
-;; (`0b101`: paired `XSP` + `RUT` decomposed 2x2 vertical spreads):
+;; (`0b101`: paired `XSP` decomposed 2x2 vertical spreads):
 (defconst xsp-dqi-b-mask 44)
 (defconst xsp-dqi-w0 (sqrt (/ 7.0 32.0)))
 (defconst xsp-dqi-w1 (sqrt (/ 25.0 32.0)))

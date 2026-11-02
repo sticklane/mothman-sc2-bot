@@ -2,10 +2,10 @@
   "pipeline": "lakefillq_real_qpu_to_retail_xsp_european_options_honest_audit",
   "overall_status": "PASS",
   "zero_fpga_q15_zkfin_coupling": true,
-  "total_elapsed_ms": 5478.41,
+  "total_elapsed_ms": 13064.41,
   "stage1_lakefillqc_compilation": {
     "status": "PASS",
-    "elapsed_ms": 2735.28,
+    "elapsed_ms": 10064.42,
     "heron_r2_dqi_report": {
       "annotation_free_flags": 0,
       "chordal_recycled_wires": 14,
@@ -19,6 +19,7 @@
       "mbu_erasure_count": 21,
       "module_circuits_checked": [
         "european-xsp-cross-index-qsvt-t2",
+        "european-xsp-15bucket-surface-early-mbu-dqi",
         "european-xsp-early-mbu-dqi-7wing"
       ],
       "parallel_partition_decisions": [],
@@ -81,6 +82,7 @@
       "mbu_erasure_count": 21,
       "module_circuits_checked": [
         "european-xsp-cross-index-qsvt-t2",
+        "european-xsp-15bucket-surface-early-mbu-dqi",
         "european-xsp-early-mbu-dqi-7wing"
       ],
       "parallel_partition_decisions": [],
@@ -128,6 +130,67 @@
       "uncompute_ccx_count": 0,
       "violations": [],
       "virtual_wires": 24,
+      "well_typed": true
+    },
+    "heron_r2_15bucket_surface_dqi_report": {
+      "annotation_free_flags": 0,
+      "chordal_recycled_wires": 45,
+      "circuit_kind": "defq",
+      "circuit_name": "european-xsp-15bucket-surface-early-mbu-dqi",
+      "classical_meas_bits": 60,
+      "fallback_to_single_machine": false,
+      "forward_temp_and_count": 45,
+      "machine_isa_ops": 347,
+      "machines_used": 1,
+      "mbu_erasure_count": 60,
+      "module_circuits_checked": [
+        "european-xsp-15bucket-surface-early-mbu-dqi"
+      ],
+      "parallel_partition_decisions": [],
+      "physical_qubits": 19,
+      "pipeline_dialects": [
+        "LakefillQ",
+        "lambda_LFQ_kern",
+        "RevIR",
+        "MachineISA"
+      ],
+      "qeffect_summary": {
+        "clean_disc": 0,
+        "dirty_leak": 0,
+        "peak": 19,
+        "phi1_action": 249,
+        "phi2_collisions": 0,
+        "w_in": 19,
+        "w_out": 19
+      },
+      "qphys_grade": {
+        "decoherence_action_milli": 249,
+        "effective_fault_distance": "unbounded",
+        "exclusion_collisions": 0,
+        "required_fault_distance": 0
+      },
+      "quantum_phase_residuals": 0,
+      "repairs_applied": [],
+      "residual_surface_forms": 0,
+      "rwire_port_signature": [
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "e15",
+          "width": 15
+        },
+        {
+          "diagonal_read_only": false,
+          "grade": "Uniq1",
+          "port": "syn4",
+          "width": 4
+        }
+      ],
+      "symbolic_inference_engine": "anf-zhegalkin",
+      "target_profile": "heron-r2",
+      "uncompute_ccx_count": 0,
+      "violations": [],
+      "virtual_wires": 64,
       "well_typed": true
     },
     "heron_r2_qsvt_t2_report": {
@@ -203,11 +266,12 @@
       "violation_count": 2,
       "zero_gensym_leak": true
     },
-    "qsvt_qasm_path": "/home/antigravity/toolchains/tmp/european_xsp_cross_index_qsvt_t2.qasm"
+    "qsvt_qasm_path": "/home/antigravity/toolchains/tmp/european_xsp_cross_index_qsvt_t2.qasm",
+    "surf15_qasm_path": "reproducers/artifacts/european_xsp_15bucket_surface_heron_r2.qasm"
   },
   "stage2_openqasm3_and_controller_latency_audit": {
     "status": "PASS",
-    "elapsed_ms": 2742.83,
+    "elapsed_ms": 2898.65,
     "dqi_exact_p_xstar_5": 0.571429,
     "dqi_max_trajectory_error_32_trials": 2.483568906086475e-13,
     "dqi_max_scratch_leak_prob": 0.0,
@@ -233,7 +297,7 @@
   },
   "stage3_qpu_turnaround_lease_and_crossover_audit": {
     "status": "PASS",
-    "elapsed_ms": 0.02,
+    "elapsed_ms": 1.05,
     "queue_turnaround_vs_quote_staleness": {
       "retail_max_quote_age_ms": 5000,
       "median_cloud_queue_wait_ms": 420000,
@@ -241,7 +305,9 @@
       "qpu_2000_shot_exec_ms": 530,
       "total_inline_turnaround_ms": 435030,
       "inline_call_rejected_by_5000ms_gate": true,
-      "required_architecture": "Offline Pre-Market / Weekly Syndrome LUT (0 ms live trading latency)"
+      "required_architecture": "Offline Pre-Market / Weekly Syndrome LUT (0 ms live trading latency)",
+      "offline_lut_artifact_path": "reproducers/artifacts/xsp_premarket_syndrome_lut.json",
+      "offline_lut_o1_lookup_latency_ms": 0.000145
     },
     "qpu_lease_and_shot_economics": {
       "ibm_heron_payg_job_cost_usd": 24.0,
@@ -252,7 +318,7 @@
       "amortized_weekly_coop_50_users_annual_cost_usd": 24.96
     },
     "classical_vs_quantum_crossover": {
-      "m7_wing_classical_cpu_solve_ms": 0.016,
+      "m7_wing_classical_cpu_solve_ms": 0.0208,
       "m7_wing_classical_cost_usd": 0.0,
       "m7_wing_verdict": "Trivially solvable on classical CPU (< 0.05 ms); QPU useful only as hardware benchmark at m=7",
       "quantum_advantage_threshold_m_wings": 45,
@@ -263,7 +329,7 @@
   },
   "stage4_honest_retail_xsp_execution_waterfall": {
     "status": "PASS",
-    "elapsed_ms": 0.09,
+    "elapsed_ms": 99.04,
     "zero_fpga_q15_zkfin_coupling": true,
     "execution_transport": "Public Internet HTTPS REST (50-250 ms jitter) + 100 ms DXLink WebSocket",
     "retail_25k_notional_and_bpr_sizing_audit": {
@@ -323,6 +389,26 @@
       "3_after_0_05_nickel_ticks_and_sequential_legin_drift_usd": 1147.2,
       "4a_net_pnl_if_unamortized_daily_qpu_runs_usd": -292.8,
       "4b_net_pnl_with_offline_premarket_amortized_lut_usd": 1141.44
+    },
+    "tastytrade_paper_trading_bot_honest_retail_comparison": {
+      "idealized_mode_60d": {
+        "trades_opened": 5,
+        "trades_closed": 4,
+        "win_rate_pct": 75.0,
+        "realized_pnl_dollars": 438.0,
+        "ending_equity": 25551.0
+      },
+      "honest_retail_xsp_mode_60d": {
+        "zero_fpga_q15_zkfin_coupling": true,
+        "eligible_25k_european_symbols": [
+          "XSP"
+        ],
+        "trades_opened": 5,
+        "trades_closed": 4,
+        "win_rate_pct": 75.0,
+        "realized_pnl_dollars": 376.96,
+        "ending_equity": 25473.52
+      }
     }
   }
 }

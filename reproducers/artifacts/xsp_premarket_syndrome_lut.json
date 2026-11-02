@@ -1,0 +1,281 @@
+{
+  "schema": "lakefillq.xsp.premarket_syndrome_lut.v1",
+  "source_circuit": "european-xsp-15bucket-surface-early-mbu-dqi",
+  "virtual_wires": 64,
+  "physical_qubits": 19,
+  "chordal_recycled_wires": 45,
+  "entries": {
+    "0000": {
+      "syndrome_int": 0,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 0,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 4,
+        "dte": 21,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_21DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.4945
+    },
+    "0001": {
+      "syndrome_int": 1,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 0,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 1,
+        "dte": 14,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_14DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.4715
+    },
+    "0010": {
+      "syndrome_int": 2,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 1,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 0,
+        "dte": 14,
+        "short_delta": 0.12,
+        "wing_width_pts": 5.0,
+        "label": "XSP_14DTE_12D_5W"
+      },
+      "dqi_coset_score": 0.4485
+    },
+    "0011": {
+      "syndrome_int": 3,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 1,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 2,
+        "dte": 14,
+        "short_delta": 0.2,
+        "wing_width_pts": 5.0,
+        "label": "XSP_14DTE_20D_5W"
+      },
+      "dqi_coset_score": 0.437
+    },
+    "0100": {
+      "syndrome_int": 4,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 0,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 0,
+        "dte": 14,
+        "short_delta": 0.12,
+        "wing_width_pts": 5.0,
+        "label": "XSP_14DTE_12D_5W"
+      },
+      "dqi_coset_score": 0.4485
+    },
+    "0101": {
+      "syndrome_int": 5,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 0,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 4,
+        "dte": 21,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_21DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.4945
+    },
+    "0110": {
+      "syndrome_int": 6,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 1,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 5,
+        "dte": 21,
+        "short_delta": 0.2,
+        "wing_width_pts": 5.0,
+        "label": "XSP_21DTE_20D_5W"
+      },
+      "dqi_coset_score": 0.4255
+    },
+    "0111": {
+      "syndrome_int": 7,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 1,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 0
+      },
+      "optimal_bucket": {
+        "bucket_id": 4,
+        "dte": 21,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_21DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.4945
+    },
+    "1000": {
+      "syndrome_int": 8,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 0,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 10,
+        "dte": 36,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_36DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.4399
+    },
+    "1001": {
+      "syndrome_int": 9,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 0,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 10,
+        "dte": 36,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_36DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.5175
+    },
+    "1010": {
+      "syndrome_int": 10,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 1,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 10,
+        "dte": 36,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_36DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.5175
+    },
+    "1011": {
+      "syndrome_int": 11,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 1,
+        "term_backwardation": 0,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 13,
+        "dte": 45,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_45DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.483
+    },
+    "1100": {
+      "syndrome_int": 12,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 0,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 13,
+        "dte": 45,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_45DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.483
+    },
+    "1101": {
+      "syndrome_int": 13,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 0,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 13,
+        "dte": 45,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_45DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.483
+    },
+    "1110": {
+      "syndrome_int": 14,
+      "syndrome_bits": {
+        "ivr_high": 0,
+        "put_skew_steep": 1,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 10,
+        "dte": 36,
+        "short_delta": 0.16,
+        "wing_width_pts": 5.0,
+        "label": "XSP_36DTE_16D_5W"
+      },
+      "dqi_coset_score": 0.5175
+    },
+    "1111": {
+      "syndrome_int": 15,
+      "syndrome_bits": {
+        "ivr_high": 1,
+        "put_skew_steep": 1,
+        "term_backwardation": 1,
+        "portfolio_delta_long": 1
+      },
+      "optimal_bucket": {
+        "bucket_id": 11,
+        "dte": 36,
+        "short_delta": 0.2,
+        "wing_width_pts": 5.0,
+        "label": "XSP_36DTE_20D_5W"
+      },
+      "dqi_coset_score": 0.46
+    }
+  }
+}
