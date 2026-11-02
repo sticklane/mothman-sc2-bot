@@ -65,17 +65,23 @@ FIX_PROC_EXE_SO = Path("/home/antigravity/toolchains/fix_proc_exe.so")
 
 
 def _resolve_ws_file(rel_candidates: List[str]) -> Path:
+    expanded: List[str] = []
     for rc in rel_candidates:
-        p = REPO_ROOT / rc
-        if p.exists():
-            return p
-        p_parent = WS_PARENT / rc
-        if p_parent.exists():
-            return p_parent
-        for sib in sorted(WS_PARENT.glob("ws*")):
-            p_sib = sib / rc
-            if p_sib.exists():
-                return p_sib
+        expanded.append(rc)
+        rc_path = Path(rc)
+        stripped = re.sub(r"^(?:rh[123]|f[1234]|next4)_", "", rc_path.name)
+        if stripped != rc_path.name:
+            expanded.append(str(rc_path.parent / stripped))
+    search_roots = [REPO_ROOT, WS_PARENT, WS_PARENT.parent]
+    for rc in expanded:
+        for root in search_roots:
+            p = root / rc
+            if p.exists():
+                return p
+            for sib in sorted(root.glob("ws*")):
+                p_sib = sib / rc
+                if p_sib.exists():
+                    return p_sib
     return REPO_ROOT / rel_candidates[0]
 
 
@@ -166,7 +172,7 @@ CORE_TRACK_PROOF_SPECS: List[Dict[str, Any]] = [
     },
     {
         "track": "Next-4",
-        "filename": "comparator_soundness_and_sos_explainability_proofs.lean",
+        "filename": "next4_comparator_soundness_and_sos_explainability_proofs.lean",
         "constructive_witness_type": "Signed Int Additive Normal Form (a <= b + c) & Constructive SOS / LDL^T Witness Induction",
         "required_markers": [
             "nat_truncated_sub_soundness_trap_counterexample",
@@ -303,9 +309,9 @@ def run_part1_comparator_ecosystem_audit() -> Dict[str, Any]:
             }
         )
 
-    # Machine-check `comparator_soundness_and_sos_explainability_proofs.lean` with Lean 4.35.0
+    # Machine-check `next4_comparator_soundness_and_sos_explainability_proofs.lean` with Lean 4.35.0
     next4_lean_path = _resolve_ws_file(
-        ["proofs/comparator_soundness_and_sos_explainability_proofs.lean"]
+        ["proofs/next4_comparator_soundness_and_sos_explainability_proofs.lean"]
     )
     lean_env = dict(os.environ)
     if FIX_PROC_EXE_SO.exists():
@@ -677,6 +683,7 @@ def _compile_fuzzer_shared_libs() -> Tuple[Path, Path]:
 
     gcc_bin = "gcc"
     for cand in [
+        "/home/antigravity/.local/bin/gcc",
         "/home/antigravity/toolchains/cargo/bin/gcc",
         "/shared/user/toolchains/cargo/bin/gcc",
         "/usr/bin/gcc",

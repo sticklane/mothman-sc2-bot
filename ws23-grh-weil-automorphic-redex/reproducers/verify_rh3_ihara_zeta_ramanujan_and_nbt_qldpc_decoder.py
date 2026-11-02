@@ -1111,6 +1111,8 @@ def compile_rh3_c_libs() -> Tuple[ctypes.CDLL, ctypes.CDLL]:
 
     if os.path.exists("/usr/bin/gcc"):
         cc_base = ["/usr/bin/gcc"]
+    elif os.path.exists("/home/antigravity/toolchains/cargo/bin/gcc"):
+        cc_base = ["/home/antigravity/toolchains/cargo/bin/gcc"]
     else:
         cc_base = [
             "/shared/user/toolchains/zig/zig",
@@ -1422,12 +1424,55 @@ def run_suite3_nonbacktracking_chebyshev_bp_osd_benchmarks(
 # Main Entrypoint
 # =============================================================================
 
+def verify_rh3_lean4_proofs() -> Dict[str, Any]:
+    import re as _re
+    repo_root = Path(__file__).resolve().parent.parent
+    lean_path = repo_root / "proofs" / "rh3_ihara_zeta_bass_hashimoto_and_ramanujan_proofs.lean"
+    lean_cands = [
+        Path("/home/antigravity/.elan/bin/lean"),
+        Path("/home/antigravity/toolchains/elan/bin/lean"),
+        Path("/home/antigravity/toolchains/lean4-custom/build/release/stage1/bin/lean"),
+        Path("/home/antigravity/toolchains/lean4-bin/lean-4.35.0-linux/bin/lean"),
+    ]
+    lean_bin = next((p for p in lean_cands if p.exists()), lean_cands[0])
+    proc = subprocess.run([str(lean_bin), str(lean_path)], capture_output=True, text=True, check=True)
+    src_text = lean_path.read_text(encoding="utf-8")
+    req_theorems = [
+        "chi4PrimeShellWeights_sumSq_le_length",
+        "rh3_unbaked_chi4_prime_shell_schur_reserve_nonneg",
+        "hashimoto_nonbacktracking_2step_and_3term_operator_identity_exact",
+        "graph_riemann_hypothesis_ramanujan_critical_circle_equivalence",
+        "bass_hashimoto_determinant_coefficients_exact",
+    ]
+    for req_thm in req_theorems:
+        assert req_thm in src_text, f"Missing required theorem {req_thm}"
+
+    cleaned = _re.sub(r"/-.*?-/", "", src_text, flags=_re.S)
+    cleaned = _re.sub(r"--[^\n]*", "", cleaned)
+    for b in _re.split(r"\b(?:theorem|lemma)\s+", cleaned)[1:]:
+        sig_part, body_part = b.split(":=", 1)
+        assert not _re.search(
+            r"\((h[A-Za-z0-9_']*)\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)", sig_part
+        ), f"Uninterpreted inequality hypothesis found in {sig_part}"
+        body_after_by = body_part.split("by", 1)[1] if "by" in body_part else body_part
+        body_block = _re.split(
+            r"\n(?:\btheorem\b|\blemma\b|\bdef\b|\babbrev\b|\bstructure\b|\binductive\b|\bend\b)",
+            body_after_by,
+        )[0]
+        proof_lines = [ln.strip() for ln in body_block.splitlines() if ln.strip()]
+        assert len(proof_lines) <= 5, f"Proof body exceeds 5 lines ({len(proof_lines)}): {sig_part}"
+    return {"lean_binary": str(lean_bin), "proof_file": str(lean_path), "exit_code": proc.returncode}
+
+
 def main() -> int:
     t_start = time.perf_counter()
     print("=" * 114)
     print("TRACK RH-3 MASTER VERIFICATION SUITE: IHARA ZETA FUNCTION, BASS-HASHIMOTO DETERMINANT IDENTITY")
     print("  & NON-BACKTRACKING RAMANUJAN SPECTRAL GAP 3-TERM CHEBYSHEV BP-OSD-0 DECODER (`Stim 1.16.0` + `AVX2 FMA`)")
     print("=" * 114)
+
+    lean_res = verify_rh3_lean4_proofs()
+    print(f"\n[SUITE 0] Lean 4.35.0 Formal Verification: {lean_res['proof_file']} (exit={lean_res['exit_code']}, 0 ineq hyps, <=5L)")
 
     k4_info = build_k4_graph()
     petersen_info = build_petersen_graph()

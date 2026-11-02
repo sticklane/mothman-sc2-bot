@@ -83,6 +83,8 @@ REPO_ROOT = SCRIPT_DIR.parent
 WS_PARENT = REPO_ROOT.parent
 
 LEAN_BIN_CANDIDATES = [
+    Path("/home/antigravity/.elan/bin/lean"),
+    Path("/home/antigravity/toolchains/elan/bin/lean"),
     Path("/home/antigravity/toolchains/lean4-custom/build/release/stage1/bin/lean"),
     Path("/home/antigravity/toolchains/lean4-bin/lean-4.35.0-linux/bin/lean"),
 ]
@@ -734,12 +736,30 @@ def run_suite1_lean_formal_verification() -> Dict[str, Any]:
     verify_ms = (time.perf_counter() - t0) * 1000.0
     src_text = lean_path.read_text(encoding="utf-8")
     req_theorems = [
+        "chi4PrimeShellWeights_sumSq_le_length",
+        "closure4_unbaked_chi4_prime_shell_schur_reserve_nonneg",
         "finite_graph_twisted_crt_zero_remainder_closure",
         "ramanujan_spectral_gap_implies_binomial_sos_dominance",
         "finite_graph_qldpc_72_144_288_remainder_closure_exact",
     ]
     for req_thm in req_theorems:
         assert req_thm in src_text, f"Missing required theorem {req_thm}"
+
+    import re as _re
+    cleaned = _re.sub(r"/-.*?-/", "", src_text, flags=_re.S)
+    cleaned = _re.sub(r"--[^\n]*", "", cleaned)
+    for b in _re.split(r"\b(?:theorem|lemma)\s+", cleaned)[1:]:
+        sig_part, body_part = b.split(":=", 1)
+        assert not _re.search(
+            r"\((h[A-Za-z0-9_']*)\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)", sig_part
+        ), f"Uninterpreted inequality hypothesis found in {sig_part}"
+        body_after_by = body_part.split("by", 1)[1] if "by" in body_part else body_part
+        body_block = _re.split(
+            r"\n(?:\btheorem\b|\blemma\b|\bdef\b|\babbrev\b|\bstructure\b|\binductive\b|\bend\b)",
+            body_after_by,
+        )[0]
+        proof_lines = [ln.strip() for ln in body_block.splitlines() if ln.strip()]
+        assert len(proof_lines) <= 5, f"Proof body exceeds 5 lines ({len(proof_lines)}): {sig_part}"
 
     return {
         "lean_binary": str(LEAN_BIN),

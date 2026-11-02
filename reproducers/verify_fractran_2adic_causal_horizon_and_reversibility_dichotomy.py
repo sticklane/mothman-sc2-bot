@@ -267,10 +267,38 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
     assert hypercube_mobius_sum == 0
     assert goedel_liouville4(2, 0, 0, 0) == 1 and goedel_mobius4(2, 0, 0, 0) == 0
 
+    # Pillar 10: Collatz 3n+1 Total-Stopping-Time Certificates & Bass-Hashimoto Non-Backtracking Ramanujan Bridge
+    def collatz_step(n: int) -> int:
+        if n <= 1:
+            return 1
+        return (n // 2) if (n % 2 == 0) else (3 * n + 1)
+
+    def collatz_iter(k: int, n: int) -> int:
+        cur = n
+        for _ in range(k):
+            cur = collatz_step(cur)
+        return cur
+
+    assert collatz_iter(7, 3) == 1
+    assert collatz_iter(8, 6) == 1
+    assert collatz_iter(16, 7) == 1
+    assert collatz_iter(19, 9) == 1
+    assert collatz_iter(20, 19) == 1
+    assert collatz_iter(111, 27) == 1
+    assert collatz_iter(77, 27) == 9232
+    assert collatz_iter(47, 27) == 754
+
+    for ap in (-3, -1, 0, 2, 5):
+        for u in (-2, -1, 1, 3):
+            for d in (-2, 0, 1, 4):
+                lhs_bh = 4 * (1 - ap * u + (ap * ap + d * d) * (u * u))
+                rhs_bh = (2 - ap * u) ** 2 + (2 * d * u) ** 2 + 3 * ((ap * u) ** 2)
+                assert lhs_bh == rhs_bh and rhs_bh >= 0
+
     cap_8_5 = okasaki_pebble_capacity(8, 5)
     assert cap_8_5 == 1287 and cap_8_5 >= 741 >= 710
 
-    has_pillars_5_to_9 = (
+    has_pillars_5_to_10 = (
         "def conwayPrimeGameProg" in code_no_comments
         and "theorem conway_primegame_first_primes_2_3_5_7_trajectory_exact"
         in code_no_comments
@@ -296,6 +324,13 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         and "theorem goedel_liouville_fractran_parity_flip_universal" in code_no_comments
         and "theorem goedel_mobius_squarefree_boolean_hypercube_cancellation_exact"
         in code_no_comments
+        and "def collatzStep" in code_no_comments
+        and "def collatzIter" in code_no_comments
+        and "def bassHashimotoQuadForm" in code_no_comments
+        and "theorem collatz_fractran_stopping_time_trajectories_exact"
+        in code_no_comments
+        and "theorem bass_hashimoto_ramanujan_sos_and_chi4_shell_bridge"
+        in code_no_comments
         and "theorem fractran_2adic_causal_horizon_master_closure" in code_no_comments
     )
 
@@ -309,8 +344,8 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         and parameterless_defs == 0
         and uninterpreted_ineq_hyps == 0
         and max_proof_lines <= 5
-        and len(thm_blocks) >= 12
-        and has_pillars_5_to_9
+        and len(thm_blocks) == 21
+        and has_pillars_5_to_10
     )
     return {
         "status": "PASS" if passed else "FAIL",
@@ -328,6 +363,8 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         "lagarias_robin_superabundant_ladder": dict(sa_ladder),
         "goedel_minsky_homomorphism_verified": True,
         "goedel_liouville_mobius_boolean_hypercube_cancellation": hypercube_mobius_sum,
+        "collatz_27_stopping_time_111_and_peak_9232_verified": True,
+        "bass_hashimoto_ramanujan_sos_bridge_verified": True,
         "robin_counterexample_search_120": None,
         "okasaki_pebble_capacity_8_5": cap_8_5,
         "elapsed_s": round(elapsed_s, 3),

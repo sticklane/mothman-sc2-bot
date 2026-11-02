@@ -720,6 +720,67 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         }
     )
 
+    # Case 19: Category 13 — Backtracking_Ihara_Determinant_Missing_Degree_Term (`Pattern 15`)
+    # Disproves naive backtracking walk determinant `1 - a_p * u` (missing the Bass-Hashimoto
+    # degree recoil `+ q * u^2`) which vanishes off the Ramanujan circle at a_p = 2, q = 2, u = 1/2
+    # (1 - 2*(1/2) = 0 != 1/2 = 1 - 1 + 2/4), paired with `bass_hashimoto_ramanujan_sos_and_chi4_shell_bridge`.
+    ap_c19, q_c19 = 2, 2
+    # Clearing denominators by 4 at u = 1/2:
+    # Bass-Hashimoto non-backtracking determinant: 4 * (1 - a_p*(1/2) + q*(1/4)) = (2 - a_p)^2 + 4*q - a_p^2 = 0 + 8 - 4 = 4 > 0 (i.e. 4*(1/2) = 2 > 0)
+    bh_nonbacktracking_scaled = 4 - 2 * ap_c19 + q_c19  # 4*(1 - 2*(1/2) + 2*(1/4)) = 2 > 0
+    naive_backtracking_scaled = 4 - 2 * ap_c19          # 4*(1 - 2*(1/2)) = 0
+    c19_pos_p = q_c19 > 0 and (4 * q_c19 >= ap_c19 * ap_c19)
+    c19_pos_q = bh_nonbacktracking_scaled > 0 and bh_nonbacktracking_scaled == 2
+    c19_neg_p = False  # Missing `+ q * u^2` degree recoil term (`q_recoil == 0`)
+    c19_neg_q = naive_backtracking_scaled > 0
+    c19_caught = verify_dual_polarity_implication_witness(c19_pos_p, c19_pos_q, c19_neg_p, c19_neg_q)
+    cases.append(
+        {
+            "case_id": 19,
+            "category": "Backtracking_Ihara_Determinant_Missing_Degree_Term",
+            "conjecture_label": "Naive backtracking walk determinant `1 - a_p u` (missing Bass–Hashimoto degree recoil `+ q u^2`, `Pattern 15`) disproved at `a_p = 2, q = 2, u = 1/2` (`1 - 2(1/2) = 0 != 1/2`)",
+            "positive_witness": f"Bass-Hashimoto non-backtracking 1 - a_p*u + q*u^2 at a_p=2, q=2, u=1/2 equals 1/2 > 0 (scaled={bh_nonbacktracking_scaled} > 0, P={c19_pos_p}, Q={c19_pos_q})",
+            "negative_disproof_witness": f"Backtracking stub 1 - a_p*u without +q*u^2 vanishes off the Ramanujan circle at u=1/2 (scaled={naive_backtracking_scaled} == 0, P={c19_neg_p}, Q={c19_neg_q})",
+            "disproved_and_dual_polarity_verified": c19_caught,
+        }
+    )
+
+    # Case 20: Category 14 — Collatz_27_Premature_Horizon_Truncation_Trap (`Pattern 15`)
+    # Disproves a premature 50-step Collatz horizon bound on n_0 = 27 (`collatzIter 47 27 = 754 != 1`,
+    # peak `collatzIter 77 27 = 9232 != 1`, whereas `collatzIter 111 27 = 1`), paired with
+    # `collatz_fractran_stopping_time_trajectories_exact`.
+    def collatz_step_int(n: int) -> int:
+        if n <= 1:
+            return 1
+        return (n // 2) if (n % 2 == 0) else (3 * n + 1)
+
+    def collatz_iter_int(k: int, n: int) -> int:
+        cur = n
+        for _ in range(k):
+            cur = collatz_step_int(cur)
+        return cur
+
+    pos_steps_c20, neg_steps_c20 = 111, 47
+    c20_pos_p = pos_steps_c20 >= 111
+    c20_pos_q = collatz_iter_int(pos_steps_c20, 27) == 1
+    c20_neg_p = neg_steps_c20 >= 111
+    c20_neg_q = collatz_iter_int(neg_steps_c20, 27) == 1 and collatz_iter_int(77, 27) == 1
+    c20_caught = bool(
+        collatz_iter_int(77, 27) == 9232
+        and collatz_iter_int(47, 27) == 754
+        and verify_dual_polarity_implication_witness(c20_pos_p, c20_pos_q, c20_neg_p, c20_neg_q)
+    )
+    cases.append(
+        {
+            "case_id": 20,
+            "category": "Collatz_27_Premature_Horizon_Truncation_Trap",
+            "conjecture_label": "Premature 50-step Collatz horizon bound on `n_0 = 27` (`collatzIter 47 27 = 754 != 1`, peak `collatzIter 77 27 = 9232 != 1`, vs `collatzIter 111 27 = 1`, `Pattern 15`)",
+            "positive_witness": f"Full stopping-time horizon k={pos_steps_c20} on n_0=27: collatzIter(111, 27) = 1 (P={c20_pos_p}, Q={c20_pos_q})",
+            "negative_disproof_witness": f"Premature horizon k={neg_steps_c20} on n_0=27: collatzIter(47, 27) = 754 != 1 and peak collatzIter(77, 27) = 9232 != 1 (P={c20_neg_p}, Q={c20_neg_q})",
+            "disproved_and_dual_polarity_verified": c20_caught,
+        }
+    )
+
     caught_count = sum(1 for c in cases if c["disproved_and_dual_polarity_verified"])
     total_cases = len(cases)
     return {
@@ -730,6 +791,7 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         "all_14_cases_caught": caught_count == total_cases,
         "all_16_cases_caught": caught_count == total_cases,
         "all_18_cases_caught": caught_count == total_cases,
+        "all_20_cases_caught": caught_count == total_cases,
         "cases": cases,
     }
 
@@ -737,6 +799,7 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
 run_14case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 run_16case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 run_18case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
+run_20case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 
 
 def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool, Dict[str, Any]]:
@@ -816,7 +879,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         and len(all_vacuous_violations) == 0
         and len(pattern11_real_violations) == 0
         and part45_lean_verified
-        and disproof_suite["all_18_cases_caught"]
+        and disproof_suite["all_20_cases_caught"]
     )
 
     summary: Dict[str, Any] = {
@@ -834,6 +897,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         "synthetic_14case_disproof_suite": disproof_suite,
         "synthetic_16case_disproof_suite": disproof_suite,
         "synthetic_18case_disproof_suite": disproof_suite,
+        "synthetic_20case_disproof_suite": disproof_suite,
         "elapsed_ms": elapsed_ms,
         "all_passed": ok,
     }
@@ -858,7 +922,7 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, summary = run_frontier6_dual_polarity_safeverify_audit(repo_root)
-    suite = summary["synthetic_18case_disproof_suite"]
+    suite = summary["synthetic_20case_disproof_suite"]
 
     print("=" * 108)
     print(
@@ -876,7 +940,7 @@ def main() -> int:
     print(f"  Pattern 11 Fallback Violations        : {len(summary['pattern11_conditional_fallback_violations'])}")
     print(f"  Frontier 6 Lean Theorems Verified     : {summary['frontier6_lean_theorems_verified']}")
     print(
-        f"  18-Case Disproof Suite Recall         : "
+        f"  20-Case Disproof Suite Recall         : "
         f"{suite['caught_count']}/{suite['total_cases'] if 'total_cases' in suite else suite['total_synthetic_cases']} "
         f"({suite['recall_pct']}% disproof & non-vacuity recall)"
     )
@@ -887,7 +951,7 @@ def main() -> int:
     print("-" * 108)
     print(
         f"  OVERALL FRONTIER 6 DUAL-POLARITY SAFEVERIFY STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 18/18 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
+        f"{'PASS (0 REAL VIOLATIONS, 20/20 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
         f"in {summary['elapsed_ms']:.1f} ms"
     )
     print("=" * 108)

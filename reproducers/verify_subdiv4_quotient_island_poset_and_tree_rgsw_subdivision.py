@@ -529,6 +529,7 @@ def compile_subdiv4_c_libraries() -> Tuple[ctypes.CDLL, ctypes.CDLL]:
     env["TMPDIR"] = str(TMP_DIR)
     gcc_bin = "gcc"
     for cand in (
+        "/home/antigravity/.local/bin/gcc",
         "/shared/user/toolchains/cargo/bin/gcc",
         "/home/antigravity/toolchains/cargo/bin/gcc",
         "/usr/bin/gcc",
@@ -537,16 +538,21 @@ def compile_subdiv4_c_libraries() -> Tuple[ctypes.CDLL, ctypes.CDLL]:
             gcc_bin = cand
             break
 
+    obj_scalar = TMP_DIR / "subdiv4_scalar.o"
     cmd_avx2 = [
         gcc_bin, "-O3", "-march=native", "-mavx2", "-mfma", "-ffast-math",
         "-shared", "-fPIC", str(c_path), "-o", str(so_avx2), "-lm",
     ]
-    cmd_scalar = [
+    cmd_scalar_obj = [
         gcc_bin, "-O3", "-mno-avx", "-mno-sse", "-mpopcnt",
-        "-shared", "-fPIC", str(c_path), "-o", str(so_scalar), "-lm",
+        "-fPIC", "-c", str(c_path), "-o", str(obj_scalar),
+    ]
+    cmd_scalar_link = [
+        gcc_bin, "-shared", "-fPIC", str(obj_scalar), "-o", str(so_scalar), "-lm",
     ]
     subprocess.run(cmd_avx2, check=True, env=env)
-    subprocess.run(cmd_scalar, check=True, env=env)
+    subprocess.run(cmd_scalar_obj, check=True, env=env)
+    subprocess.run(cmd_scalar_link, check=True, env=env)
 
     lib_avx2 = ctypes.CDLL(str(so_avx2))
     lib_scalar = ctypes.CDLL(str(so_scalar))

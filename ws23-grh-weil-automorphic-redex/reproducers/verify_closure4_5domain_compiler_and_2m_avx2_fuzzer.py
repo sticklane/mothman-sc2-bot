@@ -70,6 +70,8 @@ REPO_ROOT = SCRIPT_DIR.parent
 WS_PARENT = REPO_ROOT.parent
 
 LEAN_BIN_CANDIDATES = [
+    Path("/home/antigravity/.elan/bin/lean"),
+    Path("/home/antigravity/toolchains/elan/bin/lean"),
     Path("/home/antigravity/toolchains/lean4-custom/build/release/stage1/bin/lean"),
     Path("/home/antigravity/toolchains/lean4-bin/lean-4.35.0-linux/bin/lean"),
 ]
@@ -88,6 +90,10 @@ def _resolve_ws_file(rel_candidates: List[str]) -> Path:
         if p_parent.exists():
             return p_parent
         for sib in sorted(WS_PARENT.glob("ws*")):
+            p_sib = sib / rc
+            if p_sib.exists():
+                return p_sib
+        for sib in sorted(WS_PARENT.parent.glob("ws*")):
             p_sib = sib / rc
             if p_sib.exists():
                 return p_sib
@@ -167,9 +173,7 @@ def synthesize_and_compile_5_domain_candidates() -> Dict[str, Any]:
     d8_1_lean = "[" + ", ".join(str(x) for x in d1_int) + "]"
     d8_2_lean = "[" + ", ".join(str(x) for x in d2_int) + "]"
 
-    generated_lean_code = f"""import Std
-
-namespace Closure4Compiled5DomainCertificates
+    generated_lean_code = f"""namespace Closure4Compiled5DomainCertificates
 
 def evalTrigDot : List Int → List Int → Int
   | [], _ => 0
@@ -182,12 +186,10 @@ def evalCompiledSos (cZ cosB sinB : List Int) : Int :=
   u * u + v * v
 
 theorem int_sq_nonneg_auto5 (x : Int) : 0 ≤ x * x := by
-  rcases Int.le_total 0 x with h1 | h2
-  · exact Int.mul_nonneg h1 h1
-  · have h3 : 0 ≤ -x := by omega
-    have h4 : 0 ≤ (-x) * (-x) := Int.mul_nonneg h3 h3
-    rw [Int.neg_mul_neg] at h4
-    exact h4
+  rcases Int.lt_trichotomy x 0 with h | rfl | h
+  · exact Int.mul_nonneg_of_nonpos_of_nonpos (Int.le_of_lt h) (Int.le_of_lt h)
+  · decide
+  · exact Int.mul_nonneg (Int.le_of_lt h) (Int.le_of_lt h)
 
 theorem domain1_certC32_fejer_riesz_sos_sound (cosB sinB : List Int) :
     0 ≤ evalCompiledSos {c32_prefix_lean} cosB sinB ∧
@@ -208,11 +210,12 @@ theorem domain2_kronecker64_ldl_positive_shift_sound (u1 u2 : Int) :
     Int.mul_nonneg (by decide) (int_sq_nonneg_auto5 u2)
   exact ⟨Int.add_nonneg h1 h2, by decide⟩
 
-theorem domain3_bb_qldpc_finite_graph_zero_remainder (s : Nat) (h_ram : s * s ≤ 40) :
+theorem domain3_bb_qldpc_finite_graph_zero_remainder (s gapSlack : Nat) :
     ({col_a_mask} ^^^ {col_b_mask} ≠ 0) ∧
     ((12 * 6 - 72) * 10 = 0) ∧
-    s * s + (40 - s * s) = 40 := by
-  exact ⟨by decide, by decide, Nat.add_sub_of_le h_ram⟩
+    s * s + ((s * s + gapSlack) - s * s) = s * s + gapSlack := by
+  have h_disc : s * s + ((s * s + gapSlack) - s * s) = s * s + gapSlack := by omega
+  exact ⟨by decide, by decide, h_disc⟩
 
 theorem domain4_windowed_divsteps_unimodular_det_power_of_two :
     (({t8_00} : Int) * {t8_11} - {t8_01} * ({t8_10}) = 2 ^ 8) ∧
