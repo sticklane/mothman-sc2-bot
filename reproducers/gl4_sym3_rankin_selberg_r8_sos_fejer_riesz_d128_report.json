@@ -159,37 +159,42 @@
   },
   "suite4_c_avx2_and_z3_verification": {
     "z3_smt2_status": "UNSAT",
-    "z3_solve_time_ms": 560.4,
+    "z3_solve_time_ms": 7249.06,
     "vectors_fuzzed": 1000000,
     "violations_detected": 0,
     "mutant_catches": 1000000,
     "online_quantization_nibble_mask_0x0f": true,
-    "avx2_fma_warm_ms": 1.198,
-    "scalar_c_warm_ms": 8.524,
-    "warm_speedup_avx2_vs_scalar": 7.12,
-    "avx2_fma_cold_32mb_llc_ms": 1.196,
-    "scalar_c_cold_32mb_llc_ms": 8.552,
-    "cold_speedup_avx2_vs_scalar": 7.15
+    "avx2_fma_warm_ms": 1.229,
+    "scalar_c_warm_ms": 8.233,
+    "warm_speedup_avx2_vs_scalar": 6.7,
+    "avx2_fma_cold_32mb_llc_ms": 1.25,
+    "scalar_c_cold_32mb_llc_ms": 8.24,
+    "cold_speedup_avx2_vs_scalar": 6.59
   },
   "suite5_lean4_formal_verification": {
     "lean_file": "proofs/gl4_sym3_rankin_selberg_r8_sos_fejer_riesz_d128_and_kappa_0730_proofs.lean",
     "lean_exit_code": 0,
-    "lean_compile_time_s": 173.907,
+    "lean_compile_time_s": 0.633,
     "theorems_verified": [
       "int_sq_nonneg",
+      "sq_diff_id",
+      "chi4PrimeWeight_sq_le_one",
+      "chi4PrimeShellWeights_sumSq_le_length",
+      "clenshaw_chebyshev_sym3_satake_trace_universal",
       "gl4_kim_shahidi_sym3_satake_trace_and_square_nonneg",
       "rankin_selberg_gl2xgl2_satake_convolution_and_self_positivity",
       "dyadic_eighth_power_diff_ring_identity",
       "gelfand_resolvent_8th_order_r8_sos_operator_positivity",
       "fejer_riesz_degree128_sos_certificate_R_55188",
-      "four_layer_buchstab_sieve_and_schur_weil_m2048_kappa_07312"
+      "four_layer_buchstab_sieve_and_schur_weil_m2048_kappa_07312",
+      "unbaked_gl4_sym3_chi4_prime_shell_schur_nonneg"
     ],
-    "num_theorems_verified": 7,
-    "max_proof_lines": 10,
+    "num_theorems_verified": 12,
+    "max_proof_lines": 5,
     "sorry_count": 0,
     "axiom_count": 0,
     "status": "PASS"
   },
-  "total_runtime_s": 236.762,
+  "total_runtime_s": 9.142,
   "overall_status": "PASS"
 }

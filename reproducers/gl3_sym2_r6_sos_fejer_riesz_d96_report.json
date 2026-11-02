@@ -151,36 +151,40 @@
   },
   "suite4_c_avx2_and_z3_verification": {
     "z3_smt2_status": "UNSAT",
-    "z3_solve_time_ms": 1720.99,
+    "z3_solve_time_ms": 1474.61,
     "vectors_fuzzed": 1000000,
     "violations_detected": 0,
     "mutant_catches": 1000000,
-    "avx2_fma_warm_ms": 8.878,
-    "scalar_c_warm_ms": 11.06,
-    "warm_speedup_avx2_vs_scalar": 1.25,
-    "avx2_fma_cold_32mb_llc_ms": 9.19,
-    "scalar_c_cold_32mb_llc_ms": 11.124,
-    "cold_speedup_avx2_vs_scalar": 1.21
+    "avx2_fma_warm_ms": 9.37,
+    "scalar_c_warm_ms": 11.429,
+    "warm_speedup_avx2_vs_scalar": 1.22,
+    "avx2_fma_cold_32mb_llc_ms": 9.458,
+    "scalar_c_cold_32mb_llc_ms": 11.497,
+    "cold_speedup_avx2_vs_scalar": 1.22
   },
   "suite5_lean4_formal_verification": {
     "lean_file": "proofs/gl3_sym2_automorphic_r6_sos_fejer_riesz_d96_and_kappa_0725_proofs.lean",
     "lean_exit_code": 0,
-    "lean_compile_time_s": 205.457,
+    "lean_compile_time_s": 0.643,
     "theorems_verified": [
       "int_sq_nonneg",
+      "chi4PrimeWeight_sq_le_one",
+      "chi4PrimeShellWeights_sumSq_le_length",
+      "clenshaw_chebyshev_sym2_satake_trace_universal",
       "gl3_gelbart_jacquet_sym2_satake_trace_and_positivity",
       "cubic_diff_even_ring_identity",
       "gelfand_resolvent_6th_order_r6_sos_operator_positivity",
       "fejer_riesz_degree96_sos_certificate_R_55234",
       "three_layer_buchstab_sieve_and_schur_weil_m1536_kappa_0725",
-      "alphaevolve_symmetric_gram_rank_reduction_and_kronecker_waist"
+      "alphaevolve_symmetric_gram_rank_reduction_and_kronecker_waist",
+      "unbaked_gl3_sym2_chi4_prime_shell_schur_nonneg"
     ],
-    "num_theorems_verified": 7,
-    "max_proof_lines": 13,
+    "num_theorems_verified": 11,
+    "max_proof_lines": 5,
     "sorry_count": 0,
     "axiom_count": 0,
     "status": "PASS"
   },
-  "total_runtime_s": 229.777,
+  "total_runtime_s": 3.418,
   "overall_status": "PASS"
 }

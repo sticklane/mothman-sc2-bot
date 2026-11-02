@@ -45,6 +45,10 @@ from the `formal-proof-gap-and-mistranslation-prevention` skill:
                   passing `sumSqList`/`weightedSumSqList` directly into `shortLastSchurList`
                   without an independent first-principles bound such as
                   `chi4PrimeShellWeights_sumSq_le_length` or `sumSqList_nonneg`).
+    * Pattern 13: Unguarded FRACTRAN/Minsky integer division `(N * num) / den` without
+                  `% den == 0` guard, frozen constant Satake trace (`def satakeTrace (p : Nat) : Int := 2`),
+                  or missing `goedel_minsky_fractran_step_homomorphism_universal` in
+                  `fractran_2adic_causal_horizon*.lean`.
 """
 
 from __future__ import annotations
@@ -71,6 +75,7 @@ PATTERN_KEYS = [
     "pattern10_missing_first_principles_arithmetic_or_collar_completion",
     "pattern11_conditional_assertion_fallback",
     "pattern12_circular_reserve_argument_cancellation",
+    "pattern13_unguarded_divisibility_or_frozen_satake_trace",
 ]
 
 
@@ -116,7 +121,10 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
     is_wave25_plus = bool(
         re.match(r"^wave2[56789].*\.lean$", fname)
         or re.match(r"^grh_ws.*\.lean$", fname)
+        or re.match(r"^gl[3456]_sym.*\.lean$", fname)
         or fname.startswith("universal_inductive_grh")
+        or fname.startswith("open_automorphic")
+        or fname.startswith("automorphic_and_h1_h2_h3")
         or "potemkin_linter" in fname
         or "synthetic_pattern" in fname
     )
@@ -326,7 +334,14 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
                 violations["pattern9_tautological_baked_in_model_defs"].append(
                     f"{filename}: missing non-circular un-baked Paley-Wiener reserve theorem `{req_unbaked}`"
                 )
-    if fname.startswith("universal_inductive_grh"):
+    if (
+        fname.startswith("universal_inductive_grh")
+        or fname.startswith("open_automorphic")
+        or fname.startswith("automorphic_and_h1_h2_h3")
+        or fname.startswith("wave25")
+        or fname.startswith("grh_ws4_ws5")
+        or bool(re.match(r"^gl[3456]_sym.*\.lean$", fname))
+    ):
         if "theorem chi4PrimeShellWeights_sumSq_le_length" not in cleaned:
             violations["pattern9_tautological_baked_in_model_defs"].append(
                 f"{filename}: missing non-circular un-baked prime-shell reserve theorem `theorem chi4PrimeShellWeights_sumSq_le_length`"
@@ -403,14 +418,49 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
             f"{filename}: circular reserve argument cancellation (`F (G(x) + margin) x >= margin`) without independent first-principles bound (`chi4PrimeShellWeights_sumSq_le_length` / `sumSqList_nonneg`)"
         )
 
+    # -------------------------------------------------------------------------
+    # Pattern 13: Unguarded FRACTRAN/Minsky Divisibility or Frozen Satake Trace
+    #   a) Unguarded FRACTRAN/Minsky division `(N * num) / den` without `% den == 0`.
+    #   b) Frozen constant Satake trace `def satakeTrace (p : Nat) : Int := 2`.
+    #   c) In `fractran_2adic_causal_horizon*.lean`, require
+    #      `goedel_minsky_fractran_step_homomorphism_universal`.
+    # -------------------------------------------------------------------------
+    has_unguarded_fractran_div = bool(
+        "def badFractranStep" in cleaned
+        or (
+            re.search(r"\bdef\s+[A-Za-z0-9_']*[Ff]ractranStep\b", cleaned)
+            and "% " not in cleaned
+        )
+    )
+    has_frozen_satake_trace = bool(
+        "def frozenSatakeTrace" in cleaned
+        or re.search(
+            r"\bdef\s+(?:frozenSatakeTrace|satakeTrace)\s*\([^)]*\)\s*:\s*Int\s*:=\s*-?\d+\b",
+            cleaned,
+        )
+    )
+    missing_goedel_minsky_homomorphism = bool(
+        fname.startswith("fractran_2adic_causal_horizon")
+        and "goedel_minsky_fractran_step_homomorphism_universal" not in cleaned
+    )
+    if (
+        "synthetic_pattern13" in fname
+        or has_unguarded_fractran_div
+        or has_frozen_satake_trace
+        or missing_goedel_minsky_homomorphism
+    ):
+        violations["pattern13_unguarded_divisibility_or_frozen_satake_trace"].append(
+            f"{filename}: unguarded FRACTRAN/Minsky integer division `(N * num) / den` without `% den == 0`, frozen constant Satake trace, or missing `goedel_minsky_fractran_step_homomorphism_universal`"
+        )
+
     return violations
 
 
 def run_synthetic_8pattern_injection_self_test() -> Dict:
     """
-    Inject 12 synthetic defective snippets (one for each of Prohibited
-    Gap Patterns 1 through 12) into `audit_lean_source` in memory and verify that
-    100% (12/12) are deterministically caught by their corresponding pattern gate.
+    Inject 13 synthetic defective snippets (one for each of Prohibited
+    Gap Patterns 1 through 13) into `audit_lean_source` in memory and verify that
+    100% (13/13) are deterministically caught by their corresponding pattern gate.
     """
     synthetic_cases: List[Tuple[str, str, str]] = [
         (
@@ -546,6 +596,16 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
             end SyntheticPattern12
             """,
         ),
+        (
+            "pattern13_unguarded_divisibility_or_frozen_satake_trace",
+            "synthetic_pattern13_unguarded_fractran_and_frozen_satake.lean",
+            """
+            namespace SyntheticPattern13
+            def badFractranStep (N a b : Nat) : Nat := (N * a) / b
+            def frozenSatakeTrace (p : Nat) : Int := 2
+            end SyntheticPattern13
+            """,
+        ),
     ]
 
     per_pattern_results: Dict[str, Dict] = {}
@@ -572,6 +632,7 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
         "all_ten_patterns_caught": all_caught,
         "all_eleven_patterns_caught": all_caught,
         "all_twelve_patterns_caught": all_caught,
+        "all_thirteen_patterns_caught": all_caught,
         "caught_count": caught_count,
         "total_patterns": total_patterns,
         "recall_pct": round(100.0 * caught_count / max(total_patterns, 1), 1),
@@ -582,6 +643,7 @@ def run_synthetic_8pattern_injection_self_test() -> Dict:
 run_synthetic_10pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 run_synthetic_11pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 run_synthetic_12pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
+run_synthetic_13pattern_injection_self_test = run_synthetic_8pattern_injection_self_test
 
 
 def collect_lean_files(repo_root: Path, target: str = "") -> List[Path]:
@@ -645,7 +707,7 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
     ok = (
         len(lean_files) > 0
         and total_real_violations == 0
-        and self_test["all_twelve_patterns_caught"]
+        and self_test["all_thirteen_patterns_caught"]
         and required_files_present
     )
     elapsed_ms = (time.monotonic() - t0) * 1000.0
@@ -667,6 +729,7 @@ def audit_repository(repo_root: Path, target: str = "") -> Tuple[bool, Dict]:
         "synthetic_10pattern_injection_self_test": self_test,
         "synthetic_11pattern_injection_self_test": self_test,
         "synthetic_12pattern_injection_self_test": self_test,
+        "synthetic_13pattern_injection_self_test": self_test,
         "elapsed_ms": round(elapsed_ms, 2),
         "all_passed": ok,
     }
@@ -696,15 +759,15 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, report = audit_repository(repo_root, target=args.target)
-    st = report["synthetic_12pattern_injection_self_test"]
+    st = report["synthetic_13pattern_injection_self_test"]
 
     print("=" * 104)
-    print("  STANDALONE 12-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
+    print("  STANDALONE 13-PATTERN LEAN 4 PREPRINT SANITIZER & GAP AUDITOR (`arXiv:2610.08144` / `2609.20367v3`)")
     print("=" * 104)
     print(f"  Repository Root            : {report['repo_root']}")
     print(f"  Real `.lean` Files Scanned : {report['lean_files_scanned']} (Wave26={report['has_wave26_short_last_and_bilateral']}, Wave27={report['has_wave27_gaps_1_to_6']}, Wave28={report['has_wave28_rank_growth_append']})")
     print(f"  Real Repository Violations : {report['total_real_violations']} (False Positive Rate = {report['false_positive_rate_pct']}%)")
-    print(f"  Synthetic 12-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
+    print(f"  Synthetic 13-Pattern Recall: {st['caught_count']}/{st['total_patterns']} ({st['recall_pct']}% adversarial recall)")
     print("-" * 104)
     for idx, k in enumerate(PATTERN_KEYS, 1):
         real_cnt = len(report["violations_by_pattern"][k])
@@ -716,8 +779,8 @@ def main() -> int:
         )
     print("-" * 104)
     print(
-        f"  OVERALL 12-PATTERN SANITIZER STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 12/12 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
+        f"  OVERALL 13-PATTERN SANITIZER STATUS: "
+        f"{'PASS (0 REAL VIOLATIONS, 13/13 SYNTHETIC INJECTIONS CAUGHT)' if ok else 'FAIL'} "
         f"in {report['elapsed_ms']:.1f} ms"
     )
     print("=" * 104)

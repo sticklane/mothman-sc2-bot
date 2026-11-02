@@ -334,28 +334,41 @@ def run_suite2_hypothesis_elimination_audit() -> Dict[str, Any]:
         windows_verified += 1
 
     # 2. Audit theorem signatures in `wave25_constructive_h_schur_and_h_super_elimination_proofs.lean`
-    # Confirm that the 5 main theorems have ZERO uninterpreted `<` or `≤` hypotheses in their binders
+    # Confirm that ALL theorems and helpers have ZERO uninterpreted `<` or `≤` hypotheses in their binders
     proof_file = REPO_ROOT / "proofs" / "wave25_constructive_h_schur_and_h_super_elimination_proofs.lean"
     raw = proof_file.read_text(encoding="utf-8")
     cleaned = re.sub(r"/-.*?-/", "", raw, flags=re.S)
     cleaned = re.sub(r"--[^\n]*", "", cleaned)
+
+    required_defs = [
+        "def divisorSumAcc",
+        "def divisorSum",
+        "def isPrime",
+        "def chi4",
+        "def chi4PrimeShellWeights",
+        "theorem chi4PrimeShellWeights_sumSq_le_length",
+    ]
+    for rdef in required_defs:
+        assert rdef in cleaned, f"Missing `{rdef}` in {proof_file.name}"
 
     main_theorems = [
         "constructive_h_schur_elimination_all_windows_L_and_modes_m",
         "constructive_h_super_elimination_bilinear_kloosterman_and_9_17_4_7",
         "constructive_theta_half_split_prime_siegel_amplification_pinch",
         "constructive_all_k_gelfand_sos_without_uninterpreted_hypotheses",
+        "wave25_unbaked_chi4_prime_shell_schur_reserve_nonneg",
         "master_wave25_hypothesis_free_constructive_grh_synthesis",
     ]
-    uninterpreted_hyp_count = 0
     for thm in main_theorems:
-        m = re.search(rf"theorem\s+{thm}\b([\s\S]*?):=\s*by", cleaned)
-        assert m is not None, f"Missing theorem {thm}"
-        sig = m.group(1)
-        # Split at the top-level conclusion colon `:` (after parameter binders `( ... )`)
-        binders_part = sig.split(" :", 1)[0]
-        if "<" in binders_part or "≤" in binders_part or "<=" in binders_part:
-            uninterpreted_hyp_count += 1
+        assert f"theorem {thm}" in cleaned, f"Missing theorem {thm}"
+
+    uninterpreted_hyp_count = 0
+    for b in re.split(r"\b(?:theorem|lemma)\s+", cleaned)[1:]:
+        if ":=" in b:
+            sig = b.split(":=", 1)[0]
+            uninterpreted_hyp_count += len(
+                re.findall(r"\(\w+\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)", sig)
+            )
 
     assert uninterpreted_hyp_count == 0, f"Found {uninterpreted_hyp_count} uninterpreted inequality hypotheses!"
 
@@ -505,7 +518,7 @@ def run_suite4_lean4_verification() -> Dict[str, Any]:
             lines = [ln.strip() for ln in chunk.splitlines() if ln.strip() and not ln.strip().startswith("--")]
             max_proof_lines = max(max_proof_lines, len(lines))
 
-    assert max_proof_lines <= 20, f"Theorem exceeded 20 lines: {max_proof_lines}"
+    assert max_proof_lines <= 5, f"Theorem exceeded 5 lines: {max_proof_lines}"
 
     return {
         "lean_file": str(proof_file.relative_to(REPO_ROOT)),

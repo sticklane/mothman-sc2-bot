@@ -170,37 +170,45 @@
   },
   "suite4_c_avx2_and_z3_verification": {
     "z3_smt2_status": "UNSAT",
-    "z3_solve_time_ms": 343.88,
+    "z3_solve_time_ms": 363.98,
     "vectors_fuzzed": 1000000,
     "violations_detected": 0,
     "mutant_catches": 1000000,
     "online_quantization_nibble_mask_0x0f": true,
-    "avx2_fma_warm_ms": 1.213,
-    "scalar_c_warm_ms": 10.689,
-    "warm_speedup_avx2_vs_scalar": 8.81,
-    "avx2_fma_cold_32mb_llc_ms": 1.218,
-    "scalar_c_cold_32mb_llc_ms": 10.729,
-    "cold_speedup_avx2_vs_scalar": 8.81
+    "avx2_fma_warm_ms": 1.32,
+    "scalar_c_warm_ms": 8.847,
+    "warm_speedup_avx2_vs_scalar": 6.7,
+    "avx2_fma_cold_32mb_llc_ms": 1.354,
+    "scalar_c_cold_32mb_llc_ms": 9.017,
+    "cold_speedup_avx2_vs_scalar": 6.66
   },
   "suite5_lean4_formal_verification": {
     "lean_file": "proofs/gl6_sym5_rankin_selberg_r16_sos_fejer_riesz_d192_and_kappa_0742_proofs.lean",
     "lean_exit_code": 0,
-    "lean_compile_time_s": 0.501,
+    "lean_compile_time_s": 1.051,
     "theorems_verified": [
+      "int_sq_nonneg",
+      "sq_diff_id",
+      "dyadic_r16_diff_id",
+      "r16_cyclotomic_sos_nonneg",
+      "chi4PrimeWeight_sq_le_one",
+      "chi4PrimeShellWeights_sumSq_le_length",
+      "clenshaw_chebyshev_sym5_satake_trace_universal",
       "gl6_sym5_chebyshev_u5_and_rankin_selberg_positivity",
       "gelfand_r16_sixteenth_order_sos_identity",
       "gelfand_r16_strict_margin_positivity",
       "fejer_riesz_d192_zero_free_width_strict_improvement",
       "six_layer_buchstab_inclusion_exclusion_and_7rough_threshold",
       "block_schur_m3072_kappa_0742_and_z2_gram_halving",
-      "avx2_8way_gl6_r16_sos_equivalence_and_fail_closed"
+      "avx2_8way_gl6_r16_sos_equivalence_and_fail_closed",
+      "unbaked_gl6_sym5_chi4_prime_shell_schur_nonneg"
     ],
-    "num_theorems_verified": 7,
-    "max_proof_lines": 9,
+    "num_theorems_verified": 15,
+    "max_proof_lines": 5,
     "sorry_count": 0,
     "axiom_count": 0,
     "status": "PASS"
   },
-  "total_runtime_s": 41.727,
+  "total_runtime_s": 2.825,
   "overall_status": "PASS"
 }

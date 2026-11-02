@@ -568,6 +568,76 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         }
     )
 
+    # Case 15: Category 9 — Unguarded_Minsky_Fractran_Truncating_Div_Underflow (`Pattern 13`)
+    def vp_val_exact(p: int, n: int) -> int:
+        cnt = 0
+        cur = n
+        while cur > 0 and (cur % p) == 0:
+            cnt += 1
+            cur //= p
+        return cnt
+
+    # Positive witness: guarded FRACTRAN step `(N * num) % den == 0` on `N = 2^1 * 3^0 * 5^1 * 7^0 = 10`
+    # with `(num, den) = (63, 10)` -> `(10 * 63) // 10 = 63 = 2^0 * 3^2 * 5^0 * 7^1` preserves prime exponents.
+    pos_n15, pos_num15, pos_den15 = 10, 63, 10
+    c15_pos_p = ((pos_n15 * pos_num15) % pos_den15) == 0
+    pos_out15 = (pos_n15 * pos_num15) // pos_den15
+    c15_pos_q = (
+        vp_val_exact(2, pos_out15) == vp_val_exact(2, pos_n15) - 1
+        and vp_val_exact(3, pos_out15) == vp_val_exact(3, pos_n15) + 2
+        and vp_val_exact(5, pos_out15) == vp_val_exact(5, pos_n15) - 1
+        and vp_val_exact(7, pos_out15) == vp_val_exact(7, pos_n15) + 1
+    )
+
+    # Negative counterexample: unguarded truncating division `(N * num) // den` when `den` does NOT divide `N * num`:
+    # `N = 2^1 * 3^0 = 2`, `num = 3`, `den = 5` -> `(2 * 3) // 5 = 1 = 2^0 * 3^0`, silently erasing `v_2(2) = 1 -> 0`!
+    neg_n15, neg_num15, neg_den15 = 2, 3, 5
+    c15_neg_p = ((neg_n15 * neg_num15) % neg_den15) == 0
+    neg_out15_unguarded = (neg_n15 * neg_num15) // neg_den15  # 6 // 5 = 1
+    c15_neg_q = (
+        vp_val_exact(2, neg_out15_unguarded) == vp_val_exact(2, neg_n15)
+        and vp_val_exact(3, neg_out15_unguarded) == vp_val_exact(3, neg_n15) + 1
+    )
+    c15_caught = verify_dual_polarity_implication_witness(c15_pos_p, c15_pos_q, c15_neg_p, c15_neg_q)
+    cases.append(
+        {
+            "case_id": 15,
+            "category": "Unguarded_Minsky_Fractran_Truncating_Div_Underflow",
+            "conjecture_label": "Unguarded Minsky/FRACTRAN truncating division `(N * num) / den` without `(N * num) % den == 0` guard (`Pattern 13`)",
+            "positive_witness": f"Guarded step N={pos_n15}, (num,den)=({pos_num15},{pos_den15}) (P={c15_pos_p}, Q={c15_pos_q}: 10*63/10=63=3^2*7^1 preserves Goedel homomorphism)",
+            "negative_disproof_witness": f"Unguarded step N={neg_n15}, (num,den)=({neg_num15},{neg_den15}) (P={c15_neg_p}, Q={c15_neg_q}: (2*3)//5=1 silently erases v_2(2)=1 -> 0)",
+            "disproved_and_dual_polarity_verified": c15_caught,
+        }
+    )
+
+    # Case 16: Category 10 — Frozen_Constant_Satake_Trace_Potemkin (`Pattern 13`)
+    def clenshaw_chebyshev_t2(x: int) -> int:
+        return 2 * x * x - 1
+
+    def frozen_satake_trace(_x: int) -> int:
+        return 2
+
+    # Positive witness: at x = 2, genuine Clenshaw Chebyshev Sym^2 polynomial `T_2(x) = 2*x^2 - 1`
+    # satisfies the dynamic recurrence `T_2(2) = 2*(2^2) - 1 = 7` (non-constant in x).
+    pos_x16 = 2
+    c16_pos_p = clenshaw_chebyshev_t2(pos_x16) != clenshaw_chebyshev_t2(1)
+    c16_pos_q = clenshaw_chebyshev_t2(pos_x16) == 2 * (pos_x16 ** 2) - 1 == 7
+
+    # Negative counterexample: frozen Potemkin constant trace `satake(x) := 2` fails `T_2(2) = 7` (`2 != 7`).
+    c16_neg_p = frozen_satake_trace(pos_x16) != frozen_satake_trace(1)
+    c16_neg_q = frozen_satake_trace(pos_x16) == 2 * (pos_x16 ** 2) - 1
+    c16_caught = verify_dual_polarity_implication_witness(c16_pos_p, c16_pos_q, c16_neg_p, c16_neg_q)
+    cases.append(
+        {
+            "case_id": 16,
+            "category": "Frozen_Constant_Satake_Trace_Potemkin",
+            "conjecture_label": "Frozen constant Satake trace `def satakeTrace (x : Int) : Int := 2` disproved against Clenshaw Chebyshev `T_2(x) = 2x^2 - 1` at `x = 2` (`2 != 7`)",
+            "positive_witness": f"Clenshaw Chebyshev T_2({pos_x16}) = 2*{pos_x16}^2 - 1 = 7 (P={c16_pos_p}, Q={c16_pos_q})",
+            "negative_disproof_witness": f"Frozen trace satake({pos_x16}) = 2 != 7 = T_2({pos_x16}) (P={c16_neg_p}, Q={c16_neg_q})",
+            "disproved_and_dual_polarity_verified": c16_caught,
+        }
+    )
+
     caught_count = sum(1 for c in cases if c["disproved_and_dual_polarity_verified"])
     total_cases = len(cases)
     return {
@@ -576,11 +646,13 @@ def run_12case_h1_misformalization_disproof_suite() -> Dict[str, Any]:
         "recall_pct": round(100.0 * caught_count / max(total_cases, 1), 1),
         "all_12_cases_caught": caught_count == total_cases,
         "all_14_cases_caught": caught_count == total_cases,
+        "all_16_cases_caught": caught_count == total_cases,
         "cases": cases,
     }
 
 
 run_14case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
+run_16case_h1_misformalization_disproof_suite = run_12case_h1_misformalization_disproof_suite
 
 
 def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool, Dict[str, Any]]:
@@ -660,7 +732,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         and len(all_vacuous_violations) == 0
         and len(pattern11_real_violations) == 0
         and part45_lean_verified
-        and disproof_suite["all_14_cases_caught"]
+        and disproof_suite["all_16_cases_caught"]
     )
 
     summary: Dict[str, Any] = {
@@ -676,6 +748,7 @@ def run_frontier6_dual_polarity_safeverify_audit(repo_root: Path) -> Tuple[bool,
         "frontier6_lean_theorems_verified": part45_lean_verified,
         "synthetic_12case_disproof_suite": disproof_suite,
         "synthetic_14case_disproof_suite": disproof_suite,
+        "synthetic_16case_disproof_suite": disproof_suite,
         "elapsed_ms": elapsed_ms,
         "all_passed": ok,
     }
@@ -700,7 +773,7 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _find_repo_root()
     ok, summary = run_frontier6_dual_polarity_safeverify_audit(repo_root)
-    suite = summary["synthetic_14case_disproof_suite"]
+    suite = summary["synthetic_16case_disproof_suite"]
 
     print("=" * 108)
     print(
@@ -718,7 +791,7 @@ def main() -> int:
     print(f"  Pattern 11 Fallback Violations        : {len(summary['pattern11_conditional_fallback_violations'])}")
     print(f"  Frontier 6 Lean Theorems Verified     : {summary['frontier6_lean_theorems_verified']}")
     print(
-        f"  14-Case Disproof Suite Recall         : "
+        f"  16-Case Disproof Suite Recall         : "
         f"{suite['caught_count']}/{suite['total_cases'] if 'total_cases' in suite else suite['total_synthetic_cases']} "
         f"({suite['recall_pct']}% disproof & non-vacuity recall)"
     )
@@ -729,7 +802,7 @@ def main() -> int:
     print("-" * 108)
     print(
         f"  OVERALL FRONTIER 6 DUAL-POLARITY SAFEVERIFY STATUS: "
-        f"{'PASS (0 REAL VIOLATIONS, 14/14 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
+        f"{'PASS (0 REAL VIOLATIONS, 16/16 MISFORMALIZATIONS DISPROVED)' if ok else 'FAIL'} "
         f"in {summary['elapsed_ms']:.1f} ms"
     )
     print("=" * 108)

@@ -84,10 +84,17 @@ def run_suite_2_collar_and_sobolev_audit() -> dict:
     has_baked_in_margin = "collarLocalizedStepMargin" in code_no_comments
     has_honest_quadratic = (
         "def sumWeights : List Int → Int" in code_no_comments
+        and "def divisorSumAcc" in code_no_comments
+        and "def divisorSum" in code_no_comments
+        and "def isPrime" in code_no_comments
+        and "def chi4" in code_no_comments
+        and "def chi4PrimeShellWeights" in code_no_comments
+        and "theorem chi4PrimeShellWeights_sumSq_le_length" in code_no_comments
         and "def multiPrimeCollarQuadratic" in code_no_comments
         and "def sobolevBoundaryCollarEnergy" in code_no_comments
         and "multiPrimeCollarQuadratic 1 1 [1, 1] = -2" in code_no_comments
         and "grh_ws4_ws5_sobolev_coupled_collar_stabilizes_arbitrary_prime_shells" in code_no_comments
+        and "grh_ws4_ws5_unbaked_chi4_collar_sobolev_reserve_nonneg" in code_no_comments
     )
 
     thm_blocks = re.findall(
@@ -142,7 +149,7 @@ def run_suite_2_collar_and_sobolev_audit() -> dict:
             and parameterless_int_defs == 0
             and not has_baked_in_margin
             and has_honest_quadratic
-            and max_lines <= 6
+            and max_lines <= 5
             and collar_checks == 960
             and barrier_witness == -2
             and coupled_barrier_witness == 1

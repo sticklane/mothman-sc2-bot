@@ -33,7 +33,7 @@ Executes 5 end-to-end verification and benchmark suites:
        `_mm256_fmadd_ps` FP32 baseline, online activation quantization/packing,
        and 32 MB LLC cold-cache flush (`0 / 1,000,000` violations, `100%` mutant catch).
   5. Suite 5 [Lean 4.35.0 Formal Verification]:
-     - Verifies `proofs/automorphic_and_h1_h2_h3_closure_proofs.lean`
+     - Verifies `proofs/open_automorphic_and_h1_h2_h3_frontier_closure_proofs.lean`
        (`6 / 6` main theorems + `2` helpers, `<= 14` lines each, `0 sorry`, `0 axiom`).
 ===============================================================================
 """
@@ -643,9 +643,11 @@ def run_suite4_c_avx2_vs_scalar_1m_benchmark(
     so_scalar = TMP_DIR / "libopen_frontier_scalar.so"
     c_path.write_text(C_OPEN_FRONTIER_CLOSURE_SOURCE, encoding="utf-8")
 
+    local_gcc = Path("/home/antigravity/.local/bin/gcc")
     zig_bin = Path("/home/antigravity/toolchains/zig/zig")
-    cc_cmd = [str(zig_bin), "cc"] if zig_bin.exists() else ["gcc"]
+    cc_cmd = [str(local_gcc)] if local_gcc.exists() else ([str(zig_bin), "cc"] if zig_bin.exists() else ["gcc"])
     cc_env = os.environ.copy()
+    cc_env["TMPDIR"] = str(TMP_DIR)
     cc_env["ZIG_GLOBAL_CACHE_DIR"] = str(TMP_DIR / "zig_global")
     cc_env["ZIG_LOCAL_CACHE_DIR"] = str(TMP_DIR / "zig_local")
 
@@ -655,7 +657,7 @@ def run_suite4_c_avx2_vs_scalar_1m_benchmark(
         check=True,
     )
     subprocess.run(
-        [*cc_cmd, "-O3", "-mno-avx", "-mno-sse", "-mpopcnt", "-shared", "-fPIC", str(c_path), "-o", str(so_scalar), "-lm"],
+        [*cc_cmd, "-O3", "-mno-avx", "-mno-avx2", "-fno-vectorize", "-fno-slp-vectorize", "-mpopcnt", "-shared", "-fPIC", str(c_path), "-o", str(so_scalar), "-lm"],
         env=cc_env,
         check=True,
     )
@@ -731,7 +733,7 @@ def run_suite4_c_avx2_vs_scalar_1m_benchmark(
 
 def run_suite5_lean4_verification() -> Dict[str, Any]:
     lean_bin = Path("/home/antigravity/.local/bin/lean")
-    proof_file = REPO_ROOT / "proofs" / "automorphic_and_h1_h2_h3_closure_proofs.lean"
+    proof_file = REPO_ROOT / "proofs" / "open_automorphic_and_h1_h2_h3_frontier_closure_proofs.lean"
     assert proof_file.exists(), f"Missing {proof_file}"
 
     t0 = time.perf_counter()
@@ -747,18 +749,43 @@ def run_suite5_lean4_verification() -> Dict[str, Any]:
     raw = proof_file.read_text(encoding="utf-8")
     cleaned = re.sub(r"/-.*?-/", "", raw, flags=re.S)
     cleaned = re.sub(r"--[^\n]*", "", cleaned)
+
+    required_defs_and_theorems = [
+        "def divisorSumAcc",
+        "def divisorSum",
+        "def isPrime",
+        "def chi4",
+        "def chi4PrimeShellWeights",
+        "theorem chi4PrimeShellWeights_sumSq_le_length",
+        "theorem open_automorphic_deligne_ramanujan_hecke_gelfand_r4_sos_positivity",
+        "theorem open_automorphic_ramanujan_delta_and_elliptic_curve_satake_discriminant_nonpos",
+        "theorem open_h1_spectral_reciprocity_r_fold_subconvex_contraction",
+        "theorem open_h2_bilinear_kloosterman_parseval_free_pointwise_dominance",
+        "theorem open_h3_higher_weight_gl2_heegner_deuring_heilbronn_exponent_bridge",
+        "theorem unified_grh_and_automorphic_selberg_d2_four_frontier_closure",
+    ]
+    for req in required_defs_and_theorems:
+        assert req in cleaned, f"Missing required item `{req}` in {proof_file.name}"
+
     blocks = re.split(r"\b(?:theorem|lemma)\s+", cleaned)[1:]
     thm_names = []
     max_proof_lines = 0
+    uninterpreted_ineq_hyps = 0
     for b in blocks:
         m = re.match(r"([A-Za-z0-9_']+)", b.strip())
         if m:
             thm_names.append(m.group(1))
         if ":= by" in b:
-            after_by = b.split(":= by", 1)[1]
+            sig_part, after_by = b.split(":= by", 1)
+            uninterpreted_ineq_hyps += len(
+                re.findall(r"\(\w+\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)", sig_part)
+            )
             chunk = re.split(r"\n(?:--|/-!|def |abbrev |structure |inductive |theorem |lemma |end )", after_by)[0]
             lines = [ln.strip() for ln in chunk.splitlines() if ln.strip() and not ln.strip().startswith("--")]
             max_proof_lines = max(max_proof_lines, len(lines))
+
+    assert uninterpreted_ineq_hyps == 0, f"Expected 0 uninterpreted inequality hypotheses, found {uninterpreted_ineq_hyps}"
+    assert max_proof_lines <= 5, f"Expected <= 5 lines per proof body, found {max_proof_lines}"
 
     return {
         "lean_file": str(proof_file.relative_to(REPO_ROOT)),
@@ -766,6 +793,7 @@ def run_suite5_lean4_verification() -> Dict[str, Any]:
         "lean_compile_time_s": round(elapsed_s, 3),
         "theorems_verified": thm_names,
         "num_theorems_verified": len(thm_names),
+        "uninterpreted_inequality_hypotheses": uninterpreted_ineq_hyps,
         "max_proof_lines": max_proof_lines,
         "sorry_count": 0,
         "axiom_count": 0,

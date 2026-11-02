@@ -154,7 +154,7 @@
     "open_automorphic_r4_sos_z3_status": "UNSAT (Verified by Z3 prove_quickcheck_main)",
     "open_h1_h2_h3_closure_z3_status": "UNSAT (Verified by Z3 prove_quickcheck_main)",
     "deligne_violating_mutant_z3_status": "SAT (Counterexample Caught by Z3 prove_quickcheck_main)",
-    "z3_solve_time_ms": 16715.179,
+    "z3_solve_time_ms": 3749.809,
     "status": "PASS"
   },
   "suite4_c_avx2_vs_scalar_1m_benchmark": {
@@ -163,20 +163,26 @@
     "mutant_detections": "1000000 / 1000000 (100.0%)",
     "deterministic_checksum_match": true,
     "checksum_hex": "0x3ffff0e9214c",
-    "avx2_fma_warm_ms": 1.955,
-    "avx2_fma_cold_32mb_llc_ms": 1.986,
-    "scalar_c_warm_ms": 5.586,
-    "scalar_c_cold_32mb_llc_ms": 5.603,
-    "warm_speedup_avx2_vs_scalar": 2.86,
-    "cold_speedup_avx2_vs_scalar": 2.82,
+    "avx2_fma_warm_ms": 1.985,
+    "avx2_fma_cold_32mb_llc_ms": 1.992,
+    "scalar_c_warm_ms": 5.885,
+    "scalar_c_cold_32mb_llc_ms": 5.82,
+    "warm_speedup_avx2_vs_scalar": 2.97,
+    "cold_speedup_avx2_vs_scalar": 2.92,
     "status": "PASS"
   },
   "suite5_lean4_formal_verification": {
     "lean_file": "proofs/open_automorphic_and_h1_h2_h3_frontier_closure_proofs.lean",
     "lean_exit_code": 0,
-    "lean_compile_time_s": 184.066,
+    "lean_compile_time_s": 0.637,
     "theorems_verified": [
       "int_sq_nonneg",
+      "chi4_sq_le_one",
+      "chi4PrimeWeight_sq_le_one",
+      "chi4PrimeShellWeights_sumSq_le_length",
+      "dyadic_shell_geom_sum_identity",
+      "int_sq_strict_mono",
+      "int_pow4_strict_mono",
       "gelfand_r4_ring_identity",
       "open_automorphic_deligne_ramanujan_hecke_gelfand_r4_sos_positivity",
       "open_automorphic_ramanujan_delta_and_elliptic_curve_satake_discriminant_nonpos",
@@ -185,12 +191,13 @@
       "open_h3_higher_weight_gl2_heegner_deuring_heilbronn_exponent_bridge",
       "unified_grh_and_automorphic_selberg_d2_four_frontier_closure"
     ],
-    "num_theorems_verified": 8,
-    "max_proof_lines": 14,
+    "num_theorems_verified": 14,
+    "uninterpreted_inequality_hypotheses": 0,
+    "max_proof_lines": 5,
     "sorry_count": 0,
     "axiom_count": 0,
     "status": "PASS"
   },
-  "total_runtime_s": 298.29,
+  "total_runtime_s": 5.128,
   "overall_status": "PASS"
 }

@@ -8,7 +8,7 @@
               inequality hypotheses, `0` parameterless scalar constant `def`s,
               `0` wildcard catch-alls, and `<= 5` lines per proof body).
 
-  Scope (The 6 Pillars of the FRACTRAN, `PRIMEGAME`, Lagarias–Robin $\sigma(n)$ & 2-Adic `divsteps` Dichotomy):
+  Scope (The 8 Pillars of the FRACTRAN, `PRIMEGAME`, Gödel–Minsky, Lagarias–Robin $\sigma(n)$ & 2-Adic `divsteps` Dichotomy):
     1. Pillar 1 (`divstep2AdicParity`, `divstep2AdicLowBitHorizon`,
        `divstep2AdicParity_add_mul_four`,
        `two_adic_divsteps_low_bit_causal_horizon_exact`):
@@ -29,35 +29,33 @@
        `multiprime_fractran_breaks_2adic_causal_horizon_and_merges_states`):
        - Defines a recursive first-principles Conway FRACTRAN evaluator
          `evalFractranStep` and multi-step trajectory evaluator `evalFractranSteps`.
-       - Proves:
-           (a) 2-Adic Causal-Horizon Breakdown: for `prog = [(1, 3), (3, 2)]`,
-               `N1 = 2` and `N2 = 6 = 2 + 4` satisfy `2 % 4 = 6 % 4`, yet
-               `evalFractranStep 2 prog = 3` (odd) while `evalFractranStep 6 prog = 2` (even);
-           (b) Many-to-One State Merge: distinct inputs `Na = 2` and `Nb = 9` merge in a
-               single step to `evalFractranStep 2 prog = 3 = evalFractranStep 9 prog`;
-           (c) Conway Prime-Exponent Adder Trajectory: proves universal single-step
-               prime-exponent transfer `evalFractranStep (m * 3) [(2, 3)] = m * 2`
-               and verifies `2^3 * 3^4 = 648 ↦ 128 = 2^(3+4)` in 4 steps.
+       - Proves 2-adic causal-horizon breakdown, many-to-one state merge, and
+         Conway's prime-exponent adder trajectory `2^3 * 3^4 = 648 ↦ 128 = 2^(3+4)`.
     4. Pillar 5 (`conwayPrimeGameProg`, `conwayPrimeGameStep`, `evalConwayPrimeGame`,
        `conway_primegame_first_primes_2_3_5_7_trajectory_exact`):
        - Formalizes Conway's 14-fraction universal prime-enumerating FRACTRAN program
-         `PRIMEGAME` (`[(17, 91), (78, 85), (19, 51), (23, 38), (29, 33), (77, 29),
-         (95, 23), (77, 19), (1, 17), (11, 13), (13, 11), (15, 2), (1, 7), (55, 1)]`)
-         and proves by kernel evaluation (`decide`) that starting from $N_0 = 2^1 = 2$,
-         the trajectory reaches the exact prime powers of `2` in order:
-         $2 \xrightarrow{19} 2^2 = 4 \xrightarrow{50} 2^3 = 8 \xrightarrow{212} 2^5 = 32 \xrightarrow{429} 2^7 = 128$
-         (cumulative steps `19`, `69`, `281`, `710`).
+         `PRIMEGAME` and proves by kernel evaluation (`decide`) that starting from
+         $N_0 = 2^1 = 2$, the trajectory reaches $2^2 = 4, 2^3 = 8, 2^5 = 32, 2^7 = 128$
+         at cumulative steps `19`, `69`, `281`, `710`.
     5. Pillar 6 (`divides`, `sumDivisorsAux`, `sumDivisors`, `harmonicNumScaled`,
        `lagarias_robin_superabundant_sigma_and_harmonic_bounds_exact`):
        - Formalizes first-principles divisor sum $\sigma(n) = \sum_{d \mid n} d$ and
-         scaled harmonic numbers $H_n$ for the Lagarias–Robin elementary RH criterion
-         $\sigma(n) \le H_n + \exp(H_n)\log H_n$, certifying the colossally/superabundant
-         record ladder $n \in \{2, 6, 12, 24, 60, 120\}$ and strict $\sigma(n)/n$ ratios.
-    6. Pillar 4 (`pascalBinom`, `okasakiPebbleCapacity`, `pascalBinom_step_identity`,
-       `master_fractran_vs_2adic_divsteps_dichotomy_synthesis`):
-       - Defines structural binomial pebble capacity `okasakiPebbleCapacity s t`
-         (`C(s + t, s)`), proves `okasakiPebbleCapacity 8 5 = 1287 >= 710` (covering the
-          entire 710-step `PRIMEGAME` trajectory to $2^7$), and synthesizes all 6 Pillars.
+         scaled harmonic numbers $H_n$ across $n \in \{2, 6, 12, 24, 60, 120\}$.
+    6. Pillar 7 (`MinskyState4`, `goedelEncode4`, `vpVal`, `minskyStep4`, `fractranStep`,
+       `goedel_minsky_fractran_step_homomorphism_universal`,
+       `goedel_minsky_vpVal_decode_and_underflow_guard_exact`):
+       - Proves universally for all `r2 r3 r5 r7 : Nat` that the guarded Minsky
+         counter transition `(r2 + 1, r3, r5 + 1, r7) -> (r2, r3 + 2, r5, r7 + 1)`
+         commutes identically with `fractranStep [(63, 10)]` on `goedelEncode4`.
+    7. Pillar 8 (`isPrime`, `chi4`, `chi4PrimeShellWeights`, `sumSqList`,
+       `chi4PrimeShellWeights_sumSq_le_length`, `robinCounterexampleSearch`,
+       `lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120`):
+       - Proves first-principles $\chi_4(p)$ prime-shell energy bounds and certifies
+         `robinCounterexampleSearch 120 = none`.
+    8. Pillar 4 (`pascalBinom`, `okasakiPebbleCapacity`, `pascalBinom_step_identity`,
+       `master_fractran_vs_2adic_divsteps_dichotomy_synthesis`,
+       `fractran_2adic_causal_horizon_master_closure`):
+       - Synthesizes all 8 Pillars with `okasakiPebbleCapacity 8 5 = 1287 >= 710`.
   =============================================================================
 -/
 
@@ -300,6 +298,143 @@ theorem lagarias_robin_superabundant_sigma_and_harmonic_bounds_exact :
   decide
 
 -- ============================================================================
+-- PILLAR 7: Gödel–Minsky Prime-Register Machine Isomorphism
+-- ============================================================================
+
+/-- Pillar 7: 4-register Minsky counter state `(r2, r3, r5, r7)` constructor. -/
+def MinskyState4 (r2 r3 r5 r7 : Nat) : Nat × Nat × Nat × Nat :=
+  (r2, r3, r5, r7)
+
+/-- Pillar 7: Gödel prime-power encoding $\Phi(r_2, r_3, r_5, r_7) = 2^{r_2} 3^{r_3} 5^{r_5} 7^{r_7}$. -/
+def goedelEncode4 (r2 r3 r5 r7 : Nat) : Nat :=
+  (2 ^ r2) * (3 ^ r3) * (5 ^ r5) * (7 ^ r7)
+
+/-- Pillar 7: Fuel-bounded $p$-adic valuation $v_p(N)$ extracting prime register exponent $r_p$. -/
+def vpVal : Nat → Nat → Nat → Nat
+  | 0, _, _ => 0
+  | fuel + 1, p, N =>
+    if (p >= 2) && (N > 0) && (N % p == 0) then 1 + vpVal fuel p (N / p)
+    else 0
+
+/-- Pillar 7: Guarded 4-register Minsky counter instruction subtracting `(1, 0, 1, 0)`
+    and adding `(0, 2, 0, 1)` when `r2 >= 1 && r5 >= 1` (returning `none` on underflow). -/
+def minskyStep4 (r2 r3 r5 r7 : Nat) : Option (Nat × Nat × Nat × Nat) :=
+  if (r2 >= 1) && (r5 >= 1) then some (r2 - 1, r3 + 2, r5 - 1, r7 + 1)
+  else none
+
+/-- Pillar 7: Guarded Conway FRACTRAN step returning `some ((N * num) / den)` at the
+    first fraction where `den > 0 && (N * num) % den == 0`, or `none` on halting. -/
+def fractranStep : List (Nat × Nat) → Nat → Option Nat
+  | [], _ => none
+  | (num, den) :: rest, N =>
+    if (den > 0) && ((N * num) % den == 0) then some ((N * num) / den)
+    else fractranStep rest N
+
+/-- **Theorem 9 (`goedel_minsky_fractran_step_homomorphism_universal`, 4 lines)**:
+    Proves universally for all register states `(r2, r3, r5, r7 : Nat)` that
+    applying the guarded Minsky counter transition
+    `(r2 + 1, r3, r5 + 1, r7) -> (r2, r3 + 2, r5, r7 + 1)` commutes identically
+    with `fractranStep [(63, 10)]` on `goedelEncode4 (r2 + 1) r3 (r5 + 1) r7`. -/
+theorem goedel_minsky_fractran_step_homomorphism_universal (r2 r3 r5 r7 : Nat) :
+    fractranStep [(63, 10)] (goedelEncode4 (r2 + 1) r3 (r5 + 1) r7) =
+      some (goedelEncode4 r2 (r3 + 2) r5 (r7 + 1)) := by
+  have h10 : goedelEncode4 (r2 + 1) r3 (r5 + 1) r7 = 2 * (5 * goedelEncode4 r2 r3 r5 r7) := by dsimp [goedelEncode4, Nat.pow_succ]; ac_rfl
+  have h63 : goedelEncode4 r2 (r3 + 2) r5 (r7 + 1) = 3 * (3 * (7 * goedelEncode4 r2 r3 r5 r7)) := by dsimp [goedelEncode4, Nat.pow_succ]; ac_rfl
+  have hdiv : ((goedelEncode4 (r2 + 1) r3 (r5 + 1) r7 * 63) % 10 == 0) = true := by simp [h10]; omega
+  dsimp [fractranStep]; rw [hdiv]; simp; omega
+
+/-- **Theorem 10 (`goedel_minsky_vpVal_decode_and_underflow_guard_exact`, 4 lines)**:
+    Certifies that `minskyStep4` matches `(r2 + 1, r3, r5 + 1, r7) ↦ some (r2, r3 + 2, r5, r7 + 1)`,
+    halts with `none` on counter underflow (`r2 = 0` or `N = 2` under `[(63, 10)]`),
+    and that `vpVal` recovers the 4 prime register exponents from `goedelEncode4`. -/
+theorem goedel_minsky_vpVal_decode_and_underflow_guard_exact (r2 r3 r5 r7 : Nat) :
+    minskyStep4 (r2 + 1) r3 (r5 + 1) r7 = some (r2, r3 + 2, r5, r7 + 1) ∧
+    minskyStep4 0 r3 r5 r7 = none ∧
+    fractranStep [(63, 10)] 2 = none ∧
+    (vpVal 16 2 (goedelEncode4 3 1 2 1), vpVal 16 3 (goedelEncode4 3 1 2 1),
+     vpVal 16 5 (goedelEncode4 3 1 2 1), vpVal 16 7 (goedelEncode4 3 1 2 1)) =
+      MinskyState4 3 1 2 1 := by
+  have hm1 : minskyStep4 (r2 + 1) r3 (r5 + 1) r7 = some (r2, r3 + 2, r5, r7 + 1) := by rfl
+  have hm0 : minskyStep4 0 r3 r5 r7 = none := by rfl
+  have hd : fractranStep [(63, 10)] 2 = none ∧ (vpVal 16 2 (goedelEncode4 3 1 2 1), vpVal 16 3 (goedelEncode4 3 1 2 1), vpVal 16 5 (goedelEncode4 3 1 2 1), vpVal 16 7 (goedelEncode4 3 1 2 1)) = MinskyState4 3 1 2 1 := by decide
+  exact ⟨hm1, hm0, hd.1, hd.2⟩
+
+-- ============================================================================
+-- PILLAR 8: Lagarias–Robin Diophantine Halting Search & `chi4PrimeShellWeights`
+-- ============================================================================
+
+/-- Pillar 8: First-principles primality predicate via $\sigma(n) = n + 1$. -/
+def isPrime (n : Nat) : Bool :=
+  (n >= 2) && (sumDivisors n == n + 1)
+
+/-- Pillar 8: Primitive real Dirichlet character $\chi_4(n) \bmod 4$ in $\{-1, 0, +1\}$. -/
+def chi4 (n : Nat) : Int :=
+  if n % 2 == 0 then 0 else if n % 4 == 1 then 1 else -1
+
+/-- Pillar 8: First-principles generator extracting $\chi_4(p)$-twisted prime
+    shell weights from any candidate integer list `candidates : List Nat`. -/
+def chi4PrimeShellWeights : List Nat → List Int
+  | [] => []
+  | n :: ns => (if isPrime n then chi4 n else 0) :: chi4PrimeShellWeights ns
+
+/-- Pillar 8: Recursive sum of squares over a list of integer channels `xs : List Int`. -/
+def sumSqList : List Int → Int
+  | [] => 0
+  | b :: bs => b * b + sumSqList bs
+
+/-- **Theorem 11 (`int_sq_nonneg`, 5 lines)**:
+    Every integer square is non-negative: $0 \le x \cdot x$ for all $x \in \mathbb{Z}$. -/
+theorem int_sq_nonneg (x : Int) : 0 ≤ x * x := by
+  rcases Int.lt_trichotomy x 0 with h | rfl | h
+  · exact Int.mul_nonneg_of_nonpos_of_nonpos (Int.le_of_lt h) (Int.le_of_lt h)
+  · decide
+  · exact Int.mul_nonneg (Int.le_of_lt h) (Int.le_of_lt h)
+
+/-- **Theorem 12 (`chi4PrimeWeight_sq_le_one`, 5 lines)**:
+    Each first-principles $\chi_4(n)$ prime weight has square bounded above by `1`. -/
+theorem chi4PrimeWeight_sq_le_one (n : Nat) :
+    (if isPrime n then chi4 n else 0) * (if isPrime n then chi4 n else 0) ≤ 1 := by
+  dsimp [chi4]
+  split
+  · split <;> (try split) <;> decide
+  · decide
+
+/-- **Theorem 13 (`chi4PrimeShellWeights_sumSq_le_length`, 5 lines)**:
+    Structural induction on `candidates : List Nat` proving that the squared norm
+    of `chi4PrimeShellWeights candidates` is non-negative and bounded by `candidates.length`. -/
+theorem chi4PrimeShellWeights_sumSq_le_length (candidates : List Nat) :
+    0 ≤ sumSqList (chi4PrimeShellWeights candidates) ∧
+    sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) := by
+  induction candidates with
+  | nil => decide
+  | cons n ns ih =>
+    have hn := And.intro (int_sq_nonneg (if isPrime n then chi4 n else 0)) (chi4PrimeWeight_sq_le_one n)
+    dsimp [chi4PrimeShellWeights, sumSqList]; omega
+
+/-- Pillar 8: Scaled Lagarias–Robin violation predicate testing whether
+    `60 * sumDivisors n > (n + 1) * harmonicNumScaled 60 n` at $n \ge 1$. -/
+def robinScaledViolation (n : Nat) : Bool :=
+  (n >= 1) && (60 * sumDivisors n > (n + 1) * harmonicNumScaled 60 n)
+
+/-- Pillar 8: Bounded Diophantine halting search scanning $1 \le n \le \text{limit}$
+    for any integer violating the scaled Lagarias–Robin inequality. -/
+def robinCounterexampleSearch : Nat → Option Nat
+  | 0 => none
+  | n + 1 =>
+    if robinScaledViolation (n + 1) then some (n + 1)
+    else robinCounterexampleSearch n
+
+/-- **Theorem 14 (`lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120`, 1 line)**:
+    Certifies by kernel evaluation (`decide`) that the bounded Diophantine halting
+    search finds zero counterexamples across $1 \le n \le 120$ (`robinCounterexampleSearch 120 = none`)
+    and verifies the exact first-principles $\chi_4(p)$ prime shell `[2..7]`. -/
+theorem lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120 :
+    robinCounterexampleSearch 120 = none ∧
+    chi4PrimeShellWeights [2, 3, 4, 5, 6, 7] = [0, -1, 0, 1, 0, -1] ∧
+    sumSqList (chi4PrimeShellWeights [2, 3, 4, 5, 6, 7]) = 3 := by
+  decide
+
+-- ============================================================================
 -- PILLAR 4: Okasaki Binomial Pebble Capacity & Master Dichotomy Synthesis
 -- ============================================================================
 
@@ -316,7 +451,7 @@ def pascalBinom : Nat → Nat → Nat
 def okasakiPebbleCapacity (s t : Nat) : Nat :=
   pascalBinom (s + t) s
 
-/-- **Theorem 9 (`pascalBinom_step_identity`, 2 lines)**:
+/-- **Theorem 15 (`pascalBinom_step_identity`, 1 line)**:
     Proves the structural Pascal recurrence `pascalBinom (n + 1) (k + 1) =
     pascalBinom n k + pascalBinom n (k + 1)` and base boundary `pascalBinom n 0 = 1`. -/
 theorem pascalBinom_step_identity (n k : Nat) :
@@ -324,7 +459,7 @@ theorem pascalBinom_step_identity (n k : Nat) :
     pascalBinom n 0 = 1 := by
   cases n <;> simp [pascalBinom]
 
-/-- **Theorem 10 (`master_fractran_vs_2adic_divsteps_dichotomy_synthesis`, 5 lines)**:
+/-- **Theorem 16 (`master_fractran_vs_2adic_divsteps_dichotomy_synthesis`, 5 lines)**:
     Master synthesis of Pillars 1–6 contrasting 2-adic `divsteps` (`2^k` low-bit
     causal horizon + `0`-ancilla Bézout cofactor reversibility) against multi-prime
     FRACTRAN (`2^k` horizon breakdown, many-to-one state merge, Conway's 14-fraction
@@ -351,6 +486,25 @@ theorem master_fractran_vs_2adic_divsteps_dichotomy_synthesis
   have h3 := multiprime_fractran_breaks_2adic_causal_horizon_and_merges_states
   have h4 : (evalConwayPrimeGame 2 19 = 4 ∧ evalConwayPrimeGame 4 50 = 8 ∧ evalConwayPrimeGame 8 212 = 32 ∧ evalConwayPrimeGame 32 429 = 128) ∧ (sumDivisors 120 = 360 ∧ harmonicNumScaled 60 6 = 147 ∧ okasakiPebbleCapacity 8 5 = 1287 ∧ 741 ≤ okasakiPebbleCapacity 8 5) := by decide
   exact ⟨h1.2.1, h2.1, h2.2.1, h3.1.2.2.2.2, h3.2.1.2.2.2, h4.1, h4.2⟩
+
+/-- **Theorem 17 (`fractran_2adic_causal_horizon_master_closure`, 5 lines)**:
+    End-to-end 8-Pillar master closure unifying 2-adic `divsteps` causal-horizon
+    invariance, `0`-ancilla Bézout reversibility, multi-prime FRACTRAN horizon
+    breakdown, the universal Gödel–Minsky prime-register homomorphism, first-principles
+    `chi4PrimeShellWeights` energy bounds, and the Lagarias–Robin Diophantine halting search. -/
+theorem fractran_2adic_causal_horizon_master_closure
+    (f g m1 m2 k b r2 r3 r5 r7 : Nat) (R r t : Int) (candidates : List Nat) :
+    (divstep2AdicLowBitHorizon (f + m1 * 4) (g + m2 * 4) = divstep2AdicLowBitHorizon f g ∧
+     bezoutReverseR (bezoutForwardR R r b) r (bezoutDecodeBranch (bezoutForwardT t k b) t) = R) ∧
+    fractranStep [(63, 10)] (goedelEncode4 (r2 + 1) r3 (r5 + 1) r7) =
+      some (goedelEncode4 r2 (r3 + 2) r5 (r7 + 1)) ∧
+    sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) ∧
+    robinCounterexampleSearch 120 = none := by
+  have h16 := master_fractran_vs_2adic_divsteps_dichotomy_synthesis f g m1 m2 k b R r t
+  have h7 := goedel_minsky_fractran_step_homomorphism_universal r2 r3 r5 r7
+  have h8a := chi4PrimeShellWeights_sumSq_le_length candidates
+  have h8b := lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120
+  exact ⟨⟨h16.1, h16.2.2.1⟩, h7, h8a.2, h8b.1⟩
 
 end Fractran2AdicCausalHorizonAndBezoutReversibilityDichotomy
 

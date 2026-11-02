@@ -125,7 +125,7 @@
     "fejer_riesz_d160": {
       "degree": 160,
       "num_generator_coeffs": 161,
-      "min_grid_positivity_val": 0.00378867465154,
+      "min_grid_positivity_val": 0.00378867465153,
       "R_d64": 5.5289,
       "R_d96": 5.5234,
       "R_d128": 5.5188,
@@ -161,37 +161,41 @@
   },
   "suite4_c_avx2_and_z3_verification": {
     "z3_smt2_status": "UNSAT",
-    "z3_solve_time_ms": 454.14,
+    "z3_solve_time_ms": 4851.01,
     "vectors_fuzzed": 1000000,
     "violations_detected": 0,
     "mutant_catches": 1000000,
     "online_quantization_nibble_mask_0x0f": true,
-    "avx2_fma_warm_ms": 1.277,
-    "scalar_c_warm_ms": 9.997,
-    "warm_speedup_avx2_vs_scalar": 7.83,
-    "avx2_fma_cold_32mb_llc_ms": 1.386,
-    "scalar_c_cold_32mb_llc_ms": 10.045,
-    "cold_speedup_avx2_vs_scalar": 7.25
+    "avx2_fma_warm_ms": 1.324,
+    "scalar_c_warm_ms": 9.151,
+    "warm_speedup_avx2_vs_scalar": 6.91,
+    "avx2_fma_cold_32mb_llc_ms": 1.361,
+    "scalar_c_cold_32mb_llc_ms": 9.195,
+    "cold_speedup_avx2_vs_scalar": 6.76
   },
   "suite5_lean4_formal_verification": {
     "lean_file": "proofs/gl5_sym4_gl3xgl2_r12_sos_fejer_riesz_d160_and_kappa_0736_proofs.lean",
     "lean_exit_code": 0,
-    "lean_compile_time_s": 0.458,
+    "lean_compile_time_s": 0.699,
     "theorems_verified": [
       "int_sq_nonneg",
+      "chi4PrimeWeight_sq_le_one",
+      "chi4PrimeShellWeights_sumSq_le_length",
+      "clenshaw_chebyshev_sym4_satake_trace_universal",
       "gl5_kim_shahidi_sym4_satake_trace_and_square_nonneg",
       "rankin_selberg_gl3xgl2_sym2_times_g_trace_and_square_nonneg",
       "twelfth_power_cyclotomic_diff_ring_identity",
       "gelfand_resolvent_12th_order_r12_sos_operator_positivity",
       "fejer_riesz_degree160_sos_certificate_R_55142",
-      "five_layer_buchstab_sieve_and_schur_weil_m2560_kappa_07368"
+      "five_layer_buchstab_sieve_and_schur_weil_m2560_kappa_07368",
+      "unbaked_gl5_sym4_chi4_prime_shell_schur_nonneg"
     ],
-    "num_theorems_verified": 7,
-    "max_proof_lines": 9,
+    "num_theorems_verified": 11,
+    "max_proof_lines": 5,
     "sorry_count": 0,
     "axiom_count": 0,
     "status": "PASS"
   },
-  "total_runtime_s": 25.838,
+  "total_runtime_s": 6.912,
   "overall_status": "PASS"
 }

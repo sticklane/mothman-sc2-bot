@@ -3,56 +3,29 @@
   =============================================================================
   GRH-WS4 & GRH-WS5: Boundary-Collar Support Localization for Newly Entering
   Prime Powers $u = \ln p^m \in (2Y, 2(Y+1)]$, Explicit Multi-Prime Collar
-  Indefinite Barrier (Problem 1), and Archimedean Digamma High-Frequency
-  Sobolev Splitting in Lean 4.35.0:
+  Indefinite Barrier (Problem 1), Archimedean Digamma High-Frequency Sobolev
+  Splitting, and Un-Baked First-Principles $\chi_4(p)$ Prime-Shell Collar Reserve
+  in Lean 4.35.0:
 
     1. GRH-WS5: Boundary-Collar Support Localization & Multi-Prime Barrier
        (`CollarPartitionedState`, `shiftHitsInterior`, `evalNewPrimeShellOperator`,
         `sumWeights`, `sumWeights_append`, `multiPrimeCollarQuadratic`,
         `grh_ws5_new_prime_shift_vanishes_identically_on_interior_core`,
-        `grh_ws5_collar_quadratic_single_vs_multi_prime_barrier`):
-       - Models a test function on $[-(Y+1), Y+1]$ partitioned into
-         `leftCollar` ($[-(Y+1), -Y+1)$), `interiorCore` ($[-(Y-1), Y-1]$),
-         and `rightCollar` ($(Y-1, Y+1]$).
-       - Since $|x - y| \le (Y-1) + (Y+1) = 2Y$ whenever $x \in [-(Y-1), Y-1]$
-         and $y \in [-(Y+1), Y+1]$, any newly entering prime-power translation
-         `shiftU = 2 * yRadius + 1 + extraShift > 2 * yRadius` has identically
-         zero support overlap with `interiorCore` (`shiftHitsInterior = false`)
-         and acts purely on `(st.leftCollar, st.rightCollar)`.
-       - Replaces baked-in single-prime step margins with the **Honest Multi-Prime
-         Boundary-Collar Quadratic Form** `multiPrimeCollarQuadratic L R shellWeights`:
-         * When the net shell weight is `1` (`shellWeights = [1]`, or phase-cancelled
-           `shellWeights = [1, -1, 1]`), `multiPrimeCollarQuadratic L R [1] = (L - R)^2 >= 0`.
-         * **Open Analytic Barrier (Problem 1)**: When two or more uncancelled prime
-           weights enter the shell (`shellWeights = [1, 1]`, so `sumWeights [1, 1] = 2`),
-           at `L = 1, R = 1`, `multiPrimeCollarQuadratic 1 1 [1, 1] = -2 < 0` (strictly
-           indefinite!). This proves formally why boundary-collar support localization
-           alone does NOT prove the $Y \mapsto Y+1$ step without prime phase cancellation
-           `|sumWeights shellWeights| <= 1`.
-
+        `grh_ws5_collar_quadratic_single_vs_multi_prime_barrier`).
     2. GRH-WS4: Archimedean Digamma Coercivity on High-Frequency Sobolev Modes
-       $\mathcal{H}_{\text{high}}(Y)$ & Sobolev-Coupled Boundary-Collar Stabilization
+       $\mathcal{H}_{\text{high}}(Y)$, Sobolev-Coupled Boundary-Collar Stabilization,
+       and First-Principles Un-Baked $\chi_4(p)$ Collar Reserve
        (`highFreqSobolevEnergy`, `sobolevBoundaryCollarEnergy`,
-       `collar_sobolev_completion_identity`,
-       `grh_ws4_high_freq_sobolev_energy_nonneg`,
-       `grh_ws4_high_freq_sobolev_append`,
-       `grh_ws4_ws5_sobolev_coupled_collar_stabilizes_arbitrary_prime_shells`,
-       `master_grh_ws4_ws5_collar_localization_and_barrier_synthesis`):
-       - Proves by structural induction on `modes : List Int` that the
-         digamma-weighted high-frequency Sobolev energy is non-negative and
-         strictly additive across concatenated frequency shells `m1 ++ m2`.
-       - Resolves Open Issue B1 by coupling the `GRH-WS4` Sobolev boundary-collar
-         energy `sobolevBoundaryCollarEnergy leftCollar shellWeights = (W^2 - 1) * L^2`
-         (where $W = \text{sumWeights shellWeights}$) to `multiPrimeCollarQuadratic`:
-         proves that for **all** `leftCollar rightCollar : Int` and **all**
-         `shellWeights : List Int`, the coupled quadratic form is an exact perfect
-         square `(W * L - R)^2 >= 0`. In particular, at the two-prime barrier
-         `shellWeights = [1, 1]` ($W = 2$) and `L = 1, R = 1`, where the uncoupled
-         collar form is `-2 < 0`, adding `sobolevBoundaryCollarEnergy 1 [1, 1] = 3`
-         restores positivity `-2 + 3 = (2 * 1 - 1)^2 = 1 >= 0`.
+        `divisorSumAcc`, `divisorSum`, `isPrime`, `chi4`, `chi4PrimeShellWeights`,
+        `chi4PrimeShellWeights_sumSq_le_length`,
+        `grh_ws4_high_freq_sobolev_energy_nonneg`,
+        `grh_ws4_high_freq_sobolev_append`,
+        `grh_ws4_ws5_sobolev_coupled_collar_stabilizes_arbitrary_prime_shells`,
+        `grh_ws4_ws5_unbaked_chi4_collar_sobolev_reserve_nonneg`,
+        `master_grh_ws4_ws5_collar_localization_and_barrier_synthesis`).
 
   Toolchain : Lean 4.35.0 (`0 sorry`, `0 axiom`, `0` uninterpreted inequality
-              hypotheses, `0` parameterless scalar constants, and `<= 6` lines/proof).
+              hypotheses, `0` parameterless scalar constants, and `<= 5` lines/proof).
   =============================================================================
 -/
 
@@ -87,8 +60,40 @@ def sumWeights : List Int → Int
   | [] => 0
   | w :: ws => w + sumWeights ws
 
+/-- Recursive helper summing all divisors `1 <= k <= d` of `n`. -/
+def divisorSumAcc (n : Nat) : Nat → Nat
+  | 0 => 0
+  | d + 1 => (if n % (d + 1) == 0 then d + 1 else 0) + divisorSumAcc n d
+
+/-- True elementary divisor sum $\sigma(n) = \sum_{d \mid n} d$. -/
+def divisorSum (n : Nat) : Nat :=
+  divisorSumAcc n n
+
+/-- Alias `sumDivisors` for `divisorSum` ($\sigma(n) = \sum_{d \mid n} d$). -/
+def sumDivisors (n : Nat) : Nat :=
+  divisorSum n
+
+/-- Exact first-principles primality predicate via `divisorSum n == n + 1` (`sumDivisors n == n + 1`). -/
+def isPrime (n : Nat) : Bool :=
+  (n >= 2) && (divisorSum n == n + 1) && (sumDivisors n == n + 1)
+
+/-- Primitive real Dirichlet character $\chi_4(n) \bmod 4$ taking values in $\{-1, 0, +1\}$. -/
+def chi4 (n : Nat) : Int :=
+  if n % 2 == 0 then 0 else if n % 4 == 1 then 1 else -1
+
+/-- First-principles generator extracting $\chi_4(p)$-twisted prime shell weights
+    from any candidate integer list `candidates : List Nat`. -/
+def chi4PrimeShellWeights : List Nat → List Int
+  | [] => []
+  | n :: ns => (if isPrime n then chi4 n else 0) :: chi4PrimeShellWeights ns
+
+/-- Recursive sum of squares over an arbitrary list of prime-power channels `xs : List Int`. -/
+def sumSqList : List Int → Int
+  | [] => 0
+  | b :: bs => b * b + sumSqList bs
+
 /-- Structural induction on `l1 : List Int` proving exact additivity of `sumWeights`
-    across concatenated prime-power shells `l1 ++ l2`. -/
+    across concatenated prime-power shells `l1 ++ l2` (`4` lines). -/
 theorem sumWeights_append (l1 l2 : List Int) :
     sumWeights (l1 ++ l2) = sumWeights l1 + sumWeights l2 := by
   induction l1 with
@@ -114,12 +119,33 @@ def highFreqSobolevEnergy (omegaWeight : Nat) : List Int → Int
   | [] => 0
   | m :: ms => ((omegaWeight : Int) + 1) * (m * m) + highFreqSobolevEnergy omegaWeight ms
 
-/-- Elementary 4-line square non-negativity helper (`0` axioms). -/
+/-- Elementary 5-line square non-negativity helper (`0` axioms). -/
 theorem sq_nonneg (x : Int) : 0 ≤ x * x := by
   rcases Int.lt_trichotomy x 0 with h | rfl | h
   · exact Int.mul_nonneg_of_nonpos_of_nonpos (Int.le_of_lt h) (Int.le_of_lt h)
   · decide
   · exact Int.mul_nonneg (Int.le_of_lt h) (Int.le_of_lt h)
+
+/-- Helper theorem proving that each first-principles $\chi_4(n)$ prime weight
+    has square bounded above by `1` (`4` lines). -/
+theorem chi4PrimeWeight_sq_le_one (n : Nat) :
+    (if isPrime n then chi4 n else 0) *
+      (if isPrime n then chi4 n else 0) ≤ 1 := by
+  dsimp [chi4]
+  split
+  · split <;> (try split) <;> decide
+  · decide
+
+/-- Structural induction on `candidates : List Nat` proving that the squared norm
+    of `chi4PrimeShellWeights candidates` is non-negative and bounded by `candidates.length` (`5` lines). -/
+theorem chi4PrimeShellWeights_sumSq_le_length (candidates : List Nat) :
+    0 ≤ sumSqList (chi4PrimeShellWeights candidates) ∧
+    sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) := by
+  induction candidates with
+  | nil => decide
+  | cons n ns ih =>
+    have hn := And.intro (sq_nonneg (if isPrime n then chi4 n else 0)) (chi4PrimeWeight_sq_le_one n)
+    dsimp [chi4PrimeShellWeights, sumSqList]; omega
 
 /-- Elementary 2-line binomial square identity `(a - b)^2 = a^2 + b^2 - 2ab`. -/
 theorem sq_sub_expand (a b : Int) :
@@ -238,5 +264,24 @@ theorem grh_ws4_ws5_sobolev_coupled_collar_stabilizes_arbitrary_prime_shells
   dsimp [multiPrimeCollarQuadratic, sobolevBoundaryCollarEnergy]
   omega
 
-end GrhWs4Ws5BoundaryCollarLocalizationAndSobolevSplit
+/-- **Theorem 7 (`grh_ws4_ws5_unbaked_chi4_collar_sobolev_reserve_nonneg`, 4 lines)**:
+    Un-baked first-principles $\chi_4(p)$ prime-shell boundary-collar and Sobolev
+    reserve theorem: proves for all `leftCollar rightCollar : Int` and `candidates : List Nat`
+    that `sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int)`,
+    the Sobolev-coupled collar energy over `chi4PrimeShellWeights candidates` is non-negative,
+    and on the split/inert prime pair `[11, 13]`, `sumWeights (chi4PrimeShellWeights [11, 13]) = 0`
+    so `multiPrimeCollarQuadratic 1 1 (chi4PrimeShellWeights [11, 13]) = 2 > 0`. -/
+theorem grh_ws4_ws5_unbaked_chi4_collar_sobolev_reserve_nonneg
+    (leftCollar rightCollar : Int) (candidates : List Nat) :
+    0 ≤ sumSqList (chi4PrimeShellWeights candidates) ∧
+    sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) ∧
+    0 ≤ multiPrimeCollarQuadratic leftCollar rightCollar (chi4PrimeShellWeights candidates) +
+      sobolevBoundaryCollarEnergy leftCollar (chi4PrimeShellWeights candidates) ∧
+    sumWeights (chi4PrimeShellWeights [11, 13]) = 0 ∧
+    multiPrimeCollarQuadratic 1 1 (chi4PrimeShellWeights [11, 13]) = 2 := by
+  have h_len := chi4PrimeShellWeights_sumSq_le_length candidates
+  have h_sob := grh_ws4_ws5_sobolev_coupled_collar_stabilizes_arbitrary_prime_shells leftCollar rightCollar (chi4PrimeShellWeights candidates)
+  have h_dec : sumWeights (chi4PrimeShellWeights [11, 13]) = 0 ∧ multiPrimeCollarQuadratic 1 1 (chi4PrimeShellWeights [11, 13]) = 2 := by decide
+  exact ⟨h_len.1, h_len.2, h_sob.2, h_dec.1, h_dec.2⟩
 
+end GrhWs4Ws5BoundaryCollarLocalizationAndSobolevSplit

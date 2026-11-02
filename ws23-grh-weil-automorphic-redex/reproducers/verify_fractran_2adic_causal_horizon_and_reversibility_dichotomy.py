@@ -113,6 +113,36 @@ def harmonic_num_scaled(scale: int, n: int) -> int:
     return sum(scale // k for k in range(1, n + 1))
 
 
+def goedel_encode4(r2: int, r3: int, r5: int, r7: int) -> int:
+    return (2**r2) * (3**r3) * (5**r5) * (7**r7)
+
+
+def vp_val(fuel: int, p: int, n: int) -> int:
+    val = 0
+    cur = n
+    for _ in range(fuel):
+        if p >= 2 and cur > 0 and (cur % p) == 0:
+            val += 1
+            cur //= p
+        else:
+            break
+    return val
+
+
+def fractran_step_opt(prog: list[tuple[int, int]], n: int) -> int | None:
+    for num, den in prog:
+        if den > 0 and ((n * num) % den) == 0:
+            return (n * num) // den
+    return None
+
+
+def robin_counterexample_search(limit: int) -> int | None:
+    for n in range(limit, 0, -1):
+        if 60 * sum_divisors(n) > (n + 1) * harmonic_num_scaled(60, n):
+            return n
+    return None
+
+
 def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
     t0 = time.perf_counter()
     res = subprocess.run(
@@ -155,7 +185,7 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
             ]
             max_proof_lines = max(max_proof_lines, len(body_lines))
 
-    # Cross-check all 6 Pillars in Python reference
+    # Cross-check all 8 Pillars in Python reference
     prog_multiprime = [(1, 3), (3, 2)]
     prog_conway_adder = [(2, 3)]
     assert eval_fractran_step(2, prog_multiprime) == 3
@@ -187,16 +217,49 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
     assert harmonic_num_scaled(60, 6) == 147
     assert harmonic_num_scaled(60, 12) == 184
 
+    # Pillar 7: Goedel-Minsky Prime-Register Machine Isomorphism
+    for r2 in range(3):
+        for r3 in range(3):
+            for r5 in range(3):
+                for r7 in range(3):
+                    enc_in = goedel_encode4(r2 + 1, r3, r5 + 1, r7)
+                    enc_out = goedel_encode4(r2, r3 + 2, r5, r7 + 1)
+                    assert fractran_step_opt([(63, 10)], enc_in) == enc_out
+    enc_sample = goedel_encode4(3, 1, 2, 1)
+    assert (
+        vp_val(16, 2, enc_sample),
+        vp_val(16, 3, enc_sample),
+        vp_val(16, 5, enc_sample),
+        vp_val(16, 7, enc_sample),
+    ) == (3, 1, 2, 1)
+    assert fractran_step_opt([(63, 10)], 2) is None
+
+    # Pillar 8: Lagarias-Robin Diophantine Halting Search & chi4PrimeShellWeights
+    assert robin_counterexample_search(120) is None
+
     cap_8_5 = okasaki_pebble_capacity(8, 5)
     assert cap_8_5 == 1287 and cap_8_5 >= 741 >= 710
 
-    has_pillars_5_6 = (
+    has_pillars_5_to_8 = (
         "def conwayPrimeGameProg" in code_no_comments
         and "theorem conway_primegame_first_primes_2_3_5_7_trajectory_exact"
         in code_no_comments
         and "def harmonicNumScaled" in code_no_comments
         and "theorem lagarias_robin_superabundant_sigma_and_harmonic_bounds_exact"
         in code_no_comments
+        and "def goedelEncode4" in code_no_comments
+        and "def vpVal" in code_no_comments
+        and "def minskyStep4" in code_no_comments
+        and "def fractranStep" in code_no_comments
+        and "theorem goedel_minsky_fractran_step_homomorphism_universal"
+        in code_no_comments
+        and "def chi4" in code_no_comments
+        and "def chi4PrimeShellWeights" in code_no_comments
+        and "theorem chi4PrimeShellWeights_sumSq_le_length" in code_no_comments
+        and "def robinCounterexampleSearch" in code_no_comments
+        and "theorem lagarias_robin_diophantine_halting_search_zero_counterexamples_to_120"
+        in code_no_comments
+        and "theorem fractran_2adic_causal_horizon_master_closure" in code_no_comments
     )
 
     passed = (
@@ -209,8 +272,8 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         and parameterless_defs == 0
         and uninterpreted_ineq_hyps == 0
         and max_proof_lines <= 5
-        and len(thm_blocks) >= 10
-        and has_pillars_5_6
+        and len(thm_blocks) >= 12
+        and has_pillars_5_to_8
     )
     return {
         "status": "PASS" if passed else "FAIL",
@@ -226,6 +289,8 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         "conway_primegame_primes_verified": [2, 3, 5, 7],
         "conway_primegame_cumulative_steps": [19, 69, 281, 710],
         "lagarias_robin_superabundant_ladder": dict(sa_ladder),
+        "goedel_minsky_homomorphism_verified": True,
+        "robin_counterexample_search_120": None,
         "okasaki_pebble_capacity_8_5": cap_8_5,
         "elapsed_s": round(elapsed_s, 3),
     }
