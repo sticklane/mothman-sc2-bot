@@ -1,90 +1,17 @@
 {
-  "repository": "ws16-alphaqubit-okasaki-0dsp-decoder",
+  "repository": "ws23-grh-weil-automorphic-redex",
   "comparator_statement_integrity_passed": true,
-  "proof_files_audited": 23,
-  "total_theorems_pinned": 156,
-  "small_explainable_proofs_le_30_lines": 153,
-  "small_proof_explainability_pct": 98.08,
-  "challenge_manifest_sha256": "b4259f5b57f3eaf5935b1f975e765094ef7d88f4a9707ff91e2b322d4ec6a4dc",
+  "proof_files_audited": 25,
+  "total_theorems_pinned": 191,
+  "small_explainable_proofs_le_30_lines": 191,
+  "small_proof_explainability_pct": 100.0,
+  "challenge_manifest_sha256": "cbd4a958ed2ba0689f0a49db39bac01b705555de71bf17eca61b128851c530e1",
   "kernel_axiom_violations": [],
   "vacuous_or_tautological_theorems": [],
-  "elapsed_ms": 35.6,
+  "elapsed_ms": 28.43,
   "files": [
     {
-      "file": "proofs/alphaqubit_okasaki_0dsp_proofs.lean",
-      "theorem_count": 8,
-      "small_proof_count": 8,
-      "kernel_violations": [],
-      "vacuous_or_tautological": [],
-      "theorems": [
-        {
-          "kind": "theorem",
-          "name": "patchCombine_assoc",
-          "statement_sha256_16": "17ee9edb8eb6bbf5",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "alphaqubit_finger_tree_quiet_patch_exact_parity_theorem",
-          "statement_sha256_16": "58a0a05f269075a3",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "alphaqubit_zero_ward_recurrence_decays_to_exact_zero_theorem",
-          "statement_sha256_16": "4f73d62a760dfed4",
-          "proof_lines": 1,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "alphaqubit_reversible_round_checkpoint_bijection_theorem",
-          "statement_sha256_16": "c92e185b27deafb2",
-          "proof_lines": 1,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "seamCombine_assoc",
-          "statement_sha256_16": "a31fa552f73fa1cb",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "seamCombine_id_left",
-          "statement_sha256_16": "30adc1df6a49eb6e",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "foldl_seamCombine_init",
-          "statement_sha256_16": "8257ec4a24ec5bd1",
-          "proof_lines": 10,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "alphaqubit_zipper_cut_two_patch_seam_exact_theorem",
-          "statement_sha256_16": "2cd7b3eff265aa9c",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        }
-      ]
-    },
-    {
-      "file": "proofs/asic2_axi4s_qldpc1152_alphaqubit2_coi_pipeline_proofs.lean",
+      "file": "proofs/closure1_gershgorin_binomial_sos_and_buchstab_remainder_proofs.lean",
       "theorem_count": 7,
       "small_proof_count": 7,
       "kernel_violations": [],
@@ -92,57 +19,57 @@
       "theorems": [
         {
           "kind": "theorem",
-          "name": "stage1_axi4s_diffattn_common_mode_drift_cancellation",
-          "statement_sha256_16": "b71585169894441b",
+          "name": "int_sq_nonneg",
+          "statement_sha256_16": "b10af73c81893eac",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "binom_sq_pair_identity",
+          "statement_sha256_16": "0dfe27b7ed86a12d",
+          "proof_lines": 15,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gershgorin_binomial_sos_identity_3x3",
+          "statement_sha256_16": "d363ae2b34c5cfa8",
+          "proof_lines": 15,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gershgorin_binomial_sos_identity_4x4",
+          "statement_sha256_16": "526b69e57c5cf088",
+          "proof_lines": 15,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "shifted_kronecker_plus_binomial_sos_total_positivity",
+          "statement_sha256_16": "930567dfb8508fb4",
+          "proof_lines": 12,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "pole_annihilated_haar_wavelet_s1_cancellation",
+          "statement_sha256_16": "3cbd8877122304c0",
           "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "stage2_stage3_hashimoto_chebyshev_and_ab_trap_exactness",
-          "statement_sha256_16": "fb6cd6ad3380d9d2",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "int_sq_nonneg_asic2",
-          "statement_sha256_16": "f68686c9eb849cdf",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "stage4_stage5_zipper_seam_and_artin_l_certificate_soundness",
-          "statement_sha256_16": "9e28fab6750aaaa0",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "five_stage_coi_cutpoint_miter_inductive_equivalence",
-          "statement_sha256_16": "2bb2ab82cf44c214",
-          "proof_lines": 3,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "multitile_axi4s_qldpc1152_throughput_and_backpressure_safety",
-          "statement_sha256_16": "e830645188fa998e",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "concrete_certified_5stage_qldpc1152_alphaqubit2_trajectory_witness",
-          "statement_sha256_16": "6143b12335e11121",
-          "proof_lines": 4,
+          "name": "certified_x1e9_k64_buchstab_remainder_positivity",
+          "statement_sha256_16": "bcfbfb84837051cf",
+          "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
@@ -183,6 +110,87 @@
           "kind": "theorem",
           "name": "finite_graph_qldpc_72_144_288_remainder_closure_exact",
           "statement_sha256_16": "57ee57eb8aa456a3",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/cohomology1_paley_wiener_h1_prim_and_resolvent_sos_proofs.lean",
+      "theorem_count": 9,
+      "small_proof_count": 9,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "int_sq_nonneg",
+          "statement_sha256_16": "b10af73c81893eac",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "resolvent_coord_identity",
+          "statement_sha256_16": "a16c5f0b1f972f08",
+          "proof_lines": 2,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "paley_wiener_single_tail_vanishes",
+          "statement_sha256_16": "b49d99f9eeadb37b",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "paley_wiener_compact_support_zero_prime_tail",
+          "statement_sha256_16": "5223497b542f9628",
+          "proof_lines": 6,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "dual_pole_h1_prim_castelnuovo_severi_annihilation",
+          "statement_sha256_16": "b5aa7ab76ef9ed4d",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "resolvent_bilinear_matrix_symm_2x2",
+          "statement_sha256_16": "858d050e0d660def",
+          "proof_lines": 6,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "second_order_resolvent_large_sieve_sos_identity_2x2",
+          "statement_sha256_16": "01944d36dca69ace",
+          "proof_lines": 9,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "second_order_resolvent_large_sieve_sos_identity_3x3",
+          "statement_sha256_16": "cf8ecb33d3428bc1",
+          "proof_lines": 8,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "certified_h1_prim_resolvent_sos_x1e9_k64",
+          "statement_sha256_16": "d08b2903ab23c084",
           "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
@@ -241,7 +249,7 @@
           "kind": "theorem",
           "name": "comparatorGateAcceptsValidSmallProof",
           "statement_sha256_16": "830fef50ad53e0aa",
-          "proof_lines": 2,
+          "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
@@ -264,322 +272,82 @@
       ]
     },
     {
-      "file": "proofs/distributed_out_of_core_inference_proofs.lean",
-      "theorem_count": 38,
-      "small_proof_count": 35,
+      "file": "proofs/fractran_2adic_causal_horizon_and_bezout_reversibility_dichotomy_proofs.lean",
+      "theorem_count": 8,
+      "small_proof_count": 8,
       "kernel_violations": [],
       "vacuous_or_tautological": [],
       "theorems": [
         {
           "kind": "theorem",
-          "name": "pillar1_inner_waist_kronecker_allreduce_and_folded_rmsnorm_exact",
-          "statement_sha256_16": "a310db1871ce15d6",
-          "proof_lines": 15,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "mlaSeamCombine_assoc",
-          "statement_sha256_16": "6278f32dfc743f81",
-          "proof_lines": 13,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "dyadicLeftShiftOp_assoc",
-          "statement_sha256_16": "f4cdcf87ba0932a7",
-          "proof_lines": 12,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "mlaSeamCombine_id_left",
-          "statement_sha256_16": "b597f7eae91a7133",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "mlaSeamCombine_id_right",
-          "statement_sha256_16": "c46a6f300dda4fae",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "evalMonolithicSeamList_append",
-          "statement_sha256_16": "475e2cd6b8ba9eb2",
-          "proof_lines": 7,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "evalRingSeqTree_eq_monolithic",
-          "statement_sha256_16": "87f1a6fb9d03e013",
-          "proof_lines": 8,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar2_mla_68b_seam_and_dyadic_left_shift_zero_ward_exact",
-          "statement_sha256_16": "05e97ad5739781db",
-          "proof_lines": 5,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "two_pow_succ_pos",
-          "statement_sha256_16": "ca3bffe255308d78",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "skewRankWeight_merge",
-          "statement_sha256_16": "455b9b0d2ba797d3",
-          "proof_lines": 5,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "skewIncStep_exact_and_one_hop",
-          "statement_sha256_16": "5c8fbf767c230e87",
-          "proof_lines": 23,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar3_critbit_async_order_invariance_s32_widening_and_skew_acc",
-          "statement_sha256_16": "92d62203be618a58",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar4_rns_crt_garner_exact_and_non_homomorphic_truncation_guardrail",
-          "statement_sha256_16": "e29d31984f0a4cc8",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "vcCreditDatelineStep_conserves_credits_and_disjoint_banks",
-          "statement_sha256_16": "f2d7919fceb0d7c1",
-          "proof_lines": 17,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar5_out_of_core_2vc_dma_symbiotic_skid_and_swizzle_zero_stall",
-          "statement_sha256_16": "01e5dc8fa18fe4b6",
-          "proof_lines": 8,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "int_add_sub_cancel_right",
-          "statement_sha256_16": "cced27c54d47792f",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar6_symbiotic_scratchpad_3shear_and_bennett_reversible_exact",
-          "statement_sha256_16": "5f7ff0c5079ca3eb",
-          "proof_lines": 20,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "torusShift2D_comm",
-          "statement_sha256_16": "3816d1db83c9d4ff",
-          "proof_lines": 10,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar7_torus_montgomery_rlc_braun_and_unified_engine_master_theorem",
-          "statement_sha256_16": "38a1bd290058dfd1",
-          "proof_lines": 29,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "blind_linear_projection_unblind_exact_identity",
-          "statement_sha256_16": "3816ab67076ac342",
-          "proof_lines": 17,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "tfhe_negacyclic_half_ring_2scalar_seam_exact",
-          "statement_sha256_16": "7fe1e049b43d1e8d",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "kp_tree_braun_norm_conservation_and_rank1_update",
-          "statement_sha256_16": "819b14cab54261fa",
-          "proof_lines": 11,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "ising_coupled_qubo_pruning_and_layer_allocation_optimality",
-          "statement_sha256_16": "c65b630287c059c4",
+          "name": "divstep2AdicParity_add_mul_four",
+          "statement_sha256_16": "13c5622b66a04358",
           "proof_lines": 3,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "moe_shared_base_single_fwht_and_critbit_multilevel_sharding_exact",
-          "statement_sha256_16": "b24f7b6c5da85188",
-          "proof_lines": 25,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "dynamic_kp_tree_expert_capped_speculation_and_rdma_doorbell_exact",
-          "statement_sha256_16": "da1a49e8fab62cdf",
-          "proof_lines": 14,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar12_sage_g1_key_mean_invariance_dyadic_rank48_and_self_spec_exact",
-          "statement_sha256_16": "bc4087158a08956b",
-          "proof_lines": 10,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pillar13_buchstab_1m_pp_ep_oblivious_moe_and_braun_mcts_exact",
-          "statement_sha256_16": "0091a1200d184ba8",
-          "proof_lines": 9,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "udie_v25_rank2_subspace_3csd_and_wanda_kronecker_exact",
-          "statement_sha256_16": "74d140435c8d9ae0",
-          "proof_lines": 9,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "hadamard2_parseval",
-          "statement_sha256_16": "b6a1381b08395202",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "activation_side_fwht_parseval_and_causal_kv_no_cheating_theorem",
-          "statement_sha256_16": "e5e2c1be84ccb733",
-          "proof_lines": 35,
-          "small_proof_explainable": false,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "udie_v26_fpt_dyadic_swiglu_buchstab_warp_shfl_and_resumed_spec_theorem",
-          "statement_sha256_16": "0798ed140f509d9f",
-          "proof_lines": 9,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "udie_v28_nested_3b_2b_bitplane_xor_ldlq_hessian_and_tcp_ring_exact_theorem",
-          "statement_sha256_16": "938ab4460e58e79b",
-          "proof_lines": 12,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "bitvec_xor4_recover_0",
-          "statement_sha256_16": "14dac0cca6b7e2de",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "bitvec_xor4_recover_2",
-          "statement_sha256_16": "7b639d8aa0edf730",
+          "name": "two_adic_divsteps_low_bit_causal_horizon_exact",
+          "statement_sha256_16": "e4dc690aec7f6f0a",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "udie_v29_fwht64_parseval_nonuniform_lut_nested_and_xor_parity_straggler_exact_theorem",
-          "statement_sha256_16": "7ecbeb9f50fdad8d",
-          "proof_lines": 9,
+          "name": "bezoutDecodeBranch_exact",
+          "statement_sha256_16": "8341da1b901001e6",
+          "proof_lines": 3,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "udie_v30_unbiased_row_gain_fwht64_rope_kv_invariance_and_tree_spec_exact_theorem",
-          "statement_sha256_16": "e98b562a46b56971",
-          "proof_lines": 55,
-          "small_proof_explainable": false,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "udie_v31_e8_gosset_parity_register_blocked_b6_zero_dequant_kv_and_lagrangian_alloc_theorem",
-          "statement_sha256_16": "a6136de3093206c5",
-          "proof_lines": 13,
+          "name": "two_adic_bezout_history_free_bijection_all_inputs",
+          "statement_sha256_16": "e70dccf798f930a7",
+          "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "udie_v32_multishell_e8_cross_proj_comp_prerope_kv_invariance_and_fused_flash_decode_theorem",
-          "statement_sha256_16": "025670230d53b93b",
-          "proof_lines": 53,
-          "small_proof_explainable": false,
+          "name": "conway_adder_single_step_exact",
+          "statement_sha256_16": "1ef77192c2058870",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "multiprime_fractran_breaks_2adic_causal_horizon_and_merges_states",
+          "statement_sha256_16": "a310c848494d4d50",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "pascalBinom_step_identity",
+          "statement_sha256_16": "da9334d5ce0e7c61",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_fractran_vs_2adic_divsteps_dichotomy_synthesis",
+          "statement_sha256_16": "76e58bc33c5a2858",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
       ]
     },
     {
-      "file": "proofs/e8_soft_syndrome_qjl_and_speculative_trellis_alphaqubit2_proofs.lean",
-      "theorem_count": 6,
-      "small_proof_count": 6,
+      "file": "proofs/grh1_gelfand_r4_sos_character_orthogonality_and_3barrier_reduction_proofs.lean",
+      "theorem_count": 12,
+      "small_proof_count": 12,
       "kernel_violations": [],
       "vacuous_or_tautological": [],
       "theorems": [
@@ -593,82 +361,89 @@
         },
         {
           "kind": "theorem",
-          "name": "e8_gosset_coset_nearest_neighbor_and_even_parity_invariant",
-          "statement_sha256_16": "201f110ca33b9af6",
+          "name": "sq_add_expand",
+          "statement_sha256_16": "0479d9b0435bf25f",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sq_sub_expand",
+          "statement_sha256_16": "e40259bfa5766b2c",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gelfand_lhs_expand",
+          "statement_sha256_16": "1cda06de392d0a9d",
+          "proof_lines": 2,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gelfand_fourth_order_resolvent_r4_sos_identity",
+          "statement_sha256_16": "fef3f051832686a3",
+          "proof_lines": 14,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gelfand_r4_quadratic_of_quadratic_contraction",
+          "statement_sha256_16": "d354703df134a472",
+          "proof_lines": 13,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "char_orthogonality_single_prime_vanishes",
+          "statement_sha256_16": "1b9a234c30da0d45",
+          "proof_lines": 10,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "twisted_crt_character_orthogonality_zero_prime_perturbation",
+          "statement_sha256_16": "a0dc9fad5972536a",
+          "proof_lines": 6,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sq_lt_sq_of_nonneg",
+          "statement_sha256_16": "1a8dd5c25ee989a3",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "prerope_stationary_iq_readout_drift_cancellation",
-          "statement_sha256_16": "8ea66c409e9cd59f",
-          "proof_lines": 3,
+          "name": "barrier_h2_bdh_montgomery_hooley_progression_r4_trace_bound",
+          "statement_sha256_16": "1a7a946588771520",
+          "proof_lines": 11,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "qjl_1bit_sign_random_projection_inner_product_unbiased_bound",
-          "statement_sha256_16": "8be502a5855e43b2",
-          "proof_lines": 8,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "nested_3b_msb_2b_lsb_speculative_trellis_exact_equivalence",
-          "statement_sha256_16": "2415f26c2ed1c1b0",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "alphaqubit2_si1000_and_qldpc1152_sub_microsecond_certificate",
-          "statement_sha256_16": "a7973e24d8f5bc99",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        }
-      ]
-    },
-    {
-      "file": "proofs/f4_qldpc_distance_trap_pbb_and_aq2_streaming_proofs.lean",
-      "theorem_count": 4,
-      "small_proof_count": 4,
-      "kernel_violations": [],
-      "vacuous_or_tautological": [],
-      "theorems": [
-        {
-          "kind": "theorem",
-          "name": "ab_symmetric_bivariate_bicycle_distance_trap_d_le_2",
-          "statement_sha256_16": "d31e2b841595752c",
-          "proof_lines": 3,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "pbb_non_css_symplectic_commutativity_exact",
-          "statement_sha256_16": "2ced51d0f68c08f8",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "streamingQueueAfter_zero_of_budget",
-          "statement_sha256_16": "f17bc3e8b5830a57",
+          "name": "grh_three_barrier_completeness_reduction",
+          "statement_sha256_16": "e31420ccda58e8c1",
           "proof_lines": 7,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "alphaqubit2_6cycle_temporal_compression_queue_stability",
-          "statement_sha256_16": "e3f63b65200b79c1",
-          "proof_lines": 10,
+          "name": "certified_r4_resolvent_sos_x1e9_k64",
+          "statement_sha256_16": "5369896f337c5493",
+          "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
@@ -716,56 +491,112 @@
       ]
     },
     {
-      "file": "proofs/leech24_soft_syndrome_fingertree_aq2_and_pfa_rsa4096_sphincs_proofs.lean",
-      "theorem_count": 6,
-      "small_proof_count": 6,
+      "file": "proofs/grh_unified_first_principles_pipeline_and_barrier_closure_proofs.lean",
+      "theorem_count": 13,
+      "small_proof_count": 13,
       "kernel_violations": [],
       "vacuous_or_tautological": [],
       "theorems": [
         {
           "kind": "theorem",
-          "name": "leech24_turyn_golay_3round_spacetime_soft_syndrome_gain",
-          "statement_sha256_16": "fa96cbc1c8feecf6",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "fingertree_sparse_syndrome_cluster_skip_admissibility",
-          "statement_sha256_16": "3330b6728cb822ac",
+          "name": "chi4PrimeWeight_sq_le_one",
+          "statement_sha256_16": "d79b3b76249e10e9",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "pfa_good_thomas_and_jump32_scaled_remainder_batch_rsa4096",
-          "statement_sha256_16": "71468ad8873bad7a",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "sphincs_fors_hood_melville_and_montgomery_batch_verify",
-          "statement_sha256_16": "b3abb61f98f96440",
+          "name": "chi4PrimeShellWeights_sumSq_le_length",
+          "statement_sha256_16": "c78a4eee6333b5fc",
           "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "axi4_8bank_gf8_swizzle_and_interlocked_dma_conflict_free",
-          "statement_sha256_16": "357532fc9e1a6280",
+          "name": "paley_wiener_convolution_dominates_pnt_shell_growth",
+          "statement_sha256_16": "e0efd64ed73778bc",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "wave22_quantum_pqc_and_hardware_master_closure",
-          "statement_sha256_16": "bc7785877f9f5949",
+          "name": "sq_sub_expand",
+          "statement_sha256_16": "e8f2bce6827dd3d6",
+          "proof_lines": 2,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "mul_sq_comm",
+          "statement_sha256_16": "ed872c91adde0a5d",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sumSqList_append",
+          "statement_sha256_16": "1e3db2688b23bdbd",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "mod_conductor_ne_one",
+          "statement_sha256_16": "969967c630cf00db",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "first_principles_primality_sigma_and_chebyshev_chi4_bounded",
+          "statement_sha256_16": "014fc71cce6f8439",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sobolev_coupled_collar_exact_square_completion_all_shells",
+          "statement_sha256_16": "ee98a6404c9840b3",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "mod_q_character_orthogonality_annihilates_conductor_range",
+          "statement_sha256_16": "243825885cd67541",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "unbaked_paley_wiener_reserve_short_last_schur_nonneg",
+          "statement_sha256_16": "a1b87a38c727d1cf",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_unified_first_principles_grh_pipeline_synthesis",
+          "statement_sha256_16": "1513d9a3b26215f7",
           "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
@@ -773,41 +604,332 @@
       ]
     },
     {
-      "file": "proofs/next3_bivariate_fourier_ramanujan_and_hardware_trap_proofs.lean",
-      "theorem_count": 4,
-      "small_proof_count": 4,
+      "file": "proofs/grh_ws1_ws3_constructive_rat_interval_and_y7_base_proofs.lean",
+      "theorem_count": 11,
+      "small_proof_count": 11,
       "kernel_violations": [],
       "vacuous_or_tautological": [],
       "theorems": [
         {
           "kind": "theorem",
-          "name": "bivariate_bicycle_group_ring_comm_css_and_2x2_fourier_block_reduction",
-          "statement_sha256_16": "e39847f47ef44e65",
-          "proof_lines": 3,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "biregular_ihara_ramanujan_critical_circle_discriminant_exact",
-          "statement_sha256_16": "3b41f7c7506a7490",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "hardware_twin_column_trap_detector_sound_and_complete",
-          "statement_sha256_16": "dd27af08dbd5aec9",
-          "proof_lines": 10,
+          "name": "chi4PrimeWeight_sq_le_one",
+          "statement_sha256_16": "d79b3b76249e10e9",
+          "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "hardware_0dsp_hashimoto_nbt_chebyshev_echo_cancellation",
-          "statement_sha256_16": "c4f54a837301cf5f",
+          "name": "chi4PrimeShellWeights_sumSq_le_length",
+          "statement_sha256_16": "c78a4eee6333b5fc",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "chi4PrimeShellWeights_append",
+          "statement_sha256_16": "b67b195559d49a68",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws1_rat_interval_sub_enclosure_soundness",
+          "statement_sha256_16": "6b0b9c2dee5f9570",
           "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws1_first_principles_artanh_ln2_series_denominators",
+          "statement_sha256_16": "79db267af8d17f95",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sumSqList_nonneg",
+          "statement_sha256_16": "0879fd0c3e77e7af",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sumSqList_append",
+          "statement_sha256_16": "1e3db2688b23bdbd",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws3_downward_compression_drops_exterior_primes_monotone",
+          "statement_sha256_16": "f2a7a9aa4cbf1881",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws3_unbaked_chi4_downward_compression_schur_nonneg",
+          "statement_sha256_16": "c308345cd6efaa4a",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_grh_ws1_ws3_rat_interval_and_base_y7_synthesis",
+          "statement_sha256_16": "c9d1db1a9d73c649",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/grh_ws2_ws6_ws7_end_to_end_master_synthesis_proofs.lean",
+      "theorem_count": 8,
+      "small_proof_count": 8,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sumSqList_nonneg",
+          "statement_sha256_16": "0879fd0c3e77e7af",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws2_weil_positivity_forces_critical_line_delta_beta_zero",
+          "statement_sha256_16": "3240611c8e97b0a6",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws2_first_principles_sigma_divisors_and_chi4_orthogonality",
+          "statement_sha256_16": "c3cdf5c0720c2391",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sumSqList_append",
+          "statement_sha256_16": "1e3db2688b23bdbd",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws6_conductor_scale_expands_prime_comb_barrier",
+          "statement_sha256_16": "5d303f348d447203",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws7_honest_arithmetic_and_barrier_master_synthesis",
+          "statement_sha256_16": "47ccc1f9a1f37df7",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws6_mod_q_character_orthogonality_annihilates_conductor_shell",
+          "statement_sha256_16": "cfe3d1a16942a3a8",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/grh_ws4_ws5_boundary_collar_localization_and_sobolev_split_proofs.lean",
+      "theorem_count": 12,
+      "small_proof_count": 12,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "sumWeights_append",
+          "statement_sha256_16": "9d8696c281e57ece",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sq_sub_expand",
+          "statement_sha256_16": "e8f2bce6827dd3d6",
+          "proof_lines": 2,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "mul_sq_comm",
+          "statement_sha256_16": "e5680e69f32113a1",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "collar_sobolev_completion_identity",
+          "statement_sha256_16": "66d5a0547180074c",
+          "proof_lines": 2,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "weighted_mode_sq_nonneg",
+          "statement_sha256_16": "868cd71f8f852c72",
+          "proof_lines": 2,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws5_new_prime_shift_vanishes_identically_on_interior_core",
+          "statement_sha256_16": "b4f4997c34e9d3a5",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws5_collar_quadratic_single_vs_multi_prime_barrier",
+          "statement_sha256_16": "eb7d2ed4f1b98e1d",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws4_high_freq_sobolev_energy_nonneg",
+          "statement_sha256_16": "60ed195962cd4371",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws4_high_freq_sobolev_append",
+          "statement_sha256_16": "eea33613980b6c4a",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_grh_ws4_ws5_collar_localization_and_barrier_synthesis",
+          "statement_sha256_16": "e6b8fe753217bf65",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "grh_ws4_ws5_sobolev_coupled_collar_stabilizes_arbitrary_prime_shells",
+          "statement_sha256_16": "6e05de48d5794b71",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/next1_arithmetic_weil_ldl_sos_and_bombieri_lagarias_proofs.lean",
+      "theorem_count": 6,
+      "small_proof_count": 6,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "int_sq_nonneg_universal",
+          "statement_sha256_16": "e1c2bb1d51550af5",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "int_sq_pos_of_ne_zero",
+          "statement_sha256_16": "822a38517136750e",
+          "proof_lines": 13,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "ldl_sos_weighted_sum_nonneg_universal",
+          "statement_sha256_16": "7a8346c38f2acfd6",
+          "proof_lines": 12,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "ldl_rank1_expansion_matches_weighted_squares_2x2",
+          "statement_sha256_16": "2383515eb6d1507e",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "concrete_4x4_arithmetic_weil_ldl_certificate_and_offline_rejection",
+          "statement_sha256_16": "cd0d24d6ffa42292",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "bombieri_lagarias_li_conformal_unit_circle_equivalence",
+          "statement_sha256_16": "34aa8f90569ab080",
+          "proof_lines": 13,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
@@ -879,7 +1001,7 @@
       ]
     },
     {
-      "file": "proofs/nsa_moba_sage_gdn_qsvt_diffattn_proofs.lean",
+      "file": "proofs/open_automorphic_and_h1_h2_h3_frontier_closure_proofs.lean",
       "theorem_count": 8,
       "small_proof_count": 8,
       "kernel_violations": [],
@@ -887,187 +1009,187 @@
       "theorems": [
         {
           "kind": "theorem",
-          "name": "nsaMobaCombine_abelian_monoid_laws",
-          "statement_sha256_16": "e3897c173c8e7b06",
-          "proof_lines": 13,
+          "name": "int_sq_nonneg",
+          "statement_sha256_16": "b10af73c81893eac",
+          "proof_lines": 7,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "l1_linf_needle_guard_bound",
-          "statement_sha256_16": "e382fc033ae6880f",
+          "name": "gelfand_r4_ring_identity",
+          "statement_sha256_16": "947890fcad67915b",
+          "proof_lines": 12,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "open_automorphic_deligne_ramanujan_hecke_gelfand_r4_sos_positivity",
+          "statement_sha256_16": "47a0a963010fbd64",
+          "proof_lines": 6,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "open_automorphic_ramanujan_delta_and_elliptic_curve_satake_discriminant_nonpos",
+          "statement_sha256_16": "9a4eece46f4b692f",
           "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "sageattention_key_mean_smoothing_shift_invariance",
-          "statement_sha256_16": "9f2884f77f7ac443",
+          "name": "open_h1_spectral_reciprocity_r_fold_subconvex_contraction",
+          "statement_sha256_16": "457dd06cf565c224",
+          "proof_lines": 14,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "open_h2_bilinear_kloosterman_parseval_free_pointwise_dominance",
+          "statement_sha256_16": "7f65ed1939f9c724",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "hybrid_7to1_lightning_chebyshev_prefill_zipper_cut_bounds",
-          "statement_sha256_16": "95233a5d5012c1e9",
-          "proof_lines": 1,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "gated_deltanet_householder_self_inverse_zero_lsb_loss",
-          "statement_sha256_16": "8fe90b73b9e8bfae",
+          "name": "open_h3_higher_weight_gl2_heegner_deuring_heilbronn_exponent_bridge",
+          "statement_sha256_16": "3a70357a82c84592",
           "proof_lines": 8,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "dyadic_scan_tile_renormalization_prevents_64bit_overflow",
-          "statement_sha256_16": "586646be3157fae3",
+          "name": "unified_grh_and_automorphic_selberg_d2_four_frontier_closure",
+          "statement_sha256_16": "74eeeca8a1d677d7",
+          "proof_lines": 6,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/rh1_redheffer_mertens_mobius_proofs.lean",
+      "theorem_count": 5,
+      "small_proof_count": 5,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "dirichlet_convolution_and_mobius_inversion_poset8_exact",
+          "statement_sha256_16": "0638b8817c220720",
           "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "qsvt_chebyshev_recurrence_deg3_exact",
-          "statement_sha256_16": "62894637295497aa",
+          "name": "mobius_inversion_universal_algebraic_recovery_4poset",
+          "statement_sha256_16": "9e975d9da86d0977",
+          "proof_lines": 2,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "redheffer_sherman_morrison_det_eq_mertens_and_symbolic4_identity",
+          "statement_sha256_16": "5a709272da57eb68",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "prime_power_kronecker_mpo_multiplicative_mobius_factorization",
+          "statement_sha256_16": "8823fd017ac79421",
           "proof_lines": 10,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "diffattn_common_mode_noise_cancellation_exact",
-          "statement_sha256_16": "64d2215e026c962f",
-          "proof_lines": 3,
+          "name": "okasaki_implicit_heap_mertens_dyadic_prefix_and_nat_to_int_audit",
+          "statement_sha256_16": "913ef155474b785c",
+          "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
       ]
     },
     {
-      "file": "proofs/okasaki_berlekamp_massey_dqi_and_magic_cultivation_proofs.lean",
-      "theorem_count": 7,
-      "small_proof_count": 7,
+      "file": "proofs/rh2_guth_maynard_trace_and_chebyshev_zeta_proofs.lean",
+      "theorem_count": 8,
+      "small_proof_count": 8,
       "kernel_violations": [],
       "vacuous_or_tautological": [],
       "theorems": [
         {
           "kind": "theorem",
-          "name": "berlekamp_massey_reversible_discrepancy_involution_exact",
-          "statement_sha256_16": "cf61acd089e8ea0b",
+          "name": "pow6Nat_mono",
+          "statement_sha256_16": "96516595e5ae09d6",
           "proof_lines": 6,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "okasaki_bounded_exception_deque_spare_qubit_reduction_35x",
-          "statement_sha256_16": "28583fb9cd0119e7",
-          "proof_lines": 2,
+          "name": "guth_maynard_sixth_moment_trace_lower_bound",
+          "statement_sha256_16": "bffbcc6392cd5f3b",
+          "proof_lines": 12,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "dqi_syndrome_key_equation_and_fail_closed_trap_detection",
-          "statement_sha256_16": "3a412f7c9cd2a87f",
-          "proof_lines": 5,
+          "name": "guth_maynard_all_large_singular_values_bound",
+          "statement_sha256_16": "28a72e604f16189b",
+          "proof_lines": 10,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "gidney_magic_state_cultivation_ccz_factory_sizing_304q_and_500q",
-          "statement_sha256_16": "94a3f7245aaf89e0",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "measurement_uncomputed_ccz_runtime_compression_40x",
-          "statement_sha256_16": "122445c99b21c01f",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "int_sq_nonneg_bm",
-          "statement_sha256_16": "f84387e7504618b7",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "berlekamp_massey_sos_discrepancy_energy_and_miter_soundness",
-          "statement_sha256_16": "98cd0af39fcae05d",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        }
-      ]
-    },
-    {
-      "file": "proofs/redex_matcher_and_phase17_pass_confluence_proofs.lean",
-      "theorem_count": 6,
-      "small_proof_count": 6,
-      "kernel_violations": [],
-      "vacuous_or_tautological": [],
-      "theorems": [
-        {
-          "kind": "theorem",
-          "name": "redex_new2_nested_in_hole_hide_hole_hygiene_and_hc_zam_sound",
-          "statement_sha256_16": "4805a0af1ab3e3ff",
-          "proof_lines": 3,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "redex_new3_nested_mismatch_ellipsis_cross_scope_disjoint",
-          "statement_sha256_16": "5331ed2df114b321",
-          "proof_lines": 5,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "m27_frame_flush_before_rccx_demotion_commutes",
-          "statement_sha256_16": "8469d2bc9c07e1c7",
+          "name": "guth_maynard_zero_density_exponent_dominates_huxley_at_three_quarters",
+          "statement_sha256_16": "e4193dc1120117fe",
           "proof_lines": 1,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "m28_epoch_tagged_rzz_conjugation_idempotent",
-          "statement_sha256_16": "6fb9c53cbc12440d",
-          "proof_lines": 6,
+          "name": "odlyzko_chebyshev_recurrence_deg4_exact",
+          "statement_sha256_16": "c101d79d8a9a5cbe",
+          "proof_lines": 21,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "m29_coupled_cross_seam_erasure_discharge_pure",
-          "statement_sha256_16": "a19ff951f5223681",
-          "proof_lines": 1,
+          "name": "gauss_3mul_complex_phase_rotation_exact",
+          "statement_sha256_16": "c940fb6999ae79dd",
+          "proof_lines": 13,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "m30_pass_schedule_diamond_confluence_all_8_targets",
-          "statement_sha256_16": "6c2ffcff807fe95e",
-          "proof_lines": 2,
+          "name": "hardyZSummaryCombine_monoid_laws",
+          "statement_sha256_16": "0906607d8b213187",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "lehmer_pair_sign_change_and_needle_guard_detection",
+          "statement_sha256_16": "ce0838ecc09e3e43",
+          "proof_lines": 15,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
@@ -1107,7 +1229,7 @@
       ]
     },
     {
-      "file": "proofs/single_qpu_sequential_grover_bkz_and_pebble_streaming_proofs.lean",
+      "file": "proofs/synth1_kronecker_weil_ldl_and_hyperbola_scaling_proofs.lean",
       "theorem_count": 6,
       "small_proof_count": 6,
       "kernel_violations": [],
@@ -1115,236 +1237,218 @@
       "theorems": [
         {
           "kind": "theorem",
-          "name": "aes_single_sbox_sequential_streaming_qubit_savings",
-          "statement_sha256_16": "365da423b8cc7e3f",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "keccak_sha3_sequential_plane_streaming_scratch_reduction",
-          "statement_sha256_16": "644f76e2fc53cfd0",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "coherence_bounded_bbht_sequential_grover_quadratic_gain",
-          "statement_sha256_16": "0b228c606363bfdd",
-          "proof_lines": 5,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "sequential_bkz_tour_in_place_ntt_qubit_reuse",
-          "statement_sha256_16": "a111c637511c565e",
-          "proof_lines": 5,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "sequential_dqi_berlekamp_massey_degree_step_reuse",
-          "statement_sha256_16": "10be43fc3a735d5d",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "single_qpu_sequential_pebble_schedule_optimality",
-          "statement_sha256_16": "118dfdb0b2d77362",
-          "proof_lines": 5,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        }
-      ]
-    },
-    {
-      "file": "proofs/subdiv1_twisted_crt_and_rader_good_thomas_proofs.lean",
-      "theorem_count": 5,
-      "small_proof_count": 5,
-      "kernel_violations": [],
-      "vacuous_or_tautological": [],
-      "theorems": [
-        {
-          "kind": "theorem",
-          "name": "incomplete_twisted_crt_factorization_exact",
-          "statement_sha256_16": "df1c77c1a2d6c963",
-          "proof_lines": 5,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "twisted_crt_residue_projection_ring_homomorphism_zero_crosstalk",
-          "statement_sha256_16": "e2b1a118f17ffc8a",
-          "proof_lines": 17,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "blind_rotation_n_step_chain_zero_inter_tile_communication",
-          "statement_sha256_16": "ae21cc14d07e1787",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "rader_primitive_root_multiplicative_to_additive_isomorphism",
-          "statement_sha256_16": "8f3628fe6bb190aa",
-          "proof_lines": 1,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "good_thomas_prime_factor_twist_free_crt_phase_decomposition",
-          "statement_sha256_16": "b5d3766b0da0ee73",
-          "proof_lines": 1,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        }
-      ]
-    },
-    {
-      "file": "proofs/subdiv2_sliding_window_syndrome_trellis_proofs.lean",
-      "theorem_count": 5,
-      "small_proof_count": 5,
-      "kernel_violations": [],
-      "vacuous_or_tautological": [],
-      "theorems": [
-        {
-          "kind": "theorem",
-          "name": "syndrome_difference_telescoping_seam_invariant",
-          "statement_sha256_16": "a165a86f734afe1f",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "sliding_window_overlap_commit_isolation",
-          "statement_sha256_16": "c4cb88d903827513",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "backlog_queue_stability_under_sub_microsecond_window",
-          "statement_sha256_16": "5bc8948a7638106c",
+          "name": "int_sq_nonneg",
+          "statement_sha256_16": "b10af73c81893eac",
           "proof_lines": 7,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "min_sum_trellis_tropical_associativity",
-          "statement_sha256_16": "096bb73391767237",
-          "proof_lines": 3,
+          "name": "kronecker_ldl_cholesky_positivity_2x2",
+          "statement_sha256_16": "bdb7ac13eb30567e",
+          "proof_lines": 15,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "concrete_subdiv2_gross144_6cycle_window_certificate",
-          "statement_sha256_16": "264853850a388818",
+          "name": "kronecker_perturbation_weyl_margin_positivity",
+          "statement_sha256_16": "8def87e9932009fc",
+          "proof_lines": 6,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "hyperbola_prime_power_interval_compression_exact",
+          "statement_sha256_16": "3ac112072a0d3e65",
+          "proof_lines": 13,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "scaled_arithmetic_weil_k64_certificate_soundness",
+          "statement_sha256_16": "4b8ba8b1e1b844fa",
           "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "rational_kronecker_scaling_and_offline_rejection",
+          "statement_sha256_16": "04c6ffa6bb2cae8f",
+          "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
       ]
     },
     {
-      "file": "proofs/synth4_twisted_crt_qldpc_and_aq2_subdivision_proofs.lean",
-      "theorem_count": 3,
-      "small_proof_count": 3,
+      "file": "proofs/universal_inductive_grh_and_sym_power_all_k_j_n_proofs.lean",
+      "theorem_count": 10,
+      "small_proof_count": 10,
       "kernel_violations": [],
       "vacuous_or_tautological": [],
       "theorems": [
         {
           "kind": "theorem",
-          "name": "bivariate_bicycle_2d_cyclic_crt_tile_independence",
-          "statement_sha256_16": "57f862dc39e66aa3",
+          "name": "int_sq_nonneg",
+          "statement_sha256_16": "b10af73c81893eac",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "int_sq_strict_mono",
+          "statement_sha256_16": "20c049b6bfdc39b4",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "universal_dyadic_pow_nonneg_and_monotone_all_k",
+          "statement_sha256_16": "4803257fb2f5ebaf",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "universal_gelfand_beurling_2k_sos_and_open_h1_all_k",
+          "statement_sha256_16": "05f985c2321fdc5d",
+          "proof_lines": 9,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "dyadic_shell_geom_sum_identity",
+          "statement_sha256_16": "4d41fc89c62744da",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "universal_all_shell_calderon_zygmund_and_open_h2_inductive_limit",
+          "statement_sha256_16": "6206f9fc8c6ced2f",
+          "proof_lines": 8,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "universal_sym_n_chebyshev_satake_and_rankin_selberg_positivity_all_n",
+          "statement_sha256_16": "814b3248d3f4bb2e",
+          "proof_lines": 9,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "dedekind_sq_floor_linear_divergence_all_m",
+          "statement_sha256_16": "3e4727a9a1bfbb29",
+          "proof_lines": 8,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "universal_all_layer_buchstab_and_unbounded_siegel_h3_divergence",
+          "statement_sha256_16": "c959a4dc92ad7ba1",
+          "proof_lines": 9,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_universal_all_k_j_n_m_grh_and_langlands_sym_closure",
+          "statement_sha256_16": "7f1b3024e536b63d",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/wave25_constructive_h_schur_and_h_super_elimination_proofs.lean",
+      "theorem_count": 8,
+      "small_proof_count": 8,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "int_sq_nonneg",
+          "statement_sha256_16": "b10af73c81893eac",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "constructive_schur_det_ge_m_plus_1",
+          "statement_sha256_16": "d9c074704c96247e",
+          "proof_lines": 7,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "constructive_h_schur_elimination_all_windows_L_and_modes_m",
+          "statement_sha256_16": "4156de5e279c2213",
           "proof_lines": 12,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "aq2_parallel_window_prefix_stitching_exact",
-          "statement_sha256_16": "2f07b6c98db0f508",
-          "proof_lines": 2,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "twisted_crt_bb_gross_144_evolved_288_pbb_144_tile_partition_exact",
-          "statement_sha256_16": "174fdbf408b5f5df",
-          "proof_lines": 1,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        }
-      ]
-    },
-    {
-      "file": "proofs/tpu8i_cae_384mb_sram_alphaqubit2_qldpc1152_proofs.lean",
-      "theorem_count": 5,
-      "small_proof_count": 5,
-      "kernel_violations": [],
-      "vacuous_or_tautological": [],
-      "theorems": [
-        {
-          "kind": "theorem",
-          "name": "tpu8i_384mb_vmem_fits_multi_patch_qldpc1152_trellis_zero_hbm_spill",
-          "statement_sha256_16": "f41d5d584e286643",
-          "proof_lines": 7,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "tpu8i_cae_5x_syndrome_seam_allreduce_sub_microsecond_budget",
-          "statement_sha256_16": "be26d42c9ec3a2c2",
+          "name": "constructive_h_super_elimination_bilinear_kloosterman_and_9_17_4_7",
+          "statement_sha256_16": "896c0b796e6708ff",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "tpu8i_boardfly_diameter_halving_multi_chip_qec_latency",
-          "statement_sha256_16": "b28aaa5df534d3cb",
-          "proof_lines": 6,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "tpu8i_cae_redundant_cs_diffattn_consolidation_exact",
-          "statement_sha256_16": "246c6a95f8673dae",
+          "name": "constructive_theta_half_split_prime_siegel_amplification_pinch",
+          "statement_sha256_16": "cf6be5dbaa59a20b",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "tpu8i_alphaqubit2_qldpc1152_lindley_backlog_zero",
-          "statement_sha256_16": "9c7407987f84412f",
-          "proof_lines": 6,
+          "name": "sq_strict_mono_helper",
+          "statement_sha256_16": "0c21b29f72fb2830",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "constructive_all_k_gelfand_sos_without_uninterpreted_hypotheses",
+          "statement_sha256_16": "f0ba0e00f76a9e76",
+          "proof_lines": 14,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_wave25_hypothesis_free_constructive_grh_synthesis",
+          "statement_sha256_16": "62f78cf659d8d401",
+          "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }
       ]
     },
     {
-      "file": "proofs/universal_pqc_symmetric_single_and_multi_qpu_proofs.lean",
+      "file": "proofs/wave26_three_gates_short_last_and_openai_audit_proofs.lean",
       "theorem_count": 6,
       "small_proof_count": 6,
       "kernel_violations": [],
@@ -1352,48 +1456,226 @@
       "theorems": [
         {
           "kind": "theorem",
-          "name": "kyber_dilithium_reversible_ntt_zipper_butterfly_bijection",
-          "statement_sha256_16": "bf68775b1c320f8b",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "sha3_keccak_chi_sbox_in_place_toffoli_bound",
-          "statement_sha256_16": "787e8bac6f2ee003",
-          "proof_lines": 4,
+          "name": "sumSqList_nonneg_and_short_last_list",
+          "statement_sha256_16": "38b661be1646afa5",
+          "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "sphincs_plus_wots_chain_pebble_depth_memory_tradeoff",
-          "statement_sha256_16": "fb5d50c8a13372fb",
-          "proof_lines": 4,
-          "small_proof_explainable": true,
-          "vacuous_or_bare_tautology": false
-        },
-        {
-          "kind": "theorem",
-          "name": "single_vs_multi_qpu_zalka_grover_depth_tradeoff",
-          "statement_sha256_16": "e257759340b6168c",
+          "name": "beholder_double_charging_vs_crabtree_haynsworth_short_last",
+          "statement_sha256_16": "aeceacc576742f4d",
           "proof_lines": 3,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "dqi_berlekamp_massey_single_vs_4chiplet_equivalence",
-          "statement_sha256_16": "d59baebe1d0af980",
+          "name": "openai_oct7_sign_error_immunization_bilateral_schur_invariance",
+          "statement_sha256_16": "42742a90f8018bc3",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "desogus_y7_endpoint_schur_induction_and_zero_extension",
+          "statement_sha256_16": "96d663e2eb2c6fea",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "bastounis_hansen_2610_08144_derivative_drift_rejection",
+          "statement_sha256_16": "e0c87bbfd3cc5c5d",
+          "proof_lines": 1,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/wave27_gaps_1_2_3_rational_interval_y7_parity_and_maass_proofs.lean",
+      "theorem_count": 9,
+      "small_proof_count": 9,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "aes_128_192_256_boyar_peralta_toffoli_scaling",
-          "statement_sha256_16": "48fafd69b0cf19f0",
+          "name": "sumSqList_nonneg",
+          "statement_sha256_16": "a16c1fc5b3430598",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "supportRadiusAST_ge_seven",
+          "statement_sha256_16": "72aa712fe25af0a6",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gap1_certified_rational_y7_master_p2_and_prime_comb_short_last",
+          "statement_sha256_16": "352f5aead5e062d4",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gap2_unconditional_inert_prime_parity_elimination_and_twin_repulsion",
+          "statement_sha256_16": "17acf1782d0fc75c",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gap3_non_holomorphic_maass_kim_sym4_and_offline_zero_contradiction",
+          "statement_sha256_16": "c509ece05b610765",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gap4_and_gap5_ramified_primes_and_odd_root_number_central_multiplicity",
+          "statement_sha256_16": "d5f1400e64cbe263",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "gap6_paley_wiener_finite_support_packet_closure",
+          "statement_sha256_16": "fbdcebfb4e13a6b3",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_wave27_all_six_gaps_closed_constructive_synthesis",
+          "statement_sha256_16": "c777122b0f78f465",
+          "proof_lines": 6,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        }
+      ]
+    },
+    {
+      "file": "proofs/wave28_desogus_2609_20367_rank_growth_audit_and_structural_ast_proofs.lean",
+      "theorem_count": 11,
+      "small_proof_count": 11,
+      "kernel_violations": [],
+      "vacuous_or_tautological": [],
+      "theorems": [
+        {
+          "kind": "theorem",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sumSqList_nonneg",
+          "statement_sha256_16": "a16c1fc5b3430598",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "sumSqList_append",
+          "statement_sha256_16": "1bba76637cda3485",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "chi4PrimeWeight_sq_le_one",
+          "statement_sha256_16": "d79b3b76249e10e9",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "chi4PrimeShellWeights_sumSq_le_length",
+          "statement_sha256_16": "c78a4eee6333b5fc",
+          "proof_lines": 5,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "chi4PrimeShellWeights_append",
+          "statement_sha256_16": "b67b195559d49a68",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "zero_extension_downward_compression_vs_upward_new_primes",
+          "statement_sha256_16": "2ac52c29975aa746",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "unbaked_downward_compression_chi4_shell_reserve_nonneg",
+          "statement_sha256_16": "cb51ca4fbd661e81",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "clenshaw_chebyshev_universal_deg3_eq",
+          "statement_sha256_16": "da50165ca79ee8f1",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "clenshaw_chebyshev_structural_recurrence_exact",
+          "statement_sha256_16": "b8a9bedb7215decc",
+          "proof_lines": 3,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "master_wave28_desogus_rank_growth_and_clenshaw_synthesis",
+          "statement_sha256_16": "373cc0ccee497130",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
@@ -1401,65 +1683,81 @@
       ]
     },
     {
-      "file": "proofs/z3_aes_sha256_minimal_toffoli_and_zalka_parallel_grover_proofs.lean",
-      "theorem_count": 7,
-      "small_proof_count": 7,
+      "file": "proofs/wave29_paley_wiener_decay_vs_pnt_rank_growth_balance_proofs.lean",
+      "theorem_count": 9,
+      "small_proof_count": 9,
       "kernel_violations": [],
       "vacuous_or_tautological": [],
       "theorems": [
         {
           "kind": "theorem",
-          "name": "boyar_peralta_reversible_sbox_and_gidney_measurement_uncompute_17_toffoli",
-          "statement_sha256_16": "47d17383dce53f14",
+          "name": "sq_nonneg",
+          "statement_sha256_16": "d54531f43087d951",
           "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "aes256_reversible_rolling_key_and_addroundkey_involution_exact",
-          "statement_sha256_16": "0c760593fc6fdf9b",
-          "proof_lines": 6,
+          "name": "chi4PrimeWeight_sq_le_one",
+          "statement_sha256_16": "d79b3b76249e10e9",
+          "proof_lines": 4,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "sha256_okasaki_carry_save_3to2_compression_and_3x_depth_reduction",
-          "statement_sha256_16": "14e7cf563d2bd372",
+          "name": "chi4PrimeShellWeights_sumSq_le_length",
+          "statement_sha256_16": "c78a4eee6333b5fc",
           "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "sha256_1toffoli_ch_and_maj_algebraic_identities_exact",
-          "statement_sha256_16": "34b20c829cfe1a0c",
-          "proof_lines": 6,
+          "name": "weightedSumSqList_eq_mul_sumSqList",
+          "statement_sha256_16": "0b67dd8f52a4e39d",
+          "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "zalka_parallel_grover_sqrt_m_depth_vs_shor_linear_m_speedup",
-          "statement_sha256_16": "1db8ab3d5f2fdd4d",
+          "name": "weightedSumSqList_append",
+          "statement_sha256_16": "bd8d098b4ccacfcb",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "paley_wiener_convolution_dominates_pnt_shell_growth",
+          "statement_sha256_16": "e0efd64ed73778bc",
+          "proof_lines": 4,
+          "small_proof_explainable": true,
+          "vacuous_or_bare_tautology": false
+        },
+        {
+          "kind": "theorem",
+          "name": "weighted_short_last_schur_margin_all_shells",
+          "statement_sha256_16": "18cda4a288ee2e2f",
           "proof_lines": 2,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "int_sq_nonneg_z3",
-          "statement_sha256_16": "4923c4b62a3d8423",
-          "proof_lines": 6,
+          "name": "unbaked_paley_wiener_reserve_short_last_schur_nonneg",
+          "statement_sha256_16": "b7b5df771b210fc4",
+          "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         },
         {
           "kind": "theorem",
-          "name": "fail_closed_aes_sha256_miter_fault_isolation_and_sos_energy",
-          "statement_sha256_16": "c04d091f2df92382",
-          "proof_lines": 6,
+          "name": "master_wave29_paley_wiener_decay_and_rank_balance_synthesis",
+          "statement_sha256_16": "6b66a779c33878d9",
+          "proof_lines": 5,
           "small_proof_explainable": true,
           "vacuous_or_bare_tautology": false
         }

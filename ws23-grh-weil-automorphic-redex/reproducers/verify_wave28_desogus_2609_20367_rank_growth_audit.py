@@ -105,18 +105,30 @@ def run_suite_2_rank_growth_and_ast_audit() -> dict:
                 assert schur_old - schur_app == sum_new
                 transitions_checked += 1
 
+    has_required_theorems = all(
+        thm in code_no_comments
+        for thm in (
+            "theorem chi4PrimeShellWeights_sumSq_le_length",
+            "theorem unbaked_downward_compression_chi4_shell_reserve_nonneg",
+            "theorem clenshaw_chebyshev_universal_deg3_eq",
+            "theorem master_wave28_desogus_rank_growth_and_clenshaw_synthesis",
+        )
+    )
+
     return {
         "status": "PASS" if (
             uninterpreted_hyps == 0
             and parameterless_int_defs == 0
             and max_lines <= 5
             and transitions_checked == 180
+            and has_required_theorems
         ) else "FAIL",
         "theorem_count": len(thm_blocks),
         "max_proof_lines": max_lines,
         "uninterpreted_inequality_hypotheses": uninterpreted_hyps,
         "parameterless_scalar_int_defs_waves_26_27_28": parameterless_int_defs,
         "rank_growth_transitions_verified": transitions_checked,
+        "has_unbaked_and_universal_clenshaw_theorems": has_required_theorems,
     }
 
 
@@ -150,7 +162,7 @@ int main(void) {
         int32_t x_arr[8], c0_arr[8], c1_arr[8], c2_arr[8], c3_arr[8], n1_arr[8], n2_arr[8];
         for (int k = 0; k < 8; ++k) {
             uint32_t r = xorshift32(&rng);
-            x_arr[k]  = (int32_t)(r % 5u) - 2; // {-2, -1, 0, 1, 2}
+            x_arr[k]  = (int32_t)(r & 0x3F) - 31; // arbitrary integer in [-31, 32]
             c0_arr[k] = (int32_t)((r >> 3) & 0x0F) - 7;
             c1_arr[k] = (int32_t)((r >> 7) & 0x0F) - 7;
             c2_arr[k] = (int32_t)((r >> 11) & 0x0F) - 7;
@@ -260,10 +272,15 @@ def run_suite_4_lean() -> dict:
 
 
 def main() -> None:
-    s1 = run_suite_1_z3_xls()
-    s2 = run_suite_2_rank_growth_and_ast_audit()
-    s3 = run_suite_3_avx2_fuzzer()
-    s4 = run_suite_4_lean()
+    import shutil
+    BUILD_CACHE.mkdir(parents=True, exist_ok=True)
+    try:
+        s1 = run_suite_1_z3_xls()
+        s2 = run_suite_2_rank_growth_and_ast_audit()
+        s3 = run_suite_3_avx2_fuzzer()
+        s4 = run_suite_4_lean()
+    finally:
+        shutil.rmtree(BUILD_CACHE, ignore_errors=True)
     overall = "PASS" if all(s["status"] == "PASS" for s in (s1, s2, s3, s4)) else "FAIL"
     report = {
         "wave": "Wave 28: Adversarial Rank-Growth Audit of arXiv:2609.20367v3 (Downward vs Upward Zero-Extension) & Structural Clenshaw Chebyshev Proofs",

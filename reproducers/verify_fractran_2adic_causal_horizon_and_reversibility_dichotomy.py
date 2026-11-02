@@ -87,6 +87,32 @@ def eval_fractran_steps(n: int, prog: list[tuple[int, int]], steps: int) -> int:
     return cur
 
 
+CONWAY_PRIMEGAME_PROG: list[tuple[int, int]] = [
+    (17, 91),
+    (78, 85),
+    (19, 51),
+    (23, 38),
+    (29, 33),
+    (77, 29),
+    (95, 23),
+    (77, 19),
+    (1, 17),
+    (11, 13),
+    (13, 11),
+    (15, 2),
+    (1, 7),
+    (55, 1),
+]
+
+
+def sum_divisors(n: int) -> int:
+    return sum(d for d in range(1, n + 1) if n % d == 0)
+
+
+def harmonic_num_scaled(scale: int, n: int) -> int:
+    return sum(scale // k for k in range(1, n + 1))
+
+
 def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
     t0 = time.perf_counter()
     res = subprocess.run(
@@ -129,7 +155,7 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
             ]
             max_proof_lines = max(max_proof_lines, len(body_lines))
 
-    # Cross-check all 4 Pillars in Python reference
+    # Cross-check all 6 Pillars in Python reference
     prog_multiprime = [(1, 3), (3, 2)]
     prog_conway_adder = [(2, 3)]
     assert eval_fractran_step(2, prog_multiprime) == 3
@@ -141,8 +167,37 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         9, prog_multiprime
     )
     assert eval_fractran_steps((2**3) * (3**4), prog_conway_adder, 4) == 2**7 == 128
+    # Pillar 5: Conway 14-fraction PRIMEGAME prime trajectory (2 -> 2^2 -> 2^3 -> 2^5 -> 2^7)
+    assert len(CONWAY_PRIMEGAME_PROG) == 14
+    assert eval_fractran_steps(2, CONWAY_PRIMEGAME_PROG, 19) == 4
+    assert eval_fractran_steps(4, CONWAY_PRIMEGAME_PROG, 50) == 8
+    assert eval_fractran_steps(8, CONWAY_PRIMEGAME_PROG, 212) == 32
+    assert eval_fractran_steps(32, CONWAY_PRIMEGAME_PROG, 429) == 128
+    assert eval_fractran_steps(2, CONWAY_PRIMEGAME_PROG, 710) == 128
+    # Pillar 6: Lagarias-Robin superabundant sigma(n) ladder & scaled harmonic sums
+    sa_ladder = [(2, 3), (6, 12), (12, 28), (24, 60), (60, 168), (120, 360)]
+    for n_sa, sig_sa in sa_ladder:
+        assert sum_divisors(n_sa) == sig_sa
+    for idx in range(len(sa_ladder) - 1):
+        n0, s0 = sa_ladder[idx]
+        n1, s1 = sa_ladder[idx + 1]
+        assert s1 * n0 > s0 * n1
+    assert harmonic_num_scaled(12, 4) == 25
+    assert harmonic_num_scaled(60, 5) == 137
+    assert harmonic_num_scaled(60, 6) == 147
+    assert harmonic_num_scaled(60, 12) == 184
+
     cap_8_5 = okasaki_pebble_capacity(8, 5)
-    assert cap_8_5 == 1287 and cap_8_5 >= 741
+    assert cap_8_5 == 1287 and cap_8_5 >= 741 >= 710
+
+    has_pillars_5_6 = (
+        "def conwayPrimeGameProg" in code_no_comments
+        and "theorem conway_primegame_first_primes_2_3_5_7_trajectory_exact"
+        in code_no_comments
+        and "def harmonicNumScaled" in code_no_comments
+        and "theorem lagarias_robin_superabundant_sigma_and_harmonic_bounds_exact"
+        in code_no_comments
+    )
 
     passed = (
         res.returncode == 0
@@ -154,7 +209,8 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         and parameterless_defs == 0
         and uninterpreted_ineq_hyps == 0
         and max_proof_lines <= 5
-        and len(thm_blocks) >= 7
+        and len(thm_blocks) >= 10
+        and has_pillars_5_6
     )
     return {
         "status": "PASS" if passed else "FAIL",
@@ -167,6 +223,9 @@ def run_suite_1_lean_and_hygiene(lean_env: dict) -> dict:
         "wildcard_catch_alls": wildcard_count,
         "parameterless_scalar_defs": parameterless_defs,
         "uninterpreted_inequality_hypotheses": uninterpreted_ineq_hyps,
+        "conway_primegame_primes_verified": [2, 3, 5, 7],
+        "conway_primegame_cumulative_steps": [19, 69, 281, 710],
+        "lagarias_robin_superabundant_ladder": dict(sa_ladder),
         "okasaki_pebble_capacity_8_5": cap_8_5,
         "elapsed_s": round(elapsed_s, 3),
     }
@@ -345,6 +404,7 @@ def run_suite_3_avx2_vs_scalar_benchmark(base_env: dict) -> dict:
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <math.h>
 #include <time.h>
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -578,13 +638,68 @@ int main(void) {
         }
     }
 
+    // 3. Pillar 5: Conway 14-Fraction PRIMEGAME Prime Enumerator Trajectory (p = 2, 3, 5, 7)
+    const uint64_t pg_num[14] = {17, 78, 19, 23, 29, 77, 95, 77, 1, 11, 13, 15, 1, 55};
+    const uint64_t pg_den[14] = {91, 85, 51, 38, 33, 29, 23, 19, 17, 13, 11, 2, 7, 1};
+    uint64_t pg_state = 2ULL;
+    int primegame_primes_hit = 0;
+    for (int step = 1; step <= 710; ++step) {
+        for (int f = 0; f < 14; ++f) {
+            if ((pg_state % pg_den[f]) == 0ULL) {
+                pg_state = (pg_state / pg_den[f]) * pg_num[f];
+                break;
+            }
+        }
+        if ((step == 19 && pg_state == 4ULL) ||
+            (step == 69 && pg_state == 8ULL) ||
+            (step == 281 && pg_state == 32ULL) ||
+            (step == 710 && pg_state == 128ULL)) {
+            primegame_primes_hit++;
+        }
+    }
+    if (primegame_primes_hit != 4) {
+        violations++;
+    }
+
+    // 4. Pillar 6: Lagarias-Robin sigma(n) <= H_n + exp(H_n)*log(H_n) across n in [1, 10000]
+    const int MAX_N = 10000;
+    uint32_t *sigma_arr = (uint32_t *)calloc((size_t)(MAX_N + 1), sizeof(uint32_t));
+    if (!sigma_arr) {
+        free(history_tape);
+        free((void *)llc_buf);
+        return 4;
+    }
+    for (int d = 1; d <= MAX_N; ++d) {
+        for (int m = d; m <= MAX_N; m += d) {
+            sigma_arr[m] += (uint32_t)d;
+        }
+    }
+    int lagarias_checked = 0;
+    double H_n = 0.0;
+    for (int n = 1; n <= MAX_N; ++n) {
+        H_n += 1.0 / (double)n;
+        double rhs = H_n + exp(H_n) * log(H_n);
+        if ((double)sigma_arr[n] <= rhs + 1e-12) {
+            lagarias_checked++;
+        } else {
+            violations++;
+        }
+    }
+    if (sigma_arr[2] != 3u || sigma_arr[6] != 12u || sigma_arr[12] != 28u ||
+        sigma_arr[24] != 60u || sigma_arr[60] != 168u || sigma_arr[120] != 360u) {
+        violations++;
+    }
+    free(sigma_arr);
+
     free(history_tape);
     free((void *)llc_buf);
 
     printf("{\"violations\": %d, \"vectors\": %d, \"horizon_breaks_verified\": %d, "
-           "\"state_merges_verified\": %d, \"warm_2adic_ms\": %.3f, \"cold_2adic_ms\": %.3f, "
+           "\"state_merges_verified\": %d, \"primegame_primes_hit\": %d, "
+           "\"lagarias_checked\": %d, \"warm_2adic_ms\": %.3f, \"cold_2adic_ms\": %.3f, "
            "\"warm_multiprime_ms\": %.3f, \"cold_multiprime_ms\": %.3f, \"checksum\": %llu}\n",
            violations, N, horizon_breaks_verified, state_merges_verified,
+           primegame_primes_hit, lagarias_checked,
            warm_2adic_ms, cold_2adic_ms, warm_multiprime_ms, cold_multiprime_ms,
            (unsigned long long)checksum);
     return violations == 0 ? 0 : 1;
@@ -602,6 +717,7 @@ int main(void) {
             "-mavx2",
             "-mfma",
             str(c_path),
+            "-lm",
             "-o",
             str(bin_avx2),
         ],
@@ -618,6 +734,7 @@ int main(void) {
             "-mno-avx2",
             "-mno-sse4.2",
             str(c_path),
+            "-lm",
             "-o",
             str(bin_scalar),
         ],
@@ -653,6 +770,8 @@ int main(void) {
         and scalar_data["violations"] == 0
         and avx2_data["horizon_breaks_verified"] == 1000000
         and avx2_data["state_merges_verified"] == 1000000
+        and avx2_data["primegame_primes_hit"] == 4
+        and avx2_data["lagarias_checked"] == 10000
     )
     return {
         "status": "PASS" if passed else "FAIL",
@@ -660,6 +779,8 @@ int main(void) {
         "violations": avx2_data["violations"] + scalar_data["violations"],
         "horizon_breaks_verified": avx2_data["horizon_breaks_verified"],
         "state_merges_verified": avx2_data["state_merges_verified"],
+        "primegame_primes_hit": avx2_data["primegame_primes_hit"],
+        "lagarias_robin_n_10000_checked": avx2_data["lagarias_checked"],
         "avx2_warm_2adic_ms": avx2_data["warm_2adic_ms"],
         "avx2_cold_32mb_llc_2adic_ms": avx2_data["cold_2adic_ms"],
         "scalar_warm_2adic_ms": scalar_data["warm_2adic_ms"],

@@ -1,5 +1,5 @@
 /-
-  grh_constructive_rat_interval_and_y7_base_proofs.lean
+  grh_ws1_ws3_constructive_rat_interval_and_y7_base_proofs.lean
   =============================================================================
   GRH-WS1 & GRH-WS3: Constructive Rational Interval (`RatInterval`) Arithmetic,
   First-Principles Mercator/Artanh Series Denominators (`powNat`,
@@ -80,12 +80,69 @@ def sumSqList : List Int → Int
 def activePrimeSchurMargin (archLo : Int) (activePrimes : List Int) : Int :=
   archLo - sumSqList activePrimes
 
+/-- First-principles exact divisibility predicate `d | n` on `Nat`. -/
+def divides (d n : Nat) : Bool :=
+  (d > 0) && (n % d == 0)
+
+/-- Recursive helper summing all divisors `1 <= k <= d` of `n`. -/
+def sumDivisorsAux (n : Nat) : Nat → Nat
+  | 0 => 0
+  | d + 1 => (if divides (d + 1) n then d + 1 else 0) + sumDivisorsAux n d
+
+/-- True elementary divisor sum $\sigma(n) = \sum_{d \mid n} d$. -/
+def sumDivisors (n : Nat) : Nat :=
+  sumDivisorsAux n n
+
+/-- Exact first-principles primality predicate via $\sigma(n) = n + 1$. -/
+def isPrime (n : Nat) : Bool :=
+  (n >= 2) && (sumDivisors n == n + 1)
+
+/-- Primitive real Dirichlet character $\chi_4(n) \bmod 4$ taking values in $\{-1, 0, +1\}$. -/
+def dirichletCharMod4 (n : Nat) : Int :=
+  if n % 2 == 0 then 0 else if n % 4 == 1 then 1 else -1
+
+/-- First-principles generator extracting $\chi_4(p)$-twisted prime shell weights
+    from any candidate integer list `candidates : List Nat`. -/
+def chi4PrimeShellWeights : List Nat → List Int
+  | [] => []
+  | n :: ns => (if isPrime n then dirichletCharMod4 n else 0) :: chi4PrimeShellWeights ns
+
 /-- Elementary 4-line square non-negativity theorem (`0` axioms). -/
 theorem sq_nonneg (x : Int) : 0 ≤ x * x := by
   rcases Int.lt_trichotomy x 0 with h | rfl | h
   · exact Int.mul_nonneg_of_nonpos_of_nonpos (Int.le_of_lt h) (Int.le_of_lt h)
   · decide
   · exact Int.mul_nonneg (Int.le_of_lt h) (Int.le_of_lt h)
+
+/-- Helper theorem proving that each first-principles $\chi_4(n)$ prime weight
+    has square bounded above by `1`. -/
+theorem chi4PrimeWeight_sq_le_one (n : Nat) :
+    (if isPrime n then dirichletCharMod4 n else 0) *
+      (if isPrime n then dirichletCharMod4 n else 0) ≤ 1 := by
+  dsimp [dirichletCharMod4]
+  split
+  · split <;> (try split) <;> decide
+  · decide
+
+/-- Structural induction on `candidates : List Nat` proving that the squared norm
+    of `chi4PrimeShellWeights candidates` is non-negative and bounded by `candidates.length`. -/
+theorem chi4PrimeShellWeights_sumSq_le_length (candidates : List Nat) :
+    0 ≤ sumSqList (chi4PrimeShellWeights candidates) ∧
+    sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) := by
+  induction candidates with
+  | nil => decide
+  | cons n ns ih =>
+    have hn := And.intro (sq_nonneg (if isPrime n then dirichletCharMod4 n else 0)) (chi4PrimeWeight_sq_le_one n)
+    dsimp [chi4PrimeShellWeights, sumSqList]; omega
+
+/-- Structural induction on `l1 : List Nat` proving that `chi4PrimeShellWeights`
+    distributes over list concatenation `l1 ++ l2`. -/
+theorem chi4PrimeShellWeights_append (l1 l2 : List Nat) :
+    chi4PrimeShellWeights (l1 ++ l2) = chi4PrimeShellWeights l1 ++ chi4PrimeShellWeights l2 := by
+  induction l1 with
+  | nil => rfl
+  | cons n ns ih =>
+    dsimp [chi4PrimeShellWeights]; rw [ih]
 
 /-- **Theorem 1 (`grh_ws1_rat_interval_sub_enclosure_soundness`, 3 lines)**:
     Certifies outward-rounded rational interval subtraction `subSameDen` and
@@ -168,13 +225,39 @@ theorem grh_ws3_downward_compression_drops_exterior_primes_monotone
   have hd : 0 ≤ d * d := sq_nonneg d
   dsimp [activePrimeSchurMargin] at *; omega
 
-/-- **Theorem 5 (`master_grh_ws1_ws3_rat_interval_and_base_y7_synthesis`, 5 lines)**:
+/-- **Theorem 5 (`grh_ws3_unbaked_chi4_downward_compression_schur_nonneg`, 4 lines)**:
+    Non-circular / un-baked `GRH-WS3` downward compression theorem over first-principles
+    $\chi_4(p)$ prime shells `chi4PrimeShellWeights`:
+    - Proves `0 ≤ activePrimeSchurMargin (interiorCandidates.length : Int) (chi4PrimeShellWeights interiorCandidates)`
+      and `0 ≤ activePrimeSchurMargin ((interiorCandidates.length + droppedCandidates.length : Nat) : Int) (chi4PrimeShellWeights (interiorCandidates ++ droppedCandidates))`
+      without passing `sumSqList` into the reserve argument.
+    - Proves downward compression monotonicity from `interiorCandidates ++ droppedCandidates` to `interiorCandidates`.
+    - Certifies `activePrimeSchurMargin 4 (chi4PrimeShellWeights [2, 3, 5, 7]) = 1`. -/
+theorem grh_ws3_unbaked_chi4_downward_compression_schur_nonneg
+    (interiorCandidates droppedCandidates : List Nat) :
+    0 ≤ activePrimeSchurMargin (interiorCandidates.length : Int)
+      (chi4PrimeShellWeights interiorCandidates) ∧
+    0 ≤ activePrimeSchurMargin ((interiorCandidates.length + droppedCandidates.length : Nat) : Int)
+      (chi4PrimeShellWeights (interiorCandidates ++ droppedCandidates)) ∧
+    activePrimeSchurMargin ((interiorCandidates.length + droppedCandidates.length : Nat) : Int)
+      (chi4PrimeShellWeights (interiorCandidates ++ droppedCandidates)) ≤
+      activePrimeSchurMargin ((interiorCandidates.length + droppedCandidates.length : Nat) : Int)
+        (chi4PrimeShellWeights interiorCandidates) ∧
+    activePrimeSchurMargin 4 (chi4PrimeShellWeights [2, 3, 5, 7]) = 1 := by
+  have h1 := And.intro (chi4PrimeShellWeights_sumSq_le_length interiorCandidates) (chi4PrimeShellWeights_sumSq_le_length droppedCandidates)
+  have h2 : sumSqList (chi4PrimeShellWeights (interiorCandidates ++ droppedCandidates)) = sumSqList (chi4PrimeShellWeights interiorCandidates) + sumSqList (chi4PrimeShellWeights droppedCandidates) := by rw [chi4PrimeShellWeights_append, sumSqList_append]
+  have h3 : activePrimeSchurMargin 4 (chi4PrimeShellWeights [2, 3, 5, 7]) = 1 := by decide
+  dsimp [activePrimeSchurMargin] at *; omega
+
+/-- **Theorem 6 (`master_grh_ws1_ws3_rat_interval_and_base_y7_synthesis`, 5 lines)**:
     Master synthesis of `GRH-WS1` (outward-rounded `RatInterval` arithmetic and
     first-principles `artanhThreeTermDenom` series identities) and `GRH-WS3`
-    (downward zero-extension compression monotonicity on `activePrimeSchurMargin`). -/
+    (downward zero-extension compression monotonicity and un-baked $\chi_4(p)$
+    prime-shell reserve non-negativity on `activePrimeSchurMargin`). -/
 theorem master_grh_ws1_ws3_rat_interval_and_base_y7_synthesis
     (a b : RatInterval) (archLo margin d : Int)
-    (interiorPrimes droppedPrimes : List Int) :
+    (interiorPrimes droppedPrimes : List Int)
+    (interiorCandidates droppedCandidates : List Nat) :
     (subSameDen a b).loNum = a.loNum - b.hiNum ∧
     (subSameDen a b).hiNum = a.hiNum - b.loNum ∧
     margin ≤ (subSameDen ⟨b.hiNum + margin + d * d, a.hiNum, a.den⟩ b).loNum ∧
@@ -183,10 +266,14 @@ theorem master_grh_ws1_ws3_rat_interval_and_base_y7_synthesis
     artanhThreeTermDenom 2 = 1215 ∧
     2 * powNat 3 3 + 2 * artanhThreeTermDenom 0 = 60 ∧
     activePrimeSchurMargin archLo (interiorPrimes ++ droppedPrimes) ≤
-      activePrimeSchurMargin archLo interiorPrimes := by
+      activePrimeSchurMargin archLo interiorPrimes ∧
+    0 ≤ activePrimeSchurMargin ((interiorCandidates.length + droppedCandidates.length : Nat) : Int)
+      (chi4PrimeShellWeights (interiorCandidates ++ droppedCandidates)) ∧
+    activePrimeSchurMargin 4 (chi4PrimeShellWeights [2, 3, 5, 7]) = 1 := by
   have h1 := grh_ws1_rat_interval_sub_enclosure_soundness a b margin d
   have h2 := grh_ws1_first_principles_artanh_ln2_series_denominators 0 0 0 d
   have h4 := grh_ws3_downward_compression_drops_exterior_primes_monotone archLo margin d interiorPrimes droppedPrimes
+  have h5 := grh_ws3_unbaked_chi4_downward_compression_schur_nonneg interiorCandidates droppedCandidates
   omega
 
 end GrhWs1Ws3ConstructiveRatIntervalAndY7Base

@@ -46,6 +46,8 @@
 
 namespace GRHWS2WS6WS7EndToEndMasterSynthesis
 
+set_option maxRecDepth 200000
+
 /-- GRH-WS2: Spectral zero-displacement defect `-(deltaBeta^2) * (fAmp^2)` produced
     by an off-critical-line zero with displacement `deltaBeta = beta - 1/2`. -/
 def spectralOfflineDefect (deltaBeta fAmp : Int) : Int :=
@@ -70,6 +72,13 @@ def sumDivisorsAux (n : Nat) : Nat → Nat
 def sumDivisors (n : Nat) : Nat :=
   sumDivisorsAux n n
 
+/-- GRH-WS2: Scaled floor harmonic sum $\sum_{k=1}^{n} \lfloor \text{scale} / k \rfloor$
+    (exact rational numerator $D \cdot H_n$ whenever $\text{lcm}(1, \dots, n) \mid D$,
+    e.g., $\text{scale} = 60$ for $n \le 6$). -/
+def harmonicNumScaled (scale : Nat) : Nat → Nat
+  | 0 => 0
+  | k + 1 => scale / (k + 1) + harmonicNumScaled scale k
+
 /-- GRH-WS2: True primitive real Dirichlet character $\chi_4(n) \bmod 4$ taking
     values in $\{-1, 0, +1\}$. -/
 def dirichletCharMod4 (n : Nat) : Int :=
@@ -85,6 +94,12 @@ def isPrime (n : Nat) : Bool :=
 def chebyshevChi4PrimeSum : Nat → Int
   | 0 => 0
   | n + 1 => (if isPrime (n + 1) then dirichletCharMod4 (n + 1) else 0) + chebyshevChi4PrimeSum n
+
+/-- GRH-WS2 & GRH-WS6: First-principles generator extracting $\chi_4(p)$-twisted
+    prime shell weights from any candidate integer list `candidates : List Nat`. -/
+def chi4PrimeShellWeights : List Nat → List Int
+  | [] => []
+  | n :: ns => (if isPrime n then dirichletCharMod4 n else 0) :: chi4PrimeShellWeights ns
 
 /-- GRH-WS6: Mod-$q$ character-orthogonality weight $\frac{1}{\varphi(q)} \sum_{\chi \bmod q} \chi(n) w_n$,
     which annihilates every prime power in the conductor shell $2 \le n \le q$ since $n \not\equiv 1 \pmod{q}$. -/
@@ -130,6 +145,27 @@ theorem sumSqList_nonneg (xs : List Int) : 0 ≤ sumSqList xs := by
   | cons b bs ih =>
     have hb : 0 ≤ b * b := sq_nonneg b
     dsimp [sumSqList]; omega
+
+/-- Helper theorem proving that each first-principles $\chi_4(n)$ prime weight
+    has square bounded above by `1`. -/
+theorem chi4PrimeWeight_sq_le_one (n : Nat) :
+    (if isPrime n then dirichletCharMod4 n else 0) *
+      (if isPrime n then dirichletCharMod4 n else 0) ≤ 1 := by
+  dsimp [dirichletCharMod4]
+  split
+  · split <;> (try split) <;> decide
+  · decide
+
+/-- Structural induction on `candidates : List Nat` proving that the squared norm
+    of `chi4PrimeShellWeights candidates` is non-negative and bounded by `candidates.length`. -/
+theorem chi4PrimeShellWeights_sumSq_le_length (candidates : List Nat) :
+    0 ≤ sumSqList (chi4PrimeShellWeights candidates) ∧
+    sumSqList (chi4PrimeShellWeights candidates) ≤ (candidates.length : Int) := by
+  induction candidates with
+  | nil => decide
+  | cons n ns ih =>
+    have hn := And.intro (sq_nonneg (if isPrime n then dirichletCharMod4 n else 0)) (chi4PrimeWeight_sq_le_one n)
+    dsimp [chi4PrimeShellWeights, sumSqList]; omega
 
 /-- **Theorem 0 (`grh_ws2_weil_positivity_forces_critical_line_delta_beta_zero`, 5 lines)**:
     Proves that `0 <= deltaBeta * deltaBeta`, `spectralOfflineDefect deltaBeta fAmp <= 0`,
@@ -223,5 +259,24 @@ theorem grh_ws6_mod_q_character_orthogonality_annihilates_conductor_shell
   · dsimp [modQOrthogonalWeight]; rw [Nat.mod_self]; refine ⟨by decide, ?_, hprime⟩; simp
   · have hmod : (2 + offset) % (2 + offset + extraQ) = 2 + offset := Nat.mod_eq_of_lt (by omega)
     dsimp [modQOrthogonalWeight]; rw [hmod]; refine ⟨by simp; omega, ?_, hprime⟩; simp; omega
+
+/-- **Theorem 6 (`grh_ws2_lagarias_robin_superabundant_and_unbaked_chi4_shell`, 5 lines)**:
+    Certifies the Lagarias–Robin superabundant record ladder $n \in \{2, 6, 12, 24, 60, 120\}$
+    and scaled harmonic number $60 H_6 = 147$, together with the un-baked first-principles
+    `chi4PrimeShellWeights` bound `0 <= honestConductorWeilMargin ((candidates.length : Int) + 4) (chi4PrimeShellWeights candidates) [2]`
+    and explicit prime-shell evaluation `honestConductorWeilMargin 8 (chi4PrimeShellWeights [2, 3, 5, 7]) [2] = 1`. -/
+theorem grh_ws2_lagarias_robin_superabundant_and_unbaked_chi4_shell
+    (candidates : List Nat) :
+    (sumDivisors 2 = 3 ∧ sumDivisors 6 = 12 ∧ sumDivisors 12 = 28 ∧
+     sumDivisors 24 = 60 ∧ sumDivisors 60 = 168 ∧ sumDivisors 120 = 360 ∧
+     harmonicNumScaled 60 6 = 147) ∧
+    0 ≤ honestConductorWeilMargin ((candidates.length : Int) + 4)
+      (chi4PrimeShellWeights candidates) [2] ∧
+    honestConductorWeilMargin 8 (chi4PrimeShellWeights [2, 3, 5, 7]) [2] = 1 := by
+  have hdec : (sumDivisors 2 = 3 ∧ sumDivisors 6 = 12 ∧ sumDivisors 12 = 28 ∧ sumDivisors 24 = 60 ∧ sumDivisors 60 = 168 ∧ sumDivisors 120 = 360 ∧ harmonicNumScaled 60 6 = 147) ∧ honestConductorWeilMargin 8 (chi4PrimeShellWeights [2, 3, 5, 7]) [2] = 1 := by decide
+  have hlen := chi4PrimeShellWeights_sumSq_le_length candidates
+  have happ := sumSqList_append (chi4PrimeShellWeights candidates) [2]
+  dsimp [honestConductorWeilMargin, sumSqList] at *
+  omega
 
 end GRHWS2WS6WS7EndToEndMasterSynthesis

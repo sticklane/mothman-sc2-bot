@@ -168,16 +168,25 @@ def run_suite_2_rational_interval_and_ast_audit() -> dict:
         assert margin_full <= margin_sub
         subintervals_verified += 1
 
+    has_unbaked_theorems = all(
+        thm in code_no_comments
+        for thm in (
+            "theorem chi4PrimeShellWeights_sumSq_le_length",
+            "theorem grh_ws3_unbaked_chi4_downward_compression_schur_nonneg",
+        )
+    )
+
     return {
         "status": "PASS"
         if (
             uninterpreted_hyps == 0
             and parameterless_int_defs == 0
             and inline_magic_hits == 0
-            and max_lines <= 6
+            and max_lines <= 5
             and [d0, d1, d2] == [3, 81, 1215]
             and base_margin == 13
             and subintervals_verified == 10
+            and has_unbaked_theorems
         )
         else "FAIL",
         "theorem_count": len(thm_blocks),
@@ -188,6 +197,7 @@ def run_suite_2_rational_interval_and_ast_audit() -> dict:
         "artanh_series_denominators_k0_k1_k2": [d0, d1, d2],
         "y7_active_prime_schur_margin": base_margin,
         "downward_subintervals_verified": subintervals_verified,
+        "has_unbaked_chi4_downward_compression": has_unbaked_theorems,
     }
 
 

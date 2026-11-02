@@ -8,21 +8,21 @@ verify_grh_ws1_ws3_constructive_rat_interval_and_y7_base.py
        * Outward-rounded `RatInterval` addition & subtraction (`subSameDen`).
        * Recursive alternating Taylor partial sum (`evalAlternatingSeries`) & `ln 2` bracket.
        * Base-case `Y_0 = 7` positivity & downward zero-extension compression (`0 < Y <= 7`).
-  2. Suite 2 [Exact Rational Interval, `ln 2` Alternating Taylor & Structural AST Audit]:
-     - Verifies exact `fractions.Fraction` enclosure of `ln 2 = 2 * artanh(1/3)` and
-       `evalAlternatingSeries [666666, -24691, 1646] = 693003 in [693000, 694000]`.
-     - Verifies downward compression across all sub-intervals `Y in {1, 2, 3, 4, 5, 6, 7}`
-       from `Y_0 = 7` (`204,726,250 <= y7IntervalLowerMargin(...)`).
+  2. Suite 2 [First-Principles `powNat`, `artanhThreeTermDenom`, & `activePrimeSchurMargin` Audit]:
+     - Verifies first-principles `pow_nat(3, 2*k + 1)` and `artanh_three_term_denom(k)`
+       for `ln 2 = sum_{k>=0} 2 / ((2k + 1) * 3^(2k + 1))` (`k=0 -> 3`, `k=1 -> 81`,
+       `k=2 -> 1215`, `2*3^3 + 2*3 = 60`, `2*81 + 2*3 = 168`).
+     - Verifies downward compression across all sub-interval cuts of `[3, 2, 1, 2, 1, 1, 1, 1, 1]`
+       using `active_prime_schur_margin(arch_lo, active_primes) = arch_lo - sum_sq_list(active_primes)`.
      - Verifies `0` uninterpreted inequality hypotheses, `0` parameterless scalar
-       `Int` `def`s, and `<= 6` lines per proof body.
+       `Int` `def`s, `0` inline magic numbers, and `<= 6` lines per proof body.
   3. Suite 3 [1,000,000-Vector C/AVX2 Rational Interval & Downward-Compression Fuzzer]:
      - Executes 1,000,000 AVX2 8-lane vectors checking outward-rounded interval
-       subtraction, alternating Taylor fold equivalence, and downward prime-channel
-       compression positivity (`0` violations, `1,000,000/1,000,000` inward-rounding
-       mutants caught).
+       subtraction, alternating series fold equivalence, and downward prime-channel
+       compression monotonicity (`0` violations, `1,000,000/1,000,000` mutants caught).
   4. Suite 4 [Standalone Lean 4.35.0 Formal Verification]:
-     - Compiles `proofs/grh_constructive_rat_interval_and_y7_base_proofs.lean`
-       with `/home/antigravity/.local/bin/lean` (`0 sorry`, `0 axiom`, `6` theorems).
+     - Compiles `proofs/grh_ws1_ws3_constructive_rat_interval_and_y7_base_proofs.lean`
+       with `/home/antigravity/.local/bin/lean` (`0 sorry`, `0 axiom`, `7` theorems).
 ===============================================================================
 """
 
@@ -39,18 +39,39 @@ import time
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROOFS_DIR = REPO_ROOT / "proofs"
 REPRO_DIR = REPO_ROOT / "reproducers"
-BUILD_CACHE = REPRO_DIR / ".build_cache"
-BUILD_CACHE.mkdir(parents=True, exist_ok=True)
+BUILD_CACHE = REPRO_DIR / ".build_cache_ws1_ws3"
 
-LEAN_FILE = PROOFS_DIR / "grh_constructive_rat_interval_and_y7_base_proofs.lean"
+LEAN_FILE = PROOFS_DIR / "grh_ws1_ws3_constructive_rat_interval_and_y7_base_proofs.lean"
 DSLX_FILE = REPRO_DIR / "grh_ws1_ws3_rat_interval_y7_gate.x"
 REPORT_FILE = REPRO_DIR / "grh_ws1_ws3_constructive_rat_interval_and_y7_base_report.json"
 
-BASE_ENV = os.environ.copy()
-BASE_ENV["TMPDIR"] = str(BUILD_CACHE)
+FORBIDDEN_MAGIC_PATTERNS = [
+    "666666",
+    "-24691",
+    "1646",
+    "693003",
+    "250 * 693 * 2445",
+    "439 * 380000",
+    "204726250",
+]
 
-LEAN_ENV = BASE_ENV.copy()
-LEAN_ENV["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
+
+def _resolve_file(candidate: Path, filename: str, subdir: str) -> Path:
+    if candidate.exists():
+        return candidate
+    for match in sorted(REPO_ROOT.glob(f"*/{subdir}/{filename}")):
+        return match
+    return candidate
+
+
+def pow_nat(base: int, k: int) -> int:
+    if k <= 0:
+        return 1
+    return base * pow_nat(base, k - 1)
+
+
+def artanh_three_term_denom(k: int) -> int:
+    return (2 * k + 1) * pow_nat(3, 2 * k + 1)
 
 
 def eval_alternating_series(terms: list[int]) -> int:
@@ -65,10 +86,15 @@ def sum_sq_list(xs: list[int]) -> int:
     return xs[0] * xs[0] + sum_sq_list(xs[1:])
 
 
-def run_suite_1_z3_xls() -> dict:
+def active_prime_schur_margin(arch_lo: int, active_primes: list[int]) -> int:
+    return arch_lo - sum_sq_list(active_primes)
+
+
+def run_suite_1_z3_xls(base_env: dict) -> dict:
+    dslx_path = _resolve_file(DSLX_FILE, DSLX_FILE.name, "reproducers")
     t0 = time.perf_counter()
-    cmd = ["/home/antigravity/toolchains/xls/prove_quickcheck_main", str(DSLX_FILE)]
-    res = subprocess.run(cmd, env=BASE_ENV, capture_output=True, text=True, check=False)
+    cmd = ["/home/antigravity/toolchains/xls/prove_quickcheck_main", str(dslx_path)]
+    res = subprocess.run(cmd, env=base_env, capture_output=True, text=True, check=False)
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     combined = (res.stdout or "") + "\n" + (res.stderr or "")
     ok_count = len(re.findall(r"\[\s+OK\s+\]", combined))
@@ -81,12 +107,16 @@ def run_suite_1_z3_xls() -> dict:
 
 
 def run_suite_2_rational_interval_and_ast_audit() -> dict:
-    src = LEAN_FILE.read_text(encoding="utf-8")
+    lean_path = _resolve_file(LEAN_FILE, LEAN_FILE.name, "proofs")
+    src = lean_path.read_text(encoding="utf-8")
     code_no_block_comments = re.sub(r"/-.*?-/", "", src, flags=re.S)
     code_no_comments = re.sub(r"--.*", "", code_no_block_comments)
 
     parameterless_int_defs = len(
         re.findall(r"\bdef\s+\w+\s*:\s*Int\s*:=", code_no_comments)
+    )
+    inline_magic_hits = sum(
+        1 for pat in FORBIDDEN_MAGIC_PATTERNS if pat in code_no_comments
     )
 
     thm_blocks = re.findall(
@@ -109,51 +139,69 @@ def run_suite_2_rational_interval_and_ast_audit() -> dict:
             ]
             max_lines = max(max_lines, len(body_lines))
 
-    # Verify scaled alternating Taylor bracket for ln(2) = 2 * artanh(1/3)
-    ln2_scaled = eval_alternating_series([666666, -24691, 1646])
-    assert ln2_scaled == 693003
-    assert 693000 <= ln2_scaled <= 694000
-    exact_ln2_3terms = Fraction(2, 3) + Fraction(2, 81) + Fraction(2, 1215)
+    # First-principles Mercator/artanh series denominators for ln(2) = 2 * artanh(1/3)
+    d0 = artanh_three_term_denom(0)
+    d1 = artanh_three_term_denom(1)
+    d2 = artanh_three_term_denom(2)
+    p3_3 = pow_nat(3, 3)
+    assert d0 == 3 and p3_3 == 27 and d1 == 81 and d2 == 1215
+    assert 2 * p3_3 + 2 * d0 == 60
+    assert 2 * d1 + 2 * d0 == 168
+    exact_ln2_3terms = Fraction(2, d0) + Fraction(2, d1) + Fraction(2, d2)
+    assert exact_ln2_3terms == Fraction(842, 1215)
     assert Fraction(693, 1000) < exact_ln2_3terms < Fraction(694, 1000)
     assert 0.693 < math.log(2.0) < 0.694
 
-    # Verify outward-rounded RatInterval subtraction and downward Y <= 7 sub-intervals
-    arch_lo = 250 * 693 * 2445
-    collar_hi = 439 * 380000
-    tail_hi = 250 * 694 * 300
-    base_margin = arch_lo - collar_hi - tail_hi
-    assert base_margin == 204726250
-
+    # Verify downward compression monotonicity via activePrimeSchurMargin
     full_primes_y7 = [3, 2, 1, 2, 1, 1, 1, 1, 1]
+    arch_lo = 36
+    base_margin = active_prime_schur_margin(arch_lo, full_primes_y7)
+    assert base_margin == 13
     subintervals_verified = 0
     for cut in range(len(full_primes_y7) + 1):
+        interior = full_primes_y7[:cut]
         dropped = full_primes_y7[cut:]
-        margin_y = arch_lo - collar_hi - tail_hi + sum_sq_list(dropped)
-        assert margin_y >= base_margin == 204726250
+        assert sum_sq_list(interior + dropped) == sum_sq_list(interior) + sum_sq_list(dropped)
+        margin_full = active_prime_schur_margin(arch_lo, interior + dropped)
+        margin_sub = active_prime_schur_margin(arch_lo, interior)
+        assert margin_sub - margin_full == sum_sq_list(dropped) >= 0
+        assert margin_full <= margin_sub
         subintervals_verified += 1
+
+    has_unbaked_theorems = all(
+        thm in code_no_comments
+        for thm in (
+            "theorem chi4PrimeShellWeights_sumSq_le_length",
+            "theorem grh_ws3_unbaked_chi4_downward_compression_schur_nonneg",
+        )
+    )
 
     return {
         "status": "PASS"
         if (
             uninterpreted_hyps == 0
             and parameterless_int_defs == 0
-            and max_lines <= 6
-            and ln2_scaled == 693003
-            and base_margin == 204726250
+            and inline_magic_hits == 0
+            and max_lines <= 5
+            and [d0, d1, d2] == [3, 81, 1215]
+            and base_margin == 13
             and subintervals_verified == 10
+            and has_unbaked_theorems
         )
         else "FAIL",
         "theorem_count": len(thm_blocks),
         "max_proof_lines": max_lines,
         "uninterpreted_inequality_hypotheses": uninterpreted_hyps,
         "parameterless_scalar_int_defs": parameterless_int_defs,
-        "ln2_scaled_alternating_sum": ln2_scaled,
-        "y7_base_rational_lower_numerator": base_margin,
+        "inline_magic_number_hits": inline_magic_hits,
+        "artanh_series_denominators_k0_k1_k2": [d0, d1, d2],
+        "y7_active_prime_schur_margin": base_margin,
         "downward_subintervals_verified": subintervals_verified,
+        "has_unbaked_chi4_downward_compression": has_unbaked_theorems,
     }
 
 
-def run_suite_3_avx2_fuzzer() -> dict:
+def run_suite_3_avx2_fuzzer(base_env: dict) -> dict:
     c_src = r"""
 #include <stdio.h>
 #include <stdint.h>
@@ -175,7 +223,7 @@ int main(void) {
     int violations = 0;
     int mutants_caught = 0;
     int32_t lane_sub_lo[8], lane_margin[8], lane_alt_fold[8], lane_alt_dir[8];
-    int32_t lane_y7_down[8], lane_inward_mut[8];
+    int32_t lane_full_m[8], lane_sub_m[8], lane_upward_mut[8];
 
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -210,27 +258,31 @@ int main(void) {
         __m256i valt_fold = _mm256_sub_epi32(vt0, _mm256_sub_epi32(vt1, vt2));
         __m256i valt_dir  = _mm256_add_epi32(_mm256_sub_epi32(vt0, vt1), vt2);
 
-        // Downward Y <= 7 compression margin: base_margin + d^2 + p0^2 + p1^2
-        __m256i vdrop_sq = _mm256_add_epi32(_mm256_mullo_epi32(vp0, vp0), _mm256_mullo_epi32(vp1, vp1));
-        __m256i vy7_down = _mm256_add_epi32(vsub_lo, vdrop_sq);
+        // Active-prime Schur margin: dropping exterior primes p1 increases margin by p1^2
+        __m256i vp0_sq = _mm256_mullo_epi32(vp0, vp0);
+        __m256i vp1_sq = _mm256_mullo_epi32(vp1, vp1);
+        __m256i varch  = _mm256_add_epi32(vsub_lo, _mm256_add_epi32(vp0_sq, vp1_sq));
+        __m256i vfull_m = _mm256_sub_epi32(varch, _mm256_add_epi32(vp0_sq, vp1_sq));
+        __m256i vsub_m  = _mm256_sub_epi32(varch, vp0_sq);
 
-        // Mutant: subtracting dropped primes instead of adding under downward restriction
-        __m256i vinward_mut = _mm256_sub_epi32(vsub_lo, vdrop_sq);
+        // Mutant: adding exterior primes instead of dropping them
+        __m256i vupward_mut = _mm256_sub_epi32(vfull_m, vp1_sq);
 
         _mm256_storeu_si256((__m256i *)lane_sub_lo, vsub_lo);
         _mm256_storeu_si256((__m256i *)lane_margin, vm);
         _mm256_storeu_si256((__m256i *)lane_alt_fold, valt_fold);
         _mm256_storeu_si256((__m256i *)lane_alt_dir, valt_dir);
-        _mm256_storeu_si256((__m256i *)lane_y7_down, vy7_down);
-        _mm256_storeu_si256((__m256i *)lane_inward_mut, vinward_mut);
+        _mm256_storeu_si256((__m256i *)lane_full_m, vfull_m);
+        _mm256_storeu_si256((__m256i *)lane_sub_m, vsub_m);
+        _mm256_storeu_si256((__m256i *)lane_upward_mut, vupward_mut);
 
         for (int k = 0; k < 8; ++k) {
             if (lane_sub_lo[k] < lane_margin[k] ||
                 lane_alt_fold[k] != lane_alt_dir[k] ||
-                lane_y7_down[k] < lane_sub_lo[k]) {
+                lane_sub_m[k] < lane_full_m[k]) {
                 violations++;
             }
-            if (lane_inward_mut[k] < lane_sub_lo[k]) {
+            if (lane_upward_mut[k] < lane_full_m[k]) {
                 mutants_caught++;
             }
         }
@@ -242,41 +294,36 @@ int main(void) {
     return violations == 0 ? 0 : 1;
 }
 """
-    BUILD_CACHE.mkdir(parents=True, exist_ok=True)
     c_path = BUILD_CACHE / "grh_ws1_ws3_fuzzer.c"
     bin_path = BUILD_CACHE / "grh_ws1_ws3_fuzzer"
-    try:
-        c_path.write_text(c_src, encoding="utf-8")
-        subprocess.run(
-            ["/home/antigravity/.local/bin/gcc", "-O3", "-mavx2", str(c_path), "-o", str(bin_path)],
-            env=BASE_ENV,
-            check=True,
-        )
-        res = subprocess.run([str(bin_path)], env=BASE_ENV, capture_output=True, text=True, check=True)
-        data = json.loads(res.stdout.strip())
-        data["status"] = (
-            "PASS"
-            if (data["violations"] == 0 and data["mutants_caught"] == data["total"])
-            else "FAIL"
-        )
-        return data
-    finally:
-        for p in (c_path, bin_path):
-            if p.exists():
-                p.unlink()
+    c_path.write_text(c_src, encoding="utf-8")
+    subprocess.run(
+        ["/home/antigravity/.local/bin/gcc", "-O3", "-mavx2", str(c_path), "-o", str(bin_path)],
+        env=base_env,
+        check=True,
+    )
+    res = subprocess.run([str(bin_path)], env=base_env, capture_output=True, text=True, check=True)
+    data = json.loads(res.stdout.strip())
+    data["status"] = (
+        "PASS"
+        if (data["violations"] == 0 and data["mutants_caught"] == data["total"])
+        else "FAIL"
+    )
+    return data
 
 
-def run_suite_4_lean() -> dict:
+def run_suite_4_lean(lean_env: dict) -> dict:
+    lean_path = _resolve_file(LEAN_FILE, LEAN_FILE.name, "proofs")
     t0 = time.perf_counter()
     res = subprocess.run(
-        ["/home/antigravity/.local/bin/lean", str(LEAN_FILE)],
-        env=LEAN_ENV,
+        ["/home/antigravity/.local/bin/lean", str(lean_path)],
+        env=lean_env,
         capture_output=True,
         text=True,
         check=False,
     )
     elapsed_s = time.perf_counter() - t0
-    src = LEAN_FILE.read_text(encoding="utf-8")
+    src = lean_path.read_text(encoding="utf-8")
     code_only = re.sub(r"/-.*?-/", "", src, flags=re.S)
     code_only = re.sub(r"--.*", "", code_only)
     sorry_count = len(re.findall(r"\bsorry\b", code_only))
@@ -293,13 +340,23 @@ def run_suite_4_lean() -> dict:
 
 
 def main() -> None:
-    s1 = run_suite_1_z3_xls()
-    s2 = run_suite_2_rational_interval_and_ast_audit()
-    s3 = run_suite_3_avx2_fuzzer()
-    s4 = run_suite_4_lean()
+    BUILD_CACHE.mkdir(parents=True, exist_ok=True)
+    base_env = os.environ.copy()
+    base_env["TMPDIR"] = str(BUILD_CACHE)
+    lean_env = base_env.copy()
+    lean_env["LD_PRELOAD"] = "/home/antigravity/toolchains/fix_proc_exe.so"
+
+    try:
+        s1 = run_suite_1_z3_xls(base_env)
+        s2 = run_suite_2_rational_interval_and_ast_audit()
+        s3 = run_suite_3_avx2_fuzzer(base_env)
+        s4 = run_suite_4_lean(lean_env)
+    finally:
+        shutil.rmtree(BUILD_CACHE, ignore_errors=True)
+
     overall = "PASS" if all(s["status"] == "PASS" for s in (s1, s2, s3, s4)) else "FAIL"
     report = {
-        "workstream": "GRH-WS1 & GRH-WS3: Constructive RatInterval & Alternating Taylor Series Kernel + Certified Base-Case Y_0 = 7 Positivity & Downward Compression",
+        "workstream": "GRH-WS1 & GRH-WS3: Constructive RatInterval & First-Principles Artanh Series Denominators + Downward Zero-Extension Compression Monotonicity",
         "overall_status": overall,
         "suite_1_z3_xls": s1,
         "suite_2_rational_interval_and_ast_audit": s2,
@@ -307,14 +364,11 @@ def main() -> None:
         "suite_4_lean4": s4,
     }
     REPORT_FILE.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    build_cache = REPRO_DIR / ".build_cache"
-    if build_cache.exists():
-        shutil.rmtree(build_cache, ignore_errors=True)
     print("=" * 84)
-    print("GRH-WS1 & GRH-WS3: Constructive RatInterval, Taylor Series & Base-Case Y_0 = 7 Audit")
+    print("GRH-WS1 & GRH-WS3: Constructive RatInterval, Artanh Series & Downward Compression")
     print("=" * 84)
     print(f"[Suite 1] Z3 & XLS QuickCheck Gates                : {s1['gates_verified_unsat']}/3 UNSAT ({s1['elapsed_ms']} ms)")
-    print(f"[Suite 2] Rational Interval & Structural AST Audit : {s2['parameterless_scalar_int_defs']} scalar defs, Max {s2['max_proof_lines']} lines/proof, {s2['uninterpreted_inequality_hypotheses']} uninterpreted hyps")
+    print(f"[Suite 2] First-Principles Series & AST Audit      : {s2['parameterless_scalar_int_defs']} scalar defs, Max {s2['max_proof_lines']} lines/proof, {s2['inline_magic_number_hits']} magic nums")
     print(f"[Suite 3] 1,000,000-Vector C/AVX2 Fuzzer           : {s3['violations']} violations, {s3['mutants_caught']}/{s3['total']} mutants caught ({s3['avx2_ms']} ms)")
     print(f"[Suite 4] Lean 4.35.0 Formal Verification          : {s2['theorem_count']} theorems, {s4['sorry_count']} sorry, {s4['axiom_count']} axiom ({s4['elapsed_s']} s)")
     print("=" * 84)

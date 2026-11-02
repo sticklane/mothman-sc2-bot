@@ -116,6 +116,7 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
     is_wave25_plus = bool(
         re.match(r"^wave2[56789].*\.lean$", fname)
         or re.match(r"^grh_ws.*\.lean$", fname)
+        or fname.startswith("universal_inductive_grh")
         or "potemkin_linter" in fname
         or "synthetic_pattern" in fname
     )
@@ -147,7 +148,7 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
                 continue
             sig_part = b.split(":=", 1)[0]
             for hm in re.finditer(
-                r"\((h_[A-Za-z0-9_']*)\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)",
+                r"\((h[A-Za-z0-9_']*)\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)",
                 sig_part,
             ):
                 violations["pattern1_uninterpreted_ineq_hypotheses"].append(
@@ -325,6 +326,11 @@ def audit_lean_source(filename: str, raw_src: str) -> Dict[str, List[str]]:
                 violations["pattern9_tautological_baked_in_model_defs"].append(
                     f"{filename}: missing non-circular un-baked Paley-Wiener reserve theorem `{req_unbaked}`"
                 )
+    if fname.startswith("universal_inductive_grh"):
+        if "theorem chi4PrimeShellWeights_sumSq_le_length" not in cleaned:
+            violations["pattern9_tautological_baked_in_model_defs"].append(
+                f"{filename}: missing non-circular un-baked prime-shell reserve theorem `theorem chi4PrimeShellWeights_sumSq_le_length`"
+            )
 
     # -------------------------------------------------------------------------
     # Pattern 10: Missing first-principles arithmetic or collar/AST completion

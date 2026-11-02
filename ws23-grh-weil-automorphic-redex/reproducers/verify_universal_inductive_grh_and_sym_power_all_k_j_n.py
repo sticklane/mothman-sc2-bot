@@ -655,17 +655,37 @@ def run_suite4_lean4_verification() -> Dict[str, Any]:
     blocks = re.split(r"\b(?:theorem|lemma)\s+", cleaned)[1:]
     thm_names = []
     max_proof_lines = 0
+    uninterpreted_ineq_hyps = []
     for b in blocks:
         m = re.match(r"([A-Za-z0-9_']+)", b.strip())
+        thm_name = m.group(1) if m else "<anon>"
         if m:
-            thm_names.append(m.group(1))
+            thm_names.append(thm_name)
+        sig_part = b.split(":=", 1)[0]
+        for hm in re.finditer(r"\((h[A-Za-z0-9_']*)\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)", sig_part):
+            uninterpreted_ineq_hyps.append(f"{thm_name}::{hm.group(0)}")
         if ":= by" in b:
             after_by = b.split(":= by", 1)[1]
             chunk = re.split(r"\n(?:--|/-!|def |abbrev |structure |inductive |theorem |lemma |end )", after_by)[0]
             lines = [ln.strip() for ln in chunk.splitlines() if ln.strip() and not ln.strip().startswith("--")]
             max_proof_lines = max(max_proof_lines, len(lines))
 
-    assert max_proof_lines <= 20, f"Theorem exceeded 20 lines: {max_proof_lines}"
+    for req_sym in (
+        "def divides",
+        "def sumDivisorsAux",
+        "def sumDivisors",
+        "def isPrime",
+        "def dirichletCharMod4",
+        "def chi4PrimeShellWeights",
+        "def sumSqList",
+        "def dyadicShellGeomSumNat",
+        "theorem chi4PrimeWeight_sq_le_one",
+        "theorem chi4PrimeShellWeights_sumSq_le_length",
+    ):
+        assert req_sym in cleaned, f"Missing required first-principles symbol: {req_sym}"
+
+    assert len(uninterpreted_ineq_hyps) == 0, f"Found uninterpreted inequality hypotheses: {uninterpreted_ineq_hyps}"
+    assert max_proof_lines <= 5, f"Theorem exceeded 5 lines: {max_proof_lines}"
 
     return {
         "lean_file": str(proof_file.relative_to(REPO_ROOT)),
@@ -674,6 +694,7 @@ def run_suite4_lean4_verification() -> Dict[str, Any]:
         "theorems_verified": thm_names,
         "num_theorems_verified": len(thm_names),
         "max_proof_lines": max_proof_lines,
+        "uninterpreted_ineq_hypotheses": len(uninterpreted_ineq_hyps),
         "sorry_count": 0,
         "axiom_count": 0,
         "status": "PASS",

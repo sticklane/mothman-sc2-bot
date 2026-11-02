@@ -9,7 +9,7 @@
     "xls_dslx_gate_file": "reproducers/universal_inductive_grh_and_sym_power_gate.x",
     "xls_interpreter_status": "PASS (4/4 quickchecks)",
     "xls_prove_quickcheck_z3_status": "UNSAT (4/4 universal inductive gates proved)",
-    "z3_total_solve_time_ms": 9918.509,
+    "z3_total_solve_time_ms": 760.38,
     "status": "PASS"
   },
   "suite2_unbounded_numerical_verification": {
@@ -60,21 +60,23 @@
     "mutant_detections": "1000000 / 1000000 (100.0%)",
     "deterministic_checksum_match": true,
     "checksum_hex": "0x3ffff007f666",
-    "avx2_fma_warm_ms": 1.371,
-    "avx2_fma_cold_32mb_llc_ms": 1.405,
-    "scalar_c_warm_ms": 5.864,
-    "scalar_c_cold_32mb_llc_ms": 5.926,
-    "warm_speedup_avx2_vs_scalar": 4.28,
-    "cold_speedup_avx2_vs_scalar": 4.22,
+    "avx2_fma_warm_ms": 1.743,
+    "avx2_fma_cold_32mb_llc_ms": 1.764,
+    "scalar_c_warm_ms": 5.932,
+    "scalar_c_cold_32mb_llc_ms": 5.988,
+    "warm_speedup_avx2_vs_scalar": 3.4,
+    "cold_speedup_avx2_vs_scalar": 3.4,
     "status": "PASS"
   },
   "suite4_lean4_formal_verification": {
     "lean_file": "proofs/universal_inductive_grh_and_sym_power_all_k_j_n_proofs.lean",
     "lean_exit_code": 0,
-    "lean_compile_time_s": 0.429,
+    "lean_compile_time_s": 0.813,
     "theorems_verified": [
       "int_sq_nonneg",
       "int_sq_strict_mono",
+      "chi4PrimeWeight_sq_le_one",
+      "chi4PrimeShellWeights_sumSq_le_length",
       "universal_dyadic_pow_nonneg_and_monotone_all_k",
       "universal_gelfand_beurling_2k_sos_and_open_h1_all_k",
       "dyadic_shell_geom_sum_identity",
@@ -84,12 +86,13 @@
       "universal_all_layer_buchstab_and_unbounded_siegel_h3_divergence",
       "master_universal_all_k_j_n_m_grh_and_langlands_sym_closure"
     ],
-    "num_theorems_verified": 10,
-    "max_proof_lines": 9,
+    "num_theorems_verified": 12,
+    "max_proof_lines": 5,
+    "uninterpreted_ineq_hypotheses": 0,
     "sorry_count": 0,
     "axiom_count": 0,
     "status": "PASS"
   },
-  "total_runtime_s": 10.867,
+  "total_runtime_s": 10.375,
   "overall_status": "PASS"
 }

@@ -89,6 +89,14 @@ def run_suite_1_z3_xls(base_env: dict) -> dict:
     }
 
 
+def harmonic_num_scaled_py(scale: int, n: int) -> int:
+    return sum(scale // k for k in range(1, n + 1))
+
+
+def chi4_prime_shell_weights_py(candidates: list[int]) -> list[int]:
+    return [dirichlet_char_mod4_py(n) if is_prime_py(n) else 0 for n in candidates]
+
+
 def run_suite_2_ast_and_algebraic_audit() -> dict:
     lean_path = _resolve_file(LEAN_FILE, LEAN_FILE.name, "proofs")
     src = lean_path.read_text(encoding="utf-8")
@@ -102,9 +110,13 @@ def run_suite_2_ast_and_algebraic_audit() -> dict:
     has_first_principles_defs = (
         "def isPrime" in code_no_comments
         and "sumDivisors n == n + 1" in code_no_comments
+        and "def harmonicNumScaled" in code_no_comments
         and "def chebyshevChi4PrimeSum" in code_no_comments
+        and "def chi4PrimeShellWeights" in code_no_comments
         and "def modQOrthogonalWeight" in code_no_comments
+        and "chi4PrimeShellWeights_sumSq_le_length" in code_no_comments
         and "grh_ws6_mod_q_character_orthogonality_annihilates_conductor_shell" in code_no_comments
+        and "grh_ws2_lagarias_robin_superabundant_and_unbaked_chi4_shell" in code_no_comments
     )
 
     thm_blocks = re.findall(
@@ -124,10 +136,18 @@ def run_suite_2_ast_and_algebraic_audit() -> dict:
             ]
             max_lines = max(max_lines, len(body_lines))
 
-    # First-principles arithmetic checks: sigma(n), isPrime(n), chi_4(n), chebyshevChi4PrimeSum(n), and modQOrthogonalWeight
+    # First-principles arithmetic checks: sigma(n), harmonicNumScaled, isPrime(n), chi_4(n), chebyshevChi4PrimeSum(n), chi4PrimeShellWeights, and modQOrthogonalWeight
     assert sum_divisors_py(1) == 1
+    assert sum_divisors_py(2) == 3
     assert sum_divisors_py(6) == 12
     assert sum_divisors_py(12) == 28
+    assert sum_divisors_py(24) == 60
+    assert sum_divisors_py(60) == 168
+    assert sum_divisors_py(120) == 360
+    assert harmonic_num_scaled_py(60, 6) == 147
+    shell_2_3_5_7 = chi4_prime_shell_weights_py([2, 3, 5, 7])
+    assert shell_2_3_5_7 == [0, -1, 1, -1]
+    assert 8 - sum(w * w for w in (shell_2_3_5_7 + [2])) == 1
     assert is_prime_py(2) is True and is_prime_py(3) is True and is_prime_py(4) is False and is_prime_py(5) is True
     assert chebyshev_chi4_prime_sum_py(6) == 0
     assert chebyshev_chi4_prime_sum_py(14) == -1
@@ -170,7 +190,7 @@ def run_suite_2_ast_and_algebraic_audit() -> dict:
             and not has_self_cancelling_shim
             and has_first_principles_defs
             and max_lines <= 5
-            and len(thm_blocks) == 8
+            and len(thm_blocks) == 11
             and states_checked == 4800
         ) else "FAIL",
         "theorem_count": len(thm_blocks),

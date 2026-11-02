@@ -143,8 +143,11 @@ def run_check1_lean_proof_hygiene() -> Tuple[bool, Dict]:
             if any(op in rhs_expr for op in ["+", "-", "*"]):
                 potemkin_scalar_defs.append(f"{rel}::{def_name} := {rhs_expr}")
 
-        # Anti-Potemkin Check 1b: Uninterpreted inequality hypotheses `(h_... : ... < ...)` or `(h_... : ... ≤ ...)` in wave2[5678]*.lean
-        is_wave25_plus = bool(re.match(r"^wave2[5678].*\.lean$", pf.name))
+        # Anti-Potemkin Check 1b: Uninterpreted inequality hypotheses `(h_... : ... < ...)` or `(h_... : ... ≤ ...)` in wave2[56789]*.lean and universal_inductive_grh*.lean
+        is_wave25_plus = bool(
+            re.match(r"^wave2[56789].*\.lean$", pf.name)
+            or pf.name.startswith("universal_inductive_grh")
+        )
 
         # Classify all theorem/lemma declarations
         blocks = re.split(r"\b(?:theorem|lemma)\s+", raw)[1:]
@@ -156,7 +159,7 @@ def run_check1_lean_proof_hygiene() -> Tuple[bool, Dict]:
             if is_wave25_plus and not thm_name.endswith("_helper"):
                 b_clean = strip_lean_comments(b)
                 sig_part = b_clean.split(":=", 1)[0]
-                for hm in re.finditer(r"\((h_[A-Za-z0-9_']*)\s*:\s*[^)]*(?:<|≤|<=)[^)]*\)", sig_part):
+                for hm in re.finditer(r"\((h[A-Za-z0-9_']*)\s*:\s*[^)]*(?:<|≤|<=|>|≥|>=)[^)]*\)", sig_part):
                     uninterpreted_ineq_hyps.append(f"{rel}::{thm_name}::{hm.group(0)}")
 
             if ":= by" not in b:
@@ -180,7 +183,7 @@ def run_check1_lean_proof_hygiene() -> Tuple[bool, Dict]:
             else:
                 structural_theorems += 1
 
-    # Run the standalone 10-pattern preprint sanitizer & synthetic 10-pattern injection self-test
+    # Run the standalone 12-pattern preprint sanitizer & synthetic 12-pattern injection self-test
     eight_pattern_self_test_passed = False
     eight_pattern_real_violations = 0
     eight_pattern_recall_pct = 0.0
@@ -195,16 +198,18 @@ def run_check1_lean_proof_hygiene() -> Tuple[bool, Dict]:
         spec_san.loader.exec_module(san_mod)
         st_res = san_mod.run_synthetic_8pattern_injection_self_test()
         _, repo_san_res = san_mod.audit_repository(REPO_ROOT)
+        total_pats = int(st_res.get("total_patterns", 12))
         eight_pattern_self_test_passed = bool(
-            st_res.get("all_ten_patterns_caught", False)
-            and st_res.get("caught_count", 0) == 10
+            st_res.get("all_twelve_patterns_caught", st_res.get("all_ten_patterns_caught", False))
+            and st_res.get("caught_count", 0) == total_pats
+            and total_pats >= 10
             and repo_san_res.get("total_real_violations", 1) == 0
         )
         eight_pattern_real_violations = int(repo_san_res.get("total_real_violations", 0))
         eight_pattern_recall_pct = float(st_res.get("recall_pct", 0.0))
         if not eight_pattern_self_test_passed:
             hygiene_violations.append(
-                f"10-pattern sanitizer check failed (self_test={st_res.get('all_ten_patterns_caught')}, caught={st_res.get('caught_count')}/10, real_violations={eight_pattern_real_violations})"
+                f"12-pattern sanitizer check failed (self_test={st_res.get('all_twelve_patterns_caught')}, caught={st_res.get('caught_count')}/{total_pats}, real_violations={eight_pattern_real_violations})"
             )
     else:
         hygiene_violations.append("Missing reproducers/sanitize_lean4_preprint_and_audit_gaps.py")
@@ -232,12 +237,18 @@ def run_check1_lean_proof_hygiene() -> Tuple[bool, Dict]:
         "eight_pattern_injection_self_test_passed": eight_pattern_self_test_passed,
         "nine_pattern_injection_self_test_passed": eight_pattern_self_test_passed,
         "ten_pattern_injection_self_test_passed": eight_pattern_self_test_passed,
+        "eleven_pattern_injection_self_test_passed": eight_pattern_self_test_passed,
+        "twelve_pattern_injection_self_test_passed": eight_pattern_self_test_passed,
         "eight_pattern_real_violations": eight_pattern_real_violations,
         "nine_pattern_real_violations": eight_pattern_real_violations,
         "ten_pattern_real_violations": eight_pattern_real_violations,
+        "eleven_pattern_real_violations": eight_pattern_real_violations,
+        "twelve_pattern_real_violations": eight_pattern_real_violations,
         "eight_pattern_recall_pct": eight_pattern_recall_pct,
         "nine_pattern_recall_pct": eight_pattern_recall_pct,
         "ten_pattern_recall_pct": eight_pattern_recall_pct,
+        "eleven_pattern_recall_pct": eight_pattern_recall_pct,
+        "twelve_pattern_recall_pct": eight_pattern_recall_pct,
         "non_tautological_share_pct": round(non_tautological_pct, 2),
         "hygiene_violations": hygiene_violations,
         "tautology_list": formula_tautologies,
