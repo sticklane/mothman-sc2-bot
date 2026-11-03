@@ -695,6 +695,34 @@
                              sm-name sid kind)
                      (hasheq 'state-machine sm-name 'state sid 'kind kind 'initial init-st)
                      "Add a START/SELECT respawn transition from the failure state back to the initial/active state.")
+                    violations))))
+    ;; 3. Verify all campaign victory/completion states ('victory, 'completed, 'win) are reachable from `init-st`
+    (define adj
+      (for/hash ([s (in-list states)])
+        (values (hash-ref s 'id) (hash-ref s 'transitions '()))))
+    (define reachable (mutable-set))
+    (let bfs ([queue (list init-st)])
+      (unless (null? queue)
+        (define cur (car queue))
+        (define rest (cdr queue))
+        (if (set-member? reachable cur)
+            (bfs rest)
+            (begin
+              (set-add! reachable cur)
+              (bfs (append rest (hash-ref adj cur '())))))))
+    (for ([s (in-list states)])
+      (define sid  (hash-ref s 'id))
+      (define kind (hash-ref s 'kind 'normal))
+      (when (and (memq kind '(victory completed win))
+                 (not (set-member? reachable sid)))
+        (set! violations
+              (cons (nes-violation
+                     'L3
+                     'unreachable-victory-state
+                     (format "State machine '~a' victory state '~a' is unreachable from initial state '~a' (disconnected multi-stage campaign)"
+                             sm-name sid init-st)
+                     (hasheq 'state-machine sm-name 'victory-state sid 'initial init-st)
+                     "Ensure every intermediate stage transitions forward to the next stage until reaching the victory state.")
                     violations)))))
   (reverse violations))
 
@@ -1381,6 +1409,25 @@
                  (hash-set sm 'states fixed-states)))
              (set! repaired (hash-set repaired 'state-machines fixed-sms))
              (set! applied-repairs (cons 'inject-failure-state-respawn-transition applied-repairs))]
+
+            [(unreachable-victory-state)
+             (define fixed-sms
+               (for/list ([sm (in-list (hash-ref repaired 'state-machines '()))])
+                 (define init-st (hash-ref sm 'initial 'active))
+                 (define states (hash-ref sm 'states '()))
+                 (define vic-ids
+                   (for/list ([s (in-list states)]
+                              #:when (memq (hash-ref s 'kind 'normal) '(victory completed win)))
+                     (hash-ref s 'id)))
+                 (define fixed-states
+                   (for/list ([s (in-list states)])
+                     (if (eq? (hash-ref s 'id) init-st)
+                         (hash-set s 'transitions
+                                   (remove-duplicates (append (hash-ref s 'transitions '()) vic-ids)))
+                         s)))
+                 (hash-set sm 'states fixed-states)))
+             (set! repaired (hash-set repaired 'state-machines fixed-sms))
+             (set! applied-repairs (cons 'connect-disconnected-victory-state applied-repairs))]
 
             [(pinned-zp-address-collision)
              (define seen (make-hash))

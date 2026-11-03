@@ -1166,7 +1166,10 @@
   (nes-emulator-active-prg-bank emu))
 
 (define (nes-vram-ref emu vram-addr)
-  (bytes-ref (nes-emulator-vram emu) (bitwise-and #x0FFF vram-addr)))
+  (define a (bitwise-and #x3FFF vram-addr))
+  (if (>= a #x3F00)
+      (bytes-ref (nes-emulator-palette emu) (bitwise-and #x1F a))
+      (bytes-ref (nes-emulator-vram emu) (bitwise-and #x0FFF a))))
 
 (define (nes-palette-ref emu idx)
   (bytes-ref (nes-emulator-palette emu) (bitwise-and #x1F idx)))

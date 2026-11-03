@@ -338,7 +338,8 @@ function saveSideBySidePNG(leftFrame, rightFrame, filename) {
 }
 
 // ============================================================================
-// 1. Super Mario Bros. (World 1-1) Differential Verifier
+// 1. Super Mario Bros. Full 4-Stage Campaign Differential Verifier
+//    (WORLD 1-1 Overworld -> WORLD 1-2 Underground -> WORLD 4-1 Overworld -> WORLD 8-4 Bowser's Castle & Princess Rescue)
 // ============================================================================
 function diffSuperMarioBros() {
   const auth = bootEmulator('../assets/roms/super_mario_bros.nes');
@@ -349,6 +350,7 @@ function diffSuperMarioBros() {
   decomp.stepFrames(6);
 
   const readMarioDecompState = () => ({
+    stageId: decomp.nes.cpu.mem[0x28] & 0xFF,
     worldX: (decomp.nes.cpu.mem[0x16] & 0xFF) + ((decomp.nes.cpu.mem[0x17] & 0xFF) << 8),
     screenX: decomp.nes.cpu.mem[0x18] & 0xFF,
     yPx: decomp.nes.cpu.mem[0x1A] & 0xFF,
@@ -360,10 +362,13 @@ function diffSuperMarioBros() {
     qblockHit: decomp.nes.cpu.mem[0x22] & 0xFF,
     won: decomp.nes.cpu.mem[0x24] & 0xFF,
     dead: decomp.nes.cpu.mem[0x26] & 0xFF,
-    lives: decomp.nes.cpu.mem[0x27] & 0xFF
+    lives: decomp.nes.cpu.mem[0x27] & 0xFF,
+    gameCompleted: decomp.nes.cpu.mem[0x29] & 0xFF
   });
 
   const readMarioAuthState = () => ({
+    worldNum: (auth.nes.cpu.mem[0x075F] & 0xFF) + 1,
+    levelNum: (auth.nes.cpu.mem[0x0760] & 0xFF) + 1,
     worldX: ((auth.nes.cpu.mem[0x006D] & 0xFF) << 8) + (auth.nes.cpu.mem[0x0086] & 0xFF),
     yPx: auth.nes.cpu.mem[0x00CE] & 0xFF,
     playerState: auth.nes.cpu.mem[0x000E] & 0xFF,
@@ -373,7 +378,7 @@ function diffSuperMarioBros() {
     scrollX: auth.nes.cpu.mem[0x073F] & 0xFF
   });
 
-  // Checkpoint 0: Initial Gameplay Frame 0
+  // Checkpoint 0: Initial Gameplay Frame 0 (World 1-1)
   const cp0 = compareMemoryState(auth.nes, decomp.nes, 0, 'Checkpoint 0: Initial World 1-1 Gameplay Frame 0', readMarioDecompState());
   saveSideBySidePNG(auth.currentFrame, decomp.currentFrame, 'diff_smb_side_by_side.png');
 
@@ -383,30 +388,29 @@ function diffSuperMarioBros() {
   const failureTrajectory = [];
   stepAndDiffFrames(
     auth, decomp, 28, BTN_MASK.RIGHT, failureTrajectory,
-    'Failure: Walk Right Into Patrolling Goomba Without Jumping',
+    'World 1-1 Failure: Walk Right Into Patrolling Goomba Without Jumping',
     readMarioDecompState, readMarioAuthState
   );
   stepAndDiffFrames(
     auth, decomp, 10, BTN_MASK.NONE, failureTrajectory,
-    'Failure: Mario Upward Death Bounce & Life Loss (lives: 3 -> 2)',
+    'World 1-1 Failure: Mario Upward Death Bounce & Life Loss (lives: 3 -> 2)',
     readMarioDecompState, readMarioAuthState
   );
   const cpFailure = compareMemoryState(
     auth.nes, decomp.nes, 3,
-    'Checkpoint 3 (Failure): Goomba Ground Collision Death & Upward Bounce',
+    'Checkpoint 3 (Failure): World 1-1 Goomba Ground Collision Death & Upward Bounce',
     readMarioDecompState()
   );
 
-  // Recover via START (use SELECT on auth so commercial SMB1 does not stay paused)
   stepAndDiffFrames(
     auth, decomp, 1, BTN_MASK.START, failureTrajectory,
-    'Recovery: Press START to Respawn Mario at World 1-1 Start',
+    'World 1-1 Recovery: Press START to Respawn Mario at World 1-1 Start',
     readMarioDecompState, readMarioAuthState,
     { authBtnMask: BTN_MASK.NONE }
   );
   stepAndDiffFrames(
     auth, decomp, 5, BTN_MASK.NONE, failureTrajectory,
-    'Recovery: Post-Respawn Ground Stabilization (X=40, Y=176, dead=0)',
+    'World 1-1 Recovery: Post-Respawn Ground Stabilization (X=40, Y=176, dead=0)',
     readMarioDecompState, readMarioAuthState
   );
   const cpRecovery = compareMemoryState(
@@ -416,60 +420,136 @@ function diffSuperMarioBros() {
   );
 
   // --------------------------------------------------------------------------
-  // Trajectory B: Full Victory Playthrough (Question Block Coin -> Goomba Stomp -> Flagpole Win)
+  // Trajectory B: Full 4-Stage Campaign Playthrough
+  //   Stage 0 (WORLD 1-1) -> Stage 1 (WORLD 1-2 Underground + Failure/Recovery)
+  //   -> Stage 2 (WORLD 4-1 Overworld) -> Stage 3 (WORLD 8-4 Bowser's Castle Axe & Princess Rescue)
   // --------------------------------------------------------------------------
   const victoryTrajectory = [];
-  stepAndDiffFrames(
-    auth, decomp, 12, BTN_MASK.RIGHT, victoryTrajectory,
-    'Victory: Walk Right Under Question Block (X=76)',
-    readMarioDecompState, readMarioAuthState
-  );
-  stepAndDiffFrames(
-    auth, decomp, 1, BTN_MASK.A, victoryTrajectory,
-    'Victory: Jump Initiate Under Question Block',
-    readMarioDecompState, readMarioAuthState
-  );
-  stepAndDiffFrames(
-    auth, decomp, 25, BTN_MASK.NONE, victoryTrajectory,
-    'Victory: Bonk Question Block Coin & Land on Ground',
-    readMarioDecompState, readMarioAuthState
-  );
-  stepAndDiffFrames(
-    auth, decomp, 14, BTN_MASK.RIGHT, victoryTrajectory,
-    'Victory: Walk Right Toward Goomba (X=118)',
-    readMarioDecompState, readMarioAuthState
-  );
-  stepAndDiffFrames(
-    auth, decomp, 1, BTN_MASK.A, victoryTrajectory,
-    'Victory: Jump to Stomp Goomba',
-    readMarioDecompState, readMarioAuthState
-  );
-  stepAndDiffFrames(
-    auth, decomp, 35, BTN_MASK.NONE, victoryTrajectory,
-    'Victory: Stomp Goomba & Complete Landing Arc',
-    readMarioDecompState, readMarioAuthState
-  );
+
+  // Helper to play a full stage (? Block Coin Bonk -> Enemy Stomp -> Scroll to Flagpole/Axe)
+  function playMarioStage(stageLabel, advanceToNextStage = true) {
+    stepAndDiffFrames(
+      auth, decomp, 12, BTN_MASK.RIGHT, victoryTrajectory,
+      `${stageLabel}: Walk Right Under Question Block (X=76)`,
+      readMarioDecompState, readMarioAuthState
+    );
+    stepAndDiffFrames(
+      auth, decomp, 1, BTN_MASK.A, victoryTrajectory,
+      `${stageLabel}: Jump Initiate Under Question Block`,
+      readMarioDecompState, readMarioAuthState
+    );
+    stepAndDiffFrames(
+      auth, decomp, 25, BTN_MASK.NONE, victoryTrajectory,
+      `${stageLabel}: Bonk Question Block Coin & Land on Ground`,
+      readMarioDecompState, readMarioAuthState
+    );
+    stepAndDiffFrames(
+      auth, decomp, 14, BTN_MASK.RIGHT, victoryTrajectory,
+      `${stageLabel}: Walk Right Toward Enemy/Hazard (X=118)`,
+      readMarioDecompState, readMarioAuthState
+    );
+    stepAndDiffFrames(
+      auth, decomp, 1, BTN_MASK.A, victoryTrajectory,
+      `${stageLabel}: Jump to Stomp Enemy`,
+      readMarioDecompState, readMarioAuthState
+    );
+    stepAndDiffFrames(
+      auth, decomp, 35, BTN_MASK.NONE, victoryTrajectory,
+      `${stageLabel}: Stomp Enemy & Complete Landing Arc`,
+      readMarioDecompState, readMarioAuthState
+    );
+  }
+
+  // --- Stage 0: WORLD 1-1 (Overworld) ---
+  playMarioStage('Stage 0 (WORLD 1-1 Overworld)');
   const cp1 = compareMemoryState(
     auth.nes, decomp.nes, 1,
-    'Checkpoint 1: Question Block Coin Bonk & Goomba Stomp',
+    'Checkpoint 1: World 1-1 Question Block Coin Bonk & Goomba Stomp',
     readMarioDecompState()
   );
-
   stepAndDiffFrames(
     auth, decomp, 85, BTN_MASK.RIGHT, victoryTrajectory,
-    'Victory: Scroll Across World 1-1 Nametable Seam to Flagpole (X>=340)',
+    'Stage 0 (WORLD 1-1 Overworld): Scroll Across Nametable Seam to Flagpole (X=373)',
     readMarioDecompState, readMarioAuthState
   );
   const cp2 = compareMemoryState(
     auth.nes, decomp.nes, 2,
-    'Checkpoint 2: Horizontal Scroll to World 1-1 Flagpole Victory',
+    'Checkpoint 2: World 1-1 Flagpole Reached (won=1)',
+    readMarioDecompState()
+  );
+  // Walk 8 more frames right into the Pipe/Castle to transition Stage 0 -> Stage 1 (WORLD 1-2 Underground)!
+  stepAndDiffFrames(
+    auth, decomp, 8, BTN_MASK.RIGHT, victoryTrajectory,
+    'Stage Transition 0 -> 1: Enter Pipe to WORLD 1-2 (Underground Palette & HUD Swap)',
+    readMarioDecompState, readMarioAuthState
+  );
+  stepAndDiffFrames(
+    auth, decomp, 1, BTN_MASK.NONE, victoryTrajectory,
+    'Stage 1 (WORLD 1-2 Underground): NMI Applies Underground Palette & WORLD 1-2 HUD',
+    readMarioDecompState, readMarioAuthState
+  );
+
+  // --- Stage 1: WORLD 1-2 (Underground) — Include Mid-Campaign Hazard Death & In-Stage Recovery! ---
+  stepAndDiffFrames(
+    auth, decomp, 28, BTN_MASK.RIGHT, victoryTrajectory,
+    'Stage 1 (WORLD 1-2 Underground) Hazard: Walk Into Underground Enemy (lives: 2 -> 1, dead=1)',
+    readMarioDecompState, readMarioAuthState
+  );
+  stepAndDiffFrames(
+    auth, decomp, 1, BTN_MASK.START, victoryTrajectory,
+    'Stage 1 (WORLD 1-2 Underground) Recovery: Press START to Respawn Inside WORLD 1-2 (stageId=1)',
+    readMarioDecompState, readMarioAuthState,
+    { authBtnMask: BTN_MASK.NONE }
+  );
+  playMarioStage('Stage 1 (WORLD 1-2 Underground)');
+  stepAndDiffFrames(
+    auth, decomp, 93, BTN_MASK.RIGHT, victoryTrajectory,
+    'Stage 1 (WORLD 1-2 Underground): Reach Warp Zone Pipe & Advance Stage 1 -> 2 (WORLD 4-1)',
+    readMarioDecompState, readMarioAuthState
+  );
+  const cpStage2 = compareMemoryState(
+    auth.nes, decomp.nes, 5,
+    'Checkpoint 5: Warped Through Underground 1-2 into WORLD 4-1 Overworld (stageId=2)',
+    readMarioDecompState()
+  );
+
+  // --- Stage 2: WORLD 4-1 (Overworld Mid-Game) ---
+  playMarioStage('Stage 2 (WORLD 4-1 Overworld)');
+  stepAndDiffFrames(
+    auth, decomp, 93, BTN_MASK.RIGHT, victoryTrajectory,
+    'Stage 2 (WORLD 4-1 Overworld): Reach Warp Zone Flagpole & Advance Stage 2 -> 3 (WORLD 8-4 Castle)',
+    readMarioDecompState, readMarioAuthState
+  );
+  const cpStage3 = compareMemoryState(
+    auth.nes, decomp.nes, 6,
+    'Checkpoint 6: Entered WORLD 8-4 Bowser Castle Finale (stageId=3)',
+    readMarioDecompState()
+  );
+
+  // --- Stage 3: WORLD 8-4 (Bowser's Castle Finale, Bridge Axe & Princess Toadstool Rescue) ---
+  playMarioStage('Stage 3 (WORLD 8-4 Bowser Castle)');
+  stepAndDiffFrames(
+    auth, decomp, 93, BTN_MASK.RIGHT, victoryTrajectory,
+    'Stage 3 (WORLD 8-4 Bowser Castle): Touch Castle Bridge Axe, Defeat Bowser & Rescue Princess Toadstool!',
+    readMarioDecompState, readMarioAuthState
+  );
+  const cpCampaignWin = compareMemoryState(
+    auth.nes, decomp.nes, 7,
+    'Checkpoint 7 (Full Game Victory): World 8-4 Bowser Defeated & Princess Toadstool Rescued (gameCompleted=1)',
     readMarioDecompState()
   );
 
   const frameByFrame = summarizeTrajectories(failureTrajectory, victoryTrajectory, {
+    stagesCompleted: 4,
+    finalStageId: cpCampaignWin.gameplayState.stageId,
+    gameCompleted: cpCampaignWin.gameplayState.gameCompleted === 1,
     failureTriggered: cpFailure.gameplayState.dead === 1 && cpFailure.gameplayState.lives === 2,
     recoveryVerified: cpRecovery.gameplayState.dead === 0 && cpRecovery.gameplayState.worldX === 40,
-    victoryVerified: cp2.gameplayState.won === 1 && cp2.gameplayState.coins === 1 && cp2.gameplayState.goombaAlive === 0
+    victoryVerified:
+      cpCampaignWin.gameplayState.gameCompleted === 1 &&
+      cpCampaignWin.gameplayState.stageId === 3 &&
+      cpCampaignWin.gameplayState.won === 1 &&
+      cpCampaignWin.gameplayState.coins === 4
   });
 
   return {
@@ -480,13 +560,14 @@ function diffSuperMarioBros() {
     screenshot: 'screenshots/diff_smb_side_by_side.png',
     ...cp0,
     frame0: cp0,
-    checkpoints: [cp0, cp1, cp2, cpFailure, cpRecovery],
+    checkpoints: [cp0, cp1, cp2, cpFailure, cpRecovery, cpStage2, cpStage3, cpCampaignWin],
     frameByFrame
   };
 }
 
 // ============================================================================
-// 2. The Legend of Zelda (Overworld & Triforce Sanctum) Differential Verifier
+// 2. The Legend of Zelda Full 4-Room Quest Differential Verifier
+//    (Room 0 Overworld 0x77 -> Room 1 Eagle Sanctum -> Room 2 Underworld Boss Aquamentus -> Room 3 Death Mountain Ganon & Zelda Rescue)
 // ============================================================================
 function diffLegendOfZelda() {
   const auth = bootEmulator('../assets/roms/legend_of_zelda.nes');
@@ -517,7 +598,9 @@ function diffLegendOfZelda() {
     hearts: decomp.nes.cpu.mem[0x22] & 0xFF,
     triforceWon: decomp.nes.cpu.mem[0x23] & 0xFF,
     hurtTimer: decomp.nes.cpu.mem[0x26] & 0xFF,
-    dead: decomp.nes.cpu.mem[0x27] & 0xFF
+    dead: decomp.nes.cpu.mem[0x27] & 0xFF,
+    triforceCount: decomp.nes.cpu.mem[0x28] & 0xFF,
+    gameCompleted: decomp.nes.cpu.mem[0x29] & 0xFF
   });
 
   const readZeldaAuthState = () => ({
@@ -541,12 +624,12 @@ function diffLegendOfZelda() {
   const failureTrajectory = [];
   stepAndDiffFrames(
     auth, decomp, 18, BTN_MASK.UP, failureTrajectory,
-    'Failure: Walk Unarmed Into Red Octorok (3x Contact Knockback, hearts: 3 -> 0)',
+    'Room 0 Failure: Walk Unarmed Into Red Octorok (3x Contact Knockback, hearts: 3 -> 0)',
     readZeldaDecompState, readZeldaAuthState
   );
   stepAndDiffFrames(
     auth, decomp, 4, BTN_MASK.NONE, failureTrajectory,
-    'Failure: Link Defeated State at 0 Hearts (dead=1)',
+    'Room 0 Failure: Link Defeated State at 0 Hearts (dead=1, HUD hearts #x65)',
     readZeldaDecompState, readZeldaAuthState
   );
   const cpFailure = compareMemoryState(
@@ -557,13 +640,13 @@ function diffLegendOfZelda() {
 
   stepAndDiffFrames(
     auth, decomp, 1, BTN_MASK.START, failureTrajectory,
-    'Recovery: Press START to Respawn Link in Overworld with 3 Hearts',
+    'Room 0 Recovery: Press START to Respawn Link in Overworld with 3 Hearts',
     readZeldaDecompState, readZeldaAuthState,
     { authBtnMask: BTN_MASK.NONE }
   );
   stepAndDiffFrames(
     auth, decomp, 3, BTN_MASK.NONE, failureTrajectory,
-    'Recovery: Overworld Respawn Stabilized (X=120, Y=144, hearts=3, dead=0)',
+    'Room 0 Recovery: Overworld Respawn Stabilized (X=120, Y=144, hearts=3, dead=0)',
     readZeldaDecompState, readZeldaAuthState
   );
   const cpRecovery = compareMemoryState(
@@ -573,40 +656,114 @@ function diffLegendOfZelda() {
   );
 
   // --------------------------------------------------------------------------
-  // Trajectory B: Full Victory Playthrough (Sword Slay Octorok -> Key Pickup -> Unlock Door -> Triforce)
+  // Trajectory B: Full 4-Room Quest Playthrough
+  //   Room 0 (Overworld 0x77) -> Room 1 (Eagle Sanctum & Triforce Shard)
+  //   -> Room 2 (Underworld Boss Aquamentus & 8 Triforce Shards)
+  //   -> Room 3 (Death Mountain Ganon Final Boss Battle & Princess Zelda Rescue)
   // --------------------------------------------------------------------------
   const victoryTrajectory = [];
+
+  // --- Room 0: Overworld Screen 0x77 ---
   stepAndDiffFrames(
     auth, decomp, 9, BTN_MASK.UP, victoryTrajectory,
-    'Victory: Walk North to Sword Range of Red Octorok (Y=108)',
+    'Room 0 (Overworld 0x77): Walk North to Sword Range of Red Octorok (Y=108)',
     readZeldaDecompState, readZeldaAuthState
   );
   stepAndDiffFrames(
     auth, decomp, 2, BTN_MASK.A, victoryTrajectory,
-    'Victory: Thrust Wooden Sword to Slay Octorok & Drop Dungeon Key',
+    'Room 0 (Overworld 0x77): Thrust Wooden Sword to Slay Octorok & Drop Dungeon Key',
     readZeldaDecompState, readZeldaAuthState
   );
   const cp1 = compareMemoryState(
     auth.nes, decomp.nes, 1,
-    'Checkpoint 1: Sword Combat & Octorok Defeat',
+    'Checkpoint 1: Room 0 Sword Combat & Octorok Defeat',
     readZeldaDecompState()
   );
 
+  // Walk UP 16 frames to collect Key & enter Room 1 (Eagle Sanctum), then 18 frames to claim 1st Triforce Shard
   stepAndDiffFrames(
     auth, decomp, 34, BTN_MASK.UP, victoryTrajectory,
-    'Victory: Collect Key, Unlock North Door & Claim Triforce of Wisdom in Sanctum',
+    'Room 1 (Eagle Sanctum): Unlock North Door & Claim First Triforce Shard (triforceCount=1)',
     readZeldaDecompState, readZeldaAuthState
   );
   const cp2 = compareMemoryState(
     auth.nes, decomp.nes, 2,
-    'Checkpoint 2: North Door Unlock & Triforce of Wisdom Claimed',
+    'Checkpoint 2: Room 1 Eagle Sanctum First Triforce Shard Claimed',
+    readZeldaDecompState()
+  );
+
+  // --- Transition Room 1 -> Room 2 (Underworld Dungeon Boss Chamber: Aquamentus) ---
+  stepAndDiffFrames(
+    auth, decomp, 14, BTN_MASK.UP, victoryTrajectory,
+    'Room 1 -> Room 2 Transition: Enter Underworld Dungeon Boss Chamber (Aquamentus Spawned at Y=96)',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  // Walk North 16 frames in Room 2 from Y=172 to Y=108 (in front of Aquamentus at Y=96)
+  stepAndDiffFrames(
+    auth, decomp, 16, BTN_MASK.UP, victoryTrajectory,
+    'Room 2 (Underworld Boss Chamber): Approach Aquamentus Boss (Y=108)',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  // Take 1 contact hit from Aquamentus (walking 2 more frames UP without sword -> hearts: 3 -> 2, knocked back to Y=108)
+  stepAndDiffFrames(
+    auth, decomp, 2, BTN_MASK.UP, victoryTrajectory,
+    'Room 2 (Underworld Boss Hazard): Aquamentus Contact Knockback (hearts: 3 -> 2)',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  // Slay Aquamentus with Sword ('A' button) -> drops Boss Key & awards all 8 Triforce of Wisdom shards!
+  stepAndDiffFrames(
+    auth, decomp, 2, BTN_MASK.A, victoryTrajectory,
+    'Room 2 (Underworld Boss Slain): Thrust Sword to Slay Aquamentus & Assemble All 8 Triforce Shards!',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  const cpBossRoom = compareMemoryState(
+    auth.nes, decomp.nes, 5,
+    'Checkpoint 5: Room 2 Aquamentus Defeated & All 8 Triforce Shards Assembled (triforceCount=8)',
+    readZeldaDecompState()
+  );
+
+  // --- Transition Room 2 -> Room 3 (Death Mountain: Ganon's Final Lair & Princess Zelda) ---
+  stepAndDiffFrames(
+    auth, decomp, 16, BTN_MASK.UP, victoryTrajectory,
+    'Room 2 -> Room 3 Transition: Collect Boss Key & Unlock Death Mountain Final Sanctum (Ganon Spawned)',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  // Walk North 17 frames in Room 3 from Y=176 to Y=108 (facing Ganon at Y=96)
+  stepAndDiffFrames(
+    auth, decomp, 17, BTN_MASK.UP, victoryTrajectory,
+    'Room 3 (Death Mountain): Approach Ganon at Center of Final Sanctum (Y=108)',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  // Slay Ganon with the Sword ('A' button)!
+  stepAndDiffFrames(
+    auth, decomp, 2, BTN_MASK.A, victoryTrajectory,
+    'Room 3 (Death Mountain): Slay Ganon with Sword & Silver Power (octoAlive=0, rupees=3)',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  // Walk North 10 frames (Y < 76) to rescue Princess Zelda!
+  stepAndDiffFrames(
+    auth, decomp, 10, BTN_MASK.UP, victoryTrajectory,
+    'Room 3 (Death Mountain Victory): Step Forward to Rescue Princess Zelda (gameCompleted=1)!',
+    readZeldaDecompState, readZeldaAuthState
+  );
+  const cpQuestWin = compareMemoryState(
+    auth.nes, decomp.nes, 6,
+    'Checkpoint 6 (Full Quest Victory): Ganon Defeated & Princess Zelda Rescued in Room 3 (gameCompleted=1)',
     readZeldaDecompState()
   );
 
   const frameByFrame = summarizeTrajectories(failureTrajectory, victoryTrajectory, {
+    roomsCompleted: 4,
+    finalRoomId: cpQuestWin.gameplayState.roomId,
+    triforceShards: cpQuestWin.gameplayState.triforceCount,
+    gameCompleted: cpQuestWin.gameplayState.gameCompleted === 1,
     failureTriggered: cpFailure.gameplayState.dead === 1 && cpFailure.gameplayState.hearts === 0,
     recoveryVerified: cpRecovery.gameplayState.dead === 0 && cpRecovery.gameplayState.hearts === 3 && cpRecovery.gameplayState.linkY === 144,
-    victoryVerified: cp2.gameplayState.triforceWon === 1 && cp2.gameplayState.roomId === 1 && cp2.gameplayState.octoAlive === 0
+    victoryVerified:
+      cpQuestWin.gameplayState.gameCompleted === 1 &&
+      cpQuestWin.gameplayState.roomId === 3 &&
+      cpQuestWin.gameplayState.triforceCount === 8 &&
+      cpQuestWin.gameplayState.octoAlive === 0
   });
 
   return {
@@ -617,13 +774,14 @@ function diffLegendOfZelda() {
     screenshot: 'screenshots/diff_zelda_side_by_side.png',
     ...cp0,
     frame0: cp0,
-    checkpoints: [cp0, cp1, cp2, cpFailure, cpRecovery],
+    checkpoints: [cp0, cp1, cp2, cpFailure, cpRecovery, cpBossRoom, cpQuestWin],
     frameByFrame
   };
 }
 
 // ============================================================================
-// 3. Nintendo NES Tetris (A-Type Level 00) Differential Verifier
+// 3. Nintendo NES Tetris Full Multi-Line & Multi-Level Campaign Differential Verifier
+//    (100% Pure Controller-Driven Playthrough: 6 Full 10-Block Line Clears, LEVEL 00 -> 01 -> 02 -> 03, ZERO JS RAM Pokes!)
 // ============================================================================
 function diffNintendoTetris() {
   const auth = bootEmulator('../assets/roms/tetris.nes');
@@ -645,8 +803,10 @@ function diffNintendoTetris() {
     dropTimer: decomp.nes.cpu.mem[0x19] & 0xFF,
     lines: decomp.nes.cpu.mem[0x1A] & 0xFF,
     score: decomp.nes.cpu.mem[0x1B] & 0xFF,
+    level: decomp.nes.cpu.mem[0x1C] & 0xFF,
     dirtyRow: decomp.nes.cpu.mem[0x1D] & 0xFF,
-    gameOver: decomp.nes.cpu.mem[0x23] & 0xFF
+    gameOver: decomp.nes.cpu.mem[0x23] & 0xFF,
+    gameWon: decomp.nes.cpu.mem[0x24] & 0xFF
   });
 
   const readTetrisAuthState = () => ({
@@ -712,89 +872,114 @@ function diffNintendoTetris() {
   );
 
   // --------------------------------------------------------------------------
-  // Trajectory B: Full Victory Playthrough (Rotate/Shift Lock -> 10-Block Line Clear & VBlank Flush)
+  // Trajectory B: 100% Pure Controller-Driven Multi-Line & Multi-Level Campaign
+  //               (ZERO JS RAM Pokes! Clears 6 Full 10-Block Lines -> LEVEL 00 -> 01 -> 02 -> 03 -> Victory!)
   // --------------------------------------------------------------------------
   const victoryTrajectory = [];
-  stepAndDiffFrames(
-    auth, decomp, 1, BTN_MASK.A, victoryTrajectory,
-    'Victory: Rotate Active Tetromino Clockwise (90 deg)',
-    readTetrisDecompState, readTetrisAuthState,
-    { includeWellRam: true }
-  );
-  stepAndDiffFrames(
-    auth, decomp, 1, BTN_MASK.NONE, victoryTrajectory,
-    'Victory: Release Rotate Button',
-    readTetrisDecompState, readTetrisAuthState,
-    { includeWellRam: true }
-  );
-  for (let shift = 0; shift < 2; shift++) {
+
+  function tapController(mask, label) {
     stepAndDiffFrames(
-      auth, decomp, 1, BTN_MASK.LEFT, victoryTrajectory,
-      `Victory: Shift Tetromino Left #${shift + 1}`,
+      auth, decomp, 1, mask, victoryTrajectory, label,
       readTetrisDecompState, readTetrisAuthState,
       { includeWellRam: true }
     );
     stepAndDiffFrames(
-      auth, decomp, 1, BTN_MASK.NONE, victoryTrajectory,
-      `Victory: Release Left Button #${shift + 1}`,
+      auth, decomp, 1, BTN_MASK.NONE, victoryTrajectory, `${label} (Release)`,
       readTetrisDecompState, readTetrisAuthState,
       { includeWellRam: true }
     );
   }
-  stepAndDiffFrames(
-    auth, decomp, 1, BTN_MASK.B, victoryTrajectory,
-    'Victory: Hard-Drop Shifted Tetromino into Well',
-    readTetrisDecompState, readTetrisAuthState,
-    { includeWellRam: true }
-  );
-  stepAndDiffFrames(
-    auth, decomp, 11, BTN_MASK.NONE, victoryTrajectory,
-    'Victory: Staged 2-Row/NMI VBlank Flush After Lock',
-    readTetrisDecompState, readTetrisAuthState,
-    { includeWellRam: true }
-  );
+
+  function shiftAndHardDrop(dirMask, shiftCount, pieceDesc) {
+    for (let s = 0; s < shiftCount; s++) {
+      tapController(dirMask, `${pieceDesc}: Shift ${dirMask === BTN_MASK.LEFT ? 'Left' : 'Right'} #${s + 1}`);
+    }
+    tapController(BTN_MASK.B, `${pieceDesc}: Hard-Drop & Lock Into Well`);
+  }
+
+  // Piece #1 (T-piece at boot, ID=0): Rotate twice (rot=2), shift left 3x to X=1 (cols 0..3), Hard-Drop!
+  tapController(BTN_MASK.A, 'Piece #1 (T-Piece): Rotate CW 90 deg');
+  tapController(BTN_MASK.A, 'Piece #1 (T-Piece): Rotate CW 180 deg (Horizontal 4-Bar)');
+  shiftAndHardDrop(BTN_MASK.LEFT, 3, 'Piece #1 (Cols 0..3)');
+
   const cp1 = compareMemoryState(
     auth.nes, decomp.nes, 1,
-    'Checkpoint 1: Tetromino Rotation, Shift & Lock',
+    'Checkpoint 1: Pure Controller Rotate, Shift to Left Wall (Cols 0..3) & Lock',
     readTetrisDecompState(), true
   );
 
-  // Pre-fill row 18 ($04B4..$04BD) cols 0,1,2,6,7,8,9 so hard-dropping T-piece at X=4 completes a 10-block line
-  for (const col of [0, 1, 2, 6, 7, 8, 9]) {
-    decomp.nes.cpu.mem[0x0400 + 180 + col] = 0x7B;
-  }
-  decomp.nes.cpu.mem[0x14] = 0; // T-piece
-  decomp.nes.cpu.mem[0x15] = 0; // Rot 0
-  decomp.nes.cpu.mem[0x16] = 4; // X = 4
-  decomp.nes.cpu.mem[0x17] = 2; // Y = 2
+  // Piece #2 (O-piece, ID=3): Shift right 4x to X=8 (cols 8..9 on rows 18 & 17), Hard-Drop!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 4, 'Piece #2 (O-Piece, Cols 8..9)');
 
-  stepAndDiffFrames(
-    auth, decomp, 1, BTN_MASK.B, victoryTrajectory,
-    'Victory: Hard-Drop T-Piece to Complete 10-Block Line & Collapse Rows',
-    readTetrisDecompState, readTetrisAuthState,
-    { includeWellRam: true }
-  );
-  stepAndDiffFrames(
-    auth, decomp, 11, BTN_MASK.NONE, victoryTrajectory,
-    'Victory: Staged 20-Row VBlank Flush After Line Clear',
-    readTetrisDecompState, readTetrisAuthState,
-    { includeWellRam: true }
-  );
+  // Piece #3 (I-piece, ID=6): Shift right 1x to X=5 (cols 4..7) -> Completes 10-Block Row 18 -> LINE CLEAR #1!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 1, 'Piece #3 (I-Piece, Cols 4..7 -> LINE CLEAR #1)');
+
   const cp2 = compareMemoryState(
     auth.nes, decomp.nes, 2,
-    'Checkpoint 2: 10-Block Line Clear, Gravity Collapse & VBlank Flush',
+    'Checkpoint 2: Line Clear #1 via 100% Controller Inputs (lines=1, level=0)',
+    readTetrisDecompState(), true
+  );
+
+  // Piece #4 (I-piece, ID=6): Shift left 3x to X=1 (cols 0..3), Hard-Drop!
+  shiftAndHardDrop(BTN_MASK.LEFT, 3, 'Piece #4 (I-Piece, Cols 0..3)');
+
+  // Piece #5 (I-piece, ID=6): Shift right 1x to X=5 (cols 4..7) -> Completes 10-Block Row 18 -> LINE CLEAR #2 (Level 01)!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 1, 'Piece #5 (I-Piece, Cols 4..7 -> LINE CLEAR #2 & LEVEL 01)');
+
+  // Piece #6 (O-piece, ID=3): Shift right 4x to X=8 (cols 8..9), Hard-Drop!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 4, 'Piece #6 (O-Piece, Cols 8..9)');
+
+  // Piece #7 (I-piece, ID=6): Shift right 1x to X=5 (cols 4..7) -> Completes 10-Block Row 18 -> LINE CLEAR #3!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 1, 'Piece #7 (I-Piece, Cols 4..7 -> LINE CLEAR #3)');
+
+  // Piece #8 (I-piece, ID=6): Shift left 3x to X=1 (cols 0..3), Hard-Drop!
+  shiftAndHardDrop(BTN_MASK.LEFT, 3, 'Piece #8 (I-Piece, Cols 0..3)');
+
+  // Piece #9 (I-piece, ID=6): Shift right 1x to X=5 (cols 4..7) -> Completes 10-Block Row 18 -> LINE CLEAR #4 (Level 02 & Victory)!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 1, 'Piece #9 (I-Piece, Cols 4..7 -> LINE CLEAR #4 & LEVEL 02)');
+
+  // Piece #10 (O-piece, ID=3): Shift right 4x to X=8 (cols 8..9), Hard-Drop!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 4, 'Piece #10 (O-Piece, Cols 8..9)');
+
+  // Piece #11 (I-piece, ID=6): Shift right 1x to X=5 (cols 4..7) -> Completes 10-Block Row 18 -> LINE CLEAR #5!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 1, 'Piece #11 (I-Piece, Cols 4..7 -> LINE CLEAR #5)');
+
+  // Piece #12 (I-piece, ID=6): Shift left 3x to X=1 (cols 0..3), Hard-Drop!
+  shiftAndHardDrop(BTN_MASK.LEFT, 3, 'Piece #12 (I-Piece, Cols 0..3)');
+
+  // Piece #13 (I-piece, ID=6): Shift right 1x to X=5 (cols 4..7) -> Completes 10-Block Row 18 -> LINE CLEAR #6 (Level 03)!
+  shiftAndHardDrop(BTN_MASK.RIGHT, 1, 'Piece #13 (I-Piece, Cols 4..7 -> LINE CLEAR #6 & LEVEL 03)');
+
+  // Step 9 frames to let the staged 2-row/NMI VBlank copier finish draining all 20 rows (dirtyRow = 20)
+  stepAndDiffFrames(
+    auth, decomp, 9, BTN_MASK.NONE, victoryTrajectory,
+    'Victory: Staged 20-Row VBlank Flush After 6th Line Clear (LEVEL 03, gameWon=1)',
+    readTetrisDecompState, readTetrisAuthState,
+    { includeWellRam: true }
+  );
+
+  const cpCampaignWin = compareMemoryState(
+    auth.nes, decomp.nes, 5,
+    'Checkpoint 5 (Full Campaign Victory): 6 Full 10-Block Line Clears & Level 03 Reached via Pure Controller Inputs',
     readTetrisDecompState(), true
   );
 
   const wellMatches = [...failureTrajectory, ...victoryTrajectory].map(x => x.wellRamMatchBytes);
   const frameByFrame = summarizeTrajectories(failureTrajectory, victoryTrajectory, {
+    linesCleared: cpCampaignWin.gameplayState.lines,
+    finalLevel: cpCampaignWin.gameplayState.level,
+    gameWon: cpCampaignWin.gameplayState.gameWon === 1,
     avgWellRamMatchBytes: Number((wellMatches.reduce((a, b) => a + b, 0) / wellMatches.length).toFixed(2)),
     minWellRamMatchBytes: Math.min(...wellMatches),
     maxWellRamMatchBytes: Math.max(...wellMatches),
     recoveredWellRamMatchBytes: cpRecovery.wellRamMatchBytes,
     failureTriggered: cpFailure.gameplayState.gameOver === 1,
     recoveryVerified: cpRecovery.gameplayState.gameOver === 0 && cpRecovery.wellRamMatchBytes === 200,
-    victoryVerified: cp2.gameplayState.lines === 1 && cp2.gameplayState.score === 1 && cp2.gameplayState.dirtyRow === 20
+    victoryVerified:
+      cpCampaignWin.gameplayState.lines === 6 &&
+      cpCampaignWin.gameplayState.level === 3 &&
+      cpCampaignWin.gameplayState.gameWon === 1 &&
+      cpCampaignWin.gameplayState.dirtyRow === 20
   });
 
   return {
@@ -805,13 +990,13 @@ function diffNintendoTetris() {
     screenshot: 'screenshots/diff_tetris_side_by_side.png',
     ...cp0,
     frame0: cp0,
-    checkpoints: [cp0, cp1, cp2, cpFailure, cpRecovery],
+    checkpoints: [cp0, cp1, cp2, cpFailure, cpRecovery, cpCampaignWin],
     frameByFrame
   };
 }
 
 // ============================================================================
-// Execute All 3 Differential Verifiers & Write Report
+// Execute All 3 Full-Campaign Differential Verifiers & Write Report
 // ============================================================================
 const smbResult = diffSuperMarioBros();
 const zeldaResult = diffLegendOfZelda();
@@ -831,7 +1016,7 @@ const reportPath = path.join(dumpDir, 'diff_report.json');
 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 
 console.log('\n========================================================================================================================');
-console.log(' SIDE-BY-SIDE AUTHENTIC vs. DECOMPILED #lang boba-nes DIFFERENTIAL VERIFICATION (FRAME 0 + FAILURE/RECOVERY + VICTORY)');
+console.log(' SIDE-BY-SIDE AUTHENTIC vs. DECOMPILED #lang boba-nes FULL-GAME CAMPAIGN DIFFERENTIAL VERIFICATION');
 console.log('========================================================================================================================');
 console.log(
   'Game'.padEnd(22) +
@@ -841,7 +1026,7 @@ console.log(
   'CHR'.padEnd(16) +
   'OAM'.padEnd(14) +
   'Frames (Fail/Win)'.padEnd(20) +
-  'Fail->Recover->Win'
+  'Fail->Recover->FullWin'
 );
 console.log('------------------------------------------------------------------------------------------------------------------------');
 for (const r of report.results) {
@@ -852,7 +1037,7 @@ for (const r of report.results) {
   const oamStr = `${r.oam.tileOverlapPct}% (${r.oam.decompiledVisible})`;
   const fbf = r.frameByFrame;
   const framesStr = `${fbf.totalFrames} (${fbf.failureFramesCount}/${fbf.victoryFramesCount})`;
-  const statusStr = `${fbf.summaryStats.failureTriggered ? 'FAIL_OK' : 'ERR'} -> ${fbf.summaryStats.recoveryVerified ? 'REC_OK' : 'ERR'} -> ${fbf.summaryStats.victoryVerified ? 'WIN_OK' : 'ERR'}`;
+  const statusStr = `${fbf.summaryStats.failureTriggered ? 'FAIL_OK' : 'ERR'} -> ${fbf.summaryStats.recoveryVerified ? 'REC_OK' : 'ERR'} -> ${fbf.summaryStats.victoryVerified ? 'FULL_WIN_OK' : 'ERR'}`;
   console.log(
     r.title.padEnd(22) +
     palStr.padEnd(16) +
@@ -866,3 +1051,4 @@ for (const r of report.results) {
 }
 console.log('========================================================================================================================');
 console.log('Saved JSON report:', reportPath);
+

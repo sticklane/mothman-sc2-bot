@@ -38,12 +38,34 @@
   #:order 'symmetric-col-major
   #:attr  #x02)
 
+(defstate-machine zelda-quest-fsm
+  #:initial overworld-0x77
+  ([overworld-0x77       #:kind normal  #:transitions (eagle-sanctum defeat)]
+   [eagle-sanctum        #:kind normal  #:transitions (underworld-boss defeat)]
+   [underworld-boss      #:kind normal  #:transitions (death-mountain-ganon defeat)]
+   [death-mountain-ganon #:kind normal  #:transitions (zelda-rescued defeat)]
+   [defeat               #:kind failure #:transitions (overworld-0x77 underworld-boss death-mountain-ganon)]
+   [zelda-rescued        #:kind victory #:transitions (overworld-0x77)]))
+
+(defzp-map zelda-zp-layout
+  ([link-x         #x14 player-or-actor-coord]
+   [link-y         #x15 player-or-actor-coord]
+   [room-id        #x21 game-phase-or-flag]
+   [hearts         #x22 hud-bcd-counter]
+   [triforce-won   #x23 game-phase-or-flag]
+   [hurt-timer     #x26 game-phase-or-flag]
+   [dead           #x27 game-phase-or-flag]
+   [triforce-count #x28 hud-bcd-counter]
+   [game-completed #x29 game-phase-or-flag]))
+
 (provide zelda-chr-layout
          zelda-hud-font
          zelda-sword-vertical-tile
          zelda-dungeon-key-tile
          link-metasprite
          octorok-metasprite
+         zelda-quest-fsm
+         zelda-zp-layout
          zelda-rom-bytes
          zelda-asm-result
          zelda-type-result

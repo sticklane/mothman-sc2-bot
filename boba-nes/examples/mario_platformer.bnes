@@ -35,11 +35,34 @@
   #:order 'row-major
   #:attr  #x01)
 
+(defstate-machine smb-campaign-fsm
+  #:initial world-1-1
+  ([world-1-1        #:kind normal  #:transitions (world-1-2 dying)]
+   [world-1-2        #:kind normal  #:transitions (world-4-1 dying)]
+   [world-4-1        #:kind normal  #:transitions (world-8-4 dying)]
+   [world-8-4        #:kind normal  #:transitions (princess-rescued dying)]
+   [dying            #:kind failure #:transitions (world-1-1 world-1-2 world-4-1 world-8-4)]
+   [princess-rescued #:kind victory #:transitions (world-1-1)]))
+
+(defzp-map smb-zp-layout
+  ([scroll-x       #x14 player-or-actor-coord]
+   [x-world-lo     #x16 player-or-actor-coord]
+   [y-px           #x1A player-or-actor-coord]
+   [coins          #x1E hud-bcd-counter]
+   [score          #x1F hud-bcd-counter]
+   [won            #x24 game-phase-or-flag]
+   [dead           #x26 game-phase-or-flag]
+   [lives          #x27 hud-bcd-counter]
+   [stage-id       #x28 game-phase-or-flag]
+   [game-completed #x29 game-phase-or-flag]))
+
 (provide smb-chr-layout
          smb-hud-font
          smb-sprite0-coin-bottom
          mario-metasprite
          goomba-metasprite
+         smb-campaign-fsm
+         smb-zp-layout
          mario-rom-bytes
          mario-asm-result
          mario-type-result

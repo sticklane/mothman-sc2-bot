@@ -19,17 +19,24 @@
          (only-in "decompiled-smb.rkt"
                   MARIO-ZP-DEAD
                   MARIO-ZP-LIVES
+                  MARIO-ZP-STAGE-ID
+                  MARIO-ZP-GAME-COMPLETED
+                  MARIO-ZP-STAGE-DIRTY
                   emit-decompiled-mario-6502-program)
          (only-in "decompiled-zelda.rkt"
                   ZELDA-ZP-HURT-TIMER
                   ZELDA-ZP-DEAD
+                  ZELDA-ZP-TRIFORCE-COUNT
+                  ZELDA-ZP-GAME-COMPLETED
                   emit-decompiled-zelda-6502-program)
          (only-in "decompiled-tetris.rkt"
                   TETRIS-ZP-GAME-OVER
+                  TETRIS-ZP-GAME-WON
+                  TETRIS-ZP-SPAWN-IDX
                   emit-decompiled-tetris-6502-program))
 
 (provide
- ;; 1. Super Mario Bros. (World 1-1 Platformer)
+ ;; 1. Super Mario Bros. (Full 4-Stage Campaign: World 1-1 -> 1-2 -> 4-1 -> 8-4)
  MARIO-ZP-SCROLL-X
  MARIO-ZP-SCROLL-NT
  MARIO-ZP-X-WORLD-LO
@@ -48,9 +55,12 @@
  MARIO-ZP-WON
  MARIO-ZP-DEAD
  MARIO-ZP-LIVES
+ MARIO-ZP-STAGE-ID
+ MARIO-ZP-GAME-COMPLETED
+ MARIO-ZP-STAGE-DIRTY
  compile-mario-nes-rom!
 
- ;; 2. The Legend of Zelda (Top-Down Action-Adventure)
+ ;; 2. The Legend of Zelda (Full 4-Room Quest: Overworld -> Sanctum -> Underworld Boss -> Death Mountain Ganon)
  ZELDA-ZP-LINK-X
  ZELDA-ZP-LINK-Y
  ZELDA-ZP-LINK-DIR
@@ -66,9 +76,11 @@
  ZELDA-ZP-OAM-CURSOR
  ZELDA-ZP-HURT-TIMER
  ZELDA-ZP-DEAD
+ ZELDA-ZP-TRIFORCE-COUNT
+ ZELDA-ZP-GAME-COMPLETED
  compile-zelda-nes-rom!
 
- ;; 3. Nintendo NES Tetris (10x20 Well, Rotation & Staged VBlank Row Flush)
+ ;; 3. Nintendo NES Tetris (10x20 Well, Multi-Line & Multi-Level A-Type Campaign)
  TETRIS-WELL-RAM-BASE
  TETRIS-ZP-PIECE-ID
  TETRIS-ZP-PIECE-ROT
@@ -81,6 +93,8 @@
  TETRIS-ZP-LEVEL
  TETRIS-ZP-DIRTY-ROW
  TETRIS-ZP-GAME-OVER
+ TETRIS-ZP-GAME-WON
+ TETRIS-ZP-SPAWN-IDX
  compile-tetris-nes-rom!)
 
 ;; ============================================================================

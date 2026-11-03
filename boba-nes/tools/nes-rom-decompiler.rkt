@@ -20,7 +20,8 @@
  decompile-ines-rom-to-boba-dsl
  compare-rom-binaries
  detect-6502-jump-engine-idioms
- infer-zp-roles-from-frame-trace)
+ infer-zp-roles-from-frame-trace
+ detect-multi-stage-progression-from-trace)
 
 ;; ============================================================================
 ;; 1. Official MOS 6502 Opcode Decode Table (Opcode -> Mnemonic, Mode, Length)
@@ -513,3 +514,43 @@
                         'initial v0
                         'final vN)
                 acc)))))
+
+;; Analyze a multi-stage Zero-Page trace `(list zp-bytes-0 zp-bytes-1 ...)` to identify:
+;;   - `stage-registers`   : Zero-Page addresses that step monotonically `0 -> 1 -> 2 ...` across multiple stages/levels
+;;   - `recovery-registers`: Zero-Page flags that transition `0 -> 1 -> 0` (failure/death followed by START recovery)
+;;   - `completion-flags`  : Zero-Page flags that start at `0` and terminate at `1` at the end of the campaign
+(define (detect-multi-stage-progression-from-trace zp-frames)
+  (define (zp-at frame-snap addr)
+    (cond
+      [(bytes? frame-snap) (bytes-ref frame-snap addr)]
+      [(vector? frame-snap) (bitwise-and #xFF (vector-ref frame-snap addr))]
+      [else (error 'zp-at "expected bytes? or vector? snapshot")]))
+
+  (define stage-regs '())
+  (define recovery-regs '())
+  (define completion-flags '())
+
+  (for ([addr (in-range 256)])
+    (define series (for/list ([snap (in-list zp-frames)]) (zp-at snap addr)))
+    (define v0 (first series))
+    (define vN (last series))
+    (define distinct (remove-duplicates series))
+    (define pairs (for/list ([a (in-list series)] [b (in-list (cdr series))]) (cons a b)))
+    (define non-dec? (for/and ([p (in-list pairs)]) (<= (car p) (cdr p))))
+    (define unit-steps? (for/and ([p (in-list pairs)]) (<= (- (cdr p) (car p)) 1)))
+    ;; 1. Multi-stage register: starts at 0, non-decreasing by +1 steps, reaches >= 2 distinct stages (e.g. 0->1->2->3)
+    (when (and (= v0 0) (>= vN 2) (<= vN 16) non-dec? unit-steps?)
+      (set! stage-regs (cons (hasheq 'addr addr 'max-stage vN 'stages-visited distinct) stage-regs)))
+    ;; 2. Failure-then-recovery register: starts at 0, visits 1, returns to 0
+    (when (and (= v0 0)
+               (equal? (sort distinct <) '(0 1))
+               (for/or ([p (in-list pairs)]) (and (= (car p) 1) (= (cdr p) 0))))
+      (set! recovery-regs (cons addr recovery-regs)))
+    ;; 3. Final campaign completion flag: starts at 0, only ever transitions 0 -> 1 once, ends at 1
+    (when (and (= v0 0) (= vN 1) non-dec? (equal? distinct '(0 1)))
+      (set! completion-flags (cons addr completion-flags))))
+
+  (hasheq 'stage-registers    (reverse stage-regs)
+          'recovery-registers (reverse recovery-regs)
+          'completion-flags   (reverse completion-flags)))
+

@@ -41,37 +41,41 @@
  ZELDA-ZP-ROOM-DIRTY
  ZELDA-ZP-HURT-TIMER
  ZELDA-ZP-DEAD
+ ZELDA-ZP-TRIFORCE-COUNT
+ ZELDA-ZP-GAME-COMPLETED
  ZELDA-OVERWORLD-PALETTE
  ZELDA-OVERWORLD-NT0-PATCHED
  emit-decompiled-zelda-6502-program)
 
 ;; ============================================================================
-;; 1. Zero-Page State Layout ($0010-$0027)
+;; 1. Zero-Page State Layout ($0010-$0029)
 ;; ============================================================================
-(define ZELDA-ZP-BUTTONS      #x10)
-(define ZELDA-ZP-PREV-BTN     #x11)
-(define ZELDA-ZP-NEW-BTN      #x12)
-(define ZELDA-ZP-FRAME-CNT    #x13)
-(define ZELDA-ZP-LINK-X       #x14) ; Link pixel X (16..224, init = 120)
-(define ZELDA-ZP-LINK-Y       #x15) ; Link pixel Y (56..200, init = 144)
-(define ZELDA-ZP-LINK-DIR     #x16) ; 0=DOWN (init), 1=UP, 2=LEFT, 3=RIGHT
-(define ZELDA-ZP-SWORD-TIMER  #x17) ; >0 while sword is thrusting
-(define ZELDA-ZP-SWORD-X      #x18) ; Sword hitbox X
-(define ZELDA-ZP-SWORD-Y      #x19) ; Sword hitbox Y
-(define ZELDA-ZP-OCTO-X       #x1A) ; Octorok X (init = 120)
-(define ZELDA-ZP-OCTO-Y       #x1B) ; Octorok Y (init = 96)
-(define ZELDA-ZP-OCTO-ALIVE   #x1C) ; 1 = alive, 0 = defeated (drops Dungeon Key!)
-(define ZELDA-ZP-KEY-X        #x1D) ; Dropped Key X (0 = not on floor)
-(define ZELDA-ZP-KEY-Y        #x1E) ; Dropped Key Y
-(define ZELDA-ZP-RUPEES       #x1F) ; Rupee counter
-(define ZELDA-ZP-KEYS         #x20) ; Dungeon Key inventory count
-(define ZELDA-ZP-ROOM-ID      #x21) ; 0 = Overworld Entrance, 1 = Triforce Sanctum
-(define ZELDA-ZP-HEARTS       #x22) ; Link heart containers (3)
-(define ZELDA-ZP-TRIFORCE-WON #x23) ; 1 = collected Triforce of Wisdom!
-(define ZELDA-ZP-OAM-CURSOR   #x24) ; Coprime OAM flicker rotation cursor
-(define ZELDA-ZP-ROOM-DIRTY   #x25) ; 1 = NMI updates room doorway/HUD
-(define ZELDA-ZP-HURT-TIMER   #x26) ; Invincibility frames after contact damage
-(define ZELDA-ZP-DEAD         #x27) ; 0 = alive, 1 = defeated when HEARTS == 0
+(define ZELDA-ZP-BUTTONS        #x10)
+(define ZELDA-ZP-PREV-BTN       #x11)
+(define ZELDA-ZP-NEW-BTN        #x12)
+(define ZELDA-ZP-FRAME-CNT      #x13)
+(define ZELDA-ZP-LINK-X         #x14) ; Link pixel X (16..224, init = 120)
+(define ZELDA-ZP-LINK-Y         #x15) ; Link pixel Y (56..200, init = 144)
+(define ZELDA-ZP-LINK-DIR       #x16) ; 0=DOWN (init), 1=UP, 2=LEFT, 3=RIGHT
+(define ZELDA-ZP-SWORD-TIMER    #x17) ; >0 while sword is thrusting
+(define ZELDA-ZP-SWORD-X        #x18) ; Sword hitbox X
+(define ZELDA-ZP-SWORD-Y        #x19) ; Sword hitbox Y
+(define ZELDA-ZP-OCTO-X         #x1A) ; Enemy/Boss X (init = 120)
+(define ZELDA-ZP-OCTO-Y         #x1B) ; Enemy/Boss Y (init = 96)
+(define ZELDA-ZP-OCTO-ALIVE     #x1C) ; 1 = alive, 0 = defeated
+(define ZELDA-ZP-KEY-X          #x1D) ; Dropped Key X (0 = not on floor)
+(define ZELDA-ZP-KEY-Y          #x1E) ; Dropped Key Y
+(define ZELDA-ZP-RUPEES         #x1F) ; Rupee counter
+(define ZELDA-ZP-KEYS           #x20) ; Dungeon Key inventory count
+(define ZELDA-ZP-ROOM-ID        #x21) ; 0=Overworld, 1=Sanctum, 2=Dungeon Boss, 3=Death Mountain
+(define ZELDA-ZP-HEARTS         #x22) ; Link heart containers (3)
+(define ZELDA-ZP-TRIFORCE-WON   #x23) ; 1 = collected Triforce of Wisdom!
+(define ZELDA-ZP-OAM-CURSOR     #x24) ; Coprime OAM flicker rotation cursor
+(define ZELDA-ZP-ROOM-DIRTY     #x25) ; 1 = NMI updates room doorway/palette/HUD
+(define ZELDA-ZP-HURT-TIMER     #x26) ; Invincibility frames after contact damage
+(define ZELDA-ZP-DEAD           #x27) ; 0 = alive, 1 = defeated when HEARTS == 0
+(define ZELDA-ZP-TRIFORCE-COUNT #x28) ; 0..8 Triforce of Wisdom shards collected
+(define ZELDA-ZP-GAME-COMPLETED #x29) ; 0 = in progress, 1 = Ganon slain & Zelda rescued!
 
 ;; ============================================================================
 ;; 2. Authentic Decompiled Overworld Screen 0x77 PPU Palette & Nametable 0
@@ -103,8 +107,8 @@
 ;; ============================================================================
 (define (emit-decompiled-zelda-6502-program)
   `(;; ========================================================================
-    ;; The Legend of Zelda (Overworld Screen 0x77 & Triforce Sanctum)
-    ;; Authentic Decompiled Nametable 0, Palette & OAM Sprite Tiles
+    ;; The Legend of Zelda (4-Stage Quest: Overworld 0x77 -> Eagle Sanctum ->
+    ;; Underworld Boss Chamber -> Death Mountain Ganon & Princess Zelda Rescue)
     ;; ========================================================================
     (label reset_handler)
     (SEI)
@@ -196,6 +200,8 @@
     (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
     (STA #:zp ,ZELDA-ZP-HURT-TIMER)
     (STA #:zp ,ZELDA-ZP-DEAD)
+    (STA #:zp ,ZELDA-ZP-TRIFORCE-COUNT)
+    (STA #:zp ,ZELDA-ZP-GAME-COMPLETED)
     (LDA #:imm 1)
     (STA #:zp ,ZELDA-ZP-OCTO-ALIVE)
     (LDA #:imm 3)
@@ -221,7 +227,7 @@
     (RTS)
 
     ;; ========================================================================
-    ;; ActiveFrame Step: 4-Way Movement, Sword Attack, Octorok Combat & Rooms
+    ;; ActiveFrame Step: 4-Way Movement, Sword Attack, Boss Combat & 4 Rooms
     ;; ========================================================================
     (label game_frame_step)
     (INC #:zp ,ZELDA-ZP-FRAME-CNT)
@@ -258,15 +264,37 @@
     (BEQ z_check_reset)
     (DEC #:zp ,ZELDA-ZP-HURT-TIMER)
 
-    ;; Check Respawn/Reset when DEAD != 0 or TRIFORCE_WON != 0 on START/SELECT
+    ;; Check Respawn in current room when DEAD != 0 or Full Reset when GAME_COMPLETED != 0 on START/SELECT
     (label z_check_reset)
     (LDA #:zp ,ZELDA-ZP-DEAD)
+    (BEQ z_check_completed_reset)
+    (LDA #:zp ,ZELDA-ZP-NEW-BTN)
+    (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
+    (BNE z_respawn_current_room)
+    (JMP done_z_step)
+
+    (label z_check_completed_reset)
+    (LDA #:zp ,ZELDA-ZP-GAME-COMPLETED)
     (ORA #:zp ,ZELDA-ZP-TRIFORCE-WON)
     (BEQ z_alive_step)
     (LDA #:zp ,ZELDA-ZP-NEW-BTN)
     (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
-    (BEQ z_check_dead_halt)
-    ;; Respawn/reset Link cleanly
+    (BEQ z_alive_step)
+    ;; Full quest reset to Room 0
+    (LDA #:imm 0)
+    (STA #:zp ,ZELDA-ZP-ROOM-ID)
+    (STA #:zp ,ZELDA-ZP-TRIFORCE-WON)
+    (STA #:zp ,ZELDA-ZP-TRIFORCE-COUNT)
+    (STA #:zp ,ZELDA-ZP-GAME-COMPLETED)
+    (STA #:zp ,ZELDA-ZP-RUPEES)
+    (STA #:zp ,ZELDA-ZP-KEYS)
+    (STA #:zp ,ZELDA-ZP-KEY-X)
+    (STA #:zp ,ZELDA-ZP-KEY-Y)
+    (LDA #:imm 1)
+    (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
+
+    ;; Respawn Link in his current room
+    (label z_respawn_current_room)
     (LDA #:imm 120)
     (STA #:zp ,ZELDA-ZP-LINK-X)
     (STA #:zp ,ZELDA-ZP-OCTO-X)
@@ -278,19 +306,10 @@
     (STA #:zp ,ZELDA-ZP-LINK-DIR)
     (STA #:zp ,ZELDA-ZP-DEAD)
     (STA #:zp ,ZELDA-ZP-HURT-TIMER)
-    (STA #:zp ,ZELDA-ZP-TRIFORCE-WON)
-    (STA #:zp ,ZELDA-ZP-ROOM-ID)
     (LDA #:imm 1)
     (STA #:zp ,ZELDA-ZP-OCTO-ALIVE)
-    (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
     (LDA #:imm 3)
     (STA #:zp ,ZELDA-ZP-HEARTS)
-    (JMP z_alive_step)
-
-    (label z_check_dead_halt)
-    (LDA #:zp ,ZELDA-ZP-DEAD)
-    (BEQ z_alive_step)
-    (JMP done_z_step)
 
     (label z_alive_step)
     ;; 1. Sword Attack ('A' button spawns Sword hitbox above Link for 8 frames!)
@@ -330,7 +349,7 @@
     (ADC #:imm 16)
     (STA #:zp ,ZELDA-ZP-SWORD-X)
 
-    ;; Check if Sword Hitbox intersects Octorok (|sword_x - octo_x| < 16 and |sword_y - octo_y| < 16)
+    ;; Check if Sword Hitbox intersects Enemy/Boss (|sword_x - octo_x| < 16 and |sword_y - octo_y| < 16)
     (label check_sword_hit)
     (LDA #:zp ,ZELDA-ZP-OCTO-ALIVE)
     (BEQ move_link_dpad)
@@ -354,19 +373,30 @@
     (ADC #:imm 16)
     (CMP #:zp ,ZELDA-ZP-SWORD-Y)
     (BCC move_link_dpad)
-    ;; Sword hits Octorok! Defeat Octorok, increment Rupees, and drop Dungeon Key at Octorok's position!
+    ;; Sword hits Enemy/Boss! Defeat it and increment Rupees
     (LDA #:imm 0)
     (STA #:zp ,ZELDA-ZP-OCTO-ALIVE)
     (INC #:zp ,ZELDA-ZP-RUPEES)
-    (LDA #:zp ,ZELDA-ZP-OCTO-X)
-    (STA #:zp ,ZELDA-ZP-KEY-X)
-    (LDA #:zp ,ZELDA-ZP-OCTO-Y)
-    (STA #:zp ,ZELDA-ZP-KEY-Y)
     ;; Play Sword Slash / Enemy Defeat SFX on Pulse 1
     (LDA #:imm #x9F) (STA #:abs #x4000)
     (LDA #:imm #x89) (STA #:abs #x4001)
     (LDA #:imm #x60) (STA #:abs #x4002)
     (LDA #:imm #x18) (STA #:abs #x4003)
+    ;; In Room 3 (Ganon), no key drop needed
+    (LDA #:zp ,ZELDA-ZP-ROOM-ID)
+    (CMP #:imm 3)
+    (BEQ move_link_dpad)
+    ;; In Room 0 (Octorok) and Room 2 (Aquamentus), drop Key at (OCTO_X, OCTO_Y)
+    (LDA #:zp ,ZELDA-ZP-OCTO-X)
+    (STA #:zp ,ZELDA-ZP-KEY-X)
+    (LDA #:zp ,ZELDA-ZP-OCTO-Y)
+    (STA #:zp ,ZELDA-ZP-KEY-Y)
+    ;; In Room 2 (Underworld Dungeon Boss), assemble all 8 Triforce of Wisdom shards!
+    (LDA #:zp ,ZELDA-ZP-ROOM-ID)
+    (CMP #:imm 2)
+    (BNE move_link_dpad)
+    (LDA #:imm 8)
+    (STA #:zp ,ZELDA-ZP-TRIFORCE-COUNT)
 
     ;; 2. 4-Directional Link Movement (4 px/frame)
     (label move_link_dpad)
@@ -383,17 +413,56 @@
     (STA #:zp ,ZELDA-ZP-LINK-Y)
     (JMP check_octo_contact)
 
-    ;; Check North Dungeon Door Transition (Y < 56): Requires KEYS >= 1 in Room 0!
+    ;; Check North Door Room Transitions (Y < 56): Room 0 -> 1 -> 2 -> 3
     (label check_north_door_transition)
     (LDA #:zp ,ZELDA-ZP-ROOM-ID)
-    (BNE check_octo_contact)
+    (BEQ north_door_room0)
+    (CMP #:imm 1)
+    (BEQ north_door_room1)
+    (CMP #:imm 2)
+    (BEQ north_door_room2)
+    (JMP check_octo_contact)
+
+    ;; Room 0 -> Room 1 (Eagle Labyrinth Sanctum): requires KEYS >= 1
+    (label north_door_room0)
     (LDA #:zp ,ZELDA-ZP-KEYS)
     (BEQ check_octo_contact) ; Door is locked until Link collects the Key!
     (DEC #:zp ,ZELDA-ZP-KEYS)
     (LDA #:imm 1)
     (STA #:zp ,ZELDA-ZP-ROOM-ID)
     (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
-    ;; Reposition Link at South entrance of Triforce Sanctum (X=120, Y=176)
+    (LDA #:imm 0)
+    (STA #:zp ,ZELDA-ZP-OCTO-ALIVE)
+    (STA #:zp ,ZELDA-ZP-KEY-X)
+    ;; Reposition Link at South entrance of Eagle Labyrinth Sanctum (X=120, Y=176)
+    (LDA #:imm 176)
+    (STA #:zp ,ZELDA-ZP-LINK-Y)
+    (JMP check_octo_contact)
+
+    ;; Room 1 -> Room 2 (Underworld Dungeon Boss Chamber — Aquamentus)
+    (label north_door_room1)
+    (LDA #:imm 2)
+    (STA #:zp ,ZELDA-ZP-ROOM-ID)
+    (JMP spawn_room_boss_transition)
+
+    ;; Room 2 -> Room 3 (Death Mountain — Ganon's Lair): requires Boss Key (KEYS >= 1)
+    (label north_door_room2)
+    (LDA #:zp ,ZELDA-ZP-KEYS)
+    (BEQ check_octo_contact)
+    (DEC #:zp ,ZELDA-ZP-KEYS)
+    (LDA #:imm 3)
+    (STA #:zp ,ZELDA-ZP-ROOM-ID)
+
+    (label spawn_room_boss_transition)
+    (LDA #:imm 1)
+    (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
+    (STA #:zp ,ZELDA-ZP-OCTO-ALIVE)
+    (LDA #:imm 0)
+    (STA #:zp ,ZELDA-ZP-KEY-X)
+    (LDA #:imm 120)
+    (STA #:zp ,ZELDA-ZP-OCTO-X)
+    (LDA #:imm 96)
+    (STA #:zp ,ZELDA-ZP-OCTO-Y)
     (LDA #:imm 176)
     (STA #:zp ,ZELDA-ZP-LINK-Y)
     (JMP check_octo_contact)
@@ -439,13 +508,11 @@
     (ADC #:imm 4)
     (STA #:zp ,ZELDA-ZP-LINK-X)
 
-    ;; 2b. Octorok Body Contact Hazard (Failure Path):
-    ;;     In Room 0, if Octorok is alive, Sword is not active, and Hurt timer == 0,
-    ;;     walking directly into Octorok (84 <= LINK_Y <= 100 and 108 <= LINK_X <= 132)
+    ;; 2b. Enemy/Boss Body Contact Hazard (Failure Path in ANY room when OCTO_ALIVE != 0):
+    ;;     If Enemy/Boss is alive, Sword is not active, and Hurt timer == 0,
+    ;;     walking directly into Enemy/Boss (84 <= LINK_Y <= 100 and 108 <= LINK_X <= 132)
     ;;     knocks Link back to Y=108, sets HURT_TIMER=2, decrements HEARTS, and sets DEAD=1 at 0 hearts!
     (label check_octo_contact)
-    (LDA #:zp ,ZELDA-ZP-ROOM-ID)
-    (BNE check_pickups)
     (LDA #:zp ,ZELDA-ZP-OCTO-ALIVE)
     (BEQ check_pickups)
     (LDA #:zp ,ZELDA-ZP-SWORD-TIMER)
@@ -481,9 +548,10 @@
     (LDA #:imm 1)
     (STA #:zp ,ZELDA-ZP-DEAD)
 
-    ;; 3. Check Item Pickups:
-    ;;    - In Room 0: Pick up dropped Dungeon Key at (KEY_X, KEY_Y)
-    ;;    - In Room 1 (Sanctum): Pick up Triforce of Wisdom at (X=120, Y=104)
+    ;; 3. Check Item Pickups & Quest Milestones:
+    ;;    - In Room 0 / Room 2: Pick up dropped Key at (KEY_X, KEY_Y)
+    ;;    - In Room 1 (Sanctum): Claim first Triforce shard at Y < 116
+    ;;    - In Room 3 (Death Mountain): Rescue Princess Zelda at Y < 76 when Ganon slain
     (label check_pickups)
     (LDA #:zp ,ZELDA-ZP-KEY-X)
     (BEQ check_triforce_pickup)
@@ -507,20 +575,44 @@
     (ADC #:imm 12)
     (CMP #:zp ,ZELDA-ZP-LINK-Y)
     (BCC check_triforce_pickup)
-    ;; Collected Dungeon Key!
+    ;; Collected Dungeon/Boss Key!
     (LDA #:imm 0)
     (STA #:zp ,ZELDA-ZP-KEY-X)
     (INC #:zp ,ZELDA-ZP-KEYS)
 
     (label check_triforce_pickup)
     (LDA #:zp ,ZELDA-ZP-ROOM-ID)
-    (BEQ done_z_step)
+    (CMP #:imm 1)
+    (BEQ check_room1_triforce)
+    (CMP #:imm 3)
+    (BEQ check_room3_zelda_rescue)
+    (JMP done_z_step)
+
+    (label check_room1_triforce)
     (LDA #:zp ,ZELDA-ZP-LINK-Y)
     (CMP #:imm 116)
     (BCS done_z_step)
-    ;; Link reached the Triforce of Wisdom at (120, 104)!
+    ;; Link reached the Triforce of Wisdom in Eagle Labyrinth Sanctum!
     (LDA #:imm 1)
     (STA #:zp ,ZELDA-ZP-TRIFORCE-WON)
+    (LDA #:zp ,ZELDA-ZP-TRIFORCE-COUNT)
+    (BNE play_triforce_chime)
+    (LDA #:imm 1)
+    (STA #:zp ,ZELDA-ZP-TRIFORCE-COUNT)
+    (JMP play_triforce_chime)
+
+    (label check_room3_zelda_rescue)
+    (LDA #:zp ,ZELDA-ZP-OCTO-ALIVE)
+    (BNE done_z_step)
+    (LDA #:zp ,ZELDA-ZP-LINK-Y)
+    (CMP #:imm 76)
+    (BCS done_z_step)
+    ;; Ganon slain and Princess Zelda rescued in Death Mountain!
+    (LDA #:imm 1)
+    (STA #:zp ,ZELDA-ZP-GAME-COMPLETED)
+    (STA #:zp ,ZELDA-ZP-TRIFORCE-WON)
+
+    (label play_triforce_chime)
     ;; Play Triforce Fanfare Chime on Triangle ($4008-$400B)
     (LDA #:imm #xFF) (STA #:abs #x4008)
     (LDA #:imm #x55) (STA #:abs #x400A)
@@ -537,8 +629,8 @@
     ;;                          - DIR=0 (DOWN): TL=#x0C, BL=#x0D, TR=#x0E, BR=#x0F (attr=#x00)
     ;;                          - DIR=1 (UP)  : TL=#x0E, BL=#x0F, TR=#x0C, BR=#x0D (attr=#x40 H-flip)
     ;;   Slots 5..6 ($0214)   : Wooden Sword (#x20, #x21, attr=#x00)
-    ;;   Slots 7..10 ($021C)  : Red Octorok 16x16 Metasprite (#xB2, #xB3 symmetric-col-major, attr=#x02/#x42)
-    ;;   Slots 11..14 ($022C) : Dropped Key (#x28, #x29, attr=#x00) or Triforce (#x26, #x27 symmetric, attr=#x02/#x42)
+    ;;   Slots 7..10 ($021C)  : Enemy/Boss 16x16 Metasprite (#xB2, #xB3 symmetric-col-major, attr=#x02/#x42)
+    ;;   Slots 11..14 ($022C) : Dropped Key (#x28, #x29, attr=#x00) or Triforce/Zelda (#x26, #x27 symmetric)
     ;;   Slots 15..16 ($023C) : HUD A-box Wooden Sword icon (X=152, Y=36 #x20 / Y=44 #x21, attr=#x00)
     ;; ========================================================================
     (label build_zelda_oam)
@@ -613,7 +705,7 @@
     (LDA #:zp ,ZELDA-ZP-SWORD-X)
     (STA #:abs #x0217) (STA #:abs #x021B)
 
-    ;; Slots 7..10 ($021C..$022B): Red Octorok 16x16 Metasprite (#xB2, #xB3 + H-Flip)
+    ;; Slots 7..10 ($021C..$022B): Enemy/Boss 16x16 Metasprite (#xB2, #xB3 + H-Flip)
     (label draw_octo_oam)
     (LDA #:zp ,ZELDA-ZP-OCTO-ALIVE)
     (BNE show_octo_oam)
@@ -623,9 +715,10 @@
     (label show_octo_oam)
     ,@(emit-metasprite-oam-6502 ZELDA-OCTOROK-METASPRITE ZELDA-ZP-OCTO-X ZELDA-ZP-OCTO-Y #x1C)
 
-    ;; Slots 11..14 ($022C..$023B): Dropped Key (#x28, #x29, attr=#x00) or Triforce (#x26, #x27 symmetric)
+    ;; Slots 11..14 ($022C..$023B): Dropped Key (#x28, #x29, attr=#x00) or Triforce/Zelda (#x26, #x27 symmetric)
     (label draw_item_oam)
     (LDA #:zp ,ZELDA-ZP-ROOM-ID)
+    (AND #:imm 1)
     (BNE show_triforce_oam)
     (LDA #:zp ,ZELDA-ZP-KEY-X)
     (BEQ hide_item_oam)
@@ -660,7 +753,7 @@
     (RTS)
 
     ;; ========================================================================
-    ;; VBlank NMI Handler (Updates Rupee/Key/Hearts HUD & Unlocks North Door)
+    ;; VBlank NMI Handler (Updates Rupee/Key/Hearts HUD, North Door & Room Palette)
     ;; ========================================================================
     (label nmi_handler)
     (PHA)
@@ -709,19 +802,43 @@
     (label z_heart2_write)
     (STX #:abs #x2007)
 
-    ;; If Room transitioned to Sanctum (ROOM_ID == 1), write #x26 to
-    ;; row 8 cols 15..16 ($210F-$2110) and row 9 cols 15..16 ($212F-$2130)!
+    ;; When ROOM_DIRTY != 0, open North Door tiles ($20CF..$20F0 and $210F..$2130)
+    ;; and update $3F02..$3F03 based on ROOM_ID!
     (LDA #:zp ,ZELDA-ZP-ROOM-DIRTY)
     (BEQ z_nmi_restore)
     (LDA #:imm 0)
     (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
-    (LDA #:zp ,ZELDA-ZP-ROOM-ID)
-    (BEQ z_nmi_restore)
     (BIT #:abs #x2002)
+    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xCF) (STA #:abs #x2006)
+    (LDA #:imm #x24) (STA #:abs #x2007) (STA #:abs #x2007)
+    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xEF) (STA #:abs #x2006)
+    (LDA #:imm #x24) (STA #:abs #x2007) (STA #:abs #x2007)
     (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #x0F) (STA #:abs #x2006)
     (LDA #:imm #x26) (STA #:abs #x2007) (STA #:abs #x2007)
     (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #x2F) (STA #:abs #x2006)
     (LDA #:imm #x26) (STA #:abs #x2007) (STA #:abs #x2007)
+
+    ;; Update $3F02..$3F03 based on ROOM_ID:
+    ;;   ROOM_ID <= 1 -> Overworld (#x30, #x00)
+    ;;   ROOM_ID == 2 -> Underworld Dungeon teal (#x1C, #x0C)
+    ;;   ROOM_ID == 3 -> Death Mountain crimson (#x16, #x06)
+    (LDX #:imm #x30)
+    (LDY #:imm #x00)
+    (LDA #:zp ,ZELDA-ZP-ROOM-ID)
+    (CMP #:imm 2)
+    (BNE z_pal_check_r3)
+    (LDX #:imm #x1C)
+    (LDY #:imm #x0C)
+    (JMP z_pal_write)
+    (label z_pal_check_r3)
+    (CMP #:imm 3)
+    (BNE z_pal_write)
+    (LDX #:imm #x16)
+    (LDY #:imm #x06)
+    (label z_pal_write)
+    (LDA #:imm #x3F) (STA #:abs #x2006) (LDA #:imm #x02) (STA #:abs #x2006)
+    (STX #:abs #x2007)
+    (STY #:abs #x2007)
 
     (label z_nmi_restore)
     (BIT #:abs #x2002)

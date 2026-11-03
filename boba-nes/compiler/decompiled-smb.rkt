@@ -49,34 +49,40 @@
  MARIO-ZP-VRAM-PENDING
  MARIO-ZP-DEAD
  MARIO-ZP-LIVES
+ MARIO-ZP-STAGE-ID
+ MARIO-ZP-GAME-COMPLETED
+ MARIO-ZP-STAGE-DIRTY
  load-decompiled-smb-ppu-state
  emit-decompiled-mario-6502-program)
 
-;; Zero-Page Layout ($0010-$0027) matching `compiler/nes-games-builder.rkt`:
-(define MARIO-ZP-BUTTONS      #x10)
-(define MARIO-ZP-PREV-BTN     #x11)
-(define MARIO-ZP-NEW-BTN      #x12)
-(define MARIO-ZP-FRAME-CNT    #x13)
-(define MARIO-ZP-SCROLL-X     #x14) ; 0..255 fine+coarse X scroll
-(define MARIO-ZP-SCROLL-NT    #x15) ; 0 = Nametable 0 ($2000), 1 = Nametable 1 ($2400)
-(define MARIO-ZP-X-WORLD-LO   #x16) ; 16-bit world X coordinate low byte (0..511)
-(define MARIO-ZP-X-WORLD-HI   #x17) ; 16-bit world X coordinate high byte (0..1)
-(define MARIO-ZP-SCREEN-X     #x18) ; Screen-space X (clamped for OAM rendering)
-(define MARIO-ZP-Y-SUB        #x19) ; 8.8 fixed-point Y subpixel
-(define MARIO-ZP-Y-PX         #x1A) ; 8.8 fixed-point Y pixel (ground = 176, visual Y = 192)
-(define MARIO-ZP-VY-SUB       #x1B) ; 8.8 signed vertical velocity low byte
-(define MARIO-ZP-VY-PX        #x1C) ; 8.8 signed vertical velocity high byte
-(define MARIO-ZP-ON-GROUND    #x1D) ; 1 when standing on ground/pipe/block
-(define MARIO-ZP-COINS        #x1E) ; Collected coins counter
-(define MARIO-ZP-SCORE        #x1F) ; Score counter (x100)
-(define MARIO-ZP-GOOMBA-X     #x20) ; Goomba 1 world X (low byte)
-(define MARIO-ZP-GOOMBA-ALIVE #x21) ; 1 = patrolling, 0 = squashed!
-(define MARIO-ZP-QBLOCK-HIT   #x22) ; 1 = ? block at X=80 bonked -> coin spawned!
-(define MARIO-ZP-COIN-ANIM-Y  #x23) ; Rising coin animation Y (0 = inactive)
-(define MARIO-ZP-WON          #x24) ; 1 = touched Flagpole at X >= 340!
-(define MARIO-ZP-VRAM-PENDING #x25) ; 1 = NMI should update bonked ? block tile in VRAM
-(define MARIO-ZP-DEAD         #x26) ; 0 = alive, 1 = dead/dying (upward death bounce)
-(define MARIO-ZP-LIVES        #x27) ; Remaining lives (initialized to 3, matching SMB1 $075A)
+;; Zero-Page Layout ($0010-$002A) matching `compiler/nes-games-builder.rkt`:
+(define MARIO-ZP-BUTTONS        #x10)
+(define MARIO-ZP-PREV-BTN       #x11)
+(define MARIO-ZP-NEW-BTN        #x12)
+(define MARIO-ZP-FRAME-CNT      #x13)
+(define MARIO-ZP-SCROLL-X       #x14) ; 0..255 fine+coarse X scroll
+(define MARIO-ZP-SCROLL-NT      #x15) ; 0 = Nametable 0 ($2000), 1 = Nametable 1 ($2400)
+(define MARIO-ZP-X-WORLD-LO     #x16) ; 16-bit world X coordinate low byte (0..511)
+(define MARIO-ZP-X-WORLD-HI     #x17) ; 16-bit world X coordinate high byte (0..1)
+(define MARIO-ZP-SCREEN-X       #x18) ; Screen-space X (clamped for OAM rendering)
+(define MARIO-ZP-Y-SUB          #x19) ; 8.8 fixed-point Y subpixel
+(define MARIO-ZP-Y-PX           #x1A) ; 8.8 fixed-point Y pixel (ground = 176, visual Y = 192)
+(define MARIO-ZP-VY-SUB         #x1B) ; 8.8 signed vertical velocity low byte
+(define MARIO-ZP-VY-PX          #x1C) ; 8.8 signed vertical velocity high byte
+(define MARIO-ZP-ON-GROUND      #x1D) ; 1 when standing on ground/pipe/block
+(define MARIO-ZP-COINS          #x1E) ; Collected coins counter
+(define MARIO-ZP-SCORE          #x1F) ; Score counter (x100)
+(define MARIO-ZP-GOOMBA-X       #x20) ; Goomba 1 world X (low byte)
+(define MARIO-ZP-GOOMBA-ALIVE   #x21) ; 1 = patrolling, 0 = squashed!
+(define MARIO-ZP-QBLOCK-HIT     #x22) ; 1 = ? block at X=80 bonked -> coin spawned!
+(define MARIO-ZP-COIN-ANIM-Y    #x23) ; Rising coin animation Y (0 = inactive)
+(define MARIO-ZP-WON            #x24) ; 1 = touched Flagpole at X >= 340!
+(define MARIO-ZP-VRAM-PENDING   #x25) ; 1 = NMI should update bonked ? block tile in VRAM
+(define MARIO-ZP-DEAD           #x26) ; 0 = alive, 1 = dead/dying (upward death bounce)
+(define MARIO-ZP-LIVES          #x27) ; Remaining lives (initialized to 3, matching SMB1 $075A)
+(define MARIO-ZP-STAGE-ID       #x28) ; 0 = W1-1, 1 = W1-2, 2 = W4-1, 3 = W8-4 Bowser's Castle
+(define MARIO-ZP-GAME-COMPLETED #x29) ; 1 = Bowser defeated at Castle Axe & Princess rescued!
+(define MARIO-ZP-STAGE-DIRTY    #x2A) ; 1 = NMI should update HUD WORLD X-Y and Stage Palette
 
 (define-syntax (get-smb-ppu-json-path stx)
   (datum->syntax
@@ -300,6 +306,9 @@
     (STA #:zp ,MARIO-ZP-WON)
     (STA #:zp ,MARIO-ZP-VRAM-PENDING)
     (STA #:zp ,MARIO-ZP-DEAD)
+    (STA #:zp ,MARIO-ZP-STAGE-ID)
+    (STA #:zp ,MARIO-ZP-GAME-COMPLETED)
+    (STA #:zp ,MARIO-ZP-STAGE-DIRTY)
     (LDA #:imm 3)
     (STA #:zp ,MARIO-ZP-LIVES)
     (LDA #:imm 176)
@@ -383,13 +392,29 @@
     (AND #:zp ,MARIO-ZP-BUTTONS)
     (STA #:zp ,MARIO-ZP-NEW-BTN)
 
-    ;; 2b. Respawn / Reset when START or SELECT is pressed while DEAD != 0 or WON != 0
+    ;; 2b. Failure Recovery in Current Stage (0..3) when DEAD != 0 and START/SELECT pressed,
+    ;;     or Full Campaign Reset when DEAD == 0, GAME_COMPLETED != 0, and START pressed
     (LDA #:zp ,MARIO-ZP-DEAD)
-    (ORA #:zp ,MARIO-ZP-WON)
-    (BEQ check_dead_skip_input)
+    (BEQ check_completed_reset)
     (LDA #:zp ,MARIO-ZP-NEW-BTN)
     (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
     (BEQ check_dead_skip_input)
+    (JMP respawn_current_stage)
+
+    (label check_completed_reset)
+    (LDA #:zp ,MARIO-ZP-GAME-COMPLETED)
+    (BEQ check_dead_skip_input)
+    (LDA #:zp ,MARIO-ZP-NEW-BTN)
+    (AND #:imm ,BTN-START)
+    (BEQ check_dead_skip_input)
+    (LDA #:imm 0)
+    (STA #:zp ,MARIO-ZP-STAGE-ID)
+    (STA #:zp ,MARIO-ZP-GAME-COMPLETED)
+    (STA #:zp ,MARIO-ZP-QBLOCK-HIT)
+    (LDA #:imm 1)
+    (STA #:zp ,MARIO-ZP-STAGE-DIRTY)
+
+    (label respawn_current_stage)
     (LDA #:imm 40)
     (STA #:zp ,MARIO-ZP-X-WORLD-LO)
     (STA #:zp ,MARIO-ZP-SCREEN-X)
@@ -617,9 +642,65 @@
 
     (label award_flagpole_win)
     (LDA #:zp ,MARIO-ZP-WON)
-    (BNE step_coin_anim)
+    (BNE check_stage_transition)
     (LDA #:imm 1)
     (STA #:zp ,MARIO-ZP-WON)
+    (INC #:zp ,MARIO-ZP-SCORE)
+    (LDA #:zp ,MARIO-ZP-X-WORLD-HI)
+    (BEQ step_coin_anim)
+    (LDA #:zp ,MARIO-ZP-X-WORLD-LO)
+    (CMP #:imm 104)
+    (BCS trigger_stage_advance)
+    (JMP step_coin_anim)
+
+    ;; 7b. Stage Progression (WORLD 1-1 -> 1-2 -> 4-1 -> 8-4 Castle Bridge Axe & Princess Rescue)
+    ;;     After 85 frames from Goomba (X=118), Mario is at Flagpole (worldX=373, X_HI=1, X_LO=117).
+    ;;     Walking 8 more frames right into the Castle/Warp Pipe reaches worldX=397 (X_HI=1, X_LO=141 >= 140):
+    (label check_stage_transition)
+    (LDA #:zp ,MARIO-ZP-X-WORLD-HI)
+    (BEQ step_coin_anim)
+    (LDA #:zp ,MARIO-ZP-X-WORLD-LO)
+    (CMP #:imm 140)
+    (BCC step_coin_anim)
+
+    (label trigger_stage_advance)
+    (LDA #:zp ,MARIO-ZP-STAGE-ID)
+    (CMP #:imm 3)
+    (BCS castle_axe_victory)
+    ;; Advance to next stage (0 -> 1 -> 2 -> 3)
+    (INC #:zp ,MARIO-ZP-STAGE-ID)
+    (LDA #:imm 40)
+    (STA #:zp ,MARIO-ZP-X-WORLD-LO)
+    (STA #:zp ,MARIO-ZP-SCREEN-X)
+    (LDA #:imm 0)
+    (STA #:zp ,MARIO-ZP-X-WORLD-HI)
+    (STA #:zp ,MARIO-ZP-SCROLL-X)
+    (STA #:zp ,MARIO-ZP-SCROLL-NT)
+    (STA #:zp ,MARIO-ZP-Y-SUB)
+    (STA #:zp ,MARIO-ZP-VY-SUB)
+    (STA #:zp ,MARIO-ZP-VY-PX)
+    (STA #:zp ,MARIO-ZP-DEAD)
+    (STA #:zp ,MARIO-ZP-WON)
+    (STA #:zp ,MARIO-ZP-QBLOCK-HIT)
+    (LDA #:imm 176)
+    (STA #:zp ,MARIO-ZP-Y-PX)
+    (LDA #:imm 1)
+    (STA #:zp ,MARIO-ZP-ON-GROUND)
+    (STA #:zp ,MARIO-ZP-GOOMBA-ALIVE)
+    (STA #:zp ,MARIO-ZP-STAGE-DIRTY)
+    (LDA #:imm 120)
+    (STA #:zp ,MARIO-ZP-GOOMBA-X)
+    (JMP step_coin_anim)
+
+    ;; Stage 3 (WORLD 8-4 Bowser's Castle): Touch Castle Bridge Axe & Rescue Princess Toadstool!
+    (label castle_axe_victory)
+    (LDA #:zp ,MARIO-ZP-GAME-COMPLETED)
+    (BNE step_coin_anim)
+    (LDA #:imm 1)
+    (STA #:zp ,MARIO-ZP-GAME-COMPLETED)
+    (STA #:zp ,MARIO-ZP-WON)
+    (LDA #:imm 0)
+    (STA #:zp ,MARIO-ZP-GOOMBA-ALIVE)
     (INC #:zp ,MARIO-ZP-SCORE)
 
     (label step_coin_anim)
@@ -815,7 +896,7 @@
     ;; If '?' Question Block was bonked, turn 2x2 block ($222A..$222B & $224A..$224B)
     ;; into SMB1's authentic 2x2 Empty Block (#x57, #x58 / #x59, #x5A)!
     (LDA #:zp ,MARIO-ZP-VRAM-PENDING)
-    (BEQ nmi_restore_hud_scroll)
+    (BEQ nmi_check_stage_dirty)
     (LDA #:imm 0)
     (STA #:zp ,MARIO-ZP-VRAM-PENDING)
     (BIT #:abs #x2002)
@@ -825,6 +906,29 @@
     (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #x4A) (STA #:abs #x2006)
     (LDA #:imm #x59) (STA #:abs #x2007)
     (LDA #:imm #x5A) (STA #:abs #x2007)
+
+    ;; If MARIO-ZP-STAGE-DIRTY != 0, update HUD `WORLD X-Y` ($2073, $2075) and PPU Stage Palette ($3F00, $3F10, $3F01)
+    (label nmi_check_stage_dirty)
+    (LDA #:zp ,MARIO-ZP-STAGE-DIRTY)
+    (BEQ nmi_restore_hud_scroll)
+    (LDA #:imm 0)
+    (STA #:zp ,MARIO-ZP-STAGE-DIRTY)
+    (LDX #:zp ,MARIO-ZP-STAGE-ID)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x73) (STA #:abs #x2006)
+    (LDA #:absx stage_world_num_table)
+    (STA #:abs #x2007)
+    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #x75) (STA #:abs #x2006)
+    (LDA #:absx stage_level_num_table)
+    (STA #:abs #x2007)
+    (LDA #:imm #x3F) (STA #:abs #x2006) (LDA #:imm #x00) (STA #:abs #x2006)
+    (LDA #:absx stage_sky_color_table)
+    (STA #:abs #x2007)
+    (LDA #:absx stage_bg_c1_table)
+    (STA #:abs #x2007)
+    (LDA #:imm #x3F) (STA #:abs #x2006) (LDA #:imm #x10) (STA #:abs #x2006)
+    (LDA #:absx stage_sky_color_table)
+    (STA #:abs #x2007)
 
     ;; Lock top of screen to Nametable 0 at scroll (0, 0) with PPUCTRL = #$90 (BG=PT1, SPR=PT0)
     (label nmi_restore_hud_scroll)
@@ -848,12 +952,21 @@
     (RTI)
 
     ;; ========================================================================
-    ;; Decompiled World 1-1 ROM Tables (Palette + 1,024B NT0 + 1,024B NT1)
+    ;; Decompiled World 1-1..8-4 ROM Tables (Palette + Stage Tables + NT0 + NT1)
     ;; ========================================================================
     (.align 256)
     (label smb_palette_table)
     (label mario_palette_table)
     (.byte ,@pal-bytes)
+
+    (label stage_world_num_table)
+    (.byte 1 1 4 8)
+    (label stage_level_num_table)
+    (.byte 1 2 1 4)
+    (label stage_sky_color_table)
+    (.byte #x22 #x0F #x22 #x0F)
+    (label stage_bg_c1_table)
+    (.byte #x29 #x3C #x29 #x30)
 
     ,@(emit-1024-byte-rom-table
        'smb_nt0_table

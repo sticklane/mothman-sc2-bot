@@ -1065,6 +1065,229 @@
   (check-equal? (asm-result-page-crossings lib-asm) 0)
   (check-true (> (bytes-length (asm-result-bytes lib-asm)) 20)))
 
+(test-case "Full Multi-Stage, Multi-Dungeon & Multi-Level Game Campaigns (SMB 1-1..8-4, Zelda Overworld..Ganon, Tetris Levels 00..03)"
+  ;; --------------------------------------------------------------------------
+  ;; 1. Super Mario Bros. Full 4-Stage Campaign:
+  ;;    WORLD 1-1 -> WORLD 1-2 (Underground + Hazard Death/Respawn) -> WORLD 4-1 -> WORLD 8-4 (Bowser's Castle & Princess Rescue)
+  ;; --------------------------------------------------------------------------
+  (define m-emu (make-nes-emulator-from-rom mario-rom-bytes))
+  (define m-labels (asm-result-labels mario-asm-result))
+  (define m-boot  (hash-ref m-labels 'boot_init))
+  (define m-frame (hash-ref m-labels 'game_frame_step))
+  (nes-run-until-rts! m-emu m-boot)
+
+  (define smb-full-zp-trace '())
+  (define (step-mario! btn [n 1])
+    (for ([_ (in-range n)])
+      (define-values (_act vb) (nes-step-frame! m-emu m-frame btn))
+      (check-true (<= vb 2273))
+      (check-false (nes-emulator-ppu-tainted? m-emu))
+      (define snap (list->bytes (for/list ([a (in-range 256)]) (nes-zp-ref m-emu a))))
+      (set! smb-full-zp-trace (cons snap smb-full-zp-trace))))
+
+  (define (play-mario-stage!)
+    ;; Bonk '?' Question Block at X=76
+    (step-mario! BTN-RIGHT 12)
+    (step-mario! BTN-A 1)
+    (step-mario! 0 25)
+    ;; Jump and stomp stage enemy at X=120
+    (step-mario! BTN-RIGHT 14)
+    (step-mario! BTN-A 1)
+    (step-mario! 0 35)
+    ;; Run across Nametable 0 & 1 to Flagpole/Warp Pipe/Castle Axe (85 + 8 = 93 frames)
+    (step-mario! BTN-RIGHT 93)
+    (step-mario! 0 1))
+
+  ;; Stage 0: WORLD 1-1 -> advances to Stage 1 (WORLD 1-2 Underground)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-STAGE-ID) 0)
+  (play-mario-stage!)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-STAGE-ID) 1)
+  ;; Verify VBlank NMI updated HUD WORLD 1-2 ($2073=1, $2075=2) and Underground Palette ($3F00=#x0F, $3F01=#x3C)
+  (check-equal? (nes-vram-ref m-emu #x2073) 1)
+  (check-equal? (nes-vram-ref m-emu #x2075) 2)
+  (check-equal? (nes-vram-ref m-emu #x3F00) #x0F)
+  (check-equal? (nes-vram-ref m-emu #x3F01) #x3C)
+
+  ;; Mid-Campaign Failure & In-Stage Recovery inside Stage 1 (WORLD 1-2 Underground):
+  (step-mario! BTN-RIGHT 28)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-DEAD) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-LIVES) 2)
+  ;; Pressing START respawns Mario inside WORLD 1-2 (STAGE-ID remains 1!)
+  (step-mario! BTN-START 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-DEAD) 0)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-STAGE-ID) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-X-WORLD-LO) 40)
+
+  ;; Complete Stage 1 (WORLD 1-2) -> Warp Zone to Stage 2 (WORLD 4-1 Overworld)
+  (play-mario-stage!)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-STAGE-ID) 2)
+  (check-equal? (nes-vram-ref m-emu #x2073) 4)
+  (check-equal? (nes-vram-ref m-emu #x2075) 1)
+  (check-equal? (nes-vram-ref m-emu #x3F00) #x22)
+
+  ;; Complete Stage 2 (WORLD 4-1) -> Warp Zone to Stage 3 (WORLD 8-4 Bowser's Castle)
+  (play-mario-stage!)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-STAGE-ID) 3)
+  (check-equal? (nes-vram-ref m-emu #x2073) 8)
+  (check-equal? (nes-vram-ref m-emu #x2075) 4)
+  (check-equal? (nes-vram-ref m-emu #x3F00) #x0F)
+  (check-equal? (nes-vram-ref m-emu #x3F01) #x30)
+
+  ;; Complete Stage 3 (WORLD 8-4): Touch Castle Bridge Axe, Defeat Bowser & Rescue Princess Toadstool!
+  (play-mario-stage!)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-STAGE-ID) 3)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-GAME-COMPLETED) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-WON) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-GOOMBA-ALIVE) 0)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-COINS) 4)
+  (set! smb-full-zp-trace (reverse smb-full-zp-trace))
+
+  ;; --------------------------------------------------------------------------
+  ;; 2. The Legend of Zelda Full 4-Room Quest:
+  ;;    Overworld 0x77 -> Eagle Sanctum -> Underworld Boss (Aquamentus & 8 Triforce Shards) -> Death Mountain (Ganon & Princess Zelda)
+  ;; --------------------------------------------------------------------------
+  (define z-emu (make-nes-emulator-from-rom zelda-rom-bytes))
+  (define z-labels (asm-result-labels zelda-asm-result))
+  (define z-boot  (hash-ref z-labels 'boot_init))
+  (define z-frame (hash-ref z-labels 'game_frame_step))
+  (nes-run-until-rts! z-emu z-boot)
+
+  (define (step-zelda! btn [n 1])
+    (for ([_ (in-range n)])
+      (define-values (_act vb) (nes-step-frame! z-emu z-frame btn))
+      (check-true (<= vb 2273))
+      (check-false (nes-emulator-ppu-tainted? z-emu))))
+
+  ;; Room 0 (Overworld 0x77): Slay Red Octorok, collect Key, unlock North Gate -> Room 1
+  (step-zelda! BTN-UP 9)
+  (step-zelda! BTN-A 2)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OCTO-ALIVE) 0)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-RUPEES) 1)
+  (step-zelda! BTN-UP 34)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-ROOM-ID) 1)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-TRIFORCE-WON) 1)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-TRIFORCE-COUNT) 1)
+
+  ;; Walk North in Room 1 (Eagle Sanctum) -> Enter Room 2 (Underworld Boss Chamber: Aquamentus)
+  (step-zelda! BTN-UP 14)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-ROOM-ID) 2)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OCTO-ALIVE) 1)
+  (check-equal? (nes-vram-ref z-emu #x3F02) #x1C) ; Underworld Dungeon teal palette
+
+  ;; Approach Aquamentus in Room 2, take 1 contact knockback hit (hearts: 3 -> 2), then slay Aquamentus!
+  (step-zelda! BTN-UP 18)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-HEARTS) 2)
+  (step-zelda! BTN-A 2)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OCTO-ALIVE) 0)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-TRIFORCE-COUNT) 8) ; All 8 Triforce of Wisdom shards!
+
+  ;; Collect Boss Key & unlock North Shutter -> Enter Room 3 (Death Mountain: Ganon's Final Lair)
+  (step-zelda! BTN-UP 16)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-ROOM-ID) 3)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OCTO-ALIVE) 1) ; Ganon spawned!
+  (check-equal? (nes-vram-ref z-emu #x3F02) #x16) ; Death Mountain crimson palette
+
+  ;; Approach Ganon, slay Ganon with Sword ('A'), and step North to rescue Princess Zelda!
+  (step-zelda! BTN-UP 17)
+  (step-zelda! BTN-A 2)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-OCTO-ALIVE) 0)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-RUPEES) 3)
+  (step-zelda! BTN-UP 10)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-GAME-COMPLETED) 1)
+
+  ;; --------------------------------------------------------------------------
+  ;; 3. Nintendo NES Tetris Full Multi-Line & Multi-Level Campaign:
+  ;;    6 Full 10-Block Line Clears & LEVEL 00 -> 01 -> 02 -> 03 via 100% Controller Inputs (Zero RAM Pokes!)
+  ;; --------------------------------------------------------------------------
+  (define t-emu (make-nes-emulator-from-rom tetris-rom-bytes))
+  (define t-labels (asm-result-labels tetris-asm-result))
+  (define t-boot  (hash-ref t-labels 'boot_init))
+  (define t-frame (hash-ref t-labels 'game_frame_step))
+  (nes-run-until-rts! t-emu t-boot)
+
+  (define (tap-t! btn)
+    (define-values (_a1 vb1) (nes-step-frame! t-emu t-frame btn))
+    (check-true (<= vb1 2273))
+    (define-values (_a2 vb2) (nes-step-frame! t-emu t-frame 0))
+    (check-true (<= vb2 2273)))
+
+  (define (shift-and-drop! dir count)
+    (for ([_ (in-range count)]) (tap-t! dir))
+    (tap-t! BTN-B))
+
+  ;; Piece #1 (ID=0): Rotate twice (rot=2), shift left 3x to X=1 (cols 0..3), Hard-Drop
+  (tap-t! BTN-A)
+  (tap-t! BTN-A)
+  (shift-and-drop! BTN-LEFT 3)
+  ;; Piece #2 (ID=3, O-piece): Shift right 4x to X=8 (cols 8..9), Hard-Drop
+  (shift-and-drop! BTN-RIGHT 4)
+  ;; Piece #3 (ID=6, I-piece): Shift right 1x to X=5 (cols 4..7) -> Line Clear #1!
+  (shift-and-drop! BTN-RIGHT 1)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LINES) 1)
+
+  ;; Piece #4 (ID=6) & Piece #5 (ID=6) -> Line Clear #2 & LEVEL 01!
+  (shift-and-drop! BTN-LEFT 3)
+  (shift-and-drop! BTN-RIGHT 1)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LINES) 2)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LEVEL) 1)
+
+  ;; Piece #6 (ID=3) & Piece #7 (ID=6) -> Line Clear #3!
+  (shift-and-drop! BTN-RIGHT 4)
+  (shift-and-drop! BTN-RIGHT 1)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LINES) 3)
+
+  ;; Piece #8 (ID=6) & Piece #9 (ID=6) -> Line Clear #4, LEVEL 02 & GAME_WON = 1!
+  (shift-and-drop! BTN-LEFT 3)
+  (shift-and-drop! BTN-RIGHT 1)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LINES) 4)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LEVEL) 2)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-GAME-WON) 1)
+
+  ;; Piece #10 (ID=3), #11 (ID=6), #12 (ID=6), #13 (ID=6) -> Line Clears #5 & #6 (LEVEL 03)!
+  (shift-and-drop! BTN-RIGHT 4)
+  (shift-and-drop! BTN-RIGHT 1)
+  (shift-and-drop! BTN-LEFT 3)
+  (shift-and-drop! BTN-RIGHT 1)
+  (for ([_ (in-range 9)]) (nes-step-frame! t-emu t-frame 0))
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LINES) 6)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-LEVEL) 3)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-DIRTY-ROW) 20)
+  (check-equal? (nes-vram-ref t-emu #x22BB) 3) ; HUD LEVEL 03 digit updated in VRAM!
+
+  ;; --------------------------------------------------------------------------
+  ;; 4. Campaign Spin-Offs: Multi-Stage Trace Detector, Victory Reachability & Stage Handler
+  ;; --------------------------------------------------------------------------
+  (define prog-info (detect-multi-stage-progression-from-trace smb-full-zp-trace))
+  (define stage-addrs (map (lambda (h) (hash-ref h 'addr)) (hash-ref prog-info 'stage-registers)))
+  (check-not-false (memq MARIO-ZP-STAGE-ID stage-addrs))
+  (check-not-false (memq MARIO-ZP-DEAD (hash-ref prog-info 'recovery-registers)))
+  (check-not-false (memq MARIO-ZP-GAME-COMPLETED (hash-ref prog-info 'completion-flags)))
+
+  ;; Disconnected victory state in state-machine is caught and repaired automatically
+  (define disconnected-campaign-mod
+    (hasheq 'name 'disconnected-campaign-test
+            'mapper 'NROM
+            'state-machines
+            (list (hasheq 'name 'broken-campaign
+                          'initial 'stage-1
+                          'states (list (hasheq 'id 'stage-1 'kind 'normal 'transitions '(stage-2))
+                                        (hasheq 'id 'stage-2 'kind 'normal 'transitions '(stage-1)) ; Loops back without reaching final-victory!
+                                        (hasheq 'id 'final-victory 'kind 'victory 'transitions '(stage-1)))))))
+  (define disc-res (typecheck-nes-module disconnected-campaign-mod))
+  (check-false (nes-type-result-well-typed? disc-res))
+  (check-not-false (memq 'unreachable-victory-state (map nes-violation-category (nes-type-result-violations disc-res))))
+  (define-values (_fixed-disc disc-repairs fixed-disc-res)
+    (compile-and-verify-nes-module disconnected-campaign-mod))
+  (check-true (nes-type-result-well-typed? fixed-disc-res))
+  (check-not-false (memq 'connect-disconnected-victory-state disc-repairs))
+
+  ;; Stage progression library emitter compiles with 0 page crossings
+  (define stage-lib-asm
+    (assemble-6502 (append '((label stage_step))
+                           (emit-stage-progression-handler-6502 #x28 #x2A #x29 #:max-stage 3 #:spawn-zp #x16 #:spawn-val 40)
+                           '((RTS)))))
+  (check-equal? (asm-result-page-crossings stage-lib-asm) 0))
+
 (printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)
 

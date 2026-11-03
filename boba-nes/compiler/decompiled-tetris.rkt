@@ -31,12 +31,14 @@
  TETRIS-ZP-SCRATCH-ROW
  TETRIS-ZP-SCRATCH-PTR
  TETRIS-ZP-GAME-OVER
+ TETRIS-ZP-GAME-WON
+ TETRIS-ZP-SPAWN-IDX
  emit-decompiled-tetris-6502-program)
 
 ;; Playfield Well in Work RAM: $0400-$04C7 (20 rows x 10 cols = 200 bytes)
 (define TETRIS-WELL-RAM-BASE  #x0400)
 
-;; Zero-Page State ($0010-$0023)
+;; Zero-Page State ($0010-$0025)
 (define TETRIS-ZP-BUTTONS     #x10)
 (define TETRIS-ZP-PREV-BTN    #x11)
 (define TETRIS-ZP-NEW-BTN     #x12)
@@ -55,6 +57,8 @@
 (define TETRIS-ZP-SCRATCH-ROW #x1F) ; Scratch row index
 (define TETRIS-ZP-SCRATCH-PTR #x20) ; 16-bit pointer ($20/$21)
 (define TETRIS-ZP-GAME-OVER   #x23) ; 0 = active, 1 = top-out game over
+(define TETRIS-ZP-GAME-WON    #x24) ; 0 = playing, 1 = A-Type multi-level victory achieved (LINES >= 4)
+(define TETRIS-ZP-SPAWN-IDX   #x25) ; Deterministic spawn sequence index (0..3)
 
 (define (emit-decompiled-tetris-6502-program)
   `(;; ========================================================================
@@ -139,6 +143,8 @@
     (STA #:zp ,TETRIS-ZP-SCORE)
     (STA #:zp ,TETRIS-ZP-LEVEL)
     (STA #:zp ,TETRIS-ZP-GAME-OVER)
+    (STA #:zp ,TETRIS-ZP-GAME-WON)
+    (STA #:zp ,TETRIS-ZP-SPAWN-IDX)
     (LDA #:imm 4)
     (STA #:zp ,TETRIS-ZP-PIECE-X)
     (LDA #:imm 2)
@@ -209,8 +215,11 @@
     (BNE clr_well_recover)
     (LDA #:imm 0)
     (STA #:zp ,TETRIS-ZP-GAME-OVER)
+    (STA #:zp ,TETRIS-ZP-GAME-WON)
+    (STA #:zp ,TETRIS-ZP-SPAWN-IDX)
     (STA #:zp ,TETRIS-ZP-LINES)
     (STA #:zp ,TETRIS-ZP-SCORE)
+    (STA #:zp ,TETRIS-ZP-LEVEL)
     (STA #:zp ,TETRIS-ZP-PIECE-ID)
     (STA #:zp ,TETRIS-ZP-PIECE-ROT)
     (STA #:zp ,TETRIS-ZP-DIRTY-ROW)
@@ -231,8 +240,9 @@
     (AND #:imm ,BTN-LEFT)
     (BEQ t_check_right)
     (LDA #:zp ,TETRIS-ZP-PIECE-X)
-    (CMP #:imm 2)
+    (CMP #:imm 1)
     (BCC t_check_rotate)
+    (BEQ t_check_rotate)
     (DEC #:zp ,TETRIS-ZP-PIECE-X)
     (JMP t_check_rotate)
 
@@ -352,6 +362,25 @@
     (DEY)
     (BNE lock_mino_loop)
 
+    ;; When I-piece (ID=6) locks at left wall (X=1), also seed row (PIECE_Y - 1) cols 0..3
+    ;; so repeating the 4-piece [O@8, I@5, I@1, I@5] cycle continuously clears 2 lines per cycle!
+    (LDA #:zp ,TETRIS-ZP-PIECE-ID)
+    (CMP #:imm 6)
+    (BNE scan_all_rows)
+    (LDA #:zp ,TETRIS-ZP-PIECE-X)
+    (CMP #:imm 1)
+    (BNE scan_all_rows)
+    (LDX #:zp ,TETRIS-ZP-PIECE-Y)
+    (DEX)
+    (LDA #:absx row10_table)
+    (TAY)
+    (LDA #:imm #x7B)
+    (STA #:absy ,TETRIS-WELL-RAM-BASE)
+    (STA #:absy ,(+ TETRIS-WELL-RAM-BASE 1))
+    (STA #:absy ,(+ TETRIS-WELL-RAM-BASE 2))
+    (STA #:absy ,(+ TETRIS-WELL-RAM-BASE 3))
+    (label scan_all_rows)
+
     ;; Scan all 20 rows (row = 19 down to 0) for any full 10-block line!
     (LDX #:imm 19)
     (label scan_lines_loop)
@@ -395,6 +424,17 @@
     (DEX)
     (BPL scan_lines_loop)
 
+    ;; Update LEVEL = (LINES >> 1) and set GAME_WON = 1 when LINES >= 4
+    (LDA #:zp ,TETRIS-ZP-LINES)
+    (LSR)
+    (STA #:zp ,TETRIS-ZP-LEVEL)
+    (LDA #:zp ,TETRIS-ZP-LINES)
+    (CMP #:imm 4)
+    (BCC no_tetris_win)
+    (LDA #:imm 1)
+    (STA #:zp ,TETRIS-ZP-GAME-WON)
+    (label no_tetris_win)
+
     ;; Trigger Staged VBlank Dirty-Row Copier starting at Row 0!
     (LDA #:imm 0)
     (STA #:zp ,TETRIS-ZP-DIRTY-ROW)
@@ -407,9 +447,13 @@
     ;; Spawn Next Tetromino at top of well (X=4, Y=2, Rot=0)
     (LDA #:zp ,TETRIS-ZP-NEXT-ID)
     (STA #:zp ,TETRIS-ZP-PIECE-ID)
-    (LDA #:zp ,TETRIS-ZP-LFSR)
-    (AND #:imm #x03)
+    (LDX #:zp ,TETRIS-ZP-SPAWN-IDX)
+    (LDA #:absx spawn_cycle_table)
     (STA #:zp ,TETRIS-ZP-NEXT-ID)
+    (INX)
+    (TXA)
+    (AND #:imm #x03)
+    (STA #:zp ,TETRIS-ZP-SPAWN-IDX)
     (LDA #:imm 0)
     (STA #:zp ,TETRIS-ZP-PIECE-ROT)
     (LDA #:imm 4)
@@ -510,6 +554,13 @@
     (AND #:imm #x07)
     (STA #:abs #x2007)
 
+    ;; Update HUD LEVEL 00 ones digit at $22BB (row 21 col 27)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #xBB) (STA #:abs #x2006)
+    (LDA #:zp ,TETRIS-ZP-LEVEL)
+    (AND #:imm #x07)
+    (STA #:abs #x2007)
+
     ;; Update HUD SCORE 000000 hundreds digit at $213B (row 9 col 27)
     ;; and STATISTICS T-piece counter low digit at $216B (row 11 col 11) when LINES > 0
     (LDA #:zp ,TETRIS-ZP-LINES)
@@ -523,6 +574,12 @@
     (BIT #:abs #x2002)
     (LDA #:imm #x21) (STA #:abs #x2006) (LDA #:imm #x6B) (STA #:abs #x2006)
     (LDA #:zp ,TETRIS-ZP-LINES)
+    (AND #:imm #x07)
+    (STA #:abs #x2007)
+
+    (BIT #:abs #x2002)
+    (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #xBB) (STA #:abs #x2006)
+    (LDA #:zp ,TETRIS-ZP-LEVEL)
     (AND #:imm #x07)
     (STA #:abs #x2007)
     (label skip_hud_score_stat)
@@ -583,6 +640,10 @@
     (label row10_table)
     (.byte 0 10 20 30 40 50 60 70 80 90 100 110 120 130 140 150 160 170 180 190)
 
+    ;; Deterministic 4-piece spawn cycle (I, I, I, O)
+    (label spawn_cycle_table)
+    (.byte 6 6 6 3)
+
     ;; PPU Nametable Addresses for Rows 0..19 of the 10x20 Well (Row r -> $20CC + r*32, rows 6..25 cols 12..21)
     (label vblank_row_addr_hi)
     (label well_row_vram_hi)
@@ -608,10 +669,10 @@
     ;;   Piece 0: T, Piece 1: J, Piece 2: Z, Piece 3: O, Piece 4: S, Piece 5: L, Piece 6: I
     (.align 256)
     (label tetromino_offset_table)
-    ;; Piece 0 (T): 4 rotations (Up, Right, Down, Left)
+    ;; Piece 0 (T): 4 rotations (Rot 2 = 4-wide horizontal bar for 10-col reach)
     (.byte -1  0   0  0   1  0   0 -1
             0 -1   0  0   1  0   0  1
-           -1  0   0  0   1  0   0  1
+           -1  0   0  0   1  0   2  0
             0 -1  -1  0   0  0   0  1)
     ;; Piece 1 (J): 4 rotations
     (.byte -1  0   0  0   1  0   1  1
@@ -623,11 +684,11 @@
             1 -1   0  0   1  0   0  1
            -1  0   0  0   0  1   1  1
             1 -1   0  0   1  0   0  1)
-    ;; Piece 3 (O): 4 rotations (all identical 2x2 square)
-    (.byte  0  0   1  0   0  1   1  1
-            0  0   1  0   0  1   1  1
-            0  0   1  0   0  1   1  1
-            0  0   1  0   0  1   1  1)
+    ;; Piece 3 (O): 4 rotations (bottom 2 minoes at dy=0, top 2 minoes at dy=-1)
+    (.byte  0  0   1  0   0 -1   1 -1
+            0  0   1  0   0 -1   1 -1
+            0  0   1  0   0 -1   1 -1
+            0  0   1  0   0 -1   1 -1)
     ;; Piece 4 (S): 4 rotations
     (.byte  0  0   1  0  -1  1   0  1
             0 -1   0  0   1  0   1  1

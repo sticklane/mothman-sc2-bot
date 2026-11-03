@@ -28,8 +28,9 @@
  emit-staged-vblank-row-copier-6502
  emit-topout-and-reset-guard-6502
 
- ;; 4. Cross-Genre VBlank HUD & Recovery Library
- emit-vblank-hud-bcd-delta-6502)
+ ;; 4. Cross-Genre VBlank HUD, Multi-Stage Progression & Recovery Library
+ emit-vblank-hud-bcd-delta-6502
+ emit-stage-progression-handler-6502)
 
 ;; ============================================================================
 ;; 1. Platformer Mechanics Library
@@ -231,3 +232,31 @@
        `((CLC)
          (ADC #:imm ,digit-base)))
    `((STA #:abs #x2007))))
+
+;; Reusable Multi-Stage / Multi-World Campaign Progression Handler:
+;;   - If `zp-stage < max-stage`: increments `zp-stage`, sets `zp-stage-dirty = 1` (triggering VBlank HUD & palette swap),
+;;     and resets player spawn coordinate `zp-spawn-coord = spawn-val`.
+;;   - If `zp-stage >= max-stage`: sets `zp-game-completed = 1` (full game victory!).
+(define (emit-stage-progression-handler-6502 zp-stage zp-stage-dirty zp-game-completed
+                                             #:max-stage [max-stage 3]
+                                             #:spawn-zp [spawn-zp #f]
+                                             #:spawn-val [spawn-val 40]
+                                             #:victory-label [vic-lbl '__campaign_victory]
+                                             #:done-label [done-lbl '__stage_prog_done])
+  (append
+   `((LDA #:zp ,zp-stage)
+     (CMP #:imm ,max-stage)
+     (BCS ,vic-lbl)
+     (INC #:zp ,zp-stage)
+     (LDA #:imm 1)
+     (STA #:zp ,zp-stage-dirty))
+   (if spawn-zp
+       `((LDA #:imm ,spawn-val)
+         (STA #:zp ,spawn-zp))
+       '())
+   `((JMP ,done-lbl)
+     (label ,vic-lbl)
+     (LDA #:imm 1)
+     (STA #:zp ,zp-game-completed)
+     (label ,done-lbl))))
+

@@ -28,11 +28,33 @@
 (defsprite-tile tetris-mino-solid-tile  #:tile #x7C #:attr #x00)
 (defsprite-tile tetris-mino-border-tile #:tile #x7D #:attr #x00)
 
+(defstate-machine tetris-campaign-fsm
+  #:initial level-00
+  ([level-00       #:kind normal  #:transitions (level-01 top-out)]
+   [level-01       #:kind normal  #:transitions (level-02 top-out)]
+   [level-02       #:kind normal  #:transitions (rocket-victory top-out)]
+   [top-out        #:kind failure #:transitions (level-00)]
+   [rocket-victory #:kind victory #:transitions (level-00)]))
+
+(defzp-map tetris-zp-layout
+  ([piece-id  #x14 game-phase-or-flag]
+   [piece-rot #x15 game-phase-or-flag]
+   [piece-x   #x16 player-or-actor-coord]
+   [piece-y   #x17 player-or-actor-coord]
+   [lines     #x1A hud-bcd-counter]
+   [score     #x1B hud-bcd-counter]
+   [level     #x1C hud-bcd-counter]
+   [lfsr      #x1E prng-lfsr]
+   [game-over #x23 game-phase-or-flag]
+   [game-won  #x24 game-phase-or-flag]))
+
 (provide tetris-chr-layout
          tetris-hud-font
          tetris-mino-hollow-tile
          tetris-mino-solid-tile
          tetris-mino-border-tile
+         tetris-campaign-fsm
+         tetris-zp-layout
          tetris-rom-bytes
          tetris-asm-result
          tetris-type-result
