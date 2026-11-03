@@ -10,6 +10,8 @@
          racket/list
          racket/format
          "../compiler/graded-typechecker.rkt"
+         "../compiler/boba-core-ir.rkt"
+         "../compiler/multi-target-typechecker.rkt"
          "../compiler/diagnostics.rkt"
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
@@ -23,6 +25,8 @@
 (provide
  (all-from-out racket/base)
  (all-from-out "../compiler/graded-typechecker.rkt")
+ (all-from-out "../compiler/boba-core-ir.rkt")
+ (all-from-out "../compiler/multi-target-typechecker.rkt")
  (all-from-out "../compiler/diagnostics.rkt")
  (all-from-out "../compiler/mos6502-assembler.rkt")
  (all-from-out "../compiler/boba-rom-builder.rkt")

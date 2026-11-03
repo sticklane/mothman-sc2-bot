@@ -30,7 +30,20 @@
          "../examples/zelda_adventure.bnes"
          "../examples/tetris_nes.bnes"
          "../compiler/decompiled-metroid.rkt"
-         "../examples/metroid_brinstar.bnes")
+         "../examples/metroid_brinstar.bnes"
+         "../compiler/boba-core-ir.rkt"
+         "../compiler/multi-target-typechecker.rkt"
+         "../compiler/backend-gb-gbc.rkt"
+         "../compiler/backend-pico.rkt"
+         "../compiler/backend-snes.rkt"
+         "../compiler/backend-gba.rkt"
+         "../compiler/backend-n64.rkt"
+         "../examples/boba_gb_dmg.bnes"
+         "../examples/boba_gbc_color.bnes"
+         "../examples/boba_pico.bnes"
+         "../examples/boba_snes.bnes"
+         "../examples/boba_gba.bnes"
+         "../examples/boba_n64.bnes")
 
 (define total-checks 0)
 
@@ -1733,5 +1746,169 @@
   (define good-seams (detect-unclosed-half-sprite-seams smb-chr good-coin-oam #:sprite-pt 0))
   (check-equal? good-seams '()))
 
-(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, Top-10 classics, Metroid, and 6502 ROM tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 29. Boba-Core IR, TargetSpec Descriptors & 4-Layer Multi-Target Type System
+;; ============================================================================
+(test-case "29. Boba-Core IR, 8 TargetSpecs & 4-Layer Multi-Target Graded/Modal Typechecker"
+  ;; 1. Verify all 8 TargetSpecs & cross-target tile/color encoders
+  (check-equal? (length ALL-TARGET-SPECS) 8)
+  (for ([tid (in-list '(nes gb gbc pico8 rp2040 snes gba n64))])
+    (define spec (get-target-spec tid))
+    (check-equal? (target-spec-id spec) tid))
+  (define sample-rows '("........" "..3333.." ".322223." ".321123."
+                        ".321123." ".322223." "..3333.." "........"))
+  (check-equal? (bytes-length (pack-tile-2bpp-planar sample-rows)) 16)
+  (check-equal? (bytes-length (pack-tile-4bpp-snes-planar sample-rows)) 32)
+  (check-equal? (bytes-length (pack-tile-4bpp-linear-nibble sample-rows)) 32)
+  (check-equal? (bytes-length (pack-tile-rgba16-tmem sample-rows)) 128)
+  (check-equal? (pack-rgb15-bgr555 31 0 0) #x001F)
+  (check-equal? (pack-n64-rgba5551 31 0 0 1) #xF801)
+
+  ;; 2. Layer 1: Pre-Codegen TargetGrade Semiring Inference & Verification across all 8 targets
+  (for ([spec (in-list ALL-TARGET-SPECS)])
+    (define g (synthesize-target-module-grades
+               spec
+               (list (ir-dma-transfer 'vram 128 (target-spec-dma-min-align spec)
+                                      (first (target-spec-vram-allowed-phases spec)))
+                     (ir-oam-emit 'hero 4 2))))
+    (define v (verify-target-module-grades spec g))
+    (check-true (hash-ref v 'valid?)))
+
+  ;; 3. Layer 2: Flow-Sensitive Indexed Hoare Processor-State Typechecker (65C816 M/X & GBA ARM/Thumb)
+  (define mode-bad
+    (check-processor-mode-transitions TARGET-SNES (list '(if cond (rep #x20) (sep #x20)))))
+  (check-false (hash-ref mode-bad 'valid?))
+  (define reconciled-ops
+    (synthesize-65816-mode-reconciliation (list '(if cond (rep #x20) (sep #x20)))))
+  (define mode-fixed
+    (check-processor-mode-transitions TARGET-SNES reconciled-ops))
+  (check-true (hash-ref mode-fixed 'valid?))
+
+  ;; 4. Layer 3: Width-, Alignment-, and Phase-Qualified Memory Capabilities (CapMem)
+  ;;    - GB rejects VRAM writes during STAT Mode 3 (`active-mode3`) & OAM DMA wait outside HRAM
+  (define gb-cap-bad1
+    (check-memory-capability-access TARGET-GB (make-cap-mem 'vram 'u8 1 'active-mode3 'uncached 16)))
+  (define gb-cap-bad2
+    (check-memory-capability-access TARGET-GB (make-cap-mem 'oam-dma 'u8 256 'vblank 'wram 160)))
+  (define gb-cap-ok
+    (check-memory-capability-access TARGET-GB (make-cap-mem 'vram 'u8 1 'hblank-mode0 'hram 16)))
+  (check-false (hash-ref gb-cap-bad1 'valid?))
+  (check-false (hash-ref gb-cap-bad2 'valid?))
+  (check-true  (hash-ref gb-cap-ok   'valid?))
+
+  ;;    - GBA rejects 8-bit (`u8` / `STRB`) writes to VRAM/OAM/PALRAM; accepts `u16`/`u32` aligned writes
+  (define gba-cap-bad
+    (check-memory-capability-access TARGET-GBA (make-cap-mem 'vram 'u8 1 'vblank 'uncached 1)))
+  (define gba-cap-ok
+    (check-memory-capability-access TARGET-GBA (make-cap-mem 'vram 'u16 2 'vblank 'uncached 2)))
+  (check-false (hash-ref gba-cap-bad 'valid?))
+  (check-true  (hash-ref gba-cap-ok  'valid?))
+
+  ;;    - N64 rejects unaligned (< 16 B) or unflushed RDRAM DMA buffers and > 4,096 B TMEM loads
+  (define n64-cap-bad1
+    (check-memory-capability-access TARGET-N64 (make-cap-mem 'rdram-dma 'u32 4 'active 'dirty 64)))
+  (define n64-cap-bad2
+    (check-memory-capability-access TARGET-N64 (make-cap-mem 'rdp-tmem 'u16 16 'rsp-display-list 'cache-flushed 8192)))
+  (define n64-cap-ok
+    (check-memory-capability-access TARGET-N64 (make-cap-mem 'rdram-dma 'u64 16 'active 'cache-flushed 256)))
+  (check-false (hash-ref n64-cap-bad1 'valid?))
+  (check-false (hash-ref n64-cap-bad2 'valid?))
+  (check-true  (hash-ref n64-cap-ok   'valid?))
+
+  ;; 5. Layer 4: Co-Processor / Multi-Core Session Protocol Verifier
+  (define sess-ok
+    (check-coprocessor-session-protocol TARGET-SNES (list '(send #x2140 ipl-boot 108) '(recv #x2140 ipl-boot))))
+  (define sess-bad
+    (check-coprocessor-session-protocol TARGET-SNES (list '(send #x2140 ipl-boot 108))))
+  (check-true  (hash-ref sess-ok  'valid?))
+  (check-false (hash-ref sess-bad 'valid?)))
+
+;; ============================================================================
+;; 30. Game Boy (DMG), Game Boy Color (GBC) & PICO-8 / RP2040 Backends
+;; ============================================================================
+(test-case "30. Game Boy (.gb), Game Boy Color (.gbc), PICO-8 (.p8) & RP2040 PIO (.uf2) Backends"
+  ;; 1. DMG Game Boy (`build/boba_gb.gb`)
+  (check-equal? (bytes-length boba-gb-rom-bytes) 32768)
+  (check-true (hash-ref boba-gb-verification 'valid-header?))
+  (check-true (hash-ref boba-gb-verification 'checksum-ok?))
+  (check-true (hash-ref boba-gb-verification 'hram-dma-ok?))
+  (check-true (hash-ref boba-gb-verification 'stat-mode-safe?))
+  (check-equal? (hash-ref boba-gb-verification 'campaign-result) "FAIL_OK -> REC_OK -> FULL_WIN_OK")
+
+  ;; 2. Game Boy Color (`build/boba_gbc.gbc`) with Double-Speed, 15-bit BGR555 Palettes & HDMA
+  (check-equal? (bytes-length boba-gbc-rom-bytes) 32768)
+  (check-true (hash-ref boba-gbc-verification 'valid-header?))
+  (check-true (hash-ref boba-gbc-verification 'checksum-ok?))
+  (check-true (hash-ref boba-gbc-verification 'gbc-mode?))
+  (check-true (hash-ref boba-gbc-verification 'gbc-double-speed?))
+  (check-true (hash-ref boba-gbc-verification 'gbc-bgr555-palettes-ok?))
+  (check-true (> (hash-ref boba-gbc-verification 'hdma-transfers) 0))
+  (check-equal? (hash-ref boba-gbc-verification 'campaign-result) "FAIL_OK -> REC_OK -> FULL_WIN_OK")
+
+  ;; 3. PICO-8 (`.p8`) & RP2040 (`Cortex-M0+ Thumb` + `PIO` `.uf2`)
+  (check-true (hash-ref boba-pico-verification 'pico8-tokens-ok?))
+  (check-true (<= (hash-ref boba-pico-verification 'pico8-tokens) 8192))
+  (check-true (hash-ref boba-pico-verification 'pico8-fixed16-16-ok?))
+  (check-true (hash-ref boba-pico-verification 'pico8-sections-ok?))
+  (check-equal? (hash-ref boba-pico-verification 'pico8-campaign-result) "FAIL_OK -> REC_OK -> FULL_WIN_OK")
+  (check-true (hash-ref boba-pico-verification 'uf2-valid-blocks?))
+  (check-equal? (hash-ref boba-pico-verification 'uf2-family-id) #xE48BFF56)
+  (check-true (hash-ref boba-pico-verification 'pio-within-32-limit?))
+  (check-true (<= (hash-ref boba-pico-verification 'pio-instruction-count) 32))
+  (check-true (hash-ref boba-pico-verification 'sram-bank-disjoint?)))
+
+;; ============================================================================
+;; 31. SNES WDC 65C816 Mode-Indexed + Sony SPC700 LoROM (.sfc) Backend
+;; ============================================================================
+(test-case "31. SNES WDC 65C816 Mode-Indexed Assembler, SPC700 Audio & LoROM (.sfc) Backend"
+  (define rpt boba-snes-verification-report)
+  (check-equal? (bytes-length boba-snes-rom-bytes) 32768)
+  (check-true (asm-65816-result-mode-safe? boba-snes-asm-result))
+  (check-false (mode-safety-result-mode-safe? unreconciled-check))
+  (check-true (mode-safety-result-mode-safe? reconciled-check))
+  (check-true (snes-verification-report-header-valid? rpt))
+  (check-true (snes-verification-report-checksum-xor-ffff? rpt))
+  (check-true (snes-verification-report-checksum-matches-sum? rpt))
+  (check-true (snes-verification-report-native-mode-switched? rpt))
+  (check-true (snes-verification-report-reg-16bit-configured? rpt))
+  (check-true (snes-verification-report-spc700-handshake-ok? rpt))
+  (check-equal? (snes-verification-report-cgram-dma-bytes rpt) 64)
+  (check-equal? (snes-verification-report-vram-4bpp-dma-bytes rpt) 512)
+  (check-equal? (snes-verification-report-hdma-scanlines-updated rpt) 224)
+  (check-true (snes-verification-report-campaign-victory? rpt)))
+
+;; ============================================================================
+;; 32. GBA (ARM7TDMI ARM32/Thumb16) & N64 (MIPS VR4300 + RSP + RDP) Backends
+;; ============================================================================
+(test-case "32. GBA (.gba) ARM7TDMI Bus-Width Verifier & N64 (.z64) VR4300 + RSP/RDP TMEM Backend"
+  ;; 1. GBA (`build/boba_gba.gba`)
+  (check-true (hash-ref boba-gba-bus-check 'valid?))
+  (check-equal? (hash-ref boba-gba-bus-check 'violations) '())
+  (check-true (hash-ref boba-gba-exec-report 'header-valid?))
+  (check-equal? (hash-ref boba-gba-exec-report 'strb-vram-violations) 0)
+  (check-equal? (hash-ref boba-gba-exec-report 'dma3-transfers) 5)
+  (check-equal? (hash-ref boba-gba-exec-report 'campaign-status) "FAIL_OK -> REC_OK -> FULL_WIN_OK")
+  (check-true (hash-ref boba-gba-exec-report 'verified?))
+
+  ;; Verify GBA bus-width checker catches an illegal 8-bit STRB write to VRAM ($06000000)
+  (define bad-gba-bus
+    (verify-gba-vram-bus-widths
+     (list '(arm-mov-imm 0 #x06 4) ; R0 = $06000000 (VRAM, rot4=4 -> ROR 8)
+           '(arm-mov-imm 1 #xFF 0)
+           '(arm-strb-imm 1 0 0))))
+  (check-false (hash-ref bad-gba-bus 'valid?))
+
+  ;; 2. Nintendo 64 (`build/boba_n64.z64`)
+  (check-true (hash-ref boba-n64-safety-check 'valid?))
+  (check-true (<= (hash-ref boba-n64-exec-report 'imem-bytes) 4096))
+  (check-true (<= (hash-ref boba-n64-exec-report 'dmem-bytes) 4096))
+  (check-true (<= (hash-ref boba-n64-exec-report 'tmem-bytes) 4096))
+  (check-equal? (hash-ref boba-n64-exec-report 'header-magic) #x80371240)
+  (check-true (hash-ref boba-n64-exec-report 'dma-16byte-aligned?))
+  (check-true (hash-ref boba-n64-exec-report 'rdp-full-sync?))
+  (check-equal? (hash-ref boba-n64-exec-report 'campaign-status) "FAIL_OK -> REC_OK -> FULL_WIN_OK")
+  (check-true (hash-ref boba-n64-exec-report 'verified?)))
+
+(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, Top-10 classics, Metroid, and Multi-Backend (NES/GB/GBC/PICO-8/RP2040/SNES/GBA/N64) tests PASSED (~a assertions)!\n"
         total-checks)
+

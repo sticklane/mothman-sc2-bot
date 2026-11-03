@@ -458,3 +458,40 @@ To demonstrate that `#lang boba-nes` is a general-purpose, multi-genre NES syste
 - **Graded Hardware Profile**:
   - **Signed 8.8 Gravity Inversion ($\Phi_1$)**: Combines `emit-fixed-point-8.8-step-6502` with a dynamic sign-flipped acceleration register and OAM Vertical Flip (`bit 7 = #x80`) when running inverted on the ceiling.
   - **VBlank Delta Stripe Queue ($\Phi_1, \Phi_4$)**: Streams animated neon grid barriers and HUD Data Core counters in `644 / 2,273` VBlank cycles (`1,629` cycles of positive NTSC VBlank slack) with `0` page crossings.
+
+---
+
+## 5. Multi-Backend `Boba-Core IR` & 4-Layer Parameterized Graded/Modal Type System
+
+Beyond the MOS 6502 / 2A03 NES backend, `#lang boba-nes` lowers declarative game specifications (`defpalette`, `deftiles`, `defmetasprite`, `defphysics`, `defcampaign`, `defaudio`) into **`Boba-Core IR`** (`compiler/boba-core-ir.rkt`), verified by a **4-Layer Multi-Target Graded/Modal Typechecker** (`compiler/multi-target-typechecker.rkt`) parameterized by a `TargetSpec` record across **8 console and microcontroller targets**:
+
+### 5.1 The 4-Layer Multi-Target Type System (`compiler/multi-target-typechecker.rkt`)
+
+1. **Layer 1 — Parameterized Resource Semiring (`TargetGrade` $\mathcal{G}_{\mathcal{T}}$)**:
+   Infers exact hardware resource consumption *before* assembly generation (`synthesize-target-module-grades`, `verify-target-module-grades`):
+   $$\mathbf{g}_{\mathcal{T}} = \langle c_{\text{vblank}}, c_{\text{hblank}}, z_{\text{fast}}, o_{\text{total}}, o_{\text{line}}, b_{\text{dma}}, m_{\text{tmem/pio}}, \tau_{\text{tokens}} \rangle \preceq \text{Limits}(\mathcal{T})$$
+2. **Layer 2 — Flow-Sensitive Indexed Hoare Type System for Dynamic Processor Modes ($\{\sigma_{\text{in}}\}\; e \;\{\sigma_{\text{out}}\}$)**:
+   Tracks CPU mode states across control-flow edges (`check-processor-mode-transitions`, `synthesize-65816-mode-reconciliation`):
+   - **WDC 65C816 (`SNES`)**: Tracks `M ∈ {8, 16}` (accumulator width) and `X ∈ {8, 16}` (index width) across `REP`/`SEP` instructions, rejecting mismatched branch join modes and automatically synthesizing mode-reconciliation instructions.
+   - **ARM7TDMI (`GBA`)**: Tracks `ISA ∈ {ARM32, Thumb16}` across `BX` interworking transitions.
+   - **Sharp SM83 (`GBC`)**: Tracks `Speed ∈ {1x, 2x}` across `KEY1 ($FF4D)` + `STOP` frequency switches.
+3. **Layer 3 — Bus-Width, Cache-Alignment & Temporal-Phase Memory Capabilities (`CapMem<Region, Width, Align, Phase>`)**:
+   Statically enforces hardware bus invariants (`check-memory-capability-access`):
+   - **GBA `STRB` Bus Hazard**: Rejects 8-bit `STRB` writes to `PALRAM ($05000000)`, `VRAM ($06000000)`, and `OAM ($07000000)` (`Width ∈ {u16, u32}` only).
+   - **GB / GBC PPU Mode Lockout**: Requires `Phase ∈ {VBlank, HBlank_Mode0}` for VRAM/OAM writes (`STAT & #x02 == 0`) and forces OAM DMA (`$FF46`) wait loops to reside in `HRAM ($FF80–$FFFE)`.
+   - **N64 `CapDMA` & `TMEM`**: Enforces `16-byte` cache-line alignment on `RDRAM` DMA buffers and `≤ 4,096 B` bounds on `RDP TMEM`, `RSP DMEM`, and `RSP IMEM`.
+4. **Layer 4 — Session-Typed Co-Processor Protocols (`Session<MainCPU, CoProcessor>`)**:
+   Verifies deadlock-free cross-core handshakes (`check-coprocessor-session-protocol`) for the **SNES `SPC700`** (`$2140–$2143` `#xAA/#xBB` IPL boot protocol), **N64 `RSP`/`RDP`** (`SP_DMA` $\to$ `DP_START/END` $\to$ `Set_Scissor` $\to$ `Sync_Tile` $\to$ `Sync_Full`), and **RP2040 `PIO`** (`TX_FIFO` + striped `SRAM0..3` vs `SRAM4..5` bank disjointness).
+
+### 5.2 Supported Hardware Backends & Verified Cartridge Outputs
+
+| Target (`TargetSpec`) | Compiler Backend | Example Source & Output Binary | Verified Hardware & Campaign Metrics |
+| :--- | :--- | :--- | :--- |
+| **1. NES (`'nes`)** | `compiler/codegen-6502.rkt` | `examples/*.bnes` $\to$ `build/*.nes` (`18` iNES ROMs) | MOS 6502 + 2A03 APU, `NROM`/`UNROM`/`MMC1`, `0` VBlank overflows, `100%` visual/state parity |
+| **2. Game Boy (`'gb`)** | `compiler/backend-gb-gbc.rkt` | `examples/boba_gb_dmg.bnes` $\to$ `build/boba_gb.gb` (`32,768 B`) | Sharp SM83, Nintendo Logo + Header Checksum `#xE7`, `HRAM ($FF80)` OAM DMA, `STAT` Mode 0/1 safe |
+| **3. Game Boy Color (`'gbc`)** | `compiler/backend-gb-gbc.rkt` | `examples/boba_gbc_color.bnes` $\to$ `build/boba_gbc.gbc` (`32,768 B`) | CGB `#xC0`, `KEY1 ($FF4D)` `2x` speed (`8.38 MHz`), BGR555 palettes (`$FF68–$FF6B`), HBlank HDMA (`$FF55`) |
+| **4. PICO-8 (`'pico8`)** | `compiler/backend-pico.rkt` | `examples/boba_pico.bnes` $\to$ `build/boba_pico8.p8` (`37,427 B`) | `260 / 8,192` tokens (`3.17%`), signed `16.16` fixed-point safe, `__gfx__`/`__map__`/`__sfx__` sections |
+| **5. RP2040 (`'rp2040`)** | `compiler/backend-pico.rkt` | `examples/boba_pico.bnes` $\to$ `build/boba_rp2040.uf2` (`1,536 B`, 3 UF2 blocks) | ARMv6-M Cortex-M0+ Thumb + `11 / 32` PIO scanline instructions, Family `#xE48BFF56`, `SRAM0..3` $\perp$ `SRAM4..5` |
+| **6. SNES (`'snes`)** | `compiler/backend-snes.rkt` | `examples/boba_snes.bnes` $\to$ `build/boba_snes.sfc` (`32,768 B` LoROM) | WDC 65C816 (`M/X` flow-typed) + Sony SPC700 IPL (`#xAA/#xBB`), 4bpp DMA0 (`512 B`) + 224-line HDMA1 gradient |
+| **7. GBA (`'gba`)** | `compiler/backend-gba.rkt` | `examples/boba_gba.bnes` $\to$ `build/boba_gba.gba` (`2,048 B`) | ARM7TDMI (`ARM32` IWRAM + `Thumb16` ROM), `$B2=#x96`, Complement `#xCC`, `0` `STRB` VRAM violations, `5` DMA3 transfers |
+| **8. Nintendo 64 (`'n64`)** | `compiler/backend-n64.rkt` | `examples/boba_n64.bnes` $\to$ `build/boba_n64.z64` (`9,216 B` Big-Endian) | 64-bit MIPS VR4300 (`#x80371240`) + RSP SIMD (`IMEM 36 B`, `DMEM 64 B`) + RDP Display List (`TMEM 1,024 / 4,096 B`) |
