@@ -15,7 +15,10 @@
          "diagnostics.rkt"
          "mos6502-assembler.rkt"
          "boba-rom-builder.rkt"
-         "../lib/nes-chr-assets.rkt")
+         "../lib/nes-chr-assets.rkt"
+         (only-in "decompiled-smb.rkt" emit-decompiled-mario-6502-program)
+         (only-in "decompiled-zelda.rkt" emit-decompiled-zelda-6502-program)
+         (only-in "decompiled-tetris.rkt" emit-decompiled-tetris-6502-program))
 
 (provide
  ;; 1. Super Mario Bros. (World 1-1 Platformer)
@@ -763,7 +766,7 @@
            #x22 #x29 #x30 #x19)))
 
 (define (compile-mario-nes-rom! #:nes-out-path [nes-out-path #f])
-  (define forms (emit-mario-6502-program))
+  (define forms (emit-decompiled-mario-6502-program))
   (define asm-res (assemble-6502 forms #:origin #x8000))
   (define chr-bytes (build-mario-chr-rom))
   ;; Note: Vertical mirroring so $2000 and $2400 form a 512x240 horizontal scrolling world!
@@ -1390,7 +1393,7 @@
            #x0F #x28 #x27 #x38)))
 
 (define (compile-zelda-nes-rom! #:nes-out-path [nes-out-path #f])
-  (define forms (emit-zelda-6502-program))
+  (define forms (emit-decompiled-zelda-6502-program))
   (define asm-res (assemble-6502 forms #:origin #x8000))
   (define chr-bytes (build-zelda-chr-rom))
   (define rom-bytes (build-ines-rom asm-res chr-bytes #:mirroring 'vertical))
@@ -2005,7 +2008,7 @@
            #x0F #x30 #x27 #x16)))
 
 (define (compile-tetris-nes-rom! #:nes-out-path [nes-out-path #f])
-  (define forms (emit-tetris-6502-program))
+  (define forms (emit-decompiled-tetris-6502-program))
   (define asm-res (assemble-6502 forms #:origin #x8000))
   (define chr-bytes (build-tetris-chr-rom))
   (define rom-bytes (build-ines-rom asm-res chr-bytes #:mirroring 'vertical))

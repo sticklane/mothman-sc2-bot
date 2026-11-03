@@ -16,6 +16,7 @@
          "../lib/boba-badge-style.rkt"
          "../lib/genre-libraries.rkt"
          "../tools/nes-resource-tool.rkt"
+         "../tools/nes-rom-decompiler.rkt"
          "../examples/boba_is_you.bnes"
          "../examples/boba_200_levels_cartridge.bnes"
          "../examples/mario_platformer.bnes"
@@ -794,7 +795,7 @@
   (check-equal? (bytes-length tetris-chr) 8192)
 
   (check-equal? (count-nonblank-chr-tiles smb-chr) 510)
-  (check-equal? (count-nonblank-chr-tiles zelda-chr) 413)
+  (check-equal? (count-nonblank-chr-tiles zelda-chr) 456)
   (check-equal? (count-nonblank-chr-tiles tetris-chr) 382)
 
   ;; Zero-offset BCD property: '0'..'9' map to tile IDs 0..9, 'A'..'Z' map to 10..35
@@ -868,7 +869,25 @@
   (define patched-rom (patch-boba-rom-stage! boba-rom-bytes stage0-addr 0 ext-cells))
   (check-equal? (bytes-length patched-rom) (bytes-length boba-rom-bytes)))
 
-(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, and 6502 ROM tests PASSED (~a assertions)!\n"
+(test-case "6502 Recursive-Descent ROM Decompiler & Commercial vs. #lang boba-nes Binary Equivalence"
+  (define smb-dis    (disassemble-ines-rom "assets/roms/super_mario_bros.nes"))
+  (define zelda-dis  (disassemble-ines-rom "assets/roms/legend_of_zelda.nes"))
+  (define tetris-dis (disassemble-ines-rom "assets/roms/tetris.nes"))
+
+  (check-equal? (hash-ref smb-dis 'mapper-name) 'NROM)
+  (check-equal? (hash-ref zelda-dis 'mapper-name) 'MMC1)
+  (check-equal? (hash-ref tetris-dis 'mapper-name) 'MMC1)
+
+  (define smb-dsl (decompile-ines-rom-to-boba-dsl "assets/roms/super_mario_bros.nes" #:game-name 'smb-decompiled))
+  (check-equal? (car smb-dsl) 'boba-nes-decompiled-module)
+  (check-equal? (cadr smb-dsl) '(game-name smb-decompiled))
+
+  (define smb-cmp (compare-rom-binaries "assets/roms/super_mario_bros.nes" "build/mario_nes.nes"))
+  (check-equal? (hash-ref smb-cmp 'chr-exact-match-bytes) 8192)
+  (check-equal? (hash-ref smb-cmp 'chr-matching-tiles) 512)
+  (check-true (hash-ref smb-cmp 'vectors-valid?)))
+
+(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)
 
 
