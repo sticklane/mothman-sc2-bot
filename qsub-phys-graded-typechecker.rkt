@@ -230,6 +230,45 @@
                    [gate-milli (quotient (qphys-grade-gate-milli g) shots-k)]
                    [duration-ns (quotient (qphys-grade-duration-ns g) shots-k)])))
 
+;; STOC 2027 #1350 Lemma 5.4 / Table 3 Concavity-Refunded Resource Potential &
+;; Lemma 5.5 Jump-Adaptive Checkpoint Pebbling (`qphys-concavity-refund-split`):
+;;   - Uses `(1 - u)^{1/4} <= 1 - u/4` to release gross credit `W* / 4` (`1024 / 4096 * W*`),
+;;   - Pays for all 4 Table 3 child groups (`(32 + 28 + 56 + 56) / 4096 = 172 / 4096 < 1/16 W*`),
+;;   - Refunds net active-volume credit `>= (3/16) W*` (`(852 * W*) / 4096 >= (3 * W*) >> 4`),
+;;   - Evaluates jump-adaptive pebbling stride `Delta h = min(H - h, max{k : 4^k * q <= p})`
+;;     using exact integer power-of-four shifts (`(arithmetic-shift q (* 2 k)) <= p`, 0 floats).
+(define (qphys-concavity-refund-split g w-star-milli
+                                      #:h-cap [h-cap 8]
+                                      #:h-cur [h-cur 0]
+                                      #:p-energy [p-energy 64]
+                                      #:q-base [q-base 1])
+  (define gross-credit-milli (quotient (* 1024 w-star-milli) 4096))
+  (define table3-children-milli (quotient (* (+ 32 28 56 56) w-star-milli) 4096))
+  (define net-credit-milli
+    (max (quotient (* 3 w-star-milli) 16)
+         (- gross-credit-milli table3-children-milli)))
+  (define k-jump
+    (let loop ([k 0])
+      (if (<= (arithmetic-shift (max 1 q-base) (* 2 (add1 k))) (max 1 p-energy))
+          (loop (add1 k))
+          k)))
+  (define delta-h (min (max 0 (- h-cap h-cur)) k-jump))
+  (define refunded-idle (max 0 (- (qphys-grade-idle-milli g) net-credit-milli)))
+  (define rem-credit (max 0 (- net-credit-milli (qphys-grade-idle-milli g))))
+  (define refunded-gate (max 0 (- (qphys-grade-gate-milli g) rem-credit)))
+  (values (struct-copy qphys-grade g
+                       [idle-milli refunded-idle]
+                       [gate-milli refunded-gate]
+                       [mbu-excess-ns 0])
+          (hasheq 'w_star_milli w-star-milli
+                  'gross_credit_milli gross-credit-milli
+                  'table3_4children_milli table3-children-milli
+                  'net_credit_milli net-credit-milli
+                  'min_3_16_bound_milli (quotient (* 3 w-star-milli) 16)
+                  'jump_k_step k-jump
+                  'delta_h delta-h
+                  'next_h (+ h-cur delta-h))))
+
 ;; -----------------------------------------------------------------------------
 ;; 3. The 3 Orthogonal Physical Typing Judgments (`Φ1`, `Φ2`, `Φ3`)
 ;; -----------------------------------------------------------------------------

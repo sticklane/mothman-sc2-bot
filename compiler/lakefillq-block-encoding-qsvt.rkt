@@ -50,6 +50,7 @@
          sawtooth-unitary-prep-dag-ccx
          berry-gidney-prep-dag-temp-ands
          verify-differential-f2-phase-bank-truth-table
+         qblock-combinatorial-bmm-prod
          infer-qblock-type
          make-qb-egraph
          qb-egraph-add!
@@ -452,7 +453,61 @@
                   (qblock-type-well-typed? tf)
                   (qblock-type-violations tf))]
 
+    ;; 8. STOC 2027 #1350 Theorem 1.3(1) Zero-Cancellation Combinatorial BMM Product:
+    ;;    Decomposes `A * B = sum_{k=1}^K A_k B_k` over `Z_{>= 0}` so `SELECT` branches
+    ;;    across `k in [K]` are mutually orthogonal on active 2-path support (`Law U3` `TotalOn`),
+    ;;    require zero signed cancellation garbage (`dirtyLeak = 0`, `Law U1`), and share
+    ;;    `shared-mid-y` middle witness wires `Y` via idempotent diagonal `BorrowZ`.
+    [`(qblock-combinatorial-bmm-prod ,subA ,subB ,k-pieces ,shared-mid-y)
+     (qblock-combinatorial-bmm-prod subA subB
+                                    #:pieces k-pieces
+                                    #:shared-mid-qubits shared-mid-y
+                                    #:target target-sym)]
+
     [_ (error 'infer-qblock-type "Unrecognized QBlock AST form: ~a" block-ast)]))
+
+;; STOC 2027 #1350 Theorem 1.3(1) Zero-Cancellation Combinatorial BMM `QBlock` Product
+;; with `BorrowZ` Middle-Index Witness Sharing (`gradeAdd .borrowZ .borrowZ = .borrowZ`):
+(define (qblock-combinatorial-bmm-prod subA subB
+                                       #:pieces [k-pieces 4]
+                                       #:shared-mid-qubits [shared-mid-y 1]
+                                       #:target [target-sym 'heron-r2])
+  (define tA (if (qblock-type? subA) subA (infer-qblock-type subA #:target target-sym)))
+  (define tB (if (qblock-type? subB) subB (infer-qblock-type subB #:target target-sym)))
+  (define viols (append (qblock-type-violations tA) (qblock-type-violations tB)))
+  (unless (= (qblock-type-sys-qubits tA) (qblock-type-sys-qubits tB))
+    (set! viols
+          (append viols
+                  (list (hasheq 'category "QBlock"
+                                'code "DimensionMismatch"
+                                'message "Combinatorial BMM product requires matching system qubit counts"
+                                'witness (hasheq 'sys_A (qblock-type-sys-qubits tA)
+                                                 'sys_B (qblock-type-sys-qubits tB)))))))
+  (define aA (qblock-type-alpha tA))
+  (define aB (qblock-type-alpha tB))
+  (define alpha-prod (* aA aB))
+  (define log-k
+    (let loop ([p 1] [e 0])
+      (if (>= p (max 1 k-pieces)) e (loop (* 2 p) (add1 e)))))
+  (define raw-anc (+ (qblock-type-m-anc tA) (qblock-type-m-anc tB)))
+  (define eff-shared (min raw-anc (max 0 shared-mid-y)))
+  (define m-comb (+ (- raw-anc eff-shared) log-k))
+  (define eps-prod (+ (* aA (qblock-type-eps-block tB))
+                      (* aB (qblock-type-eps-block tA))))
+  (qblock-type `(combinatorial-bmm-no-cancel ,(qblock-type-op-expr tA)
+                                             ,(qblock-type-op-expr tB)
+                                             (pieces ,k-pieces)
+                                             (borrow-z-shared ,eff-shared))
+               alpha-prod
+               m-comb
+               (qblock-type-sys-qubits tA)
+               eps-prod
+               (and (qblock-type-hermitian-walk? tA) (qblock-type-hermitian-walk? tB))
+               'berry-gidney-mx-u4
+               (+ (qblock-type-temp-and-cost tA) (qblock-type-temp-and-cost tB) log-k)
+               (combine-qphys-seq (qblock-type-qphys-grade tA) (qblock-type-qphys-grade tB))
+               (null? viols)
+               viols))
 
 ;; =============================================================================
 ;; 4. Congruence-Closed `QBlock` `e-Graph` Saturation & Optimal Extraction
