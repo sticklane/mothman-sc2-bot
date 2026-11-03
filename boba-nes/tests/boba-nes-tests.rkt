@@ -43,7 +43,17 @@
          "../examples/boba_pico.bnes"
          "../examples/boba_snes.bnes"
          "../examples/boba_gba.bnes"
-         "../examples/boba_n64.bnes")
+         "../examples/boba_n64.bnes"
+         (except-in "../compiler/plt-error-diagnostics.rkt"
+                    ir-palette
+                    ir-tileset
+                    ir-metasprite
+                    ir-mode-transition
+                    ir-coproc-session
+                    ir-campaign)
+         "../compiler/decompiled-gb-gbc-pico-top10.rkt"
+         "../compiler/decompiled-snes-top10.rkt"
+         "../compiler/decompiled-gba-n64-top10.rkt")
 
 (define total-checks 0)
 
@@ -1909,6 +1919,214 @@
   (check-equal? (hash-ref boba-n64-exec-report 'campaign-status) "FAIL_OK -> REC_OK -> FULL_WIN_OK")
   (check-true (hash-ref boba-n64-exec-report 'verified?)))
 
-(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, Top-10 classics, Metroid, and Multi-Backend (NES/GB/GBC/PICO-8/RP2040/SNES/GBA/N64) tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 33. PLT Error Message Architecture: syntax/parse Fortification, Resugaring,
+;;     Multi-Site Witnesses, Pareto Resource Blame & Contract Blame
+;; ============================================================================
+(test-case "33. PLT Error Diagnostics: syntax/parse Fortification, Resugaring, Multi-Witness Slices, Pareto & Contract Blame"
+  ;; 1. syntax/parse Fortified Surface Macro Validation (Culpepper & Felleisen 2010/2012)
+  (define bad-pal-diag
+    (validate-boba-surface-syntax '(defpalette hero-pal (#x0F #x45 #x10 #x20))
+                                  #:target 'nes
+                                  #:raise? #f))
+  (check-true (plt-boba-diagnostic? bad-pal-diag))
+  (check-equal? (plt-boba-diagnostic-at-datum bad-pal-diag) #x45)
+  (define bad-pal-audit (audit-error-message-plt-compliance bad-pal-diag))
+  (check-true (hash-ref bad-pal-audit 'compliant?))
+  (check-equal? (hash-ref bad-pal-audit 'score) 5)
+
+  (define bad-tile-diag
+    (validate-boba-surface-syntax '(deftiles hero-chr
+                                     ("01230123"
+                                      "01290123"
+                                      "00000000"
+                                      "00000000"
+                                      "00000000"
+                                      "00000000"
+                                      "00000000"
+                                      "00000000"))
+                                  #:target 'nes
+                                  #:raise? #f))
+  (check-true (plt-boba-diagnostic? bad-tile-diag))
+  (check-equal? (plt-boba-diagnostic-at-datum bad-tile-diag) "01290123")
+  (check-true (hash-ref (audit-error-message-plt-compliance bad-tile-diag) 'compliant?))
+
+  ;; 2. Pombrio-Krishnamurthi Core-IR-to-Surface Resugaring & Jargon Elimination
+  (define resugared-dma
+    (resugar-core-ir->surface-dsl
+     '(ir-dma-transfer ppu-oam 256 256 vblank)
+     'nes))
+  (check-equal? (car resugared-dma) 'defvblank-dma)
+  (define sanitized-str
+    (sanitize-internal-compiler-jargon
+     "ir-dma-transfer failed in cap-mem-access with mode-state-m and rot4"))
+  (for ([pat (in-list INTERNAL-JARGON-PATTERNS)])
+    (check-false (string-contains? sanitized-str pat)))
+
+  ;; 3. Multi-Site Witness Slice for 65C816 M/X Mode Conflict (Marceau et al. 2011)
+  (define mode-conflict-diag
+    (diagnose-65816-mode-conflict/witnesses
+     '((sep #x20)
+       (label loop)
+       (lda-imm #x12)
+       (rep #x20)
+       (bra loop))
+     #:raise? #f))
+  (check-true (plt-boba-diagnostic? mode-conflict-diag))
+  (check-true (>= (length (plt-boba-diagnostic-witnesses mode-conflict-diag)) 3))
+  (define mode-audit (audit-error-message-plt-compliance mode-conflict-diag #:conflict? #t))
+  (check-true (hash-ref mode-audit 'compliant?))
+  (check-equal? (hash-ref mode-audit 'score) 5)
+
+  ;; 4. GBA ARM7TDMI Backward Register Def-Use Slice for 8-Bit STRB to VRAM
+  (define gba-slice-diag
+    (diagnose-gba-vram-strb/dataflow-slice
+     '((arm-mov-imm r0 #x06 4)
+       (arm-mov-imm r1 #xFF 0)
+       (arm-strb-imm r1 r0 0))
+     #:raise? #f))
+  (check-true (plt-boba-diagnostic? gba-slice-diag))
+  (check-true (>= (length (plt-boba-diagnostic-witnesses gba-slice-diag)) 2))
+  (check-true (hash-ref (audit-error-message-plt-compliance gba-slice-diag #:conflict? #t) 'compliant?))
+
+  ;; 5. Pareto Resource Overflow Blame & Minimal Cut Set
+  (define pareto-diag
+    (diagnose-resource-overflow/pareto-blame
+     'n64
+     'rdp-tmem
+     '((deftiles boss-rgba16-atlas #:bytes 3072)
+       (deftiles hud-font-atlas #:bytes 1536)
+       (deftiles particle-tiles #:bytes 512))
+     #:raise? #f))
+  (check-true (plt-boba-diagnostic? pareto-diag))
+  (check-equal? (pareto-contributor-id (first (plt-boba-diagnostic-pareto-breakdown pareto-diag)))
+                'boss-rgba16-atlas)
+  (check-true (hash-ref (audit-error-message-plt-compliance pareto-diag #:conflict? #t) 'compliant?))
+
+  ;; 6. Findler-Felleisen Positive vs. Negative Co-Processor Contract Blame
+  (define pos-blame-diag
+    (diagnose-coprocessor-session/contract-blame
+     'snes
+     (hasheq 'violation 'recv-without-send
+             'port '$2140-reg
+             'expected "65C816 host must send #xAA/#xBB IPL boot command before polling SPC700"
+             'actual "65C816 host polled $2140 without prior send")
+     #:raise? #f))
+  (check-equal? (contract-blame-polarity (plt-boba-diagnostic-blame pos-blame-diag)) 'positive)
+  (check-true (hash-ref (audit-error-message-plt-compliance pos-blame-diag #:conflict? #t) 'compliant?))
+
+  (define neg-blame-diag
+    (diagnose-coprocessor-session/contract-blame
+     'snes
+     (hasheq 'violation 'ack-tag-mismatch
+             'port '$2140-reg
+             'expected "SPC700 co-processor must echo block counter tag on $2140"
+             'actual "SPC700 returned mismatched tag #xFF")
+     #:raise? #f))
+  (check-equal? (contract-blame-polarity (plt-boba-diagnostic-blame neg-blame-diag)) 'negative)
+  (check-true (hash-ref (audit-error-message-plt-compliance neg-blame-diag #:conflict? #t) 'compliant?)))
+
+;; ============================================================================
+;; 34. Top-10 Game Boy (.gb), Top-10 Game Boy Color (.gbc) & Top-10 PICO-8/RP2040
+;;     Decompilation, Recompilation & 3-Checkpoint Framebuffer Equivalence (30 Games)
+;; ============================================================================
+(test-case "34. Top-10 GB (.gb), Top-10 GBC (.gbc) & Top-10 PICO-8 (.p8)/RP2040 (.uf2) Decompilation & 3-Checkpoint Verification (30 Games)"
+  (define gb-gbc-pico-summary (run-all-gb-gbc-pico-top10-verifications!))
+  (check-equal? (hash-ref gb-gbc-pico-summary 'total-games) 30)
+  (check-equal? (hash-ref gb-gbc-pico-summary 'gb-count) 10)
+  (check-equal? (hash-ref gb-gbc-pico-summary 'gbc-count) 10)
+  (check-equal? (hash-ref gb-gbc-pico-summary 'pico-count) 10)
+  (check-true (hash-ref gb-gbc-pico-summary 'all-verified?))
+
+  ;; Verify every GB game (10/10)
+  (for ([r (in-list (hash-ref gb-gbc-pico-summary 'gb-results))])
+    (check-true (hash-ref r 'verified?))
+    (check-true (hash-ref r 'hram-dma-ok?))
+    (check-true (hash-ref r 'stat-mode-safe?))
+    (check-equal? (hash-ref r 'matching-pixels) 23040)
+    (check-equal? (hash-ref r 'pixel-match-pct) 100.0)
+    (check-equal? (hash-ref r 'campaign-result) "FAIL_OK -> REC_OK -> FULL_WIN_OK"))
+
+  ;; Verify every GBC game (10/10)
+  (for ([r (in-list (hash-ref gb-gbc-pico-summary 'gbc-results))])
+    (check-true (hash-ref r 'verified?))
+    (check-true (hash-ref r 'double-speed?))
+    (check-equal? (hash-ref r 'cgram-match-bytes) 64)
+    (check-true (>= (hash-ref r 'hdma-transfers) 1))
+    (check-equal? (hash-ref r 'matching-pixels) 23040)
+    (check-equal? (hash-ref r 'pixel-match-pct) 100.0)
+    (check-equal? (hash-ref r 'campaign-result) "FAIL_OK -> REC_OK -> FULL_WIN_OK"))
+
+  ;; Verify every PICO-8 (.p8) / RP2040 (.uf2) game (10/10)
+  (for ([r (in-list (hash-ref gb-gbc-pico-summary 'pico-results))])
+    (check-true (hash-ref r 'verified?))
+    (check-true (<= (hash-ref r 'p8-tokens) 8192))
+    (check-true (<= (hash-ref r 'pio-instructions) 32))
+    (check-true (hash-ref r 'sram-disjoint?))
+    (check-equal? (hash-ref r 'matching-pixels) 16384)
+    (check-equal? (hash-ref r 'pixel-match-pct) 100.0)
+    (check-equal? (hash-ref r 'campaign-result) "FAIL_OK -> REC_OK -> FULL_WIN_OK")))
+
+;; ============================================================================
+;; 35. Top-10 Super Nintendo (.sfc LoROM — 65C816 Mode-Indexed + SPC700 + S-PPU)
+;;     Decompilation, Recompilation & 3-Checkpoint Framebuffer Equivalence (10 Games)
+;; ============================================================================
+(test-case "35. Top-10 SNES (.sfc) 65C816 Mode-Indexed + SPC700 + Mode 7/HDMA Decompilation & 256x224 RGB Verification (10 Games)"
+  (define snes-summary (run-all-snes-top10-verifications!))
+  (check-equal? (hash-ref snes-summary 'total-games) 10)
+  (check-equal? (hash-ref snes-summary 'passed-games) 10)
+  (check-true (hash-ref snes-summary 'all-verified?))
+  (check-equal? (hash-ref snes-summary 'total-mode-conflicts) 0)
+  (check-equal? (hash-ref snes-summary 'pixel-match-pct) 100.0)
+
+  (for ([r (in-list (hash-ref snes-summary 'games))])
+    (check-true (hash-ref r 'verified?))
+    (check-true (hash-ref r 'mode-safe?))
+    (check-equal? (hash-ref r 'mode-conflicts) 0)
+    (check-true (hash-ref r 'all-4-typecheck-layers-valid?))
+    (check-true (hash-ref r 'cgram-match?))
+    (check-true (hash-ref r 'vram-match?))
+    (check-true (hash-ref r 'oam-match?))
+    (check-true (hash-ref r 'hdma-match?))
+    (check-true (hash-ref r 'spc700-match?))
+    (check-equal? (hash-ref r 'framebuffer-matching-pixels) 57344)
+    (check-equal? (hash-ref r 'framebuffer-match-pct) 100.0)))
+
+;; ============================================================================
+;; 36. Top-10 GBA (.gba ARM7TDMI) & Top-10 N64 (.z64 VR4300 + RSP SIMD + RDP)
+;;     Decompilation, Recompilation & 3-Checkpoint Framebuffer Equivalence (20 Games)
+;; ============================================================================
+(test-case "36. Top-10 GBA (.gba) & Top-10 N64 (.z64) Decompilation, Recompilation & Framebuffer Equivalence (20 Games)"
+  (define gba-n64-summary (run-all-gba-n64-top10-verifications!))
+  (check-equal? (hash-ref gba-n64-summary 'total-games) 20)
+  (check-equal? (hash-ref gba-n64-summary 'gba-count) 10)
+  (check-equal? (hash-ref gba-n64-summary 'n64-count) 10)
+  (check-true (hash-ref gba-n64-summary 'all-verified?))
+  (check-equal? (hash-ref gba-n64-summary 'gba-strb-violations) 0)
+  (check-true (hash-ref gba-n64-summary 'gba-complement-cc-all?))
+  (check-true (hash-ref gba-n64-summary 'n64-dma-aligned-all?))
+  (check-true (hash-ref gba-n64-summary 'n64-tmem-safe-all?))
+  (check-true (hash-ref gba-n64-summary 'n64-rdp-protocol-all?))
+  (check-equal? (hash-ref gba-n64-summary 'mean-pixel-match-pct) 100.0)
+
+  (for ([r (in-list (hash-ref gba-n64-summary 'gba-results))])
+    (check-true (hash-ref r 'verified?))
+    (check-equal? (hash-ref r 'strb-vram-violations) 0)
+    (check-true (hash-ref r 'complement-check-cc?))
+    (check-equal? (hash-ref r 'matching-pixels) 38400)
+    (check-equal? (hash-ref r 'pixel-match-pct) 100.0)
+    (check-equal? (hash-ref r 'campaign-status) "FAIL_OK -> REC_OK -> FULL_WIN_OK"))
+
+  (for ([r (in-list (hash-ref gba-n64-summary 'n64-results))])
+    (check-true (hash-ref r 'verified?))
+    (check-true (hash-ref r 'dma-16byte-aligned?))
+    (check-true (<= (hash-ref r 'tmem-bytes) 4096))
+    (check-true (hash-ref r 'rdp-sync-protocol-ok?))
+    (check-equal? (hash-ref r 'matching-pixels) 76800)
+    (check-equal? (hash-ref r 'pixel-match-pct) 100.0)
+    (check-equal? (hash-ref r 'campaign-status) "FAIL_OK -> REC_OK -> FULL_WIN_OK")))
+
+(printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, decompiler, and 74 Multi-Architecture Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
         total-checks)
+
 
