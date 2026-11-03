@@ -47,10 +47,12 @@
  MARIO-ZP-COIN-ANIM-Y
  MARIO-ZP-WON
  MARIO-ZP-VRAM-PENDING
+ MARIO-ZP-DEAD
+ MARIO-ZP-LIVES
  load-decompiled-smb-ppu-state
  emit-decompiled-mario-6502-program)
 
-;; Zero-Page Layout ($0010-$0025) matching `compiler/nes-games-builder.rkt`:
+;; Zero-Page Layout ($0010-$0027) matching `compiler/nes-games-builder.rkt`:
 (define MARIO-ZP-BUTTONS      #x10)
 (define MARIO-ZP-PREV-BTN     #x11)
 (define MARIO-ZP-NEW-BTN      #x12)
@@ -73,6 +75,8 @@
 (define MARIO-ZP-COIN-ANIM-Y  #x23) ; Rising coin animation Y (0 = inactive)
 (define MARIO-ZP-WON          #x24) ; 1 = touched Flagpole at X >= 340!
 (define MARIO-ZP-VRAM-PENDING #x25) ; 1 = NMI should update bonked ? block tile in VRAM
+(define MARIO-ZP-DEAD         #x26) ; 0 = alive, 1 = dead/dying (upward death bounce)
+(define MARIO-ZP-LIVES        #x27) ; Remaining lives (initialized to 3, matching SMB1 $075A)
 
 (define-syntax (get-smb-ppu-json-path stx)
   (datum->syntax
@@ -295,6 +299,9 @@
     (STA #:zp ,MARIO-ZP-COIN-ANIM-Y)
     (STA #:zp ,MARIO-ZP-WON)
     (STA #:zp ,MARIO-ZP-VRAM-PENDING)
+    (STA #:zp ,MARIO-ZP-DEAD)
+    (LDA #:imm 3)
+    (STA #:zp ,MARIO-ZP-LIVES)
     (LDA #:imm 176)
     (STA #:zp ,MARIO-ZP-Y-PX)
     (LDA #:imm 1)
@@ -376,7 +383,40 @@
     (AND #:zp ,MARIO-ZP-BUTTONS)
     (STA #:zp ,MARIO-ZP-NEW-BTN)
 
+    ;; 2b. Respawn / Reset when START or SELECT is pressed while DEAD != 0 or WON != 0
+    (LDA #:zp ,MARIO-ZP-DEAD)
+    (ORA #:zp ,MARIO-ZP-WON)
+    (BEQ check_dead_skip_input)
+    (LDA #:zp ,MARIO-ZP-NEW-BTN)
+    (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
+    (BEQ check_dead_skip_input)
+    (LDA #:imm 40)
+    (STA #:zp ,MARIO-ZP-X-WORLD-LO)
+    (STA #:zp ,MARIO-ZP-SCREEN-X)
+    (LDA #:imm 0)
+    (STA #:zp ,MARIO-ZP-X-WORLD-HI)
+    (STA #:zp ,MARIO-ZP-SCROLL-X)
+    (STA #:zp ,MARIO-ZP-SCROLL-NT)
+    (STA #:zp ,MARIO-ZP-Y-SUB)
+    (STA #:zp ,MARIO-ZP-VY-SUB)
+    (STA #:zp ,MARIO-ZP-VY-PX)
+    (STA #:zp ,MARIO-ZP-DEAD)
+    (STA #:zp ,MARIO-ZP-WON)
+    (LDA #:imm 176)
+    (STA #:zp ,MARIO-ZP-Y-PX)
+    (LDA #:imm 1)
+    (STA #:zp ,MARIO-ZP-ON-GROUND)
+    (STA #:zp ,MARIO-ZP-GOOMBA-ALIVE)
+    (LDA #:imm 120)
+    (STA #:zp ,MARIO-ZP-GOOMBA-X)
+
+    (label check_dead_skip_input)
+    (LDA #:zp ,MARIO-ZP-DEAD)
+    (BEQ step_horizontal_input)
+    (JMP step_vertical_physics)
+
     ;; 3. Horizontal Running Input (Held LEFT / RIGHT moves 3 px/frame + advances Camera Scroll!)
+    (label step_horizontal_input)
     (LDA #:zp ,MARIO-ZP-BUTTONS)
     (AND #:imm ,BTN-RIGHT)
     (BEQ check_m_left)
@@ -506,8 +546,10 @@
     (LDA #:imm 1)
     (STA #:zp ,MARIO-ZP-ON-GROUND)
 
-    ;; 6. Goomba AI & Stomp Collision + Flagpole Victory Check
+    ;; 6. Goomba AI & Stomp / Ground-Death Collision + Flagpole Victory Check
     (label check_qblock_and_enemies)
+    (LDA #:zp ,MARIO-ZP-DEAD)
+    (BNE check_flagpole_win)
     (LDA #:zp ,MARIO-ZP-GOOMBA-ALIVE)
     (BEQ check_flagpole_win)
     (LDA #:zp ,MARIO-ZP-X-WORLD-HI)
@@ -523,7 +565,7 @@
     (CMP #:zp ,MARIO-ZP-X-WORLD-LO)
     (BCC check_flagpole_win)
     (LDA #:zp ,MARIO-ZP-ON-GROUND)
-    (BNE check_flagpole_win)
+    (BNE check_goomba_ground_death)
     (LDA #:zp ,MARIO-ZP-Y-PX)
     (CMP #:imm 150)
     (BCC check_flagpole_win)
@@ -532,6 +574,32 @@
     (LDA #:imm #xFD)
     (STA #:zp ,MARIO-ZP-VY-PX)
     (INC #:zp ,MARIO-ZP-SCORE)
+    (JMP check_flagpole_win)
+
+    ;; Mario is on the ground (ON_GROUND != 0) near Goomba:
+    ;; Check if Mario walked directly into Goomba's body (X_WORLD_LO in 120..130)
+    (label check_goomba_ground_death)
+    (LDA #:zp ,MARIO-ZP-X-WORLD-LO)
+    (CMP #:imm 120)
+    (BCC check_flagpole_win)
+    (CMP #:imm 131)
+    (BCS check_flagpole_win)
+    (LDA #:imm 1)
+    (STA #:zp ,MARIO-ZP-DEAD)
+    (LDA #:zp ,MARIO-ZP-LIVES)
+    (BEQ skip_dec_lives)
+    (DEC #:zp ,MARIO-ZP-LIVES)
+    (label skip_dec_lives)
+    (LDA #:imm 0)
+    (STA #:zp ,MARIO-ZP-ON-GROUND)
+    (STA #:zp ,MARIO-ZP-VY-SUB)
+    (LDA #:imm #xFC)
+    (STA #:zp ,MARIO-ZP-VY-PX)
+    ;; Trigger 2A03 Pulse 1 Death SFX ($4000-$4003)
+    (LDA #:imm #x9F) (STA #:abs #x4000)
+    (LDA #:imm #x8B) (STA #:abs #x4001)
+    (LDA #:imm #xE0) (STA #:abs #x4002)
+    (LDA #:imm #x38) (STA #:abs #x4003)
 
     ;; 7. Check Flagpole Victory (World X >= 340 -> X_HI == 1 and X_LO >= 80, or X_LO >= 220)
     (label check_flagpole_win)
@@ -573,6 +641,7 @@
     ;; Build OAM Sprite Buffer ($0200-$02FF) using Authentic SMB1 PT0 Tiles:
     ;;   Slot 0 ($0200)    : Sprite 0 HUD Coin Anchor (X=88, Y=23, Tile=#xFF, Attr=#x23)
     ;;   Slots 1..4 ($0204): Small Mario 16x16 Metasprite at visual Y = MARIO-ZP-Y-PX + 16
+    ;;                       Death pose (DEAD!=0): TL=#x3E, TR=#x3E (H-flip #x40), BL=#x3F, BR=#x3F (H-flip #x40)
     ;;                       Standing pose: TL=#x3A, TR=#x37, BL=#x4F, BR=#x4F (BR attr=#x40)
     ;;                       Walking/Jumping pose: #x32, #x33, #x34, #x35 (attr=#x00)
     ;;   Slots 5..8 ($0214): Goomba 16x16 Metasprite at visual Y = 192 (#x70..#x73, Pal 1)
@@ -596,8 +665,27 @@
     (STA #:abs #x020C)
     (STA #:abs #x0210)
 
+    ;; Check Death Pose first (MARIO-ZP-DEAD != 0):
+    ;; Authentic SMB1 16x16 Death Pose: TL=#x3E, TR=#x3E (OAM_FLIP_H=#x40), BL=#x3F, BR=#x3F (OAM_FLIP_H=#x40)
+    (LDA #:zp ,MARIO-ZP-DEAD)
+    (BEQ check_standing_pose)
+    (LDA #:imm #x3E)
+    (STA #:abs #x0205)
+    (STA #:abs #x0209)
+    (LDA #:imm #x3F)
+    (STA #:abs #x020D)
+    (STA #:abs #x0211)
+    (LDA #:imm #x00)
+    (STA #:abs #x0206)
+    (STA #:abs #x020E)
+    (LDA #:imm #x40)
+    (STA #:abs #x020A)
+    (STA #:abs #x0212)
+    (JMP set_mario_oam_x)
+
     ;; Choose Standing Pose vs Walking/Jumping Pose:
     ;; Standing when MARIO-ZP-ON-GROUND == 1 and no BTN-LEFT/BTN-RIGHT in MARIO-ZP-NEW-BTN / MARIO-ZP-BUTTONS
+    (label check_standing_pose)
     (LDA #:zp ,MARIO-ZP-ON-GROUND)
     (BEQ mario_action_pose)
     (LDA #:zp ,MARIO-ZP-NEW-BTN)

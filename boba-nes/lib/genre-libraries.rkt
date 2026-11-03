@@ -21,10 +21,15 @@
  ;; 2. Top-Down Adventure Library
  emit-oam-coprime-flicker-6502
  emit-directional-offset-6502
+ emit-invincibility-damage-handler-6502
 
  ;; 3. Falling-Block Puzzle Library
  emit-galois-lfsr-step-6502
- emit-staged-vblank-row-copier-6502)
+ emit-staged-vblank-row-copier-6502
+ emit-topout-and-reset-guard-6502
+
+ ;; 4. Cross-Genre VBlank HUD & Recovery Library
+ emit-vblank-hud-bcd-delta-6502)
 
 ;; ============================================================================
 ;; 1. Platformer Mechanics Library
@@ -139,6 +144,33 @@
     (LDA #:zp ,zp-x) (CLC) (ADC #:imm ,right-dx) (STA #:zp ,zp-out-x)
     (label ,done-lbl)))
 
+;; Reusable Invincibility-Frame + Health Decrement + Defeat Flag Handler:
+;;   - If `zp-hurt-timer > 0`, skips damage (`BCS/BNE done-label`).
+;;   - Otherwise sets `zp-hurt-timer = iframes`, decrements `zp-hearts` (if > 0),
+;;     and sets `zp-dead = 1` when `zp-hearts == 0`.
+(define (emit-invincibility-damage-handler-6502 zp-hearts zp-hurt-timer zp-dead
+                                                #:iframes [iframes 4]
+                                                #:knockback-zp [kb-zp #f]
+                                                #:knockback-val [kb-val 108]
+                                                #:done-label [done-lbl '__dmg_done])
+  (append
+   `((LDA #:zp ,zp-hurt-timer)
+     (BNE ,done-lbl)
+     (LDA #:imm ,iframes)
+     (STA #:zp ,zp-hurt-timer))
+   (if kb-zp
+       `((LDA #:imm ,kb-val)
+         (STA #:zp ,kb-zp))
+       '())
+   `((LDA #:zp ,zp-hearts)
+     (BEQ __dmg_set_dead)
+     (DEC #:zp ,zp-hearts)
+     (BNE ,done-lbl)
+     (label __dmg_set_dead)
+     (LDA #:imm 1)
+     (STA #:zp ,zp-dead)
+     (label ,done-lbl))))
+
 ;; ============================================================================
 ;; 3. Falling-Block Puzzle Mechanics Library
 ;; ============================================================================
@@ -164,3 +196,38 @@
              (CMP #:imm ,total-rows)
              (BCS ,done-lbl)
              (JSR ,row-sub)))))
+
+;; Reusable Well Top-Out & START/SELECT Reset Guard for Puzzle Games
+(define (emit-topout-and-reset-guard-6502 zp-piece-y zp-game-over
+                                          #:min-safe-row [min-safe-row 3]
+                                          #:ok-label [ok-lbl '__topout_ok])
+  `((LDA #:zp ,zp-piece-y)
+    (CMP #:imm ,min-safe-row)
+    (BCS ,ok-lbl)
+    (LDA #:imm 1)
+    (STA #:zp ,zp-game-over)
+    (label ,ok-lbl)))
+
+;; ============================================================================
+;; 4. Cross-Genre VBlank HUD & Recovery Library
+;; ============================================================================
+
+;; Emit a single-digit VBlank HUD BCD Nametable update ($2002 latch reset + $2006 addr + $2007 write, 20 cycles)
+(define (emit-vblank-hud-bcd-delta-6502 vram-addr zp-counter
+                                        #:digit-base [digit-base 0]
+                                        #:mask [mask #x07])
+  (define hi (bitwise-and #xFF (arithmetic-shift vram-addr -8)))
+  (define lo (bitwise-and #xFF vram-addr))
+  (append
+   `((BIT #:abs #x2002)
+     (LDA #:imm ,hi)
+     (STA #:abs #x2006)
+     (LDA #:imm ,lo)
+     (STA #:abs #x2006)
+     (LDA #:zp ,zp-counter)
+     (AND #:imm ,mask))
+   (if (zero? digit-base)
+       '()
+       `((CLC)
+         (ADC #:imm ,digit-base)))
+   `((STA #:abs #x2007))))

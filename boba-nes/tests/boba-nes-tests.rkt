@@ -885,7 +885,185 @@
   (define smb-cmp (compare-rom-binaries "assets/roms/super_mario_bros.nes" "build/mario_nes.nes"))
   (check-equal? (hash-ref smb-cmp 'chr-exact-match-bytes) 8192)
   (check-equal? (hash-ref smb-cmp 'chr-matching-tiles) 512)
-  (check-true (hash-ref smb-cmp 'vectors-valid?)))
+  (check-true (hash-ref smb-cmp 'vectors-valid?))
+
+  ;; Verify 6502 Jump-Engine / Indirect Dispatch Idiom Detection on commercial ROMs
+  (define smb-idioms (detect-6502-jump-engine-idioms smb-dis))
+  (check-true (>= (+ (hash-ref smb-idioms 'indirect-jmp-count)
+                     (hash-ref smb-idioms 'rts-dispatch-count))
+                  1)))
+
+(test-case "Full Failure -> Recovery -> Victory Trajectories & Language/Compiler/Decompiler/Library Spin-Offs"
+  ;; --------------------------------------------------------------------------
+  ;; 1. Super Mario Bros.: Lateral Goomba Failure -> START Respawn -> Victory
+  ;; --------------------------------------------------------------------------
+  (define m-emu (make-nes-emulator-from-rom mario-rom-bytes))
+  (define m-labels (asm-result-labels mario-asm-result))
+  (define m-boot  (hash-ref m-labels 'boot_init))
+  (define m-frame (hash-ref m-labels 'game_frame_step))
+  (nes-run-until-rts! m-emu m-boot)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-LIVES) 3)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-DEAD) 0)
+
+  ;; Walk right 28 frames on the ground directly into the Goomba at X=120 without jumping!
+  (define mario-zp-trace '())
+  (for ([_ (in-range 28)])
+    (nes-step-frame! m-emu m-frame BTN-RIGHT)
+    (define snap (list->bytes (for/list ([a (in-range 256)]) (nes-zp-ref m-emu a))))
+    (set! mario-zp-trace (cons snap mario-zp-trace)))
+  (set! mario-zp-trace (reverse mario-zp-trace))
+
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-DEAD) 1)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-LIVES) 2)
+  ;; Verify authentic SMB1 Death Pose tile (#x3E) is placed in OAM Slot 1 ($0205)
+  (check-equal? (nes-ram-ref m-emu #x0205) #x3E)
+
+  ;; Press START to respawn at (X=40, Y=176, DEAD=0, GOOMBA_ALIVE=1)!
+  (nes-step-frame! m-emu m-frame BTN-START)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-DEAD) 0)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-X-WORLD-LO) 40)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-Y-PX) 176)
+  (check-equal? (nes-zp-ref m-emu MARIO-ZP-GOOMBA-ALIVE) 1)
+
+  ;; --------------------------------------------------------------------------
+  ;; 2. The Legend of Zelda: Octorok Contact Damage (3 -> 0 Hearts) -> Defeat -> Respawn
+  ;; --------------------------------------------------------------------------
+  (define z-emu (make-nes-emulator-from-rom zelda-rom-bytes))
+  (define z-labels (asm-result-labels zelda-asm-result))
+  (define z-boot  (hash-ref z-labels 'boot_init))
+  (define z-frame (hash-ref z-labels 'game_frame_step))
+  (nes-run-until-rts! z-emu z-boot)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-HEARTS) 3)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-DEAD) 0)
+
+  ;; Walk UP into the live Red Octorok at (120, 96) WITHOUT thrusting the Sword:
+  ;; Knockback + 3 heart losses -> HEARTS = 0, DEAD = 1, and HUD hearts at $20D6..$20D8 become #x65!
+  (for ([_ (in-range 24)])
+    (nes-step-frame! z-emu z-frame BTN-UP))
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-HEARTS) 0)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-DEAD) 1)
+  (check-equal? (nes-vram-ref z-emu #x20D6) #x65)
+  (check-equal? (nes-vram-ref z-emu #x20D7) #x65)
+  (check-equal? (nes-vram-ref z-emu #x20D8) #x65)
+
+  ;; Press START to respawn Link with 3 full red hearts (#xF2 at $20D6..$20D8)!
+  (nes-step-frame! z-emu z-frame BTN-START)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-DEAD) 0)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-HEARTS) 3)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-LINK-X) 120)
+  (check-equal? (nes-zp-ref z-emu ZELDA-ZP-LINK-Y) 144)
+  (check-equal? (nes-vram-ref z-emu #x20D6) #xF2)
+
+  ;; --------------------------------------------------------------------------
+  ;; 3. Nintendo NES Tetris: Center-Column Stack Top-Out -> Game Over -> START Reset
+  ;; --------------------------------------------------------------------------
+  (define t-emu (make-nes-emulator-from-rom tetris-rom-bytes))
+  (define t-labels (asm-result-labels tetris-asm-result))
+  (define t-boot  (hash-ref t-labels 'boot_init))
+  (define t-frame (hash-ref t-labels 'game_frame_step))
+  (nes-run-until-rts! t-emu t-boot)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-GAME-OVER) 0)
+
+  ;; Repeatedly hard-drop pieces in column X=4 until stack reaches spawn row (Y <= 2) -> GAME_OVER = 1!
+  (define tetris-zp-trace '())
+  (for ([_ (in-range 20)])
+    (nes-step-frame! t-emu t-frame BTN-B)
+    (define s1 (list->bytes (for/list ([a (in-range 256)]) (nes-zp-ref t-emu a))))
+    (nes-step-frame! t-emu t-frame 0)
+    (define s2 (list->bytes (for/list ([a (in-range 256)]) (nes-zp-ref t-emu a))))
+    (set! tetris-zp-trace (cons s2 (cons s1 tetris-zp-trace))))
+  (set! tetris-zp-trace (reverse tetris-zp-trace))
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-GAME-OVER) 1)
+
+  ;; Press START to clear the 200-byte well and reset GAME_OVER = 0!
+  (nes-step-frame! t-emu t-frame BTN-START)
+  (check-equal? (nes-zp-ref t-emu TETRIS-ZP-GAME-OVER) 0)
+  (check-equal? (nes-ram-ref t-emu (+ TETRIS-WELL-RAM-BASE 184)) 0)
+
+  ;; --------------------------------------------------------------------------
+  ;; 4. Decompiler Spin-Off: Frame-by-Frame Zero-Page Semantic Role Inference
+  ;; --------------------------------------------------------------------------
+  (define tetris-roles (infer-zp-roles-from-frame-trace tetris-zp-trace))
+  (define role-by-addr
+    (for/hash ([entry (in-list tetris-roles)])
+      (values (hash-ref entry 'addr) (hash-ref entry 'role))))
+  ;; $13 (TETRIS-ZP-FRAME-CNT) increments by +1 every frame -> 'monotonic-frame-counter
+  (check-equal? (hash-ref role-by-addr #x13) 'monotonic-frame-counter)
+  ;; $1E (TETRIS-ZP-LFSR) steps via 8-bit Galois LFSR (#xB8) every frame -> 'prng-lfsr
+  (check-equal? (hash-ref role-by-addr #x1E) 'prng-lfsr)
+  ;; $23 (TETRIS-ZP-GAME-OVER) transitions 0 -> 1 -> 'game-phase-or-flag
+  (check-equal? (hash-ref role-by-addr TETRIS-ZP-GAME-OVER) 'game-phase-or-flag)
+
+  (define mario-roles (infer-zp-roles-from-frame-trace mario-zp-trace))
+  (define m-role-by-addr
+    (for/hash ([entry (in-list mario-roles)])
+      (values (hash-ref entry 'addr) (hash-ref entry 'role))))
+  (check-equal? (hash-ref m-role-by-addr #x13) 'monotonic-frame-counter)
+  (check-equal? (hash-ref m-role-by-addr MARIO-ZP-X-WORLD-LO) 'player-or-actor-coord)
+  (check-equal? (hash-ref m-role-by-addr MARIO-ZP-DEAD) 'game-phase-or-flag)
+
+  ;; --------------------------------------------------------------------------
+  ;; 5. Language & Typechecker Spin-Off: State-Machine Soft-Lock & Pinned ZP Checks
+  ;; --------------------------------------------------------------------------
+  (define softlock-mod
+    (hasheq 'name 'softlock-test-mod
+            'mapper 'NROM
+            'state-machines
+            (list (hasheq 'name 'mario-phase-fsm
+                          'initial 'active
+                          'states (list (hasheq 'id 'active 'kind 'normal 'transitions '(dying victory))
+                                        (hasheq 'id 'dying  'kind 'failure 'transitions '()) ; Missing recovery transition!
+                                        (hasheq 'id 'victory 'kind 'victory 'transitions '(active)))))
+            'zp-map
+            (list (hasheq 'id 'player_x 'addr #x14 'role 'player-coord)
+                  (hasheq 'id 'enemy_x  'addr #x14 'role 'actor-coord)))) ; Colliding ZP address $14!
+
+  (define softlock-res (typecheck-nes-module softlock-mod))
+  (check-false (nes-type-result-well-typed? softlock-res))
+  (define v-cats (map nes-violation-category (nes-type-result-violations softlock-res)))
+  (check-not-false (memq 'unrecoverable-failure-softlock v-cats))
+  (check-not-false (memq 'pinned-zp-address-collision v-cats))
+
+  (define-values (fixed-sm-mod sm-repairs fixed-sm-res)
+    (compile-and-verify-nes-module softlock-mod))
+  (check-true (nes-type-result-well-typed? fixed-sm-res))
+  (check-not-false (memq 'inject-failure-state-respawn-transition sm-repairs))
+  (check-not-false (memq 'relocate-colliding-pinned-zp-address sm-repairs))
+
+  ;; --------------------------------------------------------------------------
+  ;; 6. Compiler Spin-Off: 6502 Peephole Optimizer (Tail-Call + Store/Reload)
+  ;; --------------------------------------------------------------------------
+  (define sample-unopt-6502
+    '((label sub_step)
+      (LDA #:imm 42)
+      (STA #:zp #x14)
+      (LDA #:zp #x14) ; Redundant reload of $14!
+      (TAX)
+      (TXA)           ; Redundant self-transfer!
+      (JSR helper_sub)
+      (RTS)           ; Tail-call! Folds into (JMP helper_sub)
+      (label helper_sub)
+      (RTS)))
+  (define peep-stats (optimize-6502-peephole-stats sample-unopt-6502))
+  (check-equal? (hash-ref peep-stats 'tail-calls-folded) 1)
+  (check-equal? (hash-ref peep-stats 'redundant-loads-eliminated) 1)
+  (check-equal? (hash-ref peep-stats 'redundant-transfers-eliminated) 1)
+  (check-equal? (hash-ref peep-stats 'bytes-saved) 4)
+  (check-equal? (hash-ref peep-stats 'cycles-saved) 14)
+
+  ;; --------------------------------------------------------------------------
+  ;; 7. Libraries Spin-Off: Invincibility Damage, Top-Out Guard & VBlank HUD BCD
+  ;; --------------------------------------------------------------------------
+  (define lib-forms
+    (append
+     '((label test_lib_entry))
+     (emit-invincibility-damage-handler-6502 #x22 #x26 #x27 #:iframes 3 #:knockback-zp #x15 #:knockback-val 108)
+     (emit-topout-and-reset-guard-6502 #x17 #x23 #:min-safe-row 3)
+     (emit-vblank-hud-bcd-delta-6502 #x206E #x1E)
+     '((RTS))))
+  (define lib-asm (assemble-6502 lib-forms))
+  (check-equal? (asm-result-page-crossings lib-asm) 0)
+  (check-true (> (bytes-length (asm-result-bytes lib-asm)) 20)))
 
 (printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)

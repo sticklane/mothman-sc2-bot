@@ -18,7 +18,9 @@
 (provide
  disassemble-ines-rom
  decompile-ines-rom-to-boba-dsl
- compare-rom-binaries)
+ compare-rom-binaries
+ detect-6502-jump-engine-idioms
+ infer-zp-roles-from-frame-trace)
 
 ;; ============================================================================
 ;; 1. Official MOS 6502 Opcode Decode Table (Opcode -> Mnemonic, Mode, Length)
@@ -399,3 +401,115 @@
           'compiled-subroutine-count (hash-ref comp-dis 'subroutine-count)
           'vectors-valid?          (and (valid-vecs? (hash-ref orig-dis 'vectors))
                                         (valid-vecs? (hash-ref comp-dis 'vectors)))))
+
+;; ============================================================================
+;; 5. Decompiler Spin-Offs: 6502 Jump-Engine Idiom Detector &
+;;    Frame-by-Frame Zero-Page Semantic Role Classifier
+;; ============================================================================
+
+;; Scan disassembled 6502 instructions (or an iNES ROM) for indirect jump tables
+;; (`JMP ($xxxx)`) and stack-synthesized `PHA ... PHA; RTS` dispatch engines
+;; (used in SMB `JumpEngine`, Zelda `GameMode` dispatch, and Tetris `switch_s_plus_2a`).
+(define (detect-6502-jump-engine-idioms dis-or-rom)
+  (define dis
+    (if (hash? dis-or-rom)
+        dis-or-rom
+        (disassemble-ines-rom dis-or-rom)))
+  (define insts (hash-ref dis 'instructions '()))
+  (define indirect-targets '())
+  (define rts-dispatch-pcs '())
+
+  (define (inst-mnem inst)
+    (cond
+      [(hash? inst) (hash-ref inst 'mnemonic #f)]
+      [(and (pair? inst) (symbol? (car inst))) (car inst)]
+      [else #f]))
+
+  (for ([inst (in-list insts)])
+    (cond
+      [(and (hash? inst)
+            (eq? (hash-ref inst 'mnemonic #f) 'JMP)
+            (eq? (hash-ref inst 'mode #f) 'ind))
+       (set! indirect-targets (cons (hash-ref inst 'operand 0) indirect-targets))]
+      [(match inst [`(JMP #:ind ,addr) addr] [_ #f])
+       => (lambda (addr) (set! indirect-targets (cons addr indirect-targets)))]))
+
+  (let loop ([rem insts] [idx 0])
+    (match rem
+      [(list* i1 i2 i3 i4 i5 _)
+       (define m1 (inst-mnem i1))
+       (define window (list (inst-mnem i2) (inst-mnem i3) (inst-mnem i4) (inst-mnem i5)))
+       (when (and (eq? m1 'PHA)
+                  (memq 'PHA window)
+                  (memq 'RTS window))
+         (define pc-or-idx (if (hash? i1) (hash-ref i1 'pc idx) idx))
+         (set! rts-dispatch-pcs (cons pc-or-idx rts-dispatch-pcs)))
+       (loop (cdr rem) (add1 idx))]
+      [else (void)]))
+
+  (hasheq 'indirect-jmp-count   (length indirect-targets)
+          'indirect-targets     (reverse indirect-targets)
+          'rts-dispatch-count   (length rts-dispatch-pcs)
+          'rts-dispatch-pcs     (reverse rts-dispatch-pcs)))
+
+;; Given a chronological list of 256-byte Zero-Page snapshots `(list zp-bytes-0 zp-bytes-1 ...)`
+;; captured across every frame of a precanned input sequence, automatically classify each
+;; active Zero-Page address ($00-$FF) into its hardware/gameplay semantic role:
+;;   - 'monotonic-frame-counter : increments by +1 mod 256 on every frame
+;;   - 'prng-lfsr               : evolves via 8-bit Galois LFSR step (`(v >> 1) ^ ((v & 1) ? poly : 0)`)
+;;   - 'player-or-actor-coord   : bounded per-frame velocity delta in [-8..+8] within screen/world range
+;;   - 'hud-bcd-counter         : monotonically non-decreasing small counter (coins, score, rupees, lines)
+;;   - 'game-phase-or-flag      : discrete state/boolean flag in {0, 1, 2, 3}
+(define (infer-zp-roles-from-frame-trace zp-frames #:lfsr-poly [poly #xB8])
+  (define num-frames (length zp-frames))
+  (when (< num-frames 3)
+    (error 'infer-zp-roles-from-frame-trace "expected at least 3 frame snapshots, got ~a" num-frames))
+
+  (define (zp-at frame-snap addr)
+    (cond
+      [(bytes? frame-snap) (bytes-ref frame-snap addr)]
+      [(vector? frame-snap) (bitwise-and #xFF (vector-ref frame-snap addr))]
+      [else (error 'zp-at "expected bytes? or vector? snapshot")]))
+
+  (define (lfsr-next v)
+    (define shifted (arithmetic-shift v -1))
+    (if (odd? v)
+        (bitwise-xor shifted poly)
+        shifted))
+
+  (for/fold ([acc '()])
+            ([addr (in-range 256)])
+    (define series (for/list ([snap (in-list zp-frames)]) (zp-at snap addr)))
+    (define v0 (first series))
+    (define vN (last series))
+    (define changed? (for/or ([v (in-list (cdr series))]) (not (= v v0))))
+    (if (not changed?)
+        acc
+        (let* ([pairs (for/list ([a (in-list series)]
+                                 [b (in-list (cdr series))])
+                        (cons a b))]
+               [mod-deltas (for/list ([p (in-list pairs)])
+                             (modulo (- (cdr p) (car p)) 256))]
+               [signed-deltas (for/list ([d (in-list mod-deltas)])
+                                (if (> d 127) (- d 256) d))]
+               [all-plus-one? (for/and ([d (in-list mod-deltas)]) (= d 1))]
+               [all-lfsr? (for/and ([p (in-list pairs)])
+                            (= (cdr p) (lfsr-next (car p))))]
+               [all-flag-domain? (for/and ([v (in-list series)]) (<= 0 v 3))]
+               [non-dec-small? (and (not all-flag-domain?)
+                                    (for/and ([d (in-list signed-deltas)]) (<= 0 d 2))
+                                    (for/and ([v (in-list series)]) (<= 0 v 99)))]
+               [coord-like? (and (for/and ([d (in-list signed-deltas)]) (<= -16 d 16))
+                                 (for/or ([v (in-list series)]) (>= v 4)))]
+               [role (cond
+                       [all-plus-one?    'monotonic-frame-counter]
+                       [all-lfsr?        'prng-lfsr]
+                       [non-dec-small?   'hud-bcd-counter]
+                       [all-flag-domain? 'game-phase-or-flag]
+                       [coord-like?      'player-or-actor-coord]
+                       [else             'dynamic-working-state])])
+          (cons (hasheq 'addr addr
+                        'role role
+                        'initial v0
+                        'final vN)
+                acc)))))

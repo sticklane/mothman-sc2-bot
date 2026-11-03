@@ -39,12 +39,14 @@
  ZELDA-ZP-TRIFORCE-WON
  ZELDA-ZP-OAM-CURSOR
  ZELDA-ZP-ROOM-DIRTY
+ ZELDA-ZP-HURT-TIMER
+ ZELDA-ZP-DEAD
  ZELDA-OVERWORLD-PALETTE
  ZELDA-OVERWORLD-NT0-PATCHED
  emit-decompiled-zelda-6502-program)
 
 ;; ============================================================================
-;; 1. Zero-Page State Layout ($0010-$0025)
+;; 1. Zero-Page State Layout ($0010-$0027)
 ;; ============================================================================
 (define ZELDA-ZP-BUTTONS      #x10)
 (define ZELDA-ZP-PREV-BTN     #x11)
@@ -68,6 +70,8 @@
 (define ZELDA-ZP-TRIFORCE-WON #x23) ; 1 = collected Triforce of Wisdom!
 (define ZELDA-ZP-OAM-CURSOR   #x24) ; Coprime OAM flicker rotation cursor
 (define ZELDA-ZP-ROOM-DIRTY   #x25) ; 1 = NMI updates room doorway/HUD
+(define ZELDA-ZP-HURT-TIMER   #x26) ; Invincibility frames after contact damage
+(define ZELDA-ZP-DEAD         #x27) ; 0 = alive, 1 = defeated when HEARTS == 0
 
 ;; ============================================================================
 ;; 2. Authentic Decompiled Overworld Screen 0x77 PPU Palette & Nametable 0
@@ -190,6 +194,8 @@
     (STA #:zp ,ZELDA-ZP-ROOM-ID)
     (STA #:zp ,ZELDA-ZP-TRIFORCE-WON)
     (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
+    (STA #:zp ,ZELDA-ZP-HURT-TIMER)
+    (STA #:zp ,ZELDA-ZP-DEAD)
     (LDA #:imm 1)
     (STA #:zp ,ZELDA-ZP-OCTO-ALIVE)
     (LDA #:imm 3)
@@ -247,6 +253,46 @@
     (AND #:zp ,ZELDA-ZP-BUTTONS)
     (STA #:zp ,ZELDA-ZP-NEW-BTN)
 
+    ;; Decrement hurt invincibility timer if > 0
+    (LDA #:zp ,ZELDA-ZP-HURT-TIMER)
+    (BEQ z_check_reset)
+    (DEC #:zp ,ZELDA-ZP-HURT-TIMER)
+
+    ;; Check Respawn/Reset when DEAD != 0 or TRIFORCE_WON != 0 on START/SELECT
+    (label z_check_reset)
+    (LDA #:zp ,ZELDA-ZP-DEAD)
+    (ORA #:zp ,ZELDA-ZP-TRIFORCE-WON)
+    (BEQ z_alive_step)
+    (LDA #:zp ,ZELDA-ZP-NEW-BTN)
+    (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
+    (BEQ z_check_dead_halt)
+    ;; Respawn/reset Link cleanly
+    (LDA #:imm 120)
+    (STA #:zp ,ZELDA-ZP-LINK-X)
+    (STA #:zp ,ZELDA-ZP-OCTO-X)
+    (LDA #:imm 144)
+    (STA #:zp ,ZELDA-ZP-LINK-Y)
+    (LDA #:imm 96)
+    (STA #:zp ,ZELDA-ZP-OCTO-Y)
+    (LDA #:imm 0)
+    (STA #:zp ,ZELDA-ZP-LINK-DIR)
+    (STA #:zp ,ZELDA-ZP-DEAD)
+    (STA #:zp ,ZELDA-ZP-HURT-TIMER)
+    (STA #:zp ,ZELDA-ZP-TRIFORCE-WON)
+    (STA #:zp ,ZELDA-ZP-ROOM-ID)
+    (LDA #:imm 1)
+    (STA #:zp ,ZELDA-ZP-OCTO-ALIVE)
+    (STA #:zp ,ZELDA-ZP-ROOM-DIRTY)
+    (LDA #:imm 3)
+    (STA #:zp ,ZELDA-ZP-HEARTS)
+    (JMP z_alive_step)
+
+    (label z_check_dead_halt)
+    (LDA #:zp ,ZELDA-ZP-DEAD)
+    (BEQ z_alive_step)
+    (JMP done_z_step)
+
+    (label z_alive_step)
     ;; 1. Sword Attack ('A' button spawns Sword hitbox above Link for 8 frames!)
     (LDA #:zp ,ZELDA-ZP-SWORD-TIMER)
     (BEQ check_sword_btn)
@@ -335,14 +381,14 @@
     (SEC)
     (SBC #:imm 4)
     (STA #:zp ,ZELDA-ZP-LINK-Y)
-    (JMP check_pickups)
+    (JMP check_octo_contact)
 
     ;; Check North Dungeon Door Transition (Y < 56): Requires KEYS >= 1 in Room 0!
     (label check_north_door_transition)
     (LDA #:zp ,ZELDA-ZP-ROOM-ID)
-    (BNE check_pickups)
+    (BNE check_octo_contact)
     (LDA #:zp ,ZELDA-ZP-KEYS)
-    (BEQ check_pickups) ; Door is locked until Link collects the Key!
+    (BEQ check_octo_contact) ; Door is locked until Link collects the Key!
     (DEC #:zp ,ZELDA-ZP-KEYS)
     (LDA #:imm 1)
     (STA #:zp ,ZELDA-ZP-ROOM-ID)
@@ -350,7 +396,7 @@
     ;; Reposition Link at South entrance of Triforce Sanctum (X=120, Y=176)
     (LDA #:imm 176)
     (STA #:zp ,ZELDA-ZP-LINK-Y)
-    (JMP check_pickups)
+    (JMP check_octo_contact)
 
     (label z_check_down)
     (LDA #:zp ,ZELDA-ZP-BUTTONS)
@@ -360,11 +406,11 @@
     (STA #:zp ,ZELDA-ZP-LINK-DIR)
     (LDA #:zp ,ZELDA-ZP-LINK-Y)
     (CMP #:imm 188)
-    (BCS check_pickups)
+    (BCS check_octo_contact)
     (CLC)
     (ADC #:imm 4)
     (STA #:zp ,ZELDA-ZP-LINK-Y)
-    (JMP check_pickups)
+    (JMP check_octo_contact)
 
     (label z_check_left)
     (LDA #:zp ,ZELDA-ZP-BUTTONS)
@@ -374,24 +420,66 @@
     (STA #:zp ,ZELDA-ZP-LINK-DIR)
     (LDA #:zp ,ZELDA-ZP-LINK-X)
     (CMP #:imm 24)
-    (BCC check_pickups)
+    (BCC check_octo_contact)
     (SEC)
     (SBC #:imm 4)
     (STA #:zp ,ZELDA-ZP-LINK-X)
-    (JMP check_pickups)
+    (JMP check_octo_contact)
 
     (label z_check_right)
     (LDA #:zp ,ZELDA-ZP-BUTTONS)
     (AND #:imm ,BTN-RIGHT)
-    (BEQ check_pickups)
+    (BEQ check_octo_contact)
     (LDA #:imm 3)
     (STA #:zp ,ZELDA-ZP-LINK-DIR)
     (LDA #:zp ,ZELDA-ZP-LINK-X)
     (CMP #:imm 216)
-    (BCS check_pickups)
+    (BCS check_octo_contact)
     (CLC)
     (ADC #:imm 4)
     (STA #:zp ,ZELDA-ZP-LINK-X)
+
+    ;; 2b. Octorok Body Contact Hazard (Failure Path):
+    ;;     In Room 0, if Octorok is alive, Sword is not active, and Hurt timer == 0,
+    ;;     walking directly into Octorok (84 <= LINK_Y <= 100 and 108 <= LINK_X <= 132)
+    ;;     knocks Link back to Y=108, sets HURT_TIMER=2, decrements HEARTS, and sets DEAD=1 at 0 hearts!
+    (label check_octo_contact)
+    (LDA #:zp ,ZELDA-ZP-ROOM-ID)
+    (BNE check_pickups)
+    (LDA #:zp ,ZELDA-ZP-OCTO-ALIVE)
+    (BEQ check_pickups)
+    (LDA #:zp ,ZELDA-ZP-SWORD-TIMER)
+    (BNE check_pickups)
+    (LDA #:zp ,ZELDA-ZP-HURT-TIMER)
+    (BNE check_pickups)
+    (LDA #:zp ,ZELDA-ZP-LINK-Y)
+    (CMP #:imm 101)
+    (BCS check_pickups)
+    (CMP #:imm 84)
+    (BCC check_pickups)
+    (LDA #:zp ,ZELDA-ZP-LINK-X)
+    (CMP #:imm 108)
+    (BCC check_pickups)
+    (CMP #:imm 133)
+    (BCS check_pickups)
+    ;; Contact hazard triggered! Knock Link back southward to Y=108
+    (LDA #:imm 108)
+    (STA #:zp ,ZELDA-ZP-LINK-Y)
+    (LDA #:imm 2)
+    (STA #:zp ,ZELDA-ZP-HURT-TIMER)
+    ;; Play Hurt SFX on Pulse 2 ($4004-$4007)
+    (LDA #:imm #x9F) (STA #:abs #x4004)
+    (LDA #:imm #x8B) (STA #:abs #x4005)
+    (LDA #:imm #xA0) (STA #:abs #x4006)
+    (LDA #:imm #x18) (STA #:abs #x4007)
+    ;; Decrement HEARTS (if > 0); if HEARTS reaches 0, set DEAD = 1
+    (LDA #:zp ,ZELDA-ZP-HEARTS)
+    (BEQ z_link_died)
+    (DEC #:zp ,ZELDA-ZP-HEARTS)
+    (BNE check_pickups)
+    (label z_link_died)
+    (LDA #:imm 1)
+    (STA #:zp ,ZELDA-ZP-DEAD)
 
     ;; 3. Check Item Pickups:
     ;;    - In Room 0: Pick up dropped Dungeon Key at (KEY_X, KEY_Y)
@@ -572,7 +660,7 @@
     (RTS)
 
     ;; ========================================================================
-    ;; VBlank NMI Handler (Updates Rupee/Key HUD Counters & Unlocks North Door)
+    ;; VBlank NMI Handler (Updates Rupee/Key/Hearts HUD & Unlocks North Door)
     ;; ========================================================================
     (label nmi_handler)
     (PHA)
@@ -596,6 +684,30 @@
     (LDA #:zp ,ZELDA-ZP-KEYS)
     (AND #:imm #x07)
     (STA #:abs #x2007)
+
+    ;; Update HUD 3 Red Hearts at Row 6 Cols 22..24 ($20D6..$20D8):
+    ;;   #xF2 (242) = full heart when heart_index < ZELDA-ZP-HEARTS
+    ;;   #x65 (101) = empty/half heart when heart_index >= ZELDA-ZP-HEARTS
+    (LDA #:imm #x20) (STA #:abs #x2006) (LDA #:imm #xD6) (STA #:abs #x2006)
+    (LDY #:zp ,ZELDA-ZP-HEARTS)
+    (LDX #:imm #x65)
+    (CPY #:imm 1)
+    (BCC z_heart0_write)
+    (LDX #:imm #xF2)
+    (label z_heart0_write)
+    (STX #:abs #x2007)
+    (LDX #:imm #x65)
+    (CPY #:imm 2)
+    (BCC z_heart1_write)
+    (LDX #:imm #xF2)
+    (label z_heart1_write)
+    (STX #:abs #x2007)
+    (LDX #:imm #x65)
+    (CPY #:imm 3)
+    (BCC z_heart2_write)
+    (LDX #:imm #xF2)
+    (label z_heart2_write)
+    (STX #:abs #x2007)
 
     ;; If Room transitioned to Sanctum (ROOM_ID == 1), write #x26 to
     ;; row 8 cols 15..16 ($210F-$2110) and row 9 cols 15..16 ($212F-$2130)!

@@ -84,6 +84,8 @@
  check-Phi3-memory-hierarchy
  check-Phi4-vram-and-attributes
  check-Phi5-apu-channels
+ check-state-machine-totality
+ check-pinned-zp-map
 
  ;; Automated Grade-Driven Hardware Repair Pass
  repair-nes-module
@@ -535,9 +537,43 @@
                    (hasheq 'subroutine (hash-ref sub 'name 'anon)
                            'pha push-count
                            'pla pull-count)
-                   "Balance every PHA/PHP with a matching PLA/PLP on all control-flow paths before RTS/RTI.")
-                  violations))))
+                    "Balance every PHA/PHP with a matching PLA/PLP on all control-flow paths before RTS/RTI.")
+                   violations))))
 
+  (append (reverse violations) (check-pinned-zp-map mod)))
+
+;; Check pinned Zero-Page hardware layout map (`defzp-map`) for address range ($00-$FF) and collision freedom
+(define (check-pinned-zp-map mod)
+  (define violations '())
+  (define seen-addrs (make-hash))
+  (for ([entry (in-list (hash-ref mod 'zp-map '()))])
+    (define var-id (hash-ref entry 'id 'zp_var))
+    (define addr   (hash-ref entry 'addr 0))
+    (define role   (hash-ref entry 'role 'state))
+    (cond
+      [(or (< addr 0) (> addr #xFF))
+       (set! violations
+             (cons (nes-violation
+                    'L1
+                    'zp-map-out-of-range
+                    (format "Pinned Zero-Page variable '~a' maps to $~x, outside 6502 Zero-Page ($00-$FF)"
+                            var-id addr)
+                    entry
+                    "Assign Zero-Page variables to addresses within $0010-$00EF.")
+                   violations))]
+      [(hash-has-key? seen-addrs addr)
+       (define prev-id (hash-ref seen-addrs addr))
+       (set! violations
+             (cons (nes-violation
+                    'L1
+                    'pinned-zp-address-collision
+                    (format "Pinned Zero-Page address $~x aliases both '~a' and '~a' (role: ~a)"
+                            addr prev-id var-id role)
+                    (hasheq 'addr addr 'var1 prev-id 'var2 var-id 'role role)
+                    "Assign distinct Zero-Page addresses or scope non-overlapping variables via (with-zp-scratch ...).")
+                   violations))]
+      [else
+       (hash-set! seen-addrs addr var-id)]))
   (reverse violations))
 
 ;; L2: PRG/CHR Bank-Residency, Far-Call Trampolines, UNROM Bus-Conflicts & Cartridge WRAM Safety
@@ -624,6 +660,44 @@
 
   (reverse violations))
 
+;; Check game phase state-machine totality, failure-recovery reachability & victory reachability
+(define (check-state-machine-totality mod)
+  (define violations '())
+  (for ([sm (in-list (hash-ref mod 'state-machines '()))])
+    (define sm-name (hash-ref sm 'name 'game-state-machine))
+    (define init-st (hash-ref sm 'initial 'active))
+    (define states  (hash-ref sm 'states '()))
+    (define state-ids (for/set ([s (in-list states)]) (hash-ref s 'id)))
+    (for ([s (in-list states)])
+      (define sid   (hash-ref s 'id))
+      (define kind  (hash-ref s 'kind 'normal))
+      (define trans (hash-ref s 'transitions '()))
+      ;; 1. Verify all transition target states exist
+      (for ([t (in-list trans)])
+        (unless (set-member? state-ids t)
+          (set! violations
+                (cons (nes-violation
+                       'L3
+                       'undefined-state-transition
+                       (format "State machine '~a' state '~a' transitions to undeclared state '~a'"
+                               sm-name sid t)
+                       (hasheq 'state-machine sm-name 'from sid 'to t)
+                       "Declare the target state in (defstate-machine ...) or redirect to the initial state.")
+                      violations))))
+      ;; 2. Verify failure/hazard states ('failure, 'dying, 'dead, 'defeat, 'game-over, 'top-out) have a recovery transition
+      (when (and (memq kind '(failure dying dead defeat game-over top-out))
+                 (null? trans))
+        (set! violations
+              (cons (nes-violation
+                     'L3
+                     'unrecoverable-failure-softlock
+                     (format "State machine '~a' failure state '~a' (kind: ~a) has no recovery/respawn transition (causes permanent soft-lock on player defeat)"
+                             sm-name sid kind)
+                     (hasheq 'state-machine sm-name 'state sid 'kind kind 'initial init-st)
+                     "Add a START/SELECT respawn transition from the failure state back to the initial/active state.")
+                    violations)))))
+  (reverse violations))
+
 ;; L3: 2C02 PPU Temporal Phase Discipline & Total Rule/Entity Dispatch
 (define (check-L3-phase-and-totality mod)
   (define violations '())
@@ -685,7 +759,7 @@
                  "Place OAM Sprite 0 over a solid non-zero HUD background tile (e.g. coin/bomb icon at Y=22..30) before polling $2002 bit 6.")
                 violations)))
 
-  (reverse violations))
+  (append (reverse violations) (check-state-machine-totality mod)))
 
 ;; L4: $2006/$2007 Shared Scroll-Latch Taint & 2A03 DMC Joypad Glitch Safety
 (define (check-L4-ppu-latch-and-dmc mod)
@@ -1292,7 +1366,38 @@
              (define sm (hash-ref repaired 'scroll-mode 'horizontal))
              (define fixed-mir (if (eq? sm 'horizontal) 'vertical 'horizontal))
              (set! repaired (hash-set repaired 'mirroring fixed-mir))
-             (set! applied-repairs (cons 'align-nametable-mirroring-to-scroll-axis applied-repairs))]))
+             (set! applied-repairs (cons 'align-nametable-mirroring-to-scroll-axis applied-repairs))]
+
+            [(unrecoverable-failure-softlock)
+             (define fixed-sms
+               (for/list ([sm (in-list (hash-ref repaired 'state-machines '()))])
+                 (define init-st (hash-ref sm 'initial 'active))
+                 (define fixed-states
+                   (for/list ([s (in-list (hash-ref sm 'states '()))])
+                     (if (and (memq (hash-ref s 'kind 'normal) '(failure dying dead defeat game-over top-out))
+                              (null? (hash-ref s 'transitions '())))
+                         (hash-set s 'transitions (list init-st))
+                         s)))
+                 (hash-set sm 'states fixed-states)))
+             (set! repaired (hash-set repaired 'state-machines fixed-sms))
+             (set! applied-repairs (cons 'inject-failure-state-respawn-transition applied-repairs))]
+
+            [(pinned-zp-address-collision)
+             (define seen (make-hash))
+             (define next-free #x30)
+             (define fixed-zpmap
+               (for/list ([entry (in-list (hash-ref repaired 'zp-map '()))])
+                 (define addr (hash-ref entry 'addr 0))
+                 (if (hash-has-key? seen addr)
+                     (let ([new-addr next-free])
+                       (set! next-free (add1 next-free))
+                       (hash-set! seen new-addr #t)
+                       (hash-set entry 'addr new-addr))
+                     (begin
+                       (hash-set! seen addr #t)
+                       entry))))
+             (set! repaired (hash-set repaired 'zp-map fixed-zpmap))
+             (set! applied-repairs (cons 'relocate-colliding-pinned-zp-address applied-repairs))]))
 
         (define final-res (typecheck-nes-module repaired budget))
         (values repaired (reverse (remove-duplicates applied-repairs)) final-res))))

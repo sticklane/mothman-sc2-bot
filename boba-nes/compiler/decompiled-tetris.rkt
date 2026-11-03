@@ -11,12 +11,32 @@
 
 (require "mos6502-assembler.rkt")
 
-(provide emit-decompiled-tetris-6502-program)
+(provide
+ TETRIS-WELL-RAM-BASE
+ TETRIS-ZP-BUTTONS
+ TETRIS-ZP-PREV-BTN
+ TETRIS-ZP-NEW-BTN
+ TETRIS-ZP-FRAME-CNT
+ TETRIS-ZP-PIECE-ID
+ TETRIS-ZP-PIECE-ROT
+ TETRIS-ZP-PIECE-X
+ TETRIS-ZP-PIECE-Y
+ TETRIS-ZP-NEXT-ID
+ TETRIS-ZP-DROP-TIMER
+ TETRIS-ZP-LINES
+ TETRIS-ZP-SCORE
+ TETRIS-ZP-LEVEL
+ TETRIS-ZP-DIRTY-ROW
+ TETRIS-ZP-LFSR
+ TETRIS-ZP-SCRATCH-ROW
+ TETRIS-ZP-SCRATCH-PTR
+ TETRIS-ZP-GAME-OVER
+ emit-decompiled-tetris-6502-program)
 
 ;; Playfield Well in Work RAM: $0400-$04C7 (20 rows x 10 cols = 200 bytes)
 (define TETRIS-WELL-RAM-BASE  #x0400)
 
-;; Zero-Page State ($0010-$0022)
+;; Zero-Page State ($0010-$0023)
 (define TETRIS-ZP-BUTTONS     #x10)
 (define TETRIS-ZP-PREV-BTN    #x11)
 (define TETRIS-ZP-NEW-BTN     #x12)
@@ -34,6 +54,7 @@
 (define TETRIS-ZP-LFSR        #x1E) ; 8-bit Galois LFSR PRNG state
 (define TETRIS-ZP-SCRATCH-ROW #x1F) ; Scratch row index
 (define TETRIS-ZP-SCRATCH-PTR #x20) ; 16-bit pointer ($20/$21)
+(define TETRIS-ZP-GAME-OVER   #x23) ; 0 = active, 1 = top-out game over
 
 (define (emit-decompiled-tetris-6502-program)
   `(;; ========================================================================
@@ -117,6 +138,7 @@
     (STA #:zp ,TETRIS-ZP-LINES)
     (STA #:zp ,TETRIS-ZP-SCORE)
     (STA #:zp ,TETRIS-ZP-LEVEL)
+    (STA #:zp ,TETRIS-ZP-GAME-OVER)
     (LDA #:imm 4)
     (STA #:zp ,TETRIS-ZP-PIECE-X)
     (LDA #:imm 2)
@@ -172,6 +194,38 @@
     (AND #:zp ,TETRIS-ZP-BUTTONS)
     (STA #:zp ,TETRIS-ZP-NEW-BTN)
 
+    ;; 0. Check Top-Out Game Over & Recovery (START or SELECT clears well & resets state)
+    (LDA #:zp ,TETRIS-ZP-GAME-OVER)
+    (BEQ t_active_gameplay)
+    (LDA #:zp ,TETRIS-ZP-NEW-BTN)
+    (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
+    (BEQ t_game_over_halt)
+    (LDA #:imm 0)
+    (LDX #:imm 0)
+    (label clr_well_recover)
+    (STA #:absx ,TETRIS-WELL-RAM-BASE)
+    (INX)
+    (CPX #:imm 200)
+    (BNE clr_well_recover)
+    (LDA #:imm 0)
+    (STA #:zp ,TETRIS-ZP-GAME-OVER)
+    (STA #:zp ,TETRIS-ZP-LINES)
+    (STA #:zp ,TETRIS-ZP-SCORE)
+    (STA #:zp ,TETRIS-ZP-PIECE-ID)
+    (STA #:zp ,TETRIS-ZP-PIECE-ROT)
+    (STA #:zp ,TETRIS-ZP-DIRTY-ROW)
+    (LDA #:imm 4)
+    (STA #:zp ,TETRIS-ZP-PIECE-X)
+    (LDA #:imm 2)
+    (STA #:zp ,TETRIS-ZP-PIECE-Y)
+    (LDA #:imm 3)
+    (STA #:zp ,TETRIS-ZP-NEXT-ID)
+    (LDA #:imm 20)
+    (STA #:zp ,TETRIS-ZP-DROP-TIMER)
+    (label t_game_over_halt)
+    (JMP done_t_step)
+
+    (label t_active_gameplay)
     ;; 1. Horizontal Shift (LEFT / RIGHT on edge press)
     (LDA #:zp ,TETRIS-ZP-NEW-BTN)
     (AND #:imm ,BTN-LEFT)
@@ -206,14 +260,27 @@
     (LDA #:imm #x50) (STA #:abs #x4002)
     (LDA #:imm #x08) (STA #:abs #x4003)
 
-    ;; 3. Soft Drop ('DOWN' button) or Hard Drop ('B' button locks piece at bottom!)
+    ;; 3. Soft Drop ('DOWN' button) or Hard Drop ('B' button drops until collision or bottom!)
     (label t_check_drop)
     (LDA #:zp ,TETRIS-ZP-NEW-BTN)
     (AND #:imm ,BTN-B)
     (BEQ t_check_soft_drop)
-    ;; Hard Drop: Move piece directly to bottom of well (Y=18) and lock!
-    (LDA #:imm 18)
-    (STA #:zp ,TETRIS-ZP-PIECE-Y)
+    ;; Hard Drop Loop: advance PIECE_Y until PIECE_Y >= 18 or cell (PIECE_X, PIECE_Y + 1) != 0
+    (label hard_drop_loop)
+    (LDA #:zp ,TETRIS-ZP-PIECE-Y)
+    (CMP #:imm 18)
+    (BCS do_hard_lock)
+    (LDX #:zp ,TETRIS-ZP-PIECE-Y)
+    (INX)
+    (LDA #:absx row10_table)
+    (CLC)
+    (ADC #:zp ,TETRIS-ZP-PIECE-X)
+    (TAY)
+    (LDA #:absy ,TETRIS-WELL-RAM-BASE)
+    (BNE do_hard_lock)
+    (INC #:zp ,TETRIS-ZP-PIECE-Y)
+    (JMP hard_drop_loop)
+    (label do_hard_lock)
     (JSR lock_active_tetromino)
     (JMP done_t_step)
 
@@ -230,6 +297,14 @@
     (LDA #:zp ,TETRIS-ZP-PIECE-Y)
     (CMP #:imm 18)
     (BCS lock_now)
+    (LDX #:zp ,TETRIS-ZP-PIECE-Y)
+    (INX)
+    (LDA #:absx row10_table)
+    (CLC)
+    (ADC #:zp ,TETRIS-ZP-PIECE-X)
+    (TAY)
+    (LDA #:absy ,TETRIS-WELL-RAM-BASE)
+    (BNE lock_now)
     (INC #:zp ,TETRIS-ZP-PIECE-Y)
     (JMP done_t_step)
 
@@ -324,6 +399,11 @@
     (LDA #:imm 0)
     (STA #:zp ,TETRIS-ZP-DIRTY-ROW)
 
+    ;; Check Top-Out Game Over: if locked at TETRIS-ZP-PIECE-Y < 3, set TETRIS-ZP-GAME-OVER = 1!
+    (LDA #:zp ,TETRIS-ZP-PIECE-Y)
+    (CMP #:imm 3)
+    (BCC set_game_over)
+
     ;; Spawn Next Tetromino at top of well (X=4, Y=2, Rot=0)
     (LDA #:zp ,TETRIS-ZP-NEXT-ID)
     (STA #:zp ,TETRIS-ZP-PIECE-ID)
@@ -336,6 +416,11 @@
     (STA #:zp ,TETRIS-ZP-PIECE-X)
     (LDA #:imm 2)
     (STA #:zp ,TETRIS-ZP-PIECE-Y)
+    (RTS)
+
+    (label set_game_over)
+    (LDA #:imm 1)
+    (STA #:zp ,TETRIS-ZP-GAME-OVER)
     (RTS)
 
     ;; ========================================================================

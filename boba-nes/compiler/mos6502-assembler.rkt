@@ -15,6 +15,8 @@
 (provide
  ;; 6502 Two-Pass Assembler, Static WCET Cycle Analyzer & ca65 Emitter
  (struct-out asm-result)
+ optimize-6502-peephole
+ optimize-6502-peephole-stats
  relax-6502-branches
  assemble-6502
  analyze-6502-wcet
@@ -254,6 +256,85 @@
     [(BVC) 'BVS]
     [(BVS) 'BVC]
     [else (error 'invert-branch-mnemonic "Not a 6502 relative branch mnemonic: ~a" mnem)]))
+
+;; 6502 Peephole Optimizer:
+;;   1. Tail-Call Folding: `(JSR target) (RTS)` -> `(JMP target)` (saves 1 B, 2 B stack, 9 cyc)
+;;   2. Redundant Store-Then-Reload Elimination: `(STA #:zp a) (LDA #:zp a)` -> `(STA #:zp a)`
+;;      when not immediately followed by a flag-testing conditional branch (saves 2 B, 3 cyc)
+;;   3. Redundant Transfer Elimination: `(TAX) (TXA)` -> `(TAX)`, `(TAY) (TYA)` -> `(TAY)`
+(define (optimize-6502-peephole-internal raw-forms)
+  (define tail-calls 0)
+  (define redundant-loads 0)
+  (define redundant-transfers 0)
+  (define bytes-saved 0)
+  (define cycles-saved 0)
+
+  (define (branch-form? f)
+    (match f
+      [`(,m ,_) #:when (memq m BRANCH-MNEMONICS) #t]
+      [else #f]))
+
+  (let loop ([rem raw-forms]
+             [acc '()])
+    (match rem
+      ['()
+       (values (reverse acc)
+               (hasheq 'tail-calls-folded tail-calls
+                       'redundant-loads-eliminated redundant-loads
+                       'redundant-transfers-eliminated redundant-transfers
+                       'bytes-saved bytes-saved
+                       'cycles-saved cycles-saved))]
+      ;; 1. Tail-call folding: (JSR target) followed immediately by (RTS)
+      [(list* (or `(JSR ,target) `(JSR #:abs ,target))
+              `(RTS)
+              rest)
+       (set! tail-calls (add1 tail-calls))
+       (set! bytes-saved (+ bytes-saved 1))
+       (set! cycles-saved (+ cycles-saved 9))
+       (loop rest (cons `(JMP ,target) acc))]
+      ;; 2. Redundant Zero-Page store-then-reload: (STA #:zp a) (LDA #:zp a) not followed by branch
+      [(list* `(STA #:zp ,a1)
+              `(LDA #:zp ,a2)
+              rest)
+       #:when (and (equal? a1 a2)
+                   (or (null? rest) (not (branch-form? (car rest)))))
+       (set! redundant-loads (add1 redundant-loads))
+       (set! bytes-saved (+ bytes-saved 2))
+       (set! cycles-saved (+ cycles-saved 3))
+       (loop rest (cons `(STA #:zp ,a1) acc))]
+      ;; 3. Redundant Absolute store-then-reload in RAM ($0000-$07FF): (STA #:abs a) (LDA #:abs a)
+      [(list* `(STA #:abs ,a1)
+              `(LDA #:abs ,a2)
+              rest)
+       #:when (and (exact-integer? a1) (< a1 #x2000) (equal? a1 a2)
+                   (or (null? rest) (not (branch-form? (car rest)))))
+       (set! redundant-loads (add1 redundant-loads))
+       (set! bytes-saved (+ bytes-saved 3))
+       (set! cycles-saved (+ cycles-saved 4))
+       (loop rest (cons `(STA #:abs ,a1) acc))]
+      ;; 4. Redundant register self-transfers: (TAX) (TXA) or (TAY) (TYA)
+      [(list* `(TAX) `(TXA) rest)
+       #:when (or (null? rest) (not (branch-form? (car rest))))
+       (set! redundant-transfers (add1 redundant-transfers))
+       (set! bytes-saved (+ bytes-saved 1))
+       (set! cycles-saved (+ cycles-saved 2))
+       (loop rest (cons '(TAX) acc))]
+      [(list* `(TAY) `(TYA) rest)
+       #:when (or (null? rest) (not (branch-form? (car rest))))
+       (set! redundant-transfers (add1 redundant-transfers))
+       (set! bytes-saved (+ bytes-saved 1))
+       (set! cycles-saved (+ cycles-saved 2))
+       (loop rest (cons '(TAY) acc))]
+      [(cons head tail)
+       (loop tail (cons head acc))])))
+
+(define (optimize-6502-peephole raw-forms)
+  (define-values (opt-forms _stats) (optimize-6502-peephole-internal raw-forms))
+  opt-forms)
+
+(define (optimize-6502-peephole-stats raw-forms)
+  (define-values (_opt-forms stats) (optimize-6502-peephole-internal raw-forms))
+  stats)
 
 ;; Automatically relax any 6502 relative branch whose target exceeds [-128, +127] bytes
 ;; into the 5-byte sequence: (<inverted-Bxx> skip_label) (JMP target) (label skip_label).

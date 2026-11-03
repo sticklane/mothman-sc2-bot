@@ -44,11 +44,28 @@
  defsprite-tile
  defmetasprite
  emit-oam-metasprite-6502
+ defstate-machine
+ defzp-map
  defzp-var
  with-zp-scratch
  defchr-tile
  defboba-stage
  verify-nes-grades!)
+
+;; Surface DSL macro for declaring a game phase state machine with verified failure recovery & victory reachability
+(define-syntax-rule (defstate-machine sm-id #:initial init-sym ([state-sym #:kind kind-sym #:transitions (target-sym ...)] ...))
+  (define sm-id
+    (hasheq 'name 'sm-id
+            'initial 'init-sym
+            'states (list (hasheq 'id 'state-sym
+                                  'kind 'kind-sym
+                                  'transitions '(target-sym ...))
+                          ...))))
+
+;; Surface DSL macro for declaring a pinned hardware Zero-Page semantic layout map ($00-$FF)
+(define-syntax-rule (defzp-map map-id ([var-sym zp-addr role-sym] ...))
+  (define map-id
+    (list (hasheq 'id 'var-sym 'addr zp-addr 'role 'role-sym) ...)))
 
 ;; Surface DSL macro for declaring a graded Zero-Page binding
 (define-syntax-rule (defzp-var id #:bytes n #:cap cap)

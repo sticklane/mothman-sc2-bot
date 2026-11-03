@@ -16,9 +16,17 @@
          "mos6502-assembler.rkt"
          "boba-rom-builder.rkt"
          "../lib/nes-chr-assets.rkt"
-         (only-in "decompiled-smb.rkt" emit-decompiled-mario-6502-program)
-         (only-in "decompiled-zelda.rkt" emit-decompiled-zelda-6502-program)
-         (only-in "decompiled-tetris.rkt" emit-decompiled-tetris-6502-program))
+         (only-in "decompiled-smb.rkt"
+                  MARIO-ZP-DEAD
+                  MARIO-ZP-LIVES
+                  emit-decompiled-mario-6502-program)
+         (only-in "decompiled-zelda.rkt"
+                  ZELDA-ZP-HURT-TIMER
+                  ZELDA-ZP-DEAD
+                  emit-decompiled-zelda-6502-program)
+         (only-in "decompiled-tetris.rkt"
+                  TETRIS-ZP-GAME-OVER
+                  emit-decompiled-tetris-6502-program))
 
 (provide
  ;; 1. Super Mario Bros. (World 1-1 Platformer)
@@ -38,6 +46,8 @@
  MARIO-ZP-GOOMBA-ALIVE
  MARIO-ZP-QBLOCK-HIT
  MARIO-ZP-WON
+ MARIO-ZP-DEAD
+ MARIO-ZP-LIVES
  compile-mario-nes-rom!
 
  ;; 2. The Legend of Zelda (Top-Down Action-Adventure)
@@ -54,6 +64,8 @@
  ZELDA-ZP-HEARTS
  ZELDA-ZP-TRIFORCE-WON
  ZELDA-ZP-OAM-CURSOR
+ ZELDA-ZP-HURT-TIMER
+ ZELDA-ZP-DEAD
  compile-zelda-nes-rom!
 
  ;; 3. Nintendo NES Tetris (10x20 Well, Rotation & Staged VBlank Row Flush)
@@ -68,6 +80,7 @@
  TETRIS-ZP-SCORE
  TETRIS-ZP-LEVEL
  TETRIS-ZP-DIRTY-ROW
+ TETRIS-ZP-GAME-OVER
  compile-tetris-nes-rom!)
 
 ;; ============================================================================
