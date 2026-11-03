@@ -2,7 +2,7 @@
   "manuscript_title": "LakefillQ: Purely Functional Data Structures, Substructural Typing, and Graded Physical Compilation for Low-Width Fault-Tolerant Quantum Circuits",
   "compiler_system": "LakefillQ",
   "overall_status": "PASS",
-  "total_verification_seconds": 108.343,
+  "total_verification_seconds": 90.19,
   "deliverables": {
     "latex_manuscript": "paper/lakefillq_paper.tex",
     "bibtex_database": "paper/references.bib",
@@ -11,8 +11,8 @@
   },
   "quantitative_artifact_crosscheck": {
     "status": "PASS",
-    "artifacts_loaded": 40,
-    "claims_verified": 167,
+    "artifacts_loaded": 44,
+    "claims_verified": 175,
     "failure_count": 0,
     "claims": [
       {
@@ -2018,6 +2018,102 @@
         "markdown_matched": true,
         "latex_matched": true,
         "verified": true
+      },
+      {
+        "claim_id": "c169_trans_val_programs_135",
+        "category": "lakefillq_translation_validation",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_translation_validation_report.json",
+        "measured_value": 135,
+        "expected_value": 135,
+        "markdown_token": "135/135",
+        "latex_token": "135/135",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c170_trans_val_step_to_step_miters_1080",
+        "category": "lakefillq_translation_validation",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_translation_validation_report.json",
+        "measured_value": 1080,
+        "expected_value": 1080,
+        "markdown_token": "1,080",
+        "latex_token": "1{,}080",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c171_portfolio_width_pinned_qubits_1336",
+        "category": "lakefillq_portfolio_superoptimizer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_portfolio_superoptimizer_report.json",
+        "measured_value": 1336,
+        "expected_value": 1336,
+        "markdown_token": "1,336",
+        "latex_token": "1{,}336",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c172_portfolio_ebit_first_ebits_1488",
+        "category": "lakefillq_portfolio_superoptimizer",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_portfolio_superoptimizer_report.json",
+        "measured_value": 1488,
+        "expected_value": 1488,
+        "markdown_token": "1,488",
+        "latex_token": "1{,}488",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c173_15examples_0dsp_stim_rounds_150000",
+        "category": "lakefillq_15examples_0dsp_rtl_cosim",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_15examples_0dsp_rtl_cosim_report.json",
+        "measured_value": 150000,
+        "expected_value": 150000,
+        "markdown_token": "150,000",
+        "latex_token": "150{,}000",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c174_15examples_0dsp_mwpm_backlog_184646",
+        "category": "lakefillq_15examples_0dsp_rtl_cosim",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_15examples_0dsp_rtl_cosim_report.json",
+        "measured_value": 184646.4,
+        "expected_value": 184646.4,
+        "markdown_token": "184,646.4 ns",
+        "latex_token": "184{,}646.4",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c175_qasm3_autorepair_buggy_repaired_14",
+        "category": "lakefillq_qasm3_lifter_autorepair",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_qasm3_lifter_autorepair_report.json",
+        "measured_value": 14,
+        "expected_value": 14,
+        "markdown_token": "14/14",
+        "latex_token": "14/14",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
+      },
+      {
+        "claim_id": "c176_qasm3_autorepair_t_reduction_39_73",
+        "category": "lakefillq_qasm3_lifter_autorepair",
+        "artifact_relpath": "reproducers/artifacts/lakefillq_qasm3_lifter_autorepair_report.json",
+        "measured_value": 39.73,
+        "expected_value": 39.73,
+        "markdown_token": "39.73%",
+        "latex_token": "39.73\\%",
+        "markdown_matched": true,
+        "latex_matched": true,
+        "verified": true
       }
     ]
   },
@@ -2025,9 +2121,9 @@
     "status": "PASS",
     "lean_version": "4.35.0",
     "formal_statements_verified": 21,
-    "lean_declarations_verified": 126,
-    "lean_files_scanned_zero_sorry_axiom": 28,
-    "lean_kernel_modules_executed": 33,
+    "lean_declarations_verified": 135,
+    "lean_files_scanned_zero_sorry_axiom": 32,
+    "lean_kernel_modules_executed": 37,
     "mappings": [
       {
         "paper_label": "prop:p1",
@@ -2074,7 +2170,7 @@
       {
         "paper_label": "prop:p3_3",
         "lean_file": "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
-        "declaration": "braun_tree_size_and_lsb_routing_invariant",
+        "declaration": "okasaki_skew_binary_carry_save_increment_identity",
         "zero_sorry_admit_axiom": true
       },
       {
@@ -2104,7 +2200,7 @@
       {
         "paper_label": "prop:p3_5",
         "lean_file": "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
-        "declaration": "adaptive_limb_borrowz_pebble_recycling_width_and_eval_bound",
+        "declaration": "bezout_history_free_reverse_decoder_bijective",
         "zero_sorry_admit_axiom": true
       },
       {
@@ -2784,173 +2880,247 @@
         "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
         "declaration": "canonical_pipeline_strictly_dominates_suboptimal_schedules",
         "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_translation_validation_and_miter_proofs.lean",
+        "declaration": "miter_zero_iff_semantic_eq",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_translation_validation_and_miter_proofs.lean",
+        "declaration": "chordal_ssa_wire_bijection_invariance",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+        "declaration": "p_ssa_nonphase_pre_commutes_with_todd_zx",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+        "declaration": "width_pinned_schedule_reclaims_84_qubits_zero_hazardA_penalty",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:egraph",
+        "lean_file": "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+        "declaration": "ebit_first_cut_preserving_todd_reduces_ebits",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "app:0dsp",
+        "lean_file": "proofs/lakefillq_15examples_0dsp_rtl_fifo_pacing_proofs.lean",
+        "declaration": "braunOrReduce_false_iff_popcount_zero",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "app:0dsp",
+        "lean_file": "proofs/lakefillq_15examples_0dsp_rtl_fifo_pacing_proofs.lean",
+        "declaration": "fastPath_strict_dominance_with_sparse_hit",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:rq5",
+        "lean_file": "proofs/lakefillq_qasm3_lifting_and_autorepair_proofs.lean",
+        "declaration": "roundtrip_qasm3_revir_qasm3_semantics_preserved",
+        "zero_sorry_admit_axiom": true
+      },
+      {
+        "paper_label": "sec:rq5",
+        "lean_file": "proofs/lakefillq_qasm3_lifting_and_autorepair_proofs.lean",
+        "declaration": "counitU4_cond_cz_repair_restores_branch_uniform_purity",
+        "zero_sorry_admit_axiom": true
       }
     ],
     "kernel_runs": [
       {
         "lean_file": "proofs/adversarial_catch_audit_and_sota_comparison_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 939.6
+        "elapsed_ms": 749.06
       },
       {
         "lean_file": "proofs/bivariate_bicycle_qldpc_and_0dsp_backlog_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 762.31
+        "elapsed_ms": 632.61
       },
       {
         "lean_file": "proofs/dqi_opi_and_parallel_walker_bitonic_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 677.75
+        "elapsed_ms": 332.94
       },
       {
         "lean_file": "proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 869.06
+        "elapsed_ms": 513.11
       },
       {
         "lean_file": "proofs/wire_level_symbolic_type_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2391.18
+        "elapsed_ms": 1507.55
       },
       {
         "lean_file": "proofs/select_swap_qroam_crt_kawamura_u2_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3060.33
+        "elapsed_ms": 2437.48
       },
       {
         "lean_file": "proofs/pareto_inplace_aes_slp_asymmetric_mbu_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 10455.15
+        "elapsed_ms": 10733.15
       },
       {
         "lean_file": "proofs/early_mbu_phase_only_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 25523.96
+        "elapsed_ms": 20109.34
       },
       {
         "lean_file": "proofs/qphys_graded_resource_semiring_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1816.54
+        "elapsed_ms": 2601.4
       },
       {
         "lean_file": "proofs/differential_compiler_mutation_soundness_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1312.47
+        "elapsed_ms": 1565.7
       },
       {
         "lean_file": "proofs/lakefillq_unified_compiler_elaboration_and_qasm3_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3106.39
+        "elapsed_ms": 2146.85
       },
       {
         "lean_file": "proofs/lakefillq_xag_fraig_symbolic_inference_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1766.48
+        "elapsed_ms": 1539.53
       },
       {
         "lean_file": "proofs/lakefillq_egraph_qphys_saturation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2829.98
+        "elapsed_ms": 1755.95
       },
       {
         "lean_file": "proofs/lakefillq_0dsp_rtl_decoder_and_cosim_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3100.36
+        "elapsed_ms": 1578.96
       },
       {
         "lean_file": "proofs/lakefillq_block_encoding_lcu_qsvt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1760.79
+        "elapsed_ms": 834.29
       },
       {
         "lean_file": "proofs/lakefillq_bug_class_prevention_type_system_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2384.87
+        "elapsed_ms": 1851.54
       },
       {
         "lean_file": "proofs/lakefillq_algorithmic_optimizations_and_3mode_scaling_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 77635.96
+        "elapsed_ms": 65265.8
       },
       {
         "lean_file": "proofs/sota_ecc_rsa_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1677.31
+        "elapsed_ms": 1409.56
       },
       {
         "lean_file": "proofs/sota_symmetric_hash_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1838.8
+        "elapsed_ms": 1125.1
       },
       {
         "lean_file": "proofs/sota_qisd_dqi_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1675.71
+        "elapsed_ms": 1041.88
       },
       {
         "lean_file": "proofs/sota_qualtran_cobble_research_correctness_and_opt_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1362.98
+        "elapsed_ms": 572.96
       },
       {
         "lean_file": "proofs/lakefillq_graded_coeffect_uniqueness_place_effect_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 10284.4
+        "elapsed_ms": 6796.27
       },
       {
         "lean_file": "proofs/lakefillq_cluster_qasm3_partition_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 4204.42
+        "elapsed_ms": 2736.31
       },
       {
         "lean_file": "proofs/lakefillq_qasm_python_linter_lifting_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 4539.93
+        "elapsed_ms": 3706.36
       },
       {
         "lean_file": "proofs/lakefillq_noisy_optical_link_distillation_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1672.32
+        "elapsed_ms": 1828.27
       },
       {
         "lean_file": "proofs/lakefillq_multipass_diagnostic_provenance_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1182.69
+        "elapsed_ms": 1531.23
       },
       {
         "lean_file": "proofs/lakefillq_holistic_modular_duoidal_cohesion_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1726.8
+        "elapsed_ms": 1717.29
       },
       {
         "lean_file": "proofs/lakefillq_redex_surface_diagnostic_fuzzer_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2595.32
+        "elapsed_ms": 2148.23
       },
       {
         "lean_file": "proofs/lakefillq_zx_phase_poly_and_ag_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2801.12
+        "elapsed_ms": 3504.3
       },
       {
         "lean_file": "proofs/lakefillq_inductive_loop_qsub_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 1239.71
+        "elapsed_ms": 1198.2
       },
       {
         "lean_file": "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 2928.64
+        "elapsed_ms": 2607.32
       },
       {
         "lean_file": "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 3389.09
+        "elapsed_ms": 1215.66
       },
       {
         "lean_file": "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
         "return_code": 0,
-        "elapsed_ms": 9123.25
+        "elapsed_ms": 8952.83
+      },
+      {
+        "lean_file": "proofs/lakefillq_translation_validation_and_miter_proofs.lean",
+        "return_code": 0,
+        "elapsed_ms": 457.69
+      },
+      {
+        "lean_file": "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+        "return_code": 0,
+        "elapsed_ms": 2293.5
+      },
+      {
+        "lean_file": "proofs/lakefillq_15examples_0dsp_rtl_fifo_pacing_proofs.lean",
+        "return_code": 0,
+        "elapsed_ms": 768.55
+      },
+      {
+        "lean_file": "proofs/lakefillq_qasm3_lifting_and_autorepair_proofs.lean",
+        "return_code": 0,
+        "elapsed_ms": 1954.6
       }
     ]
   },

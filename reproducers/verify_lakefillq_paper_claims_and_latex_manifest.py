@@ -1881,6 +1881,78 @@ def verify_quantitative_claims(md_text: str, tex_text: str) -> Dict[str, Any]:
             "2,124 ebits",
             r"2{,}124$ ebits",
         ),
+        (
+            "c169_trans_val_programs_135",
+            "lakefillq_translation_validation",
+            "reproducers/artifacts/lakefillq_translation_validation_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_translation_validation_report.json")["total_valid_programs_certified"],
+            135,
+            "135/135",
+            "135/135",
+        ),
+        (
+            "c170_trans_val_step_to_step_miters_1080",
+            "lakefillq_translation_validation",
+            "reproducers/artifacts/lakefillq_translation_validation_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_translation_validation_report.json")["total_stage_to_stage_miters_verified"],
+            1080,
+            "1,080",
+            r"1{,}080",
+        ),
+        (
+            "c171_portfolio_width_pinned_qubits_1336",
+            "lakefillq_portfolio_superoptimizer",
+            "reproducers/artifacts/lakefillq_portfolio_superoptimizer_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_portfolio_superoptimizer_report.json")["aggregate_summary"]["width_pinned_active_qubits"],
+            1336,
+            "1,336",
+            r"1{,}336",
+        ),
+        (
+            "c172_portfolio_ebit_first_ebits_1488",
+            "lakefillq_portfolio_superoptimizer",
+            "reproducers/artifacts/lakefillq_portfolio_superoptimizer_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_portfolio_superoptimizer_report.json")["aggregate_summary"]["ebit_first_cross_qpu_ebits"],
+            1488,
+            "1,488",
+            r"1{,}488",
+        ),
+        (
+            "c173_15examples_0dsp_stim_rounds_150000",
+            "lakefillq_15examples_0dsp_rtl_cosim",
+            "reproducers/artifacts/lakefillq_15examples_0dsp_rtl_cosim_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_15examples_0dsp_rtl_cosim_report.json")["aggregate_metrics"]["total_stim_syndrome_rounds"],
+            150000,
+            "150,000",
+            r"150{,}000",
+        ),
+        (
+            "c174_15examples_0dsp_mwpm_backlog_184646",
+            "lakefillq_15examples_0dsp_rtl_cosim",
+            "reproducers/artifacts/lakefillq_15examples_0dsp_rtl_cosim_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_15examples_0dsp_rtl_cosim_report.json")["aggregate_metrics"]["max_lindley_fifo_backlog_unpaced_mwpm_ns"],
+            184646.4,
+            "184,646.4 ns",
+            r"184{,}646.4",
+        ),
+        (
+            "c175_qasm3_autorepair_buggy_repaired_14",
+            "lakefillq_qasm3_lifter_autorepair",
+            "reproducers/artifacts/lakefillq_qasm3_lifter_autorepair_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_qasm3_lifter_autorepair_report.json")["summary_metrics"]["buggy_circuits_repaired_and_verified"],
+            14,
+            "14/14",
+            "14/14",
+        ),
+        (
+            "c176_qasm3_autorepair_t_reduction_39_73",
+            "lakefillq_qasm3_lifter_autorepair",
+            "reproducers/artifacts/lakefillq_qasm3_lifter_autorepair_report.json",
+            lambda: get_doc("reproducers/artifacts/lakefillq_qasm3_lifter_autorepair_report.json")["summary_metrics"]["t_count_reduction_pct_mean"],
+            39.73,
+            "39.73%",
+            r"39.73\%",
+        ),
     ]
 
     verified_claims: List[Dict[str, Any]] = []
@@ -1971,7 +2043,7 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
             "statement_kind": "Proposition 3.3",
             "lean_declarations": [
                 ("proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean", "api3_braun_tree_fold_contract_and_cost"),
-                ("proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean", "braun_tree_size_and_lsb_routing_invariant"),
+                ("proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean", "okasaki_skew_binary_carry_save_increment_identity"),
             ],
         },
         {
@@ -1988,7 +2060,7 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
             "statement_kind": "Proposition 3.5",
             "lean_declarations": [
                 ("proofs/quantum_data_structure_api_contracts_and_costs_proofs.lean", "api5_binomial_pebble_schedule_contract_and_cost"),
-                ("proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean", "adaptive_limb_borrowz_pebble_recycling_width_and_eval_bound"),
+                ("proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean", "bezout_history_free_reverse_decoder_bijective"),
             ],
         },
         {
@@ -2504,6 +2576,52 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
                 "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
                 "canonical_pipeline_strictly_dominates_suboptimal_schedules",
             ),
+            # Include certifying translation validation, portfolio superoptimizer, 15/15 0-DSP RTL cosim, and QASM3 auto-repairer theorems
+            (
+                "sec:egraph",
+                "proofs/lakefillq_translation_validation_and_miter_proofs.lean",
+                "miter_zero_iff_semantic_eq",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_translation_validation_and_miter_proofs.lean",
+                "chordal_ssa_wire_bijection_invariance",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+                "p_ssa_nonphase_pre_commutes_with_todd_zx",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+                "width_pinned_schedule_reclaims_84_qubits_zero_hazardA_penalty",
+            ),
+            (
+                "sec:egraph",
+                "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+                "ebit_first_cut_preserving_todd_reduces_ebits",
+            ),
+            (
+                "app:0dsp",
+                "proofs/lakefillq_15examples_0dsp_rtl_fifo_pacing_proofs.lean",
+                "braunOrReduce_false_iff_popcount_zero",
+            ),
+            (
+                "app:0dsp",
+                "proofs/lakefillq_15examples_0dsp_rtl_fifo_pacing_proofs.lean",
+                "fastPath_strict_dominance_with_sparse_hit",
+            ),
+            (
+                "sec:rq5",
+                "proofs/lakefillq_qasm3_lifting_and_autorepair_proofs.lean",
+                "roundtrip_qasm3_revir_qasm3_semantics_preserved",
+            ),
+            (
+                "sec:rq5",
+                "proofs/lakefillq_qasm3_lifting_and_autorepair_proofs.lean",
+                "counitU4_cond_cz_repair_restores_branch_uniform_purity",
+            ),
         ]
     )
 
@@ -2571,6 +2689,10 @@ def verify_lean_theorems_and_kernel(tex_text: str) -> Dict[str, Any]:
         "proofs/lakefillq_higher_genus_lifted_dqi_proofs.lean",
         "proofs/okasaki_qds_jump_divsteps_bezout_and_hua_proofs.lean",
         "proofs/lakefillq_phase_ordering_commutation_and_optimality_proofs.lean",
+        "proofs/lakefillq_translation_validation_and_miter_proofs.lean",
+        "proofs/lakefillq_portfolio_superoptimizer_pareto_proofs.lean",
+        "proofs/lakefillq_15examples_0dsp_rtl_fifo_pacing_proofs.lean",
+        "proofs/lakefillq_qasm3_lifting_and_autorepair_proofs.lean",
     ]
 
     env = os.environ.copy()

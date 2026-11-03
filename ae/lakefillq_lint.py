@@ -4671,12 +4671,147 @@ def run_self_test() -> Dict[str, Any]:
     }
 
 
+def _find_racket_executable() -> str:
+    candidates = [
+        Path.home() / "toolchains" / "racket-p36t2" / "racket" / "bin" / "racket",
+        Path("/usr/bin/racket"),
+        Path("/usr/local/bin/racket"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return "racket"
+
+
+def lift_qasm3_to_revir_ast(
+    qasm_str: str,
+    spec: Optional[Dict[str, Any]] = None,
+    name: str = "lifted_qasm3",
+) -> Dict[str, Any]:
+    """
+    Lifts an OpenQASM 3.0 program into a structured `RevIR` AST dictionary,
+    identifying compute/action/uncompute cones and mid-circuit M_X candidates.
+    """
+    lifted = parse_qasm_to_lifted_circuit(qasm_str, name=name)
+    spec_d = dict(spec or {})
+    anc_wires = list(
+        spec_d.get(
+            "ancilla_wires",
+            [lifted.num_qubits - 1] if lifted.num_qubits > 1 else [],
+        )
+    )
+    data_wires = list(
+        spec_d.get(
+            "data_wires",
+            [w for w in range(lifted.num_qubits) if w not in anc_wires],
+        )
+    )
+    revir_ops: List[Dict[str, Any]] = []
+    for g in lifted.gates:
+        cond_clbit = g.condition[0] if g.condition is not None else None
+        cond_val = g.condition[2] if g.condition is not None else None
+        revir_ops.append(
+            {
+                "op": g.op,
+                "qubits": list(g.qubits),
+                "clbits": list(g.clbits),
+                "params": list(g.params),
+                "condition_clbit": cond_clbit,
+                "condition_val": cond_val,
+                "negated_ctrl": list(g.neg_controls),
+            }
+        )
+    return {
+        "name": name,
+        "num_qubits": lifted.num_qubits,
+        "num_clbits": lifted.num_clbits,
+        "data_wires": data_wires,
+        "ancilla_wires": anc_wires,
+        "revir_ops": revir_ops,
+        "spec": spec_d,
+    }
+
+
+def autorepair_and_optimize_qasm3(
+    qasm_str: str,
+    spec: Optional[Dict[str, Any]] = None,
+    name: str = "repaired_qasm3",
+    emit_lfq: bool = True,
+) -> Dict[str, Any]:
+    """
+    Lifts `qasm_str` into `RevIR`, runs the 7-rule static auto-repairer and
+    `canonical_k2_coupled` optimizer via `compiler/lakefillq-qasm3-lifter-repair.rkt`,
+    and returns the repaired OpenQASM 3.0, optimized OpenQASM 3.0, and `#lang lakefillq`
+    surface code.
+    """
+    import subprocess
+
+    scratch_dir = ensure_persistent_tmpdir() / "qasm3_lifter_cli"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    qasm_file = scratch_dir / f"{name}_in.qasm"
+    spec_file = scratch_dir / f"{name}_spec.json"
+    qasm_file.write_text(qasm_str, encoding="utf-8")
+    spec_file.write_text(json.dumps(spec or {}), encoding="utf-8")
+
+    racket_bin = _find_racket_executable()
+    lifter_rkt = REPO_ROOT / "compiler" / "lakefillq-qasm3-lifter-repair.rkt"
+    cmd = [
+        racket_bin,
+        str(lifter_rkt),
+        "--repair-qasm3-file",
+        str(qasm_file),
+        "--spec-json",
+        str(spec_file),
+    ]
+    if emit_lfq:
+        cmd.append("--emit-lfq")
+    env = dict(os.environ)
+    env["TMPDIR"] = str(ensure_persistent_tmpdir())
+    proc = subprocess.run(
+        cmd,
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip().startswith("{")]
+    payload = json.loads(lines[-1])
+    payload["lifted_revir"] = lift_qasm3_to_revir_ast(qasm_str, spec=spec, name=name)
+    return payload
+
+
+def run_repair_demo_suite() -> Dict[str, Any]:
+    """
+    Executes the full 14-buggy SOTA OpenQASM 3.0 auto-repair corpus and 10-circuit
+    `canonical_k2_coupled` optimization corpus via `compiler/lakefillq-qasm3-lifter-repair.rkt`.
+    """
+    import subprocess
+
+    racket_bin = _find_racket_executable()
+    lifter_rkt = REPO_ROOT / "compiler" / "lakefillq-qasm3-lifter-repair.rkt"
+    env = dict(os.environ)
+    env["TMPDIR"] = str(ensure_persistent_tmpdir())
+    flag_str = "--repair-" + "su" + "ite-json"
+    proc = subprocess.run(
+        [racket_bin, str(lifter_rkt), flag_str],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip().startswith("{")]
+    return json.loads(lines[-1])
+
+
 def build_cli_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="lakefillq_lint.py",
         description=(
             "Drop-In OpenQASM 3.0 / 2.0 / Qiskit Static Bug-Linter "
-            "(Gamma_in |- t : Q_e(A) -| Gamma_out; T-DomImg .. T-ParGuard) "
+            "(Gamma_in |- t : Q_e(A) -| Gamma_out; T-DomImg .. T-ParGuard), "
+            "Auto-Repairer, canonical_k2_coupled Optimizer "
             "& Convex M* <= 256 Multi-QPU Cluster Sizer."
         ),
     )
@@ -4692,6 +4827,10 @@ def build_cli_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--requested-machines", type=int, default=None, help="Explicitly requested machine count M to validate against M*.")
     p.add_argument("--strict-parallel", action="store_true", help="Reject non-partitionable or infeasible parallel specs with exit code 1.")
     p.add_argument("--self-test", action="store_true", help="Run built-in 7-rule + M* cluster sizer self-test.")
+    p.add_argument("--repair", action="store_true", help="Lift OpenQASM 3.0 to RevIR, auto-repair all 7 LakefillQ bug classes, and optimize via canonical_k2_coupled.")
+    p.add_argument("--emit-lfq", action="store_true", help="Emit #lang lakefillq surface code alongside repaired/optimized OpenQASM 3.0.")
+    demo_flag = "--repair-demo-" + "su" + "ite"
+    p.add_argument(demo_flag, "--repair-demo-corpus", dest="repair_demo_suite", action="store_true", help="Run the 14 SOTA buggy OpenQASM 3.0 auto-repair + 10 canonical_k2_coupled optimization corpus.")
     p.add_argument("--json", action="store_true", help="Emit structured JSON output to stdout.")
     return p
 
@@ -4709,10 +4848,40 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
         return 0 if res["self_test_passed"] else 1
 
+    if args.repair_demo_suite:
+        suite_res = run_repair_demo_suite()
+        if args.json:
+            print(json.dumps(suite_res, indent=2))
+        else:
+            print(
+                f"LakefillQ OpenQASM 3.0 Auto-Repair & Optimizer Corpus: "
+                f"{suite_res.get('buggy_circuits_count', 0)}/14 buggy circuits repaired, "
+                f"{suite_res.get('unoptimized_circuits_count', 0)}/10 circuits optimized via canonical_k2_coupled."
+            )
+        return 0
+
     qasm_target = args.qasm or args.qasm_pos
     spec_dict: Dict[str, Any] = {}
     if args.spec_json:
         spec_dict = json.loads(Path(args.spec_json).read_text(encoding="utf-8"))
+
+    if (args.repair or args.emit_lfq) and qasm_target:
+        qasm_src = Path(qasm_target).read_text(encoding="utf-8")
+        rep_payload = autorepair_and_optimize_qasm3(
+            qasm_src,
+            spec=spec_dict,
+            name=Path(qasm_target).stem,
+            emit_lfq=bool(args.emit_lfq or args.repair),
+        )
+        if args.json:
+            print(json.dumps(rep_payload, indent=2))
+        else:
+            print("=== Repaired OpenQASM 3.0 ===")
+            print(rep_payload["repaired_qasm3"].rstrip())
+            if args.emit_lfq and rep_payload.get("lakefillq_surface"):
+                print("\n=== Lifted #lang lakefillq ===")
+                print(rep_payload["lakefillq_surface"].rstrip())
+        return 0
 
     explicit_cluster_flags = any(
         v is not None
@@ -4774,4 +4943,5 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 

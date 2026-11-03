@@ -715,12 +715,12 @@ def run_evaluation(mode: str, json_out: Optional[str] = None) -> int:
         steps.extend(
             [
                 (
-                    "Paper 167-Claim & LaTeX/BibTeX Manifest",
+                    "Paper 175-Claim & LaTeX/BibTeX Manifest",
                     lambda: check_python_verifier(
                         tc,
                         env,
                         "reproducers/verify_lakefillq_paper_claims_and_latex_manifest.py",
-                        "167 JSON claims, 21 formal labels, 33 Lean runs, 120 BibTeX entries PASS",
+                        "175 JSON claims, 21 formal labels, 37 Lean runs, 120 BibTeX entries PASS",
                     ),
                 ),
                 (
