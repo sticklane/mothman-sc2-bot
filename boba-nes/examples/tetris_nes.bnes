@@ -63,7 +63,10 @@
 (define tetris-rom-path "build/tetris_nes.nes")
 
 (define-values (tetris-rom-bytes tetris-asm-result tetris-type-result tetris-module-desc)
-  (compile-tetris-nes-rom! #:nes-out-path tetris-rom-path))
+  (compile-tetris-nes-rom! #:nes-out-path tetris-rom-path
+                           #:chr-layout tetris-chr-layout
+                           #:zp-map tetris-zp-layout
+                           #:state-machine tetris-campaign-fsm))
 
 (module+ main
   (define vb  (nes-type-result-vblank-grade tetris-type-result))

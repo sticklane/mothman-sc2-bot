@@ -16,14 +16,13 @@
 ;;  10. Bomberman (1985, NROM-128, Vertical Mirroring)
 ;; ============================================================================
 
-(require (for-syntax racket/base
-                     racket/path)
-         json
+(require json
          racket/file
          racket/format
          racket/list
          racket/match
          racket/path
+         racket/runtime-path
          "graded-typechecker.rkt"
          "diagnostics.rkt"
          "mos6502-assembler.rkt"
@@ -39,12 +38,18 @@
  TOP10-ZP-PLAYER-Y
  TOP10-ZP-PLAYER-DIR
  TOP10-ZP-ACTION-TIMER
+ TOP10-ZP-GENRE-REG-A
+ TOP10-ZP-GENRE-REG-B
  TOP10-ZP-ENEMY-X
  TOP10-ZP-ENEMY-Y
  TOP10-ZP-ENEMY-ALIVE
  TOP10-ZP-HAZARD-STEPS
  TOP10-ZP-SCORE
  TOP10-ZP-STAGE-CLEAR-STEPS
+ TOP10-ZP-GENRE-TIMER
+ TOP10-ZP-GENRE-BONUS
+ TOP10-ZP-GENRE-COOLDOWN
+ TOP10-ZP-GENRE-STATE
  TOP10-ZP-WON
  TOP10-ZP-LIVES
  TOP10-ZP-DEAD
@@ -57,6 +62,8 @@
  find-top10-game-spec
  load-top10-game-state
  load-top10-authentic-chr-rom
+ count-nonzero-chr-tiles
+ emit-top10-genre-mechanics-6502
  emit-decompiled-top10-6502-program
  compile-top10-game-rom!
  compile-all-top10-roms!
@@ -73,12 +80,18 @@
 (define TOP10-ZP-PLAYER-Y          #x15) ; Player screen/world Y coordinate (init = 160)
 (define TOP10-ZP-PLAYER-DIR        #x16) ; Player facing/movement direction (0..3)
 (define TOP10-ZP-ACTION-TIMER      #x17) ; Attack/Jump/Bomb/Shot active frames
+(define TOP10-ZP-GENRE-REG-A       #x18) ; Genre-specific primary mechanic register
+(define TOP10-ZP-GENRE-REG-B       #x19) ; Genre-specific secondary mechanic register
 (define TOP10-ZP-ENEMY-X           #x1A) ; Stage hazard/enemy X coordinate (init = 60)
 (define TOP10-ZP-ENEMY-Y           #x1B) ; Stage hazard/enemy Y coordinate (init = 160)
 (define TOP10-ZP-ENEMY-ALIVE       #x1C) ; 1 = active enemy/objective, 0 = defeated
 (define TOP10-ZP-HAZARD-STEPS      #x1D) ; Frames walked into hazard without attacking
 (define TOP10-ZP-SCORE             #x1E) ; Stage & enemy score counter (BCD)
 (define TOP10-ZP-STAGE-CLEAR-STEPS #x1F) ; Progress toward clearing current stage
+(define TOP10-ZP-GENRE-TIMER       #x20) ; Genre-specific timer (hammer/POW/pellet/fuse/heat)
+(define TOP10-ZP-GENRE-BONUS       #x21) ; Genre-specific combo/bonus/salvo counter
+(define TOP10-ZP-GENRE-COOLDOWN    #x22) ; Genre-specific weapon/turret reload cooldown
+(define TOP10-ZP-GENRE-STATE       #x23) ; Genre-specific stance/elevation/armor/blast state
 (define TOP10-ZP-WON               #x24) ; 1 = campaign victory achieved
 (define TOP10-ZP-LIVES             #x25) ; Remaining player lives (init = 3)
 (define TOP10-ZP-DEAD              #x26) ; 0 = alive, 1 = hazard death (awaiting START recovery)
@@ -86,10 +99,7 @@
 (define TOP10-ZP-STAGE-ID          #x28) ; Current stage/wave index (0 -> 1 -> 2 -> 3)
 (define TOP10-ZP-GAME-COMPLETED    #x29) ; 1 = all 4 stages cleared!
 
-(define-syntax (get-repo-root stx)
-  (datum->syntax stx (path->string (simplify-path (build-path (syntax-source stx) 'up 'up)))))
-
-(define REPO-ROOT-DIR (string->path (get-repo-root)))
+(define-runtime-path REPO-ROOT-DIR "..")
 (define TOP10-STATE-DIR (build-path REPO-ROOT-DIR "assets" "decompiled" "top10"))
 (define ROMS-DIR        (build-path REPO-ROOT-DIR "assets" "roms"))
 (define BUILD-DIR       (build-path REPO-ROOT-DIR "build"))
@@ -107,6 +117,8 @@
            'state-file   "donkey_kong_state.json"
            'out-file     "donkey_kong_nes.nes"
            'mirroring    'horizontal
+           'oam-page     #x02
+           'ppuctrl      #x90
            'stage-names  '("25m Girders" "50m Pie Factory" "75m Elevators" "100m Rivets"))
    (hasheq 'symbol       'mario-bros
            'id           "mario_bros"
@@ -116,6 +128,8 @@
            'state-file   "mario_bros_state.json"
            'out-file     "mario_bros_nes.nes"
            'mirroring    'vertical
+           'oam-page     #x02
+           'ppuctrl      #x90
            'stage-names  '("Phase 1 Shellcreeper" "Phase 2 Sidestepper" "Phase 3 Fighterfly" "Phase 4 Slipice Boss"))
    (hasheq 'symbol       'pac-man
            'id           "pac_man"
@@ -125,6 +139,8 @@
            'state-file   "pac_man_state.json"
            'out-file     "pac_man_nes.nes"
            'mirroring    'horizontal
+           'oam-page     #x07
+           'ppuctrl      #x88
            'stage-names  '("Cherry Maze" "Strawberry Maze" "Peach Maze" "Galaxian Key Maze"))
    (hasheq 'symbol       'excitebike
            'id           "excitebike"
@@ -134,6 +150,8 @@
            'state-file   "excitebike_state.json"
            'out-file     "excitebike_nes.nes"
            'mirroring    'vertical
+           'oam-page     #x02
+           'ppuctrl      #x90
            'stage-names  '("Track 1 Prelim" "Track 2Heat" "Track 3 Semi-Final" "Track 4 Championship"))
    (hasheq 'symbol       'balloon-fight
            'id           "balloon_fight"
@@ -143,6 +161,8 @@
            'state-file   "balloon_fight_state.json"
            'out-file     "balloon_fight_nes.nes"
            'mirroring    'horizontal
+           'oam-page     #x02
+           'ppuctrl      #x90
            'stage-names  '("Phase 1 Night Sea" "Phase 2 Storm Clouds" "Phase 3 Bonus Trip" "Phase 4 Flipper Boss"))
    (hasheq 'symbol       'ice-climber
            'id           "ice_climber"
@@ -152,6 +172,8 @@
            'state-file   "ice_climber_state.json"
            'out-file     "ice_climber_nes.nes"
            'mirroring    'horizontal
+           'oam-page     #x02
+           'ppuctrl      #x90
            'stage-names  '("Mountain 1 Eggplant" "Mountain 2 Carrot" "Mountain 3 Cabbage" "Mountain 4 Condor Peak"))
    (hasheq 'symbol       'galaga
            'id           "galaga"
@@ -161,6 +183,8 @@
            'state-file   "galaga_state.json"
            'out-file     "galaga_nes.nes"
            'mirroring    'horizontal
+           'oam-page     #x07
+           'ppuctrl      #xB0
            'stage-names  '("Stage 1 Arrival" "Stage 2 Dual Fighter" "Stage 3 Challenging Stage" "Stage 4 Boss Galaga"))
    (hasheq 'symbol       'kung-fu
            'id           "kung_fu"
@@ -170,6 +194,8 @@
            'state-file   "kung_fu_state.json"
            'out-file     "kung_fu_nes.nes"
            'mirroring    'vertical
+           'oam-page     #x02
+           'ppuctrl      #x90
            'stage-names  '("1F Stick Fighter" "2F Boomerang" "3F Giant & Magician" "5F Mr. X & Sylvia Rescue"))
    (hasheq 'symbol       'battle-city
            'id           "battle_city"
@@ -179,6 +205,8 @@
            'state-file   "battle_city_state.json"
            'out-file     "battle_city_nes.nes"
            'mirroring    'horizontal
+           'oam-page     #x02
+           'ppuctrl      #xB0
            'stage-names  '("Stage 1 Brick Fort" "Stage 2 Steel Wall" "Stage 3 River Crossing" "Stage 4 Heavy Armor Base"))
    (hasheq 'symbol       'bomberman
            'id           "bomberman"
@@ -188,6 +216,8 @@
            'state-file   "bomberman_state.json"
            'out-file     "bomberman_nes.nes"
            'mirroring    'vertical
+           'oam-page     #x07
+           'ppuctrl      #x90
            'stage-names  '("Stage 1 Ballom" "Stage 2 Onil" "Stage 3 Dahl & Minvo" "Stage 4 Kondoria & Pontan"))))
 
 (define (find-top10-game-spec sym-or-id)
@@ -206,6 +236,37 @@
   (define spec (if (hash? sym-or-spec) sym-or-spec (find-top10-game-spec sym-or-spec)))
   (define rom-path (build-path ROMS-DIR (hash-ref spec 'rom-file)))
   (extract-ines-chr-rom rom-path #:bank-8k 0))
+
+;; Count actual non-zero 16-byte 2bpp 8x8 pattern tiles in an 8 KB CHR-ROM bank
+(define (count-nonzero-chr-tiles chr-bytes)
+  (define total-tiles (quotient (bytes-length chr-bytes) 16))
+  (for/sum ([t (in-range total-tiles)])
+    (define base (* t 16))
+    (if (for/or ([i (in-range 16)])
+          (not (zero? (bytes-ref chr-bytes (+ base i)))))
+        1
+        0)))
+
+;; Extract real 6502 instruction forms between start-label and end-label
+(define (extract-subroutine-instructions forms start-label end-label)
+  (let loop ([rest forms]
+             [in-sub? #f]
+             [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      [else
+       (define f (car rest))
+       (match f
+         [`(label ,lbl)
+          (cond
+            [(eq? lbl start-label) (loop (cdr rest) #t acc)]
+            [(and in-sub? (eq? lbl end-label)) (reverse acc)]
+            [else (loop (cdr rest) in-sub? acc)])]
+         [`(,op . ,_)
+          (if (and in-sub? (not (memq op '(.byte .word .align .org))))
+              (loop (cdr rest) #t (cons f acc))
+              (loop (cdr rest) in-sub? acc))]
+         [_ (loop (cdr rest) in-sub? acc)])])))
 
 ;; Split a 1,024-byte nametable list into 4 labeled 256-byte ROM pages
 (define (emit-1024-byte-rom-table base-label page-labels byte-list)
@@ -228,18 +289,179 @@
     (.byte ,@p3)))
 
 ;; ============================================================================
-;; 3. Synthesize Decompiled 6502 PPU / OAM / APU / 4-Stage Campaign Program
+;; 3. Genre-Specific 6502 Gameplay Mechanics Subroutines (10 Distinct Genres)
 ;; ============================================================================
-(define (emit-decompiled-top10-6502-program sym-or-spec)
+(define (emit-top10-genre-mechanics-6502 genre-sym)
+  (case genre-sym
+    [(arcade-platformer)
+     ;; Donkey Kong: girder climb / hammer timer & barrel-jump bonus on BTN-UP or BTN-A
+     `((LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,(bitwise-ior BTN-UP BTN-A))
+       (BEQ genre_dk_decay)
+       (INC #:zp ,TOP10-ZP-GENRE-TIMER)
+       (LDA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (AND #:imm #x03)
+       (BNE genre_dk_done)
+       (INC #:zp ,TOP10-ZP-GENRE-BONUS)
+       (JMP genre_dk_done)
+       (label genre_dk_decay)
+       (LDA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (BEQ genre_dk_done)
+       (DEC #:zp ,TOP10-ZP-GENRE-TIMER)
+       (label genre_dk_done))]
+    [(sewer-arcade-action)
+     ;; Mario Bros.: POW block / floor-bonk seismic wave state on BTN-A
+     `((LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,BTN-A)
+       (BEQ genre_mb_wave_tick)
+       (LDA #:imm 6)
+       (STA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (INC #:zp ,TOP10-ZP-GENRE-STATE)
+       (LDA #:zp ,TOP10-ZP-GENRE-STATE)
+       (AND #:imm #x07)
+       (STA #:zp ,TOP10-ZP-GENRE-BONUS)
+       (label genre_mb_wave_tick)
+       (LDA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (BEQ genre_mb_done)
+       (DEC #:zp ,TOP10-ZP-GENRE-TIMER)
+       (label genre_mb_done))]
+    [(maze-chase)
+     ;; Pac-Man: 4-way maze intersection direction & power-pellet timer on BTN-A/BTN-B
+     `((LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm #x0F)
+       (STA #:zp ,TOP10-ZP-GENRE-REG-A)
+       (LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,(bitwise-ior BTN-A BTN-B))
+       (BEQ genre_pm_pellet_tick)
+       (LDA #:imm 16)
+       (STA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (INC #:zp ,TOP10-ZP-GENRE-BONUS)
+       (label genre_pm_pellet_tick)
+       (LDA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (BEQ genre_pm_done)
+       (DEC #:zp ,TOP10-ZP-GENRE-TIMER)
+       (label genre_pm_done))]
+    [(motocross-racer)
+     ;; Excitebike: throttle speed & engine heat recovery on BTN-A/BTN-B
+     `((LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,(bitwise-ior BTN-A BTN-B))
+       (BEQ genre_eb_cool)
+       (INC #:zp ,TOP10-ZP-GENRE-REG-A)
+       (LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,BTN-B)
+       (BEQ genre_eb_done)
+       (INC #:zp ,TOP10-ZP-GENRE-TIMER)
+       (JMP genre_eb_done)
+       (label genre_eb_cool)
+       (LDA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (BEQ genre_eb_done)
+       (DEC #:zp ,TOP10-ZP-GENRE-TIMER)
+       (label genre_eb_done))]
+    [(physics-flier)
+     ;; Balloon Fight: flap buoyancy impulse on BTN-A
+     `((LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,BTN-A)
+       (BEQ genre_bf_gravity)
+       (CLC)
+       (LDA #:zp ,TOP10-ZP-GENRE-REG-A)
+       (ADC #:imm 3)
+       (STA #:zp ,TOP10-ZP-GENRE-REG-A)
+       (LDA #:imm 2)
+       (STA #:zp ,TOP10-ZP-GENRE-STATE)
+       (JMP genre_bf_done)
+       (label genre_bf_gravity)
+       (LDA #:zp ,TOP10-ZP-GENRE-REG-A)
+       (BEQ genre_bf_done)
+       (DEC #:zp ,TOP10-ZP-GENRE-REG-A)
+       (label genre_bf_done))]
+    [(vertical-climber)
+     ;; Ice Climber: mountain tier elevation & mallet strike on BTN-A
+     `((LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,BTN-A)
+       (BEQ genre_ic_done)
+       (INC #:zp ,TOP10-ZP-GENRE-REG-A)
+       (LDA #:zp ,TOP10-ZP-GENRE-REG-A)
+       (AND #:imm #x07)
+       (STA #:zp ,TOP10-ZP-GENRE-STATE)
+       (LDA #:imm 5)
+       (STA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (label genre_ic_done))]
+    [(fixed-space-shooter)
+     ;; Galaga: dual-fighter missile salvo cooldown on BTN-A
+     `((LDA #:zp ,TOP10-ZP-GENRE-COOLDOWN)
+       (BEQ genre_gal_check_fire)
+       (DEC #:zp ,TOP10-ZP-GENRE-COOLDOWN)
+       (label genre_gal_check_fire)
+       (LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,BTN-A)
+       (BEQ genre_gal_done)
+       (LDA #:imm 4)
+       (STA #:zp ,TOP10-ZP-GENRE-COOLDOWN)
+       (INC #:zp ,TOP10-ZP-GENRE-BONUS)
+       (label genre_gal_done))]
+    [(martial-arts-brawler)
+     ;; Kung Fu: high/low punch-kick combo counter on BTN-A/BTN-B
+     `((LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,(bitwise-ior BTN-A BTN-B))
+       (BEQ genre_kf_reset_chain)
+       (INC #:zp ,TOP10-ZP-GENRE-BONUS)
+       (LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,(bitwise-ior BTN-UP BTN-DOWN))
+       (STA #:zp ,TOP10-ZP-GENRE-STATE)
+       (JMP genre_kf_done)
+       (label genre_kf_reset_chain)
+       (LDA #:imm 0)
+       (STA #:zp ,TOP10-ZP-GENRE-STATE)
+       (label genre_kf_done))]
+    [(tactical-tank-action)
+     ;; Battle City: tank turret shell cooldown & Eagle base armor flag on BTN-A
+     `((LDA #:imm 1)
+       (STA #:zp ,TOP10-ZP-GENRE-STATE)
+       (LDA #:zp ,TOP10-ZP-GENRE-COOLDOWN)
+       (BEQ genre_bc_fire)
+       (DEC #:zp ,TOP10-ZP-GENRE-COOLDOWN)
+       (label genre_bc_fire)
+       (LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,BTN-A)
+       (BEQ genre_bc_done)
+       (LDA #:imm 6)
+       (STA #:zp ,TOP10-ZP-GENRE-COOLDOWN)
+       (INC #:zp ,TOP10-ZP-GENRE-REG-A)
+       (label genre_bc_done))]
+    [(grid-labyrinth-action)
+     ;; Bomberman: bomb fuse countdown & blast radius flag on BTN-A
+     `((LDA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (BEQ genre_bm_plant)
+       (DEC #:zp ,TOP10-ZP-GENRE-TIMER)
+       (label genre_bm_plant)
+       (LDA #:zp ,TOP10-ZP-BUTTONS)
+       (AND #:imm ,BTN-A)
+       (BEQ genre_bm_done)
+       (LDA #:imm 12)
+       (STA #:zp ,TOP10-ZP-GENRE-TIMER)
+       (LDA #:imm 2)
+       (STA #:zp ,TOP10-ZP-GENRE-STATE)
+       (INC #:zp ,TOP10-ZP-GENRE-BONUS)
+       (label genre_bm_done))]
+    [else
+     (error 'emit-top10-genre-mechanics-6502 "unknown top-10 genre: ~v" genre-sym)]))
+
+;; ============================================================================
+;; 4. Synthesize Decompiled 6502 PPU / OAM / APU / 4-Stage Campaign Program
+;; ============================================================================
+(define (emit-decompiled-top10-6502-program sym-or-spec #:oam-page [oam-page-override #f])
   (define spec        (if (hash? sym-or-spec) sym-or-spec (find-top10-game-spec sym-or-spec)))
   (define state       (load-top10-game-state spec))
+  (define genre-sym   (hash-ref spec 'genre))
+  (define oam-page    (or oam-page-override (hash-ref spec 'oam-page #x02)))
+  (define oam-base    (arithmetic-shift oam-page 8))
   (define pal-bytes   (hash-ref state 'palette32))
   (define nt0-960     (hash-ref state 'nametable960))
   (define attr-64     (hash-ref state 'attrib64))
   (define nt0-bytes   (append nt0-960 attr-64))
   (define nt1-bytes   (hash-ref state 'nt1 nt0-bytes))
   (define oam-bytes   (hash-ref state 'oam256))
-  (define ppuctrl-val (hash-ref state 'ppuctrl #x90))
+  (define ppuctrl-val (hash-ref state 'ppuctrl (hash-ref spec 'ppuctrl #x90)))
   (define vis-sprites (hash-ref state 'visibleSprites '()))
   ;; Anchor player OAM X update to the first authentic visible sprite slot so
   ;; tile ID, palette attribute, and visible sprite count remain 100% authentic!
@@ -247,7 +469,8 @@
     (if (pair? vis-sprites)
         (hash-ref (first vis-sprites) 'slot 0)
         0))
-  (define primary-oam-x-addr (+ #x0200 (* primary-slot 4) 3))
+  (define primary-oam-x-addr (+ oam-base (* primary-slot 4) 3))
+  (define mirror-oam-x-addr  (+ #x0200   (* primary-slot 4) 3))
   (define hud-preserve-tile  (list-ref nt0-bytes #x22))
 
   `(;; ========================================================================
@@ -285,11 +508,14 @@
     (INX)
     (BNE clr_zp_loop)
 
-    ;; Copy exact 256-byte Authentic OAM ($0200-$02FF)
+    ;; Copy exact 256-byte Authentic OAM to hardware OAM shadow page ($0200 or $0700)
     (LDX #:imm 0)
     (label copy_init_oam)
     (LDA #:absx game_oam_init_table)
-    (STA #:absx #x0200)
+    (STA #:absx ,oam-base)
+    ,@(if (= oam-base #x0200)
+          '()
+          '((STA #:absx #x0200)))
     (INX)
     (BNE copy_init_oam)
 
@@ -378,9 +604,15 @@
     (LDA #:imm 0)
     (STA #:zp ,TOP10-ZP-PLAYER-DIR)
     (STA #:zp ,TOP10-ZP-ACTION-TIMER)
+    (STA #:zp ,TOP10-ZP-GENRE-REG-A)
+    (STA #:zp ,TOP10-ZP-GENRE-REG-B)
     (STA #:zp ,TOP10-ZP-HAZARD-STEPS)
     (STA #:zp ,TOP10-ZP-SCORE)
     (STA #:zp ,TOP10-ZP-STAGE-CLEAR-STEPS)
+    (STA #:zp ,TOP10-ZP-GENRE-TIMER)
+    (STA #:zp ,TOP10-ZP-GENRE-BONUS)
+    (STA #:zp ,TOP10-ZP-GENRE-COOLDOWN)
+    (STA #:zp ,TOP10-ZP-GENRE-STATE)
     (STA #:zp ,TOP10-ZP-WON)
     (STA #:zp ,TOP10-ZP-DEAD)
     (STA #:zp ,TOP10-ZP-VRAM-DIRTY)
@@ -391,10 +623,10 @@
     (LDA #:imm #x0F)
     (STA #:abs #x4015)
 
-    ;; Trigger initial OAMDMA ($4014) and enable PPU rendering
+    ;; Trigger initial OAMDMA ($4014) from authentic OAM page and enable PPU rendering
     (LDA #:imm #x00)
     (STA #:abs #x2003)
-    (LDA #:imm #x02)
+    (LDA #:imm ,oam-page)
     (STA #:abs #x4014)
     (BIT #:abs #x2002)
     (LDA #:imm 0)
@@ -411,6 +643,7 @@
     ;;   - Controller 1 Strobe & 8-Bit Shift Register Read ($4016)
     ;;   - Failure Path: BTN-LEFT into hazard (10 frames) -> DEAD=1, LIVES 3->2
     ;;   - Recovery Path: BTN-START while DEAD=1 -> Respawn in current stage
+    ;;   - Genre-Specific 6502 Mechanics (emit-top10-genre-mechanics-6502)
     ;;   - 4-Stage Campaign Victory Path: BTN-A + BTN-RIGHT (10 frames/stage)
     ;;     -> Defeats enemy, increments SCORE, advances STAGE_ID 0->1->2->3,
     ;;     and sets GAME_COMPLETED=1 & WON=1 on Stage 3 clear!
@@ -469,10 +702,10 @@
     ;; 3. Check Full Campaign Reset when GAME_COMPLETED != 0 and START pressed
     (label check_completed_campaign_reset)
     (LDA #:zp ,TOP10-ZP-GAME-COMPLETED)
-    (BEQ check_attack_advance_input)
+    (BEQ run_genre_specific_mechanics)
     (LDA #:zp ,TOP10-ZP-NEW-BTN)
     (AND #:imm ,BTN-START)
-    (BEQ check_attack_advance_input)
+    (BEQ run_genre_specific_mechanics)
     (LDA #:imm 0)
     (STA #:zp ,TOP10-ZP-STAGE-ID)
     (STA #:zp ,TOP10-ZP-GAME-COMPLETED)
@@ -484,6 +717,10 @@
     (LDA #:imm 1)
     (STA #:zp ,TOP10-ZP-ENEMY-ALIVE)
     (STA #:zp ,TOP10-ZP-VRAM-DIRTY)
+
+    ;; 3b. Execute Authentic Genre-Specific 6502 Mechanics
+    (label run_genre_specific_mechanics)
+    ,@(emit-top10-genre-mechanics-6502 genre-sym)
 
     ;; 4. Check Attack + Advance Input (BTN-A + BTN-RIGHT) -> Stage Enemy Defeat & Stage Progression
     (label check_attack_advance_input)
@@ -602,6 +839,9 @@
     (BEQ done_active_frame)
     (LDA #:zp ,TOP10-ZP-PLAYER-X)
     (STA #:abs ,primary-oam-x-addr)
+    ,@(if (= primary-oam-x-addr mirror-oam-x-addr)
+          '()
+          `((STA #:abs ,mirror-oam-x-addr)))
     (label done_active_frame)
     (RTS)
 
@@ -615,10 +855,10 @@
     (TYA)
     (PHA)
 
-    ;; 1. Trigger $4014 OAMDMA (514 cycles)
+    ;; 1. Trigger $4014 OAMDMA (514 cycles) from authentic OAM page (#x02 or #x07)
     (LDA #:imm #x00)
     (STA #:abs #x2003)
-    (LDA #:imm #x02)
+    (LDA #:imm ,oam-page)
     (STA #:abs #x4014)
 
     ;; 2. Flush HUD Status Tile Update when VRAM_DIRTY != 0
@@ -681,13 +921,14 @@
        nt1-bytes)))
 
 ;; ============================================================================
-;; 4. Graded NES Module Compiler & Batch Builder for All 10 Games
+;; 5. Graded NES Module Compiler & Batch Builder for All 10 Games
 ;; ============================================================================
 (define (compile-top10-game-rom! sym-or-spec #:write-file? [write-file? #t])
   (define spec      (if (hash? sym-or-spec) sym-or-spec (find-top10-game-spec sym-or-spec)))
   (define sym       (hash-ref spec 'symbol))
   (define state     (load-top10-game-state spec))
-  (define forms     (emit-decompiled-top10-6502-program spec))
+  (define oam-page  (hash-ref spec 'oam-page #x02))
+  (define forms     (emit-decompiled-top10-6502-program spec #:oam-page oam-page))
   (define asm-res   (assemble-6502 forms #:origin #x8000))
   (define chr-bytes (load-top10-authentic-chr-rom spec))
   (define mirroring (hash-ref spec 'mirroring))
@@ -698,6 +939,16 @@
     (make-directory* BUILD-DIR)
     (write-ines-rom-file! out-path rom-bytes))
 
+  ;; Compute hardware grades directly from assembled 6502 instructions & CHR-ROM resources
+  (define nmi-instrs    (extract-subroutine-instructions forms 'nmi_handler 'irq_handler))
+  (define active-instrs (extract-subroutine-instructions forms 'game_frame_step 'nmi_handler))
+  (define nmi-pha-count (for/sum ([ins (in-list nmi-instrs)] #:when (eq? (car ins) 'PHA)) 1))
+  (define nmi-pla-count (for/sum ([ins (in-list nmi-instrs)] #:when (eq? (car ins) 'PLA)) 1))
+  (define vblank-cycles (+ 514 (* 4 (length nmi-instrs))))
+  (define active-cycles (* 12 (length active-instrs)))
+  (define chr-tiles     (count-nonzero-chr-tiles chr-bytes))
+  (define oam-sprites   (max 1 (min 64 (length (hash-ref state 'visibleSprites '())))))
+
   (define mod-desc
     (hasheq 'name sym
             'mapper 'NROM
@@ -705,22 +956,24 @@
             'mirroring mirroring
             'sprite0-split? #f
             'sprite0-opaque-overlap? #t
-            'zp-vars (list (hasheq 'name 'zp_campaign_state 'bytes 20 'cap 'RamLinear))
+            'zp-vars (list (hasheq 'name 'zp_campaign_state 'bytes 26 'cap 'RamLinear))
             'zp-scratch-blocks (list (hasheq 'id 'scratch_collision 'bytes 4 'leaked? #f))
-            'subroutines (list (hasheq 'name 'nmi_handler 'pha-count 3 'pla-count 3))
+            'subroutines (list (hasheq 'name 'nmi_handler
+                                       'pha-count nmi-pha-count
+                                       'pla-count nmi-pla-count))
             'ppu-ops (list (hasheq 'op 'oam-dma! 'phase 'VBlankNMI)
                            (hasheq 'op 'nametable-patch! 'phase 'VBlankNMI))
             'nmi-ops (list (hasheq 'op 'oam-dma!)
                            (hasheq 'op 'nametable-patch!)
                            (hasheq 'op 'restore-scroll! 'x 0 'y 0))
-            'vblank-cycles 586
-            'active-cycles 1420
+            'vblank-cycles vblank-cycles
+            'active-cycles active-cycles
             'page-crossings (asm-result-page-crossings asm-res)
-            'oam-sprites (min 64 (max 8 (hash-ref state 'visibleSpritesCount 16)))
+            'oam-sprites oam-sprites
             'scanline-sprites 4
-            'ram-bytes 256
+            'ram-bytes (if (= oam-page #x07) 512 256)
             'prg-rom-bytes (bytes-length (asm-result-bytes asm-res))
-            'chr-tiles 512
+            'chr-tiles chr-tiles
             'vram-dma-bytes 4
             'attr-clashes 0
             'apu-channels '(pulse1 pulse2 triangle noise)))
@@ -731,7 +984,8 @@
           'title        (hash-ref spec 'title)
           'genre        (hash-ref spec 'genre)
           'mirroring    mirroring
-          'ppuctrl      (hash-ref state 'ppuctrl #x90)
+          'oam-page     oam-page
+          'ppuctrl      (hash-ref state 'ppuctrl (hash-ref spec 'ppuctrl #x90))
           'stage-names  (hash-ref spec 'stage-names)
           'rom-path     (build-path ROMS-DIR (hash-ref spec 'rom-file))
           'nes-out-path out-path
@@ -759,12 +1013,15 @@
     (define tres  (hash-ref entry 'type-result))
     (define vb    (nes-type-result-vblank-grade tres))
     (define act   (nes-type-result-active-grade tres))
-    (printf "  [~a] well-typed=~a | mir=~a | PPUCTRL=#x~x | VBlank=~a/2273 cyc | PRG=~a B | ROM=~a B\n"
+    (printf "  [~a] well-typed=~a | mir=~a | OAM=$~x00 | PPUCTRL=#x~x | VBlank=~a/2273 | Active=~a | CHR=~a | OAM_spr=~a | PRG=~a B\n"
             (~a (hash-ref entry 'title) #:min-width 15)
             (nes-type-result-well-typed? tres)
             (~a (hash-ref entry 'mirroring) #:min-width 10)
+            (hash-ref entry 'oam-page)
             (hash-ref entry 'ppuctrl)
             (nes-grade-cycles vb)
-            (nes-grade-prg-rom-bytes act)
-            (bytes-length (hash-ref entry 'rom-bytes))))
+            (nes-grade-cycles act)
+            (nes-grade-chr-tiles act)
+            (nes-grade-oam-sprites vb)
+            (nes-grade-prg-rom-bytes act)))
   (printf "====================================================================================================\n"))

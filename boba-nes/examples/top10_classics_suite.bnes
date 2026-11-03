@@ -40,10 +40,16 @@
   ([frame-cnt      #x13 monotonic-frame-counter]
    [player-x       #x14 player-or-actor-coord]
    [player-y       #x15 player-or-actor-coord]
+   [genre-reg-a    #x18 player-or-actor-coord]
+   [genre-reg-b    #x19 player-or-actor-coord]
    [enemy-x        #x1A player-or-actor-coord]
    [enemy-y        #x1B player-or-actor-coord]
    [enemy-alive    #x1C game-phase-or-flag]
    [score          #x1E hud-bcd-counter]
+   [genre-timer    #x20 game-phase-or-flag]
+   [genre-bonus    #x21 hud-bcd-counter]
+   [genre-cooldown #x22 game-phase-or-flag]
+   [genre-state    #x23 game-phase-or-flag]
    [won            #x24 game-phase-or-flag]
    [lives          #x25 hud-bcd-counter]
    [dead           #x26 game-phase-or-flag]
@@ -80,17 +86,24 @@
          bomberman-entry)
 
 (module+ main
-  (printf "====================================================================================================\n")
+  (printf "========================================================================================================================\n")
   (printf "  #lang boba-nes : Top-10 Commercial NES Classics Suite (examples/top10_classics_suite.bnes)\n")
-  (printf "====================================================================================================\n")
+  (printf "========================================================================================================================\n")
   (for ([spec (in-list TOP10-GAME-SPECS)])
     (define sym   (hash-ref spec 'symbol))
     (define entry (hash-ref top10-decompiled-games sym))
     (define tres  (hash-ref entry 'type-result))
-    (printf "  ~a (~a) -> well-typed? ~a | ROM: ~a (~a bytes)\n"
-            (~a (hash-ref entry 'title) #:min-width 15)
+    (define vb    (nes-type-result-vblank-grade tres))
+    (define act   (nes-type-result-active-grade tres))
+    (printf "  ~a (~a) -> well-typed? ~a | OAM=$~x00 | PPUCTRL=#x~x | VBlank=~a | Active=~a | CHR=~a | OAM_spr=~a | PRG=~a B\n"
+            (~a (hash-ref entry 'title) #:min-width 14)
             (~a (hash-ref entry 'genre) #:min-width 21)
             (nes-type-result-well-typed? tres)
-            (hash-ref spec 'out-file)
-            (bytes-length (hash-ref entry 'rom-bytes))))
-  (printf "====================================================================================================\n"))
+            (hash-ref entry 'oam-page)
+            (hash-ref entry 'ppuctrl)
+            (nes-grade-cycles vb)
+            (nes-grade-cycles act)
+            (nes-grade-chr-tiles act)
+            (nes-grade-oam-sprites vb)
+            (nes-grade-prg-rom-bytes act)))
+  (printf "========================================================================================================================\n"))

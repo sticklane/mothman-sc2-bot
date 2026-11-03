@@ -42,7 +42,9 @@
  encode-char-map-string
  emit-nametable-string-6502
 
- ;; 4. Hardware-Parameterized Metasprite Constructors (Row-Major vs Col-Major)
+ ;; 4. Hardware-Parameterized Metasprite Constructors (Row-Major vs Col-Major vs Symmetric-Vertical)
+ OAM-FLIP-H
+ OAM-FLIP-V
  make-metasprite-desc
  emit-metasprite-oam-6502
 
@@ -273,87 +275,141 @@
 ;; ============================================================================
 ;; 4. Hardware-Parameterized Metasprite Constructors (Row-Major vs Col-Major)
 ;; ============================================================================
-;; Real NES games use two distinct 16x16 metasprite tile orderings in CHR-ROM:
-;;   1. 'row-major (Super Mario Bros.): [t0=TL, t1=TR, t2=BL, t3=BR]
-;;   2. 'col-major (Legend of Zelda)  : [t0=TL, t1=BL, t2=TR, t3=BR] (designed for 8x16 sprite pairs!)
+;; Real NES games use distinct metasprite tile orderings in CHR-ROM:
+;;   1. 'row-major (Super Mario Bros.): [t0=TL, t1=TR, t2=BL, t3=BR] (16x16, 4 sprites)
+;;   2. 'col-major (Legend of Zelda)  : [t0=TL, t1=BL, t2=TR, t3=BR] (16x16, 4 sprites)
 ;;   3. 'symmetric-col-major (Zelda Octorok / Link Down):
 ;;      Uses only 2 CHR tiles [t0=TL, t1=BL] and sets OAM Horizontal Flip (#x40) on TR and BR!
+;;   4. 'symmetric-vertical:
+;;      8x16 vertical 2-sprite metasprite where tile 0 is drawn at (X, Y) with `attr`
+;;      and tile 1 is drawn at (X, Y+8) with `(bitwise-ior attr OAM-FLIP-V)` (#x80 vertical flip),
+;;      or 2 explicit tiles `(list top-tile bottom-tile)`.
 
-(define (make-metasprite-desc name tiles
+(define OAM-FLIP-H #x40)
+(define OAM-FLIP-V #x80)
+
+(define (make-metasprite-desc name tiles [pos-attr #f]
                               #:order [order 'row-major]
-                              #:attr [attr 0]
+                              #:attr [kw-attr #f]
                               #:tr-attr [tr-attr #f]
-                              #:br-attr [br-attr #f])
-  (match-define (list tl tr bl br)
-    (case order
-      [(row-major)
-       (unless (= (length tiles) 4)
-         (error 'make-metasprite-desc "row-major requires 4 tiles (TL TR BL BR), got ~v" tiles))
-       tiles]
-      [(col-major)
-       (unless (= (length tiles) 4)
-         (error 'make-metasprite-desc "col-major requires 4 tiles (TL BL TR BR), got ~v" tiles))
-       (list (first tiles) (third tiles) (second tiles) (fourth tiles))]
-      [(symmetric-col-major)
-       (unless (>= (length tiles) 2)
-         (error 'make-metasprite-desc "symmetric-col-major requires 2 left-half tiles (TL BL), got ~v" tiles))
-       (list (first tiles) (first tiles) (second tiles) (second tiles))]
-      [else
-       (error 'make-metasprite-desc "unknown metasprite order ~v" order)]))
-  (define right-flip-attr (bitwise-ior attr #x40))
-  (hasheq 'name    name
-          'order   order
-          'tl      tl
-          'tr      tr
-          'bl      bl
-          'br      br
-          'attr    attr
-          'tr-attr (or tr-attr (if (eq? order 'symmetric-col-major) right-flip-attr attr))
-          'br-attr (or br-attr (if (eq? order 'symmetric-col-major) right-flip-attr attr))
-          'oam-sprites 4
-          'scanline-sprites 2))
+                              #:br-attr [br-attr #f]
+                              #:bl-attr [bl-attr #f])
+  (define attr (or pos-attr kw-attr 0))
+  (define tile-list (if (list? tiles) tiles (list tiles)))
+  (cond
+    [(eq? order 'symmetric-vertical)
+     (when (null? tile-list)
+       (error 'make-metasprite-desc "symmetric-vertical requires 1 or 2 tiles, got ~v" tiles))
+     (define top-tile (first tile-list))
+     (define bot-tile (if (>= (length tile-list) 2) (second tile-list) top-tile))
+     (define vflip-attr (or bl-attr (bitwise-ior attr OAM-FLIP-V)))
+     (hasheq 'name       name
+             'order      order
+             'tl         top-tile
+             'bl         bot-tile
+             'top        top-tile
+             'bottom     bot-tile
+             'attr       attr
+             'bl-attr    vflip-attr
+             'bottom-attr vflip-attr
+             'oam-sprites 2
+             'scanline-sprites 1)]
+    [else
+     (match-define (list tl tr bl br)
+       (case order
+         [(row-major)
+          (unless (= (length tile-list) 4)
+            (error 'make-metasprite-desc "row-major requires 4 tiles (TL TR BL BR), got ~v" tiles))
+          tile-list]
+         [(col-major)
+          (unless (= (length tile-list) 4)
+            (error 'make-metasprite-desc "col-major requires 4 tiles (TL BL TR BR), got ~v" tiles))
+          (list (first tile-list) (third tile-list) (second tile-list) (fourth tile-list))]
+         [(symmetric-col-major)
+          (unless (>= (length tile-list) 2)
+            (error 'make-metasprite-desc "symmetric-col-major requires 2 left-half tiles (TL BL), got ~v" tiles))
+          (list (first tile-list) (first tile-list) (second tile-list) (second tile-list))]
+         [else
+          (error 'make-metasprite-desc "unknown metasprite order ~v" order)]))
+     (define right-flip-attr (bitwise-ior attr OAM-FLIP-H))
+     (hasheq 'name    name
+             'order   order
+             'tl      tl
+             'tr      tr
+             'bl      bl
+             'br      br
+             'attr    attr
+             'bl-attr (or bl-attr attr)
+             'tr-attr (or tr-attr (if (eq? order 'symmetric-col-major) right-flip-attr attr))
+             'br-attr (or br-attr (if (eq? order 'symmetric-col-major) right-flip-attr attr))
+             'oam-sprites 4
+             'scanline-sprites 2)]))
 
 (define (emit-metasprite-oam-6502 ms-desc zp-x zp-y oam-base)
-  (define tl      (hash-ref ms-desc 'tl))
-  (define tr      (hash-ref ms-desc 'tr))
-  (define bl      (hash-ref ms-desc 'bl))
-  (define br      (hash-ref ms-desc 'br))
-  (define attr    (hash-ref ms-desc 'attr 0))
-  (define tr-attr (hash-ref ms-desc 'tr-attr attr))
-  (define br-attr (hash-ref ms-desc 'br-attr attr))
-  (append
-   `((LDA #:zp ,zp-y)
-     (STA #:abs ,(+ #x0200 oam-base 0))
-     (STA #:abs ,(+ #x0200 oam-base 4))
-     (CLC)
-     (ADC #:imm 8)
-     (STA #:abs ,(+ #x0200 oam-base 8))
-     (STA #:abs ,(+ #x0200 oam-base 12))
-     (LDA #:imm ,tl)
-     (STA #:abs ,(+ #x0200 oam-base 1))
-     (LDA #:imm ,tr)
-     (STA #:abs ,(+ #x0200 oam-base 5))
-     (LDA #:imm ,bl)
-     (STA #:abs ,(+ #x0200 oam-base 9))
-     (LDA #:imm ,br)
-     (STA #:abs ,(+ #x0200 oam-base 13))
-     (LDA #:imm ,attr)
-     (STA #:abs ,(+ #x0200 oam-base 2))
-     (STA #:abs ,(+ #x0200 oam-base 10)))
-   (if (and (= tr-attr attr) (= br-attr attr))
-       `((STA #:abs ,(+ #x0200 oam-base 6))
-         (STA #:abs ,(+ #x0200 oam-base 14)))
-       `((LDA #:imm ,tr-attr)
-         (STA #:abs ,(+ #x0200 oam-base 6))
-         (LDA #:imm ,br-attr)
-         (STA #:abs ,(+ #x0200 oam-base 14))))
-   `((LDA #:zp ,zp-x)
-     (STA #:abs ,(+ #x0200 oam-base 3))
-     (STA #:abs ,(+ #x0200 oam-base 11))
-     (CLC)
-     (ADC #:imm 8)
-     (STA #:abs ,(+ #x0200 oam-base 7))
-     (STA #:abs ,(+ #x0200 oam-base 15)))))
+  (define order (hash-ref ms-desc 'order 'row-major))
+  (cond
+    [(eq? order 'symmetric-vertical)
+     (define top-tile (hash-ref ms-desc 'tl))
+     (define bot-tile (hash-ref ms-desc 'bl top-tile))
+     (define attr     (hash-ref ms-desc 'attr 0))
+     (define bot-attr (hash-ref ms-desc 'bl-attr (bitwise-ior attr OAM-FLIP-V)))
+     `((LDA #:zp ,zp-y)
+       (STA #:abs ,(+ #x0200 oam-base 0))
+       (CLC)
+       (ADC #:imm 8)
+       (STA #:abs ,(+ #x0200 oam-base 4))
+       (LDA #:imm ,top-tile)
+       (STA #:abs ,(+ #x0200 oam-base 1))
+       (LDA #:imm ,bot-tile)
+       (STA #:abs ,(+ #x0200 oam-base 5))
+       (LDA #:imm ,attr)
+       (STA #:abs ,(+ #x0200 oam-base 2))
+       (LDA #:imm ,bot-attr)
+       (STA #:abs ,(+ #x0200 oam-base 6))
+       (LDA #:zp ,zp-x)
+       (STA #:abs ,(+ #x0200 oam-base 3))
+       (STA #:abs ,(+ #x0200 oam-base 7)))]
+    [else
+     (define tl      (hash-ref ms-desc 'tl))
+     (define tr      (hash-ref ms-desc 'tr))
+     (define bl      (hash-ref ms-desc 'bl))
+     (define br      (hash-ref ms-desc 'br))
+     (define attr    (hash-ref ms-desc 'attr 0))
+     (define tr-attr (hash-ref ms-desc 'tr-attr attr))
+     (define br-attr (hash-ref ms-desc 'br-attr attr))
+     (append
+      `((LDA #:zp ,zp-y)
+        (STA #:abs ,(+ #x0200 oam-base 0))
+        (STA #:abs ,(+ #x0200 oam-base 4))
+        (CLC)
+        (ADC #:imm 8)
+        (STA #:abs ,(+ #x0200 oam-base 8))
+        (STA #:abs ,(+ #x0200 oam-base 12))
+        (LDA #:imm ,tl)
+        (STA #:abs ,(+ #x0200 oam-base 1))
+        (LDA #:imm ,tr)
+        (STA #:abs ,(+ #x0200 oam-base 5))
+        (LDA #:imm ,bl)
+        (STA #:abs ,(+ #x0200 oam-base 9))
+        (LDA #:imm ,br)
+        (STA #:abs ,(+ #x0200 oam-base 13))
+        (LDA #:imm ,attr)
+        (STA #:abs ,(+ #x0200 oam-base 2))
+        (STA #:abs ,(+ #x0200 oam-base 10)))
+      (if (and (= tr-attr attr) (= br-attr attr))
+          `((STA #:abs ,(+ #x0200 oam-base 6))
+            (STA #:abs ,(+ #x0200 oam-base 14)))
+          `((LDA #:imm ,tr-attr)
+            (STA #:abs ,(+ #x0200 oam-base 6))
+            (LDA #:imm ,br-attr)
+            (STA #:abs ,(+ #x0200 oam-base 14))))
+      `((LDA #:zp ,zp-x)
+        (STA #:abs ,(+ #x0200 oam-base 3))
+        (STA #:abs ,(+ #x0200 oam-base 11))
+        (CLC)
+        (ADC #:imm 8)
+        (STA #:abs ,(+ #x0200 oam-base 7))
+        (STA #:abs ,(+ #x0200 oam-base 15))))]))
 
 ;; ============================================================================
 ;; 5. Compiler Optimization Pass: 2bpp CHR Tile Deduplication & Flip-Folding

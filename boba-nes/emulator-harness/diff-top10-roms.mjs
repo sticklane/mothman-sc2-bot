@@ -60,10 +60,10 @@ function bootDecompiledEmulator(romRelPath) {
   return { nes, currentFrame, stepFrames, setButtonsMask };
 }
 
-function extractVisibleOAM(nes) {
+function extractVisibleOAM(nes, oamPage = 0x0200) {
   const sprites = [];
   for (let s = 0; s < 64; s++) {
-    const base = 0x0200 + s * 4;
+    const base = oamPage + s * 4;
     const y = nes.cpu.mem[base] & 0xFF;
     const tile = nes.cpu.mem[base + 1] & 0xFF;
     const attr = nes.cpu.mem[base + 2] & 0xFF;
@@ -75,7 +75,7 @@ function extractVisibleOAM(nes) {
   return sprites;
 }
 
-function compareMemoryState(authNes, decompNes, checkpointIndex, label, gameplayState = {}) {
+function compareMemoryState(authNes, decompNes, checkpointIndex, label, gameplayState = {}, oamPage = 0x0200) {
   const authVram = authNes.ppu.vramMem;
   const decompVram = decompNes.ppu.vramMem;
 
@@ -115,9 +115,9 @@ function compareMemoryState(authNes, decompNes, checkpointIndex, label, gameplay
   }
   const chrMatchPct = Number(((chrMatchBytes / 8192) * 100).toFixed(2));
 
-  // 5. OAM Active Sprite Tiles & Palettes ($0200-$02FF)
-  const authSprites = extractVisibleOAM(authNes);
-  const decompSprites = extractVisibleOAM(decompNes);
+  // 5. OAM Active Sprite Tiles & Palettes ($0200-$02FF or $0700-$07FF)
+  const authSprites = extractVisibleOAM(authNes, oamPage);
+  const decompSprites = extractVisibleOAM(decompNes, oamPage);
   const authTileSet = new Set(authSprites.map(s => s.tile));
   const decompTileSet = new Set(decompSprites.map(s => s.tile));
   const authPalSet = new Set(authSprites.map(s => s.palette));
@@ -251,6 +251,7 @@ function saveSideBySidePNG(leftFrame, rightFrame, filename) {
 function diffTop10Game(gameSpec) {
   const auth = bootToGameplay(gameSpec);
   const decomp = bootDecompiledEmulator(`../build/${gameSpec.id}_nes.nes`);
+  const oamPage = gameSpec.oamPage || 0x0200;
   decomp.stepFrames(6);
 
   const readDecompState = () => ({
@@ -259,12 +260,18 @@ function diffTop10Game(gameSpec) {
     playerY: decomp.nes.cpu.mem[0x15] & 0xFF,
     playerDir: decomp.nes.cpu.mem[0x16] & 0xFF,
     actionTimer: decomp.nes.cpu.mem[0x17] & 0xFF,
+    genreRegA: decomp.nes.cpu.mem[0x18] & 0xFF,
+    genreRegB: decomp.nes.cpu.mem[0x19] & 0xFF,
     enemyX: decomp.nes.cpu.mem[0x1A] & 0xFF,
     enemyY: decomp.nes.cpu.mem[0x1B] & 0xFF,
     enemyAlive: decomp.nes.cpu.mem[0x1C] & 0xFF,
     hazardSteps: decomp.nes.cpu.mem[0x1D] & 0xFF,
     score: decomp.nes.cpu.mem[0x1E] & 0xFF,
     stageClearSteps: decomp.nes.cpu.mem[0x1F] & 0xFF,
+    genreTimer: decomp.nes.cpu.mem[0x20] & 0xFF,
+    genreBonus: decomp.nes.cpu.mem[0x21] & 0xFF,
+    genreCooldown: decomp.nes.cpu.mem[0x22] & 0xFF,
+    genreState: decomp.nes.cpu.mem[0x23] & 0xFF,
     won: decomp.nes.cpu.mem[0x24] & 0xFF,
     lives: decomp.nes.cpu.mem[0x25] & 0xFF,
     dead: decomp.nes.cpu.mem[0x26] & 0xFF,
@@ -276,7 +283,7 @@ function diffTop10Game(gameSpec) {
     decomp.setButtonsMask(btnMask);
     for (let f = 0; f < frameCount; f++) {
       decomp.nes.frame();
-      const snap = compareMemoryState(auth.nes, decomp.nes, trajectoryArray.length, phaseLabel);
+      const snap = compareMemoryState(auth.nes, decomp.nes, trajectoryArray.length, phaseLabel, {}, oamPage);
       trajectoryArray.push({
         frame: trajectoryArray.length,
         phase: phaseLabel,
@@ -297,7 +304,8 @@ function diffTop10Game(gameSpec) {
     decomp.nes,
     0,
     `Checkpoint 0: Initial ${gameSpec.title} Active Gameplay Frame 0`,
-    readDecompState()
+    readDecompState(),
+    oamPage
   );
   saveSideBySidePNG(auth.currentFrame, decomp.currentFrame, pngName);
 
@@ -317,7 +325,8 @@ function diffTop10Game(gameSpec) {
     decomp.nes,
     1,
     `Checkpoint 1 (Failure): ${gameSpec.title} Hazard Collision Death (dead=1, lives=2)`,
-    readDecompState()
+    readDecompState(),
+    oamPage
   );
 
   stepDecompAndDiff(
@@ -337,7 +346,8 @@ function diffTop10Game(gameSpec) {
     decomp.nes,
     2,
     `Checkpoint 2 (Recovery): ${gameSpec.title} Respawned via START (dead=0, lives=2, playerX=80)`,
-    readDecompState()
+    readDecompState(),
+    oamPage
   );
 
   // --------------------------------------------------------------------------
@@ -365,7 +375,8 @@ function diffTop10Game(gameSpec) {
         decomp.nes,
         3 + s,
         `Checkpoint ${3 + s}: ${gameSpec.title} Stage ${s} Cleared`,
-        readDecompState()
+        readDecompState(),
+        oamPage
       )
     );
   }

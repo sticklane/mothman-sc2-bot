@@ -35,6 +35,10 @@
   #:order 'row-major
   #:attr  #x01)
 
+;; Authentic 8x16 Spinning Coin ('symmetric-vertical pair: top #x60 attr #x02 + bottom #x60 V-flip attr #x82)
+(defmetasprite smb-coin-metasprite
+  #:tl #x60 #:tr #x60 #:bl #x60 #:br #x60 #:attr #x02)
+
 (defstate-machine smb-campaign-fsm
   #:initial world-1-1
   ([world-1-1        #:kind normal  #:transitions (world-1-2 dying)]
@@ -61,6 +65,7 @@
          smb-sprite0-coin-bottom
          mario-metasprite
          goomba-metasprite
+         smb-coin-metasprite
          smb-campaign-fsm
          smb-zp-layout
          mario-rom-bytes
@@ -71,7 +76,10 @@
 (define mario-rom-path "build/mario_nes.nes")
 
 (define-values (mario-rom-bytes mario-asm-result mario-type-result mario-module-desc)
-  (compile-mario-nes-rom! #:nes-out-path mario-rom-path))
+  (compile-mario-nes-rom! #:nes-out-path mario-rom-path
+                          #:chr-layout smb-chr-layout
+                          #:zp-map smb-zp-layout
+                          #:state-machine smb-campaign-fsm))
 
 (module+ main
   (define vb  (nes-type-result-vblank-grade mario-type-result))

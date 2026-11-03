@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-03T18:23:15.616Z",
+  "generatedAt": "2026-11-03T19:25:31.093Z",
   "games": {
     "smb": {
       "id": "smb",
@@ -23,7 +23,7 @@
       "chrMatchPct": 100,
       "oam": {
         "authenticVisible": 9,
-        "decompiledVisible": 9,
+        "decompiledVisible": 5,
         "authenticTiles": [
           255,
           252,
@@ -35,11 +35,7 @@
           255,
           58,
           55,
-          79,
-          112,
-          113,
-          114,
-          115
+          79
         ],
         "sharedTileIds": [
           255,
@@ -51,8 +47,8 @@
           3,
           0
         ],
-        "tileOverlapPct": 55.56,
-        "paletteOverlapPct": 55.56
+        "tileOverlapPct": 100,
+        "paletteOverlapPct": 100
       },
       "gameplayState": {
         "stageId": 0,
@@ -87,7 +83,7 @@
         "chrMatchPct": 100,
         "oam": {
           "authenticVisible": 9,
-          "decompiledVisible": 9,
+          "decompiledVisible": 5,
           "authenticTiles": [
             255,
             252,
@@ -99,11 +95,7 @@
             255,
             58,
             55,
-            79,
-            112,
-            113,
-            114,
-            115
+            79
           ],
           "sharedTileIds": [
             255,
@@ -115,8 +107,8 @@
             3,
             0
           ],
-          "tileOverlapPct": 55.56,
-          "paletteOverlapPct": 55.56
+          "tileOverlapPct": 100,
+          "paletteOverlapPct": 100
         },
         "gameplayState": {
           "stageId": 0,
@@ -153,7 +145,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 9,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               255,
               252,
@@ -165,11 +157,7 @@
               255,
               58,
               55,
-              79,
-              112,
-              113,
-              114,
-              115
+              79
             ],
             "sharedTileIds": [
               255,
@@ -181,8 +169,8 @@
               3,
               0
             ],
-            "tileOverlapPct": 55.56,
-            "paletteOverlapPct": 55.56
+            "tileOverlapPct": 100,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "stageId": 0,
@@ -405,7 +393,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 9,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               255,
               252,
@@ -418,11 +406,7 @@
               255,
               58,
               55,
-              79,
-              112,
-              113,
-              114,
-              115
+              79
             ],
             "sharedTileIds": [
               255,
@@ -432,8 +416,8 @@
               3,
               0
             ],
-            "tileOverlapPct": 22.22,
-            "paletteOverlapPct": 55.56
+            "tileOverlapPct": 40,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "stageId": 0,
@@ -469,7 +453,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 8,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               252,
               58,
@@ -481,18 +465,14 @@
               50,
               51,
               52,
-              53,
-              112,
-              113,
-              114,
-              115
+              53
             ],
             "sharedTileIds": [],
             "sharedPalettes": [
               0
             ],
             "tileOverlapPct": 0,
-            "paletteOverlapPct": 44.44
+            "paletteOverlapPct": 80
           },
           "gameplayState": {
             "stageId": 2,
@@ -528,7 +508,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 9,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               255,
               252,
@@ -542,11 +522,7 @@
               50,
               51,
               52,
-              53,
-              112,
-              113,
-              114,
-              115
+              53
             ],
             "sharedTileIds": [
               255
@@ -555,8 +531,8 @@
               3,
               0
             ],
-            "tileOverlapPct": 11.11,
-            "paletteOverlapPct": 55.56
+            "tileOverlapPct": 20,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "stageId": 3,
@@ -651,7 +627,7 @@
           "minAttribMatchPct": 12.5,
           "maxAttribMatchPct": 100,
           "avgChrMatchPct": 100,
-          "avgOamTileOverlapPct": 33.52,
+          "avgOamTileOverlapPct": 33.34,
           "stagesCompleted": 4,
           "finalStageId": 3,
           "gameCompleted": true,
@@ -2035,7 +2011,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 33.33,
+            "oamTileOverlapPct": 60,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -2071,7 +2047,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 33.33,
+            "oamTileOverlapPct": 60,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -2107,7 +2083,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -2143,7 +2119,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -2179,7 +2155,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -2215,7 +2191,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 22.22,
+            "oamTileOverlapPct": 40,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -3009,7 +2985,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3045,7 +3021,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3081,7 +3057,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3117,7 +3093,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3153,7 +3129,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3189,7 +3165,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3225,7 +3201,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3261,7 +3237,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3297,7 +3273,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3333,7 +3309,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3369,7 +3345,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -3405,7 +3381,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 10,
+            "oamTileOverlapPct": 9.09,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -8733,7 +8709,7 @@
             "nametableMatchPct": 98.13,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 55.56,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 1,
               "worldX": 40,
@@ -8769,7 +8745,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 55.56,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 1,
               "worldX": 40,
@@ -9813,7 +9789,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 55.56,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 1,
               "worldX": 40,
@@ -10605,7 +10581,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10641,7 +10617,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10677,7 +10653,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10713,7 +10689,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10749,7 +10725,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10785,7 +10761,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10821,7 +10797,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10857,7 +10833,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10893,7 +10869,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10929,7 +10905,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -10965,7 +10941,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -11001,7 +10977,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -22845,7 +22821,7 @@
             "nametableMatchPct": 99.17,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 3,
               "worldX": 40,
@@ -23637,7 +23613,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23673,7 +23649,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23709,7 +23685,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23745,7 +23721,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23781,7 +23757,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23817,7 +23793,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23853,7 +23829,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23889,7 +23865,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23925,7 +23901,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23961,7 +23937,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -23997,7 +23973,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 90,
+            "oamTileOverlapPct": 81.82,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -24033,7 +24009,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -40834,7 +40810,7 @@
       "chrMatchPct": 100,
       "oam": {
         "authenticVisible": 9,
-        "decompiledVisible": 9,
+        "decompiledVisible": 5,
         "authenticTiles": [
           255,
           252,
@@ -40846,11 +40822,7 @@
           255,
           58,
           55,
-          79,
-          112,
-          113,
-          114,
-          115
+          79
         ],
         "sharedTileIds": [
           255,
@@ -40862,8 +40834,8 @@
           3,
           0
         ],
-        "tileOverlapPct": 55.56,
-        "paletteOverlapPct": 55.56
+        "tileOverlapPct": 100,
+        "paletteOverlapPct": 100
       },
       "gameplayState": {
         "stageId": 0,
@@ -40898,7 +40870,7 @@
         "chrMatchPct": 100,
         "oam": {
           "authenticVisible": 9,
-          "decompiledVisible": 9,
+          "decompiledVisible": 5,
           "authenticTiles": [
             255,
             252,
@@ -40910,11 +40882,7 @@
             255,
             58,
             55,
-            79,
-            112,
-            113,
-            114,
-            115
+            79
           ],
           "sharedTileIds": [
             255,
@@ -40926,8 +40894,8 @@
             3,
             0
           ],
-          "tileOverlapPct": 55.56,
-          "paletteOverlapPct": 55.56
+          "tileOverlapPct": 100,
+          "paletteOverlapPct": 100
         },
         "gameplayState": {
           "stageId": 0,
@@ -40964,7 +40932,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 9,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               255,
               252,
@@ -40976,11 +40944,7 @@
               255,
               58,
               55,
-              79,
-              112,
-              113,
-              114,
-              115
+              79
             ],
             "sharedTileIds": [
               255,
@@ -40992,8 +40956,8 @@
               3,
               0
             ],
-            "tileOverlapPct": 55.56,
-            "paletteOverlapPct": 55.56
+            "tileOverlapPct": 100,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "stageId": 0,
@@ -41216,7 +41180,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 9,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               255,
               252,
@@ -41229,11 +41193,7 @@
               255,
               58,
               55,
-              79,
-              112,
-              113,
-              114,
-              115
+              79
             ],
             "sharedTileIds": [
               255,
@@ -41243,8 +41203,8 @@
               3,
               0
             ],
-            "tileOverlapPct": 22.22,
-            "paletteOverlapPct": 55.56
+            "tileOverlapPct": 40,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "stageId": 0,
@@ -41280,7 +41240,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 8,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               252,
               58,
@@ -41292,18 +41252,14 @@
               50,
               51,
               52,
-              53,
-              112,
-              113,
-              114,
-              115
+              53
             ],
             "sharedTileIds": [],
             "sharedPalettes": [
               0
             ],
             "tileOverlapPct": 0,
-            "paletteOverlapPct": 44.44
+            "paletteOverlapPct": 80
           },
           "gameplayState": {
             "stageId": 2,
@@ -41339,7 +41295,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 9,
-            "decompiledVisible": 9,
+            "decompiledVisible": 5,
             "authenticTiles": [
               255,
               252,
@@ -41353,11 +41309,7 @@
               50,
               51,
               52,
-              53,
-              112,
-              113,
-              114,
-              115
+              53
             ],
             "sharedTileIds": [
               255
@@ -41366,8 +41318,8 @@
               3,
               0
             ],
-            "tileOverlapPct": 11.11,
-            "paletteOverlapPct": 55.56
+            "tileOverlapPct": 20,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "stageId": 3,
@@ -41462,7 +41414,7 @@
           "minAttribMatchPct": 12.5,
           "maxAttribMatchPct": 100,
           "avgChrMatchPct": 100,
-          "avgOamTileOverlapPct": 33.52,
+          "avgOamTileOverlapPct": 33.34,
           "stagesCompleted": 4,
           "finalStageId": 3,
           "gameCompleted": true,
@@ -42846,7 +42798,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 33.33,
+            "oamTileOverlapPct": 60,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -42882,7 +42834,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 33.33,
+            "oamTileOverlapPct": 60,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -42918,7 +42870,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -42954,7 +42906,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -42990,7 +42942,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -43026,7 +42978,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 22.22,
+            "oamTileOverlapPct": 40,
             "decompState": {
               "stageId": 0,
               "worldX": 40,
@@ -43820,7 +43772,7 @@
             "nametableMatchPct": 99.48,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -43856,7 +43808,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -43892,7 +43844,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -43928,7 +43880,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -43964,7 +43916,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -44000,7 +43952,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -44036,7 +43988,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -44072,7 +44024,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -44108,7 +44060,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -44144,7 +44096,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 20,
+            "oamTileOverlapPct": 18.18,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -44180,7 +44132,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -44216,7 +44168,7 @@
             "nametableMatchPct": 99.27,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 10,
+            "oamTileOverlapPct": 9.09,
             "decompState": {
               "stageId": 0,
               "worldX": 76,
@@ -49544,7 +49496,7 @@
             "nametableMatchPct": 98.13,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 55.56,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 1,
               "worldX": 40,
@@ -49580,7 +49532,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 55.56,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 1,
               "worldX": 40,
@@ -50624,7 +50576,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 55.56,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 1,
               "worldX": 40,
@@ -51416,7 +51368,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51452,7 +51404,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51488,7 +51440,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51524,7 +51476,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51560,7 +51512,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51596,7 +51548,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51632,7 +51584,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51668,7 +51620,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51704,7 +51656,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51740,7 +51692,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51776,7 +51728,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -51812,7 +51764,7 @@
             "nametableMatchPct": 98.02,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 1,
               "worldX": 76,
@@ -63656,7 +63608,7 @@
             "nametableMatchPct": 99.17,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 11.11,
+            "oamTileOverlapPct": 20,
             "decompState": {
               "stageId": 3,
               "worldX": 40,
@@ -64448,7 +64400,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64484,7 +64436,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64520,7 +64472,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64556,7 +64508,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64592,7 +64544,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64628,7 +64580,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64664,7 +64616,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64700,7 +64652,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64736,7 +64688,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64772,7 +64724,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 60,
+            "oamTileOverlapPct": 54.55,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64808,7 +64760,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 90,
+            "oamTileOverlapPct": 81.82,
             "decompState": {
               "stageId": 3,
               "worldX": 76,
@@ -64844,7 +64796,7 @@
             "nametableMatchPct": 99.06,
             "attribMatchPct": 98.44,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 50,
+            "oamTileOverlapPct": 45.45,
             "decompState": {
               "stageId": 3,
               "worldX": 76,

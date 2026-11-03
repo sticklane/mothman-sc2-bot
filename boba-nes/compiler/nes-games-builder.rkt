@@ -687,21 +687,31 @@
     (ADC #:imm 8)
     (STA #:abs #x021B) (STA #:abs #x0223)
 
-    ;; Emit Authentic Spinning Coin Sprite (#x60) at $0224..$0227
+    ;; Emit Authentic 8x16 Spinning Coin Sprite Pair ($0224..$022B):
+    ;;   - Slot 9 ($0224..$0227): Top half (#x60, attr #x02 Gold)
+    ;;   - Slot 10 ($0228..$022B): Bottom half (#x60 vertically flipped, attr #x82 = #x02 | OAM_FLIP_V #x80)
     (label draw_coin_oam)
     (LDA #:zp ,MARIO-ZP-COIN-ANIM-Y)
     (BNE show_coin_spr)
     (LDA #:imm #xF8)
     (STA #:abs #x0224)
+    (STA #:abs #x0228)
     (JMP done_mario_oam)
     (label show_coin_spr)
     (STA #:abs #x0224)
-    (LDA #:imm #x60) (STA #:abs #x0225)
+    (CLC)
+    (ADC #:imm 8)
+    (STA #:abs #x0228)
+    (LDA #:imm #x60)
+    (STA #:abs #x0225)
+    (STA #:abs #x0229)
     (LDA #:imm #x02) (STA #:abs #x0226)
+    (LDA #:imm #x82) (STA #:abs #x022A)
     (LDA #:imm 76)
     (SEC)
     (SBC #:zp ,MARIO-ZP-SCROLL-X)
     (STA #:abs #x0227)
+    (STA #:abs #x022B)
 
     (label done_mario_oam)
     (RTS)
@@ -792,7 +802,10 @@
            #x22 #x16 #x30 #x27
            #x22 #x29 #x30 #x19)))
 
-(define (compile-mario-nes-rom! #:nes-out-path [nes-out-path #f])
+(define (compile-mario-nes-rom! #:nes-out-path [nes-out-path #f]
+                                #:chr-layout [chr-layout #f]
+                                #:zp-map [zp-map '()]
+                                #:state-machine [state-machine #f])
   (define forms (emit-decompiled-mario-6502-program))
   (define asm-res (assemble-6502 forms #:origin #x8000))
   (define chr-bytes (build-mario-chr-rom))
@@ -807,6 +820,9 @@
             'mirroring 'vertical
             'sprite0-split? #t
             'sprite0-opaque-overlap? #t
+            'chr-layout chr-layout
+            'zp-map zp-map
+            'state-machines (if state-machine (list state-machine) '())
             'zp-vars (list (hasheq 'name 'zp_mario_phys 'bytes 22 'cap 'RamLinear))
             'zp-scratch-blocks (list (hasheq 'id 'scratch_aabb 'bytes 6 'leaked? #f))
             'subroutines (list (hasheq 'name 'nmi_handler 'pha-count 3 'pla-count 3))
@@ -818,7 +834,7 @@
             'vblank-cycles 648
             'active-cycles 2840
             'page-crossings (asm-result-page-crossings asm-res)
-            'oam-sprites 10
+            'oam-sprites 11
             'scanline-sprites 5
             'ram-bytes 256
             'prg-rom-bytes (bytes-length (asm-result-bytes asm-res))
@@ -1419,7 +1435,10 @@
            #x0F #x30 #x27 #x16
            #x0F #x28 #x27 #x38)))
 
-(define (compile-zelda-nes-rom! #:nes-out-path [nes-out-path #f])
+(define (compile-zelda-nes-rom! #:nes-out-path [nes-out-path #f]
+                                #:chr-layout [chr-layout #f]
+                                #:zp-map [zp-map '()]
+                                #:state-machine [state-machine #f])
   (define forms (emit-decompiled-zelda-6502-program))
   (define asm-res (assemble-6502 forms #:origin #x8000))
   (define chr-bytes (build-zelda-chr-rom))
@@ -1430,6 +1449,9 @@
     (hasheq 'name 'legend-of-zelda-nes
             'mapper 'NROM
             'oam-mux? #t ; Uses Coprime OAM Flicker Multiplexer!
+            'chr-layout chr-layout
+            'zp-map zp-map
+            'state-machines (if state-machine (list state-machine) '())
             'zp-vars (list (hasheq 'name 'zp_zelda_state 'bytes 22 'cap 'RamLinear))
             'zp-scratch-blocks (list (hasheq 'id 'scratch_combat 'bytes 6 'leaked? #f))
             'subroutines (list (hasheq 'name 'nmi_handler 'pha-count 3 'pla-count 3))
@@ -2034,7 +2056,10 @@
            #x0F #x30 #x24 #x14
            #x0F #x30 #x27 #x16)))
 
-(define (compile-tetris-nes-rom! #:nes-out-path [nes-out-path #f])
+(define (compile-tetris-nes-rom! #:nes-out-path [nes-out-path #f]
+                                 #:chr-layout [chr-layout #f]
+                                 #:zp-map [zp-map '()]
+                                 #:state-machine [state-machine #f])
   (define forms (emit-decompiled-tetris-6502-program))
   (define asm-res (assemble-6502 forms #:origin #x8000))
   (define chr-bytes (build-tetris-chr-rom))
@@ -2044,6 +2069,9 @@
   (define mod-desc
     (hasheq 'name 'nintendo-tetris-nes
             'mapper 'NROM
+            'chr-layout chr-layout
+            'zp-map zp-map
+            'state-machines (if state-machine (list state-machine) '())
             'zp-vars (list (hasheq 'name 'zp_tetris_state 'bytes 18 'cap 'RamLinear))
             'zp-scratch-blocks (list (hasheq 'id 'scratch_line_scan 'bytes 6 'leaked? #f))
             'subroutines (list (hasheq 'name 'nmi_handler 'pha-count 3 'pla-count 3))

@@ -14,6 +14,7 @@
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
          "../compiler/nes-games-builder.rkt"
+         "../compiler/boba-dsl-compiler.rkt"
          "../lib/nes-chr-assets.rkt"
          "../lib/boba-badge-style.rkt"
          "../lib/genre-libraries.rkt"
@@ -26,6 +27,7 @@
  (all-from-out "../compiler/mos6502-assembler.rkt")
  (all-from-out "../compiler/boba-rom-builder.rkt")
  (all-from-out "../compiler/nes-games-builder.rkt")
+ (all-from-out "../compiler/boba-dsl-compiler.rkt")
  (all-from-out "../lib/nes-chr-assets.rkt")
  (all-from-out "../lib/boba-badge-style.rkt")
  (all-from-out "../lib/genre-libraries.rkt")
@@ -184,10 +186,11 @@
             'oam-sprites 1
             'scanline-sprites 1)))
 
-;; Surface DSL macro for declaring a 16x16 (2x2 hardware 8x8 tile) composite metasprite.
-;; Supports both:
+;; Surface DSL macro for declaring a 16x16 (2x2 hardware 8x8 tile) or 8x16 ('symmetric-vertical) composite metasprite.
+;; Supports:
 ;;   1. Explicit quadrant form: (defmetasprite id #:tl t0 #:tr t1 #:bl t2 #:br t3 #:attr a)
-;;   2. Order-aware form      : (defmetasprite id #:tiles (list ...) #:order 'row-major/'col-major/'symmetric-col-major #:attr a)
+;;   2. Order-aware form      : (defmetasprite id #:tiles (list ...) #:order 'row-major/'col-major/'symmetric-col-major/'symmetric-vertical #:attr a)
+;;   3. Single-tile vertical  : (defmetasprite id #:tile t0 #:order 'symmetric-vertical #:attr a)
 (define-syntax (defmetasprite stx)
   (syntax-case stx ()
     [(_ ms-id #:tl tl-tile #:tr tr-tile #:bl bl-tile #:br br-tile #:attr attr-byte)
@@ -198,6 +201,11 @@
     [(_ ms-id #:tiles tile-list-expr #:order order-expr #:attr attr-byte)
      #'(define ms-id
          (make-metasprite-desc 'ms-id tile-list-expr
+                               #:order order-expr
+                               #:attr attr-byte))]
+    [(_ ms-id #:tile single-tile-expr #:order order-expr #:attr attr-byte)
+     #'(define ms-id
+         (make-metasprite-desc 'ms-id (list single-tile-expr)
                                #:order order-expr
                                #:attr attr-byte))]))
 

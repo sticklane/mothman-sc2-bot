@@ -51,6 +51,7 @@
  (struct-out nes-grade)
  nes-grade-zero
  nes-grade-seq
+ nes-grade-join
  nes-grade-par
  nes-grade-scale
  nes-grade<=?
@@ -89,7 +90,12 @@
 
  ;; Automated Grade-Driven Hardware Repair Pass
  repair-nes-module
- compile-and-verify-nes-module)
+ compile-and-verify-nes-module
+
+ ;; Syntax-Directed Pre-Assembly DSL Grade Inference & Module Synthesis
+ infer-dsl-statement-effects
+ infer-dsl-statement-grade
+ synthesize-dsl-module-grades)
 
 ;; ============================================================================
 ;; 1. Five-Element Memory & Hardware Capability Semiring (CapMem)
@@ -234,6 +240,24 @@
    (+ (nes-grade-chr-tiles g1) (nes-grade-chr-tiles g2))
    (+ (nes-grade-vram-dma-bytes g1) (nes-grade-vram-dma-bytes g2))
    (+ (nes-grade-attr-clashes g1) (nes-grade-attr-clashes g2))
+   (set-union (nes-grade-apu-channels g1) (nes-grade-apu-channels g2))))
+
+;; Branch Join (g1 |_| g2 for `if` / `cond` alternatives):
+;; Takes the componentwise worst-case supremum across branches, while preserving
+;; high-watermark Zero-Page scratch reuse across mutually exclusive branches.
+(define (nes-grade-join g1 g2)
+  (nes-grade
+   (max (nes-grade-cycles g1) (nes-grade-cycles g2))
+   (max (nes-grade-page-crossings g1) (nes-grade-page-crossings g2))
+   (max (nes-grade-oam-sprites g1) (nes-grade-oam-sprites g2))
+   (max (nes-grade-scanline-sprites g1) (nes-grade-scanline-sprites g2))
+   (max (nes-grade-zp-bytes-live g1) (nes-grade-zp-bytes-live g2))
+   (max (nes-grade-zp-bytes-peak g1) (nes-grade-zp-bytes-peak g2))
+   (max (nes-grade-ram-bytes g1) (nes-grade-ram-bytes g2))
+   (+ (nes-grade-prg-rom-bytes g1) (nes-grade-prg-rom-bytes g2))
+   (max (nes-grade-chr-tiles g1) (nes-grade-chr-tiles g2))
+   (max (nes-grade-vram-dma-bytes g1) (nes-grade-vram-dma-bytes g2))
+   (max (nes-grade-attr-clashes g1) (nes-grade-attr-clashes g2))
    (set-union (nes-grade-apu-channels g1) (nes-grade-apu-channels g2))))
 
 ;; Parallel / Co-live Composition (g1 (+) g2):
@@ -1451,3 +1475,543 @@
 
 (define (compile-and-verify-nes-module mod [budget NTSC-NROM-BUDGET])
   (repair-nes-module mod budget))
+
+;; ============================================================================
+;; 10. Compositional, Syntax-Directed Pre-Assembly DSL Grade Inference
+;; ============================================================================
+;; Computes Phi1..Phi5 and L1..L4 purely from `#lang boba-nes` DSL forms and
+;; declarative resource descriptors BEFORE generating or assembling 6502 code.
+
+(define DSL-6502-INST-CYCLES
+  (hash
+   'LDA (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4 'absy 4 'indx 6 'indy 5)
+   'LDX (hash 'imm 2 'zp 3 'zpy 4 'abs 4 'absy 4)
+   'LDY (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4)
+   'STA (hash 'zp 3 'zpx 4 'abs 4 'absx 5 'absy 5 'indx 6 'indy 6)
+   'STX (hash 'zp 3 'zpy 4 'abs 4)
+   'STY (hash 'zp 3 'zpx 4 'abs 4)
+   'TAX 2 'TAY 2 'TXA 2 'TYA 2 'TSX 2 'TXS 2
+   'PHA 3 'PHP 3 'PLA 4 'PLP 4
+   'AND (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4 'absy 4 'indx 6 'indy 5)
+   'EOR (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4 'absy 4 'indx 6 'indy 5)
+   'ORA (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4 'absy 4 'indx 6 'indy 5)
+   'BIT (hash 'zp 3 'abs 4)
+   'ADC (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4 'absy 4 'indx 6 'indy 5)
+   'SBC (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4 'absy 4 'indx 6 'indy 5)
+   'CMP (hash 'imm 2 'zp 3 'zpx 4 'abs 4 'absx 4 'absy 4 'indx 6 'indy 5)
+   'CPX (hash 'imm 2 'zp 3 'abs 4)
+   'CPY (hash 'imm 2 'zp 3 'abs 4)
+   'INC (hash 'zp 5 'zpx 6 'abs 6 'absx 7)
+   'DEC (hash 'zp 5 'zpx 6 'abs 6 'absx 7)
+   'INX 2 'INY 2 'DEX 2 'DEY 2
+   'ASL (hash 'acc 2 'zp 5 'zpx 6 'abs 6 'absx 7)
+   'LSR (hash 'acc 2 'zp 5 'zpx 6 'abs 6 'absx 7)
+   'ROL (hash 'acc 2 'zp 5 'zpx 6 'abs 6 'absx 7)
+   'ROR (hash 'acc 2 'zp 5 'zpx 6 'abs 6 'absx 7)
+   'JMP (hash 'abs 3 'ind 5)
+   'JSR 6 'RTS 6 'RTI 6
+   'BCC 3 'BCS 3 'BEQ 3 'BMI 3 'BNE 3 'BPL 3 'BVC 3 'BVS 3
+   'CLC 2 'CLD 2 'CLI 2 'CLV 2 'SEC 2 'SED 2 'SEI 2 'BRK 7 'NOP 2))
+
+(define (dsl-inst-cycles-and-bytes form)
+  (match form
+    [`(label ,_) (values 0 0)]
+    [`(.equ ,_ ,_) (values 0 0)]
+    [`(.byte . ,bs) (values 0 (length bs))]
+    [`(.word . ,ws) (values 0 (* 2 (length ws)))]
+    [`(.align ,_) (values 0 0)]
+    [`(STA #:abs #x4014) (values (+ 4 514) 3)]
+    [`(,mnem)
+     #:when (hash-has-key? DSL-6502-INST-CYCLES mnem)
+     (define entry (hash-ref DSL-6502-INST-CYCLES mnem 2))
+     (values (if (hash? entry) (hash-ref entry 'acc 2) entry) 1)]
+    [`(,mnem ,_target)
+     #:when (hash-has-key? DSL-6502-INST-CYCLES mnem)
+     (define entry (hash-ref DSL-6502-INST-CYCLES mnem 3))
+     (define len (if (memq mnem '(JMP JSR)) 3 2))
+     (values (if (hash? entry) (hash-ref entry 'abs 3) entry) len)]
+    [`(,mnem ,kw ,_op)
+     #:when (and (hash-has-key? DSL-6502-INST-CYCLES mnem) (keyword? kw))
+     (define mode (string->symbol (keyword->string kw)))
+     (define entry (hash-ref DSL-6502-INST-CYCLES mnem 4))
+     (define cyc (if (hash? entry) (hash-ref entry mode 4) entry))
+     (define len (if (memq mode '(abs absx absy ind)) 3 2))
+     (values cyc len)]
+    [else (values 2 2)]))
+
+(define (make-empty-dsl-effects)
+  (hasheq 'grade             nes-grade-zero
+          'ppu-ops           '()
+          'nmi-ops           '()
+          'pha-count         0
+          'pla-count         0
+          'zp-scratch-blocks '()))
+
+(define (seq-dsl-effects e1 e2)
+  (hasheq 'grade             (nes-grade-seq (hash-ref e1 'grade) (hash-ref e2 'grade))
+          'ppu-ops           (append (hash-ref e1 'ppu-ops) (hash-ref e2 'ppu-ops))
+          'nmi-ops           (append (hash-ref e1 'nmi-ops) (hash-ref e2 'nmi-ops))
+          'pha-count         (+ (hash-ref e1 'pha-count) (hash-ref e2 'pha-count))
+          'pla-count         (+ (hash-ref e1 'pla-count) (hash-ref e2 'pla-count))
+          'zp-scratch-blocks (append (hash-ref e1 'zp-scratch-blocks)
+                                     (hash-ref e2 'zp-scratch-blocks))))
+
+(define (join-dsl-effects e1 e2)
+  (hasheq 'grade             (nes-grade-join (hash-ref e1 'grade) (hash-ref e2 'grade))
+          'ppu-ops           (remove-duplicates (append (hash-ref e1 'ppu-ops) (hash-ref e2 'ppu-ops)))
+          'nmi-ops           (append (hash-ref e1 'nmi-ops) (hash-ref e2 'nmi-ops))
+          'pha-count         (max (hash-ref e1 'pha-count) (hash-ref e2 'pha-count))
+          'pla-count         (max (hash-ref e1 'pla-count) (hash-ref e2 'pla-count))
+          'zp-scratch-blocks (append (hash-ref e1 'zp-scratch-blocks)
+                                     (hash-ref e2 'zp-scratch-blocks))))
+
+(define (scale-dsl-effects k eff)
+  (hasheq 'grade             (nes-grade-scale k (hash-ref eff 'grade))
+          'ppu-ops           (hash-ref eff 'ppu-ops)
+          'nmi-ops           (hash-ref eff 'nmi-ops)
+          'pha-count         (* k (hash-ref eff 'pha-count))
+          'pla-count         (* k (hash-ref eff 'pla-count))
+          'zp-scratch-blocks (hash-ref eff 'zp-scratch-blocks)))
+
+;; Infer both the 12-component `nes-grade` and logical hardware effects (`ppu-ops`,
+;; `nmi-ops`, `pha-count`, `pla-count`, `zp-scratch-blocks`) from a DSL statement or AST node
+(define (infer-dsl-statement-effects stmt [phase 'ActiveFrame])
+  (define (infer-seq stmts)
+    (for/fold ([acc (make-empty-dsl-effects)])
+              ([s (in-list stmts)])
+      (seq-dsl-effects acc (infer-dsl-statement-effects s phase))))
+
+  (match stmt
+    ;; Already a phase-block or scratch descriptor hash
+    [(? hash? h)
+     (cond
+       [(eq? (hash-ref h 'phase #f) 'VBlankNMI)
+        (define body-scratch (hash-ref h 'body-result '()))
+        (define s-list
+          (cond
+            [(hash? body-scratch) (list body-scratch)]
+            [(list? body-scratch) (filter hash? body-scratch)]
+            [else '()]))
+        (define s-peak
+          (for/fold ([pk 0]) ([b (in-list s-list)])
+            (max pk (hash-ref b 'bytes 0))))
+        (hasheq 'grade (nes-grade (hash-ref h 'vblank-cycles 0)
+                                  0
+                                  (hash-ref h 'oam-sprites 0)
+                                  (hash-ref h 'scanline-sprites 0)
+                                  0
+                                  s-peak
+                                  0
+                                  0
+                                  0
+                                  (hash-ref h 'vram-dma-bytes 0)
+                                  0
+                                  (set))
+                'ppu-ops           (hash-ref h 'ppu-ops '())
+                'nmi-ops           (hash-ref h 'nmi-ops '())
+                'pha-count         3
+                'pla-count         3
+                'zp-scratch-blocks s-list)]
+       [(eq? (hash-ref h 'phase #f) 'ActiveFrame)
+        (define body-scratch (hash-ref h 'body-result '()))
+        (define s-list
+          (cond
+            [(hash? body-scratch) (list body-scratch)]
+            [(list? body-scratch) (filter hash? body-scratch)]
+            [else '()]))
+        (define s-peak
+          (for/fold ([pk 0]) ([b (in-list s-list)])
+            (max pk (hash-ref b 'bytes 0))))
+        (hasheq 'grade (nes-grade (hash-ref h 'active-cycles 0)
+                                  0
+                                  0
+                                  0
+                                  0
+                                  s-peak
+                                  (hash-ref h 'ram-bytes 0)
+                                  0
+                                  0
+                                  0
+                                  0
+                                  (list->set (hash-ref h 'apu-channels '())))
+                'ppu-ops           '()
+                'nmi-ops           '()
+                'pha-count         0
+                'pla-count         0
+                'zp-scratch-blocks s-list)]
+       [(hash-has-key? h 'bytes)
+        (define b (hash-ref h 'bytes 0))
+        (hasheq 'grade             (nes-grade 0 0 0 0 0 b 0 0 0 0 0 (set))
+                'ppu-ops           '()
+                'nmi-ops           '()
+                'pha-count         0
+                'pla-count         0
+                'zp-scratch-blocks (list h))]
+       [else (make-empty-dsl-effects)])]
+
+    ;; Empty statement list
+    ['() (make-empty-dsl-effects)]
+
+    ;; Sequential statement block: (seq s1 ...) or (begin s1 ...)
+    [`(,(or 'seq 'begin) . ,stmts)
+     (infer-seq stmts)]
+
+    ;; Conditional branch join: (if cond-e then-s else-s)
+    [`(if ,_cond ,then-s ,else-s)
+     (define cond-eff (hasheq 'grade (nes-grade 5 0 0 0 0 0 0 4 0 0 0 (set))
+                              'ppu-ops '() 'nmi-ops '() 'pha-count 0 'pla-count 0 'zp-scratch-blocks '()))
+     (seq-dsl-effects cond-eff
+                      (join-dsl-effects (infer-dsl-statement-effects then-s phase)
+                                        (infer-dsl-statement-effects else-s phase)))]
+
+    ;; Single-armed conditional: (when cond-e s1 ...) / (unless cond-e s1 ...)
+    [`(,(or 'when 'unless) ,_cond . ,body)
+     (define cond-eff (hasheq 'grade (nes-grade 5 0 0 0 0 0 0 4 0 0 0 (set))
+                              'ppu-ops '() 'nmi-ops '() 'pha-count 0 'pla-count 0 'zp-scratch-blocks '()))
+     (seq-dsl-effects cond-eff
+                      (join-dsl-effects (infer-seq body)
+                                        (make-empty-dsl-effects)))]
+
+    ;; Multi-way conditional: (cond [test s1 ...] ...)
+    [`(cond . ,clauses)
+     (for/fold ([acc (make-empty-dsl-effects)])
+               ([cl (in-list clauses)])
+       (match cl
+         [`(,_test . ,body)
+          (join-dsl-effects acc (infer-seq body))]
+         [else acc]))]
+
+    ;; Bounded iteration scaling: (repeat-static k body ...) or (loop-bound k body ...)
+    [`(,(or 'repeat-static 'loop-bound) ,(? exact-integer? k) . ,body)
+     (scale-dsl-effects k (infer-seq body))]
+
+    ;; Scoped Zero-Page scratch block: (with-zp-scratch ([id bytes] ...) body ...)
+    [`(with-zp-scratch ([,ids ,byte-counts] ...) . ,body)
+     (define local-bytes (apply + byte-counts))
+     (define body-eff (infer-seq body))
+     (define bg (hash-ref body-eff 'grade))
+     (define new-blks
+       (for/list ([id (in-list ids)]
+                  [b  (in-list byte-counts)])
+         (hasheq 'id id 'bytes b 'leaked? #f)))
+     (hasheq 'grade (nes-grade (nes-grade-cycles bg)
+                               (nes-grade-page-crossings bg)
+                               (nes-grade-oam-sprites bg)
+                               (nes-grade-scanline-sprites bg)
+                               (nes-grade-zp-bytes-live bg)
+                               (+ local-bytes (nes-grade-zp-bytes-peak bg))
+                               (nes-grade-ram-bytes bg)
+                               (nes-grade-prg-rom-bytes bg)
+                               (nes-grade-chr-tiles bg)
+                               (nes-grade-vram-dma-bytes bg)
+                               (nes-grade-attr-clashes bg)
+                               (nes-grade-apu-channels bg))
+             'ppu-ops           (hash-ref body-eff 'ppu-ops)
+             'nmi-ops           (hash-ref body-eff 'nmi-ops)
+             'pha-count         (hash-ref body-eff 'pha-count)
+             'pla-count         (hash-ref body-eff 'pla-count)
+             'zp-scratch-blocks (append new-blks (hash-ref body-eff 'zp-scratch-blocks)))]
+
+    ;; High-level PPU OAM DMA transfer: (oam-dma! [page])
+    [`(oam-dma! . ,_)
+     (hasheq 'grade             (nes-grade 526 0 0 0 0 0 0 10 0 0 0 (set))
+             'ppu-ops           (list (hasheq 'op 'oam-dma! 'phase phase))
+             'nmi-ops           (if (eq? phase 'VBlankNMI) (list (hasheq 'op 'oam-dma!)) '())
+             'pha-count         0
+             'pla-count         0
+             'zp-scratch-blocks '())]
+
+    ;; High-level PPU VRAM / Nametable / HUD BCD write
+    [`(,(or 'nametable-patch! 'vram-put! 'ppu-write! 'hud-bcd-delta!) ,_addr . ,rest)
+     (define cnt (if (and (pair? rest) (exact-integer? (car rest)) (> (car rest) 0)) (car rest) 1))
+     (hasheq 'grade             (nes-grade (+ 16 (* 4 cnt)) 0 0 0 0 0 0 (+ 10 (* 5 cnt)) 0 (+ 2 cnt) 0 (set))
+             'ppu-ops           (list (hasheq 'op 'nametable-patch! 'phase phase))
+             'nmi-ops           (if (eq? phase 'VBlankNMI) (list (hasheq 'op 'nametable-patch!)) '())
+             'pha-count         0
+             'pla-count         0
+             'zp-scratch-blocks '())]
+
+    ;; High-level PPU Palette update
+    [`(palette-write! ,_addr . ,_)
+     (hasheq 'grade             (nes-grade 22 0 0 0 0 0 0 12 0 3 0 (set))
+             'ppu-ops           (list (hasheq 'op 'palette-write! 'phase phase))
+             'nmi-ops           (if (eq? phase 'VBlankNMI) (list (hasheq 'op 'palette-write!)) '())
+             'pha-count         0
+             'pla-count         0
+             'zp-scratch-blocks '())]
+
+    ;; High-level PPU Scroll Latch Restoration: (restore-scroll! x y)
+    [`(restore-scroll! ,x ,y)
+     (hasheq 'grade             (nes-grade 20 0 0 0 0 0 0 13 0 0 0 (set))
+             'ppu-ops           '()
+             'nmi-ops           (list (hasheq 'op 'restore-scroll!
+                                              'x (if (exact-integer? x) x 0)
+                                              'y (if (exact-integer? y) y 0)))
+             'pha-count         0
+             'pla-count         0
+             'zp-scratch-blocks '())]
+
+    ;; High-level Metasprite OAM Emission: (emit-metasprite! ms-desc x y slot)
+    [`(emit-metasprite! ,ms . ,_)
+     (define oam-n  (if (hash? ms) (hash-ref ms 'oam-sprites 4) 4))
+     (define scan-n (if (hash? ms) (hash-ref ms 'scanline-sprites 2) 2))
+     (define cyc    (if (= oam-n 2) 38 68))
+     (hasheq 'grade             (nes-grade cyc 0 oam-n scan-n 0 0 0 (* oam-n 12) 0 0 0 (set))
+             'ppu-ops           '()
+             'nmi-ops           '()
+             'pha-count         0
+             'pla-count         0
+             'zp-scratch-blocks '())]
+
+    ;; High-level 2A03 APU Channel Sound Effect: (apu-sfx! channel ...)
+    [`(,(or 'apu-sfx! 'apu-write!) ,ch . ,_)
+     (define ch-sym (if (and (pair? ch) (eq? (car ch) 'quote)) (cadr ch) ch))
+     (hasheq 'grade             (nes-grade 18 0 0 0 0 0 0 15 0 0 0
+                                           (if (symbol? ch-sym) (set ch-sym) (set)))
+             'ppu-ops           '()
+             'nmi-ops           '()
+             'pha-count         0
+             'pla-count         0
+             'zp-scratch-blocks '())]
+
+    ;; High-level Joypad Polling: (poll-joypad! ...)
+    [`(poll-joypad! . ,_)
+     (hasheq 'grade             (nes-grade 152 0 0 0 0 0 0 28 0 0 0 (set))
+             'ppu-ops           '()
+             'nmi-ops           '()
+             'pha-count         0
+             'pla-count         0
+             'zp-scratch-blocks '())]
+
+    ;; 6502 / Low-level AST instructions (or nested statement lists)
+    [_
+     (cond
+       ;; A list of statements/instructions (e.g. a block body)
+       [(and (list? stmt) (pair? stmt) (list? (car stmt)))
+        (infer-seq stmt)]
+       [else
+        (define-values (cyc len) (dsl-inst-cycles-and-bytes stmt))
+        (define pha (if (member stmt '((PHA) (PHP))) 1 0))
+        (define pla (if (member stmt '((PLA) (PLP))) 1 0))
+        (define ppu-op
+          (match stmt
+            [`(STA #:abs #x4014) (list (hasheq 'op 'oam-dma! 'phase phase))]
+            [(or `(STA #:abs #x2007) `(STA #:abs #x2006))
+             (list (hasheq 'op 'nametable-patch! 'phase phase))]
+            [else '()]))
+        (define nmi-op
+          (if (eq? phase 'VBlankNMI)
+              (match stmt
+                [`(STA #:abs #x4014) (list (hasheq 'op 'oam-dma!))]
+                [(or `(STA #:abs #x2007) `(STA #:abs #x2006))
+                 (list (hasheq 'op 'nametable-patch!))]
+                [`(STA #:abs #x2005)
+                 (list (hasheq 'op 'restore-scroll! 'x 0 'y 0))]
+                [else '()])
+              '()))
+        (define vram-b
+          (match stmt
+            [(or `(STA #:abs #x2007) `(STA #:abs #x2006)) 1]
+            [`(JSR ,callee) #:when (memq callee '(set_nt0_addr set_vram_addr)) 2]
+            [else 0]))
+        (define apu-ch
+          (match stmt
+            [`(STA #:abs ,(? exact-integer? addr))
+             (cond
+               [(<= #x4000 addr #x4003) (set 'pulse1)]
+               [(<= #x4004 addr #x4007) (set 'pulse2)]
+               [(<= #x4008 addr #x400B) (set 'triangle)]
+               [(<= #x400C addr #x400F) (set 'noise)]
+               [(<= #x4010 addr #x4013) (set 'dmc)]
+               [else (set)])]
+            [else (set)]))
+        (hasheq 'grade             (nes-grade cyc 0 0 0 0 0 0 len 0 vram-b 0 apu-ch)
+                'ppu-ops           ppu-op
+                'nmi-ops           nmi-op
+                'pha-count         pha
+                'pla-count         pla
+                'zp-scratch-blocks '())])]))
+
+(define (infer-dsl-statement-grade stmt [phase 'ActiveFrame])
+  (hash-ref (infer-dsl-statement-effects stmt phase) 'grade))
+
+;; Count non-zero 16-byte 2bpp CHR tiles from a CHR resource (bytes or tile alist) before assembly
+(define (infer-dsl-chr-tiles chr-res)
+  (cond
+    [(bytes? chr-res)
+     (define num-tiles (quotient (min 8192 (bytes-length chr-res)) 16))
+     (for/sum ([t (in-range num-tiles)])
+       (define base (* t 16))
+       (if (for/or ([i (in-range 16)])
+             (not (zero? (bytes-ref chr-res (+ base i)))))
+           1
+           0))]
+    [(list? chr-res) (length chr-res)]
+    [(exact-integer? chr-res) chr-res]
+    [else 0]))
+
+;; Synthesize a complete module descriptor hash (`synthesize-dsl-module-grades`)
+;; directly from `#lang boba-nes` declarative resources & DSL phase blocks / AST
+;; BEFORE calling `assemble-6502`.
+(define (synthesize-dsl-module-grades
+         #:name              [name 'nes-dsl-module]
+         #:mapper            [mapper 'NROM]
+         #:mirroring         [mirroring 'vertical]
+         #:scroll-mode       [scroll-mode 'none]
+         #:zp-map            [zp-map '()]
+         #:zp-vars           [zp-vars '()]
+         #:vblank-scratch    [vblank-scratch '()]
+         #:active-scratch    [active-scratch '()]
+         #:zp-scratch-blocks [zp-scratch-blocks '()]
+         #:metasprites       [metasprites '()]
+         #:sprite-tiles      [sprite-tiles '()]
+         #:oam-template      [oam-template #f]
+         #:oam-sprites       [oam-sprites #f]
+         #:scanline-sprites  [scanline-sprites #f]
+         #:chr               [chr #f]
+         #:chr-tiles         [chr-tiles #f]
+         #:state-machine     [state-machine #f]
+         #:state-machines    [state-machines '()]
+         #:vblank-block      [vblank-blk #f]
+         #:active-block      [active-blk #f]
+         #:vblank-ast        [vblank-ast #f]
+         #:active-ast        [active-ast #f]
+         #:nmi-subroutines   [nmi-subroutines #f]
+         #:vram-bytes        [vram-bytes #f]
+         #:ram-bytes         [ram-bytes 64]
+         #:prg-rom-bytes     [prg-rom-bytes #f]
+         #:apu-channels      [apu-channels #f])
+
+  ;; 1. Infer Phi3 Zero-Page permanent vars from `defzp-map` / `defzp-var`
+  (define inferred-zp-vars
+    (cond
+      [(pair? zp-vars) zp-vars]
+      [(pair? zp-map)
+       (for/list ([entry (in-list zp-map)])
+         (hasheq 'name  (hash-ref entry 'id 'zp_var)
+                 'bytes (hash-ref entry 'bytes 1)
+                 'cap   'RamLinear))]
+      [else (list (hasheq 'name 'zp_game_state 'bytes 16 'cap 'RamLinear))]))
+
+  ;; 2. Infer VBlank and ActiveFrame statement/block grades & logical effects
+  (define vb-eff
+    (cond
+      [vblank-ast (infer-dsl-statement-effects vblank-ast 'VBlankNMI)]
+      [vblank-blk (infer-dsl-statement-effects vblank-blk 'VBlankNMI)]
+      [else       (make-empty-dsl-effects)]))
+  (define act-eff
+    (cond
+      [active-ast (infer-dsl-statement-effects active-ast 'ActiveFrame)]
+      [active-blk (infer-dsl-statement-effects active-blk 'ActiveFrame)]
+      [else       (make-empty-dsl-effects)]))
+
+  (define vb-g  (hash-ref vb-eff 'grade))
+  (define act-g (hash-ref act-eff 'grade))
+
+  ;; 3. Infer Phi2 OAM sprites & scanline sprites from declared `defmetasprite` / `defsprite-tile` / `defoam-resource`
+  (define ms-oam-sum
+    (+ (for/sum ([m (in-list metasprites)]) (hash-ref m 'oam-sprites 4))
+       (for/sum ([s (in-list sprite-tiles)]) (hash-ref s 'oam-sprites 1))))
+  (define ms-scan-sum
+    (for/sum ([m (in-list metasprites)]) (hash-ref m 'scanline-sprites 2)))
+
+  (define inferred-oam-sprites
+    (cond
+      [oam-sprites oam-sprites]
+      [(and (list? oam-template) (pair? oam-template)) (quotient (length oam-template) 4)]
+      [(> ms-oam-sum 0) ms-oam-sum]
+      [(> (nes-grade-oam-sprites vb-g) 0) (nes-grade-oam-sprites vb-g)]
+      [(> (nes-grade-oam-sprites act-g) 0) (nes-grade-oam-sprites act-g)]
+      [else 11]))
+
+  (define inferred-scanline-sprites
+    (cond
+      [scanline-sprites scanline-sprites]
+      [(> ms-scan-sum 0) (min 8 ms-scan-sum)]
+      [(> (nes-grade-scanline-sprites vb-g) 0) (nes-grade-scanline-sprites vb-g)]
+      [(> (nes-grade-scanline-sprites act-g) 0) (nes-grade-scanline-sprites act-g)]
+      [else 4]))
+
+  ;; 4. Infer Phi3 CHR tiles from `defchr-resource` / `defchr-tile`
+  (define inferred-chr-tiles
+    (cond
+      [chr-tiles chr-tiles]
+      [chr       (infer-dsl-chr-tiles chr)]
+      [else      0]))
+
+  ;; 5. Collect high-watermark Zero-Page scratch blocks across VBlank and ActiveFrame
+  (define (norm-scratch lst)
+    (for/list ([item (in-list (if (list? lst) lst (list lst)))]
+               #:when (or (hash? item) (pair? item)))
+      (match item
+        [(? hash? h) h]
+        [`(,id ,(? exact-integer? b)) (hasheq 'id id 'bytes b 'leaked? #f)]
+        [(cons id (? exact-integer? b)) (hasheq 'id id 'bytes b 'leaked? #f)]
+        [else (hasheq 'id 'scratch 'bytes 4 'leaked? #f)])))
+
+  (define all-scratch
+    (append (norm-scratch zp-scratch-blocks)
+            (norm-scratch vblank-scratch)
+            (norm-scratch active-scratch)
+            (hash-ref vb-eff 'zp-scratch-blocks)
+            (hash-ref act-eff 'zp-scratch-blocks)))
+
+  ;; 6. Collect state machines (`defstate-machine`)
+  (define fsm-list
+    (cond
+      [(pair? state-machines) state-machines]
+      [(hash? state-machine)  (list state-machine)]
+      [(list? state-machine)  state-machine]
+      [else '()]))
+
+  ;; 7. Collect L1 stack discipline (`subroutines`), L3 `ppu-ops`, L4 `nmi-ops`, Phi4 `vram-dma-bytes`, Phi5 `apu-channels`
+  (define subs
+    (or nmi-subroutines
+        (list (hasheq 'name      'nmi_handler
+                      'pha-count (if (or vblank-ast vblank-blk) (hash-ref vb-eff 'pha-count) 3)
+                      'pla-count (if (or vblank-ast vblank-blk) (hash-ref vb-eff 'pla-count) 3)))))
+
+  (define combined-ppu-ops
+    (append (hash-ref vb-eff 'ppu-ops)
+            (hash-ref act-eff 'ppu-ops)))
+  (define combined-nmi-ops
+    (hash-ref vb-eff 'nmi-ops))
+
+  (define inferred-vram-bytes
+    (if vram-bytes
+        (max vram-bytes (nes-grade-vram-dma-bytes vb-g))
+        (nes-grade-vram-dma-bytes vb-g)))
+
+  (define inferred-apu-channels
+    (or apu-channels
+        (set->list (set-union (nes-grade-apu-channels vb-g)
+                              (nes-grade-apu-channels act-g)))))
+
+  (define inferred-prg-bytes
+    (or prg-rom-bytes
+        (+ (nes-grade-prg-rom-bytes vb-g)
+           (nes-grade-prg-rom-bytes act-g))))
+
+  (hasheq 'name              name
+          'mapper            mapper
+          'mirroring         mirroring
+          'scroll-mode       scroll-mode
+          'state-machines    fsm-list
+          'zp-map            zp-map
+          'zp-vars           inferred-zp-vars
+          'zp-scratch-blocks all-scratch
+          'subroutines       subs
+          'ppu-ops           combined-ppu-ops
+          'nmi-ops           combined-nmi-ops
+          'vblank-cycles     (nes-grade-cycles vb-g)
+          'active-cycles     (nes-grade-cycles act-g)
+          'page-crossings    0
+          'oam-sprites       inferred-oam-sprites
+          'scanline-sprites  inferred-scanline-sprites
+          'ram-bytes         (max ram-bytes (nes-grade-ram-bytes act-g))
+          'prg-rom-bytes     inferred-prg-bytes
+          'chr-tiles         inferred-chr-tiles
+          'vram-dma-bytes    inferred-vram-bytes
+          'attr-clashes      0
+          'apu-channels      inferred-apu-channels))
+

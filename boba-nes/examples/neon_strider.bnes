@@ -3,19 +3,61 @@
 ;; ============================================================================
 ;; examples/neon_strider.bnes : Neon Strider: Cyber Grid 1989 in #lang boba-nes
 ;; ============================================================================
-;; Original Polarity-Switching Cyber-Platformer across 3 Synth-Grid Zones:
+;; Complete, Self-Contained Polarity-Switching Cyber-Platformer across 3 Zones:
 ;;   - Zone 0: Data Highway   (Electric Cyan Circuitry #x1C)
 ;;   - Zone 1: Firewall Relay (Laser Magenta Conduits #x24)
 ;;   - Zone 2: Mainframe Core (Overclocked Gold Nexus #x28)
 ;;
-;; Toggling phase polarity (BTN-SELECT / BTN-B) shifts the runner's shield
-;; polarity (0 = Cyan #x1C, 1 = Magenta #x24) in PPU Palette $3F11 and OAM
-;; attributes to phase through laser barriers and overload the Mainframe Core!
+;; 100% of CHR tiles, palettes, Zero-Page map, state machine, metasprites,
+;; and 6502 instructions live directly in this `.bnes` source file and compile
+;; via `defnes-game` -> `build/neon_strider.nes`.
 ;; ============================================================================
 
-(require "../compiler/original-dsl-games.rkt")
+;; 1. Pinned Zero-Page Hardware Addresses ($0010-$0029)
+(define NS-ZP-BUTTONS        #x10)
+(define NS-ZP-PREV-BTN       #x11)
+(define NS-ZP-NEW-BTN        #x12)
+(define NS-ZP-FRAME-CNT      #x13)
+(define NS-ZP-X              #x14)
+(define NS-ZP-Y              #x15)
+(define NS-ZP-VY             #x16)
+(define NS-ZP-POLARITY       #x17)
+(define NS-ZP-ENEMY-X        #x1B)
+(define NS-ZP-ENEMY-ALIVE    #x1C)
+(define NS-ZP-ENEMY-Y        #x1D)
+(define NS-ZP-SCORE          #x1E)
+(define NS-ZP-NODES          #x1F)
+(define NS-ZP-WALL-INTACT    #x20)
+(define NS-ZP-WON            #x24)
+(define NS-ZP-LIVES          #x25)
+(define NS-ZP-DEAD           #x26)
+(define NS-ZP-STAGE-DIRTY    #x27)
+(define NS-ZP-STAGE-ID       #x28)
+(define NS-ZP-GAME-COMPLETED #x29)
 
-;; 1. PPU Pattern Table & Zero-Offset HUD Typography Layout
+(defzp-map neon-strider-zp-map
+  ([buttons        #x10 controller-state]
+   [prev-btn       #x11 controller-state]
+   [new-btn        #x12 controller-state]
+   [frame-cnt      #x13 frame-counter]
+   [x              #x14 player-or-actor-coord]
+   [y              #x15 player-or-actor-coord]
+   [vy             #x16 player-or-actor-coord]
+   [polarity       #x17 game-phase-or-flag]
+   [sentry-x       #x1B player-or-actor-coord]
+   [enemy-alive    #x1C game-phase-or-flag]
+   [sentry-y       #x1D player-or-actor-coord]
+   [score          #x1E hud-bcd-counter]
+   [nodes          #x1F hud-bcd-counter]
+   [wall-intact    #x20 game-phase-or-flag]
+   [won            #x24 game-phase-or-flag]
+   [lives          #x25 hud-bcd-counter]
+   [dead           #x26 game-phase-or-flag]
+   [stage-dirty    #x27 game-phase-or-flag]
+   [stage-id       #x28 game-phase-or-flag]
+   [game-completed #x29 game-phase-or-flag]))
+
+;; 2. PPU Pattern Table & Zero-Offset HUD Typography Layout
 (defchr-layout neon-strider-chr-layout
   #:sprite-pt  0
   #:bg-pt      1
@@ -29,7 +71,82 @@
 
 (defsprite-tile neon-strider-hud-anchor #:tile #xFF #:attr #x00)
 
-;; 2. Symmetric-Column-Major 16x16 Metasprites (Strider, Laser Sentry, Data Node, Core)
+;; 3. Declarative 2bpp CHR-ROM Resource (Base Zero-Offset Font + Strider / Laser Sentry / Data Node / Core Tiles)
+(defchr-resource neon-strider-chr
+  #:base-font? #t
+  #:tiles
+  (list
+   ;; #x2F: Synthwave Perspective Grid Tile
+   (cons #x2F '("1......." "1......." "11111111" "....1..."
+                "....1..." "....1..." "11111111" "......1."))
+   ;; #x30, #x31: Neon Strider Cyber-Runner (symmetric-col-major)
+   (cons #x30 '("...33333" "..322223" "..311113" "..313333"
+                "...32222" "..333222" ".3323332" ".3223133"))
+   (cons #x31 '(".3223133" "322.3333" "32..2211" "....2211"
+                "...221.1" "...21..." "..331..." ".333...."))
+   ;; #x32, #x33: Laser Barrier Sentry (symmetric-col-major)
+   (cons #x32 '("....3333" "...31113" "..312223" "..312333"
+                "..312333" "..312223" "...31113" "....3333"))
+   (cons #x33 '(".....232" ".....232" ".....232" ".....232"
+                ".....232" ".....232" ".....232" ".....232"))
+   ;; #x34, #x35: Cyber Data Node (symmetric-col-major)
+   (cons #x34 '("....33.." "...3223." "..323323" ".3231132"
+                ".3231132" "..323323" "...3223." "....33.."))
+   (cons #x35 '("....22.." "....22.." "...2332." "...2222."
+                "........" "........" "........" "........"))
+   ;; #x36, #x37: Mainframe Core Pylon (symmetric-col-major)
+   (cons #x36 '("..333333" ".3222223" ".3211113" ".3213313"
+                ".3213313" ".3211113" ".3222223" "..333333"))
+   (cons #x37 '("..221122" "..223322" ".3221122" ".3223322"
+                "33221122" "33333333" "22222222" "11111111"))
+   ;; #x3E: Laser Overload Spark Sprite
+   (cons #x3E '("3..3..3." ".3.3.3.." "..333..." "3331333."
+                "..333..." ".3.3.3.." "3..3..3." "........"))
+   ;; #x40: Cyber Highway Neon Circuit Deck
+   (cons #x40 '("33333333" "22222222" "11311131" "11311131"
+                "11333331" "11112111" "11112111" "22222222"))
+   ;; #x42: Firewall Relay Platform Tile
+   (cons #x42 '("33333333" "23123123" "31231231" "22222222"
+                "11122111" "11111111" "........" "........"))
+   ;; #x45: Synth HUD Scanline Bar
+   (cons #x45 '("33333333" "........" "22222222" "........"
+                "11111111" "........" "........" "........"))
+   ;; #xFF: Opaque HUD Anchor
+   (cons #xFF '("33333333" "32222223" "32111123" "32133123"
+                "32133123" "32111123" "32222223" "33333333"))))
+
+;; 4. Declarative Palettes, HUD Nametable Text & OAM Sprite Template Resources
+(defpalette-resource neon-strider-palette
+  '(#x0F #x1C #x11 #x30   #x0F #x24 #x14 #x30
+    #x0F #x28 #x18 #x30   #x0F #x2A #x1A #x30
+    #x0F #x1C #x21 #x30   #x0F #x24 #x14 #x30
+    #x0F #x28 #x18 #x30   #x0F #x2A #x1A #x30))
+
+;; Zone 0 (Data Highway Cyan #x1C), Zone 1 (Firewall Magenta #x24), Zone 2 (Mainframe Gold #x28)
+(defpalette-resource neon-strider-stage-accents
+  '(#x1C #x24 #x28 #x28))
+
+;; Polarity 0 = Cyan (#x1C), Polarity 1 = Magenta (#x24)
+(defpalette-resource neon-strider-polarity-colors
+  '(#x1C #x24 #x1C #x24))
+
+(defnametable-resource neon-strider-hud-bytes
+  (encode-char-map-string neon-strider-hud-font "ZONE   0  NODE 0  LIVES 3"))
+
+(defoam-resource neon-strider-oam-template
+  '(16  #xFF #x00 16
+    144 #x30 #x00 48
+    152 #x31 #x00 48
+    144 #x30 #x40 56
+    152 #x31 #x40 56
+    112 #x32 #x01 128
+    120 #x33 #x01 128
+    112 #x32 #x41 136
+    120 #x33 #x41 136
+    104 #x34 #x02 96
+    136 #x36 #x03 200))
+
+;; 5. Symmetric-Column-Major 16x16 & Symmetric-Vertical 8x16 Metasprites
 (defmetasprite neon-strider-metasprite
   #:tiles (list #x30 #x31)
   #:order 'symmetric-col-major
@@ -50,7 +167,12 @@
   #:order 'symmetric-col-major
   #:attr  #x03)
 
-;; 3. Cyber Grid Zone State Machine with Verified Laser-Overload Recovery
+(defmetasprite laser-beam-vertical-metasprite
+  #:tile  #x33
+  #:order 'symmetric-vertical
+  #:attr  #x01)
+
+;; 6. Cyber Grid Zone State Machine with Verified Laser-Overload Recovery
 (defstate-machine neon-strider-fsm
   #:initial zone-0
   ([zone-0            #:kind normal  #:transitions (zone-1 laser-overload)]
@@ -59,24 +181,407 @@
    [laser-overload    #:kind failure #:transitions (zone-0 zone-1 zone-2)]
    [mainframe-victory #:kind victory #:transitions (zone-0)]))
 
-;; 4. Pinned Hardware Zero-Page Map ($0014-$0029)
-(defzp-map neon-strider-zp-map
-  ([x              #x14 player-or-actor-coord]
-   [y              #x15 player-or-actor-coord]
-   [vy             #x16 player-or-actor-coord]
-   [polarity       #x17 game-phase-or-flag]
-   [sentry-x       #x1B player-or-actor-coord]
-   [enemy-alive    #x1C game-phase-or-flag]
-   [score          #x1E hud-bcd-counter]
-   [nodes          #x1F hud-bcd-counter]
-   [lives          #x25 hud-bcd-counter]
-   [dead           #x26 game-phase-or-flag]
-   [stage-id       #x28 game-phase-or-flag]
-   [game-completed #x29 game-phase-or-flag]))
+;; 7. Complete 6502 Program for Neon Strider: Cyber Grid 1989 (< 900 Bytes, 0 Page Crossings)
+(define neon-strider-6502-program
+  `((label reset_handler)
+    (SEI)
+    (CLD)
+    (LDX #:imm #xFF)
+    (TXS)
+    (JSR boot_init)
+    (label main_loop)
+    (LDA #:zp #x0F)
+    (BEQ main_loop)
+    (LDA #:imm 0)
+    (STA #:zp #x0F)
+    (JSR game_frame_step)
+    (JMP main_loop)
 
-;; 5. Graded VBlank NMI & ActiveFrame Phase Blocks with High-Watermark Scratch Reuse
+    ;; Helper: set_nt0_addr sets A=#x20, X=VRAM low byte; set_vram_addr uses A=hi, X=lo
+    (label set_nt0_addr)
+    (LDA #:imm #x20)
+    (label set_vram_addr)
+    (BIT #:abs #x2002)
+    (STA #:abs #x2006)
+    (STX #:abs #x2006)
+    (RTS)
+
+    (label boot_init)
+    (LDA #:imm #x00)
+    (STA #:abs #x2000)
+    (STA #:abs #x2001)
+    (LDX #:imm 0)
+    (label clr_zp_loop)
+    (STA #:zpx #x00)
+    (STA #:absx #x0300)
+    (INX)
+    (BNE clr_zp_loop)
+
+    (LDA #:imm #xF8)
+    (label clr_oam_loop)
+    (STA #:absx #x0200)
+    (INX)
+    (BNE clr_oam_loop)
+
+    ;; Load 32-byte Palette ($3F00-$3F1F)
+    (LDA #:imm #x3F) (LDX #:imm #x00) (JSR set_vram_addr)
+    (label load_pal_loop)
+    (LDA #:absx palette_table)
+    (STA #:abs #x2007)
+    (INX)
+    (CPX #:imm 32)
+    (BNE load_pal_loop)
+
+    ;; Clear Nametable 0 ($2000-$23FF) to blank tile #x24
+    (LDX #:imm #x00) (JSR set_nt0_addr)
+    (LDY #:imm 4)
+    (LDA #:imm #x24)
+    (label clr_nt_loop)
+    (STA #:abs #x2007)
+    (INX)
+    (BNE clr_nt_loop)
+    (DEY)
+    (BNE clr_nt_loop)
+
+    ;; Draw HUD Top Bar ($2020), HUD Text ($2043), and HUD Bottom Bar ($2060)
+    (LDX #:imm #x20) (JSR set_nt0_addr)
+    (LDX #:imm 32) (LDA #:imm #x45)
+    (label hud_top_loop) (STA #:abs #x2007) (DEX) (BNE hud_top_loop)
+
+    (LDX #:imm #x43) (JSR set_nt0_addr)
+    (LDX #:imm 0)
+    (label hud_txt_loop)
+    (LDA #:absx hud_text_table)
+    (STA #:abs #x2007)
+    (INX)
+    (CPX #:imm 25)
+    (BNE hud_txt_loop)
+
+    (LDX #:imm #x60) (JSR set_nt0_addr)
+    (LDX #:imm 32) (LDA #:imm #x45)
+    (label hud_bot_loop) (STA #:abs #x2007) (DEX) (BNE hud_bot_loop)
+
+    ;; Draw Synthwave Perspective Grid ($2100), Firewall Relay ($21E6), and Neon Circuit Deck ($22C0)
+    (LDA #:imm #x21) (LDX #:imm #x00) (JSR set_vram_addr)
+    (LDX #:imm 64) (LDA #:imm #x2F)
+    (label bg_detail_loop) (STA #:abs #x2007) (DEX) (BNE bg_detail_loop)
+
+    (LDA #:imm #x21) (LDX #:imm #xE6) (JSR set_vram_addr)
+    (LDX #:imm 20) (LDA #:imm #x42)
+    (label plat_loop) (STA #:abs #x2007) (DEX) (BNE plat_loop)
+
+    (LDA #:imm #x22) (LDX #:imm #xC0) (JSR set_vram_addr)
+    (LDX #:imm 128) (LDA #:imm #x40)
+    (label gnd_loop) (STA #:abs #x2007) (DEX) (BNE gnd_loop)
+
+    ;; Initialize Attribute Table ($23C0-$23FF)
+    (LDA #:imm #x23) (LDX #:imm #xC0) (JSR set_vram_addr)
+    (LDX #:imm 16) (LDA #:imm #x55)
+    (label attr_top_loop) (STA #:abs #x2007) (DEX) (BNE attr_top_loop)
+    (LDX #:imm 48) (LDA #:imm #x00)
+    (label attr_bot_loop) (STA #:abs #x2007) (DEX) (BNE attr_bot_loop)
+
+    ;; Initialize Zero-Page Gameplay State & 2A03 APU ($4015 = #x0F)
+    (LDA #:imm 48)   (STA #:zp ,NS-ZP-X)
+    (LDA #:imm 160)  (STA #:zp ,NS-ZP-Y)
+    (LDA #:imm 3)    (STA #:zp ,NS-ZP-LIVES)
+    (LDA #:imm 1)    (STA #:zp ,NS-ZP-ENEMY-ALIVE)
+    (STA #:zp ,NS-ZP-WALL-INTACT)
+    (LDA #:imm 128)  (STA #:zp ,NS-ZP-ENEMY-X)
+    (LDA #:imm 112)  (STA #:zp ,NS-ZP-ENEMY-Y)
+    (LDA #:imm #x0F) (STA #:abs #x4015)
+    (JSR build_oam)
+    (LDA #:imm #x00) (STA #:abs #x2003)
+    (LDA #:imm #x02) (STA #:abs #x4014)
+    (BIT #:abs #x2002)
+    (LDA #:imm 0)    (STA #:abs #x2005) (STA #:abs #x2005)
+    (LDA #:imm #x90) (STA #:abs #x2000)
+    (LDA #:imm #x1E) (STA #:abs #x2001)
+    (RTS)
+
+    ;; ========================================================================
+    ;; ActiveFrame Gameplay Logic: Joypad, Laser Overload Recovery & Polarity
+    ;; ========================================================================
+    (label game_frame_step)
+    (INC #:zp ,NS-ZP-FRAME-CNT)
+    (LDA #:zp ,NS-ZP-BUTTONS)
+    (STA #:zp ,NS-ZP-PREV-BTN)
+    (LDA #:imm 1) (STA #:abs #x4016)
+    (LDA #:imm 0) (STA #:abs #x4016)
+    (STA #:zp ,NS-ZP-BUTTONS)
+    (LDX #:imm 8)
+    (label poll_btn_loop)
+    (LDA #:abs #x4016)
+    (LSR)
+    (ROR #:zp ,NS-ZP-BUTTONS)
+    (DEX)
+    (BNE poll_btn_loop)
+    (LDA #:zp ,NS-ZP-PREV-BTN)
+    (EOR #:imm #xFF)
+    (AND #:zp ,NS-ZP-BUTTONS)
+    (STA #:zp ,NS-ZP-NEW-BTN)
+
+    ;; Check if player is in laser-overload failure state (NS-ZP-DEAD != 0)
+    (LDA #:zp ,NS-ZP-DEAD)
+    (BEQ check_left_hazard)
+    (LDA #:zp ,NS-ZP-BUTTONS)
+    (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
+    (BEQ dead_wait_oam)
+    (LDA #:imm 0)   (STA #:zp ,NS-ZP-DEAD)
+    (STA #:zp ,NS-ZP-VY)
+    (LDA #:imm 48)  (STA #:zp ,NS-ZP-X)
+    (LDA #:imm 160) (STA #:zp ,NS-ZP-Y)
+    (LDA #:imm 1)   (STA #:zp ,NS-ZP-ENEMY-ALIVE)
+    ;; Triangle recovery chime ($4008-$400B)
+    (LDA #:imm #x8F) (STA #:abs #x4008)
+    (LDA #:imm #x60) (STA #:abs #x400A)
+    (LDA #:imm #x18) (STA #:abs #x400B)
+    (label dead_wait_oam)
+    (JMP build_oam)
+
+    ;; Pressing BTN-LEFT triggers Mismatched Laser Barrier Overload hazard
+    (label check_left_hazard)
+    (LDA #:zp ,NS-ZP-BUTTONS)
+    (AND #:imm ,BTN-LEFT)
+    (BEQ run_game_mechanics)
+    (LDA #:imm 1)
+    (STA #:zp ,NS-ZP-DEAD)
+    (LDA #:zp ,NS-ZP-LIVES)
+    (BEQ trigger_hazard_sfx)
+    (DEC #:zp ,NS-ZP-LIVES)
+    (label trigger_hazard_sfx)
+    ;; 2A03 Noise channel laser overload SFX ($400C-$400F)
+    (LDA #:imm #x1F) (STA #:abs #x400C)
+    (LDA #:imm #x08) (STA #:abs #x400E)
+    (LDA #:imm #x18) (STA #:abs #x400F)
+    (JMP build_oam)
+
+    (label run_game_mechanics)
+    ;; 1. 8.8 Cyber-Jump Impulse on BTN-A
+    (LDA #:zp ,NS-ZP-BUTTONS)
+    (AND #:imm ,BTN-A)
+    (BEQ ns_gravity_step)
+    (LDA #:imm #xFC) (STA #:zp ,NS-ZP-VY)
+    ;; Pulse 1 synth jump sweep ($4000-$4003)
+    (LDA #:imm #x9F) (STA #:abs #x4000)
+    (LDA #:imm #x70) (STA #:abs #x4002)
+    (LDA #:imm #x18) (STA #:abs #x4003)
+    (LDA #:zp ,NS-ZP-Y)
+    (CMP #:imm 88)
+    (BCC ns_check_sprint)
+    (SEC) (SBC #:imm 8)
+    (STA #:zp ,NS-ZP-Y)
+    (JMP ns_check_sprint)
+
+    (label ns_gravity_step)
+    (LDA #:zp ,NS-ZP-Y)
+    (CMP #:imm 160)
+    (BCS ns_check_sprint)
+    (CLC) (ADC #:imm 2)
+    (STA #:zp ,NS-ZP-Y)
+
+    ;; 2. Check Matching Polarity Sprint (BTN-B + BTN-RIGHT -> phase through barrier & advance zone!)
+    (label ns_check_sprint)
+    (LDA #:zp ,NS-ZP-BUTTONS)
+    (AND #:imm ,(bitwise-ior BTN-B BTN-RIGHT))
+    (CMP #:imm ,(bitwise-ior BTN-B BTN-RIGHT))
+    (BNE ns_check_toggle)
+    (LDA #:imm 1) (STA #:zp ,NS-ZP-POLARITY)
+    (JMP trigger_stage_advance)
+
+    ;; 3. Phase Polarity Toggle (BTN-B or BTN-SELECT toggles NS-ZP-POLARITY between 0 and 1!)
+    (label ns_check_toggle)
+    (LDA #:zp ,NS-ZP-BUTTONS)
+    (AND #:imm ,(bitwise-ior BTN-B BTN-SELECT))
+    (BEQ ns_check_right_only)
+    (LDA #:zp ,NS-ZP-POLARITY)
+    (EOR #:imm 1)
+    (STA #:zp ,NS-ZP-POLARITY)
+    ;; Pulse 2 phase-shift synth SFX ($4004-$4007)
+    (LDA #:imm #x9F) (STA #:abs #x4004)
+    (LDA #:imm #x38) (STA #:abs #x4006)
+    (LDA #:imm #x18) (STA #:abs #x4007)
+
+    ;; 4. Lateral Cyber Sprint (BTN-RIGHT)
+    (label ns_check_right_only)
+    (LDA #:zp ,NS-ZP-BUTTONS)
+    (AND #:imm ,BTN-RIGHT)
+    (BEQ finish_frame_oam)
+    (LDA #:zp ,NS-ZP-X)
+    (CLC) (ADC #:imm 16)
+    (STA #:zp ,NS-ZP-X)
+    (CMP #:imm 176)
+    (BCS trigger_stage_advance)
+    (JMP finish_frame_oam)
+
+    ;; Zone Advance Progression (Zone 0 -> 1 -> 2 -> Mainframe Victory!)
+    (label trigger_stage_advance)
+    (LDA #:imm 0)  (STA #:zp ,NS-ZP-ENEMY-ALIVE)
+    (INC #:zp ,NS-ZP-NODES)
+    (INC #:zp ,NS-ZP-SCORE)
+    (LDA #:imm 1)  (STA #:zp ,NS-ZP-WON)
+    (STA #:zp ,NS-ZP-STAGE-DIRTY)
+    (LDA #:imm 48) (STA #:zp ,NS-ZP-X)
+    ;; 2A03 Pulse 2 mainframe nexus fanfare ($4004-$4007)
+    (LDA #:imm #x9F) (STA #:abs #x4004)
+    (LDA #:imm #x50) (STA #:abs #x4006)
+    (LDA #:imm #x18) (STA #:abs #x4007)
+    (LDA #:zp ,NS-ZP-STAGE-ID)
+    (CMP #:imm 2)
+    (BCS mark_campaign_completed)
+    (INC #:zp ,NS-ZP-STAGE-ID)
+    (LDA #:zp ,NS-ZP-STAGE-ID)
+    (CMP #:imm 2)
+    (BCC finish_frame_oam)
+    (label mark_campaign_completed)
+    (LDA #:imm 1)
+    (STA #:zp ,NS-ZP-GAME-COMPLETED)
+    (label finish_frame_oam)
+    (JMP build_oam)
+
+    ;; ========================================================================
+    ;; OAM Sprite Buffer Builder ($0200-$022B)
+    ;; ========================================================================
+    (label build_oam)
+    (LDX #:imm 43)
+    (label copy_oam_tpl)
+    (LDA #:absx oam_template_table)
+    (STA #:absx #x0200)
+    (DEX)
+    (BPL copy_oam_tpl)
+
+    ;; Patch Neon Strider 16x16 Metasprite Y & X coordinates
+    (LDA #:zp ,NS-ZP-Y)
+    (STA #:abs #x0204)
+    (STA #:abs #x020C)
+    (CLC) (ADC #:imm 8)
+    (STA #:abs #x0208)
+    (STA #:abs #x0210)
+
+    (LDA #:zp ,NS-ZP-X)
+    (STA #:abs #x0207)
+    (STA #:abs #x020B)
+    (CLC) (ADC #:imm 8)
+    (STA #:abs #x020F)
+    (STA #:abs #x0213)
+
+    ;; Patch Strider OAM Palette Attribute from Shield Polarity (0 = Cyan Pal 0, 1 = Magenta Pal 1)
+    (LDA #:zp ,NS-ZP-POLARITY)
+    (AND #:imm #x01)
+    (STA #:abs #x0206)
+    (STA #:abs #x020A)
+    (ORA #:imm #x40)
+    (STA #:abs #x020E)
+    (STA #:abs #x0212)
+
+    ;; Show overload spark tile (#x3E) when NS-ZP-DEAD != 0
+    (LDA #:zp ,NS-ZP-DEAD)
+    (BEQ chk_hide_enemy)
+    (LDA #:imm #x3E)
+    (STA #:abs #x0205)
+
+    ;; Hide Laser Sentry 16x16 Metasprite when NS-ZP-ENEMY-ALIVE == 0
+    (label chk_hide_enemy)
+    (LDA #:zp ,NS-ZP-ENEMY-ALIVE)
+    (BNE oam_done)
+    (LDA #:imm #xF8)
+    (STA #:abs #x0214)
+    (STA #:abs #x0218)
+    (STA #:abs #x021C)
+    (STA #:abs #x0220)
+    (label oam_done)
+    (RTS)
+
+    ;; ========================================================================
+    ;; VBlank NMI Handler (<= 2273 Cycles, 3 PHA / 3 PLA, Clean Scroll Restore)
+    ;; ========================================================================
+    (label nmi_handler)
+    (PHA)
+    (TXA) (PHA)
+    (TYA) (PHA)
+
+    ;; 1. OAM DMA ($4014 = #x02)
+    (LDA #:imm #x00) (STA #:abs #x2003)
+    (LDA #:imm #x02) (STA #:abs #x4014)
+
+    ;; 2. Zero-Offset BCD HUD Updates ($204A = Zone, $2052 = Nodes, $205B = Lives)
+    (LDX #:imm #x4A) (JSR set_nt0_addr)
+    (LDA #:zp ,NS-ZP-STAGE-ID) (AND #:imm #x03) (STA #:abs #x2007)
+
+    (LDX #:imm #x52) (JSR set_nt0_addr)
+    (LDA #:zp ,NS-ZP-NODES) (AND #:imm #x07) (STA #:abs #x2007)
+
+    (LDX #:imm #x5B) (JSR set_nt0_addr)
+    (LDA #:zp ,NS-ZP-LIVES) (AND #:imm #x07) (STA #:abs #x2007)
+
+    ;; 3. Dynamic Zone Accent ($3F02) & Shield Polarity Color ($3F11) Updates
+    (LDA #:imm #x3F) (LDX #:imm #x02) (JSR set_vram_addr)
+    (LDX #:zp ,NS-ZP-STAGE-ID)
+    (LDA #:absx stage_accent_table)
+    (STA #:abs #x2007)
+
+    (LDA #:imm #x3F) (LDX #:imm #x11) (JSR set_vram_addr)
+    (LDX #:zp ,NS-ZP-POLARITY)
+    (LDA #:absx polarity_color_table)
+    (STA #:abs #x2007)
+
+    ;; 4. Restore Clean PPU Scroll Latch ($2000 = #x90, $2005 = 0, 0)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x90) (STA #:abs #x2000)
+    (LDA #:imm 0)    (STA #:abs #x2005) (STA #:abs #x2005)
+    (LDA #:imm 1)    (STA #:zp #x0F)
+
+    (PLA) (TAY)
+    (PLA) (TAX)
+    (PLA)
+    (RTI)
+
+    (label irq_handler)
+    (RTI)
+
+    ;; ========================================================================
+    ;; Read-Only PRG-ROM Tables (0 Page Crossings!)
+    ;; ========================================================================
+    (label palette_table)
+    (.byte ,@neon-strider-palette)
+
+    (label hud_text_table)
+    (.byte ,@neon-strider-hud-bytes)
+
+    (label stage_accent_table)
+    (.byte ,@neon-strider-stage-accents)
+
+    (label polarity_color_table)
+    (.byte ,@neon-strider-polarity-colors)
+
+    (label oam_template_table)
+    (.byte ,@neon-strider-oam-template)))
+
+;; 8. Compile, Static-Analyze, Typecheck & Emit `build/neon_strider.nes` via `defnes-game`
+(defnes-game neon-strider-game
+  #:name             'neon-strider-cyber-grid
+  #:mapper           'NROM
+  #:mirroring        'vertical
+  #:chr              neon-strider-chr
+  #:zp-map           neon-strider-zp-map
+  #:state-machine    neon-strider-fsm
+  #:oam-sprites      11
+  #:scanline-sprites 4
+  #:vram-bytes       24
+  #:ram-bytes        64
+  #:vblank-scratch   '((scratch_vblank_polarity 4))
+  #:active-scratch   '((scratch_subpixel_jump 6) (scratch_laser_phase 6))
+  #:program          neon-strider-6502-program
+  #:out-rom          "build/neon_strider.nes")
+
+(define neon-strider-rom-bytes   (hash-ref neon-strider-game 'rom-bytes))
+(define neon-strider-asm-result  (hash-ref neon-strider-game 'asm-result))
+(define neon-strider-type-result (hash-ref neon-strider-game 'type-result))
+(define neon-strider-module-desc (hash-ref neon-strider-game 'module-desc))
+(define neon-strider-repairs     (hash-ref neon-strider-game 'repairs))
+
 (vblank-block neon-strider-vblank
-  #:cycles           640
+  #:cycles           (nes-grade-cycles (nes-type-result-vblank-grade neon-strider-type-result))
   #:oam-sprites      11
   #:scanline-sprites 4
   #:vram-bytes       24
@@ -84,33 +589,71 @@
     scratch_vblank_polarity))
 
 (active-frame-block neon-strider-active
-  #:cycles       1840
+  #:cycles       (nes-grade-cycles (nes-type-result-active-grade neon-strider-type-result))
   #:ram-bytes    64
   #:apu-channels '(pulse1 pulse2 triangle noise)
   (with-zp-scratch ([scratch_subpixel_jump 6]
                     [scratch_laser_phase   6])
     (list scratch_subpixel_jump scratch_laser_phase)))
 
-;; 6. Verify Graded Module Descriptor via defnes-module
 (defnes-module neon-strider-verified-module NTSC-NROM-BUDGET
   neon-strider-module-desc)
+
+(define (build-neon-strider-chr-rom) neon-strider-chr)
+(define (emit-neon-strider-6502-program) neon-strider-6502-program)
+
+(define (compile-neon-strider-rom! #:nes-out-path [nes-out-path #f])
+  (define g
+    (compile-boba-nes-game! #:id               'neon-strider-game
+                            #:name             'neon-strider-cyber-grid
+                            #:mapper           'NROM
+                            #:mirroring        'vertical
+                            #:chr              neon-strider-chr
+                            #:zp-map           neon-strider-zp-map
+                            #:state-machine    neon-strider-fsm
+                            #:oam-sprites      11
+                            #:scanline-sprites 4
+                            #:vram-bytes       24
+                            #:ram-bytes        64
+                            #:vblank-scratch   '((scratch_vblank_polarity 4))
+                            #:active-scratch   '((scratch_subpixel_jump 6) (scratch_laser_phase 6))
+                            #:program          neon-strider-6502-program
+                            #:out-rom          nes-out-path))
+  (values (hash-ref g 'rom-bytes)
+          (hash-ref g 'asm-result)
+          (hash-ref g 'type-result)
+          (hash-ref g 'module-desc)
+          (hash-ref g 'repairs)))
 
 (provide neon-strider-chr-layout
          neon-strider-hud-font
          neon-strider-hud-anchor
+         neon-strider-chr
+         neon-strider-palette
+         neon-strider-stage-accents
+         neon-strider-polarity-colors
+         neon-strider-hud-bytes
+         neon-strider-oam-template
          neon-strider-metasprite
          laser-sentry-metasprite
          cyber-node-metasprite
          mainframe-core-metasprite
+         laser-beam-vertical-metasprite
          neon-strider-fsm
          neon-strider-zp-map
+         neon-strider-6502-program
+         neon-strider-game
          neon-strider-vblank
          neon-strider-active
          neon-strider-verified-module
          neon-strider-rom-bytes
          neon-strider-asm-result
          neon-strider-type-result
-         neon-strider-module-desc)
+         neon-strider-module-desc
+         neon-strider-repairs
+         build-neon-strider-chr-rom
+         emit-neon-strider-6502-program
+         compile-neon-strider-rom!)
 
 (module+ main
   (define vb  (nes-type-result-vblank-grade neon-strider-type-result))
@@ -129,6 +672,8 @@
           (nes-grade-oam-sprites vb) (nes-grade-scanline-sprites vb))
   (printf "  Phi3 Zero-Page Live / Peak : ~a B live / ~a B peak (<= 224 B)\n"
           (nes-grade-zp-bytes-live act) (nes-grade-zp-bytes-peak act))
+  (printf "  Phi3 Non-Zero CHR Tiles    : ~a / 512 tiles\n"
+          (nes-grade-chr-tiles act))
   (printf "  Output iNES 1.0 ROM        : build/neon_strider.nes (~a bytes)\n"
           (bytes-length neon-strider-rom-bytes))
   (printf "================================================================\n"))

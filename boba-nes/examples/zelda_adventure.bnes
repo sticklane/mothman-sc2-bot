@@ -74,7 +74,10 @@
 (define zelda-rom-path "build/zelda_nes.nes")
 
 (define-values (zelda-rom-bytes zelda-asm-result zelda-type-result zelda-module-desc)
-  (compile-zelda-nes-rom! #:nes-out-path zelda-rom-path))
+  (compile-zelda-nes-rom! #:nes-out-path zelda-rom-path
+                          #:chr-layout zelda-chr-layout
+                          #:zp-map zelda-zp-layout
+                          #:state-machine zelda-quest-fsm))
 
 (module+ main
   (define vb  (nes-type-result-vblank-grade zelda-type-result))

@@ -1,0 +1,461 @@
+{
+  "generatedAt": "2026-11-03T19:25:39.491Z",
+  "totalTruncationDefectsAcrossAllGames": 0,
+  "syntheticHalfCoinRegressionProof": {
+    "oneSlotBrokenCoinAudit": {
+      "visibleSpriteCount": 1,
+      "truncationDefects": 1,
+      "defects": [
+        {
+          "type": "UNCLOSED_VERTICAL_HALF_SPRITE",
+          "slot": 9,
+          "tile": 96,
+          "tileHex": "0x60",
+          "attr": 2,
+          "x": 80,
+          "y": 120,
+          "topRowOpaque": 0,
+          "bottomSeamRowOpaque": 8,
+          "asciiRows": [
+            "........",
+            "...33...",
+            "..3333..",
+            ".333333.",
+            ".332133.",
+            "33233133",
+            "33233133",
+            "33233133"
+          ]
+        }
+      ]
+    },
+    "twoSlotRepairedCoinAudit": {
+      "visibleSpriteCount": 2,
+      "truncationDefects": 0,
+      "defects": []
+    },
+    "verifiedCatchAndFix": true
+  },
+  "primaryGames": {
+    "smb": {
+      "id": "smb",
+      "title": "Super Mario Bros.",
+      "threePanelScreenshot": "screenshots/visual_diff_smb_3panel.png",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100,
+        "meanAbsoluteRgbError": 0,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 100,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 5,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "checkpoints": [
+        {
+          "checkpoint": "CP0: Initial World 1-1 Boot",
+          "totalPixels": 61440,
+          "matchingPixels": 61440,
+          "diffPixels": 0,
+          "pixelMatchPct": 100,
+          "meanAbsoluteRgbError": 0,
+          "hudBandMatchPct": 100,
+          "upperPlayfieldMatchPct": 100,
+          "lowerPlayfieldMatchPct": 100,
+          "visibleSpriteCount": 5,
+          "truncationDefects": 0,
+          "defects": []
+        },
+        {
+          "checkpoint": "Question Block Coin Pop & Landing",
+          "totalPixels": 61440,
+          "matchingPixels": 60655,
+          "diffPixels": 785,
+          "pixelMatchPct": 98.72,
+          "meanAbsoluteRgbError": 1.52,
+          "hudBandMatchPct": 98.95,
+          "upperPlayfieldMatchPct": 100,
+          "lowerPlayfieldMatchPct": 97.37,
+          "visibleSpriteCount": 9,
+          "truncationDefects": 0,
+          "defects": []
+        },
+        {
+          "checkpoint": "World 1-1 Flagpole Reached",
+          "totalPixels": 61440,
+          "matchingPixels": 52541,
+          "diffPixels": 8899,
+          "pixelMatchPct": 85.52,
+          "meanAbsoluteRgbError": 16.55,
+          "hudBandMatchPct": 98.71,
+          "upperPlayfieldMatchPct": 92.89,
+          "lowerPlayfieldMatchPct": 74.09,
+          "visibleSpriteCount": 5,
+          "truncationDefects": 0,
+          "defects": []
+        }
+      ],
+      "coinPopWindowAudit": {
+        "frameRange": "18..36",
+        "framesInspected": 19,
+        "truncationDefects": 0
+      },
+      "summary": {
+        "totalFramesAudited": 173,
+        "truncationDefects": 0,
+        "avgPixelMatchPct": 92.07,
+        "maxPixelMatchPct": 100,
+        "avgHudBandMatchPct": 98.95,
+        "avgMeanAbsoluteRgbError": 9.64,
+        "coinPopDefects": 0
+      }
+    },
+    "zelda": {
+      "id": "zelda",
+      "title": "The Legend of Zelda",
+      "threePanelScreenshot": "screenshots/visual_diff_zelda_3panel.png",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61152,
+        "diffPixels": 288,
+        "pixelMatchPct": 99.53,
+        "meanAbsoluteRgbError": 0.49,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 99.2,
+        "lowerPlayfieldMatchPct": 99.71,
+        "visibleSpriteCount": 11,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "checkpoints": [
+        {
+          "checkpoint": "CP0: Initial Overworld Boot",
+          "totalPixels": 61440,
+          "matchingPixels": 61152,
+          "diffPixels": 288,
+          "pixelMatchPct": 99.53,
+          "meanAbsoluteRgbError": 0.49,
+          "hudBandMatchPct": 100,
+          "upperPlayfieldMatchPct": 99.2,
+          "lowerPlayfieldMatchPct": 99.71,
+          "visibleSpriteCount": 11,
+          "truncationDefects": 0,
+          "defects": []
+        },
+        {
+          "checkpoint": "Sword Thrust & Dungeon Key Drop",
+          "totalPixels": 61440,
+          "matchingPixels": 60977,
+          "diffPixels": 463,
+          "pixelMatchPct": 99.25,
+          "meanAbsoluteRgbError": 0.95,
+          "hudBandMatchPct": 99.62,
+          "upperPlayfieldMatchPct": 98.72,
+          "lowerPlayfieldMatchPct": 99.65,
+          "visibleSpriteCount": 9,
+          "truncationDefects": 0,
+          "defects": []
+        },
+        {
+          "checkpoint": "Eagle Sanctum Triforce Pedestal",
+          "totalPixels": 61440,
+          "matchingPixels": 58647,
+          "diffPixels": 2793,
+          "pixelMatchPct": 95.45,
+          "meanAbsoluteRgbError": 6.96,
+          "hudBandMatchPct": 92.64,
+          "upperPlayfieldMatchPct": 91.77,
+          "lowerPlayfieldMatchPct": 100,
+          "visibleSpriteCount": 11,
+          "truncationDefects": 0,
+          "defects": []
+        }
+      ],
+      "summary": {
+        "totalFramesAudited": 45,
+        "truncationDefects": 0,
+        "avgPixelMatchPct": 97.66,
+        "maxPixelMatchPct": 99.53,
+        "avgHudBandMatchPct": 96.76,
+        "avgMeanAbsoluteRgbError": 3.44
+      }
+    },
+    "tetris": {
+      "id": "tetris",
+      "title": "Nintendo NES Tetris",
+      "threePanelScreenshot": "screenshots/visual_diff_tetris_3panel.png",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61146,
+        "diffPixels": 294,
+        "pixelMatchPct": 99.52,
+        "meanAbsoluteRgbError": 0.82,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 98.9,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 8,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "checkpoints": [
+        {
+          "checkpoint": "CP0: Initial Level 00 Boot",
+          "totalPixels": 61440,
+          "matchingPixels": 61146,
+          "diffPixels": 294,
+          "pixelMatchPct": 99.52,
+          "meanAbsoluteRgbError": 0.82,
+          "hudBandMatchPct": 100,
+          "upperPlayfieldMatchPct": 98.9,
+          "lowerPlayfieldMatchPct": 100,
+          "visibleSpriteCount": 8,
+          "truncationDefects": 0,
+          "defects": []
+        },
+        {
+          "checkpoint": "Piece #1 Locked in Well",
+          "totalPixels": 61440,
+          "matchingPixels": 60950,
+          "diffPixels": 490,
+          "pixelMatchPct": 99.2,
+          "meanAbsoluteRgbError": 1.36,
+          "hudBandMatchPct": 100,
+          "upperPlayfieldMatchPct": 98.16,
+          "lowerPlayfieldMatchPct": 100,
+          "visibleSpriteCount": 8,
+          "truncationDefects": 0,
+          "defects": []
+        }
+      ],
+      "summary": {
+        "totalFramesAudited": 12,
+        "truncationDefects": 0,
+        "avgPixelMatchPct": 99.39,
+        "maxPixelMatchPct": 99.52,
+        "avgHudBandMatchPct": 100,
+        "avgMeanAbsoluteRgbError": 1.06
+      }
+    }
+  },
+  "bobaIsYou": {
+    "id": "boba_is_you",
+    "title": "Boba Is You",
+    "framesAudited": 32,
+    "truncationDefects": 0
+  },
+  "top10Classics": [
+    {
+      "id": "donkey_kong",
+      "title": "Donkey Kong",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100,
+        "meanAbsoluteRgbError": 0,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 100,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 14,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "mario_bros",
+      "title": "Mario Bros.",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100,
+        "meanAbsoluteRgbError": 0,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 100,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 10,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "pac_man",
+      "title": "Pac-Man",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61243,
+        "diffPixels": 197,
+        "pixelMatchPct": 99.68,
+        "meanAbsoluteRgbError": 0.43,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 99.26,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 20,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "excitebike",
+      "title": "Excitebike",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100,
+        "meanAbsoluteRgbError": 0,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 100,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 22,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "balloon_fight",
+      "title": "Balloon Fight",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100,
+        "meanAbsoluteRgbError": 0,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 100,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 24,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "ice_climber",
+      "title": "Ice Climber",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 33077,
+        "diffPixels": 28363,
+        "pixelMatchPct": 53.84,
+        "meanAbsoluteRgbError": 57.68,
+        "hudBandMatchPct": 80.4,
+        "upperPlayfieldMatchPct": 44.8,
+        "lowerPlayfieldMatchPct": 54.7,
+        "visibleSpriteCount": 12,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "galaga",
+      "title": "Galaga",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 59620,
+        "diffPixels": 1820,
+        "pixelMatchPct": 97.04,
+        "meanAbsoluteRgbError": 4.91,
+        "hudBandMatchPct": 97.42,
+        "upperPlayfieldMatchPct": 95.47,
+        "lowerPlayfieldMatchPct": 98.49,
+        "visibleSpriteCount": 29,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "kung_fu",
+      "title": "Kung Fu",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 57800,
+        "diffPixels": 3640,
+        "pixelMatchPct": 94.08,
+        "meanAbsoluteRgbError": 8.27,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 94.7,
+        "lowerPlayfieldMatchPct": 91.63,
+        "visibleSpriteCount": 26,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "battle_city",
+      "title": "Battle City",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100,
+        "meanAbsoluteRgbError": 0,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 100,
+        "lowerPlayfieldMatchPct": 100,
+        "visibleSpriteCount": 8,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    },
+    {
+      "id": "bomberman",
+      "title": "Bomberman",
+      "cp0": {
+        "totalPixels": 61440,
+        "matchingPixels": 61294,
+        "diffPixels": 146,
+        "pixelMatchPct": 99.76,
+        "meanAbsoluteRgbError": 0.26,
+        "hudBandMatchPct": 100,
+        "upperPlayfieldMatchPct": 100,
+        "lowerPlayfieldMatchPct": 99.45,
+        "visibleSpriteCount": 20,
+        "truncationDefects": 0,
+        "defects": []
+      },
+      "framesAudited": 27,
+      "truncationDefects": 0
+    }
+  ],
+  "originalGames": [
+    {
+      "id": "star_courier",
+      "title": "Star Courier: Kestral Run",
+      "framesAudited": 21,
+      "truncationDefects": 0
+    },
+    {
+      "id": "crypt_sweep",
+      "title": "Crypt Sweep: Chronomancer's Vault",
+      "framesAudited": 21,
+      "truncationDefects": 0
+    },
+    {
+      "id": "neon_strider",
+      "title": "Neon Strider: Cyber Grid 1989",
+      "framesAudited": 21,
+      "truncationDefects": 0
+    }
+  ]
+}

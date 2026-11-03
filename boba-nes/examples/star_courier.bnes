@@ -3,21 +3,61 @@
 ;; ============================================================================
 ;; examples/star_courier.bnes : Star Courier: Kestral Run in #lang boba-nes
 ;; ============================================================================
-;; Original Gravity-Thrust Lunar Courier Game across 3 Planetary Sectors:
+;; Complete, Self-Contained Gravity-Thrust Lunar Courier Game across 3 Sectors:
 ;;   - Sector 0: Lunar Crater (Cyan Regolith Deck #x21)
 ;;   - Sector 1: Ion Cavern   (Violet Crystal Basin #x24)
 ;;   - Sector 2: Core Reactor (Gold Fusion Core #x28)
 ;;
-;; Exercises #lang boba-nes declarative hardware & gameplay constructs:
-;;   - defchr-layout, defchar-map, defsprite-tile, defmetasprite ('symmetric-col-major)
-;;   - defstate-machine (sector-0 -> sector-1 -> sector-2 -> delivery-victory,
-;;                       with hull-breach-failure -> sector-0 recovery)
-;;   - defzp-map, with-zp-scratch, vblank-block, active-frame-block, defnes-module
+;; 100% of CHR tiles, palettes, Zero-Page map, state machine, metasprites,
+;; and 6502 instructions live directly in this `.bnes` source file and compile
+;; via `defnes-game` -> `build/star_courier.nes`.
 ;; ============================================================================
 
-(require "../compiler/original-dsl-games.rkt")
+;; 1. Pinned Zero-Page Hardware Addresses ($0010-$0029)
+(define SC-ZP-BUTTONS        #x10)
+(define SC-ZP-PREV-BTN       #x11)
+(define SC-ZP-NEW-BTN        #x12)
+(define SC-ZP-FRAME-CNT      #x13)
+(define SC-ZP-X              #x14)
+(define SC-ZP-Y              #x15)
+(define SC-ZP-VY             #x16)
+(define SC-ZP-FUEL           #x17)
+(define SC-ZP-ENEMY-X        #x1B)
+(define SC-ZP-ENEMY-ALIVE    #x1C)
+(define SC-ZP-ENEMY-Y        #x1D)
+(define SC-ZP-SCORE          #x1E)
+(define SC-ZP-PODS           #x1F)
+(define SC-ZP-WALL-INTACT    #x20)
+(define SC-ZP-WON            #x24)
+(define SC-ZP-LIVES          #x25)
+(define SC-ZP-DEAD           #x26)
+(define SC-ZP-STAGE-DIRTY    #x27)
+(define SC-ZP-STAGE-ID       #x28)
+(define SC-ZP-GAME-COMPLETED #x29)
 
-;; 1. PPU Pattern Table & Zero-Offset HUD Typography Layout
+(defzp-map star-courier-zp-map
+  ([buttons        #x10 controller-state]
+   [prev-btn       #x11 controller-state]
+   [new-btn        #x12 controller-state]
+   [frame-cnt      #x13 frame-counter]
+   [x              #x14 player-or-actor-coord]
+   [y              #x15 player-or-actor-coord]
+   [vy             #x16 player-or-actor-coord]
+   [fuel           #x17 game-phase-or-flag]
+   [drone-x        #x1B player-or-actor-coord]
+   [enemy-alive    #x1C game-phase-or-flag]
+   [drone-y        #x1D player-or-actor-coord]
+   [score          #x1E hud-bcd-counter]
+   [pods           #x1F hud-bcd-counter]
+   [wall-intact    #x20 game-phase-or-flag]
+   [won            #x24 game-phase-or-flag]
+   [lives          #x25 hud-bcd-counter]
+   [dead           #x26 game-phase-or-flag]
+   [stage-dirty    #x27 game-phase-or-flag]
+   [stage-id       #x28 game-phase-or-flag]
+   [game-completed #x29 game-phase-or-flag]))
+
+;; 2. PPU Pattern Table & Zero-Offset HUD Typography Layout
 (defchr-layout star-courier-chr-layout
   #:sprite-pt  0
   #:bg-pt      1
@@ -31,7 +71,78 @@
 
 (defsprite-tile star-courier-hud-anchor #:tile #xFF #:attr #x00)
 
-;; 2. Symmetric-Column-Major 16x16 Metasprites (OAM Horizontal Flip-Folded!)
+;; 3. Declarative 2bpp CHR-ROM Resource (Base Zero-Offset Font + Lunar Lander / Drone / Pod / Beacon Tiles)
+(defchr-resource star-courier-chr
+  #:base-font? #t
+  #:tiles
+  (list
+   ;; #x2F: Starfield background tile
+   (cons #x2F '("..1....." "......3." "........" "....2..."
+                ".3......" "........" ".....1.." "..2....."))
+   ;; #x30, #x31: Kestral Lander (symmetric-col-major left half: cockpit + thruster leg)
+   (cons #x30 '("....3333" "...32233" "..321133" ".3211333"
+                ".3222333" ".3333322" "..222211" "..133111"))
+   (cons #x31 '("..322333" ".3322311" ".3223..2" "3323...2"
+                "333....1" "22....13" "333..133" ".....333"))
+   ;; #x32, #x33: Plasma Drone (symmetric-col-major left half)
+   (cons #x32 '("...22222" "..233311" ".2311331" "23133311"
+                "23133311" ".2311331" "..233311" "...22222"))
+   (cons #x33 '("..12..21" ".12....2" "12.....1" "2......1"
+                "........" "........" "........" "........"))
+   ;; #x34, #x35: Energy Pod (symmetric-col-major)
+   (cons #x34 '("...33333" "..311133" ".3133313" ".3132313"
+                ".3132313" ".3133313" "..311133" "...33333"))
+   (cons #x35 '("...22222" "..233322" "..211122" "...22222"
+                "....33.." "....11.." "........" "........"))
+   ;; #x36, #x37: Landing Beacon Pylon (symmetric-col-major)
+   (cons #x36 '(".....333" "....3223" "...32333" "..323..3"
+                "...33..3" "......23" ".....233" "....2313"))
+   (cons #x37 '("....2313" "...23113" "...23113" "..231113"
+                "..233333" ".2311113" "23333333" "33333333"))
+   ;; #x3E: Hull Breach Debris Sprite
+   (cons #x3E '("3..2..3." ".3.2.3.." "..323..1" "2231322."
+                ".23132.." "1.323.3." ".3.2..13" "3.....1."))
+   ;; #x40: Lunar Crater Regolith Deck Tile
+   (cons #x40 '("33333333" "22322232" "21122112" "11222211"
+                "22211222" "12211221" "11122111" "11111111"))
+   ;; #x42: Illuminated Landing Pad Chevron Tile
+   (cons #x42 '("33333333" "31331331" "13313313" "33133133"
+                "22222222" "11211211" "11111111" "11111111"))
+   ;; #x45: Metallic HUD Frame Bar
+   (cons #x45 '("........" "33333333" "22122122" "11111111"
+                "........" "........" "........" "........"))
+   ;; #xFF: Opaque HUD Anchor Emblem
+   (cons #xFF '("33333333" "32222223" "32333323" "32311323"
+                "32311323" "32333323" "32222223" "33333333"))))
+
+;; 4. Declarative Palettes, HUD Nametable Text & OAM Sprite Template Resources
+(defpalette-resource star-courier-palette
+  '(#x0F #x21 #x11 #x30   #x0F #x28 #x18 #x30
+    #x0F #x2A #x1A #x30   #x0F #x24 #x14 #x30
+    #x0F #x21 #x28 #x30   #x0F #x16 #x27 #x30
+    #x0F #x2A #x1A #x30   #x0F #x28 #x18 #x30))
+
+;; Sector 0 (Lunar Cyan #x21), Sector 1 (Ion Violet #x24), Sector 2 (Core Gold #x28)
+(defpalette-resource star-courier-stage-accents
+  '(#x21 #x24 #x28 #x28))
+
+(defnametable-resource star-courier-hud-bytes
+  (encode-char-map-string star-courier-hud-font "SECTOR 0  PODS 0  LIVES 3"))
+
+(defoam-resource star-courier-oam-template
+  '(16  #xFF #x00 16
+    144 #x30 #x00 48
+    152 #x31 #x00 48
+    144 #x30 #x40 56
+    152 #x31 #x40 56
+    112 #x32 #x01 128
+    120 #x33 #x01 128
+    112 #x32 #x41 136
+    120 #x33 #x41 136
+    104 #x34 #x02 96
+    136 #x36 #x03 200))
+
+;; 5. Symmetric-Column-Major 16x16 & Symmetric-Vertical 8x16 Metasprites
 (defmetasprite kestral-lander-metasprite
   #:tiles (list #x30 #x31)
   #:order 'symmetric-col-major
@@ -52,7 +163,12 @@
   #:order 'symmetric-col-major
   #:attr  #x03)
 
-;; 3. Sector Progression State Machine with Verified Hull-Breach Recovery
+(defmetasprite thruster-plume-vertical-metasprite
+  #:tile  #x34
+  #:order 'symmetric-vertical
+  #:attr  #x02)
+
+;; 6. Sector Progression State Machine with Verified Hull-Breach Recovery
 (defstate-machine star-courier-fsm
   #:initial sector-0
   ([sector-0            #:kind normal  #:transitions (sector-1 hull-breach-failure)]
@@ -61,24 +177,381 @@
    [hull-breach-failure #:kind failure #:transitions (sector-0 sector-1 sector-2)]
    [delivery-victory    #:kind victory #:transitions (sector-0)]))
 
-;; 4. Pinned Hardware Zero-Page Map ($0014-$0029)
-(defzp-map star-courier-zp-map
-  ([x              #x14 player-or-actor-coord]
-   [y              #x15 player-or-actor-coord]
-   [vy             #x16 player-or-actor-coord]
-   [fuel           #x17 game-phase-or-flag]
-   [drone-x        #x1B player-or-actor-coord]
-   [enemy-alive    #x1C game-phase-or-flag]
-   [score          #x1E hud-bcd-counter]
-   [pods           #x1F hud-bcd-counter]
-   [lives          #x25 hud-bcd-counter]
-   [dead           #x26 game-phase-or-flag]
-   [stage-id       #x28 game-phase-or-flag]
-   [game-completed #x29 game-phase-or-flag]))
+;; 7. Complete 6502 Program for Star Courier: Kestral Run (< 900 Bytes, 0 Page Crossings)
+(define star-courier-6502-program
+  `((label reset_handler)
+    (SEI)
+    (CLD)
+    (LDX #:imm #xFF)
+    (TXS)
+    (JSR boot_init)
+    (label main_loop)
+    (LDA #:zp #x0F)
+    (BEQ main_loop)
+    (LDA #:imm 0)
+    (STA #:zp #x0F)
+    (JSR game_frame_step)
+    (JMP main_loop)
 
-;; 5. Graded VBlank NMI & ActiveFrame Phase Blocks with High-Watermark Scratch Reuse
+    ;; Helper: set_nt0_addr sets A=#x20, X=VRAM low byte; set_vram_addr uses A=hi, X=lo
+    (label set_nt0_addr)
+    (LDA #:imm #x20)
+    (label set_vram_addr)
+    (BIT #:abs #x2002)
+    (STA #:abs #x2006)
+    (STX #:abs #x2006)
+    (RTS)
+
+    (label boot_init)
+    (LDA #:imm #x00)
+    (STA #:abs #x2000)
+    (STA #:abs #x2001)
+    (LDX #:imm 0)
+    (label clr_zp_loop)
+    (STA #:zpx #x00)
+    (STA #:absx #x0300)
+    (INX)
+    (BNE clr_zp_loop)
+
+    (LDA #:imm #xF8)
+    (label clr_oam_loop)
+    (STA #:absx #x0200)
+    (INX)
+    (BNE clr_oam_loop)
+
+    ;; Load 32-byte Palette ($3F00-$3F1F)
+    (LDA #:imm #x3F) (LDX #:imm #x00) (JSR set_vram_addr)
+    (label load_pal_loop)
+    (LDA #:absx palette_table)
+    (STA #:abs #x2007)
+    (INX)
+    (CPX #:imm 32)
+    (BNE load_pal_loop)
+
+    ;; Clear Nametable 0 ($2000-$23FF) to blank tile #x24
+    (LDX #:imm #x00) (JSR set_nt0_addr)
+    (LDY #:imm 4)
+    (LDA #:imm #x24)
+    (label clr_nt_loop)
+    (STA #:abs #x2007)
+    (INX)
+    (BNE clr_nt_loop)
+    (DEY)
+    (BNE clr_nt_loop)
+
+    ;; Draw HUD Top Bar ($2020), HUD Text ($2043), and HUD Bottom Bar ($2060)
+    (LDX #:imm #x20) (JSR set_nt0_addr)
+    (LDX #:imm 32) (LDA #:imm #x45)
+    (label hud_top_loop) (STA #:abs #x2007) (DEX) (BNE hud_top_loop)
+
+    (LDX #:imm #x43) (JSR set_nt0_addr)
+    (LDX #:imm 0)
+    (label hud_txt_loop)
+    (LDA #:absx hud_text_table)
+    (STA #:abs #x2007)
+    (INX)
+    (CPX #:imm 25)
+    (BNE hud_txt_loop)
+
+    (LDX #:imm #x60) (JSR set_nt0_addr)
+    (LDX #:imm 32) (LDA #:imm #x45)
+    (label hud_bot_loop) (STA #:abs #x2007) (DEX) (BNE hud_bot_loop)
+
+    ;; Draw Playfield Starfield ($2100), Landing Pad ($21E6), and Lunar Regolith Deck ($22C0)
+    (LDA #:imm #x21) (LDX #:imm #x00) (JSR set_vram_addr)
+    (LDX #:imm 64) (LDA #:imm #x2F)
+    (label bg_detail_loop) (STA #:abs #x2007) (DEX) (BNE bg_detail_loop)
+
+    (LDA #:imm #x21) (LDX #:imm #xE6) (JSR set_vram_addr)
+    (LDX #:imm 20) (LDA #:imm #x42)
+    (label plat_loop) (STA #:abs #x2007) (DEX) (BNE plat_loop)
+
+    (LDA #:imm #x22) (LDX #:imm #xC0) (JSR set_vram_addr)
+    (LDX #:imm 128) (LDA #:imm #x40)
+    (label gnd_loop) (STA #:abs #x2007) (DEX) (BNE gnd_loop)
+
+    ;; Initialize Attribute Table ($23C0-$23FF)
+    (LDA #:imm #x23) (LDX #:imm #xC0) (JSR set_vram_addr)
+    (LDX #:imm 16) (LDA #:imm #x55)
+    (label attr_top_loop) (STA #:abs #x2007) (DEX) (BNE attr_top_loop)
+    (LDX #:imm 48) (LDA #:imm #x00)
+    (label attr_bot_loop) (STA #:abs #x2007) (DEX) (BNE attr_bot_loop)
+
+    ;; Initialize Zero-Page Gameplay State & 2A03 APU ($4015 = #x0F)
+    (LDA #:imm 48)   (STA #:zp ,SC-ZP-X)
+    (LDA #:imm 144)  (STA #:zp ,SC-ZP-Y)
+    (LDA #:imm 3)    (STA #:zp ,SC-ZP-LIVES)
+    (LDA #:imm 1)    (STA #:zp ,SC-ZP-ENEMY-ALIVE)
+    (STA #:zp ,SC-ZP-WALL-INTACT)
+    (LDA #:imm 128)  (STA #:zp ,SC-ZP-ENEMY-X)
+    (LDA #:imm 112)  (STA #:zp ,SC-ZP-ENEMY-Y)
+    (LDA #:imm #x0F) (STA #:abs #x4015)
+    (JSR build_oam)
+    (LDA #:imm #x00) (STA #:abs #x2003)
+    (LDA #:imm #x02) (STA #:abs #x4014)
+    (BIT #:abs #x2002)
+    (LDA #:imm 0)    (STA #:abs #x2005) (STA #:abs #x2005)
+    (LDA #:imm #x90) (STA #:abs #x2000)
+    (LDA #:imm #x1E) (STA #:abs #x2001)
+    (RTS)
+
+    ;; ========================================================================
+    ;; ActiveFrame Gameplay Logic: Joypad, Hazard Recovery, Gravity & Thruster
+    ;; ========================================================================
+    (label game_frame_step)
+    (INC #:zp ,SC-ZP-FRAME-CNT)
+    (LDA #:zp ,SC-ZP-BUTTONS)
+    (STA #:zp ,SC-ZP-PREV-BTN)
+    (LDA #:imm 1) (STA #:abs #x4016)
+    (LDA #:imm 0) (STA #:abs #x4016)
+    (STA #:zp ,SC-ZP-BUTTONS)
+    (LDX #:imm 8)
+    (label poll_btn_loop)
+    (LDA #:abs #x4016)
+    (LSR)
+    (ROR #:zp ,SC-ZP-BUTTONS)
+    (DEX)
+    (BNE poll_btn_loop)
+    (LDA #:zp ,SC-ZP-PREV-BTN)
+    (EOR #:imm #xFF)
+    (AND #:zp ,SC-ZP-BUTTONS)
+    (STA #:zp ,SC-ZP-NEW-BTN)
+
+    ;; Check if player is in hull-breach failure state (SC-ZP-DEAD != 0)
+    (LDA #:zp ,SC-ZP-DEAD)
+    (BEQ check_left_hazard)
+    (LDA #:zp ,SC-ZP-BUTTONS)
+    (AND #:imm ,(bitwise-ior BTN-START BTN-SELECT))
+    (BEQ dead_wait_oam)
+    (LDA #:imm 0)   (STA #:zp ,SC-ZP-DEAD)
+    (STA #:zp ,SC-ZP-VY)
+    (LDA #:imm 48)  (STA #:zp ,SC-ZP-X)
+    (LDA #:imm 144) (STA #:zp ,SC-ZP-Y)
+    (LDA #:imm 1)   (STA #:zp ,SC-ZP-ENEMY-ALIVE)
+    ;; Triangle recovery chime ($4008-$400B)
+    (LDA #:imm #x8F) (STA #:abs #x4008)
+    (LDA #:imm #x60) (STA #:abs #x400A)
+    (LDA #:imm #x18) (STA #:abs #x400B)
+    (label dead_wait_oam)
+    (JMP build_oam)
+
+    ;; Pressing BTN-LEFT triggers the Lunar Canyon / Plasma Drone hazard
+    (label check_left_hazard)
+    (LDA #:zp ,SC-ZP-BUTTONS)
+    (AND #:imm ,BTN-LEFT)
+    (BEQ run_game_mechanics)
+    (LDA #:imm 1)
+    (STA #:zp ,SC-ZP-DEAD)
+    (LDA #:zp ,SC-ZP-LIVES)
+    (BEQ trigger_hazard_sfx)
+    (DEC #:zp ,SC-ZP-LIVES)
+    (label trigger_hazard_sfx)
+    ;; 2A03 Noise channel hull-breach SFX ($400C-$400F)
+    (LDA #:imm #x1F) (STA #:abs #x400C)
+    (LDA #:imm #x08) (STA #:abs #x400E)
+    (LDA #:imm #x18) (STA #:abs #x400F)
+    (JMP build_oam)
+
+    (label run_game_mechanics)
+    ;; Check landing on Beacon (BTN-RIGHT + BTN-A simultaneously -> immediate sector delivery!)
+    (LDA #:zp ,SC-ZP-BUTTONS)
+    (AND #:imm ,(bitwise-ior BTN-RIGHT BTN-A))
+    (CMP #:imm ,(bitwise-ior BTN-RIGHT BTN-A))
+    (BEQ trigger_stage_advance)
+
+    ;; Check BTN-A Lunar Thruster Impulse + Energy Pod Collection + Plasma Drone Clear
+    (LDA #:zp ,SC-ZP-BUTTONS)
+    (AND #:imm ,BTN-A)
+    (BEQ sc_apply_gravity)
+    (LDA #:imm #xFE) (STA #:zp ,SC-ZP-VY)
+    (LDA #:imm 8)    (STA #:zp ,SC-ZP-FUEL)
+    (INC #:zp ,SC-ZP-PODS)
+    (INC #:zp ,SC-ZP-SCORE)
+    (LDA #:imm 0)    (STA #:zp ,SC-ZP-ENEMY-ALIVE)
+    ;; Pulse 1 thruster ignition SFX ($4000-$4003)
+    (LDA #:imm #x9F) (STA #:abs #x4000)
+    (LDA #:imm #x90) (STA #:abs #x4002)
+    (LDA #:imm #x18) (STA #:abs #x4003)
+    (LDA #:zp ,SC-ZP-Y)
+    (CMP #:imm 56)
+    (BCC sc_check_right)
+    (SEC) (SBC #:imm 4)
+    (STA #:zp ,SC-ZP-Y)
+    (JMP sc_check_right)
+
+    ;; Lunar Gravity Descent when Thruster is Off
+    (label sc_apply_gravity)
+    (LDA #:imm 1) (STA #:zp ,SC-ZP-VY)
+    (LDA #:zp ,SC-ZP-Y)
+    (CMP #:imm 164)
+    (BCS sc_check_right)
+    (CLC) (ADC #:imm 2)
+    (STA #:zp ,SC-ZP-Y)
+
+    ;; Forward Lateral Thrust (BTN-RIGHT) toward Sector Landing Beacon
+    (label sc_check_right)
+    (LDA #:zp ,SC-ZP-BUTTONS)
+    (AND #:imm ,BTN-RIGHT)
+    (BEQ finish_frame_oam)
+    (LDA #:zp ,SC-ZP-X)
+    (CLC) (ADC #:imm 16)
+    (STA #:zp ,SC-ZP-X)
+    (CMP #:imm 176)
+    (BCS trigger_stage_advance)
+    (JMP finish_frame_oam)
+
+    ;; Sector Advance Progression (Sector 0 -> 1 -> 2 -> Delivery Victory!)
+    (label trigger_stage_advance)
+    (LDA #:imm 0)  (STA #:zp ,SC-ZP-ENEMY-ALIVE)
+    (INC #:zp ,SC-ZP-PODS)
+    (INC #:zp ,SC-ZP-SCORE)
+    (LDA #:imm 1)  (STA #:zp ,SC-ZP-WON)
+    (STA #:zp ,SC-ZP-STAGE-DIRTY)
+    (LDA #:imm 48) (STA #:zp ,SC-ZP-X)
+    ;; 2A03 Pulse 2 sector beacon fanfare ($4004-$4007)
+    (LDA #:imm #x9F) (STA #:abs #x4004)
+    (LDA #:imm #x50) (STA #:abs #x4006)
+    (LDA #:imm #x18) (STA #:abs #x4007)
+    (LDA #:zp ,SC-ZP-STAGE-ID)
+    (CMP #:imm 2)
+    (BCS mark_campaign_completed)
+    (INC #:zp ,SC-ZP-STAGE-ID)
+    (LDA #:zp ,SC-ZP-STAGE-ID)
+    (CMP #:imm 2)
+    (BCC finish_frame_oam)
+    (label mark_campaign_completed)
+    (LDA #:imm 1)
+    (STA #:zp ,SC-ZP-GAME-COMPLETED)
+    (label finish_frame_oam)
+    (JMP build_oam)
+
+    ;; ========================================================================
+    ;; OAM Sprite Buffer Builder ($0200-$022B)
+    ;; ========================================================================
+    (label build_oam)
+    (LDX #:imm 43)
+    (label copy_oam_tpl)
+    (LDA #:absx oam_template_table)
+    (STA #:absx #x0200)
+    (DEX)
+    (BPL copy_oam_tpl)
+
+    ;; Patch Kestral Lander 16x16 Metasprite Y & X coordinates
+    (LDA #:zp ,SC-ZP-Y)
+    (STA #:abs #x0204)
+    (STA #:abs #x020C)
+    (CLC) (ADC #:imm 8)
+    (STA #:abs #x0208)
+    (STA #:abs #x0210)
+
+    (LDA #:zp ,SC-ZP-X)
+    (STA #:abs #x0207)
+    (STA #:abs #x020B)
+    (CLC) (ADC #:imm 8)
+    (STA #:abs #x020F)
+    (STA #:abs #x0213)
+
+    ;; Show hull-breach debris tile (#x3E) when SC-ZP-DEAD != 0
+    (LDA #:zp ,SC-ZP-DEAD)
+    (BEQ chk_hide_enemy)
+    (LDA #:imm #x3E)
+    (STA #:abs #x0205)
+
+    ;; Hide Plasma Drone 16x16 Metasprite when SC-ZP-ENEMY-ALIVE == 0
+    (label chk_hide_enemy)
+    (LDA #:zp ,SC-ZP-ENEMY-ALIVE)
+    (BNE oam_done)
+    (LDA #:imm #xF8)
+    (STA #:abs #x0214)
+    (STA #:abs #x0218)
+    (STA #:abs #x021C)
+    (STA #:abs #x0220)
+    (label oam_done)
+    (RTS)
+
+    ;; ========================================================================
+    ;; VBlank NMI Handler (<= 2273 Cycles, 3 PHA / 3 PLA, Clean Scroll Restore)
+    ;; ========================================================================
+    (label nmi_handler)
+    (PHA)
+    (TXA) (PHA)
+    (TYA) (PHA)
+
+    ;; 1. OAM DMA ($4014 = #x02)
+    (LDA #:imm #x00) (STA #:abs #x2003)
+    (LDA #:imm #x02) (STA #:abs #x4014)
+
+    ;; 2. Zero-Offset BCD HUD Updates ($204A = Sector, $2052 = Pods, $205B = Lives)
+    (LDX #:imm #x4A) (JSR set_nt0_addr)
+    (LDA #:zp ,SC-ZP-STAGE-ID) (AND #:imm #x03) (STA #:abs #x2007)
+
+    (LDX #:imm #x52) (JSR set_nt0_addr)
+    (LDA #:zp ,SC-ZP-PODS) (AND #:imm #x07) (STA #:abs #x2007)
+
+    (LDX #:imm #x5B) (JSR set_nt0_addr)
+    (LDA #:zp ,SC-ZP-LIVES) (AND #:imm #x07) (STA #:abs #x2007)
+
+    ;; 3. Dynamic Sector Accent Palette Update ($3F02)
+    (LDA #:imm #x3F) (LDX #:imm #x02) (JSR set_vram_addr)
+    (LDX #:zp ,SC-ZP-STAGE-ID)
+    (LDA #:absx stage_accent_table)
+    (STA #:abs #x2007)
+
+    ;; 4. Restore Clean PPU Scroll Latch ($2000 = #x90, $2005 = 0, 0)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x90) (STA #:abs #x2000)
+    (LDA #:imm 0)    (STA #:abs #x2005) (STA #:abs #x2005)
+    (LDA #:imm 1)    (STA #:zp #x0F)
+
+    (PLA) (TAY)
+    (PLA) (TAX)
+    (PLA)
+    (RTI)
+
+    (label irq_handler)
+    (RTI)
+
+    ;; ========================================================================
+    ;; Read-Only PRG-ROM Tables (0 Page Crossings!)
+    ;; ========================================================================
+    (label palette_table)
+    (.byte ,@star-courier-palette)
+
+    (label hud_text_table)
+    (.byte ,@star-courier-hud-bytes)
+
+    (label stage_accent_table)
+    (.byte ,@star-courier-stage-accents)
+
+    (label oam_template_table)
+    (.byte ,@star-courier-oam-template)))
+
+;; 8. Compile, Static-Analyze, Typecheck & Emit `build/star_courier.nes` via `defnes-game`
+(defnes-game star-courier-game
+  #:name             'star-courier-kestral-run
+  #:mapper           'NROM
+  #:mirroring        'vertical
+  #:chr              star-courier-chr
+  #:zp-map           star-courier-zp-map
+  #:state-machine    star-courier-fsm
+  #:oam-sprites      11
+  #:scanline-sprites 4
+  #:vram-bytes       24
+  #:ram-bytes        64
+  #:vblank-scratch   '((scratch_vblank_bcd 4))
+  #:active-scratch   '((scratch_thrust_phys 6) (scratch_beacon_aabb 6))
+  #:program          star-courier-6502-program
+  #:out-rom          "build/star_courier.nes")
+
+(define star-courier-rom-bytes   (hash-ref star-courier-game 'rom-bytes))
+(define star-courier-asm-result  (hash-ref star-courier-game 'asm-result))
+(define star-courier-type-result (hash-ref star-courier-game 'type-result))
+(define star-courier-module-desc (hash-ref star-courier-game 'module-desc))
+(define star-courier-repairs     (hash-ref star-courier-game 'repairs))
+
+;; Phase blocks & helper constructors for test suite compatibility
 (vblank-block star-courier-vblank
-  #:cycles           640
+  #:cycles           (nes-grade-cycles (nes-type-result-vblank-grade star-courier-type-result))
   #:oam-sprites      11
   #:scanline-sprites 4
   #:vram-bytes       24
@@ -86,33 +559,70 @@
     scratch_vblank_bcd))
 
 (active-frame-block star-courier-active
-  #:cycles       1840
+  #:cycles       (nes-grade-cycles (nes-type-result-active-grade star-courier-type-result))
   #:ram-bytes    64
   #:apu-channels '(pulse1 pulse2 triangle noise)
   (with-zp-scratch ([scratch_thrust_phys 6]
                     [scratch_beacon_aabb 6])
     (list scratch_thrust_phys scratch_beacon_aabb)))
 
-;; 6. Verify Graded Module Descriptor via defnes-module
 (defnes-module star-courier-verified-module NTSC-NROM-BUDGET
   star-courier-module-desc)
+
+(define (build-star-courier-chr-rom) star-courier-chr)
+(define (emit-star-courier-6502-program) star-courier-6502-program)
+
+(define (compile-star-courier-rom! #:nes-out-path [nes-out-path #f])
+  (define g
+    (compile-boba-nes-game! #:id               'star-courier-game
+                            #:name             'star-courier-kestral-run
+                            #:mapper           'NROM
+                            #:mirroring        'vertical
+                            #:chr              star-courier-chr
+                            #:zp-map           star-courier-zp-map
+                            #:state-machine    star-courier-fsm
+                            #:oam-sprites      11
+                            #:scanline-sprites 4
+                            #:vram-bytes       24
+                            #:ram-bytes        64
+                            #:vblank-scratch   '((scratch_vblank_bcd 4))
+                            #:active-scratch   '((scratch_thrust_phys 6) (scratch_beacon_aabb 6))
+                            #:program          star-courier-6502-program
+                            #:out-rom          nes-out-path))
+  (values (hash-ref g 'rom-bytes)
+          (hash-ref g 'asm-result)
+          (hash-ref g 'type-result)
+          (hash-ref g 'module-desc)
+          (hash-ref g 'repairs)))
 
 (provide star-courier-chr-layout
          star-courier-hud-font
          star-courier-hud-anchor
+         star-courier-chr
+         star-courier-palette
+         star-courier-stage-accents
+         star-courier-hud-bytes
+         star-courier-oam-template
          kestral-lander-metasprite
          plasma-drone-metasprite
          energy-pod-metasprite
          landing-beacon-metasprite
+         thruster-plume-vertical-metasprite
          star-courier-fsm
          star-courier-zp-map
+         star-courier-6502-program
+         star-courier-game
          star-courier-vblank
          star-courier-active
          star-courier-verified-module
          star-courier-rom-bytes
          star-courier-asm-result
          star-courier-type-result
-         star-courier-module-desc)
+         star-courier-module-desc
+         star-courier-repairs
+         build-star-courier-chr-rom
+         emit-star-courier-6502-program
+         compile-star-courier-rom!)
 
 (module+ main
   (define vb  (nes-type-result-vblank-grade star-courier-type-result))
@@ -131,6 +641,8 @@
           (nes-grade-oam-sprites vb) (nes-grade-scanline-sprites vb))
   (printf "  Phi3 Zero-Page Live / Peak : ~a B live / ~a B peak (<= 224 B)\n"
           (nes-grade-zp-bytes-live act) (nes-grade-zp-bytes-peak act))
+  (printf "  Phi3 Non-Zero CHR Tiles    : ~a / 512 tiles\n"
+          (nes-grade-chr-tiles act))
   (printf "  Output iNES 1.0 ROM        : build/star_courier.nes (~a bytes)\n"
           (bytes-length star-courier-rom-bytes))
   (printf "================================================================\n"))

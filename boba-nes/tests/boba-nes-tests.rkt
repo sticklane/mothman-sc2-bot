@@ -12,6 +12,10 @@
          "../compiler/diagnostics.rkt"
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
+         (except-in "../compiler/boba-dsl-compiler.rkt"
+                    count-nonzero-chr-tiles
+                    vblank-block
+                    active-frame-block)
          "../compiler/nes-games-builder.rkt"
          "../compiler/decompiled-top10.rkt"
          "../compiler/original-dsl-games.rkt"
@@ -24,7 +28,9 @@
          "../examples/boba_200_levels_cartridge.bnes"
          "../examples/mario_platformer.bnes"
          "../examples/zelda_adventure.bnes"
-         "../examples/tetris_nes.bnes")
+         "../examples/tetris_nes.bnes"
+         "../compiler/decompiled-metroid.rkt"
+         "../examples/metroid_brinstar.bnes")
 
 (define total-checks 0)
 
@@ -1516,9 +1522,216 @@
   (check-equal? (nes-zp-ref ns-emu ORIG-ZP-STAGE-ID) 2)
   (check-equal? (nes-zp-ref ns-emu ORIG-ZP-GAME-COMPLETED) 1))
 
-(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, Top-10 classics, and 6502 ROM tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 26. Pre-Assembly Compositional DSL Grade Inference (`infer-dsl-statement-grade`,
+;;     `synthesize-dsl-module-grades`), `'symmetric-vertical` Metasprites &
+;;     Post-Typecheck Grade Preservation (`analyze-6502-ast-grades` / `defnes-game`)
+;; ============================================================================
+(test-case "Pre-Assembly Compositional DSL Grade Inference, symmetric-vertical Metasprites & Grade Preservation"
+  ;; 1. Verify `'symmetric-vertical` 8x16 2-sprite metasprite descriptor and 6502 OAM emitter
+  (define v-ms1 (make-metasprite-desc 'beam-sym '(#x36) 2 #:order 'symmetric-vertical))
+  (check-equal? (hash-ref v-ms1 'order) 'symmetric-vertical)
+  (check-equal? (hash-ref v-ms1 'oam-sprites) 2)
+  (check-equal? (hash-ref v-ms1 'scanline-sprites) 1)
+  (check-equal? (hash-ref v-ms1 'tl) #x36)
+  (check-equal? (hash-ref v-ms1 'bl) #x36)
+  (check-equal? (hash-ref v-ms1 'attr) #x02)
+  (check-equal? (hash-ref v-ms1 'bl-attr) (bitwise-ior #x02 OAM-FLIP-V))
+
+  (define v-ms2 (make-metasprite-desc 'pillar-2tile '(#x36 #x37) 1 #:order 'symmetric-vertical))
+  (check-equal? (hash-ref v-ms2 'tl) #x36)
+  (check-equal? (hash-ref v-ms2 'bl) #x37)
+  (check-equal? (hash-ref v-ms2 'bl-attr) (bitwise-ior #x01 OAM-FLIP-V))
+
+  ;; Verify `defmetasprite` vertical metasprites from the 3 `.bnes` games
+  (check-equal? (hash-ref thruster-plume-vertical-metasprite 'oam-sprites) 2)
+  (check-equal? (hash-ref hourglass-pillar-vertical-metasprite 'oam-sprites) 2)
+  (check-equal? (hash-ref laser-beam-vertical-metasprite 'oam-sprites) 2)
+  (check-equal? (hash-ref laser-beam-vertical-metasprite 'bl-attr) (bitwise-ior 1 #x80))
+
+  ;; Verify 6502 OAM emission for `'symmetric-vertical` writes 2 sprites (8 bytes) at (X, Y) and (X, Y+8) with #x80 flip
+  (define v-oam-prog
+    `((label emit_v_test)
+      (LDA #:imm 80)  (STA #:zp #x14) ; X = 80
+      (LDA #:imm 100) (STA #:zp #x15) ; Y = 100
+      ,@(emit-metasprite-oam-6502 v-ms1 #x14 #x15 0)
+      (RTS)))
+  (define v-oam-asm (assemble-6502 v-oam-prog #:origin #x8000))
+  (define v-oam-emu (make-nes-emulator-from-rom (build-ines-rom v-oam-asm (make-bytes 8192 0))))
+  (nes-run-until-rts! v-oam-emu #x8000)
+  ;; Top sprite at $0200..$0203: Y=100, Tile=#x36, Attr=#x02, X=80
+  (check-equal? (nes-ram-ref v-oam-emu #x0200) 100)
+  (check-equal? (nes-ram-ref v-oam-emu #x0201) #x36)
+  (check-equal? (nes-ram-ref v-oam-emu #x0202) #x02)
+  (check-equal? (nes-ram-ref v-oam-emu #x0203) 80)
+  ;; Bottom sprite at $0204..$0207: Y=108, Tile=#x36, Attr=#x82 (V-Flip!), X=80
+  (check-equal? (nes-ram-ref v-oam-emu #x0204) 108)
+  (check-equal? (nes-ram-ref v-oam-emu #x0205) #x36)
+  (check-equal? (nes-ram-ref v-oam-emu #x0206) #x82)
+  (check-equal? (nes-ram-ref v-oam-emu #x0207) 80)
+
+  ;; 2. Verify compositional `infer-dsl-statement-grade` (seq, if/join, repeat-static, with-zp-scratch)
+  ;;    WITHOUT calling `assemble-6502`!
+  (define dsl-vblank-stmt
+    '(seq
+      (PHA) (TXA) (PHA) (TYA) (PHA)
+      (with-zp-scratch ([vb_tmp 4])
+        (oam-dma! #x02)
+        (nametable-patch! #x204A 3)
+        (restore-scroll! 0 0))
+      (PLA) (TAY) (PLA) (TAX) (PLA) (RTI)))
+  (define vb-stmt-grade (infer-dsl-statement-grade dsl-vblank-stmt 'VBlankNMI))
+  (check-true (> (nes-grade-cycles vb-stmt-grade) 514))
+  (check-true (<= (nes-grade-cycles vb-stmt-grade) 2273))
+  (check-equal? (nes-grade-zp-bytes-peak vb-stmt-grade) 4)
+  (check-equal? (nes-grade-vram-dma-bytes vb-stmt-grade) 5)
+
+  (define dsl-active-stmt
+    `(seq
+      (poll-joypad! #x10)
+      ;; Sibling `with-zp-scratch` blocks take high-watermark MAX (max 6 10 = 10), not sum!
+      (with-zp-scratch ([phys_tmp 6])
+        (if (button-pressed? 'A)
+            (apu-sfx! 'pulse1 #x9F)
+            (apu-sfx! 'noise #x1F)))
+      (with-zp-scratch ([ai_tmp 10])
+        (repeat-static 4
+          (emit-metasprite! ,kestral-lander-metasprite #x14 #x15 1)))
+      (emit-metasprite! ,thruster-plume-vertical-metasprite #x14 #x15 5)))
+  (define act-stmt-grade (infer-dsl-statement-grade dsl-active-stmt 'ActiveFrame))
+  (check-equal? (nes-grade-zp-bytes-peak act-stmt-grade) 10)
+  ;; 4 * 4 sprites (2x2 lander) + 2 sprites (1x2 vertical plume) = 18 OAM sprites
+  (check-equal? (nes-grade-oam-sprites act-stmt-grade) 18)
+  (check-equal? (nes-grade-apu-channels act-stmt-grade) (set 'pulse1 'noise))
+
+  ;; 3. Verify `synthesize-dsl-module-grades` + `typecheck-nes-module` BEFORE generating any 6502 assembly!
+  (define pre-asm-dsl-mod
+    (synthesize-dsl-module-grades
+     #:name          'pre-assembly-typechecked-game
+     #:mapper        'NROM
+     #:mirroring     'vertical
+     #:zp-map        star-courier-zp-map
+     #:metasprites   (list kestral-lander-metasprite
+                           plasma-drone-metasprite
+                           thruster-plume-vertical-metasprite)
+     #:chr           star-courier-chr
+     #:state-machine star-courier-fsm
+     #:vblank-ast    dsl-vblank-stmt
+     #:active-ast    dsl-active-stmt))
+  (define pre-asm-type-res (typecheck-nes-module pre-asm-dsl-mod NTSC-NROM-BUDGET))
+  (check-true (nes-type-result-well-typed? pre-asm-type-res))
+  ;; 4 + 4 + 2 = 10 OAM sprites inferred directly from metasprite shapes!
+  (check-equal? (nes-grade-oam-sprites (nes-type-result-vblank-grade pre-asm-type-res)) 10)
+  ;; 20 permanent ZP bytes + max(4, 6, 10) = 30 peak ZP bytes inferred before assembly!
+  (check-equal? (nes-grade-zp-bytes-live (nes-type-result-active-grade pre-asm-type-res)) 20)
+  (check-equal? (nes-grade-zp-bytes-peak (nes-type-result-active-grade pre-asm-type-res)) 30)
+  ;; Non-zero CHR tiles inferred directly from `defchr-resource`!
+  (check-true (> (nes-grade-chr-tiles (nes-type-result-active-grade pre-asm-type-res)) 40))
+
+  ;; 4. Verify `synthesize-dsl-module-grades` catches L1/L3/L4 violations at type-checking time BEFORE assembly!
+  (define bad-dsl-mod
+    (synthesize-dsl-module-grades
+     #:name       'bad-pre-asm-module
+     #:vblank-ast '(seq (PHA) (oam-dma! #x02) (nametable-patch! #x204A 2) (RTI)) ; Unbalanced PHA (1 vs 0) + missing restore-scroll!
+     #:active-ast '(seq (nametable-patch! #x2000 4))))                           ; Illegal VRAM write in ActiveFrame!
+  (define bad-pre-res (typecheck-nes-module bad-dsl-mod NTSC-NROM-BUDGET))
+  (check-false (nes-type-result-well-typed? bad-pre-res))
+  (define bad-pre-cats (map nes-violation-category (nes-type-result-violations bad-pre-res)))
+  (check-not-false (memq 'unbalanced-6502-stack bad-pre-cats))
+  (check-not-false (memq 'unrestored-ppu-scroll-latch bad-pre-cats))
+  (check-not-false (memq 'vram-write-during-active-render bad-pre-cats))
+
+  ;; 5. Verify `analyze-6502-ast-grades` and `defnes-game` Grade Preservation across all 3 `.bnes` games
+  (for ([g (in-list (list star-courier-game crypt-sweep-game neon-strider-game))])
+    (check-true (hash-ref g 'grade-preserved?))
+    (check-true (nes-type-result-well-typed? (hash-ref g 'pre-type-result)))
+    (check-true (nes-type-result-well-typed? (hash-ref g 'type-result)))))
+
+;; ============================================================================
+;; 27. Metroid (1986) Multi-Bank MMC1 + CHR-RAM Decompilation & 4-Zone Campaign
+;; ============================================================================
+(test-case "27. Metroid (1986) MMC1 Multi-Bank Analysis, Brinstar CHR-RAM & 4-Zone Zebes Campaign"
+  ;; 1. Verify authentic Metroid MMC1 8 x 16 KB PRG-ROM + 8 KB CHR-RAM multi-bank disassembly
+  (check-equal? (hash-ref metroid-multibank 'mapper-name) 'MMC1)
+  (check-equal? (hash-ref metroid-multibank 'chr-ram?) #t)
+  (check-equal? (hash-ref metroid-multibank 'prg-banks) 8)
+  (check-true (> (hash-ref metroid-multibank 'total-instructions) 50000))
+  ;; 2. Verify #lang boba-nes Metroid module grades & ROM binary
+  (check-true (nes-type-result-well-typed? metroid-type-result))
+  (check-equal? (bytes-length metroid-rom-bytes) 40976)
+  (check-equal? (asm-result-page-crossings metroid-asm-result) 0)
+  (check-equal? (check-state-machine-totality (hasheq 'state-machine metroid-zebes-fsm)) '())
+  (check-equal? (check-pinned-zp-map (hasheq 'zp-map metroid-zp-layout)) '())
+  ;; 3. Execute 4-Zone Zebes Campaign in the 6502/2C02 Emulator (Failure -> Recovery -> 4-Zone Victory)
+  (define met-emu   (make-nes-emulator-from-rom metroid-rom-bytes))
+  (define met-boot  (hash-ref (asm-result-labels metroid-asm-result) 'boot_init))
+  (define met-frame (hash-ref (asm-result-labels metroid-asm-result) 'game_frame_step))
+  (nes-run-until-rts! met-emu met-boot)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-ENERGY) 30)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-LIVES) 3)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-STAGE-ID) 0)
+  ;; Walk into Zoomer hazard without firing for 10 frames -> Energy 30 -> 0, DEAD = 1, LIVES = 2
+  (for ([_ (in-range 10)])
+    (nes-step-frame! met-emu met-frame BTN-LEFT))
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-ENERGY) 0)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-DEAD) 1)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-LIVES) 2)
+  ;; Press START to recover Energy Tank in Zone 0 (Brinstar), then toggle Morph Ball (BTN-DOWN)
+  (nes-step-frame! met-emu met-frame 0)
+  (nes-step-frame! met-emu met-frame BTN-START)
+  (nes-step-frame! met-emu met-frame BTN-DOWN)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-DEAD) 0)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-ENERGY) 30)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-MORPH-BALL) 1)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-MORPH-ACTIVE) 1)
+  ;; Fire Power Beam / Missiles & advance across all 4 Zones (0 -> 1 -> 2 -> 3)
+  (for ([z (in-range 4)])
+    (for ([_ (in-range 10)])
+      (nes-step-frame! met-emu met-frame (bitwise-ior BTN-A BTN-B BTN-RIGHT)))
+    (nes-step-frame! met-emu met-frame 0)
+    (nes-step-frame! met-emu met-frame 0))
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-STAGE-ID) 3)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-GAME-COMPLETED) 1)
+  (check-equal? (nes-zp-ref met-emu METROID-ZP-WON) 1))
+
+;; ============================================================================
+;; 28. Pixel-by-Pixel Framebuffer Image Differ & Unclosed Half-Sprite Seam Auditor
+;; ============================================================================
+(test-case "28. Framebuffer RGB Image Differ & Unclosed Half-Sprite Seam Truncation Auditor"
+  ;; 1. Verify `diff-framebuffer-rgb-bytes`
+  (define fb1 (make-bytes (* 256 240 3) #x22))
+  (define fb2 (bytes-copy fb1))
+  (define eq-diff (diff-framebuffer-rgb-bytes fb1 fb2))
+  (check-equal? (hash-ref eq-diff 'total-pixels) 61440)
+  (check-equal? (hash-ref eq-diff 'matching-pixels) 61440)
+  (check-equal? (hash-ref eq-diff 'diff-pixels) 0)
+  (bytes-set! fb2 0 #xFF)
+  (define one-diff (diff-framebuffer-rgb-bytes fb1 fb2))
+  (check-equal? (hash-ref one-diff 'matching-pixels) 61439)
+  (check-equal? (hash-ref one-diff 'diff-pixels) 1)
+
+  ;; 2. Verify `detect-unclosed-half-sprite-seams` catches a 1-slot SMB `#x60` coin (missing bottom half!)
+  ;;    and passes with 0 defects on the 2-slot vertically-flipped `#x60` + `#x82` coin!
+  (define smb-chr (load-authentic-smb-chr-rom))
+  (define bad-coin-oam (make-bytes 256 #xF8))
+  ;; Slot 9 ($24..$27): Top half only at (X=80, Y=120, Tile=#x60, Attr=#x02)
+  (bytes-set! bad-coin-oam #x24 120)
+  (bytes-set! bad-coin-oam #x25 #x60)
+  (bytes-set! bad-coin-oam #x26 #x02)
+  (bytes-set! bad-coin-oam #x27 80)
+  (define bad-seams (detect-unclosed-half-sprite-seams smb-chr bad-coin-oam #:sprite-pt 0))
+  (check-equal? (length bad-seams) 1)
+  (check-equal? (hash-ref (first bad-seams) 'type) 'unclosed-vertical-half-sprite)
+  (check-equal? (hash-ref (first bad-seams) 'tile) #x60)
+
+  ;; Add Slot 10 ($28..$2B): Vertically flipped bottom half at (X=80, Y=128, Tile=#x60, Attr=#x82)
+  (define good-coin-oam (bytes-copy bad-coin-oam))
+  (bytes-set! good-coin-oam #x28 128)
+  (bytes-set! good-coin-oam #x29 #x60)
+  (bytes-set! good-coin-oam #x2A #x82)
+  (bytes-set! good-coin-oam #x2B 80)
+  (define good-seams (detect-unclosed-half-sprite-seams smb-chr good-coin-oam #:sprite-pt 0))
+  (check-equal? good-seams '()))
+
+(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, Top-10 classics, Metroid, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)
-
-
-
-

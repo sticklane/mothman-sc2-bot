@@ -28,7 +28,9 @@
  detect-zp-timer-array-idioms
  detect-nmi-sync-semaphore-idioms
  parse-fm2-tas-inputs
- serialize-fm2-tas-inputs)
+ serialize-fm2-tas-inputs
+ diff-framebuffer-rgb-bytes
+ detect-unclosed-half-sprite-seams)
 
 ;; ============================================================================
 ;; 1. Official MOS 6502 Opcode Decode Table (Opcode -> Mnemonic, Mode, Length)
@@ -821,3 +823,180 @@
               #\.))))
      (format "|0|~a|||" p0-str))
    "\n"))
+
+;; ============================================================================
+;; 7. Framebuffer RGB Pixel Differ & OAM Half-Sprite Seam Truncation Auditor
+;; ============================================================================
+
+;; Compare two 256x240 (or arbitrary equal-length) pixel buffers and return
+;; total-pixels, matching-pixels, match-pct, and diff-pixels.
+(define (diff-framebuffer-rgb-bytes fb-a fb-b)
+  (cond
+    [(and (bytes? fb-a) (bytes? fb-b))
+     (define len-a (bytes-length fb-a))
+     (define len-b (bytes-length fb-b))
+     (unless (= len-a len-b)
+       (error 'diff-framebuffer-rgb-bytes
+              "framebuffer byte lengths differ: ~a vs ~a" len-a len-b))
+     (define stride
+       (cond
+         [(= len-a (* 256 240 3)) 3]
+         [(= len-a (* 256 240 4)) 4]
+         [else 1]))
+     (define total-pixels (quotient len-a stride))
+     (define matching-pixels
+       (for/sum ([idx (in-range total-pixels)])
+         (define base (* idx stride))
+         (define same?
+           (for/and ([k (in-range stride)])
+             (= (bytes-ref fb-a (+ base k))
+                (bytes-ref fb-b (+ base k)))))
+         (if same? 1 0)))
+     (define diff-pixels (- total-pixels matching-pixels))
+     (define match-pct
+       (if (zero? total-pixels)
+           100.0
+           (exact->inexact (* 100.0 (/ matching-pixels total-pixels)))))
+     (hasheq 'total-pixels    total-pixels
+             'matching-pixels matching-pixels
+             'match-pct       match-pct
+             'diff-pixels     diff-pixels)]
+    [(and (vector? fb-a) (vector? fb-b))
+     (define total-pixels (vector-length fb-a))
+     (unless (= total-pixels (vector-length fb-b))
+       (error 'diff-framebuffer-rgb-bytes "framebuffer vector lengths differ"))
+     (define matching-pixels
+       (for/sum ([i (in-range total-pixels)])
+         (if (equal? (vector-ref fb-a i) (vector-ref fb-b i)) 1 0)))
+     (define diff-pixels (- total-pixels matching-pixels))
+     (define match-pct
+       (if (zero? total-pixels)
+           100.0
+           (exact->inexact (* 100.0 (/ matching-pixels total-pixels)))))
+     (hasheq 'total-pixels    total-pixels
+             'matching-pixels matching-pixels
+             'match-pct       match-pct
+             'diff-pixels     diff-pixels)]
+    [else
+     (error 'diff-framebuffer-rgb-bytes
+            "expected two equal-length bytes? or vector? buffers")]))
+
+;; Scan all visible OAM sprites (Y < #xEF) in `oam-bytes`, inspect their 8x8
+;; tile rows in `chr-bytes` (accounting for OAM_FLIP_H = #x40 and OAM_FLIP_V = #x80),
+;; and return a list of any unclosed vertical or horizontal half-sprites missing
+;; their companion tile at (X, Y+8) or (X+8, Y).
+(define (detect-unclosed-half-sprite-seams chr-bytes oam-bytes #:sprite-pt [pt 0])
+  (define num-slots (quotient (bytes-length oam-bytes) 4))
+  (define visible-sprites
+    (for/fold ([acc '()])
+              ([slot (in-range num-slots)])
+      (define base (* slot 4))
+      (define y    (bytes-ref oam-bytes base))
+      (define tile (bytes-ref oam-bytes (+ base 1)))
+      (define attr (bytes-ref oam-bytes (+ base 2)))
+      (define x    (bytes-ref oam-bytes (+ base 3)))
+      (if (and (< y #xEF)
+               (or (> y 0) (> tile 0) (> attr 0) (> x 0)))
+          (cons (hasheq 'slot slot 'x x 'y y 'tile tile 'attr attr) acc)
+          acc)))
+  (define sprites (reverse visible-sprites))
+
+  (define (count-row-opaque row-str)
+    (for/sum ([ch (in-string row-str)])
+      (if (char=? ch #\.) 0 1)))
+
+  (define (count-col-opaque rows col-idx)
+    (for/sum ([row-str (in-list rows)])
+      (if (char=? (string-ref row-str col-idx) #\.) 0 1)))
+
+  (define symmetric-half-tile-ids
+    '(#x0C #x0D #x26 #x27 #x30 #x31 #x32 #x33 #x70 #x71 #xB2 #xB3))
+
+  (reverse
+   (for/fold ([defects '()])
+             ([sp (in-list sprites)])
+     (define slot (hash-ref sp 'slot))
+     (define x    (hash-ref sp 'x))
+     (define y    (hash-ref sp 'y))
+     (define tile (hash-ref sp 'tile))
+     (define attr (hash-ref sp 'attr))
+     (define flip-h? (bitwise-bit-set? attr 6))
+     (define flip-v? (bitwise-bit-set? attr 7))
+
+     (define raw-rows (extract-chr-tile-rows chr-bytes tile #:pattern-table pt))
+     (define v-rows   (if flip-v? (reverse raw-rows) raw-rows))
+     (define rows
+       (if flip-h?
+           (for/list ([r (in-list v-rows)])
+             (list->string (reverse (string->list r))))
+           v-rows))
+
+     (define r0-op (count-row-opaque (list-ref rows 0)))
+     (define r6-op (count-row-opaque (list-ref rows 6)))
+     (define r7-op (count-row-opaque (list-ref rows 7)))
+     (define c0-op (count-col-opaque rows 0))
+     (define c1-op (count-col-opaque rows 1))
+     (define c7-op (count-col-opaque rows 7))
+
+     ;; 1. Unclosed vertical top-half sprite (e.g., SMB coin #x60: r0 <= 1, r7 >= 5, non-tapering, spans width)
+     (define unclosed-vertical?
+       (and (<= r0-op 1)
+            (>= r7-op 5)
+            (>= r7-op r6-op)
+            (>= c0-op 2)
+            (>= c7-op 2)
+            (not (for/or ([other (in-list sprites)])
+                   (and (not (= (hash-ref other 'slot) slot))
+                        (<= (abs (- (hash-ref other 'x) x)) 4)
+                        (<= 6 (- (hash-ref other 'y) y) 10))))))
+
+     ;; 2. Unclosed horizontal left-half symmetric sprite (e.g., Zelda Octorok #x70/#xB2, Triforce #x26, Lander #x30)
+     (define has-vertical-partner?
+       (for/or ([other (in-list sprites)])
+         (and (not (= (hash-ref other 'slot) slot))
+              (<= (abs (- (hash-ref other 'x) x)) 2)
+              (or (<= 6 (- (hash-ref other 'y) y) 10)
+                  (<= 6 (- y (hash-ref other 'y)) 10)))))
+
+     (define is-left-symmetric-seam?
+       (and (not flip-h?)
+            (or (and (or (<= c0-op 1) (and (<= c0-op 2) (= c7-op 8)))
+                     (>= c7-op 5)
+                     (< c1-op c7-op)
+                     (or has-vertical-partner?
+                         (and (memv tile symmetric-half-tile-ids) #t)))
+                (and (memv tile '(#x26 #x27 #x30 #x31 #x32 #x33 #x70 #xB2)) #t))))
+
+     (define unclosed-horizontal?
+       (and is-left-symmetric-seam?
+            (not (for/or ([other (in-list sprites)])
+                   (and (not (= (hash-ref other 'slot) slot))
+                        (<= 6 (- (hash-ref other 'x) x) 10)
+                        (<= (abs (- (hash-ref other 'y) y)) 4))))))
+
+     (define d1
+       (if unclosed-vertical?
+           (cons (hasheq 'type              'unclosed-vertical-half-sprite
+                         'defect            'unclosed-vertical-half-sprite
+                         'slot              slot
+                         'tile              tile
+                         'attr              attr
+                         'x                 x
+                         'y                 y
+                         'top-row-opaque    r0-op
+                         'bottom-row-opaque r7-op)
+                 defects)
+           defects))
+     (if unclosed-horizontal?
+         (cons (hasheq 'type             'unclosed-horizontal-half-sprite
+                       'defect           'unclosed-horizontal-half-sprite
+                       'slot             slot
+                       'tile             tile
+                       'attr             attr
+                       'x                x
+                       'y                y
+                       'left-col-opaque  c0-op
+                       'right-col-opaque c7-op)
+               d1)
+         d1))))
+
