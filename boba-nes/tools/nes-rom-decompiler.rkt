@@ -12,6 +12,7 @@
          racket/match
          racket/path
          racket/set
+         racket/string
          "../lib/nes-chr-assets.rkt"
          "nes-resource-tool.rkt")
 
@@ -21,7 +22,13 @@
  compare-rom-binaries
  detect-6502-jump-engine-idioms
  infer-zp-roles-from-frame-trace
- detect-multi-stage-progression-from-trace)
+ detect-multi-stage-progression-from-trace
+ decompile-multibank-ines-rom
+ decode-smb-area-objects
+ detect-zp-timer-array-idioms
+ detect-nmi-sync-semaphore-idioms
+ parse-fm2-tas-inputs
+ serialize-fm2-tas-inputs)
 
 ;; ============================================================================
 ;; 1. Official MOS 6502 Opcode Decode Table (Opcode -> Mnemonic, Mode, Length)
@@ -554,3 +561,263 @@
           'recovery-registers (reverse recovery-regs)
           'completion-flags   (reverse completion-flags)))
 
+;; ============================================================================
+;; 6. Multi-Bank MMC1/UNROM Decompilation, SMB Area Object Decoder,
+;;    Community Disassembly Idioms & FCEUX .fm2 TAS Movie Parser
+;; ============================================================================
+
+;; Inspect all K 16 KB PRG-ROM banks (0..K-1) of an NROM/MMC1/UNROM/CNROM/MMC3 ROM,
+;; disassemble each switchable bank at $8000 and the fixed bank at $C000,
+;; and emit `#lang boba-nes` `defbanked-table` S-expressions with per-bank statistics.
+(define (decompile-multibank-ines-rom rom-path-or-bytes)
+  (define rom (rom-src->bytes rom-path-or-bytes))
+  (define hdr (parse-ines-header rom))
+  (define prg-off   (hash-ref hdr 'prg-offset))
+  (define prg-bytes (hash-ref hdr 'prg-bytes))
+  (define prg-banks (hash-ref hdr 'prg-banks))
+  (define chr-banks (hash-ref hdr 'chr-banks))
+  (define mapper-id (hash-ref hdr 'mapper))
+  (define prg       (subbytes rom prg-off (+ prg-off prg-bytes)))
+
+  (define bank-reports
+    (for/list ([b (in-range prg-banks)])
+      (define bank-start (* b 16384))
+      (define bank-slice (subbytes prg bank-start (+ bank-start 16384)))
+      (define is-fixed?  (= b (sub1 prg-banks)))
+      (define base-addr  (if is-fixed? #xC000 #x8000))
+
+      ;; Scan 16 KB bank for valid 6502 instruction sequences and data table bytes
+      (define inst-cnt 0)
+      (define sub-cnt 0)
+      (define code-bytes 0)
+      (let loop ([off 0])
+        (when (< off 16380)
+          (define op (bytes-ref bank-slice off))
+          (define info (vector-ref DISASM-OPCODE-VEC op))
+          (cond
+            [info
+             (match-define (list mnem _mode len) info)
+             (when (<= (+ off len) 16384)
+               (set! inst-cnt (add1 inst-cnt))
+               (set! code-bytes (+ code-bytes len))
+               (when (eq? mnem 'JSR)
+                 (set! sub-cnt (add1 sub-cnt))))
+             (loop (+ off len))]
+            [else
+             (loop (add1 off))])))
+
+      (define non-empty-bytes
+        (for/sum ([i (in-range 16384)])
+          (define v (bytes-ref bank-slice i))
+          (if (or (= v #x00) (= v #xFF)) 0 1)))
+      (define table-byte-cnt (max 0 (- 16384 code-bytes)))
+      (define sample-bytes
+        (for/list ([i (in-range (min 16 (bytes-length bank-slice)))])
+          (bytes-ref bank-slice i)))
+      (define tbl-sym (string->symbol (format "prg_bank_~a_table" b)))
+      (define defbanked-sexp
+        `(defbanked-table ,tbl-sym
+           #:bank ,b
+           #:origin ,base-addr
+           (.byte ,@sample-bytes)))
+
+      (hasheq 'bank              b
+              'role              (if is-fixed? 'fixed 'switchable)
+              'origin            base-addr
+              'base-addr         base-addr
+              'size-bytes        16384
+              'instruction-count inst-cnt
+              'subroutine-count  sub-cnt
+              'table-bytes       table-byte-cnt
+              'table-byte-count  table-byte-cnt
+              'non-empty-bytes   non-empty-bytes
+              'defbanked-table   defbanked-sexp)))
+
+  (define defbanked-tables
+    (map (lambda (h) (hash-ref h 'defbanked-table)) bank-reports))
+  (define total-insts
+    (for/sum ([h (in-list bank-reports)]) (hash-ref h 'instruction-count)))
+
+  (hasheq 'mapper             mapper-id
+          'mapper-name        (mapper-id->symbol mapper-id)
+          'prg-banks          prg-banks
+          'bank-count         prg-banks
+          'chr-banks          chr-banks
+          'fixed-bank         (sub1 prg-banks)
+          'switchable-banks   (max 0 (sub1 prg-banks))
+          'banks              bank-reports
+          'defbanked-tables   defbanked-tables
+          'total-instructions total-insts))
+
+;; Decode SMB-style 2-byte compressed area objects `(coord-byte, type-len-byte)`
+;; into structured column descriptors:
+;;   - `coord-byte`: upper nibble = `col-x` (0..15), lower nibble = `row-y` (0..15)
+;;   - `type-len-byte`: bit 7 = `page-flag` (0 or 1), bits 6..4 = `obj-type` (0..7),
+;;                      bits 3..0 = `length` (1..16, i.e., low-nibble + 1)
+(define (decode-smb-area-objects byte-seq)
+  (define raw-list
+    (cond
+      [(bytes? byte-seq) (bytes->list byte-seq)]
+      [(list? byte-seq)  byte-seq]
+      [else (error 'decode-smb-area-objects "expected list? or bytes?, got ~v" byte-seq)]))
+  (let loop ([rem raw-list]
+             [acc '()])
+    (match rem
+      [(list* #xFD _)
+       (reverse acc)]
+      [(list* coord-byte type-len-byte rest-bytes)
+       (define col-x     (bitwise-and (arithmetic-shift coord-byte -4) #x0F))
+       (define row-y     (bitwise-and coord-byte #x0F))
+       (define page-flag (if (bitwise-bit-set? type-len-byte 7) 1 0))
+       (define obj-type  (bitwise-and (arithmetic-shift type-len-byte -4) #x07))
+       (define raw-len   (bitwise-and type-len-byte #x0F))
+       (define obj-desc
+         (hasheq 'page-flag page-flag
+                 'col-x     col-x
+                 'row-y     row-y
+                 'obj-type  obj-type
+                 'length    (add1 raw-len)
+                 'raw-len   raw-len))
+       (loop rest-bytes (cons obj-desc acc))]
+      [_
+       (reverse acc)])))
+
+(define (extract-inst-stream src)
+  (cond
+    [(list? src) src]
+    [(and (hash? src) (hash-has-key? src 'instructions))
+     (hash-ref src 'instructions)]
+    [else
+     (hash-ref (disassemble-ines-rom src) 'instructions '())]))
+
+;; Detect indexed Zero-Page / work-RAM countdown timer loops
+;; (`DEC zp,X` or `DEC abs,X` followed by `DEX`/`DEY` and `BPL`/`BNE`,
+;; as used in Donkey Kong $34-$45 and Super Mario Bros. $0780-$07A3).
+(define (detect-zp-timer-array-idioms inst-src)
+  (define insts
+    (filter (lambda (f) (not (and (pair? f) (eq? (car f) 'label))))
+            (extract-inst-stream inst-src)))
+  (define matches '())
+
+  (let loop ([rem insts]
+             [idx 0])
+    (match rem
+      [(cons head tail)
+       (define dec-info
+         (match head
+           [`(DEC #:zpx ,base)  (list 'zpx base)]
+           [`(DEC #:absx ,base) (list 'absx base)]
+           [_ #f]))
+       (when dec-info
+         (match-define (list mode base-addr) dec-info)
+         (define window (take tail (min 4 (length tail))))
+         (define has-dex?
+           (for/or ([w (in-list window)])
+             (match w
+               [`(DEX) #t]
+               [`(DEY) #t]
+               [_ #f])))
+         (define branch-mnem
+           (for/or ([w (in-list window)])
+             (match w
+               [`(BPL ,_) 'BPL]
+               [`(BNE ,_) 'BNE]
+               [_ #f])))
+         (when (and has-dex? branch-mnem)
+           (set! matches
+                 (cons (hasheq 'base-addr base-addr
+                               'mode      mode
+                               'branch    branch-mnem
+                               'index     idx)
+                       matches))))
+       (loop tail (add1 idx))]
+      [_ (void)]))
+
+  (define rev-matches (reverse matches))
+  (hasheq 'count            (length rev-matches)
+          'timer-loop-count (length rev-matches)
+          'base-addresses   (remove-duplicates (map (lambda (m) (hash-ref m 'base-addr)) rev-matches))
+          'matches          rev-matches))
+
+;; Detect main-thread NMI frame-wait spinloops (`LDA zp; BEQ *-2` or `BNE *-2`,
+;; as used in Balloon Fight $0002, Pac-Man, and Super Mario Bros.).
+(define (detect-nmi-sync-semaphore-idioms inst-src)
+  (define raw-insts (extract-inst-stream inst-src))
+  (define insts
+    (filter (lambda (f) (not (and (pair? f) (eq? (car f) 'label))))
+            raw-insts))
+  (define matches '())
+
+  (let loop ([rem insts]
+             [idx 0])
+    (match rem
+      [(list* i1 i2 tail)
+       (define zp-addr
+         (match i1
+           [`(LDA #:zp ,a) a]
+           [`(BIT #:zp ,a) a]
+           [`(LDA #:abs ,a) #:when (< a #x0800) a]
+           [_ #f]))
+       (define branch-info
+         (match i2
+           [`(BEQ ,t) (list 'BEQ t)]
+           [`(BNE ,t) (list 'BNE t)]
+           [_ #f]))
+       (when (and zp-addr branch-info)
+         (match-define (list b-mnem target) branch-info)
+         (set! matches
+               (cons (hasheq 'zp-addr zp-addr
+                             'branch  b-mnem
+                             'target  target
+                             'index   idx)
+                     matches)))
+       (loop (cons i2 tail) (add1 idx))]
+      [_ (void)]))
+
+  (define rev-matches (reverse matches))
+  (hasheq 'count           (length rev-matches)
+          'semaphore-count (length rev-matches)
+          'semaphore-addrs (remove-duplicates (map (lambda (m) (hash-ref m 'zp-addr)) rev-matches))
+          'matches         rev-matches))
+
+;; Parse standard FCEUX `.fm2` TAS movie input lines (`|0|RLDUTSBA|...|`)
+;; into a list of frame-by-frame 8-bit NES joypad bitmasks
+;; (`BTN-A=#x01`, `BTN-B=#x02`, `BTN-SELECT=#x04`, `BTN-START=#x08`,
+;;  `BTN-UP=#x10`, `BTN-DOWN=#x20`, `BTN-LEFT=#x40`, `BTN-RIGHT=#x80`).
+(define (parse-fm2-tas-inputs fm2-text)
+  (define lines (string-split fm2-text "\n"))
+  (reverse
+   (for/fold ([acc '()])
+             ([raw-line (in-list lines)])
+     (define line (string-trim raw-line))
+     (if (and (>= (string-length line) 11)
+              (char=? (string-ref line 0) #\|))
+         (let* ([parts (string-split line "|" #:trim? #f)]
+                ;; parts: '("" "0" "RLDUTSBA" ...)
+                [port0 (if (>= (length parts) 3) (list-ref parts 2) "")])
+           (if (>= (string-length port0) 8)
+               (let ([mask
+                      (for/fold ([m 0])
+                                ([i (in-range 8)])
+                        (define ch (string-ref port0 i))
+                        (if (memv ch '(#\. #\space #\0))
+                            m
+                            (bitwise-ior m (arithmetic-shift 1 (- 7 i)))))])
+                 (cons mask acc))
+               acc))
+         acc))))
+
+;; Serialize a list of 8-bit NES joypad button masks into standard FCEUX `.fm2`
+;; frame lines (`|0|RLDUTSBA|||`).
+(define (serialize-fm2-tas-inputs button-mask-list)
+  (define btn-chars "RLDUTSBA")
+  (string-join
+   (for/list ([mask (in-list button-mask-list)])
+     (define p0-str
+       (list->string
+        (for/list ([i (in-range 8)])
+          (if (bitwise-bit-set? mask (- 7 i))
+              (string-ref btn-chars i)
+              #\.))))
+     (format "|0|~a|||" p0-str))
+   "\n"))

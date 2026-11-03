@@ -1,0 +1,96 @@
+#lang boba-nes
+
+;; ============================================================================
+;; examples/top10_classics_suite.bnes
+;; Top-10 Commercial NES Classics Decompiled Suite in #lang boba-nes:
+;;   1. Donkey Kong   2. Mario Bros.    3. Pac-Man       4. Excitebike
+;;   5. Balloon Fight 6. Ice Climber    7. Galaga        8. Kung Fu
+;;   9. Battle City  10. Bomberman
+;; ============================================================================
+
+(require racket/format
+         "../compiler/decompiled-top10.rkt")
+
+(defchr-layout top10-chr-layout-std
+  #:sprite-pt  0
+  #:bg-pt      1
+  #:blank-tile #x24)
+
+(defchr-layout top10-chr-layout-pacman
+  #:sprite-pt  1
+  #:bg-pt      0
+  #:blank-tile #x2D)
+
+(defchar-map top10-nintendo-font
+  #:digit-base #x00
+  #:alpha-base #x0A
+  #:space-tile #x24
+  #:extra      (list (cons #\- #x28) (cons #\x #x29) (cons #\! #x2B)))
+
+(defstate-machine top10-campaign-fsm
+  #:initial stage-0
+  ([stage-0        #:kind normal  #:transitions (stage-1 hazard-death)]
+   [stage-1        #:kind normal  #:transitions (stage-2 hazard-death)]
+   [stage-2        #:kind normal  #:transitions (stage-3 hazard-death)]
+   [stage-3        #:kind normal  #:transitions (campaign-clear hazard-death)]
+   [hazard-death   #:kind failure #:transitions (stage-0 stage-1 stage-2 stage-3)]
+   [campaign-clear #:kind victory #:transitions (stage-0)]))
+
+(defzp-map top10-zp-layout
+  ([frame-cnt      #x13 monotonic-frame-counter]
+   [player-x       #x14 player-or-actor-coord]
+   [player-y       #x15 player-or-actor-coord]
+   [enemy-x        #x1A player-or-actor-coord]
+   [enemy-y        #x1B player-or-actor-coord]
+   [enemy-alive    #x1C game-phase-or-flag]
+   [score          #x1E hud-bcd-counter]
+   [won            #x24 game-phase-or-flag]
+   [lives          #x25 hud-bcd-counter]
+   [dead           #x26 game-phase-or-flag]
+   [stage-id       #x28 game-phase-or-flag]
+   [game-completed #x29 game-phase-or-flag]))
+
+(define donkey-kong-entry   (hash-ref top10-decompiled-games 'donkey-kong))
+(define mario-bros-entry    (hash-ref top10-decompiled-games 'mario-bros))
+(define pac-man-entry       (hash-ref top10-decompiled-games 'pac-man))
+(define excitebike-entry    (hash-ref top10-decompiled-games 'excitebike))
+(define balloon-fight-entry (hash-ref top10-decompiled-games 'balloon-fight))
+(define ice-climber-entry   (hash-ref top10-decompiled-games 'ice-climber))
+(define galaga-entry        (hash-ref top10-decompiled-games 'galaga))
+(define kung-fu-entry       (hash-ref top10-decompiled-games 'kung-fu))
+(define battle-city-entry   (hash-ref top10-decompiled-games 'battle-city))
+(define bomberman-entry     (hash-ref top10-decompiled-games 'bomberman))
+
+(provide top10-chr-layout-std
+         top10-chr-layout-pacman
+         top10-nintendo-font
+         top10-campaign-fsm
+         top10-zp-layout
+         TOP10-GAME-SPECS
+         top10-decompiled-games
+         donkey-kong-entry
+         mario-bros-entry
+         pac-man-entry
+         excitebike-entry
+         balloon-fight-entry
+         ice-climber-entry
+         galaga-entry
+         kung-fu-entry
+         battle-city-entry
+         bomberman-entry)
+
+(module+ main
+  (printf "====================================================================================================\n")
+  (printf "  #lang boba-nes : Top-10 Commercial NES Classics Suite (examples/top10_classics_suite.bnes)\n")
+  (printf "====================================================================================================\n")
+  (for ([spec (in-list TOP10-GAME-SPECS)])
+    (define sym   (hash-ref spec 'symbol))
+    (define entry (hash-ref top10-decompiled-games sym))
+    (define tres  (hash-ref entry 'type-result))
+    (printf "  ~a (~a) -> well-typed? ~a | ROM: ~a (~a bytes)\n"
+            (~a (hash-ref entry 'title) #:min-width 15)
+            (~a (hash-ref entry 'genre) #:min-width 21)
+            (nes-type-result-well-typed? tres)
+            (hash-ref spec 'out-file)
+            (bytes-length (hash-ref entry 'rom-bytes))))
+  (printf "====================================================================================================\n"))

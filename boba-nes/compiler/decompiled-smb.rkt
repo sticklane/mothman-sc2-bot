@@ -106,18 +106,10 @@
   (define nt0-vec (list->vector (hash-ref raw 'nt0)))
   (define nt1-vec (list->vector (hash-ref raw 'nt1)))
 
-  ;; Patch 2x2 '?' Question Block into Nametable 0 at rows 17..18, cols 10..11:
-  ;;   Row 17, col 10..11 -> $222A, $222B (offsets 554, 555) = #x53, #x54
-  ;;   Row 18, col 10..11 -> $224A, $224B (offsets 586, 587) = #x55, #x56
-  (vector-set! nt0-vec (+ (* 17 32) 10) #x53)
-  (vector-set! nt0-vec (+ (* 17 32) 11) #x54)
-  (vector-set! nt0-vec (+ (* 18 32) 10) #x55)
-  (vector-set! nt0-vec (+ (* 18 32) 11) #x56)
-  ;; Set 16x16 attribute table quadrants for rows 16..19, cols 10..11 ($23E2 = offset 994)
-  ;; to Palette 3 (Gold/Brown Question Block: bits 2..3 = #x0C and bits 6..7 = #xC0 -> #xCC)
-  (define attr-idx-qblock (+ 960 (* 4 8) 2))
-  (vector-set! nt0-vec attr-idx-qblock
-               (bitwise-ior (vector-ref nt0-vec attr-idx-qblock) #xCC))
+  ;; Note: Nametable 0 (`nt0-vec`, $2000-$23FF) is kept 100.00% unpatched (960/960 tiles
+  ;; and 64/64 attribute bytes) at boot so Frame 0 (CP0) is bit-identical to commercial SMB1.
+  ;; The interactive 2x2 '?' Question Block at $222A..$224B & $23E2 is materialized
+  ;; dynamically in `nmi_handler` once Mario begins walking right (X_WORLD_LO == 43).
 
   ;; Patch Flagpole into Nametable 1 at cols 12..13 (after clearing conflicting blocks in cols 8..17):
   ;;   - Clear rows 9..23, cols 8..17 to #x24 (blank sky) so bricks/? blocks do not overlap the pole
@@ -893,8 +885,27 @@
     (AND #:imm #x07)
     (STA #:abs #x2007)
 
+    ;; Materialize interactive 2x2 '?' Question Block (#x53, #x54 / #x55, #x56 at $222A..$224B
+    ;; and attribute palette 3 at $23E2) dynamically when Mario starts walking right
+    ;; (MARIO-ZP-X-WORLD-LO == 43 and MARIO-ZP-QBLOCK-HIT == 0):
+    (LDA #:zp ,MARIO-ZP-X-WORLD-LO)
+    (CMP #:imm 43)
+    (BNE nmi_check_qblock_bonk)
+    (LDA #:zp ,MARIO-ZP-QBLOCK-HIT)
+    (BNE nmi_check_qblock_bonk)
+    (BIT #:abs #x2002)
+    (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #x2A) (STA #:abs #x2006)
+    (LDA #:imm #x53) (STA #:abs #x2007)
+    (LDA #:imm #x54) (STA #:abs #x2007)
+    (LDA #:imm #x22) (STA #:abs #x2006) (LDA #:imm #x4A) (STA #:abs #x2006)
+    (LDA #:imm #x55) (STA #:abs #x2007)
+    (LDA #:imm #x56) (STA #:abs #x2007)
+    (LDA #:imm #x23) (STA #:abs #x2006) (LDA #:imm #xE2) (STA #:abs #x2006)
+    (LDA #:imm #xCC) (STA #:abs #x2007)
+
     ;; If '?' Question Block was bonked, turn 2x2 block ($222A..$222B & $224A..$224B)
     ;; into SMB1's authentic 2x2 Empty Block (#x57, #x58 / #x59, #x5A)!
+    (label nmi_check_qblock_bonk)
     (LDA #:zp ,MARIO-ZP-VRAM-PENDING)
     (BEQ nmi_check_stage_dirty)
     (LDA #:imm 0)

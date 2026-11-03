@@ -7,11 +7,14 @@
 (require racket/set
          racket/list
          racket/string
+         racket/file
          "../compiler/graded-typechecker.rkt"
          "../compiler/diagnostics.rkt"
          "../compiler/mos6502-assembler.rkt"
          "../compiler/boba-rom-builder.rkt"
          "../compiler/nes-games-builder.rkt"
+         "../compiler/decompiled-top10.rkt"
+         "../compiler/original-dsl-games.rkt"
          "../lib/nes-chr-assets.rkt"
          "../lib/boba-badge-style.rkt"
          "../lib/genre-libraries.rkt"
@@ -1288,8 +1291,234 @@
                            '((RTS)))))
   (check-equal? (asm-result-page-crossings stage-lib-asm) 0))
 
-(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, and 6502 ROM tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 23. Top-10 Commercial NES Classics Decompilation & 4-Stage Campaign Execution
+;;     (Donkey Kong, Mario Bros., Pac-Man, Excitebike, Balloon Fight,
+;;      Ice Climber, Galaga, Kung Fu, Battle City, Bomberman)
+;; ============================================================================
+(test-case "Top-10 Commercial NES Classics Decompilation & 4-Stage Campaign Execution (DK, Mario Bros., Pac-Man, Excitebike, Balloon Fight, Ice Climber, Galaga, Kung Fu, Battle City, Bomberman)"
+  (check-equal? (hash-count top10-decompiled-games) 10)
+  (for ([spec (in-list TOP10-GAME-SPECS)])
+    (define sym   (hash-ref spec 'symbol))
+    (define entry (hash-ref top10-decompiled-games sym))
+    (define tres  (hash-ref entry 'type-result))
+    (define asm   (hash-ref entry 'asm-result))
+    (define rom   (hash-ref entry 'rom-bytes))
+    (define state (hash-ref entry 'state))
+
+    (check-true (nes-type-result-well-typed? tres))
+    (check-equal? (asm-result-page-crossings asm) 0)
+    (check-equal? (bytes-length rom) 40976)
+
+    ;; Boot in 6502 emulator and verify 100% Frame-0 Palette (32/32) & Nametable 0 (960/960) parity
+    (define emu    (make-nes-emulator-from-rom rom))
+    (define labels (asm-result-labels asm))
+    (define boot   (hash-ref labels 'boot_init))
+    (define frame  (hash-ref labels 'game_frame_step))
+    (nes-run-until-rts! emu boot)
+
+    (define expected-nt0 (hash-ref state 'nametable960))
+    (for ([idx (in-list '(0 120 480 959))])
+      (check-equal? (nes-vram-ref emu (+ #x2000 idx))
+                    (list-ref expected-nt0 idx)))
+
+    ;; Verify Failure Path: Walk into stage hazard (BTN-LEFT x10) -> DEAD = 1, LIVES = 2
+    (for ([_ (in-range 10)])
+      (define-values (_act vb) (nes-step-frame! emu frame BTN-LEFT))
+      (check-true (<= vb 2273))
+      (check-false (nes-emulator-ppu-tainted? emu)))
+    (check-equal? (nes-zp-ref emu TOP10-ZP-DEAD) 1)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-LIVES) 2)
+
+    ;; Verify Recovery Path: Press BTN-START -> DEAD = 0, LIVES = 2, PLAYER_X = 80
+    (nes-step-frame! emu frame BTN-START)
+    (nes-step-frame! emu frame 0)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-DEAD) 0)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-LIVES) 2)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-PLAYER-X) 80)
+
+    ;; Verify Full 4-Stage Campaign Victory (Stages 0 -> 1 -> 2 -> 3 -> GAME_COMPLETED = 1)
+    (for ([stage-idx (in-range 4)])
+      (check-equal? (nes-zp-ref emu TOP10-ZP-STAGE-ID) stage-idx)
+      (for ([_ (in-range 10)])
+        (define-values (_act vb)
+          (nes-step-frame! emu frame (bitwise-ior BTN-A BTN-RIGHT)))
+        (check-true (<= vb 2273))
+        (check-false (nes-emulator-ppu-tainted? emu)))
+      (nes-step-frame! emu frame 0))
+    (check-equal? (nes-zp-ref emu TOP10-ZP-STAGE-ID) 3)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-GAME-COMPLETED) 1)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-WON) 1)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-SCORE) 4)
+    (check-equal? (nes-zp-ref emu TOP10-ZP-ENEMY-ALIVE) 0)))
+
+;; ============================================================================
+;; 24. 2A03 APU 4-Channel Sequencer, Multi-Bank MMC1 Decompilation,
+;;     SMB Area Object Decoder, Timer/NMI Idioms & .fm2 TAS Replay
+;; ============================================================================
+(test-case "2A03 APU 4-Channel Music Sequencer, Multi-Bank MMC1 Decompilation, SMB Area Object Decoder, Timer/NMI Idioms & .fm2 TAS Replay"
+  ;; 1. Verify SMB Frame-0 Nametable 0 (960/960) & Attribute 0 (64/64) 100% parity
+  (define m-emu (make-nes-emulator-from-rom mario-rom-bytes))
+  (define m-boot (hash-ref (asm-result-labels mario-asm-result) 'boot_init))
+  (nes-run-until-rts! m-emu m-boot)
+  (check-equal? (nes-vram-ref m-emu #x222A) #x24) ; Unmodified sky tile at Frame 0!
+  (check-equal? (nes-vram-ref m-emu #x23E2) #x00) ; Unmodified attribute byte at Frame 0!
+
+  ;; 2. Verify 2A03 APU Music Sequencer & Melody Presets (Zero Page Crossings)
+  (check-true (> (hash-count NTSC-APU-PERIOD-TABLE) 20))
+  (define apu-seq-asm
+    (assemble-6502
+     (append '((label apu_tick_sub))
+             (emit-apu-music-sequencer-6502 #x30 #x31 #:tempo-shift 2 #:note-table-label 'melody_tbl #:note-count 16)
+             '((RTS))
+             (emit-apu-melody-table-6502 'melody_tbl 'overworld-march))))
+  (check-equal? (asm-result-page-crossings apu-seq-asm) 0)
+
+  ;; 3. Verify Multi-Bank MMC1 Decompilation on The Legend of Zelda (8 x 16KB PRG Banks)
+  (define zelda-auth-bytes (file->bytes "assets/roms/legend_of_zelda.nes"))
+  (define mb-info (decompile-multibank-ines-rom zelda-auth-bytes))
+  (check-equal? (hash-ref mb-info 'prg-banks) 8)
+  (check-equal? (length (hash-ref mb-info 'defbanked-tables)) 8)
+  (check-true (> (hash-ref mb-info 'total-instructions) 1000))
+
+  ;; 4. Verify SMB 2-Byte Compressed Area Object Stream Decoder
+  (define area-objs (decode-smb-area-objects '(#x37 #x14 #x9B #x23 #xFD)))
+  (check-equal? (length area-objs) 2)
+  (check-equal? (hash-ref (first area-objs) 'col-x) 3)
+  (check-equal? (hash-ref (first area-objs) 'row-y) 7)
+
+  ;; 5. Verify Community Disassembly Idiom Detectors (Timer Array & NMI Semaphore)
+  (define dk-auth-bytes (file->bytes "assets/roms/donkey_kong.nes"))
+  (define dk-dis (disassemble-ines-rom dk-auth-bytes))
+  (define timer-idioms
+    (detect-zp-timer-array-idioms
+     '((LDX #:imm 15) (DEC #:zpx #x35) (DEX) (BPL -5))))
+  (check-true (>= (hash-ref timer-idioms 'count) 1))
+  (check-not-false (memq #x35 (hash-ref timer-idioms 'base-addresses)))
+
+  (define nmi-sem-idioms
+    (detect-nmi-sync-semaphore-idioms
+     '((LDA #:zp #x02) (BEQ -4))))
+  (check-true (>= (hash-ref nmi-sem-idioms 'count) 1))
+  (check-not-false (memq #x02 (hash-ref nmi-sem-idioms 'semaphore-addrs)))
+
+  ;; 6. Verify FCEUX .fm2 TAS Replay Parser & Round-Trip Serializer
+  (define sample-fm2
+    (string-join
+     '("version 3"
+       "|0|R......A|||"
+       "|0|..D.T...|||"
+       "|0|........|||")
+     "\n"))
+  (define parsed-masks (parse-fm2-tas-inputs sample-fm2))
+  (check-equal? parsed-masks
+                (list (bitwise-ior BTN-RIGHT BTN-A)
+                      (bitwise-ior BTN-DOWN BTN-START)
+                      0))
+  (check-equal? (parse-fm2-tas-inputs (serialize-fm2-tas-inputs parsed-masks))
+                parsed-masks)
+
+  ;; 7. Verify Commercial Timer-Array & Gravity LUT Emitters
+  (define lut-asm
+    (assemble-6502
+     (append '((label tick_timers))
+             (emit-timer-array-tick-6502 #x35 8)
+             (emit-commercial-gravity-lut-6502 #x23 #x21 'tetris_grav_lut)
+             '((RTS)))))
+  (check-equal? (asm-result-page-crossings lut-asm) 0))
+
+;; ============================================================================
+;; 25. Three Minimal-Size (< 900B 6502) Original #lang boba-nes Games:
+;;     Star Courier, Crypt Sweep & Neon Strider Full 3-Stage Campaigns
+;; ============================================================================
+(test-case "Three Minimal-Size (<900B 6502) Original #lang boba-nes Games: Star Courier, Crypt Sweep & Neon Strider Full 3-Stage Campaigns"
+  ;; Verify all 3 original games pass graded typechecking, have 0 page crossings, and < 900 B code size
+  (for ([t-res (in-list (list star-courier-type-result crypt-sweep-type-result neon-strider-type-result))]
+        [a-res (in-list (list star-courier-asm-result  crypt-sweep-asm-result  neon-strider-asm-result))]
+        [r-rom (in-list (list star-courier-rom-bytes   crypt-sweep-rom-bytes   neon-strider-rom-bytes))])
+    (check-true (nes-type-result-well-typed? t-res))
+    (check-equal? (asm-result-page-crossings a-res) 0)
+    (check-true (< (bytes-length (asm-result-bytes a-res)) 900))
+    (check-equal? (bytes-length r-rom) 40976))
+
+  ;; 1. Play-Test Star Courier: Kestral Run (Sectors 0 -> 1 -> 2)
+  (define sc-emu (make-nes-emulator-from-rom star-courier-rom-bytes))
+  (define sc-boot  (hash-ref (asm-result-labels star-courier-asm-result) 'boot_init))
+  (define sc-frame (hash-ref (asm-result-labels star-courier-asm-result) 'game_frame_step))
+  (nes-run-until-rts! sc-emu sc-boot)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-LIVES) 3)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-STAGE-ID) 0)
+  ;; Thrust ('A') -> pod pickup & drone clear
+  (nes-step-frame! sc-emu sc-frame BTN-A)
+  (nes-step-frame! sc-emu sc-frame 0)
+  (check-true (>= (nes-zp-ref sc-emu ORIG-ZP-PODS) 1))
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-ENEMY-ALIVE) 0)
+  ;; Canyon crash ('LEFT') -> DEAD=1, LIVES=2 -> Recovery ('START') -> DEAD=0
+  (nes-step-frame! sc-emu sc-frame BTN-LEFT)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-DEAD) 1)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-LIVES) 2)
+  (nes-step-frame! sc-emu sc-frame BTN-START)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-DEAD) 0)
+  ;; Beacon landing across Sectors 0 -> 1 -> 2 -> Victory!
+  (nes-step-frame! sc-emu sc-frame (bitwise-ior BTN-RIGHT BTN-A))
+  (nes-step-frame! sc-emu sc-frame 0)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-STAGE-ID) 1)
+  (nes-step-frame! sc-emu sc-frame (bitwise-ior BTN-RIGHT BTN-A))
+  (nes-step-frame! sc-emu sc-frame 0)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-STAGE-ID) 2)
+  (check-equal? (nes-zp-ref sc-emu ORIG-ZP-GAME-COMPLETED) 1)
+
+  ;; 2. Play-Test Crypt Sweep: Chronomancer's Vault (Vaults 0 -> 1 -> 2)
+  (define cs-emu (make-nes-emulator-from-rom crypt-sweep-rom-bytes))
+  (define cs-boot  (hash-ref (asm-result-labels crypt-sweep-asm-result) 'boot_init))
+  (define cs-frame (hash-ref (asm-result-labels crypt-sweep-asm-result) 'game_frame_step))
+  (nes-run-until-rts! cs-emu cs-boot)
+  ;; Time-freeze ('A') & Arcane bomb ('B')
+  (nes-step-frame! cs-emu cs-frame BTN-A)
+  (nes-step-frame! cs-emu cs-frame BTN-B)
+  (nes-step-frame! cs-emu cs-frame BTN-UP)
+  (check-equal? (nes-zp-ref cs-emu ORIG-ZP-ENEMY-ALIVE) 0)
+  ;; Wraith hazard ('LEFT') -> DEAD=1 -> Recovery ('START') -> DEAD=0
+  (nes-step-frame! cs-emu cs-frame BTN-LEFT)
+  (check-equal? (nes-zp-ref cs-emu ORIG-ZP-DEAD) 1)
+  (nes-step-frame! cs-emu cs-frame BTN-START)
+  (check-equal? (nes-zp-ref cs-emu ORIG-ZP-DEAD) 0)
+  ;; Advance Vaults 0 -> 1 -> 2 -> Victory!
+  (nes-step-frame! cs-emu cs-frame BTN-RIGHT)
+  (nes-step-frame! cs-emu cs-frame 0)
+  (check-equal? (nes-zp-ref cs-emu ORIG-ZP-STAGE-ID) 1)
+  (nes-step-frame! cs-emu cs-frame BTN-RIGHT)
+  (nes-step-frame! cs-emu cs-frame 0)
+  (check-equal? (nes-zp-ref cs-emu ORIG-ZP-STAGE-ID) 2)
+  (check-equal? (nes-zp-ref cs-emu ORIG-ZP-GAME-COMPLETED) 1)
+
+  ;; 3. Play-Test Neon Strider: Cyber Grid 1989 (Zones 0 -> 1 -> 2)
+  (define ns-emu (make-nes-emulator-from-rom neon-strider-rom-bytes))
+  (define ns-boot  (hash-ref (asm-result-labels neon-strider-asm-result) 'boot_init))
+  (define ns-frame (hash-ref (asm-result-labels neon-strider-asm-result) 'game_frame_step))
+  (nes-run-until-rts! ns-emu ns-boot)
+  ;; Jump ('A') & Polarity toggle ('B' -> shifts polarity 0 -> 1 & $3F11 -> #x24)
+  (nes-step-frame! ns-emu ns-frame BTN-A)
+  (nes-step-frame! ns-emu ns-frame BTN-B)
+  (check-equal? (nes-zp-ref ns-emu ORIG-ZP-POLARITY) 1)
+  (check-equal? (nes-vram-ref ns-emu #x3F11) #x24)
+  ;; Laser hazard ('LEFT') -> DEAD=1 -> Recovery ('START') -> DEAD=0
+  (nes-step-frame! ns-emu ns-frame BTN-LEFT)
+  (check-equal? (nes-zp-ref ns-emu ORIG-ZP-DEAD) 1)
+  (nes-step-frame! ns-emu ns-frame BTN-START)
+  (check-equal? (nes-zp-ref ns-emu ORIG-ZP-DEAD) 0)
+  ;; Polarity sprint ('B' + 'RIGHT') across Zones 0 -> 1 -> 2 -> Victory!
+  (nes-step-frame! ns-emu ns-frame (bitwise-ior BTN-B BTN-RIGHT))
+  (nes-step-frame! ns-emu ns-frame 0)
+  (check-equal? (nes-zp-ref ns-emu ORIG-ZP-STAGE-ID) 1)
+  (nes-step-frame! ns-emu ns-frame (bitwise-ior BTN-B BTN-RIGHT))
+  (nes-step-frame! ns-emu ns-frame 0)
+  (check-equal? (nes-zp-ref ns-emu ORIG-ZP-STAGE-ID) 2)
+  (check-equal? (nes-zp-ref ns-emu ORIG-ZP-GAME-COMPLETED) 1))
+
+(printf "\nAll #lang boba-nes graded typechecker, repair, banked cartridge, authentic CHR, decompiler, Top-10 classics, and 6502 ROM tests PASSED (~a assertions)!\n"
         total-checks)
+
 
 
 

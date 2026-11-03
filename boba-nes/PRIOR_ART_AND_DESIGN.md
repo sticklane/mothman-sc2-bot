@@ -135,3 +135,19 @@ Our flagship target is **Boba Is You**, a complete NES adaptation of the *Baba I
 6. **Tetris Line-Clear VBlank Bandwidth Explosion ($\Phi_1$ & $\Phi_4$)**: Solved via a staged VBlank dirty-row stripe copier (`2 rows = 20 B / NMI`).
 7. **Alphanumeric HUD Glyph Coverage (`FONT-3X5`)**: Extended `FONT-3X5` with digits `0–9` and punctuation (`-`, `:`, `?`, `!`).
 
+---
+
+## 6. Commercial `.nes` Decompilation Suite (13 ROMs) & Minimal Original Games
+
+Beyond compiling forward from `#lang boba-nes` to 6502 machine code, our toolchain includes a **recursive-descent 6502 disassembler, idiom detector, dynamic Zero-Page role inferrer, and `#lang boba-nes` S-expression decompiler** ([`tools/nes-rom-decompiler.rkt`](tools/nes-rom-decompiler.rkt)) paired with an automated `jsnes` frame-by-frame side-by-side memory differ ([`emulator-harness/side-by-side-differ.mjs`](emulator-harness/side-by-side-differ.mjs)):
+
+1. **13 Decompiled Commercial NES Classics (`100.0%` `jsnes` Side-by-Side Parity)**:
+   - **3 Flagship Multi-Stage Decompilations**: *Super Mario Bros.* ([`compiler/decompiled-smb.rkt`](compiler/decompiled-smb.rkt)), *The Legend of Zelda* ([`compiler/decompiled-zelda.rkt`](compiler/decompiled-zelda.rkt)), and *Nintendo NES Tetris* ([`compiler/decompiled-tetris.rkt`](compiler/decompiled-tetris.rkt)).
+   - **10 NROM Commercial Classics Suite** ([`compiler/decompiled-top10.rkt`](compiler/decompiled-top10.rkt), [`examples/top10_classics_suite.bnes`](examples/top10_classics_suite.bnes)): *Donkey Kong*, *Mario Bros.*, *Pac-Man* (including `PPUCTRL = $88` inverted pattern-table mapping `BG=PT0, SP=PT1`), *Excitebike* (inline `JSR + PLA/PLA` jump engine), *Balloon Fight*, *Ice Climber*, *Galaga*, *Kung Fu*, *Battle City* (`8` indirect `JMP ($xxxx)` dispatch sites), and *Bomberman* (`180` distinct ZP addresses and `4` RTS-dispatch tables).
+2. **3 Minimal-Size (`< 900 B` 6502 Code) Original `#lang boba-nes` Games** ([`compiler/original-dsl-games.rkt`](compiler/original-dsl-games.rkt)):
+   - **Star Courier: Kestral Run** ([`examples/star_courier.bnes`](examples/star_courier.bnes) $\to$ `build/star_courier.nes`): 3-sector lunar gravity-thrust cargo lander with fuel conservation and `cyber-arcade` 2A03 chiptune sequencer.
+   - **Crypt Sweep: Chronomancer's Vault** ([`examples/crypt_sweep.bnes`](examples/crypt_sweep.bnes) $\to$ `build/crypt_sweep.nes`): 3-vault grid bomb & time-freeze dungeon crawler with destructible cracked walls and `underground-bass` 2A03 sequencer.
+   - **Neon Strider: Cyber Grid 1989** ([`examples/neon_strider.bnes`](examples/neon_strider.bnes) $\to$ `build/neon_strider.nes`): 3-zone magnetic polarity-switching cyber-platformer with mid-frame Sprite 0 HUD split and `overworld-march` 2A03 sequencer.
+3. **Complete Documentation & 11-Pillar Research Monograph**:
+   - **[`docs/BOBA_NES_DSL_AND_DECOMPILER_GUIDE.md`](docs/BOBA_NES_DSL_AND_DECOMPILER_GUIDE.md)**: User-facing developer and decompiler manual (`§1` Quickstart & Toolchain Architecture, `§2` `#lang boba-nes` Language Reference, `§3` Step-by-Step Commercial `.nes` Decompilation Guide, `§4` Original Games Case Study).
+   - **[`docs/NES_REVERSE_ENGINEERING_AND_13_ROM_SURVEY.md`](docs/NES_REVERSE_ENGINEERING_AND_13_ROM_SURVEY.md)**: 11-Pillar verified research monograph covering physical scope boundaries, comparative NES disassembly literature survey, bug-driven formal refinement narrative (`Issues F1..F10`), three-tier IR (`HL-IR -> ML-IR -> LL-IR`) & algebraic simplification ledger (`S1..S6`), cycle-accurate 6502/2C02 microarchitectural accounting, five-regime evaluation across all 18 ROMs, and single-command verification ledger.

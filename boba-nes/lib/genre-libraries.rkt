@@ -10,9 +10,12 @@
 ;; ============================================================================
 
 (require racket/list
-         racket/format)
+         racket/format
+         "apu-sequencer.rkt")
 
 (provide
+ (all-from-out "apu-sequencer.rkt")
+
  ;; 1. Platformer Library
  emit-fixed-point-8.8-step-6502
  emit-sprite0-hud-split-6502
@@ -24,13 +27,16 @@
  emit-invincibility-damage-handler-6502
 
  ;; 3. Falling-Block Puzzle Library
+ NES-TETRIS-GRAVITY-TABLE
  emit-galois-lfsr-step-6502
  emit-staged-vblank-row-copier-6502
  emit-topout-and-reset-guard-6502
+ emit-commercial-gravity-lut-6502
 
- ;; 4. Cross-Genre VBlank HUD, Multi-Stage Progression & Recovery Library
+ ;; 4. Cross-Genre VBlank HUD, Multi-Stage Progression, Timers & Recovery Library
  emit-vblank-hud-bcd-delta-6502
- emit-stage-progression-handler-6502)
+ emit-stage-progression-handler-6502
+ emit-timer-array-tick-6502)
 
 ;; ============================================================================
 ;; 1. Platformer Mechanics Library
@@ -260,3 +266,47 @@
      (STA #:zp ,zp-game-completed)
      (label ,done-lbl))))
 
+;; Emit a zero-page-crossing 6502 loop that decrements every non-zero timer in
+;; `[zp-base .. zp-base + count - 1]` once per frame (matching Donkey Kong $35-$45
+;; and Super Mario Bros. $0780-$078F).
+(define (emit-timer-array-tick-6502 zp-base count
+                                    #:loop-label [loop-lbl '__timer_tick_loop]
+                                    #:skip-label [skip-lbl '__timer_tick_skip])
+  `((LDX #:imm ,(max 0 (sub1 count)))
+    (label ,loop-lbl)
+    (LDA #:zpx ,zp-base)
+    (BEQ ,skip-lbl)
+    (DEC #:zpx ,zp-base)
+    (label ,skip-lbl)
+    (DEX)
+    (BPL ,loop-lbl)))
+
+;; Authentic Nintendo NES Tetris Levels 00..29 frames-per-row gravity table
+(define NES-TETRIS-GRAVITY-TABLE
+  '(48 43 38 33 28 23 18 13 8 6
+    5  5  5  4  4  4  3  3  3  2
+    2  2  2  2  2  2  2  2  2  1))
+
+;; Emit a level-indexed gravity speed lookup (matching Nintendo NES Tetris
+;; Levels 00..29 frames-per-row table) that clamps `zp-level` to 0..29,
+;; indexes `lut-label`, and stores the gravity period into `zp-drop-timer`.
+(define (emit-commercial-gravity-lut-6502 zp-level zp-drop-timer lut-label
+                                          #:max-level [max-level 29]
+                                          #:include-table? [include-table? #t])
+  (define lbl-ok   (string->symbol (format "~a_lvl_ok" lut-label)))
+  (define lbl-done (string->symbol (format "~a_done" lut-label)))
+  (append
+   `((LDX #:zp ,zp-level)
+     (CPX #:imm ,max-level)
+     (BCC ,lbl-ok)
+     (LDX #:imm ,max-level)
+     (label ,lbl-ok)
+     (LDA #:absx ,lut-label)
+     (STA #:zp ,zp-drop-timer))
+   (if include-table?
+       `((JMP ,lbl-done)
+         (.align 256)
+         (label ,lut-label)
+         (.byte ,@NES-TETRIS-GRAVITY-TABLE)
+         (label ,lbl-done))
+       '())))

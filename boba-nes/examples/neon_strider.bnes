@@ -1,0 +1,134 @@
+#lang boba-nes
+
+;; ============================================================================
+;; examples/neon_strider.bnes : Neon Strider: Cyber Grid 1989 in #lang boba-nes
+;; ============================================================================
+;; Original Polarity-Switching Cyber-Platformer across 3 Synth-Grid Zones:
+;;   - Zone 0: Data Highway   (Electric Cyan Circuitry #x1C)
+;;   - Zone 1: Firewall Relay (Laser Magenta Conduits #x24)
+;;   - Zone 2: Mainframe Core (Overclocked Gold Nexus #x28)
+;;
+;; Toggling phase polarity (BTN-SELECT / BTN-B) shifts the runner's shield
+;; polarity (0 = Cyan #x1C, 1 = Magenta #x24) in PPU Palette $3F11 and OAM
+;; attributes to phase through laser barriers and overload the Mainframe Core!
+;; ============================================================================
+
+(require "../compiler/original-dsl-games.rkt")
+
+;; 1. PPU Pattern Table & Zero-Offset HUD Typography Layout
+(defchr-layout neon-strider-chr-layout
+  #:sprite-pt  0
+  #:bg-pt      1
+  #:blank-tile #x24)
+
+(defchar-map neon-strider-hud-font
+  #:digit-base #x00
+  #:alpha-base #x0A
+  #:space-tile #x24
+  #:extra      (list (cons #\- #x28) (cons #\: #x2C) (cons #\! #x2B)))
+
+(defsprite-tile neon-strider-hud-anchor #:tile #xFF #:attr #x00)
+
+;; 2. Symmetric-Column-Major 16x16 Metasprites (Strider, Laser Sentry, Data Node, Core)
+(defmetasprite neon-strider-metasprite
+  #:tiles (list #x30 #x31)
+  #:order 'symmetric-col-major
+  #:attr  #x00)
+
+(defmetasprite laser-sentry-metasprite
+  #:tiles (list #x32 #x33)
+  #:order 'symmetric-col-major
+  #:attr  #x01)
+
+(defmetasprite cyber-node-metasprite
+  #:tiles (list #x34 #x35)
+  #:order 'symmetric-col-major
+  #:attr  #x02)
+
+(defmetasprite mainframe-core-metasprite
+  #:tiles (list #x36 #x37)
+  #:order 'symmetric-col-major
+  #:attr  #x03)
+
+;; 3. Cyber Grid Zone State Machine with Verified Laser-Overload Recovery
+(defstate-machine neon-strider-fsm
+  #:initial zone-0
+  ([zone-0            #:kind normal  #:transitions (zone-1 laser-overload)]
+   [zone-1            #:kind normal  #:transitions (zone-2 laser-overload)]
+   [zone-2            #:kind normal  #:transitions (mainframe-victory laser-overload)]
+   [laser-overload    #:kind failure #:transitions (zone-0 zone-1 zone-2)]
+   [mainframe-victory #:kind victory #:transitions (zone-0)]))
+
+;; 4. Pinned Hardware Zero-Page Map ($0014-$0029)
+(defzp-map neon-strider-zp-map
+  ([x              #x14 player-or-actor-coord]
+   [y              #x15 player-or-actor-coord]
+   [vy             #x16 player-or-actor-coord]
+   [polarity       #x17 game-phase-or-flag]
+   [sentry-x       #x1B player-or-actor-coord]
+   [enemy-alive    #x1C game-phase-or-flag]
+   [score          #x1E hud-bcd-counter]
+   [nodes          #x1F hud-bcd-counter]
+   [lives          #x25 hud-bcd-counter]
+   [dead           #x26 game-phase-or-flag]
+   [stage-id       #x28 game-phase-or-flag]
+   [game-completed #x29 game-phase-or-flag]))
+
+;; 5. Graded VBlank NMI & ActiveFrame Phase Blocks with High-Watermark Scratch Reuse
+(vblank-block neon-strider-vblank
+  #:cycles           640
+  #:oam-sprites      11
+  #:scanline-sprites 4
+  #:vram-bytes       24
+  (with-zp-scratch ([scratch_vblank_polarity 4])
+    scratch_vblank_polarity))
+
+(active-frame-block neon-strider-active
+  #:cycles       1840
+  #:ram-bytes    64
+  #:apu-channels '(pulse1 pulse2 triangle noise)
+  (with-zp-scratch ([scratch_subpixel_jump 6]
+                    [scratch_laser_phase   6])
+    (list scratch_subpixel_jump scratch_laser_phase)))
+
+;; 6. Verify Graded Module Descriptor via defnes-module
+(defnes-module neon-strider-verified-module NTSC-NROM-BUDGET
+  neon-strider-module-desc)
+
+(provide neon-strider-chr-layout
+         neon-strider-hud-font
+         neon-strider-hud-anchor
+         neon-strider-metasprite
+         laser-sentry-metasprite
+         cyber-node-metasprite
+         mainframe-core-metasprite
+         neon-strider-fsm
+         neon-strider-zp-map
+         neon-strider-vblank
+         neon-strider-active
+         neon-strider-verified-module
+         neon-strider-rom-bytes
+         neon-strider-asm-result
+         neon-strider-type-result
+         neon-strider-module-desc)
+
+(module+ main
+  (define vb  (nes-type-result-vblank-grade neon-strider-type-result))
+  (define act (nes-type-result-active-grade neon-strider-type-result))
+  (printf "================================================================\n")
+  (printf "  #lang boba-nes : Neon Strider: Cyber Grid 1989 ROM Report\n")
+  (printf "================================================================\n")
+  (printf "  Well-Typed Hardware Module : ~a (0 violations)\n"
+          (nes-type-result-well-typed? neon-strider-type-result))
+  (printf "  6502 Machine Code Size     : ~a bytes (< 900 B, ~a page crossings)\n"
+          (bytes-length (asm-result-bytes neon-strider-asm-result))
+          (asm-result-page-crossings neon-strider-asm-result))
+  (printf "  Phi1 VBlank / Active Cyc   : ~a / 2273 VBlank, ~a / 29780 Active\n"
+          (nes-grade-cycles vb) (nes-grade-cycles act))
+  (printf "  Phi2 OAM Total / Scanline  : ~a / 64 sprites (~a / 8 per scanline)\n"
+          (nes-grade-oam-sprites vb) (nes-grade-scanline-sprites vb))
+  (printf "  Phi3 Zero-Page Live / Peak : ~a B live / ~a B peak (<= 224 B)\n"
+          (nes-grade-zp-bytes-live act) (nes-grade-zp-bytes-peak act))
+  (printf "  Output iNES 1.0 ROM        : build/neon_strider.nes (~a bytes)\n"
+          (bytes-length neon-strider-rom-bytes))
+  (printf "================================================================\n"))
