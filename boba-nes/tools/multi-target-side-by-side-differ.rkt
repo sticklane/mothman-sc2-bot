@@ -31,6 +31,7 @@
  NES-METROID-DIFF-REPORT-PATH
  MULTI-TARGET-SIDE-BY-SIDE-REPORT-PATH
  verify-all-14-commercial-nes-side-by-side!
+ export-all-60-other-systems-framebuffers!
  run-all-74-multi-target-side-by-side-diffs!)
 
 (define-syntax (get-repo-root stx)
@@ -38,6 +39,7 @@
 
 (define REPO-ROOT-DIR (string->path (get-repo-root)))
 (define DECOMPILED-DIR (build-path REPO-ROOT-DIR "assets" "decompiled"))
+(define FB-DUMPS-DIR (build-path DECOMPILED-DIR "fb_dumps"))
 (define SCREENSHOTS-DIR (build-path REPO-ROOT-DIR "screenshots"))
 
 (define NES-VISUAL-DIFF-REPORT-PATH
@@ -50,6 +52,15 @@
   (build-path DECOMPILED-DIR "metroid_diff_report.json"))
 (define MULTI-TARGET-SIDE-BY-SIDE-REPORT-PATH
   (build-path DECOMPILED-DIR "multi_target_side_by_side_report.json"))
+
+(define (clean-game-id sym-or-str target-str)
+  (define raw (if (symbol? sym-or-str) (symbol->string sym-or-str) sym-or-str))
+  (define s1 (regexp-replace* #rx"-" raw "_"))
+  (define prefix (string-append target-str "_"))
+  (if (and (> (string-length s1) (string-length prefix))
+           (string=? (substring s1 0 (string-length prefix)) prefix))
+      (substring s1 (string-length prefix))
+      s1))
 
 ;; ============================================================================
 ;; 1. Verify All 14 Real Commercial NES ROMs Side-by-Side (jsnes + Framebuffer)
@@ -154,7 +165,68 @@
           'games                  nes-game-results))
 
 ;; ============================================================================
-;; 2. Run Unified Multi-Target Side-by-Side Verification Across All 74 Games
+;; 2. Export All 60 Non-NES RGB24 Framebuffers for 3-Panel PNG Rendering
+;; ============================================================================
+(define (export-all-60-other-systems-framebuffers!)
+  (make-directory* FB-DUMPS-DIR)
+  (define gb-gbc-pico-summary (run-all-gb-gbc-pico-top10-verifications!))
+  (define snes-summary        (run-all-snes-top10-verifications!))
+  (define gba-n64-summary     (run-all-gba-n64-top10-verifications!))
+
+  (define (dump-target-games! target-str width height games-list)
+    (for/list ([g (in-list games-list)]
+               [idx (in-naturals 1)])
+      (define sym-or-id (hash-ref g 'id (hash-ref g 'symbol)))
+      (define gid       (clean-game-id sym-or-id target-str))
+      (define title     (hash-ref g 'title))
+      (define genre     (symbol->string (hash-ref g 'genre 'action)))
+      (define ref-fb    (hash-ref g 'cp0-ref-fb))
+      (define rec-fb    (hash-ref g 'cp0-recomp-fb))
+      (define ref-fname (format "~a_~a_ref.rgb" target-str gid))
+      (define rec-fname (format "~a_~a_recomp.rgb" target-str gid))
+      (define png-rel   (format "screenshots/visual_diff_~a_~a_3panel.png" target-str gid))
+      (call-with-output-file (build-path FB-DUMPS-DIR ref-fname)
+        #:exists 'replace
+        (lambda (out) (write-bytes ref-fb out)))
+      (call-with-output-file (build-path FB-DUMPS-DIR rec-fname)
+        #:exists 'replace
+        (lambda (out) (write-bytes rec-fb out)))
+      (hasheq 'index         idx
+              'id            gid
+              'symbol        (symbol->string (hash-ref g 'symbol))
+              'title         title
+              'target        target-str
+              'genre         genre
+              'width         width
+              'height        height
+              'totalPixels   (* width height)
+              'refRgbFile    ref-fname
+              'recompRgbFile rec-fname
+              'threePanelPng png-rel)))
+
+  (define gb-entries   (dump-target-games! "gb"   160 144 (hash-ref gb-gbc-pico-summary 'gb-results)))
+  (define gbc-entries  (dump-target-games! "gbc"  160 144 (hash-ref gb-gbc-pico-summary 'gbc-results)))
+  (define pico-entries (dump-target-games! "pico" 128 128 (hash-ref gb-gbc-pico-summary 'pico-results)))
+  (define snes-entries (dump-target-games! "snes" 256 224 (hash-ref snes-summary 'games)))
+  (define gba-entries  (dump-target-games! "gba"  240 160 (hash-ref gba-n64-summary 'gba-results)))
+  (define n64-entries  (dump-target-games! "n64"  320 240 (hash-ref gba-n64-summary 'n64-results)))
+
+  (define manifest
+    (hasheq 'gb   gb-entries
+            'gbc  gbc-entries
+            'pico pico-entries
+            'snes snes-entries
+            'gba  gba-entries
+            'n64  n64-entries))
+
+  (define manifest-path (build-path FB-DUMPS-DIR "manifest.json"))
+  (call-with-output-file manifest-path
+    #:exists 'replace
+    (lambda (out) (write-json manifest out)))
+  manifest-path)
+
+;; ============================================================================
+;; 3. Run Unified Multi-Target Side-by-Side Verification Across All 74 Games
 ;; ============================================================================
 (define (run-all-74-multi-target-side-by-side-diffs!
          #:write-json? [write-json? #t])
@@ -170,6 +242,33 @@
   (define snes-games (hash-ref snes-summary 'games))
   (define gba-games  (hash-ref gba-n64-summary 'gba-results))
   (define n64-games  (hash-ref gba-n64-summary 'n64-results))
+
+  (define (check-target-pngs target-str games-list)
+    (for/and ([g (in-list games-list)])
+      (define sym-or-id (hash-ref g 'id (hash-ref g 'symbol)))
+      (define gid       (clean-game-id sym-or-id target-str))
+      (define p         (build-path SCREENSHOTS-DIR (format "visual_diff_~a_~a_3panel.png" target-str gid)))
+      (and (file-exists? p) (> (file-size p) 500))))
+
+  (define (check-sheet-png target-str)
+    (define p (build-path SCREENSHOTS-DIR (format "side_by_side_sheet_~a_top10.png" target-str)))
+    (and (file-exists? p) (> (file-size p) 2000)))
+
+  (define other-60-pngs-ok?
+    (and (check-target-pngs "gb"   gb-games)
+         (check-target-pngs "gbc"  gbc-games)
+         (check-target-pngs "pico" pico-games)
+         (check-target-pngs "snes" snes-games)
+         (check-target-pngs "gba"  gba-games)
+         (check-target-pngs "n64"  n64-games)))
+
+  (define all-6-sheets-ok?
+    (and (check-sheet-png "gb")
+         (check-sheet-png "gbc")
+         (check-sheet-png "pico")
+         (check-sheet-png "snes")
+         (check-sheet-png "gba")
+         (check-sheet-png "n64")))
 
   (define total-games
     (+ (length nes-games)
@@ -200,6 +299,8 @@
     (hasheq 'total-games              total-games
             'total-targets            8
             'all-74-verified?         all-74-verified?
+            'all-74-3panel-pngs-ok?   (and (hash-ref nes-summary 'all-verified?) other-60-pngs-ok?)
+            'all-6-system-sheets-ok?  all-6-sheets-ok?
             'overall-pixel-match-pct  100.0
             'total-pixels-verified    total-pixels-verified
             'total-matching-pixels    total-pixels-verified
@@ -222,6 +323,8 @@
          (hasheq 'totalGames           total-games
                  'totalTargets         8
                  'all74Verified        all-74-verified?
+                 'all74ThreePanelPngs  (and (hash-ref nes-summary 'all-verified?) other-60-pngs-ok?)
+                 'all6SystemSheets     all-6-sheets-ok?
                  'overallPixelMatchPct 100.0
                  'totalPixelsVerified  total-pixels-verified
                  'totalMatchingPixels  total-pixels-verified
@@ -239,6 +342,15 @@
   report)
 
 (module+ main
+  (require racket/cmdline)
+  (define do-export? #f)
+  (command-line
+   #:once-each
+   [("--export-fb") "Export 60 non-NES RGB24 framebuffers to assets/decompiled/fb_dumps"
+                    (set! do-export? #t)])
+  (when do-export?
+    (define mp (export-all-60-other-systems-framebuffers!))
+    (printf "  Exported 60 Reference + Recompiled RGB24 framebuffer pairs to ~a\n" mp))
   (define rpt (run-all-74-multi-target-side-by-side-diffs!))
   (printf "====================================================================================================\n")
   (printf "  MULTI-TARGET SIDE-BY-SIDE REAL vs. DECOMPILED ROM VERIFICATION (ALL 74 GAMES / 8 TARGETS)\n")
@@ -246,6 +358,9 @@
   (printf "  Total Games Verified       : ~a / 74 (all-verified? = ~a)\n"
           (hash-ref rpt 'total-games)
           (hash-ref rpt 'all-74-verified?))
+  (printf "  All 74 3-Panel PNGs Ready? : ~a | All 6 Composite System Sheets Ready? : ~a\n"
+          (hash-ref rpt 'all-74-3panel-pngs-ok?)
+          (hash-ref rpt 'all-6-system-sheets-ok?))
   (printf "  14 Commercial NES ROMs     : 14 / 14 @ 256x240 (61,440 / 61,440 px = 100.00%, 0 seam defects)\n")
   (printf "  10 Game Boy (DMG .gb)      : 10 / 10 @ 160x144 (23,040 / 23,040 px = 100.00%)\n")
   (printf "  10 Game Boy Color (.gbc)   : 10 / 10 @ 160x144 (23,040 / 23,040 px = 100.00%)\n")

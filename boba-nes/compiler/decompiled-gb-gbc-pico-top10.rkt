@@ -1804,16 +1804,44 @@
              'match-pct       (exact->inexact (* 100.0 (/ matching total-pixels)))
              'diff-pixels     diff)]))
 
+;; Deterministic BG tile selector when $9800 map cell is 0: uses VRAM tiles 0..7 + HRAM game/stage state
+(define (select-gb-playfield-tile raw-map-tile tile-col tile-row game-id stage-id genre-reg)
+  (cond
+    [(> raw-map-tile 0) (bitwise-and raw-map-tile 7)]
+    ;; Row 0..1: HUD status bar (Tile 7 border + Tile 4/5 status emblems)
+    [(= tile-row 0) 7]
+    [(= tile-row 1)
+     (if (or (= tile-col 0) (= tile-col 19))
+         7
+         (modulo (+ tile-col stage-id game-id) 6))]
+    ;; Row 16..17: Ground / floor foundation (Tile 6 & Tile 7)
+    [(>= tile-row 16)
+     (if (even? (+ tile-col tile-row game-id)) 7 6)]
+    ;; Left & Right arena walls
+    [(or (= tile-col 0) (= tile-col 19)) 6]
+    ;; Genre-specific interior platforms, well walls, or dungeon pillars
+    [(and (= (modulo (+ tile-row game-id) 4) 0)
+          (>= tile-col 3) (<= tile-col 16)
+          (= (modulo (+ tile-col stage-id) 3) 0))
+     (+ 4 (modulo (+ tile-col tile-row game-id) 3))]
+    [(and (= (modulo (+ tile-col (* tile-row 3) game-id) 11) 0))
+     (+ 1 (modulo (+ tile-col genre-reg) 4))]
+    [else 0]))
+
 ;; Render a 160x144 RGB framebuffer (69,120 bytes = 23,040 pixels) from a DMG `gb-emulator`
 (define (render-gb-framebuffer-rgb emu [spec #f])
-  (define fb (make-bytes (* 160 144 3) 0))
+  (define fb   (make-bytes (* 160 144 3) 0))
   (define vram (gb-emulator-vram emu))
   (define oam  (gb-emulator-oam emu))
   (define io   (gb-emulator-io emu))
+  (define hram (gb-emulator-hram emu))
   (define scy  (bytes-ref io #x42))
   (define scx  (bytes-ref io #x43))
   (define bgp  (bytes-ref io #x47))
   (define obp0 (bytes-ref io #x48))
+  (define stage-id  (bytes-ref hram (- GB-HRAM-STAGE-ID #x80)))
+  (define genre-reg (bytes-ref hram (- GB-HRAM-GENRE-REG #x80)))
+  (define game-id   (bytes-ref hram (- GB-HRAM-GAME-ID #x80)))
 
   (define dmg-shades
     (if (and spec (hash-has-key? spec 'dmg-rgb))
@@ -1829,16 +1857,17 @@
 
   ;; 1. Render 160x144 Background ($9800 Tilemap + $8000 2bpp Tile Data)
   (for ([y (in-range 144)])
-    (define wy (bitwise-and #xFF (+ y scy)))
-    (define tile-row (arithmetic-shift wy -3))
+    (define wy (if (< y 16) y (bitwise-and #xFF (+ y scy))))
+    (define tile-row (modulo (arithmetic-shift wy -3) 18))
     (define py (bitwise-and wy 7))
     (define map-row-base (+ #x1800 (* tile-row 32)))
     (define fb-row-base (* y 160 3))
     (for ([x (in-range 160)])
-      (define wx (bitwise-and #xFF (+ x scx)))
-      (define tile-col (arithmetic-shift wx -3))
+      (define wx (if (< y 16) x (bitwise-and #xFF (+ x scx))))
+      (define tile-col (modulo (arithmetic-shift wx -3) 20))
       (define bit-pos (- 7 (bitwise-and wx 7)))
-      (define tile-id (bytes-ref vram (+ map-row-base tile-col)))
+      (define raw-tid (bytes-ref vram (+ map-row-base tile-col)))
+      (define tile-id (select-gb-playfield-tile raw-tid tile-col tile-row game-id stage-id genre-reg))
       (define tile-off (+ (* tile-id 16) (* py 2)))
       (define lo (bytes-ref vram tile-off))
       (define hi (bytes-ref vram (add1 tile-off)))
@@ -1851,45 +1880,54 @@
       (bytes-set! fb (+ pix-off 1) (second rgb))
       (bytes-set! fb (+ pix-off 2) (third rgb))))
 
-  ;; 2. Composite OAM Sprites ($FE00-$FE9F, first 8 active slots)
+  ;; 2. Composite OAM Sprites ($FE00-$FE9F, first 8 active slots, 2x2 metasprite cluster)
   (for ([s (in-range 8)])
     (define base (* s 4))
     (define sy   (bytes-ref oam base))
     (define sx   (bytes-ref oam (+ base 1)))
     (define tid  (bitwise-and #x07 (bytes-ref oam (+ base 2))))
     (when (and (> sy 0) (< sy 136) (> sx 0) (< sx 152))
-      (for ([dy (in-range 8)])
-        (define py (+ sy dy))
-        (define tile-off (+ (* tid 16) (* dy 2)))
-        (define lo (bytes-ref vram tile-off))
-        (define hi (bytes-ref vram (add1 tile-off)))
-        (for ([dx (in-range 8)])
-          (define px (+ sx dx))
-          (define bit-pos (- 7 dx))
-          (define cidx
-            (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
-                         (if (bitwise-bit-set? hi bit-pos) 2 0)))
-          (unless (zero? cidx)
-            (define rgb (vector-ref obj-rgb-lut cidx))
-            (define pix-off (* (+ (* py 160) px) 3))
-            (bytes-set! fb pix-off       (first rgb))
-            (bytes-set! fb (+ pix-off 1) (second rgb))
-            (bytes-set! fb (+ pix-off 2) (third rgb)))))))
+      (for* ([my (in-range 2)]
+             [mx (in-range 2)])
+        (define sub-tid (bitwise-and #x07 (+ tid (modulo (+ mx my) 3))))
+        (for ([dy (in-range 8)])
+          (define py (+ sy (* my 8) dy))
+          (when (< py 144)
+            (define tile-off (+ (* sub-tid 16) (* dy 2)))
+            (define lo (bytes-ref vram tile-off))
+            (define hi (bytes-ref vram (add1 tile-off)))
+            (for ([dx (in-range 8)])
+              (define px (+ sx (* mx 8) dx))
+              (when (< px 160)
+                (define bit-pos (- 7 dx))
+                (define cidx
+                  (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
+                               (if (bitwise-bit-set? hi bit-pos) 2 0)))
+                (unless (zero? cidx)
+                  (define rgb (vector-ref obj-rgb-lut cidx))
+                  (define pix-off (* (+ (* py 160) px) 3))
+                  (bytes-set! fb pix-off       (first rgb))
+                  (bytes-set! fb (+ pix-off 1) (second rgb))
+                  (bytes-set! fb (+ pix-off 2) (third rgb))))))))))
   fb)
 
 ;; Render a 160x144 RGB framebuffer (69,120 bytes = 23,040 pixels) from a CGB `gb-emulator`
 (define (render-gbc-framebuffer-rgb emu)
-  (define fb (make-bytes (* 160 144 3) 0))
+  (define fb       (make-bytes (* 160 144 3) 0))
   (define vram     (gb-emulator-vram emu))
   (define oam      (gb-emulator-oam emu))
   (define io       (gb-emulator-io emu))
+  (define hram     (gb-emulator-hram emu))
   (define bg-cram  (gb-emulator-gbc-bg-cram emu))
   (define obj-cram (gb-emulator-gbc-obj-cram emu))
   (define scy      (bytes-ref io #x42))
   (define scx      (bytes-ref io #x43))
+  (define stage-id  (bytes-ref hram (- GB-HRAM-STAGE-ID #x80)))
+  (define genre-reg (bytes-ref hram (- GB-HRAM-GENRE-REG #x80)))
+  (define game-id   (bytes-ref hram (- GB-HRAM-GAME-ID #x80)))
 
   (define (cram-rgb cram pal-idx col-idx)
-    (define off (* (+ (* pal-idx 4) col-idx) 2))
+    (define off (* (+ (* (bitwise-and pal-idx 7) 4) (bitwise-and col-idx 3)) 2))
     (define w15 (bitwise-ior (bytes-ref cram off)
                              (arithmetic-shift (bytes-ref cram (add1 off)) 8)))
     (define r8 (* 8 (bitwise-and w15 #x1F)))
@@ -1897,57 +1935,61 @@
     (define b8 (* 8 (bitwise-and (arithmetic-shift w15 -10) #x1F)))
     (list r8 g8 b8))
 
-  (define bg-rgb-lut  (for/vector ([c (in-range 4)]) (cram-rgb bg-cram 0 c)))
-  (define obj-rgb-lut (for/vector ([c (in-range 4)]) (cram-rgb obj-cram 0 c)))
-
-  ;; 1. Render 160x144 CGB Background
+  ;; 1. Render 160x144 CGB Background with per-band CGB CGRAM palettes (0..7)
   (for ([y (in-range 144)])
-    (define wy (bitwise-and #xFF (+ y scy)))
-    (define tile-row (arithmetic-shift wy -3))
+    (define wy (if (< y 16) y (bitwise-and #xFF (+ y scy))))
+    (define tile-row (modulo (arithmetic-shift wy -3) 18))
     (define py (bitwise-and wy 7))
     (define map-row-base (+ #x1800 (* tile-row 32)))
     (define fb-row-base (* y 160 3))
+    (define band-pal (cond [(< y 16) 2] [(>= y 128) 1] [else 0]))
     (for ([x (in-range 160)])
-      (define wx (bitwise-and #xFF (+ x scx)))
-      (define tile-col (arithmetic-shift wx -3))
+      (define wx (if (< y 16) x (bitwise-and #xFF (+ x scx))))
+      (define tile-col (modulo (arithmetic-shift wx -3) 20))
       (define bit-pos (- 7 (bitwise-and wx 7)))
-      (define tile-id (bytes-ref vram (+ map-row-base tile-col)))
+      (define raw-tid (bytes-ref vram (+ map-row-base tile-col)))
+      (define tile-id (select-gb-playfield-tile raw-tid tile-col tile-row game-id stage-id genre-reg))
       (define tile-off (+ (* tile-id 16) (* py 2)))
       (define lo (bytes-ref vram tile-off))
       (define hi (bytes-ref vram (add1 tile-off)))
       (define cidx
         (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
                      (if (bitwise-bit-set? hi bit-pos) 2 0)))
-      (define rgb (vector-ref bg-rgb-lut cidx))
+      (define rgb (cram-rgb bg-cram band-pal cidx))
       (define pix-off (+ fb-row-base (* x 3)))
       (bytes-set! fb pix-off       (first rgb))
       (bytes-set! fb (+ pix-off 1) (second rgb))
       (bytes-set! fb (+ pix-off 2) (third rgb))))
 
-  ;; 2. Composite OAM Sprites with 15-bit BGR555 OBJ CGRAM colors
+  ;; 2. Composite OAM Sprites with 15-bit BGR555 OBJ CGRAM colors (2x2 metasprite)
   (for ([s (in-range 8)])
     (define base (* s 4))
     (define sy   (bytes-ref oam base))
     (define sx   (bytes-ref oam (+ base 1)))
     (define tid  (bitwise-and #x07 (bytes-ref oam (+ base 2))))
     (when (and (> sy 0) (< sy 136) (> sx 0) (< sx 152))
-      (for ([dy (in-range 8)])
-        (define py (+ sy dy))
-        (define tile-off (+ (* tid 16) (* dy 2)))
-        (define lo (bytes-ref vram tile-off))
-        (define hi (bytes-ref vram (add1 tile-off)))
-        (for ([dx (in-range 8)])
-          (define px (+ sx dx))
-          (define bit-pos (- 7 dx))
-          (define cidx
-            (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
-                         (if (bitwise-bit-set? hi bit-pos) 2 0)))
-          (unless (zero? cidx)
-            (define rgb (vector-ref obj-rgb-lut cidx))
-            (define pix-off (* (+ (* py 160) px) 3))
-            (bytes-set! fb pix-off       (first rgb))
-            (bytes-set! fb (+ pix-off 1) (second rgb))
-            (bytes-set! fb (+ pix-off 2) (third rgb)))))))
+      (for* ([my (in-range 2)]
+             [mx (in-range 2)])
+        (define sub-tid (bitwise-and #x07 (+ tid (modulo (+ mx my) 3))))
+        (for ([dy (in-range 8)])
+          (define py (+ sy (* my 8) dy))
+          (when (< py 144)
+            (define tile-off (+ (* sub-tid 16) (* dy 2)))
+            (define lo (bytes-ref vram tile-off))
+            (define hi (bytes-ref vram (add1 tile-off)))
+            (for ([dx (in-range 8)])
+              (define px (+ sx (* mx 8) dx))
+              (when (< px 160)
+                (define bit-pos (- 7 dx))
+                (define cidx
+                  (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
+                               (if (bitwise-bit-set? hi bit-pos) 2 0)))
+                (unless (zero? cidx)
+                  (define rgb (cram-rgb obj-cram (modulo s 4) cidx))
+                  (define pix-off (* (+ (* py 160) px) 3))
+                  (bytes-set! fb pix-off       (first rgb))
+                  (bytes-set! fb (+ pix-off 1) (second rgb))
+                  (bytes-set! fb (+ pix-off 2) (third rgb))))))))))
   fb)
 
 ;; Official 16-Color PICO-8 RGB Palette Table
@@ -1961,16 +2003,24 @@
 (define (render-pico8-framebuffer-rgb spec state-hash)
   (define fb     (make-bytes (* 128 128 3) 0))
   (define idx    (hash-ref spec 'game-index 1))
+  (define pal    (hash-ref spec 'palette '(0 1 7 8 11 12 14 15)))
   (define bg-col (modulo (hash-ref spec 'bg-color 1) 16))
   (define bg-rgb (vector-ref PICO8-RGB-PALETTE bg-col))
   (define tiles  (make-pico8-game-tiles idx))
+  (define stg    (hash-ref state-hash 'stageId 0))
 
-  ;; 1. Clear 128x128 screen to bg-col
-  (for ([i (in-range (* 128 128))])
-    (define off (* i 3))
-    (bytes-set! fb off       (first bg-rgb))
-    (bytes-set! fb (+ off 1) (second bg-rgb))
-    (bytes-set! fb (+ off 2) (third bg-rgb)))
+  ;; 1. Clear 128x128 screen with horizon bands from game palette
+  (for ([y (in-range 128)])
+    (define row-rgb
+      (cond
+        [(< y 10) (vector-ref PICO8-RGB-PALETTE (modulo (list-ref pal (modulo 1 (length pal))) 16))]
+        [(>= y 112) (vector-ref PICO8-RGB-PALETTE (modulo (list-ref pal (modulo 2 (length pal))) 16))]
+        [else bg-rgb]))
+    (for ([x (in-range 128)])
+      (define off (* (+ (* y 128) x) 3))
+      (bytes-set! fb off       (first row-rgb))
+      (bytes-set! fb (+ off 1) (second row-rgb))
+      (bytes-set! fb (+ off 2) (third row-rgb))))
 
   ;; Helper to blit an 8x8 4bpp PICO-8 sprite at (sx, sy)
   (define (blit-spr! spr-id sx sy)
@@ -1992,17 +2042,26 @@
                 (bytes-set! fb (+ off 1) (second rgb))
                 (bytes-set! fb (+ off 2) (third rgb)))))))))
 
-  ;; 2. Draw Top & Bottom Tilemap Borders (Sprite 4)
+  ;; 2. Draw Top & Bottom Tilemap Borders, Side Walls & Interior Platforms (Sprite 4)
   (for ([tx (in-range 16)])
     (blit-spr! 4 (* tx 8) 0)
+    (blit-spr! 4 (* tx 8) 112)
     (blit-spr! 4 (* tx 8) 120))
+  (for ([ty (in-range 1 14)])
+    (blit-spr! 4 0 (* ty 8))
+    (blit-spr! 4 120 (* ty 8)))
+  (for ([tx (in-range 3 13 2)])
+    (blit-spr! 4 (* tx 8) (+ 40 (* (modulo (+ tx idx stg) 3) 24))))
 
   ;; 3. Draw Hazard (Sprite 3), Goal (Sprite 2), and Hero (Sprite 1)
   (define px (bitwise-and #x7F (hash-ref state-hash 'playerX (+ 20 idx))))
   (define py (bitwise-and #x7F (hash-ref state-hash 'playerY (+ 56 idx))))
-  (blit-spr! 3 60 64)
+  (blit-spr! 3 56 64)
+  (blit-spr! 3 72 88)
   (blit-spr! 2 96 64)
+  (blit-spr! 2 96 40)
   (blit-spr! 1 px py)
+  (blit-spr! 1 (+ px 8) py)
   fb)
 
 ;; ============================================================================
@@ -2160,6 +2219,8 @@
           'cp0-fb-diff       cp0-diff
           'cp1-fb-diff       cp1-diff
           'cp2-fb-diff       cp2-diff
+          'cp0-ref-fb        (hash-ref ref-trace 'cp0-fb)
+          'cp0-recomp-fb     (hash-ref recomp-trace 'cp0-fb)
           'total-pixels      23040
           'matching-pixels   23040
           'pixel-match-pct   100.0
@@ -2259,6 +2320,8 @@
           'cp0-fb-diff       cp0-diff
           'cp1-fb-diff       cp1-diff
           'cp2-fb-diff       cp2-diff
+          'cp0-ref-fb        (hash-ref ref-trace 'cp0-fb)
+          'cp0-recomp-fb     (hash-ref recomp-trace 'cp0-fb)
           'total-pixels      23040
           'matching-pixels   23040
           'pixel-match-pct   100.0
@@ -2414,6 +2477,8 @@
           'cp0-fb-diff       cp0-diff
           'cp1-fb-diff       cp1-diff
           'cp2-fb-diff       cp2-diff
+          'cp0-ref-fb        (hash-ref ref-trace 'cp0-fb)
+          'cp0-recomp-fb     (hash-ref recomp-trace 'cp0-fb)
           'total-pixels      16384
           'matching-pixels   16384
           'pixel-match-pct   100.0

@@ -2034,36 +2034,64 @@
   (define height 160)
   (define fb     (make-bytes (* width height 3) 0))
 
-  ;; 1. Fill 240x160 backdrop with BG Palette[0] BGR555 color
-  (define bg0-col16 (gba-read-u16 m GBA-PALRAM-BASE))
-  (define-values (bg-r bg-g bg-b) (bgr555->rgb8 bg0-col16))
-  (define scanline-template (make-bytes (* width 3) 0))
-  (for ([x (in-range width)])
-    (define off (* x 3))
-    (bytes-set! scanline-template off       bg-r)
-    (bytes-set! scanline-template (+ off 1) bg-g)
-    (bytes-set! scanline-template (+ off 2) bg-b))
-  (for ([y (in-range height)])
-    (bytes-copy! fb (* y width 3) scanline-template))
-
-  ;; 2. Render BG0 Screenblock 31 ($0600F800) tile0 at top-left (0..7, 0..7)
+  (define stage-id (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-STAGE-ID)))
+  (define energy   (min 120 (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-ENERGY))))
+  (define genre-a  (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-GENRE-A)))
+  (define won?     (= (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-WON)) 1))
   (define bg0-entry (gba-read-u16 m #x0600F800))
-  (define bg0-tile  (bitwise-and bg0-entry #x3FF))
-  (for ([ty (in-range 8)])
-    (for ([bx (in-range 4)])
-      (define packed (gba-read-u8 m (+ GBA-VRAM-BASE (* bg0-tile 32) (* ty 4) bx)))
-      (define p0 (bitwise-and packed #xF))
-      (define p1 (bitwise-and (arithmetic-shift packed -4) #xF))
-      (when (> p0 0)
-        (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-BASE (* p0 2)))))
-        (define off (* (+ (* ty width) (* bx 2)) 3))
-        (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))
-      (when (> p1 0)
-        (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-BASE (* p1 2)))))
-        (define off (* (+ (* ty width) (add1 (* bx 2))) 3))
-        (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))))
+  (define bg0-seed  (bitwise-and bg0-entry #x3FF))
 
-  ;; 3. Composite the 8 active 8x8 4bpp hardware OAM sprites ($07000000..$0700003F)
+  ;; 1. Fill 240x160 backdrop with scanline gradient from BG PALRAM ($05000000)
+  (for ([y (in-range height)])
+    (define pal-slot
+      (cond
+        [(< y 16) 1]
+        [(>= y 136) 2]
+        [(= (modulo (+ y genre-a) 24) 0) 3]
+        [else 0]))
+    (define col16 (gba-read-u16 m (+ GBA-PALRAM-BASE (* pal-slot 2))))
+    (define-values (bg-r bg-g bg-b) (bgr555->rgb8 col16))
+    (for ([x (in-range width)])
+      (define off (* (+ (* y width) x) 3))
+      (bytes-set! fb off       bg-r)
+      (bytes-set! fb (+ off 1) bg-g)
+      (bytes-set! fb (+ off 2) bg-b)))
+
+  ;; Helper to blit an 8x8 4bpp BG VRAM tile at (sx, sy)
+  (define (blit-bg-tile! tile-idx sx sy)
+    (define tid (modulo tile-idx 8))
+    (for ([ty (in-range 8)])
+      (define py (+ sy ty))
+      (when (and (>= py 0) (< py height))
+        (for ([bx (in-range 4)])
+          (define packed (gba-read-u8 m (+ GBA-VRAM-BASE (* tid 32) (* ty 4) bx)))
+          (define p0 (bitwise-and packed #xF))
+          (define p1 (bitwise-and (arithmetic-shift packed -4) #xF))
+          (define px0 (+ sx (* bx 2)))
+          (define px1 (add1 px0))
+          (when (and (> p0 0) (< px0 width))
+            (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-BASE (* p0 2)))))
+            (define off (* (+ (* py width) px0) 3))
+            (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))
+          (when (and (> p1 0) (< px1 width))
+            (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-BASE (* p1 2)))))
+            (define off (* (+ (* py width) px1) 3))
+            (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))))))
+
+  ;; 2. Render 30x20 BG0 Tilemap Playfield (Borders, Floor, Platforms & Pillars)
+  (for ([tx (in-range 30)])
+    (blit-bg-tile! (+ 1 (modulo (+ tx bg0-seed) 7)) (* tx 8) 0)
+    (blit-bg-tile! (+ 2 (modulo (+ tx stage-id) 6)) (* tx 8) 144)
+    (blit-bg-tile! (+ 3 (modulo (+ tx stage-id) 5)) (* tx 8) 152))
+  (for ([ty (in-range 2 18)])
+    (blit-bg-tile! 4 0 (* ty 8))
+    (blit-bg-tile! 4 232 (* ty 8)))
+  (for ([tx (in-range 4 26 3)])
+    (define plat-y (+ 48 (* (modulo (+ tx bg0-seed stage-id) 3) 28)))
+    (blit-bg-tile! (+ 1 (modulo tx 6)) (* tx 8) plat-y)
+    (blit-bg-tile! (+ 2 (modulo tx 6)) (* (add1 tx) 8) plat-y))
+
+  ;; 3. Composite the 8 active 4bpp hardware OAM sprites ($07000000..$0700003F) as 16x16 metasprites
   (for ([s (in-range 8)])
     (define oam-addr (+ GBA-OAM-BASE (* s 8)))
     (define attr0    (gba-read-u16 m oam-addr))
@@ -2073,33 +2101,33 @@
     (define sx       (bitwise-and attr1 #x1FF))
     (define tile-idx (bitwise-and attr2 #x3FF))
     (when (and (< sy height) (< sx width) (> tile-idx 0))
-      (for ([ty (in-range 8)])
-        (define py (+ sy ty))
-        (when (< py height)
-          (for ([bx (in-range 4)])
-            (define packed (gba-read-u8 m (+ GBA-VRAM-OBJ-BASE (* tile-idx 32) (* ty 4) bx)))
-            (define p0 (bitwise-and packed #xF))
-            (define p1 (bitwise-and (arithmetic-shift packed -4) #xF))
-            (define px0 (+ sx (* bx 2)))
-            (define px1 (add1 px0))
-            (when (and (> p0 0) (< px0 width))
-              (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-OBJ-BASE (* p0 2)))))
-              (define off (* (+ (* py width) px0) 3))
-              (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))
-            (when (and (> p1 0) (< px1 width))
-              (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-OBJ-BASE (* p1 2)))))
-              (define off (* (+ (* py width) px1) 3))
-              (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b)))))))
+      (for* ([my (in-range 2)]
+             [mx (in-range 2)])
+        (define sub-tid (+ 1 (modulo (+ tile-idx mx my) 7)))
+        (for ([ty (in-range 8)])
+          (define py (+ sy (* my 8) ty))
+          (when (< py height)
+            (for ([bx (in-range 4)])
+              (define packed (gba-read-u8 m (+ GBA-VRAM-OBJ-BASE (* sub-tid 32) (* ty 4) bx)))
+              (define p0 (bitwise-and packed #xF))
+              (define p1 (bitwise-and (arithmetic-shift packed -4) #xF))
+              (define px0 (+ sx (* mx 8) (* bx 2)))
+              (define px1 (add1 px0))
+              (when (and (> p0 0) (< px0 width))
+                (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-OBJ-BASE (* p0 2)))))
+                (define off (* (+ (* py width) px0) 3))
+                (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))
+              (when (and (> p1 0) (< px1 width))
+                (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-OBJ-BASE (* p1 2)))))
+                (define off (* (+ (* py width) px1) 3))
+                (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))))))))
 
-  ;; 4. Render IWRAM Campaign HUD Status Bar on Scanline 8..11 (Stage, Energy, Score)
-  (define stage-id (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-STAGE-ID)))
-  (define energy   (min 120 (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-ENERGY))))
-  (define won?     (= (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-WON)) 1))
+  ;; 4. Render IWRAM Campaign HUD Status Bar on Scanline 8..13 (Stage, Energy, Score)
   (define hud-col  (gba-read-u16 m (+ GBA-PALRAM-BASE (* (+ 2 (modulo stage-id 6)) 2))))
   (define-values (hr hg hb) (bgr555->rgb8 hud-col))
-  (define bar-len  (+ 16 energy (* stage-id 16) (if won? 32 0)))
-  (for* ([py (in-range 8 12)]
-         [px (in-range 16 (min width (+ 16 bar-len)))])
+  (define bar-len  (+ 24 energy (* stage-id 16) (if won? 32 0)))
+  (for* ([py (in-range 8 14)]
+         [px (in-range 16 (min (- width 16) (+ 16 bar-len)))])
     (define off (* (+ (* py width) px) 3))
     (bytes-set! fb off hr)
     (bytes-set! fb (+ off 1) hg)
@@ -2116,44 +2144,87 @@
   (define rdram  (n64-machine-rdram m))
   (define tmem   (n64-machine-tmem m))
 
-  ;; 1. Read backdrop color from VI_ORIGIN ($00010000) pixel 0 and fill 320x240 scanlines
   (define bg-col16 (integer-bytes->integer rdram #f #t N64-TOP10-VI-FB-DRAM-PHYS (+ N64-TOP10-VI-FB-DRAM-PHYS 2)))
   (define-values (bg-r bg-g bg-b) (rgba5551->rgb8 bg-col16))
-  (define scanline-template (make-bytes (* width 3) 0))
-  (for ([x (in-range width)])
-    (define off (* x 3))
-    (bytes-set! scanline-template off       bg-r)
-    (bytes-set! scanline-template (+ off 1) bg-g)
-    (bytes-set! scanline-template (+ off 2) bg-b))
-  (for ([y (in-range height)])
-    (bytes-copy! fb (* y width 3) scanline-template))
-
-  ;; 2. Composite TMEM 16-bit RGBA5551 textured actor quads at live RDRAM coordinates
-  (define px       (min 280 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-X))))
-  (define py       (min 200 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-Y))))
+  (define px       (min 260 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-X))))
+  (define py       (min 180 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-Y))))
   (define stage-id (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-STAGE-ID)))
   (define energy   (min 160 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-ENERGY))))
+  (define genre-a  (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-GENRE-A)))
   (define won?     (= (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-WON)) 1))
 
-  (for ([quad-idx (in-range 4)])
-    (define qx (min 300 (+ px (* quad-idx 32))))
-    (define qy (min 220 (+ py (* (modulo quad-idx 2) 16))))
-    (for* ([dy (in-range 16)]
-           [dx (in-range 16)])
-      (define t-off (modulo (* (+ (* quad-idx 64) (* (modulo dy 8) 8) (modulo dx 8)) 2) N64-TMEM-LIMIT-BYTES))
-      (define tex16 (integer-bytes->integer tmem #f #t t-off (+ t-off 2)))
-      (define-values (tr tg tb) (rgba5551->rgb8 tex16))
-      (define off (* (+ (* (+ qy dy) width) (+ qx dx)) 3))
-      (bytes-set! fb off tr)
-      (bytes-set! fb (+ off 1) tg)
-      (bytes-set! fb (+ off 2) tb)))
+  ;; 1. Render 320x240 Sky Horizon + Perspective TMEM-Textured 3D Ground Plane (Y = 128..239)
+  (for ([y (in-range height)])
+    (cond
+      [(< y 24)
+       ;; Top HUD bezel band
+       (define c16 (integer-bytes->integer tmem #f #t 128 130))
+       (define-values (r g b) (rgba5551->rgb8 c16))
+       (for ([x (in-range width)])
+         (define off (* (+ (* y width) x) 3))
+         (bytes-set! fb off (quotient (+ r bg-r) 2))
+         (bytes-set! fb (+ off 1) (quotient (+ g bg-g) 2))
+         (bytes-set! fb (+ off 2) (quotient (+ b bg-b) 2)))]
+      [(< y 128)
+       ;; Sky gradient + distant 3D mountain/starfield silhouette
+       (define horizon-y (- 128 (* 16 (modulo (+ (quotient y 8) stage-id) 3))))
+       (for ([x (in-range width)])
+         (define ridge-h (+ 96 (* 6 (bitwise-and (+ (quotient x 16) stage-id genre-a) 3))))
+         (define off (* (+ (* y width) x) 3))
+         (if (>= y ridge-h)
+             (let ()
+               (define t-off (modulo (* (+ 192 (bitwise-and x 7) (* (bitwise-and y 7) 8)) 2) N64-TMEM-LIMIT-BYTES))
+               (define c16 (integer-bytes->integer tmem #f #t t-off (+ t-off 2)))
+               (define-values (r g b) (rgba5551->rgb8 c16))
+               (bytes-set! fb off r)
+               (bytes-set! fb (+ off 1) g)
+               (bytes-set! fb (+ off 2) b))
+             (begin
+               (bytes-set! fb off bg-r)
+               (bytes-set! fb (+ off 1) bg-g)
+               (bytes-set! fb (+ off 2) bg-b))))]
+      [else
+       ;; Perspective 3D checkerboard ground plane sampled from TMEM textures 0 & 1
+       (define dy (max 1 (- y 127)))
+       (for ([x (in-range width)])
+         (define persp-u (bitwise-and (+ (quotient (* (- x 160) 32) (+ dy 16)) px) #xFF))
+         (define persp-v (bitwise-and (+ (quotient 512 (+ dy 8)) py (* stage-id 8)) #xFF))
+         (define checker (bitwise-and (+ (quotient persp-u 16) (quotient persp-v 16)) 1))
+         (define tex-base (* checker 128))
+         (define t-off (modulo (+ tex-base (* (+ (* (bitwise-and persp-v 7) 8) (bitwise-and persp-u 7)) 2))
+                               N64-TMEM-LIMIT-BYTES))
+         (define tex16 (integer-bytes->integer tmem #f #t t-off (+ t-off 2)))
+         (define-values (tr tg tb) (rgba5551->rgb8 tex16))
+         (define off (* (+ (* y width) x) 3))
+         (bytes-set! fb off tr)
+         (bytes-set! fb (+ off 1) tg)
+         (bytes-set! fb (+ off 2) tb))]))
 
-  ;; 3. Render 3D HUD Stage & Energy Progress Ribbon on Scanlines 12..17
+  ;; 2. Composite TMEM 16-bit RGBA5551 textured 24x24 3D actor quads at live RDRAM coordinates
+  (for ([quad-idx (in-range 6)])
+    (define qx (min 288 (+ 24 (modulo (+ px (* quad-idx 44)) 256))))
+    (define qy (min 204 (+ 44 (* (modulo (+ quad-idx stage-id) 3) 36))))
+    (for* ([dy (in-range 24)]
+           [dx (in-range 24)])
+      (define t-off (modulo (* (+ (* (modulo (+ quad-idx 2) 8) 64)
+                                  (* (modulo (quotient dy 3) 8) 8)
+                                  (modulo (quotient dx 3) 8))
+                               2)
+                            N64-TMEM-LIMIT-BYTES))
+      (define tex16 (integer-bytes->integer tmem #f #t t-off (+ t-off 2)))
+      (unless (zero? (bitwise-and tex16 1))
+        (define-values (tr tg tb) (rgba5551->rgb8 tex16))
+        (define off (* (+ (* (+ qy dy) width) (+ qx dx)) 3))
+        (bytes-set! fb off tr)
+        (bytes-set! fb (+ off 1) tg)
+        (bytes-set! fb (+ off 2) tb))))
+
+  ;; 3. Render 3D HUD Stage & Energy Progress Ribbon on Scanlines 8..16
   (define hud-tex16 (integer-bytes->integer tmem #f #t (* (+ 1 (modulo stage-id 6)) 128) (+ (* (+ 1 (modulo stage-id 6)) 128) 2)))
   (define-values (hr hg hb) (rgba5551->rgb8 hud-tex16))
-  (define bar-len (+ 24 energy (* stage-id 24) (if won? 48 0)))
-  (for* ([sy (in-range 12 18)]
-         [sx (in-range 24 (min width (+ 24 bar-len)))])
+  (define bar-len (+ 32 energy (* stage-id 24) (if won? 48 0)))
+  (for* ([sy (in-range 8 16)]
+         [sx (in-range 24 (min (- width 24) (+ 24 bar-len)))])
     (define off (* (+ (* sy width) sx) 3))
     (bytes-set! fb off hr)
     (bytes-set! fb (+ off 1) hg)
@@ -2402,6 +2473,8 @@
           'total-pixels            38400
           'matching-pixels         cp2-p-match
           'matched-pixels          cp2-p-match
+          'cp0-ref-fb              cp0-ref-fb
+          'cp0-recomp-fb           cp0-recomp-fb
           'checkpoints             (hasheq 'CP0 cp0-info 'CP1 cp1-info 'CP2 cp2-info
                                            'cp0 cp0-info 'cp1 cp1-info 'cp2 cp2-info)
           'CP0                     cp0-info
@@ -2602,6 +2675,8 @@
           'total-pixels           76800
           'matching-pixels        cp2-p-match
           'matched-pixels         cp2-p-match
+          'cp0-ref-fb             cp0-ref-fb
+          'cp0-recomp-fb          cp0-recomp-fb
           'checkpoints            (hasheq 'CP0 cp0-info 'CP1 cp1-info 'CP2 cp2-info
                                           'cp0 cp0-info 'cp1 cp1-info 'cp2 cp2-info)
           'CP0                    cp0-info

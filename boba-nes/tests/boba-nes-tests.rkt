@@ -2163,6 +2163,8 @@
   (check-equal? (hash-ref multi-74-rpt 'total-games) 74)
   (check-equal? (hash-ref multi-74-rpt 'total-targets) 8)
   (check-true   (hash-ref multi-74-rpt 'all-74-verified?))
+  (check-true   (hash-ref multi-74-rpt 'all-74-3panel-pngs-ok?))
+  (check-true   (hash-ref multi-74-rpt 'all-6-system-sheets-ok?))
   (check-equal? (hash-ref multi-74-rpt 'overall-pixel-match-pct) 100.0)
   (check-equal? (hash-ref multi-74-rpt 'total-diff-pixels) 0)
   (check-equal? (hash-ref multi-74-rpt 'total-seam-defects) 0)

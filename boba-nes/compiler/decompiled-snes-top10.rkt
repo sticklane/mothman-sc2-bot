@@ -2260,7 +2260,9 @@
                         'matching-pixels  (hash-ref fb-diff 'matching-pixels)
                         'diff-pixels      (hash-ref fb-diff 'diff-pixels)
                         'match-pct        (hash-ref fb-diff 'match-pct)
-                        'rgb-mae          (hash-ref fb-diff 'rgb-mae))])
+                        'rgb-mae          (hash-ref fb-diff 'rgb-mae)
+                        'fb-ref           fb-ref
+                        'fb-rec           fb-rec)])
             ([(k v) (in-hash extra)])
     (hash-set h k v)))
 
@@ -2422,6 +2424,8 @@
           'framebuffer-matching-pixels 57344
           'framebuffer-match-pct       100.0
           'framebuffer-rgb-mae         0.0
+          'cp0-ref-fb                  (hash-ref cp0 'fb-ref)
+          'cp0-recomp-fb               (hash-ref cp0 'fb-rec)
           'checkpoints                 (hasheq 'CP0 cp0 'CP1 cp1 'CP2 cp2
                                                'cp0 cp0 'cp1 cp1 'cp2 cp2)
           'CP0                         cp0
