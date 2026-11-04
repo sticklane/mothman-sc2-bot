@@ -911,5 +911,103 @@ theorem qphys_concavity_refund_table3_and_jump_pebble_bound
   intro hRatio
   simpa [checkJumpPebbleRatio] using hRatio
 
+-- ============================================================================
+-- Section 7: Place-Effect & Linear Uniqueness Theorems for the 11-Tuple
+--            GPU/VRAM Graded Arena (`VmmVirtualAliasedFixedVA`, `Swizzle128B`,
+--            and `3-Epoch GPU-QSBR`)
+-- ============================================================================
+
+/-- Virtual aperture slot state for `VmmVirtualAliasedFixedVA` (`cuMemMap` / `cuMemUnmap`)
+    tracking 2 MiB (`2097152`-byte) physical HBM page handles under a fixed virtual address. -/
+structure VmmVirtualSlotState where
+  slotIdx      : Nat
+  baseVa       : Nat
+  physHandle   : Nat
+  physGrade    : UsageUniqGrade
+  reclaimedOld : Nat
+  eff          : EffectGrade
+  deriving DecidableEq, Repr
+
+/-- Virtual device address `va(v) = baseVa + 2 MiB * slotIdx` captured by a CUDA Graph. -/
+def vmmSlotVa (st : VmmVirtualSlotState) : Nat :=
+  st.baseVa + 2097152 * st.slotIdx
+
+/-- Remaps physical 2 MiB HBM handle `hNew` into virtual slot `st.slotIdx` while keeping
+    `vmmSlotVa` invariant and linearly reclaiming the old physical handle `st.physHandle`. -/
+def vmmRemapPhysical2M (st : VmmVirtualSlotState) (hNew : Nat) : VmmVirtualSlotState :=
+  { st with
+    physHandle   := hNew
+    physGrade    := UsageUniqGrade.uniq1
+    reclaimedOld := st.physHandle
+    eff          := { st.eff with cleanDisc := st.eff.cleanDisc + 1 } }
+
+/-- Theorem 21 (`VmmVirtualAliasedFixedVA` Physical-Page Linear Uniqueness):
+    Remapping physical 2MB HBM handle `h_new` into virtual slot `v` keeps `va(v)`
+    invariant for captured CUDA Graphs while linearly reclaiming `h_old` (`dirtyLeak = 0`). -/
+theorem vmm_remap_preserves_va_invariance_and_phys_uniqueness
+    (st : VmmVirtualSlotState) (h_new : Nat) (hClean : st.eff.dirtyLeak = 0) :
+    let st' := vmmRemapPhysical2M st h_new
+    vmmSlotVa st' = vmmSlotVa st ∧
+    st'.physHandle = h_new ∧
+    st'.reclaimedOld = st.physHandle ∧
+    st'.physGrade = UsageUniqGrade.uniq1 ∧
+    st'.eff.dirtyLeak = 0 := by
+  dsimp [vmmRemapPhysical2M, vmmSlotVa]
+  exact ⟨rfl, rfl, rfl, rfl, hClean⟩
+
+/-- 32-bank (`BitVec 5`) shared-memory XOR phase swizzle for `Swizzle128B` Tensor-Core tiles. -/
+def tmaSwizzle128Bank (c r : BitVec 5) : BitVec 5 :=
+  c ^^^ r
+
+/-- Theorem 22 (`Swizzle128B` Involutive Place Bijection):
+    `(c ^^^ r) ^^^ r = c` is a strict involution on `BitVec 5` and preserves linear
+    ownership of all 32 shared-memory banks with `0` bank collisions across distinct rows. -/
+theorem tma_swizzle128_involutive_place_bijection (c r r2 : BitVec 5) :
+    (c ^^^ r) ^^^ r = c ∧
+    tmaSwizzle128Bank (tmaSwizzle128Bank c r) r = c ∧
+    (r ≠ r2 → tmaSwizzle128Bank c r ≠ tmaSwizzle128Bank c r2) := by
+  have hInv : ∀ (x y : BitVec 5), (x ^^^ y) ^^^ y = x := by decide
+  have hInj : ∀ (x y z : BitVec 5), tmaSwizzle128Bank x y = tmaSwizzle128Bank x z → y = z := by decide
+  exact ⟨hInv c r, hInv c r, fun hNe hEq => hNe (hInj c r r2 hEq)⟩
+
+/-- Ring-slot state for 3-epoch GPU Quiescent-State-Based Reclamation (`3-Epoch GPU-QSBR`). -/
+structure GpuQsbrSlotState where
+  slotMod3   : Nat
+  birthEpoch : Nat
+  grade      : UsageUniqGrade
+  dirtyLeak  : Nat
+  deriving DecidableEq, Repr
+
+/-- Attempts to reclaim a 3-epoch GPU-QSBR ring slot using a timeline semaphore token
+    witnessing `retiredEpoch`, succeeding iff `birthEpoch <= retiredEpoch`. -/
+def stepQsbrReclaim3Epoch (st : GpuQsbrSlotState) (retiredEpoch nextEpoch : Nat) :
+    Bool × GpuQsbrSlotState :=
+  if decide (st.birthEpoch ≤ retiredEpoch) then
+    (true,
+     { slotMod3   := nextEpoch % 3
+       birthEpoch := nextEpoch
+       grade      := UsageUniqGrade.uniq1
+       dirtyLeak  := 0 })
+  else
+    (false, st)
+
+/-- Theorem 23 (`3-Epoch GPU-QSBR` Quiescent-State Place Reclamation):
+    A 3-epoch GPU-QSBR ring slot is safely reclaimed with `uniq1` linear ownership and
+    `dirtyLeak = 0` once `birthEpoch <= retiredEpoch` (including at `birthEpoch + 3`),
+    and rejects premature reclamation whenever `retiredEpoch < birthEpoch`. -/
+theorem gpu_qsbr_3epoch_safe_reclaim (st : GpuQsbrSlotState) (retiredEpoch : Nat) :
+    (st.birthEpoch ≤ retiredEpoch →
+      (stepQsbrReclaim3Epoch st retiredEpoch (st.birthEpoch + 3)).1 = true ∧
+      (stepQsbrReclaim3Epoch st retiredEpoch (st.birthEpoch + 3)).2.grade = UsageUniqGrade.uniq1 ∧
+      (stepQsbrReclaim3Epoch st retiredEpoch (st.birthEpoch + 3)).2.dirtyLeak = 0 ∧
+      (stepQsbrReclaim3Epoch st retiredEpoch (st.birthEpoch + 3)).2.slotMod3 = st.birthEpoch % 3) ∧
+    (retiredEpoch < st.birthEpoch →
+      (stepQsbrReclaim3Epoch st retiredEpoch (st.birthEpoch + 3)).1 = false ∧
+      (stepQsbrReclaim3Epoch st retiredEpoch (st.birthEpoch + 3)).2 = st) := by
+  refine ⟨fun hLe => ?_, fun hLt => ?_⟩
+  · simp [stepQsbrReclaim3Epoch, hLe, Nat.add_mod_right]
+  · have hNotLe : ¬ (st.birthEpoch ≤ retiredEpoch) := by omega
+    simp [stepQsbrReclaim3Epoch, hNotLe]
+
 end LakefillQGradedCoeffectUniquenessPlaceEffectProofs
 
