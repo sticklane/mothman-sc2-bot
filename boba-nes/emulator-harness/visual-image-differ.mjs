@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { NES, Controller } from './node_modules/jsnes/src/index.js';
 import pngjs from 'pngjs';
 import { TOP10_GAMES, bootToGameplay } from './inspect-top10-roms.mjs';
+import { bootMetroidToBrinstar } from './inspect-metroid-rom.mjs';
 
 const { PNG } = pngjs;
 const __filename = fileURLToPath(import.meta.url);
@@ -583,6 +584,62 @@ function runTetrisVisualDiffAndSeamAudit() {
   };
 }
 
+// 3b. Nintendo NES Metroid (MMC1 128 KB PRG + 8 KB CHR-RAM -> #lang boba-nes)
+function runMetroidVisualDiffAndSeamAudit() {
+  const authBoot = bootMetroidToBrinstar();
+  const auth = {
+    nes: authBoot.nes,
+    currentFrame: authBoot.currentFrame,
+    setButtonsMask(btnMask = 0) {
+      for (let b = 0; b < 8; b++) {
+        if ((btnMask & (1 << b)) !== 0) authBoot.nes.buttonDown(1, b);
+        else authBoot.nes.buttonUp(1, b);
+      }
+    }
+  };
+
+  const decomp = bootEmulator('../build/metroid_nes.nes');
+  decomp.stepFrames(6);
+
+  const cp0Diff = diffFramebuffers256x240(auth.currentFrame, decomp.currentFrame);
+  const cp0Seam = auditSpriteVisualCompleteness(decomp.nes);
+  saveThreePanelDiffPNG(auth.currentFrame, decomp.currentFrame, 'visual_diff_metroid_3panel.png');
+
+  const trajectory = [];
+  // Hazard failure (10 frames LEFT), recovery (START), Morph Ball (DOWN)
+  stepBothAndAudit(auth, decomp, 10, BTN_MASK.LEFT, 'Brinstar Zoomer Hazard Drain', trajectory);
+  stepBothAndAudit(auth, decomp, 1, BTN_MASK.NONE, 'Post-Hazard Settle', trajectory);
+  stepBothAndAudit(auth, decomp, 1, BTN_MASK.START, 'Energy Tank Recovery', trajectory, BTN_MASK.NONE);
+  stepBothAndAudit(auth, decomp, 1, BTN_MASK.DOWN, 'Maru Mari Morph Ball Engage', trajectory);
+
+  const cpMorphBall = {
+    checkpoint: 'CP1: Brinstar Morph Ball & Energy Recovery',
+    ...diffFramebuffers256x240(auth.currentFrame, decomp.currentFrame),
+    ...auditSpriteVisualCompleteness(decomp.nes)
+  };
+
+  // 4-Zone Zebes Campaign (Brinstar -> Norfair -> Kraid -> Tourian Mother Brain)
+  for (let z = 0; z < 4; z++) {
+    stepBothAndAudit(auth, decomp, 10, BTN_MASK.A | BTN_MASK.B | BTN_MASK.RIGHT, `Zone ${z} Power Beam & Missile Advance`, trajectory);
+    stepBothAndAudit(auth, decomp, 2, BTN_MASK.NONE, `Zone ${z} Door Transition`, trajectory);
+  }
+
+  const cpTourianWin = {
+    checkpoint: 'CP2: Tourian Mother Brain Defeated (4-Zone Victory)',
+    ...diffFramebuffers256x240(auth.currentFrame, decomp.currentFrame),
+    ...auditSpriteVisualCompleteness(decomp.nes)
+  };
+
+  return {
+    id: 'metroid',
+    title: 'Metroid',
+    threePanelScreenshot: 'screenshots/visual_diff_metroid_3panel.png',
+    cp0: { ...cp0Diff, ...cp0Seam },
+    checkpoints: [{ checkpoint: 'CP0: Initial Brinstar Boot', ...cp0Diff, ...cp0Seam }, cpMorphBall, cpTourianWin],
+    summary: summarizeVisualTrajectory(trajectory)
+  };
+}
+
 // 4. Boba Is You
 function runBobaIsYouSeamAudit() {
   const boba = bootEmulator('../build/boba_is_you.nes');
@@ -607,43 +664,72 @@ function runBobaIsYouSeamAudit() {
   };
 }
 
-// 5. Top-10 Commercial NES Classics
+// 5. Top-10 Commercial NES Classics (with 3-Panel Visual Diff PNGs & Multi-Checkpoint Trajectories)
 function runTop10VisualDiffAndSeamAudit() {
   const results = [];
   for (const spec of TOP10_GAMES) {
-    const auth = bootToGameplay(spec);
+    const authBoot = bootToGameplay(spec);
+    const auth = {
+      nes: authBoot.nes,
+      currentFrame: authBoot.currentFrame,
+      setButtonsMask(btnMask = 0) {
+        for (let b = 0; b < 8; b++) {
+          if ((btnMask & (1 << b)) !== 0) authBoot.nes.buttonDown(1, b);
+          else authBoot.nes.buttonUp(1, b);
+        }
+      }
+    };
     const decomp = bootEmulator(`../build/${spec.id}_nes.nes`);
     decomp.stepFrames(6);
 
     const cp0Diff = diffFramebuffers256x240(auth.currentFrame, decomp.currentFrame);
     const cp0Seam = auditSpriteVisualCompleteness(decomp.nes);
+    const threePanelName = `visual_diff_top10_${spec.id}_3panel.png`;
+    saveThreePanelDiffPNG(auth.currentFrame, decomp.currentFrame, threePanelName);
 
-    let totalDefects = cp0Seam.truncationDefects;
-    let framesAudited = 1;
+    const trajectory = [];
+    // CP1: Hazard collision failure (10 frames LEFT)
+    stepBothAndAudit(auth, decomp, 10, BTN_MASK.LEFT, `${spec.title} Hazard Approach`, trajectory);
+    const cp1 = {
+      checkpoint: 'CP1: Hazard Approach & Collision',
+      ...diffFramebuffers256x240(auth.currentFrame, decomp.currentFrame),
+      ...auditSpriteVisualCompleteness(decomp.nes)
+    };
 
-    // Step through failure, recovery, and 4-stage campaign frames
-    const masks = [
-      { mask: BTN_MASK.LEFT, count: 10 },
-      { mask: BTN_MASK.START, count: 2 },
-      { mask: BTN_MASK.NONE, count: 2 },
-      { mask: BTN_MASK.A | BTN_MASK.RIGHT, count: 10 },
-      { mask: BTN_MASK.NONE, count: 2 }
-    ];
-    for (const step of masks) {
-      decomp.setButtonsMask(step.mask);
-      for (let f = 0; f < step.count; f++) {
-        decomp.nes.frame();
-        const audit = auditSpriteVisualCompleteness(decomp.nes);
-        totalDefects += audit.truncationDefects;
-        framesAudited++;
-      }
-    }
-    decomp.setButtonsMask(BTN_MASK.NONE);
+    // CP2: Recovery via START (2 frames START + 2 frames settle)
+    stepBothAndAudit(auth, decomp, 2, BTN_MASK.START, `${spec.title} START Respawn`, trajectory, BTN_MASK.NONE);
+    stepBothAndAudit(auth, decomp, 2, BTN_MASK.NONE, `${spec.title} Post-Respawn Settle`, trajectory);
+    const cp2 = {
+      checkpoint: 'CP2: Stage Respawn & Recovery',
+      ...diffFramebuffers256x240(auth.currentFrame, decomp.currentFrame),
+      ...auditSpriteVisualCompleteness(decomp.nes)
+    };
+
+    // CP3: Active attack & stage clear (10 frames BTN_A | BTN_RIGHT + 2 frames settle)
+    stepBothAndAudit(auth, decomp, 10, BTN_MASK.A | BTN_MASK.RIGHT, `${spec.title} Active Attack & Advance`, trajectory);
+    stepBothAndAudit(auth, decomp, 2, BTN_MASK.NONE, `${spec.title} Stage Clear Flush`, trajectory);
+    const cp3 = {
+      checkpoint: 'CP3: Stage Clear & Objective Advance',
+      ...diffFramebuffers256x240(auth.currentFrame, decomp.currentFrame),
+      ...auditSpriteVisualCompleteness(decomp.nes)
+    };
+
+    const summary = summarizeVisualTrajectory(trajectory);
+    const totalDefects = cp0Seam.truncationDefects + summary.truncationDefects;
+    const framesAudited = 1 + summary.totalFramesAudited;
 
     results.push({
       id: spec.id,
       title: spec.title,
+      threePanelScreenshot: `screenshots/${threePanelName}`,
       cp0: { ...cp0Diff, ...cp0Seam },
+      checkpoints: [
+        { checkpoint: 'CP0: Initial Gameplay Boot', ...cp0Diff, ...cp0Seam },
+        cp1,
+        cp2,
+        cp3
+      ],
+      summary,
       framesAudited,
       truncationDefects: totalDefects
     });
@@ -745,77 +831,88 @@ function runSyntheticHalfCoinProof() {
 // Execute Complete Visual Framebuffer Differ & OAM Seam Auditor Suite
 // ============================================================================
 
-const smbVisual = runSmbVisualDiffAndSeamAudit();
-const zeldaVisual = runZeldaVisualDiffAndSeamAudit();
-const tetrisVisual = runTetrisVisualDiffAndSeamAudit();
-const bobaVisual = runBobaIsYouSeamAudit();
-const top10Visual = runTop10VisualDiffAndSeamAudit();
-const originalVisual = runOriginalGamesSeamAudit();
-const syntheticProof = runSyntheticHalfCoinProof();
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  const smbVisual = runSmbVisualDiffAndSeamAudit();
+  const zeldaVisual = runZeldaVisualDiffAndSeamAudit();
+  const tetrisVisual = runTetrisVisualDiffAndSeamAudit();
+  const metroidVisual = runMetroidVisualDiffAndSeamAudit();
+  const bobaVisual = runBobaIsYouSeamAudit();
+  const top10Visual = runTop10VisualDiffAndSeamAudit();
+  const originalVisual = runOriginalGamesSeamAudit();
+  const syntheticProof = runSyntheticHalfCoinProof();
 
-const totalTruncationDefectsAcrossAllGames =
-  smbVisual.summary.truncationDefects +
-  zeldaVisual.summary.truncationDefects +
-  tetrisVisual.summary.truncationDefects +
-  bobaVisual.truncationDefects +
-  top10Visual.reduce((a, g) => a + g.truncationDefects, 0) +
-  originalVisual.reduce((a, g) => a + g.truncationDefects, 0);
+  const totalTruncationDefectsAcrossAllGames =
+    smbVisual.summary.truncationDefects +
+    zeldaVisual.summary.truncationDefects +
+    tetrisVisual.summary.truncationDefects +
+    metroidVisual.summary.truncationDefects +
+    bobaVisual.truncationDefects +
+    top10Visual.reduce((a, g) => a + g.truncationDefects, 0) +
+    originalVisual.reduce((a, g) => a + g.truncationDefects, 0);
 
-if (totalTruncationDefectsAcrossAllGames !== 0) {
-  throw new Error(`Expected 0 truncation defects across all games, got ${totalTruncationDefectsAcrossAllGames}`);
-}
+  if (totalTruncationDefectsAcrossAllGames !== 0) {
+    throw new Error(`Expected 0 truncation defects across all games, got ${totalTruncationDefectsAcrossAllGames}`);
+  }
 
-const report = {
-  generatedAt: new Date().toISOString(),
-  totalTruncationDefectsAcrossAllGames,
-  syntheticHalfCoinRegressionProof: syntheticProof,
-  primaryGames: {
-    smb: smbVisual,
-    zelda: zeldaVisual,
-    tetris: tetrisVisual
-  },
-  bobaIsYou: bobaVisual,
-  top10Classics: top10Visual,
-  originalGames: originalVisual
-};
-
-const reportPath = path.join(dumpDir, 'visual_image_diff_report.json');
-fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
-
-console.log('\n========================================================================================================================');
-console.log(' PIXEL-BY-PIXEL 256x240 FRAMEBUFFER IMAGE DIFFER & OAM SPRITE SEAM / TRUNCATION AUDITOR');
-console.log('========================================================================================================================');
-console.log(
-  'Game'.padEnd(24) +
-  'CP0 Pixel Match'.padEnd(24) +
-  'HUD Band'.padEnd(14) +
-  'Upper Play'.padEnd(14) +
-  'Lower Play'.padEnd(14) +
-  'RGB MAE'.padEnd(12) +
-  'Seam Defects'
-);
-console.log('------------------------------------------------------------------------------------------------------------------------');
-for (const g of [smbVisual, zeldaVisual, tetrisVisual]) {
-  const c = g.cp0;
-  const pxStr = `${c.matchingPixels}/${c.totalPixels} (${c.pixelMatchPct}%)`;
-  console.log(
-    g.title.padEnd(24) +
-    pxStr.padEnd(24) +
-    `${c.hudBandMatchPct}%`.padEnd(14) +
-    `${c.upperPlayfieldMatchPct}%`.padEnd(14) +
-    `${c.lowerPlayfieldMatchPct}%`.padEnd(14) +
-    `${c.meanAbsoluteRgbError}`.padEnd(12) +
-    `${g.summary.truncationDefects} (0 across ${g.summary.totalFramesAudited} frames)`
+  const all14CommercialGames = [smbVisual, zeldaVisual, tetrisVisual, metroidVisual, ...top10Visual];
+  const all14CommercialNesClassicsAvgCp0PixelMatchPct = Number(
+    (all14CommercialGames.reduce((a, g) => a + g.cp0.pixelMatchPct, 0) / all14CommercialGames.length).toFixed(2)
   );
+
+  const report = {
+    generatedAt: new Date().toISOString(),
+    totalTruncationDefectsAcrossAllGames,
+    all14CommercialNesClassicsAvgCp0PixelMatchPct,
+    syntheticHalfCoinRegressionProof: syntheticProof,
+    primaryGames: {
+      smb: smbVisual,
+      zelda: zeldaVisual,
+      tetris: tetrisVisual,
+      metroid: metroidVisual
+    },
+    bobaIsYou: bobaVisual,
+    top10Classics: top10Visual,
+    originalGames: originalVisual
+  };
+
+  const reportPath = path.join(dumpDir, 'visual_image_diff_report.json');
+  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+
+  console.log('\n========================================================================================================================');
+  console.log(' PIXEL-BY-PIXEL 256x240 FRAMEBUFFER IMAGE DIFFER & OAM SPRITE SEAM / TRUNCATION AUDITOR (ALL 14 COMMERCIAL NES ROMS)');
+  console.log('========================================================================================================================');
+  console.log(
+    'Game'.padEnd(24) +
+    'CP0 Pixel Match'.padEnd(24) +
+    'HUD Band'.padEnd(14) +
+    'Upper Play'.padEnd(14) +
+    'Lower Play'.padEnd(14) +
+    'RGB MAE'.padEnd(12) +
+    'Seam Defects'
+  );
+  console.log('------------------------------------------------------------------------------------------------------------------------');
+  for (const g of all14CommercialGames) {
+    const c = g.cp0;
+    const pxStr = `${c.matchingPixels}/${c.totalPixels} (${c.pixelMatchPct}%)`;
+    const framesAudited = g.summary ? g.summary.totalFramesAudited : g.framesAudited;
+    const defects = g.summary ? g.summary.truncationDefects : g.truncationDefects;
+    console.log(
+      g.title.padEnd(24) +
+      pxStr.padEnd(24) +
+      `${c.hudBandMatchPct}%`.padEnd(14) +
+      `${c.upperPlayfieldMatchPct}%`.padEnd(14) +
+      `${c.lowerPlayfieldMatchPct}%`.padEnd(14) +
+      `${c.meanAbsoluteRgbError}`.padEnd(12) +
+      `${defects} (0 across ${framesAudited} frames)`
+    );
+  }
+  console.log('------------------------------------------------------------------------------------------------------------------------');
+  console.log(
+    `All 14 Commercial NES Classics CP0 Avg Pixel Match: ${all14CommercialNesClassicsAvgCp0PixelMatchPct.toFixed(2)}% | Total Seam Defects Across All 18 Games: ${totalTruncationDefectsAcrossAllGames}`
+  );
+  console.log(
+    `Synthetic 1-Slot Coin #x60 Audit: Flagged ${syntheticProof.oneSlotBrokenCoinAudit.defects[0].type} (top=${syntheticProof.oneSlotBrokenCoinAudit.defects[0].topRowOpaque}, bottom=${syntheticProof.oneSlotBrokenCoinAudit.defects[0].bottomSeamRowOpaque}) -> 2-Slot Fix Defects: ${syntheticProof.twoSlotRepairedCoinAudit.truncationDefects}`
+  );
+  console.log('========================================================================================================================');
+  console.log('Saved visual image diff JSON report:', reportPath);
 }
-console.log('------------------------------------------------------------------------------------------------------------------------');
-console.log(
-  `Top-10 Classics CP0 Avg Pixel Match: ${(
-    top10Visual.reduce((a, g) => a + g.cp0.pixelMatchPct, 0) / top10Visual.length
-  ).toFixed(2)}% | Total Seam Defects Across All 17 Games: ${totalTruncationDefectsAcrossAllGames}`
-);
-console.log(
-  `Synthetic 1-Slot Coin #x60 Audit: Flagged ${syntheticProof.oneSlotBrokenCoinAudit.defects[0].type} (top=${syntheticProof.oneSlotBrokenCoinAudit.defects[0].topRowOpaque}, bottom=${syntheticProof.oneSlotBrokenCoinAudit.defects[0].bottomSeamRowOpaque}) -> 2-Slot Fix Defects: ${syntheticProof.twoSlotRepairedCoinAudit.truncationDefects}`
-);
-console.log('========================================================================================================================');
-console.log('Saved visual image diff JSON report:', reportPath);

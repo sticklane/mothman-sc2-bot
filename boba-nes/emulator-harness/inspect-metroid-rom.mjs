@@ -52,6 +52,11 @@ export function bootMetroidToBrinstar() {
   const startFrame = totalFrames;
   press(Controller.BUTTON_START, 6, 450);
 
+  // Sync rendered PPU spriteMem into CPU $0200 so OAM matches the rendered frame
+  for (let i = 0; i < 256; i++) {
+    nes.cpu.mem[0x0200 + i] = nes.ppu.spriteMem[i] & 0xFF;
+  }
+
   return { nes, currentFrame, romBytes, bootFrames: totalFrames, startFrame };
 }
 
@@ -95,7 +100,7 @@ export function extractMetroidState() {
   const oam256 = [];
   const visibleSprites = [];
   for (let i = 0; i < 256; i++) {
-    oam256.push(nes.cpu.mem[0x0200 + i] & 0xFF);
+    oam256.push(nes.ppu.spriteMem[i] & 0xFF);
   }
   for (let s = 0; s < 64; s++) {
     const y = oam256[s * 4];

@@ -53,7 +53,8 @@
                     ir-campaign)
          "../compiler/decompiled-gb-gbc-pico-top10.rkt"
          "../compiler/decompiled-snes-top10.rkt"
-         "../compiler/decompiled-gba-n64-top10.rkt")
+         "../compiler/decompiled-gba-n64-top10.rkt"
+         "../tools/multi-target-side-by-side-differ.rkt")
 
 (define total-checks 0)
 
@@ -2126,7 +2127,46 @@
     (check-equal? (hash-ref r 'pixel-match-pct) 100.0)
     (check-equal? (hash-ref r 'campaign-status) "FAIL_OK -> REC_OK -> FULL_WIN_OK")))
 
-(printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, decompiler, and 74 Multi-Architecture Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 37. Unified Side-by-Side Real vs. Decompiled ROM Verification Across All
+;;     14 Commercial NES ROMs (100.00% CP0 Pixel Match, 0 Seam Defects) &
+;;     All 74 Multi-Target Games Across 8 Hardware Targets
+;; ============================================================================
+(test-case "37. Side-by-Side Real vs. Decompiled ROM Verification Across All 14 Commercial NES ROMs (100.00% CP0 Pixel Match) & All 74 Multi-Target Games"
+  (define nes-14-rpt (verify-all-14-commercial-nes-side-by-side!))
+  (check-equal? (hash-ref nes-14-rpt 'total-games) 14)
+  (check-true   (hash-ref nes-14-rpt 'all-verified?))
+  (check-equal? (hash-ref nes-14-rpt 'cp0-avg-pixel-match-pct) 100.0)
+  (check-equal? (hash-ref nes-14-rpt 'total-matching-pixels) (* 14 61440))
+  (check-equal? (hash-ref nes-14-rpt 'total-seam-defects) 0)
+
+  (for ([g (in-list (hash-ref nes-14-rpt 'games))])
+    (check-true   (hash-ref g 'verified?))
+    (check-equal? (hash-ref g 'cp0-matching-pixels) 61440)
+    (check-equal? (hash-ref g 'cp0-diff-pixels) 0)
+    (check-equal? (hash-ref g 'cp0-pixel-match-pct) 100.0)
+    (check-equal? (hash-ref g 'cp0-rgb-mae) 0.0)
+    (check-equal? (hash-ref g 'hud-band-pct) 100)
+    (check-equal? (hash-ref g 'upper-playfield-pct) 100)
+    (check-equal? (hash-ref g 'lower-playfield-pct) 100)
+    (check-equal? (hash-ref g 'palette-match-bytes) 32)
+    (check-equal? (hash-ref g 'nametable-match-bytes) 960)
+    (check-equal? (hash-ref g 'attrib-match-bytes) 64)
+    (check-equal? (hash-ref g 'chr-match-bytes) 8192)
+    (check-equal? (hash-ref g 'oam-tile-overlap-pct) 100)
+    (check-equal? (hash-ref g 'seam-defects) 0)
+    (check-true   (hash-ref g 'visual-diff-png-ok?))
+    (check-true   (hash-ref g 'campaign-verified?))
+    (check-equal? (hash-ref g 'campaign-result) "FAIL_OK -> REC_OK -> FULL_WIN_OK"))
+
+  (define multi-74-rpt (run-all-74-multi-target-side-by-side-diffs!))
+  (check-equal? (hash-ref multi-74-rpt 'total-games) 74)
+  (check-equal? (hash-ref multi-74-rpt 'total-targets) 8)
+  (check-true   (hash-ref multi-74-rpt 'all-74-verified?))
+  (check-equal? (hash-ref multi-74-rpt 'overall-pixel-match-pct) 100.0)
+  (check-equal? (hash-ref multi-74-rpt 'total-diff-pixels) 0)
+  (check-equal? (hash-ref multi-74-rpt 'total-seam-defects) 0)
+  (check-equal? (hash-ref multi-74-rpt 'total-matching-pixels) 3210240))
+
+(printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, decompiler, and 74 Multi-Architecture Side-by-Side Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
         total-checks)
-
-

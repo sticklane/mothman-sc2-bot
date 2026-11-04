@@ -453,6 +453,8 @@
   (define spec        (if (hash? sym-or-spec) sym-or-spec (find-top10-game-spec sym-or-spec)))
   (define state       (load-top10-game-state spec))
   (define genre-sym   (hash-ref spec 'genre))
+  (define mirroring   (hash-ref spec 'mirroring 'horizontal))
+  (define nt1-hi-byte (if (eq? mirroring 'horizontal) #x28 #x24))
   (define oam-page    (or oam-page-override (hash-ref spec 'oam-page #x02)))
   (define oam-base    (arithmetic-shift oam-page 8))
   (define pal-bytes   (hash-ref state 'palette32))
@@ -462,6 +464,8 @@
   (define nt1-bytes   (hash-ref state 'nt1 nt0-bytes))
   (define oam-bytes   (hash-ref state 'oam256))
   (define ppuctrl-val (hash-ref state 'ppuctrl (hash-ref spec 'ppuctrl #x90)))
+  (define scroll-x    (hash-ref state 'scrollX 0))
+  (define scroll-y    (hash-ref state 'scrollY 0))
   (define vis-sprites (hash-ref state 'visibleSprites '()))
   ;; Anchor player OAM X update to the first authentic visible sprite slot so
   ;; tile ID, palette attribute, and visible sprite count remain 100% authentic!
@@ -533,9 +537,9 @@
     (CPX #:imm 32)
     (BNE load_pal_loop)
 
-    ;; Upload exact 1,024-byte Authentic Nametable 1 ($2400-$27FF) first
+    ;; Upload exact 1,024-byte Authentic Secondary Physical Nametable ($2800 for H-mirroring, $2400 for V-mirroring)
     (BIT #:abs #x2002)
-    (LDA #:imm #x24)
+    (LDA #:imm ,nt1-hi-byte)
     (STA #:abs #x2006)
     (LDA #:imm #x00)
     (STA #:abs #x2006)
@@ -629,8 +633,9 @@
     (LDA #:imm ,oam-page)
     (STA #:abs #x4014)
     (BIT #:abs #x2002)
-    (LDA #:imm 0)
+    (LDA #:imm ,scroll-x)
     (STA #:abs #x2005)
+    (LDA #:imm ,scroll-y)
     (STA #:abs #x2005)
     (LDA #:imm ,ppuctrl-val)
     (STA #:abs #x2000)
@@ -880,8 +885,9 @@
     (BIT #:abs #x2002)
     (LDA #:imm ,ppuctrl-val)
     (STA #:abs #x2000)
-    (LDA #:imm 0)
+    (LDA #:imm ,scroll-x)
     (STA #:abs #x2005)
+    (LDA #:imm ,scroll-y)
     (STA #:abs #x2005)
     (LDA #:imm 1)
     (STA #:zp #x0F)
@@ -948,6 +954,8 @@
   (define active-cycles (* 12 (length active-instrs)))
   (define chr-tiles     (count-nonzero-chr-tiles chr-bytes))
   (define oam-sprites   (max 1 (min 64 (length (hash-ref state 'visibleSprites '())))))
+  (define scroll-x      (hash-ref state 'scrollX 0))
+  (define scroll-y      (hash-ref state 'scrollY 0))
 
   (define mod-desc
     (hasheq 'name sym
@@ -965,7 +973,7 @@
                            (hasheq 'op 'nametable-patch! 'phase 'VBlankNMI))
             'nmi-ops (list (hasheq 'op 'oam-dma!)
                            (hasheq 'op 'nametable-patch!)
-                           (hasheq 'op 'restore-scroll! 'x 0 'y 0))
+                           (hasheq 'op 'restore-scroll! 'x scroll-x 'y scroll-y))
             'vblank-cycles vblank-cycles
             'active-cycles active-cycles
             'page-crossings (asm-result-page-crossings asm-res)
@@ -986,6 +994,8 @@
           'mirroring    mirroring
           'oam-page     oam-page
           'ppuctrl      (hash-ref state 'ppuctrl (hash-ref spec 'ppuctrl #x90))
+          'scroll-x     scroll-x
+          'scroll-y     scroll-y
           'stage-names  (hash-ref spec 'stage-names)
           'rom-path     (build-path ROMS-DIR (hash-ref spec 'rom-file))
           'nes-out-path out-path

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-03T19:25:31.093Z",
+  "generatedAt": "2026-11-04T04:10:59.673Z",
   "games": {
     "smb": {
       "id": "smb",
@@ -29391,7 +29391,7 @@
       "chrMatchPct": 100,
       "oam": {
         "authenticVisible": 3,
-        "decompiledVisible": 11,
+        "decompiledVisible": 3,
         "authenticTiles": [
           12,
           14,
@@ -29400,13 +29400,7 @@
         "decompiledTiles": [
           62,
           12,
-          14,
-          13,
-          15,
-          178,
-          179,
-          32,
-          33
+          14
         ],
         "sharedTileIds": [
           62,
@@ -29416,8 +29410,8 @@
         "sharedPalettes": [
           0
         ],
-        "tileOverlapPct": 27.27,
-        "paletteOverlapPct": 63.64
+        "tileOverlapPct": 100,
+        "paletteOverlapPct": 100
       },
       "gameplayState": {
         "linkX": 120,
@@ -29454,7 +29448,7 @@
         "chrMatchPct": 100,
         "oam": {
           "authenticVisible": 3,
-          "decompiledVisible": 11,
+          "decompiledVisible": 3,
           "authenticTiles": [
             12,
             14,
@@ -29463,13 +29457,7 @@
           "decompiledTiles": [
             62,
             12,
-            14,
-            13,
-            15,
-            178,
-            179,
-            32,
-            33
+            14
           ],
           "sharedTileIds": [
             62,
@@ -29479,8 +29467,8 @@
           "sharedPalettes": [
             0
           ],
-          "tileOverlapPct": 27.27,
-          "paletteOverlapPct": 63.64
+          "tileOverlapPct": 100,
+          "paletteOverlapPct": 100
         },
         "gameplayState": {
           "linkX": 120,
@@ -29519,7 +29507,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 3,
-            "decompiledVisible": 11,
+            "decompiledVisible": 3,
             "authenticTiles": [
               12,
               14,
@@ -29528,13 +29516,7 @@
             "decompiledTiles": [
               62,
               12,
-              14,
-              13,
-              15,
-              178,
-              179,
-              32,
-              33
+              14
             ],
             "sharedTileIds": [
               62,
@@ -29544,8 +29526,8 @@
             "sharedPalettes": [
               0
             ],
-            "tileOverlapPct": 27.27,
-            "paletteOverlapPct": 63.64
+            "tileOverlapPct": 100,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "linkX": 120,
@@ -29773,7 +29755,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 3,
-            "decompiledVisible": 11,
+            "decompiledVisible": 3,
             "authenticTiles": [
               14,
               12,
@@ -29782,13 +29764,7 @@
             "decompiledTiles": [
               62,
               12,
-              14,
-              13,
-              15,
-              178,
-              179,
-              32,
-              33
+              14
             ],
             "sharedTileIds": [
               62,
@@ -29798,8 +29774,8 @@
             "sharedPalettes": [
               0
             ],
-            "tileOverlapPct": 27.27,
-            "paletteOverlapPct": 63.64
+            "tileOverlapPct": 100,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "linkX": 120,
@@ -29964,7 +29940,7 @@
           "minAttribMatchPct": 100,
           "maxAttribMatchPct": 100,
           "avgChrMatchPct": 100,
-          "avgOamTileOverlapPct": 28.43,
+          "avgOamTileOverlapPct": 30.37,
           "roomsCompleted": 4,
           "finalRoomId": 3,
           "triforceShards": 8,
@@ -30795,7 +30771,7 @@
             "nametableMatchPct": 99.69,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,
@@ -30832,7 +30808,7 @@
             "nametableMatchPct": 100,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,
@@ -30869,7 +30845,7 @@
             "nametableMatchPct": 100,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,
@@ -30906,7 +30882,7 @@
             "nametableMatchPct": 100,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,
@@ -70178,7 +70154,7 @@
       "chrMatchPct": 100,
       "oam": {
         "authenticVisible": 3,
-        "decompiledVisible": 11,
+        "decompiledVisible": 3,
         "authenticTiles": [
           12,
           14,
@@ -70187,13 +70163,7 @@
         "decompiledTiles": [
           62,
           12,
-          14,
-          13,
-          15,
-          178,
-          179,
-          32,
-          33
+          14
         ],
         "sharedTileIds": [
           62,
@@ -70203,8 +70173,8 @@
         "sharedPalettes": [
           0
         ],
-        "tileOverlapPct": 27.27,
-        "paletteOverlapPct": 63.64
+        "tileOverlapPct": 100,
+        "paletteOverlapPct": 100
       },
       "gameplayState": {
         "linkX": 120,
@@ -70241,7 +70211,7 @@
         "chrMatchPct": 100,
         "oam": {
           "authenticVisible": 3,
-          "decompiledVisible": 11,
+          "decompiledVisible": 3,
           "authenticTiles": [
             12,
             14,
@@ -70250,13 +70220,7 @@
           "decompiledTiles": [
             62,
             12,
-            14,
-            13,
-            15,
-            178,
-            179,
-            32,
-            33
+            14
           ],
           "sharedTileIds": [
             62,
@@ -70266,8 +70230,8 @@
           "sharedPalettes": [
             0
           ],
-          "tileOverlapPct": 27.27,
-          "paletteOverlapPct": 63.64
+          "tileOverlapPct": 100,
+          "paletteOverlapPct": 100
         },
         "gameplayState": {
           "linkX": 120,
@@ -70306,7 +70270,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 3,
-            "decompiledVisible": 11,
+            "decompiledVisible": 3,
             "authenticTiles": [
               12,
               14,
@@ -70315,13 +70279,7 @@
             "decompiledTiles": [
               62,
               12,
-              14,
-              13,
-              15,
-              178,
-              179,
-              32,
-              33
+              14
             ],
             "sharedTileIds": [
               62,
@@ -70331,8 +70289,8 @@
             "sharedPalettes": [
               0
             ],
-            "tileOverlapPct": 27.27,
-            "paletteOverlapPct": 63.64
+            "tileOverlapPct": 100,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "linkX": 120,
@@ -70560,7 +70518,7 @@
           "chrMatchPct": 100,
           "oam": {
             "authenticVisible": 3,
-            "decompiledVisible": 11,
+            "decompiledVisible": 3,
             "authenticTiles": [
               14,
               12,
@@ -70569,13 +70527,7 @@
             "decompiledTiles": [
               62,
               12,
-              14,
-              13,
-              15,
-              178,
-              179,
-              32,
-              33
+              14
             ],
             "sharedTileIds": [
               62,
@@ -70585,8 +70537,8 @@
             "sharedPalettes": [
               0
             ],
-            "tileOverlapPct": 27.27,
-            "paletteOverlapPct": 63.64
+            "tileOverlapPct": 100,
+            "paletteOverlapPct": 100
           },
           "gameplayState": {
             "linkX": 120,
@@ -70751,7 +70703,7 @@
           "minAttribMatchPct": 100,
           "maxAttribMatchPct": 100,
           "avgChrMatchPct": 100,
-          "avgOamTileOverlapPct": 28.43,
+          "avgOamTileOverlapPct": 30.37,
           "roomsCompleted": 4,
           "finalRoomId": 3,
           "triforceShards": 8,
@@ -71582,7 +71534,7 @@
             "nametableMatchPct": 99.69,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,
@@ -71619,7 +71571,7 @@
             "nametableMatchPct": 100,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,
@@ -71656,7 +71608,7 @@
             "nametableMatchPct": 100,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,
@@ -71693,7 +71645,7 @@
             "nametableMatchPct": 100,
             "attribMatchPct": 100,
             "chrMatchPct": 100,
-            "oamTileOverlapPct": 27.27,
+            "oamTileOverlapPct": 100,
             "decompState": {
               "linkX": 120,
               "linkY": 144,

@@ -70,7 +70,7 @@ export const TOP10_GAMES = [
     bootPlan: [
       { wait: 120 },
       { btn: Controller.BUTTON_START, hold: 4, wait: 60 },
-      { btn: Controller.BUTTON_START, hold: 4, wait: 220 }
+      { btn: Controller.BUTTON_START, hold: 4, wait: 45 }
     ]
   },
   {
@@ -92,7 +92,8 @@ export const TOP10_GAMES = [
     romFile: 'kung_fu.nes',
     bootPlan: [
       { wait: 60 },
-      { btn: Controller.BUTTON_START, hold: 6, wait: 540 }
+      { btn: Controller.BUTTON_START, hold: 6, wait: 540 },
+      { btn: Controller.BUTTON_RIGHT, hold: 2, wait: 0 }
     ]
   },
   {
@@ -151,9 +152,11 @@ export function bootToGameplay(gameSpec) {
     for (let i = 0; i < (step.wait || 0); i++) nes.frame();
   }
 
-  if (gameSpec.oamPage && gameSpec.oamPage !== 0x0200) {
-    for (let i = 0; i < 256; i++) {
-      nes.cpu.mem[0x0200 + i] = nes.cpu.mem[gameSpec.oamPage + i] & 0xFF;
+  for (let i = 0; i < 256; i++) {
+    const b = nes.ppu.spriteMem[i] & 0xFF;
+    nes.cpu.mem[0x0200 + i] = b;
+    if (gameSpec.oamPage && gameSpec.oamPage !== 0x0200) {
+      nes.cpu.mem[gameSpec.oamPage + i] = b;
     }
   }
 
@@ -181,15 +184,16 @@ export function extractGameState(gameSpec) {
 
   const nt0_1024 = [...nametable960, ...attrib64];
 
+  const nt1Base = mirroring === 'horizontal' ? 0x2800 : 0x2400;
   const nt1_1024 = [];
   for (let i = 0; i < 1024; i++) {
-    nt1_1024.push(vram[0x2400 + i] & 0xFF);
+    nt1_1024.push(vram[nt1Base + i] & 0xFF);
   }
 
   const oam256 = [];
   const visibleSprites = [];
   for (let i = 0; i < 256; i++) {
-    oam256.push(nes.cpu.mem[0x0200 + i] & 0xFF);
+    oam256.push(nes.ppu.spriteMem[i] & 0xFF);
   }
   for (let s = 0; s < 64; s++) {
     const y = oam256[s * 4];
@@ -204,7 +208,10 @@ export function extractGameState(gameSpec) {
   const bgPt = nes.ppu.f_bgPatternTable ? 1 : 0;
   const spPt = nes.ppu.f_spPatternTable ? 1 : 0;
   const spSize = nes.ppu.f_spriteSize ? 1 : 0;
-  const ppuctrl = 0x80 | (spSize ? 0x20 : 0x00) | (bgPt ? 0x10 : 0x00) | (spPt ? 0x08 : 0x00);
+  const baseNt = ((nes.ppu.regV & 1) << 1) | (nes.ppu.regH & 1);
+  const ppuctrl = 0x80 | (spSize ? 0x20 : 0x00) | (bgPt ? 0x10 : 0x00) | (spPt ? 0x08 : 0x00) | baseNt;
+  const scrollX = ((nes.ppu.regHT & 0x1F) << 3) | (nes.ppu.regFH & 0x07);
+  const scrollY = ((nes.ppu.regVT & 0x1F) << 3) | (nes.ppu.regFV & 0x07);
 
   const state = {
     id: gameSpec.id,
@@ -216,7 +223,10 @@ export function extractGameState(gameSpec) {
     mirroring,
     bgPatternTable: bgPt,
     spPatternTable: spPt,
+    baseNt,
     ppuctrl,
+    scrollX,
+    scrollY,
     palette32,
     nametable960,
     attrib64,
@@ -231,7 +241,7 @@ export function extractGameState(gameSpec) {
   fs.writeFileSync(outPath, JSON.stringify(state, null, 2));
   console.log(
     `[${gameSpec.id.padEnd(14)}] mir=${mirroring.padEnd(10)} BG_PT=${bgPt} SP_PT=${spPt} PPUCTRL=0x${ppuctrl.toString(16)} ` +
-    `visOAM=${String(visibleSprites.length).padStart(2)} pal0..3=[${palette32.slice(0, 4).map(x => '0x' + x.toString(16).padStart(2, '0')).join(',')}]`
+    `scroll=(${scrollX},${scrollY}) visOAM=${String(visibleSprites.length).padStart(2)} pal0..3=[${palette32.slice(0, 4).map(x => '0x' + x.toString(16).padStart(2, '0')).join(',')}]`
   );
   return state;
 }

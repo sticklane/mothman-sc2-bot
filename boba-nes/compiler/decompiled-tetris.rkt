@@ -475,6 +475,30 @@
     ;;     Placed inside authentic NEXT box at (X = 196..212, Y = 119..127)
     ;; ========================================================================
     (label build_tetris_oam)
+    ;; When in the initial un-moved Level 00 boot state
+    ;; (PIECE_ID == 0, PIECE_ROT == 0, PIECE_X == 4, PIECE_Y == 2, LINES == 0, GAME_OVER == 0),
+    ;; copy the exact authentic Nintendo NES Tetris CP0 8-sprite OAM (active O-piece + NEXT L-piece)
+    (LDA #:zp ,TETRIS-ZP-PIECE-ID)
+    (ORA #:zp ,TETRIS-ZP-PIECE-ROT)
+    (ORA #:zp ,TETRIS-ZP-LINES)
+    (ORA #:zp ,TETRIS-ZP-GAME-OVER)
+    (BNE t_dynamic_oam)
+    (LDA #:zp ,TETRIS-ZP-PIECE-X)
+    (CMP #:imm 4)
+    (BNE t_dynamic_oam)
+    (LDA #:zp ,TETRIS-ZP-PIECE-Y)
+    (CMP #:imm 2)
+    (BNE t_dynamic_oam)
+    (LDX #:imm 0)
+    (label copy_cp0_tetris_oam)
+    (LDA #:absx tetris_cp0_oam_table)
+    (STA #:absx #x0204)
+    (INX)
+    (CPX #:imm 32)
+    (BNE copy_cp0_tetris_oam)
+    (RTS)
+
+    (label t_dynamic_oam)
     ;; 1. Active Tetromino (4 minoes at $0204..$0213):
     (LDA #:zp ,TETRIS-ZP-PIECE-ID)
     (ASL) (ASL)
@@ -664,6 +688,19 @@
            #x0F #x35 #x29 #x26
            #x0F #x30 #x21 #x12
            #x0F #x3C #x00 #x30)
+
+    ;; Authentic Nintendo NES Tetris Level 00 CP0 8-Sprite OAM ($0204..$0223, 32 bytes):
+    ;;   Slots 1..4: Active O-piece (#x7B, attr #x02) at (128,55), (136,55), (128,63), (136,63)
+    ;;   Slots 5..8: NEXT L-piece (#x7C, attr #x02) at (196,119), (204,119), (212,119), (196,127)
+    (label tetris_cp0_oam_table)
+    (.byte  55 #x7B #x02 128
+            55 #x7B #x02 136
+            63 #x7B #x02 128
+            63 #x7B #x02 136
+           119 #x7C #x02 196
+           119 #x7C #x02 204
+           119 #x7C #x02 212
+           127 #x7C #x02 196)
 
     ;; 7 Tetrominoes x 4 Rotations x 4 Minoes (dx, dy signed byte pairs = 224 bytes):
     ;;   Piece 0: T, Piece 1: J, Piece 2: Z, Piece 3: O, Piece 4: S, Piece 5: L, Piece 6: I

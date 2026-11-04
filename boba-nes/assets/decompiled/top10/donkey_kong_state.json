@@ -8,7 +8,10 @@
   "mirroring": "horizontal",
   "bgPatternTable": 1,
   "spPatternTable": 0,
+  "baseNt": 0,
   "ppuctrl": 144,
+  "scrollX": 0,
+  "scrollY": 0,
   "palette32": [
     15,
     21,
