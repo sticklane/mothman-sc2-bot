@@ -185,12 +185,21 @@
       (define ref-fname (format "~a_~a_ref.rgb" target-str gid))
       (define rec-fname (format "~a_~a_recomp.rgb" target-str gid))
       (define png-rel   (format "screenshots/visual_diff_~a_~a_3panel.png" target-str gid))
-      (call-with-output-file (build-path FB-DUMPS-DIR ref-fname)
-        #:exists 'replace
-        (lambda (out) (write-bytes ref-fb out)))
-      (call-with-output-file (build-path FB-DUMPS-DIR rec-fname)
-        #:exists 'replace
-        (lambda (out) (write-bytes rec-fb out)))
+      (define ref-path  (build-path FB-DUMPS-DIR ref-fname))
+      (define rec-path  (build-path FB-DUMPS-DIR rec-fname))
+      (define preserve-real-emu?
+        (and (member target-str '("gb" "gbc" "pico"))
+             (file-exists? ref-path)
+             (file-exists? rec-path)
+             (= (file-size ref-path) (* width height 3))
+             (= (file-size rec-path) (* width height 3))))
+      (unless preserve-real-emu?
+        (call-with-output-file ref-path
+          #:exists 'replace
+          (lambda (out) (write-bytes ref-fb out)))
+        (call-with-output-file rec-path
+          #:exists 'replace
+          (lambda (out) (write-bytes rec-fb out))))
       (hasheq 'index         idx
               'id            gid
               'symbol        (symbol->string (hash-ref g 'symbol))

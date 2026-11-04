@@ -1,0 +1,40 @@
+#lang boba-nes
+;; ============================================================================
+;; Decompiled from Real Commercial GB ROM: gb/dr_mario_gb.gb (32768 bytes)
+;; Game Title : Dr. Mario (GB, 1990) (Header: "DR.MARIO")
+;; Emulator   : danShumway/serverboy.js (Grant Galitz GameBoyCore SM83 + PPU)
+;; Captured   : Frame 690 | Non-Zero 2bpp Tiles: 378/384 | Active OAM Sprites: 26/40
+;; Registers  : LCDC=$83 SCX=0 SCY=0 WX=0 WY=0 BGP=$e1
+;; ============================================================================
+
+(def-cartridge
+  (target gb)
+  (title "DR.MARIO")
+  (rom-source "gb/dr_mario_gb.gb")
+  (origin-frame 690)
+  (lcdc #x83)
+  (scroll (scx 0) (scy 0) (wx 0) (wy 0))
+  (dmg-palettes (bgp #xe1)
+                (obp0 #xe1)
+                (obp1 #xe5))
+  (gbc-bg-cgram "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
+  (gbc-obj-cgram "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
+  (vram-bank0-sha-prefix "000000000000000030304f4fa787cccc00000000000000000000e0e0f0f008087f7f49415c545c547f40ff83ff877f7ff8f8fc3cfe32fe6afe0afe12fecefc8c")
+  (oam-table "000000000000000000000000000000002030a0002830b0003b6a81003b7291003574ff103d740410357c02103d7c05102d7c0010457c07102d840110358403103d840610458408108d6b20108d732110956b3010957331108d7b40108d834110957b5010958351108d8b60108d936110958b70109593711000000000000000000000000000000000000000000000000000000000000000000000000000000000")
+  (sample-2bpp-tiles
+    (tile 0 "000000000000000030304f4fa787cccc")
+    (tile 1 "00000000000000000000e0e0f0f00808")
+    (tile 2 "7f7f49415c545c547f40ff83ff877f7f")
+    (tile 3 "f8f8fc3cfe32fe6afe0afe12fecefc8c")
+    (tile 4 "0000000007071e1a3e223e3e03030000")
+    (tile 5 "3f2c5f508f8f2a2a47474444f4f44444")
+    (tile 6 "f818e4648282828211111111f1f13f3f")
+    (tile 7 "242422221f1f09091d1d233f417f7f7f")
+    (tile 8 "3f211f11fefe08083838c4fc02fefefe")
+    (tile 9 "000000001a1a3f253f213f231c140808")
+    (tile 10 "7f7f49415c545c547f40ff83ff877f7f")
+    (tile 11 "04040303000000000000000000000000")
+    (tile 12 "3f2c1f108f8f6a6a4747444474744444")
+    (tile 13 "00000101010101010101010101010101")
+    (tile 14 "ffffc941dc54dcd47f40ff83ff877f7f")
+    (tile 15 "bfac9f904f4f6a6a4747444474744444")))
