@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-04T04:13:07.831Z",
+  "generatedAt": "2026-11-04T22:27:25.215Z",
   "id": "metroid",
   "symbol": "metroid",
   "title": "Metroid (NES, 1986)",
@@ -7,6 +7,59 @@
   "mirroring": "vertical",
   "authenticRom": "assets/roms/metroid.nes",
   "decompiledRom": "build/metroid_nes.nes",
+  "bobaWholeRomModule": "assets/decompiled/real_roms/nes_metroid.boba.rkt",
+  "recompiledWholeRom": "build/recompiled_metroid.nes",
+  "tasFile": "assets/tas/nes_metroid.fm2",
+  "wholeRomTasLockstep": {
+    "gameId": "metroid",
+    "authenticRom": "assets/roms/metroid.nes",
+    "bobaWholeRomModule": "assets/decompiled/real_roms/nes_metroid.boba.rkt",
+    "recompiledWholeRom": "build/recompiled_metroid.nes",
+    "romBytes": 131088,
+    "recompiledRomBytes": 131088,
+    "sha256Match": true,
+    "tasFile": "assets/tas/nes_metroid.fm2",
+    "totalTasMovieFrames": 1082,
+    "lockstepFramesExecuted": 1082,
+    "totalDiffPixelsAcrossCheckpoints": 0,
+    "everyFrameMatch100Pct": true,
+    "cp0Frame": 731,
+    "cp1Frame": 899,
+    "cp2Frame": 1081,
+    "cp0ToCp1PixelDelta": 18774,
+    "cp1ToCp2PixelDelta": 16464,
+    "cp0ToCp2PixelDelta": 13809,
+    "gameplayProgressedAcrossCheckpoints": true,
+    "checkpoints": [
+      {
+        "checkpoint": "CP0",
+        "frame": 731,
+        "inputField": "........",
+        "matchingPixels": 61440,
+        "totalPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100
+      },
+      {
+        "checkpoint": "CP1",
+        "frame": 899,
+        "inputField": "R.......",
+        "matchingPixels": 61440,
+        "totalPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100
+      },
+      {
+        "checkpoint": "CP2",
+        "frame": 1081,
+        "inputField": "R.....B.",
+        "matchingPixels": 61440,
+        "totalPixels": 61440,
+        "diffPixels": 0,
+        "pixelMatchPct": 100
+      }
+    ]
+  },
   "screenshot": "screenshots/diff_metroid_side_by_side.png",
   "checkpoint": 0,
   "label": "Checkpoint 0: Initial Metroid Brinstar Pedestal Frame 0 (EN..30)",

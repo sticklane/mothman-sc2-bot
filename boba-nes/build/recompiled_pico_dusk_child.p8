@@ -121,6 +121,229 @@ there was yet one issue of
 which the god of life 
 refused to resolve - death.
 ]],[["it may not seem as such to a
+lowly mortal such as you, but
+death is of grave import."
+the god of life explained to
+their dearest friend, the
+gentle sinner. said sinner
+had long since grown into
+a capable and proper adult.
+
+"you see, without death, you
+humans will forget the
+preciousness of life." said
+the god. "life only gains
+meaning when temporary."
+
+the sinner agreed, but only
+in their words, not heart.
+]],[[many years passed, and the
+gentle sinner eventually
+found themselves on their
+deathbed.
+
+"i would request a boon of
+you." they asked their god.
+"grant me life eternal, so
+our reign may yet continue."
+
+"have you learned nothing?"
+the god of life and death
+replied. "your kin are not
+made for eternity. that honor
+is for gods alone. do not
+succumb to fear; let my first
+gift fall away with grace."
+]],[[however, age had made the
+sinner no less cunning, and
+they said "i understand, dear
+friend. i ask of you instead
+to make me the greatest thief
+to ever exist, capable of 
+stealing anything, so that i
+die a master of my craft."
+
+"how little humans change!"
+the god of life and death 
+said, granting their wish.
+
+"my thanks, gentle god." they
+said, and reached over to
+steal the concept of life
+itself from their god.
+]],[["what have you done, sinner!"
+exclaimed the god in shock.
+
+"i have taken naught but what
+i deserved." said the sinner.
+bearing the concept of life
+itself, the years shed from
+their body. "eternity."
+
+the god of life and death 
+fell to the ground. for now
+lacking life, they bore only
+death, and were a twisted,
+unbalanced deity. fields of
+flowers withered away and
+philosphers collapsed dead
+in the midst of speeches.
+]],[[the sinner beheld the 
+destruction wreaked by their
+theft. without life, the god
+had no means to 
+counterbalance death, and it 
+raged free to prey on all.
+
+"a shame, to be sure." said
+the sinner, fleeing beyond
+the wave of ruin and death.
+
+the other gods appeared at
+the chaos, and seeing the
+god of death, realized they
+had no choice. an ever-
+shifting prison was formed to
+seal them away forevermore. 
+]],[[the sinner enjoyed their
+renewed being. bearing the
+concept of life, they were
+immune to age, plague, and
+wounds alike. even lesser
+death held no sway, and their
+body would reform with ease.
+
+the gods held trial against
+the sinner for their theft,
+but only prosecuted them as
+humans would, and lopped off
+a single arm as penance.
+
+"a cheap price for life
+immemorial!" said the sinner,
+and lived happily ever after.
+]],[[eons passed. happily ever
+after came and went. the
+sinner experienced all the
+joys and sorrows which life
+had to offer, and grew 
+exhausted with each in turn.
+
+ennui and boredom plauged 
+them. but they could not find
+rest eternal, as they yet 
+beheld the concept of life.
+and the sinner could not 
+discard their truest life,
+for they were only a master
+of stealing, not giving.
+
+so the sinner made a plan.
+]],[[the sinner stole the warfare
+god's arsenal. this made them
+rather mad, but since they
+now lacked the means of war,
+they became a god of peace.
+alas, the other gods sliced
+off the sinner's remaining
+arm as penance.
+
+"what are we to do? this
+sinner is a nuisance, and now
+that death has been sealed
+away, we cannot kill them."
+
+"if only there was somewhere
+you could imprison me" said
+the sinner innocently.
+]],[[the gods tossed the sinner in
+the same shifting prison
+which housed their old
+friend, the god of death.
+
+"have you come to taunt me?"
+the imprisoned god asked 
+them. "are you proud to have
+destroyed everything i am,
+and everything i will be?"
+
+"my friend, i have come to
+free you. you were right 
+about life; i long to be free
+from it. once i break your
+chains, death will finally
+embrace me, at long last.
+]],[[the god of death looked down 
+in disgust. "freeing me would
+sentence all of my former
+creations to death and dust.
+learn to live with your sins,
+rather than punish the world
+for your mistakes."
+
+the sinner took up the
+weapons they had claimed as
+their own. "i have nothing
+more to learn from life."
+
+the god summoned forth the
+souls of the dead to protect
+them. "then i will hold you 
+back for all eternity!"
+]],[[and so the sinner who beheld
+life waged a war against the
+god of death.
+
+time and time again, the
+sinner found their body 
+broken under the assault of
+the god and their hordes of
+fallen souls. but the sinner
+could not truly die while
+death remained shackled, and
+they reformed each and every
+time to take up their weapons
+and try anew. 
+
+until finally...
+
+]],[[the sinner severed the final
+chain, and freed the god of
+death. in an instant, the
+ever-shifting prison
+shattered.
+
+for the first time in eons,
+the god looked out at their
+beautiful world. and then
+despaired as it began to
+wither and die.
+
+the other gods were helpless
+before the might of death,
+suffused and reinforced over
+eons of containment. they too
+were snuffed from existence.
+]],[[the sinner felt their limbs
+weaken and shake, but their
+heart only felt victory.
+"why do you savage your 
+countrymen, of god of death?"
+they mocked. their eyes went
+wild. "am i still gentle? 
+tell me! i need to hear it!
+i need you to-"
+
+the god extinguished their
+life without thought, before
+kneeling to the ground in
+tears. 
+
+but there was nobody left to
+witness them.
+]]}function _init()menuitem(1,"erase data",ei)I,h=split"sword,spear,axe,hammer,knife",dget(62)~=0and dget(62)or 1T,j,v=h,-1,dget(63)~=0and dget(63)or 2J,V,K,l,S,D,e,n=v,1,dget(0),dget(1),0,0,0,split(chr(peek(63191,50)))poke(63191,ord(nil,1,50))m=n[1]=="_training"and 6or n[1]=="_tutorial"and 1or n[9]==nil and-1or 5o,z,a,q,u=m,1,1,1,{}if n[1]=="_training"or n[1]=="_tutorial"then if n[1]=="_training"then add(u,{1,2})a=h end music"0"end y,w=0,0e0,i=s"0=-0.5|-8.5|-520.5|-522.5|-2570.5|-2634.5|-6730.5|-6746.5|-23130.5|-23134.5|-23390.5|-23391.5|-24415.5|-24543.5|-32735.5|-32767.5",0ed={k"0|-16|2|-12|-2|-12&-1|-3|2|-12|-2|-12&1|-3|2|-12|-2|-12&-2|-4|-1|-4|-1|-3&2|-4|1|-4|1|-3&-.5|-12|-.5|0|.5|0&.5|-12|-.5|0|.5|0",k"-2|-17|0|-20|2|-17&-2|-17|0|-9|2|-17&-.5|-13|-.5|0|.5|0&-.5|-13|.5|-13|.5|0&-.5|-13|.5|-12|2|-11",k"-.5|-15|-.5|0|.5|0&-.5|-15|.5|-15|.5|0&-4|-16|-5|-13|-4|-10&-4|-16|0|-13|-4|-10&4|-16|5|-13|4|-10&4|-16|0|-13|4|-10",k"-.5|-15|-.5|0|.5|0&-.5|-15|.5|-15|.5|0&-5|-15|-5|-8|-2|-8&-5|-15|-2|-15|-2|-8&5|-15|5|-8|2|-8&5|-15|2|-15|2|-8&-3|-14|-3|-9|3|-9&-3|-14|3|-14|3|-9",k"0|-14|-2|-8|2|-8&0|-2|-2|-8|2|-8&-.5|-5|-.5|0|.5|0&.5|-5|-.5|0|.5|0"}p=k"new run|training|tutorial|lore|scores|credits&sword|spear|axe|hammer|knife&easy|medium|hard|extreme|oblivion&start|back&&sword|spear|axe|hammer|knife"if stat(102)==0then p[1][7]="quit"end U,E,M,L,W,F=0,0,{},"","",{}e6,b,f,r,c,B,N,ee=k"30|10&44|20&46|20&60|30",0,{},{},{},{},0,false for e=1,5do f[e]={}r[e]={}c[e]={}for n=1,4do f[e][n]=dget(19+e*4+n)r[e][n]=dget(39+e*4+n)end for n=1,2do c[e][n]=dget(11+e*2+n)end end if n[9]~=nil then B={{"completion: "..(n[9]-1)*25 .."%",(n[9]/2)^2*1000+750},{"difficulty: "..p[3][n[2]],(n[2]+5)*n[9]*150},{"enemies defeated: "..n[5],n[5]*20},{"items collected: "..n[6],n[6]==0and n[9]==5and 3000or max(-250,n[6]*-5)},{"hits taken: "..n[7],n[7]==0and 3000or max(-250,n[7]*-10)},{"game time: "..P(n[8]),max(-500,ceil(n[8]/-10))}}for e=1,#B do N+=B[e][2]end for e=1,5do if N>f[e][1]then add(f,{N,n[8],n[9],n[2]},e)ee=true break end end if n[9]==5then for e=1,5do if n[8]<r[e][2]or r[e][1]==0then add(r,{N,n[8],n[9],n[2]},e)break end end end l=min(18,l+min(3,n[9]-1))dset(1,l)end if n[3]~=nil then for e=1,5do if c[e][1]==nil or n[3]>0and n[3]+tonum(n[4])/1000>tonum(c[e][1])+tonum(c[e][2])/1000then add(c,{n[3],n[4]},e)break end end end if n[9]==5then m,o=7,7if l==18then dset(2,1)end end A=l+(dget(2)>0and l==18and 2or 0)for e=1,5do for n=1,4do dset(19+e*4+n,f[e][n])dset(39+e*4+n,r[e][n])end for n=1,2do dset(11+e*2+n,c[e][n])end end if m==-1then sfx(14,3)end poke(55020,ord(R,1,8003))poke(64024,ord(O[min(18,l+1)],1,500))poke(64524,ord(O[min(18,l+2)],1,500))poke(-512,ord(O[min(18,l+3)],1,500))end function er(n,e)e=e or 1for t,n in pairs(n)do if type(n)=="table"then printh(e.."…in "..t..":","debug")er(n,e+1)else if type(n)~="boolean"then printh(e.."…"..t.."="..n,"debug")end end end end function _update60()print"⁶!5f100█●7🐱♪ˇ⬅️6>8☉3?⬅️⬇️"i+=1if e<1000then e+=1end if e>=300and m<1then o+=1if o==1then music"0"end e=0end if e>=200and m==7then if A==20then o=8else o=5end end if b<1000and m==5then b+=1end if t()==1.5and m==-1then D=.5end D*=.85if D<.05then D=0end if m~=5then local e=k"134|131&139|131&12|140&10|137&7|13"[J]if m==1or m==2or m==3or m==4or m==7then pal(14,e[1],1)pal(15,e[2],1)if J==5then local e="-5,11,-6,10,9,-7,8,-8,2,1,-4,3"local n,e=split(e)[i\5%12+1],split(e)[(i\5+1)%12+1]pal(14,n,1)pal(6,e,1)if m~=1then pal(9,n,1)pal(13,e,1)pal(6,e,1)end end end end if m==99and z==-1then local e=""if peek(32768,4)~=57then e="oblivion_eve_gen"elseif split(chr(peek(63191,50)))[1]=="launch"then e="oblivion_eve_data"else e="oblivion_eve_training"end load(e..".p8","return to menu")load("#"..e,"return to menu")end U,E=(U+1/split"3000,1000,300,120,80"[J])%1,mid(0,E+((m<=2and 0or 46)-E)/5,46)if i%100==1then add(F,s("x=%1|y=140|id=0|arsenal=%2|rotation=%3|scale=%6|stretch_x=%8|stretch_y=%9|dist_length=-8|dist_side=0|color=14|speed=%4|angle=%5|time=120|type=weapon|endlag=270|front=%7",rnd(45),flr(rnd"5")+1,rnd".02"-.01,rnd".2"+.5,rnd"1",rnd"1"+.5,flr(rnd"2"),rnd".8"+.6,rnd".8"+.6))end for e in all(F)do e.time-=1e.angle+=e.rotation e.y-=e.speed if e.time<=0then del(F,e)end end if abs(E-(m<=2and 0or 46))<.5then E=m<=2and 0or 46end if m~=o then z=min(1,z+.25)else z=max(-1,z-.25)end if z==1then m,y=o,0if o==2or o==6then a=h end if o==10then y=1end end if z==-1then if h~=T then j=max(-1,j-.25)else j=min(1,j+.25)end if j==-1then T=h end if W~=L then V=max(-1,V-.25)else V=min(1,V+.25)end if V==-1then L=W end if a~=q then q=mid(1,q+(a-q)/4,100)end if abs(q-a)<.05then q=a end if w<0then w-=8end if w>0then w+=8end if w>=128then w=0y+=1elseif w<=-128then w=0y-=1end end for e in all(M)do e[1]+=4e[2]-=.2if e[1]>=75and e[2]>=1then J=v end if e[2]<-1then del(M,e)end end function X()if o==2or o==3or o==4then local e,n=s"the sword is the most balanced\nweapon, with average stats\nand no weaknesses|the spear boasts the longest\nrange, but is slower and\ngenerates less meter|the axe may be slow, but your\nattacks will swing further and\nhave very high damage output|the hammer is a crude weapon\nwhich generates less meter, but\nstuns enemies for much longer|the knife may be small, but\nits high meter generation lets\nyou to quickly power up",s"a more forgiving difficulty,\nwhich allows beginners to learn\nthe tools of the trade|the basic difficulty, which\nprovides a challenging, yet\nrewarding experience|an advanced difficulty for\nexperts of the game, featuring\nmany powerful enemies|a monsterous challenge for\nthose who have claimed mastery\nover life and death alike.|for those who seek to free\nthemselves from existence"W=split(o==4and en("begin with these settings?\nweapon: %1\ndifficulty: %2",I[h],p[3][v])or o==2and e[h]or n[v],"\n")end end function e1()if m==2or m==6then h=a dset(62,h)elseif m==3then v=a dset(63,v)for e in all(M)do e[2]=1end add(M,{0,5})end if m~=4then X()end end function et()o,a=u[#u][1],u[#u][2]if o~=1then m=o else q=a end deli(u,#u)end if z<=-1and o~=99then if S==0then if m<=4and m>=1or m==6then if btnp"2"then a=(a-2)%#p[m]+1e1()sfx"11"elseif btnp"3"then a=(a)%#p[m]+1e1()sfx"11"end end if btnp"0"and m==14and y~=0or btnp"0"and m==10then w-=8sfx"11"end if btnp"4"and m==1and a==7then extcmd"shutdown"extcmd"reset"elseif btnp"5"and m==7then if A==20then o=8else o=5end sfx"12"elseif(btnp"4"or btnp"5")and(m==8or m==9)then if m==8then o=9else o=5end sfx"13"elseif(btnp"4"or btnp"5")and m<=0then o+=1if o==1then music"0"else sfx(-1,3)end e=0sfx"13"elseif(btnp"1"or btnp"4")and m==14and A>y or btnp"1"and m==10then w+=8sfx"11"elseif(btnp"0"and m==3or btnp"4"and m==22or btnp"5")and(#u~=0or b>330and m==5)then if m==5then o=1music"0"sfx"12"elseif m==14and y~=0then m=15sfx"12"else et()X()sfx"12"end elseif btnp"1"and o==2or btnp"4"then if b>330and m==5then o=1music"0"sfx"13"elseif m==1then if a==1and K==0then S=1else add(u,{m,a})o,L=a*4-2,""sfx"13"if o==10then K=1dset(0,K)end end elseif m==2then add(u,{m,a})m+=1o,a=m,v sfx"13"elseif m==3then add(u,{m,a})m+=1o,a,q=m,1,1sfx"13"elseif m==4then if a==1then poke(63191,ord("launch,"..h..","..v..","..l..",",1,50))o=99sfx"13"else et()sfx"12"end elseif m==6then poke(63191,ord("training,"..h..",2,0",1,50))o=99sfx"13"elseif m==10then poke(63191,ord("tutorial,1,2,0",1,50))o=99sfx"13"elseif m==18and r[1][1]>0then sfx"13"o=19elseif m==19then sfx"13"o=18end X()end else if btnp"4"or btnp"5"then S,K=0,1dset(0,K)if btnp"4"then add(u,{m,3})o=10else add(u,{m,1})o=2end L=""sfx"13"end end end end function _draw()cls"0"function eo(n)for e=0,15do local e=(e/15-U)%1if bxor(tonum(e>.25and e<.75),tonum(n))==0then x(s("x=64|y=27|dist_length=20|stretch_x=1|stretch_y=.55|scale=%3|angle=%1|time=999|color=14|stay_still=true|arsenal=%2",e,T,3.5-abs(e-.5)*7))end end end if m==-1then cls"0"local e=max(0,75-t()*50)local function n(o,a,n,d,r)for t=1,n*2do srand(t)local i=-i*n/-100local n,t=(rnd(n)-i)%n,(t+i*d)/n/2if pget(o+sin(t)*n,a+cos(t)/2*n)<=1and n>34-e then pset(o+sin(t)*n,a+cos(t)/2*n,r)end end srand(t())end camera(G(),G())srand(t())circfill(64,64,41+e,5)if e==0then rectfill(64-(35+e),60,160,160,0)circfill(64,64,36+e,5)end Q(64,64,20+e*2,68+e*2,.825,5,1)circfill(64,64,33+e,0)n(64,64,150,1,6)circfill(64,64,33-e,0)for e=0,8do for n=0,8do mset(e,n,(e>4or n>4)and 0or e+n*16+128)end end for n=0,2do poke(24405,0)rectfill(0,64,40,104,0)sspr(({32,0,32})[n+1],({0,32,32})[n+1],32,32,0,64)poke(24405,96)local e,o=8+n*5+e,e==0and t()/10+n/3or-t()^2+n/3+.4e2(64+sin(o)*e,64+cos(o)*e,t()/(2+n*5),2,2,4.1,1,.6+n*.2)end camera()d("ᵉthe",-34+#"the"*4,-49,13,9,1)d("ᵉsmartalloc",-54+#"smartalloc"*4,-57,13,9,1)d("ᵉexperience",-74+#"experience"*4,-65,13,9,1)elseif m==0then print("ᵉcontroller",64-#"controller"*4,96,2)print("ᵉrecommended",64-#"recommended"*4,106,2)print("i pray for touch screen users",64-#"i pray for touch screen users"*2,122,2)print("⁶-b⁶x8⁶y8  ᶜ2⁶.\0\0\0\0█ナユュ⁶.\0█ヲ◜◝◝◝◝⁶.ナ◝◝◝◝◝◝◝²2    ⁶-#⁶.⁷◝◝◝◝◝◝◝⁶.\0¹゜○◝◝◝◝⁶.\0\0\0\0¹⁷ᶠ?\n ⁶.\0\0█らナユヲュ⁶.◜◝◝◝◝○?゜⁶.◝?ᶠ³¹\0\0\0⁶.³\0\0\0\0\0\0\0    ⁶.ら\0\0\0\0\0\0\0⁶.◝ュユら█\0\0\0⁶.○◝◝◝◝◜ュヲ⁶.\0\0¹³⁷ᶠ゜?\n⁶.\0\0\0\0███ら⁶.ュ◜◜◝◝◝○○⁶.ᶠ⁷³¹\0\0\0\0 ⁶.「~~◝◝◝◝◝    ⁶.「~~◝◝~~「 ⁶.ユナら█\0\0\0\0⁶.?○○◝◝◝◜◜⁶.\0\0\0\0¹¹¹³\n⁶.らナナナナユユユ⁶.??゜゜゜゜ᶠᶠ ⁶.ヲ◜◜◝◝◜◜ヲ²2 ⁶-#⁶.゜○◝◝◝◝○゜  ⁶.「~~◝◝~~「 ⁶.「~~◝◝~~「 ⁶.ュュヲヲヲヲユユ⁶.³⁷⁷⁷⁷ᶠᶠᶠ\n⁶.ユユユユヲヲヲヲ⁶.ᶠᶠᶠ⁷⁷⁷⁷⁷  ⁶.◝◝◝◝◝~~<    ⁶.「~~◝◝~~「  ⁶.ユユユナナナナナ⁶.ᶠᶠᶠᶠ゜゜゜゜\n⁶.ヲヲヲュュュュュ⁶.⁷³³³³³³³          ⁶.ナららららららら⁶.゜゜゜?????\n⁶.ュュュ◜◜◜◜◜⁶.¹¹¹¹¹¹¹\0  ⁶.█ナユユヲヲュュ²2    ⁶-#⁶.¹⁷ᶠᶠ゜゜??  ⁶.███████\0⁶.???○○○○○\n⁶.◜◜◝◝◝◝◝◝  ⁶.\0\0\0\0██らら⁶.◜◜◝◝◝○○?⁶.³¹¹\0\0\0\0\0  ⁶.ら██\0\0\0\0\0⁶.○○◝◝◝◜◜ュ⁶.\0\0\0\0¹¹³³  ⁶.○○◝◝◝◝◝◝\n⁶.◝◜◜◜ュュュヲ⁶.\0\0¹³³⁷゜○⁶.\0\0\0\0\0\0\0█⁶.ナナユユヲュ◜◝⁶.?゜゜ᶠᶠ⁷⁷³    ⁶.ュヲヲユユナナら⁶.⁷⁷ᶠᶠ゜?○◝⁶.\0\0\0\0\0\0\0¹⁶.\0\0█ららナヲ◜⁶.◝○○○???゜\n⁶.ユナら█\0\0\0\0⁶.◝◝◝◝◝ュユ\0⁶.◝◝◝◝◝◝◝?⁶.◝◝◝○゜ᶠ³\0⁶.³¹\0\0\0\0\0\0    ⁶.ら█\0\0\0\0\0\0⁶.◝◝◝◜ヲユら\0⁶.◝◝◝◝◝◝◝ュ⁶.◝◝◝◝◝?ᶠ\0⁶.ᶠ⁷³¹\0\0\0\0",8,8)elseif m==1then color(4)camera(-45,2)Q(60,69,30,sin(t()/10)*30,t()/10,4)Q(60,69,39,sin(t()/20)*44,t()/20,4)Q(60,69,41,sin(t()/20)*46,t()/20,4)Q(60,69,50,sin(t()/30)*60,t()/30,4)camera()pal(1,4)print(split(R)[5],82,39)pal(1,1)for e=#F,1,-1do if F[e].front~=0then x(F[e])fillp()end end ea()for e=#F,1,-1do if F[e].front==0then x(F[e])fillp()end end rectfill(0,0,128,18,0)rectfill(67,18,74,28,0)print("⁶-b⁶x8⁶y8ᶜ9⁶.◝◝◝◝◝○??⁶.◝◝◝¹\0\0\0ヲ⁶.◝◝◝xp`@A⁶.◝◝◝\0\0\0\0ヲ⁶.◝◝◝ユナら█♥⁶.◝◝◝◜ュヲユユ⁶.◝◝◝よ????⁶.\0¹³⁷ᶠᵉ、、⁶.ユヲュュヲヲユユ⁶.³⁷ᶠᶠ⁷⁷³³⁶.らナユx<、ᵉᵉ⁶.◝◝◝ᶠ⁷³¹り⁶.◝◝◝ら█\0\0ᶠ⁶.◝◝◝れ⬇️³²²⁶.◝◝◝よ??><⁶.◝◝◝◝◝◜ュュ\n⁶.????????⁶.ュュュュュュヲ\0⁶.CCCCCCA@⁶.ヲ\0\0\0\0ヲヲ⁸⁶.♥█らら█♥♥█⁶.ユユユユユユユ\0⁶.???????<⁶.<<||ュュ◝◜⁶.ナナらら\0\0ᶠ⁷⁶.¹¹██ららュヲ⁶.ᶠᶠᶠᶠᶠᶠ?゜⁶.ニニニニニニり¹⁶.゜゜゜゜゜゜ᶠ\0⁶.²²²Bるるるる⁶.80 \0\0¹³⁷⁶.ュュュュュュュュ\n⁶.○◝◝\0\0\0\0\0⁶.\0\0¹\0\0\0\0\0⁶.ナユヲ\0\0\0\0\0⁶.「9{\0\0\0\0\0⁶.らナユ\0\0\0\0\0⁶.\0\0\0◝◝◝◝ᶠ⁶.80 ◝◝◝○\0⁶.ュュュリニナらら⁶.³³⁷⁷ᶠᶠ゜゜⁶.ユユヲヲュュ◜◜⁶.ᶠᶠᶠリヨヨユユ⁶.³⁷ᶠ◝◝◝◝\0⁶.\0█ら?゜ᶠ⁷\0⁶.んエト\0\0\0\0\0⁶.ᶠ゜?\0\0\0\0\0⁶.ュュュ\0\0\0\0\0\n     ⁶.ᶠ◝◝◝◝ᶠᶠ◝⁶.\0○○○○\0\0○⁶.██\0\0\0\0\0\0⁶.??◝◝◜◜ュュ⁶.○○??゜゜ᶠᶠ⁶.ユユユユユユユユ⁶.\0◝◝◝◝\0\0◝⁶.\0⁷⁷⁷⁷\0\0⁷\n     ⁶.◝◝◝\0\0\0\0\0⁶.◝◝◝\0\0\0\0\0⁶.\0¹³\0\0\0\0\0⁶.ヲヲユユナナらら⁶.⁷⁷³³¹¹\0\0⁶.ユユユ\0\0\0\0\0⁶.◝◝◝\0\0\0\0\0⁶.ᶠ゜?\0\0\0\0\0",0,0)d("v1.1.0",-104,-116,4,4,0)d("studio smartalloc",-60,-122,4,4,0)elseif m==2or m==3or m==4then eo(false)print("⁶-b⁶x8⁶y8   ⁶-#ᶜ0⁶.\0\0\0\0\0\0\0█⁸⁶-#ᶜf⁶.\0\0\0\0█らナp⁶-#ᶜ0⁶.\0\0\0\0 、³\0⁸⁶-#ᶜf⁶.「>??トネュ◝⁶-#⁶.\0\0\0\0◝◝◝◝⁶-#ᶜ0⁶.\0\0\0\0⁴8ら\0⁸⁶-#ᶜf⁶.「|ュュャん?◝⁶-#ᶜ0⁶.\0\0\0\0\0\0\0¹⁸⁶-#ᶜf⁶.\0\0\0\0¹³⁷ᵉ⁶-#\n ⁶.\0\0\0\0\0\0ナ◝⁶.\0\0\0らユュ◝◝⁶-#ᶜ0⁶.@  ▮⁸⁴⁴²⁸⁶-#ᶜf⁶.まチトヤワャャョ²f   ⁶-#ᶜ0⁶.²⁴⁴⁸▮  @⁸⁶-#ᶜf⁶.。;ャワヤトトよ⁶-#⁶.\0\0\0³ᶠ?◝◝⁶.\0\0\0\0\0\0⁷◝\n⁶.████ららユ◜²f ᶜ0⁶.\0█@  ▮▮▮⁶.¹\0\0\0\0\0\0\0   ⁶.█\0\0\0\0\0\0\0⁶.\0¹²⁴⁴⁸⁸⁸ ⁶-#ᶜf⁶.¹¹¹¹³³ᶠ○\n⁶.◝◝◜◜ュュュュ⁶.◝◝◝◝◝◝◝○⁶.ワワネれ▒¹\0\0⁶.◝◝◝◝◝゛\0\0⁶.◝◝?ᶠ¹\0\0\0⁶.◝▒\0\0\0\0\0\0⁶.◝◝ュユ█\0\0\0⁶.◝◝◝◝◝x\0\0⁶.ヤヤんれ▒█\0\0⁶.◝◝◝◝◝◝◝◜⁶.◝◝○○????\n⁶.ュュュ◜◜◜◜◜⁶.??゜ᶠ⁷⁷⁷⁷       ⁶.ュュヲユナナナナ⁶.???○○○○○\n⁶.◜ュュヲヲユユナ⁶.⁷⁷⁷⁷⁷ᶠᶠᶠ       ⁶.ナナナナナユユユ⁶.○??゜゜ᶠᶠ⁷\n⁶.ら\0\0\0\0\0\0\0⁶.゜○ュユら█\0\0⁶.\0\0\0¹³⁷ᶠ\0     ⁶.\0\0\0█らナユ\0⁶.ヲ◜?ᶠ³¹\0\0⁶.³\0\0\0\0\0\0\0",20,16-sin(i/300-.33)*1.9)print("⁶-b⁶x8⁶y8 ᶜ6⁶.ナ◜◝◝◝◝◜◜⁶-#ᶜ0⁶.\0\0\0\0\0\0█@⁸⁶-#ᶜ6⁶.り██りネ◝○よ⁸⁶-#ᶜ9⁶.\0~|8\0\0\0\0⁸⁶-#ᶜd⁶.\0¹³⁶、\0\0\0⁶-#ᶜ0⁶.\0\0\0\0\0\0⁷⁸⁸⁶-#ᶜ6⁶.\0³ᶠ゜??8▶⁶-#\n ⁶-#ᶜ0⁶.\0\0\0\0\0\0█@⁸⁶-#ᶜ6⁶.ュュュヲヲヲxも²0⁶.トヤワャョ◜◝◝⁶-#ᶜ0⁶.▮\0\0\0\0\0\0\0⁸⁶-#ᶜ6⁶.ᶠ゜?○○◝◝◝⁶-#⁶.\0\0\0\0\0\0\0¹⁶.\0\0\0\0\0\0█ら⁶.\0\0\0\0\0\0³⁷\nᶜe⁶.\0\0\0\0\0「8ロ⁶-#ᶜ0⁶. ▮⁸⁴⁴²²²⁸⁶-#ᶜ6⁶.チムロッッョョョ²0⁶.◝よよ○○よよト⁶.◝◝◝◝◝◜ョャ⁶-#⁶.³³⁷ᶠ゜゜?○⁶.ナナナユユユヲヲ⁶.ᶠ゜゜?????\nᶜe⁶.◜◜ヲナ█\0\0\0⁶-#ᶜ6⁶.ナ\0\0\0\0\0\0\0⁸⁶-#ᶜe⁶.゜◝◝◝◝ワ●\0⁶-#ᶜ0⁶. ▮\0\0\0\0\0\0⁸⁶-#ᶜ6⁶.トモナユユユユユ⁸⁶-#ᶜe⁶.\0¹゜ᶠᶠᶠᶠᶜ⁶-#ᶜ0⁶.「 @\0\0\0\0\0⁸⁶-#ᶜ6⁶.フトよ○○○??⁸⁶-#ᶜe⁶.\0\0\0\0██らら⁶-#ᶜ6⁶.◝◝◝◜ヲユナら⁸⁶-#ᶜe⁶.\0\0\0\0\0¹³⁷⁶-#ᶜ6⁶.ヲョ◝◝◝◝◝◝⁶.?゜゜ᶠᶠ⁷⁷⁷\n  ⁶.ユユユユユユユヲ⁶-#⁶.?゜゜ᶠᶠᶠ⁷⁷⁸⁶-#ᶜe⁶.らナナナ\0\0\0\0⁶-#ᶜ6⁶.█\0\0\0\0\0\0\0⁸⁶-#ᶜe⁶.ᶠ゜⁷\0\0\0\0\0⁶-#ᶜ6⁶.◝◝◝◜◜ュュヲ⁶.⁷⁷⁷⁷⁷³³¹\n  ⁶.ヲヲヲヲヲヲヲヲ⁶.⁷⁷³³³³³¹ ⁶.ユ\0\0\0\0\0\0\0\n  ⁶.ヲヲヲュュュュュ⁶.¹³³³⁷⁷ᶠᶠ\n  ⁶.ュュュュヲヲヲユ⁶.ᶠᶠᶠ⁷⁷³¹\0   ",46,18-sin(i/300)*1.9)print(split"⁶-b⁶x8⁶y8⁶-#ᶜd⁶.\0\0\0\0\0\0\0 ⁸⁶-#ᶜe⁶.\0\0\0ナヲュ◜テ⁶-#ᶜd⁶.\0\0\0\0\0\0\0²⁸⁶-#ᶜe⁶.\0\0\0¹ᶠ゜?や\n⁶-#ᶜ6⁶.\0\0ナ\0\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0\0\0\0\0 ⁸⁶-#ᶜd⁶.ナユ▮ナユユナら⁸⁶-#ᶜe⁶.゛\rᶜ、ᶜᵉ゛¹⁶-#ᶜ6⁶.\0\0ᶜ\0\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0²\0¹¹\0⁸⁶-#ᶜd⁶.ᶜ゜⁙\rᶠᵉ⁶³⁸⁶-#ᶜe⁶.s  ▮\0\0\0\0,⁶-b⁶x8⁶y8⁶-#ᶜd⁶.\0\0\0\0\0\0\0 ⁸⁶-#ᶜe⁶.\0\0\0ナヲュ◜テ⁶-#ᶜd⁶.\0\0\0\0\0\0\0²⁸⁶-#ᶜe⁶.\0\0\0¹ᶠ゜?や\n⁶-#ᶜ0⁶.\0@\0\0\0\0\0\0⁸⁶-#ᶜ3⁶.\0  \0\0\0\0\0⁸⁶-#ᶜ6⁶.`█\0\0\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0\0\0\0█ ⁸⁶-#ᶜc⁶.\0\0@\0\0\0\0\0⁸⁶-#ᶜd⁶.█▮…ナユユ`ら⁸⁶-#ᶜe⁶.゛\rᶜ、ᶜᵉ゛¹⁶-#ᶜ0⁶.\0⁸\0\0\0\0\0\0⁸⁶-#ᶜ3⁶.\0⁴⁴\0\0\0\0\0⁸⁶-#ᶜ6⁶.ᶜ²\0\0\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0²\0\0¹\0⁸⁶-#ᶜc⁶.\0\0⁸\0\0\0\0\0⁸⁶-#ᶜd⁶.\0■⁙\rᶠᶠ⁶³⁸⁶-#ᶜe⁶.s  ▮\0\0\0\0,⁶-b⁶x8⁶y8⁶-#ᶜ9⁶.\0\0\0\0⁸「\0\0⁸⁶-#ᶜd⁶.\0\0\0\0\0\0\0 ⁸⁶-#ᶜe⁶.\0\0⁸「ユノ◜テ⁶-#ᶜd⁶.\0\0\0\0\0\0\0²⁸⁶-#ᶜe⁶.\0\0▮「。゜?や\n⁶-#ᶜ0⁶.\0@\0\0\0\0\0\0⁸⁶-#ᶜ3⁶.\0  \0\0\0\0\0⁸⁶-#ᶜ6⁶.`█\0\0\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0\0\0@█ ⁸⁶-#ᶜc⁶.\0\0@\0\0\0\0\0⁸⁶-#ᶜd⁶.█▮…ナユぬ`ら⁸⁶-#ᶜe⁶.゛\rᶜ、ᶜᵉ゛¹⁶-#ᶜ0⁶.\0⁸\0\0\0\0\0\0⁸⁶-#ᶜ3⁶.\0⁴⁴\0\0\0\0\0⁸⁶-#ᶜ6⁶.ᶜ²\0\0\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0²\0\0¹\0⁸⁶-#ᶜc⁶.\0\0⁸\0\0\0\0\0⁸⁶-#ᶜd⁶.\0■⁙\rᶠᶠ⁶³⁸⁶-#ᶜe⁶.s  ▮\0\0\0\0,⁶-b⁶x8⁶y8⁶-#ᶜ3⁶.\0\0\0\0\0\0\0@⁸⁶-#ᶜd⁶.\0\0\0\0\0\0\0 ⁸⁶-#ᶜe⁶.@0「8ヲュ◜お⁶-#ᶜ3⁶.\0\0\0\0\0\0\0⁴⁸⁶-#ᶜd⁶.\0\0\0\0\0\0\0²⁸⁶-#ᶜe⁶.²ᶜ「、゜゜?み\n⁶-#ᶜ3⁶.@ユ@@\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0\0\0ら█ ⁸⁶-#ᶜd⁶.き\0ぬきユ0`ら⁸⁶-#ᶜe⁶.゛\rᶜ、ᶜᵉ゛¹⁶-#ᶜ3⁶.⁴゜⁴⁴\0\0\0\0⁸⁶-#ᶜ9⁶.\0\0\0²\0³¹\0⁸⁶-#ᶜd⁶.⁸\0•	ᶠᶜ⁶³⁸⁶-#ᶜe⁶.s  ▮\0\0\0\0"[min(J,4)],58,3-sin(i/300)*1.9)eo(true)for e in all(M)do g(e[2])circfill(64,30,e[1],3)end if L~=""then for e,n in pairs(L)do d(n,-2,-100-7*e,3,8,1)end end g(-V)rectfill(0,106,127,127,0)fillp()if m~=4then local e,n,t=k"13|9&8|2",I[h],p[3][v]d(n,-66+#n*2+E,-92,e[m-1][1],e[m-1][2],1)d(t,-112+#t*2+E,-92,e[4-m][1],e[4-m][2],1)d("⬆️",-62,-84-sin(i/50)-.5,13,9,1)d("⬇️",-62,-99+sin(i/50)+.5,13,9,1)end elseif m==7then j=1camera(0-50/(e/2)+G(),G())print(split(R)[4],17,16)rectfill(94,82,94,80,0)rectfill(95,83,200,74,0)rectfill(98,73,200,66,0)rectfill(101,65,200,0,0)camera(50/(e/2)+G(),G())ea()x(s("x=30|y=96|dist_length=10|stretch_x=.5|stretch_y=1|scale=3.5|angle=%1|time=999|color=14|stay_still=true|arsenal=1",mid(0,(e-100)^1.4/100,1)))g(2-(e-50)/10)rectfill(0,0,40,64,0)fillp()camera()if e==110then sfx(16)D=1end if e==160then sfx(15)D=2end if e>150then rectfill(81-(e-160)^1.5,90-(e-150)*8,82+(e-160)^1.5,91+(e-150)*8,3)end g(0-e/20)rectfill(0,0,127,127,3)fillp()elseif m==8or m==9then cls"3"local e=m+11d("ᵉapocrypha",-12,-5,1,0)d("ᵉ1:",-88,-5,1,0)d("ᵉ"..e,-102,-5,1,0)local e=split(O[e],"\n")for n=1,#e do d(e[n],-6,-21-n*6+6,1,0)end rect(2,17,125,125,0)elseif m==5then sspr(64,48,24,16,52,15)sspr(88,56,24,8,52,31)if n[9]<5then d("i yet live",-64+#"i yet live"*2,-2,13,9,1)d("ᵉi yet burn",-64+#"i yet burn"*4,-10,13,9,1)else d("ᵉoblivion reified",-64+#"oblivion reified"*4,-5,13,9,1)end g(n[9]==5and 1or 2-b/40)rectfill(0,18,127,30,0)fillp()rect(1,36,126,104,1)rect(2,37,125,103,2)rect(3,38,124,102,1)d("score",-14,-35,3,8,1)g(10-b/10)rectfill(1,34,126,104,0)fillp()for e=1,#B do d(B[e][1],-8,-35-e*8,3,8,1)local n=(B[e][2]>=0and"+"or"")..B[e][2]d(n,-121+#n*4,-35-e*8,3,8,1)g(10+e*2-b/10)rectfill(5,34+e*8,122,40+e*8,0)fillp()end d("ᵉ"..(ee and"hi-score!"or"total:"),-8,-91,3,8,1)d("ᵉ"..N,-121+#(""..N)*8,-91,13,9,1)g(10+14-b/10)rectfill(5,34+56,122,98,0)fillp()rect(1,108,126,126,1)rect(2,109,125,125,14)rect(3,110,124,124,1)d("best combo",-14,-107,8,14,1)g(10+18-b/10)rectfill(1,106,126,126,0)d("hits: "..n[3],-8,-115,8,14,1)d("damage: "..flr(n[4]),-120+#("damage: "..flr(n[4]))*4,-115,8,14,1)g(10+20-b/10)rectfill(5,112,40,122,0)g(10+22-b/10)rectfill(41,112,122,122,0)fillp()elseif m==6then d("ᵉtraining room",-64+#"training room"*4,-5,13,9,1)d("an arena to practice",-64+#"an arena to practice"*2,-15,3,8,1)d("and refine your combos",-64+#"and refine your combos"*2,-21,3,8,1)d("enter with a "..I[h].."?",-64+#("enter with a "..I[h].."?")*2,-36,3,8,1)d(I[h],-88+#(I[h].."")*2,-36,13,9,1)d("⬆️",-84,-28-sin(i/50)-.5,13,9,1)d("⬇️",-84,-43+sin(i/50)+.5,13,9,1)d("🅾️ (z): begin   ❎ (x): back  ",-64+#"🅾️ (z): begin   ❎ (x): back  "*2,-51,13,9,1)d("ᵉbest combos",-64+#"best combos"*4,-65,3,8,1)for e=1,3do if c[e]~=nil and c[e][1]~=nil and c[e][1]>0then rect(1,59-3+e*18,126,72+e*18,1)rect(2,59-2+e*18,125,71+e*18,2)rect(3,59-1+e*18,124,70+e*18,1)d("hits:",-7,-62-e*18,3,8,1)d("ᵉ"..c[e][1],-31,-61-e*18,8,14,1)d("damage:",-91+#(""..flr(c[e][2]))*8,-62-e*18,3,8,1)d("ᵉ"..flr(c[e][2]),-123+#(""..flr(c[e][2]))*8,-61-e*18,3,8,1)else rect(2,59-2+e*18,125,71+e*18,1)end end elseif m==10then d("ᵉtutorial",-64+#"tutorial"*4,-5,13,9,1)d("learn the basics or",-64+#"learn the basics or"*2,-15,3,8,1)d("review your knowledge",-64+#"review your knowledge"*2,-21,3,8,1)d("🅾️ (z): enter   ❎ (x): back  ",-64+#"🅾️ (z): enter   ❎ (x): back  "*2,-36,13,9,1)for e=0,14do local n=(e/15+t()/40)%1x(s("x=64|y=165|dist_length=20|stretch_x=1|stretch_y=1|scale=%3|angle=%1|time=999|color=14|stay_still=true|arsenal=%2",n,e%5+1,3))end elseif m==14or m==15then for n=-1,1do local e=n*128+w if y-n==0then camera(e,0)rect(23,50,104,101,3)rect(23,102,104,103,3)rectfill(61,50,66,104,3)rectfill(25,52,102,98,0)rect(25,52,102,98,3)rect(25,98,102,99,3)local n,t=t()/2%1,t()/2%2if t<.25or t>1.75then if n~=false then C,H=sin(n)*38,-cos(n)*19for e=C,0,(C>0and-1or 1)do rect(63+e,53+e/C*H,63+e,98+e/C*H,0)end line(63,98,63+C,98+H,3)line(63,52,63+C,52+H,3)rect(63+C,52+H,63+C,98+H,3)end else g(-(abs(t-1)-.5)*5)sspr(64,0,32,45,27,53)sspr(96,0,32,45,69,53)fillp()end rect(63,52,64,98,3)camera()d("ᵉbook of",-64+e+#"book of"*4,-5,13,9,1)d("ᵉapocrypha",-64+e+#"apocrypha"*4,-13,13,9,1)if l>0then d("➡️",-120+e+sin(i/50)+1.5,-10,13,9,1)end d(A.."/20 pages obtained",-64+e+#(A.."/20 pages obtained")*2,-25,3,8,1)d(flr(A/20*100).."% completion",-64+e+#(flr(A/20*100).."% completion")*2,-33,3,8,1)if l==0then d("progress through the game",-64+e+#"progress through the game"*2,-110,3,8,1)d("to acquire more!",-64+e+#"to acquire more!"*2,-118,3,8,1)elseif l<18then d("press 🅾️ (z) or ➡️ to  ",-64+e+#"press 🅾️ (z) or ➡️ to  "*2,-110,3,8,1)d("view collected pages",-64+e+#"view collected pages"*2,-118,3,8,1)elseif dget(2)==0then d("beat game to unlock",-64+e+#"beat game to unlock"*2,-110,3,8,1)d("the last two pages!",-64+e+#"the last two pages!"*2,-118,3,8,1)else d("thanks for playing!",-64+e+#"thanks for playing!"*2,-118,3,8,1)end else d("ᵉapocrypha",-12+e,-5,13,9,1)d("ᵉ1:",-88+e,-5,13,9,1)d("ᵉ"..y,-102+e,-5,13,9,1)d("⬅️",-0+e-sin(i/50)-1.5,-6,13,9,1)if l>y then d("➡️",-120+e+sin(i/50)+1.5,-6,13,9,1)end if O[y-n]then local n=split(O[y-n],"\n")for t=1,#n do d(n[t],-6+e,-21-t*6+6,3,8,0)end end rect(1-e,16,126-e,126,1)rect(2-e,17,125-e,125,3)rect(3-e,18,124-e,124,1)end end elseif m==18then d("ᵉhigh scores",-64+#"high scores"*4,-5,13,9,1)for e=1,5do if f[e][1]>0then rect(1,-3+e*20,126,13+e*20,1)rect(2,-2+e*20,125,12+e*20,2)rect(3,-1+e*20,124,11+e*20,1)d("ᵉ"..f[e][1],-26+#(""..f[e][1])*4,-2-e*20,8,14,1)d(P(f[e][2]),-60+#P(f[e][2])*2,-3-e*20,3,8,1)d((f[e][3]-1)*25 .."%",-82+#((f[e][3]-1)*25 .."%")*2,-3-e*20,3,8,1)d(p[3][f[e][4]],-108+#p[3][f[e][4]]*2,-3-e*20,3,8,1)else rect(2,-2+e*20,125,12+e*20,1)end end if r[1][1]>0then d("press 🅾️ (z) to view best times",-63+#"press 🅾️ (z) to view best times"*2,-119,13,9,1)else d("beat game to unlock time trials",-64+#"beat game to unlock time trials"*2,-119,8,2,1)end elseif m==19then d("ᵉbest clear times",-64+#"best clear times"*4,-5,13,9,1)for e=1,5do if r[e][1]>0then rect(1,-3+e*20,126,13+e*20,1)rect(2,-2+e*20,125,12+e*20,2)rect(3,-1+e*20,124,11+e*20,1)d("ᵉ"..P(r[e][2]),-26+#P(r[e][2])*4,-2-e*20,8,14,1)d(r[e][1],-60+#(""..r[e][1])*2,-3-e*20,3,8,1)d((r[e][3]-1)*25 .."%",-82+#((r[e][3]-1)*25 .."%")*2,-3-e*20,3,8,1)d(p[3][r[e][4]],-108+#p[3][r[e][4]]*2,-3-e*20,3,8,1)else rect(2,-2+e*20,125,12+e*20,1)end end d("press 🅾️ (z) to view high scores",-63+#"press 🅾️ (z) to view high scores"*2,-119,13,9,1)elseif m==22then d("ᵉcredits",-64+#"credits"*4,-5,13,9,1)local e,t,o=s"coding, sprites, design|music|sound effects|additional help|beta testers",k"smartalloc&extar&munchkin&bikibird|freds72|heracleum|josiah winslow|mazzetip|merwok|miss mouse|p01|pancelor|smalltestaccount|smellyfishtiks|thisismypassword&merwok|ohhcurtains|redlink|rey k|spiderware|yokoboko",-19for e,n in pairs(e)do local a=e==2and 34or e==3and-18or 0if e==3then o+=18end d("◆ "..n.." ◆",a-64+(#n+6)*2,o,8,14,1)o-=7for n,i in pairs(t[e])do if e==5then d(t[e][n],#t[e]==1and a-64+#t[e][n]*2or n%3==1and-2or n%3==2and-36or-90,o,13,9,1)if n==#t[e]then o-=11elseif n%3==0then o-=7end else d(t[e][n],#t[e]==1and a-64+#t[e][n]*2or n%2==1and-2or-63,o,13,9,1)if n==#t[e]then o-=11elseif n%2==0then o-=7end end end end elseif m==99then d("loading...",-14,-5,3,8,1)print(split(R)[5],37,46)end if m==1or m==4then Y,Z=m~=4and-52or-107,m~=4and(stat(102)==0and-54or-58)or-106for e,n in pairs(p[m])do local n=split(n)[1]if a==e then d(n,Y,Z-e*8,13,9,1)else d(n,Y,Z-e*8,8,2,1)end end d("▶",Y+6,Z-q*8,13,9,1)end if S==1then rect(7,41,119,97,1)rect(8,42,118,96,8)rectfill(9,43,117,95,0)rect(9,43,117,95,1)d("it's recommended to play",-64+#"it's recommended to play"*2,-46,3,8,1)d("through the tutorial first",-64+#"through the tutorial first"*2,-52,3,8,1)d("would you like to",-64+#"would you like to"*2,-64,3,8,1)d("try the tutorial?",-64+#"try the tutorial?"*2,-70,3,8,1)d("🅾️ (z): begin tutorial ",-64+#"🅾️ (z): begin tutorial "*2,-82,13,9,1)d("❎ (x): i'd rather not ",-64+#"❎ (x): i'd rather not "*2,-88,13,9,1)end g(z)rectfill(0,0,127,127,(o==8or o==9)and 3or 0)fillp()end function ei(e)if e&32>0then menuitem(1,"are you sure?",eh)end return true end function eh(e)if e&32>0then menuitem(1,"really sure?",es)end return true end function es(e)if e&32>0then for e=0,63do dset(e,0)end end extcmd"reset"end function ea()x(s"x=6|y=118|dist_length=0|stretch_x=1|stretch_y=.4|scale=3.5|angle=.09|time=999|color=14|stay_still=true|arsenal=1")x(s"x=12|y=116|dist_length=0|stretch_x=.8|stretch_y=1|scale=1.5|angle=.92|time=999|color=14|stay_still=true|arsenal=2")x(s"x=51|y=153|dist_length=0|stretch_x=1|stretch_y=1|scale=4|angle=.82|time=999|color=14|stay_still=true|arsenal=3")x(s"x=0|y=183|dist_length=0|stretch_x=1|stretch_y=1|scale=4|angle=0|time=999|color=14|stay_still=true|arsenal=3")x(s"x=13|y=130|dist_length=0|stretch_x=1|stretch_y=1|scale=1.5|angle=.20|time=999|color=14|stay_still=true|arsenal=4")x(s"x=33|y=137|dist_length=0|stretch_x=1|stretch_y=1|scale=1.5|angle=.1|time=999|color=14|stay_still=true|arsenal=5")print("⁶-b⁶x8⁶y8 ᶜ5⁶.ュュュュュももも⁶.⁷⁷⁷⁷⁷⁷³³\n ⁶.チテテテテテテチ⁶.³³³³³⁷⁷⁷\n ⁶.ら\0\0\0\0\0\0\0⁶.³\0\0\0\0\0\0\0",14,90)pal(5,6)print(split"⁶-b⁶x8⁶y8  ᶜf⁶.⁴⁸「「8まもュ⁶.@08、゛ᵉᶠ゜\n⁶.\0\0\0\0\0\0█ナ⁶.\0\0らナヲ◜◝◝⁶-#ᶜ0⁶.\0 ▮▮⁸⁴²²⁸⁶-#ᶜf⁶.◜トヤヤワャョョ⁶-#⁶.゜゜??????\n⁶-#ᶜ0⁶.\0\0\0゛!ら\0\0⁸⁶-#ᶜf⁶.ヲュ◜ニテ?◜◜²0⁶.◝◝◝◝◝○~~⁶-#ᶜ0⁶.²¹¹⁷	▮\0\0⁸⁶-#ᶜf⁶.ョ◜◜ヲロヤれ⬇️⁶-#⁶.??○○○○○?\n⁶.<「⁸\0\0\0\0\0⁶-#ᶜ0⁶.█\0\0\0\0\0\0\0⁸⁶-#ᶜf⁶.~ヲ\0\0\0\0\0\0⁶-#⁶.¹\0\0\0\0\0\0\0⁶.?゛ᶜ\0\0\0\0\0,⁶-b⁶x8⁶y8  ᶜf⁶.⁴⁸「「8まも◜⁶.@08、゛ᵉ゜゜\n⁶.\0\0\0\0\0\0\0ら⁶-#ᶜ0⁶.\0\0\0\0\0█@ ⁸⁶-#ᶜf⁶.\0█らユヲ|よト²0⁶.◝よエリョ◜◝◝⁶-#⁶.゜゜゜゜゜゜゜゜\n⁶-#ᶜ0⁶.\0\0\0\0\0ᵉ▮`⁸⁶-#ᶜf⁶.ユヲュ◜◝ヨモお⁶-#ᶜ0⁶.▮▮ヘ⁸⁸⁸⁸⁸⁸⁶-#ᶜf⁶.ヤヤ▶ワワワワw⁶-#ᶜ0⁶.\0\0\0³⁴\0\0\0⁸⁶-#ᶜf⁶.◝◝◝ュャヲユナ⁶-#⁶.゜゜゜゜゜゜゜゜\n⁶-#ᶜ0⁶.█\0\0\0\0\0\0\0⁸⁶-#ᶜf⁶.|>゛\0\0\0\0\0⁶-#ᶜ0⁶.▮\0\0\0\0\0\0\0⁸⁶-#ᶜf⁶./゜\0\0\0\0\0\0⁶-#⁶.ら\0\0\0\0\0\0\0⁶.ᶠ⁷\0\0\0\0\0\0,⁶-b⁶x8⁶y8  ᶜf⁶.⁴⁸「「8まも◜⁶.@08、゛ᵉᶠ゜\n ⁶-#ᶜ0⁶.\0\0\0\0\0ら 「⁸⁶-#ᶜf⁶.\0██らら オノ²0⁶.◝◝◆リュ◝◝◝⁶-#⁶.゜゜゜?????\n⁶-#ᶜ0⁶.\0\0\0\0\0\0\0゛⁸⁶-#ᶜf⁶.\0らユヲュ◜◝ニ⁶-#ᶜ0⁶.⁴²¹ᶠ1A🐱⁴⁸⁶-#ᶜf⁶.ャョ◜ユウゆ};²f ⁶-#⁶.???????゜\n⁶-#ᶜ0⁶. @\0\0\0\0\0\0⁸⁶-#ᶜf⁶.テゆ、\0\0\0\0\0⁶-#ᶜ0⁶.⁸\0\0\0\0\0\0\0⁸⁶-#ᶜf⁶.▶⁷⁷\0\0\0\0\0⁶-#⁶.◜ヲp\0\0\0\0\0⁶.¹\0\0\0\0\0\0\0,⁶-b⁶x8⁶y8  ᶜf⁶.⁴⁸「「8ままュ⁶.@08、゛ᵉᶠ゜\n ⁶-#ᶜ0⁶.\0\0\0\0\0█p\0⁸⁶-#ᶜf⁶.\0\0\0█ら`█ヲ⁶-#ᶜ0⁶.\0\0\0⁸⁶¹\0\0⁸⁶-#ᶜf⁶.◜◝◝ワン◜◝◝⁶-#ᶜ0⁶.\0\0\0\0\0\0²²⁸⁶-#ᶜf⁶.゜゜゜゜??==\n⁶-#ᶜ0⁶.\0\0\0████ᶜ⁸⁶-#ᶜf⁶.\0\0\0\0`x|ユ⁶-#ᶜ0⁶.\0\0\0³⁴⁸\0¹⁸⁶-#ᶜf⁶.ュ◜◝ュャワエ⁶⁶-#ᶜ0⁶.\0\0██@@  ⁸⁶-#ᶜf⁶.◝◝○○よよ__⁶-#ᶜ0⁶.¹¹\0\0\0\0\0\0⁸⁶-#ᶜf⁶.>>???<8▮\n⁶-#ᶜ0⁶.0\0\0\0\0\0\0\0⁸⁶-#ᶜf⁶.アも「\0\0\0\0\0⁶-#ᶜ0⁶.¹\0\0\0\0\0\0\0⁸⁶-#ᶜf⁶.²\0\0\0\0\0\0\0⁶-#⁶.ᶜ\0\0\0\0\0\0\0,⁶-b⁶x8⁶y8  ᶜf⁶.⁴⁸「「8ままュ⁶.@08、゛ᵉᶠ゜\n ⁶-#ᶜ0⁶.\0\0\0\0\0ら\0\0⁸⁶-#ᶜf⁶.\0\0\0██\0ユュ⁶-#ᶜ0⁶.\0\0\0\0⁴⬇️█@⁸⁶-#ᶜf⁶.◜◝◝◝ャ|○よ⁶-#ᶜ0⁶.\0\0\0\0¹\0\0\0⁸⁶-#ᶜf⁶.゜゜゜゜>???\n⁶-#ᶜ0⁶.\0\0\0\0ナ\0\0\0⁸⁶-#ᶜf⁶.\0█らナ\0ユヲュ⁶-#ᶜ0⁶.\0\0\0\0¹⁶\0\0⁸⁶-#ᶜf⁶.◜◝◝◝◜ンワネ⁶-#ᶜ0⁶.  ▮⁸x☉⁴³⁸⁶-#ᶜf⁶.トトヤワ♥w;、⁶-#⁶.??????>、\n⁶.ラ\0\0\0\0\0\0\0 ⁶.ᶠ\0\0\0\0\0\0\0,⁶-b⁶x8⁶y8  ᶜf⁶.⁴⁸「「8まも◜⁶.@08、゛ᵉᶠ゜\n ⁶.\0\0\0█らユュ◝⁶-#ᶜ0⁶.\0\0\0\0@ ▮⁸⁸⁶-#ᶜf⁶.◜◝◝◝よトヤワ⁶-#⁶.゜゜゜゜゜゜゜゜\n⁶-#ᶜ0⁶.\0\0\0\0x░\0\0⁸⁶-#ᶜf⁶.█ナユヲ░xュュ⁶-#ᶜ0⁶.\0\0\0\0\0¹²\0⁸⁶-#ᶜf⁶.◝◝◝◝◝◜ョヲ⁶-#ᶜ0⁶.⁴⁴²゛¹¹¹¹⁸⁶-#ᶜf⁶.ャャョニウ●⁶²⁶-#⁶.゜゜゜゜゜゜゜ᵉ\n⁶.x8▮\0\0\0\0\0⁶.p\0\0\0\0\0\0\0"[flr(i/10)%6+1],6,70)print(split"⁶-b⁶x8⁶y8⁶-#ᶜd⁶.\0\0\0\0\0\0█\0⁸⁶-#ᶜe⁶.\0\0<◜◜◝~~⁶-#⁶.\0\0\0\0¹\0\0\0\n⁶.>、⁘⁴\0\0\0\0,⁶-b⁶x8⁶y8⁶-#ᶜd⁶.\0\0\0\0\0\0█\0⁸⁶-#ᶜe⁶.\0B~◜◜◝~~⁶-#⁶.\0\0\0\0¹\0\0\0\n⁶.>、⁘⁴\0\0\0\0,⁶-b⁶x8⁶y8⁶-#ᶜd⁶.\0\0\0\0\0\0█\0⁸⁶-#ᶜe⁶.$B~◜◜◝~~⁶-#⁶.\0\0\0\0¹\0\0\0\n⁶.>、⁘⁴\0\0\0\0"[mid(1,v-1,3)],26,65)end function G()return el"32"*D end function el(e)return rnd(e)-e/2end function P(e)e=min(e,5999)return flr(e/60)..":"..(flr(e)%60<10and"0"or"")..flr(e)%60end function Q(a,e,n,t,d,s,o)local o,i,l,r,n,t=n*n,t*t,o or 0,max(n,t),cos(d),sin(d)local d,h,n=n*n,t*t,shl(n*t*(1/o-1/i),1)local f,t=h/o+d/i,shl(d/o+h/i,1)color(s)for o=max(e-r,0),min(e+r,127)do local e=o-e+.5local n,e=n*e,e*e*f-1local e=n*n-shl(t*e,1)if e==0then pset(a-n/t,o)elseif e>0then e=e^.5if l==1then rectfill(a+(-n+e)/t,o,a+(-n-e)/t,o)else pset(a+(-n+e)/t,o)pset(a+(-n-e)/t,o)end end end end function x(e)for n in all(ed[e.arsenal])do ef(e,unpack(n))end end function ef(e,h,f,s,c,l,u)local a,i,t,d,r,n,o,y=e.x,e.y,e.dist_length,e.stretch_x,e.stretch_y,e.scale,e.angle,e.color local t,o,f,c,u=cos(o),sin(o),f-t,c-t,u-t local t,o,h,s,l,f=t*h+o*f,-o*h+t*f,t*s+o*c,-o*s+t*c,t*l+o*u,-o*l+t*u g(m~=1and j or e.time/8-1)e9(t*n*d+a,o*n*r+i,h*n*d+a,s*n*r+i,l*n*d+a,f*n*r+i,y)fillp()end function g(e)if e>=0and i%2==0or e>=1then return fillp()elseif i%2==0or e<=-1then return fillp"-0.25"elseif e>=0then fillp(e0[flr(e*16)]|(i%2==1and 0or.25))else fillp(e0[flr(e%1*16)]|.25)end end function e9(n,t,o,e,i,a,d)color(d)while t>e or e>a do n,t,o,e=o,e,n,t while(e>a)o,e,i,a=i,a,o,e
+end local d,r=n,(i-n)/(a-t)while(e)local h=(o-n)/(e-t)for e=flr(t),min(flr(e)-1,127)do rectfill(n,e,d,e)n+=h d+=r end n,t,e,o,a=o,e,a,i
+pset(i,t)end function d(e,o,n,a,i,t)camera(o,n)if t~=nil then print(e,1,0,t)print(e,-1,0)print(e,0,1)print(e,0,-1)end print(e,0,0,i)clip(0,-n+1,127,2)print(e,0,0,a)clip()camera()end function en(n,...)local e for t,n in inext,split(n,"%",false)do e=e and e..select(n[1],...)..sub(n,2)or n end return e end function s(e,...)e=en(e,...)local n={}foreach(split(e,"|",false),function(e)local t,e=unpack(split(e,"="))if not e then add(n,t)else n[t]=e==""and{}or e=="true"and true or e end end)return n end function k(n,...)local e={}for n in all(split(n,"&"))do add(e,s(n,...))end return e end function e2(a,i,t,o,d,e,r,n)n=n or 1e*=n*4local n,t=cos(t)*.125/n,sin(t)*.125/n local r,h,d,o=o+n*-e,d+t*-e,r and-e or e,-e for e=i-e,i+e do tline(a-d,e,a+d,e,r-t*o,h+n*o,n,t)o+=1end end
 __gfx__
 11110000000000111100000000001111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 11111000000001111110000000011111000000000000000000000000000000000880000000000000000080000000008080800000000000000000000000000000
@@ -412,3 +635,40 @@ eff37dbedfeff7062d230c30062e848281808080404008062d230c31062e7b7d7e7f7f7f3f3f062d
 ffffffffff062d23062e03030303030301010a062e0141c3e7eefefcfc062d230c31062ec0e0e0e06000000008062d230c32062e3e1f1f1f9fffffff0231062efcf8f8f8f9ffffff062d23062effffffff7f7f3f3f200a062d230c31062e00f080800000000008062d230c32062ef8007060e0e0e0c00231062eff6f6d000001
 6d6f062efff6b6000080b6f6062d230c31062e000f01010000000008062d230c32062e1f000e0607070703062d23200a062ec080000000000000062efffffef000000000062effff7f0f00000000062e03010000000000002c062d62067838067938200c36062e0030e040e080c0c0062e00000000010307030a20062e4080e0
 c080f0e0fe062e071f0f070f0705030a062e00000000000898f8062efc78fc9c1f3f2f0b062e03000000000000000a062efcbe3c1810000000062e010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+__sfx__
+11240000155651c5651d565155651c5651d565155651a5651c565155651a5651c565155651a565185651a565155651c5651d565155651c5651d565155651a5651c565155651a5651c565155651a565185651a565
+c92400000953209532095320953209532095320953209532095320953209532095320953209532095320953209532095320953209532095320953209532095320953209532095320953209532095320953209532
+c92400001053210532105321053210532105321053210532105321053210532105321053210532105321053210532105321053210532105321053210532105321153210532115321053211532105321153210532
+c92400000253202532025320253202532025320253202532025320253202532025320253202532025320253202532025320253202532025320253202532025320253204532055320453205532075320553207532
+152400000000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050000500005000050901509025090350904509055090650907509075
+152400000907509075000000907509075000050907509075000000907509075090750707507075070750000505075050750000505075050750000505075050750000505075050750507507075070750707500005
+152400000507505075000000507505075000000507505075000000507505075050750407504075040750407502075020750000002075020750000002075020750000002075020750207507075070750707507075
+012400000c0430c043156430c0430c04300603156430c0430c0430c043156430c043006030c04315643156430c04300603156430c0430c0430060315643006030c0430060315643006030c043156431564315643
+31240020307402f740307402f7402d7402f7402d7402d7402d7402d7402d7402d740297402b7402974028740267402674026740267402674026740267402674026740287402674028740297402b7402d7402f740
+3124000030740307402f740307402f7402f7402d7402f740000002d7402b7402d7402b7402b740297402b74000000297402874029740287402874026740287402674026740247402674024740267402474026740
+012400002474024740247402474024742247422474224742247422474224742247422474224742247422474218742187421874218742187321873218732187321872218722187221872218712187121871218712
+000300001656016570165500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0003000015560145700f5500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000300001556015570195500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+7b080000196401b6501d6501e6501e6401c6501a65018650176401765017650186501c6401e6501d6501b65018640176501765017650186401b6501e65023063220441d02418651146510f6410d6310d6210d611
+7c040000236402c650326603765037650316402b640266402264020630216302263022630236402364024640246402464024640246402464023640236402364022640226402163021630206201f6201f6101e600
+b003000011421164311e441266512764127651266312663125631246212262121631206211f6211d6211b6211a611186111562113621116210e6310d621096210862106621046310362102601006010000100001
+__music__
+00 00010244
+00 00030244
+00 00044344
+01 00054344
+00 00054344
+00 00064344
+00 00064344
+00 00050744
+00 00050744
+00 00060744
+00 00060744
+00 00010244
+00 00030244
+00 00050708
+00 00050709
+00 0006070a
+02 00060741
+

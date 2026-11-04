@@ -1,0 +1,327 @@
+import { Matrix4x4 } from '../../src/graphics/Matrix4x4.js';
+import * as gbi from '../../src/hle/graphics/gbi.js';
+import { GBIMicrocode } from '../../src/hle/graphics/microcodes/gbi_microcode.js';
+import { GBI2FLX } from '../../src/hle/graphics/microcodes/gbi2_flx.js';
+import {
+  assertPixels,
+  testTexture,
+  loadTestTexture,
+  createWebGLHarness,
+  drawProjectedTriangle,
+  solid,
+} from './webgl_test_helpers.js';
+
+// Runs in the existing pixel-check page/GL context, so CI exercises the actual
+// vertex loader, shader variants, interpolation and final framebuffer blend.
+export function runFogTests(gl) {
+  const lines = [];
+  const { ram, state, renderer, microcode } = createWebGLHarness(gl, {
+    width: 4,
+    height: 1,
+    ramBytes: 64,
+    Microcode: GBIMicrocode,
+  });
+  renderer.newFrame();
+  gl.disable(gl.DITHER);
+  state.rdpOtherModeH = gbi.CycleType.G_CYC_2CYCLE;
+  state.rdpOtherModeL = 0xc8000000; // FOG_SHADE_A, opaque second cycle.
+  state.primColor = 0x0000ffff;
+  state.fogColor = 0xff000000; // Red with ZERO alpha: fog uses shade alpha.
+
+  function combine(rgb0 = 3, alpha0 = 3, rgb1 = rgb0, alpha1 = alpha0) {
+    // Both cycles select D; A/B/C are zero. Defaults output primitive RGBA.
+    state.combine.hi = 0x00ffffff;
+    state.combine.lo = (0xfffc7038 | (rgb0 << 15) | (alpha0 << 9) | (rgb1 << 6) | alpha1) >>> 0;
+  }
+  combine();
+
+  function load(z = [2, 2, 2], { fog = true, varyingW = false, scale = 1 } = {}) {
+    state.geometryMode.fog = fog ? 1 : 0;
+    state.fogParameters.set(512, -128);
+    state.projection[0] = varyingW ? new Matrix4x4([
+      scale, 0, 0, 0,
+      0, scale, 0, 0,
+      0, 0, 0.75 * scale, -scale,
+      0, 0, scale, 0,
+    ]) : new Matrix4x4([
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 0.25, 0,
+      0, 0, 0, 1,
+    ]);
+    // This fixture writes the stack directly, bypassing matrix-command invalidation.
+    state.combinedMatrixDirty = true;
+    const xy = varyingW ? [[-2, -2], [12, -4], [-8, 24]] : [[-1, -1], [3, -1], [-1, 3]];
+    for (let i = 0; i < 3; i++) {
+      ram.setInt16(i * 16, xy[i][0]);
+      ram.setInt16(i * 16 + 2, xy[i][1]);
+      ram.setInt16(i * 16 + 4, z[i]);
+      ram.setUint32(i * 16 + 12, 0x0000ff29); // Blue, alpha 41 if fog is off.
+    }
+    microcode.loadVertices(0, 3, 0);
+  }
+
+  function check(name, expected) {
+    renderer.newFrame();
+    gl.clearColor(0, 1, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    drawProjectedTriangle(renderer, state.projectedVertices);
+    assertPixels(gl, { width: 4, height: 1, expected, label: name });
+    lines.push(`PASS ${name}`);
+    return renderer.getCurrentN64Shader(state.noNearClipping);
+  }
+  const gradient = factors => factors.map(a => [a, 0, 255 - a, 255]);
+
+  load([0, 0, 0]);
+  check('fog clamps to zero before the fog range', solid([0, 0, 255, 255]));
+  load();
+  const fogShader = check('partial fog uses shade alpha, not fog-colour alpha', solid([128, 0, 127, 255]));
+  load([4, 4, 4]);
+  check('fog clamps to full at the far end', solid([255, 0, 0, 255]));
+  load([0, 2, 4]);
+  // At the four pixel centres, barycentrics for the oversized triangle are
+  // (3/4-t, t, 1/4), t = 1/16,3/16,5/16,7/16. Vertex alphas are 0,128,255.
+  check('fog interpolates already clamped per-vertex factors', gradient([71.75, 87.75, 103.75, 119.75]));
+
+  for (const scale of [1, 32768]) {
+    for (const noNearClipping of [false, true]) {
+      state.noNearClipping = noNearClipping;
+      load([2, 4, 8], { varyingW: true, scale });
+      // W = 2,4,8 (times scale), Z/W = 1/4,1/2,5/8, alpha = 0,128,192.
+      check(`fog is affine with unequal W (scale ${scale}, NoN ${noNearClipping})`, gradient([56, 72, 88, 104]));
+    }
+  }
+  state.noNearClipping = false;
+
+  load();
+  state.geometryMode.fog = 0;
+  state.fogParameters.set(0, 0);
+  check('draw-time fog disable and parameter changes preserve cached alpha', solid([128, 0, 127, 255]));
+  state.fogColor = 0x00ff00ff;
+  const recolored = check('fog-colour changes update a cached shader', solid([0, 128, 127, 255]));
+  if (recolored !== fogShader) {
+    throw new Error('Fog colour or RSP fog state changed the shader cache key');
+  }
+  state.fogColor = 0xff000000;
+  load(undefined, { fog: false });
+  check('fog-disabled vertex loads retain source shade alpha', solid([41, 0, 214, 255]));
+  load();
+  check('reenabling fog affects newly loaded vertices', solid([128, 0, 127, 255]));
+
+  state.rdpOtherModeL = 0;
+  const plainShader = check('removing first-cycle fog changes the shader variant', solid([0, 0, 255, 255]));
+  if (plainShader === fogShader) {
+    throw new Error('First-cycle blender state missing from shader cache key');
+  }
+  state.rdpOtherModeL = 0xc8000000;
+  if (check('restoring fog reuses the original shader', solid([128, 0, 127, 255])) !== fogShader) {
+    throw new Error('Restoring first-cycle fog failed to reuse its shader');
+  }
+  state.rdpOtherModeH = gbi.CycleType.G_CYC_1CYCLE;
+  state.rdpOtherModeL = 0xc8002000; // FOG_SHADE_A with alpha coverage select.
+  check('one-cycle fog blends shade alpha independently of coverage select', solid([128, 0, 127, 255]));
+  load([0, 0, 0]);
+  check('one-cycle fog leaves incoming colour at zero shade alpha', solid([0, 0, 255, 255]));
+  load([4, 4, 4]);
+  check('one-cycle fog reaches fog colour at full shade alpha', solid([255, 0, 0, 255]));
+  load([2, 4, 8], { varyingW: true });
+  check('one-cycle fog interpolates shade alpha affinely', gradient([56, 72, 88, 104]));
+  load();
+  state.rdpOtherModeL = 0;
+  check('disabling one-cycle fog selects a different shader', solid([0, 0, 255, 255]));
+  state.rdpOtherModeL = 0x32000000;
+  check('one-cycle mode ignores second-cycle fog fields', solid([0, 0, 255, 255]));
+  state.rdpOtherModeH = gbi.CycleType.G_CYC_2CYCLE;
+  check('second-cycle fog blends with the incoming colour', solid([128, 0, 127, 255]));
+  state.rdpOtherModeL = 0xfa000000;
+  check('fog in both blender cycles is applied twice', solid([192, 0, 63, 255]));
+
+  // ZSortp supplies the reverse factor: IN * SHADE_A + FOG * (1-SHADE_A).
+  state.rdpOtherModeH = gbi.CycleType.G_CYC_1CYCLE;
+  state.rdpOtherModeL = 0x08c00000;
+  load([0, 0, 0]);
+  const reverseFogShader = check('reverse fog selects fog colour at zero alpha', solid([255, 0, 0, 255]));
+  load([4, 4, 4]);
+  check('reverse fog selects incoming colour at full alpha', solid([0, 0, 255, 255]));
+  load([2, 4, 8], { varyingW: true });
+  check('reverse fog interpolates affinely with unequal W', gradient([199, 183, 167, 151]));
+  load();
+  state.primColor = 0x0000ff80;
+  check('reverse fog preserves combiner alpha', solid([127, 0, 128, 128]));
+  state.primColor = 0x0000ffff;
+  state.rdpOtherModeL = 0xc8000000;
+  if (check('forward fog has a different cache key from reverse fog', solid([128, 0, 127, 255])) === reverseFogShader) {
+    throw new Error('Fog direction missing from shader cache key');
+  }
+  state.rdpOtherModeH = gbi.CycleType.G_CYC_2CYCLE;
+  state.rdpOtherModeL = 0x02300000;
+  check('reverse fog in the second cycle', solid([127, 0, 128, 255]));
+  state.rdpOtherModeL = 0xca300000;
+  check('forward then reverse fog applies both blend factors', solid([191, 0, 64, 255]));
+  state.rdpOtherModeL = 0x3ac00000;
+  check('reverse then forward fog applies both blend factors', solid([191, 0, 64, 255]));
+  state.rdpOtherModeL = 0xc8000000;
+
+  combine(3, 3, 0, 0);
+  // Cycle one computes primitive * shade + primitive (blue = 2), then passes it.
+  state.combine.hi = (3 << 20) | (4 << 15) | (7 << 12) | (7 << 9) | (15 << 5) | 31;
+  check('fog blends clamped combiner RGB', solid([128, 0, 127, 255]));
+
+  combine(3, 4); // Primitive RGB, shade alpha in both combiner cycles.
+  check('combiner SHADE alpha reads the cached fog factor', solid([128, 0, 127, 128]));
+  // Shade alpha must remain affine even if the blender doesn't select fog.
+  state.rdpOtherModeL = 0;
+  load([2, 4, 8], { varyingW: true });
+  check('combiner SHADE alpha interpolates linearly without a fog blender', [56, 72, 88, 104].map(a => [0, 0, 255, a]));
+
+  // A translucent blue texel supplies alpha independently of shade/fog.
+  const texture = testTexture( 1, 1, [[0, 0, 255, 128]]);
+  for (const tile of state.tiles.slice(0, 2)) {
+    tile.set(gbi.ImageFormat.G_IM_FMT_RGBA, gbi.ImageSize.G_IM_SIZ_32b, 1, 0, 0, 2, 0, 0, 2, 0, 0);
+    tile.setSize(0, 0, 0, 0);
+    loadTestTexture(state, tile, texture);
+  }
+  state.geometryMode.texture = 1;
+  combine(1, 1, 2, 2); // TEXEL0, accounting for the second-cycle input swap.
+  load();
+  state.rdpOtherModeL = 0xc81049d8; // Captured fog + translucent surface mode.
+  check('fogged textured surface preserves transparency over the framebuffer', solid([64, 127, 64, 191]));
+  state.rdpOtherModeL |= gbi.AlphaCompare.G_AC_THRESHOLD;
+  state.blendColor = 129;
+  check('fog keeps alpha testing on independent texture alpha', solid([0, 255, 0, 255]));
+  state.blendColor = 128;
+  check('fogged texture passes alpha-threshold equality', solid([64, 127, 64, 191]));
+
+  state.geometryMode.texture = 0;
+  combine();
+  load(undefined, { fog: false }); // Cached shade alpha is 41, not the blend factor.
+  state.primColor = 0x0000ff80;
+  const forced = gbi.RenderMode.FORCE_BL | gbi.RenderMode.IM_RD;
+  const setMode = (mode, flags = forced) => {
+    const blender = state.getCycleType() === gbi.CycleType.G_CYC_1CYCLE ? mode << 2 : mode;
+    state.rdpOtherModeL = (blender << 16) | flags;
+  };
+  for (const cycle of [gbi.CycleType.G_CYC_1CYCLE, gbi.CycleType.G_CYC_2CYCLE]) {
+    state.rdpOtherModeH = cycle;
+    for (const mode of [0x0110, 0x3110]) {
+      setMode(mode);
+      let cached;
+      for (const alpha of [0, 7, 8, 127, 128, 135, 248, 255]) {
+        state.fogColor = (0xff000000 | alpha) >>> 0;
+        // Independent integer reference: forced RDP blender truncates A to
+        // five bits, then truncates the weighted sum. GL may round by one.
+        const a = alpha >> 3;
+        const src = mode === 0x0110 ? [0, 0, 255] : [255, 0, 0];
+        const rgb = src.map((v, i) => (v * a + [0, 255, 0][i] * (32 - a)) >> 5);
+        const shader = check(`constant fog ${mode.toString(16)} cycle ${cycle} alpha ${alpha}`, solid([...rgb, 191]));
+        if (cached && cached !== shader) {
+          throw new Error('Constant fog alpha changed the shader cache key');
+        }
+        cached = shader;
+      }
+      state.fogColor = 0xffff0080;
+      check('constant fog colour updates between draws', solid(mode === 0x0110 ? [0, 127, 127, 191] : [127, 255, 0, 191]));
+      state.rdpOtherModeL |= gbi.AlphaCompare.G_AC_THRESHOLD;
+      state.blendColor = 129;
+      state.fogColor = 0xff0000ff;
+      check('constant fog keeps alpha testing on combiner alpha', solid([0, 255, 0, 255]));
+      state.blendColor = 128;
+      state.fogColor = 0xff000000;
+      check('constant fog threshold equality accepts even zero fog alpha', solid([0, 255, 0, 191]));
+      for (const flag of [0, gbi.RenderMode.AA_EN, gbi.RenderMode.CLR_ON_CVG,
+        gbi.RenderMode.CVG_X_ALPHA, gbi.RenderMode.ALPHA_CVG_SEL]) {
+        setMode(mode, flag ? forced | flag : gbi.RenderMode.IM_RD);
+        check(`constant fog unsupported flags ${flag} retain opaque fallback`, solid([0, 0, 255, 128]));
+      }
+      setMode(mode);
+      state.fogColor = 0xff000080;
+      check('constant fog reenabled after fallback', solid(mode === 0x0110 ? [0, 127, 127, 191] : [127, 127, 0, 191]));
+      setMode(0);
+      check('opaque draw after constant fog', solid([0, 0, 255, 128]));
+      setMode(mode);
+      check('constant fog after opaque draw', solid(mode === 0x0110 ? [0, 127, 127, 191] : [127, 127, 0, 191]));
+      setMode(0x0010);
+      check('ordinary alpha blend after constant fog', solid([0, 127, 128, 191]));
+    }
+  }
+  state.rdpOtherModeH = gbi.CycleType.G_CYC_2CYCLE;
+  state.rdpOtherModeL = (((0x3200 << 2) | 0x0110) << 16) | forced;
+  state.fogColor = 0xff000080;
+  check('first-cycle shade fog feeds constant framebuffer blending', solid([20, 127, 107, 191]));
+  for (const alpha of [0, 255]) {
+    state.primColor = (0x0000ff00 | alpha) >>> 0;
+    setMode(0x3110);
+    check('constant blend factor is independent of combiner alpha', solid([127, 127, 0, 255]));
+  }
+  state.primColor = 0x0000ff80;
+  for (const cycle of [gbi.CycleType.G_CYC_COPY, gbi.CycleType.G_CYC_FILL]) {
+    state.rdpOtherModeH = gbi.CycleType.G_CYC_1CYCLE;
+    setMode(0x3110);
+    check('constant fog before copy/fill', solid([127, 127, 0, 191]));
+    state.rdpOtherModeH = cycle;
+    state.geometryMode.texture = 1;
+    check('copy/fill bypass constant fog RGB and framebuffer blending',
+      solid([0, 0, 255, cycle === gbi.CycleType.G_CYC_COPY ? 128 : 41]));
+    state.geometryMode.texture = 0;
+  }
+  return lines;
+}
+
+// F-Zero X feeds normal-indexed alpha to the same fog blender while G_FOG is
+// disabled. Its G_TEXTURE_GEN bit must leave the supplied texel UVs intact.
+export function runF3DFLXTests(gl) {
+  const { ram, state, renderer, microcode, resetFrame } = createWebGLHarness(gl, {
+    width: 4, height: 1, Microcode: GBI2FLX,
+  });
+  state.rdpOtherModeH = gbi.CycleType.G_CYC_2CYCLE | gbi.TexturePerspective.G_TP_PERSP;
+  state.rdpOtherModeL = 0xc8000230; // Captured F-Zero X car render mode.
+  state.fogColor = 0xff0000ff;
+  state.combine.hi = 0x00ffffff;
+  state.combine.lo = (0xfffc7038 | (1 << 15) | (1 << 9) | (2 << 6) | 2) >>> 0;
+  const texture = testTexture(4, 1, [
+    [0, 255, 0, 255], [0, 0, 255, 255], [0, 255, 0, 255], [0, 255, 0, 255],
+  ]);
+  for (const tile of state.tiles.slice(0, 2)) {
+    tile.set(gbi.ImageFormat.G_IM_FMT_RGBA, gbi.ImageSize.G_IM_SIZ_32b, 2, 0, 0, 2, 0, 0, 2, 0, 0);
+    tile.setSize(0, 0, 12, 0);
+    loadTestTexture(state, tile, texture);
+  }
+  for (let i = 0; i < 256; i++) {
+    ram.setUint8(0x100 + i, i);
+  }
+  ram.setInt16(0x208, 256);
+  microcode.executeDmaIo(0xd622c0ff, 0x100);
+  microcode.executeMoveMem(0xdc08030a, 0x200);
+  microcode.executeGeometryMode(0xd9000000, 0x00060000);
+  microcode.executeTexture(0xd7000002, 0xffffffff);
+
+  function load(normals) {
+    const xy = [[-1, -1], [3, -1], [-1, 3]];
+    for (let i = 0; i < 3; i++) {
+      ram.setInt16(i * 16, xy[i][0]);
+      ram.setInt16(i * 16 + 2, xy[i][1]);
+      ram.setInt16(i * 16 + 8, 32); // Texel 1, blue; generated/rescaled UVs hit green.
+      ram.setInt8(i * 16 + 12, normals[i]);
+      ram.setUint8(i * 16 + 15, 255);
+    }
+    microcode.loadVertices(0, 3, 0);
+  }
+  const lines = [];
+  function check(name, expected) {
+    resetFrame();
+    drawProjectedTriangle(renderer, state.projectedVertices);
+    assertPixels(gl, { width: 4, height: 1, expected, label: name });
+    lines.push(`PASS ${name}`);
+  }
+  load([-127, -127, -127]);
+  check('F3DFLX zero alpha retains car texture and supplied UVs', solid([0, 0, 255, 255]));
+  load([0, 0, 0]);
+  check('F3DFLX partial reflection blends with fog colour', solid([128, 0, 127, 255]));
+  load([127, 127, 127]);
+  check('F3DFLX full reflection selects fog colour', solid([255, 0, 0, 255]));
+  load([-127, 0, 127]);
+  check('F3DFLX interpolates cached reflection alpha', [71.75, 87.75, 103.75, 119.75].map(a => [a, 0, 255 - a, 255]));
+  microcode.executeGeometryMode(0xd9000000, 0);
+  check('F3DFLX cached alpha survives disabling alpha lighting', [71.75, 87.75, 103.75, 119.75].map(a => [a, 0, 255 - a, 255]));
+  return lines;
+}

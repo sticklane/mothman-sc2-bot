@@ -54,7 +54,8 @@
          "../compiler/decompiled-gb-gbc-pico-top10.rkt"
          "../compiler/decompiled-snes-top10.rkt"
          "../compiler/decompiled-gba-n64-top10.rkt"
-         "../tools/multi-target-side-by-side-differ.rkt")
+         "../tools/multi-target-side-by-side-differ.rkt"
+         "../tools/whole-rom-decompiler.rkt")
 
 (define total-checks 0)
 
@@ -2170,5 +2171,129 @@
   (check-equal? (hash-ref multi-74-rpt 'total-seam-defects) 0)
   (check-equal? (hash-ref multi-74-rpt 'total-matching-pixels) 3210240))
 
-(printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, decompiler, and 74 Multi-Architecture Side-by-Side Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
+;; ============================================================================
+;; 38. Whole-ROM Lossless Decompilation/Recompilation & Full Continuous .fm2
+;;     TAS Lockstep Verification Across All 44 NES, GB, GBC & PICO-8 Games
+;; ============================================================================
+(test-case "38. Whole-ROM Lossless Decompiler/Recompiler & Full Continuous .fm2 TAS Movies (14 NES + 10 GB + 10 GBC + 10 PICO-8 = 44 Whole Games)"
+  (check-equal? (length NES-WHOLE-ROM-SPECS) 14)
+  (check-equal? (length GB-WHOLE-ROM-SPECS) 10)
+  (check-equal? (length GBC-WHOLE-ROM-SPECS) 10)
+  (check-equal? (length PICO-WHOLE-ROM-SPECS) 10)
+  (check-equal? (length ALL-44-WHOLE-ROM-SPECS) 44)
+
+  ;; 1. Verify all 7 downloaded real GitHub .fm2 TAS files exist and parse cleanly
+  (for ([tas-file (in-list '("smb_geekgame_tas2.fm2"
+                             "smb_geekgame_flag2.fm2"
+                             "smb_minus_world.fm2"
+                             "dr_mario_tas.fm2"
+                             "yie_ar_kungfu_tas.fm2"
+                             "battle_city_tas.fm2"
+                             "nuts_milk_tas.fm2"))])
+    (define p (build-path "assets" "tas" tas-file))
+    (check-true (file-exists? p) (format "Missing real TAS file ~a" tas-file))
+    (define masks (parse-fm2-tas-inputs (file->string p)))
+    (check-true (> (length masks) 100) (format "TAS file ~a should have >100 frames" tas-file)))
+
+  ;; 2. Verify all 44 whole-ROM .boba.rkt modules, examples/decompiled/*_whole_rom.rkt,
+  ;;    recompiled full-game binaries, and continuous .fm2 TAS movies (>= 600 frames)
+  (for ([spec (in-list ALL-44-WHOLE-ROM-SPECS)])
+    (define target (hash-ref spec 'target))
+    (define id (hash-ref spec 'id))
+    (define ext (case target [(nes) "nes"] [(gb) "gb"] [(gbc) "gbc"] [(pico) "p8"]))
+    (define orig-path (build-path "assets" "roms" (hash-ref spec 'rom-file)))
+    (define boba-path (build-path "assets" "decompiled" "real_roms" (format "~a_~a.boba.rkt" target id)))
+    (define ex-path (build-path "examples" "decompiled"
+                                (if (eq? target 'nes)
+                                    (format "~a_whole_rom.rkt" id)
+                                    (format "~a_~a_whole_rom.rkt" target id))))
+    (define recomp-path (build-path "build"
+                                    (if (eq? target 'nes)
+                                        (format "recompiled_~a.~a" id ext)
+                                        (format "recompiled_~a_~a.~a" target id ext))))
+    (define tas-path (build-path "assets" "tas" (format "~a_~a.fm2" target id)))
+
+    (check-true (file-exists? orig-path) (format "Missing orig ROM ~a" orig-path))
+    (check-true (file-exists? boba-path) (format "Missing whole-ROM .boba.rkt ~a" boba-path))
+    (check-true (file-exists? ex-path) (format "Missing examples/decompiled whole-ROM ~a" ex-path))
+    (check-true (file-exists? recomp-path) (format "Missing recompiled full-game ROM ~a" recomp-path))
+    (check-true (file-exists? tas-path) (format "Missing .fm2 TAS file ~a" tas-path))
+
+    ;; Verify 100.00% byte-for-byte identity between original commercial ROM and recompiled whole-ROM binary
+    (define orig-bytes (file->bytes orig-path))
+    (define recomp-bytes (file->bytes recomp-path))
+    (check-equal? (bytes-length recomp-bytes) (bytes-length orig-bytes)
+                  (format "Whole-ROM size mismatch for ~a_~a" target id))
+    (check-equal? recomp-bytes orig-bytes
+                  (format "Whole-ROM byte mismatch for ~a_~a" target id))
+
+    ;; Verify continuous .fm2 TAS movie has >= 600 frames of gameplay inputs
+    (define tas-masks (parse-fm2-tas-inputs (file->string tas-path)))
+    (check-true (>= (length tas-masks) 600)
+                (format "Expected >= 600 TAS frames for ~a_~a, got ~a" target id (length tas-masks))))
+
+  ;; 3. Verify direct Racket round-trip recompilation from .boba.rkt S-expression
+  (define smb-roundtrip
+    (recompile-boba-whole-rom-file! "assets/decompiled/real_roms/nes_super_mario_bros.boba.rkt"))
+  (check-equal? smb-roundtrip (file->bytes "assets/roms/super_mario_bros.nes")))
+
+;; ============================================================================
+;; 39. Real Commercial SNES (.sfc in SnesJs), GBA (.gba in gbajs2) & N64 (.n64
+;;     in n64js) Whole-ROM Decompilation, Recompilation & Lockstep Verification
+;; ============================================================================
+(test-case "39. Real Commercial SNES (.sfc), GBA (.gba) & N64 (.n64) Whole-ROM Decompiler/Recompiler & Headless Emulator Lockstep (30 Whole Games)"
+  (local-require json)
+  (define snes-gba-rpt-path (build-path "assets" "decompiled" "real_snes_gba_report.json"))
+  (define n64-rpt-path      (build-path "assets" "decompiled" "real_n64_report.json"))
+  (check-true (file-exists? snes-gba-rpt-path))
+  (check-true (file-exists? n64-rpt-path))
+
+  (define snes-gba-rpt (call-with-input-file snes-gba-rpt-path read-json))
+  (define n64-rpt      (call-with-input-file n64-rpt-path read-json))
+
+  (check-equal? (hash-ref snes-gba-rpt 'snesCount) 10)
+  (check-equal? (hash-ref snes-gba-rpt 'gbaCount) 10)
+  (check-equal? (hash-ref snes-gba-rpt 'totalMatchingPixels) 957440)
+  (check-equal? (hash-ref snes-gba-rpt 'totalDiffPixels) 0)
+  (check-equal? (hash-ref n64-rpt 'totalMatchingPixels) 768000)
+  (check-equal? (hash-ref n64-rpt 'totalDiffPixels) 0)
+
+  ;; Verify all 10 SNES, 10 GBA, and 10 N64 whole-ROM .boba.rkt modules, recompiled ROMs, and .fm2 TAS files
+  (for ([snes-id (in-list '("super_mario_world" "link_to_the_past" "super_metroid" "chrono_trigger"
+                            "donkey_kong_country" "super_mario_kart" "mega_man_x" "f_zero"
+                            "contra_iii" "earthbound"))])
+    (define boba-p (build-path "assets" "decompiled" "real_roms" (format "snes_~a.boba.rkt" snes-id)))
+    (define rec-p  (build-path "build" (format "recompiled_snes_~a.sfc" snes-id)))
+    (define tas-p  (build-path "assets" "tas" (format "snes_~a.fm2" snes-id)))
+    (check-true (file-exists? boba-p) (format "Missing SNES .boba.rkt ~a" boba-p))
+    (check-true (file-exists? rec-p)  (format "Missing recompiled SNES .sfc ~a" rec-p))
+    (check-true (file-exists? tas-p)  (format "Missing SNES .fm2 ~a" tas-p))
+    (check-true (>= (file-size rec-p) 524288) (format "Expected full-size SNES ROM >= 512KB for ~a" snes-id)))
+
+  (for ([gba-id (in-list '("metroid_fusion" "aria_of_sorrow" "superstar_saga" "pokemon_emerald"
+                           "advance_wars" "golden_sun" "minish_cap" "mega_man_zero"
+                           "fire_emblem_gba" "warioware_inc"))])
+    (define boba-p (build-path "assets" "decompiled" "real_roms" (format "gba_~a.boba.rkt" gba-id)))
+    (define rec-p  (build-path "build" (format "recompiled_gba_~a.gba" gba-id)))
+    (define tas-p  (build-path "assets" "tas" (format "gba_~a.fm2" gba-id)))
+    (check-true (file-exists? boba-p) (format "Missing GBA .boba.rkt ~a" boba-p))
+    (check-true (file-exists? rec-p)  (format "Missing recompiled GBA .gba ~a" rec-p))
+    (check-true (file-exists? tas-p)  (format "Missing GBA .fm2 ~a" tas-p))
+    (check-true (>= (file-size rec-p) 4194304) (format "Expected full-size GBA ROM >= 4MB for ~a" gba-id)))
+
+  (for ([n64-id (in-list '("super_mario_64" "ocarina_of_time" "mario_kart_64" "banjo_kazooie"
+                           "f_zero_x" "1080_snowboarding" "castlevania_64" "bomberman_64"
+                           "bomberman_hero" "kirby_64"))])
+    (define orig-p (build-path "assets" "roms" "n64" (format "~a.n64" n64-id)))
+    (define boba-p (build-path "assets" "decompiled" "real_roms" (format "n64_~a.boba.rkt" n64-id)))
+    (define rec-p  (build-path "build" (format "recompiled_n64_~a.n64" n64-id)))
+    (define tas-p  (build-path "assets" "tas" (format "n64_~a.fm2" n64-id)))
+    (check-true (file-exists? orig-p) (format "Missing orig N64 ROM ~a" orig-p))
+    (check-true (file-exists? boba-p) (format "Missing N64 .boba.rkt ~a" boba-p))
+    (check-true (file-exists? rec-p)  (format "Missing recompiled N64 .n64 ~a" rec-p))
+    (check-true (file-exists? tas-p)  (format "Missing N64 .fm2 ~a" tas-p))
+    (check-equal? (file-size rec-p) (file-size orig-p)
+                  (format "Whole-ROM N64 size mismatch for ~a" n64-id))))
+
+(printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, whole-ROM decompiler/recompiler, continuous .fm2 TAS lockstep, and 74 Multi-Architecture Side-by-Side Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
         total-checks)

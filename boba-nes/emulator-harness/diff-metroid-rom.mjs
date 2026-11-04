@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { NES, Controller } from './node_modules/jsnes/src/index.js';
 import pngjs from 'pngjs';
 import { bootMetroidToBrinstar } from './inspect-metroid-rom.mjs';
+import { runNesWholeRomTasLockstep } from './tas-fm2-runner.mjs';
 
 const { PNG } = pngjs;
 const __filename = fileURLToPath(import.meta.url);
@@ -378,6 +379,8 @@ export function diffMetroidRom() {
     cpCampaignWin.gameplayState.enemyAlive === 0 &&
     cpCampaignWin.gameplayState.doorOpen === 1;
 
+  const wholeRomTasLockstep = runNesWholeRomTasLockstep('metroid', 'metroid.nes');
+
   const report = {
     generatedAt: new Date().toISOString(),
     id: 'metroid',
@@ -387,6 +390,10 @@ export function diffMetroidRom() {
     mirroring: 'vertical',
     authenticRom: 'assets/roms/metroid.nes',
     decompiledRom: 'build/metroid_nes.nes',
+    bobaWholeRomModule: wholeRomTasLockstep.bobaWholeRomModule,
+    recompiledWholeRom: wholeRomTasLockstep.recompiledWholeRom,
+    tasFile: wholeRomTasLockstep.tasFile,
+    wholeRomTasLockstep,
     screenshot: `screenshots/${pngName}`,
     ...cp0,
     frame0: cp0,

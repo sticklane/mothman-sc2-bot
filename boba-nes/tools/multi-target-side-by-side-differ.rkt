@@ -188,7 +188,7 @@
       (define ref-path  (build-path FB-DUMPS-DIR ref-fname))
       (define rec-path  (build-path FB-DUMPS-DIR rec-fname))
       (define preserve-real-emu?
-        (and (member target-str '("gb" "gbc" "pico"))
+        (and (member target-str '("gb" "gbc" "pico" "snes" "gba" "n64"))
              (file-exists? ref-path)
              (file-exists? rec-path)
              (= (file-size ref-path) (* width height 3))

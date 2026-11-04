@@ -121,6 +121,1843 @@ spawn="0,820,64,6,246,102,6,438,102,1,472,60,6,512,102,5,656,48,5,748,48,6,692,1
 {
 ref="128,176,true,",
 tiles="19,20,-1,27,28,-1,",
+ferns="40,200,4,13,72,208,2,5,96,224,3,13,104,224,2,5,120,232,4,13,128,232,5,5,136,232,3,13,144,232,4,13,156,208,2,13,166,208,3,5,180,216,3,5,192,208,3,5,224,152,5,13,",
+spawn="0,128,48,6,56,200,6,184,216,6,128,104,1,120,88,1,136,88,"
+},
+
+{
+tiles="24,4,21,-1,",
+spawn="0,320,64,7,256,56,7,256,72,",
+ferns="192,96,2,8,304,112,2,9,320,104,2,8,"
+},
+
+{
+ref="82,64,",
+tiles="24,4,7,0,-1,17,17,18,0,-1,17,17,18,0,-1,17,17,17,15,-1,",
+spawn="0,450,500,5,140,30,4,240,64,5,338,64,6,376,246,6,390,382,5,400,60,5,432,120,5,464,260,5,496,160,",
+fields="194,42,3,1,80,0,true,234,88,3,1,80,0,true,408,12,1,3,0,135,true,478,66,1,4,0,82,true,448,102,1,5,0,60,true,426,412,3,2,25,20,true,",
+triggers={{
+{},
+function()
+local m=create_mine(130,74)
+m.state="detonate"
+end
+}}
+},
+
+{
+tiles="7,2,0,3,20,17,-1,25,9,9,17,11,17,-1,0,3,20,18,0,16,-1,9,17,13,17,15,17,-1,17,17,27,5,28,17,-1,",
+ferns="24,96,2,8,72,96,3,8,79,96,2,2,96,96,2,14,280,128,2,8,288,136,3,2,312,136,4,8,320,144,4,8,328,144,5,14,460,96,2,8,467,96,2,8,544,440,3,8,608,440,4,2,456,584,3,8,463,584,2,8,470,584,3,14,477,584,3,8,484,584,2,2,320,584,3,8,328,592,3,14,286,480,4,8,294,480,3,8,302,480,3,2,310,480,2,8,318,480,3,8,70,400,5,8,80,384,4,14,26,384,4,8,",
+spawn="0,64,300,7,240,20,6,300,136,7,425,70,4,335,89,1,564,460,1,580,460,1,596,460,11,344,392,1,297,309,1,208,343,1,116,300,1,24,332,3,348,350,3,172,289,3,60,360,7,530,336,7,660,336,7,400,570,8,468,570,8,308,470,"
+},
+
+{
+tiles="24,5,5,5,20,-1,19,6,6,6,28,-1,27,5,5,5,21,-1,24,6,6,6,21,-1,",
+spawn="0,576,320,3,240,62,2,343,62,2,460,62,1,480,62,6,186,168,6,314,168,6,442,168,4,240,318,2,343,318,2,460,318,1,480,318,6,170,424,6,202,424,6,298,424,6,330,424,6,426,424,6,458,424,",
+ferns=""..
+"384,232,4,8,392,240,5,14,400,240,4,8,408,240,3,8,416,240,3,14,424,240,3,8,432,240,3,14,440,240,3,8,448,240,3,8,456,240,3,14,464,240,3,14,472,240,3,8,480,240,4,14,488,240,4,14,496,240,5,8,504,232,5,14,256,232,6,2,264,240,4,2,272,240,4,2,280,240,3,8,288,240,3,8,296,240,3,2,304,240,3,8,312,240,3,8,320,240,3,14,328,240,3,2,336,240,3,8,344,240,3,8,352,240,6,14,360,240,4,8,368,240,5,8,376,232,5,14,128,232,3,2,136,240,4,2,144,240,4,8,152,240,3,2,160,240,3,8,168,240,3,8,176,240,3,2,184,240,3,8,192,240,3,8,200,240,3,2,208,240,3,8,216,240,3,2,224,240,4,2,232,240,4,8,240,240,5,8,248,232,6,8,",
+},
+
+{
+ref="192,32,",
+tiles="17,12,17,-1,17,11,17,-1,18,0,16,-1,18,0,16,-1,17,15,17,-1,",
+spawn="0,192,620,4,192,128,4,202,292,7,158,388,7,230,388,4,196,464,",
+fields="169,120,4,1,18,0,false,140,312,8,2,18,128,false,"
+},
+
+{
+ref="32,192,",
+tiles="17,18,0,0,16,-1,4,7,0,0,16,-1,17,18,0,0,3,-1,17,17,9,9,17,-1,",
+fields="264,8,5,6,64,64,false,",
+ferns="88,232,3,8,104,232,2,9,112,232,3,8,152,224,3,9,168,224,2,9,176,232,3,8,",
+spawn="0,608,320,5,296,32,5,360,64,5,424,250,5,488,128,8,296,104,8,400,168,8,480,232,8,312,296,8,312,360,5,296,160,5,360,192,5,424,122,5,488,256,8,424,104,8,300,168,8,380,232,8,512,296,8,412,360,"
+},
+
+{
+tiles="15,-1,12,-1,13,-1,12,-1,11,-1,0,-1,2,-1,29,-1,0,-1,",
+spawn="0,64,1088,",
+fields="50,82,2,4,38,52,true,68,108,1,4,38,52,true,50,402,2,6,38,52,true,68,428,1,6,38,52,true,",
+triggers={{
+parse"64,840,60,10,0,",
+function() create_trap(96,882) end
+},{
+parse"64,928,60,10,0,",
+function() create_trap(20,960) create_trap(108,930)end
+}}
+},
+
+{
+tiles="0,-1,0,-1,0,-1,0,-1,0,-1,0,-1,0,-1,",
+spawn="0,64,875,",
+inks="90,110,110,120,26,166,40,190,95,226,128,260,0,316,72,346,50,400,128,430,0,540,74,600,0,600,88,640,60,680,80,700,90,690,120,720,0,820,128,840,0,860,20,896,106,880,128,896,"
+},
+
+{
+tiles="0,-1,0,-1,0,-1,0,-1,0,-1,0,-1,0,-1,",
+spawn="0,64,875,",
+inks="0,100,128,132,0,200,128,256,0,320,128,352,48,352,128,452,48,452,80,500,0,500,80,664,80,564,128,600,54,664,128,732,0,732,128,780,40,780,128,854,84,854,128,896,"
+},
+
+{
+ref="54,140,false,",
+tiles="25,25,25,25,25,25,25,-1,0,0,0,0,0,0,0,-1,0,0,0,0,0,0,0,-1,0,0,26,26,26,26,26,-1,10,8,30,31,30,31,30,-1,",
+spawn="0,120,616,",
+inks="-10,192,800,384,880,176,900,560,500,172,530,404,364,440,412,460,-10,-10,20,512,96,436,140,486,214,480,264,616,-10,500,64,564,280,360,296,440,",
+triggers={{
+parse"0,0,0,0,1,",
+function()
+update_boss()
+if t%150==0 or t==20 then
+boss.wave=40
+music(3)
+for i=296,872,64 do
+create_bubbles(i,436,16,14,2,4)
+end
+end
+end
+}}
+},
+
+{
+ref="64,32,",
+tiles="22,-1,22,-1,30,-1,23,-1,31,-1,",
+spawn="0,240,128,6,-15,650,6,138,650,6,-15,512,6,138,512,",
+triggers={{
+{},
+function()
+change_state(boss,"active")
+boss.hp=3
+create_bubbles(arg"64,320,20,40,2,3,")
+create_ink(arg"-20,320,146,340,13,true,")
+boss.wave=40
+music(3)
+end
+},{
+parse"0,0,0,0,1,",
+function()
+update_boss()
+end
+}}
+},
+
+{
+ref="192,704,",
+tiles="17,15,17,-1,17,12,17,-1,17,12,17,-1,17,11,17,-1,18,2,16,-1,18,0,16,-1,",
+spawn="0,192,32,1,190,346,1,202,442,6,78,64,6,78,128,6,78,192,6,306,64,6,306,128,6,306,192,",
+fields="176,322,2,8,40,24,false,191,252,4,1,12,0,false,",
+triggers={{
+{},
+function()
+create_ink(arg"-10,768,394,768,13,")
+end
+},{
+parse"0,0,0,0,1,",
+function()
+if t%2==0 then
+create_explosion(rnd(328)+120,rnd(256)+512,rnd(8)+8)
+create_explosion(rnd(128)+128,rnd(512),rnd(8)+8)
+end
+if t%flr(rnd(10)+4)==0 then sfx(14) add_shake(4) end
+end
+}}
+},
+
+{
+ref="64,1088,",
+tiles="0,-1,0,-1,15,-1,12,-1,12,-1,13,-1,12,-1,11,-1,15,-1,",
+spawn="0,64,32,6,-12,640,6,140,640,",
+fields="30,510,6,1,10,0,false,70,456,5,1,10,0,false,28,80,3,3,40,80,true,48,120,2,3,40,80,true,",
+triggers={{
+{},
+function()
+create_ink(arg"-10,1150,138,1152,13,")
+create_trap(40,1020)
+create_trap(94,1020)
+end
+},{
+parse"0,0,0,0,1,",
+function()
+if t%4==0 then
+create_explosion(rnd(128),rnd(512)+248,rnd(8)+8)
+create_explosion(rnd(128),rnd(512)+760,rnd(8)+8)
+end
+if t%flr(rnd(10)+4)==0 then sfx(14) add_shake(4) end
+end
+},{
+parse"64,388,60,45,0,",
+function()
+create_trap(28,214)
+create_trap(100,214)
+end
+}}
+},
+
+{
+ref="276,64,",
+tiles="14,4,-1,",
+spawn="0,300,150,",
+ferns="0,104,3,8,8,104,2,9,32,112,2,8,40,112,1,2,49,128,2,8,56,128,3,14,91,128,2,8,104,120,4,2,112,104,4,8,121,104,6,14,128,104,6,8,135,104,5,9,142,104,4,10,149,104,3,15,156,104,2,7,218,104,2,7,225,104,3,15,232,104,4,10,239,104,5,9,246,104,6,8,",
+triggers={{
+{},
+function()
+player.off=true
+end
+},{
+parse"0,0,0,0,1,",
+function()
+if titles then
+player.off=true
+player.dir=7
+if t==80 then music(2) end
+if t>=30 and t<=200 then
+change_state(player,"swim")
+player.vx-=0.3
+player.vy-=0.3
+end
+else
+if t==20 then
+create_explosion(arg"250,64,30,")
+sfx(14)
+add_shake(2)
+music(0)
+player.dir=6
+player.vx=-4
+end
+if t==60 then player.off=false end
+end
+end
+},{
+parse"72,64,30,0,0,",
+function()
+titles=true
+t=0
+end
+}}
+}
+
+}
+end
+
+-->8
+--game loop
+
+function _init()
+
+load_room_data()
+
+room=1
+godmode = false
+
+wtrfrc = 0.94
+
+gt,gm,deathcounter,freeze,fade=0,0,0,0,0
+
+camx,camy,shkx,shky = 0,0,0,0
+
+fades={
+0b1111111111111111.1,
+0b0111111111011111.1,
+0b0101111101011111.1,
+0b0101101101011110.1,
+0b0101101001011010.1,
+0b0001101001001010.1,
+0b0000101000001010.1,
+0b0000001000001000.1
+}
+
+boss = {
+x=52,
+y=592,
+hp=3,
+animt=0,
+state="dead",
+wave=0,
+box = new_box(arg"48,576,80,608,")
+}
+
+load_room(room)
+end
+
+function _update()
+t+=1
+if t>=30000 then t=0 end
+if room>1 and room <#rooms then
+gt+=1
+if gt==1800 then gt=0 gm+=1 end
+end
+if freeze >0 then freeze -= 1 return end
+if fade>0 then return end
+
+update_shake()
+update_player(player)
+update_objects(objects)
+update_hazards(hazards)
+update_particles()
+update_exit()
+
+if (player.invinci<=0 and not godmode) or player.state=="attack" then
+coll_objs()
+check_hazard_colls(hazards)
+end
+coll_exit()
+
+
+update_camera()
+
+for enemy in all(objects) do
+if enemy.name!="pearl" and enemy.name!="clam" then
+detectwalls(enemy)
+end
+end
+
+update_triggers(triggers)
+end
+
+
+function _draw()
+
+if fade>0 then
+if fade<=#fades and fadein==false then
+fillp(fades[fade])
+rectfill(0,0,cmaxx,cmaxy,1)
+fade+=1
+fillp()
+return
+else
+fadein=true
+end
+end
+
+cls()
+
+camera(camx,camy)
+
+draw_background()
+draw_foreground()
+draw_exit()
+draw_particles()
+draw_hazards(hazards)
+draw_objects(objects)
+draw_player(player)
+draw_fx(fx)
+
+if boss.state!="dead" then draw_boss() end
+
+if room>1 and room<#rooms then
+draw_hud()
+else
+draw_titles()
+end
+
+camera()
+
+if fadein  then
+fade-=1
+if fade>0 then
+fillp(fades[fade])
+rectfill(0,0,cmaxx,cmaxy,1)
+fillp()
+else
+fade=0
+fadein=false
+end
+end
+end
+
+
+
+function update_camera()
+local xoff,yoff,pd = 0,0,player.dir
+if pd >= 1 and pd <=3 then xoff = 12 end
+if pd >= 5 and pd <=7 then xoff = -12 end
+if pd <=1 or pd ==7 then yoff = -12 end
+if pd >= 3 and pd <=5 then yoff = 12 end
+local xpoint = max(0,player.x-64+(player.vx*14)+xoff)
+local ypoint = max(0,player.y-64+(player.vy*14)+yoff)
+camx += (xpoint-camx)*0.1
+camy += (ypoint-camy)*0.1
+if camx>cmaxx-127 then camx=cmaxx-127 end
+if camy>cmaxy-127 then camy=cmaxy-127 end
+camx +=shkx
+camy +=shky
+end
+
+
+function draw_background()
+rectfill(0,0,cmaxx,cmaxy,1)
+end
+
+
+function draw_foreground()
+local mapx,mapy = 0,0
+pal(10,0)
+for i in all(roomtiles) do
+if i == -1 then
+mapx=0
+mapy+=128
+else
+map((i%8)*16,flr(i/8)*16,mapx,mapy,16,16,0x1)
+mapx+=128
+end
+end
+pal()
+end
+
+function update_objects(objects)
+for enemy in all(objects) do
+enemy.update(enemy)
+end
+end
+
+function update_hazards(hazards)
+for p in all(hazards) do
+p.update(p)
+end
+end
+
+function check_hazard_colls(hazards)
+for p in all(hazards) do
+p.coll(p)
+end
+end
+
+function draw_hazards(hazards)
+for p in all(hazards) do
+p.draw(p)
+end
+end
+
+
+
+function create_trigger(ref,exec)
+local t ={
+x=ref[1] or 0,
+y=ref[2] or 0,
+prox=ref[3] or 1,
+t=ref[4] or 0,
+active=ref[5] or 1,
+exec=exec
+}
+add(triggers,t)
+end
+
+function update_triggers(triggers)
+for trig in all(triggers) do
+local kill=false
+if trig.prox>0 then
+kill=true
+if dist(player.x,player.y,trig.x,trig.y)<=trig.prox then
+trig.active=1
+end
+end
+
+if trig.active==1 then
+if trig.t>0 then
+trig.t-=1
+else
+trig.t = 0
+trig.exec()
+if kill then del(triggers,trig) end
+end
+end
+end
+end
+
+function update_shake()
+if abs(shkx)+abs(shky)<0.5 then
+shkx,shky=0,0
+else
+shkx*=-0.5-rnd(0.2)
+shky*=-0.5-rnd(0.2)
+end
+end
+
+function draw_objects(objects)
+for enemy in all(objects) do
+enemy.draw(enemy)
+end
+end
+
+function draw_hud()
+for i=106,122,8 do
+circ(camx+i-shkx,camy+6-shky,3.5,0)
+end
+local cx=106
+local col=ternary(t<30 and t%4==0,7,8)
+for i=1,player.hp do
+circfill(camx+cx-shkx,camy+6-shky,2.5,col)
+pset(camx+cx-1-shkx,camy+4-shky,7)
+cx+=8
+end
+
+boldprint(timer(),camx+2-shkx,camy+121-shky)
+end
+
+function draw_titles()
+if player.y>=60 and t>=60 and room==1 then
+boldprint("⬅️➡️⬆️⬇️: move",32,40)
+boldprint("❎/🅾️ (hold): attack",20,50)
+end
+if titles and t>=80 then
+if room==1 then
+boldprint("s w o r d f i s h",155,60)
+else
+local tstars, dstars = 1,1
+if gm <15 then
+tstars = 2
+if gm<10 then
+tstars = 3
+end
+end
+if deathcounter <11 then
+dstars=2
+if deathcounter <6 then
+dstars=3
+end
+end
+
+rect(arg"28,27,96,96,")
+boldprint("congratulations",33,32,10)
+boldprint("time: "..timer(),43,42)
+
+for i=1,3 do
+local sx = 40+(i*10)
+if i>tstars then
+print("★",sx,52,6)
+else
+boldprint("★",sx,52,10)
+end
+end
+
+boldprint("deaths: "..deathcounter,45,62)
+
+for i=1,3 do
+local sx = 40+(i*10)
+if i>dstars then
+print("★",sx,72,6)
+else
+boldprint("★",sx,72,10)
+end
+end
+
+boldprint("thanks for",43,82)
+boldprint("playing!",48,89)
+end
+end
+end
+
+function draw_fx(fxs)
+for fx in all(fx) do
+fx.draw(fx)
+end
+end
+
+function next_room()
+room+=1
+load_room(room)
+end
+
+
+function load_room(rm)
+t=0
+
+objects={}
+fx={}
+particles={}
+triggers={}
+hazards={}
+
+local r=rooms[rm]
+
+local roomref={64,64,false}
+if r.ref then roomref=parse(r.ref) end
+
+local px = roomref[1]
+local py = roomref[2]
+player = create_player(px,py)
+camx=max(0,px-54)
+camy=max(0,py-64)
+
+roomtiles=parse(r.tiles)
+roomrows = 0
+for i in all(roomtiles) do
+if i == -1 then
+roomrows+=1
+end
+end
+
+roomcols = (#roomtiles-roomrows)/roomrows
+
+cmaxx = roomcols*128-1
+cmaxy = roomrows*128-1
+
+spawnlist(r.spawn)
+
+if roomref[3] then
+exit.state="closed"
+exit.combat=true
+end
+
+for t in all(r.triggers) do
+create_trigger(t[1],t[2])
+end
+
+if r.fields!=nil then
+local f = parse(r.fields)
+for i=1,#f,7 do
+create_field(f[i],f[i+1],f[i+2],f[i+3],f[i+4],f[i+5],f[i+6])
+end
+end
+
+if r.inks!=nil then
+local inks = parse(r.inks)
+for i=1,#inks,4 do
+create_ink(inks[i],inks[i+1],inks[i+2],inks[i+3])
+end
+end
+
+if r.ferns!=nil then
+local fs = parse(r.ferns)
+for i=1,#fs,4 do
+create_fern(fs[i],fs[i+1],fs[i+2],fs[i+3])
+end
+end
+
+fade=1
+
+end
+
+
+-->8
+--player--
+
+function create_player(x,y)
+local p=new_object(x,y,"player")
+p.dir=2
+p.hp=3
+p.charge=0
+p.invinci=0
+p.cooldown=0
+p.flash=0
+p.bigbox=false
+p.tpspd = 3
+
+p.spr_info={
+idle = {
+up = parse"7,38,7,39,",
+diagu = parse"32,36,32,34,",
+diagd = parse"40,42,40,44,",
+right=parse"16,18,16,20,",
+dt=0.3
+},
+swim = {
+up = parse"38,39,",
+diagu = parse"36,34,",
+diagd = parse"42,44,",
+right=parse"18,20,",
+dt=0.05
+},
+charge = {
+up = {38},
+diagu = {32},
+diagd = {42},
+right={18},
+dt=0.2
+},
+attack = {
+up = {15},
+diagu = {11},
+diagd = {11},
+right={13},
+dt=0.2
+},
+hurt = {
+hurt = {46},
+dt=0.2
+},
+dead = {
+hurt = {46},
+dt=0.2
+}
+}
+p.abs_box=function(att)
+local b,mx,my,pb = 5,0,0,p.bigbox and att
+if att and p.state=="attack" then
+b=ternary(pb,14,8)
+end
+
+if p.dir== 0 or p.dir==4 then
+mx=1
+if pb then
+my=5
+end
+elseif p.dir==2 or p.dir==6 then
+my=1
+if pb then
+mx=5
+end
+elseif pb then
+mx,my=5,5
+end
+
+return new_box(p.x-b+mx,p.y-b+my,p.x+b-mx,p.y+b-my)
+end
+
+return p
+end
+
+
+function update_player(p)
+p.animt+=0.01
+
+local state = p.state
+
+if state=="dead" then
+p.vy+=0.04
+apply_friction(p,wtrfrc)
+if abs(p.animt/0.01)%2==0 then p.flash = 0.1 end
+if p.animt>=1 then load_room(room) end
+
+else
+
+if p.invinci>0 then
+p.invinci -= 1
+else p.invinci = 0
+end
+local bl,br,bu,bd,bx,bz
+if not player.off then
+if btn"0" then bl=true end
+if btn"1" then br=true end
+if btn"2" then bu=true end
+if btn"3" then bd=true end
+if btn"4" then bz=true end
+if btn"5" then bx=true end
+end
+if state=="hurt" then
+if p.cooldown > 0 then
+bl,br,bu,bd = false, false, false, false
+else
+p.invinci = 60
+change_state(p,"idle")
+end
+end
+if p.cooldown > 0 then
+p.cooldown-=0.1
+bz,bx = false,false
+else
+p.cooldown=0
+end
+if state=="charge"and not(bz or bx) then
+if p.charge>=1 then
+sfx(4)
+create_bubbles(p.x,p.y,rnd(4)+p.charge,4,1,p.charge+1)
+if p.charge>=3 then p.bigbox=true end
+change_state(p,"attack")
+else
+change_state(p,'idle')
+end
+end
+state = p.state
+if state=="attack" then
+if p.charge > 0 then
+local d = p.dir
+local attackspd=8
+if d==0 or d==1 or d==7 then p.vy-=attackspd end
+if d>=1 and d<=3 then p.vx+=attackspd end
+if d>=3 and d<=5 then p.vy+=attackspd end
+if d>=5 then p.vx-=attackspd end
+p.charge-=0.15
+apply_accel(p,p.tpspd+(flr(p.charge)*1.5))
+if abs(p.animt/0.01)%2==0 then	p.flash = 0.1 end
+add_shake(0.3)
+else
+p.charge = 0
+p.cooldown = 2
+if player.invinci<3 then player.invinci=15 end
+p.bigbox = false
+change_state(p,'idle')
+end
+else
+if (state=="charge" and t%3==0) or state!="charge" then --only check direction every three frames if charging( to make aiming less fiddly)
+setdirection(p,bl,br,bu,bd)
+end
+if (bl or br or bu or bd) and not(bz or bx) then
+local placc=0.5
+change_state(p,"swim")
+if bl then p.vx-=placc end
+if br then p.vx+=placc end
+if bu then p.vy-=placc end
+if bd then p.vy+=placc end
+apply_accel(p,p.tpspd)
+else
+if (bz or bx) and not (p.cooldown >0) then
+change_state(p,"charge")
+if p.animt>=0.8 then
+p.charge = 0
+sfx(5)
+add_shake(3)
+p.cooldown = 2
+change_state(p,'idle')
+elseif p.animt>=0.27 and p.charge <3 then
+p.charge=3
+sfx(3)
+elseif p.animt>=0.15 and p.charge <2 then
+p.flash=0.2
+p.charge=2
+sfx(2)
+elseif p.animt>=0.03 and p.charge <1 then
+p.flash=0.2
+p.charge=1
+sfx(1)
+end
+if p.charge==3 and abs(p.animt/0.01)%5==0 and p.animt<0.75 then
+p.flash = 0.2
+end
+
+elseif state!='hurt' and not titles then
+change_state(p,"idle")
+end
+end
+end
+end
+if state=="attack" then
+local xm=0.3
+
+if p.dir%2!=0 then xm=-0.3 end
+create_particle(p.x+p.vx*2.2,p.y+p.vy*2.2,p.vy*0.3,p.vx*xm,true)
+create_particle(p.x+p.vx*2.2,p.y+p.vy*2.2,p.vy*-0.3,p.vx*-xm,true)
+end
+apply_friction(p,wtrfrc)
+move(p)
+if not player.off then
+detectwalls(p)
+end
+end
+
+function draw_player(p)
+local state=p.state
+local sinfo=p.spr_info[state]
+local flipx,flipy,sprw,sprh,xoff,yoff,sprites = false,false,2,2,-4,-8,{}
+
+if state=="hurt" or state=="dead" then
+sprites = sinfo.hurt
+else
+local d = p.dir
+if d==0 or d==4 then sprites = sinfo.up sprw=1 end
+if d==1 or d==7 then sprites = sinfo.diagu xoff=-8 end
+if d==2 or d==6 then sprites = sinfo.right sprh=1 xoff=-8 yoff=-4 end
+if d==3 or d==5 then sprites = sinfo.diagd xoff=-8 end
+if d==4 or ((d==3 or d==5) and state=="attack") then flipy=true end
+if d>=5 then flipx=true end
+end
+local spri = sprites[flr(p.animt/sinfo.dt)%#sprites+1]
+if (p.invinci>0 and flr(p.invinci%3)==0) then
+else
+local fc = 7
+if state=="dead" then fc=8 end
+local oc = 0
+if p.flash>0 then oc = fc end
+drawoutline(spri,p.x+xoff,p.y+yoff,sprw,sprh,flipx,flipy,oc)
+flashobject(p,fc)
+spr(spri,p.x+xoff,p.y+yoff,sprw,sprh,flipx,flipy)
+end
+pal()
+end
+
+function coll_objs()
+for e in all(objects) do
+
+local att=ternary(player.state=="attack" and not e.invinci,true,false)
+
+
+if coll(e.abs_box(),player.abs_box(att)) then
+local name = e.name
+if name=="mine" then change_state(e,"detonate") sfx(9)end
+
+if player.state=="attack" then
+if e.invinci then
+if player.invinci>0 then return end
+if name!="clam" then bounce(e,player.vx*0.6,player.vy*0.6) end
+cancel_attack()
+bounce_relative(player,e,3)
+else
+kill_object(e)
+end
+elseif player.state!="hurt" then
+if name!="clam" then bounce(e,player.vx,player.vy) end
+if name!="mine" then
+if not (name=="clam" and e.state=="idle") then
+if player.invinci>0 then return end
+hurt_player(player)
+end
+end
+bounce_relative(player,e,3)
+if name=="pearl" then kill_object(e) end
+end
+end
+end
+end
+
+
+function hurt_player(p)
+if p.state != "dead" then
+p.hp-=1
+create_bubbles(p.x,p.y,rnd(3)+3,8,2,4)
+freeze=3
+sfx(6)
+add_shake(10)
+if p.hp<=0 then
+deathcounter+=1
+change_state(p,"dead")
+else
+p.charge = 0
+p.cooldown = 3
+change_state(p,"hurt")
+end
+end
+end
+
+function cancel_attack()
+change_state(player,"idle")
+add_shake(3)
+sfx(9)
+player.charge = 0
+player.cooldown = 2
+player.flash = 0
+player.bigbox=false
+for i=1,rnd(4)+3 do
+create_particle(player.x,player.y,rnd(3)+-2,rnd(3)+-2,true)
+end
+if player.invinci<3 then player.invinci=15 end
+end
+
+-->8
+--objects--
+
+
+function new_object(x,y,name,update,draw)
+return {x=x,y=y,vx=0,vy=0,animt=0,state="idle",name=name,update=update,draw=draw}
+end
+
+function create_snapper(x,y)
+local e=new_object(x,y,"snapper",update_snapper,draw_snapper)
+e.dir=0
+e.active=false
+
+e.spr_info={
+idle = {
+up = {1,2},
+diag = {3,4},
+right={5,6},
+dt=0.02
+}
+}
+e.abs_box=function()
+return new_box(e.x-3,e.y-3,e.x+3,e.y+3)
+end
+add(objects, e)
+return e
+end
+
+function create_school(x,y)
+for i=1,6 do
+local a=rnd(1)
+local d=rnd(20)
+local sx=x+d*cos(a)
+local sy=y+d*sin(a)
+create_snapper(sx,sy)
+end
+end
+
+
+function update_snapper(e)
+e.animt+=0.01
+local d = dist(e.x,e.y,player.x,player.y)
+if not e.active then
+if d<=120 then e.active=true end
+else
+local spd,buff=0.1,20
+if d<=20 then buff=4 end
+local l,r,u,d
+if player.x-buff > e.x then e.vx +=spd r=true end
+if player.x+buff < e.x then e.vx -=spd l=true end
+if player.y-buff > e.y then e.vy +=spd d=true end
+if player.y+buff < e.y then e.vy -=spd u=true end
+apply_accel(e,1)
+setdirection(e,l,r,u,d)
+
+move(e)
+end
+end
+
+function draw_snapper(e)
+local sinfo,flipx,flipy,sprites,d=e.spr_info[e.state],false,false,{},e.dir
+
+if d==0 or d==4 then sprites = sinfo.up  end
+if d==1 or d==3 or d==5 or d==7 then sprites = sinfo.diag end
+if d==2 or d==6 then sprites = sinfo.right end
+if d>=3 and d<=5 then  flipy=true end
+if d>=5 then flipx=true end
+
+local spri = sprites[flr(e.animt/sinfo.dt)%#sprites+1]
+drawoutline(spri,e.x-4,e.y-4,1,1,flipx,flipy,0,true)
+end
+
+function create_puffer(x,y)
+local e=new_object(x,y,"puffer",update_puffer,draw_puffer)
+e.invinci=false
+
+e.spr_info={
+idle = {
+sprites = {110,111},
+dt=0.02
+},
+puffed = {
+sprites = {78},
+dt=0.5
+}
+}
+e.abs_box=function()
+local size = ternary(e.state=="puffed",7,3)
+return new_box(e.x-size,e.y-size,e.x+size,e.y+size)
+end
+add(objects, e)
+return e
+end
+
+
+function update_puffer(e)
+e.animt+=0.01
+local os= is_offscreen(e,80)
+if os then return end
+local state = e.state
+local spd = ternary(state=="puffed",0.06,0.1)
+
+if e.animt>1.2 and state=="idle" then
+change_state(e,"puffed")
+e.invinci=true
+if not os then sfx(23) end
+end
+if e.animt>0.75 and state=="puffed" then
+change_state(e,"idle")
+e.invinci=false
+if not os then sfx(24) end
+end
+if dist(player.x,player.y,e.x,e.y)<48 and state=="idle" then spd *=-1 end
+if player.x-8 > e.x then e.vx +=spd end
+if player.x+8 < e.x then e.vx -=spd end
+if player.y-8 > e.y then e.vy +=spd end
+if player.y+8 < e.y then e.vy -=spd end
+
+apply_accel(e,1)
+move(e)
+end
+
+function draw_puffer(e)
+local sinfo=e.spr_info[e.state]
+local sprites = sinfo.sprites
+local flipx,sprw,sprh,xoff,yoff = ternary(player.x>e.x,true,false),1,1,-4,-4
+
+if e.state=="puffed" then xoff,yoff,sprw,sprh,flipx = -8,-8,2,2,not flipx  end
+local spri = sprites[flr(e.animt/sinfo.dt)%#sprites+1]
+drawoutline(spri,e.x+xoff,e.y+yoff,sprw,sprh,flipx,false,0,true)
+end
+
+function create_squid(x,y,shark)
+local e=new_object(x,y,"squid",update_squid,draw_squid)
+e.up=false
+e.invinci=false
+local sa,sb= 76,77
+if shark then
+e.name,e.up,sa,sb="shark",true,74,90
+end
+
+e.spr_info={
+idle = {
+sprites = {sa},
+dt=0.02
+},
+swim = {
+sprites = {sa,sb},
+dt=6
+}
+}
+e.abs_box=function()
+local xa,ya=3,7
+if e.name=="shark" then xa,ya=7,3 end
+return new_box(e.x-xa,e.y-ya,e.x+xa,e.y+ya)
+end
+add(objects, e)
+return e
+end
+
+function create_shark(x,y)
+create_squid(x,y,true)
+end
+
+function update_squid(e)
+e.animt+=1
+if e.name=="squid" then
+e.up=ternary(e.vy<0,true,false)
+e.invinci=ternary(((player.y>e.y-3 and not e.up) or (player.y<e.y+3 and e.up)),true,false)
+
+else
+e.up=ternary(e.vx<=0,true,false)
+end
+
+if e.state=='idle' then
+apply_friction(e,wtrfrc)
+if e.animt>30 then change_state(e,'swim') end
+else
+if e.animt>120 then change_state(e,'idle') end
+if e.name=="squid" then
+e.vy+=ternary(e.up,-0.1,0.1)
+else
+e.vx+=ternary(e.up,-0.1,0.1)
+end
+apply_accel(e,1.5)
+end
+move(e)
+end
+
+function draw_squid(e)
+local sinfo = e.spr_info[e.state]
+local sprites = sinfo.sprites
+local spri = sprites[flr(e.animt/sinfo.dt)%#sprites+1]
+local flipy,flipx,xa,ya,sx,sy = false,false,3,7,1,2
+if e.name=="squid" then
+flipy=ternary(e.up,false,true)
+else
+flipx=ternary(e.up,true,false)
+xa,ya,sx,sy=7,3,2,1
+end
+drawoutline(spri,e.x-xa,e.y-ya,sx,sy,flipx,flipy,0,true)
+end
+
+function create_spikey(x,y,mine)
+local e=new_object(x,y,"spikey",update_spikey,draw_spikey)
+e.spri=22
+e.bob=true
+e.flash=0
+e.invinci=true
+
+e.seed = flr(rnd(30))
+e.abs_box=function()
+return new_box(e.x-3,e.y-3,e.x+3,e.y+3)
+end
+if mine then e.name = "mine" e.spri=10 end
+add(objects, e)
+return e
+end
+
+function create_mine(x,y)
+return create_spikey(x,y,true)
+end
+
+function create_field(x,y,cols,rows,xspace,yspace,mine)
+local ypos = y
+for i=1,cols do
+for i=1,rows do
+create_spikey(x,ypos,mine)
+ypos+=yspace
+end
+x+=xspace
+ypos=y
+end
+end
+
+function create_trap(x,y)
+local m = create_mine(x,y)
+m.state="detonate"
+create_field(x-10,y-10,2,2,20,20)
+create_bubbles(x,y,14,15,2,4)
+end
+
+function update_spikey(e)
+e.vy+=ternary(e.bob,0.01,-0.01)
+
+if (t+e.seed)%30==0 then e.bob = not e.bob end
+
+if e.state=="detonate" then
+e.animt+=1
+if e.animt>=60 then
+create_explosion(e.x,e.y,15)
+create_bubbles(e.x,e.y,10,15,2,4)
+add_shake(8)
+sfx(14)
+local pdist = dist(player.x,player.y,e.x,e.y)
+if pdist<=30 and player.state != "hurt" and player.invinci==0 then
+hurt_player(player)
+bounce_relative(player,e,9-pdist/4)
+end
+for o in all(objects) do
+local odist = dist(o.x,o.y,e.x,e.y)
+if odist<=30 then
+if o.name == "mine" or o.name == "spikey" then
+bounce_relative(o,e,9-odist/4)
+if o.name =="mine" then change_state(o,"detonate") end
+else
+kill_object(o)
+end
+end
+end
+
+del(objects,e)
+elseif e.animt>=40 and e.animt%2==0 then
+e.flash =0.1
+elseif e.animt>=0 and e.animt%10==0 then
+e.flash =0.2
+end
+end
+apply_friction(e,wtrfrc)
+move(e)
+end
+
+function draw_spikey(e)
+drawoutline(e.spri,e.x-4,e.y-4,1,1)
+flashobject(e,7)
+spr(e.spri,e.x-4,e.y-4,1,1)
+pal()
+end
+
+
+function create_clam(x,y)
+local e =new_object(x,y,"clam",update_clam,draw_clam)
+e.flipx=false
+e.wob=true
+e.invinci=true
+e.shakesound=false
+
+e.abs_box=function()
+
+local box = new_box(e.x-7,e.y-3,e.x+7,e.y+3)
+if e.state=="open" then box.y1-=4 box.y2+=4 end
+return box
+end
+add(objects,e)
+return e
+end
+
+function update_clam(e)
+e.animt+=1
+if is_offscreen(e,60) then return end
+if e.state=="idle" then
+e.flipx=ternary(player.x>e.x,true,false)
+if e.animt >=60 then
+if not e.shakesound and not is_offscreen(e) then sfx(15) e.shakesound=true end
+if t%2==0 then
+if e.wob then
+e.x+=2
+else
+e.x-=2
+end
+e.wob=not e.wob
+end
+end
+if e.animt >=80 then
+change_state(e,"open")
+e.shakesound=false
+e.invinci=false
+end
+end
+
+if e.state=="open" then
+if e.animt==1 then
+local vx = (player.x-e.x)/dist(player.x,player.y,e.x,e.y)
+local vy = (player.y-e.y)/dist(player.x,player.y,e.x,e.y)
+create_bubbles(e.x,e.y-3,rnd(3)+2,4,1,3)
+create_pearl(e.x,e.y-2,vx*2,vy*1.6)
+sfx(16)
+end
+if e.animt>=120 then
+change_state(e,"idle")
+e.invinci=true
+end
+end
+end
+
+function draw_clam(e)
+local spri,yoff,h=29,-7,1
+
+if e.state=="open" then
+spri,yoff,h=8,-15,2
+end
+drawoutline(spri,e.x-8,e.y+yoff,2,h,e.flipx,false,0,true)
+end
+
+function create_pearl(x,y,vx,vy)
+local e=new_object(x,y,"pearl",update_pearl,draw_pearl)
+e.vx=vx
+e.vy=vy
+
+e.abs_box=function()
+return new_box(e.x-2,e.y-2,e.x+2,e.y+2)
+end
+
+add(objects,e)
+return e
+end
+
+function update_pearl(e)
+if e.x<-20 or e.x>roomcols*140 or e.y<-20 or e.y>roomrows*140 then
+del(objects,e)
+end
+move(e)
+end
+
+function draw_pearl(e)
+drawoutline(26,e.x-2,e.y-2,1,1,false,false,0,true)
+end
+
+function create_exit(x,y)
+local e={
+x=x,
+y=y,
+name='exit',
+state='open',
+combat=false,
+abs_box=new_box(x-4,y-4,x+4,y+4)
+}
+exit = e
+return e
+end
+
+function update_exit()
+if exit.combat==true and exit.state=="closed" then
+local no = 0
+for i in all(objects) do
+if i.name=="mine" or i.name=="spikey" or i.name=="pearl" then
+no+=1
+end
+end
+if #objects-no <= 0 then
+exit.state="open"
+music(5)
+create_bubbles(exit.x,exit.y,10,6,2,4)
+end
+end
+if t%60==0 then create_bubbles(exit.x,exit.y,rnd(1)+1,2,1,2) end
+end
+
+function coll_exit()
+if coll(exit.abs_box,player.abs_box()) then
+if exit.state=="open" and player.state!="dead" then
+sfx(29)
+next_room()
+end
+end
+end
+
+function draw_exit()
+local ca,cb=0,0
+if exit.state=="closed" then ca,cb= 13,2 end
+pal(8,0)
+pal(9,ca)
+pal(10,cb)
+spr(108,exit.x-8,exit.y-8,2,2)
+pal()
+end
+
+function create_ink(x1,y1,x2,y2,uprate,both)
+e = {
+box=new_box(x1,y1,x2,y2),
+uprate=uprate or 0,
+both=both or false,
+name="ink",
+update=update_ink,
+coll=coll_ink,
+draw=draw_ink
+}
+e.uprate*=0.1
+add(hazards,e)
+return e
+end
+
+function update_ink(e)
+local box=e.box
+box.y1-=e.uprate
+if e.both then box.y2-=e.uprate end
+if box.y2<0 then del(hazards,e) end
+
+local cbox =new_box(camx-20,camy-20,camx+148,camy+148)
+
+if coll(box,cbox) then
+if t%3==0 then
+local x1,y1,x2,y2=box.x1,box.y1,box.x2,box.y2
+local tblen,rllen,off = x2-x1,y2-y1,10
+for i=1, flr((tblen+64)/64) do
+create_particle(flr(rnd(tblen)+x1),y1+off,0,(rnd(0.2)+0.2+e.uprate)*-1)
+create_particle(flr(rnd(tblen)+x1),y2-off,0,rnd(0.2)+0.2-(e.uprate*0.9))
+end
+for i=1, flr((rllen+64)/64) do
+create_particle(x2-off,flr(rnd(rllen)+y1),rnd(0.2)+0.2,0)
+create_particle(x1+off,flr(rnd(rllen)+y1),(rnd(0.2)+0.2)*-1,0)
+end
+end
+end
+end
+
+function coll_ink(e)
+local box = e.box
+local ps = player.state
+if coll(box,player.abs_box()) and ps!="attack" and ps!="hurt" and ps!="dead" then
+local centre = {}
+centre.x = box.x1+box.x2/2
+centre.y = box.y1+box.y2/2
+hurt_player(player)
+bounce_relative(player,centre,2)
+end
+end
+
+function draw_ink(e)
+local b = e.box
+palt(0,false)
+rectfill(b.x1,b.y1,b.x2,b.y2,0)
+pal()
+end
+
+
+function update_boss()
+boss.animt+=1
+if boss.wave>0 then boss.wave-=1 player.vy-=0.4 add_shake(1)end
+if boss.state=="active" then
+if coll(player.abs_box(),boss.box) then
+if player.state=="attack" then
+cancel_attack()
+sfx(21)
+boss.hp-=1
+add_shake(4)
+if boss.hp<=0 then
+sfx(22)
+change_state(boss,"dying")
+for i in all(objects) do
+kill_object(i)
+end
+end
+end
+bounce_relative(player,boss,2)
+end
+if t%150==0 then
+create_bubbles(arg"64,640,20,40,2,3,")
+create_ink(arg"-20,640,146,660,13,true,")
+boss.wave=40
+music(3)
+end
+elseif boss.state=="dying" then
+if t%2==0 then
+create_explosion(rnd(80)+20,rnd(128)+512,rnd(8)+8)
+end
+if t%flr(rnd(10)+4)==0 then sfx(14) add_shake(4) end
+if boss.animt>=150 and player.state!="dead"then change_state(boss,"dead") next_room() end
+end
+end
+
+function draw_boss()
+drawoutline(arg"69,48,576,4,4,false,false,0,true,")
+if boss.hp<3 then
+spr(arg"73,69,596,")
+if boss.hp<2 then
+spr(arg"73,52,596,1,1,false,true,")
+spr(arg"73,66,580,1,1,true,")
+if boss.hp<1 then
+spr(arg"73,56,581,1,1,true,true,")
+spr(arg"73,62,588,1,1,")
+end
+end
+end
+end
+
+-->8
+--object utils
+
+function spawnlist(l)
+local ol = parse(l)
+for i=1,#ol,3 do
+local t,x,y=ol[i],ol[i+1],ol[i+2]
+spawntype(t,x,y)
+end
+end
+
+function spawntype(type,x,y)
+if type==3 then
+create_snapper(x,y)
+elseif type==4 then
+create_puffer(x,y)
+elseif type==5 then
+create_squid(x,y)
+elseif type==1 then
+create_spikey(x,y)
+elseif type==2 then
+create_mine(x,y)
+elseif type==0 then
+create_exit(x,y)
+elseif type==6 then
+create_clam(x,y)
+elseif type==7 then
+create_school(x,y)
+elseif type==8 then
+create_shark(x,y)
+end
+end
+
+function coll(a,b)
+return not (a.x1>b.x2 or a.y1>b.y2 or a.x2<b.x1 or a.y2<b.y1)
+end
+
+function move(o)
+o.x+=o.vx
+o.y+=o.vy
+end
+
+function kill_object(e)
+add_shake(5)
+create_explosion(e.x,e.y,5)
+create_bubbles(e.x,e.y,rnd(2)+2,4,1,3)
+for i=1,flr(rnd(4)+3) do
+create_particle(e.x,e.y,rnd(3)+-2,rnd(3)+-2,true)
+end
+sfx(7)
+del(objects,e)
+freeze=2
+end
+
+
+function apply_friction(o,fric)
+o.vx*=fric
+o.vy*=fric
+end
+
+function bounce(o,bx,by)
+if bx then o.vx = bx end
+if by then o.vy = by end
+end
+
+function bounce_relative(p,o,str)
+local rdist = dist(p.x,p.y,o.x,o.y)
+local bouncex = (p.x-o.x)/rdist
+local bouncey = (p.y-o.y)/rdist
+bouncex*=str
+bouncey*=str
+bounce(p,bouncex,bouncey)
+end
+
+function change_state(o,state)
+if o.state != state then
+o.state = state
+o.animt = 0
+end
+end
+
+function apply_accel(o,tpspd)
+local l=dist(o.vx,o.vy)
+local rl=min(l,tpspd)
+o.vx=o.vx/l*rl
+o.vy=o.vy/l*rl
+end
+
+function issolid(x, y)
+local tile,col,row = gettile(x,y)
+if tile then
+ox = (x-(col*128))/8
+oy = (y-(row*128))/8
+offsetx = (tile%8)*16
+offsety = flr(tile/8)*16
+val=mget(ox+offsetx, oy+offsety)
+return fget(val, 1)
+end
+end
+
+function detectwalls(o)
+local hb = o.abs_box()
+local x1,x2,y1,y2,xc,yc=hb.x1,hb.x2,hb.y1,hb.y2,0,0
+local adjust = 0.1
+
+for i=y1,y2 do
+if x1-1<0 or issolid(x1-1,i) then
+o.x+=adjust
+xc+=1
+end
+if x2+1>cmaxx or issolid(x2+1,i) then
+o.x-=adjust
+xc+=1
+end
+end
+
+for i=x1,x2 do
+if y1-1<0 or issolid(i,y1-1) then
+o.y+=adjust
+yc+=1
+end
+if y2+1>cmaxy or issolid(i,y2+1) then
+o.y-=adjust
+yc+=1
+end
+end
+
+if xc>0 and xc>=yc then bounce(o,o.vx*-0.8,nil) end
+if yc>0 and yc>=xc then bounce(o,nil,o.vy*-0.8) end
+
+if (xc>0 or yc>0) and o.name=="player" and o.state=="attack" then
+if (player.dir==2 or player.dir==6) and yc>xc then
+else
+cancel_attack()
+end
+end
+end
+
+function setdirection(o,bl,br,bu,bd)
+if bu and not(bl or br or bd) then o.dir = 0 end
+if br and not(bu or bl or bd) then o.dir = 2 end
+if bd and not(bl or bu or br) then o.dir = 4 end
+if bl and not(bd or br or bu) then o.dir = 6 end
+if (bu and br) and not(bl or bd) then o.dir = 1 end
+if (br and bd) and not(bl or bu) then o.dir = 3 end
+if (bd and bl) and not(br or bu) then o.dir = 5 end
+if (bl and bu) and not(br or bd) then o.dir = 7 end
+end
+
+function add_shake(p)
+local a=rnd(1)
+shkx+=p*cos(a)
+shky+=p*sin(a)
+end
+
+function is_offscreen(o,buffer)
+local buf = buffer or 0
+
+if o.x<camx-buf or o.x>camx+127+buf or o.y<camy-buf or o.y>camy+127+buf then return true end
+end
+
+-->8
+--effects--
+
+
+function create_explosion(x,y,r)
+local e={
+x=x,
+y=y,
+r=r,
+p=0,
+draw=draw_explosion,
+}
+add(fx,e)
+end
+
+function draw_explosion(s)
+if s.p<2 then
+circfill(s.x,s.y,s.r,0)
+elseif s.p<4 then
+circfill(s.x,s.y,s.r,7)
+
+if s.p<3 and s.r>4 then
+for i=0,2 do
+local x=s.x+rnd(2.2*s.r)-1.1*s.r
+local y=s.y+rnd(2.2*s.r)-1.1*s.r
+local r=0.25*s.r+rnd(0.5*s.r)
+create_explosion(x,y,r)
+end
+end
+elseif s.p<5 then
+circ(s.x,s.y,s.r,7)
+
+del(fx,s)
+return
+end
+
+s.p+=1
+end
+
+function create_bubbles(x,y,num,spread,minsize,maxsize)
+for i=1,num do
+local a=rnd(1)
+local b={
+x=x+spread*cos(a),
+y=y+spread*sin(a),
+r=rnd(maxsize-minsize)+minsize,
+draw=draw_bubble
+}
+add(fx,b)
+end
+end
+
+function draw_bubble(b)
+circ(b.x+0.5,b.y+0.5,b.r,13)
+circfill(b.x+0.5-b.r*0.4,b.y+0.5-b.r*0.4,b.r*0.2,6)
+b.y-=b.r*0.6
+if(b.y<0)then del(fx,b) end
+end
+
+function create_fern(x,y,len,col)
+f={x=x,y=y,len=len,col=col,flipx=false,draw=draw_fern}
+f.bub=flr(rnd(1080)+720)
+add(fx,f)
+end
+
+function draw_fern(f)
+if t%50==0 then f.flipx=not f.flipx end
+if flr(t+1080)%f.bub==0 then create_bubbles(f.x+3,f.y,1,1,1,2) end
+pal(8,f.col)
+for i=1,f.len do
+if i==f.len then
+spr(105,f.x,f.y-i*8,1,1,f.flipx)
+else
+spr(121,f.x,f.y-i*8,1,1,f.flipx)
+end
+end
+pal()
+end
+
+
+function flashobject(o,c)
+if o.flash > 0 then
+o.flash-=0.1
+for i=0,15 do
+pal(i,c)
+end
+else
+o.flash = 0
+end
+end
+
+function drawoutline(n,x,y,w,h,flip_x,flip_y,c,main)
+for i=1,15 do
+pal(i,c)
+end
+
+for xx=-1,1 do
+for yy=-1,1 do
+spr(n,x+xx,y+yy,w,h,flip_x,flip_y)
+end
+end
+pal()
+if main then spr(n,x,y,w,h,flip_x,flip_y) end
+end
+
+function boldprint(str,x,y,col)
+c=col or 7
+for xx=-1,1 do
+for yy=-1,1 do
+print(str,x+xx,y+yy,0)
+end
+end
+print(str,x,y,c)
+end
+
+function create_particle(x,y,vx,vy,pp)
+p = {
+x=x,
+y=y,
+vx=vx,
+vy=vy,
+cols={0,0,2},
+size=10,
+age=0,
+maxage=30
+}
+if pp then
+p.size=1
+p.maxage=15
+p.cols={7,7,7,6,6,12}
+p.pp=true
+end
+add(particles,p)
+end
+
+function update_particles()
+for p in all(particles) do
+p.age+=1
+if p.age==p.maxage or is_offscreen(p,30) then del(particles,p) end
+local ci = 1+flr((p.age/p.maxage)*#p.cols)
+p.col = p.cols[ci]
+if p.age/p.maxage > 0.6 then p.fill = fades[4] end
+if p.age/p.maxage > 0.8 then
+p.fill = fades[2]
+if not p.pp then
+p.size=14
+end
+end
+
+move(p)
+end
+end
+
+function draw_particles()
+for p in all(particles) do
+if p.fill then fillp(p.fill) end
+circfill(p.x,p.y,p.size,p.col)
+fillp()
+end
+end
+
+-->8
+--utilities--
+
+function parse(string)
+local data = {}
+local d = ""
+for i=1,#string do
+local s = sub(string,i,i)
+if s != "," then
+d=d..s
+else
+if d=="true" then
+d=true
+elseif d=="false" then
+d=false
+else
+d=flr(d)
+end
+add(data,d)
+d=""
+end
+end
+return data
+end
+
+function arg(str)
+return unpack(parse(str))
+end
+
+function unpack(t,i)
+i=i or 1
+if t[i]!=nil then
+return t[i],unpack(t,i+1)
+end
+end
+
+function ternary(c,a,b)
+if c then return a else return b end
+end
+
+function gettile(x,y)
+local col = flr(x/128)
+local row = flr(y/128)
+local tile = roomtiles[(roomcols*row)+row+col+1]
+return tile,col, row
+end
+
+function dist(xa,ya,xb,yb)
+if xb then xa=xb-xa ya=yb-ya end
+local d = max(abs(xa),abs(ya))
+local n = min(abs(xa),abs(ya)) / d
+return sqrt(n*n +1)*d
+end
+
+function new_box(x1,y1,x2,y2)
+return {x1=x1,y1=y1,x2=x2,y2=y2}
+end
+
+function timer()
+local min,sec=gm,flr(gt/30)
+if min<10 then
+min="0"..min
+end
+if sec<10 then
+sec="0"..sec
+end
+return min..":"..sec
+end
+
 __gfx__
 000000000088e0000088e000000008e8000008e8000e0000000e0000000c0000000000000001d000002222000000000000000000000000677777000000060000
 0000000000178e0000178e000008718800087188e008e0000008e000000c000000000000001dd50002e2222000000000000076700d6666666666770000676000
@@ -416,3 +2253,63 @@ __map__
 41424242424242737373737373407373737373737373737373737373737373737373737373737373737373737374596b736463596a59595959595959597b59737360606359596b000000596b00736073737362626262746263595959597373734243000000000000000000005959414473607363595900006a59595959736073
 7360737364737364737373737373737373737373647373737373647373737373737373736473737373737373734244434074595959597b00007a59595959597373647459595959596b00595959606473737374595974635959595959597373735153000041436b004144436a595960406064745959596a595959595959647364
 7373737360737373737373737373737373737373737373737373737373736073737373737373737373737373737364746263597b0000000000000000007a5961737374595959595959595959597373737373745959635959595959595973737373746b6a60745959647374595941737373737459595959595959595959736073
+__sfx__
+0114000005611086210c6210c6210c6210c6210b6310b6310c6310e6410f6411264115641186511b6611b6511c6611a671186711567113671106610e6510b6510964108631076210662105611036110261101611
+010400000a0510c0510f0511105100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010400000e05110051120511305100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000400001305115051170511905120553285030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+01040000225531e5531a55316553135530f5530d55303500015001b0001800016000120000f0000d0000800006000000000000000000000000000000000000000000000000000000000000000000000000000000
+010600000a0500a050010500105000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010400002945312053314532055327053366570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010400002245122451264512645121654226512065521100000002110021100000000000021100211000000021100211000000000000000000000000000000000000000000000000000000000000000000000000
+011000000161101611016110361105611046110161101611026110461105611046110361102621016310162101621016210161101611016110161102611036210662105621046210362103621046110161101611
+010100000505305053050530405304053040530205302053020530005300053000530000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+01100000114301143011440114401145011460114601146011470114701147011470114701146011460114500c4600c4600c4700c4700c4700c4700c4600c4500c4500c4500c4500c4400c4400c4400c4300c430
+01100000212222122221222212322123221242212422125221252212522125221252212422124221232212321c2621c2521c2521c2521c2421c2421c2321c2221c2221c2221c2221c2121c2121c2121c2021c202
+011000001814118151181511815124151241512414124131181611815118151181511815118151181511814113161131511315113151131511315113141131411313113131131311312113121131211311113111
+01100000281122811228122281222813228132281422814228152281522816228162281612815228152281522815228152281522815228142281322812228112281122811228112281121c1121c1121c1121c112
+01040000291531c1530e1530015000050000500005000050001030010300103001030010300103001030010300103001030010300103001030010300103001030000000000000000000000000000000000000000
+010800001103504535110350453511035045351103504535110350453511035045350c00500005000050000500005000050000500005000050000500005000050000500005000050000500000000000000000000
+0104000013530297531c5101a51010510105100050000501005010050100501005010050100501005010050100501005010050100501005010050100501005010050100501005010050100501005010050000500
+011000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010300000c7230c7230c7230c7230c7230c7330c7430c7530c7630c7630c7530c7430c7330c7230c7230c7330c7330c7430c7530c7630c7630c7530c7430c7330c7230c7330c7330c7430c7430c7330c7230c723
+000300001173311743117531176311763117531175311743117431173311743117431175311753117531175311753117631176311763117531174311743117331173311733117431174311743117531176311753
+0103000002023030230402307023080330b0330b03308023070130802309023080230603306043080530a0630b0630c0630b05309043070330603305033040230402305033070430703306023060230601306003
+010500003664327345336513634533651336512462124611246111861118615000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0105000032355346513b355376513465135345356413b641346413b631393353b631396313762132325326213b621346113631518611186111861118611186111861118611186111861118611186111861118611
+010500000c521105311f5412355124533245000050100501005010050100501005010050100501005010050100501005010050100501005010050100501005010050100501005010050100501005010000000000
+0105000024531235311f5411c55118543000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010a00001144011450114601146011460114601146011450114401144011430114301142011410114101141000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010a00001c2221c2221c2221c2221c2321c2321c2421c2521d2721d2621d2521d2421d2321d2221d2121d21200000000000000000000000000000000000000000000000000000000000000000000000000000000
+010a00001814118151181511815121151211512114121131111511115111141111311112111111111111111100000000000000000000000000000000000000000000000000000000000000000000000000000000
+010a00002811228112281222812228132281422814228152291522915229142291322912229112291122911200000000000000000000000000000000000000000000000000000000000000000000000000000000
+010600001d0341d0711d0711d015000001d0141d0151800000000180001d0141d0151d0001800018000180001d0001d0001800000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+011000000c0533f415000003c6150c0533f3153c615000000c0533f415000003c6150c0533f4153c615000000c0533f3153f3153c6150c0533f4153c615000000c053000003f3153c6150c0533f4153c61500000
+011000000c0533f200000003c6150c0533f2003c615000000c0533f200000003c6150c0533f2003c615000000c0533f2003f2003c6150c0533f2003c615000000c053000003f2003c6150c0533f2003c61500000
+011000000c05329454264453c6150c0532f3453c6152b3520c05328352294523c6150c0533f2003c615000000c0533f200293503c6150c053283503c615293500c05329440263553c6150c053000003c61500000
+011000000014000020001100010000140000200011000100001400002000110001000014000020001100010000140000200011000100001400002000110001000014000020001100010000140000200011000100
+011000000414004020041100410004140040200411004100041400402004110041000414004020041100410004140040200411004100041400402004110041000414004020041100410004140040200411004100
+011000000714007020071100710007140070200711007100071400702007110071000714007020071100710007140070200711007100071400702007110071000714007020071100710007140070200711007100
+011000000514005020051100510005140050200511005100051400502005110051000514005020051100510005140050200511005100051400502005110051000514005020051100510005140050200511005100
+011000000914009020091100910009140090200911009100091400902009110091000914009020091100910009140090200911009100091400902009110091000914009020091100910009140090200911009100
+011000000214002020021100210002140020200211002100021400202002110021000214002020021100210002140020200211002100021400202002110021000214002020021100210002140020200211002100
+__music__
+00 00424344
+02 08424344
+04 0a0b0c0d
+00 12134344
+04 13144344
+04 191a1b1c
+00 41424344
+00 41424344
+01 22234344
+00 22244344
+00 22254344
+00 22254344
+00 22264344
+00 22274344
+00 22254344
+02 22284344
+

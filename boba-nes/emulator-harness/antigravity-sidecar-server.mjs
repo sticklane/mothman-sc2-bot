@@ -511,6 +511,8 @@ function loadAllDiffTelemetry() {
   const visualReport = readJsonSafe(path.join(DECOMPILED_DIR, 'visual_image_diff_report.json'));
   const origReport = readJsonSafe(path.join(DECOMPILED_DIR, 'original_games_report.json'));
   const multiTargetReport = readJsonSafe(path.join(DECOMPILED_DIR, 'multi_target_side_by_side_report.json'));
+  const realN64Report = readJsonSafe(path.join(DECOMPILED_DIR, 'real_n64_report.json'));
+  const realSnesGbaReport = readJsonSafe(path.join(DECOMPILED_DIR, 'real_snes_gba_report.json'));
 
   cachedTelemetry = {
     core3Report,
@@ -518,7 +520,9 @@ function loadAllDiffTelemetry() {
     metroidReport,
     visualReport,
     origReport,
-    multiTargetReport
+    multiTargetReport,
+    realN64Report,
+    realSnesGbaReport
   };
   cachedTelemetryTime = now;
   return cachedTelemetry;
@@ -526,9 +530,9 @@ function loadAllDiffTelemetry() {
 
 function humanizeId(id) {
   return id
-    .replace(/\.(nes|gb|gbc|p8)$/i, '')
+    .replace(/\.(nes|gb|gbc|p8|sfc|gba|n64|z64)$/i, '')
     .split(/[_-]+/)
-    .map(w => (w.length <= 2 && /^(ii|gb|3d)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .map(w => (w.length <= 2 && /^(ii|gb|3d|64)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
     .join(' ');
 }
 
@@ -660,11 +664,14 @@ function buildCatalog() {
     byId[entry.id] = entry;
   }
 
-  // 3. Scan real .gb, .gbc, and .p8 ROMs in assets/roms/{gb,gbc,pico}/
+  // 3. Scan real .gb, .gbc, .p8, .sfc, .gba, and .n64 ROMs in assets/roms/{gb,gbc,pico,snes,gba,n64}/
   const extraTargets = [
     { target: 'gb', ext: '.gb', dir: path.join(ROMS_DIR, 'gb'), res: '160x144', totalPx: 23040, category: 'commercial-gb' },
     { target: 'gbc', ext: '.gbc', dir: path.join(ROMS_DIR, 'gbc'), res: '160x144', totalPx: 23040, category: 'commercial-gbc' },
-    { target: 'pico', ext: '.p8', dir: path.join(ROMS_DIR, 'pico'), res: '128x128', totalPx: 16384, category: 'commercial-pico' }
+    { target: 'pico', ext: '.p8', dir: path.join(ROMS_DIR, 'pico'), res: '128x128', totalPx: 16384, category: 'commercial-pico' },
+    { target: 'snes', ext: '.sfc', dir: path.join(ROMS_DIR, 'snes'), res: '256x224', totalPx: 57344, category: 'commercial-snes' },
+    { target: 'gba', ext: '.gba', dir: path.join(ROMS_DIR, 'gba'), res: '240x160', totalPx: 38400, category: 'commercial-gba' },
+    { target: 'n64', ext: '.n64', dir: path.join(ROMS_DIR, 'n64'), res: '320x240', totalPx: 76800, category: 'commercial-n64' }
   ];
 
   for (const tSpec of extraTargets) {
@@ -675,12 +682,22 @@ function buildCatalog() {
       const stat = fs.statSync(fullPath);
       if (!stat.isFile() || stat.size === 0) continue;
       const buf = fs.readFileSync(fullPath);
-      const cleanId = fname.replace(/\.(gb|gbc|p8)$/i, '');
+      const cleanId = fname.replace(/\.(gb|gbc|p8|sfc|gba|n64|z64)$/i, '');
       const header =
         tSpec.target === 'pico'
           ? parsePicoHeader(buf)
+          : tSpec.target === 'n64'
+          ? { format: 'N64 Big/Little-Endian Cartridge (.n64)', mapperName: 'MIPS III VR4300 + SGI RCP (RSP/RDP)', prgBytes: stat.size, chrBytes: 4096 }
+          : tSpec.target === 'snes'
+          ? { format: 'SNES Cartridge (.sfc)', mapperName: 'WDC 65C816 + S-PPU', prgBytes: stat.size, chrBytes: 65536 }
+          : tSpec.target === 'gba'
+          ? { format: 'GBA Cartridge (.gba)', mapperName: 'ARM7TDMI + GBA PPU', prgBytes: stat.size, chrBytes: 98304 }
           : parseGbHeader(buf, tSpec.target);
 
+      const recompCandidate = `build/recompiled_${tSpec.target}_${cleanId}${tSpec.ext}`;
+      const hasRecomp = fs.existsSync(path.join(REPO_ROOT, recompCandidate));
+      const dslCandidate = `assets/decompiled/real_roms/${tSpec.target}_${cleanId}.boba.rkt`;
+      const tasCandidate = `assets/tas/${tSpec.target}_${cleanId}.fm2`;
       const screenshotCandidate = `screenshots/visual_diff_${tSpec.target}_${cleanId}_3panel.png`;
       const hasScreenshot = fs.existsSync(path.join(REPO_ROOT, screenshotCandidate));
 
@@ -692,7 +709,9 @@ function buildCatalog() {
         category: tSpec.category,
         resolution: tSpec.res,
         romPath: `assets/roms/${tSpec.target}/${fname}`,
-        decompRomPath: `assets/roms/${tSpec.target}/${fname}`,
+        decompRomPath: hasRecomp ? recompCandidate : `assets/roms/${tSpec.target}/${fname}`,
+        dslPath: fs.existsSync(path.join(REPO_ROOT, dslCandidate)) ? dslCandidate : undefined,
+        tasPath: fs.existsSync(path.join(REPO_ROOT, tasCandidate)) ? tasCandidate : undefined,
         fileSize: stat.size,
         sha256: computeFileSha256(fullPath),
         decompFileSize: stat.size,
@@ -717,7 +736,7 @@ function buildCatalog() {
           Phi3: {
             zpBytes: 32,
             zpBudget: tSpec.target === 'pico' ? 256 : 127,
-            ramBytes: tSpec.target === 'gbc' ? 32768 : 8192,
+            ramBytes: tSpec.target === 'n64' ? 4194304 : tSpec.target === 'gbc' ? 32768 : 8192,
             prgBytes: stat.size,
             chrBytes: header.chrBytes || 8192,
             status: 'PASS'
@@ -752,7 +771,10 @@ function buildCatalog() {
       originalDslNes: roms.filter(r => r.category === 'original-dsl-nes').length,
       gb: roms.filter(r => r.target === 'gb').length,
       gbc: roms.filter(r => r.target === 'gbc').length,
-      pico: roms.filter(r => r.target === 'pico').length
+      pico: roms.filter(r => r.target === 'pico').length,
+      snes: roms.filter(r => r.target === 'snes').length,
+      gba: roms.filter(r => r.target === 'gba').length,
+      n64: roms.filter(r => r.target === 'n64').length
     },
     roms,
     byTarget: {
@@ -760,10 +782,15 @@ function buildCatalog() {
       dsl: roms.filter(r => r.category === 'original-dsl-nes'),
       gb: roms.filter(r => r.target === 'gb'),
       gbc: roms.filter(r => r.target === 'gbc'),
-      pico: roms.filter(r => r.target === 'pico')
+      pico: roms.filter(r => r.target === 'pico'),
+      snes: roms.filter(r => r.target === 'snes'),
+      gba: roms.filter(r => r.target === 'gba'),
+      n64: roms.filter(r => r.target === 'n64')
     },
     byId,
-    multiTargetSummary: telemetry.multiTargetReport
+    multiTargetSummary: telemetry.multiTargetReport,
+    realN64Report: telemetry.realN64Report,
+    realSnesGbaReport: telemetry.realSnesGbaReport
   };
 }
 
@@ -895,13 +922,13 @@ function resolveRomAndState(target, rawId, options = {}) {
   const cleanTarget = String(target || 'nes').toLowerCase();
   const cleanId = String(rawId || 'super_mario_bros')
     .toLowerCase()
-    .replace(/\.(nes|gb|gbc|p8)$/i, '');
+    .replace(/\.(nes|gb|gbc|p8|sfc|smc|gba|n64|z64)$/i, '');
 
   const catalog = buildCatalog();
   const entry =
     catalog.byId[`${cleanTarget}:${cleanId}`] ||
     catalog.byId[cleanId] ||
-    catalog.roms.find(r => r.target === cleanTarget && (r.id === cleanId || r.shortId === cleanId));
+    catalog.roms.find(r => r.target === cleanTarget && (r.id === cleanId || r.shortId === cleanId || (Array.isArray(r.aliases) && r.aliases.includes(cleanId))));
 
   if (!entry) {
     return null;
@@ -924,6 +951,8 @@ function resolveRomAndState(target, rawId, options = {}) {
     } else if (nesSpec && stateJson) {
       decompBytes = synthesizeDecompiledNesRomFromState(nesSpec, stateJson, refBytes);
     }
+  } else if (fs.existsSync(decompAbsPath)) {
+    decompBytes = fs.readFileSync(decompAbsPath);
   }
 
   return {
@@ -1610,12 +1639,25 @@ function getStatusPayload() {
   const gbFiles = listDirFilesByExt(path.join(ROMS_DIR, 'gb'), '.gb');
   const gbcFiles = listDirFilesByExt(path.join(ROMS_DIR, 'gbc'), '.gbc');
   const picoFiles = listDirFilesByExt(path.join(ROMS_DIR, 'pico'), '.p8');
+  const snesFiles = listDirFilesByExt(path.join(ROMS_DIR, 'snes'), '.sfc');
+  const gbaFiles = listDirFilesByExt(path.join(ROMS_DIR, 'gba'), '.gba');
+  const n64Files = listDirFilesByExt(path.join(ROMS_DIR, 'n64'), '.n64');
   const builtNesFiles = listDirFilesByExt(BUILD_DIR, '.nes');
+  const builtN64Files = listDirFilesByExt(BUILD_DIR, '.n64');
+
+  const totalReal =
+    nesFiles.length +
+    gbFiles.length +
+    gbcFiles.length +
+    picoFiles.length +
+    snesFiles.length +
+    gbaFiles.length +
+    n64Files.length;
 
   return {
     ok: true,
     server: 'Antigravity Boba-NES Live Sidecar Daemon',
-    version: '2.4.0',
+    version: '3.0.0',
     host: '127.0.0.1',
     port: PORT,
     startedAt: STARTED_AT,
@@ -1629,15 +1671,22 @@ function getStatusPayload() {
       gb: gbFiles.length,
       gbc: gbcFiles.length,
       pico: picoFiles.length,
+      snes: snesFiles.length,
+      gba: gbaFiles.length,
+      n64: n64Files.length,
       dslOriginalNes: ORIGINAL_DSL_GAMES.length,
       builtNesTotal: builtNesFiles.length,
-      totalRealRoms: nesFiles.length + gbFiles.length + gbcFiles.length + picoFiles.length,
-      totalCatalogRoms: nesFiles.length + ORIGINAL_DSL_GAMES.length + gbFiles.length + gbcFiles.length + picoFiles.length,
+      builtN64Total: builtN64Files.length,
+      totalRealRoms: totalReal,
+      totalCatalogRoms: totalReal + ORIGINAL_DSL_GAMES.length,
       files: {
         nes: nesFiles,
         gb: gbFiles,
         gbc: gbcFiles,
         pico: picoFiles,
+        snes: snesFiles,
+        gba: gbaFiles,
+        n64: n64Files,
         dslOriginalNes: ORIGINAL_DSL_GAMES.map(g => g.romFile)
       }
     },
@@ -1646,6 +1695,7 @@ function getStatusPayload() {
     engines: {
       jsnes: true,
       serverboy: Boolean(ServerBoy),
+      n64js: fs.existsSync(path.join(__dirname, 'vendor/n64js/src/headless/headless_env.js')),
       racket: fs.existsSync(RACKET_BIN)
     }
   };
@@ -1696,7 +1746,15 @@ function tryServeStaticAsset(pathname, res) {
     '.nes': 'application/octet-stream',
     '.gb': 'application/octet-stream',
     '.gbc': 'application/octet-stream',
-    '.p8': 'text/plain; charset=utf-8'
+    '.sfc': 'application/octet-stream',
+    '.smc': 'application/octet-stream',
+    '.gba': 'application/octet-stream',
+    '.n64': 'application/octet-stream',
+    '.z64': 'application/octet-stream',
+    '.rgb': 'application/octet-stream',
+    '.p8': 'text/plain; charset=utf-8',
+    '.fm2': 'text/plain; charset=utf-8',
+    '.rkt': 'text/plain; charset=utf-8'
   };
 
   const data = fs.readFileSync(fullPath);

@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { NES, Controller } from './node_modules/jsnes/src/index.js';
 import pngjs from 'pngjs';
+import { runNesWholeRomTasLockstep } from './tas-fm2-runner.mjs';
 const { PNG } = pngjs;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -552,11 +553,17 @@ function diffSuperMarioBros() {
       cpCampaignWin.gameplayState.coins === 4
   });
 
+  const wholeRomTasLockstep = runNesWholeRomTasLockstep('super_mario_bros', 'super_mario_bros.nes');
+
   return {
     id: 'smb',
     title: 'Super Mario Bros.',
     authenticRom: 'assets/roms/super_mario_bros.nes',
     decompiledRom: 'build/mario_nes.nes',
+    bobaWholeRomModule: wholeRomTasLockstep.bobaWholeRomModule,
+    recompiledWholeRom: wholeRomTasLockstep.recompiledWholeRom,
+    tasFile: wholeRomTasLockstep.tasFile,
+    wholeRomTasLockstep,
     screenshot: 'screenshots/diff_smb_side_by_side.png',
     ...cp0,
     frame0: cp0,
@@ -766,11 +773,17 @@ function diffLegendOfZelda() {
       cpQuestWin.gameplayState.octoAlive === 0
   });
 
+  const wholeRomTasLockstep = runNesWholeRomTasLockstep('legend_of_zelda', 'legend_of_zelda.nes');
+
   return {
     id: 'zelda',
     title: 'The Legend of Zelda',
     authenticRom: 'assets/roms/legend_of_zelda.nes',
     decompiledRom: 'build/zelda_nes.nes',
+    bobaWholeRomModule: wholeRomTasLockstep.bobaWholeRomModule,
+    recompiledWholeRom: wholeRomTasLockstep.recompiledWholeRom,
+    tasFile: wholeRomTasLockstep.tasFile,
+    wholeRomTasLockstep,
     screenshot: 'screenshots/diff_zelda_side_by_side.png',
     ...cp0,
     frame0: cp0,
@@ -982,11 +995,17 @@ function diffNintendoTetris() {
       cpCampaignWin.gameplayState.dirtyRow === 20
   });
 
+  const wholeRomTasLockstep = runNesWholeRomTasLockstep('tetris', 'tetris.nes');
+
   return {
     id: 'tetris',
     title: 'Nintendo NES Tetris',
     authenticRom: 'assets/roms/tetris.nes',
     decompiledRom: 'build/tetris_nes.nes',
+    bobaWholeRomModule: wholeRomTasLockstep.bobaWholeRomModule,
+    recompiledWholeRom: wholeRomTasLockstep.recompiledWholeRom,
+    tasFile: wholeRomTasLockstep.tasFile,
+    wholeRomTasLockstep,
     screenshot: 'screenshots/diff_tetris_side_by_side.png',
     ...cp0,
     frame0: cp0,

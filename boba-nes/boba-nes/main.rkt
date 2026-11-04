@@ -56,6 +56,8 @@
  with-zp-scratch
  defchr-tile
  defboba-stage
+ define-boba-whole-rom
+ def-whole-rom-cartridge
  verify-nes-grades!)
 
 ;; Surface DSL macro for declaring a game phase state machine with verified failure recovery & victory reachability
@@ -231,4 +233,19 @@
 (define (verify-nes-grades! mod [budget NTSC-NROM-BUDGET])
   (typecheck-nes-module mod budget))
 
+;; Surface DSL macro for a whole-ROM decompiled/recompiled cartridge module (.nes / .gb / .gbc / .p8)
+(define-syntax (define-boba-whole-rom stx)
+  (syntax-case stx ()
+    [(define-boba-whole-rom rom-id rest ...)
+     #'(begin
+         (provide rom-id whole-rom-sexp)
+         (define whole-rom-sexp '(define-boba-whole-rom rom-id rest ...))
+         (define rom-id whole-rom-sexp))]))
+
+(define-syntax (def-whole-rom-cartridge stx)
+  (syntax-case stx ()
+    [(def-whole-rom-cartridge body ...)
+     #'(begin
+         (provide whole-rom-sexp)
+         (define whole-rom-sexp '(def-whole-rom-cartridge body ...)))]))
 

@@ -1,0 +1,1421 @@
+import { describe, expect, spyOn, test } from 'bun:test';
+import { createHeadlessEmulator, runCycles, runFrames } from './headless_env.js';
+import { controlCause, controlStatus } from '../cpu/cpu0reg.js';
+import { MI_INTR_DP, MI_INTR_MASK_REG, MI_INTR_REG, MI_INTR_SP, MI_INTR_VI } from '../devices/mi.js';
+import { SI_DRAM_ADDR_REG, SI_PIF_ADDR_RD64B_REG, SI_PIF_ADDR_WR64B_REG, SI_STATUS_REG } from '../devices/si.js';
+import {
+  SP_CLR_BROKE, SP_CLR_HALT, SP_CLR_SIG1, SP_CLR_SIG2, SP_CLR_SIG3, SP_SET_SIG3, SP_STATUS_SIG3, SP_SET_HALT, SP_SET_INTR_BREAK, SP_SET_SIG2,
+  SP_STATUS_HALT, SP_STATUS_BROKE, SP_STATUS_TASKDONE, SP_STATUS_REG,
+} from '../devices/sp_constants.js';
+import { audioOptions } from '../hle/audio/options.js';
+import { EmulationMode } from '../hle/emulation_mode.js';
+import { graphicsOptions } from '../hle/graphics/graphics_options.js';
+import { ImageFormat, ImageSize } from '../hle/graphics/gbi.js';
+import { MicrocodeId, microcodePrefixLength } from '../hle/graphics/microcode_identifier.js';
+import { TaskOffsets } from '../hle/rsp_task_constants.js';
+import { OS_TV_NTSC } from '../system_constants.js';
+
+
+function createEmulator(options) {
+  // Boot initialization only needs a buffer containing the bootstrap region.
+  // Controller tests issue SI DMA requests directly, without running ROM code.
+  return createHeadlessEmulator({
+    romBuffer: new ArrayBuffer(0x1000),
+    rominfo: { cic: '6102', tvType: OS_TV_NTSC, save: 'Eeprom4k' },
+  }, options);
+}
+
+function readController(emulator, port = 0, onRead = null) {
+  const { hardware } = emulator;
+  const dramAddress = 0x1000;
+  const siBase = 0xa4800000;
+  const pifAddress = 0x1fc007c0;
+  const frame = hardware.ram.u8.subarray(dramAddress, dramAddress + 64);
+  frame.fill(0);
+  // Leading zero bytes skip earlier ports. Send command 1 (controller read),
+  // reserve four response bytes, then terminate the Joybus command list.
+  frame.set([1, 4, 1, 0, 0, 0, 0, 0xfe], port);
+  frame[63] = 1;
+
+  const si = hardware.siRegDevice;
+  si.write32(siBase + SI_DRAM_ADDR_REG, dramAddress);
+  si.write32(siBase + SI_PIF_ADDR_WR64B_REG, pifAddress);
+  return afterDMA(() => {
+    si.write32(siBase + SI_STATUS_REG, 0);
+    si.write32(siBase + SI_PIF_ADDR_RD64B_REG, pifAddress);
+    return afterDMA(() => {
+      si.write32(siBase + SI_STATUS_REG, 0);
+      const result = {
+        status: frame[port + 1],
+        data: Array.from(frame.subarray(port + 3, port + 7)),
+      };
+      if (onRead) {
+        onRead(result);
+      }
+      return result;
+    });
+  });
+
+  function afterDMA(next) {
+    // Poll after completion; callbacks used inside a running CPU must not
+    // advance its event queue recursively.
+    if (onRead) {
+      return emulator.cpu0.addEvent('Test SI completion', 0x901, next);
+    }
+    emulator.cpu0.incrementCount(0x900);
+    emulator.cpu0.eventQueue.incrementCount(0x900);
+    return next();
+  }
+}
+
+describe('headless controller input', () => {
+  test('starts neutral and keeps additional controller ports disconnected', async () => {
+    const emulator = await createEmulator();
+    expect(emulator.inputs).toHaveLength(4);
+    expect(readController(emulator)).toEqual({ status: 4, data: [0, 0, 0, 0] });
+
+    for (let port = 1; port < 4; port++) {
+      emulator.inputs[port].buttons = 0x8000;
+      // The high bit reports that the disconnected port returned no data.
+      expect(readController(emulator, port).status).toBe(0x84);
+    }
+    expect(readController(emulator)).toEqual({ status: 4, data: [0, 0, 0, 0] });
+  });
+
+  test('delivers button presses, holds, releases, and signed stick positions through SI DMA', async () => {
+    const emulator = await createEmulator();
+    const controller = emulator.inputs[0];
+    controller.buttons = 0x9001; // Start, A, and C-right exercise both button bytes.
+    controller.stick_x = -80;
+    controller.stick_y = 80;
+    const pressed = { status: 4, data: [0x90, 0x01, 0xb0, 0x50] };
+    expect(readController(emulator)).toEqual(pressed);
+    expect(readController(emulator)).toEqual(pressed);
+
+    controller.buttons = 0;
+    controller.stick_x = 0;
+    controller.stick_y = 0;
+    expect(readController(emulator)).toEqual({ status: 4, data: [0, 0, 0, 0] });
+    expect(emulator.fatalError()).toBeNull();
+  });
+
+  test('allocates fresh controller state for each emulator', async () => {
+    const first = await createEmulator();
+    for (const input of first.inputs) {
+      input.buttons = 0x1000;
+      input.stick_x = -80;
+      input.stick_y = 80;
+    }
+
+    const second = await createEmulator();
+    for (const input of second.inputs) {
+      expect(input).toMatchObject({ buttons: 0, stick_x: 0, stick_y: 0 });
+    }
+    expect(readController(second)).toEqual({ status: 4, data: [0, 0, 0, 0] });
+    expect(first.inputs[0]).toMatchObject({ buttons: 0x1000, stick_x: -80, stick_y: 80 });
+  });
+});
+
+function prepareVIEmulation(emulator, interval = 8) {
+  const { cpu0, hardware } = emulator;
+  // Execute NOPs from cleared RAM, with guest interrupts disabled. Use a short
+  // synthetic VI interval while exercising the real CPU and VI event handling.
+  cpu0.pc = 0x80000000;
+  cpu0.setControlU32(controlStatus, 0);
+  cpu0.cop1ControlChanged();
+  hardware.vi_reg.set32(0, 0x40); // Interlaced, so the field toggles each VI.
+  hardware.mi_reg.set32(MI_INTR_MASK_REG, MI_INTR_VI);
+  cpu0.updateCause3();
+  hardware.viRegDevice.countPerVbl = interval;
+  hardware.viRegDevice.addInterruptEvent();
+}
+
+describe('VI boundary callback', () => {
+  test('runs once per VI after the counter, field, and interrupt state are updated', async () => {
+    const seen = [];
+    const emulator = await createEmulator({
+      onVerticalBlank: count => {
+        const { cpu0, hardware } = emulator;
+        seen.push({
+          count,
+          actualCount: hardware.verticalBlankCount,
+          field: hardware.viRegDevice.field,
+          pending: hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_VI,
+          cause: cpu0.getControlU32(controlCause) & 0x400,
+          nextVI: hardware.viRegDevice.getVblCount(),
+        });
+      },
+    });
+    prepareVIEmulation(emulator);
+    runCycles(emulator, 7);
+    expect(seen).toEqual([]);
+    runCycles(emulator, 1);
+    expect(seen).toEqual([
+      { count: 1, actualCount: 1, field: 1, pending: MI_INTR_VI, cause: 0x400, nextVI: 8 },
+    ]);
+    runCycles(emulator, 8);
+    expect(seen).toEqual([
+      { count: 1, actualCount: 1, field: 1, pending: MI_INTR_VI, cause: 0x400, nextVI: 8 },
+      { count: 2, actualCount: 2, field: 0, pending: MI_INTR_VI, cause: 0x400, nextVI: 8 },
+    ]);
+  });
+
+  test('updates input before subsequent polls with either runner and different chunk sizes', async () => {
+    for (const frames of [false, true]) {
+      for (const chunkCycles of [1, 3, 100]) {
+        const samples = [];
+        const emulator = await createEmulator({
+          onVerticalBlank: count => {
+            emulator.inputs[0].buttons = count % 2 ? 0x1000 : 0;
+            // Poll through SI DMA one emulated cycle after each VI boundary.
+            emulator.cpu0.addEvent('Test controller poll', 1, () => {
+              readController(emulator, 0, result => samples.push(result.data));
+            });
+          },
+        });
+        // Leave time for both SI transfers between VI boundaries.
+        prepareVIEmulation(emulator, 0x2000);
+        if (frames) {
+          runFrames(emulator, 3, 0x6000, chunkCycles);
+        } else {
+          runCycles(emulator, 0x6000, chunkCycles);
+        }
+        runCycles(emulator, 0x1203); // Finish the final scheduled poll's DMAs.
+        expect(samples).toEqual([[0x10, 0, 0, 0], [0, 0, 0, 0], [0x10, 0, 0, 0]]);
+        expect(emulator.hardware.verticalBlankCount).toBe(3);
+      }
+    }
+  });
+
+  test('preserves the callback across reset and restarts the VI count', async () => {
+    const seen = [];
+    const emulator = await createEmulator({ onVerticalBlank: count => seen.push(count) });
+    prepareVIEmulation(emulator);
+    runFrames(emulator, 2, 16);
+    emulator.hardware.reset();
+    expect(emulator.hardware.verticalBlankCount).toBe(0);
+    expect(seen).toEqual([1, 2]);
+    prepareVIEmulation(emulator);
+    runFrames(emulator, 1, 8);
+    expect(seen).toEqual([1, 2, 1]);
+  });
+
+  test('keeps the callback optional and scoped to its hardware instance', async () => {
+    const seen = [];
+    const first = await createEmulator({ onVerticalBlank: count => seen.push(count) });
+    prepareVIEmulation(first);
+    runFrames(first, 1, 8);
+
+    const second = await createEmulator();
+    prepareVIEmulation(second);
+    expect(runFrames(second, 2, 16)).toBe(2);
+    expect(seen).toEqual([1]);
+  });
+});
+
+function prepareGraphicsTask(emulator, version = 'RSP Gfx ucode F3DEX fifo 2.0', code = [1, 2, 3]) {
+  const { hardware } = emulator;
+  hardware.ram.u8.set(code, 0x1000);
+  const data = new TextEncoder().encode(version + '\0');
+  hardware.ram.u8.set(data, 0x2000);
+  const task = hardware.sp_mem.subRegion(0xfc0, 0x40);
+  task.set32(TaskOffsets.ucodePtr, 0x80001000);
+  task.set32(TaskOffsets.ucodeSize, code.length);
+  task.set32(TaskOffsets.ucodeDataPtr, 0x80002000);
+  task.set32(TaskOffsets.ucodeDataSize, data.length);
+}
+
+function startRSPTask(emulator, type = 1) {
+  const { hardware } = emulator;
+  hardware.sp_mem.set32(0xfc0 + TaskOffsets.type, type);
+  const spStatusAddress = 0xa4040000 + SP_STATUS_REG;
+  hardware.spRegDevice.write32(spStatusAddress, SP_SET_HALT | SP_CLR_BROKE | SP_CLR_SIG2);
+  // Discard any interrupt from halting the RSP during setup.
+  hardware.mi_reg.clearBits32(MI_INTR_REG, MI_INTR_DP | MI_INTR_SP);
+  hardware.spRegDevice.write32(spStatusAddress, SP_CLR_HALT);
+}
+
+// Dispatch-focused tests wait for the nominal HLE completion event. Timing and
+// producer-wait tests use startRSPTask directly to observe the pending state.
+function startAndCompleteRSPTask(emulator, type = 1) {
+  startRSPTask(emulator, type);
+  if (emulator.hardware.spRegDevice.hleTask) {
+    emulator.cpu0.eventQueue.incrementCount(1000);
+  }
+}
+
+function setGraphicsCommands(emulator, commands) {
+  const { hardware } = emulator;
+  hardware.sp_mem.set32(0xfc0 + TaskOffsets.dataPtr, 0x3000);
+  commands.forEach(([cmd0, cmd1], index) => {
+    hardware.ram.set32(0x3000 + index * 8, cmd0);
+    hardware.ram.set32(0x3004 + index * 8, cmd1);
+  });
+}
+
+// Synthetic bytes with hash 0xe281945c, not game microcode. Leading zeros keep
+// the hash unchanged and exercise the 4 KiB size used by in-list microcode loads.
+const bossCode = new Uint8Array(0x1000);
+bossCode.set([9, 4, 7, 7, 4, 4, 9, 0], bossCode.length - 8);
+// Synthetic bytes with hash 0xc62a1631, likewise not game microcode.
+const rogueCode = new Uint8Array(0x1000);
+rogueCode.set([8, 1, 12, 9, 2, 0, 12, 5], rogueCode.length - 8);
+// Synthetic bytes with hash 0x1f59be1a, not Naboo microcode.
+const nabooCode = new Uint8Array(0x1000);
+nabooCode.set([1, 4, 13, 7, 8, 13, 15, 13], nabooCode.length - 8);
+// Synthetic base-17 digits with hash 0xdd57a04e, not Indiana Jones microcode.
+const indiCode = new Uint8Array(0x1000);
+indiCode.set([9, 0, 14, 6, 16, 5, 10, 2], indiCode.length - 8);
+// Synthetic prefix with hash 0xeb70fcb5; no game code is included.
+const hvqmCode = new Uint8Array(0x1000);
+hvqmCode.set([9, 10, 11, 0, 1, 11, 12, 15], microcodePrefixLength - 8);
+const unsupportedMicrocodes = [
+  { family: 'F5', version: '', code: rogueCode, detection: 'hash' },
+];
+const factor5RSPMicrocodes = [
+  { name: 'Indiana Jones', id: MicrocodeId.F5_INDI, variant: 'INDI', code: indiCode },
+  { name: 'Battle for Naboo', id: MicrocodeId.F5_NABOO, variant: 'NABOO', code: nabooCode },
+];
+const factor5RSPCases = factor5RSPMicrocodes.flatMap(info =>
+  [false, true].map(executeGraphics => ({ ...info, executeGraphics })));
+
+describe('headless graphics execution', () => {
+  test.each(factor5RSPCases)('executes $name linked tasks without synthetic completion (draws=$executeGraphics)', async ({ id, code, executeGraphics }) => {
+    const seen = [], loaded = [];
+    const emulator = await createEmulator({ executeGraphics,
+      onGraphicsTask: info => seen.push(info), onMicrocodeLoad: info => loaded.push(info) });
+    const { cpu0, hardware } = emulator;
+    prepareGraphicsTask(emulator, '', code);
+    hardware.sp_mem.set32(0xfc0 + TaskOffsets.dataPtr, 0x3000);
+    hardware.spRegDevice.spUpdateStatus(SP_SET_INTR_BREAK);
+    cpu0.pc = 0x80007000;
+    cpu0.setControlU32(controlStatus, 0);
+    cpu0.cop1ControlChanged();
+    hardware.ram.set32(0x7000, 0x1000ffff); // CPU waits while the RSP runs.
+
+    // Stand-in RSP program, not the game's microcode. Read linked 0x108-byte
+    // blocks (8-byte header + 0x100-byte payload), DMA two raw RDP commands
+    // from each, and finish only after consuming the final block. A self-link
+    // exercises bounded execution while the CPU has not published more work.
+    const program = [
+      0x8c110ff0,             // lw s1, OSTask.dataPtr(zero)
+      0x24125000,             // output RDP buffer = 0x5000
+      0x24080270, 0x40880000, // next: SP_MEM_ADDR = 0x270
+      0x40910800,             // SP_DRAM_ADDR = s1
+      0x24080107, 0x40881000, // SP_RD_LEN = 0x107
+      0x40083000, 0x1500fffe, 0, // wait for input DMA
+      0x8c110270,             // s1 = next block pointer
+      0x24080278, 0x40880000, // SP_MEM_ADDR = payload
+      0x40920800,             // SP_DRAM_ADDR = output buffer
+      0x2408000f, 0x40881800, // SP_WR_LEN = 15
+      0x40083000, 0x1500fffe, 0, // wait for output DMA
+      0x40924000,             // DPC_START = output buffer
+      0x26480010, 0x40884800, // DPC_END = output buffer + 16
+      0x1620ffeb, 0,          // bne s1, zero, next
+      0x24080000 | SP_SET_SIG2, 0x40882000,
+      0x0000000d,             // break, with interrupt-on-break enabled
+    ];
+    program.forEach((word, i) => hardware.sp_mem.set32(0x1000 + i * 4, word));
+    hardware.ram.set32(0x3000, 0x3000); // CPU producer has not published block 2.
+    hardware.ram.set32(0x3008, 0xf7000000); // SetFillColor
+    hardware.ram.set32(0x300c, 0x12345678);
+    hardware.ram.set32(0x3010, 0xe7000000); // PipeSync, no DP interrupt
+    hardware.ram.set32(0x3208, 0xf7000000);
+    hardware.ram.set32(0x320c, 0xabcdef01);
+    hardware.ram.set32(0x3210, 0xe9000000); // FullSync in the final block
+    let dp = 0;
+    const interruptDP = hardware.miRegDevice.interruptDP.bind(hardware.miRegDevice);
+    hardware.miRegDevice.interruptDP = () => { dp++; interruptDP(); };
+
+    startRSPTask(emulator);
+    expect(seen).toMatchObject([{ id, detection: 'hash' }]);
+    let sp = 0;
+    const interruptSP = hardware.miRegDevice.interruptSP.bind(hardware.miRegDevice);
+    hardware.miRegDevice.interruptSP = () => { sp++; interruptSP(); };
+    expect(hardware.rsp.halted).toBe(false);
+    expect(hardware.spRegDevice.hleTask).toBeNull();
+    const complete = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(0);
+    expect(dp).toBe(0);
+    runCycles(emulator, 10_000);
+    expect(hardware.rsp.halted).toBe(false);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(0);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(0);
+    expect([sp, dp]).toEqual([0, 0]);
+    expect(hardware.ram.getU32(0x5004)).toBe(0x12345678);
+    if (executeGraphics) {
+      expect(hardware.graphics.state.fillColor).toBe(0x12345678);
+    }
+
+    // Real CPU instructions publish the second block while the RSP is active.
+    cpu0.pc = 0x80007100;
+    [0x3c088000, 0x24093200, 0xad093000, 0x1000ffff, 0].forEach((word, i) => hardware.ram.set32(0x7100 + i * 4, word));
+    runCycles(emulator, 10_000);
+    expect(hardware.ram.getU32(0x5004)).toBe(0xabcdef01);
+    expect(hardware.rsp.halted).toBe(true);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(complete);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(MI_INTR_SP | MI_INTR_DP);
+    expect([sp, dp]).toEqual([1, 1]);
+    expect(loaded).toEqual([]);
+    if (executeGraphics) {
+      expect(hardware.graphics.state.fillColor).toBe(0xabcdef01);
+    }
+
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    expect(loaded.map(info => info.id)).toEqual(executeGraphics ? [MicrocodeId.GBI2] : []);
+    expect(dp).toBe(2);
+  });
+
+  for (const hash of [0x26da8a4c, 0xdd560323]) {
+    test.each([false, true])(`runs T3DUX ${hash.toString(16)} writeback tasks on the RSP (draws=%s)`, async executeGraphics => {
+      const loaded = [];
+      const emulator = await createEmulator({ executeGraphics, onMicrocodeLoad: info => loaded.push(info) });
+      const { hardware } = emulator;
+      // Synthetic base-17 digits identify the variant without including ROM code.
+      const code = new Uint8Array(8);
+      let remaining = hash;
+      for (let i = code.length - 1; i >= 0; i--) {
+        code[i] = remaining % 17;
+        remaining = Math.floor(remaining / 17);
+      }
+      prepareGraphicsTask(emulator, '', code);
+      setGraphicsCommands(emulator, [[0, 0x4000], [0, 0], [0, 0], [0, 0x4020], [0, 0x8000], [0, 0], [0, 0]]);
+      hardware.ram.u8[0x4029] = 4;
+      hardware.spRegDevice.write32(0xa4040000 + SP_STATUS_REG, SP_SET_INTR_BREAK);
+      // Stand-in for transformed vertices plus adjacent DMEM: count=3 writes
+      // 48 bytes, not merely the 24 bytes occupied by three packed vertices.
+      const output = Uint8Array.from({ length: 48 }, (_, i) => i * 3 + 1);
+      hardware.sp_mem.u8.set(output, 0x140);
+      hardware.ram.u8.fill(0xa5, 0x7ff8, 0x8038);
+      hardware.ram.set32(0x5000, 0xf7000000); // SetFillColor
+      hardware.ram.set32(0x5004, 0x12345678);
+      hardware.ram.set32(0x5008, 0xe9000000); // FullSync
+      const program = [
+        0x24080140, 0x40880000, // SP_MEM_ADDR = 0x140
+        0x34088000, 0x40880800, // SP_DRAM_ADDR = 0x8000
+        0x2408002f, 0x40881800, // SP_WR_LEN = 47
+        0x24085000, 0x40884000, // DPC_START = 0x5000
+        0x24085010, 0x40884800, // DPC_END = 0x5010
+        0x24080000 | SP_SET_SIG2, 0x40882000,
+        0x0000000d,
+      ];
+      program.forEach((word, i) => hardware.sp_mem.set32(0x1000 + i * 4, word));
+      startRSPTask(emulator);
+      expect(loaded).toEqual([]); // No partial HLE execution of the first object.
+      expect(hardware.rsp.halted).toBe(false);
+      expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(0);
+      expect(hardware.ram.u8.slice(0x8000, 0x8030)).toEqual(new Uint8Array(48).fill(0xa5));
+      for (let i = 0; i < program.length; i++) {
+        hardware.rsp.step();
+      }
+      expect(hardware.ram.u8.slice(0x8000, 0x8030)).toEqual(output);
+      expect(hardware.ram.getU32(0x7ffc)).toBe(0xa5a5a5a5);
+      expect(hardware.ram.getU32(0x8030)).toBe(0xa5a5a5a5);
+      expect(hardware.rsp.halted).toBe(true);
+      const complete = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+      expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(complete);
+      expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(MI_INTR_SP | MI_INTR_DP);
+      if (executeGraphics) {
+        expect(hardware.graphics.state.fillColor).toBe(0x12345678);
+      }
+
+      // The next ordinary T3DUX task returns to HLE, even with the same hash.
+      hardware.ram.u8[0x4029] = 1;
+      hardware.ram.set32(0x402c, 0x5000);
+      startAndCompleteRSPTask(emulator);
+      expect(hardware.rsp.halted).toBe(true);
+      expect(loaded.map(info => info.hash)).toEqual(executeGraphics ? [hash] : []);
+    });
+  }
+
+  test.each([false, true])('runs BOSS signal waits, DMA, RDP output and completion on the RSP (draws=%s)', async executeGraphics => {
+    const seen = [];
+    const loaded = [];
+    const emulator = await createEmulator({ executeGraphics,
+      onGraphicsTask: info => seen.push(info), onMicrocodeLoad: info => loaded.push(info) });
+    const { hardware } = emulator;
+    prepareGraphicsTask(emulator, '', bossCode);
+    // An invalid HLE list address proves no display-list parser was used.
+    hardware.sp_mem.set32(0xfc0 + TaskOffsets.dataPtr, 0x1000000);
+    hardware.spRegDevice.write32(0xa4040000 + SP_STATUS_REG, SP_SET_INTR_BREAK);
+    hardware.ram.set32(0x5000, 0xf7000000); // SetFillColor
+    hardware.ram.set32(0x5004, 0x12345678);
+    hardware.ram.set32(0x5008, 0xe9000000); // FullSync
+    const program = [
+      0x3c080000 | (SP_SET_SIG3 >>> 16),
+      0x35080000 | SP_CLR_SIG1 | SP_CLR_SIG2,
+      0x40882000, // mtc0 t0, SP_STATUS
+      0x40092000, // wait: mfc0 t1, SP_STATUS
+      0x31290000 | SP_STATUS_SIG3,
+      0x1520fffd, // bne t1, zero, wait
+      0,
+      0x24081234, // a sample produced by the task
+      0xac080080, // sw t0, 0x80(zero)
+      0x24080080, 0x40880000, // SP_MEM_ADDR = 0x80
+      0x34088000, 0x40880800, // SP_DRAM_ADDR = 0x8000
+      0x24080007, 0x40881800, // SP_WR_LEN = 7 (8 bytes)
+      0x24085000, 0x40884000, // DPC_START = 0x5000
+      0x24085010, 0x40884800, // DPC_END = 0x5010
+      0x24080000 | SP_SET_SIG2, 0x40882000,
+      0x0000000d, // break
+    ];
+    program.forEach((word, i) => hardware.sp_mem.set32(0x1000 + i * 4, word));
+    startRSPTask(emulator);
+    expect(loaded).toEqual([]);
+    expect(seen[0]).toMatchObject({ id: MicrocodeId.ZSORT_BOSS, detection: 'hash' });
+    for (let i = 0; i < 30; i++) {
+      hardware.rsp.step();
+    }
+    expect(hardware.rsp.halted).toBe(false);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_SIG3).toBe(SP_STATUS_SIG3);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(0);
+    expect(hardware.ram.getU32(0x8000)).toBe(0);
+    hardware.spRegDevice.write32(0xa4040000 + SP_STATUS_REG, SP_CLR_SIG3);
+    for (let i = 0; i < 40 && !hardware.rsp.halted; i++) {
+      hardware.rsp.step();
+    }
+    expect(hardware.ram.getU32(0x8000)).toBe(0x1234);
+    expect(hardware.rsp.halted).toBe(true);
+    const complete = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(complete);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(MI_INTR_SP | MI_INTR_DP);
+    if (executeGraphics) {
+      expect(hardware.graphics.state.fillColor).toBe(0x12345678);
+    }
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    expect(hardware.rsp.halted).toBe(true);
+    expect(loaded.map(info => info.id)).toEqual(executeGraphics ? [MicrocodeId.GBI2] : []);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(MI_INTR_DP);
+  });
+
+  test.each([false, true])('executes HVQM2 on the RSP with executeGraphics=%s and returns to HLE for drawing', async executeGraphics => {
+    const seen = [];
+    const loaded = [];
+    const emulator = await createEmulator({
+      executeGraphics, onGraphicsTask: info => seen.push(info), onMicrocodeLoad: info => loaded.push(info),
+    });
+    const { hardware } = emulator;
+    prepareGraphicsTask(emulator, '', hvqmCode);
+    // This would throw if the video parameters were parsed as a display list.
+    hardware.sp_mem.set32(0xfc0 + TaskOffsets.dataPtr, 0x1000000);
+    hardware.spRegDevice.write32(0xa4040000 + SP_STATUS_REG, SP_SET_INTR_BREAK);
+    const instructions = [
+      0x24020007,                  // addiu v0, zero, 7
+      0xac020080,                  // sw v0, 0x80(zero)
+      0x24020000 | SP_SET_SIG2,    // addiu v0, zero, SP_SET_SIG2
+      0x40822000,                  // mtc0 v0, SP_STATUS
+      0x0000000d,                  // break
+    ];
+    instructions.forEach((instruction, index) => hardware.sp_mem.set32(0x1000 + index * 4, instruction));
+
+    // Successive video tasks reuse the code but change data within its reported size.
+    for (const tail of [0, 1]) {
+      hardware.ram.u8[0x1000 + hvqmCode.length - 1] = tail;
+      hardware.sp_mem.set32(0x80, 0);
+      hardware.rsp.pc = 0;
+      startAndCompleteRSPTask(emulator);
+      expect(hardware.rsp.halted).toBe(false);
+      expect(hardware.sp_reg.getU32(SP_STATUS_REG) & (SP_STATUS_TASKDONE | SP_STATUS_BROKE)).toBe(0);
+      expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(0);
+      expect(hardware.sp_mem.getU32(0x80)).toBe(0);
+      expect(loaded).toEqual([]);
+      for (let i = 0; i < instructions.length; i++) {
+        hardware.rsp.step();
+      }
+      expect(hardware.sp_mem.getU32(0x80)).toBe(7);
+      expect(hardware.rsp.halted).toBe(true);
+      const complete = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+      expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(complete);
+      expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(MI_INTR_SP);
+    }
+    expect(seen).toHaveLength(2);
+    expect(seen.every(info => info.id === MicrocodeId.HVQM2 && info.detection === 'hash')).toBe(true);
+    expect(seen[0].hash).not.toBe(seen[1].hash);
+
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    expect(seen[2].id).toBe(MicrocodeId.GBI2);
+    expect(hardware.rsp.halted).toBe(true);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(MI_INTR_SP | MI_INTR_DP);
+    expect(loaded.map(info => info.id)).toEqual(executeGraphics ? [MicrocodeId.GBI2] : []);
+  });
+
+  test('rejects an in-list HVQM2 load instead of interpreting video data as GBI0', async () => {
+    const loaded = [];
+    const emulator = await createEmulator({ executeGraphics: true, onMicrocodeLoad: info => loaded.push(info) });
+    const { hardware } = emulator;
+    prepareGraphicsTask(emulator);
+    hardware.ram.u8.set(hvqmCode, 0x4000);
+    setGraphicsCommands(emulator, [
+      [0xe1000000, 0x80005000],
+      [0xdd000000, 0x80004000],
+      [0xfa000000, 0x12345678],
+      [0xb8000000, 0],
+    ]);
+    expect(() => startAndCompleteRSPTask(emulator)).toThrow('Unsupported graphics microcode: HVQM2');
+    expect(loaded.map(info => info.id)).toEqual([MicrocodeId.GBI2]);
+    expect(hardware.graphics.state.primColor).toBe(0);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & (SP_STATUS_TASKDONE | SP_STATUS_BROKE)).toBe(0);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(0);
+  });
+
+  test('does not identify a short task as HVQM2 using an incomplete prefix', async () => {
+    const seen = [];
+    const emulator = await createEmulator({ executeGraphics: true, onGraphicsTask: info => seen.push(info) });
+    // Same rolling hash, but only eight bytes rather than a complete prefix.
+    prepareGraphicsTask(emulator, undefined, hvqmCode.slice(microcodePrefixLength - 8, microcodePrefixLength));
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    expect(seen[0]).toMatchObject({ id: MicrocodeId.GBI2, hash: 0xeb70fcb5, detection: 'string' });
+    expect(emulator.hardware.rsp.halted).toBe(true);
+    expect(emulator.hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(MI_INTR_DP);
+  });
+
+  test('executes ZSortp startup lists and in-list loads with independent SP and DP completion', async () => {
+    const version = 'RSP Gfx ucode ZSortp 0.33 Yoshitaka Yasumoto Nintendo.';
+    for (const inList of [false, true]) {
+      const loaded = [];
+      const emulator = await createEmulator({ executeGraphics: true, onMicrocodeLoad: info => loaded.push(info.family) });
+      const { hardware } = emulator;
+      prepareGraphicsTask(emulator, inList ? undefined : version);
+      const data = new TextEncoder().encode(version + '\0');
+      hardware.ram.u8.set(data, 0x5000);
+      setGraphicsCommands(emulator, [
+        ...(inList ? [[0xe1000000, 0x80005000], [0xdd000000 | (data.length - 1), 0x80004000]] : []),
+        [0xdb000806, 0x80008000],
+        [0x81000000, 0x02000000],
+        [0x81000000, 0x02000010],
+        [0xdf000000, 0],
+        [0xfa000000, 0xdeadbeef],
+      ]);
+      hardware.ram.set32(0x8000, 0xfa000000);
+      hardware.ram.set32(0x8004, 0x12345678);
+      hardware.ram.set32(0x8008, 0xdf000000);
+      hardware.ram.set32(0x8010, 0xe9000000);
+      hardware.ram.set32(0x8018, 0xdf000000);
+      hardware.spRegDevice.write32(0xa4040000 + SP_STATUS_REG, SP_SET_INTR_BREAK);
+      startAndCompleteRSPTask(emulator);
+      expect(loaded).toEqual(inList ? ['GBI2', 'ZSortp'] : ['ZSortp']);
+      expect(hardware.graphics.state.primColor).toBe(0x12345678);
+      expect(hardware.graphics.state.pc).toBe(0);
+      const complete = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+      expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(complete);
+      expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(MI_INTR_SP | MI_INTR_DP);
+      expect(hardware.dpcDevice.readU32(0xa4100010)).toBe(1);
+
+      // The same task without FullSync must only signal SP completion.
+      hardware.ram.set32(0x8010, 0xdf000000);
+      startAndCompleteRSPTask(emulator);
+      expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_SP | MI_INTR_DP)).toBe(MI_INTR_SP);
+      expect(hardware.dpcDevice.readU32(0xa4100010)).toBe(1);
+    }
+  });
+
+  test('reports runaway display lists as fatal errors without fabricating SP or DP completion', async () => {
+    const halted = [];
+    const emulator = await createEmulator({
+      executeGraphics: true,
+      onHalt: (message, details) => halted.push({ message, details }),
+    });
+    const { cpu0, hardware } = emulator;
+    prepareGraphicsTask(emulator);
+    // Two branches evade the intentional single-command producer-wait check.
+    setGraphicsCommands(emulator, [[0xde010000, 0x3008], [0xde010000, 0x3000]]);
+    hardware.sp_mem.set32(0xfc0 + TaskOffsets.type, 1);
+    hardware.spRegDevice.write32(0xa4040000 + SP_STATUS_REG, SP_SET_INTR_BREAK);
+    cpu0.pc = 0x80007000;
+    cpu0.setControlU32(controlStatus, 0);
+    cpu0.cop1ControlChanged();
+    hardware.ram.set32(0x7000, 0x3c08a404); // LUI t0, 0xa404
+    hardware.ram.set32(0x7004, 0x24090000 | SP_CLR_HALT);
+    hardware.ram.set32(0x7008, 0xad090000 | SP_STATUS_REG);
+
+    expect(() => runCycles(emulator, 1100)).toThrow('HLE display-list command limit');
+    expect(halted).toHaveLength(1);
+    expect(halted[0].details.error.name).toBe('DisplayListLimitError');
+    expect(halted[0].details.error.message).toContain('1000000');
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & (SP_STATUS_TASKDONE | SP_STATUS_BROKE)).toBe(0);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_DP | MI_INTR_SP)).toBe(0);
+    expect(hardware.spRegDevice.hleTask).toBeNull();
+  });
+
+  test('completes SP-only lists without reporting an extra DP completion', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { hardware } = emulator;
+    prepareGraphicsTask(emulator);
+    // Griffey splits a frame over tasks: the first finishes without FullSync,
+    // and the next requests DP completion. A DP interrupt on the first task
+    // makes its scheduler consume the next task's pointer prematurely.
+    let dp = 0;
+    hardware.miRegDevice.interruptDP = () => { dp++; };
+    for (const [fullSync, expected] of [[false, 0], [true, 1], [false, 1]]) {
+      setGraphicsCommands(emulator, [
+        [0xe7000000, 0], // PipeSync is not a DP interrupt.
+        ...(fullSync ? [[0xe9000000, 0]] : []),
+        [0xdf000000, 0],
+        [0xe9000000, 0], // Unreachable commands must not signal completion.
+      ]);
+      startAndCompleteRSPTask(emulator);
+      const complete = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+      expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(complete);
+      expect(dp).toBe(expected);
+      expect(hardware.dpcDevice.readU32(0xa4100010)).toBe(expected);
+    }
+    expect(dp).toBe(1);
+  });
+
+  test('completes SP work while DP is frozen and delivers FullSync after unfreeze', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { hardware } = emulator;
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    hardware.dpcDevice.write32(0xa410000c, 0x8); // SET_FREEZE
+    startAndCompleteRSPTask(emulator);
+    const complete = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & complete).toBe(complete);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(0);
+    hardware.dpcDevice.write32(0xa410000c, 0x4); // CLR_FREEZE
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(MI_INTR_DP);
+  });
+
+  test('keeps the ECW/WWF counter conversion and division finite in interpreted and compiled loops', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { cpu0, hardware } = emulator;
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+
+    // These games divide profiling measurements by the DP clock counter after
+    // their first completed list. A permanently zero clock raises Invalid.
+    const program = [
+      0x3c08a410, // LUI t0, 0xa410
+      0x8d030010, // LW v1, DPC_CLOCK(t0)
+      0x44831000, // MTC1 v1, f2
+      0x468010a1, // CVT.D.W f2, f2
+      0x04620001, // BLTZL v1, +1
+      0x46341080, // ADD.D f2, f2, f20 (annulled for a nonnegative counter)
+      0x46220003, // DIV.D f0, f0, f2
+      0x08001c00, // J 0x80007000
+      0x00000000,
+    ];
+    program.forEach((word, i) => hardware.ram.set32(0x7000 + i * 4, word));
+    cpu0.pc = 0x80007000;
+    cpu0.setControlU32(controlStatus, 0x20000000); // CU1, interrupts disabled.
+    cpu0.clearControlBits32(controlCause, 0x7c);
+    cpu0.cop1ControlChanged();
+    hardware.cpu1.control[31] = 0x01000800; // Invalid operation enabled.
+    hardware.cpu1.regF64[hardware.cpu1.fsRegIdx64(0)] = 0;
+    hardware.cpu1.regF64[hardware.cpu1.fsRegIdx64(20)] = 4294967296;
+    for (const cycles of [8, 16000]) {
+      runCycles(emulator, cycles);
+      expect(cpu0.pc).toBe(0x80007000);
+      expect(hardware.cpu1.loadF64(0)).toBe(0);
+      expect(hardware.cpu1.loadF64(hardware.cpu1.fsRegIdx64(2))).toBe(1);
+      expect(hardware.cpu1.control[31]).toBe(0x01000800);
+      expect(cpu0.getControlU32(controlCause) & 0x7c).toBe(0);
+    }
+    expect(hardware.fragmentCache.fragments.get(0x80007000)?.executionCount).toBeGreaterThan(0);
+
+    // A zero counter must still take the enabled Invalid exception.
+    hardware.dpcDevice.write32(0xa410000c, 0x200);
+    cpu0.run(6);
+    expect(cpu0.pc).toBe(0x80000180);
+    expect(cpu0.getControlU32(controlCause) & 0x7c).toBe(15 << 2);
+    expect(hardware.cpu1.control[31]).toBe(0x01010800);
+  });
+
+  test.each([...unsupportedMicrocodes,
+    { family: 'ZSortBOSS', version: '', code: bossCode, detection: 'hash', inListOnly: true },
+    ...factor5RSPMicrocodes.map(info => ({ ...info, family: 'F5', version: '', detection: 'hash', inListOnly: true })),
+  ])('rejects $family tasks and in-list loads before parsing their commands', async ({ family, variant, version, code, detection, inListOnly }) => {
+    const previousHaltOnWarning = graphicsOptions.haltOnWarning;
+    try {
+      // Unsupported execution must stop even when ordinary warnings are ignored.
+      graphicsOptions.haltOnWarning = false;
+      for (const inList of (inListOnly ? [true] : [false, true])) {
+        const seen = [];
+        const loaded = [];
+        const halted = [];
+        const emulator = await createEmulator({
+          executeGraphics: true,
+          onGraphicsTask: info => seen.push(info),
+          onMicrocodeLoad: info => loaded.push(info),
+          onHalt: (message, details) => halted.push({ message, details }),
+        });
+        const { cpu0, hardware } = emulator;
+        prepareGraphicsTask(emulator, inList ? undefined : version, inList ? undefined : code);
+        const data = new TextEncoder().encode(version + '\0');
+        hardware.ram.u8.set(data, 0x5000);
+        hardware.ram.u8.set(code, 0x4000);
+        setGraphicsCommands(emulator, [
+          ...(inList ? [[0xe1000000, 0x80005000], [0xdd000000 | (data.length - 1), 0x80004000]] : []),
+          // The observed ZSortp startup sequence. GBI0 ignores even its end.
+          [0xdb000806, 0x80008000],
+          [0x81000000, 0x80006000],
+          [0x81000000, 0x80006008],
+          [0xdf000000, 0],
+          // A canary past the end: the fallback would continue and execute it.
+          [0xfa000000, 0x12345678],
+          [0xb8000000, 0],
+        ]);
+        hardware.sp_mem.set32(0xfc0 + TaskOffsets.type, 1);
+        cpu0.pc = 0x80007000;
+        cpu0.setControlU32(controlStatus, 0);
+        cpu0.cop1ControlChanged();
+        hardware.ram.set32(0x7000, 0x3c08a404); // lui t0, 0xa404
+        hardware.ram.set32(0x7004, 0x24090000 | SP_CLR_HALT);
+        hardware.ram.set32(0x7008, 0xad090000 | SP_STATUS_REG);
+
+        expect(() => runCycles(emulator, 1100)).toThrow(`Unsupported graphics microcode: ${family}`);
+        expect(halted).toHaveLength(1);
+        expect(halted[0].details.error).toMatchObject({ name: 'UnsupportedMicrocodeError' });
+        expect(halted[0].details.error.message).toContain(version);
+        expect(halted[0].details.error.message).toContain('hash');
+        expect(halted[0].details.error.message).toContain('HLE is not implemented');
+        if (variant === 'NABOO') {
+          expect(halted[0].details.error.message).toContain('F5/NABOO');
+          expect(halted[0].details.error.message).toContain('0x1f59be1a');
+          expect(seen[0].variant).toBe(inList ? null : 'NABOO');
+        }
+        if (variant === 'INDI') {
+          expect(halted[0].details.error.message).toContain('F5/INDI');
+          expect(halted[0].details.error.message).toContain('0xdd57a04e');
+        }
+        if (family === 'ZSortBOSS') {
+          expect(halted[0].details.error.message).toContain('0xe281945c');
+        }
+        expect(seen.map(info => info.family)).toEqual([inList ? 'GBI2' : family]);
+        expect(seen[0].detection).toBe(inList ? 'string' : detection);
+        expect(loaded.map(info => info.family)).toEqual(inList ? ['GBI2'] : []);
+        expect(hardware.graphics.state.primColor).toBe(0);
+        expect(hardware.graphics.state.currentOp).toBe(inList ? 1 : 0);
+        expect(hardware.sp_reg.getU32(SP_STATUS_REG) & (SP_STATUS_TASKDONE | SP_STATUS_BROKE)).toBe(0);
+        expect(hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_DP | MI_INTR_SP)).toBe(0);
+        expect(hardware.spRegDevice.hleTask).toBeNull();
+      }
+    } finally {
+      graphicsOptions.haltOnWarning = previousHaltOnWarning;
+    }
+  });
+
+  test.each(unsupportedMicrocodes)('does not fabricate completion for $family when headless display lists are skipped', async ({ family, version, code, detection }) => {
+    const seen = [];
+    const emulator = await createEmulator({ onGraphicsTask: info => seen.push(info) });
+    prepareGraphicsTask(emulator, version, code);
+    // Interrupt-on-break makes an accidental HLE completion observable in MI.
+    emulator.hardware.spRegDevice.write32(0xa4040000 + SP_STATUS_REG, SP_SET_INTR_BREAK);
+    expect(() => startRSPTask(emulator)).toThrow(`Unsupported graphics microcode: ${family}`);
+    expect(seen[0]).toMatchObject({ family, detection });
+    expect(emulator.hardware.sp_reg.getU32(SP_STATUS_REG) & (SP_STATUS_TASKDONE | SP_STATUS_BROKE)).toBe(0);
+    expect(emulator.hardware.mi_reg.getU32(MI_INTR_REG) & (MI_INTR_DP | MI_INTR_SP)).toBe(0);
+    expect(emulator.hardware.spRegDevice.hleTask).toBeNull();
+  });
+
+  test.each([...unsupportedMicrocodes,
+    ...factor5RSPMicrocodes.map(info => ({ ...info, family: 'F5', version: '', detection: 'hash' })),
+  ])('leaves $family available to explicit LLE without claiming HLE execution', async ({ family, version, code, detection }) => {
+    const previousMode = graphicsOptions.emulationMode;
+    try {
+      graphicsOptions.emulationMode = EmulationMode.LLE;
+      const seen = [];
+      const loaded = [];
+      const emulator = await createEmulator({
+        executeGraphics: true, onGraphicsTask: info => seen.push(info), onMicrocodeLoad: info => loaded.push(info),
+      });
+      prepareGraphicsTask(emulator, version, code);
+      emulator.hardware.sp_mem.set32(0xfc0 + TaskOffsets.dataPtr, 0x1000000);
+      expect(() => startRSPTask(emulator)).not.toThrow();
+      expect(seen[0]).toMatchObject({ family, detection });
+      expect(loaded).toEqual([]);
+      expect(emulator.hardware.rsp.halted).toBe(false);
+      expect(emulator.hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(0);
+      expect(emulator.hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(0);
+    } finally {
+      graphicsOptions.emulationMode = previousMode;
+    }
+  });
+
+  test('executes drawing commands and in-list microcode switches through SP dispatch', async () => {
+    const seen = [];
+    const loaded = [];
+    const emulator = await createEmulator({
+      executeGraphics: true,
+      onGraphicsTask: info => seen.push(info),
+      onMicrocodeLoad: info => {
+        loaded.push({ ...info });
+        // Observers cannot change which handler executes the following commands.
+        info.id = MicrocodeId.GBI0;
+        info.version = 'changed by observer';
+        return MicrocodeId.GBI0;
+      },
+    });
+    const { hardware } = emulator;
+    prepareGraphicsTask(emulator);
+
+    // Use a 640x480 source image to exercise VI setup independently of the
+    // native transform's default dimensions, without creating a canvas.
+    hardware.vi_reg.set32(0x00, 2);
+    hardware.vi_reg.set32(0x08, 640);
+    hardware.vi_reg.set32(0x24, (108 << 16) | 748);
+    hardware.vi_reg.set32(0x28, (34 << 16) | 514);
+    hardware.vi_reg.set32(0x30, 0x400);
+    hardware.vi_reg.set32(0x34, 0x800);
+
+    const gbi1Data = new TextEncoder().encode('RSP Gfx ucode F3DEX 1.23\0');
+    hardware.ram.u8.set(gbi1Data, 0x5000);
+    for (let index = 0; index < 3; index++) {
+      hardware.ram.dataView.setInt16(0x6000 + index * 16, index === 1 ? 1 : 0);
+      hardware.ram.dataView.setInt16(0x6002 + index * 16, index === 2 ? 1 : 0);
+      hardware.ram.set32(0x600c + index * 16, 0xffffffff);
+    }
+    const gbi2DataSize = hardware.sp_mem.getU32(0xfc0 + TaskOffsets.ucodeDataSize);
+    setGraphicsCommands(emulator, [
+      [0xf5000000 | (ImageFormat.G_IM_FMT_CI << 21) | (1 << 9), 0], // CI4 tile.
+      [0x01003006, 0x6000], // GBI2: load vertices 0–2.
+      [0x05000204, 0], // GBI2: draw a triangle.
+      [0xe1000000, 0x80005000],
+      [0xdd000000 | (gbi1Data.length - 1), 0x80004000], // Switch to GBI1.
+      [0xbf000000, 0x00000204], // The replacement also needs the renderer.
+      [0xb4000000, 0x80002000],
+      [0xaf000000 | (gbi2DataSize - 1), 0x80001000], // Switch back to GBI2.
+      [0x05000204, 0],
+      [0xfa000000, 0x12345678],
+      [0xe9000000, 0], // FullSync requests the DP interrupt.
+      [0xdf000000, 0],
+    ]);
+    startAndCompleteRSPTask(emulator);
+
+    const { state, renderer } = hardware.graphics;
+    expect(state.projectedVertices.slice(0, 3).every(vertex => vertex.set)).toBe(true);
+    expect(state.tiles[0]).toMatchObject({ format: ImageFormat.G_IM_FMT_CI, size: ImageSize.G_IM_SIZ_4b });
+    expect(state.primColor).toBe(0x12345678);
+    expect(state.pc).toBe(0);
+    expect(renderer.nativeTransform).toMatchObject({ viWidth: 640, viHeight: 480 });
+    expect(seen).toHaveLength(1); // The observer still reports only task starts.
+    expect(seen[0].family).toBe('GBI2');
+    expect(loaded.map(info => info.family)).toEqual(['GBI2', 'GBI1', 'GBI2']);
+    expect(hardware.rsp.halted).toBe(true);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(SP_STATUS_TASKDONE);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(MI_INTR_DP);
+  });
+
+  test('preserves graphics observers across reset and keeps their snapshots and instances independent', async () => {
+    const loaded = [];
+    const textures = [];
+    const emulator = await createEmulator({
+      executeGraphics: true,
+      onMicrocodeLoad: info => loaded.push(info),
+      onTextureUse: info => textures.push(info),
+    });
+    const commands = [
+      [0xf5000000 | (ImageFormat.G_IM_FMT_CI << 21) | (1 << 9), 0],
+      [0xe4020020, 0], [0xe1000000, 0], [0xf1000000, 0x04000400],
+      [0xdf000000, 0],
+    ];
+    for (let run = 0; run < 2; run++) {
+      emulator.hardware.reset();
+      prepareGraphicsTask(emulator);
+      setGraphicsCommands(emulator, commands);
+      startAndCompleteRSPTask(emulator);
+    }
+    expect(loaded).toHaveLength(2);
+    expect(textures).toHaveLength(2);
+    loaded[0].family = 'changed by observer';
+    textures[0].format = ImageFormat.G_IM_FMT_IA;
+    expect(loaded[1].family).toBe('GBI2');
+    expect(textures[1]).toEqual({ format: ImageFormat.G_IM_FMT_CI, size: ImageSize.G_IM_SIZ_4b });
+
+    const fresh = await createEmulator({ executeGraphics: true });
+    prepareGraphicsTask(fresh);
+    setGraphicsCommands(fresh, commands);
+    startAndCompleteRSPTask(fresh);
+    expect(loaded).toHaveLength(2);
+    expect(textures).toHaveLength(2);
+  });
+
+  test('starts each task afresh while preserving RDP state until hardware reset', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xfa000000, 0x12345678], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    setGraphicsCommands(emulator, [[0xfb000000, 0xabcdef01], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    expect(emulator.hardware.graphics.state).toMatchObject({ primColor: 0x12345678, envColor: 0xabcdef01, pc: 0 });
+
+    emulator.hardware.reset();
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    expect(emulator.hardware.graphics.state).toMatchObject({ primColor: 0, envColor: 0, pc: 0 });
+
+    setGraphicsCommands(emulator, [[0xfa000000, 0x87654321], [0xdf000000, 0]]);
+    startAndCompleteRSPTask(emulator);
+    const fresh = await createEmulator({ executeGraphics: true });
+    expect(fresh.hardware.graphics.state.primColor).toBe(0);
+    expect(emulator.hardware.graphics.state.primColor).toBe(0x87654321);
+  });
+
+  test('keeps default, LLE, and audio tasks out of headless HLE execution', async () => {
+    const previousMode = graphicsOptions.emulationMode;
+    try {
+      for (const [options, mode, taskType] of [
+        [{}, EmulationMode.HLE, 1],
+        [{ executeGraphics: true }, EmulationMode.LLE, 1],
+        [{ executeGraphics: true }, EmulationMode.HLE, 2],
+      ]) {
+        graphicsOptions.emulationMode = mode;
+        const loaded = [];
+        const textures = [];
+        const emulator = await createEmulator({
+          ...options, onMicrocodeLoad: info => loaded.push(info), onTextureUse: info => textures.push(info),
+        });
+        prepareGraphicsTask(emulator);
+        // This would throw if the display-list runner tried to read it.
+        emulator.hardware.sp_mem.set32(0xfc0 + TaskOffsets.dataPtr, 0x1000000);
+        expect(() => startAndCompleteRSPTask(emulator, taskType)).not.toThrow();
+        expect(loaded).toEqual([]);
+        expect(textures).toEqual([]);
+        expect(emulator.hardware.dpcDevice.readU32(0xa4100010)).toBe(mode === EmulationMode.HLE && taskType === 1 ? 1 : 0);
+        if (taskType === 1) {
+          expect(emulator.hardware.rsp.halted).toBe(mode === EmulationMode.HLE);
+          expect(emulator.hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(mode === EmulationMode.HLE ? MI_INTR_DP : 0);
+        }
+      }
+    } finally {
+      graphicsOptions.emulationMode = previousMode;
+    }
+  });
+
+  test('aborts a fatal HLE warning through the CPU halt path without completing the task', async () => {
+    const previousHaltOnWarning = graphicsOptions.haltOnWarning;
+    try {
+      graphicsOptions.haltOnWarning = true;
+      const halted = [];
+      const emulator = await createEmulator({ executeGraphics: true, onHalt: (message, details) => halted.push({ message, details }) });
+      const { cpu0, hardware } = emulator;
+      prepareGraphicsTask(emulator);
+      setGraphicsCommands(emulator, [[0x81000000, 0], [0xfa000000, 0x12345678], [0xdf000000, 0]]);
+      hardware.sp_mem.set32(0xfc0 + TaskOffsets.type, 1);
+
+      // Let guest code start the task so the actual CPU exception/halt handling
+      // is exercised, rather than calling the processor directly.
+      cpu0.pc = 0x80007000;
+      cpu0.setControlU32(controlStatus, 0);
+      cpu0.cop1ControlChanged();
+      hardware.ram.set32(0x7000, 0x3c08a404); // lui t0, 0xa404
+      hardware.ram.set32(0x7004, 0x24090000 | SP_CLR_HALT); // addiu t1, zero, SP_CLR_HALT
+      hardware.ram.set32(0x7008, 0xad090000 | SP_STATUS_REG); // sw t1, SP_STATUS_REG(t0)
+
+      expect(() => runCycles(emulator, 1100)).toThrow(/Unknown display list op/);
+      expect(halted).toHaveLength(1);
+      expect(emulator.fatalError()).toBe(halted[0].message);
+      expect(halted[0].details.error).toBeInstanceOf(Error);
+      expect(halted[0].details.error.message).toContain('Unknown display list op');
+      expect(hardware.graphics.state.primColor).toBe(0);
+      expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(0);
+      expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(0);
+    } finally {
+      graphicsOptions.haltOnWarning = previousHaltOnWarning;
+    }
+  });
+});
+
+describe('graphics task callback', () => {
+  test('reports graphics starts before dispatch in both HLE and LLE without a renderer', async () => {
+    const previousMode = graphicsOptions.emulationMode;
+    try {
+      for (const mode of [EmulationMode.HLE, EmulationMode.LLE]) {
+        graphicsOptions.emulationMode = mode;
+        const seen = [];
+        const emulator = await createEmulator({
+          onGraphicsTask: info => {
+            seen.push(info);
+            expect(emulator.hardware.rsp.halted).toBe(true);
+            expect(emulator.hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(0);
+            return true; // Observers cannot claim a task was handled.
+          },
+        });
+        const { hardware } = emulator;
+        prepareGraphicsTask(emulator);
+        startAndCompleteRSPTask(emulator);
+        expect(seen).toEqual([{
+          id: MicrocodeId.GBI2, family: 'GBI2', variant: null,
+          version: 'RSP Gfx ucode F3DEX fifo 2.0', hash: 326, detection: 'string',
+        }]);
+        expect(hardware.rsp.halted).toBe(mode === EmulationMode.HLE);
+        expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(mode === EmulationMode.HLE ? SP_STATUS_TASKDONE : 0);
+        expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(mode === EmulationMode.HLE ? MI_INTR_DP : 0);
+
+        startRSPTask(emulator, 2); // Audio tasks are not graphics observations.
+        expect(seen).toHaveLength(1);
+      }
+    } finally {
+      graphicsOptions.emulationMode = previousMode;
+    }
+  });
+
+  test('delivers independent snapshots on repeated starts and preserves the observer across reset', async () => {
+    const seen = [];
+    const emulator = await createEmulator({ onGraphicsTask: info => seen.push(info) });
+    prepareGraphicsTask(emulator);
+    startAndCompleteRSPTask(emulator);
+    startAndCompleteRSPTask(emulator);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toEqual(seen[1]);
+    expect(seen[0]).not.toBe(seen[1]);
+    const original = { ...seen[1] };
+    seen[0].family = 'changed by observer';
+
+    // Guest memory changes must not change previously collected observations.
+    emulator.hardware.ram.u8.fill(0, 0x1000, 0x2040);
+    startAndCompleteRSPTask(emulator);
+    expect(seen[2]).toMatchObject({ version: '', hash: 0, detection: 'fallback' });
+    expect(seen[1]).toEqual(original);
+
+    emulator.hardware.reset();
+    prepareGraphicsTask(emulator);
+    startAndCompleteRSPTask(emulator);
+    expect(seen).toHaveLength(4);
+    expect(seen[3]).toEqual(original);
+  });
+
+  test('keeps observation optional and scoped to the hardware instance', async () => {
+    const seen = [];
+    const first = await createEmulator({ onGraphicsTask: info => seen.push(info) });
+    prepareGraphicsTask(first);
+    startAndCompleteRSPTask(first);
+
+    const second = await createEmulator();
+    prepareGraphicsTask(second);
+    startAndCompleteRSPTask(second);
+    expect(seen).toHaveLength(1);
+    expect(second.hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(SP_STATUS_TASKDONE);
+    expect(second.hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(MI_INTR_DP);
+  });
+});
+
+describe('audio task callback', () => {
+  test('reports unknown audio starts, including HLE fallback, without handling the task', async () => {
+    const previous = audioOptions.emulationMode;
+    try {
+      for (const mode of [EmulationMode.LLE, EmulationMode.HLE, EmulationMode.Disabled]) {
+        audioOptions.emulationMode = mode;
+        const seen = [];
+        const emulator = await createEmulator({ onAudioTask: info => { seen.push(info); return true; } });
+        prepareGraphicsTask(emulator);
+        startAndCompleteRSPTask(emulator, 1);
+        expect(seen).toEqual([]);
+        emulator.hardware.rsp.halt(0);
+        startRSPTask(emulator, 2);
+        expect(seen).toEqual([{ family: 'Unknown', detection: 'unknown' }]);
+        expect(emulator.hardware.rsp.halted).toBe(mode === EmulationMode.Disabled);
+        seen[0].family = 'changed by observer';
+        startRSPTask(emulator, 2);
+        expect(seen).toHaveLength(2);
+        expect(seen[1]).toEqual({ family: 'Unknown', detection: 'unknown' });
+        expect(seen[1]).not.toBe(seen[0]);
+        emulator.hardware.reset();
+        prepareGraphicsTask(emulator);
+        startRSPTask(emulator, 2);
+        expect(seen).toHaveLength(3);
+        expect(seen[2]).toEqual({ family: 'Unknown', detection: 'unknown' });
+      }
+    } finally {
+      audioOptions.emulationMode = previous;
+    }
+  });
+});
+
+describe('audio dispatch logging', () => {
+  test('logs unknown HLE fallback once and executes the original task on the RSP', async () => {
+    const previous = audioOptions.emulationMode;
+    const log = spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      audioOptions.emulationMode = EmulationMode.HLE;
+      const emulator = await createEmulator();
+      const { hardware } = emulator;
+      prepareGraphicsTask(emulator);
+      hardware.sp_mem.set32(0x1000, 0x24020007); // addiu v0, zero, 7
+      hardware.sp_mem.set32(0x1004, 0x0000000d); // break
+      hardware.rsp.pc = 0;
+      startRSPTask(emulator, 2);
+      expect(hardware.rsp.halted).toBe(false);
+      expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(0);
+      hardware.rsp.step();
+      hardware.rsp.step();
+      expect(hardware.rsp.getRegU32(2)).toBe(7);
+      expect(hardware.rsp.halted).toBe(true);
+      hardware.rsp.pc = 0;
+      startRSPTask(emulator, 2);
+      const messages = log.mock.calls.map(([message]) => message).filter(message => message.startsWith('RSP audio microcode'));
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatch(/^RSP audio microcode Unknown \(code hash [0-9a-f]{8}\): LLE \(HLE fallback\)$/);
+    } finally {
+      audioOptions.emulationMode = previous;
+      log.mockRestore();
+    }
+  });
+
+  test('reports each execution path and unknown code independently, scoped to the emulator', async () => {
+    const previous = audioOptions.emulationMode;
+    const log = spyOn(console, 'log').mockImplementation(() => {});
+    const messages = () => log.mock.calls.map(([message]) => message).filter(message => message.startsWith('RSP audio microcode'));
+    try {
+      const emulator = await createEmulator();
+      prepareGraphicsTask(emulator);
+      for (const mode of [EmulationMode.LLE, EmulationMode.HLE, EmulationMode.Disabled]) {
+        audioOptions.emulationMode = mode;
+        startRSPTask(emulator, 2);
+        startRSPTask(emulator, 2);
+      }
+      expect(messages().map(message => message.split(': ')[1])).toEqual(['LLE', 'LLE (HLE fallback)', 'Disabled']);
+
+      emulator.hardware.ram.u8[0x1000] ^= 1;
+      startRSPTask(emulator, 2);
+      expect(messages()).toHaveLength(4);
+      expect(messages()[3]).not.toBe(messages()[2]);
+
+      const second = await createEmulator();
+      prepareGraphicsTask(second);
+      startRSPTask(second, 2);
+      expect(messages()).toHaveLength(5);
+      expect(messages()[4]).toBe(messages()[2]);
+    } finally {
+      audioOptions.emulationMode = previous;
+      log.mockRestore();
+    }
+  });
+});
+
+describe('HLE graphics completion timing', () => {
+  test('lets the submitting CPU publish its next task before SP and DP completion', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { cpu0, hardware } = emulator;
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    hardware.sp_mem.set32(0xfc0 + TaskOffsets.type, 1);
+    hardware.spRegDevice.spUpdateStatus(SP_SET_INTR_BREAK | SP_CLR_BROKE | SP_CLR_SIG2);
+    cpu0.pc = 0x80007000;
+    cpu0.setControlU32(controlStatus, 0);
+    cpu0.cop1ControlChanged();
+    // Start the task, then advance a producer's task pointer. Completing SP or
+    // DP inside the status write lets a guest completion thread see the old slot.
+    [
+      0x3c08a404, // lui t0, 0xa404
+      0x24090001, // addiu t1, zero, SP_CLR_HALT
+      0xad090010, // sw t1, SP_STATUS(t0)
+      0x3c088000, // lui t0, 0x8000
+      0x24090002, // addiu t1, zero, 2
+      0xad090080, // sw t1, 0x80(t0)
+    ].forEach((word, i) => hardware.ram.set32(0x7000 + i * 4, word));
+    hardware.ram.set32(0x80, 1);
+    const completions = [];
+    const dp = [];
+    hardware.miRegDevice.interruptSP = () => completions.push(hardware.ram.getU32(0x80));
+    hardware.miRegDevice.interruptDP = () => dp.push(hardware.ram.getU32(0x80));
+
+    runCycles(emulator, 100);
+    expect(hardware.ram.getU32(0x80)).toBe(2);
+    expect(dp).toEqual([]);
+    expect(completions).toEqual([]);
+    const completeBits = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & completeBits).toBe(0);
+    runCycles(emulator, 1000);
+    expect(completions).toEqual([2]);
+    expect(dp).toEqual([2]);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & completeBits).toBe(completeBits);
+    runCycles(emulator, 1000);
+    expect(completions).toEqual([2]);
+    expect(dp).toEqual([2]);
+  });
+
+  test('reset cancels a queued list before it executes', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { hardware, cpu0 } = emulator;
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xfa000000, 0x12345678], [0xe9000000, 0], [0xdf000000, 0]]);
+    const loads = [];
+    hardware.onMicrocodeLoad = info => loads.push(info);
+    startRSPTask(emulator);
+    expect(loads).toEqual([]);
+    expect(hardware.spRegDevice.hleTask).not.toBeNull();
+    hardware.reset();
+    cpu0.eventQueue.incrementCount(2000);
+    expect(loads).toEqual([]);
+    expect(hardware.graphics.state.primColor).toBe(0);
+    expect(hardware.spRegDevice.hleTask).toBeNull();
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(0);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(0);
+  });
+
+  test('the CPU sees final SP completion when handling FullSync from a consumed list', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { hardware, cpu0 } = emulator;
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xe9000000, 0], [0xdf000000, 0]]);
+    hardware.sp_mem.set32(0xfc0 + TaskOffsets.type, 1);
+    hardware.mi_reg.set32(MI_INTR_MASK_REG, MI_INTR_DP);
+    cpu0.setControlU32(controlStatus, 0x401); // IE and the RCP interrupt mask.
+    cpu0.statusRegisterChanged();
+    cpu0.pc = 0x80007000;
+    [
+      0x3c08a404, // lui t0, 0xa404
+      0x24090001, // addiu t1, zero, SP_CLR_HALT
+      0xad090010, // sw t1, SP_STATUS(t0)
+      0x3c088000, // lui t0, 0x8000
+      0x24090002, // addiu t1, zero, 2
+      0xad090080, // publish the producer's next task
+      0x1000ffff, // wait for the interrupt
+      0,
+    ].forEach((word, i) => hardware.ram.set32(0x7000 + i * 4, word));
+    // A real guest interrupt handler observes SP status and the producer slot.
+    // Immediate DP with delayed SP enters here while the task is still busy.
+    [
+      0x3c08a404, // lui t0, 0xa404
+      0x8d090010, // lw t1, SP_STATUS(t0)
+      0x3c0a8000, // lui t2, 0x8000
+      0xad490084, // save observed SP status
+      0x8d4b0080, // read the producer slot
+      0xad4b0088, // save observed slot
+      0x1000ffff,
+      0,
+    ].forEach((word, i) => hardware.ram.set32(0x180 + i * 4, word));
+    runCycles(emulator, 1500);
+    const completeBits = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+    expect(hardware.ram.getU32(0x84) & completeBits).toBe(completeBits);
+    expect(hardware.ram.getU32(0x88)).toBe(2);
+  });
+
+  test('halts a queued list before execution and resumes it exactly once', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { hardware, cpu0 } = emulator;
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [[0xfa000000, 0x12345678], [0xe9000000, 0], [0xdf000000, 0]]);
+    const loads = [];
+    hardware.onMicrocodeLoad = info => loads.push(info);
+    let dp = 0;
+    hardware.miRegDevice.interruptDP = () => { dp++; };
+    startRSPTask(emulator);
+    hardware.spRegDevice.spUpdateStatus(SP_SET_HALT);
+    cpu0.eventQueue.incrementCount(2000);
+    expect(loads).toEqual([]);
+    expect(hardware.graphics.state.primColor).toBe(0);
+    expect(dp).toBe(0);
+    hardware.spRegDevice.spUpdateStatus(SP_CLR_HALT);
+    cpu0.eventQueue.incrementCount(2000);
+    expect(loads).toHaveLength(1);
+    expect(hardware.graphics.state.primColor).toBe(0x12345678);
+    expect(dp).toBe(1);
+    expect(hardware.spRegDevice.hleTask).toBeNull();
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(SP_STATUS_TASKDONE);
+  });
+});
+
+describe('HLE display-list producer waits', () => {
+  test('signals FullSync before a producer wait without repeating it on task completion', async () => {
+    const emulator = await createEmulator({ executeGraphics: true });
+    const { cpu0, hardware } = emulator;
+    cpu0.pc = 0x80007000;
+    cpu0.setControlU32(controlStatus, 0);
+    cpu0.cop1ControlChanged();
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [
+      [0xe9000000, 0],
+      [0xde010000, 0x3008],
+      [0xdf000000, 0],
+    ]);
+    let dp = 0;
+    hardware.miRegDevice.interruptDP = () => { dp++; };
+    startRSPTask(emulator);
+    expect(dp).toBe(0);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(0);
+    runCycles(emulator, 2000);
+    expect(dp).toBe(1);
+    hardware.ram.set32(0x3008, 0);
+    runCycles(emulator, 2000);
+    expect(dp).toBe(1);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(SP_STATUS_TASKDONE);
+  });
+
+  async function waitingTask() {
+    const tasks = [], loads = [];
+    const emulator = await createEmulator({
+      executeGraphics: true,
+      onGraphicsTask: info => tasks.push(info),
+      onMicrocodeLoad: info => loads.push(info),
+    });
+    const { cpu0, hardware } = emulator;
+    cpu0.pc = 0x80007000;
+    cpu0.setControlU32(controlStatus, 0);
+    cpu0.cop1ControlChanged();
+    prepareGraphicsTask(emulator);
+    setGraphicsCommands(emulator, [
+      [0xfa000000, 0x12345678],
+      [0xde010000, 0x3008],
+      [0xfa000000, 0xabcdef01],
+      [0xe9000000, 0],
+      [0xdf000000, 0],
+    ]);
+    hardware.spRegDevice.spUpdateStatus(SP_SET_INTR_BREAK);
+    startRSPTask(emulator);
+    runCycles(emulator, 1000);
+    return { emulator, tasks, loads };
+  }
+
+  test('allows the CPU to patch a live list and only then signals task completion', async () => {
+    const { emulator, tasks, loads } = await waitingTask();
+    const { cpu0, hardware } = emulator;
+    const completeBits = SP_STATUS_TASKDONE | SP_STATUS_BROKE | SP_STATUS_HALT;
+    let dp = 0, sp = 0;
+    const interruptDP = hardware.miRegDevice.interruptDP.bind(hardware.miRegDevice);
+    const interruptSP = hardware.miRegDevice.interruptSP.bind(hardware.miRegDevice);
+    hardware.miRegDevice.interruptDP = () => { dp++; interruptDP(); };
+    hardware.miRegDevice.interruptSP = () => { sp++; interruptSP(); };
+    runCycles(emulator, 2000);
+    expect(hardware.graphics.state.primColor).toBe(0x12345678);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & completeBits).toBe(0);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(0);
+    expect([dp, sp]).toEqual([0, 0]);
+
+    // Real guest instructions publish more commands by clearing the wait marker.
+    cpu0.pc = 0x80007000;
+    hardware.ram.set32(0x7000, 0x3c088000); // lui t0, 0x8000
+    hardware.ram.set32(0x7004, 0x35083008); // ori t0, t0, 0x3008
+    hardware.ram.set32(0x7008, 0xad000000); // sw zero, 0(t0)
+    runCycles(emulator, 2000);
+    expect(hardware.graphics.state.primColor).toBe(0xabcdef01);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & completeBits).toBe(completeBits);
+    expect(hardware.mi_reg.getU32(MI_INTR_REG) & MI_INTR_DP).toBe(MI_INTR_DP);
+    expect([dp, sp]).toEqual([1, 1]);
+    expect(tasks).toHaveLength(1);
+    expect(loads).toHaveLength(1);
+    expect(hardware.spRegDevice.hleTask).toBeNull();
+  });
+
+  test('pauses a pending task on SP halt and resumes it without reloading', async () => {
+    const { emulator, tasks, loads } = await waitingTask();
+    const { hardware } = emulator;
+    hardware.spRegDevice.spUpdateStatus(SP_SET_HALT);
+    hardware.ram.set32(0x3008, 0);
+    runCycles(emulator, 2000);
+    expect(hardware.graphics.state.primColor).toBe(0x12345678);
+    expect(hardware.sp_reg.getU32(SP_STATUS_REG) & SP_STATUS_TASKDONE).toBe(0);
+    hardware.spRegDevice.spUpdateStatus(SP_CLR_HALT);
+    runCycles(emulator, 2000);
+    expect(hardware.graphics.state.primColor).toBe(0xabcdef01);
+    expect(tasks).toHaveLength(1);
+    expect(loads).toHaveLength(1);
+  });
+
+  test('reset discards a pending continuation and its event', async () => {
+    const { emulator } = await waitingTask();
+    emulator.hardware.reset();
+    expect(emulator.hardware.spRegDevice.hleTask).toBeNull();
+    expect(emulator.cpu0.hasEvent('HLE task wait')).toBe(false);
+  });
+});

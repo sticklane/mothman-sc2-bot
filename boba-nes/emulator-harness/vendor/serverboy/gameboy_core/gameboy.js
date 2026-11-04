@@ -1986,10 +1986,8 @@ GameBoyCore.prototype.executeHDMA = function () {
 };
 GameBoyCore.prototype.clockUpdate = function () {
     if (this.cTIMER) {
-        var dateObj = new Date();
-        var newTime = dateObj.getTime();
-        var timeElapsed = newTime - this.lastIteration; //Get the numnber of milliseconds since this last executed.
-        this.lastIteration = newTime;
+        var timeElapsed = 1000 / 60;
+        this.lastIteration = (this.lastIteration || 0) + timeElapsed;
         if (this.cTIMER && !this.RTCHALT) {
             //Update the MBC3 RTC:
             this.RTCSeconds += timeElapsed / 1000;

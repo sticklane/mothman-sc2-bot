@@ -1,0 +1,482 @@
+canvas {
+  cursor: none;
+}
+
+#title {
+  margin-top: 16px;
+}
+
+#performance {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  transform: scale(2);
+  transform-origin: top right;
+}
+
+#performance canvas {
+  cursor: pointer;
+  image-rendering: pixelated;
+}
+
+/* Leave room for the enlarged stats panel when the debugger is open. */
+#performance:not(:empty) ~ .lil-gui.autoPlace {
+  top: 120px;
+  max-height: calc(100% - 120px);
+}
+
+pre {
+  font-family: var(--code-font);
+  font-variant-numeric: tabular-nums;
+  font-variant-ligatures: none;
+  font-size: 12px;
+}
+
+.toolbar {
+  margin-bottom: 15px;
+}
+
+.fixed {
+  font-family: var(--code-font);
+  font-variant-numeric: tabular-nums;
+  font-variant-ligatures: none;
+  font-size: 12px;
+}
+
+.table-nonfluid {
+  width: auto !important;
+}
+
+.debug.hidden {
+  display: none;
+}
+
+.debug-adjacent {
+  display: inline-block;
+  float: none;
+}
+
+.register-table th,
+.register-table td {
+  padding: 2px 10px;
+
+  text-align: right;
+}
+
+.disasm-table th,
+.disasm-table td {
+  padding: 2px 10px;
+
+  text-align: right;
+}
+
+.disasm-table th.op,
+.disasm-table td.op {
+  text-align: left;
+}
+
+.dis {
+  position: relative;
+}
+
+.dis-gutter {
+  float: left;
+
+  width: 30px;
+}
+
+.dis-view {
+  min-width: 0;
+  flex: 1;
+}
+
+.dis-gutter pre {
+  font-size: 12px;
+
+  color: var(--danger-color);
+  border: 0;
+  border-radius: 0;
+  background-color: var(--secondary-bg);
+}
+
+.dis-view pre {
+  border: 0;
+  border-radius: 0;
+  background-color: var(--body-bg);
+}
+
+pre .dis-address-jump {
+  font-weight: bold;
+}
+
+pre .dis-address-target {
+  font-weight: bold;
+}
+
+pre .dis-label {
+  font-weight: bold;
+}
+
+pre .dis-address {
+  color: var(--secondary-color);
+}
+
+pre .dis-line-target {
+  background-color: var(--tertiary-bg);
+}
+
+pre .dis-line-cur {
+  background-color: var(--accent-bg);
+}
+
+.output {
+  overflow: scroll;
+
+  height: 360px;
+
+  color: var(--body-color);
+  background-color: var(--secondary-bg);
+}
+
+div #disasm {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.popover-inner {
+  width: auto;
+}
+
+.matrix-table th,
+.matrix-table td {
+  padding: 2px 10px;
+}
+
+.vertex-table th,
+.vertex-table td {
+  padding: 2px 10px;
+
+  text-align: right;
+}
+
+table .impl0 {
+  color: #000;
+  background-color: #c44;
+}
+
+table .impl40 {
+  color: #000;
+  background-color: #cc4;
+}
+
+table .impl80 {
+  color: #000;
+  background-color: #8c4;
+}
+
+table .impl100 {
+  color: #000;
+  background-color: #4f4;
+}
+
+.scrub {
+  width: 640px;
+}
+
+.scrub input {
+  width: 100%;
+}
+
+.hle-disasm {
+  position: relative;
+
+  overflow: scroll;
+
+  height: 480px;
+
+  color: var(--body-color);
+  background-color: var(--body-bg);
+}
+
+.hle-cur-instr {
+  background-color: var(--register-2);
+}
+
+.combine {
+  display: inline-block;
+}
+
+.processor-display {
+  display: inline-block;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.processor-details {
+  display: inline-block;
+
+  vertical-align: top;
+}
+
+.speed-slider {
+  white-space: nowrap;
+}
+
+.clear {
+  clear: both;
+}
+
+.dl-debug-table th,
+.dl-debug-table td {
+  padding: 2px 10px;
+}
+
+.dl-debug-geommode-enabled {
+  background-color: var(--register-2);
+}
+
+.dl-debug-geommode-disabled {
+  background-color: var(--danger-bg);
+}
+
+.clip-pos {
+  background-color: rgb(68, 219, 83);
+}
+
+.clip-neg {
+  background-color: rgb(66, 135, 245);
+}
+
+.clip-none {}
+
+.clip-err {
+  background-color: red;
+}
+
+.cpu0-status-bit-set {
+  background-color: var(--danger-bg);
+}
+
+.cpu0-status-bit-enabled {
+  font-weight: bold;
+}
+
+.timeline-panel {
+  position: relative;
+  height: 100px;
+  width: 8000px;
+}
+
+.timeline-block {
+  position: absolute;
+
+  /* Should be overridden in element style */
+  width: 50px;
+  height: 30px;
+  background-color: #3b86f6;
+
+  box-shadow: inset 0 0 2px #000;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.timeline-name {
+  position: absolute;
+  margin: 7px 10px;
+  font-size: 12px;
+  color: rgb(0, 0, 0, 0.8);
+  white-space: nowrap;
+}
+
+/* Keep the dense debugger data inside bounded panels, without squeezing columns. */
+.debugger {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius);
+  font-size: 13px;
+}
+
+.debugger .nav {
+  border-bottom: 1px solid var(--border-color);
+  gap: 20px;
+}
+
+.debugger .tab-content > .tab-pane {
+  padding-top: 12px;
+}
+
+.processor-display {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.processor-details {
+  max-width: 100%;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius);
+}
+
+.processor-details:last-child {
+  flex: 1 1 540px;
+}
+
+.debugger .register-table {
+  width: 100%;
+}
+
+.debugger .register-table td,
+.debugger .register-table th {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* lil-gui exposes these tokens for matching the emulator's options panel. */
+.lil-gui {
+  --background-color: var(--panel-bg);
+  --text-color: var(--body-color);
+  --title-background-color: var(--secondary-bg);
+  --title-text-color: var(--body-color);
+  --widget-color: var(--body-bg);
+  --hover-color: var(--accent-bg);
+  --focus-color: var(--accent-bg);
+  --number-color: var(--link-color);
+  --string-color: var(--link-color);
+  --font-family: Inter, system-ui, sans-serif;
+  --font-family-mono: var(--code-font);
+  --widget-border-radius: var(--control-radius);
+  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius);
+}
+
+.debugger .register-table td:not(.fixed),
+.debugger .register-table th {
+  color: var(--secondary-color);
+  font-weight: 500;
+}
+
+/* Status flags span both register pairs; draw separators across complete rows. */
+.debugger .control-register-table td {
+  border-bottom: 0;
+}
+
+.debugger .control-register-table tr {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.debugger .control-register-table .status-flags {
+  text-align: left;
+}
+
+.debugger input:not([type="range"]),
+.debugger select {
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  color: var(--body-color);
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius);
+  font-family: var(--code-font);
+  font-size: 12px;
+}
+
+.debugger .control-group {
+  margin-bottom: 12px;
+}
+
+.debugger .controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.debugger .dis {
+  display: flex;
+}
+
+/* Small operand labels need stronger fills than the matching register cells. */
+.debugger .dis-view {
+  --register-1: #85cef0;
+  --register-2: #8ddab4;
+  --register-3: #c8a5ef;
+}
+
+[data-theme="dark"] .debugger .dis-view {
+  --register-1: #64cde8;
+  --register-2: #71d6ab;
+  --register-3: #c3a0f5;
+}
+
+/* Bright fills need dark text, including when the surrounding code is dark. */
+.debugger .dis-reg-highlight {
+  color: #102139;
+}
+
+/* Both columns must share line metrics so breakpoint hit targets stay aligned. */
+.debugger .dis pre {
+  margin: 0;
+  font-size: 12px;
+  line-height: 24px;
+  background: var(--panel-bg);
+}
+
+.debugger .dis-gutter {
+  flex: 0 0 24px;
+  text-align: center;
+  border-right: 1px solid var(--border-color);
+  margin-right: 8px;
+}
+
+.debugger .dis-gutter span {
+  display: inline-block;
+  width: 100%;
+  cursor: pointer;
+}
+
+.debugger .dis-line-cur {
+  box-shadow: inset 2px 0 var(--link-color);
+}
+
+.debugger .dis-address-jump,
+.debugger .dis-fragment-link {
+  color: var(--link-color);
+  cursor: pointer;
+}
+
+.debugger .output,
+.debugger #memory-content pre,
+.debugger .hle-disasm {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--control-radius);
+  background: var(--panel-bg);
+}
+
+.debugger #memory-content input {
+  margin-bottom: 12px;
+}
+
+.debugger #clear {
+  margin-bottom: 12px;
+}
+
+.debugger #timeline-content {
+  overflow-x: auto;
+}
+
+.toolbar .btn-toolbar {
+  gap: 6px;
+}
+
+.toolbar {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}

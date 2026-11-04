@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { NES, Controller } from './node_modules/jsnes/src/index.js';
 import pngjs from 'pngjs';
 import { TOP10_GAMES, bootToGameplay } from './inspect-top10-roms.mjs';
+import { runNesWholeRomTasLockstep } from './tas-fm2-runner.mjs';
 
 const { PNG } = pngjs;
 const __filename = fileURLToPath(import.meta.url);
@@ -401,6 +402,8 @@ function diffTop10Game(gameSpec) {
       cpCampaignWin.gameplayState.enemyAlive === 0
   });
 
+  const wholeRomTasLockstep = runNesWholeRomTasLockstep(gameSpec.id, gameSpec.romFile);
+
   return {
     id: gameSpec.id,
     symbol: gameSpec.symbol,
@@ -408,6 +411,10 @@ function diffTop10Game(gameSpec) {
     mirroring: auth.mirroring,
     authenticRom: `assets/roms/${gameSpec.romFile}`,
     decompiledRom: `build/${gameSpec.id}_nes.nes`,
+    bobaWholeRomModule: wholeRomTasLockstep.bobaWholeRomModule,
+    recompiledWholeRom: wholeRomTasLockstep.recompiledWholeRom,
+    tasFile: wholeRomTasLockstep.tasFile,
+    wholeRomTasLockstep,
     screenshot: `screenshots/${pngName}`,
     ...cp0,
     frame0: cp0,

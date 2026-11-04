@@ -1,0 +1,463 @@
+import { describe, expect, test } from 'bun:test';
+import { getPerformanceProfile, setPerformanceProfiling } from '../debug/performance_profile.js';
+import { MI_INTR_MASK_REG, MI_INTR_SP } from '../devices/mi.js';
+import { SP_STATUS_INTR_BREAK, SP_STATUS_REG } from '../devices/sp_constants.js';
+import * as regs from './cpu0reg.js';
+import * as decode from './decode.js';
+import { Fragment } from './fragments.js';
+import { FragmentContext } from './recompiler.js';
+import {
+  DEFAULT_PC,
+  captureExecutionSnapshot,
+  compileFragmentAt,
+  compileOps,
+  createTestEmulator,
+  iop,
+  resetExecutionState,
+  special,
+} from './test_helpers.js';
+
+const pc = DEFAULT_PC;
+const cycles = 16;
+
+async function fixture(words) {
+  const e = await createTestEmulator();
+  const { cpu0: c, hardware: h } = e;
+  const step = h.rsp.step;
+  function setup(prepare = () => {}) {
+    resetExecutionState(c, words, { pc });
+    h.rsp.step = step;
+    c.setRegS32Extend(20, 0x80003000);
+    prepare(c, h);
+  }
+  function snapshot() {
+    return captureExecutionSnapshot(e, { ramOffset: 0x3000, ramLength: 0x40 });
+  }
+  function train(prepare) {
+    setup(prepare);
+    return compileFragmentAt(c, pc, cycles);
+  }
+  function compare(fragment, prepare, profiled = false, expectCompiled = true) {
+    setPerformanceProfiling(false);
+    setup(prepare);
+    c.run(cycles);
+    const interpreted = snapshot();
+    setup(prepare);
+    h.fragmentCache.fragments.set(pc, fragment);
+    const before = fragment.executionCount;
+    setPerformanceProfiling(profiled);
+    try {
+      c.run(cycles);
+      if (expectCompiled) {
+        expect(fragment.executionCount).toBeGreaterThan(before);
+      }
+      expect(snapshot()).toEqual(interpreted);
+      return { ...interpreted, profile: getPerformanceProfile() };
+    } finally {
+      setPerformanceProfiling(false);
+    }
+  }
+  return { e, train, compare };
+}
+
+function generated(words, ctx = new FragmentContext(), fragment = new Fragment(pc)) {
+  return compileOps(words, { pc, ctx, fragment }).bodyCode;
+}
+
+describe('GPR fact generated code', () => {
+  test('Mario entry compares both full-width inputs and forwards the stored result', () => {
+    const code = generated([
+      special(decode.SPECIAL_SLT, 15, 4, 1),
+      iop(decode.OP_BNEL, 1, 0, -2),
+      iop(decode.OP_LW, 2, 15),
+    ]);
+    expect(code).toContain('(c.gprS32[31] === c.gprS32[9] ? c.getRegU32Lo(15) < c.getRegU32Lo(4) : c.gprS32[31] < c.gprS32[9])');
+    expect(code).not.toContain('getRegS64');
+    expect(code).toContain('c.setRegU32Extend(1, compare_1 ? 1 : 0)');
+    expect(code).toContain('if (compare_1)');
+    expect(code).not.toContain('c.getRegU64(1)');
+    const afterLoad = generated([iop(decode.OP_LW, 2, 15), special(decode.SPECIAL_SLT, 15, 4, 1)]);
+    expect(afterLoad).toContain('(c.gprS32[31] === c.gprS32[9] ? c.getRegU32Lo(15) < c.getRegU32Lo(4) : c.gprS32[31] < c.gprS32[9])');
+  });
+
+  test('Zelda word arithmetic proves both SLTU inputs', () => {
+    const code = generated([
+      iop(decode.OP_LW, 4, 15, 8),
+      iop(decode.OP_ADDIU, 2, 2, 1),
+      special(decode.SPECIAL_ADDU, 15, 5, 24),
+      special(decode.SPECIAL_SLTU, 2, 24, 1),
+      iop(decode.OP_BNEL, 1, 0, -5),
+      iop(decode.OP_SB, 2, 0),
+    ]);
+    expect(code).toContain('c.getRegU32Lo(2) < c.getRegU32Lo(24)');
+    expect(code).toContain('if (compare_4)');
+  });
+
+  test('Diddy ANDI allows a Number equality even after a gap', () => {
+    const code = generated([
+      iop(decode.OP_LH, 20, 3),
+      special(decode.SPECIAL_AND, 3, 4, 3),
+      iop(decode.OP_ANDI, 3, 3, 0xffff),
+      0,
+      iop(decode.OP_BEQ, 3, 0, 2),
+    ]);
+    expect(code).toContain('c.getRegU32Lo(3) === 0');
+  });
+
+  test('overwrites and unknown effects kill proofs and forwarding', () => {
+    for (const overwrite of [
+      iop(decode.OP_LD, 20, 1),
+      special(decode.SPECIAL_DADDU, 4, 5, 1),
+      iop(decode.OP_DADDIU, 4, 1, 1),
+      iop(decode.OP_LDL, 20, 1),
+      iop(decode.OP_LDR, 20, 1),
+      special(decode.SPECIAL_MFHI, 0, 0, 1),
+      0x44210000,
+      0x0000000f,
+    ]) {
+      const code = generated([special(decode.SPECIAL_SLT, 4, 5, 1), overwrite, iop(decode.OP_BNE, 1, 0, 2)]);
+      expect(code).toContain('(c.gprU32[2] !== 0 || c.gprU32[3] !== 0)');
+    }
+  });
+
+  test('a nonadjacent comparison uses its width but not the old local', () => {
+    const code = generated([special(decode.SPECIAL_SLT, 4, 5, 1), 0, iop(decode.OP_BNE, 1, 0, 2)]);
+    expect(code).toContain('c.getRegS32Lo(1) !== 0');
+  });
+
+  test('facts reset on fragment changes, explicit starts and invalidation/rebuilds', () => {
+    const ctx = new FragmentContext();
+    const fragment = new Fragment(pc);
+    generated([iop(decode.OP_ADDIU, 0, 1, 1)], ctx, fragment);
+    fragment.invalidate();
+    expect(generated([iop(decode.OP_BNE, 1, 0, 2)], ctx, fragment)).toContain('(c.gprU32[2] !== 0 || c.gprU32[3] !== 0)');
+    generated([iop(decode.OP_ADDIU, 0, 1, 1)], ctx, fragment);
+    expect(generated([iop(decode.OP_BNE, 1, 0, 2)], ctx)).toContain('(c.gprU32[2] !== 0 || c.gprU32[3] !== 0)');
+    ctx.newFragment();
+    expect(ctx.gprFacts.get(1).kind).toBe('unknown64');
+    expect(ctx.gprFacts.get(0).value).toBe(0n);
+  });
+
+  test('inlines hot 32-bit ALU, shift and bitwise ops with direct word stores and constant folding', () => {
+    const code = generated([
+      iop(decode.OP_LUI, 0, 1, 0x8001),
+      iop(decode.OP_ORI, 1, 1, 0x2345),
+      iop(decode.OP_XORI, 1, 2, 0x0001),
+      iop(decode.OP_ADDIU, 2, 3, -5),
+      iop(decode.OP_ADDIU, 4, 5, 12),
+      special(decode.SPECIAL_ADDU, 4, 5, 6),
+      special(decode.SPECIAL_SUBU, 4, 5, 7),
+      special(decode.SPECIAL_SLL, 0, 4, 8, 3),
+      special(decode.SPECIAL_SRL, 0, 4, 9, 3),
+      special(decode.SPECIAL_SRA, 0, 6, 10, 3),
+      special(decode.SPECIAL_SRA, 0, 11, 12, 3),
+      special(decode.SPECIAL_SLLV, 5, 4, 13),
+      special(decode.SPECIAL_SRLV, 5, 4, 14),
+      special(decode.SPECIAL_SRAV, 5, 6, 15),
+      special(decode.SPECIAL_AND, 8, 9, 16),
+      special(decode.SPECIAL_OR, 8, 9, 17),
+      special(decode.SPECIAL_XOR, 8, 9, 18),
+      special(decode.SPECIAL_NOR, 8, 9, 19),
+      iop(decode.OP_ANDI, 4, 21, 0x00ff),
+      iop(decode.OP_ORI, 21, 21, 0x0f00),
+      iop(decode.OP_ORI, 21, 22, 0x00f0),
+    ]);
+    expect(code).not.toMatch(/c\.exec(LUI|ORI|XORI|ANDI|ADDIU|ADDU|SUBU|SLL|SRL|SRA|SLLV|SRLV|SRAV|AND|OR|XOR|NOR)\b/);
+    expect(code).not.toMatch(/c\.setReg/);
+    // LUI + ORI + XORI + ADDIU fold to compile-time constants.
+    expect(code).toContain('c.gprS32[2] = -2147418112;\n  c.gprS32[3] = -1;');
+    expect(code).toContain('c.gprS32[4] = -2147409084;\n  c.gprS32[5] = -1;');
+    expect(code).toContain('c.gprS32[6] = -2147409089;\n  c.gprS32[7] = -1;');
+    // SRL by non-zero shift clears the upper word without >> 31.
+    expect(code).toContain('c.gprS32[18] = c.gprU32[8] >>> 3;\n  c.gprS32[19] = 0;');
+    // SRA uses a 32-bit shift when proven sign-extended, and a 64-bit funnel shift when unknown64.
+    expect(code).toContain('const v = c.gprS32[12] >> 3;');
+    expect(code).toContain('const v = (c.gprU32[22] >>> 3) | (c.gprU32[23] << 29);');
+    // In-place ORI updates only the low word; zero-extended source folds high word to 0.
+    expect(code).toContain('c.gprS32[42] |= 3840;');
+    expect(code).toContain('c.gprS32[44] = c.gprS32[42] | 240;\n  c.gprS32[45] = 0;');
+  });
+});
+
+describe('mixed-width compiled/interpreted comparisons', () => {
+  const values = [
+    0n, 1n, -1n, 0x7fffffffn, 0x80000000n, -0x80000000n, 0xffffffffn,
+    0x100000000n, 0x100000001n, -0x100000000n, 0x7fffffffffffffffn, -0x8000000000000000n,
+  ];
+  for (const [name, prefix] of [
+    ['unknown', []],
+    ['signed words', [iop(decode.OP_ADDIU, 4, 4), iop(decode.OP_ADDIU, 5, 5)]],
+    ['unsigned words', [iop(decode.OP_LWU, 20, 4), iop(decode.OP_LWU, 20, 5, 8)]],
+    ['signed/unsigned', [iop(decode.OP_ADDIU, 4, 4), iop(decode.OP_LWU, 20, 5, 8)]],
+    ['unsigned/signed', [iop(decode.OP_LWU, 20, 4), iop(decode.OP_ADDIU, 5, 5)]],
+  ]) {
+    test(`${name}: signed and unsigned ordering, equality, aliases and high words`, async () => {
+      // BEQ skips the aliased write to r4, making equality (including differing
+      // upper words) observable independently of the comparison-result GPRs.
+      const f = await fixture([
+        ...prefix,
+        special(decode.SPECIAL_SLT, 4, 5, 1),
+        iop(decode.OP_BNE, 1, 0, 1),
+        iop(decode.OP_SW, 20, 1),
+        special(decode.SPECIAL_SLTU, 4, 5, 2),
+        iop(decode.OP_BEQ, 4, 5, 2),
+        iop(decode.OP_SW, 20, 2, 4),
+        special(decode.SPECIAL_SLT, 4, 5, 4),
+        special(decode.SPECIAL_SLTU, 5, 5, 5),
+        special(decode.SPECIAL_SLT, 4, 5, 0),
+      ]);
+      const fragment = f.train();
+      for (const s of values) {
+        for (const t of values) {
+          f.compare(fragment, (c, h) => {
+            c.setRegU64(4, s);
+            c.setRegU64(5, t);
+            h.ram.set32(0x3000, Number(BigInt.asUintN(32, s)));
+            h.ram.set32(0x3008, Number(BigInt.asUintN(32, t)));
+          });
+        }
+      }
+    });
+  }
+
+  for (const unsigned of [false, true]) {
+    for (const immediate of [-32768, -1, 0, 1, 32767]) {
+      test(`SLTI${unsigned ? 'U' : ''} immediate ${immediate}`, async () => {
+        const op = unsigned ? decode.OP_SLTIU : decode.OP_SLTI;
+        const f = await fixture([
+          iop(op, 4, 1, immediate),
+          iop(decode.OP_ADDIU, 4, 4),
+          iop(op, 4, 2, immediate),
+          iop(decode.OP_LWU, 20, 4),
+          iop(op, 4, 4, immediate),
+          iop(decode.OP_BNE, 4, 0, 1),
+          iop(decode.OP_SW, 20, 4, 4),
+        ]);
+        const fragment = f.train();
+        for (const value of values) {
+          f.compare(fragment, (c, h) => {
+            c.setRegU64(4, value);
+            h.ram.set32(0x3000, Number(BigInt.asUintN(32, value)));
+          });
+        }
+      });
+    }
+  }
+
+  test('overflow, constants, mixed-width overwrites and full-source SRA/SRAV', async () => {
+    for (const shift of [special(decode.SPECIAL_SRA, 0, 4, 4, 4), special(decode.SPECIAL_SRAV, 6, 4, 4)]) {
+      const words = [
+        iop(decode.OP_LUI, 0, 1, 0x8000),
+        iop(decode.OP_ADDIU, 1, 1, -1),
+        iop(decode.OP_ADDIU, 5, 5, 1),
+        special(decode.SPECIAL_SLT, 1, 5, 2),
+        iop(decode.OP_LD, 20, 1),
+        special(decode.SPECIAL_SLT, 1, 5, 3),
+        shift,
+        special(decode.SPECIAL_SLT, 4, 5, 7),
+        iop(decode.OP_ANDI, 1, 1, 0xffff),
+        iop(decode.OP_BEQ, 1, 0, 1),
+        iop(decode.OP_SW, 20, 7, 16),
+      ];
+      const f = await fixture(words);
+      const fragment = f.train();
+      for (const value of values) {
+        f.compare(fragment, (c, h) => {
+          c.setRegU64(4, value);
+          c.setRegU64(5, value);
+          c.setRegS32Extend(6, 4);
+          h.ram.set64(0x3000, 0x100000000n);
+        });
+      }
+    }
+  });
+
+  test('load and bitwise transfer rules handle sign bits and overwritten constants', async () => {
+    for (const load of [decode.OP_LB, decode.OP_LH, decode.OP_LWL, decode.OP_LW, decode.OP_LBU, decode.OP_LHU, decode.OP_LWR, decode.OP_LWU, decode.OP_LL]) {
+      for (const bitwise of [decode.SPECIAL_AND, decode.SPECIAL_OR, decode.SPECIAL_XOR]) {
+        const f = await fixture([
+          iop(decode.OP_LUI, 0, 1, 0x8000),
+          iop(load, 20, 1),
+          iop(decode.OP_ADDIU, 5, 5),
+          special(bitwise, 1, 5, 2),
+          special(decode.SPECIAL_SLT, 2, 5, 3),
+          special(decode.SPECIAL_SLTU, 2, 5, 4),
+          iop(decode.OP_ANDI, 2, 2, 0xffff),
+          iop(decode.OP_ORI, 2, 2, 0x8000),
+          iop(decode.OP_XORI, 2, 2, 0xffff),
+          iop(decode.OP_SLTIU, 2, 6, -1),
+          iop(decode.OP_BNE, 2, 0, 1),
+          iop(decode.OP_SW, 20, 6, 16),
+        ]);
+        const fragment = f.train();
+        for (const value of values) {
+          f.compare(fragment, (c, h) => {
+            c.setRegU64(5, value);
+            h.ram.set32(0x3000, Number(BigInt.asUintN(32, value)));
+          });
+        }
+      }
+    }
+  });
+
+  test('word immediates and move/clear specializations preserve comparison facts', async () => {
+    for (const load of [decode.OP_LW, decode.OP_LWU, decode.OP_LD]) { // Signed word, unsigned word, full width.
+      for (const move of [
+        special(decode.SPECIAL_OR, 4, 0, 6),
+        special(decode.SPECIAL_OR, 0, 4, 6),
+        special(decode.SPECIAL_OR, 4, 0, 4),
+        special(decode.SPECIAL_OR, 0, 0, 6),
+        special(decode.SPECIAL_OR, 4, 0, 0),
+      ]) {
+        const f = await fixture([
+          iop(load, 20, 4),
+          move,
+          iop(decode.OP_ORI, 6, 6, 0xffff),
+          iop(decode.OP_XORI, 6, 6, 0x8000),
+          special(decode.SPECIAL_SLT, 4, 6, 8),
+          special(decode.SPECIAL_SLTU, 4, 6, 9),
+          iop(decode.OP_ANDI, 4, 4, 0xffff),
+          special(decode.SPECIAL_SLT, 4, 6, 10),
+          special(decode.SPECIAL_SLTU, 4, 6, 11),
+          iop(decode.OP_BNE, 11, 0, 1),
+          iop(decode.OP_SW, 20, 6, 16),
+        ]);
+        const fragment = f.train();
+        for (const value of values) {
+          f.compare(fragment, (c, h) => {
+            c.setRegU64(6, value ^ 0xffff000080000000n);
+            h.ram.set64(0x3000, value);
+          });
+        }
+      }
+    }
+  });
+
+  for (const branch of [decode.OP_BEQ, decode.OP_BNE, decode.OP_BEQL, decode.OP_BNEL]) {
+    for (const reversed of [false, true]) {
+      test(`branch ${branch.toString(16)}, zero ${reversed ? 'first' : 'second'}: off-trace exits, annulment and active RSP`, async () => {
+        const f = await fixture([
+          special(decode.SPECIAL_SLT, 4, 5, 1),
+          iop(branch, reversed ? 0 : 1, reversed ? 1 : 0, 2),
+          iop(decode.OP_SW, 20, 1),
+          iop(decode.OP_ADDIU, 0, 8, 17),
+          iop(decode.OP_ADDIU, 0, 9, 23),
+        ]);
+        const fragment = f.train(c => { c.setRegS32Extend(4, 1); });
+        for (const value of [-1n, 1n]) {
+          f.compare(fragment, (c, h) => {
+            c.setRegU64(4, value);
+            for (let i = 0; i < 32; i++) {
+              h.rsp.imemDV.setUint32(i * 4, iop(decode.OP_ADDIU, 1, 1, 1), false);
+            }
+            h.rsp.halted = false;
+          });
+        }
+      });
+    }
+  }
+
+  for (const profiled of [false, true]) {
+    test(`RSP interrupt between comparison and branch materializes the exact prefix, profiling=${profiled}`, async () => {
+      const f = await fixture([special(decode.SPECIAL_SLT, 4, 5, 1), iop(decode.OP_BNE, 1, 0, 2), iop(decode.OP_SW, 20, 1)]);
+      const fragment = f.train();
+      const result = f.compare(fragment, (c, h) => {
+        c.setRegS32Extend(4, -1);
+        c.setControlU32(regs.controlStatus, 0x20000401);
+        c.statusRegisterChanged();
+        h.mi_reg.set32(MI_INTR_MASK_REG, MI_INTR_SP);
+        h.sp_reg.set32(SP_STATUS_REG, SP_STATUS_INTR_BREAK);
+        h.rsp.imemDV.setUint32(0, iop(decode.OP_ADDIU, 1, 1, 1), false);
+        h.rsp.imemDV.setUint32(4, 0x0d, false); // BREAK before CPU branch.
+        h.rsp.halted = false;
+      }, profiled);
+      expect(result.gpr[1]).toBe(1n);
+      expect(BigInt.asUintN(32, result.control[regs.controlEPC])).toBe(BigInt(pc + 4));
+      expect(result.count).toBe(cycles);
+      expect(result.memory.slice(0, 4)).toEqual([0, 0, 0, 0]);
+      if (profiled) {
+        expect(result.profile.compiledOps).toBe(1);
+      }
+    });
+
+    test(`delay-slot exception after a forwarded branch, profiling=${profiled}`, async () => {
+      const f = await fixture([special(decode.SPECIAL_SLT, 4, 5, 1), iop(decode.OP_BNE, 1, 0, 2), iop(decode.OP_LW, 20, 2)]);
+      const fragment = f.train(c => c.setRegS32Extend(4, -1));
+      const result = f.compare(fragment, c => {
+        c.setRegS32Extend(4, -1); c.setRegS32Extend(20, 0x80003001);
+      }, profiled);
+      expect(result.gpr[1]).toBe(1n);
+      expect(Number(result.control[regs.controlCause]) >>> 0).toBe(0x80000010);
+      expect(BigInt.asUintN(32, result.control[regs.controlEPC])).toBe(BigInt(pc + 4));
+      if (profiled) {
+        expect(result.profile.compiledOps).toBe(3);
+      }
+    });
+  }
+
+  test('an event deadline between comparison and branch falls back with the same visible result', async () => {
+    const f = await fixture([special(decode.SPECIAL_SLT, 4, 5, 1), iop(decode.OP_BNE, 1, 0, 2), iop(decode.OP_SW, 20, 1)]);
+    const fragment = f.train();
+    const result = f.compare(fragment, c => {
+      c.setRegS32Extend(4, -1);
+      c.addEvent('Stop after comparison', 1, () => c.breakExecution());
+    }, false, false);
+    expect(result.gpr[1]).toBe(1n);
+    expect(result.pc).toBe(pc + 4);
+    expect(result.count).toBe(1);
+  });
+
+  test('inlined 32-bit ALU, shifts, bitwise ops and zero-shift sign extensions match interpreter across 64-bit edge values', async () => {
+    const f = await fixture([
+      iop(decode.OP_LUI, 0, 1, 0x8000),
+      iop(decode.OP_ORI, 1, 1, 0x0001),
+      iop(decode.OP_XORI, 1, 2, 0xffff),
+      iop(decode.OP_ADDIU, 2, 3, -32768),
+      iop(decode.OP_ADDIU, 4, 6, 0),       // Sign-extends full-width r4 into r6.
+      special(decode.SPECIAL_ADDU, 4, 5, 7),
+      special(decode.SPECIAL_SUBU, 4, 5, 8),
+      special(decode.SPECIAL_SUBU, 0, 5, 9),
+      special(decode.SPECIAL_SLL, 0, 4, 10, 5),
+      special(decode.SPECIAL_SRL, 0, 4, 11, 5),
+      special(decode.SPECIAL_SRA, 0, 4, 12, 5), // Full-width SRA on r4.
+      special(decode.SPECIAL_SRA, 0, 6, 13, 5), // Proven sign-extended SRA on r6.
+      special(decode.SPECIAL_SLLV, 5, 4, 14),
+      special(decode.SPECIAL_SRLV, 5, 4, 15),
+      special(decode.SPECIAL_SRAV, 5, 6, 16),
+      special(decode.SPECIAL_NOR, 4, 5, 17),
+    ]);
+    const fragment = f.train();
+    for (const s of values) {
+      for (const t of values) {
+        f.compare(fragment, c => {
+          c.setRegU64(4, s);
+          c.setRegU64(5, t);
+        });
+      }
+    }
+  });
+
+  test('in-place zero-immediate and zero-shift operations still sign-extend unextended 64-bit registers', async () => {
+    for (const op of [
+      iop(decode.OP_ADDIU, 4, 4, 0),
+      special(decode.SPECIAL_ADDU, 4, 0, 4),
+      special(decode.SPECIAL_ADDU, 0, 4, 4),
+      special(decode.SPECIAL_SUBU, 4, 0, 4),
+      special(decode.SPECIAL_SLL, 0, 4, 4, 0),
+      special(decode.SPECIAL_SRL, 0, 4, 4, 0),
+      special(decode.SPECIAL_SRA, 0, 4, 4, 0),
+      special(decode.SPECIAL_SLLV, 0, 4, 4),
+      special(decode.SPECIAL_SRLV, 0, 4, 4),
+      special(decode.SPECIAL_SRAV, 0, 4, 4),
+    ]) {
+      const f = await fixture([op, iop(decode.OP_BNE, 4, 5, 1), iop(decode.OP_SW, 20, 4)]);
+      const fragment = f.train();
+      for (const value of values) {
+        f.compare(fragment, c => {
+          c.setRegU64(4, value);
+          c.setRegU64(5, BigInt.asIntN(32, value));
+        });
+      }
+    }
+  });
+});
