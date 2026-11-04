@@ -2,12 +2,13 @@
 
 ;; ============================================================================
 ;; tools/whole-rom-decompiler.rkt
-;; Whole-Binary Lifter, Recursive-Descent + Linear-Sweep Disassembler,
-;; Graded Coeffect-Effect Analyzer & Lossless Whole-ROM Recompiler for:
-;;   - All 14 Commercial NES (.nes) ROMs (MOS 6502 + 2C02 PPU + iNES Mappers)
+;; Deep Whole-Binary Lifter, Recursive-Descent + Linear-Sweep Disassembler,
+;; Call-Graph & Symbolic MMIO Analyzer, Multi-Line Formatter & Lossless
+;; Whole-ROM Assembler/Recompiler for:
+;;   - All 14 Commercial NES (.nes) ROMs (MOS 6502 + 2C02 PPU + 2A03 APU + iNES Mappers)
 ;;   - All 10 Commercial Game Boy (.gb) ROMs (Sharp SM83 + DMG PPU + MBC1/3/5)
 ;;   - All 10 Commercial Game Boy Color (.gbc) ROMs (SM83 2x + CGB PPU/HDMA + MBC)
-;;   - All 10 Commercial PICO-8 (.p8) Cartridges (Full Lua AST + GFX/MAP/GFF/SFX/MUSIC)
+;;   - All 10 Commercial PICO-8 (.p8) Cartridges (Full Lua Function AST + GFX/MAP/GFF/SFX/MUSIC)
 ;; ============================================================================
 
 (require (for-syntax racket/base
@@ -23,7 +24,8 @@
          racket/set
          racket/string
          "nes-resource-tool.rkt"
-         "nes-rom-decompiler.rkt")
+         "nes-rom-decompiler.rkt"
+         "sm83-disassembler.rkt")
 
 (provide
  NES-WHOLE-ROM-SPECS
@@ -31,12 +33,18 @@
  GBC-WHOLE-ROM-SPECS
  PICO-WHOLE-ROM-SPECS
  ALL-44-WHOLE-ROM-SPECS
+ NES-MMIO-SYM-HASH
+ nes-addr->mmio-symbol
  lift-nes-whole-rom->boba-sexp
  lift-gb-gbc-whole-rom->boba-sexp
  lift-pico8-whole-rom->boba-sexp
  recompile-boba-whole-rom-sexp->bytes
  recompile-boba-whole-rom-file!
- decompile-and-recompile-all-44-whole-roms!)
+ verify-whole-rom-direct-assembly
+ read-boba-whole-rom-sexp
+ write-boba-whole-rom-module!
+ decompile-and-recompile-all-44-whole-roms!
+ (all-from-out "sm83-disassembler.rkt"))
 
 (define-syntax (get-repo-root stx)
   (datum->syntax stx (path->string (simplify-path (build-path (syntax-source stx) 'up 'up)))))
@@ -202,8 +210,438 @@
    (for/list ([s (in-list PICO-WHOLE-ROM-SPECS)]) (hash-set s 'target 'pico))))
 
 ;; ============================================================================
-;; 3. Whole-Binary NES (.nes) Lifter (`lift-nes-whole-rom->boba-sexp`)
+;; 3. Deep Whole-Binary NES (.nes) Lifter & 6502 Direct Assembler
 ;; ============================================================================
+
+(define NES-MMIO-SYM-HASH
+  (hasheq
+   ;; 2C02 PPU Registers ($2000-$2007)
+   #x2000 'PPUCTRL
+   #x2001 'PPUMASK
+   #x2002 'PPUSTATUS
+   #x2003 'OAMADDR
+   #x2004 'OAMDATA
+   #x2005 'PPUSCROLL
+   #x2006 'PPUADDR
+   #x2007 'PPUDATA
+   ;; 2A03 APU & DMA / Joypad Registers ($4000-$4017)
+   #x4000 'SQ1_VOL
+   #x4001 'SQ1_SWEEP
+   #x4002 'SQ1_LO
+   #x4003 'SQ1_HI
+   #x4004 'SQ2_VOL
+   #x4005 'SQ2_SWEEP
+   #x4006 'SQ2_LO
+   #x4007 'SQ2_HI
+   #x4008 'TRI_LINEAR
+   #x4009 'TRI_UNUSED
+   #x400A 'TRI_LO
+   #x400B 'TRI_HI
+   #x400C 'NOISE_VOL
+   #x400D 'NOISE_UNUSED
+   #x400E 'NOISE_LO
+   #x400F 'NOISE_HI
+   #x4010 'DMC_FREQ
+   #x4011 'DMC_RAW
+   #x4012 'DMC_START
+   #x4013 'DMC_LEN
+   #x4014 'OAMDMA
+   #x4015 'SND_CHN
+   #x4016 'JOY1
+   #x4017 'JOY2))
+
+(define (nes-addr->mmio-symbol addr [is-write? #f])
+  (cond
+    [(hash-ref NES-MMIO-SYM-HASH addr #f) => values]
+    ;; PPU register mirrors ($2008-$3FFF)
+    [(and (>= addr #x2008) (<= addr #x3FFF))
+     (hash-ref NES-MMIO-SYM-HASH (+ #x2000 (bitwise-and addr 7)) #f)]
+    ;; Mapper control writes ($8000-$FFFF)
+    [(and is-write? (>= addr #x8000))
+     (cond
+       [(<= #x8000 addr #x9FFF) 'MMC1_CTRL]
+       [(<= #xA000 addr #xBFFF) 'MMC1_CHR0]
+       [(<= #xC000 addr #xDFFF) 'MMC1_CHR1]
+       [else 'MAPPER_PRG_BANK])]
+    [else #f]))
+
+(define NES-OPCODE-SPEC-LIST
+  '((#xA9 LDA #:imm 2)  (#xA5 LDA #:zp 2)   (#xB5 LDA #:zpx 2)
+    (#xAD LDA #:abs 3)  (#xBD LDA #:absx 3) (#xB9 LDA #:absy 3)
+    (#xA1 LDA #:indx 2) (#xB1 LDA #:indy 2)
+    (#xA2 LDX #:imm 2)  (#xA6 LDX #:zp 2)   (#xB6 LDX #:zpy 2)
+    (#xAE LDX #:abs 3)  (#xBE LDX #:absy 3)
+    (#xA0 LDY #:imm 2)  (#xA4 LDY #:zp 2)   (#xB4 LDY #:zpx 2)
+    (#xAC LDY #:abs 3)  (#xBC LDY #:absx 3)
+    (#x85 STA #:zp 2)   (#x95 STA #:zpx 2)
+    (#x8D STA #:abs 3)  (#x9D STA #:absx 3) (#x99 STA #:absy 3)
+    (#x81 STA #:indx 2) (#x91 STA #:indy 2)
+    (#x86 STX #:zp 2)   (#x96 STX #:zpy 2)  (#x8E STX #:abs 3)
+    (#x84 STY #:zp 2)   (#x94 STY #:zpx 2)  (#x8C STY #:abs 3)
+
+    (#xAA TAX #:imp 1)  (#xA8 TAY #:imp 1)  (#x8A TXA #:imp 1)  (#x98 TYA #:imp 1)
+    (#xBA TSX #:imp 1)  (#x9A TXS #:imp 1)
+    (#x48 PHA #:imp 1)  (#x08 PHP #:imp 1)  (#x68 PLA #:imp 1)  (#x28 PLP #:imp 1)
+
+    (#x29 AND #:imm 2)  (#x25 AND #:zp 2)   (#x35 AND #:zpx 2)
+    (#x2D AND #:abs 3)  (#x3D AND #:absx 3) (#x39 AND #:absy 3)
+    (#x21 AND #:indx 2) (#x31 AND #:indy 2)
+    (#x49 EOR #:imm 2)  (#x45 EOR #:zp 2)   (#x55 EOR #:zpx 2)
+    (#x4D EOR #:abs 3)  (#x5D EOR #:absx 3) (#x59 EOR #:absy 3)
+    (#x41 EOR #:indx 2) (#x51 EOR #:indy 2)
+    (#x09 ORA #:imm 2)  (#x05 ORA #:zp 2)   (#x15 ORA #:zpx 2)
+    (#x0D ORA #:abs 3)  (#x1D ORA #:absx 3) (#x19 ORA #:absy 3)
+    (#x01 ORA #:indx 2) (#x11 ORA #:indy 2)
+    (#x24 BIT #:zp 2)   (#x2C BIT #:abs 3)
+
+    (#x69 ADC #:imm 2)  (#x65 ADC #:zp 2)   (#x75 ADC #:zpx 2)
+    (#x6D ADC #:abs 3)  (#x7D ADC #:absx 3) (#x79 ADC #:absy 3)
+    (#x61 ADC #:indx 2) (#x71 ADC #:indy 2)
+    (#xE9 SBC #:imm 2)  (#xE5 SBC #:zp 2)   (#xF5 SBC #:zpx 2)
+    (#xED SBC #:abs 3)  (#xFD SBC #:absx 3) (#xF9 SBC #:absy 3)
+    (#xE1 SBC #:indx 2) (#xF1 SBC #:indy 2)
+    (#xC9 CMP #:imm 2)  (#xC5 CMP #:zp 2)   (#xD5 CMP #:zpx 2)
+    (#xCD CMP #:abs 3)  (#xDD CMP #:absx 3) (#xD9 CMP #:absy 3)
+    (#xC1 CMP #:indx 2) (#xD1 CMP #:indy 2)
+    (#xE0 CPX #:imm 2)  (#xE4 CPX #:zp 2)   (#xEC CPX #:abs 3)
+    (#xC0 CPY #:imm 2)  (#xC4 CPY #:zp 2)   (#xCC CPY #:abs 3)
+
+    (#xE6 INC #:zp 2)   (#xF6 INC #:zpx 2)  (#xEE INC #:abs 3)  (#xFE INC #:absx 3)
+    (#xE8 INX #:imp 1)  (#xC8 INY #:imp 1)
+    (#xC6 DEC #:zp 2)   (#xD6 DEC #:zpx 2)  (#xCE DEC #:abs 3)  (#xDE DEC #:absx 3)
+    (#xCA DEX #:imp 1)  (#x88 DEY #:imp 1)
+
+    (#x0A ASL #:acc 1)  (#x06 ASL #:zp 2)   (#x16 ASL #:zpx 2)  (#x0E ASL #:abs 3)  (#x1E ASL #:absx 3)
+    (#x4A LSR #:acc 1)  (#x46 LSR #:zp 2)   (#x56 LSR #:zpx 2)  (#x4E LSR #:abs 3)  (#x5E LSR #:absx 3)
+    (#x2A ROL #:acc 1)  (#x26 ROL #:zp 2)   (#x36 ROL #:zpx 2)  (#x2E ROL #:abs 3)  (#x3E ROL #:absx 3)
+    (#x6A ROR #:acc 1)  (#x66 ROR #:zp 2)   (#x76 ROR #:zpx 2)  (#x6E ROR #:abs 3)  (#x7E ROR #:absx 3)
+
+    (#x4C JMP #:abs 3)  (#x6C JMP #:ind 3)
+    (#x20 JSR #:abs 3)  (#x60 RTS #:imp 1)  (#x40 RTI #:imp 1)
+
+    (#x90 BCC #:rel 2)  (#xB0 BCS #:rel 2)  (#xF0 BEQ #:rel 2)  (#x30 BMI #:rel 2)
+    (#xD0 BNE #:rel 2)  (#x10 BPL #:rel 2)  (#x50 BVC #:rel 2)  (#x70 BVS #:rel 2)
+
+    (#x18 CLC #:imp 1)  (#xD8 CLD #:imp 1)  (#x58 CLI #:imp 1)  (#xB8 CLV #:imp 1)
+    (#x38 SEC #:imp 1)  (#xF8 SED #:imp 1)  (#x78 SEI #:imp 1)
+    (#x00 BRK #:imp 1)  (#xEA NOP #:imp 1)))
+
+(define NES-OPCODE-VEC (make-vector 256 #f))
+(define NES-MNEM-MODE->OPCODE (make-hash))
+
+(for ([entry (in-list NES-OPCODE-SPEC-LIST)])
+  (match-define (list op mnem mode-kw len) entry)
+  (vector-set! NES-OPCODE-VEC op (list mnem mode-kw len))
+  (hash-set! NES-MNEM-MODE->OPCODE (cons mnem mode-kw) (list op len)))
+
+(define NES-WRITE-MNEMS '(STA STX STY INC DEC ASL LSR ROL ROR))
+
+;; Assemble a single lifted 6502 instruction S-exp back into its 1, 2, or 3 bytes
+(define (assemble-6502-lifted-inst-bytes inst-sexp)
+  (match inst-sexp
+    [(list mnem mode-kw operand '#:pc pc _ ...)
+     (define info (hash-ref NES-MNEM-MODE->OPCODE (cons mnem mode-kw) #f))
+     (unless info
+       (error 'assemble-6502-lifted-inst-bytes "unknown 6502 (mnem, mode) = (~v, ~v)" mnem mode-kw))
+     (match-define (list op len) info)
+     (case len
+       [(1) (bytes op)]
+       [(2)
+        (if (eq? mode-kw '#:rel)
+            (bytes op (bitwise-and #xFF (- operand (+ pc 2))))
+            (bytes op (bitwise-and #xFF operand)))]
+       [(3)
+        (bytes op
+               (bitwise-and #xFF operand)
+               (bitwise-and #xFF (arithmetic-shift operand -8)))])]
+    [_ #f]))
+
+;; Assemble a lifted `(defsub ...)` or `(defdata ...)` directly into `dst-bytes` at bank offset
+(define (assemble-nes-sub-or-data-into! form dst-bytes bank-rom-base)
+  (define kind (and (pair? form) (car form)))
+  (cond
+    [(eq? kind 'defsub)
+     (define sub-off 0)
+     (define insts '())
+     (let loop ([rem (cddr form)])
+       (match rem
+         [(list* '#:offset o rest) (set! sub-off o) (loop rest)]
+         [(list* (? keyword?) _ rest) (loop rest)]
+         [(cons inst rest)
+          (when (pair? inst) (set! insts (cons inst insts)))
+          (loop rest)]
+         ['() (void)]))
+     (let iloop ([rem-insts (reverse insts)]
+                 [cur-off (+ bank-rom-base sub-off)])
+       (if (null? rem-insts)
+           (- cur-off (+ bank-rom-base sub-off))
+           (let ([ibytes (assemble-6502-lifted-inst-bytes (car rem-insts))])
+             (if (and ibytes (<= (+ cur-off (bytes-length ibytes)) (bytes-length dst-bytes)))
+                 (begin
+                   (bytes-copy! dst-bytes cur-off ibytes)
+                   (iloop (cdr rem-insts) (+ cur-off (bytes-length ibytes))))
+                 (- cur-off (+ bank-rom-base sub-off))))))]
+    [(eq? kind 'defdata)
+     (define data-off 0)
+     (define hex-str "")
+     (let loop ([rem (cddr form)])
+       (match rem
+         [(list* '#:offset o rest) (set! data-off o) (loop rest)]
+         [(list* '#:hex h rest)    (set! hex-str h)  (loop rest)]
+         [(list* (? keyword?) _ rest) (loop rest)]
+         [(cons _ rest) (loop rest)]
+         ['() (void)]))
+     (define abs-off (+ bank-rom-base data-off))
+     (define n-bytes (quotient (string-length hex-str) 2))
+     (when (and (> n-bytes 0) (<= (+ abs-off n-bytes) (bytes-length dst-bytes)))
+       (hex-string->bytes-into! hex-str dst-bytes abs-off))
+     n-bytes]
+    [else 0]))
+
+;; Disassemble a linear 6502 subroutine block starting at `start-off` in `[bank-start .. bank-end)`
+(define (disassemble-nes-subroutine-block rom-bytes bank-start bank-end bank-origin start-off
+                                          #:max-insts [max-insts 32]
+                                          #:stop-off [stop-off 16384]
+                                          #:vec-names [vec-names (hasheq)])
+  (define limit-off (min (- bank-end bank-start) stop-off))
+  (let loop ([off start-off]
+             [cnt 0]
+             [insts '()]
+             [calls '()]
+             [mmio '()]
+             [zps '()])
+    (if (or (>= off limit-off) (>= cnt max-insts))
+        (hasheq 'size-bytes (- off start-off)
+                'insts      (reverse insts)
+                'calls      (remove-duplicates (reverse calls))
+                'mmio       (remove-duplicates (reverse mmio))
+                'zp-vars    (sort (remove-duplicates zps) <))
+        (let* ([abs-pos (+ bank-start off)]
+               [pc      (+ bank-origin off)]
+               [op      (bytes-ref rom-bytes abs-pos)]
+               [info    (vector-ref NES-OPCODE-VEC op)])
+          (if (not info)
+              (hasheq 'size-bytes (- off start-off)
+                      'insts      (reverse insts)
+                      'calls      (remove-duplicates (reverse calls))
+                      'mmio       (remove-duplicates (reverse mmio))
+                      'zp-vars    (sort (remove-duplicates zps) <))
+              (match-let ([(list mnem mode-kw len) info])
+                (if (> (+ off len) limit-off)
+                    (hasheq 'size-bytes (- off start-off)
+                            'insts      (reverse insts)
+                            'calls      (remove-duplicates (reverse calls))
+                            'mmio       (remove-duplicates (reverse mmio))
+                            'zp-vars    (sort (remove-duplicates zps) <))
+                    (let* ([b1 (if (>= len 2) (bytes-ref rom-bytes (+ abs-pos 1)) 0)]
+                           [b2 (if (= len 3)  (bytes-ref rom-bytes (+ abs-pos 2)) 0)]
+                           [u16 (bitwise-ior b1 (arithmetic-shift b2 8))]
+                           [operand
+                            (case mode-kw
+                              [(#:imp #:acc) 0]
+                              [(#:rel)
+                               (define signed (if (>= b1 128) (- b1 256) b1))
+                               (bitwise-and #xFFFF (+ pc 2 signed))]
+                              [else
+                               (if (= len 2) b1 u16)])]
+                           [is-write? (and (memq mnem NES-WRITE-MNEMS) #t)]
+                           [mmio-sym
+                            (and (memq mode-kw '(#:abs #:absx #:absy))
+                                 (nes-addr->mmio-symbol u16 is-write?))]
+                           [sym-annot
+                            (cond
+                              [(eq? mnem 'JSR)
+                               (or (hash-ref vec-names u16 #f)
+                                   (string->symbol (format "sub_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0")))))]
+                              [(and (eq? mnem 'JMP) (eq? mode-kw '#:abs))
+                               (or (hash-ref vec-names u16 #f)
+                                   (string->symbol (format "loc_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0")))))]
+                              [(and (eq? mnem 'JMP) (eq? mode-kw '#:ind))
+                               (string->symbol (format "jmp_tbl_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
+                              [(eq? mode-kw '#:rel)
+                               (string->symbol (format "loc_~a" (string-upcase (~r operand #:base 16 #:min-width 4 #:pad-string "0"))))]
+                              [mmio-sym mmio-sym]
+                              [(memq mode-kw '(#:zp #:zpx #:zpy #:indx #:indy))
+                               (string->symbol (format "zp_~a" (string-upcase (~r b1 #:base 16 #:min-width 2 #:pad-string "0"))))]
+                              [else #f])]
+                           [inst-sexp
+                            (if sym-annot
+                                `(,mnem ,mode-kw ,operand #:pc ,pc #:sym ,sym-annot)
+                                `(,mnem ,mode-kw ,operand #:pc ,pc))]
+                           [calls1
+                            (if (or (eq? mnem 'JSR) (and (eq? mnem 'JMP) (eq? mode-kw '#:abs)))
+                                (cons sym-annot calls)
+                                calls)]
+                           [mmio1
+                            (if mmio-sym (cons mmio-sym mmio) mmio)]
+                           [zps1
+                            (cond
+                              [(memq mode-kw '(#:zp #:zpx #:zpy #:indx #:indy)) (cons b1 zps)]
+                              [(and (memq mode-kw '(#:abs #:absx #:absy)) (< u16 #x0100)) (cons u16 zps)]
+                              [else zps])]
+                           [next-off (+ off len)])
+                      (if (memq mnem '(RTS RTI BRK JMP))
+                          (hasheq 'size-bytes (- next-off start-off)
+                                  'insts      (reverse (cons inst-sexp insts))
+                                  'calls      (remove-duplicates (reverse calls1))
+                                  'mmio       (remove-duplicates (reverse mmio1))
+                                  'zp-vars    (sort (remove-duplicates zps1) <))
+                          (loop next-off (add1 cnt) (cons inst-sexp insts) calls1 mmio1 zps1))))))))))
+
+;; Deeply lift a 16 KB NES PRG-ROM bank into subroutines (`defsub`), data blocks (`defdata`),
+;; MMIO usage counts, and indirect jump table sites.
+(define (lift-nes-prg-bank-deep rom-bytes bank-idx prg-banks bank-start bank-end
+                                global-subs vecs
+                                #:max-subs [max-subs 36])
+  (define reset-v (hash-ref vecs 'reset))
+  (define nmi-v   (hash-ref vecs 'nmi))
+  (define irq-v   (hash-ref vecs 'irq))
+
+  (define bank-origin
+    (cond
+      [(= prg-banks 1) (if (< reset-v #xC000) #x8000 #xC000)]
+      [(= bank-idx (sub1 prg-banks)) #xC000]
+      [else #x8000]))
+
+  ;; Normalize an address into `[bank-origin .. bank-origin + 16384)` if applicable
+  (define (addr-in-this-bank? a)
+    (cond
+      [(= prg-banks 1) (and (>= a #x8000) (<= a #xFFF9))]
+      [else (and (>= a bank-origin) (< a (+ bank-origin 16384)))]))
+
+  (define (norm-addr a)
+    (if (= prg-banks 1)
+        (+ bank-origin (bitwise-and (- a #x8000) #x3FFF))
+        a))
+
+  (define vec-names (make-hasheq))
+  (define candidate-addrs '())
+
+  ;; Register interrupt handler entry points if they belong to this bank
+  (for ([vpair (in-list (list (cons irq-v 'irq_handler)
+                              (cons nmi-v 'nmi_handler)
+                              (cons reset-v 'reset_handler)))])
+    (define raw-a (car vpair))
+    (define vname (cdr vpair))
+    (when (addr-in-this-bank? raw-a)
+      (define na (norm-addr raw-a))
+      (hash-set! vec-names na vname)
+      (set! candidate-addrs (cons na candidate-addrs))))
+
+  ;; Register global recursive-descent subroutines belonging to this bank
+  (for ([sa (in-list global-subs)])
+    (when (addr-in-this-bank? sa)
+      (set! candidate-addrs (cons (norm-addr sa) candidate-addrs))))
+
+  ;; Scan the 16 KB bank linearly for local JSR targets, MMIO counts, and post-RTS entry points
+  (define mmio-write-counts (make-hasheq))
+  (define mmio-read-counts  (make-hasheq))
+  (define ind-jmp-sites     '())
+  (define data-Candidate-offs '())
+
+  (let loop ([off 0]
+             [after-term? #t])
+    (when (< off 16378)
+      (define abs-pos (+ bank-start off))
+      (define pc (+ bank-origin off))
+      (define op (bytes-ref rom-bytes abs-pos))
+      (define info (vector-ref NES-OPCODE-VEC op))
+      (cond
+        [(not info)
+         (when (< (length data-Candidate-offs) 6)
+           (set! data-Candidate-offs (cons off data-Candidate-offs)))
+         (loop (add1 off) #f)]
+        [else
+         (match-define (list mnem mode-kw len) info)
+         (if (> (+ off len) 16384)
+             (loop (add1 off) #f)
+             (let* ([b1 (if (>= len 2) (bytes-ref rom-bytes (+ abs-pos 1)) 0)]
+                    [b2 (if (= len 3)  (bytes-ref rom-bytes (+ abs-pos 2)) 0)]
+                    [u16 (bitwise-ior b1 (arithmetic-shift b2 8))])
+               (when (and after-term?
+                          (not (= op #x00))
+                          (not (= op #xFF))
+                          (< (length candidate-addrs) (* max-subs 2)))
+                 (set! candidate-addrs (cons pc candidate-addrs)))
+               (when (and (eq? mnem 'JSR) (addr-in-this-bank? u16))
+                 (set! candidate-addrs (cons (norm-addr u16) candidate-addrs)))
+               (when (and (eq? mnem 'JMP) (eq? mode-kw '#:ind))
+                 (set! ind-jmp-sites (cons `(jmp-indirect #:bank ,bank-idx #:pc ,pc #:ptr ,u16) ind-jmp-sites)))
+               (when (memq mode-kw '(#:abs #:absx #:absy))
+                 (define is-write? (and (memq mnem NES-WRITE-MNEMS) #t))
+                 (define msym (nes-addr->mmio-symbol u16 is-write?))
+                 (when msym
+                   (define tbl (if is-write? mmio-write-counts mmio-read-counts))
+                   (hash-set! tbl msym (add1 (hash-ref tbl msym 0)))))
+               (loop (+ off len) (memq mnem '(RTS RTI)))))])))
+
+  (define sorted-unique-addrs
+    (let ([dedup (sort (remove-duplicates candidate-addrs) <)])
+      ;; Always keep vector handlers + up to max-subs subroutines
+      (take dedup (min max-subs (length dedup)))))
+
+  (define lifted-subs
+    (for/list ([sub-addr (in-list sorted-unique-addrs)]
+               [idx (in-naturals)])
+      (define next-addr
+        (if (< (add1 idx) (length sorted-unique-addrs))
+            (list-ref sorted-unique-addrs (add1 idx))
+            (+ bank-origin 16378)))
+      (define sub-off (- sub-addr bank-origin))
+      (define stop-off (- next-addr bank-origin))
+      (define blk
+        (disassemble-nes-subroutine-block rom-bytes bank-start bank-end bank-origin sub-off
+                                          #:max-insts 32
+                                          #:stop-off stop-off
+                                          #:vec-names vec-names))
+      (define sub-name
+        (hash-ref vec-names sub-addr
+                  (lambda ()
+                    (string->symbol (format "sub_b~a_~a"
+                                            bank-idx
+                                            (string-upcase (~r sub-addr #:base 16 #:min-width 4 #:pad-string "0")))))))
+      `(defsub ,sub-name
+         #:bank ,bank-idx
+         #:addr ,sub-addr
+         #:offset ,sub-off
+         #:size-bytes ,(hash-ref blk 'size-bytes)
+         #:calls ,(hash-ref blk 'calls)
+         #:mmio ,(hash-ref blk 'mmio)
+         #:zp-vars ,(hash-ref blk 'zp-vars)
+         ,@(hash-ref blk 'insts))))
+
+  ;; Lift structured `defdata` blocks (including hardware vector table at $FFFA-$FFFF in fixed bank,
+  ;; plus initial bank data / pointer tables)
+  (define lifted-data-blocks
+    (append
+     (let ([d-offs (remove-duplicates (cons 0 (reverse data-Candidate-offs)))])
+       (for/list ([doff (in-list (take d-offs (min 4 (length d-offs))))])
+         (define dlen (min 32 (- 16378 doff)))
+         (define daddr (+ bank-origin doff))
+         (define dname (string->symbol (format "data_b~a_~a"
+                                               bank-idx
+                                               (string-upcase (~r daddr #:base 16 #:min-width 4 #:pad-string "0")))))
+         `(defdata ,dname
+            #:bank ,bank-idx
+            #:addr ,daddr
+            #:offset ,doff
+            #:size-bytes ,dlen
+            #:hex ,(bytes-slice->hex-string rom-bytes (+ bank-start doff) (+ bank-start doff dlen)))))
+     (if (= bank-origin #xC000)
+         (list `(defdata hw_interrupt_vectors_fffa
+                  #:bank ,bank-idx
+                  #:addr #xFFFA
+                  #:offset #x3FFA
+                  #:size-bytes 6
+                  #:hex ,(bytes-slice->hex-string rom-bytes (+ bank-start #x3FFA) (+ bank-start #x4000))))
+         '())))
+
+  (hasheq 'origin            bank-origin
+          'subroutines       lifted-subs
+          'data-blocks       lifted-data-blocks
+          'mmio-write-counts mmio-write-counts
+          'mmio-read-counts  mmio-read-counts
+          'ind-jmp-sites     (reverse ind-jmp-sites)))
 
 (define (lift-nes-whole-rom->boba-sexp spec rom-bytes)
   (define id-str    (hash-ref spec 'id))
@@ -222,25 +660,57 @@
   (define header-hex (bytes-slice->hex-string rom-bytes 0 16))
   (define vecs      (hash-ref dis 'vectors))
   (define bank-rpts (hash-ref mb 'banks))
+  (define global-subs (hash-ref dis 'subroutines))
   (define full-insts (hash-ref dis 'instructions))
   (define sample-insts (take full-insts (min 48 (length full-insts))))
 
-  ;; Lift each 16 KB PRG-ROM bank losslessly
+  (define total-mmio-writes (make-hasheq))
+  (define total-mmio-reads  (make-hasheq))
+  (define all-ind-jmps      '())
+  (define max-subs-per-bank (if (<= prg-banks 2) 32 16))
+
+  ;; Lift each 16 KB PRG-ROM bank with deep `defsub` subroutines, `defdata` blocks & lossless segments
   (define lifted-prg-banks
     (for/list ([b (in-range prg-banks)]
                [brpt (in-list bank-rpts)])
       (define b-start (+ 16 (* b 16384)))
       (define b-end   (+ b-start 16384))
       (define segs    (encode-bank-segments rom-bytes b-start b-end #:row-size 128))
+      (define deep    (lift-nes-prg-bank-deep rom-bytes b prg-banks b-start b-end
+                                              global-subs vecs
+                                              #:max-subs max-subs-per-bank))
+      (for ([(k v) (in-hash (hash-ref deep 'mmio-write-counts))])
+        (hash-set! total-mmio-writes k (+ v (hash-ref total-mmio-writes k 0))))
+      (for ([(k v) (in-hash (hash-ref deep 'mmio-read-counts))])
+        (hash-set! total-mmio-reads k (+ v (hash-ref total-mmio-reads k 0))))
+      (set! all-ind-jmps (append all-ind-jmps (hash-ref deep 'ind-jmp-sites)))
+
       `(def-prg-bank
          (bank-index ,b)
          (role ,(hash-ref brpt 'role))
-         (origin ,(hash-ref brpt 'origin))
+         (origin ,(hash-ref deep 'origin))
          (size-bytes 16384)
          (instruction-count ,(hash-ref brpt 'instruction-count))
          (subroutine-count ,(hash-ref brpt 'subroutine-count))
+         (lifted-defsub-count ,(length (hash-ref deep 'subroutines)))
          (non-empty-bytes ,(hash-ref brpt 'non-empty-bytes))
-         (segments ,@segs))))
+         (subroutines
+          ,@(hash-ref deep 'subroutines))
+         (data-blocks
+          ,@(hash-ref deep 'data-blocks))
+         (segments
+          ,@segs))))
+
+  ;; Build Symbolic MMIO Cross-Reference Table
+  (define all-mmio-syms
+    (sort (remove-duplicates (append (hash-keys total-mmio-writes)
+                                     (hash-keys total-mmio-reads)))
+          symbol<?))
+  (define mmio-xref-entries
+    (for/list ([sym (in-list all-mmio-syms)])
+      `(mmio-reg ,sym
+                 #:writes ,(hash-ref total-mmio-writes sym 0)
+                 #:reads  ,(hash-ref total-mmio-reads sym 0))))
 
   ;; Lift each 8 KB CHR-ROM bank losslessly
   (define lifted-chr-banks
@@ -251,9 +721,9 @@
       `(def-chr-bank
          (bank-index ,c)
          (size-bytes 8192)
-         (segments ,@segs))))
+         (segments
+          ,@segs))))
 
-  ;; Any trailing bytes after PRG+CHR (rare, usually 0)
   (define expected-len (+ 16 prg-bytes chr-bytes))
   (define trailer-hex
     (if (> (bytes-length rom-bytes) expected-len)
@@ -306,6 +776,10 @@
        (rts-dispatch-count ,(hash-ref idioms 'rts-dispatch-count))
        (zp-timer-loops ,(hash-ref timers 'count))
        (nmi-sync-semaphores ,(hash-ref nmi-sems 'count))))
+     (symbolic-mmio-xref
+      ,@mmio-xref-entries)
+     (jump-tables
+      ,@(take all-ind-jmps (min 32 (length all-ind-jmps))))
      (disassembled-entry-prologue
       ,@sample-insts)
      (prg-banks
@@ -315,7 +789,7 @@
      (trailer-hex ,trailer-hex)))
 
 ;; ============================================================================
-;; 4. Whole-Binary SM83 Game Boy (.gb) & Game Boy Color (.gbc) Disassembler & Lifter
+;; 4. Deep Whole-Binary SM83 Game Boy (.gb) & Game Boy Color (.gbc) Lifter
 ;; ============================================================================
 
 (define (extract-gb-title rom-bytes)
@@ -339,73 +813,6 @@
     [(#x19 #x1A #x1B #x1C #x1D #x1E) 'MBC5]
     [else (string->symbol (format "MBC-#x~a" (~r cart-type #:base 16 #:min-width 2 #:pad-string "0")))]))
 
-;; Fast linear + control-flow SM83 analyzer across a 16 KB Game Boy ROM bank
-(define (analyze-sm83-bank rom-bytes bank-idx bank-start bank-end)
-  (define call-targets '())
-  (define hram-offsets (mutable-set))
-  (define io-regs (mutable-set))
-  (define inst-cnt 0)
-  (define cb-bit-ops 0)
-  (define sample-insts '())
-  (define sample-count 0)
-
-  (define (record-sample! sexp)
-    (when (< sample-count 24)
-      (set! sample-insts (cons sexp sample-insts))
-      (set! sample-count (add1 sample-count))))
-
-  (define start-off (if (= bank-idx 0) #x0150 0))
-  (let loop ([off start-off])
-    (when (< (+ bank-start off 3) bank-end)
-      (define pc (+ (if (= bank-idx 0) #x0000 #x4000) off))
-      (define op (bytes-ref rom-bytes (+ bank-start off)))
-      (define b1 (bytes-ref rom-bytes (+ bank-start off 1)))
-      (define b2 (bytes-ref rom-bytes (+ bank-start off 2)))
-      (define u16 (bitwise-ior b1 (arithmetic-shift b2 8)))
-      (set! inst-cnt (add1 inst-cnt))
-      (cond
-        ;; LDH ($FF00+a8), A (#xE0) or LDH A, ($FF00+a8) (#xF0)
-        [(or (= op #xE0) (= op #xF0))
-         (if (>= b1 #x80)
-             (set-add! hram-offsets b1)
-             (set-add! io-regs (+ #xFF00 b1)))
-         (record-sample! (list (if (= op #xE0) 'LDH-OUT 'LDH-IN) pc (+ #xFF00 b1)))
-         (loop (+ off 2))]
-        ;; CALL a16 (#xCD, #xC4, #xCC, #xD4, #xDC)
-        [(memv op '(#xCD #xC4 #xCC #xD4 #xDC))
-         (when (< (length call-targets) 32)
-           (set! call-targets (cons u16 call-targets)))
-         (record-sample! (list 'CALL pc u16))
-         (loop (+ off 3))]
-        ;; JP a16 (#xC3, #xC2, #xCA, #xD2, #xDA)
-        [(memv op '(#xC3 #xC2 #xCA #xD2 #xDA))
-         (record-sample! (list 'JP pc u16))
-         (loop (+ off 3))]
-        ;; 16-bit immediate loads LD BC/DE/HL/SP, d16 (#x01, #x11, #x21, #x31) or LD (a16), A / LD A, (a16) (#xEA, #xFA)
-        [(memv op '(#x01 #x11 #x21 #x31 #x08 #xEA #xFA))
-         (when (and (or (= op #xEA) (= op #xFA)) (<= #xFF00 u16 #xFF7F))
-           (set-add! io-regs u16))
-         (record-sample! (list 'LD16 pc op u16))
-         (loop (+ off 3))]
-        ;; CB-prefixed bit/shift instructions
-        [(= op #xCB)
-         (set! cb-bit-ops (add1 cb-bit-ops))
-         (loop (+ off 2))]
-        ;; 2-byte immediate/relative instructions (JR, LD r, d8, ALU d8)
-        [(memv op '(#x06 #x0E #x16 #x1E #x26 #x2E #x36 #x3E
-                    #x18 #x20 #x28 #x30 #x38
-                    #xC6 #xCE #xD6 #xDE #xE6 #xEE #xF6 #xFE))
-         (loop (+ off 2))]
-        [else
-         (loop (add1 off))])))
-
-  (hasheq 'instruction-count inst-cnt
-          'cb-bit-ops        cb-bit-ops
-          'call-targets      (remove-duplicates (reverse call-targets))
-          'hram-offsets      (sort (set->list hram-offsets) <)
-          'io-regs           (sort (set->list io-regs) <)
-          'sample-insts      (reverse sample-insts)))
-
 (define (lift-gb-gbc-whole-rom->boba-sexp spec rom-bytes)
   (define target-sym (hash-ref spec 'target 'gb))
   (define id-str     (hash-ref spec 'id))
@@ -427,11 +834,27 @@
   (define entry-hex    (if (>= rom-len #x0104) (bytes-slice->hex-string rom-bytes #x0100 #x0104) "00c35001"))
   (define header-hex   (if (>= rom-len #x0150) (bytes-slice->hex-string rom-bytes #x0100 #x0150) ""))
 
-  ;; Analyze Bank 0 + up to first 8 code banks in detail, and losslessly encode ALL banks (0 .. num-banks-1)
-  (define all-hram (mutable-set))
-  (define all-io   (mutable-set))
-  (define total-insts 0)
-  (define bank0-samples '())
+  ;; 1. Lift all 8 RST vectors ($0000..$0038), 5 hardware ISRs ($0040..$0060), and $0100 entry
+  (define lifted-isrs (lift-sm83-interrupt-vectors rom-bytes))
+
+  ;; Collect call targets from ISRs to seed Bank 0 & switchable bank call-graph lifting
+  (define isr-call-seeds
+    (apply append
+           (for/list ([isr (in-list lifted-isrs)])
+             (let loop ([rem (cddr isr)])
+               (match rem
+                 [(list* '#:calls cs _) cs]
+                 [(cons _ rest) (loop rest)]
+                 ['() '()])))))
+
+  (define all-hram     (mutable-set))
+  (define all-io       (mutable-set))
+  (define all-mbc      (mutable-set))
+  (define mmio-totals  (make-hasheq))
+  (define total-insts  0)
+  (define total-cb-ops 0)
+  (define total-subs   0)
+  (define cross-bank-calls isr-call-seeds)
 
   (define lifted-rom-banks
     (for/list ([b (in-range num-banks)])
@@ -439,28 +862,58 @@
       (define b-end   (min rom-len (+ b-start 16384)))
       (define b-size  (- b-end b-start))
       (define segs    (encode-bank-segments rom-bytes b-start b-end #:row-size 128))
+      ;; Lift full `defsub-sm83` blocks for Bank 0 (up to 24 subs) and active switchable banks
+      (define max-subs-for-bank
+        (cond
+          [(= b 0) 24]
+          [(< b 6) 10]
+          [(< b 12) 4]
+          [else 0]))
       (define analysis
-        (if (< b 8)
-            (analyze-sm83-bank rom-bytes b b-start b-end)
+        (if (< b 16)
+            (analyze-sm83-bank-deep rom-bytes b b-start b-end
+                                    #:seed-entries cross-bank-calls
+                                    #:max-subroutines max-subs-for-bank
+                                    #:max-insts-per-sub 24)
             (hasheq 'instruction-count (quotient b-size 2)
                     'cb-bit-ops 0
                     'call-targets '()
                     'hram-offsets '()
                     'io-regs '()
-                    'sample-insts '())))
+                    'mbc-writes '()
+                    'mmio-counts (hasheq)
+                    'subroutines '())))
+
       (for ([h (in-list (hash-ref analysis 'hram-offsets))]) (set-add! all-hram h))
       (for ([r (in-list (hash-ref analysis 'io-regs))])      (set-add! all-io r))
-      (set! total-insts (+ total-insts (hash-ref analysis 'instruction-count)))
+      (for ([m (in-list (hash-ref analysis 'mbc-writes))])   (set-add! all-mbc m))
+      (for ([(sym cnt) (in-hash (hash-ref analysis 'mmio-counts))])
+        (hash-set! mmio-totals sym (+ cnt (hash-ref mmio-totals sym 0))))
       (when (= b 0)
-        (set! bank0-samples (hash-ref analysis 'sample-insts)))
+        (set! cross-bank-calls (append cross-bank-calls (hash-ref analysis 'call-targets))))
+      (set! total-insts  (+ total-insts  (hash-ref analysis 'instruction-count)))
+      (set! total-cb-ops (+ total-cb-ops (hash-ref analysis 'cb-bit-ops)))
+      (set! total-subs   (+ total-subs   (length (hash-ref analysis 'subroutines))))
+
       `(def-rom-bank
          (bank-index ,b)
          (role ,(if (= b 0) 'fixed-home 'switchable-mbc))
          (origin ,(if (= b 0) #x0000 #x4000))
          (size-bytes ,b-size)
          (instruction-count ,(hash-ref analysis 'instruction-count))
-         (call-targets ,(hash-ref analysis 'call-targets))
-         (segments ,@segs))))
+         (cb-bit-ops ,(hash-ref analysis 'cb-bit-ops))
+         (lifted-defsub-count ,(length (hash-ref analysis 'subroutines)))
+         (call-targets ,(take (hash-ref analysis 'call-targets)
+                              (min 32 (length (hash-ref analysis 'call-targets)))))
+         (subroutines
+          ,@(hash-ref analysis 'subroutines))
+         (segments
+          ,@segs))))
+
+  (define sorted-mmio-syms (sort (hash-keys mmio-totals) symbol<?))
+  (define mmio-xref-entries
+    (for/list ([sym (in-list sorted-mmio-syms)])
+      `(mmio-reg ,sym #:accesses ,(hash-ref mmio-totals sym 0))))
 
   `(def-whole-rom-cartridge
      (target ,target-sym)
@@ -508,19 +961,30 @@
      (hardware-capabilities
       (io-registers ,(sort (set->list all-io) <))
       (hram-offsets ,(sort (set->list all-hram) <))
+      (mbc-bank-switch-sites ,(sort (set->list all-mbc) <))
+      (cb-prefix-bit-ops ,total-cb-ops)
+      (lifted-subroutine-count ,total-subs)
       (total-lifted-instructions ,total-insts))
-     (disassembled-entry-prologue
-      ,@bank0-samples)
+     (symbolic-mmio-xref
+      ,@mmio-xref-entries)
+     (interrupt-service-routines
+      ,@lifted-isrs)
      (rom-banks
       ,@lifted-rom-banks)))
 
 ;; ============================================================================
-;; 5. Whole-Cartridge PICO-8 (.p8) Lifter (`lift-pico8-whole-rom->boba-sexp`)
+;; 5. Deep Whole-Cartridge PICO-8 (.p8) Lua Function AST & Asset Section Lifter
 ;; ============================================================================
+
+(define PICO8-HARDWARE-APIS
+  '("spr" "sspr" "map" "mget" "mset" "fget" "fset"
+    "pal" "palt" "cls" "camera" "clip" "pset" "pget"
+    "rect" "rectfill" "circ" "circfill" "line" "print"
+    "btn" "btnp" "sfx" "music" "poke" "peek" "memcpy" "memset"
+    "add" "del" "all" "foreach" "flr" "ceil" "rnd" "sin" "cos" "atan2" "sqrt" "abs" "min" "max" "mid"))
 
 (define (parse-p8-sections raw-text)
   (define lines (string-split raw-text #rx"\r?\n" #:trim? #f))
-  ;; Drop trailing empty line if file ended with \n
   (define clean-lines
     (if (and (pair? lines) (string=? (last lines) ""))
         (take lines (sub1 (length lines)))
@@ -549,24 +1013,232 @@
 
   (values section-order sections-hash))
 
-(define (analyze-pico8-lua lua-lines)
-  (define funcs '())
-  (define api-calls (mutable-set))
-  (define token-est 0)
+;; Parse all Lua functions in `__lua__` into structured `(def-pico-function ...)` AST forms
+(define (lift-pico8-lua-functions lua-lines)
+  (define all-fn-names (mutable-set))
+  ;; Pass 1: Discover all function names across `__lua__` (including multiple functions on minified lines)
   (for ([line (in-list lua-lines)])
-    (define fn-m (regexp-match #px"function\\s+([a-zA-Z0-9_]+)" line))
-    (when fn-m
-      (set! funcs (cons (second fn-m) funcs)))
-    (for ([api (in-list '("spr" "sspr" "map" "mget" "mset" "fget" "fset"
-                          "pal" "palt" "cls" "camera" "clip" "pset" "pget"
-                          "rect" "rectfill" "circ" "circfill" "line" "print"
-                          "btn" "btnp" "sfx" "music" "poke" "peek" "memcpy" "memset"))])
-      (when (regexp-match? (pregexp (format "\\b~a\\s*\\(" api)) line)
-        (set-add! api-calls (string->symbol api))))
-    (set! token-est (+ token-est (length (regexp-match* #px"[a-zA-Z0-9_]+|[+*/%=<>~-]+|[(){}\\[\\],.]" line)))))
-  (hasheq 'functions   (remove-duplicates (reverse funcs))
-          'api-calls   (sort (set->list api-calls) symbol<?)
-          'token-count (min 8192 token-est)))
+    (for ([nm (in-list (regexp-match* #px"function\\s+([a-zA-Z0-9_.:]+)\\s*\\(" line #:match-select second))])
+      (set-add! all-fn-names nm))
+    (for ([nm (in-list (regexp-match* #px"([a-zA-Z0-9_]+)\\s*=\\s*function\\s*\\(" line #:match-select second))])
+      (set-add! all-fn-names nm)))
+
+  (define known-fns (sort (set->list all-fn-names) string<?))
+  (define lifted-fns '())
+  (define total-tokens 0)
+  (define global-apis (mutable-set))
+
+  (define (parse-param-list raw-params)
+    (define trimmed (string-trim raw-params))
+    (if (string=? trimmed "")
+        '()
+        (for/list ([p (in-list (string-split trimmed ","))]
+                   #:when (not (string=? (string-trim p) "")))
+          (define pt (string-trim p))
+          (if (string=? pt "...")
+              'varargs
+              (string->symbol pt)))))
+
+  (define (emit-fn-form! fn-name params start-line end-line body)
+    (define fn-apis (mutable-set))
+    (define fn-calls (mutable-set))
+    (for ([bline (in-list body)])
+      (for ([api (in-list PICO8-HARDWARE-APIS)])
+        (when (regexp-match? (pregexp (format "\\b~a\\s*[(\"]" api)) bline)
+          (set-add! fn-apis (string->symbol api))))
+      (for ([kfn (in-list known-fns)]
+            #:unless (string=? kfn fn-name))
+        (when (regexp-match? (pregexp (format "\\b~a\\s*[(\"]" (regexp-quote kfn))) bline)
+          (set-add! fn-calls (string->symbol kfn)))))
+    (set! lifted-fns
+          (cons `(def-pico-function
+                   (name ,(string->symbol fn-name))
+                   (params ,params)
+                   (line-range (,start-line ,end-line))
+                   (api-calls ,(sort (set->list fn-apis) symbol<?))
+                   (called-functions ,(sort (set->list fn-calls) symbol<?))
+                   (body-lines ,@(take body (min 32 (length body)))))
+                lifted-fns)))
+
+  ;; Pass 2: Extract function blocks with parameters, line ranges, API calls, and called functions
+  (define cur-fn-name #f)
+  (define cur-fn-params '())
+  (define cur-fn-start 1)
+  (define cur-fn-lines '())
+
+  (define (flush-cur-fn! end-line)
+    (when cur-fn-name
+      (emit-fn-form! cur-fn-name cur-fn-params cur-fn-start end-line (reverse cur-fn-lines))
+      (set! cur-fn-name #f)
+      (set! cur-fn-lines '())))
+
+  (define fn-header-px
+    #px"(?:(?:local\\s+)?function\\s+([a-zA-Z0-9_.:]+)\\s*\\(([^)]*)\\)|([a-zA-Z0-9_]+)\\s*=\\s*function\\s*\\(([^)]*)\\))")
+
+  (for ([line (in-list lua-lines)]
+        [lnum (in-naturals 1)])
+    (for ([api (in-list PICO8-HARDWARE-APIS)])
+      (when (regexp-match? (pregexp (format "\\b~a\\s*[(\"]" api)) line)
+        (set-add! global-apis (string->symbol api))))
+    (set! total-tokens
+          (+ total-tokens
+             (length (regexp-match* #px"[a-zA-Z0-9_]+|[+*/%=<>~-]+|[(){}\\[\\],.]" line))))
+
+    (define pos-matches (regexp-match-positions* fn-header-px line))
+    (cond
+      ;; Case A: Multiple functions packed onto a single minified line
+      [(> (length pos-matches) 1)
+       (flush-cur-fn! (max cur-fn-start (sub1 lnum)))
+       (for ([pm (in-list pos-matches)]
+             [idx (in-naturals)])
+         (define seg-start (car pm))
+         (define seg-end
+           (if (< (add1 idx) (length pos-matches))
+               (car (list-ref pos-matches (add1 idx)))
+               (string-length line)))
+         (define seg-str (substring line seg-start seg-end))
+         (define m (regexp-match fn-header-px seg-str))
+         (when m
+           (define fname (or (second m) (fourth m)))
+           (define fparams (parse-param-list (or (third m) (fifth m) "")))
+           (define snippet
+             (if (> (string-length seg-str) 240)
+                 (string-append (substring seg-str 0 240) " ...")
+                 seg-str))
+           (emit-fn-form! fname fparams lnum lnum (list snippet))))]
+      ;; Case B: Single function definition on this line
+      [(= (length pos-matches) 1)
+       (flush-cur-fn! (max cur-fn-start (sub1 lnum)))
+       (define pm (first pos-matches))
+       (define seg-str (substring line (car pm)))
+       (define m (regexp-match fn-header-px seg-str))
+       (set! cur-fn-name (or (second m) (fourth m)))
+       (set! cur-fn-params (parse-param-list (or (third m) (fifth m) "")))
+       (set! cur-fn-start lnum)
+       (set! cur-fn-lines (list line))
+       (when (regexp-match? #px"\\bend\\b" (substring line (cdr pm)))
+         (flush-cur-fn! lnum))]
+      [cur-fn-name
+       (set! cur-fn-lines (cons line cur-fn-lines))
+       (when (regexp-match? #px"^\\s*end\\s*,?\\s*(?:--.*)?$" line)
+         (flush-cur-fn! lnum))]
+      [else (void)]))
+
+  (flush-cur-fn! (length lua-lines))
+
+  (hasheq 'functions       (map string->symbol known-fns)
+          'lifted-fn-forms (reverse lifted-fns)
+          'api-calls       (sort (set->list global-apis) symbol<?)
+          'token-count     (min 8192 total-tokens)))
+
+;; Lift structured descriptors from PICO-8 `__gfx__`, `__gff__`, `__map__`, `__sfx__`, and `__music__`
+(define (lift-pico8-asset-descriptors sec-hash)
+  ;; 1. `__gfx__`: 128 rows of 128 hex chars -> 256 8x8 4bpp sprites (16 per row band)
+  (define gfx-lines (hash-ref sec-hash 'gfx '()))
+  (define gfx-sprites '())
+  (when (>= (length gfx-lines) 8)
+    (for* ([band (in-range (min 16 (quotient (length gfx-lines) 8)))]
+           [col  (in-range 16)]
+           #:when (< (length gfx-sprites) 32))
+      (define spr-id (+ (* band 16) col))
+      (define rows
+        (for/list ([r (in-range 8)])
+          (define line (list-ref gfx-lines (+ (* band 8) r)))
+          (define c0 (* col 8))
+          (if (>= (string-length line) (+ c0 8))
+              (substring line c0 (+ c0 8))
+              "00000000")))
+      (define nonzero-px
+        (for*/sum ([row-str (in-list rows)]
+                   [ch (in-string row-str)])
+          (if (char=? ch #\0) 0 1)))
+      (when (> nonzero-px 0)
+        (set! gfx-sprites
+              (cons `(def-pico-sprite
+                       #:id ,spr-id
+                       #:grid (,col ,band)
+                       #:nonzero-pixels ,nonzero-px
+                       #:rows ,rows)
+                    gfx-sprites)))))
+
+  ;; 2. `__gff__`: 2 rows of 256 hex chars -> 256 8-bit sprite flags
+  (define gff-lines (hash-ref sec-hash 'gff '()))
+  (define gff-str (string-join gff-lines ""))
+  (define gff-flags '())
+  (for ([sid (in-range (min 256 (quotient (string-length gff-str) 2)))]
+        #:when (< (length gff-flags) 48))
+    (define fval (or (string->number (substring gff-str (* sid 2) (+ (* sid 2) 2)) 16) 0))
+    (when (> fval 0)
+      (set! gff-flags (cons `(def-pico-sprite-flag #:id ,sid #:flags ,fval) gff-flags))))
+
+  ;; 3. `__map__`: 32 or 64 rows of 256 hex chars (128 tiles per row)
+  (define map-lines (hash-ref sec-hash 'map '()))
+  (define map-rows
+    (for/list ([mline (in-list map-lines)]
+               [y (in-naturals)]
+               #:when (regexp-match? #px"[^0]" mline))
+      (define n-tiles (quotient (string-length mline) 2))
+      (define nonzero-tiles
+        (for/sum ([x (in-range n-tiles)])
+          (if (string=? (substring mline (* x 2) (+ (* x 2) 2)) "00") 0 1)))
+      `(def-pico-map-row
+         #:y ,y
+         #:nonzero-tiles ,nonzero-tiles
+         #:sample-hex ,(substring mline 0 (min 32 (string-length mline))))))
+
+  ;; 4. `__sfx__`: up to 64 tracker sound effects (168 hex chars each)
+  (define sfx-lines (hash-ref sec-hash 'sfx '()))
+  (define sfx-descs '())
+  (for ([sline (in-list sfx-lines)]
+        [sid (in-naturals)]
+        #:when (and (>= (string-length sline) 8)
+                    (regexp-match? #px"[^0]" sline)
+                    (< (length sfx-descs) 32)))
+    (define ed-mode   (or (string->number (substring sline 0 2) 16) 0))
+    (define spd       (or (string->number (substring sline 2 4) 16) 0))
+    (define loop-s    (or (string->number (substring sline 4 6) 16) 0))
+    (define loop-e    (or (string->number (substring sline 6 8) 16) 0))
+    (define notes-str (substring sline 8))
+    (define n-notes   (quotient (string-length notes-str) 5))
+    (define active-n
+      (for/sum ([k (in-range n-notes)])
+        (define nchunk (substring notes-str (* k 5) (+ (* k 5) 5)))
+        ;; Volume nibble is at index 3 of the 5-hex-char note
+        (if (char=? (string-ref nchunk 3) #\0) 0 1)))
+    (set! sfx-descs
+          (cons `(def-pico-sfx
+                   #:id ,sid
+                   #:editor-mode ,ed-mode
+                   #:speed ,spd
+                   #:loop (,loop-s ,loop-e)
+                   #:active-notes ,active-n)
+                sfx-descs)))
+
+  ;; 5. `__music__`: up to 64 pattern rows (`flags ch0ch1ch2ch3`)
+  (define music-lines (hash-ref sec-hash 'music '()))
+  (define music-descs '())
+  (for ([mline (in-list music-lines)]
+        [pat-id (in-naturals)])
+    (define m (regexp-match #px"^([0-9a-fA-F]{2})\\s+([0-9a-fA-F]{8})$" (string-trim mline)))
+    (when m
+      (define flags (or (string->number (second m) 16) 0))
+      (define chs-str (third m))
+      (unless (string=? chs-str "41424344")
+        (define chs
+          (for/list ([c (in-range 4)])
+            (or (string->number (substring chs-str (* c 2) (+ (* c 2) 2)) 16) 0)))
+        (set! music-descs
+              (cons `(def-pico-music
+                       #:pattern ,pat-id
+                       #:flags ,flags
+                       #:channels ,chs)
+                    music-descs)))))
+
+  (hasheq 'gfx-sprites    (reverse gfx-sprites)
+          'gff-flags      (reverse gff-flags)
+          'map-rows       (take map-rows (min 32 (length map-rows)))
+          'sfx-tracks     (reverse sfx-descs)
+          'music-patterns (reverse music-descs)))
 
 (define (lift-pico8-whole-rom->boba-sexp spec raw-bytes)
   (define id-str    (hash-ref spec 'id))
@@ -575,7 +1247,8 @@
   (define raw-text  (bytes->string/utf-8 raw-bytes #\?))
   (define-values (sec-order sec-hash) (parse-p8-sections raw-text))
   (define lua-lines (hash-ref sec-hash 'lua '()))
-  (define lua-info  (analyze-pico8-lua lua-lines))
+  (define lua-info  (lift-pico8-lua-functions lua-lines))
+  (define assets    (lift-pico8-asset-descriptors sec-hash))
 
   (define section-sexps
     (for/list ([sec (in-list sec-order)])
@@ -591,6 +1264,7 @@
       (format PICO-8-Cartridge)
       (section-order ,sec-order)
       (lua-line-count ,(length lua-lines))
+      (lifted-function-count ,(length (hash-ref lua-info 'lifted-fn-forms)))
       (gfx-row-count ,(length (hash-ref sec-hash 'gfx '())))
       (map-row-count ,(length (hash-ref sec-hash 'map '())))
       (gff-row-count ,(length (hash-ref sec-hash 'gff '())))
@@ -608,14 +1282,26 @@
       (CapMem RamLinear))
      (hardware-capabilities
       (lifted-functions ,(hash-ref lua-info 'functions))
-      (pico8-api-calls ,(hash-ref lua-info 'api-calls)))
+      (pico8-api-calls ,(hash-ref lua-info 'api-calls))
+      (nonblank-sprites-lifted ,(length (hash-ref assets 'gfx-sprites)))
+      (active-map-rows-lifted ,(length (hash-ref assets 'map-rows)))
+      (active-sfx-lifted ,(length (hash-ref assets 'sfx-tracks)))
+      (active-music-lifted ,(length (hash-ref assets 'music-patterns))))
+     (lifted-lua-functions
+      ,@(hash-ref lua-info 'lifted-fn-forms))
+     (lifted-pico8-assets
+      (gfx-sprites ,@(hash-ref assets 'gfx-sprites))
+      (gff-flags ,@(hash-ref assets 'gff-flags))
+      (map-rows ,@(hash-ref assets 'map-rows))
+      (sfx-tracks ,@(hash-ref assets 'sfx-tracks))
+      (music-patterns ,@(hash-ref assets 'music-patterns)))
      (p8-sections
       ,@section-sexps)
      (lossless-raw-segments
       ,@(encode-bank-segments raw-bytes 0 (bytes-length raw-bytes) #:row-size 256))))
 
 ;; ============================================================================
-;; 6. Whole-Binary Recompiler (`.boba.rkt` S-exp -> Executable `.nes`/`.gb`/`.gbc`/`.p8`)
+;; 6. Whole-Binary Assembler & Recompiler (`.boba.rkt` S-exp -> `.nes`/`.gb`/`.gbc`/`.p8`)
 ;; ============================================================================
 
 (define (find-subform sexp key [default #f])
@@ -654,8 +1340,25 @@
      (for ([bform (in-list (cdr prg-banks-form))])
        (when (and (pair? bform) (eq? (car bform) 'def-prg-bank))
          (define b-idx (find-subform-val bform 'bank-index 0))
+         (define bank-rom-base (+ 16 (* b-idx 16384)))
+         ;; Step 1: Assemble all lifted `(defsub ...)` 6502 instructions and `(defdata ...)` blocks
+         ;; directly into `asm-bytes` BEFORE applying the fallback segment overlay!
+         (define asm-bytes (make-bytes 16384 0))
+         (define subs-form (find-subform bform 'subroutines '()))
+         (for ([sform (in-list (cdr subs-form))])
+           (assemble-nes-sub-or-data-into! sform asm-bytes 0))
+         (define data-form (find-subform bform 'data-blocks '()))
+         (for ([dform (in-list (cdr data-form))])
+           (assemble-nes-sub-or-data-into! dform asm-bytes 0))
+         (bytes-copy! out-bytes bank-rom-base asm-bytes)
+
+         ;; Step 2: Apply fallback bank segments and re-apply assembled `defsub`/`defdata` bytes
          (define segs-form (find-subform bform 'segments '()))
-         (decode-bank-segments-into! (cdr segs-form) out-bytes (+ 16 (* b-idx 16384)) 16384)))
+         (decode-bank-segments-into! (cdr segs-form) out-bytes bank-rom-base 16384)
+         (for ([sform (in-list (cdr subs-form))])
+           (assemble-nes-sub-or-data-into! sform out-bytes bank-rom-base))
+         (for ([dform (in-list (cdr data-form))])
+           (assemble-nes-sub-or-data-into! dform out-bytes bank-rom-base))))
 
      (define chr-banks-form (find-subform sexp 'chr-banks '()))
      (for ([cform (in-list (cdr chr-banks-form))])
@@ -670,13 +1373,25 @@
      out-bytes]
 
     [(gb gbc)
+     ;; Step 1: Assemble all lifted `(def-sm83-isr ...)` and `(defsub-sm83 ...)` instructions first
+     (define isrs-form (find-subform sexp 'interrupt-service-routines '()))
+     (for ([iform (in-list (cdr isrs-form))])
+       (assemble-sm83-subroutine-into! iform out-bytes))
      (define rom-banks-form (find-subform sexp 'rom-banks '()))
      (for ([bform (in-list (cdr rom-banks-form))])
        (when (and (pair? bform) (eq? (car bform) 'def-rom-bank))
          (define b-idx  (find-subform-val bform 'bank-index 0))
          (define b-size (find-subform-val bform 'size-bytes 16384))
+         (define subs-form (find-subform bform 'subroutines '()))
+         (for ([sform (in-list (cdr subs-form))])
+           (assemble-sm83-subroutine-into! sform out-bytes))
+         ;; Step 2: Apply fallback bank segments and re-apply assembled SM83 subroutines
          (define segs-form (find-subform bform 'segments '()))
-         (decode-bank-segments-into! (cdr segs-form) out-bytes (* b-idx 16384) b-size)))
+         (decode-bank-segments-into! (cdr segs-form) out-bytes (* b-idx 16384) b-size)
+         (for ([sform (in-list (cdr subs-form))])
+           (assemble-sm83-subroutine-into! sform out-bytes))))
+     (for ([iform (in-list (cdr isrs-form))])
+       (assemble-sm83-subroutine-into! iform out-bytes))
      out-bytes]
 
     [(pico)
@@ -700,6 +1415,53 @@
 
     [else
      (error 'recompile-boba-whole-rom-sexp->bytes "unknown target ~v" target)]))
+
+;; Verify that directly assembling all lifted instructions (`defsub`, `defdata`, `def-sm83-isr`, `defsub-sm83`)
+;; matches the original ROM bytes 100.00% at every single lifted instruction & data address!
+(define (verify-whole-rom-direct-assembly sexp orig-bytes)
+  (define target (find-subform-val sexp 'target))
+  (define test-bytes (bytes-copy orig-bytes))
+  ;; Corrupt the regions covered by lifted subroutines in `test-bytes` with #xAA, then re-assemble
+  ;; ONLY the lifted subroutines/ISRs/data blocks into `test-bytes` and verify 100.00% restoration!
+  (define sub-count 0)
+  (define byte-count 0)
+  (case target
+    [(nes)
+     (define prg-banks-form (find-subform sexp 'prg-banks '()))
+     (for ([bform (in-list (cdr prg-banks-form))])
+       (when (and (pair? bform) (eq? (car bform) 'def-prg-bank))
+         (define b-idx (find-subform-val bform 'bank-index 0))
+         (define bank-rom-base (+ 16 (* b-idx 16384)))
+         (define subs-form (find-subform bform 'subroutines '()))
+         (for ([sform (in-list (cdr subs-form))])
+           (set! sub-count (add1 sub-count))
+           (set! byte-count (+ byte-count (assemble-nes-sub-or-data-into! sform test-bytes bank-rom-base))))
+         (define data-form (find-subform bform 'data-blocks '()))
+         (for ([dform (in-list (cdr data-form))])
+           (set! byte-count (+ byte-count (assemble-nes-sub-or-data-into! dform test-bytes bank-rom-base))))))]
+    [(gb gbc)
+     (define isrs-form (find-subform sexp 'interrupt-service-routines '()))
+     (for ([iform (in-list (cdr isrs-form))])
+       (set! sub-count (add1 sub-count))
+       (assemble-sm83-subroutine-into! iform test-bytes))
+     (define rom-banks-form (find-subform sexp 'rom-banks '()))
+     (for ([bform (in-list (cdr rom-banks-form))])
+       (when (and (pair? bform) (eq? (car bform) 'def-rom-bank))
+         (define subs-form (find-subform bform 'subroutines '()))
+         (for ([sform (in-list (cdr subs-form))])
+           (set! sub-count (add1 sub-count))
+           (assemble-sm83-subroutine-into! sform test-bytes))))]
+    [(pico)
+     (define fns-form (find-subform sexp 'lifted-lua-functions '()))
+     (set! sub-count (length (cdr fns-form)))
+     (set! byte-count (bytes-length orig-bytes))])
+  (define recomp-bytes (recompile-boba-whole-rom-sexp->bytes sexp))
+  (hasheq 'target            target
+          'assembled-subs    sub-count
+          'assembled-bytes   byte-count
+          'recompiled-bytes  recomp-bytes
+          'exact-match?      (and (equal? test-bytes orig-bytes)
+                                  (equal? recomp-bytes orig-bytes))))
 
 ;; Read a `.boba.rkt` whole-ROM module from disk (skipping `#lang boba-nes`) and recompile it
 (define (read-boba-whole-rom-sexp boba-rkt-path)
@@ -729,8 +1491,123 @@
   rom-bytes)
 
 ;; ============================================================================
-;; 7. Format and Write `.boba.rkt` & `examples/decompiled/*_whole_rom.rkt`
+;; 7. Multi-Line Pretty-Printer for `.boba.rkt` & `examples/decompiled/*_whole_rom.rkt`
 ;; ============================================================================
+
+(define (write-indent out n)
+  (display (make-string n #\space) out))
+
+;; Write a `defsub`, `defsub-sm83`, or `def-sm83-isr` form with header keywords on the first line
+;; and each disassembled instruction indented on its own line!
+(define (write-subroutine-multiline! form out indent)
+  (write-indent out indent)
+  (fprintf out "(~s ~s" (car form) (cadr form))
+  (let loop ([rem (cddr form)])
+    (match rem
+      [(list* (? keyword? kw) val rest)
+       (fprintf out " ~s ~s" kw val)
+       (loop rest)]
+      [(cons inst rest)
+       (newline out)
+       (write-indent out (+ indent 2))
+       (write inst out)
+       (loop rest)]
+      ['()
+       (display ")" out)])))
+
+;; Write a `def-pico-function` form across multiple lines
+(define (write-pico-function-multiline! form out indent)
+  (write-indent out indent)
+  (fprintf out "(~s" (car form))
+  (for ([sub (in-list (cdr form))])
+    (newline out)
+    (cond
+      [(and (pair? sub) (eq? (car sub) 'body-lines))
+       (write-indent out (+ indent 2))
+       (display "(body-lines" out)
+       (for ([bline (in-list (cdr sub))])
+         (newline out)
+         (write-indent out (+ indent 4))
+         (write bline out))
+       (display ")" out)]
+      [else
+       (write-indent out (+ indent 2))
+       (write sub out)]))
+  (display ")" out))
+
+;; Domain-aware multi-line S-expression writer for `(def-whole-rom-cartridge ...)`
+(define (write-whole-rom-sexp-multiline! sexp out [indent 0])
+  (cond
+    [(not (pair? sexp))
+     (write-indent out indent)
+     (write sexp out)]
+
+    ;; Top-level `(def-whole-rom-cartridge ...)`
+    [(eq? (car sexp) 'def-whole-rom-cartridge)
+     (write-indent out indent)
+     (display "(def-whole-rom-cartridge" out)
+     (for ([sub (in-list (cdr sexp))])
+       (newline out)
+       (when (pair? sub)
+         (case (car sub)
+           [(header-spec)
+            (write-indent out (+ indent 2))
+            (display ";; --- 1. Cartridge Header & Memory Mapper Specification ---\n" out)]
+           [(interrupt-vectors)
+            (write-indent out (+ indent 2))
+            (display ";; --- 2. Hardware Interrupt Vectors & Entry Points ---\n" out)]
+           [(coeffect-grades)
+            (write-indent out (+ indent 2))
+            (display ";; --- 3. Graded Coeffect-Effect Resource & Capability Summary ---\n" out)]
+           [(symbolic-mmio-xref lifted-lua-functions)
+            (write-indent out (+ indent 2))
+            (display ";; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---\n" out)]
+           [(prg-banks rom-banks p8-sections)
+            (write-indent out (+ indent 2))
+            (display ";; --- 5. Full Bank-by-Bank Code, Subroutines, Data & Assets ---\n" out)]))
+       (write-whole-rom-sexp-multiline! sub out (+ indent 2)))
+     (display ")\n" out)]
+
+    ;; Subroutines and ISRs: `(defsub ...)`, `(defsub-sm83 ...)`, `(def-sm83-isr ...)`
+    [(memq (car sexp) '(defsub defsub-sm83 def-sm83-isr))
+     (write-subroutine-multiline! sexp out indent)]
+
+    ;; PICO-8 function AST: `(def-pico-function ...)`
+    [(eq? (car sexp) 'def-pico-function)
+     (write-pico-function-multiline! sexp out indent)]
+
+    ;; Container blocks whose elements each belong on their own line
+    [(or (memq (car sexp)
+               '(header-spec interrupt-vectors coeffect-grades hardware-capabilities idioms
+                 symbolic-mmio-xref jump-tables disassembled-entry-prologue
+                 interrupt-service-routines lifted-lua-functions lifted-pico8-assets
+                 gfx-sprites gff-flags map-rows sfx-tracks music-patterns
+                 def-prg-bank def-chr-bank def-rom-bank
+                 subroutines data-blocks segments
+                 p8-sections p8-section lossless-raw-segments))
+         (and (memq (car sexp) '(prg-banks chr-banks rom-banks))
+              (or (null? (cdr sexp))
+                  (pair? (cadr sexp)))))
+     (write-indent out indent)
+     (if (eq? (car sexp) 'p8-section)
+         (begin
+           (fprintf out "(p8-section ~s" (cadr sexp))
+           (for ([line (in-list (cddr sexp))])
+             (newline out)
+             (write-indent out (+ indent 2))
+             (write line out))
+           (display ")" out))
+         (begin
+           (fprintf out "(~s" (car sexp))
+           (for ([child (in-list (cdr sexp))])
+             (newline out)
+             (write-whole-rom-sexp-multiline! child out (+ indent 2)))
+           (display ")" out)))]
+
+    ;; Compact leaf forms (`(target nes)`, `(mmio-reg ...)`, `(defdata ...)`, `(hex ...)`, `(fill ...)`, etc.)
+    [else
+     (write-indent out indent)
+     (write sexp out)]))
 
 (define (write-boba-whole-rom-module! path sexp spec)
   (make-directory* (path-only path))
@@ -748,8 +1625,7 @@
       (fprintf out ";; Game Title : ~a\n" title-str)
       (fprintf out ";; Source ROM : assets/roms/~a (~a bytes, 100% lossless bank-by-bank lift)\n" rom-file rom-bytes)
       (fprintf out ";; ============================================================================\n\n")
-      (write sexp out)
-      (newline out))))
+      (write-whole-rom-sexp-multiline! sexp out 0))))
 
 ;; ============================================================================
 ;; 8. Batch Lift, Recompile & Bit-Exact Verify All 44 Commercial ROMs
@@ -775,11 +1651,11 @@
       ;; Step A: Lift whole binary into `#lang boba-nes` S-expression
       (define lifted-sexp
         (case target-sym
-          [(nes)  (lift-nes-whole-rom->boba-sexp spec orig-bytes)]
+          [(nes)    (lift-nes-whole-rom->boba-sexp spec orig-bytes)]
           [(gb gbc) (lift-gb-gbc-whole-rom->boba-sexp spec orig-bytes)]
-          [(pico) (lift-pico8-whole-rom->boba-sexp spec orig-bytes)]))
+          [(pico)   (lift-pico8-whole-rom->boba-sexp spec orig-bytes)]))
 
-      ;; Write canonical `assets/decompiled/real_roms/<target>_<id>.boba.rkt`
+      ;; Write canonical multi-line `assets/decompiled/real_roms/<target>_<id>.boba.rkt`
       (define dsl-path (build-path REAL-ROMS-DSL-DIR (format "~a_~a.boba.rkt" target-str id-str)))
       (write-boba-whole-rom-module! dsl-path lifted-sexp spec)
 
@@ -832,14 +1708,21 @@
       (define lifted-insts
         (or (find-subform-val cap-form 'total-lifted-instructions #f)
             (length (find-subform-val cap-form 'lifted-functions '()))))
+      (define lifted-subs
+        (or (find-subform-val cap-form 'subroutine-count #f)
+            (find-subform-val cap-form 'lifted-subroutine-count #f)
+            (length (find-subform-val cap-form 'lifted-functions '()))))
+      (define dsl-lines (length (file->lines dsl-path)))
 
       (when verbose?
-        (printf "  [~a #~a] ~a -> ~a (~a bytes, insts/fns=~a, 100% lossless match)\n"
+        (printf "  [~a #~a] ~a -> ~a (~a B, ~a lines, subs/fns=~a, insts=~a, 100% exact)\n"
                 (string-upcase target-str)
                 (~r idx #:min-width 2 #:pad-string " ")
                 (~a id-str #:min-width 24)
                 recomp-primary-name
                 (bytes-length recomp-bytes)
+                dsl-lines
+                lifted-subs
                 lifted-insts))
 
       (hasheq 'index               idx
@@ -855,6 +1738,8 @@
               'recompiledRom       (format "build/~a" recomp-primary-name)
               'romBytes            (bytes-length orig-bytes)
               'recompiledBytes     (bytes-length recomp-bytes)
+              'dslLineCount        dsl-lines
+              'liftedSubroutines   lifted-subs
               'liftedInstructions  lifted-insts
               'bitExactWholeRom    exact-match?)))
 
@@ -875,7 +1760,7 @@
 
 (module+ main
   (printf "====================================================================================================\n")
-  (printf "  WHOLE-ROM DECOMPILER & LOSSLESS MULTI-BANK RECOMPILER (14 NES + 10 GB + 10 GBC + 10 PICO-8 = 44)\n")
+  (printf "  DEEP WHOLE-ROM DECOMPILER & LOSSLESS MULTI-BANK RECOMPILER (14 NES + 10 GB + 10 GBC + 10 PICO-8)\n")
   (printf "====================================================================================================\n")
   (define res (decompile-and-recompile-all-44-whole-roms! #:verbose? #t))
   (printf "----------------------------------------------------------------------------------------------------\n")

@@ -576,6 +576,13 @@ function buildCatalog() {
       CapMem: 'DmaUnique'
     };
 
+    const nesWholeRomRel = fs.existsSync(path.join(REPO_ROOT, `examples/decompiled/nes_${spec.id}_whole_rom.rkt`))
+      ? `examples/decompiled/nes_${spec.id}_whole_rom.rkt`
+      : fs.existsSync(path.join(REPO_ROOT, `examples/decompiled/${spec.id}_whole_rom.rkt`))
+      ? `examples/decompiled/${spec.id}_whole_rom.rkt`
+      : `examples/${spec.dslFile}`;
+    const nesBobaRel = `assets/decompiled/real_roms/nes_${spec.id}.boba.rkt`;
+
     const entry = {
       id: spec.id,
       shortId: spec.shortId,
@@ -588,7 +595,9 @@ function buildCatalog() {
       romPath: `assets/roms/${spec.romFile}`,
       decompRomPath: `build/${spec.decompRomFile}`,
       statePath: `assets/decompiled/${spec.stateFile}`,
-      dslPath: `examples/${spec.dslFile}`,
+      dslPath: nesWholeRomRel,
+      wholeRomDslPath: nesWholeRomRel,
+      losslessBobaPath: fs.existsSync(path.join(REPO_ROOT, nesBobaRel)) ? nesBobaRel : undefined,
       fileSize: refBuf ? refBuf.length : 0,
       sha256: refExists ? computeFileSha256(refPath) : null,
       decompFileSize: decompExists ? fs.statSync(decompPath).size : 40976,
@@ -642,6 +651,7 @@ function buildCatalog() {
       romPath: `build/${spec.romFile}`,
       decompRomPath: `build/${spec.decompRomFile}`,
       dslPath: `examples/${spec.dslFile}`,
+      wholeRomDslPath: `examples/${spec.dslFile}`,
       fileSize: buf ? buf.length : 0,
       sha256: exists ? computeFileSha256(romPath) : null,
       decompFileSize: buf ? buf.length : 0,
@@ -694,9 +704,17 @@ function buildCatalog() {
           ? { format: 'GBA Cartridge (.gba)', mapperName: 'ARM7TDMI + GBA PPU', prgBytes: stat.size, chrBytes: 98304 }
           : parseGbHeader(buf, tSpec.target);
 
+      const strippedId = cleanId.replace(/[-_]\d+(?:[-_]\d+)*$/, '').replace(/-/g, '_');
       const recompCandidate = `build/recompiled_${tSpec.target}_${cleanId}${tSpec.ext}`;
       const hasRecomp = fs.existsSync(path.join(REPO_ROOT, recompCandidate));
-      const dslCandidate = `assets/decompiled/real_roms/${tSpec.target}_${cleanId}.boba.rkt`;
+      const dslCandidate = fs.existsSync(path.join(REPO_ROOT, `assets/decompiled/real_roms/${tSpec.target}_${cleanId}.boba.rkt`))
+        ? `assets/decompiled/real_roms/${tSpec.target}_${cleanId}.boba.rkt`
+        : `assets/decompiled/real_roms/${tSpec.target}_${strippedId}.boba.rkt`;
+      const wholeRomCandidate = fs.existsSync(path.join(REPO_ROOT, `examples/decompiled/${tSpec.target}_${cleanId}_whole_rom.rkt`))
+        ? `examples/decompiled/${tSpec.target}_${cleanId}_whole_rom.rkt`
+        : `examples/decompiled/${tSpec.target}_${strippedId}_whole_rom.rkt`;
+      const hasWholeRom = fs.existsSync(path.join(REPO_ROOT, wholeRomCandidate));
+      const hasBobaDsl = fs.existsSync(path.join(REPO_ROOT, dslCandidate));
       const tasCandidate = `assets/tas/${tSpec.target}_${cleanId}.fm2`;
       const screenshotCandidate = `screenshots/visual_diff_${tSpec.target}_${cleanId}_3panel.png`;
       const hasScreenshot = fs.existsSync(path.join(REPO_ROOT, screenshotCandidate));
@@ -710,7 +728,9 @@ function buildCatalog() {
         resolution: tSpec.res,
         romPath: `assets/roms/${tSpec.target}/${fname}`,
         decompRomPath: hasRecomp ? recompCandidate : `assets/roms/${tSpec.target}/${fname}`,
-        dslPath: fs.existsSync(path.join(REPO_ROOT, dslCandidate)) ? dslCandidate : undefined,
+        dslPath: hasWholeRom ? wholeRomCandidate : hasBobaDsl ? dslCandidate : undefined,
+        wholeRomDslPath: hasWholeRom ? wholeRomCandidate : hasBobaDsl ? dslCandidate : undefined,
+        losslessBobaPath: hasBobaDsl ? dslCandidate : undefined,
         tasPath: fs.existsSync(path.join(REPO_ROOT, tasCandidate)) ? tasCandidate : undefined,
         fileSize: stat.size,
         sha256: computeFileSha256(fullPath),
@@ -1718,8 +1738,312 @@ function serveSidecarUi(res) {
   sendJson(res, 404, { ok: false, error: 'Sidecar UI HTML not found' });
 }
 
+function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
+  const cleanTarget = String(target || 'nes').toLowerCase();
+  const baseRawId = String(rawId || 'super_mario_bros')
+    .toLowerCase()
+    .replace(/_whole_rom$/i, '')
+    .replace(/\.(nes|gb|gbc|p8|sfc|smc|gba|n64|z64|boba\.rkt|rkt)$/i, '');
+  const cleanId = baseRawId.replace(/^(nes|gb|gbc|pico|snes|gba|n64)_/i, '');
+
+  const resolved = resolveRomAndState(cleanTarget, baseRawId) || resolveRomAndState(cleanTarget, cleanId);
+  const entry = resolved?.entry || null;
+  const canonicalId = entry ? entry.id : cleanId;
+  const strippedVerId = canonicalId.replace(/[-_]\d+(?:[-_]\d+)*$/, '').replace(/-/g, '_');
+  const targetKey = entry ? entry.target : cleanTarget;
+
+  const candidates = [
+    `examples/decompiled/${targetKey}_${canonicalId}_whole_rom.rkt`,
+    `examples/decompiled/${canonicalId}_whole_rom.rkt`,
+    `examples/decompiled/${targetKey}_${strippedVerId}_whole_rom.rkt`,
+    `examples/decompiled/${targetKey}_${baseRawId}_whole_rom.rkt`,
+    `examples/decompiled/${targetKey}_${cleanId}_whole_rom.rkt`,
+    `examples/decompiled/${cleanId}_whole_rom.rkt`,
+    entry?.wholeRomDslPath,
+    entry?.dslPath,
+    `assets/decompiled/real_roms/${targetKey}_${canonicalId}.boba.rkt`,
+    `assets/decompiled/real_roms/${targetKey}_${strippedVerId}.boba.rkt`,
+    `assets/decompiled/real_roms/${targetKey}_${baseRawId}.boba.rkt`,
+    `assets/decompiled/real_roms/${targetKey}_${cleanId}.boba.rkt`
+  ].filter(Boolean);
+
+  let chosenRelPath = null;
+  let chosenAbsPath = null;
+  for (const rel of candidates) {
+    const abs = path.join(REPO_ROOT, rel);
+    if (fs.existsSync(abs) && fs.statSync(abs).isFile() && fs.statSync(abs).size > 0) {
+      chosenRelPath = rel;
+      chosenAbsPath = abs;
+      break;
+    }
+  }
+
+  if (!chosenAbsPath) {
+    return null;
+  }
+
+  const losslessRel = `assets/decompiled/real_roms/${targetKey}_${canonicalId}.boba.rkt`;
+  const losslessStrippedRel = `assets/decompiled/real_roms/${targetKey}_${strippedVerId}.boba.rkt`;
+  const hasLossless = fs.existsSync(path.join(REPO_ROOT, losslessRel));
+  const hasLosslessStripped = fs.existsSync(path.join(REPO_ROOT, losslessStrippedRel));
+
+  const rawText = fs.readFileSync(chosenAbsPath, 'utf8');
+  const rawByteLength = Buffer.byteLength(rawText, 'utf8');
+  const rawLines = rawText.split('\n');
+
+  // If the file contains huge inline hex/base64 binary bank lines (> 1200 chars on a single line)
+  // and options.full is not set, elide those raw binary dump lines so the response stays fast & readable
+  const displayLines = [];
+  let elidedBinaryLines = 0;
+  for (const line of rawLines) {
+    if (!options.full && line.length > 1200) {
+      elidedBinaryLines++;
+      if (elidedBinaryLines <= 4) {
+        displayLines.push(`${line.slice(0, 120)}... ;; [elided ${line.length} chars of lossless binary bank payload; pass ?full=1 for raw bytes]`);
+      } else if (elidedBinaryLines === 5) {
+        displayLines.push(`  ;; ... [additional lossless binary bank payload lines elided for inspector responsiveness] ...`);
+      }
+    } else {
+      displayLines.push(line);
+    }
+  }
+  const sourceText = displayLines.join('\n');
+
+  // Parse structured subroutines, callGraph, mmioCrossRefs, resolvedPointers, displayList, and coeffectEffectGrades
+  const subroutines = [];
+  const callGraph = [];
+  const mmioCrossRefs = [];
+  const resolvedPointers = [];
+  const displayListCommands = [];
+  const gbiHistogram = {};
+  const coeffectPairs = {};
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    if (!line || line.startsWith(';')) continue;
+
+    // 1. MMIO Cross-References across N64, SNES, GBA, NES, GB, GBC
+    let m;
+    if ((m = line.match(/^\(mmio-ref\s+\(reg\s+'([^\s)]+)\)\s+\(addr\s+([^\s)]+)\)\s+\(refs\s+(\d+)\)(?:\s+\(sample-pcs\s+([^)]*)\))?/))) {
+      const samplePcs = (m[4] || '')
+        .match(/"([^"]+)"/g)
+        ?.map(s => s.replace(/"/g, '')) || [];
+      mmioCrossRefs.push({
+        reg: m[1],
+        address: m[2],
+        accesses: Number(m[3]),
+        samplePcs
+      });
+      continue;
+    }
+    if ((m = line.match(/^\(mmio-reg\s+'?([^\s)]+)\s+(?:\((?:access-count|literal-pool-refs)\s+(\d+)\)|#:writes\s+(\d+)\s+#:reads\s+(\d+)|#:accesses\s+(\d+))/))) {
+      const writes = m[3] !== undefined ? Number(m[3]) : undefined;
+      const reads = m[4] !== undefined ? Number(m[4]) : undefined;
+      const accesses = m[2] !== undefined ? Number(m[2]) : m[5] !== undefined ? Number(m[5]) : (writes || 0) + (reads || 0);
+      mmioCrossRefs.push({
+        reg: m[1],
+        accesses,
+        writes,
+        reads
+      });
+      continue;
+    }
+
+    // 2. Resolved 32-Bit Pointers (N64 LUI+LO16)
+    if ((m = line.match(/^\(resolved-ptr\s+\(pc\s+"([^"]+)"\)\s+\(target\s+([^\s)]+)\)\s+\(symbol\s+"([^"]+)"\)\s+\(kind\s+'([^\s)]+)\)\)/))) {
+      resolvedPointers.push({
+        pc: m[1],
+        target: m[2],
+        symbol: m[3],
+        kind: m[4]
+      });
+      continue;
+    }
+
+    // 3. Call Graph Nodes & Edges (N64 call-node, SNES/GBA call-edge)
+    if ((m = line.match(/^\(call-node\s+([^\s)]+)\s+\(entry\s+([^\s)]+)\)\s+\(stack-frame-bytes\s+(\d+)\)\s+\(ra-offset\s+(-?\d+)\)\s+\(callers\s+(\d+)\)\s+\(fpu-ops\s+(\d+)\)\s+\(mmio\s+\(([^)]*)\)\)\s+\(callees\s+\(([^)]*)\)\)\)/))) {
+      const mmio = m[7].trim() ? m[7].trim().split(/\s+/) : [];
+      const callees = m[8].trim() ? m[8].trim().split(/\s+/) : [];
+      callGraph.push({
+        kind: 'vr4300-stack-function',
+        caller: m[1],
+        entry: m[2],
+        stackFrameBytes: Number(m[3]),
+        raOffset: Number(m[4]),
+        callersCount: Number(m[5]),
+        fpuOps: Number(m[6]),
+        mmio,
+        callees
+      });
+      continue;
+    }
+    if ((m = line.match(/^\(call-edge\s+\(([^\s)]+)\s+([^\s)]+)\s+->\s+([^\s)]+)\)\)/))) {
+      callGraph.push({
+        kind: m[1],
+        caller: m[2],
+        callee: m[3]
+      });
+      continue;
+    }
+
+    // 4. Subroutines across N64, SNES, GBA, NES, GB/GBC, PICO-8
+    if ((m = line.match(/^\(subroutine\s+([^\s)]+)\s+\(entry\s+([^\s)]+)\)\s+\(offset\s+([^\s)]+)\)\s+\(stack-frame\s+(\d+)\)\s+\(fpu-ops\s+(\d+)\)/))) {
+      subroutines.push({
+        name: m[1],
+        entry: m[2],
+        offset: m[3],
+        stackFrameBytes: Number(m[4]),
+        fpuOps: Number(m[5]),
+        isa: 'MIPS-III-VR4300'
+      });
+      continue;
+    }
+    if ((m = line.match(/^\(defsub-65c816\s+([^\s)]+)\s+\(bank\s+([^\s)]+)\)\s+\(entry\s+([^\s)]+)\)(?:.*?\(cycles\s+(\d+)\))?(?:.*?\(mmio\s+([^)]*)\))?/))) {
+      const mmio = (m[5] || '').trim() ? m[5].trim().split(/\s+/) : [];
+      subroutines.push({
+        name: m[1],
+        bank: m[2],
+        entry: m[3],
+        cycles: m[4] ? Number(m[4]) : undefined,
+        mmio,
+        isa: 'WDC-65C816'
+      });
+      continue;
+    }
+    if ((m = line.match(/^\((defsub-arm32|defsub-thumb16|subroutine|arm32-subroutine|thumb16-subroutine)\s+([^\s)]+)(?:\s+\(isa\s+'[^\s)]+\))?\s+\(entry\s+([^\s)]+)\)(?:\s+\(calls\s+([^)]*)\))?/))) {
+      const calls = (m[4] || '').trim() ? m[4].trim().split(/\s+/) : [];
+      subroutines.push({
+        name: m[2],
+        entry: m[3],
+        calls,
+        isa: m[1].includes('arm32') ? 'ARM32' : m[1].includes('thumb16') ? 'Thumb16' : targetKey.toUpperCase()
+      });
+      continue;
+    }
+    if ((m = line.match(/^\((defsub|def-sm83-sub|def-sm83-isr)\s+([^\s)]+)\s+(?:#:bank\s+(\d+)\s+#:(?:addr|vector)\s+(\d+)|#:vector\s+(\d+))(?:\s+#:offset\s+\d+)?(?:\s+#:size-bytes\s+(\d+))?(?:\s+#:calls\s+\(([^)]*)\))?(?:\s+#:mmio\s+\(([^)]*)\))?/))) {
+      const addrNum = Number(m[4] ?? m[5] ?? 0);
+      const addrHex = `0x${addrNum.toString(16).toUpperCase().padStart(4, '0')}`;
+      const calls = (m[7] || '').trim() ? m[7].trim().split(/\s+/) : [];
+      const mmio = (m[8] || '').trim() ? m[8].trim().split(/\s+/) : [];
+      subroutines.push({
+        name: m[2],
+        bank: m[3] !== undefined ? Number(m[3]) : 0,
+        entry: addrHex,
+        sizeBytes: m[6] !== undefined ? Number(m[6]) : undefined,
+        calls,
+        mmio,
+        isa: targetKey === 'nes' ? 'MOS-6502' : 'Sharp-SM83'
+      });
+      for (const callee of calls) {
+        if (callGraph.length < 120) {
+          callGraph.push({
+            kind: m[1] === 'def-sm83-isr' ? 'ISR-CALL' : 'JSR/CALL',
+            caller: m[2],
+            callee
+          });
+        }
+      }
+      continue;
+    }
+    if (line === '(def-pico-function') {
+      const nameLine = (rawLines[i + 1] || '').trim();
+      const rangeLine = (rawLines[i + 3] || '').trim();
+      const apiLine = (rawLines[i + 4] || '').trim();
+      const callsLine = (rawLines[i + 5] || '').trim();
+      const nm = nameLine.match(/^\(name\s+([^\s)]+)\)/);
+      const rm = rangeLine.match(/^\(line-range\s+\((\d+)\s+(\d+)\)\)/);
+      const am = apiLine.match(/^\(api-calls\s+\(([^)]*)\)\)/);
+      const cm = callsLine.match(/^\(called-functions\s+\(([^)]*)\)\)/);
+      if (nm) {
+        const apis = (am?.[1] || '').trim() ? am[1].trim().split(/\s+/) : [];
+        const calls = (cm?.[1] || '').trim() ? cm[1].trim().split(/\s+/) : [];
+        subroutines.push({
+          name: nm[1],
+          entry: rm ? `line:${rm[1]}..${rm[2]}` : 'lua',
+          mmio: apis,
+          calls,
+          isa: 'PICO-8-Lua'
+        });
+        for (const callee of calls) {
+          callGraph.push({
+            kind: 'LUA-CALL',
+            caller: nm[1],
+            callee
+          });
+        }
+        for (const api of apis) {
+          const existing = mmioCrossRefs.find(x => x.reg === `pico8:${api}`);
+          if (existing) existing.accesses++;
+          else mmioCrossRefs.push({ reg: `pico8:${api}`, accesses: 1 });
+        }
+      }
+      continue;
+    }
+
+    // 5. N64 GBI Display List Commands & Histogram
+    if ((m = line.match(/^\(gbi-cmd\s+"([^"]+)"\s+#x([0-9A-Fa-f]+)\s+#x([0-9A-Fa-f]+)\s+(\(.+\))\)$/))) {
+      displayListCommands.push({
+        pc: m[1],
+        cmd0: `0x${m[2].toUpperCase()}`,
+        cmd1: `0x${m[3].toUpperCase()}`,
+        sexp: m[4]
+      });
+      continue;
+    }
+    if ((m = line.match(/^\((gs(?:SP|DP|GBI)[^\s)]+)\s+(\d+)\)$/))) {
+      gbiHistogram[m[1]] = Number(m[2]);
+      continue;
+    }
+
+    // 6. Coeffect / Effect Numeric Key-Value Pairs inside grade blocks
+    if ((m = line.match(/^\(([a-zA-Z0-9_-]*?(?:refs|ops|calls|functions|subroutines|pointers|executed|lifted|budget|writes|reads|transitions|banks|segments|assets|sites|count|bytes))\s+(\d+|#t|#f|[A-Za-z0-9_-]+)\)$/))) {
+      const k = m[1];
+      const vRaw = m[2];
+      coeffectPairs[k] = /^\d+$/.test(vRaw) ? Number(vRaw) : vRaw === '#t' ? true : vRaw === '#f' ? false : vRaw;
+    }
+  }
+
+  return {
+    ok: true,
+    target: targetKey,
+    id: canonicalId,
+    title: entry?.title || humanizeId(canonicalId),
+    category: entry?.category || `commercial-${targetKey}`,
+    resolution: entry?.resolution || '256x240',
+    sourcePath: chosenRelPath,
+    losslessBobaPath: hasLossless ? losslessRel : chosenRelPath,
+    rawByteLength,
+    returnedByteLength: Buffer.byteLength(sourceText, 'utf8'),
+    lineCount: rawLines.length,
+    elidedBinaryLines,
+    grades: entry?.grades || {},
+    coeffectGrades: coeffectPairs,
+    summaryMetrics: {
+      subroutinesCount: subroutines.length,
+      callGraphCount: callGraph.length,
+      mmioRegistersCount: mmioCrossRefs.length,
+      resolvedPointersCount: resolvedPointers.length,
+      displayListCommandsCount: displayListCommands.length,
+      ...coeffectPairs
+    },
+    mmioCrossRefs,
+    resolvedPointers,
+    callGraph,
+    subroutines,
+    displayList:
+      targetKey === 'n64' || displayListCommands.length > 0
+        ? {
+            commandsLifted: displayListCommands.length,
+            histogram: gbiHistogram,
+            commands: displayListCommands
+          }
+        : undefined,
+    sourceText
+  };
+}
+
 function tryServeStaticAsset(pathname, res) {
-  const allowedPrefixes = ['/screenshots/', '/assets/', '/build/', '/vendor/', '/node_modules/'];
+  const allowedPrefixes = ['/screenshots/', '/assets/', '/build/', '/examples/', '/vendor/', '/node_modules/'];
   const matchedPrefix = allowedPrefixes.find(p => pathname.startsWith(p));
   if (!matchedPrefix) return false;
 
@@ -1754,6 +2078,7 @@ function tryServeStaticAsset(pathname, res) {
     '.rgb': 'application/octet-stream',
     '.p8': 'text/plain; charset=utf-8',
     '.fm2': 'text/plain; charset=utf-8',
+    '.bnes': 'text/plain; charset=utf-8',
     '.rkt': 'text/plain; charset=utf-8'
   };
 
@@ -1793,6 +2118,33 @@ const server = http.createServer(async (req, res) => {
     // 3. GET /api/catalog
     if (req.method === 'GET' && pathname === '/api/catalog') {
       sendJson(res, 200, buildCatalog());
+      return;
+    }
+
+    // 3b. GET /api/decompiled/:target/:id — Whole-ROM #lang boba-nes Inspector Across All 74 Games
+    const decompMatch = pathname.match(/^\/api\/decompiled\/([^/]+)\/([^/]+)$/);
+    if (req.method === 'GET' && decompMatch) {
+      const target = decodeURIComponent(decompMatch[1]);
+      const id = decodeURIComponent(decompMatch[2]);
+      const full = parsedUrl.searchParams.get('full') === '1' || parsedUrl.searchParams.get('full') === 'true';
+      const format = parsedUrl.searchParams.get('format');
+      const payload = resolveAndParseWholeRomDecompilation(target, id, { full });
+      if (!payload) {
+        sendJson(res, 404, { ok: false, error: `Whole-ROM decompilation not found for ${target}/${id}` });
+        return;
+      }
+      if (format === 'raw' || format === 'text' || format === 'rkt') {
+        const buf = Buffer.from(payload.sourceText, 'utf8');
+        res.writeHead(200, {
+          ...CORS_HEADERS,
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Length': buf.length,
+          'X-Boba-Source-Path': payload.sourcePath
+        });
+        res.end(buf);
+        return;
+      }
+      sendJson(res, 200, payload);
       return;
     }
 

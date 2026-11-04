@@ -58,6 +58,14 @@
  defboba-stage
  define-boba-whole-rom
  def-whole-rom-cartridge
+ defsub
+ defdata
+ def-sm83-isr
+ defsub-sm83
+ def-pico-function
+ def-prg-bank
+ def-chr-bank
+ def-rom-bank
  verify-nes-grades!)
 
 ;; Surface DSL macro for declaring a game phase state machine with verified failure recovery & victory reachability
@@ -249,3 +257,26 @@
          (provide whole-rom-sexp)
          (define whole-rom-sexp '(def-whole-rom-cartridge body ...)))]))
 
+(define-syntax-rule (defsub sub-id body ...)
+  (define sub-id '(defsub sub-id body ...)))
+
+(define-syntax-rule (defdata data-id body ...)
+  (define data-id '(defdata data-id body ...)))
+
+(define-syntax-rule (def-sm83-isr isr-id body ...)
+  (define isr-id '(def-sm83-isr isr-id body ...)))
+
+(define-syntax-rule (defsub-sm83 sub-id body ...)
+  (define sub-id '(defsub-sm83 sub-id body ...)))
+
+(define-syntax-rule (def-pico-function body ...)
+  '(def-pico-function body ...))
+
+(define-syntax-rule (def-prg-bank body ...)
+  '(def-prg-bank body ...))
+
+(define-syntax-rule (def-chr-bank body ...)
+  '(def-chr-bank body ...))
+
+(define-syntax-rule (def-rom-bank body ...)
+  '(def-rom-bank body ...))

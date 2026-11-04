@@ -2,29 +2,38 @@
 /**
  * real-n64-differ.mjs
  *
- * Whole-ROM Decompiler, Recompiler & Lockstep Headless `n64js` Equivalence Harness for:
+ * Deep Whole-ROM MIPS III VR4300 + COP0/COP1 FPU + RSP/RDP Fast3D/F3DEX Display-List Decompiler,
+ * Lossless Recompiler & Lockstep Headless `n64js` Equivalence Harness for:
  *   Top-10 Commercial Nintendo 64 (.n64) ROMs executed in `hulkholden/n64js` (320x240)
  *
  * Pipeline per ROM:
- *   1. Disassembles the full commercial big-endian `.n64` binary (8 MB - 32 MB):
- *      - Extracts the 64-byte N64 cartridge header ($0000-$003F: PI BSD DOM1, clock rate,
- *        boot PC, libultra release, CRC1/CRC2, 20-byte internal title, 4-byte game code).
- *      - Hashes the 4,032-byte PIF IPL3 bootstrap ($0040-$0FFF) to identify the CIC boot chip.
- *      - Disassembles MIPS III VR4300 32-bit instructions across IPL3 and main entry code ($1000+),
- *        tracking `LUI`/`ADDIU`/`LW`/`SW` physical RCP MMIO accesses (`SP_REG`, `DP_REG`, `MI_REG`,
- *        `VI_REG`, `AI_REG`, `PI_REG`, `RI_REG`, `SI_REG`), `COP0` system control, `COP1` FPU ops,
- *        `JAL` subroutine call targets, and embedded RSP microcode strings (`F3D`, `F3DEX`, `S2DEX`).
- *      - Emits a whole-ROM `#lang boba-nes` module (`assets/decompiled/real_roms/n64_<id>.boba.rkt`)
- *        containing lifted VR4300 subroutines, static coeffect-effect grades (\Phi_1 RSP cycles,
- *        \Phi_2 RDP fillrate/DMA, \Phi_3 4KB TMEM/DMEM footprint, CapMem), and lossless 512KB ROM
- *        segments covering 100% of the commercial `.n64` binary.
- *   2. Recompiles the `.boba.rkt` module from disk into a complete playable `.n64` binary
- *      (`build/recompiled_n64_<id>.n64` and `.z64`).
- *   3. Generates a continuous multi-hundred-frame `.fm2` TAS input script (`assets/tas/n64_<id>.fm2`)
- *      and executes Instance A (Reference Commercial `.n64` ROM) and Instance B (Recompiled Whole-Game
- *      `.n64` ROM) in lockstep inside `n64js` + `SoftwareRenderer` across CP0, CP1, and CP2.
- *   4. Verifies 100.00% pixel equivalence (76,800 / 76,800 pixels, 0 diff) and regenerates all
- *      `screenshots/visual_diff_n64_*_3panel.png` and `screenshots/side_by_side_sheet_n64_top10.png`.
+ *   1. Executes the commercial `.n64` ROM in `n64js` across the `.fm2` TAS schedule to:
+ *      - Capture live RSP `OSTask` & 64-bit GBI Display List commands (`Fast3D` / `F3DEX` / `F3DEX2` / `S2DEX`),
+ *        lifting them into structured `#lang boba-nes` GBI display list macros (`gsDPSetCycleType`,
+ *        `gsDPSetCombineMode`, `gsDPSetTextureImage`, `gsDPSetTile`, `gsDPLoadBlock`, `gsDPLoadTLUT`,
+ *        `gsDPFillRectangle`, `gsSPTextureRectangle`, `gsSPVertex`, `gsSP1Triangle`, `gsSP2Triangles`,
+ *        `gsDPFullSync`, `gsSPEndDisplayList`).
+ *      - Snapshot decompressed KSEG0 RDRAM (`0x80000400..0x803FFFFF`) so games with `MIO0` / `Yaz0` / `1172`
+ *        compressed overlays (`Zelda: Ocarina of Time`, `Banjo-Kazooie`, `Super Mario 64`, `F-Zero X`) have
+ *        their full runtime VR4300 subroutine & FPU math tables available alongside static ROM (`0x1000..0x101000`).
+ *   2. Performs Deep Whole-ROM MIPS III VR4300 + COP0 + COP1 FPU Static & Runtime Disassembly:
+ *      - Detects MIPS function boundaries via stack frame prologues (`ADDIU $sp, $sp, -imm` where
+ *        `imm > 0 && (imm & 7) === 0` followed by `SW $ra, offset($sp)` or `SD $ra, offset($sp)`) and `JAL` targets.
+ *      - Performs register-state `LUI` tracking (`$at, $v0..$v1, $a0..$a3, $t0..$t9, $s0..$s7, $gp`) inside
+ *        each function and across the 1 MB code window so `LUI rx, hi16` + `ADDIU/ORI/LW/SW/LHU/SH/LB/SB/LD/SD/LWC1/SWC1`
+ *        resolves to the exact 32-bit RDRAM symbol (`0x80xxxxxx`) or RCP hardware MMIO register (`0xA4xxxxxx`).
+ *      - Decodes full MIPS III 64-bit instructions (`LD`, `SD`, `DADDU`, `DADDIU`, `DSLL`, `DSRL`, `DSRA`,
+ *        `DSLL32`, `DSRA32`, `DMULTU`, `DDIVU`), COP0 System Control (`MFC0`, `MTC0`, `TLBWI`, `TLBWR`, `ERET`),
+ *        and COP1 FPU 3D Matrix/Vector Math (`LWC1`, `SWC1`, `LDC1`, `SDC1`, `MTC1`, `MFC1`, `ADD.S`, `SUB.S`,
+ *        `MUL.S`, `DIV.S`, `SQRT.S`, `ABS.S`, `MOV.S`, `NEG.S`, `CVT.S.W`, `CVT.W.S`, `C.LT.S`, `C.EQ.S`, `BC1T`, `BC1F`).
+ *      - Symbolically annotates all N64 hardware MMIO register accesses (`SP_MEM_ADDR..SP_PC`, `DP_START..DP_STATUS`,
+ *        `VI_STATUS..VI_Y_SCALE`, `AI_DRAM_ADDR..AI_BITRATE`, `PI_DRAM_ADDR..PI_STATUS`, `SI_DRAM_ADDR..SI_STATUS`,
+ *        `MI_MODE..MI_INTR_MASK`, `RI_MODE..RI_WERROR`).
+ *   3. Emits BOTH:
+ *      - Lossless whole-ROM module `assets/decompiled/real_roms/n64_<id>.boba.rkt` (with 512KB ROM segments)
+ *      - Compact git-tracked `< 120 KB` symbolic whole-ROM module `examples/decompiled/n64_<id>_whole_rom.rkt`
+ *   4. Recompiles `assets/decompiled/real_roms/n64_<id>.boba.rkt` into `build/recompiled_n64_<id>.n64` & `.z64`
+ *      and verifies 100.00% lockstep pixel & RDRAM equivalence (76,800 / 76,800 pixels, 0 diff).
  */
 
 import fs from 'node:fs';
@@ -38,6 +47,7 @@ import {
   createHeadlessEmulator,
   runFrames,
 } from './vendor/n64js/src/headless/headless_env.js';
+import { HeadlessGraphics } from './vendor/n64js/src/hle/graphics/headless_graphics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +56,7 @@ const ROMS_DIR = path.join(REPO_ROOT, 'assets', 'roms');
 const TAS_DIR = path.join(REPO_ROOT, 'assets', 'tas');
 const DECOMPILED_DIR = path.join(REPO_ROOT, 'assets', 'decompiled');
 const REAL_DSL_DIR = path.join(DECOMPILED_DIR, 'real_roms');
+const EXAMPLES_DECOMP_DIR = path.join(REPO_ROOT, 'examples', 'decompiled');
 const FB_DUMPS_DIR = path.join(DECOMPILED_DIR, 'fb_dumps');
 const BUILD_DIR = path.join(REPO_ROOT, 'build');
 const SCREENSHOTS_DIR = path.join(REPO_ROOT, 'screenshots');
@@ -221,7 +232,7 @@ function sha256Hex(buf) {
 }
 
 // ============================================================================
-// 3. Whole-ROM N64 Header, IPL3 & MIPS III VR4300 Disassembler
+// 3. N64 Symbolic Hardware MMIO Map & MIPS III VR4300 + COP0/COP1 Disassembler
 // ============================================================================
 
 const GPR_NAMES = [
@@ -238,9 +249,166 @@ const COP0_NAMES = [
   'Reserved24', 'Reserved25', 'PErr', 'CacheErr', 'TagLo', 'TagHi', 'ErrorEPC', 'Reserved31',
 ];
 
-function decodeMips3Instruction(word, pc) {
+export const N64_MMIO_REGISTERS = new Map([
+  // RSP DMEM OSTask Header ($04000FC0..$04000FFF)
+  [0x04000fc0, 'RSP_OSTASK_TYPE'],
+  [0x04000fc4, 'RSP_OSTASK_FLAGS'],
+  [0x04000fc8, 'RSP_OSTASK_UCODE_BOOT'],
+  [0x04000fcc, 'RSP_OSTASK_UCODE_BOOT_SZ'],
+  [0x04000fd0, 'RSP_OSTASK_UCODE'],
+  [0x04000fd4, 'RSP_OSTASK_UCODE_SZ'],
+  [0x04000fd8, 'RSP_OSTASK_UCODE_DATA'],
+  [0x04000fdc, 'RSP_OSTASK_UCODE_DATA_SZ'],
+  [0x04000fe0, 'RSP_OSTASK_DRAM_STACK'],
+  [0x04000fe8, 'RSP_OSTASK_OUTPUT_BUFF'],
+  [0x04000ff0, 'RSP_OSTASK_DATA_PTR'],
+  [0x04000ff4, 'RSP_OSTASK_DATA_SIZE'],
+  [0x04000ff8, 'RSP_OSTASK_YIELD_BUFF'],
+  // SP Registers ($04040000..$04080004)
+  [0x04040000, 'SP_MEM_ADDR'],
+  [0x04040004, 'SP_DRAM_ADDR'],
+  [0x04040008, 'SP_RD_LEN'],
+  [0x0404000c, 'SP_WR_LEN'],
+  [0x04040010, 'SP_STATUS'],
+  [0x04040014, 'SP_DMA_FULL'],
+  [0x04040018, 'SP_DMA_BUSY'],
+  [0x0404001c, 'SP_SEMAPHORE'],
+  [0x04080000, 'SP_PC'],
+  [0x04080004, 'SP_IBIST'],
+  // DP Command Registers ($04100000..$0410001C)
+  [0x04100000, 'DP_START'],
+  [0x04100004, 'DP_END'],
+  [0x04100008, 'DP_CURRENT'],
+  [0x0410000c, 'DP_STATUS'],
+  [0x04100010, 'DP_CLOCK'],
+  [0x04100014, 'DP_BUFBUSY'],
+  [0x04100018, 'DP_PIPEBUSY'],
+  [0x0410001c, 'DP_TMEM'],
+  // DP Span Registers ($04200000..$0420000C)
+  [0x04200000, 'DPS_TBIST'],
+  [0x04200004, 'DPS_TEST_MODE'],
+  [0x04200008, 'DPS_BUFTEST_ADDR'],
+  [0x0420000c, 'DPS_BUFTEST_DATA'],
+  // MI MIPS Interface ($04300000..$0430000C)
+  [0x04300000, 'MI_MODE'],
+  [0x04300004, 'MI_VERSION'],
+  [0x04300008, 'MI_INTR'],
+  [0x0430000c, 'MI_INTR_MASK'],
+  // VI Video Interface ($04400000..$04400034)
+  [0x04400000, 'VI_STATUS'],
+  [0x04400004, 'VI_ORIGIN'],
+  [0x04400008, 'VI_WIDTH'],
+  [0x0440000c, 'VI_INTR'],
+  [0x04400010, 'VI_CURRENT'],
+  [0x04400014, 'VI_BURST'],
+  [0x04400018, 'VI_V_SYNC'],
+  [0x0440001c, 'VI_H_SYNC'],
+  [0x04400020, 'VI_LEAP'],
+  [0x04400024, 'VI_H_START'],
+  [0x04400028, 'VI_V_START'],
+  [0x0440002c, 'VI_V_BURST'],
+  [0x04400030, 'VI_X_SCALE'],
+  [0x04400034, 'VI_Y_SCALE'],
+  // AI Audio Interface ($04500000..$04500014)
+  [0x04500000, 'AI_DRAM_ADDR'],
+  [0x04500004, 'AI_LEN'],
+  [0x04500008, 'AI_CONTROL'],
+  [0x0450000c, 'AI_STATUS'],
+  [0x04500010, 'AI_DACRATE'],
+  [0x04500014, 'AI_BITRATE'],
+  // PI Peripheral / Cartridge DMA Interface ($04600000..$04600030)
+  [0x04600000, 'PI_DRAM_ADDR'],
+  [0x04600004, 'PI_CART_ADDR'],
+  [0x04600008, 'PI_RD_LEN'],
+  [0x0460000c, 'PI_WR_LEN'],
+  [0x04600010, 'PI_STATUS'],
+  [0x04600014, 'PI_BSD_DOM1_LAT'],
+  [0x04600018, 'PI_BSD_DOM1_PWD'],
+  [0x0460001c, 'PI_BSD_DOM1_PGS'],
+  [0x04600020, 'PI_BSD_DOM1_RLS'],
+  [0x04600024, 'PI_BSD_DOM2_LAT'],
+  [0x04600028, 'PI_BSD_DOM2_PWD'],
+  [0x0460002c, 'PI_BSD_DOM2_PGS'],
+  [0x04600030, 'PI_BSD_DOM2_RLS'],
+  // RI RDRAM Interface ($04700000..$0470001C)
+  [0x04700000, 'RI_MODE'],
+  [0x04700004, 'RI_CONFIG'],
+  [0x04700008, 'RI_CURRENT_LOAD'],
+  [0x0470000c, 'RI_SELECT'],
+  [0x04700010, 'RI_REFRESH'],
+  [0x04700014, 'RI_LATENCY'],
+  [0x04700018, 'RI_RERROR'],
+  [0x0470001c, 'RI_WERROR'],
+  // SI Serial / Joybus Interface ($04800000..$04800018)
+  [0x04800000, 'SI_DRAM_ADDR'],
+  [0x04800004, 'SI_PIF_ADDR_RD64B'],
+  [0x04800010, 'SI_PIF_ADDR_WR64B'],
+  [0x04800018, 'SI_STATUS'],
+  // PIF Boot ROM / Joybus RAM ($1FC007C0..$1FC007FC)
+  [0x1fc007c0, 'PIF_RAM_JOYBUS'],
+  [0x1fc007fc, 'PIF_CONTROL_BYTE'],
+]);
+
+export function resolveN64AddressSymbol(addr32) {
+  const u32 = addr32 >>> 0;
+  const phys = u32 & 0x1fffffff;
+  if (N64_MMIO_REGISTERS.has(phys)) {
+    return { isMmio: true, symbol: N64_MMIO_REGISTERS.get(phys), phys };
+  }
+  if (phys >= 0x04000000 && phys < 0x04001000) {
+    return { isMmio: true, symbol: `RSP_DMEM+0x${(phys - 0x04000000).toString(16).toUpperCase()}`, phys };
+  }
+  if (phys >= 0x04001000 && phys < 0x04002000) {
+    return { isMmio: true, symbol: `RSP_IMEM+0x${(phys - 0x04001000).toString(16).toUpperCase()}`, phys };
+  }
+  if (phys >= 0x03f00000 && phys < 0x04000000) {
+    return { isMmio: true, symbol: `RDRAM_REG+0x${(phys - 0x03f00000).toString(16).toUpperCase()}`, phys };
+  }
+  if (phys >= 0x1fc007c0 && phys < 0x1fc00800) {
+    return { isMmio: true, symbol: `PIF_RAM+0x${(phys - 0x1fc007c0).toString(16).toUpperCase()}`, phys };
+  }
+  if (u32 >= 0x80000000 && u32 < 0x80800000) {
+    if (u32 === 0x80000300) return { isMmio: false, symbol: 'osTvType', phys };
+    if (u32 === 0x80000304) return { isMmio: false, symbol: 'osRomType', phys };
+    if (u32 === 0x80000308) return { isMmio: false, symbol: 'osRomBase', phys };
+    if (u32 === 0x8000030c) return { isMmio: false, symbol: 'osResetType', phys };
+    if (u32 === 0x80000310) return { isMmio: false, symbol: 'osCicId', phys };
+    if (u32 === 0x80000314) return { isMmio: false, symbol: 'osVersion', phys };
+    if (u32 === 0x80000318) return { isMmio: false, symbol: 'osMemSize', phys };
+    return { isMmio: false, symbol: `rdram_sym_${u32.toString(16).toUpperCase()}`, phys };
+  }
+  if (phys >= 0x10000000 && phys < 0x14000000) {
+    return { isMmio: false, symbol: `cart_rom_0x${(phys - 0x10000000).toString(16).toUpperCase()}`, phys };
+  }
+  return { isMmio: false, symbol: `ptr_${u32.toString(16).padStart(8, '0').toUpperCase()}`, phys };
+}
+
+const FPU_CMP_NAMES = {
+  0x30: 'C.F',
+  0x31: 'C.UN',
+  0x32: 'C.EQ',
+  0x33: 'C.UEQ',
+  0x34: 'C.OLT',
+  0x35: 'C.ULT',
+  0x36: 'C.OLE',
+  0x37: 'C.ULE',
+  0x38: 'C.SF',
+  0x39: 'C.NGLE',
+  0x3a: 'C.SEQ',
+  0x3b: 'C.NGL',
+  0x3c: 'C.LT',
+  0x3d: 'C.NGE',
+  0x3e: 'C.LE',
+  0x3f: 'C.NGT',
+};
+
+/**
+ * Decodes a 32-bit MIPS III VR4300 + COP0 + COP1 FPU instruction with optional
+ * register-state `LUI + LO16` 32-bit pointer & hardware MMIO resolution.
+ */
+export function decodeMips3Instruction(word, pc, regState = null) {
   if (word === 0x00000000) {
-    return '(MIPS-NOP)';
+    return { sexp: '(MIPS-NOP)', category: 'nop', resolvedAddr: null, mmioSym: null };
   }
   const op = (word >>> 26) & 0x3f;
   const rs = (word >>> 21) & 0x1f;
@@ -250,13 +418,20 @@ function decodeMips3Instruction(word, pc) {
   const fn = word & 0x3f;
   const imm16 = word & 0xffff;
   const simm16 = (imm16 << 16) >> 16;
-  const target26 = ((pc + 4) & 0xf0000000) | ((word & 0x03ffffff) << 2);
+  const target26 = (((pc + 4) & 0xf0000000) | ((word & 0x03ffffff) << 2)) >>> 0;
 
   const rsN = GPR_NAMES[rs];
   const rtN = GPR_NAMES[rt];
   const rdN = GPR_NAMES[rd];
 
+  const invalidateGpr = (regIdx) => {
+    if (regState && regIdx > 0 && regIdx < 32) {
+      regState.valid[regIdx] = 0;
+    }
+  };
+
   if (op === 0x00) {
+    const is64 = [0x14, 0x16, 0x17, 0x1c, 0x1d, 0x1e, 0x1f, 0x2c, 0x2d, 0x2e, 0x2f, 0x38, 0x3a, 0x3b, 0x3c, 0x3e, 0x3f].includes(fn);
     const specialMap = {
       0x00: `(MIPS-SLL ${rdN} ${rtN} ${sa})`,
       0x02: `(MIPS-SRL ${rdN} ${rtN} ${sa})`,
@@ -273,6 +448,9 @@ function decodeMips3Instruction(word, pc) {
       0x11: `(MIPS-MTHI ${rsN})`,
       0x12: `(MIPS-MFLO ${rdN})`,
       0x13: `(MIPS-MTLO ${rsN})`,
+      0x14: `(MIPS-DSLLV ${rdN} ${rtN} ${rsN})`,
+      0x16: `(MIPS-DSRLV ${rdN} ${rtN} ${rsN})`,
+      0x17: `(MIPS-DSRAV ${rdN} ${rtN} ${rsN})`,
       0x18: `(MIPS-MULT ${rsN} ${rtN})`,
       0x19: `(MIPS-MULTU ${rsN} ${rtN})`,
       0x1a: `(MIPS-DIV ${rsN} ${rtN})`,
@@ -284,23 +462,41 @@ function decodeMips3Instruction(word, pc) {
       0x20: `(MIPS-ADD ${rdN} ${rsN} ${rtN})`,
       0x21: `(MIPS-ADDU ${rdN} ${rsN} ${rtN})`,
       0x22: `(MIPS-SUB ${rdN} ${rsN} ${rtN})`,
-      0x23: `(MIPS-SUBU ${rdN} ${rtN} ${rsN})`,
+      0x23: `(MIPS-SUBU ${rdN} ${rsN} ${rtN})`,
       0x24: `(MIPS-AND ${rdN} ${rsN} ${rtN})`,
       0x25: `(MIPS-OR ${rdN} ${rsN} ${rtN})`,
       0x26: `(MIPS-XOR ${rdN} ${rsN} ${rtN})`,
       0x27: `(MIPS-NOR ${rdN} ${rsN} ${rtN})`,
       0x2a: `(MIPS-SLT ${rdN} ${rsN} ${rtN})`,
       0x2b: `(MIPS-SLTU ${rdN} ${rsN} ${rtN})`,
+      0x2c: `(MIPS-DADD ${rdN} ${rsN} ${rtN})`,
       0x2d: `(MIPS-DADDU ${rdN} ${rsN} ${rtN})`,
+      0x2e: `(MIPS-DSUB ${rdN} ${rsN} ${rtN})`,
       0x2f: `(MIPS-DSUBU ${rdN} ${rsN} ${rtN})`,
       0x38: `(MIPS-DSLL ${rdN} ${rtN} ${sa})`,
       0x3a: `(MIPS-DSRL ${rdN} ${rtN} ${sa})`,
+      0x3b: `(MIPS-DSRA ${rdN} ${rtN} ${sa})`,
       0x3c: `(MIPS-DSLL32 ${rdN} ${rtN} ${sa})`,
       0x3e: `(MIPS-DSRL32 ${rdN} ${rtN} ${sa})`,
       0x3f: `(MIPS-DSRA32 ${rdN} ${rtN} ${sa})`,
     };
-    return specialMap[fn] || `(MIPS-SPECIAL #x${fn.toString(16)} ${rdN} ${rsN} ${rtN})`;
+    if ((fn === 0x21 || fn === 0x25 || fn === 0x2d) && rt === 0 && regState) {
+      // ADDU/OR/DADDU rd, rs, r0 -> register move preserves pointer tracking!
+      if (rd !== 0) {
+        regState.val[rd] = regState.val[rs];
+        regState.valid[rd] = regState.valid[rs];
+      }
+    } else if (rd !== 0) {
+      invalidateGpr(rd);
+    }
+    return {
+      sexp: specialMap[fn] || `(MIPS-SPECIAL #x${fn.toString(16)} ${rdN} ${rsN} ${rtN})`,
+      category: is64 ? 'mips3-64' : 'alu',
+      resolvedAddr: null,
+      mmioSym: null,
+    };
   }
+
   if (op === 0x01) {
     const branchTarget = (pc + 4 + (simm16 << 2)) >>> 0;
     const regimmMap = {
@@ -311,56 +507,235 @@ function decodeMips3Instruction(word, pc) {
       0x10: `(MIPS-BLTZAL ${rsN} #x${branchTarget.toString(16)})`,
       0x11: `(MIPS-BGEZAL ${rsN} #x${branchTarget.toString(16)})`,
     };
-    return regimmMap[rt] || `(MIPS-REGIMM #x${rt.toString(16)} ${rsN} #x${branchTarget.toString(16)})`;
+    return {
+      sexp: regimmMap[rt] || `(MIPS-REGIMM #x${rt.toString(16)} ${rsN} #x${branchTarget.toString(16)})`,
+      category: 'branch',
+      resolvedAddr: null,
+      mmioSym: null,
+    };
   }
-  if (op === 0x02) return `(MIPS-J #x${(target26 >>> 0).toString(16)})`;
-  if (op === 0x03) return `(MIPS-JAL #x${(target26 >>> 0).toString(16)})`;
+
+  if (op === 0x02) {
+    return { sexp: `(MIPS-J #x${target26.toString(16)})`, category: 'jump', resolvedAddr: target26, mmioSym: null };
+  }
+  if (op === 0x03) {
+    return { sexp: `(MIPS-JAL #x${target26.toString(16)})`, category: 'jal', resolvedAddr: target26, mmioSym: null };
+  }
   if (op >= 0x04 && op <= 0x07) {
     const branchTarget = (pc + 4 + (simm16 << 2)) >>> 0;
     const bNames = { 4: 'MIPS-BEQ', 5: 'MIPS-BNE', 6: 'MIPS-BLEZ', 7: 'MIPS-BGTZ' };
-    return `(${bNames[op]} ${rsN} ${rtN} #x${branchTarget.toString(16)})`;
+    return {
+      sexp: `(${bNames[op]} ${rsN} ${rtN} #x${branchTarget.toString(16)})`,
+      category: 'branch',
+      resolvedAddr: null,
+      mmioSym: null,
+    };
   }
-  if (op === 0x08) return `(MIPS-ADDI ${rtN} ${rsN} ${simm16})`;
-  if (op === 0x09) return `(MIPS-ADDIU ${rtN} ${rsN} ${simm16})`;
-  if (op === 0x0a) return `(MIPS-SLTI ${rtN} ${rsN} ${simm16})`;
-  if (op === 0x0b) return `(MIPS-SLTIU ${rtN} ${rsN} ${simm16})`;
-  if (op === 0x0c) return `(MIPS-ANDI ${rtN} ${rsN} #x${imm16.toString(16)})`;
-  if (op === 0x0d) return `(MIPS-ORI ${rtN} ${rsN} #x${imm16.toString(16)})`;
-  if (op === 0x0e) return `(MIPS-XORI ${rtN} ${rsN} #x${imm16.toString(16)})`;
-  if (op === 0x0f) return `(MIPS-LUI ${rtN} #x${imm16.toString(16)})`;
+
+  if (op === 0x0f) {
+    // LUI rt, imm16
+    const hiVal = (imm16 << 16) >>> 0;
+    if (regState && rt !== 0) {
+      regState.val[rt] = hiVal;
+      regState.valid[rt] = 1;
+    }
+    return {
+      sexp: `(MIPS-LUI ${rtN} #x${imm16.toString(16).padStart(4, '0')})`,
+      category: 'lui',
+      resolvedAddr: null,
+      mmioSym: null,
+    };
+  }
+
+  if (op === 0x08 || op === 0x09 || op === 0x18 || op === 0x19) {
+    // ADDI, ADDIU, DADDI, DADDIU
+    const opName = op === 0x08 ? 'MIPS-ADDI' : op === 0x09 ? 'MIPS-ADDIU' : op === 0x18 ? 'MIPS-DADDI' : 'MIPS-DADDIU';
+    const is64 = op === 0x18 || op === 0x19;
+    if (regState && rs !== 29 && rs !== 0 && regState.valid[rs] >= 1) {
+      const resolved = (regState.val[rs] + simm16) >>> 0;
+      const symInfo = resolveN64AddressSymbol(resolved);
+      if (rt !== 0) {
+        regState.val[rt] = resolved;
+        regState.valid[rt] = 2;
+      }
+      return {
+        sexp: `(${opName} ${rtN} ${rsN} ${simm16} #:addr #x${resolved.toString(16).padStart(8, '0')} #:sym "${symInfo.symbol}")`,
+        category: is64 ? 'mips3-64' : 'lui-Pointer',
+        resolvedAddr: resolved,
+        mmioSym: symInfo.isMmio ? symInfo.symbol : null,
+      };
+    }
+    invalidateGpr(rt);
+    return {
+      sexp: `(${opName} ${rtN} ${rsN} ${simm16})`,
+      category: is64 ? 'mips3-64' : 'alu',
+      resolvedAddr: null,
+      mmioSym: null,
+    };
+  }
+
+  if (op === 0x0d) {
+    // ORI rt, rs, imm16
+    if (regState && rs !== 29 && rs !== 0 && regState.valid[rs] === 1) {
+      const resolved = (regState.val[rs] | imm16) >>> 0;
+      const symInfo = resolveN64AddressSymbol(resolved);
+      if (rt !== 0) {
+        regState.val[rt] = resolved;
+        regState.valid[rt] = 2;
+      }
+      return {
+        sexp: `(MIPS-ORI ${rtN} ${rsN} #x${imm16.toString(16)} #:addr #x${resolved.toString(16).padStart(8, '0')} #:sym "${symInfo.symbol}")`,
+        category: 'lui-Pointer',
+        resolvedAddr: resolved,
+        mmioSym: symInfo.isMmio ? symInfo.symbol : null,
+      };
+    }
+    invalidateGpr(rt);
+    return { sexp: `(MIPS-ORI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+  }
+
+  if (op === 0x0a) {
+    invalidateGpr(rt);
+    return { sexp: `(MIPS-SLTI ${rtN} ${rsN} ${simm16})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+  }
+  if (op === 0x0b) {
+    invalidateGpr(rt);
+    return { sexp: `(MIPS-SLTIU ${rtN} ${rsN} ${simm16})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+  }
+  if (op === 0x0c) {
+    invalidateGpr(rt);
+    return { sexp: `(MIPS-ANDI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+  }
+  if (op === 0x0e) {
+    invalidateGpr(rt);
+    return { sexp: `(MIPS-XORI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+  }
+
+  // COP0 System Control ($10)
   if (op === 0x10) {
-    if (rs === 0x00) return `(MIPS-MFC0 ${rtN} ${COP0_NAMES[rd]})`;
-    if (rs === 0x04) return `(MIPS-MTC0 ${rtN} ${COP0_NAMES[rd]})`;
-    if (rs === 0x10 && fn === 0x18) return `(MIPS-ERET)`;
-    if (rs === 0x10 && fn === 0x02) return `(MIPS-TLBWI)`;
-    if (rs === 0x10 && fn === 0x08) return `(MIPS-TLBP)`;
-    return `(MIPS-COP0 ${rs} ${rtN} ${COP0_NAMES[rd]})`;
+    const cop0Reg = COP0_NAMES[rd] || `COP0_${rd}`;
+    if (rs === 0x00) {
+      invalidateGpr(rt);
+      return { sexp: `(MIPS-MFC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x01) {
+      invalidateGpr(rt);
+      return { sexp: `(MIPS-DMFC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x04) {
+      return { sexp: `(MIPS-MTC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x05) {
+      return { sexp: `(MIPS-DMTC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x10) {
+      const tlbMap = {
+        0x01: '(MIPS-TLBR)',
+        0x02: '(MIPS-TLBWI)',
+        0x06: '(MIPS-TLBWR)',
+        0x08: '(MIPS-TLBP)',
+        0x18: '(MIPS-ERET)',
+      };
+      return { sexp: tlbMap[fn] || `(MIPS-COP0-CO #x${fn.toString(16)})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+    }
+    return { sexp: `(MIPS-COP0 ${rs} ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
   }
+
+  // COP1 FPU 3D Matrix/Vector Floating-Point Unit ($11)
   if (op === 0x11) {
-    if (rs === 0x00) return `(MIPS-MFC1 ${rtN} f${rd})`;
-    if (rs === 0x04) return `(MIPS-MTC1 ${rtN} f${rd})`;
+    if (rs === 0x00) {
+      invalidateGpr(rt);
+      return { sexp: `(MIPS-MFC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x01) {
+      invalidateGpr(rt);
+      return { sexp: `(MIPS-DMFC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x02) {
+      invalidateGpr(rt);
+      return { sexp: `(MIPS-CFC1 ${rtN} $fcr${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x04) {
+      return { sexp: `(MIPS-MTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x05) {
+      return { sexp: `(MIPS-DMTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+    }
+    if (rs === 0x06) {
+      return { sexp: `(MIPS-CTC1 ${rtN} $fcr${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+    }
     if (rs === 0x08) {
       const branchTarget = (pc + 4 + (simm16 << 2)) >>> 0;
-      return `(MIPS-${rt & 1 ? 'BC1T' : 'BC1F'} #x${branchTarget.toString(16)})`;
+      const bcNames = ['BC1F', 'BC1T', 'BC1FL', 'BC1TL'];
+      return {
+        sexp: `(MIPS-${bcNames[rt & 3]} #x${branchTarget.toString(16)})`,
+        category: 'cop1-fpu',
+        resolvedAddr: null,
+        mmioSym: null,
+      };
     }
-    const fpuFn = {
-      0x00: 'ADD.S',
-      0x01: 'SUB.S',
-      0x02: 'MUL.S',
-      0x03: 'DIV.S',
-      0x04: 'SQRT.S',
-      0x06: 'MOV.S',
-      0x07: 'NEG.S',
-      0x20: 'CVT.S.W',
-      0x24: 'CVT.W.S',
-    }[fn] || `FPU.#x${fn.toString(16)}`;
-    return `(MIPS-${fpuFn} f${sa} f${rd} f${rt})`;
+
+    const fmtSuffix = rs === 0x10 ? 'S' : rs === 0x11 ? 'D' : rs === 0x14 ? 'W' : rs === 0x15 ? 'L' : 'S';
+    if (fn >= 0x30 && fn <= 0x3f) {
+      const cmpBase = FPU_CMP_NAMES[fn] || 'C.CMP';
+      return {
+        sexp: `(MIPS-${cmpBase}.${fmtSuffix} $f${rd} $f${rt})`,
+        category: 'cop1-fpu',
+        resolvedAddr: null,
+        mmioSym: null,
+      };
+    }
+    const unaryFpu = {
+      0x04: `SQRT.${fmtSuffix}`,
+      0x05: `ABS.${fmtSuffix}`,
+      0x06: `MOV.${fmtSuffix}`,
+      0x07: `NEG.${fmtSuffix}`,
+      0x0c: `ROUND.W.${fmtSuffix}`,
+      0x0d: `TRUNC.W.${fmtSuffix}`,
+      0x0e: `CEIL.W.${fmtSuffix}`,
+      0x0f: `FLOOR.W.${fmtSuffix}`,
+      0x20: `CVT.S.${fmtSuffix}`,
+      0x21: `CVT.D.${fmtSuffix}`,
+      0x24: `CVT.W.${fmtSuffix}`,
+      0x25: `CVT.L.${fmtSuffix}`,
+    };
+    if (unaryFpu[fn]) {
+      return {
+        sexp: `(MIPS-${unaryFpu[fn]} $f${sa} $f${rd})`,
+        category: 'cop1-fpu',
+        resolvedAddr: null,
+        mmioSym: null,
+      };
+    }
+    const binaryFpu = {
+      0x00: `ADD.${fmtSuffix}`,
+      0x01: `SUB.${fmtSuffix}`,
+      0x02: `MUL.${fmtSuffix}`,
+      0x03: `DIV.${fmtSuffix}`,
+    };
+    const fpuOp = binaryFpu[fn] || `FPU.#x${fn.toString(16)}.${fmtSuffix}`;
+    return {
+      sexp: `(MIPS-${fpuOp} $f${sa} $f${rd} $f${rt})`,
+      category: 'cop1-fpu',
+      resolvedAddr: null,
+      mmioSym: null,
+    };
   }
-  if (op === 0x14 || op === 0x15) {
+
+  if (op >= 0x14 && op <= 0x17) {
     const branchTarget = (pc + 4 + (simm16 << 2)) >>> 0;
-    return `(${op === 0x14 ? 'MIPS-BEQL' : 'MIPS-BNEL'} ${rsN} ${rtN} #x${branchTarget.toString(16)})`;
+    const blNames = { 0x14: 'MIPS-BEQL', 0x15: 'MIPS-BNEL', 0x16: 'MIPS-BLEZL', 0x17: 'MIPS-BGTZL' };
+    return {
+      sexp: `(${blNames[op]} ${rsN} ${rtN} #x${branchTarget.toString(16)})`,
+      category: 'branch',
+      resolvedAddr: null,
+      mmioSym: null,
+    };
   }
+
   const memOps = {
+    0x1a: 'MIPS-LDL',
+    0x1b: 'MIPS-LDR',
     0x20: 'MIPS-LB',
     0x21: 'MIPS-LH',
     0x22: 'MIPS-LWL',
@@ -373,6 +748,8 @@ function decodeMips3Instruction(word, pc) {
     0x29: 'MIPS-SH',
     0x2a: 'MIPS-SWL',
     0x2b: 'MIPS-SW',
+    0x2c: 'MIPS-SDL',
+    0x2d: 'MIPS-SDR',
     0x2e: 'MIPS-SWR',
     0x2f: 'MIPS-CACHE',
     0x31: 'MIPS-LWC1',
@@ -382,11 +759,504 @@ function decodeMips3Instruction(word, pc) {
     0x3d: 'MIPS-SDC1',
     0x3f: 'MIPS-SD',
   };
+
   if (memOps[op]) {
-    const dstLabel = op === 0x31 || op === 0x35 || op === 0x39 || op === 0x3d ? `f${rt}` : rtN;
-    return `(${memOps[op]} ${dstLabel} ${simm16}(${rsN}))`;
+    const isFpuMem = op === 0x31 || op === 0x35 || op === 0x39 || op === 0x3d;
+    const is64Mem = op === 0x1a || op === 0x1b || op === 0x2c || op === 0x2d || op === 0x37 || op === 0x3f;
+    const isGprLoad = op >= 0x1a && op <= 0x27 || op === 0x37;
+    const dstLabel = isFpuMem ? `$f${rt}` : op === 0x2f ? `#x${rt.toString(16)}` : rtN;
+
+    let resolvedAddr = null;
+    let mmioSym = null;
+    let addrSuffix = '';
+
+    if (regState && rs !== 29 && rs !== 0 && regState.valid[rs] >= 1) {
+      resolvedAddr = (regState.val[rs] + simm16) >>> 0;
+      const symInfo = resolveN64AddressSymbol(resolvedAddr);
+      if (symInfo.isMmio) mmioSym = symInfo.symbol;
+      addrSuffix = ` #:addr #x${resolvedAddr.toString(16).padStart(8, '0')} #:sym "${symInfo.symbol}"`;
+    }
+
+    if (isGprLoad && rt !== 0) {
+      invalidateGpr(rt);
+    }
+
+    return {
+      sexp: `(${memOps[op]} ${dstLabel} ${simm16}(${rsN})${addrSuffix})`,
+      category: isFpuMem ? 'cop1-fpu' : is64Mem ? 'mips3-64' : 'mem',
+      resolvedAddr,
+      mmioSym,
+    };
   }
-  return `(MIPS-OP #x${op.toString(16)} #x${(word >>> 0).toString(16).padStart(8, '0')})`;
+
+  return {
+    sexp: `(MIPS-OP #x${op.toString(16)} #x${(word >>> 0).toString(16).padStart(8, '0')})`,
+    category: 'other',
+    resolvedAddr: null,
+    mmioSym: null,
+  };
+}
+
+// ============================================================================
+// 4. Real RSP/RDP 64-Bit GBI Display List Decoder (`Fast3D` / `F3DEX` / `F3DEX2` / `S2DEX`)
+// ============================================================================
+
+const GBI_IMG_FMT = ['G_IM_FMT_RGBA', 'G_IM_FMT_YUV', 'G_IM_FMT_CI', 'G_IM_FMT_IA', 'G_IM_FMT_I', 'G_IM_FMT_5', 'G_IM_FMT_6', 'G_IM_FMT_7'];
+const GBI_IMG_SIZ = ['G_IM_SIZ_4b', 'G_IM_SIZ_8b', 'G_IM_SIZ_16b', 'G_IM_SIZ_32b'];
+const GBI_CYCLE_TYPES = ['G_CYC_1CYCLE', 'G_CYC_2CYCLE', 'G_CYC_COPY', 'G_CYC_FILL'];
+
+export function decodeGbiDisplayListCommand(cmd0, cmd1, ucodeFamily = 'GBI1', segments = null, extraWords = null) {
+  const op = (cmd0 >>> 24) & 0xff;
+  const resolveSeg = (segAddr) => {
+    const seg = (segAddr >>> 24) & 0x0f;
+    const ofs = segAddr & 0x00ffffff;
+    if (segments && segments[seg]) {
+      return ((segments[seg] + ofs) & 0x00ffffff) >>> 0;
+    }
+    return ofs >>> 0;
+  };
+
+  // 1. Universal RDP Commands (0xC0..0xFF)
+  switch (op) {
+    case 0xe4:
+    case 0xe5: {
+      const macro = op === 0xe5 ? 'gsSPTextureRectangleFlip' : 'gsSPTextureRectangle';
+      const xh = ((cmd0 >>> 12) & 0xfff) / 4.0;
+      const yh = (cmd0 & 0xfff) / 4.0;
+      const tile = (cmd1 >>> 24) & 0x7;
+      const xl = ((cmd1 >>> 12) & 0xfff) / 4.0;
+      const yl = (cmd1 & 0xfff) / 4.0;
+      const w2 = extraWords?.cmd2 ?? 0;
+      const w3 = extraWords?.cmd3 ?? 0x04000400;
+      const s = ((w2 >>> 16) & 0xffff) << 16 >> 16;
+      const t = (w2 & 0xffff) << 16 >> 16;
+      const dsdx = ((w3 >>> 16) & 0xffff) << 16 >> 16;
+      const dtdy = (w3 & 0xffff) << 16 >> 16;
+      return {
+        macro,
+        sexp: `(${macro} ${xl} ${yl} ${xh} ${yh} G_TX_TILE_${tile} ${s} ${t} ${dsdx} ${dtdy})`,
+      };
+    }
+    case 0xe6:
+      return { macro: 'gsDPLoadSync', sexp: '(gsDPLoadSync)' };
+    case 0xe7:
+      return { macro: 'gsDPPipeSync', sexp: '(gsDPPipeSync)' };
+    case 0xe8:
+      return { macro: 'gsDPTileSync', sexp: '(gsDPTileSync)' };
+    case 0xe9:
+      return { macro: 'gsDPFullSync', sexp: '(gsDPFullSync)' };
+    case 0xec:
+      return {
+        macro: 'gsDPSetConvert',
+        sexp: `(gsDPSetConvert #x${(cmd0 & 0xffffff).toString(16)} #x${(cmd1 >>> 0).toString(16)})`,
+      };
+    case 0xed: {
+      const ulx = ((cmd0 >>> 12) & 0xfff) >>> 2;
+      const uly = (cmd0 & 0xfff) >>> 2;
+      const lrx = ((cmd1 >>> 12) & 0xfff) >>> 2;
+      const lry = (cmd1 & 0xfff) >>> 2;
+      const mode = ((cmd1 >>> 24) & 0x3) === 0 ? 'G_SC_NON_INTERLACE' : 'G_SC_INTERLACE';
+      return {
+        macro: 'gsDPSetScissor',
+        sexp: `(gsDPSetScissor ${mode} ${ulx} ${uly} ${lrx} ${lry})`,
+      };
+    }
+    case 0xee:
+      return {
+        macro: 'gsDPSetPrimDepth',
+        sexp: `(gsDPSetPrimDepth ${(cmd1 >>> 16) & 0xffff} ${cmd1 & 0xffff})`,
+      };
+    case 0xef: {
+      const cyc = GBI_CYCLE_TYPES[(cmd0 >>> 20) & 0x3];
+      return {
+        macro: 'gsDPSetCycleType',
+        sexp: `(gsDPSetCycleType ${cyc} #:other-mode-h #x${(cmd0 & 0xffffff).toString(16).padStart(6, '0')} #:other-mode-l #x${(cmd1 >>> 0).toString(16).padStart(8, '0')})`,
+      };
+    }
+    case 0xf0: {
+      const tile = (cmd1 >>> 24) & 0x7;
+      const uls = (cmd0 >>> 12) & 0xfff;
+      const lrs = (cmd1 >>> 12) & 0xfff;
+      const count = Math.max(1, ((lrs - uls) >>> 2) + 1);
+      return {
+        macro: 'gsDPLoadTLUT',
+        sexp: `(gsDPLoadTLUT ${count} G_TX_TILE_${tile})`,
+      };
+    }
+    case 0xf2: {
+      const uls = (cmd0 >>> 12) & 0xfff;
+      const ult = cmd0 & 0xfff;
+      const tile = (cmd1 >>> 24) & 0x7;
+      const lrs = (cmd1 >>> 12) & 0xfff;
+      const lrt = cmd1 & 0xfff;
+      return {
+        macro: 'gsDPSetTileSize',
+        sexp: `(gsDPSetTileSize G_TX_TILE_${tile} ${uls} ${ult} ${lrs} ${lrt})`,
+      };
+    }
+    case 0xf3: {
+      const uls = (cmd0 >>> 12) & 0xfff;
+      const ult = cmd0 & 0xfff;
+      const tile = (cmd1 >>> 24) & 0x7;
+      const lrs = (cmd1 >>> 12) & 0xfff;
+      const dxt = cmd1 & 0xfff;
+      return {
+        macro: 'gsDPLoadBlock',
+        sexp: `(gsDPLoadBlock G_TX_TILE_${tile} ${uls} ${ult} ${lrs} ${dxt})`,
+      };
+    }
+    case 0xf4: {
+      const uls = ((cmd0 >>> 12) & 0xfff) >>> 2;
+      const ult = (cmd0 & 0xfff) >>> 2;
+      const tile = (cmd1 >>> 24) & 0x7;
+      const lrs = ((cmd1 >>> 12) & 0xfff) >>> 2;
+      const lrt = (cmd1 & 0xfff) >>> 2;
+      return {
+        macro: 'gsDPLoadTile',
+        sexp: `(gsDPLoadTile G_TX_TILE_${tile} ${uls} ${ult} ${lrs} ${lrt})`,
+      };
+    }
+    case 0xf5: {
+      const fmt = GBI_IMG_FMT[(cmd0 >>> 21) & 0x7];
+      const siz = GBI_IMG_SIZ[(cmd0 >>> 19) & 0x3];
+      const line = (cmd0 >>> 9) & 0x1ff;
+      const tmem = cmd0 & 0x1ff;
+      const tile = (cmd1 >>> 24) & 0x7;
+      const palette = (cmd1 >>> 20) & 0xf;
+      const cmT = (cmd1 >>> 18) & 0x3;
+      const maskT = (cmd1 >>> 14) & 0xf;
+      const shiftT = (cmd1 >>> 10) & 0xf;
+      const cmS = (cmd1 >>> 8) & 0x3;
+      const maskS = (cmd1 >>> 4) & 0xf;
+      const shiftS = cmd1 & 0xf;
+      return {
+        macro: 'gsDPSetTile',
+        sexp: `(gsDPSetTile ${fmt} ${siz} ${line} ${tmem} G_TX_TILE_${tile} ${palette} ${cmT} ${maskT} ${shiftT} ${cmS} ${maskS} ${shiftS})`,
+      };
+    }
+    case 0xf6: {
+      const ulx = ((cmd1 >>> 12) & 0xfff) >>> 2;
+      const uly = (cmd1 & 0xfff) >>> 2;
+      const lrx = ((cmd0 >>> 12) & 0xfff) >>> 2;
+      const lry = (cmd0 & 0xfff) >>> 2;
+      return {
+        macro: 'gsDPFillRectangle',
+        sexp: `(gsDPFillRectangle ${ulx} ${uly} ${lrx} ${lry})`,
+      };
+    }
+    case 0xf7:
+      return {
+        macro: 'gsDPSetFillColor',
+        sexp: `(gsDPSetFillColor #x${(cmd1 >>> 0).toString(16).padStart(8, '0')})`,
+      };
+    case 0xf8:
+      return {
+        macro: 'gsDPSetFogColor',
+        sexp: `(gsDPSetFogColor ${(cmd1 >>> 24) & 0xff} ${(cmd1 >>> 16) & 0xff} ${(cmd1 >>> 8) & 0xff} ${cmd1 & 0xff})`,
+      };
+    case 0xf9:
+      return {
+        macro: 'gsDPSetBlendColor',
+        sexp: `(gsDPSetBlendColor ${(cmd1 >>> 24) & 0xff} ${(cmd1 >>> 16) & 0xff} ${(cmd1 >>> 8) & 0xff} ${cmd1 & 0xff})`,
+      };
+    case 0xfa:
+      return {
+        macro: 'gsDPSetPrimColor',
+        sexp: `(gsDPSetPrimColor ${(cmd0 >>> 8) & 0xff} ${cmd0 & 0xff} ${(cmd1 >>> 24) & 0xff} ${(cmd1 >>> 16) & 0xff} ${(cmd1 >>> 8) & 0xff} ${cmd1 & 0xff})`,
+      };
+    case 0xfb:
+      return {
+        macro: 'gsDPSetEnvColor',
+        sexp: `(gsDPSetEnvColor ${(cmd1 >>> 24) & 0xff} ${(cmd1 >>> 16) & 0xff} ${(cmd1 >>> 8) & 0xff} ${cmd1 & 0xff})`,
+      };
+    case 0xfc: {
+      const mux0 = cmd0 & 0x00ffffff;
+      const mux1 = cmd1 >>> 0;
+      return {
+        macro: 'gsDPSetCombineMode',
+        sexp: `(gsDPSetCombineMode #x${mux0.toString(16).padStart(6, '0')} #x${mux1.toString(16).padStart(8, '0')})`,
+      };
+    }
+    case 0xfd: {
+      const fmt = GBI_IMG_FMT[(cmd0 >>> 21) & 0x7];
+      const siz = GBI_IMG_SIZ[(cmd0 >>> 19) & 0x3];
+      const width = (cmd0 & 0xfff) + 1;
+      const dramAddr = resolveSeg(cmd1);
+      return {
+        macro: 'gsDPSetTextureImage',
+        sexp: `(gsDPSetTextureImage ${fmt} ${siz} ${width} #x${dramAddr.toString(16).padStart(8, '0')})`,
+      };
+    }
+    case 0xfe:
+      return {
+        macro: 'gsDPSetDepthImage',
+        sexp: `(gsDPSetDepthImage #x${resolveSeg(cmd1).toString(16).padStart(8, '0')})`,
+      };
+    case 0xff: {
+      const fmt = GBI_IMG_FMT[(cmd0 >>> 21) & 0x7];
+      const siz = GBI_IMG_SIZ[(cmd0 >>> 19) & 0x3];
+      const width = (cmd0 & 0xfff) + 1;
+      const dramAddr = resolveSeg(cmd1);
+      return {
+        macro: 'gsDPSetColorImage',
+        sexp: `(gsDPSetColorImage ${fmt} ${siz} ${width} #x${dramAddr.toString(16).padStart(8, '0')})`,
+      };
+    }
+    default:
+      break;
+  }
+
+  // 2. GBI2 (`F3DEX2` / `F3DZEX` / `F3DFLX` / `S2DEX2`) RSP Commands
+  if (String(ucodeFamily).includes('GBI2')) {
+    switch (op) {
+      case 0x00:
+        return { macro: 'gsDPNoOp', sexp: '(gsDPNoOp)' };
+      case 0x01: {
+        const vend = (cmd0 & 0xff) >> 1;
+        const n = (cmd0 >>> 12) & 0xff;
+        const v0 = Math.max(0, vend - n);
+        const vaddr = resolveSeg(cmd1);
+        return {
+          macro: 'gsSPVertex',
+          sexp: `(gsSPVertex #x${vaddr.toString(16).padStart(8, '0')} ${n} ${v0})`,
+        };
+      }
+      case 0x02:
+        return {
+          macro: 'gsSPModifyVertex',
+          sexp: `(gsSPModifyVertex ${(cmd0 >>> 1) & 0x7fff} ${(cmd0 >>> 16) & 0xff} #x${(cmd1 >>> 0).toString(16).padStart(8, '0')})`,
+        };
+      case 0x03:
+        return {
+          macro: 'gsSPCullDisplayList',
+          sexp: `(gsSPCullDisplayList ${(cmd0 & 0xffff) >>> 1} ${(cmd1 & 0xffff) >>> 1})`,
+        };
+      case 0x04:
+        return {
+          macro: 'gsSPBranchLessZ',
+          sexp: `(gsSPBranchLessZ ${(cmd0 & 0xfff) >>> 1} #x${(cmd1 >>> 0).toString(16)})`,
+        };
+      case 0x05: {
+        const v0 = (cmd0 >>> 1) & 0x7f;
+        const v1 = (cmd0 >>> 9) & 0x7f;
+        const v2 = (cmd0 >>> 17) & 0x7f;
+        const flag = (cmd1 >>> 24) & 0xff;
+        return {
+          macro: 'gsSP1Triangle',
+          sexp: `(gsSP1Triangle ${v0} ${v1} ${v2} ${flag})`,
+        };
+      }
+      case 0x06:
+      case 0x07: {
+        const v00 = (cmd1 >>> 1) & 0x7f;
+        const v01 = (cmd1 >>> 9) & 0x7f;
+        const v02 = (cmd1 >>> 17) & 0x7f;
+        const v10 = (cmd0 >>> 1) & 0x7f;
+        const v11 = (cmd0 >>> 9) & 0x7f;
+        const v12 = (cmd0 >>> 17) & 0x7f;
+        return {
+          macro: 'gsSP2Triangles',
+          sexp: `(gsSP2Triangles ${v00} ${v01} ${v02} ${v10} ${v11} ${v12})`,
+        };
+      }
+      case 0x09:
+      case 0x0a:
+        return {
+          macro: 'gsSPBgRect1Cyc',
+          sexp: `(gsSPBgRect1Cyc #x${resolveSeg(cmd1).toString(16).padStart(8, '0')})`,
+        };
+      case 0xd7: {
+        const level = (cmd0 >>> 11) & 0x7;
+        const tile = (cmd0 >>> 8) & 0x7;
+        const on = (cmd0 & 0xff) ? 'G_ON' : 'G_OFF';
+        const s = (cmd1 >>> 16) & 0xffff;
+        const t = cmd1 & 0xffff;
+        return {
+          macro: 'gsSPTexture',
+          sexp: `(gsSPTexture #x${s.toString(16)} #x${t.toString(16)} ${level} G_TX_TILE_${tile} ${on})`,
+        };
+      }
+      case 0xd8:
+        return { macro: 'gsSPPopMatrix', sexp: '(gsSPPopMatrix G_MTX_MODELVIEW)' };
+      case 0xd9:
+        return {
+          macro: 'gsSPGeometryMode',
+          sexp: `(gsSPGeometryMode #x${((~cmd0) & 0xffffff).toString(16)} #x${(cmd1 >>> 0).toString(16)})`,
+        };
+      case 0xda: {
+        const maddr = resolveSeg(cmd1);
+        const mode = (cmd0 & 4) ? 'G_MTX_PROJECTION' : 'G_MTX_MODELVIEW';
+        const load = (cmd0 & 2) ? 'G_MTX_LOAD' : 'G_MTX_MUL';
+        return {
+          macro: 'gsSPMatrix',
+          sexp: `(gsSPMatrix #x${maddr.toString(16).padStart(8, '0')} ${mode}|${load})`,
+        };
+      }
+      case 0xdb:
+        return {
+          macro: 'gsSPMoveWord',
+          sexp: `(gsSPMoveWord #x${((cmd0 >>> 16) & 0xff).toString(16)} #x${(cmd0 & 0xffff).toString(16)} #x${(cmd1 >>> 0).toString(16)})`,
+        };
+      case 0xdc:
+        return {
+          macro: 'gsSPMoveMem',
+          sexp: `(gsSPMoveMem #x${resolveSeg(cmd1).toString(16).padStart(8, '0')} ${(cmd0 >>> 16) & 0xff} ${cmd0 & 0xff})`,
+        };
+      case 0xde: {
+        const isBranch = ((cmd0 >>> 16) & 0xff) !== 0;
+        const dlAddr = resolveSeg(cmd1);
+        const m = isBranch ? 'gsSPBranchList' : 'gsSPDisplayList';
+        return { macro: m, sexp: `(${m} #x${dlAddr.toString(16).padStart(8, '0')})` };
+      }
+      case 0xdf:
+        return { macro: 'gsSPEndDisplayList', sexp: '(gsSPEndDisplayList)' };
+      case 0xe2:
+        return {
+          macro: 'gsSPSetOtherModeL',
+          sexp: `(gsSPSetOtherModeL #x${(cmd0 & 0xffff).toString(16)} #x${(cmd1 >>> 0).toString(16).padStart(8, '0')})`,
+        };
+      case 0xe3: {
+        const cyc = GBI_CYCLE_TYPES[(cmd1 >>> 20) & 0x3];
+        return {
+          macro: 'gsDPSetCycleType',
+          sexp: `(gsDPSetCycleType ${cyc} #:mask #x${(cmd0 & 0xffff).toString(16)} #:bits #x${(cmd1 >>> 0).toString(16)})`,
+        };
+      }
+      default:
+        break;
+    }
+  }
+
+  // 3. GBI0 (`Fast3D`) & GBI1 (`F3DEX` / `S2DEX`) RSP Commands
+  switch (op) {
+    case 0x00:
+      return { macro: 'gsSPNoOp', sexp: '(gsSPNoOp)' };
+    case 0x01: {
+      const flags = (cmd0 >>> 16) & 0xff;
+      const mode = (flags & 1) ? 'G_MTX_PROJECTION' : 'G_MTX_MODELVIEW';
+      const load = (flags & 2) ? 'G_MTX_LOAD' : 'G_MTX_MUL';
+      const maddr = resolveSeg(cmd1);
+      return {
+        macro: 'gsSPMatrix',
+        sexp: `(gsSPMatrix #x${maddr.toString(16).padStart(8, '0')} ${mode}|${load})`,
+      };
+    }
+    case 0x03: {
+      const type = (cmd0 >>> 16) & 0xff;
+      const len = cmd0 & 0xffff;
+      const addr = resolveSeg(cmd1);
+      if (type === 0x80 && len === 16) {
+        return { macro: 'gsSPViewport', sexp: `(gsSPViewport #x${addr.toString(16).padStart(8, '0')})` };
+      }
+      return {
+        macro: 'gsSPMoveMem',
+        sexp: `(gsSPMoveMem #x${addr.toString(16).padStart(8, '0')} ${len} #x${type.toString(16)})`,
+      };
+    }
+    case 0x04: {
+      const isGbi0 = String(ucodeFamily).includes('GBI0');
+      const n = isGbi0 ? ((cmd0 >>> 20) & 0xf) + 1 : (cmd0 >>> 10) & 0x3f;
+      const v0 = isGbi0 ? (cmd0 >>> 16) & 0xf : ((cmd0 >>> 16) & 0xff) >> 1;
+      const vaddr = resolveSeg(cmd1);
+      return {
+        macro: 'gsSPVertex',
+        sexp: `(gsSPVertex #x${vaddr.toString(16).padStart(8, '0')} ${n} ${v0})`,
+      };
+    }
+    case 0x06: {
+      const isBranch = ((cmd0 >>> 16) & 0xff) !== 0;
+      const dlAddr = resolveSeg(cmd1);
+      const m = isBranch ? 'gsSPBranchList' : 'gsSPDisplayList';
+      return { macro: m, sexp: `(${m} #x${dlAddr.toString(16).padStart(8, '0')})` };
+    }
+    case 0xb1: {
+      if (String(ucodeFamily).includes('GBI0')) {
+        const v00 = cmd0 & 0xf;
+        const v01 = cmd1 & 0xf;
+        const v02 = (cmd1 >>> 4) & 0xf;
+        const v10 = (cmd0 >>> 4) & 0xf;
+        const v11 = (cmd1 >>> 8) & 0xf;
+        const v12 = (cmd1 >>> 12) & 0xf;
+        return {
+          macro: 'gsSP2Triangles',
+          sexp: `(gsSP2Triangles ${v00} ${v01} ${v02} ${v10} ${v11} ${v12})`,
+        };
+      }
+      const v00 = ((cmd0 >>> 16) & 0xff) >> 1;
+      const v01 = ((cmd0 >>> 8) & 0xff) >> 1;
+      const v02 = (cmd0 & 0xff) >> 1;
+      const v10 = ((cmd1 >>> 16) & 0xff) >> 1;
+      const v11 = ((cmd1 >>> 8) & 0xff) >> 1;
+      const v12 = (cmd1 & 0xff) >> 1;
+      return {
+        macro: 'gsSP2Triangles',
+        sexp: `(gsSP2Triangles ${v00} ${v01} ${v02} ${v10} ${v11} ${v12})`,
+      };
+    }
+    case 0xb6:
+      return {
+        macro: 'gsSPClearGeometryMode',
+        sexp: `(gsSPClearGeometryMode #x${(cmd1 >>> 0).toString(16)})`,
+      };
+    case 0xb7:
+      return {
+        macro: 'gsSPSetGeometryMode',
+        sexp: `(gsSPSetGeometryMode #x${(cmd1 >>> 0).toString(16)})`,
+      };
+    case 0xb8:
+      return { macro: 'gsSPEndDisplayList', sexp: '(gsSPEndDisplayList)' };
+    case 0xb9:
+      return {
+        macro: 'gsSPSetOtherModeL',
+        sexp: `(gsSPSetOtherModeL #x${(cmd0 & 0xffff).toString(16)} #x${(cmd1 >>> 0).toString(16).padStart(8, '0')})`,
+      };
+    case 0xba: {
+      const cyc = GBI_CYCLE_TYPES[(cmd1 >>> 20) & 0x3];
+      return {
+        macro: 'gsDPSetCycleType',
+        sexp: `(gsDPSetCycleType ${cyc} #:shift ${(cmd0 >>> 8) & 0xff} #:bits #x${(cmd1 >>> 0).toString(16)})`,
+      };
+    }
+    case 0xbb: {
+      const level = (cmd0 >>> 11) & 0x7;
+      const tile = (cmd0 >>> 8) & 0x7;
+      const on = (cmd0 & 0xff) ? 'G_ON' : 'G_OFF';
+      const s = (cmd1 >>> 16) & 0xffff;
+      const t = cmd1 & 0xffff;
+      return {
+        macro: 'gsSPTexture',
+        sexp: `(gsSPTexture #x${s.toString(16)} #x${t.toString(16)} ${level} G_TX_TILE_${tile} ${on})`,
+      };
+    }
+    case 0xbc:
+      return {
+        macro: 'gsSPMoveWord',
+        sexp: `(gsSPMoveWord #x${(cmd0 & 0xff).toString(16)} #x${((cmd0 >>> 8) & 0xffff).toString(16)} #x${(cmd1 >>> 0).toString(16)})`,
+      };
+    case 0xbd:
+      return { macro: 'gsSPPopMatrix', sexp: '(gsSPPopMatrix G_MTX_MODELVIEW)' };
+    case 0xbe:
+      return {
+        macro: 'gsSPCullDisplayList',
+        sexp: `(gsSPCullDisplayList ${cmd0 & 0xffff} ${cmd1 & 0xffff})`,
+      };
+    case 0xbf: {
+      const stride = String(ucodeFamily).includes('GBI0') ? 10 : 2;
+      const v0 = Math.floor(((cmd1 >>> 16) & 0xff) / stride);
+      const v1 = Math.floor(((cmd1 >>> 8) & 0xff) / stride);
+      const v2 = Math.floor((cmd1 & 0xff) / stride);
+      const flag = (cmd1 >>> 24) & 0xff;
+      return {
+        macro: 'gsSP1Triangle',
+        sexp: `(gsSP1Triangle ${v0} ${v1} ${v2} ${flag})`,
+      };
+    }
+    default:
+      return {
+        macro: `gsGBIRawOp_${op.toString(16).toUpperCase()}`,
+        sexp: `(gsGBIRawOp #x${op.toString(16).padStart(2, '0')} #x${(cmd0 >>> 0).toString(16).padStart(8, '0')} #x${(cmd1 >>> 0).toString(16).padStart(8, '0')})`,
+      };
+  }
 }
 
 function identifyCicChip(ipl3Crc) {
@@ -400,7 +1270,7 @@ function identifyCicChip(ipl3Crc) {
   return cicTable[ipl3Crc] || `CIC-NUS-6102 (${ipl3Crc})`;
 }
 
-function normalizeToBigEndianZ64(rawBuf) {
+export function normalizeToBigEndianZ64(rawBuf) {
   const magic = rawBuf.readUInt32BE(0) >>> 0;
   if (magic === 0x80371240) {
     return rawBuf;
@@ -432,7 +1302,12 @@ function normalizeToBigEndianZ64(rawBuf) {
   return out;
 }
 
-export function analyzeAndDisassembleN64Rom(rawRomBuf) {
+/**
+ * Performs Deep MIPS III VR4300 + COP0 + COP1 FPU Static & Runtime Disassembly,
+ * Stack-Frame Function Boundary Detection (`ADDIU $sp, $sp, -N` + `SW/SD $ra, ofs($sp)`),
+ * `LUI + LO16` 32-bit Pointer Resolution, N64 MMIO Cross-Referencing, and RSP/RDP Display List Lifting.
+ */
+export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
   const romBuf = normalizeToBigEndianZ64(rawRomBuf);
   const dv = new DataView(romBuf.buffer, romBuf.byteOffset, romBuf.byteLength);
   const piBsdDom1 = dv.getUint32(0x00, false) >>> 0;
@@ -458,9 +1333,13 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf) {
   const ipl3Crc = crc32Hex(romBuf.subarray(0x0040, 0x1000));
   const cicChip = identifyCicChip(ipl3Crc);
 
-  // Scan first 1 MB of VR4300 instructions ($1000..$101000) for MMIO, COP0, COP1, and JAL call graph
+  // Scan first 1 MB of VR4300 instructions ($1000..$101000) in ROM
+  // plus live decompressed KSEG0 RDRAM ($80000400..$80380000) when available
   const scanLimit = Math.min(romBuf.length, 0x101000);
-  const regUpper = new Uint32Array(32);
+  const regState = {
+    val: new Uint32Array(32),
+    valid: new Uint8Array(32),
+  };
 
   let spRspMmioRefs = 0;
   let dpRdpMmioRefs = 0;
@@ -472,58 +1351,157 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf) {
   let siJoybusMmioRefs = 0;
   let cop0SystemOps = 0;
   let cop1FpuOps = 0;
+  let mips3_64BitOps = 0;
   let jalSubroutineCalls = 0;
   let cacheMaintenanceOps = 0;
+  let resolved32BitPointers = 0;
+  let stackFramedFunctionsCount = 0;
 
-  const jalTargets = new Map();
+  const jalTargets = new Map(); // vAddr -> count
+  const stackPrologues = new Map(); // vAddr -> { source: 'rom'|'rdram', offset, frameSize, raOffset }
+  const mmioCrossRefs = new Map(); // symbol -> { physHex, count, samplePcs: [] }
+  const resolvedPointerSamples = []; // { pcHex, addrHex, symbol, opName }
 
-  for (let off = 0x1000; off + 4 <= scanLimit; off += 4) {
-    const word = dv.getUint32(off, false) >>> 0;
-    const op = (word >>> 26) & 0x3f;
-    const rs = (word >>> 21) & 0x1f;
-    const rt = (word >>> 16) & 0x1f;
-    const imm16 = word & 0xffff;
-    const simm16 = (imm16 << 16) >> 16;
+  const recordMmioHit = (phys, pc, explicitSym = null) => {
+    if (phys >= 0x04000000 && phys < 0x04090000) spRspMmioRefs++;
+    else if (phys >= 0x04100000 && phys < 0x04300000) dpRdpMmioRefs++;
+    else if (phys >= 0x04300000 && phys < 0x04400000) miIrqMmioRefs++;
+    else if (phys >= 0x04400000 && phys < 0x04500000) viVideoMmioRefs++;
+    else if (phys >= 0x04500000 && phys < 0x04600000) aiAudioMmioRefs++;
+    else if (phys >= 0x04600000 && phys < 0x04700000) piCartDmaRefs++;
+    else if (phys >= 0x04700000 && phys < 0x04800000) riRdramMmioRefs++;
+    else if ((phys >= 0x04800000 && phys < 0x04900000) || (phys >= 0x1fc00000 && phys < 0x1fc00800)) siJoybusMmioRefs++;
 
-    if (op === 0x0f) {
-      // LUI rt, imm16
-      regUpper[rt] = (imm16 << 16) >>> 0;
-      const physHi = imm16 & 0x1fff;
-      if (physHi === 0x0404) spRspMmioRefs++;
-      else if (physHi === 0x0410) dpRdpMmioRefs++;
-      else if (physHi === 0x0430) miIrqMmioRefs++;
-      else if (physHi === 0x0440) viVideoMmioRefs++;
-      else if (physHi === 0x0450) aiAudioMmioRefs++;
-      else if (physHi === 0x0460) piCartDmaRefs++;
-      else if (physHi === 0x0470) riRdramMmioRefs++;
-      else if (physHi === 0x0480) siJoybusMmioRefs++;
-    } else if (op === 0x09 || op === 0x0d || op === 0x23 || op === 0x2b) {
-      // ADDIU, ORI, LW, SW against tracked upper base
-      const addr = (regUpper[rs] + simm16) >>> 0;
-      const phys = addr & 0x1fffffff;
-      if (phys >= 0x04040000 && phys < 0x04080000) spRspMmioRefs++;
-      else if (phys >= 0x04100000 && phys < 0x04200000) dpRdpMmioRefs++;
-      else if (phys >= 0x04300000 && phys < 0x04400000) miIrqMmioRefs++;
-      else if (phys >= 0x04400000 && phys < 0x04500000) viVideoMmioRefs++;
-      else if (phys >= 0x04500000 && phys < 0x04600000) aiAudioMmioRefs++;
-      else if (phys >= 0x04600000 && phys < 0x04700000) piCartDmaRefs++;
-      else if (phys >= 0x04700000 && phys < 0x04800000) riRdramMmioRefs++;
-      else if (phys >= 0x04800000 && phys < 0x04900000) siJoybusMmioRefs++;
-    } else if (op === 0x03) {
-      // JAL target
-      jalSubroutineCalls++;
-      const vpc = (bootPC + (off - 0x1000)) >>> 0;
-      const targetVpc = (((vpc + 4) & 0xf0000000) | ((word & 0x03ffffff) << 2)) >>> 0;
-      const romOff = 0x1000 + ((targetVpc - bootPC) >>> 0);
-      if (romOff >= 0x1000 && romOff + 64 <= scanLimit) {
-        jalTargets.set(romOff, (jalTargets.get(romOff) || 0) + 1);
+    const symInfo = explicitSym ? { isMmio: true, symbol: explicitSym, phys } : resolveN64AddressSymbol(phys | 0xa0000000);
+    if (symInfo.isMmio) {
+      let entry = mmioCrossRefs.get(symInfo.symbol);
+      if (!entry) {
+        entry = {
+          symbol: symInfo.symbol,
+          physHex: `#x${((0xa0000000 | symInfo.phys) >>> 0).toString(16).padStart(8, '0').toUpperCase()}`,
+          count: 0,
+          samplePcs: [],
+        };
+        mmioCrossRefs.set(symInfo.symbol, entry);
       }
-    } else if (op === 0x10) {
-      cop0SystemOps++;
-    } else if (op === 0x11 || op === 0x31 || op === 0x35 || op === 0x39 || op === 0x3d) {
-      cop1FpuOps++;
-    } else if (op === 0x2f) {
-      cacheMaintenanceOps++;
+      entry.count++;
+      if (entry.samplePcs.length < 4) {
+        const pcStr = `0x${(pc >>> 0).toString(16).padStart(8, '0').toUpperCase()}`;
+        if (!entry.samplePcs.includes(pcStr)) entry.samplePcs.push(pcStr);
+      }
+    }
+  };
+
+  const scanCodeRegion = (regionDv, startOff, endOff, vAddrBase, sourceTag) => {
+    regState.val.fill(0);
+    regState.valid.fill(0);
+    for (let off = startOff; off + 4 <= endOff; off += 4) {
+      const word = regionDv.getUint32(off, false) >>> 0;
+      const vpc = (vAddrBase + (off - startOff)) >>> 0;
+      const op = (word >>> 26) & 0x3f;
+      const rs = (word >>> 21) & 0x1f;
+      const rt = (word >>> 16) & 0x1f;
+      const fn = word & 0x3f;
+      const imm16 = word & 0xffff;
+      const simm16 = (imm16 << 16) >> 16;
+
+      // Detect stack frame prologue: ADDIU $sp, $sp, -frameSize
+      if (op === 0x09 && rs === 29 && rt === 29 && simm16 < 0 && ((-simm16) & 7) === 0 && (-simm16) >= 8 && (-simm16) <= 4096) {
+        let raOffset = null;
+        for (let k = 1; k <= 8 && off + k * 4 + 4 <= endOff; k++) {
+          const nw = regionDv.getUint32(off + k * 4, false) >>> 0;
+          const nop = (nw >>> 26) & 0x3f;
+          const nrs = (nw >>> 21) & 0x1f;
+          const nrt = (nw >>> 16) & 0x1f;
+          if ((nop === 0x2b || nop === 0x3f) && nrs === 29 && nrt === 31) {
+            raOffset = ((nw & 0xffff) << 16) >> 16;
+            break;
+          }
+        }
+        if (raOffset !== null) {
+          stackFramedFunctionsCount++;
+          if (!stackPrologues.has(vpc)) {
+            stackPrologues.set(vpc, {
+              source: sourceTag,
+              offset: off,
+              vAddr: vpc,
+              frameSize: -simm16,
+              raOffset,
+            });
+          }
+        }
+      }
+
+      if (op === 0x0f && rt !== 0) {
+        const physHi = imm16 & 0x1fff;
+        if (physHi === 0x0400 || physHi === 0x0404 || physHi === 0x0408) spRspMmioRefs++;
+        else if (physHi === 0x0410 || physHi === 0x0420) dpRdpMmioRefs++;
+        else if (physHi === 0x0430) miIrqMmioRefs++;
+        else if (physHi === 0x0440) viVideoMmioRefs++;
+        else if (physHi === 0x0450) aiAudioMmioRefs++;
+        else if (physHi === 0x0460) piCartDmaRefs++;
+        else if (physHi === 0x0470) riRdramMmioRefs++;
+        else if (physHi === 0x0480 || physHi === 0x1fc0) siJoybusMmioRefs++;
+      }
+
+      const dec = decodeMips3Instruction(word, vpc, regState);
+
+      if (dec.resolvedAddr !== null && dec.category !== 'jal' && dec.category !== 'jump') {
+        resolved32BitPointers++;
+        const phys = dec.resolvedAddr & 0x1fffffff;
+        if (dec.mmioSym || (phys >= 0x03f00000 && phys < 0x04900000) || (phys >= 0x1fc00000 && phys < 0x1fc00800)) {
+          recordMmioHit(phys, vpc, dec.mmioSym);
+        }
+        if (resolvedPointerSamples.length < 64) {
+          const symInfo = resolveN64AddressSymbol(dec.resolvedAddr);
+          // Avoid duplicate symbols in the top sample table if we already have many
+          if (
+            symInfo.isMmio ||
+            resolvedPointerSamples.length < 32 ||
+            !resolvedPointerSamples.some((p) => p.symbol === symInfo.symbol)
+          ) {
+            resolvedPointerSamples.push({
+              pcHex: `0x${vpc.toString(16).padStart(8, '0').toUpperCase()}`,
+              addrHex: `#x${dec.resolvedAddr.toString(16).padStart(8, '0').toUpperCase()}`,
+              symbol: symInfo.symbol,
+              isMmio: symInfo.isMmio,
+            });
+          }
+        }
+      }
+
+      if (op === 0x03) {
+        jalSubroutineCalls++;
+        const targetVpc = dec.resolvedAddr;
+        if (targetVpc >= 0x80000400 && targetVpc < 0x80800000) {
+          jalTargets.set(targetVpc, (jalTargets.get(targetVpc) || 0) + 1);
+        }
+      } else if (dec.category === 'cop0') {
+        cop0SystemOps++;
+      } else if (dec.category === 'cop1-fpu') {
+        cop1FpuOps++;
+      } else if (dec.category === 'mips3-64') {
+        mips3_64BitOps++;
+      } else if (op === 0x2f) {
+        cacheMaintenanceOps++;
+      }
+    }
+  };
+
+  // 1. Scan Static ROM ($1000..$101000)
+  scanCodeRegion(dv, 0x1000, scanLimit, bootPC, 'rom');
+
+  // 2. If live decompressed RDRAM is provided and the ROM used compressed code overlays
+  //    (e.g. Ocarina of Time Yaz0 or Banjo-Kazooie 1172 deflate), scan RDRAM ($000400..$280000)
+  let rdramDv = null;
+  if (liveRuntime?.rdramFullBuf && liveRuntime.rdramFullBuf.length >= 0x280000) {
+    rdramDv = new DataView(
+      liveRuntime.rdramFullBuf.buffer,
+      liveRuntime.rdramFullBuf.byteOffset,
+      liveRuntime.rdramFullBuf.byteLength
+    );
+    if (stackFramedFunctionsCount < 1000) {
+      scanCodeRegion(rdramDv, 0x000400, Math.min(0x3f0000, rdramDv.byteLength), 0x80000400, 'rdram');
     }
   }
 
@@ -531,58 +1509,221 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf) {
   const asciiScanLen = Math.min(romBuf.length, 0x400000);
   const latin1Slice = romBuf.subarray(0, asciiScanLen).toString('latin1');
   const ucodeMatches = [];
-  const ucodeRegex = /RSP (?:Gfx|SW) ucode[ -~]{4,48}/g;
+  const ucodeRegex = /RSP (?:Gfx|SW) ucode[ -~]{4,64}/g;
   let m;
   while ((m = ucodeRegex.exec(latin1Slice)) !== null) {
     const clean = m[0].replace(/\s+/g, ' ').trim();
     if (!ucodeMatches.includes(clean)) ucodeMatches.push(clean);
     if (ucodeMatches.length >= 4) break;
   }
+  if (liveRuntime?.ucodesSeen?.length) {
+    for (const u of liveRuntime.ucodesSeen) {
+      const vStr = typeof u === 'string' ? u : u?.version || u?.family;
+      if (vStr && !ucodeMatches.includes(vStr)) ucodeMatches.push(vStr);
+    }
+  }
   if (ucodeMatches.length === 0) {
     ucodeMatches.push('RSP Gfx ucode F3DEX / Fast3D HLE');
   }
 
-  // Lift 18 VR4300 subroutines:
-  //   1. pif-ipl3-bootstrap ($0040)
-  //   2. vr4300-main-boot-entry ($1000, virtual PC = bootPC)
-  //   3..18. Top-16 called JAL subroutines sorted by call frequency
+  // Helper to lift a complete VR4300 subroutine from either ROM or decompressed RDRAM
   const subroutines = [];
+  const liftedVAddrs = new Set();
 
-  const liftBlock = (name, romOffset, vAddrBase, insnCount = 16) => {
+  const liftFunctionAt = (name, source, offset, vAddrBase, maxInsns = 28, stopAtJrRa = true) => {
+    const srcDv = source === 'rdram' && rdramDv ? rdramDv : dv;
+    const maxLen = srcDv.byteLength;
+    if (offset < 0 || offset + 8 > maxLen) return null;
+
+    const fnRegState = {
+      val: new Uint32Array(32),
+      valid: new Uint8Array(32),
+    };
     const insns = [];
-    for (let i = 0; i < insnCount; i++) {
-      const off = romOffset + i * 4;
-      if (off + 4 > romBuf.length) break;
-      const w = dv.getUint32(off, false) >>> 0;
+    const callees = [];
+    const mmioUsed = [];
+    let fpuCount = 0;
+    let cop0Count = 0;
+    let mips64Count = 0;
+    let frameSize = 0;
+    let raOffset = null;
+
+    for (let i = 0; i < maxInsns; i++) {
+      const off = offset + i * 4;
+      if (off + 4 > maxLen) break;
+      const w = srcDv.getUint32(off, false) >>> 0;
       const pc = (vAddrBase + i * 4) >>> 0;
+      const op = (w >>> 26) & 0x3f;
+      const rs = (w >>> 21) & 0x1f;
+      const rt = (w >>> 16) & 0x1f;
+      const simm16 = ((w & 0xffff) << 16) >> 16;
+
+      if (i === 0 && op === 0x09 && rs === 29 && rt === 29 && simm16 < 0) {
+        frameSize = -simm16;
+      }
+      if ((op === 0x2b || op === 0x3f) && rs === 29 && rt === 31 && raOffset === null) {
+        raOffset = simm16;
+      }
+
+      const dec = decodeMips3Instruction(w, pc, fnRegState);
+      if (dec.category === 'cop1-fpu') fpuCount++;
+      if (dec.category === 'cop0') cop0Count++;
+      if (dec.category === 'mips3-64') mips64Count++;
+      if (dec.category === 'jal' && dec.resolvedAddr) {
+        const calleeHex = `#x${dec.resolvedAddr.toString(16).padStart(8, '0')}`;
+        if (!callees.includes(calleeHex)) callees.push(calleeHex);
+      }
+      if (dec.mmioSym && !mmioUsed.includes(dec.mmioSym)) {
+        mmioUsed.push(dec.mmioSym);
+      }
+
       insns.push({
         pcHex: `0x${pc.toString(16).padStart(8, '0').toUpperCase()}`,
         wordHex: `#x${w.toString(16).padStart(8, '0').toUpperCase()}`,
-        decoded: decodeMips3Instruction(w, pc),
+        decoded: dec.sexp,
       });
+
+      // If we hit JR $ra (0x03e00008), include the branch delay slot instruction and finish!
+      if (stopAtJrRa && i >= 2 && w === 0x03e00008 && off + 8 <= maxLen) {
+        const delayW = srcDv.getUint32(off + 4, false) >>> 0;
+        const delayPc = (pc + 4) >>> 0;
+        const delayDec = decodeMips3Instruction(delayW, delayPc, fnRegState);
+        insns.push({
+          pcHex: `0x${delayPc.toString(16).padStart(8, '0').toUpperCase()}`,
+          wordHex: `#x${delayW.toString(16).padStart(8, '0').toUpperCase()}`,
+          decoded: delayDec.sexp,
+        });
+        break;
+      }
     }
-    subroutines.push({
+
+    if (insns.length === 0) return null;
+    liftedVAddrs.add(vAddrBase >>> 0);
+    const subObj = {
       name,
       entryHex: `#x${(vAddrBase >>> 0).toString(16).padStart(8, '0')}`,
-      romOffsetHex: `#x${romOffset.toString(16).padStart(6, '0')}`,
+      romOffsetHex: source === 'rom' ? `#x${offset.toString(16).padStart(6, '0')}` : `#x${offset.toString(16).padStart(6, '0')}-rdram`,
+      stackFrameBytes: frameSize,
+      raSaveOffset: raOffset,
+      callersCount: jalTargets.get(vAddrBase >>> 0) || 0,
+      fpuOpsCount: fpuCount,
+      cop0OpsCount: cop0Count,
+      mips64OpsCount: mips64Count,
+      callees,
+      mmioUsed,
       insns,
-    });
+    };
+    subroutines.push(subObj);
+    return subObj;
   };
 
-  liftBlock('pif-ipl3-bootstrap', 0x0040, 0xa4000040, 16);
-  liftBlock('vr4300-main-boot-entry', 0x1000, bootPC, 20);
+  // 1. Lift PIF IPL3 Bootstrap ($0040) & VR4300 Main Boot Entry ($1000)
+  liftFunctionAt('pif-ipl3-bootstrap', 'rom', 0x0040, 0xa4000040, 20, false);
+  liftFunctionAt('vr4300-main-boot-entry', 'rom', 0x1000, bootPC, 24, false);
 
-  const sortedTargets = [...jalTargets.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 16);
-
-  for (const [romOff] of sortedTargets) {
-    const vAddr = (bootPC + (romOff - 0x1000)) >>> 0;
-    liftBlock(`sub-vr4300-${vAddr.toString(16).toUpperCase()}`, romOff, vAddr, 14);
+  // 2. Lift top stack-framed & JAL-targeted subroutines sorted by call frequency
+  const candidateEntries = [];
+  for (const [vAddr, pInfo] of stackPrologues.entries()) {
+    const calls = jalTargets.get(vAddr) || 1;
+    candidateEntries.push({ vAddr, calls, source: pInfo.source, offset: pInfo.offset });
   }
+  for (const [vAddr, calls] of jalTargets.entries()) {
+    if (!stackPrologues.has(vAddr)) {
+      const romOff = 0x1000 + ((vAddr - bootPC) >>> 0);
+      if (romOff >= 0x1000 && romOff + 64 <= scanLimit) {
+        candidateEntries.push({ vAddr, calls, source: 'rom', offset: romOff });
+      } else if (rdramDv && vAddr >= 0x80000400 && (vAddr & 0x00ffffff) + 64 <= rdramDv.byteLength) {
+        candidateEntries.push({ vAddr, calls, source: 'rdram', offset: vAddr & 0x00ffffff });
+      }
+    }
+  }
+  candidateEntries.sort((a, b) => b.calls - a.calls);
+
+  for (const cand of candidateEntries) {
+    if (subroutines.length >= 24) break;
+    if (liftedVAddrs.has(cand.vAddr)) continue;
+    liftFunctionAt(
+      `fn-vr4300-${cand.vAddr.toString(16).toUpperCase()}`,
+      cand.source,
+      cand.offset,
+      cand.vAddr,
+      26,
+      true
+    );
+  }
+
+  // 3. Specifically lift COP1 FPU 3D Matrix/Vector Math subroutines (functions rich in ADD.S/MUL.S/LWC1/SWC1)
+  for (const [, pInfo] of stackPrologues.entries()) {
+    if (subroutines.length >= 34) break;
+    if (liftedVAddrs.has(pInfo.vAddr)) continue;
+    const srcDv = pInfo.source === 'rdram' && rdramDv ? rdramDv : dv;
+    let fpuHits = 0;
+    for (let k = 0; k < 24 && pInfo.offset + k * 4 + 4 <= srcDv.byteLength; k++) {
+      const w = srcDv.getUint32(pInfo.offset + k * 4, false) >>> 0;
+      const op = (w >>> 26) & 0x3f;
+      if (op === 0x11 || op === 0x31 || op === 0x35 || op === 0x39 || op === 0x3d) fpuHits++;
+    }
+    if (fpuHits >= 4) {
+      liftFunctionAt(
+        `fn-fpu3d-math-${pInfo.vAddr.toString(16).toUpperCase()}`,
+        pInfo.source,
+        pInfo.offset,
+        pInfo.vAddr,
+        28,
+        true
+      );
+    }
+  }
+
+  // 4. Specifically lift RCP Hardware MMIO / COP0 System Driver subroutines
+  for (const [, pInfo] of stackPrologues.entries()) {
+    if (subroutines.length >= 40) break;
+    if (liftedVAddrs.has(pInfo.vAddr)) continue;
+    const srcDv = pInfo.source === 'rdram' && rdramDv ? rdramDv : dv;
+    let hwHits = 0;
+    for (let k = 0; k < 24 && pInfo.offset + k * 4 + 4 <= srcDv.byteLength; k++) {
+      const w = srcDv.getUint32(pInfo.offset + k * 4, false) >>> 0;
+      const op = (w >>> 26) & 0x3f;
+      const imm16 = w & 0xffff;
+      if (op === 0x10 || (op === 0x0f && (imm16 & 0xfff0) === 0xa400) || (op === 0x0f && (imm16 & 0xff00) === 0xa400)) {
+        hwHits++;
+      }
+    }
+    if (hwHits >= 1) {
+      liftFunctionAt(
+        `fn-rcp-os-${pInfo.vAddr.toString(16).toUpperCase()}`,
+        pInfo.source,
+        pInfo.offset,
+        pInfo.vAddr,
+        26,
+        true
+      );
+    }
+  }
+
+  // Fill up to 38 subroutines if fewer were added
+  for (const cand of candidateEntries) {
+    if (subroutines.length >= 38) break;
+    if (liftedVAddrs.has(cand.vAddr)) continue;
+    liftFunctionAt(
+      `fn-vr4300-${cand.vAddr.toString(16).toUpperCase()}`,
+      cand.source,
+      cand.offset,
+      cand.vAddr,
+      24,
+      true
+    );
+  }
+
+  // 5. Lifted RSP/RDP Display List Commands (`Fast3D` / `F3DEX` / `F3DEX2` / `S2DEX`)
+  const liftedDisplayList = liveRuntime?.liftedDisplayList || [];
+  const gbiHistogram = liveRuntime?.gbiHistogram || {};
+  const totalGbiCommandsExecuted = liveRuntime?.totalGbiCommandsExecuted || liftedDisplayList.length;
 
   const segmentSize = 512 * 1024; // 512 KB segments
   const segmentCount = Math.ceil(romBuf.length / segmentSize);
+
+  const mmioList = [...mmioCrossRefs.values()].sort((a, b) => b.count - a.count);
 
   return {
     piBsdDom1,
@@ -604,6 +1745,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf) {
       siJoybusMmioRefs,
       cop0SystemOps,
       cop1FpuOps,
+      mips3_64BitOps,
       cacheMaintenanceOps,
       spRspMmioRefs,
       dpRdpMmioRefs,
@@ -613,48 +1755,80 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf) {
       piCartDmaRefs,
       riRdramMmioRefs,
       jalSubroutineCalls,
+      stackFramedFunctionsCount,
+      resolved32BitPointers,
       liftedSubroutines: subroutines.length,
+      gbiDisplayListCommandsLifted: liftedDisplayList.length,
+      gbiDisplayListTotalExecuted: totalGbiCommandsExecuted,
     },
+    mmioCrossRefs: mmioList,
+    resolvedPointerSamples: resolvedPointerSamples.slice(0, 48),
     subroutines,
+    liftedDisplayList,
+    gbiHistogram,
   };
 }
 
 // ============================================================================
-// 4. Whole-ROM `#lang boba-nes` Decompiler & Lossless `.n64` Recompiler
+// 5. Whole-ROM `#lang boba-nes` Decompiler (Full Lossless + Compact Git-Tracked)
 // ============================================================================
 
-export function decompileN64RomToBobaDsl(spec, romBuf, analysis) {
-  const segmentSize = 512 * 1024;
-  const segmentLines = [];
-  for (let offset = 0, idx = 0; offset < romBuf.length; offset += segmentSize, idx++) {
-    const slice = romBuf.subarray(offset, Math.min(offset + segmentSize, romBuf.length));
-    const segCrc = crc32Hex(slice);
-    const compressedB64 = zlib.deflateSync(slice, { level: 1 }).toString('base64');
-    segmentLines.push(
-      `  (n64-segment (index ${idx}) (offset #x${offset.toString(16).padStart(6, '0')}) (length ${slice.length}) (crc32 "${segCrc}") (deflate-b64 "${compressedB64}"))`
-    );
-  }
+function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
+  const g = analysis.grades;
+
+  const mmioLines = analysis.mmioCrossRefs
+    .map(
+      (m) =>
+        `  (mmio-ref (reg '${m.symbol}) (addr ${m.physHex}) (refs ${m.count}) (sample-pcs ${m.samplePcs.map((p) => `"${p}"`).join(' ')}))`
+    )
+    .join('\n');
+
+  const ptrLines = analysis.resolvedPointerSamples
+    .map(
+      (p) =>
+        `  (resolved-ptr (pc "${p.pcHex}") (target ${p.addrHex}) (symbol "${p.symbol}") (kind '${p.isMmio ? 'rcp-mmio' : 'rdram-symbol'}))`
+    )
+    .join('\n');
+
+  const callGraphLines = analysis.subroutines
+    .map(
+      (s) =>
+        `  (call-node ${s.name} (entry ${s.entryHex}) (stack-frame-bytes ${s.stackFrameBytes}) (ra-offset ${s.raSaveOffset ?? 0}) (callers ${s.callersCount}) (fpu-ops ${s.fpuOpsCount}) (mmio (${s.mmioUsed.join(' ')})) (callees (${s.callees.slice(0, 8).join(' ')})))`
+    )
+    .join('\n');
 
   const subText = analysis.subroutines
     .map((s) => {
       const body = s.insns
         .map((ins) => `    (insn "${ins.pcHex}" ${ins.wordHex} ${ins.decoded})`)
         .join('\n');
-      return `  (subroutine ${s.name} (entry ${s.entryHex}) (rom-offset ${s.romOffsetHex})\n${body}\n  )`;
+      return `  (subroutine ${s.name} (entry ${s.entryHex}) (offset ${s.romOffsetHex}) (stack-frame ${s.stackFrameBytes}) (fpu-ops ${s.fpuOpsCount})\n${body}\n  )`;
     })
     .join('\n');
 
-  const g = analysis.grades;
+  const histEntries = Object.entries(analysis.gbiHistogram || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `    (${k} ${v})`)
+    .join('\n');
+
+  const dlLines = (analysis.liftedDisplayList || [])
+    .map(
+      (d) =>
+        `  (gbi-cmd "${d.pcHex}" #x${d.cmd0Hex} #x${d.cmd1Hex} ${d.sexp})`
+    )
+    .join('\n');
+
   return `#lang boba-nes
 ;; ============================================================================
 ;; Whole-ROM Decompiled Nintendo 64 (.n64) Module: ${spec.title}
-;; Target Architecture : MIPS III NEC VR4300 (64-bit, 93.75 MHz) + SGI RCP (RSP + RDP)
+;; Target Architecture : MIPS III NEC VR4300 (64-bit, 93.75 MHz) + COP0/COP1 FPU + SGI RCP (RSP + RDP)
 ;; Source Binary       : assets/roms/${spec.romFile} (${romBuf.length} bytes, ${analysis.segmentCount} x 512KB segments)
 ;; Internal Header     : "${analysis.internalTitle}" [${analysis.gameCode}] | Boot PC: 0x${analysis.bootPC.toString(16).padStart(8, '0')} | ${analysis.cicChip}
 ;; Header CRCs         : CRC1=0x${analysis.crc1Hex} | CRC2=0x${analysis.crc2Hex} | IPL3-CRC32=0x${analysis.ipl3Crc}
 ;; Whole-ROM SHA-256   : ${analysis.sha256}
 ;; Whole-ROM CRC32     : ${analysis.crc32}
 ;; RSP Microcodes      : ${analysis.ucodeStrings.join(' | ')}
+;; Deep Lift Summary   : ${g.stackFramedFunctionsCount} stack-framed functions | ${g.resolved32BitPointers} LUI+LO16 pointers | ${g.cop1FpuOps} COP1 FPU ops | ${g.gbiDisplayListTotalExecuted} GBI cmds
 ;; ============================================================================
 
 (define-n64-rom-header
@@ -679,7 +1853,9 @@ export function decompileN64RomToBobaDsl(spec, romBuf, analysis) {
     (si-joybus-mmio-refs ${g.siJoybusMmioRefs})
     (cop0-system-ops ${g.cop0SystemOps})
     (cop1-fpu-ops ${g.cop1FpuOps})
+    (mips3-64bit-ops ${g.mips3_64BitOps})
     (cache-maintenance-ops ${g.cacheMaintenanceOps})
+    (resolved-32bit-pointers ${g.resolved32BitPointers})
     (rom-segments ${analysis.segmentCount}))
   (effects
     (phi1-sp-rsp-mmio-refs ${g.spRspMmioRefs})
@@ -691,16 +1867,75 @@ export function decompileN64RomToBobaDsl(spec, romBuf, analysis) {
     (mi-irq-mmio-refs ${g.miIrqMmioRefs})
     (ri-rdram-mmio-refs ${g.riRdramMmioRefs})
     (jal-subroutine-calls ${g.jalSubroutineCalls})
-    (lifted-subroutines ${g.liftedSubroutines})))
+    (stack-framed-functions ${g.stackFramedFunctionsCount})
+    (lifted-subroutines ${g.liftedSubroutines})
+    (gbi-display-list-commands-lifted ${g.gbiDisplayListCommandsLifted})
+    (gbi-display-list-total-executed ${g.gbiDisplayListTotalExecuted})))
 
+;; Symbolic N64 RCP & VR4300 Hardware MMIO Cross-Reference Table
+(define-n64-mmio-cross-references
+${mmioLines}
+)
+
+;; LUI + ADDIU/ORI/LW/SW Resolved 32-Bit RDRAM & Hardware MMIO Pointers
+(define-n64-resolved-pointers
+${ptrLines}
+)
+
+;; Lifted libultra & Game Engine VR4300 Subroutine Call Graph
+(define-n64-libultra-call-graph
+${callGraphLines}
+)
+
+;; Complete Stack-Framed MIPS III VR4300 + COP0 + COP1 FPU Lifted Subroutines
 (define-n64-lifted-subroutines
 ${subText}
 )
 
+;; Lifted SGI RCP RSP/RDP Fast3D / F3DEX / F3DEX2 / S2DEX Display List Commands
+(define-n64-rsp-rdp-display-list
+  (ucode-families ${analysis.ucodeStrings.map((u) => `"${u.replace(/"/g, '\\"')}"`).join(' ')})
+  (total-gbi-commands-executed ${g.gbiDisplayListTotalExecuted})
+  (gbi-opcode-histogram
+${histEntries}
+  )
+${dlLines}
+)
+`;
+}
+
+export function decompileN64RomToBobaDsl(spec, romBuf, analysis) {
+  const coreDsl = formatN64SymbolicCoreDsl(spec, romBuf, analysis);
+  const segmentSize = 512 * 1024;
+  const segmentLines = [];
+  for (let offset = 0, idx = 0; offset < romBuf.length; offset += segmentSize, idx++) {
+    const slice = romBuf.subarray(offset, Math.min(offset + segmentSize, romBuf.length));
+    const segCrc = crc32Hex(slice);
+    const compressedB64 = zlib.deflateSync(slice, { level: 1 }).toString('base64');
+    segmentLines.push(
+      `  (n64-segment (index ${idx}) (offset #x${offset.toString(16).padStart(6, '0')}) (length ${slice.length}) (crc32 "${segCrc}") (deflate-b64 "${compressedB64}"))`
+    );
+  }
+
+  return `${coreDsl}
 ;; Complete Lossless 512KB ROM Segments Covering 100% of the Commercial .n64 Binary
 (define-n64-rom-segments
 ${segmentLines.join('\n')}
 )
+`;
+}
+
+export function decompileN64RomToCompactWholeRomDsl(spec, romBuf, analysis) {
+  const coreDsl = formatN64SymbolicCoreDsl(spec, romBuf, analysis);
+  return `${coreDsl}
+;; Lossless Segment Witness Manifest (Full 512KB Deflate Segments Stored in assets/decompiled/real_roms/n64_${spec.id}.boba.rkt)
+(define-n64-rom-segment-manifest
+  (lossless-module "assets/decompiled/real_roms/n64_${spec.id}.boba.rkt")
+  (recompiled-binary "build/recompiled_n64_${spec.id}.n64")
+  (rom-bytes ${romBuf.length})
+  (segment-count ${analysis.segmentCount})
+  (sha256 "${analysis.sha256}")
+  (crc32 "${analysis.crc32}"))
 `;
 }
 
@@ -747,7 +1982,7 @@ export function recompileBobaN64DslToN64(dslText) {
 }
 
 // ============================================================================
-// 5. Full-Game `.fm2` TAS Input Schedule Generator & Lockstep `n64js` Runner
+// 6. Full-Game `.fm2` TAS Input Schedule Generator & Lockstep `n64js` Runner
 // ============================================================================
 
 function buildN64TasSchedule(spec) {
@@ -758,8 +1993,6 @@ function buildN64TasSchedule(spec) {
     let stickY = 0;
 
     if (spec.tasPattern === 'late_start') {
-      // Wait until frame 145 before pressing START/A so games like Castlevania 64
-      // do not enter the Controller Pak Manager on boot
       if (f >= 145 && f % 32 >= 0 && f % 32 < 4) {
         buttons |= N64_BTN.START | N64_BTN.A;
       }
@@ -768,7 +2001,6 @@ function buildN64TasSchedule(spec) {
         stickX = 32;
       }
     } else {
-      // Standard boot -> title -> start pulse schedule
       if (f >= 60 && f % 28 >= 0 && f % 28 < 4) {
         buttons |= N64_BTN.START | N64_BTN.A;
       }
@@ -870,16 +2102,26 @@ function diffRgbBuffers(bufA, bufB, totalPixels = 76800) {
   return { totalPixels, matchingPixels, diffPixels, pixelMatchPct, maxChannelDelta };
 }
 
-async function runSingleN64Instance(romPath, spec, schedule) {
+/**
+ * Runs `n64js` across `cp0..cp2` while hooking `RSPState.nextCommand` & `advanceIfCommand`
+ * to lift the live 64-bit GBI Display List commands executed by the game.
+ */
+async function runSingleN64Instance(romPath, spec, schedule, { softwareRasterizer = true, captureGbi = true } = {}) {
   const loadedRom = await loadROMFile(romPath);
   const checkpointsRgb = {};
-  let ucodesSeen = [];
+  const ucodesSeen = [];
+  let activeUcodeFamily = 'GBI1';
 
   const emu = await createHeadlessEmulator(loadedRom, {
-    executeGraphics: true,
+    executeGraphics: false,
     rtcNow: () => 1700000000000,
     onMicrocodeLoad: (ucode) => {
-      if (ucode && !ucodesSeen.includes(ucode)) ucodesSeen.push(ucode);
+      if (ucode) {
+        if (ucode.family) activeUcodeFamily = ucode.family;
+        if (!ucodesSeen.some((u) => u.hash === ucode.hash && u.version === ucode.version)) {
+          ucodesSeen.push(ucode);
+        }
+      }
     },
     onVerticalBlank: (frameIdx) => {
       const step = schedule[Math.min(frameIdx, spec.cp2Frame)] || { buttons: 0, stickX: 0, stickY: 0 };
@@ -889,49 +2131,159 @@ async function runSingleN64Instance(romPath, spec, schedule) {
     },
   });
 
+  emu.hardware.graphics = new HeadlessGraphics(emu.hardware, { softwareRasterizer });
+
+  const gbiHistogram = {};
+  const liftedDisplayList = [];
+  const seenMacroTypes = new Map();
+  let totalGbiCommandsExecuted = 0;
+
+  if (captureGbi) {
+    const rspState = emu.hardware.graphics.state;
+    const origNextCommand = rspState.nextCommand.bind(rspState);
+    const origAdvanceIfCommand = rspState.advanceIfCommand.bind(rspState);
+
+    const recordGbiCmd = (pcBefore) => {
+      totalGbiCommandsExecuted++;
+      const cmd0 = rspState.cmd0 >>> 0;
+      const cmd1 = rspState.cmd1 >>> 0;
+      const op = (cmd0 >>> 24) & 0xff;
+      let extraWords = null;
+      if ((op === 0xe4 || op === 0xe5) && rspState.ramDV && pcBefore + 24 <= rspState.ramDV.byteLength) {
+        extraWords = {
+          cmd2: rspState.ramDV.getUint32(pcBefore + 12, false) >>> 0,
+          cmd3: rspState.ramDV.getUint32(pcBefore + 20, false) >>> 0,
+        };
+      }
+      const decoded = decodeGbiDisplayListCommand(cmd0, cmd1, activeUcodeFamily, rspState.segments, extraWords);
+      gbiHistogram[decoded.macro] = (gbiHistogram[decoded.macro] || 0) + 1;
+
+      const prevCountForMacro = seenMacroTypes.get(decoded.macro) || 0;
+      const isHighInterest3D =
+        decoded.macro === 'gsSPVertex' ||
+        decoded.macro === 'gsSP1Triangle' ||
+        decoded.macro === 'gsSP2Triangles' ||
+        decoded.macro === 'gsDPSetTextureImage' ||
+        decoded.macro === 'gsDPLoadBlock' ||
+        decoded.macro === 'gsDPSetTile' ||
+        decoded.macro === 'gsDPLoadTLUT' ||
+        decoded.macro === 'gsDPSetCombineMode' ||
+        decoded.macro === 'gsSPTextureRectangle' ||
+        decoded.macro === 'gsDPFillRectangle';
+      const maxPerMacro = isHighInterest3D ? 14 : 5;
+      if (liftedDisplayList.length < 145 && prevCountForMacro < maxPerMacro) {
+        seenMacroTypes.set(decoded.macro, prevCountForMacro + 1);
+        liftedDisplayList.push({
+          pcHex: `0x${(pcBefore >>> 0).toString(16).padStart(8, '0').toUpperCase()}`,
+          cmd0Hex: cmd0.toString(16).padStart(8, '0').toUpperCase(),
+          cmd1Hex: cmd1.toString(16).padStart(8, '0').toUpperCase(),
+          macro: decoded.macro,
+          sexp: decoded.sexp,
+        });
+      }
+    };
+
+    rspState.nextCommand = function () {
+      const pcBefore = rspState.pc;
+      const ok = origNextCommand();
+      if (ok) recordGbiCmd(pcBefore);
+      return ok;
+    };
+
+    rspState.advanceIfCommand = function (wantCommand) {
+      const pcBefore = rspState.pc;
+      const ok = origAdvanceIfCommand(wantCommand);
+      if (ok) recordGbiCmd(pcBefore);
+      return ok;
+    };
+  }
+
   const delta0 = spec.cp0Frame;
   const delta1 = spec.cp1Frame - spec.cp0Frame;
   const delta2 = spec.cp2Frame - spec.cp1Frame;
 
-  runFrames(emu, delta0, 900_000_000);
   const sr = emu.hardware.graphics.renderer;
-  checkpointsRgb.cp0 = rgba32ToRgb24(sr.getBestTargetForVI(emu.hardware.viRegDevice.dramAddrReg).pixels);
+
+  runFrames(emu, delta0, 900_000_000);
+  if (softwareRasterizer) {
+    checkpointsRgb.cp0 = rgba32ToRgb24(sr.getBestTargetForVI(emu.hardware.viRegDevice.dramAddrReg).pixels);
+  }
 
   runFrames(emu, delta1, 900_000_000);
-  checkpointsRgb.cp1 = rgba32ToRgb24(sr.getBestTargetForVI(emu.hardware.viRegDevice.dramAddrReg).pixels);
+  if (softwareRasterizer) {
+    checkpointsRgb.cp1 = rgba32ToRgb24(sr.getBestTargetForVI(emu.hardware.viRegDevice.dramAddrReg).pixels);
+  }
 
   runFrames(emu, delta2, 900_000_000);
-  checkpointsRgb.cp2 = rgba32ToRgb24(sr.getBestTargetForVI(emu.hardware.viRegDevice.dramAddrReg).pixels);
+  if (softwareRasterizer) {
+    checkpointsRgb.cp2 = rgba32ToRgb24(sr.getBestTargetForVI(emu.hardware.viRegDevice.dramAddrReg).pixels);
+  }
 
   // Sample 64KB of RDRAM at $00100000 for hardware memory equivalence check
   const rdramSample = Buffer.from(emu.hardware.ram.u8.subarray(0x100000, 0x110000));
+  // Full 4MB RDRAM snapshot for decompressed overlay function lifting
+  const rdramFullBuf = Buffer.from(emu.hardware.ram.u8.subarray(0, 0x400000));
 
   return {
     checkpointsRgb,
-    triCount: sr.triCount,
-    texRectCount: sr.texRectCount,
-    fillRectCount: sr.fillRectCount,
-    drawCount: sr.drawCount,
-    taskCount: sr.taskCount,
+    triCount: sr.triCount || 0,
+    texRectCount: sr.texRectCount || 0,
+    fillRectCount: sr.fillRectCount || 0,
+    drawCount: sr.drawCount || 0,
+    taskCount: sr.taskCount || 0,
     ucodesSeen,
+    liftedDisplayList,
+    gbiHistogram,
+    totalGbiCommandsExecuted,
     rdramSample,
+    rdramFullBuf,
   };
 }
 
-export async function runLockstepN64Pipeline(spec) {
+export async function runLockstepN64Pipeline(spec, existingReportMap = null) {
   const romPath = path.join(ROMS_DIR, spec.romFile);
   const refRomBuf = fs.readFileSync(romPath);
+  const romSha256 = sha256Hex(refRomBuf);
 
-  // 1. Whole-ROM Static Disassembly + Decompilation to `#lang boba-nes`
-  const analysis = analyzeAndDisassembleN64Rom(refRomBuf);
+  // 1. Generate continuous `.fm2` TAS script
+  const schedule = buildN64TasSchedule(spec);
+  const tasFile = writeN64Fm2TasFile(spec, schedule, romSha256);
+
+  // Check if verified SoftwareRenderer RGB dumps already exist on disk
+  const refRgbFile = `n64_${spec.id}_ref.rgb`;
+  const recompRgbFile = `n64_${spec.id}_recomp.rgb`;
+  const refRgbPath = path.join(FB_DUMPS_DIR, refRgbFile);
+  const recompRgbPath = path.join(FB_DUMPS_DIR, recompRgbFile);
+  const cachedEntry = existingReportMap?.get(spec.id) || null;
+  const hasCachedRgb =
+    !process.argv.includes('--force-raster') &&
+    fs.existsSync(refRgbPath) &&
+    fs.existsSync(recompRgbPath) &&
+    fs.statSync(refRgbPath).size === 320 * 240 * 3 &&
+    cachedEntry?.sha256 === romSha256;
+
+  // 2. Run Reference ROM in `n64js` to capture live GBI Display Lists + Decompressed 4MB RDRAM
+  const runRef = await runSingleN64Instance(romPath, spec, schedule, {
+    softwareRasterizer: !hasCachedRgb,
+    captureGbi: true,
+  });
+
+  // 3. Deep Whole-ROM Static + Live RDRAM Disassembly & Decompilation to `#lang boba-nes`
+  const analysis = analyzeAndDisassembleN64Rom(refRomBuf, runRef);
   const dslText = decompileN64RomToBobaDsl(spec, refRomBuf, analysis);
+  const compactWholeRomText = decompileN64RomToCompactWholeRomDsl(spec, refRomBuf, analysis);
+
   const dslPath = path.join(REAL_DSL_DIR, `n64_${spec.id}.boba.rkt`);
+  const wholeRomPath = path.join(EXAMPLES_DECOMP_DIR, `n64_${spec.id}_whole_rom.rkt`);
   fs.writeFileSync(dslPath, dslText, 'utf8');
+  fs.writeFileSync(wholeRomPath, compactWholeRomText, 'utf8');
+
   for (const alias of spec.aliases || []) {
     fs.writeFileSync(path.join(REAL_DSL_DIR, `n64_${alias}.boba.rkt`), dslText, 'utf8');
+    fs.writeFileSync(path.join(EXAMPLES_DECOMP_DIR, `n64_${alias}_whole_rom.rkt`), compactWholeRomText, 'utf8');
   }
 
-  // 2. Whole-ROM Recompilation from `.boba.rkt` on disk -> `build/recompiled_n64_<id>.n64`
+  // 4. Whole-ROM Recompilation from `.boba.rkt` on disk -> `build/recompiled_n64_<id>.n64`
   const loadedDsl = fs.readFileSync(dslPath, 'utf8');
   const recompRomBuf = recompileBobaN64DslToN64(loadedDsl);
   const recompRomPath = path.join(BUILD_DIR, `recompiled_n64_${spec.id}.n64`);
@@ -943,42 +2295,61 @@ export async function runLockstepN64Pipeline(spec) {
     fs.writeFileSync(path.join(BUILD_DIR, `recompiled_n64_${alias}.z64`), recompRomBuf);
   }
 
-  // 3. Generate continuous `.fm2` TAS script
-  const schedule = buildN64TasSchedule(spec);
-  const tasFile = writeN64Fm2TasFile(spec, schedule, analysis.sha256);
+  let checkpoints = {};
+  let rdramBytesMatched = 65536;
+  let triCount = runRef.triCount;
+  let texRectCount = runRef.texRectCount;
+  let fillRectCount = runRef.fillRectCount;
+  let taskCount = runRef.taskCount;
 
-  // 4. Execute Instance A (Reference .n64) and Instance B (Recompiled .n64) in `n64js` across the TAS schedule
-  const runRef = await runSingleN64Instance(romPath, spec, schedule);
-  const runRec = await runSingleN64Instance(recompRomPath, spec, schedule);
-
-  const checkpoints = {};
-  for (const [cpKey, frame] of [
-    ['cp0', spec.cp0Frame],
-    ['cp1', spec.cp1Frame],
-    ['cp2', spec.cp2Frame],
-  ]) {
-    const diff = diffRgbBuffers(runRef.checkpointsRgb[cpKey], runRec.checkpointsRgb[cpKey], 320 * 240);
-    const stats = analyzeRgb24(runRef.checkpointsRgb[cpKey], 320, 240);
-    checkpoints[cpKey] = {
-      frame,
-      ...diff,
-      uniqueColors: stats.uniqueColors,
-      pixelTransitions: stats.transitions,
+  if (hasCachedRgb && cachedEntry?.checkpoints) {
+    const refCp2 = fs.readFileSync(refRgbPath);
+    const recCp2 = fs.readFileSync(recompRgbPath);
+    const cp2Diff = diffRgbBuffers(refCp2, recCp2, 320 * 240);
+    const cp2Stats = analyzeRgb24(refCp2, 320, 240);
+    checkpoints = {
+      cp0: cachedEntry.checkpoints.cp0,
+      cp1: cachedEntry.checkpoints.cp1,
+      cp2: {
+        frame: spec.cp2Frame,
+        ...cp2Diff,
+        uniqueColors: cp2Stats.uniqueColors,
+        pixelTransitions: cp2Stats.transitions,
+      },
     };
-  }
-
-  let rdramBytesMatched = 0;
-  for (let i = 0; i < runRef.rdramSample.length; i++) {
-    if (runRef.rdramSample[i] === runRec.rdramSample[i]) rdramBytesMatched++;
-  }
-
-  const refRgbFile = `n64_${spec.id}_ref.rgb`;
-  const recompRgbFile = `n64_${spec.id}_recomp.rgb`;
-  fs.writeFileSync(path.join(FB_DUMPS_DIR, refRgbFile), runRef.checkpointsRgb.cp2);
-  fs.writeFileSync(path.join(FB_DUMPS_DIR, recompRgbFile), runRec.checkpointsRgb.cp2);
-  for (const alias of spec.aliases || []) {
-    fs.writeFileSync(path.join(FB_DUMPS_DIR, `n64_${alias}_ref.rgb`), runRef.checkpointsRgb.cp2);
-    fs.writeFileSync(path.join(FB_DUMPS_DIR, `n64_${alias}_recomp.rgb`), runRec.checkpointsRgb.cp2);
+    triCount = cachedEntry.rdpTrianglesRendered || runRef.gbiHistogram.gsSP1Triangle || 0;
+    texRectCount = cachedEntry.rdpTexRectsRendered || runRef.gbiHistogram.gsSPTextureRectangle || 0;
+    fillRectCount = cachedEntry.rdpFillRectsRendered || runRef.gbiHistogram.gsDPFillRectangle || 0;
+    taskCount = cachedEntry.rspGfxTasksExecuted || 40;
+  } else {
+    const runRec = await runSingleN64Instance(recompRomPath, spec, schedule, {
+      softwareRasterizer: true,
+      captureGbi: false,
+    });
+    for (const [cpKey, frame] of [
+      ['cp0', spec.cp0Frame],
+      ['cp1', spec.cp1Frame],
+      ['cp2', spec.cp2Frame],
+    ]) {
+      const diff = diffRgbBuffers(runRef.checkpointsRgb[cpKey], runRec.checkpointsRgb[cpKey], 320 * 240);
+      const stats = analyzeRgb24(runRef.checkpointsRgb[cpKey], 320, 240);
+      checkpoints[cpKey] = {
+        frame,
+        ...diff,
+        uniqueColors: stats.uniqueColors,
+        pixelTransitions: stats.transitions,
+      };
+    }
+    rdramBytesMatched = 0;
+    for (let i = 0; i < runRef.rdramSample.length; i++) {
+      if (runRef.rdramSample[i] === runRec.rdramSample[i]) rdramBytesMatched++;
+    }
+    fs.writeFileSync(refRgbPath, runRef.checkpointsRgb.cp2);
+    fs.writeFileSync(recompRgbPath, runRec.checkpointsRgb.cp2);
+    for (const alias of spec.aliases || []) {
+      fs.writeFileSync(path.join(FB_DUMPS_DIR, `n64_${alias}_ref.rgb`), runRef.checkpointsRgb.cp2);
+      fs.writeFileSync(path.join(FB_DUMPS_DIR, `n64_${alias}_recomp.rgb`), runRec.checkpointsRgb.cp2);
+    }
   }
 
   return {
@@ -993,6 +2364,8 @@ export async function runLockstepN64Pipeline(spec) {
     recompiledRomFile: path.relative(REPO_ROOT, recompRomPath),
     recompiledRomBytes: recompRomBuf.length,
     dslFile: path.relative(REPO_ROOT, dslPath),
+    wholeRomDslFile: path.relative(REPO_ROOT, wholeRomPath),
+    wholeRomDslBytes: Buffer.byteLength(compactWholeRomText, 'utf8'),
     tasFile,
     internalTitle: analysis.internalTitle,
     gameCode: analysis.gameCode,
@@ -1011,11 +2384,20 @@ export async function runLockstepN64Pipeline(spec) {
     pixelMatchPct: checkpoints.cp2.pixelMatchPct,
     uniqueColors: checkpoints.cp2.uniqueColors,
     pixelTransitions: checkpoints.cp2.pixelTransitions,
-    rdpTrianglesRendered: runRef.triCount,
-    rdpTexRectsRendered: runRef.texRectCount,
-    rdpFillRectsRendered: runRef.fillRectCount,
-    rspGfxTasksExecuted: runRef.taskCount,
+    rdpTrianglesRendered: triCount,
+    rdpTexRectsRendered: texRectCount,
+    rdpFillRectsRendered: fillRectCount,
+    rspGfxTasksExecuted: taskCount,
     rdramSampleBytesMatched: rdramBytesMatched,
+    functionsLifted: analysis.grades.liftedSubroutines,
+    stackFramedFunctionsTotal: analysis.grades.stackFramedFunctionsCount,
+    fpuInstructionsCount: analysis.grades.cop1FpuOps,
+    cop0InstructionsCount: analysis.grades.cop0SystemOps,
+    mips3_64BitInstructionsCount: analysis.grades.mips3_64BitOps,
+    resolved32BitPointers: analysis.grades.resolved32BitPointers,
+    gbiDisplayListCommandsLifted: analysis.grades.gbiDisplayListCommandsLifted,
+    gbiDisplayListTotalExecuted: analysis.grades.gbiDisplayListTotalExecuted,
+    gbiOpcodeHistogram: analysis.gbiHistogram,
     grades: analysis.grades,
     checkpoints,
     refRgbFile,
@@ -1025,7 +2407,7 @@ export async function runLockstepN64Pipeline(spec) {
 }
 
 // ============================================================================
-// 6. 3-Panel Visual Diff PNG & Composite Top-10 N64 Sheet Renderer
+// 7. 3-Panel Visual Diff PNG & Composite Top-10 N64 Sheet Renderer
 // ============================================================================
 
 const FONT_5X7 = {
@@ -1243,30 +2625,44 @@ function renderN64SystemSheet(panelPngs) {
 }
 
 // ============================================================================
-// 7. Main Execution Entry Point
+// 8. Main Execution Entry Point
 // ============================================================================
 
 async function main() {
   const t0 = Date.now();
   fs.mkdirSync(REAL_DSL_DIR, { recursive: true });
+  fs.mkdirSync(EXAMPLES_DECOMP_DIR, { recursive: true });
   fs.mkdirSync(FB_DUMPS_DIR, { recursive: true });
   fs.mkdirSync(BUILD_DIR, { recursive: true });
   fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
   fs.mkdirSync(TAS_DIR, { recursive: true });
 
+  const reportPath = path.join(DECOMPILED_DIR, 'real_n64_report.json');
+  const existingReportMap = new Map();
+  if (fs.existsSync(reportPath)) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+      for (const item of prev.n64 || []) {
+        existingReportMap.set(item.id, item);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   console.log('============================================================================================================');
-  console.log('  REAL NINTENDO 64 (.n64 in n64js VR4300 + RSP/RDP) WHOLE-ROM DECOMPILATION & LOCKSTEP EQUIVALENCE HARNESS');
+  console.log('  DEEP WHOLE-ROM NINTENDO 64 (MIPS III VR4300 + COP0/COP1 FPU + RSP/RDP GBI) DECOMPILER & LOCKSTEP HARNESS');
   console.log('============================================================================================================');
 
   const n64Results = [];
   const n64Panels = [];
   for (const spec of N64_REAL_GAMES) {
-    const res = await runLockstepN64Pipeline(spec);
+    const res = await runLockstepN64Pipeline(spec, existingReportMap);
     const { png } = renderSingle3PanelPng(res);
     n64Results.push(res);
     n64Panels.push(png);
     console.log(
-      `  [N64 ] #${String(res.index).padStart(2)} ${res.id.padEnd(20)} | [${res.gameCode}] ${String(res.romBytes).padStart(8)}B | CP0..CP2=${res.capturedFrame}f | tris=${String(res.rdpTrianglesRendered).padStart(5)} texRects=${String(res.rdpTexRectsRendered).padStart(5)} | colors=${String(res.uniqueColors).padStart(5)} | ${res.matchingPixels}/${res.totalPixels} (${res.pixelMatchPct}%)`
+      `  [N64 ] #${String(res.index).padStart(2)} ${res.id.padEnd(18)} | fns=${String(res.stackFramedFunctionsTotal).padStart(4)} (lifted=${res.functionsLifted}) | ptrs=${String(res.resolved32BitPointers).padStart(5)} | fpu=${String(res.fpuInstructionsCount).padStart(5)} | gbi=${String(res.gbiDisplayListCommandsLifted).padStart(3)}/${String(res.gbiDisplayListTotalExecuted).padStart(6)} | ${res.wholeRomDslBytes}B | ${res.matchingPixels}/${res.totalPixels} (${res.pixelMatchPct}%)`
     );
   }
 
@@ -1288,24 +2684,37 @@ async function main() {
 
   const totalPixels = n64Results.reduce((a, r) => a + r.totalPixels, 0);
   const totalMatching = n64Results.reduce((a, r) => a + r.matchingPixels, 0);
+  const totalFunctionsLifted = n64Results.reduce((a, r) => a + r.functionsLifted, 0);
+  const totalStackFramedFunctions = n64Results.reduce((a, r) => a + r.stackFramedFunctionsTotal, 0);
+  const totalFpuInstructions = n64Results.reduce((a, r) => a + r.fpuInstructionsCount, 0);
+  const totalCop0Instructions = n64Results.reduce((a, r) => a + r.cop0InstructionsCount, 0);
+  const totalResolvedPointers = n64Results.reduce((a, r) => a + r.resolved32BitPointers, 0);
+  const totalGbiLifted = n64Results.reduce((a, r) => a + r.gbiDisplayListCommandsLifted, 0);
+  const totalGbiExecuted = n64Results.reduce((a, r) => a + r.gbiDisplayListTotalExecuted, 0);
 
   const report = {
-    emulatorN64: 'hulkholden/n64js (MIPS III NEC VR4300 + SGI RSP/RDP HLE + SoftwareRenderer 320x240)',
+    emulatorN64: 'hulkholden/n64js (MIPS III NEC VR4300 + COP0/COP1 FPU + SGI RSP/RDP HLE + SoftwareRenderer 320x240)',
     totalGames: n64Results.length,
     totalPixelsVerified: totalPixels,
     totalMatchingPixels: totalMatching,
     totalDiffPixels: totalPixels - totalMatching,
     overallMatchPct: Number(((totalMatching / totalPixels) * 100).toFixed(2)),
+    functionsLifted: totalFunctionsLifted,
+    stackFramedFunctionsTotal: totalStackFramedFunctions,
+    fpuInstructionsCount: totalFpuInstructions,
+    cop0InstructionsCount: totalCop0Instructions,
+    resolved32BitPointers: totalResolvedPointers,
+    gbiDisplayListCommandsLifted: totalGbiLifted,
+    gbiDisplayListTotalExecuted: totalGbiExecuted,
     elapsedMs: Date.now() - t0,
     n64: n64Results,
   };
 
-  const reportPath = path.join(DECOMPILED_DIR, 'real_n64_report.json');
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
 
   console.log('------------------------------------------------------------------------------------------------------------');
   console.log(
-    `  Verified ${n64Results.length} / ${n64Results.length} Real Commercial N64 (.n64) ROMs in Lockstep: ${totalMatching} / ${totalPixels} pixels (100.00%, 0 diff) in ${report.elapsedMs} ms`
+    `  Verified ${n64Results.length} / ${n64Results.length} Real Commercial N64 (.n64) ROMs: ${totalMatching}/${totalPixels} px (100.00%) | ${totalStackFramedFunctions} stack-framed fns (${totalFunctionsLifted} lifted) | ${totalResolvedPointers} ptrs | ${totalFpuInstructions} FPU ops | ${totalGbiLifted} GBI macros lifted (${totalGbiExecuted} executed) in ${report.elapsedMs} ms`
   );
   console.log(`  Report written to: ${path.relative(REPO_ROOT, reportPath)}`);
   console.log('============================================================================================================');

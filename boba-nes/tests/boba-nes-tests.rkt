@@ -2219,6 +2219,36 @@
     (check-true (file-exists? recomp-path) (format "Missing recompiled full-game ROM ~a" recomp-path))
     (check-true (file-exists? tas-path) (format "Missing .fm2 TAS file ~a" tas-path))
 
+    ;; Verify multi-line formatting (> 100 lines) and lifted AST forms in .boba.rkt and example modules
+    (define boba-str (file->string boba-path))
+    (define ex-str (file->string ex-path))
+    (define boba-lines (length (string-split boba-str "\n")))
+    (define ex-lines (length (string-split ex-str "\n")))
+    (check-true (> boba-lines 100)
+                (format "Expected multi-line formatting (> 100 lines) in ~a, got ~a" boba-path boba-lines))
+    (check-true (> ex-lines 100)
+                (format "Expected multi-line formatting (> 100 lines) in ~a, got ~a" ex-path ex-lines))
+    (case target
+      [(nes)
+       (check-true (string-contains? boba-str "(symbolic-mmio-xref")
+                   (format "Missing symbolic-mmio-xref in ~a" boba-path))
+       (check-true (string-contains? boba-str "(defsub ")
+                   (format "Missing lifted (defsub ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(defdata ")
+                   (format "Missing lifted (defdata ...) in ~a" boba-path))]
+      [(gb gbc)
+       (check-true (string-contains? boba-str "(symbolic-mmio-xref")
+                   (format "Missing symbolic-mmio-xref in ~a" boba-path))
+       (check-true (string-contains? boba-str "(def-sm83-isr ")
+                   (format "Missing lifted (def-sm83-isr ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(defsub-sm83 ")
+                   (format "Missing lifted (defsub-sm83 ...) in ~a" boba-path))]
+      [(pico)
+       (check-true (string-contains? boba-str "(def-pico-function")
+                   (format "Missing lifted (def-pico-function ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(lifted-pico8-assets")
+                   (format "Missing (lifted-pico8-assets ...) in ~a" boba-path))])
+
     ;; Verify 100.00% byte-for-byte identity between original commercial ROM and recompiled whole-ROM binary
     (define orig-bytes (file->bytes orig-path))
     (define recomp-bytes (file->bytes recomp-path))
@@ -2232,10 +2262,39 @@
     (check-true (>= (length tas-masks) 600)
                 (format "Expected >= 600 TAS frames for ~a_~a, got ~a" target id (length tas-masks))))
 
-  ;; 3. Verify direct Racket round-trip recompilation from .boba.rkt S-expression
-  (define smb-roundtrip
-    (recompile-boba-whole-rom-file! "assets/decompiled/real_roms/nes_super_mario_bros.boba.rkt"))
-  (check-equal? smb-roundtrip (file->bytes "assets/roms/super_mario_bros.nes")))
+  ;; 3. Verify direct instruction/function assembly & round-trip recompilation across all 4 targets
+  (for ([sample-pair (in-list '(("assets/decompiled/real_roms/nes_super_mario_bros.boba.rkt"
+                                 "assets/roms/super_mario_bros.nes")
+                                ("assets/decompiled/real_roms/gb_tetris.boba.rkt"
+                                 "assets/roms/gb/tetris.gb")
+                                ("assets/decompiled/real_roms/gbc_smb_deluxe.boba.rkt"
+                                 "assets/roms/gbc/smb_deluxe.gbc")
+                                ("assets/decompiled/real_roms/pico_celeste_classic.boba.rkt"
+                                 "assets/roms/pico/celeste.p8")))])
+    (define boba-file (first sample-pair))
+    (define orig-file (second sample-pair))
+    (define orig-bytes (file->bytes orig-file))
+    (define sexp (read-boba-whole-rom-sexp boba-file))
+    (define direct-asm-res (verify-whole-rom-direct-assembly sexp orig-bytes))
+    (check-true (hash-ref direct-asm-res 'exact-match?)
+                (format "Direct instruction assembly failed for ~a" boba-file))
+    (check-true (> (hash-ref direct-asm-res 'assembled-subs) 0)
+                (format "Expected > 0 assembled subroutines/functions for ~a" boba-file))
+    (check-equal? (hash-ref direct-asm-res 'recompiled-bytes) orig-bytes
+                  (format "Round-trip recompilation mismatch for ~a" boba-file)))
+
+  ;; 4. Verify whole_rom_decompilation_report.json metrics
+  (local-require json)
+  (define whole-rpt-path (build-path "assets" "decompiled" "whole_rom_decompilation_report.json"))
+  (check-true (file-exists? whole-rpt-path))
+  (define whole-rpt (string->jsexpr (file->string whole-rpt-path)))
+  (check-equal? (hash-ref whole-rpt 'allBitExactWholeRom) #t)
+  (check-equal? (hash-ref whole-rpt 'totalGames) 44)
+  (for ([g (in-list (hash-ref whole-rpt 'games))])
+    (check-equal? (hash-ref g 'bitExactWholeRom) #t)
+    (check-true (> (hash-ref g 'dslLineCount) 100))
+    (check-true (> (hash-ref g 'liftedSubroutines) 0))
+    (check-true (> (hash-ref g 'liftedInstructions) 0))))
 
 ;; ============================================================================
 ;; 39. Real Commercial SNES (.sfc in SnesJs), GBA (.gba in gbajs2) & N64 (.n64
@@ -2258,42 +2317,60 @@
   (check-equal? (hash-ref n64-rpt 'totalMatchingPixels) 768000)
   (check-equal? (hash-ref n64-rpt 'totalDiffPixels) 0)
 
-  ;; Verify all 10 SNES, 10 GBA, and 10 N64 whole-ROM .boba.rkt modules, recompiled ROMs, and .fm2 TAS files
+  ;; Verify all 10 SNES, 10 GBA, and 10 N64 whole-ROM .boba.rkt modules, symbolic examples/decompiled/*_whole_rom.rkt modules, recompiled ROMs, and .fm2 TAS files
   (for ([snes-id (in-list '("super_mario_world" "link_to_the_past" "super_metroid" "chrono_trigger"
                             "donkey_kong_country" "super_mario_kart" "mega_man_x" "f_zero"
                             "contra_iii" "earthbound"))])
     (define boba-p (build-path "assets" "decompiled" "real_roms" (format "snes_~a.boba.rkt" snes-id)))
+    (define sym-p  (build-path "examples" "decompiled" (format "snes_~a_whole_rom.rkt" snes-id)))
     (define rec-p  (build-path "build" (format "recompiled_snes_~a.sfc" snes-id)))
     (define tas-p  (build-path "assets" "tas" (format "snes_~a.fm2" snes-id)))
     (check-true (file-exists? boba-p) (format "Missing SNES .boba.rkt ~a" boba-p))
+    (check-true (file-exists? sym-p)  (format "Missing symbolic SNES whole_rom.rkt ~a" sym-p))
     (check-true (file-exists? rec-p)  (format "Missing recompiled SNES .sfc ~a" rec-p))
     (check-true (file-exists? tas-p)  (format "Missing SNES .fm2 ~a" tas-p))
-    (check-true (>= (file-size rec-p) 524288) (format "Expected full-size SNES ROM >= 512KB for ~a" snes-id)))
+    (check-true (>= (file-size rec-p) 524288) (format "Expected full-size SNES ROM >= 512KB for ~a" snes-id))
+    (define sym-str (file->string sym-p))
+    (check-true (string-contains? sym-str "(defsub-65c816 ") (format "Missing defsub-65c816 in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-snes-spc700-audio-driver") (format "Missing SPC700 driver in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-snes-mmio-profile") (format "Missing SNES MMIO profile in ~a" sym-p)))
 
   (for ([gba-id (in-list '("metroid_fusion" "aria_of_sorrow" "superstar_saga" "pokemon_emerald"
                            "advance_wars" "golden_sun" "minish_cap" "mega_man_zero"
                            "fire_emblem_gba" "warioware_inc"))])
     (define boba-p (build-path "assets" "decompiled" "real_roms" (format "gba_~a.boba.rkt" gba-id)))
+    (define sym-p  (build-path "examples" "decompiled" (format "gba_~a_whole_rom.rkt" gba-id)))
     (define rec-p  (build-path "build" (format "recompiled_gba_~a.gba" gba-id)))
     (define tas-p  (build-path "assets" "tas" (format "gba_~a.fm2" gba-id)))
     (check-true (file-exists? boba-p) (format "Missing GBA .boba.rkt ~a" boba-p))
+    (check-true (file-exists? sym-p)  (format "Missing symbolic GBA whole_rom.rkt ~a" sym-p))
     (check-true (file-exists? rec-p)  (format "Missing recompiled GBA .gba ~a" rec-p))
     (check-true (file-exists? tas-p)  (format "Missing GBA .fm2 ~a" tas-p))
-    (check-true (>= (file-size rec-p) 4194304) (format "Expected full-size GBA ROM >= 4MB for ~a" gba-id)))
+    (check-true (>= (file-size rec-p) 4194304) (format "Expected full-size GBA ROM >= 4MB for ~a" gba-id))
+    (define sym-str (file->string sym-p))
+    (check-true (string-contains? sym-str "(defsub-arm32 ") (format "Missing defsub-arm32 in ~a" sym-p))
+    (check-true (string-contains? sym-str "(defsub-thumb16 ") (format "Missing defsub-thumb16 in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-gba-bios-swi-catalog") (format "Missing GBA BIOS SWI catalog in ~a" sym-p)))
 
   (for ([n64-id (in-list '("super_mario_64" "ocarina_of_time" "mario_kart_64" "banjo_kazooie"
                            "f_zero_x" "1080_snowboarding" "castlevania_64" "bomberman_64"
                            "bomberman_hero" "kirby_64"))])
     (define orig-p (build-path "assets" "roms" "n64" (format "~a.n64" n64-id)))
     (define boba-p (build-path "assets" "decompiled" "real_roms" (format "n64_~a.boba.rkt" n64-id)))
+    (define sym-p  (build-path "examples" "decompiled" (format "n64_~a_whole_rom.rkt" n64-id)))
     (define rec-p  (build-path "build" (format "recompiled_n64_~a.n64" n64-id)))
     (define tas-p  (build-path "assets" "tas" (format "n64_~a.fm2" n64-id)))
     (check-true (file-exists? orig-p) (format "Missing orig N64 ROM ~a" orig-p))
     (check-true (file-exists? boba-p) (format "Missing N64 .boba.rkt ~a" boba-p))
+    (check-true (file-exists? sym-p)  (format "Missing symbolic N64 whole_rom.rkt ~a" sym-p))
     (check-true (file-exists? rec-p)  (format "Missing recompiled N64 .n64 ~a" rec-p))
     (check-true (file-exists? tas-p)  (format "Missing N64 .fm2 ~a" tas-p))
     (check-equal? (file-size rec-p) (file-size orig-p)
-                  (format "Whole-ROM N64 size mismatch for ~a" n64-id))))
+                  (format "Whole-ROM N64 size mismatch for ~a" n64-id))
+    (define sym-str (file->string sym-p))
+    (check-true (string-contains? sym-str "(define-n64-lifted-subroutines") (format "Missing VR4300 subroutines in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-n64-rsp-rdp-display-list") (format "Missing GBI display lists in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-n64-resolved-pointers") (format "Missing resolved 32-bit pointers in ~a" sym-p))))
 
 (printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, whole-ROM decompiler/recompiler, continuous .fm2 TAS lockstep, and 74 Multi-Architecture Side-by-Side Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
         total-checks)
