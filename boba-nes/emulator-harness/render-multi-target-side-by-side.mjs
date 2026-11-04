@@ -35,6 +35,7 @@ const FONT_5X7 = {
   '!': [0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04],
   '"': [0x0A, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00],
   '#': [0x0A, 0x1F, 0x0A, 0x0A, 0x1F, 0x0A, 0x00],
+  '$': [0x04, 0x0F, 0x14, 0x0E, 0x05, 0x1E, 0x04],
   '%': [0x19, 0x19, 0x02, 0x04, 0x08, 0x13, 0x13],
   '&': [0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D],
   "'": [0x04, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00],
@@ -106,7 +107,10 @@ function fillRect(png, x0, y0, w, h, r, g, b) {
 }
 
 function drawText(png, text, x0, y0, r, g, b, scale = 1) {
-  const upper = String(text).toUpperCase();
+  const upper = String(text)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
   let curX = x0;
   for (let i = 0; i < upper.length; i++) {
     const ch = upper[i];
@@ -171,16 +175,14 @@ function renderSingle3PanelPng(entry) {
       setPixel(png, xRec + x, yPanel + y, r1, g1, b1);
 
       if (r0 === r1 && g0 === g1 && b0 === b1) {
-        // Attenuated luminance + verification grid on the diff panel so structure is visible with 0 diff
-        const luma = Math.round(0.25 * r0 + 0.5 * g0 + 0.25 * b0);
-        const gridBoost = (x % 16 === 0 || y % 16 === 0) ? 14 : 0;
+        // Clean emerald-tinted zero-diff overlay matching the NES 3-panel visual diff style
         setPixel(
           png,
           xDif + x,
           yPanel + y,
-          Math.min(255, Math.round(luma * 0.18) + 6),
-          Math.min(255, Math.round(luma * 0.38) + 18 + gridBoost),
-          Math.min(255, Math.round(luma * 0.24) + 10)
+          Math.min(255, Math.round(r0 * 0.22) + 4),
+          Math.min(255, Math.round(g0 * 0.45) + 22),
+          Math.min(255, Math.round(b0 * 0.25) + 8)
         );
       } else {
         diffPixels++;

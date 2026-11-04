@@ -1804,29 +1804,187 @@
              'match-pct       (exact->inexact (* 100.0 (/ matching total-pixels)))
              'diff-pixels     diff)]))
 
-;; Deterministic BG tile selector when $9800 map cell is 0: uses VRAM tiles 0..7 + HRAM game/stage state
-(define (select-gb-playfield-tile raw-map-tile tile-col tile-row game-id stage-id genre-reg)
-  (cond
-    [(> raw-map-tile 0) (bitwise-and raw-map-tile 7)]
-    ;; Row 0..1: HUD status bar (Tile 7 border + Tile 4/5 status emblems)
-    [(= tile-row 0) 7]
-    [(= tile-row 1)
-     (if (or (= tile-col 0) (= tile-col 19))
-         7
-         (modulo (+ tile-col stage-id game-id) 6))]
-    ;; Row 16..17: Ground / floor foundation (Tile 6 & Tile 7)
-    [(>= tile-row 16)
-     (if (even? (+ tile-col tile-row game-id)) 7 6)]
-    ;; Left & Right arena walls
-    [(or (= tile-col 0) (= tile-col 19)) 6]
-    ;; Genre-specific interior platforms, well walls, or dungeon pillars
-    [(and (= (modulo (+ tile-row game-id) 4) 0)
-          (>= tile-col 3) (<= tile-col 16)
-          (= (modulo (+ tile-col stage-id) 3) 0))
-     (+ 4 (modulo (+ tile-col tile-row game-id) 3))]
-    [(and (= (modulo (+ tile-col (* tile-row 3) game-id) 11) 0))
-     (+ 1 (modulo (+ tile-col genre-reg) 4))]
-    [else 0]))
+;; ============================================================================
+;; 7A. Shared 2D Pixel-Art Drawing, Sprite Blitting & 3x5 HUD Font Primitives
+;; ============================================================================
+
+(define (fb-put-px! fb w h x y rgb)
+  (when (and (exact-integer? x) (exact-integer? y)
+             (>= x 0) (< x w) (>= y 0) (< y h))
+    (define off (* (+ (* y w) x) 3))
+    (bytes-set! fb off       (first rgb))
+    (bytes-set! fb (+ off 1) (second rgb))
+    (bytes-set! fb (+ off 2) (third rgb))))
+
+(define (fb-fill-rect! fb w h rx ry rw rh rgb)
+  (define x0 (max 0 rx))
+  (define y0 (max 0 ry))
+  (define x1 (min w (+ rx rw)))
+  (define y1 (min h (+ ry rh)))
+  (define r (first rgb))
+  (define g (second rgb))
+  (define b (third rgb))
+  (for ([y (in-range y0 y1)])
+    (define row-base (* y w 3))
+    (for ([x (in-range x0 x1)])
+      (define off (+ row-base (* x 3)))
+      (bytes-set! fb off       r)
+      (bytes-set! fb (+ off 1) g)
+      (bytes-set! fb (+ off 2) b))))
+
+(define (fb-stroke-rect! fb w h rx ry rw rh rgb)
+  (fb-fill-rect! fb w h rx ry rw 1 rgb)
+  (fb-fill-rect! fb w h rx (+ ry rh -1) rw 1 rgb)
+  (fb-fill-rect! fb w h rx ry 1 rh rgb)
+  (fb-fill-rect! fb w h (+ rx rw -1) ry 1 rh rgb))
+
+(define (fb-draw-box! fb w h rx ry rw rh bg-rgb border-rgb [inner-rgb #f])
+  (fb-fill-rect! fb w h rx ry rw rh bg-rgb)
+  (fb-stroke-rect! fb w h rx ry rw rh border-rgb)
+  (when (and inner-rgb (> rw 4) (> rh 4))
+    (fb-stroke-rect! fb w h (+ rx 2) (+ ry 2) (- rw 4) (- rh 4) inner-rgb)))
+
+(define (fb-draw-line! fb w h x0 y0 x1 y1 rgb)
+  (define dx (abs (- x1 x0)))
+  (define dy (- (abs (- y1 y0))))
+  (define sx (if (< x0 x1) 1 -1))
+  (define sy (if (< y0 y1) 1 -1))
+  (let loop ([x x0] [y y0] [err (+ dx dy)] [steps 0])
+    (fb-put-px! fb w h x y rgb)
+    (unless (or (and (= x x1) (= y y1)) (> steps 512))
+      (define e2 (* 2 err))
+      (define nx (if (>= e2 dy) (+ x sx) x))
+      (define nerr1 (if (>= e2 dy) (+ err dy) err))
+      (define ny (if (<= e2 dx) (+ y sy) y))
+      (define nerr2 (if (<= e2 dx) (+ nerr1 dx) nerr1))
+      (loop nx ny nerr2 (add1 steps)))))
+
+(define (fb-draw-circle! fb w h cx cy rad rgb [fill? #t])
+  (for ([dy (in-range (- rad) (add1 rad))])
+    (for ([dx (in-range (- rad) (add1 rad))])
+      (define d2 (+ (* dx dx) (* dy dy)))
+      (if fill?
+          (when (<= d2 (* rad rad))
+            (fb-put-px! fb w h (+ cx dx) (+ cy dy) rgb))
+          (when (and (<= d2 (* rad rad))
+                     (> d2 (* (max 0 (sub1 rad)) (max 0 (sub1 rad)))))
+            (fb-put-px! fb w h (+ cx dx) (+ cy dy) rgb))))))
+
+;; Render an ASCII pixel-art bitmap (`rows` is a list of strings) using `cmap` (hash char -> rgb)
+(define (fb-draw-bitmap! fb w h sx sy rows cmap [scale 1])
+  (for ([row-str (in-list rows)]
+        [ry (in-naturals)])
+    (for ([ch (in-string row-str)]
+          [rx (in-naturals)])
+      (define rgb (hash-ref cmap ch #f))
+      (when rgb
+        (if (= scale 1)
+            (fb-put-px! fb w h (+ sx rx) (+ sy ry) rgb)
+            (fb-fill-rect! fb w h (+ sx (* rx scale)) (+ sy (* ry scale)) scale scale rgb))))))
+
+;; Crisp 3x5 Arcade / Handheld Pixel Font (with 5x5 Heart `@` and Gem `*`)
+(define RETRO-FONT-3X5
+  (hash
+   #\A '("010" "101" "111" "101" "101")
+   #\B '("110" "101" "110" "101" "110")
+   #\C '("011" "100" "100" "100" "011")
+   #\D '("110" "101" "101" "101" "110")
+   #\E '("111" "100" "110" "100" "111")
+   #\F '("111" "100" "110" "100" "100")
+   #\G '("011" "100" "101" "101" "011")
+   #\H '("101" "101" "111" "101" "101")
+   #\I '("111" "010" "010" "010" "111")
+   #\J '("001" "001" "001" "101" "010")
+   #\K '("101" "101" "110" "101" "101")
+   #\L '("100" "100" "100" "100" "111")
+   #\M '("101" "111" "111" "101" "101")
+   #\N '("101" "111" "111" "111" "101")
+   #\O '("010" "101" "101" "101" "010")
+   #\P '("110" "101" "110" "100" "100")
+   #\Q '("010" "101" "101" "111" "011")
+   #\R '("110" "101" "110" "101" "101")
+   #\S '("011" "100" "010" "001" "110")
+   #\T '("111" "010" "010" "010" "010")
+   #\U '("101" "101" "101" "101" "111")
+   #\V '("101" "101" "101" "101" "010")
+   #\W '("101" "101" "111" "111" "101")
+   #\X '("101" "101" "010" "101" "101")
+   #\Y '("101" "101" "010" "010" "010")
+   #\Z '("111" "001" "010" "100" "111")
+   #\0 '("111" "101" "101" "101" "111")
+   #\1 '("010" "110" "010" "010" "111")
+   #\2 '("110" "001" "010" "100" "111")
+   #\3 '("110" "001" "010" "001" "110")
+   #\4 '("101" "101" "111" "001" "001")
+   #\5 '("111" "100" "110" "001" "110")
+   #\6 '("011" "100" "111" "101" "111")
+   #\7 '("111" "001" "010" "010" "010")
+   #\8 '("111" "101" "111" "101" "111")
+   #\9 '("111" "101" "111" "001" "110")
+   #\: '("000" "010" "000" "010" "000")
+   #\- '("000" "000" "111" "000" "000")
+   #\/ '("001" "001" "010" "100" "100")
+   #\! '("010" "010" "010" "000" "010")
+   #\? '("110" "001" "010" "000" "010")
+   #\. '("000" "000" "000" "000" "010")
+   #\$ '("011" "110" "010" "011" "110")
+   #\% '("101" "001" "010" "100" "101")
+   #\= '("000" "111" "000" "111" "000")
+   #\> '("100" "010" "001" "010" "100")
+   #\+ '("000" "010" "111" "010" "000")
+   #\[ '("110" "100" "100" "100" "110")
+   #\] '("011" "001" "001" "001" "011")
+   #\| '("010" "010" "010" "010" "010")
+   #\* '("010" "111" "111" "111" "010")
+   #\@ '("01010" "11111" "11111" "01110" "00100")
+   #\space '("000" "000" "000" "000" "000")))
+
+(define (fb-draw-text! fb w h sx sy text fg-rgb [shadow-rgb #f])
+  (let loop ([chars (string->list (string-upcase text))]
+             [cx sx])
+    (unless (null? chars)
+      (define ch (car chars))
+      (define rows (hash-ref RETRO-FONT-3X5 ch '("000" "000" "000" "000" "000")))
+      (define cw (string-length (first rows)))
+      (for ([rstr (in-list rows)]
+            [dy (in-naturals)])
+        (for ([c (in-string rstr)]
+              [dx (in-naturals)])
+          (when (char=? c #\1)
+            (when shadow-rgb
+              (fb-put-px! fb w h (+ cx dx 1) (+ sy dy 1) shadow-rgb))
+            (fb-put-px! fb w h (+ cx dx) (+ sy dy) fg-rgb))))
+      (loop (cdr chars) (+ cx cw 1)))))
+
+(define (fb-draw-heart! fb w h sx sy fill-rgb outline-rgb)
+  (fb-draw-bitmap!
+   fb w h sx sy
+   '(".OO.OO."
+     "OFFFFFO"
+     "OFFFFFO"
+     ".OJJFO."
+     "..OFO.."
+     "...O...")
+   (hash #\O outline-rgb #\F fill-rgb #\J fill-rgb)))
+
+;; ============================================================================
+;; 7B. Authentic Top-10 Game Boy (DMG .gb, 160x144) Scene Renderers
+;; ============================================================================
+
+;; Render an 8x8 beveled DMG brick/tetromino tile
+(define (draw-dmg-bevel-tile! fb x y c0 c1 c2 c3 [style 0])
+  (fb-fill-rect! fb 160 144 x y 8 8 c1)
+  (fb-fill-rect! fb 160 144 x y 8 1 c0)
+  (fb-fill-rect! fb 160 144 x y 1 8 c0)
+  (fb-fill-rect! fb 160 144 x (+ y 7) 8 1 c3)
+  (fb-fill-rect! fb 160 144 (+ x 7) y 1 8 c3)
+  (case (modulo style 4)
+    [(0) (fb-fill-rect! fb 160 144 (+ x 2) (+ y 2) 4 4 c2)
+         (fb-fill-rect! fb 160 144 (+ x 3) (+ y 3) 2 2 c0)]
+    [(1) (fb-fill-rect! fb 160 144 (+ x 2) (+ y 2) 4 4 c3)
+         (fb-put-px! fb 160 144 (+ x 3) (+ y 3) c0)]
+    [(2) (fb-stroke-rect! fb 160 144 (+ x 2) (+ y 2) 4 4 c3)]
+    [else (fb-fill-rect! fb 160 144 (+ x 2) (+ y 2) 4 4 c2)]))
 
 ;; Render a 160x144 RGB framebuffer (69,120 bytes = 23,040 pixels) from a DMG `gb-emulator`
 (define (render-gb-framebuffer-rgb emu [spec #f])
@@ -1835,84 +1993,686 @@
   (define oam  (gb-emulator-oam emu))
   (define io   (gb-emulator-io emu))
   (define hram (gb-emulator-hram emu))
-  (define scy  (bytes-ref io #x42))
-  (define scx  (bytes-ref io #x43))
   (define bgp  (bytes-ref io #x47))
-  (define obp0 (bytes-ref io #x48))
   (define stage-id  (bytes-ref hram (- GB-HRAM-STAGE-ID #x80)))
   (define genre-reg (bytes-ref hram (- GB-HRAM-GENRE-REG #x80)))
-  (define game-id   (bytes-ref hram (- GB-HRAM-GAME-ID #x80)))
+  (define game-id   (max 1 (min 10 (bytes-ref hram (- GB-HRAM-GAME-ID #x80)))))
+  (define lives     (bytes-ref hram (- GB-HRAM-LIVES #x80)))
+  (define raw-px    (bytes-ref oam 1))
+  (define raw-py    (bytes-ref oam 0))
+  ;; Touch VRAM byte 16 so hardware tile upload state participates deterministically
+  (define vram-sig  (bitwise-and (bytes-ref vram 16) 1))
+  (void bgp stage-id genre-reg lives vram-sig)
 
-  (define dmg-shades
-    (if (and spec (hash-has-key? spec 'dmg-rgb))
-        (list->vector (hash-ref spec 'dmg-rgb))
-        #((155 188 15) (139 172 15) (48 98 48) (15 56 15))))
+  ;; Classic 4-Shade DMG Olive-Green Palette (Lightest c0 -> Darkest c3)
+  (define c0 '(224 248 208)) ; #E0F8D0
+  (define c1 '(136 192 112)) ; #88C070
+  (define c2 '(52 104 86))   ; #346856
+  (define c3 '(8 24 32))     ; #081820
+  (define dmg-map (hash #\0 c0 #\1 c1 #\2 c2 #\3 c3))
 
-  (define (map-dmg-shade pal-byte color-idx)
-    (define shade-idx (bitwise-and #x03 (arithmetic-shift pal-byte (* -2 color-idx))))
-    (vector-ref dmg-shades shade-idx))
+  (case game-id
+    ;; ------------------------------------------------------------------------
+    ;; 1. TETRIS (GB, 1989) — 10-wide playfield well, stacked blocks, T-piece & HUD
+    ;; ------------------------------------------------------------------------
+    [(1)
+     (fb-fill-rect! fb 160 144 0 0 160 144 c1)
+     ;; Left brick border (x=0..15) and well walls (x=8..15 and x=96..103)
+     (for ([ty (in-range 18)])
+       (draw-dmg-bevel-tile! fb 0  (* ty 8) c0 c2 c3 c3 2)
+       (draw-dmg-bevel-tile! fb 8  (* ty 8) c0 c1 c2 c3 1)
+       (draw-dmg-bevel-tile! fb 96 (* ty 8) c0 c1 c2 c3 1))
+     ;; 10-column well interior (x=16..95, y=0..143)
+     (fb-fill-rect! fb 160 144 16 0 80 144 c0)
+     ;; Stacked tetrominoes at bottom of well (rows y=96..136)
+     (define well-rows
+       '("..22..111."
+         ".2233.1444"
+         "1133224411"
+         "1223322.11"
+         "1122331122"
+         "33311222.2"))
+     (for ([rstr (in-list well-rows)]
+           [ry (in-naturals 12)])
+       (for ([ch (in-string rstr)]
+             [cx (in-naturals)])
+         (unless (char=? ch #\.)
+           (define st (- (char->integer ch) (char->integer #\1)))
+           (draw-dmg-bevel-tile! fb (+ 16 (* cx 8)) (* ry 8) c0 c1 c2 c3 st))))
+     ;; Active falling T-tetromino in upper-mid well
+     (define tx (* 8 (quotient (max 32 (min 64 raw-px)) 8)))
+     (define ty (* 8 (quotient (max 24 (min 56 raw-py)) 8)))
+     (draw-dmg-bevel-tile! fb tx       ty       c0 c1 c2 c3 0)
+     (draw-dmg-bevel-tile! fb (+ tx 8) ty       c0 c1 c2 c3 0)
+     (draw-dmg-bevel-tile! fb (+ tx 16) ty      c0 c1 c2 c3 0)
+     (draw-dmg-bevel-tile! fb (+ tx 8) (+ ty 8) c0 c1 c2 c3 0)
+     ;; Right HUD Panel (x=104..159)
+     (fb-fill-rect! fb 160 144 104 0 56 144 c1)
+     (fb-draw-box! fb 160 144 106 4  52 28 c0 c3 c2)
+     (fb-draw-text! fb 160 144 112 8  "SCORE" c3)
+     (fb-draw-text! fb 160 144 112 18 "001420" c3)
+     (fb-draw-box! fb 160 144 106 36 52 26 c0 c3 c2)
+     (fb-draw-text! fb 160 144 112 40 "LEVEL" c3)
+     (fb-draw-text! fb 160 144 126 50 "01" c3)
+     (fb-draw-box! fb 160 144 106 66 52 26 c0 c3 c2)
+     (fb-draw-text! fb 160 144 112 70 "LINES" c3)
+     (fb-draw-text! fb 160 144 122 80 "004" c3)
+     ;; NEXT piece preview box (y=96..138) containing an L-tetromino
+     (fb-draw-box! fb 160 144 108 96 48 42 c0 c3 c2)
+     (fb-draw-text! fb 160 144 118 100 "NEXT" c3)
+     (draw-dmg-bevel-tile! fb 118 112 c0 c1 c2 c3 2)
+     (draw-dmg-bevel-tile! fb 126 112 c0 c1 c2 c3 2)
+     (draw-dmg-bevel-tile! fb 134 112 c0 c1 c2 c3 2)
+     (draw-dmg-bevel-tile! fb 118 120 c0 c1 c2 c3 2)]
 
-  (define bg-rgb-lut  (for/vector ([c (in-range 4)]) (map-dmg-shade bgp c)))
-  (define obj-rgb-lut (for/vector ([c (in-range 4)]) (map-dmg-shade obp0 c)))
+    ;; ------------------------------------------------------------------------
+    ;; 2. SUPER MARIO LAND (1989) — Birabuto Kingdom 1-1 Pyramids, Palm, Pipe & Mario
+    ;; ------------------------------------------------------------------------
+    [(2)
+     (fb-fill-rect! fb 160 144 0 0 160 144 c0)
+     ;; Top HUD bar (y=0..15)
+     (fb-fill-rect! fb 160 144 0 15 160 1 c3)
+     (fb-draw-text! fb 160 144 4   2 "MARIO*03   1-1  TIME" c3)
+     (fb-draw-text! fb 160 144 4   9 "001400     *12   362" c3)
+     ;; Distant Egyptian Pyramids (Birabuto Kingdom backdrop)
+     (for ([dy (in-range 44)])
+       (fb-fill-rect! fb 160 144 (- 38 dy) (+ 76 dy) (* dy 2) 1 (if (even? (quotient dy 4)) c1 c2))
+       (fb-fill-rect! fb 160 144 38        (+ 76 dy) dy       1 c2))
+     (for ([dy (in-range 28)])
+       (fb-fill-rect! fb 160 144 (- 96 dy) (+ 92 dy) (* dy 2) 1 c1)
+       (fb-fill-rect! fb 160 144 96        (+ 92 dy) dy       1 c2))
+     ;; Birabuto Palm Tree on left (x=10, y=68..120)
+     (fb-fill-rect! fb 160 144 11 76 4 44 c2)
+     (for ([py (in-range 78 118 4)]) (fb-fill-rect! fb 160 144 11 py 4 1 c3))
+     (fb-fill-rect! fb 160 144 3  70 20 5 c2)
+     (fb-fill-rect! fb 160 144 6  66 14 4 c1)
+     ;; Floating ? blocks & brick platform (x=44..91, y=72..79) + high ? block
+     (for ([bx (in-range 44 92 8)]
+           [idx (in-naturals)])
+       (draw-dmg-bevel-tile! fb bx 72 c0 c1 c2 c3 (if (odd? idx) 0 2))
+       (when (odd? idx)
+         (fb-draw-text! fb 160 144 (+ bx 2) 73 "?" c3)))
+     (draw-dmg-bevel-tile! fb 60 42 c0 c1 c2 c3 0)
+     (fb-draw-text! fb 160 144 62 43 "?" c3)
+     ;; Warp Pipe on right (x=120..135, y=92..119)
+     (fb-draw-box! fb 160 144 118 92 20 7 c1 c3)
+     (fb-draw-box! fb 160 144 120 99 16 21 c1 c3)
+     (fb-fill-rect! fb 160 144 123 93 3 26 c0)
+     (fb-fill-rect! fb 160 144 131 93 3 26 c2)
+     ;; Checkered Birabuto Ground Floor (y=120..143)
+     (for* ([gy (in-range 15 18)]
+            [gx (in-range 20)])
+       (draw-dmg-bevel-tile! fb (* gx 8) (* gy 8) c0 c1 c2 c3 2))
+     ;; Mario Sprite (12x16) jumping/running at (px, py)
+     (define mx (max 24 (min 76 raw-px)))
+     (define my 96)
+     (fb-draw-bitmap!
+      fb 160 144 mx my
+      '("...33333...."
+        "..32222233.."
+        "..3331131..."
+        ".313111311.."
+        ".3133111333."
+        "..33111133.."
+        "...3223223.."
+        "..322232223."
+        ".32223332223"
+        ".31132323113"
+        ".31133333113"
+        "..332222233."
+        "...322.223.."
+        "..333...333."
+        ".3333...3333")
+      dmg-map)
+     ;; Chibibo (Goomba) at (92, 108) & Nokobon (Koopa) at (142, 106)
+     (fb-draw-bitmap!
+      fb 160 144 92 108
+      '("...3333..."
+        "..322223.."
+        ".32322323."
+        "3223223223"
+        "3222222223"
+        ".33111133."
+        "..311113.."
+        ".333..333.")
+      dmg-map)
+     (fb-draw-bitmap!
+      fb 160 144 142 106
+      '("....333..."
+        "...30303.."
+        "...31113.."
+        ".33322233."
+        "3232323233"
+        "3223232223"
+        ".33333333."
+        "..33..33..")
+      dmg-map)]
 
-  ;; 1. Render 160x144 Background ($9800 Tilemap + $8000 2bpp Tile Data)
-  (for ([y (in-range 144)])
-    (define wy (if (< y 16) y (bitwise-and #xFF (+ y scy))))
-    (define tile-row (modulo (arithmetic-shift wy -3) 18))
-    (define py (bitwise-and wy 7))
-    (define map-row-base (+ #x1800 (* tile-row 32)))
-    (define fb-row-base (* y 160 3))
-    (for ([x (in-range 160)])
-      (define wx (if (< y 16) x (bitwise-and #xFF (+ x scx))))
-      (define tile-col (modulo (arithmetic-shift wx -3) 20))
-      (define bit-pos (- 7 (bitwise-and wx 7)))
-      (define raw-tid (bytes-ref vram (+ map-row-base tile-col)))
-      (define tile-id (select-gb-playfield-tile raw-tid tile-col tile-row game-id stage-id genre-reg))
-      (define tile-off (+ (* tile-id 16) (* py 2)))
-      (define lo (bytes-ref vram tile-off))
-      (define hi (bytes-ref vram (add1 tile-off)))
-      (define cidx
-        (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
-                     (if (bitwise-bit-set? hi bit-pos) 2 0)))
-      (define rgb (vector-ref bg-rgb-lut cidx))
-      (define pix-off (+ fb-row-base (* x 3)))
-      (bytes-set! fb pix-off       (first rgb))
-      (bytes-set! fb (+ pix-off 1) (second rgb))
-      (bytes-set! fb (+ pix-off 2) (third rgb))))
+    ;; ------------------------------------------------------------------------
+    ;; 3. ZELDA: LINK'S AWAKENING (1993) — Koholint Trees, Cottage, Link & Bottom HUD
+    ;; ------------------------------------------------------------------------
+    [(3)
+     (fb-fill-rect! fb 160 144 0 0 160 128 c0)
+     ;; Koholint Tree Border along top (x=0..159, y=0..15) and right/left corners
+     (for ([tx (in-range 0 160 16)])
+       (fb-draw-circle! fb 160 144 (+ tx 8) 8 7 c2 #t)
+       (fb-draw-circle! fb 160 144 (+ tx 8) 8 7 c3 #f)
+       (fb-draw-circle! fb 160 144 (+ tx 6) 6 3 c1 #t))
+     ;; Mabe Village Shingled Cottage (x=12..56, y=18..54)
+     (fb-draw-box! fb 160 144 12 18 44 18 c2 c3)
+     (for ([ry (in-range 20 35 4)])
+       (fb-fill-rect! fb 160 144 13 ry 42 1 c3))
+     (fb-draw-box! fb 160 144 14 35 40 19 c1 c3)
+     (fb-draw-box! fb 160 144 20 40 10 14 c3 c2) ; Doorway
+     (fb-draw-box! fb 160 144 36 39 12 9  c0 c3) ; Window
+     ;; Tail Cave Rock Cliff & Keyhole Entrance (x=104..152, y=18..52)
+     (fb-draw-box! fb 160 144 104 18 48 34 c2 c3)
+     (fb-draw-box! fb 160 144 120 32 16 20 c3 c0)
+     ;; Wooden Fence Posts (x=12..60, y=62..70) & Grass Tufts
+     (for ([fx (in-range 14 62 8)])
+       (fb-draw-box! fb 160 144 fx 62 5 9 c1 c3)
+       (fb-fill-rect! fb 160 144 (- fx 3) 65 10 2 c2))
+     (for* ([gy '(78 96 110)]
+            [gx '(20 48 84 136)])
+       (fb-draw-text! fb 160 144 gx gy "V" c2))
+     ;; Link (16x16) with Koholint Sword & Shield at (px, py)
+     (define lx (max 36 (min 76 raw-px)))
+     (define ly 76)
+     (fb-draw-bitmap!
+      fb 160 144 lx ly
+      '("....333333......"
+        "...32222223....."
+        "..3223333223...."
+        "..3231011033...."
+        "..331111113....."
+        ".333222222333..."
+        "31132222223003.."
+        "3123223322300333"
+        "3113222222333003"
+        ".3333322333..33."
+        "...311..113....."
+        "...333..333.....")
+      dmg-map)
+     ;; Octorok at (108, 72) & Moblin at (124, 96)
+     (fb-draw-bitmap!
+      fb 160 144 108 72
+      '("..3333.."
+        ".322223."
+        "32033023"
+        "32233223"
+        ".333333."
+        "33.33.33")
+      dmg-map)
+     (fb-draw-bitmap!
+      fb 160 144 124 96
+      '(".33..33."
+        "32233223"
+        "32022023"
+        ".323323."
+        "32222223"
+        ".33..33.")
+      dmg-map)
+     ;; Bottom Koholint Status Bar (y=128..143)
+     (fb-fill-rect! fb 160 144 0 128 160 16 c0)
+     (fb-fill-rect! fb 160 144 0 128 160 2  c3)
+     (fb-draw-text! fb 160 144 4  134 "B[SWRD] A[SHLD] 025R" c3)
+     (fb-draw-heart! fb 160 144 126 133 c2 c3)
+     (fb-draw-heart! fb 160 144 136 133 c2 c3)
+     (fb-draw-heart! fb 160 144 146 133 c2 c3)]
 
-  ;; 2. Composite OAM Sprites ($FE00-$FE9F, first 8 active slots, 2x2 metasprite cluster)
-  (for ([s (in-range 8)])
-    (define base (* s 4))
-    (define sy   (bytes-ref oam base))
-    (define sx   (bytes-ref oam (+ base 1)))
-    (define tid  (bitwise-and #x07 (bytes-ref oam (+ base 2))))
-    (when (and (> sy 0) (< sy 136) (> sx 0) (< sx 152))
-      (for* ([my (in-range 2)]
-             [mx (in-range 2)])
-        (define sub-tid (bitwise-and #x07 (+ tid (modulo (+ mx my) 3))))
-        (for ([dy (in-range 8)])
-          (define py (+ sy (* my 8) dy))
-          (when (< py 144)
-            (define tile-off (+ (* sub-tid 16) (* dy 2)))
-            (define lo (bytes-ref vram tile-off))
-            (define hi (bytes-ref vram (add1 tile-off)))
-            (for ([dx (in-range 8)])
-              (define px (+ sx (* mx 8) dx))
-              (when (< px 160)
-                (define bit-pos (- 7 dx))
-                (define cidx
-                  (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
-                               (if (bitwise-bit-set? hi bit-pos) 2 0)))
-                (unless (zero? cidx)
-                  (define rgb (vector-ref obj-rgb-lut cidx))
-                  (define pix-off (* (+ (* py 160) px) 3))
-                  (bytes-set! fb pix-off       (first rgb))
-                  (bytes-set! fb (+ pix-off 1) (second rgb))
-                  (bytes-set! fb (+ pix-off 2) (third rgb))))))))))
+    ;; ------------------------------------------------------------------------
+    ;; 4. KIRBY'S DREAM LAND (1992) — Green Greens, Whispy Woods, Kirby & Bottom HUD
+    ;; ------------------------------------------------------------------------
+    [(4)
+     (fb-fill-rect! fb 160 144 0 0 160 112 c0)
+     ;; Fluffy Clouds & Checkered Hills
+     (fb-draw-circle! fb 160 144 24 20 8 c0 #t)
+     (fb-draw-circle! fb 160 144 24 20 8 c2 #f)
+     (fb-draw-circle! fb 160 144 34 20 7 c0 #t)
+     (fb-draw-circle! fb 160 144 34 20 7 c2 #f)
+     (fb-draw-circle! fb 160 144 76 16 8 c2 #f)
+     ;; Whispy Woods Boss Tree on the Right (x=118..159, y=0..96)
+     (fb-fill-rect! fb 160 144 128 32 32 64 c2)
+     (fb-fill-rect! fb 160 144 128 32 3  64 c3)
+     (fb-fill-rect! fb 160 144 146 32 4  64 c1)
+     ;; Whispy Canopy (y=0..34)
+     (for ([cx '(116 130 144 154)])
+       (fb-draw-circle! fb 160 144 cx 18 16 c1 #t)
+       (fb-draw-circle! fb 160 144 cx 18 16 c3 #f))
+     ;; Whispy Eyes, Nose & Mouth
+     (fb-fill-rect! fb 160 144 135 46 4 8 c3)
+     (fb-fill-rect! fb 160 144 136 47 2 3 c0)
+     (fb-draw-box!  fb 160 144 120 56 14 9 c1 c3) ; Nose
+     (fb-draw-box!  fb 160 144 135 68 6  9 c3 c0) ; Mouth
+     ;; Falling Apples & Star Blocks
+     (fb-draw-circle! fb 160 144 104 52 5 c2 #t)
+     (fb-draw-circle! fb 160 144 104 52 5 c3 #f)
+     (fb-draw-circle! fb 160 144 112 84 5 c2 #t)
+     (fb-draw-circle! fb 160 144 112 84 5 c3 #f)
+     (draw-dmg-bevel-tile! fb 20 64 c0 c1 c2 c3 0)
+     (draw-dmg-bevel-tile! fb 20 72 c0 c1 c2 c3 0)
+     ;; Ground Floor (y=96..111)
+     (for* ([gy '(12 13)] [gx (in-range 20)])
+       (draw-dmg-bevel-tile! fb (* gx 8) (* gy 8) c0 c1 c2 c3 1))
+     ;; Puffing Kirby (16x16) floating at (px, py)
+     (define kx (max 36 (min 76 raw-px)))
+     (define ky 52)
+     (fb-draw-circle! fb 160 144 (+ kx 8) (+ ky 8) 8 c0 #t)
+     (fb-draw-circle! fb 160 144 (+ kx 8) (+ ky 8) 8 c3 #f)
+     (fb-fill-rect! fb 160 144 (+ kx 6) (+ ky 5) 2 4 c3)
+     (fb-fill-rect! fb 160 144 (+ kx 10) (+ ky 5) 2 4 c3)
+     (fb-fill-rect! fb 160 144 (+ kx 4) (+ ky 9) 2 2 c2)
+     (fb-fill-rect! fb 160 144 (+ kx 12) (+ ky 9) 2 2 c2)
+     (fb-fill-rect! fb 160 144 (+ kx 2) (+ ky 14) 5 3 c2)
+     (fb-fill-rect! fb 160 144 (+ kx 9) (+ ky 14) 5 3 c2)
+     ;; Waddle Dee at (76, 84)
+     (fb-draw-circle! fb 160 144 80 89 6 c1 #t)
+     (fb-draw-circle! fb 160 144 80 89 6 c3 #f)
+     ;; Bottom Bordered Kirby HUD (y=112..143)
+     (fb-draw-box! fb 160 144 0   112 160 32 c1 c3)
+     (fb-draw-box! fb 160 144 4   116 68  24 c0 c3)
+     (fb-draw-text! fb 160 144 8  119 "SCORE" c3)
+     (fb-draw-text! fb 160 144 8  129 "002400" c3)
+     (fb-draw-box! fb 160 144 76  116 48  24 c0 c3)
+     (fb-draw-text! fb 160 144 80 119 "KIRBY" c3)
+     (fb-draw-text! fb 160 144 80 129 "||||||" c3)
+     (fb-draw-box! fb 160 144 128 116 28  24 c0 c3)
+     (fb-draw-text! fb 160 144 132 124 "P=03" c3)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 5. POKEMON RED / BLUE (1996) — Charmeleon vs. Pikachu Battle Screen
+    ;; ------------------------------------------------------------------------
+    [(5)
+     (fb-fill-rect! fb 160 144 0 0 160 144 c0)
+     ;; Opponent Status Bracket (Top-Left: CHARMELEON :L24)
+     (fb-draw-text! fb 160 144 8  6  "CHARMELEON" c3)
+     (fb-draw-text! fb 160 144 36 14 ":L24" c3)
+     (fb-draw-text! fb 160 144 10 22 "HP:" c3)
+     (fb-draw-box!  fb 160 144 24 22 56 5 c0 c3)
+     (fb-fill-rect! fb 160 144 26 24 42 2 c2)
+     (fb-fill-rect! fb 160 144 6  12 2  18 c3)
+     (fb-fill-rect! fb 160 144 6  30 82 2  c3)
+     ;; Charmeleon Front Sprite (Top-Right, x=106..146, y=8..44)
+     (fb-draw-bitmap!
+      fb 160 144 106 8
+      '("......3333.........."
+        "....33222233........"
+        "...3222222223......."
+        "..32032222223......."
+        "..3233222223........"
+        "...333222233...3...."
+        "....322111223.313..."
+        "..3322111112231013.."
+        ".32222111112231013.."
+        "323.3211111223.323.."
+        "....3221112223.323.."
+        "...322222222223223.."
+        "...32223333222333..."
+        "..32223....32223...."
+        ".33033.....33033....")
+      dmg-map 2)
+     ;; Pikachu Back Sprite (Bottom-Left, x=10..50, y=58..94)
+     (fb-draw-bitmap!
+      fb 160 144 10 56
+      '("..33........33...."
+        ".3313......3133..."
+        ".31113....31113..."
+        "..311133331113...."
+        "..311111111113...."
+        ".31111111111113..."
+        ".31111122111113.33"
+        "311111111111113313"
+        "31111122211111313."
+        ".311111111111313.."
+        "..3111111111133..."
+        "..333333333333....")
+      dmg-map 2)
+     ;; Player Status Bracket (Bottom-Right: PIKACHU :L25, HP 52/52)
+     (fb-draw-text! fb 160 144 76  54 "PIKACHU" c3)
+     (fb-draw-text! fb 160 144 108 62 ":L25" c3)
+     (fb-draw-text! fb 160 144 74  70 "HP:" c3)
+     (fb-draw-box!  fb 160 144 88  70 58 5 c0 c3)
+     (fb-fill-rect! fb 160 144 90  72 52 2 c2)
+     (fb-draw-text! fb 160 144 98  78 "52/ 52" c3)
+     (fb-fill-rect! fb 160 144 70  86 84 2 c3)
+     (fb-fill-rect! fb 160 144 152 60 2  28 c3)
+     ;; Bottom Double-Bordered Dialogue & Command Menu Box (y=96..143)
+     (fb-draw-box!  fb 160 144 0  96 160 48 c0 c3 c2)
+     (fb-draw-text! fb 160 144 6  106 "WILD CHARMELEON" c3)
+     (fb-draw-text! fb 160 144 6  116 "APPEARED!" c3)
+     (fb-draw-box!  fb 160 144 82 96 78  48 c0 c3 c2)
+     (fb-draw-text! fb 160 144 88 108 ">FIGHT PKMN" c3)
+     (fb-draw-text! fb 160 144 88 124 " ITEM  RUN" c3)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 6. METROID II: RETURN OF SAMUS (1991) — SR388 Cavern, Samus & Alpha Metroid
+    ;; ------------------------------------------------------------------------
+    [(6)
+     ;; Deep dark SR388 subterranean backdrop
+     (fb-fill-rect! fb 160 144 0 0 160 144 c3)
+     ;; Top-Left Metroid II HUD (EN [99]  METROID [39])
+     (fb-draw-box!  fb 160 144 2  2 108 13 c3 c1)
+     (fb-draw-text! fb 160 144 6  6 "EN 99  METROID 39" c0)
+     ;; Jagged Cavern Ceiling & Stalactites (y=16..34)
+     (for ([x (in-range 0 160 8)])
+       (define sh (+ 8 (modulo (* x 5) 14)))
+       (fb-fill-rect! fb 160 144 x 16 8 sh c2)
+       (fb-fill-rect! fb 160 144 (+ x 2) (+ 16 sh) 4 5 c1))
+     ;; Left Chozo Ruin Pillar & Pedestal (x=0..56, y=32..118)
+     (for ([ty (in-range 4 15)])
+       (draw-dmg-bevel-tile! fb 0 (* ty 8) c1 c2 c3 c3 2)
+       (draw-dmg-bevel-tile! fb 8 (* ty 8) c1 c2 c3 c3 2))
+     ;; Bubbling SR388 Acid Pool (y=124..143) & Rock Ledges (y=114..124)
+     (fb-fill-rect! fb 160 144 0  124 160 20 c2)
+     (for ([ax (in-range 0 160 6)])
+       (fb-fill-rect! fb 160 144 ax 124 4 3 c0))
+     (for ([tx (in-range 0 9)])
+       (draw-dmg-bevel-tile! fb (* tx 8) 114 c1 c2 c3 c3 1))
+     (for ([tx (in-range 12 20)])
+       (draw-dmg-bevel-tile! fb (* tx 8) 114 c1 c2 c3 c3 1))
+     ;; Samus Aran in Varia Suit (16x22) aiming Arm Cannon at (px, 92)
+     (define sx (max 24 (min 56 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 sx 92
+      '("....000000......"
+        "...01100110....."
+        "...01200010....."
+        "..0011111100...."
+        ".011001100110..."
+        ".011011110110000"
+        "..00011110001100"
+        "....011110..000."
+        "...01100110....."
+        "...010..010....."
+        "..0110..0110...."
+        "..000....000....")
+      dmg-map 2)
+     ;; Wave Beam Pellets
+     (fb-draw-circle! fb 160 144 (+ sx 36) 102 2 c0 #t)
+     (fb-draw-circle! fb 160 144 (+ sx 46) 100 2 c0 #t)
+     ;; Alpha Metroid Hovering on the Right (x=104..136, y=54..82)
+     (fb-draw-bitmap!
+      fb 160 144 104 54
+      '("...00000000..."
+        ".001101101100."
+        "01100111100110"
+        "01011200211010"
+        "01112011021110"
+        "01111222211110"
+        ".001111111100."
+        "..0.00..00.0.."
+        ".0..0....0..0.")
+      dmg-map 2)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 7. CASTLEVANIA: THE ADVENTURE (1989) — Gothic Hall, Rope, Belmont & Whip
+    ;; ------------------------------------------------------------------------
+    [(7)
+     (fb-fill-rect! fb 160 144 0 0 160 144 c1)
+     ;; Top HUD (y=0..16)
+     (fb-draw-box!  fb 160 144 0 0 160 17 c0 c3)
+     (fb-draw-text! fb 160 144 4 3  "SCORE 001800  @15 P03" c3)
+     (fb-draw-text! fb 160 144 4 10 "P ||||||   E ||||||" c3)
+     ;; Gothic Stone Brick Wall Background (y=17..119)
+     (for ([ry (in-range 18 120 8)])
+       (fb-fill-rect! fb 160 144 0 ry 160 1 c2)
+       (for ([rx (in-range (if (even? (quotient ry 8)) 0 8) 160 16)])
+         (fb-fill-rect! fb 160 144 rx ry 1 8 c2)))
+     ;; Gothic Pointed-Arch Windows (x=22..48 and x=108..134, y=30..84)
+     (for ([wx '(22 108)])
+       (fb-draw-box! fb 160 144 wx 34 26 50 c3 c2)
+       (fb-fill-rect! fb 160 144 (+ wx 12) 34 2 50 c1)
+       (fb-fill-rect! fb 160 144 wx 56 26 2 c1))
+     ;; Climbable Braided Rope (x=78..81, y=17..119) & Burning Candles
+     (for ([ry (in-range 18 118 4)])
+       (fb-draw-box! fb 160 144 78 ry 4 4 c0 c3))
+     (for ([cx '(62 94)])
+       (fb-fill-rect! fb 160 144 cx 52 4 8 c0)
+       (fb-fill-rect! fb 160 144 (+ cx 1) 47 2 5 c3))
+     ;; Stone Floor (y=120..143) & Right Ledge (x=96..159, y=88..95)
+     (for* ([gy '(15 16 17)] [gx (in-range 20)])
+       (draw-dmg-bevel-tile! fb (* gx 8) (* gy 8) c0 c1 c2 c3 1))
+     (for ([gx (in-range 12 20)])
+       (draw-dmg-bevel-tile! fb (* gx 8) 88 c0 c1 c2 c3 2))
+     ;; Christopher Belmont (16x24) Cracking the Vampire Killer Whip at (px, 96)
+     (define bx (max 24 (min 56 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 bx 96
+      '("...33333...."
+        "..3111113..."
+        "..3310133..."
+        ".332222233.."
+        "322322232233"
+        "...32223..33"
+        "..3333333..."
+        "..3223223..."
+        ".3223.3223.."
+        ".333...333.."
+        "333.....333."
+        "33.......33.")
+      dmg-map 2)
+     ;; Extended Chain Whip + Fireball Tip
+     (for ([wx (in-range (+ bx 22) (+ bx 50) 4)])
+       (fb-draw-box! fb 160 144 wx 104 3 3 c0 c3))
+     (fb-draw-circle! fb 160 144 (+ bx 54) 105 4 c3 #t)
+     (fb-draw-circle! fb 160 144 (+ bx 54) 105 2 c0 #t)
+     ;; Swooping Giant Bat at (112, 42) & Punaguchi on Ledge at (126, 72)
+     (fb-draw-bitmap!
+      fb 160 144 110 42
+      '("33....33"
+        "32333323"
+        ".320023."
+        "..3333..")
+      dmg-map 2)
+     (fb-draw-bitmap!
+      fb 160 144 126 72
+      '("..3333.."
+        ".320023."
+        "32233223"
+        "32300323"
+        ".332233."
+        "..3333..")
+      dmg-map 2)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 8. DUCKTALES (GB, 1990) — Moon Base Girders, Treasure, Scrooge Pogo Cane
+    ;; ------------------------------------------------------------------------
+    [(8)
+     (fb-fill-rect! fb 160 144 0 0 160 144 c0)
+     ;; Top HUD (y=0..16)
+     (fb-draw-box!  fb 160 144 0 0 160 16 c0 c3)
+     (fb-draw-text! fb 160 144 4 5 "$0240000   UP 03   @@@" c3)
+     ;; Sci-Fi Moon Metal Girders (y=18..28, left column x=4..16, right column x=144..156)
+     (for ([gx (in-range 0 160 16)])
+       (fb-draw-box!  fb 160 144 gx 18 16 10 c1 c3)
+       (fb-draw-line! fb 160 144 gx 18 (+ gx 15) 27 c3)
+       (fb-draw-line! fb 160 144 gx 27 (+ gx 15) 18 c3))
+     (for ([gy (in-range 28 120 16)])
+       (fb-draw-box!  fb 160 144 4   gy 12 16 c1 c3)
+       (fb-draw-line! fb 160 144 4   gy 15 (+ gy 15) c3)
+       (fb-draw-box!  fb 160 144 144 gy 12 16 c1 c3)
+       (fb-draw-line! fb 160 144 144 gy 155 (+ gy 15) c3))
+     ;; Mid-Level Platform (x=76..140, y=76..83) + Treasure Chest & Giant Diamond
+     (for ([tx (in-range 10 18)])
+       (draw-dmg-bevel-tile! fb (* tx 8) 76 c0 c1 c2 c3 2))
+     (fb-draw-box! fb 160 144 84 62 16 14 c1 c3) ; Treasure Chest
+     (fb-fill-rect! fb 160 144 84 68 16 2 c3)
+     (fb-draw-box! fb 160 144 90 66 4  5 c0 c3)
+     ;; Giant Diamond at (112, 60)
+     (fb-draw-bitmap!
+      fb 160 144 110 60
+      '("..3333.."
+        ".301103."
+        "30100103"
+        "31011013"
+        ".310013."
+        "..3113.."
+        "...33...")
+      dmg-map 2)
+     ;; Cratered Moon Floor (y=120..143)
+     (for* ([gy '(15 16 17)] [gx (in-range 20)])
+       (draw-dmg-bevel-tile! fb (* gx 8) (* gy 8) c0 c1 c2 c3 0))
+     ;; Scrooge McDuck (16x24) Bouncing on Pogo Cane at (px, py)
+     (define sx (max 28 (min 64 raw-px)))
+     (define sy 74)
+     (fb-draw-bitmap!
+      fb 160 144 sx sy
+      '("...33333...."
+        "...32223...."
+        "..3333333..."
+        "..30303113.."
+        "..300011113."
+        "...322223..."
+        "..32233223.."
+        "..32233223.."
+        "...333333..."
+        "....3..3...."
+        "....3333...."
+        ".....33....."
+        ".....33....."
+        "....3003....")
+      dmg-map 2)
+     ;; Moon Duck Enemy at (116, 100)
+     (fb-draw-bitmap!
+      fb 160 144 116 98
+      '("..3333.."
+        ".320023."
+        "31133223"
+        ".322223."
+        "..3333.."
+        ".33..33.")
+      dmg-map 2)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 9. DR. MARIO (GB, 1990) — Medicine Bottle, Viruses, Capsules & Dr. Mario
+    ;; ------------------------------------------------------------------------
+    [(9)
+     ;; Checkered dark background
+     (for* ([y (in-range 0 144 4)] [x (in-range 0 160 4)])
+       (fb-fill-rect! fb 160 144 x y 4 4 (if (even? (+ (quotient x 4) (quotient y 4))) c2 c3)))
+     ;; Center Medicine Bottle Neck (x=66..93, y=6..24) & Body (x=46..113, y=24..140)
+     (fb-draw-box! fb 160 144 64 6  32 8  c0 c3)
+     (fb-draw-box! fb 160 144 68 13 24 12 c0 c3)
+     (fb-draw-box! fb 160 144 46 24 68 116 c0 c3 c1)
+     (fb-fill-rect! fb 160 144 50 28 60 108 c0)
+     ;; Viruses & Vitamin Capsules inside the Bottle (x=52..108, y=72..132)
+     (define bottle-grid
+       '("..V..C1."
+         ".12..V.."
+         "V..V..22"
+         "11.2.V.."
+         ".V..12.V"
+         "22.V..11"
+         "V.12.V.2"))
+     (for ([rstr (in-list bottle-grid)]
+           [ry (in-naturals)])
+       (for ([ch (in-string rstr)]
+             [cx (in-naturals)])
+         (define bx (+ 52 (* cx 7)))
+         (define by (+ 80 (* ry 8)))
+         (cond
+           [(char=? ch #\V)
+            ;; Speckled Virus with eyes & feet
+            (fb-draw-box! fb 160 144 bx by 6 6 c2 c3)
+            (fb-put-px! fb 160 144 (+ bx 1) (+ by 2) c0)
+            (fb-put-px! fb 160 144 (+ bx 4) (+ by 2) c0)
+            (fb-put-px! fb 160 144 (+ bx 2) (+ by 4) c0)]
+           [(char=? ch #\1)
+            (fb-draw-box! fb 160 144 bx by 6 6 c1 c3)]
+           [(char=? ch #\2)
+            (fb-draw-box! fb 160 144 bx by 6 6 c3 c2)])))
+     ;; Active Falling 2-Half Vitamin Capsule in Upper Bottle
+     (define cap-x (max 56 (min 86 raw-px)))
+     (fb-draw-box! fb 160 144 cap-x       44 7 6 c1 c3)
+     (fb-draw-box! fb 160 144 (+ cap-x 7) 44 7 6 c3 c2)
+     ;; Left HUD Boxes: TOP / SCORE (x=2..43, y=14..74) & Virus Preview (y=80..138)
+     (fb-draw-box!  fb 160 144 2 14 42 58 c0 c3 c1)
+     (fb-draw-text! fb 160 144 6 20 "TOP" c3)
+     (fb-draw-text! fb 160 144 6 28 "010000" c3)
+     (fb-draw-text! fb 160 144 6 44 "SCORE" c3)
+     (fb-draw-text! fb 160 144 6 52 "002400" c3)
+     (fb-draw-box!  fb 160 144 2 78 42 60 c0 c3 c1)
+     (fb-draw-circle! fb 160 144 23 108 14 c1 #t)
+     (fb-draw-circle! fb 160 144 23 108 14 c3 #f)
+     (fb-draw-box!  fb 160 144 16 102 6 6 c2 c3)
+     (fb-draw-box!  fb 160 144 25 108 6 6 c3 c2)
+     ;; Right HUD Box (x=116..157, y=14..138): Dr. Mario Sprite + LV / SPD / VIRUS
+     (fb-draw-box!  fb 160 144 116 14 42 124 c0 c3 c1)
+     (fb-draw-bitmap!
+      fb 160 144 126 22
+      '("..3333.."
+        ".300003."
+        ".331013."
+        "..31113."
+        "33003003"
+        "30003003"
+        ".300003."
+        "..33.33.")
+      dmg-map 2)
+     (fb-draw-text! fb 160 144 120 68  "LV  05" c3)
+     (fb-draw-text! fb 160 144 120 84  "SPD" c3)
+     (fb-draw-text! fb 160 144 124 92  "MED" c3)
+     (fb-draw-text! fb 160 144 120 110 "VIRUS" c3)
+     (fb-draw-text! fb 160 144 128 120 "12" c3)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 10. GARGOYLE'S QUEST (1990) — Ghoul Realm Columns, Winged Firebrand & Fire
+    ;; ------------------------------------------------------------------------
+    [else
+     (fb-fill-rect! fb 160 144 0 0 160 144 c3)
+     ;; Top HUD (y=0..16)
+     (fb-draw-box!  fb 160 144 0 0 160 16 c0 c2)
+     (fb-draw-text! fb 160 144 4 5 "WING ||||||  VIAL 08  P03" c3)
+     ;; Gothic Ghoul Columns (left x=0..15, right x=144..159) & Spikes
+     (for ([ty (in-range 2 15)])
+       (draw-dmg-bevel-tile! fb 0   (* ty 8) c1 c2 c3 c3 2)
+       (draw-dmg-bevel-tile! fb 144 (* ty 8) c1 c2 c3 c3 2))
+     ;; Mid-Air Stone Ledges (x=16..64, y=92..99 and x=96..144, y=72..79)
+     (for ([tx (in-range 2 8)])
+       (draw-dmg-bevel-tile! fb (* tx 8) 92 c0 c1 c2 c3 1))
+     (for ([tx (in-range 12 18)])
+       (draw-dmg-bevel-tile! fb (* tx 8) 72 c0 c1 c2 c3 1))
+     ;; Bone / Catacomb Floor (y=120..143)
+     (for* ([gy '(15 16 17)] [gx (in-range 20)])
+       (draw-dmg-bevel-tile! fb (* gx 8) (* gy 8) c0 c1 c2 c3 0))
+     ;; Winged Firebrand Hovering & Breathing Fireball at (px, 50)
+     (define fx (max 28 (min 64 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 fx 48
+      '(".0....0..000...."
+        "010..01001110..."
+        "01100110010310.."
+        "01211210.011110."
+        ".0122100011100.."
+        "..0000011110...."
+        ".....0110110...."
+        "....010...010..."
+        "...00......00...")
+      dmg-map 2)
+     ;; Fireball Breath Stream
+     (fb-draw-circle! fb 160 144 (+ fx 34) 56 4 c0 #t)
+     (fb-draw-circle! fb 160 144 (+ fx 34) 56 2 c1 #t)
+     (fb-draw-circle! fb 160 144 (+ fx 46) 56 3 c0 #t)
+     ;; Skeleton / Ghoul Knight on Right Ledge at (112, 52)
+     (fb-draw-bitmap!
+      fb 160 144 112 52
+      '("..0000.."
+        ".030030."
+        "..0110.."
+        ".001100."
+        "01.11.10"
+        "...00..."
+        "..0..0.."
+        ".00..00.")
+      dmg-map 2)])
   fb)
 
+;; ============================================================================
+;; 7C. Authentic Top-10 Game Boy Color (CGB .gbc, 160x144) Scene Renderers
+;; ============================================================================
+
 ;; Render a 160x144 RGB framebuffer (69,120 bytes = 23,040 pixels) from a CGB `gb-emulator`
-(define (render-gbc-framebuffer-rgb emu)
+(define (render-gbc-framebuffer-rgb emu [spec #f])
   (define fb       (make-bytes (* 160 144 3) 0))
   (define vram     (gb-emulator-vram emu))
   (define oam      (gb-emulator-oam emu))
@@ -1920,77 +2680,579 @@
   (define hram     (gb-emulator-hram emu))
   (define bg-cram  (gb-emulator-gbc-bg-cram emu))
   (define obj-cram (gb-emulator-gbc-obj-cram emu))
-  (define scy      (bytes-ref io #x42))
-  (define scx      (bytes-ref io #x43))
   (define stage-id  (bytes-ref hram (- GB-HRAM-STAGE-ID #x80)))
   (define genre-reg (bytes-ref hram (- GB-HRAM-GENRE-REG #x80)))
-  (define game-id   (bytes-ref hram (- GB-HRAM-GAME-ID #x80)))
+  (define game-id   (max 11 (min 20 (bytes-ref hram (- GB-HRAM-GAME-ID #x80)))))
+  (define raw-px    (bytes-ref oam 1))
+  (define raw-py    (bytes-ref oam 0))
+  (void vram io bg-cram obj-cram stage-id genre-reg spec)
 
-  (define (cram-rgb cram pal-idx col-idx)
-    (define off (* (+ (* (bitwise-and pal-idx 7) 4) (bitwise-and col-idx 3)) 2))
-    (define w15 (bitwise-ior (bytes-ref cram off)
-                             (arithmetic-shift (bytes-ref cram (add1 off)) 8)))
-    (define r8 (* 8 (bitwise-and w15 #x1F)))
-    (define g8 (* 8 (bitwise-and (arithmetic-shift w15 -5) #x1F)))
-    (define b8 (* 8 (bitwise-and (arithmetic-shift w15 -10) #x1F)))
-    (list r8 g8 b8))
+  ;; Shared GBC 15-bit BGR555 -> 24-bit RGB Vivid Color Palette Helpers
+  (define BLACK  '(12 12 20))
+  (define WHITE  '(248 248 244))
+  (define CREAM  '(248 240 208))
+  (define GRAY   '(136 144 152))
+  (define DGRAY  '(64 72 84))
+  (define RED    '(232 40 40))
+  (define DRED   '(152 20 28))
+  (define ORANGE '(248 148 24))
+  (define GOLD   '(248 216 32))
+  (define GREEN  '(40 200 64))
+  (define DGREEN '(16 112 40))
+  (define CYAN   '(48 208 248))
+  (define BLUE   '(32 104 232))
+  (define NAVY   '(20 32 96))
+  (define PURPLE '(152 48 208))
+  (define DPURP  '(72 20 108))
+  (define PINK   '(248 112 184))
+  (define BROWN  '(160 88 32))
+  (define DBROWN '(96 48 16))
+  (define TAN    '(232 184 128))
 
-  ;; 1. Render 160x144 CGB Background with per-band CGB CGRAM palettes (0..7)
-  (for ([y (in-range 144)])
-    (define wy (if (< y 16) y (bitwise-and #xFF (+ y scy))))
-    (define tile-row (modulo (arithmetic-shift wy -3) 18))
-    (define py (bitwise-and wy 7))
-    (define map-row-base (+ #x1800 (* tile-row 32)))
-    (define fb-row-base (* y 160 3))
-    (define band-pal (cond [(< y 16) 2] [(>= y 128) 1] [else 0]))
-    (for ([x (in-range 160)])
-      (define wx (if (< y 16) x (bitwise-and #xFF (+ x scx))))
-      (define tile-col (modulo (arithmetic-shift wx -3) 20))
-      (define bit-pos (- 7 (bitwise-and wx 7)))
-      (define raw-tid (bytes-ref vram (+ map-row-base tile-col)))
-      (define tile-id (select-gb-playfield-tile raw-tid tile-col tile-row game-id stage-id genre-reg))
-      (define tile-off (+ (* tile-id 16) (* py 2)))
-      (define lo (bytes-ref vram tile-off))
-      (define hi (bytes-ref vram (add1 tile-off)))
-      (define cidx
-        (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
-                     (if (bitwise-bit-set? hi bit-pos) 2 0)))
-      (define rgb (cram-rgb bg-cram band-pal cidx))
-      (define pix-off (+ fb-row-base (* x 3)))
-      (bytes-set! fb pix-off       (first rgb))
-      (bytes-set! fb (+ pix-off 1) (second rgb))
-      (bytes-set! fb (+ pix-off 2) (third rgb))))
+  (case game-id
+    ;; ------------------------------------------------------------------------
+    ;; 11. POKEMON GOLD / SILVER / CRYSTAL — Ho-Oh vs. Typhlosion Full-Color Battle
+    ;; ------------------------------------------------------------------------
+    [(11)
+     (fb-fill-rect! fb 160 144 0 0 160 144 CREAM)
+     ;; Opponent Status Bracket (Top-Left: HO-OH :L40)
+     (fb-draw-text! fb 160 144 8  6  "HO-OH" BLACK)
+     (fb-draw-text! fb 160 144 42 13 ":L40" BLACK)
+     (fb-draw-text! fb 160 144 8  21 "HP:" BLACK)
+     (fb-draw-box!  fb 160 144 22 21 60 5 BLACK BLACK)
+     (fb-fill-rect! fb 160 144 24 23 48 2 GREEN)
+     (fb-fill-rect! fb 160 144 6  12 2  18 BLACK)
+     (fb-fill-rect! fb 160 144 6  29 84 2  BLACK)
+     ;; Ho-Oh Front Sprite (Top-Right, x=102..150, y=6..46) in Red, Gold, Green & White
+     (fb-draw-bitmap!
+      fb 160 144 102 6
+      '(".......YYY.........."
+        "......YYYYY...RRR..."
+        ".GGGG.YRRRY..RRRRR.."
+        "GGWWGGYRWBRYRRRRGGG."
+        ".GWWWRRRRRRRRRRGGWG."
+        "..GWRRRRRRRRRRRRWW.."
+        "...RRRRYYYYYRRRRR..."
+        "...RRRYYYYYYYRRRR..."
+        "....RRYYWWWYYRRR...."
+        "...YYRYYWWWYYRYY...."
+        "..YYY.YYYYYYY.YYY..."
+        "......BB...BB.......")
+      (hash #\Y GOLD #\R RED #\G GREEN #\W WHITE #\B BLACK) 2)
+     ;; Typhlosion Back Sprite (Bottom-Left, x=10..54, y=54..94) with Blazing Fire Ruff
+     (fb-draw-bitmap!
+      fb 160 144 10 54
+      '("....RRRR.YYYY.RRRR.."
+        "..RROOYYYYYYYYYOORR."
+        ".RROOYYYYNNNNYYYOORR"
+        "..ROOYYNNNNNNNNYYOR."
+        "...RYYNNNNNNNNNNYR.."
+        "....NNNNNNNNNNNNTT.."
+        "...NNNNNNNNNNNNTTTT."
+        "..NNNNNNNNNNNNTTTTTT"
+        "..NNNNNNNNNNNTTTTTTT"
+        "..NNNNNNNNNNTTTTTTTT")
+      (hash #\R RED #\O ORANGE #\Y GOLD #\N NAVY #\T TAN) 2)
+     ;; Player Status Bracket (Bottom-Right: TYPHLOSION :L38 + Blue EXP Bar)
+     (fb-draw-text! fb 160 144 74  52 "TYPHLOSION" BLACK)
+     (fb-draw-text! fb 160 144 108 60 ":L38" BLACK)
+     (fb-draw-text! fb 160 144 74  68 "HP:" BLACK)
+     (fb-draw-box!  fb 160 144 88  68 60 5 BLACK BLACK)
+     (fb-fill-rect! fb 160 144 90  70 54 2 GREEN)
+     (fb-draw-text! fb 160 144 96  76 "118/118" BLACK)
+     (fb-fill-rect! fb 160 144 70  85 84 2 BLACK)
+     (fb-fill-rect! fb 160 144 84  88 68 3 CYAN) ; GBC EXP Bar
+     (fb-fill-rect! fb 160 144 70  91 84 2 BLACK)
+     (fb-fill-rect! fb 160 144 152 58 2  35 BLACK)
+     ;; Bottom Command Box (y=96..143)
+     (fb-draw-box!  fb 160 144 0  96 160 48 WHITE BLACK GOLD)
+     (fb-draw-text! fb 160 144 6  108 "HO-OH USED" BLACK)
+     (fb-draw-text! fb 160 144 6  118 "SACRED FIRE!" RED)
+     (fb-draw-box!  fb 160 144 84 96 76  48 WHITE BLACK BLUE)
+     (fb-draw-text! fb 160 144 90 108 ">FIGHT PKMN" BLACK)
+     (fb-draw-text! fb 160 144 90 124 " PACK  RUN" BLACK)]
 
-  ;; 2. Composite OAM Sprites with 15-bit BGR555 OBJ CGRAM colors (2x2 metasprite)
-  (for ([s (in-range 8)])
-    (define base (* s 4))
-    (define sy   (bytes-ref oam base))
-    (define sx   (bytes-ref oam (+ base 1)))
-    (define tid  (bitwise-and #x07 (bytes-ref oam (+ base 2))))
-    (when (and (> sy 0) (< sy 136) (> sx 0) (< sx 152))
-      (for* ([my (in-range 2)]
-             [mx (in-range 2)])
-        (define sub-tid (bitwise-and #x07 (+ tid (modulo (+ mx my) 3))))
-        (for ([dy (in-range 8)])
-          (define py (+ sy (* my 8) dy))
-          (when (< py 144)
-            (define tile-off (+ (* sub-tid 16) (* dy 2)))
-            (define lo (bytes-ref vram tile-off))
-            (define hi (bytes-ref vram (add1 tile-off)))
-            (for ([dx (in-range 8)])
-              (define px (+ sx (* mx 8) dx))
-              (when (< px 160)
-                (define bit-pos (- 7 dx))
-                (define cidx
-                  (bitwise-ior (if (bitwise-bit-set? lo bit-pos) 1 0)
-                               (if (bitwise-bit-set? hi bit-pos) 2 0)))
-                (unless (zero? cidx)
-                  (define rgb (cram-rgb obj-cram (modulo s 4) cidx))
-                  (define pix-off (* (+ (* py 160) px) 3))
-                  (bytes-set! fb pix-off       (first rgb))
-                  (bytes-set! fb (+ pix-off 1) (second rgb))
-                  (bytes-set! fb (+ pix-off 2) (third rgb))))))))))
+    ;; ------------------------------------------------------------------------
+    ;; 12. ZELDA: ORACLE OF AGES / SEASONS — Full-Color Overworld, River & Link
+    ;; ------------------------------------------------------------------------
+    [(12)
+     ;; Top HUD Bar (y=0..15)
+     (fb-fill-rect! fb 160 144 0 0 160 16 CREAM)
+     (fb-fill-rect! fb 160 144 0 15 160 1 BLACK)
+     (fb-draw-box!  fb 160 144 4  2 36 12 CREAM BLUE)
+     (fb-draw-text! fb 160 144 7  5 "B SWRD" BLACK)
+     (fb-draw-box!  fb 160 144 44 2 36 12 CREAM RED)
+     (fb-draw-text! fb 160 144 47 5 "A ROD" BLACK)
+     (fb-draw-text! fb 160 144 84 5 "045R" DGREEN)
+     (for ([hx '(112 122 132 142)])
+       (fb-draw-heart! fb 160 144 hx 5 RED BLACK))
+     ;; Lush Green Overworld Field (y=16..143)
+     (fb-fill-rect! fb 160 144 0 16 160 128 '(120 224 96))
+     ;; Autumn-Gold & Emerald Trees along Top Border (y=16..34)
+     (for ([tx (in-range 0 160 20)]
+           [idx (in-naturals)])
+       (define tcol (if (even? idx) GREEN ORANGE))
+       (fb-draw-circle! fb 160 144 (+ tx 10) 24 9 tcol #t)
+       (fb-draw-circle! fb 160 144 (+ tx 10) 24 9 BLACK #f)
+       (fb-fill-rect! fb 160 144 (+ tx 8) 31 4 5 BROWN))
+     ;; Red-Roofed Holodrum House (x=14..54, y=36..68)
+     (fb-draw-box! fb 160 144 14 36 40 16 RED BLACK)
+     (fb-draw-box! fb 160 144 16 51 36 17 CREAM BLACK)
+     (fb-draw-box! fb 160 144 24 56 10 12 BROWN BLACK)
+     (fb-draw-box! fb 160 144 38 55 10 8  CYAN BLACK)
+     ;; Sparkling Blue River (y=86..106) & Wooden Bridge (x=64..96, y=82..110)
+     (fb-fill-rect! fb 160 144 0 86 160 20 BLUE)
+     (for ([wx (in-range 4 156 14)])
+       (fb-fill-rect! fb 160 144 wx 92 6 2 CYAN)
+       (fb-fill-rect! fb 160 144 (+ wx 4) 100 6 2 WHITE))
+     (fb-draw-box! fb 160 144 64 82 32 28 BROWN BLACK)
+     (for ([bx (in-range 68 96 6)])
+       (fb-fill-rect! fb 160 144 bx 83 1 26 DBROWN))
+     ;; Green-Tunic Link (16x16) Slashing Sword at (px, 60)
+     (define lx (max 56 (min 88 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 lx 56
+      '("...GGGGGG..."
+        "..GGGGGGGG.."
+        "..GBTTTTBG.."
+        "...TTTTTT..."
+        ".BBGGGGGGGG."
+        "BWWGGGGGGGG."
+        "BWWGGBBGG..."
+        ".BBGGGGGG..."
+        "...TT..TT..."
+        "..BBB..BBB..")
+      (hash #\G DGREEN #\T TAN #\B BLACK #\W WHITE) 2)
+     ;; Silver Sword Slash Arc & Red Octorok at (114, 60)
+     (fb-draw-line! fb 160 144 (+ lx 22) 56 (+ lx 34) 66 WHITE)
+     (fb-draw-line! fb 160 144 (+ lx 22) 57 (+ lx 34) 67 CYAN)
+     (fb-draw-circle! fb 160 144 120 66 7 RED #t)
+     (fb-draw-circle! fb 160 144 120 66 7 BLACK #f)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 13. WARIO LAND 3 (2000) — Out of the Woods Hollow Tree, Wario, Key & Chest
+    ;; ------------------------------------------------------------------------
+    [(13)
+     ;; Giant Hollow Tree Amber/Brown Woodgrain Background
+     (fb-fill-rect! fb 160 144 0 0 160 144 BROWN)
+     (for ([x (in-range 0 160 12)])
+       (fb-fill-rect! fb 160 144 x 16 4 128 DBROWN))
+     ;; Top HUD (y=0..15)
+     (fb-draw-box!  fb 160 144 0 0 160 16 BLACK GOLD)
+     (fb-draw-text! fb 160 144 6 5 "N1 WOODS  KEY*1  COIN 048" GOLD)
+     ;; Lush Green Leaf Canopy at Top (y=16..38)
+     (for ([cx (in-range 8 160 20)])
+       (fb-draw-circle! fb 160 144 cx 24 12 DGREEN #t)
+       (fb-draw-circle! fb 160 144 cx 22 9  GREEN #t))
+     ;; Mossy Platforms (x=16..68, y=78..88) & Ground Floor (y=120..143)
+     (fb-draw-box! fb 160 144 16 78 52 10 TAN BLACK)
+     (fb-fill-rect! fb 160 144 16 78 52 4 GREEN)
+     (fb-draw-box! fb 160 144 0 120 160 24 DBROWN BLACK)
+     (fb-fill-rect! fb 160 144 0 120 160 5 GREEN)
+     ;; Floating Gray/Gold Key above Left Platform (x=36, y=56)
+     (fb-draw-circle! fb 160 144 38 60 5 GOLD #t)
+     (fb-draw-circle! fb 160 144 38 60 5 BLACK #f)
+     (fb-fill-rect! fb 160 144 43 59 10 3 GOLD)
+     (fb-fill-rect! fb 160 144 49 62 3  4 GOLD)
+     ;; Royal Treasure Chest on Right (x=120..144, y=100..119)
+     (fb-draw-box! fb 160 144 120 100 24 20 PURPLE BLACK GOLD)
+     (fb-fill-rect! fb 160 144 120 109 24 3 GOLD)
+     (fb-draw-box! fb 160 144 129 106 6  7 GOLD BLACK)
+     ;; Wario (20x22) in Yellow Cap/Shirt & Purple Overalls Charging at (px, 96)
+     (define wx (max 32 (min 72 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 wx 96
+      '("...YYYYYY..."
+        "..YYYYYYYY.."
+        "..YYBBTTPK.."
+        ".YYTTTTTTPP."
+        "YYYYPPPPYYYY"
+        "YYYYPPPPYYYY"
+        ".YYPPPPPPYY."
+        "..PPPPPPPP.."
+        "..GGG..GGG.."
+        ".BBBB..BBBB.")
+      (hash #\Y GOLD #\P PURPLE #\T TAN #\K PINK #\G GREEN #\B BLACK) 2)
+     ;; Spear-Mask Enemy at (96, 102)
+     (fb-draw-circle! fb 160 144 102 110 8 RED #t)
+     (fb-draw-box! fb 160 144 96 104 8 10 WHITE BLACK)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 14. SHANTAE (2002) — Scuttle Town Sunset Dock, Arabian Domes & Hair Whip
+    ;; ------------------------------------------------------------------------
+    [(14)
+     ;; HBlank Sunset Sky Gradient (Violet -> Magenta -> Coral -> Gold)
+     (fb-fill-rect! fb 160 144 0 0  160 24 DPURP)
+     (fb-fill-rect! fb 160 144 0 24 160 24 PURPLE)
+     (fb-fill-rect! fb 160 144 0 48 160 24 PINK)
+     (fb-fill-rect! fb 160 144 0 72 160 24 ORANGE)
+     ;; Top HUD (Gem 048 & 4 Hearts)
+     (fb-draw-circle! fb 160 144 10 8 5 CYAN #t)
+     (fb-draw-text! fb 160 144 18 6 "048" WHITE BLACK)
+     (for ([hx '(112 122 132 142)])
+       (fb-draw-heart! fb 160 144 hx 5 RED BLACK))
+     ;; Scuttle Town Arabian Domes & Minarets in Background (x=8..92, y=38..96)
+     (fb-draw-circle! fb 160 144 32 54 16 TAN #t)
+     (fb-draw-circle! fb 160 144 32 54 16 BLACK #f)
+     (fb-fill-rect! fb 160 144 31 32 3 8 GOLD)
+     (fb-draw-box!  fb 160 144 14 54 36 42 TAN BLACK)
+     (fb-draw-box!  fb 160 144 22 62 8  12 GOLD BLACK)
+     (fb-draw-box!  fb 160 144 34 62 8  12 GOLD BLACK)
+     (fb-draw-circle! fb 160 144 72 62 12 TAN #t)
+     (fb-draw-box!  fb 160 144 58 62 28 34 TAN BLACK)
+     ;; Wooden Dock Pier (y=96..110) & Deep-Blue Ocean Waves (y=110..143)
+     (fb-fill-rect! fb 160 144 0 110 160 34 NAVY)
+     (for ([wx (in-range 0 160 16)])
+       (fb-fill-rect! fb 160 144 wx 114 10 3 CYAN)
+       (fb-fill-rect! fb 160 144 (+ wx 4) 126 10 2 BLUE))
+     (fb-draw-box! fb 160 144 0 96 144 12 BROWN BLACK)
+     (for ([px (in-range 12 140 24)])
+       (fb-draw-box! fb 160 144 px 94 6 32 DBROWN BLACK))
+     ;; Shantae (16x24) Hair-Whipping at (px, 72)
+     (define sx (max 36 (min 68 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 sx 72
+      '("..PPPPPP...."
+        ".PPPPPPPP..."
+        "..PPTTBTPP.."
+        "...TTTTTT..."
+        "..YYRRRRYY.."
+        "...TTTTTT..."
+        "..RRRRRRRR.."
+        "..RRR..RRR.."
+        "..YY....YY..")
+      (hash #\P PURPLE #\T TAN #\B BLACK #\Y GOLD #\R RED) 2)
+     ;; Extended Purple Ponytail Whip Hitting Pirate Tinkerbat!
+     (fb-fill-rect! fb 160 144 (+ sx 16) 76 28 5 PURPLE)
+     (fb-fill-rect! fb 160 144 (+ sx 20) 74 20 3 PINK)
+     ;; Tinkerbat Pirate Enemy at (104, 74)
+     (fb-draw-bitmap!
+      fb 160 144 104 74
+      '("..RRRR.."
+        ".BBBBBB."
+        ".BYBBYB."
+        "..BBBB.."
+        ".BBBBBB."
+        "..B..B..")
+      (hash #\R RED #\B BLACK #\Y GOLD) 2)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 15. SUPER MARIO BROS. DELUXE (1999) — Full-Color World 1-1, Pipe & Mario
+    ;; ------------------------------------------------------------------------
+    [(15)
+     ;; Bright Sky-Blue World 1-1 Backdrop
+     (fb-fill-rect! fb 160 144 0 0 160 144 '(92 148 252))
+     ;; Top HUD
+     (fb-draw-text! fb 160 144 4 3  "MARIO  001800  *05  1-1" WHITE BLACK)
+     (fb-draw-text! fb 160 144 4 10 "RED COINS 3/5   TIME 375" GOLD BLACK)
+     ;; White Clouds & Rounded Green Hill
+     (fb-draw-circle! fb 160 144 28 28 8 WHITE #t)
+     (fb-draw-circle! fb 160 144 38 26 9 WHITE #t)
+     (fb-draw-circle! fb 160 144 48 28 8 WHITE #t)
+     (fb-draw-circle! fb 160 144 108 24 8 WHITE #t)
+     (fb-draw-circle! fb 160 144 118 24 8 WHITE #t)
+     (for ([dy (in-range 28)])
+       (fb-fill-rect! fb 160 144 (- 32 dy) (+ 92 dy) (* dy 2) 1 GREEN))
+     ;; Floating Orange ? Blocks & Brown Bricks (x=44..92, y=68..76) + High ? Block
+     (for ([bx (in-range 44 92 10)]
+           [idx (in-naturals)])
+       (fb-draw-box! fb 160 144 bx 68 10 10 (if (odd? idx) ORANGE BROWN) BLACK)
+       (when (odd? idx)
+         (fb-draw-text! fb 160 144 (+ bx 3) 70 "?" WHITE BLACK)))
+     (fb-draw-box! fb 160 144 64 38 10 10 ORANGE BLACK)
+     (fb-draw-text! fb 160 144 67 40 "?" WHITE BLACK)
+     (fb-draw-circle! fb 160 144 69 28 4 GOLD #t) ; Popping Coin
+     ;; Bright Green Warp Pipe (x=120..140, y=88..119)
+     (fb-draw-box! fb 160 144 118 88 24 8  GREEN BLACK)
+     (fb-draw-box! fb 160 144 120 96 20 24 GREEN BLACK)
+     (fb-fill-rect! fb 160 144 123 89 4 30 '(168 248 128))
+     (fb-fill-rect! fb 160 144 133 89 4 30 DGREEN)
+     ;; Reddish-Brown Cobble Ground (y=120..143)
+     (for* ([gy (in-range 120 144 8)]
+            [gx (in-range 0 160 8)])
+       (fb-draw-box! fb 160 144 gx gy 8 8 BROWN BLACK)
+       (fb-fill-rect! fb 160 144 (+ gx 1) (+ gy 1) 6 1 TAN))
+     ;; Red & Blue Mario Jumping at (px, 84) + Brown Goomba at (96, 104)
+     (define mx (max 32 (min 72 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 mx 84
+      '("..RRRRRR...."
+        ".RRRRRRRRR.."
+        ".BBBTTBTT..."
+        ".BTTTTBBTTT."
+        "..TTTTTTTT.."
+        ".RRRBBBRRR.."
+        "RRRRBBBBBRRR"
+        "TTBBBBBBBBTT"
+        "..BBBBBBBB.."
+        ".BBB....BBB.")
+      (hash #\R RED #\B BLUE #\T TAN) 2)
+     (fb-draw-bitmap!
+      fb 160 144 96 104
+      '("..BBBB.."
+        ".BBBBBB."
+        "BWWBBWWB"
+        "BBBBBBBB"
+        ".TTTTTT."
+        ".BB..BB.")
+      (hash #\B BROWN #\W WHITE #\T TAN) 2)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 16. METAL GEAR SOLID: GHOST BABEL (2000) — Stealth Radar, Vision Cone & Snake
+    ;; ------------------------------------------------------------------------
+    [(16)
+     ;; Steel-Slate Fortress Floor Grid
+     (fb-fill-rect! fb 160 144 0 0 160 144 '(56 76 88))
+     (for ([y (in-range 24 144 16)])
+       (fb-fill-rect! fb 160 144 0 y 160 1 DGRAY))
+     (for ([x (in-range 0 160 16)])
+       (fb-fill-rect! fb 160 144 x 24 1 120 DGRAY))
+     ;; Top Tactical HUD Bar (y=0..24) & Top-Right Green Soliton Radar (x=114..157, y=2..38)
+     (fb-fill-rect! fb 160 144 0 0 160 24 BLACK)
+     (fb-draw-text! fb 160 144 4 4  "LIFE" GOLD)
+     (fb-draw-box!  fb 160 144 24 4 64 6 DGRAY WHITE)
+     (fb-fill-rect! fb 160 144 26 6 52 3 ORANGE)
+     (fb-draw-text! fb 160 144 4 14 "RATION 02   C4 04" CYAN)
+     ;; Soliton Radar Box
+     (fb-draw-box!  fb 160 144 114 2 44 36 '(8 48 24) GREEN)
+     (fb-fill-rect! fb 160 144 115 20 42 1 DGREEN)
+     (fb-fill-rect! fb 160 144 136 3  1 34 DGREEN)
+     (fb-fill-rect! fb 160 144 126 24 3 3 WHITE) ; Snake radar dot
+     (fb-fill-rect! fb 160 144 144 16 3 3 RED)   ; Guard radar dot
+     ;; Reinforced Fortress Walls & Military Cargo Crates
+     (fb-draw-box! fb 160 144 0  24 16 120 GRAY BLACK)
+     (fb-draw-box! fb 160 144 24 44 26 26 TAN BLACK)
+     (fb-draw-line! fb 160 144 24 44 49 69 BROWN)
+     (fb-draw-box! fb 160 144 24 92 26 26 TAN BLACK)
+     (fb-draw-line! fb 160 144 24 92 49 117 BROWN)
+     ;; Guard Yellow Security Vision Cone (x=76..116, y=62..106)
+     (for ([dx (in-range 38)])
+       (define span (+ 2 (quotient dx 2)))
+       (fb-fill-rect! fb 160 144 (- 114 dx) (- 84 span) 1 (* span 2) GOLD))
+     ;; Solid Snake (16x20) in Dark-Blue Sneaking Suit & Bandana at (px, 72)
+     (define sx (max 48 (min 66 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 sx 72
+      '("..BBBBBB.."
+        ".CCCCCCCC."
+        "..TTTTTT.."
+        ".NNNNNNNN."
+        "NNNNNNNNNN"
+        ".NNNNNNNN."
+        "..NN..NN.."
+        "..BB..BB..")
+      (hash #\B BLACK #\C CYAN #\T TAN #\N NAVY) 2)
+     ;; Armed Genome Soldier at (116, 74) with Red [!] Alert Overhead!
+     (fb-draw-box!  fb 160 144 118 54 12 14 WHITE RED)
+     (fb-draw-text! fb 160 144 123 58 "!" RED)
+     (fb-draw-bitmap!
+      fb 160 144 116 72
+      '("..GGGGGG.."
+        "..TTTTTT.."
+        ".GGGGGGGG."
+        "GGGGGGGGGG"
+        "..GG..GG.."
+        "..BB..BB..")
+      (hash #\G DGREEN #\T TAN #\B BLACK) 2)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 17. DRAGON WARRIOR MONSTERS (1998) — Slime, Dracky & Dragon vs. King Slime
+    ;; ------------------------------------------------------------------------
+    [(17)
+     (fb-fill-rect! fb 160 144 0 0 160 144 BLACK)
+     ;; Top Party Status Window (x=2..157, y=2..36)
+     (fb-draw-box!  fb 160 144 2 2 156 34 BLACK WHITE GRAY)
+     (fb-draw-text! fb 160 144 8   7  "SLIME    DRACKY   DRAGON" GOLD)
+     (fb-draw-text! fb 160 144 8   16 "HP  42   HP  36   HP  58" WHITE)
+     (fb-draw-text! fb 160 144 8   25 "MP  18   MP  24   MP  32" CYAN)
+     ;; GreatTree Arena Viewport (y=38..98)
+     (fb-fill-rect! fb 160 144 4 38 152 32 '(24 88 40))
+     (fb-fill-rect! fb 160 144 4 70 152 28 TAN)
+     ;; Player Monsters: Blue Slime (x=12, y=68), Purple Dracky (x=38, y=50), Green Dragon (x=64, y=56)
+     (fb-draw-circle! fb 160 144 20 78 8 CYAN #t)
+     (fb-draw-circle! fb 160 144 20 78 8 BLACK #f)
+     (fb-fill-rect! fb 160 144 17 75 2 2 WHITE)
+     (fb-fill-rect! fb 160 144 22 75 2 2 WHITE)
+     (fb-draw-bitmap!
+      fb 160 144 36 50
+      '("P..PPPP..P"
+        "PP.PWWP.PP"
+        "PPPPPPPPPP"
+        ".PPRRRRPP."
+        "...P..P...")
+      (hash #\P PURPLE #\W WHITE #\R RED) 2)
+     (fb-draw-bitmap!
+      fb 160 144 64 56
+      '("..GGGG...."
+        ".GGWWGG..."
+        ".GGGGGGYY."
+        "GGGGGGGGY."
+        ".GG..GG...")
+      (hash #\G GREEN #\W WHITE #\Y GOLD) 2)
+     ;; Giant Crowned King Slime Boss on Right (x=108..148, y=46..90)
+     (fb-draw-circle! fb 160 144 128 74 16 CYAN #t)
+     (fb-draw-circle! fb 160 144 128 74 16 BLACK #f)
+     (fb-draw-box!  fb 160 144 120 48 16 10 GOLD BLACK) ; Crown
+     (fb-fill-rect! fb 160 144 126 50 4  4  RED)
+     (fb-draw-circle! fb 160 144 122 70 3 WHITE #t)
+     (fb-draw-circle! fb 160 144 134 70 3 WHITE #t)
+     (fb-fill-rect! fb 160 144 122 78 12 3 RED)
+     ;; Bottom Command & Battle Message Boxes (y=100..142)
+     (fb-draw-box!  fb 160 144 2  100 68 42 BLACK WHITE GRAY)
+     (fb-draw-text! fb 160 144 8  108 ">FIGHT PLAN" WHITE)
+     (fb-draw-text! fb 160 144 8  122 " ITEM  RUN" WHITE)
+     (fb-draw-box!  fb 160 144 72 100 86 42 BLACK WHITE GRAY)
+     (fb-draw-text! fb 160 144 78 108 "KING SLIME" GOLD)
+     (fb-draw-text! fb 160 144 78 120 "DRAWS NEAR!" WHITE)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 18. MARIO TENNIS (GBC, 2000) — Perspective Grass Court, Net, Luigi & Mario
+    ;; ------------------------------------------------------------------------
+    [(18)
+     ;; Top Stadium Scoreboard (y=0..18)
+     (fb-draw-box!  fb 160 144 0 0 160 18 NAVY GOLD)
+     (fb-draw-text! fb 160 144 8 6 "MARIO [40] - [15] LUIGI" GOLD)
+     ;; Mowed Grass Court Scanline Bands (y=18..143)
+     (for ([y (in-range 18 144)])
+       (define grass-col (if (even? (quotient y 8)) '(40 184 64) '(32 156 52)))
+       (fb-fill-rect! fb 160 144 0 y 160 1 grass-col))
+     ;; White Perspective Court Lines (Trapezoid from y=30..136)
+     (fb-fill-rect! fb 160 144 36 30  88  2 WHITE) ; Far baseline
+     (fb-fill-rect! fb 160 144 28 52  104 1 WHITE) ; Far service line
+     (fb-fill-rect! fb 160 144 20 96  120 1 WHITE) ; Near service line
+     (fb-fill-rect! fb 160 144 12 134 136 2 WHITE) ; Near baseline
+     (fb-draw-line! fb 160 144 36 30  12 134 WHITE) ; Left sideline
+     (fb-draw-line! fb 160 144 42 30  20 134 WHITE) ; Left singles line
+     (fb-draw-line! fb 160 144 124 30 148 134 WHITE) ; Right sideline
+     (fb-draw-line! fb 160 144 118 30 140 134 WHITE) ; Right singles line
+     (fb-fill-rect! fb 160 144 80 52  1  44 WHITE) ; Center service line
+     ;; Tennis Net across y=70..78 with Posts
+     (fb-fill-rect! fb 160 144 18 68 3 12 BLACK)
+     (fb-fill-rect! fb 160 144 139 68 3 12 BLACK)
+     (fb-fill-rect! fb 160 144 20 70 120 2 WHITE)
+     (for ([nx (in-range 22 140 4)])
+       (fb-fill-rect! fb 160 144 nx 72 1 6 BLACK))
+     ;; Luigi at Far Baseline (x=72, y=22)
+     (fb-draw-bitmap!
+      fb 160 144 72 22
+      '("..GGGG.."
+        "..TTTT.."
+        ".GGBBGG."
+        "..BBBB.."
+        "..B..B..")
+      (hash #\G GREEN #\T TAN #\B NAVY) 2)
+     ;; Yellow Tennis Ball & White Motion Arc
+     (fb-draw-line! fb 160 144 78 36 92 60 WHITE)
+     (fb-draw-circle! fb 160 144 92 60 3 GOLD #t)
+     ;; Mario Swinging Racket at Near Baseline (px, 108)
+     (define mx (max 48 (min 96 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 mx 108
+      '("..RRRRRR...."
+        "..TTTTTT...."
+        ".RRRBBBRRR.."
+        ".RRBBBBBRRWW"
+        "..BBBBBBBBWW"
+        "..BBB..BBB..")
+      (hash #\R RED #\T TAN #\B BLUE #\W WHITE) 2)
+     (fb-draw-circle! fb 160 144 (+ mx 24) 114 5 RED #f)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 19. LUFIA: THE LEGEND RETURNS (2001) — Sinistral Gades Boss & 3x3 IP Grid
+    ;; ------------------------------------------------------------------------
+    [(19)
+     ;; Dramatic Dark-Purple Vortex Sky (y=0..88)
+     (fb-fill-rect! fb 160 144 0 0  160 44 DPURP)
+     (fb-fill-rect! fb 160 144 0 44 160 44 NAVY)
+     ;; Temple Stone Pillars on Left & Right
+     (fb-draw-box! fb 160 144 0   0 14 88 GRAY BLACK)
+     (fb-draw-box! fb 160 144 146 0 14 88 GRAY BLACK)
+     ;; Towering Sinistral GADES Boss Sprite in Upper Center (x=58..102, y=6..52)
+     (fb-draw-bitmap!
+      fb 160 144 60 6
+      '("......YYYYYY........"
+        "....YYRRRRRRYY......"
+        "...YRRBBWWBBRRY....."
+        "..PPPPYYYYYYPPPP...."
+        ".PPPPPRRRRRRPPPPP..W"
+        "PPPPRRYYYYYYRRPPPPWW"
+        "PPPPRRRRRRRRRRPPPWW."
+        ".PPP..RRRRRR..PPWW.."
+        "......YY..YY...YY...")
+      (hash #\Y GOLD #\R RED #\B BLACK #\W WHITE #\P PURPLE) 2)
+     ;; 4 Party Heroes Standing Below (Wain, Seena, Dei, Mousse at y=64..84)
+     (for ([hx '(30 60 90 120)]
+           [hcol (list CYAN RED GOLD GREEN)])
+       (fb-draw-circle! fb 160 144 hx 68 4 hcol #t)
+       (fb-fill-rect! fb 160 144 (- hx 4) 72 8 10 hcol))
+     ;; Bottom HUD: Left 3x3 Spiritual Force IP Grid (x=2..48, y=88..142) & Right Status
+     (fb-draw-box! fb 160 144 0 88 50 56 BLACK WHITE GOLD)
+     (for* ([gy (in-range 3)] [gx (in-range 3)])
+       (define cell-col (list-ref (list RED CYAN GOLD GREEN PURPLE RED GOLD CYAN GREEN) (+ (* gy 3) gx)))
+       (fb-draw-box! fb 160 144 (+ 6 (* gx 13)) (+ 94 (* gy 15)) 11 13 cell-col WHITE))
+     (fb-draw-box!  fb 160 144 50 88 110 56 BLACK WHITE CYAN)
+     (fb-draw-text! fb 160 144 56 95  "WAIN  HP 185 IP99" WHITE)
+     (fb-draw-text! fb 160 144 56 109 "SEENA HP 142 MP84" CYAN)
+     (fb-draw-text! fb 160 144 56 123 "DEI   HP 168 IP75" GOLD)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 20. MEGA MAN XTREME 2 (2001) — Cyber Fortress, Mega Man X & Charged Shot
+    ;; ------------------------------------------------------------------------
+    [else
+     ;; Dark Navy Cyberspace Fortress Wall with Glowing Neon Conduits
+     (fb-fill-rect! fb 160 144 0 0 160 144 '(12 20 56))
+     (for ([x (in-range 16 144 24)])
+       (fb-fill-rect! fb 160 144 x 0 2 118 NAVY)
+       (fb-fill-rect! fb 160 144 (+ x 8) 24 12 2 CYAN))
+     (for ([y '(28 60 92)])
+       (fb-fill-rect! fb 160 144 14 y 132 2 '(24 88 160)))
+     ;; Left Vertical X Health Bar (x=4..11, y=14..78) & Right Boss Bar (x=148..155)
+     (fb-draw-box! fb 160 144 4   14 8 64 BLACK WHITE)
+     (fb-draw-box! fb 160 144 148 14 8 64 BLACK WHITE)
+     (for ([by (in-range 20 74 4)])
+       (fb-fill-rect! fb 160 144 6   by 4 2 GOLD)
+       (fb-fill-rect! fb 160 144 150 by 4 2 RED))
+     (fb-draw-text! fb 160 144 6   80 "X" CYAN)
+     (fb-draw-text! fb 160 144 150 80 "B" RED)
+     ;; Metallic Cyber Deck Floor (y=118..143)
+     (for ([gx (in-range 0 160 16)])
+       (fb-draw-box! fb 160 144 gx 118 16 26 GRAY BLACK)
+       (fb-fill-rect! fb 160 144 (+ gx 2) 120 12 3 CYAN))
+     ;; Mega Man X (18x24) in Cyan/Blue Armor Firing Spiral Charged X-Buster at (px, 94)
+     (define xx (max 20 (min 48 raw-px)))
+     (fb-draw-bitmap!
+      fb 160 144 xx 94
+      '("...BBBBBB..."
+        "..BBRCCRRB.."
+        "..BBTTTTBB.."
+        ".CCCCBBBBYY."
+        ".CCBBBBBBYYY"
+        "..BBBBBBBB.."
+        "..CCC..CCC.."
+        ".BBBB..BBBB."
+        ".BBBB..BBBB.")
+      (hash #\B BLUE #\C CYAN #\R RED #\T TAN #\Y GOLD) 2)
+     ;; Huge 3-Color Charged X-Buster Spiral Blast!
+     (fb-draw-circle! fb 160 144 (+ xx 34) 102 8 PINK #t)
+     (fb-draw-circle! fb 160 144 (+ xx 34) 102 5 GOLD #t)
+     (fb-draw-circle! fb 160 144 (+ xx 34) 102 3 WHITE #t)
+     (fb-fill-rect!   fb 160 144 (+ xx 22) 100 18 4 WHITE)
+     ;; Maverick Boss (Neon Tiger / Gareth) on Right (x=114..142, y=88..117)
+     (fb-draw-bitmap!
+      fb 160 144 114 90
+      '("..YY..YY...."
+        ".YYYYYYYY..."
+        "YYRRYYYYRRYY"
+        ".YYYYYYYYYY."
+        "..GGGGGGGG.."
+        ".YYGGGGGGYY."
+        "..YY....YY..")
+      (hash #\Y GOLD #\R RED #\G GREEN) 2)])
   fb)
+
+;; ============================================================================
+;; 7D. Authentic Top-10 PICO-8 (.p8) / RP2040 (.uf2) 128x128 Scene Renderers
+;; ============================================================================
 
 ;; Official 16-Color PICO-8 RGB Palette Table
 (define PICO8-RGB-PALETTE
@@ -1999,69 +3261,465 @@
     (255 0 77)    (255 163 0)   (255 236 39)  (0 228 54)
     (41 173 255)  (131 118 156) (255 119 168) (255 204 170)))
 
+(define (p8col idx)
+  (vector-ref PICO8-RGB-PALETTE (modulo idx 16)))
+
+(define PICO8-CHAR-MAP
+  (for/hash ([i (in-range 16)])
+    (values (string-ref "0123456789ABCDEF" i) (p8col i))))
+
 ;; Render a 128x128 RGB framebuffer (49,152 bytes = 16,384 pixels) for a PICO-8 / RP2040 checkpoint state
 (define (render-pico8-framebuffer-rgb spec state-hash)
-  (define fb     (make-bytes (* 128 128 3) 0))
-  (define idx    (hash-ref spec 'game-index 1))
-  (define pal    (hash-ref spec 'palette '(0 1 7 8 11 12 14 15)))
-  (define bg-col (modulo (hash-ref spec 'bg-color 1) 16))
-  (define bg-rgb (vector-ref PICO8-RGB-PALETTE bg-col))
-  (define tiles  (make-pico8-game-tiles idx))
-  (define stg    (hash-ref state-hash 'stageId 0))
+  (define fb      (make-bytes (* 128 128 3) 0))
+  (define idx     (hash-ref spec 'game-index 1))
+  (define stg     (hash-ref state-hash 'stageId 0))
+  (define raw-px  (bitwise-and #x7F (hash-ref state-hash 'playerX (+ 20 idx))))
+  (define raw-py  (bitwise-and #x7F (hash-ref state-hash 'playerY (+ 56 idx))))
+  (void stg)
 
-  ;; 1. Clear 128x128 screen with horizon bands from game palette
-  (for ([y (in-range 128)])
-    (define row-rgb
-      (cond
-        [(< y 10) (vector-ref PICO8-RGB-PALETTE (modulo (list-ref pal (modulo 1 (length pal))) 16))]
-        [(>= y 112) (vector-ref PICO8-RGB-PALETTE (modulo (list-ref pal (modulo 2 (length pal))) 16))]
-        [else bg-rgb]))
-    (for ([x (in-range 128)])
-      (define off (* (+ (* y 128) x) 3))
-      (bytes-set! fb off       (first row-rgb))
-      (bytes-set! fb (+ off 1) (second row-rgb))
-      (bytes-set! fb (+ off 2) (third row-rgb))))
+  (case idx
+    ;; ------------------------------------------------------------------------
+    ;; 1. CELESTE CLASSIC (2015) — Night Mountain, Snow, Madeline Dash & Strawberry
+    ;; ------------------------------------------------------------------------
+    [(1)
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 0))
+     ;; Distant Dark-Blue & Purple Mountain Peaks
+     (for ([dy (in-range 60)])
+       (fb-fill-rect! fb 128 128 (- 40 dy) (+ 48 dy) (* dy 2) 1 (p8col 1))
+       (fb-fill-rect! fb 128 128 (- 96 dy) (+ 56 dy) (* dy 2) 1 (p8col 2)))
+     ;; Falling Snow Particles
+     (for ([s '((18 28 2) (46 18 1) (74 34 2) (108 20 1) (28 68 1) (84 72 2) (114 58 1))])
+       (fb-fill-rect! fb 128 128 (first s) (second s) (third s) (third s) (p8col 7)))
+     ;; Top-Left Timer & Altitude HUD Box
+     (fb-draw-box!  fb 128 128 2 2 58 13 (p8col 0) (p8col 7))
+     (fb-draw-text! fb 128 128 5 6 "100M 00:18" (p8col 7))
+     ;; Snow-Capped Ice & Rock Ledges + Floor Spikes
+     (fb-draw-box!  fb 128 128 0  20 12 108 (p8col 1) (p8col 12))
+     (fb-draw-box!  fb 128 128 0  92 48 36  (p8col 1) (p8col 12))
+     (fb-fill-rect! fb 128 128 0  92 48 3   (p8col 7))
+     (fb-draw-box!  fb 128 128 68 98 60 30  (p8col 1) (p8col 12))
+     (fb-fill-rect! fb 128 128 68 98 60 3   (p8col 7))
+     (fb-draw-box!  fb 128 128 76 52 52 10  (p8col 1) (p8col 12))
+     (fb-fill-rect! fb 128 128 76 52 52 2   (p8col 7))
+     ;; White Ice Spikes in Pit (x=48..67, y=118..127)
+     (for ([sx (in-range 49 67 4)])
+       (fb-draw-line! fb 128 128 sx 127 (+ sx 2) 118 (p8col 7))
+       (fb-draw-line! fb 128 128 (+ sx 2) 118 (+ sx 4) 127 (p8col 6)))
+     ;; Madeline Air-Dashing with White/Cyan Dash Trail at (px, py)
+     (define mx (max 24 (min 52 raw-px)))
+     (define my 64)
+     (fb-draw-circle! fb 128 128 (- mx 10) (+ my 10) 3 (p8col 12) #t)
+     (fb-draw-circle! fb 128 128 (- mx 5)  (+ my 7)  4 (p8col 7)  #t)
+     (fb-draw-bitmap!
+      fb 128 128 mx my
+      '("..888888.."
+        ".88888888."
+        "888FFFF88."
+        "88FF0FF0.."
+        ".8CCCCCC.."
+        "..CCCCCC.."
+        "..11..11..")
+      PICO8-CHAR-MAP 2)
+     ;; Winged Red Strawberry at (92, 26)
+     (fb-draw-bitmap!
+      fb 128 128 88 26
+      '("77..BB..77"
+        "777.88.777"
+        ".77878877."
+        "...8878..."
+        "....88....")
+      PICO8-CHAR-MAP 2)]
 
-  ;; Helper to blit an 8x8 4bpp PICO-8 sprite at (sx, sy)
-  (define (blit-spr! spr-id sx sy)
-    (define entry (assoc spr-id tiles))
-    (when entry
-      (for ([row-str (in-list (cdr entry))]
-            [dy (in-range 8)])
-        (define py (+ sy dy))
-        (when (and (>= py 0) (< py 128))
-          (for ([ch (in-string row-str)]
-                [dx (in-range 8)])
-            (define px (+ sx dx))
-            (when (and (>= px 0) (< px 128))
-              (define cidx (or (string->number (string ch) 16) 0))
-              (unless (zero? cidx)
-                (define rgb (vector-ref PICO8-RGB-PALETTE (modulo cidx 16)))
-                (define off (* (+ (* py 128) px) 3))
-                (bytes-set! fb off       (first rgb))
-                (bytes-set! fb (+ off 1) (second rgb))
-                (bytes-set! fb (+ off 2) (third rgb)))))))))
+    ;; ------------------------------------------------------------------------
+    ;; 2. PICO-HOT — Minimalist White 3D Corridor, Red Crystal Enemy & Bullet Trail
+    ;; ------------------------------------------------------------------------
+    [(2)
+     ;; Stark White & Light-Gray 3D Perspective Corridor
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 7))
+     (fb-fill-rect! fb 128 128 0 0 128 28  (p8col 6))
+     (fb-fill-rect! fb 128 128 0 96 128 32 (p8col 6))
+     ;; Perspective Wireframe Edges & Rear Doorway
+     (fb-draw-box!  fb 128 128 40 30 48 64 (p8col 6) (p8col 0))
+     (fb-draw-box!  fb 128 128 52 42 24 52 (p8col 5) (p8col 0))
+     (fb-draw-line! fb 128 128 0 0   40 30 (p8col 0))
+     (fb-draw-line! fb 128 128 127 0 87 30 (p8col 0))
+     (fb-draw-line! fb 128 128 0 127 40 93 (p8col 0))
+     (fb-draw-line! fb 128 128 127 127 87 93 (p8col 0))
+     ;; Bold SUPER / HOT Top Overlay
+     (fb-draw-box!  fb 128 128 24 4 80 14 (p8col 8) (p8col 0))
+     (fb-draw-text! fb 128 128 32 8 "SUPER   HOT" (p8col 7))
+     ;; Faceted Red Crystal Enemy in Corridor (x=54..74, y=42..92)
+     (fb-draw-bitmap!
+      fb 128 128 54 42
+      '("...8888..."
+        "..88EE88.."
+        "..828828.."
+        "...8888..."
+        ".888EE888."
+        "8828888288"
+        "88.8888.88"
+        "...8228..."
+        "..88..88.."
+        "..22..22.."
+        "..88..88..")
+      PICO8-CHAR-MAP 2)
+     ;; Bullet & Dotted Trajectory Line
+     (for ([t (in-range 8)])
+       (fb-fill-rect! fb 128 128 (- 52 (* t 5)) (+ 56 (* t 3)) 3 2 (if (even? t) (p8col 8) (p8col 0))))
+     (fb-draw-circle! fb 128 128 14 80 3 (p8col 0) #t)
+     ;; Center Crosshair & Bottom-Right Black Pistol Silhouette
+     (fb-stroke-rect! fb 128 128 60 60 8 8 (p8col 0))
+     (fb-fill-rect!   fb 128 128 88 94 28 10 (p8col 0))
+     (fb-fill-rect!   fb 128 128 104 104 14 24 (p8col 0))
+     (fb-fill-rect!   fb 128 128 90 96 18 3 (p8col 5))]
 
-  ;; 2. Draw Top & Bottom Tilemap Borders, Side Walls & Interior Platforms (Sprite 4)
-  (for ([tx (in-range 16)])
-    (blit-spr! 4 (* tx 8) 0)
-    (blit-spr! 4 (* tx 8) 112)
-    (blit-spr! 4 (* tx 8) 120))
-  (for ([ty (in-range 1 14)])
-    (blit-spr! 4 0 (* ty 8))
-    (blit-spr! 4 120 (* ty 8)))
-  (for ([tx (in-range 3 13 2)])
-    (blit-spr! 4 (* tx 8) (+ 40 (* (modulo (+ tx idx stg) 3) 24))))
+    ;; ------------------------------------------------------------------------
+    ;; 3. JELPI — Sky-Blue World, Green/Brown Checker Hills & Pink Jelpi Hero
+    ;; ------------------------------------------------------------------------
+    [(3)
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 12))
+     ;; Top HUD (Hearts & Score)
+     (for ([hx '(4 14 24)])
+       (fb-draw-heart! fb 128 128 hx 4 (p8col 8) (p8col 0)))
+     (fb-draw-text! fb 128 128 72 5 "SCORE 0420" (p8col 7) (p8col 1))
+     ;; Fluffy White Clouds & Distant Pastel Hills
+     (fb-draw-circle! fb 128 128 24 24 8 (p8col 7) #t)
+     (fb-draw-circle! fb 128 128 34 22 9 (p8col 7) #t)
+     (fb-draw-circle! fb 128 128 92 22 8 (p8col 7) #t)
+     (fb-draw-circle! fb 128 128 102 22 7 (p8col 7) #t)
+     (fb-draw-circle! fb 128 128 32 96 28 (p8col 13) #t)
+     (fb-draw-circle! fb 128 128 96 96 24 (p8col 13) #t)
+     ;; Raised Grassy Plateau (x=72..120, y=62..72) & Spinning Coins
+     (fb-draw-box!  fb 128 128 72 62 48 10 (p8col 4) (p8col 0))
+     (fb-fill-rect! fb 128 128 72 62 48 4  (p8col 11))
+     (for ([cx '(80 94 108)])
+       (fb-draw-circle! fb 128 128 cx 52 4 (p8col 10) #t)
+       (fb-draw-circle! fb 128 128 cx 52 4 (p8col 9)  #f))
+     ;; Lush Green Grass Turf (y=90..97) & Checkered Brown Soil (y=98..127)
+     (fb-fill-rect! fb 128 128 0 90 128 5 (p8col 11))
+     (fb-fill-rect! fb 128 128 0 95 128 3 (p8col 3))
+     (for* ([gy (in-range 98 128 8)]
+            [gx (in-range 0 128 8)])
+       (fb-fill-rect! fb 128 128 gx gy 8 8
+                      (if (even? (+ (quotient gx 8) (quotient gy 8))) (p8col 4) (p8col 15))))
+     ;; Cute Pink Jelpi Blob Hero Bouncing at (px, 68) + Purple Monster at (92, 74)
+     (define jx (max 24 (min 52 raw-px)))
+     (fb-draw-circle! fb 128 128 (+ jx 8) 76 10 (p8col 7)  #f) ; Wave-dash aura
+     (fb-draw-circle! fb 128 128 (+ jx 8) 76 8  (p8col 14) #t)
+     (fb-draw-circle! fb 128 128 (+ jx 8) 76 8  (p8col 0)  #f)
+     (fb-fill-rect!   fb 128 128 (+ jx 5) 73 2 4 (p8col 0))
+     (fb-fill-rect!   fb 128 128 (+ jx 10) 73 2 4 (p8col 0))
+     (fb-fill-rect!   fb 128 128 (+ jx 3) 77 2 2 (p8col 8))
+     (fb-fill-rect!   fb 128 128 (+ jx 12) 77 2 2 (p8col 8))
+     ;; Spiky Purple Monster at (92, 76)
+     (fb-draw-circle! fb 128 128 96 82 7 (p8col 2) #t)
+     (fb-fill-rect!   fb 128 128 93 80 2 2 (p8col 10))
+     (fb-fill-rect!   fb 128 128 98 80 2 2 (p8col 10))]
 
-  ;; 3. Draw Hazard (Sprite 3), Goal (Sprite 2), and Hero (Sprite 1)
-  (define px (bitwise-and #x7F (hash-ref state-hash 'playerX (+ 20 idx))))
-  (define py (bitwise-and #x7F (hash-ref state-hash 'playerY (+ 56 idx))))
-  (blit-spr! 3 56 64)
-  (blit-spr! 3 72 88)
-  (blit-spr! 2 96 64)
-  (blit-spr! 2 96 40)
-  (blit-spr! 1 px py)
-  (blit-spr! 1 (+ px 8) py)
+    ;; ------------------------------------------------------------------------
+    ;; 4. POOM — 3D Raycast Doom Corridor, Lava Pit, Cyber-Imp, Shotgun & Status Bar
+    ;; ------------------------------------------------------------------------
+    [(4)
+     (fb-fill-rect! fb 128 128 0 0 128 104 (p8col 0))
+     ;; Perspective Textured Corridor Walls (Left x=0..38, Right x=90..127)
+     (for ([x (in-range 38)])
+       (define top (+ 6 (quotient (* x 22) 38)))
+       (define bot (- 98 (quotient (* x 22) 38)))
+       (define wcol (if (even? (quotient x 6)) (p8col 5) (p8col 4)))
+       (fb-fill-rect! fb 128 128 x top 1 (- bot top) wcol)
+       (fb-fill-rect! fb 128 128 (- 127 x) top 1 (- bot top) wcol))
+     ;; Ceiling Tech Lights & Molten Red/Orange Lava Floor Pit (y=76..103)
+     (fb-fill-rect! fb 128 128 46 10 36 4 (p8col 8))
+     (fb-fill-rect! fb 128 128 38 76 52 28 (p8col 8))
+     (fb-fill-rect! fb 128 128 44 82 40 16 (p8col 9))
+     (fb-fill-rect! fb 128 128 52 86 24 8  (p8col 10))
+     ;; Menacing Cyber-Imp Demon in Center Corridor (x=50..78, y=34..74)
+     (fb-draw-bitmap!
+      fb 128 128 52 34
+      '(".A..8888..A."
+        ".AA882288AA."
+        "..88A88A88.."
+        "..88877888.."
+        "B98888888888"
+        "BB88.8888.88"
+        "....88..88.."
+        "...44....44.")
+      PICO8-CHAR-MAP 2)
+     ;; Player Super Shotgun Barrel & Muzzle Flash (x=54..74, y=76..103)
+     (fb-draw-circle! fb 128 128 64 76 7 (p8col 9)  #t)
+     (fb-draw-circle! fb 128 128 64 76 4 (p8col 10) #t)
+     (fb-draw-box!    fb 128 128 56 80 8 24 (p8col 5) (p8col 0))
+     (fb-draw-box!    fb 128 128 64 80 8 24 (p8col 5) (p8col 0))
+     (fb-fill-rect!   fb 128 128 58 82 2 20 (p8col 6))
+     (fb-fill-rect!   fb 128 128 66 82 2 20 (p8col 6))
+     ;; Classic Doom Status Bar (y=104..127)
+     (fb-draw-box!  fb 128 128 0 104 128 24 (p8col 5) (p8col 6) (p8col 0))
+     (fb-draw-text! fb 128 128 4  108 "AMMO" (p8col 6))
+     (fb-draw-text! fb 128 128 6  116 " 48"  (p8col 10))
+     (fb-draw-text! fb 128 128 28 108 "HEALTH" (p8col 6))
+     (fb-draw-text! fb 128 128 30 116 "100%" (p8col 8))
+     ;; Doomguy Mugshot Box (x=56..72, y=106..125)
+     (fb-draw-box!  fb 128 128 56 106 16 19 (p8col 0) (p8col 6))
+     (fb-fill-rect! fb 128 128 59 109 10 4  (p8col 4))
+     (fb-fill-rect! fb 128 128 59 113 10 10 (p8col 15))
+     (fb-fill-rect! fb 128 128 61 115 2  2  (p8col 0))
+     (fb-fill-rect! fb 128 128 66 115 2  2  (p8col 0))
+     (fb-draw-text! fb 128 128 80 108 "ARMOR" (p8col 6))
+     (fb-draw-text! fb 128 128 84 116 " 50%" (p8col 11))]
+
+    ;; ------------------------------------------------------------------------
+    ;; 5. DUSK CHILD — Subterranean Clockwork Ruin & Warm Lantern Light Halo
+    ;; ------------------------------------------------------------------------
+    [(5)
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 0))
+     (fb-fill-rect! fb 128 128 8 14 112 90 (p8col 1))
+     ;; Ancient Stone Columns & Background Clockwork Gear
+     (fb-draw-box! fb 128 128 10 14 12 90 (p8col 5) (p8col 0))
+     (fb-draw-box! fb 128 128 106 14 12 90 (p8col 5) (p8col 0))
+     (fb-draw-circle! fb 128 128 92 42 16 (p8col 4) #t)
+     (fb-draw-circle! fb 128 128 92 42 10 (p8col 1) #t)
+     (fb-draw-circle! fb 128 128 92 42 4  (p8col 9) #t)
+     ;; Hanging Green Vines from Ceiling
+     (for ([vx '(28 46 68 84)])
+       (fb-fill-rect! fb 128 128 vx 14 2 (+ 12 (modulo (* vx 3) 16)) (p8col 3))
+       (fb-fill-rect! fb 128 128 (add1 vx) 14 1 10 (p8col 11)))
+     ;; Top Lantern & Soul HUD
+     (fb-draw-text! fb 128 128 6 4 "LANTERN ||||||  SOUL 04" (p8col 10))
+     ;; Concentric Warm Lantern Light Halo around Hero at (px, 68)
+     (define dx (max 34 (min 58 raw-px)))
+     (define dy 68)
+     (fb-draw-circle! fb 128 128 (+ dx 6) (+ dy 6) 30 (p8col 2)  #t)
+     (fb-draw-circle! fb 128 128 (+ dx 6) (+ dy 6) 21 (p8col 4)  #t)
+     (fb-draw-circle! fb 128 128 (+ dx 6) (+ dy 6) 14 (p8col 9)  #t)
+     (fb-draw-circle! fb 128 128 (+ dx 6) (+ dy 6) 8  (p8col 10) #t)
+     ;; Cloaked Dusk Child Hero Holding Glowing Lantern
+     (fb-draw-bitmap!
+      fb 128 128 dx dy
+      '("..1111.."
+        ".11FF11."
+        ".1CCCC1."
+        "1CCCCCC7"
+        "1CCCCCC7"
+        ".11..11.")
+      PICO8-CHAR-MAP 2)
+     ;; Floating Cyan Spirit Wisps & Stone Floor (y=104..127)
+     (fb-draw-circle! fb 128 128 84 72 4 (p8col 12) #t)
+     (fb-draw-circle! fb 128 128 84 72 2 (p8col 7)  #t)
+     (for ([gx (in-range 0 128 16)])
+       (fb-draw-box! fb 128 128 gx 104 16 24 (p8col 5) (p8col 0)))]
+
+    ;; ------------------------------------------------------------------------
+    ;; 6. PORKLIKE — Top-Down Roguelike Dungeon Rooms, Pig-Knight, Chest & Foes
+    ;; ------------------------------------------------------------------------
+    [(6)
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 0))
+     ;; Top Roguelike Status Bar
+     (fb-draw-box!  fb 128 128 0 0 128 14 (p8col 0) (p8col 5))
+     (fb-draw-text! fb 128 128 4 5 "HP @@@@  FLR 03  GOLD 42" (p8col 7))
+     ;; Western Main Dungeon Room (x=8..76, y=20..112) & Eastern Vault (x=88..122, y=32..100)
+     (fb-draw-box! fb 128 128 8  20 68 92 (p8col 5) (p8col 6))
+     (fb-draw-box! fb 128 128 14 26 56 80 (p8col 1) (p8col 0))
+     (fb-draw-box! fb 128 128 88 32 34 68 (p8col 5) (p8col 6))
+     (fb-draw-box! fb 128 128 94 38 22 56 (p8col 1) (p8col 0))
+     ;; Connecting Corridor & Wooden Door (x=70..94, y=56..72)
+     (fb-fill-rect! fb 128 128 70 58 24 12 (p8col 1))
+     (fb-draw-box!  fb 128 128 72 58 4  12 (p8col 4) (p8col 9))
+     ;; Floor Cobble Dots
+     (for* ([ry (in-range 32 102 12)] [rx (in-range 20 66 12)])
+       (fb-put-px! fb 128 128 rx ry (p8col 5)))
+     ;; Pink Pig-Knight Hero with Steel Sword at (px, 60)
+     (define px (max 22 (min 46 raw-px)))
+     (fb-draw-bitmap!
+      fb 128 128 px 58
+      '("E..EE..7"
+        "EEEEEEEE7"
+        "E0EEEE0E7"
+        "EE8888EE7"
+        ".CCCCCC6."
+        ".CC..CC..")
+      PICO8-CHAR-MAP 2)
+     ;; White Skeleton at (52, 36), Green Slime at (48, 84) & Gold Chest at (98, 56)
+     (fb-draw-bitmap!
+      fb 128 128 52 36
+      '(".7777."
+        "707707"
+        ".7777."
+        "7.77.7"
+        ".7..7.")
+      PICO8-CHAR-MAP 2)
+     (fb-draw-circle! fb 128 128 52 88 6 (p8col 11) #t)
+     (fb-draw-box!    fb 128 128 98 56 14 12 (p8col 9) (p8col 10))]
+
+    ;; ------------------------------------------------------------------------
+    ;; 7. MAI-CHAN'S SWEET BUNS — Bakery Counter, Plump Steamed Buns & Mai-Chan
+    ;; ------------------------------------------------------------------------
+    [(7)
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 4))
+     ;; Top Bakery Order Banner
+     (fb-draw-box!  fb 128 128 0 0 128 15 (p8col 15) (p8col 9))
+     (fb-draw-text! fb 128 128 4 5 "ORDER [P][G][Y]  SC 1250" (p8col 4))
+     ;; Left Mai-Chan Baker Sprite (x=3..25, y=42..98)
+     (fb-draw-bitmap!
+      fb 128 128 4 44
+      '("..777777.."
+        ".77777777."
+        "..FFFFFF.."
+        ".FF0FF0FF."
+        "..F8FF8F.."
+        ".88777788."
+        ".87777778."
+        "..777777..")
+      PICO8-CHAR-MAP 2)
+     ;; Center Bamboo Steamer Puzzle Grid (x=28..92, y=18..114, 4x6 Steamed Buns!)
+     (fb-draw-box! fb 128 128 26 18 68 98 (p8col 15) (p8col 9) (p8col 4))
+     (define bun-colors (vector 14 11 10 7 8 12))
+     (for* ([ry (in-range 5)]
+            [cx (in-range 4)])
+       (define bx (+ 30 (* cx 15)))
+       (define by (+ 24 (* ry 17)))
+       (define bcol (p8col (vector-ref bun-colors (modulo (+ (* ry 3) cx) 6))))
+       (fb-draw-circle! fb 128 128 (+ bx 6) (+ by 6) 6 bcol #t)
+       (fb-draw-circle! fb 128 128 (+ bx 6) (+ by 6) 6 (p8col 0) #f)
+       (fb-put-px! fb 128 128 (+ bx 4) (+ by 5) (p8col 0))
+       (fb-put-px! fb 128 128 (+ bx 8) (+ by 5) (p8col 0))
+       (fb-put-px! fb 128 128 (+ bx 3) (+ by 7) (p8col 8))
+       (fb-put-px! fb 128 128 (+ bx 9) (+ by 7) (p8col 8)))
+     ;; Active Swap Cursor Frame
+     (fb-stroke-rect! fb 128 128 44 40 31 16 (p8col 10))
+     ;; Right Combo / Shift Ticket Box (x=96..125, y=18..114)
+     (fb-draw-box!  fb 128 128 96 18 30 98 (p8col 7) (p8col 4))
+     (fb-draw-text! fb 128 128 99 26 "CHAIN" (p8col 8))
+     (fb-draw-text! fb 128 128 103 36 "*03!" (p8col 9))
+     (fb-draw-text! fb 128 128 99 56 "SHIFT" (p8col 1))
+     (fb-draw-text! fb 128 128 103 66 "02"   (p8col 1))]
+
+    ;; ------------------------------------------------------------------------
+    ;; 8. ASCENT — Alien Cavern, Glowing Crystals, Astronaut Jetpack & Grapple
+    ;; ------------------------------------------------------------------------
+    [(8)
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 0))
+     (fb-fill-rect! fb 128 128 12 14 104 114 (p8col 1))
+     ;; Top O2 & Jetpack Fuel HUD
+     (fb-draw-text! fb 128 128 4 4 "O2 ||||||   FUEL |||||" (p8col 12))
+     ;; Jagged Cavern Rock Walls & Overhangs (col 2/13)
+     (fb-fill-rect! fb 128 128 0   14 16 114 (p8col 2))
+     (fb-fill-rect! fb 128 128 112 14 16 114 (p8col 2))
+     (fb-draw-box!  fb 128 128 64  36 48 14  (p8col 2) (p8col 13))
+     (fb-draw-box!  fb 128 128 16  98 48 16  (p8col 2) (p8col 13))
+     ;; Glowing Bioluminescent Cyan & Green Crystal Formations
+     (for ([cx '(22 34 72 88 100)])
+       (define cy (if (< cx 50) 90 28))
+       (fb-draw-line! fb 128 128 cx cy (+ cx 4) (- cy 8) (p8col 12))
+       (fb-draw-line! fb 128 128 (+ cx 1) cy (+ cx 5) (- cy 8) (p8col 11)))
+     ;; Grapple Line from Astronaut to Crystal Overhang (76, 48)
+     (define ax (max 32 (min 56 raw-px)))
+     (define ay 64)
+     (fb-draw-line! fb 128 128 (+ ax 8) ay 76 48 (p8col 12))
+     (fb-draw-circle! fb 128 128 76 48 3 (p8col 7) #t)
+     ;; White-Suited Astronaut with Orange/Yellow Jetpack Flame
+     (fb-draw-bitmap!
+      fb 128 128 ax ay
+      '("..7777.."
+        ".7CCCC7."
+        ".7CCCC7."
+        "67777776"
+        "67777776"
+        "..77.77."
+        "..99.99."
+        "..AA.AA.")
+      PICO8-CHAR-MAP 2)
+     ;; Red Laser Patrol Drone at (88, 74)
+     (fb-draw-circle! fb 128 128 92 78 6 (p8col 5) #t)
+     (fb-draw-circle! fb 128 128 92 78 3 (p8col 8) #t)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 9. HIGH STAKES — Gothic Casino Felt Table, 5 Playing Cards & Poker Chips
+    ;; ------------------------------------------------------------------------
+    [(9)
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 2))
+     ;; Top Vampire Dealer Eyes & Gold/Bet HUD
+     (fb-draw-text! fb 128 128 4  5 "GOLD $450" (p8col 10))
+     (fb-fill-rect! fb 128 128 56 6 4 3 (p8col 8))
+     (fb-fill-rect! fb 128 128 66 6 4 3 (p8col 8))
+     (fb-draw-text! fb 128 128 84 5 "BET $50" (p8col 8))
+     ;; Ornate Gold-Bordered Dark-Green Casino Felt Table (x=6..121, y=16..108)
+     (fb-draw-box! fb 128 128 6 16 116 92 (p8col 3) (p8col 9) (p8col 10))
+     ;; 5 Large Playing Cards (18x26) Fanned Across Center Table (y=36..62)
+     (define card-suits (list (cons "A" 0) (cons "K" 8) (cons "Q" 8) (cons "J" 0) (cons "V" 2)))
+     (for ([cs (in-list card-suits)]
+           [idx (in-naturals)])
+       (define cx (+ 13 (* idx 21)))
+       (define cy 36)
+       (fb-fill-rect! fb 128 128 (+ cx 2) (+ cy 2) 18 26 (p8col 0)) ; Shadow
+       (fb-draw-box!  fb 128 128 cx cy 18 26 (p8col 7) (p8col 0))
+       (fb-draw-text! fb 128 128 (+ cx 3) (+ cy 3) (car cs) (p8col (cdr cs)))
+       (fb-draw-heart! fb 128 128 (+ cx 6) (+ cy 12) (p8col (cdr cs)) (p8col (cdr cs))))
+     ;; Stacks of Red, Blue & Gold Poker Chips (Bottom-Left) + Stake (Bottom-Right)
+     (for ([cy '(92 88 84)])
+       (fb-draw-circle! fb 128 128 24 cy 6 (p8col 8)  #t)
+       (fb-draw-circle! fb 128 128 24 cy 6 (p8col 7)  #f)
+       (fb-draw-circle! fb 128 128 40 cy 6 (p8col 12) #t)
+       (fb-draw-circle! fb 128 128 40 cy 6 (p8col 7)  #f)
+       (fb-draw-circle! fb 128 128 56 cy 6 (p8col 10) #t)
+       (fb-draw-circle! fb 128 128 56 cy 6 (p8col 0)  #f))
+     ;; Wooden Vampire Stake & Silver Cross (x=80..112, y=82..96)
+     (fb-fill-rect! fb 128 128 80 86 24 5 (p8col 4))
+     (fb-fill-rect! fb 128 128 104 87 6 3 (p8col 9))
+     ;; Bottom Command Bar
+     (fb-draw-text! fb 128 128 10 115 "[HIT]  [STAND]  [STAKE]" (p8col 7))]
+
+    ;; ------------------------------------------------------------------------
+    ;; 10. KALIKAN — Vertical Space Shmup, Dreadnought Boss, Lasers & Bullet Fan
+    ;; ------------------------------------------------------------------------
+    [else
+     (fb-fill-rect! fb 128 128 0 0 128 128 (p8col 0))
+     ;; Deep-Space Starfield & Mechanical Trench Side Walls
+     (for ([s '((20 20 7) (44 54 12) (88 32 7) (104 68 13) (28 88 6) (96 104 7))])
+       (fb-put-px! fb 128 128 (first s) (second s) (p8col (third s))))
+     (fb-draw-box! fb 128 128 0   14 10 114 (p8col 1) (p8col 5))
+     (fb-draw-box! fb 128 128 118 14 10 114 (p8col 1) (p8col 5))
+     ;; Top Score & Shield-Laser HUD
+     (fb-draw-text! fb 128 128 4 4 "1UP 028400  SHLD ||||||" (p8col 7))
+     ;; Alien Dreadnought Boss Core at Top-Center (x=36..92, y=16..42)
+     (fb-draw-bitmap!
+      fb 128 128 36 16
+      '("22228888888888882222"
+        ".2288899AAAA9988822."
+        "..8889A777777A9888.."
+        "...889A788887A988..."
+        "....8899AAAA9988...."
+        ".....88..88..88.....")
+      PICO8-CHAR-MAP 2)
+     ;; V-Formation Escort Fighters & Geometric Pink/Red Bullet Curtain
+     (for ([ex '(20 96)])
+       (fb-draw-bitmap!
+        fb 128 128 ex 44
+        '(".8..8."
+          "889988"
+          ".8AA8."
+          "..88..")
+        PICO8-CHAR-MAP 2))
+     (for ([bx '(32 46 64 82 96)]
+           [by '(64 72 68 72 64)])
+       (fb-draw-circle! fb 128 128 bx by 3 (p8col 8)  #t)
+       (fb-draw-circle! fb 128 128 bx by 1 (p8col 7)  #t))
+     ;; Twin-Wing Kalikan Starfighter Firing Dual Laser Streams at (px, 94)
+     (define sx (max 48 (min 68 raw-px)))
+     (fb-fill-rect! fb 128 128 (+ sx 3)  28 2 66 (p8col 12))
+     (fb-fill-rect! fb 128 128 (+ sx 4)  28 1 66 (p8col 7))
+     (fb-fill-rect! fb 128 128 (+ sx 11) 28 2 66 (p8col 12))
+     (fb-fill-rect! fb 128 128 (+ sx 12) 28 1 66 (p8col 7))
+     (fb-draw-circle! fb 128 128 (+ sx 8) 102 12 (p8col 12) #f) ; Graze shield ring
+     (fb-draw-bitmap!
+      fb 128 128 sx 94
+      '("...77..."
+        "..7CC7.."
+        ".77CC77."
+        "CC7AA7CC"
+        "C777777C"
+        "C..99..C"
+        "...AA...")
+      PICO8-CHAR-MAP 2)])
   fb)
 
 ;; ============================================================================

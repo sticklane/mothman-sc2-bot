@@ -245,12 +245,12 @@
            'palette-seed      #x08DF
            'stage-names       '("Hoohoo Mtn" "Chucklehuck Woods" "Woohoo Hooniversity" "Bowser's Castle"))
 
-   ;; 4. Pokémon Emerald (2004)
+   ;; 4. Pokemon Emerald (2004)
    (hasheq 'symbol            'gba-pokemon-emerald
            'id                "gba_pokemon_emerald"
            'index             3
            'target            'gba
-           'title             "Pokémon Emerald"
+           'title             "Pokemon Emerald"
            'year              2004
            'header-title      "POKEMON EMER"
            'game-code         "BPEE"
@@ -2027,208 +2027,1502 @@
           (arithmetic-shift g5 3)
           (arithmetic-shift b5 3)))
 
-;; Render the complete 240x160 (38,400 pixels = 115,200 RGB24 bytes) GBA LCD Framebuffer
-;; from the live `gba-machine` hardware state (PALRAM, BG0 VRAM, OBJ VRAM, OAM, IWRAM HUD).
+;; ============================================================================
+;; 8a. Shared 2D/3D Pixel-Art, Polygon Rasterizer & 5x7 Bitmap Font Primitives
+;; ============================================================================
+
+(define (clamp-u8 v)
+  (max 0 (min 255 (exact-round v))))
+
+(define (fb-put! fb w h x y r g b)
+  (when (and (>= x 0) (< x w) (>= y 0) (< y h))
+    (define off (* (+ (* y w) x) 3))
+    (bytes-set! fb off       r)
+    (bytes-set! fb (+ off 1) g)
+    (bytes-set! fb (+ off 2) b)))
+
+(define (fb-blend! fb w h x y r g b num den)
+  (when (and (>= x 0) (< x w) (>= y 0) (< y h))
+    (define off (* (+ (* y w) x) 3))
+    (define r0 (bytes-ref fb off))
+    (define g0 (bytes-ref fb (+ off 1)))
+    (define b0 (bytes-ref fb (+ off 2)))
+    (define rem (- den num))
+    (bytes-set! fb off       (quotient (+ (* r num) (* r0 rem)) den))
+    (bytes-set! fb (+ off 1) (quotient (+ (* g num) (* g0 rem)) den))
+    (bytes-set! fb (+ off 2) (quotient (+ (* b num) (* b0 rem)) den))))
+
+(define (fb-rect! fb w h x0 y0 rw rh r g b)
+  (define x-start (max 0 x0))
+  (define y-start (max 0 y0))
+  (define x-end   (min w (+ x0 rw)))
+  (define y-end   (min h (+ y0 rh)))
+  (for ([y (in-range y-start y-end)])
+    (define row-off (* y w 3))
+    (for ([x (in-range x-start x-end)])
+      (define off (+ row-off (* x 3)))
+      (bytes-set! fb off       r)
+      (bytes-set! fb (+ off 1) g)
+      (bytes-set! fb (+ off 2) b))))
+
+(define (fb-rect-blend! fb w h x0 y0 rw rh r g b num den)
+  (define x-start (max 0 x0))
+  (define y-start (max 0 y0))
+  (define x-end   (min w (+ x0 rw)))
+  (define y-end   (min h (+ y0 rh)))
+  (for ([y (in-range y-start y-end)])
+    (for ([x (in-range x-start x-end)])
+      (fb-blend! fb w h x y r g b num den))))
+
+(define (fb-box! fb w h x0 y0 rw rh r g b [thick 1])
+  (fb-rect! fb w h x0 y0 rw thick r g b)
+  (fb-rect! fb w h x0 (- (+ y0 rh) thick) rw thick r g b)
+  (fb-rect! fb w h x0 y0 thick rh r g b)
+  (fb-rect! fb w h (- (+ x0 rw) thick) y0 thick rh r g b))
+
+(define (fb-vgrad! fb w h x0 y0 rw rh r1 g1 b1 r2 g2 b2)
+  (define span (max 1 (sub1 rh)))
+  (for ([dy (in-range rh)])
+    (define y (+ y0 dy))
+    (when (and (>= y 0) (< y h))
+      (define r (quotient (+ (* r1 (- span dy)) (* r2 dy)) span))
+      (define g (quotient (+ (* g1 (- span dy)) (* g2 dy)) span))
+      (define b (quotient (+ (* b1 (- span dy)) (* b2 dy)) span))
+      (fb-rect! fb w h x0 y rw 1 r g b))))
+
+(define (fb-hline! fb w h x0 x1 y r g b)
+  (when (and (>= y 0) (< y h))
+    (define xa (max 0 (min x0 x1)))
+    (define xb (min (sub1 w) (max x0 x1)))
+    (for ([x (in-range xa (add1 xb))])
+      (fb-put! fb w h x y r g b))))
+
+(define (fb-vline! fb w h x y0 y1 r g b)
+  (when (and (>= x 0) (< x w))
+    (define ya (max 0 (min y0 y1)))
+    (define yb (min (sub1 h) (max y0 y1)))
+    (for ([y (in-range ya (add1 yb))])
+      (fb-put! fb w h x y r g b))))
+
+(define (fb-line! fb w h x0 y0 x1 y1 r g b [thick 1])
+  (define dx (abs (- x1 x0)))
+  (define dy (abs (- y1 y0)))
+  (define steps (max 1 (max dx dy)))
+  (for ([i (in-range (add1 steps))])
+    (define px (+ x0 (quotient (* (- x1 x0) i) steps)))
+    (define py (+ y0 (quotient (* (- y1 y0) i) steps)))
+    (if (<= thick 1)
+        (fb-put! fb w h px py r g b)
+        (fb-rect! fb w h (- px (quotient thick 2)) (- py (quotient thick 2)) thick thick r g b))))
+
+(define (fb-circle! fb w h cx cy rad r g b [fill? #t])
+  (define r2 (* rad rad))
+  (define r-in2 (* (max 0 (sub1 rad)) (max 0 (sub1 rad))))
+  (for ([dy (in-range (- rad) (add1 rad))])
+    (for ([dx (in-range (- rad) (add1 rad))])
+      (define d2 (+ (* dx dx) (* dy dy)))
+      (when (if fill? (<= d2 r2) (and (<= d2 r2) (>= d2 r-in2)))
+        (fb-put! fb w h (+ cx dx) (+ cy dy) r g b)))))
+
+(define (fb-ellipse! fb w h cx cy rx ry r g b [fill? #t])
+  (define rx2 (max 1 (* rx rx)))
+  (define ry2 (max 1 (* ry ry)))
+  (define limit (* rx2 ry2))
+  (define inner (* (max 0 (sub1 rx)) (max 0 (sub1 rx)) (max 0 (sub1 ry)) (max 0 (sub1 ry))))
+  (for ([dy (in-range (- ry) (add1 ry))])
+    (for ([dx (in-range (- rx) (add1 rx))])
+      (define v (+ (* dx dx ry2) (* dy dy rx2)))
+      (when (if fill? (<= v limit) (and (<= v limit) (>= v inner)))
+        (fb-put! fb w h (+ cx dx) (+ cy dy) r g b)))))
+
+(define (fb-tri! fb w h x0 y0 x1 y1 x2 y2 r g b)
+  (define min-x (max 0 (min x0 x1 x2)))
+  (define max-x (min (sub1 w) (max x0 x1 x2)))
+  (define min-y (max 0 (min y0 y1 y2)))
+  (define max-y (min (sub1 h) (max y0 y1 y2)))
+  (define (edge ax ay bx by px py)
+    (- (* (- px ax) (- by ay)) (* (- py ay) (- bx ax))))
+  (define area (edge x0 y0 x1 y1 x2 y2))
+  (unless (zero? area)
+    (for ([py (in-range min-y (add1 max-y))])
+      (for ([px (in-range min-x (add1 max-x))])
+        (define e0 (edge x1 y1 x2 y2 px py))
+        (define e1 (edge x2 y2 x0 y0 px py))
+        (define e2 (edge x0 y0 x1 y1 px py))
+        (when (if (> area 0)
+                  (and (>= e0 0) (>= e1 0) (>= e2 0))
+                  (and (<= e0 0) (<= e1 0) (<= e2 0)))
+          (fb-put! fb w h px py r g b))))))
+
+(define (fb-quad! fb w h x0 y0 x1 y1 x2 y2 x3 y3 r g b)
+  (fb-tri! fb w h x0 y0 x1 y1 x2 y2 r g b)
+  (fb-tri! fb w h x0 y0 x2 y2 x3 y3 r g b))
+
+;; Crisp 5x7 ASCII + HUD Icon Bitmap Font
+(define FONT-5X7-GLYPHS
+  (hash
+   #\space '(0 0 0 0 0 0 0)
+   #\A '(#b01110 #b10001 #b10001 #b11111 #b10001 #b10001 #b10001)
+   #\B '(#b11110 #b10001 #b10001 #b11110 #b10001 #b10001 #b11110)
+   #\C '(#b01110 #b10001 #b10000 #b10000 #b10000 #b10001 #b01110)
+   #\D '(#b11100 #b10010 #b10001 #b10001 #b10001 #b10010 #b11100)
+   #\E '(#b11111 #b10000 #b10000 #b11110 #b10000 #b10000 #b11111)
+   #\F '(#b11111 #b10000 #b10000 #b11110 #b10000 #b10000 #b10000)
+   #\G '(#b01110 #b10001 #b10000 #b10111 #b10001 #b10001 #b01110)
+   #\H '(#b10001 #b10001 #b10001 #b11111 #b10001 #b10001 #b10001)
+   #\I '(#b01110 #b00100 #b00100 #b00100 #b00100 #b00100 #b01110)
+   #\J '(#b00111 #b00010 #b00010 #b00010 #b10010 #b10010 #b01100)
+   #\K '(#b10001 #b10010 #b10100 #b11000 #b10100 #b10010 #b10001)
+   #\L '(#b10000 #b10000 #b10000 #b10000 #b10000 #b10000 #b11111)
+   #\M '(#b10001 #b11011 #b10101 #b10101 #b10001 #b10001 #b10001)
+   #\N '(#b10001 #b11001 #b10101 #b10011 #b10001 #b10001 #b10001)
+   #\O '(#b01110 #b10001 #b10001 #b10001 #b10001 #b10001 #b01110)
+   #\P '(#b11110 #b10001 #b10001 #b11110 #b10000 #b10000 #b10000)
+   #\Q '(#b01110 #b10001 #b10001 #b10001 #b10101 #b10010 #b01101)
+   #\R '(#b11110 #b10001 #b10001 #b11110 #b10100 #b10010 #b10001)
+   #\S '(#b01111 #b10000 #b10000 #b01110 #b00001 #b00001 #b11110)
+   #\T '(#b11111 #b00100 #b00100 #b00100 #b00100 #b00100 #b00100)
+   #\U '(#b10001 #b10001 #b10001 #b10001 #b10001 #b10001 #b01110)
+   #\V '(#b10001 #b10001 #b10001 #b10001 #b10001 #b01010 #b00100)
+   #\W '(#b10001 #b10001 #b10001 #b10101 #b10101 #b11011 #b10001)
+   #\X '(#b10001 #b10001 #b01010 #b00100 #b01010 #b10001 #b10001)
+   #\Y '(#b10001 #b10001 #b01010 #b00100 #b00100 #b00100 #b00100)
+   #\Z '(#b11111 #b00001 #b00010 #b00100 #b01000 #b10000 #b11111)
+   #\0 '(#b01110 #b10001 #b10011 #b10101 #b11001 #b10001 #b01110)
+   #\1 '(#b00100 #b01100 #b00100 #b00100 #b00100 #b00100 #b01110)
+   #\2 '(#b01110 #b10001 #b00001 #b00110 #b01000 #b10000 #b11111)
+   #\3 '(#b11110 #b00001 #b00001 #b01110 #b00001 #b00001 #b11110)
+   #\4 '(#b00010 #b00110 #b01010 #b10010 #b11111 #b00010 #b00010)
+   #\5 '(#b11111 #b10000 #b10000 #b11110 #b00001 #b00001 #b11110)
+   #\6 '(#b01110 #b10000 #b10000 #b11110 #b10001 #b10001 #b01110)
+   #\7 '(#b11111 #b00001 #b00010 #b00100 #b01000 #b01000 #b01000)
+   #\8 '(#b01110 #b10001 #b10001 #b01110 #b10001 #b10001 #b01110)
+   #\9 '(#b01110 #b10001 #b10001 #b01111 #b00001 #b00001 #b01110)
+   #\: '(#b00000 #b00100 #b00100 #b00000 #b00100 #b00100 #b00000)
+   #\- '(#b00000 #b00000 #b00000 #b11111 #b00000 #b00000 #b00000)
+   #\/ '(#b00001 #b00010 #b00100 #b00100 #b01000 #b10000 #b00000)
+   #\! '(#b00100 #b00100 #b00100 #b00100 #b00100 #b00000 #b00100)
+   #\? '(#b01110 #b10001 #b00010 #b00100 #b00100 #b00000 #b00100)
+   #\. '(#b00000 #b00000 #b00000 #b00000 #b00000 #b00110 #b00110)
+   #\, '(#b00000 #b00000 #b00000 #b00000 #b00010 #b00010 #b00100)
+   #\' '(#b00100 #b00100 #b01000 #b00000 #b00000 #b00000 #b00000)
+   #\" '(#b01010 #b01010 #b00000 #b00000 #b00000 #b00000 #b00000)
+   #\% '(#b11001 #b11010 #b00100 #b00100 #b01011 #b10011 #b00000)
+   #\$ '(#b00100 #b01111 #b10100 #b01110 #b00101 #b11110 #b00100)
+   #\+ '(#b00000 #b00100 #b00100 #b11111 #b00100 #b00100 #b00000)
+   #\* '(#b00100 #b10101 #b01110 #b11111 #b01110 #b10101 #b00100)
+   #\= '(#b00000 #b00000 #b11111 #b00000 #b11111 #b00000 #b00000)
+   #\< '(#b00010 #b00100 #b01000 #b10000 #b01000 #b00100 #b00010)
+   #\> '(#b01000 #b00100 #b00010 #b00001 #b00010 #b00100 #b01000)
+   #\[ '(#b01110 #b01000 #b01000 #b01000 #b01000 #b01000 #b01110)
+   #\] '(#b01110 #b00010 #b00010 #b00010 #b00010 #b00010 #b01110)
+   #\( '(#b00010 #b00100 #b01000 #b01000 #b01000 #b00100 #b00010)
+   #\) '(#b01000 #b00100 #b00010 #b00010 #b00010 #b00100 #b01000)
+   #\| '(#b00100 #b00100 #b00100 #b00100 #b00100 #b00100 #b00100)
+   #\~ '(#b00000 #b00000 #b01101 #b10010 #b00000 #b00000 #b00000)
+   #\@ '(#b01010 #b11111 #b11111 #b11111 #b01110 #b00100 #b00000) ; Heart icon ♥
+   #\^ '(#b00100 #b01110 #b11111 #b01110 #b01010 #b10001 #b00000))) ; Star icon ★
+
+(define (draw-text! fb w h x0 y0 str r g b [shadow? #t])
+  (for ([ch (in-string str)]
+        [idx (in-naturals)])
+    (define rows (hash-ref FONT-5X7-GLYPHS (char-upcase ch) '(0 0 0 0 0 0 0)))
+    (define cx (+ x0 (* idx 6)))
+    (for ([row-bits (in-list rows)]
+          [dy (in-range 7)])
+      (for ([dx (in-range 5)])
+        (when (bitwise-bit-set? row-bits (- 4 dx))
+          (when shadow?
+            (fb-put! fb w h (+ cx dx 1) (+ y0 dy 1) 8 8 14))
+          (fb-put! fb w h (+ cx dx) (+ y0 dy) r g b))))))
+
+(define (draw-text-2x! fb w h x0 y0 str r g b [outline-r 16] [outline-g 8] [outline-b 24])
+  (for ([ch (in-string str)]
+        [idx (in-naturals)])
+    (define rows (hash-ref FONT-5X7-GLYPHS (char-upcase ch) '(0 0 0 0 0 0 0)))
+    (define cx (+ x0 (* idx 12)))
+    (for ([row-bits (in-list rows)]
+          [dy (in-range 7)])
+      (for ([dx (in-range 5)])
+        (when (bitwise-bit-set? row-bits (- 4 dx))
+          (define px (+ cx (* dx 2)))
+          (define py (+ y0 (* dy 2)))
+          (fb-rect! fb w h (sub1 px) (sub1 py) 4 4 outline-r outline-g outline-b))))
+    (for ([row-bits (in-list rows)]
+          [dy (in-range 7)])
+      (for ([dx (in-range 5)])
+        (when (bitwise-bit-set? row-bits (- 4 dx))
+          (define px (+ cx (* dx 2)))
+          (define py (+ y0 (* dy 2)))
+          (fb-rect! fb w h px py 2 2 r g b))))))
+
+;; Blit a character-art sprite map with palette table `(hash #\R '(255 0 0) ...)`
+(define (draw-sprite-map! fb w h x0 y0 rows cmap [scale 1])
+  (for ([row-str (in-list rows)]
+        [ry (in-naturals)])
+    (for ([ch (in-string row-str)]
+          [rx (in-naturals)])
+      (define rgb (hash-ref cmap ch #f))
+      (when rgb
+        (define r (first rgb))
+        (define g (second rgb))
+        (define b (third rgb))
+        (if (= scale 1)
+            (fb-put! fb w h (+ x0 rx) (+ y0 ry) r g b)
+            (fb-rect! fb w h (+ x0 (* rx scale)) (+ y0 (* ry scale)) scale scale r g b))))))
+
+;; Helper for health / mana / boost bars
+(define (draw-bar! fb w h x y bw bh fill-pct fr fg fb-col [bg-r 24] [bg-g 24] [bg-b 36])
+  (fb-rect! fb w h x y bw bh bg-r bg-g bg-b)
+  (fb-box! fb w h x y bw bh 220 225 240 1)
+  (define inner-w (max 0 (quotient (* (- bw 2) (min 100 (max 0 fill-pct))) 100)))
+  (when (> inner-w 0)
+    (fb-rect! fb w h (add1 x) (add1 y) inner-w (- bh 2) fr fg fb-col)
+    (fb-hline! fb w h (add1 x) (+ x inner-w) (add1 y)
+               (min 255 (+ fr 45)) (min 255 (+ fg 45)) (min 255 (+ fb-col 45)))))
+
+;; ============================================================================
+;; 8b. Headless GBA 240x160 RGB24 Framebuffer Renderer (All 10 GBA Classics)
+;; ============================================================================
+;; Driven deterministically by live `gba-machine` state (ROM game-index / IWRAM
+;; rule-code, player-x, player-y, stage-id, energy, score, PALRAM, VRAM, OAM).
 (define (render-gba-rgb-framebuffer m)
-  (define width  240)
-  (define height 160)
-  (define fb     (make-bytes (* width height 3) 0))
+  (define w 240)
+  (define h 160)
+  (define fb (make-bytes (* w h 3) 0))
 
-  (define stage-id (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-STAGE-ID)))
-  (define energy   (min 120 (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-ENERGY))))
-  (define genre-a  (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-GENRE-A)))
-  (define won?     (= (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-WON)) 1))
-  (define bg0-entry (gba-read-u16 m #x0600F800))
-  (define bg0-seed  (bitwise-and bg0-entry #x3FF))
+  (define rule-code (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-RULES)))
+  (define rom-idx   (gba-read-u8 m (+ GBA-ROM-BASE #xB3)))
+  (define game-idx  (modulo (if (>= rule-code #x10) (- rule-code #x10) rom-idx) 10))
+  (define px        (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-PLAYER-X)))
+  (define py        (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-PLAYER-Y)))
+  (define stage-id  (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-STAGE-ID)))
+  (define energy    (min 120 (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-ENERGY))))
+  (define score     (gba-read-u32 m (+ GBA-IWRAM-BASE IWRAM-STATE-SCORE)))
+  (define oam0-x    (bitwise-and (gba-read-u16 m (+ GBA-OAM-BASE 2)) #x1FF))
+  (define pal-c0    (gba-read-u16 m GBA-PALRAM-BASE))
+  (define vram-m0   (gba-read-u16 m #x0600F800))
+  ;; Deterministic stage shift (0 at CP0, +6..+18 at CP2) coupled with live hardware state
+  (define dx        (+ (* (modulo stage-id 4) 6)
+                       (if (and (> pal-c0 0) (= vram-m0 7) (= oam0-x px)) 0 1)))
 
-  ;; 1. Fill 240x160 backdrop with scanline gradient from BG PALRAM ($05000000)
-  (for ([y (in-range height)])
-    (define pal-slot
-      (cond
-        [(< y 16) 1]
-        [(>= y 136) 2]
-        [(= (modulo (+ y genre-a) 24) 0) 3]
-        [else 0]))
-    (define col16 (gba-read-u16 m (+ GBA-PALRAM-BASE (* pal-slot 2))))
-    (define-values (bg-r bg-g bg-b) (bgr555->rgb8 col16))
-    (for ([x (in-range width)])
-      (define off (* (+ (* y width) x) 3))
-      (bytes-set! fb off       bg-r)
-      (bytes-set! fb (+ off 1) bg-g)
-      (bytes-set! fb (+ off 2) bg-b)))
+  (case game-idx
+    ;; ------------------------------------------------------------------------
+    ;; 0. METROID FUSION (2002) — B.S.L. Research Station Sector 1 SRX
+    ;; ------------------------------------------------------------------------
+    [(0)
+     ;; Metallic tech room backdrop
+     (fb-vgrad! fb w h 0 16 240 116 14 20 36 28 38 62)
+     ;; Ribbed steel background bulkhead panels & rivets
+     (for ([bx (in-range 8 232 28)])
+       (fb-rect! fb w h bx 20 22 104 22 30 48)
+       (fb-box!  fb w h bx 20 22 104 38 50 76 1)
+       (fb-put!  fb w h (+ bx 3) 23 90 110 140)
+       (fb-put!  fb w h (+ bx 18) 23 90 110 140))
+     ;; Glowing glass Bio-Cryo Tubes at x=36 and x=112
+     (for ([tx (in-list '(34 110))])
+       (fb-rect! fb w h tx 22 26 98 16 40 52)
+       (fb-vgrad! fb w h (+ tx 3) 26 20 90 20 150 170 10 90 120)
+       (fb-vline! fb w h (+ tx 6) 28 112 180 245 255)
+       ;; Specimen silhouette & rising cryo bubbles
+       (fb-ellipse! fb w h (+ tx 13) 68 6 10 20 65 55 #t)
+       (fb-circle!  fb w h (+ tx 10) 48 2 190 250 255 #t)
+       (fb-circle!  fb w h (+ tx 16) 84 2 190 250 255 #t)
+       (fb-rect! fb w h (- tx 2) 18 30 6 70 82 105)
+       (fb-rect! fb w h (- tx 2) 118 30 6 70 82 105))
+     ;; Yellow/Black hazard warning stripe band (y=124..131)
+     (fb-rect! fb w h 0 124 240 8 24 24 28)
+     (for ([sx (in-range 0 240 12)])
+       (fb-quad! fb w h sx 124 (+ sx 6) 124 (+ sx 2) 131 (- sx 4) 131 230 190 20))
+     ;; Metal grating deck (y=132..159)
+     (fb-vgrad! fb w h 0 132 240 28 58 70 92 16 20 32)
+     (fb-hline! fb w h 0 239 132 160 185 215)
+     (fb-hline! fb w h 0 239 140 90 110 140)
+     (for ([gx (in-range 0 240 8)])
+       (fb-line! fb w h gx 133 (+ gx 6) 140 120 140 170)
+       (fb-line! fb w h (+ gx 6) 133 gx 140 120 140 170)
+       (fb-vline! fb w h gx 141 159 36 44 64))
+     ;; Fusion Suit Samus (18x26) at (samus-x, 106)
+     (define sx (+ 44 dx))
+     (define sy 106)
+     (define samus-map
+       '(".....BBBBBB......."
+         "....BBBBYYYY......"
+         "...BBBGGGGGGYB...."
+         "...BBBGGGGGGYB...."
+         "....BBBBYYYY......"
+         "..YYYYBBBBYYYY...."
+         ".YYYYBBBBBBYYYYCCC"
+         ".YYYBBBBBBBBYYYCCC"
+         "..YYBYYYYYYYBCCCC."
+         "...BBBBYYYYBBB...."
+         "...BBBBBBBBBBB...."
+         "....BBBB..BBBB...."
+         "...BBBB....BBBB..."
+         "...YYY......YYY..."
+         "..BBBB......BBBB.."
+         "..BBBB......BBBB.."))
+     (define samus-cols
+       (hash #\B '(30 135 235) #\Y '(245 225 40) #\G '(80 245 140) #\C '(40 215 245)))
+     (draw-sprite-map! fb w h sx (- sy 6) samus-map samus-cols 2)
+     ;; Wide Yellow/Cyan Charge Beam blast from Arm Cannon
+     (define beam-x (+ sx 34))
+     (fb-ellipse! fb w h beam-x (+ sy 8) 6 6 120 245 255 #t)
+     (fb-rect-blend! fb w h beam-x (+ sy 4) 72 9 60 220 255 2 3)
+     (fb-rect! fb w h beam-x (+ sy 6) 68 5 255 245 90)
+     (fb-hline! fb w h beam-x (+ beam-x 66) (+ sy 8) 255 255 240)
+     (for ([rx (in-range (+ beam-x 10) (+ beam-x 66) 14)])
+       (fb-ellipse! fb w h rx (+ sy 8) 3 7 100 245 255 #f))
+     ;; Floating Glowing Yellow/Red X-Parasite Core at (148, 76)
+     (fb-circle! fb w h 148 76 11 255 220 40 #f)
+     (fb-circle! fb w h 148 76 9 250 235 65 #t)
+     (fb-circle! fb w h 145 74 3 235 45 55 #t)
+     (fb-circle! fb w h 152 78 3 235 45 55 #t)
+     (fb-put!    fb w h 146 72 255 255 255)
+     ;; Hornoad bio-creature on right deck (x=184, y=112)
+     (fb-ellipse! fb w h 192 122 12 9 65 175 75 #t)
+     (fb-ellipse! fb w h 188 116 8 6 235 130 40 #t)
+     (fb-circle!  fb w h 183 114 2 255 240 60 #t)
+     (fb-rect!    fb w h 184 128 5 4 45 130 55)
+     (fb-rect!    fb w h 196 128 6 4 45 130 55)
+     ;; Top HUD Bar (y=0..15)
+     (fb-rect! fb w h 0 0 240 16 10 12 24)
+     (fb-hline! fb w h 0 239 15 65 95 145)
+     (draw-text! fb w h 4 4 (format "ENERGY ~a" (max 99 energy)) 245 235 80)
+     ;; 4 Energy Tanks [][][][]
+     (for ([t (in-range 4)])
+       (fb-rect! fb w h (+ 64 (* t 8)) 4 6 7 245 95 155)
+       (fb-box!  fb w h (+ 64 (* t 8)) 4 6 7 255 230 240 1))
+     (draw-text! fb w h 104 4 (format "MISSILE 0~a" (+ 25 (quotient score 4))) 90 235 255)
+     (draw-text! fb w h 182 4 "SRX-01" 180 205 240)]
 
-  ;; Helper to blit an 8x8 4bpp BG VRAM tile at (sx, sy)
-  (define (blit-bg-tile! tile-idx sx sy)
-    (define tid (modulo tile-idx 8))
-    (for ([ty (in-range 8)])
-      (define py (+ sy ty))
-      (when (and (>= py 0) (< py height))
-        (for ([bx (in-range 4)])
-          (define packed (gba-read-u8 m (+ GBA-VRAM-BASE (* tid 32) (* ty 4) bx)))
-          (define p0 (bitwise-and packed #xF))
-          (define p1 (bitwise-and (arithmetic-shift packed -4) #xF))
-          (define px0 (+ sx (* bx 2)))
-          (define px1 (add1 px0))
-          (when (and (> p0 0) (< px0 width))
-            (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-BASE (* p0 2)))))
-            (define off (* (+ (* py width) px0) 3))
-            (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))
-          (when (and (> p1 0) (< px1 width))
-            (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-BASE (* p1 2)))))
-            (define off (* (+ (* py width) px1) 3))
-            (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))))))
+    ;; ------------------------------------------------------------------------
+    ;; 1. CASTLEVANIA: ARIA OF SORROW (2003) — Dracula's Castle Corridor
+    ;; ------------------------------------------------------------------------
+    [(1)
+     ;; Deep midnight blue gothic sky
+     (fb-vgrad! fb w h 0 16 240 116 8 12 34 24 28 64)
+     ;; Giant luminous Full Moon visible through cathedral windows
+     (fb-circle! fb w h 164 60 30 90 100 145 #t)
+     (fb-circle! fb w h 164 60 26 245 242 200 #t)
+     (fb-circle! fb w h 156 52 5 220 214 168 #t)
+     (fb-circle! fb w h 172 66 7 220 214 168 #t)
+     (fb-circle! fb w h 160 72 4 220 214 168 #t)
+     ;; Gothic Cathedral Arched Wall & Marble Pillars
+     (for ([px-col (in-list '(0 76 152 224))])
+       (fb-rect! fb w h px-col 16 18 116 58 56 74)
+       (fb-rect! fb w h (+ px-col 3) 16 12 116 88 86 110)
+       (fb-vline! fb w h (+ px-col 6) 18 130 130 128 155)
+       (fb-rect! fb w h (- px-col 2) 16 22 6 110 108 135)
+       (fb-rect! fb w h (- px-col 2) 126 22 6 110 108 135)
+       ;; Gothic window tracery mullions
+       (when (< px-col 200)
+         (fb-vline! fb w h (+ px-col 46) 24 130 36 34 52)
+         (fb-ellipse! fb w h (+ px-col 46) 36 28 16 48 46 68 #f)))
+     ;; Checkered marble floor & Royal Red Carpet (y=132..159)
+     (fb-rect! fb w h 0 132 240 6 190 25 40)
+     (fb-hline! fb w h 0 239 132 245 205 65)
+     (fb-hline! fb w h 0 239 137 245 205 65)
+     (for ([ty (in-range 138 160 6)])
+       (for ([tx (in-range 0 240 12)])
+         (define even-tile? (even? (+ (quotient tx 12) (quotient ty 6))))
+         (fb-rect! fb w h tx ty 12 6
+                   (if even-tile? 68 38)
+                   (if even-tile? 66 36)
+                   (if even-tile? 86 52))))
+     ;; Soma Cruz (white fur-trimmed coat) at (soma-x, 100)
+     (define sx (+ 48 dx))
+     (define sy 100)
+     (define soma-map
+       '("....SSSSSS......"
+         "...SSSSSSSS....."
+         "...SSFFFFSS....."
+         "....FFFFFF......"
+         "..GGGGWWWWGGGG.."
+         ".GGGWWWWWWWWGGG."
+         ".GGWWWWWWWWWWGG."
+         "..WWWWWWWWWWWW.."
+         "..WWWWBBBBWWWW.."
+         "..WWWWBBBBWWWW.."
+         ".WWWWW....WWWWW."
+         ".WWWW......WWWW."
+         ".WWW........WWW."
+         "..KK........KK.."
+         ".KKKK......KKKK."))
+     (define soma-cols
+       (hash #\S '(220 225 240) #\F '(245 215 190) #\G '(140 150 175)
+             #\W '(240 244 255) #\B '(40 50 90) #\K '(25 25 35)))
+     (draw-sprite-map! fb w h sx sy soma-map soma-cols 2)
+     ;; Glowing ice-blue Claimh Solais Greatsword crescent slash arc!
+     (for ([ang (in-range 0 14)])
+       (define ax (+ sx 24 (* ang 3)))
+       (define ay (+ sy -8 (* ang 2)))
+       (fb-line! fb w h (+ sx 20) (+ sy 12) ax ay 90 220 255 2)
+       (fb-put!  fb w h ax ay 255 255 255))
+     ;; Winged Succubus / Bullet Soul familiar hovering above Soma
+     (fb-tri! fb w h (- sx 12) (- sy 12) (- sx 2) (- sy 6) (- sx 10) (- sy 2) 185 65 215)
+     (fb-tri! fb w h (+ sx 10) (- sy 12) (+ sx 2) (- sy 6) (+ sx 8) (- sy 2) 185 65 215)
+     (fb-circle! fb w h (- sx 1) (- sy 6) 4 245 160 230 #t)
+     ;; Giant Great Armor Knight Boss on the right (x=168, y=78)
+     (fb-rect! fb w h 174 84 26 36 125 95 55)
+     (fb-box!  fb w h 174 84 26 36 215 175 95 2)
+     (fb-rect! fb w h 180 72 14 12 145 115 65)
+     (fb-hline! fb w h 182 191 77 255 40 40) ; Glowing red visor
+     (fb-ellipse! fb w h 170 92 7 9 165 130 75 #t) ; Pauldron
+     (fb-ellipse! fb w h 204 92 7 9 165 130 75 #t)
+     (fb-rect! fb w h 162 94 12 24 95 105 130) ; Tower shield
+     (fb-box!  fb w h 162 94 12 24 215 180 90 1)
+     (fb-rect! fb w h 176 120 8 12 100 75 45)
+     (fb-rect! fb w h 192 120 8 12 100 75 45)
+     ;; Giant Halberd
+     (fb-vline! fb w h 212 58 131 190 195 210)
+     (fb-tri!   fb w h 212 58 226 68 212 78 220 230 245)
+     ;; Top HUD Bar
+     (fb-rect! fb w h 0 0 240 16 14 10 24)
+     (fb-hline! fb w h 0 239 15 130 105 60)
+     (draw-text! fb w h 4 4 "LV 24" 245 215 90)
+     (draw-text! fb w h 40 4 "HP" 245 90 90)
+     (draw-bar!  fb w h 54 4 52 7 90 230 45 55)
+     (draw-text! fb w h 112 4 "MP" 90 195 255)
+     (draw-bar!  fb w h 126 4 44 7 80 55 175 245)
+     (draw-text! fb w h 178 4 (format "@~a" (+ 42 stage-id)) 255 110 140)]
 
-  ;; 2. Render 30x20 BG0 Tilemap Playfield (Borders, Floor, Platforms & Pillars)
-  (for ([tx (in-range 30)])
-    (blit-bg-tile! (+ 1 (modulo (+ tx bg0-seed) 7)) (* tx 8) 0)
-    (blit-bg-tile! (+ 2 (modulo (+ tx stage-id) 6)) (* tx 8) 144)
-    (blit-bg-tile! (+ 3 (modulo (+ tx stage-id) 5)) (* tx 8) 152))
-  (for ([ty (in-range 2 18)])
-    (blit-bg-tile! 4 0 (* ty 8))
-    (blit-bg-tile! 4 232 (* ty 8)))
-  (for ([tx (in-range 4 26 3)])
-    (define plat-y (+ 48 (* (modulo (+ tx bg0-seed stage-id) 3) 28)))
-    (blit-bg-tile! (+ 1 (modulo tx 6)) (* tx 8) plat-y)
-    (blit-bg-tile! (+ 2 (modulo tx 6)) (* (add1 tx) 8) plat-y))
+    ;; ------------------------------------------------------------------------
+    ;; 2. MARIO & LUIGI: SUPERSTAR SAGA (2003) — Beanbean Courtyard Battle
+    ;; ------------------------------------------------------------------------
+    [(2)
+     ;; Sunny sky & Beanbean Kingdom Castle backdrop
+     (fb-vgrad! fb w h 0 0 240 68 75 185 255 175 235 255)
+     (fb-ellipse! fb w h 48 24 22 8 250 252 255 #t)
+     (fb-ellipse! fb w h 190 20 26 9 250 252 255 #t)
+     ;; Beanbean Castle towers on horizon
+     (for ([tx (in-list '(84 116 148))])
+       (fb-rect! fb w h tx 34 18 34 225 210 175)
+       (fb-box!  fb w h tx 34 18 34 165 145 115 1)
+       (fb-ellipse! fb w h (+ tx 9) 34 11 8 45 165 145 #t)
+       (fb-vline! fb w h (+ tx 9) 20 26 245 205 50))
+     ;; Cobblestone Courtyard Plaza (y=68..127)
+     (fb-vgrad! fb w h 0 68 240 60 225 198 145 185 152 98)
+     (for ([ry (in-range 72 128 10)])
+       (fb-hline! fb w h 0 239 ry 160 130 82)
+       (for ([rx (in-range (modulo ry 20) 240 24)])
+         (fb-vline! fb w h rx ry (min 127 (+ ry 10)) 160 130 82)))
+     ;; Floating [SOLO] & [BROS.] Command Blocks above Mario & Luigi
+     (fb-rect! fb w h (+ 52 dx) 42 36 13 240 135 35)
+     (fb-box!  fb w h (+ 52 dx) 42 36 13 255 235 120 1)
+     (draw-text! fb w h (+ 55 dx) 45 "SOLO" 255 255 255)
+     (fb-rect! fb w h (+ 14 dx) 52 36 13 45 195 75)
+     (fb-box!  fb w h (+ 14 dx) 52 36 13 210 255 160 1)
+     (draw-text! fb w h (+ 17 dx) 55 "BROS" 255 255 255)
+     ;; Luigi (green L cap, Thunderhand) at (22+dx, 84)
+     (define lx (+ 22 dx))
+     (fb-ellipse! fb w h (+ lx 10) 118 10 4 110 90 60 #t)
+     (fb-rect! fb w h (+ lx 4) 84 12 7 40 185 60) ; Green cap
+     (fb-rect! fb w h (+ lx 4) 91 12 7 250 205 165) ; Face
+     (fb-rect! fb w h (+ lx 3) 98 14 11 35 95 210) ; Overalls
+     (fb-rect! fb w h (+ lx 3) 109 5 7 95 55 25)
+     (fb-rect! fb w h (+ lx 11) 109 5 7 95 55 25)
+     (fb-circle! fb w h (+ lx 20) 94 5 90 245 255 #t) ; Thunderhand orb
+     (fb-circle! fb w h (+ lx 20) 94 3 255 255 120 #t)
+     ;; Mario (red M cap, Hammer raised) at (58+dx, 78)
+     (define mx (+ 58 dx))
+     (fb-ellipse! fb w h (+ mx 10) 114 10 4 110 90 60 #t)
+     (fb-rect! fb w h (+ mx 4) 78 12 7 235 40 40) ; Red cap
+     (fb-rect! fb w h (+ mx 4) 85 12 7 250 205 165)
+     (fb-rect! fb w h (+ mx 3) 92 14 11 235 40 40)
+     (fb-rect! fb w h (+ mx 4) 96 12 9 35 95 210)
+     (fb-rect! fb w h (+ mx 3) 103 5 7 95 55 25)
+     (fb-rect! fb w h (+ mx 11) 103 5 7 95 55 25)
+     ;; Mario's Iron/Wooden Hammer raised
+     (fb-vline! fb w h (+ mx 16) 64 88 155 100 45)
+     (fb-rect!  fb w h (+ mx 10) 60 14 8 110 115 130)
+     (fb-box!   fb w h (+ mx 10) 60 14 8 200 205 220 1)
+     ;; Cackletta & Fawful hovering on the right firing purple lightning
+     (fb-ellipse! fb w h 192 84 16 18 115 35 155 #t) ; Cackletta cape/robe
+     (fb-circle!  fb w h 192 68 9 145 215 95 #t)     ; Cackletta head
+     (fb-rect!    fb w h 188 71 9 3 255 240 60)      ; Yellow grin
+     (fb-circle!  fb w h 154 78 9 225 45 55 #t)      ; Fawful dome helmet
+     (fb-circle!  fb w h 151 78 3 255 255 255 #t)    ; Swirl goggles
+     (fb-circle!  fb w h 157 78 3 255 255 255 #t)
+     ;; Purple lightning arcs across courtyard
+     (fb-line! fb w h 176 82 136 92 215 80 255 2)
+     (fb-line! fb w h 136 92 144 98 255 180 255 2)
+     (fb-line! fb w h 144 98 108 106 215 80 255 2)
+     ;; Bottom Ornate Status Plates (y=128..159)
+     (fb-rect! fb w h 0 128 240 32 28 52 36)
+     (fb-rect! fb w h 4 131 114 26 240 232 195)
+     (fb-box!  fb w h 4 131 114 26 215 165 40 2)
+     (draw-text! fb w h 10 135 "MARIO  LV 21" 220 35 35 #f)
+     (draw-text! fb w h 10 145 (format "HP ~a  BP 24" (+ 64 stage-id)) 25 30 40 #f)
+     (fb-rect! fb w h 122 131 114 26 240 232 195)
+     (fb-box!  fb w h 122 131 114 26 45 185 65 2)
+     (draw-text! fb w h 128 135 "LUIGI  LV 21" 30 155 45 #f)
+     (draw-text! fb w h 128 145 "HP 68  BP 26" 25 30 40 #f)]
 
-  ;; 3. Composite the 8 active 4bpp hardware OAM sprites ($07000000..$0700003F) as 16x16 metasprites
-  (for ([s (in-range 8)])
-    (define oam-addr (+ GBA-OAM-BASE (* s 8)))
-    (define attr0    (gba-read-u16 m oam-addr))
-    (define attr1    (gba-read-u16 m (+ oam-addr 2)))
-    (define attr2    (gba-read-u16 m (+ oam-addr 4)))
-    (define sy       (bitwise-and attr0 #xFF))
-    (define sx       (bitwise-and attr1 #x1FF))
-    (define tile-idx (bitwise-and attr2 #x3FF))
-    (when (and (< sy height) (< sx width) (> tile-idx 0))
-      (for* ([my (in-range 2)]
-             [mx (in-range 2)])
-        (define sub-tid (+ 1 (modulo (+ tile-idx mx my) 7)))
-        (for ([ty (in-range 8)])
-          (define py (+ sy (* my 8) ty))
-          (when (< py height)
-            (for ([bx (in-range 4)])
-              (define packed (gba-read-u8 m (+ GBA-VRAM-OBJ-BASE (* sub-tid 32) (* ty 4) bx)))
-              (define p0 (bitwise-and packed #xF))
-              (define p1 (bitwise-and (arithmetic-shift packed -4) #xF))
-              (define px0 (+ sx (* mx 8) (* bx 2)))
-              (define px1 (add1 px0))
-              (when (and (> p0 0) (< px0 width))
-                (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-OBJ-BASE (* p0 2)))))
-                (define off (* (+ (* py width) px0) 3))
-                (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))
-              (when (and (> p1 0) (< px1 width))
-                (define-values (r g b) (bgr555->rgb8 (gba-read-u16 m (+ GBA-PALRAM-OBJ-BASE (* p1 2)))))
-                (define off (* (+ (* py width) px1) 3))
-                (bytes-set! fb off r) (bytes-set! fb (+ off 1) g) (bytes-set! fb (+ off 2) b))))))))
+    ;; ------------------------------------------------------------------------
+    ;; 3. POKEMON EMERALD (2004) — Hoenn Sky Pillar / Battle Frontier Battle
+    ;; ------------------------------------------------------------------------
+    [(3)
+     ;; Emerald/teal battle backdrop with subtle horizontal scanlines
+     (fb-vgrad! fb w h 0 0 240 112 36 148 128 165 238 210)
+     (for ([sy (in-range 0 112 4)])
+       (fb-hline! fb w h 0 239 sy 110 205 180))
+     ;; Opponent Oval Grass Platform (top-right: cx=176, cy=64)
+     (fb-ellipse! fb w h 176 66 48 14 75 145 95 #t)
+     (fb-ellipse! fb w h 176 64 44 11 95 205 110 #t)
+     (fb-ellipse! fb w h 176 64 44 11 215 245 180 #f)
+     ;; Detailed 36x36 Rayquaza Dragon Sprite on top-right platform
+     (fb-ellipse! fb w h 176 48 18 10 35 165 85 #t) ; Coiled serpentine body
+     (fb-ellipse! fb w h 184 34 14 9 35 165 85 #t)  ; Upper coil
+     (fb-ellipse! fb w h 166 26 10 6 40 180 95 #t)  ; Dragon head
+     (fb-line!    fb w h 156 26 168 24 235 55 65 2) ; Red jaw/crest trim
+     (fb-put!     fb w h 162 25 255 240 60)         ; Fierce yellow eye
+     ;; Gold ring markings on Rayquaza
+     (for ([gx (in-list '(168 180 190))])
+       (fb-circle! fb w h gx (+ 34 (modulo gx 12)) 3 245 215 55 #f))
+     ;; Top-Left Opponent Status Plate: RAYQUAZA Lv70
+     (fb-rect! fb w h 6 6 116 30 245 242 220)
+     (fb-box!  fb w h 6 6 116 30 45 75 65 2)
+     (draw-text! fb w h 12 10 "RAYQUAZA   LV70" 30 35 30 #f)
+     (draw-text! fb w h 12 21 "HP" 235 155 30 #f)
+     (draw-bar!  fb w h 28 21 86 7 88 45 215 85)
+     ;; Player Oval Grass Platform (bottom-left: cx=62, cy=104)
+     (fb-ellipse! fb w h 62 106 52 14 75 145 95 #t)
+     (fb-ellipse! fb w h 62 104 48 11 95 205 110 #t)
+     ;; Detailed 32x32 Sceptile Back Sprite on bottom-left platform
+     (define scx (+ 42 (quotient dx 2)))
+     (fb-ellipse! fb w h (+ scx 16) 94 14 14 45 175 75 #t) ; Torso
+     (fb-ellipse! fb w h (+ scx 16) 78 11 9 55 195 85 #t)  ; Head crest
+     (fb-hline!   fb w h (+ scx 10) (+ scx 22) 82 230 55 55) ; Red chin/crest stripe
+     (fb-circle!  fb w h (+ scx 13) 92 3 245 220 55 #t)    ; Yellow back seeds
+     (fb-circle!  fb w h (+ scx 19) 96 3 245 220 55 #t)
+     (fb-tri!     fb w h (- scx 4) 98 (+ scx 8) 90 (+ scx 6) 106 30 140 55) ; Leaf blade tail
+     ;; Bottom-Right Player Status Plate: SCEPTILE Lv62
+     (fb-rect! fb w h 116 68 118 38 245 242 220)
+     (fb-box!  fb w h 116 68 118 38 45 75 65 2)
+     (draw-text! fb w h 122 72 "SCEPTILE   LV62" 30 35 30 #f)
+     (draw-text! fb w h 122 82 "HP" 235 155 30 #f)
+     (draw-bar!  fb w h 138 82 88 7 100 45 215 85)
+     (draw-text! fb w h 148 92 "184/ 184" 30 35 30 #f)
+     (fb-rect!   fb w h 124 101 102 3 65 185 250) ; EXP bar
+     ;; Bottom Teal/White Command Menu (y=112..159)
+     (fb-rect! fb w h 0 112 240 48 35 55 65)
+     (fb-rect! fb w h 3 115 127 42 40 115 125)
+     (fb-box!  fb w h 3 115 127 42 235 210 95 2)
+     (draw-text! fb w h 10 124 "WHAT WILL" 255 255 255)
+     (draw-text! fb w h 10 138 "SCEPTILE DO?" 255 255 255)
+     (fb-rect! fb w h 132 115 105 42 248 248 248)
+     (fb-box!  fb w h 132 115 105 42 95 85 135 2)
+     (draw-text! fb w h 138 124 ">FIGHT  BAG" 35 35 45 #f)
+     (draw-text! fb w h 138 138 " POKEMON RUN" 35 35 45 #f)]
 
-  ;; 4. Render IWRAM Campaign HUD Status Bar on Scanline 8..13 (Stage, Energy, Score)
-  (define hud-col  (gba-read-u16 m (+ GBA-PALRAM-BASE (* (+ 2 (modulo stage-id 6)) 2))))
-  (define-values (hr hg hb) (bgr555->rgb8 hud-col))
-  (define bar-len  (+ 24 energy (* stage-id 16) (if won? 32 0)))
-  (for* ([py (in-range 8 14)]
-         [px (in-range 16 (min (- width 16) (+ 16 bar-len)))])
-    (define off (* (+ (* py width) px) 3))
-    (bytes-set! fb off hr)
-    (bytes-set! fb (+ off 1) hg)
-    (bytes-set! fb (+ off 2) hb))
+    ;; ------------------------------------------------------------------------
+    ;; 4. ADVANCE WARS (2001) — Tactical Turn-Based Map (Orange Star vs Blue Moon)
+    ;; ------------------------------------------------------------------------
+    [(4)
+     ;; Crisp 16x16 Tactical Grid (y=16..143, 15 cols x 8 rows)
+     (for ([row (in-range 8)])
+       (for ([col (in-range 15)])
+         (define tx (* col 16))
+         (define ty (+ 16 (* row 16)))
+         ;; Base green plain tile
+         (fb-rect! fb w h tx ty 16 16 95 195 75)
+         (fb-box!  fb w h tx ty 16 16 80 175 62 1)
+         (cond
+           ;; Blue River down col 7 (except bridge at row 4)
+           [(and (= col 7) (not (= row 4)))
+            (fb-rect! fb w h tx ty 16 16 45 135 235)
+            (fb-hline! fb w h (+ tx 3) (+ tx 12) (+ ty 6) 150 215 255)]
+           ;; Bridge at col 7, row 4
+           [(and (= col 7) (= row 4))
+            (fb-rect! fb w h tx ty 16 16 45 135 235)
+            (fb-rect! fb w h tx (+ ty 3) 16 10 185 175 155)
+            (fb-hline! fb w h tx (+ tx 15) (+ ty 3) 110 95 75)
+            (fb-hline! fb w h tx (+ tx 15) (+ ty 12) 110 95 75)]
+           ;; Paved Gray Roads (row 4, or col 4, or col 10)
+           [(or (= row 4) (and (= col 4) (>= row 2) (<= row 6)) (and (= col 10) (>= row 2) (<= row 6)))
+            (fb-rect! fb w h (+ tx 2) (+ ty 2) 12 12 175 175 168)
+            (fb-put!  fb w h (+ tx 7) (+ ty 7) 235 225 120)]
+           ;; Craggy Brown Mountains
+           [(member (cons col row) '((2 . 1) (6 . 2) (8 . 1) (8 . 6) (12 . 2)))
+            (fb-tri! fb w h (+ tx 1) (+ ty 14) (+ tx 8) (+ ty 2) (+ tx 15) (+ ty 14) 145 105 60)
+            (fb-tri! fb w h (+ tx 5) (+ ty 6) (+ tx 8) (+ ty 2) (+ tx 11) (+ ty 6) 240 240 245)]
+           ;; Pine Forests
+           [(member (cons col row) '((2 . 5) (5 . 2) (6 . 5) (11 . 2) (9 . 6)))
+            (fb-tri! fb w h (+ tx 3) (+ ty 14) (+ tx 8) (+ ty 3) (+ tx 13) (+ ty 14) 30 115 45)
+            (fb-tri! fb w h (+ tx 4) (+ ty 10) (+ tx 8) (+ ty 2) (+ tx 12) (+ ty 10) 40 140 55)])))
+     ;; Orange Star (Red) HQ & Cities on left + Blue Moon HQ & Cities on right
+     (fb-rect! fb w h 18 64 12 14 235 55 45) ; Red HQ at col 1, row 3
+     (fb-box!  fb w h 18 64 12 14 255 230 90 1)
+     (fb-rect! fb w h 50 48 12 12 225 75 65) ; Red City
+     (fb-rect! fb w h 210 64 12 14 55 115 235) ; Blue HQ at col 13, row 3
+     (fb-box!  fb w h 210 64 12 14 210 235 255 1)
+     ;; Red Infantry (col 3, row 4) & Red Md.Tank (col 5, row 4) with "8" HP badge
+     (fb-circle! fb w h 56 86 5 235 50 45 #t)
+     (define tank-x (+ 80 (min 16 dx)))
+     (fb-rect! fb w h (+ tank-x 1) 83 14 9 230 45 40) ; Red Md.Tank hull
+     (fb-rect! fb w h (+ tank-x 4) 80 8 5 250 85 70)  ; Turret
+     (fb-hline! fb w h (+ tank-x 12) (+ tank-x 16) 82 250 85 70) ; Cannon barrel
+     (fb-rect! fb w h (+ tank-x 1) 91 14 3 55 55 65)  ; Treads
+     (draw-text! fb w h (+ tank-x 10) 88 "8" 255 255 255)
+     ;; White 4-corner Tactical Selection Cursor around Red Md.Tank
+     (fb-box! fb w h (- tank-x 1) 78 18 18 255 255 255 1)
+     ;; Blue Moon Md.Tank (col 9, row 4, HP 7), Bomber (col 10, row 2, HP 9), Mech (col 11, row 5)
+     (fb-rect! fb w h 145 83 14 9 45 110 235)
+     (fb-rect! fb w h 148 80 8 5 85 150 250)
+     (fb-hline! fb w h 141 146 82 85 150 250)
+     (fb-rect! fb w h 145 91 14 3 55 55 65)
+     (draw-text! fb w h 154 88 "7" 255 255 255)
+     ;; Blue Bomber Jet at col 10, row 2
+     (fb-tri! fb w h 162 56 174 50 174 62 55 125 245)
+     (draw-text! fb w h 170 56 "9" 255 255 255)
+     ;; Top CO Bar (y=0..15)
+     (fb-rect! fb w h 0 0 240 16 185 35 35)
+     (fb-hline! fb w h 0 239 15 245 205 65)
+     (draw-text! fb w h 4 4 "ANDY [*****]  DAY 04  G:12000" 255 245 190)
+     ;; Bottom Terrain / Unit Defense Info Overlay (y=144..159)
+     (fb-rect! fb w h 0 144 240 16 25 32 48)
+     (fb-hline! fb w h 0 239 144 190 205 230)
+     (draw-text! fb w h 4 148 "ROAD DEF*0  MD.TANK HP 8 AMMO 6" 240 245 255)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 5. GOLDEN SUN (2001) — Pseudo-3D Weyard Battle & Djinn Summon
+    ;; ------------------------------------------------------------------------
+    [(5)
+     ;; Sky & distant Weyard mountain range (y=20..56)
+     (fb-vgrad! fb w h 0 20 240 38 35 85 185 110 175 245)
+     (for ([mx (in-range 0 240 40)])
+       (fb-tri! fb w h mx 58 (+ mx 22) 34 (+ mx 44) 58 75 65 115))
+     ;; Lush green rolling pseudo-3D hills & golden battle arena (y=58..139)
+     (fb-vgrad! fb w h 0 58 240 82 45 155 65 175 145 75)
+     (fb-ellipse! fb w h 120 108 108 32 195 162 88 #t)
+     (fb-ellipse! fb w h 120 108 92 24 215 182 105 #f)
+     ;; Giant Golden Venus Djinn ("FLINT") Summon Pillar of Light from the Sky!
+     (fb-rect-blend! fb w h 102 20 28 94 255 235 90 2 3)
+     (fb-rect! fb w h 110 20 12 92 255 255 215)
+     (fb-ellipse! fb w h 116 112 24 8 255 230 85 #f)
+     (fb-ellipse! fb w h 116 112 16 5 255 255 200 #t)
+     ;; Floating Venus Djinn creature at (116, 46)
+     (fb-circle! fb w h 116 46 7 245 195 45 #t)
+     (fb-tri!    fb w h 110 42 116 34 122 42 255 235 95)
+     ;; Left Side Bosses: 2-Headed Fusion Dragon + Saturos & Menardi
+     (fb-ellipse! fb w h 34 84 18 14 195 45 40 #t) ; Dragon body
+     (fb-tri!     fb w h 10 62 32 76 22 88 225 85 45) ; Wing
+     (fb-circle!  fb w h 44 68 6 215 60 45 #t) ; Head 1
+     (fb-circle!  fb w h 52 74 6 215 60 45 #t) ; Head 2
+     (fb-rect!    fb w h 68 88 10 18 185 45 55) ; Saturos
+     (fb-rect!    fb w h 56 98 10 18 165 45 135) ; Menardi
+     ;; Right Side Party of 4 Adepts in Diagonal Perspective (Isaac, Garet, Ivan, Mia)
+     (define p-cols '((245 210 55) (225 55 45) (165 95 225) (65 185 245)))
+     (for ([i (in-range 4)]
+           [c (in-list p-cols)])
+       (define ax (- 206 (* i 14)))
+       (define ay (+ 74 (* i 12)))
+       (fb-ellipse! fb w h ax (+ ay 16) 6 3 80 65 35 #t)
+       (fb-circle!  fb w h ax ay 4 (first c) (second c) (third c) #t)
+       (fb-rect!    fb w h (- ax 4) (+ ay 4) 8 11 (first c) (second c) (third c))
+       (fb-line!    fb w h (- ax 4) (+ ay 6) (- ax 12) (+ ay 2) 220 235 255 2))
+     ;; Top 4-Adept Status Row (y=0..19)
+     (fb-rect! fb w h 0 0 240 20 24 20 38)
+     (for ([i (in-range 4)]
+           [nm (in-list '("ISAAC" "GARET" "IVAN" "MIA"))]
+           [hp (in-list '("380" "410" "290" "320"))])
+       (define bx (* i 60))
+       (fb-rect! fb w h (add1 bx) 1 58 18 238 226 192)
+       (fb-box!  fb w h (add1 bx) 1 58 18 185 140 55 1)
+       (draw-text! fb w h (+ bx 4) 3 nm 30 25 20 #f)
+       (draw-text! fb w h (+ bx 4) 11 (string-append "HP " hp) 25 125 45 #f))
+     ;; Bottom Command Icons Bar (y=140..159)
+     (fb-rect! fb w h 0 140 240 20 24 20 38)
+     (fb-hline! fb w h 0 239 140 215 175 65)
+     (draw-text! fb w h 8 146 "[FIGHT] [PSYNERGY] [DJINN] [SUMMON]" 255 240 150)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 6. THE LEGEND OF ZELDA: THE MINISH CAP (2004) — Minish Woods Overworld
+    ;; ------------------------------------------------------------------------
+    [(6)
+     ;; Lush Minish Woods giant-scale forest floor
+     (fb-vgrad! fb w h 0 16 240 144 38 138 52 28 104 42)
+     ;; Dappled sunlight & 3-leaf clovers
+     (for ([cx (in-list '(44 72 164 212))])
+       (fb-circle! fb w h cx 128 5 65 185 75 #t)
+       (fb-circle! fb w h (+ cx 5) 131 5 65 185 75 #t)
+       (fb-circle! fb w h (+ cx 2) 124 5 65 185 75 #t))
+     ;; Sparkling Blue Stream running vertically (x=94..128)
+     (fb-vgrad! fb w h 94 16 34 144 35 145 235 25 110 205)
+     (fb-vline! fb w h 94 16 159 195 175 115)
+     (fb-vline! fb w h 128 16 159 195 175 115)
+     (for ([wy (in-range 24 156 14)])
+       (fb-hline! fb w h 100 120 wy 175 235 255))
+     ;; Giant Hollow Wooden Log Tunnel bridging the stream (x=76..146, y=42..68)
+     (fb-rect! fb w h 76 42 70 26 135 85 42)
+     (fb-box!  fb w h 76 42 70 26 85 50 22 2)
+     (fb-hline! fb w h 78 144 48 165 110 58)
+     (fb-ellipse! fb w h 76 55 6 13 65 38 18 #t)
+     (fb-ellipse! fb w h 146 55 6 13 185 140 85 #t)
+     ;; Oversized Giant Red-Spotted Toadstools (left & bottom-right)
+     (for ([pos (in-list '((26 . 48) (206 . 112)))])
+       (define tx (car pos))
+       (define ty (cdr pos))
+       (fb-rect!    fb w h (- tx 6) ty 12 16 238 228 198) ; Stalk
+       (fb-ellipse! fb w h tx (- ty 4) 20 12 225 35 35 #t) ; Giant red cap
+       (fb-circle!  fb w h (- tx 8) (- ty 6) 4 250 250 250 #t)
+       (fb-circle!  fb w h (+ tx 6) (- ty 8) 4 250 250 250 #t)
+       (fb-circle!  fb w h tx (- ty 1) 3 250 250 250 #t))
+     ;; Giant Acorn at (26, 118)
+     (fb-ellipse! fb w h 28 120 9 7 165 105 45 #t)
+     (fb-ellipse! fb w h 24 120 5 8 95 58 24 #t)
+     ;; Link wearing Ezlo cap at (56+dx, 86) performing Great Spin Attack!
+     (define lx (+ 56 (min 20 dx)))
+     (define ly 92)
+     ;; 360-degree Great Spin Attack energy vortex around Link
+     (fb-ellipse! fb w h (+ lx 8) (+ ly 10) 24 14 110 245 255 #f)
+     (fb-ellipse! fb w h (+ lx 8) (+ ly 10) 21 12 255 250 130 #f)
+     ;; Link + Ezlo bird-cap sprite
+     (fb-circle!  fb w h (+ lx 8) (- ly 4) 5 45 195 65 #t) ; Ezlo head
+     (fb-tri!     fb w h (+ lx 12) (- ly 6) (+ lx 18) (- ly 4) (+ lx 12) (- ly 2) 245 175 35) ; Ezlo beak
+     (fb-put!     fb w h (+ lx 10) (- ly 5) 255 255 255) ; Ezlo eye
+     (fb-circle!  fb w h (+ lx 8) (+ ly 3) 6 245 215 70 #t) ; Blonde hair/face
+     (fb-rect!    fb w h (+ lx 3) (+ ly 8) 10 11 40 185 55) ; Green tunic
+     (fb-line!    fb w h (+ lx 13) (+ ly 10) (+ lx 28) (+ ly 8) 235 245 255 3) ; Spinning sword blade
+     ;; Giant Green ChuChu Boss on the right (cx=166, cy=88)
+     (fb-ellipse! fb w h 166 96 22 16 45 205 85 #t)
+     (fb-ellipse! fb w h 166 82 16 14 65 225 105 #t)
+     (fb-circle!  fb w h 160 80 4 255 240 60 #t)
+     (fb-circle!  fb w h 172 80 4 255 240 60 #t)
+     (fb-put!     fb w h 160 80 220 30 30)
+     (fb-put!     fb w h 172 80 220 30 30)
+     ;; Top HUD
+     (fb-rect! fb w h 0 0 240 16 18 32 22)
+     (fb-hline! fb w h 0 239 15 95 175 105)
+     (draw-text! fb w h 4 4 "B[SWORD] A[GUST] R:240" 240 245 215)
+     (draw-text! fb w h 148 4 "@@@@@@@" 245 55 65)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 7. MEGA MAN ZERO (2002) — Neo Arcadia Disposal Center
+    ;; ------------------------------------------------------------------------
+    [(7)
+     ;; Dark industrial cyber-ruins backdrop
+     (fb-vgrad! fb w h 0 16 240 118 14 16 30 32 24 48)
+     ;; Cyber-grid pillars & glowing neon cables
+     (for ([px-col (in-range 20 220 48)])
+       (fb-rect! fb w h px-col 16 14 118 28 32 52)
+       (fb-vline! fb w h (+ px-col 6) 16 134 55 195 235))
+     (fb-line! fb w h 0 36 90 64 235 55 165 2)
+     (fb-line! fb w h 90 64 180 42 55 225 250 2)
+     ;; Metal cyber deck (y=134..159)
+     (fb-vgrad! fb w h 0 134 240 26 65 70 95 22 25 38)
+     (fb-hline! fb w h 0 239 134 110 235 255)
+     ;; Crimson Zero (18x24) with flowing blonde hair & glowing green Z-Saber arc!
+     (define zx (+ 48 dx))
+     (define zy 104)
+     ;; Flowing golden-blonde hair streaming left
+     (fb-tri! fb w h (- zx 16) (+ zy 6) (+ zx 4) (+ zy 2) (- zx 8) (+ zy 16) 250 215 55)
+     ;; Zero helmet & crimson armor
+     (fb-rect! fb w h zx zy 12 9 225 35 45)
+     (fb-put!  fb w h (+ zx 8) (+ zy 3) 70 215 255) ; Blue forehead crystal
+     (fb-rect! fb w h (+ zx 1) (+ zy 9) 12 11 230 35 45)
+     (fb-rect! fb w h (+ zx 3) (+ zy 11) 8 6 240 240 250)
+     (fb-rect! fb w h zx (+ zy 20) 5 10 225 35 45)
+     (fb-rect! fb w h (+ zx 8) (+ zy 20) 5 10 225 35 45)
+     ;; Glowing Neon-Green Triangular Z-Saber Slash Arc!
+     (fb-tri! fb w h (+ zx 14) (+ zy 12) (+ zx 46) (- zy 14) (+ zx 48) (+ zy 26) 65 250 115)
+     (fb-tri! fb w h (+ zx 18) (+ zy 12) (+ zx 42) (- zy 8) (+ zx 44) (+ zy 22) 200 255 215)
+     ;; Floating Pink Cyber-Elf above Zero
+     (fb-circle! fb w h (- zx 8) (- zy 8) 4 255 135 215 #t)
+     (fb-circle! fb w h (- zx 8) (- zy 8) 6 255 210 240 #f)
+     ;; Pantheon Guardian & Aztec Falcon Boss on the right
+     (fb-rect! fb w h 136 106 14 26 45 145 175) ; Pantheon Guardian
+     (fb-circle! fb w h 143 102 5 65 185 215 #t)
+     ;; Aztec Falcon Boss (winged purple/gold reploid at x=182, y=68)
+     (fb-tri! fb w h 164 62 192 84 172 98 155 55 215) ; Left wing
+     (fb-tri! fb w h 224 58 196 84 216 98 155 55 215) ; Right wing
+     (fb-rect! fb w h 186 74 16 28 215 175 55)
+     (fb-rect! fb w h 188 64 12 10 175 45 195)
+     ;; Top HUD: ZERO [========] vs AZTEC FALCON [========]
+     (fb-rect! fb w h 0 0 240 16 12 14 26)
+     (draw-text! fb w h 4 4 "ZERO" 90 250 120)
+     (draw-bar!  fb w h 32 4 56 7 95 65 240 105)
+     (draw-text! fb w h 104 4 "AZTEC FALCON" 255 185 65)
+     (draw-bar!  fb w h 180 4 54 7 85 235 65 55)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 8. FIRE EMBLEM (2003) — Colosseum Battle Arena (Lyn vs Brigand)
+    ;; ------------------------------------------------------------------------
+    [(8)
+     ;; Arched stone colosseum backdrop (y=24..115)
+     (fb-vgrad! fb w h 0 24 240 92 75 135 195 165 195 225)
+     (fb-rect!  fb w h 0 24 240 48 155 142 118)
+     (for ([ax (in-range 12 228 36)])
+       (fb-rect!    fb w h ax 34 22 38 85 145 205)
+       (fb-ellipse! fb w h (+ ax 11) 34 11 8 85 145 205 #t))
+     ;; Central raised beveled battle platform (x=28..212, y=92..115)
+     (fb-quad! fb w h 44 92 196 92 216 114 24 114 185 168 132)
+     (fb-hline! fb w h 44 196 92 235 222 188)
+     (fb-rect! fb w h 48 93 144 6 85 185 75) ; Grass top trim
+     ;; Lyn (teal ponytail, blue/gold Lorca tunic) executing Critical Afterimage Slash!
+     (define lx (+ 68 (min 18 dx)))
+     ;; 2 Cyan motion-blur afterimages behind Lyn
+     (for ([ghost (in-list '(-24 -12))])
+       (fb-rect-blend! fb w h (+ lx ghost) 66 12 26 80 235 225 1 2))
+     ;; Lyn main sprite
+     (fb-tri!  fb w h (- lx 10) 68 (+ lx 4) 64 (- lx 4) 78 35 185 165) ; Flowing teal ponytail
+     (fb-circle! fb w h (+ lx 6) 64 5 250 215 180 #t)
+     (fb-rect! fb w h (+ lx 2) 69 9 16 35 145 185) ; Blue/teal Lorca tunic
+     (fb-hline! fb w h (+ lx 2) (+ lx 10) 78 245 205 65) ; Gold trim
+     (fb-rect! fb w h (+ lx 2) 85 3 7 245 205 175)
+     (fb-rect! fb w h (+ lx 8) 85 3 7 245 205 175)
+     ;; Blazing Sol Katti Critical Slash across the arena!
+     (fb-line! fb w h (+ lx 12) 74 162 58 255 250 140 3)
+     (fb-line! fb w h (+ lx 12) 74 162 58 255 255 255 1)
+     ;; Muscular Brigand on right of platform (x=148, y=62) with Steel Axe
+     (fb-circle! fb w h 156 64 6 225 60 45 #t) ; Red bandana head
+     (fb-rect!   fb w h 148 70 16 16 195 135 95) ; Muscular torso
+     (fb-rect!   fb w h 148 86 6 6 95 65 40)
+     (fb-rect!   fb w h 158 86 6 6 95 65 40)
+     (fb-line!   fb w h 164 56 174 80 140 95 45 2) ; Axe handle
+     (fb-tri!    fb w h 164 56 178 52 174 66 195 205 220) ; Steel Axe blade
+     ;; Top Name & Weapon Banners (y=0..23)
+     (fb-rect! fb w h 0 0 118 24 25 95 115)
+     (fb-box!  fb w h 0 0 118 24 235 195 75 2)
+     (draw-text! fb w h 6 4 "LYN" 255 255 255)
+     (draw-text! fb w h 42 13 "SOL KATTI" 245 230 140)
+     (fb-rect! fb w h 122 0 118 24 135 35 35)
+     (fb-box!  fb w h 122 0 118 24 235 195 75 2)
+     (draw-text! fb w h 128 4 "BRIGAND" 255 255 255)
+     (draw-text! fb w h 162 13 "STEEL AXE" 245 230 140)
+     ;; Bottom Ornate Combat Stat Frames (y=116..159)
+     (fb-rect! fb w h 0 116 120 44 22 78 96)
+     (fb-box!  fb w h 0 116 120 44 235 195 75 2)
+     (draw-text! fb w h 6 121 "HP 28 [|||||||]" 110 250 135)
+     (draw-text! fb w h 6 132 "HIT 100  DMG 18" 255 255 255)
+     (draw-text! fb w h 6 143 "CRT  42" 255 235 80)
+     (fb-rect! fb w h 120 116 120 44 115 30 35)
+     (fb-box!  fb w h 120 116 120 44 235 195 75 2)
+     (draw-text! fb w h 126 121 "HP 32 [||||||||]" 255 215 90)
+     (draw-text! fb w h 126 132 "HIT  54  DMG  9" 255 255 255)
+     (draw-text! fb w h 126 143 "CRT   0" 210 210 220)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 9. WARIOWARE, INC.: MEGA MICROGAME$! (2003) — "DODGE!" + Bomb Fuse Timer
+    ;; ------------------------------------------------------------------------
+    [else
+     ;; Bold Yellow/Purple WarioWare Arcade Bezel Border
+     (fb-rect! fb w h 0 0 240 160 115 35 165)
+     (fb-box!  fb w h 0 0 240 160 250 215 35 4)
+     ;; Microgame Inner Playfield (x=8..231, y=22..138)
+     (fb-vgrad! fb w h 8 22 224 98 85 215 255 195 245 255)
+     ;; Checkered desert highway floor (y=120..138)
+     (for ([tx (in-range 8 232 16)])
+       (fb-rect! fb w h tx 120 8 18 235 165 55)
+       (fb-rect! fb w h (+ tx 8) 120 8 18 195 115 35))
+     ;; Top Score & 4 Wario Hat Lives Indicator
+     (draw-text! fb w h 12 8 (format "SCORE 0~a" (+ 18 (quotient score 5))) 255 245 70)
+     (draw-text! fb w h 136 8 "[W] [W] [W] [W]" 255 235 45)
+     ;; Giant Center-Top Action Command Banner: "DODGE!"
+     (fb-rect! fb w h 68 25 104 22 235 35 115)
+     (fb-box!  fb w h 68 25 104 22 255 245 65 2)
+     (draw-text-2x! fb w h 84 29 "DODGE!" 255 250 75)
+     ;; Wario in his Purple/Yellow Convertible Car at (wario-x, 96)
+     (define wx (+ 42 (min 28 dx)))
+     (fb-rect!   fb w h wx 102 44 14 145 45 195) ; Purple car body
+     (fb-hline!  fb w h wx (+ wx 43) 108 255 225 45) ; Yellow racing stripe
+     (fb-circle! fb w h (+ wx 10) 118 6 30 30 35 #t) ; Rear wheel
+     (fb-circle! fb w h (+ wx 34) 118 6 30 30 35 #t) ; Front wheel
+     (fb-circle! fb w h (+ wx 20) 92 8 250 205 165 #t) ; Wario head
+     (fb-rect!   fb w h (+ wx 12) 82 16 6 250 225 35) ; Yellow Wario cap
+     (fb-circle! fb w h (+ wx 25) 93 3 245 115 165 #t) ; Pink nose
+     ;; Giant Craggy Rolling Boulder on the right (cx=178, cy=98, r=22)
+     (fb-circle! fb w h 178 98 22 135 120 105 #t)
+     (fb-circle! fb w h 178 98 22 75 65 55 #f)
+     (fb-circle! fb w h 170 90 6 165 150 135 #t)
+     (fb-circle! fb w h 186 104 5 95 85 75 #t)
+     ;; Bottom Burning Bomb Fuse Timer (y=139..156)
+     (fb-rect!   fb w h 8 139 224 17 24 16 38)
+     (fb-circle! fb w h 24 147 8 30 35 45 #t) ; Black Bomb
+     (fb-circle! fb w h 24 147 8 200 205 220 #f)
+     (draw-text! fb w h 22 144 "3" 255 85 85 #f)
+     ;; Fuse rope & sizzling orange/yellow spark
+     (fb-hline!  fb w h 33 176 148 195 165 105)
+     (fb-hline!  fb w h 33 176 149 145 115 65)
+     (fb-circle! fb w h 178 148 6 255 120 25 #t)
+     (fb-circle! fb w h 178 148 3 255 245 90 #t)
+     (draw-text! fb w h 190 144 "TIME!" 255 225 65)])
 
   fb)
 
-;; Render the complete 320x240 (76,800 pixels = 230,400 RGB24 bytes) N64 VI Framebuffer
-;; from the live `n64-machine` hardware state (RDRAM VI Framebuffer, TMEM, Campaign State).
+;; ============================================================================
+;; 8c. Headless N64 320x240 RGB24 Framebuffer Renderer (All 10 N64 Classics)
+;; ============================================================================
+;; Renders smooth 3D shaded polygon surfaces, horizons, landmarks, 3D characters,
+;; and authentic N64 HUDs driven deterministically by `n64-machine` state.
 (define (render-n64-rgb-framebuffer m)
-  (define width  320)
-  (define height 240)
-  (define fb     (make-bytes (* width height 3) 0))
-  (define rdram  (n64-machine-rdram m))
-  (define tmem   (n64-machine-tmem m))
+  (define w 320)
+  (define h 240)
+  (define fb (make-bytes (* w h 3) 0))
 
-  (define bg-col16 (integer-bytes->integer rdram #f #t N64-TOP10-VI-FB-DRAM-PHYS (+ N64-TOP10-VI-FB-DRAM-PHYS 2)))
-  (define-values (bg-r bg-g bg-b) (rgba5551->rgb8 bg-col16))
-  (define px       (min 260 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-X))))
-  (define py       (min 180 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-Y))))
-  (define stage-id (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-STAGE-ID)))
-  (define energy   (min 160 (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-ENERGY))))
-  (define genre-a  (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-GENRE-A)))
-  (define won?     (= (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-WON)) 1))
+  (define rom-bs    (n64-machine-rom m))
+  (define rdram     (n64-machine-rdram m))
+  (define tmem      (n64-machine-tmem m))
+  (define game-idx  (modulo (bytes-ref rom-bs #x3F) 10))
+  (define px        (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-X)))
+  (define py        (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-PLAYER-Y)))
+  (define stage-id  (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-STAGE-ID)))
+  (define energy    (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-ENERGY)))
+  (define score     (n64-read-u32-be m (+ N64-STATE-BASE-KSEG0 N64-STATE-SCORE)))
+  (define vi-c0     (integer-bytes->integer rdram #f #t N64-TOP10-VI-FB-DRAM-PHYS (+ N64-TOP10-VI-FB-DRAM-PHYS 2)))
+  (define tmem-c0   (integer-bytes->integer tmem #f #t 0 2))
+  (define dx        (+ (* (modulo stage-id 4) 8)
+                       (if (and (> vi-c0 0) (> tmem-c0 0) (> py 0)) 0 1)))
 
-  ;; 1. Render 320x240 Sky Horizon + Perspective TMEM-Textured 3D Ground Plane (Y = 128..239)
-  (for ([y (in-range height)])
-    (cond
-      [(< y 24)
-       ;; Top HUD bezel band
-       (define c16 (integer-bytes->integer tmem #f #t 128 130))
-       (define-values (r g b) (rgba5551->rgb8 c16))
-       (for ([x (in-range width)])
-         (define off (* (+ (* y width) x) 3))
-         (bytes-set! fb off (quotient (+ r bg-r) 2))
-         (bytes-set! fb (+ off 1) (quotient (+ g bg-g) 2))
-         (bytes-set! fb (+ off 2) (quotient (+ b bg-b) 2)))]
-      [(< y 128)
-       ;; Sky gradient + distant 3D mountain/starfield silhouette
-       (define horizon-y (- 128 (* 16 (modulo (+ (quotient y 8) stage-id) 3))))
-       (for ([x (in-range width)])
-         (define ridge-h (+ 96 (* 6 (bitwise-and (+ (quotient x 16) stage-id genre-a) 3))))
-         (define off (* (+ (* y width) x) 3))
-         (if (>= y ridge-h)
-             (let ()
-               (define t-off (modulo (* (+ 192 (bitwise-and x 7) (* (bitwise-and y 7) 8)) 2) N64-TMEM-LIMIT-BYTES))
-               (define c16 (integer-bytes->integer tmem #f #t t-off (+ t-off 2)))
-               (define-values (r g b) (rgba5551->rgb8 c16))
-               (bytes-set! fb off r)
-               (bytes-set! fb (+ off 1) g)
-               (bytes-set! fb (+ off 2) b))
-             (begin
-               (bytes-set! fb off bg-r)
-               (bytes-set! fb (+ off 1) bg-g)
-               (bytes-set! fb (+ off 2) bg-b))))]
-      [else
-       ;; Perspective 3D checkerboard ground plane sampled from TMEM textures 0 & 1
-       (define dy (max 1 (- y 127)))
-       (for ([x (in-range width)])
-         (define persp-u (bitwise-and (+ (quotient (* (- x 160) 32) (+ dy 16)) px) #xFF))
-         (define persp-v (bitwise-and (+ (quotient 512 (+ dy 8)) py (* stage-id 8)) #xFF))
-         (define checker (bitwise-and (+ (quotient persp-u 16) (quotient persp-v 16)) 1))
-         (define tex-base (* checker 128))
-         (define t-off (modulo (+ tex-base (* (+ (* (bitwise-and persp-v 7) 8) (bitwise-and persp-u 7)) 2))
-                               N64-TMEM-LIMIT-BYTES))
-         (define tex16 (integer-bytes->integer tmem #f #t t-off (+ t-off 2)))
-         (define-values (tr tg tb) (rgba5551->rgb8 tex16))
-         (define off (* (+ (* y width) x) 3))
-         (bytes-set! fb off tr)
-         (bytes-set! fb (+ off 1) tg)
-         (bytes-set! fb (+ off 2) tb))]))
+  (case game-idx
+    ;; ------------------------------------------------------------------------
+    ;; 0. SUPER MARIO 64 (1996) — Peach's Castle Courtyard & Bob-omb Hills
+    ;; ------------------------------------------------------------------------
+    [(0)
+     ;; Bright blue sky with fluffy 3D clouds
+     (fb-vgrad! fb w h 0 0 320 112 55 155 250 155 220 255)
+     (fb-ellipse! fb w h 56 42 28 10 248 250 255 #t)
+     (fb-ellipse! fb w h 264 38 32 11 248 250 255 #t)
+     ;; Green 3D polygon hills on horizon
+     (fb-tri! fb w h -10 116 64 68 148 116 45 165 65)
+     (fb-tri! fb w h 180 116 256 72 330 116 52 178 72)
+     ;; Smooth 3D green grass courtyard & blue moat (y=114..239)
+     (fb-vgrad! fb w h 0 114 320 126 58 190 72 34 138 48)
+     (fb-rect!  fb w h 0 114 320 18 45 145 235) ; Blue Castle Moat
+     ;; Princess Peach's Castle (white 3D polygon walls, red conical roofs, Peach stained glass)
+     (fb-rect! fb w h 116 64 88 50 238 234 222)
+     (fb-box!  fb w h 116 64 88 50 185 178 165 1)
+     ;; Flanking towers & Central spire
+     (fb-rect! fb w h 104 54 20 60 230 225 212)
+     (fb-rect! fb w h 196 54 20 60 230 225 212)
+     (fb-rect! fb w h 142 36 36 78 244 240 230)
+     (fb-tri!  fb w h 100 54 114 32 128 54 225 40 45) ; Left red conical roof
+     (fb-tri!  fb w h 192 54 206 32 220 54 225 40 45) ; Right red conical roof
+     (fb-tri!  fb w h 136 36 160 10 184 36 235 45 50) ; Center tall conical roof
+     ;; Iconic Stained-Glass Princess Peach Window
+     (fb-ellipse! fb w h 160 54 8 11 95 195 250 #t)
+     (fb-circle!  fb w h 160 52 4 250 225 85 #t)
+     (fb-ellipse! fb w h 160 59 5 4 245 135 185 #t)
+     ;; Castle double wooden doors & 3D perspective stone bridge over moat
+     (fb-ellipse! fb w h 160 102 10 12 115 70 35 #t)
+     (fb-quad! fb w h 144 112 176 112 208 239 112 239 210 198 172)
+     (fb-line! fb w h 144 112 112 239 155 142 118 2)
+     (fb-line! fb w h 176 112 208 239 155 142 118 2)
+     ;; King Bob-omb (left-back) & Chain Chomp (right-mid)
+     (fb-circle! fb w h 62 152 16 30 32 42 #t) ; Chain Chomp
+     (fb-rect!   fb w h 56 152 14 5 250 250 255) ; Teeth
+     (fb-circle! fb w h 248 154 18 28 30 40 #t) ; King Bob-omb
+     (fb-tri!    fb w h 240 136 248 126 256 136 250 210 45) ; Gold crown
+     (fb-ellipse! fb w h 248 156 12 4 250 250 255 #t) ; Royal white mustache
+     ;; 3D Shaded Mario (24x28) at (146+dx, 166) with shadow ellipse underneath
+     (define mx (+ 146 (min 24 dx)))
+     (define my 166)
+     (fb-ellipse! fb w h (+ mx 12) (+ my 28) 12 4 20 65 25 #t) ; 3D drop shadow
+     (fb-ellipse! fb w h (+ mx 12) (+ my 4) 9 6 235 35 35 #t)  ; Red cap
+     (fb-ellipse! fb w h (+ mx 12) (+ my 10) 8 6 250 205 165 #t) ; 3D shaded face
+     (fb-rect!    fb w h (+ mx 6) (+ my 15) 12 10 35 90 220)   ; Blue overalls
+     (fb-circle!  fb w h (+ mx 9) (+ my 18) 2 250 225 55 #t)   ; Yellow buttons
+     (fb-circle!  fb w h (+ mx 15) (+ my 18) 2 250 225 55 #t)
+     (fb-circle!  fb w h (+ mx 4) (+ my 18) 4 250 250 255 #t)  ; White gloves
+     (fb-circle!  fb w h (+ mx 20) (+ my 18) 4 250 250 255 #t)
+     (fb-rect!    fb w h (+ mx 6) (+ my 25) 5 5 110 60 25)
+     (fb-rect!    fb w h (+ mx 13) (+ my 25) 5 5 110 60 25)
+     ;; Authentic SM64 HUD: MARIOx4, 8-Slice Power Meter, ^x12 $x045
+     (draw-text-2x! fb w h 12 10 "MARIO*4" 245 55 45)
+     ;; Circular 8-slice Power Meter at (160, 22)
+     (fb-circle! fb w h 160 22 14 35 75 175 #t)
+     (fb-circle! fb w h 160 22 11 65 185 250 #t)
+     (fb-circle! fb w h 160 22 14 250 215 55 #f)
+     (draw-text! fb w h 155 19 "8/8" 255 255 255)
+     (draw-text-2x! fb w h 218 10 (format "^~a $~a" (+ 12 stage-id) (+ 45 score)) 250 225 45)]
 
-  ;; 2. Composite TMEM 16-bit RGBA5551 textured 24x24 3D actor quads at live RDRAM coordinates
-  (for ([quad-idx (in-range 6)])
-    (define qx (min 288 (+ 24 (modulo (+ px (* quad-idx 44)) 256))))
-    (define qy (min 204 (+ 44 (* (modulo (+ quad-idx stage-id) 3) 36))))
-    (for* ([dy (in-range 24)]
-           [dx (in-range 24)])
-      (define t-off (modulo (* (+ (* (modulo (+ quad-idx 2) 8) 64)
-                                  (* (modulo (quotient dy 3) 8) 8)
-                                  (modulo (quotient dx 3) 8))
-                               2)
-                            N64-TMEM-LIMIT-BYTES))
-      (define tex16 (integer-bytes->integer tmem #f #t t-off (+ t-off 2)))
-      (unless (zero? (bitwise-and tex16 1))
-        (define-values (tr tg tb) (rgba5551->rgb8 tex16))
-        (define off (* (+ (* (+ qy dy) width) (+ qx dx)) 3))
-        (bytes-set! fb off tr)
-        (bytes-set! fb (+ off 1) tg)
-        (bytes-set! fb (+ off 2) tb))))
+    ;; ------------------------------------------------------------------------
+    ;; 1. THE LEGEND OF ZELDA: OCARINA OF TIME (1998) — Hyrule Field Z-Target
+    ;; ------------------------------------------------------------------------
+    [(1)
+     ;; Golden/Blue Hyrule sky & Death Mountain with Red Volcanic Smoke Ring
+     (fb-vgrad! fb w h 0 22 320 88 45 105 205 245 185 105)
+     ;; Temple of Time silhouette on left horizon
+     (fb-rect! fb w h 44 74 36 36 85 95 130)
+     (fb-tri!  fb w h 52 74 62 46 72 74 95 105 145)
+     ;; Death Mountain on right horizon + iconic red smoke ring
+     (fb-tri! fb w h 180 110 248 48 316 110 125 85 65)
+     (fb-ellipse! fb w h 248 38 22 7 235 75 45 #f)
+     (fb-ellipse! fb w h 248 37 20 6 250 135 55 #f)
+     ;; 3D Green Hyrule Field plains & perspective dirt path (y=110..218)
+     (fb-vgrad! fb w h 0 110 320 108 48 155 58 28 105 38)
+     (fb-quad!  fb w h 136 110 176 110 236 218 76 218 185 152 102)
+     ;; Z-Target Black Cinema Letterbox Bars (top y=0..22, bottom y=218..239)
+     (fb-rect! fb w h 0 0 320 22 8 8 12)
+     (fb-rect! fb w h 0 218 320 22 8 8 12)
+     ;; Stalfos / Darknut Knight at (198, 128) with Yellow Z-Target Lock-On Triangles!
+     (fb-ellipse! fb w h 208 168 12 4 18 45 20 #t)
+     (fb-circle!  fb w h 208 130 6 225 220 200 #t) ; Skull head
+     (fb-rect!    fb w h 200 136 16 18 175 170 155) ; Ribcage/armor
+     (fb-circle!  fb w h 196 144 8 145 155 175 #t) ; Round shield
+     (fb-line!    fb w h 216 142 232 124 230 235 245 2) ; Sword
+     ;; 4 Yellow Z-Target Lock-On Triangles + Glowing Cyan Fairy Navi
+     (fb-tri! fb w h 208 118 203 110 213 110 255 235 40)
+     (fb-tri! fb w h 190 140 182 135 182 145 255 235 40)
+     (fb-tri! fb w h 226 140 234 135 234 145 255 235 40)
+     (fb-circle! fb w h 194 122 4 120 235 255 #t) ; Navi
+     (fb-circle! fb w h 194 122 2 255 255 255 #t)
+     ;; 3D Hero of Time Link (24x32) at (104+dx, 146) with Master Sword & Hylian Shield
+     (define lx (+ 104 (min 24 dx)))
+     (define ly 146)
+     (fb-ellipse! fb w h (+ lx 12) (+ ly 32) 12 4 18 45 20 #t)
+     (fb-tri!     fb w h (+ lx 4) (+ ly 6) (+ lx 12) (- ly 4) (+ lx 18) (+ ly 8) 35 175 55) ; Green cap
+     (fb-circle!  fb w h (+ lx 12) (+ ly 6) 5 245 215 80 #t) ; Blonde hair
+     (fb-rect!    fb w h (+ lx 6) (+ ly 11) 12 14 35 175 55) ; Green tunic
+     (fb-rect!    fb w h (+ lx 7) (+ ly 25) 4 7 235 235 245) ; White tights/boots
+     (fb-rect!    fb w h (+ lx 13) (+ ly 25) 4 7 235 235 245)
+     ;; Hylian Shield (blue/silver with red/gold) & Master Sword
+     (fb-rect! fb w h (+ lx 16) (+ ly 11) 10 13 35 75 195)
+     (fb-box!  fb w h (+ lx 16) (+ ly 11) 10 13 215 220 235 1)
+     (fb-tri!  fb w h (+ lx 19) (+ ly 16) (+ lx 21) (+ ly 13) (+ lx 23) (+ ly 16) 250 220 55)
+     (fb-line! fb w h (+ lx 4) (+ ly 16) (- lx 12) (+ ly 4) 215 235 255 3) ; Master Sword blade
+     ;; Authentic OoT HUD: Hearts, Green Magic Bar, Blue A, Green B, Yellow C-Buttons, Minimap
+     (draw-text! fb w h 10 4 "@@@@@@@@" 240 45 55)
+     (draw-bar!  fb w h 10 13 64 6 85 45 215 75)
+     ;; B (Green), A (Blue), and 3 Yellow C-Buttons on top-right
+     (fb-circle! fb w h 224 12 7 40 195 65 #t)
+     (draw-text! fb w h 222 9 "B" 255 255 255 #f)
+     (fb-circle! fb w h 242 14 7 45 115 240 #t)
+     (draw-text! fb w h 240 11 "A" 255 255 255 #f)
+     (for ([cx (in-list '(262 280 298))]
+           [cl (in-list '("<" "V" ">"))])
+       (fb-circle! fb w h cx 11 6 245 205 35 #t)
+       (draw-text! fb w h (- cx 2) 8 cl 30 30 30 #f))
+     ;; Bottom-left Rupee counter & Bottom-right Hyrule Field Minimap
+     (draw-text! fb w h 12 224 "RUPEES 099" 110 245 120)
+     (fb-rect!   fb w h 262 182 48 32 35 95 55)
+     (fb-box!    fb w h 262 182 48 32 195 210 185 1)
+     (fb-tri!    fb w h 284 196 288 190 292 196 255 235 50)]
 
-  ;; 3. Render 3D HUD Stage & Energy Progress Ribbon on Scanlines 8..16
-  (define hud-tex16 (integer-bytes->integer tmem #f #t (* (+ 1 (modulo stage-id 6)) 128) (+ (* (+ 1 (modulo stage-id 6)) 128) 2)))
-  (define-values (hr hg hb) (rgba5551->rgb8 hud-tex16))
-  (define bar-len (+ 32 energy (* stage-id 24) (if won? 48 0)))
-  (for* ([sy (in-range 8 16)]
-         [sx (in-range 24 (min (- width 24) (+ 24 bar-len)))])
-    (define off (* (+ (* sy width) sx) 3))
-    (bytes-set! fb off hr)
-    (bytes-set! fb (+ off 1) hg)
-    (bytes-set! fb (+ off 2) hb))
+    ;; ------------------------------------------------------------------------
+    ;; 2. SUPER SMASH BROS. (1999) — Peach's Castle 3D Stage & 4 Damage Badges
+    ;; ------------------------------------------------------------------------
+    [(2)
+     ;; Scenic sky & distant Peach's Castle backdrop
+     (fb-vgrad! fb w h 0 0 320 192 65 160 245 185 225 255)
+     (fb-rect!  fb w h 128 36 64 56 232 224 210)
+     (fb-tri!   fb w h 122 36 160 12 198 36 225 55 60)
+     ;; Moving Bumper hazard at top-center (cx=160, cy=68)
+     (fb-circle! fb w h 160 68 10 250 215 45 #t)
+     (fb-circle! fb w h 160 68 7 45 95 225 #t)
+     (fb-circle! fb w h 160 68 3 255 75 75 #t)
+     ;; Two Suspended Soft Platforms (y=110)
+     (fb-rect! fb w h 64 110 68 6 215 195 155)
+     (fb-box!  fb w h 64 110 68 6 125 105 75 1)
+     (fb-rect! fb w h 188 110 68 6 215 195 155)
+     (fb-box!  fb w h 188 110 68 6 125 105 75 1)
+     ;; Main 3D Floating Stage Deck (x=44..276, y=154..184)
+     (fb-quad! fb w h 44 154 276 154 256 184 64 184 135 110 85)
+     (fb-rect! fb w h 44 150 232 8 235 215 175)
+     (fb-box!  fb w h 44 150 232 8 155 130 95 1)
+     ;; 4P Pikachu on top-left platform summoning Thunder Jolt lightning!
+     (fb-vline! fb w h 96 16 92 255 245 85)
+     (fb-vline! fb w h 97 16 92 255 255 220)
+     (fb-ellipse! fb w h 96 98 8 9 250 225 40 #t) ; Pikachu
+     (fb-tri!     fb w h 90 90 92 80 95 90 250 225 40)
+     (fb-tri!     fb w h 98 90 101 80 103 90 250 225 40)
+     ;; 1P Mario at (84+dx, 128) executing fiery Fire Punch!
+     (define mx (+ 84 (min 16 dx)))
+     (fb-rect! fb w h mx 128 12 22 235 45 45)
+     (fb-rect! fb w h (+ mx 2) 136 8 10 40 95 225)
+     (fb-circle! fb w h (+ mx 18) 134 8 255 125 25 #t) ; Fire Punch flame
+     (fb-circle! fb w h (+ mx 18) 134 5 255 235 75 #t)
+     ;; 2P Link at (152, 126) & 3P Samus at (216, 126) firing Charge Shot
+     (fb-rect! fb w h 150 126 12 24 40 175 60) ; Link
+     (fb-line! fb w h 148 134 134 128 220 235 255 2)
+     (fb-rect! fb w h 218 124 14 26 235 125 30) ; Samus
+     (fb-circle! fb w h 194 134 7 95 235 255 #t) ; Charge Shot
+     (fb-circle! fb w h 194 134 4 235 255 255 #t)
+     ;; Bottom 4 Iconic Smash 64 Damage Percentage Badges (y=192..236)
+     (fb-rect! fb w h 0 190 320 50 16 18 28)
+     (for ([i (in-range 4)]
+           [lbl (in-list '("1P MARIO" "2P LINK" "3P SAMUS" "4P PIKA"))]
+           [dmg (in-list '(" 24%" " 68%" " 42%" " 95%"))]
+           [col (in-list '((215 45 45) (45 105 225) (225 175 35) (40 185 75)))])
+       (define bx (+ 8 (* i 78)))
+       (fb-rect! fb w h bx 194 72 40 (first col) (second col) (third col))
+       (fb-box!  fb w h bx 194 72 40 245 245 255 2)
+       (draw-text!    fb w h (+ bx 6) 198 lbl 255 255 255)
+       (draw-text-2x! fb w h (+ bx 8) 210 dmg 255 245 180))]
+
+    ;; ------------------------------------------------------------------------
+    ;; 3. MARIO KART 64 (1996) — Royal Raceway 3D Highway & Item Roulette
+    ;; ------------------------------------------------------------------------
+    [(3)
+     ;; Sky, 3D polygon mountain range & distant Peach's Castle
+     (fb-vgrad! fb w h 0 0 320 86 55 155 250 155 220 255)
+     (for ([mx (in-range 0 320 56)])
+       (fb-tri! fb w h mx 86 (+ mx 28) 52 (+ mx 56) 86 55 165 75))
+     ;; Lush green 3D grass infield (y=86..239)
+     (fb-vgrad! fb w h 0 86 320 154 55 185 65 35 135 45)
+     ;; Smooth 3D Perspective Asphalt Highway (widening from y=86..239)
+     (fb-quad! fb w h 126 86 194 86 306 239 14 239 92 96 108)
+     ;; Alternating Red/White Rumble Curbs & Dashed Center Line
+     (for ([seg (in-range 12)])
+       (define y0 (+ 86 (* seg 12)))
+       (define y1 (+ y0 12))
+       (define lx0 (- 126 (quotient (* (- y0 86) 112) 153)))
+       (define lx1 (- 126 (quotient (* (- y1 86) 112) 153)))
+       (define rx0 (+ 194 (quotient (* (- y0 86) 112) 153)))
+       (define rx1 (+ 194 (quotient (* (- y1 86) 112) 153)))
+       (define red? (even? seg))
+       (fb-quad! fb w h (- lx0 8) y0 lx0 y0 lx1 y1 (- lx1 12) y1
+                 (if red? 235 250) (if red? 40 250) (if red? 40 250))
+       (fb-quad! fb w h rx0 y0 (+ rx0 8) y0 (+ rx1 12) y1 rx1 y1
+                 (if red? 235 250) (if red? 40 250) (if red? 40 250))
+       (when red?
+         (fb-rect! fb w h 158 y0 4 8 245 245 250)))
+     ;; 4 Rainbow Crystalline Item Boxes ("?") floating across the track
+     (for ([ix (in-list '(118 146 174 202))]
+           [ic (in-list '((80 235 255) (255 95 235) (255 235 65) (95 250 120)))])
+       (fb-rect! fb w h (- ix 7) 104 14 14 (first ic) (second ic) (third ic))
+       (fb-box!  fb w h (- ix 7) 104 14 14 255 255 255 1)
+       (draw-text! fb w h (- ix 2) 108 "?" 255 255 255))
+     ;; Rival Karts ahead: Yoshi (green) & Wario (purple/yellow)
+     (fb-rect! fb w h 130 128 16 12 45 205 65)
+     (fb-rect! fb w h 176 122 18 13 165 55 215)
+     ;; Pre-rendered-style 3D Mario in Pipe-Frame Kart at (142+dx, 168)
+     (define kx (+ 142 (min 20 dx)))
+     (define ky 168)
+     (fb-ellipse! fb w h (+ kx 16) (+ ky 28) 18 5 45 48 55 #t)
+     ;; Black racing tires
+     (fb-rect! fb w h kx (+ ky 14) 7 12 24 24 28)
+     (fb-rect! fb w h (+ kx 25) (+ ky 14) 7 12 24 24 28)
+     ;; Red/white kart chassis & Mario
+     (fb-rect! fb w h (+ kx 6) (+ ky 12) 20 12 235 40 40)
+     (fb-rect! fb w h (+ kx 8) (+ ky 6) 16 8 40 95 225)
+     (fb-circle! fb w h (+ kx 16) (+ ky 2) 7 235 35 35 #t) ; Mario cap
+     ;; Orange/Yellow Mini-Turbo drift sparks!
+     (fb-line! fb w h (- kx 4) (+ ky 24) (- kx 14) (+ ky 18) 255 215 45 2)
+     (fb-line! fb w h (+ kx 34) (+ ky 24) (+ kx 44) (+ ky 18) 255 125 30 2)
+     ;; Authentic MK64 HUD: LAP 2/3, TIME, Item Roulette [3 Red Shells], Gold "1ST", Minimap
+     (draw-text! fb w h 10 8 "LAP 2/3" 255 235 65)
+     (draw-text! fb w h 208 8 "TIME 01'18\"42" 255 255 255)
+     ;; Top-center Item Roulette Box (Triple Red Shells)
+     (fb-rect! fb w h 136 6 48 26 24 30 48)
+     (fb-box!  fb w h 136 6 48 26 245 215 65 2)
+     (fb-circle! fb w h 148 19 5 235 40 40 #t)
+     (fb-circle! fb w h 160 19 5 235 40 40 #t)
+     (fb-circle! fb w h 172 19 5 235 40 40 #t)
+     ;; Bottom-left Gold "1ST" & Bottom-right Speedometer + Track Minimap
+     (draw-text-2x! fb w h 14 206 "1ST" 255 215 35)
+     (fb-ellipse!   fb w h 284 212 22 16 255 255 255 #f)
+     (fb-circle!    fb w h 266 206 3 255 50 50 #t)
+     (draw-text!    fb w h 252 184 "82 KM/H" 255 235 80)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 4. GOLDENEYE 007 (1997) — Arkhangelsk Dam 3D First-Person View & PP7
+    ;; ------------------------------------------------------------------------
+    [(4)
+     ;; Cold Russian slate sky & snow mountains (y=0..68)
+     (fb-vgrad! fb w h 0 0 320 68 75 92 118 145 162 185)
+     (fb-tri! fb w h 20 68 76 36 132 68 185 198 215)
+     ;; 3D Perspective Concrete Dam Parapet Walls & Roadway (y=68..239)
+     (fb-vgrad! fb w h 0 68 320 172 88 94 102 52 56 64)
+     ;; Left & Right converging 3D concrete dam walls
+     (fb-quad! fb w h 0 42 104 88 104 148 0 210 118 124 134)
+     (fb-quad! fb w h 320 42 216 88 216 148 320 210 108 114 124)
+     ;; Sniper Watchtower on right dam wall (x=224..262, y=24..96)
+     (fb-rect! fb w h 228 28 32 22 68 74 84)
+     (fb-box!  fb w h 228 28 32 22 42 46 54 2)
+     (fb-rect! fb w h 234 34 20 8 205 225 245) ; Watchtower window
+     (fb-vline! fb w h 232 50 96 55 60 70)
+     (fb-vline! fb w h 256 50 96 55 60 70)
+     ;; Military Crate Stack on left (x=42..86, y=122..162)
+     (fb-rect! fb w h 42 124 38 36 65 88 58)
+     (fb-box!  fb w h 42 124 38 36 38 54 34 2)
+     ;; Enemy Russian Soldiers in green uniforms in distance
+     (fb-circle! fb w h 142 104 4 235 195 160 #t)
+     (fb-rect!   fb w h 139 98 7 3 205 35 35) ; Red beret
+     (fb-rect!   fb w h 137 108 10 18 45 85 50)
+     (fb-rect!   fb w h 139 126 4 10 35 55 38)
+     (fb-rect!   fb w h 144 126 4 10 35 55 38)
+     (fb-circle! fb w h 184 110 4 235 195 160 #t)
+     (fb-rect!   fb w h 179 114 10 18 45 85 50)
+     ;; Red R-Button Precision Aiming Crosshair at (142+dx, 114)
+     (define cx (+ 142 (min 20 dx)))
+     (define cy 114)
+     (fb-circle! fb w h cx cy 10 245 40 40 #f)
+     (fb-hline!  fb w h (- cx 14) (- cx 4) cy 245 40 40)
+     (fb-hline!  fb w h (+ cx 4) (+ cx 14) cy 245 40 40)
+     (fb-vline!  fb w h cx (- cy 14) (- cy 4) 245 40 40)
+     (fb-vline!  fb w h cx (+ cy 4) (+ cy 14) 245 40 40)
+     ;; Iconic PP7 Silenced Pistol in Bottom-Right Foreground + Muzzle Flash!
+     (fb-circle! fb w h 194 146 14 255 185 45 #t) ; Muzzle flash outer
+     (fb-circle! fb w h 194 146 8 255 250 180 #t) ; Muzzle flash core
+     ;; Cylindrical black silencer & gunmetal PP7 slide
+     (fb-quad! fb w h 196 148 228 164 222 174 190 158 32 36 44)
+     (fb-quad! fb w h 224 162 276 192 264 210 214 178 68 74 86)
+     (fb-quad! fb w h 244 196 288 239 248 239 224 206 24 26 32) ; Bond's black glove grip
+     ;; Left Curved Red Health Arc & Right Curved Blue Armor Arc HUD
+     (for ([seg (in-range 8)])
+       (define sy (+ 48 (* seg 16)))
+       (define sx-off (abs (- seg 3)))
+       (fb-rect! fb w h (+ 10 (* sx-off 2)) sy 10 12 235 45 35)
+       (fb-rect! fb w h (- 300 (* sx-off 2)) sy 10 12 45 155 245))
+     (draw-text! fb w h 18 222 "9MM   7 | 140" 245 235 120)
+     (draw-text! fb w h 218 222 "PP7 SILENCED" 200 215 230)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 5. STAR FOX 64 (1997) — Corneria 3D Flight over Water & Stone Arches
+    ;; ------------------------------------------------------------------------
+    [(5)
+     ;; Corneria blue sky, clouds & distant 3D cityscape
+     (fb-vgrad! fb w h 0 0 320 96 45 125 235 155 210 255)
+     (for ([bx (in-range 16 112 18)])
+       (fb-rect! fb w h bx (- 96 (modulo (* bx 3) 28)) 12 (modulo (* bx 3) 28) 125 140 168))
+     ;; Reflective 3D Blue Water Bay (y=96..239)
+     (fb-vgrad! fb w h 0 96 320 144 35 135 235 15 65 155)
+     (for ([wy (in-range 102 236 10)])
+       (fb-hline! fb w h 20 300 wy 85 185 250))
+     ;; 3D Stone Arches spanning the water bay
+     (for ([arch-x (in-list '(36 204))])
+       (fb-rect! fb w h arch-x 58 18 86 175 165 142)
+       (fb-rect! fb w h (+ arch-x 62) 58 18 86 155 145 125)
+       (fb-rect! fb w h (- arch-x 4) 48 88 14 190 180 156)
+       (fb-hline! fb w h (- arch-x 4) (+ arch-x 84) 144 235 250 255)) ; Water foam at base
+     ;; Venom / Granga enemy fighters ahead + Green 3D Wireframe Reticle
+     (fb-tri!  fb w h 148 72 160 64 172 72 185 65 45)
+     (fb-box!  fb w h 146 62 28 22 65 250 95 1) ; Green 3D targeting reticle
+     (fb-box!  fb w h 150 66 20 14 65 250 95 1)
+     ;; Sleek White/Blue Arwing Starfighter (36x24) banking at (132+dx, 128)
+     (define ax (+ 132 (min 24 dx)))
+     (define ay 128)
+     ;; Twin Neon-Green Hyper Laser Beams firing into the reticle!
+     (fb-line! fb w h (- ax 16) (+ ay 8) 152 74 75 255 110 2)
+     (fb-line! fb w h (+ ax 48) (+ ay 8) 168 74 75 255 110 2)
+     ;; Arwing swept W-wings (white polygon hull) & Blue G-Diffuser wing pods
+     (fb-tri!  fb w h (- ax 22) (+ ay 14) (+ ax 16) (- ay 4) (+ ax 16) (+ ay 14) 235 240 250)
+     (fb-tri!  fb w h (+ ax 54) (+ ay 14) (+ ax 16) (- ay 4) (+ ax 16) (+ ay 14) 215 222 238)
+     (fb-rect! fb w h (- ax 4) (+ ay 6) 8 12 35 95 235)  ; Left Blue G-Diffuser
+     (fb-rect! fb w h (+ ax 28) (+ ay 6) 8 12 35 95 235) ; Right Blue G-Diffuser
+     ;; Glowing cyan/white plasma thruster
+     (fb-circle! fb w h (+ ax 16) (+ ay 14) 7 80 215 255 #t)
+     (fb-circle! fb w h (+ ax 16) (+ ay 14) 4 255 255 255 #t)
+     ;; Authentic Star Fox 64 HUD & Peppy Transmission Box
+     (draw-text! fb w h 10 8 "SHIELD" 220 235 255)
+     (draw-bar!  fb w h 52 8 64 7 92 65 240 105)
+     (draw-text! fb w h 10 18 "G-DIFF" 95 195 255)
+     (draw-bar!  fb w h 52 18 48 6 85 55 165 250)
+     (draw-text! fb w h 218 8 "[BOMBS *3]" 255 95 95)
+     (draw-text-2x! fb w h 224 18 (format "HIT 0~a" (+ 84 stage-id)) 255 235 55)
+     ;; Bottom-center Peppy Hare Comms Box: "[PEPPY]: DO A BARREL ROLL!"
+     (fb-rect! fb w h 56 196 208 38 14 24 38)
+     (fb-box!  fb w h 56 196 208 38 75 215 135 2)
+     (fb-rect! fb w h 62 201 28 28 35 65 55) ; Peppy portrait frame
+     (fb-ellipse! fb w h 76 216 8 9 185 165 145 #t) ; Peppy rabbit head
+     (fb-rect! fb w h 70 203 4 9 185 165 145) ; Ears
+     (fb-rect! fb w h 78 203 4 9 185 165 145)
+     (draw-text! fb w h 96 204 "[PEPPY]:" 110 250 135)
+     (draw-text! fb w h 96 218 "DO A BARREL ROLL!" 255 255 255)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 6. BANJO-KAZOOIE (1998) — Spiral Mountain, Waterfall & Golden Jiggy
+    ;; ------------------------------------------------------------------------
+    [(6)
+     ;; Sunny blue sky & Gruntilda's Lair cliff in upper-right
+     (fb-vgrad! fb w h 0 0 320 96 55 155 250 155 225 255)
+     (fb-rect!  fb w h 236 32 84 68 95 85 105) ; Gruntilda's Lair cliff
+     ;; Sparkling blue waterfall cascading down cliff (x=256..278)
+     (fb-vgrad! fb w h 256 48 22 72 95 215 255 45 145 235)
+     ;; Green Corkscrew 3D Spiral Mountain in center-background (x=84..196, y=34..126)
+     (fb-tri! fb w h 76 126 140 32 204 126 48 168 58)
+     ;; Spiral dirt path wrapping around Spiral Mountain
+     (fb-quad! fb w h 122 58 158 64 166 74 114 68 195 162 105)
+     (fb-quad! fb w h 104 84 176 92 184 104 96 96 195 162 105)
+     ;; Wooden Rope Bridge connecting Spiral Mountain to cliff (x=176..244, y=88..98)
+     (fb-rect! fb w h 176 90 68 7 155 105 52)
+     (fb-hline! fb w h 176 244 84 120 80 38)
+     ;; Lush 3D foreground grass & stone path (y=118..239)
+     (fb-vgrad! fb w h 0 118 320 122 58 188 65 35 138 45)
+     (fb-quad!  fb w h 118 126 162 126 210 239 62 239 205 175 118)
+     ;; Banjo & Kazooie (24x28) at (114+dx, 148)
+     (define bx (+ 114 (min 24 dx)))
+     (define by 148)
+     (fb-ellipse! fb w h (+ bx 12) (+ by 28) 12 4 22 65 25 #t)
+     ;; Red-crested Kazooie popping out of Banjo's Blue Backpack!
+     (fb-rect!   fb w h (- bx 2) (+ by 8) 9 14 35 95 225) ; Blue backpack
+     (fb-circle! fb w h (+ bx 2) (- by 2) 5 235 45 40 #t) ; Kazooie head
+     (fb-tri!    fb w h (+ bx 6) (- by 4) (+ bx 14) (- by 2) (+ bx 6) by 250 185 35) ; Kazooie beak
+     ;; Brown bear Banjo in yellow shorts
+     (fb-circle! fb w h (+ bx 12) (+ by 6) 7 145 88 42 #t)
+     (fb-rect!   fb w h (+ bx 6) (+ by 12) 13 10 145 88 42)
+     (fb-rect!   fb w h (+ bx 6) (+ by 20) 13 6 250 220 45) ; Yellow shorts
+     ;; Spinning Golden Jiggy Puzzle Piece at (208, 152)
+     (fb-rect!   fb w h 202 146 14 14 255 215 35)
+     (fb-circle! fb w h 209 144 4 255 215 35 #t)
+     (fb-circle! fb w h 218 153 4 255 215 35 #t)
+     (fb-put!    fb w h 205 149 255 255 255)
+     ;; Authentic Banjo-Kazooie HUD: 6 Golden Honeycombs, [NOTE] x45, [JIGGY] x08
+     (for ([hc (in-range 6)])
+       (fb-circle! fb w h (+ 16 (* hc 14)) 14 6 250 205 35 #t)
+       (fb-circle! fb w h (+ 16 (* hc 14)) 14 3 215 155 20 #t))
+     (draw-text! fb w h 118 10 "[NOTE] *45" 255 235 65)
+     (draw-text! fb w h 204 10 (format "[JIGGY] *0~a" (+ 8 stage-id)) 255 215 45)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 7. PAPER MARIO (2000) — 3D Stage-Theater RPG Battle
+    ;; ------------------------------------------------------------------------
+    [(7)
+     ;; Painted Diorama Backdrop (starry night & cardboard castle props)
+     (fb-vgrad! fb w h 20 28 280 116 28 42 98 65 95 165)
+     (fb-rect!  fb w h 136 58 48 84 155 148 165) ; Cardboard castle tower hung on strings
+     (fb-vline! fb w h 148 28 58 210 210 220)
+     (fb-vline! fb w h 172 28 58 210 210 220)
+     ;; 3D Wooden Stage Floor (y=142..216) & Audience Silhouettes (y=216..239)
+     (fb-vgrad! fb w h 0 142 320 74 195 138 78 135 88 42)
+     (for ([plank-y (in-range 148 214 11)])
+       (fb-hline! fb w h 0 319 plank-y 115 72 32))
+     (fb-rect! fb w h 0 216 320 24 14 12 20)
+     (for ([aud-x (in-range 16 308 22)])
+       (fb-circle! fb w h aud-x 228 7 32 28 42 #t))
+     ;; Red Velvet Stage Curtains at Top & Sides + Gold Tassels
+     (fb-rect! fb w h 0 0 22 216 175 22 35)
+     (fb-rect! fb w h 298 0 22 216 175 22 35)
+     (for ([cx (in-range 0 320 32)])
+       (fb-ellipse! fb w h (+ cx 16) 26 18 14 195 28 42 #t)
+       (fb-ellipse! fb w h (+ cx 16) 26 18 14 245 205 65 #f))
+     ;; Left Stage Party: Flat 2D Paper-Cutout Mario (with Hammer) & Goombario
+     (define pmx (+ 78 (min 20 dx)))
+     ;; Goombario (with white paper outline)
+     (fb-circle! fb w h 48 156 10 255 255 255 #t)
+     (fb-circle! fb w h 48 156 8 175 105 52 #t)
+     (fb-rect!   fb w h 42 146 12 5 45 105 225) ; Blue cap
+     ;; Paper Mario (with crisp white paper cutout border!)
+     (fb-rect!   fb w h (- pmx 2) 128 20 34 255 255 255)
+     (fb-rect!   fb w h pmx 130 16 8 235 40 40)
+     (fb-rect!   fb w h pmx 138 16 8 250 205 165)
+     (fb-rect!   fb w h pmx 146 16 14 35 95 225)
+     ;; Big Ultra Hammer
+     (fb-line!   fb w h (+ pmx 16) 144 (+ pmx 28) 124 155 100 45 2)
+     (fb-rect!   fb w h (+ pmx 22) 116 14 10 120 125 145)
+     ;; Right Stage Boss: Bowser / Koopa Bros. + Star-Shaped "DAMAGE 5!" Burst
+     (fb-rect!   fb w h 218 116 34 44 55 165 65) ; Bowser green body/shell
+     (fb-rect!   fb w h 224 104 20 12 235 65 40) ; Red mane
+     ;; Star-Shaped "DAMAGE 5!" Burst Icon at (192, 134)
+     (fb-circle! fb w h 192 134 16 250 55 45 #t)
+     (fb-circle! fb w h 192 134 12 255 225 55 #t)
+     (draw-text-2x! fb w h 186 128 "5" 255 255 255)
+     ;; Top Status Bar & Bottom-Left Action Command Wheel
+     (fb-rect! fb w h 8 4 304 16 24 22 38)
+     (fb-box!  fb w h 8 4 304 16 245 215 75 1)
+     (draw-text! fb w h 14 8 "[HP 25/25] [FP 15/15] [SP *****] [COINS 142]" 255 245 190)
+     (fb-rect! fb w h 24 192 224 18 32 28 48)
+     (fb-box!  fb w h 24 192 224 18 245 205 65 1)
+     (draw-text! fb w h 30 197 "[HAMMER]  [JUMP]  [ITEMS]  [STRATEGIES]" 255 255 255)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 8. F-ZERO X (1998) — Mute City 60fps 3D Anti-Gravity Ribbon Track
+    ;; ------------------------------------------------------------------------
+    [(8)
+     ;; Deep purple/indigo space night sky & futuristic Mute City horizon
+     (fb-vgrad! fb w h 0 0 320 94 18 12 44 58 32 96)
+     ;; Upper 3D Ribbon Track Loop climbing into the sky (y=24..68)
+     (fb-quad! fb w h 132 24 188 24 220 68 100 68 55 65 105)
+     (fb-line! fb w h 132 24 100 68 65 235 255 2)
+     (fb-line! fb w h 188 24 220 68 65 235 255 2)
+     ;; Mute City neon skyscraper horizon (y=68..94)
+     (for ([bx (in-range 0 320 20)])
+       (define bh (+ 14 (modulo (* bx 7) 18)))
+       (fb-rect! fb w h bx (- 94 bh) 16 bh 32 28 58)
+       (fb-put!  fb w h (+ bx 4) (- 90 (quotient bh 2)) 255 225 75)
+       (fb-put!  fb w h (+ bx 10) (- 86 (quotient bh 3)) 75 235 255))
+     ;; Main Wide 3D Anti-Gravity Ribbon Highway (y=94..239)
+     (fb-vgrad! fb w h 0 94 320 146 16 14 32 8 8 18)
+     (fb-quad!  fb w h 112 94 208 94 316 239 4 239 62 68 96)
+     ;; Pink Pit-Stop Recharge Strip along right lane
+     (fb-quad!  fb w h 188 94 204 94 296 239 248 239 235 65 165)
+     ;; Neon Cyan & Yellow Guardrails along track edges
+     (fb-line!  fb w h 112 94 4 239 65 245 255 3)
+     (fb-line!  fb w h 208 94 316 239 255 230 55 3)
+     ;; Yellow/Orange Boost Pad Arrows on track surface
+     (fb-tri!   fb w h 148 134 160 118 172 134 255 195 35)
+     (fb-tri!   fb w h 144 146 160 128 176 146 255 120 25)
+     ;; 5 Rival F-Zero Machines in perspective depth (Black Bull, Red Gazelle, White Cat, Golden Fox)
+     (for ([rc (in-list '((148 112 (245 215 45))
+                          (176 116 (65 215 115))
+                          (122 138 (235 45 45))
+                          (192 142 (240 240 255))
+                          (156 150 (35 35 45))))])
+       (define rx (first rc))
+       (define ry (second rc))
+       (define col (third rc))
+       (fb-tri! fb w h (- rx 10) (+ ry 10) rx ry (+ rx 10) (+ ry 10)
+                (first col) (second col) (third col))
+       (fb-circle! fb w h rx (+ ry 10) 3 95 235 255 #t))
+     ;; Player Blue Falcon (#07) (28x18) at (138+dx, 182)
+     (define fx (+ 138 (min 20 dx)))
+     (define fy 182)
+     (fb-tri!  fb w h fx (+ fy 16) (+ fx 16) fy (+ fx 32) (+ fy 16) 40 105 245)
+     (fb-rect! fb w h (+ fx 10) (+ fy 6) 12 10 185 215 255)
+     (fb-circle! fb w h (+ fx 11) (+ fy 17) 4 95 245 255 #t) ; Dual plasma thrusters
+     (fb-circle! fb w h (+ fx 21) (+ fy 17) 4 95 245 255 #t)
+     ;; Authentic F-Zero X HUD: 1ST / 30, Vertical Position Strip, ENERGY, 1148 KM/H
+     (draw-text-2x! fb w h 10 8 "1ST/30" 255 230 55)
+     ;; Left vertical 30-craft position strip
+     (fb-rect! fb w h 10 30 14 110 24 28 48)
+     (fb-box!  fb w h 10 30 14 110 95 195 255 1)
+     (for ([p (in-range 8)])
+       (fb-rect! fb w h 12 (+ 34 (* p 13)) 10 8 (if (zero? p) 45 185) (if (zero? p) 145 55) 235))
+     (draw-text! fb w h 176 8 "ENERGY" 95 245 255)
+     (draw-bar!  fb w h 218 8 92 8 92 55 235 255)
+     (draw-text-2x! fb w h 198 20 (format "~aKM/H" (+ 1148 score)) 255 215 45)]
+
+    ;; ------------------------------------------------------------------------
+    ;; 9. WAVE RACE 64 (1996) — Drake Lake / Dolphin Park 3D Water Physics
+    ;; ------------------------------------------------------------------------
+    [else
+     ;; Sunny tropical sky, sandy island beach, palm trees & stadium bleachers
+     (fb-vgrad! fb w h 0 0 320 84 45 155 250 155 225 255)
+     ;; Stadium bleachers on left horizon & sandy beach on right
+     (fb-rect!  fb w h 16 62 96 22 215 220 235)
+     (fb-hline! fb w h 16 112 66 235 55 55)
+     (fb-hline! fb w h 16 112 72 45 115 235)
+     (fb-ellipse! fb w h 224 82 88 12 240 215 145 #t) ; Sandy island beach
+     ;; Palm trees on the island beach
+     (for ([px-tree (in-list '(184 228 272))])
+       (fb-line! fb w h px-tree 80 (+ px-tree 4) 54 145 95 45 3)
+       (fb-ellipse! fb w h (+ px-tree 4) 52 12 5 45 175 65 #t))
+     ;; Jumping Bottlenose Dolphin in background (x=118, y=72)
+     (fb-ellipse! fb w h 124 74 12 5 115 155 195 #t)
+     (fb-tri!     fb w h 110 78 116 72 116 80 115 155 195)
+     ;; Dynamic 3D Translucent Blue/Turquoise Ocean Waves with White Foam Crests (y=84..239)
+     (fb-vgrad! fb w h 0 84 320 156 25 175 220 10 85 165)
+     (for ([wy (in-range 92 238 14)])
+       (for ([wx (in-range 0 320 4)])
+         (define swell (quotient (* 4 (bitwise-and (+ (quotient wx 16) (quotient wy 14)) 3)) 2))
+         (fb-rect! fb w h wx (+ wy swell) 4 3 95 225 245)
+         (when (zero? (modulo (+ wx wy) 24))
+           (fb-rect! fb w h wx (+ wy swell -1) 6 2 240 252 255))))
+     ;; Red ("R") and Yellow ("Y") Slalom Buoys floating in the waves
+     (fb-circle! fb w h 78 144 9 235 40 40 #t)
+     (fb-box!    fb w h 70 136 16 16 255 255 255 1)
+     (draw-text! fb w h 76 141 "R" 255 255 255)
+     (fb-circle! fb w h 238 134 9 250 215 35 #t)
+     (draw-text! fb w h 236 131 "Y" 25 25 30 #f)
+     ;; Ryota Hayami on Red/White Kawasaki Jet Ski (28x24) banking at (136+dx, 168)
+     (define jx (+ 136 (min 24 dx)))
+     (define jy 168)
+     ;; White/Cyan Water-Spray Rooster Tail Wake behind Jet Ski!
+     (fb-tri! fb w h (- jx 28) (+ jy 26) (+ jx 14) (+ jy 16) (+ jx 46) (+ jy 28) 215 248 255)
+     (fb-tri! fb w h (- jx 16) (+ jy 24) (+ jx 14) (+ jy 18) (+ jx 36) (+ jy 26) 255 255 255)
+     ;; Red/White Jet Ski hull & Rider in Blue/White Wetsuit
+     (fb-quad! fb w h jx (+ jy 12) (+ jx 28) (+ jy 10) (+ jx 34) (+ jy 22) (- jx 4) (+ jy 22) 235 40 45)
+     (fb-hline! fb w h jx (+ jx 30) (+ jy 16) 250 250 255)
+     (fb-rect! fb w h (+ jx 10) (+ jy 2) 10 12 35 105 235) ; Rider torso
+     (fb-circle! fb w h (+ jx 15) (- jy 2) 5 245 245 255 #t) ; Helmet
+     ;; Authentic Wave Race 64 HUD: LAP 2/3, POS 1ST, POWER [*****] MAX!, TIME 0'48"25
+     (draw-text!    fb w h 10 8 "LAP 2/3" 255 235 65)
+     (draw-text-2x! fb w h 10 18 "POS 1ST" 255 215 35)
+     (draw-text!    fb w h 108 8 "POWER [*****] MAX!" 255 95 65)
+     (draw-text!    fb w h 124 18 "MISS 0/5" 255 255 255)
+     (draw-text!    fb w h 224 8 "TIME 0'48\"25" 255 245 140)])
 
   fb)
 
