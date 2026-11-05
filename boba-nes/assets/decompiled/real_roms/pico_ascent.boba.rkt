@@ -38,11 +38,24 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update aimedfire animate animatestars big_shwave bigexplode blink boss1 boss2 boss3 boss4 boss5 cherbomb col cprint doenemy dofade doshake draw_game draw_over draw_start draw_wavetext draw_win dropickup drwmyspr drwoutline explode fire firespread killen makescore makespr makestars move nextwave page_blue page_red pickattac pickfire picktimer placens plogic popfloat smol_shwave smol_spark spawnen spawnwave starfield startgame startscreen update_game update_over update_start update_wavetext update_win))
     (pico8-api-calls (abs add all atan2 btn btnp camera circ circfill cls cos del flr min music pal print pset rectfill rnd sfx sin spr))
+    (structured-loops 11)
+    (structured-conditionals 50)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 5)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 0)
     (active-sfx-lifted 32)
     (active-music-lifted 23))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update draw_game move startgame update_game update_over update_start update_wavetext) #:draw-states (_draw draw_game draw_over draw_start draw_wavetext draw_win drwmyspr firespread))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update aimedfire animate animatestars big_shwave bigexplode blink boss1)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 46)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 38)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 68)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 18)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 25))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name _init)
@@ -50,6 +63,8 @@
       (line-range (4 45))
       (api-calls (cls spr))
       (called-functions (cprint dofade startscreen))
+      (structured-ast
+        (for-loop "i=0,30"))
       (body-lines
         "function _init()"
         " --this will clear the screen"
@@ -89,6 +104,8 @@
       (line-range (61 65))
       (api-calls (flr min pal))
       (called-functions ())
+      (structured-ast
+        (for-loop "c=0,15"))
       (body-lines
         "function dofade()"
         " fadeperc=min(fadeperc,1)"
@@ -101,6 +118,8 @@
       (line-range (68 83))
       (api-calls ())
       (called-functions (update_game update_over update_start update_wavetext update_win))
+      (structured-ast
+        (if-cond "mode==\"game\""))
       (body-lines
         "function _update() "
         " t+=1"
@@ -124,6 +143,8 @@
       (line-range (87 100))
       (api-calls ())
       (called-functions (doshake draw_game draw_over draw_start draw_wavetext draw_win))
+      (structured-ast
+        (if-cond "mode==\"game\""))
       (body-lines
         "function _draw()"
         " doshake()"
@@ -145,6 +166,8 @@
       (line-range (107 111))
       (api-calls (music))
       (called-functions (makestars))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function startscreen()"
         " makestars()"
@@ -157,6 +180,8 @@
       (line-range (113 156))
       (api-calls ())
       (called-functions (makespr makestars nextwave))
+      (structured-ast
+        (seq-block 44))
       (body-lines
         "function startgame()"
         " t=0"
@@ -196,6 +221,8 @@
       (line-range (161 169))
       (api-calls (add flr rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,100"))
       (body-lines
         "function makestars()"
         " stars={} "
@@ -212,6 +239,9 @@
       (line-range (172 182))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,#stars")
+        (if-cond "mystar.spd<1"))
       (body-lines
         "function starfield()"
         " "
@@ -230,6 +260,8 @@
       (line-range (188 191))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "spd==nil"))
       (body-lines
         "function animatestars(spd)"
         " if spd==nil then"
@@ -241,6 +273,8 @@
       (line-range (203 208))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "blinkt>#banim"))
       (body-lines
         "function blink()"
         " local banim={5,5,5,5,5,5,5,5,5,5,5,6,6,7,7,6,6,5}"
@@ -254,6 +288,8 @@
       (line-range (213 218))
       (api-calls (spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function drwoutline(myspr)"
         " spr(myspr.spr,myspr.x+1,myspr.y,myspr.sprw,myspr.sprh)"
@@ -267,6 +303,9 @@
       (line-range (220 228))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "myspr.shake>0")
+        (if-cond "t%4<2"))
       (body-lines
         "function drwmyspr(myspr)"
         " local sprx=myspr.x"
@@ -283,6 +322,9 @@
       (line-range (238 241))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "a.ghost or b.ghost")
+        (return-expr "false"))
       (body-lines
         "function col(a,b)"
         " if a.ghost or b.ghost then "
@@ -294,6 +336,8 @@
       (line-range (261 291))
       (api-calls (add rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,30"))
       (body-lines
         "function explode(expx,expy,isblue)"
         " "
@@ -332,6 +376,8 @@
       (line-range (314 342))
       (api-calls (add rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,60"))
       (body-lines
         "function bigexplode(expx,expy)"
         " "
@@ -368,6 +414,8 @@
       (line-range (364 369))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "page>5"))
       (body-lines
         "function page_red(page)"
         " local col=7"
@@ -381,6 +429,8 @@
       (line-range (386 391))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "page>5"))
       (body-lines
         "function page_blue(page)"
         " local col=7"
@@ -394,6 +444,8 @@
       (line-range (408 411))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "shcol==nil"))
       (body-lines
         "function smol_shwave(shx,shy,shcol)"
         " if shcol==nil then"
@@ -405,6 +457,8 @@
       (line-range (422 431))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "function big_shwave(shx,shy)"
         " local mysw={}"
@@ -422,6 +476,8 @@
       (line-range (433 450))
       (api-calls (add rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,2"))
       (body-lines
         "function smol_spark(sx,sy)"
         " --for i=1,2 do"
@@ -447,6 +503,8 @@
       (line-range (452 470))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "myspr"))
       (body-lines
         "function makespr()"
         " local myspr={}"
@@ -473,6 +531,9 @@
       (line-range (472 485))
       (api-calls (camera rnd))
       (called-functions ())
+      (structured-ast
+        (if-cond "shake>10")
+        (if-cond "shake<1"))
       (body-lines
         "function doshake()"
         ""
@@ -494,6 +555,8 @@
       (line-range (489 496))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function popfloat(fltxt,flx,fly)"
         " local fl={}"
@@ -509,6 +572,8 @@
       (line-range (498 500))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function cprint(txt,x,y,c)"
         " print(txt,x-#txt*2,y,c)"
@@ -519,6 +584,8 @@
       (line-range (506 515))
       (api-calls (btn))
       (called-functions ())
+      (structured-ast
+        (if-cond "btn(0"))
       (body-lines
         "function update_game()"
         " --controls"
@@ -536,6 +603,8 @@
       (line-range (727 732))
       (api-calls (btn))
       (called-functions (animatestars))
+      (structured-ast
+        (if-cond "btn(4"))
       (body-lines
         "function update_start()"
         " animatestars(0.4)"
@@ -549,6 +618,9 @@
       (line-range (742 745))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "t<lockout")
+        (return-expr ""))
       (body-lines
         "function update_over()"
         " if t<lockout then"
@@ -560,6 +632,9 @@
       (line-range (763 766))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "t<lockout")
+        (return-expr ""))
       (body-lines
         "function update_win()"
         " if t<lockout then"
@@ -571,6 +646,8 @@
       (line-range (784 790))
       (api-calls ())
       (called-functions (spawnwave update_game))
+      (structured-ast
+        (if-cond "wavetime<=0"))
       (body-lines
         "function update_wavetext()"
         " update_game()"
@@ -585,6 +662,8 @@
       (line-range (795 801))
       (api-calls (cls))
       (called-functions ())
+      (structured-ast
+        (if-cond "flash>0"))
       (body-lines
         "function draw_game()"
         " if flash>0 then"
@@ -599,6 +678,9 @@
       (line-range (938 941))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "val==0")
+        (return-expr "\"0\""))
       (body-lines
         "function makescore(val)"
         " if val==0 then"
@@ -610,6 +692,8 @@
       (line-range (945 953))
       (api-calls (cls print rnd sin spr))
       (called-functions (starfield))
+      (structured-ast
+        (if-cond "sin(time("))
       (body-lines
         "function draw_start()"
         " cls(0)"
@@ -626,6 +710,9 @@
       (line-range (971 980))
       (api-calls ())
       (called-functions (cprint draw_game makescore))
+      (structured-ast
+        (if-cond "score>highscore")
+        (if-cond "t%4<2"))
       (body-lines
         "function draw_over()"
         " draw_game()"
@@ -643,6 +730,9 @@
       (line-range (987 996))
       (api-calls ())
       (called-functions (cprint draw_game makescore))
+      (structured-ast
+        (if-cond "score>highscore")
+        (if-cond "t%4<2"))
       (body-lines
         "function draw_win()"
         " draw_game()"
@@ -660,6 +750,8 @@
       (line-range (1003 1009))
       (api-calls ())
       (called-functions (blink cprint draw_game))
+      (structured-ast
+        (if-cond "wave==lastwave"))
       (body-lines
         "function draw_wavetext()"
         " draw_game()"
@@ -674,6 +766,8 @@
       (line-range (1014 1019))
       (api-calls (music sfx))
       (called-functions ())
+      (structured-ast
+        (if-cond "wave<lastwave"))
       (body-lines
         "function spawnwave()"
         " if wave<lastwave then"
@@ -687,6 +781,10 @@
       (line-range (1115 1122))
       (api-calls ())
       (called-functions (spawnen))
+      (structured-ast
+        (for-loop "y=1,4")
+        (for-loop "x=1,10")
+        (if-cond "myline[x]!=0"))
       (body-lines
         "function placens(lvl)"
         ""
@@ -702,6 +800,9 @@
       (line-range (1128 1140))
       (api-calls (music))
       (called-functions ())
+      (structured-ast
+        (if-cond "wave>lastwave")
+        (if-cond "wave==1"))
       (body-lines
         "function nextwave()"
         " wave+=1"
@@ -722,6 +823,8 @@
       (line-range (1148 1207))
       (api-calls ())
       (called-functions (makespr))
+      (structured-ast
+        (if-cond "entype==nil or entype==1"))
       (body-lines
         "function spawnen(entype,enx,eny,enwait)"
         " local myen=makespr()"
@@ -761,6 +864,9 @@
       (line-range (1214 1218))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "myen.wait>0")
+        (return-expr ""))
       (body-lines
         "function doenemy(myen)"
         " if myen.wait>0 then"
@@ -773,6 +879,9 @@
       (line-range (1322 1325))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "mode!=\"game\"")
+        (return-expr ""))
       (body-lines
         "function picktimer()"
         " if mode!=\"game\" then"
@@ -784,6 +893,10 @@
       (line-range (1337 1350))
       (api-calls (flr min rnd))
       (called-functions ())
+      (structured-ast
+        (if-cond "myen==nil")
+        (return-expr "end")
+        (if-cond "myen.mission==\"protec\""))
       (body-lines
         "function pickattac()"
         " local maxnum=min(10,#enemies)"
@@ -805,6 +918,11 @@
       (line-range (1353 1362))
       (api-calls (all flr min rnd))
       (called-functions (firespread))
+      (structured-ast
+        (for-loop "myen in all(enemies)")
+        (if-cond "myen.type==4 and myen.mission==\"protec\"")
+        (if-cond "rnd(")
+        (return-expr ""))
       (body-lines
         "function pickfire()"
         " local maxnum=min(10,#enemies)"
@@ -822,6 +940,8 @@
       (line-range (1384 1387))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function move(obj)"
         " obj.x+=obj.sx"
@@ -833,6 +953,9 @@
       (line-range (1389 1398))
       (api-calls (music sfx))
       (called-functions (boss5))
+      (structured-ast
+        (if-cond "myen.boss")
+        (return-expr ""))
       (body-lines
         "function killen(myen)"
         " if myen.boss then"
@@ -850,6 +973,8 @@
       (line-range (1426 1433))
       (api-calls (add))
       (called-functions (makespr))
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function dropickup(pix,piy)"
         " local mypick=makespr()"
@@ -865,6 +990,9 @@
       (line-range (1435 1451))
       (api-calls (sfx))
       (called-functions (makescore popfloat smol_shwave))
+      (structured-ast
+        (if-cond "cher>=10")
+        (if-cond "lives<4"))
       (body-lines
         "function plogic(mypick)"
         " cher+=1"
@@ -889,6 +1017,8 @@
       (line-range (1457 1461))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (if-cond "flr(myen.aniframe"))
       (body-lines
         "function animate(myen)"
         " myen.aniframe+=myen.anispd"
@@ -901,6 +1031,8 @@
       (line-range (1467 1478))
       (api-calls ())
       (called-functions (makespr))
+      (structured-ast
+        (if-cond "myen.type==4"))
       (body-lines
         "function fire(myen,ang,spd)"
         " local myebul=makespr()"
@@ -920,6 +1052,8 @@
       (line-range (1503 1506))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "base==nil"))
       (body-lines
         "function firespread(myen,num,spd,base)"
         " if base==nil then"
@@ -931,6 +1065,8 @@
       (line-range (1512 1519))
       (api-calls (atan2 cos sin))
       (called-functions (fire))
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function aimedfire(myen,spd)"
         " local myebul=fire(myen,0,spd)"
@@ -946,6 +1082,8 @@
       (line-range (1521 1537))
       (api-calls (add cos sin))
       (called-functions (makespr))
+      (structured-ast
+        (for-loop "i=0,cher*2"))
       (body-lines
         "function cherbomb()"
         " local spc=0.25/(cher*2)"
@@ -970,6 +1108,8 @@
       (line-range (1550 1556))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "myen.sx==0 or myen.x>=93"))
       (body-lines
         "function boss1(myen)"
         " -- movement"
@@ -984,6 +1124,9 @@
       (line-range (1576 1584))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "myen.subphase==1")
+        (if-cond "myen.x<=4"))
       (body-lines
         "function boss2(myen)"
         " local spd=1.5"
@@ -1000,6 +1143,8 @@
       (line-range (1615 1621))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "myen.sx==0 or myen.x>=93"))
       (body-lines
         "function boss3(myen)"
         " -- movement"
@@ -1014,6 +1159,9 @@
       (line-range (1640 1648))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "myen.subphase==1")
+        (if-cond "myen.x>=91"))
       (body-lines
         "function boss4(myen)"
         " local spd=1.5"
@@ -1030,6 +1178,8 @@
       (line-range (1688 1696))
       (api-calls (rnd sfx))
       (called-functions (explode))
+      (structured-ast
+        (if-cond "t%8==0"))
       (body-lines
         "function boss5(myen)"
         " myen.shake=10"

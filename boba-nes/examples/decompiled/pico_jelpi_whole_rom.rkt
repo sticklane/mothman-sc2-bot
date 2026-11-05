@@ -38,11 +38,25 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update60 a_alert_checkforwindup a_anim_set a_anim_update a_attack a_deviate a_doflipx a_fly a_move_angle a_random_turn a_set_invuln_flash add_to_people alert_class attack_reset attack_target attempt_deflect_target cam_pos check_for_footsteps combo constrain_to_borders constrain_to_screen copy_screen_to_mem damage dealt_damage del_from_people draw draw_character draw_class emotion_add emotion_set_from_count emotion_update explode fd fire_arrow fly_reset frnd frnda fu game_pause get_angle_from_input get_dir_to_player get_direction_to_turn get_flipx_from_angle get_gen_coords get_rebound_angle_speed get_yboboffset handle_impact handle_impact_class handle_impact_death handle_slash_entity_impact handle_slash_recovery init int_cols is_level_active is_near_objs is_timed_mode kill kill_class level_create level_end level_end_bad level_end_player_died level_end_villager_died level_end_win m_arrow m_bodypart m_cam m_emotion m_enemy m_enemy_archer m_enemy_bomber m_enemy_boss m_enemy_furniture m_enemy_random m_enemy_seeker m_enemy_villager m_enemy_wander m_food m_object m_part_angle m_part_blood m_part_bloodsplash m_part_bomb_spark m_part_circle m_part_impact m_part_sprite m_player m_splat m_step m_textfloat m_transition_splatter move nearest_angle paste_screen_from_mem printc printc_o printsprite randc reset_game reset_level rndbool save_score score_add set_cam_pos set_outline shake slash slash_target sort_by_y split_entity table_clear touch_class transition_level update update_base update_class update_weather wrap))
     (pico8-api-calls (abs add all atan2 btn btnp camera circfill cls cos del flr foreach line map max memcpy mget mid min mset pal print pset rect rectfill rnd sfx sin spr))
+    (structured-loops 15)
+    (structured-conditionals 102)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 6)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 32)
     (active-sfx-lifted 32)
     (active-music-lifted 64))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update60 a_anim_update a_move_angle check_for_footsteps emotion_update game_pause get_dir_to_player level_end_player_died) #:draw-states (_draw draw draw_character draw_class m_part_sprite printsprite))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update60 a_alert_checkforwindup a_anim_set a_anim_update a_attack a_deviate a_doflipx a_fly)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 65)
+    (idiom-pico8-tilemap-collision #:apis (mget fget map) #:call-sites 5)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 56)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 65)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 11)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 28))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name frnd)
@@ -50,6 +64,8 @@
       (line-range (13 15))
       (api-calls (flr rnd))
       (called-functions ())
+      (structured-ast
+        (return-expr "flr(rnd(n))"))
       (body-lines
         "function frnd(n)"
         "\treturn flr(rnd(n))"
@@ -60,6 +76,8 @@
       (line-range (17 20))
       (api-calls ())
       (called-functions (frnd))
+      (structured-ast
+        (return-expr "frnd(n)+addval"))
       (body-lines
         "function frnda(n, o)"
         "\tlocal addval = o or 1"
@@ -71,6 +89,9 @@
       (line-range (22 26))
       (api-calls ())
       (called-functions (frnd))
+      (structured-ast
+        (if-cond "frnd(100")
+        (return-expr "true"))
       (body-lines
         "function randc(chance)"
         "\tlocal c = chance or 50"
@@ -83,6 +104,11 @@
       (line-range (30 37))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "value < min")
+        (return-expr "max")
+        (return-expr "min")
+        (return-expr "value"))
       (body-lines
         "function wrap(value, min, max)"
         "\tif value < min then"
@@ -98,6 +124,8 @@
       (line-range (40 43))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=0, count"))
       (body-lines
         "function table_clear(t)"
         "\tlocal count = #t"
@@ -109,6 +137,8 @@
       (line-range (45 50))
       (api-calls (memcpy))
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function copy_screen_to_mem()"
         "\t-- half the map/lower sprite memory area"
@@ -122,6 +152,8 @@
       (line-range (52 55))
       (api-calls (memcpy))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function paste_screen_from_mem()"
         "\tmemcpy(0x6000, 0x1800, 0x0800)"
@@ -133,6 +165,9 @@
       (line-range (57 61))
       (api-calls ())
       (called-functions (printc))
+      (structured-ast
+        (for-loop "i=-1,1")
+        (for-loop "j=-1,1"))
       (body-lines
         "function printc_o(str, y, col, outcol, x) -- print a centered string with a black outline"
         "\tfor i=-1,1 do"
@@ -145,6 +180,8 @@
       (line-range (66 68))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function printc(str, y, col, x)"
         "\tprint(str, (x or 64)-#str*2, y, col or 7)"
@@ -155,6 +192,10 @@
       (line-range (71 81))
       (api-calls (all flr pal spr))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1, #str")
+        (for-loop "j in all(g_alphabet_sprites)")
+        (if-cond "letter == j"))
       (body-lines
         "function printsprite(str, y, color)"
         "\tpal(7, color)"
@@ -173,6 +214,8 @@
       (line-range (87 89))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function set_outline()"
         "\tpal(2, g_color_outline)"
@@ -183,6 +226,8 @@
       (line-range (91 101))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 11))
       (body-lines
         "function m_textfloat(x,y, text, col_main, col_sec)"
         "\tadd(list_parts_front,"
@@ -201,6 +246,8 @@
       (line-range (102 106))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.dur < self.dur_orig/3"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color = self.col_main"
@@ -213,6 +260,8 @@
       (line-range (110 116))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.dur == 0"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself.dur-=1"
@@ -227,6 +276,9 @@
       (line-range (121 125))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.invuln_frames > 0 and self.invuln_frames % 5 < 3")
+        (for-loop "i=1,15"))
       (body-lines
         "function a_set_invuln_flash(self)"
         "\tif self.invuln_frames > 0 and self.invuln_frames % 5 < 3 then"
@@ -239,6 +291,9 @@
       (line-range (131 134))
       (api-calls (abs))
       (called-functions ())
+      (structured-ast
+        (if-cond "abs(obj1.x-obj2.x")
+        (return-expr "true"))
       (body-lines
         "function is_near_objs(obj1, obj2, range)"
         "\tif abs(obj1.x-obj2.x) <= range and abs(obj1.y-obj2.y) <= range then"
@@ -250,6 +305,9 @@
       (line-range (138 141))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "e1.just_spawned or e2.just_spawned")
+        (return-expr "false"))
       (body-lines
         "function int_cols(e1, e2, buffer)"
         "\tif e1.just_spawned or e2.just_spawned then"
@@ -261,6 +319,8 @@
       (line-range (159 162))
       (api-calls ())
       (called-functions (frnda m_part_angle))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function m_part_blood(part_details, duration)"
         "\tpart_details[6] = duration or frnda(10, 50)"
@@ -272,6 +332,8 @@
       (line-range (164 180))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 17))
       (body-lines
         "function m_part_angle(part_details, frict, color, color_sec, layer)"
         ""
@@ -296,6 +358,8 @@
       (line-range (181 185))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.time > self.duration *.75"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color, s2 = self.color, self.size/2"
@@ -308,6 +372,9 @@
       (line-range (193 201))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.time > self.duration")
+        (if-cond "self.layer == 1"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.time > self.duration then"
@@ -324,6 +391,8 @@
       (line-range (222 239))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 18))
       (body-lines
         "function m_part_sprite(frame, x,y, dy, col, col_sec, duration, flipx, is_front)"
         ""
@@ -349,6 +418,8 @@
       (line-range (240 245))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.time < self.duration *.75"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif self.time < self.duration *.75 then"
@@ -362,6 +433,8 @@
       (line-range (250 252))
       (api-calls ())
       (called-functions (update_base))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself:update_base()"
@@ -372,6 +445,9 @@
       (line-range (254 260))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.time > self.duration")
+        (if-cond "self.is_front"))
       (body-lines
         "\t\tupdate_base=function(self)"
         "\t\t\tif self.time > self.duration then"
@@ -386,6 +462,8 @@
       (line-range (277 281))
       (api-calls ())
       (called-functions (randc))
+      (structured-ast
+        (if-cond "randc("))
       (body-lines
         "function m_part_bomb_spark(x, y)"
         "\tlocal color, color_second = 10, 9"
@@ -398,6 +476,8 @@
       (line-range (291 293))
       (api-calls ())
       (called-functions (m_part_angle))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function m_part_circle(x,y, size, duration, color, color_sec, layer)"
         ""
@@ -408,6 +488,8 @@
       (line-range (294 298))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.time > self.duration * .75"))
       (body-lines
         "\tp.draw=function(self)"
         "\t\tlocal color = self.color"
@@ -420,6 +502,9 @@
       (line-range (303 312))
       (api-calls (rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=0,36")
+        (if-cond "i > 30"))
       (body-lines
         "function m_part_bloodsplash(x,y,angle)"
         ""
@@ -437,6 +522,8 @@
       (line-range (318 320))
       (api-calls ())
       (called-functions (m_part_circle))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function m_part_impact(entity,size)"
         "\tm_part_circle(entity.x, entity.y, size or 7, 4, 10, 9, 1)"
@@ -447,6 +534,8 @@
       (line-range (322 326))
       (api-calls (rnd))
       (called-functions (randc))
+      (structured-ast
+        (if-cond "randc("))
       (body-lines
         "function handle_slash_recovery(speed)"
         "\tlocal dir = rnd(.125)"
@@ -459,6 +548,8 @@
       (line-range (333 339))
       (api-calls ())
       (called-functions (game_pause m_part_bloodsplash shake))
+      (structured-ast
+        (if-cond "not target.is_furniture"))
       (body-lines
         "function handle_slash_entity_impact(target)"
         ""
@@ -473,6 +564,8 @@
       (line-range (345 350))
       (api-calls (flr min sfx))
       (called-functions ())
+      (structured-ast
+        (if-cond "score > 0"))
       (body-lines
         "function score_add(entity, score)"
         "\tif score > 0 then"
@@ -486,6 +579,9 @@
       (line-range (367 382))
       (api-calls (abs rnd sfx))
       (called-functions (m_part_circle randc))
+      (structured-ast
+        (if-cond "abs(p1.slash_angle - reverse_angle")
+        (if-cond "randc("))
       (body-lines
         "function attempt_deflect_target(target)"
         ""
@@ -509,6 +605,8 @@
       (line-range (394 402))
       (api-calls (sfx))
       (called-functions (frnda handle_impact_death m_part_bloodsplash))
+      (structured-ast
+        (if-cond "not entity.is_furniture"))
       (body-lines
         "function combo(entity, target)"
         "\tentity.was_counted_for_combo = true"
@@ -525,6 +623,8 @@
       (line-range (419 426))
       (api-calls (sfx))
       (called-functions (a_anim_set handle_impact handle_slash_entity_impact))
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function slash_target(target)"
         ""
@@ -540,6 +640,8 @@
       (line-range (428 431))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "tick_multiplier == nil"))
       (body-lines
         "function a_anim_update(entity, anim_set, tick_multiplier)"
         "\tif tick_multiplier == nil then"
@@ -551,6 +653,9 @@
       (line-range (444 448))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "(anim==entity.curanim")
+        (return-expr ""))
       (body-lines
         "function a_anim_set(entity, anim)"
         "\tif(anim==entity.curanim)return"
@@ -563,6 +668,9 @@
       (line-range (450 458))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "angle == .25 or angle == .75")
+        (return-expr ""))
       (body-lines
         "function a_doflipx(entity)"
         "\tlocal angle = entity.angle"
@@ -579,6 +687,8 @@
       (line-range (461 463))
       (api-calls ())
       (called-functions (constrain_to_borders))
+      (structured-ast
+        (return-expr "constrain_to_borders(obj, g_level_screen_buffer+4, g_level_scree"))
       (body-lines
         "function constrain_to_screen(obj)"
         "\treturn constrain_to_borders(obj, g_level_screen_buffer+4, g_level_screen_buffer+4, 124-g_level_screen_buffer, 124-g_level_screen_buffer)"
@@ -589,6 +699,8 @@
       (line-range (465 472))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "x < bor_x1"))
       (body-lines
         "function constrain_to_borders(obj, bor_x1, bor_y1, bor_x2, bor_y2)"
         ""
@@ -604,6 +716,8 @@
       (line-range (482 484))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function game_pause(duration)"
         "\tgame_pause_timer = duration"
@@ -614,6 +728,10 @@
       (line-range (486 494))
       (api-calls ())
       (called-functions (m_part_bloodsplash split_entity))
+      (structured-ast
+        (if-cond "not entity.is_furniture and not entity.is_armored")
+        (if-cond "target.is_heavy")
+        (if-cond "not target.is_bloody"))
       (body-lines
         "function handle_impact_death(entity, target)"
         "\tif not entity.is_furniture and not entity.is_armored then"
@@ -630,6 +748,8 @@
       (line-range (510 513))
       (api-calls ())
       (called-functions (get_dir_to_player))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function fly_reset(entity)"
         "\tentity.fly_speed, entity.is_flying, entity.is_flying_impactable, entity.angle, entity.score_multiplier ="
@@ -641,6 +761,8 @@
       (line-range (515 518))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function attack_reset(entity)"
         "\tentity.attack_time_rem, entity.recovery_time_rem, entity.time_between_attacks_rem ="
@@ -652,6 +774,8 @@
       (line-range (520 527))
       (api-calls (sfx))
       (called-functions (a_move_angle attack_reset constrain_to_screen))
+      (structured-ast
+        (if-cond "constrain_to_screen(entity"))
       (body-lines
         "function a_attack(entity)"
         ""
@@ -667,6 +791,8 @@
       (line-range (534 543))
       (api-calls ())
       (called-functions (a_move_angle fly_reset))
+      (structured-ast
+        (if-cond "entity.fly_speed <= .1"))
       (body-lines
         "function a_fly(entity)"
         "\ta_move_angle(entity, entity.fly_speed)"
@@ -684,6 +810,8 @@
       (line-range (566 569))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "not speed"))
       (body-lines
         "function a_move_angle(entity, speed)"
         "\tif not speed then"
@@ -695,6 +823,8 @@
       (line-range (619 629))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "-.5 < angle_delta and angle_delta <= .5"))
       (body-lines
         "function get_direction_to_turn(cur_angle, desired_angle)"
         "\tlocal angle_delta = desired_angle-cur_angle"
@@ -713,6 +843,8 @@
       (line-range (638 642))
       (api-calls ())
       (called-functions (randc))
+      (structured-ast
+        (if-cond "randc("))
       (body-lines
         "function get_rebound_angle_speed(angle, speed)"
         "\tlocal dir = -.125"
@@ -725,6 +857,9 @@
       (line-range (646 649))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "p1.recovery_time_rem > 0")
+        (return-expr "0"))
       (body-lines
         "function get_angle_from_input()"
         "\tif p1.recovery_time_rem > 0 then"
@@ -736,6 +871,8 @@
       (line-range (677 709))
       (api-calls ())
       (called-functions (move))
+      (structured-ast
+        (seq-block 33))
       (body-lines
         "function m_player(setx, sety)"
         ""
@@ -775,6 +912,8 @@
       (line-range (710 711))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 2))
       (body-lines
         "\t\tinit=function(self)"
         "\t\tend,"))
@@ -784,6 +923,9 @@
       (line-range (713 716))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.invuln_frames > 0 and not do_kill")
+        (return-expr "false"))
       (body-lines
         "    damage=function(self, source, do_kill)"
         "      if self.invuln_frames > 0 and not do_kill then"
@@ -795,6 +937,8 @@
       (line-range (739 758))
       (api-calls (sfx))
       (called-functions (a_anim_set frnda))
+      (structured-ast
+        (if-cond "not self.is_slashing"))
       (body-lines
         "\t\tslash=function(self)"
         "\t\t\tif not self.is_slashing then"
@@ -822,6 +966,9 @@
       (line-range (761 764))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.is_dead")
+        (return-expr ""))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.is_dead then"
@@ -833,6 +980,9 @@
       (line-range (851 854))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.is_dead")
+        (return-expr ""))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif self.is_dead then"
@@ -844,6 +994,8 @@
       (line-range (883 891))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 9))
       (body-lines
         "function m_emotion(entity, emotion)"
         "\tlocal e ="
@@ -860,6 +1012,8 @@
       (line-range (892 894))
       (api-calls ())
       (called-functions (a_anim_update))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\ta_anim_update(self, emotion_anims)"
@@ -870,6 +1024,8 @@
       (line-range (896 905))
       (api-calls (pal spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal frame, c_o = emotion_anims[self.curanim].frames[self.curframe], -4"
@@ -887,6 +1043,9 @@
       (line-range (912 915))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "angle > .25 and angle <= .75")
+        (return-expr "true"))
       (body-lines
         "function get_flipx_from_angle(angle)"
         "\tif angle > .25 and angle <= .75 then"
@@ -898,6 +1057,8 @@
       (line-range (919 921))
       (api-calls (atan2))
       (called-functions ())
+      (structured-ast
+        (return-expr "(atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"))
       (body-lines
         "function get_dir_to_player(entity)"
         "\treturn (atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"
@@ -908,6 +1069,10 @@
       (line-range (923 928))
       (api-calls ())
       (called-functions (move))
+      (structured-ast
+        (if-cond "self.curanim == \"move\"")
+        (if-cond "self.curframe % 2 == 0")
+        (return-expr "-1"))
       (body-lines
         "function get_yboboffset(self)"
         ""
@@ -921,6 +1086,8 @@
       (line-range (933 940))
       (api-calls (add))
       (called-functions (frnda))
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function m_step(x,y)"
         "\tlocal s ="
@@ -936,6 +1103,9 @@
       (line-range (942 947))
       (api-calls ())
       (called-functions (m_step randc))
+      (structured-ast
+        (if-cond "g_season == 3 and not g_level_indoor")
+        (if-cond "randc(50"))
       (body-lines
         "function check_for_footsteps(self)"
         "\t-- do snow stuff"
@@ -949,6 +1119,8 @@
       (line-range (951 958))
       (api-calls (pal))
       (called-functions (a_set_invuln_flash get_yboboffset))
+      (structured-ast
+        (if-cond "not a_set_invuln_flash(self"))
       (body-lines
         "function draw_character(self)"
         ""
@@ -964,6 +1136,8 @@
       (line-range (978 981))
       (api-calls (abs rnd))
       (called-functions (m_bodypart))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function split_entity(entity, angle)"
         "\tm_bodypart(entity, 42, entity.pcolor, (angle+.300+rnd(.325))%1)"
@@ -975,6 +1149,8 @@
       (line-range (983 985))
       (api-calls ())
       (called-functions (frnd))
+      (structured-ast
+        (return-expr "frnd(2) == 0"))
       (body-lines
         "function rndbool()"
         "\treturn frnd(2) == 0"
@@ -985,6 +1161,8 @@
       (line-range (987 1000))
       (api-calls (rnd))
       (called-functions (frnda rndbool))
+      (structured-ast
+        (seq-block 14))
       (body-lines
         "function m_bodypart(entity, sprite, replace_color, angle)"
         "\tlocal h="
@@ -1006,6 +1184,10 @@
       (line-range (1001 1011))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.speed_move < .1")
+        (if-cond "self.decay_time < 0")
+        (return-expr ""))
       (body-lines
         "\t\tupdate=function(self)"
         ""
@@ -1024,6 +1206,8 @@
       (line-range (1031 1044))
       (api-calls (pal spr))
       (called-functions (set_outline))
+      (structured-ast
+        (seq-block 14))
       (body-lines
         "\t\tdraw=function(self)"
         ""
@@ -1045,6 +1229,8 @@
       (line-range (1051 1062))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 12))
       (body-lines
         "function m_object(x, y, spritelist, is_deadly)"
         "\tlocal o ="
@@ -1064,6 +1250,8 @@
       (line-range (1063 1064))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 2))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\tend,"))
@@ -1073,6 +1261,8 @@
       (line-range (1066 1068))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\t\tdealt_damage=function(self)"
         "\t\t\tself.sprite = 2"
@@ -1083,6 +1273,8 @@
       (line-range (1070 1076))
       (api-calls (pal spr))
       (called-functions (set_outline))
+      (structured-ast
+        (seq-block 7))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tset_outline()"
@@ -1097,6 +1289,8 @@
       (line-range (1083 1093))
       (api-calls (del))
       (called-functions (m_object m_part_sprite score_add))
+      (structured-ast
+        (seq-block 11))
       (body-lines
         "function m_food(setx, sety)"
         "\tlocal o = m_object(setx, sety, {99, 99}, false)"
@@ -1115,6 +1309,8 @@
       (line-range (1096 1102))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (if-cond "entity.is_villager"))
       (body-lines
         "function add_to_people(entity)"
         ""
@@ -1129,6 +1325,8 @@
       (line-range (1108 1113))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "entity.is_villager"))
       (body-lines
         "function del_from_people(entity)"
         "\tif entity.is_villager then"
@@ -1142,6 +1340,10 @@
       (line-range (1121 1131))
       (api-calls ())
       (called-functions (a_anim_set get_dir_to_player get_flipx_from_angle is_level_active is_near_objs))
+      (structured-ast
+        (if-cond "is_level_active(")
+        (return-expr "true")
+        (return-expr "false"))
       (body-lines
         "function a_alert_checkforwindup(entity)"
         "\tif is_level_active() and entity.windup_time_rem == 0 and is_near_objs(entity, p1, entity.alert_distance) then"
@@ -1160,6 +1362,8 @@
       (line-range (1134 1137))
       (api-calls ())
       (called-functions (frnda randc))
+      (structured-ast
+        (if-cond "randc(10"))
       (body-lines
         "function a_deviate(entity, time)"
         "\tif randc(10) then"
@@ -1171,6 +1375,8 @@
       (line-range (1140 1144))
       (api-calls ())
       (called-functions (randc))
+      (structured-ast
+        (if-cond "randc("))
       (body-lines
         "function a_random_turn(entity)"
         "\tlocal angle_adjust = .25"
@@ -1183,6 +1389,8 @@
       (line-range (1149 1153))
       (api-calls ())
       (called-functions (m_enemy))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function m_enemy_villager(setx, sety)"
         "\tlocal e = m_enemy(setx, sety, true)"
@@ -1195,6 +1403,8 @@
       (line-range (1154 1159))
       (api-calls ())
       (called-functions (level_end_villager_died))
+      (structured-ast
+        (if-cond "source == p1"))
       (body-lines
         "\te.kill_class=function(self, source)"
         "\t\tif source == p1 then"
@@ -1208,6 +1418,8 @@
       (line-range (1163 1167))
       (api-calls ())
       (called-functions (del_from_people score_add))
+      (structured-ast
+        (return-expr "true"))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\tscore_add(self, 0-self.score-2.5*self.emotion_count)"
@@ -1220,6 +1432,8 @@
       (line-range (1169 1172))
       (api-calls ())
       (called-functions (a_deviate a_random_turn))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 5)"
@@ -1231,6 +1445,8 @@
       (line-range (1174 1175))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 2))
       (body-lines
         "\te.draw_class=function(self)"
         "\tend"))
@@ -1240,6 +1456,8 @@
       (line-range (1180 1189))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "angle>.825 or angle < .125"))
       (body-lines
         "function nearest_angle(angle)"
         "\tif angle>.825 or angle < .125 then"
@@ -1257,6 +1475,8 @@
       (line-range (1193 1206))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 14))
       (body-lines
         "function m_arrow(x, y, angle)"
         "\tlocal a ="
@@ -1278,6 +1498,8 @@
       (line-range (1207 1211))
       (api-calls (pal spr))
       (called-functions (set_outline))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tset_outline()"
@@ -1290,6 +1512,8 @@
       (line-range (1213 1217))
       (api-calls ())
       (called-functions (a_move_angle constrain_to_screen dealt_damage))
+      (structured-ast
+        (if-cond "constrain_to_screen(self"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\ta_move_angle(self)"
@@ -1302,6 +1526,8 @@
       (line-range (1220 1223))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\t\tdealt_damage=function(self)"
         "\t\t\tdel(list_objects, self)"
@@ -1313,6 +1539,8 @@
       (line-range (1233 1236))
       (api-calls ())
       (called-functions (m_enemy))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function m_enemy_archer(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1324,6 +1552,8 @@
       (line-range (1237 1241))
       (api-calls ())
       (called-functions (a_deviate get_dir_to_player is_level_active))
+      (structured-ast
+        (if-cond "is_level_active("))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 10)"
@@ -1336,6 +1566,11 @@
       (line-range (1244 1252))
       (api-calls (abs sfx))
       (called-functions (a_alert_checkforwindup nearest_angle))
+      (structured-ast
+        (if-cond "abs(self.x - p1.x")
+        (if-cond "a_alert_checkforwindup(self")
+        (return-expr "true")
+        (return-expr "false"))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\tif abs(self.x - p1.x) < 5 or abs(self.y - p1.y) < 5 then"
@@ -1352,6 +1587,8 @@
       (line-range (1256 1259))
       (api-calls (sfx))
       (called-functions (m_arrow))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\te.fire_arrow=function(self)"
         "\t\tsfx(17)"
@@ -1363,6 +1600,9 @@
       (line-range (1261 1269))
       (api-calls ())
       (called-functions (set_outline))
+      (structured-ast
+        (if-cond "self.windup_time_rem > 0")
+        (if-cond "self.desired_angle == .75"))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tif self.windup_time_rem > 0 then"
@@ -1379,6 +1619,8 @@
       (line-range (1276 1280))
       (api-calls ())
       (called-functions (m_enemy))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function m_enemy_wander(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1391,6 +1633,8 @@
       (line-range (1281 1284))
       (api-calls ())
       (called-functions (a_deviate a_random_turn))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 15)"
@@ -1402,6 +1646,8 @@
       (line-range (1286 1288))
       (api-calls ())
       (called-functions (a_alert_checkforwindup))
+      (structured-ast
+        (return-expr "a_alert_checkforwindup(self)"))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\treturn a_alert_checkforwindup(self)"
@@ -1412,6 +1658,8 @@
       (line-range (1293 1298))
       (api-calls ())
       (called-functions (m_enemy))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function m_enemy_bomber(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1425,6 +1673,8 @@
       (line-range (1299 1302))
       (api-calls ())
       (called-functions (explode))
+      (structured-ast
+        (return-expr "true"))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\tself:explode(nil, true)"
@@ -1436,6 +1686,8 @@
       (line-range (1304 1308))
       (api-calls (sfx))
       (called-functions (is_near_objs))
+      (structured-ast
+        (if-cond "not self.is_fuse_lit and is_near_objs(self, p1, 25"))
       (body-lines
         "\te.update_class=function(self)"
         "\t\tif not self.is_fuse_lit and is_near_objs(self, p1, 25) then"
@@ -1448,6 +1700,8 @@
       (line-range (1321 1326))
       (api-calls ())
       (called-functions (a_deviate get_dir_to_player is_level_active))
+      (structured-ast
+        (if-cond "is_level_active("))
       (body-lines
         "\te.move=function(self)"
         ""
@@ -1461,6 +1715,8 @@
       (line-range (1329 1332))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "source != nil and source != p1 and not source.is_heavy"))
       (body-lines
         "\te.explode=function(self, source, no_score)"
         "\t\tif source != nil and source != p1 and not source.is_heavy then"
@@ -1472,6 +1728,8 @@
       (line-range (1392 1395))
       (api-calls ())
       (called-functions (explode))
+      (structured-ast
+        (return-expr "true"))
       (body-lines
         "\te.handle_impact_class=function(self, source)"
         "\t\tself:explode(source)"
@@ -1483,6 +1741,8 @@
       (line-range (1397 1400))
       (api-calls ())
       (called-functions (explode))
+      (structured-ast
+        (return-expr "true"))
       (body-lines
         "\te.kill_class=function(self, source, no_score)"
         "\t\tself:explode(source, no_score)"
@@ -1494,6 +1754,8 @@
       (line-range (1402 1406))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.flipx"))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tlocal x_off = -5"
@@ -1506,6 +1768,8 @@
       (line-range (1415 1419))
       (api-calls ())
       (called-functions (init m_enemy_seeker))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function m_enemy_boss(setx, sety)"
         "\tlocal e = m_enemy_seeker(setx, sety)"
@@ -1518,6 +1782,8 @@
       (line-range (1421 1425))
       (api-calls ())
       (called-functions (m_enemy))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function m_enemy_seeker(setx, sety)"
         ""
@@ -1530,6 +1796,8 @@
       (line-range (1426 1431))
       (api-calls ())
       (called-functions (a_deviate get_dir_to_player is_level_active))
+      (structured-ast
+        (if-cond "is_level_active("))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 10)"
@@ -1543,6 +1811,8 @@
       (line-range (1434 1436))
       (api-calls ())
       (called-functions (a_alert_checkforwindup))
+      (structured-ast
+        (return-expr "a_alert_checkforwindup(self)"))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\treturn a_alert_checkforwindup(self)"
@@ -1553,6 +1823,8 @@
       (line-range (1441 1443))
       (api-calls ())
       (called-functions (m_enemy))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function m_enemy_furniture(setx, sety, sprite, is_heavy)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1563,6 +1835,8 @@
       (line-range (1444 1448))
       (api-calls ())
       (called-functions (a_fly check_for_footsteps))
+      (structured-ast
+        (if-cond "self.is_flying"))
       (body-lines
         "\te.update_class=function(self)"
         "\t\tif self.is_flying then"
@@ -1575,6 +1849,8 @@
       (line-range (1452 1455))
       (api-calls ())
       (called-functions (del_from_people))
+      (structured-ast
+        (return-expr "true"))
       (body-lines
         "\te.kill_class=function(self)"
         "\t  del_from_people(self)"
@@ -1586,6 +1862,8 @@
       (line-range (1457 1459))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "true"))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\treturn true"
@@ -1596,6 +1874,8 @@
       (line-range (1467 1522))
       (api-calls (rnd))
       (called-functions (frnd move))
+      (structured-ast
+        (seq-block 56))
       (body-lines
         "function m_enemy(setx, sety, is_villager)"
         "\tlocal e="
@@ -1635,6 +1915,8 @@
       (line-range (1523 1527))
       (api-calls (atan2))
       (called-functions (constrain_to_screen is_level_active))
+      (structured-ast
+        (if-cond "is_level_active("))
       (body-lines
         "\t\tinit=function(self)"
         "\t\t\tif is_level_active() then"
@@ -1647,6 +1929,8 @@
       (line-range (1530 1531))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 2))
       (body-lines
         "\t\tmove=function(self)"
         "\t\tend,"))
@@ -1656,6 +1940,9 @@
       (line-range (1533 1538))
       (api-calls ())
       (called-functions (attack_reset fire_arrow))
+      (structured-ast
+        (if-cond "self.attack_is_shot")
+        (return-expr ""))
       (body-lines
         "\t\tattack_target=function(self)"
         "\t\t\tif self.attack_is_shot then"
@@ -1669,6 +1956,8 @@
       (line-range (1545 1547))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "false"))
       (body-lines
         "\t\thandle_impact_class=function(self)"
         "\t\t\treturn false"
@@ -1679,6 +1968,8 @@
       (line-range (1549 1555))
       (api-calls ())
       (called-functions (a_anim_set emotion_add handle_impact_class m_part_impact))
+      (structured-ast
+        (if-cond "not self:handle_impact_class(source"))
       (body-lines
         "\t\thandle_impact=function(self, source)"
         "\t\t\tif not self:handle_impact_class(source) then"
@@ -1693,6 +1984,8 @@
       (line-range (1558 1560))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "false"))
       (body-lines
         "\t\tkill_class=function(self)"
         "\t\t\treturn false"
@@ -1703,6 +1996,10 @@
       (line-range (1562 1566))
       (api-calls ())
       (called-functions (kill_class))
+      (structured-ast
+        (if-cond "not override")
+        (if-cond "self:kill_class(source, no_score")
+        (return-expr ""))
       (body-lines
         "\t\tkill=function(self, source, no_score, angle, override)"
         "\t\t\tif not override then"
@@ -1715,6 +2012,8 @@
       (line-range (1581 1583))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "false"))
       (body-lines
         "\t\talert_class=function(self)"
         "\t\t\treturn false"
@@ -1725,6 +2024,8 @@
       (line-range (1585 1587))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "false"))
       (body-lines
         "\t\ttouch_class=function(self)"
         "\t\t\treturn false"
@@ -1735,6 +2036,8 @@
       (line-range (1589 1591))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "true"))
       (body-lines
         "\t\tupdate_class=function(self)"
         "\t\t\treturn true"
@@ -1745,6 +2048,8 @@
       (line-range (1593 1598))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "self.invuln_frames > 0"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.invuln_frames > 0 then"
@@ -1758,6 +2063,8 @@
       (line-range (1654 1655))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 2))
       (body-lines
         "\t\tdraw_class=function(self)"
         "\t\tend,"))
@@ -1767,6 +2074,9 @@
       (line-range (1657 1663))
       (api-calls ())
       (called-functions (draw_character draw_class))
+      (structured-ast
+        (if-cond "not self.is_furniture")
+        (if-cond "self.emotion and not self.is_flying"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif not self.is_furniture then"
@@ -1781,6 +2091,8 @@
       (line-range (1671 1674))
       (api-calls ())
       (called-functions (update))
+      (structured-ast
+        (if-cond "self.emotion"))
       (body-lines
         "\t\temotion_update=function(self)"
         "\t\t\tif self.emotion then"
@@ -1792,6 +2104,8 @@
       (line-range (1687 1694))
       (api-calls ())
       (called-functions (m_emotion))
+      (structured-ast
+        (if-cond "self.emotion_count == 3"))
       (body-lines
         "\t\temotion_set_from_count=function(self)"
         "\t\t\tif self.emotion_count == 3 then"
@@ -1807,6 +2121,8 @@
       (line-range (1699 1702))
       (api-calls (min))
       (called-functions (emotion_set_from_count))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\t\temotion_add=function(self)"
         "\t\t\tself.emotion_count, self.emotion_timer = min(3, self.emotion_count+1), 360"
@@ -1818,6 +2134,8 @@
       (line-range (1711 1721))
       (api-calls ())
       (called-functions (frnd))
+      (structured-ast
+        (if-cond "whichside == 0"))
       (body-lines
         "function get_gen_coords()"
         "\tlocal gen_x, gen_y, whichside = frnd(128), frnd(128), frnd(4)"
@@ -1836,6 +2154,10 @@
       (line-range (1725 1735))
       (api-calls ())
       (called-functions (frnda get_gen_coords m_enemy_boss))
+      (structured-ast
+        (if-cond "enemy_type == 5")
+        (if-cond "not g_spawned_boss")
+        (return-expr ""))
       (body-lines
         "function m_enemy_random()"
         ""
@@ -1854,6 +2176,8 @@
       (line-range (1748 1751))
       (api-calls (min))
       (called-functions ())
+      (structured-ast
+        (if-cond "pos+8<64"))
       (body-lines
         "function set_cam_pos(pos)"
         "\tif pos+8<64 then"
@@ -1865,6 +2189,8 @@
       (line-range (1758 1767))
       (api-calls (camera))
       (called-functions ())
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "function m_cam()"
         "\tcamera()"
@@ -1882,6 +2208,8 @@
       (line-range (1768 1771))
       (api-calls (camera max mid))
       (called-functions (cam_pos set_cam_pos))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself.shake_remaining, self.pos_y, self.pos_x = max(0,self.shake_remaining-1), mid(64, set_cam_pos(self.pos_y), 960), mid(64, set_cam_pos(self.pos_x), 960)"
@@ -1893,6 +2221,8 @@
       (line-range (1773 1778))
       (api-calls (rnd))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.shake_remaining>0"))
       (body-lines
         "\t\tcam_pos=function(self)"
         "\t\t\tlocal shk_x, shk_y, force = 0, 0, self.shake_force"
@@ -1906,6 +2236,8 @@
       (line-range (1782 1784))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\t\tshake=function(self, force, duration)"
         "\t\t\tself.shake_force, self.shake_remaining = force, duration"
@@ -1916,6 +2248,8 @@
       (line-range (1790 1793))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "g_score_total >= g_high_scores[g_difficulty][1]"))
       (body-lines
         "function save_score()"
         "\tif g_score_total >= g_high_scores[g_difficulty][1] then"
@@ -1927,6 +2261,8 @@
       (line-range (1803 1806))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function level_end()"
         "\tp1.ready_time, g_game_state, g_transition_time = 300, 6, 150"
@@ -1938,6 +2274,8 @@
       (line-range (1808 1811))
       (api-calls ())
       (called-functions (score_add))
+      (structured-ast
+        (if-cond "p1.hp_cur > 1"))
       (body-lines
         "function level_end_win()"
         "\tif p1.hp_cur > 1 then"
@@ -1949,6 +2287,8 @@
       (line-range (1817 1822))
       (api-calls (sfx))
       (called-functions (level_end save_score))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function level_end_bad()"
         "\tg_game_transition_to_state = 8"
@@ -1962,6 +2302,9 @@
       (line-range (1824 1827))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "g_difficulty < 7")
+        (return-expr ""))
       (body-lines
         "function level_end_villager_died(killed_by_player)"
         "\tif g_difficulty < 7 then"
@@ -1973,6 +2316,8 @@
       (line-range (1835 1839))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "killed_by_obstacle"))
       (body-lines
         "function level_end_player_died(killed_by_obstacle)"
         "  g_level_end_reason = \"slain in combat\""
@@ -1985,6 +2330,8 @@
       (line-range (1843 1849))
       (api-calls ())
       (called-functions (frnda))
+      (structured-ast
+        (seq-block 7))
       (body-lines
         "function m_splat(x, y, size_base, size_var)"
         "\tlocal s ="
@@ -1999,6 +2346,8 @@
       (line-range (1850 1855))
       (api-calls (circfill))
       (called-functions ())
+      (structured-ast
+        (if-cond "color == 0"))
       (body-lines
         "\t\tdraw=function(self, color)"
         "\t\t\tif color == 0 then"
@@ -2012,6 +2361,8 @@
       (line-range (1861 1865))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function m_transition_splatter()"
         "\tlocal t ="
@@ -2024,6 +2375,9 @@
       (line-range (1866 1877))
       (api-calls (add rnd))
       (called-functions (frnd frnda m_splat randc))
+      (structured-ast
+        (while-loop "wipe_position < 128")
+        (if-cond "randc("))
       (body-lines
         "\t\tinit=function(self)"
         "\t\t\tlocal wipe_position = 0"
@@ -2043,6 +2397,8 @@
       (line-range (1885 1890))
       (api-calls (all rectfill))
       (called-functions ())
+      (structured-ast
+        (for-loop "s in all(self.list_splats)"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\trectfill(0, 41, 128, 87, 0)"
@@ -2056,6 +2412,9 @@
       (line-range (1903 1906))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "g_game_state == 5 or g_game_state == 6")
+        (return-expr "true"))
       (body-lines
         "function is_level_active()"
         "\tif g_game_state == 5 or g_game_state == 6 then"
@@ -2067,6 +2426,9 @@
       (line-range (1911 1915))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "g_weather_part_rate == 0")
+        (return-expr ""))
       (body-lines
         "function update_weather()"
         "\t---[["
@@ -2079,6 +2441,10 @@
       (line-range (1933 1940))
       (api-calls (rnd))
       (called-functions (m_part_sprite randc))
+      (structured-ast
+        (if-cond "self.y >= self.splash_loc")
+        (for-loop "i=0,1")
+        (if-cond "randc(50"))
       (body-lines
         "\t\t\t\tp.update=function(self)"
         "\t\t\t\t\tif self.y >= self.splash_loc then"
@@ -2094,6 +2460,9 @@
       (line-range (1947 1951))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "self.y > 128")
+        (return-expr ""))
       (body-lines
         "\t\t\t\tp.update=function(self)"
         "\t\t\t\t\tif self.y > 128 then"
@@ -2106,6 +2475,8 @@
       (line-range (1968 1973))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "stat(9"))
       (body-lines
         "function _update60()"
         "\tg_ticks += 1"
@@ -2119,6 +2490,8 @@
       (line-range (1976 1976))
       (api-calls ())
       (called-functions (update))
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "\tlocal fu = function(i) i:update() end"))
     (def-pico-function
@@ -2127,6 +2500,10 @@
       (line-range (2167 2178))
       (api-calls ())
       (called-functions (frnd m_player randc))
+      (structured-ast
+        (if-cond "g_year ~= g_year_endgame")
+        (if-cond "g_year ~= 1")
+        (if-cond "randc(25"))
       (body-lines
         "function level_create()"
         "\tp1 = m_player(64,64)"
@@ -2146,6 +2523,9 @@
       (line-range (2269 2278))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (if-cond "g_season > 3")
+        (if-cond "g_year == 7"))
       (body-lines
         "function transition_level()"
         ""
@@ -2163,6 +2543,8 @@
       (line-range (2305 2337))
       (api-calls (flr))
       (called-functions (level_create m_cam table_clear))
+      (structured-ast
+        (if-cond "g_game_state > 3"))
       (body-lines
         "function reset_level()"
         "\tcam=m_cam()"
@@ -2202,6 +2584,8 @@
       (line-range (2350 2367))
       (api-calls (sfx))
       (called-functions (reset_level shake))
+      (structured-ast
+        (seq-block 18))
       (body-lines
         "function reset_game()"
         "  -- initialized variables, but change during game"
@@ -2227,6 +2611,9 @@
       (line-range (2370 2394))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,8")
+        (for-loop "j=1,2"))
       (body-lines
         "function _init()"
         "\tcartdata(\"tmirobot_bunbunsamurai_4\")"
@@ -2259,6 +2646,9 @@
       (line-range (2400 2406))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "n=2,#t")
+        (while-loop "i>1 and t[i].y<t[i-1].y"))
       (body-lines
         "function sort_by_y(t) --insertion sort, ascending y"
         "  for n=2,#t do"
@@ -2273,6 +2663,8 @@
       (line-range (2410 2412))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "g_difficulty % 2 == 0"))
       (body-lines
         "function is_timed_mode()"
         "\treturn g_difficulty % 2 == 0"
@@ -2283,6 +2675,10 @@
       (line-range (2414 2422))
       (api-calls (all))
       (called-functions (draw paste_screen_from_mem))
+      (structured-ast
+        (if-cond "g_game_state > 3 and g_game_state < 10")
+        (for-loop "a in all(list_parts_blood)")
+        (if-cond "a.time == a.duration"))
       (body-lines
         "function _draw()"
         ""
@@ -2299,6 +2695,8 @@
       (line-range (2442 2442))
       (api-calls ())
       (called-functions (draw))
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "\t\tlocal fd = function(i) i:draw() end")))
   (lifted-pico8-assets

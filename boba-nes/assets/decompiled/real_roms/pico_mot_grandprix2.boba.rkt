@@ -38,11 +38,24 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update anim_draw applyraceresults basepal clamp clr confirm cprint dadd data datahdr dataint dexp dinp dinsp doafterframe drawanim drawconfirm drawfade drawgamename drawleaderboard drawmenu dui fadein findrefkeyframes framedone fromhexchar getmenuitems getmodeanimset getvirtualkeyframe lerp loadanims loadspriteanim loadtlanim loadtournament makeevent makekeyframe makerandomroster makespriteanim makespriteframe maketl maketlanim mem_r1 mem_size mprint mus newtournament pprint quittournament randomnums read2 readmemstream readstr readstrfixed readstrstream reltxt runcoroutines rungame savetournament sfx smap sort sprcoords spriteanim_draw spriteanim_duration str_r1 str_size tilecoords tlanim_draw tlanim_duration transition txt updateconfirm updatefade updateleaderboard updatemenu))
     (pico8-api-calls (add all btn btnp camera ceil clip cls cos del flr line max memset mid min music pal palt peek poke print rect rectfill rnd sfx sin spr sspr))
+    (structured-loops 33)
+    (structured-conditionals 47)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 5)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 25)
     (active-sfx-lifted 23)
     (active-music-lifted 33))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update drawgamename drawmenu getmenuitems rungame updateconfirm updatefade updateleaderboard) #:draw-states (_draw anim_draw drawanim drawconfirm drawfade drawgamename drawleaderboard drawmenu))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update anim_draw applyraceresults basepal clamp clr confirm cprint)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 38)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 42)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 25)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 12)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 3))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name dataint)
@@ -50,6 +63,11 @@
       (line-range (10 18))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (for-loop "l in all(lines)")
+        (for-loop "i,val in ipairs(v)")
+        (if-cond "val~=\"\"")
+        (if-cond "(glob[val]~=nil"))
       (body-lines
         "function dataint(lines,props,globname)"
         " local d={}"
@@ -66,6 +84,8 @@
       (line-range (29 33))
       (api-calls ())
       (called-functions (dataint))
+      (structured-ast
+        (return-expr "dataint(lines,props,globname)"))
       (body-lines
         "function data(str,globname)"
         " local lines=split(str,chr(10))"
@@ -78,6 +98,8 @@
       (line-range (35 37))
       (api-calls ())
       (called-functions (dataint))
+      (structured-ast
+        (return-expr "dataint(split(str,chr(10)),split(propstr),globname)"))
       (body-lines
         "function datahdr(propstr,str,globname)"
         " return dataint(split(str,chr(10)),split(propstr),globname)"
@@ -88,6 +110,9 @@
       (line-range (39 45))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=2,#array")
+        (while-loop "j>1 and compfn(array[j-1],c)"))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -102,6 +127,9 @@
       (line-range (60 66))
       (api-calls (all del))
       (called-functions ())
+      (structured-ast
+        (for-loop "c in all(co)")
+        (if-cond "costatus(c"))
       (body-lines
         "function runcoroutines(co)"
         "\tfor c in all(co) do"
@@ -116,6 +144,8 @@
       (line-range (70 72))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "(1-f)*a+f*b"))
       (body-lines
         "function lerp(a,b,f)"
         " return (1-f)*a+f*b"
@@ -126,6 +156,8 @@
       (line-range (81 83))
       (api-calls (max min))
       (called-functions ())
+      (structured-ast
+        (return-expr "min(max(v,mn),mx)"))
       (body-lines
         "function clamp(v,mn,mx)"
         "\treturn min(max(v,mn),mx)"
@@ -136,6 +168,8 @@
       (line-range (85 87))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (return-expr "(n%16)*8,flr(n/16)*8"))
       (body-lines
         "function sprcoords(n)"
         "\treturn (n%16)*8,flr(n/16)*8"
@@ -146,6 +180,8 @@
       (line-range (89 91))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (return-expr "n%128,flr(n/128)"))
       (body-lines
         "function tilecoords(n)"
         " return n%128,flr(n/128)"
@@ -156,6 +192,8 @@
       (line-range (93 101))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "flipx"))
       (body-lines
         "function smap(cx,cy,cw,ch,sx,sy,sw,sh,flipx,flipy)"
         " -- delta"
@@ -172,6 +210,8 @@
       (line-range (124 126))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "self:read1()|(self:read1()<<8)"))
       (body-lines
         "function read2(self)"
         " return self:read1()|(self:read1()<<8)"
@@ -182,6 +222,8 @@
       (line-range (130 132))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "self.addr-self.baseaddr"))
       (body-lines
         "function mem_size(self)"
         "\treturn self.addr-self.baseaddr"
@@ -192,6 +234,8 @@
       (line-range (134 138))
       (api-calls (peek))
       (called-functions ())
+      (structured-ast
+        (return-expr "v"))
       (body-lines
         "function mem_r1(self)"
         " local v=peek(self.addr)"
@@ -204,6 +248,8 @@
       (line-range (140 148))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function readmemstream(addr)"
         "\treturn {"
@@ -220,6 +266,8 @@
       (line-range (152 154))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "ord(c)-(c>\"9\" and 87 or 48)"))
       (body-lines
         "function fromhexchar(c)"
         " return ord(c)-(c>\"9\" and 87 or 48)"
@@ -230,6 +278,8 @@
       (line-range (156 158))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "#self.str/2"))
       (body-lines
         "function str_size(self)"
         "\treturn #self.str/2"
@@ -240,6 +290,8 @@
       (line-range (160 168))
       (api-calls (flr))
       (called-functions (fromhexchar))
+      (structured-ast
+        (return-expr "(hi<<4)|lo"))
       (body-lines
         "function str_r1(self)"
         " local str,offs=self.strs[flr(self.offs>>10)+1],self.offs&0x3ff"
@@ -256,6 +308,8 @@
       (line-range (170 178))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function readstrstream(strs)"
         "\treturn {"
@@ -272,6 +326,8 @@
       (line-range (182 186))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,len"))
       (body-lines
         "function readstrfixed(stream,len)"
         "\tlocal result=\"\""
@@ -284,6 +340,8 @@
       (line-range (190 193))
       (api-calls ())
       (called-functions (readstrfixed))
+      (structured-ast
+        (return-expr "readstrfixed(stream,len)"))
       (body-lines
         "function readstr(stream)"
         "\tlocal len=stream:read1()"
@@ -295,6 +353,8 @@
       (line-range (197 205))
       (api-calls ())
       (called-functions (readstrfixed))
+      (structured-ast
+        (if-cond "hdr~=\"mas\""))
       (body-lines
         "function loadanims(stream)"
         "\tprinth(\"*** loading animations ***\")"
@@ -311,6 +371,8 @@
       (line-range (242 264))
       (api-calls (add))
       (called-functions (makespriteanim read2 readstr))
+      (structured-ast
+        (for-loop "i=1,ct"))
       (body-lines
         "function loadspriteanim(stream)"
         "\tlocal anim=makespriteanim()"
@@ -341,6 +403,11 @@
       (line-range (269 293))
       (api-calls ())
       (called-functions (makekeyframe maketlanim read2 readstr))
+      (structured-ast
+        (if-cond "(typ==3")
+        (for-loop "i=1,ct")
+        (for-loop "j=1,kct")
+        (if-cond "(flags&1"))
       (body-lines
         "function loadtlanim(stream,typ)"
         " local anim=maketlanim()"
@@ -373,6 +440,9 @@
       (line-range (373 403))
       (api-calls (flr palt))
       (called-functions (clamp smap tilecoords))
+      (structured-ast
+        (if-cond "(frame.flipx")
+        (if-cond "(frame.flipy"))
       (body-lines
         "function spriteanim_draw(self,t,x,y,xscale,yscale,flipx,flipy)"
         ""
@@ -411,6 +481,8 @@
       (line-range (405 407))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "#self.frames/self.fps"))
       (body-lines
         "function spriteanim_duration(self)"
         "\treturn #self.frames/self.fps"
@@ -421,6 +493,8 @@
       (line-range (409 424))
       (api-calls ())
       (called-functions (makespriteframe))
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function makespriteanim()"
         "\treturn {"
@@ -444,6 +518,8 @@
       (line-range (426 432))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function makespriteframe(n)"
         "\treturn {"
@@ -458,6 +534,8 @@
       (line-range (436 438))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "self.d"))
       (body-lines
         "function tlanim_duration(self)"
         "\treturn self.d"
@@ -468,6 +546,10 @@
       (line-range (444 453))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (for-loop "k in all(tl.keyframes)")
+        (if-cond "k[prop]")
+        (if-cond "k.t<=t and k.t>beforet"))
       (body-lines
         "function findrefkeyframes(tl,prop,t)"
         " -- find nearest frames before/after t"
@@ -485,6 +567,10 @@
       (line-range (462 485))
       (api-calls (all))
       (called-functions (findrefkeyframes))
+      (structured-ast
+        (for-loop "prop in all(keyframeswitch)")
+        (if-cond "(frame")
+        (if-cond "prop==\"animt\""))
       (body-lines
         "function getvirtualkeyframe(tl,t)"
         ""
@@ -516,6 +602,14 @@
       (line-range (527 553))
       (api-calls (all))
       (called-functions (anim_draw getvirtualkeyframe))
+      (structured-ast
+        (if-cond "(r>10")
+        (return-expr "")
+        (for-loop "tl in all(self.tls)")
+        (if-cond "props.visible and props.anim")
+        (if-cond "(props.flipx")
+        (if-cond "(props.flipy")
+        (if-cond "not anim_draw or anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cf"))
       (body-lines
         "function tlanim_draw(self,t,x,y,xscale,yscale,flipx,flipy,dt,r)"
         " -- recursion limit"
@@ -550,6 +644,8 @@
       (line-range (567 586))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function makekeyframe(t)"
         "\treturn {"
@@ -577,6 +673,8 @@
       (line-range (588 597))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function makeevent(t,typ)"
         " return {"
@@ -594,6 +692,8 @@
       (line-range (599 608))
       (api-calls ())
       (called-functions (makekeyframe))
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function maketl()"
         ""
@@ -611,6 +711,8 @@
       (line-range (610 621))
       (api-calls ())
       (called-functions (maketl))
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function maketlanim()"
         "\treturn {"
@@ -630,6 +732,8 @@
       (line-range (627 629))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\tlocal function doafterframe(fn)"
         "\t\t add(afterframeco,cocreate(fn))"
@@ -640,6 +744,8 @@
       (line-range (632 632))
       (api-calls (sfx))
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "  sfx=function(ev)\tsfx(ev.n)         end,"))
     (def-pico-function
@@ -648,6 +754,8 @@
       (line-range (633 633))
       (api-calls (music))
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "  mus=function(ev) music(ev.n or -1) end,"))
     (def-pico-function
@@ -656,6 +764,8 @@
       (line-range (634 639))
       (api-calls (print))
       (called-functions (doafterframe))
+      (structured-ast
+        (for-loop "i=1,ev.n or 30"))
       (body-lines
         "  txt=function(ev)"
         "   doafterframe(function()"
@@ -669,6 +779,8 @@
       (line-range (642 647))
       (api-calls (print))
       (called-functions (doafterframe))
+      (structured-ast
+        (for-loop "i=1,ev.n or 30"))
       (body-lines
         "  reltxt=function(ev,x,y)"
         "   doafterframe(function()"
@@ -682,6 +794,8 @@
       (line-range (650 652))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\t\tclr=function()"
         "\t\t afterframeco={}"
@@ -692,6 +806,8 @@
       (line-range (659 661))
       (api-calls ())
       (called-functions (runcoroutines))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\t\tframedone=function()"
         "\t\t runcoroutines(afterframeco)"
@@ -702,6 +818,8 @@
       (line-range (724 742))
       (api-calls ())
       (called-functions (loadanims readstrstream))
+      (structured-ast
+        (if-cond "dget(10"))
       (body-lines
         "function _init()"
         " cartdata(\"mot_gpp\")"
@@ -728,6 +846,9 @@
       (line-range (767 773))
       (api-calls (cls))
       (called-functions (basepal drawconfirm drawfade))
+      (structured-ast
+        (if-cond "(anim and animt")
+        (if-cond "(confirmprompt"))
       (body-lines
         "function _draw()"
         " cls()"
@@ -742,6 +863,9 @@
       (line-range (775 784))
       (api-calls ())
       (called-functions (updateconfirm updatemenu))
+      (structured-ast
+        (if-cond "not istransition")
+        (if-cond "confirmprompt"))
       (body-lines
         "function _update()"
         " frame+=1"
@@ -759,6 +883,8 @@
       (line-range (804 812))
       (api-calls ())
       (called-functions (makerandomroster))
+      (structured-ast
+        (if-cond "racetype==type_race"))
       (body-lines
         "function rungame(demo)"
         ""
@@ -775,6 +901,8 @@
       (line-range (851 857))
       (api-calls (pal))
       (called-functions (basepal))
+      (structured-ast
+        (if-cond "tag==1"))
       (body-lines
         "function anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r)"
         " local tag=props.tag"
@@ -789,6 +917,8 @@
       (line-range (880 887))
       (api-calls (rect rectfill))
       (called-functions (cprint pprint))
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function drawconfirm()"
         " rectfill(0,50,128,77,3)"
@@ -804,6 +934,11 @@
       (line-range (889 896))
       (api-calls (btnp))
       (called-functions ())
+      (structured-ast
+        (if-cond "(btnp(⬅️")
+        (if-cond "(btnp(➡️")
+        (if-cond "btnp(❎")
+        (if-cond "confirmx==0"))
       (body-lines
         "function updateconfirm()"
         " if(btnp(⬅️))confirmx=0"
@@ -819,6 +954,8 @@
       (line-range (903 908))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=0,63"))
       (body-lines
         "function fadein()"
         " fadepixels={}"
@@ -832,6 +969,9 @@
       (line-range (912 917))
       (api-calls (palt spr))
       (called-functions ())
+      (structured-ast
+        (if-cond "fade==\"in\"")
+        (for-loop "i=0,255"))
       (body-lines
         "function drawfade()"
         " if fade==\"in\" then"
@@ -845,6 +985,9 @@
       (line-range (922 928))
       (api-calls (del rnd))
       (called-functions ())
+      (structured-ast
+        (if-cond "fade==\"in\"")
+        (for-loop "k=1,2"))
       (body-lines
         "function updatefade()"
         " if fade==\"in\" then"
@@ -859,6 +1002,9 @@
       (line-range (932 936))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (for-loop "ox=-1,1")
+        (for-loop "oy=-1,1"))
       (body-lines
         "function pprint(txt,x,y,c)"
         " for ox=-1,1 do"
@@ -871,6 +1017,8 @@
       (line-range (941 943))
       (api-calls ())
       (called-functions (pprint))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function cprint(txt,y,c)"
         " pprint(txt,65-#txt*2,y,c)"
@@ -881,6 +1029,8 @@
       (line-range (945 947))
       (api-calls ())
       (called-functions (cprint))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function mprint(txt,y,i)"
         " cprint(txt,y,menui==i and frame%8<4 and not istransition and not confirmprompt and 7 or 6)"
@@ -891,6 +1041,8 @@
       (line-range (949 953))
       (api-calls (pal poke))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function basepal()"
         " pal()"
@@ -903,6 +1055,8 @@
       (line-range (955 958))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function transition(_anim,_doneanim,_donefn)"
         " anim,doneanim,donefn=_anim,_doneanim,_donefn"
@@ -914,6 +1068,8 @@
       (line-range (960 968))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function getmodeanimset(racetype)"
         " local modename=racetypeanims[racetype]"
@@ -930,6 +1086,8 @@
       (line-range (970 972))
       (api-calls ())
       (called-functions (randomnums))
+      (structured-ast
+        (return-expr "randomnums(14,7)"))
       (body-lines
         "function makerandomroster(t,n)"
         " return randomnums(14,7)"
@@ -940,6 +1098,8 @@
       (line-range (974 978))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,t"))
       (body-lines
         "function randomnums(t,n)"
         " local allnums={}"
@@ -952,6 +1112,9 @@
       (line-range (986 992))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=2,#array")
+        (while-loop "j>1 and compfn(array[j-1],c)"))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -966,6 +1129,8 @@
       (line-range (997 1001))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function confirm(prompt,fn)"
         " confirmprompt=prompt"
@@ -978,6 +1143,8 @@
       (line-range (1006 1010))
       (api-calls (print rectfill))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function drawgamename()"
         " rectfill(20,6,105,37,0)"
@@ -990,6 +1157,8 @@
       (line-range (1014 1019))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (if-cond "racetype~=type_prac"))
       (body-lines
         "function getmenuitems()"
         " local items={menu_type}"
@@ -1003,6 +1172,8 @@
       (line-range (1036 1042))
       (api-calls (palt sspr))
       (called-functions (getmenuitems))
+      (structured-ast
+        (if-cond "not istransition and not confirmprompt"))
       (body-lines
         "function drawmenu()"
         " local items=getmenuitems()"
@@ -1017,6 +1188,13 @@
       (line-range (1062 1085))
       (api-calls (btnp mid))
       (called-functions (getmenuitems getmodeanimset transition))
+      (structured-ast
+        (if-cond "(btnp(⬆️")
+        (if-cond "(btnp(⬇️")
+        (if-cond "(btnp(⬅️")
+        (if-cond "(btnp(➡️")
+        (if-cond "item==menu_type and d~=0")
+        (if-cond "racetype+d>=1 and racetype+d<=#racetypenames"))
       (body-lines
         "function updatemenu()"
         " -- up/down arrows"
@@ -1048,6 +1226,8 @@
       (line-range (1122 1122))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (while-loop "p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines"))
       (body-lines
         "lines,s={},0 function dadd(n,v,i,p)while p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines[p-1].n>n do p-=1 end add(lines,{n=n,v=v,x=type(v)==\"table\"and\"+\"or\" \",i=i},p)end"))
     (def-pico-function
@@ -1056,6 +1236,10 @@
       (line-range (1123 1123))
       (api-calls ())
       (called-functions (dadd))
+      (structured-ast
+        (if-cond "l.x==\"+\"")
+        (for-loop "n,v in pairs(l.v)do p+=1 dadd(n,v,l.i..\" \",p)end l.x=\"-\"elseif l")
+        (while-loop "p<#lines and #lines[p+1].i>#lines[p].i"))
       (body-lines
         "function dexp(l,p)if l.x==\"+\"then for n,v in pairs(l.v)do p+=1 dadd(n,v,l.i..\" \",p)end l.x=\"-\"elseif l.x==\"-\"then while p<#lines and #lines[p+1].i>#lines[p].i do deli(lines,p+1)end\tl.x=\"+\" end end"))
     (def-pico-function
@@ -1064,6 +1248,9 @@
       (line-range (1124 1124))
       (api-calls (btnp line max min))
       (called-functions (dexp))
+      (structured-ast
+        (if-cond "btnp(❎")
+        (if-cond "l and(x-10"))
       (body-lines
         "function dinp()local x,y,b,w=stat(32),stat(33),stat(34),stat(36)line(x,y,x,y+2,10)if btnp(❎) then local i=(y-10)\\6+1 local p=s+i local l=lines[p]if l and(x-10)\\4==#l.i then dexp(l,p)end end s=max(min(s-stat(36),#lines-18),0) end"))
     (def-pico-function
@@ -1072,6 +1259,10 @@
       (line-range (1125 1125))
       (api-calls (print rectfill))
       (called-functions (dinp))
+      (structured-ast
+        (if-cond "l")
+        (for-loop "i=1,18")
+        (while-loop "true"))
       (body-lines
         "function dui()while true do rectfill(10,10,118,118,1)for i=1,18 do local l=lines[i+s]if l then print(sub(\"\\fc\"..l.i..l.x..l.n..\":\\f7\"..tostr(l.v),1,31),10,(i-1)*6+10,7)end end dinp()flip()end end"))
     (def-pico-function
@@ -1080,6 +1271,8 @@
       (line-range (1126 1126))
       (api-calls (clip pal poke))
       (called-functions (dadd dui))
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "function dinsp(v)dadd(\"value\",v,\"\",#lines+1)poke(0x5f2d,3)cursor()pal()clip()dui()end"))
     (def-pico-function
@@ -1088,6 +1281,8 @@
       (line-range (1131 1139))
       (api-calls (add))
       (called-functions (makerandomroster randomnums))
+      (structured-ast
+        (for-loop "i=1,7"))
       (body-lines
         "function newtournament()"
         " tour.tracks=randomnums(#tracknames)"
@@ -1104,6 +1299,8 @@
       (line-range (1147 1152))
       (api-calls ())
       (called-functions (savetournament))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function quittournament()"
         ""
@@ -1117,6 +1314,9 @@
       (line-range (1154 1165))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (if-cond "tour.tracknum>0")
+        (for-loop "i=1,#tracknames"))
       (body-lines
         "function loadtournament()"
         " tour={"
@@ -1136,6 +1336,9 @@
       (line-range (1175 1180))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "tour.tracknum>0")
+        (for-loop "i=1,#tracknames"))
       (body-lines
         "function savetournament()"
         " dset(40,tour.tracknum)"
@@ -1149,6 +1352,8 @@
       (line-range (1189 1198))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (for-loop "i,car in ipairs(tour.roster)"))
       (body-lines
         "function updateleaderboard()"
         " leaderboard={}"
@@ -1166,6 +1371,11 @@
       (line-range (1207 1222))
       (api-calls (pal palt print spr))
       (called-functions ())
+      (structured-ast
+        (if-cond "(tour.tracknum==0")
+        (return-expr "")
+        (for-loop "i,e in ipairs(leaderboard)")
+        (if-cond "(e.p"))
       (body-lines
         "function drawleaderboard()"
         " print(\"driver\",0,1,5)"
@@ -1189,6 +1399,8 @@
       (line-range (1235 1245))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,7"))
       (body-lines
         "function applyraceresults()"
         ""

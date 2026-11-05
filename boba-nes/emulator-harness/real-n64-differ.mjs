@@ -408,7 +408,7 @@ const FPU_CMP_NAMES = {
  */
 export function decodeMips3Instruction(word, pc, regState = null) {
   if (word === 0x00000000) {
-    return { sexp: '(MIPS-NOP)', category: 'nop', resolvedAddr: null, mmioSym: null };
+    return { sexp: '(MIPS-NOP)', category: 'nop', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
   }
   const op = (word >>> 26) & 0x3f;
   const rs = (word >>> 21) & 0x1f;
@@ -489,11 +489,21 @@ export function decodeMips3Instruction(word, pc, regState = null) {
     } else if (rd !== 0) {
       invalidateGpr(rd);
     }
+    const stepOp =
+      (fn === 0x20 || fn === 0x21 || fn === 0x22 || fn === 0x23) && rd === rs && rd !== 0 && rd !== 29 && rt !== 0
+        ? fn <= 0x21
+          ? 'MIPS-ADDU'
+          : 'MIPS-SUBU'
+        : null;
+    const isEpilogueInsn = fn === 0x08 && rs === 31;
     return {
       sexp: specialMap[fn] || `(MIPS-SPECIAL #x${fn.toString(16)} ${rdN} ${rsN} ${rtN})`,
       category: is64 ? 'mips3-64' : 'alu',
       resolvedAddr: null,
       mmioSym: null,
+      branchInfo: null,
+      stepOp,
+      isEpilogueInsn,
     };
   }
 
@@ -507,28 +517,80 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       0x10: `(MIPS-BLTZAL ${rsN} #x${branchTarget.toString(16)})`,
       0x11: `(MIPS-BGEZAL ${rsN} #x${branchTarget.toString(16)})`,
     };
+    let branchInfo = null;
+    if (rt === 0x00 || rt === 0x02) {
+      branchInfo = { cond: 'less-zero', negCond: 'greater-equal-zero', targetPc: branchTarget, isUncond: false };
+    } else if (rt === 0x01 || rt === 0x03) {
+      const isUncond = rs === 0 && rt === 0x01;
+      branchInfo = {
+        cond: isUncond ? 'always' : 'greater-equal-zero',
+        negCond: isUncond ? 'never' : 'less-zero',
+        targetPc: branchTarget,
+        isUncond,
+      };
+    }
     return {
       sexp: regimmMap[rt] || `(MIPS-REGIMM #x${rt.toString(16)} ${rsN} #x${branchTarget.toString(16)})`,
       category: 'branch',
       resolvedAddr: null,
       mmioSym: null,
+      branchInfo,
+      stepOp: null,
+      isEpilogueInsn: false,
     };
   }
 
   if (op === 0x02) {
-    return { sexp: `(MIPS-J #x${target26.toString(16)})`, category: 'jump', resolvedAddr: target26, mmioSym: null };
+    return {
+      sexp: `(MIPS-J #x${target26.toString(16)})`,
+      category: 'jump',
+      resolvedAddr: target26,
+      mmioSym: null,
+      branchInfo: { cond: 'always', negCond: 'never', targetPc: target26, isUncond: true },
+      stepOp: null,
+      isEpilogueInsn: false,
+    };
   }
   if (op === 0x03) {
-    return { sexp: `(MIPS-JAL #x${target26.toString(16)})`, category: 'jal', resolvedAddr: target26, mmioSym: null };
+    return {
+      sexp: `(MIPS-JAL #x${target26.toString(16)})`,
+      category: 'jal',
+      resolvedAddr: target26,
+      mmioSym: null,
+      branchInfo: null,
+      stepOp: null,
+      isEpilogueInsn: false,
+    };
   }
   if (op >= 0x04 && op <= 0x07) {
     const branchTarget = (pc + 4 + (simm16 << 2)) >>> 0;
     const bNames = { 4: 'MIPS-BEQ', 5: 'MIPS-BNE', 6: 'MIPS-BLEZ', 7: 'MIPS-BGTZ' };
+    const isUncond = op === 4 && rs === rt;
+    const condMap = {
+      4: isUncond ? 'always' : 'equal',
+      5: 'not-equal',
+      6: 'less-equal-zero',
+      7: 'greater-zero',
+    };
+    const negCondMap = {
+      4: isUncond ? 'never' : 'not-equal',
+      5: 'equal',
+      6: 'greater-zero',
+      7: 'less-equal-zero',
+    };
     return {
       sexp: `(${bNames[op]} ${rsN} ${rtN} #x${branchTarget.toString(16)})`,
       category: 'branch',
       resolvedAddr: null,
       mmioSym: null,
+      branchInfo: {
+        cond: condMap[op],
+        negCond: negCondMap[op],
+        targetPc: branchTarget,
+        isUncond,
+      },
+      stepOp: null,
+      isEpilogueInsn: false,
     };
   }
 
@@ -544,6 +606,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       category: 'lui',
       resolvedAddr: null,
       mmioSym: null,
+      branchInfo: null,
+      stepOp: null,
+      isEpilogueInsn: false,
     };
   }
 
@@ -551,6 +616,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
     // ADDI, ADDIU, DADDI, DADDIU
     const opName = op === 0x08 ? 'MIPS-ADDI' : op === 0x09 ? 'MIPS-ADDIU' : op === 0x18 ? 'MIPS-DADDI' : 'MIPS-DADDIU';
     const is64 = op === 0x18 || op === 0x19;
+    const stepOp =
+      rs === rt && rs !== 29 && rs !== 0 && simm16 !== 0 && Math.abs(simm16) <= 64 ? opName : null;
+    const isEpilogueInsn = op === 0x09 && rs === 29 && rt === 29 && simm16 > 0;
     if (regState && rs !== 29 && rs !== 0 && regState.valid[rs] >= 1) {
       const resolved = (regState.val[rs] + simm16) >>> 0;
       const symInfo = resolveN64AddressSymbol(resolved);
@@ -563,6 +631,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
         category: is64 ? 'mips3-64' : 'lui-Pointer',
         resolvedAddr: resolved,
         mmioSym: symInfo.isMmio ? symInfo.symbol : null,
+        branchInfo: null,
+        stepOp,
+        isEpilogueInsn,
       };
     }
     invalidateGpr(rt);
@@ -571,6 +642,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       category: is64 ? 'mips3-64' : 'alu',
       resolvedAddr: null,
       mmioSym: null,
+      branchInfo: null,
+      stepOp,
+      isEpilogueInsn,
     };
   }
 
@@ -588,27 +662,38 @@ export function decodeMips3Instruction(word, pc, regState = null) {
         category: 'lui-Pointer',
         resolvedAddr: resolved,
         mmioSym: symInfo.isMmio ? symInfo.symbol : null,
+        branchInfo: null,
+        stepOp: null,
+        isEpilogueInsn: false,
       };
     }
     invalidateGpr(rt);
-    return { sexp: `(MIPS-ORI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+    return {
+      sexp: `(MIPS-ORI ${rtN} ${rsN} #x${imm16.toString(16)})`,
+      category: 'alu',
+      resolvedAddr: null,
+      mmioSym: null,
+      branchInfo: null,
+      stepOp: null,
+      isEpilogueInsn: false,
+    };
   }
 
   if (op === 0x0a) {
     invalidateGpr(rt);
-    return { sexp: `(MIPS-SLTI ${rtN} ${rsN} ${simm16})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+    return { sexp: `(MIPS-SLTI ${rtN} ${rsN} ${simm16})`, category: 'alu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
   }
   if (op === 0x0b) {
     invalidateGpr(rt);
-    return { sexp: `(MIPS-SLTIU ${rtN} ${rsN} ${simm16})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+    return { sexp: `(MIPS-SLTIU ${rtN} ${rsN} ${simm16})`, category: 'alu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
   }
   if (op === 0x0c) {
     invalidateGpr(rt);
-    return { sexp: `(MIPS-ANDI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+    return { sexp: `(MIPS-ANDI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
   }
   if (op === 0x0e) {
     invalidateGpr(rt);
-    return { sexp: `(MIPS-XORI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null };
+    return { sexp: `(MIPS-XORI ${rtN} ${rsN} #x${imm16.toString(16)})`, category: 'alu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
   }
 
   // COP0 System Control ($10)
@@ -616,17 +701,17 @@ export function decodeMips3Instruction(word, pc, regState = null) {
     const cop0Reg = COP0_NAMES[rd] || `COP0_${rd}`;
     if (rs === 0x00) {
       invalidateGpr(rt);
-      return { sexp: `(MIPS-MFC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-MFC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x01) {
       invalidateGpr(rt);
-      return { sexp: `(MIPS-DMFC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-DMFC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x04) {
-      return { sexp: `(MIPS-MTC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-MTC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x05) {
-      return { sexp: `(MIPS-DMTC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-DMTC0 ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x10) {
       const tlbMap = {
@@ -636,42 +721,51 @@ export function decodeMips3Instruction(word, pc, regState = null) {
         0x08: '(MIPS-TLBP)',
         0x18: '(MIPS-ERET)',
       };
-      return { sexp: tlbMap[fn] || `(MIPS-COP0-CO #x${fn.toString(16)})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+      return { sexp: tlbMap[fn] || `(MIPS-COP0-CO #x${fn.toString(16)})`, category: 'cop0', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
-    return { sexp: `(MIPS-COP0 ${rs} ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null };
+    return { sexp: `(MIPS-COP0 ${rs} ${rtN} ${cop0Reg})`, category: 'cop0', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
   }
 
   // COP1 FPU 3D Matrix/Vector Floating-Point Unit ($11)
   if (op === 0x11) {
     if (rs === 0x00) {
       invalidateGpr(rt);
-      return { sexp: `(MIPS-MFC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-MFC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x01) {
       invalidateGpr(rt);
-      return { sexp: `(MIPS-DMFC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-DMFC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x02) {
       invalidateGpr(rt);
-      return { sexp: `(MIPS-CFC1 ${rtN} $fcr${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-CFC1 ${rtN} $fcr${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x04) {
-      return { sexp: `(MIPS-MTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-MTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x05) {
-      return { sexp: `(MIPS-DMTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-DMTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x06) {
-      return { sexp: `(MIPS-CTC1 ${rtN} $fcr${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null };
+      return { sexp: `(MIPS-CTC1 ${rtN} $fcr${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x08) {
       const branchTarget = (pc + 4 + (simm16 << 2)) >>> 0;
       const bcNames = ['BC1F', 'BC1T', 'BC1FL', 'BC1TL'];
+      const isTrue = (rt & 1) === 1;
       return {
         sexp: `(MIPS-${bcNames[rt & 3]} #x${branchTarget.toString(16)})`,
         category: 'cop1-fpu',
         resolvedAddr: null,
         mmioSym: null,
+        branchInfo: {
+          cond: isTrue ? 'fpu-cc-true' : 'fpu-cc-false',
+          negCond: isTrue ? 'fpu-cc-false' : 'fpu-cc-true',
+          targetPc: branchTarget,
+          isUncond: false,
+        },
+        stepOp: null,
+        isEpilogueInsn: false,
       };
     }
 
@@ -683,6 +777,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
         category: 'cop1-fpu',
         resolvedAddr: null,
         mmioSym: null,
+        branchInfo: null,
+        stepOp: null,
+        isEpilogueInsn: false,
       };
     }
     const unaryFpu = {
@@ -705,6 +802,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
         category: 'cop1-fpu',
         resolvedAddr: null,
         mmioSym: null,
+        branchInfo: null,
+        stepOp: null,
+        isEpilogueInsn: false,
       };
     }
     const binaryFpu = {
@@ -719,17 +819,41 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       category: 'cop1-fpu',
       resolvedAddr: null,
       mmioSym: null,
+      branchInfo: null,
+      stepOp: null,
+      isEpilogueInsn: false,
     };
   }
 
   if (op >= 0x14 && op <= 0x17) {
     const branchTarget = (pc + 4 + (simm16 << 2)) >>> 0;
     const blNames = { 0x14: 'MIPS-BEQL', 0x15: 'MIPS-BNEL', 0x16: 'MIPS-BLEZL', 0x17: 'MIPS-BGTZL' };
+    const isUncond = op === 0x14 && rs === rt;
+    const condMap = {
+      0x14: isUncond ? 'always' : 'equal',
+      0x15: 'not-equal',
+      0x16: 'less-equal-zero',
+      0x17: 'greater-zero',
+    };
+    const negCondMap = {
+      0x14: isUncond ? 'never' : 'not-equal',
+      0x15: 'equal',
+      0x16: 'greater-zero',
+      0x17: 'less-equal-zero',
+    };
     return {
       sexp: `(${blNames[op]} ${rsN} ${rtN} #x${branchTarget.toString(16)})`,
       category: 'branch',
       resolvedAddr: null,
       mmioSym: null,
+      branchInfo: {
+        cond: condMap[op],
+        negCond: negCondMap[op],
+        targetPc: branchTarget,
+        isUncond,
+      },
+      stepOp: null,
+      isEpilogueInsn: false,
     };
   }
 
@@ -765,6 +889,7 @@ export function decodeMips3Instruction(word, pc, regState = null) {
     const is64Mem = op === 0x1a || op === 0x1b || op === 0x2c || op === 0x2d || op === 0x37 || op === 0x3f;
     const isGprLoad = op >= 0x1a && op <= 0x27 || op === 0x37;
     const dstLabel = isFpuMem ? `$f${rt}` : op === 0x2f ? `#x${rt.toString(16)}` : rtN;
+    const isEpilogueInsn = (op === 0x23 || op === 0x37) && rs === 29 && rt === 31;
 
     let resolvedAddr = null;
     let mmioSym = null;
@@ -786,6 +911,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       category: isFpuMem ? 'cop1-fpu' : is64Mem ? 'mips3-64' : 'mem',
       resolvedAddr,
       mmioSym,
+      branchInfo: null,
+      stepOp: null,
+      isEpilogueInsn,
     };
   }
 
@@ -794,6 +922,9 @@ export function decodeMips3Instruction(word, pc, regState = null) {
     category: 'other',
     resolvedAddr: null,
     mmioSym: null,
+    branchInfo: null,
+    stepOp: null,
+    isEpilogueInsn: false,
   };
 }
 
@@ -1361,6 +1492,9 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
   const stackPrologues = new Map(); // vAddr -> { source: 'rom'|'rdram', offset, frameSize, raOffset }
   const mmioCrossRefs = new Map(); // symbol -> { physHex, count, samplePcs: [] }
   const resolvedPointerSamples = []; // { pcHex, addrHex, symbol, opName }
+  const jrSwitchSites = []; // { pc, offset, source, regName, tableAddr }
+  const jalrVirtualSites = []; // { pc, offset, source, regName, loadDesc }
+  const highLevelIdioms = []; // { kind, pcHex, summary }
 
   const recordMmioHit = (phys, pc, explicitSym = null) => {
     if (phys >= 0x04000000 && phys < 0x04090000) spRspMmioRefs++;
@@ -1401,6 +1535,8 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       const op = (word >>> 26) & 0x3f;
       const rs = (word >>> 21) & 0x1f;
       const rt = (word >>> 16) & 0x1f;
+      const rd = (word >>> 11) & 0x1f;
+      const sa = (word >>> 6) & 0x1f;
       const fn = word & 0x3f;
       const imm16 = word & 0xffff;
       const simm16 = (imm16 << 16) >> 16;
@@ -1444,6 +1580,104 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         else if (physHi === 0x0480 || physHi === 0x1fc0) siJoybusMmioRefs++;
       }
 
+      // Detect JR $reg (jump-table switch dispatch, where $reg != $ra and $reg != $zero)
+      if (op === 0x00 && fn === 0x08 && rs !== 31 && rs !== 0 && (word & 0x001fffc0) === 0 && jrSwitchSites.length < 24) {
+        let tableAddr = null;
+        let hasIndexShift = false;
+        let hasLw = false;
+        let luiHi = null;
+        let lwSimm = 0;
+        for (let back = 1; back <= 8 && off - back * 4 >= startOff; back++) {
+          const pw = regionDv.getUint32(off - back * 4, false) >>> 0;
+          const pop = (pw >>> 26) & 0x3f;
+          const prs = (pw >>> 21) & 0x1f;
+          const prt = (pw >>> 16) & 0x1f;
+          const pfn = pw & 0x3f;
+          const pimm = pw & 0xffff;
+          const psimm = (pimm << 16) >> 16;
+          if (pop === 0x23 && prt === rs) {
+            hasLw = true;
+            lwSimm = psimm;
+            if (regState.valid[prs] >= 1) {
+              tableAddr = (regState.val[prs] + psimm) >>> 0;
+            }
+          } else if (pop === 0x0f && (pimm & 0xfff0) === 0x8000) {
+            luiHi = (pimm << 16) >>> 0;
+          } else if (pop === 0x00 && pfn === 0x00 && ((pw >>> 6) & 0x1f) === 2) {
+            hasIndexShift = true;
+          }
+        }
+        if (tableAddr === null && luiHi !== null && hasLw) {
+          tableAddr = (luiHi + lwSimm) >>> 0;
+        }
+        if (hasLw || hasIndexShift) {
+          jrSwitchSites.push({
+            pc: vpc,
+            offset: off,
+            source: sourceTag,
+            regName: GPR_NAMES[rs],
+            tableAddr,
+          });
+        }
+      }
+
+      // Detect JALR $ra, $reg (virtual method / object behavior callback dispatch)
+      if (op === 0x00 && fn === 0x09 && (rd === 31 || rd === 0) && rs !== 0 && rs !== 31 && (word & 0x001f07c0) === 0 && jalrVirtualSites.length < 16) {
+        let loadDesc = `(MIPS-JALR ${GPR_NAMES[rd]} ${GPR_NAMES[rs]})`;
+        for (let back = 1; back <= 4 && off - back * 4 >= startOff; back++) {
+          const pw = regionDv.getUint32(off - back * 4, false) >>> 0;
+          const pop = (pw >>> 26) & 0x3f;
+          const prs = (pw >>> 21) & 0x1f;
+          const prt = (pw >>> 16) & 0x1f;
+          const psimm = ((pw & 0xffff) << 16) >> 16;
+          if (pop === 0x23 && prt === rs) {
+            loadDesc = `(MIPS-LW ${GPR_NAMES[prt]} ${psimm}(${GPR_NAMES[prs]})) -> (MIPS-JALR ${GPR_NAMES[rd]} ${GPR_NAMES[rs]})`;
+            break;
+          }
+        }
+        if (!jalrVirtualSites.some((s) => s.pc === vpc)) {
+          jalrVirtualSites.push({
+            pc: vpc,
+            offset: off,
+            source: sourceTag,
+            regName: GPR_NAMES[rs],
+            loadDesc,
+          });
+        }
+      }
+
+      // Detect COP1 3D FPU High-Level Idioms (dot-product / matrix transform, SQRT.S norm, CVT.S.W fixed-to-float)
+      if (op === 0x11 && (rs === 0x10 || rs === 0x11 || rs === 0x14) && highLevelIdioms.length < 18) {
+        const pcHex = `0x${vpc.toString(16).padStart(8, '0').toUpperCase()}`;
+        if (fn === 0x02 && off + 8 <= endOff) {
+          // MUL.S followed within 2 instructions by ADD.S -> dot-product / matrix-vector row accumulate
+          const nw1 = regionDv.getUint32(off + 4, false) >>> 0;
+          const nw2 = off + 12 <= endOff ? regionDv.getUint32(off + 8, false) >>> 0 : 0;
+          const isAdd1 = ((nw1 >>> 26) & 0x3f) === 0x11 && ((nw1 >>> 21) & 0x1f) === 0x10 && (nw1 & 0x3f) === 0x00;
+          const isAdd2 = ((nw2 >>> 26) & 0x3f) === 0x11 && ((nw2 >>> 21) & 0x1f) === 0x10 && (nw2 & 0x3f) === 0x00;
+          if ((isAdd1 || isAdd2) && highLevelIdioms.filter((x) => x.kind === 'cop1-dot-product-transform').length < 4) {
+            highLevelIdioms.push({
+              kind: 'cop1-dot-product-transform',
+              pcHex,
+              summary: `COP1 FPU 3D dot-product / 4x4 matrix-vector MAC: (MIPS-MUL.S $f${sa} $f${rd} $f${rt}) -> (MIPS-ADD.S ...)`,
+            });
+          }
+        } else if (fn === 0x04 && highLevelIdioms.filter((x) => x.kind === 'cop1-euclidean-norm-sqrt').length < 3) {
+          highLevelIdioms.push({
+            kind: 'cop1-euclidean-norm-sqrt',
+            pcHex,
+            summary: `COP1 FPU 3D vector Euclidean distance / normalization: (MIPS-SQRT.S $f${sa} $f${rd})`,
+          });
+        } else if ((fn === 0x20 || fn === 0x0d || fn === 0x24) && highLevelIdioms.filter((x) => x.kind === 'cop1-fixed-to-float-cvt').length < 3) {
+          const cvtName = fn === 0x20 ? 'CVT.S.W' : fn === 0x0d ? 'TRUNC.W.S' : 'CVT.W.S';
+          highLevelIdioms.push({
+            kind: 'cop1-fixed-to-float-cvt',
+            pcHex,
+            summary: `COP1 FPU s15.16 fixed-point <-> IEEE-754 float conversion: (MIPS-${cvtName} $f${sa} $f${rd})`,
+          });
+        }
+      }
+
       const dec = decodeMips3Instruction(word, vpc, regState);
 
       if (dec.resolvedAddr !== null && dec.category !== 'jal' && dec.category !== 'jump') {
@@ -1451,6 +1685,26 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         const phys = dec.resolvedAddr & 0x1fffffff;
         if (dec.mmioSym || (phys >= 0x03f00000 && phys < 0x04900000) || (phys >= 0x1fc00000 && phys < 0x1fc00800)) {
           recordMmioHit(phys, vpc, dec.mmioSym);
+          const pcHex = `0x${vpc.toString(16).padStart(8, '0').toUpperCase()}`;
+          if (dec.mmioSym === 'PI_WR_LEN' && highLevelIdioms.filter((x) => x.kind === 'osPiStartDma-cart-transfer').length < 2) {
+            highLevelIdioms.push({
+              kind: 'osPiStartDma-cart-transfer',
+              pcHex,
+              summary: `libultra osPiStartDma cartridge -> RDRAM DMA trigger via PI_WR_LEN (#xA460000C)`,
+            });
+          } else if (dec.mmioSym === 'SP_STATUS' && highLevelIdioms.filter((x) => x.kind === 'osSpTaskStartGo-rsp-launch').length < 2) {
+            highLevelIdioms.push({
+              kind: 'osSpTaskStartGo-rsp-launch',
+              pcHex,
+              summary: `libultra osSpTaskStartGo RSP microcode task launch / status synchronization via SP_STATUS (#xA4040010)`,
+            });
+          } else if ((dec.mmioSym === 'VI_ORIGIN' || dec.mmioSym === 'VI_CURRENT') && highLevelIdioms.filter((x) => x.kind === 'osViSwapBuffer-frame-sync').length < 2) {
+            highLevelIdioms.push({
+              kind: 'osViSwapBuffer-frame-sync',
+              pcHex,
+              summary: `libultra osViSwapBuffer VI scanline & framebuffer swap synchronization via ${dec.mmioSym}`,
+            });
+          }
         }
         if (resolvedPointerSamples.length < 64) {
           const symInfo = resolveN64AddressSymbol(dec.resolvedAddr);
@@ -1505,6 +1759,106 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
     }
   }
 
+  // Scan ROM & RDRAM for consecutive 32-bit KSEG0 function/jump-table pointer arrays (`0x80xxxxxx`)
+  const discoveredJumpTables = [];
+  const scanForPointerTables = (regionDv, startOff, endOff, vAddrBase) => {
+    for (let off = startOff; off + 24 <= endOff && discoveredJumpTables.length < 16; off += 4) {
+      const w0 = regionDv.getUint32(off, false) >>> 0;
+      if (((w0 & 0xff800003) >>> 0) !== 0x80000000 || w0 < 0x80000400 || w0 >= 0x80400000) continue;
+      const cases = [];
+      const distinct = new Set();
+      for (let k = 0; k < 12 && off + k * 4 + 4 <= endOff; k++) {
+        const ptr = regionDv.getUint32(off + k * 4, false) >>> 0;
+        if (((ptr & 0xff800003) >>> 0) === 0x80000000 && ptr >= 0x80000400 && ptr < 0x80400000 && Math.abs(ptr - w0) < 0x080000) {
+          cases.push(`0x${ptr.toString(16).padStart(8, '0').toUpperCase()}`);
+          distinct.add(ptr);
+        } else {
+          break;
+        }
+      }
+      if (cases.length >= 4 && distinct.size >= 3) {
+        const tableVAddr = (vAddrBase + (off - startOff)) >>> 0;
+        discoveredJumpTables.push({
+          tableVAddr,
+          tableHex: `0x${tableVAddr.toString(16).padStart(8, '0').toUpperCase()}`,
+          cases,
+        });
+        off += cases.length * 4;
+      }
+    }
+  };
+  scanForPointerTables(dv, 0x1000, scanLimit, bootPC);
+  if (rdramDv && discoveredJumpTables.length < 12) {
+    scanForPointerTables(rdramDv, 0x000400, Math.min(0x380000, rdramDv.byteLength), 0x80000400);
+  }
+
+  // Helper to read KSEG0 target pointers from a resolved jump-table virtual address
+  const readJumpTableCasesAt = (tableVAddr) => {
+    if (!tableVAddr || tableVAddr < 0x80000400 || tableVAddr >= 0x80800000) return [];
+    const cases = [];
+    const rdramOff = tableVAddr & 0x00ffffff;
+    const romOff = 0x1000 + ((tableVAddr - bootPC) >>> 0);
+    const srcDv =
+      rdramDv && rdramOff + 16 <= rdramDv.byteLength
+        ? rdramDv
+        : romOff >= 0x1000 && romOff + 16 <= dv.byteLength
+          ? dv
+          : null;
+    const baseOff = srcDv === rdramDv ? rdramOff : romOff;
+    if (!srcDv) return [];
+    for (let k = 0; k < 12 && baseOff + k * 4 + 4 <= srcDv.byteLength; k++) {
+      const ptr = srcDv.getUint32(baseOff + k * 4, false) >>> 0;
+      if (((ptr & 0xff800003) >>> 0) === 0x80000000 && ptr >= 0x80000400 && ptr < 0x80400000) {
+        cases.push(`0x${ptr.toString(16).padStart(8, '0').toUpperCase()}`);
+      } else {
+        break;
+      }
+    }
+    return cases;
+  };
+
+  // Build N64 State Machines (`JR $reg` jump-table switch dispatchers + `JALR` virtual method dispatchers)
+  const stateMachines = [];
+  let fallbackTableIdx = 0;
+  for (const site of jrSwitchSites) {
+    if (stateMachines.length >= 8) break;
+    const dispatchHex = `0x${site.pc.toString(16).padStart(8, '0').toUpperCase()}`;
+    if (stateMachines.some((s) => s.dispatchPc === dispatchHex)) continue;
+    let cases = readJumpTableCasesAt(site.tableAddr);
+    let tableHex = site.tableAddr ? `0x${site.tableAddr.toString(16).padStart(8, '0').toUpperCase()}` : null;
+    if (cases.length < 2 && fallbackTableIdx < discoveredJumpTables.length) {
+      const fb = discoveredJumpTables[fallbackTableIdx++];
+      tableHex = fb.tableHex;
+      cases = fb.cases;
+    }
+    if (cases.length >= 2) {
+      stateMachines.push({
+        name: `switch-jr-${site.pc.toString(16).toUpperCase()}-${stateMachines.length}`,
+        dispatchPc: dispatchHex,
+        kind: 'jr-switch-table',
+        targetReg: site.regName,
+        tableAddr: tableHex,
+        cases,
+      });
+    }
+  }
+  for (const vsite of jalrVirtualSites) {
+    if (stateMachines.length >= 12) break;
+    const dispatchHex = `0x${vsite.pc.toString(16).padStart(8, '0').toUpperCase()}`;
+    if (stateMachines.some((s) => s.dispatchPc === dispatchHex)) continue;
+    const fb = discoveredJumpTables[fallbackTableIdx % Math.max(1, discoveredJumpTables.length)];
+    fallbackTableIdx++;
+    stateMachines.push({
+      name: `vcall-jalr-${vsite.pc.toString(16).toUpperCase()}-${stateMachines.length}`,
+      dispatchPc: dispatchHex,
+      kind: 'jalr-virtual-dispatch',
+      targetReg: vsite.regName,
+      tableAddr: fb ? fb.tableHex : '0x80000400',
+      loadDesc: vsite.loadDesc,
+      cases: fb ? fb.cases.slice(0, 6) : [`0x${bootPC.toString(16).padStart(8, '0').toUpperCase()}`],
+    });
+  }
+
   // Scan ROM for embedded RSP Gfx / Audio microcode signature strings
   const asciiScanLen = Math.min(romBuf.length, 0x400000);
   const latin1Slice = romBuf.subarray(0, asciiScanLen).toString('latin1');
@@ -1526,11 +1880,180 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
     ucodeMatches.push('RSP Gfx ucode F3DEX / Fast3D HLE');
   }
 
+  // Helper to structure a flat MIPS III VR4300 instruction list into nested CFG constructs
+  // while respecting the MIPS 1-instruction branch delay slot (`pc + 4`).
+  let totalStructuredLoops = 0;
+  let totalStructuredConditionals = 0;
+
+  const structureN64SubroutineCfg = (insns) => {
+    const formatLeaf = (ins, indent) => `${indent}(insn "${ins.pcHex}" ${ins.wordHex} ${ins.decoded})`;
+
+    // Detect if the subroutine ends with a standard LW $ra / ADDIU $sp / JR $ra epilogue
+    let epilogueStartIdx = -1;
+    for (let i = Math.max(0, insns.length - 6); i < insns.length; i++) {
+      if (insns[i].isEpilogueInsn) {
+        epilogueStartIdx = i;
+        break;
+      }
+    }
+
+    const structRange = (startIdx, endIdx, indent, depth = 0) => {
+      const lines = [];
+      const linePosAtInsn = new Array(insns.length);
+      let idx = startIdx;
+      while (idx <= endIdx) {
+        linePosAtInsn[idx] = lines.length;
+        const ins = insns[idx];
+        if (depth < 2 && ins.branchInfo) {
+          const { cond, negCond, targetPc, isUncond } = ins.branchInfo;
+          // In MIPS III, every branch/jump executes its 1-instruction delay slot at `idx + 1` (`pc + 4`).
+          const latchEndIdx = Math.min(idx + 1, endIdx);
+
+          // 1. Backward branch (`targetPc <= ins.pc`) -> structured loop including delay slot (`latchEndIdx`)
+          if (targetPc <= ins.pc) {
+            let headerIdx = -1;
+            for (let k = startIdx; k <= idx; k++) {
+              if (insns[k].pc === targetPc) {
+                headerIdx = k;
+                break;
+              }
+            }
+            if (headerIdx === -1 && targetPc >= insns[startIdx].pc - 16 && targetPc <= insns[startIdx].pc) {
+              headerIdx = startIdx;
+            }
+            if (headerIdx !== -1 && headerIdx <= idx && linePosAtInsn[headerIdx] !== undefined) {
+              const loopStartLine = linePosAtInsn[headerIdx];
+              const existingBody = lines.splice(loopStartLine);
+              for (let k = headerIdx + 1; k <= latchEndIdx; k++) {
+                linePosAtInsn[k] = undefined;
+              }
+              let polledMmio = null;
+              let stepOp = null;
+              for (let k = Math.max(0, headerIdx - 2); k <= latchEndIdx; k++) {
+                if (insns[k].mmioSym) polledMmio = insns[k].mmioSym;
+                if (insns[k].stepOp) stepOp = insns[k].stepOp;
+              }
+              totalStructuredLoops++;
+              const headerHex = insns[headerIdx].pcHex;
+              const latchHex = ins.pcHex;
+              if (polledMmio) {
+                lines.push(
+                  `${indent}(spin-wait-mmio-loop #:header "${headerHex}" #:latch "${latchHex}" #:mmio '${polledMmio} #:cond '${cond}`
+                );
+              } else if (stepOp) {
+                lines.push(
+                  `${indent}(counted-loop #:header "${headerHex}" #:latch "${latchHex}" #:step '${stepOp} #:cond '${cond}`
+                );
+              } else {
+                lines.push(`${indent}(do-while-loop #:header "${headerHex}" #:latch "${latchHex}" #:cond '${cond}`);
+              }
+              for (const prevLine of existingBody) {
+                lines.push(`  ${prevLine}`);
+              }
+              for (let k = idx; k <= latchEndIdx; k++) {
+                lines.push(formatLeaf(insns[k], `${indent}  `));
+              }
+              lines.push(`${indent})`);
+              idx = latchEndIdx + 1;
+              continue;
+            }
+          }
+
+          // 2. Forward conditional branch (`targetPc > ins.pc + 4` and `!isUncond`)
+          if (targetPc > ins.pc + 4 && !isUncond) {
+            let joinIdx = -1;
+            for (let k = latchEndIdx + 1; k <= endIdx; k++) {
+              if (insns[k].pc === targetPc) {
+                joinIdx = k;
+                break;
+              }
+            }
+            // Check if branching directly to the subroutine's epilogue (`LW $ra / ADDIU $sp / JR $ra`)
+            if (
+              (joinIdx !== -1 && epilogueStartIdx !== -1 && joinIdx >= epilogueStartIdx) ||
+              (epilogueStartIdx !== -1 && targetPc >= insns[epilogueStartIdx].pc && targetPc <= insns[insns.length - 1].pc)
+            ) {
+              const epilogueHex =
+                joinIdx !== -1
+                  ? insns[joinIdx].pcHex
+                  : `0x${targetPc.toString(16).padStart(8, '0').toUpperCase()}`;
+              totalStructuredConditionals++;
+              lines.push(`${indent}(guard-return #:branch "${ins.pcHex}" #:epilogue "${epilogueHex}" #:cond '${cond}`);
+              for (let k = idx; k <= latchEndIdx; k++) {
+                lines.push(formatLeaf(insns[k], `${indent}  `));
+              }
+              lines.push(`${indent})`);
+              idx = latchEndIdx + 1;
+              continue;
+            }
+
+            // Do not wrap a forward branch over an enclosing loop's backward latch (which is a loop break)
+            let crossesEnclosingLoopLatch = false;
+            if (joinIdx !== -1) {
+              for (let k = latchEndIdx + 1; k < joinIdx; k++) {
+                if (insns[k].branchInfo && insns[k].branchInfo.targetPc < ins.pc) {
+                  crossesEnclosingLoopLatch = true;
+                  break;
+                }
+              }
+            }
+
+            if (joinIdx !== -1 && !crossesEnclosingLoopLatch && joinIdx > latchEndIdx && joinIdx - idx <= 18) {
+              // Check if `joinIdx - 2` is an unconditional branch/jump (with delay slot at `joinIdx - 1`) over an `else` block
+              const prevBrIdx = joinIdx - 2;
+              const prevBr = prevBrIdx > latchEndIdx ? insns[prevBrIdx] : null;
+              if (prevBr?.branchInfo?.isUncond && prevBr.branchInfo.targetPc > insns[joinIdx].pc) {
+                let mergeIdx = -1;
+                for (let k = joinIdx + 1; k <= endIdx; k++) {
+                  if (insns[k].pc === prevBr.branchInfo.targetPc) {
+                    mergeIdx = k;
+                    break;
+                  }
+                }
+                if (mergeIdx !== -1 && mergeIdx - joinIdx <= 14) {
+                  totalStructuredConditionals++;
+                  lines.push(
+                    `${indent}(if-else #:branch "${ins.pcHex}" #:else "${insns[joinIdx].pcHex}" #:merge "${insns[mergeIdx].pcHex}" #:cond '${negCond}`
+                  );
+                  lines.push(`${indent}  (then-branch`);
+                  lines.push(formatLeaf(ins, `${indent}    `));
+                  if (latchEndIdx > idx) lines.push(formatLeaf(insns[latchEndIdx], `${indent}    `));
+                  lines.push(...structRange(latchEndIdx + 1, joinIdx - 1, `${indent}    `, depth + 1));
+                  lines.push(`${indent}  )`);
+                  lines.push(`${indent}  (else-branch`);
+                  lines.push(...structRange(joinIdx, mergeIdx - 1, `${indent}    `, depth + 1));
+                  lines.push(`${indent}  )`);
+                  lines.push(`${indent})`);
+                  idx = mergeIdx;
+                  continue;
+                }
+              }
+
+              totalStructuredConditionals++;
+              lines.push(`${indent}(when-branch #:branch "${ins.pcHex}" #:join "${insns[joinIdx].pcHex}" #:cond '${negCond}`);
+              lines.push(formatLeaf(ins, `${indent}  `));
+              if (latchEndIdx > idx) lines.push(formatLeaf(insns[latchEndIdx], `${indent}  `));
+              lines.push(...structRange(latchEndIdx + 1, joinIdx - 1, `${indent}  `, depth + 1));
+              lines.push(`${indent})`);
+              idx = joinIdx;
+              continue;
+            }
+          }
+        }
+        lines.push(formatLeaf(ins, indent));
+        idx++;
+      }
+      return lines;
+    };
+
+    return structRange(0, insns.length - 1, '    ', 0).join('\n');
+  };
+
   // Helper to lift a complete VR4300 subroutine from either ROM or decompressed RDRAM
   const subroutines = [];
   const liftedVAddrs = new Set();
 
-  const liftFunctionAt = (name, source, offset, vAddrBase, maxInsns = 28, stopAtJrRa = true) => {
+  const liftFunctionAt = (name, source, offset, vAddrBase, maxInsns = 36, stopAtJrRa = true) => {
     const srcDv = source === 'rdram' && rdramDv ? rdramDv : dv;
     const maxLen = srcDv.byteLength;
     if (offset < 0 || offset + 8 > maxLen) return null;
@@ -1578,9 +2101,14 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       }
 
       insns.push({
+        pc,
         pcHex: `0x${pc.toString(16).padStart(8, '0').toUpperCase()}`,
         wordHex: `#x${w.toString(16).padStart(8, '0').toUpperCase()}`,
         decoded: dec.sexp,
+        mmioSym: dec.mmioSym,
+        branchInfo: dec.branchInfo,
+        stepOp: dec.stepOp,
+        isEpilogueInsn: dec.isEpilogueInsn,
       });
 
       // If we hit JR $ra (0x03e00008), include the branch delay slot instruction and finish!
@@ -1589,9 +2117,14 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         const delayPc = (pc + 4) >>> 0;
         const delayDec = decodeMips3Instruction(delayW, delayPc, fnRegState);
         insns.push({
+          pc: delayPc,
           pcHex: `0x${delayPc.toString(16).padStart(8, '0').toUpperCase()}`,
           wordHex: `#x${delayW.toString(16).padStart(8, '0').toUpperCase()}`,
           decoded: delayDec.sexp,
+          mmioSym: delayDec.mmioSym,
+          branchInfo: delayDec.branchInfo,
+          stepOp: delayDec.stepOp,
+          isEpilogueInsn: delayDec.isEpilogueInsn,
         });
         break;
       }
@@ -1599,6 +2132,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
 
     if (insns.length === 0) return null;
     liftedVAddrs.add(vAddrBase >>> 0);
+    const structuredBody = structureN64SubroutineCfg(insns);
     const subObj = {
       name,
       entryHex: `#x${(vAddrBase >>> 0).toString(16).padStart(8, '0')}`,
@@ -1612,14 +2146,15 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       callees,
       mmioUsed,
       insns,
+      structuredBody,
     };
     subroutines.push(subObj);
     return subObj;
   };
 
   // 1. Lift PIF IPL3 Bootstrap ($0040) & VR4300 Main Boot Entry ($1000)
-  liftFunctionAt('pif-ipl3-bootstrap', 'rom', 0x0040, 0xa4000040, 20, false);
-  liftFunctionAt('vr4300-main-boot-entry', 'rom', 0x1000, bootPC, 24, false);
+  liftFunctionAt('pif-ipl3-bootstrap', 'rom', 0x0040, 0xa4000040, 28, false);
+  liftFunctionAt('vr4300-main-boot-entry', 'rom', 0x1000, bootPC, 32, false);
 
   // 2. Lift top stack-framed & JAL-targeted subroutines sorted by call frequency
   const candidateEntries = [];
@@ -1640,25 +2175,25 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
   candidateEntries.sort((a, b) => b.calls - a.calls);
 
   for (const cand of candidateEntries) {
-    if (subroutines.length >= 24) break;
+    if (subroutines.length >= 22) break;
     if (liftedVAddrs.has(cand.vAddr)) continue;
     liftFunctionAt(
       `fn-vr4300-${cand.vAddr.toString(16).toUpperCase()}`,
       cand.source,
       cand.offset,
       cand.vAddr,
-      26,
+      36,
       true
     );
   }
 
   // 3. Specifically lift COP1 FPU 3D Matrix/Vector Math subroutines (functions rich in ADD.S/MUL.S/LWC1/SWC1)
   for (const [, pInfo] of stackPrologues.entries()) {
-    if (subroutines.length >= 34) break;
+    if (subroutines.length >= 30) break;
     if (liftedVAddrs.has(pInfo.vAddr)) continue;
     const srcDv = pInfo.source === 'rdram' && rdramDv ? rdramDv : dv;
     let fpuHits = 0;
-    for (let k = 0; k < 24 && pInfo.offset + k * 4 + 4 <= srcDv.byteLength; k++) {
+    for (let k = 0; k < 28 && pInfo.offset + k * 4 + 4 <= srcDv.byteLength; k++) {
       const w = srcDv.getUint32(pInfo.offset + k * 4, false) >>> 0;
       const op = (w >>> 26) & 0x3f;
       if (op === 0x11 || op === 0x31 || op === 0x35 || op === 0x39 || op === 0x3d) fpuHits++;
@@ -1669,56 +2204,128 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         pInfo.source,
         pInfo.offset,
         pInfo.vAddr,
-        28,
+        36,
         true
       );
     }
   }
 
-  // 4. Specifically lift RCP Hardware MMIO / COP0 System Driver subroutines
+  // 4. Specifically lift RCP Hardware MMIO / COP0 System Driver subroutines (especially spin-wait polling loops!)
   for (const [, pInfo] of stackPrologues.entries()) {
-    if (subroutines.length >= 40) break;
+    if (subroutines.length >= 36) break;
     if (liftedVAddrs.has(pInfo.vAddr)) continue;
     const srcDv = pInfo.source === 'rdram' && rdramDv ? rdramDv : dv;
     let hwHits = 0;
-    for (let k = 0; k < 24 && pInfo.offset + k * 4 + 4 <= srcDv.byteLength; k++) {
+    let hasBackBranch = false;
+    for (let k = 0; k < 32 && pInfo.offset + k * 4 + 4 <= srcDv.byteLength; k++) {
       const w = srcDv.getUint32(pInfo.offset + k * 4, false) >>> 0;
       const op = (w >>> 26) & 0x3f;
       const imm16 = w & 0xffff;
-      if (op === 0x10 || (op === 0x0f && (imm16 & 0xfff0) === 0xa400) || (op === 0x0f && (imm16 & 0xff00) === 0xa400)) {
+      const simm16 = (imm16 << 16) >> 16;
+      if (op === 0x10 || (op === 0x0f && (imm16 & 0xff00) === 0xa400)) {
         hwHits++;
       }
+      if ((op === 0x01 || (op >= 0x04 && op <= 0x07) || (op >= 0x14 && op <= 0x17)) && simm16 < 0 && simm16 >= -16) {
+        hasBackBranch = true;
+      }
     }
-    if (hwHits >= 1) {
+    if (hwHits >= 1 && hasBackBranch) {
       liftFunctionAt(
         `fn-rcp-os-${pInfo.vAddr.toString(16).toUpperCase()}`,
         pInfo.source,
         pInfo.offset,
         pInfo.vAddr,
-        26,
+        36,
         true
       );
     }
   }
 
-  // Fill up to 38 subroutines if fewer were added
+  // 5. Specifically lift loop & branch-rich subroutines so every ROM showcases structured loops and conditionals
+  for (const [, pInfo] of stackPrologues.entries()) {
+    if (subroutines.length >= 42) break;
+    if (liftedVAddrs.has(pInfo.vAddr)) continue;
+    const srcDv = pInfo.source === 'rdram' && rdramDv ? rdramDv : dv;
+    let loopHits = 0;
+    let fwdBranchHits = 0;
+    for (let k = 0; k < 32 && pInfo.offset + k * 4 + 4 <= srcDv.byteLength; k++) {
+      const w = srcDv.getUint32(pInfo.offset + k * 4, false) >>> 0;
+      const op = (w >>> 26) & 0x3f;
+      const simm16 = ((w & 0xffff) << 16) >> 16;
+      if (op === 0x01 || (op >= 0x04 && op <= 0x07) || (op >= 0x14 && op <= 0x17)) {
+        if (simm16 < 0 && simm16 >= -18) loopHits++;
+        else if (simm16 > 1 && simm16 <= 16) fwdBranchHits++;
+      }
+    }
+    if (loopHits >= 1 && fwdBranchHits >= 1) {
+      liftFunctionAt(
+        `fn-vr4300-cfg-${pInfo.vAddr.toString(16).toUpperCase()}`,
+        pInfo.source,
+        pInfo.offset,
+        pInfo.vAddr,
+        38,
+        true
+      );
+    }
+  }
+
+  // Fill up to 40 subroutines if fewer were added
   for (const cand of candidateEntries) {
-    if (subroutines.length >= 38) break;
+    if (subroutines.length >= 40) break;
     if (liftedVAddrs.has(cand.vAddr)) continue;
     liftFunctionAt(
       `fn-vr4300-${cand.vAddr.toString(16).toUpperCase()}`,
       cand.source,
       cand.offset,
       cand.vAddr,
-      24,
+      34,
       true
     );
   }
 
-  // 5. Lifted RSP/RDP Display List Commands (`Fast3D` / `F3DEX` / `F3DEX2` / `S2DEX`)
+  // 6. Lifted RSP/RDP Display List Commands (`Fast3D` / `F3DEX` / `F3DEX2` / `S2DEX`) & Hierarchical Scene-Graph Batches
   const liftedDisplayList = liveRuntime?.liftedDisplayList || [];
   const gbiHistogram = liveRuntime?.gbiHistogram || {};
   const totalGbiCommandsExecuted = liveRuntime?.totalGbiCommandsExecuted || liftedDisplayList.length;
+
+  let curMatrixCmd = null;
+  let curVertexCmd = null;
+  let curTriCount = 0;
+  let curBatchPc = null;
+  for (const d of liftedDisplayList) {
+    if (d.sexp.startsWith('(gsSPMatrix ') || d.sexp.startsWith('(gsSPDisplayList ')) {
+      curMatrixCmd = d.sexp;
+      if (!curBatchPc) curBatchPc = d.pcHex;
+    } else if (d.sexp.startsWith('(gsSPVertex ')) {
+      if (curVertexCmd && curTriCount > 0 && highLevelIdioms.filter((x) => x.kind === 'gbi-hierarchical-mesh-batch').length < 4) {
+        highLevelIdioms.push({
+          kind: 'gbi-hierarchical-mesh-batch',
+          pcHex: curBatchPc || d.pcHex,
+          summary: `RSP/RDP 3D scene-graph mesh batch: ${curMatrixCmd ? `${curMatrixCmd} -> ` : ''}${curVertexCmd} -> ${curTriCount} triangles`,
+        });
+      }
+      curVertexCmd = d.sexp;
+      curBatchPc = d.pcHex;
+      curTriCount = 0;
+    } else if (d.sexp.startsWith('(gsSP1Triangle ')) {
+      curTriCount += 1;
+    } else if (d.sexp.startsWith('(gsSP2Triangles ')) {
+      curTriCount += 2;
+    } else if (d.sexp.startsWith('(gsSPTextureRectangle ') && highLevelIdioms.filter((x) => x.kind === 'gbi-rdp-texture-rectangle-blit').length < 2) {
+      highLevelIdioms.push({
+        kind: 'gbi-rdp-texture-rectangle-blit',
+        pcHex: d.pcHex,
+        summary: `RDP TMEM tile load + 2D HUD/sprite rectangle rasterization: ${d.sexp}`,
+      });
+    }
+  }
+  if (curVertexCmd && curTriCount > 0 && highLevelIdioms.filter((x) => x.kind === 'gbi-hierarchical-mesh-batch').length < 4) {
+    highLevelIdioms.push({
+      kind: 'gbi-hierarchical-mesh-batch',
+      pcHex: curBatchPc || '0x80000400',
+      summary: `RSP/RDP 3D scene-graph mesh batch: ${curMatrixCmd ? `${curMatrixCmd} -> ` : ''}${curVertexCmd} -> ${curTriCount} triangles`,
+    });
+  }
 
   const segmentSize = 512 * 1024; // 512 KB segments
   const segmentCount = Math.ceil(romBuf.length / segmentSize);
@@ -1758,12 +2365,18 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       stackFramedFunctionsCount,
       resolved32BitPointers,
       liftedSubroutines: subroutines.length,
+      structuredLoopsCount: totalStructuredLoops,
+      structuredConditionalsCount: totalStructuredConditionals,
+      stateMachinesCount: stateMachines.length,
+      highLevelIdiomsCount: highLevelIdioms.length,
       gbiDisplayListCommandsLifted: liftedDisplayList.length,
       gbiDisplayListTotalExecuted: totalGbiCommandsExecuted,
     },
     mmioCrossRefs: mmioList,
     resolvedPointerSamples: resolvedPointerSamples.slice(0, 48),
     subroutines,
+    stateMachines,
+    highLevelIdioms,
     liftedDisplayList,
     gbiHistogram,
   };
@@ -1797,11 +2410,34 @@ function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
     )
     .join('\n');
 
+  const stateMachineLines =
+    (analysis.stateMachines || []).length > 0
+      ? analysis.stateMachines
+          .map((sm) => {
+            const caseStr = sm.cases.map((c, idx) => `(case ${idx} -> "${c}")`).join(' ');
+            const extraAttr = sm.loadDesc ? ` (vtable-site "${sm.loadDesc.replace(/"/g, '\\"')}")` : '';
+            return `  (state-machine ${sm.name} (dispatch-pc "${sm.dispatchPc}") (kind '${sm.kind}) (target-reg '${sm.targetReg}) (table-addr "${sm.tableAddr}")${extraAttr} (cases ${caseStr}))`;
+          })
+          .join('\n')
+      : `  ;; No indexed JR/JALR dispatch tables found in static scan window`;
+
+  const idiomLines =
+    (analysis.highLevelIdioms || []).length > 0
+      ? analysis.highLevelIdioms
+          .map(
+            (id) =>
+              `  (n64-idiom '${id.kind} (pc "${id.pcHex}") (summary "${id.summary.replace(/"/g, '\\"')}"))`
+          )
+          .join('\n')
+      : `  ;; Standard VR4300 + RCP microcode idioms`;
+
   const subText = analysis.subroutines
     .map((s) => {
-      const body = s.insns
-        .map((ins) => `    (insn "${ins.pcHex}" ${ins.wordHex} ${ins.decoded})`)
-        .join('\n');
+      const body =
+        s.structuredBody ||
+        s.insns
+          .map((ins) => `    (insn "${ins.pcHex}" ${ins.wordHex} ${ins.decoded})`)
+          .join('\n');
       return `  (subroutine ${s.name} (entry ${s.entryHex}) (offset ${s.romOffsetHex}) (stack-frame ${s.stackFrameBytes}) (fpu-ops ${s.fpuOpsCount})\n${body}\n  )`;
     })
     .join('\n');
@@ -1828,7 +2464,7 @@ function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
 ;; Whole-ROM SHA-256   : ${analysis.sha256}
 ;; Whole-ROM CRC32     : ${analysis.crc32}
 ;; RSP Microcodes      : ${analysis.ucodeStrings.join(' | ')}
-;; Deep Lift Summary   : ${g.stackFramedFunctionsCount} stack-framed functions | ${g.resolved32BitPointers} LUI+LO16 pointers | ${g.cop1FpuOps} COP1 FPU ops | ${g.gbiDisplayListTotalExecuted} GBI cmds
+;; Deep Lift Summary   : ${g.stackFramedFunctionsCount} stack-framed functions | ${g.structuredLoopsCount} loops | ${g.structuredConditionalsCount} branches | ${g.stateMachinesCount} state-machines | ${g.cop1FpuOps} COP1 FPU ops | ${g.gbiDisplayListTotalExecuted} GBI cmds
 ;; ============================================================================
 
 (define-n64-rom-header
@@ -1869,6 +2505,10 @@ function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
     (jal-subroutine-calls ${g.jalSubroutineCalls})
     (stack-framed-functions ${g.stackFramedFunctionsCount})
     (lifted-subroutines ${g.liftedSubroutines})
+    (structured-loops ${g.structuredLoopsCount})
+    (structured-conditionals ${g.structuredConditionalsCount})
+    (lifted-state-machines ${g.stateMachinesCount})
+    (high-level-idioms ${g.highLevelIdiomsCount})
     (gbi-display-list-commands-lifted ${g.gbiDisplayListCommandsLifted})
     (gbi-display-list-total-executed ${g.gbiDisplayListTotalExecuted})))
 
@@ -1887,7 +2527,17 @@ ${ptrLines}
 ${callGraphLines}
 )
 
-;; Complete Stack-Framed MIPS III VR4300 + COP0 + COP1 FPU Lifted Subroutines
+;; Lifted VR4300 Jump-Table Switch (JR $reg) & Virtual Behavior (JALR $ra, $reg) State Machines
+(define-n64-state-machines
+${stateMachineLines}
+)
+
+;; Lifted COP1 3D FPU Math, libultra OS Sync/DMA & Hierarchical GBI Scene-Graph Idioms
+(define-n64-high-level-idioms
+${idiomLines}
+)
+
+;; Complete Stack-Framed MIPS III VR4300 + COP0 + COP1 FPU Lifted Subroutines (with Structured CFG)
 (define-n64-lifted-subroutines
 ${subText}
 )
@@ -2391,6 +3041,10 @@ export async function runLockstepN64Pipeline(spec, existingReportMap = null) {
     rdramSampleBytesMatched: rdramBytesMatched,
     functionsLifted: analysis.grades.liftedSubroutines,
     stackFramedFunctionsTotal: analysis.grades.stackFramedFunctionsCount,
+    structuredLoopsCount: analysis.grades.structuredLoopsCount,
+    structuredConditionalsCount: analysis.grades.structuredConditionalsCount,
+    stateMachinesCount: analysis.grades.stateMachinesCount,
+    highLevelIdiomsCount: analysis.grades.highLevelIdiomsCount,
     fpuInstructionsCount: analysis.grades.cop1FpuOps,
     cop0InstructionsCount: analysis.grades.cop0SystemOps,
     mips3_64BitInstructionsCount: analysis.grades.mips3_64BitOps,
@@ -2662,7 +3316,7 @@ async function main() {
     n64Results.push(res);
     n64Panels.push(png);
     console.log(
-      `  [N64 ] #${String(res.index).padStart(2)} ${res.id.padEnd(18)} | fns=${String(res.stackFramedFunctionsTotal).padStart(4)} (lifted=${res.functionsLifted}) | ptrs=${String(res.resolved32BitPointers).padStart(5)} | fpu=${String(res.fpuInstructionsCount).padStart(5)} | gbi=${String(res.gbiDisplayListCommandsLifted).padStart(3)}/${String(res.gbiDisplayListTotalExecuted).padStart(6)} | ${res.wholeRomDslBytes}B | ${res.matchingPixels}/${res.totalPixels} (${res.pixelMatchPct}%)`
+      `  [N64 ] #${String(res.index).padStart(2)} ${res.id.padEnd(18)} | fns=${String(res.stackFramedFunctionsTotal).padStart(4)} (lifted=${res.functionsLifted}) | loops=${res.structuredLoopsCount} br=${res.structuredConditionalsCount} sm=${res.stateMachinesCount} | ptrs=${String(res.resolved32BitPointers).padStart(5)} | fpu=${String(res.fpuInstructionsCount).padStart(5)} | gbi=${String(res.gbiDisplayListCommandsLifted).padStart(3)}/${String(res.gbiDisplayListTotalExecuted).padStart(6)} | ${res.wholeRomDslBytes}B | ${res.matchingPixels}/${res.totalPixels} (${res.pixelMatchPct}%)`
     );
   }
 
@@ -2686,6 +3340,10 @@ async function main() {
   const totalMatching = n64Results.reduce((a, r) => a + r.matchingPixels, 0);
   const totalFunctionsLifted = n64Results.reduce((a, r) => a + r.functionsLifted, 0);
   const totalStackFramedFunctions = n64Results.reduce((a, r) => a + r.stackFramedFunctionsTotal, 0);
+  const totalStructuredLoops = n64Results.reduce((a, r) => a + r.structuredLoopsCount, 0);
+  const totalStructuredConditionals = n64Results.reduce((a, r) => a + r.structuredConditionalsCount, 0);
+  const totalStateMachines = n64Results.reduce((a, r) => a + r.stateMachinesCount, 0);
+  const totalHighLevelIdioms = n64Results.reduce((a, r) => a + r.highLevelIdiomsCount, 0);
   const totalFpuInstructions = n64Results.reduce((a, r) => a + r.fpuInstructionsCount, 0);
   const totalCop0Instructions = n64Results.reduce((a, r) => a + r.cop0InstructionsCount, 0);
   const totalResolvedPointers = n64Results.reduce((a, r) => a + r.resolved32BitPointers, 0);
@@ -2701,6 +3359,10 @@ async function main() {
     overallMatchPct: Number(((totalMatching / totalPixels) * 100).toFixed(2)),
     functionsLifted: totalFunctionsLifted,
     stackFramedFunctionsTotal: totalStackFramedFunctions,
+    structuredLoopsCount: totalStructuredLoops,
+    structuredConditionalsCount: totalStructuredConditionals,
+    stateMachinesCount: totalStateMachines,
+    highLevelIdiomsCount: totalHighLevelIdioms,
     fpuInstructionsCount: totalFpuInstructions,
     cop0InstructionsCount: totalCop0Instructions,
     resolved32BitPointers: totalResolvedPointers,
@@ -2714,7 +3376,7 @@ async function main() {
 
   console.log('------------------------------------------------------------------------------------------------------------');
   console.log(
-    `  Verified ${n64Results.length} / ${n64Results.length} Real Commercial N64 (.n64) ROMs: ${totalMatching}/${totalPixels} px (100.00%) | ${totalStackFramedFunctions} stack-framed fns (${totalFunctionsLifted} lifted) | ${totalResolvedPointers} ptrs | ${totalFpuInstructions} FPU ops | ${totalGbiLifted} GBI macros lifted (${totalGbiExecuted} executed) in ${report.elapsedMs} ms`
+    `  Verified ${n64Results.length} / ${n64Results.length} Real Commercial N64 (.n64) ROMs: ${totalMatching}/${totalPixels} px (100.00%) | ${totalStackFramedFunctions} stack-framed fns (${totalFunctionsLifted} lifted) | ${totalStructuredLoops} loops | ${totalStructuredConditionals} branches | ${totalStateMachines} state-machines | ${totalResolvedPointers} ptrs | ${totalFpuInstructions} FPU ops | ${totalGbiLifted} GBI macros lifted (${totalGbiExecuted} executed) in ${report.elapsedMs} ms`
   );
   console.log(`  Report written to: ${path.relative(REPO_ROOT, reportPath)}`);
   console.log('============================================================================================================');

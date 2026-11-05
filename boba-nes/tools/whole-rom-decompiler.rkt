@@ -25,6 +25,7 @@
          racket/string
          "nes-resource-tool.rkt"
          "nes-rom-decompiler.rkt"
+         "cfg-structurer.rkt"
          "sm83-disassembler.rkt")
 
 (provide
@@ -44,6 +45,7 @@
  read-boba-whole-rom-sexp
  write-boba-whole-rom-module!
  decompile-and-recompile-all-44-whole-roms!
+ (all-from-out "cfg-structurer.rkt")
  (all-from-out "sm83-disassembler.rkt"))
 
 (define-syntax (get-repo-root stx)
@@ -404,6 +406,16 @@
                                           #:stop-off [stop-off 16384]
                                           #:vec-names [vec-names (hasheq)])
   (define limit-off (min (- bank-end bank-start) stop-off))
+  (define (finish-block end-off rev-insts rev-calls rev-mmio zps)
+    (define raw-insts (reverse rev-insts))
+    (define-values (struct-insts cfg-stats)
+      (structure-subroutine-cfg raw-insts #:arch 'mos6502))
+    (hasheq 'size-bytes (- end-off start-off)
+            'insts      struct-insts
+            'cfg-stats  cfg-stats
+            'calls      (remove-duplicates (reverse rev-calls))
+            'mmio       (remove-duplicates (reverse rev-mmio))
+            'zp-vars    (sort (remove-duplicates zps) <)))
   (let loop ([off start-off]
              [cnt 0]
              [insts '()]
@@ -411,28 +423,16 @@
              [mmio '()]
              [zps '()])
     (if (or (>= off limit-off) (>= cnt max-insts))
-        (hasheq 'size-bytes (- off start-off)
-                'insts      (reverse insts)
-                'calls      (remove-duplicates (reverse calls))
-                'mmio       (remove-duplicates (reverse mmio))
-                'zp-vars    (sort (remove-duplicates zps) <))
+        (finish-block off insts calls mmio zps)
         (let* ([abs-pos (+ bank-start off)]
                [pc      (+ bank-origin off)]
                [op      (bytes-ref rom-bytes abs-pos)]
                [info    (vector-ref NES-OPCODE-VEC op)])
           (if (not info)
-              (hasheq 'size-bytes (- off start-off)
-                      'insts      (reverse insts)
-                      'calls      (remove-duplicates (reverse calls))
-                      'mmio       (remove-duplicates (reverse mmio))
-                      'zp-vars    (sort (remove-duplicates zps) <))
+              (finish-block off insts calls mmio zps)
               (match-let ([(list mnem mode-kw len) info])
                 (if (> (+ off len) limit-off)
-                    (hasheq 'size-bytes (- off start-off)
-                            'insts      (reverse insts)
-                            'calls      (remove-duplicates (reverse calls))
-                            'mmio       (remove-duplicates (reverse mmio))
-                            'zp-vars    (sort (remove-duplicates zps) <))
+                    (finish-block off insts calls mmio zps)
                     (let* ([b1 (if (>= len 2) (bytes-ref rom-bytes (+ abs-pos 1)) 0)]
                            [b2 (if (= len 3)  (bytes-ref rom-bytes (+ abs-pos 2)) 0)]
                            [u16 (bitwise-ior b1 (arithmetic-shift b2 8))]
@@ -481,15 +481,11 @@
                               [else zps])]
                            [next-off (+ off len)])
                       (if (memq mnem '(RTS RTI BRK JMP))
-                          (hasheq 'size-bytes (- next-off start-off)
-                                  'insts      (reverse (cons inst-sexp insts))
-                                  'calls      (remove-duplicates (reverse calls1))
-                                  'mmio       (remove-duplicates (reverse mmio1))
-                                  'zp-vars    (sort (remove-duplicates zps1) <))
+                          (finish-block next-off (cons inst-sexp insts) calls1 mmio1 zps1)
                           (loop next-off (add1 cnt) (cons inst-sexp insts) calls1 mmio1 zps1))))))))))
 
 ;; Deeply lift a 16 KB NES PRG-ROM bank into subroutines (`defsub`), data blocks (`defdata`),
-;; MMIO usage counts, and indirect jump table sites.
+;; MMIO usage counts, indirect jump table sites, state machines, and high-level idioms.
 (define (lift-nes-prg-bank-deep rom-bytes bank-idx prg-banks bank-start bank-end
                                 global-subs vecs
                                 #:max-subs [max-subs 36])
@@ -515,23 +511,26 @@
         a))
 
   (define vec-names (make-hasheq))
-  (define candidate-addrs '())
+  (define vec-addrs '())
+  (define rec-addrs '())
+  (define jsr-addrs '())
+  (define linear-addrs '())
 
   ;; Register interrupt handler entry points if they belong to this bank
-  (for ([vpair (in-list (list (cons irq-v 'irq_handler)
+  (for ([vpair (in-list (list (cons reset-v 'reset_handler)
                               (cons nmi-v 'nmi_handler)
-                              (cons reset-v 'reset_handler)))])
+                              (cons irq-v 'irq_handler)))])
     (define raw-a (car vpair))
     (define vname (cdr vpair))
     (when (addr-in-this-bank? raw-a)
       (define na (norm-addr raw-a))
       (hash-set! vec-names na vname)
-      (set! candidate-addrs (cons na candidate-addrs))))
+      (set! vec-addrs (cons na vec-addrs))))
 
   ;; Register global recursive-descent subroutines belonging to this bank
   (for ([sa (in-list global-subs)])
     (when (addr-in-this-bank? sa)
-      (set! candidate-addrs (cons (norm-addr sa) candidate-addrs))))
+      (set! rec-addrs (cons (norm-addr sa) rec-addrs))))
 
   ;; Scan the 16 KB bank linearly for local JSR targets, MMIO counts, and post-RTS entry points
   (define mmio-write-counts (make-hasheq))
@@ -561,10 +560,10 @@
                (when (and after-term?
                           (not (= op #x00))
                           (not (= op #xFF))
-                          (< (length candidate-addrs) (* max-subs 2)))
-                 (set! candidate-addrs (cons pc candidate-addrs)))
+                          (< (length linear-addrs) (* max-subs 2)))
+                 (set! linear-addrs (cons pc linear-addrs)))
                (when (and (eq? mnem 'JSR) (addr-in-this-bank? u16))
-                 (set! candidate-addrs (cons (norm-addr u16) candidate-addrs)))
+                 (set! jsr-addrs (cons (norm-addr u16) jsr-addrs)))
                (when (and (eq? mnem 'JMP) (eq? mode-kw '#:ind))
                  (set! ind-jmp-sites (cons `(jmp-indirect #:bank ,bank-idx #:pc ,pc #:ptr ,u16) ind-jmp-sites)))
                (when (memq mode-kw '(#:abs #:absx #:absy))
@@ -575,10 +574,20 @@
                    (hash-set! tbl msym (add1 (hash-ref tbl msym 0)))))
                (loop (+ off len) (memq mnem '(RTS RTI)))))])))
 
+  (define prioritized-addrs
+    (remove-duplicates
+     (append (reverse vec-addrs)
+             (reverse rec-addrs)
+             (reverse jsr-addrs)
+             (reverse linear-addrs))))
+
   (define sorted-unique-addrs
-    (let ([dedup (sort (remove-duplicates candidate-addrs) <)])
-      ;; Always keep vector handlers + up to max-subs subroutines
-      (take dedup (min max-subs (length dedup)))))
+    (sort (take prioritized-addrs (min max-subs (length prioritized-addrs))) <))
+
+  (define bank-loops         0)
+  (define bank-spin-waits    0)
+  (define bank-conditionals  0)
+  (define bank-guard-returns 0)
 
   (define lifted-subs
     (for/list ([sub-addr (in-list sorted-unique-addrs)]
@@ -594,6 +603,11 @@
                                           #:max-insts 32
                                           #:stop-off stop-off
                                           #:vec-names vec-names))
+      (define cstats (hash-ref blk 'cfg-stats (hasheq)))
+      (set! bank-loops         (+ bank-loops         (hash-ref cstats 'loops 0)))
+      (set! bank-spin-waits    (+ bank-spin-waits    (hash-ref cstats 'spin-waits 0)))
+      (set! bank-conditionals  (+ bank-conditionals  (hash-ref cstats 'conditionals 0)))
+      (set! bank-guard-returns (+ bank-guard-returns (hash-ref cstats 'guard-returns 0)))
       (define sub-name
         (hash-ref vec-names sub-addr
                   (lambda ()
@@ -609,6 +623,10 @@
          #:mmio ,(hash-ref blk 'mmio)
          #:zp-vars ,(hash-ref blk 'zp-vars)
          ,@(hash-ref blk 'insts))))
+
+  ;; Lift state-machine dispatch tables (`def-state-machine`) and high-level 6502 idioms in this bank
+  (define sm-and-idioms
+    (lift-nes-state-machines-and-idioms rom-bytes bank-idx bank-start bank-end bank-origin lifted-subs))
 
   ;; Lift structured `defdata` blocks (including hardware vector table at $FFFA-$FFFF in fixed bank,
   ;; plus initial bank data / pointer tables)
@@ -636,12 +654,18 @@
                   #:hex ,(bytes-slice->hex-string rom-bytes (+ bank-start #x3FFA) (+ bank-start #x4000))))
          '())))
 
-  (hasheq 'origin            bank-origin
-          'subroutines       lifted-subs
-          'data-blocks       lifted-data-blocks
-          'mmio-write-counts mmio-write-counts
-          'mmio-read-counts  mmio-read-counts
-          'ind-jmp-sites     (reverse ind-jmp-sites)))
+  (hasheq 'origin                   bank-origin
+          'subroutines              lifted-subs
+          'data-blocks              lifted-data-blocks
+          'mmio-write-counts        mmio-write-counts
+          'mmio-read-counts         mmio-read-counts
+          'ind-jmp-sites            (reverse ind-jmp-sites)
+          'structured-loops         bank-loops
+          'structured-spin-waits    bank-spin-waits
+          'structured-conditionals  bank-conditionals
+          'structured-guard-returns bank-guard-returns
+          'state-machines           (hash-ref sm-and-idioms 'state-machines)
+          'high-level-idioms        (hash-ref sm-and-idioms 'high-level-idioms)))
 
 (define (lift-nes-whole-rom->boba-sexp spec rom-bytes)
   (define id-str    (hash-ref spec 'id))
@@ -664,9 +688,15 @@
   (define full-insts (hash-ref dis 'instructions))
   (define sample-insts (take full-insts (min 48 (length full-insts))))
 
-  (define total-mmio-writes (make-hasheq))
-  (define total-mmio-reads  (make-hasheq))
-  (define all-ind-jmps      '())
+  (define total-mmio-writes   (make-hasheq))
+  (define total-mmio-reads    (make-hasheq))
+  (define all-ind-jmps        '())
+  (define all-state-machines  '())
+  (define all-high-idioms     '())
+  (define total-loops         0)
+  (define total-spin-waits    0)
+  (define total-conditionals  0)
+  (define total-guard-returns 0)
   (define max-subs-per-bank (if (<= prg-banks 2) 32 16))
 
   ;; Lift each 16 KB PRG-ROM bank with deep `defsub` subroutines, `defdata` blocks & lossless segments
@@ -683,7 +713,13 @@
         (hash-set! total-mmio-writes k (+ v (hash-ref total-mmio-writes k 0))))
       (for ([(k v) (in-hash (hash-ref deep 'mmio-read-counts))])
         (hash-set! total-mmio-reads k (+ v (hash-ref total-mmio-reads k 0))))
-      (set! all-ind-jmps (append all-ind-jmps (hash-ref deep 'ind-jmp-sites)))
+      (set! all-ind-jmps        (append all-ind-jmps        (hash-ref deep 'ind-jmp-sites)))
+      (set! all-state-machines  (append all-state-machines  (hash-ref deep 'state-machines)))
+      (set! all-high-idioms     (append all-high-idioms     (hash-ref deep 'high-level-idioms)))
+      (set! total-loops         (+ total-loops         (hash-ref deep 'structured-loops 0)))
+      (set! total-spin-waits    (+ total-spin-waits    (hash-ref deep 'structured-spin-waits 0)))
+      (set! total-conditionals  (+ total-conditionals  (hash-ref deep 'structured-conditionals 0)))
+      (set! total-guard-returns (+ total-guard-returns (hash-ref deep 'structured-guard-returns 0)))
 
       `(def-prg-bank
          (bank-index ,b)
@@ -700,6 +736,11 @@
           ,@(hash-ref deep 'data-blocks))
          (segments
           ,@segs))))
+
+  (define capped-state-machines
+    (take all-state-machines (min 16 (length all-state-machines))))
+  (define capped-high-idioms
+    (take all-high-idioms (min 24 (length all-high-idioms))))
 
   ;; Build Symbolic MMIO Cross-Reference Table
   (define all-mmio-syms
@@ -771,6 +812,12 @@
       (subroutine-count ,(hash-ref dis 'subroutine-count))
       (subroutine-entry-points ,(take (hash-ref dis 'subroutines) (min 64 (length (hash-ref dis 'subroutines)))))
       (total-lifted-instructions ,(hash-ref mb 'total-instructions))
+      (structured-loops ,total-loops)
+      (structured-spin-waits ,total-spin-waits)
+      (structured-conditionals ,total-conditionals)
+      (structured-guard-returns ,total-guard-returns)
+      (lifted-state-machines ,(length capped-state-machines))
+      (lifted-high-level-idioms ,(length capped-high-idioms))
       (idioms
        (indirect-jmp-count ,(hash-ref idioms 'indirect-jmp-count))
        (rts-dispatch-count ,(hash-ref idioms 'rts-dispatch-count))
@@ -778,6 +825,10 @@
        (nmi-sync-semaphores ,(hash-ref nmi-sems 'count))))
      (symbolic-mmio-xref
       ,@mmio-xref-entries)
+     (state-machines
+      ,@capped-state-machines)
+     (high-level-idioms
+      ,@capped-high-idioms)
      (jump-tables
       ,@(take all-ind-jmps (min 32 (length all-ind-jmps))))
      (disassembled-entry-prologue
@@ -847,14 +898,36 @@
                  [(cons _ rest) (loop rest)]
                  ['() '()])))))
 
-  (define all-hram     (mutable-set))
-  (define all-io       (mutable-set))
-  (define all-mbc      (mutable-set))
-  (define mmio-totals  (make-hasheq))
-  (define total-insts  0)
-  (define total-cb-ops 0)
-  (define total-subs   0)
-  (define cross-bank-calls isr-call-seeds)
+  (define all-hram            (mutable-set))
+  (define all-io              (mutable-set))
+  (define all-mbc             (mutable-set))
+  (define mmio-totals         (make-hasheq))
+  (define total-insts         0)
+  (define total-cb-ops        0)
+  (define total-subs          0)
+  (define total-loops         0)
+  (define total-spin-waits    0)
+  (define total-conditionals  0)
+  (define total-guard-returns 0)
+  (define cross-bank-calls    isr-call-seeds)
+
+  ;; Count structured CFG constructs inside lifted ISRs as well
+  (for ([isr (in-list lifted-isrs)])
+    (let count-sub ([forms (cddr isr)])
+      (for ([f (in-list forms)]
+            #:when (pair? f))
+        (case (car f)
+          [(spin-wait-mmio-loop)
+           (set! total-spin-waits (add1 total-spin-waits))
+           (set! total-loops (add1 total-loops))]
+          [(counted-loop do-while-loop)
+           (set! total-loops (add1 total-loops))]
+          [(guard-return)
+           (set! total-guard-returns (add1 total-guard-returns))
+           (set! total-conditionals (add1 total-conditionals))]
+          [(when-branch if-else)
+           (set! total-conditionals (add1 total-conditionals))]
+          [else (void)]))))
 
   (define lifted-rom-banks
     (for/list ([b (in-range num-banks)])
@@ -874,7 +947,7 @@
             (analyze-sm83-bank-deep rom-bytes b b-start b-end
                                     #:seed-entries cross-bank-calls
                                     #:max-subroutines max-subs-for-bank
-                                    #:max-insts-per-sub 24)
+                                    #:max-insts-per-sub 28)
             (hasheq 'instruction-count (quotient b-size 2)
                     'cb-bit-ops 0
                     'call-targets '()
@@ -882,7 +955,11 @@
                     'io-regs '()
                     'mbc-writes '()
                     'mmio-counts (hasheq)
-                    'subroutines '())))
+                    'subroutines '()
+                    'structured-loops 0
+                    'structured-spin-waits 0
+                    'structured-conditionals 0
+                    'structured-guard-returns 0)))
 
       (for ([h (in-list (hash-ref analysis 'hram-offsets))]) (set-add! all-hram h))
       (for ([r (in-list (hash-ref analysis 'io-regs))])      (set-add! all-io r))
@@ -891,9 +968,13 @@
         (hash-set! mmio-totals sym (+ cnt (hash-ref mmio-totals sym 0))))
       (when (= b 0)
         (set! cross-bank-calls (append cross-bank-calls (hash-ref analysis 'call-targets))))
-      (set! total-insts  (+ total-insts  (hash-ref analysis 'instruction-count)))
-      (set! total-cb-ops (+ total-cb-ops (hash-ref analysis 'cb-bit-ops)))
-      (set! total-subs   (+ total-subs   (length (hash-ref analysis 'subroutines))))
+      (set! total-insts         (+ total-insts         (hash-ref analysis 'instruction-count)))
+      (set! total-cb-ops        (+ total-cb-ops        (hash-ref analysis 'cb-bit-ops)))
+      (set! total-subs          (+ total-subs          (length (hash-ref analysis 'subroutines))))
+      (set! total-loops         (+ total-loops         (hash-ref analysis 'structured-loops 0)))
+      (set! total-spin-waits    (+ total-spin-waits    (hash-ref analysis 'structured-spin-waits 0)))
+      (set! total-conditionals  (+ total-conditionals  (hash-ref analysis 'structured-conditionals 0)))
+      (set! total-guard-returns (+ total-guard-returns (hash-ref analysis 'structured-guard-returns 0)))
 
       `(def-rom-bank
          (bank-index ,b)
@@ -909,6 +990,11 @@
           ,@(hash-ref analysis 'subroutines))
          (segments
           ,@segs))))
+
+  ;; Lift SM83 state-machine dispatch tables (`def-sm83-state-machine`) and high-level SM83 idioms
+  (define sm83-sm-and-idioms (lift-sm83-state-machines-and-idioms rom-bytes num-banks))
+  (define sm83-state-machines (hash-ref sm83-sm-and-idioms 'state-machines))
+  (define sm83-high-idioms    (hash-ref sm83-sm-and-idioms 'high-level-idioms))
 
   (define sorted-mmio-syms (sort (hash-keys mmio-totals) symbol<?))
   (define mmio-xref-entries
@@ -964,9 +1050,19 @@
       (mbc-bank-switch-sites ,(sort (set->list all-mbc) <))
       (cb-prefix-bit-ops ,total-cb-ops)
       (lifted-subroutine-count ,total-subs)
-      (total-lifted-instructions ,total-insts))
+      (total-lifted-instructions ,total-insts)
+      (structured-loops ,total-loops)
+      (structured-spin-waits ,total-spin-waits)
+      (structured-conditionals ,total-conditionals)
+      (structured-guard-returns ,total-guard-returns)
+      (lifted-state-machines ,(length sm83-state-machines))
+      (lifted-high-level-idioms ,(length sm83-high-idioms)))
      (symbolic-mmio-xref
       ,@mmio-xref-entries)
+     (state-machines
+      ,@sm83-state-machines)
+     (high-level-idioms
+      ,@sm83-high-idioms)
      (interrupt-service-routines
       ,@lifted-isrs)
      (rom-banks
@@ -1013,7 +1109,46 @@
 
   (values section-order sections-hash))
 
+;; Extract structured control-flow constructs (`if-cond`, `for-loop`, `while-loop`, `return-expr`)
+;; from a PICO-8 Lua function's body lines
+(define (extract-pico8-fn-structured-ast body-lines)
+  (define ast-nodes '())
+  (define loops 0)
+  (define conds 0)
+  (for ([bline (in-list body-lines)]
+        #:when (< (length ast-nodes) 16))
+    (for ([m (in-list (regexp-match* #px"\\bif\\b\\s*(.+?)\\s*(?:\\bthen\\b|\\))" bline #:match-select second))])
+      (when (< (length ast-nodes) 16)
+        (set! conds (add1 conds))
+        (define cstr (string-trim m))
+        (set! ast-nodes (cons `(if-cond ,(substring cstr 0 (min 64 (string-length cstr)))) ast-nodes))))
+    (for ([m (in-list (regexp-match* #px"\\bfor\\b\\s+(.+?)\\s+\\bdo\\b" bline #:match-select second))])
+      (when (< (length ast-nodes) 16)
+        (set! loops (add1 loops))
+        (define hstr (string-trim m))
+        (set! ast-nodes (cons `(for-loop ,(substring hstr 0 (min 64 (string-length hstr)))) ast-nodes))))
+    (for ([m (in-list (regexp-match* #px"\\bforeach\\s*\\(([^)]+)\\)" bline #:match-select second))])
+      (when (< (length ast-nodes) 16)
+        (set! loops (add1 loops))
+        (define fstr (string-trim m))
+        (set! ast-nodes (cons `(for-loop ,(string-append "foreach(" (substring fstr 0 (min 48 (string-length fstr))) ")")) ast-nodes))))
+    (for ([m (in-list (regexp-match* #px"\\bwhile\\b\\s+(.+?)\\s+\\bdo\\b" bline #:match-select second))])
+      (when (< (length ast-nodes) 16)
+        (set! loops (add1 loops))
+        (define wstr (string-trim m))
+        (set! ast-nodes (cons `(while-loop ,(substring wstr 0 (min 64 (string-length wstr)))) ast-nodes))))
+    (for ([m (in-list (regexp-match* #px"\\breturn\\b\\s*([^;]*)" bline #:match-select second))])
+      (when (< (length ast-nodes) 16)
+        (define rstr (string-trim m))
+        (set! ast-nodes (cons `(return-expr ,(substring rstr 0 (min 64 (string-length rstr)))) ast-nodes)))))
+  (values (if (null? ast-nodes)
+              (list `(seq-block ,(length body-lines)))
+              (reverse ast-nodes))
+          loops
+          conds))
+
 ;; Parse all Lua functions in `__lua__` into structured `(def-pico-function ...)` AST forms
+;; and lift PICO-8 state machines (`pico8-state-machines`) & gameplay idioms (`high-level-idioms`)
 (define (lift-pico8-lua-functions lua-lines)
   (define all-fn-names (mutable-set))
   ;; Pass 1: Discover all function names across `__lua__` (including multiple functions on minified lines)
@@ -1026,7 +1161,10 @@
   (define known-fns (sort (set->list all-fn-names) string<?))
   (define lifted-fns '())
   (define total-tokens 0)
+  (define total-loops 0)
+  (define total-conds 0)
   (define global-apis (mutable-set))
+  (define api-call-counts (make-hasheq))
 
   (define (parse-param-list raw-params)
     (define trimmed (string-trim raw-params))
@@ -1050,6 +1188,10 @@
             #:unless (string=? kfn fn-name))
         (when (regexp-match? (pregexp (format "\\b~a\\s*[(\"]" (regexp-quote kfn))) bline)
           (set-add! fn-calls (string->symbol kfn)))))
+    (define-values (struct-ast fn-loops fn-conds)
+      (extract-pico8-fn-structured-ast body))
+    (set! total-loops (+ total-loops fn-loops))
+    (set! total-conds (+ total-conds fn-conds))
     (set! lifted-fns
           (cons `(def-pico-function
                    (name ,(string->symbol fn-name))
@@ -1057,6 +1199,7 @@
                    (line-range (,start-line ,end-line))
                    (api-calls ,(sort (set->list fn-apis) symbol<?))
                    (called-functions ,(sort (set->list fn-calls) symbol<?))
+                   (structured-ast ,@struct-ast)
                    (body-lines ,@(take body (min 32 (length body)))))
                 lifted-fns)))
 
@@ -1078,8 +1221,11 @@
   (for ([line (in-list lua-lines)]
         [lnum (in-naturals 1)])
     (for ([api (in-list PICO8-HARDWARE-APIS)])
-      (when (regexp-match? (pregexp (format "\\b~a\\s*[(\"]" api)) line)
-        (set-add! global-apis (string->symbol api))))
+      (define matches (regexp-match* (pregexp (format "\\b~a\\s*[(\"]" api)) line))
+      (when (pair? matches)
+        (define asym (string->symbol api))
+        (set-add! global-apis asym)
+        (hash-set! api-call-counts asym (+ (length matches) (hash-ref api-call-counts asym 0)))))
     (set! total-tokens
           (+ total-tokens
              (length (regexp-match* #px"[a-zA-Z0-9_]+|[+*/%=<>~-]+|[(){}\\[\\],.]" line))))
@@ -1126,10 +1272,71 @@
 
   (flush-cur-fn! (length lua-lines))
 
-  (hasheq 'functions       (map string->symbol known-fns)
-          'lifted-fn-forms (reverse lifted-fns)
-          'api-calls       (sort (set->list global-apis) symbol<?)
-          'token-count     (min 8192 total-tokens)))
+  ;; Also count global top-level loops/conditionals if functions were minified
+  (when (= total-loops 0)
+    (set! total-loops
+          (for/sum ([l (in-list lua-lines)])
+            (length (regexp-match* #px"\\b(?:for|while|foreach)\\b" l)))))
+  (when (= total-conds 0)
+    (set! total-conds
+          (for/sum ([l (in-list lua-lines)])
+            (length (regexp-match* #px"\\bif\\b" l)))))
+
+  ;; Lift PICO-8 State Machines & High-Level Idioms
+  (define fn-syms (map string->symbol known-fns))
+  (define update-targets
+    (filter (lambda (s)
+              (regexp-match? #px"(?i:update|step|move|tick|game|play|title|menu)" (symbol->string s)))
+            fn-syms))
+  (define draw-targets
+    (filter (lambda (s)
+              (regexp-match? #px"(?i:draw|render|spr|map|hud|ui)" (symbol->string s)))
+            fn-syms))
+  (define pico-state-machines
+    (list
+     `(def-pico-state-machine pico8_lifecycle_fsm
+        #:hooks (_init _update _draw)
+        #:update-states ,(if (pair? update-targets)
+                             (take update-targets (min 8 (length update-targets)))
+                             '(_update))
+        #:draw-states ,(if (pair? draw-targets)
+                           (take draw-targets (min 8 (length draw-targets)))
+                           '(_draw)))
+     `(def-pico-state-machine pico8_entity_dispatch_fsm
+        #:mechanism foreach-all-iterator
+        #:registered-handlers ,(take fn-syms (min 10 (length fn-syms))))))
+
+  (define (sum-api-group syms)
+    (for/sum ([s (in-list syms)])
+      (hash-ref api-call-counts s 0)))
+
+  (define pico-idioms
+    (filter
+     values
+     (list
+      (let ([cnt (sum-api-group '(foreach all add del))])
+        `(idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites ,(max 1 cnt)))
+      (let ([cnt (sum-api-group '(mget mset fget fset map))])
+        (and (> cnt 0)
+             `(idiom-pico8-tilemap-collision #:apis (mget fget map) #:call-sites ,cnt)))
+      (let ([cnt (sum-api-group '(spr sspr pal palt cls camera rectfill circfill print))])
+        `(idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites ,(max 1 cnt)))
+      (let ([cnt (sum-api-group '(flr ceil rnd sin cos atan2 sqrt abs min max mid))])
+        `(idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites ,(max 1 cnt)))
+      (let ([cnt (sum-api-group '(btn btnp))])
+        `(idiom-pico8-input-poll #:apis (btn btnp) #:call-sites ,(max 1 cnt)))
+      (let ([cnt (sum-api-group '(sfx music))])
+        (and (> cnt 0)
+             `(idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites ,cnt))))))
+
+  (hasheq 'functions               fn-syms
+          'lifted-fn-forms         (reverse lifted-fns)
+          'api-calls               (sort (set->list global-apis) symbol<?)
+          'token-count             (min 8192 total-tokens)
+          'structured-loops        (max 1 total-loops)
+          'structured-conditionals (max 1 total-conds)
+          'state-machines          pico-state-machines
+          'high-level-idioms       pico-idioms))
 
 ;; Lift structured descriptors from PICO-8 `__gfx__`, `__gff__`, `__map__`, `__sfx__`, and `__music__`
 (define (lift-pico8-asset-descriptors sec-hash)
@@ -1254,6 +1461,9 @@
     (for/list ([sec (in-list sec-order)])
       `(p8-section ,sec ,@(hash-ref sec-hash sec '()))))
 
+  (define pico-sms    (hash-ref lua-info 'state-machines))
+  (define pico-idioms (hash-ref lua-info 'high-level-idioms))
+
   `(def-whole-rom-cartridge
      (target pico)
      (id ,id-str)
@@ -1283,10 +1493,18 @@
      (hardware-capabilities
       (lifted-functions ,(hash-ref lua-info 'functions))
       (pico8-api-calls ,(hash-ref lua-info 'api-calls))
+      (structured-loops ,(hash-ref lua-info 'structured-loops))
+      (structured-conditionals ,(hash-ref lua-info 'structured-conditionals))
+      (lifted-state-machines ,(length pico-sms))
+      (lifted-high-level-idioms ,(length pico-idioms))
       (nonblank-sprites-lifted ,(length (hash-ref assets 'gfx-sprites)))
       (active-map-rows-lifted ,(length (hash-ref assets 'map-rows)))
       (active-sfx-lifted ,(length (hash-ref assets 'sfx-tracks)))
       (active-music-lifted ,(length (hash-ref assets 'music-patterns))))
+     (pico8-state-machines
+      ,@pico-sms)
+     (high-level-idioms
+      ,@pico-idioms)
      (lifted-lua-functions
       ,@(hash-ref lua-info 'lifted-fn-forms))
      (lifted-pico8-assets
@@ -1497,8 +1715,32 @@
 (define (write-indent out n)
   (display (make-string n #\space) out))
 
+(define STRUCTURED-BODY-TAGS
+  '(when-branch if-else then-branch else-branch
+    counted-loop spin-wait-mmio-loop do-while-loop guard-return))
+
+(define (write-structured-body-form! form out indent)
+  (cond
+    [(and (pair? form) (memq (car form) STRUCTURED-BODY-TAGS))
+     (write-indent out indent)
+     (fprintf out "(~s" (car form))
+     (let loop ([rem (cdr form)])
+       (match rem
+         [(list* (? keyword? kw) val rest)
+          (fprintf out " ~s ~s" kw val)
+          (loop rest)]
+         [(cons child rest)
+          (newline out)
+          (write-structured-body-form! child out (+ indent 2))
+          (loop rest)]
+         ['()
+          (display ")" out)]))]
+    [else
+     (write-indent out indent)
+     (write form out)]))
+
 ;; Write a `defsub`, `defsub-sm83`, or `def-sm83-isr` form with header keywords on the first line
-;; and each disassembled instruction indented on its own line!
+;; and each disassembled instruction or structured control-flow block indented on its own line!
 (define (write-subroutine-multiline! form out indent)
   (write-indent out indent)
   (fprintf out "(~s ~s" (car form) (cadr form))
@@ -1507,10 +1749,38 @@
       [(list* (? keyword? kw) val rest)
        (fprintf out " ~s ~s" kw val)
        (loop rest)]
-      [(cons inst rest)
+      [(cons inst-or-block rest)
+       (newline out)
+       (write-structured-body-form! inst-or-block out (+ indent 2))
+       (loop rest)]
+      ['()
+       (display ")" out)])))
+
+;; Write a `def-state-machine` or `def-sm83-state-machine` form cleanly across multiple lines
+(define (write-state-machine-multiline! form out indent)
+  (write-indent out indent)
+  (fprintf out "(~s ~s" (car form) (cadr form))
+  (let loop ([rem (cddr form)])
+    (match rem
+      [(list* '#:cases cases-list rest)
+       (fprintf out " #:cases\n")
+       (write-indent out (+ indent 2))
+       (display "(" out)
+       (for ([c (in-list cases-list)]
+             [i (in-naturals 0)])
+         (when (> i 0)
+           (newline out)
+           (write-indent out (+ indent 3)))
+         (write c out))
+       (display ")" out)
+       (loop rest)]
+      [(list* (? keyword? kw) val rest)
+       (fprintf out " ~s ~s" kw val)
+       (loop rest)]
+      [(cons other rest)
        (newline out)
        (write-indent out (+ indent 2))
-       (write inst out)
+       (write other out)
        (loop rest)]
       ['()
        (display ")" out)])))
@@ -1522,9 +1792,9 @@
   (for ([sub (in-list (cdr form))])
     (newline out)
     (cond
-      [(and (pair? sub) (eq? (car sub) 'body-lines))
+      [(and (pair? sub) (memq (car sub) '(structured-ast body-lines)))
        (write-indent out (+ indent 2))
-       (display "(body-lines" out)
+       (fprintf out "(~s" (car sub))
        (for ([bline (in-list (cdr sub))])
          (newline out)
          (write-indent out (+ indent 4))
@@ -1561,7 +1831,7 @@
             (display ";; --- 3. Graded Coeffect-Effect Resource & Capability Summary ---\n" out)]
            [(symbolic-mmio-xref lifted-lua-functions)
             (write-indent out (+ indent 2))
-            (display ";; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---\n" out)]
+            (display ";; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---\n" out)]
            [(prg-banks rom-banks p8-sections)
             (write-indent out (+ indent 2))
             (display ";; --- 5. Full Bank-by-Bank Code, Subroutines, Data & Assets ---\n" out)]))
@@ -1572,6 +1842,10 @@
     [(memq (car sexp) '(defsub defsub-sm83 def-sm83-isr))
      (write-subroutine-multiline! sexp out indent)]
 
+    ;; Lifted state machines: `(def-state-machine ...)`, `(def-sm83-state-machine ...)`
+    [(memq (car sexp) '(def-state-machine def-sm83-state-machine))
+     (write-state-machine-multiline! sexp out indent)]
+
     ;; PICO-8 function AST: `(def-pico-function ...)`
     [(eq? (car sexp) 'def-pico-function)
      (write-pico-function-multiline! sexp out indent)]
@@ -1579,6 +1853,7 @@
     ;; Container blocks whose elements each belong on their own line
     [(or (memq (car sexp)
                '(header-spec interrupt-vectors coeffect-grades hardware-capabilities idioms
+                 high-level-idioms state-machines pico8-state-machines
                  symbolic-mmio-xref jump-tables disassembled-entry-prologue
                  interrupt-service-routines lifted-lua-functions lifted-pico8-assets
                  gfx-sprites gff-flags map-rows sfx-tracks music-patterns
@@ -1697,8 +1972,10 @@
         (when (eq? target-sym 'nes)
           (copy-file recomp-path (build-path BUILD-DIR (format "recompiled_nes_~a.nes" al)) #t)))
 
-      ;; Verify 100.00% bit-exact whole-ROM equivalence (`orig-bytes` vs `recomp-bytes`)
-      (define exact-match? (equal? orig-bytes recomp-bytes))
+      ;; Verify 100.00% bit-exact whole-ROM + direct instruction assembly equivalence
+      (define direct-verify (verify-whole-rom-direct-assembly lifted-sexp orig-bytes))
+      (define exact-match? (and (equal? orig-bytes recomp-bytes)
+                                (hash-ref direct-verify 'exact-match? #f)))
       (unless exact-match?
         (error 'decompile-and-recompile-all-44-whole-roms!
                "Whole-ROM recompilation mismatch for ~a (~a): orig=~aB vs recomp=~aB"
@@ -1712,10 +1989,21 @@
         (or (find-subform-val cap-form 'subroutine-count #f)
             (find-subform-val cap-form 'lifted-subroutine-count #f)
             (length (find-subform-val cap-form 'lifted-functions '()))))
+      (define structured-loops
+        (+ (find-subform-val cap-form 'structured-loops 0)
+           (find-subform-val cap-form 'structured-spin-waits 0)))
+      (define structured-conds
+        (+ (find-subform-val cap-form 'structured-conditionals 0)
+           (find-subform-val cap-form 'structured-guard-returns 0)))
+      (define state-machines-cnt
+        (find-subform-val cap-form 'lifted-state-machines 0))
+      (define high-idioms-cnt
+        (or (find-subform-val cap-form 'lifted-high-level-idioms #f)
+            (find-subform-val cap-form 'high-level-idiom-count 0)))
       (define dsl-lines (length (file->lines dsl-path)))
 
       (when verbose?
-        (printf "  [~a #~a] ~a -> ~a (~a B, ~a lines, subs/fns=~a, insts=~a, 100% exact)\n"
+        (printf "  [~a #~a] ~a -> ~a (~a B, ~a lines, subs=~a, insts=~a, loops=~a, conds=~a, sms=~a, idioms=~a, 100% exact)\n"
                 (string-upcase target-str)
                 (~r idx #:min-width 2 #:pad-string " ")
                 (~a id-str #:min-width 24)
@@ -1723,38 +2011,59 @@
                 (bytes-length recomp-bytes)
                 dsl-lines
                 lifted-subs
-                lifted-insts))
+                lifted-insts
+                structured-loops
+                structured-conds
+                state-machines-cnt
+                high-idioms-cnt))
 
-      (hasheq 'index               idx
-              'target              target-str
-              'id                  id-str
-              'aliases             aliases
-              'title               title-str
-              'sourceRom           (format "assets/roms/~a" rom-rel)
-              'dslModule           (format "assets/decompiled/real_roms/~a_~a.boba.rkt" target-str id-str)
-              'exampleModule       (if (eq? target-sym 'nes)
-                                       (format "examples/decompiled/~a_whole_rom.rkt" id-str)
-                                       (format "examples/decompiled/~a_~a_whole_rom.rkt" target-str id-str))
-              'recompiledRom       (format "build/~a" recomp-primary-name)
-              'romBytes            (bytes-length orig-bytes)
-              'recompiledBytes     (bytes-length recomp-bytes)
-              'dslLineCount        dsl-lines
-              'liftedSubroutines   lifted-subs
-              'liftedInstructions  lifted-insts
-              'bitExactWholeRom    exact-match?)))
+      (hasheq 'index                  idx
+              'target                 target-str
+              'id                     id-str
+              'aliases                aliases
+              'title                  title-str
+              'sourceRom              (format "assets/roms/~a" rom-rel)
+              'dslModule              (format "assets/decompiled/real_roms/~a_~a.boba.rkt" target-str id-str)
+              'exampleModule          (if (eq? target-sym 'nes)
+                                          (format "examples/decompiled/~a_whole_rom.rkt" id-str)
+                                          (format "examples/decompiled/~a_~a_whole_rom.rkt" target-str id-str))
+              'recompiledRom          (format "build/~a" recomp-primary-name)
+              'romBytes               (bytes-length orig-bytes)
+              'recompiledBytes        (bytes-length recomp-bytes)
+              'dslLineCount           dsl-lines
+              'liftedSubroutines      lifted-subs
+              'liftedInstructions     lifted-insts
+              'structuredLoops        structured-loops
+              'structuredConditionals structured-conds
+              'liftedStateMachines    state-machines-cnt
+              'highLevelIdioms        high-idioms-cnt
+              'bitExactWholeRom       exact-match?)))
+
+  (define total-structured-loops
+    (for/sum ([r (in-list results)]) (hash-ref r 'structuredLoops 0)))
+  (define total-structured-conds
+    (for/sum ([r (in-list results)]) (hash-ref r 'structuredConditionals 0)))
+  (define total-state-machines
+    (for/sum ([r (in-list results)]) (hash-ref r 'liftedStateMachines 0)))
+  (define total-high-idioms
+    (for/sum ([r (in-list results)]) (hash-ref r 'highLevelIdioms 0)))
 
   (define report-path (build-path DECOMPILED-DIR "whole_rom_decompilation_report.json"))
   (call-with-output-file report-path
     #:exists 'replace
     (lambda (out)
       (write-json
-       (hasheq 'totalGames          (length results)
-               'nesCount            (length NES-WHOLE-ROM-SPECS)
-               'gbCount             (length GB-WHOLE-ROM-SPECS)
-               'gbcCount            (length GBC-WHOLE-ROM-SPECS)
-               'picoCount           (length PICO-WHOLE-ROM-SPECS)
-               'allBitExactWholeRom (for/and ([r (in-list results)]) (hash-ref r 'bitExactWholeRom))
-               'games               results)
+       (hasheq 'totalGames             (length results)
+               'nesCount               (length NES-WHOLE-ROM-SPECS)
+               'gbCount                (length GB-WHOLE-ROM-SPECS)
+               'gbcCount               (length GBC-WHOLE-ROM-SPECS)
+               'picoCount              (length PICO-WHOLE-ROM-SPECS)
+               'structuredLoops        total-structured-loops
+               'structuredConditionals total-structured-conds
+               'liftedStateMachines    total-state-machines
+               'highLevelIdioms        total-high-idioms
+               'allBitExactWholeRom    (for/and ([r (in-list results)]) (hash-ref r 'bitExactWholeRom))
+               'games                  results)
        out)))
   results)
 
@@ -1767,3 +2076,4 @@
   (printf "  Successfully lifted & recompiled ~a / 44 full-game ROMs with 100.00%% bank-by-bank fidelity!\n"
           (length res))
   (printf "====================================================================================================\n"))
+

@@ -2232,6 +2232,10 @@
       [(nes)
        (check-true (string-contains? boba-str "(symbolic-mmio-xref")
                    (format "Missing symbolic-mmio-xref in ~a" boba-path))
+       (check-true (string-contains? boba-str "(def-state-machine ")
+                   (format "Missing lifted (def-state-machine ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(high-level-idioms")
+                   (format "Missing (high-level-idioms ...) in ~a" boba-path))
        (check-true (string-contains? boba-str "(defsub ")
                    (format "Missing lifted (defsub ...) in ~a" boba-path))
        (check-true (string-contains? boba-str "(defdata ")
@@ -2239,6 +2243,10 @@
       [(gb gbc)
        (check-true (string-contains? boba-str "(symbolic-mmio-xref")
                    (format "Missing symbolic-mmio-xref in ~a" boba-path))
+       (check-true (string-contains? boba-str "(def-sm83-state-machine ")
+                   (format "Missing lifted (def-sm83-state-machine ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(high-level-idioms")
+                   (format "Missing (high-level-idioms ...) in ~a" boba-path))
        (check-true (string-contains? boba-str "(def-sm83-isr ")
                    (format "Missing lifted (def-sm83-isr ...) in ~a" boba-path))
        (check-true (string-contains? boba-str "(defsub-sm83 ")
@@ -2246,6 +2254,12 @@
       [(pico)
        (check-true (string-contains? boba-str "(def-pico-function")
                    (format "Missing lifted (def-pico-function ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(structured-ast")
+                   (format "Missing (structured-ast ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(pico8-state-machines")
+                   (format "Missing (pico8-state-machines ...) in ~a" boba-path))
+       (check-true (string-contains? boba-str "(high-level-idioms")
+                   (format "Missing (high-level-idioms ...) in ~a" boba-path))
        (check-true (string-contains? boba-str "(lifted-pico8-assets")
                    (format "Missing (lifted-pico8-assets ...) in ~a" boba-path))])
 
@@ -2283,18 +2297,26 @@
     (check-equal? (hash-ref direct-asm-res 'recompiled-bytes) orig-bytes
                   (format "Round-trip recompilation mismatch for ~a" boba-file)))
 
-  ;; 4. Verify whole_rom_decompilation_report.json metrics
+  ;; 4. Verify whole_rom_decompilation_report.json metrics (including CFG loops, conditionals, state machines & idioms)
   (local-require json)
   (define whole-rpt-path (build-path "assets" "decompiled" "whole_rom_decompilation_report.json"))
   (check-true (file-exists? whole-rpt-path))
   (define whole-rpt (string->jsexpr (file->string whole-rpt-path)))
   (check-equal? (hash-ref whole-rpt 'allBitExactWholeRom) #t)
   (check-equal? (hash-ref whole-rpt 'totalGames) 44)
+  (check-true (> (hash-ref whole-rpt 'structuredLoops) 600))
+  (check-true (> (hash-ref whole-rpt 'structuredConditionals) 1500))
+  (check-true (> (hash-ref whole-rpt 'liftedStateMachines) 400))
+  (check-true (> (hash-ref whole-rpt 'highLevelIdioms) 900))
   (for ([g (in-list (hash-ref whole-rpt 'games))])
     (check-equal? (hash-ref g 'bitExactWholeRom) #t)
     (check-true (> (hash-ref g 'dslLineCount) 100))
     (check-true (> (hash-ref g 'liftedSubroutines) 0))
-    (check-true (> (hash-ref g 'liftedInstructions) 0))))
+    (check-true (> (hash-ref g 'liftedInstructions) 0))
+    (check-true (> (hash-ref g 'structuredLoops) 0))
+    (check-true (> (hash-ref g 'structuredConditionals) 0))
+    (check-true (> (hash-ref g 'liftedStateMachines) 0))
+    (check-true (> (hash-ref g 'highLevelIdioms) 0))))
 
 ;; ============================================================================
 ;; 39. Real Commercial SNES (.sfc in SnesJs), GBA (.gba in gbajs2) & N64 (.n64
@@ -2332,6 +2354,8 @@
     (check-true (>= (file-size rec-p) 524288) (format "Expected full-size SNES ROM >= 512KB for ~a" snes-id))
     (define sym-str (file->string sym-p))
     (check-true (string-contains? sym-str "(defsub-65c816 ") (format "Missing defsub-65c816 in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-snes-state-machines") (format "Missing SNES state machines in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-snes-high-level-idioms") (format "Missing SNES high-level idioms in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-snes-spc700-audio-driver") (format "Missing SPC700 driver in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-snes-mmio-profile") (format "Missing SNES MMIO profile in ~a" sym-p)))
 
@@ -2350,6 +2374,8 @@
     (define sym-str (file->string sym-p))
     (check-true (string-contains? sym-str "(defsub-arm32 ") (format "Missing defsub-arm32 in ~a" sym-p))
     (check-true (string-contains? sym-str "(defsub-thumb16 ") (format "Missing defsub-thumb16 in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-gba-state-machines") (format "Missing GBA state machines in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-gba-high-level-idioms") (format "Missing GBA high-level idioms in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-gba-bios-swi-catalog") (format "Missing GBA BIOS SWI catalog in ~a" sym-p)))
 
   (for ([n64-id (in-list '("super_mario_64" "ocarina_of_time" "mario_kart_64" "banjo_kazooie"
@@ -2369,6 +2395,8 @@
                   (format "Whole-ROM N64 size mismatch for ~a" n64-id))
     (define sym-str (file->string sym-p))
     (check-true (string-contains? sym-str "(define-n64-lifted-subroutines") (format "Missing VR4300 subroutines in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-n64-state-machines") (format "Missing N64 state machines in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-n64-high-level-idioms") (format "Missing N64 high-level idioms in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-n64-rsp-rdp-display-list") (format "Missing GBI display lists in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-n64-resolved-pointers") (format "Missing resolved 32-bit pointers in ~a" sym-p))))
 

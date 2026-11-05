@@ -2048,8 +2048,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 17,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 23,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 25,
+        "structuredConditionals": 14,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2124,8 +2128,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 26,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 29,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 7,
+        "structuredConditionals": 31,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2200,8 +2208,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 21,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 27,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 25,
+        "structuredConditionals": 7,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2262,7 +2274,7 @@
       "pixelTransitions": 36667,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 41,
+      "subroutinesLifted": 42,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 12428,
       "grades": {
@@ -2272,12 +2284,16 @@
         "ppuWrites": 488,
         "apuPortWrites": 87,
         "dmaChannelWrites": 654,
-        "joypadReads": 6,
+        "joypadReads": 7,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 41,
-        "callGraphEdges": 26,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 42,
+        "callGraphEdges": 53,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 11,
+        "structuredConditionals": 35,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2338,7 +2354,7 @@
       "pixelTransitions": 27485,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 37,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 6697,
       "grades": {
@@ -2351,9 +2367,13 @@
         "joypadReads": 13,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 23,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 37,
+        "callGraphEdges": 32,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 22,
+        "structuredConditionals": 10,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2431,8 +2451,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 24,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 27,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 15,
+        "structuredConditionals": 14,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2493,7 +2517,7 @@
       "pixelTransitions": 5439,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 38,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 10227,
       "grades": {
@@ -2506,9 +2530,13 @@
         "joypadReads": 2,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 33,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 38,
+        "callGraphEdges": 40,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 9,
+        "structuredConditionals": 28,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2569,7 +2597,7 @@
       "pixelTransitions": 10254,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 41,
+      "subroutinesLifted": 36,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 1997,
       "grades": {
@@ -2582,9 +2610,13 @@
         "joypadReads": 1,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 13,
-        "subroutinesLifted": 41,
-        "callGraphEdges": 43,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 36,
+        "callGraphEdges": 38,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 14,
+        "structuredConditionals": 12,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2645,7 +2677,7 @@
       "pixelTransitions": 22232,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 37,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 5092,
       "grades": {
@@ -2655,12 +2687,16 @@
         "ppuWrites": 379,
         "apuPortWrites": 29,
         "dmaChannelWrites": 695,
-        "joypadReads": 0,
+        "joypadReads": 1,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 17,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 37,
+        "callGraphEdges": 38,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 18,
+        "structuredConditionals": 13,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -2721,7 +2757,7 @@
       "pixelTransitions": 9010,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 39,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 11281,
       "grades": {
@@ -2734,9 +2770,13 @@
         "joypadReads": 10,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 18,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 39,
+        "callGraphEdges": 29,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 10,
+        "structuredConditionals": 15,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 12
       },
       "checkpoints": {
         "cp0": {
@@ -2815,8 +2855,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 16,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 19,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 5,
+        "structuredConditionals": 14,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 19
       },
       "checkpoints": {
         "cp0": {
@@ -2893,8 +2937,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 31,
         "subroutinesLifted": 31,
-        "callGraphEdges": 19,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 21,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 0,
+        "structuredConditionals": 5,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 10
       },
       "checkpoints": {
         "cp0": {
@@ -2971,8 +3019,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 29,
         "subroutinesLifted": 29,
-        "callGraphEdges": 12,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 14,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 1,
+        "structuredConditionals": 7,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 10
       },
       "checkpoints": {
         "cp0": {
@@ -3049,8 +3101,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 30,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 37,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 4,
+        "structuredConditionals": 20,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 9
       },
       "checkpoints": {
         "cp0": {
@@ -3127,8 +3183,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 26,
         "subroutinesLifted": 26,
-        "callGraphEdges": 23,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 31,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 3,
+        "structuredConditionals": 15,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -3205,8 +3265,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 36,
         "subroutinesLifted": 36,
-        "callGraphEdges": 14,
-        "lz77AssetsFound": 5
+        "callGraphEdges": 19,
+        "lz77AssetsFound": 5,
+        "structuredLoops": 3,
+        "structuredConditionals": 21,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 19
       },
       "checkpoints": {
         "cp0": {
@@ -3283,8 +3347,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 36,
         "subroutinesLifted": 36,
-        "callGraphEdges": 31,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 32,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 4,
+        "structuredConditionals": 23,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 15
       },
       "checkpoints": {
         "cp0": {
@@ -3361,8 +3429,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 33,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 37,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 8,
+        "structuredConditionals": 12,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 19
       },
       "checkpoints": {
         "cp0": {
@@ -3439,8 +3511,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 28,
         "subroutinesLifted": 28,
-        "callGraphEdges": 15,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 20,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 2,
+        "structuredConditionals": 5,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 14
       },
       "checkpoints": {
         "cp0": {
@@ -3517,8 +3593,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 16,
-        "lz77AssetsFound": 1
+        "callGraphEdges": 17,
+        "lz77AssetsFound": 1,
+        "structuredLoops": 3,
+        "structuredConditionals": 4,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 15
       },
       "checkpoints": {
         "cp0": {
@@ -3568,7 +3648,7 @@
       "recompiledRomBytes": 8388608,
       "dslFile": "assets/decompiled/real_roms/n64_super_mario_64.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_super_mario_64_whole_rom.rkt",
-      "wholeRomDslBytes": 90138,
+      "wholeRomDslBytes": 120355,
       "tasFile": "assets/tas/n64_super_mario_64.fm2",
       "internalTitle": "SUPER MARIO 64",
       "gameCode": "NSME",
@@ -3601,8 +3681,12 @@
       "rdpFillRectsRendered": 120,
       "rspGfxTasksExecuted": 40,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 2898,
+      "structuredLoopsCount": 13,
+      "structuredConditionalsCount": 24,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 15,
       "fpuInstructionsCount": 32460,
       "cop0InstructionsCount": 495,
       "mips3_64BitInstructionsCount": 1065,
@@ -3656,7 +3740,11 @@
         "jalSubroutineCalls": 12057,
         "stackFramedFunctionsCount": 2898,
         "resolved32BitPointers": 23681,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 13,
+        "structuredConditionalsCount": 24,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 15,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 49655
       },
@@ -3709,7 +3797,7 @@
       "recompiledRomBytes": 33554432,
       "dslFile": "assets/decompiled/real_roms/n64_ocarina_of_time.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_ocarina_of_time_whole_rom.rkt",
-      "wholeRomDslBytes": 91993,
+      "wholeRomDslBytes": 125922,
       "tasFile": "assets/tas/n64_ocarina_of_time.fm2",
       "internalTitle": "THE LEGEND OF ZELDA",
       "gameCode": "CZLE",
@@ -3742,8 +3830,12 @@
       "rdpFillRectsRendered": 451,
       "rspGfxTasksExecuted": 268,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 2703,
+      "structuredLoopsCount": 16,
+      "structuredConditionalsCount": 28,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 22,
       "fpuInstructionsCount": 70627,
       "cop0InstructionsCount": 13097,
       "mips3_64BitInstructionsCount": 127565,
@@ -3806,7 +3898,11 @@
         "jalSubroutineCalls": 27117,
         "stackFramedFunctionsCount": 2703,
         "resolved32BitPointers": 26354,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 16,
+        "structuredConditionalsCount": 28,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 22,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 263415
       },
@@ -3859,7 +3955,7 @@
       "recompiledRomBytes": 12582912,
       "dslFile": "assets/decompiled/real_roms/n64_mario_kart_64.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_mario_kart_64_whole_rom.rkt",
-      "wholeRomDslBytes": 87036,
+      "wholeRomDslBytes": 115113,
       "tasFile": "assets/tas/n64_mario_kart_64.fm2",
       "internalTitle": "MARIOKART64",
       "gameCode": "NKTE",
@@ -3892,8 +3988,12 @@
       "rdpFillRectsRendered": 84,
       "rspGfxTasksExecuted": 42,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 1753,
+      "structuredLoopsCount": 17,
+      "structuredConditionalsCount": 26,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 17,
       "fpuInstructionsCount": 29811,
       "cop0InstructionsCount": 849,
       "mips3_64BitInstructionsCount": 2657,
@@ -3954,7 +4054,11 @@
         "jalSubroutineCalls": 15212,
         "stackFramedFunctionsCount": 1753,
         "resolved32BitPointers": 26175,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 17,
+        "structuredConditionalsCount": 26,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 17,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 82784
       },
@@ -4007,7 +4111,7 @@
       "recompiledRomBytes": 16777216,
       "dslFile": "assets/decompiled/real_roms/n64_banjo_kazooie.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_banjo_kazooie_whole_rom.rkt",
-      "wholeRomDslBytes": 88048,
+      "wholeRomDslBytes": 121074,
       "tasFile": "assets/tas/n64_banjo_kazooie.fm2",
       "internalTitle": "Banjo-Kazooie",
       "gameCode": "NBKE",
@@ -4040,8 +4144,12 @@
       "rdpFillRectsRendered": 152,
       "rspGfxTasksExecuted": 151,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 4923,
+      "structuredLoopsCount": 18,
+      "structuredConditionalsCount": 34,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 17,
       "fpuInstructionsCount": 76189,
       "cop0InstructionsCount": 8162,
       "mips3_64BitInstructionsCount": 88823,
@@ -4098,7 +4206,11 @@
         "jalSubroutineCalls": 32462,
         "stackFramedFunctionsCount": 4923,
         "resolved32BitPointers": 36891,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 18,
+        "structuredConditionalsCount": 34,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 17,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 342670
       },
@@ -4151,7 +4263,7 @@
       "recompiledRomBytes": 16777216,
       "dslFile": "assets/decompiled/real_roms/n64_f_zero_x.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_f_zero_x_whole_rom.rkt",
-      "wholeRomDslBytes": 97170,
+      "wholeRomDslBytes": 133821,
       "tasFile": "assets/tas/n64_f_zero_x.fm2",
       "internalTitle": "F-ZERO X",
       "gameCode": "CFZE",
@@ -4192,8 +4304,12 @@
       "rdpFillRectsRendered": 4812,
       "rspGfxTasksExecuted": 179,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 1114,
+      "structuredLoopsCount": 17,
+      "structuredConditionalsCount": 38,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 16,
       "fpuInstructionsCount": 30420,
       "cop0InstructionsCount": 1301,
       "mips3_64BitInstructionsCount": 2656,
@@ -4245,7 +4361,11 @@
         "jalSubroutineCalls": 7878,
         "stackFramedFunctionsCount": 1114,
         "resolved32BitPointers": 24207,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 17,
+        "structuredConditionalsCount": 38,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 16,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 209792
       },
@@ -4300,7 +4420,7 @@
       "recompiledRomBytes": 16777216,
       "dslFile": "assets/decompiled/real_roms/n64_1080_snowboarding.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_1080_snowboarding_whole_rom.rkt",
-      "wholeRomDslBytes": 93779,
+      "wholeRomDslBytes": 126951,
       "tasFile": "assets/tas/n64_1080_snowboarding.fm2",
       "internalTitle": "1080 SNOWBOARDING",
       "gameCode": "NTEA",
@@ -4333,8 +4453,12 @@
       "rdpFillRectsRendered": 137,
       "rspGfxTasksExecuted": 189,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 1829,
+      "structuredLoopsCount": 18,
+      "structuredConditionalsCount": 35,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 18,
       "fpuInstructionsCount": 34638,
       "cop0InstructionsCount": 9066,
       "mips3_64BitInstructionsCount": 235265,
@@ -4398,7 +4522,11 @@
         "jalSubroutineCalls": 28025,
         "stackFramedFunctionsCount": 1829,
         "resolved32BitPointers": 22661,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 18,
+        "structuredConditionalsCount": 35,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 18,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 101959
       },
@@ -4453,7 +4581,7 @@
       "recompiledRomBytes": 12582912,
       "dslFile": "assets/decompiled/real_roms/n64_castlevania_64.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_castlevania_64_whole_rom.rkt",
-      "wholeRomDslBytes": 84686,
+      "wholeRomDslBytes": 108505,
       "tasFile": "assets/tas/n64_castlevania_64.fm2",
       "internalTitle": "CASTLEVANIA",
       "gameCode": "ND3E",
@@ -4486,8 +4614,12 @@
       "rdpFillRectsRendered": 293,
       "rspGfxTasksExecuted": 263,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 2273,
+      "structuredLoopsCount": 14,
+      "structuredConditionalsCount": 32,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 18,
       "fpuInstructionsCount": 42531,
       "cop0InstructionsCount": 1404,
       "mips3_64BitInstructionsCount": 2318,
@@ -4544,7 +4676,11 @@
         "jalSubroutineCalls": 6597,
         "stackFramedFunctionsCount": 2273,
         "resolved32BitPointers": 14842,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 14,
+        "structuredConditionalsCount": 32,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 18,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 123171
       },
@@ -4599,7 +4735,7 @@
       "recompiledRomBytes": 16777216,
       "dslFile": "assets/decompiled/real_roms/n64_bomberman_64.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_bomberman_64_whole_rom.rkt",
-      "wholeRomDslBytes": 84287,
+      "wholeRomDslBytes": 113416,
       "tasFile": "assets/tas/n64_bomberman_64.fm2",
       "internalTitle": "BOMBERMAN64U2",
       "gameCode": "NBVE",
@@ -4640,8 +4776,12 @@
       "rdpFillRectsRendered": 283,
       "rspGfxTasksExecuted": 185,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 1345,
+      "structuredLoopsCount": 19,
+      "structuredConditionalsCount": 26,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 14,
       "fpuInstructionsCount": 18606,
       "cop0InstructionsCount": 560,
       "mips3_64BitInstructionsCount": 2142,
@@ -4703,7 +4843,11 @@
         "jalSubroutineCalls": 8065,
         "stackFramedFunctionsCount": 1345,
         "resolved32BitPointers": 10731,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 19,
+        "structuredConditionalsCount": 26,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 14,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 56960
       },
@@ -4758,7 +4902,7 @@
       "recompiledRomBytes": 12582912,
       "dslFile": "assets/decompiled/real_roms/n64_bomberman_hero.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_bomberman_hero_whole_rom.rkt",
-      "wholeRomDslBytes": 95396,
+      "wholeRomDslBytes": 128616,
       "tasFile": "assets/tas/n64_bomberman_hero.fm2",
       "internalTitle": "BOMBERMAN HERO",
       "gameCode": "NBDE",
@@ -4791,8 +4935,12 @@
       "rdpFillRectsRendered": 237,
       "rspGfxTasksExecuted": 180,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 1969,
+      "structuredLoopsCount": 19,
+      "structuredConditionalsCount": 24,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 16,
       "fpuInstructionsCount": 29870,
       "cop0InstructionsCount": 369,
       "mips3_64BitInstructionsCount": 3519,
@@ -4859,7 +5007,11 @@
         "jalSubroutineCalls": 9602,
         "stackFramedFunctionsCount": 1969,
         "resolved32BitPointers": 18404,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 19,
+        "structuredConditionalsCount": 24,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 16,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 137524
       },
@@ -4914,7 +5066,7 @@
       "recompiledRomBytes": 33554432,
       "dslFile": "assets/decompiled/real_roms/n64_kirby_64.boba.rkt",
       "wholeRomDslFile": "examples/decompiled/n64_kirby_64_whole_rom.rkt",
-      "wholeRomDslBytes": 94566,
+      "wholeRomDslBytes": 124089,
       "tasFile": "assets/tas/n64_kirby_64.fm2",
       "internalTitle": "Kirby64",
       "gameCode": "NK4E",
@@ -4955,8 +5107,12 @@
       "rdpFillRectsRendered": 143,
       "rspGfxTasksExecuted": 96,
       "rdramSampleBytesMatched": 65536,
-      "functionsLifted": 40,
+      "functionsLifted": 42,
       "stackFramedFunctionsTotal": 1923,
+      "structuredLoopsCount": 25,
+      "structuredConditionalsCount": 33,
+      "stateMachinesCount": 12,
+      "highLevelIdiomsCount": 14,
       "fpuInstructionsCount": 37791,
       "cop0InstructionsCount": 3529,
       "mips3_64BitInstructionsCount": 4689,
@@ -5019,7 +5175,11 @@
         "jalSubroutineCalls": 9372,
         "stackFramedFunctionsCount": 1923,
         "resolved32BitPointers": 26298,
-        "liftedSubroutines": 40,
+        "liftedSubroutines": 42,
+        "structuredLoopsCount": 25,
+        "structuredConditionalsCount": 33,
+        "stateMachinesCount": 12,
+        "highLevelIdiomsCount": 14,
         "gbiDisplayListCommandsLifted": 145,
         "gbiDisplayListTotalExecuted": 152800
       },

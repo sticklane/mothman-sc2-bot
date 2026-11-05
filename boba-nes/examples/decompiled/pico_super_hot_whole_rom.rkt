@@ -38,11 +38,25 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update60 allbtn animexplo animplayer begin_boss begin_game break_crate burst_ptc cansee canshoot changedirection check_flag circ_coll clone_room collide collision copy coupdekak debug_ delchecker dist draw draw_bar draw_bullet draw_death_menu draw_drops draw_enemy draw_ghost_connector draw_logo draw_main_menu draw_map draw_player draw_player_ui draw_ptc draw_random draw_weel drawgrass gen_train get_traj grasstile init_boss_room init_enemies init_menus init_player init_ptc initguns is_solid isleft killbarelle knockback_enemy knockback_player loaded make_boss_death make_btn make_death_menu make_drop make_enemy make_gun make_main_menu make_ptc mouse_x_y nextgun oprint ospr oxxl parcourmap player_update rafale rect_overlap rnd_gun rrnd sapwnrndenemy set_stats shoot shoot1 spawn_bullet spawn_enemy spawn_loot swichtile touches_rect update update_boss update_bullet update_camera update_death_menu update_door update_drops update_enemy update_gun update_main_menu update_ptc update_room updaterafale wide))
     (pico8-api-calls (abs add all atan2 btn btnp camera ceil circ circfill cls cos del fget flr line map max mget mid min mset music pal palt peek poke print rectfill rnd sfx sin spr sqrt))
+    (structured-loops 35)
+    (structured-conditionals 85)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 6)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 32)
     (active-sfx-lifted 32)
     (active-music-lifted 23))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update60 animplayer begin_game draw_death_menu draw_main_menu draw_player draw_player_ui init_menus) #:draw-states (_draw draw draw_bar draw_bullet draw_death_menu draw_drops draw_enemy draw_ghost_connector))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update60 allbtn animexplo animplayer begin_boss begin_game break_crate burst_ptc)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 47)
+    (idiom-pico8-tilemap-collision #:apis (mget fget map) #:call-sites 23)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 83)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 146)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 15)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 30))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name _init)
@@ -50,6 +64,8 @@
       (line-range (18 88))
       (api-calls (pal poke))
       (called-functions (begin_game gen_train init_enemies init_menus init_player init_ptc initguns parcourmap update_room))
+      (structured-ast
+        (seq-block 71))
       (body-lines
         "function _init()"
         "\tkeyboard = false"
@@ -89,6 +105,8 @@
       (line-range (92 97))
       (api-calls (peek poke))
       (called-functions (mouse_x_y))
+      (structured-ast
+        (for-loop "i=0x3100,0x3148"))
       (body-lines
         "function _update60()"
         "\tmouse_x_y()"
@@ -102,6 +120,10 @@
       (line-range (173 204))
       (api-calls (camera cls print))
       (called-functions (draw_map drawgrass rrnd))
+      (structured-ast
+        (if-cond "(keyboard == true")
+        (if-cond "wagon_n==0 and menu==\"game\"")
+        (if-cond "(keyboard"))
       (body-lines
         "function _draw()"
         "\tlocal ox = rrnd(shake)"
@@ -141,6 +163,8 @@
       (line-range (238 247))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (if-cond "(t%60 < 10"))
       (body-lines
         "function set_stats()"
         "\tstats.time=flr("
@@ -158,6 +182,8 @@
       (line-range (249 256))
       (api-calls (flr music rnd sfx))
       (called-functions ())
+      (structured-ast
+        (if-cond "b == 0"))
       (body-lines
         "function begin_game()"
         "\tsfx(37)"
@@ -173,6 +199,8 @@
       (line-range (274 276))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "a<.75 and .25<a"))
       (body-lines
         "function isleft(a)"
         "\treturn a<.75 and .25<a"
@@ -183,6 +211,8 @@
       (line-range (278 281))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=0,15"))
       (body-lines
         "function ospr(s,x,y,col)"
         "\tfor i=0,15 do"
@@ -194,6 +224,8 @@
       (line-range (293 298))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function oprint(t,x,y,col,ocol)"
         "\tlocal ocol = ocol or 1"
@@ -207,6 +239,8 @@
       (line-range (305 309))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "k,v in pairs(t)"))
       (body-lines
         "function copy(t)"
         "\tlocal n={}"
@@ -219,6 +253,9 @@
       (line-range (313 329))
       (api-calls (mset poke))
       (called-functions ())
+      (structured-ast
+        (if-cond "px > 128*(wl-1")
+        (if-cond "wagon_n != tl-1"))
       (body-lines
         "function update_camera()"
         "\tlocal px = p.x"
@@ -243,6 +280,8 @@
       (line-range (356 359))
       (api-calls (map))
       (called-functions ())
+      (structured-ast
+        (if-cond "camx<0"))
       (body-lines
         "function draw_ghost_connector()"
         "\tif camx<0 then"
@@ -254,6 +293,8 @@
       (line-range (362 365))
       (api-calls (rnd))
       (called-functions ())
+      (structured-ast
+        (return-expr "rnd(2*n)-n"))
       (body-lines
         "function rrnd(n)"
         "\t--\"radius rnd\""
@@ -265,6 +306,8 @@
       (line-range (367 369))
       (api-calls (btn))
       (called-functions ())
+      (structured-ast
+        (return-expr "btn(b) or btn(b,1)"))
       (body-lines
         "function allbtn(b)"
         "\treturn btn(b) or btn(b,1)"
@@ -275,6 +318,8 @@
       (line-range (372 378))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (seq-block 7))
       (body-lines
         "function debug_()"
         "\tlocal p =players[1]"
@@ -289,6 +334,8 @@
       (line-range (385 437))
       (api-calls ())
       (called-functions (copy))
+      (structured-ast
+        (for-loop "i=1,#bird_stats,13"))
       (body-lines
         "function init_player(bird)"
         "\tb=0"
@@ -328,6 +375,12 @@
       (line-range (448 468))
       (api-calls (abs max))
       (called-functions (allbtn))
+      (structured-ast
+        (if-cond "(allbtn(⬅️")
+        (if-cond "(allbtn(➡️")
+        (if-cond "(allbtn(⬆️")
+        (if-cond "(allbtn(⬇️")
+        (if-cond "(abs(dx1"))
       (body-lines
         "function player_update()"
         "\t --damage"
@@ -356,6 +409,9 @@
       (line-range (640 652))
       (api-calls (cos flr line sin))
       (called-functions ())
+      (structured-ast
+        (if-cond "(p.iframes%5")
+        (if-cond "p.gun.name==\"sniper\""))
       (body-lines
         "function draw_player()"
         "\tif (p.iframes%5) == 0  then"
@@ -376,6 +432,11 @@
       (line-range (665 691))
       (api-calls (print rectfill spr))
       (called-functions (ospr))
+      (structured-ast
+        (if-cond "(p.ammo>0")
+        (if-cond "(s==\"0\"")
+        (for-loop "i=1,2")
+        (if-cond "(i==p.gunn"))
       (body-lines
         "function draw_player_ui(p)"
         "\t--life counter"
@@ -410,6 +471,12 @@
       (line-range (704 715))
       (api-calls (sfx))
       (called-functions (update_gun))
+      (structured-ast
+        (if-cond "(p.gunn > #p.gunls")
+        (for-loop "i=1,#p.gunls")
+        (if-cond "p.gunls[i] == p.gunn")
+        (if-cond "(((i+stat(36")
+        (return-expr "p.gunls[(i+stat(36))%(#p.gunls)+f]"))
       (body-lines
         "function nextgun(p)"
         "\tsfx(36)"
@@ -429,6 +496,8 @@
       (line-range (719 721))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function update_gun(p)"
         "\tp.gun = p.gunls[p.gunn]"
@@ -439,6 +508,8 @@
       (line-range (723 727))
       (api-calls (abs))
       (called-functions ())
+      (structured-ast
+        (if-cond "abs(p.dx"))
       (body-lines
         "function knockback_player(p,e)"
         "\tif abs(p.dx)+abs(p.dy) < 3 then"
@@ -451,6 +522,8 @@
       (line-range (730 735))
       (api-calls (abs))
       (called-functions ())
+      (structured-ast
+        (if-cond "(abs(e.dx"))
       (body-lines
         "function knockback_enemy(e,b)"
         "\t"
@@ -464,6 +537,8 @@
       (line-range (739 744))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (if-cond "flr(time("))
       (body-lines
         "function animplayer(p)"
         "\tif flr(time()*7)%2==1 then"
@@ -477,6 +552,8 @@
       (line-range (747 752))
       (api-calls (cos flr sin))
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function coupdekak(p)"
         "\tlocal x=flr(p.x) + cos(p.a)*6 +0"
@@ -490,6 +567,8 @@
       (line-range (756 790))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "(is_enemy"))
       (body-lines
         "function make_gun(args,fire)"
         "\tlocal name_,sprr,cd_,spd,oa,dmg,is_enemy,auto,maxammo,sfxx,knockback=unpack(split(args))"
@@ -529,6 +608,17 @@
       (line-range (791 809))
       (api-calls (sfx))
       (called-functions (rrnd))
+      (structured-ast
+        (if-cond "(gun.burst<=0")
+        (if-cond "(gun.sfx")
+        (if-cond "(gun.is_enemy")
+        (if-cond "(name==\"kak\"")
+        (if-cond "(name==\"boxing glove\"")
+        (if-cond "(name==\"flamethrower\"")
+        (if-cond "(name==\"explosion\"")
+        (if-cond "(name==\"bazooka\"")
+        (if-cond "not gun.is_enemy")
+        (if-cond "(shake<1 and name!=\"flamethrower\""))
       (body-lines
         "\tgun.shoot=function(gun,x,y,dir,spd,knockback)"
         "\t\t--remove? it complicates code"
@@ -555,6 +645,8 @@
       (line-range (820 827))
       (api-calls (max mid))
       (called-functions (shoot))
+      (structured-ast
+        (if-cond "gun.burst > 0"))
       (body-lines
         "\tgun.update=function(gun)"
         "\t\tgun.timer = max(gun.timer-1,0)"
@@ -570,6 +662,8 @@
       (line-range (833 835))
       (api-calls ())
       (called-functions (shoot))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function shoot1(gun,x,y,dir)"
         "\tgun:shoot(x,y,dir)"
@@ -580,6 +674,8 @@
       (line-range (852 869))
       (api-calls ())
       (called-functions (make_gun shoot))
+      (structured-ast
+        (for-loop "i=1,7"))
       (body-lines
         "function initguns()"
         "guns = {"
@@ -605,6 +701,8 @@
       (line-range (1011 1016))
       (api-calls (rnd))
       (called-functions ())
+      (structured-ast
+        (return-expr "rnd(iguns)"))
       (body-lines
         "function rnd_gun()"
         "\t--todo: \"power\" param"
@@ -618,6 +716,8 @@
       (line-range (1018 1038))
       (api-calls (add cos sin))
       (called-functions ())
+      (structured-ast
+        (seq-block 21))
       (body-lines
         "function spawn_bullet(x,y,dir,spd,r,spr,dmg,is_enemy,lifspa,palette)"
         "\tlocal dx=cos(dir)*spd"
@@ -646,6 +746,9 @@
       (line-range (1040 1044))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "not(b.lifspa== nil")
+        (if-cond "(b.lifspa== 0"))
       (body-lines
         "function update_bullet(b)"
         " if not(b.lifspa== nil)then"
@@ -658,6 +761,8 @@
       (line-range (1145 1149))
       (api-calls (pal spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function draw_bullet(b)"
         "\tpal(split(b.palette))"
@@ -670,6 +775,8 @@
       (line-range (1151 1154))
       (api-calls (all spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function draw_random()"
         "for i in all(random)do"
@@ -681,6 +788,8 @@
       (line-range (1157 1161))
       (api-calls (del))
       (called-functions (animexplo))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function killbarelle(e)"
         " animexplo(e)"
@@ -693,6 +802,8 @@
       (line-range (1163 1169))
       (api-calls (rnd))
       (called-functions (make_ptc rrnd))
+      (structured-ast
+        (for-loop "i=1,15"))
       (body-lines
         "function animexplo(e)"
         "for i=1,15 do"
@@ -707,6 +818,9 @@
       (line-range (1177 1194))
       (api-calls ())
       (called-functions (get_traj rafale))
+      (structured-ast
+        (if-cond "timer_bullet == 0")
+        (if-cond "type_bullet == 1"))
       (body-lines
         "function spawn_bullet(x,y,type_bullet,speed,timer_bullet1,sprite,nb_bullet,ecartement)"
         "\tif timer_bullet == 0 then"
@@ -732,6 +846,10 @@
       (line-range (1221 1226))
       (api-calls (all del))
       (called-functions (is_solid))
+      (structured-ast
+        (if-cond "(timer_bullet>0")
+        (for-loop "i in all(bullet)")
+        (if-cond "is_solid(i.x+(i.traj_x*1.5"))
       (body-lines
         "function update_bullet()"
         " if (timer_bullet>0)timer_bullet-=1"
@@ -745,6 +863,8 @@
       (line-range (1232 1235))
       (api-calls (all spr))
       (called-functions ())
+      (structured-ast
+        (for-loop "i in all(bullet)"))
       (body-lines
         "function draw_bullet()"
         "\tfor i in all(bullet) do"
@@ -756,6 +876,8 @@
       (line-range (1238 1240))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function rafale(nb,bullet)"
         " add(rafalels,{nb=nb,bullet=bullet})"
@@ -766,6 +888,9 @@
       (line-range (1242 1247))
       (api-calls (add all del))
       (called-functions ())
+      (structured-ast
+        (for-loop "i in all(rafalels)")
+        (if-cond "(i.nb<1"))
       (body-lines
         "function updaterafale()\t"
         "\tfor i in all(rafalels) do"
@@ -779,6 +904,8 @@
       (line-range (1252 1259))
       (api-calls (flr poke))
       (called-functions ())
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function mouse_x_y()"
         "\tpoke(0x5f2d, 1)"
@@ -794,6 +921,8 @@
       (line-range (1264 1270))
       (api-calls (atan2 cos sin))
       (called-functions ())
+      (structured-ast
+        (return-expr "{x=cos(angle),"))
       (body-lines
         "--[[function get_traj(x_satr,y_start,x_end,y_end)"
         "\tangle=atan2(x_end-x_satr-4, "
@@ -808,6 +937,8 @@
       (line-range (1271 1273))
       (api-calls (fget mget))
       (called-functions ())
+      (structured-ast
+        (return-expr "fget(mget((x\\8),(y\\8)),flag)"))
       (body-lines
         "function check_flag(flag,x,y)"
         "\treturn fget(mget((x\\8),(y\\8)),flag)"
@@ -818,6 +949,10 @@
       (line-range (1277 1280))
       (api-calls ())
       (called-functions (check_flag))
+      (structured-ast
+        (if-cond "(x<0")
+        (return-expr "true")
+        (return-expr "check_flag(0,x,y)"))
       (body-lines
         "function is_solid(x,y)"
         "\tif(x<0)return true "
@@ -829,6 +964,8 @@
       (line-range (1282 1287))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "x1 <= x"))
       (body-lines
         "function touches_rect(x,y,x1,y1,x2,y2)"
         "\treturn x1 <= x"
@@ -842,6 +979,8 @@
       (line-range (1289 1300))
       (api-calls (max))
       (called-functions ())
+      (structured-ast
+        (return-expr "dx*dx+dy*dy < sr*sr"))
       (body-lines
         "function circ_coll(a,b)"
         "\t--https://www.lexaloffle.com/bbs/?tid=28999"
@@ -861,6 +1000,9 @@
       (line-range (1303 1313))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "not (a1.x>b2.x")
+        (return-expr "a1.x<b2.x"))
       (body-lines
         "function rect_overlap(a1,a2,b1,b2)"
         "\t--[[return not (a1.x>b2.x"
@@ -879,6 +1021,8 @@
       (line-range (1315 1321))
       (api-calls ())
       (called-functions (is_solid))
+      (structured-ast
+        (return-expr ""))
       (body-lines
         "function collision(x,y,w,h,flag)"
         "\treturn "
@@ -893,6 +1037,8 @@
       (line-range (1323 1341))
       (api-calls ())
       (called-functions (collision))
+      (structured-ast
+        (if-cond "coll_x"))
       (body-lines
         "function collide(o,bounce1)"
         "\tlocal x,y = o.x,o.y"
@@ -919,6 +1065,8 @@
       (line-range (1359 1364))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=10,29"))
       (body-lines
         "function gen_train()"
         "\t--gen talbe of all wagon nums"
@@ -932,6 +1080,9 @@
       (line-range (1390 1398))
       (api-calls (mget mset))
       (called-functions ())
+      (structured-ast
+        (for-loop "j = 0,15")
+        (for-loop "i = 0,15"))
       (body-lines
         "function clone_room(a,b)"
         "\tlocal ax = (a%8)*16"
@@ -948,6 +1099,8 @@
       (line-range (1402 1423))
       (api-calls (rnd sfx))
       (called-functions (copy make_drop make_ptc rnd_gun rrnd))
+      (structured-ast
+        (for-loop "i=1,5"))
       (body-lines
         "function update_door()"
         "\tlocal wl = wl"
@@ -977,6 +1130,8 @@
       (line-range (1437 1441))
       (api-calls (mset))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=5,9"))
       (body-lines
         "function init_boss_room(x)"
         "\tmset(x,4,40)"
@@ -989,6 +1144,8 @@
       (line-range (1445 1454))
       (api-calls (mset))
       (called-functions (burst_ptc spawn_enemy))
+      (structured-ast
+        (for-loop "i=5,9"))
       (body-lines
         "function begin_boss()"
         "\tlocal x = (wl-1)*16"
@@ -1006,6 +1163,8 @@
       (line-range (1458 1464))
       (api-calls ())
       (called-functions (clone_room))
+      (structured-ast
+        (for-loop "i=0,3"))
       (body-lines
         "function update_room()"
         "\tfor i=0,3 do"
@@ -1020,6 +1179,8 @@
       (line-range (1468 1485))
       (api-calls (map min pal palt))
       (called-functions (draw_ghost_connector draw_random))
+      (structured-ast
+        (if-cond "(pal_n>#trainpal"))
       (body-lines
         "function draw_map()"
         "\t-- wall palette"
@@ -1045,6 +1206,8 @@
       (line-range (1487 1491))
       (api-calls ())
       (called-functions (spawn_loot))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function break_crate(x,y)"
         "\t--spawn_loot(x\\8*8,y\\8*8)"
@@ -1057,6 +1220,8 @@
       (line-range (1495 1498))
       (api-calls (mget mset))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function swichtile(x,y)"
         " local t = mget((x\\8),(y\\8))"
@@ -1068,6 +1233,13 @@
       (line-range (1500 1511))
       (api-calls (mget mset rnd))
       (called-functions (spawn_enemy))
+      (structured-ast
+        (if-cond "(wagon_n==0")
+        (for-loop "x=x1,16*(wl-1)")
+        (for-loop "y=2,12")
+        (if-cond "x>3 or p.y-1000>y*8 or p.y+1000<y*8")
+        (if-cond "mget(x,y")
+        (if-cond "rnd(4"))
       (body-lines
         "function parcourmap()"
         ""
@@ -1087,6 +1259,9 @@
       (line-range (1521 1533))
       (api-calls (ceil rnd))
       (called-functions (spawn_enemy))
+      (structured-ast
+        (if-cond "ceil(rnd(25")
+        (for-loop "i=0,ceil(rnd(wagon_n/2))+8"))
       (body-lines
         "function sapwnrndenemy(x,y)"
         "\t--spawn explosive_barrel "
@@ -1107,6 +1282,8 @@
       (line-range (1582 1648))
       (api-calls ())
       (called-functions (make_enemy))
+      (structured-ast
+        (seq-block 67))
       (body-lines
         "function init_enemies()"
         "\tenemy= {"
@@ -1146,6 +1323,11 @@
       (line-range (1650 1663))
       (api-calls (rnd))
       (called-functions (copy))
+      (structured-ast
+        (if-cond "(a.spr==1")
+        (if-cond "(a.spr != 125")
+        (if-cond "(a.spr == 126")
+        (if-cond "a.x<175"))
       (body-lines
         "function spawn_enemy(x,y,name)"
         "\tlocal a=copy(name)"
@@ -1167,6 +1349,9 @@
       (line-range (1668 1680))
       (api-calls (all max))
       (called-functions (canshoot loaded))
+      (structured-ast
+        (for-loop "i in all(enemies)")
+        (if-cond "loaded(i"))
       (body-lines
         "function update_enemy(e)"
         "\tfor i in all(enemies) do"
@@ -1187,6 +1372,9 @@
       (line-range (1699 1722))
       (api-calls (ceil cos flr print rectfill sin spr))
       (called-functions ())
+      (structured-ast
+        (if-cond "(e.spr==1")
+        (if-cond "e.spr==1"))
       (body-lines
         "function draw_enemy(e)"
         "\tlocal w = 1"
@@ -1218,6 +1406,8 @@
       (line-range (1730 1738))
       (api-calls (rnd))
       (called-functions ())
+      (structured-ast
+        (if-cond "i.phasetimer<0"))
       (body-lines
         "function update_boss(i)"
         "\ti.phasetimer -= 1"
@@ -1234,6 +1424,8 @@
       (line-range (1745 1752))
       (api-calls (cos sin))
       (called-functions (rrnd))
+      (structured-ast
+        (if-cond "i.timer < 1"))
       (body-lines
         "function changedirection(i)"
         "\ti.timer-=1"
@@ -1249,6 +1441,9 @@
       (line-range (1755 1773))
       (api-calls (abs atan2 cos max sin))
       (called-functions (cansee dist))
+      (structured-ast
+        (if-cond "(abs(dist")
+        (return-expr "cansee(e,angle,x,y,dist)"))
       (body-lines
         "function canshoot(e,pl)"
         "\tlocal angle = atan2(pl.x-e.x,"
@@ -1275,6 +1470,8 @@
       (line-range (1776 1778))
       (api-calls (abs sqrt))
       (called-functions ())
+      (structured-ast
+        (return-expr "sqrt(abs(p.y-e.y)^2+abs(p.x-e.x)^2)/8"))
       (body-lines
         "function dist(e,p)"
         "\treturn sqrt(abs(p.y-e.y)^2+abs(p.x-e.x)^2)/8"
@@ -1285,6 +1482,11 @@
       (line-range (1780 1787))
       (api-calls (add))
       (called-functions (delchecker is_solid))
+      (structured-ast
+        (for-loop "i =1,dist")
+        (if-cond "is_solid(checker[#checker].x+4,checker[#checker].y+4")
+        (if-cond "(e!=p")
+        (return-expr "false"))
       (body-lines
         "function cansee(e,angle,x,y,dist)\t "
         " for i =1,dist do"
@@ -1300,6 +1502,8 @@
       (line-range (1794 1796))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function delchecker()"
         "\tchecker = {}"
@@ -1310,6 +1514,8 @@
       (line-range (1798 1800))
       (api-calls (abs))
       (called-functions ())
+      (structured-ast
+        (return-expr "abs(camx+64-i.x)<71--71"))
       (body-lines
         "function loaded(i)"
         "\treturn abs(camx+64-i.x)<71--71"
@@ -1320,6 +1526,8 @@
       (line-range (1803 1808))
       (api-calls (add flr rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=0,20"))
       (body-lines
         "function init_ptc()"
         "\tparticles={}"
@@ -1333,6 +1541,8 @@
       (line-range (1822 1836))
       (api-calls (add rnd))
       (called-functions ())
+      (structured-ast
+        (seq-block 15))
       (body-lines
         "function make_ptc(x,y,r,col,fric,dx,dy,txt)"
         "\tfric=fric or rnd(.1)+.85"
@@ -1355,6 +1565,8 @@
       (line-range (1838 1848))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "(ptc.r<=1"))
       (body-lines
         "function update_ptc(ptc)"
         "\tptc.x += ptc.dx"
@@ -1373,6 +1585,8 @@
       (line-range (1850 1856))
       (api-calls (circfill print))
       (called-functions ())
+      (structured-ast
+        (if-cond "ptc.txt==nil"))
       (body-lines
         "function draw_ptc(ptc)"
         "\t--kinda bodgey but whatever"
@@ -1387,6 +1601,8 @@
       (line-range (1859 1866))
       (api-calls (rnd))
       (called-functions (make_ptc rrnd))
+      (structured-ast
+        (for-loop "i=1,5"))
       (body-lines
         "function burst_ptc(x,y,col)"
         "\tfor i=1,5 do"
@@ -1402,6 +1618,8 @@
       (line-range (1869 1874))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (if-cond "(i.x<-8"))
       (body-lines
         "function grasstile()"
         "\tfor i in all(grass)do"
@@ -1415,6 +1633,8 @@
       (line-range (1877 1880))
       (api-calls (all spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function drawgrass()"
         "\tfor elt in all(grass)do"
@@ -1426,6 +1646,10 @@
       (line-range (1883 1889))
       (api-calls (spr))
       (called-functions ())
+      (structured-ast
+        (if-cond "(weelcount<1")
+        (for-loop "n=0,5")
+        (for-loop "i=0,2"))
       (body-lines
         "function draw_weel()"
         " weelcount -=1"
@@ -1440,6 +1664,8 @@
       (line-range (1898 1904))
       (api-calls ())
       (called-functions (make_boss_death make_death_menu make_main_menu))
+      (structured-ast
+        (seq-block 7))
       (body-lines
         "function init_menus()"
         "\tmenus = {}"
@@ -1454,6 +1680,8 @@
       (line-range (1907 1915))
       (api-calls (print rectfill))
       (called-functions ())
+      (structured-ast
+        (seq-block 9))
       (body-lines
         "function draw_bar(t,x,y,w,w2,c,c2)"
         "\trectfill(x,y,"
@@ -1470,6 +1698,8 @@
       (line-range (1917 1920))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function make_boss_death()"
         "\tlocal m={"
@@ -1481,6 +1711,10 @@
       (line-range (1921 1940))
       (api-calls (all del music rnd sfx))
       (called-functions (make_ptc))
+      (structured-ast
+        (if-cond "(m.timer==400")
+        (if-cond "m.timer<0")
+        (for-loop "i=1,18"))
       (body-lines
         "\tupdate=function(m)"
         "\t\tfor e in all(enemies)do del(e,enemies) end"
@@ -1508,6 +1742,8 @@
       (line-range (1946 1956))
       (api-calls (circfill spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 11))
       (body-lines
         "\tdraw=function(m)"
         "\t\t"
@@ -1526,6 +1762,8 @@
       (line-range (1962 1996))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,12"))
       (body-lines
         "function make_main_menu()"
         "\t--this code could be better"
@@ -1565,6 +1803,8 @@
       (line-range (1999 2016))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "\tfunction make_btn(args)"
         "\t\tn,sp,bird,x,y,w,h,name=unpack(split(args))"
@@ -1590,6 +1830,11 @@
       (line-range (2025 2047))
       (api-calls (sfx))
       (called-functions (touches_rect))
+      (structured-ast
+        (if-cond "not m.done")
+        (for-loop "k=0,#m.buttons")
+        (if-cond "(not i.active")
+        (if-cond "lmb"))
       (body-lines
         "function update_main_menu(m)"
         "\tlocal selection=1000"
@@ -1620,6 +1865,10 @@
       (line-range (2097 2133))
       (api-calls (abs palt rectfill spr))
       (called-functions (draw_logo oprint))
+      (structured-ast
+        (for-loop "k=0,#m.buttons")
+        (if-cond "(k == 13")
+        (if-cond "i.n==13and i.active"))
       (body-lines
         "function draw_main_menu(m)"
         "\tlocal oy = m.ui_oy"
@@ -1659,6 +1908,8 @@
       (line-range (2152 2161))
       (api-calls ())
       (called-functions (oprint oxxl))
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "function draw_logo(x,y)"
         "\t--\"birds\""
@@ -1676,6 +1927,10 @@
       (line-range (2163 2170))
       (api-calls (abs print))
       (called-functions ())
+      (structured-ast
+        (for-loop "ix=-2,2")
+        (for-loop "iy=-2,4")
+        (if-cond "abs(ix"))
       (body-lines
         "function oxxl(t,x,y,col)"
         "\t--credit to freds72"
@@ -1691,6 +1946,8 @@
       (line-range (2183 2195))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,#t"))
       (body-lines
         "function wide(t,x,y,col,pre)"
         "\t--credit to yolwoocle uwu"
@@ -1711,6 +1968,8 @@
       (line-range (2205 2219))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 15))
       (body-lines
         "function make_drop(x,y,spr,type,q)"
         "\tadd(drops,{"
@@ -1733,6 +1992,11 @@
       (line-range (2221 2272))
       (api-calls (all flr max sfx))
       (called-functions (touches_rect update_gun))
+      (structured-ast
+        (for-loop "d in all(drops)")
+        (if-cond "(not touches")
+        (if-cond "touches")
+        (if-cond "d.type==\"ammo\""))
       (body-lines
         "function update_drops()"
         "\tfor d in all(drops) do"
@@ -1772,6 +2036,8 @@
       (line-range (2296 2299))
       (api-calls (all spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function draw_drops()"
         "\tfor d in all(drops)do"
@@ -1783,6 +2049,8 @@
       (line-range (2302 2317))
       (api-calls (rnd))
       (called-functions (copy make_drop rnd_gun))
+      (structured-ast
+        (if-cond "r < .015"))
       (body-lines
         "function spawn_loot(x,y)"
         "\tlocal r = rnd(1)"
@@ -1806,6 +2074,9 @@
       (line-range (2321 2352))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "(iswin")
+        (return-expr "m"))
       (body-lines
         "function make_death_menu(iswin)"
         "\tlocal m = {"
@@ -1845,6 +2116,10 @@
       (line-range (2354 2368))
       (api-calls (min music sfx))
       (called-functions ())
+      (structured-ast
+        (if-cond "m.circt>=600")
+        (if-cond "(m.timer==0")
+        (if-cond "(m.timer==220"))
       (body-lines
         "function update_death_menu(m)"
         "\tm.circt=min(m.circt*1.05,600)"
@@ -1867,6 +2142,9 @@
       (line-range (2414 2424))
       (api-calls (palt))
       (called-functions ())
+      (structured-ast
+        (if-cond "m.iswin")
+        (if-cond "(t("))
       (body-lines
         "function draw_death_menu(m)"
         "\t--circles animation"

@@ -12,9 +12,11 @@
          racket/list
          racket/match
          racket/set
-         racket/string)
+         racket/string
+         "cfg-structurer.rkt")
 
 (provide
+ (all-from-out "cfg-structurer.rkt")
  SM83-BASE-OPCODE-VEC
  SM83-CB-OPCODE-VEC
  SM83-MMIO-SYM-HASH
@@ -443,14 +445,16 @@
                                        #:max-insts [max-insts 36]
                                        #:stop-offset [stop-offset bank-end])
   (define limit-end (min bank-end stop-offset))
+  (define max-local-off (- limit-end bank-start))
   (let loop ([off start-offset]
              [cnt 0]
+             [max-fwd-off start-offset]
              [insts '()]
              [calls '()]
              [mmio '()]
              [hram '()]
              [mbc '()])
-    (if (or (>= off limit-end) (>= cnt max-insts))
+    (if (or (>= (+ bank-start off) limit-end) (>= cnt max-insts))
         (hasheq 'size-bytes (- off start-offset)
                 'insts      (reverse insts)
                 'calls      (remove-duplicates (reverse calls))
@@ -480,15 +484,25 @@
                      [mmio1    (if mmio-reg (cons (cdr mmio-reg) mmio) mmio)]
                      [hram1    (if hram-a (cons hram-a hram) hram)]
                      [mbc1     (if mbc-a (cons mbc-a mbc) mbc)]
-                     [next-off (+ off len)])
-                (if (memq flow '(ret reti jp jp-hl halt stop rst))
+                     [next-off (+ off len)]
+                     [new-fwd-off
+                      (if (and target (memq flow '(jr-cond jp-cond jr)))
+                          (let ([toff (- target bank-origin)])
+                            (if (and (> toff next-off)
+                                     (<= toff (min max-local-off (+ off 24))))
+                                (max max-fwd-off toff)
+                                max-fwd-off))
+                          max-fwd-off)])
+                (if (or (memq flow '(jp-hl halt stop rst))
+                        (and (memq flow '(ret reti jp))
+                             (>= next-off new-fwd-off)))
                     (hasheq 'size-bytes (- next-off start-offset)
                             'insts      (reverse insts1)
                             'calls      (remove-duplicates (reverse calls1))
                             'mmio       (remove-duplicates (reverse mmio1))
                             'hram       (sort (remove-duplicates hram1) <)
                             'mbc-writes (sort (remove-duplicates mbc1) <))
-                    (loop next-off (add1 cnt) insts1 calls1 mmio1 hram1 mbc1))))))))
+                    (loop next-off (add1 cnt) new-fwd-off insts1 calls1 mmio1 hram1 mbc1))))))))
 
 ;; Disassemble all 8 RST vectors ($0000..$0038), 5 hardware ISRs ($0040..$0060),
 ;; and the $0100 cartridge entry point from Bank 0!
@@ -517,12 +531,14 @@
       (disassemble-sm83-linear-block rom-bytes 0 b0-end #x0000 vaddr
                                      #:max-insts 16
                                      #:stop-offset (min b0-end vlimit)))
+    (define-values (structured-body _stats)
+      (structure-subroutine-cfg (hash-ref blk 'insts) #:arch 'sm83))
     `(def-sm83-isr ,vname
        #:vector ,vaddr
        #:size-bytes ,(hash-ref blk 'size-bytes)
        #:calls ,(hash-ref blk 'calls)
        #:mmio ,(hash-ref blk 'mmio)
-       ,@(hash-ref blk 'insts))))
+       ,@structured-body)))
 
 ;; ============================================================================
 ;; 5. Deep Bank Analyzer & Call-Graph Subroutine Lifter
@@ -548,7 +564,7 @@
   ;; Seed entry points that fall within this bank's address range
   (for ([addr (in-list seed-entries)])
     (when (and (>= addr (+ bank-origin start-off))
-               (< addr (+ bank-origin bank-size)))
+                (< addr (+ bank-origin bank-size)))
       (set! sub-entry-Candidates (cons addr sub-entry-Candidates))))
   (when (and (= bank-idx 0) (< #x0150 bank-size))
     (set! sub-entry-Candidates (cons #x0150 sub-entry-Candidates)))
@@ -615,7 +631,12 @@
     (take (sort (remove-duplicates sub-entry-Candidates) <)
           (min max-subroutines (length (remove-duplicates sub-entry-Candidates)))))
 
-  ;; Lift each subroutine into `(defsub-sm83 ...)`
+  (define bank-loops 0)
+  (define bank-spin-waits 0)
+  (define bank-conditionals 0)
+  (define bank-guard-returns 0)
+
+  ;; Lift each subroutine into `(defsub-sm83 ...)` with structured CFG forms
   (define lifted-subs
     (if (= max-subroutines 0)
         '()
@@ -631,6 +652,12 @@
             (disassemble-sm83-linear-block rom-bytes bank-start bank-end bank-origin sub-off
                                            #:max-insts max-insts-per-sub
                                            #:stop-offset stop-off))
+          (define-values (structured-body cfg-stats)
+            (structure-subroutine-cfg (hash-ref blk 'insts) #:arch 'sm83))
+          (set! bank-loops         (+ bank-loops         (hash-ref cfg-stats 'loops 0)))
+          (set! bank-spin-waits    (+ bank-spin-waits    (hash-ref cfg-stats 'spin-waits 0)))
+          (set! bank-conditionals  (+ bank-conditionals  (hash-ref cfg-stats 'conditionals 0)))
+          (set! bank-guard-returns (+ bank-guard-returns (hash-ref cfg-stats 'guard-returns 0)))
           (define sub-name
             (if (and (= bank-idx 0) (= sub-addr #x0150))
                 'main_entry_0150
@@ -646,16 +673,20 @@
              #:mmio ,(hash-ref blk 'mmio)
              #:hram ,(hash-ref blk 'hram)
              #:mbc-writes ,(hash-ref blk 'mbc-writes)
-             ,@(hash-ref blk 'insts)))))
+             ,@structured-body))))
 
-  (hasheq 'instruction-count inst-cnt
-          'cb-bit-ops        cb-bit-ops
-          'call-targets      (sort (set->list call-targets) <)
-          'hram-offsets      (sort (set->list hram-offsets) <)
-          'io-regs           (sort (set->list io-regs) <)
-          'mbc-writes        (sort (set->list mbc-writes) <)
-          'mmio-counts       mmio-counts
-          'subroutines       lifted-subs))
+  (hasheq 'instruction-count        inst-cnt
+          'cb-bit-ops               cb-bit-ops
+          'call-targets             (sort (set->list call-targets) <)
+          'hram-offsets             (sort (set->list hram-offsets) <)
+          'io-regs                  (sort (set->list io-regs) <)
+          'mbc-writes               (sort (set->list mbc-writes) <)
+          'mmio-counts              mmio-counts
+          'subroutines              lifted-subs
+          'structured-loops         bank-loops
+          'structured-spin-waits    bank-spin-waits
+          'structured-conditionals  bank-conditionals
+          'structured-guard-returns bank-guard-returns))
 
 (define (lift-sm83-bank-subroutines rom-bytes bank-idx bank-start bank-end
                                     #:seed-entries [seed-entries '()]
@@ -700,27 +731,28 @@
     [_ #f]))
 
 ;; Assemble all instructions in a `(def-sm83-isr ...)` or `(defsub-sm83 ...)` form
-;; directly into `dst-bytes` at the bank's ROM offset!
+;; (including nested structured control-flow forms) directly into `dst-bytes` at the bank's ROM offset!
 (define (assemble-sm83-subroutine-into! sub-sexp dst-bytes)
   (define kind (and (pair? sub-sexp) (car sub-sexp)))
   (when (memq kind '(def-sm83-isr defsub-sm83))
-    ;; Extract keyword headers vs instruction forms
+    ;; Extract keyword headers vs body/instruction forms
     (define bank-idx 0)
     (define sub-off  0)
-    (define inst-forms '())
+    (define body-forms '())
     (let loop ([rem (cddr sub-sexp)])
       (match rem
         [(list* '#:bank b rest)   (set! bank-idx b) (loop rest)]
         [(list* '#:vector v rest) (set! sub-off v)  (loop rest)]
         [(list* '#:offset o rest) (set! sub-off o)  (loop rest)]
         [(list* (? keyword?) _ rest) (loop rest)]
-        [(cons inst rest)
-         (when (pair? inst)
-           (set! inst-forms (cons inst inst-forms)))
+        [(cons form rest)
+         (when (pair? form)
+           (set! body-forms (cons form body-forms)))
          (loop rest)]
         ['() (void)]))
+    (define flat-insts (flatten-structured-insts (reverse body-forms)))
     (define base-rom-off (+ (* bank-idx 16384) sub-off))
-    (let iloop ([insts (reverse inst-forms)]
+    (let iloop ([insts flat-insts]
                 [cur-off base-rom-off])
       (when (pair? insts)
         (define ibytes (assemble-sm83-inst-bytes (car insts)))

@@ -38,11 +38,25 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update abs_box add_shake apply_accel apply_friction arg boldprint bounce bounce_relative cancel_attack change_state check_hazard_colls coll coll_exit coll_ink coll_objs create_bubbles create_clam create_exit create_explosion create_fern create_field create_ink create_mine create_particle create_pearl create_player create_puffer create_school create_shark create_snapper create_spikey create_squid create_trap create_trigger detectwalls dist draw_background draw_boss draw_bubble draw_clam draw_exit draw_explosion draw_fern draw_foreground draw_fx draw_hazards draw_hud draw_ink draw_objects draw_particles draw_pearl draw_player draw_puffer draw_snapper draw_spikey draw_squid draw_titles drawoutline flashobject gettile hurt_player is_offscreen issolid kill_object load_room load_room_data move new_box new_object next_room parse setdirection spawnlist spawntype ternary timer unpack update_boss update_camera update_clam update_exit update_hazards update_ink update_objects update_particles update_pearl update_player update_puffer update_shake update_snapper update_spikey update_squid update_triggers))
     (pico8-api-calls (abs add all btn camera circ circfill cls cos del fget flr map max mget min music pal palt print pset rect rectfill rnd sfx sin spr sqrt))
+    (structured-loops 31)
+    (structured-conditionals 125)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 6)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 32)
     (active-sfx-lifted 32)
     (active-music-lifted 14))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update create_player draw_player draw_titles hurt_player move update_boss update_camera) #:draw-states (_draw create_squid draw_background draw_boss draw_bubble draw_clam draw_exit draw_explosion))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update abs_box add_shake apply_accel apply_friction arg boldprint bounce)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 38)
+    (idiom-pico8-tilemap-collision #:apis (mget fget map) #:call-sites 3)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 43)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 98)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 6)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 29))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name load_room_data)
@@ -50,6 +64,9 @@
       (line-range (7 27))
       (api-calls (music))
       (called-functions (change_state next_room parse))
+      (structured-ast
+        (if-cond "titles")
+        (if-cond "t==200"))
       (body-lines
         "function load_room_data()"
         "rooms = {"
@@ -78,6 +95,8 @@
       (line-range (341 376))
       (api-calls ())
       (called-functions (arg load_room load_room_data new_box))
+      (structured-ast
+        (seq-block 36))
       (body-lines
         "function _init()"
         ""
@@ -117,6 +136,10 @@
       (line-range (378 384))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "t>=30000")
+        (if-cond "room>1 and room <#rooms")
+        (if-cond "gt==1800"))
       (body-lines
         "function _update()"
         "t+=1"
@@ -131,6 +154,10 @@
       (line-range (414 425))
       (api-calls (rectfill))
       (called-functions ())
+      (structured-ast
+        (if-cond "fade>0")
+        (if-cond "fade<=#fades and fadein==false")
+        (return-expr ""))
       (body-lines
         "function _draw()"
         ""
@@ -150,6 +177,13 @@
       (line-range (466 480))
       (api-calls (max))
       (called-functions ())
+      (structured-ast
+        (if-cond "pd >= 1 and pd <=3")
+        (if-cond "pd >= 5 and pd <=7")
+        (if-cond "pd <=1 or pd ==7")
+        (if-cond "pd >= 3 and pd <=5")
+        (if-cond "camx>cmaxx-127")
+        (if-cond "camy>cmaxy-127"))
       (body-lines
         "function update_camera()"
         "local xoff,yoff,pd = 0,0,player.dir"
@@ -172,6 +206,8 @@
       (line-range (483 485))
       (api-calls (rectfill))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function draw_background()"
         "rectfill(0,0,cmaxx,cmaxy,1)"
@@ -182,6 +218,9 @@
       (line-range (488 498))
       (api-calls (all flr map pal))
       (called-functions ())
+      (structured-ast
+        (for-loop "i in all(roomtiles)")
+        (if-cond "i == -1"))
       (body-lines
         "function draw_foreground()"
         "local mapx,mapy = 0,0"
@@ -200,6 +239,8 @@
       (line-range (503 506))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (for-loop "enemy in all(objects)"))
       (body-lines
         "function update_objects(objects)"
         "for enemy in all(objects) do"
@@ -211,6 +252,8 @@
       (line-range (509 512))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (for-loop "p in all(hazards)"))
       (body-lines
         "function update_hazards(hazards)"
         "for p in all(hazards) do"
@@ -222,6 +265,8 @@
       (line-range (515 518))
       (api-calls (all))
       (called-functions (coll))
+      (structured-ast
+        (for-loop "p in all(hazards)"))
       (body-lines
         "function check_hazard_colls(hazards)"
         "for p in all(hazards) do"
@@ -233,6 +278,8 @@
       (line-range (521 524))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (for-loop "p in all(hazards)"))
       (body-lines
         "function draw_hazards(hazards)"
         "for p in all(hazards) do"
@@ -244,6 +291,8 @@
       (line-range (529 539))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 11))
       (body-lines
         "function create_trigger(ref,exec)"
         "local t ={"
@@ -262,6 +311,10 @@
       (line-range (541 548))
       (api-calls (all))
       (called-functions (dist))
+      (structured-ast
+        (for-loop "trig in all(triggers)")
+        (if-cond "trig.prox>0")
+        (if-cond "dist(player.x,player.y,trig.x,trig.y"))
       (body-lines
         "function update_triggers(triggers)"
         "for trig in all(triggers) do"
@@ -277,6 +330,8 @@
       (line-range (563 569))
       (api-calls (abs rnd))
       (called-functions ())
+      (structured-ast
+        (if-cond "abs(shkx"))
       (body-lines
         "function update_shake()"
         "if abs(shkx)+abs(shky)<0.5 then"
@@ -291,6 +346,8 @@
       (line-range (572 575))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (for-loop "enemy in all(objects)"))
       (body-lines
         "function draw_objects(objects)"
         "for enemy in all(objects) do"
@@ -302,6 +359,8 @@
       (line-range (578 581))
       (api-calls (circ))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=106,122,8"))
       (body-lines
         "function draw_hud()"
         "for i=106,122,8 do"
@@ -313,6 +372,8 @@
       (line-range (593 597))
       (api-calls ())
       (called-functions (boldprint move))
+      (structured-ast
+        (if-cond "player.y>=60 and t>=60 and room==1"))
       (body-lines
         "function draw_titles()"
         "if player.y>=60 and t>=60 and room==1 then"
@@ -325,6 +386,8 @@
       (line-range (646 649))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (for-loop "fx in all(fx)"))
       (body-lines
         "function draw_fx(fxs)"
         "for fx in all(fx) do"
@@ -336,6 +399,8 @@
       (line-range (652 655))
       (api-calls ())
       (called-functions (load_room))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function next_room()"
         "room+=1"
@@ -347,6 +412,10 @@
       (line-range (658 683))
       (api-calls (all max))
       (called-functions (create_player parse))
+      (structured-ast
+        (if-cond "r.ref")
+        (for-loop "i in all(roomtiles)")
+        (if-cond "i == -1"))
       (body-lines
         "function load_room(rm)"
         "t=0"
@@ -380,6 +449,8 @@
       (line-range (731 779))
       (api-calls ())
       (called-functions (new_object parse))
+      (structured-ast
+        (seq-block 49))
       (body-lines
         "function create_player(x,y)"
         "local p=new_object(x,y,\"player\")"
@@ -419,6 +490,8 @@
       (line-range (780 784))
       (api-calls ())
       (called-functions (ternary))
+      (structured-ast
+        (if-cond "att and p.state==\"attack\""))
       (body-lines
         "p.abs_box=function(att)"
         "local b,mx,my,pb = 5,0,0,p.bigbox and att"
@@ -431,6 +504,11 @@
       (line-range (807 823))
       (api-calls (abs))
       (called-functions (apply_friction load_room))
+      (structured-ast
+        (if-cond "state==\"dead\"")
+        (if-cond "abs(p.animt/0.01")
+        (if-cond "p.animt>=1")
+        (if-cond "p.invinci>0"))
       (body-lines
         "function update_player(p)"
         "p.animt+=0.01"
@@ -455,6 +533,14 @@
       (line-range (934 949))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "state==\"hurt\" or state==\"dead\"")
+        (if-cond "d==0 or d==4")
+        (if-cond "d==1 or d==7")
+        (if-cond "d==2 or d==6")
+        (if-cond "d==3 or d==5")
+        (if-cond "d==4 or ((d==3 or d==5")
+        (if-cond "d>=5"))
       (body-lines
         "function draw_player(p)"
         "local state=p.state"
@@ -478,6 +564,15 @@
       (line-range (964 982))
       (api-calls (all sfx))
       (called-functions (abs_box bounce bounce_relative cancel_attack change_state coll kill_object ternary))
+      (structured-ast
+        (for-loop "e in all(objects)")
+        (if-cond "coll(e.abs_box(")
+        (if-cond "name==\"mine\"")
+        (if-cond "player.state==\"attack\"")
+        (if-cond "e.invinci")
+        (if-cond "player.invinci>0")
+        (return-expr "end")
+        (if-cond "name!=\"clam\""))
       (body-lines
         "function coll_objs()"
         "for e in all(objects) do"
@@ -504,6 +599,9 @@
       (line-range (999 1013))
       (api-calls (rnd sfx))
       (called-functions (add_shake change_state create_bubbles))
+      (structured-ast
+        (if-cond "p.state != \"dead\"")
+        (if-cond "p.hp<=0"))
       (body-lines
         "function hurt_player(p)"
         "if p.state != \"dead\" then"
@@ -526,6 +624,8 @@
       (line-range (1017 1027))
       (api-calls (rnd sfx))
       (called-functions (add_shake change_state create_particle))
+      (structured-ast
+        (for-loop "i=1,rnd(4)+3"))
       (body-lines
         "function cancel_attack()"
         "change_state(player,\"idle\")"
@@ -544,6 +644,8 @@
       (line-range (1035 1037))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{x=x,y=y,vx=0,vy=0,animt=0,state=\"idle\",name=name,update=update,"))
       (body-lines
         "function new_object(x,y,name,update,draw)"
         "return {x=x,y=y,vx=0,vy=0,animt=0,state=\"idle\",name=name,update=update,draw=draw}"
@@ -554,6 +656,8 @@
       (line-range (1039 1051))
       (api-calls ())
       (called-functions (new_object))
+      (structured-ast
+        (seq-block 13))
       (body-lines
         "function create_snapper(x,y)"
         "local e=new_object(x,y,\"snapper\",update_snapper,draw_snapper)"
@@ -574,6 +678,8 @@
       (line-range (1052 1054))
       (api-calls ())
       (called-functions (new_box))
+      (structured-ast
+        (return-expr "new_box(e.x-3,e.y-3,e.x+3,e.y+3)"))
       (body-lines
         "e.abs_box=function()"
         "return new_box(e.x-3,e.y-3,e.x+3,e.y+3)"
@@ -584,6 +690,8 @@
       (line-range (1059 1066))
       (api-calls (cos rnd sin))
       (called-functions (create_snapper))
+      (structured-ast
+        (for-loop "i=1,6"))
       (body-lines
         "function create_school(x,y)"
         "for i=1,6 do"
@@ -599,6 +707,14 @@
       (line-range (1070 1087))
       (api-calls ())
       (called-functions (apply_accel dist move setdirection))
+      (structured-ast
+        (if-cond "not e.active")
+        (if-cond "d<=120")
+        (if-cond "d<=20")
+        (if-cond "player.x-buff > e.x")
+        (if-cond "player.x+buff < e.x")
+        (if-cond "player.y-buff > e.y")
+        (if-cond "player.y+buff < e.y"))
       (body-lines
         "function update_snapper(e)"
         "e.animt+=0.01"
@@ -624,6 +740,12 @@
       (line-range (1090 1101))
       (api-calls (flr))
       (called-functions (drawoutline))
+      (structured-ast
+        (if-cond "d==0 or d==4")
+        (if-cond "d==1 or d==3 or d==5 or d==7")
+        (if-cond "d==2 or d==6")
+        (if-cond "d>=3 and d<=5")
+        (if-cond "d>=5"))
       (body-lines
         "function draw_snapper(e)"
         "local sinfo,flipx,flipy,sprites,d=e.spr_info[e.state],false,false,{},e.dir"
@@ -643,6 +765,8 @@
       (line-range (1103 1116))
       (api-calls ())
       (called-functions (new_object))
+      (structured-ast
+        (seq-block 14))
       (body-lines
         "function create_puffer(x,y)"
         "local e=new_object(x,y,\"puffer\",update_puffer,draw_puffer)"
@@ -664,6 +788,8 @@
       (line-range (1117 1120))
       (api-calls ())
       (called-functions (new_box ternary))
+      (structured-ast
+        (return-expr "new_box(e.x-size,e.y-size,e.x+size,e.y+size)"))
       (body-lines
         "e.abs_box=function()"
         "local size = ternary(e.state==\"puffed\",7,3)"
@@ -675,6 +801,11 @@
       (line-range (1126 1137))
       (api-calls (sfx))
       (called-functions (change_state is_offscreen ternary))
+      (structured-ast
+        (if-cond "os")
+        (return-expr "end")
+        (if-cond "e.animt>1.2 and state==\"idle\"")
+        (if-cond "not os"))
       (body-lines
         "function update_puffer(e)"
         "e.animt+=0.01"
@@ -694,6 +825,8 @@
       (line-range (1153 1161))
       (api-calls (flr))
       (called-functions (drawoutline ternary))
+      (structured-ast
+        (if-cond "e.state==\"puffed\""))
       (body-lines
         "function draw_puffer(e)"
         "local sinfo=e.spr_info[e.state]"
@@ -710,6 +843,8 @@
       (line-range (1163 1170))
       (api-calls ())
       (called-functions (new_object))
+      (structured-ast
+        (if-cond "shark"))
       (body-lines
         "function create_squid(x,y,shark)"
         "local e=new_object(x,y,\"squid\",update_squid,draw_squid)"
@@ -725,6 +860,9 @@
       (line-range (1182 1186))
       (api-calls ())
       (called-functions (new_box))
+      (structured-ast
+        (if-cond "e.name==\"shark\"")
+        (return-expr "new_box(e.x-xa,e.y-ya,e.x+xa,e.y+ya)"))
       (body-lines
         "e.abs_box=function()"
         "local xa,ya=3,7"
@@ -737,6 +875,8 @@
       (line-range (1191 1193))
       (api-calls ())
       (called-functions (create_squid))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function create_shark(x,y)"
         "create_squid(x,y,true)"
@@ -747,6 +887,8 @@
       (line-range (1195 1203))
       (api-calls ())
       (called-functions (ternary))
+      (structured-ast
+        (if-cond "e.name==\"squid\""))
       (body-lines
         "function update_squid(e)"
         "e.animt+=1"
@@ -763,6 +905,8 @@
       (line-range (1220 1230))
       (api-calls (flr))
       (called-functions (ternary))
+      (structured-ast
+        (if-cond "e.name==\"squid\""))
       (body-lines
         "function draw_squid(e)"
         "local sinfo = e.spr_info[e.state]"
@@ -781,6 +925,8 @@
       (line-range (1234 1241))
       (api-calls (flr rnd))
       (called-functions (new_object))
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function create_spikey(x,y,mine)"
         "local e=new_object(x,y,\"spikey\",update_spikey,draw_spikey)"
@@ -796,6 +942,8 @@
       (line-range (1242 1244))
       (api-calls ())
       (called-functions (new_box))
+      (structured-ast
+        (return-expr "new_box(e.x-3,e.y-3,e.x+3,e.y+3)"))
       (body-lines
         "e.abs_box=function()"
         "return new_box(e.x-3,e.y-3,e.x+3,e.y+3)"
@@ -806,6 +954,8 @@
       (line-range (1250 1252))
       (api-calls ())
       (called-functions (create_spikey))
+      (structured-ast
+        (return-expr "create_spikey(x,y,true)"))
       (body-lines
         "function create_mine(x,y)"
         "return create_spikey(x,y,true)"
@@ -816,6 +966,9 @@
       (line-range (1254 1260))
       (api-calls ())
       (called-functions (create_spikey))
+      (structured-ast
+        (for-loop "i=1,cols")
+        (for-loop "i=1,rows"))
       (body-lines
         "function create_field(x,y,cols,rows,xspace,yspace,mine)"
         "local ypos = y"
@@ -830,6 +983,8 @@
       (line-range (1266 1271))
       (api-calls ())
       (called-functions (create_bubbles create_field create_mine))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function create_trap(x,y)"
         "local m = create_mine(x,y)"
@@ -843,6 +998,11 @@
       (line-range (1273 1289))
       (api-calls (sfx))
       (called-functions (add_shake bounce_relative create_bubbles create_explosion dist hurt_player ternary))
+      (structured-ast
+        (if-cond "(t+e.seed")
+        (if-cond "e.state==\"detonate\"")
+        (if-cond "e.animt>=60")
+        (if-cond "pdist<=30 and player.state != \"hurt\" and player.invinci==0"))
       (body-lines
         "function update_spikey(e)"
         "e.vy+=ternary(e.bob,0.01,-0.01)"
@@ -867,6 +1027,8 @@
       (line-range (1313 1318))
       (api-calls (pal spr))
       (called-functions (drawoutline flashobject))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function draw_spikey(e)"
         "drawoutline(e.spri,e.x-4,e.y-4,1,1)"
@@ -880,6 +1042,8 @@
       (line-range (1321 1327))
       (api-calls ())
       (called-functions (new_object))
+      (structured-ast
+        (seq-block 7))
       (body-lines
         "function create_clam(x,y)"
         "local e =new_object(x,y,\"clam\",update_clam,draw_clam)"
@@ -894,6 +1058,9 @@
       (line-range (1328 1333))
       (api-calls ())
       (called-functions (new_box))
+      (structured-ast
+        (if-cond "e.state==\"open\"")
+        (return-expr "box"))
       (body-lines
         "e.abs_box=function()"
         ""
@@ -907,6 +1074,14 @@
       (line-range (1338 1350))
       (api-calls (sfx))
       (called-functions (is_offscreen ternary))
+      (structured-ast
+        (if-cond "is_offscreen(e,60")
+        (return-expr "end")
+        (if-cond "e.state==\"idle\"")
+        (if-cond "e.animt >=60")
+        (if-cond "not e.shakesound and not is_offscreen(e")
+        (if-cond "t%2==0")
+        (if-cond "e.wob"))
       (body-lines
         "function update_clam(e)"
         "e.animt+=1"
@@ -927,6 +1102,8 @@
       (line-range (1376 1381))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "e.state==\"open\""))
       (body-lines
         "function draw_clam(e)"
         "local spri,yoff,h=29,-7,1"
@@ -940,6 +1117,8 @@
       (line-range (1385 1389))
       (api-calls ())
       (called-functions (new_object))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function create_pearl(x,y,vx,vy)"
         "local e=new_object(x,y,\"pearl\",update_pearl,draw_pearl)"
@@ -952,6 +1131,8 @@
       (line-range (1390 1392))
       (api-calls ())
       (called-functions (new_box))
+      (structured-ast
+        (return-expr "new_box(e.x-2,e.y-2,e.x+2,e.y+2)"))
       (body-lines
         "e.abs_box=function()"
         "return new_box(e.x-2,e.y-2,e.x+2,e.y+2)"
@@ -962,6 +1143,8 @@
       (line-range (1398 1401))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "e.x<-20 or e.x>roomcols*140 or e.y<-20 or e.y>roomrows*140"))
       (body-lines
         "function update_pearl(e)"
         "if e.x<-20 or e.x>roomcols*140 or e.y<-20 or e.y>roomrows*140 then"
@@ -973,6 +1156,8 @@
       (line-range (1405 1407))
       (api-calls ())
       (called-functions (drawoutline))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function draw_pearl(e)"
         "drawoutline(26,e.x-2,e.y-2,1,1,false,false,0,true)"
@@ -983,6 +1168,8 @@
       (line-range (1409 1420))
       (api-calls ())
       (called-functions (new_box))
+      (structured-ast
+        (return-expr "e"))
       (body-lines
         "function create_exit(x,y)"
         "local e={"
@@ -1002,6 +1189,10 @@
       (line-range (1422 1428))
       (api-calls (all))
       (called-functions ())
+      (structured-ast
+        (if-cond "exit.combat==true and exit.state==\"closed\"")
+        (for-loop "i in all(objects)")
+        (if-cond "i.name==\"mine\" or i.name==\"spikey\" or i.name==\"pearl\""))
       (body-lines
         "function update_exit()"
         "if exit.combat==true and exit.state==\"closed\" then"
@@ -1016,6 +1207,9 @@
       (line-range (1439 1444))
       (api-calls (sfx))
       (called-functions (abs_box coll next_room))
+      (structured-ast
+        (if-cond "coll(exit.abs_box,player.abs_box(")
+        (if-cond "exit.state==\"open\" and player.state!=\"dead\""))
       (body-lines
         "function coll_exit()"
         "if coll(exit.abs_box,player.abs_box()) then"
@@ -1029,6 +1223,8 @@
       (line-range (1448 1456))
       (api-calls (pal spr))
       (called-functions ())
+      (structured-ast
+        (if-cond "exit.state==\"closed\""))
       (body-lines
         "function draw_exit()"
         "local ca,cb=0,0"
@@ -1045,6 +1241,8 @@
       (line-range (1458 1471))
       (api-calls (add))
       (called-functions (new_box))
+      (structured-ast
+        (return-expr "e"))
       (body-lines
         "function create_ink(x1,y1,x2,y2,uprate,both)"
         "e = {"
@@ -1066,6 +1264,12 @@
       (line-range (1473 1488))
       (api-calls (del flr rnd))
       (called-functions (coll create_particle new_box))
+      (structured-ast
+        (if-cond "e.both")
+        (if-cond "box.y2<0")
+        (if-cond "coll(box,cbox")
+        (if-cond "t%3==0")
+        (for-loop "i=1, flr((tblen+64)/64)"))
       (body-lines
         "function update_ink(e)"
         "local box=e.box"
@@ -1089,6 +1293,8 @@
       (line-range (1497 1506))
       (api-calls ())
       (called-functions (abs_box bounce_relative coll hurt_player))
+      (structured-ast
+        (if-cond "coll(box,player.abs_box("))
       (body-lines
         "function coll_ink(e)"
         "local box = e.box"
@@ -1106,6 +1312,8 @@
       (line-range (1509 1514))
       (api-calls (pal palt rectfill))
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function draw_ink(e)"
         "local b = e.box"
@@ -1119,6 +1327,13 @@
       (line-range (1517 1532))
       (api-calls (all sfx))
       (called-functions (abs_box add_shake cancel_attack change_state coll kill_object))
+      (structured-ast
+        (if-cond "boss.wave>0")
+        (if-cond "boss.state==\"active\"")
+        (if-cond "coll(player.abs_box(")
+        (if-cond "player.state==\"attack\"")
+        (if-cond "boss.hp<=0")
+        (for-loop "i in all(objects)"))
       (body-lines
         "function update_boss()"
         "boss.animt+=1"
@@ -1142,6 +1357,10 @@
       (line-range (1552 1562))
       (api-calls (spr))
       (called-functions (arg drawoutline))
+      (structured-ast
+        (if-cond "boss.hp<3")
+        (if-cond "boss.hp<2")
+        (if-cond "boss.hp<1"))
       (body-lines
         "function draw_boss()"
         "drawoutline(arg\"69,48,576,4,4,false,false,0,true,\")"
@@ -1160,6 +1379,8 @@
       (line-range (1570 1575))
       (api-calls ())
       (called-functions (parse spawntype))
+      (structured-ast
+        (for-loop "i=1,#ol,3"))
       (body-lines
         "function spawnlist(l)"
         "local ol = parse(l)"
@@ -1173,6 +1394,8 @@
       (line-range (1578 1597))
       (api-calls ())
       (called-functions (create_clam create_exit create_mine create_puffer create_school create_shark create_snapper create_spikey create_squid))
+      (structured-ast
+        (if-cond "type==3"))
       (body-lines
         "function spawntype(type,x,y)"
         "if type==3 then"
@@ -1200,6 +1423,8 @@
       (line-range (1600 1602))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "not (a.x1>b.x2 or a.y1>b.y2 or a.x2<b.x1 or a.y2<b.y1)"))
       (body-lines
         "function coll(a,b)"
         "return not (a.x1>b.x2 or a.y1>b.y2 or a.x2<b.x1 or a.y2<b.y1)"
@@ -1210,6 +1435,8 @@
       (line-range (1604 1607))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function move(o)"
         "o.x+=o.vx"
@@ -1221,6 +1448,8 @@
       (line-range (1609 1615))
       (api-calls (flr rnd))
       (called-functions (add_shake create_bubbles create_explosion create_particle))
+      (structured-ast
+        (for-loop "i=1,flr(rnd(4)+3)"))
       (body-lines
         "function kill_object(e)"
         "add_shake(5)"
@@ -1235,6 +1464,8 @@
       (line-range (1622 1625))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function apply_friction(o,fric)"
         "o.vx*=fric"
@@ -1246,6 +1477,9 @@
       (line-range (1627 1630))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "bx")
+        (if-cond "by"))
       (body-lines
         "function bounce(o,bx,by)"
         "if bx then o.vx = bx end"
@@ -1257,6 +1491,8 @@
       (line-range (1632 1639))
       (api-calls ())
       (called-functions (bounce dist))
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "function bounce_relative(p,o,str)"
         "local rdist = dist(p.x,p.y,o.x,o.y)"
@@ -1272,6 +1508,8 @@
       (line-range (1641 1645))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "o.state != state"))
       (body-lines
         "function change_state(o,state)"
         "if o.state != state then"
@@ -1284,6 +1522,8 @@
       (line-range (1648 1653))
       (api-calls (min))
       (called-functions (dist))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function apply_accel(o,tpspd)"
         "local l=dist(o.vx,o.vy)"
@@ -1297,6 +1537,9 @@
       (line-range (1655 1664))
       (api-calls (fget flr mget))
       (called-functions (gettile))
+      (structured-ast
+        (if-cond "tile")
+        (return-expr "fget(val, 1)"))
       (body-lines
         "function issolid(x, y)"
         "local tile,col,row = gettile(x,y)"
@@ -1314,6 +1557,9 @@
       (line-range (1667 1676))
       (api-calls ())
       (called-functions (abs_box issolid))
+      (structured-ast
+        (for-loop "i=y1,y2")
+        (if-cond "x1-1<0 or issolid(x1-1,i"))
       (body-lines
         "function detectwalls(o)"
         "local hb = o.abs_box()"
@@ -1331,6 +1577,15 @@
       (line-range (1705 1714))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "bu and not(bl or br or bd")
+        (if-cond "br and not(bu or bl or bd")
+        (if-cond "bd and not(bl or bu or br")
+        (if-cond "bl and not(bd or br or bu")
+        (if-cond "(bu and br")
+        (if-cond "(br and bd")
+        (if-cond "(bd and bl")
+        (if-cond "(bl and bu"))
       (body-lines
         "function setdirection(o,bl,br,bu,bd)"
         "if bu and not(bl or br or bd) then o.dir = 0 end"
@@ -1348,6 +1603,8 @@
       (line-range (1716 1720))
       (api-calls (cos rnd sin))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function add_shake(p)"
         "local a=rnd(1)"
@@ -1360,6 +1617,9 @@
       (line-range (1722 1726))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "o.x<camx-buf or o.x>camx+127+buf or o.y<camy-buf or o.y>camy+127")
+        (return-expr "true end"))
       (body-lines
         "function is_offscreen(o,buffer)"
         "local buf = buffer or 0"
@@ -1372,6 +1632,8 @@
       (line-range (1732 1741))
       (api-calls (add))
       (called-functions ())
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "function create_explosion(x,y,r)"
         "local e={"
@@ -1389,6 +1651,10 @@
       (line-range (1743 1755))
       (api-calls (circfill rnd))
       (called-functions (create_explosion))
+      (structured-ast
+        (if-cond "s.p<2")
+        (if-cond "s.p<3 and s.r>4")
+        (for-loop "i=0,2"))
       (body-lines
         "function draw_explosion(s)"
         "if s.p<2 then"
@@ -1409,6 +1675,8 @@
       (line-range (1767 1777))
       (api-calls (add cos rnd sin))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,num"))
       (body-lines
         "function create_bubbles(x,y,num,spread,minsize,maxsize)"
         "for i=1,num do"
@@ -1427,6 +1695,8 @@
       (line-range (1780 1785))
       (api-calls (circ circfill del))
       (called-functions ())
+      (structured-ast
+        (if-cond "(b.y<0"))
       (body-lines
         "function draw_bubble(b)"
         "circ(b.x+0.5,b.y+0.5,b.r,13)"
@@ -1440,6 +1710,8 @@
       (line-range (1787 1791))
       (api-calls (add flr rnd))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function create_fern(x,y,len,col)"
         "f={x=x,y=y,len=len,col=col,flipx=false,draw=draw_fern}"
@@ -1452,6 +1724,11 @@
       (line-range (1793 1802))
       (api-calls (flr pal spr))
       (called-functions (create_bubbles))
+      (structured-ast
+        (if-cond "t%50==0")
+        (if-cond "flr(t+1080")
+        (for-loop "i=1,f.len")
+        (if-cond "i==f.len"))
       (body-lines
         "function draw_fern(f)"
         "if t%50==0 then f.flipx=not f.flipx end"
@@ -1469,6 +1746,9 @@
       (line-range (1808 1813))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (if-cond "o.flash > 0")
+        (for-loop "i=0,15"))
       (body-lines
         "function flashobject(o,c)"
         "if o.flash > 0 then"
@@ -1482,6 +1762,8 @@
       (line-range (1819 1822))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,15"))
       (body-lines
         "function drawoutline(n,x,y,w,h,flip_x,flip_y,c,main)"
         "for i=1,15 do"
@@ -1493,6 +1775,9 @@
       (line-range (1833 1838))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (for-loop "xx=-1,1")
+        (for-loop "yy=-1,1"))
       (body-lines
         "function boldprint(str,x,y,col)"
         "c=col or 7"
@@ -1506,6 +1791,8 @@
       (line-range (1843 1859))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "pp"))
       (body-lines
         "function create_particle(x,y,vx,vy,pp)"
         "p = {"
@@ -1530,6 +1817,12 @@
       (line-range (1863 1874))
       (api-calls (all del flr))
       (called-functions (is_offscreen))
+      (structured-ast
+        (for-loop "p in all(particles)")
+        (if-cond "p.age==p.maxage or is_offscreen(p,30")
+        (if-cond "p.age/p.maxage > 0.6")
+        (if-cond "p.age/p.maxage > 0.8")
+        (if-cond "not p.pp"))
       (body-lines
         "function update_particles()"
         "for p in all(particles) do"
@@ -1549,6 +1842,9 @@
       (line-range (1881 1886))
       (api-calls (all circfill))
       (called-functions ())
+      (structured-ast
+        (for-loop "p in all(particles)")
+        (if-cond "p.fill"))
       (body-lines
         "function draw_particles()"
         "for p in all(particles) do"
@@ -1562,6 +1858,10 @@
       (line-range (1892 1906))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,#string")
+        (if-cond "s != \",\"")
+        (if-cond "d==\"true\""))
       (body-lines
         "function parse(string)"
         "local data = {}"
@@ -1584,6 +1884,8 @@
       (line-range (1914 1916))
       (api-calls ())
       (called-functions (parse unpack))
+      (structured-ast
+        (return-expr "unpack(parse(str))"))
       (body-lines
         "function arg(str)"
         "return unpack(parse(str))"
@@ -1594,6 +1896,9 @@
       (line-range (1918 1922))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "t[i]!=nil")
+        (return-expr "t[i],unpack(t,i+1)"))
       (body-lines
         "function unpack(t,i)"
         "i=i or 1"
@@ -1606,6 +1911,9 @@
       (line-range (1925 1927))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "c")
+        (return-expr "a else return b end"))
       (body-lines
         "function ternary(c,a,b)"
         "if c then return a else return b end"
@@ -1616,6 +1924,8 @@
       (line-range (1929 1934))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (return-expr "tile,col, row"))
       (body-lines
         "function gettile(x,y)"
         "local col = flr(x/128)"
@@ -1629,6 +1939,9 @@
       (line-range (1936 1941))
       (api-calls (abs max min sqrt))
       (called-functions ())
+      (structured-ast
+        (if-cond "xb")
+        (return-expr "sqrt(n*n +1)*d"))
       (body-lines
         "function dist(xa,ya,xb,yb)"
         "if xb then xa=xb-xa ya=yb-ya end"
@@ -1642,6 +1955,8 @@
       (line-range (1943 1945))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{x1=x1,y1=y1,x2=x2,y2=y2}"))
       (body-lines
         "function new_box(x1,y1,x2,y2)"
         "return {x1=x1,y1=y1,x2=x2,y2=y2}"
@@ -1652,6 +1967,8 @@
       (line-range (1947 1951))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (if-cond "min<10"))
       (body-lines
         "function timer()"
         "local min,sec=gm,flr(gt/30)"

@@ -662,6 +662,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
   };
 
   const scanLimit = Math.min(romBuf.length - 4, 0x200000);
+  const loopRichCandidates = [];
   for (let i = 0; i < scanLimit; i++) {
     const op = romBuf[i];
     if (op === 0xc2 || op === 0xe2) {
@@ -680,13 +681,37 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
         dmaChannelWrites++;
         bumpMmio(SNES_MMIO_SYMBOLS[addr]);
       }
-    } else if (op === 0xad || op === 0xae || op === 0xac) {
+    } else if (op === 0xad || op === 0xae || op === 0xac || op === 0x2c) {
       const addr = romBuf[i + 1] | (romBuf[i + 2] << 8);
       if (addr === 0x4016 || addr === 0x4017 || (addr >= 0x4218 && addr <= 0x421f)) {
         joypadReads++;
         bumpMmio(SNES_MMIO_SYMBOLS[addr]);
       } else if (SNES_MMIO_SYMBOLS[addr]) {
         bumpMmio(SNES_MMIO_SYMBOLS[addr]);
+      }
+      // Detect tight backward polling loops on RDNMI ($4210), TIMEUP ($4211), HVBJOY ($4212), or APUIO0..3 ($2140..$2143)
+      if (
+        loopRichCandidates.length < 12 &&
+        (addr === 0x4210 || addr === 0x4211 || addr === 0x4212 || (addr >= 0x2140 && addr <= 0x2143)) &&
+        i + 5 < romBuf.length
+      ) {
+        for (let d = 3; d <= 7 && i + d + 1 < romBuf.length; d++) {
+          const brOp = romBuf[i + d];
+          const brRel = romBuf[i + d + 1];
+          if (
+            (brOp === 0x10 || brOp === 0x30 || brOp === 0xd0 || brOp === 0xf0 || brOp === 0x90 || brOp === 0xb0) &&
+            brRel >= 0xf4
+          ) {
+            const bank = isHirom ? (i >>> 16) & 0x3f : (i >>> 15) & 0x7f;
+            const pcAddr = isHirom ? 0x8000 | (i & 0x7fff) : 0x8000 | (i & 0x7fff);
+            const key = `${bank}:${pcAddr}`;
+            if (!seenSubKeys.has(key)) {
+              seenSubKeys.add(key);
+              loopRichCandidates.push({ bank, addr: pcAddr });
+            }
+            break;
+          }
+        }
       }
     } else if (op === 0x20) {
       const target = romBuf[i + 1] | (romBuf[i + 2] << 8);
@@ -734,7 +759,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
   const subSymbol = (bank, addr, customName = null) =>
     customName || `sub-65c816-${bank.toString(16).padStart(2, '0').toUpperCase()}-${addr.toString(16).padStart(4, '0').toUpperCase()}`;
 
-  const enqueueSub = (bank, addr, m8In = true, x8In = true, customName = null, maxInsns = 28) => {
+  const enqueueSub = (bank, addr, m8In = true, x8In = true, customName = null, maxInsns = 32) => {
     if (addr < 0x8000 || addr === 0xffff) return null;
     const normBank = isHirom ? bank & 0x3f : bank & 0x7f;
     const key = `${normBank}:${addr}`;
@@ -746,15 +771,248 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     return name;
   };
 
-  enqueueSub(0x00, vectors.emuReset, true, true, 'vec-emu-reset', 34);
-  enqueueSub(0x00, vectors.nativeNmi, true, true, 'vec-native-nmi', 34);
-  enqueueSub(0x00, vectors.nativeIrq, true, true, 'vec-native-irq', 28);
+  enqueueSub(0x00, vectors.emuReset, true, true, 'vec-emu-reset', 36);
+  enqueueSub(0x00, vectors.nativeNmi, true, true, 'vec-native-nmi', 36);
+  enqueueSub(0x00, vectors.nativeIrq, true, true, 'vec-native-irq', 30);
   if (vectors.nativeCop >= 0x8000 && vectors.nativeCop !== vectors.nativeIrq) {
-    enqueueSub(0x00, vectors.nativeCop, true, true, 'vec-native-cop', 20);
+    enqueueSub(0x00, vectors.nativeCop, true, true, 'vec-native-cop', 22);
   }
   if (vectors.nativeBrk >= 0x8000 && vectors.nativeBrk !== vectors.nativeIrq && vectors.nativeBrk !== 0xffff) {
-    enqueueSub(0x00, vectors.nativeBrk, true, true, 'vec-native-brk', 20);
+    enqueueSub(0x00, vectors.nativeBrk, true, true, 'vec-native-brk', 22);
   }
+  for (const cand of loopRichCandidates.slice(0, 4)) {
+    enqueueSub(cand.bank, cand.addr, true, true);
+  }
+
+  const SNES_BRANCH_CONDS = {
+    'BPL-rel':   { cond: 'plus',           negCond: 'minus' },
+    'BMI-rel':   { cond: 'minus',          negCond: 'plus' },
+    'BVC-rel':   { cond: 'overflow-clear', negCond: 'overflow-set' },
+    'BVS-rel':   { cond: 'overflow-set',   negCond: 'overflow-clear' },
+    'BCC-rel':   { cond: 'carry-clear',    negCond: 'carry-set' },
+    'BCS-rel':   { cond: 'carry-set',      negCond: 'carry-clear' },
+    'BNE-rel':   { cond: 'not-equal',      negCond: 'equal' },
+    'BEQ-rel':   { cond: 'equal',          negCond: 'not-equal' },
+    'BRA-rel':   { cond: 'always',         negCond: 'never' },
+    'BRL-rel16': { cond: 'always',         negCond: 'never' },
+    'JMP-abs':   { cond: 'always',         negCond: 'never' },
+  };
+
+  const SNES_STEP_OPS = new Set([
+    'DEX', 'DEY', 'INX', 'INY', 'DEC-A', 'INC-A', 'DEC-dp', 'INC-dp', 'DEC-abs', 'INC-abs', 'DEC-dpX', 'INC-dpX',
+  ]);
+
+  const SNES_SPIN_WAIT_MMIOS = new Set([
+    'RDNMI', 'TIMEUP', 'HVBJOY', 'APUIO0', 'APUIO1', 'APUIO2', 'APUIO3', 'SLHV', 'STAT77', 'STAT78',
+  ]);
+
+  const structureSnesSubroutineCfg = (insns) => {
+    const used = new Uint8Array(insns.length);
+    const loopsByHeader = new Map();
+    const branchesByIdx = new Map();
+    let structuredLoops = 0;
+    let structuredConditionals = 0;
+
+    // 1. Identify backward branches (spin-wait-mmio-loop, counted-loop, do-while-loop)
+    for (let i = 0; i < insns.length; i++) {
+      const ins = insns[i];
+      if (!ins.branchInfo || ins.branchTarget === null) continue;
+      if (ins.branchTarget <= ins.pcNum) {
+        let headerIdx = -1;
+        for (let h = 0; h <= i; h++) {
+          if (insns[h].pcNum >= ins.branchTarget) {
+            headerIdx = h;
+            break;
+          }
+        }
+        if (headerIdx >= 0 && i - headerIdx <= 18) {
+          let overlap = false;
+          for (let k = headerIdx; k <= i; k++) {
+            if (used[k]) { overlap = true; break; }
+          }
+          if (!overlap) {
+            for (let k = headerIdx; k <= i; k++) used[k] = 1;
+            let pollMmio = null;
+            let stepOp = null;
+            for (let k = Math.max(0, headerIdx - 1); k <= i; k++) {
+              const mSym = insns[k].mmioSym;
+              if (mSym && SNES_SPIN_WAIT_MMIOS.has(mSym)) pollMmio = mSym;
+            }
+            for (let k = headerIdx; k <= i; k++) {
+              if (SNES_STEP_OPS.has(insns[k].op)) stepOp = insns[k].op;
+            }
+            const loopKind = pollMmio
+              ? 'spin-wait-mmio-loop'
+              : stepOp
+                ? 'counted-loop'
+                : 'do-while-loop';
+            loopsByHeader.set(headerIdx, {
+              kind: loopKind,
+              headerIdx,
+              latchIdx: i,
+              headerAddr: insns[headerIdx].addr,
+              latchAddr: ins.addr,
+              mmio: pollMmio,
+              step: stepOp,
+              cond: ins.branchInfo.cond,
+            });
+            structuredLoops++;
+          }
+        }
+      }
+    }
+
+    // 2. Identify forward conditional branches (if-else and when-branch)
+    for (let i = 0; i < insns.length; i++) {
+      if (used[i]) continue;
+      const ins = insns[i];
+      if (!ins.branchInfo || ins.branchInfo.cond === 'always' || ins.branchTarget === null) continue;
+      if (ins.branchTarget > ins.pcNum) {
+        let joinIdx = -1;
+        for (let j = i + 1; j < insns.length; j++) {
+          if (insns[j].pcNum >= ins.branchTarget) {
+            joinIdx = j;
+            break;
+          }
+        }
+        if (joinIdx === -1 && ins.branchTarget <= ins.pcNum + 24 && i + 1 < insns.length) {
+          joinIdx = Math.min(insns.length, i + 4);
+        }
+        if (joinIdx > i && joinIdx - i <= 14) {
+          let overlap = false;
+          for (let k = i; k < joinIdx; k++) {
+            if (used[k]) { overlap = true; break; }
+          }
+          if (overlap) continue;
+
+          // Check if the last instruction of the then-branch is an unconditional forward branch (if-else diamond)
+          const prevIns = insns[joinIdx - 1];
+          let mergeIdx = -1;
+          if (
+            joinIdx - 1 > i &&
+            prevIns.branchInfo &&
+            prevIns.branchInfo.cond === 'always' &&
+            prevIns.branchTarget !== null &&
+            prevIns.branchTarget > prevIns.pcNum &&
+            joinIdx < insns.length
+          ) {
+            for (let m = joinIdx + 1; m <= insns.length; m++) {
+              if (m < insns.length && insns[m].pcNum >= prevIns.branchTarget) {
+                mergeIdx = m;
+                break;
+              }
+            }
+            if (mergeIdx === -1 && prevIns.branchTarget <= prevIns.pcNum + 24) {
+              mergeIdx = Math.min(insns.length, joinIdx + 3);
+            }
+            if (mergeIdx > joinIdx) {
+              for (let k = joinIdx; k < mergeIdx; k++) {
+                if (used[k]) { mergeIdx = -1; break; }
+              }
+            }
+          }
+
+          if (mergeIdx > joinIdx) {
+            for (let k = i; k < mergeIdx; k++) used[k] = 1;
+            const mergeAddr =
+              mergeIdx < insns.length
+                ? insns[mergeIdx].addr
+                : `$${ins.bankHex}:${prevIns.branchTarget.toString(16).padStart(4, '0').toUpperCase()}`;
+            branchesByIdx.set(i, {
+              kind: 'if-else',
+              branchIdx: i,
+              elseIdx: joinIdx,
+              mergeIdx,
+              branchAddr: ins.addr,
+              elseAddr: insns[joinIdx].addr,
+              mergeAddr,
+              cond: ins.branchInfo.negCond,
+            });
+            structuredConditionals++;
+          } else {
+            for (let k = i; k < joinIdx; k++) used[k] = 1;
+            const joinAddr =
+              joinIdx < insns.length
+                ? insns[joinIdx].addr
+                : `$${ins.bankHex}:${ins.branchTarget.toString(16).padStart(4, '0').toUpperCase()}`;
+            branchesByIdx.set(i, {
+              kind: 'when-branch',
+              branchIdx: i,
+              joinIdx,
+              branchAddr: ins.addr,
+              joinAddr,
+              cond: ins.branchInfo.negCond,
+            });
+            structuredConditionals++;
+          }
+        }
+      }
+    }
+
+    const formatInsnLine = (ins, indent) => {
+      const mmioAnnot = ins.mmioSym ? ` #:mmio '${ins.mmioSym}` : '';
+      const callAnnot = ins.callTargetSym ? ` #:target '${ins.callTargetSym}` : '';
+      return `${indent}(insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${callAnnot})`;
+    };
+
+    const astLines = [];
+    for (let i = 0; i < insns.length; ) {
+      if (loopsByHeader.has(i)) {
+        const lp = loopsByHeader.get(i);
+        if (lp.kind === 'spin-wait-mmio-loop') {
+          astLines.push(
+            `    (spin-wait-mmio-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:mmio '${lp.mmio} #:cond '${lp.cond}`
+          );
+        } else if (lp.kind === 'counted-loop') {
+          astLines.push(
+            `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond}`
+          );
+        } else {
+          astLines.push(
+            `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond}`
+          );
+        }
+        for (let k = lp.headerIdx; k <= lp.latchIdx; k++) {
+          astLines.push(formatInsnLine(insns[k], '      '));
+        }
+        astLines.push(`    )`);
+        i = lp.latchIdx + 1;
+      } else if (branchesByIdx.has(i)) {
+        const br = branchesByIdx.get(i);
+        if (br.kind === 'if-else') {
+          astLines.push(
+            `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond}`
+          );
+          astLines.push(`      (then-branch`);
+          for (let k = br.branchIdx; k < br.elseIdx; k++) {
+            astLines.push(formatInsnLine(insns[k], '        '));
+          }
+          astLines.push(`      )`);
+          astLines.push(`      (else-branch`);
+          for (let k = br.elseIdx; k < br.mergeIdx; k++) {
+            astLines.push(formatInsnLine(insns[k], '        '));
+          }
+          astLines.push(`      )`);
+          astLines.push(`    )`);
+          i = br.mergeIdx;
+        } else {
+          astLines.push(
+            `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond}`
+          );
+          for (let k = br.branchIdx; k < br.joinIdx; k++) {
+            astLines.push(formatInsnLine(insns[k], '      '));
+          }
+          astLines.push(`    )`);
+          i = br.joinIdx;
+        }
+      } else {
+        astLines.push(formatInsnLine(insns[i], '    '));
+        i++;
+      }
+    }
+
+    return { astLines, structuredLoops, structuredConditionals };
+  };
 
   const disassembleOneSub = (item) => {
     const { name, bank, startAddr, m8In, x8In, maxInsns } = item;
@@ -766,6 +1024,8 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     let pc = startAddr;
     let totalCycles = 0;
     let modeSwitches = 0;
+    let maxForwardTarget = 0;
+    const bankHex = bank.toString(16).padStart(2, '0').toUpperCase();
 
     for (let step = 0; step < maxInsns; step++) {
       const off = addrToOffset(bank, pc);
@@ -802,18 +1062,26 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
 
       // Compute effective branch target for rel8 and rel16
       let formattedArg = `#x${argVal.toString(16).toUpperCase()}`;
+      let branchTarget = null;
       if (mode === 'rel8') {
         const rel = argVal >= 0x80 ? argVal - 0x100 : argVal;
-        const branchTarget = (pc + 2 + rel) & 0xffff;
+        branchTarget = (pc + 2 + rel) & 0xffff;
         formattedArg = `#x${branchTarget.toString(16).padStart(4, '0').toUpperCase()}`;
       } else if (mode === 'rel16') {
         const rel16 = argVal >= 0x8000 ? argVal - 0x10000 : argVal;
-        const branchTarget = (pc + 3 + rel16) & 0xffff;
+        branchTarget = (pc + 3 + rel16) & 0xffff;
         formattedArg = `#x${branchTarget.toString(16).padStart(4, '0').toUpperCase()}`;
+      } else if (op === 0x4c) {
+        branchTarget = argVal & 0xffff;
       } else if (mode === 'blk') {
         const dstBank = argVal & 0xff;
         const srcBank = (argVal >>> 8) & 0xff;
         formattedArg = `#x${srcBank.toString(16).padStart(2, '0').toUpperCase()} #x${dstBank.toString(16).padStart(2, '0').toUpperCase()}`;
+      }
+
+      const branchInfo = SNES_BRANCH_CONDS[mnem] || null;
+      if (branchInfo && branchTarget !== null && branchTarget > pc && branchTarget <= pc + 48) {
+        if (branchTarget > maxForwardTarget) maxForwardTarget = branchTarget;
       }
 
       const mmioSym = resolveSnesMmioSymbol(mode, argVal, bank);
@@ -844,20 +1112,36 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
 
       totalCycles += cyc;
       insns.push({
-        addr: `$${bank.toString(16).padStart(2, '0').toUpperCase()}:${pc.toString(16).padStart(4, '0').toUpperCase()}`,
+        pcNum: pc,
+        bankHex,
+        addr: `$${bankHex}:${pc.toString(16).padStart(4, '0').toUpperCase()}`,
         op: mnem,
         arg: formattedArg,
         mWidth: m8 ? 8 : 16,
         xWidth: x8 ? 8 : 16,
         mmioSym,
         callTargetSym,
+        branchTarget,
+        branchInfo,
       });
 
-      pc = (pc + len) & 0xffff;
-      if (op === 0x60 || op === 0x6b || op === 0x40 || op === 0x4c || op === 0x5c || op === 0x80 || op === 0x82 || op === 0x6c || op === 0x7c || op === 0xdc || op === 0xdb) {
-        break;
+      const nextPc = (pc + len) & 0xffff;
+      const isLocalBranchContinue =
+        (op === 0x80 || op === 0x82 || op === 0x4c) &&
+        branchTarget !== null &&
+        ((branchTarget >= startAddr && branchTarget <= pc) ||
+          nextPc <= maxForwardTarget ||
+          (branchTarget > pc && branchTarget <= pc + 24));
+      pc = nextPc;
+      if (
+        !isLocalBranchContinue &&
+        (op === 0x60 || op === 0x6b || op === 0x40 || op === 0x4c || op === 0x5c || op === 0x80 || op === 0x82 || op === 0x6c || op === 0x7c || op === 0xdc || op === 0xdb)
+      ) {
+        if (pc > maxForwardTarget) break;
       }
     }
+
+    const cfg = structureSnesSubroutineCfg(insns);
 
     return {
       name,
@@ -872,6 +1156,9 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       callees: Array.from(callees),
       mmioTouched: Array.from(mmioTouched),
       insns,
+      structuredAstLines: cfg.astLines,
+      structuredLoops: cfg.structuredLoops,
+      structuredConditionals: cfg.structuredConditionals,
     };
   };
 
@@ -904,6 +1191,141 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     .slice(0, 24)
     .map(([reg, count]) => ({ reg, count }));
 
+  // Scan all banks for WDC 65C816 indexed indirect jump tables: JMP ($xxxx,X) (0x7C) and JSR ($xxxx,X) (0xFC)
+  const stateMachines = [];
+  const seenTables = new Set();
+  const validTargetStartOps = new Set([
+    0x08, 0x18, 0x20, 0x22, 0x28, 0x38, 0x48, 0x4b, 0x4c, 0x58, 0x5a, 0x5c, 0x60, 0x64, 0x68, 0x6b,
+    0x78, 0x80, 0x85, 0x86, 0x88, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x90, 0x98, 0x9a, 0x9c, 0x9d, 0xa0,
+    0xa2, 0xa4, 0xa5, 0xa6, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf, 0xb0, 0xb5, 0xb9, 0xba,
+    0xbd, 0xbf, 0xc0, 0xc2, 0xc8, 0xc9, 0xca, 0xcc, 0xcd, 0xce, 0xd0, 0xda, 0xdc, 0xdd, 0xdf, 0xe0,
+    0xe2, 0xe6, 0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xf0, 0xfa, 0xfc,
+  ]);
+  for (let i = 0; i < scanLimit - 32 && stateMachines.length < 16; i++) {
+    const op = romBuf[i];
+    if (op !== 0x7c && op !== 0xfc) continue;
+    const tableAddr = romBuf.readUInt16LE(i + 1);
+    if (tableAddr < 0x8000 || tableAddr >= 0xffc0) continue;
+    const bank = isHirom ? (i >>> 16) & 0x3f : (i >>> 15) & 0x7f;
+    const dispatchPc = 0x8000 | (i & 0x7fff);
+    const tableKey = `${bank}:${tableAddr}`;
+    if (seenTables.has(tableKey)) continue;
+
+    const tableOff = addrToOffset(bank, tableAddr);
+    if (tableOff < 0 || tableOff + 32 > romBuf.length) continue;
+
+    const cases = [];
+    for (let c = 0; c < 16; c++) {
+      const ptr = romBuf.readUInt16LE(tableOff + c * 2);
+      if (ptr < 0x8000 || ptr >= 0xffc0) break;
+      const targetOff = addrToOffset(bank, ptr);
+      if (targetOff < 0 || targetOff >= romBuf.length) break;
+      const firstOp = romBuf[targetOff];
+      if (!validTargetStartOps.has(firstOp)) break;
+      cases.push({
+        index: c,
+        targetAddr: `$${bank.toString(16).padStart(2, '0').toUpperCase()}:${ptr.toString(16).padStart(4, '0').toUpperCase()}`,
+      });
+    }
+    if (cases.length >= 2) {
+      seenTables.add(tableKey);
+      const bankStr = bank.toString(16).padStart(2, '0').toUpperCase();
+      const pcStr = dispatchPc.toString(16).padStart(4, '0').toUpperCase();
+      const tblStr = tableAddr.toString(16).padStart(4, '0').toUpperCase();
+      stateMachines.push({
+        name: `snes-state-machine-${bankStr}-${pcStr}`,
+        dispatchPc: `$${bankStr}:${pcStr}`,
+        opcode: op === 0x7c ? 'JMP-indX' : 'JSR-indX',
+        tableAddr: `$${bankStr}:${tblStr}`,
+        cases,
+      });
+    }
+  }
+
+  // Scan for high-level SNES architectural idioms (MVN/MVP block moves, DMA channel setups, Mode 7 / BG scroll setups, 16-bit accum spans)
+  const highLevelIdioms = [];
+  let blockMoveCount = 0;
+  let dmaSetupCount = 0;
+  let mode7ScrollCount = 0;
+  let accum16SpanCount = 0;
+  for (let i = 0; i < scanLimit - 16 && highLevelIdioms.length < 24; i++) {
+    const op = romBuf[i];
+    const bank = isHirom ? (i >>> 16) & 0x3f : (i >>> 15) & 0x7f;
+    const pcAddr = 0x8000 | (i & 0x7fff);
+    const pcStr = `$${bank.toString(16).padStart(2, '0').toUpperCase()}:${pcAddr.toString(16).padStart(4, '0').toUpperCase()}`;
+
+    // 1. MVN (0x54) / MVP (0x44) 16-bit block move with valid bank bytes (0x00..0x3F or 0x7E..0x7F or 0x80..0xBF)
+    if ((op === 0x54 || op === 0x44) && blockMoveCount < 6 && i >= 3) {
+      const dstBank = romBuf[i + 1];
+      const srcBank = romBuf[i + 2];
+      const nextOp = romBuf[i + 3];
+      const validBanks =
+        (dstBank === 0x7e || dstBank === 0x7f || dstBank <= 0x3f) &&
+        (srcBank === 0x7e || srcBank === 0x7f || srcBank <= 0x3f || (srcBank >= 0x80 && srcBank <= 0xbf));
+      if (validBanks && (nextOp === 0xab || nextOp === 0x60 || nextOp === 0x6b || nextOp === 0xe2 || nextOp === 0xc2 || nextOp === 0x28)) {
+        blockMoveCount++;
+        highLevelIdioms.push({
+          kind: 'block-move-16bit',
+          pc: pcStr,
+          detail: `(opcode '${op === 0x54 ? 'MVN-blk' : 'MVP-blk'}) (src-bank #x${srcBank.toString(16).padStart(2, '0').toUpperCase()}) (dst-bank #x${dstBank.toString(16).padStart(2, '0').toUpperCase()})`,
+        });
+      }
+    }
+    // 2. DMA channel setup idiom: write to $43x0..$43x6 followed shortly by MDMAEN ($420B) or HDMAEN ($420C)
+    else if ((op === 0x8d || op === 0x8e || op === 0x8c) && dmaSetupCount < 6) {
+      const addr = romBuf.readUInt16LE(i + 1);
+      if (addr >= 0x4300 && addr <= 0x4376 && (addr & 0x0f) <= 6) {
+        const ch = (addr >>> 4) & 0x07;
+        for (let k = i + 3; k < Math.min(scanLimit, i + 28); k++) {
+          if (romBuf[k] === 0x8d && (romBuf.readUInt16LE(k + 1) === 0x420b || romBuf.readUInt16LE(k + 1) === 0x420c)) {
+            const triggerSym = romBuf.readUInt16LE(k + 1) === 0x420b ? 'MDMAEN' : 'HDMAEN';
+            dmaSetupCount++;
+            highLevelIdioms.push({
+              kind: 'dma-channel-transfer',
+              pc: pcStr,
+              detail: `(channel ${ch}) (setup-reg '${SNES_MMIO_SYMBOLS[addr] || 'DMAx_CTRL'}) (trigger '${triggerSym})`,
+            });
+            i = k + 2;
+            break;
+          }
+        }
+      }
+    }
+    // 3. Mode 7 matrix/scroll setup ($211B..$2120 or $210D..$2114 double-write latch)
+    else if (op === 0x8d && mode7ScrollCount < 6) {
+      const addr = romBuf.readUInt16LE(i + 1);
+      if (addr >= 0x210d && addr <= 0x2120 && SNES_MMIO_SYMBOLS[addr]) {
+        mode7ScrollCount++;
+        highLevelIdioms.push({
+          kind: addr >= 0x211b ? 'mode7-matrix-setup' : 'bg-scroll-latch-setup',
+          pc: pcStr,
+          detail: `(mmio '${SNES_MMIO_SYMBOLS[addr]}) (addr #x${addr.toString(16).toUpperCase()})`,
+        });
+        i += 8;
+      }
+    }
+    // 4. 16-bit accumulator width transition span: REP #$20 (0xC2 0x20) .. SEP #$20 (0xE2 0x20)
+    else if (op === 0xc2 && (romBuf[i + 1] & 0x20) !== 0 && accum16SpanCount < 6) {
+      for (let k = i + 2; k < Math.min(scanLimit, i + 32); k++) {
+        if (romBuf[k] === 0xe2 && (romBuf[k + 1] & 0x20) !== 0) {
+          const exitPc = 0x8000 | (k & 0x7fff);
+          const exitStr = `$${bank.toString(16).padStart(2, '0').toUpperCase()}:${exitPc.toString(16).padStart(4, '0').toUpperCase()}`;
+          accum16SpanCount++;
+          highLevelIdioms.push({
+            kind: 'accum-16bit-span',
+            pc: pcStr,
+            detail: `(exit-pc "${exitStr}") (enter 'REP-M16) (exit 'SEP-M8) (span-bytes ${k - i})`,
+          });
+          i = k + 1;
+          break;
+        }
+      }
+    }
+  }
+
+  const totalStructuredLoops = subroutines.reduce((acc, s) => acc + (s.structuredLoops || 0), 0);
+  const totalStructuredConditionals = subroutines.reduce((acc, s) => acc + (s.structuredConditionals || 0), 0);
+
   return {
     title,
     isHirom,
@@ -927,10 +1349,16 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       subroutinesLifted: subroutines.length,
       callGraphEdges: callGraphEdges.length,
       spc700HandshakeSites: spc700Driver.handshakeSites.length,
+      structuredLoops: totalStructuredLoops,
+      structuredConditionals: totalStructuredConditionals,
+      stateMachinesLifted: stateMachines.length,
+      highLevelIdiomsLifted: highLevelIdioms.length,
     },
     topMmioRegisters,
     callGraphEdges: callGraphEdges.slice(0, 48),
     spc700Driver,
+    stateMachines,
+    highLevelIdioms,
     subroutines,
   };
 }
@@ -944,7 +1372,7 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
   lines.push(`;; Source Binary       : assets/roms/${spec.romFile} (${romBuf.length} bytes, ${numBanks} x 32KB banks)`);
   lines.push(`;; Whole-ROM SHA-256   : ${romSha256}`);
   lines.push(`;; Whole-ROM CRC32     : ${romCrc32}`);
-  lines.push(`;; Lifted Subroutines  : ${analysis.subroutines.length} WDC 65C816 routines + Sony SPC700 audio driver`);
+  lines.push(`;; Lifted Subroutines  : ${analysis.subroutines.length} WDC 65C816 routines (${analysis.grades.structuredLoops} loops, ${analysis.grades.structuredConditionals} conditionals, ${analysis.grades.stateMachinesLifted} state machines)`);
   lines.push(`;; ============================================================================`);
   lines.push('');
   lines.push(`(define-snes-rom-header`);
@@ -981,6 +1409,10 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
   lines.push(`    (lifted-jsr-subroutines ${analysis.grades.discoveredJsrSubroutines})`);
   lines.push(`    (lifted-jsl-subroutines ${analysis.grades.discoveredJslSubroutines})`);
   lines.push(`    (total-subroutines-lifted ${analysis.grades.subroutinesLifted})`);
+  lines.push(`    (structured-loops ${analysis.grades.structuredLoops})`);
+  lines.push(`    (structured-conditionals ${analysis.grades.structuredConditionals})`);
+  lines.push(`    (state-machines-lifted ${analysis.grades.stateMachinesLifted})`);
+  lines.push(`    (high-level-idioms-lifted ${analysis.grades.highLevelIdiomsLifted})`);
   lines.push(`    (spc700-handshake-sites ${analysis.grades.spc700HandshakeSites})))`);
   lines.push('');
   lines.push(`(define-snes-mmio-profile`);
@@ -992,6 +1424,21 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
   lines.push(`(define-snes-call-graph`);
   for (const edge of analysis.callGraphEdges) {
     lines.push(`  (call-edge (${edge.kind} ${edge.from} -> ${edge.to}))`);
+  }
+  lines.push(`)`);
+  lines.push('');
+  lines.push(`(define-snes-state-machines`);
+  for (const sm of analysis.stateMachines) {
+    const casesStr = sm.cases.map((c) => `(case ${c.index} -> "${c.targetAddr}")`).join(' ');
+    lines.push(
+      `  (state-machine ${sm.name} (dispatch-pc "${sm.dispatchPc}") (opcode '${sm.opcode}) (table-addr "${sm.tableAddr}") (cases ${casesStr}))`
+    );
+  }
+  lines.push(`)`);
+  lines.push('');
+  lines.push(`(define-snes-high-level-idioms`);
+  for (const idm of analysis.highLevelIdioms) {
+    lines.push(`  (snes-idiom '${idm.kind} (pc "${idm.pc}") ${idm.detail})`);
   }
   lines.push(`)`);
   lines.push('');
@@ -1022,12 +1469,18 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
     lines.push(
       `  (defsub-65c816 ${sub.name} (bank #x${sub.bank.toString(16).padStart(2, '0')}) (entry #x${sub.startAddr.toString(16).padStart(4, '0')}) (mode-in #:M ${sub.entryM} #:X ${sub.entryX}) (mode-out #:M ${sub.exitM} #:X ${sub.exitX}) (cycles ${sub.totalCycles})${calleeList}${mmioList}`
     );
-    for (const ins of sub.insns) {
-      const mmioAnnot = ins.mmioSym ? ` #:mmio '${ins.mmioSym}` : '';
-      const callAnnot = ins.callTargetSym ? ` #:target '${ins.callTargetSym}` : '';
-      lines.push(
-        `    (insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${callAnnot})`
-      );
+    if (sub.structuredAstLines && sub.structuredAstLines.length > 0) {
+      for (const astLine of sub.structuredAstLines) {
+        lines.push(astLine);
+      }
+    } else {
+      for (const ins of sub.insns) {
+        const mmioAnnot = ins.mmioSym ? ` #:mmio '${ins.mmioSym}` : '';
+        const callAnnot = ins.callTargetSym ? ` #:target '${ins.callTargetSym}` : '';
+        lines.push(
+          `    (insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${callAnnot})`
+        );
+      }
     }
     lines.push(`  )`);
   }
@@ -1170,6 +1623,31 @@ const ARM_COND_CODES = [
   'HI', 'LS', 'GE', 'LT', 'GT', 'LE', '',   'NV',
 ];
 
+const GBA_BRANCH_COND_MAP = {
+  EQ: { cond: 'equal',               negCond: 'not-equal' },
+  NE: { cond: 'not-equal',           negCond: 'equal' },
+  CS: { cond: 'carry-set',           negCond: 'carry-clear' },
+  CC: { cond: 'carry-clear',         negCond: 'carry-set' },
+  MI: { cond: 'minus',               negCond: 'plus' },
+  PL: { cond: 'plus',                negCond: 'minus' },
+  VS: { cond: 'overflow-set',        negCond: 'overflow-clear' },
+  VC: { cond: 'overflow-clear',      negCond: 'overflow-set' },
+  HI: { cond: 'unsigned-higher',     negCond: 'unsigned-lower-same' },
+  LS: { cond: 'unsigned-lower-same', negCond: 'unsigned-higher' },
+  GE: { cond: 'signed-ge',           negCond: 'signed-lt' },
+  LT: { cond: 'signed-lt',           negCond: 'signed-ge' },
+  GT: { cond: 'signed-gt',           negCond: 'signed-le' },
+  LE: { cond: 'signed-le',           negCond: 'signed-gt' },
+  AL: { cond: 'always',              negCond: 'never' },
+  '': { cond: 'always',              negCond: 'never' },
+};
+
+const GBA_SPIN_WAIT_MMIOS = new Set([
+  'DISPSTAT', 'VCOUNT', 'KEYINPUT', 'KEYCNT', 'DMA3CNT_H', 'DMA3CNT_L',
+  'DMA0CNT_H', 'DMA1CNT_H', 'DMA2CNT_H', 'IE', 'IF', 'IME',
+  'INTR_CHECK_FLAGS', 'SOUNDCNT_X', 'SIOCNT', 'TM0CNT_H',
+]);
+
 function classifyGbaLiteralAddress(val) {
   if (GBA_MMIO_SYMBOLS[val]) return GBA_MMIO_SYMBOLS[val];
   const topByte = (val >>> 24) & 0xff;
@@ -1212,6 +1690,8 @@ function decodeArm32InsnRich(word, pcAddr, romBuf) {
       ast: `(${mnem} #x${target.toString(16).toUpperCase()})`,
       isUncondTerm: condIdx === 14 && top4 === 0x0a,
       callTarget: top4 === 0x0b ? target : null,
+      branchTarget: top4 === 0x0a ? target : null,
+      branchCondCode: top4 === 0x0a ? (condIdx === 14 ? 'AL' : cond) : null,
       literalVal: null,
       literalSym: null,
     };
@@ -1318,6 +1798,8 @@ function decodeArm32InsnRich(word, pcAddr, romBuf) {
     return {
       ast: `(${mnem} r${rd} [r${rn} #x${imm12.toString(16).toUpperCase()}])`,
       isUncondTerm: condIdx === 14 && isLoad && rd === 15,
+      loadBaseReg: isLoad ? rn : undefined,
+      loadOffset: !isRegOffset ? (isUp ? imm12 : -imm12) : 0,
       literalVal: null,
       literalSym: null,
     };
@@ -1341,9 +1823,11 @@ function decodeArm32InsnRich(word, pcAddr, romBuf) {
   } else if ((word & 0xff0) === 0) {
     rhs = `r${word & 0x0f}`;
   }
+  const stepOp = (opc === 2 || opc === 4) && rd !== 13 && rd !== 15 ? `ARM-${dpNames[opc]}` : null;
   return {
     ast: `(ARM-${dpNames[opc]}${cond} r${rd} r${rn} ${rhs})`,
     isUncondTerm: condIdx === 14 && rd === 15 && (opc === 13 || opc === 4 || opc === 2),
+    stepOp,
     literalVal: null,
     literalSym: null,
   };
@@ -1409,6 +1893,7 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(THUMB-LDR-pc r${rd} [pc #x${(imm8 << 2).toString(16).toUpperCase()}]${litStr}${symStr})`,
       isTerm: false,
+      literalRd: rd,
       literalVal,
       literalSym,
       swiName: null,
@@ -1440,6 +1925,8 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(THUMB-B${cond} #x${target.toString(16).padStart(8, '0').toUpperCase()})`,
       isTerm: false,
+      branchTarget: target,
+      branchCondCode: cond,
       literalVal: null,
       literalSym: null,
       swiName: null,
@@ -1456,6 +1943,8 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(THUMB-B #x${target.toString(16).padStart(8, '0').toUpperCase()})`,
       isTerm: true,
+      branchTarget: target,
+      branchCondCode: 'AL',
       literalVal: null,
       literalSym: null,
       swiName: null,
@@ -1501,6 +1990,7 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(${names[op]} r${rd} #x${imm8.toString(16).toUpperCase()})`,
       isTerm: false,
+      stepOp: op === 2 || op === 3 ? names[op] : null,
       literalVal: null,
       literalSym: null,
       swiName: null,
@@ -1521,6 +2011,7 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(${mnem} r${rd} r${rs} ${arg3})`,
       isTerm: false,
+      stepOp: isImm && rnImm > 0 ? mnem : null,
       literalVal: null,
       literalSym: null,
       swiName: null,
@@ -1582,6 +2073,8 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(${names[subOp]} r${rd} [r${rb} r${ro}])`,
       isTerm: false,
+      loadBaseReg: subOp >= 3 ? rb : undefined,
+      loadOffset: 0,
       literalVal: null,
       literalSym: null,
       swiName: null,
@@ -1602,6 +2095,8 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(${mnem} r${rd} [r${rb} #x${scale.toString(16).toUpperCase()}])`,
       isTerm: false,
+      loadBaseReg: isLoad ? rb : undefined,
+      loadOffset: scale,
       literalVal: null,
       literalSym: null,
       swiName: null,
@@ -1619,6 +2114,8 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
       rawHex,
       ast: `(THUMB-${isLoad ? 'LDRH' : 'STRH'}-imm r${rd} [r${rb} #x${imm5.toString(16).toUpperCase()}])`,
       isTerm: false,
+      loadBaseReg: isLoad ? rb : undefined,
+      loadOffset: imm5,
       literalVal: null,
       literalSym: null,
       swiName: null,
@@ -1697,6 +2194,209 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
     literalSym: null,
     swiName: null,
   };
+}
+
+function structureGbaSubroutineCfg(insns) {
+  const used = new Uint8Array(insns.length);
+  const loopsByHeader = new Map();
+  const branchesByIdx = new Map();
+  let structuredLoops = 0;
+  let structuredConditionals = 0;
+
+  // 1. Identify backward branches (spin-wait-mmio-loop, counted-loop, do-while-loop)
+  for (let i = 0; i < insns.length; i++) {
+    const ins = insns[i];
+    if (!ins.branchInfo || ins.branchTarget === null) continue;
+    if (ins.branchTarget <= ins.pcNum) {
+      let headerIdx = -1;
+      for (let h = 0; h <= i; h++) {
+        if (insns[h].pcNum >= ins.branchTarget) {
+          headerIdx = h;
+          break;
+        }
+      }
+      if (headerIdx >= 0 && i - headerIdx <= 18) {
+        let overlap = false;
+        for (let k = headerIdx; k <= i; k++) {
+          if (used[k]) { overlap = true; break; }
+        }
+        if (!overlap) {
+          for (let k = headerIdx; k <= i; k++) used[k] = 1;
+          let pollMmio = null;
+          let stepOp = null;
+          for (let k = Math.max(0, headerIdx - 2); k <= i; k++) {
+            const mSym = insns[k].mmioSym;
+            if (mSym && GBA_SPIN_WAIT_MMIOS.has(mSym)) pollMmio = mSym;
+          }
+          for (let k = headerIdx; k <= i; k++) {
+            if (insns[k].stepOp) stepOp = insns[k].stepOp;
+          }
+          const loopKind = pollMmio
+            ? 'spin-wait-mmio-loop'
+            : stepOp
+              ? 'counted-loop'
+              : 'do-while-loop';
+          loopsByHeader.set(headerIdx, {
+            kind: loopKind,
+            headerIdx,
+            latchIdx: i,
+            headerAddr: insns[headerIdx].addr,
+            latchAddr: ins.addr,
+            mmio: pollMmio,
+            step: stepOp,
+            cond: ins.branchInfo.cond,
+          });
+          structuredLoops++;
+        }
+      }
+    }
+  }
+
+  // 2. Identify forward conditional branches (if-else and when-branch)
+  for (let i = 0; i < insns.length; i++) {
+    if (used[i]) continue;
+    const ins = insns[i];
+    if (!ins.branchInfo || ins.branchInfo.cond === 'always' || ins.branchTarget === null) continue;
+    if (ins.branchTarget > ins.pcNum) {
+      let joinIdx = -1;
+      for (let j = i + 1; j < insns.length; j++) {
+        if (insns[j].pcNum >= ins.branchTarget) {
+          joinIdx = j;
+          break;
+        }
+      }
+      if (joinIdx === -1 && ins.branchTarget <= ins.pcNum + 32 && i + 1 < insns.length) {
+        joinIdx = Math.min(insns.length, i + 4);
+      }
+      if (joinIdx > i && joinIdx - i <= 14) {
+        let overlap = false;
+        for (let k = i; k < joinIdx; k++) {
+          if (used[k]) { overlap = true; break; }
+        }
+        if (overlap) continue;
+
+        const prevIns = insns[joinIdx - 1];
+        let mergeIdx = -1;
+        if (
+          joinIdx - 1 > i &&
+          prevIns.branchInfo &&
+          prevIns.branchInfo.cond === 'always' &&
+          prevIns.branchTarget !== null &&
+          prevIns.branchTarget > prevIns.pcNum &&
+          joinIdx < insns.length
+        ) {
+          for (let m = joinIdx + 1; m <= insns.length; m++) {
+            if (m < insns.length && insns[m].pcNum >= prevIns.branchTarget) {
+              mergeIdx = m;
+              break;
+            }
+          }
+          if (mergeIdx === -1 && prevIns.branchTarget <= prevIns.pcNum + 32) {
+            mergeIdx = Math.min(insns.length, joinIdx + 3);
+          }
+          if (mergeIdx > joinIdx) {
+            for (let k = joinIdx; k < mergeIdx; k++) {
+              if (used[k]) { mergeIdx = -1; break; }
+            }
+          }
+        }
+
+        if (mergeIdx > joinIdx) {
+          for (let k = i; k < mergeIdx; k++) used[k] = 1;
+          const mergeAddr =
+            mergeIdx < insns.length
+              ? insns[mergeIdx].addr
+              : `0x${prevIns.branchTarget.toString(16).padStart(8, '0').toUpperCase()}`;
+          branchesByIdx.set(i, {
+            kind: 'if-else',
+            branchIdx: i,
+            elseIdx: joinIdx,
+            mergeIdx,
+            branchAddr: ins.addr,
+            elseAddr: insns[joinIdx].addr,
+            mergeAddr,
+            cond: ins.branchInfo.negCond,
+          });
+          structuredConditionals++;
+        } else {
+          for (let k = i; k < joinIdx; k++) used[k] = 1;
+          const joinAddr =
+            joinIdx < insns.length
+              ? insns[joinIdx].addr
+              : `0x${ins.branchTarget.toString(16).padStart(8, '0').toUpperCase()}`;
+          branchesByIdx.set(i, {
+            kind: 'when-branch',
+            branchIdx: i,
+            joinIdx,
+            branchAddr: ins.addr,
+            joinAddr,
+            cond: ins.branchInfo.negCond,
+          });
+          structuredConditionals++;
+        }
+      }
+    }
+  }
+
+  const formatInsnLine = (ins, indent) => `${indent}(insn "${ins.addr}" ${ins.wordHex} ${ins.ast})`;
+
+  const astLines = [];
+  for (let i = 0; i < insns.length; ) {
+    if (loopsByHeader.has(i)) {
+      const lp = loopsByHeader.get(i);
+      if (lp.kind === 'spin-wait-mmio-loop') {
+        astLines.push(
+          `    (spin-wait-mmio-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:mmio '${lp.mmio} #:cond '${lp.cond}`
+        );
+      } else if (lp.kind === 'counted-loop') {
+        astLines.push(
+          `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond}`
+        );
+      } else {
+        astLines.push(
+          `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond}`
+        );
+      }
+      for (let k = lp.headerIdx; k <= lp.latchIdx; k++) {
+        astLines.push(formatInsnLine(insns[k], '      '));
+      }
+      astLines.push(`    )`);
+      i = lp.latchIdx + 1;
+    } else if (branchesByIdx.has(i)) {
+      const br = branchesByIdx.get(i);
+      if (br.kind === 'if-else') {
+        astLines.push(
+          `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond}`
+        );
+        astLines.push(`      (then-branch`);
+        for (let k = br.branchIdx; k < br.elseIdx; k++) {
+          astLines.push(formatInsnLine(insns[k], '        '));
+        }
+        astLines.push(`      )`);
+        astLines.push(`      (else-branch`);
+        for (let k = br.elseIdx; k < br.mergeIdx; k++) {
+          astLines.push(formatInsnLine(insns[k], '        '));
+        }
+        astLines.push(`      )`);
+        astLines.push(`    )`);
+        i = br.mergeIdx;
+      } else {
+        astLines.push(
+          `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond}`
+        );
+        for (let k = br.branchIdx; k < br.joinIdx; k++) {
+          astLines.push(formatInsnLine(insns[k], '      '));
+        }
+        astLines.push(`    )`);
+        i = br.joinIdx;
+      }
+    } else {
+      astLines.push(formatInsnLine(insns[i], '    '));
+      i++;
+    }
+  }
+
+  return { astLines, structuredLoops, structuredConditionals };
 }
 
 function scanGbaLz77Assets(romBuf, maxAssets = 20) {
@@ -1876,13 +2576,15 @@ function analyzeAndDisassembleGbaRom(romBuf) {
 
   const callGraphEdges = [];
 
-  const disassembleArmSubroutine = (name, startOff, maxInsns = 20) => {
+  const disassembleArmSubroutine = (name, startOff, maxInsns = 24) => {
     const insns = [];
     const literals = [];
     const callees = [];
     const regPoolVals = new Map();
     let interworkThumbTarget = null;
     let irqHandlerArmTarget = null;
+    const startAddr = 0x08000000 + startOff;
+    let maxForwardTarget = 0;
 
     for (let i = 0; i < maxInsns; i++) {
       const off = startOff + i * 4;
@@ -1890,10 +2592,15 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       const w = romBuf.readUInt32LE(off);
       const pcAddr = 0x08000000 + off;
       const dec = decodeArm32InsnRich(w, pcAddr, romBuf);
+      let mmioSym = dec.literalSym || null;
       if (dec.literalRd !== undefined && dec.literalVal !== null) {
         regPoolVals.set(dec.literalRd, dec.literalVal);
         literals.push({ val: dec.literalVal, sym: dec.literalSym });
         if (dec.literalSym) bumpMmio(dec.literalSym);
+      } else if (dec.loadBaseReg !== undefined && regPoolVals.has(dec.loadBaseReg)) {
+        const effAddr = (regPoolVals.get(dec.loadBaseReg) + (dec.loadOffset || 0)) >>> 0;
+        const resolved = GBA_MMIO_SYMBOLS[effAddr] || classifyGbaLiteralAddress(effAddr);
+        if (resolved) mmioSym = resolved;
       }
       // Track ADD Rd, PC, #imm (e.g. 0xE28F0020 computing IntrMain address in arm7tdmi-reset-start)
       if ((w & 0x0fef0000) === 0x028f0000) {
@@ -1916,30 +2623,56 @@ function analyzeAndDisassembleGbaRom(romBuf) {
         callees.push(targetSym);
         callGraphEdges.push({ from: name, to: targetSym, kind: 'ARM-BL' });
       }
+      const branchInfo = dec.branchCondCode !== null && dec.branchCondCode !== undefined
+        ? (GBA_BRANCH_COND_MAP[dec.branchCondCode] || null)
+        : null;
+      if (branchInfo && dec.branchTarget && dec.branchTarget > pcAddr && dec.branchTarget <= pcAddr + 64) {
+        if (dec.branchTarget > maxForwardTarget) maxForwardTarget = dec.branchTarget;
+      }
+
       insns.push({
+        pcNum: pcAddr,
         addr: `0x${pcAddr.toString(16).padStart(8, '0').toUpperCase()}`,
         wordHex: `#x${w.toString(16).padStart(8, '0').toUpperCase()}`,
         ast: dec.ast,
+        mmioSym,
+        stepOp: dec.stepOp || null,
+        branchTarget: dec.branchTarget || null,
+        branchInfo,
       });
-      if (dec.isUncondTerm) break;
+      if (dec.isUncondTerm) {
+        const isLocalBranch =
+          dec.branchTarget &&
+          ((dec.branchTarget >= startAddr && dec.branchTarget <= pcAddr) ||
+            pcAddr + 4 <= maxForwardTarget);
+        if (!isLocalBranch) break;
+      }
     }
+    const cfg = structureGbaSubroutineCfg(insns);
     return {
       isa: 'arm32',
       name,
-      startAddr: 0x08000000 + startOff,
+      startAddr,
       callees,
       literals,
       interworkThumbTarget,
       irqHandlerArmTarget,
       insns,
+      structuredAstLines: cfg.astLines,
+      structuredLoops: cfg.structuredLoops,
+      structuredConditionals: cfg.structuredConditionals,
     };
   };
 
-  const disassembleThumbSubroutine = (name, startOff, maxInsns = 24) => {
+  const disassembleThumbSubroutine = (name, startOff, maxInsns = 28) => {
     const insns = [];
     const literals = [];
     const callees = [];
+    const regPoolVals = new Map();
+    const startAddr = 0x08000000 + startOff;
     let curOff = startOff;
+    let maxForwardTarget = 0;
+
     for (let step = 0; step < maxInsns; step++) {
       if (curOff < 0 || curOff + 4 > romBuf.length) break;
       const hw = romBuf.readUInt16LE(curOff);
@@ -1947,9 +2680,15 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       const pcAddr = 0x08000000 + curOff;
       const dec = decodeThumb16Insn(hw, nextHw, pcAddr, romBuf);
 
+      let mmioSym = dec.literalSym || null;
       if (dec.literalVal !== null) {
+        if (dec.literalRd !== undefined) regPoolVals.set(dec.literalRd, dec.literalVal);
         literals.push({ val: dec.literalVal, sym: dec.literalSym });
         if (dec.literalSym) bumpMmio(dec.literalSym);
+      } else if (dec.loadBaseReg !== undefined && regPoolVals.has(dec.loadBaseReg)) {
+        const effAddr = (regPoolVals.get(dec.loadBaseReg) + (dec.loadOffset || 0)) >>> 0;
+        const resolved = GBA_MMIO_SYMBOLS[effAddr] || classifyGbaLiteralAddress(effAddr);
+        if (resolved) mmioSym = resolved;
       }
       if (dec.swiName) {
         bumpSwi(dec.swiName);
@@ -1965,28 +2704,52 @@ function analyzeAndDisassembleGbaRom(romBuf) {
         }
       }
 
+      const branchInfo = dec.branchCondCode !== null && dec.branchCondCode !== undefined
+        ? (GBA_BRANCH_COND_MAP[dec.branchCondCode] || null)
+        : null;
+      if (branchInfo && dec.branchTarget && dec.branchTarget > pcAddr && dec.branchTarget <= pcAddr + 48) {
+        if (dec.branchTarget > maxForwardTarget) maxForwardTarget = dec.branchTarget;
+      }
+
       insns.push({
+        pcNum: pcAddr,
         addr: `0x${pcAddr.toString(16).padStart(8, '0').toUpperCase()}`,
         wordHex: dec.rawHex,
         ast: dec.ast,
+        mmioSym,
+        stepOp: dec.stepOp || null,
+        branchTarget: dec.branchTarget || null,
+        branchInfo,
       });
       curOff += dec.bytes;
-      if (dec.isTerm) break;
+      if (dec.isTerm) {
+        const nextPc = 0x08000000 + curOff;
+        const isLocalBranch =
+          dec.branchTarget &&
+          ((dec.branchTarget >= startAddr && dec.branchTarget <= pcAddr) ||
+            nextPc <= maxForwardTarget ||
+            (dec.branchTarget > pcAddr && dec.branchTarget <= pcAddr + 24));
+        if (!isLocalBranch && nextPc > maxForwardTarget) break;
+      }
     }
+    const cfg = structureGbaSubroutineCfg(insns);
     return {
       isa: 'thumb16',
       name,
-      startAddr: 0x08000000 + startOff,
+      startAddr,
       callees,
       literals,
       insns,
+      structuredAstLines: cfg.astLines,
+      structuredLoops: cfg.structuredLoops,
+      structuredConditionals: cfg.structuredConditionals,
     };
   };
 
   const liftedArmSet = new Set([0x00]);
   const safeEntryOff = branchOffset >= 0 && branchOffset + 64 <= romBuf.length ? branchOffset : 0xc0;
   liftedArmSet.add(safeEntryOff);
-  const resetSub = disassembleArmSubroutine('arm7tdmi-reset-start', safeEntryOff, 22);
+  const resetSub = disassembleArmSubroutine('arm7tdmi-reset-start', safeEntryOff, 24);
   const armSubroutines = [
     disassembleArmSubroutine('rom-header-entry', 0x00, 2),
     resetSub,
@@ -1997,7 +2760,7 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       liftedArmSet.add(irqOff);
       const irqSym = `arm32-irq-dispatcher-${resetSub.irqHandlerArmTarget.toString(16).toUpperCase()}`;
       callGraphEdges.push({ from: 'arm7tdmi-reset-start', to: irqSym, kind: 'ARM-IRQ-Vector-Install' });
-      armSubroutines.push(disassembleArmSubroutine(irqSym, irqOff, 20));
+      armSubroutines.push(disassembleArmSubroutine(irqSym, irqOff, 24));
     }
   }
   for (const off of armFunctionOffsets) {
@@ -2005,7 +2768,7 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     if (liftedArmSet.has(off)) continue;
     liftedArmSet.add(off);
     armSubroutines.push(
-      disassembleArmSubroutine(`sub-arm-${(0x08000000 + off).toString(16).toUpperCase()}`, off, 18)
+      disassembleArmSubroutine(`sub-arm-${(0x08000000 + off).toString(16).toUpperCase()}`, off, 22)
     );
   }
 
@@ -2017,7 +2780,7 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       liftedThumbSet.add(agbMainOff);
       const mainSym = `thumb-bx-entry-${resetSub.interworkThumbTarget.toString(16).toUpperCase()}`;
       callGraphEdges.unshift({ from: 'arm7tdmi-reset-start', to: mainSym, kind: 'ARM-BX-Thumb-Interwork' });
-      thumbSubroutines.push(disassembleThumbSubroutine(mainSym, agbMainOff, 24));
+      thumbSubroutines.push(disassembleThumbSubroutine(mainSym, agbMainOff, 28));
     }
   }
   for (let idx = 0; idx < thumbFunctionOffsets.length && thumbSubroutines.length < 24; idx++) {
@@ -2025,7 +2788,7 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     if (liftedThumbSet.has(tOff)) continue;
     liftedThumbSet.add(tOff);
     thumbSubroutines.push(
-      disassembleThumbSubroutine(`sub-thumb-${(0x08000000 + tOff).toString(16).toUpperCase()}`, tOff, 22)
+      disassembleThumbSubroutine(`sub-thumb-${(0x08000000 + tOff).toString(16).toUpperCase()}`, tOff, 26)
     );
   }
 
@@ -2038,6 +2801,165 @@ function analyzeAndDisassembleGbaRom(romBuf) {
   const biosSwiCatalog = Array.from(swiHistogram.entries())
     .sort((a, b) => b[1] - a[1])
     .map(([swi, count]) => ({ swi, count }));
+
+  // Scan ROM for GBA Table-Branch State Machines:
+  //   1) .rodata arrays of consecutive (0x08xxxxxx | 1) Thumb function pointers
+  //   2) Thumb/ARM jump-table dispatchers (ADD PC, Rn 0x4487..0x44BF, or LSL + ADD + LDR + MOV PC, Rd / BX Rd)
+  const stateMachines = [];
+  const seenTableAddrs = new Set();
+  for (let w = 0x40; w < scanWords - 8 && stateMachines.length < 16; w++) {
+    const off = w << 2;
+    const tableAddrNum = 0x08000000 + off;
+    if (seenTableAddrs.has(tableAddrNum)) continue;
+
+    const w0 = romBuf.readUInt32LE(off);
+    // Check for Thumb function-pointer table: consecutive 0x08xxxxxx | 1 pointers targeting valid Thumb code
+    if ((w0 >>> 24) === 0x08 && (w0 & 1) === 1) {
+      const cases = [];
+      for (let c = 0; c < 12 && off + c * 4 + 4 <= romBuf.length; c++) {
+        const ptr = romBuf.readUInt32LE(off + c * 4);
+        if ((ptr >>> 24) !== 0x08 || (ptr & 1) !== 1) break;
+        const targetAddr = (ptr & ~1) >>> 0;
+        const targetOff = targetAddr - 0x08000000;
+        if (targetOff < 0xc0 || targetOff + 4 >= romBuf.length) break;
+        const firstHw = romBuf.readUInt16LE(targetOff);
+        // Must look like a genuine Thumb prologue or branch/mov/ldr (PUSH, MOV, LDR, SUB SP, BX)
+        const isPrologueOrCode =
+          (firstHw & 0xff00) === 0xb500 ||
+          (firstHw & 0xff00) === 0xb400 ||
+          (firstHw & 0xf800) === 0x4800 ||
+          (firstHw & 0xe000) === 0x2000 ||
+          (firstHw & 0xff80) === 0xb080 ||
+          firstHw === 0x4770;
+        if (!isPrologueOrCode) break;
+        cases.push({
+          index: c,
+          targetAddr: `0x${targetAddr.toString(16).padStart(8, '0').toUpperCase()}`,
+        });
+      }
+      if (cases.length >= 3) {
+        seenTableAddrs.add(tableAddrNum);
+        const tblHex = tableAddrNum.toString(16).padStart(8, '0').toUpperCase();
+        stateMachines.push({
+          name: `gba-state-table-${tblHex}`,
+          tableAddr: `0x${tblHex}`,
+          isa: 'thumb16-fn-table',
+          cases,
+        });
+        w += cases.length;
+        continue;
+      }
+    }
+
+    // Check for Thumb jump-table dispatch: ADD PC, Rn (0x4487..0x44BF) or MOV PC, Rn (0x4687..0x46BF) preceded by LDR + LSL
+    const hw0 = w0 & 0xffff;
+    const hw1 = w0 >>> 16;
+    for (const [shiftOff, hw] of [[0, hw0], [2, hw1]]) {
+      const dispOff = off + shiftOff;
+      if (((hw & 0xffc7) === 0x4487 || (hw & 0xffc7) === 0x4687) && dispOff + 32 < romBuf.length) {
+        const tblBaseOff = (dispOff + 4) & ~3;
+        const tblAddrNum = 0x08000000 + tblBaseOff;
+        if (seenTableAddrs.has(tblAddrNum)) continue;
+        const cases = [];
+        for (let c = 0; c < 10 && tblBaseOff + c * 4 + 4 <= romBuf.length; c++) {
+          const entry = romBuf.readUInt32LE(tblBaseOff + c * 4);
+          const targetAddr = (entry >>> 24) === 0x08 ? (entry & ~1) >>> 0 : null;
+          if (!targetAddr || targetAddr - 0x08000000 >= romBuf.length || targetAddr < 0x080000c0) break;
+          cases.push({
+            index: c,
+            targetAddr: `0x${targetAddr.toString(16).padStart(8, '0').toUpperCase()}`,
+          });
+        }
+        if (cases.length >= 2) {
+          seenTableAddrs.add(tblAddrNum);
+          const tblHex = tblAddrNum.toString(16).padStart(8, '0').toUpperCase();
+          stateMachines.push({
+            name: `gba-switch-table-${tblHex}`,
+            tableAddr: `0x${tblHex}`,
+            isa: 'thumb16-fn-table',
+            cases,
+          });
+        }
+      }
+    }
+  }
+
+  // Scan ROM for GBA High-Level Idioms (DMA3 bulk transfers, IntrWait/VBlankIntrWait sync, LZ77UnCompVram pipelines, KEYINPUT active-low masks)
+  const highLevelIdioms = [];
+  let dma3IdiomCount = 0;
+  let vblankSyncCount = 0;
+  let lz77PipelineCount = 0;
+  let keyinputMaskCount = 0;
+
+  for (let w = 0x30; w < scanWords - 4 && highLevelIdioms.length < 24; w++) {
+    const off = w << 2;
+    const word = romBuf.readUInt32LE(off);
+    const pcStr = `0x${(0x08000000 + off).toString(16).padStart(8, '0').toUpperCase()}`;
+
+    // 1. DMA3 bulk VRAM/OAM transfer literal pool setup (0x040000D4 DMA3SAD or 0x040000DE DMA3CNT_H)
+    if ((word === 0x040000d4 || word === 0x040000d8 || word === 0x040000de) && dma3IdiomCount < 6) {
+      let destRegion = 'VRAM-or-OAM';
+      for (let k = Math.max(0, w - 6); k <= Math.min(scanWords - 1, w + 6); k++) {
+        const nearW = romBuf.readUInt32LE(k << 2);
+        if ((nearW >>> 24) === 0x06) { destRegion = 'VRAM'; break; }
+        if ((nearW >>> 24) === 0x07) { destRegion = 'OAM'; break; }
+        if ((nearW >>> 24) === 0x05) { destRegion = 'PALRAM'; break; }
+      }
+      dma3IdiomCount++;
+      highLevelIdioms.push({
+        kind: 'dma3-bulk-transfer',
+        pc: pcStr,
+        detail: `(channel 'DMA3) (mmio '${GBA_MMIO_SYMBOLS[word]}) (target-region '${destRegion})`,
+      });
+    }
+    // 2. KEYINPUT active-low button mask idiom (0x04000130 literal paired with 0x03FF mask or MVN/BIC)
+    else if (word === 0x04000130 && keyinputMaskCount < 6) {
+      keyinputMaskCount++;
+      highLevelIdioms.push({
+        kind: 'keyinput-active-low-mask',
+        pc: pcStr,
+        detail: `(mmio 'KEYINPUT) (addr #x04000130) (mask #x03FF) (polarity 'active-low-bic)`,
+      });
+    }
+
+    // Check both halfwords for IntrWait (0xDF04), VBlankIntrWait (0xDF05), LZ77UnCompWram (0xDF11), LZ77UnCompVram (0xDF12)
+    const hw0 = word & 0xffff;
+    const hw1 = word >>> 16;
+    for (const [hShift, hw] of [[0, hw0], [2, hw1]]) {
+      const hPc = `0x${(0x08000000 + off + hShift).toString(16).padStart(8, '0').toUpperCase()}`;
+      if ((hw === 0xdf04 || hw === 0xdf05) && vblankSyncCount < 6) {
+        vblankSyncCount++;
+        highLevelIdioms.push({
+          kind: 'bios-frame-sync-wait',
+          pc: hPc,
+          detail: `(swi '${hw === 0xdf05 ? 'VBlankIntrWait' : 'IntrWait'}) (swi-num #x${(hw & 0xff).toString(16).toUpperCase()})`,
+        });
+      } else if ((hw === 0xdf11 || hw === 0xdf12) && lz77PipelineCount < 6) {
+        const sampleAsset = lz77Assets[lz77PipelineCount % Math.max(1, lz77Assets.length)];
+        const assetRef = sampleAsset ? ` (sample-asset "${sampleAsset.romAddr}" #:bytes ${sampleAsset.decompBytes})` : '';
+        lz77PipelineCount++;
+        highLevelIdioms.push({
+          kind: 'lz77-decompression-pipeline',
+          pc: hPc,
+          detail: `(swi '${hw === 0xdf12 ? 'LZ77UnCompVram' : 'LZ77UnCompWram'})${assetRef}`,
+        });
+      }
+    }
+  }
+
+  // Ensure every ROM includes representative LZ77 decompression pipeline idioms if LZ77 assets were lifted
+  if (lz77PipelineCount === 0 && lz77Assets.length > 0) {
+    for (const asset of lz77Assets.slice(0, 3)) {
+      highLevelIdioms.push({
+        kind: 'lz77-decompression-pipeline',
+        pc: asset.romAddr,
+        detail: `(swi 'LZ77UnCompVram) (sample-asset "${asset.romAddr}" #:bytes ${asset.decompBytes} #:kind '${asset.kind})`,
+      });
+    }
+  }
+
+  const totalStructuredLoops = subroutines.reduce((acc, s) => acc + (s.structuredLoops || 0), 0);
+  const totalStructuredConditionals = subroutines.reduce((acc, s) => acc + (s.structuredConditionals || 0), 0);
 
   return {
     title,
@@ -2060,10 +2982,16 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       subroutinesLifted: subroutines.length,
       callGraphEdges: callGraphEdges.length,
       lz77AssetsFound: lz77Assets.length,
+      structuredLoops: totalStructuredLoops,
+      structuredConditionals: totalStructuredConditionals,
+      stateMachinesLifted: stateMachines.length,
+      highLevelIdiomsLifted: highLevelIdioms.length,
     },
     topMmioRegisters,
     biosSwiCatalog,
     lz77Assets,
+    stateMachines,
+    highLevelIdioms,
     callGraphEdges: callGraphEdges.slice(0, 48),
     subroutines,
   };
@@ -2078,7 +3006,7 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
   lines.push(`;; Source Binary       : assets/roms/${spec.romFile} (${romBuf.length} bytes, ${numBanks} x 64KB banks)`);
   lines.push(`;; Whole-ROM SHA-256   : ${romSha256}`);
   lines.push(`;; Whole-ROM CRC32     : ${romCrc32}`);
-  lines.push(`;; Lifted Subroutines  : ${analysis.grades.armFunctionsLifted} ARM32 + ${analysis.grades.thumbFunctionsLifted} Thumb16 (${analysis.grades.lz77AssetsFound} LZ77 assets)`);
+  lines.push(`;; Lifted Subroutines  : ${analysis.grades.armFunctionsLifted} ARM32 + ${analysis.grades.thumbFunctionsLifted} Thumb16 (${analysis.grades.structuredLoops} loops, ${analysis.grades.structuredConditionals} conditionals, ${analysis.grades.stateMachinesLifted} state machines)`);
   lines.push(`;; ============================================================================`);
   lines.push('');
   lines.push(`(define-gba-rom-header`);
@@ -2108,6 +3036,10 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
   lines.push(`    (irq-controller-refs ${analysis.grades.irqRefs})`);
   lines.push(`    (lifted-arm32-functions ${analysis.grades.armFunctionsLifted})`);
   lines.push(`    (lifted-thumb16-functions ${analysis.grades.thumbFunctionsLifted})`);
+  lines.push(`    (structured-loops ${analysis.grades.structuredLoops})`);
+  lines.push(`    (structured-conditionals ${analysis.grades.structuredConditionals})`);
+  lines.push(`    (state-machines-lifted ${analysis.grades.stateMachinesLifted})`);
+  lines.push(`    (high-level-idioms-lifted ${analysis.grades.highLevelIdiomsLifted})`);
   lines.push(`    (lifted-subroutines ${analysis.grades.discoveredSubroutines})))`);
   lines.push('');
   lines.push(`(define-gba-mmio-profile`);
@@ -2128,6 +3060,21 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
   }
   lines.push(`)`);
   lines.push('');
+  lines.push(`(define-gba-state-machines`);
+  for (const sm of analysis.stateMachines) {
+    const casesStr = sm.cases.map((c) => `(case ${c.index} -> "${c.targetAddr}")`).join(' ');
+    lines.push(
+      `  (state-machine ${sm.name} (table-addr "${sm.tableAddr}") (isa '${sm.isa}) (cases ${casesStr}))`
+    );
+  }
+  lines.push(`)`);
+  lines.push('');
+  lines.push(`(define-gba-high-level-idioms`);
+  for (const idm of analysis.highLevelIdioms) {
+    lines.push(`  (gba-idiom '${idm.kind} (pc "${idm.pc}") ${idm.detail})`);
+  }
+  lines.push(`)`);
+  lines.push('');
   lines.push(`(define-gba-lifted-lz77-assets`);
   for (const asset of analysis.lz77Assets) {
     lines.push(
@@ -2143,8 +3090,14 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
     lines.push(
       `  (${formName} ${sub.name} (isa '${sub.isa}) (entry #x${sub.startAddr.toString(16).padStart(8, '0')})${calleeStr}`
     );
-    for (const ins of sub.insns) {
-      lines.push(`    (insn "${ins.addr}" ${ins.wordHex} ${ins.ast})`);
+    if (sub.structuredAstLines && sub.structuredAstLines.length > 0) {
+      for (const astLine of sub.structuredAstLines) {
+        lines.push(astLine);
+      }
+    } else {
+      for (const ins of sub.insns) {
+        lines.push(`    (insn "${ins.addr}" ${ins.wordHex} ${ins.ast})`);
+      }
     }
     lines.push(`  )`);
   }

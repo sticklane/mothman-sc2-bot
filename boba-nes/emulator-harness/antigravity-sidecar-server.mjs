@@ -1809,12 +1809,16 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
   }
   const sourceText = displayLines.join('\n');
 
-  // Parse structured subroutines, callGraph, mmioCrossRefs, resolvedPointers, displayList, and coeffectEffectGrades
+  // Parse structured subroutines, callGraph, mmioCrossRefs, resolvedPointers, displayList, CFG loops/conditionals, stateMachines, and coeffectEffectGrades
   const subroutines = [];
   const callGraph = [];
   const mmioCrossRefs = [];
   const resolvedPointers = [];
   const displayListCommands = [];
+  const structuredLoops = [];
+  const structuredConditionals = [];
+  const stateMachines = [];
+  const highLevelIdioms = [];
   const gbiHistogram = {};
   const coeffectPairs = {};
 
@@ -1856,6 +1860,56 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
         target: m[2],
         symbol: m[3],
         kind: m[4]
+      });
+      continue;
+    }
+
+    // 2b. Structured Loops (spin-wait-mmio-loop, counted-loop, do-while-loop)
+    if ((m = line.match(/^\((spin-wait-mmio-loop|counted-loop|do-while-loop)\s+#:header\s+"([^"]+)"\s+#:latch\s+"([^"]+)"(?:\s+#:(?:mmio|step)\s+'?([^\s)]+))?(?:\s+#:cond\s+'?([^\s)]+))?/))) {
+      structuredLoops.push({
+        kind: m[1],
+        header: m[2],
+        latch: m[3],
+        mmioOrStep: m[4] || null,
+        cond: m[5] || null
+      });
+      continue;
+    }
+
+    // 2c. Structured Conditionals (when-branch, if-else, guard-return)
+    if ((m = line.match(/^\((when-branch|if-else|guard-return)\s+#:branch\s+"([^"]+)"\s+#:(?:join|else|epilogue)\s+"([^"]+)"(?:\s+#:merge\s+"([^"]+)")?(?:\s+#:cond\s+'?([^\s)]+))?/))) {
+      structuredConditionals.push({
+        kind: m[1],
+        branch: m[2],
+        target: m[3],
+        merge: m[4] || null,
+        cond: m[5] || null
+      });
+      continue;
+    }
+
+    // 2d. Lifted Jump-Table / Virtual Dispatch State Machines
+    if ((m = line.match(/^\(state-machine\s+([^\s)]+)(?:.*?\(dispatch-pc\s+"([^"]+)"\))?(?:.*?\(table-addr\s+"([^"]+)"\))?/))) {
+      const cases = (line.match(/\(case\s+\d+\s+->\s+"([^"]+)"\)/g) || []).map(c => {
+        const cm = c.match(/\(case\s+(\d+)\s+->\s+"([^"]+)"\)/);
+        return cm ? { index: Number(cm[1]), target: cm[2] } : null;
+      }).filter(Boolean);
+      stateMachines.push({
+        name: m[1],
+        dispatchPc: m[2] || null,
+        tableAddr: m[3] || null,
+        casesCount: cases.length,
+        cases
+      });
+      continue;
+    }
+
+    // 2e. High-Level Architectural Idioms (SNES, GBA, N64, NES, GB/GBC)
+    if ((m = line.match(/^\((?:snes-idiom|gba-idiom|n64-idiom|high-level-idiom)\s+'([^\s)]+)\s+\((?:pc|addr)\s+"([^"]+)"\)(?:.*?\(summary\s+"([^"]+)"\))?/))) {
+      highLevelIdioms.push({
+        kind: m[1],
+        pc: m[2],
+        summary: m[3] || m[1]
       });
       continue;
     }
@@ -1996,7 +2050,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     }
 
     // 6. Coeffect / Effect Numeric Key-Value Pairs inside grade blocks
-    if ((m = line.match(/^\(([a-zA-Z0-9_-]*?(?:refs|ops|calls|functions|subroutines|pointers|executed|lifted|budget|writes|reads|transitions|banks|segments|assets|sites|count|bytes))\s+(\d+|#t|#f|[A-Za-z0-9_-]+)\)$/))) {
+    if ((m = line.match(/^\(([a-zA-Z0-9_-]*?(?:refs|ops|calls|functions|subroutines|pointers|executed|lifted|budget|writes|reads|transitions|banks|segments|assets|sites|count|bytes|loops|conditionals|machines|idioms))\s+(\d+|#t|#f|[A-Za-z0-9_-]+)\)$/))) {
       const k = m[1];
       const vRaw = m[2];
       coeffectPairs[k] = /^\d+$/.test(vRaw) ? Number(vRaw) : vRaw === '#t' ? true : vRaw === '#f' ? false : vRaw;
@@ -2024,12 +2078,20 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
       mmioRegistersCount: mmioCrossRefs.length,
       resolvedPointersCount: resolvedPointers.length,
       displayListCommandsCount: displayListCommands.length,
+      structuredLoopsCount: structuredLoops.length,
+      structuredConditionalsCount: structuredConditionals.length,
+      stateMachinesCount: stateMachines.length,
+      highLevelIdiomsCount: highLevelIdioms.length,
       ...coeffectPairs
     },
     mmioCrossRefs,
     resolvedPointers,
     callGraph,
     subroutines,
+    structuredLoops,
+    structuredConditionals,
+    stateMachines,
+    highLevelIdioms,
     displayList:
       targetKey === 'n64' || displayListCommands.length > 0
         ? {

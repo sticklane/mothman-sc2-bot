@@ -38,11 +38,25 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update appr begin_game break_fall_floor break_spring check clamp collide create_hair destroy_object draw draw_hair draw_object draw_time ice_at init init_object is_ice is_solid is_title kill_player level_index load_room maybe move move_x move_y next_room psfx restart_room set_hair_color sign solid_at spikes_at tile_at tile_flag_at title_screen unset_hair_color update))
     (pico8-api-calls (abs add btn camera circfill cos del fget flr foreach line map max mget min music pal print rect rectfill rnd sfx sin spr))
+    (structured-loops 15)
+    (structured-conditionals 62)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 6)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 32)
     (active-sfx-lifted 32)
     (active-music-lifted 31))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update begin_game is_title kill_player move move_x move_y title_screen) #:draw-states (_draw break_spring draw draw_hair draw_object draw_time))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update appr begin_game break_fall_floor break_spring check clamp collide)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 31)
+    (idiom-pico8-tilemap-collision #:apis (mget fget map) #:call-sites 6)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 63)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 69)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 15)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 24))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name _init)
@@ -50,6 +64,8 @@
       (line-range (32 34))
       (api-calls ())
       (called-functions (title_screen))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function _init()"
         "\ttitle_screen()"
@@ -60,6 +76,8 @@
       (line-range (36 48))
       (api-calls (add music))
       (called-functions (load_room))
+      (structured-ast
+        (for-loop "i=0,29"))
       (body-lines
         "function title_screen()"
         "\tgot_fruit = {}"
@@ -80,6 +98,8 @@
       (line-range (50 58))
       (api-calls (music))
       (called-functions (load_room))
+      (structured-ast
+        (seq-block 9))
       (body-lines
         "function begin_game()"
         "\tframes=0"
@@ -96,6 +116,8 @@
       (line-range (60 62))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "room.x%8+room.y*8"))
       (body-lines
         "function level_index()"
         "\treturn room.x%8+room.y*8"
@@ -106,6 +128,8 @@
       (line-range (64 66))
       (api-calls ())
       (called-functions (level_index))
+      (structured-ast
+        (return-expr "level_index()==31"))
       (body-lines
         "function is_title()"
         "\treturn level_index()==31"
@@ -116,6 +140,8 @@
       (line-range (100 114))
       (api-calls ())
       (called-functions (create_hair))
+      (structured-ast
+        (seq-block 15))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.p_jump=false"
@@ -138,6 +164,12 @@
       (line-range (115 134))
       (api-calls (btn))
       (called-functions (init_object is_ice is_solid kill_player spikes_at))
+      (structured-ast
+        (if-cond "(pause_player")
+        (return-expr "")
+        (if-cond "spikes_at(this.x+this.hitbox.x,this.y+this.hitbox.y,this.hitbox.")
+        (if-cond "this.y>128")
+        (if-cond "on_ground and not this.was_on_ground"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tif (pause_player) return"
@@ -165,6 +197,8 @@
       (line-range (312 318))
       (api-calls ())
       (called-functions (clamp))
+      (structured-ast
+        (if-cond "this.x<-1 or this.x>121"))
       (body-lines
         "\tdraw=function(this)"
         "\t"
@@ -179,6 +213,8 @@
       (line-range (327 330))
       (api-calls (sfx))
       (called-functions ())
+      (structured-ast
+        (if-cond "sfx_timer<=0"))
       (body-lines
         "psfx=function(num)"
         " if sfx_timer<=0 then"
@@ -190,6 +226,8 @@
       (line-range (333 337))
       (api-calls (add max min))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=0,4"))
       (body-lines
         "create_hair=function(obj)"
         "\tobj.hair={}"
@@ -202,6 +240,8 @@
       (line-range (340 342))
       (api-calls (flr pal))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "set_hair_color=function(djump)"
         "\tpal(8,(djump==1 and 8 or djump==2 and (7+flr((frames/3)%2)*4) or 12))"
@@ -212,6 +252,8 @@
       (line-range (344 352))
       (api-calls (btn circfill foreach))
       (called-functions ())
+      (structured-ast
+        (for-loop "foreach(obj.hair,function(h)"))
       (body-lines
         "draw_hair=function(obj,facing)"
         "\tlocal last={x=obj.x+4-facing*2,y=obj.y+(btn(k_down) and 4 or 3)}"
@@ -228,6 +270,8 @@
       (line-range (354 356))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "unset_hair_color=function()"
         "\tpal(8,8)"
@@ -238,6 +282,8 @@
       (line-range (360 370))
       (api-calls (sfx))
       (called-functions (create_hair))
+      (structured-ast
+        (seq-block 11))
       (body-lines
         "\tinit=function(this)"
         "\t sfx(4)"
@@ -256,6 +302,9 @@
       (line-range (371 377))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "this.state==0")
+        (if-cond "this.y < this.target.y+16"))
       (body-lines
         "\tupdate=function(this)"
         "\t\t-- jumping up"
@@ -270,6 +319,8 @@
       (line-range (404 409))
       (api-calls (spr))
       (called-functions (draw_hair set_hair_color unset_hair_color))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "\tdraw=function(this)"
         "\t\tset_hair_color(max_djump)"
@@ -283,6 +334,8 @@
       (line-range (415 418))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.hide_in=0"
@@ -294,6 +347,9 @@
       (line-range (419 425))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "this.hide_for>0")
+        (if-cond "this.hide_for<=0"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tif this.hide_for>0 then"
@@ -308,6 +364,8 @@
       (line-range (463 465))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function break_spring(obj)"
         "\tobj.hide_in=15"
@@ -318,6 +376,8 @@
       (line-range (469 474))
       (api-calls (rnd))
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.offset=rnd(1)"
@@ -331,6 +391,9 @@
       (line-range (475 486))
       (api-calls (sin))
       (called-functions (collide init_object psfx))
+      (structured-ast
+        (if-cond "this.spr==22")
+        (if-cond "hit~=nil and hit.djump<max_djump"))
       (body-lines
         "\tupdate=function(this) "
         "\t\tif this.spr==22 then"
@@ -350,6 +413,8 @@
       (line-range (495 499))
       (api-calls (spr))
       (called-functions ())
+      (structured-ast
+        (if-cond "this.spr==22"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tif this.spr==22 then"
@@ -362,6 +427,8 @@
       (line-range (506 509))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.state=0"
@@ -373,6 +440,9 @@
       (line-range (510 515))
       (api-calls ())
       (called-functions (break_fall_floor check))
+      (structured-ast
+        (if-cond "this.state == 0")
+        (if-cond "this.check(player,0,-1"))
       (body-lines
         "\tupdate=function(this)"
         "\t\t-- idling"
@@ -386,6 +456,9 @@
       (line-range (535 541))
       (api-calls (spr))
       (called-functions ())
+      (structured-ast
+        (if-cond "this.state!=2")
+        (if-cond "this.state!=1"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tif this.state!=2 then"
@@ -400,6 +473,9 @@
       (line-range (547 556))
       (api-calls ())
       (called-functions (break_spring collide init_object psfx))
+      (structured-ast
+        (if-cond "obj.state==0")
+        (if-cond "hit~=nil"))
       (body-lines
         "function break_fall_floor(obj)"
         " if obj.state==0 then"
@@ -417,6 +493,8 @@
       (line-range (561 570))
       (api-calls (rnd))
       (called-functions (maybe))
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.spr=29"
@@ -434,6 +512,8 @@
       (line-range (571 575))
       (api-calls ())
       (called-functions (destroy_object))
+      (structured-ast
+        (if-cond "this.spr>=32"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.spr+=0.2"
@@ -446,6 +526,8 @@
       (line-range (582 585))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.start=this.y"
@@ -457,6 +539,8 @@
       (line-range (586 595))
       (api-calls (sfx))
       (called-functions (collide destroy_object init_object level_index))
+      (structured-ast
+        (if-cond "hit~=nil"))
       (body-lines
         "\tupdate=function(this)"
         "\t local hit=this.collide(player,0,0)"
@@ -474,6 +558,8 @@
       (line-range (605 611))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 7))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.start=this.y"
@@ -488,6 +574,10 @@
       (line-range (612 620))
       (api-calls (sfx))
       (called-functions ())
+      (structured-ast
+        (if-cond "this.fly")
+        (if-cond "this.sfx_delay>0")
+        (if-cond "this.sfx_delay<=0"))
       (body-lines
         "\tupdate=function(this)"
         "\t\t--fly away"
@@ -504,6 +594,9 @@
       (line-range (645 651))
       (api-calls (max sin))
       (called-functions (sign))
+      (structured-ast
+        (if-cond "not this.fly")
+        (if-cond "dir<0"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tlocal off=0"
@@ -518,6 +611,8 @@
       (line-range (663 670))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 8))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.spd.y=-0.25"
@@ -533,6 +628,8 @@
       (line-range (671 675))
       (api-calls ())
       (called-functions (destroy_object))
+      (structured-ast
+        (if-cond "this.duration<= 0"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.duration-=1"
@@ -545,6 +642,8 @@
       (line-range (677 681))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.flash+=0.5"
@@ -557,6 +656,8 @@
       (line-range (687 702))
       (api-calls (sfx))
       (called-functions (collide destroy_object init_object sign))
+      (structured-ast
+        (if-cond "hit~=nil and hit.dash_effect_time>0"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.hitbox={x=-1,y=-1,w=18,h=18}"
@@ -580,6 +681,8 @@
       (line-range (705 710))
       (api-calls (spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "\tdraw=function(this)"
         "\t\tspr(64,this.x,this.y)"
@@ -593,6 +696,8 @@
       (line-range (717 723))
       (api-calls (flr sin))
       (called-functions ())
+      (structured-ast
+        (if-cond "is==10 and is!=was"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tlocal was=flr(this.spr)"
@@ -607,6 +712,8 @@
       (line-range (737 741))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.x-=4"
@@ -619,6 +726,9 @@
       (line-range (742 751))
       (api-calls (rnd sfx))
       (called-functions (destroy_object init_object))
+      (structured-ast
+        (if-cond "has_key")
+        (if-cond "this.timer<=0"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tif has_key then"
@@ -636,6 +746,8 @@
       (line-range (758 763))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.x-=4"
@@ -649,6 +761,10 @@
       (line-range (764 772))
       (api-calls ())
       (called-functions (check collide move_x))
+      (structured-ast
+        (if-cond "this.x<-16")
+        (if-cond "not this.check(player,0,0")
+        (if-cond "hit~=nil"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.spd.x=this.dir*0.65"
@@ -665,6 +781,8 @@
       (line-range (776 779))
       (api-calls (spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\tdraw=function(this)"
         "\t\tspr(11,this.x,this.y-1)"
@@ -676,6 +794,10 @@
       (line-range (785 793))
       (api-calls (sfx))
       (called-functions (check))
+      (structured-ast
+        (if-cond "this.check(player,4,0")
+        (if-cond "this.index<#this.text")
+        (if-cond "this.index>=this.last+1"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.text=\"-- celeste mountain --#this memorial to those# perished on the climb\""
@@ -692,6 +814,8 @@
       (line-range (816 819))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.state=0"
@@ -703,6 +827,9 @@
       (line-range (820 834))
       (api-calls (music sfx))
       (called-functions (collide init_object is_solid))
+      (structured-ast
+        (if-cond "this.state==0")
+        (if-cond "hit~=nil and hit.is_solid(0,1"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tif this.state==0 then"
@@ -725,6 +852,8 @@
       (line-range (869 873))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.spd.y=-4"
@@ -737,6 +866,8 @@
       (line-range (874 885))
       (api-calls (sfx))
       (called-functions (appr collide destroy_object))
+      (structured-ast
+        (if-cond "this.spd.y==0 and hit~=nil"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.spd.y=appr(this.spd.y,0,0.5)"
@@ -756,6 +887,9 @@
       (line-range (897 904))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,count(got_fruit)")
+        (if-cond "got_fruit[i]"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.x+=5"
@@ -771,6 +905,8 @@
       (line-range (907 920))
       (api-calls (print rectfill sfx spr))
       (called-functions (check draw_time))
+      (structured-ast
+        (if-cond "this.show"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.spr=118+(frames/5)%3"
@@ -792,6 +928,8 @@
       (line-range (926 928))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.delay=5"
@@ -802,6 +940,9 @@
       (line-range (929 945))
       (api-calls (print rect rectfill))
       (called-functions (destroy_object level_index))
+      (structured-ast
+        (if-cond "this.delay<-30")
+        (if-cond "room.x==3 and room.y==1"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.delay-=1"
@@ -826,6 +967,9 @@
       (line-range (956 959))
       (api-calls ())
       (called-functions (level_index))
+      (structured-ast
+        (if-cond "type.if_not_fruit~=nil and got_fruit[1+level_index(")
+        (return-expr ""))
       (body-lines
         "function init_object(type,x,y)"
         "\tif type.if_not_fruit~=nil and got_fruit[1+level_index()] then"
@@ -837,6 +981,9 @@
       (line-range (975 978))
       (api-calls ())
       (called-functions (check))
+      (structured-ast
+        (if-cond "oy>0 and not obj.check(platform,ox,0")
+        (return-expr "true"))
       (body-lines
         "\tobj.is_solid=function(ox,oy)"
         "\t\tif oy>0 and not obj.check(platform,ox,0) and obj.check(platform,ox,oy) then"
@@ -848,6 +995,8 @@
       (line-range (984 986))
       (api-calls ())
       (called-functions (ice_at))
+      (structured-ast
+        (return-expr "ice_at(obj.x+obj.hitbox.x+ox,obj.y+obj.hitbox.y+oy,obj.hitbox.w,"))
       (body-lines
         "\tobj.is_ice=function(ox,oy)"
         "\t\treturn ice_at(obj.x+obj.hitbox.x+ox,obj.y+obj.hitbox.y+oy,obj.hitbox.w,obj.hitbox.h)"
@@ -858,6 +1007,9 @@
       (line-range (988 998))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,count(objects)")
+        (return-expr "other"))
       (body-lines
         "\tobj.collide=function(type,ox,oy)"
         "\t\tlocal other"
@@ -876,6 +1028,8 @@
       (line-range (1003 1005))
       (api-calls ())
       (called-functions (collide))
+      (structured-ast
+        (return-expr "obj.collide(type,ox,oy) ~=nil"))
       (body-lines
         "\tobj.check=function(type,ox,oy)"
         "\t\treturn obj.collide(type,ox,oy) ~=nil"
@@ -886,6 +1040,8 @@
       (line-range (1007 1020))
       (api-calls (flr))
       (called-functions (move_x move_y))
+      (structured-ast
+        (seq-block 14))
       (body-lines
         "\tobj.move=function(ox,oy)"
         "\t\tlocal amount"
@@ -907,6 +1063,10 @@
       (line-range (1022 1032))
       (api-calls (abs))
       (called-functions (is_solid sign))
+      (structured-ast
+        (if-cond "obj.solids")
+        (for-loop "i=start,abs(amount)")
+        (if-cond "not obj.is_solid(step,0"))
       (body-lines
         "\tobj.move_x=function(amount,start)"
         "\t\tif obj.solids then"
@@ -925,6 +1085,10 @@
       (line-range (1039 1049))
       (api-calls (abs))
       (called-functions (is_solid sign))
+      (structured-ast
+        (if-cond "obj.solids")
+        (for-loop "i=0,abs(amount)")
+        (if-cond "not obj.is_solid(0,step"))
       (body-lines
         "\tobj.move_y=function(amount)"
         "\t\tif obj.solids then"
@@ -943,6 +1107,8 @@
       (line-range (1063 1065))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function destroy_object(obj)"
         "\tdel(objects,obj)"
@@ -953,6 +1119,8 @@
       (line-range (1067 1086))
       (api-calls (add cos sfx sin))
       (called-functions (destroy_object restart_room))
+      (structured-ast
+        (for-loop "dir=0,7"))
       (body-lines
         "function kill_player(obj)"
         "\tsfx_timer=12"
@@ -980,6 +1148,8 @@
       (line-range (1092 1095))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function restart_room()"
         "\twill_restart=true"
@@ -991,6 +1161,8 @@
       (line-range (1097 1106))
       (api-calls (music))
       (called-functions ())
+      (structured-ast
+        (if-cond "room.x==2 and room.y==1"))
       (body-lines
         "function next_room()"
         " if room.x==2 and room.y==1 then"
@@ -1008,6 +1180,12 @@
       (line-range (1115 1139))
       (api-calls (foreach mget))
       (called-functions (init_object))
+      (structured-ast
+        (for-loop "foreach(objects,destroy_object)")
+        (for-loop "tx=0,15")
+        (for-loop "ty=0,15")
+        (if-cond "tile==11")
+        (if-cond "type.tile == tile"))
       (body-lines
         "function load_room(x,y)"
         "\thas_dashed=false"
@@ -1040,6 +1218,9 @@
       (line-range (1153 1159))
       (api-calls ())
       (called-functions (level_index))
+      (structured-ast
+        (if-cond "frames==0 and level_index(")
+        (if-cond "seconds==0"))
       (body-lines
         "function _update()"
         "\tframes=((frames+1)%30)"
@@ -1054,6 +1235,12 @@
       (line-range (1221 1233))
       (api-calls (pal))
       (called-functions ())
+      (structured-ast
+        (if-cond "freeze>0")
+        (return-expr "end")
+        (if-cond "start_game")
+        (if-cond "start_game_flash>10")
+        (if-cond "frames%10<5"))
       (body-lines
         "function _draw()"
         "\tif freeze>0 then return end"
@@ -1074,6 +1261,8 @@
       (line-range (1347 1353))
       (api-calls (spr))
       (called-functions (draw))
+      (structured-ast
+        (if-cond "obj.type.draw ~=nil"))
       (body-lines
         "function draw_object(obj)"
         ""
@@ -1088,6 +1277,8 @@
       (line-range (1357 1366))
       (api-calls (flr print rectfill))
       (called-functions ())
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "function draw_time(x,y)"
         ""
@@ -1105,6 +1296,8 @@
       (line-range (1371 1373))
       (api-calls (max min))
       (called-functions ())
+      (structured-ast
+        (return-expr "max(a, min(b, val))"))
       (body-lines
         "function clamp(val,a,b)"
         "\treturn max(a, min(b, val))"
@@ -1115,6 +1308,8 @@
       (line-range (1375 1379))
       (api-calls (max min))
       (called-functions ())
+      (structured-ast
+        (return-expr "val > target"))
       (body-lines
         "function appr(val,target,amount)"
         " return val > target "
@@ -1127,6 +1322,8 @@
       (line-range (1381 1384))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "v>0 and 1 or"))
       (body-lines
         "function sign(v)"
         "\treturn v>0 and 1 or"
@@ -1138,6 +1335,8 @@
       (line-range (1386 1388))
       (api-calls (rnd))
       (called-functions ())
+      (structured-ast
+        (return-expr "rnd(1)<0.5"))
       (body-lines
         "function maybe()"
         "\treturn rnd(1)<0.5"
@@ -1148,6 +1347,8 @@
       (line-range (1390 1392))
       (api-calls ())
       (called-functions (tile_flag_at))
+      (structured-ast
+        (return-expr "tile_flag_at(x,y,w,h,0)"))
       (body-lines
         "function solid_at(x,y,w,h)"
         " return tile_flag_at(x,y,w,h,0)"
@@ -1158,6 +1359,8 @@
       (line-range (1394 1396))
       (api-calls ())
       (called-functions (tile_flag_at))
+      (structured-ast
+        (return-expr "tile_flag_at(x,y,w,h,4)"))
       (body-lines
         "function ice_at(x,y,w,h)"
         " return tile_flag_at(x,y,w,h,4)"
@@ -1168,6 +1371,11 @@
       (line-range (1398 1403))
       (api-calls (fget flr max min))
       (called-functions (tile_at))
+      (structured-ast
+        (for-loop "i=max(0,flr(x/8)),min(15,(x+w-1)/8)")
+        (for-loop "j=max(0,flr(y/8)),min(15,(y+h-1)/8)")
+        (if-cond "fget(tile_at(i,j")
+        (return-expr "true"))
       (body-lines
         "function tile_flag_at(x,y,w,h,flag)"
         " for i=max(0,flr(x/8)),min(15,(x+w-1)/8) do"
@@ -1181,6 +1389,8 @@
       (line-range (1409 1411))
       (api-calls (mget))
       (called-functions ())
+      (structured-ast
+        (return-expr "mget(room.x * 16 + x, room.y * 16 + y)"))
       (body-lines
         "function tile_at(x,y)"
         " return mget(room.x * 16 + x, room.y * 16 + y)"
@@ -1191,6 +1401,14 @@
       (line-range (1413 1425))
       (api-calls (flr max min))
       (called-functions (tile_at))
+      (structured-ast
+        (for-loop "i=max(0,flr(x/8)),min(15,(x+w-1)/8)")
+        (for-loop "j=max(0,flr(y/8)),min(15,(y+h-1)/8)")
+        (if-cond "tile==17 and ((y+h-1")
+        (return-expr "true")
+        (return-expr "true")
+        (return-expr "true")
+        (return-expr "true"))
       (body-lines
         "function spikes_at(x,y,w,h,xspd,yspd)"
         " for i=max(0,flr(x/8)),min(15,(x+w-1)/8) do"

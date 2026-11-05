@@ -8,11 +8,11 @@
   "totalMatchingPixels": 957440,
   "totalDiffPixels": 0,
   "overallMatchPct": 100,
-  "totalSnesSubroutinesLifted": 370,
+  "totalSnesSubroutinesLifted": 373,
   "totalGbaArmFunctionsLifted": 54,
   "totalGbaThumbFunctionsLifted": 240,
   "totalGbaLz77AssetsFound": 166,
-  "elapsedMs": 7866,
+  "elapsedMs": 11280,
   "snes": [
     {
       "index": 1,
@@ -54,8 +54,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 17,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 23,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 25,
+        "structuredConditionals": 14,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -130,8 +134,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 26,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 29,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 7,
+        "structuredConditionals": 31,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -206,8 +214,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 21,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 27,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 25,
+        "structuredConditionals": 7,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -268,7 +280,7 @@
       "pixelTransitions": 36667,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 41,
+      "subroutinesLifted": 42,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 12428,
       "grades": {
@@ -278,12 +290,16 @@
         "ppuWrites": 488,
         "apuPortWrites": 87,
         "dmaChannelWrites": 654,
-        "joypadReads": 6,
+        "joypadReads": 7,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 41,
-        "callGraphEdges": 26,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 42,
+        "callGraphEdges": 53,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 11,
+        "structuredConditionals": 35,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -344,7 +360,7 @@
       "pixelTransitions": 27485,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 37,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 6697,
       "grades": {
@@ -357,9 +373,13 @@
         "joypadReads": 13,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 23,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 37,
+        "callGraphEdges": 32,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 22,
+        "structuredConditionals": 10,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -437,8 +457,12 @@
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
         "subroutinesLifted": 36,
-        "callGraphEdges": 24,
-        "spc700HandshakeSites": 16
+        "callGraphEdges": 27,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 15,
+        "structuredConditionals": 14,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -499,7 +523,7 @@
       "pixelTransitions": 5439,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 38,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 10227,
       "grades": {
@@ -512,9 +536,13 @@
         "joypadReads": 2,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 33,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 38,
+        "callGraphEdges": 40,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 9,
+        "structuredConditionals": 28,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -575,7 +603,7 @@
       "pixelTransitions": 10254,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 41,
+      "subroutinesLifted": 36,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 1997,
       "grades": {
@@ -588,9 +616,13 @@
         "joypadReads": 1,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 13,
-        "subroutinesLifted": 41,
-        "callGraphEdges": 43,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 36,
+        "callGraphEdges": 38,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 14,
+        "structuredConditionals": 12,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -651,7 +683,7 @@
       "pixelTransitions": 22232,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 37,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 5092,
       "grades": {
@@ -661,12 +693,16 @@
         "ppuWrites": 379,
         "apuPortWrites": 29,
         "dmaChannelWrites": 695,
-        "joypadReads": 0,
+        "joypadReads": 1,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 17,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 37,
+        "callGraphEdges": 38,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 18,
+        "structuredConditionals": 13,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -727,7 +763,7 @@
       "pixelTransitions": 9010,
       "vramWordsMatched": 32768,
       "cgramWordsMatched": 256,
-      "subroutinesLifted": 36,
+      "subroutinesLifted": 39,
       "spc700HandshakeSites": 16,
       "modeSwitchCount": 11281,
       "grades": {
@@ -740,9 +776,13 @@
         "joypadReads": 10,
         "discoveredJsrSubroutines": 96,
         "discoveredJslSubroutines": 96,
-        "subroutinesLifted": 36,
-        "callGraphEdges": 18,
-        "spc700HandshakeSites": 16
+        "subroutinesLifted": 39,
+        "callGraphEdges": 29,
+        "spc700HandshakeSites": 16,
+        "structuredLoops": 10,
+        "structuredConditionals": 15,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 12
       },
       "checkpoints": {
         "cp0": {
@@ -821,8 +861,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 16,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 19,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 5,
+        "structuredConditionals": 14,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 19
       },
       "checkpoints": {
         "cp0": {
@@ -899,8 +943,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 31,
         "subroutinesLifted": 31,
-        "callGraphEdges": 19,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 21,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 0,
+        "structuredConditionals": 5,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 10
       },
       "checkpoints": {
         "cp0": {
@@ -977,8 +1025,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 29,
         "subroutinesLifted": 29,
-        "callGraphEdges": 12,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 14,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 1,
+        "structuredConditionals": 7,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 10
       },
       "checkpoints": {
         "cp0": {
@@ -1055,8 +1107,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 30,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 37,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 4,
+        "structuredConditionals": 20,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 9
       },
       "checkpoints": {
         "cp0": {
@@ -1133,8 +1189,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 26,
         "subroutinesLifted": 26,
-        "callGraphEdges": 23,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 31,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 3,
+        "structuredConditionals": 15,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 24
       },
       "checkpoints": {
         "cp0": {
@@ -1211,8 +1271,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 36,
         "subroutinesLifted": 36,
-        "callGraphEdges": 14,
-        "lz77AssetsFound": 5
+        "callGraphEdges": 19,
+        "lz77AssetsFound": 5,
+        "structuredLoops": 3,
+        "structuredConditionals": 21,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 19
       },
       "checkpoints": {
         "cp0": {
@@ -1289,8 +1353,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 36,
         "subroutinesLifted": 36,
-        "callGraphEdges": 31,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 32,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 4,
+        "structuredConditionals": 23,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 15
       },
       "checkpoints": {
         "cp0": {
@@ -1367,8 +1435,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 33,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 37,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 8,
+        "structuredConditionals": 12,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 19
       },
       "checkpoints": {
         "cp0": {
@@ -1445,8 +1517,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 28,
         "subroutinesLifted": 28,
-        "callGraphEdges": 15,
-        "lz77AssetsFound": 20
+        "callGraphEdges": 20,
+        "lz77AssetsFound": 20,
+        "structuredLoops": 2,
+        "structuredConditionals": 5,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 14
       },
       "checkpoints": {
         "cp0": {
@@ -1523,8 +1599,12 @@
         "thumbFunctionsLifted": 24,
         "discoveredSubroutines": 27,
         "subroutinesLifted": 27,
-        "callGraphEdges": 16,
-        "lz77AssetsFound": 1
+        "callGraphEdges": 17,
+        "lz77AssetsFound": 1,
+        "structuredLoops": 3,
+        "structuredConditionals": 4,
+        "stateMachinesLifted": 16,
+        "highLevelIdiomsLifted": 15
       },
       "checkpoints": {
         "cp0": {

@@ -38,11 +38,25 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update aabb add_ball_body add_balls_to_bag add_body add_boom_particle add_constraint add_force add_particles apply_force apply_impulse blink capsule circles_collide collides contact contains cos_sin create_fruit_particle create_new_balls do_gameover do_intro do_wiki draw draw_ball draw_boom_particle draw_contact draw_fruit_particle draw_particle eval find game_draw game_update gameover_draw gameover_update geometry has_more insert intro_draw intro_update inv_mass is_awake is_dynamic lerp mass minmax next ngon on_event onoff overlaps pd_rotate position print_s print_sc rectangle remove remove_ball_body remove_body sat scale scene send_messages set shuffle sleep solve start_game sweep_and_prune to_screen transform translate triangle union update update_body update_boom_particle update_fruit_particle update_menuitems update_music update_particle velocity viewport wake wiki_draw wiki_update zero))
     (pico8-api-calls (abs add all atan2 btn btnp camera ceil circfill clip cls cos del flr foreach line map max mid min music pal palt print rectfill rnd sfx sin spr sqrt sspr))
+    (structured-loops 31)
+    (structured-conditionals 34)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 6)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 20)
     (active-sfx-lifted 32)
     (active-music-lifted 15))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update do_gameover game_draw game_update gameover_draw gameover_update intro_update remove) #:draw-states (_draw create_fruit_particle draw draw_ball draw_boom_particle draw_contact draw_fruit_particle draw_particle))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update aabb add_ball_body add_balls_to_bag add_body add_boom_particle add_constraint add_force)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 21)
+    (idiom-pico8-tilemap-collision #:apis (mget fget map) #:call-sites 4)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 36)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 65)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 10)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 14))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name zero)
@@ -50,6 +64,8 @@
       (line-range (13 13))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "x<0x0.002 and x>0xffff.ffe0 and 0 or x end"))
       (body-lines
         "function zero(x) return x<0x0.002 and x>0xffff.ffe0 and 0 or x end"))
     (def-pico-function
@@ -58,6 +74,8 @@
       (line-range (16 16))
       (api-calls (max min))
       (called-functions ())
+      (structured-ast
+        (return-expr "min(x, y), max(x, y) end"))
       (body-lines
         "function minmax(x, y) return min(x, y), max(x, y) end"))
     (def-pico-function
@@ -66,6 +84,8 @@
       (line-range (19 19))
       (api-calls (cos sin))
       (called-functions ())
+      (structured-ast
+        (return-expr "cos(a), sin(-a) end"))
       (body-lines
         "function cos_sin(a) a*=0x0.28be return cos(a), sin(-a) end"))
     (def-pico-function
@@ -74,6 +94,8 @@
       (line-range (22 25))
       (api-calls ())
       (called-functions (cos_sin))
+      (structured-ast
+        (return-expr "x*ca-y*sa+tx, x*sa+y*ca+ty"))
       (body-lines
         "function transform(x, y, tx, ty, ta)"
         "  local ca, sa = cos_sin(ta)"
@@ -85,6 +107,8 @@
       (line-range (32 36))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function aabb(x1, y1, x2, y2)"
         "  local self"
@@ -97,6 +121,8 @@
       (line-range (37 40))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "    set=function(x1, y1, x2, y2)"
         "      self.x1, self.y1, self.x2, self.y2 ="
@@ -108,6 +134,8 @@
       (line-range (41 44))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "self.x2>=b.x1 and self.x1<=b.x2 and"))
       (body-lines
         "    overlaps=function(b)"
         "      return self.x2>=b.x1 and self.x1<=b.x2 and"
@@ -119,6 +147,8 @@
       (line-range (45 48))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "b.x1>=self.x1 and b.y1>=self.y1 and"))
       (body-lines
         "    contains=function(b)"
         "      return b.x1>=self.x1 and b.y1>=self.y1 and"
@@ -130,6 +160,8 @@
       (line-range (61 69))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function viewport(args)"
         "  args = args or {}"
@@ -146,6 +178,8 @@
       (line-range (70 73))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "    translate=function(tx, ty)"
         "      --tx/=scale ty/=scale"
@@ -157,6 +191,8 @@
       (line-range (74 74))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "    scale=function(s) scale*=s m11*=s m12*=s m21*=s m22*=s end,"))
     (def-pico-function
@@ -165,6 +201,8 @@
       (line-range (75 77))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "m11*x+m12*y+m13, m21*x+m22*y+m23"))
       (body-lines
         "    to_screen=function(x, y) -- converts metres to pixels"
         "      return m11*x+m12*y+m13, m21*x+m22*y+m23"
@@ -175,6 +213,8 @@
       (line-range (104 115))
       (api-calls ())
       (called-functions (aabb sweep_and_prune))
+      (structured-ast
+        (seq-block 12))
       (body-lines
         "function scene(args)"
         "  args = args or {}"
@@ -194,6 +234,9 @@
       (line-range (116 120))
       (api-calls (foreach))
       (called-functions (on_event))
+      (structured-ast
+        (for-loop "foreach(args, function(evt)")
+        (if-cond "(listeners[evt.id]"))
       (body-lines
         "  local function send_messages(args)"
         "    foreach(args, function(evt)"
@@ -206,6 +249,8 @@
       (line-range (121 121))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "id==island[id] and id or find(island[id]) end"))
       (body-lines
         "  local function find(id) return id==island[id] and id or find(island[id]) end"))
     (def-pico-function
@@ -214,6 +259,8 @@
       (line-range (122 122))
       (api-calls ())
       (called-functions (find minmax))
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "  local function union(id1, id2) id2, id1 = minmax(find(id1), find(id2)) island[id1] = id2 end"))
     (def-pico-function
@@ -222,6 +269,9 @@
       (line-range (129 134))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "cid in pairs(contact_ids)")
+        (if-cond "(id==shr(band(cid, 0xff00"))
       (body-lines
         "  local function remove_body(id)"
         "    send_messages{ { id=id, event=0x05 } }"
@@ -235,6 +285,8 @@
       (line-range (143 143))
       (api-calls ())
       (called-functions (find))
+      (structured-ast
+        (return-expr "dynamic[id] and awake[find(id)] end"))
       (body-lines
         "  local function is_awake(id) return dynamic[id] and awake[find(id)] end"))
     (def-pico-function
@@ -243,6 +295,10 @@
       (line-range (145 150))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "awake[isle]")
+        (if-cond "(island[id]==isle")
+        (for-loop "id in pairs(alive)"))
       (body-lines
         "  local function sleep(id)"
         "    local isle = island[id]"
@@ -256,6 +312,10 @@
       (line-range (153 158))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "not awake[isle] and dynamic[isle]")
+        (if-cond "(island[id]==isle")
+        (for-loop "id in pairs(alive)"))
       (body-lines
         "  local function wake(id)"
         "    local isle = island[id]"
@@ -269,6 +329,8 @@
       (line-range (169 176))
       (api-calls ())
       (called-functions (wake))
+      (structured-ast
+        (return-expr "vx[id], vy[id], va[id]"))
       (body-lines
         "  local function apply_force(id, dt, fx, fy, px, py)"
         "    wake(id)"
@@ -284,6 +346,8 @@
       (line-range (184 190))
       (api-calls ())
       (called-functions (wake))
+      (structured-ast
+        (return-expr "vx[id], vy[id], va[id]"))
       (body-lines
         "  local function apply_impulse(id, px, py, pa)"
         "    wake(id)"
@@ -298,6 +362,8 @@
       (line-range (193 198))
       (api-calls (sqrt))
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "  local function contact(id1, id2, nx, ny)"
         "    local lambdan, lambdat, r, f, jn3, jn6, jmn, b, jt3, jt6, jmt ="
@@ -311,6 +377,10 @@
       (line-range (199 214))
       (api-calls (abs))
       (called-functions (apply_impulse zero))
+      (structured-ast
+        (if-cond "(nx*vx1+ny*vy1+jn3*va1-nx*vx2-ny*vy2+jn6*va2>=0")
+        (return-expr "false")
+        (if-cond "abs(lambdan"))
       (body-lines
         "      eval=function(dt, dist, px1, py1, px2, py2)"
         "        local rx1, ry1, rx2, ry2, vx1, vy1, va1, vx2, vy2, va2, imass1, imoi1, imass2, imoi2 ="
@@ -334,6 +404,8 @@
       (line-range (226 240))
       (api-calls (max mid))
       (called-functions (apply_impulse))
+      (structured-ast
+        (return-expr "deln^2+delt^2<0x0.001"))
       (body-lines
         "      solve=function()"
         "        local vx1, vy1, va1, vx2, vy2, va2, deln, delt ="
@@ -356,6 +428,11 @@
       (line-range (260 277))
       (api-calls ())
       (called-functions (geometry next rectangle))
+      (structured-ast
+        (if-cond "(id")
+        (if-cond "not moi")
+        (if-cond "mass[id]>0")
+        (for-loop "i=1,nv"))
       (body-lines
         "    add_body=function(args)"
         "      args = args or {}"
@@ -381,6 +458,8 @@
       (line-range (299 299))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "x[id], y[id], a[id] end, -- returns position/angle of a body"))
       (body-lines
         "    position=function(id) return x[id], y[id], a[id] end, -- returns position/angle of a body"))
     (def-pico-function
@@ -389,6 +468,8 @@
       (line-range (300 300))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "vx[id], vy[id], va[id] end, -- returns velocity of a body"))
       (body-lines
         "    velocity=function(id) return vx[id], vy[id], va[id] end, -- returns velocity of a body"))
     (def-pico-function
@@ -397,6 +478,8 @@
       (line-range (301 301))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "mass[id] end,"))
       (body-lines
         "    mass=function(id) return mass[id] end,"))
     (def-pico-function
@@ -405,6 +488,8 @@
       (line-range (302 302))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "imass[id], imoi[id] end, -- returns inverse mass/inertia of a bo"))
       (body-lines
         "    inv_mass=function(id) return imass[id], imoi[id] end, -- returns inverse mass/inertia of a body"))
     (def-pico-function
@@ -413,6 +498,8 @@
       (line-range (303 303))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "dynamic[id] end, -- returns true if the body reacts to forces"))
       (body-lines
         "    is_dynamic=function(id) return dynamic[id] end, -- returns true if the body reacts to forces"))
     (def-pico-function
@@ -421,6 +508,8 @@
       (line-range (304 304))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "    add_constraint=function(c) constraints[#constraints+1] = c end,"))
     (def-pico-function
@@ -429,6 +518,8 @@
       (line-range (305 305))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "    add_force=function(f) forces[#forces+1] = f end,"))
     (def-pico-function
@@ -437,6 +528,9 @@
       (line-range (308 318))
       (api-calls ())
       (called-functions (apply_force is_awake))
+      (structured-ast
+        (for-loop "id in pairs(alive)")
+        (if-cond "is_awake(id"))
       (body-lines
         "    update=function(dt) -- update function called once per frame"
         "      dt = dt or 1/stat(7)"
@@ -455,6 +549,9 @@
       (line-range (408 420))
       (api-calls (line print))
       (called-functions (cos_sin is_awake to_screen))
+      (structured-ast
+        (for-loop "id in pairs(alive)")
+        (if-cond "not is_awake(id"))
       (body-lines
         "    draw=function(vp)"
         "      for id in pairs(alive) do"
@@ -475,6 +572,8 @@
       (line-range (435 442))
       (api-calls ())
       (called-functions (transform))
+      (structured-ast
+        (for-loop "i=1,nv"))
       (body-lines
         "function ngon(r, nv, sx, sy, ox, oy)"
         "  sx, sy, ox, oy = r*(sx or 1), r*(sy or 1), ox or 0, oy or 0"
@@ -490,6 +589,8 @@
       (line-range (446 446))
       (api-calls ())
       (called-functions (ngon))
+      (structured-ast
+        (return-expr "ngon(0x1.6109, 3, w/2, h/2, ox, oy) end"))
       (body-lines
         "function triangle(w, h, ox, oy) return ngon(0x1.6109, 3, w/2, h/2, ox, oy) end"))
     (def-pico-function
@@ -498,6 +599,8 @@
       (line-range (447 447))
       (api-calls ())
       (called-functions (ngon))
+      (structured-ast
+        (return-expr "ngon(0x1.6109, 4, w/2, h/2, ox, oy) end"))
       (body-lines
         "function rectangle(w, h, ox, oy) return ngon(0x1.6109, 4, w/2, h/2, ox, oy) end"))
     (def-pico-function
@@ -506,6 +609,10 @@
       (line-range (449 461))
       (api-calls ())
       (called-functions (ngon))
+      (structured-ast
+        (for-loop "i=1,nv/2+1")
+        (for-loop "i=nv/2+2,nv")
+        (return-expr "{ numv=nv+2, x=x, y=y }"))
       (body-lines
         "function capsule(w, h, nv, ox, oy)"
         "  nv += nv%2"
@@ -526,6 +633,8 @@
       (line-range (468 472))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "{"))
       (body-lines
         "function sweep_and_prune()"
         "  local nump, x_id, y_id, x_val, y_val, x_minmax, y_minmax, x_spans, y_spans, count, cand, iter ="
@@ -538,6 +647,8 @@
       (line-range (473 473))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "    add_body=function(id, box)"))
     (def-pico-function
@@ -546,6 +657,8 @@
       (line-range (474 486))
       (api-calls (max min))
       (called-functions ())
+      (structured-ast
+        (while-loop "vals[idx-1]>val"))
       (body-lines
         "      local function insert(len, ids, vals, minmaxs, spans, id, val, minmax)"
         "        ids[len+1], vals[len+1], minmaxs[len+1] = ids[len], vals[len], minmaxs[len]"
@@ -566,6 +679,8 @@
       (line-range (496 496))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "    remove_body=function(id)"))
     (def-pico-function
@@ -574,6 +689,9 @@
       (line-range (497 501))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=idx+1, len")
+        (if-cond "(ids[i]>0"))
       (body-lines
         "      local function remove(len, ids, vals, minmaxs, spans, idx)"
         "        for i=idx+1, len do"
@@ -586,6 +704,8 @@
       (line-range (517 517))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "    update_body=function(id, box)"))
     (def-pico-function
@@ -594,6 +714,9 @@
       (line-range (518 529))
       (api-calls (max mid min))
       (called-functions ())
+      (structured-ast
+        (while-loop "mid(vals[idx-1], val, vals[idx+1])!=val")
+        (if-cond "id1!=id2"))
       (body-lines
         "      local function update(ids, vals, minmaxs, spans, idx, val)"
         "        local off, id1, id2, cid, nidx"
@@ -613,6 +736,8 @@
       (line-range (543 543))
       (api-calls ())
       (called-functions (next))
+      (structured-ast
+        (return-expr "iter end,"))
       (body-lines
         "    has_more=function() iter = next(cand, iter) return iter end,"))
     (def-pico-function
@@ -621,6 +746,9 @@
       (line-range (544 544))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "(iter")
+        (return-expr "shr(band(iter, 0xff00), 8), band(iter, 0xff) end"))
       (body-lines
         "    next=function() if(iter) return shr(band(iter, 0xff00), 8), band(iter, 0xff) end"))
     (def-pico-function
@@ -629,6 +757,9 @@
       (line-range (552 557))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "dist > rsq")
+        (return-expr "nil"))
       (body-lines
         "function circles_collide(x1, y1, r1, x2, y2, r2)"
         " local x,y,r,dist,rsq,cid,cx,cy,nx,ny,a=x1-x2,y1-y2,r1+r2"
@@ -642,6 +773,8 @@
       (line-range (564 572))
       (api-calls (sqrt))
       (called-functions (aabb))
+      (structured-ast
+        (for-loop "i=1,numv"))
       (body-lines
         "function geometry(numv, vx, vy, r)"
         "  local tvx, tvy, nx, ny, tnx, tny, maxp, box, x, y, len, idx = {}, {}, {}, {}, {}, {}, {}, aabb()"
@@ -658,6 +791,8 @@
       (line-range (581 581))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 1))
       (body-lines
         "    collides=function(g)"))
     (def-pico-function
@@ -666,6 +801,10 @@
       (line-range (582 591))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,nv1")
+        (for-loop "j=1,nv2")
+        (if-cond "(p<minp"))
       (body-lines
         "      local function sat(nv1, x1, y1, nx1, ny1, maxp, nv2, x2, y2, nx2, ny2)"
         "        local cid, dist, nrmx, nrmy, rx, ry, minp, p, idx, d,"
@@ -683,6 +822,8 @@
       (line-range (633 642))
       (api-calls (max min))
       (called-functions (set))
+      (structured-ast
+        (for-loop "i=1,numv"))
       (body-lines
         "    transform=function(x, y, a)"
         "      box.set()"
@@ -700,6 +841,8 @@
       (line-range (644 651))
       (api-calls (line))
       (called-functions (to_screen))
+      (structured-ast
+        (for-loop "i=1,numv"))
       (body-lines
         "    draw=function(vp)"
         "      local v1x, v1y, v2x, v2y, idx = vp.to_screen(tvx[1], tvy[1])"
@@ -715,6 +858,8 @@
       (line-range (657 669))
       (api-calls (cos sin))
       (called-functions ())
+      (structured-ast
+        (for-loop "py=y-w, y+w"))
       (body-lines
         "function pd_rotate(x,y,rot,mx,my,w,flip,scale)"
         "  scale=scale or 1"
@@ -735,6 +880,8 @@
       (line-range (709 719))
       (api-calls ())
       (called-functions (do_gameover do_intro do_wiki start_game update_menuitems))
+      (structured-ast
+        (seq-block 11))
       (body-lines
         "function _init()"
         "  cartdata('spoike_suika_melons_1')"
@@ -753,6 +900,8 @@
       (line-range (721 737))
       (api-calls (music))
       (called-functions (onoff update_music))
+      (structured-ast
+        (seq-block 17))
       (body-lines
         "function update_menuitems()"
         "  menuitem(5, \"reset highscore\", function()"
@@ -777,6 +926,8 @@
       (line-range (739 741))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "b==true and \" on\" or \"off\""))
       (body-lines
         "function onoff(b)"
         " return b==true and \" on\" or \"off\""
@@ -787,6 +938,9 @@
       (line-range (744 748))
       (api-calls (music))
       (called-functions ())
+      (structured-ast
+        (if-cond "options&0b10>0")
+        (return-expr ""))
       (body-lines
         "function update_music()"
         " if options&0b10>0 then"
@@ -799,6 +953,8 @@
       (line-range (758 763))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function do_wiki()"
         "  _upd,_drw=wiki_update,wiki_draw"
@@ -812,6 +968,8 @@
       (line-range (779 783))
       (api-calls (min))
       (called-functions ())
+      (structured-ast
+        (if-cond "wiki_closing >= 1"))
       (body-lines
         "function wiki_update()"
         "  wiki_start_t=min(wiki_start_t + 1,10)"
@@ -824,6 +982,8 @@
       (line-range (812 819))
       (api-calls (camera line sin))
       (called-functions (game_draw lerp))
+      (structured-ast
+        (for-loop "i=0,127"))
       (body-lines
         "function wiki_draw()"
         "  game_draw()"
@@ -839,6 +999,8 @@
       (line-range (855 860))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (for-loop "i,l in pairs(debug)"))
       (body-lines
         "function _draw()"
         "  _drw()"
@@ -852,6 +1014,8 @@
       (line-range (869 874))
       (api-calls (music))
       (called-functions (create_fruit_particle))
+      (structured-ast
+        (for-loop "i=1,20"))
       (body-lines
         "function do_intro()"
         "  --music(0)"
@@ -865,6 +1029,8 @@
       (line-range (877 890))
       (api-calls (add ceil rnd))
       (called-functions ())
+      (structured-ast
+        (seq-block 14))
       (body-lines
         "function create_fruit_particle()"
         "  local a = rnd(1)"
@@ -886,6 +1052,8 @@
       (line-range (892 897))
       (api-calls (del))
       (called-functions (create_fruit_particle))
+      (structured-ast
+        (if-cond "p.t > p.tend"))
       (body-lines
         "function update_fruit_particle(p)"
         " p.t+=1"
@@ -899,6 +1067,8 @@
       (line-range (900 905))
       (api-calls ())
       (called-functions (draw_ball lerp))
+      (structured-ast
+        (seq-block 6))
       (body-lines
         "function draw_fruit_particle(p)"
         "  local t = p.t/p.tend"
@@ -912,6 +1082,8 @@
       (line-range (907 915))
       (api-calls (cls line sin))
       (called-functions (lerp))
+      (structured-ast
+        (for-loop "i=0,127"))
       (body-lines
         "function intro_draw()"
         "  cls(15)"
@@ -928,6 +1100,8 @@
       (line-range (934 937))
       (api-calls (all))
       (called-functions (update))
+      (structured-ast
+        (for-loop "p in all(fruit_particles)"))
       (body-lines
         "function intro_update()"
         "  for p in all(fruit_particles) do"
@@ -939,6 +1113,8 @@
       (line-range (948 952))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "got_highscore"))
       (body-lines
         "function do_gameover()"
         "  got_highscore = score > high_score"
@@ -951,6 +1127,9 @@
       (line-range (958 964))
       (api-calls (btnp))
       (called-functions ())
+      (structured-ast
+        (if-cond "go_timer < 50")
+        (if-cond "got_highscore"))
       (body-lines
         "function gameover_update()"
         "  if go_timer < 50 then"
@@ -965,6 +1144,8 @@
       (line-range (970 983))
       (api-calls (clip line min rectfill))
       (called-functions (blink game_draw lerp print_sc))
+      (structured-ast
+        (if-cond "go_timer == 50 and blink("))
       (body-lines
         "function gameover_draw()"
         " game_draw()"
@@ -986,6 +1167,8 @@
       (line-range (992 998))
       (api-calls (cls flr pal))
       (called-functions (lerp))
+      (structured-ast
+        (if-cond "game_intro_t < 10"))
       (body-lines
         "function game_draw()"
         "  cls(15)"
@@ -1000,6 +1183,8 @@
       (line-range (1045 1049))
       (api-calls (all))
       (called-functions (update))
+      (structured-ast
+        (for-loop "p in all(particles)"))
       (body-lines
         "function _update()"
         "  _upd()"
@@ -1012,6 +1197,8 @@
       (line-range (1052 1055))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "game_intro_t < 20"))
       (body-lines
         "function game_update()"
         "  if game_intro_t < 20 then"
@@ -1023,6 +1210,9 @@
       (line-range (1103 1135))
       (api-calls (rnd))
       (called-functions (add_ball_body create_new_balls rectangle translate update_music))
+      (structured-ast
+        (for-loop "x=-3,3,2")
+        (for-loop "y=3,6,2"))
       (body-lines
         "function start_game()"
         "  _drw,_upd=game_draw,game_update"
@@ -1062,6 +1252,8 @@
       (line-range (1140 1143))
       (api-calls ())
       (called-functions (add_balls_to_bag))
+      (structured-ast
+        (if-cond "#bag_of_balls < 3"))
       (body-lines
         "function create_new_balls()"
         "  if #bag_of_balls < 3 then"
@@ -1073,6 +1265,9 @@
       (line-range (1152 1157))
       (api-calls ())
       (called-functions (remove_ball_body))
+      (structured-ast
+        (if-cond "args.event==0x05")
+        (return-expr ""))
       (body-lines
         "  on_event=function(args)"
         "    -- ON_BODY_DEAD"
@@ -1086,6 +1281,8 @@
       (line-range (1162 1166))
       (api-calls (circfill))
       (called-functions (position to_screen))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "      local function draw_contact(id,col)"
         "        local x, y = s.position(id)"
@@ -1098,6 +1295,9 @@
       (line-range (1196 1202))
       (api-calls (circfill sin))
       (called-functions ())
+      (structured-ast
+        (if-cond "angle == nil")
+        (if-cond "is_highlighted"))
       (body-lines
         "function draw_ball(ball_idx, x, y, angle, is_highlighted)"
         "  if angle == nil then angle = 0 end"
@@ -1112,6 +1312,8 @@
       (line-range (1226 1239))
       (api-calls (add))
       (called-functions (add_body ngon))
+      (structured-ast
+        (seq-block 14))
       (body-lines
         "function add_ball_body(x,y,idx)"
         "  local i = s.add_body({"
@@ -1133,6 +1335,8 @@
       (line-range (1241 1244))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function remove_ball_body(id)"
         " balls[id] = nil"
@@ -1144,6 +1348,8 @@
       (line-range (1246 1248))
       (api-calls (circfill))
       (called-functions ())
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function draw_particle(p)"
         " circfill(p.x,p.y,p.r,p.col)"
@@ -1154,6 +1360,8 @@
       (line-range (1250 1257))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "p.life < 0"))
       (body-lines
         "function update_particle(p)"
         " p.x+=p.dx"
@@ -1169,6 +1377,8 @@
       (line-range (1260 1274))
       (api-calls (add rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,amt"))
       (body-lines
         "function add_particles(x, y, amt, cols)"
         " amt = amt or 20"
@@ -1191,6 +1401,8 @@
       (line-range (1277 1287))
       (api-calls (add))
       (called-functions (position to_screen))
+      (structured-ast
+        (seq-block 11))
       (body-lines
         "function add_boom_particle(id, ballidx)"
         " local x, y = s.position(id)"
@@ -1209,6 +1421,8 @@
       (line-range (1289 1291))
       (api-calls (circfill))
       (called-functions (lerp))
+      (structured-ast
+        (seq-block 3))
       (body-lines
         "function draw_boom_particle(p)"
         " circfill(p.x,p.y,lerp(p.r,0,p.t),7)"
@@ -1219,6 +1433,8 @@
       (line-range (1293 1297))
       (api-calls (del))
       (called-functions ())
+      (structured-ast
+        (if-cond "p.t > 1"))
       (body-lines
         "function update_boom_particle(p)"
         "  p.t+=0.1"
@@ -1231,6 +1447,9 @@
       (line-range (1300 1304))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (if-cond "do_halo")
+        (for-loop "i=1,4"))
       (body-lines
         "function print_s(str, x, y, colfg, colbg, do_halo)"
         " if do_halo then"
@@ -1243,6 +1462,8 @@
       (line-range (1311 1314))
       (api-calls ())
       (called-functions (print_s))
+      (structured-ast
+        (seq-block 4))
       (body-lines
         "function print_sc(str, y, colfg, colbg, do_halo)"
         " str=tostr(str)"
@@ -1254,6 +1475,8 @@
       (line-range (1316 1318))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "(1-t)*a+t*b"))
       (body-lines
         "function lerp(a,b,t)"
         " return (1-t)*a+t*b"
@@ -1264,6 +1487,8 @@
       (line-range (1320 1325))
       (api-calls (flr rnd))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=#t,1,-1"))
       (body-lines
         "function shuffle(t)"
         " -- fisher-yates"
@@ -1277,6 +1502,8 @@
       (line-range (1329 1332))
       (api-calls (flr))
       (called-functions ())
+      (structured-ast
+        (return-expr "flr(t()*speed) % 2 == 1"))
       (body-lines
         "function blink(speed)"
         "  speed = speed or 1"
@@ -1288,6 +1515,8 @@
       (line-range (1334 1338))
       (api-calls (add all))
       (called-functions ())
+      (structured-ast
+        (for-loop "i in all(initial_bag)"))
       (body-lines
         "function add_balls_to_bag(bag)"
         "  local initial_bag=shuffle{1,1,2,2,3,3,4,4,5}"

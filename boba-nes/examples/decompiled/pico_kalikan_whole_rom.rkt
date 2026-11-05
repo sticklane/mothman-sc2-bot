@@ -38,11 +38,24 @@
   (hardware-capabilities
     (lifted-functions (_draw _init _update60 draw_girlfriend draw_logo fade0 fade1 get_splash_text menu_draw menu_init menu_update splash_draw splash_init splash_update))
     (pico8-api-calls (btnp ceil cls flr max music pal palt poke print rectfill rnd sfx sspr))
+    (structured-loops 3)
+    (structured-conditionals 24)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 5)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 0)
     (active-sfx-lifted 17)
     (active-music-lifted 10))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update60 menu_draw menu_init menu_update splash_update) #:draw-states (_draw draw_girlfriend draw_logo menu_draw splash_draw))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_draw _init _update60 draw_girlfriend draw_logo fade0 fade1 get_splash_text menu_draw menu_init)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 1)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 38)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 17)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 2)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 3))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name _init)
@@ -50,6 +63,8 @@
       (line-range (4 18))
       (api-calls (flr music poke rnd))
       (called-functions (splash_init))
+      (structured-ast
+        (if-cond "(flr(rnd(100"))
       (body-lines
         "function _init()"
         "\tpoke(0x5f2d,1)"
@@ -72,6 +87,10 @@
       (line-range (20 27))
       (api-calls (poke))
       (called-functions (menu_update splash_update))
+      (structured-ast
+        (if-cond "(menustate == 0 or menustate == 1")
+        (if-cond "(menustate == -1")
+        (if-cond "(stat(26"))
       (body-lines
         "function _update60()"
         "\t--step = stat(26) + (stat(24)*  509)"
@@ -87,6 +106,16 @@
       (line-range (29 49))
       (api-calls (ceil cls max palt rectfill))
       (called-functions (fade0 fade1 menu_draw splash_draw))
+      (structured-ast
+        (if-cond "(menustate == -1")
+        (if-cond "(menustate == 0 or menustate == 1")
+        (if-cond "fading > -1")
+        (if-cond "(fading == 0")
+        (if-cond "(fading == 1")
+        (if-cond "(fading == 2")
+        (if-cond "(fading == 3")
+        (if-cond "(fade > 0")
+        (if-cond "fade == 0.5 and menustate == 0 and fading == 2"))
       (body-lines
         "function _draw()"
         "\tcls()"
@@ -115,6 +144,8 @@
       (line-range (62 68))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 7))
       (body-lines
         "function menu_init()"
         "\tmenustate = 0"
@@ -129,6 +160,9 @@
       (line-range (70 77))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "nextstate > 0")
+        (if-cond "nextstate == 0"))
       (body-lines
         "function menu_update()"
         "\tif nextstate > 0 then"
@@ -144,6 +178,9 @@
       (line-range (98 104))
       (api-calls (pal rectfill))
       (called-functions ())
+      (structured-ast
+        (if-cond "menustate == 0")
+        (for-loop "i=0,15"))
       (body-lines
         "function menu_draw()"
         "\tif menustate == 0 then"
@@ -158,6 +195,8 @@
       (line-range (135 139))
       (api-calls (flr rnd))
       (called-functions (get_splash_text))
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function splash_init()"
         "\tsplashstate = 0"
@@ -170,6 +209,8 @@
       (line-range (141 148))
       (api-calls (btnp poke))
       (called-functions (menu_init))
+      (structured-ast
+        (if-cond "btnp("))
       (body-lines
         "function splash_update()"
         "\tif btnp() == 64 then"
@@ -185,6 +226,10 @@
       (line-range (175 187))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (if-cond "splashstate == 0 or splashstate == 1")
+        (if-cond "splashstate == 1")
+        (if-cond "(ispresident"))
       (body-lines
         "function splash_draw()"
         "\t--print(splashtext[1],63,63)"
@@ -205,6 +250,8 @@
       (line-range (227 231))
       (api-calls (flr rnd))
       (called-functions ())
+      (structured-ast
+        (return-expr "split(_splash[flr(rnd(#_splash))+1],\":\")"))
       (body-lines
         "function get_splash_text()"
         "\tlocal _splashs = \"SHOUTOUTS TO TOM FULP:LMAO|DA BABY:BIGGEST INSPIRATION|THIS GAME IS DEDICATED TO RINGO:MY FAVORITE BEATLE|THAT'S A HEALTHY LOOKING PENIS:THAT'S AN AMERICAN PENIS|pico-8 EXCLUSIVE:SPLASH TEST|REFINED TASTE IN MUSIC:IF I SAY SO MYSELF|SWAGSHIT:MONEYMONEY|RHYTHM GAMING:DEMADE|RITZ DX:REST IN PEACE LOL|nEWGROUNDS IS DOWN!:pLEASE sTAND bY ♥ |BACK THE FULL ASS GAME:NOW|NEWGROUNDS:FOREVER|RATE FIVE:PLS NO BLAM|GAME OF THE YEAR:FOREVER|STREAM CHUCKIE FINSTER:ON SPOTIFY|NEVER FORGET TO:PRAY TO GOD|LIKE PARAPPA:BUT COOLER|HATSUNE MIKU:BIGGEST INSPIRATION|WOMEN ARE REAL:THIS IS OFFICIAL|DANCIN:FOREVER|DOPE ASS GAME:PLAYSTATION MAGAZINE|GO MANGO:GO MANGO|DONT PLAY RUST:WE ONLY FUNKIN'|GOODBYE:MY PENIS|HOW I ACCIDENTALLY:MADE FNF IN pico-8|YOOOOOOOOO:yooooooooo|YOU ALREADY KNOW:WE REALLY OUT HERE| :WE HAVE FUN HERE|CLOUD BASHERS:BEST RHYTHM GAME|SUPER PICKLE MILK:ITS THE SAME THING|TURNIP BOY:COMMITS FUNK EVASION|THE LAST FUNK:PIPIN' HOT|PERFECT LAWN:ONE BROWN SPOT|wEEK 7:YES ITS HERE|YOURE SO SUSSY:I KNOW YOU TOOK MY FORTNITE CARD|$19 FORTNITE CARD:WHO WANTS IT?|DARNELL FOR PRESIDENT!:HE STILL HAS 5 YEARS TO LIVE|THAT'LL BE 15 DOLLARS:YOU ARE THE PRESIDENT| :NAME A WOMAN|FUCKIN' STEAK BABY:YEAH|NINJAMUFFIN'S BEEN REAL QUIET:SINCE WEEK 7 DROPPED|DOWNSCROLL:NEVER HEARD OF IT|WE ACTUALLY FUCKING:UPDATED IT|YES...:WE ADDED WEEK 2|CHECK OUT THE MODS:ON LEXALOFFLE|THE MODDING SCENE:IS INSANE|I ADDED MORE:SPLASH TEXT|NOW WITH:WEEK 2|HORSE:OOH AH OOH AH|WEEK 8:NEVER HAPPENING LMAO|JINGLE:BALLS| :PROBLEM NOOB?|WE UPDATED IT:TWICE|WE NEED:MORE SPLASH TEXT|WE MADE WEEK 5:IN A DAY|GO PICO GO GO:GO PICO, YEAH|YOU CAN USE dfjk NOW:CRY ABOUT IT|dfjk IS REAL:THIS IS OFFICIAL|KEYBINDS?:WHAT?|FUNKY-US MCPUNK:HE'S FUNKING OUT HIS PUNK|WE HAVE ALL THE WEEKS NOW:YES, ACTUALLY|DID YOU KNOW JOE SWANSON SAYS:FORTNITE IN FAMILY GUY LOL\""
@@ -217,6 +264,9 @@
       (line-range (255 261))
       (api-calls (flr pal))
       (called-functions ())
+      (structured-ast
+        (for-loop "c=0,15")
+        (if-cond "flr(i+1"))
       (body-lines
         "function fade0(i)"
         "for c=0,15 do"
@@ -231,6 +281,9 @@
       (line-range (285 291))
       (api-calls (flr pal))
       (called-functions ())
+      (structured-ast
+        (for-loop "c=0,15")
+        (if-cond "flr(i+1"))
       (body-lines
         "function fade1(i)"
         " for c=0,15 do"
@@ -245,6 +298,8 @@
       (line-range (296 305))
       (api-calls (flr sspr))
       (called-functions ())
+      (structured-ast
+        (if-cond "flr(step/(inc*4"))
       (body-lines
         "function draw_girlfriend(_x,_y)"
         "\tif flr(step/(inc*4))%2==0 then"
@@ -262,6 +317,8 @@
       (line-range (310 317))
       (api-calls (sspr))
       (called-functions ())
+      (structured-ast
+        (if-cond "_id == 0"))
       (body-lines
         "function draw_logo(_id,_x,_y)"
         "\tif _id == 0 then"

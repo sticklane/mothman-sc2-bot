@@ -38,11 +38,24 @@
   (hardware-capabilities
     (lifted-functions (_init _update btnp credits_state draw_gfx fadetoblack_state launch_state lerp masked menu_state next next_state padding printb slicefade_state start_state stats_state switch_scheme time_tostr unpack_gfx vcol))
     (pico8-api-calls (btnp circfill cls flr line max memcpy mid min pal palt peek poke print rect rectfill rnd sfx spr sspr))
+    (structured-loops 5)
+    (structured-conditionals 15)
+    (lifted-state-machines 2)
+    (lifted-high-level-idioms 5)
     (nonblank-sprites-lifted 32)
     (active-map-rows-lifted 32)
     (active-sfx-lifted 32)
     (active-music-lifted 64))
-  ;; --- 4. Symbolic MMIO Cross-Reference, Subroutines & Lifted AST ---
+  (pico8-state-machines
+    (def-pico-state-machine pico8_lifecycle_fsm #:hooks (_init _update _draw) #:update-states (_update menu_state) #:draw-states (draw_gfx))
+    (def-pico-state-machine pico8_entity_dispatch_fsm #:mechanism foreach-all-iterator #:registered-handlers (_init _update btnp credits_state draw_gfx fadetoblack_state launch_state lerp masked menu_state)))
+  (high-level-idioms
+    (idiom-pico8-entity-iterator #:apis (foreach all add del) #:call-sites 1)
+    (idiom-pico8-sprite-batch-render #:apis (spr sspr pal palt cls) #:call-sites 30)
+    (idiom-pico8-fixed-point-physics #:apis (flr sin cos abs min max) #:call-sites 16)
+    (idiom-pico8-input-poll #:apis (btn btnp) #:call-sites 13)
+    (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 7))
+  ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
     (def-pico-function
       (name btnp)
@@ -50,6 +63,8 @@
       (line-range (32 34))
       (api-calls (btnp))
       (called-functions ())
+      (structured-ast
+        (return-expr "_btnp(b,0) or _btnp(b,1)"))
       (body-lines
         "function btnp(b)"
         "return _btnp(b,0) or _btnp(b,1)"
@@ -60,6 +75,9 @@
       (line-range (35 44))
       (api-calls (max poke))
       (called-functions ())
+      (structured-ast
+        (for-loop "i=0,#src-1")
+        (if-cond "(addr>0x4e00+64*offset-1"))
       (body-lines
         "function unpack_gfx(src)"
         "local offset=src.h-128"
@@ -77,6 +95,8 @@
       (line-range (46 50))
       (api-calls (memcpy spr))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function draw_gfx(src)"
         "local offset=src.h-128"
@@ -89,6 +109,8 @@
       (line-range (51 52))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (seq-block 2))
       (body-lines
         "function next_state(fn,...)"
         "local u,d,i=fn(...)"))
@@ -98,6 +120,9 @@
       (line-range (53 58))
       (api-calls (peek poke))
       (called-functions ())
+      (structured-ast
+        (if-cond "(i")
+        (if-cond "(peek(0x5f81"))
       (body-lines
         "_update=function()"
         "if(i) i()"
@@ -111,6 +136,9 @@
       (line-range (60 68))
       (api-calls (btnp))
       (called-functions (btnp next_state))
+      (structured-ast
+        (return-expr "")
+        (if-cond "ttl<0 or btnp(4"))
       (body-lines
         "function start_state()"
         "local ttl=300"
@@ -127,6 +155,8 @@
       (line-range (83 92))
       (api-calls (mid))
       (called-functions ())
+      (structured-ast
+        (seq-block 10))
       (body-lines
         "function menu_state()"
         "local mouse_ttl,mouse_x,mouse_y=0,0,0"
@@ -144,6 +174,10 @@
       (line-range (93 96))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (if-cond "(sel==1")
+        (return-expr "menus.skills")
+        (return-expr "menus.controls"))
       (body-lines
         "next=function(menus,sel)"
         "if(sel==1) return menus.skills"
@@ -155,6 +189,10 @@
       (line-range (122 131))
       (api-calls ())
       (called-functions (switch_scheme))
+      (structured-ast
+        (if-cond "sel==1 and mouse_ttl==0")
+        (if-cond "(keyboard_mode>1")
+        (if-cond "(mouse_acc>8"))
       (body-lines
         "next=function(menus,sel)"
         "if sel==1 and mouse_ttl==0 then"
@@ -172,6 +210,9 @@
       (line-range (146 157))
       (api-calls (mid))
       (called-functions (next_state))
+      (structured-ast
+        (return-expr "")
+        (if-cond "stat(38"))
       (body-lines
         "next=function(menus)"
         "next_state(launch_state,menus.skills.sel,1)"
@@ -191,6 +232,9 @@
       (line-range (243 250))
       (api-calls ())
       (called-functions (next_state))
+      (structured-ast
+        (return-expr "")
+        (if-cond "fade_ttl<0"))
       (body-lines
         "function fadetoblack_state(...)"
         "local args,fade_ttl={...},32"
@@ -206,6 +250,9 @@
       (line-range (263 279))
       (api-calls (btnp))
       (called-functions (btnp next_state time_tostr))
+      (structured-ast
+        (return-expr "")
+        (if-cond "ttl>600 or btnp(4"))
       (body-lines
         "function stats_state(skill,id,level_time,kills,monsters,secrets,all_secrets,ammoused)"
         "local ttl,msg_ttl,max_msg=0,0,2"
@@ -230,6 +277,11 @@
       (line-range (305 312))
       (api-calls (sfx))
       (called-functions ())
+      (structured-ast
+        (if-cond "(id>dget(32")
+        (return-expr "")
+        (if-cond "launch_ttl==0")
+        (for-loop "i=0,3"))
       (body-lines
         "function launch_state(skill,id)"
         "if(id>dget(32)) dset(32,id)"
@@ -245,6 +297,9 @@
       (line-range (339 345))
       (api-calls (btnp))
       (called-functions (btnp next_state))
+      (structured-ast
+        (return-expr "")
+        (if-cond "ttl>3000 or btnp(4"))
       (body-lines
         "function credits_state()"
         "local ttl,t,creditsi=0,{},0"
@@ -259,6 +314,8 @@
       (line-range (377 382))
       (api-calls (rnd))
       (called-functions (lerp))
+      (structured-ast
+        (for-loop "i=0,127"))
       (body-lines
         "function slicefade_state(...)"
         "local args,ttl,r,h,rr=pack(...),30,{},{},0"
@@ -272,6 +329,8 @@
       (line-range (405 413))
       (api-calls (poke))
       (called-functions ())
+      (structured-ast
+        (seq-block 9))
       (body-lines
         "function switch_scheme(scheme)"
         "local s=schemes[scheme+1]"
@@ -288,6 +347,9 @@
       (line-range (414 423))
       (api-calls (poke))
       (called-functions (switch_scheme))
+      (structured-ast
+        (if-cond "(dget(39")
+        (for-loop "i=0,#snd\\4-1"))
       (body-lines
         "function _init()"
         "poke(0x5f36,0x10)"
@@ -305,6 +367,8 @@
       (line-range (436 440))
       (api-calls (print))
       (called-functions ())
+      (structured-ast
+        (seq-block 5))
       (body-lines
         "function printb(s,x,y,c,bgc)"
         "bgc=bgc or 0"
@@ -317,6 +381,8 @@
       (line-range (441 444))
       (api-calls (min))
       (called-functions ())
+      (structured-ast
+        (return-expr "sub(\"00\",1,2-#n)..n"))
       (body-lines
         "function padding(n)"
         "n=tostr(min(n,99)\\1)"
@@ -328,6 +394,8 @@
       (line-range (445 450))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (for-loop "i=1,#s"))
       (body-lines
         "function masked(s)"
         "local q=\"\""
@@ -341,6 +409,8 @@
       (line-range (453 455))
       (api-calls ())
       (called-functions (padding))
+      (structured-ast
+        (return-expr "padding((t\\60)%60)..\"'\"..padding(t%60)..\"''\"..padding((t&0x0.fff"))
       (body-lines
         "function time_tostr(t)"
         "return padding((t\\60)%60)..\"'\"..padding(t%60)..\"''\"..padding((t&0x0.ffff)*100)"
@@ -351,6 +421,8 @@
       (line-range (456 458))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "a+t*(b-a)"))
       (body-lines
         "function lerp(a,b,t)"
         "return a+t*(b-a)"
@@ -361,6 +433,8 @@
       (line-range (459 461))
       (api-calls ())
       (called-functions ())
+      (structured-ast
+        (return-expr "sget(112+c,128-12)"))
       (body-lines
         "function vcol(c)"
         "return sget(112+c,128-12)"

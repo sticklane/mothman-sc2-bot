@@ -66,6 +66,19 @@
  def-prg-bank
  def-chr-bank
  def-rom-bank
+ def-state-machine
+ def-sm83-state-machine
+ def-pico-state-machine
+ when-branch
+ if-else
+ then-branch
+ else-branch
+ counted-loop
+ spin-wait-mmio-loop
+ do-while-loop
+ guard-return
+ high-level-idioms
+ pico8-state-machines
  verify-nes-grades!)
 
 ;; Surface DSL macro for declaring a game phase state machine with verified failure recovery & victory reachability
@@ -280,3 +293,43 @@
 
 (define-syntax-rule (def-rom-bank body ...)
   '(def-rom-bank body ...))
+
+(define-syntax-rule (def-state-machine sm-id body ...)
+  '(def-state-machine sm-id body ...))
+
+(define-syntax-rule (def-sm83-state-machine sm-id body ...)
+  '(def-sm83-state-machine sm-id body ...))
+
+(define-syntax-rule (def-pico-state-machine sm-id body ...)
+  '(def-pico-state-machine sm-id body ...))
+
+(define-syntax-rule (when-branch body ...)
+  '(when-branch body ...))
+
+(define-syntax-rule (if-else body ...)
+  '(if-else body ...))
+
+(define-syntax-rule (then-branch body ...)
+  '(then-branch body ...))
+
+(define-syntax-rule (else-branch body ...)
+  '(else-branch body ...))
+
+(define-syntax-rule (counted-loop body ...)
+  '(counted-loop body ...))
+
+(define-syntax-rule (spin-wait-mmio-loop body ...)
+  '(spin-wait-mmio-loop body ...))
+
+(define-syntax-rule (do-while-loop body ...)
+  '(do-while-loop body ...))
+
+(define-syntax-rule (guard-return body ...)
+  '(guard-return body ...))
+
+(define-syntax-rule (high-level-idioms body ...)
+  '(high-level-idioms body ...))
+
+(define-syntax-rule (pico8-state-machines body ...)
+  '(pico8-state-machines body ...))
+
