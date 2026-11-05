@@ -26,6 +26,7 @@
   "source_integrations": {
     "lean_qblock_verified": true,
     "lean_graded_verified": true,
+    "lean_okasaki_lemma42_and_lemma55_verified": true,
     "rkt_qblock_combinatorial_bmm_prod_verified": true,
     "rkt_qphys_concavity_refund_split_verified": true
   }

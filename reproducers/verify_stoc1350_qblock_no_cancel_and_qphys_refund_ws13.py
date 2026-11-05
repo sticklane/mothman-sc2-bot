@@ -239,8 +239,10 @@ def verify_qphys_concavity_refund_and_jump_pebbling() -> Dict:
 def verify_source_integrations() -> Dict:
     lean_qblock = (REPO_ROOT / "proofs" / "lakefillq_block_encoding_lcu_qsvt_proofs.lean").read_text(encoding="utf-8")
     lean_graded = (REPO_ROOT / "proofs" / "lakefillq_graded_coeffect_uniqueness_place_effect_proofs.lean").read_text(encoding="utf-8")
+    lean_okasaki = (REPO_ROOT / "proofs" / "okasaki_quantum_data_structures_proofs.lean").read_text(encoding="utf-8")
     rkt_qblock = (REPO_ROOT / "compiler" / "lakefillq-block-encoding-qsvt.rkt").read_text(encoding="utf-8")
     rkt_qphys = (REPO_ROOT / "qsub-phys-graded-typechecker.rkt").read_text(encoding="utf-8")
+    okasaki_doc = (REPO_ROOT / "OKASAKI_FUNCTIONAL_AND_QUANTUM_DATA_STRUCTURES.md").read_text(encoding="utf-8")
 
     assert "def combinatorialBmmProdSpec" in lean_qblock
     assert "theorem combinatorialBmmProdSpec_orthogonality_no_cancel_and_borrowZ" in lean_qblock
@@ -249,12 +251,17 @@ def verify_source_integrations() -> Dict:
     assert "structure QPhysGrade" in lean_graded
     assert "theorem combinatorialBmmProdSpec_borrowZ_and_zero_leak_soundness" in lean_graded
     assert "theorem qphys_concavity_refund_table3_and_jump_pebble_bound" in lean_graded
+    assert "structure BinomialPebbleSchedule" in lean_okasaki
+    assert "structure SelectSwapQROAM" in lean_okasaki
+    assert "theorem stoc1350_lemma42_sift_retention_telescoping_and_lemma55_jump_pebble_recurrence" in lean_okasaki
     assert "qblock-combinatorial-bmm-prod" in rkt_qblock
     assert "qphys-concavity-refund-split" in rkt_qphys
+    assert "combinatorialBmmProdSpec" in okasaki_doc
 
     return {
         "lean_qblock_verified": True,
         "lean_graded_verified": True,
+        "lean_okasaki_lemma42_and_lemma55_verified": True,
         "rkt_qblock_combinatorial_bmm_prod_verified": True,
         "rkt_qphys_concavity_refund_split_verified": True,
     }

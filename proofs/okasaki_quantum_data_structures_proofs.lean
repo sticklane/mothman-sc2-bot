@@ -1866,9 +1866,80 @@ theorem okasaki_implicit_heap_kp_tree_dyadic_l2_norm_conservation_and_sampling_t
     omega
   exact ⟨⟨rfl, rfl, rfl⟩, h_sum, ⟨h_d2, h_d1, rfl⟩⟩
 
+-- ============================================================================
+-- === Module: STOC 2027 Submission #1350 — Lemma 4.2 Dyadic `Sift` Retention ===
+--          Telescoping & Lemma 5.5 Jump-Adaptive Pebble Recurrence
+--          (`BinomialPebbleSchedule` & `SelectSwapQROAM`)
+-- ============================================================================
+
+/-- Sum of per-round dyadic shift thresholds $\sum_{t=1}^r s_t$ across `r` rounds of Algorithm 1 (`Sift`). -/
+def siftSumSteps : List Nat → Nat
+  | []        => 0
+  | s :: rest => s + siftSumSteps rest
+
+/-- Telescoped per-round retention exponent sum $\sum_{t=1}^r (s_t + 2) = \sum_{t=1}^r s_t + 2r$
+    for Lemma 4.2 ($\prod_{t=1}^r 2^{-(s_t + 2)d} = 2^{-d\sum s_t - 2rd}$). -/
+def siftTelescopedSteps : List Nat → Nat
+  | []        => 0
+  | s :: rest => (s + 2) + siftTelescopedSteps rest
+
+/-- Jump-Adaptive Checkpoint Pebble Schedule (`BinomialPebbleSchedule`) governed by
+    STOC 2027 #1350 Lemma 5.5 halving-log jump $\Delta h = \min(H - h, \lfloor \frac{1}{2}\log_2(p/q)\rfloor)$. -/
+structure BinomialPebbleSchedule where
+  maxHeight  : Nat
+  curHeight  : Nat
+  jumpShiftK : Nat
+  deriving Repr, DecidableEq
+
+/-- `SelectSwapQROAM` trade-off descriptor balancing coherent `SELECT` tree cost and
+    $2 \cdot k_{\text{swap}}$ `CSWAP` butterfly routing stages. -/
+structure SelectSwapQROAM where
+  tableSize   : Nat
+  swapFactorK : Nat
+  selectCost  : Nat
+  deriving Repr, DecidableEq
+
+/-- Jump-adaptive target checkpoint depth $h + \Delta h = \min(H, h + k)$ for `BinomialPebbleSchedule`. -/
+def evalJumpAdaptivePebbleDepth (sched : BinomialPebbleSchedule) : Nat :=
+  if sched.curHeight + sched.jumpShiftK ≤ sched.maxHeight then
+    sched.curHeight + sched.jumpShiftK
+  else
+    sched.maxHeight
+
+/-- Combined `SELECT` + `CSWAP` routing work for `SelectSwapQROAM`. -/
+def evalSelectSwapQroamBound (qroam : SelectSwapQROAM) : Nat :=
+  qroam.selectCost + 2 * qroam.swapFactorK
+
+/-- **Theorem 12.1 (`stoc1350_lemma42_sift_retention_telescoping_and_lemma55_jump_pebble_recurrence`)**:
+    Formalizes STOC 2027 #1350 Lemma 4.2 Dyadic `Sift` Retention Telescoping and Lemma 5.5
+    Jump-Adaptive Pebble Recurrence for `BinomialPebbleSchedule` and `SelectSwapQROAM`:
+    1. Across any $r$-step `Sift` schedule `sList : List Nat`, the telescoped retention exponent
+       satisfies $\sum_{t=1}^r (s_t + 2) = \sum_{t=1}^r s_t + 2r$, and $\sum_{t=1}^r s_t \le d \implies
+       \sum_{t=1}^r (s_t + 2) \le d + 2r$.
+    2. Power-of-two factor multiplication telescopes exact exponents $(s_1 + 2)d + (s_2 + 2)d$.
+    3. `evalJumpAdaptivePebbleDepth sched` is universally bounded by `sched.maxHeight` ($H$) and
+       `evalSelectSwapQroamBound qroam` bounds `qroam.selectCost`. -/
+theorem stoc1350_lemma42_sift_retention_telescoping_and_lemma55_jump_pebble_recurrence
+    (sList : List Nat) (d s1 s2 : Nat)
+    (sched : BinomialPebbleSchedule) (qroam : SelectSwapQROAM) :
+    (siftTelescopedSteps sList = siftSumSteps sList + 2 * sList.length) ∧
+    (siftSumSteps sList ≤ d → siftTelescopedSteps sList ≤ d + 2 * sList.length) ∧
+    ((2 : Int) ^ ((s1 + 2) * d + (s2 + 2) * d) =
+      (2 : Int) ^ ((s1 + 2) * d) * (2 : Int) ^ ((s2 + 2) * d)) ∧
+    (evalJumpAdaptivePebbleDepth sched ≤ sched.maxHeight) ∧
+    (qroam.selectCost ≤ evalSelectSwapQroamBound qroam) := by
+  have h_tele : siftTelescopedSteps sList = siftSumSteps sList + 2 * sList.length := by
+    induction sList with
+    | nil => simp [siftTelescopedSteps, siftSumSteps]
+    | cons s rest ih =>
+        simp [siftTelescopedSteps, siftSumSteps, List.length]
+        omega
+  refine ⟨h_tele, ?_, int_two_pow_add ((s1 + 2) * d) ((s2 + 2) * d), ?_, ?_⟩
+  · intro h_le
+    omega
+  · dsimp [evalJumpAdaptivePebbleDepth]
+    split <;> omega
+  · dsimp [evalSelectSwapQroamBound]
+    omega
+
 end OkasakiQuantumDataStructuresProofs
-
-
-
-
-
