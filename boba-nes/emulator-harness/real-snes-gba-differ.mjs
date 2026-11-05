@@ -806,6 +806,52 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     'RDNMI', 'TIMEUP', 'HVBJOY', 'APUIO0', 'APUIO1', 'APUIO2', 'APUIO3', 'SLHV', 'STAT77', 'STAT78',
   ]);
 
+  const snesStructFieldsMap = new Map();
+  const recordSnesStructField = (baseKey, structName, offsetNum, typeTag, sizeBytes) => {
+    if (!snesStructFieldsMap.has(baseKey)) {
+      snesStructFieldsMap.set(baseKey, {
+        name: structName,
+        baseReg: baseKey,
+        fields: new Map(),
+        totalAccesses: 0,
+      });
+    }
+    const entry = snesStructFieldsMap.get(baseKey);
+    entry.totalAccesses++;
+    const fKey = `${offsetNum}:${typeTag}`;
+    const prev = entry.fields.get(fKey) || {
+      fieldSym: `:field_0x${offsetNum.toString(16).toUpperCase()}`,
+      offset: offsetNum,
+      type: typeTag,
+      size: sizeBytes,
+      accesses: 0,
+    };
+    prev.accesses++;
+    entry.fields.set(fKey, prev);
+  };
+
+  const decodeSnesMmioFlags = (mmioSym, immVal) => {
+    if (immVal === null || immVal === undefined || Number.isNaN(immVal)) return null;
+    const v = immVal & 0xff;
+    if (mmioSym === 'INIDISP') {
+      const flags = [];
+      if (v & 0x80) flags.push('FORCE_BLANK');
+      else flags.push('DISPLAY_ON');
+      flags.push(`BRIGHTNESS_${v & 0x0f}`);
+      return `#:flags (${flags.join(' ')})`;
+    }
+    if (mmioSym === 'NMITIMEN') {
+      const flags = [];
+      if (v & 0x80) flags.push('VBLANK_NMI_ENABLE');
+      if (v & 0x20) flags.push('V_TIME_IRQ_ENABLE');
+      if (v & 0x10) flags.push('H_TIME_IRQ_ENABLE');
+      if (v & 0x01) flags.push('AUTO_JOYPAD_READ');
+      if (flags.length === 0) flags.push('ALL_INTERRUPTS_DISABLED');
+      return `#:flags (${flags.join(' ')})`;
+    }
+    return null;
+  };
+
   const formatSnesTargetExpr = (ins, valExpr = '') => {
     if (ins.mmioSym) return ins.mmioSym;
     const op = ins.op;
@@ -898,186 +944,336 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     return `(${condSym}? flags)`;
   };
 
+  const inferSnesSubroutineAbi = (insns) => {
+    const written = new Set();
+    const params = [];
+    const returns = [];
+    const lastWritten = new Set();
+    const addParam = (r) => {
+      if (!written.has(r) && !params.includes(r)) params.push(r);
+    };
+    const markWrite = (r) => {
+      written.add(r);
+      lastWritten.add(r);
+    };
+    for (const ins of insns) {
+      const op = ins.op;
+      // Reads of X / Y via indexed addressing modes
+      if (op.endsWith('-dpX') || op.endsWith('-absX') || op.endsWith('-longX') || op.endsWith('-indX')) {
+        addParam('X');
+      }
+      if (op.endsWith('-dpY') || op.endsWith('-absY') || op.endsWith('-indY') || op.endsWith('-indLY') || op.endsWith('-srY')) {
+        addParam('Y');
+      }
+      if (
+        op.startsWith('STA-') || op.startsWith('ADC-') || op.startsWith('SBC-') ||
+        op.startsWith('AND-') || op.startsWith('ORA-') || op.startsWith('EOR-') ||
+        op.startsWith('CMP-') || op.startsWith('BIT-') ||
+        op === 'TAX' || op === 'TAY' || op === 'TCD' || op === 'TCS' || op === 'PHA' ||
+        op === 'ASL-A' || op === 'LSR-A' || op === 'ROL-A' || op === 'ROR-A' ||
+        op === 'INC-A' || op === 'DEC-A' || op === 'XBA'
+      ) {
+        addParam('A');
+      }
+      if (op.startsWith('STX-') || op.startsWith('CPX-') || op === 'TXA' || op === 'TXY' || op === 'TXS' || op === 'PHX' || op === 'INX' || op === 'DEX') {
+        addParam('X');
+      }
+      if (op.startsWith('STY-') || op.startsWith('CPY-') || op === 'TYA' || op === 'TYX' || op === 'PHY' || op === 'INY' || op === 'DEY') {
+        addParam('Y');
+      }
+      if (op === 'MVN' || op === 'MVP') {
+        addParam('A');
+        addParam('X');
+        addParam('Y');
+      }
+
+      // Writes
+      if (
+        op.startsWith('LDA-') || op === 'TXA' || op === 'TYA' || op === 'TDC' || op === 'TSC' || op === 'PLA' ||
+        op.startsWith('ADC-') || op.startsWith('SBC-') || op.startsWith('AND-') || op.startsWith('ORA-') || op.startsWith('EOR-') ||
+        op === 'ASL-A' || op === 'LSR-A' || op === 'ROL-A' || op === 'ROR-A' || op === 'INC-A' || op === 'DEC-A' || op === 'XBA'
+      ) {
+        markWrite('A');
+      }
+      if (op.startsWith('LDX-') || op === 'TAX' || op === 'TYX' || op === 'TSX' || op === 'PLX' || op === 'INX' || op === 'DEX') {
+        markWrite('X');
+      }
+      if (op.startsWith('LDY-') || op === 'TAY' || op === 'TXY' || op === 'PLY' || op === 'INY' || op === 'DEY') {
+        markWrite('Y');
+      }
+      if (op === 'JSR-abs' || op === 'JSL-long') {
+        lastWritten.clear();
+      }
+    }
+    const lastOp = insns.length > 0 ? insns[insns.length - 1].op : '';
+    if (lastOp !== 'RTI') {
+      for (const r of ['A', 'X', 'Y']) {
+        if (lastWritten.has(r)) returns.push(r);
+      }
+    }
+    return { params, returns };
+  };
+
+  const snesSubAbiMap = new Map();
+
   const synthesizeSnesPseudoCode = (insns, loopsByHeader, branchesByIdx, resolveSym = (s) => s) => {
-    const foldRange = (startIdx, endIdx, indent, topLevel = false) => {
+    const visitedStructs = new Set();
+    const makeEnv = (base = null) => ({
+      regA: base ? base.regA : 'A',
+      regX: base ? base.regX : 'X',
+      regY: base ? base.regY : 'Y',
+      aDirty: false,
+      xDirty: false,
+      yDirty: false,
+      wroteA: false,
+      wroteX: false,
+      wroteY: false,
+    });
+
+    const foldRange = (startIdx, endIdx, indent, env = makeEnv(), isBranchOrLoop = false) => {
       const stmts = [];
-      let regA = 'A';
-      let regX = 'X';
-      let regY = 'Y';
-      let aDirty = false;
-      let xDirty = false;
-      let yDirty = false;
 
       const flushDirty = () => {
-        if (aDirty && regA !== 'A') {
-          stmts.push(`${indent}(set! A ${regA})`);
-          aDirty = false;
+        if (env.aDirty && env.regA !== 'A') {
+          stmts.push(`${indent}(set! A ${env.regA})`);
+          env.aDirty = false;
+          env.regA = 'A';
         }
-        if (xDirty && regX !== 'X') {
-          stmts.push(`${indent}(set! X ${regX})`);
-          xDirty = false;
+        if (env.xDirty && env.regX !== 'X') {
+          stmts.push(`${indent}(set! X ${env.regX})`);
+          env.xDirty = false;
+          env.regX = 'X';
         }
-        if (yDirty && regY !== 'Y') {
-          stmts.push(`${indent}(set! Y ${regY})`);
-          yDirty = false;
+        if (env.yDirty && env.regY !== 'Y') {
+          stmts.push(`${indent}(set! Y ${env.regY})`);
+          env.yDirty = false;
+          env.regY = 'Y';
         }
       };
 
       for (let k = startIdx; k < endIdx; ) {
-        if (topLevel && loopsByHeader.has(k)) {
+        if (loopsByHeader.has(k) && !visitedStructs.has(`loop:${k}`) && loopsByHeader.get(k).latchIdx < endIdx) {
+          visitedStructs.add(`loop:${k}`);
           const lp = loopsByHeader.get(k);
           if (lp.kind === 'spin-wait-mmio-loop') {
             flushDirty();
             stmts.push(`${indent}(await-mmio! ${lp.mmio} ${lp.cond})`);
           } else if (lp.kind === 'counted-loop') {
-            if (xDirty && lp.step && lp.step.includes('X')) {
-              stmts.push(`${indent}(set! X ${regX})`);
-              xDirty = false;
+            if (env.xDirty && lp.step && lp.step.includes('X')) {
+              stmts.push(`${indent}(set! X ${env.regX})`);
+              env.xDirty = false;
+              env.regX = 'X';
             }
-            if (yDirty && lp.step && lp.step.includes('Y')) {
-              stmts.push(`${indent}(set! Y ${regY})`);
-              yDirty = false;
+            if (env.yDirty && lp.step && lp.step.includes('Y')) {
+              stmts.push(`${indent}(set! Y ${env.regY})`);
+              env.yDirty = false;
+              env.regY = 'Y';
             }
+            const loopEnv = makeEnv(env);
+            const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
             stmts.push(`${indent}(loop-counted #:step ${lp.step} #:while ${lp.condExpr}`);
-            const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false);
-            stmts.push(...bodyStmts);
+            stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
             stmts.push(`${indent})`);
+            if (loopEnv.wroteA) { env.regA = 'A'; env.aDirty = false; }
+            if (loopEnv.wroteX) { env.regX = 'X'; env.xDirty = false; }
+            if (loopEnv.wroteY) { env.regY = 'Y'; env.yDirty = false; }
           } else {
             flushDirty();
+            const loopEnv = makeEnv(env);
+            const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
             stmts.push(`${indent}(do-while ${lp.condExpr}`);
-            const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false);
-            stmts.push(...bodyStmts);
+            stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
             stmts.push(`${indent})`);
+            if (loopEnv.wroteA) { env.regA = 'A'; env.aDirty = false; }
+            if (loopEnv.wroteX) { env.regX = 'X'; env.xDirty = false; }
+            if (loopEnv.wroteY) { env.regY = 'Y'; env.yDirty = false; }
           }
           k = lp.latchIdx + 1;
           continue;
         }
-        if (topLevel && branchesByIdx.has(k)) {
+        if (branchesByIdx.has(k) && !visitedStructs.has(`branch:${k}`)) {
           const br = branchesByIdx.get(k);
-          if (br.kind === 'if-else') {
-            stmts.push(`${indent}(if ${br.condExpr}`);
-            stmts.push(`${indent}  (then`);
-            stmts.push(...foldRange(br.branchIdx + 1, Math.max(br.branchIdx + 1, br.elseIdx - 1), `${indent}    `, false));
-            stmts.push(`${indent}  )`);
-            stmts.push(`${indent}  (else`);
-            stmts.push(...foldRange(br.elseIdx, br.mergeIdx, `${indent}    `, false));
-            stmts.push(`${indent}  ))`);
-            k = br.mergeIdx;
-            continue;
-          } else {
-            stmts.push(`${indent}(when ${br.condExpr}`);
-            stmts.push(...foldRange(br.branchIdx + 1, br.joinIdx, `${indent}  `, false));
-            stmts.push(`${indent})`);
-            k = br.joinIdx;
-            continue;
+          const brEnd = br.kind === 'if-else' ? br.mergeIdx : br.joinIdx;
+          if (brEnd <= endIdx) {
+            visitedStructs.add(`branch:${k}`);
+            flushDirty();
+            if (br.kind === 'if-else') {
+              const thenEnv = makeEnv(env);
+              const elseEnv = makeEnv(env);
+              const thenStmts = foldRange(br.branchIdx + 1, Math.max(br.branchIdx + 1, br.elseIdx - 1), `${indent}    `, thenEnv, true);
+              const elseStmts = foldRange(br.elseIdx, br.mergeIdx, `${indent}    `, elseEnv, true);
+              if (thenStmts.length > 0 && elseStmts.length > 0) {
+                stmts.push(`${indent}(if ${br.condExpr}`);
+                stmts.push(`${indent}  (then`);
+                stmts.push(...thenStmts);
+                stmts.push(`${indent}  )`);
+                stmts.push(`${indent}  (else`);
+                stmts.push(...elseStmts);
+                stmts.push(`${indent}  ))`);
+              } else if (thenStmts.length > 0) {
+                stmts.push(`${indent}(when ${br.condExpr}`);
+                stmts.push(...thenStmts.map((s) => s.replace(/^ {2}/, '')));
+                stmts.push(`${indent})`);
+              } else if (elseStmts.length > 0) {
+                stmts.push(`${indent}(when (not ${br.condExpr})`);
+                stmts.push(...elseStmts.map((s) => s.replace(/^ {2}/, '')));
+                stmts.push(`${indent})`);
+              }
+              if (thenEnv.wroteA || elseEnv.wroteA) { env.regA = 'A'; env.aDirty = false; env.wroteA = true; }
+              if (thenEnv.wroteX || elseEnv.wroteX) { env.regX = 'X'; env.xDirty = false; env.wroteX = true; }
+              if (thenEnv.wroteY || elseEnv.wroteY) { env.regY = 'Y'; env.yDirty = false; env.wroteY = true; }
+              k = br.mergeIdx;
+              continue;
+            } else {
+              const whenEnv = makeEnv(env);
+              const whenStmts = foldRange(br.branchIdx + 1, br.joinIdx, `${indent}  `, whenEnv, true);
+              if (whenStmts.length > 0) {
+                stmts.push(`${indent}(when ${br.condExpr}`);
+                stmts.push(...whenStmts);
+                stmts.push(`${indent})`);
+              }
+              if (whenEnv.wroteA) { env.regA = 'A'; env.aDirty = false; env.wroteA = true; }
+              if (whenEnv.wroteX) { env.regX = 'X'; env.xDirty = false; env.wroteX = true; }
+              if (whenEnv.wroteY) { env.regY = 'Y'; env.yDirty = false; env.wroteY = true; }
+              k = br.joinIdx;
+              continue;
+            }
           }
         }
 
         const ins = insns[k];
         const op = ins.op;
         if (op.startsWith('STZ-')) {
-          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, '#x00')} #x00)`);
+          const flagStr = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, '#x00')} #x00${flagStr})`);
         } else if (op === 'LDA-imm') {
-          regA = ins.arg;
-          aDirty = true;
+          env.regA = ins.arg;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op.startsWith('LDA-')) {
-          regA = formatSnesTargetExpr(ins);
-          aDirty = true;
+          env.regA = formatSnesTargetExpr(ins);
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'LDX-imm') {
-          regX = ins.arg;
-          xDirty = true;
+          env.regX = ins.arg;
+          env.xDirty = true;
+          env.wroteX = true;
         } else if (op.startsWith('LDX-')) {
-          regX = formatSnesTargetExpr(ins);
-          xDirty = true;
+          env.regX = formatSnesTargetExpr(ins);
+          env.xDirty = true;
+          env.wroteX = true;
         } else if (op === 'LDY-imm') {
-          regY = ins.arg;
-          yDirty = true;
+          env.regY = ins.arg;
+          env.yDirty = true;
+          env.wroteY = true;
         } else if (op.startsWith('LDY-')) {
-          regY = formatSnesTargetExpr(ins);
-          yDirty = true;
+          env.regY = formatSnesTargetExpr(ins);
+          env.yDirty = true;
+          env.wroteY = true;
         } else if (op.startsWith('STA-')) {
-          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, regA)} ${regA})`);
-          aDirty = false;
+          const flagStr = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, env.regA)} ${env.regA}${flagStr})`);
+          env.aDirty = false;
         } else if (op.startsWith('STX-')) {
-          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, regX)} ${regX})`);
-          xDirty = false;
+          const flagStr = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, env.regX)} ${env.regX}${flagStr})`);
+          env.xDirty = false;
         } else if (op.startsWith('STY-')) {
-          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, regY)} ${regY})`);
-          yDirty = false;
+          const flagStr = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, env.regY)} ${env.regY}${flagStr})`);
+          env.yDirty = false;
         } else if (op === 'TCD') {
-          stmts.push(`${indent}(set! DP ${regA})`);
-          aDirty = false;
+          stmts.push(`${indent}(set! DP ${env.regA})`);
+          env.aDirty = false;
         } else if (op === 'TCS') {
-          stmts.push(`${indent}(set! SP ${regA})`);
-          aDirty = false;
+          stmts.push(`${indent}(set! SP ${env.regA})`);
+          env.aDirty = false;
         } else if (op === 'TXS') {
-          stmts.push(`${indent}(set! SP ${regX})`);
-          xDirty = false;
+          stmts.push(`${indent}(set! SP ${env.regX})`);
+          env.xDirty = false;
         } else if (op === 'TAX') {
-          regX = regA;
-          aDirty = false;
-          xDirty = true;
+          env.regX = env.regA;
+          env.aDirty = false;
+          env.xDirty = true;
+          env.wroteX = true;
         } else if (op === 'TAY') {
-          regY = regA;
-          aDirty = false;
-          yDirty = true;
+          env.regY = env.regA;
+          env.aDirty = false;
+          env.yDirty = true;
+          env.wroteY = true;
         } else if (op === 'TXA') {
-          regA = regX;
-          xDirty = false;
-          aDirty = true;
+          env.regA = env.regX;
+          env.xDirty = false;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'TYA') {
-          regA = regY;
-          yDirty = false;
-          aDirty = true;
+          env.regA = env.regY;
+          env.yDirty = false;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'TXY') {
-          regY = regX;
-          xDirty = false;
-          yDirty = true;
+          env.regY = env.regX;
+          env.xDirty = false;
+          env.yDirty = true;
+          env.wroteY = true;
         } else if (op === 'TYX') {
-          regX = regY;
-          yDirty = false;
-          xDirty = true;
+          env.regX = env.regY;
+          env.yDirty = false;
+          env.xDirty = true;
+          env.wroteX = true;
         } else if (op === 'XBA') {
-          regA = `(swap-bytes ${regA})`;
-          aDirty = true;
+          env.regA = `(swap-bytes ${env.regA})`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op.startsWith('ADC-')) {
           const rhs = op === 'ADC-imm' ? ins.arg : formatSnesTargetExpr(ins);
-          regA = `(+ ${regA} ${rhs})`;
-          aDirty = true;
+          env.regA = `(+ ${env.regA} ${rhs})`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op.startsWith('SBC-')) {
           const rhs = op === 'SBC-imm' ? ins.arg : formatSnesTargetExpr(ins);
-          regA = `(- ${regA} ${rhs})`;
-          aDirty = true;
+          env.regA = `(- ${env.regA} ${rhs})`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op.startsWith('AND-')) {
           const rhs = op === 'AND-imm' ? ins.arg : formatSnesTargetExpr(ins);
-          regA = `(bit-and ${regA} ${rhs})`;
-          aDirty = true;
+          env.regA = `(bit-and ${env.regA} ${rhs})`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op.startsWith('ORA-')) {
           const rhs = op === 'ORA-imm' ? ins.arg : formatSnesTargetExpr(ins);
-          regA = `(bit-ior ${regA} ${rhs})`;
-          aDirty = true;
+          env.regA = `(bit-ior ${env.regA} ${rhs})`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op.startsWith('EOR-')) {
           const rhs = op === 'EOR-imm' ? ins.arg : formatSnesTargetExpr(ins);
-          regA = `(bit-xor ${regA} ${rhs})`;
-          aDirty = true;
+          env.regA = `(bit-xor ${env.regA} ${rhs})`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'ASL-A') {
-          regA = `(shl ${regA} 1)`;
-          aDirty = true;
+          env.regA = `(shl ${env.regA} 1)`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'LSR-A') {
-          regA = `(shr ${regA} 1)`;
-          aDirty = true;
+          env.regA = `(shr ${env.regA} 1)`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'ROL-A') {
-          regA = `(rol ${regA} 1)`;
-          aDirty = true;
+          env.regA = `(rol ${env.regA} 1)`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'ROR-A') {
-          regA = `(ror ${regA} 1)`;
-          aDirty = true;
+          env.regA = `(ror ${env.regA} 1)`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'INC-A') {
-          regA = `(+ ${regA} 1)`;
-          aDirty = true;
+          env.regA = `(+ ${env.regA} 1)`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (op === 'DEC-A') {
-          regA = `(- ${regA} 1)`;
-          aDirty = true;
+          env.regA = `(- ${env.regA} 1)`;
+          env.aDirty = true;
+          env.wroteA = true;
         } else if (
           op.startsWith('ASL-') ||
           op.startsWith('LSR-') ||
@@ -1101,30 +1297,53 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
           stmts.push(`${indent}(set! ${tgt} (${fn} ${tgt} 1))`);
         } else if (op === 'INX') {
           stmts.push(`${indent}(set! X (+ X 1))`);
-          regX = 'X';
-          xDirty = false;
+          env.regX = 'X';
+          env.xDirty = false;
+          env.wroteX = true;
         } else if (op === 'DEX') {
           stmts.push(`${indent}(set! X (- X 1))`);
-          regX = 'X';
-          xDirty = false;
+          env.regX = 'X';
+          env.xDirty = false;
+          env.wroteX = true;
         } else if (op === 'INY') {
           stmts.push(`${indent}(set! Y (+ Y 1))`);
-          regY = 'Y';
-          yDirty = false;
+          env.regY = 'Y';
+          env.yDirty = false;
+          env.wroteY = true;
         } else if (op === 'DEY') {
           stmts.push(`${indent}(set! Y (- Y 1))`);
-          regY = 'Y';
-          yDirty = false;
+          env.regY = 'Y';
+          env.yDirty = false;
+          env.wroteY = true;
         } else if (op === 'JSR-abs' || op === 'JSL-long') {
           const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : ins.arg;
-          stmts.push(`${indent}(call ${targetSym})`);
-          regA = 'A';
-          aDirty = false;
+          const calleeAbi = snesSubAbiMap.get(targetSym);
+          const callArgs = [];
+          if (calleeAbi && calleeAbi.params.length > 0) {
+            for (const p of calleeAbi.params) {
+              if (p === 'A') { callArgs.push(env.regA); env.aDirty = false; }
+              else if (p === 'X') { callArgs.push(env.regX); env.xDirty = false; }
+              else if (p === 'Y') { callArgs.push(env.regY); env.yDirty = false; }
+            }
+          } else {
+            if (env.aDirty && env.regA !== 'A') { callArgs.push(env.regA); env.aDirty = false; }
+            if (env.xDirty && env.regX !== 'X') { callArgs.push(env.regX); env.xDirty = false; }
+            if (env.yDirty && env.regY !== 'Y') { callArgs.push(env.regY); env.yDirty = false; }
+          }
+          flushDirty();
+          const argsSuffix = callArgs.length > 0 ? ` ${callArgs.join(' ')}` : '';
+          stmts.push(`${indent}(call ${targetSym}${argsSuffix})`);
+          env.regA = 'A';
+          env.aDirty = false;
         } else if (op === 'JMP-abs' || op === 'JML-long' || op === 'JMP-ind' || op === 'JMP-indX' || op === 'JSR-indX') {
+          flushDirty();
           const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : ins.arg;
           stmts.push(`${indent}(${op.startsWith('JSR') ? 'call-indirect' : 'tail-jump'} ${targetSym})`);
         } else if (op === 'MVN' || op === 'MVP') {
-          stmts.push(`${indent}(block-move! ${op} ${ins.arg} #:len A #:src X #:dst Y)`);
+          stmts.push(`${indent}(block-move! ${op} ${ins.arg} #:len ${env.regA} #:src ${env.regX} #:dst ${env.regY})`);
+          env.aDirty = false;
+          env.xDirty = false;
+          env.yDirty = false;
         } else if (op === 'RTS' || op === 'RTL' || op === 'RTI') {
           flushDirty();
           stmts.push(`${indent}(return)`);
@@ -1136,7 +1355,9 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
         k++;
       }
 
-      if (stmts.length === 0) {
+      if (isBranchOrLoop) {
+        flushDirty();
+      } else if (stmts.length === 0) {
         flushDirty();
         if (stmts.length === 0) {
           stmts.push(`${indent}(nop)`);
@@ -1145,18 +1366,28 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       return stmts;
     };
 
-    const bodyLines = foldRange(0, insns.length, '      ', true);
+    const bodyLines = foldRange(0, insns.length, '      ', makeEnv(), false);
     return [`    (decompiled-pseudo-code`, ...bodyLines, `    )`];
   };
 
   const structureSnesSubroutineCfg = (insns, resolveSym = (s) => s) => {
-    const used = new Uint8Array(insns.length);
     const loopsByHeader = new Map();
     const branchesByIdx = new Map();
+    const acceptedIntervals = [];
     let structuredLoops = 0;
     let structuredConditionals = 0;
     let hasCountedLoop = false;
     let hasSpinWaitMmio = false;
+
+    const isIntervalCompatible = (start, end) => {
+      for (const iv of acceptedIntervals) {
+        if (end < iv.start || start > iv.end) continue;
+        if (start >= iv.start && end <= iv.end && !(start === iv.start && end === iv.end)) continue;
+        if (iv.start >= start && iv.end <= end && !(start === iv.start && end === iv.end)) continue;
+        return false;
+      }
+      return true;
+    };
 
     // 1. Identify backward branches (spin-wait-mmio-loop, counted-loop, do-while-loop)
     for (let i = 0; i < insns.length; i++) {
@@ -1170,13 +1401,9 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
             break;
           }
         }
-        if (headerIdx >= 0 && i - headerIdx <= 18) {
-          let overlap = false;
-          for (let k = headerIdx; k <= i; k++) {
-            if (used[k]) { overlap = true; break; }
-          }
-          if (!overlap) {
-            for (let k = headerIdx; k <= i; k++) used[k] = 1;
+        if (headerIdx >= 0 && i - headerIdx <= 18 && !loopsByHeader.has(headerIdx)) {
+          if (isIntervalCompatible(headerIdx, i)) {
+            acceptedIntervals.push({ start: headerIdx, end: i });
             let pollMmio = null;
             let stepOp = null;
             for (let k = Math.max(0, headerIdx - 1); k <= i; k++) {
@@ -1211,9 +1438,9 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       }
     }
 
-    // 2. Identify forward conditional branches (if-else and when-branch)
+    // 2. Identify forward conditional branches (if-else and when-branch), including nested inside loops/branches
     for (let i = 0; i < insns.length; i++) {
-      if (used[i]) continue;
+      if (branchesByIdx.has(i)) continue;
       const ins = insns[i];
       if (!ins.branchInfo || ins.branchInfo.cond === 'always' || ins.branchTarget === null) continue;
       if (ins.branchTarget > ins.pcNum) {
@@ -1228,11 +1455,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
           joinIdx = Math.min(insns.length, i + 4);
         }
         if (joinIdx > i && joinIdx - i <= 14) {
-          let overlap = false;
-          for (let k = i; k < joinIdx; k++) {
-            if (used[k]) { overlap = true; break; }
-          }
-          if (overlap) continue;
+          if (!isIntervalCompatible(i, joinIdx - 1)) continue;
 
           // Check if the last instruction of the then-branch is an unconditional forward branch (if-else diamond)
           const prevIns = insns[joinIdx - 1];
@@ -1255,15 +1478,17 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
               mergeIdx = Math.min(insns.length, joinIdx + 3);
             }
             if (mergeIdx > joinIdx) {
-              for (let k = joinIdx; k < mergeIdx; k++) {
-                if (used[k]) { mergeIdx = -1; break; }
+              if (!isIntervalCompatible(i, mergeIdx - 1) || !isIntervalCompatible(joinIdx, mergeIdx - 1)) {
+                mergeIdx = -1;
               }
             }
           }
 
           const condExpr = inferSnesCondExpr(insns, i, ins.branchInfo.negCond);
           if (mergeIdx > joinIdx) {
-            for (let k = i; k < mergeIdx; k++) used[k] = 1;
+            acceptedIntervals.push({ start: i, end: mergeIdx - 1 });
+            acceptedIntervals.push({ start: i, end: joinIdx - 1 });
+            acceptedIntervals.push({ start: joinIdx, end: mergeIdx - 1 });
             const mergeAddr =
               mergeIdx < insns.length
                 ? insns[mergeIdx].addr
@@ -1281,7 +1506,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
             });
             structuredConditionals++;
           } else {
-            for (let k = i; k < joinIdx; k++) used[k] = 1;
+            acceptedIntervals.push({ start: i, end: joinIdx - 1 });
             const joinAddr =
               joinIdx < insns.length
                 ? insns[joinIdx].addr
@@ -1303,67 +1528,74 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
 
     const formatInsnLine = (ins, indent) => {
       const mmioAnnot = ins.mmioSym ? ` #:mmio '${ins.mmioSym}` : '';
+      const structAnnot = ins.structField ? ` #:struct-field "${ins.structField}"` : '';
+      const flagsAnnot = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
       const resolvedTarget = ins.callTargetSym ? resolveSym(ins.callTargetSym) : null;
       const callAnnot = resolvedTarget ? ` #:target '${resolvedTarget}` : '';
-      return `${indent}(insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${callAnnot})`;
+      return `${indent}(insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${structAnnot}${flagsAnnot}${callAnnot})`;
     };
 
-    const astLines = [];
-    for (let i = 0; i < insns.length; ) {
-      if (loopsByHeader.has(i)) {
-        const lp = loopsByHeader.get(i);
-        if (lp.kind === 'spin-wait-mmio-loop') {
-          astLines.push(
-            `    (spin-wait-mmio-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:mmio '${lp.mmio} #:cond '${lp.cond}`
-          );
-        } else if (lp.kind === 'counted-loop') {
-          astLines.push(
-            `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
-          );
+    const visitedAstStructs = new Set();
+    const renderAstRange = (startIdx, endIdx, indent) => {
+      const lines = [];
+      for (let i = startIdx; i < endIdx; ) {
+        if (loopsByHeader.has(i) && !visitedAstStructs.has(`loop:${i}`) && loopsByHeader.get(i).latchIdx < endIdx) {
+          visitedAstStructs.add(`loop:${i}`);
+          const lp = loopsByHeader.get(i);
+          if (lp.kind === 'spin-wait-mmio-loop') {
+            lines.push(
+              `${indent}(spin-wait-mmio-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:mmio '${lp.mmio} #:cond '${lp.cond}`
+            );
+          } else if (lp.kind === 'counted-loop') {
+            lines.push(
+              `${indent}(counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
+            );
+          } else {
+            lines.push(
+              `${indent}(do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
+            );
+          }
+          lines.push(...renderAstRange(lp.headerIdx, lp.latchIdx + 1, `${indent}  `));
+          lines.push(`${indent})`);
+          i = lp.latchIdx + 1;
+        } else if (branchesByIdx.has(i) && !visitedAstStructs.has(`branch:${i}`)) {
+          const br = branchesByIdx.get(i);
+          const brEnd = br.kind === 'if-else' ? br.mergeIdx : br.joinIdx;
+          if (brEnd <= endIdx) {
+            visitedAstStructs.add(`branch:${i}`);
+            if (br.kind === 'if-else') {
+              lines.push(
+                `${indent}(if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
+              );
+              lines.push(`${indent}  (then-branch`);
+              lines.push(...renderAstRange(br.branchIdx, br.elseIdx, `${indent}    `));
+              lines.push(`${indent}  )`);
+              lines.push(`${indent}  (else-branch`);
+              lines.push(...renderAstRange(br.elseIdx, br.mergeIdx, `${indent}    `));
+              lines.push(`${indent}  )`);
+              lines.push(`${indent})`);
+              i = br.mergeIdx;
+            } else {
+              lines.push(
+                `${indent}(when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
+              );
+              lines.push(...renderAstRange(br.branchIdx, br.joinIdx, `${indent}  `));
+              lines.push(`${indent})`);
+              i = br.joinIdx;
+            }
+          } else {
+            lines.push(formatInsnLine(insns[i], indent));
+            i++;
+          }
         } else {
-          astLines.push(
-            `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
-          );
+          lines.push(formatInsnLine(insns[i], indent));
+          i++;
         }
-        for (let k = lp.headerIdx; k <= lp.latchIdx; k++) {
-          astLines.push(formatInsnLine(insns[k], '      '));
-        }
-        astLines.push(`    )`);
-        i = lp.latchIdx + 1;
-      } else if (branchesByIdx.has(i)) {
-        const br = branchesByIdx.get(i);
-        if (br.kind === 'if-else') {
-          astLines.push(
-            `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
-          );
-          astLines.push(`      (then-branch`);
-          for (let k = br.branchIdx; k < br.elseIdx; k++) {
-            astLines.push(formatInsnLine(insns[k], '        '));
-          }
-          astLines.push(`      )`);
-          astLines.push(`      (else-branch`);
-          for (let k = br.elseIdx; k < br.mergeIdx; k++) {
-            astLines.push(formatInsnLine(insns[k], '        '));
-          }
-          astLines.push(`      )`);
-          astLines.push(`    )`);
-          i = br.mergeIdx;
-        } else {
-          astLines.push(
-            `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
-          );
-          for (let k = br.branchIdx; k < br.joinIdx; k++) {
-            astLines.push(formatInsnLine(insns[k], '      '));
-          }
-          astLines.push(`    )`);
-          i = br.joinIdx;
-        }
-      } else {
-        astLines.push(formatInsnLine(insns[i], '    '));
-        i++;
       }
-    }
+      return lines;
+    };
 
+    const astLines = renderAstRange(0, insns.length, '    ');
     const pseudoCodeLines = synthesizeSnesPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym);
     return { astLines, pseudoCodeLines, structuredLoops, structuredConditionals, hasCountedLoop, hasSpinWaitMmio };
   };
@@ -1379,6 +1611,9 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     let totalCycles = 0;
     let modeSwitches = 0;
     let maxForwardTarget = 0;
+    let lastImmA = null;
+    let lastImmX = null;
+    let lastImmY = null;
     const bankHex = bank.toString(16).padStart(2, '0').toUpperCase();
 
     for (let step = 0; step < maxInsns; step++) {
@@ -1444,6 +1679,42 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
         bumpMmio(mmioSym);
       }
 
+      // Track immediate loads for hardware flag decoding on INIDISP / NMITIMEN writes
+      if (mnem === 'LDA-imm') lastImmA = argVal;
+      else if (mnem === 'LDX-imm') lastImmX = argVal;
+      else if (mnem === 'LDY-imm') lastImmY = argVal;
+      else if (mnem.startsWith('LDA-') || mnem === 'TXA' || mnem === 'TYA' || mnem === 'PLA') lastImmA = null;
+      else if (mnem.startsWith('LDX-') || mnem === 'TAX' || mnem === 'TSX' || mnem === 'PLX') lastImmX = null;
+      else if (mnem.startsWith('LDY-') || mnem === 'TAY' || mnem === 'PLY') lastImmY = null;
+
+      let flagsAnnot = null;
+      if (mmioSym === 'INIDISP' || mmioSym === 'NMITIMEN') {
+        if (mnem.startsWith('STZ-')) flagsAnnot = decodeSnesMmioFlags(mmioSym, 0);
+        else if (mnem.startsWith('STA-') && lastImmA !== null) flagsAnnot = decodeSnesMmioFlags(mmioSym, lastImmA);
+        else if (mnem.startsWith('STX-') && lastImmX !== null) flagsAnnot = decodeSnesMmioFlags(mmioSym, lastImmX);
+        else if (mnem.startsWith('STY-') && lastImmY !== null) flagsAnnot = decodeSnesMmioFlags(mmioSym, lastImmY);
+      }
+
+      // Track struct field accesses on Direct Page & X/Y-indexed structs
+      let structField = null;
+      if (!mmioSym && !mnem.startsWith('JMP') && !mnem.startsWith('JSR') && !mnem.startsWith('JML') && !mnem.startsWith('JSL')) {
+        const typeTag = m8 ? ':u8' : ':u16';
+        const sizeBytes = m8 ? 1 : 2;
+        if (mode === 'dp') {
+          const offNum = argVal & 0xff;
+          structField = `->DP+0x${offNum.toString(16).toUpperCase()}`;
+          recordSnesStructField('DP', 'snes_direct_page_struct', offNum, typeTag, sizeBytes);
+        } else if (mode === 'dpX' || mode === 'absX' || mode === 'longX') {
+          const offNum = argVal & 0xffff;
+          structField = `->X+0x${offNum.toString(16).toUpperCase()}`;
+          recordSnesStructField('X', 'snes_indexed_actor_x_struct', offNum, typeTag, sizeBytes);
+        } else if (mode === 'dpY' || mode === 'absY' || mode === 'indY' || mode === 'indLY') {
+          const offNum = argVal & 0xffff;
+          structField = `->Y+0x${offNum.toString(16).toUpperCase()}`;
+          recordSnesStructField('Y', 'snes_indexed_actor_y_struct', offNum, typeTag, sizeBytes);
+        }
+      }
+
       // Follow JSR / JSL / JMP / JML call & trampoline edges
       let callTargetSym = null;
       if ((op === 0x20 || op === 0x4c) && argVal >= 0x8000) {
@@ -1474,6 +1745,8 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
         mWidth: m8 ? 8 : 16,
         xWidth: x8 ? 8 : 16,
         mmioSym,
+        structField,
+        flagsAnnot,
         callTargetSym,
         branchTarget,
         branchInfo,
@@ -1495,6 +1768,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       }
     }
 
+    const abi = inferSnesSubroutineAbi(insns);
     const cfg = structureSnesSubroutineCfg(insns);
 
     return {
@@ -1507,6 +1781,8 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       exitX: x8 ? 8 : 16,
       totalCycles,
       modeSwitches,
+      params: abi.params,
+      returns: abi.returns,
       callees: Array.from(callees),
       mmioTouched: Array.from(mmioTouched),
       insns,
@@ -1587,19 +1863,54 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       return `wram_block_move_${suffix}`;
     }
     if (sub.hasCountedLoop) {
-      return `engine_loop_update_${suffix}`;
+      return `wram_loop_update_${suffix}`;
     }
-    return `engine_routine_${suffix}`;
+    if (sub.insns.some((ins) => ins.structField)) {
+      return `wram_actor_state_${suffix}`;
+    }
+    if ((sub.callees || []).length > 0) {
+      return `bank${bankStr}_dispatch_${addrStr}`;
+    }
+    return `rom_bank${bankStr}_helper_${addrStr}`;
   };
 
   const snesRenameMap = new Map();
   for (const sub of subroutines) {
-    snesRenameMap.set(sub.name, classifySnesSubroutineName(sub));
+    const semName = classifySnesSubroutineName(sub);
+    snesRenameMap.set(sub.name, semName);
+    snesSubAbiMap.set(semName, { params: sub.params || [], returns: sub.returns || [] });
   }
   const resolveSnesSubSym = (sym) => {
     if (!sym) return sym;
     if (snesRenameMap.has(sym)) return snesRenameMap.get(sym);
-    return sym.replace(/^sub-65c816-([0-9A-F]{2})-([0-9A-F]{4})$/, 'engine_routine_$1_$2');
+    const m = sym.match(/^sub-65c816-([0-9A-F]{2})-([0-9A-F]{4})$/i);
+    if (m) {
+      const bankNum = parseInt(m[1], 16);
+      const addrNum = parseInt(m[2], 16);
+      const bankHex = m[1].toUpperCase();
+      const addrHex = m[2].toUpperCase();
+      const off = addrToOffset(bankNum, addrNum);
+      let semName = `rom_bank${bankHex}_helper_${addrHex}`;
+      if (bankNum === 0x7e || bankNum === 0x7f) {
+        semName = `wram_routine_${bankHex}_${addrHex}`;
+      } else if (off >= 0 && off + 16 <= romBuf.length) {
+        for (let k = 0; k < 12 && off + k + 3 <= romBuf.length; k++) {
+          const op = romBuf[off + k];
+          if (op === 0x8d || op === 0xad || op === 0x9c) {
+            const target16 = romBuf.readUInt16LE(off + k + 1);
+            const mmio = SNES_MMIO_SYMBOLS[target16];
+            if (mmio) {
+              if (mmio.startsWith('APUIO')) { semName = `spc700_apu_helper_${bankHex}_${addrHex}`; break; }
+              if (mmio.startsWith('DMA') || mmio === 'MDMAEN' || mmio === 'HDMAEN') { semName = `dma_channel_helper_${bankHex}_${addrHex}`; break; }
+              if (mmio.startsWith('VM') || mmio === 'INIDISP' || mmio.startsWith('BG')) { semName = `ppu_reg_helper_${bankHex}_${addrHex}`; break; }
+            }
+          }
+        }
+      }
+      snesRenameMap.set(sym, semName);
+      return semName;
+    }
+    return sym;
   };
 
   for (const sub of subroutines) {
@@ -1757,6 +2068,20 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
   const totalStructuredLoops = subroutines.reduce((acc, s) => acc + (s.structuredLoops || 0), 0);
   const totalStructuredConditionals = subroutines.reduce((acc, s) => acc + (s.structuredConditionals || 0), 0);
 
+  const structLayouts = Array.from(snesStructFieldsMap.values()).map((st) => {
+    const fields = Array.from(st.fields.values())
+      .sort((a, b) => a.offset - b.offset)
+      .slice(0, 16);
+    const maxEnd = fields.reduce((acc, f) => Math.max(acc, (f.offset & 0xff) + f.size), 0);
+    return {
+      name: st.name,
+      baseReg: st.baseReg,
+      totalBytes: Math.max(2, maxEnd),
+      accessCount: st.totalAccesses,
+      fields,
+    };
+  });
+
   return {
     title,
     isHirom,
@@ -1784,12 +2109,14 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       structuredConditionals: totalStructuredConditionals,
       stateMachinesLifted: stateMachines.length,
       highLevelIdiomsLifted: highLevelIdioms.length,
+      structLayoutsLifted: structLayouts.length,
     },
     topMmioRegisters,
     callGraphEdges: callGraphEdges.slice(0, 48),
     spc700Driver,
     stateMachines,
     highLevelIdioms,
+    structLayouts,
     subroutines,
   };
 }
@@ -1873,6 +2200,20 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
   }
   lines.push(`)`);
   lines.push('');
+  lines.push(`(define-snes-struct-layouts`);
+  for (const st of analysis.structLayouts || []) {
+    lines.push(
+      `  (struct-layout ${st.name} #:base-reg '${st.baseReg} #:total-bytes ${st.totalBytes} #:access-count ${st.accessCount}`
+    );
+    for (const f of st.fields) {
+      lines.push(
+        `    (field ${f.fieldSym} #:offset #x${f.offset.toString(16).toUpperCase()} #:type ${f.type} #:size ${f.size} #:accesses ${f.accesses})`
+      );
+    }
+    lines.push(`  )`);
+  }
+  lines.push(`)`);
+  lines.push('');
   lines.push(`(define-snes-spc700-audio-driver`);
   lines.push(`  (aram-entry #x${analysis.spc700Driver.driverAramEntry.toString(16).padStart(4, '0')})`);
   lines.push(`  (rom-offset #x${analysis.spc700Driver.driverBlockOffset.toString(16).padStart(6, '0')})`);
@@ -1897,8 +2238,9 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
   for (const sub of analysis.subroutines) {
     const calleeList = sub.callees.length > 0 ? ` (calls ${sub.callees.join(' ')})` : '';
     const mmioList = sub.mmioTouched.length > 0 ? ` (mmio ${sub.mmioTouched.join(' ')})` : '';
+    const paramsStr = ` #:params (${(sub.params || []).join(' ')}) #:returns (${(sub.returns || []).join(' ')})`;
     lines.push(
-      `  (defsub-65c816 ${sub.name} (bank #x${sub.bank.toString(16).padStart(2, '0')}) (entry #x${sub.startAddr.toString(16).padStart(4, '0')}) (mode-in #:M ${sub.entryM} #:X ${sub.entryX}) (mode-out #:M ${sub.exitM} #:X ${sub.exitX}) (cycles ${sub.totalCycles})${calleeList}${mmioList}`
+      `  (defsub-65c816 ${sub.name} (bank #x${sub.bank.toString(16).padStart(2, '0')}) (entry #x${sub.startAddr.toString(16).padStart(4, '0')}) (mode-in #:M ${sub.entryM} #:X ${sub.entryX}) (mode-out #:M ${sub.exitM} #:X ${sub.exitX}) (cycles ${sub.totalCycles})${calleeList}${mmioList}${paramsStr}`
     );
     if (sub.pseudoCodeLines && sub.pseudoCodeLines.length > 0) {
       for (const pLine of sub.pseudoCodeLines) {
@@ -1912,9 +2254,11 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
     } else {
       for (const ins of sub.insns) {
         const mmioAnnot = ins.mmioSym ? ` #:mmio '${ins.mmioSym}` : '';
+        const structAnnot = ins.structField ? ` #:struct-field "${ins.structField}"` : '';
+        const flagsAnnot = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
         const callAnnot = ins.callTargetSym ? ` #:target '${ins.callTargetSym}` : '';
         lines.push(
-          `    (insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${callAnnot})`
+          `    (insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${structAnnot}${flagsAnnot}${callAnnot})`
         );
       }
     }
@@ -2632,6 +2976,113 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
   };
 }
 
+function decodeGbaMmioFlags(mmioSym, immVal) {
+  if (immVal === null || immVal === undefined || Number.isNaN(immVal)) return null;
+  const v = immVal >>> 0;
+  if (mmioSym === 'DISPCNT') {
+    const flags = [`MODE_${v & 0x07}`];
+    if (v & 0x0010) flags.push('FRAME_SELECT_1');
+    if (v & 0x0020) flags.push('HBLANK_OAM_FREE');
+    if (v & 0x0040) flags.push('OBJ_1D_MAPPING');
+    if (v & 0x0080) flags.push('FORCED_BLANK');
+    if (v & 0x0100) flags.push('BG0_ENABLE');
+    if (v & 0x0200) flags.push('BG1_ENABLE');
+    if (v & 0x0400) flags.push('BG2_ENABLE');
+    if (v & 0x0800) flags.push('BG3_ENABLE');
+    if (v & 0x1000) flags.push('OBJ_ENABLE');
+    if (v & 0x2000) flags.push('WIN0_ENABLE');
+    if (v & 0x4000) flags.push('WIN1_ENABLE');
+    if (v & 0x8000) flags.push('OBJWIN_ENABLE');
+    return `#:flags (${flags.join(' ')})`;
+  }
+  if (mmioSym === 'DMA3CNT_H' || (mmioSym === 'DMA3CNT_L' && (v >>> 16) !== 0)) {
+    const h = mmioSym === 'DMA3CNT_L' ? (v >>> 16) & 0xffff : v & 0xffff;
+    const flags = [];
+    if (h & 0x8000) flags.push('DMA_ENABLE');
+    if (h & 0x4000) flags.push('DMA_IRQ_ENABLE');
+    const timing = ['START_IMMEDIATE', 'START_VBLANK', 'START_HBLANK', 'START_SPECIAL'][(h >>> 12) & 0x03];
+    if (timing) flags.push(timing);
+    flags.push(h & 0x0400 ? 'DMA_32BIT' : 'DMA_16BIT');
+    if (h & 0x0200) flags.push('DMA_REPEAT');
+    const srcCtrl = ['SRC_INC', 'SRC_DEC', 'SRC_FIXED', 'SRC_PROHIBITED'][(h >>> 7) & 0x03];
+    const dstCtrl = ['DST_INC', 'DST_DEC', 'DST_FIXED', 'DST_RELOAD'][(h >>> 5) & 0x03];
+    if (srcCtrl) flags.push(srcCtrl);
+    if (dstCtrl) flags.push(dstCtrl);
+    return `#:flags (${flags.join(' ')})`;
+  }
+  if (mmioSym === 'IME') {
+    return `#:flags (${v & 1 ? 'MASTER_IRQ_ENABLE' : 'MASTER_IRQ_DISABLE'})`;
+  }
+  if (mmioSym === 'DISPSTAT') {
+    const flags = [];
+    if (v & 0x08) flags.push('VBLANK_IRQ_ENABLE');
+    if (v & 0x10) flags.push('HBLANK_IRQ_ENABLE');
+    if (v & 0x20) flags.push('VCOUNT_IRQ_ENABLE');
+    if (flags.length === 0) flags.push('DISPLAY_SYNC_POLL');
+    return `#:flags (${flags.join(' ')})`;
+  }
+  return null;
+}
+
+function inferGbaSubroutineAbi(insns) {
+  const written = new Set();
+  const params = [];
+  const returns = [];
+  let r0WrittenAfterCall = false;
+  const checkRead = (reg) => {
+    if (/^r[0-3]$/.test(reg) && !written.has(reg) && !params.includes(reg)) {
+      params.push(reg);
+    }
+  };
+  const markWrite = (reg) => {
+    written.add(reg);
+    if (reg === 'r0') r0WrittenAfterCall = true;
+  };
+  for (const ins of insns) {
+    const ast = ins.ast || '';
+    let m;
+    if ((m = ast.match(/^\((?:THUMB-LDR-pc|ARM-LDR[A-Z]*-pc)\s+(r\d+)/))) {
+      markWrite(m[1]);
+    } else if ((m = ast.match(/^\(THUMB-MOV-imm\s+(r\d+)/))) {
+      markWrite(m[1]);
+    } else if ((m = ast.match(/^\(ARM-MOV[A-Z]*\s+(r\d+)\s+r\d+\s+([^\s)]+)\)/))) {
+      if (m[2].startsWith('r')) checkRead(m[2]);
+      markWrite(m[1]);
+    } else if ((m = ast.match(/^\(THUMB-MOV-hi\s+(r\d+)\s+(r\d+)\)/))) {
+      checkRead(m[2]);
+      markWrite(m[1]);
+    } else if ((m = ast.match(/^\((?:THUMB-CMP-imm|THUMB-ADD-imm|THUMB-SUB-imm)\s+(r\d+)/))) {
+      checkRead(m[1]);
+      if (!ast.startsWith('(THUMB-CMP')) markWrite(m[1]);
+    } else if ((m = ast.match(/^\((?:THUMB-ADD|THUMB-SUB|THUMB-LSL|THUMB-LSR|THUMB-ASR)\s+(r\d+)\s+(r\d+)\s+([^\s)]+)\)/))) {
+      checkRead(m[2]);
+      if (m[3].startsWith('r')) checkRead(m[3]);
+      markWrite(m[1]);
+    } else if ((m = ast.match(/^\((?:THUMB-AND|THUMB-ORR|THUMB-EOR|THUMB-BIC|THUMB-MUL|THUMB-CMP|THUMB-TST)\s+(r\d+)\s+(r\d+)\)/))) {
+      checkRead(m[1]);
+      checkRead(m[2]);
+      if (!ast.includes('CMP') && !ast.includes('TST')) markWrite(m[1]);
+    } else if ((m = ast.match(/^\((?:THUMB-MVN|THUMB-NEG)\s+(r\d+)\s+(r\d+)\)/))) {
+      checkRead(m[2]);
+      markWrite(m[1]);
+    } else if ((m = ast.match(/^\(ARM-(?:ADD|SUB|AND|ORR|EOR|BIC|CMP|TST)[A-Z]*\s+(r\d+)\s+(r\d+)\s+([^\s)]+)\)/))) {
+      checkRead(m[2]);
+      if (m[3].startsWith('r')) checkRead(m[3]);
+      if (!ast.startsWith('(ARM-CMP') && !ast.startsWith('(ARM-TST')) markWrite(m[1]);
+    } else if ((m = ast.match(/^\((?:THUMB-STR-imm|THUMB-STRH-imm|THUMB-STRB-imm|ARM-STR[A-Z]*|ARM-STRB[A-Z]*)\s+(r\d+)\s+\[(r\d+)/))) {
+      checkRead(m[1]);
+      checkRead(m[2]);
+    } else if ((m = ast.match(/^\((?:THUMB-LDR-imm|THUMB-LDRH-imm|THUMB-LDRB-imm|ARM-LDR[A-Z]*|ARM-LDRB[A-Z]*)\s+(r\d+)\s+\[(r\d+)/))) {
+      checkRead(m[2]);
+      markWrite(m[1]);
+    } else if ((m = ast.match(/^\((?:THUMB-BL|ARM-BL[A-Z]*|THUMB-SWI|ARM-SWI[A-Z]*)/))) {
+      r0WrittenAfterCall = false;
+    }
+  }
+  if (r0WrittenAfterCall) returns.push('r0');
+  return { params, returns };
+}
+
 function inferGbaCondExpr(insns, branchIdx, condSym) {
   const cmpOpMap = {
     equal: '=',
@@ -2682,89 +3133,154 @@ function inferGbaCondExpr(insns, branchIdx, condSym) {
 }
 
 function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym = (s) => s, subInfo = {}) {
-  const foldRange = (startIdx, endIdx, indent, topLevel = false) => {
-    const stmts = [];
-    const regExpr = new Map();
-    const regLitAddr = new Map();
-    const regDirty = new Set();
+  const visitedStructs = new Set();
+  const makeEnv = (base = null) => ({
+    regExpr: base ? new Map(base.regExpr) : new Map(),
+    regLitAddr: base ? new Map(base.regLitAddr) : new Map(),
+    regConstVal: base ? new Map(base.regConstVal) : new Map(),
+    regDirty: new Set(),
+    wroteRegs: new Set(),
+    pushedLr: base ? base.pushedLr : false,
+    poppedLrReg: null,
+  });
 
-    const getReg = (r) => regExpr.get(r) || r;
+  const foldRange = (startIdx, endIdx, indent, env = makeEnv(), isBranchOrLoop = false) => {
+    const stmts = [];
+
+    const getReg = (r) => env.regExpr.get(r) || r;
     const setReg = (r, expr, dirty = true) => {
-      regExpr.set(r, expr);
-      if (dirty) regDirty.add(r);
-      else regDirty.delete(r);
+      env.regExpr.set(r, expr);
+      env.wroteRegs.add(r);
+      if (dirty) env.regDirty.add(r);
+      else env.regDirty.delete(r);
     };
-    const flushDirty = () => {
-      for (const r of Array.from(regDirty)) {
-        const val = regExpr.get(r);
+    const flushReg = (r) => {
+      if (env.regDirty.has(r)) {
+        const val = env.regExpr.get(r);
         if (val && val !== r) {
           stmts.push(`${indent}(set! ${r} ${val})`);
         }
-        regDirty.delete(r);
+        env.regExpr.set(r, r);
+        env.regDirty.delete(r);
+      }
+    };
+    const flushDirty = () => {
+      for (const r of Array.from(env.regDirty)) {
+        flushReg(r);
       }
     };
 
     const resolveMemTarget = (rb, offNum, widthTag, insMmioSym) => {
-      if (regLitAddr.has(rb)) {
-        const effAddr = (regLitAddr.get(rb) + offNum) >>> 0;
-        const mmio = GBA_MMIO_SYMBOLS[effAddr] || insMmioSym;
-        regDirty.delete(rb);
-        if (mmio && (effAddr >= 0x04000000 && effAddr <= 0x040003fe)) {
+      if (env.regLitAddr.has(rb)) {
+        const effAddr = (env.regLitAddr.get(rb) + offNum) >>> 0;
+        const mmio = GBA_MMIO_SYMBOLS[effAddr] || (offNum === 0 ? insMmioSym : null) || classifyGbaLiteralAddress(effAddr);
+        env.regDirty.delete(rb);
+        if (mmio && effAddr >= 0x04000000 && effAddr <= 0x040003fe) {
           const mmioKind = widthTag === 'u16' || widthTag === 's16' ? 'mmio16' : widthTag === 'u8' || widthTag === 's8' ? 'mmio8' : 'mmio32';
-          return `(${mmioKind} ${mmio})`;
+          return { expr: `(${mmioKind} ${mmio})`, mmioSym: mmio, effAddr };
         }
         if (mmio) {
-          return `(${mmio} #x${effAddr.toString(16).padStart(8, '0').toUpperCase()})`;
+          return { expr: `(${mmio} #x${effAddr.toString(16).padStart(8, '0').toUpperCase()})`, mmioSym: mmio, effAddr };
         }
-        return `(mem-${widthTag} #x${effAddr.toString(16).padStart(8, '0').toUpperCase()})`;
+        return { expr: `(mem-${widthTag} #x${effAddr.toString(16).padStart(8, '0').toUpperCase()})`, mmioSym: null, effAddr };
       }
       if (insMmioSym && offNum === 0) {
-        regDirty.delete(rb);
+        env.regDirty.delete(rb);
         const mmioKind = widthTag === 'u16' || widthTag === 's16' ? 'mmio16' : widthTag === 'u8' || widthTag === 's8' ? 'mmio8' : 'mmio32';
-        return `(${mmioKind} ${insMmioSym})`;
+        return { expr: `(${mmioKind} ${insMmioSym})`, mmioSym: insMmioSym, effAddr: null };
       }
-      return `(-> ${rb} :offset_0x${offNum.toString(16).toUpperCase()} :${widthTag})`;
+      if (env.regDirty.has(rb)) {
+        flushReg(rb);
+      }
+      if (subInfo.recordStructField) {
+        const sizeBytes = widthTag === 'u16' || widthTag === 's16' ? 2 : widthTag === 'u8' || widthTag === 's8' ? 1 : 4;
+        subInfo.recordStructField(rb, offNum, `:${widthTag}`, sizeBytes);
+      }
+      return { expr: `(-> ${rb} :offset_0x${offNum.toString(16).toUpperCase()} :${widthTag})`, mmioSym: null, effAddr: null };
     };
 
     for (let k = startIdx; k < endIdx; ) {
-      if (topLevel && loopsByHeader.has(k)) {
+      if (loopsByHeader.has(k) && !visitedStructs.has(`loop:${k}`) && loopsByHeader.get(k).latchIdx < endIdx) {
+        visitedStructs.add(`loop:${k}`);
         const lp = loopsByHeader.get(k);
+        flushDirty();
         if (lp.kind === 'spin-wait-mmio-loop') {
-          flushDirty();
           stmts.push(`${indent}(await-mmio! ${lp.mmio} ${lp.cond})`);
         } else if (lp.kind === 'counted-loop') {
-          flushDirty();
+          const loopEnv = makeEnv(env);
+          const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
           stmts.push(`${indent}(loop-counted #:step ${lp.step} #:while ${lp.condExpr}`);
-          stmts.push(...foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false));
+          stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
           stmts.push(`${indent})`);
+          for (const r of loopEnv.wroteRegs) {
+            env.regExpr.set(r, r);
+            env.regDirty.delete(r);
+          }
         } else {
-          flushDirty();
+          const loopEnv = makeEnv(env);
+          const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
           stmts.push(`${indent}(do-while ${lp.condExpr}`);
-          stmts.push(...foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false));
+          stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
           stmts.push(`${indent})`);
+          for (const r of loopEnv.wroteRegs) {
+            env.regExpr.set(r, r);
+            env.regDirty.delete(r);
+          }
         }
         k = lp.latchIdx + 1;
         continue;
       }
-      if (topLevel && branchesByIdx.has(k)) {
+      if (branchesByIdx.has(k) && !visitedStructs.has(`branch:${k}`)) {
         const br = branchesByIdx.get(k);
-        flushDirty();
-        if (br.kind === 'if-else') {
-          stmts.push(`${indent}(if ${br.condExpr}`);
-          stmts.push(`${indent}  (then`);
-          stmts.push(...foldRange(br.branchIdx + 1, Math.max(br.branchIdx + 1, br.elseIdx - 1), `${indent}    `, false));
-          stmts.push(`${indent}  )`);
-          stmts.push(`${indent}  (else`);
-          stmts.push(...foldRange(br.elseIdx, br.mergeIdx, `${indent}    `, false));
-          stmts.push(`${indent}  ))`);
-          k = br.mergeIdx;
-          continue;
-        } else {
-          stmts.push(`${indent}(when ${br.condExpr}`);
-          stmts.push(...foldRange(br.branchIdx + 1, br.joinIdx, `${indent}  `, false));
-          stmts.push(`${indent})`);
-          k = br.joinIdx;
-          continue;
+        const brEnd = br.kind === 'if-else' ? br.mergeIdx : br.joinIdx;
+        if (brEnd <= endIdx) {
+          visitedStructs.add(`branch:${k}`);
+          flushDirty();
+          if (br.kind === 'if-else') {
+            const thenEnv = makeEnv(env);
+            const elseEnv = makeEnv(env);
+            const thenStmts = foldRange(br.branchIdx + 1, Math.max(br.branchIdx + 1, br.elseIdx - 1), `${indent}    `, thenEnv, true);
+            const elseStmts = foldRange(br.elseIdx, br.mergeIdx, `${indent}    `, elseEnv, true);
+            if (thenStmts.length > 0 && elseStmts.length > 0) {
+              stmts.push(`${indent}(if ${br.condExpr}`);
+              stmts.push(`${indent}  (then`);
+              stmts.push(...thenStmts);
+              stmts.push(`${indent}  )`);
+              stmts.push(`${indent}  (else`);
+              stmts.push(...elseStmts);
+              stmts.push(`${indent}  ))`);
+            } else if (thenStmts.length > 0) {
+              stmts.push(`${indent}(when ${br.condExpr}`);
+              stmts.push(...thenStmts.map((s) => s.replace(/^ {2}/, '')));
+              stmts.push(`${indent})`);
+            } else if (elseStmts.length > 0) {
+              stmts.push(`${indent}(when (not ${br.condExpr})`);
+              stmts.push(...elseStmts.map((s) => s.replace(/^ {2}/, '')));
+              stmts.push(`${indent})`);
+            }
+            for (const r of [...thenEnv.wroteRegs, ...elseEnv.wroteRegs]) {
+              env.regExpr.set(r, r);
+              env.regDirty.delete(r);
+              env.wroteRegs.add(r);
+            }
+            k = br.mergeIdx;
+            continue;
+          } else {
+            const whenEnv = makeEnv(env);
+            const whenStmts = foldRange(br.branchIdx + 1, br.joinIdx, `${indent}  `, whenEnv, true);
+            if (whenStmts.length > 0) {
+              stmts.push(`${indent}(when ${br.condExpr}`);
+              stmts.push(...whenStmts);
+              stmts.push(`${indent})`);
+            }
+            for (const r of whenEnv.wroteRegs) {
+              env.regExpr.set(r, r);
+              env.regDirty.delete(r);
+              env.wroteRegs.add(r);
+            }
+            k = br.joinIdx;
+            continue;
+          }
         }
       }
 
@@ -2772,48 +3288,97 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
       const ast = ins.ast || '';
       let m;
 
-      if ((m = ast.match(/^\((?:THUMB-LDR-pc|ARM-LDR[A-Z]*-pc)\s+(r\d+)\s+\[pc\s+#x[0-9A-F]+\](?:\s+#:literal\s+(#x[0-9A-F]+))?(?:\s+#:sym\s+'([^\s)]+))?\)/))) {
+      if ((m = ast.match(/^\((?:THUMB-PUSH|ARM-PUSH[A-Z]*).*?\blr\b/))) {
+        env.pushedLr = true;
+      } else if ((m = ast.match(/^\((?:THUMB-LDR-pc|ARM-LDR[A-Z]*-pc)\s+(r\d+)\s+\[pc\s+#x[0-9A-F]+\](?:\s+#:literal\s+(#x[0-9A-F]+))?(?:\s+#:sym\s+'([^\s)]+))?\)/))) {
         const rd = m[1];
         const litHex = m[2];
         const sym = m[3] || null;
         if (litHex) {
           const litVal = parseInt(litHex.slice(2), 16) >>> 0;
-          regLitAddr.set(rd, litVal);
+          env.regLitAddr.set(rd, litVal);
+          env.regConstVal.set(rd, litVal);
           setReg(rd, sym && GBA_MMIO_SYMBOLS[litVal] ? sym : litHex, false);
         }
       } else if ((m = ast.match(/^\(ARM-MOV[A-Z]*\s+(r\d+)\s+r\d+\s+([^\s)]+)\)/))) {
         const rd = m[1];
         const rhs = m[2].startsWith('r') ? getReg(m[2]) : m[2];
+        if (m[2].startsWith('#x')) {
+          env.regConstVal.set(rd, parseInt(m[2].slice(2), 16) >>> 0);
+        } else {
+          env.regConstVal.delete(rd);
+        }
+        env.regLitAddr.delete(rd);
         setReg(rd, rhs, true);
       } else if ((m = ast.match(/^\(ARM-MSR[A-Z]*\s+([^\s)]+)\s+([^\s)]+)\)/))) {
         const psr = m[1];
         const src = m[2];
         const val = src.startsWith('r') ? getReg(src) : src;
-        if (src.startsWith('r')) regDirty.delete(src);
+        if (src.startsWith('r')) env.regDirty.delete(src);
         stmts.push(`${indent}(set! ${psr} ${val})`);
       } else if ((m = ast.match(/^\(ARM-MRS[A-Z]*\s+(r\d+)\s+([^\s)]+)\)/))) {
         setReg(m[1], m[2], true);
       } else if ((m = ast.match(/^\(THUMB-MOV-imm\s+(r\d+)\s+(#x[0-9A-F]+)\)/))) {
-        setReg(m[1], m[2], true);
-        regLitAddr.delete(m[1]);
+        const rd = m[1];
+        const immVal = parseInt(m[2].slice(2), 16) >>> 0;
+        setReg(rd, m[2], true);
+        env.regConstVal.set(rd, immVal);
+        env.regLitAddr.delete(rd);
       } else if ((m = ast.match(/^\(THUMB-MOV-hi\s+(r\d+)\s+(r\d+)\)/))) {
-        setReg(m[1], getReg(m[2]), true);
+        const rd = m[1];
+        const rs = m[2];
+        setReg(rd, getReg(rs), true);
+        if (env.regLitAddr.has(rs)) env.regLitAddr.set(rd, env.regLitAddr.get(rs));
+        else env.regLitAddr.delete(rd);
+        if (env.regConstVal.has(rs)) env.regConstVal.set(rd, env.regConstVal.get(rs));
+        else env.regConstVal.delete(rd);
       } else if ((m = ast.match(/^\((THUMB-ADD-imm|THUMB-SUB-imm)\s+(r\d+)\s+(#x[0-9A-F]+)\)/))) {
-        const opSym = m[1] === 'THUMB-ADD-imm' ? '+' : '-';
+        const isAdd = m[1] === 'THUMB-ADD-imm';
+        const opSym = isAdd ? '+' : '-';
         const rd = m[2];
-        setReg(rd, `(${opSym} ${getReg(rd)} ${m[3]})`, true);
+        const immVal = parseInt(m[3].slice(2), 16) >>> 0;
+        if (env.regLitAddr.has(rd)) {
+          const nextAddr = (isAdd ? env.regLitAddr.get(rd) + immVal : env.regLitAddr.get(rd) - immVal) >>> 0;
+          env.regLitAddr.set(rd, nextAddr);
+          env.regConstVal.set(rd, nextAddr);
+          const sym = GBA_MMIO_SYMBOLS[nextAddr] || classifyGbaLiteralAddress(nextAddr);
+          setReg(rd, sym || `#x${nextAddr.toString(16).padStart(8, '0').toUpperCase()}`, false);
+        } else {
+          if (env.regConstVal.has(rd)) {
+            env.regConstVal.set(rd, (isAdd ? env.regConstVal.get(rd) + immVal : env.regConstVal.get(rd) - immVal) >>> 0);
+          }
+          setReg(rd, `(${opSym} ${getReg(rd)} ${m[3]})`, true);
+        }
       } else if ((m = ast.match(/^\((THUMB-ADD|THUMB-SUB)\s+(r\d+)\s+(r\d+)\s+([^\s)]+)\)/))) {
         const opSym = m[1] === 'THUMB-ADD' ? '+' : '-';
         const rd = m[2];
         const lhs = getReg(m[3]);
         const rhs = m[4].startsWith('r') ? getReg(m[4]) : m[4];
+        env.regLitAddr.delete(rd);
+        env.regConstVal.delete(rd);
         setReg(rd, `(${opSym} ${lhs} ${rhs})`, true);
       } else if ((m = ast.match(/^\((THUMB-LSL|THUMB-LSR|THUMB-ASR)\s+(r\d+)\s+(r\d+)\s+(#x[0-9A-F]+)\)/))) {
         const shiftFn = m[1] === 'THUMB-LSL' ? 'shl' : m[1] === 'THUMB-LSR' ? 'shr' : 'ashr';
         const rd = m[2];
-        const rs = getReg(m[3]);
+        const rsReg = m[3];
+        const rs = getReg(rsReg);
         const amt = parseInt(m[4].slice(2), 16);
-        setReg(rd, amt === 0 ? rs : `(${shiftFn} ${rs} ${amt})`, true);
+        const shiftedExpr = amt === 0 ? rs : `(${shiftFn} ${rs} ${amt})`;
+        if (m[1] === 'THUMB-LSL' && env.regConstVal.has(rsReg)) {
+          const shiftedVal = (env.regConstVal.get(rsReg) << amt) >>> 0;
+          env.regConstVal.set(rd, shiftedVal);
+          if (shiftedVal >= 0x04000000 && shiftedVal <= 0x070003ff) {
+            env.regLitAddr.set(rd, shiftedVal);
+            setReg(rd, shiftedExpr, false);
+          } else {
+            env.regLitAddr.delete(rd);
+            setReg(rd, shiftedExpr, true);
+          }
+        } else {
+          env.regConstVal.delete(rd);
+          env.regLitAddr.delete(rd);
+          setReg(rd, shiftedExpr, true);
+        }
       } else if ((m = ast.match(/^\((THUMB-AND|THUMB-ORR|THUMB-EOR|THUMB-BIC|THUMB-MUL|THUMB-MVN|THUMB-NEG|THUMB-LSL-reg|THUMB-LSR-reg|THUMB-ASR-reg)\s+(r\d+)\s+(r\d+)\)/))) {
         const opMap = {
           'THUMB-AND': 'bit-and',
@@ -2827,6 +3392,8 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         };
         const rd = m[2];
         const rs = getReg(m[3]);
+        env.regLitAddr.delete(rd);
+        env.regConstVal.delete(rd);
         if (m[1] === 'THUMB-MVN') {
           setReg(rd, `(bit-not ${rs})`, true);
         } else if (m[1] === 'THUMB-NEG') {
@@ -2834,11 +3401,13 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         } else {
           setReg(rd, `(${opMap[m[1]]} ${getReg(rd)} ${rs})`, true);
         }
-      } else if ((m = ast.match(/^\(ARM-(ADD|SUB|AND|ORR|EOR|BIC)[A-Z]*\s+(r\d+)\s+(r\d+)\s+([^\s)]+)\)/))) {
+      } else if ((m = ast.match(/^\(ARM-(ADD|SUB|AND|ORR|EOR|BIC)([A-Z]*)\s+(r\d+)\s+(r\d+)\s+([^\s)]+)\)/))) {
         const opMap = { ADD: '+', SUB: '-', AND: 'bit-and', ORR: 'bit-ior', EOR: 'bit-xor', BIC: 'bit-and-not' };
-        const rd = m[2];
-        const rn = m[3] === 'r15' ? `pc` : getReg(m[3]);
-        const rhs = m[4].startsWith('r') ? getReg(m[4]) : m[4];
+        const rd = m[3];
+        const rn = m[4] === 'r15' ? `pc` : getReg(m[4]);
+        const rhs = m[5].startsWith('r') ? getReg(m[5]) : m[5];
+        env.regLitAddr.delete(rd);
+        env.regConstVal.delete(rd);
         setReg(rd, `(${opMap[m[1]]} ${rn} ${rhs})`, true);
       } else if ((m = ast.match(/^\((THUMB-STR-imm|THUMB-STRH-imm|THUMB-STRB-imm|ARM-STR[A-Z]*|ARM-STRB[A-Z]*)\s+(r\d+)\s+\[(r\d+)\s+#x([0-9A-F]+)\]\)/))) {
         const mnem = m[1];
@@ -2846,31 +3415,55 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         const rb = m[3];
         const offNum = parseInt(m[4], 16);
         const widthTag = mnem.includes('STRH') ? 'u16' : mnem.includes('STRB') ? 'u8' : 'u32';
-        const targetExpr = resolveMemTarget(rb, offNum, widthTag, ins.mmioSym);
+        const condMatch = mnem.match(/^ARM-STRB?([A-Z]{2})$/);
+        const condSuffix = condMatch && GBA_BRANCH_COND_MAP[condMatch[1]] && condMatch[1] !== 'AL' ? condMatch[1] : null;
+        if (condSuffix) {
+          flushDirty();
+        }
+        const resolved = resolveMemTarget(rb, offNum, widthTag, ins.mmioSym);
+        const targetExpr = resolved.expr;
         let valExpr = getReg(rd);
         if (valExpr === '#x0' && targetExpr.startsWith('(mmio16 ')) {
           valExpr = '#x0000';
         }
-        regDirty.delete(rd);
-        stmts.push(`${indent}(set! ${targetExpr} ${valExpr})`);
+        const immConst = env.regConstVal.has(rd)
+          ? env.regConstVal.get(rd)
+          : /^#x[0-9A-F]+$/i.test(valExpr)
+            ? parseInt(valExpr.slice(2), 16) >>> 0
+            : null;
+        const flagsAnnot = resolved.mmioSym ? decodeGbaMmioFlags(resolved.mmioSym, immConst) : null;
+        if (flagsAnnot && !ins.flagsAnnot) ins.flagsAnnot = flagsAnnot;
+        const flagStr = flagsAnnot ? ` ${flagsAnnot}` : '';
+        env.regDirty.delete(rd);
+        if (condSuffix) {
+          const condInfo = GBA_BRANCH_COND_MAP[condSuffix];
+          const condExpr = inferGbaCondExpr(insns, k, condInfo.cond);
+          stmts.push(`${indent}(when ${condExpr}`);
+          stmts.push(`${indent}  (set! ${targetExpr} ${valExpr}${flagStr}))`);
+        } else {
+          stmts.push(`${indent}(set! ${targetExpr} ${valExpr}${flagStr})`);
+        }
       } else if ((m = ast.match(/^\((THUMB-LDR-imm|THUMB-LDRH-imm|THUMB-LDRB-imm|ARM-LDR[A-Z]*|ARM-LDRB[A-Z]*)\s+(r\d+)\s+\[(r\d+)\s+#x([0-9A-F]+)\]\)/))) {
         const mnem = m[1];
         const rd = m[2];
         const rb = m[3];
         const offNum = parseInt(m[4], 16);
         const widthTag = mnem.includes('LDRH') ? 'u16' : mnem.includes('LDRB') ? 'u8' : 'u32';
-        const srcExpr = resolveMemTarget(rb, offNum, widthTag, ins.mmioSym);
-        setReg(rd, srcExpr, true);
-        regLitAddr.delete(rd);
+        const resolved = resolveMemTarget(rb, offNum, widthTag, ins.mmioSym);
+        setReg(rd, resolved.expr, true);
+        env.regLitAddr.delete(rd);
+        env.regConstVal.delete(rd);
       } else if ((m = ast.match(/^\((THUMB-STR-reg|THUMB-STRH-reg|THUMB-STRB-reg)\s+(r\d+)\s+\[(r\d+)\s+(r\d+)\]\)/))) {
         const widthTag = m[1].includes('STRH') ? 'u16' : m[1].includes('STRB') ? 'u8' : 'u32';
         const rd = m[2];
         const valExpr = getReg(rd);
-        regDirty.delete(rd);
+        env.regDirty.delete(rd);
         stmts.push(`${indent}(set! (array-ref ${m[3]} ${m[4]} :${widthTag}) ${valExpr})`);
       } else if ((m = ast.match(/^\((THUMB-LDR-reg|THUMB-LDRH-reg|THUMB-LDRB-reg|THUMB-LDSB-reg|THUMB-LDSH-reg)\s+(r\d+)\s+\[(r\d+)\s+(r\d+)\]\)/))) {
         const widthTag = m[1].includes('LDRH') ? 'u16' : m[1].includes('LDSH') ? 's16' : m[1].includes('LDRB') ? 'u8' : m[1].includes('LDSB') ? 's8' : 'u32';
         setReg(m[2], `(array-ref ${m[3]} ${m[4]} :${widthTag})`, true);
+        env.regLitAddr.delete(m[2]);
+        env.regConstVal.delete(m[2]);
       } else if ((m = ast.match(/^\((?:THUMB-SWI|ARM-SWI[A-Z]*)\s+#x[0-9A-F]+\s+'([^\s)]+)\)/))) {
         const swiName = m[1];
         const twoArgSwis = new Set([
@@ -2883,37 +3476,54 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         } else {
           stmts.push(`${indent}(bios-call ${swiName})`);
         }
-        regDirty.delete('r0');
-        regDirty.delete('r1');
+        env.regDirty.delete('r0');
+        env.regDirty.delete('r1');
       } else if ((m = ast.match(/^\((?:THUMB-BL|ARM-BL[A-Z]*)\s+(#x[0-9A-F]+)\)/))) {
         const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : m[1];
-        regDirty.delete('r0');
-        regDirty.delete('r1');
-        regDirty.delete('r2');
-        regDirty.delete('r3');
-        stmts.push(`${indent}(call ${targetSym})`);
+        const callArgs = [];
+        for (const argReg of ['r0', 'r1', 'r2', 'r3']) {
+          if (env.regDirty.has(argReg) && env.regExpr.get(argReg) && env.regExpr.get(argReg) !== argReg) {
+            callArgs.push(env.regExpr.get(argReg));
+          }
+          env.regDirty.delete(argReg);
+        }
+        const argsSuffix = callArgs.length > 0 ? ` ${callArgs.join(' ')}` : '';
+        stmts.push(`${indent}(call ${targetSym}${argsSuffix})`);
+      } else if ((m = ast.match(/^\((?:THUMB-POP|ARM-POP[A-Z]*)\s+"([^"]+)"\)/))) {
+        const regListStr = m[1];
+        const poppedRegs = regListStr.replace(/[{}]/g, '').trim().split(/\s+/).filter(Boolean);
+        for (const pr of poppedRegs) {
+          env.regDirty.delete(pr);
+          env.regLitAddr.delete(pr);
+          env.regConstVal.delete(pr);
+          env.regExpr.set(pr, pr);
+        }
+        if (poppedRegs.includes('pc')) {
+          flushDirty();
+          stmts.push(`${indent}(return)`);
+        } else if (env.pushedLr && poppedRegs.length === 1 && /^r[0-3]$/.test(poppedRegs[0])) {
+          env.poppedLrReg = poppedRegs[0];
+        }
       } else if ((m = ast.match(/^\((?:THUMB-BX|ARM-BX[A-Z]*)\s+(r\d+)\)/))) {
         const rn = m[1];
-        if (rn === 'r14') {
+        if (rn === 'r14' || rn === env.poppedLrReg) {
           flushDirty();
           stmts.push(`${indent}(return)`);
         } else if (subInfo.interworkThumbSym) {
-          regDirty.delete(rn);
+          env.regDirty.delete(rn);
           stmts.push(`${indent}(call ${resolveSym(subInfo.interworkThumbSym)})`);
         } else {
           const target = getReg(rn);
-          regDirty.delete(rn);
+          env.regDirty.delete(rn);
           stmts.push(`${indent}(call ${target})`);
         }
       } else if ((m = ast.match(/^\(ARM-B\s+(#x[0-9A-F]+)\)/))) {
         if (subInfo.name === 'rom-header-entry') {
           stmts.push(`${indent}(call arm7tdmi-reset-start)`);
         } else {
+          flushDirty();
           stmts.push(`${indent}(tail-jump ${m[1]})`);
         }
-      } else if ((m = ast.match(/^\((?:THUMB-POP|ARM-POP[A-Z]*).*?\bpc\b/))) {
-        flushDirty();
-        stmts.push(`${indent}(return)`);
       } else if ((m = ast.match(/^\((THUMB-LDMIA|THUMB-STMIA)\s+(r\d+)!\s+"([^"]+)"\)/))) {
         const opKind = m[1] === 'THUMB-LDMIA' ? 'block-load!' : 'block-store!';
         stmts.push(`${indent}(${opKind} ${m[2]} "${m[3]}")`);
@@ -2921,7 +3531,9 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
       k++;
     }
 
-    if (stmts.length === 0) {
+    if (isBranchOrLoop) {
+      flushDirty();
+    } else if (stmts.length === 0) {
       flushDirty();
       if (stmts.length === 0) {
         stmts.push(`${indent}(nop)`);
@@ -2930,16 +3542,26 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
     return stmts;
   };
 
-  const bodyLines = foldRange(0, insns.length, '      ', true);
+  const bodyLines = foldRange(0, insns.length, '      ', makeEnv(), false);
   return [`    (decompiled-pseudo-code`, ...bodyLines, `    )`];
 }
 
 function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
-  const used = new Uint8Array(insns.length);
   const loopsByHeader = new Map();
   const branchesByIdx = new Map();
+  const acceptedIntervals = [];
   let structuredLoops = 0;
   let structuredConditionals = 0;
+
+  const isIntervalCompatible = (start, end) => {
+    for (const iv of acceptedIntervals) {
+      if (end < iv.start || start > iv.end) continue;
+      if (start >= iv.start && end <= iv.end && !(start === iv.start && end === iv.end)) continue;
+      if (iv.start >= start && iv.end <= end && !(start === iv.start && end === iv.end)) continue;
+      return false;
+    }
+    return true;
+  };
 
   // 1. Identify backward branches (spin-wait-mmio-loop, counted-loop, do-while-loop)
   for (let i = 0; i < insns.length; i++) {
@@ -2953,13 +3575,9 @@ function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
           break;
         }
       }
-      if (headerIdx >= 0 && i - headerIdx <= 18) {
-        let overlap = false;
-        for (let k = headerIdx; k <= i; k++) {
-          if (used[k]) { overlap = true; break; }
-        }
-        if (!overlap) {
-          for (let k = headerIdx; k <= i; k++) used[k] = 1;
+      if (headerIdx >= 0 && i - headerIdx <= 18 && !loopsByHeader.has(headerIdx)) {
+        if (isIntervalCompatible(headerIdx, i)) {
+          acceptedIntervals.push({ start: headerIdx, end: i });
           let pollMmio = null;
           let stepOp = null;
           for (let k = Math.max(0, headerIdx - 2); k <= i; k++) {
@@ -2992,9 +3610,9 @@ function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
     }
   }
 
-  // 2. Identify forward conditional branches (if-else and when-branch)
+  // 2. Identify forward conditional branches (if-else and when-branch), including nested intervals
   for (let i = 0; i < insns.length; i++) {
-    if (used[i]) continue;
+    if (branchesByIdx.has(i)) continue;
     const ins = insns[i];
     if (!ins.branchInfo || ins.branchInfo.cond === 'always' || ins.branchTarget === null) continue;
     if (ins.branchTarget > ins.pcNum) {
@@ -3009,11 +3627,7 @@ function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
         joinIdx = Math.min(insns.length, i + 4);
       }
       if (joinIdx > i && joinIdx - i <= 14) {
-        let overlap = false;
-        for (let k = i; k < joinIdx; k++) {
-          if (used[k]) { overlap = true; break; }
-        }
-        if (overlap) continue;
+        if (!isIntervalCompatible(i, joinIdx - 1)) continue;
 
         const prevIns = insns[joinIdx - 1];
         let mergeIdx = -1;
@@ -3035,15 +3649,17 @@ function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
             mergeIdx = Math.min(insns.length, joinIdx + 3);
           }
           if (mergeIdx > joinIdx) {
-            for (let k = joinIdx; k < mergeIdx; k++) {
-              if (used[k]) { mergeIdx = -1; break; }
+            if (!isIntervalCompatible(i, mergeIdx - 1) || !isIntervalCompatible(joinIdx, mergeIdx - 1)) {
+              mergeIdx = -1;
             }
           }
         }
 
         const condExpr = inferGbaCondExpr(insns, i, ins.branchInfo.negCond);
         if (mergeIdx > joinIdx) {
-          for (let k = i; k < mergeIdx; k++) used[k] = 1;
+          acceptedIntervals.push({ start: i, end: mergeIdx - 1 });
+          acceptedIntervals.push({ start: i, end: joinIdx - 1 });
+          acceptedIntervals.push({ start: joinIdx, end: mergeIdx - 1 });
           const mergeAddr =
             mergeIdx < insns.length
               ? insns[mergeIdx].addr
@@ -3061,7 +3677,7 @@ function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
           });
           structuredConditionals++;
         } else {
-          for (let k = i; k < joinIdx; k++) used[k] = 1;
+          acceptedIntervals.push({ start: i, end: joinIdx - 1 });
           const joinAddr =
             joinIdx < insns.length
               ? insns[joinIdx].addr
@@ -3081,69 +3697,77 @@ function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
     }
   }
 
+  // Synthesize pseudo-code first so flagsAnnot on instructions are populated
+  const pseudoCodeLines = synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym, subInfo);
+
   const formatInsnLine = (ins, indent) => {
     const resolvedTarget = ins.callTargetSym ? resolveSym(ins.callTargetSym) : null;
     const callAnnot = resolvedTarget ? ` #:target '${resolvedTarget}` : '';
-    return `${indent}(insn "${ins.addr}" ${ins.wordHex} ${ins.ast}${callAnnot})`;
+    const flagsAnnot = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
+    return `${indent}(insn "${ins.addr}" ${ins.wordHex} ${ins.ast}${flagsAnnot}${callAnnot})`;
   };
 
-  const astLines = [];
-  for (let i = 0; i < insns.length; ) {
-    if (loopsByHeader.has(i)) {
-      const lp = loopsByHeader.get(i);
-      if (lp.kind === 'spin-wait-mmio-loop') {
-        astLines.push(
-          `    (spin-wait-mmio-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:mmio '${lp.mmio} #:cond '${lp.cond}`
-        );
-      } else if (lp.kind === 'counted-loop') {
-        astLines.push(
-          `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
-        );
+  const visitedAstStructs = new Set();
+  const renderAstRange = (startIdx, endIdx, indent) => {
+    const lines = [];
+    for (let i = startIdx; i < endIdx; ) {
+      if (loopsByHeader.has(i) && !visitedAstStructs.has(`loop:${i}`) && loopsByHeader.get(i).latchIdx < endIdx) {
+        visitedAstStructs.add(`loop:${i}`);
+        const lp = loopsByHeader.get(i);
+        if (lp.kind === 'spin-wait-mmio-loop') {
+          lines.push(
+            `${indent}(spin-wait-mmio-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:mmio '${lp.mmio} #:cond '${lp.cond}`
+          );
+        } else if (lp.kind === 'counted-loop') {
+          lines.push(
+            `${indent}(counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
+          );
+        } else {
+          lines.push(
+            `${indent}(do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
+          );
+        }
+        lines.push(...renderAstRange(lp.headerIdx, lp.latchIdx + 1, `${indent}  `));
+        lines.push(`${indent})`);
+        i = lp.latchIdx + 1;
+      } else if (branchesByIdx.has(i) && !visitedAstStructs.has(`branch:${i}`)) {
+        const br = branchesByIdx.get(i);
+        const brEnd = br.kind === 'if-else' ? br.mergeIdx : br.joinIdx;
+        if (brEnd <= endIdx) {
+          visitedAstStructs.add(`branch:${i}`);
+          if (br.kind === 'if-else') {
+            lines.push(
+              `${indent}(if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
+            );
+            lines.push(`${indent}  (then-branch`);
+            lines.push(...renderAstRange(br.branchIdx, br.elseIdx, `${indent}    `));
+            lines.push(`${indent}  )`);
+            lines.push(`${indent}  (else-branch`);
+            lines.push(...renderAstRange(br.elseIdx, br.mergeIdx, `${indent}    `));
+            lines.push(`${indent}  )`);
+            lines.push(`${indent})`);
+            i = br.mergeIdx;
+          } else {
+            lines.push(
+              `${indent}(when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
+            );
+            lines.push(...renderAstRange(br.branchIdx, br.joinIdx, `${indent}  `));
+            lines.push(`${indent})`);
+            i = br.joinIdx;
+          }
+        } else {
+          lines.push(formatInsnLine(insns[i], indent));
+          i++;
+        }
       } else {
-        astLines.push(
-          `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
-        );
+        lines.push(formatInsnLine(insns[i], indent));
+        i++;
       }
-      for (let k = lp.headerIdx; k <= lp.latchIdx; k++) {
-        astLines.push(formatInsnLine(insns[k], '      '));
-      }
-      astLines.push(`    )`);
-      i = lp.latchIdx + 1;
-    } else if (branchesByIdx.has(i)) {
-      const br = branchesByIdx.get(i);
-      if (br.kind === 'if-else') {
-        astLines.push(
-          `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
-        );
-        astLines.push(`      (then-branch`);
-        for (let k = br.branchIdx; k < br.elseIdx; k++) {
-          astLines.push(formatInsnLine(insns[k], '        '));
-        }
-        astLines.push(`      )`);
-        astLines.push(`      (else-branch`);
-        for (let k = br.elseIdx; k < br.mergeIdx; k++) {
-          astLines.push(formatInsnLine(insns[k], '        '));
-        }
-        astLines.push(`      )`);
-        astLines.push(`    )`);
-        i = br.mergeIdx;
-      } else {
-        astLines.push(
-          `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
-        );
-        for (let k = br.branchIdx; k < br.joinIdx; k++) {
-          astLines.push(formatInsnLine(insns[k], '      '));
-        }
-        astLines.push(`    )`);
-        i = br.joinIdx;
-      }
-    } else {
-      astLines.push(formatInsnLine(insns[i], '    '));
-      i++;
     }
-  }
+    return lines;
+  };
 
-  const pseudoCodeLines = synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym, subInfo);
+  const astLines = renderAstRange(0, insns.length, '    ');
   return { astLines, pseudoCodeLines, structuredLoops, structuredConditionals };
 }
 
@@ -3324,6 +3948,36 @@ function analyzeAndDisassembleGbaRom(romBuf) {
 
   const callGraphEdges = [];
 
+  const gbaStructFieldsMap = new Map();
+  const recordGbaStructField = (baseReg, offsetNum, typeTag, sizeBytes) => {
+    const structName =
+      baseReg === 'r0' || baseReg === 'r1'
+        ? `gba_arg_ptr_${baseReg}_struct`
+        : baseReg === 'r4' || baseReg === 'r5' || baseReg === 'r6' || baseReg === 'r7'
+          ? `gba_actor_state_${baseReg}_struct`
+          : `gba_reg_${baseReg}_struct`;
+    if (!gbaStructFieldsMap.has(baseReg)) {
+      gbaStructFieldsMap.set(baseReg, {
+        name: structName,
+        baseReg,
+        fields: new Map(),
+        totalAccesses: 0,
+      });
+    }
+    const entry = gbaStructFieldsMap.get(baseReg);
+    entry.totalAccesses++;
+    const fKey = `${offsetNum}:${typeTag}`;
+    const prev = entry.fields.get(fKey) || {
+      fieldSym: `:field_0x${offsetNum.toString(16).toUpperCase()}`,
+      offset: offsetNum,
+      type: typeTag,
+      size: sizeBytes,
+      accesses: 0,
+    };
+    prev.accesses++;
+    entry.fields.set(fKey, prev);
+  };
+
   const disassembleArmSubroutine = (name, startOff, maxInsns = 24) => {
     const insns = [];
     const literals = [];
@@ -3413,11 +4067,14 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     const interworkThumbSym = interworkThumbTarget
       ? `thumb-bx-entry-${interworkThumbTarget.toString(16).toUpperCase()}`
       : null;
+    const abi = inferGbaSubroutineAbi(insns);
     const cfg = structureGbaSubroutineCfg(insns, (s) => s, { name, interworkThumbSym });
     return {
       isa: 'arm32',
       name,
       startAddr,
+      params: abi.params,
+      returns: abi.returns,
       callees,
       literals,
       mmioTouched: Array.from(mmioTouched),
@@ -3513,11 +4170,14 @@ function analyzeAndDisassembleGbaRom(romBuf) {
         if (!isLocalBranch && nextPc > maxForwardTarget) break;
       }
     }
+    const abi = inferGbaSubroutineAbi(insns);
     const cfg = structureGbaSubroutineCfg(insns, (s) => s, { name });
     return {
       isa: 'thumb16',
       name,
       startAddr,
+      params: abi.params,
+      returns: abi.returns,
       callees,
       literals,
       mmioTouched: Array.from(mmioTouched),
@@ -3578,6 +4238,43 @@ function analyzeAndDisassembleGbaRom(romBuf) {
 
   const subroutines = [...armSubroutines, ...thumbSubroutines];
 
+  const classifyGbaRomTargetByBytes = (addrNum, isArm = false) => {
+    const addrHex = addrNum.toString(16).toUpperCase();
+    const off = (addrNum - 0x08000000) & ~1;
+    if (off >= 0 && off + 32 <= romBuf.length) {
+      for (let k = 0; k < 16 && off + k * 2 + 4 <= romBuf.length; k++) {
+        const hw = romBuf.readUInt16LE(off + k * 2);
+        if ((hw & 0xff00) === 0xdf00) {
+          const swiNum = hw & 0xff;
+          if (swiNum === 0x11 || swiNum === 0x12) return `lz77_decompress_helper_${addrHex}`;
+          if (swiNum === 0x04 || swiNum === 0x05) return `bios_vblank_helper_${addrHex}`;
+          if (swiNum === 0x0b || swiNum === 0x0c) return `bios_cpuset_helper_${addrHex}`;
+          return `bios_swi_helper_${addrHex}`;
+        }
+        if ((hw & 0xf800) === 0x4800) {
+          const imm8 = hw & 0xff;
+          const poolOff = (((off + k * 2 + 4) & ~3) + (imm8 << 2));
+          if (poolOff >= 0 && poolOff + 4 <= romBuf.length) {
+            const litVal = romBuf.readUInt32LE(poolOff);
+            const mmio = GBA_MMIO_SYMBOLS[litVal] || classifyGbaLiteralAddress(litVal);
+            if (mmio) {
+              if (mmio.startsWith('DMA')) return `dma_transfer_helper_${addrHex}`;
+              if (mmio === 'DISPSTAT' || mmio === 'IME' || mmio === 'IE' || mmio === 'IF') return `irq_sync_helper_${addrHex}`;
+              if (mmio === 'KEYINPUT' || mmio === 'KEYCNT') return `joypad_input_helper_${addrHex}`;
+              if (mmio.startsWith('SOUND') || mmio.startsWith('FIFO')) return `audio_mixer_helper_${addrHex}`;
+              if (mmio === 'VRAM_PTR' || mmio === 'OAM_PTR' || mmio === 'PALRAM_PTR' || mmio === 'DISPCNT' || mmio.startsWith('BG')) {
+                return `ppu_vram_helper_${addrHex}`;
+              }
+              if (mmio === 'IWRAM_PTR') return `iwram_state_helper_${addrHex}`;
+              if (mmio === 'EWRAM_PTR') return `ewram_state_helper_${addrHex}`;
+            }
+          }
+        }
+      }
+    }
+    return isArm ? `iwram_arm_routine_${addrHex}` : `rom_thumb_helper_${addrHex}`;
+  };
+
   // Semantic Subroutine Auto-Namer for GBA (ARM7TDMI ARM32 & Thumb16)
   const classifyGbaSubroutineName = (sub) => {
     if (
@@ -3629,7 +4326,16 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     if ((sub.structuredLoops || 0) > 0) {
       return `ewram_loop_step_${addrHex}`;
     }
-    return `agb_engine_fn_${addrHex}`;
+    if (hasAnyMmio(['IWRAM_PTR'])) {
+      return `iwram_state_update_${addrHex}`;
+    }
+    if (hasAnyMmio(['EWRAM_PTR'])) {
+      return `ewram_actor_update_${addrHex}`;
+    }
+    if ((sub.callees || []).length > 0) {
+      return `rom_dispatch_${addrHex}`;
+    }
+    return classifyGbaRomTargetByBytes(sub.startAddr, sub.isa === 'arm32');
   };
 
   const gbaRenameMap = new Map();
@@ -3641,8 +4347,14 @@ function analyzeAndDisassembleGbaRom(romBuf) {
   const resolveGbaSym = (sym) => {
     if (!sym) return sym;
     if (gbaRenameMap.has(sym)) return gbaRenameMap.get(sym);
-    const m = sym.match(/^sub-(?:arm|thumb)-([0-9A-F]+)$/i);
-    if (m) return `agb_engine_fn_${m[1].toUpperCase()}`;
+    const m = sym.match(/^sub-(arm|thumb)-([0-9A-F]+)$/i);
+    if (m) {
+      const isArm = m[1].toLowerCase() === 'arm';
+      const addrNum = parseInt(m[2], 16) >>> 0;
+      const semName = classifyGbaRomTargetByBytes(addrNum, isArm);
+      gbaRenameMap.set(sym, semName);
+      return semName;
+    }
     return sym;
   };
   for (const sub of subroutines) {
@@ -3653,6 +4365,7 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     const reCfg = structureGbaSubroutineCfg(sub.insns, resolveGbaSym, {
       name: sub.name,
       interworkThumbSym: sub.interworkThumbSym,
+      recordStructField: recordGbaStructField,
     });
     sub.structuredAstLines = reCfg.astLines;
     sub.pseudoCodeLines = reCfg.pseudoCodeLines;
@@ -3830,6 +4543,20 @@ function analyzeAndDisassembleGbaRom(romBuf) {
   const totalStructuredLoops = subroutines.reduce((acc, s) => acc + (s.structuredLoops || 0), 0);
   const totalStructuredConditionals = subroutines.reduce((acc, s) => acc + (s.structuredConditionals || 0), 0);
 
+  const structLayouts = Array.from(gbaStructFieldsMap.values()).map((st) => {
+    const fields = Array.from(st.fields.values())
+      .sort((a, b) => a.offset - b.offset)
+      .slice(0, 16);
+    const maxEnd = fields.reduce((acc, f) => Math.max(acc, f.offset + f.size), 0);
+    return {
+      name: st.name,
+      baseReg: st.baseReg,
+      totalBytes: Math.max(4, maxEnd),
+      accessCount: st.totalAccesses,
+      fields,
+    };
+  });
+
   return {
     title,
     gameCode,
@@ -3855,12 +4582,14 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       structuredConditionals: totalStructuredConditionals,
       stateMachinesLifted: stateMachines.length,
       highLevelIdiomsLifted: highLevelIdioms.length,
+      structLayoutsLifted: structLayouts.length,
     },
     topMmioRegisters,
     biosSwiCatalog,
     lz77Assets,
     stateMachines,
     highLevelIdioms,
+    structLayouts,
     callGraphEdges: callGraphEdges.slice(0, 48),
     subroutines,
   };
@@ -3944,6 +4673,20 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
   }
   lines.push(`)`);
   lines.push('');
+  lines.push(`(define-gba-struct-layouts`);
+  for (const st of analysis.structLayouts || []) {
+    lines.push(
+      `  (struct-layout ${st.name} #:base-reg '${st.baseReg} #:total-bytes ${st.totalBytes} #:access-count ${st.accessCount}`
+    );
+    for (const f of st.fields) {
+      lines.push(
+        `    (field ${f.fieldSym} #:offset #x${f.offset.toString(16).toUpperCase()} #:type ${f.type} #:size ${f.size} #:accesses ${f.accesses})`
+      );
+    }
+    lines.push(`  )`);
+  }
+  lines.push(`)`);
+  lines.push('');
   lines.push(`(define-gba-lifted-lz77-assets`);
   for (const asset of analysis.lz77Assets) {
     lines.push(
@@ -3956,8 +4699,9 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
   for (const sub of analysis.subroutines) {
     const formName = sub.isa === 'thumb16' ? 'defsub-thumb16' : 'defsub-arm32';
     const calleeStr = sub.callees && sub.callees.length > 0 ? ` (calls ${sub.callees.slice(0, 6).join(' ')})` : '';
+    const paramsStr = ` #:params (${(sub.params || []).join(' ')}) #:returns (${(sub.returns || []).join(' ')})`;
     lines.push(
-      `  (${formName} ${sub.name} (isa '${sub.isa}) (entry #x${sub.startAddr.toString(16).padStart(8, '0')})${calleeStr}`
+      `  (${formName} ${sub.name} (isa '${sub.isa}) (entry #x${sub.startAddr.toString(16).padStart(8, '0')})${calleeStr}${paramsStr}`
     );
     if (sub.pseudoCodeLines && sub.pseudoCodeLines.length > 0) {
       for (const pLine of sub.pseudoCodeLines) {

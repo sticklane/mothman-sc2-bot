@@ -946,7 +946,44 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       resolvedAddr = (regState.val[rs] + simm16) >>> 0;
       const symInfo = resolveN64AddressSymbol(resolvedAddr);
       if (symInfo.isMmio) mmioSym = symInfo.symbol;
-      addrSuffix = ` #:addr #x${resolvedAddr.toString(16).padStart(8, '0')} #:sym "${symInfo.symbol}"`;
+      let flagsSuffix = '';
+      if (!isGprLoad && !isFpuMem && mmioSym && (rt === 0 || regState.valid[rt] >= 1)) {
+        const immVal = rt === 0 ? 0 : regState.val[rt] >>> 0;
+        const flags = [];
+        if (mmioSym === 'VI_STATUS') {
+          const bpp = immVal & 0x3;
+          if (bpp === 0) flags.push("'TYPE_BLANK");
+          else if (bpp === 2) flags.push("'TYPE_16BPP");
+          else if (bpp === 3) flags.push("'TYPE_32BPP");
+          if (immVal & 0x0004) flags.push("'GAMMA_DITHER_EN");
+          if (immVal & 0x0008) flags.push("'GAMMA_EN");
+          if (immVal & 0x0010) flags.push("'DIVOT_EN");
+          if (immVal & 0x0040) flags.push("'SERRATE_INTERLACE");
+          const aa = (immVal >>> 8) & 0x3;
+          if (aa === 1) flags.push("'AA_RESAMP");
+          else if (aa === 2) flags.push("'AA_RESAMP_FETCH");
+          else if (aa === 3) flags.push("'AA_OFF");
+          if (immVal & 0x10000) flags.push("'DITHER_FILTER_EN");
+        } else if (mmioSym === 'SP_STATUS') {
+          if (immVal & 0x0001) flags.push("'CLR_HALT");
+          if (immVal & 0x0002) flags.push("'SET_HALT");
+          if (immVal & 0x0004) flags.push("'CLR_BROKE");
+          if (immVal & 0x0008) flags.push("'CLR_INTR");
+          if (immVal & 0x0010) flags.push("'SET_INTR");
+          if (immVal & 0x0020) flags.push("'CLR_SSTEP");
+          if (immVal & 0x0040) flags.push("'SET_SSTEP");
+          if (immVal & 0x0080) flags.push("'CLR_INTR_ON_BREAK");
+          if (immVal & 0x0100) flags.push("'SET_INTR_ON_BREAK");
+          if (immVal & 0x0200) flags.push("'CLR_SIG0_YIELD");
+          if (immVal & 0x0400) flags.push("'SET_SIG0_YIELD");
+          if (immVal & 0x0800) flags.push("'CLR_SIG1_YIELDED");
+          if (immVal & 0x2000) flags.push("'CLR_SIG2_TASKDONE");
+        }
+        if (flags.length > 0) {
+          flagsSuffix = ` #:flags (${flags.join(' ')})`;
+        }
+      }
+      addrSuffix = ` #:addr #x${resolvedAddr.toString(16).padStart(8, '0')} #:sym "${symInfo.symbol}"${flagsSuffix}`;
     }
 
     const isStructMemOp =
@@ -1287,7 +1324,7 @@ export function decodeGbiDisplayListCommand(cmd0, cmd1, ucodeFamily = 'GBI1', se
         const load = (cmd0 & 2) ? 'G_MTX_LOAD' : 'G_MTX_MUL';
         return {
           macro: 'gsSPMatrix',
-          sexp: `(gsSPMatrix #x${maddr.toString(16).padStart(8, '0')} ${mode}|${load})`,
+          sexp: `(gsSPMatrix #x${maddr.toString(16).padStart(8, '0')} ${mode} ${load})`,
         };
       }
       case 0xdb:
@@ -1336,7 +1373,7 @@ export function decodeGbiDisplayListCommand(cmd0, cmd1, ucodeFamily = 'GBI1', se
       const maddr = resolveSeg(cmd1);
       return {
         macro: 'gsSPMatrix',
-        sexp: `(gsSPMatrix #x${maddr.toString(16).padStart(8, '0')} ${mode}|${load})`,
+        sexp: `(gsSPMatrix #x${maddr.toString(16).padStart(8, '0')} ${mode} ${load})`,
       };
     }
     case 0x03: {
@@ -2009,6 +2046,9 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
 
   const structureN64SubroutineCfg = (insns) => {
     const formatLeaf = (ins, indent) => `${indent}(insn "${ins.pcHex}" ${ins.wordHex} ${ins.decoded})`;
+    const loopsByHeader = new Map();
+    const branchesByIdx = new Map();
+    const guardReturnsByIdx = new Map();
 
     // Detect if the subroutine ends with a standard LW $ra / ADDIU $sp / JR $ra epilogue
     let epilogueStartIdx = -1;
@@ -2026,7 +2066,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       while (idx <= endIdx) {
         linePosAtInsn[idx] = lines.length;
         const ins = insns[idx];
-        if (depth < 2 && ins.branchInfo) {
+        if (depth < 4 && ins.branchInfo) {
           const { cond, negCond, targetPc, isUncond } = ins.branchInfo;
           // In MIPS III, every branch/jump executes its 1-instruction delay slot at `idx + 1` (`pc + 4`).
           const latchEndIdx = Math.min(idx + 1, endIdx);
@@ -2059,6 +2099,19 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
               const headerHex = insns[headerIdx].pcHex;
               const latchHex = ins.pcHex;
               const condExpr = inferN64CondExpr(insns, idx, cond);
+              const loopKind = polledMmio ? 'spin-wait-mmio-loop' : stepOp ? 'counted-loop' : 'do-while-loop';
+              if (!loopsByHeader.has(headerIdx) || latchEndIdx > loopsByHeader.get(headerIdx).latchEndIdx) {
+                loopsByHeader.set(headerIdx, {
+                  kind: loopKind,
+                  headerIdx,
+                  branchIdx: idx,
+                  latchEndIdx,
+                  polledMmio,
+                  stepOp,
+                  cond,
+                  condExpr: condExpr.replace(/^'/, ''),
+                });
+              }
               if (polledMmio) {
                 lines.push(
                   `${indent}(spin-wait-mmio-loop #:header "${headerHex}" #:latch "${latchHex}" #:mmio '${polledMmio} #:cond '${cond}`
@@ -2102,6 +2155,13 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
                   : `0x${targetPc.toString(16).padStart(8, '0').toUpperCase()}`;
               totalStructuredConditionals++;
               const condExpr = inferN64CondExpr(insns, idx, cond);
+              guardReturnsByIdx.set(idx, {
+                branchIdx: idx,
+                latchEndIdx,
+                epilogueHex,
+                cond,
+                condExpr: condExpr.replace(/^'/, ''),
+              });
               lines.push(`${indent}(guard-return #:branch "${ins.pcHex}" #:epilogue "${epilogueHex}" #:cond '${cond} #:cond-expr ${condExpr}`);
               for (let k = idx; k <= latchEndIdx; k++) {
                 lines.push(formatLeaf(insns[k], `${indent}  `));
@@ -2122,7 +2182,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
               }
             }
 
-            if (joinIdx !== -1 && !crossesEnclosingLoopLatch && joinIdx > latchEndIdx && joinIdx - idx <= 18) {
+            if (joinIdx !== -1 && !crossesEnclosingLoopLatch && joinIdx > latchEndIdx && joinIdx - idx <= 22) {
               // Check if `joinIdx - 2` is an unconditional branch/jump (with delay slot at `joinIdx - 1`) over an `else` block
               const prevBrIdx = joinIdx - 2;
               const prevBr = prevBrIdx > latchEndIdx ? insns[prevBrIdx] : null;
@@ -2134,9 +2194,21 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
                     break;
                   }
                 }
-                if (mergeIdx !== -1 && mergeIdx - joinIdx <= 14) {
+                if (mergeIdx !== -1 && mergeIdx - joinIdx <= 16) {
                   totalStructuredConditionals++;
                   const condExpr = inferN64CondExpr(insns, idx, negCond);
+                  branchesByIdx.set(idx, {
+                    kind: 'if-else',
+                    branchIdx: idx,
+                    delaySlotIdx: latchEndIdx,
+                    thenStartIdx: latchEndIdx,
+                    thenEndIdx: joinIdx - 1,
+                    elseStartIdx: joinIdx,
+                    elseEndIdx: mergeIdx - 1,
+                    mergeIdx,
+                    cond: negCond,
+                    condExpr: condExpr.replace(/^'/, ''),
+                  });
                   lines.push(
                     `${indent}(if-else #:branch "${ins.pcHex}" #:else "${insns[joinIdx].pcHex}" #:merge "${insns[mergeIdx].pcHex}" #:cond '${negCond} #:cond-expr ${condExpr}`
                   );
@@ -2156,6 +2228,16 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
 
               totalStructuredConditionals++;
               const condExpr = inferN64CondExpr(insns, idx, negCond);
+              branchesByIdx.set(idx, {
+                kind: 'when-branch',
+                branchIdx: idx,
+                delaySlotIdx: latchEndIdx,
+                thenStartIdx: latchEndIdx,
+                thenEndIdx: joinIdx - 1,
+                joinIdx,
+                cond: negCond,
+                condExpr: condExpr.replace(/^'/, ''),
+              });
               lines.push(`${indent}(when-branch #:branch "${ins.pcHex}" #:join "${insns[joinIdx].pcHex}" #:cond '${negCond} #:cond-expr ${condExpr}`);
               lines.push(formatLeaf(ins, `${indent}  `));
               if (latchEndIdx > idx) lines.push(formatLeaf(insns[latchEndIdx], `${indent}  `));
@@ -2172,7 +2254,12 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       return lines;
     };
 
-    return structRange(0, insns.length - 1, '    ', 0).join('\n');
+    return {
+      cfgText: structRange(0, insns.length - 1, '    ', 0).join('\n'),
+      loopsByHeader,
+      branchesByIdx,
+      guardReturnsByIdx,
+    };
   };
 
   // Helper to lift a complete VR4300 subroutine from either ROM or decompressed RDRAM
@@ -2258,12 +2345,12 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
 
     if (insns.length === 0) return null;
     liftedVAddrs.add(vAddrBase >>> 0);
-    const structuredBody = structureN64SubroutineCfg(insns);
+    const cfgInfo = structureN64SubroutineCfg(insns);
     const subObj = {
       name,
       vAddr: vAddrBase >>> 0,
       entryHex: `#x${(vAddrBase >>> 0).toString(16).padStart(8, '0')}`,
-      romOffsetHex: source === 'rom' ? `#x${offset.toString(16).padStart(6, '0')}` : `#x${offset.toString(16).padStart(6, '0')}-rdram`,
+      romOffsetHex: `#x${offset.toString(16).padStart(6, '0')}`,
       stackFrameBytes: frameSize,
       raSaveOffset: raOffset,
       callersCount: jalTargets.get(vAddrBase >>> 0) || 0,
@@ -2273,7 +2360,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       callees,
       mmioUsed,
       insns,
-      structuredBody,
+      structuredBody: cfgInfo.cfgText,
     };
     subroutines.push(subObj);
     return subObj;
@@ -2509,28 +2596,245 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
   const resolveN64CalleeName = (vAddr) => {
     const addr32 = vAddr >>> 0;
     if (n64RenameMap.has(addr32)) return n64RenameMap.get(addr32);
-    return `engine_sub_${addr32.toString(16).padStart(8, '0').toUpperCase()}`;
+    const addrHex = addr32.toString(16).padStart(8, '0').toUpperCase();
+    const romOff = 0x1000 + ((addr32 - bootPC) >>> 0);
+    let targetDv = null;
+    let targetOff = -1;
+    if (romOff >= 0x1000 && romOff + 32 <= romBuf.length) {
+      targetDv = dv;
+      targetOff = romOff;
+    } else if (rdramDv && addr32 >= 0x80000400 && (addr32 & 0x00ffffff) + 32 <= rdramDv.byteLength) {
+      targetDv = rdramDv;
+      targetOff = addr32 & 0x00ffffff;
+    }
+    let semName = null;
+    if (targetDv && targetOff >= 0) {
+      let hasFpu = false;
+      let hasCop0 = false;
+      let hasMmio = false;
+      let hasJal = false;
+      let hasStructMem = false;
+      let hasShiftMath = false;
+      for (let k = 0; k < 18 && targetOff + k * 4 + 4 <= targetDv.byteLength; k++) {
+        const w = targetDv.getUint32(targetOff + k * 4, false) >>> 0;
+        if (w === 0x03e00008 && k >= 1) break;
+        const op = (w >>> 26) & 0x3f;
+        const imm16 = w & 0xffff;
+        if (op === 0x11 || op === 0x31 || op === 0x35 || op === 0x39 || op === 0x3d) hasFpu = true;
+        else if (op === 0x10) hasCop0 = true;
+        else if (op === 0x0f && (imm16 & 0xff00) === 0xa400) hasMmio = true;
+        else if (op === 0x03) hasJal = true;
+        else if (op >= 0x20 && op <= 0x2b) hasStructMem = true;
+        else if (op === 0x00 && ((w & 0x3f) === 0x00 || (w & 0x3f) === 0x02 || (w & 0x3f) === 0x03)) hasShiftMath = true;
+      }
+      if (hasFpu) semName = `fpu_math_helper_${addrHex}`;
+      else if (hasMmio || hasCop0) semName = `os_rcp_driver_${addrHex}`;
+      else if (hasJal && hasStructMem) semName = `actor_state_helper_${addrHex}`;
+      else if (hasStructMem) semName = `rdram_struct_helper_${addrHex}`;
+      else if (hasShiftMath) semName = `math_fixed_helper_${addrHex}`;
+      else semName = `rom_helper_${addrHex}`;
+    } else if (addr32 >= 0x80300000) {
+      semName = `libultra_os_routine_${addrHex}`;
+    } else {
+      semName = `kseg0_routine_${addrHex}`;
+    }
+    n64RenameMap.set(addr32, semName);
+    return semName;
   };
 
-  const synthesizeN64PseudoCode = (insns) => {
-    const gpr = { r0: '0' };
-    const fpr = {};
-    const stackGpr = {};
-    const stackFpr = {};
-    const stmts = [];
+  // Whole-ROM struct layout aggregator across all lifted subroutines
+  const n64StructFieldsMap = new Map(); // baseKey -> Map(offsetNum -> { offsetHex, widthTag, accessCount })
+  const recordN64StructField = (baseReg, offsetNum, widthTag) => {
+    if (offsetNum < 0 || offsetNum > 0x400) return;
+    const cleanBase = /^(a[0-3]|s[0-7]|t[0-9]|v[0-1]|rdram_sym_[0-9A-Fa-f]+)$/.test(baseReg) ? baseReg : 'a0';
+    if (!n64StructFieldsMap.has(cleanBase)) {
+      n64StructFieldsMap.set(cleanBase, new Map());
+    }
+    const fMap = n64StructFieldsMap.get(cleanBase);
+    const existing = fMap.get(offsetNum);
+    if (existing) {
+      existing.accessCount++;
+    } else {
+      fMap.set(offsetNum, {
+        offsetNum,
+        offsetHex: `#x${offsetNum.toString(16).toUpperCase().padStart(2, '0')}`,
+        fieldSym: `:field_0x${offsetNum.toString(16).toUpperCase()}`,
+        widthTag,
+        accessCount: 1,
+      });
+    }
+  };
+
+  // Interprocedural MIPS O32 ABI parameter & return signature inference
+  const inferN64SubroutineAbi = (insns) => {
+    const readArgs = new Set();
+    const writtenRegs = new Set();
+    let writesV0 = false;
+    let writesF0 = false;
+
+    const checkRead = (reg) => {
+      if ((/^a[0-3]$/.test(reg) || reg === '$f12' || reg === '$f14') && !writtenRegs.has(reg)) {
+        readArgs.add(reg);
+      }
+    };
+    const markWrite = (reg) => {
+      if (!reg || reg === 'r0') return;
+      writtenRegs.add(reg);
+      if (reg === 'v0') writesV0 = true;
+      if (reg === '$f0') writesF0 = true;
+    };
+
+    for (let i = 0; i < insns.length; i++) {
+      const d = insns[i].decoded;
+      let m;
+      // Stack home-slot save of incoming argument: (MIPS-SW a0..a3 offset(sp))
+      if ((m = d.match(/^\(MIPS-(?:SW|SD|SWC1|SDC1)\s+(a[0-3]|\$f1[24])\s+-?\d+\(sp\)\)/))) {
+        checkRead(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-(?:LW|LH|LHU|LB|LBU|LD|LWU|LWC1|LDC1)\s+(\S+)\s+-?\d+\((\w+)\)/))) {
+        checkRead(m[2]);
+        markWrite(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-(?:SW|SH|SB|SD|SWC1|SDC1)\s+(\S+)\s+-?\d+\((\w+)\)/))) {
+        checkRead(m[1]);
+        checkRead(m[2]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-LUI\s+(\S+)\s+/))) {
+        markWrite(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-MTC1\s+(\S+)\s+(\$f\d+)/))) {
+        checkRead(m[1]);
+        markWrite(m[2]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-MFC1\s+(\S+)\s+(\$f\d+)/))) {
+        checkRead(m[2]);
+        markWrite(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-(?:ADDIU|ADDI|ORI|ANDI|XORI|SLTI|SLTIU|SLL|SRL|SRA|DADDIU)\s+(\S+)\s+(\S+)\s+/))) {
+        checkRead(m[2]);
+        markWrite(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-(?:ADDU|ADD|SUBU|SUB|AND|OR|XOR|NOR|SLT|SLTU|SLLV|SRLV|SRAV|DADDU|DSUBU)\s+(\S+)\s+(\S+)\s+(\S+)\)/))) {
+        checkRead(m[2]);
+        checkRead(m[3]);
+        markWrite(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-(?:ADD|SUB|MUL|DIV)\.[SD]\s+(\$f\d+)\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        checkRead(m[2]);
+        checkRead(m[3]);
+        markWrite(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-[A-Z.]+\.[SDW]\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        checkRead(m[2]);
+        markWrite(m[1]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-(?:BEQ|BNE|BEQL|BNEL)\s+(\S+)\s+(\S+)\s+/))) {
+        checkRead(m[1]);
+        checkRead(m[2]);
+        continue;
+      }
+      if ((m = d.match(/^\(MIPS-(?:BLEZ|BGTZ|BLTZ|BGEZ|BLEZL|BGTZL|BLTZL|BGEZL)\s+(\S+)\s+/))) {
+        checkRead(m[1]);
+        continue;
+      }
+      if (/^\(MIPS-JAL\s/.test(d)) {
+        // After JAL + its delay slot, caller-saved argument registers are clobbered
+        if (i + 1 < insns.length) {
+          const dd = insns[i + 1].decoded;
+          let dm;
+          if ((dm = dd.match(/^\(MIPS-(?:OR|ADDU|DADDU)\s+(a[0-3])\s+(\S+)\s+r0\)/))) {
+            checkRead(dm[2]);
+            markWrite(dm[1]);
+          } else if ((dm = dd.match(/^\(MIPS-(?:ADDIU|ORI)\s+(a[0-3])\s+(\S+)\s+/))) {
+            checkRead(dm[2]);
+            markWrite(dm[1]);
+          }
+        }
+        for (const r of ['a0', 'a1', 'a2', 'a3', '$f12', '$f14']) {
+          writtenRegs.add(r);
+        }
+      }
+    }
+
+    const orderedParams = ['a0', 'a1', 'a2', 'a3', '$f12', '$f14'].filter((r) => readArgs.has(r));
+    const returns = writesF0 ? ['$f0'] : writesV0 ? ['v0'] : [];
+    return { params: orderedParams, returns };
+  };
+
+  const synthesizeN64PseudoCode = (insns, cfgInfo = null) => {
+    const loopsByHeader = cfgInfo?.loopsByHeader || new Map();
+    const branchesByIdx = cfgInfo?.branchesByIdx || new Map();
+    const guardReturnsByIdx = cfgInfo?.guardReturnsByIdx || new Map();
+    const consumedLoopHeaders = new Set();
+
     let wroteF0 = false;
     let wroteV0 = false;
 
-    const pushStmt = (s) => {
-      if (stmts.length < 14 && stmts[stmts.length - 1] !== s) {
-        stmts.push(s);
+    const makeEnv = (parent = null) => ({
+      gpr: parent ? { ...parent.gpr } : { r0: '0' },
+      fpr: parent ? { ...parent.fpr } : {},
+      stackGpr: parent ? { ...parent.stackGpr } : {},
+      stackFpr: parent ? { ...parent.stackFpr } : {},
+      dirtyGpr: new Set(),
+      dirtyFpr: new Set(),
+      writtenArgGpr: parent ? new Set(parent.writtenArgGpr) : new Set(),
+      writtenArgFpr: parent ? new Set(parent.writtenArgFpr) : new Set(),
+    });
+
+    const getGpr = (env, r) => (r === 'r0' ? '0' : env.gpr[r] || r);
+    const getFpr = (env, f) => env.fpr[f] || f;
+
+    const resolveCondExpr = (rawCondExpr, env) => {
+      const clean = (rawCondExpr || '').replace(/^'/, '');
+      const m = clean.match(/^\((\S+)\s+(\S+)\s+([^)]+)\)$/);
+      if (!m) return clean || '(!= cc 0)';
+      const op = m[1];
+      let lhs = m[2];
+      let rhs = m[3];
+      if (/^(?:t[0-9]|at)$/.test(lhs) && env.gpr[lhs] && env.gpr[lhs] !== lhs) {
+        lhs = env.gpr[lhs];
+      }
+      if (/^(?:t[0-9]|at)$/.test(rhs) && env.gpr[rhs] && env.gpr[rhs] !== rhs) {
+        rhs = env.gpr[rhs];
+      }
+      return `(${op} ${lhs} ${rhs})`;
+    };
+
+    const setGpr = (env, dst, val, indent, pushStmt) => {
+      if (!dst || dst === 'r0') return;
+      env.gpr[dst] = val;
+      env.dirtyGpr.add(dst);
+      if (/^a[0-3]$/.test(dst)) env.writtenArgGpr.add(dst);
+      if (dst === 'v0') {
+        wroteV0 = true;
+        pushStmt(`${indent}(set! v0 ${val})`);
+        env.dirtyGpr.delete('v0');
       }
     };
 
-    const getGpr = (r) => (r === 'r0' ? '0' : gpr[r] || r);
-    const getFpr = (f) => fpr[f] || f;
+    const setFpr = (env, dst, val, indent, pushStmt) => {
+      if (!dst) return;
+      env.fpr[dst] = val;
+      env.dirtyFpr.add(dst);
+      if (dst === '$f12' || dst === '$f14') env.writtenArgFpr.add(dst);
+      if (dst === '$f0') {
+        wroteF0 = true;
+        pushStmt(`${indent}(set! $f0 ${val})`);
+        env.dirtyFpr.delete('$f0');
+      }
+    };
 
-    const processSingleInsn = (ins) => {
+    const processSingleInsn = (ins, env, indent, pushStmt) => {
       const d = ins.decoded;
       let m;
 
@@ -2539,105 +2843,93 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       if (/^\(MIPS-(?:SW|SD|LW|LD)\s+(?:ra|s[0-7]|fp)\s+-?\d+\(sp\)/.test(d)) return;
       if (d === '(MIPS-NOP)') return;
 
-      // Argument register home-slot saves on stack (`SW a0..a3 offset(sp)`)
-      if ((m = d.match(/^\(MIPS-SW\s+(a[0-3])\s+(-?\d+)\(sp\)\)/))) {
-        stackGpr[m[2]] = m[1];
+      // Argument register home-slot saves on stack (`SW/SH/SB/SD a0..a3 offset(sp)`)
+      if ((m = d.match(/^\(MIPS-(?:SW|SH|SB|SD)\s+(a[0-3])\s+(-?\d+)\(sp\)\)/))) {
+        env.stackGpr[m[2]] = m[1];
         return;
       }
       // Local GPR stack store/load
-      if ((m = d.match(/^\(MIPS-SW\s+(\w+)\s+(-?\d+)\(sp\)\)/))) {
-        stackGpr[m[2]] = getGpr(m[1]);
+      if ((m = d.match(/^\(MIPS-(?:SW|SH|SB|SD)\s+(\w+)\s+(-?\d+)\(sp\)\)/))) {
+        env.stackGpr[m[2]] = getGpr(env, m[1]);
         return;
       }
-      if ((m = d.match(/^\(MIPS-LW\s+(\w+)\s+(-?\d+)\(sp\)\)/))) {
-        if (stackGpr[m[2]]) {
-          gpr[m[1]] = stackGpr[m[2]];
+      if ((m = d.match(/^\(MIPS-(?:LW|LH|LHU|LB|LBU|LD|LWU)\s+(\w+)\s+(-?\d+)\(sp\)\)/))) {
+        if (env.stackGpr[m[2]]) {
+          env.gpr[m[1]] = env.stackGpr[m[2]];
         } else {
           const offNum = Number(m[2]);
-          gpr[m[1]] = `stack_0x${Math.abs(offNum).toString(16).toUpperCase()}`;
+          env.gpr[m[1]] = `stack_0x${Math.abs(offNum).toString(16).toUpperCase()}`;
         }
+        if (/^a[0-3]$/.test(m[1])) env.writtenArgGpr.add(m[1]);
         return;
       }
       // Local FPR stack store/load
       if ((m = d.match(/^\(MIPS-(?:SWC1|SDC1)\s+(\$f\d+)\s+(-?\d+)\(sp\)\)/))) {
-        stackFpr[m[2]] = getFpr(m[1]);
+        env.stackFpr[m[2]] = getFpr(env, m[1]);
         return;
       }
       if ((m = d.match(/^\(MIPS-(?:LWC1|LDC1)\s+(\$f\d+)\s+(-?\d+)\(sp\)\)/))) {
-        fpr[m[1]] = stackFpr[m[2]] || m[1];
+        env.fpr[m[1]] = env.stackFpr[m[2]] || m[1];
+        if (m[1] === '$f12' || m[1] === '$f14') env.writtenArgFpr.add(m[1]);
         return;
       }
 
       // COP0 system control
       if ((m = d.match(/^\(MIPS-MTC0\s+(\S+)\s+(\S+)\)/))) {
-        pushStmt(`(set! COP0.${m[2]} ${getGpr(m[1])})`);
+        pushStmt(`${indent}(set! COP0.${m[2]} ${getGpr(env, m[1])})`);
         return;
       }
       if ((m = d.match(/^\(MIPS-MFC0\s+(\S+)\s+(\S+)\)/))) {
-        gpr[m[1]] = `COP0.${m[2]}`;
+        setGpr(env, m[1], `COP0.${m[2]}`, indent, pushStmt);
         return;
       }
 
       // LUI + resolved symbol or immediate
       if ((m = d.match(/^\(MIPS-LUI\s+(\S+)\s+#x([0-9a-fA-F]+)\)/))) {
         const hi = (parseInt(m[2], 16) << 16) >>> 0;
-        gpr[m[1]] = `#x${hi.toString(16).padStart(8, '0')}`;
+        env.gpr[m[1]] = `#x${hi.toString(16).padStart(8, '0')}`;
         return;
       }
       if ((m = d.match(/^\(MIPS-(?:ADDIU|ADDI|ORI)\s+(\S+)\s+(\S+)\s+[^\s)]+\s+#:addr\s+#x[0-9a-fA-F]+\s+#:sym\s+"([^"]+)"\)/))) {
-        gpr[m[1]] = m[3];
-        if (m[1] === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${m[3]})`);
-        }
+        setGpr(env, m[1], m[3], indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(?:ADDIU|ADDI)\s+(\S+)\s+r0\s+(-?\d+)\)/))) {
-        gpr[m[1]] = m[2];
-        if (m[1] === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${m[2]})`);
-        }
+        setGpr(env, m[1], m[2], indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-ORI\s+(\S+)\s+r0\s+(#x[0-9a-fA-F]+)\)/))) {
-        gpr[m[1]] = m[2];
-        if (m[1] === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${m[2]})`);
-        }
+        setGpr(env, m[1], m[2], indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-ANDI\s+(\S+)\s+(\S+)\s+#x([0-9a-fA-F]+)\)/))) {
         const dst = m[1];
-        const srcExpr = getGpr(m[2]);
+        const srcExpr = getGpr(env, m[2]);
         const mask = m[3].toLowerCase();
-        if (mask === 'ffff') gpr[dst] = `(u16 ${srcExpr})`;
-        else if (mask === 'ff') gpr[dst] = `(u8 ${srcExpr})`;
-        else gpr[dst] = `(bit-and ${srcExpr} #x${mask})`;
-        if (dst === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${gpr[dst]})`);
-        }
+        const val =
+          mask === 'ffff' ? `(u16 ${srcExpr})` : mask === 'ff' ? `(u8 ${srcExpr})` : `(bit-and ${srcExpr} #x${mask})`;
+        setGpr(env, dst, val, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(?:OR|ADDU|DADDU)\s+(\S+)\s+(\S+)\s+r0\)/))) {
-        gpr[m[1]] = getGpr(m[2]);
-        if (m[1] === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${gpr[m[1]]})`);
+        const dst = m[1];
+        const src = m[2];
+        const srcVal = getGpr(env, src);
+        if (/^s[0-7]$/.test(dst) && src === 'v0') {
+          pushStmt(`${indent}(set! ${dst} v0)`);
+          env.gpr[dst] = dst;
+          env.dirtyGpr.delete(dst);
+          return;
         }
+        setGpr(env, dst, srcVal, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(?:ADDIU|ADDI)\s+(\S+)\s+(\S+)\s+(-?\d+)\)/))) {
         const dst = m[1];
-        const srcExpr = getGpr(m[2]);
+        const srcExpr = getGpr(env, m[2]);
         const immNum = Number(m[3]);
-        gpr[dst] = immNum < 0 ? `(- ${srcExpr} ${-immNum})` : `(+ ${srcExpr} ${immNum})`;
-        if (dst === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${gpr[dst]})`);
-        }
+        const val = immNum < 0 ? `(- ${srcExpr} ${-immNum})` : `(+ ${srcExpr} ${immNum})`;
+        setGpr(env, dst, val, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(ADDU|ADD|SUBU|SUB|AND|OR|XOR)\s+(\S+)\s+(\S+)\s+(\S+)\)/))) {
@@ -2651,21 +2943,15 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
           XOR: 'bit-xor',
         };
         const dst = m[2];
-        gpr[dst] = `(${opMap[m[1]]} ${getGpr(m[3])} ${getGpr(m[4])})`;
-        if (dst === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${gpr[dst]})`);
-        }
+        const val = `(${opMap[m[1]]} ${getGpr(env, m[3])} ${getGpr(env, m[4])})`;
+        setGpr(env, dst, val, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(SLL|SRL|SRA)\s+(\S+)\s+(\S+)\s+(\d+)\)/))) {
         const shMap = { SLL: 'shl', SRL: 'shr', SRA: 'asr' };
         const dst = m[2];
-        gpr[dst] = `(${shMap[m[1]]} ${getGpr(m[3])} ${m[4]})`;
-        if (dst === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${gpr[dst]})`);
-        }
+        const val = `(${shMap[m[1]]} ${getGpr(env, m[3])} ${m[4]})`;
+        setGpr(env, dst, val, indent, pushStmt);
         return;
       }
 
@@ -2676,72 +2962,56 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         const fnum = Number(m[3]);
         const floatLit = m[4];
         if (floatLit) {
-          fpr[freg] = floatLit;
+          env.fpr[freg] = floatLit;
+          env.dirtyFpr.add(freg);
           if ((fnum & 1) === 1) {
-            fpr[`$f${fnum - 1}`] = floatLit;
+            env.fpr[`$f${fnum - 1}`] = floatLit;
           }
         } else if (rt === 'r0') {
-          if (!fpr[freg]) fpr[freg] = '0.0';
+          if (!env.fpr[freg]) env.fpr[freg] = '0.0';
         } else {
-          fpr[freg] = getGpr(rt);
+          setFpr(env, freg, getGpr(env, rt), indent, pushStmt);
         }
         return;
       }
       if ((m = d.match(/^\(MIPS-MFC1\s+(\S+)\s+(\$f\d+)\)/))) {
-        gpr[m[1]] = getFpr(m[2]);
-        if (m[1] === 'v0') {
-          wroteV0 = true;
-          pushStmt(`(set! v0 ${gpr[m[1]]})`);
-        }
+        setGpr(env, m[1], getFpr(env, m[2]), indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-CVT\.S\.W\s+(\$f\d+)\s+(\$f\d+)\)/))) {
-        const src = getFpr(m[2]);
-        fpr[m[1]] = src.startsWith('(u16 ') ? src : `(f32 ${src})`;
-        if (m[1] === '$f0') {
-          wroteF0 = true;
-          pushStmt(`(set! $f0 ${fpr[m[1]]})`);
-        }
+        const src = getFpr(env, m[2]);
+        const val = src.startsWith('(u16 ') ? src : `(f32 ${src})`;
+        setFpr(env, m[1], val, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-CVT\.D\.S\s+(\$f\d+)\s+(\$f\d+)\)/))) {
-        const src = getFpr(m[2]);
+        const src = getFpr(env, m[2]);
         const inner = src.startsWith('(f32 ') && src.endsWith(')') ? src.slice(5, -1) : src;
-        fpr[m[1]] = `(f64 ${inner})`;
+        setFpr(env, m[1], `(f64 ${inner})`, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-CVT\.S\.D\s+(\$f\d+)\s+(\$f\d+)\)/))) {
-        fpr[m[1]] = `(f32 ${getFpr(m[2])})`;
-        if (m[1] === '$f0') {
-          wroteF0 = true;
-          pushStmt(`(set! $f0 ${fpr[m[1]]})`);
-        }
+        setFpr(env, m[1], `(f32 ${getFpr(env, m[2])})`, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(?:TRUNC|ROUND|FLOOR|CEIL)\.W\.[SD]\s+(\$f\d+)\s+(\$f\d+)\)/))) {
-        fpr[m[1]] = `(s32 ${getFpr(m[2])})`;
+        setFpr(env, m[1], `(s32 ${getFpr(env, m[2])})`, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(MOV|ABS|NEG|SQRT)\.[SD]\s+(\$f\d+)\s+(\$f\d+)\)/))) {
         const kind = m[1];
         const dst = m[2];
-        const src = getFpr(m[3]);
-        fpr[dst] =
+        const src = getFpr(env, m[3]);
+        const val =
           kind === 'MOV' ? src : kind === 'ABS' ? `(abs ${src})` : kind === 'NEG' ? `(- ${src})` : `(sqrt ${src})`;
-        if (dst === '$f0') {
-          wroteF0 = true;
-          pushStmt(`(set! $f0 ${fpr[dst]})`);
-        }
+        setFpr(env, dst, val, indent, pushStmt);
         return;
       }
       if ((m = d.match(/^\(MIPS-(ADD|SUB|MUL|DIV)\.[SD]\s+(\$f\d+)\s+(\$f\d+)\s+(\$f\d+)\)/))) {
         const fOpMap = { ADD: '+', SUB: '-', MUL: '*', DIV: '/' };
         const dst = m[2];
-        fpr[dst] = `(${fOpMap[m[1]]} ${getFpr(m[3])} ${getFpr(m[4])})`;
-        if (dst === '$f0') {
-          wroteF0 = true;
-          pushStmt(`(set! $f0 ${fpr[dst]})`);
-        }
+        const val = `(${fOpMap[m[1]]} ${getFpr(env, m[3])} ${getFpr(env, m[4])})`;
+        setFpr(env, dst, val, indent, pushStmt);
         return;
       }
 
@@ -2749,21 +3019,16 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       if ((m = d.match(/^\(MIPS-(LW|LH|LHU|LB|LBU|LD|LWC1|LDC1)\s+(\S+)\s+-?\d+\(\S+\)\s+#:addr\s+#x[0-9a-fA-F]+\s+#:sym\s+"([^"]+)"/))) {
         const dst = m[2];
         const sym = m[3];
-        if (dst.startsWith('$f')) fpr[dst] = sym;
-        else {
-          gpr[dst] = sym;
-          if (dst === 'v0') {
-            wroteV0 = true;
-            pushStmt(`(set! v0 ${sym})`);
-          }
-        }
+        if (dst.startsWith('$f')) setFpr(env, dst, sym, indent, pushStmt);
+        else setGpr(env, dst, sym, indent, pushStmt);
         return;
       }
-      if ((m = d.match(/^\(MIPS-(SW|SH|SB|SD|SWC1|SDC1)\s+(\S+)\s+-?\d+\(\S+\)\s+#:addr\s+#x[0-9a-fA-F]+\s+#:sym\s+"([^"]+)"/))) {
+      if ((m = d.match(/^\(MIPS-(SW|SH|SB|SD|SWC1|SDC1)\s+(\S+)\s+-?\d+\(\S+\)\s+#:addr\s+#x[0-9a-fA-F]+\s+#:sym\s+"([^"]+)"(?:\s+#:flags\s+(\([^)]+\)))?/))) {
         const src = m[2];
         const sym = m[3];
-        const valExpr = src.startsWith('$f') ? getFpr(src) : getGpr(src);
-        pushStmt(`(set! ${sym} ${valExpr})`);
+        const flagsPart = m[4] ? ` #:flags ${m[4]}` : '';
+        const valExpr = src.startsWith('$f') ? getFpr(env, src) : getGpr(env, src);
+        pushStmt(`${indent}(set! ${sym} ${valExpr}${flagsPart})`);
         return;
       }
 
@@ -2784,17 +3049,15 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
             LWC1: ':f32',
             LDC1: ':f64',
           };
-          const baseResolved = gpr[base] && /^(a[0-3]|s[0-7]|v[0-1]|\(-> |rdram_sym_)/.test(gpr[base]) ? gpr[base] : base;
+          const widthTag = typeMap[opName] || ':s32';
+          const baseResolved = env.gpr[base] && /^(a[0-3]|s[0-7]|v[0-1]|\(-> |rdram_sym_)/.test(env.gpr[base]) ? env.gpr[base] : base;
+          recordN64StructField(baseResolved, offNum, widthTag);
           const offHex = offNum >= 0 ? `0x${offNum.toString(16).toUpperCase()}` : `-0x${(-offNum).toString(16).toUpperCase()}`;
-          const fieldExpr = `(-> ${baseResolved} :field_${offHex} ${typeMap[opName] || ':s32'})`;
+          const fieldExpr = `(-> ${baseResolved} :field_${offHex} ${widthTag})`;
           if (dst.startsWith('$f')) {
-            fpr[dst] = fieldExpr;
+            setFpr(env, dst, fieldExpr, indent, pushStmt);
           } else {
-            gpr[dst] = fieldExpr;
-            if (dst === 'v0') {
-              wroteV0 = true;
-              pushStmt(`(set! v0 ${fieldExpr})`);
-            }
+            setGpr(env, dst, fieldExpr, indent, pushStmt);
           }
         }
         return;
@@ -2806,95 +3069,235 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         const base = m[4];
         if (base !== 'sp' && base !== 'r0') {
           const typeMap = { SW: ':s32', SH: ':s16', SB: ':u8', SD: ':s64', SWC1: ':f32', SDC1: ':f64' };
-          const baseResolved = gpr[base] && /^(a[0-3]|s[0-7]|v[0-1]|\(-> |rdram_sym_)/.test(gpr[base]) ? gpr[base] : base;
+          const widthTag = typeMap[opName] || ':s32';
+          const baseResolved = env.gpr[base] && /^(a[0-3]|s[0-7]|v[0-1]|\(-> |rdram_sym_)/.test(env.gpr[base]) ? env.gpr[base] : base;
+          recordN64StructField(baseResolved, offNum, widthTag);
           const offHex = offNum >= 0 ? `0x${offNum.toString(16).toUpperCase()}` : `-0x${(-offNum).toString(16).toUpperCase()}`;
-          const valExpr = src.startsWith('$f') ? getFpr(src) : getGpr(src);
-          pushStmt(`(set! (-> ${baseResolved} :field_${offHex} ${typeMap[opName] || ':s32'}) ${valExpr})`);
+          const valExpr = src.startsWith('$f') ? getFpr(env, src) : getGpr(env, src);
+          pushStmt(`${indent}(set! (-> ${baseResolved} :field_${offHex} ${widthTag}) ${valExpr})`);
         }
         return;
       }
     };
 
-    for (let i = 0; i < insns.length; i++) {
-      const ins = insns[i];
-      const d = ins.decoded;
-
-      // Pattern 1: IDO C compiler unsigned-int-to-float conversion (`MTC1 v0 $f4; BGEZ v0; CVT.S.W $f6 $f4; LUI at #x4f80; MTC1 at $f8; NOP; ADD.S $f6 $f6 $f8`)
-      const mtcM = d.match(/^\(MIPS-MTC1\s+(\w+)\s+(\$f\d+)\)/);
-      if (
-        mtcM &&
-        i + 6 < insns.length &&
-        insns[i + 1].decoded.startsWith(`(MIPS-BGEZ ${mtcM[1]} `) &&
-        insns[i + 2].decoded.includes('MIPS-CVT.S.W') &&
-        insns[i + 3].decoded === '(MIPS-LUI at #x4f80)'
-      ) {
-        const cvtM = insns[i + 2].decoded.match(/^\(MIPS-CVT\.S\.W\s+(\$f\d+)\s+(\$f\d+)\)/);
-        if (cvtM && cvtM[2] === mtcM[2]) {
-          const srcExpr = getGpr(mtcM[1]);
-          fpr[cvtM[1]] = srcExpr.startsWith('(u16 ') ? srcExpr : `(u16 ${srcExpr})`;
-          i += 6;
-          continue;
-        }
-      }
-
-      // JAL subroutine call (execute delay slot at i + 1 before recording the call)
-      const jalM = d.match(/^\(MIPS-JAL\s+#x([0-9a-fA-F]+)/);
-      if (jalM) {
-        if (i + 1 < insns.length) {
-          processSingleInsn(insns[i + 1]);
-        }
-        const targetAddr = parseInt(jalM[1], 16) >>> 0;
-        const calleeName = resolveN64CalleeName(targetAddr);
-        let v0UsedAfter = false;
-        for (let k = i + 2; k < Math.min(insns.length, i + 9); k++) {
-          const kd = insns[k].decoded;
-          if (/^\(MIPS-JAL\s/.test(kd)) break;
-          if (/\bv0\b/.test(kd) && !/^\(MIPS-(?:LUI|LW|LH|LHU|LB|LBU|LD|ADDIU|ORI)\s+v0\b/.test(kd)) {
-            v0UsedAfter = true;
-            break;
+    const flushBranchEnv = (branchStmts, branchEnv, parentEnv, bodyIndent) => {
+      if (branchStmts.length === 0) {
+        for (const f of branchEnv.dirtyFpr) {
+          if (branchEnv.fpr[f] && branchEnv.fpr[f] !== f && branchEnv.fpr[f] !== parentEnv.fpr[f]) {
+            branchStmts.push(`${bodyIndent}(set! ${f} ${branchEnv.fpr[f]})`);
           }
         }
-        if (v0UsedAfter) {
-          pushStmt(`(set! v0 (call ${calleeName}))`);
-          gpr.v0 = 'v0';
-          wroteV0 = true;
-        } else {
-          pushStmt(`(call ${calleeName})`);
+        for (const r of branchEnv.dirtyGpr) {
+          if (r !== 'at' && branchEnv.gpr[r] && branchEnv.gpr[r] !== r && branchEnv.gpr[r] !== parentEnv.gpr[r]) {
+            branchStmts.push(`${bodyIndent}(set! ${r} ${branchEnv.gpr[r]})`);
+          }
         }
-        i += 1;
-        continue;
       }
+      if (branchStmts.length === 0) {
+        branchStmts.push(`${bodyIndent}(nop-cycle)`);
+      }
+    };
 
-      // JR ra epilogue return (execute delay slot at i + 1 first)
-      if (d === '(MIPS-JR ra)') {
-        if (i + 1 < insns.length) {
-          processSingleInsn(insns[i + 1]);
+    const evalRange = (startIdx, endIdx, env, indent, isBranchBody = false) => {
+      const stmts = [];
+      const pushStmt = (s) => {
+        if (stmts.length < 20 && stmts[stmts.length - 1] !== s) {
+          stmts.push(s);
         }
-        if (wroteF0) pushStmt('(return $f0)');
-        else if (wroteV0) pushStmt('(return v0)');
-        else pushStmt('(return)');
-        break;
+      };
+
+      for (let i = startIdx; i <= endIdx; i++) {
+        // 1. Check structured loop starting at `i`
+        const loopInfo = loopsByHeader.get(i);
+        if (loopInfo && !consumedLoopHeaders.has(i) && loopInfo.latchEndIdx <= endIdx) {
+          consumedLoopHeaders.add(i);
+          const loopEnv = makeEnv(env);
+          const bodyIndent = `${indent}  `;
+          const bodyStmts = evalRange(i, loopInfo.branchIdx - 1, loopEnv, bodyIndent, true);
+          if (loopInfo.latchEndIdx > loopInfo.branchIdx) {
+            const delayStmts = evalRange(loopInfo.branchIdx + 1, loopInfo.latchEndIdx, loopEnv, bodyIndent, true);
+            for (const ds of delayStmts) {
+              if (bodyStmts[bodyStmts.length - 1] !== ds) bodyStmts.push(ds);
+            }
+          }
+          if (bodyStmts.length === 0) {
+            if (loopInfo.polledMmio) {
+              bodyStmts.push(`${bodyIndent}(poll-mmio ${loopInfo.polledMmio})`);
+            } else {
+              flushBranchEnv(bodyStmts, loopEnv, env, bodyIndent);
+            }
+          }
+          const condStr = resolveCondExpr(loopInfo.condExpr, loopEnv);
+          const loopTag =
+            loopInfo.kind === 'spin-wait-mmio-loop'
+              ? `spin-wait-mmio ${loopInfo.polledMmio}`
+              : loopInfo.kind === 'counted-loop'
+                ? `loop-counted ${condStr}`
+                : `do-while ${condStr}`;
+          pushStmt(`${indent}(${loopTag}\n${bodyStmts.join('\n')})`);
+          i = loopInfo.latchEndIdx;
+          continue;
+        }
+
+        // 2. Check structured guard-return at `i`
+        const grInfo = guardReturnsByIdx.get(i);
+        if (grInfo && grInfo.latchEndIdx <= endIdx) {
+          const grEnv = makeEnv(env);
+          const bodyIndent = `${indent}  `;
+          const delayStmts =
+            grInfo.latchEndIdx > i ? evalRange(i + 1, grInfo.latchEndIdx, grEnv, bodyIndent, true) : [];
+          const retStr = wroteF0 ? '(return $f0)' : wroteV0 ? '(return v0)' : '(return)';
+          delayStmts.push(`${bodyIndent}${retStr}`);
+          const condStr = resolveCondExpr(grInfo.condExpr, env);
+          pushStmt(`${indent}(when ${condStr}\n${delayStmts.join('\n')})`);
+          i = grInfo.latchEndIdx;
+          continue;
+        }
+
+        // 3. Check structured conditional branch (`if-else` or `when-branch`) at `i`
+        const brInfo = branchesByIdx.get(i);
+        if (brInfo) {
+          const brEndIdx = brInfo.kind === 'if-else' ? brInfo.mergeIdx - 1 : brInfo.joinIdx - 1;
+          if (brEndIdx <= endIdx) {
+            const condStr = resolveCondExpr(brInfo.condExpr, env);
+            if (brInfo.kind === 'if-else') {
+              const thenEnv = makeEnv(env);
+              const elseEnv = makeEnv(env);
+              const thenIndent = `${indent}    `;
+              const elseIndent = `${indent}    `;
+              const thenStmts = evalRange(brInfo.thenStartIdx, brInfo.thenEndIdx, thenEnv, thenIndent, true);
+              flushBranchEnv(thenStmts, thenEnv, env, thenIndent);
+              const elseStmts = evalRange(brInfo.elseStartIdx, brInfo.elseEndIdx, elseEnv, elseIndent, true);
+              flushBranchEnv(elseStmts, elseEnv, env, elseIndent);
+              pushStmt(
+                `${indent}(if ${condStr}\n${indent}  (then\n${thenStmts.join('\n')})\n${indent}  (else\n${elseStmts.join('\n')}))`
+              );
+              i = brInfo.mergeIdx - 1;
+              continue;
+            } else {
+              const whenEnv = makeEnv(env);
+              const whenIndent = `${indent}  `;
+              const whenStmts = evalRange(brInfo.thenStartIdx, brInfo.thenEndIdx, whenEnv, whenIndent, true);
+              flushBranchEnv(whenStmts, whenEnv, env, whenIndent);
+              pushStmt(`${indent}(when ${condStr}\n${whenStmts.join('\n')})`);
+              i = brInfo.joinIdx - 1;
+              continue;
+            }
+          }
+        }
+
+        const ins = insns[i];
+        const d = ins.decoded;
+
+        // If inside a branch body and we hit an unconditional branch/jump out to merge, execute its delay slot and exit block
+        if (isBranchBody && ins.branchInfo?.isUncond && ins.branchInfo.targetPc > ins.pc) {
+          if (i + 1 <= endIdx) {
+            processSingleInsn(insns[i + 1], env, indent, pushStmt);
+          }
+          break;
+        }
+
+        // Pattern 1: IDO C compiler unsigned-int-to-float conversion
+        const mtcM = d.match(/^\(MIPS-MTC1\s+(\w+)\s+(\$f\d+)\)/);
+        if (
+          mtcM &&
+          i + 6 <= endIdx &&
+          insns[i + 1].decoded.startsWith(`(MIPS-BGEZ ${mtcM[1]} `) &&
+          insns[i + 2].decoded.includes('MIPS-CVT.S.W') &&
+          insns[i + 3].decoded === '(MIPS-LUI at #x4f80)'
+        ) {
+          const cvtM = insns[i + 2].decoded.match(/^\(MIPS-CVT\.S\.W\s+(\$f\d+)\s+(\$f\d+)\)/);
+          if (cvtM && cvtM[2] === mtcM[2]) {
+            const srcExpr = getGpr(env, mtcM[1]);
+            env.fpr[cvtM[1]] = srcExpr.startsWith('(u16 ') ? srcExpr : `(u16 ${srcExpr})`;
+            env.dirtyFpr.add(cvtM[1]);
+            i += 6;
+            continue;
+          }
+        }
+
+        // JAL subroutine call (execute delay slot at i + 1 before recording the call)
+        const jalM = d.match(/^\(MIPS-JAL\s+#x([0-9a-fA-F]+)/);
+        if (jalM) {
+          if (i + 1 <= endIdx) {
+            processSingleInsn(insns[i + 1], env, indent, pushStmt);
+          }
+          const targetAddr = parseInt(jalM[1], 16) >>> 0;
+          const calleeName = resolveN64CalleeName(targetAddr);
+          const callArgs = [];
+          if (env.writtenArgFpr.has('$f12')) {
+            callArgs.push(getFpr(env, '$f12'));
+            if (env.writtenArgFpr.has('$f14')) {
+              callArgs.push(getFpr(env, '$f14'));
+            }
+          } else {
+            for (const ar of ['a0', 'a1', 'a2', 'a3']) {
+              if (env.writtenArgGpr.has(ar)) {
+                callArgs.push(getGpr(env, ar));
+              } else {
+                break;
+              }
+            }
+          }
+          env.writtenArgGpr.clear();
+          env.writtenArgFpr.clear();
+
+          const callExpr = `(call ${calleeName}${callArgs.length ? ' ' + callArgs.join(' ') : ''})`;
+          let v0UsedAfter = false;
+          for (let k = i + 2; k < Math.min(insns.length, i + 9); k++) {
+            const kd = insns[k].decoded;
+            if (/^\(MIPS-JAL\s/.test(kd)) break;
+            if (/\bv0\b/.test(kd) && !/^\(MIPS-(?:LUI|LW|LH|LHU|LB|LBU|LD|ADDIU|ORI)\s+v0\b/.test(kd)) {
+              v0UsedAfter = true;
+              break;
+            }
+          }
+          if (v0UsedAfter) {
+            pushStmt(`${indent}(set! v0 ${callExpr})`);
+            env.gpr.v0 = 'v0';
+            wroteV0 = true;
+          } else {
+            pushStmt(`${indent}${callExpr}`);
+          }
+          i += 1;
+          continue;
+        }
+
+        // JR ra epilogue return (execute delay slot at i + 1 first)
+        if (d === '(MIPS-JR ra)') {
+          if (i + 1 <= endIdx) {
+            processSingleInsn(insns[i + 1], env, indent, pushStmt);
+          }
+          if (wroteF0) pushStmt(`${indent}(return $f0)`);
+          else if (wroteV0) pushStmt(`${indent}(return v0)`);
+          else pushStmt(`${indent}(return)`);
+          break;
+        }
+
+        if (d.startsWith('(MIPS-JR ')) {
+          const reg = d.slice(9, -1).trim();
+          pushStmt(`${indent}(tail-call ${getGpr(env, reg)})`);
+          continue;
+        }
+        if (d.startsWith('(MIPS-JALR ')) {
+          const parts = d.slice(11, -1).trim().split(/\s+/);
+          const reg = parts[parts.length - 1];
+          pushStmt(`${indent}(call-indirect ${getGpr(env, reg)})`);
+          continue;
+        }
+
+        processSingleInsn(ins, env, indent, pushStmt);
       }
 
-      if (d.startsWith('(MIPS-JR ')) {
-        const reg = d.slice(9, -1).trim();
-        pushStmt(`(tail-call ${getGpr(reg)})`);
-        continue;
-      }
-      if (d.startsWith('(MIPS-JALR ')) {
-        const parts = d.slice(11, -1).trim().split(/\s+/);
-        const reg = parts[parts.length - 1];
-        pushStmt(`(call-indirect ${getGpr(reg)})`);
-        continue;
-      }
+      return stmts;
+    };
 
-      processSingleInsn(ins);
-    }
-
+    const rootEnv = makeEnv(null);
+    const stmts = evalRange(0, insns.length - 1, rootEnv, '      ', false);
     if (stmts.length === 0) {
-      stmts.push('(return)');
+      stmts.push('      (return)');
     }
-    return `    (decompiled-pseudo-code\n${stmts.map((s) => `      ${s}`).join('\n')})`;
+    return `    (decompiled-pseudo-code\n${stmts.join('\n')})`;
   };
 
   totalStructuredLoops = 0;
@@ -2912,10 +3315,35 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       const cAddr = parseInt(cHex.replace(/^#x/i, ''), 16) >>> 0;
       return resolveN64CalleeName(cAddr);
     });
-    const cfgBody = structureN64SubroutineCfg(sub.insns);
-    const pseudoCodeBlock = synthesizeN64PseudoCode(sub.insns);
-    sub.structuredBody = `${pseudoCodeBlock}\n${cfgBody}`;
+    const cfgInfo = structureN64SubroutineCfg(sub.insns);
+    const abiSig = inferN64SubroutineAbi(sub.insns);
+    sub.params = abiSig.params;
+    sub.returns = abiSig.returns;
+    const pseudoCodeBlock = synthesizeN64PseudoCode(sub.insns, cfgInfo);
+    sub.structuredBody = `${pseudoCodeBlock}\n${cfgInfo.cfgText}`;
   }
+
+  const structLayouts = [];
+  for (const [baseKey, fMap] of n64StructFieldsMap.entries()) {
+    const fields = [...fMap.values()].sort((a, b) => a.offsetNum - b.offsetNum);
+    if (fields.length === 0) continue;
+    const lastField = fields[fields.length - 1];
+    const widthBytes =
+      lastField.widthTag === ':f64' || lastField.widthTag === ':s64'
+        ? 8
+        : lastField.widthTag === ':f32' || lastField.widthTag === ':s32'
+          ? 4
+          : lastField.widthTag === ':s16' || lastField.widthTag === ':u16'
+            ? 2
+            : 1;
+    structLayouts.push({
+      name: `n64_struct_${baseKey.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+      baseReg: baseKey,
+      totalSpanBytes: lastField.offsetNum + widthBytes,
+      fields,
+    });
+  }
+  structLayouts.sort((a, b) => b.fields.length - a.fields.length);
 
   // 6. Lifted RSP/RDP Display List Commands (`Fast3D` / `F3DEX` / `F3DEX2` / `S2DEX`) & Hierarchical Scene-Graph Batches
   const liftedDisplayList = liveRuntime?.liftedDisplayList || [];
@@ -3003,12 +3431,14 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       structuredConditionalsCount: totalStructuredConditionals,
       stateMachinesCount: stateMachines.length,
       highLevelIdiomsCount: highLevelIdioms.length,
+      structLayoutsLifted: structLayouts.length,
       gbiDisplayListCommandsLifted: liftedDisplayList.length,
       gbiDisplayListTotalExecuted: totalGbiCommandsExecuted,
     },
     mmioCrossRefs: mmioList,
     resolvedPointerSamples: resolvedPointerSamples.slice(0, 48),
     subroutines,
+    structLayouts,
     stateMachines,
     highLevelIdioms,
     liftedDisplayList,
@@ -3065,6 +3495,21 @@ function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
           .join('\n')
       : `  ;; Standard VR4300 + RCP microcode idioms`;
 
+  const structLayoutLines =
+    (analysis.structLayouts || []).length > 0
+      ? analysis.structLayouts
+          .map((sl) => {
+            const fieldStr = sl.fields
+              .map(
+                (f) =>
+                  `    (field ${f.fieldSym} #:offset ${f.offsetHex} #:type '${f.widthTag} #:accesses ${f.accessCount})`
+              )
+              .join('\n');
+            return `  (struct-layout ${sl.name} #:base-reg '${sl.baseReg} #:span-bytes ${sl.totalSpanBytes}\n${fieldStr})`;
+          })
+          .join('\n')
+      : `  ;; No struct field offsets observed`;
+
   const subText = analysis.subroutines
     .map((s) => {
       const body =
@@ -3072,7 +3517,9 @@ function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
         s.insns
           .map((ins) => `    (insn "${ins.pcHex}" ${ins.wordHex} ${ins.decoded})`)
           .join('\n');
-      return `  (subroutine ${s.name} (entry ${s.entryHex}) (offset ${s.romOffsetHex}) (stack-frame ${s.stackFrameBytes}) (fpu-ops ${s.fpuOpsCount})\n${body}\n  )`;
+      const paramsList = (s.params || []).join(' ');
+      const returnsList = (s.returns || []).join(' ');
+      return `  (subroutine ${s.name} (entry ${s.entryHex}) (offset ${s.romOffsetHex}) (stack-frame ${s.stackFrameBytes}) (fpu-ops ${s.fpuOpsCount}) #:params (${paramsList}) #:returns (${returnsList})\n${body}\n  )`;
     })
     .join('\n');
 
@@ -3143,6 +3590,7 @@ function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
     (structured-conditionals ${g.structuredConditionalsCount})
     (lifted-state-machines ${g.stateMachinesCount})
     (high-level-idioms ${g.highLevelIdiomsCount})
+    (struct-layouts-lifted ${g.structLayoutsLifted || 0})
     (gbi-display-list-commands-lifted ${g.gbiDisplayListCommandsLifted})
     (gbi-display-list-total-executed ${g.gbiDisplayListTotalExecuted})))
 
@@ -3169,6 +3617,11 @@ ${stateMachineLines}
 ;; Lifted COP1 3D FPU Math, libultra OS Sync/DMA & Hierarchical GBI Scene-Graph Idioms
 (define-n64-high-level-idioms
 ${idiomLines}
+)
+
+;; Whole-ROM Aggregated N64 RDRAM Object & Actor Struct Layouts
+(define-n64-struct-layouts
+${structLayoutLines}
 )
 
 ;; Complete Stack-Framed MIPS III VR4300 + COP0 + COP1 FPU Lifted Subroutines (with Structured CFG)

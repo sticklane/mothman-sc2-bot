@@ -2412,10 +2412,117 @@
     (check-true (string-contains? sym-str "(decompiled-pseudo-code") (format "Missing decompiled-pseudo-code in ~a" sym-p))
     (check-true (string-contains? sym-str "#:cond-expr ") (format "Missing #:cond-expr in ~a" sym-p))
     (check-true (string-contains? sym-str "#:struct-field ") (format "Missing #:struct-field in ~a" sym-p))
+    (check-true (string-contains? sym-str "(define-n64-struct-layouts") (format "Missing N64 struct layouts in ~a" sym-p))
+    (check-true (string-contains? sym-str "#:params ") (format "Missing #:params in ~a" sym-p))
+    (check-true (string-contains? sym-str "#:returns ") (format "Missing #:returns in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-n64-state-machines") (format "Missing N64 state machines in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-n64-high-level-idioms") (format "Missing N64 high-level idioms in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-n64-rsp-rdp-display-list") (format "Missing GBI display lists in ~a" sym-p))
     (check-true (string-contains? sym-str "(define-n64-resolved-pointers") (format "Missing resolved 32-bit pointers in ~a" sym-p))))
 
+;; ============================================================================
+;; 40. Code Understandability Bug Fixes, Interprocedural ABI/Mirror/Struct
+;;     Lifting & Layers 5-8 Type/Coeffect/Bidirectional Pseudo-Code Compiler
+;; ============================================================================
+(test-case "40. Code Understandability Bug Fixes (Bugs #1-#7), ABI/Mirror/Struct Lifting & Layers 5-8 Type/Compiler Features"
+  ;; 1. Verify Bug #1, #5, #6 + MMIO Mirror & Bitfield Flags in nes_super_mario_bros_whole_rom.rkt
+  (define smb-str (file->string (build-path "examples" "decompiled" "nes_super_mario_bros_whole_rom.rkt")))
+  ;; Bug #1: nmi_handler branch on wram #x0774 is non-empty and merges into A before storing to ppumask_mirror_0779
+  (check-true (string-contains? smb-str "(when (== (wram #x0774) #x00) (set! A (bit-ior ppumask_mirror_0779 #x1E)))"))
+  (check-true (string-contains? smb-str "(set! ppumask_mirror_0779 A #:flags (SHOW_SPRITES SHOW_BG SHOW_SPRITES_LEFT8 SHOW_BG_LEFT8))"))
+  ;; Bug #5: guard-return in logic_routine_b0_8182 preserves (-= (wram #x0777) 1) before (return) and uses not-zero/not-equal
+  (check-true (string-contains? smb-str "(-= (wram #x0777) 1)\n              (return)"))
+  (check-true (string-contains? smb-str "(guard-return #:branch-pc #x8197 #:cond not-zero/not-equal #:cond-expr (!= (wram #x0777) #x00)"))
+  ;; Bug #6 + Memory Layout: symbolic ppu-writes, symbolized entry prologue, def-memory-layout with ppuctrl_mirror_0778
+  (check-true (string-contains? smb-str "(ppu-writes (PPUCTRL PPUMASK OAMADDR PPUSCROLL PPUADDR PPUDATA OAMDMA))"))
+  (check-true (string-contains? smb-str "(STA #:abs PPUCTRL #:flags (BG_PATTERN_1000))"))
+  (check-true (string-contains? smb-str "(def-memory-layout"))
+  (check-true (string-contains? smb-str "(mirror ppuctrl_mirror_0778 #:addr #x0778 #:mmio PPUCTRL)"))
+  (check-false (regexp-match? #rx"\\bsub_[0-9A-Fa-f]{4}\\b" smb-str))
+
+  ;; 2. Verify Bug #6 in gb_tetris_whole_rom.rkt (zero unresolved sub_XXXX / sub_bN_XXXX callees + def-memory-layout)
+  (define gb-tetris-str (file->string (build-path "examples" "decompiled" "gb_tetris_whole_rom.rkt")))
+  (check-false (regexp-match? #rx"\\bsub_([bB][0-9]+_)?[0-9A-Fa-f]{4}\\b" gb-tetris-str))
+  (check-true (string-contains? gb-tetris-str "(def-memory-layout"))
+
+  ;; 3. Verify Bug #7 in pico_celeste_classic_whole_rom.rkt (no "function(this)" assignment, single-line when bodies preserved)
+  (define celeste-str (file->string (build-path "examples" "decompiled" "pico_celeste_classic_whole_rom.rkt")))
+  (check-false (string-contains? celeste-str "\"function(this)\""))
+  (check-true (string-contains? celeste-str "(when (> (-> this :y) 128) (call kill_player this))"))
+
+  ;; 4. Verify Bug #3 (DMA3SAD/DMA3DAD/DMA3CNT_L pointer arithmetic) & Bug #4 (flushDirty ordering + ARM-STRBNE) in gba_metroid_fusion_whole_rom.rkt
+  (define fusion-str (file->string (build-path "examples" "decompiled" "gba_metroid_fusion_whole_rom.rkt")))
+  (check-true (string-contains? fusion-str "(set! (mmio32 DMA3SAD) r13)"))
+  (check-true (string-contains? fusion-str "(set! (mmio32 DMA3DAD) (shl #x80 18))"))
+  (check-true (string-contains? fusion-str "(set! (mmio32 DMA3CNT_L) #x85010000 #:flags (DMA_ENABLE START_IMMEDIATE DMA_32BIT SRC_FIXED DST_INC))"))
+  (check-true (string-contains? fusion-str "(set! r3 (+ #x4000000 #x200))\n      (set! r2 (-> r3 :offset_0x0 :u32))"))
+  (check-true (string-contains? fusion-str "(when (!= (bit-and r1 #x2000) 0)\n        (set! (-> r3 :offset_0x17C :u8) r0))"))
+
+  ;; 5. Verify Bug #2 (Structured if/else & when in N64 decompiled-pseudo-code) in n64_super_mario_64_whole_rom.rkt
+  (define sm64-str (file->string (build-path "examples" "decompiled" "n64_super_mario_64_whole_rom.rkt")))
+  (check-true (string-contains? sm64-str "(if (= s0 0)"))
+  (check-true (string-contains? sm64-str "(else\n          (set! v0 0))"))
+  (check-true (string-contains? sm64-str "(when (< (-> a0 :field_0x0 :s16) -7)\n        (set! (-> a0 :field_0x4 :f32) (f32 (+ (-> a0 :field_0x0 :s16) 6))))"))
+
+  ;; 6. Layer 5: BitfieldType & RangeType verification
+  (check-equal? (decode-bitfield-mask 'PPUCTRL #x90) '(NMI_ENABLE BG_PATTERN_1000))
+  (check-equal? (encode-bitfield-flags 'PPUCTRL '(NMI_ENABLE BG_PATTERN_1000)) #x90)
+  (check-true (check-bitfield-mask-valid? 'PPUCTRL #x90))
+  (check-equal? (decode-bitfield-mask 'LCDC #x93) '(LCD_ENABLE BG_TILE_8000 OBJ_ENABLE BG_WIN_ENABLE))
+  (define idx-check-ok (check-dispatch-index-bounds (make-range-type 0 3) 4))
+  (check-true (hash-ref idx-check-ok 'safe?))
+  (define idx-check-bad (check-dispatch-index-bounds (make-range-type 0 5) 4))
+  (check-false (hash-ref idx-check-bad 'safe?))
+
+  ;; 7. Layer 6: PtrProvenance & static MMIO pointer offset resolution (GBA DISPSTAT + #xD0 -> DMA3SAD)
+  (define gba-dispstat-ptr
+    (make-ptr-provenance #:target 'gba #:space '@mmio #:base-addr #x04000004 #:offset 0 #:elem-type 'u16 #:alignment 2))
+  (check-equal? (resolve-ptr-mmio-symbol gba-dispstat-ptr) 'DISPSTAT)
+  (define gba-dma3sad-ptr (ptr-provenance-add-offset gba-dispstat-ptr #xD0 #:elem-type 'u32 #:alignment 4))
+  (check-equal? (ptr-provenance-effective-addr gba-dma3sad-ptr) #x040000D4)
+  (check-equal? (resolve-ptr-mmio-symbol gba-dma3sad-ptr) 'DMA3SAD)
+  (check-true (hash-ref (check-ptr-provenance-access gba-dma3sad-ptr) 'valid?))
+
+  ;; 8. Layer 7: SubroutineContract & call-graph processor mode verification
+  (define c-caller
+    (make-subroutine-contract 'main_step #:target 'snes #:params '(A) #:returns '(A)
+                              #:mode-in '(M8 X8) #:mode-out '(M8 X8)
+                              #:cycles 120 #:mmio-writes '(INIDISP) #:callees '(helper_sub)))
+  (define c-callee-ok
+    (make-subroutine-contract 'helper_sub #:target 'snes #:params '(A) #:returns '(A)
+                              #:mode-in '(M8 X8) #:mode-out '(M8 X8)
+                              #:cycles 80 #:mmio-writes '(NMITIMEN) #:callees '()))
+  (define cg-ok (verify-call-graph-contracts (list c-caller c-callee-ok)))
+  (check-true (hash-ref cg-ok 'valid?))
+  (define c-callee-bad
+    (make-subroutine-contract 'helper_sub #:target 'snes #:params '(A) #:returns '(A)
+                              #:mode-in '(M16 X16) #:mode-out '(M16 X16)
+                              #:cycles 80 #:mmio-writes '(NMITIMEN) #:callees '()))
+  (define cg-bad (verify-call-graph-contracts (list c-caller c-callee-bad)))
+  (check-false (hash-ref cg-bad 'valid?))
+
+  ;; 9. Layer 8: Bidirectional Pseudo-Code Compiler (`compile-pseudo-code->insts`) across all targets
+  (define nes-insts
+    (compile-pseudo-code->insts
+     '(decompiled-pseudo-code
+        (set! PPUCTRL #x90)
+        (when (== (wram #x0774) #x00)
+          (set! (wram #x0779) #x1E))
+        (return))
+     #:target 'nes))
+  (check-true (pair? nes-insts))
+  (define nes-asm (assemble-6502 nes-insts #:origin #x8000))
+  (check-true (> (bytes-length (asm-result-bytes nes-asm)) 0))
+
+  (for ([tgt (in-list '(gb snes gba n64))])
+    (define tgt-insts
+      (compile-pseudo-code->insts
+       '(decompiled-pseudo-code
+          (set! A 1)
+          (return))
+       #:target tgt))
+    (check-true (pair? tgt-insts) (format "Expected compiled instructions for target ~a" tgt))))
+
 (printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, whole-ROM decompiler/recompiler, continuous .fm2 TAS lockstep, and 74 Multi-Architecture Side-by-Side Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
         total-checks)
+

@@ -12,7 +12,7 @@
   "totalGbaArmFunctionsLifted": 54,
   "totalGbaThumbFunctionsLifted": 240,
   "totalGbaLz77AssetsFound": 166,
-  "elapsedMs": 10241,
+  "elapsedMs": 14290,
   "snes": [
     {
       "index": 1,
@@ -56,10 +56,11 @@
         "subroutinesLifted": 36,
         "callGraphEdges": 23,
         "spc700HandshakeSites": 16,
-        "structuredLoops": 25,
-        "structuredConditionals": 14,
+        "structuredLoops": 27,
+        "structuredConditionals": 20,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -137,9 +138,10 @@
         "callGraphEdges": 29,
         "spc700HandshakeSites": 16,
         "structuredLoops": 7,
-        "structuredConditionals": 31,
+        "structuredConditionals": 40,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -217,9 +219,10 @@
         "callGraphEdges": 27,
         "spc700HandshakeSites": 16,
         "structuredLoops": 25,
-        "structuredConditionals": 7,
+        "structuredConditionals": 9,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -297,9 +300,10 @@
         "callGraphEdges": 53,
         "spc700HandshakeSites": 16,
         "structuredLoops": 11,
-        "structuredConditionals": 35,
+        "structuredConditionals": 49,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -376,10 +380,11 @@
         "subroutinesLifted": 37,
         "callGraphEdges": 32,
         "spc700HandshakeSites": 16,
-        "structuredLoops": 22,
+        "structuredLoops": 23,
         "structuredConditionals": 10,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -459,10 +464,11 @@
         "subroutinesLifted": 36,
         "callGraphEdges": 27,
         "spc700HandshakeSites": 16,
-        "structuredLoops": 15,
-        "structuredConditionals": 14,
+        "structuredLoops": 16,
+        "structuredConditionals": 15,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -540,9 +546,10 @@
         "callGraphEdges": 40,
         "spc700HandshakeSites": 16,
         "structuredLoops": 9,
-        "structuredConditionals": 28,
+        "structuredConditionals": 40,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -619,10 +626,11 @@
         "subroutinesLifted": 36,
         "callGraphEdges": 38,
         "spc700HandshakeSites": 16,
-        "structuredLoops": 14,
-        "structuredConditionals": 12,
+        "structuredLoops": 16,
+        "structuredConditionals": 17,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -700,9 +708,10 @@
         "callGraphEdges": 38,
         "spc700HandshakeSites": 16,
         "structuredLoops": 18,
-        "structuredConditionals": 13,
+        "structuredConditionals": 26,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -779,10 +788,11 @@
         "subroutinesLifted": 39,
         "callGraphEdges": 29,
         "spc700HandshakeSites": 16,
-        "structuredLoops": 10,
-        "structuredConditionals": 15,
+        "structuredLoops": 11,
+        "structuredConditionals": 20,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 12
+        "highLevelIdiomsLifted": 12,
+        "structLayoutsLifted": 3
       },
       "checkpoints": {
         "cp0": {
@@ -864,9 +874,10 @@
         "callGraphEdges": 19,
         "lz77AssetsFound": 20,
         "structuredLoops": 5,
-        "structuredConditionals": 14,
+        "structuredConditionals": 20,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 19
+        "highLevelIdiomsLifted": 19,
+        "structLayoutsLifted": 7
       },
       "checkpoints": {
         "cp0": {
@@ -948,7 +959,8 @@
         "structuredLoops": 0,
         "structuredConditionals": 5,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 10
+        "highLevelIdiomsLifted": 10,
+        "structLayoutsLifted": 9
       },
       "checkpoints": {
         "cp0": {
@@ -1028,9 +1040,10 @@
         "callGraphEdges": 14,
         "lz77AssetsFound": 20,
         "structuredLoops": 1,
-        "structuredConditionals": 7,
+        "structuredConditionals": 9,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 10
+        "highLevelIdiomsLifted": 10,
+        "structLayoutsLifted": 8
       },
       "checkpoints": {
         "cp0": {
@@ -1110,9 +1123,10 @@
         "callGraphEdges": 37,
         "lz77AssetsFound": 20,
         "structuredLoops": 4,
-        "structuredConditionals": 20,
+        "structuredConditionals": 23,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 9
+        "highLevelIdiomsLifted": 9,
+        "structLayoutsLifted": 6
       },
       "checkpoints": {
         "cp0": {
@@ -1192,9 +1206,10 @@
         "callGraphEdges": 31,
         "lz77AssetsFound": 20,
         "structuredLoops": 3,
-        "structuredConditionals": 15,
+        "structuredConditionals": 23,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 24
+        "highLevelIdiomsLifted": 24,
+        "structLayoutsLifted": 5
       },
       "checkpoints": {
         "cp0": {
@@ -1274,9 +1289,10 @@
         "callGraphEdges": 19,
         "lz77AssetsFound": 5,
         "structuredLoops": 3,
-        "structuredConditionals": 21,
+        "structuredConditionals": 23,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 19
+        "highLevelIdiomsLifted": 19,
+        "structLayoutsLifted": 6
       },
       "checkpoints": {
         "cp0": {
@@ -1356,9 +1372,10 @@
         "callGraphEdges": 32,
         "lz77AssetsFound": 20,
         "structuredLoops": 4,
-        "structuredConditionals": 23,
+        "structuredConditionals": 31,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 15
+        "highLevelIdiomsLifted": 15,
+        "structLayoutsLifted": 7
       },
       "checkpoints": {
         "cp0": {
@@ -1438,9 +1455,10 @@
         "callGraphEdges": 37,
         "lz77AssetsFound": 20,
         "structuredLoops": 8,
-        "structuredConditionals": 12,
+        "structuredConditionals": 14,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 19
+        "highLevelIdiomsLifted": 19,
+        "structLayoutsLifted": 7
       },
       "checkpoints": {
         "cp0": {
@@ -1520,9 +1538,10 @@
         "callGraphEdges": 20,
         "lz77AssetsFound": 20,
         "structuredLoops": 2,
-        "structuredConditionals": 5,
+        "structuredConditionals": 6,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 14
+        "highLevelIdiomsLifted": 14,
+        "structLayoutsLifted": 5
       },
       "checkpoints": {
         "cp0": {
@@ -1602,9 +1621,10 @@
         "callGraphEdges": 17,
         "lz77AssetsFound": 1,
         "structuredLoops": 3,
-        "structuredConditionals": 4,
+        "structuredConditionals": 5,
         "stateMachinesLifted": 16,
-        "highLevelIdiomsLifted": 15
+        "highLevelIdiomsLifted": 15,
+        "structLayoutsLifted": 7
       },
       "checkpoints": {
         "cp0": {

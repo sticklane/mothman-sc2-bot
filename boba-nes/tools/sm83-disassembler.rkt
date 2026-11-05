@@ -335,7 +335,7 @@
 ;;   'mmio-reg   -> `(cons addr sym)` or #f
 ;;   'hram-addr  -> addr in $FF80..$FFFE or #f
 ;;   'mbc-write  -> addr in $0000..$7FFF or #f
-(define (disassemble-sm83-inst-at rom-bytes rom-offset bank-end pc)
+(define (disassemble-sm83-inst-at rom-bytes rom-offset bank-end pc #:mirror-map [mirror-map (hasheq)])
   (and (< rom-offset bank-end)
        (let* ([op (bytes-ref rom-bytes rom-offset)]
               [info (vector-ref SM83-BASE-OPCODE-VEC op)])
@@ -382,7 +382,9 @@
                        [(io8)
                         (define io-addr (+ #xFF00 b1))
                         (define is-write? (eq? mnem 'LDH_OUT))
-                        (define sym (sm83-addr->mmio-symbol io-addr is-write?))
+                        (define sym (or (hash-ref mirror-map io-addr #f)
+                                        (sm83-addr->mmio-symbol io-addr is-write?)))
+                        (define hw-sym (sm83-addr->mmio-symbol io-addr is-write?))
                         (define is-hram? (and (>= io-addr #xFF80) (<= io-addr #xFFFE)))
                         (hasheq 'sexp (if sym
                                           `(,mnem #:io8 ,b1 #:pc ,pc #:sym ,sym)
@@ -390,7 +392,7 @@
                                 'len 2
                                 'flow 'normal
                                 'target #f
-                                'mmio-reg (and (not is-hram?) sym (cons io-addr sym))
+                                'mmio-reg (and (not is-hram?) hw-sym (cons io-addr hw-sym))
                                 'hram-addr (and is-hram? io-addr)
                                 'mbc-write #f)]
                        [(rel)
@@ -405,24 +407,29 @@
                                 'hram-addr #f
                                 'mbc-write #f)]
                        [(d16)
-                        (define sym (sm83-addr->mmio-symbol u16 #f))
+                        (define sym (or (hash-ref mirror-map u16 #f)
+                                        (sm83-addr->mmio-symbol u16 #f)))
+                        (define hw-sym (sm83-addr->mmio-symbol u16 #f))
                         (hasheq 'sexp (if sym
                                           `(,mnem #:d16 ,u16 #:pc ,pc #:sym ,sym)
                                           `(,mnem #:d16 ,u16 #:pc ,pc))
                                 'len 3
                                 'flow 'normal
                                 'target #f
-                                'mmio-reg (and sym (>= u16 #xFF00) (not (<= #xFF80 u16 #xFFFE)) (cons u16 sym))
+                                'mmio-reg (and hw-sym (>= u16 #xFF00) (not (<= #xFF80 u16 #xFFFE)) (cons u16 hw-sym))
                                 'hram-addr (and (<= #xFF80 u16 #xFFFE) u16)
                                 'mbc-write #f)]
                        [(a16)
                         (define is-write? (or (eq? mnem 'LD_A16_A) (eq? mnem 'LD_A16_SP)))
                         (define is-call?  (memq flow '(call call-cond)))
                         (define is-jp?    (memq flow '(jp jp-cond)))
-                        (define mmio-sym  (and (not is-call?) (not is-jp?) (sm83-addr->mmio-symbol u16 is-write?)))
+                        (define hw-mmio   (and (not is-call?) (not is-jp?) (sm83-addr->mmio-symbol u16 is-write?)))
+                        (define mmio-sym  (and (not is-call?) (not is-jp?)
+                                               (or (hash-ref mirror-map u16 #f)
+                                                   hw-mmio)))
                         (define target-sym
                           (cond
-                            [is-call? (string->symbol (format "sub_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
+                            [is-call? (string->symbol (format "rom_helper_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
                             [is-jp?   (string->symbol (format "loc_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
                             [else     mmio-sym]))
                         (define is-hram? (and (not is-call?) (not is-jp?) (<= #xFF80 u16 #xFFFE)))
@@ -433,7 +440,7 @@
                                 'len 3
                                 'flow flow
                                 'target (and (or is-call? is-jp?) u16)
-                                'mmio-reg (and mmio-sym (not is-hram?) (not is-mbc?) (cons u16 mmio-sym))
+                                'mmio-reg (and hw-mmio (not is-hram?) (not is-mbc?) (cons u16 hw-mmio))
                                 'hram-addr (and is-hram? u16)
                                 'mbc-write (and is-mbc? u16))]))))))))
 
@@ -443,12 +450,14 @@
 
 (define (disassemble-sm83-linear-block rom-bytes bank-start bank-end bank-origin start-offset
                                        #:max-insts [max-insts 36]
-                                       #:stop-offset [stop-offset bank-end])
+                                       #:stop-offset [stop-offset bank-end]
+                                       #:mirror-map [mirror-map (hasheq)])
   (define limit-end (min bank-end stop-offset))
   (define max-local-off (- limit-end bank-start))
   (let loop ([off start-offset]
              [cnt 0]
              [max-fwd-off start-offset]
+             [last-imm-a #f]
              [insts '()]
              [calls '()]
              [mmio '()]
@@ -463,7 +472,7 @@
                 'mbc-writes (sort (remove-duplicates mbc) <))
         (let* ([abs-off (+ bank-start off)]
                [pc      (+ bank-origin off)]
-               [dec     (disassemble-sm83-inst-at rom-bytes abs-off limit-end pc)])
+               [dec     (disassemble-sm83-inst-at rom-bytes abs-off limit-end pc #:mirror-map mirror-map)])
           (if (not dec)
               (hasheq 'size-bytes (- off start-offset)
                       'insts      (reverse insts)
@@ -471,20 +480,44 @@
                       'mmio       (remove-duplicates (reverse mmio))
                       'hram       (sort (remove-duplicates hram) <)
                       'mbc-writes (sort (remove-duplicates mbc) <))
-              (let* ([len      (hash-ref dec 'len)]
-                     [flow     (hash-ref dec 'flow)]
-                     [target   (hash-ref dec 'target)]
-                     [mmio-reg (hash-ref dec 'mmio-reg)]
-                     [hram-a   (hash-ref dec 'hram-addr)]
-                     [mbc-a    (hash-ref dec 'mbc-write)]
-                     [insts1   (cons (hash-ref dec 'sexp) insts)]
-                     [calls1   (if (and target (memq flow '(call call-cond jp rst)))
-                                   (cons target calls)
-                                   calls)]
-                     [mmio1    (if mmio-reg (cons (cdr mmio-reg) mmio) mmio)]
-                     [hram1    (if hram-a (cons hram-a hram) hram)]
-                     [mbc1     (if mbc-a (cons mbc-a mbc) mbc)]
-                     [next-off (+ off len)]
+              (let* ([len       (hash-ref dec 'len)]
+                     [flow      (hash-ref dec 'flow)]
+                     [target    (hash-ref dec 'target)]
+                     [mmio-reg  (hash-ref dec 'mmio-reg)]
+                     [hram-a    (hash-ref dec 'hram-addr)]
+                     [mbc-a     (hash-ref dec 'mbc-write)]
+                     [base-sexp (hash-ref dec 'sexp)]
+                     [mnem      (car base-sexp)]
+                     [operand   (caddr base-sexp)]
+                     [sym-annot (let sloop ([rem (cdddr base-sexp)])
+                                  (match rem
+                                    [(list* '#:sym s _) s]
+                                    [(cons _ rest) (sloop rest)]
+                                    ['() #f]))]
+                     [hw-flags  (and (memq mnem '(LDH_OUT LD_A16_A))
+                                     sym-annot
+                                     last-imm-a
+                                     (decode-hw-bitfield-flags sym-annot last-imm-a))]
+                     [inst-sexp (if (and hw-flags (pair? hw-flags))
+                                    (append base-sexp (list '#:flags hw-flags))
+                                    base-sexp)]
+                     [next-imm-a
+                      (cond
+                        [(memq mnem '(LD_A OR_A)) operand]
+                        [(memq mnem '(XOR_A_A SUB_A_A)) 0]
+                        [(memq mnem '(LDH_OUT LD_A16_A LD_HLI_A LD_HLD_A LD_DE_IND_A LD_BC_IND_A
+                                      LD_B LD_C LD_D LD_E LD_H LD_L LD_BC LD_DE LD_HL LD_SP
+                                      PUSH_AF PUSH_BC PUSH_DE PUSH_HL DI EI NOP))
+                         last-imm-a]
+                        [else #f])]
+                     [insts1    (cons inst-sexp insts)]
+                     [calls1    (if (and target (memq flow '(call call-cond jp rst)))
+                                    (cons target calls)
+                                    calls)]
+                     [mmio1     (if mmio-reg (cons (cdr mmio-reg) mmio) mmio)]
+                     [hram1     (if hram-a (cons hram-a hram) hram)]
+                     [mbc1      (if mbc-a (cons mbc-a mbc) mbc)]
+                     [next-off  (+ off len)]
                      [new-fwd-off
                       (if (and target (memq flow '(jr-cond jp-cond jr)))
                           (let ([toff (- target bank-origin)])
@@ -502,7 +535,7 @@
                             'mmio       (remove-duplicates (reverse mmio1))
                             'hram       (sort (remove-duplicates hram1) <)
                             'mbc-writes (sort (remove-duplicates mbc1) <))
-                    (loop next-off (add1 cnt) new-fwd-off insts1 calls1 mmio1 hram1 mbc1))))))))
+                    (loop next-off (add1 cnt) new-fwd-off next-imm-a insts1 calls1 mmio1 hram1 mbc1))))))))
 
 ;; Disassemble all 8 RST vectors ($0000..$0038), 5 hardware ISRs ($0040..$0060),
 ;; and the $0100 cartridge entry point from Bank 0!
@@ -569,6 +602,47 @@
           "game_logic_step"]))
      (string->symbol (format "~a_b~a_~a" prefix bank-idx hex-a))]))
 
+;; Resolve any SM83 callee address `c-addr` (whether in `sub-name-map` or outside the top-N lifted set)
+;; to a deterministic semantic symbol and cache it in `sub-name-map`.
+(define (resolve-sm83-callee-sym! rom-bytes bank-idx bank-start bank-end c-addr sub-name-map
+                                  #:mirror-map [mirror-map (hasheq)])
+  (define t-bank (if (< c-addr #x4000) 0 bank-idx))
+  (or (hash-ref sub-name-map (cons t-bank c-addr) #f)
+      (hash-ref sub-name-map c-addr #f)
+      (let* ([vec-entry (findf (lambda (vs) (= (second vs) c-addr)) SM83-VECTOR-SPECS)]
+             [sem-sym
+              (cond
+                [vec-entry (first vec-entry)]
+                [(and (= t-bank 0) (= c-addr #x0150))
+                 'main_entry_0150]
+                [(and (< c-addr #x0150) (>= c-addr 0))
+                 (string->symbol (format "low_isr_~a" (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0"))))]
+                [(and (< c-addr #x4000) (< c-addr (bytes-length rom-bytes)))
+                 (define b0-end (min (bytes-length rom-bytes) 16384))
+                 (define c-blk
+                   (disassemble-sm83-linear-block rom-bytes 0 b0-end #x0000 c-addr
+                                                  #:max-insts 16
+                                                  #:mirror-map mirror-map))
+                 (infer-sm83-semantic-sub-name 0 c-addr c-blk)]
+                [(and (<= #x4000 c-addr #x7FFF)
+                      (< (+ bank-start (- c-addr #x4000)) bank-end))
+                 (define c-blk
+                   (disassemble-sm83-linear-block rom-bytes bank-start bank-end #x4000 (- c-addr #x4000)
+                                                  #:max-insts 16
+                                                  #:mirror-map mirror-map))
+                 (infer-sm83-semantic-sub-name bank-idx c-addr c-blk)]
+                [(>= c-addr #xFF80)
+                 (string->symbol (format "hram_dma_routine_~a" (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0"))))]
+                [(>= c-addr #xC000)
+                 (string->symbol (format "wram_trampoline_~a" (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0"))))]
+                [else
+                 (string->symbol (format "bank~a_helper_~a"
+                                         t-bank
+                                         (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0"))))])])
+        (hash-set! sub-name-map (cons t-bank c-addr) sem-sym)
+        (hash-set! sub-name-map c-addr sem-sym)
+        sem-sym)))
+
 (define (rewrite-sm83-call-syms forms bank-idx sub-name-map)
   (for/list ([f (in-list forms)])
     (cond
@@ -584,36 +658,49 @@
             (append (reverse hdr) (rewrite-sm83-call-syms rem bank-idx sub-name-map))]))]
       [else
        (match f
-         [`(,mnem #:a16 ,u16 #:pc ,pc #:sym ,old-sym)
-          #:when (memq mnem '(CALL CALL_NZ CALL_Z CALL_NC CALL_C))
+         [(list* (and mnem (or 'CALL 'CALL_NZ 'CALL_Z 'CALL_NC 'CALL_C 'JP 'JP_NZ 'JP_Z 'JP_NC 'JP_C))
+                 '#:a16 u16 '#:pc pc '#:sym old-sym rest-kws)
           (define t-bank (if (< u16 #x4000) 0 bank-idx))
           (define new-sym
             (or (hash-ref sub-name-map (cons t-bank u16) #f)
                 (hash-ref sub-name-map u16 #f)
                 old-sym))
-          `(,mnem #:a16 ,u16 #:pc ,pc #:sym ,new-sym)]
+          `(,mnem #:a16 ,u16 #:pc ,pc #:sym ,new-sym ,@rest-kws)]
          [_ f])])))
 
-(define (lift-sm83-interrupt-vectors rom-bytes)
+(define (lift-sm83-interrupt-vectors rom-bytes
+                                     #:mirror-map [mirror-map (hasheq)]
+                                     #:sub-name-map [sub-name-map (make-hash)])
   (define b0-end (min (bytes-length rom-bytes) 16384))
+  (for ([vspec (in-list SM83-VECTOR-SPECS)])
+    (hash-set! sub-name-map (cons 0 (second vspec)) (first vspec))
+    (hash-set! sub-name-map (second vspec) (first vspec)))
   (for/list ([vspec (in-list SM83-VECTOR-SPECS)]
              #:when (< (second vspec) b0-end))
     (match-define (list vname vaddr vlimit) vspec)
     (define blk
       (disassemble-sm83-linear-block rom-bytes 0 b0-end #x0000 vaddr
                                      #:max-insts 16
-                                     #:stop-offset (min b0-end vlimit)))
+                                     #:stop-offset (min b0-end vlimit)
+                                     #:mirror-map mirror-map))
+    (define sem-calls
+      (for/list ([c (in-list (hash-ref blk 'calls))])
+        (resolve-sm83-callee-sym! rom-bytes 0 0 b0-end c sub-name-map #:mirror-map mirror-map)))
     (define-values (structured-body _stats)
       (structure-subroutine-cfg (hash-ref blk 'insts) #:arch 'sm83))
+    (define rewritten-body
+      (rewrite-sm83-call-syms structured-body 0 sub-name-map))
     (define pseudo-code
-      (synthesize-subroutine-pseudo-code structured-body #:arch 'sm83))
+      (synthesize-subroutine-pseudo-code rewritten-body #:arch 'sm83))
     `(def-sm83-isr ,vname
        #:vector ,vaddr
        #:size-bytes ,(hash-ref blk 'size-bytes)
-       #:calls ,(hash-ref blk 'calls)
+       #:params ()
+       #:returns ()
+       #:calls ,sem-calls
        #:mmio ,(hash-ref blk 'mmio)
        ,pseudo-code
-       ,@structured-body)))
+       ,@rewritten-body)))
 
 ;; ============================================================================
 ;; 5. Deep Bank Analyzer & Call-Graph Subroutine Lifter
@@ -622,7 +709,9 @@
 (define (analyze-sm83-bank-deep rom-bytes bank-idx bank-start bank-end
                                 #:seed-entries [seed-entries '()]
                                 #:max-subroutines [max-subroutines 24]
-                                #:max-insts-per-sub [max-insts-per-sub 28])
+                                #:max-insts-per-sub [max-insts-per-sub 28]
+                                #:mirror-map [mirror-map (hasheq)]
+                                #:global-sub-names [global-sub-names (hash)])
   (define bank-origin (if (= bank-idx 0) #x0000 #x4000))
   (define bank-size   (- bank-end bank-start))
   (define start-off   (if (= bank-idx 0) #x0150 0))
@@ -712,6 +801,11 @@
   (define bank-conditionals 0)
   (define bank-guard-returns 0)
   (define sub-name-map (make-hash))
+  (for ([(k v) (in-hash global-sub-names)])
+    (hash-set! sub-name-map k v))
+  (for ([vspec (in-list SM83-VECTOR-SPECS)])
+    (hash-set! sub-name-map (cons 0 (second vspec)) (first vspec))
+    (hash-set! sub-name-map (second vspec) (first vspec)))
 
   ;; Pass 1: Disassemble blocks & assign semantic subroutine names
   (define raw-sub-entries
@@ -728,18 +822,32 @@
           (define blk
             (disassemble-sm83-linear-block rom-bytes bank-start bank-end bank-origin sub-off
                                            #:max-insts max-insts-per-sub
-                                           #:stop-offset stop-off))
+                                           #:stop-offset stop-off
+                                           #:mirror-map mirror-map))
           (define sub-name (infer-sm83-semantic-sub-name bank-idx sub-addr blk))
           (hash-set! sub-name-map (cons bank-idx sub-addr) sub-name)
           (hash-set! sub-name-map sub-addr sub-name)
           (list sub-addr sub-off blk sub-name))))
 
+  ;; Pass 1B: Ensure every callee referenced in `calls` across all subroutines in this bank
+  ;; has a semantic name in `sub-name-map` (even if outside `unique-sub-addrs`)!
+  (for ([entry (in-list raw-sub-entries)])
+    (match-define (list _sub-addr _sub-off blk _sub-name) entry)
+    (for ([c (in-list (hash-ref blk 'calls))])
+      (resolve-sm83-callee-sym! rom-bytes bank-idx bank-start bank-end c sub-name-map
+                                #:mirror-map mirror-map)))
+
   ;; Pass 2: Structure CFG, rewrite call targets to semantic names, & synthesize pseudo-code
   (define lifted-subs
     (for/list ([entry (in-list raw-sub-entries)])
       (match-define (list sub-addr sub-off blk sub-name) entry)
+      (define raw-insts (hash-ref blk 'insts))
+      (define-values (abi-params abi-returns)
+        (infer-subroutine-abi-signature raw-insts
+                                        #:arch 'sm83
+                                        #:is-isr? (eq? sub-name 'main_entry_0150)))
       (define-values (structured-body cfg-stats)
-        (structure-subroutine-cfg (hash-ref blk 'insts) #:arch 'sm83))
+        (structure-subroutine-cfg raw-insts #:arch 'sm83))
       (set! bank-loops         (+ bank-loops         (hash-ref cfg-stats 'loops 0)))
       (set! bank-spin-waits    (+ bank-spin-waits    (hash-ref cfg-stats 'spin-waits 0)))
       (set! bank-conditionals  (+ bank-conditionals  (hash-ref cfg-stats 'conditionals 0)))
@@ -750,17 +858,15 @@
         (synthesize-subroutine-pseudo-code rewritten-body #:arch 'sm83))
       (define sem-calls
         (for/list ([c (in-list (hash-ref blk 'calls))])
-          (define t-bank (if (< c #x4000) 0 bank-idx))
-          (or (hash-ref sub-name-map (cons t-bank c) #f)
-              (hash-ref sub-name-map c #f)
-              (string->symbol (format "sub_b~a_~a"
-                                      t-bank
-                                      (string-upcase (~r c #:base 16 #:min-width 4 #:pad-string "0")))))))
+          (resolve-sm83-callee-sym! rom-bytes bank-idx bank-start bank-end c sub-name-map
+                                    #:mirror-map mirror-map)))
       `(defsub-sm83 ,sub-name
          #:bank ,bank-idx
          #:addr ,sub-addr
          #:offset ,sub-off
          #:size-bytes ,(hash-ref blk 'size-bytes)
+         #:params ,abi-params
+         #:returns ,abi-returns
          #:calls ,sem-calls
          #:mmio ,(hash-ref blk 'mmio)
          #:hram ,(hash-ref blk 'hram)
@@ -784,10 +890,12 @@
 
 (define (lift-sm83-bank-subroutines rom-bytes bank-idx bank-start bank-end
                                     #:seed-entries [seed-entries '()]
-                                    #:max-subroutines [max-subroutines 24])
+                                    #:max-subroutines [max-subroutines 24]
+                                    #:mirror-map [mirror-map (hasheq)])
   (hash-ref (analyze-sm83-bank-deep rom-bytes bank-idx bank-start bank-end
                                     #:seed-entries seed-entries
-                                    #:max-subroutines max-subroutines)
+                                    #:max-subroutines max-subroutines
+                                    #:mirror-map mirror-map)
             'subroutines))
 
 ;; ============================================================================

@@ -17,6 +17,7 @@
          racket/set
          racket/format
          racket/math
+         racket/string
          "boba-core-ir.rkt"
          "graded-typechecker.rkt")
 
@@ -52,7 +53,38 @@
  check-memory-capability-access
 
  ;; Layer 4: Co-Processor / Multi-Core Session Protocol Verifier
- check-coprocessor-session-protocol)
+ check-coprocessor-session-protocol
+
+ ;; Layer 5: Refinement & Bitfield Hardware Register Types (`BitfieldType` & `RangeType`)
+ (struct-out bitfield-type)
+ BitfieldType
+ make-bitfield-type
+ HARDWARE-BITFIELD-SPECS
+ decode-bitfield-mask
+ encode-bitfield-flags
+ check-bitfield-mask-valid?
+ (struct-out range-type)
+ RangeType
+ make-range-type
+ check-dispatch-index-bounds
+
+ ;; Layer 6: Address-Space Pointer Provenance Modalities (`PtrProvenance`)
+ (struct-out ptr-provenance)
+ PtrProvenance
+ make-ptr-provenance
+ ptr-provenance-effective-addr
+ ptr-provenance-add-offset
+ resolve-ptr-mmio-symbol
+ check-ptr-provenance-access
+
+ ;; Layer 7: Per-Subroutine Coeffect & Calling-Convention Contracts (`SubroutineContract`)
+ (struct-out subroutine-contract)
+ SubroutineContract
+ make-subroutine-contract
+ verify-call-graph-contracts
+
+ ;; Layer 8: Bidirectional Editable Pseudo-Code Compiler (`compile-pseudo-code->insts`)
+ compile-pseudo-code->insts)
 
 ;; ============================================================================
 ;; Layer 1: Target-Parameterized Resource Semiring (`TargetGrade`)
@@ -1620,3 +1652,1451 @@
         (hash-set* (verify-target-module-grades repaired-g spec)
                    'applied-repairs (hash-ref check-res 'repairs)
                    'original-grade  g))))
+
+;; ============================================================================
+;; Layer 5: Refinement & Bitfield Hardware Register Types (`BitfieldType` & `RangeType`)
+;; ============================================================================
+
+(struct bitfield-type
+  (reg-name
+   target
+   width-bits
+   flags-alist)
+  #:transparent)
+
+(define BitfieldType bitfield-type)
+
+(define (make-bitfield-type reg-name
+                            #:target     [target 'nes]
+                            #:width-bits [width-bits 8]
+                            #:flags      [flags-alist '()])
+  (bitfield-type reg-name target width-bits flags-alist))
+
+(define HARDWARE-BITFIELD-SPECS
+  (hasheq
+   'PPUCTRL
+   (bitfield-type 'PPUCTRL 'nes 8
+                  '((#x80 . NMI_ENABLE)
+                    (#x40 . PPU_MASTER)
+                    (#x20 . SPRITE_8X16)
+                    (#x10 . BG_PATTERN_1000)
+                    (#x08 . SPR_PATTERN_1000)
+                    (#x04 . VRAM_INC_32)
+                    (#x03 . NAMETABLE_BASE_MASK)))
+   'PPUMASK
+   (bitfield-type 'PPUMASK 'nes 8
+                  '((#x80 . EMPH_BLUE)
+                    (#x40 . EMPH_GREEN)
+                    (#x20 . EMPH_RED)
+                    (#x10 . SHOW_SPR)
+                    (#x08 . SHOW_BG)
+                    (#x04 . SHOW_SPR_LEFT8)
+                    (#x02 . SHOW_BG_LEFT8)
+                    (#x01 . GREYSCALE)))
+   'PPUSTATUS
+   (bitfield-type 'PPUSTATUS 'nes 8
+                  '((#x80 . VBLANK_FLAG)
+                    (#x40 . SPRITE0_HIT)
+                    (#x20 . SPRITE_OVERFLOW)))
+   'LCDC
+   (bitfield-type 'LCDC 'gb 8
+                  '((#x80 . LCD_ENABLE)
+                    (#x40 . WIN_MAP_9C00)
+                    (#x20 . WIN_ENABLE)
+                    (#x10 . BG_TILE_8000)
+                    (#x08 . BG_MAP_9C00)
+                    (#x04 . OBJ_8X16)
+                    (#x02 . OBJ_ENABLE)
+                    (#x01 . BG_WIN_ENABLE)))
+   'STAT
+   (bitfield-type 'STAT 'gb 8
+                  '((#x40 . LYC_INT)
+                    (#x20 . MODE2_OAM_INT)
+                    (#x10 . MODE1_VBLANK_INT)
+                    (#x08 . MODE0_HBLANK_INT)
+                    (#x04 . LYC_EQUAL)))
+   'INIDISP
+   (bitfield-type 'INIDISP 'snes 8
+                  '((#x80 . FORCE_BLANK)
+                    (#x0F . FULL_BRIGHTNESS)))
+   'NMITIMEN
+   (bitfield-type 'NMITIMEN 'snes 8
+                  '((#x80 . NMI_ENABLE)
+                    (#x20 . V_IRQ_ENABLE)
+                    (#x10 . H_IRQ_ENABLE)
+                    (#x01 . AUTO_JOYPAD_READ)))
+   'DISPCNT
+   (bitfield-type 'DISPCNT 'gba 16
+                  '((#x0080 . FORCED_BLANK)
+                    (#x0100 . BG0_ENABLE)
+                    (#x0200 . BG1_ENABLE)
+                    (#x0400 . BG2_ENABLE)
+                    (#x0800 . BG3_ENABLE)
+                    (#x1000 . OBJ_ENABLE)))
+   'DISPSTAT
+   (bitfield-type 'DISPSTAT 'gba 16
+                  '((#x0001 . VBLANK_FLAG)
+                    (#x0002 . HBLANK_FLAG)
+                    (#x0004 . VCOUNT_FLAG)
+                    (#x0008 . VBLANK_IRQ_ENABLE)
+                    (#x0010 . HBLANK_IRQ_ENABLE)
+                    (#x0020 . VCOUNT_IRQ_ENABLE)))
+   'DMA3CNT_H
+   (bitfield-type 'DMA3CNT_H 'gba 16
+                  '((#x8000 . DMA_ENABLE)
+                    (#x4000 . DMA_IRQ_ENABLE)
+                    (#x0400 . DMA_32BIT)
+                    (#x0200 . DMA_REPEAT)
+                    (#x0100 . DMA_SRC_FIXED)))
+   'VI_STATUS
+   (bitfield-type 'VI_STATUS 'n64 32
+                  '((#x0002 . PIXEL_SIZE_16BIT)
+                    (#x0003 . PIXEL_SIZE_32BIT)
+                    (#x0008 . GAMMA_DITHER_ENABLE)
+                    (#x0040 . AA_MODE_RESAMP)
+                    (#x0300 . DIVOT_ENABLE)))
+   'SP_STATUS
+   (bitfield-type 'SP_STATUS 'n64 32
+                  '((#x0001 . CLEAR_HALT)
+                    (#x0002 . SET_HALT)
+                    (#x0008 . CLEAR_INTR)
+                    (#x0080 . YIELD_SIGNAL)))))
+
+(define (resolve-bitfield-spec reg-or-spec)
+  (cond
+    [(bitfield-type? reg-or-spec) reg-or-spec]
+    [(and (symbol? reg-or-spec) (hash-has-key? HARDWARE-BITFIELD-SPECS reg-or-spec))
+     (hash-ref HARDWARE-BITFIELD-SPECS reg-or-spec)]
+    [(eq? reg-or-spec 'VI_STATUS_REG) (hash-ref HARDWARE-BITFIELD-SPECS 'VI_STATUS)]
+    [(eq? reg-or-spec 'SP_STATUS_REG) (hash-ref HARDWARE-BITFIELD-SPECS 'SP_STATUS)]
+    [else #f]))
+
+(define (decode-bitfield-mask reg-or-spec mask-int)
+  (define spec (resolve-bitfield-spec reg-or-spec))
+  (if (and spec (exact-integer? mask-int))
+      (for/list ([pair (in-list (bitfield-type-flags-alist spec))]
+                 #:when (and (> (car pair) 0)
+                             (= (bitwise-and mask-int (car pair)) (car pair))))
+        (cdr pair))
+      '()))
+
+(define (encode-bitfield-flags reg-or-spec flag-syms)
+  (define spec (resolve-bitfield-spec reg-or-spec))
+  (define syms (if (list? flag-syms) flag-syms (list flag-syms)))
+  (if spec
+      (for/fold ([acc 0]) ([s (in-list syms)])
+        (define found
+          (for/first ([pair (in-list (bitfield-type-flags-alist spec))]
+                      #:when (eq? (cdr pair) s))
+            (car pair)))
+        (bitwise-ior acc (or found 0)))
+      0))
+
+(define (check-bitfield-mask-valid? reg-or-spec mask-int)
+  (define spec (resolve-bitfield-spec reg-or-spec))
+  (and spec
+       (exact-integer? mask-int)
+       (>= mask-int 0)
+       (< mask-int (arithmetic-shift 1 (bitfield-type-width-bits spec)))
+       (let ([defined-bits
+              (for/fold ([acc 0]) ([pair (in-list (bitfield-type-flags-alist spec))])
+                (bitwise-ior acc (car pair)))])
+         (zero? (bitwise-and mask-int (bitwise-not defined-bits))))))
+
+(struct range-type
+  (min-val
+   max-val)
+  #:transparent)
+
+(define RangeType range-type)
+
+(define (make-range-type min-val max-val)
+  (range-type min-val max-val))
+
+(define (check-dispatch-index-bounds idx-range table-length)
+  (define-values (min-v max-v)
+    (cond
+      [(range-type? idx-range)
+       (values (range-type-min-val idx-range)
+               (range-type-max-val idx-range))]
+      [(pair? idx-range)
+       (values (car idx-range) (cdr idx-range))]
+      [(exact-integer? idx-range)
+       (values idx-range idx-range)]
+      [else
+       (values 0 -1)]))
+  (define safe?
+    (and (exact-integer? min-v)
+         (exact-integer? max-v)
+         (exact-integer? table-length)
+         (<= min-v max-v)
+         (>= min-v 0)
+         (< max-v table-length)))
+  (hasheq 'safe?        safe?
+          'min          min-v
+          'max          max-v
+          'table-length table-length))
+
+;; ============================================================================
+;; Layer 6: Address-Space Pointer Provenance Modalities (`PtrProvenance`)
+;; ============================================================================
+
+(struct ptr-provenance
+  (target
+   space
+   base-addr
+   offset
+   elem-type
+   alignment)
+  #:transparent)
+
+(define PtrProvenance ptr-provenance)
+
+(define (make-ptr-provenance
+         #:target    [target 'gba]
+         #:space     [space '@mmio]
+         #:base-addr [base-addr #x04000000]
+         #:offset    [offset 0]
+         #:elem-type [elem-type 'u16]
+         #:alignment [alignment 2])
+  (ptr-provenance target space base-addr offset elem-type alignment))
+
+(define (ptr-provenance-effective-addr p)
+  (+ (ptr-provenance-base-addr p) (ptr-provenance-offset p)))
+
+(define (ptr-provenance-add-offset p delta
+                                   #:elem-type [elem-type #f]
+                                   #:alignment [alignment #f])
+  (ptr-provenance (ptr-provenance-target p)
+                  (ptr-provenance-space p)
+                  (ptr-provenance-base-addr p)
+                  (+ (ptr-provenance-offset p) delta)
+                  (or elem-type (ptr-provenance-elem-type p))
+                  (or alignment (ptr-provenance-alignment p))))
+
+(define TARGET-MMIO-ADDR->SYM-TABLES
+  (hasheq
+   'nes
+   (hasheqv #x2000 'PPUCTRL
+            #x2001 'PPUMASK
+            #x2002 'PPUSTATUS
+            #x2003 'OAMADDR
+            #x2004 'OAMDATA
+            #x2005 'PPUSCROLL
+            #x2006 'PPUADDR
+            #x2007 'PPUDATA
+            #x4014 'OAMDMA
+            #x4015 'SND_CHN
+            #x4016 'JOY1
+            #x4017 'JOY2)
+   'gb
+   (hasheqv #xFF00 'JOYP
+            #xFF04 'DIV
+            #xFF05 'TIMA
+            #xFF06 'TMA
+            #xFF07 'TAC
+            #xFF0F 'IF
+            #xFF40 'LCDC
+            #xFF41 'STAT
+            #xFF42 'SCY
+            #xFF43 'SCX
+            #xFF44 'LY
+            #xFF45 'LYC
+            #xFF46 'DMA
+            #xFF47 'BGP
+            #xFF48 'OBP0
+            #xFF49 'OBP1
+            #xFF4A 'WY
+            #xFF4B 'WX
+            #xFFFF 'IE)
+   'snes
+   (hasheqv #x2100 'INIDISP
+            #x2101 'OBSEL
+            #x2105 'BGMODE
+            #x2115 'VMAIN
+            #x2116 'VMADDL
+            #x2117 'VMADDH
+            #x2118 'VMDATAL
+            #x2119 'VMDATAH
+            #x2121 'CGADD
+            #x2122 'CGDATA
+            #x2140 'APUIO0
+            #x2141 'APUIO1
+            #x2142 'APUIO2
+            #x2143 'APUIO3
+            #x4200 'NMITIMEN
+            #x420B 'MDMAEN
+            #x420C 'HDMAEN
+            #x4210 'RDNMI
+            #x4211 'TIMEUP
+            #x4212 'HVBJOY
+            #x4218 'JOY1L)
+   'gba
+   (hasheqv #x04000000 'DISPCNT
+            #x04000004 'DISPSTAT
+            #x04000006 'VCOUNT
+            #x04000008 'BG0CNT
+            #x0400000A 'BG1CNT
+            #x0400000C 'BG2CNT
+            #x0400000E 'BG3CNT
+            #x04000010 'BG0HOFS
+            #x04000012 'BG0VOFS
+            #x04000050 'BLDCNT
+            #x04000052 'BLDALPHA
+            #x04000054 'BLDY
+            #x040000D4 'DMA3SAD
+            #x040000D8 'DMA3DAD
+            #x040000DC 'DMA3CNT_L
+            #x040000DE 'DMA3CNT_H
+            #x04000130 'KEYINPUT
+            #x04000200 'IE
+            #x04000202 'IF
+            #x04000204 'WAITCNT
+            #x04000208 'IME
+            #x04000300 'POSTFLG)
+   'n64
+   (hasheqv #xA4040010 'SP_STATUS_REG
+            #xA4300000 'MI_MODE_REG
+            #xA4400000 'VI_STATUS_REG
+            #xA4400004 'VI_ORIGIN_REG
+            #xA4500000 'AI_DRAM_ADDR_REG
+            #xA4600000 'PI_DRAM_ADDR_REG
+            #xA4800000 'SI_DRAM_ADDR_REG)))
+
+(define (resolve-ptr-mmio-symbol p [opt-target #f])
+  (define-values (tid addr)
+    (cond
+      [(ptr-provenance? p)
+       (values (ptr-provenance-target p)
+               (ptr-provenance-effective-addr p))]
+      [(exact-integer? p)
+       (values (or opt-target 'gba) p)]
+      [else
+       (values 'gba -1)]))
+  (define norm-tid (if (eq? tid 'gbc) 'gb tid))
+  (define tbl (hash-ref TARGET-MMIO-ADDR->SYM-TABLES norm-tid (hasheqv)))
+  (hash-ref tbl addr #f))
+
+(define (address-in-space-range? target space addr)
+  (define norm-tid (if (eq? target 'gbc) 'gb target))
+  (case space
+    [(@zp zp @dp dp)
+     (if (eq? norm-tid 'snes)
+         (<= #x0000 addr #x1FFF)
+         (<= #x0000 addr #x00FF))]
+    [(@wram wram)
+     (case norm-tid
+       [(nes)  (or (<= #x0000 addr #x1FFF) (<= #x6000 addr #x7FFF))]
+       [(gb)   (<= #xC000 addr #xDFFF)]
+       [(snes) (or (<= #x0000 addr #x1FFF) (<= #x7E0000 addr #x7FFFFF))]
+       [else   (>= addr 0)])]
+    [(@vram vram)
+     (case norm-tid
+       [(nes)  (<= #x0000 addr #x3FFF)]
+       [(gb)   (<= #x8000 addr #x9FFF)]
+       [(snes) (<= #x0000 addr #xFFFF)]
+       [(gba)  (<= #x06000000 addr #x06017FFF)]
+       [else   (>= addr 0)])]
+    [(@mmio mmio)
+     (case norm-tid
+       [(nes)  (or (<= #x2000 addr #x3FFF) (<= #x4000 addr #x401F))]
+       [(gb)   (or (<= #xFF00 addr #xFF7F) (= addr #xFFFF))]
+       [(snes) (or (<= #x2100 addr #x21FF) (<= #x4000 addr #x43FF))]
+       [(gba)  (<= #x04000000 addr #x040003FE)]
+       [(n64)  (or (<= #xA4000000 addr #xA4FFFFFF) (<= #x04000000 addr #x04FFFFFF))]
+       [else   (>= addr 0)])]
+    [(@hram hram)
+     (<= #xFF80 addr #xFFFE)]
+    [(@iwram iwram)
+     (<= #x03000000 addr #x03007FFF)]
+    [(@ewram ewram)
+     (<= #x02000000 addr #x0203FFFF)]
+    [(@kseg0 kseg0)
+     (<= #x80000000 addr #x9FFFFFFF)]
+    [(@kseg1 kseg1)
+     (<= #xA0000000 addr #xBFFFFFFF)]
+    [else (>= addr 0)]))
+
+(define (elem-type-min-align elem-type)
+  (case elem-type
+    [(u8 s8 i8)      1]
+    [(u16 s16 i16)   2]
+    [(u32 s32 i32 f32 ptr) 4]
+    [else            1]))
+
+(define (check-ptr-provenance-access p)
+  (define addr  (ptr-provenance-effective-addr p))
+  (define space (ptr-provenance-space p))
+  (define tid   (ptr-provenance-target p))
+  (define align (max 1
+                     (or (ptr-provenance-alignment p) 1)
+                     (if (memq tid '(gba n64 rp2040))
+                         (elem-type-min-align (ptr-provenance-elem-type p))
+                         1)))
+  (define aligned?  (zero? (modulo addr align)))
+  (define in-range? (address-in-space-range? tid space addr))
+  (define mmio-sym  (resolve-ptr-mmio-symbol p))
+  (hasheq 'valid?         (and aligned? in-range?)
+          'effective-addr addr
+          'mmio-sym       mmio-sym
+          'space          space))
+
+;; ============================================================================
+;; Layer 7: Per-Subroutine Coeffect & Calling-Convention Contracts (`SubroutineContract`)
+;; ============================================================================
+
+(struct subroutine-contract
+  (name
+   target
+   params
+   returns
+   mode-in
+   mode-out
+   cycles
+   mmio-reads
+   mmio-writes
+   callees)
+  #:transparent)
+
+(define SubroutineContract subroutine-contract)
+
+(define (make-subroutine-contract
+         name
+         #:target      [target 'nes]
+         #:params      [params '()]
+         #:returns     [returns '()]
+         #:mode-in     [mode-in #f]
+         #:mode-out    [mode-out #f]
+         #:cycles      [cycles 0]
+         #:mmio-reads  [mmio-reads '()]
+         #:mmio-writes [mmio-writes '()]
+         #:callees     [callees '()])
+  (subroutine-contract name
+                       target
+                       params
+                       returns
+                       mode-in
+                       mode-out
+                       cycles
+                       mmio-reads
+                       mmio-writes
+                       callees))
+
+(define (modes-compatible? m1 m2)
+  (cond
+    [(or (not m1) (not m2)) #t]
+    [(and (hash? m1) (hash? m2))
+     (processor-states-equal? m1 m2)]
+    [else
+     (equal? m1 m2)]))
+
+(define (verify-call-graph-contracts contracts-list)
+  (define contract-map
+    (for/hasheq ([c (in-list contracts-list)]
+                 #:when (subroutine-contract? c))
+      (values (subroutine-contract-name c) c)))
+
+  (define mismatches '())
+
+  ;; 1. Verify caller -> callee mode-out / mode-in compatibility across all edges
+  (for ([c (in-list contracts-list)]
+        #:when (subroutine-contract? c))
+    (define caller-name (subroutine-contract-name c))
+    (define caller-mode (or (subroutine-contract-mode-out c)
+                            (subroutine-contract-mode-in c)))
+    (for ([callee-sym (in-list (subroutine-contract-callees c))])
+      (define callee (hash-ref contract-map callee-sym #f))
+      (when callee
+        (define callee-mode (subroutine-contract-mode-in callee))
+        (unless (modes-compatible? caller-mode callee-mode)
+          (set! mismatches
+                (cons (hasheq 'caller      caller-name
+                              'callee      callee-sym
+                              'caller-mode caller-mode
+                              'callee-mode callee-mode
+                              'message     (format "Call-graph mode mismatch: '~a' calls '~a' with mode ~v, but callee expects ~v"
+                                                   caller-name callee-sym caller-mode callee-mode))
+                      mismatches))))))
+
+  ;; 2. Compute transitive MMIO writes and transitive cycle bounds (with cycle detection)
+  (define (compute-transitive-writes root-name [visited (seteq)])
+    (define c (hash-ref contract-map root-name #f))
+    (if (or (not c) (set-member? visited root-name))
+        '()
+        (let ([next-vis (set-add visited root-name)]
+              [direct   (subroutine-contract-mmio-writes c)])
+          (remove-duplicates
+           (append direct
+                   (apply append
+                          (for/list ([cal (in-list (subroutine-contract-callees c))])
+                            (compute-transitive-writes cal next-vis))))))))
+
+  (define (compute-transitive-cycles root-name [visited (seteq)])
+    (define c (hash-ref contract-map root-name #f))
+    (if (or (not c) (set-member? visited root-name))
+        0
+        (let ([next-vis (set-add visited root-name)])
+          (+ (subroutine-contract-cycles c)
+             (for/sum ([cal (in-list (subroutine-contract-callees c))])
+               (compute-transitive-cycles cal next-vis))))))
+
+  (define trans-writes
+    (for/hasheq ([c (in-list contracts-list)]
+                 #:when (subroutine-contract? c))
+      (define nm (subroutine-contract-name c))
+      (values nm (compute-transitive-writes nm))))
+
+  (define trans-cycles
+    (for/hasheq ([c (in-list contracts-list)]
+                 #:when (subroutine-contract? c))
+      (define nm (subroutine-contract-name c))
+      (values nm (compute-transitive-cycles nm))))
+
+  (hasheq 'valid?                 (null? mismatches)
+          'mismatches             (reverse mismatches)
+          'transitive-mmio-writes trans-writes
+          'transitive-cycles      trans-cycles))
+
+;; ============================================================================
+;; Layer 8: Bidirectional Editable Pseudo-Code Compiler (`compile-pseudo-code->insts`)
+;; ============================================================================
+
+(define MMIO-SYMBOL->ADDR-TABLE
+  (hasheq
+   ;; NES
+   'PPUCTRL   #x2000
+   'PPUMASK   #x2001
+   'PPUSTATUS #x2002
+   'OAMADDR   #x2003
+   'OAMDATA   #x2004
+   'PPUSCROLL #x2005
+   'PPUADDR   #x2006
+   'PPUDATA   #x2007
+   'OAMDMA    #x4014
+   'SND_CHN   #x4015
+   'JOY1      #x4016
+   'JOY2      #x4017
+   ;; GB / GBC
+   'JOYP      #xFF00
+   'DIV       #xFF04
+   'TIMA      #xFF05
+   'TMA       #xFF06
+   'TAC       #xFF07
+   'IF        #xFF0F
+   'LCDC      #xFF40
+   'STAT      #xFF41
+   'SCY       #xFF42
+   'SCX       #xFF43
+   'LY        #xFF44
+   'LYC       #xFF45
+   'DMA       #xFF46
+   'BGP       #xFF47
+   'OBP0      #xFF48
+   'OBP1      #xFF49
+   'WY        #xFF4A
+   'WX        #xFF4B
+   'IE        #xFFFF
+   ;; SNES
+   'INIDISP   #x2100
+   'OBSEL     #x2101
+   'BGMODE    #x2105
+   'VMAIN     #x2115
+   'VMADDL    #x2116
+   'VMADDH    #x2117
+   'VMDATAL   #x2118
+   'VMDATAH   #x2119
+   'CGADD     #x2121
+   'CGDATA    #x2122
+   'APUIO0    #x2140
+   'APUIO1    #x2141
+   'APUIO2    #x2142
+   'APUIO3    #x2143
+   'NMITIMEN  #x4200
+   'MDMAEN    #x420B
+   'HDMAEN    #x420C
+   'RDNMI     #x4210
+   'TIMEUP    #x4211
+   'HVBJOY    #x4212
+   ;; GBA
+   'DISPCNT   #x04000000
+   'DISPSTAT  #x04000004
+   'VCOUNT    #x04000006
+   'BG0CNT    #x04000008
+   'BG1CNT    #x0400000A
+   'BG2CNT    #x0400000C
+   'BG3CNT    #x0400000E
+   'BG0HOFS   #x04000010
+   'BG0VOFS   #x04000012
+   'BLDCNT    #x04000050
+   'BLDALPHA  #x04000052
+   'BLDY      #x04000054
+   'DMA3SAD   #x040000D4
+   'DMA3DAD   #x040000D8
+   'DMA3CNT_L #x040000DC
+   'DMA3CNT_H #x040000DE
+   'KEYINPUT  #x04000130
+   'WAITCNT   #x04000204
+   'IME       #x04000208
+   'POSTFLG   #x04000300
+   ;; N64
+   'SP_STATUS     #xA4040010
+   'SP_STATUS_REG #xA4040010
+   'MI_MODE       #xA4300000
+   'MI_MODE_REG   #xA4300000
+   'VI_STATUS     #xA4400000
+   'VI_STATUS_REG #xA4400000
+   'VI_ORIGIN     #xA4400004
+   'VI_ORIGIN_REG #xA4400004
+   'AI_DRAM_ADDR_REG #xA4500000
+   'PI_DRAM_ADDR_REG #xA4600000
+   'SI_DRAM_ADDR_REG #xA4800000))
+
+(define (resolve-mmio-or-addr x [target 'nes])
+  (cond
+    [(exact-integer? x) x]
+    [(and (eq? target 'gba) (eq? x 'IE)) #x04000200]
+    [(and (eq? target 'gba) (eq? x 'IF)) #x04000202]
+    [(and (symbol? x) (hash-has-key? MMIO-SYMBOL->ADDR-TABLE x))
+     (hash-ref MMIO-SYMBOL->ADDR-TABLE x)]
+    [(and (pair? x) (memq (car x) '(zp dp wram hram mem8 mem16 mem32 EWRAM_PTR IWRAM_PTR))
+          (pair? (cdr x)) (exact-integer? (cadr x)))
+     (cadr x)]
+    [else #x2000]))
+
+(define (parse-struct-field-offset field-sym)
+  (cond
+    [(exact-integer? field-sym) field-sym]
+    [else
+     (define s (format "~a" field-sym))
+     (define m-hex (regexp-match #rx"0[xX]([0-9a-fA-F]+)" s))
+     (define m-dec (regexp-match #rx"([0-9]+)$" s))
+     (cond
+       [m-hex (or (string->number (cadr m-hex) 16) 0)]
+       [m-dec (or (string->number (cadr m-dec) 10) 0)]
+       [else 0])]))
+
+(define (fpu-reg-symbol? s)
+  (and (symbol? s)
+       (let ([str (symbol->string s)])
+         (or (string-prefix? str "$f")
+             (regexp-match? #rx"^f[0-9]+$" str)))))
+
+(define (compile-pseudo-code->insts pseudo-sexp [pos-target #f] #:target [kw-target #f])
+  (define raw-tid (or kw-target pos-target 'nes))
+  (define tid
+    (cond
+      [(target-spec? raw-tid) (target-spec-id raw-tid)]
+      [(eq? raw-tid 'gbc)     'gb]
+      [(symbol? raw-tid)      raw-tid]
+      [else                   'nes]))
+
+  (define stmts
+    (match pseudo-sexp
+      [`(decompiled-pseudo-code . ,body) body]
+      [(? list? lst)
+       (if (and (pair? lst) (symbol? (car lst))
+                (memq (car lst) '(set! += -= when unless if loop-counted spin-wait-mmio await-mmio! call tail-call return reti push! pop!)))
+           (list lst)
+           lst)]
+      [_ (list pseudo-sexp)]))
+
+  (define label-counter 0)
+  (define (fresh-label prefix)
+    (set! label-counter (add1 label-counter))
+    (string->symbol (format "~a_~a" prefix label-counter)))
+
+  ;; --------------------------------------------------------------------------
+  ;; 1. MOS 6502 (NES) & WDC 65C816 (SNES) Compiler Backend
+  ;; --------------------------------------------------------------------------
+  (define (compile-6502-expr->A expr)
+    (match expr
+      [(? exact-integer? n)
+       `((LDA #:imm ,(bitwise-and n (if (eq? tid 'snes) #xFFFF #xFF))))]
+      ['A '()]
+      ['X '((TXA))]
+      ['Y '((TYA))]
+      [`(,(or 'zp 'dp) ,addr)
+       `((LDA #:zp ,addr))]
+      [`(,(or 'wram 'mem8 'mem16 'mem32) ,addr)
+       (if (< addr #x0100)
+           `((LDA #:zp ,addr))
+           `((LDA #:abs ,addr)))]
+      [`(aref ,(or 'zp 'dp) ,base X)
+       `((LDA #:zpx ,base))]
+      [`(aref ,(or 'zp 'dp) ,base Y)
+       `((LDA #:zpy ,base))]
+      [`(aref ,_ ,base X)
+       `((LDA #:absx ,base))]
+      [`(aref ,_ ,base Y)
+       `((LDA #:absy ,base))]
+      [`(-> ,base ,field-sym . ,_)
+       (define off (parse-struct-field-offset field-sym))
+       (define base-addr (if (exact-integer? base) base #x0300))
+       (define eff (+ base-addr off))
+       (if (< eff #x0100)
+           `((LDA #:zp ,eff))
+           `((LDA #:abs ,eff)))]
+      [(? symbol? sym)
+       `((LDA #:abs ,(resolve-mmio-or-addr sym tid)))]
+      [`(+ ,e1 ,e2)
+       (append (compile-6502-expr->A e1)
+               '((CLC))
+               (match e2
+                 [(? exact-integer? k) `((ADC #:imm ,(bitwise-and k #xFF)))]
+                 [`(,(or 'zp 'dp) ,a)  `((ADC #:zp ,a))]
+                 [`(,_ ,(? exact-integer? a)) `((ADC #:abs ,a))]
+                 [_ (append '((STA #:zp #xFE))
+                            (compile-6502-expr->A e2)
+                            '((CLC) (ADC #:zp #xFE)))]))]
+      [`(- ,e1 ,e2)
+       (append (compile-6502-expr->A e1)
+               '((SEC))
+               (match e2
+                 [(? exact-integer? k) `((SBC #:imm ,(bitwise-and k #xFF)))]
+                 [`(,(or 'zp 'dp) ,a)  `((SBC #:zp ,a))]
+                 [`(,_ ,(? exact-integer? a)) `((SBC #:abs ,a))]
+                 [_ `((SBC #:imm 1))]))]
+      [`(bit-and ,e1 ,e2)
+       (append (compile-6502-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((AND #:imm ,(bitwise-and k #xFF)))]
+                 [`(,(or 'zp 'dp) ,a)  `((AND #:zp ,a))]
+                 [`(,_ ,(? exact-integer? a)) `((AND #:abs ,a))]
+                 [_ `((AND #:imm #xFF))]))]
+      [`(bit-ior ,e1 ,e2)
+       (append (compile-6502-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((ORA #:imm ,(bitwise-and k #xFF)))]
+                 [`(,(or 'zp 'dp) ,a)  `((ORA #:zp ,a))]
+                 [`(,_ ,(? exact-integer? a)) `((ORA #:abs ,a))]
+                 [_ `((ORA #:imm 0))]))]
+      [`(bit-xor ,e1 ,e2)
+       (append (compile-6502-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((EOR #:imm ,(bitwise-and k #xFF)))]
+                 [`(,(or 'zp 'dp) ,a)  `((EOR #:zp ,a))]
+                 [`(,_ ,(? exact-integer? a)) `((EOR #:abs ,a))]
+                 [_ `((EOR #:imm 0))]))]
+      [`(shl ,e1 ,(? exact-integer? k))
+       (append (compile-6502-expr->A e1)
+               (for/list ([_ (in-range (max 1 k))]) '(ASL)))]
+      [`(shr ,e1 ,(? exact-integer? k))
+       (append (compile-6502-expr->A e1)
+               (for/list ([_ (in-range (max 1 k))]) '(LSR)))]
+      [_ '((LDA #:imm 0))]))
+
+  (define (compile-6502-cond-branch-false cond-expr false-lbl)
+    (match cond-expr
+      [`(,(or '= '==) ,lhs ,rhs)
+       (append (compile-6502-expr->A lhs)
+               (if (and (exact-integer? rhs) (zero? rhs))
+                   `((CMP #:imm 0) (BNE ,false-lbl))
+                   (match rhs
+                     [(? exact-integer? k) `((CMP #:imm ,k) (BNE ,false-lbl))]
+                     [`(,(or 'zp 'dp) ,a)  `((CMP #:zp ,a) (BNE ,false-lbl))]
+                     [_ `((CMP #:imm 0) (BNE ,false-lbl))])))]
+      [`(!= ,lhs ,rhs)
+       (append (compile-6502-expr->A lhs)
+               (match rhs
+                 [(? exact-integer? k) `((CMP #:imm ,k) (BEQ ,false-lbl))]
+                 [`(,(or 'zp 'dp) ,a)  `((CMP #:zp ,a) (BEQ ,false-lbl))]
+                 [_ `((CMP #:imm 0) (BEQ ,false-lbl))]))]
+      [`(< ,lhs ,rhs)
+       (append (compile-6502-expr->A lhs)
+               (match rhs
+                 [(? exact-integer? k) `((CMP #:imm ,k) (BCS ,false-lbl))]
+                 [`(,(or 'zp 'dp) ,a)  `((CMP #:zp ,a) (BCS ,false-lbl))]
+                 [_ `((CMP #:imm 0) (BCS ,false-lbl))]))]
+      [`(>= ,lhs ,rhs)
+       (append (compile-6502-expr->A lhs)
+               (match rhs
+                 [(? exact-integer? k) `((CMP #:imm ,k) (BCC ,false-lbl))]
+                 [`(,(or 'zp 'dp) ,a)  `((CMP #:zp ,a) (BCC ,false-lbl))]
+                 [_ `((CMP #:imm 0) (BCC ,false-lbl))]))]
+      [_
+       (append (compile-6502-expr->A cond-expr)
+               `((CMP #:imm 0) (BEQ ,false-lbl)))]))
+
+  (define (compile-6502-stmt stmt)
+    (match stmt
+      [`(set! X ,(? exact-integer? n))
+       `((LDX #:imm ,(bitwise-and n #xFF)))]
+      [`(set! Y ,(? exact-integer? n))
+       `((LDY #:imm ,(bitwise-and n #xFF)))]
+      [`(set! X ,expr)
+       (append (compile-6502-expr->A expr) '((TAX)))]
+      [`(set! Y ,expr)
+       (append (compile-6502-expr->A expr) '((TAY)))]
+      [`(set! SP ,(? exact-integer? n))
+       `((LDX #:imm ,(bitwise-and n #xFF)) (TXS))]
+      [`(set! A ,expr)
+       (compile-6502-expr->A expr)]
+      [`(set! (,(or 'zp 'dp) ,addr) ,expr)
+       (append (compile-6502-expr->A expr) `((STA #:zp ,addr)))]
+      [`(set! (,(or 'wram 'mem8 'mem16 'mem32) ,addr) ,expr)
+       (append (compile-6502-expr->A expr)
+               (if (< addr #x0100)
+                   `((STA #:zp ,addr))
+                   `((STA #:abs ,addr))))]
+      [`(set! (aref ,(or 'zp 'dp) ,base X) ,expr)
+       (append (compile-6502-expr->A expr) `((STA #:zpx ,base)))]
+      [`(set! (aref ,_ ,base X) ,expr)
+       (append (compile-6502-expr->A expr) `((STA #:absx ,base)))]
+      [`(set! (-> ,base ,field-sym . ,_) ,expr)
+       (define off (parse-struct-field-offset field-sym))
+       (define base-addr (if (exact-integer? base) base #x0300))
+       (define eff (+ base-addr off))
+       (append (compile-6502-expr->A expr)
+               (if (< eff #x0100)
+                   `((STA #:zp ,eff))
+                   `((STA #:abs ,eff))))]
+      [`(set! ,(? symbol? dst) ,expr)
+       (define addr (resolve-mmio-or-addr dst tid))
+       (append (compile-6502-expr->A expr) `((STA #:abs ,addr)))]
+      [`(+= X 1) '((INX))]
+      [`(-= X 1) '((DEX))]
+      [`(+= Y 1) '((INY))]
+      [`(-= Y 1) '((DEY))]
+      [`(+= (,(or 'zp 'dp) ,addr) 1) `((INC #:zp ,addr))]
+      [`(-= (,(or 'zp 'dp) ,addr) 1) `((DEC #:zp ,addr))]
+      [`(+= ,dst ,expr)
+       (compile-6502-stmt `(set! ,dst (+ ,dst ,expr)))]
+      [`(-= ,dst ,expr)
+       (compile-6502-stmt `(set! ,dst (- ,dst ,expr)))]
+      [`(push! A) '((PHA))]
+      [`(push! X) '((TXA) (PHA))]
+      [`(push! Y) '((TYA) (PHA))]
+      [`(pop! A)  '((PLA))]
+      [`(pop! X)  '((PLA) (TAX))]
+      [`(pop! Y)  '((PLA) (TAY))]
+      [`(when ,cond-expr . ,body)
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-6502-cond-branch-false cond-expr join-lbl)
+               (apply append (map compile-6502-stmt body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr (then . ,then-body) (else . ,else-body))
+       (define else-lbl (fresh-label 'L_else))
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-6502-cond-branch-false cond-expr else-lbl)
+               (apply append (map compile-6502-stmt then-body))
+               `((JMP ,join-lbl)
+                 (label ,else-lbl))
+               (apply append (map compile-6502-stmt else-body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr ,then-stmt ,else-stmt)
+       (compile-6502-stmt `(if ,cond-expr (then ,then-stmt) (else ,else-stmt)))]
+      [`(loop-counted (,reg ,count) . ,body)
+       (define loop-lbl (fresh-label 'L_loop))
+       (define init-insts
+         (case reg
+           [(X) `((LDX #:imm ,count))]
+           [(Y) `((LDY #:imm ,count))]
+           [else `((LDX #:imm ,count))]))
+       (define step-insts
+         (case reg
+           [(Y) `((DEY) (BNE ,loop-lbl))]
+           [else `((DEX) (BNE ,loop-lbl))]))
+       (append init-insts
+               `((label ,loop-lbl))
+               (apply append (map compile-6502-stmt body))
+               step-insts)]
+      [`(spin-wait-mmio ,reg-or-addr ,mask)
+       (define wait-lbl (fresh-label 'L_wait))
+       (define addr (resolve-mmio-or-addr reg-or-addr tid))
+       `((label ,wait-lbl)
+         (LDA #:abs ,addr)
+         (AND #:imm ,mask)
+         (BEQ ,wait-lbl))]
+      [`(await-mmio! ,reg-or-addr ,cond-sym)
+       (define wait-lbl (fresh-label 'L_wait))
+       (define addr (resolve-mmio-or-addr reg-or-addr tid))
+       (define br-mnem (if (eq? cond-sym 'minus/negative) 'BMI 'BPL))
+       `((label ,wait-lbl)
+         (LDA #:abs ,addr)
+         (,br-mnem ,wait-lbl))]
+      [`(,(or 'call 'tail-call) ,callee . ,args)
+       (define arg-insts
+         (apply append
+                (for/list ([arg (in-list args)]
+                           [idx (in-naturals)])
+                  (case idx
+                    [(0) (compile-6502-stmt `(set! A ,arg))]
+                    [(1) (compile-6502-stmt `(set! X ,arg))]
+                    [(2) (compile-6502-stmt `(set! Y ,arg))]
+                    [else '()]))))
+       (append arg-insts `((JSR ,callee)))]
+      [`(return)
+       '((RTS))]
+      [`(return ,expr)
+       (append (compile-6502-expr->A expr) '((RTS)))]
+      [`(reti)
+       '((RTI))]
+      [`(label ,sym)
+       `((label ,sym))]
+      [_ '((NOP))]))
+
+  ;; --------------------------------------------------------------------------
+  ;; 2. Sharp SM83 (Game Boy / Game Boy Color) Compiler Backend
+  ;; --------------------------------------------------------------------------
+  (define (compile-sm83-expr->A expr)
+    (match expr
+      [(? exact-integer? n)
+       `((LD_A #:d8 ,(bitwise-and n #xFF)))]
+      ['A '()]
+      [(? symbol? r) #:when (memq r '(B C D E H L))
+       `((,(string->symbol (format "LD_A_~a" r)) #:imp 0))]
+      [`(hram ,addr)
+       `((LDH_IN #:io8 ,(bitwise-and addr #xFF)))]
+      [`(,(or 'wram 'mem8 'mem16 'zp 'dp) ,addr)
+       (if (>= addr #xFF00)
+           `((LDH_IN #:io8 ,(bitwise-and addr #xFF)))
+           `((LD_A_MEM #:a16 ,addr)))]
+      [`(deref HL)
+       '((LD_A_HL-IND #:imp 0))]
+      [`(-> ,base ,field-sym . ,_)
+       (define off (parse-struct-field-offset field-sym))
+       (define base-addr (if (exact-integer? base) base #xC000))
+       `((LD_A_MEM #:a16 ,(+ base-addr off)))]
+      [(? symbol? sym)
+       (define addr (resolve-mmio-or-addr sym 'gb))
+       (if (>= addr #xFF00)
+           `((LDH_IN #:io8 ,(bitwise-and addr #xFF)))
+           `((LD_A_MEM #:a16 ,addr)))]
+      [`(+ ,e1 ,e2)
+       (append (compile-sm83-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((ADD_A #:d8 ,(bitwise-and k #xFF)))]
+                 ['A '((ADD_A_A #:imp 0))]
+                 [_  `((ADD_A #:d8 1))]))]
+      [`(- ,e1 ,e2)
+       (append (compile-sm83-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((SUB_A #:d8 ,(bitwise-and k #xFF)))]
+                 [_ `((SUB_A #:d8 1))]))]
+      [`(bit-and ,e1 ,e2)
+       (append (compile-sm83-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((AND_A #:d8 ,(bitwise-and k #xFF)))]
+                 [_ `((AND_A #:d8 #xFF))]))]
+      [`(bit-ior ,e1 ,e2)
+       (append (compile-sm83-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((OR_A #:d8 ,(bitwise-and k #xFF)))]
+                 [_ `((OR_A #:d8 0))]))]
+      [`(bit-xor ,e1 ,e2)
+       (append (compile-sm83-expr->A e1)
+               (match e2
+                 [(? exact-integer? k) `((XOR_A #:d8 ,(bitwise-and k #xFF)))]
+                 [_ `((XOR_A #:d8 0))]))]
+      [`(shl ,e1 ,(? exact-integer? k))
+       (append (compile-sm83-expr->A e1)
+               (for/list ([_ (in-range (max 1 k))]) '(SLA_A #:cb #x27)))]
+      [`(shr ,e1 ,(? exact-integer? k))
+       (append (compile-sm83-expr->A e1)
+               (for/list ([_ (in-range (max 1 k))]) '(SRL_A #:cb #x3F)))]
+      [_ '((LD_A #:d8 0))]))
+
+  (define (compile-sm83-cond-branch-false cond-expr false-lbl)
+    (match cond-expr
+      [`(,(or '= '==) ,lhs ,(? exact-integer? k))
+       (append (compile-sm83-expr->A lhs)
+               `((CP_A #:d8 ,(bitwise-and k #xFF))
+                 (JR_NZ ,false-lbl)))]
+      [`(!= ,lhs ,(? exact-integer? k))
+       (append (compile-sm83-expr->A lhs)
+               `((CP_A #:d8 ,(bitwise-and k #xFF))
+                 (JR_Z ,false-lbl)))]
+      [_
+       (append (compile-sm83-expr->A cond-expr)
+               `((CP_A #:d8 0)
+                 (JR_Z ,false-lbl)))]))
+
+  (define (compile-sm83-stmt stmt)
+    (match stmt
+      [`(set! ,(and r16 (or 'HL 'BC 'DE 'SP)) ,(? exact-integer? n))
+       `((,(string->symbol (format "LD_~a" r16)) #:d16 ,(bitwise-and n #xFFFF)))]
+      [`(set! A ,expr)
+       (compile-sm83-expr->A expr)]
+      [`(set! ,(and r8 (or 'B 'C 'D 'E 'H 'L)) ,(? exact-integer? n))
+       `((,(string->symbol (format "LD_~a" r8)) #:d8 ,(bitwise-and n #xFF)))]
+      [`(set! ,(and r8 (or 'B 'C 'D 'E 'H 'L)) ,expr)
+       (append (compile-sm83-expr->A expr)
+               `((,(string->symbol (format "LD_~a_A" r8)) #:imp 0)))]
+      [`(set! (hram ,addr) ,expr)
+       (append (compile-sm83-expr->A expr)
+               `((LDH_OUT #:io8 ,(bitwise-and addr #xFF))))]
+      [`(set! (,(or 'wram 'mem8 'mem16 'zp 'dp) ,addr) ,expr)
+       (append (compile-sm83-expr->A expr)
+               (if (>= addr #xFF00)
+                   `((LDH_OUT #:io8 ,(bitwise-and addr #xFF)))
+                   `((LD_MEM_A #:a16 ,addr))))]
+      [`(set! (-> ,base ,field-sym . ,_) ,expr)
+       (define off (parse-struct-field-offset field-sym))
+       (define base-addr (if (exact-integer? base) base #xC000))
+       (append (compile-sm83-expr->A expr)
+               `((LD_MEM_A #:a16 ,(+ base-addr off))))]
+      [`(set! ,(? symbol? dst) ,expr)
+       (define addr (resolve-mmio-or-addr dst 'gb))
+       (append (compile-sm83-expr->A expr)
+               (if (>= addr #xFF00)
+                   `((LDH_OUT #:io8 ,(bitwise-and addr #xFF)))
+                   `((LD_MEM_A #:a16 ,addr))))]
+      [`(+= ,dst ,expr)
+       (compile-sm83-stmt `(set! ,dst (+ ,dst ,expr)))]
+      [`(-= ,dst ,expr)
+       (compile-sm83-stmt `(set! ,dst (- ,dst ,expr)))]
+      [`(when ,cond-expr . ,body)
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-sm83-cond-branch-false cond-expr join-lbl)
+               (apply append (map compile-sm83-stmt body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr (then . ,then-body) (else . ,else-body))
+       (define else-lbl (fresh-label 'L_else))
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-sm83-cond-branch-false cond-expr else-lbl)
+               (apply append (map compile-sm83-stmt then-body))
+               `((JR ,join-lbl)
+                 (label ,else-lbl))
+               (apply append (map compile-sm83-stmt else-body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr ,then-stmt ,else-stmt)
+       (compile-sm83-stmt `(if ,cond-expr (then ,then-stmt) (else ,else-stmt)))]
+      [`(loop-counted (,reg ,count) . ,body)
+       (define loop-lbl (fresh-label 'L_loop))
+       (define r (if (memq reg '(B C D E)) reg 'B))
+       (append `((,(string->symbol (format "LD_~a" r)) #:d8 ,count)
+                 (label ,loop-lbl))
+               (apply append (map compile-sm83-stmt body))
+               `((,(string->symbol (format "DEC_~a" r)) #:imp 0)
+                 (JR_NZ ,loop-lbl)))]
+      [`(spin-wait-mmio ,reg-or-addr ,mask)
+       (define wait-lbl (fresh-label 'L_wait))
+       (define addr (resolve-mmio-or-addr reg-or-addr 'gb))
+       `((label ,wait-lbl)
+         (LDH_IN #:io8 ,(bitwise-and addr #xFF))
+         (AND_A #:d8 ,mask)
+         (JR_Z ,wait-lbl))]
+      [`(,(or 'call 'tail-call) ,callee . ,args)
+       (define arg-insts
+         (apply append
+                (for/list ([arg (in-list args)]
+                           [idx (in-naturals)])
+                  (case idx
+                    [(0) (compile-sm83-stmt `(set! A ,arg))]
+                    [(1) (compile-sm83-stmt `(set! HL ,arg))]
+                    [(2) (compile-sm83-stmt `(set! DE ,arg))]
+                    [(3) (compile-sm83-stmt `(set! BC ,arg))]
+                    [else '()]))))
+       (append arg-insts `((CALL ,callee)))]
+      [`(return)
+       '((RET))]
+      [`(return ,expr)
+       (append (compile-sm83-expr->A expr) '((RET)))]
+      [`(reti)
+       '((RETI))]
+      [`(label ,sym)
+       `((label ,sym))]
+      [_ '((NOP #:imp 0))]))
+
+  ;; --------------------------------------------------------------------------
+  ;; 3. GBA (ARM7TDMI Thumb16 / ARM32) Compiler Backend
+  ;; --------------------------------------------------------------------------
+  (define (compile-gba-expr->reg rd expr)
+    (match expr
+      [(? exact-integer? n)
+       (if (<= 0 n 255)
+           `((THUMB-MOV-imm ,rd ,n))
+           `((THUMB-LDR-lit ,rd ,n)))]
+      [(? symbol? rs) #:when (memq rs '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 sp lr pc))
+       (if (eq? rd rs) '() `((THUMB-MOV ,rd ,rs)))]
+      [`(,(or 'EWRAM_PTR 'IWRAM_PTR) ,addr)
+       `((THUMB-LDR-lit ,rd ,addr))]
+      [`(mem8 ,addr)
+       `((THUMB-LDR-lit r3 ,addr)
+         (THUMB-LDRB-imm ,rd [r3 0]))]
+      [`(mem16 ,addr)
+       `((THUMB-LDR-lit r3 ,addr)
+         (THUMB-LDRH-imm ,rd [r3 0]))]
+      [`(,(or 'mem32 'wram) ,addr)
+       `((THUMB-LDR-lit r3 ,addr)
+         (THUMB-LDR-imm ,rd [r3 0]))]
+      [`(-> ,base ,field-sym . ,rest)
+       (define off (parse-struct-field-offset field-sym))
+       (define ty (if (pair? rest) (car rest) ':u32))
+       (case ty
+         [(:u8 u8 :s8 s8)   `((THUMB-LDRB-imm ,rd [,base ,off]))]
+         [(:u16 u16 :s16 s16) `((THUMB-LDRH-imm ,rd [,base ,off]))]
+         [else              `((THUMB-LDR-imm ,rd [,base ,off]))])]
+      [(? symbol? mmio-sym)
+       (define addr (resolve-mmio-or-addr mmio-sym 'gba))
+       `((THUMB-LDR-lit r3 ,addr)
+         (THUMB-LDRH-imm ,rd [r3 0]))]
+      [`(+ ,e1 ,e2)
+       (append (compile-gba-expr->reg rd e1)
+               (match e2
+                 [(? exact-integer? k) `((THUMB-ADD-imm ,rd ,k))]
+                 [(? symbol? r2)       `((THUMB-ADD ,rd ,rd ,r2))]
+                 [_ (append (compile-gba-expr->reg 'r3 e2)
+                            `((THUMB-ADD ,rd ,rd r3)))]))]
+      [`(- ,e1 ,e2)
+       (append (compile-gba-expr->reg rd e1)
+               (match e2
+                 [(? exact-integer? k) `((THUMB-SUB-imm ,rd ,k))]
+                 [(? symbol? r2)       `((THUMB-SUB ,rd ,rd ,r2))]
+                 [_ (append (compile-gba-expr->reg 'r3 e2)
+                            `((THUMB-SUB ,rd ,rd r3)))]))]
+      [`(bit-and ,e1 ,e2)
+       (append (compile-gba-expr->reg rd e1)
+               (compile-gba-expr->reg 'r3 e2)
+               `((THUMB-AND ,rd r3)))]
+      [`(bit-ior ,e1 ,e2)
+       (append (compile-gba-expr->reg rd e1)
+               (compile-gba-expr->reg 'r3 e2)
+               `((THUMB-ORR ,rd r3)))]
+      [`(bit-xor ,e1 ,e2)
+       (append (compile-gba-expr->reg rd e1)
+               (compile-gba-expr->reg 'r3 e2)
+               `((THUMB-EOR ,rd r3)))]
+      [`(shl ,e1 ,(? exact-integer? k))
+       (append (compile-gba-expr->reg rd e1)
+               `((THUMB-LSL ,rd ,rd ,k)))]
+      [`(shr ,e1 ,(? exact-integer? k))
+       (append (compile-gba-expr->reg rd e1)
+               `((THUMB-LSR ,rd ,rd ,k)))]
+      [_ `((THUMB-MOV-imm ,rd 0))]))
+
+  (define (compile-gba-cond-branch-false cond-expr false-lbl)
+    (match cond-expr
+      [`(,(or '= '==) ,lhs ,(? exact-integer? k))
+       (append (compile-gba-expr->reg 'r0 lhs)
+               `((THUMB-CMP-imm r0 ,k)
+                 (THUMB-BNE ,false-lbl)))]
+      [`(!= ,lhs ,(? exact-integer? k))
+       (append (compile-gba-expr->reg 'r0 lhs)
+               `((THUMB-CMP-imm r0 ,k)
+                 (THUMB-BEQ ,false-lbl)))]
+      [`(< ,lhs ,(? exact-integer? k))
+       (append (compile-gba-expr->reg 'r0 lhs)
+               `((THUMB-CMP-imm r0 ,k)
+                 (THUMB-BGE ,false-lbl)))]
+      [`(>= ,lhs ,(? exact-integer? k))
+       (append (compile-gba-expr->reg 'r0 lhs)
+               `((THUMB-CMP-imm r0 ,k)
+                 (THUMB-BLT ,false-lbl)))]
+      [_
+       (append (compile-gba-expr->reg 'r0 cond-expr)
+               `((THUMB-CMP-imm r0 0)
+                 (THUMB-BEQ ,false-lbl)))]))
+
+  (define (compile-gba-stmt stmt)
+    (match stmt
+      [`(set! ,(? symbol? rd) ,expr)
+       #:when (memq rd '(r0 r1 r2 r3 r4 r5 r6 r7))
+       (compile-gba-expr->reg rd expr)]
+      [`(set! (-> ,base ,field-sym . ,rest) ,expr)
+       (define off (parse-struct-field-offset field-sym))
+       (define ty (if (pair? rest) (car rest) ':u32))
+       (define val-insts (compile-gba-expr->reg 'r1 expr))
+       (define st-inst
+         (case ty
+           [(:u8 u8 :s8 s8)     `(THUMB-STRB-imm r1 [,base ,off])]
+           [(:u16 u16 :s16 s16) `(THUMB-STRH-imm r1 [,base ,off])]
+           [else                `(THUMB-STR-imm r1 [,base ,off])]))
+       (append val-insts (list st-inst))]
+      [`(set! (mem8 ,addr) ,expr)
+       (append (compile-gba-expr->reg 'r0 expr)
+               `((THUMB-LDR-lit r1 ,addr)
+                 (THUMB-STRB-imm r0 [r1 0])))]
+      [`(set! (mem16 ,addr) ,expr)
+       (append (compile-gba-expr->reg 'r0 expr)
+               `((THUMB-LDR-lit r1 ,addr)
+                 (THUMB-STRH-imm r0 [r1 0])))]
+      [`(set! (,(or 'mem32 'wram) ,addr) ,expr)
+       (append (compile-gba-expr->reg 'r0 expr)
+               `((THUMB-LDR-lit r1 ,addr)
+                 (THUMB-STR-imm r0 [r1 0])))]
+      [`(set! ,(? symbol? mmio-sym) ,expr)
+       (define addr (resolve-mmio-or-addr mmio-sym 'gba))
+       (define st-op
+         (if (memq mmio-sym '(DMA3SAD DMA3DAD))
+             'THUMB-STR-imm
+             'THUMB-STRH-imm))
+       (append (compile-gba-expr->reg 'r0 expr)
+               `((THUMB-LDR-lit r1 ,addr)
+                 (,st-op r0 [r1 0])))]
+      [`(+= ,dst ,expr)
+       (compile-gba-stmt `(set! ,dst (+ ,dst ,expr)))]
+      [`(-= ,dst ,expr)
+       (compile-gba-stmt `(set! ,dst (- ,dst ,expr)))]
+      [`(when ,cond-expr . ,body)
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-gba-cond-branch-false cond-expr join-lbl)
+               (apply append (map compile-gba-stmt body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr (then . ,then-body) (else . ,else-body))
+       (define else-lbl (fresh-label 'L_else))
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-gba-cond-branch-false cond-expr else-lbl)
+               (apply append (map compile-gba-stmt then-body))
+               `((THUMB-B ,join-lbl)
+                 (label ,else-lbl))
+               (apply append (map compile-gba-stmt else-body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr ,then-stmt ,else-stmt)
+       (compile-gba-stmt `(if ,cond-expr (then ,then-stmt) (else ,else-stmt)))]
+      [`(loop-counted (,reg ,count) . ,body)
+       (define loop-lbl (fresh-label 'L_loop))
+       (append (compile-gba-expr->reg reg count)
+               `((label ,loop-lbl))
+               (apply append (map compile-gba-stmt body))
+               `((THUMB-SUB-imm ,reg 1)
+                 (THUMB-BNE ,loop-lbl)))]
+      [`(spin-wait-mmio ,reg-or-addr ,mask)
+       (define wait-lbl (fresh-label 'L_wait))
+       (define addr (resolve-mmio-or-addr reg-or-addr 'gba))
+       `((THUMB-LDR-lit r1 ,addr)
+         (THUMB-MOV-imm r2 ,mask)
+         (label ,wait-lbl)
+         (THUMB-LDRH-imm r0 [r1 0])
+         (THUMB-TST r0 r2)
+         (THUMB-BEQ ,wait-lbl))]
+      [`(,(or 'call 'tail-call) ,callee . ,args)
+       (define arg-regs '(r0 r1 r2 r3))
+       (define arg-insts
+         (apply append
+                (for/list ([arg (in-list args)]
+                           [r   (in-list arg-regs)])
+                  (compile-gba-expr->reg r arg))))
+       (append arg-insts `((BL ,callee)))]
+      [`(return)
+       '((THUMB-BX lr))]
+      [`(return ,expr)
+       (append (compile-gba-expr->reg 'r0 expr)
+               '((THUMB-BX lr)))]
+      [`(label ,sym)
+       `((label ,sym))]
+      [_ '((THUMB-NOP))]))
+
+  ;; --------------------------------------------------------------------------
+  ;; 4. N64 (MIPS III VR4300 + COP1 FPU) Compiler Backend
+  ;; --------------------------------------------------------------------------
+  (define (compile-n64-fpu-expr fd expr)
+    (match expr
+      [(? real? x)
+       `((LI.S ,fd ,(exact->inexact x)))]
+      [(? fpu-reg-symbol? fs)
+       (if (eq? fd fs) '() `((MOV.S ,fd ,fs)))]
+      [`(-> ,base ,field-sym . ,_)
+       (define off (parse-struct-field-offset field-sym))
+       `((LWC1 ,fd ,off ,base))]
+      [`(,(or '+ 'fadd) ,e1 ,e2)
+       (append (compile-n64-fpu-expr '$f2 e1)
+               (compile-n64-fpu-expr '$f4 e2)
+               `((ADD.S ,fd $f2 $f4)))]
+      [`(,(or '- 'fsub) ,e1 ,e2)
+       (append (compile-n64-fpu-expr '$f2 e1)
+               (compile-n64-fpu-expr '$f4 e2)
+               `((SUB.S ,fd $f2 $f4)))]
+      [`(,(or '* 'fmul) ,e1 ,e2)
+       (append (compile-n64-fpu-expr '$f2 e1)
+               (compile-n64-fpu-expr '$f4 e2)
+               `((MUL.S ,fd $f2 $f4)))]
+      [`(,(or '/ 'fdiv) ,e1 ,e2)
+       (append (compile-n64-fpu-expr '$f2 e1)
+               (compile-n64-fpu-expr '$f4 e2)
+               `((DIV.S ,fd $f2 $f4)))]
+      [`(,(or 'sqrt 'fsqrt) ,e1)
+       (append (compile-n64-fpu-expr '$f2 e1)
+               `((SQRT.S ,fd $f2)))]
+      [_ `((LI.S ,fd 0.0))]))
+
+  (define (compile-n64-expr->reg rd expr)
+    (match expr
+      [(? exact-integer? n)
+       (if (<= -32768 n #xFFFF)
+           `((ADDIU ,rd r0 ,n))
+           `((LUI ,rd ,(bitwise-and (arithmetic-shift n -16) #xFFFF))
+             (ORI ,rd ,rd ,(bitwise-and n #xFFFF))))]
+      [(? fpu-reg-symbol? fs)
+       `((MFC1 ,rd ,fs))]
+      [(? symbol? rs) #:when (memq rs '(r0 v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 s0 s1 s2 s3 s4 s5 s6 s7 sp ra))
+       (if (eq? rd rs) '() `((ADDU ,rd ,rs r0)))]
+      [`(-> ,base ,field-sym . ,rest)
+       (define off (parse-struct-field-offset field-sym))
+       (define ty (if (pair? rest) (car rest) ':u32))
+       (case ty
+         [(:u8 u8 :s8 s8)     `((LB ,rd ,off ,base))]
+         [(:u16 u16 :s16 s16) `((LH ,rd ,off ,base))]
+         [(:f32 f32)          `((LWC1 ,rd ,off ,base))]
+         [else                `((LW ,rd ,off ,base))])]
+      [`(,(or 'mem8 'mem16 'mem32 'wram) ,addr)
+       `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
+         (ORI t8 t8 ,(bitwise-and addr #xFFFF))
+         (LW ,rd 0 t8))]
+      [(? symbol? mmio-sym)
+       (define addr (resolve-mmio-or-addr mmio-sym 'n64))
+       `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
+         (ORI t8 t8 ,(bitwise-and addr #xFFFF))
+         (LW ,rd 0 t8))]
+      [`(+ ,e1 ,e2)
+       (append (compile-n64-expr->reg rd e1)
+               (match e2
+                 [(? exact-integer? k) `((ADDIU ,rd ,rd ,k))]
+                 [(? symbol? r2)       `((ADDU ,rd ,rd ,r2))]
+                 [_ (append (compile-n64-expr->reg 't9 e2)
+                            `((ADDU ,rd ,rd t9)))]))]
+      [`(- ,e1 ,e2)
+       (append (compile-n64-expr->reg rd e1)
+               (match e2
+                 [(? exact-integer? k) `((ADDIU ,rd ,rd ,(- k)))]
+                 [(? symbol? r2)       `((SUBU ,rd ,rd ,r2))]
+                 [_ (append (compile-n64-expr->reg 't9 e2)
+                            `((SUBU ,rd ,rd t9)))]))]
+      [`(bit-and ,e1 ,e2)
+       (append (compile-n64-expr->reg rd e1)
+               (match e2
+                 [(? exact-integer? k) `((ANDI ,rd ,rd ,(bitwise-and k #xFFFF)))]
+                 [_ (append (compile-n64-expr->reg 't9 e2)
+                            `((AND ,rd ,rd t9)))]))]
+      [`(bit-ior ,e1 ,e2)
+       (append (compile-n64-expr->reg rd e1)
+               (match e2
+                 [(? exact-integer? k) `((ORI ,rd ,rd ,(bitwise-and k #xFFFF)))]
+                 [_ (append (compile-n64-expr->reg 't9 e2)
+                            `((OR ,rd ,rd t9)))]))]
+      [`(bit-xor ,e1 ,e2)
+       (append (compile-n64-expr->reg rd e1)
+               (match e2
+                 [(? exact-integer? k) `((XORI ,rd ,rd ,(bitwise-and k #xFFFF)))]
+                 [_ (append (compile-n64-expr->reg 't9 e2)
+                            `((XOR ,rd ,rd t9)))]))]
+      [`(shl ,e1 ,(? exact-integer? k))
+       (append (compile-n64-expr->reg rd e1)
+               `((SLL ,rd ,rd ,k)))]
+      [`(shr ,e1 ,(? exact-integer? k))
+       (append (compile-n64-expr->reg rd e1)
+               `((SRL ,rd ,rd ,k)))]
+      [_ `((ADDIU ,rd r0 0))]))
+
+  (define (compile-n64-cond-branch-false cond-expr false-lbl)
+    (match cond-expr
+      [`(,(or '= '==) ,lhs ,(? exact-integer? 0))
+       (append (compile-n64-expr->reg 't0 lhs)
+               `((BNE t0 r0 ,false-lbl)
+                 (NOP)))]
+      [`(!= ,lhs ,(? exact-integer? 0))
+       (append (compile-n64-expr->reg 't0 lhs)
+               `((BEQ t0 r0 ,false-lbl)
+                 (NOP)))]
+      [`(,(or '= '==) ,lhs ,rhs)
+       (append (compile-n64-expr->reg 't0 lhs)
+               (compile-n64-expr->reg 't1 rhs)
+               `((BNE t0 t1 ,false-lbl)
+                 (NOP)))]
+      [`(!= ,lhs ,rhs)
+       (append (compile-n64-expr->reg 't0 lhs)
+               (compile-n64-expr->reg 't1 rhs)
+               `((BEQ t0 t1 ,false-lbl)
+                 (NOP)))]
+      [_
+       (append (compile-n64-expr->reg 't0 cond-expr)
+               `((BEQ t0 r0 ,false-lbl)
+                 (NOP)))]))
+
+  (define (compile-n64-stmt stmt)
+    (match stmt
+      [`(set! ,(? fpu-reg-symbol? fd) ,expr)
+       (compile-n64-fpu-expr fd expr)]
+      [`(set! ,(? symbol? rd) ,expr)
+       #:when (memq rd '(v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 s0 s1 s2 s3 s4 s5 s6 s7))
+       (compile-n64-expr->reg rd expr)]
+      [`(set! (-> ,base ,field-sym . ,rest) ,expr)
+       (define off (parse-struct-field-offset field-sym))
+       (define ty (if (pair? rest) (car rest) ':u32))
+       (if (or (memq ty '(:f32 f32)) (fpu-reg-symbol? expr) (and (real? expr) (inexact? expr)))
+           (append (compile-n64-fpu-expr '$f0 expr)
+                   `((SWC1 $f0 ,off ,base)))
+           (append (compile-n64-expr->reg 't0 expr)
+                   (case ty
+                     [(:u8 u8 :s8 s8)     `((SB t0 ,off ,base))]
+                     [(:u16 u16 :s16 s16) `((SH t0 ,off ,base))]
+                     [else                `((SW t0 ,off ,base))])))]
+      [`(set! (,(or 'mem8 'mem16 'mem32 'wram) ,addr) ,expr)
+       (append (compile-n64-expr->reg 't0 expr)
+               `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
+                 (ORI t8 t8 ,(bitwise-and addr #xFFFF))
+                 (SW t0 0 t8)))]
+      [`(set! ,(? symbol? mmio-sym) ,expr)
+       (define addr (resolve-mmio-or-addr mmio-sym 'n64))
+       (append (compile-n64-expr->reg 't0 expr)
+               `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
+                 (ORI t8 t8 ,(bitwise-and addr #xFFFF))
+                 (SW t0 0 t8)))]
+      [`(+= ,dst ,expr)
+       (compile-n64-stmt `(set! ,dst (+ ,dst ,expr)))]
+      [`(-= ,dst ,expr)
+       (compile-n64-stmt `(set! ,dst (- ,dst ,expr)))]
+      [`(when ,cond-expr . ,body)
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-n64-cond-branch-false cond-expr join-lbl)
+               (apply append (map compile-n64-stmt body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr (then . ,then-body) (else . ,else-body))
+       (define else-lbl (fresh-label 'L_else))
+       (define join-lbl (fresh-label 'L_join))
+       (append (compile-n64-cond-branch-false cond-expr else-lbl)
+               (apply append (map compile-n64-stmt then-body))
+               `((J ,join-lbl)
+                 (NOP)
+                 (label ,else-lbl))
+               (apply append (map compile-n64-stmt else-body))
+               `((label ,join-lbl)))]
+      [`(if ,cond-expr ,then-stmt ,else-stmt)
+       (compile-n64-stmt `(if ,cond-expr (then ,then-stmt) (else ,else-stmt)))]
+      [`(loop-counted (,reg ,count) . ,body)
+       (define loop-lbl (fresh-label 'L_loop))
+       (append (compile-n64-expr->reg reg count)
+               `((label ,loop-lbl))
+               (apply append (map compile-n64-stmt body))
+               `((ADDIU ,reg ,reg -1)
+                 (BNE ,reg r0 ,loop-lbl)
+                 (NOP)))]
+      [`(spin-wait-mmio ,reg-or-addr ,mask)
+       (define wait-lbl (fresh-label 'L_wait))
+       (define addr (resolve-mmio-or-addr reg-or-addr 'n64))
+       `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
+         (ORI t8 t8 ,(bitwise-and addr #xFFFF))
+         (label ,wait-lbl)
+         (LW t9 0 t8)
+         (ANDI t9 t9 ,mask)
+         (BEQ t9 r0 ,wait-lbl)
+         (NOP))]
+      [`(,(or 'call 'tail-call) ,callee . ,args)
+       (define arg-regs '(a0 a1 a2 a3))
+       (define arg-insts
+         (apply append
+                (for/list ([arg (in-list args)]
+                           [r   (in-list arg-regs)])
+                  (compile-n64-expr->reg r arg))))
+       (append arg-insts `((JAL ,callee) (NOP)))]
+      [`(return)
+       '((JR ra) (NOP))]
+      [`(return ,expr)
+       (if (or (fpu-reg-symbol? expr) (and (real? expr) (inexact? expr)))
+           (append (compile-n64-fpu-expr '$f0 expr) '((JR ra) (NOP)))
+           (append (compile-n64-expr->reg 'v0 expr) '((JR ra) (NOP))))]
+      [`(label ,sym)
+       `((label ,sym))]
+      [_ '((NOP))]))
+
+  ;; Dispatch per target
+  (define compile-one
+    (case tid
+      [(nes snes) compile-6502-stmt]
+      [(gb)       compile-sm83-stmt]
+      [(gba rp2040) compile-gba-stmt]
+      [(n64)      compile-n64-stmt]
+      [else       compile-6502-stmt]))
+
+  (apply append (map compile-one stmts)))
+

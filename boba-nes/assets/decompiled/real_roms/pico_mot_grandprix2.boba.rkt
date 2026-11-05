@@ -57,23 +57,21 @@
     (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 3))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
-    (def-pico-function
+    (def-pico-function #:params (lines props globname) #:returns ()
       (name dataint)
       (params (lines props globname))
+      (returns ())
       (line-range (10 18))
       (api-calls (all))
       (called-functions ())
       (structured-ast
         (for-loop "l in all(lines)")
         (for-loop "i,val in ipairs(v)")
-        (if-cond "val~=\"\"")
-        (if-cond "(glob[val]~=nil"))
+        (if-cond (!= val ""))
+        (if-cond (!= (aref glob val) nil)))
       (decompiled-pseudo-code
-        (set! d "{}")
-        (foreach l "lines")
-        (set! |o,v| "{},split(l)")
-        (when "val~=\"\"")
-        (set! |o[props[i]]| "val"))
+        (set! d (table))
+        (foreach l lines (set-values! (o v) ((table) (call split l))) for (when (!= val "") (when (!= (aref glob val) nil) (set! val (aref glob val))) (set! (aref o (aref props i)) val))))
       (body-lines
         "function dataint(lines,props,globname)"
         " local d={}"
@@ -84,52 +82,52 @@
         "    if(glob[val]~=nil)val=glob[val]"
         "\t   o[props[i]]=val"
         "\t  end"))
-    (def-pico-function
+    (def-pico-function #:params (str globname) #:returns (val)
       (name data)
       (params (str globname))
+      (returns (val))
       (line-range (29 33))
       (api-calls ())
       (called-functions (dataint))
       (structured-ast
-        (return-expr "dataint(lines,props,globname)"))
+        (return-expr (call dataint lines props globname)))
       (decompiled-pseudo-code
-        (set! lines "split(str,chr(10))")
-        (set! props "split(deli(lines,1))")
-        (return "dataint(lines,props,globname)"))
+        (set! lines (call split str (call chr 10)))
+        (set! props (call split (call deli lines 1)))
+        (return (call dataint lines props globname)))
       (body-lines
         "function data(str,globname)"
         " local lines=split(str,chr(10))"
         " local props=split(deli(lines,1))"
         " return dataint(lines,props,globname)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (propstr str globname) #:returns (val)
       (name datahdr)
       (params (propstr str globname))
+      (returns (val))
       (line-range (35 37))
       (api-calls ())
       (called-functions (dataint))
       (structured-ast
-        (return-expr "dataint(split(str,chr(10)),split(propstr),globname)"))
+        (return-expr (call dataint (call split str (call chr 10)) (call split propstr) globname)))
       (decompiled-pseudo-code
-        (return "dataint(split(str,chr(10)),split(propstr),globname)"))
+        (return (call dataint (call split str (call chr 10)) (call split propstr) globname)))
       (body-lines
         "function datahdr(propstr,str,globname)"
         " return dataint(split(str,chr(10)),split(propstr),globname)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (array compfn) #:returns ()
       (name sort)
       (params (array compfn))
+      (returns ())
       (line-range (39 45))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (for-loop "i=2,#array")
-        (while-loop "j>1 and compfn(array[j-1],c)"))
+        (while-loop (and (> j 1) (call compfn (aref array (- j 1)) c))))
       (decompiled-pseudo-code
-        (for-range i "2" "#array")
-        (set! |c,j| "array[i],i")
-        (set! |array[j]| "array[j-1]")
-        (-= j "1"))
+        (for-range i 2 (len array) (set-values! (c j) ((aref array i) i)) (while (and (> j 1) (call compfn (aref array (- j 1)) c)) (set! (aref array j) (aref array (- j 1))) (-= j 1))))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -138,19 +136,18 @@
         "   array[j]=array[j-1]"
         "   j-=1"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params (co) #:returns ()
       (name runcoroutines)
       (params (co))
+      (returns ())
       (line-range (60 66))
       (api-calls (all del))
       (called-functions ())
       (structured-ast
         (for-loop "c in all(co)")
-        (if-cond "costatus(c"))
+        (if-cond (call costatus c)))
       (decompiled-pseudo-code
-        (foreach c "co")
-        (call del "co,c")
-        (call assert "coresume(c)"))
+        (foreach c co if (call del co c)))
       (body-lines
         "function runcoroutines(co)"
         "\tfor c in all(co) do"
@@ -159,75 +156,78 @@
         "\t\telse"
         "\t\t\tassert(coresume(c))"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (a b f) #:returns (val)
       (name lerp)
       (params (a b f))
+      (returns (val))
       (line-range (70 72))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "(1-f)*a+f*b"))
+        (return-expr (+ (* (- 1 f) a) (* f b))))
       (decompiled-pseudo-code
-        (return "(1-f)*a+f*b"))
+        (return (+ (* (- 1 f) a) (* f b))))
       (body-lines
         "function lerp(a,b,f)"
         " return (1-f)*a+f*b"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (v mn mx) #:returns (val)
       (name clamp)
       (params (v mn mx))
+      (returns (val))
       (line-range (81 83))
       (api-calls (max min))
       (called-functions ())
       (structured-ast
-        (return-expr "min(max(v,mn),mx)"))
+        (return-expr (call min (call max v mn) mx)))
       (decompiled-pseudo-code
-        (return "min(max(v,mn),mx)"))
+        (return (call min (call max v mn) mx)))
       (body-lines
         "function clamp(v,mn,mx)"
         "\treturn min(max(v,mn),mx)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (n) #:returns (val)
       (name sprcoords)
       (params (n))
+      (returns (val))
       (line-range (85 87))
       (api-calls (flr))
       (called-functions ())
       (structured-ast
-        (return-expr "(n%16)*8,flr(n/16)*8"))
+        (return-expr (* (modulo n 16) 8)))
       (decompiled-pseudo-code
-        (return "(n%16)*8,flr(n/16)*8"))
+        (return (* (modulo n 16) 8) (* (call flr (/ n 16)) 8)))
       (body-lines
         "function sprcoords(n)"
         "\treturn (n%16)*8,flr(n/16)*8"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (n) #:returns (val)
       (name tilecoords)
       (params (n))
+      (returns (val))
       (line-range (89 91))
       (api-calls (flr))
       (called-functions ())
       (structured-ast
-        (return-expr "n%128,flr(n/128)"))
+        (return-expr (modulo n 128)))
       (decompiled-pseudo-code
-        (return "n%128,flr(n/128)"))
+        (return (modulo n 128) (call flr (/ n 128))))
       (body-lines
         "function tilecoords(n)"
         " return n%128,flr(n/128)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (cx cy cw ch sx sy sw sh flipx flipy) #:returns ()
       (name smap)
       (params (cx cy cw ch sx sy sw sh flipx flipy))
+      (returns ())
       (line-range (93 101))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "flipx"))
+        (if-cond flipx))
       (decompiled-pseudo-code
-        (set! |dx,dy| "cw/sw,ch/sh")
-        (when "flipx")
-        (+= cx "cw")
-        (set! dx "-dx"))
+        (set-values! (dx dy) ((/ cw sw) (/ ch sh)))
+        (when flipx (+= cx cw) (set! dx (- dx))))
       (body-lines
         "function smap(cx,cy,cw,ch,sx,sy,sw,sh,flipx,flipy)"
         " -- delta"
@@ -238,67 +238,72 @@
         "  cx+=cw"
         "  dx=-dx"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name read2)
       (params (self))
+      (returns (val))
       (line-range (124 126))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "self:read1()|(self:read1()<<8)"))
+        (return-expr (call (send self :read1) (shl (send self :read1) 8))))
       (decompiled-pseudo-code
-        (return "self:read1()|(self:read1()<<8)"))
+        (return (call (send self :read1) (shl (send self :read1) 8))))
       (body-lines
         "function read2(self)"
         " return self:read1()|(self:read1()<<8)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name mem_size)
       (params (self))
+      (returns (val))
       (line-range (130 132))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "self.addr-self.baseaddr"))
+        (return-expr (- (-> self :addr) (-> self :baseaddr))))
       (decompiled-pseudo-code
-        (return "self.addr-self.baseaddr"))
+        (return (- (-> self :addr) (-> self :baseaddr))))
       (body-lines
         "function mem_size(self)"
         "\treturn self.addr-self.baseaddr"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name mem_r1)
       (params (self))
+      (returns (val))
       (line-range (134 138))
       (api-calls (peek))
       (called-functions ())
       (structured-ast
-        (return-expr "v"))
+        (return-expr v))
       (decompiled-pseudo-code
-        (set! v "peek(self.addr)")
-        (+= self.addr "1")
-        (return "v"))
+        (set! v (call peek (-> self :addr)))
+        (+= (-> self :addr) 1)
+        (return v))
       (body-lines
         "function mem_r1(self)"
         " local v=peek(self.addr)"
         " self.addr+=1"
         " return v"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (addr) #:returns (val)
       (name readmemstream)
       (params (addr))
+      (returns (val))
       (line-range (140 148))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (return "{")
-        (set! baseaddr "addr,")
-        (set! addr "addr,")
-        (set! size "mem_size,")
-        (set! read1 "mem_r1,")
-        (set! read2 "read2"))
+        (return (table))
+        (set! baseaddr addr)
+        (set! addr addr)
+        (set! size mem_size)
+        (set! read1 mem_r1)
+        (set! read2 read2)
+        |}|)
       (body-lines
         "function readmemstream(addr)"
         "\treturn {"
@@ -309,50 +314,53 @@
         "\t\tread2=read2"
         "\t}"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (c) #:returns (val)
       (name fromhexchar)
       (params (c))
+      (returns (val))
       (line-range (152 154))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "ord(c)-(c>\"9\" and 87 or 48)"))
+        (return-expr (- (call ord c) (or (and (> c "9") 87) 48))))
       (decompiled-pseudo-code
-        (return "ord(c)-(c>\"9\" and 87 or 48)"))
+        (return (- (call ord c) (or (and (> c "9") 87) 48))))
       (body-lines
         "function fromhexchar(c)"
         " return ord(c)-(c>\"9\" and 87 or 48)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name str_size)
       (params (self))
+      (returns (val))
       (line-range (156 158))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "#self.str/2"))
+        (return-expr (/ (len (-> self :str)) 2)))
       (decompiled-pseudo-code
-        (return "#self.str/2"))
+        (return (/ (len (-> self :str)) 2)))
       (body-lines
         "function str_size(self)"
         "\treturn #self.str/2"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name str_r1)
       (params (self))
+      (returns (val))
       (line-range (160 168))
       (api-calls (flr))
       (called-functions (fromhexchar))
       (structured-ast
-        (return-expr "(hi<<4)|lo"))
+        (return-expr (shl hi 4)))
       (decompiled-pseudo-code
-        (set! |str,offs| "self.strs[flr(self.offs>>10)+1],self.offs&0x3ff")
-        (+= offs "1")
-        (set! hi "fromhexchar(sub(str,offs,offs))")
-        (+= offs "1")
-        (set! lo "fromhexchar(sub(str,offs,offs))")
-        (+= self.offs "2")
-        (return "(hi<<4)|lo"))
+        (set-values! (str offs) ((aref (-> self :strs) (+ (call flr (shr (-> self :offs) 10)) 1)) (-> self :offs)))
+        (+= offs 1)
+        (set! hi (call fromhexchar (call sub str offs offs)))
+        (+= offs 1)
+        (set! lo (call fromhexchar (call sub str offs offs)))
+        (+= (-> self :offs) 2)
+        (return (shl hi 4)))
       (body-lines
         "function str_r1(self)"
         " local str,offs=self.strs[flr(self.offs>>10)+1],self.offs&0x3ff"
@@ -363,21 +371,23 @@
         " self.offs+=2"
         " return (hi<<4)|lo"
         "end "))
-    (def-pico-function
+    (def-pico-function #:params (strs) #:returns (val)
       (name readstrstream)
       (params (strs))
+      (returns (val))
       (line-range (170 178))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (return "{")
-        (set! strs "strs,")
-        (set! offs "0,")
-        (set! size "str_size,")
-        (set! read1 "str_r1,")
-        (set! read2 "read2"))
+        (return (table))
+        (set! strs strs)
+        (set! offs 0)
+        (set! size str_size)
+        (set! read1 str_r1)
+        (set! read2 read2)
+        |}|)
       (body-lines
         "function readstrstream(strs)"
         "\treturn {"
@@ -388,54 +398,54 @@
         "\t\tread2=read2"
         "\t}"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (stream len) #:returns ()
       (name readstrfixed)
       (params (stream len))
+      (returns ())
       (line-range (182 186))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (for-loop "i=1,len"))
       (decompiled-pseudo-code
-        (set! result "\"\"")
-        (for-range i "1" "len")
-        (set! result.. "chr(stream:read1())"))
+        (set! result "")
+        (for-range i 1 len (set! (string-append result void) (call chr (send stream :read1)))))
       (body-lines
         "function readstrfixed(stream,len)"
         "\tlocal result=\"\""
         "\tfor i=1,len do"
         "\t\tresult..=chr(stream:read1())"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (stream) #:returns (val)
       (name readstr)
       (params (stream))
+      (returns (val))
       (line-range (190 193))
       (api-calls ())
       (called-functions (readstrfixed))
       (structured-ast
-        (return-expr "readstrfixed(stream,len)"))
+        (return-expr (call readstrfixed stream len)))
       (decompiled-pseudo-code
-        (set! len "stream:read1()")
-        (return "readstrfixed(stream,len)"))
+        (set! len (send stream :read1))
+        (return (call readstrfixed stream len)))
       (body-lines
         "function readstr(stream)"
         "\tlocal len=stream:read1()"
         "\treturn readstrfixed(stream,len)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (stream) #:returns ()
       (name loadanims)
       (params (stream))
+      (returns ())
       (line-range (197 205))
       (api-calls ())
       (called-functions (readstrfixed))
       (structured-ast
-        (if-cond "hdr~=\"mas\""))
+        (if-cond (!= hdr "mas")))
       (decompiled-pseudo-code
-        (call printh "\"*** loading animations ***\"")
-        (set! hdr "readstrfixed(stream,3)")
-        (when "hdr~=\"mas\"")
-        (call printh "\"'mas' header not found\"")
-        (call stop ""))
+        (call printh "*** loading animations ***")
+        (set! hdr (call readstrfixed stream 3))
+        (when (!= hdr "mas") (call printh "'mas' header not found") (call stop)))
       (body-lines
         "function loadanims(stream)"
         "\tprinth(\"*** loading animations ***\")"
@@ -446,32 +456,27 @@
         "\t\tprinth(\"'mas' header not found\")"
         "\t\tstop()"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (stream) #:returns ()
       (name loadspriteanim)
       (params (stream))
+      (returns ())
       (line-range (242 264))
       (api-calls (add))
       (called-functions (makespriteanim read2 readstr))
       (structured-ast
         (for-loop "i=1,ct"))
       (decompiled-pseudo-code
-        (set! anim "makespriteanim()")
-        (set! anim.name "readstr(stream)")
-        (set! anim.fps "stream:read1()/4")
-        (set! anim.w "stream:read1()")
-        (set! anim.h "stream:read1()")
-        (set! anim.ox "stream:read1()/100")
-        (set! anim.oy "stream:read1()/100")
-        (set! anim.tr "stream:read1()")
-        (set! anim.frames "{}")
-        (set! ct "stream:read1()")
-        (for-range i "1" "ct")
-        (set! frame "{}")
-        (set! frame.frame "stream:read2()")
-        (set! flags "stream:read1()")
-        (set! frame.flipx "(flags&1)==1")
-        (set! frame.flipy "(flags&2)==2")
-        (call add "anim.frames,frame"))
+        (set! anim (call makespriteanim))
+        (set! (-> anim :name) (call readstr stream))
+        (set! (-> anim :fps) (/ (send stream :read1) 4))
+        (set! (-> anim :w) (send stream :read1))
+        (set! (-> anim :h) (send stream :read1))
+        (set! (-> anim :ox) (/ (send stream :read1) 100))
+        (set! (-> anim :oy) (/ (send stream :read1) 100))
+        (set! (-> anim :tr) (send stream :read1))
+        (set! (-> anim :frames) (table))
+        (set! ct (send stream :read1))
+        (for-range i 1 ct (set! frame (table)) (set! (-> frame :frame) (send stream :read2)) (set! flags (send stream :read1)) (set! (-> frame :flipx) flags) (set! (-> frame :flipy) flags) (call add (-> anim :frames) frame)))
       (body-lines
         "function loadspriteanim(stream)"
         "\tlocal anim=makespriteanim()"
@@ -496,32 +501,26 @@
         "\t\tframe.flipy=(flags&2)==2"
         "\t\tadd(anim.frames,frame)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (stream typ) #:returns ()
       (name loadtlanim)
       (params (stream typ))
+      (returns ())
       (line-range (269 293))
       (api-calls ())
       (called-functions (makekeyframe maketlanim read2 readstr))
       (structured-ast
-        (if-cond "(typ==3")
+        (if-cond (== typ 3))
         (for-loop "i=1,ct")
         (for-loop "j=1,kct")
-        (if-cond "(flags&1"))
+        (if-cond flags))
       (decompiled-pseudo-code
-        (set! anim "maketlanim()")
-        (set! anim.name "readstr(stream)")
-        (set! anim.d "stream:read2()/100")
-        (set! anim.tls "{}")
-        (set! ct "stream:read1()")
-        (for-range i "1" "ct")
-        (set! keyframes "{}")
-        (set! kct "stream:read1()")
-        (for-range j "1" "kct")
-        (set! t "stream:read2()/100")
-        (set! k "makekeyframe(t)")
-        (set! flags "stream:read1()")
-        (when "(flags&1)~=0")
-        (set! k.anim "stream:read1()"))
+        (set! anim (call maketlanim))
+        (when (== typ 3) (set! (-> anim :typ) "storyboard"))
+        (set! (-> anim :name) (call readstr stream))
+        (set! (-> anim :d) (/ (send stream :read2) 100))
+        (set! (-> anim :tls) (table))
+        (set! ct (send stream :read1))
+        (for-range i 1 ct (set! keyframes (table)) (set! kct (send stream :read1)) (for-range j 1 kct (set! t (/ (send stream :read2) 100)) (set! k (call makekeyframe t)) (set! flags (send stream :read1)) (when flags (set! (-> k :anim) (send stream :read1))))))
       (body-lines
         "function loadtlanim(stream,typ)"
         " local anim=maketlanim()"
@@ -548,26 +547,35 @@
         "\t  if (flags&1)~=0 then "
         "\t  \tk.anim=stream:read1()\t\t-- will be converted to object reference later"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self t x y xscale yscale flipx flipy) #:returns ()
       (name spriteanim_draw)
       (params (self t x y xscale yscale flipx flipy))
+      (returns ())
       (line-range (373 403))
       (api-calls (flr palt))
       (called-functions (clamp smap tilecoords))
       (structured-ast
-        (if-cond "(frame.flipx")
-        (if-cond "(frame.flipy"))
+        (if-cond (-> frame :flipx))
+        (if-cond (-> frame :flipy)))
       (decompiled-pseudo-code
-        (set! f "clamp(flr(t*self.fps)+1,1,#self.frames)")
-        (set! frame "self.frames[f]")
-        (set! |dw,dh| "self.w*8*xscale,self.h*8*yscale")
-        (-= x "dw*(flipx and (1-self.ox) or self.ox)")
-        (-= y "dh*(flipy and (1-self.oy) or self.oy)")
-        (call palt "0,false")
-        (call palt "self.tr,true")
-        (set! |cx,cy| "tilecoords(frame.frame)")
-        (call palt "self.tr,false")
-        (call palt "0,true"))
+        (set! f (call clamp (+ (call flr (* t (-> self :fps))) 1) 1 (len (-> self :frames))))
+        (set! frame (aref (-> self :frames) f))
+        (set-values! (dw dh) ((* (* (-> self :w) 8) xscale) (* (* (-> self :h) 8) yscale)))
+        (when (-> frame :flipx) (set! flipx (not flipx)))
+        (when (-> frame :flipy) (set! flipy (not flipy)))
+        (-= x (* dw (or (and flipx (- 1 (-> self :ox))) (-> self :ox))))
+        (-= y (* dh (or (and flipy (- 1 (-> self :oy))) (-> self :oy))))
+        (call palt 0 #f)
+        (call palt (-> self :tr) #t)
+        (set-values! (cx cy) ((call tilecoords (-> frame :frame))))
+        (call smap void)
+        cx
+        (-> self :w)
+        x
+        dw
+        flipx
+        (call palt (-> self :tr) #f)
+        (call palt 0 #t))
       (body-lines
         "function spriteanim_draw(self,t,x,y,xscale,yscale,flipx,flipy)"
         ""
@@ -600,40 +608,45 @@
         " palt(self.tr,false)\t"
         "\tpalt(0,true)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name spriteanim_duration)
       (params (self))
+      (returns (val))
       (line-range (405 407))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "#self.frames/self.fps"))
+        (return-expr (/ (len (-> self :frames)) (-> self :fps))))
       (decompiled-pseudo-code
-        (return "#self.frames/self.fps"))
+        (return (/ (len (-> self :frames)) (-> self :fps))))
       (body-lines
         "function spriteanim_duration(self)"
         "\treturn #self.frames/self.fps"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name makespriteanim)
       (params ())
+      (returns (val))
       (line-range (409 424))
       (api-calls ())
       (called-functions (makespriteframe))
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (return "{")
-        (set! typ "\"sprite\",")
-        (set! name "\"sprite\",")
-        (set! fps "10,")
-        (set! w "1,h=1,")
-        (set! ox "0.5,oy=0.5,")
-        (set! tr "16,")
-        (set! frames "{")
-        (set! duration "spriteanim_duration,")
-        (set! dodraw "spriteanim_draw,")
-        (set! draw "drawanim"))
+        (return (table))
+        (set! typ "sprite")
+        (set! name "sprite")
+        (set! fps 10)
+        (set-values! (w) (1 h))
+        (set-values! (ox) (0.5 oy))
+        (set! tr 16)
+        (set! frames (table))
+        (call makespriteframe 1)
+        |}|
+        (set! duration spriteanim_duration)
+        (set! dodraw spriteanim_draw)
+        (set! draw drawanim)
+        |}|)
       (body-lines
         "function makespriteanim()"
         "\treturn {"
@@ -651,17 +664,19 @@
         "\t\tdraw=drawanim"
         "\t}"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (n) #:returns (val)
       (name makespriteframe)
       (params (n))
+      (returns (val))
       (line-range (426 432))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (return "{")
-        (set! frame "n"))
+        (return (table))
+        (set! frame n)
+        |}|)
       (body-lines
         "function makespriteframe(n)"
         "\treturn {"
@@ -670,36 +685,36 @@
         "--\t\tflipy=false"
         "\t}"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name tlanim_duration)
       (params (self))
+      (returns (val))
       (line-range (436 438))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "self.d"))
+        (return-expr (-> self :d)))
       (decompiled-pseudo-code
-        (return "self.d"))
+        (return (-> self :d)))
       (body-lines
         "function tlanim_duration(self)"
         "\treturn self.d"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (tl prop t) #:returns ()
       (name findrefkeyframes)
       (params (tl prop t))
+      (returns ())
       (line-range (444 453))
       (api-calls (all))
       (called-functions ())
       (structured-ast
         (for-loop "k in all(tl.keyframes)")
-        (if-cond "k[prop]")
-        (if-cond "k.t<=t and k.t>beforet"))
+        (if-cond (aref k prop))
+        (if-cond (and (<= (-> k :t) t) (> (-> k :t) beforet))))
       (decompiled-pseudo-code
-        (set! |beforet,aftert| "-1000,1000")
-        (foreach k "tl.keyframes")
-        (when "k[prop]")
-        (when "k.t<=t and k.t>beforet")
-        (set! |before,beforet| "k,k.t"))
+        (local before after)
+        (set-values! (beforet aftert) ((- 1000) 1000))
+        (foreach k (-> tl :keyframes) (when (aref k prop) (when (and (<= (-> k :t) t) (> (-> k :t) beforet)) (set-values! (before beforet) (k (-> k :t)))))))
       (body-lines
         "function findrefkeyframes(tl,prop,t)"
         " -- find nearest frames before/after t"
@@ -711,29 +726,28 @@
         "   if k.t<=t and k.t>beforet then"
         "    before,beforet=k,k.t"
         "   end"))
-    (def-pico-function
+    (def-pico-function #:params (tl t) #:returns ()
       (name getvirtualkeyframe)
       (params (tl t))
+      (returns ())
       (line-range (462 485))
       (api-calls (all))
       (called-functions (findrefkeyframes))
       (structured-ast
         (for-loop "prop in all(keyframeswitch)")
-        (if-cond "(frame")
-        (if-cond "prop==\"animt\""))
+        (if-cond frame)
+        (if-cond (== prop "animt")))
       (decompiled-pseudo-code
-        (set! props "{")
-        (set! visible "true,")
-        (set! animt "0,animspd=1,")
-        (set! x "0,y=0,")
-        (set! xscale "1,yscale=1,")
-        (set! flipx "false,flipy=false,")
-        (set! easein "false,easeout=false")
-        (foreach prop "keyframeswitch")
-        (set! |before,after| "findrefkeyframes(tl,prop,t)")
-        (set! frame "before or after")
-        (when "prop==\"animt\"")
-        (set! animtt "before and before.t"))
+        (set! props (table))
+        (set! visible #t)
+        (set-values! (animt) (0 animspd))
+        (set-values! (x) (0 y))
+        (set-values! (xscale) (1 yscale))
+        (set-values! (flipx) (#f flipy))
+        (set-values! (easein) (#f easeout))
+        |}|
+        (local animtt)
+        (foreach prop keyframeswitch (set-values! (before after) ((call findrefkeyframes tl prop t))) (set! frame (or before after)) (when frame (set! (aref props prop) (aref frame prop))) (when (== prop "animt") (set! animtt (and before (-> before :t))))))
       (body-lines
         "function getvirtualkeyframe(tl,t)"
         ""
@@ -759,33 +773,25 @@
         "\t\tif prop==\"animt\" then"
         "\t\t animtt=before and before.t"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self t x y xscale yscale flipx flipy dt r) #:returns ()
       (name tlanim_draw)
       (params (self t x y xscale yscale flipx flipy dt r))
+      (returns ())
       (line-range (527 553))
       (api-calls (all))
       (called-functions (anim_draw getvirtualkeyframe))
       (structured-ast
-        (if-cond "(r>10")
-        (return-expr "")
+        (if-cond (> r 10))
+        (return-expr void)
         (for-loop "tl in all(self.tls)")
-        (if-cond "props.visible and props.anim")
-        (if-cond "(props.flipx")
-        (if-cond "(props.flipy")
-        (if-cond "not anim_draw or anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cf"))
+        (if-cond (and (-> props :visible) (-> props :anim)))
+        (if-cond (-> props :flipx))
+        (if-cond (-> props :flipy))
+        (if-cond (or (not anim_draw) (call anim_draw props cx cy cxscale cyscale cflipx cflipy cdt r))))
       (decompiled-pseudo-code
-        (+= r "1")
-        (when "r>10" "return")
-        (foreach tl "self.tls")
-        (set! props "getvirtualkeyframe(tl,t)")
-        (when "props.visible and props.anim")
-        (set! cx "x+props.x*xscale*(flipx and -1 or 1)")
-        (set! cy "y+props.y*yscale*(flipy and -1 or 1)")
-        (set! |cxscale,cyscale| "xscale*props.xscale,yscale*props.yscale")
-        (set! |cflipx,cflipy| "flipx,flipy")
-        (set! cdt "dt and dt*props.animspd")
-        (when "not anim_draw or anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r)")
-        (call props.anim:dodraw "props.animt,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r"))
+        (+= r 1)
+        (when (> r 10) (return))
+        (foreach tl (-> self :tls) (set! props (call getvirtualkeyframe tl t)) (when (and (-> props :visible) (-> props :anim)) (set! cx (+ x (* (* (-> props :x) xscale) (or (and flipx (- 1)) 1)))) (set! cy (+ y (* (* (-> props :y) yscale) (or (and flipy (- 1)) 1)))) (set-values! (cxscale cyscale) ((* xscale (-> props :xscale)) (* yscale (-> props :yscale)))) (set-values! (cflipx cflipy) (flipx flipy)) (when (-> props :flipx) (set! cflipx (not cflipx))) (when (-> props :flipy) (set! cflipy (not cflipy))) (set! cdt (and dt (* dt (-> props :animspd)))) (when (or (not anim_draw) (call anim_draw props cx cy cxscale cyscale cflipx cflipy cdt r)) (send (-> props :anim) :dodraw (-> props :animt) cx cy cxscale cyscale cflipx cflipy cdt r)))))
       (body-lines
         "function tlanim_draw(self,t,x,y,xscale,yscale,flipx,flipy,dt,r)"
         " -- recursion limit"
@@ -814,26 +820,28 @@
         "\t\t if not anim_draw or anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r) then"
         "\t\t\t props.anim:dodraw(props.animt,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r)"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (t) #:returns (val)
       (name makekeyframe)
       (params (t))
+      (returns (val))
       (line-range (567 586))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (return "{")
-        (set! t "t,")
-        (set! anim "nil,")
-        (set! loop "true,")
-        (set! after "false,")
-        (set! visible "true,")
-        (set! flipx "false,")
-        (set! flipy "false,")
-        (set! easein "false,")
-        (set! easeout "false,")
-        (set! tag "0"))
+        (return (table))
+        (set! t t)
+        (set! anim nil)
+        (set! loop #t)
+        (set! after #f)
+        (set! visible #t)
+        (set! flipx #f)
+        (set! flipy #f)
+        (set! easein #f)
+        (set! easeout #f)
+        (set! tag 0)
+        |}|)
       (body-lines
         "function makekeyframe(t)"
         "\treturn {"
@@ -855,18 +863,20 @@
         "\t\ttag=0"
         "\t}"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (t typ) #:returns (val)
       (name makeevent)
       (params (t typ))
+      (returns (val))
       (line-range (588 597))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (return "{")
-        (set! t "t,")
-        (set! typ "\"\""))
+        (return (table))
+        (set! t t)
+        (set! typ "")
+        |}|)
       (body-lines
         "function makeevent(t,typ)"
         " return {"
@@ -878,19 +888,21 @@
         "--  txt=nil"
         " }"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name maketl)
       (params ())
+      (returns (val))
       (line-range (599 608))
       (api-calls ())
       (called-functions (makekeyframe))
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (set! k "makekeyframe(0)")
-        (set! |k.animt,k.animspd,k.x,k.y| "0,1,0,0")
-        (return "{")
-        (set! keyframes "{k}"))
+        (set! k (call makekeyframe 0))
+        (set-values! ((-> k :animt) (-> k :animspd) (-> k :x) (-> k :y)) (0 1 0 0))
+        (return (table))
+        (set! keyframes (table k))
+        |}|)
       (body-lines
         "function maketl()"
         ""
@@ -902,24 +914,26 @@
         "\t\tkeyframes={k}\t"
         "\t}"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name maketlanim)
       (params ())
+      (returns (val))
       (line-range (610 621))
       (api-calls ())
       (called-functions (maketl))
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (return "{")
-        (set! typ "\"tl\",")
-        (set! name "\"timeline\",")
-        (set! d "10,")
-        (set! tls "{ maketl() },")
-        (set! events "{ keyframes={} },")
-        (set! duration "tlanim_duration,")
-        (set! dodraw "tlanim_draw,")
-        (set! draw "drawanim"))
+        (return (table))
+        (set! typ "tl")
+        (set! name "timeline")
+        (set! d 10)
+        (set! tls (table (call maketl)))
+        (set! events (table (:keyframes (table))))
+        (set! duration tlanim_duration)
+        (set! dodraw tlanim_draw)
+        (set! draw drawanim)
+        |}|)
       (body-lines
         "function maketlanim()"
         "\treturn {"
@@ -933,58 +947,59 @@
         "\t\tdraw=drawanim"
         "\t}"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (fn) #:returns ()
       (name doafterframe)
       (params (fn))
+      (returns ())
       (line-range (627 629))
       (api-calls (add))
       (called-functions ())
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (call add "afterframeco,cocreate(fn)"))
+        (call add afterframeco (call cocreate fn)))
       (body-lines
         "\tlocal function doafterframe(fn)"
         "\t\t add(afterframeco,cocreate(fn))"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params (ev) #:returns ()
       (name sfx)
       (params (ev))
+      (returns ())
       (line-range (632 632))
       (api-calls (sfx))
       (called-functions ())
       (structured-ast
         (seq-block 1))
       (decompiled-pseudo-code
-        (set! sfx "function(ev)\tsfx(ev.n)         end,"))
+        (call sfx (-> ev :n)))
       (body-lines
         "  sfx=function(ev)\tsfx(ev.n)         end,"))
-    (def-pico-function
+    (def-pico-function #:params (ev) #:returns ()
       (name mus)
       (params (ev))
+      (returns ())
       (line-range (633 633))
       (api-calls (music))
       (called-functions ())
       (structured-ast
         (seq-block 1))
       (decompiled-pseudo-code
-        (set! mus "function(ev) music(ev.n or -1) end,"))
+        (call music (or (-> ev :n) (- 1))))
       (body-lines
         "  mus=function(ev) music(ev.n or -1) end,"))
-    (def-pico-function
+    (def-pico-function #:params (ev) #:returns ()
       (name txt)
       (params (ev))
+      (returns ())
       (line-range (634 639))
       (api-calls (print))
       (called-functions (doafterframe))
       (structured-ast
         (for-loop "i=1,ev.n or 30"))
       (decompiled-pseudo-code
-        (set! txt "function(ev)")
-        (call doafterframe "function(")
-        (for-range i "1" "ev.n or 30")
-        (call print "ev.txt,ev.x,ev.y")
-        (call yield ""))
+        (call doafterframe (call function))
+        (for-range i 1 (or (-> ev :n) 30) (call print (-> ev :txt) (-> ev :x) (-> ev :y)) (call yield)))
       (body-lines
         "  txt=function(ev)"
         "   doafterframe(function()"
@@ -992,20 +1007,18 @@
         "     print(ev.txt,ev.x,ev.y)"
         "     yield()"
         "    end"))
-    (def-pico-function
+    (def-pico-function #:params (ev x y) #:returns ()
       (name reltxt)
       (params (ev x y))
+      (returns ())
       (line-range (642 647))
       (api-calls (print))
       (called-functions (doafterframe))
       (structured-ast
         (for-loop "i=1,ev.n or 30"))
       (decompiled-pseudo-code
-        (set! reltxt "function(ev,x,y)")
-        (call doafterframe "function(")
-        (for-range i "1" "ev.n or 30")
-        (call print "ev.txt,x+(ev.x or 0),y+(ev.y or 0)")
-        (call yield ""))
+        (call doafterframe (call function))
+        (for-range i 1 (or (-> ev :n) 30) (call print (-> ev :txt) (+ x (or (-> ev :x) 0)) (+ y (or (-> ev :y) 0))) (call yield)))
       (body-lines
         "  reltxt=function(ev,x,y)"
         "   doafterframe(function()"
@@ -1013,55 +1026,51 @@
         "     print(ev.txt,x+(ev.x or 0),y+(ev.y or 0))"
         "     yield()"
         "    end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name clr)
       (params ())
+      (returns ())
       (line-range (650 652))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! clr "function()")
-        (set! afterframeco "{}"))
+        (set! afterframeco (table)))
       (body-lines
         "\t\tclr=function()"
         "\t\t afterframeco={}"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name framedone)
       (params ())
+      (returns ())
       (line-range (659 661))
       (api-calls ())
       (called-functions (runcoroutines))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! framedone "function()")
-        (call runcoroutines "afterframeco"))
+        (call runcoroutines afterframeco))
       (body-lines
         "\t\tframedone=function()"
         "\t\t runcoroutines(afterframeco)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _init)
       (params ())
+      (returns ())
       (line-range (724 742))
       (api-calls ())
       (called-functions (loadanims readstrstream))
       (structured-ast
-        (if-cond "dget(10"))
+        (if-cond (call dget 10)))
       (decompiled-pseudo-code
-        (call cartdata "\"mot_gpp\"")
-        (set! stream "readstrstream(animdata)")
-        (set! anims "loadanims(stream)")
-        (set! anim_events.fin "fadein")
-        (when "dget(10)==0")
-        (set! |racetype,dif,lapoption,tracknum| "1,2,2,1")
-        (set! racetype "dget(10)")
-        (set! dif "dget(11)")
-        (set! tracknum "dget(12)")
-        (set! lapoption "dget(13)"))
+        (call cartdata "mot_gpp")
+        (set! stream (call readstrstream animdata))
+        (set! anims (call loadanims stream))
+        (set! (-> anim_events :fin) fadein)
+        (if (== (call dget 10) 0) (then (set-values! (racetype dif lapoption tracknum) (1 2 2 1))) (else (set! racetype (call dget 10)) (set! dif (call dget 11)) (set! tracknum (call dget 12)) (set! lapoption (call dget 13)))))
       (body-lines
         "function _init()"
         " cartdata(\"mot_gpp\")"
@@ -1082,21 +1091,22 @@
         "\t tracknum\t=dget(12)"
         " \tlapoption=dget(13)"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _draw)
       (params ())
+      (returns ())
       (line-range (767 773))
       (api-calls (cls))
       (called-functions (basepal drawconfirm drawfade))
       (structured-ast
-        (if-cond "(anim and animt")
-        (if-cond "(confirmprompt"))
+        (if-cond (and anim animt))
+        (if-cond confirmprompt))
       (decompiled-pseudo-code
-        (call cls "")
-        (call basepal "")
-        (call if "anim and animt)anim:draw(animt")
-        (call if "confirmprompt)drawconfirm(")
-        (call drawfade ""))
+        (call cls)
+        (call basepal)
+        (when (and anim animt) (send anim :draw animt))
+        (when confirmprompt (call drawconfirm))
+        (call drawfade))
       (body-lines
         "function _draw()"
         " cls()"
@@ -1105,22 +1115,19 @@
         " if(confirmprompt)drawconfirm()"
         " drawfade()"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _update)
       (params ())
+      (returns ())
       (line-range (775 784))
       (api-calls ())
       (called-functions (updateconfirm updatemenu))
       (structured-ast
-        (if-cond "not istransition")
-        (if-cond "confirmprompt"))
+        (if-cond (not istransition))
+        (if-cond confirmprompt))
       (decompiled-pseudo-code
-        (+= frame "1")
-        (when "not istransition")
-        (when "confirmprompt")
-        (call updateconfirm "")
-        (when "mode==\"title\"")
-        (call updatemenu ""))
+        (+= frame 1)
+        (when (not istransition) (when confirmprompt (call updateconfirm) (when (== mode "title") (call updatemenu)))))
       (body-lines
         "function _update()"
         " frame+=1"
@@ -1132,20 +1139,17 @@
         "  elseif mode==\"title\" then"
         "\t \tupdatemenu()"
         "\t end"))
-    (def-pico-function
+    (def-pico-function #:params (demo) #:returns ()
       (name rungame)
       (params (demo))
+      (returns ())
       (line-range (804 812))
       (api-calls ())
       (called-functions (makerandomroster))
       (structured-ast
-        (if-cond "racetype==type_race"))
+        (if-cond (== racetype type_race)))
       (decompiled-pseudo-code
-        (when "racetype==type_race")
-        (set! roster "makerandomroster()")
-        (when "racetype==type_tour")
-        (set! roster "tour.roster")
-        (set! roster "nil"))
+        (when (== racetype type_race) (set! roster (call makerandomroster)) (if (== racetype type_tour) (then (set! roster (-> tour :roster))) (else (set! roster nil)))))
       (body-lines
         "function rungame(demo)"
         ""
@@ -1156,19 +1160,18 @@
         " else"
         "  roster=nil"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params (props cx cy cxscale cyscale cflipx cflipy cdt r) #:returns ()
       (name anim_draw)
       (params (props cx cy cxscale cyscale cflipx cflipy cdt r))
+      (returns ())
       (line-range (851 857))
       (api-calls (pal))
       (called-functions (basepal))
       (structured-ast
-        (if-cond "tag==1"))
+        (if-cond (== tag 1)))
       (decompiled-pseudo-code
-        (set! tag "props.tag")
-        (when "tag==1")
-        (call pal "pals[2]")
-        (call basepal ""))
+        (set! tag (-> props :tag))
+        (if (== tag 1) (then (call pal (aref pals 2))) (else (call basepal))))
       (body-lines
         "function anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r)"
         " local tag=props.tag"
@@ -1177,21 +1180,22 @@
         " else"
         "  basepal()"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name drawconfirm)
       (params ())
+      (returns ())
       (line-range (880 887))
       (api-calls (rect rectfill))
       (called-functions (cprint pprint))
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (call rectfill "0,50,128,77,3")
-        (call rect "-1,50,128,77,7")
-        (call cprint "confirmprompt,56,6")
-        (set! selcol "frame%8<4 and 7 or 6")
-        (call pprint "\"yES\",50,67,confirmx==0 and selcol or 5")
-        (call pprint "\"nO\", 69,67,confirmx==1 and selcol or 5"))
+        (call rectfill 0 50 128 77 3)
+        (call rect (- 1) 50 128 77 7)
+        (call cprint confirmprompt 56 6)
+        (set! selcol (or (and (< (modulo frame 8) 4) 7) 6))
+        (call pprint "yES" 50 67 (or (and (== confirmx 0) selcol) 5))
+        (call pprint "nO" 69 67 (or (and (== confirmx 1) selcol) 5)))
       (body-lines
         "function drawconfirm()"
         " rectfill(0,50,128,77,3)"
@@ -1201,22 +1205,22 @@
         " pprint(\"yES\",50,67,confirmx==0 and selcol or 5)"
         " pprint(\"nO\", 69,67,confirmx==1 and selcol or 5)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name updateconfirm)
       (params ())
+      (returns ())
       (line-range (889 896))
       (api-calls (btnp))
       (called-functions ())
       (structured-ast
-        (if-cond "(btnp(⬅️")
-        (if-cond "(btnp(➡️")
-        (if-cond "btnp(❎")
-        (if-cond "confirmx==0"))
+        (if-cond (call btnp void))
+        (if-cond (call btnp void))
+        (if-cond (call btnp void))
+        (if-cond (== confirmx 0)))
       (decompiled-pseudo-code
-        (when "btnp(❎)or btnp(🅾️)")
-        (set! confirmprompt "nil")
-        (when "confirmx==0")
-        (call confirmfn ""))
+        (when (call btnp) (set! confirmx 0))
+        (when (call btnp) (set! confirmx 1))
+        (when (or (call btnp) (call btnp)) (set! confirmprompt nil) (when (== confirmx 0) (call confirmfn))))
       (body-lines
         "function updateconfirm()"
         " if(btnp(⬅️))confirmx=0"
@@ -1226,19 +1230,18 @@
         "  if confirmx==0 then"
         "   confirmfn()"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name fadein)
       (params ())
+      (returns ())
       (line-range (903 908))
       (api-calls (add))
       (called-functions ())
       (structured-ast
         (for-loop "i=0,63"))
       (decompiled-pseudo-code
-        (set! fadepixels "{}")
-        (for-range i "0" "63")
-        (call sset "i%8,i\\8,0")
-        (call add "fadepixels,i"))
+        (set! fadepixels (table))
+        (for-range i 0 63 (call sset (modulo i 8) i) (call add fadepixels i)))
       (body-lines
         "function fadein()"
         " fadepixels={}"
@@ -1246,20 +1249,18 @@
         "  sset(i%8,i\\8,0)"
         "  add(fadepixels,i)"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name drawfade)
       (params ())
+      (returns ())
       (line-range (912 917))
       (api-calls (palt spr))
       (called-functions ())
       (structured-ast
-        (if-cond "fade==\"in\"")
+        (if-cond (== fade "in"))
         (for-loop "i=0,255"))
       (decompiled-pseudo-code
-        (when "fade==\"in\"")
-        (call palt "0,false) palt(1,true")
-        (for-range i "0" "255")
-        (call spr "0,i%16*8,i\\16*8"))
+        (when (== fade "in") (call palt 0 #f) (for-range i 0 255 (* (call spr 0 (* (modulo i 16) 8) i) 8))))
       (body-lines
         "function drawfade()"
         " if fade==\"in\" then"
@@ -1267,21 +1268,18 @@
         "  for i=0,255 do"
         "   spr(0,i%16*8,i\\16*8)"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name updatefade)
       (params ())
+      (returns ())
       (line-range (922 928))
       (api-calls (del rnd))
       (called-functions ())
       (structured-ast
-        (if-cond "fade==\"in\"")
+        (if-cond (== fade "in"))
         (for-loop "k=1,2"))
       (decompiled-pseudo-code
-        (when "fade==\"in\"")
-        (for-range k "1" "2")
-        (set! j "rnd(fadepixels)")
-        (call del "fadepixels,j")
-        (call sset "j%8,j\\8,1"))
+        (when (== fade "in") (for-range k 1 2 (set! j (call rnd fadepixels)) (call del fadepixels j) (call sset (modulo j 8) j))))
       (body-lines
         "function updatefade()"
         " if fade==\"in\" then"
@@ -1290,9 +1288,10 @@
         "   del(fadepixels,j)"
         "  \tsset(j%8,j\\8,1)"
         "\t end"))
-    (def-pico-function
+    (def-pico-function #:params (txt x y c) #:returns ()
       (name pprint)
       (params (txt x y c))
+      (returns ())
       (line-range (932 936))
       (api-calls (print))
       (called-functions ())
@@ -1300,92 +1299,96 @@
         (for-loop "ox=-1,1")
         (for-loop "oy=-1,1"))
       (decompiled-pseudo-code
-        (for-range ox "-1" "1")
-        (for-range oy "-1" "1")
-        (call print "txt,x+ox,y+oy,1"))
+        (for-range ox (- 1) 1 (for-range oy (- 1) 1 (call print txt (+ x ox) (+ y oy) 1))))
       (body-lines
         "function pprint(txt,x,y,c)"
         " for ox=-1,1 do"
         "  for oy=-1,1 do"
         "   print(txt,x+ox,y+oy,1)"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params (txt y c) #:returns ()
       (name cprint)
       (params (txt y c))
+      (returns ())
       (line-range (941 943))
       (api-calls ())
       (called-functions (pprint))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (call pprint "txt,65-#txt*2,y,c"))
+        (call pprint txt (- 65 (* (len txt) 2)) y c))
       (body-lines
         "function cprint(txt,y,c)"
         " pprint(txt,65-#txt*2,y,c)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (txt y i) #:returns ()
       (name mprint)
       (params (txt y i))
+      (returns ())
       (line-range (945 947))
       (api-calls ())
       (called-functions (cprint))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (call cprint "txt,y,menui==i and frame%8<4 and not istransition and not confirmprompt and 7 or 6"))
+        (call cprint txt y (or (and (and (and (and (== menui i) (< (modulo frame 8) 4)) (not istransition)) (not confirmprompt)) 7) 6)))
       (body-lines
         "function mprint(txt,y,i)"
         " cprint(txt,y,menui==i and frame%8<4 and not istransition and not confirmprompt and 7 or 6)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name basepal)
       (params ())
+      (returns ())
       (line-range (949 953))
       (api-calls (pal poke))
       (called-functions ())
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (call pal "")
-        (call pal "pals[1],1")
-        (call poke "0x5f2e,1"))
+        (call pal)
+        (call pal (aref pals 1) 1)
+        (call poke 24366 1))
       (body-lines
         "function basepal()"
         " pal()"
         " pal(pals[1],1)"
         "\tpoke(0x5f2e,1)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (_anim _doneanim _donefn) #:returns ()
       (name transition)
       (params (_anim _doneanim _donefn))
+      (returns ())
       (line-range (955 958))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! |anim,doneanim,donefn| "_anim,_doneanim,_donefn")
-        (set! |animt,istransition| "0,true"))
+        (set-values! (anim doneanim donefn) (_anim _doneanim _donefn))
+        (set-values! (animt istransition) (0 #t)))
       (body-lines
         "function transition(_anim,_doneanim,_donefn)"
         " anim,doneanim,donefn=_anim,_doneanim,_donefn"
         " animt,istransition=0,true"
         "end "))
-    (def-pico-function
+    (def-pico-function #:params (racetype) #:returns (val)
       (name getmodeanimset)
       (params (racetype))
+      (returns (val))
       (line-range (960 968))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "{"))
+        (return-expr (table)))
       (decompiled-pseudo-code
-        (set! modename "racetypeanims[racetype]")
-        (return "{")
-        (set! pre "anims[modename..\"pre\"],")
-        (set! _in "anims[modename..\"in\"],")
-        (set! idle "anims[modename..\"idle\"],")
-        (set! out "anims[modename..\"out\"]"))
+        (set! modename (aref racetypeanims racetype))
+        (return (table))
+        (set! pre (aref anims (string-append modename "pre")))
+        (set! _in (aref anims (string-append modename "in")))
+        (set! idle (aref anims (string-append modename "idle")))
+        (set! out (aref anims (string-append modename "out")))
+        |}|)
       (body-lines
         "function getmodeanimset(racetype)"
         " local modename=racetypeanims[racetype]"
@@ -1396,52 +1399,51 @@
         "  out=anims[modename..\"out\"]"
         " } "
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (t n) #:returns (val)
       (name makerandomroster)
       (params (t n))
+      (returns (val))
       (line-range (970 972))
       (api-calls ())
       (called-functions (randomnums))
       (structured-ast
-        (return-expr "randomnums(14,7)"))
+        (return-expr (call randomnums 14 7)))
       (decompiled-pseudo-code
-        (return "randomnums(14,7)"))
+        (return (call randomnums 14 7)))
       (body-lines
         "function makerandomroster(t,n)"
         " return randomnums(14,7)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (t n) #:returns ()
       (name randomnums)
       (params (t n))
+      (returns ())
       (line-range (974 978))
       (api-calls (add))
       (called-functions ())
       (structured-ast
         (for-loop "i=1,t"))
       (decompiled-pseudo-code
-        (set! allnums "{}")
-        (for-range i "1" "t")
-        (call add "allnums,i"))
+        (set! allnums (table))
+        (for-range i 1 t (call add allnums i)))
       (body-lines
         "function randomnums(t,n)"
         " local allnums={}"
         " for i=1,t do"
         "  add(allnums,i)"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params (array compfn) #:returns ()
       (name sort)
       (params (array compfn))
+      (returns ())
       (line-range (986 992))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (for-loop "i=2,#array")
-        (while-loop "j>1 and compfn(array[j-1],c)"))
+        (while-loop (and (> j 1) (call compfn (aref array (- j 1)) c))))
       (decompiled-pseudo-code
-        (for-range i "2" "#array")
-        (set! |c,j| "array[i],i")
-        (set! |array[j]| "array[j-1]")
-        (-= j "1"))
+        (for-range i 2 (len array) (set-values! (c j) ((aref array i) i)) (while (and (> j 1) (call compfn (aref array (- j 1)) c)) (set! (aref array j) (aref array (- j 1))) (-= j 1))))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -1450,55 +1452,56 @@
         "   array[j]=array[j-1]"
         "   j-=1"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params (prompt fn) #:returns ()
       (name confirm)
       (params (prompt fn))
+      (returns ())
       (line-range (997 1001))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! confirmprompt "prompt")
-        (set! confirmfn "fn")
-        (set! confirmx "1"))
+        (set! confirmprompt prompt)
+        (set! confirmfn fn)
+        (set! confirmx 1))
       (body-lines
         "function confirm(prompt,fn)"
         " confirmprompt=prompt"
         " confirmfn=fn"
         " confirmx=1"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name drawgamename)
       (params ())
+      (returns ())
       (line-range (1006 1010))
       (api-calls (print rectfill))
       (called-functions ())
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (call rectfill "20,6,105,37,0")
-        (call print "\"\\^pmOT'S\",44,10,7")
-        (call print "\"\\^pgRAND pRIX\",24,25,7"))
+        (call rectfill 20 6 105 37 0)
+        (call print "\\^pmOT'S" 44 10 7)
+        (call print "\\^pgRAND pRIX" 24 25 7))
       (body-lines
         "function drawgamename()"
         " rectfill(20,6,105,37,0)"
         " print(\"\\^pmOT'S\",44,10,7)"
         " print(\"\\^pgRAND pRIX\",24,25,7)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name getmenuitems)
       (params ())
+      (returns ())
       (line-range (1014 1019))
       (api-calls (add))
       (called-functions ())
       (structured-ast
-        (if-cond "racetype~=type_prac"))
+        (if-cond (!= racetype type_prac)))
       (decompiled-pseudo-code
-        (set! items "{menu_type}")
-        (when "racetype~=type_prac")
-        (call add "items,menu_dif")
-        (call add "items,menu_laps"))
+        (set! items (table menu_type))
+        (when (!= racetype type_prac) (call add items menu_dif) (call add items menu_laps)))
       (body-lines
         "function getmenuitems()"
         " local items={menu_type}"
@@ -1506,20 +1509,20 @@
         "  add(items,menu_dif)"
         "  add(items,menu_laps)"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name drawmenu)
       (params ())
+      (returns ())
       (line-range (1036 1042))
       (api-calls (palt sspr))
       (called-functions (getmenuitems))
       (structured-ast
-        (if-cond "not istransition and not confirmprompt"))
+        (if-cond (and (not istransition) (not confirmprompt))))
       (decompiled-pseudo-code
-        (set! items "getmenuitems()")
-        (set! yoffs "(5-#items)*3")
-        (call palt "12,false")
-        (when "not istransition and not confirmprompt")
-        (call sspr "8,0,8,8,0,menuy*8-2+yoffs,128,9"))
+        (set! items (call getmenuitems))
+        (set! yoffs (* (- 5 (len items)) 3))
+        (call palt 12 #f)
+        (when (and (not istransition) (not confirmprompt)) (call sspr 8 0 8 8 0 (+ (- (* menuy 8) 2) yoffs) 128 9)))
       (body-lines
         "function drawmenu()"
         " local items=getmenuitems()"
@@ -1528,32 +1531,30 @@
         " if not istransition and not confirmprompt then"
         "\t sspr(8,0,8,8,0,menuy*8-2+yoffs,128,9)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name updatemenu)
       (params ())
+      (returns ())
       (line-range (1062 1085))
       (api-calls (btnp mid))
       (called-functions (getmenuitems getmodeanimset transition))
       (structured-ast
-        (if-cond "(btnp(⬆️")
-        (if-cond "(btnp(⬇️")
-        (if-cond "(btnp(⬅️")
-        (if-cond "(btnp(➡️")
-        (if-cond "item==menu_type and d~=0")
-        (if-cond "racetype+d>=1 and racetype+d<=#racetypenames"))
+        (if-cond (call btnp void))
+        (if-cond (call btnp void))
+        (if-cond (call btnp void))
+        (if-cond (call btnp void))
+        (if-cond (and (== item menu_type) (!= d 0)))
+        (if-cond (and (>= (+ racetype d) 1) (<= (+ racetype d) (len racetypenames)))))
       (decompiled-pseudo-code
-        (set! items "getmenuitems()")
-        (set! menui "mid(0,#items-1,menui)")
-        (set! item "items[menui+1]")
-        (set! d "0")
-        (when "item==menu_type and d~=0")
-        (when "racetype+d>=1 and racetype+d<=#racetypenames")
-        (set! prevtype "racetype")
-        (+= racetype "d")
-        (set! |animset,prevset| "getmodeanimset(racetype),getmodeanimset(prevtype)")
-        (set! animsets "{animset,prevset}")
-        (set! anim "d<0 and anims[\"tranleft\"] or anims[\"tranright\"]")
-        (call transition "anim,anims[\"idle\"]"))
+        (when (call btnp) (-= menui 1))
+        (when (call btnp) (+= menui 1))
+        (set! items (call getmenuitems))
+        (set! menui (call mid 0 (- (len items) 1) menui))
+        (set! item (aref items (+ menui 1)))
+        (set! d 0)
+        (when (call btnp) (-= d 1))
+        (when (call btnp) (+= d 1))
+        (when (and (== item menu_type) (!= d 0)) (when (and (>= (+ racetype d) 1) (<= (+ racetype d) (len racetypenames))) (set! prevtype racetype) (+= racetype d) (set-values! (animset prevset) ((call getmodeanimset racetype) (call getmodeanimset prevtype))) (set! animsets (table animset prevset)) (set! anim (or (and (< d 0) (aref anims "tranleft")) (aref anims "tranright"))) (call transition anim (aref anims "idle")))))
       (body-lines
         "function updatemenu()"
         " -- up/down arrows"
@@ -1579,87 +1580,92 @@
         "\t\t\tlocal anim=d<0 and anims[\"tranleft\"] or anims[\"tranright\"]"
         "\t\t\ttransition(anim,anims[\"idle\"])"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params (n v i p) #:returns ()
       (name dadd)
       (params (n v i p))
+      (returns ())
       (line-range (1122 1122))
       (api-calls (add))
       (called-functions ())
       (structured-ast
-        (while-loop "p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines"))
+        (while-loop (and (and (and (> p 1) (== (-> (aref lines (- p 1)) :i) i)) (== (call type (-> (aref lines (- p 1)) :n)) (call type n))) (> (-> (aref lines (- p 1)) :n) n))))
       (decompiled-pseudo-code
-        (set! |lines,s| "{},0 function dadd(n,v,i,p)while p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines[p-1].n>n do p-=1 end add(lines,{n=n,v=v,x=type(v)==\"table\"and\"+\"or\" \",i=i},p)end"))
+        (set-values! (lines s) ((table) 0)))
       (body-lines
         "lines,s={},0 function dadd(n,v,i,p)while p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines[p-1].n>n do p-=1 end add(lines,{n=n,v=v,x=type(v)==\"table\"and\"+\"or\" \",i=i},p)end"))
-    (def-pico-function
+    (def-pico-function #:params (l p) #:returns ()
       (name dexp)
       (params (l p))
+      (returns ())
       (line-range (1123 1123))
       (api-calls ())
       (called-functions (dadd))
       (structured-ast
-        (if-cond "l.x==\"+\"")
+        (if-cond (== (-> l :x) "+"))
         (for-loop "n,v in pairs(l.v)do p+=1 dadd(n,v,l.i..\" \",p)end l.x=\"-\"elseif l")
-        (while-loop "p<#lines and #lines[p+1].i>#lines[p].i"))
+        (while-loop (and (< p (len lines)) (> (len (-> (aref lines (+ p 1)) :i)) (len (-> (aref lines p) :i))))))
       (decompiled-pseudo-code
-        (nop))
+        if)
       (body-lines
         "function dexp(l,p)if l.x==\"+\"then for n,v in pairs(l.v)do p+=1 dadd(n,v,l.i..\" \",p)end l.x=\"-\"elseif l.x==\"-\"then while p<#lines and #lines[p+1].i>#lines[p].i do deli(lines,p+1)end\tl.x=\"+\" end end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name dinp)
       (params ())
+      (returns ())
       (line-range (1124 1124))
       (api-calls (btnp line max min))
       (called-functions (dexp))
       (structured-ast
-        (if-cond "btnp(❎")
-        (if-cond "l and(x-10"))
+        (if-cond (call btnp void))
+        (if-cond (and l (- x 10))))
       (decompiled-pseudo-code
-        (nop))
+        (set-values! (x y b w) ((call stat 32) (call stat 33) (call stat 34) (call stat 36))))
       (body-lines
         "function dinp()local x,y,b,w=stat(32),stat(33),stat(34),stat(36)line(x,y,x,y+2,10)if btnp(❎) then local i=(y-10)\\6+1 local p=s+i local l=lines[p]if l and(x-10)\\4==#l.i then dexp(l,p)end end s=max(min(s-stat(36),#lines-18),0) end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name dui)
       (params ())
+      (returns ())
       (line-range (1125 1125))
       (api-calls (print rectfill))
       (called-functions (dinp))
       (structured-ast
-        (if-cond "l")
+        (if-cond l)
         (for-loop "i=1,18")
-        (while-loop "true"))
+        (while-loop #t))
       (decompiled-pseudo-code
-        (nop))
+        (while #t (call rectfill 10 10 118 118 1)))
       (body-lines
         "function dui()while true do rectfill(10,10,118,118,1)for i=1,18 do local l=lines[i+s]if l then print(sub(\"\\fc\"..l.i..l.x..l.n..\":\\f7\"..tostr(l.v),1,31),10,(i-1)*6+10,7)end end dinp()flip()end end"))
-    (def-pico-function
+    (def-pico-function #:params (v) #:returns ()
       (name dinsp)
       (params (v))
+      (returns ())
       (line-range (1126 1126))
       (api-calls (clip pal poke))
       (called-functions (dadd dui))
       (structured-ast
         (seq-block 1))
       (decompiled-pseudo-code
-        (nop))
+        (call dadd "value" v "" (+ (len lines) 1)))
       (body-lines
         "function dinsp(v)dadd(\"value\",v,\"\",#lines+1)poke(0x5f2d,3)cursor()pal()clip()dui()end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name newtournament)
       (params ())
+      (returns ())
       (line-range (1131 1139))
       (api-calls (add))
       (called-functions (makerandomroster randomnums))
       (structured-ast
         (for-loop "i=1,7"))
       (decompiled-pseudo-code
-        (set! tour.tracks "randomnums(#tracknames)")
-        (set! tour.tracknum "1")
-        (set! tour.roster "makerandomroster()")
-        (set! tour.playerpts "0")
-        (set! tour.pts "{}")
-        (for-range i "1" "7")
-        (call add "tour.pts,0"))
+        (set! (-> tour :tracks) (call randomnums (len tracknames)))
+        (set! (-> tour :tracknum) 1)
+        (set! (-> tour :roster) (call makerandomroster))
+        (set! (-> tour :playerpts) 0)
+        (set! (-> tour :pts) (table))
+        (for-range i 1 7 (call add (-> tour :pts) 0)))
       (body-lines
         "function newtournament()"
         " tour.tracks=randomnums(#tracknames)"
@@ -1670,17 +1676,18 @@
         " for i=1,7 do"
         "  add(tour.pts,0)"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name quittournament)
       (params ())
+      (returns ())
       (line-range (1147 1152))
       (api-calls ())
       (called-functions (savetournament))
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (set! tour.tracknum "0")
-        (call savetournament ""))
+        (set! (-> tour :tracknum) 0)
+        (call savetournament))
       (body-lines
         "function quittournament()"
         ""
@@ -1688,25 +1695,25 @@
         " tour.tracknum=0"
         " savetournament()"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name loadtournament)
       (params ())
+      (returns ())
       (line-range (1154 1165))
       (api-calls (add))
       (called-functions ())
       (structured-ast
-        (if-cond "tour.tracknum>0")
+        (if-cond (> (-> tour :tracknum) 0))
         (for-loop "i=1,#tracknames"))
       (decompiled-pseudo-code
-        (set! tour "{")
-        (set! tracknum "dget(40),")
-        (set! tracks "{},")
-        (set! roster "{},")
-        (set! pts "{},")
-        (set! playerpts "0")
-        (when "tour.tracknum>0")
-        (for-range i "1" "#tracknames")
-        (call add "tour.tracks,dget(40+i)"))
+        (set! tour (table))
+        (set! tracknum (call dget 40))
+        (set! tracks (table))
+        (set! roster (table))
+        (set! pts (table))
+        (set! playerpts 0)
+        |}|
+        (when (> (-> tour :tracknum) 0) (for-range i 1 (len tracknames) (call add (-> tour :tracks) (call dget (+ 40 i))))))
       (body-lines
         "function loadtournament()"
         " tour={"
@@ -1720,20 +1727,19 @@
         "  for i=1,#tracknames do"
         "   add(tour.tracks,dget(40+i))"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name savetournament)
       (params ())
+      (returns ())
       (line-range (1175 1180))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "tour.tracknum>0")
+        (if-cond (> (-> tour :tracknum) 0))
         (for-loop "i=1,#tracknames"))
       (decompiled-pseudo-code
-        (call dset "40,tour.tracknum")
-        (when "tour.tracknum>0")
-        (for-range i "1" "#tracknames")
-        (call dset "40+i,tour.tracks[i]"))
+        (call dset 40 (-> tour :tracknum))
+        (when (> (-> tour :tracknum) 0) (for-range i 1 (len tracknames) (call dset (+ 40 i) (aref (-> tour :tracks) i)))))
       (body-lines
         "function savetournament()"
         " dset(40,tour.tracknum)"
@@ -1741,19 +1747,24 @@
         "  for i=1,#tracknames do"
         "   dset(40+i,tour.tracks[i])"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name updateleaderboard)
       (params ())
+      (returns ())
       (line-range (1189 1198))
       (api-calls (add))
       (called-functions ())
       (structured-ast
         (for-loop "i,car in ipairs(tour.roster)"))
       (decompiled-pseudo-code
-        (set! leaderboard "{}")
-        (set! name "aicarnames[car],")
-        (set! p "aicarpals[car],")
-        (set! pts "tour.pts[i]"))
+        (set! leaderboard (table))
+        for
+        (call add leaderboard void)
+        (table)
+        (set! name (aref aicarnames car))
+        (set! p (aref aicarpals car))
+        (set! pts (aref (-> tour :pts) i))
+        |}|)
       (body-lines
         "function updateleaderboard()"
         " leaderboard={}"
@@ -1765,30 +1776,33 @@
         "  \t pts=tour.pts[i]"
         "  \t})"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name drawleaderboard)
       (params ())
+      (returns ())
       (line-range (1207 1222))
       (api-calls (pal palt print spr))
       (called-functions ())
       (structured-ast
-        (if-cond "(tour.tracknum==0")
-        (return-expr "")
+        (if-cond (== (-> tour :tracknum) 0))
+        (return-expr void)
         (for-loop "i,e in ipairs(leaderboard)")
-        (if-cond "(e.p"))
+        (if-cond (-> e :p)))
       (decompiled-pseudo-code
-        (call print "\"driver\",0,1,5")
-        (call print "\"points\",58,1,5")
-        (set! |y,col| "i*6+2,e.isplayer and 7 or 6")
-        (call pal "")
-        (call palt "0,false")
-        (call palt "12,true")
-        (call if "e.p)pal(e.p,0")
-        (call spr "8,0,y")
-        (call pal "")
-        (call print "e.name,10,y,col")
-        (set! txt "tostr(e.pts)")
-        (call print "txt,82-#txt*4,y,col"))
+        (call print "driver" 0 1 5)
+        (call print "points" 58 1 5)
+        (when (== (-> tour :tracknum) 0) (return))
+        for
+        (set-values! (y col) ((+ (* i 6) 2) (or (and (-> e :isplayer) 7) 6)))
+        (call pal)
+        (call palt 0 #f)
+        (call palt 12 #t)
+        (when (-> e :p) (call pal (-> e :p) 0))
+        (call spr 8 0 y)
+        (call pal)
+        (call print (-> e :name) 10 y col)
+        (set! txt (call tostr (-> e :pts)))
+        (call print txt (- 82 (* (len txt) 4)) y col))
       (body-lines
         "function drawleaderboard()"
         " print(\"driver\",0,1,5)"
@@ -1806,20 +1820,19 @@
         "\t\tlocal txt=tostr(e.pts)\t\t"
         "\t\tprint(txt,82-#txt*4,y,col)"
         " end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name applyraceresults)
       (params ())
+      (returns ())
       (line-range (1235 1245))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (for-loop "i=1,7"))
       (decompiled-pseudo-code
-        (set! playerpos "dget(31)")
-        (+= tour.playerpts "racepts[playerpos]")
-        (for-range i "1" "7")
-        (set! pos "dget(31+i)")
-        (+= |tour.pts[i]| "racepts[pos]"))
+        (set! playerpos (call dget 31))
+        (+= (-> tour :playerpts) (aref racepts playerpos))
+        (for-range i 1 7 (set! pos (call dget (+ 31 i))) (+= (aref (-> tour :pts) i) (aref racepts pos))))
       (body-lines
         "function applyraceresults()"
         ""
@@ -1834,123 +1847,123 @@
         " end")))
   (lifted-pico8-assets
     (gfx-sprites
-      (def-pico-sprite #:id 0 #:grid (0 0) #:nonzero-pixels 8 #:rows ("00000000" "00000000" "00700700" "00077000" "00077000" "00700700" "00000000" "00000000"))
-      (def-pico-sprite #:id 1 #:grid (1 0) #:nonzero-pixels 64 #:rows ("cccccccc" "77777777" "77777777" "77777777" "77777777" "77777777" "77777777" "cccccccc"))
-      (def-pico-sprite #:id 2 #:grid (2 0) #:nonzero-pixels 26 #:rows ("00000000" "00000007" "00076777" "07777766" "66667777" "00077667" "00000000" "00000000"))
-      (def-pico-sprite #:id 3 #:grid (3 0) #:nonzero-pixels 48 #:rows ("00007777" "77777767" "66777777" "77777777" "77777667" "66676667" "76700070" "00000000"))
-      (def-pico-sprite #:id 4 #:grid (4 0) #:nonzero-pixels 27 #:rows ("00000000" "00770000" "77770700" "66777777" "66666677" "66770000" "00000000" "00000000"))
-      (def-pico-sprite #:id 5 #:grid (5 0) #:nonzero-pixels 19 #:rows ("00000000" "00000000" "00770000" "77777770" "06677667" "00766000" "00000000" "00000000"))
-      (def-pico-sprite #:id 6 #:grid (6 0) #:nonzero-pixels 8 #:rows ("00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "66886688"))
-      (def-pico-sprite #:id 7 #:grid (7 0) #:nonzero-pixels 15 #:rows ("00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "06688668" "66886688"))
-      (def-pico-sprite #:id 8 #:grid (8 0) #:nonzero-pixels 64 #:rows ("99cccccc" "c67ccccc" "5577755c" "55999559" "cccccccc" "cccccccc" "cccccccc" "cccccccc"))
-      (def-pico-sprite #:id 9 #:grid (9 0) #:nonzero-pixels 64 #:rows ("81111111" "81111111" "81111111" "8ccccccc" "81111111" "81111111" "8ccccccc" "8ccccccc"))
-      (def-pico-sprite #:id 10 #:grid (10 0) #:nonzero-pixels 56 #:rows ("11111188" "11111811" "11118100" "cccc8100" "11181100" "11181100" "cc811111" "cc811111"))
-      (def-pico-sprite #:id 11 #:grid (11 0) #:nonzero-pixels 56 #:rows ("88111111" "11811111" "00181111" "0018cccc" "00118111" "00118111" "111118cc" "111118cc"))
-      (def-pico-sprite #:id 12 #:grid (12 0) #:nonzero-pixels 64 #:rows ("11111118" "11111118" "11111118" "ccccccc8" "11111118" "11111118" "ccccccc8" "ccccccc8"))
-      (def-pico-sprite #:id 13 #:grid (13 0) #:nonzero-pixels 64 #:rows ("ccccc677" "ccc11d77" "ccc11d76" "ccc11d51" "cc1dd111" "cc776111" "cc76d111" "cc5115d6"))
-      (def-pico-sprite #:id 14 #:grid (14 0) #:nonzero-pixels 64 #:rows ("d1dcc777" "d1117777" "11117776" "11116d51" "d5111111" "6776111d" "6777111d" "115d15d6"))
-      (def-pico-sprite #:id 15 #:grid (15 0) #:nonzero-pixels 64 #:rows ("d1dcc677" "d111d677" "1111d676" "11116656" "d51d1117" "67711117" "6771111c" "115155dc"))
-      (def-pico-sprite #:id 16 #:grid (0 1) #:nonzero-pixels 64 #:rows ("dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd"))
-      (def-pico-sprite #:id 17 #:grid (1 1) #:nonzero-pixels 64 #:rows ("ebebbbee" "ebbbebbe" "beee2eee" "bbbee2ee" "beeeb2e2" "bee2eee2" "ebeee222" "ee22ee2e"))
-      (def-pico-sprite #:id 18 #:grid (2 1) #:nonzero-pixels 27 #:rows ("0000b000" "0000b000" "000be200" "00eb2000" "000bee00" "0e0eb220" "0bbee000" "bbee2e20"))
-      (def-pico-sprite #:id 19 #:grid (3 1) #:nonzero-pixels 16 #:rows ("0000000b" "0000000b" "000000ee" "0000000e" "00000ebb" "000000eb" "0000b0be" "00000eee"))
-      (def-pico-sprite #:id 20 #:grid (4 1) #:nonzero-pixels 15 #:rows ("20000000" "e0000000" "e2000000" "e0000000" "20200000" "e0e00000" "ee220000" "e2000000"))
-      (def-pico-sprite #:id 21 #:grid (5 1) #:nonzero-pixels 6 #:rows ("00000000" "00000000" "00000000" "07777000" "00660000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 22 #:grid (6 1) #:nonzero-pixels 20 #:rows ("07777770" "05577550" "00077000" "00077000" "00077000" "00055000" "00000000" "00000000"))
-      (def-pico-sprite #:id 23 #:grid (7 1) #:nonzero-pixels 64 #:rows ("cccccccc" "cccccccc" "cccccccc" "cccccccc" "cccccccc" "ccc22222" "cc222222" "cc222222"))
-      (def-pico-sprite #:id 24 #:grid (8 1) #:nonzero-pixels 64 #:rows ("cccccccc" "cccccccc" "cccccccc" "cccccccc" "cccccccc" "22222ccc" "222222cc" "222222cc"))
-      (def-pico-sprite #:id 25 #:grid (9 1) #:nonzero-pixels 64 #:rows ("8ccccccc" "8ccccccc" "8ccccccc" "8ccccccc" "8ccccccc" "8cc888cc" "8ccaaacc" "8cccccac"))
-      (def-pico-sprite #:id 26 #:grid (10 1) #:nonzero-pixels 64 #:rows ("cc8111bb" "cc811eb7" "c811ebbb" "c8119111" "c8117777" "81677666" "8ddd6677" "1dd88888"))
-      (def-pico-sprite #:id 27 #:grid (11 1) #:nonzero-pixels 64 #:rows ("bb1118cc" "7be118cc" "bbbe118c" "1119118c" "7777118c" "66677618" "7766ddd8" "88888dd1"))
-      (def-pico-sprite #:id 28 #:grid (12 1) #:nonzero-pixels 64 #:rows ("ccccccc8" "ccccccc8" "ccccccc8" "ccccccc8" "ccccccc8" "cc888cc8" "ccaaacc8" "caccccc8"))
-      (def-pico-sprite #:id 29 #:grid (13 1) #:nonzero-pixels 64 #:rows ("cc111777" "cd111777" "cd11d776" "c6dd1151" "c7761111" "67771111" "77cccc11" "cccccccc"))
-      (def-pico-sprite #:id 30 #:grid (14 1) #:nonzero-pixels 64 #:rows ("11117777" "11117777" "11117776" "6d516d51" "77761111" "7777111d" "777d111d" "cc6d11cc"))
-      (def-pico-sprite #:id 31 #:grid (15 1) #:nonzero-pixels 64 #:rows ("1111d77c" "1d11d77c" "1d11d77c" "665ddd5c" "777611cc" "777d11cc" "776d11cc" "cc6111cc")))
+      (def-pico-sprite #:id #x00 #:grid (0 0) #:nonzero-pixels 8 #:rows ("00000000" "00000000" "00700700" "00077000" "00077000" "00700700" "00000000" "00000000"))
+      (def-pico-sprite #:id #x01 #:grid (1 0) #:nonzero-pixels 64 #:rows ("cccccccc" "77777777" "77777777" "77777777" "77777777" "77777777" "77777777" "cccccccc"))
+      (def-pico-sprite #:id #x02 #:grid (2 0) #:nonzero-pixels 26 #:rows ("00000000" "00000007" "00076777" "07777766" "66667777" "00077667" "00000000" "00000000"))
+      (def-pico-sprite #:id #x03 #:grid (3 0) #:nonzero-pixels 48 #:rows ("00007777" "77777767" "66777777" "77777777" "77777667" "66676667" "76700070" "00000000"))
+      (def-pico-sprite #:id #x04 #:grid (4 0) #:nonzero-pixels 27 #:rows ("00000000" "00770000" "77770700" "66777777" "66666677" "66770000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x05 #:grid (5 0) #:nonzero-pixels 19 #:rows ("00000000" "00000000" "00770000" "77777770" "06677667" "00766000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x06 #:grid (6 0) #:nonzero-pixels 8 #:rows ("00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "66886688"))
+      (def-pico-sprite #:id #x07 #:grid (7 0) #:nonzero-pixels 15 #:rows ("00000000" "00000000" "00000000" "00000000" "00000000" "00000000" "06688668" "66886688"))
+      (def-pico-sprite #:id #x08 #:grid (8 0) #:nonzero-pixels 64 #:rows ("99cccccc" "c67ccccc" "5577755c" "55999559" "cccccccc" "cccccccc" "cccccccc" "cccccccc"))
+      (def-pico-sprite #:id #x09 #:grid (9 0) #:nonzero-pixels 64 #:rows ("81111111" "81111111" "81111111" "8ccccccc" "81111111" "81111111" "8ccccccc" "8ccccccc"))
+      (def-pico-sprite #:id #x0A #:grid (10 0) #:nonzero-pixels 56 #:rows ("11111188" "11111811" "11118100" "cccc8100" "11181100" "11181100" "cc811111" "cc811111"))
+      (def-pico-sprite #:id #x0B #:grid (11 0) #:nonzero-pixels 56 #:rows ("88111111" "11811111" "00181111" "0018cccc" "00118111" "00118111" "111118cc" "111118cc"))
+      (def-pico-sprite #:id #x0C #:grid (12 0) #:nonzero-pixels 64 #:rows ("11111118" "11111118" "11111118" "ccccccc8" "11111118" "11111118" "ccccccc8" "ccccccc8"))
+      (def-pico-sprite #:id #x0D #:grid (13 0) #:nonzero-pixels 64 #:rows ("ccccc677" "ccc11d77" "ccc11d76" "ccc11d51" "cc1dd111" "cc776111" "cc76d111" "cc5115d6"))
+      (def-pico-sprite #:id #x0E #:grid (14 0) #:nonzero-pixels 64 #:rows ("d1dcc777" "d1117777" "11117776" "11116d51" "d5111111" "6776111d" "6777111d" "115d15d6"))
+      (def-pico-sprite #:id #x0F #:grid (15 0) #:nonzero-pixels 64 #:rows ("d1dcc677" "d111d677" "1111d676" "11116656" "d51d1117" "67711117" "6771111c" "115155dc"))
+      (def-pico-sprite #:id #x10 #:grid (0 1) #:nonzero-pixels 64 #:rows ("dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd" "dddddddd"))
+      (def-pico-sprite #:id #x11 #:grid (1 1) #:nonzero-pixels 64 #:rows ("ebebbbee" "ebbbebbe" "beee2eee" "bbbee2ee" "beeeb2e2" "bee2eee2" "ebeee222" "ee22ee2e"))
+      (def-pico-sprite #:id #x12 #:grid (2 1) #:nonzero-pixels 27 #:rows ("0000b000" "0000b000" "000be200" "00eb2000" "000bee00" "0e0eb220" "0bbee000" "bbee2e20"))
+      (def-pico-sprite #:id #x13 #:grid (3 1) #:nonzero-pixels 16 #:rows ("0000000b" "0000000b" "000000ee" "0000000e" "00000ebb" "000000eb" "0000b0be" "00000eee"))
+      (def-pico-sprite #:id #x14 #:grid (4 1) #:nonzero-pixels 15 #:rows ("20000000" "e0000000" "e2000000" "e0000000" "20200000" "e0e00000" "ee220000" "e2000000"))
+      (def-pico-sprite #:id #x15 #:grid (5 1) #:nonzero-pixels 6 #:rows ("00000000" "00000000" "00000000" "07777000" "00660000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x16 #:grid (6 1) #:nonzero-pixels 20 #:rows ("07777770" "05577550" "00077000" "00077000" "00077000" "00055000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x17 #:grid (7 1) #:nonzero-pixels 64 #:rows ("cccccccc" "cccccccc" "cccccccc" "cccccccc" "cccccccc" "ccc22222" "cc222222" "cc222222"))
+      (def-pico-sprite #:id #x18 #:grid (8 1) #:nonzero-pixels 64 #:rows ("cccccccc" "cccccccc" "cccccccc" "cccccccc" "cccccccc" "22222ccc" "222222cc" "222222cc"))
+      (def-pico-sprite #:id #x19 #:grid (9 1) #:nonzero-pixels 64 #:rows ("8ccccccc" "8ccccccc" "8ccccccc" "8ccccccc" "8ccccccc" "8cc888cc" "8ccaaacc" "8cccccac"))
+      (def-pico-sprite #:id #x1A #:grid (10 1) #:nonzero-pixels 64 #:rows ("cc8111bb" "cc811eb7" "c811ebbb" "c8119111" "c8117777" "81677666" "8ddd6677" "1dd88888"))
+      (def-pico-sprite #:id #x1B #:grid (11 1) #:nonzero-pixels 64 #:rows ("bb1118cc" "7be118cc" "bbbe118c" "1119118c" "7777118c" "66677618" "7766ddd8" "88888dd1"))
+      (def-pico-sprite #:id #x1C #:grid (12 1) #:nonzero-pixels 64 #:rows ("ccccccc8" "ccccccc8" "ccccccc8" "ccccccc8" "ccccccc8" "cc888cc8" "ccaaacc8" "caccccc8"))
+      (def-pico-sprite #:id #x1D #:grid (13 1) #:nonzero-pixels 64 #:rows ("cc111777" "cd111777" "cd11d776" "c6dd1151" "c7761111" "67771111" "77cccc11" "cccccccc"))
+      (def-pico-sprite #:id #x1E #:grid (14 1) #:nonzero-pixels 64 #:rows ("11117777" "11117777" "11117776" "6d516d51" "77761111" "7777111d" "777d111d" "cc6d11cc"))
+      (def-pico-sprite #:id #x1F #:grid (15 1) #:nonzero-pixels 64 #:rows ("1111d77c" "1d11d77c" "1d11d77c" "665ddd5c" "777611cc" "777d11cc" "776d11cc" "cc6111cc")))
     (gff-flags)
     (map-rows
-      (def-pico-map-row #:y 0 #:nonzero-tiles 64 #:sample-hex "0000303030090a0b0c30303000000000")
-      (def-pico-map-row #:y 1 #:nonzero-tiles 65 #:sample-hex "0000301718191a1b1c17183005000000")
-      (def-pico-map-row #:y 2 #:nonzero-tiles 62 #:sample-hex "0000262728292a2b2c2d2e2f00000015")
-      (def-pico-map-row #:y 3 #:nonzero-tiles 70 #:sample-hex "0000363738393a3b3c3d3e3f00000000")
-      (def-pico-map-row #:y 4 #:nonzero-tiles 48 #:sample-hex "00000000000000000000000024000000")
-      (def-pico-map-row #:y 5 #:nonzero-tiles 64 #:sample-hex "00001616161616161616161611240013")
-      (def-pico-map-row #:y 6 #:nonzero-tiles 58 #:sample-hex "00000000000000000000000021222423")
-      (def-pico-map-row #:y 7 #:nonzero-tiles 70 #:sample-hex "00001616161616161616161631321131")
-      (def-pico-map-row #:y 8 #:nonzero-tiles 50 #:sample-hex "00000000000000000000000025353500")
-      (def-pico-map-row #:y 9 #:nonzero-tiles 70 #:sample-hex "00001616161616161616161640404040")
-      (def-pico-map-row #:y 10 #:nonzero-tiles 48 #:sample-hex "00000000000000000000000010101010")
-      (def-pico-map-row #:y 11 #:nonzero-tiles 48 #:sample-hex "00000000000000000000000010101010")
-      (def-pico-map-row #:y 12 #:nonzero-tiles 48 #:sample-hex "00000000000000000000000050505050")
-      (def-pico-map-row #:y 13 #:nonzero-tiles 48 #:sample-hex "00000000000000000000000060606060")
-      (def-pico-map-row #:y 14 #:nonzero-tiles 48 #:sample-hex "00000000000000000000000070707070")
-      (def-pico-map-row #:y 15 #:nonzero-tiles 32 #:sample-hex "00000000000000000000000030303030")
-      (def-pico-map-row #:y 16 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
-      (def-pico-map-row #:y 17 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
-      (def-pico-map-row #:y 18 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
-      (def-pico-map-row #:y 19 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
-      (def-pico-map-row #:y 20 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
-      (def-pico-map-row #:y 21 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020")
-      (def-pico-map-row #:y 22 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020")
-      (def-pico-map-row #:y 23 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020")
-      (def-pico-map-row #:y 24 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020"))
+      (def-pico-map-row #:y #x00 #:nonzero-tiles 64 #:sample-hex "0000303030090a0b0c30303000000000")
+      (def-pico-map-row #:y #x01 #:nonzero-tiles 65 #:sample-hex "0000301718191a1b1c17183005000000")
+      (def-pico-map-row #:y #x02 #:nonzero-tiles 62 #:sample-hex "0000262728292a2b2c2d2e2f00000015")
+      (def-pico-map-row #:y #x03 #:nonzero-tiles 70 #:sample-hex "0000363738393a3b3c3d3e3f00000000")
+      (def-pico-map-row #:y #x04 #:nonzero-tiles 48 #:sample-hex "00000000000000000000000024000000")
+      (def-pico-map-row #:y #x05 #:nonzero-tiles 64 #:sample-hex "00001616161616161616161611240013")
+      (def-pico-map-row #:y #x06 #:nonzero-tiles 58 #:sample-hex "00000000000000000000000021222423")
+      (def-pico-map-row #:y #x07 #:nonzero-tiles 70 #:sample-hex "00001616161616161616161631321131")
+      (def-pico-map-row #:y #x08 #:nonzero-tiles 50 #:sample-hex "00000000000000000000000025353500")
+      (def-pico-map-row #:y #x09 #:nonzero-tiles 70 #:sample-hex "00001616161616161616161640404040")
+      (def-pico-map-row #:y #x0A #:nonzero-tiles 48 #:sample-hex "00000000000000000000000010101010")
+      (def-pico-map-row #:y #x0B #:nonzero-tiles 48 #:sample-hex "00000000000000000000000010101010")
+      (def-pico-map-row #:y #x0C #:nonzero-tiles 48 #:sample-hex "00000000000000000000000050505050")
+      (def-pico-map-row #:y #x0D #:nonzero-tiles 48 #:sample-hex "00000000000000000000000060606060")
+      (def-pico-map-row #:y #x0E #:nonzero-tiles 48 #:sample-hex "00000000000000000000000070707070")
+      (def-pico-map-row #:y #x0F #:nonzero-tiles 32 #:sample-hex "00000000000000000000000030303030")
+      (def-pico-map-row #:y #x10 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
+      (def-pico-map-row #:y #x11 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
+      (def-pico-map-row #:y #x12 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
+      (def-pico-map-row #:y #x13 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
+      (def-pico-map-row #:y #x14 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000030303030")
+      (def-pico-map-row #:y #x15 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020")
+      (def-pico-map-row #:y #x16 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020")
+      (def-pico-map-row #:y #x17 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020")
+      (def-pico-map-row #:y #x18 #:nonzero-tiles 16 #:sample-hex "00000000000000000000000020202020"))
     (sfx-tracks
-      (def-pico-sfx #:id 0 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
-      (def-pico-sfx #:id 1 #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 20)
-      (def-pico-sfx #:id 2 #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 21)
-      (def-pico-sfx #:id 3 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 4 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
-      (def-pico-sfx #:id 5 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 6 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
-      (def-pico-sfx #:id 7 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 8 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 24)
-      (def-pico-sfx #:id 9 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 10 #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 23)
-      (def-pico-sfx #:id 11 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
-      (def-pico-sfx #:id 12 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
-      (def-pico-sfx #:id 13 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 20)
-      (def-pico-sfx #:id 14 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
-      (def-pico-sfx #:id 15 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 28)
-      (def-pico-sfx #:id 16 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
-      (def-pico-sfx #:id 17 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
-      (def-pico-sfx #:id 18 #:editor-mode 101 #:speed 12 #:loop (0 32) #:active-notes 32)
-      (def-pico-sfx #:id 19 #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 26)
-      (def-pico-sfx #:id 20 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 26)
-      (def-pico-sfx #:id 21 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 22 #:editor-mode 101 #:speed 12 #:loop (0 0) #:active-notes 32))
+      (def-pico-sfx #:id #x00 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
+      (def-pico-sfx #:id #x01 #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 20)
+      (def-pico-sfx #:id #x02 #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 21)
+      (def-pico-sfx #:id #x03 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x04 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
+      (def-pico-sfx #:id #x05 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x06 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
+      (def-pico-sfx #:id #x07 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x08 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 24)
+      (def-pico-sfx #:id #x09 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x0A #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 23)
+      (def-pico-sfx #:id #x0B #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
+      (def-pico-sfx #:id #x0C #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
+      (def-pico-sfx #:id #x0D #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 20)
+      (def-pico-sfx #:id #x0E #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
+      (def-pico-sfx #:id #x0F #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 28)
+      (def-pico-sfx #:id #x10 #:editor-mode 101 #:speed 12 #:loop (0 8) #:active-notes 8)
+      (def-pico-sfx #:id #x11 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 24)
+      (def-pico-sfx #:id #x12 #:editor-mode 101 #:speed 12 #:loop (0 32) #:active-notes 32)
+      (def-pico-sfx #:id #x13 #:editor-mode 5 #:speed 12 #:loop (0 0) #:active-notes 26)
+      (def-pico-sfx #:id #x14 #:editor-mode 41 #:speed 12 #:loop (0 32) #:active-notes 26)
+      (def-pico-sfx #:id #x15 #:editor-mode 17 #:speed 12 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x16 #:editor-mode 101 #:speed 12 #:loop (0 0) #:active-notes 32))
     (music-patterns
-      (def-pico-music #:pattern 0 #:flags 0 #:channels (0 66 67 68))
-      (def-pico-music #:pattern 1 #:flags 0 #:channels (0 66 67 68))
-      (def-pico-music #:pattern 2 #:flags 0 #:channels (0 66 1 68))
-      (def-pico-music #:pattern 3 #:flags 0 #:channels (0 66 2 68))
-      (def-pico-music #:pattern 4 #:flags 0 #:channels (0 3 1 68))
-      (def-pico-music #:pattern 5 #:flags 0 #:channels (4 5 2 68))
-      (def-pico-music #:pattern 6 #:flags 0 #:channels (6 7 1 68))
-      (def-pico-music #:pattern 7 #:flags 0 #:channels (4 8 2 68))
-      (def-pico-music #:pattern 8 #:flags 0 #:channels (0 3 1 68))
-      (def-pico-music #:pattern 9 #:flags 0 #:channels (4 5 2 68))
-      (def-pico-music #:pattern 10 #:flags 0 #:channels (6 7 1 68))
-      (def-pico-music #:pattern 11 #:flags 0 #:channels (4 9 10 68))
-      (def-pico-music #:pattern 12 #:flags 0 #:channels (0 87 1 11))
-      (def-pico-music #:pattern 13 #:flags 0 #:channels (4 88 2 12))
-      (def-pico-music #:pattern 14 #:flags 0 #:channels (0 87 1 11))
-      (def-pico-music #:pattern 15 #:flags 0 #:channels (4 88 2 13))
-      (def-pico-music #:pattern 16 #:flags 0 #:channels (6 89 1 14))
-      (def-pico-music #:pattern 17 #:flags 0 #:channels (0 87 1 15))
-      (def-pico-music #:pattern 18 #:flags 0 #:channels (16 66 1 17))
-      (def-pico-music #:pattern 19 #:flags 0 #:channels (18 66 19 20))
-      (def-pico-music #:pattern 20 #:flags 0 #:channels (0 3 1 68))
-      (def-pico-music #:pattern 21 #:flags 0 #:channels (4 5 2 68))
-      (def-pico-music #:pattern 22 #:flags 0 #:channels (6 7 1 68))
-      (def-pico-music #:pattern 23 #:flags 0 #:channels (4 8 10 68))
-      (def-pico-music #:pattern 24 #:flags 0 #:channels (0 3 1 68))
-      (def-pico-music #:pattern 25 #:flags 0 #:channels (4 5 2 68))
-      (def-pico-music #:pattern 26 #:flags 0 #:channels (6 7 1 68))
-      (def-pico-music #:pattern 27 #:flags 0 #:channels (4 9 19 68))
-      (def-pico-music #:pattern 28 #:flags 0 #:channels (0 21 1 68))
-      (def-pico-music #:pattern 29 #:flags 0 #:channels (0 66 1 68))
-      (def-pico-music #:pattern 30 #:flags 0 #:channels (0 66 67 68))
-      (def-pico-music #:pattern 31 #:flags 0 #:channels (22 66 67 68))
-      (def-pico-music #:pattern 32 #:flags 0 #:channels (41 66 67 68))))
+      (def-pico-music #:pattern #x00 #:flags 0 #:channels (0 66 67 68))
+      (def-pico-music #:pattern #x01 #:flags 0 #:channels (0 66 67 68))
+      (def-pico-music #:pattern #x02 #:flags 0 #:channels (0 66 1 68))
+      (def-pico-music #:pattern #x03 #:flags 0 #:channels (0 66 2 68))
+      (def-pico-music #:pattern #x04 #:flags 0 #:channels (0 3 1 68))
+      (def-pico-music #:pattern #x05 #:flags 0 #:channels (4 5 2 68))
+      (def-pico-music #:pattern #x06 #:flags 0 #:channels (6 7 1 68))
+      (def-pico-music #:pattern #x07 #:flags 0 #:channels (4 8 2 68))
+      (def-pico-music #:pattern #x08 #:flags 0 #:channels (0 3 1 68))
+      (def-pico-music #:pattern #x09 #:flags 0 #:channels (4 5 2 68))
+      (def-pico-music #:pattern #x0A #:flags 0 #:channels (6 7 1 68))
+      (def-pico-music #:pattern #x0B #:flags 0 #:channels (4 9 10 68))
+      (def-pico-music #:pattern #x0C #:flags 0 #:channels (0 87 1 11))
+      (def-pico-music #:pattern #x0D #:flags 0 #:channels (4 88 2 12))
+      (def-pico-music #:pattern #x0E #:flags 0 #:channels (0 87 1 11))
+      (def-pico-music #:pattern #x0F #:flags 0 #:channels (4 88 2 13))
+      (def-pico-music #:pattern #x10 #:flags 0 #:channels (6 89 1 14))
+      (def-pico-music #:pattern #x11 #:flags 0 #:channels (0 87 1 15))
+      (def-pico-music #:pattern #x12 #:flags 0 #:channels (16 66 1 17))
+      (def-pico-music #:pattern #x13 #:flags 0 #:channels (18 66 19 20))
+      (def-pico-music #:pattern #x14 #:flags 0 #:channels (0 3 1 68))
+      (def-pico-music #:pattern #x15 #:flags 0 #:channels (4 5 2 68))
+      (def-pico-music #:pattern #x16 #:flags 0 #:channels (6 7 1 68))
+      (def-pico-music #:pattern #x17 #:flags 0 #:channels (4 8 10 68))
+      (def-pico-music #:pattern #x18 #:flags 0 #:channels (0 3 1 68))
+      (def-pico-music #:pattern #x19 #:flags 0 #:channels (4 5 2 68))
+      (def-pico-music #:pattern #x1A #:flags 0 #:channels (6 7 1 68))
+      (def-pico-music #:pattern #x1B #:flags 0 #:channels (4 9 19 68))
+      (def-pico-music #:pattern #x1C #:flags 0 #:channels (0 21 1 68))
+      (def-pico-music #:pattern #x1D #:flags 0 #:channels (0 66 1 68))
+      (def-pico-music #:pattern #x1E #:flags 0 #:channels (0 66 67 68))
+      (def-pico-music #:pattern #x1F #:flags 0 #:channels (22 66 67 68))
+      (def-pico-music #:pattern #x20 #:flags 0 #:channels (41 66 67 68))))
   ;; --- 5. Full Bank-by-Bank Code, Subroutines, Data & Assets ---
   (p8-sections
     (p8-section header

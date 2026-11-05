@@ -36,10 +36,16 @@
  ALL-44-WHOLE-ROM-SPECS
  NES-MMIO-SYM-HASH
  nes-addr->mmio-symbol
+ symbolize-6502-inst
+ parse-pico-lua-expr
+ pico-lua-lines->pseudo-code
  lift-nes-whole-rom->boba-sexp
+ decompile-nes-rom->sexp
  lift-gb-gbc-whole-rom->boba-sexp
+ decompile-gb-rom->sexp
  lift-pico8-whole-rom->boba-sexp
  recompile-boba-whole-rom-sexp->bytes
+ compile-whole-rom-sexp->bytes
  recompile-boba-whole-rom-file!
  verify-whole-rom-direct-assembly
  read-boba-whole-rom-sexp
@@ -405,7 +411,8 @@
 (define (disassemble-nes-subroutine-block rom-bytes bank-start bank-end bank-origin start-off
                                           #:max-insts [max-insts 32]
                                           #:stop-off [stop-off 16384]
-                                          #:vec-names [vec-names (hasheq)])
+                                          #:vec-names [vec-names (hasheq)]
+                                          #:mirror-map [mirror-map (hasheq)])
   (define limit-off (min (- bank-end bank-start) stop-off))
   (define (finish-block end-off rev-insts rev-calls rev-mmio zps)
     (define raw-insts (reverse rev-insts))
@@ -423,7 +430,10 @@
              [insts '()]
              [calls '()]
              [mmio '()]
-             [zps '()])
+             [zps '()]
+             [last-imm-a #f]
+             [last-imm-x #f]
+             [last-imm-y #f])
     (if (or (>= off limit-off) (>= cnt max-insts))
         (finish-block off insts calls mmio zps)
         (let* ([abs-pos (+ bank-start off)]
@@ -450,11 +460,18 @@
                            [mmio-sym
                             (and (memq mode-kw '(#:abs #:absx #:absy))
                                  (nes-addr->mmio-symbol u16 is-write?))]
+                           [mirror-sym
+                            (cond
+                              [(memq mode-kw '(#:zp #:zpx #:zpy))
+                               (hash-ref mirror-map b1 #f)]
+                              [(and (memq mode-kw '(#:abs #:absx #:absy)) (< u16 #x0800))
+                               (hash-ref mirror-map u16 #f)]
+                              [else #f])]
                            [sym-annot
                             (cond
                               [(eq? mnem 'JSR)
                                (or (hash-ref vec-names u16 #f)
-                                   (string->symbol (format "sub_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0")))))]
+                                   (string->symbol (format "rom_helper_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0")))))]
                               [(and (eq? mnem 'JMP) (eq? mode-kw '#:abs))
                                (or (hash-ref vec-names u16 #f)
                                    (string->symbol (format "loc_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0")))))]
@@ -463,6 +480,7 @@
                               [(eq? mode-kw '#:rel)
                                (string->symbol (format "loc_~a" (string-upcase (~r operand #:base 16 #:min-width 4 #:pad-string "0"))))]
                               [mmio-sym mmio-sym]
+                              [mirror-sym mirror-sym]
                               [(memq mode-kw '(#:zp #:zpx #:zpy #:indx #:indy))
                                (string->symbol (format "zp_~a" (string-upcase (~r b1 #:base 16 #:min-width 2 #:pad-string "0"))))]
                               [(and (memq mode-kw '(#:abs #:absx #:absy)) (< u16 #x0100))
@@ -474,10 +492,51 @@
                               [(and (memq mode-kw '(#:abs #:absx #:absy)) (<= #x6000 u16 #x7FFF))
                                (string->symbol (format "sram_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
                               [else #f])]
+                           [stored-imm
+                            (case mnem
+                              [(STA) last-imm-a]
+                              [(STX) last-imm-x]
+                              [(STY) last-imm-y]
+                              [else #f])]
+                           [decoded-flags
+                            (and sym-annot
+                                 stored-imm
+                                 (decode-hw-bitfield-flags sym-annot stored-imm))]
                            [inst-sexp
-                            (if sym-annot
-                                `(,mnem ,mode-kw ,operand #:pc ,pc #:sym ,sym-annot)
-                                `(,mnem ,mode-kw ,operand #:pc ,pc))]
+                            (cond
+                              [(and sym-annot decoded-flags (pair? decoded-flags))
+                               `(,mnem ,mode-kw ,operand #:pc ,pc #:sym ,sym-annot #:flags ,decoded-flags)]
+                              [sym-annot
+                               `(,mnem ,mode-kw ,operand #:pc ,pc #:sym ,sym-annot)]
+                              [else
+                               `(,mnem ,mode-kw ,operand #:pc ,pc)])]
+                           [next-imm-a
+                            (cond
+                              [(and (eq? mnem 'LDA) (eq? mode-kw '#:imm)) operand]
+                              [(and (eq? mnem 'ORA) (eq? mode-kw '#:imm))
+                               (if last-imm-a (bitwise-ior last-imm-a operand) operand)]
+                              [(and (eq? mnem 'AND) (eq? mode-kw '#:imm) last-imm-a)
+                               (bitwise-and last-imm-a operand)]
+                              [(eq? mnem 'TXA) last-imm-x]
+                              [(eq? mnem 'TYA) last-imm-y]
+                              [(memq mnem '(LDA PLA ADC SBC EOR ASL LSR ROL ROR JSR)) #f]
+                              [else last-imm-a])]
+                           [next-imm-x
+                            (cond
+                              [(and (eq? mnem 'LDX) (eq? mode-kw '#:imm)) operand]
+                              [(eq? mnem 'TAX) last-imm-a]
+                              [(and (eq? mnem 'INX) last-imm-x) (bitwise-and #xFF (add1 last-imm-x))]
+                              [(and (eq? mnem 'DEX) last-imm-x) (bitwise-and #xFF (sub1 last-imm-x))]
+                              [(memq mnem '(LDX TSX JSR)) #f]
+                              [else last-imm-x])]
+                           [next-imm-y
+                            (cond
+                              [(and (eq? mnem 'LDY) (eq? mode-kw '#:imm)) operand]
+                              [(eq? mnem 'TAY) last-imm-a]
+                              [(and (eq? mnem 'INY) last-imm-y) (bitwise-and #xFF (add1 last-imm-y))]
+                              [(and (eq? mnem 'DEY) last-imm-y) (bitwise-and #xFF (sub1 last-imm-y))]
+                              [(memq mnem '(LDY JSR)) #f]
+                              [else last-imm-y])]
                            [calls1
                             (if (or (eq? mnem 'JSR) (and (eq? mnem 'JMP) (eq? mode-kw '#:abs)))
                                 (cons u16 calls)
@@ -492,7 +551,8 @@
                            [next-off (+ off len)])
                       (if (memq mnem '(RTS RTI BRK JMP))
                           (finish-block next-off (cons inst-sexp insts) calls1 mmio1 zps1)
-                          (loop next-off (add1 cnt) (cons inst-sexp insts) calls1 mmio1 zps1))))))))))
+                          (loop next-off (add1 cnt) (cons inst-sexp insts) calls1 mmio1 zps1
+                                next-imm-a next-imm-x next-imm-y))))))))))
 
 ;; Infer a semantic subroutine name for a lifted 6502 subroutine block
 (define (infer-nes-semantic-sub-name bank-idx sub-addr blk vec-names)
@@ -559,6 +619,51 @@
           "logic_routine"]))
      (string->symbol (format "~a_b~a_~a" prefix bank-idx hex-a))]))
 
+;; Resolve any 6502 callee address `c-addr` (including targets outside the top-N lifted set)
+;; to a deterministic semantic symbol by disassembling a short preview slice at `c-addr`.
+(define (resolve-nes-callee-sym! rom-bytes bank-idx prg-banks bank-start bank-end bank-origin
+                                 c-addr sub-name-map vec-names mirror-map)
+  (cond
+    [(hash-ref sub-name-map c-addr #f) => values]
+    [(hash-ref vec-names c-addr #f)
+     => (lambda (s)
+          (hash-set! sub-name-map c-addr s)
+          s)]
+    [(< c-addr #x8000)
+     (define s (string->symbol (format "ram_trampoline_~a"
+                                       (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0")))))
+     (hash-set! sub-name-map c-addr s)
+     s]
+    [else
+     (define-values (t-bank t-start t-end t-orig t-off)
+       (cond
+         [(and (>= c-addr bank-origin) (< c-addr (+ bank-origin 16384)))
+          (values bank-idx bank-start bank-end bank-origin (- c-addr bank-origin))]
+         [(= prg-banks 1)
+          (define off (bitwise-and (- c-addr #x8000) #x3FFF))
+          (values 0 bank-start bank-end bank-origin off)]
+         [(>= c-addr #xC000)
+          (define last-b (sub1 prg-banks))
+          (define lb-start (+ 16 (* last-b 16384)))
+          (define lb-end (min (bytes-length rom-bytes) (+ lb-start 16384)))
+          (values last-b lb-start lb-end #xC000 (- c-addr #xC000))]
+         [else
+          (define b0-start 16)
+          (define b0-end (min (bytes-length rom-bytes) (+ 16 16384)))
+          (values bank-idx b0-start b0-end #x8000 (bitwise-and (- c-addr #x8000) #x3FFF))]))
+     (define s
+       (if (and (>= t-off 0) (< t-off (- t-end t-start)))
+           (let ([blk (disassemble-nes-subroutine-block rom-bytes t-start t-end t-orig t-off
+                                                        #:max-insts 16
+                                                        #:vec-names vec-names
+                                                        #:mirror-map mirror-map)])
+             (infer-nes-semantic-sub-name t-bank c-addr blk vec-names))
+           (string->symbol (format "rom_helper_b~a_~a"
+                                   t-bank
+                                   (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0"))))))
+     (hash-set! sub-name-map c-addr s)
+     s]))
+
 ;; Rewrite `JSR` and `JMP #:abs` target symbols in structured 6502 forms using `sub-name-map`
 (define (rewrite-nes-call-syms forms sub-name-map)
   (for/list ([f (in-list forms)])
@@ -575,17 +680,18 @@
             (append (reverse hdr) (rewrite-nes-call-syms rem sub-name-map))]))]
       [else
        (match f
-         [`(,mnem #:abs ,u16 #:pc ,pc #:sym ,old-sym)
-          #:when (memq mnem '(JSR JMP))
+         [(list* (and mnem (or 'JSR 'JMP)) '#:abs u16 '#:pc pc '#:sym old-sym tail)
           (define new-sym (hash-ref sub-name-map u16 old-sym))
-          `(,mnem #:abs ,u16 #:pc ,pc #:sym ,new-sym)]
+          `(,mnem #:abs ,u16 #:pc ,pc #:sym ,new-sym ,@tail)]
          [_ f])])))
 
 ;; Deeply lift a 16 KB NES PRG-ROM bank into subroutines (`defsub`), data blocks (`defdata`),
 ;; MMIO usage counts, indirect jump table sites, state machines, and high-level idioms.
 (define (lift-nes-prg-bank-deep rom-bytes bank-idx prg-banks bank-start bank-end
                                 global-subs vecs
-                                #:max-subs [max-subs 36])
+                                #:max-subs [max-subs 36]
+                                #:mirror-map [mirror-map (hasheq)]
+                                #:global-sub-names [global-sub-names (make-hasheq)])
   (define reset-v (hash-ref vecs 'reset))
   (define nmi-v   (hash-ref vecs 'nmi))
   (define irq-v   (hash-ref vecs 'irq))
@@ -619,9 +725,11 @@
                               (cons irq-v 'irq_handler)))])
     (define raw-a (car vpair))
     (define vname (cdr vpair))
+    (hash-set! global-sub-names raw-a vname)
     (when (addr-in-this-bank? raw-a)
       (define na (norm-addr raw-a))
       (hash-set! vec-names na vname)
+      (hash-set! global-sub-names na vname)
       (set! vec-addrs (cons na vec-addrs))))
 
   ;; Register global recursive-descent subroutines belonging to this bank
@@ -701,13 +809,24 @@
         (disassemble-nes-subroutine-block rom-bytes bank-start bank-end bank-origin sub-off
                                           #:max-insts 32
                                           #:stop-off stop-off
-                                          #:vec-names vec-names))
+                                          #:vec-names vec-names
+                                          #:mirror-map mirror-map))
       (define sub-name
         (infer-nes-semantic-sub-name bank-idx sub-addr blk vec-names))
       (hash-set! sub-name-map sub-addr sub-name)
+      (hash-set! global-sub-names sub-addr sub-name)
       (list sub-addr sub-off blk sub-name)))
 
-  ;; Pass 2: Rewrite call targets to semantic names & synthesize `(decompiled-pseudo-code ...)`
+  ;; Pass 1.5: Resolve EVERY callee in `blk 'calls` (including callees outside `sorted-unique-addrs`)
+  (for ([entry (in-list raw-sub-entries)])
+    (define blk (third entry))
+    (for ([c-addr (in-list (hash-ref blk 'calls '()))])
+      (define c-sym
+        (resolve-nes-callee-sym! rom-bytes bank-idx prg-banks bank-start bank-end bank-origin
+                                 c-addr sub-name-map vec-names mirror-map))
+      (hash-set! global-sub-names c-addr c-sym)))
+
+  ;; Pass 2: Rewrite call targets to semantic names, infer ABI signatures & synthesize `(decompiled-pseudo-code ...)`
   (define lifted-subs
     (for/list ([entry (in-list raw-sub-entries)])
       (match-define (list sub-addr sub-off blk sub-name) entry)
@@ -720,18 +839,23 @@
         (rewrite-nes-call-syms (hash-ref blk 'insts) sub-name-map))
       (define pseudo-code
         (synthesize-subroutine-pseudo-code rewritten-insts #:arch 'mos6502))
+      (define is-isr?
+        (and (memq sub-name '(reset_handler nmi_handler irq_handler)) #t))
+      (define-values (abi-params abi-returns)
+        (infer-subroutine-abi-signature (hash-ref blk 'raw-insts)
+                                        #:arch 'mos6502
+                                        #:is-isr? is-isr?))
       (define sem-calls
         (for/list ([c-addr (in-list (hash-ref blk 'calls))])
-          (hash-ref sub-name-map c-addr
-                    (lambda ()
-                      (string->symbol (format "sub_b~a_~a"
-                                              bank-idx
-                                              (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0"))))))))
+          (resolve-nes-callee-sym! rom-bytes bank-idx prg-banks bank-start bank-end bank-origin
+                                   c-addr sub-name-map vec-names mirror-map)))
       `(defsub ,sub-name
          #:bank ,bank-idx
          #:addr ,sub-addr
          #:offset ,sub-off
          #:size-bytes ,(hash-ref blk 'size-bytes)
+         #:params ,abi-params
+         #:returns ,abi-returns
          #:calls ,sem-calls
          #:mmio ,(hash-ref blk 'mmio)
          #:zp-vars ,(hash-ref blk 'zp-vars)
@@ -781,6 +905,113 @@
           'state-machines           (hash-ref sm-and-idioms 'state-machines)
           'high-level-idioms        (hash-ref sm-and-idioms 'high-level-idioms)))
 
+;; Symbolize a single 6502 instruction form (either `(STA #:abs 8192)` from `disassembled-entry-prologue`
+;; or `(STA-abs 8192)` shorthand) using hardware MMIO names, mirror names, subroutine names, and bitfield flags.
+(define (symbolize-6502-inst inst
+                             #:mirror-map [mirror-map (hasheq)]
+                             #:sub-name-map [sub-name-map (hasheq)]
+                             #:last-imm-a [last-imm-a #f]
+                             #:last-imm-x [last-imm-x #f]
+                             #:last-imm-y [last-imm-y #f])
+  (define (resolve-addr-sym mnem mode-kw addr)
+    (define is-write? (and (memq mnem NES-WRITE-MNEMS) #t))
+    (cond
+      [(not (exact-integer? addr)) addr]
+      [(eq? mnem 'JSR)
+       (hash-ref sub-name-map addr
+                 (lambda ()
+                   (string->symbol (format "rom_helper_~a"
+                                           (string-upcase (~r addr #:base 16 #:min-width 4 #:pad-string "0"))))))]
+      [(and (eq? mnem 'JMP) (eq? mode-kw '#:abs))
+       (hash-ref sub-name-map addr
+                 (lambda ()
+                   (string->symbol (format "loc_~a"
+                                           (string-upcase (~r addr #:base 16 #:min-width 4 #:pad-string "0"))))))]
+      [(and (eq? mnem 'JMP) (eq? mode-kw '#:ind))
+       (string->symbol (format "jmp_tbl_~a" (string-upcase (~r addr #:base 16 #:min-width 4 #:pad-string "0"))))]
+      [(and (memq mode-kw '(#:abs #:absx #:absy))
+            (nes-addr->mmio-symbol addr is-write?))
+       => values]
+      [(hash-ref mirror-map addr #f) => values]
+      [else addr]))
+  (match inst
+    ;; Form 1: `(MNEM mode-kw operand)` from `disassembled-entry-prologue`
+    [(list mnem (? keyword? mode-kw) operand)
+     (define sym-or-op
+       (if (eq? mode-kw '#:imm)
+           operand
+           (resolve-addr-sym mnem mode-kw operand)))
+     (define stored-imm
+       (case mnem
+         [(STA) last-imm-a]
+         [(STX) last-imm-x]
+         [(STY) last-imm-y]
+         [else #f]))
+     (define fl
+       (and (symbol? sym-or-op)
+            stored-imm
+            (decode-hw-bitfield-flags sym-or-op stored-imm)))
+     (if (and fl (pair? fl))
+         `(,mnem ,mode-kw ,sym-or-op #:flags ,fl)
+         `(,mnem ,mode-kw ,sym-or-op))]
+    ;; Form 2: 2-element branch or hyphenated instruction (`(BPL 32778)` or `(STA-abs 8192)`)
+    [(list (? symbol? op-sym) (? exact-integer? operand))
+     (define op-str (symbol->string op-sym))
+     (cond
+       [(memq op-sym '(BPL BMI BVC BVS BCC BCS BNE BEQ))
+        `(,op-sym ,(string->symbol (format "loc_~a" (string-upcase (~r operand #:base 16 #:min-width 4 #:pad-string "0")))))]
+       [(regexp-match #px"^([A-Z]{3})-(abs|absx|absy|zp|zpx|zpy|imm|ind|indx|indy)$" op-str)
+        => (lambda (m)
+             (define mnem (string->symbol (second m)))
+             (define mode-kw (string->keyword (third m)))
+             (define sym-or-op
+               (if (eq? mode-kw '#:imm)
+                   operand
+                   (resolve-addr-sym mnem mode-kw operand)))
+             `(,op-sym ,sym-or-op))]
+       [else inst])]
+    [_ inst]))
+
+(define (symbolize-6502-inst-list insts
+                                  #:mirror-map [mirror-map (hasheq)]
+                                  #:sub-name-map [sub-name-map (hasheq)])
+  (let loop ([rem insts]
+             [acc '()]
+             [imm-a #f]
+             [imm-x #f]
+             [imm-y #f])
+    (if (null? rem)
+        (reverse acc)
+        (let* ([ins (car rem)]
+               [sym-ins (symbolize-6502-inst ins
+                                             #:mirror-map mirror-map
+                                             #:sub-name-map sub-name-map
+                                             #:last-imm-a imm-a
+                                             #:last-imm-x imm-x
+                                             #:last-imm-y imm-y)]
+               [next-a
+                (match ins
+                  [(list 'LDA '#:imm v) v]
+                  [(list 'ORA '#:imm v) (if imm-a (bitwise-ior imm-a v) v)]
+                  [(list 'AND '#:imm v) (and imm-a (bitwise-and imm-a v))]
+                  [(list 'TXA) imm-x]
+                  [(list 'TYA) imm-y]
+                  [(list (or 'LDA 'PLA 'ADC 'SBC 'EOR 'ASL 'LSR 'ROL 'ROR 'JSR) _ ...) #f]
+                  [_ imm-a])]
+               [next-x
+                (match ins
+                  [(list 'LDX '#:imm v) v]
+                  [(list 'TAX) imm-a]
+                  [(list (or 'LDX 'TSX 'JSR) _ ...) #f]
+                  [_ imm-x])]
+               [next-y
+                (match ins
+                  [(list 'LDY '#:imm v) v]
+                  [(list 'TAY) imm-a]
+                  [(list (or 'LDY 'JSR) _ ...) #f]
+                  [_ imm-y])])
+          (loop (cdr rem) (cons sym-ins acc) next-a next-x next-y)))))
+
 (define (lift-nes-whole-rom->boba-sexp spec rom-bytes)
   (define id-str    (hash-ref spec 'id))
   (define title-str (hash-ref spec 'title))
@@ -802,8 +1033,13 @@
   (define full-insts (hash-ref dis 'instructions))
   (define sample-insts (take full-insts (min 48 (length full-insts))))
 
+  ;; Infer whole-ROM memory layout (`def-memory-layout`) and MMIO shadow/mirror symbol map
+  (define-values (mirror-map memory-layout-sexp)
+    (infer-nes-rom-memory-layout rom-bytes prg-banks))
+
   (define total-mmio-writes   (make-hasheq))
   (define total-mmio-reads    (make-hasheq))
+  (define global-sub-names    (make-hasheq))
   (define all-ind-jmps        '())
   (define all-state-machines  '())
   (define all-high-idioms     '())
@@ -822,7 +1058,9 @@
       (define segs    (encode-bank-segments rom-bytes b-start b-end #:row-size 128))
       (define deep    (lift-nes-prg-bank-deep rom-bytes b prg-banks b-start b-end
                                               global-subs vecs
-                                              #:max-subs max-subs-per-bank))
+                                              #:max-subs max-subs-per-bank
+                                              #:mirror-map mirror-map
+                                              #:global-sub-names global-sub-names))
       (for ([(k v) (in-hash (hash-ref deep 'mmio-write-counts))])
         (hash-set! total-mmio-writes k (+ v (hash-ref total-mmio-writes k 0))))
       (for ([(k v) (in-hash (hash-ref deep 'mmio-read-counts))])
@@ -855,6 +1093,23 @@
     (take all-state-machines (min 16 (length all-state-machines))))
   (define capped-high-idioms
     (take all-high-idioms (min 24 (length all-high-idioms))))
+
+  ;; Convert raw decimal MMIO register lists in `hardware-capabilities` to symbolic MMIO names
+  (define (addrs->mmio-syms addrs is-write?)
+    (remove-duplicates
+     (for/list ([a (in-list addrs)])
+       (or (nes-addr->mmio-symbol a is-write?) a))))
+
+  (define sym-ppu-writes   (addrs->mmio-syms (hash-ref dis 'ppu-writes) #t))
+  (define sym-ppu-reads    (addrs->mmio-syms (hash-ref dis 'ppu-reads) #f))
+  (define sym-apu-writes   (addrs->mmio-syms (hash-ref dis 'apu-writes) #t))
+  (define sym-joypad-reads (addrs->mmio-syms (hash-ref dis 'joypad-reads) #f))
+
+  ;; Symbolize `disassembled-entry-prologue` instructions
+  (define symbolized-prologue
+    (symbolize-6502-inst-list sample-insts
+                              #:mirror-map mirror-map
+                              #:sub-name-map global-sub-names))
 
   ;; Build Symbolic MMIO Cross-Reference Table
   (define all-mmio-syms
@@ -917,10 +1172,10 @@
       (Phi5-apu-registers ,(length (hash-ref dis 'apu-writes)))
       (CapMem DmaUnique))
      (hardware-capabilities
-      (ppu-writes ,(hash-ref dis 'ppu-writes))
-      (ppu-reads ,(hash-ref dis 'ppu-reads))
-      (apu-writes ,(hash-ref dis 'apu-writes))
-      (joypad-reads ,(hash-ref dis 'joypad-reads))
+      (ppu-writes ,sym-ppu-writes)
+      (ppu-reads ,sym-ppu-reads)
+      (apu-writes ,sym-apu-writes)
+      (joypad-reads ,sym-joypad-reads)
       (mapper-writes ,(hash-ref dis 'mapper-writes))
       (zp-addresses ,(hash-ref dis 'zp-addresses))
       (subroutine-count ,(hash-ref dis 'subroutine-count))
@@ -939,6 +1194,7 @@
        (nmi-sync-semaphores ,(hash-ref nmi-sems 'count))))
      (symbolic-mmio-xref
       ,@mmio-xref-entries)
+     ,memory-layout-sexp
      (state-machines
       ,@capped-state-machines)
      (high-level-idioms
@@ -946,12 +1202,14 @@
      (jump-tables
       ,@(take all-ind-jmps (min 32 (length all-ind-jmps))))
      (disassembled-entry-prologue
-      ,@sample-insts)
+      ,@symbolized-prologue)
      (prg-banks
       ,@lifted-prg-banks)
      (chr-banks
       ,@lifted-chr-banks)
      (trailer-hex ,trailer-hex)))
+
+(define decompile-nes-rom->sexp lift-nes-whole-rom->boba-sexp)
 
 ;; ============================================================================
 ;; 4. Deep Whole-Binary SM83 Game Boy (.gb) & Game Boy Color (.gbc) Lifter
@@ -999,24 +1257,36 @@
   (define entry-hex    (if (>= rom-len #x0104) (bytes-slice->hex-string rom-bytes #x0100 #x0104) "00c35001"))
   (define header-hex   (if (>= rom-len #x0150) (bytes-slice->hex-string rom-bytes #x0100 #x0150) ""))
 
-  ;; 1. Lift all 8 RST vectors ($0000..$0038), 5 hardware ISRs ($0040..$0060), and $0100 entry
-  (define lifted-isrs (lift-sm83-interrupt-vectors rom-bytes))
+  ;; 0. Infer whole-ROM SM83 memory layout (`def-memory-layout`) and MMIO mirror symbol map
+  (define-values (mirror-map memory-layout-sexp)
+    (infer-sm83-rom-memory-layout rom-bytes num-banks))
+  (define global-sm83-subs (make-hash))
 
-  ;; Collect call targets from ISRs to seed Bank 0 & switchable bank call-graph lifting
+  ;; 1. Lift all 8 RST vectors ($0000..$0038), 5 hardware ISRs ($0040..$0060), and $0100 entry
+  (define lifted-isrs
+    (lift-sm83-interrupt-vectors rom-bytes
+                                 #:mirror-map mirror-map
+                                 #:sub-name-map global-sm83-subs))
+
+  ;; Collect numeric call target addresses from ISRs to seed Bank 0 & switchable bank call-graph lifting
   (define isr-call-seeds
-    (apply append
-           (for/list ([isr (in-list lifted-isrs)])
-             (let loop ([rem (cddr isr)])
-               (match rem
-                 [(list* '#:calls cs _) cs]
-                 [(cons _ rest) (loop rest)]
-                 ['() '()])))))
+    (remove-duplicates
+     (apply append
+            (for/list ([isr (in-list lifted-isrs)])
+              (define flat-insts (flatten-structured-insts (cddr isr)))
+              (for/fold ([acc '()])
+                        ([ins (in-list flat-insts)])
+                (match ins
+                  [(list (or 'CALL 'CALL_NZ 'CALL_Z 'CALL_NC 'CALL_C
+                             'JP   'JP_NZ   'JP_Z   'JP_NC   'JP_C)
+                         '#:a16 (? exact-integer? target-addr) _ ...)
+                   (cons target-addr acc)]
+                  [_ acc]))))))
 
   (define all-hram            (mutable-set))
   (define all-io              (mutable-set))
   (define all-mbc             (mutable-set))
   (define mmio-totals         (make-hasheq))
-  (define global-sm83-subs    (make-hash))
   (define total-insts         0)
   (define total-cb-ops        0)
   (define total-subs          0)
@@ -1062,7 +1332,9 @@
             (analyze-sm83-bank-deep rom-bytes b b-start b-end
                                     #:seed-entries cross-bank-calls
                                     #:max-subroutines max-subs-for-bank
-                                    #:max-insts-per-sub 28)
+                                    #:max-insts-per-sub 28
+                                    #:mirror-map mirror-map
+                                    #:global-sub-names global-sm83-subs)
             (hasheq 'instruction-count (quotient b-size 2)
                     'cb-bit-ops 0
                     'call-targets '()
@@ -1116,6 +1388,11 @@
   (define sm83-state-machines (hash-ref sm83-sm-and-idioms 'state-machines))
   (define sm83-high-idioms    (hash-ref sm83-sm-and-idioms 'high-level-idioms))
 
+  (define sym-io-registers
+    (remove-duplicates
+     (for/list ([r (in-list (sort (set->list all-io) <))])
+       (or (sm83-addr->mmio-symbol r) r))))
+
   (define sorted-mmio-syms (sort (hash-keys mmio-totals) symbol<?))
   (define mmio-xref-entries
     (for/list ([sym (in-list sorted-mmio-syms)])
@@ -1165,7 +1442,7 @@
       (Phi4-cgb-hdma? ,(eq? target-sym 'gbc))
       (CapMem DmaUnique))
      (hardware-capabilities
-      (io-registers ,(sort (set->list all-io) <))
+      (io-registers ,sym-io-registers)
       (hram-offsets ,(sort (set->list all-hram) <))
       (mbc-bank-switch-sites ,(sort (set->list all-mbc) <))
       (cb-prefix-bit-ops ,total-cb-ops)
@@ -1179,6 +1456,7 @@
       (lifted-high-level-idioms ,(length sm83-high-idioms)))
      (symbolic-mmio-xref
       ,@mmio-xref-entries)
+     ,memory-layout-sexp
      (state-machines
       ,@sm83-state-machines)
      (high-level-idioms
@@ -1187,6 +1465,8 @@
       ,@lifted-isrs)
      (rom-banks
       ,@lifted-rom-banks)))
+
+(define decompile-gb-rom->sexp lift-gb-gbc-whole-rom->boba-sexp)
 
 ;; ============================================================================
 ;; 5. Deep Whole-Cartridge PICO-8 (.p8) Lua Function AST & Asset Section Lifter
@@ -1229,6 +1509,238 @@
 
   (values section-order sections-hash))
 
+;; ============================================================================
+;; 5A. PICO-8 Lua Expression Tokenizer & Pratt/Recursive-Descent S-exp Parser
+;; ============================================================================
+
+(define PICO-LUA-TOKEN-PX
+  #px"\\s*(?:(--.*$)|(\"[^\"]*\"|'[^']*')|(0x[0-9a-fA-F]+(?:\\.[0-9a-fA-F]+)?|[0-9]+(?:\\.[0-9]+)?)|(\\.\\.|<<|>>|<=|>=|==|~=|!=|[+\\-*/%^<>=~#(),\\[\\]{}.:;])|([a-zA-Z_][a-zA-Z0-9_]*))")
+
+(define (tokenize-pico-lua-expr str)
+  (define len (string-length str))
+  (let loop ([pos 0]
+             [acc '()])
+    (if (>= pos len)
+        (reverse acc)
+        (let ([m (regexp-match-positions PICO-LUA-TOKEN-PX str pos)])
+          (if (or (not m) (not (= (caar m) pos)))
+              (loop (add1 pos) acc)
+              (let ([end-pos (cdar m)]
+                    [comment-p (second m)]
+                    [str-p     (third m)]
+                    [num-p     (fourth m)]
+                    [op-p      (fifth m)]
+                    [id-p      (sixth m)])
+                (cond
+                  [comment-p (reverse acc)]
+                  [str-p
+                   (define raw (substring str (car str-p) (cdr str-p)))
+                   (define inner (substring raw 1 (max 1 (sub1 (string-length raw)))))
+                   (loop end-pos (cons (cons 'str inner) acc))]
+                  [num-p
+                   (define raw (substring str (car num-p) (cdr num-p)))
+                   (define n
+                     (cond
+                       [(or (string-prefix? raw "0x") (string-prefix? raw "0X"))
+                        (or (string->number (substring raw 2) 16) 0)]
+                       [else
+                        (or (string->number raw) 0)]))
+                   (loop end-pos (cons (cons 'num n) acc))]
+                  [op-p
+                   (define raw (substring str (car op-p) (cdr op-p)))
+                   (loop end-pos (cons (cons 'op (string->symbol raw)) acc))]
+                  [id-p
+                   (define raw (substring str (car id-p) (cdr id-p)))
+                   (loop end-pos (cons (cons 'id (string->symbol raw)) acc))]
+                  [else
+                   (loop end-pos acc)])))))))
+
+(define (pico-binop-info tok)
+  (match tok
+    [(cons 'id 'or)  (list 1 'or  'left)]
+    [(cons 'id 'and) (list 2 'and 'left)]
+    [(cons 'op '<)   (list 3 '<   'left)]
+    [(cons 'op '>)   (list 3 '>   'left)]
+    [(cons 'op '<=)  (list 3 '<=  'left)]
+    [(cons 'op '>=)  (list 3 '>=  'left)]
+    [(cons 'op '==)  (list 3 '==  'left)]
+    [(cons 'op '~=)  (list 3 '!=  'left)]
+    [(cons 'op '!=)  (list 3 '!=  'left)]
+    [(cons 'op '<<)  (list 4 'shl 'left)]
+    [(cons 'op '>>)  (list 4 'shr 'left)]
+    [(cons 'op '..)  (list 5 'string-append 'right)]
+    [(cons 'op '+)   (list 6 '+   'left)]
+    [(cons 'op '-)   (list 6 '-   'left)]
+    [(cons 'op '*)   (list 7 '*   'left)]
+    [(cons 'op '/)   (list 7 '/   'left)]
+    [(cons 'op '%)   (list 7 'modulo 'left)]
+    [(cons 'op '^)   (list 9 'expt 'right)]
+    [_ #f]))
+
+;; Parse a PICO-8 Lua expression string into a clean S-expression
+;; e.g. `"0"` -> `0`, `"(seconds+1)%60"` -> `(modulo (+ seconds 1) 60)`,
+;;      `"this.y>128"` -> `(> (-> this :y) 128)`, `"this.spd.x"` -> `(-> (-> this :spd) :x)`
+(define (parse-pico-lua-expr raw-str)
+  (define trimmed (string-trim raw-str))
+  (cond
+    [(string=? trimmed "") 'void]
+    [else
+     (define toks (list->vector (tokenize-pico-lua-expr trimmed)))
+     (define n (vector-length toks))
+     (define pos 0)
+     (define (peek) (and (< pos n) (vector-ref toks pos)))
+     (define (next!)
+       (and (< pos n)
+            (begin0 (vector-ref toks pos)
+              (set! pos (add1 pos)))))
+     (define (match-op? sym)
+       (define t (peek))
+       (and t (eq? (car t) 'op) (eq? (cdr t) sym) (begin (next!) #t)))
+
+     (define (parse-arg-list close-sym)
+       (cond
+         [(match-op? close-sym) '()]
+         [else
+          (let loop ([acc (list (parse-expr 0))])
+            (cond
+              [(match-op? close-sym) (reverse acc)]
+              [(match-op? '|,|) (loop (cons (parse-expr 0) acc))]
+              [else
+               (when (peek) (next!))
+               (reverse acc)]))]))
+
+     (define (parse-table-entries)
+       (cond
+         [(match-op? '|}|) '()]
+         [else
+          (let loop ([acc '()])
+            (cond
+              [(or (not (peek)) (match-op? '|}|)) (reverse acc)]
+              [else
+               (define t0 (peek))
+               (define entry
+                 (cond
+                   [(and t0 (eq? (car t0) 'id)
+                         (< (add1 pos) n)
+                         (equal? (vector-ref toks (add1 pos)) '(op . =)))
+                    (define k (cdr (next!)))
+                    (next!) ;; consume `=`
+                    (define v (parse-expr 0))
+                    `(,(string->symbol (format ":~a" k)) ,v)]
+                   [else
+                    (parse-expr 0)]))
+               (unless (match-op? '|,|)
+                 (match-op? '|;|))
+               (loop (cons entry acc))]))]))
+
+     (define (parse-primary)
+       (define t (next!))
+       (match t
+         [#f 'void]
+         [(cons 'num v) v]
+         [(cons 'str s) s]
+         [(cons 'id 'true)  #t]
+         [(cons 'id 'false) #f]
+         [(cons 'id 'nil)   'nil]
+         [(cons 'id 'not)   `(not ,(parse-expr 8))]
+         [(cons 'id sym)    sym]
+         [(cons 'op '-)     `(- ,(parse-expr 8))]
+         [(cons 'op '+)     (parse-expr 8)]
+         [(cons 'op '|#|)   `(len ,(parse-expr 8))]
+         [(cons 'op '~)     `(bnot ,(parse-expr 8))]
+         [(cons 'op '|(|)
+          (define inner (parse-expr 0))
+          (match-op? '|)|)
+          inner]
+         [(cons 'op '|{|)
+          `(table ,@(parse-table-entries))]
+         [(cons 'op other)
+          other]))
+
+     (define (parse-postfix base)
+       (define t (peek))
+       (match t
+         [(cons 'op '|.|)
+          (next!)
+          (define fld (peek))
+          (if (and fld (eq? (car fld) 'id))
+              (begin
+                (next!)
+                (parse-postfix `(-> ,base ,(string->symbol (format ":~a" (cdr fld))))))
+              base)]
+         [(cons 'op ':)
+          (next!)
+          (define mth (peek))
+          (if (and mth (eq? (car mth) 'id))
+              (let* ([_ (next!)]
+                     [args (if (match-op? '|(|)
+                               (parse-arg-list '|)|)
+                               '())])
+                (parse-postfix `(send ,base ,(string->symbol (format ":~a" (cdr mth))) ,@args)))
+              base)]
+         [(cons 'op '|[|)
+          (next!)
+          (define idx (parse-expr 0))
+          (match-op? '|]|)
+          (parse-postfix `(aref ,base ,idx))]
+         [(cons 'op '|(|)
+          (next!)
+          (define args (parse-arg-list '|)|))
+          (parse-postfix `(call ,base ,@args))]
+         [_ base]))
+
+     (define (parse-expr min-prec)
+       (let loop ([lhs (parse-postfix (parse-primary))])
+         (define info (and (peek) (pico-binop-info (peek))))
+         (if (or (not info) (< (first info) min-prec))
+             lhs
+             (let ([prec (first info)]
+                   [op-sym (second info)]
+                   [assoc (third info)])
+               (next!)
+               (define next-min (if (eq? assoc 'left) (add1 prec) prec))
+               (define rhs (parse-expr next-min))
+               (loop `(,op-sym ,lhs ,rhs))))))
+
+     (if (= n 0)
+         'void
+         (parse-expr 0))]))
+
+(define (parse-pico-lua-expr-list raw-str)
+  (define trimmed (string-trim raw-str))
+  (if (string=? trimmed "")
+      '()
+      ;; Split on top-level commas (outside parens/brackets/braces/quotes)
+      (let ([len (string-length trimmed)])
+        (let loop ([i 0]
+                   [start 0]
+                   [depth 0]
+                   [in-str #f]
+                   [acc '()])
+          (cond
+            [(>= i len)
+             (define last-seg (string-trim (substring trimmed start len)))
+             (define parts (if (string=? last-seg "") (reverse acc) (reverse (cons last-seg acc))))
+             (map parse-pico-lua-expr parts)]
+            [else
+             (define ch (string-ref trimmed i))
+             (cond
+               [in-str
+                (if (char=? ch in-str)
+                    (loop (add1 i) start depth #f acc)
+                    (loop (add1 i) start depth in-str acc))]
+               [(or (char=? ch #\") (char=? ch #\'))
+                (loop (add1 i) start depth ch acc)]
+               [(or (char=? ch #\() (char=? ch #\[) (char=? ch #\{))
+                (loop (add1 i) start (add1 depth) #f acc)]
+               [(or (char=? ch #\)) (char=? ch #\]) (char=? ch #\}))
+                (loop (add1 i) start (max 0 (sub1 depth)) #f acc)]
+               [(and (char=? ch #\,) (= depth 0))
+                (define seg (string-trim (substring trimmed start i)))
+                (loop (add1 i) (add1 i) 0 #f (cons seg acc))]
+               [else
+                (loop (add1 i) start depth #f acc)])])))))
+
 ;; Extract structured control-flow constructs (`if-cond`, `for-loop`, `while-loop`, `return-expr`)
 ;; from a PICO-8 Lua function's body lines
 (define (extract-pico8-fn-structured-ast body-lines)
@@ -1241,7 +1753,7 @@
       (when (< (length ast-nodes) 16)
         (set! conds (add1 conds))
         (define cstr (string-trim m))
-        (set! ast-nodes (cons `(if-cond ,(substring cstr 0 (min 64 (string-length cstr)))) ast-nodes))))
+        (set! ast-nodes (cons `(if-cond ,(parse-pico-lua-expr cstr)) ast-nodes))))
     (for ([m (in-list (regexp-match* #px"\\bfor\\b\\s+(.+?)\\s+\\bdo\\b" bline #:match-select second))])
       (when (< (length ast-nodes) 16)
         (set! loops (add1 loops))
@@ -1256,84 +1768,274 @@
       (when (< (length ast-nodes) 16)
         (set! loops (add1 loops))
         (define wstr (string-trim m))
-        (set! ast-nodes (cons `(while-loop ,(substring wstr 0 (min 64 (string-length wstr)))) ast-nodes))))
+        (set! ast-nodes (cons `(while-loop ,(parse-pico-lua-expr wstr)) ast-nodes))))
     (for ([m (in-list (regexp-match* #px"\\breturn\\b\\s*([^;]*)" bline #:match-select second))])
       (when (< (length ast-nodes) 16)
         (define rstr (string-trim m))
-        (set! ast-nodes (cons `(return-expr ,(substring rstr 0 (min 64 (string-length rstr)))) ast-nodes)))))
+        (define clean-rstr (string-trim (regexp-replace #px"\\s*\\bend\\b.*$" rstr "")))
+        (set! ast-nodes (cons `(return-expr ,(if (string=? clean-rstr "") 'void (parse-pico-lua-expr clean-rstr))) ast-nodes)))))
   (values (if (null? ast-nodes)
               (list `(seq-block ,(length body-lines)))
               (reverse ast-nodes))
           loops
           conds))
 
+;; Parse a single leaf PICO-8 Lua statement string into an S-expression
+(define (parse-single-pico-stmt stmt-str)
+  (define trimmed (string-trim stmt-str))
+  (cond
+    [(or (string=? trimmed "")
+         (string=? trimmed "end")
+         (string=? trimmed "else")
+         (string=? trimmed "do"))
+     #f]
+    ;; Single-line `if <cond> then <then-stmt> else <else-stmt> end`
+    [(regexp-match #px"^(?:else)?if\\s+(.+?)\\s+then\\s+(.+?)\\s+else\\s+(.+?)\\s+end$" trimmed)
+     => (lambda (m)
+          (define c-expr (parse-pico-lua-expr (second m)))
+          (define t-stmt (or (parse-single-pico-stmt (third m)) '(nop)))
+          (define e-stmt (or (parse-single-pico-stmt (fourth m)) '(nop)))
+          `(if ,c-expr (then ,t-stmt) (else ,e-stmt)))]
+    ;; Single-line `if <cond> then <body-stmt> end`
+    [(regexp-match #px"^(?:else)?if\\s+(.+?)\\s+then\\s+(.+?)\\s+end$" trimmed)
+     => (lambda (m)
+          (define c-expr (parse-pico-lua-expr (second m)))
+          (define b-stmt (parse-single-pico-stmt (third m)))
+          (if b-stmt
+              `(when ,c-expr ,b-stmt)
+              `(when ,c-expr)))]
+    ;; PICO-8 short-hand `if (<cond>) <stmt>` (where `<cond>` has balanced parens)
+    [(and (regexp-match? #px"^if\\s*\\(" trimmed)
+          (not (regexp-match? #px"\\bthen\\b" trimmed)))
+     (define open-pos (caar (regexp-match-positions #px"\\(" trimmed)))
+     (define len (string-length trimmed))
+     (let scan ([i open-pos] [depth 0])
+       (if (>= i len)
+           #f
+           (let ([ch (string-ref trimmed i)])
+             (cond
+               [(char=? ch #\() (scan (add1 i) (add1 depth))]
+               [(char=? ch #\))
+                (if (= depth 1)
+                    (let* ([cnd-str (substring trimmed (add1 open-pos) i)]
+                           [rest-str (string-trim (substring trimmed (add1 i)))]
+                           [c-expr (parse-pico-lua-expr cnd-str)]
+                           [b-stmt (parse-single-pico-stmt rest-str)])
+                      (if b-stmt
+                          `(when ,c-expr ,b-stmt)
+                          `(when ,c-expr)))
+                    (scan (add1 i) (sub1 depth)))]
+               [else (scan (add1 i) depth)]))))]
+    ;; `foreach(tbl, function(var) body end)`
+    [(regexp-match #px"^foreach\\s*\\(\\s*([^,]+),\\s*function\\s*\\(([^)]*)\\)\\s*(.+?)\\s*end\\s*\\)$" trimmed)
+     => (lambda (m)
+          (define tbl-expr (parse-pico-lua-expr (second m)))
+          (define var-sym (string->symbol (string-trim (third m))))
+          (define body-stmt (or (parse-single-pico-stmt (fourth m)) '(nop)))
+          `(foreach ,var-sym ,tbl-expr ,body-stmt))]
+    ;; `foreach(tbl, fn)`
+    [(regexp-match #px"^foreach\\s*\\(([^,]+),\\s*([^)]+)\\)$" trimmed)
+     => (lambda (m)
+          `(foreach ,(parse-pico-lua-expr (second m))
+                    ,(parse-pico-lua-expr (third m))))]
+    ;; `return <exprs>`
+    [(regexp-match #px"^return\\b\\s*(.*)$" trimmed)
+     => (lambda (m)
+          (define r-str (string-trim (second m)))
+          (if (string=? r-str "")
+              '(return)
+              (let ([exprs (parse-pico-lua-expr-list r-str)])
+                `(return ,@exprs))))]
+    ;; Compound assignment `lhs += rhs`, `lhs -= rhs`, `lhs *= rhs`, `lhs /= rhs`, `lhs %= rhs`
+    [(regexp-match #px"^([a-zA-Z_][a-zA-Z0-9_.\\[\\]]*)\\s*([+*/%-]=)\\s*(.+)$" trimmed)
+     => (lambda (m)
+          (define lhs-expr (parse-pico-lua-expr (second m)))
+          (define op-sym   (string->symbol (third m)))
+          (define rhs-expr (parse-pico-lua-expr (fourth m)))
+          `(,op-sym ,lhs-expr ,rhs-expr))]
+    ;; Assignment `local lhs = rhs` or `lhs = rhs`
+    [(regexp-match #px"^(?:local\\s+)?([a-zA-Z_][a-zA-Z0-9_.,\\s\\[\\]]*?)\\s*=\\s*([^=].*)$" trimmed)
+     => (lambda (m)
+          (define lhs-raw (string-trim (second m)))
+          (define rhs-raw (string-trim (third m)))
+          ;; Guard against function header `name = function(...)`
+          (if (regexp-match? #px"^function\\s*\\(" rhs-raw)
+              #f
+              (let ([lhs-exprs (parse-pico-lua-expr-list lhs-raw)]
+                    [rhs-exprs (parse-pico-lua-expr-list rhs-raw)])
+                (if (and (= (length lhs-exprs) 1) (= (length rhs-exprs) 1))
+                    `(set! ,(first lhs-exprs) ,(first rhs-exprs))
+                    `(set-values! ,lhs-exprs ,rhs-exprs)))))]
+    ;; Local variable declaration without initializer `local a, b`
+    [(regexp-match #px"^local\\s+([a-zA-Z_][a-zA-Z0-9_,\\s]*)$" trimmed)
+     => (lambda (m)
+          `(local ,@(parse-pico-lua-expr-list (second m))))]
+    ;; Function call or general expression
+    [else
+     (define expr (parse-pico-lua-expr trimmed))
+     (and (not (eq? expr 'void)) expr)]))
+
 ;; Synthesize clean S-expression `(decompiled-pseudo-code ...)` from PICO-8 Lua function body lines
 (define (synthesize-pico8-pseudo-code body-lines)
-  (define stmts '())
-  (define (emit! s)
-    (when (< (length stmts) 24)
-      (set! stmts (cons s stmts))))
-  (for ([raw-line (in-list body-lines)]
-        #:when (< (length stmts) 24))
-    (define no-comment (regexp-replace #px"--.*$" raw-line ""))
-    (define trimmed (string-trim no-comment))
-    (unless (or (string=? trimmed "")
-                (regexp-match? #px"^(?:local\\s+)?function\\b" trimmed)
-                (regexp-match? #px"^end\\b" trimmed)
-                (regexp-match? #px"^else\\b" trimmed))
-      (cond
-        ;; `for var=start,end do`
-        [(regexp-match #px"^for\\s+([a-zA-Z0-9_]+)\\s*=\\s*([^,]+),\\s*(.+?)\\s+do\\b" trimmed)
-         => (lambda (m)
-              (emit! `(for-range ,(string->symbol (second m))
-                                 ,(string-trim (third m))
-                                 ,(string-trim (fourth m)))))]
-        ;; `for item in all(tbl) do`
-        [(regexp-match #px"^for\\s+([a-zA-Z0-9_,\\s]+)\\s+in\\s+all\\(([^)]+)\\)\\s+do\\b" trimmed)
-         => (lambda (m)
-              (emit! `(foreach ,(string->symbol (string-trim (second m)))
-                               ,(string-trim (third m)))))]
-        ;; `foreach(tbl, fn)`
-        [(regexp-match #px"^foreach\\s*\\(([^,]+),\\s*([^)]+)\\)" trimmed)
-         => (lambda (m)
-              (emit! `(foreach ,(string-trim (second m))
-                               ,(string-trim (third m)))))]
-        ;; `if cond then stmt`
-        [(regexp-match #px"^(?:else)?if\\s+(.+?)\\s+then\\s*(.*)$" trimmed)
-         => (lambda (m)
-              (define cnd (string-trim (second m)))
-              (define tail (string-trim (regexp-replace #px"\\s*end\\s*$" (third m) "")))
-              (if (string=? tail "")
-                  (emit! `(when ,cnd))
-                  (emit! `(when ,cnd ,tail))))]
-        ;; PICO-8 short `if (cond) stmt`
-        [(regexp-match #px"^if\\s*\\(([^)]+)\\)\\s+(.+)$" trimmed)
-         => (lambda (m)
-              (emit! `(when ,(string-trim (second m)) ,(string-trim (third m)))))]
-        ;; `return expr`
-        [(regexp-match #px"^return\\b\\s*(.*)$" trimmed)
-         => (lambda (m)
-              (emit! `(return ,(string-trim (second m)))))]
-        ;; Compound assignment `lhs += rhs`, `lhs -= rhs`, `lhs *= rhs`, `lhs /= rhs`
-        [(regexp-match #px"^([a-zA-Z0-9_.\\[\\]]+)\\s*([+*/%-]=)\\s*(.+)$" trimmed)
-         => (lambda (m)
-              (emit! `(,(string->symbol (third m))
-                       ,(string->symbol (second m))
-                       ,(string-trim (fourth m)))))]
-        ;; Assignment `local lhs = rhs` or `lhs = rhs`
-        [(regexp-match #px"^(?:local\\s+)?([a-zA-Z0-9_.,\\s\\[\\]]+?)\\s*=\\s*([^=].*)$" trimmed)
-         => (lambda (m)
-              (emit! `(set! ,(string->symbol (string-trim (second m)))
-                            ,(string-trim (third m)))))]
-        ;; Function call `fn(args)`
-        [(regexp-match #px"^([a-zA-Z0-9_.:]+)\\s*\\((.*)\\)$" trimmed)
-         => (lambda (m)
-              (emit! `(call ,(string->symbol (second m))
-                            ,(string-trim (third m)))))]
-        [else (void)])))
-  (if (null? stmts)
+  ;; Step 1: Strip comments, function declaration header on the first line, and final `end`
+  (define cleaned-lines
+    (let ([non-empty
+           (filter (lambda (s) (not (string=? s "")))
+                   (for/list ([raw (in-list body-lines)])
+                     (string-trim (regexp-replace #px"--.*$" raw ""))))])
+      (if (null? non-empty)
+          '()
+          (let* ([first-l (first non-empty)]
+                 ;; Strip `function name(...)` or `name = function(...)` header prefix
+                 [first-stripped
+                  (string-trim
+                   (regexp-replace
+                    #px"^(?:(?:local\\s+)?function\\s+[a-zA-Z0-9_.:]+\\s*\\([^)]*\\)|(?:local\\s+)?[a-zA-Z0-9_.\\[\\]]+\\s*=\\s*function\\s*\\([^)]*\\))\\s*"
+                    first-l
+                    ""))]
+                 [with-first
+                  (if (string=? first-stripped "")
+                      (cdr non-empty)
+                      (cons first-stripped (cdr non-empty)))])
+            (if (null? with-first)
+                '()
+                (let* ([last-l (last with-first)]
+                       [init-ls (take with-first (sub1 (length with-first)))]
+                       [last-stripped
+                        (string-trim (regexp-replace #px"\\bend\\s*,?\\s*$" last-l ""))])
+                  (if (string=? last-stripped "")
+                      init-ls
+                      (append init-ls (list last-stripped)))))))))
+
+  ;; Step 2: Structured block stack for multi-line `if/then/else/end`, `for/do/end`, `while/do/end`
+  (define root-stmts '())
+  (define block-stack '()) ;; stack of `(hash 'kind ... 'hdr ... 'stmts ... 'else-stmts ... 'in-else? ...)`
+
+  (define (emit-stmt! s)
+    (when s
+      (if (null? block-stack)
+          (when (< (length root-stmts) 24)
+            (set! root-stmts (cons s root-stmts)))
+          (let ([top (car block-stack)])
+            (if (hash-ref top 'in-else? #f)
+                (hash-set! top 'else-stmts (cons s (hash-ref top 'else-stmts '())))
+                (hash-set! top 'stmts (cons s (hash-ref top 'stmts '()))))))))
+
+  (define (push-block! kind hdr)
+    (set! block-stack
+          (cons (make-hasheq (list (cons 'kind kind)
+                                   (cons 'hdr hdr)
+                                   (cons 'stmts '())
+                                   (cons 'else-stmts '())
+                                   (cons 'in-else? #f)))
+                block-stack)))
+
+  (define (pop-block!)
+    (when (pair? block-stack)
+      (define top (car block-stack))
+      (set! block-stack (cdr block-stack))
+      (define kind (hash-ref top 'kind))
+      (define hdr  (hash-ref top 'hdr))
+      (define body (reverse (hash-ref top 'stmts '())))
+      (define ebody (reverse (hash-ref top 'else-stmts '())))
+      (define form
+        (case kind
+          [(if)
+           (if (pair? ebody)
+               `(if ,hdr (then ,@body) (else ,@ebody))
+               (if (pair? body)
+                   `(when ,hdr ,@body)
+                   `(when ,hdr '(nop))))]
+          [(for-range)
+           `(for-range ,@hdr ,@body)]
+          [(foreach)
+           `(foreach ,@hdr ,@body)]
+          [(while)
+           `(while ,hdr ,@body)]
+          [else
+           `(begin ,@body)]))
+      (emit-stmt! form)))
+
+  (define (process-line! line)
+    (define trimmed (string-trim line))
+    (cond
+      [(string=? trimmed "") (void)]
+      ;; Standalone `end` (or `end,` / `end end`)
+      [(regexp-match #px"^end(?:\\s*,?\\s*|\\s+(.+))$" trimmed)
+       => (lambda (m)
+            (pop-block!)
+            (when (second m)
+              (process-line! (second m))))]
+      ;; Standalone `else` (or `else <stmt>`)
+      [(regexp-match #px"^else(?:\\s*$|\\s+(.+)$)" trimmed)
+       => (lambda (m)
+            (when (pair? block-stack)
+              (hash-set! (car block-stack) 'in-else? #t))
+            (when (second m)
+              (process-line! (second m))))]
+      ;; Single-line `if <cond> then <then-body> else <else-body> end`
+      [(regexp-match #px"^(?:else)?if\\s+(.+?)\\s+then\\s+(.+?)\\s+else\\s+(.+?)\\s+end$" trimmed)
+       => (lambda (m)
+            (emit-stmt! (parse-single-pico-stmt trimmed)))]
+      ;; Single-line `if <cond> then <body> end`
+      [(regexp-match #px"^(?:else)?if\\s+(.+?)\\s+then\\s+(.+?)\\s+end$" trimmed)
+       => (lambda (m)
+            (emit-stmt! (parse-single-pico-stmt trimmed)))]
+      ;; Multi-line `if <cond> then [tail]`
+      [(regexp-match #px"^(?:else)?if\\s+(.+?)\\s+then\\s*(.*)$" trimmed)
+       => (lambda (m)
+            (define c-expr (parse-pico-lua-expr (second m)))
+            (define tail   (string-trim (third m)))
+            (push-block! 'if c-expr)
+            (unless (string=? tail "")
+              (process-line! tail)))]
+      ;; `for var=start,stop[,step] do [tail]`
+      [(regexp-match #px"^for\\s+([a-zA-Z0-9_]+)\\s*=\\s*(.+?)\\s+do\\b\\s*(.*)$" trimmed)
+       => (lambda (m)
+            (define var-sym (string->symbol (second m)))
+            (define bounds  (parse-pico-lua-expr-list (third m)))
+            (define tail    (string-trim (fourth m)))
+            (push-block! 'for-range (cons var-sym bounds))
+            (unless (string=? tail "")
+              (process-line! tail)))]
+      ;; `for item in all(tbl) do [tail]`
+      [(regexp-match #px"^for\\s+([a-zA-Z0-9_,\\s]+)\\s+in\\s+all\\(([^)]+)\\)\\s+do\\b\\s*(.*)$" trimmed)
+       => (lambda (m)
+            (define var-sym  (string->symbol (string-trim (second m))))
+            (define tbl-expr (parse-pico-lua-expr (third m)))
+            (define tail     (string-trim (fourth m)))
+            (push-block! 'foreach (list var-sym tbl-expr))
+            (unless (string=? tail "")
+              (process-line! tail)))]
+      ;; `while <cond> do [tail]`
+      [(regexp-match #px"^while\\s+(.+?)\\s+do\\b\\s*(.*)$" trimmed)
+       => (lambda (m)
+            (define c-expr (parse-pico-lua-expr (second m)))
+            (define tail   (string-trim (third m)))
+            (push-block! 'while c-expr)
+            (unless (string=? tail "")
+              (process-line! tail)))]
+      ;; Statement ending with ` end` (e.g., `kill_player(this) end`)
+      [(and (not (regexp-match? #px"\\bfunction\\b" trimmed))
+            (regexp-match #px"^(.+?)\\s+end$" trimmed))
+       => (lambda (m)
+            (emit-stmt! (parse-single-pico-stmt (second m)))
+            (pop-block!))]
+      [else
+       (emit-stmt! (parse-single-pico-stmt trimmed))]))
+
+  (for ([line (in-list cleaned-lines)])
+    (process-line! line))
+  (let flush-loop ()
+    (when (pair? block-stack)
+      (pop-block!)
+      (flush-loop)))
+
+  (if (null? root-stmts)
       '((nop))
-      (reverse stmts)))
+      (reverse root-stmts)))
+
+(define pico-lua-lines->pseudo-code synthesize-pico8-pseudo-code)
 
 ;; Parse all Lua functions in `__lua__` into structured `(def-pico-function ...)` AST forms
 ;; and lift PICO-8 state machines (`pico8-state-machines`) & gameplay idioms (`high-level-idioms`)
@@ -1380,12 +2082,21 @@
       (extract-pico8-fn-structured-ast body))
     (define pseudo-stmts
       (synthesize-pico8-pseudo-code body))
+    (define has-val-return?
+      (for/or ([node (in-list struct-ast)])
+        (match node
+          [(list 'return-expr v) (not (eq? v 'void))]
+          [_ #f])))
+    (define fn-returns (if has-val-return? '(val) '()))
     (set! total-loops (+ total-loops fn-loops))
     (set! total-conds (+ total-conds fn-conds))
     (set! lifted-fns
           (cons `(def-pico-function
+                   #:params ,params
+                   #:returns ,fn-returns
                    (name ,(string->symbol fn-name))
                    (params ,params)
+                   (returns ,fn-returns)
                    (line-range (,start-line ,end-line))
                    (api-calls ,(sort (set->list fn-apis) symbol<?))
                    (called-functions ,(sort (set->list fn-calls) symbol<?))
@@ -1825,6 +2536,8 @@
     [else
      (error 'recompile-boba-whole-rom-sexp->bytes "unknown target ~v" target)]))
 
+(define compile-whole-rom-sexp->bytes recompile-boba-whole-rom-sexp->bytes)
+
 ;; Verify that directly assembling all lifted instructions (`defsub`, `defdata`, `def-sm83-isr`, `defsub-sm83`)
 ;; matches the original ROM bytes 100.00% at every single lifted instruction & data address!
 (define (verify-whole-rom-direct-assembly sexp orig-bytes)
@@ -2050,6 +2763,13 @@
        (eq? (fourth form) '#:pc)
        (exact-integer? (fifth form))))
 
+(define (prologue-inst-form? form)
+  (and (pair? form)
+       (symbol? (car form))
+       (>= (length form) 3)
+       (keyword? (cadr form))
+       (not (eq? (car form) 'mmio-reg))))
+
 (define (write-cpu-inst-hex! form out indent)
   (write-indent out indent)
   (define mnem (car form))
@@ -2057,10 +2777,12 @@
   (define operand (caddr form))
   (define op-str
     (cond
-      [(and (memq mode-kw MODE-8BIT-KEYWORDS) (>= operand 0))
+      [(and (exact-integer? operand) (memq mode-kw MODE-8BIT-KEYWORDS) (>= operand 0))
        (format-hex2 operand)]
-      [(and (memq mode-kw MODE-16BIT-KEYWORDS) (>= operand 0))
+      [(and (exact-integer? operand) (memq mode-kw MODE-16BIT-KEYWORDS) (>= operand 0))
        (format-hex4 operand)]
+      [(and (exact-integer? operand) (>= operand 0))
+       (format-hex-auto operand)]
       [else
        (format "~s" operand)]))
   (fprintf out "(~s ~s ~a" mnem mode-kw op-str)
@@ -2158,24 +2880,30 @@
       ['()
        (display ")" out)])))
 
-;; Write a `def-pico-function` form across multiple lines
+;; Write a `def-pico-function` form across multiple lines (supporting `#:params` / `#:returns` keywords)
 (define (write-pico-function-multiline! form out indent)
   (write-indent out indent)
   (fprintf out "(~s" (car form))
-  (for ([sub (in-list (cdr form))])
-    (newline out)
-    (cond
-      [(and (pair? sub) (memq (car sub) '(decompiled-pseudo-code structured-ast body-lines)))
-       (write-indent out (+ indent 2))
-       (fprintf out "(~s" (car sub))
-       (for ([bline (in-list (cdr sub))])
+  (let loop ([rem (cdr form)])
+    (match rem
+      [(list* (? keyword? kw) val rest)
+       (fprintf out " ~s ~s" kw val)
+       (loop rest)]
+      [_
+       (for ([sub (in-list rem)])
          (newline out)
-         (write-indent out (+ indent 4))
-         (write bline out))
-       (display ")" out)]
-      [else
-       (write-indent out (+ indent 2))
-       (write sub out)]))
+         (cond
+           [(and (pair? sub) (memq (car sub) '(decompiled-pseudo-code structured-ast body-lines)))
+            (write-indent out (+ indent 2))
+            (fprintf out "(~s" (car sub))
+            (for ([bline (in-list (cdr sub))])
+              (newline out)
+              (write-indent out (+ indent 4))
+              (write bline out))
+            (display ")" out)]
+           [else
+            (write-indent out (+ indent 2))
+            (write sub out)]))] ))
   (display ")" out))
 
 (define (write-flat-kw-form-hex! form out indent)
@@ -2238,15 +2966,45 @@
      (write-pico-function-multiline! sexp out indent)]
 
     ;; CPU instruction inside `disassembled-entry-prologue`
-    [(cpu-inst-form? sexp)
+    [(or (cpu-inst-form? sexp) (prologue-inst-form? sexp))
      (write-cpu-inst-hex! sexp out indent)]
 
-    ;; `(origin #x8000)`
-    [(and (eq? (car sexp) 'origin)
+    ;; `(origin #x8000)` or interrupt vector entry `(nmi #x8082)` / `(rst-00 #x0000)`
+    [(and (memq (car sexp) '(origin nmi reset irq
+                             rst-00 rst-08 rst-10 rst-18 rst-20 rst-28 rst-30 rst-38
+                             vblank-irq lcd-stat-irq timer-irq serial-irq joypad-irq cart-entry))
           (= (length sexp) 2)
-          (exact-integer? (cadr sexp)))
+          (exact-integer? (cadr sexp))
+          (>= (cadr sexp) 0))
      (write-indent out indent)
-     (fprintf out "(origin ~a)" (format-hex4 (cadr sexp)))]
+     (fprintf out "(~s ~a)" (car sexp) (format-hex4 (cadr sexp)))]
+
+    ;; 8-bit hex address list `(zp-addresses (#x00 #x01 ...))`
+    [(and (eq? (car sexp) 'zp-addresses)
+          (= (length sexp) 2)
+          (list? (cadr sexp)))
+     (write-indent out indent)
+     (fprintf out "(~s (" (car sexp))
+     (for ([v (in-list (cadr sexp))] [i (in-naturals 0)])
+       (when (> i 0) (display " " out))
+       (if (and (exact-integer? v) (>= v 0))
+           (display (format-hex2 v) out)
+           (write v out)))
+     (display "))" out)]
+
+    ;; 16-bit hex address list `(subroutine-entry-points (#x8182 ...))`, `(hram-offsets (#xFF80 ...))`, `(io-registers (JOYP ... #xFF50))`, etc.
+    [(and (memq (car sexp) '(subroutine-entry-points hram-offsets mbc-bank-switch-sites call-targets
+                             io-registers ppu-writes ppu-reads apu-writes joypad-reads))
+          (= (length sexp) 2)
+          (list? (cadr sexp)))
+     (write-indent out indent)
+     (fprintf out "(~s (" (car sexp))
+     (for ([v (in-list (cadr sexp))] [i (in-naturals 0)])
+       (when (> i 0) (display " " out))
+       (if (and (exact-integer? v) (>= v 0))
+           (display (format-hex4 v) out)
+           (write v out)))
+     (display "))" out)]
 
     ;; `(vector nmi #x8082 #:sym nmi_handler)`
     [(and (eq? (car sexp) 'vector)
@@ -2265,15 +3023,19 @@
          ['()
           (display ")" out)]))]
 
-    ;; Flat keyword-bearing leaf forms (`defdata`, `jump-table-dispatch`, `idiom`)
-    [(memq (car sexp) '(defdata jump-table-dispatch idiom))
+    ;; Flat keyword-bearing leaf forms (`defdata`, `mirror`, `zp-ptr`, `state-var`, `hram-var`, `wram-var`, etc.)
+    [(memq (car sexp) '(defdata jump-table-dispatch jmp-indirect idiom
+                        idiom-oam-dma-blit idiom-ppu-vram-seek idiom-zp-pointer-init
+                        mirror zp-ptr state-var hram-var wram-var))
      (write-flat-kw-form-hex! sexp out indent)]
 
     ;; Container blocks whose elements each belong on their own line
     [(or (memq (car sexp)
                '(header-spec interrupt-vectors coeffect-grades hardware-capabilities idioms
                  high-level-idioms state-machines pico8-state-machines
-                 symbolic-mmio-xref jump-tables disassembled-entry-prologue
+                 symbolic-mmio-xref def-memory-layout
+                 mmio-mirrors zp-pointers state-variables hram-variables wram-variables
+                 jump-tables disassembled-entry-prologue
                  interrupt-service-routines lifted-lua-functions lifted-pico8-assets
                  gfx-sprites gff-flags map-rows sfx-tracks music-patterns
                  def-prg-bank def-chr-bank def-rom-bank

@@ -57,27 +57,29 @@
     (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 3))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _init)
       (params ())
+      (returns ())
       (line-range (4 18))
       (api-calls (flr music poke rnd))
       (called-functions (splash_init))
       (structured-ast
-        (if-cond "(flr(rnd(100"))
+        (if-cond (call flr (call rnd 100))))
       (decompiled-pseudo-code
-        (call poke "0x5f2d,1")
-        (call cartdata "\"ckcw_fnfp8\"")
-        (set! step "0")
-        (set! inc "509/64")
-        (set! logo "1")
-        (set! menustate "-1")
-        (set! fade "0")
-        (set! fading "-1")
-        (call splash_init "")
-        (call music "0")
-        (set! synctime "509")
-        (call dset "60,0"))
+        (call poke 24365 1)
+        (call cartdata "ckcw_fnfp8")
+        (set! step 0)
+        (set! inc (/ 509 64))
+        (set! logo 1)
+        (set! menustate (- 1))
+        (set! fade 0)
+        (set! fading (- 1))
+        (call splash_init)
+        (call music 0)
+        (set! synctime 509)
+        (call dset 60 0)
+        (when (== (call flr (call rnd 100)) 0) (set! logo 2)))
       (body-lines
         "function _init()"
         "\tpoke(0x5f2d,1)"
@@ -94,21 +96,22 @@
         "\tdset(60,0)"
         "\tif(flr(rnd(100)) == 0) logo = 2"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _update60)
       (params ())
+      (returns ())
       (line-range (20 27))
       (api-calls (poke))
       (called-functions (menu_update splash_update))
       (structured-ast
-        (if-cond "(menustate == 0 or menustate == 1")
-        (if-cond "(menustate == -1")
-        (if-cond "(stat(26"))
+        (if-cond (or (== menustate 0) (== menustate 1)))
+        (if-cond (== menustate (- 1)))
+        (if-cond (call stat 26)))
       (decompiled-pseudo-code
-        (when "menustate == 0 or menustate == 1" "menu_update()")
-        (when "menustate == -1" "splash_update()")
-        (+= step "1")
-        (call poke "0x5f30,1"))
+        (when (or (== menustate 0) (== menustate 1)) (call menu_update))
+        (when (== menustate (- 1)) (call splash_update))
+        (+= step 1)
+        (call poke 24368 1))
       (body-lines
         "function _update60()"
         "\t--step = stat(26) + (stat(24)*  509)"
@@ -118,39 +121,32 @@
         "\tpoke(0x5f30,1)"
         "\t--if(stat(26) > synctime) synctime = stat(26)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _draw)
       (params ())
+      (returns ())
       (line-range (29 49))
       (api-calls (ceil cls max palt rectfill))
       (called-functions (fade0 fade1 menu_draw splash_draw))
       (structured-ast
-        (if-cond "(menustate == -1")
-        (if-cond "(menustate == 0 or menustate == 1")
-        (if-cond "fading > -1")
-        (if-cond "(fading == 0")
-        (if-cond "(fading == 1")
-        (if-cond "(fading == 2")
-        (if-cond "(fading == 3")
-        (if-cond "(fade > 0")
-        (if-cond "fade == 0.5 and menustate == 0 and fading == 2"))
+        (if-cond (== menustate (- 1)))
+        (if-cond (or (== menustate 0) (== menustate 1)))
+        (if-cond (> fading (- 1)))
+        (if-cond (== fading 0))
+        (if-cond (== fading 1))
+        (if-cond (== fading 2))
+        (if-cond (== fading 3))
+        (if-cond (> fade 0))
+        (if-cond (and (and (== fade 0.5) (== menustate 0)) (== fading 2))))
       (decompiled-pseudo-code
-        (call cls "")
-        (call palt "0,false")
-        (call palt "9,true")
-        (call rectfill "0,0,128,128,0")
-        (call color "6")
-        (when "menustate == -1" "splash_draw()")
-        (when "menustate == 0 or menustate == 1" "menu_draw()")
-        (when "fading > -1")
-        (when "fading == 0" "fade0(ceil(fade))")
-        (when "fading == 1" "fade1(ceil(fade))")
-        (when "fading == 2" "fade0(15-ceil(fade))")
-        (when "fading == 3" "fade1(15-ceil(fade))")
-        (when "fade > 0" "fade -= 0.5")
-        (when "fade == 0.5 and menustate == 0 and fading == 2")
-        (call dset "59,max(0,stat(24)-2)")
-        (call load "\"#fnf_select\""))
+        (call cls)
+        (call palt 0 #f)
+        (call palt 9 #t)
+        (call rectfill 0 0 128 128 0)
+        (call color 6)
+        (when (== menustate (- 1)) (call splash_draw))
+        (when (or (== menustate 0) (== menustate 1)) (call menu_draw))
+        (when (> fading (- 1)) (when (== fading 0) (call fade0 (call ceil fade))) (when (== fading 1) (call fade1 (call ceil fade))) (when (== fading 2) (call fade0 (- 15 (call ceil fade)))) (when (== fading 3) (call fade1 (- 15 (call ceil fade)))) (when (> fade 0) (-= fade 0.5)) (when (and (and (== fade 0.5) (== menustate 0)) (== fading 2)) (call dset 59 (call max 0 (- (call stat 24) 2))) (call load "#fnf_select"))))
       (body-lines
         "function _draw()"
         "\tcls()"
@@ -173,20 +169,21 @@
         "\t\t\tdset(59,max(0,stat(24)-2))"
         "\t\t\tload(\"#fnf_select\")"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name menu_init)
       (params ())
+      (returns ())
       (line-range (62 68))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 7))
       (decompiled-pseudo-code
-        (set! menustate "0")
-        (set! state "0")
-        (set! nextstate "-1")
-        (set! starting "-1")
-        (set! loading "false"))
+        (set! menustate 0)
+        (set! state 0)
+        (set! nextstate (- 1))
+        (set! starting (- 1))
+        (set! loading #f))
       (body-lines
         "function menu_init()"
         "\tmenustate = 0"
@@ -195,22 +192,18 @@
         "\tstarting = -1"
         "\tloading = false"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name menu_update)
       (params ())
+      (returns ())
       (line-range (70 77))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "nextstate > 0")
-        (if-cond "nextstate == 0"))
+        (if-cond (> nextstate 0))
+        (if-cond (== nextstate 0)))
       (decompiled-pseudo-code
-        (when "nextstate > 0")
-        (-= nextstate "1")
-        (when "nextstate == 0")
-        (set! fading "2")
-        (set! fade "15")
-        (set! nextstate "0"))
+        (when (> nextstate 0) (-= nextstate 1) (when (== nextstate 0) (set! fading 2) (set! fade 15) (set! nextstate 0))))
       (body-lines
         "function menu_update()"
         "\tif nextstate > 0 then"
@@ -220,20 +213,18 @@
         "\t\t\tfade = 15"
         "\t\t\tnextstate = 0"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name menu_draw)
       (params ())
+      (returns ())
       (line-range (98 104))
       (api-calls (pal rectfill))
       (called-functions ())
       (structured-ast
-        (if-cond "menustate == 0")
+        (if-cond (== menustate 0))
         (for-loop "i=0,15"))
       (decompiled-pseudo-code
-        (when "menustate == 0")
-        (call rectfill "0,0,128,128,0")
-        (for-range i "0" "15")
-        (call pal "i,12"))
+        (when (== menustate 0) (call rectfill 0 0 128 128 0) (for-range i 0 15 (call pal i 12))))
       (body-lines
         "function menu_draw()"
         "\tif menustate == 0 then"
@@ -242,39 +233,36 @@
         "\t\tfor i=0,15 do"
         "\t\t\tpal(i,12)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name splash_init)
       (params ())
+      (returns ())
       (line-range (135 139))
       (api-calls (flr rnd))
       (called-functions (get_splash_text))
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! splashstate "0")
-        (set! splashtext "get_splash_text()")
-        (set! ispresident "flr(rnd(100)) == 0"))
+        (set! splashstate 0)
+        (set! splashtext (call get_splash_text))
+        (set! ispresident (== (call flr (call rnd 100)) 0)))
       (body-lines
         "function splash_init()"
         "\tsplashstate = 0"
         "\tsplashtext = get_splash_text()"
         "\tispresident = flr(rnd(100)) == 0"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name splash_update)
       (params ())
+      (returns ())
       (line-range (141 148))
       (api-calls (btnp poke))
       (called-functions (menu_init))
       (structured-ast
-        (if-cond "btnp("))
+        (if-cond (call btnp void)))
       (decompiled-pseudo-code
-        (when "btnp() == 64")
-        (set! splashstate "0")
-        (call menu_init "")
-        (set! fading "1")
-        (set! fade "15")
-        (call poke "0x5f30,1"))
+        (when (== (call btnp) 64) (set! splashstate 0) (call menu_init) (set! fading 1) (set! fade 15) (call poke 24368 1)))
       (body-lines
         "function splash_update()"
         "\tif btnp() == 64 then"
@@ -284,27 +272,20 @@
         "\t\tfade = 15"
         "\t\tpoke(0x5f30,1)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name splash_draw)
       (params ())
+      (returns ())
       (line-range (175 187))
       (api-calls (print))
       (called-functions ())
       (structured-ast
-        (if-cond "splashstate == 0 or splashstate == 1")
-        (if-cond "splashstate == 1")
-        (if-cond "(ispresident"))
+        (if-cond (or (== splashstate 0) (== splashstate 1)))
+        (if-cond (== splashstate 1))
+        (if-cond ispresident))
       (decompiled-pseudo-code
-        (set! _tx "\"\"")
-        (when "splashstate == 0 or splashstate == 1")
-        (set! _tx "\"cARSON kOMPON\"")
-        (call print "_tx,64-#_tx*2,54")
-        (set! _tx "\"& cHRIS wEST\"")
-        (call print "_tx,64-#_tx*2,60")
-        (when "splashstate == 1")
-        (set! _tx "\"present\"")
-        (when "ispresident" "_tx = \"& tHE pRESIDENT\"")
-        (call print "_tx,64-#_tx*2,66"))
+        (set! _tx "")
+        (when (or (== splashstate 0) (== splashstate 1)) (set! _tx "cARSON kOMPON") (call print _tx (- 64 (* (len _tx) 2)) 54) (set! _tx "& cHRIS wEST") (call print _tx (- 64 (* (len _tx) 2)) 60) (when (== splashstate 1) (set! _tx "present") (when ispresident (set! _tx "& tHE pRESIDENT")) (call print _tx (- 64 (* (len _tx) 2)) 66))))
       (body-lines
         "function splash_draw()"
         "\t--print(splashtext[1],63,63)"
@@ -319,38 +300,37 @@
         "\t\t\tif(ispresident) _tx = \"& tHE pRESIDENT\""
         "\t\t\tprint(_tx,64-#_tx*2,66)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name get_splash_text)
       (params ())
+      (returns (val))
       (line-range (227 231))
       (api-calls (flr rnd))
       (called-functions ())
       (structured-ast
-        (return-expr "split(_splash[flr(rnd(#_splash))+1],\":\")"))
+        (return-expr (call split (aref _splash (+ (call flr (call rnd (len _splash))) 1)) ":")))
       (decompiled-pseudo-code
-        (set! _splashs "\"SHOUTOUTS TO TOM FULP:LMAO|DA BABY:BIGGEST INSPIRATION|THIS GAME IS DEDICATED TO RINGO:MY FAVORITE BEATLE|THAT'S A HEALTHY LOOKING PENIS:THAT'S AN AMERICAN PENIS|pico-8 EXCLUSIVE:SPLASH TEST|REFINED TASTE IN MUSIC:IF I SAY SO MYSELF|SWAGSHIT:MONEYMONEY|RHYTHM GAMING:DEMADE|RITZ DX:REST IN PEACE LOL|nEWGROUNDS IS DOWN!:pLEASE sTAND bY ♥ |BACK THE FULL ASS GAME:NOW|NEWGROUNDS:FOREVER|RATE FIVE:PLS NO BLAM|GAME OF THE YEAR:FOREVER|STREAM CHUCKIE FINSTER:ON SPOTIFY|NEVER FORGET TO:PRAY TO GOD|LIKE PARAPPA:BUT COOLER|HATSUNE MIKU:BIGGEST INSPIRATION|WOMEN ARE REAL:THIS IS OFFICIAL|DANCIN:FOREVER|DOPE ASS GAME:PLAYSTATION MAGAZINE|GO MANGO:GO MANGO|DONT PLAY RUST:WE ONLY FUNKIN'|GOODBYE:MY PENIS|HOW I ACCIDENTALLY:MADE FNF IN pico-8|YOOOOOOOOO:yooooooooo|YOU ALREADY KNOW:WE REALLY OUT HERE| :WE HAVE FUN HERE|CLOUD BASHERS:BEST RHYTHM GAME|SUPER PICKLE MILK:ITS THE SAME THING|TURNIP BOY:COMMITS FUNK EVASION|THE LAST FUNK:PIPIN' HOT|PERFECT LAWN:ONE BROWN SPOT|wEEK 7:YES ITS HERE|YOURE SO SUSSY:I KNOW YOU TOOK MY FORTNITE CARD|$19 FORTNITE CARD:WHO WANTS IT?|DARNELL FOR PRESIDENT!:HE STILL HAS 5 YEARS TO LIVE|THAT'LL BE 15 DOLLARS:YOU ARE THE PRESIDENT| :NAME A WOMAN|FUCKIN' STEAK BABY:YEAH|NINJAMUFFIN'S BEEN REAL QUIET:SINCE WEEK 7 DROPPED|DOWNSCROLL:NEVER HEARD OF IT|WE ACTUALLY FUCKING:UPDATED IT|YES...:WE ADDED WEEK 2|CHECK OUT THE MODS:ON LEXALOFFLE|THE MODDING SCENE:IS INSANE|I ADDED MORE:SPLASH TEXT|NOW WITH:WEEK 2|HORSE:OOH AH OOH AH|WEEK 8:NEVER HAPPENING LMAO|JINGLE:BALLS| :PROBLEM NOOB?|WE UPDATED IT:TWICE|WE NEED:MORE SPLASH TEXT|WE MADE WEEK 5:IN A DAY|GO PICO GO GO:GO PICO, YEAH|YOU CAN USE dfjk NOW:CRY ABOUT IT|dfjk IS REAL:THIS IS OFFICIAL|KEYBINDS?:WHAT?|FUNKY-US MCPUNK:HE'S FUNKING OUT HIS PUNK|WE HAVE ALL THE WEEKS NOW:YES, ACTUALLY|DID YOU KNOW JOE SWANSON SAYS:FORTNITE IN FAMILY GUY LOL\"")
-        (set! _splash "split(_splashs,\"|\")")
-        (return "split(_splash[flr(rnd(#_splash))+1],\":\")"))
+        (set! _splashs "SHOUTOUTS TO TOM FULP:LMAO|DA BABY:BIGGEST INSPIRATION|THIS GAME IS DEDICATED TO RINGO:MY FAVORITE BEATLE|THAT'S A HEALTHY LOOKING PENIS:THAT'S AN AMERICAN PENIS|pico-8 EXCLUSIVE:SPLASH TEST|REFINED TASTE IN MUSIC:IF I SAY SO MYSELF|SWAGSHIT:MONEYMONEY|RHYTHM GAMING:DEMADE|RITZ DX:REST IN PEACE LOL|nEWGROUNDS IS DOWN!:pLEASE sTAND bY ♥ |BACK THE FULL ASS GAME:NOW|NEWGROUNDS:FOREVER|RATE FIVE:PLS NO BLAM|GAME OF THE YEAR:FOREVER|STREAM CHUCKIE FINSTER:ON SPOTIFY|NEVER FORGET TO:PRAY TO GOD|LIKE PARAPPA:BUT COOLER|HATSUNE MIKU:BIGGEST INSPIRATION|WOMEN ARE REAL:THIS IS OFFICIAL|DANCIN:FOREVER|DOPE ASS GAME:PLAYSTATION MAGAZINE|GO MANGO:GO MANGO|DONT PLAY RUST:WE ONLY FUNKIN'|GOODBYE:MY PENIS|HOW I ACCIDENTALLY:MADE FNF IN pico-8|YOOOOOOOOO:yooooooooo|YOU ALREADY KNOW:WE REALLY OUT HERE| :WE HAVE FUN HERE|CLOUD BASHERS:BEST RHYTHM GAME|SUPER PICKLE MILK:ITS THE SAME THING|TURNIP BOY:COMMITS FUNK EVASION|THE LAST FUNK:PIPIN' HOT|PERFECT LAWN:ONE BROWN SPOT|wEEK 7:YES ITS HERE|YOURE SO SUSSY:I KNOW YOU TOOK MY FORTNITE CARD|$19 FORTNITE CARD:WHO WANTS IT?|DARNELL FOR PRESIDENT!:HE STILL HAS 5 YEARS TO LIVE|THAT'LL BE 15 DOLLARS:YOU ARE THE PRESIDENT| :NAME A WOMAN|FUCKIN' STEAK BABY:YEAH|NINJAMUFFIN'S BEEN REAL QUIET:SINCE WEEK 7 DROPPED|DOWNSCROLL:NEVER HEARD OF IT|WE ACTUALLY FUCKING:UPDATED IT|YES...:WE ADDED WEEK 2|CHECK OUT THE MODS:ON LEXALOFFLE|THE MODDING SCENE:IS INSANE|I ADDED MORE:SPLASH TEXT|NOW WITH:WEEK 2|HORSE:OOH AH OOH AH|WEEK 8:NEVER HAPPENING LMAO|JINGLE:BALLS| :PROBLEM NOOB?|WE UPDATED IT:TWICE|WE NEED:MORE SPLASH TEXT|WE MADE WEEK 5:IN A DAY|GO PICO GO GO:GO PICO, YEAH|YOU CAN USE dfjk NOW:CRY ABOUT IT|dfjk IS REAL:THIS IS OFFICIAL|KEYBINDS?:WHAT?|FUNKY-US MCPUNK:HE'S FUNKING OUT HIS PUNK|WE HAVE ALL THE WEEKS NOW:YES, ACTUALLY|DID YOU KNOW JOE SWANSON SAYS:FORTNITE IN FAMILY GUY LOL")
+        (set! _splash (call split _splashs "|"))
+        (return (call split (aref _splash (+ (call flr (call rnd (len _splash))) 1)) ":")))
       (body-lines
         "function get_splash_text()"
         "\tlocal _splashs = \"SHOUTOUTS TO TOM FULP:LMAO|DA BABY:BIGGEST INSPIRATION|THIS GAME IS DEDICATED TO RINGO:MY FAVORITE BEATLE|THAT'S A HEALTHY LOOKING PENIS:THAT'S AN AMERICAN PENIS|pico-8 EXCLUSIVE:SPLASH TEST|REFINED TASTE IN MUSIC:IF I SAY SO MYSELF|SWAGSHIT:MONEYMONEY|RHYTHM GAMING:DEMADE|RITZ DX:REST IN PEACE LOL|nEWGROUNDS IS DOWN!:pLEASE sTAND bY ♥ |BACK THE FULL ASS GAME:NOW|NEWGROUNDS:FOREVER|RATE FIVE:PLS NO BLAM|GAME OF THE YEAR:FOREVER|STREAM CHUCKIE FINSTER:ON SPOTIFY|NEVER FORGET TO:PRAY TO GOD|LIKE PARAPPA:BUT COOLER|HATSUNE MIKU:BIGGEST INSPIRATION|WOMEN ARE REAL:THIS IS OFFICIAL|DANCIN:FOREVER|DOPE ASS GAME:PLAYSTATION MAGAZINE|GO MANGO:GO MANGO|DONT PLAY RUST:WE ONLY FUNKIN'|GOODBYE:MY PENIS|HOW I ACCIDENTALLY:MADE FNF IN pico-8|YOOOOOOOOO:yooooooooo|YOU ALREADY KNOW:WE REALLY OUT HERE| :WE HAVE FUN HERE|CLOUD BASHERS:BEST RHYTHM GAME|SUPER PICKLE MILK:ITS THE SAME THING|TURNIP BOY:COMMITS FUNK EVASION|THE LAST FUNK:PIPIN' HOT|PERFECT LAWN:ONE BROWN SPOT|wEEK 7:YES ITS HERE|YOURE SO SUSSY:I KNOW YOU TOOK MY FORTNITE CARD|$19 FORTNITE CARD:WHO WANTS IT?|DARNELL FOR PRESIDENT!:HE STILL HAS 5 YEARS TO LIVE|THAT'LL BE 15 DOLLARS:YOU ARE THE PRESIDENT| :NAME A WOMAN|FUCKIN' STEAK BABY:YEAH|NINJAMUFFIN'S BEEN REAL QUIET:SINCE WEEK 7 DROPPED|DOWNSCROLL:NEVER HEARD OF IT|WE ACTUALLY FUCKING:UPDATED IT|YES...:WE ADDED WEEK 2|CHECK OUT THE MODS:ON LEXALOFFLE|THE MODDING SCENE:IS INSANE|I ADDED MORE:SPLASH TEXT|NOW WITH:WEEK 2|HORSE:OOH AH OOH AH|WEEK 8:NEVER HAPPENING LMAO|JINGLE:BALLS| :PROBLEM NOOB?|WE UPDATED IT:TWICE|WE NEED:MORE SPLASH TEXT|WE MADE WEEK 5:IN A DAY|GO PICO GO GO:GO PICO, YEAH|YOU CAN USE dfjk NOW:CRY ABOUT IT|dfjk IS REAL:THIS IS OFFICIAL|KEYBINDS?:WHAT?|FUNKY-US MCPUNK:HE'S FUNKING OUT HIS PUNK|WE HAVE ALL THE WEEKS NOW:YES, ACTUALLY|DID YOU KNOW JOE SWANSON SAYS:FORTNITE IN FAMILY GUY LOL\""
         "\tlocal _splash = split(_splashs,\"|\")"
         "\treturn split(_splash[flr(rnd(#_splash))+1],\":\")"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (i) #:returns ()
       (name fade0)
       (params (i))
+      (returns ())
       (line-range (255 261))
       (api-calls (flr pal))
       (called-functions ())
       (structured-ast
         (for-loop "c=0,15")
-        (if-cond "flr(i+1"))
+        (if-cond (call flr (+ i 1))))
       (decompiled-pseudo-code
-        (for-range c "0" "15")
-        (when "flr(i+1)>=16")
-        (call pal "c,0,1")
-        (call pal "c,fadetable0[c+1][flr(i+1)],1"))
+        (for-range c 0 15 (if (>= (call flr (+ i 1)) 16) (then (call pal c 0 1)) (else (call pal c (aref (aref fadetable0 (+ c 1)) (call flr (+ i 1))) 1)))))
       (body-lines
         "function fade0(i)"
         "for c=0,15 do"
@@ -359,20 +339,18 @@
         "else"
         "pal(c,fadetable0[c+1][flr(i+1)],1)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (i) #:returns ()
       (name fade1)
       (params (i))
+      (returns ())
       (line-range (285 291))
       (api-calls (flr pal))
       (called-functions ())
       (structured-ast
         (for-loop "c=0,15")
-        (if-cond "flr(i+1"))
+        (if-cond (call flr (+ i 1))))
       (decompiled-pseudo-code
-        (for-range c "0" "15")
-        (when "flr(i+1)>=16")
-        (call pal "c,7,1")
-        (call pal "c,fadetable1[c+1][flr(i+1)],1"))
+        (for-range c 0 15 (if (>= (call flr (+ i 1)) 16) (then (call pal c 7 1)) (else (call pal c (aref (aref fadetable1 (+ c 1)) (call flr (+ i 1))) 1)))))
       (body-lines
         "function fade1(i)"
         " for c=0,15 do"
@@ -381,22 +359,17 @@
         "  else"
         "      pal(c,fadetable1[c+1][flr(i+1)],1)"
         "     end"))
-    (def-pico-function
+    (def-pico-function #:params (_x _y) #:returns ()
       (name draw_girlfriend)
       (params (_x _y))
+      (returns ())
       (line-range (296 305))
       (api-calls (flr sspr))
       (called-functions ())
       (structured-ast
-        (if-cond "flr(step/(inc*4"))
+        (if-cond (call flr (/ step (* inc 4)))))
       (decompiled-pseudo-code
-        (when "flr(step/(inc*4))%2==0")
-        (call sspr "2,95,13,15,_x+30,_y+31")
-        (call sspr "2,95,13,15,_x-12,_y+31,12,15,true")
-        (call sspr "0,0,30,46,_x,_y")
-        (call sspr "15,95,12,15,_x+30,_y+31")
-        (call sspr "15,95,12,15,_x-12+1,_y+31,11,15,true")
-        (call sspr "0,46,30,47,_x,_y-1"))
+        (if (== (modulo (call flr (/ step (* inc 4))) 2) 0) (then (call sspr 2 95 13 15 (+ _x 30) (+ _y 31)) (call sspr 2 95 13 15 (- _x 12) (+ _y 31) 12 15 #t) (call sspr 0 0 30 46 _x _y)) (else (call sspr 15 95 12 15 (+ _x 30) (+ _y 31)) (call sspr 15 95 12 15 (+ (- _x 12) 1) (+ _y 31) 11 15 #t) (call sspr 0 46 30 47 _x (- _y 1)))))
       (body-lines
         "function draw_girlfriend(_x,_y)"
         "\tif flr(step/(inc*4))%2==0 then"
@@ -408,21 +381,17 @@
         "\t\tsspr(15,95,12,15,_x-12+1,_y+31,11,15,true)"
         "\t\tsspr(0,46,30,47,_x,_y-1)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (_id _x _y) #:returns ()
       (name draw_logo)
       (params (_id _x _y))
+      (returns ())
       (line-range (310 317))
       (api-calls (sspr))
       (called-functions ())
       (structured-ast
-        (if-cond "_id == 0"))
+        (if-cond (== _id 0)))
       (decompiled-pseudo-code
-        (when "_id == 0")
-        (call sspr "58,0,70,42,_x-35,_y")
-        (when "_id == 1")
-        (call sspr "57,43,71,42,_x-35,_y")
-        (when "_id == 2")
-        (call sspr "58,86,70,43,_x-35,_y"))
+        (when (== _id 0) (call sspr 58 0 70 42 (- _x 35) _y) (when (== _id 1) (call sspr 57 43 71 42 (- _x 35) _y) (when (== _id 2) (call sspr 58 86 70 43 (- _x 35) _y)))))
       (body-lines
         "function draw_logo(_id,_x,_y)"
         "\tif _id == 0 then"
@@ -434,69 +403,69 @@
         "\tend")))
   (lifted-pico8-assets
     (gfx-sprites
-      (def-pico-sprite #:id 0 #:grid (0 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999992" "99999924" "9999994f" "99929944" "99929224"))
-      (def-pico-sprite #:id 1 #:grid (1 0) #:nonzero-pixels 64 #:rows ("99992222" "99999242" "92222224" "44444444" "4444444f" "f44ff44f" "44f4f4f4" "44444444"))
-      (def-pico-sprite #:id 2 #:grid (2 0) #:nonzero-pixels 64 #:rows ("99999999" "22299999" "44442999" "44f44299" "44f44499" "ff444429" "44444429" "44444429"))
-      (def-pico-sprite #:id 3 #:grid (3 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
-      (def-pico-sprite #:id 4 #:grid (4 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
-      (def-pico-sprite #:id 5 #:grid (5 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
-      (def-pico-sprite #:id 6 #:grid (6 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
-      (def-pico-sprite #:id 7 #:grid (7 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999911" "99999911"))
-      (def-pico-sprite #:id 8 #:grid (8 0) #:nonzero-pixels 52 #:rows ("99999999" "99999911" "99911100" "99100028" "91028888" "10288888" "10288888" "10888000"))
-      (def-pico-sprite #:id 9 #:grid (9 0) #:nonzero-pixels 33 #:rows ("11111199" "00000011" "88808001" "88002000" "80808080" "88002000" "88208002" "82000008"))
-      (def-pico-sprite #:id 10 #:grid (10 0) #:nonzero-pixels 45 #:rows ("99999999" "99999999" "11119991" "00011111" "00000000" "88202800" "88808882" "80808008"))
-      (def-pico-sprite #:id 11 #:grid (11 0) #:nonzero-pixels 39 #:rows ("99991199" "11110019" "00010801" "08800801" "08800280" "08800080" "02808808" "80888808"))
-      (def-pico-sprite #:id 12 #:grid (12 0) #:nonzero-pixels 42 #:rows ("91191911" "91191111" "99111111" "11000000" "10288200" "00888000" "00888000" "00882082"))
-      (def-pico-sprite #:id 13 #:grid (13 0) #:nonzero-pixels 43 #:rows ("99999111" "19911100" "11110000" "00008880" "02208880" "28820280" "88882080" "08888080"))
-      (def-pico-sprite #:id 14 #:grid (14 0) #:nonzero-pixels 47 #:rows ("11119999" "00001119" "88820001" "28888820" "00088882" "88088888" "88088888" "88088000"))
-      (def-pico-sprite #:id 15 #:grid (15 0) #:nonzero-pixels 61 #:rows ("99999999" "99999999" "99999999" "11999999" "01999999" "01999999" "01999999" "11999999"))
-      (def-pico-sprite #:id 16 #:grid (0 1) #:nonzero-pixels 63 #:rows ("99944244" "99924242" "99992222" "99999222" "99999224" "99999244" "99999942" "99999940"))
-      (def-pico-sprite #:id 17 #:grid (1 1) #:nonzero-pixels 58 #:rows ("44444444" "224442ee" "2e24e220" "2e00ee40" "2ee0eff4" "2ef4ffff" "efff2082" "effff88f"))
-      (def-pico-sprite #:id 18 #:grid (2 1) #:nonzero-pixels 64 #:rows ("44444229" "244ee429" "e22fe242" "2e2f2222" "f4222249" "f4424442" "f2244444" "f4244444"))
-      (def-pico-sprite #:id 19 #:grid (3 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "29999999" "99999999" "99999999" "92999999" "42999999" "29999999"))
-      (def-pico-sprite #:id 20 #:grid (4 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
-      (def-pico-sprite #:id 21 #:grid (5 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
-      (def-pico-sprite #:id 22 #:grid (6 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
-      (def-pico-sprite #:id 23 #:grid (7 1) #:nonzero-pixels 60 #:rows ("99999991" "99999911" "99999111" "99999911" "99999111" "99999100" "99991028" "99991088"))
-      (def-pico-sprite #:id 24 #:grid (8 1) #:nonzero-pixels 47 #:rows ("10888880" "10888880" "00888008" "02888028" "08888088" "28888088" "88888082" "88888000"))
-      (def-pico-sprite #:id 25 #:grid (9 1) #:nonzero-pixels 36 #:rows ("00000008" "82088028" "88088088" "02088088" "00880088" "00820000" "00006777" "67777777"))
-      (def-pico-sprite #:id 26 #:grid (10 1) #:nonzero-pixels 34 #:rows ("20808000" "00808208" "08808888" "88208888" "82028808" "00008000" "76000000" "77000677"))
-      (def-pico-sprite #:id 27 #:grid (11 1) #:nonzero-pixels 37 #:rows ("80882028" "80880888" "80880288" "80880088" "20282088" "00022028" "00000000" "60067600"))
-      (def-pico-sprite #:id 28 #:grid (12 1) #:nonzero-pixels 35 #:rows ("20880288" "80880082" "88880200" "88880808" "08880802" "00820800" "00000820" "06760000"))
-      (def-pico-sprite #:id 29 #:grid (13 1) #:nonzero-pixels 31 #:rows ("08088088" "08088088" "08000088" "88088080" "88008020" "88822000" "22000000" "00077000"))
-      (def-pico-sprite #:id 30 #:grid (14 1) #:nonzero-pixels 40 #:rows ("88088011" "88088201" "88088801" "88088800" "28088880" "22028820" "00002800" "67600000"))
-      (def-pico-sprite #:id 31 #:grid (15 1) #:nonzero-pixels 55 #:rows ("19999999" "99999999" "19999999" "11111999" "00000199" "06760199" "77760199" "67701199")))
+      (def-pico-sprite #:id #x00 #:grid (0 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999992" "99999924" "9999994f" "99929944" "99929224"))
+      (def-pico-sprite #:id #x01 #:grid (1 0) #:nonzero-pixels 64 #:rows ("99992222" "99999242" "92222224" "44444444" "4444444f" "f44ff44f" "44f4f4f4" "44444444"))
+      (def-pico-sprite #:id #x02 #:grid (2 0) #:nonzero-pixels 64 #:rows ("99999999" "22299999" "44442999" "44f44299" "44f44499" "ff444429" "44444429" "44444429"))
+      (def-pico-sprite #:id #x03 #:grid (3 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
+      (def-pico-sprite #:id #x04 #:grid (4 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
+      (def-pico-sprite #:id #x05 #:grid (5 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
+      (def-pico-sprite #:id #x06 #:grid (6 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
+      (def-pico-sprite #:id #x07 #:grid (7 0) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999911" "99999911"))
+      (def-pico-sprite #:id #x08 #:grid (8 0) #:nonzero-pixels 52 #:rows ("99999999" "99999911" "99911100" "99100028" "91028888" "10288888" "10288888" "10888000"))
+      (def-pico-sprite #:id #x09 #:grid (9 0) #:nonzero-pixels 33 #:rows ("11111199" "00000011" "88808001" "88002000" "80808080" "88002000" "88208002" "82000008"))
+      (def-pico-sprite #:id #x0A #:grid (10 0) #:nonzero-pixels 45 #:rows ("99999999" "99999999" "11119991" "00011111" "00000000" "88202800" "88808882" "80808008"))
+      (def-pico-sprite #:id #x0B #:grid (11 0) #:nonzero-pixels 39 #:rows ("99991199" "11110019" "00010801" "08800801" "08800280" "08800080" "02808808" "80888808"))
+      (def-pico-sprite #:id #x0C #:grid (12 0) #:nonzero-pixels 42 #:rows ("91191911" "91191111" "99111111" "11000000" "10288200" "00888000" "00888000" "00882082"))
+      (def-pico-sprite #:id #x0D #:grid (13 0) #:nonzero-pixels 43 #:rows ("99999111" "19911100" "11110000" "00008880" "02208880" "28820280" "88882080" "08888080"))
+      (def-pico-sprite #:id #x0E #:grid (14 0) #:nonzero-pixels 47 #:rows ("11119999" "00001119" "88820001" "28888820" "00088882" "88088888" "88088888" "88088000"))
+      (def-pico-sprite #:id #x0F #:grid (15 0) #:nonzero-pixels 61 #:rows ("99999999" "99999999" "99999999" "11999999" "01999999" "01999999" "01999999" "11999999"))
+      (def-pico-sprite #:id #x10 #:grid (0 1) #:nonzero-pixels 63 #:rows ("99944244" "99924242" "99992222" "99999222" "99999224" "99999244" "99999942" "99999940"))
+      (def-pico-sprite #:id #x11 #:grid (1 1) #:nonzero-pixels 58 #:rows ("44444444" "224442ee" "2e24e220" "2e00ee40" "2ee0eff4" "2ef4ffff" "efff2082" "effff88f"))
+      (def-pico-sprite #:id #x12 #:grid (2 1) #:nonzero-pixels 64 #:rows ("44444229" "244ee429" "e22fe242" "2e2f2222" "f4222249" "f4424442" "f2244444" "f4244444"))
+      (def-pico-sprite #:id #x13 #:grid (3 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "29999999" "99999999" "99999999" "92999999" "42999999" "29999999"))
+      (def-pico-sprite #:id #x14 #:grid (4 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
+      (def-pico-sprite #:id #x15 #:grid (5 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
+      (def-pico-sprite #:id #x16 #:grid (6 1) #:nonzero-pixels 64 #:rows ("99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999" "99999999"))
+      (def-pico-sprite #:id #x17 #:grid (7 1) #:nonzero-pixels 60 #:rows ("99999991" "99999911" "99999111" "99999911" "99999111" "99999100" "99991028" "99991088"))
+      (def-pico-sprite #:id #x18 #:grid (8 1) #:nonzero-pixels 47 #:rows ("10888880" "10888880" "00888008" "02888028" "08888088" "28888088" "88888082" "88888000"))
+      (def-pico-sprite #:id #x19 #:grid (9 1) #:nonzero-pixels 36 #:rows ("00000008" "82088028" "88088088" "02088088" "00880088" "00820000" "00006777" "67777777"))
+      (def-pico-sprite #:id #x1A #:grid (10 1) #:nonzero-pixels 34 #:rows ("20808000" "00808208" "08808888" "88208888" "82028808" "00008000" "76000000" "77000677"))
+      (def-pico-sprite #:id #x1B #:grid (11 1) #:nonzero-pixels 37 #:rows ("80882028" "80880888" "80880288" "80880088" "20282088" "00022028" "00000000" "60067600"))
+      (def-pico-sprite #:id #x1C #:grid (12 1) #:nonzero-pixels 35 #:rows ("20880288" "80880082" "88880200" "88880808" "08880802" "00820800" "00000820" "06760000"))
+      (def-pico-sprite #:id #x1D #:grid (13 1) #:nonzero-pixels 31 #:rows ("08088088" "08088088" "08000088" "88088080" "88008020" "88822000" "22000000" "00077000"))
+      (def-pico-sprite #:id #x1E #:grid (14 1) #:nonzero-pixels 40 #:rows ("88088011" "88088201" "88088801" "88088800" "28088880" "22028820" "00002800" "67600000"))
+      (def-pico-sprite #:id #x1F #:grid (15 1) #:nonzero-pixels 55 #:rows ("19999999" "99999999" "19999999" "11111999" "00000199" "06760199" "77760199" "67701199")))
     (gff-flags)
     (map-rows)
     (sfx-tracks
-      (def-pico-sfx #:id 0 #:editor-mode 183 #:speed 16 #:loop (0 32) #:active-notes 24)
-      (def-pico-sfx #:id 1 #:editor-mode 183 #:speed 16 #:loop (0 32) #:active-notes 23)
-      (def-pico-sfx #:id 2 #:editor-mode 1 #:speed 1 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 3 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 8)
-      (def-pico-sfx #:id 4 #:editor-mode 183 #:speed 16 #:loop (0 32) #:active-notes 13)
-      (def-pico-sfx #:id 5 #:editor-mode 1 #:speed 8 #:loop (0 0) #:active-notes 16)
-      (def-pico-sfx #:id 6 #:editor-mode 0 #:speed 16 #:loop (0 0) #:active-notes 0)
-      (def-pico-sfx #:id 7 #:editor-mode 0 #:speed 16 #:loop (0 0) #:active-notes 0)
-      (def-pico-sfx #:id 8 #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 9 #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 16)
-      (def-pico-sfx #:id 10 #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 14)
-      (def-pico-sfx #:id 11 #:editor-mode 1 #:speed 16 #:loop (0 32) #:active-notes 3)
-      (def-pico-sfx #:id 12 #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 10)
-      (def-pico-sfx #:id 13 #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 24)
-      (def-pico-sfx #:id 14 #:editor-mode 209 #:speed 16 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 15 #:editor-mode 209 #:speed 16 #:loop (0 0) #:active-notes 16)
-      (def-pico-sfx #:id 16 #:editor-mode 209 #:speed 16 #:loop (0 0) #:active-notes 26))
+      (def-pico-sfx #:id #x00 #:editor-mode 183 #:speed 16 #:loop (0 32) #:active-notes 24)
+      (def-pico-sfx #:id #x01 #:editor-mode 183 #:speed 16 #:loop (0 32) #:active-notes 23)
+      (def-pico-sfx #:id #x02 #:editor-mode 1 #:speed 1 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x03 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 8)
+      (def-pico-sfx #:id #x04 #:editor-mode 183 #:speed 16 #:loop (0 32) #:active-notes 13)
+      (def-pico-sfx #:id #x05 #:editor-mode 1 #:speed 8 #:loop (0 0) #:active-notes 16)
+      (def-pico-sfx #:id #x06 #:editor-mode 0 #:speed 16 #:loop (0 0) #:active-notes 0)
+      (def-pico-sfx #:id #x07 #:editor-mode 0 #:speed 16 #:loop (0 0) #:active-notes 0)
+      (def-pico-sfx #:id #x08 #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x09 #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 16)
+      (def-pico-sfx #:id #x0A #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 14)
+      (def-pico-sfx #:id #x0B #:editor-mode 1 #:speed 16 #:loop (0 32) #:active-notes 3)
+      (def-pico-sfx #:id #x0C #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 10)
+      (def-pico-sfx #:id #x0D #:editor-mode 1 #:speed 16 #:loop (0 0) #:active-notes 24)
+      (def-pico-sfx #:id #x0E #:editor-mode 209 #:speed 16 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x0F #:editor-mode 209 #:speed 16 #:loop (0 0) #:active-notes 16)
+      (def-pico-sfx #:id #x10 #:editor-mode 209 #:speed 16 #:loop (0 0) #:active-notes 26))
     (music-patterns
-      (def-pico-music #:pattern 0 #:flags 0 #:channels (8 0 73 9))
-      (def-pico-music #:pattern 1 #:flags 0 #:channels (12 4 77 13))
-      (def-pico-music #:pattern 2 #:flags 1 #:channels (8 0 73 9))
-      (def-pico-music #:pattern 3 #:flags 0 #:channels (8 0 73 9))
-      (def-pico-music #:pattern 4 #:flags 0 #:channels (8 0 73 9))
-      (def-pico-music #:pattern 5 #:flags 0 #:channels (12 4 77 13))
-      (def-pico-music #:pattern 6 #:flags 0 #:channels (10 1 9 80))
-      (def-pico-music #:pattern 7 #:flags 0 #:channels (10 1 9 80))
-      (def-pico-music #:pattern 8 #:flags 0 #:channels (10 1 9 80))
-      (def-pico-music #:pattern 9 #:flags 2 #:channels (10 1 9 80))))
+      (def-pico-music #:pattern #x00 #:flags 0 #:channels (8 0 73 9))
+      (def-pico-music #:pattern #x01 #:flags 0 #:channels (12 4 77 13))
+      (def-pico-music #:pattern #x02 #:flags 1 #:channels (8 0 73 9))
+      (def-pico-music #:pattern #x03 #:flags 0 #:channels (8 0 73 9))
+      (def-pico-music #:pattern #x04 #:flags 0 #:channels (8 0 73 9))
+      (def-pico-music #:pattern #x05 #:flags 0 #:channels (12 4 77 13))
+      (def-pico-music #:pattern #x06 #:flags 0 #:channels (10 1 9 80))
+      (def-pico-music #:pattern #x07 #:flags 0 #:channels (10 1 9 80))
+      (def-pico-music #:pattern #x08 #:flags 0 #:channels (10 1 9 80))
+      (def-pico-music #:pattern #x09 #:flags 2 #:channels (10 1 9 80))))
   ;; --- 5. Full Bank-by-Bank Code, Subroutines, Data & Assets ---
   (p8-sections
     (p8-section header

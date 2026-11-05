@@ -19,6 +19,10 @@
  STRUCTURED-CFG-TAGS
  structured-cfg-form?
  flatten-structured-insts
+ decode-hw-bitfield-flags
+ infer-subroutine-abi-signature
+ infer-nes-rom-memory-layout
+ infer-sm83-rom-memory-layout
  structure-subroutine-cfg
  synthesize-subroutine-pseudo-code
  lift-nes-state-machines-and-idioms
@@ -215,6 +219,93 @@
     'WAVE_RAM_8 'WAVE_RAM_9 'WAVE_RAM_A 'WAVE_RAM_B
     'WAVE_RAM_C 'WAVE_RAM_D 'WAVE_RAM_E 'WAVE_RAM_F)))
 
+(define (inst-flags inst)
+  (let loop ([rem (if (and (pair? inst) (pair? (cdr inst)) (pair? (cddr inst)))
+                      (cdddr inst)
+                      '())])
+    (match rem
+      [(list* '#:flags fl _) fl]
+      [(cons _ rest) (loop rest)]
+      ['() #f])))
+
+(define (mirror-or-mmio-sym? s)
+  (and (symbol? s)
+       (or (set-member? ALL-HW-MMIO-SYMS s)
+           (regexp-match? #px"(?:_mirror_|_state_|^zp_ptr_)" (symbol->string s)))))
+
+;; Decode an 8-bit hardware bitmask written to PPUCTRL, PPUMASK, LCDC, or STAT into symbolic flags
+(define (decode-hw-bitfield-flags reg-sym mask)
+  (and (symbol? reg-sym)
+       (exact-integer? mask)
+       (<= 0 mask #xFF)
+       (let* ([s-str (symbol->string reg-sym)]
+              [canon-reg
+               (cond
+                 [(or (eq? reg-sym 'PPUCTRL) (string-prefix? s-str "ppuctrl_mirror_")) 'PPUCTRL]
+                 [(or (eq? reg-sym 'PPUMASK) (string-prefix? s-str "ppumask_mirror_")) 'PPUMASK]
+                 [(or (eq? reg-sym 'LCDC)    (string-prefix? s-str "lcdc_mirror_"))    'LCDC]
+                 [(or (eq? reg-sym 'STAT)    (string-prefix? s-str "stat_mirror_"))    'STAT]
+                 [else #f])])
+         (case canon-reg
+           [(PPUCTRL)
+            (if (= mask 0)
+                '(PPUCTRL_CLEAR)
+                (filter
+                 values
+                 (list (and (bitwise-bit-set? mask 7) 'NMI_ENABLE)
+                       (and (bitwise-bit-set? mask 6) 'PPU_MASTER_EXT)
+                       (and (bitwise-bit-set? mask 5) 'SPRITE_8X16)
+                       (and (bitwise-bit-set? mask 4) 'BG_PATTERN_1000)
+                       (and (bitwise-bit-set? mask 3) 'SPRITE_PATTERN_1000)
+                       (and (bitwise-bit-set? mask 2) 'VRAM_INC_32)
+                       (case (bitwise-and mask #x03)
+                         [(1) 'NAMETABLE_2400]
+                         [(2) 'NAMETABLE_2800]
+                         [(3) 'NAMETABLE_2C00]
+                         [else #f]))))]
+           [(PPUMASK)
+            (if (= mask 0)
+                '(RENDER_DISABLE)
+                (filter
+                 values
+                 (list (and (bitwise-bit-set? mask 7) 'EMPHASIZE_BLUE)
+                       (and (bitwise-bit-set? mask 6) 'EMPHASIZE_GREEN)
+                       (and (bitwise-bit-set? mask 5) 'EMPHASIZE_RED)
+                       (and (bitwise-bit-set? mask 4) 'SHOW_SPRITES)
+                       (and (bitwise-bit-set? mask 3) 'SHOW_BG)
+                       (and (bitwise-bit-set? mask 2) 'SHOW_SPRITES_LEFT8)
+                       (and (bitwise-bit-set? mask 1) 'SHOW_BG_LEFT8)
+                       (and (bitwise-bit-set? mask 0) 'GREYSCALE))))]
+           [(LCDC)
+            (if (= mask 0)
+                '(LCD_DISABLE)
+                (filter
+                 values
+                 (list (and (bitwise-bit-set? mask 7) 'LCD_ENABLE)
+                       (and (bitwise-bit-set? mask 6) 'WIN_TILEMAP_9C00)
+                       (and (bitwise-bit-set? mask 5) 'WIN_ENABLE)
+                       (and (bitwise-bit-set? mask 4) 'BG_TILE_8000)
+                       (and (bitwise-bit-set? mask 3) 'BG_TILEMAP_9C00)
+                       (and (bitwise-bit-set? mask 2) 'OBJ_8X16)
+                       (and (bitwise-bit-set? mask 1) 'OBJ_ENABLE)
+                       (and (bitwise-bit-set? mask 0) 'BG_WIN_ENABLE))))]
+           [(STAT)
+            (if (= mask 0)
+                '(STAT_INT_DISABLE)
+                (filter
+                 values
+                 (list (and (bitwise-bit-set? mask 6) 'LYC_INT_ENABLE)
+                       (and (bitwise-bit-set? mask 5) 'OAM_INT_ENABLE)
+                       (and (bitwise-bit-set? mask 4) 'VBLANK_INT_ENABLE)
+                       (and (bitwise-bit-set? mask 3) 'HBLANK_INT_ENABLE)
+                       (and (bitwise-bit-set? mask 2) 'LYC_EQUAL_FLAG)
+                       (case (bitwise-and mask #x03)
+                         [(1) 'MODE_VBLANK]
+                         [(2) 'MODE_OAM]
+                         [(3) 'MODE_VRAM]
+                         [else #f]))))]
+           [else #f]))))
+
 (define (hex2-str v)
   (string-upcase (~r (bitwise-and #xFF v) #:base 16 #:min-width 2 #:pad-string "0")))
 
@@ -222,13 +313,13 @@
   (define mode (inst-mode inst))
   (define operand (or (inst-operand inst) 0))
   (define s (inst-sym inst))
-  (define mmio-s (and s (set-member? ALL-HW-MMIO-SYMS s) s))
+  (define mmio-s (and s (mirror-or-mmio-sym? s) s))
   (case mode
     [(#:imm) operand]
     [(#:acc) 'A]
-    [(#:zp)  `(zp ,operand)]
-    [(#:zpx) `(aref zp ,operand X)]
-    [(#:zpy) `(aref zp ,operand Y)]
+    [(#:zp)  (or mmio-s `(zp ,operand))]
+    [(#:zpx) (if mmio-s `(aref ,mmio-s X) `(aref zp ,operand X))]
+    [(#:zpy) (if mmio-s `(aref ,mmio-s Y) `(aref zp ,operand Y))]
     [(#:indx)
      `(deref-indx ,(string->symbol (format "zp_ptr_~a" (hex2-str operand))) X)]
     [(#:indy)
@@ -645,7 +736,7 @@
                     [(and (<= 2 span-len 4)
                           (return-inst? prev-inst arch)
                           (range-unclaimed? claimed i end-idx))
-                     (define c-sym (branch-cond-sym mnem))
+                     (define c-sym (branch-neg-cond-sym mnem))
                      (define c-expr (infer-branch-cond-expr ivec i #t arch))
                      (define form
                        `(guard-return
@@ -792,16 +883,79 @@
       (take forms (sub1 (length forms)))
       forms))
 
+(define ALL-PSEUDO-REGS '(A X Y B C D E H L BC DE HL))
+
 ;; Synthesize folded high-level `(decompiled-pseudo-code <stmt> ...)` from structured CFG & instructions
 (define (synthesize-subroutine-pseudo-code structured-body #:arch [arch 'mos6502])
-  (define regs (make-hasheq))
-  (for ([r (in-list '(A X Y B C D E H L BC DE HL))])
-    (hash-set! regs r r))
+  (define root-regs (make-hasheq))
+  (for ([r (in-list ALL-PSEUDO-REGS)])
+    (hash-set! root-regs r r))
+  (define root-dirty (mutable-seteq))
 
-  (define (fold-forms forms)
+  (define (fallback-flag-or-nop-stmts children)
+    (define flag-stmts
+      (for/fold ([acc '()])
+                ([ins (in-list children)]
+                 #:when (pair? ins))
+        (case (car ins)
+          [(SEC SCF) (cons '(set! Carry 1) acc)]
+          [(CLC)     (cons '(set! Carry 0) acc)]
+          [(CCF)     (cons '(set! Carry (bit-xor Carry 1)) acc)]
+          [(SEI DI)  (cons '(disable-interrupts!) acc)]
+          [(CLI EI)  (cons '(enable-interrupts!) acc)]
+          [(CLD)     (cons '(clear-decimal!) acc)]
+          [(SED)     (cons '(set-decimal!) acc)]
+          [(PUSH_AF) (cons '(push! AF) acc)]
+          [(PUSH_BC) (cons '(push! BC) acc)]
+          [(PUSH_DE) (cons '(push! DE) acc)]
+          [(PUSH_HL) (cons '(push! HL) acc)]
+          [(POP_AF)  (cons '(set! AF (pop!)) acc)]
+          [(POP_BC)  (cons '(set! BC (pop!)) acc)]
+          [(POP_DE)  (cons '(set! DE (pop!)) acc)]
+          [(POP_HL)  (cons '(set! HL (pop!)) acc)]
+          [else acc])))
+    (if (pair? flag-stmts)
+        (reverse flag-stmts)
+        '((nop))))
+
+  (define (ensure-non-empty-branch-stmts raw-stmts children regs-before regs-branch dirty-branch)
+    (define flushed-regs '())
+    (define extra-reg-stmts
+      (for/fold ([acc '()])
+                ([r (in-list ALL-PSEUDO-REGS)])
+        (define v-before (hash-ref regs-before r r))
+        (define v-branch (hash-ref regs-branch r r))
+        (if (or (set-member? dirty-branch r)
+                (and (null? raw-stmts)
+                     (not (equal? v-branch v-before))))
+            (begin
+              (set! flushed-regs (cons r flushed-regs))
+              (cons `(set! ,r ,v-branch) acc))
+            acc)))
+    (define combined (append raw-stmts (reverse extra-reg-stmts)))
+    (values (if (pair? combined)
+                combined
+                (fallback-flag-or-nop-stmts children))
+            (reverse flushed-regs)))
+
+  (define (fold-forms forms regs dirty)
     (define stmts '())
     (define (emit! s)
       (set! stmts (cons s stmts)))
+    (define (emit-store! dst val inst)
+      (define eff-mask
+        (match val
+          [(? exact-integer? m) m]
+          [(list 'bit-ior _ (? exact-integer? m)) m]
+          [_ #f]))
+      (define flags
+        (or (inst-flags inst)
+            (and (symbol? dst)
+                 eff-mask
+                 (decode-hw-bitfield-flags dst eff-mask))))
+      (if (and flags (pair? flags))
+          (emit! `(set! ,dst ,val #:flags ,flags))
+          (emit! `(set! ,dst ,val))))
 
     (for ([f (in-list forms)])
       (when (pair? f)
@@ -819,27 +973,79 @@
            (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
                              (extract-kw-arg f '#:cond 'not-zero)))
            (define children (drop-last-if-branch (strip-leading-kw-args (cdr f)) arch))
-           (define body-stmts (fold-forms children))
+           (define regs-before (hash-copy regs))
+           (define regs-loop   (hash-copy regs))
+           (define dirty-loop  (mutable-seteq))
+           (define raw-body    (fold-forms children regs-loop dirty-loop))
+           (define-values (body-stmts _flushed)
+             (ensure-non-empty-branch-stmts raw-body children regs-before regs-loop dirty-loop))
+           (for ([r (in-list ALL-PSEUDO-REGS)])
+             (when (or (set-member? dirty-loop r)
+                       (not (equal? (hash-ref regs-loop r r) (hash-ref regs-before r r))))
+               (hash-set! regs r r)
+               (set-remove! dirty r)))
            (emit! `(loop-counted #:step ,step #:while ,cexpr ,@body-stmts))]
 
           [(eq? tag 'do-while-loop)
            (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
                              (extract-kw-arg f '#:cond 'not-zero)))
            (define children (drop-last-if-branch (strip-leading-kw-args (cdr f)) arch))
-           (define body-stmts (fold-forms children))
+           (define regs-before (hash-copy regs))
+           (define regs-loop   (hash-copy regs))
+           (define dirty-loop  (mutable-seteq))
+           (define raw-body    (fold-forms children regs-loop dirty-loop))
+           (define-values (body-stmts _flushed)
+             (ensure-non-empty-branch-stmts raw-body children regs-before regs-loop dirty-loop))
+           (for ([r (in-list ALL-PSEUDO-REGS)])
+             (when (or (set-member? dirty-loop r)
+                       (not (equal? (hash-ref regs-loop r r) (hash-ref regs-before r r))))
+               (hash-set! regs r r)
+               (set-remove! dirty r)))
            (emit! `(do-while #:while ,cexpr ,@body-stmts))]
 
           [(eq? tag 'guard-return)
            (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
                              (extract-kw-arg f '#:cond 'branch-cond)))
-           (emit! `(when ,cexpr (return)))]
+           (define guard-children
+             (filter (lambda (ins)
+                       (not (and (pair? ins)
+                                 (memq (car ins) '(RTS RTI RET RETI RET_NZ RET_Z RET_NC RET_C)))))
+                     (drop-first-if-branch (strip-leading-kw-args (cdr f)) arch)))
+           (define regs-guard  (hash-copy regs))
+           (define dirty-guard (mutable-seteq))
+           (define raw-guard-stmts (fold-forms guard-children regs-guard dirty-guard))
+           (define extra-guard-stmts
+             (for/list ([r (in-list ALL-PSEUDO-REGS)]
+                        #:when (set-member? dirty-guard r))
+               `(set! ,r ,(hash-ref regs-guard r r))))
+           (define guard-body-stmts (append raw-guard-stmts extra-guard-stmts))
+           (emit! `(when ,cexpr ,@guard-body-stmts (return)))]
 
           [(eq? tag 'when-branch)
            (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
                              (extract-kw-arg f '#:cond 'branch-cond)))
            (define children (drop-first-if-branch (strip-leading-kw-args (cdr f)) arch))
-           (define body-stmts (fold-forms children))
-           (emit! `(when ,cexpr ,@body-stmts))]
+           (define regs-before  (hash-copy regs))
+           (define dirty-before (set-copy dirty))
+           (define regs-branch  (hash-copy regs))
+           (define dirty-branch (mutable-seteq))
+           (define raw-body     (fold-forms children regs-branch dirty-branch))
+           (define-values (body-stmts flushed-regs)
+             (ensure-non-empty-branch-stmts raw-body children regs-before regs-branch dirty-branch))
+           ;; If a register `r` was modified inside `when-branch` to pass a value to post-branch
+           ;; code AND `r` had a pre-branch unemitted value, emit `(set! r pre-val)` before `when`!
+           (for ([r (in-list flushed-regs)])
+             (define pre-val (hash-ref regs-before r r))
+             (when (and (set-member? dirty-before r)
+                        (not (eq? pre-val r)))
+               (emit! `(set! ,r ,pre-val))))
+           (emit! `(when ,cexpr ,@body-stmts))
+           ;; Reset any register mutated inside the branch to `r` so branch expressions never leak!
+           (for ([r (in-list ALL-PSEUDO-REGS)])
+             (when (or (set-member? dirty-branch r)
+                       (not (equal? (hash-ref regs-branch r r) (hash-ref regs-before r r))))
+               (hash-set! regs r r)
+               (set-remove! dirty r)))]
 
           [(eq? tag 'if-else)
            (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
@@ -853,9 +1059,27 @@
                  '()))
            (define else-children
              (if else-form (cdr else-form) '()))
+           (define regs-before (hash-copy regs))
+           (define regs-then   (hash-copy regs))
+           (define dirty-then  (mutable-seteq))
+           (define regs-else   (hash-copy regs))
+           (define dirty-else  (mutable-seteq))
+           (define raw-then    (fold-forms then-children regs-then dirty-then))
+           (define raw-else    (fold-forms else-children regs-else dirty-else))
+           (define-values (then-stmts _f1)
+             (ensure-non-empty-branch-stmts raw-then then-children regs-before regs-then dirty-then))
+           (define-values (else-stmts _f2)
+             (ensure-non-empty-branch-stmts raw-else else-children regs-before regs-else dirty-else))
            (emit! `(if ,cexpr
-                       (then ,@(fold-forms then-children))
-                       (else ,@(fold-forms else-children))))]
+                       (then ,@then-stmts)
+                       (else ,@else-stmts)))
+           (for ([r (in-list ALL-PSEUDO-REGS)])
+             (when (or (set-member? dirty-then r)
+                       (set-member? dirty-else r)
+                       (not (equal? (hash-ref regs-then r r) (hash-ref regs-before r r)))
+                       (not (equal? (hash-ref regs-else r r) (hash-ref regs-before r r))))
+               (hash-set! regs r r)
+               (set-remove! dirty r)))]
 
           ;; Raw MOS 6502 Instructions
           [(eq? arch 'mos6502)
@@ -867,43 +1091,59 @@
              [(LDA)
               (define src (mos6502-operand->sym-expr f))
               (hash-set! regs 'A src)
+              (set-add! dirty 'A)
               (when (memq src '(PPUSTATUS PPUDATA JOY1 JOY2))
-                (emit! `(io-read! ,src)))]
+                (emit! `(io-read! ,src))
+                (set-remove! dirty 'A))]
              [(LDX)
               (define src (mos6502-operand->sym-expr f))
               (hash-set! regs 'X src)
+              (set-remove! dirty 'X)
               (emit! `(set! X ,src))]
              [(LDY)
               (define src (mos6502-operand->sym-expr f))
               (hash-set! regs 'Y src)
+              (set-remove! dirty 'Y)
               (emit! `(set! Y ,src))]
              [(STA)
               (define dst (mos6502-operand->sym-expr f))
               (define val (hash-ref regs 'A 'A))
-              (emit! `(set! ,dst ,val))
+              (emit-store! dst val f)
+              (set-remove! dirty 'A)
               (unless (and (symbol? dst) (set-member? ALL-HW-MMIO-SYMS dst))
                 (hash-set! regs 'A dst))]
              [(STX)
               (define dst (mos6502-operand->sym-expr f))
-              (emit! `(set! ,dst ,(hash-ref regs 'X 'X)))]
+              (define val (hash-ref regs 'X 'X))
+              (emit-store! dst val f)
+              (set-remove! dirty 'X)]
              [(STY)
               (define dst (mos6502-operand->sym-expr f))
-              (emit! `(set! ,dst ,(hash-ref regs 'Y 'Y)))]
+              (define val (hash-ref regs 'Y 'Y))
+              (emit-store! dst val f)
+              (set-remove! dirty 'Y)]
              [(ADC)
-              (hash-set! regs 'A `(+ ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+              (hash-set! regs 'A `(+ ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))
+              (set-add! dirty 'A)]
              [(SBC)
-              (hash-set! regs 'A `(- ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+              (hash-set! regs 'A `(- ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))
+              (set-add! dirty 'A)]
              [(AND)
-              (hash-set! regs 'A `(bit-and ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+              (hash-set! regs 'A `(bit-and ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))
+              (set-add! dirty 'A)]
              [(ORA)
-              (hash-set! regs 'A `(bit-ior ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+              (hash-set! regs 'A `(bit-ior ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))
+              (set-add! dirty 'A)]
              [(EOR)
-              (hash-set! regs 'A `(bit-xor ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+              (hash-set! regs 'A `(bit-xor ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))
+              (set-add! dirty 'A)]
              [(ASL LSR ROL ROR)
               (define shift-op
                 (case mnem [(ASL) 'shl] [(LSR) 'shr] [(ROL) 'rol] [(ROR) 'ror]))
               (if (eq? mode '#:acc)
-                  (hash-set! regs 'A `(,shift-op ,(hash-ref regs 'A 'A) 1))
+                  (begin
+                    (hash-set! regs 'A `(,shift-op ,(hash-ref regs 'A 'A) 1))
+                    (set-add! dirty 'A))
                   (let ([dst (mos6502-operand->sym-expr f)])
                     (emit! `(,(string->symbol (format "~a!" shift-op)) ,dst 1))))]
              [(INC)
@@ -912,39 +1152,54 @@
               (emit! `(-= ,(mos6502-operand->sym-expr f) 1))]
              [(INX)
               (hash-set! regs 'X 'X)
+              (set-remove! dirty 'X)
               (emit! '(+= X 1))]
              [(DEX)
               (hash-set! regs 'X 'X)
+              (set-remove! dirty 'X)
               (emit! '(-= X 1))]
              [(INY)
               (hash-set! regs 'Y 'Y)
+              (set-remove! dirty 'Y)
               (emit! '(+= Y 1))]
              [(DEY)
               (hash-set! regs 'Y 'Y)
+              (set-remove! dirty 'Y)
               (emit! '(-= Y 1))]
              [(TAX)
               (define v (hash-ref regs 'A 'A))
               (hash-set! regs 'X v)
+              (set-remove! dirty 'A)
+              (set-remove! dirty 'X)
               (emit! `(set! X ,v))]
              [(TAY)
               (define v (hash-ref regs 'A 'A))
               (hash-set! regs 'Y v)
+              (set-remove! dirty 'A)
+              (set-remove! dirty 'Y)
               (emit! `(set! Y ,v))]
              [(TXA)
-              (hash-set! regs 'A (hash-ref regs 'X 'X))]
+              (hash-set! regs 'A (hash-ref regs 'X 'X))
+              (set-add! dirty 'A)]
              [(TYA)
-              (hash-set! regs 'A (hash-ref regs 'Y 'Y))]
+              (hash-set! regs 'A (hash-ref regs 'Y 'Y))
+              (set-add! dirty 'A)]
              [(TXS)
+              (set-remove! dirty 'X)
               (emit! `(set! SP ,(hash-ref regs 'X 'X)))]
              [(TSX)
-              (hash-set! regs 'X 'SP)]
+              (hash-set! regs 'X 'SP)
+              (set-add! dirty 'X)]
              [(PHA)
+              (set-remove! dirty 'A)
               (emit! `(push! ,(hash-ref regs 'A 'A)))]
              [(PLA)
-              (hash-set! regs 'A '(pop!))]
+              (hash-set! regs 'A '(pop!))
+              (set-add! dirty 'A)]
              [(JSR)
               (emit! `(call ,(or sym op)))
-              (hash-set! regs 'A 'A)]
+              (hash-set! regs 'A 'A)
+              (set-remove! dirty 'A)]
              [(JMP)
               (if (eq? mode '#:ind)
                   (emit! `(jump-indirect (deref ,op)))
@@ -965,50 +1220,65 @@
            (define op   (or (inst-operand f) 0))
            (define sym  (inst-sym f))
            (cond
-             [(eq? mnem 'LD_A)      (hash-set! regs 'A op)]
-             [(eq? mnem 'LD_B)      (hash-set! regs 'B op) (emit! `(set! B ,op))]
-             [(eq? mnem 'LD_C)      (hash-set! regs 'C op) (emit! `(set! C ,op))]
-             [(eq? mnem 'LD_D)      (hash-set! regs 'D op) (emit! `(set! D ,op))]
-             [(eq? mnem 'LD_E)      (hash-set! regs 'E op) (emit! `(set! E ,op))]
-             [(eq? mnem 'LD_H)      (hash-set! regs 'H op) (emit! `(set! H ,op))]
-             [(eq? mnem 'LD_L)      (hash-set! regs 'L op) (emit! `(set! L ,op))]
-             [(eq? mnem 'LD_BC)     (hash-set! regs 'BC op) (emit! `(set! BC ,op))]
-             [(eq? mnem 'LD_DE)     (hash-set! regs 'DE op) (emit! `(set! DE ,op))]
-             [(eq? mnem 'LD_HL)     (hash-set! regs 'HL (or sym op)) (emit! `(set! HL ,(or sym op)))]
+             [(eq? mnem 'LD_A)      (hash-set! regs 'A op) (set-add! dirty 'A)]
+             [(eq? mnem 'LD_B)      (hash-set! regs 'B op) (set-remove! dirty 'B) (emit! `(set! B ,op))]
+             [(eq? mnem 'LD_C)      (hash-set! regs 'C op) (set-remove! dirty 'C) (emit! `(set! C ,op))]
+             [(eq? mnem 'LD_D)      (hash-set! regs 'D op) (set-remove! dirty 'D) (emit! `(set! D ,op))]
+             [(eq? mnem 'LD_E)      (hash-set! regs 'E op) (set-remove! dirty 'E) (emit! `(set! E ,op))]
+             [(eq? mnem 'LD_H)      (hash-set! regs 'H op) (set-remove! dirty 'H) (emit! `(set! H ,op))]
+             [(eq? mnem 'LD_L)      (hash-set! regs 'L op) (set-remove! dirty 'L) (emit! `(set! L ,op))]
+             [(eq? mnem 'LD_BC)     (hash-set! regs 'BC op) (set-remove! dirty 'BC) (emit! `(set! BC ,op))]
+             [(eq? mnem 'LD_DE)     (hash-set! regs 'DE op) (set-remove! dirty 'DE) (emit! `(set! DE ,op))]
+             [(eq? mnem 'LD_HL)     (hash-set! regs 'HL (or sym op)) (set-remove! dirty 'HL) (emit! `(set! HL ,(or sym op)))]
              [(eq? mnem 'LD_SP)     (emit! `(set! SP ,op))]
-             [(eq? mnem 'XOR_A_A)   (hash-set! regs 'A 0)]
+             [(eq? mnem 'XOR_A_A)   (hash-set! regs 'A 0) (set-add! dirty 'A)]
              [(eq? mnem 'LDH_OUT)
-              (emit! `(set! ,(sm83-io-or-mem-sym f) ,(hash-ref regs 'A 'A)))]
+              (emit-store! (sm83-io-or-mem-sym f) (hash-ref regs 'A 'A) f)
+              (set-remove! dirty 'A)]
              [(eq? mnem 'LDH_IN)
-              (hash-set! regs 'A (sm83-io-or-mem-sym f))]
+              (hash-set! regs 'A (sm83-io-or-mem-sym f))
+              (set-add! dirty 'A)]
              [(eq? mnem 'LDH_C_OUT)
-              (emit! `(set! (io-port C) ,(hash-ref regs 'A 'A)))]
+              (emit! `(set! (io-port C) ,(hash-ref regs 'A 'A)))
+              (set-remove! dirty 'A)]
              [(eq? mnem 'LDH_C_IN)
-              (hash-set! regs 'A '(io-port C))]
+              (hash-set! regs 'A '(io-port C))
+              (set-add! dirty 'A)]
              [(eq? mnem 'LD_A16_A)
-              (emit! `(set! ,(sm83-io-or-mem-sym f) ,(hash-ref regs 'A 'A)))]
+              (emit-store! (sm83-io-or-mem-sym f) (hash-ref regs 'A 'A) f)
+              (set-remove! dirty 'A)]
              [(eq? mnem 'LD_A_A16)
-              (hash-set! regs 'A (sm83-io-or-mem-sym f))]
+              (hash-set! regs 'A (sm83-io-or-mem-sym f))
+              (set-add! dirty 'A)]
              [(eq? mnem 'LD_HLI_A)
-              (emit! `(set! (deref HL++) ,(hash-ref regs 'A 'A)))]
+              (emit! `(set! (deref HL++) ,(hash-ref regs 'A 'A)))
+              (set-remove! dirty 'A)]
              [(eq? mnem 'LD_HLD_A)
-              (emit! `(set! (deref HL--) ,(hash-ref regs 'A 'A)))]
+              (emit! `(set! (deref HL--) ,(hash-ref regs 'A 'A)))
+              (set-remove! dirty 'A)]
              [(eq? mnem 'LD_A_HLI)
-              (hash-set! regs 'A '(deref HL++))]
+              (hash-set! regs 'A '(deref HL++))
+              (set-add! dirty 'A)]
              [(eq? mnem 'LD_A_HLD)
-              (hash-set! regs 'A '(deref HL--))]
+              (hash-set! regs 'A '(deref HL--))
+              (set-add! dirty 'A)]
              [(eq? mnem 'LD_A_DE_IND)
-              (hash-set! regs 'A '(deref DE))]
+              (hash-set! regs 'A '(deref DE))
+              (set-add! dirty 'A)]
              [(eq? mnem 'LD_A_BC_IND)
-              (hash-set! regs 'A '(deref BC))]
+              (hash-set! regs 'A '(deref BC))
+              (set-add! dirty 'A)]
              [(eq? mnem 'LD_DE_IND_A)
-              (emit! `(set! (deref DE) ,(hash-ref regs 'A 'A)))]
+              (emit! `(set! (deref DE) ,(hash-ref regs 'A 'A)))
+              (set-remove! dirty 'A)]
              [(eq? mnem 'LD_BC_IND_A)
-              (emit! `(set! (deref BC) ,(hash-ref regs 'A 'A)))]
+              (emit! `(set! (deref BC) ,(hash-ref regs 'A 'A)))
+              (set-remove! dirty 'A)]
              [(eq? mnem 'LD_HL_IND)
               (emit! `(set! (deref HL) ,op))]
              [(eq? mnem 'DAA)
               (define cur-a (hash-ref regs 'A 'A))
+              (set-add! dirty 'A)
               (match cur-a
                 [`(+ ,x ,y) (hash-set! regs 'A `(bcd+ ,x ,y))]
                 [`(- ,x ,y) (hash-set! regs 'A `(bcd- ,x ,y))]
@@ -1019,11 +1289,17 @@
                    (define src (string->symbol (third mt)))
                    (define src-val (if (eq? src 'HL-IND) '(deref HL) (hash-ref regs src src)))
                    (if (eq? dst 'HL-IND)
-                       (emit! `(set! (deref HL) ,src-val))
+                       (begin
+                         (emit! `(set! (deref HL) ,src-val))
+                         (when (symbol? src) (set-remove! dirty src)))
                        (begin
                          (hash-set! regs dst src-val)
-                         (unless (eq? dst 'A)
-                           (emit! `(set! ,dst ,src-val))))))]
+                         (if (eq? dst 'A)
+                             (set-add! dirty 'A)
+                             (begin
+                               (set-remove! dirty dst)
+                               (when (eq? src 'A) (set-remove! dirty 'A))
+                               (emit! `(set! ,dst ,src-val)))))))]
              [(regexp-match #px"^(ADD|ADC|SUB|SBC|AND|XOR|OR)_A(?:_(.+))?$" m-str)
               => (lambda (mt)
                    (define alu (second mt))
@@ -1042,16 +1318,20 @@
                        [(string=? alu "AND") 'bit-and]
                        [(string=? alu "OR")  'bit-ior]
                        [else                 'bit-xor]))
-                   (hash-set! regs 'A `(,op-sym ,cur-a ,rhs)))]
+                   (hash-set! regs 'A `(,op-sym ,cur-a ,rhs))
+                   (set-add! dirty 'A))]
              [(regexp-match #px"^(INC|DEC)_(.+)$" m-str)
               => (lambda (mt)
                    (define dir (if (string=? (second mt) "INC") '+= '-=))
                    (define r (string->symbol (third mt)))
                    (define tgt (if (or (eq? r 'HL_IND) (eq? r 'HL-IND)) '(deref HL) r))
-                   (when (symbol? tgt) (hash-set! regs tgt tgt))
+                   (when (symbol? tgt)
+                     (hash-set! regs tgt tgt)
+                     (set-remove! dirty tgt))
                    (emit! `(,dir ,tgt 1)))]
              [(regexp-match #px"^ADD_HL_(.+)$" m-str)
               => (lambda (mt)
+                   (set-remove! dirty 'HL)
                    (emit! `(+= HL ,(string->symbol (second mt)))))]
              [(regexp-match #px"^(BIT|RES|SET)_([0-7])_(.+)$" m-str)
               => (lambda (mt)
@@ -1067,7 +1347,8 @@
               (emit! `(bit-op! ,mnem))]
              [(memq mnem '(CALL CALL_NZ CALL_Z CALL_NC CALL_C))
               (emit! `(call ,(or sym op)))
-              (hash-set! regs 'A 'A)]
+              (hash-set! regs 'A 'A)
+              (set-remove! dirty 'A)]
              [(memq mnem '(RST_00 RST_08 RST_10 RST_18 RST_20 RST_28 RST_30 RST_38))
               (emit! `(rst ,(or sym mnem)))]
              [(eq? mnem 'JP)
@@ -1086,9 +1367,521 @@
 
     (reverse stmts))
 
-  (define folded (fold-forms structured-body))
+  (define folded (fold-forms structured-body root-regs root-dirty))
   `(decompiled-pseudo-code
     ,@(if (null? folded) '((nop)) folded)))
+
+;; ============================================================================
+;; 3C. Interprocedural ABI Signature Recovery (`infer-subroutine-abi-signature`)
+;;     & Whole-ROM Memory-Map / MMIO Mirror Inference
+;; ============================================================================
+
+;; Inspect a subroutine's instructions to infer:
+;;   - `params`: registers read before being written (`A`, `X`, `Y` on 6502; `A`, `BC`, `DE`, `HL` on SM83)
+;;   - `returns`: registers/flags written before return (`A`, `X`, `Y`, `Carry`, `Zero` on 6502; `A`, `HL`, `Carry`, `Zero` on SM83)
+(define (infer-subroutine-abi-signature raw-insts #:arch [arch 'mos6502] #:is-isr? [is-isr? #f])
+  (case arch
+    [(mos6502)
+     (define written (mutable-seteq))
+     (define params  '())
+     (define returns (mutable-seteq))
+     (define (read-reg! r)
+       (when (and (not is-isr?)
+                  (not (set-member? written r))
+                  (not (memq r params)))
+         (set! params (cons r params))))
+     (define (write-reg! r)
+       (set-add! written r)
+       (set-add! returns r))
+     (for ([ins (in-list raw-insts)]
+           #:when (pair? ins))
+       (define mnem (inst-mnem ins))
+       (define mode (inst-mode ins))
+       ;; Check indexed addressing mode reads first
+       (when (memq mode '(#:zpx #:absx #:indx)) (read-reg! 'X))
+       (when (memq mode '(#:zpy #:absy #:indy)) (read-reg! 'Y))
+       (case mnem
+         [(LDA) (write-reg! 'A) (set-add! returns 'Zero)]
+         [(LDX) (write-reg! 'X) (set-add! returns 'Zero)]
+         [(LDY) (write-reg! 'Y) (set-add! returns 'Zero)]
+         [(STA) (read-reg! 'A)]
+         [(STX) (read-reg! 'X)]
+         [(STY) (read-reg! 'Y)]
+         [(ADC SBC)
+          (read-reg! 'A)
+          (write-reg! 'A)
+          (set-add! returns 'Carry)
+          (set-add! returns 'Zero)]
+         [(AND ORA EOR)
+          (read-reg! 'A)
+          (write-reg! 'A)
+          (set-add! returns 'Zero)]
+         [(ASL LSR ROL ROR)
+          (when (eq? mode '#:acc)
+            (read-reg! 'A)
+            (write-reg! 'A))
+          (set-add! returns 'Carry)
+          (set-add! returns 'Zero)]
+         [(CMP) (read-reg! 'A) (set-add! returns 'Carry) (set-add! returns 'Zero)]
+         [(CPX) (read-reg! 'X) (set-add! returns 'Carry) (set-add! returns 'Zero)]
+         [(CPY) (read-reg! 'Y) (set-add! returns 'Carry) (set-add! returns 'Zero)]
+         [(BIT) (read-reg! 'A) (set-add! returns 'Zero)]
+         [(TAX) (read-reg! 'A) (write-reg! 'X)]
+         [(TAY) (read-reg! 'A) (write-reg! 'Y)]
+         [(TXA) (read-reg! 'X) (write-reg! 'A)]
+         [(TYA) (read-reg! 'Y) (write-reg! 'A)]
+         [(TXS) (read-reg! 'X)]
+         [(TSX) (write-reg! 'X)]
+         [(PHA) (read-reg! 'A)]
+         [(PLA) (write-reg! 'A)]
+         [(INX DEX) (read-reg! 'X) (write-reg! 'X) (set-add! returns 'Zero)]
+         [(INY DEY) (read-reg! 'Y) (write-reg! 'Y) (set-add! returns 'Zero)]
+         [(INC DEC) (set-add! returns 'Zero)]
+         [(SEC CLC) (set-add! returns 'Carry)]
+         [else (void)]))
+     (define ordered-params
+       (for/list ([r (in-list '(A X Y))]
+                  #:when (memq r params))
+         r))
+     (define ordered-returns
+       (if is-isr?
+           '()
+           (for/list ([r (in-list '(A X Y Carry Zero))]
+                      #:when (set-member? returns r))
+             r)))
+     (values ordered-params ordered-returns)]
+
+    [(sm83)
+     (define written (mutable-seteq))
+     (define params  '())
+     (define returns (mutable-seteq))
+     (define (read-reg! r)
+       (when (and (not is-isr?)
+                  (not (set-member? written r))
+                  (not (memq r params)))
+         (set! params (cons r params))))
+     (define (write-reg! r)
+       (set-add! written r)
+       (when (memq r '(A HL Carry Zero))
+         (set-add! returns r)))
+     (for ([ins (in-list raw-insts)]
+           #:when (pair? ins))
+       (define mnem  (inst-mnem ins))
+       (define m-str (symbol->string mnem))
+       (cond
+         ;; Ignore callee-save PUSH/POP for parameter inference
+         [(memq mnem '(PUSH_AF PUSH_BC PUSH_DE PUSH_HL POP_AF POP_BC POP_DE POP_HL))
+          (void)]
+         ;; Self-zeroing idiom `XOR A` / `SUB A` writes A without reading old A
+         [(memq mnem '(XOR_A_A SUB_A_A))
+          (write-reg! 'A)
+          (write-reg! 'Zero)]
+         [(eq? mnem 'LD_A)   (write-reg! 'A)]
+         [(memq mnem '(LD_B LD_C LD_BC)) (write-reg! 'BC)]
+         [(memq mnem '(LD_D LD_E LD_DE)) (write-reg! 'DE)]
+         [(memq mnem '(LD_H LD_L LD_HL LD_HL_SP_OFFSET)) (write-reg! 'HL)]
+         [(memq mnem '(LDH_OUT LD_A16_A)) (read-reg! 'A)]
+         [(memq mnem '(LDH_IN LD_A_A16))  (write-reg! 'A)]
+         [(eq? mnem 'LDH_C_OUT) (read-reg! 'BC) (read-reg! 'A)]
+         [(eq? mnem 'LDH_C_IN)  (read-reg! 'BC) (write-reg! 'A)]
+         [(memq mnem '(LD_HLI_A LD_HLD_A)) (read-reg! 'HL) (read-reg! 'A) (write-reg! 'HL)]
+         [(memq mnem '(LD_A_HLI LD_A_HLD)) (read-reg! 'HL) (write-reg! 'A) (write-reg! 'HL)]
+         [(eq? mnem 'LD_A_DE_IND) (read-reg! 'DE) (write-reg! 'A)]
+         [(eq? mnem 'LD_A_BC_IND) (read-reg! 'BC) (write-reg! 'A)]
+         [(eq? mnem 'LD_DE_IND_A) (read-reg! 'DE) (read-reg! 'A)]
+         [(eq? mnem 'LD_BC_IND_A) (read-reg! 'BC) (read-reg! 'A)]
+         [(eq? mnem 'LD_HL_IND)   (read-reg! 'HL)]
+         [(eq? mnem 'JP_HL)       (read-reg! 'HL)]
+         [(memq mnem '(DAA RLCA RRCA RLA RRA))
+          (read-reg! 'A) (write-reg! 'A) (write-reg! 'Carry)]
+         [(eq? mnem 'CPL) (read-reg! 'A) (write-reg! 'A)]
+         [(memq mnem '(SCF CCF RET_C RET_NC)) (write-reg! 'Carry)]
+         [(memq mnem '(RET_Z RET_NZ))         (write-reg! 'Zero)]
+         [(regexp-match #px"^LD_([BCDEHLA]|HL-IND)_([BCDEHLA]|HL-IND)$" m-str)
+          => (lambda (mt)
+               (define dst (second mt))
+               (define src (third mt))
+               (cond
+                 [(string=? src "A") (read-reg! 'A)]
+                 [(or (string=? src "B") (string=? src "C")) (read-reg! 'BC)]
+                 [(or (string=? src "D") (string=? src "E")) (read-reg! 'DE)]
+                 [(or (string=? src "H") (string=? src "L") (string=? src "HL-IND")) (read-reg! 'HL)])
+               (cond
+                 [(string=? dst "A") (write-reg! 'A)]
+                 [(or (string=? dst "B") (string=? dst "C")) (write-reg! 'BC)]
+                 [(or (string=? dst "D") (string=? dst "E")) (write-reg! 'DE)]
+                 [(or (string=? dst "H") (string=? dst "L")) (write-reg! 'HL)]
+                 [(string=? dst "HL-IND") (read-reg! 'HL)]))]
+         [(regexp-match #px"^(ADD|ADC|SUB|SBC|AND|XOR|OR|CP)_A(?:_(.+))?$" m-str)
+          => (lambda (mt)
+               (define alu (second mt))
+               (define src (third mt))
+               (read-reg! 'A)
+               (when src
+                 (cond
+                   [(or (string=? src "B") (string=? src "C")) (read-reg! 'BC)]
+                   [(or (string=? src "D") (string=? src "E")) (read-reg! 'DE)]
+                   [(or (string=? src "H") (string=? src "L") (string=? src "HL-IND")) (read-reg! 'HL)]))
+               (unless (string=? alu "CP")
+                 (write-reg! 'A))
+               (when (memq (string->symbol alu) '(ADD ADC SUB SBC CP))
+                 (write-reg! 'Carry))
+               (write-reg! 'Zero))]
+         [(regexp-match #px"^(INC|DEC)_(.+)$" m-str)
+          => (lambda (mt)
+               (define r (second mt))
+               (cond
+                 [(string=? r "A") (read-reg! 'A) (write-reg! 'A) (write-reg! 'Zero)]
+                 [(or (string=? r "B") (string=? r "C") (string=? r "BC")) (read-reg! 'BC) (write-reg! 'BC)]
+                 [(or (string=? r "D") (string=? r "E") (string=? r "DE")) (read-reg! 'DE) (write-reg! 'DE)]
+                 [(or (string=? r "H") (string=? r "L") (string=? r "HL")
+                      (string=? r "HL_IND") (string=? r "HL-IND"))
+                  (read-reg! 'HL) (write-reg! 'HL)]))]
+         [(regexp-match #px"^ADD_HL_(.+)$" m-str)
+          => (lambda (mt)
+               (define r (second mt))
+               (read-reg! 'HL)
+               (cond
+                 [(string=? r "BC") (read-reg! 'BC)]
+                 [(string=? r "DE") (read-reg! 'DE)])
+               (write-reg! 'HL)
+               (write-reg! 'Carry))]
+         [(regexp-match #px"^(BIT|RES|SET|RLC|RRC|RL|RR|SLA|SRA|SWAP|SRL)_(?:[0-7]_)?(.+)$" m-str)
+          => (lambda (mt)
+               (define kind (second mt))
+               (define r (third mt))
+               (cond
+                 [(string=? r "A") (read-reg! 'A) (unless (string=? kind "BIT") (write-reg! 'A))]
+                 [(or (string=? r "B") (string=? r "C")) (read-reg! 'BC) (unless (string=? kind "BIT") (write-reg! 'BC))]
+                 [(or (string=? r "D") (string=? r "E")) (read-reg! 'DE) (unless (string=? kind "BIT") (write-reg! 'DE))]
+                 [(or (string=? r "H") (string=? r "L") (string=? r "HL-IND")) (read-reg! 'HL)])
+               (if (string=? kind "BIT")
+                   (write-reg! 'Zero)
+                   (write-reg! 'Carry)))]
+         [else (void)]))
+     (define ordered-params
+       (for/list ([r (in-list '(A BC DE HL))]
+                  #:when (memq r params))
+         r))
+     (define ordered-returns
+       (if is-isr?
+           '()
+           (for/list ([r (in-list '(A HL Carry Zero))]
+                      #:when (set-member? returns r))
+             r)))
+     (values ordered-params ordered-returns)]
+    [else
+     (values '() '())]))
+
+;; Scan all PRG-ROM banks of an NES ROM to infer:
+;;   1. MMIO shadow/mirror variables in ZP/WRAM (`ppuctrl_mirror_0778`, `ppumask_mirror_0779`, etc.)
+;;   2. 16-bit Zero-Page indirect pointers (`zp_ptr_00`, etc.)
+;;   3. Frequently accessed game state variables
+(define (infer-nes-rom-memory-layout rom-bytes prg-banks)
+  (define nes-mmio-names
+    (hasheq #x2000 'PPUCTRL   #x2001 'PPUMASK   #x2005 'PPUSCROLL
+            #x2006 'PPUADDR   #x2007 'PPUDATA   #x2003 'OAMADDR
+            #x4015 'SND_CHN   #x4010 'DMC_FREQ  #x4011 'DMC_RAW))
+  (define mirror-pair-counts (make-hash))
+  (define zp-ptr-counts      (make-hasheq))
+  (define ram-state-counts   (make-hasheq))
+
+  (for ([b (in-range prg-banks)])
+    (define b-start (+ 16 (* b 16384)))
+    (define b-end   (min (bytes-length rom-bytes) (+ b-start 16384)))
+    ;; Track recent RAM/ZP address loaded into or stored from A
+    (define recent-a-ram #f)
+    (define recent-a-ttl 0)
+    (define recent-mmio  #f)
+    (define recent-m-ttl 0)
+    (let loop ([pos b-start])
+      (when (< (+ pos 3) b-end)
+        (define op (bytes-ref rom-bytes pos))
+        (define b1 (bytes-ref rom-bytes (+ pos 1)))
+        (define b2 (bytes-ref rom-bytes (+ pos 2)))
+        (define u16 (bitwise-ior b1 (arithmetic-shift b2 8)))
+        (when (> recent-a-ttl 0) (set! recent-a-ttl (sub1 recent-a-ttl)))
+        (when (= recent-a-ttl 0) (set! recent-a-ram #f))
+        (when (> recent-m-ttl 0) (set! recent-m-ttl (sub1 recent-m-ttl)))
+        (when (= recent-m-ttl 0) (set! recent-mmio #f))
+
+        (cond
+          ;; `LDA zp` (A5) or `LDA abs` (AD) from ZP/WRAM ($0000..$07FF, excluding OAM $0200..$02FF)
+          [(or (= op #xA5)
+               (and (= op #xAD) (< u16 #x0800) (not (<= #x0200 u16 #x02FF))))
+           (define ram-a (if (= op #xA5) b1 u16))
+           (set! recent-a-ram ram-a)
+           (set! recent-a-ttl 6)
+           (hash-set! ram-state-counts ram-a (add1 (hash-ref ram-state-counts ram-a 0)))
+           (loop (+ pos (if (= op #xA5) 2 3)))]
+
+          ;; `STA zp` (85) or `STA abs` (8D) to ZP/WRAM ($0000..$07FF, excluding OAM $0200..$02FF)
+          [(or (= op #x85)
+               (and (= op #x8D) (< u16 #x0800) (not (<= #x0200 u16 #x02FF))))
+           (define ram-a (if (= op #x85) b1 u16))
+           (hash-set! ram-state-counts ram-a (add1 (hash-ref ram-state-counts ram-a 0)))
+           (cond
+             [recent-mmio
+              (define key (cons ram-a recent-mmio))
+              (hash-set! mirror-pair-counts key (add1 (hash-ref mirror-pair-counts key 0)))]
+             [else
+              (set! recent-a-ram ram-a)
+              (set! recent-a-ttl 5)])
+           (loop (+ pos (if (= op #x85) 2 3)))]
+
+          ;; `STA abs` (8D) to a hardware MMIO register ($2000, $2001, $2005, $2006, $2007, $4015, etc.)
+          [(and (= op #x8D) (hash-ref nes-mmio-names u16 #f))
+           => (lambda (msym)
+                (when recent-a-ram
+                  (define key (cons recent-a-ram msym))
+                  (hash-set! mirror-pair-counts key (add1 (hash-ref mirror-pair-counts key 0))))
+                (set! recent-mmio msym)
+                (set! recent-m-ttl 3)
+                (loop (+ pos 3)))]
+
+          ;; Bitwise/load-index instructions that preserve the A mirror chain (`AND #imm` 29, `ORA #imm` 09, `EOR #imm` 49, `LDY abs` AC, `LDY zp` A4)
+          [(memv op '(#x29 #x09 #x49 #xA4 #xA0 #xA2))
+           (loop (+ pos 2))]
+          [(memv op '(#xAC #xAE))
+           (loop (+ pos 3))]
+
+          ;; Indirect ZP pointer `(zp),Y` (B1/91/11/31/51/71/D1/F1) or `(zp,X)` (A1/81)
+          [(memv op '(#xB1 #x91 #x11 #x31 #x51 #x71 #xD1 #xF1 #xA1 #x81))
+           (hash-set! zp-ptr-counts b1 (add1 (hash-ref zp-ptr-counts b1 0)))
+           (set! recent-a-ram #f)
+           (loop (+ pos 2))]
+
+          ;; Immediate load `LDA #imm` resets `recent-a-ram`
+          [(= op #xA9)
+           (set! recent-a-ram #f)
+           (loop (+ pos 2))]
+
+          [else
+           (loop (+ pos 1))]))))
+
+  ;; Select the dominant MMIO mirror per RAM address ( prioritizing PPUCTRL & PPUMASK )
+  (define sorted-pairs
+    (sort (hash->list mirror-pair-counts)
+          (lambda (a b)
+            (define m-a (cdar a))
+            (define m-b (cdar b))
+            (define prio-a (+ (* (cdr a) 10) (if (memq m-a '(PPUCTRL PPUMASK PPUSCROLL)) 5 0)))
+            (define prio-b (+ (* (cdr b) 10) (if (memq m-b '(PPUCTRL PPUMASK PPUSCROLL)) 5 0)))
+            (if (= prio-a prio-b)
+                (< (caar a) (caar b))
+                (> prio-a prio-b)))))
+
+  (define mirror-map (make-hasheq))
+  (define mirror-forms '())
+  (for ([entry (in-list sorted-pairs)]
+        #:when (< (length mirror-forms) 8))
+    (define ram-addr (caar entry))
+    (define msym     (cdar entry))
+    (unless (hash-has-key? mirror-map ram-addr)
+      (define hex-str
+        (if (< ram-addr #x0100)
+            (string-upcase (~r ram-addr #:base 16 #:min-width 2 #:pad-string "0"))
+            (string-upcase (~r ram-addr #:base 16 #:min-width 4 #:pad-string "0"))))
+      (define mirror-sym
+        (string->symbol (format "~a_mirror_~a"
+                                (string-downcase (symbol->string msym))
+                                hex-str)))
+      (hash-set! mirror-map ram-addr mirror-sym)
+      (set! mirror-forms
+            (cons `(mirror ,mirror-sym #:addr ,ram-addr #:mmio ,msym)
+                  mirror-forms))))
+
+  (define sorted-ptrs
+    (sort (hash->list zp-ptr-counts)
+          (lambda (a b) (if (= (cdr a) (cdr b)) (< (car a) (car b)) (> (cdr a) (cdr b))))))
+  (define ptr-forms
+    (for/list ([p (in-list (take sorted-ptrs (min 6 (length sorted-ptrs))))])
+      (define zp-a (car p))
+      (define psym (string->symbol (format "zp_ptr_~a" (hex2-str zp-a))))
+      `(zp-ptr ,psym #:addr ,zp-a #:width-bytes 2 #:uses ,(cdr p))))
+
+  (define sorted-states
+    (sort (filter (lambda (kv) (not (hash-has-key? mirror-map (car kv))))
+                  (hash->list ram-state-counts))
+          (lambda (a b) (if (= (cdr a) (cdr b)) (< (car a) (car b)) (> (cdr a) (cdr b))))))
+  (define state-forms
+    (for/list ([s (in-list (take sorted-states (min 8 (length sorted-states))))])
+      (define sa (car s))
+      (define ssym
+        (if (< sa #x0100)
+            (string->symbol (format "zp_state_~a" (hex2-str sa)))
+            (string->symbol (format "wram_state_~a" (string-upcase (~r sa #:base 16 #:min-width 4 #:pad-string "0"))))))
+      `(state-var ,ssym #:addr ,sa #:accesses ,(cdr s))))
+
+  (values mirror-map
+          `(def-memory-layout
+             (mmio-mirrors ,@(reverse mirror-forms))
+             (zp-pointers ,@ptr-forms)
+             (state-variables ,@state-forms))))
+
+;; Scan all ROM banks of an SM83 (GB / GBC) ROM to infer:
+;;   1. MMIO shadow/mirror variables in HRAM ($FF80..$FFFE) or WRAM ($C000..$DFFF)
+;;   2. Hot HRAM working-set variables
+;;   3. Hot WRAM state variables
+(define (infer-sm83-rom-memory-layout rom-bytes num-banks)
+  (define sm83-mmio-names
+    (hasheq #xFF00 'JOYP  #xFF01 'SB    #xFF02 'SC
+            #xFF04 'DIV   #xFF05 'TIMA  #xFF06 'TMA   #xFF07 'TAC   #xFF0F 'IF
+            #xFF40 'LCDC  #xFF41 'STAT  #xFF42 'SCY   #xFF43 'SCX   #xFF45 'LYC
+            #xFF47 'BGP   #xFF48 'OBP0  #xFF49 'OBP1  #xFF4A 'WY    #xFF4B 'WX
+            #xFF4D 'KEY1  #xFF4F 'VBK   #xFF68 'BCPS  #xFF69 'BCPD  #xFF6A 'OCPS  #xFF6B 'OCPD
+            #xFF70 'SVBK  #xFFFF 'IE))
+  (define mirror-pair-counts (make-hash))
+  (define hram-counts        (make-hasheq))
+  (define wram-counts        (make-hasheq))
+  (define rom-len            (bytes-length rom-bytes))
+
+  (for ([b (in-range (min num-banks 8))])
+    (define b-start (* b 16384))
+    (define b-end   (min rom-len (+ b-start 16384)))
+    (define start-off (if (= b 0) #x0150 0))
+    (define recent-a-ram #f)
+    (define recent-a-ttl 0)
+    (define recent-mmio  #f)
+    (define recent-m-ttl 0)
+
+    (let loop ([pos (+ b-start start-off)])
+      (when (< (+ pos 3) b-end)
+        (define op (bytes-ref rom-bytes pos))
+        (define b1 (bytes-ref rom-bytes (+ pos 1)))
+        (define b2 (bytes-ref rom-bytes (+ pos 2)))
+        (define u16 (bitwise-ior b1 (arithmetic-shift b2 8)))
+        (when (> recent-a-ttl 0) (set! recent-a-ttl (sub1 recent-a-ttl)))
+        (when (= recent-a-ttl 0) (set! recent-a-ram #f))
+        (when (> recent-m-ttl 0) (set! recent-m-ttl (sub1 recent-m-ttl)))
+        (when (= recent-m-ttl 0) (set! recent-mmio #f))
+
+        (cond
+          ;; `LDH A, ($FF00+n)` (F0 n) where n >= $80 (HRAM)
+          [(and (= op #xF0) (>= b1 #x80) (< b1 #xFF))
+           (define h-addr (+ #xFF00 b1))
+           (hash-set! hram-counts h-addr (add1 (hash-ref hram-counts h-addr 0)))
+           (set! recent-a-ram h-addr)
+           (set! recent-a-ttl 4)
+           (loop (+ pos 2))]
+
+          ;; `LDH ($FF00+n), A` (E0 n)
+          [(= op #xE0)
+           (define io-addr (+ #xFF00 b1))
+           (cond
+             [(and (>= b1 #x80) (< b1 #xFF))
+              (hash-set! hram-counts io-addr (add1 (hash-ref hram-counts io-addr 0)))
+              (if recent-mmio
+                  (let ([key (cons io-addr recent-mmio)])
+                    (hash-set! mirror-pair-counts key (add1 (hash-ref mirror-pair-counts key 0))))
+                  (begin
+                    (set! recent-a-ram io-addr)
+                    (set! recent-a-ttl 4)))]
+             [(hash-ref sm83-mmio-names io-addr #f)
+              => (lambda (msym)
+                   (when recent-a-ram
+                     (define key (cons recent-a-ram msym))
+                     (hash-set! mirror-pair-counts key (add1 (hash-ref mirror-pair-counts key 0))))
+                   (set! recent-mmio msym)
+                   (set! recent-m-ttl 3))])
+           (loop (+ pos 2))]
+
+          ;; `LD A, (a16)` (FA lo hi) from WRAM ($C000..$DFFF) or HRAM ($FF80..$FFFE)
+          [(and (= op #xFA) (or (<= #xC000 u16 #xDFFF) (<= #xFF80 u16 #xFFFE)))
+           (if (<= #xC000 u16 #xDFFF)
+               (hash-set! wram-counts u16 (add1 (hash-ref wram-counts u16 0)))
+               (hash-set! hram-counts u16 (add1 (hash-ref hram-counts u16 0))))
+           (set! recent-a-ram u16)
+           (set! recent-a-ttl 4)
+           (loop (+ pos 3))]
+
+          ;; `LD (a16), A` (EA lo hi) to WRAM ($C000..$DFFF), HRAM, or MMIO
+          [(= op #xEA)
+           (cond
+             [(or (<= #xC000 u16 #xDFFF) (<= #xFF80 u16 #xFFFE))
+              (if (<= #xC000 u16 #xDFFF)
+                  (hash-set! wram-counts u16 (add1 (hash-ref wram-counts u16 0)))
+                  (hash-set! hram-counts u16 (add1 (hash-ref hram-counts u16 0))))
+              (if recent-mmio
+                  (let ([key (cons u16 recent-mmio)])
+                    (hash-set! mirror-pair-counts key (add1 (hash-ref mirror-pair-counts key 0))))
+                  (begin
+                    (set! recent-a-ram u16)
+                    (set! recent-a-ttl 4)))]
+             [(hash-ref sm83-mmio-names u16 #f)
+              => (lambda (msym)
+                   (when recent-a-ram
+                     (define key (cons recent-a-ram msym))
+                     (hash-set! mirror-pair-counts key (add1 (hash-ref mirror-pair-counts key 0))))
+                   (set! recent-mmio msym)
+                   (set! recent-m-ttl 3))])
+           (loop (+ pos 3))]
+
+          ;; Bitmask ops `AND d8` (E6), `OR d8` (F6), `XOR d8` (EE), `CB` (CB xx) preserve `recent-a-ram`
+          [(memv op '(#xE6 #xF6 #xEE #xCB))
+           (loop (+ pos 2))]
+
+          ;; `LD A, d8` (3E) or `XOR A` (AF) resets `recent-a-ram`
+          [(memv op '(#x3E #xAF))
+           (set! recent-a-ram #f)
+           (loop (+ pos (if (= op #x3E) 2 1)))]
+
+          [else
+           (loop (+ pos 1))]))))
+
+  (define sorted-pairs
+    (sort (hash->list mirror-pair-counts)
+          (lambda (a b)
+            (define m-a (cdar a))
+            (define m-b (cdar b))
+            (define prio-a (+ (* (cdr a) 10) (if (memq m-a '(LCDC STAT SCY SCX BGP OBP0 OBP1 IE)) 5 0)))
+            (define prio-b (+ (* (cdr b) 10) (if (memq m-b '(LCDC STAT SCY SCX BGP OBP0 OBP1 IE)) 5 0)))
+            (if (= prio-a prio-b)
+                (< (caar a) (caar b))
+                (> prio-a prio-b)))))
+
+  (define mirror-map (make-hasheq))
+  (define mirror-forms '())
+  (for ([entry (in-list sorted-pairs)]
+        #:when (< (length mirror-forms) 8))
+    (define ram-addr (caar entry))
+    (define msym     (cdar entry))
+    (unless (hash-has-key? mirror-map ram-addr)
+      (define hex-str (string-upcase (~r ram-addr #:base 16 #:min-width 4 #:pad-string "0")))
+      (define mirror-sym
+        (string->symbol (format "~a_mirror_~a"
+                                (string-downcase (symbol->string msym))
+                                hex-str)))
+      (hash-set! mirror-map ram-addr mirror-sym)
+      (set! mirror-forms
+            (cons `(mirror ,mirror-sym #:addr ,ram-addr #:mmio ,msym)
+                  mirror-forms))))
+
+  (define sorted-hram
+    (sort (filter (lambda (kv) (not (hash-has-key? mirror-map (car kv))))
+                  (hash->list hram-counts))
+          (lambda (a b) (if (= (cdr a) (cdr b)) (< (car a) (car b)) (> (cdr a) (cdr b))))))
+  (define hram-forms
+    (for/list ([h (in-list (take sorted-hram (min 6 (length sorted-hram))))])
+      (define ha (car h))
+      (define hsym (string->symbol (format "hram_state_~a" (string-upcase (~r ha #:base 16 #:min-width 4 #:pad-string "0")))))
+      `(hram-var ,hsym #:addr ,ha #:accesses ,(cdr h))))
+
+  (define sorted-wram
+    (sort (filter (lambda (kv) (not (hash-has-key? mirror-map (car kv))))
+                  (hash->list wram-counts))
+          (lambda (a b) (if (= (cdr a) (cdr b)) (< (car a) (car b)) (> (cdr a) (cdr b))))))
+  (define wram-forms
+    (for/list ([w (in-list (take sorted-wram (min 6 (length sorted-wram))))])
+      (define wa (car w))
+      (define wsym (string->symbol (format "wram_state_~a" (string-upcase (~r wa #:base 16 #:min-width 4 #:pad-string "0")))))
+      `(wram-var ,wsym #:addr ,wa #:accesses ,(cdr w))))
+
+  (values mirror-map
+          `(def-memory-layout
+             (mmio-mirrors ,@(reverse mirror-forms))
+             (hram-variables ,@hram-forms)
+             (wram-variables ,@wram-forms))))
 
 ;; ============================================================================
 ;; 4. NES (6502) State-Machine Dispatcher & High-Level Idiom Lifter

@@ -117,6 +117,12 @@
  define-n64-rsp-rdp-display-list
  define-n64-rom-segments
  define-n64-rom-segment-manifest
+ def-memory-layout
+ def-struct-layout
+ def-subroutine-contract
+ define-snes-struct-layouts
+ define-gba-struct-layouts
+ define-n64-struct-layouts
  verify-nes-grades!)
 
 ;; Surface DSL macro for declaring a game phase state machine with verified failure recovery & victory reachability
@@ -421,5 +427,13 @@
 (define-syntax-rule (define-n64-rsp-rdp-display-list body ...) '(define-n64-rsp-rdp-display-list body ...))
 (define-syntax-rule (define-n64-rom-segments body ...) '(define-n64-rom-segments body ...))
 (define-syntax-rule (define-n64-rom-segment-manifest body ...) '(define-n64-rom-segment-manifest body ...))
+
+(define-syntax-rule (def-memory-layout body ...) '(def-memory-layout body ...))
+(define-syntax-rule (def-struct-layout body ...) '(def-struct-layout body ...))
+(define-syntax-rule (def-subroutine-contract body ...) '(def-subroutine-contract body ...))
+(define-syntax-rule (define-snes-struct-layouts body ...) '(define-snes-struct-layouts body ...))
+(define-syntax-rule (define-gba-struct-layouts body ...) '(define-gba-struct-layouts body ...))
+(define-syntax-rule (define-n64-struct-layouts body ...) '(define-n64-struct-layouts body ...))
+
 
 

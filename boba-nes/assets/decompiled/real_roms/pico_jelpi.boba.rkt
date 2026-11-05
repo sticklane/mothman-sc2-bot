@@ -58,72 +58,71 @@
     (idiom-pico8-audio-trigger #:apis (sfx music) #:call-sites 28))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (lifted-lua-functions
-    (def-pico-function
+    (def-pico-function #:params (n) #:returns (val)
       (name frnd)
       (params (n))
+      (returns (val))
       (line-range (13 15))
       (api-calls (flr rnd))
       (called-functions ())
       (structured-ast
-        (return-expr "flr(rnd(n))"))
+        (return-expr (call flr (call rnd n))))
       (decompiled-pseudo-code
-        (return "flr(rnd(n))"))
+        (return (call flr (call rnd n))))
       (body-lines
         "function frnd(n)"
         "\treturn flr(rnd(n))"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (n o) #:returns (val)
       (name frnda)
       (params (n o))
+      (returns (val))
       (line-range (17 20))
       (api-calls ())
       (called-functions (frnd))
       (structured-ast
-        (return-expr "frnd(n)+addval"))
+        (return-expr (+ (call frnd n) addval)))
       (decompiled-pseudo-code
-        (set! addval "o or 1")
-        (return "frnd(n)+addval"))
+        (set! addval (or o 1))
+        (return (+ (call frnd n) addval)))
       (body-lines
         "function frnda(n, o)"
         "\tlocal addval = o or 1"
         "\treturn frnd(n)+addval"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (chance) #:returns (val)
       (name randc)
       (params (chance))
+      (returns (val))
       (line-range (22 26))
       (api-calls ())
       (called-functions (frnd))
       (structured-ast
-        (if-cond "frnd(100")
-        (return-expr "true"))
+        (if-cond (call frnd 100))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! c "chance or 50")
-        (when "frnd(100) < c")
-        (return "true"))
+        (set! c (or chance 50))
+        (when (< (call frnd 100) c) (return #t)))
       (body-lines
         "function randc(chance)"
         "\tlocal c = chance or 50"
         "\tif frnd(100) < c then"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (value min max) #:returns (val)
       (name wrap)
       (params (value min max))
+      (returns (val))
       (line-range (30 37))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "value < min")
-        (return-expr "max")
-        (return-expr "min")
-        (return-expr "value"))
+        (if-cond (< value min))
+        (return-expr max)
+        (return-expr min)
+        (return-expr value))
       (decompiled-pseudo-code
-        (when "value < min")
-        (return "max")
-        (when "value > max")
-        (return "min")
-        (return "value"))
+        (when (< value min) (return max) (if (> value max) (then (return min)) (else (return value)))))
       (body-lines
         "function wrap(value, min, max)"
         "\tif value < min then"
@@ -133,33 +132,35 @@
         "\telse"
         "\t\treturn value"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (t) #:returns ()
       (name table_clear)
       (params (t))
+      (returns ())
       (line-range (40 43))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (for-loop "i=0, count"))
       (decompiled-pseudo-code
-        (set! count "#t")
-        (for-range i "0" "count"))
+        (set! count (len t))
+        (for-range i 0 count (set! (aref t i) nil)))
       (body-lines
         "function table_clear(t)"
         "\tlocal count = #t"
         "\tfor i=0, count do t[i]=nil end"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name copy_screen_to_mem)
       (params ())
+      (returns ())
       (line-range (45 50))
       (api-calls (memcpy))
       (called-functions ())
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (call memcpy "0x1800, 0x6000, 0x0800")
-        (call memcpy "0x4300, 0x6800, 0x1800"))
+        (call memcpy 6144 24576 2048)
+        (call memcpy 17152 26624 6144))
       (body-lines
         "function copy_screen_to_mem()"
         "\t-- half the map/lower sprite memory area"
@@ -167,25 +168,27 @@
         "\t-- almost all general use memory"
         "\tmemcpy(0x4300, 0x6800, 0x1800)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name paste_screen_from_mem)
       (params ())
+      (returns ())
       (line-range (52 55))
       (api-calls (memcpy))
       (called-functions ())
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (call memcpy "0x6000, 0x1800, 0x0800")
-        (call memcpy "0x6800, 0x4300, 0x1800"))
+        (call memcpy 24576 6144 2048)
+        (call memcpy 26624 17152 6144))
       (body-lines
         "function paste_screen_from_mem()"
         "\tmemcpy(0x6000, 0x1800, 0x0800)"
         "\tmemcpy(0x6800, 0x4300, 0x1800)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (str y col outcol x) #:returns ()
       (name printc_o)
       (params (str y col outcol x))
+      (returns ())
       (line-range (57 61))
       (api-calls ())
       (called-functions (printc))
@@ -193,47 +196,42 @@
         (for-loop "i=-1,1")
         (for-loop "j=-1,1"))
       (decompiled-pseudo-code
-        (for-range i "-1" "1")
-        (for-range j "-1" "1")
-        (call printc "str, y+j, outcol or 2, (x or 64)+i"))
+        (for-range i (- 1) 1 (for-range j (- 1) 1 (call printc str (+ y j) (or outcol 2) (+ (or x 64) i)))))
       (body-lines
         "function printc_o(str, y, col, outcol, x) -- print a centered string with a black outline"
         "\tfor i=-1,1 do"
         "\t \tfor j=-1,1 do"
         "\t   \tprintc(str, y+j, outcol or 2, (x or 64)+i)"
         "\t \tend"))
-    (def-pico-function
+    (def-pico-function #:params (str y col x) #:returns ()
       (name printc)
       (params (str y col x))
+      (returns ())
       (line-range (66 68))
       (api-calls (print))
       (called-functions ())
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (call print "str, (x or 64)-#str*2, y, col or 7"))
+        (call print str (- (or x 64) (* (len str) 2)) y (or col 7)))
       (body-lines
         "function printc(str, y, col, x)"
         "\tprint(str, (x or 64)-#str*2, y, col or 7)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (str y color) #:returns ()
       (name printsprite)
       (params (str y color))
+      (returns ())
       (line-range (71 81))
       (api-calls (all flr pal spr))
       (called-functions ())
       (structured-ast
         (for-loop "i=1, #str")
         (for-loop "j in all(g_alphabet_sprites)")
-        (if-cond "letter == j"))
+        (if-cond (== letter j)))
       (decompiled-pseudo-code
-        (call pal "7, color")
-        (for-range i "1" "#str")
-        (set! |letter, whichalpha| "sub(str,i,i), -1")
-        (foreach j "g_alphabet_sprites")
-        (+= whichalpha "1")
-        (when "letter == j")
-        (call spr "131 + flr(whichalpha/9)*16 + whichalpha % 9, 64-(#str*8)/2 + (i-1)*8, y"))
+        (call pal 7 color)
+        (for-range i 1 (len str) (set-values! (letter whichalpha) ((call sub str i i) (- 1))) (foreach j g_alphabet_sprites (+= whichalpha 1) (when (== letter j) (call spr (+ (+ 131 (* (call flr (/ whichalpha 9)) 16)) (modulo whichalpha 9)) (+ (- 64 (/ (* (len str) 8) 2)) (* (- i 1) 8)) y) break))))
       (body-lines
         "function printsprite(str, y, color)"
         "\tpal(7, color)"
@@ -246,36 +244,40 @@
         "\t\t\t\tspr(131 + flr(whichalpha/9)*16 + whichalpha % 9, 64-(#str*8)/2 + (i-1)*8, y)"
         "\t\t\t\tbreak"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name set_outline)
       (params ())
+      (returns ())
       (line-range (87 89))
       (api-calls (pal))
       (called-functions ())
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (call pal "2, g_color_outline"))
+        (call pal 2 g_color_outline))
       (body-lines
         "function set_outline()"
         "\tpal(2, g_color_outline)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (x y text col_main col_sec) #:returns ()
       (name m_textfloat)
       (params (x y text col_main col_sec))
+      (returns ())
       (line-range (91 101))
       (api-calls (add))
       (called-functions ())
       (structured-ast
         (seq-block 11))
       (decompiled-pseudo-code
-        (set! x "x,")
-        (set! y "y,")
-        (set! text "text,")
-        (set! col_main "col_main or 7,")
-        (set! col_sec "col_sec or 5,")
-        (set! dur "30,")
-        (set! dur_orig "30,"))
+        (call add list_parts_front void)
+        (table)
+        (set! x x)
+        (set! y y)
+        (set! text text)
+        (set! col_main (or col_main 7))
+        (set! col_sec (or col_sec 5))
+        (set! dur 30)
+        (set! dur_orig 30))
       (body-lines
         "function m_textfloat(x,y, text, col_main, col_sec)"
         "\tadd(list_parts_front,"
@@ -288,39 +290,36 @@
         "\t\tdur=30,"
         "\t\tdur_orig=30,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (102 106))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.dur < self.dur_orig/3"))
+        (if-cond (< (-> self :dur) (/ (-> self :dur_orig) 3))))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (set! color "self.col_main")
-        (when "self.dur < self.dur_orig/3")
-        (set! color "self.col_sec"))
+        (set! color (-> self :col_main))
+        (when (< (-> self :dur) (/ (-> self :dur_orig) 3)) (set! color (-> self :col_sec))))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color = self.col_main"
         "\t\t\tif self.dur < self.dur_orig/3 then"
         "\t\t\t\tcolor = self.col_sec"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (110 116))
       (api-calls (del))
       (called-functions ())
       (structured-ast
-        (if-cond "self.dur == 0"))
+        (if-cond (== (-> self :dur) 0)))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (-= self.dur "1")
-        (when "self.dur == 0")
-        (call del "list_parts_front, self")
-        (-= self.y ".3"))
+        (-= (-> self :dur) 1)
+        (if (== (-> self :dur) 0) (then (call del list_parts_front self)) (else (-= (-> self :y) |.|))))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself.dur-=1"
@@ -329,95 +328,98 @@
         "\t\t\telse"
         "\t\t\t\tself.y -= .3"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name a_set_invuln_flash)
       (params (self))
+      (returns ())
       (line-range (121 125))
       (api-calls (pal))
       (called-functions ())
       (structured-ast
-        (if-cond "self.invuln_frames > 0 and self.invuln_frames % 5 < 3")
+        (if-cond (and (> (-> self :invuln_frames) 0) (< (modulo (-> self :invuln_frames) 5) 3)))
         (for-loop "i=1,15"))
       (decompiled-pseudo-code
-        (when "self.invuln_frames > 0 and self.invuln_frames % 5 < 3")
-        (for-range i "1" "15")
-        (call pal "i, 2"))
+        (when (and (> (-> self :invuln_frames) 0) (< (modulo (-> self :invuln_frames) 5) 3)) (for-range i 1 15 (call pal i 2))))
       (body-lines
         "function a_set_invuln_flash(self)"
         "\tif self.invuln_frames > 0 and self.invuln_frames % 5 < 3 then"
         "\t\tfor i=1,15 do"
         "\t\t\tpal(i, 2)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (obj1 obj2 range) #:returns (val)
       (name is_near_objs)
       (params (obj1 obj2 range))
+      (returns (val))
       (line-range (131 134))
       (api-calls (abs))
       (called-functions ())
       (structured-ast
-        (if-cond "abs(obj1.x-obj2.x")
-        (return-expr "true"))
+        (if-cond (call abs (- (-> obj1 :x) (-> obj2 :x))))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (when "abs(obj1.x-obj2.x) <= range and abs(obj1.y-obj2.y) <= range")
-        (return "true"))
+        (when (and (<= (call abs (- (-> obj1 :x) (-> obj2 :x))) range) (<= (call abs (- (-> obj1 :y) (-> obj2 :y))) range)) (return #t)))
       (body-lines
         "function is_near_objs(obj1, obj2, range)"
         "\tif abs(obj1.x-obj2.x) <= range and abs(obj1.y-obj2.y) <= range then"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (e1 e2 buffer) #:returns (val)
       (name int_cols)
       (params (e1 e2 buffer))
+      (returns (val))
       (line-range (138 141))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "e1.just_spawned or e2.just_spawned")
-        (return-expr "false"))
+        (if-cond (or (-> e1 :just_spawned) (-> e2 :just_spawned)))
+        (return-expr #f))
       (decompiled-pseudo-code
-        (when "e1.just_spawned or e2.just_spawned")
-        (return "false"))
+        (when (or (-> e1 :just_spawned) (-> e2 :just_spawned)) (return #f)))
       (body-lines
         "function int_cols(e1, e2, buffer)"
         "\tif e1.just_spawned or e2.just_spawned then"
         "\t\treturn false"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (part_details duration) #:returns ()
       (name m_part_blood)
       (params (part_details duration))
+      (returns ())
       (line-range (159 162))
       (api-calls ())
       (called-functions (frnda m_part_angle))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! |part_details[6]| "duration or frnda(10, 50)")
-        (call m_part_angle "part_details, .65, 8, g_color_blood_burn"))
+        (set! (aref part_details 6) (or duration (call frnda 10 50)))
+        (call m_part_angle part_details |.|))
       (body-lines
         "function m_part_blood(part_details, duration)"
         "\tpart_details[6] = duration or frnda(10, 50)"
         "\tm_part_angle(part_details, .65, 8, g_color_blood_burn)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (part_details frict color color_sec layer) #:returns ()
       (name m_part_angle)
       (params (part_details frict color color_sec layer))
+      (returns ())
       (line-range (164 180))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 17))
       (decompiled-pseudo-code
-        (set! size "part_details[1]-1,")
-        (set! x "part_details[2],")
-        (set! y "part_details[3],")
-        (set! angle "part_details[4],")
-        (set! speed_move "part_details[5],")
-        (set! duration "part_details[6],")
-        (set! frict "frict,")
-        (set! color "color,")
-        (set! color_sec "color_sec or color,")
-        (set! layer "layer or 0,")
-        (set! time "0,"))
+        local
+        (table)
+        (set! size (- (aref part_details 1) 1))
+        (set! x (aref part_details 2))
+        (set! y (aref part_details 3))
+        (set! angle (aref part_details 4))
+        (set! speed_move (aref part_details 5))
+        (set! duration (aref part_details 6))
+        (set! frict frict)
+        (set! color color)
+        (set! color_sec (or color_sec color))
+        (set! layer (or layer 0))
+        (set! time 0))
       (body-lines
         "function m_part_angle(part_details, frict, color, color_sec, layer)"
         ""
@@ -436,42 +438,36 @@
         ""
         "\t\ttime=0,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (181 185))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.time > self.duration *.75"))
+        (if-cond (> (-> self :time) (* (-> self :duration) |.|))))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (set! |color, s2| "self.color, self.size/2")
-        (when "self.time > self.duration *.75")
-        (set! color "self.color_sec"))
+        (set-values! (color s2) ((-> self :color) (/ (-> self :size) 2)))
+        (when (> (-> self :time) (* (-> self :duration) |.|)) (set! color (-> self :color_sec))))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color, s2 = self.color, self.size/2"
         "\t\t\tif self.time > self.duration *.75 then"
         "\t\t\t\tcolor = self.color_sec"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (193 201))
       (api-calls (del))
       (called-functions ())
       (structured-ast
-        (if-cond "self.time > self.duration")
-        (if-cond "self.layer == 1"))
+        (if-cond (> (-> self :time) (-> self :duration)))
+        (if-cond (== (-> self :layer) 1)))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (when "self.time > self.duration")
-        (when "self.layer == 1")
-        (call del "list_parts_back, self")
-        (when "self.layer == 2")
-        (call del "list_parts_front, self")
-        (call del "list_parts_blood, self"))
+        (when (> (-> self :time) (-> self :duration)) (when (== (-> self :layer) 1) (call del list_parts_back self) (if (== (-> self :layer) 2) (then (call del list_parts_front self)) (else (call del list_parts_blood self))))))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.time > self.duration then"
@@ -482,27 +478,30 @@
         "\t\t\t\telse"
         "\t\t\t\t\tdel(list_parts_blood, self)"
         "\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (frame x y dy col col_sec duration flipx is_front) #:returns ()
       (name m_part_sprite)
       (params (frame x y dy col col_sec duration flipx is_front))
+      (returns ())
       (line-range (222 239))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 18))
       (decompiled-pseudo-code
-        (set! x "x,")
-        (set! y "y,")
-        (set! frame "frame,")
-        (set! col "col,")
-        (set! col_sec "col_sec or col,")
-        (set! duration "duration,")
-        (set! flipx "flipx or false,")
-        (set! is_front "is_front or false,")
-        (set! time "0,")
-        (set! dx "0,")
-        (set! dy "dy,")
-        (set! ddy "0,"))
+        local
+        (table)
+        (set! x x)
+        (set! y y)
+        (set! frame frame)
+        (set! col col)
+        (set! col_sec (or col_sec col))
+        (set! duration duration)
+        (set! flipx (or flipx #f))
+        (set! is_front (or is_front #f))
+        (set! time 0)
+        (set! dx 0)
+        (set! dy dy)
+        (set! ddy 0))
       (body-lines
         "function m_part_sprite(frame, x,y, dy, col, col_sec, duration, flipx, is_front)"
         ""
@@ -522,19 +521,17 @@
         "\t\tdy=dy,"
         "\t\tddy=0,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (240 245))
       (api-calls (pal))
       (called-functions ())
       (structured-ast
-        (if-cond "self.time < self.duration *.75"))
+        (if-cond (< (-> self :time) (* (-> self :duration) |.|))))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (when "self.time < self.duration *.75")
-        (call pal "7,self.col")
-        (call pal "7,self.col_sec"))
+        (if (< (-> self :time) (* (-> self :duration) |.|)) (then (call pal 7 (-> self :col))) (else (call pal 7 (-> self :col_sec)))))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif self.time < self.duration *.75 then"
@@ -542,36 +539,33 @@
         "\t\t\telse"
         "\t\t\t\tpal(7,self.col_sec)"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (250 252))
       (api-calls ())
       (called-functions (update_base))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (call self:update_base ""))
+        (send self :update_base))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself:update_base()"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update_base)
       (params (self))
+      (returns ())
       (line-range (254 260))
       (api-calls (del))
       (called-functions ())
       (structured-ast
-        (if-cond "self.time > self.duration")
-        (if-cond "self.is_front"))
+        (if-cond (> (-> self :time) (-> self :duration)))
+        (if-cond (-> self :is_front)))
       (decompiled-pseudo-code
-        (set! update_base "function(self)")
-        (when "self.time > self.duration")
-        (when "self.is_front")
-        (call del "list_parts_front, self")
-        (call del "list_parts_back, self"))
+        (when (> (-> self :time) (-> self :duration)) (if (-> self :is_front) (then (call del list_parts_front self)) (else (call del list_parts_back self)))))
       (body-lines
         "\t\tupdate_base=function(self)"
         "\t\t\tif self.time > self.duration then"
@@ -580,74 +574,69 @@
         "\t\t\t\telse"
         "\t\t\t\t\tdel(list_parts_back, self)"
         "\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (x y) #:returns ()
       (name m_part_bomb_spark)
       (params (x y))
+      (returns ())
       (line-range (277 281))
       (api-calls ())
       (called-functions (randc))
       (structured-ast
-        (if-cond "randc("))
+        (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! |color, color_second| "10, 9")
-        (when "randc()")
-        (set! |color, color_second| "7, 10"))
+        (set-values! (color color_second) (10 9))
+        (when (call randc) (set-values! (color color_second) (7 10))))
       (body-lines
         "function m_part_bomb_spark(x, y)"
         "\tlocal color, color_second = 10, 9"
         "\tif randc() then"
         "\t\tcolor, color_second = 7, 10"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (x y size duration color color_sec layer) #:returns ()
       (name m_part_circle)
       (params (x y size duration color color_sec layer))
+      (returns ())
       (line-range (291 293))
       (api-calls ())
       (called-functions (m_part_angle))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! p "m_part_angle({size, x, y, 0, 0, duration}, 0, color, color_sec, layer)"))
+        (set! p (call m_part_angle (table size x y 0 0 duration) 0 color color_sec layer)))
       (body-lines
         "function m_part_circle(x,y, size, duration, color, color_sec, layer)"
         ""
         "\tlocal p = m_part_angle({size, x, y, 0, 0, duration}, 0, color, color_sec, layer)"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (294 298))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.time > self.duration * .75"))
+        (if-cond (> (-> self :time) (* (-> self :duration) |.|))))
       (decompiled-pseudo-code
-        (set! p.draw "function(self)")
-        (set! color "self.color")
-        (when "self.time > self.duration * .75")
-        (set! color "self.color_sec"))
+        (set! color (-> self :color))
+        (when (> (-> self :time) (* (-> self :duration) |.|)) (set! color (-> self :color_sec))))
       (body-lines
         "\tp.draw=function(self)"
         "\t\tlocal color = self.color"
         "\t\tif self.time > self.duration * .75 then"
         "\t\t\tcolor = self.color_sec"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (x y angle) #:returns ()
       (name m_part_bloodsplash)
       (params (x y angle))
+      (returns ())
       (line-range (303 312))
       (api-calls (rnd))
       (called-functions ())
       (structured-ast
         (for-loop "i=0,36")
-        (if-cond "i > 30"))
+        (if-cond (> i 30)))
       (decompiled-pseudo-code
-        (for-range i "0" "36")
-        (set! |size, xoff, yoff, angleoff,dur| "1, rnd(4), rnd(4), rnd(.2), rnd(8)")
-        (when "i > 30")
-        (set! dur "rnd(1)")
-        (set! size "2")
-        (when "i > 15")
-        (set! dur "rnd(4)"))
+        (for-range i 0 36 (set-values! (size xoff yoff angleoff dur) (1 (call rnd 4) (call rnd 4) (call rnd |.|) (call rnd 8))) (when (> i 30) (set! dur (call rnd 1)) (set! size 2) (when (> i 15) (set! dur (call rnd 4))))))
       (body-lines
         "function m_part_bloodsplash(x,y,angle)"
         ""
@@ -659,51 +648,52 @@
         "\t\telseif i > 15 then"
         "\t\t\tdur=rnd(4)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity size) #:returns ()
       (name m_part_impact)
       (params (entity size))
+      (returns ())
       (line-range (318 320))
       (api-calls ())
       (called-functions (m_part_circle))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (call m_part_circle "entity.x, entity.y, size or 7, 4, 10, 9, 1"))
+        (call m_part_circle (-> entity :x) (-> entity :y) (or size 7) 4 10 9 1))
       (body-lines
         "function m_part_impact(entity,size)"
         "\tm_part_circle(entity.x, entity.y, size or 7, 4, 10, 9, 1)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (speed) #:returns ()
       (name handle_slash_recovery)
       (params (speed))
+      (returns ())
       (line-range (322 326))
       (api-calls (rnd))
       (called-functions (randc))
       (structured-ast
-        (if-cond "randc("))
+        (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! dir "rnd(.125)")
-        (when "randc()")
-        (set! dir "0-dir"))
+        (set! dir (call rnd |.|))
+        (when (call randc) (set! dir (- 0 dir))))
       (body-lines
         "function handle_slash_recovery(speed)"
         "\tlocal dir = rnd(.125)"
         "\tif randc() then"
         "\t\tdir = 0-dir"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (target) #:returns ()
       (name handle_slash_entity_impact)
       (params (target))
+      (returns ())
       (line-range (333 339))
       (api-calls ())
       (called-functions (game_pause m_part_bloodsplash shake))
       (structured-ast
-        (if-cond "not target.is_furniture"))
+        (if-cond (not (-> target :is_furniture))))
       (decompiled-pseudo-code
-        (call cam:shake ".1, 3")
-        (call game_pause "2, 0")
-        (when "not target.is_furniture")
-        (call m_part_bloodsplash "target.x, target.y, p1.slash_angle"))
+        (send cam :shake |.|)
+        (call game_pause 2 0)
+        (when (not (-> target :is_furniture)) (call m_part_bloodsplash (-> target :x) (-> target :y) (-> p1 :slash_angle))))
       (body-lines
         "function handle_slash_entity_impact(target)"
         ""
@@ -712,18 +702,17 @@
         "\tif not target.is_furniture then"
         "\t\tm_part_bloodsplash(target.x, target.y, p1.slash_angle)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity score) #:returns ()
       (name score_add)
       (params (entity score))
+      (returns ())
       (line-range (345 350))
       (api-calls (flr min sfx))
       (called-functions ())
       (structured-ast
-        (if-cond "score > 0"))
+        (if-cond (> score 0)))
       (decompiled-pseudo-code
-        (when "score > 0")
-        (call sfx "min(26+flr(score/1), 31)")
-        (call sfx "32"))
+        (if (> score 0) (then (call sfx (call min (+ 26 (call flr (/ score 1))) 31))) (else (call sfx 32))))
       (body-lines
         "function score_add(entity, score)"
         "\tif score > 0 then"
@@ -731,23 +720,19 @@
         "\telse"
         "\t\tsfx(32)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (target) #:returns ()
       (name attempt_deflect_target)
       (params (target))
+      (returns ())
       (line-range (367 382))
       (api-calls (abs rnd sfx))
       (called-functions (m_part_circle randc))
       (structured-ast
-        (if-cond "abs(p1.slash_angle - reverse_angle")
-        (if-cond "randc("))
+        (if-cond (call abs (- (-> p1 :slash_angle) reverse_angle)))
+        (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! reverse_angle "abs(target.angle+.5)%1")
-        (when "abs(p1.slash_angle - reverse_angle) < .25")
-        (call sfx "8")
-        (call m_part_circle "target.x, target.y, 6, 10, 7, 5, 1")
-        (set! t_dir "rnd(.125)")
-        (when "randc()")
-        (set! t_dir "0 - t_dir"))
+        (set! reverse_angle (call abs (+ (-> target :angle) |.|)))
+        (when (< (call abs (- (-> p1 :slash_angle) reverse_angle)) |.|) (call sfx 8) (call m_part_circle (-> target :x) (-> target :y) 6 10 7 5 1) (-> target :is_flying) #t (set! t_dir (call rnd |.|)) (when (call randc) (set! t_dir (- 0 t_dir)))))
       (body-lines
         "function attempt_deflect_target(target)"
         ""
@@ -765,20 +750,20 @@
         "\t\tif randc() then"
         "\t\t\tt_dir = 0 - t_dir"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity target) #:returns ()
       (name combo)
       (params (entity target))
+      (returns ())
       (line-range (394 402))
       (api-calls (sfx))
       (called-functions (frnda handle_impact_death m_part_bloodsplash))
       (structured-ast
-        (if-cond "not entity.is_furniture"))
+        (if-cond (not (-> entity :is_furniture))))
       (decompiled-pseudo-code
-        (set! entity.was_counted_for_combo "true")
-        (call sfx "frnda(2, 21)")
-        (call handle_impact_death "entity, target")
-        (when "not entity.is_furniture")
-        (call m_part_bloodsplash "target.x, target.y, entity.angle"))
+        (set! (-> entity :was_counted_for_combo) #t)
+        (call sfx (call frnda 2 21))
+        (call handle_impact_death entity target)
+        (when (not (-> entity :is_furniture)) (call m_part_bloodsplash (-> target :x) (-> target :y) (-> entity :angle))))
       (body-lines
         "function combo(entity, target)"
         "\tentity.was_counted_for_combo = true"
@@ -789,20 +774,21 @@
         "\tif not entity.is_furniture then"
         "\t\tm_part_bloodsplash(target.x, target.y, entity.angle)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (target) #:returns ()
       (name slash_target)
       (params (target))
+      (returns ())
       (line-range (419 426))
       (api-calls (sfx))
       (called-functions (a_anim_set handle_impact handle_slash_entity_impact))
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (call sfx "25")
-        (set! |target.fly_speed, target.angle| "3, p1.slash_angle")
-        (call target:handle_impact "")
-        (call handle_slash_entity_impact "target")
-        (call a_anim_set "p1, \"attack\""))
+        (call sfx 25)
+        (set-values! ((-> target :fly_speed) (-> target :angle)) (3 (-> p1 :slash_angle)))
+        (send target :handle_impact)
+        (call handle_slash_entity_impact target)
+        (call a_anim_set p1 "attack"))
       (body-lines
         "function slash_target(target)"
         ""
@@ -812,55 +798,54 @@
         "\thandle_slash_entity_impact(target)"
         "\ta_anim_set(p1, \"attack\")"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (entity anim_set tick_multiplier) #:returns ()
       (name a_anim_update)
       (params (entity anim_set tick_multiplier))
+      (returns ())
       (line-range (428 431))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "tick_multiplier == nil"))
+        (if-cond (== tick_multiplier nil)))
       (decompiled-pseudo-code
-        (when "tick_multiplier == nil")
-        (set! tick_multiplier "1"))
+        (when (== tick_multiplier nil) (set! tick_multiplier 1)))
       (body-lines
         "function a_anim_update(entity, anim_set, tick_multiplier)"
         "\tif tick_multiplier == nil then"
         "\t\ttick_multiplier = 1"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity anim) #:returns ()
       (name a_anim_set)
       (params (entity anim))
+      (returns ())
       (line-range (444 448))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "(anim==entity.curanim")
-        (return-expr ""))
+        (if-cond (== anim (-> entity :curanim)))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! |entity.animtick, entity.curanim, entity.curframe| "character_anims[anim].ticks, anim, 1"))
+        (when (== anim (-> entity :curanim)) (return))
+        (set-values! ((-> entity :animtick) (-> entity :curanim) (-> entity :curframe)) ((-> (aref character_anims anim) :ticks) anim 1)))
       (body-lines
         "function a_anim_set(entity, anim)"
         "\tif(anim==entity.curanim)return"
         ""
         "\tentity.animtick, entity.curanim, entity.curframe = character_anims[anim].ticks, anim, 1"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name a_doflipx)
       (params (entity))
+      (returns ())
       (line-range (450 458))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "angle == .25 or angle == .75")
-        (return-expr ""))
+        (if-cond (== angle |.|))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! angle "entity.angle")
-        (when "angle == .25 or angle == .75")
-        (return "")
-        (when "angle > .25 and angle < .75")
-        (set! entity.flipx "true")
-        (set! entity.flipx "false"))
+        (set! angle (-> entity :angle))
+        (when (== angle |.|) (return) (if (> angle |.|) (then (set! (-> entity :flipx) #t)) (else (set! (-> entity :flipx) #f)))))
       (body-lines
         "function a_doflipx(entity)"
         "\tlocal angle = entity.angle"
@@ -871,34 +856,33 @@
         "\telse"
         "\t\tentity.flipx = false"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (obj) #:returns (val)
       (name constrain_to_screen)
       (params (obj))
+      (returns (val))
       (line-range (461 463))
       (api-calls ())
       (called-functions (constrain_to_borders))
       (structured-ast
-        (return-expr "constrain_to_borders(obj, g_level_screen_buffer+4, g_level_scree"))
+        (return-expr (call constrain_to_borders obj (+ g_level_screen_buffer 4) (+ g_level_screen_buffer 4) (- 124 g_level_screen_buffer) (- 124 g_level_screen_buffer))))
       (decompiled-pseudo-code
-        (return "constrain_to_borders(obj, g_level_screen_buffer+4, g_level_screen_buffer+4, 124-g_level_screen_buffer, 124-g_level_screen_buffer)"))
+        (return (call constrain_to_borders obj (+ g_level_screen_buffer 4) (+ g_level_screen_buffer 4) (- 124 g_level_screen_buffer) (- 124 g_level_screen_buffer))))
       (body-lines
         "function constrain_to_screen(obj)"
         "\treturn constrain_to_borders(obj, g_level_screen_buffer+4, g_level_screen_buffer+4, 124-g_level_screen_buffer, 124-g_level_screen_buffer)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (obj bor_x1 bor_y1 bor_x2 bor_y2) #:returns ()
       (name constrain_to_borders)
       (params (obj bor_x1 bor_y1 bor_x2 bor_y2))
+      (returns ())
       (line-range (465 472))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "x < bor_x1"))
+        (if-cond (< x bor_x1)))
       (decompiled-pseudo-code
-        (set! |was_constrained, x, y| "false, obj.x, obj.y")
-        (when "x < bor_x1")
-        (set! |x, was_constrained| "bor_x1, true")
-        (when "x > bor_x2")
-        (set! |x, was_constrained| "bor_x2, true"))
+        (set-values! (was_constrained x y) (#f (-> obj :x) (-> obj :y)))
+        (when (< x bor_x1) (set-values! (x was_constrained) (bor_x1 #t)) (when (> x bor_x2) (set-values! (x was_constrained) (bor_x2 #t)))))
       (body-lines
         "function constrain_to_borders(obj, bor_x1, bor_y1, bor_x2, bor_y2)"
         ""
@@ -908,38 +892,34 @@
         "\telseif x > bor_x2 then"
         "\t\tx, was_constrained = bor_x2, true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (duration) #:returns ()
       (name game_pause)
       (params (duration))
+      (returns ())
       (line-range (482 484))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! game_pause_timer "duration"))
+        (set! game_pause_timer duration))
       (body-lines
         "function game_pause(duration)"
         "\tgame_pause_timer = duration"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (entity target) #:returns ()
       (name handle_impact_death)
       (params (entity target))
+      (returns ())
       (line-range (486 494))
       (api-calls ())
       (called-functions (m_part_bloodsplash split_entity))
       (structured-ast
-        (if-cond "not entity.is_furniture and not entity.is_armored")
-        (if-cond "target.is_heavy")
-        (if-cond "not target.is_bloody"))
+        (if-cond (and (not (-> entity :is_furniture)) (not (-> entity :is_armored))))
+        (if-cond (-> target :is_heavy))
+        (if-cond (not (-> target :is_bloody))))
       (decompiled-pseudo-code
-        (when "not entity.is_furniture and not entity.is_armored")
-        (call split_entity "entity, (entity.angle+.5)%1")
-        (call m_part_bloodsplash "target.x, target.y, entity.angle")
-        (when "target.is_heavy")
-        (when "not target.is_bloody")
-        (+= target.sprite "16")
-        (set! target.is_bloody "true"))
+        (when (and (not (-> entity :is_furniture)) (not (-> entity :is_armored))) (call split_entity entity (+ (-> entity :angle) |.|)) (call m_part_bloodsplash (-> target :x) (-> target :y) (-> entity :angle)) (when (-> target :is_heavy) (when (not (-> target :is_bloody)) (+= (-> target :sprite) 16) (set! (-> target :is_bloody) #t)))))
       (body-lines
         "function handle_impact_death(entity, target)"
         "\tif not entity.is_furniture and not entity.is_armored then"
@@ -950,50 +930,53 @@
         "\t\t\t\ttarget.sprite += 16"
         "\t\t\t\ttarget.is_bloody = true"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name fly_reset)
       (params (entity))
+      (returns ())
       (line-range (510 513))
       (api-calls ())
       (called-functions (get_dir_to_player))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (nop))
+        (-> entity :fly_speed)
+        0)
       (body-lines
         "function fly_reset(entity)"
         "\tentity.fly_speed, entity.is_flying, entity.is_flying_impactable, entity.angle, entity.score_multiplier ="
         "\t0, false, false, get_dir_to_player(entity), 1"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name attack_reset)
       (params (entity))
+      (returns ())
       (line-range (515 518))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (nop))
+        (-> entity :attack_time_rem)
+        0)
       (body-lines
         "function attack_reset(entity)"
         "\tentity.attack_time_rem, entity.recovery_time_rem, entity.time_between_attacks_rem ="
         "\t0, entity.recovery_time, entity.time_between_attacks+entity.recovery_time"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name a_attack)
       (params (entity))
+      (returns ())
       (line-range (520 527))
       (api-calls (sfx))
       (called-functions (a_move_angle attack_reset constrain_to_screen))
       (structured-ast
-        (if-cond "constrain_to_screen(entity"))
+        (if-cond (call constrain_to_screen entity)))
       (decompiled-pseudo-code
-        (-= entity.attack_time_rem "1")
-        (call a_move_angle "entity, 4")
-        (when "constrain_to_screen(entity)")
-        (call sfx "20")
-        (call attack_reset "entity"))
+        (-= (-> entity :attack_time_rem) 1)
+        (call a_move_angle entity 4)
+        (when (call constrain_to_screen entity) (call sfx 20) (call attack_reset entity)))
       (body-lines
         "function a_attack(entity)"
         ""
@@ -1003,21 +986,20 @@
         "\t\tsfx(20)"
         "\t\tattack_reset(entity)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name a_fly)
       (params (entity))
+      (returns ())
       (line-range (534 543))
       (api-calls ())
       (called-functions (a_move_angle fly_reset))
       (structured-ast
-        (if-cond "entity.fly_speed <= .1"))
+        (if-cond (<= (-> entity :fly_speed) |.|)))
       (decompiled-pseudo-code
-        (call a_move_angle "entity, entity.fly_speed")
-        (*= entity.fly_speed ".95")
-        (set! was_reset "false")
-        (when "entity.fly_speed <= .1")
-        (call fly_reset "entity")
-        (set! was_reset "true"))
+        (call a_move_angle entity (-> entity :fly_speed))
+        (*= (-> entity :fly_speed) |.|)
+        (set! was_reset #f)
+        (when (<= (-> entity :fly_speed) |.|) (call fly_reset entity) (set! was_reset #t)))
       (body-lines
         "function a_fly(entity)"
         "\ta_move_angle(entity, entity.fly_speed)"
@@ -1029,39 +1011,35 @@
         "\t\tfly_reset(entity)"
         "\t\twas_reset = true"
         "  end"))
-    (def-pico-function
+    (def-pico-function #:params (entity speed) #:returns ()
       (name a_move_angle)
       (params (entity speed))
+      (returns ())
       (line-range (566 569))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "not speed"))
+        (if-cond (not speed)))
       (decompiled-pseudo-code
-        (when "not speed")
-        (set! speed "entity.speed_move"))
+        (when (not speed) (set! speed (-> entity :speed_move))))
       (body-lines
         "function a_move_angle(entity, speed)"
         "\tif not speed then"
         "\t\tspeed = entity.speed_move"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (cur_angle desired_angle) #:returns ()
       (name get_direction_to_turn)
       (params (cur_angle desired_angle))
+      (returns ())
       (line-range (619 629))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "-.5 < angle_delta and angle_delta <= .5"))
+        (if-cond (- |.|)))
       (decompiled-pseudo-code
-        (set! angle_delta "desired_angle-cur_angle")
-        (set! turn_result "0")
-        (when "-.5 < angle_delta and angle_delta <= .5")
-        (set! turn_result "angle_delta")
-        (when "angle_delta > .5")
-        (set! turn_result "angle_delta - 1")
-        (when "angle_delta <= -.5")
-        (set! turn_result "angle_delta + 1"))
+        (set! angle_delta (- desired_angle cur_angle))
+        (set! turn_result 0)
+        (when (- |.|) (set! turn_result angle_delta) (when (> angle_delta |.|) (set! turn_result (- angle_delta 1)) (when (<= angle_delta (- |.|)) (set! turn_result (+ angle_delta 1))))))
       (body-lines
         "function get_direction_to_turn(cur_angle, desired_angle)"
         "\tlocal angle_delta = desired_angle-cur_angle"
@@ -1074,74 +1052,75 @@
         "\telseif angle_delta <= -.5 then"
         "\t\tturn_result = angle_delta + 1"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (angle speed) #:returns ()
       (name get_rebound_angle_speed)
       (params (angle speed))
+      (returns ())
       (line-range (638 642))
       (api-calls ())
       (called-functions (randc))
       (structured-ast
-        (if-cond "randc("))
+        (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! dir "-.125")
-        (when "randc()")
-        (set! dir ".125"))
+        (set! dir (- |.|))
+        (when (call randc) (set! dir |.|)))
       (body-lines
         "function get_rebound_angle_speed(angle, speed)"
         "\tlocal dir = -.125"
         "\tif randc() then"
         "\t\tdir = .125"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name get_angle_from_input)
       (params ())
+      (returns (val))
       (line-range (646 649))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "p1.recovery_time_rem > 0")
-        (return-expr "0"))
+        (if-cond (> (-> p1 :recovery_time_rem) 0))
+        (return-expr 0))
       (decompiled-pseudo-code
-        (when "p1.recovery_time_rem > 0")
-        (return "0"))
+        (when (> (-> p1 :recovery_time_rem) 0) (return 0)))
       (body-lines
         "function get_angle_from_input()"
         "\tif p1.recovery_time_rem > 0 then"
         "\t\treturn 0"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_player)
       (params (setx sety))
+      (returns ())
       (line-range (677 709))
       (api-calls ())
       (called-functions (move))
       (structured-ast
         (seq-block 33))
       (decompiled-pseudo-code
-        (set! name "\"\",")
-        (set! pcolor "7,")
-        (set! scolor "6,")
-        (set! is_player "true,")
-        (set! x "setx,")
-        (set! y "sety,")
-        (set! angle "0,")
-        (set! speed_move "0,")
-        (set! speed_move_max "1.25,")
-        (set! col_w "6,")
-        (set! col_h "6,")
-        (set! col_off "0,")
-        (set! curanim "\"move\",")
-        (set! curframe "1,")
-        (set! animtick "0,")
-        (set! flipx "true,")
-        (set! head_shift "0,")
-        (set! body_shift "0,")
-        (set! hp_cur "2,")
-        (set! is_dead "false,")
-        (set! recovery_time_rem "0,")
-        (set! ready_time "150,")
-        (set! invuln_frames "0,")
-        (set! is_slashing "false,"))
+        local
+        (table)
+        (set! name "")
+        (set! pcolor 7)
+        (set! scolor 6)
+        (set! is_player #t)
+        (set! x setx)
+        (set! y sety)
+        (set! angle 0)
+        (set! speed_move 0)
+        (set! speed_move_max 1.25)
+        (set! col_w 6)
+        (set! col_h 6)
+        (set! col_off 0)
+        (set! curanim "move")
+        (set! curframe 1)
+        (set! animtick 0)
+        (set! flipx #t)
+        (set! head_shift 0)
+        (set! body_shift 0)
+        (set! hp_cur 2)
+        (set! is_dead #f)
+        (set! recovery_time_rem 0)
+        (set! ready_time 150))
       (body-lines
         "function m_player(setx, sety)"
         ""
@@ -1175,50 +1154,48 @@
         "    invuln_frames = 0,"
         "\t\tis_slashing = false,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name init)
       (params (self))
+      (returns ())
       (line-range (710 711))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 2))
       (decompiled-pseudo-code
-        (set! init "function(self)"))
+        (nop))
       (body-lines
         "\t\tinit=function(self)"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self source do_kill) #:returns (val)
       (name damage)
       (params (self source do_kill))
+      (returns (val))
       (line-range (713 716))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.invuln_frames > 0 and not do_kill")
-        (return-expr "false"))
+        (if-cond (and (> (-> self :invuln_frames) 0) (not do_kill)))
+        (return-expr #f))
       (decompiled-pseudo-code
-        (set! damage "function(self, source, do_kill)")
-        (when "self.invuln_frames > 0 and not do_kill")
-        (return "false"))
+        (when (and (> (-> self :invuln_frames) 0) (not do_kill)) (return #f)))
       (body-lines
         "    damage=function(self, source, do_kill)"
         "      if self.invuln_frames > 0 and not do_kill then"
         "        return false"
         "      end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name slash)
       (params (self))
+      (returns ())
       (line-range (739 758))
       (api-calls (sfx))
       (called-functions (a_anim_set frnda))
       (structured-ast
-        (if-cond "not self.is_slashing"))
+        (if-cond (not (-> self :is_slashing))))
       (decompiled-pseudo-code
-        (set! slash "function(self)")
-        (when "not self.is_slashing")
-        (call sfx "frnda(3,4)")
-        (call a_anim_set "self, \"windup\""))
+        (when (not (-> self :is_slashing)) (call sfx (call frnda 3 4)) (call a_anim_set self "windup") (-> self :slash_has_impacted) (-> self :is_slashing) (-> self :slash_time) (-> self :slash_speed) (-> self :slash_angle) (-> self :speed_move) (-> self :ready_time) #t 5 6 (-> self :angle) 0 45))
       (body-lines
         "\t\tslash=function(self)"
         "\t\t\tif not self.is_slashing then"
@@ -1240,56 +1217,57 @@
         "\t\t\t\t0,"
         "\t\t\t\t45"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (761 764))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.is_dead")
-        (return-expr ""))
+        (if-cond (-> self :is_dead))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (when "self.is_dead")
-        (return ""))
+        (when (-> self :is_dead) (return)))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.is_dead then"
         "\t\t\t\treturn"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (851 854))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.is_dead")
-        (return-expr ""))
+        (if-cond (-> self :is_dead))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (when "self.is_dead")
-        (return ""))
+        (when (-> self :is_dead) (return)))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif self.is_dead then"
         "\t\t\t\treturn"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity emotion) #:returns ()
       (name m_emotion)
       (params (entity emotion))
+      (returns ())
       (line-range (883 891))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 9))
       (decompiled-pseudo-code
-        (set! owner "entity,")
-        (set! curanim "emotion,")
-        (set! curframe "1,")
-        (set! animtick "0,")
-        (set! color "g_color_interface,"))
+        local
+        (table)
+        (set! owner entity)
+        (set! curanim emotion)
+        (set! curframe 1)
+        (set! animtick 0)
+        (set! color g_color_interface))
       (body-lines
         "function m_emotion(entity, emotion)"
         "\tlocal e ="
@@ -1300,34 +1278,38 @@
         "\t\tanimtick=0,"
         "\t\tcolor=g_color_interface,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (892 894))
       (api-calls ())
       (called-functions (a_anim_update))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (call a_anim_update "self, emotion_anims"))
+        (call a_anim_update self emotion_anims))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\ta_anim_update(self, emotion_anims)"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (896 905))
       (api-calls (pal spr))
       (called-functions ())
       (structured-ast
         (seq-block 10))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (set! |frame, c_o| "emotion_anims[self.curanim].frames[self.curframe], -4")
-        (call pal "7, self.color")
-        (call pal ""))
+        (set-values! (frame c_o) ((aref (-> (aref emotion_anims (-> self :curanim)) :frames) (-> self :curframe)) (- 4)))
+        (call pal 7 (-> self :color))
+        (call spr frame void)
+        (+ (-> (-> self :owner) :x) c_o)
+        (- (+ (-> (-> self :owner) :y) c_o) 10)
+        1
+        (call pal))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal frame, c_o = emotion_anims[self.curanim].frames[self.curframe], -4"
@@ -1339,51 +1321,51 @@
         "\t\t\t\t1,1, false)"
         "\t\t\tpal()"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (angle) #:returns (val)
       (name get_flipx_from_angle)
       (params (angle))
+      (returns (val))
       (line-range (912 915))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "angle > .25 and angle <= .75")
-        (return-expr "true"))
+        (if-cond (> angle |.|))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (when "angle > .25 and angle <= .75")
-        (return "true"))
+        (when (> angle |.|) (return #t)))
       (body-lines
         "function get_flipx_from_angle(angle)"
         "\tif angle > .25 and angle <= .75 then"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns (val)
       (name get_dir_to_player)
       (params (entity))
+      (returns (val))
       (line-range (919 921))
       (api-calls (atan2))
       (called-functions ())
       (structured-ast
-        (return-expr "(atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"))
+        (return-expr (+ (call atan2 (- (-> entity :x) (-> p1 :x)) (- (-> entity :y) (-> p1 :y))) |.|)))
       (decompiled-pseudo-code
-        (return "(atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"))
+        (return (+ (call atan2 (- (-> entity :x) (-> p1 :x)) (- (-> entity :y) (-> p1 :y))) |.|)))
       (body-lines
         "function get_dir_to_player(entity)"
         "\treturn (atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name get_yboboffset)
       (params (self))
+      (returns (val))
       (line-range (923 928))
       (api-calls ())
       (called-functions (move))
       (structured-ast
-        (if-cond "self.curanim == \"move\"")
-        (if-cond "self.curframe % 2 == 0")
-        (return-expr "-1"))
+        (if-cond (== (-> self :curanim) "move"))
+        (if-cond (== (modulo (-> self :curframe) 2) 0))
+        (return-expr (- 1)))
       (decompiled-pseudo-code
-        (when "self.curanim == \"move\"")
-        (when "self.curframe % 2 == 0")
-        (return "-1"))
+        (when (== (-> self :curanim) "move") (when (== (modulo (-> self :curframe) 2) 0) (return (- 1)))))
       (body-lines
         "function get_yboboffset(self)"
         ""
@@ -1391,18 +1373,22 @@
         "\t\tif self.curframe % 2 == 0 then"
         "\t\t\treturn -1"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (x y) #:returns ()
       (name m_step)
       (params (x y))
+      (returns ())
       (line-range (933 940))
       (api-calls (add))
       (called-functions (frnda))
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (set! x "x-frnda(4,2),")
-        (set! y "y,")
-        (call add "list_steps, s"))
+        local
+        (table)
+        (set! x (- x (call frnda 4 2)))
+        (set! y y)
+        |}|
+        (call add list_steps s))
       (body-lines
         "function m_step(x,y)"
         "\tlocal s ="
@@ -1412,19 +1398,18 @@
         "\t}"
         "\tadd(list_steps, s)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name check_for_footsteps)
       (params (self))
+      (returns ())
       (line-range (942 947))
       (api-calls ())
       (called-functions (m_step randc))
       (structured-ast
-        (if-cond "g_season == 3 and not g_level_indoor")
-        (if-cond "randc(50"))
+        (if-cond (and (== g_season 3) (not g_level_indoor)))
+        (if-cond (call randc 50)))
       (decompiled-pseudo-code
-        (when "g_season == 3 and not g_level_indoor")
-        (when "randc(50)")
-        (call m_step "self.x, self.y"))
+        (when (and (== g_season 3) (not g_level_indoor)) (when (call randc 50) (call m_step (-> self :x) (-> self :y)))))
       (body-lines
         "function check_for_footsteps(self)"
         "\t-- do snow stuff"
@@ -1432,19 +1417,18 @@
         "\t\tif randc(50) then"
         "\t\t\tm_step(self.x, self.y)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw_character)
       (params (self))
+      (returns ())
       (line-range (951 958))
       (api-calls (pal))
       (called-functions (a_set_invuln_flash get_yboboffset))
       (structured-ast
-        (if-cond "not a_set_invuln_flash(self"))
+        (if-cond (not (call a_set_invuln_flash self))))
       (decompiled-pseudo-code
-        (set! yboboffset "get_yboboffset(self)")
-        (when "not a_set_invuln_flash(self)")
-        (call pal "6,self.scolor")
-        (call pal "7,self.pcolor"))
+        (set! yboboffset (call get_yboboffset self))
+        (when (not (call a_set_invuln_flash self)) (call pal 6 (-> self :scolor)) (call pal 7 (-> self :pcolor))))
       (body-lines
         "function draw_character(self)"
         ""
@@ -1454,53 +1438,58 @@
         "\t\tpal(6,self.scolor)"
         "\t\tpal(7,self.pcolor)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity angle) #:returns ()
       (name split_entity)
       (params (entity angle))
+      (returns ())
       (line-range (978 981))
       (api-calls (abs rnd))
       (called-functions (m_bodypart))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (call m_bodypart "entity, 42, entity.pcolor, (angle+.300+rnd(.325))%1")
-        (call m_bodypart "entity, 56+entity.head_shift, entity.scolor, abs(angle-.300-rnd(.325))%1"))
+        (+ (call m_bodypart entity 42 (-> entity :pcolor) (+ angle |.|)) (call rnd |.|))
+        (call m_bodypart entity (+ 56 (-> entity :head_shift)) (-> entity :scolor) (- (call abs (- angle |.|)) (call rnd |.|))))
       (body-lines
         "function split_entity(entity, angle)"
         "\tm_bodypart(entity, 42, entity.pcolor, (angle+.300+rnd(.325))%1)"
         "\tm_bodypart(entity, 56+entity.head_shift, entity.scolor, abs(angle-.300-rnd(.325))%1)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name rndbool)
       (params ())
+      (returns (val))
       (line-range (983 985))
       (api-calls ())
       (called-functions (frnd))
       (structured-ast
-        (return-expr "frnd(2) == 0"))
+        (return-expr (== (call frnd 2) 0)))
       (decompiled-pseudo-code
-        (return "frnd(2) == 0"))
+        (return (== (call frnd 2) 0)))
       (body-lines
         "function rndbool()"
         "\treturn frnd(2) == 0"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (entity sprite replace_color angle) #:returns ()
       (name m_bodypart)
       (params (entity sprite replace_color angle))
+      (returns ())
       (line-range (987 1000))
       (api-calls (rnd))
       (called-functions (frnda rndbool))
       (structured-ast
         (seq-block 14))
       (decompiled-pseudo-code
-        (set! x "entity.x,")
-        (set! y "entity.y,")
-        (set! replace_color "replace_color,")
-        (set! angle "angle,")
-        (set! sprite "sprite,")
-        (set! speed_move ".5+rnd(.5),")
-        (set! flip_x "rndbool(),")
-        (set! decay_time "frnda(25,25),"))
+        local
+        (table)
+        (set! x (-> entity :x))
+        (set! y (-> entity :y))
+        (set! replace_color replace_color)
+        (set! angle angle)
+        (set! sprite sprite)
+        (set! speed_move |.|)
+        (set! flip_x (call rndbool))
+        (set! decay_time (call frnda 25 25)))
       (body-lines
         "function m_bodypart(entity, sprite, replace_color, angle)"
         "\tlocal h="
@@ -1516,24 +1505,19 @@
         ""
         "\t\tdecay_time=frnda(25,25),"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (1001 1011))
       (api-calls (del))
       (called-functions ())
       (structured-ast
-        (if-cond "self.speed_move < .1")
-        (if-cond "self.decay_time < 0")
-        (return-expr ""))
+        (if-cond (< (-> self :speed_move) |.|))
+        (if-cond (< (-> self :decay_time) 0))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (when "self.speed_move < .1")
-        (-= self.decay_time "1")
-        (when "self.decay_time < 0")
-        (call del "list_heads, self")
-        (call del "list_drawstuff, self")
-        (return ""))
+        (when (< (-> self :speed_move) |.|) (-= (-> self :decay_time) 1) (when (< (-> self :decay_time) 0) (call del list_heads self) (call del list_drawstuff self) (return))))
       (body-lines
         "\t\tupdate=function(self)"
         ""
@@ -1546,20 +1530,25 @@
         "\t\t\t\t\tdel(list_drawstuff, self)"
         "\t\t\t\t\treturn"
         "\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (1031 1044))
       (api-calls (pal spr))
       (called-functions (set_outline))
       (structured-ast
         (seq-block 14))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (set! c_o "-4")
-        (call set_outline "")
-        (call pal "6, self.replace_color")
-        (call pal ""))
+        (set! c_o (- 4))
+        (call set_outline)
+        (call pal 6 (-> self :replace_color))
+        (call spr (-> self :sprite) void)
+        (+ (-> self :x) c_o)
+        (+ (+ (-> self :y) 1) c_o)
+        1
+        (-> self :flip_x)
+        (call pal))
       (body-lines
         "\t\tdraw=function(self)"
         ""
@@ -1575,23 +1564,26 @@
         "\t\t\t\tself.flip_x)"
         "\t\t\tpal()"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (x y spritelist is_deadly) #:returns ()
       (name m_object)
       (params (x y spritelist is_deadly))
+      (returns ())
       (line-range (1051 1062))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 12))
       (decompiled-pseudo-code
-        (set! x "x,")
-        (set! y "y,")
-        (set! col_w "4,")
-        (set! col_h "2,")
-        (set! spritelist "spritelist,")
-        (set! sprite "1,")
-        (set! is_static "true,")
-        (set! is_deadly "is_deadly,"))
+        local
+        (table)
+        (set! x x)
+        (set! y y)
+        (set! col_w 4)
+        (set! col_h 2)
+        (set! spritelist spritelist)
+        (set! sprite 1)
+        (set! is_static #t)
+        (set! is_deadly is_deadly))
       (body-lines
         "function m_object(x, y, spritelist, is_deadly)"
         "\tlocal o ="
@@ -1605,49 +1597,50 @@
         "\t\tis_static=true,"
         "\t\tis_deadly=is_deadly,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (1063 1064))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 2))
       (decompiled-pseudo-code
-        (set! update "function(self)"))
+        (nop))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name dealt_damage)
       (params (self))
+      (returns ())
       (line-range (1066 1068))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! dealt_damage "function(self)")
-        (set! self.sprite "2"))
+        (set! (-> self :sprite) 2))
       (body-lines
         "\t\tdealt_damage=function(self)"
         "\t\t\tself.sprite = 2"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (1070 1076))
       (api-calls (pal spr))
       (called-functions (set_outline))
       (structured-ast
         (seq-block 7))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (call set_outline "")
-        (call pal "14, 8")
-        (call pal "1, g_color_detail")
-        (call spr "self.spritelist[self.sprite], x-4, y-4")
-        (call pal ""))
+        (call set_outline)
+        (call pal 14 8)
+        (call pal 1 g_color_detail)
+        (call spr (aref (-> self :spritelist) (-> self :sprite)) (- x 4) (- y 4))
+        (call pal))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tset_outline()"
@@ -1656,21 +1649,25 @@
         "\t\t\tspr(self.spritelist[self.sprite], x-4, y-4)"
         "\t\t\tpal()"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_food)
       (params (setx sety))
+      (returns ())
       (line-range (1083 1093))
       (api-calls (del))
       (called-functions (m_object m_part_sprite score_add))
       (structured-ast
         (seq-block 11))
       (decompiled-pseudo-code
-        (set! o "m_object(setx, sety, {99, 99}, false)")
-        (set! p1.hp_cur "2")
-        (call m_part_sprite "106, self.x, self.y, -.1, g_color_outline, g_color_outline, 15, false, true")
-        (call score_add "self, 5")
-        (call del "list_objects, self")
-        (call del "list_drawstuff, self"))
+        (set! o (call m_object setx sety (table 99 99) #f))
+        (-> o :col_h)
+        6
+        (call function self)
+        (set! (-> p1 :hp_cur) 2)
+        (call m_part_sprite 106 (-> self :x) (-> self :y) (- |.|))
+        (call score_add self 5)
+        (call del list_objects self)
+        (call del list_drawstuff self))
       (body-lines
         "function m_food(setx, sety)"
         "\tlocal o = m_object(setx, sety, {99, 99}, false)"
@@ -1683,18 +1680,17 @@
         "\t\tdel(list_objects, self)"
         "\t\tdel(list_drawstuff, self)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name add_to_people)
       (params (entity))
+      (returns ())
       (line-range (1096 1102))
       (api-calls (add))
       (called-functions ())
       (structured-ast
-        (if-cond "entity.is_villager"))
+        (if-cond (-> entity :is_villager)))
       (decompiled-pseudo-code
-        (when "entity.is_villager")
-        (call add "list_villagers, entity")
-        (call add "list_enemies, entity"))
+        (if (-> entity :is_villager) (then (call add list_villagers entity)) (else (call add list_enemies entity))))
       (body-lines
         "function add_to_people(entity)"
         ""
@@ -1703,19 +1699,17 @@
         "\telse"
         "\t\tadd(list_enemies, entity)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name del_from_people)
       (params (entity))
+      (returns ())
       (line-range (1108 1113))
       (api-calls (del))
       (called-functions ())
       (structured-ast
-        (if-cond "entity.is_villager"))
+        (if-cond (-> entity :is_villager)))
       (decompiled-pseudo-code
-        (when "entity.is_villager")
-        (call del "list_villagers, entity")
-        (when "not entity.is_furniture")
-        (call del "list_enemies, entity"))
+        (when (-> entity :is_villager) (call del list_villagers entity) (when (not (-> entity :is_furniture)) (call del list_enemies entity))))
       (body-lines
         "function del_from_people(entity)"
         "\tif entity.is_villager then"
@@ -1723,22 +1717,19 @@
         "\telseif not entity.is_furniture then"
         "\t\tdel(list_enemies, entity)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns (val)
       (name a_alert_checkforwindup)
       (params (entity))
+      (returns (val))
       (line-range (1121 1131))
       (api-calls ())
       (called-functions (a_anim_set get_dir_to_player get_flipx_from_angle is_level_active is_near_objs))
       (structured-ast
-        (if-cond "is_level_active(")
-        (return-expr "true")
-        (return-expr "false"))
+        (if-cond (call is_level_active void))
+        (return-expr #t)
+        (return-expr #f))
       (decompiled-pseudo-code
-        (when "is_level_active() and entity.windup_time_rem == 0 and is_near_objs(entity, p1, entity.alert_distance)")
-        (set! entity.flipx "get_flipx_from_angle(entity.desired_angle)")
-        (call a_anim_set "entity, \"windup\"")
-        (return "true")
-        (return "false"))
+        (if (and (and (call is_level_active) (== (-> entity :windup_time_rem) 0)) (call is_near_objs entity p1 (-> entity :alert_distance))) (then (-> entity :windup_time_rem) (- (-> entity :windup_time) (* (-> entity :emotion_count) 3)) (set! (-> entity :flipx) (call get_flipx_from_angle (-> entity :desired_angle))) (call a_anim_set entity "windup") (return #t)) (else (return #f))))
       (body-lines
         "function a_alert_checkforwindup(entity)"
         "\tif is_level_active() and entity.windup_time_rem == 0 and is_near_objs(entity, p1, entity.alert_distance) then"
@@ -1751,69 +1742,70 @@
         "\telse"
         "\t\treturn false"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity time) #:returns ()
       (name a_deviate)
       (params (entity time))
+      (returns ())
       (line-range (1134 1137))
       (api-calls ())
       (called-functions (frnda randc))
       (structured-ast
-        (if-cond "randc(10"))
+        (if-cond (call randc 10)))
       (decompiled-pseudo-code
-        (when "randc(10)")
-        (set! entity.deviation_time "frnda(time, time)"))
+        (when (call randc 10) (set! (-> entity :deviation_time) (call frnda time time))))
       (body-lines
         "function a_deviate(entity, time)"
         "\tif randc(10) then"
         "\t\tentity.deviation_time = frnda(time, time)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (entity) #:returns ()
       (name a_random_turn)
       (params (entity))
+      (returns ())
       (line-range (1140 1144))
       (api-calls ())
       (called-functions (randc))
       (structured-ast
-        (if-cond "randc("))
+        (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! angle_adjust ".25")
-        (when "randc()")
-        (set! angle_adjust "0-angle_adjust"))
+        (set! angle_adjust |.|)
+        (when (call randc) (set! angle_adjust (- 0 angle_adjust))))
       (body-lines
         "function a_random_turn(entity)"
         "\tlocal angle_adjust = .25"
         "\tif randc() then"
         "\t\tangle_adjust = 0-angle_adjust"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_enemy_villager)
       (params (setx sety))
+      (returns ())
       (line-range (1149 1153))
       (api-calls ())
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e "m_enemy(setx, sety, true)"))
+        (set! e (call m_enemy setx sety #t))
+        (-> e :head_shift)
+        6)
       (body-lines
         "function m_enemy_villager(setx, sety)"
         "\tlocal e = m_enemy(setx, sety, true)"
         "  e.head_shift, e.body_shift, e.pcolor, e.scolor, e.score ="
         "\t6, 16, 11, 4, -10"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self source) #:returns ()
       (name kill_class)
       (params (self source))
+      (returns ())
       (line-range (1154 1159))
       (api-calls ())
       (called-functions (level_end_villager_died))
       (structured-ast
-        (if-cond "source == p1"))
+        (if-cond (== source p1)))
       (decompiled-pseudo-code
-        (set! e.kill_class "function(self, source)")
-        (when "source == p1")
-        (call level_end_villager_died "true")
-        (call level_end_villager_died "false"))
+        (if (== source p1) (then (call level_end_villager_died #t)) (else (call level_end_villager_died #f))))
       (body-lines
         "\te.kill_class=function(self, source)"
         "\t\tif source == p1 then"
@@ -1821,71 +1813,67 @@
         "\t\telse"
         "\t\t\tlevel_end_villager_died(false)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name touch_class)
       (params (self))
+      (returns (val))
       (line-range (1163 1167))
       (api-calls ())
       (called-functions (del_from_people score_add))
       (structured-ast
-        (return-expr "true"))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! e.touch_class "function(self)")
-        (call score_add "self, 0-self.score-2.5*self.emotion_count")
-        (call del_from_people "self")
-        (return "true"))
+        (call score_add self (- (- 0 (-> self :score)) (* 2.5 (-> self :emotion_count))))
+        (call del_from_people self)
+        (return #t))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\tscore_add(self, 0-self.score-2.5*self.emotion_count)"
         "\t\tdel_from_people(self)"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name move)
       (params (self))
+      (returns ())
       (line-range (1169 1172))
       (api-calls ())
       (called-functions (a_deviate a_random_turn))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! e.move "function(self)")
-        (call a_deviate "self, 5")
-        (call a_random_turn "self"))
+        (call a_deviate self 5)
+        (call a_random_turn self))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 5)"
         "\t\ta_random_turn(self)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw_class)
       (params (self))
+      (returns ())
       (line-range (1174 1175))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 2))
       (decompiled-pseudo-code
-        (set! e.draw_class "function(self)"))
+        (nop))
       (body-lines
         "\te.draw_class=function(self)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (angle) #:returns ()
       (name nearest_angle)
       (params (angle))
+      (returns ())
       (line-range (1180 1189))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "angle>.825 or angle < .125"))
+        (if-cond (> angle |.|)))
       (decompiled-pseudo-code
-        (when "angle>.825 or angle < .125")
-        (set! angle "0")
-        (when "angle < .375")
-        (set! angle ".25")
-        (when "angle < .625")
-        (set! angle ".5")
-        (set! angle ".75"))
+        (when (> angle |.|) (set! angle 0) (when (< angle |.|) (set! angle |.|) (if (< angle |.|) (then (set! angle |.|)) (else (set! angle |.|))))))
       (body-lines
         "function nearest_angle(angle)"
         "\tif angle>.825 or angle < .125 then"
@@ -1897,25 +1885,28 @@
         "\telse"
         "\t\tangle = .75"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (x y angle) #:returns ()
       (name m_arrow)
       (params (x y angle))
+      (returns ())
       (line-range (1193 1206))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 14))
       (decompiled-pseudo-code
-        (set! x "x,")
-        (set! y "y,")
-        (set! col_w "4,")
-        (set! col_h "4,")
-        (set! angle "angle,")
-        (set! speed_move "3,")
-        (set! is_static "false,")
-        (set! is_deadly "true,")
-        (set! sprite "40,")
-        (set! flipx "false,"))
+        local
+        (table)
+        (set! x x)
+        (set! y y)
+        (set! col_w 4)
+        (set! col_h 4)
+        (set! angle angle)
+        (set! speed_move 3)
+        (set! is_static #f)
+        (set! is_deadly #t)
+        (set! sprite 40)
+        (set! flipx #f))
       (body-lines
         "function m_arrow(x, y, angle)"
         "\tlocal a ="
@@ -1931,115 +1922,109 @@
         "\t\tsprite=40,"
         "\t\tflipx=false,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (1207 1211))
       (api-calls (pal spr))
       (called-functions (set_outline))
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (call set_outline "")
-        (call spr "self.sprite, self.x-4, self.y-4, 1, 1, self.flipx")
-        (call pal ""))
+        (call set_outline)
+        (call spr (-> self :sprite) (- (-> self :x) 4) (- (-> self :y) 4) 1 1 (-> self :flipx))
+        (call pal))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tset_outline()"
         "\t\t\tspr(self.sprite, self.x-4, self.y-4, 1, 1, self.flipx)"
         "\t\t\tpal()"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (1213 1217))
       (api-calls ())
       (called-functions (a_move_angle constrain_to_screen dealt_damage))
       (structured-ast
-        (if-cond "constrain_to_screen(self"))
+        (if-cond (call constrain_to_screen self)))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (call a_move_angle "self")
-        (when "constrain_to_screen(self)")
-        (call self:dealt_damage ""))
+        (call a_move_angle self)
+        (when (call constrain_to_screen self) (send self :dealt_damage)))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\ta_move_angle(self)"
         "\t\t\tif constrain_to_screen(self) then"
         "\t\t\t\tself:dealt_damage()"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name dealt_damage)
       (params (self))
+      (returns ())
       (line-range (1220 1223))
       (api-calls (del))
       (called-functions ())
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! dealt_damage "function(self)")
-        (call del "list_objects, self")
-        (call del "list_drawstuff, self"))
+        (call del list_objects self)
+        (call del list_drawstuff self))
       (body-lines
         "\t\tdealt_damage=function(self)"
         "\t\t\tdel(list_objects, self)"
         "\t\t\tdel(list_drawstuff, self)"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_enemy_archer)
       (params (setx sety))
+      (returns ())
       (line-range (1233 1236))
       (api-calls ())
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! e "m_enemy(setx, sety)")
-        (set! |e.head_shift, e.pcolor, e.scolor, e.alert_distance, e.windup_time, e.time_between_attacks, e.attack_time, e.attack_is_shot| "4, 14, 13, 60, 30, 60, 30, true"))
+        (set! e (call m_enemy setx sety))
+        (set-values! ((-> e :head_shift) (-> e :pcolor) (-> e :scolor) (-> e :alert_distance) (-> e :windup_time) (-> e :time_between_attacks) (-> e :attack_time) (-> e :attack_is_shot)) (4 14 13 60 30 60 30 #t)))
       (body-lines
         "function m_enemy_archer(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
         "\te.head_shift, e.pcolor, e.scolor, e.alert_distance, e.windup_time, e.time_between_attacks, e.attack_time, e.attack_is_shot = 4, 14, 13, 60, 30, 60, 30, true"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name move)
       (params (self))
+      (returns ())
       (line-range (1237 1241))
       (api-calls ())
       (called-functions (a_deviate get_dir_to_player is_level_active))
       (structured-ast
-        (if-cond "is_level_active("))
+        (if-cond (call is_level_active void)))
       (decompiled-pseudo-code
-        (set! e.move "function(self)")
-        (call a_deviate "self, 10")
-        (when "is_level_active()")
-        (set! self.angle_desired "get_dir_to_player(self)"))
+        (call a_deviate self 10)
+        (when (call is_level_active) (set! (-> self :angle_desired) (call get_dir_to_player self))))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 10)"
         "\t\tif is_level_active() then"
         "\t\t\tself.angle_desired = get_dir_to_player(self)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name alert_class)
       (params (self))
+      (returns (val))
       (line-range (1244 1252))
       (api-calls (abs sfx))
       (called-functions (a_alert_checkforwindup nearest_angle))
       (structured-ast
-        (if-cond "abs(self.x - p1.x")
-        (if-cond "a_alert_checkforwindup(self")
-        (return-expr "true")
-        (return-expr "false"))
+        (if-cond (call abs (- (-> self :x) (-> p1 :x))))
+        (if-cond (call a_alert_checkforwindup self))
+        (return-expr #t)
+        (return-expr #f))
       (decompiled-pseudo-code
-        (set! e.alert_class "function(self)")
-        (when "abs(self.x - p1.x) < 5 or abs(self.y - p1.y) < 5")
-        (when "a_alert_checkforwindup(self)")
-        (set! self.desired_angle "nearest_angle(self.desired_angle)")
-        (call sfx "24")
-        (return "true")
-        (return "false"))
+        (when (or (< (call abs (- (-> self :x) (-> p1 :x))) 5) (< (call abs (- (-> self :y) (-> p1 :y))) 5)) (if (call a_alert_checkforwindup self) (then (set! (-> self :desired_angle) (call nearest_angle (-> self :desired_angle))) (call sfx 24) (return #t)) (else (return #f)))))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\tif abs(self.x - p1.x) < 5 or abs(self.y - p1.y) < 5 then"
@@ -2050,41 +2035,35 @@
         "\t\t\telse"
         "\t\t\t\treturn false"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name fire_arrow)
       (params (self))
+      (returns ())
       (line-range (1256 1259))
       (api-calls (sfx))
       (called-functions (m_arrow))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! e.fire_arrow "function(self)")
-        (call sfx "17")
-        (call m_arrow "self.x, self.y, self.desired_angle"))
+        (call sfx 17)
+        (call m_arrow (-> self :x) (-> self :y) (-> self :desired_angle)))
       (body-lines
         "\te.fire_arrow=function(self)"
         "\t\tsfx(17)"
         "\t\tm_arrow(self.x, self.y, self.desired_angle)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw_class)
       (params (self))
+      (returns ())
       (line-range (1261 1269))
       (api-calls ())
       (called-functions (set_outline))
       (structured-ast
-        (if-cond "self.windup_time_rem > 0")
-        (if-cond "self.desired_angle == .75"))
+        (if-cond (> (-> self :windup_time_rem) 0))
+        (if-cond (== (-> self :desired_angle) |.|)))
       (decompiled-pseudo-code
-        (set! e.draw_class "function(self)")
-        (when "self.windup_time_rem > 0")
-        (call set_outline "")
-        (set! |arrow_sprite, doflipy| "40, false")
-        (when "self.desired_angle == .75")
-        (set! |arrow_sprite, doflipy| "41, true")
-        (when "self.desired_angle == .25")
-        (set! arrow_sprite "41"))
+        (when (> (-> self :windup_time_rem) 0) (call set_outline) (set-values! (arrow_sprite doflipy) (40 #f)) (when (== (-> self :desired_angle) |.|) (set-values! (arrow_sprite doflipy) (41 #t)) (when (== (-> self :desired_angle) |.|) (set! arrow_sprite 41)))))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tif self.windup_time_rem > 0 then"
@@ -2095,65 +2074,69 @@
         "\t\t\telseif self.desired_angle == .25 then"
         "\t\t\t\tarrow_sprite = 41"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_enemy_wander)
       (params (setx sety))
+      (returns ())
       (line-range (1276 1280))
       (api-calls ())
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e "m_enemy(setx, sety)")
-        (set! |e.head_shift, e.pcolor| "1, 9"))
+        (set! e (call m_enemy setx sety))
+        (set-values! ((-> e :head_shift) (-> e :pcolor)) (1 9)))
       (body-lines
         "function m_enemy_wander(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
         ""
         "\te.head_shift, e.pcolor = 1, 9"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name move)
       (params (self))
+      (returns ())
       (line-range (1281 1284))
       (api-calls ())
       (called-functions (a_deviate a_random_turn))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! e.move "function(self)")
-        (call a_deviate "self, 15")
-        (call a_random_turn "self"))
+        (call a_deviate self 15)
+        (call a_random_turn self))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 15)"
         "\t\ta_random_turn(self)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name alert_class)
       (params (self))
+      (returns (val))
       (line-range (1286 1288))
       (api-calls ())
       (called-functions (a_alert_checkforwindup))
       (structured-ast
-        (return-expr "a_alert_checkforwindup(self)"))
+        (return-expr (call a_alert_checkforwindup self)))
       (decompiled-pseudo-code
-        (set! e.alert_class "function(self)")
-        (return "a_alert_checkforwindup(self)"))
+        (return (call a_alert_checkforwindup self)))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\treturn a_alert_checkforwindup(self)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_enemy_bomber)
       (params (setx sety))
+      (returns ())
       (line-range (1293 1298))
       (api-calls ())
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (set! e "m_enemy(setx, sety)"))
+        (set! e (call m_enemy setx sety))
+        (-> e :pcolor)
+        8)
       (body-lines
         "function m_enemy_bomber(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -2161,55 +2144,52 @@
         " \te.pcolor, e.scolor, e.head_shift, e.is_fuse_lit, e.is_bomber ="
         "\t8, 4, 3, false, true"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name touch_class)
       (params (self))
+      (returns (val))
       (line-range (1299 1302))
       (api-calls ())
       (called-functions (explode))
       (structured-ast
-        (return-expr "true"))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! e.touch_class "function(self)")
-        (call self:explode "nil, true")
-        (return "true"))
+        (send self :explode nil #t)
+        (return #t))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\tself:explode(nil, true)"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update_class)
       (params (self))
+      (returns ())
       (line-range (1304 1308))
       (api-calls (sfx))
       (called-functions (is_near_objs))
       (structured-ast
-        (if-cond "not self.is_fuse_lit and is_near_objs(self, p1, 25"))
+        (if-cond (and (not (-> self :is_fuse_lit)) (call is_near_objs self p1 25))))
       (decompiled-pseudo-code
-        (set! e.update_class "function(self)")
-        (when "not self.is_fuse_lit and is_near_objs(self, p1, 25)")
-        (set! |self.is_fuse_lit, self.fuse_timer, self.emotion_count, self.speed_move| "true, 500, 1, self.speed_move_orig*2")
-        (call sfx "35"))
+        (when (and (not (-> self :is_fuse_lit)) (call is_near_objs self p1 25)) (set-values! ((-> self :is_fuse_lit) (-> self :fuse_timer) (-> self :emotion_count) (-> self :speed_move)) (#t 500 1 (* (-> self :speed_move_orig) 2))) (call sfx 35)))
       (body-lines
         "\te.update_class=function(self)"
         "\t\tif not self.is_fuse_lit and is_near_objs(self, p1, 25) then"
         "\t\t\tself.is_fuse_lit, self.fuse_timer, self.emotion_count, self.speed_move = true, 500, 1, self.speed_move_orig*2"
         "\t\t\tsfx(35)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name move)
       (params (self))
+      (returns ())
       (line-range (1321 1326))
       (api-calls ())
       (called-functions (a_deviate get_dir_to_player is_level_active))
       (structured-ast
-        (if-cond "is_level_active("))
+        (if-cond (call is_level_active void)))
       (decompiled-pseudo-code
-        (set! e.move "function(self)")
-        (call a_deviate "self, 10")
-        (when "is_level_active()")
-        (set! self.angle_desired "get_dir_to_player(self)"))
+        (call a_deviate self 10)
+        (when (call is_level_active) (set! (-> self :angle_desired) (call get_dir_to_player self))))
       (body-lines
         "\te.move=function(self)"
         ""
@@ -2217,124 +2197,123 @@
         "\t\tif is_level_active() then"
         "\t\t\tself.angle_desired = get_dir_to_player(self)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self source no_score) #:returns ()
       (name explode)
       (params (self source no_score))
+      (returns ())
       (line-range (1329 1332))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "source != nil and source != p1 and not source.is_heavy"))
+        (if-cond (and (and (!= source nil) (!= source p1)) (not (-> source :is_heavy)))))
       (decompiled-pseudo-code
-        (set! e.explode "function(self, source, no_score)")
-        (when "source != nil and source != p1 and not source.is_heavy")
-        (set! self.score_multiplier "source.score_multiplier + 1"))
+        (when (and (and (!= source nil) (!= source p1)) (not (-> source :is_heavy))) (set! (-> self :score_multiplier) (+ (-> source :score_multiplier) 1))))
       (body-lines
         "\te.explode=function(self, source, no_score)"
         "\t\tif source != nil and source != p1 and not source.is_heavy then"
         "\t\t\tself.score_multiplier = source.score_multiplier + 1"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self source) #:returns (val)
       (name handle_impact_class)
       (params (self source))
+      (returns (val))
       (line-range (1392 1395))
       (api-calls ())
       (called-functions (explode))
       (structured-ast
-        (return-expr "true"))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! e.handle_impact_class "function(self, source)")
-        (call self:explode "source")
-        (return "true"))
+        (send self :explode source)
+        (return #t))
       (body-lines
         "\te.handle_impact_class=function(self, source)"
         "\t\tself:explode(source)"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self source no_score) #:returns (val)
       (name kill_class)
       (params (self source no_score))
+      (returns (val))
       (line-range (1397 1400))
       (api-calls ())
       (called-functions (explode))
       (structured-ast
-        (return-expr "true"))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! e.kill_class "function(self, source, no_score)")
-        (call self:explode "source, no_score")
-        (return "true"))
+        (send self :explode source no_score)
+        (return #t))
       (body-lines
         "\te.kill_class=function(self, source, no_score)"
         "\t\tself:explode(source, no_score)"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw_class)
       (params (self))
+      (returns ())
       (line-range (1402 1406))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.flipx"))
+        (if-cond (-> self :flipx)))
       (decompiled-pseudo-code
-        (set! e.draw_class "function(self)")
-        (set! x_off "-5")
-        (when "self.flipx")
-        (set! x_off "-3"))
+        (set! x_off (- 5))
+        (when (-> self :flipx) (set! x_off (- 3))))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tlocal x_off = -5"
         "\t\tif self.flipx then"
         "\t\t\tx_off = -3"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_enemy_boss)
       (params (setx sety))
+      (returns ())
       (line-range (1415 1419))
       (api-calls ())
       (called-functions (init m_enemy_seeker))
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e "m_enemy_seeker(setx, sety)")
-        (set! |e.is_armored, e.head_shift, e.pcolor, e.scolor, e.speed_move_orig| "true, 5, 13, 6, .5")
-        (call e:init ""))
+        (set! e (call m_enemy_seeker setx sety))
+        (set-values! ((-> e :is_armored) (-> e :head_shift) (-> e :pcolor) (-> e :scolor) (-> e :speed_move_orig)) (#t 5 13 6 |.|))
+        (send e :init))
       (body-lines
         "function m_enemy_boss(setx, sety)"
         "\tlocal e = m_enemy_seeker(setx, sety)"
         "\te.is_armored, e.head_shift, e.pcolor, e.scolor, e.speed_move_orig = true, 5, 13, 6, .5"
         "\te:init()"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety) #:returns ()
       (name m_enemy_seeker)
       (params (setx sety))
+      (returns ())
       (line-range (1421 1425))
       (api-calls ())
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e "m_enemy(setx, sety)")
-        (set! e.head_shift "2"))
+        (set! e (call m_enemy setx sety))
+        (set! (-> e :head_shift) 2))
       (body-lines
         "function m_enemy_seeker(setx, sety)"
         ""
         "\tlocal e = m_enemy(setx, sety)"
         ""
         "\te.head_shift = 2"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name move)
       (params (self))
+      (returns ())
       (line-range (1426 1431))
       (api-calls ())
       (called-functions (a_deviate get_dir_to_player is_level_active))
       (structured-ast
-        (if-cond "is_level_active("))
+        (if-cond (call is_level_active void)))
       (decompiled-pseudo-code
-        (set! e.move "function(self)")
-        (call a_deviate "self, 10")
-        (when "is_level_active()")
-        (set! self.angle_desired "get_dir_to_player(self)"))
+        (call a_deviate self 10)
+        (when (call is_level_active) (set! (-> self :angle_desired) (call get_dir_to_player self))))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 10)"
@@ -2342,119 +2321,119 @@
         "\t\tif is_level_active() then"
         "\t\t\tself.angle_desired = get_dir_to_player(self)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name alert_class)
       (params (self))
+      (returns (val))
       (line-range (1434 1436))
       (api-calls ())
       (called-functions (a_alert_checkforwindup))
       (structured-ast
-        (return-expr "a_alert_checkforwindup(self)"))
+        (return-expr (call a_alert_checkforwindup self)))
       (decompiled-pseudo-code
-        (set! e.alert_class "function(self)")
-        (return "a_alert_checkforwindup(self)"))
+        (return (call a_alert_checkforwindup self)))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\treturn a_alert_checkforwindup(self)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety sprite is_heavy) #:returns ()
       (name m_enemy_furniture)
       (params (setx sety sprite is_heavy))
+      (returns ())
       (line-range (1441 1443))
       (api-calls ())
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! e "m_enemy(setx, sety)"))
+        (set! e (call m_enemy setx sety)))
       (body-lines
         "function m_enemy_furniture(setx, sety, sprite, is_heavy)"
         "\tlocal e = m_enemy(setx, sety)"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update_class)
       (params (self))
+      (returns ())
       (line-range (1444 1448))
       (api-calls ())
       (called-functions (a_fly check_for_footsteps))
       (structured-ast
-        (if-cond "self.is_flying"))
+        (if-cond (-> self :is_flying)))
       (decompiled-pseudo-code
-        (set! e.update_class "function(self)")
-        (when "self.is_flying")
-        (call check_for_footsteps "self")
-        (call a_fly "self"))
+        (when (-> self :is_flying) (call check_for_footsteps self) (call a_fly self)))
       (body-lines
         "\te.update_class=function(self)"
         "\t\tif self.is_flying then"
         "\t\t\tcheck_for_footsteps(self)"
         "\t\t\ta_fly(self)"
         "\t\t  end"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name kill_class)
       (params (self))
+      (returns (val))
       (line-range (1452 1455))
       (api-calls ())
       (called-functions (del_from_people))
       (structured-ast
-        (return-expr "true"))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! e.kill_class "function(self)")
-        (call del_from_people "self")
-        (return "true"))
+        (call del_from_people self)
+        (return #t))
       (body-lines
         "\te.kill_class=function(self)"
         "\t  del_from_people(self)"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name touch_class)
       (params (self))
+      (returns (val))
       (line-range (1457 1459))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "true"))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! e.touch_class "function(self)")
-        (return "true"))
+        (return #t))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (setx sety is_villager) #:returns ()
       (name m_enemy)
       (params (setx sety is_villager))
+      (returns ())
       (line-range (1467 1522))
       (api-calls (rnd))
       (called-functions (frnd move))
       (structured-ast
         (seq-block 56))
       (decompiled-pseudo-code
-        (set! x "setx,")
-        (set! y "sety,")
-        (set! pcolor "10,")
-        (set! scolor "7,")
-        (set! is_villager "is_villager or false,")
-        (set! angle "0,")
-        (set! angle_desired "0,")
-        (set! alert_distance "15,")
-        (set! speed_turn ".01,")
-        (set! speed_move_orig ".25+rnd(.1),")
-        (set! speed_move "0,")
-        (set! windup_time "25,")
-        (set! windup_time_rem "0,")
-        (set! deviation_time "0,")
-        (set! col_w "6,")
-        (set! col_h "6,")
-        (set! col_off "0,")
-        (set! curanim "\"move\",")
-        (set! curframe "1,")
-        (set! animtick "0,")
-        (set! flipx "true,")
-        (set! head_shift "0,")
-        (set! body_shift "0,")
-        (set! emotion "nil,"))
+        local
+        (table)
+        (set! x setx)
+        (set! y sety)
+        (set! pcolor 10)
+        (set! scolor 7)
+        (set! is_villager (or is_villager #f))
+        (set! angle 0)
+        (set! angle_desired 0)
+        (set! alert_distance 15)
+        (set! speed_turn |.|)
+        (set! speed_move_orig |.|)
+        (set! speed_move 0)
+        (set! windup_time 25)
+        (set! windup_time_rem 0)
+        (set! deviation_time 0)
+        (set! col_w 6)
+        (set! col_h 6)
+        (set! col_off 0)
+        (set! curanim "move")
+        (set! curframe 1)
+        (set! animtick 0)
+        (set! flipx #t)
+        (set! head_shift 0))
       (body-lines
         "function m_enemy(setx, sety, is_villager)"
         "\tlocal e="
@@ -2488,53 +2467,49 @@
         "\t\thead_shift=0,"
         "\t\tbody_shift=0,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name init)
       (params (self))
+      (returns ())
       (line-range (1523 1527))
       (api-calls (atan2))
       (called-functions (constrain_to_screen is_level_active))
       (structured-ast
-        (if-cond "is_level_active("))
+        (if-cond (call is_level_active void)))
       (decompiled-pseudo-code
-        (set! init "function(self)")
-        (when "is_level_active()")
-        (set! |self.invuln_frames, self.speed_move, self.angle| "30, self.speed_move_orig, (atan2(self.x - p1.x, self.y - p1.y)+.5)%1")
-        (call constrain_to_screen "self"))
+        (when (call is_level_active) (set-values! ((-> self :invuln_frames) (-> self :speed_move) (-> self :angle)) (30 (-> self :speed_move_orig) (+ (call atan2 (- (-> self :x) (-> p1 :x)) (- (-> self :y) (-> p1 :y))) |.|))) (call constrain_to_screen self)))
       (body-lines
         "\t\tinit=function(self)"
         "\t\t\tif is_level_active() then"
         "\t\t\t\tself.invuln_frames, self.speed_move, self.angle = 30, self.speed_move_orig, (atan2(self.x - p1.x, self.y - p1.y)+.5)%1"
         "\t\t\t\tconstrain_to_screen(self)"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name move)
       (params (self))
+      (returns ())
       (line-range (1530 1531))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 2))
       (decompiled-pseudo-code
-        (set! move "function(self)"))
+        (nop))
       (body-lines
         "\t\tmove=function(self)"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name attack_target)
       (params (self))
+      (returns ())
       (line-range (1533 1538))
       (api-calls ())
       (called-functions (attack_reset fire_arrow))
       (structured-ast
-        (if-cond "self.attack_is_shot")
-        (return-expr ""))
+        (if-cond (-> self :attack_is_shot))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! attack_target "function(self)")
-        (when "self.attack_is_shot")
-        (call self:fire_arrow "")
-        (call attack_reset "self")
-        (return ""))
+        (when (-> self :attack_is_shot) (send self :fire_arrow) (call attack_reset self) (return)))
       (body-lines
         "\t\tattack_target=function(self)"
         "\t\t\tif self.attack_is_shot then"
@@ -2542,36 +2517,32 @@
         "\t\t\t\tattack_reset(self)"
         "\t\t\t\treturn"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name handle_impact_class)
       (params (self))
+      (returns (val))
       (line-range (1545 1547))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "false"))
+        (return-expr #f))
       (decompiled-pseudo-code
-        (set! handle_impact_class "function(self)")
-        (return "false"))
+        (return #f))
       (body-lines
         "\t\thandle_impact_class=function(self)"
         "\t\t\treturn false"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self source) #:returns ()
       (name handle_impact)
       (params (self source))
+      (returns ())
       (line-range (1549 1555))
       (api-calls ())
       (called-functions (a_anim_set emotion_add handle_impact_class m_part_impact))
       (structured-ast
-        (if-cond "not self:handle_impact_class(source"))
+        (if-cond (not (send self :handle_impact_class source))))
       (decompiled-pseudo-code
-        (set! handle_impact "function(self, source)")
-        (when "not self:handle_impact_class(source)")
-        (set! |self.is_flying, self.is_flying_impactable, self.windup_time_rem, self.attack_time_rem| "true, true, 0, 0")
-        (call a_anim_set "self, \"fly\"")
-        (call self:emotion_add "")
-        (call m_part_impact "self"))
+        (when (not (send self :handle_impact_class source)) (set-values! ((-> self :is_flying) (-> self :is_flying_impactable) (-> self :windup_time_rem) (-> self :attack_time_rem)) (#t #t 0 0)) (call a_anim_set self "fly") (send self :emotion_add) (call m_part_impact self)))
       (body-lines
         "\t\thandle_impact=function(self, source)"
         "\t\t\tif not self:handle_impact_class(source) then"
@@ -2580,100 +2551,96 @@
         "\t\t\t\tself:emotion_add()"
         "\t\t\t\tm_part_impact(self)"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name kill_class)
       (params (self))
+      (returns (val))
       (line-range (1558 1560))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "false"))
+        (return-expr #f))
       (decompiled-pseudo-code
-        (set! kill_class "function(self)")
-        (return "false"))
+        (return #f))
       (body-lines
         "\t\tkill_class=function(self)"
         "\t\t\treturn false"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self source no_score angle override) #:returns ()
       (name kill)
       (params (self source no_score angle override))
+      (returns ())
       (line-range (1562 1566))
       (api-calls ())
       (called-functions (kill_class))
       (structured-ast
-        (if-cond "not override")
-        (if-cond "self:kill_class(source, no_score")
-        (return-expr ""))
+        (if-cond (not override))
+        (if-cond (send self :kill_class source no_score))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! kill "function(self, source, no_score, angle, override)")
-        (when "not override")
-        (when "self:kill_class(source, no_score)")
-        (return ""))
+        (when (not override) (when (send self :kill_class source no_score) (return))))
       (body-lines
         "\t\tkill=function(self, source, no_score, angle, override)"
         "\t\t\tif not override then"
         "\t\t\t\tif self:kill_class(source, no_score) then"
         "\t\t\t\t\treturn"
         "\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name alert_class)
       (params (self))
+      (returns (val))
       (line-range (1581 1583))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "false"))
+        (return-expr #f))
       (decompiled-pseudo-code
-        (set! alert_class "function(self)")
-        (return "false"))
+        (return #f))
       (body-lines
         "\t\talert_class=function(self)"
         "\t\t\treturn false"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name touch_class)
       (params (self))
+      (returns (val))
       (line-range (1585 1587))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "false"))
+        (return-expr #f))
       (decompiled-pseudo-code
-        (set! touch_class "function(self)")
-        (return "false"))
+        (return #f))
       (body-lines
         "\t\ttouch_class=function(self)"
         "\t\t\treturn false"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns (val)
       (name update_class)
       (params (self))
+      (returns (val))
       (line-range (1589 1591))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "true"))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (set! update_class "function(self)")
-        (return "true"))
+        (return #t))
       (body-lines
         "\t\tupdate_class=function(self)"
         "\t\t\treturn true"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (1593 1598))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "self.invuln_frames > 0"))
+        (if-cond (> (-> self :invuln_frames) 0)))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (when "self.invuln_frames > 0")
-        (-= self.invuln_frames "1")
-        (set! self.just_spawned "false"))
+        (if (> (-> self :invuln_frames) 0) (then (-= (-> self :invuln_frames) 1)) (else (set! (-> self :just_spawned) #f))))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.invuln_frames > 0 then"
@@ -2681,35 +2648,32 @@
         "\t\t\telse"
         "\t\t\t\tself.just_spawned = false"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw_class)
       (params (self))
+      (returns ())
       (line-range (1654 1655))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 2))
       (decompiled-pseudo-code
-        (set! draw_class "function(self)"))
+        (nop))
       (body-lines
         "\t\tdraw_class=function(self)"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (1657 1663))
       (api-calls ())
       (called-functions (draw_character draw_class))
       (structured-ast
-        (if-cond "not self.is_furniture")
-        (if-cond "self.emotion and not self.is_flying"))
+        (if-cond (not (-> self :is_furniture)))
+        (if-cond (and (-> self :emotion) (not (-> self :is_flying)))))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (when "not self.is_furniture")
-        (call draw_character "self")
-        (call self:draw_class "")
-        (when "self.emotion and not self.is_flying")
-        (call self.emotion:draw ""))
+        (when (not (-> self :is_furniture)) (call draw_character self) (send self :draw_class) (when (and (-> self :emotion) (not (-> self :is_flying))) (send (-> self :emotion) :draw))))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif not self.is_furniture then"
@@ -2718,38 +2682,33 @@
         "\t\t\t\tif self.emotion and not self.is_flying then"
         "\t\t\t\t\tself.emotion:draw()"
         "\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name emotion_update)
       (params (self))
+      (returns ())
       (line-range (1671 1674))
       (api-calls ())
       (called-functions (update))
       (structured-ast
-        (if-cond "self.emotion"))
+        (if-cond (-> self :emotion)))
       (decompiled-pseudo-code
-        (set! emotion_update "function(self)")
-        (when "self.emotion")
-        (call self.emotion:update ""))
+        (when (-> self :emotion) (send (-> self :emotion) :update)))
       (body-lines
         "\t\temotion_update=function(self)"
         "\t\t\tif self.emotion then"
         "\t\t\t\tself.emotion:update()"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name emotion_set_from_count)
       (params (self))
+      (returns ())
       (line-range (1687 1694))
       (api-calls ())
       (called-functions (m_emotion))
       (structured-ast
-        (if-cond "self.emotion_count == 3"))
+        (if-cond (== (-> self :emotion_count) 3)))
       (decompiled-pseudo-code
-        (set! emotion_set_from_count "function(self)")
-        (when "self.emotion_count == 3")
-        (call m_emotion "self, \"angry\"")
-        (when "self.emotion_count >= 1")
-        (call m_emotion "self, \"upset\"")
-        (set! self.emotion "nil"))
+        (when (== (-> self :emotion_count) 3) (call m_emotion self "angry") (if (>= (-> self :emotion_count) 1) (then (call m_emotion self "upset")) (else (set! (-> self :emotion) nil)))))
       (body-lines
         "\t\temotion_set_from_count=function(self)"
         "\t\t\tif self.emotion_count == 3 then"
@@ -2759,40 +2718,35 @@
         "\t\t\telse"
         "\t\t\t\tself.emotion = nil"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name emotion_add)
       (params (self))
+      (returns ())
       (line-range (1699 1702))
       (api-calls (min))
       (called-functions (emotion_set_from_count))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! emotion_add "function(self)")
-        (set! |self.emotion_count, self.emotion_timer| "min(3, self.emotion_count+1), 360")
-        (call self:emotion_set_from_count ""))
+        (set-values! ((-> self :emotion_count) (-> self :emotion_timer)) ((call min 3 (+ (-> self :emotion_count) 1)) 360))
+        (send self :emotion_set_from_count))
       (body-lines
         "\t\temotion_add=function(self)"
         "\t\t\tself.emotion_count, self.emotion_timer = min(3, self.emotion_count+1), 360"
         "\t\t\tself:emotion_set_from_count()"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name get_gen_coords)
       (params ())
+      (returns ())
       (line-range (1711 1721))
       (api-calls ())
       (called-functions (frnd))
       (structured-ast
-        (if-cond "whichside == 0"))
+        (if-cond (== whichside 0)))
       (decompiled-pseudo-code
-        (set! |gen_x, gen_y, whichside| "frnd(128), frnd(128), frnd(4)")
-        (when "whichside == 0")
-        (set! gen_x "4")
-        (when "whichside == 1")
-        (set! gen_x "124")
-        (when "whichside == 2")
-        (set! gen_y "4")
-        (set! gen_y "124"))
+        (set-values! (gen_x gen_y whichside) ((call frnd 128) (call frnd 128) (call frnd 4)))
+        (when (== whichside 0) (set! gen_x 4) (when (== whichside 1) (set! gen_x 124) (if (== whichside 2) (then (set! gen_y 4)) (else (set! gen_y 124))))))
       (body-lines
         "function get_gen_coords()"
         "\tlocal gen_x, gen_y, whichside = frnd(128), frnd(128), frnd(4)"
@@ -2805,23 +2759,20 @@
         "\telse"
         "\t\tgen_y = 124"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name m_enemy_random)
       (params ())
+      (returns ())
       (line-range (1725 1735))
       (api-calls ())
       (called-functions (frnda get_gen_coords m_enemy_boss))
       (structured-ast
-        (if-cond "enemy_type == 5")
-        (if-cond "not g_spawned_boss")
-        (return-expr ""))
+        (if-cond (== enemy_type 5))
+        (if-cond (not g_spawned_boss))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! enemy_type "g_enemy_weights[frnda(#g_enemy_weights)]")
-        (when "enemy_type == 5")
-        (when "not g_spawned_boss")
-        (call m_enemy_boss "get_gen_coords()")
-        (set! g_spawned_boss "true")
-        (return ""))
+        (set! enemy_type (aref g_enemy_weights (call frnda (len g_enemy_weights))))
+        (when (== enemy_type 5) (if (not g_spawned_boss) (then (call m_enemy_boss (call get_gen_coords)) (set! g_spawned_boss #t)) (else (return)))))
       (body-lines
         "function m_enemy_random()"
         ""
@@ -2834,36 +2785,39 @@
         "\t\telse"
         "\t\t\treturn"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (pos) #:returns ()
       (name set_cam_pos)
       (params (pos))
+      (returns ())
       (line-range (1748 1751))
       (api-calls (min))
       (called-functions ())
       (structured-ast
-        (if-cond "pos+8<64"))
+        (if-cond (< (+ pos 8) 64)))
       (decompiled-pseudo-code
-        (when "pos+8<64")
-        (+= pos "min(64-(pos+8),4)"))
+        (when (< (+ pos 8) 64) (+= pos (call min (- 64 (+ pos 8)) 4))))
       (body-lines
         "function set_cam_pos(pos)"
         "\tif pos+8<64 then"
         "\t\tpos+=min(64-(pos+8),4)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name m_cam)
       (params ())
+      (returns ())
       (line-range (1758 1767))
       (api-calls (camera))
       (called-functions ())
       (structured-ast
         (seq-block 10))
       (decompiled-pseudo-code
-        (call camera "")
-        (set! pos_x "64,")
-        (set! pos_y "64,")
-        (set! shake_remaining "0,")
-        (set! shake_force "0,"))
+        (call camera)
+        local
+        (table)
+        (set! pos_x 64)
+        (set! pos_y 64)
+        (set! shake_remaining 0)
+        (set! shake_force 0))
       (body-lines
         "function m_cam()"
         "\tcamera()"
@@ -2875,36 +2829,35 @@
         "\t\tshake_remaining=0,"
         "\t\tshake_force=0,"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (1768 1771))
       (api-calls (camera max mid))
       (called-functions (cam_pos set_cam_pos))
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! update "function(self)")
-        (set! |self.shake_remaining, self.pos_y, self.pos_x| "max(0,self.shake_remaining-1), mid(64, set_cam_pos(self.pos_y), 960), mid(64, set_cam_pos(self.pos_x), 960)")
-        (call camera "self:cam_pos()"))
+        (set-values! ((-> self :shake_remaining) (-> self :pos_y) (-> self :pos_x)) ((call max 0 (- (-> self :shake_remaining) 1)) (call mid 64 (call set_cam_pos (-> self :pos_y)) 960) (call mid 64 (call set_cam_pos (-> self :pos_x)) 960)))
+        (call camera (send self :cam_pos)))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself.shake_remaining, self.pos_y, self.pos_x = max(0,self.shake_remaining-1), mid(64, set_cam_pos(self.pos_y), 960), mid(64, set_cam_pos(self.pos_x), 960)"
         "\t\t\tcamera(self:cam_pos())"
         "\t\tend,"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name cam_pos)
       (params (self))
+      (returns ())
       (line-range (1773 1778))
       (api-calls (rnd))
       (called-functions ())
       (structured-ast
-        (if-cond "self.shake_remaining>0"))
+        (if-cond (> (-> self :shake_remaining) 0)))
       (decompiled-pseudo-code
-        (set! cam_pos "function(self)")
-        (set! |shk_x, shk_y, force| "0, 0, self.shake_force")
-        (when "self.shake_remaining>0")
-        (set! |shk_x, shk_y| "rnd(force)-force/2, rnd(force)-force/2"))
+        (set-values! (shk_x shk_y force) (0 0 (-> self :shake_force)))
+        (when (> (-> self :shake_remaining) 0) (set-values! (shk_x shk_y) ((- (call rnd force) (/ force 2)) (- (call rnd force) (/ force 2))))))
       (body-lines
         "\t\tcam_pos=function(self)"
         "\t\t\tlocal shk_x, shk_y, force = 0, 0, self.shake_force"
@@ -2912,82 +2865,84 @@
         "\t\t\tif self.shake_remaining>0 then"
         "\t\t\t\tshk_x, shk_y = rnd(force)-force/2, rnd(force)-force/2"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self force duration) #:returns ()
       (name shake)
       (params (self force duration))
+      (returns ())
       (line-range (1782 1784))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 3))
       (decompiled-pseudo-code
-        (set! shake "function(self, force, duration)")
-        (set! |self.shake_force, self.shake_remaining| "force, duration"))
+        (set-values! ((-> self :shake_force) (-> self :shake_remaining)) (force duration)))
       (body-lines
         "\t\tshake=function(self, force, duration)"
         "\t\t\tself.shake_force, self.shake_remaining = force, duration"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name save_score)
       (params ())
+      (returns ())
       (line-range (1790 1793))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "g_score_total >= g_high_scores[g_difficulty][1]"))
+        (if-cond (>= g_score_total (aref (aref g_high_scores g_difficulty) 1))))
       (decompiled-pseudo-code
-        (when "g_score_total >= g_high_scores[g_difficulty][1]")
-        (set! |g_high_scores[g_difficulty][1], g_high_scores[g_difficulty][2]| "g_score_total, g_year"))
+        (when (>= g_score_total (aref (aref g_high_scores g_difficulty) 1)) (set-values! ((aref (aref g_high_scores g_difficulty) 1) (aref (aref g_high_scores g_difficulty) 2)) (g_score_total g_year))))
       (body-lines
         "function save_score()"
         "\tif g_score_total >= g_high_scores[g_difficulty][1] then"
         "\t\tg_high_scores[g_difficulty][1], g_high_scores[g_difficulty][2] = g_score_total, g_year"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name level_end)
       (params ())
+      (returns ())
       (line-range (1803 1806))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! |p1.ready_time, g_game_state, g_transition_time| "300, 6, 150")
-        (+= g_score_total "g_score_level"))
+        (set-values! ((-> p1 :ready_time) g_game_state g_transition_time) (300 6 150))
+        (+= g_score_total g_score_level))
       (body-lines
         "function level_end()"
         "\tp1.ready_time, g_game_state, g_transition_time = 300, 6, 150"
         "\tg_score_total += g_score_level"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name level_end_win)
       (params ())
+      (returns ())
       (line-range (1808 1811))
       (api-calls ())
       (called-functions (score_add))
       (structured-ast
-        (if-cond "p1.hp_cur > 1"))
+        (if-cond (> (-> p1 :hp_cur) 1)))
       (decompiled-pseudo-code
-        (when "p1.hp_cur > 1")
-        (call score_add "p1, 25"))
+        (when (> (-> p1 :hp_cur) 1) (call score_add p1 25)))
       (body-lines
         "function level_end_win()"
         "\tif p1.hp_cur > 1 then"
         "\t\tscore_add(p1, 25)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name level_end_bad)
       (params ())
+      (returns ())
       (line-range (1817 1822))
       (api-calls (sfx))
       (called-functions (level_end save_score))
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (set! g_game_transition_to_state "8")
-        (call sfx "12")
-        (call level_end "")
-        (call save_score ""))
+        (set! g_game_transition_to_state 8)
+        (call sfx 12)
+        (call level_end)
+        (call save_score))
       (body-lines
         "function level_end_bad()"
         "\tg_game_transition_to_state = 8"
@@ -2995,53 +2950,56 @@
         "\tlevel_end()"
         "\tsave_score()"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params (killed_by_player) #:returns ()
       (name level_end_villager_died)
       (params (killed_by_player))
+      (returns ())
       (line-range (1824 1827))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "g_difficulty < 7")
-        (return-expr ""))
+        (if-cond (< g_difficulty 7))
+        (return-expr void))
       (decompiled-pseudo-code
-        (when "g_difficulty < 7")
-        (return ""))
+        (when (< g_difficulty 7) (return)))
       (body-lines
         "function level_end_villager_died(killed_by_player)"
         "\tif g_difficulty < 7 then"
         "\t\treturn"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (killed_by_obstacle) #:returns ()
       (name level_end_player_died)
       (params (killed_by_obstacle))
+      (returns ())
       (line-range (1835 1839))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "killed_by_obstacle"))
+        (if-cond killed_by_obstacle))
       (decompiled-pseudo-code
-        (set! g_level_end_reason "\"slain in combat\"")
-        (when "killed_by_obstacle")
-        (set! g_level_end_reason "\"stumbled into death\""))
+        (set! g_level_end_reason "slain in combat")
+        (when killed_by_obstacle (set! g_level_end_reason "stumbled into death")))
       (body-lines
         "function level_end_player_died(killed_by_obstacle)"
         "  g_level_end_reason = \"slain in combat\""
         "\tif killed_by_obstacle then"
         "\t\tg_level_end_reason = \"stumbled into death\""
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (x y size_base size_var) #:returns ()
       (name m_splat)
       (params (x y size_base size_var))
+      (returns ())
       (line-range (1843 1849))
       (api-calls ())
       (called-functions (frnda))
       (structured-ast
         (seq-block 7))
       (decompiled-pseudo-code
-        (set! x "x,")
-        (set! y "y,")
-        (set! size "frnda(size_var, size_base),"))
+        local
+        (table)
+        (set! x x)
+        (set! y y)
+        (set! size (call frnda size_var size_base)))
       (body-lines
         "function m_splat(x, y, size_base, size_var)"
         "\tlocal s ="
@@ -3050,19 +3008,17 @@
         "\t\ty=y,"
         "\t\tsize=frnda(size_var, size_base),"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self color) #:returns ()
       (name draw)
       (params (self color))
+      (returns ())
       (line-range (1850 1855))
       (api-calls (circfill))
       (called-functions ())
       (structured-ast
-        (if-cond "color == 0"))
+        (if-cond (== color 0)))
       (decompiled-pseudo-code
-        (set! draw "function(self, color)")
-        (when "color == 0")
-        (call circfill "self.x, self.y, self.size+1, color")
-        (call circfill "self.x, self.y, self.size, color"))
+        (if (== color 0) (then (call circfill (-> self :x) (-> self :y) (+ (-> self :size) 1) color)) (else (call circfill (-> self :x) (-> self :y) (-> self :size) color))))
       (body-lines
         "\t\tdraw=function(self, color)"
         "\t\t\tif color == 0 then"
@@ -3070,39 +3026,38 @@
         "\t\t\telse"
         "\t\t\t\tcircfill(self.x, self.y, self.size, color)"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name m_transition_splatter)
       (params ())
+      (returns ())
       (line-range (1861 1865))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! list_splats "{},"))
+        local
+        (table)
+        (set! list_splats (table)))
       (body-lines
         "function m_transition_splatter()"
         "\tlocal t ="
         "\t{"
         "\t\tlist_splats={},"
         ""))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name init)
       (params (self))
+      (returns ())
       (line-range (1866 1877))
       (api-calls (add rnd))
       (called-functions (frnd frnda m_splat randc))
       (structured-ast
-        (while-loop "wipe_position < 128")
-        (if-cond "randc("))
+        (while-loop (< wipe_position 128))
+        (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! init "function(self)")
-        (set! wipe_position "0")
-        (+= wipe_position "10")
-        (call add "self.list_splats, m_splat(wipe_position+2-rnd(4), 48-frnd(6), 10, 8)")
-        (call add "self.list_splats, m_splat(wipe_position+2-rnd(4), frnda(6, 80), 10, 8)")
-        (when "randc()")
-        (call add "self.list_splats, m_splat(wipe_position+4-rnd(8), 30-frnd(15), 2, 5)"))
+        (set! wipe_position 0)
+        (while (< wipe_position 128) (+= wipe_position 10) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 2) (call rnd 4)) (- 48 (call frnd 6)) 10 8)) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 2) (call rnd 4)) (call frnda 6 80) 10 8)) (when (call randc) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 4) (call rnd 8)) (- 30 (call frnd 15)) 2 5)))))
       (body-lines
         "\t\tinit=function(self)"
         "\t\t\tlocal wipe_position = 0"
@@ -3116,19 +3071,18 @@
         "\t\t\t\tif randc() then"
         "\t\t\t\t\tadd(self.list_splats, m_splat(wipe_position+4-rnd(8), 30-frnd(15), 2, 5))"
         "\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name draw)
       (params (self))
+      (returns ())
       (line-range (1885 1890))
       (api-calls (all rectfill))
       (called-functions ())
       (structured-ast
         (for-loop "s in all(self.list_splats)"))
       (decompiled-pseudo-code
-        (set! draw "function(self)")
-        (call rectfill "0, 41, 128, 87, 0")
-        (foreach s "self.list_splats")
-        (call s:draw "0"))
+        (call rectfill 0 41 128 87 0)
+        (foreach s (-> self :list_splats) (send s :draw 0)))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\trectfill(0, 41, 128, 87, 0)"
@@ -3136,59 +3090,54 @@
         "\t\t\tfor s in all(self.list_splats) do"
         "\t\t\t\ts:draw(0)"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name is_level_active)
       (params ())
+      (returns (val))
       (line-range (1903 1906))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "g_game_state == 5 or g_game_state == 6")
-        (return-expr "true"))
+        (if-cond (or (== g_game_state 5) (== g_game_state 6)))
+        (return-expr #t))
       (decompiled-pseudo-code
-        (when "g_game_state == 5 or g_game_state == 6")
-        (return "true"))
+        (when (or (== g_game_state 5) (== g_game_state 6)) (return #t)))
       (body-lines
         "function is_level_active()"
         "\tif g_game_state == 5 or g_game_state == 6 then"
         "\t\treturn true"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name update_weather)
       (params ())
+      (returns ())
       (line-range (1911 1915))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "g_weather_part_rate == 0")
-        (return-expr ""))
+        (if-cond (== g_weather_part_rate 0))
+        (return-expr void))
       (decompiled-pseudo-code
-        (when "g_weather_part_rate == 0")
-        (return ""))
+        (when (== g_weather_part_rate 0) (return)))
       (body-lines
         "function update_weather()"
         "\t---[["
         "\tif g_weather_part_rate == 0 then"
         "\t\treturn"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (1933 1940))
       (api-calls (rnd))
       (called-functions (m_part_sprite randc))
       (structured-ast
-        (if-cond "self.y >= self.splash_loc")
+        (if-cond (>= (-> self :y) (-> self :splash_loc)))
         (for-loop "i=0,1")
-        (if-cond "randc(50"))
+        (if-cond (call randc 50)))
       (decompiled-pseudo-code
-        (set! p.update "function(self)")
-        (when "self.y >= self.splash_loc")
-        (for-range i "0" "1")
-        (set! s "m_part_sprite(103, self.x, self.y, -rnd(1), 12, 12, 5, false, true)")
-        (set! |s.ddy, s.dx| ".1, rnd(.5)")
-        (when "randc(50)")
-        (set! s.dx "-rnd(.5)"))
+        (when (>= (-> self :y) (-> self :splash_loc)) (for-range i 0 1 (set! s (call m_part_sprite 103 (-> self :x) (-> self :y) (- (call rnd 1)) 12 12 5 #f #t)) (set-values! ((-> s :ddy) (-> s :dx)) (|.| (call rnd |.|))) (when (call randc 50) (set! (-> s :dx) (- (call rnd |.|)))))))
       (body-lines
         "\t\t\t\tp.update=function(self)"
         "\t\t\t\t\tif self.y >= self.splash_loc then"
@@ -3198,37 +3147,36 @@
         "\t\t\t\t\t\t\tif randc(50) then"
         "\t\t\t\t\t\t\t\ts.dx = -rnd(.5)"
         "\t\t\t\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (self) #:returns ()
       (name update)
       (params (self))
+      (returns ())
       (line-range (1947 1951))
       (api-calls (del))
       (called-functions ())
       (structured-ast
-        (if-cond "self.y > 128")
-        (return-expr ""))
+        (if-cond (> (-> self :y) 128))
+        (return-expr void))
       (decompiled-pseudo-code
-        (set! p.update "function(self)")
-        (when "self.y > 128")
-        (call del "list_parts_front, self")
-        (return ""))
+        (when (> (-> self :y) 128) (call del list_parts_front self) (return)))
       (body-lines
         "\t\t\t\tp.update=function(self)"
         "\t\t\t\t\tif self.y > 128 then"
         "\t\t\t\t\t\tdel(list_parts_front, self)"
         "\t\t\t\t\t\treturn"
         "\t\t\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _update60)
       (params ())
+      (returns ())
       (line-range (1968 1973))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (if-cond "stat(9"))
+        (if-cond (call stat 9)))
       (decompiled-pseudo-code
-        (+= g_ticks "1")
-        (when "stat(9) < stat(8)"))
+        (+= g_ticks 1)
+        (when (< (call stat 9) (call stat 8)) (quote (nop))))
       (body-lines
         "function _update60()"
         "\tg_ticks += 1"
@@ -3236,35 +3184,35 @@
         "\tif stat(9) < stat(8) then"
         "\t--\tprinth(\"dropped frame \"..g_ticks)"
         "\tend"))
-    (def-pico-function
+    (def-pico-function #:params (i) #:returns ()
       (name fu)
       (params (i))
+      (returns ())
       (line-range (1976 1976))
       (api-calls ())
       (called-functions (update))
       (structured-ast
         (seq-block 1))
       (decompiled-pseudo-code
-        (set! fu "function(i) i:update() end"))
+        (send i :update))
       (body-lines
         "\tlocal fu = function(i) i:update() end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name level_create)
       (params ())
+      (returns ())
       (line-range (2167 2178))
       (api-calls ())
       (called-functions (frnd m_player randc))
       (structured-ast
-        (if-cond "g_year ~= g_year_endgame")
-        (if-cond "g_year ~= 1")
-        (if-cond "randc(25"))
+        (if-cond (!= g_year g_year_endgame))
+        (if-cond (!= g_year 1))
+        (if-cond (call randc 25)))
       (decompiled-pseudo-code
-        (set! p1 "m_player(64,64)")
-        (call reload "0x2000, 0x2000, 0x1000")
-        (set! |color_choice, block_sel_x, block_sel_y| "g_season, frnd(2), 0")
-        (when "g_year ~= g_year_endgame")
-        (when "g_year ~= 1")
-        (when "randc(25)"))
+        (set! p1 (call m_player 64 64))
+        (call reload 8192 8192 4096)
+        (set-values! (color_choice block_sel_x block_sel_y) (g_season (call frnd 2) 0))
+        (when (!= g_year g_year_endgame) (when (!= g_year 1) (when (call randc 25) g_level_indoor #t))))
       (body-lines
         "function level_create()"
         "\tp1 = m_player(64,64)"
@@ -3278,22 +3226,19 @@
         "\t\t\t\tg_level_indoor, block_sel_y ="
         "\t\t\t\ttrue, 1"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name transition_level)
       (params ())
+      (returns ())
       (line-range (2269 2278))
       (api-calls (add))
       (called-functions ())
       (structured-ast
-        (if-cond "g_season > 3")
-        (if-cond "g_year == 7"))
+        (if-cond (> g_season 3))
+        (if-cond (== g_year 7)))
       (decompiled-pseudo-code
-        (+= g_season "1")
-        (when "g_season > 3")
-        (set! g_season "0")
-        (+= g_year "1")
-        (when "g_year == 7")
-        (call add "g_enemy_weights, 5"))
+        (+= g_season 1)
+        (when (> g_season 3) (set! g_season 0) (+= g_year 1) (when (== g_year 7) (call add g_enemy_weights 5))))
       (body-lines
         "function transition_level()"
         ""
@@ -3305,28 +3250,40 @@
         "\t\tif g_year == 7 then"
         "\t\t\tadd(g_enemy_weights, 5)"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name reset_level)
       (params ())
+      (returns ())
       (line-range (2305 2337))
       (api-calls (flr))
       (called-functions (level_create m_cam table_clear))
       (structured-ast
-        (if-cond "g_game_state > 3"))
+        (if-cond (> g_game_state 3)))
       (decompiled-pseudo-code
-        (set! cam "m_cam()")
-        (call table_clear "list_parts_back")
-        (call table_clear "list_parts_front")
-        (call table_clear "list_parts_blood")
-        (call table_clear "list_heads")
-        (call table_clear "list_enemies")
-        (call table_clear "list_villagers")
-        (call table_clear "list_people")
-        (call table_clear "list_drawstuff")
-        (call table_clear "list_objects")
-        (call table_clear "list_steps")
-        (when "g_game_state > 3")
-        (call level_create ""))
+        (set! cam (call m_cam))
+        (call table_clear list_parts_back)
+        (call table_clear list_parts_front)
+        (call table_clear list_parts_blood)
+        (call table_clear list_heads)
+        (call table_clear list_enemies)
+        (call table_clear list_villagers)
+        (call table_clear list_people)
+        (call table_clear list_drawstuff)
+        (call table_clear list_objects)
+        (call table_clear list_steps)
+        g_spawned_boss
+        g_ticks
+        g_player_damaged_time
+        g_level_villagers_count
+        g_score_level
+        game_pause_timer
+        g_level_indoor
+        g_weather_sprite
+        0
+        0
+        (+ 3 (* (call flr |.|) g_year))
+        0
+        0)
       (body-lines
         "function reset_level()"
         "\tcam=m_cam()"
@@ -3360,19 +3317,29 @@
         ""
         "\tif g_game_state > 3 then"
         "\t\tlevel_create()"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name reset_game)
       (params ())
+      (returns ())
       (line-range (2350 2367))
       (api-calls (sfx))
       (called-functions (reset_level shake))
       (structured-ast
         (seq-block 18))
       (decompiled-pseudo-code
-        (call split "\"1,1,1,2,2,2,2\"")
-        (call reset_level "")
-        (call cam:shake "3, 20")
-        (call sfx "9"))
+        g_game_state
+        g_year
+        g_score_total
+        g_level_screen_buffer
+        g_enemy_weights
+        0
+        1
+        0
+        16
+        (call split "1,1,1,2,2,2,2")
+        (call reset_level)
+        (send cam :shake 3 20)
+        (call sfx 9))
       (body-lines
         "function reset_game()"
         "  -- initialized variables, but change during game"
@@ -3392,9 +3359,10 @@
         "  cam:shake(3, 20)"
         "\tsfx(9)"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _init)
       (params ())
+      (returns ())
       (line-range (2370 2394))
       (api-calls ())
       (called-functions ())
@@ -3402,14 +3370,24 @@
         (for-loop "i=1,8")
         (for-loop "j=1,2"))
       (decompiled-pseudo-code
-        (call cartdata "\"tmirobot_bunbunsamurai_4\"")
-        (set! index "1")
-        (set! g_high_scores "{}")
-        (for-range i "1" "8")
-        (set! |g_high_scores[i]| "{}")
-        (for-range j "1" "2")
-        (set! |g_high_scores[i][j]| "dget(index)")
-        (+= index "1"))
+        (call cartdata "tmirobot_bunbunsamurai_4")
+        g_alphabet_sprites
+        g_season_names
+        g_weather_seasondata
+        g_difficulty_strings
+        g_difficulty_descs
+        g_year_endgame
+        g_difficulty
+        (call split "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,0,1,2,3,4,5,6,7,8,9" "," #f)
+        (call split "spring,summer,fall,winter,140,142,172,174")
+        (call split "119,12,1,0,3,121,14,6,.05,.5,123,9,6,.05,.5,121,6,1,.1,1")
+        (call split "easy,easy,norm,norm,hard,hard,hell,hell")
+        (call split "enemy strikes deal damage,s,enemy touches deal damage,s,hero dies from a single hit,s,villager death ends the game,s")
+        10
+        3
+        (set! index 1)
+        (set! g_high_scores (table))
+        (for-range i 1 8 (set! (aref g_high_scores i) (table)) (for-range j 1 2 (set! (aref (aref g_high_scores i) j) (call dget index)) (+= index 1))))
       (body-lines
         "function _init()"
         "\tcartdata(\"tmirobot_bunbunsamurai_4\")"
@@ -3436,19 +3414,18 @@
         "\t\t\tg_high_scores[i][j] = dget(index)"
         "\t\t\tindex += 1"
         "\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (t) #:returns ()
       (name sort_by_y)
       (params (t))
+      (returns ())
       (line-range (2400 2406))
       (api-calls ())
       (called-functions ())
       (structured-ast
         (for-loop "n=2,#t")
-        (while-loop "i>1 and t[i].y<t[i-1].y"))
+        (while-loop (and (> i 1) (< (-> (aref t i) :y) (-> (aref t (- i 1)) :y)))))
       (decompiled-pseudo-code
-        (for-range n "2" "#t")
-        (set! i "n")
-        (-= i "1"))
+        (for-range n 2 (len t) (set! i n) (while (and (> i 1) (< (-> (aref t i) :y) (-> (aref t (- i 1)) :y))) (aref t i) (-= i 1))))
       (body-lines
         "function sort_by_y(t) --insertion sort, ascending y"
         "  for n=2,#t do"
@@ -3457,36 +3434,34 @@
         "      t[i],t[i-1]=t[i-1],t[i]"
         "      i-=1"
         "    end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns (val)
       (name is_timed_mode)
       (params ())
+      (returns (val))
       (line-range (2410 2412))
       (api-calls ())
       (called-functions ())
       (structured-ast
-        (return-expr "g_difficulty % 2 == 0"))
+        (return-expr (== (modulo g_difficulty 2) 0)))
       (decompiled-pseudo-code
-        (return "g_difficulty % 2 == 0"))
+        (return (== (modulo g_difficulty 2) 0)))
       (body-lines
         "function is_timed_mode()"
         "\treturn g_difficulty % 2 == 0"
         "end"))
-    (def-pico-function
+    (def-pico-function #:params () #:returns ()
       (name _draw)
       (params ())
+      (returns ())
       (line-range (2414 2422))
       (api-calls (all))
       (called-functions (draw paste_screen_from_mem))
       (structured-ast
-        (if-cond "g_game_state > 3 and g_game_state < 10")
+        (if-cond (and (> g_game_state 3) (< g_game_state 10)))
         (for-loop "a in all(list_parts_blood)")
-        (if-cond "a.time == a.duration"))
+        (if-cond (== (-> a :time) (-> a :duration))))
       (decompiled-pseudo-code
-        (when "g_game_state > 3 and g_game_state < 10")
-        (call paste_screen_from_mem "")
-        (foreach a "list_parts_blood")
-        (when "a.time == a.duration")
-        (call a:draw ""))
+        (when (and (> g_game_state 3) (< g_game_state 10)) (call paste_screen_from_mem) (foreach a list_parts_blood (when (== (-> a :time) (-> a :duration)) (send a :draw)))))
       (body-lines
         "function _draw()"
         ""
@@ -3497,205 +3472,206 @@
         "\t\t\tif a.time == a.duration then"
         "\t\t\t\ta:draw()"
         "\t\t\tend"))
-    (def-pico-function
+    (def-pico-function #:params (i) #:returns ()
       (name fd)
       (params (i))
+      (returns ())
       (line-range (2442 2442))
       (api-calls ())
       (called-functions (draw))
       (structured-ast
         (seq-block 1))
       (decompiled-pseudo-code
-        (set! fd "function(i) i:draw() end"))
+        (send i :draw))
       (body-lines
         "\t\tlocal fd = function(i) i:draw() end")))
   (lifted-pico8-assets
     (gfx-sprites
-      (def-pico-sprite #:id 0 #:grid (0 0) #:nonzero-pixels 8 #:rows ("00000000" "00000000" "00700700" "00077000" "00077000" "00700700" "00000000" "00000000"))
-      (def-pico-sprite #:id 1 #:grid (1 0) #:nonzero-pixels 37 #:rows ("00000000" "00202000" "02424200" "02424200" "28888820" "024c4c20" "02777720" "22667200"))
-      (def-pico-sprite #:id 2 #:grid (2 0) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02424200" "29999920" "02484820" "02999920" "22669200"))
-      (def-pico-sprite #:id 3 #:grid (3 0) #:nonzero-pixels 30 #:rows ("00000000" "00000000" "00000000" "02222200" "2aaaaa20" "025c5c20" "02aa9920" "22665200"))
-      (def-pico-sprite #:id 4 #:grid (4 0) #:nonzero-pixels 38 #:rows ("00000000" "00000000" "02202200" "24424420" "28888820" "024a4a20" "02888442" "22888220"))
-      (def-pico-sprite #:id 5 #:grid (5 0) #:nonzero-pixels 46 #:rows ("00000000" "02202200" "2dd2dd20" "2dd2dd20" "2eeeee20" "02dadad2" "02eeedd2" "22eee220"))
-      (def-pico-sprite #:id 6 #:grid (6 0) #:nonzero-pixels 46 #:rows ("00200200" "02822820" "028dd820" "02dddd20" "021a1ad2" "02ddddd2" "02dddd20" "0266dd20"))
-      (def-pico-sprite #:id 7 #:grid (7 0) #:nonzero-pixels 30 #:rows ("00000000" "00000000" "00202000" "02626200" "02626200" "02666620" "026b6b20" "02666620"))
-      (def-pico-sprite #:id 12 #:grid (12 0) #:nonzero-pixels 16 #:rows ("26677772" "02272720" "00020200" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 13 #:grid (13 0) #:nonzero-pixels 16 #:rows ("26677772" "02227720" "00002200" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 14 #:grid (14 0) #:nonzero-pixels 17 #:rows ("26677772" "02272272" "00020020" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 15 #:grid (15 0) #:nonzero-pixels 16 #:rows ("26677772" "02222272" "00000020" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 17 #:grid (1 1) #:nonzero-pixels 44 #:rows ("00000000" "00222220" "02666662" "02427272" "28888820" "024c4c20" "02777720" "02777220"))
-      (def-pico-sprite #:id 18 #:grid (2 1) #:nonzero-pixels 43 #:rows ("00000000" "00222220" "02666662" "02429292" "29999920" "02484820" "02999920" "02999200"))
-      (def-pico-sprite #:id 19 #:grid (3 1) #:nonzero-pixels 43 #:rows ("00000000" "00222220" "02666662" "0222a2a2" "2aaaaa20" "025c5c20" "02aa9920" "02aaa200"))
-      (def-pico-sprite #:id 20 #:grid (4 1) #:nonzero-pixels 38 #:rows ("00020000" "00262000" "00027200" "00255520" "02555552" "02555552" "02555552" "00255520"))
-      (def-pico-sprite #:id 21 #:grid (5 1) #:nonzero-pixels 46 #:rows ("00000000" "02202200" "2dd2dd20" "2dd2dd20" "2eeeee20" "02dadad2" "02eeedd2" "22eee220"))
-      (def-pico-sprite #:id 22 #:grid (6 1) #:nonzero-pixels 51 #:rows ("00222220" "02666662" "028dd8d2" "02dddd20" "021a1ad2" "02ddddd2" "02dddd20" "02dddd20"))
-      (def-pico-sprite #:id 23 #:grid (7 1) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02626200" "02626200" "02666620" "266b6b62" "02661620"))
-      (def-pico-sprite #:id 24 #:grid (8 1) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02626200" "02626200" "026b6b20" "02661620" "26661662"))
-      (def-pico-sprite #:id 28 #:grid (12 1) #:nonzero-pixels 13 #:rows ("00277772" "00272720" "00020200" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 29 #:grid (13 1) #:nonzero-pixels 12 #:rows ("00277772" "00027720" "00002200" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 30 #:grid (14 1) #:nonzero-pixels 14 #:rows ("00277772" "00272272" "00020020" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 31 #:grid (15 1) #:nonzero-pixels 12 #:rows ("00277772" "00022272" "00000020" "00000000" "00000000" "00000000" "00000000" "00000000"))
-      (def-pico-sprite #:id 33 #:grid (1 2) #:nonzero-pixels 37 #:rows ("00000000" "00202000" "02424200" "02424200" "28888820" "024c4c20" "02777720" "02777220"))
-      (def-pico-sprite #:id 34 #:grid (2 2) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02424200" "29999920" "02484820" "02999920" "02999220"))
-      (def-pico-sprite #:id 35 #:grid (3 2) #:nonzero-pixels 30 #:rows ("00000000" "00000000" "00000000" "02222200" "2aaaaa20" "025c5c20" "02aa9920" "02aaa220"))
-      (def-pico-sprite #:id 37 #:grid (5 2) #:nonzero-pixels 46 #:rows ("00000000" "02202200" "2dd2dd20" "2dd2dd20" "2eeeee20" "02dadad2" "02eeedd2" "22eee220"))
-      (def-pico-sprite #:id 38 #:grid (6 2) #:nonzero-pixels 46 #:rows ("00200200" "02822820" "028dd820" "02dddd20" "021a1ad2" "02ddddd2" "02dddd20" "02dddd20"))
-      (def-pico-sprite #:id 40 #:grid (8 2) #:nonzero-pixels 23 #:rows ("00000000" "00000000" "02000000" "28222220" "02777772" "28222220" "02000000" "00000000"))
-      (def-pico-sprite #:id 41 #:grid (9 2) #:nonzero-pixels 23 #:rows ("00002000" "00027200" "00027200" "00027200" "00027200" "00027200" "00282820" "00020200"))
-      (def-pico-sprite #:id 42 #:grid (10 2) #:nonzero-pixels 30 #:rows ("00000000" "00222200" "02668620" "00266820" "00268820" "02666820" "00222200" "00000000")))
+      (def-pico-sprite #:id #x00 #:grid (0 0) #:nonzero-pixels 8 #:rows ("00000000" "00000000" "00700700" "00077000" "00077000" "00700700" "00000000" "00000000"))
+      (def-pico-sprite #:id #x01 #:grid (1 0) #:nonzero-pixels 37 #:rows ("00000000" "00202000" "02424200" "02424200" "28888820" "024c4c20" "02777720" "22667200"))
+      (def-pico-sprite #:id #x02 #:grid (2 0) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02424200" "29999920" "02484820" "02999920" "22669200"))
+      (def-pico-sprite #:id #x03 #:grid (3 0) #:nonzero-pixels 30 #:rows ("00000000" "00000000" "00000000" "02222200" "2aaaaa20" "025c5c20" "02aa9920" "22665200"))
+      (def-pico-sprite #:id #x04 #:grid (4 0) #:nonzero-pixels 38 #:rows ("00000000" "00000000" "02202200" "24424420" "28888820" "024a4a20" "02888442" "22888220"))
+      (def-pico-sprite #:id #x05 #:grid (5 0) #:nonzero-pixels 46 #:rows ("00000000" "02202200" "2dd2dd20" "2dd2dd20" "2eeeee20" "02dadad2" "02eeedd2" "22eee220"))
+      (def-pico-sprite #:id #x06 #:grid (6 0) #:nonzero-pixels 46 #:rows ("00200200" "02822820" "028dd820" "02dddd20" "021a1ad2" "02ddddd2" "02dddd20" "0266dd20"))
+      (def-pico-sprite #:id #x07 #:grid (7 0) #:nonzero-pixels 30 #:rows ("00000000" "00000000" "00202000" "02626200" "02626200" "02666620" "026b6b20" "02666620"))
+      (def-pico-sprite #:id #x0C #:grid (12 0) #:nonzero-pixels 16 #:rows ("26677772" "02272720" "00020200" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x0D #:grid (13 0) #:nonzero-pixels 16 #:rows ("26677772" "02227720" "00002200" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x0E #:grid (14 0) #:nonzero-pixels 17 #:rows ("26677772" "02272272" "00020020" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x0F #:grid (15 0) #:nonzero-pixels 16 #:rows ("26677772" "02222272" "00000020" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x11 #:grid (1 1) #:nonzero-pixels 44 #:rows ("00000000" "00222220" "02666662" "02427272" "28888820" "024c4c20" "02777720" "02777220"))
+      (def-pico-sprite #:id #x12 #:grid (2 1) #:nonzero-pixels 43 #:rows ("00000000" "00222220" "02666662" "02429292" "29999920" "02484820" "02999920" "02999200"))
+      (def-pico-sprite #:id #x13 #:grid (3 1) #:nonzero-pixels 43 #:rows ("00000000" "00222220" "02666662" "0222a2a2" "2aaaaa20" "025c5c20" "02aa9920" "02aaa200"))
+      (def-pico-sprite #:id #x14 #:grid (4 1) #:nonzero-pixels 38 #:rows ("00020000" "00262000" "00027200" "00255520" "02555552" "02555552" "02555552" "00255520"))
+      (def-pico-sprite #:id #x15 #:grid (5 1) #:nonzero-pixels 46 #:rows ("00000000" "02202200" "2dd2dd20" "2dd2dd20" "2eeeee20" "02dadad2" "02eeedd2" "22eee220"))
+      (def-pico-sprite #:id #x16 #:grid (6 1) #:nonzero-pixels 51 #:rows ("00222220" "02666662" "028dd8d2" "02dddd20" "021a1ad2" "02ddddd2" "02dddd20" "02dddd20"))
+      (def-pico-sprite #:id #x17 #:grid (7 1) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02626200" "02626200" "02666620" "266b6b62" "02661620"))
+      (def-pico-sprite #:id #x18 #:grid (8 1) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02626200" "02626200" "026b6b20" "02661620" "26661662"))
+      (def-pico-sprite #:id #x1C #:grid (12 1) #:nonzero-pixels 13 #:rows ("00277772" "00272720" "00020200" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x1D #:grid (13 1) #:nonzero-pixels 12 #:rows ("00277772" "00027720" "00002200" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x1E #:grid (14 1) #:nonzero-pixels 14 #:rows ("00277772" "00272272" "00020020" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x1F #:grid (15 1) #:nonzero-pixels 12 #:rows ("00277772" "00022272" "00000020" "00000000" "00000000" "00000000" "00000000" "00000000"))
+      (def-pico-sprite #:id #x21 #:grid (1 2) #:nonzero-pixels 37 #:rows ("00000000" "00202000" "02424200" "02424200" "28888820" "024c4c20" "02777720" "02777220"))
+      (def-pico-sprite #:id #x22 #:grid (2 2) #:nonzero-pixels 32 #:rows ("00000000" "00000000" "00202000" "02424200" "29999920" "02484820" "02999920" "02999220"))
+      (def-pico-sprite #:id #x23 #:grid (3 2) #:nonzero-pixels 30 #:rows ("00000000" "00000000" "00000000" "02222200" "2aaaaa20" "025c5c20" "02aa9920" "02aaa220"))
+      (def-pico-sprite #:id #x25 #:grid (5 2) #:nonzero-pixels 46 #:rows ("00000000" "02202200" "2dd2dd20" "2dd2dd20" "2eeeee20" "02dadad2" "02eeedd2" "22eee220"))
+      (def-pico-sprite #:id #x26 #:grid (6 2) #:nonzero-pixels 46 #:rows ("00200200" "02822820" "028dd820" "02dddd20" "021a1ad2" "02ddddd2" "02dddd20" "02dddd20"))
+      (def-pico-sprite #:id #x28 #:grid (8 2) #:nonzero-pixels 23 #:rows ("00000000" "00000000" "02000000" "28222220" "02777772" "28222220" "02000000" "00000000"))
+      (def-pico-sprite #:id #x29 #:grid (9 2) #:nonzero-pixels 23 #:rows ("00002000" "00027200" "00027200" "00027200" "00027200" "00027200" "00282820" "00020200"))
+      (def-pico-sprite #:id #x2A #:grid (10 2) #:nonzero-pixels 30 #:rows ("00000000" "00222200" "02668620" "00266820" "00268820" "02666820" "00222200" "00000000")))
     (gff-flags
-      (def-pico-sprite-flag #:id 135 #:flags 29)
-      (def-pico-sprite-flag #:id 136 #:flags 1)
-      (def-pico-sprite-flag #:id 138 #:flags 56)
-      (def-pico-sprite-flag #:id 150 #:flags 255)
-      (def-pico-sprite-flag #:id 151 #:flags 255)
-      (def-pico-sprite-flag #:id 152 #:flags 255)
-      (def-pico-sprite-flag #:id 153 #:flags 255)
-      (def-pico-sprite-flag #:id 154 #:flags 255)
-      (def-pico-sprite-flag #:id 166 #:flags 255)
-      (def-pico-sprite-flag #:id 167 #:flags 255)
-      (def-pico-sprite-flag #:id 168 #:flags 255)
-      (def-pico-sprite-flag #:id 169 #:flags 255)
-      (def-pico-sprite-flag #:id 170 #:flags 255)
-      (def-pico-sprite-flag #:id 182 #:flags 255)
-      (def-pico-sprite-flag #:id 183 #:flags 255)
-      (def-pico-sprite-flag #:id 184 #:flags 255)
-      (def-pico-sprite-flag #:id 185 #:flags 255)
-      (def-pico-sprite-flag #:id 186 #:flags 255)
-      (def-pico-sprite-flag #:id 187 #:flags 255)
-      (def-pico-sprite-flag #:id 188 #:flags 255)
-      (def-pico-sprite-flag #:id 189 #:flags 255))
+      (def-pico-sprite-flag #:id #x87 #:flags 29)
+      (def-pico-sprite-flag #:id #x88 #:flags 1)
+      (def-pico-sprite-flag #:id #x8A #:flags 56)
+      (def-pico-sprite-flag #:id #x96 #:flags 255)
+      (def-pico-sprite-flag #:id #x97 #:flags 255)
+      (def-pico-sprite-flag #:id #x98 #:flags 255)
+      (def-pico-sprite-flag #:id #x99 #:flags 255)
+      (def-pico-sprite-flag #:id #x9A #:flags 255)
+      (def-pico-sprite-flag #:id #xA6 #:flags 255)
+      (def-pico-sprite-flag #:id #xA7 #:flags 255)
+      (def-pico-sprite-flag #:id #xA8 #:flags 255)
+      (def-pico-sprite-flag #:id #xA9 #:flags 255)
+      (def-pico-sprite-flag #:id #xAA #:flags 255)
+      (def-pico-sprite-flag #:id #xB6 #:flags 255)
+      (def-pico-sprite-flag #:id #xB7 #:flags 255)
+      (def-pico-sprite-flag #:id #xB8 #:flags 255)
+      (def-pico-sprite-flag #:id #xB9 #:flags 255)
+      (def-pico-sprite-flag #:id #xBA #:flags 255)
+      (def-pico-sprite-flag #:id #xBB #:flags 255)
+      (def-pico-sprite-flag #:id #xBC #:flags 255)
+      (def-pico-sprite-flag #:id #xBD #:flags 255))
     (map-rows
-      (def-pico-map-row #:y 0 #:nonzero-tiles 3 #:sample-hex "00000000000000000000009100000000")
-      (def-pico-map-row #:y 1 #:nonzero-tiles 7 #:sample-hex "00a0000000000000000000000000a000")
-      (def-pico-map-row #:y 2 #:nonzero-tiles 6 #:sample-hex "00000000920000000000000000000000")
-      (def-pico-map-row #:y 3 #:nonzero-tiles 7 #:sample-hex "00000000000000000000000000000000")
-      (def-pico-map-row #:y 4 #:nonzero-tiles 8 #:sample-hex "00000000a0000000000000a000920000")
-      (def-pico-map-row #:y 5 #:nonzero-tiles 1 #:sample-hex "00000000000000000000000000000000")
-      (def-pico-map-row #:y 6 #:nonzero-tiles 2 #:sample-hex "00009100000000000000000000000000")
-      (def-pico-map-row #:y 7 #:nonzero-tiles 4 #:sample-hex "0000000000009200000000000000a000")
-      (def-pico-map-row #:y 8 #:nonzero-tiles 2 #:sample-hex "00a00000000000000000000000000000")
-      (def-pico-map-row #:y 9 #:nonzero-tiles 2 #:sample-hex "00000000000000000000000000000092")
-      (def-pico-map-row #:y 10 #:nonzero-tiles 2 #:sample-hex "00000000000000000092000000000000")
-      (def-pico-map-row #:y 11 #:nonzero-tiles 12 #:sample-hex "00000000a0000000000000a000000000")
-      (def-pico-map-row #:y 12 #:nonzero-tiles 10 #:sample-hex "00000091000000000000000000000000")
-      (def-pico-map-row #:y 13 #:nonzero-tiles 10 #:sample-hex "00000000000000000000000091000000")
-      (def-pico-map-row #:y 14 #:nonzero-tiles 14 #:sample-hex "00a00000000000a0000000000000a000")
-      (def-pico-map-row #:y 15 #:nonzero-tiles 2 #:sample-hex "00009200000000000000000000000000")
-      (def-pico-map-row #:y 16 #:nonzero-tiles 32 #:sample-hex "80808080808080808080808080808080")
-      (def-pico-map-row #:y 17 #:nonzero-tiles 32 #:sample-hex "80808282828282828282828282828080")
-      (def-pico-map-row #:y 18 #:nonzero-tiles 32 #:sample-hex "8081a090909090909090909090a08180")
-      (def-pico-map-row #:y 19 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 20 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 21 #:nonzero-tiles 32 #:sample-hex "8081909090a090909090a09090908180")
-      (def-pico-map-row #:y 22 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 23 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 24 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 25 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 26 #:nonzero-tiles 32 #:sample-hex "8081909090a090909090a09090908180")
-      (def-pico-map-row #:y 27 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 28 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
-      (def-pico-map-row #:y 29 #:nonzero-tiles 32 #:sample-hex "8081a090909090909090909090a08180")
-      (def-pico-map-row #:y 30 #:nonzero-tiles 32 #:sample-hex "80808282828282828282828282828080")
-      (def-pico-map-row #:y 31 #:nonzero-tiles 32 #:sample-hex "80808080808080808080808080808080"))
+      (def-pico-map-row #:y #x00 #:nonzero-tiles 3 #:sample-hex "00000000000000000000009100000000")
+      (def-pico-map-row #:y #x01 #:nonzero-tiles 7 #:sample-hex "00a0000000000000000000000000a000")
+      (def-pico-map-row #:y #x02 #:nonzero-tiles 6 #:sample-hex "00000000920000000000000000000000")
+      (def-pico-map-row #:y #x03 #:nonzero-tiles 7 #:sample-hex "00000000000000000000000000000000")
+      (def-pico-map-row #:y #x04 #:nonzero-tiles 8 #:sample-hex "00000000a0000000000000a000920000")
+      (def-pico-map-row #:y #x05 #:nonzero-tiles 1 #:sample-hex "00000000000000000000000000000000")
+      (def-pico-map-row #:y #x06 #:nonzero-tiles 2 #:sample-hex "00009100000000000000000000000000")
+      (def-pico-map-row #:y #x07 #:nonzero-tiles 4 #:sample-hex "0000000000009200000000000000a000")
+      (def-pico-map-row #:y #x08 #:nonzero-tiles 2 #:sample-hex "00a00000000000000000000000000000")
+      (def-pico-map-row #:y #x09 #:nonzero-tiles 2 #:sample-hex "00000000000000000000000000000092")
+      (def-pico-map-row #:y #x0A #:nonzero-tiles 2 #:sample-hex "00000000000000000092000000000000")
+      (def-pico-map-row #:y #x0B #:nonzero-tiles 12 #:sample-hex "00000000a0000000000000a000000000")
+      (def-pico-map-row #:y #x0C #:nonzero-tiles 10 #:sample-hex "00000091000000000000000000000000")
+      (def-pico-map-row #:y #x0D #:nonzero-tiles 10 #:sample-hex "00000000000000000000000091000000")
+      (def-pico-map-row #:y #x0E #:nonzero-tiles 14 #:sample-hex "00a00000000000a0000000000000a000")
+      (def-pico-map-row #:y #x0F #:nonzero-tiles 2 #:sample-hex "00009200000000000000000000000000")
+      (def-pico-map-row #:y #x10 #:nonzero-tiles 32 #:sample-hex "80808080808080808080808080808080")
+      (def-pico-map-row #:y #x11 #:nonzero-tiles 32 #:sample-hex "80808282828282828282828282828080")
+      (def-pico-map-row #:y #x12 #:nonzero-tiles 32 #:sample-hex "8081a090909090909090909090a08180")
+      (def-pico-map-row #:y #x13 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x14 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x15 #:nonzero-tiles 32 #:sample-hex "8081909090a090909090a09090908180")
+      (def-pico-map-row #:y #x16 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x17 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x18 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x19 #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x1A #:nonzero-tiles 32 #:sample-hex "8081909090a090909090a09090908180")
+      (def-pico-map-row #:y #x1B #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x1C #:nonzero-tiles 32 #:sample-hex "80819090909090909090909090908180")
+      (def-pico-map-row #:y #x1D #:nonzero-tiles 32 #:sample-hex "8081a090909090909090909090a08180")
+      (def-pico-map-row #:y #x1E #:nonzero-tiles 32 #:sample-hex "80808282828282828282828282828080")
+      (def-pico-map-row #:y #x1F #:nonzero-tiles 32 #:sample-hex "80808080808080808080808080808080"))
     (sfx-tracks
-      (def-pico-sfx #:id 0 #:editor-mode 1 #:speed 1 #:loop (0 0) #:active-notes 4)
-      (def-pico-sfx #:id 1 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 2 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 13)
-      (def-pico-sfx #:id 3 #:editor-mode 1 #:speed 4 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 4 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 15)
-      (def-pico-sfx #:id 5 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 14)
-      (def-pico-sfx #:id 6 #:editor-mode 1 #:speed 0 #:loop (0 0) #:active-notes 13)
-      (def-pico-sfx #:id 7 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 15)
-      (def-pico-sfx #:id 8 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 14)
-      (def-pico-sfx #:id 9 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 27)
-      (def-pico-sfx #:id 10 #:editor-mode 1 #:speed 2 #:loop (0 0) #:active-notes 17)
-      (def-pico-sfx #:id 11 #:editor-mode 63 #:speed 22 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 12 #:editor-mode 63 #:speed 22 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 13 #:editor-mode 62 #:speed 22 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 14 #:editor-mode 62 #:speed 22 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 15 #:editor-mode 62 #:speed 20 #:loop (0 0) #:active-notes 32)
-      (def-pico-sfx #:id 16 #:editor-mode 0 #:speed 6 #:loop (0 0) #:active-notes 2)
-      (def-pico-sfx #:id 17 #:editor-mode 104 #:speed 2 #:loop (0 0) #:active-notes 16)
-      (def-pico-sfx #:id 18 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 9)
-      (def-pico-sfx #:id 19 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 9)
-      (def-pico-sfx #:id 20 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 8)
-      (def-pico-sfx #:id 21 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 11)
-      (def-pico-sfx #:id 22 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 9)
-      (def-pico-sfx #:id 23 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 10)
-      (def-pico-sfx #:id 24 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 6)
-      (def-pico-sfx #:id 25 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 11)
-      (def-pico-sfx #:id 26 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 27 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 28 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 29 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 30 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
-      (def-pico-sfx #:id 31 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12))
+      (def-pico-sfx #:id #x00 #:editor-mode 1 #:speed 1 #:loop (0 0) #:active-notes 4)
+      (def-pico-sfx #:id #x01 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x02 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 13)
+      (def-pico-sfx #:id #x03 #:editor-mode 1 #:speed 4 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x04 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 15)
+      (def-pico-sfx #:id #x05 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 14)
+      (def-pico-sfx #:id #x06 #:editor-mode 1 #:speed 0 #:loop (0 0) #:active-notes 13)
+      (def-pico-sfx #:id #x07 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 15)
+      (def-pico-sfx #:id #x08 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 14)
+      (def-pico-sfx #:id #x09 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 27)
+      (def-pico-sfx #:id #x0A #:editor-mode 1 #:speed 2 #:loop (0 0) #:active-notes 17)
+      (def-pico-sfx #:id #x0B #:editor-mode 63 #:speed 22 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x0C #:editor-mode 63 #:speed 22 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x0D #:editor-mode 62 #:speed 22 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x0E #:editor-mode 62 #:speed 22 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x0F #:editor-mode 62 #:speed 20 #:loop (0 0) #:active-notes 32)
+      (def-pico-sfx #:id #x10 #:editor-mode 0 #:speed 6 #:loop (0 0) #:active-notes 2)
+      (def-pico-sfx #:id #x11 #:editor-mode 104 #:speed 2 #:loop (0 0) #:active-notes 16)
+      (def-pico-sfx #:id #x12 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 9)
+      (def-pico-sfx #:id #x13 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 9)
+      (def-pico-sfx #:id #x14 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 8)
+      (def-pico-sfx #:id #x15 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 11)
+      (def-pico-sfx #:id #x16 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 9)
+      (def-pico-sfx #:id #x17 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 10)
+      (def-pico-sfx #:id #x18 #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 6)
+      (def-pico-sfx #:id #x19 #:editor-mode 0 #:speed 1 #:loop (0 0) #:active-notes 11)
+      (def-pico-sfx #:id #x1A #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x1B #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x1C #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x1D #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x1E #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12)
+      (def-pico-sfx #:id #x1F #:editor-mode 0 #:speed 0 #:loop (0 0) #:active-notes 12))
     (music-patterns
-      (def-pico-music #:pattern 0 #:flags 2 #:channels (14 64 64 64))
-      (def-pico-music #:pattern 1 #:flags 0 #:channels (14 0 0 0))
-      (def-pico-music #:pattern 2 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 3 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 4 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 5 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 6 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 7 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 8 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 9 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 10 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 11 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 12 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 13 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 14 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 15 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 16 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 17 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 18 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 19 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 20 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 21 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 22 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 23 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 24 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 25 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 26 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 27 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 28 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 29 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 30 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 31 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 32 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 33 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 34 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 35 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 36 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 37 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 38 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 39 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 40 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 41 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 42 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 43 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 44 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 45 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 46 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 47 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 48 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 49 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 50 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 51 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 52 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 53 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 54 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 55 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 56 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 57 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 58 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 59 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 60 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 61 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 62 #:flags 0 #:channels (0 0 0 0))
-      (def-pico-music #:pattern 63 #:flags 0 #:channels (0 0 0 0))))
+      (def-pico-music #:pattern #x00 #:flags 2 #:channels (14 64 64 64))
+      (def-pico-music #:pattern #x01 #:flags 0 #:channels (14 0 0 0))
+      (def-pico-music #:pattern #x02 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x03 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x04 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x05 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x06 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x07 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x08 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x09 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x0A #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x0B #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x0C #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x0D #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x0E #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x0F #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x10 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x11 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x12 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x13 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x14 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x15 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x16 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x17 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x18 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x19 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x1A #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x1B #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x1C #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x1D #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x1E #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x1F #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x20 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x21 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x22 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x23 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x24 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x25 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x26 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x27 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x28 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x29 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x2A #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x2B #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x2C #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x2D #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x2E #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x2F #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x30 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x31 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x32 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x33 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x34 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x35 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x36 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x37 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x38 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x39 #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x3A #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x3B #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x3C #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x3D #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x3E #:flags 0 #:channels (0 0 0 0))
+      (def-pico-music #:pattern #x3F #:flags 0 #:channels (0 0 0 0))))
   ;; --- 5. Full Bank-by-Bank Code, Subroutines, Data & Assets ---
   (p8-sections
     (p8-section header

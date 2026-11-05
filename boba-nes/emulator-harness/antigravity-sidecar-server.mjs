@@ -1819,6 +1819,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
   const structuredConditionals = [];
   const stateMachines = [];
   const highLevelIdioms = [];
+  const structLayouts = [];
   const pseudoCodeBlocks = [];
   const gbiHistogram = {};
   const coeffectPairs = {};
@@ -1942,6 +1943,35 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
       continue;
     }
 
+    // 2f. Whole-ROM Struct Layouts (SNES, GBA, N64)
+    if ((m = line.match(/^\(struct-layout\s+([^\s)]+)\s+#:(?:base-reg|base)\s+'?([^\s)]+)\s+#:span-bytes\s+(\d+)/))) {
+      const layoutName = m[1];
+      const baseReg = m[2];
+      const spanBytes = Number(m[3]);
+      const fields = [];
+      for (let k = i + 1; k < Math.min(rawLines.length, i + 64); k++) {
+        const fLine = rawLines[k].trim();
+        const fm = fLine.match(/^\(field\s+([^\s)]+)\s+#:offset\s+([^\s)]+)\s+#:type\s+'?([^\s)]+)\s+#:accesses\s+(\d+)\)/);
+        if (fm) {
+          fields.push({
+            name: fm[1],
+            offset: fm[2],
+            type: fm[3],
+            accesses: Number(fm[4])
+          });
+        }
+        if (fLine.endsWith('))') || fLine === ')') break;
+      }
+      structLayouts.push({
+        name: layoutName,
+        baseReg,
+        spanBytes,
+        fieldsCount: fields.length,
+        fields
+      });
+      continue;
+    }
+
     // 3. Call Graph Nodes & Edges (N64 call-node, SNES/GBA call-edge)
     if ((m = line.match(/^\(call-node\s+([^\s)]+)\s+\(entry\s+([^\s)]+)\)\s+\(stack-frame-bytes\s+(\d+)\)\s+\(ra-offset\s+(-?\d+)\)\s+\(callers\s+(\d+)\)\s+\(fpu-ops\s+(\d+)\)\s+\(mmio\s+\(([^)]*)\)\)\s+\(callees\s+\(([^)]*)\)\)\)/))) {
       const mmio = m[7].trim() ? m[7].trim().split(/\s+/) : [];
@@ -1969,35 +1999,51 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     }
 
     // 4. Subroutines across N64, SNES, GBA, NES, GB/GBC, PICO-8
-    if ((m = line.match(/^\(subroutine\s+([^\s)]+)\s+\(entry\s+([^\s)]+)\)\s+\(offset\s+([^\s)]+)\)\s+\(stack-frame\s+(\d+)\)\s+\(fpu-ops\s+(\d+)\)/))) {
+    if ((m = line.match(/^\(subroutine\s+([^\s)]+)\s+\(entry\s+([^\s)]+)\)\s+\(offset\s+([^\s)]+)\)\s+\(stack-frame\s+(\d+)\)\s+\(fpu-ops\s+(\d+)\)(?:\s+#:params\s+\(([^)]*)\))?(?:\s+#:returns\s+\(([^)]*)\))?/))) {
+      const params = (m[6] || '').trim() ? m[6].trim().split(/\s+/) : [];
+      const returns = (m[7] || '').trim() ? m[7].trim().split(/\s+/) : [];
       subroutines.push({
         name: m[1],
         entry: m[2],
         offset: m[3],
         stackFrameBytes: Number(m[4]),
         fpuOps: Number(m[5]),
+        params,
+        returns,
         isa: 'MIPS-III-VR4300'
       });
       continue;
     }
     if ((m = line.match(/^\(defsub-65c816\s+([^\s)]+)\s+\(bank\s+([^\s)]+)\)\s+\(entry\s+([^\s)]+)\)(?:.*?\(cycles\s+(\d+)\))?(?:.*?\(mmio\s+([^)]*)\))?/))) {
       const mmio = (m[5] || '').trim() ? m[5].trim().split(/\s+/) : [];
+      const pm = line.match(/#:params\s+\(([^)]*)\)/);
+      const rm = line.match(/#:returns\s+\(([^)]*)\)/);
+      const params = (pm?.[1] || '').trim() ? pm[1].trim().split(/\s+/) : [];
+      const returns = (rm?.[1] || '').trim() ? rm[1].trim().split(/\s+/) : [];
       subroutines.push({
         name: m[1],
         bank: m[2],
         entry: m[3],
         cycles: m[4] ? Number(m[4]) : undefined,
         mmio,
+        params,
+        returns,
         isa: 'WDC-65C816'
       });
       continue;
     }
     if ((m = line.match(/^\((defsub-arm32|defsub-thumb16|subroutine|arm32-subroutine|thumb16-subroutine)\s+([^\s)]+)(?:\s+\(isa\s+'[^\s)]+\))?\s+\(entry\s+([^\s)]+)\)(?:\s+\(calls\s+([^)]*)\))?/))) {
       const calls = (m[4] || '').trim() ? m[4].trim().split(/\s+/) : [];
+      const pm = line.match(/#:params\s+\(([^)]*)\)/);
+      const rm = line.match(/#:returns\s+\(([^)]*)\)/);
+      const params = (pm?.[1] || '').trim() ? pm[1].trim().split(/\s+/) : [];
+      const returns = (rm?.[1] || '').trim() ? rm[1].trim().split(/\s+/) : [];
       subroutines.push({
         name: m[2],
         entry: m[3],
         calls,
+        params,
+        returns,
         isa: m[1].includes('arm32') ? 'ARM32' : m[1].includes('thumb16') ? 'Thumb16' : targetKey.toUpperCase()
       });
       continue;
@@ -2078,7 +2124,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     }
 
     // 6. Coeffect / Effect Numeric Key-Value Pairs inside grade blocks
-    if ((m = line.match(/^\(([a-zA-Z0-9_-]*?(?:refs|ops|calls|functions|subroutines|pointers|executed|lifted|budget|writes|reads|transitions|banks|segments|assets|sites|count|bytes|loops|conditionals|machines|idioms))\s+(\d+|#t|#f|[A-Za-z0-9_-]+)\)$/))) {
+    if ((m = line.match(/^\(([a-zA-Z0-9_-]*?(?:refs|ops|calls|functions|subroutines|pointers|executed|lifted|budget|writes|reads|transitions|banks|segments|assets|sites|count|bytes|loops|conditionals|machines|idioms|layouts))\s+(\d+|#t|#f|[A-Za-z0-9_-]+)\)$/))) {
       const k = m[1];
       const vRaw = m[2];
       coeffectPairs[k] = /^\d+$/.test(vRaw) ? Number(vRaw) : vRaw === '#t' ? true : vRaw === '#f' ? false : vRaw;
@@ -2111,6 +2157,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
       foldedCondExprsCount,
       floatConstantsCount,
       structFieldAccessesCount,
+      structLayoutsCount: structLayouts.length,
       callGraphCount: callGraph.length,
       mmioRegistersCount: mmioCrossRefs.length,
       resolvedPointersCount: resolvedPointers.length,
@@ -2125,6 +2172,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     resolvedPointers,
     callGraph,
     subroutines,
+    structLayouts,
     pseudoCodeBlocks,
     structuredLoops,
     structuredConditionals,
