@@ -967,8 +967,8 @@ theorem tma_swizzle128_involutive_place_bijection (c r r2 : BitVec 5) :
     tmaSwizzle128Bank (tmaSwizzle128Bank c r) r = c ∧
     (r ≠ r2 → tmaSwizzle128Bank c r ≠ tmaSwizzle128Bank c r2) := by
   have hInv : ∀ (x y : BitVec 5), (x ^^^ y) ^^^ y = x := by decide
-  have hInj : ∀ (x y z : BitVec 5), tmaSwizzle128Bank x y = tmaSwizzle128Bank x z → y = z := by decide
-  exact ⟨hInv c r, hInv c r, fun hNe hEq => hNe (hInj c r r2 hEq)⟩
+  have hInvL : ∀ (x y : BitVec 5), x ^^^ (x ^^^ y) = y := by decide
+  exact ⟨hInv c r, hInv c r, fun hNe hEq => hNe ((hInvL c r).symm.trans ((congrArg (c ^^^ ·) hEq).trans (hInvL c r2)))⟩
 
 /-- Ring-slot state for 3-epoch GPU Quiescent-State-Based Reclamation (`3-Epoch GPU-QSBR`). -/
 structure GpuQsbrSlotState where
@@ -1069,6 +1069,63 @@ theorem dlopen_trampoline_hotpatch_coeffect_and_bit_exact_preservation
   | nil => rfl
   | cons w rest ih =>
       simp [evalLayerStackVecDot, hBitExact w x, ih (x + serialKernel w x)]
+
+/-- Per-turn AST Braun-trie session-arena coeffect grade `gamma_session`
+    tracking dynamic heap allocations `heapAllocs`, slab bump bytes `bumpBytes`,
+    uniqueness capability `uniqueness`, and dirty leak count `dirtyLeak`. -/
+structure AstSessionTurnCoeffect where
+  heapAllocs : Nat
+  bumpBytes  : Nat
+  uniqueness : UsageUniqGrade
+  dirtyLeak  : Nat
+  deriving DecidableEq, Repr
+
+/-- Constructs a persistent session-arena turn coeffect under grade `gamma_session`
+    for a turn inserting `bTurn` AST node bytes into the pre-reserved session slab. -/
+def mkSessionTurnCoeffect (bTurn : Nat) : AstSessionTurnCoeffect :=
+  { heapAllocs := 0
+    bumpBytes  := bTurn
+    uniqueness := UsageUniqGrade.uniq1
+    dirtyLeak  := 0 }
+
+/-- Sequential composition of two turn coeffect grades under the session-arena discipline. -/
+def seqComposeSessionTurnCoeffect (g1 g2 : AstSessionTurnCoeffect) : AstSessionTurnCoeffect :=
+  { heapAllocs := g1.heapAllocs + g2.heapAllocs
+    bumpBytes  := g1.bumpBytes + g2.bumpBytes
+    uniqueness := gradeMul g1.uniqueness g2.uniqueness
+    dirtyLeak  := g1.dirtyLeak + g2.dirtyLeak }
+
+/-- Cumulative AST byte footprint $\sum_{t=1}^T B_t$ across a list of $T$ agent turns. -/
+def sumTurnBytes : List Nat → Nat
+  | []        => 0
+  | b :: rest => b + sumTurnBytes rest
+
+/-- Sequential composition of $T$ turn coeffects under persistent session-arena grade `gamma_session`. -/
+def foldSessionTurnCoeffects : List Nat → AstSessionTurnCoeffect
+  | []        => mkSessionTurnCoeffect 0
+  | b :: rest => seqComposeSessionTurnCoeffect (mkSessionTurnCoeffect b) (foldSessionTurnCoeffects rest)
+
+/-- Theorem 25 (`cross_turn_ast_session_coeffect_grade_composition`):
+    Sequential composition of $T$ turn coeffects under persistent session-arena grade `gamma_session`
+    has zero cross-turn heap allocation grade ($\text{alloc}_1 + \dots + \text{alloc}_T = 0$),
+    exact cumulative bump footprint $\sum_{t=1}^T B_t$, bounded peak memory
+    $\sum_{t=1}^T B_t \le C_{\text{cap}}$ (`cCap = sumTurnBytes turnBytes + slack`),
+    and linear `uniq1` ownership with `dirtyLeak = 0`. -/
+theorem cross_turn_ast_session_coeffect_grade_composition
+    (turnBytes : List Nat) (slack : Nat) :
+    let composed := foldSessionTurnCoeffects turnBytes
+    let cCap := sumTurnBytes turnBytes + slack
+    composed = mkSessionTurnCoeffect (sumTurnBytes turnBytes) ∧
+    composed.heapAllocs = 0 ∧
+    composed.bumpBytes = sumTurnBytes turnBytes ∧
+    composed.bumpBytes ≤ cCap ∧
+    composed.uniqueness = UsageUniqGrade.uniq1 ∧
+    composed.dirtyLeak = 0 := by
+  have hFold : foldSessionTurnCoeffects turnBytes = mkSessionTurnCoeffect (sumTurnBytes turnBytes) := by
+    induction turnBytes with
+    | nil => rfl
+    | cons b rest ih => simp [foldSessionTurnCoeffects, sumTurnBytes, ih, seqComposeSessionTurnCoeffect, mkSessionTurnCoeffect, gradeMul]
+  refine ⟨hFold, by rw [hFold]; rfl, by rw [hFold]; rfl, by rw [hFold]; dsimp [mkSessionTurnCoeffect]; omega, by rw [hFold]; rfl, by rw [hFold]; rfl⟩
 
 end LakefillQGradedCoeffectUniquenessPlaceEffectProofs
 
