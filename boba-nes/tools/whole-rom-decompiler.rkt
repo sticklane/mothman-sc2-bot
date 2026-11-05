@@ -2646,7 +2646,7 @@
 ;; with hardware addresses and bitmasks in uppercase hexadecimal `#xXXXX` / `#xXX`.
 (define (write-pseudo-expr! expr out)
   (match expr
-    [(list (and space (or 'zp 'hram 'io)) (? exact-integer? addr))
+    [(list (and space (or 'zp 'u16-zp 'hram 'io)) (? exact-integer? addr))
      (fprintf out "(~s ~a)" space (if (< addr 256) (format-hex2 addr) (format-hex4 addr)))]
     [(list (and space (or 'wram 'sram 'rom 'vram 'oam)) (? exact-integer? addr))
      (fprintf out "(~s ~a)" space (format-hex4 addr))]
@@ -3023,10 +3023,10 @@
          ['()
           (display ")" out)]))]
 
-    ;; Flat keyword-bearing leaf forms (`defdata`, `mirror`, `zp-ptr`, `state-var`, `hram-var`, `wram-var`, etc.)
+    ;; Flat keyword-bearing leaf forms (`defdata`, `mirror`, `zp-ptr`, `state-var`, `timer`, `table`, `hram-var`, `wram-var`, etc.)
     [(memq (car sexp) '(defdata jump-table-dispatch jmp-indirect idiom
                         idiom-oam-dma-blit idiom-ppu-vram-seek idiom-zp-pointer-init
-                        mirror zp-ptr state-var hram-var wram-var))
+                        mirror zp-ptr state-var timer table hram-var wram-var))
      (write-flat-kw-form-hex! sexp out indent)]
 
     ;; Container blocks whose elements each belong on their own line
@@ -3034,7 +3034,7 @@
                '(header-spec interrupt-vectors coeffect-grades hardware-capabilities idioms
                  high-level-idioms state-machines pico8-state-machines
                  symbolic-mmio-xref def-memory-layout
-                 mmio-mirrors zp-pointers state-variables hram-variables wram-variables
+                 mmio-mirrors zp-pointers state-variables timers indexed-tables hram-variables wram-variables
                  jump-tables disassembled-entry-prologue
                  interrupt-service-routines lifted-lua-functions lifted-pico8-assets
                  gfx-sprites gff-flags map-rows sfx-tracks music-patterns

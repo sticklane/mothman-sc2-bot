@@ -1530,6 +1530,64 @@ function runRacketCompileDsl({ code = '', target = 'nes', runDiffer = false }) {
   });
 }
 
+function runRacketCompilePseudoCode({ pseudoCode, target = 'nes' }) {
+  return new Promise((resolve) => {
+    const snippet = (pseudoCode || '(decompiled-pseudo-code (return))').trim();
+    const escapedSnippet = snippet.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const safeTarget = String(target || 'nes').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+    const racketScript = `
+#lang racket/base
+(require json
+         racket/port
+         racket/format
+         (file "${path.join(COMPILER_DIR, 'multi-target-typechecker.rkt')}"))
+
+(with-handlers ([exn:fail?
+                 (lambda (e)
+                   (write-json
+                    (hasheq 'ok #f
+                            'target "${safeTarget}"
+                            'error (exn-message e)
+                            'compiledInstructions '())))])
+  (define raw-str "${escapedSnippet}")
+  (define datum (with-input-from-string raw-str read))
+  (define target-sym (string->symbol "${safeTarget}"))
+  (define insts (compile-pseudo-code->insts datum #:target target-sym))
+  (write-json
+   (hasheq 'ok #t
+           'target (symbol->string target-sym)
+           'inputDatum (format "~s" datum)
+           'instructionCount (length insts)
+           'compiledInstructions (map (lambda (i) (format "~s" i)) insts)
+           'sexp (format "~s" insts))))
+`;
+
+    execFile(RACKET_BIN, ['-e', racketScript], { timeout: 8000, cwd: REPO_ROOT }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({
+          ok: false,
+          target: safeTarget,
+          error: stderr || err.message,
+          compiledInstructions: []
+        });
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        resolve(parsed);
+      } catch (_parseErr) {
+        resolve({
+          ok: true,
+          target: safeTarget,
+          rawOutput: stdout.trim(),
+          compiledInstructions: [stdout.trim()]
+        });
+      }
+    });
+  });
+}
+
 // ============================================================================
 // 6. Server-Sent Events (SSE) & File System Watchers (/api/events)
 // ============================================================================
@@ -1820,6 +1878,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
   const stateMachines = [];
   const highLevelIdioms = [];
   const structLayouts = [];
+  const memoryLayout = [];
   const pseudoCodeBlocks = [];
   const gbiHistogram = {};
   const coeffectPairs = {};
@@ -1944,20 +2003,24 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     }
 
     // 2f. Whole-ROM Struct Layouts (SNES, GBA, N64)
-    if ((m = line.match(/^\(struct-layout\s+([^\s)]+)\s+#:(?:base-reg|base)\s+'?([^\s)]+)\s+#:span-bytes\s+(\d+)/))) {
+    if ((m = line.match(/^\(struct-layout\s+([^\s)]+)\s+#:(?:base-reg|base)\s+'?([^\s)]+)\s+#:(?:span-bytes|total-bytes)\s+(\d+)/))) {
       const layoutName = m[1];
       const baseReg = m[2];
       const spanBytes = Number(m[3]);
       const fields = [];
       for (let k = i + 1; k < Math.min(rawLines.length, i + 64); k++) {
         const fLine = rawLines[k].trim();
-        const fm = fLine.match(/^\(field\s+([^\s)]+)\s+#:offset\s+([^\s)]+)\s+#:type\s+'?([^\s)]+)\s+#:accesses\s+(\d+)\)/);
+        const fm = fLine.match(
+          /^\(field\s+([^\s)]+)(?:\s+#:role\s+'?([^\s)]+))?\s+#:offset\s+([^\s)]+)\s+#:type\s+'?([^\s)]+)(?:\s+#:size\s+(\d+))?\s+#:accesses\s+(\d+)\)/
+        );
         if (fm) {
           fields.push({
             name: fm[1],
-            offset: fm[2],
-            type: fm[3],
-            accesses: Number(fm[4])
+            role: fm[2] || null,
+            offset: fm[3],
+            type: fm[4],
+            size: fm[5] !== undefined ? Number(fm[5]) : undefined,
+            accesses: Number(fm[6])
           });
         }
         if (fLine.endsWith('))') || fLine === ')') break;
@@ -1968,6 +2031,36 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
         spanBytes,
         fieldsCount: fields.length,
         fields
+      });
+      continue;
+    }
+
+    // 2g. Whole-ROM Memory Layout Entries ((def-memory-layout ...) in NES, GB, GBC)
+    if ((m = line.match(/^\(mirror\s+([^\s)]+)\s+#:addr\s+([^\s)]+)\s+#:mmio\s+([^\s)]+)\)/))) {
+      memoryLayout.push({
+        kind: 'mirror',
+        name: m[1],
+        addr: m[2],
+        mmio: m[3]
+      });
+      continue;
+    }
+    if ((m = line.match(/^\(zp-ptr\s+([^\s)]+)\s+#:addr\s+([^\s)]+)\s+#:width-bytes\s+(\d+)\s+#:uses\s+(\d+)\)/))) {
+      memoryLayout.push({
+        kind: 'zp-ptr',
+        name: m[1],
+        addr: m[2],
+        widthBytes: Number(m[3]),
+        accesses: Number(m[4])
+      });
+      continue;
+    }
+    if ((m = line.match(/^\((state-var|hram-var)\s+([^\s)]+)\s+#:addr\s+([^\s)]+)\s+#:accesses\s+(\d+)\)/))) {
+      memoryLayout.push({
+        kind: m[1],
+        name: m[2],
+        addr: m[3],
+        accesses: Number(m[4])
       });
       continue;
     }
@@ -2158,6 +2251,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
       floatConstantsCount,
       structFieldAccessesCount,
       structLayoutsCount: structLayouts.length,
+      memoryLayoutCount: memoryLayout.length,
       callGraphCount: callGraph.length,
       mmioRegistersCount: mmioCrossRefs.length,
       resolvedPointersCount: resolvedPointers.length,
@@ -2173,6 +2267,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     callGraph,
     subroutines,
     structLayouts,
+    memoryLayout,
     pseudoCodeBlocks,
     structuredLoops,
     structuredConditionals,
@@ -2386,6 +2481,22 @@ const server = http.createServer(async (req, res) => {
         target,
         valid: compileRes.valid,
         capMem: compileRes.grades?.CapMem || 'DmaUnique'
+      });
+      sendJson(res, 200, compileRes);
+      return;
+    }
+
+    // 6b. POST /api/compile-pseudo-code — Bidirectional Pseudo-Code -> Target Assembly Compiler
+    if (req.method === 'POST' && pathname === '/api/compile-pseudo-code') {
+      const body = await readRequestBody(req);
+      const pseudoCode = body.pseudoCode || body.code || body.expression || '(decompiled-pseudo-code (return))';
+      const target = body.target || 'nes';
+      const compileRes = await runRacketCompilePseudoCode({ pseudoCode, target });
+      lastCompileTimestamp = new Date().toISOString();
+      broadcastSseEvent('compile-complete', {
+        target,
+        valid: Boolean(compileRes.ok),
+        instructionCount: compileRes.instructionCount || 0
       });
       sendJson(res, 200, compileRes);
       return;

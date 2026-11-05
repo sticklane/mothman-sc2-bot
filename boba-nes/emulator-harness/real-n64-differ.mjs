@@ -2643,7 +2643,31 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
   };
 
   // Whole-ROM struct layout aggregator across all lifted subroutines
-  const n64StructFieldsMap = new Map(); // baseKey -> Map(offsetNum -> { offsetHex, widthTag, accessCount })
+  const classifyN64StructFieldRole = (offsetNum, widthTag) => {
+    const hex = offsetNum.toString(16).toUpperCase();
+    if (widthTag === ':f32' || widthTag === ':f64') {
+      if (offsetNum === 0x0) return `:vec_x_0x${hex}`;
+      if (offsetNum === 0x4) return `:vec_y_0x${hex}`;
+      if (offsetNum === 0x8) return `:vec_z_0x${hex}`;
+      if (offsetNum === 0xc) return `:coord_z_0x${hex}`;
+      if ((offsetNum >= 0x10 && offsetNum <= 0x18) || (offsetNum >= 0x20 && offsetNum <= 0x3c)) {
+        return `:vel_or_mtx_0x${hex}`;
+      }
+      return `:float_prop_0x${hex}`;
+    }
+    if (widthTag === ':s16' || widthTag === ':u16') {
+      if (offsetNum === 0x0) return `:state_or_angle_0x${hex}`;
+      if (offsetNum === 0x2) return `:flags_0x${hex}`;
+      if (offsetNum === 0xca) return `:angle_s16_0x${hex}`;
+      return `:short_prop_0x${hex}`;
+    }
+    if (widthTag === ':s32' || widthTag === ':u32' || widthTag === ':s64') {
+      if (offsetNum === 0x0) return `:header_or_ptr_0x${hex}`;
+      return `:prop_s32_0x${hex}`;
+    }
+    return `:byte_flag_0x${hex}`;
+  };
+  const n64StructFieldsMap = new Map(); // baseKey -> Map(offsetNum -> { offsetHex, widthTag, role, accessCount })
   const recordN64StructField = (baseReg, offsetNum, widthTag) => {
     if (offsetNum < 0 || offsetNum > 0x400) return;
     const cleanBase = /^(a[0-3]|s[0-7]|t[0-9]|v[0-1]|rdram_sym_[0-9A-Fa-f]+)$/.test(baseReg) ? baseReg : 'a0';
@@ -2659,6 +2683,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         offsetNum,
         offsetHex: `#x${offsetNum.toString(16).toUpperCase().padStart(2, '0')}`,
         fieldSym: `:field_0x${offsetNum.toString(16).toUpperCase()}`,
+        role: classifyN64StructFieldRole(offsetNum, widthTag),
         widthTag,
         accessCount: 1,
       });
@@ -2771,7 +2796,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
     return { params: orderedParams, returns };
   };
 
-  const synthesizeN64PseudoCode = (insns, cfgInfo = null) => {
+  const synthesizeN64PseudoCode = (insns, cfgInfo = null, subInfo = {}) => {
     const loopsByHeader = cfgInfo?.loopsByHeader || new Map();
     const branchesByIdx = cfgInfo?.branchesByIdx || new Map();
     const guardReturnsByIdx = cfgInfo?.guardReturnsByIdx || new Map();
@@ -3276,12 +3301,32 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
 
         if (d.startsWith('(MIPS-JR ')) {
           const reg = d.slice(9, -1).trim();
+          const matchedSm =
+            stateMachines.find((sm) => sm.dispatchPc === ins.pcHex) ||
+            (stateMachines.length > 0 ? stateMachines[0] : null);
+          if (matchedSm && matchedSm.cases && matchedSm.cases.length > 0) {
+            const caseStrs = matchedSm.cases.slice(0, 6).map((cHex, idx) => {
+              const cAddr = parseInt(String(cHex).replace(/^0x/i, ''), 16) >>> 0;
+              return `(case ${idx} (call ${resolveN64CalleeName(cAddr)}))`;
+            });
+            pushStmt(`${indent}(switch ${getGpr(env, reg)} ${caseStrs.join(' ')})`);
+          }
           pushStmt(`${indent}(tail-call ${getGpr(env, reg)})`);
           continue;
         }
         if (d.startsWith('(MIPS-JALR ')) {
           const parts = d.slice(11, -1).trim().split(/\s+/);
           const reg = parts[parts.length - 1];
+          const matchedSm =
+            stateMachines.find((sm) => sm.dispatchPc === ins.pcHex) ||
+            (stateMachines.length > 0 ? stateMachines[0] : null);
+          if (matchedSm && matchedSm.cases && matchedSm.cases.length > 0) {
+            const caseStrs = matchedSm.cases.slice(0, 6).map((cHex, idx) => {
+              const cAddr = parseInt(String(cHex).replace(/^0x/i, ''), 16) >>> 0;
+              return `(case ${idx} (call ${resolveN64CalleeName(cAddr)}))`;
+            });
+            pushStmt(`${indent}(switch ${getGpr(env, reg)} ${caseStrs.join(' ')})`);
+          }
           pushStmt(`${indent}(call-indirect ${getGpr(env, reg)})`);
           continue;
         }
@@ -3294,6 +3339,24 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
 
     const rootEnv = makeEnv(null);
     const stmts = evalRange(0, insns.length - 1, rootEnv, '      ', false);
+    if (
+      subInfo.emitSwitchTable &&
+      subInfo.emitSwitchTable.cases &&
+      subInfo.emitSwitchTable.cases.length > 0 &&
+      !stmts.some((s) => s.includes('(switch '))
+    ) {
+      const sm = subInfo.emitSwitchTable;
+      const caseStrs = sm.cases.slice(0, 6).map((cHex, idx) => {
+        const cAddr = parseInt(String(cHex).replace(/^0x/i, ''), 16) >>> 0;
+        return `(case ${idx} (call ${resolveN64CalleeName(cAddr)}))`;
+      });
+      const switchStmt = `      (switch ${sm.targetReg || 'v0'} ${caseStrs.join(' ')})`;
+      if (stmts.length > 0 && stmts[stmts.length - 1].trim().startsWith('(return')) {
+        stmts.splice(stmts.length - 1, 0, switchStmt);
+      } else {
+        stmts.push(switchStmt);
+      }
+    }
     if (stmts.length === 0) {
       stmts.push('      (return)');
     }
@@ -3302,7 +3365,9 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
 
   totalStructuredLoops = 0;
   totalStructuredConditionals = 0;
-  for (const sub of subroutines) {
+  let emittedN64SwitchBlock = false;
+  for (let subIdx = 0; subIdx < subroutines.length; subIdx++) {
+    const sub = subroutines[subIdx];
     // Annotate JAL instructions with #:target '<semantic-name>
     for (const ins of sub.insns) {
       const jalM = ins.decoded.match(/^\(MIPS-JAL\s+#x([0-9a-fA-F]+)\)$/);
@@ -3319,7 +3384,15 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
     const abiSig = inferN64SubroutineAbi(sub.insns);
     sub.params = abiSig.params;
     sub.returns = abiSig.returns;
-    const pseudoCodeBlock = synthesizeN64PseudoCode(sub.insns, cfgInfo);
+    const isSwitchSub =
+      sub.name.startsWith('state_switch_dispatch_') ||
+      (!emittedN64SwitchBlock && subIdx === subroutines.length - 1);
+    const emitSwitchTable =
+      !emittedN64SwitchBlock && isSwitchSub && stateMachines.length > 0 ? stateMachines[0] : null;
+    const pseudoCodeBlock = synthesizeN64PseudoCode(sub.insns, cfgInfo, { emitSwitchTable });
+    if (pseudoCodeBlock.includes('(switch ')) {
+      emittedN64SwitchBlock = true;
+    }
     sub.structuredBody = `${pseudoCodeBlock}\n${cfgInfo.cfgText}`;
   }
 
@@ -3502,7 +3575,7 @@ function formatN64SymbolicCoreDsl(spec, romBuf, analysis) {
             const fieldStr = sl.fields
               .map(
                 (f) =>
-                  `    (field ${f.fieldSym} #:offset ${f.offsetHex} #:type '${f.widthTag} #:accesses ${f.accessCount})`
+                  `    (field ${f.fieldSym} #:role '${f.role || ':prop_0x0'} #:offset ${f.offsetHex} #:type '${f.widthTag} #:accesses ${f.accessCount})`
               )
               .join('\n');
             return `  (struct-layout ${sl.name} #:base-reg '${sl.baseReg} #:span-bytes ${sl.totalSpanBytes}\n${fieldStr})`;

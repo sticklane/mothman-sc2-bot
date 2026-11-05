@@ -2523,6 +2523,68 @@
        #:target tgt))
     (check-true (pair? tgt-insts) (format "Expected compiled instructions for target ~a" tgt))))
 
+;; ============================================================================
+;; 41. Deep Pseudo-Code Understandability (Structured break/goto/switch,
+;;     16-Bit u16-zp, Timer/Table/Role Inference) & Layer 9 Whole-ROM Verifier
+;; ============================================================================
+(test-case "41. Deep Pseudo-Code Understandability (break/goto/switch, u16-zp, Timer/Table/Field Roles) & Layer 9 Whole-ROM Contract Verifier"
+  ;; 1. Track A: Folded loop break/goto conditions, 16-bit u16-zp pointers & timers/indexed-tables in nes_super_mario_bros_whole_rom.rkt
+  (define smb-str (file->string (build-path "examples" "decompiled" "nes_super_mario_bros_whole_rom.rkt")))
+  (check-true (string-contains? smb-str "(when (>= (aref wram #x07D7 X) #x0A) (break loc_802B))"))
+  (check-true (string-contains? smb-str "(when (!= (wram #x0770) #x01) (goto loc_81C5))"))
+  (check-true (string-contains? smb-str "(when (!= (wram #x0772) #x03) (goto loc_81C5))"))
+  (check-true (string-contains? smb-str "(set! (u16-zp #x06) #x0700)"))
+  (check-true (string-contains? smb-str "(timers"))
+  (check-true (string-contains? smb-str "(indexed-tables"))
+  (check-false (string-contains? smb-str "(branch-if "))
+
+  ;; 2. Track B: GBA IRQ priority cascade, semantic struct field #:role annotations & switch synthesis
+  (define fusion-str (file->string (build-path "examples" "decompiled" "gba_metroid_fusion_whole_rom.rkt")))
+  (check-true (string-contains? fusion-str "(when (!= (bit-and r1 #x400) 0) (goto #x80001C4))"))
+  (check-true (string-contains? fusion-str "#:role :"))
+  (define smw-str (file->string (build-path "examples" "decompiled" "snes_super_mario_world_whole_rom.rkt")))
+  (check-true (string-contains? smw-str "#:role :"))
+  (define sm64-str (file->string (build-path "examples" "decompiled" "n64_super_mario_64_whole_rom.rkt")))
+  (check-true (string-contains? sm64-str "#:role ':vec_"))
+
+  ;; 3. Track C: Extended Layer 8 (`compile-pseudo-code->insts` with break, switch, u16-zp, await-mmio!)
+  (for ([tgt (in-list '(nes gb snes gba n64))])
+    (define adv-insts
+      (compile-pseudo-code->insts
+       '(decompiled-pseudo-code
+          (set! (u16-zp #x06) #x0700)
+          (+= (u16-zp #x06) #x0100)
+          (await-mmio! PPUSTATUS plus/positive)
+          (loop-counted #:step DEX #:while (>= X #x00)
+            (when (>= A #x0A) (break exit_loop))
+            (-= X 1))
+          (switch A
+            (case 0 (set! X 1))
+            (case 1 (set! X 2)))
+          (return))
+       #:target tgt))
+    (check-true (and (list? adv-insts) (> (length adv-insts) 4))
+                (format "Expected non-empty compiled instructions for advanced pseudo-code on ~a" tgt)))
+
+  ;; 4. Track C: Layer 9 (`verify-whole-rom-module-contracts`) across all 7 target families
+  (for ([mod-spec (in-list '((nes   "examples/decompiled/nes_super_mario_bros_whole_rom.rkt")
+                             (gb    "examples/decompiled/gb_tetris_whole_rom.rkt")
+                             (gbc   "examples/decompiled/gbc_pokemon_gold_whole_rom.rkt")
+                             (pico8 "examples/decompiled/pico_celeste_classic_whole_rom.rkt")
+                             (snes  "examples/decompiled/snes_super_mario_world_whole_rom.rkt")
+                             (gba   "examples/decompiled/gba_metroid_fusion_whole_rom.rkt")
+                             (n64   "examples/decompiled/n64_super_mario_64_whole_rom.rkt")))])
+    (define expected-tgt (car mod-spec))
+    (define mod-path     (cadr mod-spec))
+    (define res          (verify-whole-rom-module-contracts mod-path))
+    (check-true (hash-ref res 'valid?) (format "Whole-ROM contract verification failed for ~a" mod-path))
+    (check-equal? (hash-ref res 'target) expected-tgt)
+    (check-true (hash-ref res 'no-empty-when-branches?))
+    (check-true (> (hash-ref res 'subroutine-count) 0))
+    (check-true (> (hash-ref res 'pseudo-code-count) 0))
+    (check-true (> (hash-ref res 'compiled-inst-count) 0))))
+
 (printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, whole-ROM decompiler/recompiler, continuous .fm2 TAS lockstep, and 74 Multi-Architecture Side-by-Side Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
         total-checks)
+
 

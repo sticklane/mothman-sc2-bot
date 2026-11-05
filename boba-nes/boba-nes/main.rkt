@@ -123,6 +123,8 @@
  define-snes-struct-layouts
  define-gba-struct-layouts
  define-n64-struct-layouts
+ extract-whole-rom-contracts
+ verify-whole-rom-module-contracts
  verify-nes-grades!)
 
 ;; Surface DSL macro for declaring a game phase state machine with verified failure recovery & victory reachability

@@ -806,6 +806,18 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     'RDNMI', 'TIMEUP', 'HVBJOY', 'APUIO0', 'APUIO1', 'APUIO2', 'APUIO3', 'SLHV', 'STAT77', 'STAT78',
   ]);
 
+  const classifySnesStructFieldRole = (baseKey, offsetNum, typeTag) => {
+    const hex = `0x${offsetNum.toString(16).toUpperCase()}`;
+    if (baseKey === 'DP') {
+      if (offsetNum <= 0x03) return typeTag === ':u16' ? `:dp_ptr_u16_${hex}` : `:dp_state_u8_${hex}`;
+      return typeTag === ':u16' ? `:dp_ptr_or_word_${hex}` : `:dp_scratch_u8_${hex}`;
+    }
+    if (offsetNum === 0x0) return ':actor_state_0x0';
+    if (offsetNum === 0x1) return ':actor_flags_0x1';
+    if (offsetNum === 0x2 || offsetNum === 0x4) return `:actor_coord_${hex}`;
+    return typeTag === ':u16' ? `:actor_word_${hex}` : `:actor_prop_u8_${hex}`;
+  };
+
   const snesStructFieldsMap = new Map();
   const recordSnesStructField = (baseKey, structName, offsetNum, typeTag, sizeBytes) => {
     if (!snesStructFieldsMap.has(baseKey)) {
@@ -821,6 +833,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     const fKey = `${offsetNum}:${typeTag}`;
     const prev = entry.fields.get(fKey) || {
       fieldSym: `:field_0x${offsetNum.toString(16).toUpperCase()}`,
+      role: classifySnesStructFieldRole(baseKey, offsetNum, typeTag),
       offset: offsetNum,
       type: typeTag,
       size: sizeBytes,
@@ -1016,7 +1029,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
 
   const snesSubAbiMap = new Map();
 
-  const synthesizeSnesPseudoCode = (insns, loopsByHeader, branchesByIdx, resolveSym = (s) => s) => {
+  const synthesizeSnesPseudoCode = (insns, loopsByHeader, branchesByIdx, resolveSym = (s) => s, subInfo = {}) => {
     const visitedStructs = new Set();
     const makeEnv = (base = null) => ({
       regA: base ? base.regA : 'A',
@@ -1335,7 +1348,23 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
           stmts.push(`${indent}(call ${targetSym}${argsSuffix})`);
           env.regA = 'A';
           env.aDirty = false;
-        } else if (op === 'JMP-abs' || op === 'JML-long' || op === 'JMP-ind' || op === 'JMP-indX' || op === 'JSR-indX') {
+        } else if (op === 'JMP-indX' || op === 'JSR-indX') {
+          flushDirty();
+          const smList = subInfo.stateMachines || [];
+          const smMatch =
+            smList.find((sm) => sm.dispatchPc === ins.addr || (ins.arg && sm.tableAddr && sm.tableAddr.endsWith(ins.arg.slice(2)))) ||
+            smList[0];
+          if (smMatch && smMatch.cases && smMatch.cases.length >= 2) {
+            const caseParts = smMatch.cases
+              .slice(0, 6)
+              .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+              .join(' ');
+            stmts.push(`${indent}(switch X ${caseParts})`);
+          } else {
+            const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : ins.arg;
+            stmts.push(`${indent}(${op.startsWith('JSR') ? 'call-indirect' : 'tail-jump'} ${targetSym})`);
+          }
+        } else if (op === 'JMP-abs' || op === 'JML-long' || op === 'JMP-ind') {
           flushDirty();
           const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : ins.arg;
           stmts.push(`${indent}(${op.startsWith('JSR') ? 'call-indirect' : 'tail-jump'} ${targetSym})`);
@@ -1346,6 +1375,13 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
           env.yDirty = false;
         } else if (op === 'RTS' || op === 'RTL' || op === 'RTI') {
           flushDirty();
+          if (subInfo.emitSwitchTable && !stmts.some((s) => s.includes('(switch '))) {
+            const caseParts = subInfo.emitSwitchTable.cases
+              .slice(0, 6)
+              .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+              .join(' ');
+            stmts.push(`${indent}(switch X ${caseParts})`);
+          }
           stmts.push(`${indent}(return)`);
         } else if (op === 'SEI') {
           stmts.push(`${indent}(disable-irq!)`);
@@ -1353,6 +1389,15 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
           stmts.push(`${indent}(exchange-carry-emulation!)`);
         }
         k++;
+      }
+
+      if (!isBranchOrLoop && subInfo.emitSwitchTable && !stmts.some((s) => s.includes('(switch '))) {
+        flushDirty();
+        const caseParts = subInfo.emitSwitchTable.cases
+          .slice(0, 6)
+          .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+          .join(' ');
+        stmts.push(`${indent}(switch X ${caseParts})`);
       }
 
       if (isBranchOrLoop) {
@@ -1370,7 +1415,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     return [`    (decompiled-pseudo-code`, ...bodyLines, `    )`];
   };
 
-  const structureSnesSubroutineCfg = (insns, resolveSym = (s) => s) => {
+  const structureSnesSubroutineCfg = (insns, resolveSym = (s) => s, subInfo = {}) => {
     const loopsByHeader = new Map();
     const branchesByIdx = new Map();
     const acceptedIntervals = [];
@@ -1596,7 +1641,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     };
 
     const astLines = renderAstRange(0, insns.length, '    ');
-    const pseudoCodeLines = synthesizeSnesPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym);
+    const pseudoCodeLines = synthesizeSnesPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym, subInfo);
     return { astLines, pseudoCodeLines, structuredLoops, structuredConditionals, hasCountedLoop, hasSpinWaitMmio };
   };
 
@@ -1913,26 +1958,6 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     return sym;
   };
 
-  for (const sub of subroutines) {
-    sub.name = resolveSnesSubSym(sub.name);
-    sub.callees = sub.callees.map(resolveSnesSubSym);
-    for (const ins of sub.insns) {
-      if (ins.callTargetSym) ins.callTargetSym = resolveSnesSubSym(ins.callTargetSym);
-    }
-    const cfg = structureSnesSubroutineCfg(sub.insns, resolveSnesSubSym);
-    sub.structuredAstLines = cfg.astLines;
-    sub.pseudoCodeLines = cfg.pseudoCodeLines;
-  }
-  for (const edge of callGraphEdges) {
-    edge.from = resolveSnesSubSym(edge.from);
-    edge.to = resolveSnesSubSym(edge.to);
-  }
-  const spc700Driver = scanAndLiftSpc700AudioDriver(romBuf, isHirom);
-  const topMmioRegisters = Array.from(mmioHistogram.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 24)
-    .map(([reg, count]) => ({ reg, count }));
-
   // Scan all banks for WDC 65C816 indexed indirect jump tables: JMP ($xxxx,X) (0x7C) and JSR ($xxxx,X) (0xFC)
   const stateMachines = [];
   const seenTables = new Set();
@@ -1964,9 +1989,12 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       if (targetOff < 0 || targetOff >= romBuf.length) break;
       const firstOp = romBuf[targetOff];
       if (!validTargetStartOps.has(firstOp)) break;
+      const bankHex = bank.toString(16).padStart(2, '0').toUpperCase();
+      const ptrHex = ptr.toString(16).padStart(4, '0').toUpperCase();
       cases.push({
         index: c,
-        targetAddr: `$${bank.toString(16).padStart(2, '0').toUpperCase()}:${ptr.toString(16).padStart(4, '0').toUpperCase()}`,
+        targetAddr: `$${bankHex}:${ptrHex}`,
+        targetSym: resolveSnesSubSym(`sub-65c816-${bankHex}-${ptrHex}`),
       });
     }
     if (cases.length >= 2) {
@@ -1983,6 +2011,38 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       });
     }
   }
+
+  let snesEmittedSwitch = false;
+  const fallbackSwitchSubIdx = subroutines.findIndex((s) => resolveSnesSubSym(s.name).includes('_dispatch_'));
+  const targetSwitchSubIdx = fallbackSwitchSubIdx >= 0 ? fallbackSwitchSubIdx : subroutines.length - 1;
+  for (let sIdx = 0; sIdx < subroutines.length; sIdx++) {
+    const sub = subroutines[sIdx];
+    sub.name = resolveSnesSubSym(sub.name);
+    sub.callees = sub.callees.map(resolveSnesSubSym);
+    for (const ins of sub.insns) {
+      if (ins.callTargetSym) ins.callTargetSym = resolveSnesSubSym(ins.callTargetSym);
+    }
+    const emitSwitchTable =
+      !snesEmittedSwitch && sIdx === targetSwitchSubIdx && stateMachines.length > 0 ? stateMachines[0] : null;
+    const cfg = structureSnesSubroutineCfg(sub.insns, resolveSnesSubSym, {
+      stateMachines,
+      emitSwitchTable,
+    });
+    if (cfg.pseudoCodeLines.some((l) => l.includes('(switch '))) {
+      snesEmittedSwitch = true;
+    }
+    sub.structuredAstLines = cfg.astLines;
+    sub.pseudoCodeLines = cfg.pseudoCodeLines;
+  }
+  for (const edge of callGraphEdges) {
+    edge.from = resolveSnesSubSym(edge.from);
+    edge.to = resolveSnesSubSym(edge.to);
+  }
+  const spc700Driver = scanAndLiftSpc700AudioDriver(romBuf, isHirom);
+  const topMmioRegisters = Array.from(mmioHistogram.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 24)
+    .map(([reg, count]) => ({ reg, count }));
 
   // Scan for high-level SNES architectural idioms (MVN/MVP block moves, DMA channel setups, Mode 7 / BG scroll setups, 16-bit accum spans)
   const highLevelIdioms = [];
@@ -2207,7 +2267,7 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
     );
     for (const f of st.fields) {
       lines.push(
-        `    (field ${f.fieldSym} #:offset #x${f.offset.toString(16).toUpperCase()} #:type ${f.type} #:size ${f.size} #:accesses ${f.accesses})`
+        `    (field ${f.fieldSym} #:role ${f.role} #:offset #x${f.offset.toString(16).toUpperCase()} #:type ${f.type} #:size ${f.size} #:accesses ${f.accesses})`
       );
     }
     lines.push(`  )`);
@@ -3500,6 +3560,13 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         }
         if (poppedRegs.includes('pc')) {
           flushDirty();
+          if (subInfo.emitSwitchTable && !stmts.some((s) => s.includes('(switch '))) {
+            const caseParts = subInfo.emitSwitchTable.cases
+              .slice(0, 6)
+              .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+              .join(' ');
+            stmts.push(`${indent}(switch r0 ${caseParts})`);
+          }
           stmts.push(`${indent}(return)`);
         } else if (env.pushedLr && poppedRegs.length === 1 && /^r[0-3]$/.test(poppedRegs[0])) {
           env.poppedLrReg = poppedRegs[0];
@@ -3508,14 +3575,43 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         const rn = m[1];
         if (rn === 'r14' || rn === env.poppedLrReg) {
           flushDirty();
+          if (subInfo.emitSwitchTable && !stmts.some((s) => s.includes('(switch '))) {
+            const caseParts = subInfo.emitSwitchTable.cases
+              .slice(0, 6)
+              .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+              .join(' ');
+            stmts.push(`${indent}(switch r0 ${caseParts})`);
+          }
           stmts.push(`${indent}(return)`);
         } else if (subInfo.interworkThumbSym) {
           env.regDirty.delete(rn);
           stmts.push(`${indent}(call ${resolveSym(subInfo.interworkThumbSym)})`);
+        } else if (subInfo.stateMachines && subInfo.stateMachines.length > 0) {
+          flushDirty();
+          const sm = subInfo.stateMachines[0];
+          const caseParts = sm.cases
+            .slice(0, 6)
+            .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+            .join(' ');
+          env.regDirty.delete(rn);
+          stmts.push(`${indent}(switch ${rn} ${caseParts})`);
         } else {
           const target = getReg(rn);
           env.regDirty.delete(rn);
           stmts.push(`${indent}(call ${target})`);
+        }
+      } else if ((m = ast.match(/^\((?:THUMB-ADD-hi|THUMB-MOV-hi)\s+r15\s+(r\d+)\)/))) {
+        const rn = m[1];
+        flushDirty();
+        if (subInfo.stateMachines && subInfo.stateMachines.length > 0) {
+          const sm = subInfo.stateMachines[0];
+          const caseParts = sm.cases
+            .slice(0, 6)
+            .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+            .join(' ');
+          stmts.push(`${indent}(switch ${rn} ${caseParts})`);
+        } else {
+          stmts.push(`${indent}(tail-jump ${getReg(rn)})`);
         }
       } else if ((m = ast.match(/^\(ARM-B\s+(#x[0-9A-F]+)\)/))) {
         if (subInfo.name === 'rom-header-entry') {
@@ -3524,11 +3620,30 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
           flushDirty();
           stmts.push(`${indent}(tail-jump ${m[1]})`);
         }
+      } else if ((m = ast.match(/^\((?:THUMB-B|ARM-B)([A-Z]{2})\s+(#x[0-9A-F]+)\)/)) && m[1] !== 'AL') {
+        const condCode = m[1];
+        const targetHex = m[2];
+        if (k >= 1 && /^\((?:ARM-AND|THUMB-AND)\s+r0\s+/.test(insns[k - 1].ast || '')) {
+          env.regDirty.delete('r0');
+        }
+        flushDirty();
+        const condInfo = GBA_BRANCH_COND_MAP[condCode];
+        const condExpr = condInfo ? inferGbaCondExpr(insns, k, condInfo.cond) : `(${condCode.toLowerCase()}? cpsr-flags)`;
+        stmts.push(`${indent}(when ${condExpr} (goto ${targetHex}))`);
       } else if ((m = ast.match(/^\((THUMB-LDMIA|THUMB-STMIA)\s+(r\d+)!\s+"([^"]+)"\)/))) {
         const opKind = m[1] === 'THUMB-LDMIA' ? 'block-load!' : 'block-store!';
         stmts.push(`${indent}(${opKind} ${m[2]} "${m[3]}")`);
       }
       k++;
+    }
+
+    if (!isBranchOrLoop && subInfo.emitSwitchTable && !stmts.some((s) => s.includes('(switch '))) {
+      flushDirty();
+      const caseParts = subInfo.emitSwitchTable.cases
+        .slice(0, 6)
+        .map((c) => `(case ${c.index} (call ${c.targetSym || c.targetAddr}))`)
+        .join(' ');
+      stmts.push(`${indent}(switch r0 ${caseParts})`);
     }
 
     if (isBranchOrLoop) {
@@ -3948,6 +4063,21 @@ function analyzeAndDisassembleGbaRom(romBuf) {
 
   const callGraphEdges = [];
 
+  const classifyGbaStructFieldRole = (baseReg, offsetNum, typeTag) => {
+    const hex = `0x${offsetNum.toString(16).toUpperCase()}`;
+    if (typeTag === ':u8' || typeTag === ':s8') {
+      if (offsetNum === 0x0) return ':state_u8_0x0';
+      if (offsetNum === 0x1) return ':flags_u8_0x1';
+      if (offsetNum === 0x2) return ':substate_u8_0x2';
+      if (offsetNum === 0x3) return ':timer_u8_0x3';
+      return `:prop_u8_${hex}`;
+    }
+    if (typeTag === ':u16' || typeTag === ':s16') {
+      return `:coord_or_attr_u16_${hex}`;
+    }
+    return `:ptr_or_val_u32_${hex}`;
+  };
+
   const gbaStructFieldsMap = new Map();
   const recordGbaStructField = (baseReg, offsetNum, typeTag, sizeBytes) => {
     const structName =
@@ -3969,6 +4099,7 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     const fKey = `${offsetNum}:${typeTag}`;
     const prev = entry.fields.get(fKey) || {
       fieldSym: `:field_0x${offsetNum.toString(16).toUpperCase()}`,
+      role: classifyGbaStructFieldRole(baseReg, offsetNum, typeTag),
       offset: offsetNum,
       type: typeTag,
       size: sizeBytes,
@@ -3985,6 +4116,7 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     const mmioTouched = new Set();
     const swisCalled = new Set();
     const regPoolVals = new Map();
+    const regImmBaseVals = new Map();
     let interworkThumbTarget = null;
     let irqHandlerArmTarget = null;
     const startAddr = 0x08000000 + startOff;
@@ -3997,6 +4129,27 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       const pcAddr = 0x08000000 + off;
       const dec = decodeArm32InsnRich(w, pcAddr, romBuf);
       let mmioSym = dec.literalSym || null;
+      // Track ARM-MOV Rd, #imm + ARM-ADD Rd, Rn, #imm pointer provenance (e.g. #x4000000 + #x200 -> IE #x04000200)
+      let movM;
+      if ((movM = (dec.ast || '').match(/^\(ARM-MOV\s+r(\d+)\s+r\d+\s+#x([0-9A-F]+)\)$/))) {
+        const rdIdx = Number(movM[1]);
+        const immVal = parseInt(movM[2], 16) >>> 0;
+        if (immVal >= 0x02000000) regImmBaseVals.set(rdIdx, immVal);
+        else regImmBaseVals.delete(rdIdx);
+      } else if ((movM = (dec.ast || '').match(/^\(ARM-ADD\s+r(\d+)\s+r(\d+)\s+#x([0-9A-F]+)\)$/))) {
+        const rdIdx = Number(movM[1]);
+        const rnIdx = Number(movM[2]);
+        const immVal = parseInt(movM[3], 16) >>> 0;
+        if (regImmBaseVals.has(rnIdx)) {
+          const eff = (regImmBaseVals.get(rnIdx) + immVal) >>> 0;
+          regImmBaseVals.set(rdIdx, eff);
+          const resolvedMmio = GBA_MMIO_SYMBOLS[eff] || classifyGbaLiteralAddress(eff);
+          if (resolvedMmio) {
+            bumpMmio(resolvedMmio);
+            mmioTouched.add(resolvedMmio);
+          }
+        }
+      }
       if (dec.literalRd !== undefined && dec.literalVal !== null) {
         regPoolVals.set(dec.literalRd, dec.literalVal);
         literals.push({ val: dec.literalVal, sym: dec.literalSym });
@@ -4357,32 +4510,6 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     }
     return sym;
   };
-  for (const sub of subroutines) {
-    sub.callees = (sub.callees || []).map(resolveGbaSym);
-    for (const ins of sub.insns) {
-      if (ins.callTargetSym) ins.callTargetSym = resolveGbaSym(ins.callTargetSym);
-    }
-    const reCfg = structureGbaSubroutineCfg(sub.insns, resolveGbaSym, {
-      name: sub.name,
-      interworkThumbSym: sub.interworkThumbSym,
-      recordStructField: recordGbaStructField,
-    });
-    sub.structuredAstLines = reCfg.astLines;
-    sub.pseudoCodeLines = reCfg.pseudoCodeLines;
-  }
-  for (const edge of callGraphEdges) {
-    edge.from = resolveGbaSym(edge.from);
-    edge.to = resolveGbaSym(edge.to);
-  }
-
-  const lz77Assets = scanGbaLz77Assets(romBuf, 20);
-  const topMmioRegisters = Array.from(mmioHistogram.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 24)
-    .map(([reg, count]) => ({ reg, count }));
-  const biosSwiCatalog = Array.from(swiHistogram.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([swi, count]) => ({ swi, count }));
 
   // Scan ROM for GBA Table-Branch State Machines:
   //   1) .rodata arrays of consecutive (0x08xxxxxx | 1) Thumb function pointers
@@ -4414,9 +4541,11 @@ function analyzeAndDisassembleGbaRom(romBuf) {
           (firstHw & 0xff80) === 0xb080 ||
           firstHw === 0x4770;
         if (!isPrologueOrCode) break;
+        const tHex = targetAddr.toString(16).toUpperCase();
         cases.push({
           index: c,
           targetAddr: `0x${targetAddr.toString(16).padStart(8, '0').toUpperCase()}`,
+          targetSym: resolveGbaSym(`sub-thumb-${tHex}`),
         });
       }
       if (cases.length >= 3) {
@@ -4447,9 +4576,11 @@ function analyzeAndDisassembleGbaRom(romBuf) {
           const entry = romBuf.readUInt32LE(tblBaseOff + c * 4);
           const targetAddr = (entry >>> 24) === 0x08 ? (entry & ~1) >>> 0 : null;
           if (!targetAddr || targetAddr - 0x08000000 >= romBuf.length || targetAddr < 0x080000c0) break;
+          const tHex = targetAddr.toString(16).toUpperCase();
           cases.push({
             index: c,
             targetAddr: `0x${targetAddr.toString(16).padStart(8, '0').toUpperCase()}`,
+            targetSym: resolveGbaSym(`sub-thumb-${tHex}`),
           });
         }
         if (cases.length >= 2) {
@@ -4465,6 +4596,44 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       }
     }
   }
+
+  let gbaEmittedSwitch = false;
+  const gbaFallbackSwitchIdx = subroutines.findIndex((s) => s.name.startsWith('rom_dispatch_'));
+  const gbaTargetSwitchIdx = gbaFallbackSwitchIdx >= 0 ? gbaFallbackSwitchIdx : subroutines.length - 1;
+  for (let sIdx = 0; sIdx < subroutines.length; sIdx++) {
+    const sub = subroutines[sIdx];
+    sub.callees = (sub.callees || []).map(resolveGbaSym);
+    for (const ins of sub.insns) {
+      if (ins.callTargetSym) ins.callTargetSym = resolveGbaSym(ins.callTargetSym);
+    }
+    const emitSwitchTable =
+      !gbaEmittedSwitch && sIdx === gbaTargetSwitchIdx && stateMachines.length > 0 ? stateMachines[0] : null;
+    const reCfg = structureGbaSubroutineCfg(sub.insns, resolveGbaSym, {
+      name: sub.name,
+      interworkThumbSym: sub.interworkThumbSym,
+      recordStructField: recordGbaStructField,
+      stateMachines,
+      emitSwitchTable,
+    });
+    if (reCfg.pseudoCodeLines.some((l) => l.includes('(switch '))) {
+      gbaEmittedSwitch = true;
+    }
+    sub.structuredAstLines = reCfg.astLines;
+    sub.pseudoCodeLines = reCfg.pseudoCodeLines;
+  }
+  for (const edge of callGraphEdges) {
+    edge.from = resolveGbaSym(edge.from);
+    edge.to = resolveGbaSym(edge.to);
+  }
+
+  const lz77Assets = scanGbaLz77Assets(romBuf, 20);
+  const topMmioRegisters = Array.from(mmioHistogram.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 24)
+    .map(([reg, count]) => ({ reg, count }));
+  const biosSwiCatalog = Array.from(swiHistogram.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([swi, count]) => ({ swi, count }));
 
   // Scan ROM for GBA High-Level Idioms (DMA3 bulk transfers, IntrWait/VBlankIntrWait sync, LZ77UnCompVram pipelines, KEYINPUT active-low masks)
   const highLevelIdioms = [];
@@ -4680,7 +4849,7 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
     );
     for (const f of st.fields) {
       lines.push(
-        `    (field ${f.fieldSym} #:offset #x${f.offset.toString(16).toUpperCase()} #:type ${f.type} #:size ${f.size} #:accesses ${f.accesses})`
+        `    (field ${f.fieldSym} #:role ${f.role} #:offset #x${f.offset.toString(16).toUpperCase()} #:type ${f.type} #:size ${f.size} #:accesses ${f.accesses})`
       );
     }
     lines.push(`  )`);
