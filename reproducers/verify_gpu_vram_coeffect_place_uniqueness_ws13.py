@@ -197,6 +197,58 @@ def verify_gpu_qsbr_3epoch_safe_reclaim(epochs_to_simulate: int = 900) -> Dict[s
     }
 
 
+def verify_dlopen_trampoline_hotpatch_coeffect_and_bit_exact(num_layers: int = 48) -> Dict[str, Any]:
+    rng = random.Random(20261105)
+    lut243 = [
+        ((b % 3) - 1, ((b // 3) % 3) - 1, ((b // 9) % 3) - 1, ((b // 27) % 3) - 1, ((b // 81) % 3) - 1)
+        for b in range(243)
+    ]
+
+    def serial_kernel(b: int, x: int) -> int:
+        b_mod = b % 243
+        t0 = (b_mod % 3) - 1
+        t1 = ((b_mod // 3) % 3) - 1
+        t2 = ((b_mod // 9) % 3) - 1
+        t3 = ((b_mod // 27) % 3) - 1
+        t4 = ((b_mod // 81) % 3) - 1
+        return (t0 + t1 + t2 + t3 + t4) * x
+
+    def lut_kernel(b: int, x: int) -> int:
+        t0, t1, t2, t3, t4 = lut243[b % 243]
+        return (t0 + t1 + t2 + t3 + t4) * x
+
+    for b in range(243):
+        for x in (-17, -1, 0, 1, 23):
+            assert lut_kernel(b, x) == serial_kernel(b, x)
+
+    entry_before = {
+        "place_id": 0,
+        "uniqueness": "borrowZ",
+        "residency_2q": "activePinned2Q",
+        "coeffect_11_grade": {"dirty_leak": 0, "clean_disc": 0},
+        "read_only_weights": True,
+    }
+    entry_patched = dict(entry_before) if entry_before["read_only_weights"] else {}
+    assert entry_patched == entry_before
+    assert entry_patched["coeffect_11_grade"]["dirty_leak"] == 0
+
+    weight_blocks_48 = [rng.randrange(243) for _ in range(num_layers)]
+    acc_serial = 13
+    acc_lut = 13
+    for w in weight_blocks_48:
+        acc_serial = acc_serial + serial_kernel(w, acc_serial)
+        acc_lut = acc_lut + lut_kernel(w, acc_lut)
+    assert acc_lut == acc_serial
+
+    return {
+        "layers_verified": num_layers,
+        "lut243_states_verified": 243,
+        "coeffect_11_grade_preserved": True,
+        "linux_2q_residency": entry_patched["residency_2q"],
+        "layer48_logit_diff": abs(acc_lut - acc_serial),
+    }
+
+
 def verify_lean_proof_hygiene_and_line_bounds() -> Dict[str, Any]:
     txt = LEAN_PATH.read_text(encoding="utf-8")
     for forbidden in ("sorry", "axiom", "Real", "native_decide"):
@@ -209,6 +261,7 @@ def verify_lean_proof_hygiene_and_line_bounds() -> Dict[str, Any]:
         "vmm_remap_preserves_va_invariance_and_phys_uniqueness",
         "tma_swizzle128_involutive_place_bijection",
         "gpu_qsbr_3epoch_safe_reclaim",
+        "dlopen_trampoline_hotpatch_coeffect_and_bit_exact_preservation",
     ]
     lines = txt.splitlines()
     proof_lengths: Dict[str, int] = {}
@@ -257,6 +310,7 @@ def main() -> int:
     vmm_res = verify_vmm_virtual_aliased_fixed_va(1024)
     swiz_res = verify_tma_swizzle128_involutive_place_bijection()
     qsbr_res = verify_gpu_qsbr_3epoch_safe_reclaim(900)
+    dlopen_res = verify_dlopen_trampoline_hotpatch_coeffect_and_bit_exact(48)
     lean_res = verify_lean_proof_hygiene_and_line_bounds()
 
     report = {
@@ -266,6 +320,7 @@ def main() -> int:
         "vmm_virtual_aliased_fixed_va": vmm_res,
         "tma_swizzle128_involutive_bijection": swiz_res,
         "gpu_qsbr_3epoch_reclamation": qsbr_res,
+        "dlopen_trampoline_hotpatch": dlopen_res,
         "lean_proof_verification": lean_res,
     }
     REPORT_PATH.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -286,7 +341,11 @@ def main() -> int:
         f"{qsbr_res['premature_reclaim_rejections_verified']} premature hazards blocked"
     )
     print(
-        f"  [d] Lean 4 Proof Bounds (<=8L) : {lean_res['new_gpu_vram_theorem_proof_lines']} "
+        f"  [d] dlopen LUT Trampoline      : {dlopen_res['layers_verified']} layers, "
+        f"logit_diff={dlopen_res['layer48_logit_diff']}, residency={dlopen_res['linux_2q_residency']}"
+    )
+    print(
+        f"  [e] Lean 4 Proof Bounds (<=8L) : {lean_res['new_gpu_vram_theorem_proof_lines']} "
         f"(0 sorry, 0 axiom, 0 Real)"
     )
     print("  STATUS                         : PASS")

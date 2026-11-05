@@ -1009,5 +1009,66 @@ theorem gpu_qsbr_3epoch_safe_reclaim (st : GpuQsbrSlotState) (retiredEpoch : Nat
   · have hNotLe : ¬ (st.birthEpoch ≤ retiredEpoch) := by omega
     simp [stepQsbrReclaim3Epoch, hNotLe]
 
+/-- Linux 2Q page-cache / VRAM residency tier (`activePinned2Q` vs `inactiveColdFifo`)
+    tracked by the 11-tuple coeffect grade during `dlopen` trampoline hot-patching. -/
+inductive Linux2QResidency where
+  | activePinned2Q   : Linux2QResidency
+  | inactiveColdFifo : Linux2QResidency
+  deriving DecidableEq, Repr
+
+/-- Dynamic library (`dlopen` / GOT-PLT trampoline) kernel dispatch descriptor
+    tracking `Place` (`placeId`), `Uniqueness` (`UsageUniqGrade`), `Linux2QResidency`,
+    and the 11-tuple arena coeffect grade `EffectGrade`. -/
+structure KernelDispatchEntry where
+  placeId         : Nat
+  uniqueness      : UsageUniqGrade
+  residency2Q     : Linux2QResidency
+  coeffect11Grade : EffectGrade
+  readOnlyWeights : Bool
+  deriving DecidableEq, Repr
+
+/-- Hot-patches a baseline `vec_dot` `KernelDispatchEntry` via a `dlopen` AVX-512
+    `vpermb` LUT trampoline when the replacement kernel is read-only on weight slabs
+    (`readOnly = true`), preserving `(placeId, uniqueness, residency2Q, coeffect11Grade)`. -/
+def hotpatchDlopenTrampoline (entry : KernelDispatchEntry) (readOnly : Bool) : KernelDispatchEntry :=
+  if readOnly then
+    entry
+  else
+    { entry with
+      uniqueness  := UsageUniqGrade.taintedX
+      residency2Q := Linux2QResidency.inactiveColdFifo }
+
+/-- Evaluates a sequence of layer weight blocks `weightBlocks : List Nat` (e.g., 48 layers)
+    starting from hidden state `acc : Int` using a dispatched `vec_dot` kernel `k : Nat → Int → Int`. -/
+def evalLayerStackVecDot (k : Nat → Int → Int) : List Nat → Int → Int
+  | [], acc        => acc
+  | b :: rest, acc => evalLayerStackVecDot k rest (acc + k b acc)
+
+/-- Theorem 24 (`dlopen` / Trampoline Pure-Kernel Hot-Patch Coeffect & Bit-Exact Preservation):
+    Replacing a baseline `vec_dot` `serialKernel` with an AVX-512 `vpermb` `lutKernel`
+    trampoline that is observationally bit-exact (`∀ b x, lutKernel b x = serialKernel b x`)
+    and read-only on weight slabs preserves `Place`, `Uniqueness`, `Linux2QResidency`,
+    the 11-tuple coeffect grade (`dirtyLeak = 0`), and exact layer-48 output logits. -/
+theorem dlopen_trampoline_hotpatch_coeffect_and_bit_exact_preservation
+    (entry : KernelDispatchEntry) (lutKernel serialKernel : Nat → Int → Int)
+    (weightBlocks48 : List Nat) (b : Nat) (x : Int)
+    (hBitExact : ∀ w a, lutKernel w a = serialKernel w a)
+    (hClean : entry.coeffect11Grade.dirtyLeak = 0) :
+    let patched := hotpatchDlopenTrampoline entry true
+    patched = entry ∧
+    patched.placeId = entry.placeId ∧
+    patched.uniqueness = entry.uniqueness ∧
+    patched.residency2Q = entry.residency2Q ∧
+    patched.coeffect11Grade = entry.coeffect11Grade ∧
+    patched.coeffect11Grade.dirtyLeak = 0 ∧
+    lutKernel b x = serialKernel b x ∧
+    evalLayerStackVecDot lutKernel weightBlocks48 x =
+      evalLayerStackVecDot serialKernel weightBlocks48 x := by
+  refine ⟨rfl, rfl, rfl, rfl, rfl, hClean, hBitExact b x, ?_⟩
+  induction weightBlocks48 generalizing x with
+  | nil => rfl
+  | cons w rest ih =>
+      simp [evalLayerStackVecDot, hBitExact w x, ih (x + serialKernel w x)]
+
 end LakefillQGradedCoeffectUniquenessPlaceEffectProofs
 
