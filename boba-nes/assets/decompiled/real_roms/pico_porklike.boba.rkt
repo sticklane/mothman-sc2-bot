@@ -67,6 +67,23 @@
       (structured-ast
         (if-cond "titles")
         (if-cond "t==200"))
+      (decompiled-pseudo-code
+        (set! rooms "{")
+        (set! ref "\"-20,-20,\",")
+        (set! tiles "\"14,4,-1,\",")
+        (set! spawn "\"0,300,150,\",")
+        (set! ferns "\"0,104,3,8,8,104,2,9,32,112,2,8,40,112,1,2,49,128,2,8,56,128,3,14,91,128,2,8,104,120,4,2,112,104,4,8,121,104,6,14,128,104,6,8,135,104,5,9,142,104,4,10,149,104,3,15,156,104,2,7,218,104,2,7,225,104,3,15,232,104,4,10,239,104,5,9,246,104,6,8,\",")
+        (set! triggers "{{")
+        (when "titles")
+        (set! player.off "true")
+        (set! player.dir "2")
+        (when "t==200")
+        (set! titles "false")
+        (call next_room "")
+        (when "t==80" "music(2)")
+        (when "t>=30")
+        (call change_state "player,\"swim\"")
+        (+= player.vx "0.3"))
       (body-lines
         "function load_room_data()"
         "rooms = {"
@@ -97,6 +114,23 @@
       (called-functions (arg load_room load_room_data new_box))
       (structured-ast
         (seq-block 36))
+      (decompiled-pseudo-code
+        (call load_room_data "")
+        (set! room "1")
+        (set! godmode "false")
+        (set! wtrfrc "0.94")
+        (set! |gt,gm,deathcounter,freeze,fade| "0,0,0,0,0")
+        (set! |camx,camy,shkx,shky| "0,0,0,0")
+        (set! fades "{")
+        (set! boss "{")
+        (set! x "52,")
+        (set! y "592,")
+        (set! hp "3,")
+        (set! animt "0,")
+        (set! state "\"dead\",")
+        (set! wave "0,")
+        (set! box "new_box(arg\"48,576,80,608,\")")
+        (call load_room "room"))
       (body-lines
         "function _init()"
         ""
@@ -140,6 +174,12 @@
         (if-cond "t>=30000")
         (if-cond "room>1 and room <#rooms")
         (if-cond "gt==1800"))
+      (decompiled-pseudo-code
+        (+= t "1")
+        (when "t>=30000" "t=0")
+        (when "room>1 and room <#rooms")
+        (+= gt "1")
+        (when "gt==1800" "gt=0 gm+=1"))
       (body-lines
         "function _update()"
         "t+=1"
@@ -158,6 +198,15 @@
         (if-cond "fade>0")
         (if-cond "fade<=#fades and fadein==false")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "fade>0")
+        (when "fade<=#fades and fadein==false")
+        (call fillp "fades[fade]")
+        (call rectfill "0,0,cmaxx,cmaxy,1")
+        (+= fade "1")
+        (call fillp "")
+        (return "")
+        (set! fadein "true"))
       (body-lines
         "function _draw()"
         ""
@@ -184,6 +233,20 @@
         (if-cond "pd >= 3 and pd <=5")
         (if-cond "camx>cmaxx-127")
         (if-cond "camy>cmaxy-127"))
+      (decompiled-pseudo-code
+        (set! |xoff,yoff,pd| "0,0,player.dir")
+        (when "pd >= 1 and pd <=3" "xoff = 12")
+        (when "pd >= 5 and pd <=7" "xoff = -12")
+        (when "pd <=1 or pd ==7" "yoff = -12")
+        (when "pd >= 3 and pd <=5" "yoff = 12")
+        (set! xpoint "max(0,player.x-64+(player.vx*14)+xoff)")
+        (set! ypoint "max(0,player.y-64+(player.vy*14)+yoff)")
+        (+= camx "(xpoint-camx)*0.1")
+        (+= camy "(ypoint-camy)*0.1")
+        (when "camx>cmaxx-127" "camx=cmaxx-127")
+        (when "camy>cmaxy-127" "camy=cmaxy-127")
+        (+= camx "shkx")
+        (+= camy "shky"))
       (body-lines
         "function update_camera()"
         "local xoff,yoff,pd = 0,0,player.dir"
@@ -208,6 +271,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call rectfill "0,0,cmaxx,cmaxy,1"))
       (body-lines
         "function draw_background()"
         "rectfill(0,0,cmaxx,cmaxy,1)"
@@ -221,6 +286,15 @@
       (structured-ast
         (for-loop "i in all(roomtiles)")
         (if-cond "i == -1"))
+      (decompiled-pseudo-code
+        (set! |mapx,mapy| "0,0")
+        (call pal "10,0")
+        (foreach i "roomtiles")
+        (when "i == -1")
+        (set! mapx "0")
+        (+= mapy "128")
+        (call map "(i%8)*16,flr(i/8)*16,mapx,mapy,16,16,0x1")
+        (+= mapx "128"))
       (body-lines
         "function draw_foreground()"
         "local mapx,mapy = 0,0"
@@ -241,6 +315,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "enemy in all(objects)"))
+      (decompiled-pseudo-code
+        (foreach enemy "objects")
+        (call enemy.update "enemy"))
       (body-lines
         "function update_objects(objects)"
         "for enemy in all(objects) do"
@@ -254,6 +331,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "p in all(hazards)"))
+      (decompiled-pseudo-code
+        (foreach p "hazards")
+        (call p.update "p"))
       (body-lines
         "function update_hazards(hazards)"
         "for p in all(hazards) do"
@@ -267,6 +347,9 @@
       (called-functions (coll))
       (structured-ast
         (for-loop "p in all(hazards)"))
+      (decompiled-pseudo-code
+        (foreach p "hazards")
+        (call p.coll "p"))
       (body-lines
         "function check_hazard_colls(hazards)"
         "for p in all(hazards) do"
@@ -280,6 +363,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "p in all(hazards)"))
+      (decompiled-pseudo-code
+        (foreach p "hazards")
+        (call p.draw "p"))
       (body-lines
         "function draw_hazards(hazards)"
         "for p in all(hazards) do"
@@ -293,6 +379,15 @@
       (called-functions ())
       (structured-ast
         (seq-block 11))
+      (decompiled-pseudo-code
+        (set! t "{")
+        (set! x "ref[1] or 0,")
+        (set! y "ref[2] or 0,")
+        (set! prox "ref[3] or 1,")
+        (set! t "ref[4] or 0,")
+        (set! active "ref[5] or 1,")
+        (set! exec "exec")
+        (call add "triggers,t"))
       (body-lines
         "function create_trigger(ref,exec)"
         "local t ={"
@@ -315,6 +410,13 @@
         (for-loop "trig in all(triggers)")
         (if-cond "trig.prox>0")
         (if-cond "dist(player.x,player.y,trig.x,trig.y"))
+      (decompiled-pseudo-code
+        (foreach trig "triggers")
+        (set! kill "false")
+        (when "trig.prox>0")
+        (set! kill "true")
+        (when "dist(player.x,player.y,trig.x,trig.y)<=trig.prox")
+        (set! trig.active "1"))
       (body-lines
         "function update_triggers(triggers)"
         "for trig in all(triggers) do"
@@ -332,6 +434,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "abs(shkx"))
+      (decompiled-pseudo-code
+        (when "abs(shkx)+abs(shky)<0.5")
+        (set! |shkx,shky| "0,0")
+        (*= shkx "-0.5-rnd(0.2)")
+        (*= shky "-0.5-rnd(0.2)"))
       (body-lines
         "function update_shake()"
         "if abs(shkx)+abs(shky)<0.5 then"
@@ -348,6 +455,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "enemy in all(objects)"))
+      (decompiled-pseudo-code
+        (foreach enemy "objects")
+        (call enemy.draw "enemy"))
       (body-lines
         "function draw_objects(objects)"
         "for enemy in all(objects) do"
@@ -361,6 +471,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=106,122,8"))
+      (decompiled-pseudo-code
+        (for-range i "106" "122,8")
+        (call circ "camx+i-shkx,camy+6-shky,3.5,0"))
       (body-lines
         "function draw_hud()"
         "for i=106,122,8 do"
@@ -374,6 +487,10 @@
       (called-functions (boldprint move))
       (structured-ast
         (if-cond "player.y>=60 and t>=60 and room==1"))
+      (decompiled-pseudo-code
+        (when "player.y>=60 and t>=60 and room==1")
+        (call boldprint "\"⬅️➡️⬆️⬇️: move\",32,40")
+        (call boldprint "\"❎/🅾️ (hold): attack\",20,50"))
       (body-lines
         "function draw_titles()"
         "if player.y>=60 and t>=60 and room==1 then"
@@ -388,6 +505,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "fx in all(fx)"))
+      (decompiled-pseudo-code
+        (foreach fx "fx")
+        (call fx.draw "fx"))
       (body-lines
         "function draw_fx(fxs)"
         "for fx in all(fx) do"
@@ -401,6 +521,9 @@
       (called-functions (load_room))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (+= room "1")
+        (call load_room "room"))
       (body-lines
         "function next_room()"
         "room+=1"
@@ -416,6 +539,26 @@
         (if-cond "r.ref")
         (for-loop "i in all(roomtiles)")
         (if-cond "i == -1"))
+      (decompiled-pseudo-code
+        (set! t "0")
+        (set! objects "{}")
+        (set! fx "{}")
+        (set! particles "{}")
+        (set! triggers "{}")
+        (set! hazards "{}")
+        (set! r "rooms[rm]")
+        (set! roomref "{64,64,false}")
+        (when "r.ref" "roomref=parse(r.ref)")
+        (set! px "roomref[1]")
+        (set! py "roomref[2]")
+        (set! player "create_player(px,py)")
+        (set! camx "max(0,px-54)")
+        (set! camy "max(0,py-64)")
+        (set! roomtiles "parse(r.tiles)")
+        (set! roomrows "0")
+        (foreach i "roomtiles")
+        (when "i == -1")
+        (+= roomrows "1"))
       (body-lines
         "function load_room(rm)"
         "t=0"
@@ -451,6 +594,31 @@
       (called-functions (new_object parse))
       (structured-ast
         (seq-block 49))
+      (decompiled-pseudo-code
+        (set! p "new_object(x,y,\"player\")")
+        (set! p.dir "2")
+        (set! p.hp "3")
+        (set! p.charge "0")
+        (set! p.invinci "0")
+        (set! p.cooldown "0")
+        (set! p.flash "0")
+        (set! p.bigbox "false")
+        (set! p.tpspd "3")
+        (set! p.spr_info "{")
+        (set! idle "{")
+        (set! up "parse\"7,38,7,39,\",")
+        (set! diagu "parse\"32,36,32,34,\",")
+        (set! diagd "parse\"40,42,40,44,\",")
+        (set! right "parse\"16,18,16,20,\",")
+        (set! dt "0.3")
+        (set! swim "{")
+        (set! up "parse\"38,39,\",")
+        (set! diagu "parse\"36,34,\",")
+        (set! diagd "parse\"42,44,\",")
+        (set! right "parse\"18,20,\",")
+        (set! dt "0.05")
+        (set! charge "{")
+        (set! up "{38},"))
       (body-lines
         "function create_player(x,y)"
         "local p=new_object(x,y,\"player\")"
@@ -492,6 +660,11 @@
       (called-functions (ternary))
       (structured-ast
         (if-cond "att and p.state==\"attack\""))
+      (decompiled-pseudo-code
+        (set! p.abs_box "function(att)")
+        (set! |b,mx,my,pb| "5,0,0,p.bigbox and att")
+        (when "att and p.state==\"attack\"")
+        (set! b "ternary(pb,14,8)"))
       (body-lines
         "p.abs_box=function(att)"
         "local b,mx,my,pb = 5,0,0,p.bigbox and att"
@@ -509,6 +682,16 @@
         (if-cond "abs(p.animt/0.01")
         (if-cond "p.animt>=1")
         (if-cond "p.invinci>0"))
+      (decompiled-pseudo-code
+        (+= p.animt "0.01")
+        (set! state "p.state")
+        (when "state==\"dead\"")
+        (+= p.vy "0.04")
+        (call apply_friction "p,wtrfrc")
+        (when "abs(p.animt/0.01)%2==0" "p.flash = 0.1")
+        (when "p.animt>=1" "load_room(room)")
+        (when "p.invinci>0")
+        (-= p.invinci "1"))
       (body-lines
         "function update_player(p)"
         "p.animt+=0.01"
@@ -541,6 +724,19 @@
         (if-cond "d==3 or d==5")
         (if-cond "d==4 or ((d==3 or d==5")
         (if-cond "d>=5"))
+      (decompiled-pseudo-code
+        (set! state "p.state")
+        (set! sinfo "p.spr_info[state]")
+        (set! |flipx,flipy,sprw,sprh,xoff,yoff,sprites| "false,false,2,2,-4,-8,{}")
+        (when "state==\"hurt\" or state==\"dead\"")
+        (set! sprites "sinfo.hurt")
+        (set! d "p.dir")
+        (when "d==0 or d==4" "sprites = sinfo.up sprw=1")
+        (when "d==1 or d==7" "sprites = sinfo.diagu xoff=-8")
+        (when "d==2 or d==6" "sprites = sinfo.right sprh=1 xoff=-8 yoff=-4")
+        (when "d==3 or d==5" "sprites = sinfo.diagd xoff=-8")
+        (when "d==4 or ((d==3 or d==5) and state==\"attack\")" "flipy=true")
+        (when "d>=5" "flipx=true"))
       (body-lines
         "function draw_player(p)"
         "local state=p.state"
@@ -573,6 +769,19 @@
         (if-cond "player.invinci>0")
         (return-expr "end")
         (if-cond "name!=\"clam\""))
+      (decompiled-pseudo-code
+        (foreach e "objects")
+        (set! att "ternary(player.state==\"attack\" and not e.invinci,true,false)")
+        (when "coll(e.abs_box(),player.abs_box(att))")
+        (set! name "e.name")
+        (when "name==\"mine\"" "change_state(e,\"detonate\") sfx(9)")
+        (when "player.state==\"attack\"")
+        (when "e.invinci")
+        (when "player.invinci>0" "return")
+        (when "name!=\"clam\"" "bounce(e,player.vx*0.6,player.vy*0.6)")
+        (call cancel_attack "")
+        (call bounce_relative "player,e,3")
+        (call kill_object "e"))
       (body-lines
         "function coll_objs()"
         "for e in all(objects) do"
@@ -602,6 +811,19 @@
       (structured-ast
         (if-cond "p.state != \"dead\"")
         (if-cond "p.hp<=0"))
+      (decompiled-pseudo-code
+        (when "p.state != \"dead\"")
+        (-= p.hp "1")
+        (call create_bubbles "p.x,p.y,rnd(3)+3,8,2,4")
+        (set! freeze "3")
+        (call sfx "6")
+        (call add_shake "10")
+        (when "p.hp<=0")
+        (+= deathcounter "1")
+        (call change_state "p,\"dead\"")
+        (set! p.charge "0")
+        (set! p.cooldown "3")
+        (call change_state "p,\"hurt\""))
       (body-lines
         "function hurt_player(p)"
         "if p.state != \"dead\" then"
@@ -626,6 +848,16 @@
       (called-functions (add_shake change_state create_particle))
       (structured-ast
         (for-loop "i=1,rnd(4)+3"))
+      (decompiled-pseudo-code
+        (call change_state "player,\"idle\"")
+        (call add_shake "3")
+        (call sfx "9")
+        (set! player.charge "0")
+        (set! player.cooldown "2")
+        (set! player.flash "0")
+        (set! player.bigbox "false")
+        (for-range i "1" "rnd(4)+3")
+        (call create_particle "player.x,player.y,rnd(3)+-2,rnd(3)+-2,true"))
       (body-lines
         "function cancel_attack()"
         "change_state(player,\"idle\")"
@@ -646,6 +878,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "{x=x,y=y,vx=0,vy=0,animt=0,state=\"idle\",name=name,update=update,"))
+      (decompiled-pseudo-code
+        (return "{x=x,y=y,vx=0,vy=0,animt=0,state=\"idle\",name=name,update=update,draw=draw}"))
       (body-lines
         "function new_object(x,y,name,update,draw)"
         "return {x=x,y=y,vx=0,vy=0,animt=0,state=\"idle\",name=name,update=update,draw=draw}"
@@ -658,6 +892,16 @@
       (called-functions (new_object))
       (structured-ast
         (seq-block 13))
+      (decompiled-pseudo-code
+        (set! e "new_object(x,y,\"snapper\",update_snapper,draw_snapper)")
+        (set! e.dir "0")
+        (set! e.active "false")
+        (set! e.spr_info "{")
+        (set! idle "{")
+        (set! up "{1,2},")
+        (set! diag "{3,4},")
+        (set! right "{5,6},")
+        (set! dt "0.02"))
       (body-lines
         "function create_snapper(x,y)"
         "local e=new_object(x,y,\"snapper\",update_snapper,draw_snapper)"
@@ -680,6 +924,9 @@
       (called-functions (new_box))
       (structured-ast
         (return-expr "new_box(e.x-3,e.y-3,e.x+3,e.y+3)"))
+      (decompiled-pseudo-code
+        (set! e.abs_box "function()")
+        (return "new_box(e.x-3,e.y-3,e.x+3,e.y+3)"))
       (body-lines
         "e.abs_box=function()"
         "return new_box(e.x-3,e.y-3,e.x+3,e.y+3)"
@@ -692,6 +939,13 @@
       (called-functions (create_snapper))
       (structured-ast
         (for-loop "i=1,6"))
+      (decompiled-pseudo-code
+        (for-range i "1" "6")
+        (set! a "rnd(1)")
+        (set! d "rnd(20)")
+        (set! sx "x+d*cos(a)")
+        (set! sy "y+d*sin(a)")
+        (call create_snapper "sx,sy"))
       (body-lines
         "function create_school(x,y)"
         "for i=1,6 do"
@@ -715,6 +969,20 @@
         (if-cond "player.x+buff < e.x")
         (if-cond "player.y-buff > e.y")
         (if-cond "player.y+buff < e.y"))
+      (decompiled-pseudo-code
+        (+= e.animt "0.01")
+        (set! d "dist(e.x,e.y,player.x,player.y)")
+        (when "not e.active")
+        (when "d<=120" "e.active=true")
+        (set! |spd,buff| "0.1,20")
+        (when "d<=20" "buff=4")
+        (when "player.x-buff > e.x" "e.vx +=spd r=true")
+        (when "player.x+buff < e.x" "e.vx -=spd l=true")
+        (when "player.y-buff > e.y" "e.vy +=spd d=true")
+        (when "player.y+buff < e.y" "e.vy -=spd u=true")
+        (call apply_accel "e,1")
+        (call setdirection "e,l,r,u,d")
+        (call move "e"))
       (body-lines
         "function update_snapper(e)"
         "e.animt+=0.01"
@@ -746,6 +1014,15 @@
         (if-cond "d==2 or d==6")
         (if-cond "d>=3 and d<=5")
         (if-cond "d>=5"))
+      (decompiled-pseudo-code
+        (set! |sinfo,flipx,flipy,sprites,d| "e.spr_info[e.state],false,false,{},e.dir")
+        (when "d==0 or d==4" "sprites = sinfo.up")
+        (when "d==1 or d==3 or d==5 or d==7" "sprites = sinfo.diag")
+        (when "d==2 or d==6" "sprites = sinfo.right")
+        (when "d>=3 and d<=5" "flipy=true")
+        (when "d>=5" "flipx=true")
+        (set! spri "sprites[flr(e.animt/sinfo.dt)%#sprites+1]")
+        (call drawoutline "spri,e.x-4,e.y-4,1,1,flipx,flipy,0,true"))
       (body-lines
         "function draw_snapper(e)"
         "local sinfo,flipx,flipy,sprites,d=e.spr_info[e.state],false,false,{},e.dir"
@@ -767,6 +1044,16 @@
       (called-functions (new_object))
       (structured-ast
         (seq-block 14))
+      (decompiled-pseudo-code
+        (set! e "new_object(x,y,\"puffer\",update_puffer,draw_puffer)")
+        (set! e.invinci "false")
+        (set! e.spr_info "{")
+        (set! idle "{")
+        (set! sprites "{110,111},")
+        (set! dt "0.02")
+        (set! puffed "{")
+        (set! sprites "{78},")
+        (set! dt "0.5"))
       (body-lines
         "function create_puffer(x,y)"
         "local e=new_object(x,y,\"puffer\",update_puffer,draw_puffer)"
@@ -790,6 +1077,10 @@
       (called-functions (new_box ternary))
       (structured-ast
         (return-expr "new_box(e.x-size,e.y-size,e.x+size,e.y+size)"))
+      (decompiled-pseudo-code
+        (set! e.abs_box "function()")
+        (set! size "ternary(e.state==\"puffed\",7,3)")
+        (return "new_box(e.x-size,e.y-size,e.x+size,e.y+size)"))
       (body-lines
         "e.abs_box=function()"
         "local size = ternary(e.state==\"puffed\",7,3)"
@@ -806,6 +1097,16 @@
         (return-expr "end")
         (if-cond "e.animt>1.2 and state==\"idle\"")
         (if-cond "not os"))
+      (decompiled-pseudo-code
+        (+= e.animt "0.01")
+        (set! os "is_offscreen(e,80)")
+        (when "os" "return")
+        (set! state "e.state")
+        (set! spd "ternary(state==\"puffed\",0.06,0.1)")
+        (when "e.animt>1.2 and state==\"idle\"")
+        (call change_state "e,\"puffed\"")
+        (set! e.invinci "true")
+        (when "not os" "sfx(23)"))
       (body-lines
         "function update_puffer(e)"
         "e.animt+=0.01"
@@ -827,6 +1128,13 @@
       (called-functions (drawoutline ternary))
       (structured-ast
         (if-cond "e.state==\"puffed\""))
+      (decompiled-pseudo-code
+        (set! sinfo "e.spr_info[e.state]")
+        (set! sprites "sinfo.sprites")
+        (set! |flipx,sprw,sprh,xoff,yoff| "ternary(player.x>e.x,true,false),1,1,-4,-4")
+        (when "e.state==\"puffed\"" "xoff,yoff,sprw,sprh,flipx = -8,-8,2,2,not flipx")
+        (set! spri "sprites[flr(e.animt/sinfo.dt)%#sprites+1]")
+        (call drawoutline "spri,e.x+xoff,e.y+yoff,sprw,sprh,flipx,false,0,true"))
       (body-lines
         "function draw_puffer(e)"
         "local sinfo=e.spr_info[e.state]"
@@ -845,6 +1153,13 @@
       (called-functions (new_object))
       (structured-ast
         (if-cond "shark"))
+      (decompiled-pseudo-code
+        (set! e "new_object(x,y,\"squid\",update_squid,draw_squid)")
+        (set! e.up "false")
+        (set! e.invinci "false")
+        (set! |sa,sb| "76,77")
+        (when "shark")
+        (set! |e.name,e.up,sa,sb| "\"shark\",true,74,90"))
       (body-lines
         "function create_squid(x,y,shark)"
         "local e=new_object(x,y,\"squid\",update_squid,draw_squid)"
@@ -863,6 +1178,11 @@
       (structured-ast
         (if-cond "e.name==\"shark\"")
         (return-expr "new_box(e.x-xa,e.y-ya,e.x+xa,e.y+ya)"))
+      (decompiled-pseudo-code
+        (set! e.abs_box "function()")
+        (set! |xa,ya| "3,7")
+        (when "e.name==\"shark\"" "xa,ya=7,3")
+        (return "new_box(e.x-xa,e.y-ya,e.x+xa,e.y+ya)"))
       (body-lines
         "e.abs_box=function()"
         "local xa,ya=3,7"
@@ -877,6 +1197,8 @@
       (called-functions (create_squid))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call create_squid "x,y,true"))
       (body-lines
         "function create_shark(x,y)"
         "create_squid(x,y,true)"
@@ -889,6 +1211,12 @@
       (called-functions (ternary))
       (structured-ast
         (if-cond "e.name==\"squid\""))
+      (decompiled-pseudo-code
+        (+= e.animt "1")
+        (when "e.name==\"squid\"")
+        (set! e.up "ternary(e.vy<0,true,false)")
+        (set! e.invinci "ternary(((player.y>e.y-3 and not e.up) or (player.y<e.y+3 and e.up)),true,false)")
+        (set! e.up "ternary(e.vx<=0,true,false)"))
       (body-lines
         "function update_squid(e)"
         "e.animt+=1"
@@ -907,6 +1235,15 @@
       (called-functions (ternary))
       (structured-ast
         (if-cond "e.name==\"squid\""))
+      (decompiled-pseudo-code
+        (set! sinfo "e.spr_info[e.state]")
+        (set! sprites "sinfo.sprites")
+        (set! spri "sprites[flr(e.animt/sinfo.dt)%#sprites+1]")
+        (set! |flipy,flipx,xa,ya,sx,sy| "false,false,3,7,1,2")
+        (when "e.name==\"squid\"")
+        (set! flipy "ternary(e.up,false,true)")
+        (set! flipx "ternary(e.up,true,false)")
+        (set! |xa,ya,sx,sy| "7,3,2,1"))
       (body-lines
         "function draw_squid(e)"
         "local sinfo = e.spr_info[e.state]"
@@ -927,6 +1264,13 @@
       (called-functions (new_object))
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (set! e "new_object(x,y,\"spikey\",update_spikey,draw_spikey)")
+        (set! e.spri "22")
+        (set! e.bob "true")
+        (set! e.flash "0")
+        (set! e.invinci "true")
+        (set! e.seed "flr(rnd(30))"))
       (body-lines
         "function create_spikey(x,y,mine)"
         "local e=new_object(x,y,\"spikey\",update_spikey,draw_spikey)"
@@ -944,6 +1288,9 @@
       (called-functions (new_box))
       (structured-ast
         (return-expr "new_box(e.x-3,e.y-3,e.x+3,e.y+3)"))
+      (decompiled-pseudo-code
+        (set! e.abs_box "function()")
+        (return "new_box(e.x-3,e.y-3,e.x+3,e.y+3)"))
       (body-lines
         "e.abs_box=function()"
         "return new_box(e.x-3,e.y-3,e.x+3,e.y+3)"
@@ -956,6 +1303,8 @@
       (called-functions (create_spikey))
       (structured-ast
         (return-expr "create_spikey(x,y,true)"))
+      (decompiled-pseudo-code
+        (return "create_spikey(x,y,true)"))
       (body-lines
         "function create_mine(x,y)"
         "return create_spikey(x,y,true)"
@@ -969,6 +1318,12 @@
       (structured-ast
         (for-loop "i=1,cols")
         (for-loop "i=1,rows"))
+      (decompiled-pseudo-code
+        (set! ypos "y")
+        (for-range i "1" "cols")
+        (for-range i "1" "rows")
+        (call create_spikey "x,ypos,mine")
+        (+= ypos "yspace"))
       (body-lines
         "function create_field(x,y,cols,rows,xspace,yspace,mine)"
         "local ypos = y"
@@ -985,6 +1340,11 @@
       (called-functions (create_bubbles create_field create_mine))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! m "create_mine(x,y)")
+        (set! m.state "\"detonate\"")
+        (call create_field "x-10,y-10,2,2,20,20")
+        (call create_bubbles "x,y,14,15,2,4"))
       (body-lines
         "function create_trap(x,y)"
         "local m = create_mine(x,y)"
@@ -1003,6 +1363,20 @@
         (if-cond "e.state==\"detonate\"")
         (if-cond "e.animt>=60")
         (if-cond "pdist<=30 and player.state != \"hurt\" and player.invinci==0"))
+      (decompiled-pseudo-code
+        (+= e.vy "ternary(e.bob,0.01,-0.01)")
+        (when "(t+e.seed)%30==0" "e.bob = not e.bob")
+        (when "e.state==\"detonate\"")
+        (+= e.animt "1")
+        (when "e.animt>=60")
+        (call create_explosion "e.x,e.y,15")
+        (call create_bubbles "e.x,e.y,10,15,2,4")
+        (call add_shake "8")
+        (call sfx "14")
+        (set! pdist "dist(player.x,player.y,e.x,e.y)")
+        (when "pdist<=30 and player.state != \"hurt\" and player.invinci==0")
+        (call hurt_player "player")
+        (call bounce_relative "player,e,9-pdist/4"))
       (body-lines
         "function update_spikey(e)"
         "e.vy+=ternary(e.bob,0.01,-0.01)"
@@ -1029,6 +1403,11 @@
       (called-functions (drawoutline flashobject))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (call drawoutline "e.spri,e.x-4,e.y-4,1,1")
+        (call flashobject "e,7")
+        (call spr "e.spri,e.x-4,e.y-4,1,1")
+        (call pal ""))
       (body-lines
         "function draw_spikey(e)"
         "drawoutline(e.spri,e.x-4,e.y-4,1,1)"
@@ -1044,6 +1423,12 @@
       (called-functions (new_object))
       (structured-ast
         (seq-block 7))
+      (decompiled-pseudo-code
+        (set! e "new_object(x,y,\"clam\",update_clam,draw_clam)")
+        (set! e.flipx "false")
+        (set! e.wob "true")
+        (set! e.invinci "true")
+        (set! e.shakesound "false"))
       (body-lines
         "function create_clam(x,y)"
         "local e =new_object(x,y,\"clam\",update_clam,draw_clam)"
@@ -1061,6 +1446,11 @@
       (structured-ast
         (if-cond "e.state==\"open\"")
         (return-expr "box"))
+      (decompiled-pseudo-code
+        (set! e.abs_box "function()")
+        (set! box "new_box(e.x-7,e.y-3,e.x+7,e.y+3)")
+        (when "e.state==\"open\"" "box.y1-=4 box.y2+=4")
+        (return "box"))
       (body-lines
         "e.abs_box=function()"
         ""
@@ -1082,6 +1472,17 @@
         (if-cond "not e.shakesound and not is_offscreen(e")
         (if-cond "t%2==0")
         (if-cond "e.wob"))
+      (decompiled-pseudo-code
+        (+= e.animt "1")
+        (when "is_offscreen(e,60)" "return")
+        (when "e.state==\"idle\"")
+        (set! e.flipx "ternary(player.x>e.x,true,false)")
+        (when "e.animt >=60")
+        (when "not e.shakesound and not is_offscreen(e)" "sfx(15) e.shakesound=true")
+        (when "t%2==0")
+        (when "e.wob")
+        (+= e.x "2")
+        (-= e.x "2"))
       (body-lines
         "function update_clam(e)"
         "e.animt+=1"
@@ -1104,6 +1505,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "e.state==\"open\""))
+      (decompiled-pseudo-code
+        (set! |spri,yoff,h| "29,-7,1")
+        (when "e.state==\"open\"")
+        (set! |spri,yoff,h| "8,-15,2"))
       (body-lines
         "function draw_clam(e)"
         "local spri,yoff,h=29,-7,1"
@@ -1119,6 +1524,10 @@
       (called-functions (new_object))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! e "new_object(x,y,\"pearl\",update_pearl,draw_pearl)")
+        (set! e.vx "vx")
+        (set! e.vy "vy"))
       (body-lines
         "function create_pearl(x,y,vx,vy)"
         "local e=new_object(x,y,\"pearl\",update_pearl,draw_pearl)"
@@ -1133,6 +1542,9 @@
       (called-functions (new_box))
       (structured-ast
         (return-expr "new_box(e.x-2,e.y-2,e.x+2,e.y+2)"))
+      (decompiled-pseudo-code
+        (set! e.abs_box "function()")
+        (return "new_box(e.x-2,e.y-2,e.x+2,e.y+2)"))
       (body-lines
         "e.abs_box=function()"
         "return new_box(e.x-2,e.y-2,e.x+2,e.y+2)"
@@ -1145,6 +1557,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "e.x<-20 or e.x>roomcols*140 or e.y<-20 or e.y>roomrows*140"))
+      (decompiled-pseudo-code
+        (when "e.x<-20 or e.x>roomcols*140 or e.y<-20 or e.y>roomrows*140")
+        (call del "objects,e"))
       (body-lines
         "function update_pearl(e)"
         "if e.x<-20 or e.x>roomcols*140 or e.y<-20 or e.y>roomrows*140 then"
@@ -1158,6 +1573,8 @@
       (called-functions (drawoutline))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call drawoutline "26,e.x-2,e.y-2,1,1,false,false,0,true"))
       (body-lines
         "function draw_pearl(e)"
         "drawoutline(26,e.x-2,e.y-2,1,1,false,false,0,true)"
@@ -1170,6 +1587,16 @@
       (called-functions (new_box))
       (structured-ast
         (return-expr "e"))
+      (decompiled-pseudo-code
+        (set! e "{")
+        (set! x "x,")
+        (set! y "y,")
+        (set! name "'exit',")
+        (set! state "'open',")
+        (set! combat "false,")
+        (set! abs_box "new_box(x-4,y-4,x+4,y+4)")
+        (set! exit "e")
+        (return "e"))
       (body-lines
         "function create_exit(x,y)"
         "local e={"
@@ -1193,6 +1620,12 @@
         (if-cond "exit.combat==true and exit.state==\"closed\"")
         (for-loop "i in all(objects)")
         (if-cond "i.name==\"mine\" or i.name==\"spikey\" or i.name==\"pearl\""))
+      (decompiled-pseudo-code
+        (when "exit.combat==true and exit.state==\"closed\"")
+        (set! no "0")
+        (foreach i "objects")
+        (when "i.name==\"mine\" or i.name==\"spikey\" or i.name==\"pearl\"")
+        (+= no "1"))
       (body-lines
         "function update_exit()"
         "if exit.combat==true and exit.state==\"closed\" then"
@@ -1210,6 +1643,11 @@
       (structured-ast
         (if-cond "coll(exit.abs_box,player.abs_box(")
         (if-cond "exit.state==\"open\" and player.state!=\"dead\""))
+      (decompiled-pseudo-code
+        (when "coll(exit.abs_box,player.abs_box())")
+        (when "exit.state==\"open\" and player.state!=\"dead\"")
+        (call sfx "29")
+        (call next_room ""))
       (body-lines
         "function coll_exit()"
         "if coll(exit.abs_box,player.abs_box()) then"
@@ -1225,6 +1663,14 @@
       (called-functions ())
       (structured-ast
         (if-cond "exit.state==\"closed\""))
+      (decompiled-pseudo-code
+        (set! |ca,cb| "0,0")
+        (when "exit.state==\"closed\"" "ca,cb= 13,2")
+        (call pal "8,0")
+        (call pal "9,ca")
+        (call pal "10,cb")
+        (call spr "108,exit.x-8,exit.y-8,2,2")
+        (call pal ""))
       (body-lines
         "function draw_exit()"
         "local ca,cb=0,0"
@@ -1243,6 +1689,18 @@
       (called-functions (new_box))
       (structured-ast
         (return-expr "e"))
+      (decompiled-pseudo-code
+        (set! e "{")
+        (set! box "new_box(x1,y1,x2,y2),")
+        (set! uprate "uprate or 0,")
+        (set! both "both or false,")
+        (set! name "\"ink\",")
+        (set! update "update_ink,")
+        (set! coll "coll_ink,")
+        (set! draw "draw_ink")
+        (*= e.uprate "0.1")
+        (call add "hazards,e")
+        (return "e"))
       (body-lines
         "function create_ink(x1,y1,x2,y2,uprate,both)"
         "e = {"
@@ -1270,6 +1728,19 @@
         (if-cond "coll(box,cbox")
         (if-cond "t%3==0")
         (for-loop "i=1, flr((tblen+64)/64)"))
+      (decompiled-pseudo-code
+        (set! box "e.box")
+        (-= box.y1 "e.uprate")
+        (when "e.both" "box.y2-=e.uprate")
+        (when "box.y2<0" "del(hazards,e)")
+        (set! cbox "new_box(camx-20,camy-20,camx+148,camy+148)")
+        (when "coll(box,cbox)")
+        (when "t%3==0")
+        (set! |x1,y1,x2,y2| "box.x1,box.y1,box.x2,box.y2")
+        (set! |tblen,rllen,off| "x2-x1,y2-y1,10")
+        (for-range i "1" "flr((tblen+64)/64)")
+        (call create_particle "flr(rnd(tblen)+x1),y1+off,0,(rnd(0.2)+0.2+e.uprate)*-1")
+        (call create_particle "flr(rnd(tblen)+x1),y2-off,0,rnd(0.2)+0.2-(e.uprate*0.9)"))
       (body-lines
         "function update_ink(e)"
         "local box=e.box"
@@ -1295,6 +1766,15 @@
       (called-functions (abs_box bounce_relative coll hurt_player))
       (structured-ast
         (if-cond "coll(box,player.abs_box("))
+      (decompiled-pseudo-code
+        (set! box "e.box")
+        (set! ps "player.state")
+        (when "coll(box,player.abs_box()) and ps!=\"attack\" and ps!=\"hurt\" and ps!=\"dead\"")
+        (set! centre "{}")
+        (set! centre.x "box.x1+box.x2/2")
+        (set! centre.y "box.y1+box.y2/2")
+        (call hurt_player "player")
+        (call bounce_relative "player,centre,2"))
       (body-lines
         "function coll_ink(e)"
         "local box = e.box"
@@ -1314,6 +1794,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! b "e.box")
+        (call palt "0,false")
+        (call rectfill "b.x1,b.y1,b.x2,b.y2,0")
+        (call pal ""))
       (body-lines
         "function draw_ink(e)"
         "local b = e.box"
@@ -1334,6 +1819,21 @@
         (if-cond "player.state==\"attack\"")
         (if-cond "boss.hp<=0")
         (for-loop "i in all(objects)"))
+      (decompiled-pseudo-code
+        (+= boss.animt "1")
+        (when "boss.wave>0" "boss.wave-=1 player.vy-=0.4 add_shake(1)")
+        (when "boss.state==\"active\"")
+        (when "coll(player.abs_box(),boss.box)")
+        (when "player.state==\"attack\"")
+        (call cancel_attack "")
+        (call sfx "21")
+        (-= boss.hp "1")
+        (call add_shake "4")
+        (when "boss.hp<=0")
+        (call sfx "22")
+        (call change_state "boss,\"dying\"")
+        (foreach i "objects")
+        (call kill_object "i"))
       (body-lines
         "function update_boss()"
         "boss.animt+=1"
@@ -1361,6 +1861,16 @@
         (if-cond "boss.hp<3")
         (if-cond "boss.hp<2")
         (if-cond "boss.hp<1"))
+      (decompiled-pseudo-code
+        (call drawoutline "arg\"69,48,576,4,4,false,false,0,true,\"")
+        (when "boss.hp<3")
+        (call spr "arg\"73,69,596,\"")
+        (when "boss.hp<2")
+        (call spr "arg\"73,52,596,1,1,false,true,\"")
+        (call spr "arg\"73,66,580,1,1,true,\"")
+        (when "boss.hp<1")
+        (call spr "arg\"73,56,581,1,1,true,true,\"")
+        (call spr "arg\"73,62,588,1,1,\""))
       (body-lines
         "function draw_boss()"
         "drawoutline(arg\"69,48,576,4,4,false,false,0,true,\")"
@@ -1381,6 +1891,11 @@
       (called-functions (parse spawntype))
       (structured-ast
         (for-loop "i=1,#ol,3"))
+      (decompiled-pseudo-code
+        (set! ol "parse(l)")
+        (for-range i "1" "#ol,3")
+        (set! |t,x,y| "ol[i],ol[i+1],ol[i+2]")
+        (call spawntype "t,x,y"))
       (body-lines
         "function spawnlist(l)"
         "local ol = parse(l)"
@@ -1396,6 +1911,25 @@
       (called-functions (create_clam create_exit create_mine create_puffer create_school create_shark create_snapper create_spikey create_squid))
       (structured-ast
         (if-cond "type==3"))
+      (decompiled-pseudo-code
+        (when "type==3")
+        (call create_snapper "x,y")
+        (when "type==4")
+        (call create_puffer "x,y")
+        (when "type==5")
+        (call create_squid "x,y")
+        (when "type==1")
+        (call create_spikey "x,y")
+        (when "type==2")
+        (call create_mine "x,y")
+        (when "type==0")
+        (call create_exit "x,y")
+        (when "type==6")
+        (call create_clam "x,y")
+        (when "type==7")
+        (call create_school "x,y")
+        (when "type==8")
+        (call create_shark "x,y"))
       (body-lines
         "function spawntype(type,x,y)"
         "if type==3 then"
@@ -1425,6 +1959,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "not (a.x1>b.x2 or a.y1>b.y2 or a.x2<b.x1 or a.y2<b.y1)"))
+      (decompiled-pseudo-code
+        (return "not (a.x1>b.x2 or a.y1>b.y2 or a.x2<b.x1 or a.y2<b.y1)"))
       (body-lines
         "function coll(a,b)"
         "return not (a.x1>b.x2 or a.y1>b.y2 or a.x2<b.x1 or a.y2<b.y1)"
@@ -1437,6 +1973,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (+= o.x "o.vx")
+        (+= o.y "o.vy"))
       (body-lines
         "function move(o)"
         "o.x+=o.vx"
@@ -1450,6 +1989,12 @@
       (called-functions (add_shake create_bubbles create_explosion create_particle))
       (structured-ast
         (for-loop "i=1,flr(rnd(4)+3)"))
+      (decompiled-pseudo-code
+        (call add_shake "5")
+        (call create_explosion "e.x,e.y,5")
+        (call create_bubbles "e.x,e.y,rnd(2)+2,4,1,3")
+        (for-range i "1" "flr(rnd(4)+3)")
+        (call create_particle "e.x,e.y,rnd(3)+-2,rnd(3)+-2,true"))
       (body-lines
         "function kill_object(e)"
         "add_shake(5)"
@@ -1466,6 +2011,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (*= o.vx "fric")
+        (*= o.vy "fric"))
       (body-lines
         "function apply_friction(o,fric)"
         "o.vx*=fric"
@@ -1480,6 +2028,9 @@
       (structured-ast
         (if-cond "bx")
         (if-cond "by"))
+      (decompiled-pseudo-code
+        (when "bx" "o.vx = bx")
+        (when "by" "o.vy = by"))
       (body-lines
         "function bounce(o,bx,by)"
         "if bx then o.vx = bx end"
@@ -1493,6 +2044,13 @@
       (called-functions (bounce dist))
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (set! rdist "dist(p.x,p.y,o.x,o.y)")
+        (set! bouncex "(p.x-o.x)/rdist")
+        (set! bouncey "(p.y-o.y)/rdist")
+        (*= bouncex "str")
+        (*= bouncey "str")
+        (call bounce "p,bouncex,bouncey"))
       (body-lines
         "function bounce_relative(p,o,str)"
         "local rdist = dist(p.x,p.y,o.x,o.y)"
@@ -1510,6 +2068,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "o.state != state"))
+      (decompiled-pseudo-code
+        (when "o.state != state")
+        (set! o.state "state")
+        (set! o.animt "0"))
       (body-lines
         "function change_state(o,state)"
         "if o.state != state then"
@@ -1524,6 +2086,11 @@
       (called-functions (dist))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! l "dist(o.vx,o.vy)")
+        (set! rl "min(l,tpspd)")
+        (set! o.vx "o.vx/l*rl")
+        (set! o.vy "o.vy/l*rl"))
       (body-lines
         "function apply_accel(o,tpspd)"
         "local l=dist(o.vx,o.vy)"
@@ -1540,6 +2107,15 @@
       (structured-ast
         (if-cond "tile")
         (return-expr "fget(val, 1)"))
+      (decompiled-pseudo-code
+        (set! |tile,col,row| "gettile(x,y)")
+        (when "tile")
+        (set! ox "(x-(col*128))/8")
+        (set! oy "(y-(row*128))/8")
+        (set! offsetx "(tile%8)*16")
+        (set! offsety "flr(tile/8)*16")
+        (set! val "mget(ox+offsetx, oy+offsety)")
+        (return "fget(val, 1)"))
       (body-lines
         "function issolid(x, y)"
         "local tile,col,row = gettile(x,y)"
@@ -1560,6 +2136,14 @@
       (structured-ast
         (for-loop "i=y1,y2")
         (if-cond "x1-1<0 or issolid(x1-1,i"))
+      (decompiled-pseudo-code
+        (set! hb "o.abs_box()")
+        (set! |x1,x2,y1,y2,xc,yc| "hb.x1,hb.x2,hb.y1,hb.y2,0,0")
+        (set! adjust "0.1")
+        (for-range i "y1" "y2")
+        (when "x1-1<0 or issolid(x1-1,i)")
+        (+= o.x "adjust")
+        (+= xc "1"))
       (body-lines
         "function detectwalls(o)"
         "local hb = o.abs_box()"
@@ -1586,6 +2170,15 @@
         (if-cond "(br and bd")
         (if-cond "(bd and bl")
         (if-cond "(bl and bu"))
+      (decompiled-pseudo-code
+        (when "bu and not(bl or br or bd)" "o.dir = 0")
+        (when "br and not(bu or bl or bd)" "o.dir = 2")
+        (when "bd and not(bl or bu or br)" "o.dir = 4")
+        (when "bl and not(bd or br or bu)" "o.dir = 6")
+        (when "(bu and br) and not(bl or bd)" "o.dir = 1")
+        (when "(br and bd) and not(bl or bu)" "o.dir = 3")
+        (when "(bd and bl) and not(br or bu)" "o.dir = 5")
+        (when "(bl and bu) and not(br or bd)" "o.dir = 7"))
       (body-lines
         "function setdirection(o,bl,br,bu,bd)"
         "if bu and not(bl or br or bd) then o.dir = 0 end"
@@ -1605,6 +2198,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! a "rnd(1)")
+        (+= shkx "p*cos(a)")
+        (+= shky "p*sin(a)"))
       (body-lines
         "function add_shake(p)"
         "local a=rnd(1)"
@@ -1620,6 +2217,9 @@
       (structured-ast
         (if-cond "o.x<camx-buf or o.x>camx+127+buf or o.y<camy-buf or o.y>camy+127")
         (return-expr "true end"))
+      (decompiled-pseudo-code
+        (set! buf "buffer or 0")
+        (when "o.x<camx-buf or o.x>camx+127+buf or o.y<camy-buf or o.y>camy+127+buf" "return true"))
       (body-lines
         "function is_offscreen(o,buffer)"
         "local buf = buffer or 0"
@@ -1634,6 +2234,14 @@
       (called-functions ())
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (set! e "{")
+        (set! x "x,")
+        (set! y "y,")
+        (set! r "r,")
+        (set! p "0,")
+        (set! draw "draw_explosion,")
+        (call add "fx,e"))
       (body-lines
         "function create_explosion(x,y,r)"
         "local e={"
@@ -1655,6 +2263,17 @@
         (if-cond "s.p<2")
         (if-cond "s.p<3 and s.r>4")
         (for-loop "i=0,2"))
+      (decompiled-pseudo-code
+        (when "s.p<2")
+        (call circfill "s.x,s.y,s.r,0")
+        (when "s.p<4")
+        (call circfill "s.x,s.y,s.r,7")
+        (when "s.p<3 and s.r>4")
+        (for-range i "0" "2")
+        (set! x "s.x+rnd(2.2*s.r)-1.1*s.r")
+        (set! y "s.y+rnd(2.2*s.r)-1.1*s.r")
+        (set! r "0.25*s.r+rnd(0.5*s.r)")
+        (call create_explosion "x,y,r"))
       (body-lines
         "function draw_explosion(s)"
         "if s.p<2 then"
@@ -1677,6 +2296,15 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,num"))
+      (decompiled-pseudo-code
+        (for-range i "1" "num")
+        (set! a "rnd(1)")
+        (set! b "{")
+        (set! x "x+spread*cos(a),")
+        (set! y "y+spread*sin(a),")
+        (set! r "rnd(maxsize-minsize)+minsize,")
+        (set! draw "draw_bubble")
+        (call add "fx,b"))
       (body-lines
         "function create_bubbles(x,y,num,spread,minsize,maxsize)"
         "for i=1,num do"
@@ -1697,6 +2325,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "(b.y<0"))
+      (decompiled-pseudo-code
+        (call circ "b.x+0.5,b.y+0.5,b.r,13")
+        (call circfill "b.x+0.5-b.r*0.4,b.y+0.5-b.r*0.4,b.r*0.2,6")
+        (-= b.y "b.r*0.6"))
       (body-lines
         "function draw_bubble(b)"
         "circ(b.x+0.5,b.y+0.5,b.r,13)"
@@ -1712,6 +2344,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! f "{x=x,y=y,len=len,col=col,flipx=false,draw=draw_fern}")
+        (set! f.bub "flr(rnd(1080)+720)")
+        (call add "fx,f"))
       (body-lines
         "function create_fern(x,y,len,col)"
         "f={x=x,y=y,len=len,col=col,flipx=false,draw=draw_fern}"
@@ -1729,6 +2365,14 @@
         (if-cond "flr(t+1080")
         (for-loop "i=1,f.len")
         (if-cond "i==f.len"))
+      (decompiled-pseudo-code
+        (when "t%50==0" "f.flipx=not f.flipx")
+        (when "flr(t+1080)%f.bub==0" "create_bubbles(f.x+3,f.y,1,1,1,2)")
+        (call pal "8,f.col")
+        (for-range i "1" "f.len")
+        (when "i==f.len")
+        (call spr "105,f.x,f.y-i*8,1,1,f.flipx")
+        (call spr "121,f.x,f.y-i*8,1,1,f.flipx"))
       (body-lines
         "function draw_fern(f)"
         "if t%50==0 then f.flipx=not f.flipx end"
@@ -1749,6 +2393,11 @@
       (structured-ast
         (if-cond "o.flash > 0")
         (for-loop "i=0,15"))
+      (decompiled-pseudo-code
+        (when "o.flash > 0")
+        (-= o.flash "0.1")
+        (for-range i "0" "15")
+        (call pal "i,c"))
       (body-lines
         "function flashobject(o,c)"
         "if o.flash > 0 then"
@@ -1764,6 +2413,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,15"))
+      (decompiled-pseudo-code
+        (for-range i "1" "15")
+        (call pal "i,c"))
       (body-lines
         "function drawoutline(n,x,y,w,h,flip_x,flip_y,c,main)"
         "for i=1,15 do"
@@ -1778,6 +2430,11 @@
       (structured-ast
         (for-loop "xx=-1,1")
         (for-loop "yy=-1,1"))
+      (decompiled-pseudo-code
+        (set! c "col or 7")
+        (for-range xx "-1" "1")
+        (for-range yy "-1" "1")
+        (call print "str,x+xx,y+yy,0"))
       (body-lines
         "function boldprint(str,x,y,col)"
         "c=col or 7"
@@ -1793,6 +2450,21 @@
       (called-functions ())
       (structured-ast
         (if-cond "pp"))
+      (decompiled-pseudo-code
+        (set! p "{")
+        (set! x "x,")
+        (set! y "y,")
+        (set! vx "vx,")
+        (set! vy "vy,")
+        (set! cols "{0,0,2},")
+        (set! size "10,")
+        (set! age "0,")
+        (set! maxage "30")
+        (when "pp")
+        (set! p.size "1")
+        (set! p.maxage "15")
+        (set! p.cols "{7,7,7,6,6,12}")
+        (set! p.pp "true"))
       (body-lines
         "function create_particle(x,y,vx,vy,pp)"
         "p = {"
@@ -1823,6 +2495,17 @@
         (if-cond "p.age/p.maxage > 0.6")
         (if-cond "p.age/p.maxage > 0.8")
         (if-cond "not p.pp"))
+      (decompiled-pseudo-code
+        (foreach p "particles")
+        (+= p.age "1")
+        (when "p.age==p.maxage or is_offscreen(p,30)" "del(particles,p)")
+        (set! ci "1+flr((p.age/p.maxage)*#p.cols)")
+        (set! p.col "p.cols[ci]")
+        (when "p.age/p.maxage > 0.6" "p.fill = fades[4]")
+        (when "p.age/p.maxage > 0.8")
+        (set! p.fill "fades[2]")
+        (when "not p.pp")
+        (set! p.size "14"))
       (body-lines
         "function update_particles()"
         "for p in all(particles) do"
@@ -1845,6 +2528,11 @@
       (structured-ast
         (for-loop "p in all(particles)")
         (if-cond "p.fill"))
+      (decompiled-pseudo-code
+        (foreach p "particles")
+        (when "p.fill" "fillp(p.fill)")
+        (call circfill "p.x,p.y,p.size,p.col")
+        (call fillp ""))
       (body-lines
         "function draw_particles()"
         "for p in all(particles) do"
@@ -1862,6 +2550,18 @@
         (for-loop "i=1,#string")
         (if-cond "s != \",\"")
         (if-cond "d==\"true\""))
+      (decompiled-pseudo-code
+        (set! data "{}")
+        (set! d "\"\"")
+        (for-range i "1" "#string")
+        (set! s "sub(string,i,i)")
+        (when "s != \",\"")
+        (set! d "d..s")
+        (when "d==\"true\"")
+        (set! d "true")
+        (when "d==\"false\"")
+        (set! d "false")
+        (set! d "flr(d)"))
       (body-lines
         "function parse(string)"
         "local data = {}"
@@ -1886,6 +2586,8 @@
       (called-functions (parse unpack))
       (structured-ast
         (return-expr "unpack(parse(str))"))
+      (decompiled-pseudo-code
+        (return "unpack(parse(str))"))
       (body-lines
         "function arg(str)"
         "return unpack(parse(str))"
@@ -1899,6 +2601,10 @@
       (structured-ast
         (if-cond "t[i]!=nil")
         (return-expr "t[i],unpack(t,i+1)"))
+      (decompiled-pseudo-code
+        (set! i "i or 1")
+        (when "t[i]!=nil")
+        (return "t[i],unpack(t,i+1)"))
       (body-lines
         "function unpack(t,i)"
         "i=i or 1"
@@ -1914,6 +2620,8 @@
       (structured-ast
         (if-cond "c")
         (return-expr "a else return b end"))
+      (decompiled-pseudo-code
+        (when "c" "return a else return b"))
       (body-lines
         "function ternary(c,a,b)"
         "if c then return a else return b end"
@@ -1926,6 +2634,11 @@
       (called-functions ())
       (structured-ast
         (return-expr "tile,col, row"))
+      (decompiled-pseudo-code
+        (set! col "flr(x/128)")
+        (set! row "flr(y/128)")
+        (set! tile "roomtiles[(roomcols*row)+row+col+1]")
+        (return "tile,col, row"))
       (body-lines
         "function gettile(x,y)"
         "local col = flr(x/128)"
@@ -1942,6 +2655,11 @@
       (structured-ast
         (if-cond "xb")
         (return-expr "sqrt(n*n +1)*d"))
+      (decompiled-pseudo-code
+        (when "xb" "xa=xb-xa ya=yb-ya")
+        (set! d "max(abs(xa),abs(ya))")
+        (set! n "min(abs(xa),abs(ya)) / d")
+        (return "sqrt(n*n +1)*d"))
       (body-lines
         "function dist(xa,ya,xb,yb)"
         "if xb then xa=xb-xa ya=yb-ya end"
@@ -1957,6 +2675,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "{x1=x1,y1=y1,x2=x2,y2=y2}"))
+      (decompiled-pseudo-code
+        (return "{x1=x1,y1=y1,x2=x2,y2=y2}"))
       (body-lines
         "function new_box(x1,y1,x2,y2)"
         "return {x1=x1,y1=y1,x2=x2,y2=y2}"
@@ -1969,6 +2689,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "min<10"))
+      (decompiled-pseudo-code
+        (set! |min,sec| "gm,flr(gt/30)")
+        (when "min<10")
+        (set! min "\"0\"..min"))
       (body-lines
         "function timer()"
         "local min,sec=gm,flr(gt/30)"

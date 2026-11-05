@@ -65,6 +65,19 @@
       (called-functions (splash_init))
       (structured-ast
         (if-cond "(flr(rnd(100"))
+      (decompiled-pseudo-code
+        (call poke "0x5f2d,1")
+        (call cartdata "\"ckcw_fnfp8\"")
+        (set! step "0")
+        (set! inc "509/64")
+        (set! logo "1")
+        (set! menustate "-1")
+        (set! fade "0")
+        (set! fading "-1")
+        (call splash_init "")
+        (call music "0")
+        (set! synctime "509")
+        (call dset "60,0"))
       (body-lines
         "function _init()"
         "\tpoke(0x5f2d,1)"
@@ -91,6 +104,11 @@
         (if-cond "(menustate == 0 or menustate == 1")
         (if-cond "(menustate == -1")
         (if-cond "(stat(26"))
+      (decompiled-pseudo-code
+        (when "menustate == 0 or menustate == 1" "menu_update()")
+        (when "menustate == -1" "splash_update()")
+        (+= step "1")
+        (call poke "0x5f30,1"))
       (body-lines
         "function _update60()"
         "\t--step = stat(26) + (stat(24)*  509)"
@@ -116,6 +134,23 @@
         (if-cond "(fading == 3")
         (if-cond "(fade > 0")
         (if-cond "fade == 0.5 and menustate == 0 and fading == 2"))
+      (decompiled-pseudo-code
+        (call cls "")
+        (call palt "0,false")
+        (call palt "9,true")
+        (call rectfill "0,0,128,128,0")
+        (call color "6")
+        (when "menustate == -1" "splash_draw()")
+        (when "menustate == 0 or menustate == 1" "menu_draw()")
+        (when "fading > -1")
+        (when "fading == 0" "fade0(ceil(fade))")
+        (when "fading == 1" "fade1(ceil(fade))")
+        (when "fading == 2" "fade0(15-ceil(fade))")
+        (when "fading == 3" "fade1(15-ceil(fade))")
+        (when "fade > 0" "fade -= 0.5")
+        (when "fade == 0.5 and menustate == 0 and fading == 2")
+        (call dset "59,max(0,stat(24)-2)")
+        (call load "\"#fnf_select\""))
       (body-lines
         "function _draw()"
         "\tcls()"
@@ -146,6 +181,12 @@
       (called-functions ())
       (structured-ast
         (seq-block 7))
+      (decompiled-pseudo-code
+        (set! menustate "0")
+        (set! state "0")
+        (set! nextstate "-1")
+        (set! starting "-1")
+        (set! loading "false"))
       (body-lines
         "function menu_init()"
         "\tmenustate = 0"
@@ -163,6 +204,13 @@
       (structured-ast
         (if-cond "nextstate > 0")
         (if-cond "nextstate == 0"))
+      (decompiled-pseudo-code
+        (when "nextstate > 0")
+        (-= nextstate "1")
+        (when "nextstate == 0")
+        (set! fading "2")
+        (set! fade "15")
+        (set! nextstate "0"))
       (body-lines
         "function menu_update()"
         "\tif nextstate > 0 then"
@@ -181,6 +229,11 @@
       (structured-ast
         (if-cond "menustate == 0")
         (for-loop "i=0,15"))
+      (decompiled-pseudo-code
+        (when "menustate == 0")
+        (call rectfill "0,0,128,128,0")
+        (for-range i "0" "15")
+        (call pal "i,12"))
       (body-lines
         "function menu_draw()"
         "\tif menustate == 0 then"
@@ -197,6 +250,10 @@
       (called-functions (get_splash_text))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! splashstate "0")
+        (set! splashtext "get_splash_text()")
+        (set! ispresident "flr(rnd(100)) == 0"))
       (body-lines
         "function splash_init()"
         "\tsplashstate = 0"
@@ -211,6 +268,13 @@
       (called-functions (menu_init))
       (structured-ast
         (if-cond "btnp("))
+      (decompiled-pseudo-code
+        (when "btnp() == 64")
+        (set! splashstate "0")
+        (call menu_init "")
+        (set! fading "1")
+        (set! fade "15")
+        (call poke "0x5f30,1"))
       (body-lines
         "function splash_update()"
         "\tif btnp() == 64 then"
@@ -230,6 +294,17 @@
         (if-cond "splashstate == 0 or splashstate == 1")
         (if-cond "splashstate == 1")
         (if-cond "(ispresident"))
+      (decompiled-pseudo-code
+        (set! _tx "\"\"")
+        (when "splashstate == 0 or splashstate == 1")
+        (set! _tx "\"cARSON kOMPON\"")
+        (call print "_tx,64-#_tx*2,54")
+        (set! _tx "\"& cHRIS wEST\"")
+        (call print "_tx,64-#_tx*2,60")
+        (when "splashstate == 1")
+        (set! _tx "\"present\"")
+        (when "ispresident" "_tx = \"& tHE pRESIDENT\"")
+        (call print "_tx,64-#_tx*2,66"))
       (body-lines
         "function splash_draw()"
         "\t--print(splashtext[1],63,63)"
@@ -252,6 +327,10 @@
       (called-functions ())
       (structured-ast
         (return-expr "split(_splash[flr(rnd(#_splash))+1],\":\")"))
+      (decompiled-pseudo-code
+        (set! _splashs "\"SHOUTOUTS TO TOM FULP:LMAO|DA BABY:BIGGEST INSPIRATION|THIS GAME IS DEDICATED TO RINGO:MY FAVORITE BEATLE|THAT'S A HEALTHY LOOKING PENIS:THAT'S AN AMERICAN PENIS|pico-8 EXCLUSIVE:SPLASH TEST|REFINED TASTE IN MUSIC:IF I SAY SO MYSELF|SWAGSHIT:MONEYMONEY|RHYTHM GAMING:DEMADE|RITZ DX:REST IN PEACE LOL|nEWGROUNDS IS DOWN!:pLEASE sTAND bY ♥ |BACK THE FULL ASS GAME:NOW|NEWGROUNDS:FOREVER|RATE FIVE:PLS NO BLAM|GAME OF THE YEAR:FOREVER|STREAM CHUCKIE FINSTER:ON SPOTIFY|NEVER FORGET TO:PRAY TO GOD|LIKE PARAPPA:BUT COOLER|HATSUNE MIKU:BIGGEST INSPIRATION|WOMEN ARE REAL:THIS IS OFFICIAL|DANCIN:FOREVER|DOPE ASS GAME:PLAYSTATION MAGAZINE|GO MANGO:GO MANGO|DONT PLAY RUST:WE ONLY FUNKIN'|GOODBYE:MY PENIS|HOW I ACCIDENTALLY:MADE FNF IN pico-8|YOOOOOOOOO:yooooooooo|YOU ALREADY KNOW:WE REALLY OUT HERE| :WE HAVE FUN HERE|CLOUD BASHERS:BEST RHYTHM GAME|SUPER PICKLE MILK:ITS THE SAME THING|TURNIP BOY:COMMITS FUNK EVASION|THE LAST FUNK:PIPIN' HOT|PERFECT LAWN:ONE BROWN SPOT|wEEK 7:YES ITS HERE|YOURE SO SUSSY:I KNOW YOU TOOK MY FORTNITE CARD|$19 FORTNITE CARD:WHO WANTS IT?|DARNELL FOR PRESIDENT!:HE STILL HAS 5 YEARS TO LIVE|THAT'LL BE 15 DOLLARS:YOU ARE THE PRESIDENT| :NAME A WOMAN|FUCKIN' STEAK BABY:YEAH|NINJAMUFFIN'S BEEN REAL QUIET:SINCE WEEK 7 DROPPED|DOWNSCROLL:NEVER HEARD OF IT|WE ACTUALLY FUCKING:UPDATED IT|YES...:WE ADDED WEEK 2|CHECK OUT THE MODS:ON LEXALOFFLE|THE MODDING SCENE:IS INSANE|I ADDED MORE:SPLASH TEXT|NOW WITH:WEEK 2|HORSE:OOH AH OOH AH|WEEK 8:NEVER HAPPENING LMAO|JINGLE:BALLS| :PROBLEM NOOB?|WE UPDATED IT:TWICE|WE NEED:MORE SPLASH TEXT|WE MADE WEEK 5:IN A DAY|GO PICO GO GO:GO PICO, YEAH|YOU CAN USE dfjk NOW:CRY ABOUT IT|dfjk IS REAL:THIS IS OFFICIAL|KEYBINDS?:WHAT?|FUNKY-US MCPUNK:HE'S FUNKING OUT HIS PUNK|WE HAVE ALL THE WEEKS NOW:YES, ACTUALLY|DID YOU KNOW JOE SWANSON SAYS:FORTNITE IN FAMILY GUY LOL\"")
+        (set! _splash "split(_splashs,\"|\")")
+        (return "split(_splash[flr(rnd(#_splash))+1],\":\")"))
       (body-lines
         "function get_splash_text()"
         "\tlocal _splashs = \"SHOUTOUTS TO TOM FULP:LMAO|DA BABY:BIGGEST INSPIRATION|THIS GAME IS DEDICATED TO RINGO:MY FAVORITE BEATLE|THAT'S A HEALTHY LOOKING PENIS:THAT'S AN AMERICAN PENIS|pico-8 EXCLUSIVE:SPLASH TEST|REFINED TASTE IN MUSIC:IF I SAY SO MYSELF|SWAGSHIT:MONEYMONEY|RHYTHM GAMING:DEMADE|RITZ DX:REST IN PEACE LOL|nEWGROUNDS IS DOWN!:pLEASE sTAND bY ♥ |BACK THE FULL ASS GAME:NOW|NEWGROUNDS:FOREVER|RATE FIVE:PLS NO BLAM|GAME OF THE YEAR:FOREVER|STREAM CHUCKIE FINSTER:ON SPOTIFY|NEVER FORGET TO:PRAY TO GOD|LIKE PARAPPA:BUT COOLER|HATSUNE MIKU:BIGGEST INSPIRATION|WOMEN ARE REAL:THIS IS OFFICIAL|DANCIN:FOREVER|DOPE ASS GAME:PLAYSTATION MAGAZINE|GO MANGO:GO MANGO|DONT PLAY RUST:WE ONLY FUNKIN'|GOODBYE:MY PENIS|HOW I ACCIDENTALLY:MADE FNF IN pico-8|YOOOOOOOOO:yooooooooo|YOU ALREADY KNOW:WE REALLY OUT HERE| :WE HAVE FUN HERE|CLOUD BASHERS:BEST RHYTHM GAME|SUPER PICKLE MILK:ITS THE SAME THING|TURNIP BOY:COMMITS FUNK EVASION|THE LAST FUNK:PIPIN' HOT|PERFECT LAWN:ONE BROWN SPOT|wEEK 7:YES ITS HERE|YOURE SO SUSSY:I KNOW YOU TOOK MY FORTNITE CARD|$19 FORTNITE CARD:WHO WANTS IT?|DARNELL FOR PRESIDENT!:HE STILL HAS 5 YEARS TO LIVE|THAT'LL BE 15 DOLLARS:YOU ARE THE PRESIDENT| :NAME A WOMAN|FUCKIN' STEAK BABY:YEAH|NINJAMUFFIN'S BEEN REAL QUIET:SINCE WEEK 7 DROPPED|DOWNSCROLL:NEVER HEARD OF IT|WE ACTUALLY FUCKING:UPDATED IT|YES...:WE ADDED WEEK 2|CHECK OUT THE MODS:ON LEXALOFFLE|THE MODDING SCENE:IS INSANE|I ADDED MORE:SPLASH TEXT|NOW WITH:WEEK 2|HORSE:OOH AH OOH AH|WEEK 8:NEVER HAPPENING LMAO|JINGLE:BALLS| :PROBLEM NOOB?|WE UPDATED IT:TWICE|WE NEED:MORE SPLASH TEXT|WE MADE WEEK 5:IN A DAY|GO PICO GO GO:GO PICO, YEAH|YOU CAN USE dfjk NOW:CRY ABOUT IT|dfjk IS REAL:THIS IS OFFICIAL|KEYBINDS?:WHAT?|FUNKY-US MCPUNK:HE'S FUNKING OUT HIS PUNK|WE HAVE ALL THE WEEKS NOW:YES, ACTUALLY|DID YOU KNOW JOE SWANSON SAYS:FORTNITE IN FAMILY GUY LOL\""
@@ -267,6 +346,11 @@
       (structured-ast
         (for-loop "c=0,15")
         (if-cond "flr(i+1"))
+      (decompiled-pseudo-code
+        (for-range c "0" "15")
+        (when "flr(i+1)>=16")
+        (call pal "c,0,1")
+        (call pal "c,fadetable0[c+1][flr(i+1)],1"))
       (body-lines
         "function fade0(i)"
         "for c=0,15 do"
@@ -284,6 +368,11 @@
       (structured-ast
         (for-loop "c=0,15")
         (if-cond "flr(i+1"))
+      (decompiled-pseudo-code
+        (for-range c "0" "15")
+        (when "flr(i+1)>=16")
+        (call pal "c,7,1")
+        (call pal "c,fadetable1[c+1][flr(i+1)],1"))
       (body-lines
         "function fade1(i)"
         " for c=0,15 do"
@@ -300,6 +389,14 @@
       (called-functions ())
       (structured-ast
         (if-cond "flr(step/(inc*4"))
+      (decompiled-pseudo-code
+        (when "flr(step/(inc*4))%2==0")
+        (call sspr "2,95,13,15,_x+30,_y+31")
+        (call sspr "2,95,13,15,_x-12,_y+31,12,15,true")
+        (call sspr "0,0,30,46,_x,_y")
+        (call sspr "15,95,12,15,_x+30,_y+31")
+        (call sspr "15,95,12,15,_x-12+1,_y+31,11,15,true")
+        (call sspr "0,46,30,47,_x,_y-1"))
       (body-lines
         "function draw_girlfriend(_x,_y)"
         "\tif flr(step/(inc*4))%2==0 then"
@@ -319,6 +416,13 @@
       (called-functions ())
       (structured-ast
         (if-cond "_id == 0"))
+      (decompiled-pseudo-code
+        (when "_id == 0")
+        (call sspr "58,0,70,42,_x-35,_y")
+        (when "_id == 1")
+        (call sspr "57,43,71,42,_x-35,_y")
+        (when "_id == 2")
+        (call sspr "58,86,70,43,_x-35,_y"))
       (body-lines
         "function draw_logo(_id,_x,_y)"
         "\tif _id == 0 then"

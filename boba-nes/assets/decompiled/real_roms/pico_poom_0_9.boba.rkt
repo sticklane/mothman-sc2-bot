@@ -65,6 +65,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "_btnp(b,0) or _btnp(b,1)"))
+      (decompiled-pseudo-code
+        (return "_btnp(b,0) or _btnp(b,1)"))
       (body-lines
         "function btnp(b)"
         "return _btnp(b,0) or _btnp(b,1)"
@@ -78,6 +80,15 @@
       (structured-ast
         (for-loop "i=0,#src-1")
         (if-cond "(addr>0x4e00+64*offset-1"))
+      (decompiled-pseudo-code
+        (set! offset "src.h-128")
+        (set! addr "offset>0 and 0x4e00 or 0x0")
+        (set! offset "max(offset)")
+        (set! src "src.bytes")
+        (for-range i "0" "#src-1")
+        (call poke "addr,ord(src,i+1)")
+        (+= addr "1")
+        (when "addr>0x4e00+64*offset-1" "addr=0x0"))
       (body-lines
         "function unpack_gfx(src)"
         "local offset=src.h-128"
@@ -97,6 +108,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! offset "src.h-128")
+        (call memcpy "0x6000,0x4e00,64*offset")
+        (call spr "0,0,offset,16,16"))
       (body-lines
         "function draw_gfx(src)"
         "local offset=src.h-128"
@@ -111,6 +126,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 2))
+      (decompiled-pseudo-code
+        (set! |u,d,i| "fn(...)"))
       (body-lines
         "function next_state(fn,...)"
         "local u,d,i=fn(...)"))
@@ -123,6 +140,12 @@
       (structured-ast
         (if-cond "(i")
         (if-cond "(peek(0x5f81"))
+      (decompiled-pseudo-code
+        (set! _update "function()")
+        (when "i" "i()")
+        (set! _draw "d")
+        (call u "")
+        (call if "peek(0x5f81)==1) poke(0x5f81,0) extcmd(\"video\""))
       (body-lines
         "_update=function()"
         "if(i) i()"
@@ -139,6 +162,13 @@
       (structured-ast
         (return-expr "")
         (if-cond "ttl<0 or btnp(4"))
+      (decompiled-pseudo-code
+        (set! ttl "300")
+        (call dset "0,-1")
+        (call dset "17,0")
+        (return "")
+        (when "ttl<0 or btnp(4) or btnp(5)")
+        (call next_state "menu_state"))
       (body-lines
         "function start_state()"
         "local ttl=300"
@@ -157,6 +187,16 @@
       (called-functions ())
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (set! |mouse_ttl,mouse_x,mouse_y| "0,0,0")
+        (set! |anm_ttl,menus| "0")
+        (set! |mouse_acc,keyboard_mode| "mid(dget(39)\\4,1,8),mid(dget(34),0,1)")
+        (set! menus "{")
+        (set! select "{")
+        (set! title "\"sELECT\",")
+        (set! entries "{\"nEW gAME\",\"cONTROLS\"},")
+        (set! sel "1,")
+        (set! max "2,"))
       (body-lines
         "function menu_state()"
         "local mouse_ttl,mouse_x,mouse_y=0,0,0"
@@ -178,6 +218,10 @@
         (if-cond "(sel==1")
         (return-expr "menus.skills")
         (return-expr "menus.controls"))
+      (decompiled-pseudo-code
+        (set! next "function(menus,sel)")
+        (when "sel==1" "return menus.skills")
+        (return "menus.controls"))
       (body-lines
         "next=function(menus,sel)"
         "if(sel==1) return menus.skills"
@@ -193,6 +237,16 @@
         (if-cond "sel==1 and mouse_ttl==0")
         (if-cond "(keyboard_mode>1")
         (if-cond "(mouse_acc>8"))
+      (decompiled-pseudo-code
+        (set! next "function(menus,sel)")
+        (when "sel==1 and mouse_ttl==0")
+        (+= keyboard_mode "1")
+        (when "keyboard_mode>1" "keyboard_mode=0")
+        (call switch_scheme "keyboard_mode")
+        (when "sel==2")
+        (+= mouse_acc "1")
+        (when "mouse_acc>8" "mouse_acc=1")
+        (call dset "39,mouse_acc*4"))
       (body-lines
         "next=function(menus,sel)"
         "if sel==1 and mouse_ttl==0 then"
@@ -213,6 +267,15 @@
       (structured-ast
         (return-expr "")
         (if-cond "stat(38"))
+      (decompiled-pseudo-code
+        (set! next "function(menus)")
+        (call next_state "launch_state,menus.skills.sel,1")
+        (set! active_menu "menus.select")
+        (return "")
+        (when "stat(38)!=0")
+        (set! mouse_ttl "30")
+        (set! mouse_x "mid(mouse_x+stat(38)/mouse_acc,0,126)")
+        (set! mouse_y "mid(mouse_y+stat(39)/mouse_acc,0,126)"))
       (body-lines
         "next=function(menus)"
         "next_state(launch_state,menus.skills.sel,1)"
@@ -235,6 +298,12 @@
       (structured-ast
         (return-expr "")
         (if-cond "fade_ttl<0"))
+      (decompiled-pseudo-code
+        (set! |args,fade_ttl| "{...},32")
+        (return "")
+        (-= fade_ttl "1")
+        (when "fade_ttl<0")
+        (call next_state "unpack(args)"))
       (body-lines
         "function fadetoblack_state(...)"
         "local args,fade_ttl={...},32"
@@ -253,6 +322,14 @@
       (structured-ast
         (return-expr "")
         (if-cond "ttl>600 or btnp(4"))
+      (decompiled-pseudo-code
+        (set! |ttl,msg_ttl,max_msg| "0,0,2")
+        (set! punch_perfect "kills==monsters and ammoused==0")
+        (set! secret_perfect "all_secrets>0 and secrets==all_secrets")
+        (set! msgs "{")
+        (return "")
+        (when "ttl>600 or btnp(4) or btnp(5)")
+        (call next_state "credits_state"))
       (body-lines
         "function stats_state(skill,id,level_time,kills,monsters,secrets,all_secrets,ammoused)"
         "local ttl,msg_ttl,max_msg=0,0,2"
@@ -282,6 +359,12 @@
         (return-expr "")
         (if-cond "launch_ttl==0")
         (for-loop "i=0,3"))
+      (decompiled-pseudo-code
+        (call if "id>dget(32)) dset(32,id")
+        (return "")
+        (when "launch_ttl==0")
+        (for-range i "0" "3")
+        (call sfx "-1,i"))
       (body-lines
         "function launch_state(skill,id)"
         "if(id>dget(32)) dset(32,id)"
@@ -300,6 +383,11 @@
       (structured-ast
         (return-expr "")
         (if-cond "ttl>3000 or btnp(4"))
+      (decompiled-pseudo-code
+        (set! |ttl,t,creditsi| "0,{},0")
+        (return "")
+        (when "ttl>3000 or btnp(4) or btnp(5)")
+        (call next_state "start_state"))
       (body-lines
         "function credits_state()"
         "local ttl,t,creditsi=0,{},0"
@@ -316,6 +404,11 @@
       (called-functions (lerp))
       (structured-ast
         (for-loop "i=0,127"))
+      (decompiled-pseudo-code
+        (set! |args,ttl,r,h,rr| "pack(...),30,{},{},0")
+        (for-range i "0" "127")
+        (set! rr "lerp(rr,rnd(0.2),0.1)")
+        (set! |r[i],h[i]| "0.05+rr,0"))
       (body-lines
         "function slicefade_state(...)"
         "local args,ttl,r,h,rr=pack(...),30,{},{},0"
@@ -331,6 +424,14 @@
       (called-functions ())
       (structured-ast
         (seq-block 9))
+      (decompiled-pseudo-code
+        (set! s "schemes[scheme+1]")
+        (call dset "34,scheme")
+        (call dset "35,s.btnfire")
+        (call dset "36,s.btnuse")
+        (call dset "37,s.btndown")
+        (call dset "38,s.btnup")
+        (call poke "0x5f80,s.space"))
       (body-lines
         "function switch_scheme(scheme)"
         "local s=schemes[scheme+1]"
@@ -350,6 +451,15 @@
       (structured-ast
         (if-cond "(dget(39")
         (for-loop "i=0,#snd\\4-1"))
+      (decompiled-pseudo-code
+        (call poke "0x5f36,0x10")
+        (call poke "0x5f2d, 7")
+        (call cartdata "mod_name")
+        (call if "dget(39)==0) dset(39,8")
+        (call switch_scheme "dget(34)")
+        (set! addr "0x3200")
+        (for-range i "0" "#snd\\4-1")
+        (call poke2 "addr+i*2,tonum(\"0x\"..sub(snd,i*4+1,i*4+4))"))
       (body-lines
         "function _init()"
         "poke(0x5f36,0x10)"
@@ -369,6 +479,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! bgc "bgc or 0")
+        (call print "s,x,y+1,bgc")
+        (call print "s,x,y,c"))
       (body-lines
         "function printb(s,x,y,c,bgc)"
         "bgc=bgc or 0"
@@ -383,6 +497,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "sub(\"00\",1,2-#n)..n"))
+      (decompiled-pseudo-code
+        (set! n "tostr(min(n,99)\\1)")
+        (return "sub(\"00\",1,2-#n)..n"))
       (body-lines
         "function padding(n)"
         "n=tostr(min(n,99)\\1)"
@@ -396,6 +513,11 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,#s"))
+      (decompiled-pseudo-code
+        (set! q "\"\"")
+        (for-range i "1" "#s")
+        (set! c "sub(s,i,i)")
+        (set! q "q..(c==\" \" and c or \"?\")"))
       (body-lines
         "function masked(s)"
         "local q=\"\""
@@ -411,6 +533,8 @@
       (called-functions (padding))
       (structured-ast
         (return-expr "padding((t\\60)%60)..\"'\"..padding(t%60)..\"''\"..padding((t&0x0.fff"))
+      (decompiled-pseudo-code
+        (return "padding((t\\60)%60)..\"'\"..padding(t%60)..\"''\"..padding((t&0x0.ffff)*100)"))
       (body-lines
         "function time_tostr(t)"
         "return padding((t\\60)%60)..\"'\"..padding(t%60)..\"''\"..padding((t&0x0.ffff)*100)"
@@ -423,6 +547,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "a+t*(b-a)"))
+      (decompiled-pseudo-code
+        (return "a+t*(b-a)"))
       (body-lines
         "function lerp(a,b,t)"
         "return a+t*(b-a)"
@@ -435,6 +561,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "sget(112+c,128-12)"))
+      (decompiled-pseudo-code
+        (return "sget(112+c,128-12)"))
       (body-lines
         "function vcol(c)"
         "return sget(112+c,128-12)"

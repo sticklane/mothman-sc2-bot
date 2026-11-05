@@ -66,6 +66,31 @@
       (called-functions (begin_game gen_train init_enemies init_menus init_player init_ptc initguns parcourmap update_room))
       (structured-ast
         (seq-block 71))
+      (decompiled-pseudo-code
+        (set! keyboard "false")
+        (call initguns "")
+        (set! |enemies,checker| "{},{}")
+        (set! |mx,my| "0,0")
+        (set! |solid,breakable,spawnable,lootable,notbulletsolid| "0,1,2,3,4")
+        (set! |shake,camy,camx,targetcamx| "0,0,0,0")
+        (set! cam_follow_player "true")
+        (set! trainpal "split\"8,2,11,3,7,13,12,13,10,9,0,2,8,2\"")
+        (set! |pal_n,menu| "1,\"main\"")
+        (set! actors "{}")
+        (call init_enemies "")
+        (call init_player "111")
+        (call init_ptc "")
+        (set! |wl,diffi| "4,20")
+        (set! |wagon_n,trainlen| "0,6")
+        (set! tl "trainlen")
+        (call gen_train "")
+        (call update_room "")
+        (set! |random,enemies| "{},{}")
+        (call parcourmap "")
+        (set! drops "{}")
+        (call init_menus "")
+        (set! |birdchoice,hardmodetimer| "0,0")
+        (set! |ofsetboss,bullets_shooted,bullets_hit| "0,1,1"))
       (body-lines
         "function _init()"
         "\tkeyboard = false"
@@ -107,6 +132,10 @@
       (called-functions (mouse_x_y))
       (structured-ast
         (for-loop "i=0x3100,0x3148"))
+      (decompiled-pseudo-code
+        (call mouse_x_y "")
+        (for-range i "0x3100" "0x3148")
+        (call poke "i,peek(i)&0b10111111"))
       (body-lines
         "function _update60()"
         "\tmouse_x_y()"
@@ -124,6 +153,16 @@
         (if-cond "(keyboard == true")
         (if-cond "wagon_n==0 and menu==\"game\"")
         (if-cond "(keyboard"))
+      (decompiled-pseudo-code
+        (set! ox "rrnd(shake)")
+        (set! oy "rrnd(shake)")
+        (call camera "camx+ox, camy+oy")
+        (call cls "15")
+        (call drawgrass "")
+        (call draw_map "")
+        (when "wagon_n==0 and menu==\"game\"")
+        (set! s "[[")
+        (call print "s,33,42,2"))
       (body-lines
         "function _draw()"
         "\tlocal ox = rrnd(shake)"
@@ -165,6 +204,13 @@
       (called-functions ())
       (structured-ast
         (if-cond "(t%60 < 10"))
+      (decompiled-pseudo-code
+        (set! stats.time "flr(")
+        (set! t "stats.time")
+        (set! s "\"\"")
+        (when "t%60 < 10" "s=\"0\"")
+        (set! stats.time "tostr(t\\60)..\":\"..s..tostr(t%60)")
+        (set! stats.wagon "tostr(wagon_n+1)..\"/7\""))
       (body-lines
         "function set_stats()"
         "\tstats.time=flr("
@@ -184,6 +230,12 @@
       (called-functions ())
       (structured-ast
         (if-cond "b == 0"))
+      (decompiled-pseudo-code
+        (call sfx "37")
+        (call music "")
+        (set! b "birdchoice or 0")
+        (when "b == 0")
+        (set! b "flr(rnd(12))+1"))
       (body-lines
         "function begin_game()"
         "\tsfx(37)"
@@ -201,6 +253,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "a<.75 and .25<a"))
+      (decompiled-pseudo-code
+        (return "a<.75 and .25<a"))
       (body-lines
         "function isleft(a)"
         "\treturn a<.75 and .25<a"
@@ -213,6 +267,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=0,15"))
+      (decompiled-pseudo-code
+        (for-range i "0" "15")
+        (call pal "i,col"))
       (body-lines
         "function ospr(s,x,y,col)"
         "\tfor i=0,15 do"
@@ -226,6 +283,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! ocol "ocol or 1")
+        (set! |for i| "-1,1do")
+        (set! |for j| "-1,1do")
+        (call print "t,x+i,y+j,ocol"))
       (body-lines
         "function oprint(t,x,y,col,ocol)"
         "\tlocal ocol = ocol or 1"
@@ -241,6 +303,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "k,v in pairs(t)"))
+      (decompiled-pseudo-code
+        (set! n "{}")
+        (set! |n[k]| "v"))
       (body-lines
         "function copy(t)"
         "\tlocal n={}"
@@ -256,6 +321,15 @@
       (structured-ast
         (if-cond "px > 128*(wl-1")
         (if-cond "wagon_n != tl-1"))
+      (decompiled-pseudo-code
+        (set! px "p.x")
+        (set! wl "wl")
+        (set! maxlen "240")
+        (call poke "0x5f43,0")
+        (when "px > 128*(wl-1)+8")
+        (set! cam_follow_player "false")
+        (set! targetcamx "128*(wl-1)")
+        (when "wagon_n != tl-1"))
       (body-lines
         "function update_camera()"
         "\tlocal px = p.x"
@@ -282,6 +356,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "camx<0"))
+      (decompiled-pseudo-code
+        (when "camx<0")
+        (call map "0,16, -128,0, 16,16"))
       (body-lines
         "function draw_ghost_connector()"
         "\tif camx<0 then"
@@ -295,6 +372,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "rnd(2*n)-n"))
+      (decompiled-pseudo-code
+        (return "rnd(2*n)-n"))
       (body-lines
         "function rrnd(n)"
         "\t--\"radius rnd\""
@@ -308,6 +387,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "btn(b) or btn(b,1)"))
+      (decompiled-pseudo-code
+        (return "btn(b) or btn(b,1)"))
       (body-lines
         "function allbtn(b)"
         "\treturn btn(b) or btn(b,1)"
@@ -320,6 +401,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 7))
+      (decompiled-pseudo-code
+        (set! p "players[1]")
+        (set! |p.gunls[1]| "debuggun")
+        (set! wagon_n "tl-1")
+        (set! i.destory "true"))
       (body-lines
         "function debug_()"
         "\tlocal p =players[1]"
@@ -336,6 +422,31 @@
       (called-functions (copy))
       (structured-ast
         (for-loop "i=1,#bird_stats,13"))
+      (decompiled-pseudo-code
+        (set! b "0")
+        (set! dx1 "1")
+        (set! dy1 "0")
+        (set! p "{")
+        (set! n "1,")
+        (set! agro "9999,")
+        (set! x "-64,y=-64,")
+        (set! dx "0,dy=0,")
+        (set! a "0,")
+        (set! spd ".4,")
+        (set! fric "0.75,")
+        (set! bx "2,by=2,")
+        (set! bw "4,bh=4,")
+        (set! hx "2,hy=2,")
+        (set! hw "4,")
+        (set! life "10,")
+        (set! maxlife "10,")
+        (set! ammo "250,")
+        (set! maxammo "250,")
+        (set! spr "bird,")
+        (set! gun "nil,")
+        (set! gunn "1,")
+        (set! gunls "{},")
+        (set! lmbp "true,"))
       (body-lines
         "function init_player(bird)"
         "\tb=0"
@@ -381,6 +492,15 @@
         (if-cond "(allbtn(⬆️")
         (if-cond "(allbtn(⬇️")
         (if-cond "(abs(dx1"))
+      (decompiled-pseudo-code
+        (set! p.iframes "max(0,p.iframes-1)")
+        (set! |dx,dy| "p.dx,p.dy")
+        (set! spd "p.spd")
+        (*= p.dx "p.fric")
+        (*= p.dy "p.fric")
+        (when "(abs(dx1)+abs(dy1))>0.1")
+        (*= dx1 "p.fric")
+        (*= dy1 "p.fric"))
       (body-lines
         "function player_update()"
         "\t --damage"
@@ -412,6 +532,12 @@
       (structured-ast
         (if-cond "(p.iframes%5")
         (if-cond "p.gun.name==\"sniper\""))
+      (decompiled-pseudo-code
+        (when "(p.iframes%5) == 0")
+        (set! x "flr(p.x) + cos(p.a)*6 +0")
+        (set! y "flr(p.y) + sin(p.a)*3 +0")
+        (when "p.gun.name==\"sniper\"")
+        (set! |c,s| "cos(p.a),sin(p.a)"))
       (body-lines
         "function draw_player()"
         "\tif (p.iframes%5) == 0  then"
@@ -437,6 +563,21 @@
         (if-cond "(s==\"0\"")
         (for-loop "i=1,2")
         (if-cond "(i==p.gunn"))
+      (decompiled-pseudo-code
+        (call rectfill "camx+1,1,camx+43,7,2")
+        (set! l "40*(p.life/p.maxlife)")
+        (call rectfill "camx+2,2,camx+2+l,6,8")
+        (set! s "\"♥\"..p.life..\"/\"..p.maxlife..\" \"")
+        (call print "s, camx+2,2,7")
+        (call rectfill "camx+84,1,camx+84+42,7,4")
+        (set! l "40*(p.gun.ammo/p.gun.maxammo)")
+        (call if "p.ammo>0)rectfill(camx+85,2,camx+85+l,6,9")
+        (set! |s,col| "tostr(p.gun.ammo),7")
+        (when "s==\"0\"" "s,col=\"no ammo!\",14")
+        (call spr "110,camx+89,2")
+        (call print "s, camx+95,2,col")
+        (for-range i "1" "2")
+        (set! col "1"))
       (body-lines
         "function draw_player_ui(p)"
         "\t--life counter"
@@ -477,6 +618,14 @@
         (if-cond "p.gunls[i] == p.gunn")
         (if-cond "(((i+stat(36")
         (return-expr "p.gunls[(i+stat(36))%(#p.gunls)+f]"))
+      (decompiled-pseudo-code
+        (call sfx "36")
+        (+= p.gunn "1")
+        (when "p.gunn > #p.gunls" "p.gunn = 1")
+        (call update_gun "p")
+        (for-range i "1" "#p.gunls")
+        (when "p.gunls[i] == p.gunn")
+        (return "p.gunls[(i+stat(36))%(#p.gunls)+f]"))
       (body-lines
         "function nextgun(p)"
         "\tsfx(36)"
@@ -498,6 +647,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! p.gun "p.gunls[p.gunn]"))
       (body-lines
         "function update_gun(p)"
         "\tp.gun = p.gunls[p.gunn]"
@@ -510,6 +661,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "abs(p.dx"))
+      (decompiled-pseudo-code
+        (when "abs(p.dx)+abs(p.dy) < 3")
+        (+= p.dx "e.dx*e.spd*2")
+        (+= p.dy "e.dy*e.spd*2"))
       (body-lines
         "function knockback_player(p,e)"
         "\tif abs(p.dx)+abs(p.dy) < 3 then"
@@ -524,6 +679,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "(abs(e.dx"))
+      (decompiled-pseudo-code
+        (when "(abs(e.dx)+abs(e.dy<30))")
+        (+= e.dx "b.dx*b.spd*.1")
+        (+= e.dy "b.dy*b.spd*.1"))
       (body-lines
         "function knockback_enemy(e,b)"
         "\t"
@@ -539,6 +698,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "flr(time("))
+      (decompiled-pseudo-code
+        (when "flr(time()*7)%2==1")
+        (set! p.spriteoffset "1")
+        (set! p.spriteoffset "0"))
       (body-lines
         "function animplayer(p)"
         "\tif flr(time()*7)%2==1 then"
@@ -554,6 +717,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! x "flr(p.x) + cos(p.a)*6 +0")
+        (set! y "flr(p.y) + sin(p.a)*3 +0")
+        (call p.kak:fire "x+4,y+4,p.a"))
       (body-lines
         "function coupdekak(p)"
         "\tlocal x=flr(p.x) + cos(p.a)*6 +0"
@@ -569,6 +736,30 @@
       (called-functions ())
       (structured-ast
         (if-cond "(is_enemy"))
+      (decompiled-pseudo-code
+        (set! |name_,sprr,cd_,spd,oa,dmg,is_enemy,auto,maxammo,sfxx,knockback| "unpack(split(args))")
+        (set! is_enemy "is_enemy == 1")
+        (set! auto "auto  == 1")
+        (when "is_enemy" "dmg += degaplus * 2")
+        (set! gun "{")
+        (set! name "name_,")
+        (set! spr "sprr,")
+        (set! spd "spd,")
+        (set! oa "oa,")
+        (set! dmg "dmg,")
+        (set! shake "shake,")
+        (set! auto "auto,")
+        (set! ammo "maxammo,")
+        (set! maxammo "maxammo,")
+        (set! timer "0,")
+        (set! cooldown "cd_,")
+        (set! is_enemy "is_enemy,")
+        (set! x "0,y=0,")
+        (set! dir "0,")
+        (set! burst "0,")
+        (set! sfx "sfxx,")
+        (set! knockback "knockback,")
+        (set! gun.fire "fire"))
       (body-lines
         "function make_gun(args,fire)"
         "\tlocal name_,sprr,cd_,spd,oa,dmg,is_enemy,auto,maxammo,sfxx,knockback=unpack(split(args))"
@@ -619,6 +810,16 @@
         (if-cond "(name==\"bazooka\"")
         (if-cond "not gun.is_enemy")
         (if-cond "(shake<1 and name!=\"flamethrower\""))
+      (decompiled-pseudo-code
+        (set! gun.shoot "function(gun,x,y,dir,spd,knockback)")
+        (call if "gun.burst<=0)dir+=rrnd(gun.oa")
+        (when "gun.sfx" "sfx(gun.sfx)")
+        (set! s "93")
+        (set! name "gun.name")
+        (set! palette "\"\"")
+        (when "name==\"flamethrower\"" "lifspa=40 palette=\"1,2,3,4,5,6,10,8,8,9\"")
+        (when "name==\"bazooka\"" "palette=\"1,2,3,4,5,6,6,8,5,13\"")
+        (when "not gun.is_enemy"))
       (body-lines
         "\tgun.shoot=function(gun,x,y,dir,spd,knockback)"
         "\t\t--remove? it complicates code"
@@ -647,6 +848,13 @@
       (called-functions (shoot))
       (structured-ast
         (if-cond "gun.burst > 0"))
+      (decompiled-pseudo-code
+        (set! gun.update "function(gun)")
+        (set! gun.timer "max(gun.timer-1,0)")
+        (set! gun.ammo "mid(0,gun.ammo,gun.maxammo)")
+        (when "gun.burst > 0")
+        (call gun:shoot "gun.x,gun.y,gun.dir")
+        (-= gun.burst "1"))
       (body-lines
         "\tgun.update=function(gun)"
         "\t\tgun.timer = max(gun.timer-1,0)"
@@ -664,6 +872,8 @@
       (called-functions (shoot))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call gun:shoot "x,y,dir"))
       (body-lines
         "function shoot1(gun,x,y,dir)"
         "\tgun:shoot(x,y,dir)"
@@ -676,6 +886,13 @@
       (called-functions (make_gun shoot))
       (structured-ast
         (for-loop "i=1,7"))
+      (decompiled-pseudo-code
+        (set! guns "{")
+        (set! revolver "make_gun(\"revolver, 64, 15,2.5,.02,3 ,0,       0,   100,    33, 0.3\",")
+        (set! fireworklauncher "make_gun(\"firework launcher, 74, 25,2.5,.02,0.1 ,0,       0,   80,    52, 0.6\",")
+        (set! boxing_glove "make_gun(\"boxing glove, 72, 18,3.3,.005,1 , 0, 0, 1,      53, -0.96\",")
+        (for-range i "1" "7")
+        (call gun:shoot "x,y,dir"))
       (body-lines
         "function initguns()"
         "guns = {"
@@ -703,6 +920,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "rnd(iguns)"))
+      (decompiled-pseudo-code
+        (return "rnd(iguns)"))
       (body-lines
         "function rnd_gun()"
         "\t--todo: \"power\" param"
@@ -718,6 +937,22 @@
       (called-functions ())
       (structured-ast
         (seq-block 21))
+      (decompiled-pseudo-code
+        (set! dx "cos(dir)*spd")
+        (set! dy "sin(dir)*spd")
+        (set! x "x,  y=y,")
+        (set! dx "dx,dy=dy,")
+        (set! r "4,")
+        (set! dmg "dmg,")
+        (set! spd "spd,")
+        (set! spr "spr,")
+        (set! is_enemy "is_enemy,")
+        (set! destroy_flag "false,")
+        (set! dir "dir,")
+        (set! update "update_bullet,")
+        (set! draw "draw_bullet,")
+        (set! lifspa "lifspa,")
+        (set! palette "palette,"))
       (body-lines
         "function spawn_bullet(x,y,dir,spd,r,spr,dmg,is_enemy,lifspa,palette)"
         "\tlocal dx=cos(dir)*spd"
@@ -749,6 +984,9 @@
       (structured-ast
         (if-cond "not(b.lifspa== nil")
         (if-cond "(b.lifspa== 0"))
+      (decompiled-pseudo-code
+        (-= b.lifspa "1")
+        (when "b.lifspa== 0" "b.destroy_flag = true"))
       (body-lines
         "function update_bullet(b)"
         " if not(b.lifspa== nil)then"
@@ -763,6 +1001,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (call pal "split(b.palette)")
+        (call spr "b.spr, b.x-4, b.y-4,1,1, p.flip")
+        (call pal ""))
       (body-lines
         "function draw_bullet(b)"
         "\tpal(split(b.palette))"
@@ -777,6 +1019,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (call spr "i.spr, i.x-4, i.y-4,1,1,i.f,i.r"))
       (body-lines
         "function draw_random()"
         "for i in all(random)do"
@@ -790,6 +1034,10 @@
       (called-functions (animexplo))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (call animexplo "e")
+        (call e.gun:fire "e.x+4,e.y+4,e.a")
+        (call del "enemies,e"))
       (body-lines
         "function killbarelle(e)"
         " animexplo(e)"
@@ -804,6 +1052,8 @@
       (called-functions (make_ptc rrnd))
       (structured-ast
         (for-loop "i=1,15"))
+      (decompiled-pseudo-code
+        (for-range i "1" "15"))
       (body-lines
         "function animexplo(e)"
         "for i=1,15 do"
@@ -821,6 +1071,21 @@
       (structured-ast
         (if-cond "timer_bullet == 0")
         (if-cond "type_bullet == 1"))
+      (decompiled-pseudo-code
+        (when "timer_bullet == 0")
+        (set! xy "get_traj(x,y,mouse_x,mouse_y)")
+        (set! traj_x "xy.x*speed")
+        (set! traj_y "xy.y*speed")
+        (set! angle "xy.angle")
+        (set! timer_bullet "timer_bullet1")
+        (when "type_bullet == 1")
+        (set! nvelement "{")
+        (set! x "x,y=y,")
+        (set! type_bullet "type_bullet,")
+        (set! traj_x "traj_x,")
+        (set! traj_y "traj_y,")
+        (set! sprite "sprite")
+        (call rafale "10,nvelement"))
       (body-lines
         "function spawn_bullet(x,y,type_bullet,speed,timer_bullet1,sprite,nb_bullet,ecartement)"
         "\tif timer_bullet == 0 then"
@@ -850,6 +1115,10 @@
         (if-cond "(timer_bullet>0")
         (for-loop "i in all(bullet)")
         (if-cond "is_solid(i.x+(i.traj_x*1.5"))
+      (decompiled-pseudo-code
+        (foreach i "bullet")
+        (when "is_solid(i.x+(i.traj_x*1.5)+4,i.y+4+(i.traj_y*1.5))")
+        (call del "bullet,i"))
       (body-lines
         "function update_bullet()"
         " if (timer_bullet>0)timer_bullet-=1"
@@ -865,6 +1134,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "i in all(bullet)"))
+      (decompiled-pseudo-code
+        (foreach i "bullet")
+        (call spr "i.sprite,i.x,i.y"))
       (body-lines
         "function draw_bullet()"
         "\tfor i in all(bullet) do"
@@ -878,6 +1150,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call add "rafalels,{nb=nb,bullet=bullet}"))
       (body-lines
         "function rafale(nb,bullet)"
         " add(rafalels,{nb=nb,bullet=bullet})"
@@ -891,6 +1165,11 @@
       (structured-ast
         (for-loop "i in all(rafalels)")
         (if-cond "(i.nb<1"))
+      (decompiled-pseudo-code
+        (foreach i "rafalels")
+        (when "i.nb<1" "del(rafalels,i)")
+        (call add "bullet,i.bullet")
+        (-= i.nb "1"))
       (body-lines
         "function updaterafale()\t"
         "\tfor i in all(rafalels) do"
@@ -906,6 +1185,13 @@
       (called-functions ())
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (call poke "0x5f2d, 1")
+        (set! mx "stat(32)+flr(camx)")
+        (set! my "stat(33)")
+        (set! s "stat(34)")
+        (set! lmb "s&1 > 0")
+        (set! rmb "s&2 > 0"))
       (body-lines
         "function mouse_x_y()"
         "\tpoke(0x5f2d, 1)"
@@ -923,6 +1209,10 @@
       (called-functions ())
       (structured-ast
         (return-expr "{x=cos(angle),"))
+      (decompiled-pseudo-code
+        (set! angle "atan2(x_end-x_satr-4,")
+        (return "{x=cos(angle),")
+        (set! y "sin(angle),angle=angle}"))
       (body-lines
         "--[[function get_traj(x_satr,y_start,x_end,y_end)"
         "\tangle=atan2(x_end-x_satr-4, "
@@ -939,6 +1229,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "fget(mget((x\\8),(y\\8)),flag)"))
+      (decompiled-pseudo-code
+        (return "fget(mget((x\\8),(y\\8)),flag)"))
       (body-lines
         "function check_flag(flag,x,y)"
         "\treturn fget(mget((x\\8),(y\\8)),flag)"
@@ -953,6 +1245,8 @@
         (if-cond "(x<0")
         (return-expr "true")
         (return-expr "check_flag(0,x,y)"))
+      (decompiled-pseudo-code
+        (return "check_flag(0,x,y)"))
       (body-lines
         "function is_solid(x,y)"
         "\tif(x<0)return true "
@@ -966,6 +1260,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "x1 <= x"))
+      (decompiled-pseudo-code
+        (return "x1 <= x"))
       (body-lines
         "function touches_rect(x,y,x1,y1,x2,y2)"
         "\treturn x1 <= x"
@@ -981,6 +1277,14 @@
       (called-functions ())
       (structured-ast
         (return-expr "dx*dx+dy*dy < sr*sr"))
+      (decompiled-pseudo-code
+        (set! dx "a.x+4 - b.x")
+        (set! dy "a.y+4 - b.y")
+        (set! d "max(dx,dy)")
+        (/= dx "d")
+        (/= dy "d")
+        (set! sr "(a.r+b.r)/d")
+        (return "dx*dx+dy*dy < sr*sr"))
       (body-lines
         "function circ_coll(a,b)"
         "\t--https://www.lexaloffle.com/bbs/?tid=28999"
@@ -1003,6 +1307,8 @@
       (structured-ast
         (return-expr "not (a1.x>b2.x")
         (return-expr "a1.x<b2.x"))
+      (decompiled-pseudo-code
+        (return "a1.x<b2.x"))
       (body-lines
         "function rect_overlap(a1,a2,b1,b2)"
         "\t--[[return not (a1.x>b2.x"
@@ -1023,6 +1329,9 @@
       (called-functions (is_solid))
       (structured-ast
         (return-expr ""))
+      (decompiled-pseudo-code
+        (return "")
+        (call is_solid "x,  y"))
       (body-lines
         "function collision(x,y,w,h,flag)"
         "\treturn "
@@ -1039,6 +1348,18 @@
       (called-functions (collision))
       (structured-ast
         (if-cond "coll_x"))
+      (decompiled-pseudo-code
+        (set! |x,y| "o.x,o.y")
+        (set! |dx,dy| "o.dx,o.dy")
+        (set! |w,h| "o.bw,o.bh")
+        (set! |ox,oy| "x+o.bx,y+o.by")
+        (set! bounce "bounce1")
+        (set! |we,he| "w-1, h-1")
+        (set! coll_x "collision(")
+        (set! coll_y "collision(")
+        (set! coll_xy "collision(")
+        (when "coll_x")
+        (*= o.dx "-bounce"))
       (body-lines
         "function collide(o,bounce1)"
         "\tlocal x,y = o.x,o.y"
@@ -1067,6 +1388,10 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=10,29"))
+      (decompiled-pseudo-code
+        (set! nums "{}")
+        (for-range i "10" "29")
+        (call add "nums,i"))
       (body-lines
         "function gen_train()"
         "\t--gen talbe of all wagon nums"
@@ -1083,6 +1408,14 @@
       (structured-ast
         (for-loop "j = 0,15")
         (for-loop "i = 0,15"))
+      (decompiled-pseudo-code
+        (set! ax "(a%8)*16")
+        (set! ay "(a\\8)*16")
+        (set! room_all "{}")
+        (for-range j "0" "15")
+        (for-range i "0" "15")
+        (set! t "mget(ax+i,ay+j)")
+        (call mset "b*16+i,j,t"))
       (body-lines
         "function clone_room(a,b)"
         "\tlocal ax = (a%8)*16"
@@ -1101,6 +1434,15 @@
       (called-functions (copy make_drop make_ptc rnd_gun rrnd))
       (structured-ast
         (for-loop "i=1,5"))
+      (decompiled-pseudo-code
+        (set! wl "wl")
+        (call sfx "37")
+        (call sfx "42")
+        (set! x "(wl-1)*16")
+        (set! g "rnd_gun()")
+        (call copy "g)")
+        (set! enemiescleared "true")
+        (for-range i "1" "5"))
       (body-lines
         "function update_door()"
         "\tlocal wl = wl"
@@ -1132,6 +1474,10 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=5,9"))
+      (decompiled-pseudo-code
+        (call mset "x,4,40")
+        (for-range i "5" "9")
+        (call mset "x,i,39"))
       (body-lines
         "function init_boss_room(x)"
         "\tmset(x,4,40)"
@@ -1146,6 +1492,12 @@
       (called-functions (burst_ptc spawn_enemy))
       (structured-ast
         (for-loop "i=5,9"))
+      (decompiled-pseudo-code
+        (set! x "(wl-1)*16")
+        (call mset "x,i,6")
+        (for-range i "5" "9")
+        (call mset "x,i,6")
+        (call burst_ptc "x*8,i*8,10"))
       (body-lines
         "function begin_boss()"
         "\tlocal x = (wl-1)*16"
@@ -1165,6 +1517,10 @@
       (called-functions (clone_room))
       (structured-ast
         (for-loop "i=0,3"))
+      (decompiled-pseudo-code
+        (for-range i "0" "3")
+        (set! w "wagon_n*wl + i")
+        (call clone_room "train[w],i"))
       (body-lines
         "function update_room()"
         "\tfor i=0,3 do"
@@ -1181,6 +1537,15 @@
       (called-functions (draw_ghost_connector draw_random))
       (structured-ast
         (if-cond "(pal_n>#trainpal"))
+      (decompiled-pseudo-code
+        (set! pal_n "min(7,pal_n)")
+        (call pal "8,trainpal[pal_n*2-1]")
+        (call pal "14,trainpal[pal_n*2]")
+        (call draw_ghost_connector "")
+        (call map "")
+        (call draw_random "")
+        (call palt "")
+        (call pal ""))
       (body-lines
         "function draw_map()"
         "\t-- wall palette"
@@ -1208,6 +1573,8 @@
       (called-functions (spawn_loot))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (call spawn_loot "x&~7,y&~7"))
       (body-lines
         "function break_crate(x,y)"
         "\t--spawn_loot(x\\8*8,y\\8*8)"
@@ -1222,6 +1589,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! t "mget((x\\8),(y\\8))")
+        (call mset "(x\\8),(y\\8),t+1"))
       (body-lines
         "function swichtile(x,y)"
         " local t = mget((x\\8),(y\\8))"
@@ -1240,6 +1610,15 @@
         (if-cond "x>3 or p.y-1000>y*8 or p.y+1000<y*8")
         (if-cond "mget(x,y")
         (if-cond "rnd(4"))
+      (decompiled-pseudo-code
+        (set! x1 "0")
+        (for-range x "x1" "16*(wl-1)")
+        (for-range y "2" "12")
+        (when "x>3 or p.y-1000>y*8 or p.y+1000<y*8")
+        (when "mget(x,y)==109")
+        (call mset "x,y,39")
+        (when "rnd(4)>3")
+        (call spawn_enemy "x * 8,y * 8,enemy.explosive_barrel"))
       (body-lines
         "function parcourmap()"
         ""
@@ -1262,6 +1641,14 @@
       (structured-ast
         (if-cond "ceil(rnd(25")
         (for-loop "i=0,ceil(rnd(wagon_n/2))+8"))
+      (decompiled-pseudo-code
+        (when "ceil(rnd(25))==10")
+        (call spawn_enemy "x * 8,y * 8,enemy.explosive_barrel")
+        (when "ceil(rnd(32))>31-(wagon_n*0.7) and wagon_n>1")
+        (call spawn_enemy "x * 8,y * 8,enemy.juggernaut")
+        (when "ceil(rnd(30))>28.5-(wagon_n*0.5) and wagon_n>0")
+        (for-range i "0" "ceil(rnd(wagon_n/2))+8")
+        (call spawn_enemy "x * 8,y * 8,enemy.warm"))
       (body-lines
         "function sapwnrndenemy(x,y)"
         "\t--spawn explosive_barrel "
@@ -1284,6 +1671,23 @@
       (called-functions (make_enemy))
       (structured-ast
         (seq-block 67))
+      (decompiled-pseudo-code
+        (set! enemy "{")
+        (set! hedgehog "make_enemy(")
+        (set! hedgehogbuff "make_enemy(")
+        (set! juggernaut "make_enemy(")
+        (set! warm "make_enemy(")
+        (set! tourelle "make_enemy(")
+        (set! explosive_barrel "make_enemy(")
+        (set! boss "make_enemy(")
+        (set! b "enemy.boss")
+        (set! b.bw "15")
+        (set! b.bh "15")
+        (set! b.hw "16")
+        (set! b.guns "{guns.boss_targetgun,")
+        (set! b.phase "0")
+        (set! b.phasetimer "0")
+        (set! b.pause "0"))
       (body-lines
         "function init_enemies()"
         "\tenemy= {"
@@ -1328,6 +1732,16 @@
         (if-cond "(a.spr != 125")
         (if-cond "(a.spr == 126")
         (if-cond "a.x<175"))
+      (decompiled-pseudo-code
+        (set! a "copy(name)")
+        (set! a.x "x")
+        (set! a.y "y")
+        (set! a.gun "copy(a.gun)")
+        (set! r "rnd(60)")
+        (call if "a.spr == 126)a.spd = 0.8+rnd(0.4")
+        (when "a.x<175")
+        (+= a.gun.timer "90")
+        (set! a.timer "90"))
       (body-lines
         "function spawn_enemy(x,y,name)"
         "\tlocal a=copy(name)"
@@ -1352,6 +1766,12 @@
       (structured-ast
         (for-loop "i in all(enemies)")
         (if-cond "loaded(i"))
+      (decompiled-pseudo-code
+        (foreach i "enemies")
+        (when "loaded(i)")
+        (set! mouvrnd "true")
+        (set! i.gun.timer "max(i.gun.timer-1")
+        (call i.gun:fire "i.x+4,i.y+4,i.a"))
       (body-lines
         "function update_enemy(e)"
         "\tfor i in all(enemies) do"
@@ -1375,6 +1795,16 @@
       (structured-ast
         (if-cond "(e.spr==1")
         (if-cond "e.spr==1"))
+      (decompiled-pseudo-code
+        (set! w "1")
+        (set! x "flr(e.x)+")
+        (set! y "flr(e.y)+")
+        (call spr "e.gun.spr,x,y,1,1, e.flip")
+        (call spr "e.spr,e.x,e.y,w,w, e.flip")
+        (when "e.spr==1")
+        (set! l "126*(e.life/300)")
+        (set! s "\"🐱\"..ceil(e.life)..\"/\"..\"300\"")
+        (call print "s, camx+3,121,7"))
       (body-lines
         "function draw_enemy(e)"
         "\tlocal w = 1"
@@ -1408,6 +1838,13 @@
       (called-functions ())
       (structured-ast
         (if-cond "i.phasetimer<0"))
+      (decompiled-pseudo-code
+        (-= i.phasetimer "1")
+        (-= i.pause "1")
+        (when "i.phasetimer<0")
+        (set! i.phasetimer "600+rnd(600)")
+        (+= i.phase "1")
+        (set! i.pause "200"))
       (body-lines
         "function update_boss(i)"
         "\ti.phasetimer -= 1"
@@ -1426,6 +1863,13 @@
       (called-functions (rrnd))
       (structured-ast
         (if-cond "i.timer < 1"))
+      (decompiled-pseudo-code
+        (-= i.timer "1")
+        (when "i.timer < 1")
+        (+= i.angle "rrnd(0.25)")
+        (set! i.timer "i.cd")
+        (set! i.dx "cos(i.angle)/8*i.spd")
+        (set! i.dy "sin(i.angle)/8*i.spd"))
       (body-lines
         "function changedirection(i)"
         "\ti.timer-=1"
@@ -1444,6 +1888,19 @@
       (structured-ast
         (if-cond "(abs(dist")
         (return-expr "cansee(e,angle,x,y,dist)"))
+      (decompiled-pseudo-code
+        (set! angle "atan2(pl.x-e.x,")
+        (set! e.a "angle")
+        (set! x "cos(angle)")
+        (set! y "sin(angle)")
+        (set! dist "dist(e,pl)")
+        (when "(abs(dist)<e.agro and abs(pl.x-e.x)<128) or e==p")
+        (return "cansee(e,angle,x,y,dist)")
+        (when "abs(dist)<e.seerange and abs(dist)>e.agro and e.chase and cansee(e,angle,x,y,dist)")
+        (set! o "e.dx+e.dy")
+        (set! e.dx "x*(e.spd*2)/max(dist,4)")
+        (set! e.dy "y*(e.spd*2)/max(dist,4)")
+        (set! mouvrnd "false"))
       (body-lines
         "function canshoot(e,pl)"
         "\tlocal angle = atan2(pl.x-e.x,"
@@ -1472,6 +1929,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "sqrt(abs(p.y-e.y)^2+abs(p.x-e.x)^2)/8"))
+      (decompiled-pseudo-code
+        (return "sqrt(abs(p.y-e.y)^2+abs(p.x-e.x)^2)/8"))
       (body-lines
         "function dist(e,p)"
         "\treturn sqrt(abs(p.y-e.y)^2+abs(p.x-e.x)^2)/8"
@@ -1487,6 +1946,13 @@
         (if-cond "is_solid(checker[#checker].x+4,checker[#checker].y+4")
         (if-cond "(e!=p")
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (for-range i "1" "dist")
+        (call add "checker,{x=e.x+x*i*8,y=e.y+y*i*8}")
+        (when "is_solid(checker[#checker].x+4,checker[#checker].y+4)")
+        (call delchecker "")
+        (when "e!=p" "e.gun.timer = e.gun.cooldown/2")
+        (return "false"))
       (body-lines
         "function cansee(e,angle,x,y,dist)\t "
         " for i =1,dist do"
@@ -1504,6 +1970,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! checker "{}"))
       (body-lines
         "function delchecker()"
         "\tchecker = {}"
@@ -1516,6 +1984,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "abs(camx+64-i.x)<71--71"))
+      (decompiled-pseudo-code
+        (return "abs(camx+64-i.x)<71"))
       (body-lines
         "function loaded(i)"
         "\treturn abs(camx+64-i.x)<71--71"
@@ -1528,6 +1998,11 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=0,20"))
+      (decompiled-pseudo-code
+        (set! particles "{}")
+        (set! grass "{}")
+        (for-range i "0" "20")
+        (call add "grass,{x=flr(rnd(16))*8, y=flr(rnd(16))*8, spr=56}"))
       (body-lines
         "function init_ptc()"
         "\tparticles={}"
@@ -1543,6 +2018,16 @@
       (called-functions ())
       (structured-ast
         (seq-block 15))
+      (decompiled-pseudo-code
+        (set! fric "fric or rnd(.1)+.85")
+        (set! dx "dx or 0")
+        (set! dy "dy or 0")
+        (set! x "x,  y=y,")
+        (set! dx "dx,dy=dy,")
+        (set! fric "fric,")
+        (set! txt "txt,")
+        (set! r "r, col=col,")
+        (set! destroy "false,"))
       (body-lines
         "function make_ptc(x,y,r,col,fric,dx,dy,txt)"
         "\tfric=fric or rnd(.1)+.85"
@@ -1567,6 +2052,12 @@
       (called-functions ())
       (structured-ast
         (if-cond "(ptc.r<=1"))
+      (decompiled-pseudo-code
+        (+= ptc.x "ptc.dx")
+        (+= ptc.y "ptc.dy")
+        (*= ptc.dx "ptc.fric")
+        (*= ptc.dy "ptc.fric")
+        (*= ptc.r "ptc.fric"))
       (body-lines
         "function update_ptc(ptc)"
         "\tptc.x += ptc.dx"
@@ -1587,6 +2078,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "ptc.txt==nil"))
+      (decompiled-pseudo-code
+        (when "ptc.txt==nil")
+        (call circfill "ptc.x,ptc.y,ptc.r,ptc.col")
+        (call print "ptc.txt,ptc.x,ptc.y,ptc.col"))
       (body-lines
         "function draw_ptc(ptc)"
         "\t--kinda bodgey but whatever"
@@ -1603,6 +2098,8 @@
       (called-functions (make_ptc rrnd))
       (structured-ast
         (for-loop "i=1,5"))
+      (decompiled-pseudo-code
+        (for-range i "1" "5"))
       (body-lines
         "function burst_ptc(x,y,col)"
         "\tfor i=1,5 do"
@@ -1620,6 +2117,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "(i.x<-8"))
+      (decompiled-pseudo-code
+        (set! i.x "i.x")
+        (-= i.x "2.5"))
       (body-lines
         "function grasstile()"
         "\tfor i in all(grass)do"
@@ -1635,6 +2135,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (call spr "elt.spr,camx+elt.x,elt.y"))
       (body-lines
         "function drawgrass()"
         "\tfor elt in all(grass)do"
@@ -1650,6 +2152,12 @@
         (if-cond "(weelcount<1")
         (for-loop "n=0,5")
         (for-loop "i=0,2"))
+      (decompiled-pseudo-code
+        (-= weelcount "1")
+        (when "weelcount<1" "weelflip = not weelflip weelcount=weelframe")
+        (for-range n "0" "5")
+        (for-range i "0" "2")
+        (call spr "42,8+n*64+i*16,14*8, 2,2,weelflip"))
       (body-lines
         "function draw_weel()"
         " weelcount -=1"
@@ -1666,6 +2174,12 @@
       (called-functions (make_boss_death make_death_menu make_main_menu))
       (structured-ast
         (seq-block 7))
+      (decompiled-pseudo-code
+        (set! menus "{}")
+        (set! menus.main "make_main_menu()")
+        (set! menus.death "make_death_menu(false)")
+        (set! menus.bossdeath "make_boss_death()")
+        (set! menus.win "make_death_menu(true)"))
       (body-lines
         "function init_menus()"
         "\tmenus = {}"
@@ -1682,6 +2196,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 9))
+      (decompiled-pseudo-code
+        (set! l "w*w2")
+        (call print "t, x+1,y+1,7"))
       (body-lines
         "function draw_bar(t,x,y,w,w2,c,c2)"
         "\trectfill(x,y,"
@@ -1700,6 +2217,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! m "{")
+        (set! timer "400,"))
       (body-lines
         "function make_boss_death()"
         "\tlocal m={"
@@ -1715,6 +2235,17 @@
         (if-cond "(m.timer==400")
         (if-cond "m.timer<0")
         (for-loop "i=1,18"))
+      (decompiled-pseudo-code
+        (set! update "function(m)")
+        (call music "-1,0")
+        (call if "m.timer==400)sfx(45")
+        (-= m.timer "3")
+        (when "m.timer<0")
+        (set! menu "\"game\"")
+        (set! win "true")
+        (+= shake "40")
+        (call sfx "48")
+        (for-range i "1" "18"))
       (body-lines
         "\tupdate=function(m)"
         "\t\tfor e in all(enemies)do del(e,enemies) end"
@@ -1744,6 +2275,16 @@
       (called-functions ())
       (structured-ast
         (seq-block 11))
+      (decompiled-pseudo-code
+        (set! draw "function(m)")
+        (set! |x,y| "boss_pos[1]+8,boss_pos[2]+8")
+        (set! flp "boss_pos[3]")
+        (set! t "m.timer")
+        (call circfill "x,y,t    ,8")
+        (call circfill "x,y,t*.75,9")
+        (call circfill "x,y,t*.5 ,10")
+        (call circfill "x,y,t*.25,7")
+        (call spr "1,x-8,y-8,2,2,flp"))
       (body-lines
         "\tdraw=function(m)"
         "\t\t"
@@ -1764,6 +2305,31 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,12"))
+      (decompiled-pseudo-code
+        (set! m "{")
+        (set! update "update_main_menu,")
+        (set! draw "draw_main_menu,")
+        (set! sel "0,")
+        (set! done "false,")
+        (set! ui_oy "0,")
+        (set! ui_dy "0,")
+        (set! has_active "false,")
+        (set! m.buttons "{}")
+        (set! names "split\"pigeon,duck,sparrow,parrot,toucan,flamingo,eagle,seagull,ostrich,penguin,jay,chicken\"")
+        (set! x "4")
+        (set! y "105")
+        (for-range i "1" "12")
+        (set! n "i,")
+        (set! spr "i+79,")
+        (set! bird "i+111,")
+        (set! x "i*10-6,")
+        (set! y "105,")
+        (set! w "9,")
+        (set! h "17,")
+        (set! col "1,")
+        (set! sh "2,")
+        (set! name "names[i],")
+        (set! active "false,"))
       (body-lines
         "function make_main_menu()"
         "\t--this code could be better"
@@ -1805,6 +2371,19 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (set! |n,sp,bird,x,y,w,h,name| "unpack(split(args))")
+        (return "{")
+        (set! n "n,")
+        (set! spr "sp,")
+        (set! bird "bird,")
+        (set! x "x,y=y,")
+        (set! w "w,h=h,")
+        (set! oy "0,")
+        (set! col "1,")
+        (set! sh "1,")
+        (set! name "name,")
+        (set! active "false,"))
       (body-lines
         "\tfunction make_btn(args)"
         "\t\tn,sp,bird,x,y,w,h,name=unpack(split(args))"
@@ -1835,6 +2414,19 @@
         (for-loop "k=0,#m.buttons")
         (if-cond "(not i.active")
         (if-cond "lmb"))
+      (decompiled-pseudo-code
+        (set! selection "1000")
+        (when "not m.done")
+        (for-range k "0" "#m.buttons")
+        (set! i "m.buttons[k]")
+        (set! i.col "7")
+        (set! i.oy "2")
+        (when "not i.active" "sfx(43)")
+        (set! m.has_active "true")
+        (set! m.sel "i.n")
+        (set! i.active "true")
+        (when "lmb")
+        (set! selection "i.n"))
       (body-lines
         "function update_main_menu(m)"
         "\tlocal selection=1000"
@@ -1869,6 +2461,17 @@
         (for-loop "k=0,#m.buttons")
         (if-cond "(k == 13")
         (if-cond "i.n==13and i.active"))
+      (decompiled-pseudo-code
+        (set! oy "m.ui_oy")
+        (call palt "0,false")
+        (call draw_logo "44,5-oy")
+        (call rectfill "112,89+oy,125,110+oy,12")
+        (call rectfill "2,103+oy,125,124+oy,1")
+        (for-range k "0" "#m.buttons")
+        (set! i "m.buttons[k]")
+        (set! oy "abs(oy)")
+        (when "i.n==13and i.active")
+        (call oprint "\"a game by:\",2,13, 14"))
       (body-lines
         "function draw_main_menu(m)"
         "\tlocal oy = m.ui_oy"
@@ -1910,6 +2513,11 @@
       (called-functions (oprint oxxl))
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (call oxxl "\"birds\",x,y,10")
+        (call oxxl "\"guns\",x+4,y+15, 6")
+        (call oprint "\"with\",x+11,y+10")
+        (call oprint "\"with\",x+11,y+9"))
       (body-lines
         "function draw_logo(x,y)"
         "\t--\"birds\""
@@ -1931,6 +2539,10 @@
         (for-loop "ix=-2,2")
         (for-loop "iy=-2,4")
         (if-cond "abs(ix"))
+      (decompiled-pseudo-code
+        (for-range ix "-2" "2")
+        (for-range iy "-2" "4")
+        (call print "\"\\^p\"..t,x+ix,y+iy,1"))
       (body-lines
         "function oxxl(t,x,y,col)"
         "\t--credit to freds72"
@@ -1948,6 +2560,16 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,#t"))
+      (decompiled-pseudo-code
+        (set! t1 "\"                ! #$%&'()  ,-./[12345[7[9:;<=>?([[c[efc[ij[l[[([([st[[[&yz[\\\\]'_`[[c[efc[ij[l[[([([st[[[&yz{|}~\"")
+        (set! t2 "\"                !\\\"=$  '()*+,-./0123]5678]:;<=>?@abcdefghijklmnopqrstuvwx]z[\\\\]^_`abcdefghijklmnopqrstuvwx]z{|} \"")
+        (set! |n1,n2| "\"\",\"\"")
+        (set! pre "pre or \"\"")
+        (for-range i "1" "#t")
+        (set! char "sub(t,i,i)")
+        (set! c "ord(char)-16")
+        (set! n1.. "sub(t1,c,c)..\" \"")
+        (set! n2.. "sub(t2,c,c)..\" \""))
       (body-lines
         "function wide(t,x,y,col,pre)"
         "\t--credit to yolwoocle uwu"
@@ -1970,6 +2592,15 @@
       (called-functions ())
       (structured-ast
         (seq-block 15))
+      (decompiled-pseudo-code
+        (set! x "x, y=y,")
+        (set! bx "8,dy=8,")
+        (set! spr "spr,")
+        (set! type "type,")
+        (set! q "q,")
+        (set! touched "false,")
+        (set! cooldown "0,")
+        (set! destroy "false,"))
       (body-lines
         "function make_drop(x,y,spr,type,q)"
         "\tadd(drops,{"
@@ -1997,6 +2628,31 @@
         (if-cond "(not touches")
         (if-cond "touches")
         (if-cond "d.type==\"ammo\""))
+      (decompiled-pseudo-code
+        (foreach d "drops")
+        (set! d.cooldown "max(0,d.cooldown-1)")
+        (set! touches "touches_rect(")
+        (when "touches")
+        (set! col "7")
+        (set! txt "\"\"")
+        (set! do_ptc "false")
+        (when "d.type==\"ammo\"")
+        (set! d.destroy "true")
+        (set! q "flr(d.q*p.gun.maxammo)")
+        (+= p.gun.ammo "q")
+        (set! do_ptc "true")
+        (set! col "9")
+        (set! txt "\"+\"..q..\" ammo\"")
+        (call sfx "38")
+        (set! d.destroy "true")
+        (+= p.life "d.q")
+        (set! do_ptc "true")
+        (set! col "8")
+        (set! txt "\"+\"..d.q..\" health\"")
+        (call sfx "38")
+        (set! d.touched "true")
+        (set! d.cooldown "60")
+        (set! do_ptc "true"))
       (body-lines
         "function update_drops()"
         "\tfor d in all(drops) do"
@@ -2038,6 +2694,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (call spr "d.spr,d.x,d.y"))
       (body-lines
         "function draw_drops()"
         "\tfor d in all(drops)do"
@@ -2051,6 +2709,17 @@
       (called-functions (copy make_drop rnd_gun))
       (structured-ast
         (if-cond "r < .015"))
+      (decompiled-pseudo-code
+        (set! r "rnd(1)")
+        (when "r < .015")
+        (set! g "rnd_gun()")
+        (call copy "g)")
+        (when "r < .045")
+        (call make_drop "x,y,79,\"ammo\",1/4")
+        (when "r < .075 and degaplus == 0")
+        (call make_drop "x,y,78,\"health\",2")
+        (when "r < .017 and degaplus == 1")
+        (call make_drop "x,y,78,\"health\",1"))
       (body-lines
         "function spawn_loot(x,y)"
         "\tlocal r = rnd(1)"
@@ -2077,6 +2746,28 @@
       (structured-ast
         (if-cond "(iswin")
         (return-expr "m"))
+      (decompiled-pseudo-code
+        (set! m "{")
+        (set! update "update_death_menu,")
+        (set! draw "draw_death_menu,")
+        (set! circt "1,")
+        (set! timer "0,")
+        (set! showtext "false,")
+        (set! iswin "iswin,")
+        (set! nstats "0,")
+        (set! |t,t2| "\"retry\",\"change bird\"")
+        (set! m.buttons "{}")
+        (set! |m.buttons[1]| "{")
+        (set! n "1,")
+        (set! t "t,")
+        (set! x "0,y=0, oy=0,")
+        (set! active "false")
+        (set! |m.buttons[2]| "{")
+        (set! n "2,")
+        (set! t "t2,")
+        (set! x "0,y=0, oy=0,")
+        (set! active "false")
+        (return "m"))
       (body-lines
         "function make_death_menu(iswin)"
         "\tlocal m = {"
@@ -2120,6 +2811,13 @@
         (if-cond "m.circt>=600")
         (if-cond "(m.timer==0")
         (if-cond "(m.timer==220"))
+      (decompiled-pseudo-code
+        (set! m.circt "min(m.circt*1.05,600)")
+        (when "m.circt>=600")
+        (when "m.timer==0" "music(23)")
+        (when "m.timer==220" "music(24)")
+        (call sfx "41")
+        (+= m.nstats "1"))
       (body-lines
         "function update_death_menu(m)"
         "\tm.circt=min(m.circt*1.05,600)"
@@ -2145,6 +2843,14 @@
       (structured-ast
         (if-cond "m.iswin")
         (if-cond "(t("))
+      (decompiled-pseudo-code
+        (call palt "0,false")
+        (call palt "1,true")
+        (set! |col,c2,c3,c4| "0,1,2,9")
+        (set! txtcol "7")
+        (when "m.iswin")
+        (set! |col,c2,c3,c4| "15,9,8,2")
+        (set! txtcol "10"))
       (body-lines
         "function draw_death_menu(m)"
         "\t--circles animation"

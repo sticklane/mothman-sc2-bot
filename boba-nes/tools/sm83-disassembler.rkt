@@ -522,6 +522,78 @@
     (joypad_isr   #x0060 #x0080)
     (cart_entry   #x0100 #x0104)))
 
+(define (infer-sm83-semantic-sub-name bank-idx sub-addr blk)
+  (cond
+    [(and (= bank-idx 0) (= sub-addr #x0150))
+     'main_entry_0150]
+    [else
+     (define insts (hash-ref blk 'insts '()))
+     (define mmio  (hash-ref blk 'mmio '()))
+     (define mbc-w (hash-ref blk 'mbc-writes '()))
+     (define mnems (map car insts))
+     (define hex-a (string-upcase (~r sub-addr #:base 16 #:min-width 4 #:pad-string "0")))
+     (define prefix
+       (cond
+         [(memq 'DAA mnems)
+          "bcd_score_math"]
+         [(or (memq 'DMA mmio)
+              (for/or ([m (in-list mmio)])
+                (memq m '(HDMA1 HDMA2 HDMA3 HDMA4 HDMA5))))
+          "dma_oam_vram_transfer"]
+         [(memq 'JOYP mmio)
+          "poll_joypad_matrix"]
+         [(for/or ([m (in-list mmio)])
+            (memq m '(LCDC STAT LY LYC SCX SCY BGP OBP0 OBP1 WY WX BCPS BCPD OCPS OCPD VBK)))
+          "lcd_ppu_control"]
+         [(or (memq 'SB mmio) (memq 'SC mmio))
+          "serial_link_io"]
+         [(for/or ([m (in-list mmio)])
+            (or (memq m '(NR10 NR11 NR12 NR13 NR14 NR21 NR22 NR23 NR24
+                          NR30 NR31 NR32 NR33 NR34 NR41 NR42 NR43 NR44 NR50 NR51 NR52))
+                (regexp-match? #px"^WAVE_RAM_" (symbol->string m))))
+          "apu_sound_channel"]
+         [(or (pair? mbc-w)
+              (for/or ([m (in-list mmio)])
+                (memq m '(MBC_ROM_BANK MBC_RAM_EN MBC_RAM_BANK MBC_BANK_MODE))))
+          "mbc_rom_bank_switch"]
+         [(for/or ([mn (in-list mnems)])
+            (memq mn '(LD_HLI_A LD_A_HLI LD_HLD_A LD_A_HLD)))
+          "vram_wram_block_xfer"]
+         [(for/or ([mn (in-list mnems)])
+            (memq mn '(RST_28 JP_HL)))
+          "state_table_dispatch"]
+         [(for/or ([ins (in-list insts)])
+            (and (pair? ins) (pair? (cdr ins)) (eq? (cadr ins) '#:cb)))
+          "bitfield_flag_update"]
+         [else
+          "game_logic_step"]))
+     (string->symbol (format "~a_b~a_~a" prefix bank-idx hex-a))]))
+
+(define (rewrite-sm83-call-syms forms bank-idx sub-name-map)
+  (for/list ([f (in-list forms)])
+    (cond
+      [(not (pair? f)) f]
+      [(memq (car f) '(when-branch if-else then-branch else-branch
+                       counted-loop spin-wait-mmio-loop do-while-loop guard-return))
+       (let loop ([rem (cdr f)]
+                  [hdr (list (car f))])
+         (match rem
+           [(list* (? keyword? k) v rest)
+            (loop rest (cons v (cons k hdr)))]
+           [_
+            (append (reverse hdr) (rewrite-sm83-call-syms rem bank-idx sub-name-map))]))]
+      [else
+       (match f
+         [`(,mnem #:a16 ,u16 #:pc ,pc #:sym ,old-sym)
+          #:when (memq mnem '(CALL CALL_NZ CALL_Z CALL_NC CALL_C))
+          (define t-bank (if (< u16 #x4000) 0 bank-idx))
+          (define new-sym
+            (or (hash-ref sub-name-map (cons t-bank u16) #f)
+                (hash-ref sub-name-map u16 #f)
+                old-sym))
+          `(,mnem #:a16 ,u16 #:pc ,pc #:sym ,new-sym)]
+         [_ f])])))
+
 (define (lift-sm83-interrupt-vectors rom-bytes)
   (define b0-end (min (bytes-length rom-bytes) 16384))
   (for/list ([vspec (in-list SM83-VECTOR-SPECS)]
@@ -533,11 +605,14 @@
                                      #:stop-offset (min b0-end vlimit)))
     (define-values (structured-body _stats)
       (structure-subroutine-cfg (hash-ref blk 'insts) #:arch 'sm83))
+    (define pseudo-code
+      (synthesize-subroutine-pseudo-code structured-body #:arch 'sm83))
     `(def-sm83-isr ,vname
        #:vector ,vaddr
        #:size-bytes ,(hash-ref blk 'size-bytes)
        #:calls ,(hash-ref blk 'calls)
        #:mmio ,(hash-ref blk 'mmio)
+       ,pseudo-code
        ,@structured-body)))
 
 ;; ============================================================================
@@ -563,8 +638,9 @@
 
   ;; Seed entry points that fall within this bank's address range
   (for ([addr (in-list seed-entries)])
-    (when (and (>= addr (+ bank-origin start-off))
-                (< addr (+ bank-origin bank-size)))
+    (when (and (exact-integer? addr)
+               (>= addr (+ bank-origin start-off))
+               (< addr (+ bank-origin bank-size)))
       (set! sub-entry-Candidates (cons addr sub-entry-Candidates))))
   (when (and (= bank-idx 0) (< #x0150 bank-size))
     (set! sub-entry-Candidates (cons #x0150 sub-entry-Candidates)))
@@ -635,9 +711,10 @@
   (define bank-spin-waits 0)
   (define bank-conditionals 0)
   (define bank-guard-returns 0)
+  (define sub-name-map (make-hash))
 
-  ;; Lift each subroutine into `(defsub-sm83 ...)` with structured CFG forms
-  (define lifted-subs
+  ;; Pass 1: Disassemble blocks & assign semantic subroutine names
+  (define raw-sub-entries
     (if (= max-subroutines 0)
         '()
         (for/list ([sub-addr (in-list unique-sub-addrs)]
@@ -652,28 +729,44 @@
             (disassemble-sm83-linear-block rom-bytes bank-start bank-end bank-origin sub-off
                                            #:max-insts max-insts-per-sub
                                            #:stop-offset stop-off))
-          (define-values (structured-body cfg-stats)
-            (structure-subroutine-cfg (hash-ref blk 'insts) #:arch 'sm83))
-          (set! bank-loops         (+ bank-loops         (hash-ref cfg-stats 'loops 0)))
-          (set! bank-spin-waits    (+ bank-spin-waits    (hash-ref cfg-stats 'spin-waits 0)))
-          (set! bank-conditionals  (+ bank-conditionals  (hash-ref cfg-stats 'conditionals 0)))
-          (set! bank-guard-returns (+ bank-guard-returns (hash-ref cfg-stats 'guard-returns 0)))
-          (define sub-name
-            (if (and (= bank-idx 0) (= sub-addr #x0150))
-                'main_entry_0150
-                (string->symbol (format "sub_b~a_~a"
-                                        bank-idx
-                                        (string-upcase (~r sub-addr #:base 16 #:min-width 4 #:pad-string "0"))))))
-          `(defsub-sm83 ,sub-name
-             #:bank ,bank-idx
-             #:addr ,sub-addr
-             #:offset ,sub-off
-             #:size-bytes ,(hash-ref blk 'size-bytes)
-             #:calls ,(hash-ref blk 'calls)
-             #:mmio ,(hash-ref blk 'mmio)
-             #:hram ,(hash-ref blk 'hram)
-             #:mbc-writes ,(hash-ref blk 'mbc-writes)
-             ,@structured-body))))
+          (define sub-name (infer-sm83-semantic-sub-name bank-idx sub-addr blk))
+          (hash-set! sub-name-map (cons bank-idx sub-addr) sub-name)
+          (hash-set! sub-name-map sub-addr sub-name)
+          (list sub-addr sub-off blk sub-name))))
+
+  ;; Pass 2: Structure CFG, rewrite call targets to semantic names, & synthesize pseudo-code
+  (define lifted-subs
+    (for/list ([entry (in-list raw-sub-entries)])
+      (match-define (list sub-addr sub-off blk sub-name) entry)
+      (define-values (structured-body cfg-stats)
+        (structure-subroutine-cfg (hash-ref blk 'insts) #:arch 'sm83))
+      (set! bank-loops         (+ bank-loops         (hash-ref cfg-stats 'loops 0)))
+      (set! bank-spin-waits    (+ bank-spin-waits    (hash-ref cfg-stats 'spin-waits 0)))
+      (set! bank-conditionals  (+ bank-conditionals  (hash-ref cfg-stats 'conditionals 0)))
+      (set! bank-guard-returns (+ bank-guard-returns (hash-ref cfg-stats 'guard-returns 0)))
+      (define rewritten-body
+        (rewrite-sm83-call-syms structured-body bank-idx sub-name-map))
+      (define pseudo-code
+        (synthesize-subroutine-pseudo-code rewritten-body #:arch 'sm83))
+      (define sem-calls
+        (for/list ([c (in-list (hash-ref blk 'calls))])
+          (define t-bank (if (< c #x4000) 0 bank-idx))
+          (or (hash-ref sub-name-map (cons t-bank c) #f)
+              (hash-ref sub-name-map c #f)
+              (string->symbol (format "sub_b~a_~a"
+                                      t-bank
+                                      (string-upcase (~r c #:base 16 #:min-width 4 #:pad-string "0")))))))
+      `(defsub-sm83 ,sub-name
+         #:bank ,bank-idx
+         #:addr ,sub-addr
+         #:offset ,sub-off
+         #:size-bytes ,(hash-ref blk 'size-bytes)
+         #:calls ,sem-calls
+         #:mmio ,(hash-ref blk 'mmio)
+         #:hram ,(hash-ref blk 'hram)
+         #:mbc-writes ,(hash-ref blk 'mbc-writes)
+         ,pseudo-code
+         ,@rewritten-body)))
 
   (hasheq 'instruction-count        inst-cnt
           'cb-bit-ops               cb-bit-ops
@@ -683,6 +776,7 @@
           'mbc-writes               (sort (set->list mbc-writes) <)
           'mmio-counts              mmio-counts
           'subroutines              lifted-subs
+          'sub-name-map             sub-name-map
           'structured-loops         bank-loops
           'structured-spin-waits    bank-spin-waits
           'structured-conditionals  bank-conditionals

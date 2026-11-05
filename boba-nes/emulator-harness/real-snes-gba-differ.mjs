@@ -806,12 +806,357 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
     'RDNMI', 'TIMEUP', 'HVBJOY', 'APUIO0', 'APUIO1', 'APUIO2', 'APUIO3', 'SLHV', 'STAT77', 'STAT78',
   ]);
 
-  const structureSnesSubroutineCfg = (insns) => {
+  const formatSnesTargetExpr = (ins, valExpr = '') => {
+    if (ins.mmioSym) return ins.mmioSym;
+    const op = ins.op;
+    if (op.endsWith('-dp')) return `(dp ${ins.arg})`;
+    if (op.endsWith('-dpX')) return `(dp+X ${ins.arg})`;
+    if (op.endsWith('-dpY')) return `(dp+Y ${ins.arg})`;
+    if (op.endsWith('-long') || op.endsWith('-longX')) {
+      const idxPart = op.endsWith('X') ? ' X' : '';
+      if (/^#x7[EF]/i.test(ins.arg)) {
+        const is16 = ins.mWidth === 16 || /^#x[0-9A-F]{4}$/i.test(valExpr);
+        return `(${is16 ? 'wram16' : 'wram8'} ${ins.arg}${idxPart})`;
+      }
+      return `(far-mem ${ins.arg}${idxPart})`;
+    }
+    if (op.endsWith('-absX')) return `(mem+X ${ins.arg})`;
+    if (op.endsWith('-absY')) return `(mem+Y ${ins.arg})`;
+    if (
+      op.endsWith('-indX') ||
+      op.endsWith('-indY') ||
+      op.endsWith('-ind') ||
+      op.endsWith('-indL') ||
+      op.endsWith('-indLY')
+    ) {
+      return `(ptr ${ins.arg})`;
+    }
+    if (op.endsWith('-sr') || op.endsWith('-srY')) return `(stack+${ins.arg})`;
+    return `(mem ${ins.arg})`;
+  };
+
+  const inferSnesCondExpr = (insns, branchIdx, condSym) => {
+    const cmpOpMap = {
+      equal: '=',
+      'not-equal': '!=',
+      'carry-set': '>=',
+      'carry-clear': '<',
+      plus: '>=',
+      minus: '<',
+    };
+    for (let k = branchIdx - 1; k >= Math.max(0, branchIdx - 3); k--) {
+      const p = insns[k];
+      if (!p) continue;
+      if (p.op.startsWith('CMP-') || p.op.startsWith('CPX-') || p.op.startsWith('CPY-')) {
+        let lhs = p.op.startsWith('CPX-') ? 'X' : p.op.startsWith('CPY-') ? 'Y' : 'A';
+        if (lhs === 'A' && k >= 1 && insns[k - 1].op.startsWith('LDA-') && insns[k - 1].op !== 'LDA-imm') {
+          lhs = formatSnesTargetExpr(insns[k - 1]);
+        }
+        const rhs = p.op.endsWith('-imm') ? p.arg : formatSnesTargetExpr(p);
+        const rel = cmpOpMap[condSym] || condSym;
+        return `(${rel} ${lhs} ${rhs})`;
+      }
+      if (p.op.startsWith('BIT-')) {
+        const tgt = p.op === 'BIT-imm' ? p.arg : formatSnesTargetExpr(p);
+        if (p.op === 'BIT-imm') {
+          return condSym === 'equal' ? `(= (bit-and A ${tgt}) 0)` : `(!= (bit-and A ${tgt}) 0)`;
+        }
+        if (condSym === 'minus') return `(bit-set? ${tgt} 7)`;
+        if (condSym === 'plus') return `(bit-clear? ${tgt} 7)`;
+        if (condSym === 'overflow-set') return `(bit-set? ${tgt} 6)`;
+        if (condSym === 'overflow-clear') return `(bit-clear? ${tgt} 6)`;
+        return condSym === 'equal' ? `(= (bit-and A ${tgt}) 0)` : `(!= (bit-and A ${tgt}) 0)`;
+      }
+      if (p.op === 'DEX' || p.op === 'INX') {
+        const rel = condSym === 'plus' ? '>=' : condSym === 'minus' ? '<' : cmpOpMap[condSym] || '!=';
+        return `(${rel} X 0)`;
+      }
+      if (p.op === 'DEY' || p.op === 'INY') {
+        const rel = condSym === 'plus' ? '>=' : condSym === 'minus' ? '<' : cmpOpMap[condSym] || '!=';
+        return `(${rel} Y 0)`;
+      }
+      if (p.op.startsWith('AND-')) {
+        const rhs = p.op === 'AND-imm' ? p.arg : formatSnesTargetExpr(p);
+        let lhs = 'A';
+        if (k >= 1 && insns[k - 1].op.startsWith('LDA-') && insns[k - 1].op !== 'LDA-imm') {
+          lhs = formatSnesTargetExpr(insns[k - 1]);
+        }
+        return condSym === 'equal' ? `(= (bit-and ${lhs} ${rhs}) 0)` : `(!= (bit-and ${lhs} ${rhs}) 0)`;
+      }
+      if (p.op.startsWith('LDA-') && p.op !== 'LDA-imm') {
+        const src = formatSnesTargetExpr(p);
+        if (condSym === 'minus') return `(bit-set? ${src} 7)`;
+        if (condSym === 'plus') return `(bit-clear? ${src} 7)`;
+        return condSym === 'equal' ? `(= ${src} 0)` : `(!= ${src} 0)`;
+      }
+      if (p.op.startsWith('DEC-') || p.op.startsWith('INC-')) {
+        const tgt = p.op.endsWith('-A') ? 'A' : formatSnesTargetExpr(p);
+        const rel = condSym === 'plus' ? '>=' : condSym === 'minus' ? '<' : cmpOpMap[condSym] || '!=';
+        return `(${rel} ${tgt} 0)`;
+      }
+    }
+    return `(${condSym}? flags)`;
+  };
+
+  const synthesizeSnesPseudoCode = (insns, loopsByHeader, branchesByIdx, resolveSym = (s) => s) => {
+    const foldRange = (startIdx, endIdx, indent, topLevel = false) => {
+      const stmts = [];
+      let regA = 'A';
+      let regX = 'X';
+      let regY = 'Y';
+      let aDirty = false;
+      let xDirty = false;
+      let yDirty = false;
+
+      const flushDirty = () => {
+        if (aDirty && regA !== 'A') {
+          stmts.push(`${indent}(set! A ${regA})`);
+          aDirty = false;
+        }
+        if (xDirty && regX !== 'X') {
+          stmts.push(`${indent}(set! X ${regX})`);
+          xDirty = false;
+        }
+        if (yDirty && regY !== 'Y') {
+          stmts.push(`${indent}(set! Y ${regY})`);
+          yDirty = false;
+        }
+      };
+
+      for (let k = startIdx; k < endIdx; ) {
+        if (topLevel && loopsByHeader.has(k)) {
+          const lp = loopsByHeader.get(k);
+          if (lp.kind === 'spin-wait-mmio-loop') {
+            flushDirty();
+            stmts.push(`${indent}(await-mmio! ${lp.mmio} ${lp.cond})`);
+          } else if (lp.kind === 'counted-loop') {
+            if (xDirty && lp.step && lp.step.includes('X')) {
+              stmts.push(`${indent}(set! X ${regX})`);
+              xDirty = false;
+            }
+            if (yDirty && lp.step && lp.step.includes('Y')) {
+              stmts.push(`${indent}(set! Y ${regY})`);
+              yDirty = false;
+            }
+            stmts.push(`${indent}(loop-counted #:step ${lp.step} #:while ${lp.condExpr}`);
+            const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false);
+            stmts.push(...bodyStmts);
+            stmts.push(`${indent})`);
+          } else {
+            flushDirty();
+            stmts.push(`${indent}(do-while ${lp.condExpr}`);
+            const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false);
+            stmts.push(...bodyStmts);
+            stmts.push(`${indent})`);
+          }
+          k = lp.latchIdx + 1;
+          continue;
+        }
+        if (topLevel && branchesByIdx.has(k)) {
+          const br = branchesByIdx.get(k);
+          if (br.kind === 'if-else') {
+            stmts.push(`${indent}(if ${br.condExpr}`);
+            stmts.push(`${indent}  (then`);
+            stmts.push(...foldRange(br.branchIdx + 1, Math.max(br.branchIdx + 1, br.elseIdx - 1), `${indent}    `, false));
+            stmts.push(`${indent}  )`);
+            stmts.push(`${indent}  (else`);
+            stmts.push(...foldRange(br.elseIdx, br.mergeIdx, `${indent}    `, false));
+            stmts.push(`${indent}  ))`);
+            k = br.mergeIdx;
+            continue;
+          } else {
+            stmts.push(`${indent}(when ${br.condExpr}`);
+            stmts.push(...foldRange(br.branchIdx + 1, br.joinIdx, `${indent}  `, false));
+            stmts.push(`${indent})`);
+            k = br.joinIdx;
+            continue;
+          }
+        }
+
+        const ins = insns[k];
+        const op = ins.op;
+        if (op.startsWith('STZ-')) {
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, '#x00')} #x00)`);
+        } else if (op === 'LDA-imm') {
+          regA = ins.arg;
+          aDirty = true;
+        } else if (op.startsWith('LDA-')) {
+          regA = formatSnesTargetExpr(ins);
+          aDirty = true;
+        } else if (op === 'LDX-imm') {
+          regX = ins.arg;
+          xDirty = true;
+        } else if (op.startsWith('LDX-')) {
+          regX = formatSnesTargetExpr(ins);
+          xDirty = true;
+        } else if (op === 'LDY-imm') {
+          regY = ins.arg;
+          yDirty = true;
+        } else if (op.startsWith('LDY-')) {
+          regY = formatSnesTargetExpr(ins);
+          yDirty = true;
+        } else if (op.startsWith('STA-')) {
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, regA)} ${regA})`);
+          aDirty = false;
+        } else if (op.startsWith('STX-')) {
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, regX)} ${regX})`);
+          xDirty = false;
+        } else if (op.startsWith('STY-')) {
+          stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, regY)} ${regY})`);
+          yDirty = false;
+        } else if (op === 'TCD') {
+          stmts.push(`${indent}(set! DP ${regA})`);
+          aDirty = false;
+        } else if (op === 'TCS') {
+          stmts.push(`${indent}(set! SP ${regA})`);
+          aDirty = false;
+        } else if (op === 'TXS') {
+          stmts.push(`${indent}(set! SP ${regX})`);
+          xDirty = false;
+        } else if (op === 'TAX') {
+          regX = regA;
+          aDirty = false;
+          xDirty = true;
+        } else if (op === 'TAY') {
+          regY = regA;
+          aDirty = false;
+          yDirty = true;
+        } else if (op === 'TXA') {
+          regA = regX;
+          xDirty = false;
+          aDirty = true;
+        } else if (op === 'TYA') {
+          regA = regY;
+          yDirty = false;
+          aDirty = true;
+        } else if (op === 'TXY') {
+          regY = regX;
+          xDirty = false;
+          yDirty = true;
+        } else if (op === 'TYX') {
+          regX = regY;
+          yDirty = false;
+          xDirty = true;
+        } else if (op === 'XBA') {
+          regA = `(swap-bytes ${regA})`;
+          aDirty = true;
+        } else if (op.startsWith('ADC-')) {
+          const rhs = op === 'ADC-imm' ? ins.arg : formatSnesTargetExpr(ins);
+          regA = `(+ ${regA} ${rhs})`;
+          aDirty = true;
+        } else if (op.startsWith('SBC-')) {
+          const rhs = op === 'SBC-imm' ? ins.arg : formatSnesTargetExpr(ins);
+          regA = `(- ${regA} ${rhs})`;
+          aDirty = true;
+        } else if (op.startsWith('AND-')) {
+          const rhs = op === 'AND-imm' ? ins.arg : formatSnesTargetExpr(ins);
+          regA = `(bit-and ${regA} ${rhs})`;
+          aDirty = true;
+        } else if (op.startsWith('ORA-')) {
+          const rhs = op === 'ORA-imm' ? ins.arg : formatSnesTargetExpr(ins);
+          regA = `(bit-ior ${regA} ${rhs})`;
+          aDirty = true;
+        } else if (op.startsWith('EOR-')) {
+          const rhs = op === 'EOR-imm' ? ins.arg : formatSnesTargetExpr(ins);
+          regA = `(bit-xor ${regA} ${rhs})`;
+          aDirty = true;
+        } else if (op === 'ASL-A') {
+          regA = `(shl ${regA} 1)`;
+          aDirty = true;
+        } else if (op === 'LSR-A') {
+          regA = `(shr ${regA} 1)`;
+          aDirty = true;
+        } else if (op === 'ROL-A') {
+          regA = `(rol ${regA} 1)`;
+          aDirty = true;
+        } else if (op === 'ROR-A') {
+          regA = `(ror ${regA} 1)`;
+          aDirty = true;
+        } else if (op === 'INC-A') {
+          regA = `(+ ${regA} 1)`;
+          aDirty = true;
+        } else if (op === 'DEC-A') {
+          regA = `(- ${regA} 1)`;
+          aDirty = true;
+        } else if (
+          op.startsWith('ASL-') ||
+          op.startsWith('LSR-') ||
+          op.startsWith('ROL-') ||
+          op.startsWith('ROR-') ||
+          op.startsWith('INC-') ||
+          op.startsWith('DEC-')
+        ) {
+          const tgt = formatSnesTargetExpr(ins);
+          const fn = op.startsWith('ASL')
+            ? 'shl'
+            : op.startsWith('LSR')
+              ? 'shr'
+              : op.startsWith('ROL')
+                ? 'rol'
+                : op.startsWith('ROR')
+                  ? 'ror'
+                  : op.startsWith('INC')
+                    ? '+'
+                    : '-';
+          stmts.push(`${indent}(set! ${tgt} (${fn} ${tgt} 1))`);
+        } else if (op === 'INX') {
+          stmts.push(`${indent}(set! X (+ X 1))`);
+          regX = 'X';
+          xDirty = false;
+        } else if (op === 'DEX') {
+          stmts.push(`${indent}(set! X (- X 1))`);
+          regX = 'X';
+          xDirty = false;
+        } else if (op === 'INY') {
+          stmts.push(`${indent}(set! Y (+ Y 1))`);
+          regY = 'Y';
+          yDirty = false;
+        } else if (op === 'DEY') {
+          stmts.push(`${indent}(set! Y (- Y 1))`);
+          regY = 'Y';
+          yDirty = false;
+        } else if (op === 'JSR-abs' || op === 'JSL-long') {
+          const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : ins.arg;
+          stmts.push(`${indent}(call ${targetSym})`);
+          regA = 'A';
+          aDirty = false;
+        } else if (op === 'JMP-abs' || op === 'JML-long' || op === 'JMP-ind' || op === 'JMP-indX' || op === 'JSR-indX') {
+          const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : ins.arg;
+          stmts.push(`${indent}(${op.startsWith('JSR') ? 'call-indirect' : 'tail-jump'} ${targetSym})`);
+        } else if (op === 'MVN' || op === 'MVP') {
+          stmts.push(`${indent}(block-move! ${op} ${ins.arg} #:len A #:src X #:dst Y)`);
+        } else if (op === 'RTS' || op === 'RTL' || op === 'RTI') {
+          flushDirty();
+          stmts.push(`${indent}(return)`);
+        } else if (op === 'SEI') {
+          stmts.push(`${indent}(disable-irq!)`);
+        } else if (op === 'XCE') {
+          stmts.push(`${indent}(exchange-carry-emulation!)`);
+        }
+        k++;
+      }
+
+      if (stmts.length === 0) {
+        flushDirty();
+        if (stmts.length === 0) {
+          stmts.push(`${indent}(nop)`);
+        }
+      }
+      return stmts;
+    };
+
+    const bodyLines = foldRange(0, insns.length, '      ', true);
+    return [`    (decompiled-pseudo-code`, ...bodyLines, `    )`];
+  };
+
+  const structureSnesSubroutineCfg = (insns, resolveSym = (s) => s) => {
     const used = new Uint8Array(insns.length);
     const loopsByHeader = new Map();
     const branchesByIdx = new Map();
     let structuredLoops = 0;
     let structuredConditionals = 0;
+    let hasCountedLoop = false;
+    let hasSpinWaitMmio = false;
 
     // 1. Identify backward branches (spin-wait-mmio-loop, counted-loop, do-while-loop)
     for (let i = 0; i < insns.length; i++) {
@@ -846,6 +1191,9 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
               : stepOp
                 ? 'counted-loop'
                 : 'do-while-loop';
+            if (loopKind === 'counted-loop') hasCountedLoop = true;
+            if (loopKind === 'spin-wait-mmio-loop') hasSpinWaitMmio = true;
+            const condExpr = inferSnesCondExpr(insns, i, ins.branchInfo.cond);
             loopsByHeader.set(headerIdx, {
               kind: loopKind,
               headerIdx,
@@ -855,6 +1203,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
               mmio: pollMmio,
               step: stepOp,
               cond: ins.branchInfo.cond,
+              condExpr,
             });
             structuredLoops++;
           }
@@ -912,6 +1261,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
             }
           }
 
+          const condExpr = inferSnesCondExpr(insns, i, ins.branchInfo.negCond);
           if (mergeIdx > joinIdx) {
             for (let k = i; k < mergeIdx; k++) used[k] = 1;
             const mergeAddr =
@@ -927,6 +1277,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
               elseAddr: insns[joinIdx].addr,
               mergeAddr,
               cond: ins.branchInfo.negCond,
+              condExpr,
             });
             structuredConditionals++;
           } else {
@@ -942,6 +1293,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
               branchAddr: ins.addr,
               joinAddr,
               cond: ins.branchInfo.negCond,
+              condExpr,
             });
             structuredConditionals++;
           }
@@ -951,7 +1303,8 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
 
     const formatInsnLine = (ins, indent) => {
       const mmioAnnot = ins.mmioSym ? ` #:mmio '${ins.mmioSym}` : '';
-      const callAnnot = ins.callTargetSym ? ` #:target '${ins.callTargetSym}` : '';
+      const resolvedTarget = ins.callTargetSym ? resolveSym(ins.callTargetSym) : null;
+      const callAnnot = resolvedTarget ? ` #:target '${resolvedTarget}` : '';
       return `${indent}(insn "${ins.addr}" (${ins.op} ${ins.arg}) #:M ${ins.mWidth} #:X ${ins.xWidth}${mmioAnnot}${callAnnot})`;
     };
 
@@ -965,11 +1318,11 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
           );
         } else if (lp.kind === 'counted-loop') {
           astLines.push(
-            `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond}`
+            `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
           );
         } else {
           astLines.push(
-            `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond}`
+            `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
           );
         }
         for (let k = lp.headerIdx; k <= lp.latchIdx; k++) {
@@ -981,7 +1334,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
         const br = branchesByIdx.get(i);
         if (br.kind === 'if-else') {
           astLines.push(
-            `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond}`
+            `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
           );
           astLines.push(`      (then-branch`);
           for (let k = br.branchIdx; k < br.elseIdx; k++) {
@@ -997,7 +1350,7 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
           i = br.mergeIdx;
         } else {
           astLines.push(
-            `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond}`
+            `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
           );
           for (let k = br.branchIdx; k < br.joinIdx; k++) {
             astLines.push(formatInsnLine(insns[k], '      '));
@@ -1011,7 +1364,8 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       }
     }
 
-    return { astLines, structuredLoops, structuredConditionals };
+    const pseudoCodeLines = synthesizeSnesPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym);
+    return { astLines, pseudoCodeLines, structuredLoops, structuredConditionals, hasCountedLoop, hasSpinWaitMmio };
   };
 
   const disassembleOneSub = (item) => {
@@ -1157,8 +1511,11 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
       mmioTouched: Array.from(mmioTouched),
       insns,
       structuredAstLines: cfg.astLines,
+      pseudoCodeLines: cfg.pseudoCodeLines,
       structuredLoops: cfg.structuredLoops,
       structuredConditionals: cfg.structuredConditionals,
+      hasCountedLoop: cfg.hasCountedLoop,
+      hasSpinWaitMmio: cfg.hasSpinWaitMmio,
     };
   };
 
@@ -1185,6 +1542,80 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
   }
 
   const subroutines = Array.from(liftedSubMap.values()).filter(Boolean);
+
+  // Semantic Subroutine Auto-Namer for SNES (WDC 65C816)
+  const classifySnesSubroutineName = (sub) => {
+    if (sub.name.startsWith('vec-')) return sub.name;
+    const bankStr = sub.bank.toString(16).padStart(2, '0').toUpperCase();
+    const addrStr = sub.startAddr.toString(16).padStart(4, '0').toUpperCase();
+    const suffix = `${bankStr}_${addrStr}`;
+    const mmios = new Set(sub.mmioTouched || []);
+    const hasAny = (list) => list.some((m) => mmios.has(m));
+    const hasPrefix = (pfx) => Array.from(mmios).some((m) => m.startsWith(pfx));
+    const hasBlockMove = sub.insns.some((ins) => ins.op === 'MVN' || ins.op === 'MVP');
+
+    if (hasAny(['APUIO0', 'APUIO1', 'APUIO2', 'APUIO3'])) {
+      return `spc700_apu_comm_${suffix}`;
+    }
+    if (sub.hasSpinWaitMmio || hasAny(['HVBJOY', 'RDNMI', 'TIMEUP'])) {
+      return `ppu_sync_wait_${suffix}`;
+    }
+    if (hasAny(['MDMAEN', 'HDMAEN']) || hasPrefix('DMA')) {
+      return `dma_hdma_transfer_${suffix}`;
+    }
+    if (hasAny(['VMAIN', 'VMADDL', 'VMADDH', 'VMDATAL', 'VMDATAH', 'VMDATALREAD', 'VMDATAHREAD'])) {
+      return `ppu_vram_upload_${suffix}`;
+    }
+    if (hasAny(['M7SEL', 'M7A', 'M7B', 'M7C', 'M7D', 'M7X', 'M7Y'])) {
+      return `ppu_mode7_matrix_${suffix}`;
+    }
+    if (hasAny(['WRMPYA', 'WRMPYB', 'WRDIVL', 'WRDIVH', 'WRDIVB', 'RDMPYL', 'RDMPYH', 'RDDIVL', 'RDDIVH', 'MPYL', 'MPYM', 'MPYH'])) {
+      return `hw_mult_div_math_${suffix}`;
+    }
+    if (hasAny(['JOY1L', 'JOY1H', 'JOY2L', 'JOY2H', 'JOY3L', 'JOY3H', 'JOY4L', 'JOY4H', 'JOYSER0', 'JOYSER1'])) {
+      return `joypad_read_input_${suffix}`;
+    }
+    if (
+      hasAny([
+        'BGMODE', 'BG1HOFS', 'BG1VOFS', 'BG2HOFS', 'BG2VOFS', 'BG3HOFS', 'BG3VOFS', 'BG4HOFS', 'BG4VOFS',
+        'INIDISP', 'CGADD', 'CGDATA', 'OBSEL', 'BG1SC', 'BG2SC', 'BG3SC', 'BG4SC', 'BG12NBA', 'BG34NBA', 'TM', 'TS',
+      ])
+    ) {
+      return `ppu_display_scroll_${suffix}`;
+    }
+    if (hasBlockMove) {
+      return `wram_block_move_${suffix}`;
+    }
+    if (sub.hasCountedLoop) {
+      return `engine_loop_update_${suffix}`;
+    }
+    return `engine_routine_${suffix}`;
+  };
+
+  const snesRenameMap = new Map();
+  for (const sub of subroutines) {
+    snesRenameMap.set(sub.name, classifySnesSubroutineName(sub));
+  }
+  const resolveSnesSubSym = (sym) => {
+    if (!sym) return sym;
+    if (snesRenameMap.has(sym)) return snesRenameMap.get(sym);
+    return sym.replace(/^sub-65c816-([0-9A-F]{2})-([0-9A-F]{4})$/, 'engine_routine_$1_$2');
+  };
+
+  for (const sub of subroutines) {
+    sub.name = resolveSnesSubSym(sub.name);
+    sub.callees = sub.callees.map(resolveSnesSubSym);
+    for (const ins of sub.insns) {
+      if (ins.callTargetSym) ins.callTargetSym = resolveSnesSubSym(ins.callTargetSym);
+    }
+    const cfg = structureSnesSubroutineCfg(sub.insns, resolveSnesSubSym);
+    sub.structuredAstLines = cfg.astLines;
+    sub.pseudoCodeLines = cfg.pseudoCodeLines;
+  }
+  for (const edge of callGraphEdges) {
+    edge.from = resolveSnesSubSym(edge.from);
+    edge.to = resolveSnesSubSym(edge.to);
+  }
   const spc700Driver = scanAndLiftSpc700AudioDriver(romBuf, isHirom);
   const topMmioRegisters = Array.from(mmioHistogram.entries())
     .sort((a, b) => b[1] - a[1])
@@ -1469,6 +1900,11 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
     lines.push(
       `  (defsub-65c816 ${sub.name} (bank #x${sub.bank.toString(16).padStart(2, '0')}) (entry #x${sub.startAddr.toString(16).padStart(4, '0')}) (mode-in #:M ${sub.entryM} #:X ${sub.entryX}) (mode-out #:M ${sub.exitM} #:X ${sub.exitX}) (cycles ${sub.totalCycles})${calleeList}${mmioList}`
     );
+    if (sub.pseudoCodeLines && sub.pseudoCodeLines.length > 0) {
+      for (const pLine of sub.pseudoCodeLines) {
+        lines.push(pLine);
+      }
+    }
     if (sub.structuredAstLines && sub.structuredAstLines.length > 0) {
       for (const astLine of sub.structuredAstLines) {
         lines.push(astLine);
@@ -2196,7 +2632,309 @@ function decodeThumb16Insn(hw, nextHw, pcAddr, romBuf) {
   };
 }
 
-function structureGbaSubroutineCfg(insns) {
+function inferGbaCondExpr(insns, branchIdx, condSym) {
+  const cmpOpMap = {
+    equal: '=',
+    'not-equal': '!=',
+    'carry-set': '>=',
+    'carry-clear': '<',
+    'unsigned-higher': '>',
+    'unsigned-lower-same': '<=',
+    'signed-ge': '>=',
+    'signed-lt': '<',
+    'signed-gt': '>',
+    'signed-le': '<=',
+    minus: '<',
+    plus: '>=',
+  };
+  const rel = cmpOpMap[condSym] || condSym;
+  for (let k = branchIdx - 1; k >= Math.max(0, branchIdx - 3); k--) {
+    const p = insns[k];
+    if (!p || !p.ast) continue;
+    let m;
+    if ((m = p.ast.match(/^\((?:THUMB-CMP-imm|THUMB-CMP|THUMB-CMP-hi)\s+(r\d+)\s+([^\s)]+)\)/))) {
+      let lhs = m[1];
+      const rhs = m[2];
+      if (k >= 1 && insns[k - 1].mmioSym && insns[k - 1].ast.includes(` ${lhs} `)) {
+        lhs = insns[k - 1].mmioSym;
+      }
+      return `(${rel} ${lhs} ${rhs})`;
+    }
+    if ((m = p.ast.match(/^\(ARM-CMP[A-Z]*\s+r\d+\s+(r\d+)\s+([^\s)]+)\)/))) {
+      return `(${rel} ${m[1]} ${m[2]})`;
+    }
+    if ((m = p.ast.match(/^\((?:THUMB-TST|THUMB-AND)\s+(r\d+)\s+(r\d+)\)/))) {
+      const bitExpr = `(bit-and ${m[1]} ${m[2]})`;
+      return condSym === 'equal' ? `(= ${bitExpr} 0)` : `(!= ${bitExpr} 0)`;
+    }
+    if ((m = p.ast.match(/^\(ARM-(?:TST|AND)[A-Z]*\s+r\d+\s+(r\d+)\s+([^\s)]+)\)/))) {
+      const bitExpr = `(bit-and ${m[1]} ${m[2]})`;
+      return condSym === 'equal' ? `(= ${bitExpr} 0)` : `(!= ${bitExpr} 0)`;
+    }
+    if ((m = p.ast.match(/^\((?:THUMB-SUB-imm|THUMB-ADD-imm|THUMB-SUB|THUMB-ADD|THUMB-LSL|THUMB-LSR|THUMB-ASR)\s+(r\d+)\s+/))) {
+      return `(${rel} ${m[1]} 0)`;
+    }
+    if ((m = p.ast.match(/^\(ARM-(?:SUB|ADD)[A-Z]*\s+(r\d+)\s+/))) {
+      return `(${rel} ${m[1]} 0)`;
+    }
+  }
+  return `(${condSym}? cpsr-flags)`;
+}
+
+function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym = (s) => s, subInfo = {}) {
+  const foldRange = (startIdx, endIdx, indent, topLevel = false) => {
+    const stmts = [];
+    const regExpr = new Map();
+    const regLitAddr = new Map();
+    const regDirty = new Set();
+
+    const getReg = (r) => regExpr.get(r) || r;
+    const setReg = (r, expr, dirty = true) => {
+      regExpr.set(r, expr);
+      if (dirty) regDirty.add(r);
+      else regDirty.delete(r);
+    };
+    const flushDirty = () => {
+      for (const r of Array.from(regDirty)) {
+        const val = regExpr.get(r);
+        if (val && val !== r) {
+          stmts.push(`${indent}(set! ${r} ${val})`);
+        }
+        regDirty.delete(r);
+      }
+    };
+
+    const resolveMemTarget = (rb, offNum, widthTag, insMmioSym) => {
+      if (regLitAddr.has(rb)) {
+        const effAddr = (regLitAddr.get(rb) + offNum) >>> 0;
+        const mmio = GBA_MMIO_SYMBOLS[effAddr] || insMmioSym;
+        regDirty.delete(rb);
+        if (mmio && (effAddr >= 0x04000000 && effAddr <= 0x040003fe)) {
+          const mmioKind = widthTag === 'u16' || widthTag === 's16' ? 'mmio16' : widthTag === 'u8' || widthTag === 's8' ? 'mmio8' : 'mmio32';
+          return `(${mmioKind} ${mmio})`;
+        }
+        if (mmio) {
+          return `(${mmio} #x${effAddr.toString(16).padStart(8, '0').toUpperCase()})`;
+        }
+        return `(mem-${widthTag} #x${effAddr.toString(16).padStart(8, '0').toUpperCase()})`;
+      }
+      if (insMmioSym && offNum === 0) {
+        regDirty.delete(rb);
+        const mmioKind = widthTag === 'u16' || widthTag === 's16' ? 'mmio16' : widthTag === 'u8' || widthTag === 's8' ? 'mmio8' : 'mmio32';
+        return `(${mmioKind} ${insMmioSym})`;
+      }
+      return `(-> ${rb} :offset_0x${offNum.toString(16).toUpperCase()} :${widthTag})`;
+    };
+
+    for (let k = startIdx; k < endIdx; ) {
+      if (topLevel && loopsByHeader.has(k)) {
+        const lp = loopsByHeader.get(k);
+        if (lp.kind === 'spin-wait-mmio-loop') {
+          flushDirty();
+          stmts.push(`${indent}(await-mmio! ${lp.mmio} ${lp.cond})`);
+        } else if (lp.kind === 'counted-loop') {
+          flushDirty();
+          stmts.push(`${indent}(loop-counted #:step ${lp.step} #:while ${lp.condExpr}`);
+          stmts.push(...foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false));
+          stmts.push(`${indent})`);
+        } else {
+          flushDirty();
+          stmts.push(`${indent}(do-while ${lp.condExpr}`);
+          stmts.push(...foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, false));
+          stmts.push(`${indent})`);
+        }
+        k = lp.latchIdx + 1;
+        continue;
+      }
+      if (topLevel && branchesByIdx.has(k)) {
+        const br = branchesByIdx.get(k);
+        flushDirty();
+        if (br.kind === 'if-else') {
+          stmts.push(`${indent}(if ${br.condExpr}`);
+          stmts.push(`${indent}  (then`);
+          stmts.push(...foldRange(br.branchIdx + 1, Math.max(br.branchIdx + 1, br.elseIdx - 1), `${indent}    `, false));
+          stmts.push(`${indent}  )`);
+          stmts.push(`${indent}  (else`);
+          stmts.push(...foldRange(br.elseIdx, br.mergeIdx, `${indent}    `, false));
+          stmts.push(`${indent}  ))`);
+          k = br.mergeIdx;
+          continue;
+        } else {
+          stmts.push(`${indent}(when ${br.condExpr}`);
+          stmts.push(...foldRange(br.branchIdx + 1, br.joinIdx, `${indent}  `, false));
+          stmts.push(`${indent})`);
+          k = br.joinIdx;
+          continue;
+        }
+      }
+
+      const ins = insns[k];
+      const ast = ins.ast || '';
+      let m;
+
+      if ((m = ast.match(/^\((?:THUMB-LDR-pc|ARM-LDR[A-Z]*-pc)\s+(r\d+)\s+\[pc\s+#x[0-9A-F]+\](?:\s+#:literal\s+(#x[0-9A-F]+))?(?:\s+#:sym\s+'([^\s)]+))?\)/))) {
+        const rd = m[1];
+        const litHex = m[2];
+        const sym = m[3] || null;
+        if (litHex) {
+          const litVal = parseInt(litHex.slice(2), 16) >>> 0;
+          regLitAddr.set(rd, litVal);
+          setReg(rd, sym && GBA_MMIO_SYMBOLS[litVal] ? sym : litHex, false);
+        }
+      } else if ((m = ast.match(/^\(ARM-MOV[A-Z]*\s+(r\d+)\s+r\d+\s+([^\s)]+)\)/))) {
+        const rd = m[1];
+        const rhs = m[2].startsWith('r') ? getReg(m[2]) : m[2];
+        setReg(rd, rhs, true);
+      } else if ((m = ast.match(/^\(ARM-MSR[A-Z]*\s+([^\s)]+)\s+([^\s)]+)\)/))) {
+        const psr = m[1];
+        const src = m[2];
+        const val = src.startsWith('r') ? getReg(src) : src;
+        if (src.startsWith('r')) regDirty.delete(src);
+        stmts.push(`${indent}(set! ${psr} ${val})`);
+      } else if ((m = ast.match(/^\(ARM-MRS[A-Z]*\s+(r\d+)\s+([^\s)]+)\)/))) {
+        setReg(m[1], m[2], true);
+      } else if ((m = ast.match(/^\(THUMB-MOV-imm\s+(r\d+)\s+(#x[0-9A-F]+)\)/))) {
+        setReg(m[1], m[2], true);
+        regLitAddr.delete(m[1]);
+      } else if ((m = ast.match(/^\(THUMB-MOV-hi\s+(r\d+)\s+(r\d+)\)/))) {
+        setReg(m[1], getReg(m[2]), true);
+      } else if ((m = ast.match(/^\((THUMB-ADD-imm|THUMB-SUB-imm)\s+(r\d+)\s+(#x[0-9A-F]+)\)/))) {
+        const opSym = m[1] === 'THUMB-ADD-imm' ? '+' : '-';
+        const rd = m[2];
+        setReg(rd, `(${opSym} ${getReg(rd)} ${m[3]})`, true);
+      } else if ((m = ast.match(/^\((THUMB-ADD|THUMB-SUB)\s+(r\d+)\s+(r\d+)\s+([^\s)]+)\)/))) {
+        const opSym = m[1] === 'THUMB-ADD' ? '+' : '-';
+        const rd = m[2];
+        const lhs = getReg(m[3]);
+        const rhs = m[4].startsWith('r') ? getReg(m[4]) : m[4];
+        setReg(rd, `(${opSym} ${lhs} ${rhs})`, true);
+      } else if ((m = ast.match(/^\((THUMB-LSL|THUMB-LSR|THUMB-ASR)\s+(r\d+)\s+(r\d+)\s+(#x[0-9A-F]+)\)/))) {
+        const shiftFn = m[1] === 'THUMB-LSL' ? 'shl' : m[1] === 'THUMB-LSR' ? 'shr' : 'ashr';
+        const rd = m[2];
+        const rs = getReg(m[3]);
+        const amt = parseInt(m[4].slice(2), 16);
+        setReg(rd, amt === 0 ? rs : `(${shiftFn} ${rs} ${amt})`, true);
+      } else if ((m = ast.match(/^\((THUMB-AND|THUMB-ORR|THUMB-EOR|THUMB-BIC|THUMB-MUL|THUMB-MVN|THUMB-NEG|THUMB-LSL-reg|THUMB-LSR-reg|THUMB-ASR-reg)\s+(r\d+)\s+(r\d+)\)/))) {
+        const opMap = {
+          'THUMB-AND': 'bit-and',
+          'THUMB-ORR': 'bit-ior',
+          'THUMB-EOR': 'bit-xor',
+          'THUMB-BIC': 'bit-and-not',
+          'THUMB-MUL': '*',
+          'THUMB-LSL-reg': 'shl',
+          'THUMB-LSR-reg': 'shr',
+          'THUMB-ASR-reg': 'ashr',
+        };
+        const rd = m[2];
+        const rs = getReg(m[3]);
+        if (m[1] === 'THUMB-MVN') {
+          setReg(rd, `(bit-not ${rs})`, true);
+        } else if (m[1] === 'THUMB-NEG') {
+          setReg(rd, `(- 0 ${rs})`, true);
+        } else {
+          setReg(rd, `(${opMap[m[1]]} ${getReg(rd)} ${rs})`, true);
+        }
+      } else if ((m = ast.match(/^\(ARM-(ADD|SUB|AND|ORR|EOR|BIC)[A-Z]*\s+(r\d+)\s+(r\d+)\s+([^\s)]+)\)/))) {
+        const opMap = { ADD: '+', SUB: '-', AND: 'bit-and', ORR: 'bit-ior', EOR: 'bit-xor', BIC: 'bit-and-not' };
+        const rd = m[2];
+        const rn = m[3] === 'r15' ? `pc` : getReg(m[3]);
+        const rhs = m[4].startsWith('r') ? getReg(m[4]) : m[4];
+        setReg(rd, `(${opMap[m[1]]} ${rn} ${rhs})`, true);
+      } else if ((m = ast.match(/^\((THUMB-STR-imm|THUMB-STRH-imm|THUMB-STRB-imm|ARM-STR[A-Z]*|ARM-STRB[A-Z]*)\s+(r\d+)\s+\[(r\d+)\s+#x([0-9A-F]+)\]\)/))) {
+        const mnem = m[1];
+        const rd = m[2];
+        const rb = m[3];
+        const offNum = parseInt(m[4], 16);
+        const widthTag = mnem.includes('STRH') ? 'u16' : mnem.includes('STRB') ? 'u8' : 'u32';
+        const targetExpr = resolveMemTarget(rb, offNum, widthTag, ins.mmioSym);
+        let valExpr = getReg(rd);
+        if (valExpr === '#x0' && targetExpr.startsWith('(mmio16 ')) {
+          valExpr = '#x0000';
+        }
+        regDirty.delete(rd);
+        stmts.push(`${indent}(set! ${targetExpr} ${valExpr})`);
+      } else if ((m = ast.match(/^\((THUMB-LDR-imm|THUMB-LDRH-imm|THUMB-LDRB-imm|ARM-LDR[A-Z]*|ARM-LDRB[A-Z]*)\s+(r\d+)\s+\[(r\d+)\s+#x([0-9A-F]+)\]\)/))) {
+        const mnem = m[1];
+        const rd = m[2];
+        const rb = m[3];
+        const offNum = parseInt(m[4], 16);
+        const widthTag = mnem.includes('LDRH') ? 'u16' : mnem.includes('LDRB') ? 'u8' : 'u32';
+        const srcExpr = resolveMemTarget(rb, offNum, widthTag, ins.mmioSym);
+        setReg(rd, srcExpr, true);
+        regLitAddr.delete(rd);
+      } else if ((m = ast.match(/^\((THUMB-STR-reg|THUMB-STRH-reg|THUMB-STRB-reg)\s+(r\d+)\s+\[(r\d+)\s+(r\d+)\]\)/))) {
+        const widthTag = m[1].includes('STRH') ? 'u16' : m[1].includes('STRB') ? 'u8' : 'u32';
+        const rd = m[2];
+        const valExpr = getReg(rd);
+        regDirty.delete(rd);
+        stmts.push(`${indent}(set! (array-ref ${m[3]} ${m[4]} :${widthTag}) ${valExpr})`);
+      } else if ((m = ast.match(/^\((THUMB-LDR-reg|THUMB-LDRH-reg|THUMB-LDRB-reg|THUMB-LDSB-reg|THUMB-LDSH-reg)\s+(r\d+)\s+\[(r\d+)\s+(r\d+)\]\)/))) {
+        const widthTag = m[1].includes('LDRH') ? 'u16' : m[1].includes('LDSH') ? 's16' : m[1].includes('LDRB') ? 'u8' : m[1].includes('LDSB') ? 's8' : 'u32';
+        setReg(m[2], `(array-ref ${m[3]} ${m[4]} :${widthTag})`, true);
+      } else if ((m = ast.match(/^\((?:THUMB-SWI|ARM-SWI[A-Z]*)\s+#x[0-9A-F]+\s+'([^\s)]+)\)/))) {
+        const swiName = m[1];
+        const twoArgSwis = new Set([
+          'LZ77UnCompVram', 'LZ77UnCompWram', 'CpuSet', 'CpuFastSet',
+          'Diff8bitUnFilterWram', 'Diff8bitUnFilterVram', 'Diff16bitUnFilter',
+          'BgAffineSet', 'ObjAffineSet', 'BitUnPack', 'Div', 'HuffUnComp', 'RLUnCompWram', 'RLUnCompVram',
+        ]);
+        if (twoArgSwis.has(swiName)) {
+          stmts.push(`${indent}(bios-call ${swiName} r0 r1)`);
+        } else {
+          stmts.push(`${indent}(bios-call ${swiName})`);
+        }
+        regDirty.delete('r0');
+        regDirty.delete('r1');
+      } else if ((m = ast.match(/^\((?:THUMB-BL|ARM-BL[A-Z]*)\s+(#x[0-9A-F]+)\)/))) {
+        const targetSym = ins.callTargetSym ? resolveSym(ins.callTargetSym) : m[1];
+        regDirty.delete('r0');
+        regDirty.delete('r1');
+        regDirty.delete('r2');
+        regDirty.delete('r3');
+        stmts.push(`${indent}(call ${targetSym})`);
+      } else if ((m = ast.match(/^\((?:THUMB-BX|ARM-BX[A-Z]*)\s+(r\d+)\)/))) {
+        const rn = m[1];
+        if (rn === 'r14') {
+          flushDirty();
+          stmts.push(`${indent}(return)`);
+        } else if (subInfo.interworkThumbSym) {
+          regDirty.delete(rn);
+          stmts.push(`${indent}(call ${resolveSym(subInfo.interworkThumbSym)})`);
+        } else {
+          const target = getReg(rn);
+          regDirty.delete(rn);
+          stmts.push(`${indent}(call ${target})`);
+        }
+      } else if ((m = ast.match(/^\(ARM-B\s+(#x[0-9A-F]+)\)/))) {
+        if (subInfo.name === 'rom-header-entry') {
+          stmts.push(`${indent}(call arm7tdmi-reset-start)`);
+        } else {
+          stmts.push(`${indent}(tail-jump ${m[1]})`);
+        }
+      } else if ((m = ast.match(/^\((?:THUMB-POP|ARM-POP[A-Z]*).*?\bpc\b/))) {
+        flushDirty();
+        stmts.push(`${indent}(return)`);
+      } else if ((m = ast.match(/^\((THUMB-LDMIA|THUMB-STMIA)\s+(r\d+)!\s+"([^"]+)"\)/))) {
+        const opKind = m[1] === 'THUMB-LDMIA' ? 'block-load!' : 'block-store!';
+        stmts.push(`${indent}(${opKind} ${m[2]} "${m[3]}")`);
+      }
+      k++;
+    }
+
+    if (stmts.length === 0) {
+      flushDirty();
+      if (stmts.length === 0) {
+        stmts.push(`${indent}(nop)`);
+      }
+    }
+    return stmts;
+  };
+
+  const bodyLines = foldRange(0, insns.length, '      ', true);
+  return [`    (decompiled-pseudo-code`, ...bodyLines, `    )`];
+}
+
+function structureGbaSubroutineCfg(insns, resolveSym = (s) => s, subInfo = {}) {
   const used = new Uint8Array(insns.length);
   const loopsByHeader = new Map();
   const branchesByIdx = new Map();
@@ -2236,6 +2974,7 @@ function structureGbaSubroutineCfg(insns) {
             : stepOp
               ? 'counted-loop'
               : 'do-while-loop';
+          const condExpr = inferGbaCondExpr(insns, i, ins.branchInfo.cond);
           loopsByHeader.set(headerIdx, {
             kind: loopKind,
             headerIdx,
@@ -2245,6 +2984,7 @@ function structureGbaSubroutineCfg(insns) {
             mmio: pollMmio,
             step: stepOp,
             cond: ins.branchInfo.cond,
+            condExpr,
           });
           structuredLoops++;
         }
@@ -2301,6 +3041,7 @@ function structureGbaSubroutineCfg(insns) {
           }
         }
 
+        const condExpr = inferGbaCondExpr(insns, i, ins.branchInfo.negCond);
         if (mergeIdx > joinIdx) {
           for (let k = i; k < mergeIdx; k++) used[k] = 1;
           const mergeAddr =
@@ -2316,6 +3057,7 @@ function structureGbaSubroutineCfg(insns) {
             elseAddr: insns[joinIdx].addr,
             mergeAddr,
             cond: ins.branchInfo.negCond,
+            condExpr,
           });
           structuredConditionals++;
         } else {
@@ -2331,6 +3073,7 @@ function structureGbaSubroutineCfg(insns) {
             branchAddr: ins.addr,
             joinAddr,
             cond: ins.branchInfo.negCond,
+            condExpr,
           });
           structuredConditionals++;
         }
@@ -2338,7 +3081,11 @@ function structureGbaSubroutineCfg(insns) {
     }
   }
 
-  const formatInsnLine = (ins, indent) => `${indent}(insn "${ins.addr}" ${ins.wordHex} ${ins.ast})`;
+  const formatInsnLine = (ins, indent) => {
+    const resolvedTarget = ins.callTargetSym ? resolveSym(ins.callTargetSym) : null;
+    const callAnnot = resolvedTarget ? ` #:target '${resolvedTarget}` : '';
+    return `${indent}(insn "${ins.addr}" ${ins.wordHex} ${ins.ast}${callAnnot})`;
+  };
 
   const astLines = [];
   for (let i = 0; i < insns.length; ) {
@@ -2350,11 +3097,11 @@ function structureGbaSubroutineCfg(insns) {
         );
       } else if (lp.kind === 'counted-loop') {
         astLines.push(
-          `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond}`
+          `    (counted-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:step '${lp.step} #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
         );
       } else {
         astLines.push(
-          `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond}`
+          `    (do-while-loop #:header "${lp.headerAddr}" #:latch "${lp.latchAddr}" #:cond '${lp.cond} #:cond-expr '${lp.condExpr}`
         );
       }
       for (let k = lp.headerIdx; k <= lp.latchIdx; k++) {
@@ -2366,7 +3113,7 @@ function structureGbaSubroutineCfg(insns) {
       const br = branchesByIdx.get(i);
       if (br.kind === 'if-else') {
         astLines.push(
-          `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond}`
+          `    (if-else #:branch "${br.branchAddr}" #:else "${br.elseAddr}" #:merge "${br.mergeAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
         );
         astLines.push(`      (then-branch`);
         for (let k = br.branchIdx; k < br.elseIdx; k++) {
@@ -2382,7 +3129,7 @@ function structureGbaSubroutineCfg(insns) {
         i = br.mergeIdx;
       } else {
         astLines.push(
-          `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond}`
+          `    (when-branch #:branch "${br.branchAddr}" #:join "${br.joinAddr}" #:cond '${br.cond} #:cond-expr '${br.condExpr}`
         );
         for (let k = br.branchIdx; k < br.joinIdx; k++) {
           astLines.push(formatInsnLine(insns[k], '      '));
@@ -2396,7 +3143,8 @@ function structureGbaSubroutineCfg(insns) {
     }
   }
 
-  return { astLines, structuredLoops, structuredConditionals };
+  const pseudoCodeLines = synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym, subInfo);
+  return { astLines, pseudoCodeLines, structuredLoops, structuredConditionals };
 }
 
 function scanGbaLz77Assets(romBuf, maxAssets = 20) {
@@ -2580,6 +3328,8 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     const insns = [];
     const literals = [];
     const callees = [];
+    const mmioTouched = new Set();
+    const swisCalled = new Set();
     const regPoolVals = new Map();
     let interworkThumbTarget = null;
     let irqHandlerArmTarget = null;
@@ -2596,11 +3346,20 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       if (dec.literalRd !== undefined && dec.literalVal !== null) {
         regPoolVals.set(dec.literalRd, dec.literalVal);
         literals.push({ val: dec.literalVal, sym: dec.literalSym });
-        if (dec.literalSym) bumpMmio(dec.literalSym);
+        if (dec.literalSym) {
+          bumpMmio(dec.literalSym);
+          mmioTouched.add(dec.literalSym);
+        }
       } else if (dec.loadBaseReg !== undefined && regPoolVals.has(dec.loadBaseReg)) {
         const effAddr = (regPoolVals.get(dec.loadBaseReg) + (dec.loadOffset || 0)) >>> 0;
         const resolved = GBA_MMIO_SYMBOLS[effAddr] || classifyGbaLiteralAddress(effAddr);
-        if (resolved) mmioSym = resolved;
+        if (resolved) {
+          mmioSym = resolved;
+          mmioTouched.add(resolved);
+        }
+      }
+      if (dec.swiName) {
+        swisCalled.add(dec.swiName);
       }
       // Track ADD Rd, PC, #imm (e.g. 0xE28F0020 computing IntrMain address in arm7tdmi-reset-start)
       if ((w & 0x0fef0000) === 0x028f0000) {
@@ -2618,10 +3377,11 @@ function analyzeAndDisassembleGbaRom(romBuf) {
           interworkThumbTarget = (bxTarget & ~1) >>> 0;
         }
       }
+      let callTargetSym = null;
       if (dec.callTarget && (dec.callTarget >>> 24) === 0x08) {
-        const targetSym = `sub-arm-${dec.callTarget.toString(16).toUpperCase()}`;
-        callees.push(targetSym);
-        callGraphEdges.push({ from: name, to: targetSym, kind: 'ARM-BL' });
+        callTargetSym = `sub-arm-${dec.callTarget.toString(16).toUpperCase()}`;
+        callees.push(callTargetSym);
+        callGraphEdges.push({ from: name, to: callTargetSym, kind: 'ARM-BL' });
       }
       const branchInfo = dec.branchCondCode !== null && dec.branchCondCode !== undefined
         ? (GBA_BRANCH_COND_MAP[dec.branchCondCode] || null)
@@ -2636,6 +3396,8 @@ function analyzeAndDisassembleGbaRom(romBuf) {
         wordHex: `#x${w.toString(16).padStart(8, '0').toUpperCase()}`,
         ast: dec.ast,
         mmioSym,
+        swiName: dec.swiName || null,
+        callTargetSym,
         stepOp: dec.stepOp || null,
         branchTarget: dec.branchTarget || null,
         branchInfo,
@@ -2648,17 +3410,24 @@ function analyzeAndDisassembleGbaRom(romBuf) {
         if (!isLocalBranch) break;
       }
     }
-    const cfg = structureGbaSubroutineCfg(insns);
+    const interworkThumbSym = interworkThumbTarget
+      ? `thumb-bx-entry-${interworkThumbTarget.toString(16).toUpperCase()}`
+      : null;
+    const cfg = structureGbaSubroutineCfg(insns, (s) => s, { name, interworkThumbSym });
     return {
       isa: 'arm32',
       name,
       startAddr,
       callees,
       literals,
+      mmioTouched: Array.from(mmioTouched),
+      swisCalled: Array.from(swisCalled),
       interworkThumbTarget,
+      interworkThumbSym,
       irqHandlerArmTarget,
       insns,
       structuredAstLines: cfg.astLines,
+      pseudoCodeLines: cfg.pseudoCodeLines,
       structuredLoops: cfg.structuredLoops,
       structuredConditionals: cfg.structuredConditionals,
     };
@@ -2668,6 +3437,8 @@ function analyzeAndDisassembleGbaRom(romBuf) {
     const insns = [];
     const literals = [];
     const callees = [];
+    const mmioTouched = new Set();
+    const swisCalled = new Set();
     const regPoolVals = new Map();
     const startAddr = 0x08000000 + startOff;
     let curOff = startOff;
@@ -2684,19 +3455,27 @@ function analyzeAndDisassembleGbaRom(romBuf) {
       if (dec.literalVal !== null) {
         if (dec.literalRd !== undefined) regPoolVals.set(dec.literalRd, dec.literalVal);
         literals.push({ val: dec.literalVal, sym: dec.literalSym });
-        if (dec.literalSym) bumpMmio(dec.literalSym);
+        if (dec.literalSym) {
+          bumpMmio(dec.literalSym);
+          mmioTouched.add(dec.literalSym);
+        }
       } else if (dec.loadBaseReg !== undefined && regPoolVals.has(dec.loadBaseReg)) {
         const effAddr = (regPoolVals.get(dec.loadBaseReg) + (dec.loadOffset || 0)) >>> 0;
         const resolved = GBA_MMIO_SYMBOLS[effAddr] || classifyGbaLiteralAddress(effAddr);
-        if (resolved) mmioSym = resolved;
+        if (resolved) {
+          mmioSym = resolved;
+          mmioTouched.add(resolved);
+        }
       }
       if (dec.swiName) {
         bumpSwi(dec.swiName);
+        swisCalled.add(dec.swiName);
       }
+      let callTargetSym = null;
       if (dec.callTarget && (dec.callTarget >>> 24) === 0x08) {
-        const targetSym = `sub-thumb-${dec.callTarget.toString(16).toUpperCase()}`;
-        callees.push(targetSym);
-        callGraphEdges.push({ from: name, to: targetSym, kind: 'THUMB-BL' });
+        callTargetSym = `sub-thumb-${dec.callTarget.toString(16).toUpperCase()}`;
+        callees.push(callTargetSym);
+        callGraphEdges.push({ from: name, to: callTargetSym, kind: 'THUMB-BL' });
         const tOff = dec.callTarget - 0x08000000;
         if (tOff >= 0x100 && tOff + 16 < romBuf.length && !seenThumbOffsets.has(tOff) && thumbFunctionOffsets.length < 72) {
           seenThumbOffsets.add(tOff);
@@ -2717,6 +3496,8 @@ function analyzeAndDisassembleGbaRom(romBuf) {
         wordHex: dec.rawHex,
         ast: dec.ast,
         mmioSym,
+        swiName: dec.swiName || null,
+        callTargetSym,
         stepOp: dec.stepOp || null,
         branchTarget: dec.branchTarget || null,
         branchInfo,
@@ -2732,15 +3513,18 @@ function analyzeAndDisassembleGbaRom(romBuf) {
         if (!isLocalBranch && nextPc > maxForwardTarget) break;
       }
     }
-    const cfg = structureGbaSubroutineCfg(insns);
+    const cfg = structureGbaSubroutineCfg(insns, (s) => s, { name });
     return {
       isa: 'thumb16',
       name,
       startAddr,
       callees,
       literals,
+      mmioTouched: Array.from(mmioTouched),
+      swisCalled: Array.from(swisCalled),
       insns,
       structuredAstLines: cfg.astLines,
+      pseudoCodeLines: cfg.pseudoCodeLines,
       structuredLoops: cfg.structuredLoops,
       structuredConditionals: cfg.structuredConditionals,
     };
@@ -2793,6 +3577,91 @@ function analyzeAndDisassembleGbaRom(romBuf) {
   }
 
   const subroutines = [...armSubroutines, ...thumbSubroutines];
+
+  // Semantic Subroutine Auto-Namer for GBA (ARM7TDMI ARM32 & Thumb16)
+  const classifyGbaSubroutineName = (sub) => {
+    if (
+      sub.name === 'rom-header-entry' ||
+      sub.name === 'arm7tdmi-reset-start' ||
+      sub.name.startsWith('arm32-irq-dispatcher-') ||
+      sub.name.startsWith('thumb-bx-entry-')
+    ) {
+      return sub.name;
+    }
+    const addrHex = sub.startAddr.toString(16).toUpperCase();
+    const swis = new Set(sub.swisCalled || []);
+    const mmios = new Set(sub.mmioTouched || []);
+    const hasAnySwi = (list) => list.some((s) => swis.has(s));
+    const hasAnyMmio = (list) => list.some((m) => mmios.has(m));
+    const hasMmioPrefix = (pfx) => Array.from(mmios).some((m) => m.startsWith(pfx));
+
+    if (hasAnySwi(['LZ77UnCompVram', 'LZ77UnCompWram', 'HuffUnComp', 'RLUnCompVram', 'RLUnCompWram'])) {
+      return `lz77_decompress_asset_${addrHex}`;
+    }
+    if (hasAnySwi(['VBlankIntrWait', 'IntrWait'])) {
+      return `bios_vblank_sync_${addrHex}`;
+    }
+    if (hasMmioPrefix('DMA0') || hasMmioPrefix('DMA1') || hasMmioPrefix('DMA2') || hasMmioPrefix('DMA3')) {
+      return `dma_channel_transfer_${addrHex}`;
+    }
+    if (hasAnyMmio(['DISPSTAT', 'VCOUNT', 'IME', 'IE', 'IF', 'INTR_CHECK_FLAGS', 'IRQ_HANDLER_PTR'])) {
+      return `irq_display_sync_${addrHex}`;
+    }
+    if (
+      hasAnyMmio([
+        'DISPCNT', 'GREENSWAP',
+        'BG0CNT', 'BG1CNT', 'BG2CNT', 'BG3CNT',
+        'BG0HOFS', 'BG0VOFS', 'BG1HOFS', 'BG1VOFS', 'BG2HOFS', 'BG2VOFS', 'BG3HOFS', 'BG3VOFS',
+        'BG2PA', 'BG2PB', 'BG2PC', 'BG2PD', 'BG2X_L', 'BG2X_H', 'BG2Y_L', 'BG2Y_H',
+        'BG3PA', 'BG3PB', 'BG3PC', 'BG3PD', 'BG3X_L', 'BG3X_H', 'BG3Y_L', 'BG3Y_H',
+        'WIN0H', 'WIN1H', 'WIN0V', 'WIN1V', 'WININ', 'WINOUT', 'MOSAIC', 'BLDCNT', 'BLDALPHA', 'BLDY',
+        'VRAM_PTR', 'PALRAM_PTR', 'OAM_PTR',
+      ])
+    ) {
+      return `ppu_layer_control_${addrHex}`;
+    }
+    if (hasAnyMmio(['KEYINPUT', 'KEYCNT'])) {
+      return `joypad_key_poll_${addrHex}`;
+    }
+    if (hasMmioPrefix('SOUND') || hasAnyMmio(['FIFO_A', 'FIFO_B'])) {
+      return `directsound_audio_mix_${addrHex}`;
+    }
+    if ((sub.structuredLoops || 0) > 0) {
+      return `ewram_loop_step_${addrHex}`;
+    }
+    return `agb_engine_fn_${addrHex}`;
+  };
+
+  const gbaRenameMap = new Map();
+  for (const sub of subroutines) {
+    const newName = classifyGbaSubroutineName(sub);
+    gbaRenameMap.set(sub.name, newName);
+    sub.name = newName;
+  }
+  const resolveGbaSym = (sym) => {
+    if (!sym) return sym;
+    if (gbaRenameMap.has(sym)) return gbaRenameMap.get(sym);
+    const m = sym.match(/^sub-(?:arm|thumb)-([0-9A-F]+)$/i);
+    if (m) return `agb_engine_fn_${m[1].toUpperCase()}`;
+    return sym;
+  };
+  for (const sub of subroutines) {
+    sub.callees = (sub.callees || []).map(resolveGbaSym);
+    for (const ins of sub.insns) {
+      if (ins.callTargetSym) ins.callTargetSym = resolveGbaSym(ins.callTargetSym);
+    }
+    const reCfg = structureGbaSubroutineCfg(sub.insns, resolveGbaSym, {
+      name: sub.name,
+      interworkThumbSym: sub.interworkThumbSym,
+    });
+    sub.structuredAstLines = reCfg.astLines;
+    sub.pseudoCodeLines = reCfg.pseudoCodeLines;
+  }
+  for (const edge of callGraphEdges) {
+    edge.from = resolveGbaSym(edge.from);
+    edge.to = resolveGbaSym(edge.to);
+  }
+
   const lz77Assets = scanGbaLz77Assets(romBuf, 20);
   const topMmioRegisters = Array.from(mmioHistogram.entries())
     .sort((a, b) => b[1] - a[1])
@@ -3090,6 +3959,11 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
     lines.push(
       `  (${formName} ${sub.name} (isa '${sub.isa}) (entry #x${sub.startAddr.toString(16).padStart(8, '0')})${calleeStr}`
     );
+    if (sub.pseudoCodeLines && sub.pseudoCodeLines.length > 0) {
+      for (const pLine of sub.pseudoCodeLines) {
+        lines.push(pLine);
+      }
+    }
     if (sub.structuredAstLines && sub.structuredAstLines.length > 0) {
       for (const astLine of sub.structuredAstLines) {
         lines.push(astLine);

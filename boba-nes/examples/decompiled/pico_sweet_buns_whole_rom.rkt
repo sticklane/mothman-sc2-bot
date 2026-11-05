@@ -66,6 +66,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "x<0x0.002 and x>0xffff.ffe0 and 0 or x end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function zero(x) return x<0x0.002 and x>0xffff.ffe0 and 0 or x end"))
     (def-pico-function
@@ -76,6 +78,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "min(x, y), max(x, y) end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function minmax(x, y) return min(x, y), max(x, y) end"))
     (def-pico-function
@@ -86,6 +90,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "cos(a), sin(-a) end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function cos_sin(a) a*=0x0.28be return cos(a), sin(-a) end"))
     (def-pico-function
@@ -96,6 +102,9 @@
       (called-functions (cos_sin))
       (structured-ast
         (return-expr "x*ca-y*sa+tx, x*sa+y*ca+ty"))
+      (decompiled-pseudo-code
+        (set! |ca, sa| "cos_sin(ta)")
+        (return "x*ca-y*sa+tx, x*sa+y*ca+ty"))
       (body-lines
         "function transform(x, y, tx, ty, ta)"
         "  local ca, sa = cos_sin(ta)"
@@ -109,6 +118,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! self "{")
+        (set! x1 "x1 or 0x7fff, y1=y1 or 0x7fff,")
+        (set! x2 "x2 or 0x8000, y2=y2 or 0x8000,"))
       (body-lines
         "function aabb(x1, y1, x2, y2)"
         "  local self"
@@ -123,6 +136,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! set "function(x1, y1, x2, y2)"))
       (body-lines
         "    set=function(x1, y1, x2, y2)"
         "      self.x1, self.y1, self.x2, self.y2 ="
@@ -136,6 +151,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "self.x2>=b.x1 and self.x1<=b.x2 and"))
+      (decompiled-pseudo-code
+        (set! overlaps "function(b)")
+        (return "self.x2>=b.x1 and self.x1<=b.x2 and"))
       (body-lines
         "    overlaps=function(b)"
         "      return self.x2>=b.x1 and self.x1<=b.x2 and"
@@ -149,6 +167,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "b.x1>=self.x1 and b.y1>=self.y1 and"))
+      (decompiled-pseudo-code
+        (set! contains "function(b)")
+        (return "b.x1>=self.x1 and b.y1>=self.y1 and"))
       (body-lines
         "    contains=function(b)"
         "      return b.x1>=self.x1 and b.y1>=self.y1 and"
@@ -162,6 +183,10 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (set! args "args or {}")
+        (set! scale "args.scale or 16")
+        (return "{"))
       (body-lines
         "function viewport(args)"
         "  args = args or {}"
@@ -180,6 +205,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! translate "function(tx, ty)")
+        (set! |m13, m23| "m11*tx+m12*ty+m13, m21*tx+m22*ty+m23"))
       (body-lines
         "    translate=function(tx, ty)"
         "      --tx/=scale ty/=scale"
@@ -193,6 +221,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! scale "function(s) scale*=s m11*=s m12*=s m21*=s m22*=s end,"))
       (body-lines
         "    scale=function(s) scale*=s m11*=s m12*=s m21*=s m22*=s end,"))
     (def-pico-function
@@ -203,6 +233,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "m11*x+m12*y+m13, m21*x+m22*y+m23"))
+      (decompiled-pseudo-code
+        (set! to_screen "function(x, y)")
+        (return "m11*x+m12*y+m13, m21*x+m22*y+m23"))
       (body-lines
         "    to_screen=function(x, y) -- converts metres to pixels"
         "      return m11*x+m12*y+m13, m21*x+m22*y+m23"
@@ -215,6 +248,9 @@
       (called-functions (aabb sweep_and_prune))
       (structured-ast
         (seq-block 12))
+      (decompiled-pseudo-code
+        (set! args "args or {}")
+        (set! size "args.size or 10"))
       (body-lines
         "function scene(args)"
         "  args = args or {}"
@@ -237,6 +273,9 @@
       (structured-ast
         (for-loop "foreach(args, function(evt)")
         (if-cond "(listeners[evt.id]"))
+      (decompiled-pseudo-code
+        (foreach "args" "function(evt")
+        (when "listeners[evt.id]" "listeners[evt.id].on_event(evt)"))
       (body-lines
         "  local function send_messages(args)"
         "    foreach(args, function(evt)"
@@ -251,6 +290,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "id==island[id] and id or find(island[id]) end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "  local function find(id) return id==island[id] and id or find(island[id]) end"))
     (def-pico-function
@@ -261,6 +302,8 @@
       (called-functions (find minmax))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "  local function union(id1, id2) id2, id1 = minmax(find(id1), find(id2)) island[id1] = id2 end"))
     (def-pico-function
@@ -272,6 +315,8 @@
       (structured-ast
         (for-loop "cid in pairs(contact_ids)")
         (if-cond "(id==shr(band(cid, 0xff00"))
+      (decompiled-pseudo-code
+        (set! |dead[id], alive[id], geom[id], listeners[id]| "true"))
       (body-lines
         "  local function remove_body(id)"
         "    send_messages{ { id=id, event=0x05 } }"
@@ -287,6 +332,8 @@
       (called-functions (find))
       (structured-ast
         (return-expr "dynamic[id] and awake[find(id)] end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "  local function is_awake(id) return dynamic[id] and awake[find(id)] end"))
     (def-pico-function
@@ -299,6 +346,10 @@
         (if-cond "awake[isle]")
         (if-cond "(island[id]==isle")
         (for-loop "id in pairs(alive)"))
+      (decompiled-pseudo-code
+        (set! isle "island[id]")
+        (when "awake[isle]")
+        (set! |island_sframes[isle], awake[isle]| "0"))
       (body-lines
         "  local function sleep(id)"
         "    local isle = island[id]"
@@ -316,6 +367,10 @@
         (if-cond "not awake[isle] and dynamic[isle]")
         (if-cond "(island[id]==isle")
         (for-loop "id in pairs(alive)"))
+      (decompiled-pseudo-code
+        (set! isle "island[id]")
+        (when "not awake[isle] and dynamic[isle]")
+        (set! |awake[isle]| "true"))
       (body-lines
         "  local function wake(id)"
         "    local isle = island[id]"
@@ -331,6 +386,13 @@
       (called-functions (wake))
       (structured-ast
         (return-expr "vx[id], vy[id], va[id]"))
+      (decompiled-pseudo-code
+        (call wake "id")
+        (set! |px, py| "px and px-x[id] or 0, py and py-y[id] or 0")
+        (+= |vx[id]| "fx*imass[id]*dt")
+        (+= |vy[id]| "fy*imass[id]*dt")
+        (-= |va[id]| "(fx*py-fy*px)*imoi[id]*dt")
+        (return "vx[id], vy[id], va[id]"))
       (body-lines
         "  local function apply_force(id, dt, fx, fy, px, py)"
         "    wake(id)"
@@ -348,6 +410,12 @@
       (called-functions (wake))
       (structured-ast
         (return-expr "vx[id], vy[id], va[id]"))
+      (decompiled-pseudo-code
+        (call wake "id")
+        (+= |vx[id]| "px*imass[id]")
+        (+= |vy[id]| "py*imass[id]")
+        (+= |va[id]| "pa*imoi[id]")
+        (return "vx[id], vy[id], va[id]"))
       (body-lines
         "  local function apply_impulse(id, px, py, pa)"
         "    wake(id)"
@@ -364,6 +432,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! nx "nx,ny=ny,"))
       (body-lines
         "  local function contact(id1, id2, nx, ny)"
         "    local lambdan, lambdat, r, f, jn3, jn6, jmn, b, jt3, jt6, jmt ="
@@ -381,6 +452,14 @@
         (if-cond "(nx*vx1+ny*vy1+jn3*va1-nx*vx2-ny*vy2+jn6*va2>=0")
         (return-expr "false")
         (if-cond "abs(lambdan"))
+      (decompiled-pseudo-code
+        (set! eval "function(dt, dist, px1, py1, px2, py2)")
+        (set! |jn3, jn6| "rx1*ny-ry1*nx, ry2*nx-rx2*ny")
+        (when "nx*vx1+ny*vy1+jn3*va1-nx*vx2-ny*vy2+jn6*va2>=0" "return false")
+        (when "abs(lambdan)+abs(lambdat)>0")
+        (set! |px, py| "nx*lambdan-ny*lambdat, ny*lambdan+nx*lambdat")
+        (set! |vx1, vy1, va1| "apply_impulse(id1, px, py, rx1*py-ry1*px)")
+        (set! |vx2, vy2, va2| "apply_impulse(id2, -px, -py, ry2*px-rx2*py)"))
       (body-lines
         "      eval=function(dt, dist, px1, py1, px2, py2)"
         "        local rx1, ry1, rx2, ry2, vx1, vy1, va1, vx2, vy2, va2, imass1, imoi1, imass2, imoi2 ="
@@ -406,6 +485,15 @@
       (called-functions (apply_impulse))
       (structured-ast
         (return-expr "deln^2+delt^2<0x0.001"))
+      (decompiled-pseudo-code
+        (set! solve "function()")
+        (set! deln "max(lambdan-(nx*vx1+ny*vy1+jn3*va1-nx*vx2-ny*vy2+jn6*va2+b)/jmn, 0)-lambdan")
+        (+= lambdan "deln")
+        (set! delt "mid(-f*lambdan, lambdat-(-ny*vx1+nx*vy1+jt3*va1+ny*vx2-nx*vy2+jt6*va2)/jmt, f*lambdan)-lambdat")
+        (+= lambdat "delt")
+        (call apply_impulse "id1, deln*nx-delt*ny, deln*ny+delt*nx, deln*jn3+delt*jt3")
+        (call apply_impulse "id2, delt*ny-deln*nx, -deln*ny-delt*nx, deln*jn6+delt*jt6")
+        (return "deln^2+delt^2<0x0.001"))
       (body-lines
         "      solve=function()"
         "        local vx1, vy1, va1, vx2, vy2, va2, deln, delt ="
@@ -433,6 +521,21 @@
         (if-cond "not moi")
         (if-cond "mass[id]>0")
         (for-loop "i=1,nv"))
+      (decompiled-pseudo-code
+        (set! add_body "function(args)")
+        (set! args "args or {}")
+        (set! id "next(dead)")
+        (when "id" "dead[id] = nil else id = nextid nextid += 1")
+        (set! verts "args.verts and args.verts or rectangle(1, 1)")
+        (set! |mass[id], geom[id]| "args.mass or 1, geometry(verts.numv, verts.x, verts.y, verts.r)")
+        (set! moi "args.moi")
+        (when "not moi")
+        (set! moi "0")
+        (when "mass[id]>0")
+        (set! |nv, vx, vy| "geom[id].numv")
+        (for-range i "1" "nv")
+        (set! |vx, vy| "geom[id].x[i], geom[id].y[i]")
+        (+= moi "vx^2+vy^2"))
       (body-lines
         "    add_body=function(args)"
         "      args = args or {}"
@@ -460,6 +563,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "x[id], y[id], a[id] end, -- returns position/angle of a body"))
+      (decompiled-pseudo-code
+        (set! position "function(id) return x[id], y[id], a[id] end,"))
       (body-lines
         "    position=function(id) return x[id], y[id], a[id] end, -- returns position/angle of a body"))
     (def-pico-function
@@ -470,6 +575,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "vx[id], vy[id], va[id] end, -- returns velocity of a body"))
+      (decompiled-pseudo-code
+        (set! velocity "function(id) return vx[id], vy[id], va[id] end,"))
       (body-lines
         "    velocity=function(id) return vx[id], vy[id], va[id] end, -- returns velocity of a body"))
     (def-pico-function
@@ -480,6 +587,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "mass[id] end,"))
+      (decompiled-pseudo-code
+        (set! mass "function(id) return mass[id] end,"))
       (body-lines
         "    mass=function(id) return mass[id] end,"))
     (def-pico-function
@@ -490,6 +599,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "imass[id], imoi[id] end, -- returns inverse mass/inertia of a bo"))
+      (decompiled-pseudo-code
+        (set! inv_mass "function(id) return imass[id], imoi[id] end,"))
       (body-lines
         "    inv_mass=function(id) return imass[id], imoi[id] end, -- returns inverse mass/inertia of a body"))
     (def-pico-function
@@ -500,6 +611,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "dynamic[id] end, -- returns true if the body reacts to forces"))
+      (decompiled-pseudo-code
+        (set! is_dynamic "function(id) return dynamic[id] end,"))
       (body-lines
         "    is_dynamic=function(id) return dynamic[id] end, -- returns true if the body reacts to forces"))
     (def-pico-function
@@ -510,6 +623,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! add_constraint "function(c) constraints[#constraints+1] = c end,"))
       (body-lines
         "    add_constraint=function(c) constraints[#constraints+1] = c end,"))
     (def-pico-function
@@ -520,6 +635,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! add_force "function(f) forces[#forces+1] = f end,"))
       (body-lines
         "    add_force=function(f) forces[#forces+1] = f end,"))
     (def-pico-function
@@ -531,6 +648,12 @@
       (structured-ast
         (for-loop "id in pairs(alive)")
         (if-cond "is_awake(id"))
+      (decompiled-pseudo-code
+        (set! update "function(dt)")
+        (set! dt "dt or 1/stat(7)")
+        (set! |solvers, id1, id2, cid, rid, dist, nx, ny, x1, y1, x2, y2| "{}")
+        (when "is_awake(id)")
+        (call apply_force "id, dt, 0, g*mass[id]"))
       (body-lines
         "    update=function(dt) -- update function called once per frame"
         "      dt = dt or 1/stat(7)"
@@ -552,6 +675,16 @@
       (structured-ast
         (for-loop "id in pairs(alive)")
         (if-cond "not is_awake(id"))
+      (decompiled-pseudo-code
+        (set! draw "function(vp)")
+        (call color "island[id]%7+8")
+        (set! |cx, cy| "vp.to_screen(x[id], y[id])")
+        (when "not is_awake(id)")
+        (call print "'⧗', cx-3, cy-2")
+        (set! |upy, upx| "cos_sin(a[id])")
+        (*= upx "2 upy *= 2")
+        (call line "cx-upx, cy-upy, cx+upx, cy+upy")
+        (call line "cx-upy, cy+upx, cx+upy, cy-upx"))
       (body-lines
         "    draw=function(vp)"
         "      for id in pairs(alive) do"
@@ -574,6 +707,13 @@
       (called-functions (transform))
       (structured-ast
         (for-loop "i=1,nv"))
+      (decompiled-pseudo-code
+        (set! |sx, sy, ox, oy| "r*(sx or 1), r*(sy or 1), ox or 0, oy or 0")
+        (set! |x, y, angle, da| "{}, {}, (nv==4) and 0x0.c90c or 0, -0x6.487e/nv")
+        (for-range i "1" "nv")
+        (set! |x[i], y[i]| "transform(1, 0, ox, oy, angle)")
+        (*= |x[i]| "sx y[i] *= sy")
+        (+= angle "da"))
       (body-lines
         "function ngon(r, nv, sx, sy, ox, oy)"
         "  sx, sy, ox, oy = r*(sx or 1), r*(sy or 1), ox or 0, oy or 0"
@@ -591,6 +731,8 @@
       (called-functions (ngon))
       (structured-ast
         (return-expr "ngon(0x1.6109, 3, w/2, h/2, ox, oy) end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function triangle(w, h, ox, oy) return ngon(0x1.6109, 3, w/2, h/2, ox, oy) end"))
     (def-pico-function
@@ -601,6 +743,8 @@
       (called-functions (ngon))
       (structured-ast
         (return-expr "ngon(0x1.6109, 4, w/2, h/2, ox, oy) end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function rectangle(w, h, ox, oy) return ngon(0x1.6109, 4, w/2, h/2, ox, oy) end"))
     (def-pico-function
@@ -613,6 +757,13 @@
         (for-loop "i=1,nv/2+1")
         (for-loop "i=nv/2+2,nv")
         (return-expr "{ numv=nv+2, x=x, y=y }"))
+      (decompiled-pseudo-code
+        (+= nv "nv%2")
+        (set! sphere "ngon(w/2, nv, 1, 1, ox, oy)")
+        (set! |numv, sx, sy, x, y| "sphere.numv, sphere.x, sphere.y, {}, {}")
+        (for-range i "1" "nv/2+1")
+        (for-range i "nv/2+2" "nv")
+        (return "{ numv=nv+2, x=x, y=y }"))
       (body-lines
         "function capsule(w, h, nv, ox, oy)"
         "  nv += nv%2"
@@ -635,6 +786,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{"))
       (body-lines
         "function sweep_and_prune()"
         "  local nump, x_id, y_id, x_val, y_val, x_minmax, y_minmax, x_spans, y_spans, count, cand, iter ="
@@ -649,6 +802,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! add_body "function(id, box)"))
       (body-lines
         "    add_body=function(id, box)"))
     (def-pico-function
@@ -659,6 +814,14 @@
       (called-functions ())
       (structured-ast
         (while-loop "vals[idx-1]>val"))
+      (decompiled-pseudo-code
+        (set! |idx, prev_id, cid, pidx| "len")
+        (set! pidx "idx-1")
+        (set! prev_id "ids[pidx]")
+        (set! cid "shl(min(id, prev_id), 8)+max(id, prev_id)")
+        (set! |count[cid]| "(count[cid] and count[cid] or 0) + (minmaxs[pidx]-minmax)")
+        (set! |cand[cid]| "count[cid]==2 and true or nil")
+        (-= idx "1"))
       (body-lines
         "      local function insert(len, ids, vals, minmaxs, spans, id, val, minmax)"
         "        ids[len+1], vals[len+1], minmaxs[len+1] = ids[len], vals[len], minmaxs[len]"
@@ -681,6 +844,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! remove_body "function(id)"))
       (body-lines
         "    remove_body=function(id)"))
     (def-pico-function
@@ -692,6 +857,9 @@
       (structured-ast
         (for-loop "i=idx+1, len")
         (if-cond "(ids[i]>0"))
+      (decompiled-pseudo-code
+        (for-range i "idx+1" "len")
+        (when "ids[i]>0" "spans[ids[i]*2+minmaxs[i]] = i-1"))
       (body-lines
         "      local function remove(len, ids, vals, minmaxs, spans, idx)"
         "        for i=idx+1, len do"
@@ -706,6 +874,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! update_body "function(id, box)"))
       (body-lines
         "    update_body=function(id, box)"))
     (def-pico-function
@@ -717,6 +887,15 @@
       (structured-ast
         (while-loop "mid(vals[idx-1], val, vals[idx+1])!=val")
         (if-cond "id1!=id2"))
+      (decompiled-pseudo-code
+        (set! |vals[idx]| "val")
+        (set! off "vals[idx+1]<val and 1 or -1")
+        (set! nidx "idx+off")
+        (set! |id1, id2| "ids[idx], ids[nidx]")
+        (when "id1!=id2")
+        (set! cid "shl(min(id1, id2), 8)+max(id1, id2)")
+        (set! |count[cid]| "(count[cid] and count[cid] or 0) - off*(minmaxs[nidx]-minmaxs[idx])")
+        (set! |cand[cid]| "count[cid]==2 and true or nil"))
       (body-lines
         "      local function update(ids, vals, minmaxs, spans, idx, val)"
         "        local off, id1, id2, cid, nidx"
@@ -738,6 +917,8 @@
       (called-functions (next))
       (structured-ast
         (return-expr "iter end,"))
+      (decompiled-pseudo-code
+        (set! has_more "function() iter = next(cand, iter) return iter end,"))
       (body-lines
         "    has_more=function() iter = next(cand, iter) return iter end,"))
     (def-pico-function
@@ -749,6 +930,8 @@
       (structured-ast
         (if-cond "(iter")
         (return-expr "shr(band(iter, 0xff00), 8), band(iter, 0xff) end"))
+      (decompiled-pseudo-code
+        (set! next "function() if(iter) return shr(band(iter, 0xff00), 8), band(iter, 0xff) end"))
       (body-lines
         "    next=function() if(iter) return shr(band(iter, 0xff00), 8), band(iter, 0xff) end"))
     (def-pico-function
@@ -760,6 +943,11 @@
       (structured-ast
         (if-cond "dist > rsq")
         (return-expr "nil"))
+      (decompiled-pseudo-code
+        (set! |x,y,r,dist,rsq,cid,cx,cy,nx,ny,a| "x1-x2,y1-y2,r1+r2")
+        (set! |dist,rsq| "(x*x)+(y*y),r*r")
+        (when "dist > rsq")
+        (return "nil"))
       (body-lines
         "function circles_collide(x1, y1, r1, x2, y2, r2)"
         " local x,y,r,dist,rsq,cid,cx,cy,nx,ny,a=x1-x2,y1-y2,r1+r2"
@@ -775,6 +963,13 @@
       (called-functions (aabb))
       (structured-ast
         (for-loop "i=1,numv"))
+      (decompiled-pseudo-code
+        (set! |tvx, tvy, nx, ny, tnx, tny, maxp, box, x, y, len, idx| "{}, {}, {}, {}, {}, {}, {}, aabb()")
+        (for-range i "1" "numv")
+        (set! |idx, x, y| "i%numv+1, vx[i], vy[i]")
+        (set! |tvx[i], tvy[i], nx[i], ny[i]| "x, y, y-vy[idx], vx[idx]-x")
+        (set! len "sqrt(nx[i]^2+ny[i]^2)")
+        (/= |nx[i]| "len ny[i] /= len"))
       (body-lines
         "function geometry(numv, vx, vy, r)"
         "  local tvx, tvy, nx, ny, tnx, tny, maxp, box, x, y, len, idx = {}, {}, {}, {}, {}, {}, {}, aabb()"
@@ -793,6 +988,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! collides "function(g)"))
       (body-lines
         "    collides=function(g)"))
     (def-pico-function
@@ -805,6 +1002,13 @@
         (for-loop "i=1,nv1")
         (for-loop "j=1,nv2")
         (if-cond "(p<minp"))
+      (decompiled-pseudo-code
+        (set! |lidx, ridx, ldot, rdot, ex, ey, minn, maxn, mine, maxe, alpha| "-1, 0x7fff")
+        (for-range i "1" "nv1")
+        (set! |minp, idx| "0x7fff, -1")
+        (for-range j "1" "nv2")
+        (set! p "x2[j]*nx1[i]+y2[j]*ny1[i]")
+        (when "p<minp" "minp, idx, px, py = p, j, x2[j], y2[j]"))
       (body-lines
         "      local function sat(nv1, x1, y1, nx1, ny1, maxp, nv2, x2, y2, nx2, ny2)"
         "        local cid, dist, nrmx, nrmy, rx, ry, minp, p, idx, d,"
@@ -824,6 +1028,13 @@
       (called-functions (set))
       (structured-ast
         (for-loop "i=1,numv"))
+      (decompiled-pseudo-code
+        (set! transform "function(x, y, a)")
+        (call box.set "")
+        (for-range i "1" "numv")
+        (set! |tvx[i], tvy[i]| "transform(vx[i], vy[i], x, y, a)")
+        (set! |tnx[i], tny[i]| "transform(nx[i], ny[i], 0, 0, a)")
+        (call max "tvx[i], box.x2), max(tvy[i], box.y2"))
       (body-lines
         "    transform=function(x, y, a)"
         "      box.set()"
@@ -843,6 +1054,14 @@
       (called-functions (to_screen))
       (structured-ast
         (for-loop "i=1,numv"))
+      (decompiled-pseudo-code
+        (set! draw "function(vp)")
+        (set! |v1x, v1y, v2x, v2y, idx| "vp.to_screen(tvx[1], tvy[1])")
+        (for-range i "1" "numv")
+        (set! idx "i%numv+1")
+        (set! |v2x, v2y| "vp.to_screen(tvx[idx], tvy[idx])")
+        (call line "v1x, v1y, v2x, v2y")
+        (set! |v1x, v1y| "v2x, v2y"))
       (body-lines
         "    draw=function(vp)"
         "      local v1x, v1y, v2x, v2y, idx = vp.to_screen(tvx[1], tvy[1])"
@@ -860,6 +1079,16 @@
       (called-functions ())
       (structured-ast
         (for-loop "py=y-w, y+w"))
+      (decompiled-pseudo-code
+        (set! scale "scale or 1")
+        (*= w "scale*4")
+        (set! |cs, ss| "cos(rot)*.125/scale,sin(rot)*.125/scale")
+        (set! |sx, sy| "mx+cs*-w, my+ss*-w")
+        (set! hx "flip and -w or w")
+        (set! halfw "-w")
+        (for-range py "y-w" "y+w")
+        (call tline "x-hx, py, x+hx, py, sx-ss*halfw, sy+cs*halfw, cs, ss")
+        (+= halfw "1"))
       (body-lines
         "function pd_rotate(x,y,rot,mx,my,w,flip,scale)"
         "  scale=scale or 1"
@@ -882,6 +1111,13 @@
       (called-functions (do_gameover do_intro do_wiki start_game update_menuitems))
       (structured-ast
         (seq-block 11))
+      (decompiled-pseudo-code
+        (call cartdata "'spoike_suika_melons_1'")
+        (set! high_score "dget(0)")
+        (set! options "dget(1)")
+        (set! |debug, particles| "{}, {}")
+        (call update_menuitems "")
+        (call do_intro ""))
       (body-lines
         "function _init()"
         "  cartdata('spoike_suika_melons_1')"
@@ -902,6 +1138,19 @@
       (called-functions (onoff update_music))
       (structured-ast
         (seq-block 17))
+      (decompiled-pseudo-code
+        (call menuitem "5, \"reset highscore\", function(")
+        (set! high_score "0")
+        (call dset "0,0")
+        (call menuitem "1, \"music        \"..onoff((options&0b10)==0), function(")
+        (set! options "options^^0b10")
+        (call dset "1,options")
+        (call update_menuitems "")
+        (call update_music "")
+        (call menuitem "2, \"show physics \"..onoff((options&0b1)>0), function(")
+        (set! options "options^^0b1")
+        (call dset "1,options")
+        (call update_menuitems ""))
       (body-lines
         "function update_menuitems()"
         "  menuitem(5, \"reset highscore\", function()"
@@ -928,6 +1177,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "b==true and \" on\" or \"off\""))
+      (decompiled-pseudo-code
+        (return "b==true and \" on\" or \"off\""))
       (body-lines
         "function onoff(b)"
         " return b==true and \" on\" or \"off\""
@@ -941,6 +1192,10 @@
       (structured-ast
         (if-cond "options&0b10>0")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "options&0b10>0")
+        (call music "-1")
+        (return ""))
       (body-lines
         "function update_music()"
         " if options&0b10>0 then"
@@ -955,6 +1210,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! |_upd,_drw| "wiki_update,wiki_draw")
+        (set! wiki_idx "current_ball or next_ball")
+        (set! wiki_offs "(wiki_idx-1) * 48")
+        (set! |wiki_start_t,wiki_t,wiki_closing| "0,1,0"))
       (body-lines
         "function do_wiki()"
         "  _upd,_drw=wiki_update,wiki_draw"
@@ -970,6 +1230,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "wiki_closing >= 1"))
+      (decompiled-pseudo-code
+        (set! wiki_start_t "min(wiki_start_t + 1,10)")
+        (when "wiki_closing >= 1")
+        (+= wiki_closing "1.5"))
       (body-lines
         "function wiki_update()"
         "  wiki_start_t=min(wiki_start_t + 1,10)"
@@ -984,6 +1248,12 @@
       (called-functions (game_draw lerp))
       (structured-ast
         (for-loop "i=0,127"))
+      (decompiled-pseudo-code
+        (call game_draw "")
+        (call camera "0, lerp(-80, 0, (wiki_start_t-wiki_closing)/10)")
+        (for-range i "0" "127")
+        (call line "i, 64+(sin((t()/2)+(i/73))*4.5), i, 127, 9")
+        (call line "i, 70+(sin((t()/2)+((i/100+0.33)))*2.5), i, 127, 4"))
       (body-lines
         "function wiki_draw()"
         "  game_draw()"
@@ -1001,6 +1271,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "i,l in pairs(debug)"))
+      (decompiled-pseudo-code
+        (call _drw "")
+        (call print "l,0,(i-1)*7,7"))
       (body-lines
         "function _draw()"
         "  _drw()"
@@ -1016,6 +1289,10 @@
       (called-functions (create_fruit_particle))
       (structured-ast
         (for-loop "i=1,20"))
+      (decompiled-pseudo-code
+        (set! |fruit_particles,_drw,_upd,intro_to_start| "{},intro_draw,intro_update,0")
+        (for-range i "1" "20")
+        (call create_fruit_particle ""))
       (body-lines
         "function do_intro()"
         "  --music(0)"
@@ -1031,6 +1308,17 @@
       (called-functions ())
       (structured-ast
         (seq-block 14))
+      (decompiled-pseudo-code
+        (set! a "rnd(1)")
+        (set! sx "a>0.5 and -64 or 192,")
+        (set! sy "32+rnd(64),")
+        (set! dx "a>0.5 and 192 or -64,")
+        (set! dy "32+rnd(64),")
+        (set! t "rnd(100)-100,")
+        (set! tend "100,")
+        (set! idx "ceil(rnd(10)),")
+        (set! update "update_fruit_particle,")
+        (set! draw "draw_fruit_particle"))
       (body-lines
         "function create_fruit_particle()"
         "  local a = rnd(1)"
@@ -1054,6 +1342,11 @@
       (called-functions (create_fruit_particle))
       (structured-ast
         (if-cond "p.t > p.tend"))
+      (decompiled-pseudo-code
+        (+= p.t "1")
+        (when "p.t > p.tend")
+        (call del "fruit_particles, p")
+        (call create_fruit_particle ""))
       (body-lines
         "function update_fruit_particle(p)"
         " p.t+=1"
@@ -1069,6 +1362,9 @@
       (called-functions (draw_ball lerp))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! t "p.t/p.tend")
+        (call lerp "p.sy,p.dy,t)"))
       (body-lines
         "function draw_fruit_particle(p)"
         "  local t = p.t/p.tend"
@@ -1084,6 +1380,14 @@
       (called-functions (lerp))
       (structured-ast
         (for-loop "i=0,127"))
+      (decompiled-pseudo-code
+        (call cls "15")
+        (for-range i "0" "127")
+        (call line "i,0,i,sin(t()+(i*0.01)+0.3)*3+20,14")
+        (call line "i,0,i,sin(t()+(i*0.005))*-5+10,9")
+        (call line "i,128,i,128-(sin(t()+(i*0.01)+0.3)*3+20)+lerp(0,-128,intro_to_start/10),14")
+        (call line "i,128,i,128-(sin(t()+(i*0.005))*5+10)+lerp(0,-128,intro_to_start/15),9")
+        (call line "i,128,i,128-(sin(t()+(i*0.0025))*5+10)+lerp(20,-128,intro_to_start/28),15"))
       (body-lines
         "function intro_draw()"
         "  cls(15)"
@@ -1102,6 +1406,9 @@
       (called-functions (update))
       (structured-ast
         (for-loop "p in all(fruit_particles)"))
+      (decompiled-pseudo-code
+        (foreach p "fruit_particles")
+        (call p:update ""))
       (body-lines
         "function intro_update()"
         "  for p in all(fruit_particles) do"
@@ -1115,6 +1422,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "got_highscore"))
+      (decompiled-pseudo-code
+        (set! got_highscore "score > high_score")
+        (when "got_highscore")
+        (call dset "0, score"))
       (body-lines
         "function do_gameover()"
         "  got_highscore = score > high_score"
@@ -1130,6 +1441,12 @@
       (structured-ast
         (if-cond "go_timer < 50")
         (if-cond "got_highscore"))
+      (decompiled-pseudo-code
+        (when "go_timer < 50")
+        (+= go_timer "1")
+        (when "btnp(4) or btnp(5)")
+        (when "got_highscore")
+        (set! high_score "score"))
       (body-lines
         "function gameover_update()"
         "  if go_timer < 50 then"
@@ -1146,6 +1463,18 @@
       (called-functions (blink game_draw lerp print_sc))
       (structured-ast
         (if-cond "go_timer == 50 and blink("))
+      (decompiled-pseudo-code
+        (call game_draw "")
+        (call clip "lerp(128, 0, min(go_timer/10, 1)), 0, 128, 128")
+        (call rectfill "0, 46, 128, 90, 4")
+        (call line "0, 91, 128, 91, 2")
+        (call print_sc "got_highscore and 'you got highscore!' or 'game over', 53, got_highscore and 10 or 7, 1")
+        (call print_sc "score, 61, got_highscore and 10 or 7, 1")
+        (call print_sc "'previous best', 71, 7, 2")
+        (call print_sc "high_score, 79, 7, 2")
+        (call clip "")
+        (when "go_timer == 50 and blink()")
+        (call print_sc "'click to continue', 100, 7, 4, true"))
       (body-lines
         "function gameover_draw()"
         " game_draw()"
@@ -1169,6 +1498,11 @@
       (called-functions (lerp))
       (structured-ast
         (if-cond "game_intro_t < 10"))
+      (decompiled-pseudo-code
+        (call cls "15")
+        (when "game_intro_t < 10")
+        (call pal "fade_palettes[flr(lerp(1,#fade_palettes+1,game_intro_t/10))]")
+        (call pal ""))
       (body-lines
         "function game_draw()"
         "  cls(15)"
@@ -1185,6 +1519,10 @@
       (called-functions (update))
       (structured-ast
         (for-loop "p in all(particles)"))
+      (decompiled-pseudo-code
+        (call _upd "")
+        (foreach p "particles")
+        (call p:update ""))
       (body-lines
         "function _update()"
         "  _upd()"
@@ -1199,6 +1537,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "game_intro_t < 20"))
+      (decompiled-pseudo-code
+        (when "game_intro_t < 20")
+        (+= game_intro_t "1"))
       (body-lines
         "function game_update()"
         "  if game_intro_t < 20 then"
@@ -1213,6 +1554,25 @@
       (structured-ast
         (for-loop "x=-3,3,2")
         (for-loop "y=3,6,2"))
+      (decompiled-pseudo-code
+        (set! |_drw,_upd| "game_draw,game_update")
+        (set! |px, pdx, cursor_wait_timer, score, highlight_fruit, game_intro_t| "0, 0, 0, 0, nil, 0")
+        (set! |bag_of_balls, balls, ball_ids, to_add| "add_balls_to_bag{}, {}, {}, {}")
+        (call update_music "")
+        (call create_new_balls "")
+        (set! vp "viewport{ scale=10 }")
+        (call vp.translate "-1.7, 4.7")
+        (set! s "scene{")
+        (set! size "13,")
+        (set! g "-9.8,")
+        (set! damp "0x0.ffe0,")
+        (set! slop "0x0.00f,")
+        (set! sframes "100,")
+        (set! beta "0.2,")
+        (set! isteps "10")
+        (for-range x "-3" "3,2")
+        (for-range y "3" "6,2")
+        (call add_ball_body "x, -y*2, rnd({1,2,3,4,5,6,7,8,9})"))
       (body-lines
         "function start_game()"
         "  _drw,_upd=game_draw,game_update"
@@ -1254,6 +1614,9 @@
       (called-functions (add_balls_to_bag))
       (structured-ast
         (if-cond "#bag_of_balls < 3"))
+      (decompiled-pseudo-code
+        (when "#bag_of_balls < 3")
+        (set! bag_of_balls "add_balls_to_bag(bag_of_balls)"))
       (body-lines
         "function create_new_balls()"
         "  if #bag_of_balls < 3 then"
@@ -1268,6 +1631,11 @@
       (structured-ast
         (if-cond "args.event==0x05")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! on_event "function(args)")
+        (when "args.event==0x05")
+        (call remove_ball_body "args.id, true")
+        (return ""))
       (body-lines
         "  on_event=function(args)"
         "    -- ON_BODY_DEAD"
@@ -1283,6 +1651,10 @@
       (called-functions (position to_screen))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! |x, y| "s.position(id)")
+        (set! |px, py| "vp.to_screen(x, y)")
+        (call circfill "px, py, 3, col"))
       (body-lines
         "      local function draw_contact(id,col)"
         "        local x, y = s.position(id)"
@@ -1298,6 +1670,12 @@
       (structured-ast
         (if-cond "angle == nil")
         (if-cond "is_highlighted"))
+      (decompiled-pseudo-code
+        (when "angle == nil" "angle = 0")
+        (set! ball "ball_conf[ball_idx]")
+        (set! c "(ball[COLOR_FG] << 4) | ball[COLOR]")
+        (when "is_highlighted")
+        (call circfill "x, y, ball[RADIUS]+4+(sin(t()*0.8)*2), 7"))
       (body-lines
         "function draw_ball(ball_idx, x, y, angle, is_highlighted)"
         "  if angle == nil then angle = 0 end"
@@ -1314,6 +1692,18 @@
       (called-functions (add_body ngon))
       (structured-ast
         (seq-block 14))
+      (decompiled-pseudo-code
+        (set! i "s.add_body({")
+        (set! x "x,")
+        (set! y "y,")
+        (set! mass "1,")
+        (set! moi "nil,")
+        (set! rest "0.15,")
+        (set! frict "BODY_FRICTION,")
+        (set! verts "ngon((ball_conf[idx][RADIUS] / 10), 5),")
+        (set! listener "listener")
+        (set! |balls[i]| "idx")
+        (call add "ball_ids, i"))
       (body-lines
         "function add_ball_body(x,y,idx)"
         "  local i = s.add_body({"
@@ -1337,6 +1727,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! |balls[id]| "nil")
+        (call del "ball_ids, id"))
       (body-lines
         "function remove_ball_body(id)"
         " balls[id] = nil"
@@ -1350,6 +1743,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call circfill "p.x,p.y,p.r,p.col"))
       (body-lines
         "function draw_particle(p)"
         " circfill(p.x,p.y,p.r,p.col)"
@@ -1362,6 +1757,13 @@
       (called-functions ())
       (structured-ast
         (if-cond "p.life < 0"))
+      (decompiled-pseudo-code
+        (+= p.x "p.dx")
+        (+= p.y "p.dy")
+        (-= p.life "1")
+        (+= p.dy "0.25")
+        (when "p.life < 0")
+        (call del "particles, p"))
       (body-lines
         "function update_particle(p)"
         " p.x+=p.dx"
@@ -1379,6 +1781,18 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,amt"))
+      (decompiled-pseudo-code
+        (set! amt "amt or 20")
+        (set! cols "cols or {1,2,3}")
+        (for-range i "1" "amt")
+        (set! x "x,y=y,")
+        (set! dx "rnd(10)-5,")
+        (set! dy "rnd(10)-5,")
+        (set! r "rnd(1)+0.5,")
+        (set! col "rnd(cols),")
+        (set! life "18,")
+        (set! update "update_particle,")
+        (set! draw "draw_particle"))
       (body-lines
         "function add_particles(x, y, amt, cols)"
         " amt = amt or 20"
@@ -1403,6 +1817,14 @@
       (called-functions (position to_screen))
       (structured-ast
         (seq-block 11))
+      (decompiled-pseudo-code
+        (set! |x, y| "s.position(id)")
+        (set! |sx, sy| "vp.to_screen(x, y)")
+        (set! x "sx,y=sy,")
+        (set! r "ball_conf[ballidx][RADIUS] + 2,")
+        (set! t "0,")
+        (set! draw "draw_boom_particle,")
+        (set! update "update_boom_particle"))
       (body-lines
         "function add_boom_particle(id, ballidx)"
         " local x, y = s.position(id)"
@@ -1423,6 +1845,8 @@
       (called-functions (lerp))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call circfill "p.x,p.y,lerp(p.r,0,p.t),7"))
       (body-lines
         "function draw_boom_particle(p)"
         " circfill(p.x,p.y,lerp(p.r,0,p.t),7)"
@@ -1435,6 +1859,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "p.t > 1"))
+      (decompiled-pseudo-code
+        (+= p.t "0.1")
+        (when "p.t > 1")
+        (call del "particles, p"))
       (body-lines
         "function update_boom_particle(p)"
         "  p.t+=0.1"
@@ -1450,6 +1878,10 @@
       (structured-ast
         (if-cond "do_halo")
         (for-loop "i=1,4"))
+      (decompiled-pseudo-code
+        (when "do_halo")
+        (for-range i "1" "4")
+        (call print "str, dirx[i]+x, diry[i]+y, colbg"))
       (body-lines
         "function print_s(str, x, y, colfg, colbg, do_halo)"
         " if do_halo then"
@@ -1464,6 +1896,9 @@
       (called-functions (print_s))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! str "tostr(str)")
+        (call print_s "str, 64-(#str*2), y, colfg, colbg, do_halo"))
       (body-lines
         "function print_sc(str, y, colfg, colbg, do_halo)"
         " str=tostr(str)"
@@ -1477,6 +1912,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "(1-t)*a+t*b"))
+      (decompiled-pseudo-code
+        (return "(1-t)*a+t*b"))
       (body-lines
         "function lerp(a,b,t)"
         " return (1-t)*a+t*b"
@@ -1489,6 +1926,10 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=#t,1,-1"))
+      (decompiled-pseudo-code
+        (for-range i "#t" "1,-1")
+        (set! j "flr(rnd(i)) + 1")
+        (set! |t[i],t[j]| "t[j],t[i]"))
       (body-lines
         "function shuffle(t)"
         " -- fisher-yates"
@@ -1504,6 +1945,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "flr(t()*speed) % 2 == 1"))
+      (decompiled-pseudo-code
+        (set! speed "speed or 1")
+        (return "flr(t()*speed) % 2 == 1"))
       (body-lines
         "function blink(speed)"
         "  speed = speed or 1"
@@ -1517,6 +1961,10 @@
       (called-functions ())
       (structured-ast
         (for-loop "i in all(initial_bag)"))
+      (decompiled-pseudo-code
+        (set! initial_bag "shuffle{1,1,2,2,3,3,4,4,5}")
+        (foreach i "initial_bag")
+        (call add "bag, i"))
       (body-lines
         "function add_balls_to_bag(bag)"
         "  local initial_bag=shuffle{1,1,2,2,3,3,4,4,5}"

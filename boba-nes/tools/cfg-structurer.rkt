@@ -20,6 +20,7 @@
  structured-cfg-form?
  flatten-structured-insts
  structure-subroutine-cfg
+ synthesize-subroutine-pseudo-code
  lift-nes-state-machines-and-idioms
  lift-sm83-state-machines-and-idioms)
 
@@ -50,10 +51,11 @@
     [_ rem]))
 
 ;; Given any subroutine body containing a mix of raw instruction S-expressions
-;; (e.g. `(LDA #:imm 16 #:pc 32770)`) and structured control-flow forms
-;; (`(when-branch ...)`, `(if-else ...)`, `(counted-loop ...)`,
-;;  `(spin-wait-mmio-loop ...)`, `(do-while-loop ...)`, `(guard-return ...)`),
-;; recursively extracts all leaf instruction S-expressions in exact PC order.
+;; (e.g. `(LDA #:imm #x10 #:pc #x8002)`), `(decompiled-pseudo-code ...)`, and
+;; structured control-flow forms (`(when-branch ...)`, `(if-else ...)`,
+;; `(counted-loop ...)`, `(spin-wait-mmio-loop ...)`, `(do-while-loop ...)`,
+;; `(guard-return ...)`), recursively extracts all leaf instruction S-expressions
+;; in exact PC order while ignoring `(decompiled-pseudo-code ...)`.
 (define (flatten-structured-insts body-forms)
   (let loop ([forms body-forms]
              [acc '()])
@@ -63,6 +65,8 @@
       [else
        (define f (car forms))
        (cond
+         [(and (pair? f) (eq? (car f) 'decompiled-pseudo-code))
+          (loop (cdr forms) acc)]
          [(structured-cfg-form? f)
           (define children (strip-leading-kw-args (cdr f)))
           (define flat-children (flatten-structured-insts children))
@@ -195,6 +199,268 @@
    'NR10 'NR11 'NR12 'NR13 'NR14 'NR21 'NR22 'NR23 'NR24
    'NR30 'NR31 'NR32 'NR33 'NR34 'NR41 'NR42 'NR43 'NR44 'NR50 'NR51 'NR52))
 
+(define ALL-HW-MMIO-SYMS
+  (set-union
+   MMIO-POLL-SYMS
+   (seteq
+    'SQ1_VOL 'SQ1_SWEEP 'SQ1_LO 'SQ1_HI
+    'SQ2_VOL 'SQ2_SWEEP 'SQ2_LO 'SQ2_HI
+    'TRI_LINEAR 'TRI_UNUSED 'TRI_LO 'TRI_HI
+    'NOISE_VOL 'NOISE_UNUSED 'NOISE_LO 'NOISE_HI
+    'DMC_FREQ 'DMC_RAW 'DMC_START 'DMC_LEN
+    'MMC1_CTRL 'MMC1_CHR0 'MMC1_CHR1 'MAPPER_PRG_BANK
+    'MBC_RAM_EN 'MBC_ROM_BANK 'MBC_RAM_BANK 'MBC_BANK_MODE
+    'WAVE_RAM_0 'WAVE_RAM_1 'WAVE_RAM_2 'WAVE_RAM_3
+    'WAVE_RAM_4 'WAVE_RAM_5 'WAVE_RAM_6 'WAVE_RAM_7
+    'WAVE_RAM_8 'WAVE_RAM_9 'WAVE_RAM_A 'WAVE_RAM_B
+    'WAVE_RAM_C 'WAVE_RAM_D 'WAVE_RAM_E 'WAVE_RAM_F)))
+
+(define (hex2-str v)
+  (string-upcase (~r (bitwise-and #xFF v) #:base 16 #:min-width 2 #:pad-string "0")))
+
+(define (mos6502-operand->sym-expr inst)
+  (define mode (inst-mode inst))
+  (define operand (or (inst-operand inst) 0))
+  (define s (inst-sym inst))
+  (define mmio-s (and s (set-member? ALL-HW-MMIO-SYMS s) s))
+  (case mode
+    [(#:imm) operand]
+    [(#:acc) 'A]
+    [(#:zp)  `(zp ,operand)]
+    [(#:zpx) `(aref zp ,operand X)]
+    [(#:zpy) `(aref zp ,operand Y)]
+    [(#:indx)
+     `(deref-indx ,(string->symbol (format "zp_ptr_~a" (hex2-str operand))) X)]
+    [(#:indy)
+     `(deref-indy ,(string->symbol (format "zp_ptr_~a" (hex2-str operand))) Y)]
+    [(#:abs)
+     (cond
+       [mmio-s mmio-s]
+       [(< operand #x0100) `(zp ,operand)]
+       [(<= #x0200 operand #x02FF) `(oam ,operand)]
+       [(< operand #x2000) `(wram ,operand)]
+       [(<= #x6000 operand #x7FFF) `(sram ,operand)]
+       [else `(rom ,operand)])]
+    [(#:absx)
+     (cond
+       [mmio-s `(aref ,mmio-s X)]
+       [(<= #x0200 operand #x02FF) `(aref oam ,operand X)]
+       [(< operand #x2000) `(aref wram ,operand X)]
+       [(<= #x6000 operand #x7FFF) `(aref sram ,operand X)]
+       [else `(aref rom ,operand X)])]
+    [(#:absy)
+     (cond
+       [mmio-s `(aref ,mmio-s Y)]
+       [(<= #x0200 operand #x02FF) `(aref oam ,operand Y)]
+       [(< operand #x2000) `(aref wram ,operand Y)]
+       [(<= #x6000 operand #x7FFF) `(aref sram ,operand Y)]
+       [else `(aref rom ,operand Y)])]
+    [else (or s operand)]))
+
+(define (sm83-io-or-mem-sym inst)
+  (define mode (inst-mode inst))
+  (define op (or (inst-operand inst) 0))
+  (define s (inst-sym inst))
+  (cond
+    [s s]
+    [(eq? mode '#:io8)
+     (define addr (+ #xFF00 op))
+     (string->symbol (format "HRAM_~a" (string-upcase (~r addr #:base 16 #:min-width 4 #:pad-string "0"))))]
+    [(and (eq? mode '#:a16) (>= op #xC000) (< op #xE000))
+     `(wram ,op)]
+    [(and (eq? mode '#:a16) (>= op #x8000) (< op #xA000))
+     `(vram ,op)]
+    [(and (eq? mode '#:a16) (>= op #xA000) (< op #xC000))
+     `(sram ,op)]
+    [else op]))
+
+;; Infer a folded symbolic condition expression for a branch at `b-idx`
+(define (infer-branch-cond-expr ivec b-idx negated? arch)
+  (define b-inst (vector-ref ivec b-idx))
+  (define b-mnem (inst-mnem b-inst))
+  (define eff-cond (if negated? (branch-neg-cond-sym b-mnem) (branch-cond-sym b-mnem)))
+  (case arch
+    [(mos6502)
+     (define (find-recent-a-src limit-idx)
+       (let loop ([k (sub1 limit-idx)])
+         (if (< k (max 0 (- limit-idx 3)))
+             'A
+             (let* ([ins (vector-ref ivec k)]
+                    [m (inst-mnem ins)])
+               (cond
+                 [(eq? m 'LDA) (mos6502-operand->sym-expr ins)]
+                 [(eq? m 'TXA) 'X]
+                 [(eq? m 'TYA) 'Y]
+                 [(memq m '(JSR RTS RTI JMP BPL BMI BVC BVS BCC BCS BNE BEQ)) 'A]
+                 [else (loop (sub1 k))])))))
+     (let scan ([k (sub1 b-idx)])
+       (if (< k (max 0 (- b-idx 4)))
+           (case eff-cond
+             [(zero/equal)         '(== A 0)]
+             [(not-zero/not-equal) '(!= A 0)]
+             [(plus/positive)      '(>= A 0)]
+             [(minus/negative)     '(< A 0)]
+             [(carry-clear/lt)     '(== carry 0)]
+             [(carry-set/ge)       '(== carry 1)]
+             [else eff-cond])
+           (let* ([ins (vector-ref ivec k)]
+                  [m (inst-mnem ins)])
+             (cond
+               [(memq m '(CMP CPX CPY))
+                (define lhs
+                  (case m
+                    [(CMP) (find-recent-a-src k)]
+                    [(CPX) 'X]
+                    [(CPY) 'Y]))
+                (define rhs (mos6502-operand->sym-expr ins))
+                (case eff-cond
+                  [(zero/equal)         `(== ,lhs ,rhs)]
+                  [(not-zero/not-equal) `(!= ,lhs ,rhs)]
+                  [(carry-clear/lt)     `(< ,lhs ,rhs)]
+                  [(carry-set/ge)       `(>= ,lhs ,rhs)]
+                  [(plus/positive)      `(>= (- ,lhs ,rhs) 0)]
+                  [(minus/negative)     `(< (- ,lhs ,rhs) 0)]
+                  [else `(,eff-cond ,lhs ,rhs)])]
+               [(memq m '(DEX INX))
+                (case eff-cond
+                  [(zero/equal)         '(== X 0)]
+                  [(not-zero/not-equal) '(!= X 0)]
+                  [(plus/positive)      '(>= X 0)]
+                  [(minus/negative)     '(< X 0)]
+                  [else `(,eff-cond X 0)])]
+               [(memq m '(DEY INY))
+                (case eff-cond
+                  [(zero/equal)         '(== Y 0)]
+                  [(not-zero/not-equal) '(!= Y 0)]
+                  [(plus/positive)      '(>= Y 0)]
+                  [(minus/negative)     '(< Y 0)]
+                  [else `(,eff-cond Y 0)])]
+               [(memq m '(DEC INC))
+                (define dst (mos6502-operand->sym-expr ins))
+                (case eff-cond
+                  [(zero/equal)         `(== ,dst 0)]
+                  [(not-zero/not-equal) `(!= ,dst 0)]
+                  [(plus/positive)      `(>= ,dst 0)]
+                  [(minus/negative)     `(< ,dst 0)]
+                  [else `(,eff-cond ,dst 0)])]
+               [(eq? m 'BIT)
+                (define dst (mos6502-operand->sym-expr ins))
+                (case eff-cond
+                  [(plus/positive)      `(== (bit-and ,dst #x80) 0)]
+                  [(minus/negative)     `(!= (bit-and ,dst #x80) 0)]
+                  [(overflow-clear)     `(== (bit-and ,dst #x40) 0)]
+                  [(overflow-set)       `(!= (bit-and ,dst #x40) 0)]
+                  [(zero/equal)         `(== (bit-and A ,dst) 0)]
+                  [(not-zero/not-equal) `(!= (bit-and A ,dst) 0)]
+                  [else `(bit-test ,dst ,eff-cond)])]
+               [(memq m '(AND ORA EOR))
+                (define lhs (find-recent-a-src k))
+                (define rhs (mos6502-operand->sym-expr ins))
+                (define op-sym (case m [(AND) 'bit-and] [(ORA) 'bit-ior] [(EOR) 'bit-xor]))
+                (case eff-cond
+                  [(zero/equal)         `(== (,op-sym ,lhs ,rhs) 0)]
+                  [(not-zero/not-equal) `(!= (,op-sym ,lhs ,rhs) 0)]
+                  [(plus/positive)      `(== (bit-and (,op-sym ,lhs ,rhs) #x80) 0)]
+                  [(minus/negative)     `(!= (bit-and (,op-sym ,lhs ,rhs) #x80) 0)]
+                  [else `(,eff-cond (,op-sym ,lhs ,rhs) 0)])]
+               [(memq m '(LDA LDX LDY))
+                (define src (mos6502-operand->sym-expr ins))
+                (case eff-cond
+                  [(zero/equal)         `(== ,src 0)]
+                  [(not-zero/not-equal) `(!= ,src 0)]
+                  [(plus/positive)      `(== (bit-and ,src #x80) 0)]
+                  [(minus/negative)     `(!= (bit-and ,src #x80) 0)]
+                  [else `(,eff-cond ,src 0)])]
+               [(memq m '(JSR RTS RTI JMP BPL BMI BVC BVS BCC BCS BNE BEQ))
+                (scan -1)]
+               [else
+                (scan (sub1 k))]))))]
+    [(sm83)
+     (define (find-recent-sm83-a limit-idx)
+       (let loop ([k (sub1 limit-idx)])
+         (if (< k (max 0 (- limit-idx 3)))
+             'A
+             (let* ([ins (vector-ref ivec k)]
+                    [m (inst-mnem ins)])
+               (cond
+                 [(eq? m 'LDH_IN) (sm83-io-or-mem-sym ins)]
+                 [(eq? m 'LD_A_A16) (sm83-io-or-mem-sym ins)]
+                 [(eq? m 'LD_A_HLI) '(deref HL++)]
+                 [(eq? m 'LD_A_HLD) '(deref HL--)]
+                 [(eq? m 'LD_A_HL-IND) '(deref HL)]
+                 [(eq? m 'LD_A_DE_IND) '(deref DE)]
+                 [(eq? m 'LD_A_BC_IND) '(deref BC)]
+                 [else (loop (sub1 k))])))))
+     (let scan ([k (sub1 b-idx)])
+       (if (< k (max 0 (- b-idx 4)))
+           (case eff-cond
+             [(zero)     '(== A 0)]
+             [(not-zero) '(!= A 0)]
+             [(carry)    '(== carry 1)]
+             [(no-carry) '(== carry 0)]
+             [else eff-cond])
+           (let* ([ins (vector-ref ivec k)]
+                  [m (inst-mnem ins)]
+                  [m-str (symbol->string m)])
+             (cond
+               [(eq? m 'CP_A)
+                (define lhs (find-recent-sm83-a k))
+                (define rhs (or (inst-operand ins) 0))
+                (case eff-cond
+                  [(zero)     `(== ,lhs ,rhs)]
+                  [(not-zero) `(!= ,lhs ,rhs)]
+                  [(carry)    `(< ,lhs ,rhs)]
+                  [(no-carry) `(>= ,lhs ,rhs)]
+                  [else `(,eff-cond ,lhs ,rhs)])]
+               [(regexp-match #px"^CP_A_(.+)$" m-str)
+                => (lambda (mt)
+                     (define r (string->symbol (second mt)))
+                     (define rhs (if (eq? r 'HL-IND) '(deref HL) r))
+                     (case eff-cond
+                       [(zero)     `(== A ,rhs)]
+                       [(not-zero) `(!= A ,rhs)]
+                       [(carry)    `(< A ,rhs)]
+                       [(no-carry) `(>= A ,rhs)]
+                       [else `(,eff-cond A ,rhs)]))]
+               [(regexp-match #px"^BIT_([0-7])_(.+)$" m-str)
+                => (lambda (mt)
+                     (define bit (string->number (second mt)))
+                     (define r (string->symbol (third mt)))
+                     (define tgt (if (eq? r 'HL-IND) '(deref HL) r))
+                     (case eff-cond
+                       [(zero)     `(== (bit-test? ,tgt ,bit) 0)]
+                       [(not-zero) `(bit-test? ,tgt ,bit)]
+                       [else `(bit-test? ,tgt ,bit)]))]
+               [(regexp-match #px"^(?:DEC|INC)_(.+)$" m-str)
+                => (lambda (mt)
+                     (define r (string->symbol (second mt)))
+                     (define tgt (if (or (eq? r 'HL_IND) (eq? r 'HL-IND)) '(deref HL) r))
+                     (case eff-cond
+                       [(zero)     `(== ,tgt 0)]
+                       [(not-zero) `(!= ,tgt 0)]
+                       [else `(,eff-cond ,tgt 0)]))]
+               [(eq? m 'AND_A)
+                (define lhs (find-recent-sm83-a k))
+                (define mask (or (inst-operand ins) 0))
+                (case eff-cond
+                  [(zero)     `(== (bit-and ,lhs ,mask) 0)]
+                  [(not-zero) `(!= (bit-and ,lhs ,mask) 0)]
+                  [else `(,eff-cond (bit-and ,lhs ,mask) 0)])]
+               [(or (eq? m 'OR_A_C) (eq? m 'OR_A_B))
+                (case eff-cond
+                  [(zero)     '(== BC 0)]
+                  [(not-zero) '(!= BC 0)]
+                  [else `(,eff-cond BC 0)])]
+               [(or (eq? m 'OR_A_A) (eq? m 'AND_A_A))
+                (define lhs (find-recent-sm83-a k))
+                (case eff-cond
+                  [(zero)     `(== ,lhs 0)]
+                  [(not-zero) `(!= ,lhs 0)]
+                  [else `(,eff-cond ,lhs 0)])]
+               [else
+                (scan (sub1 k))]))))]
+    [else eff-cond]))
+
 (define LOOP-STEP-MNEMS
   (seteq
    ;; 6502 index/memory counter step instructions
@@ -299,6 +565,7 @@
        (when (range-unclaimed? claimed h-idx l-idx)
          (define body-slice (vec-slice->list ivec h-idx l-idx))
          (define c-sym (branch-cond-sym mnem))
+         (define c-expr (infer-branch-cond-expr ivec l-idx #f arch))
          (define mmio-sym (and (<= num-insts 6) (find-loop-mmio-sym ivec h-idx l-idx)))
          (define step-mnem (find-loop-step-mnem ivec h-idx l-idx))
          (define form
@@ -311,6 +578,7 @@
                 #:latch-pc ,latch-pc
                 #:mmio ,mmio-sym
                 #:cond ,c-sym
+                #:cond-expr ,c-expr
                 ,@body-slice)]
              [step-mnem
               (set! loop-count (add1 loop-count))
@@ -319,6 +587,7 @@
                 #:latch-pc ,latch-pc
                 #:step ,step-mnem
                 #:cond ,c-sym
+                #:cond-expr ,c-expr
                 ,@body-slice)]
              [else
               (set! loop-count (add1 loop-count))
@@ -326,6 +595,7 @@
                 #:header-pc ,header-pc
                 #:latch-pc ,latch-pc
                 #:cond ,c-sym
+                #:cond-expr ,c-expr
                 ,@body-slice)]))
          (claim-range! claimed h-idx l-idx 'loop)
          (hash-set! region-at-start h-idx (cons l-idx form))))
@@ -347,7 +617,8 @@
               ;; 4a. SM83 single-instruction conditional return (`RET_NZ`, `RET_Z`, `RET_NC`, `RET_C`)
               [(sm83-cond-return-inst? inst arch)
                (define c-sym (branch-cond-sym mnem))
-               (define form `(guard-return #:branch-pc ,b-pc #:cond ,c-sym ,inst))
+               (define c-expr (infer-branch-cond-expr ivec i #f arch))
+               (define form `(guard-return #:branch-pc ,b-pc #:cond ,c-sym #:cond-expr ,c-expr ,inst))
                (claim-range! claimed i i 'guard-return)
                (hash-set! region-at-start i (cons i form))
                (set! guard-ret-count (add1 guard-ret-count))
@@ -375,10 +646,12 @@
                           (return-inst? prev-inst arch)
                           (range-unclaimed? claimed i end-idx))
                      (define c-sym (branch-cond-sym mnem))
+                     (define c-expr (infer-branch-cond-expr ivec i #t arch))
                      (define form
                        `(guard-return
                          #:branch-pc ,b-pc
                          #:cond ,c-sym
+                         #:cond-expr ,c-expr
                          ,@(vec-slice->list ivec i end-idx)))
                      (claim-range! claimed i end-idx 'guard-return)
                      (hash-set! region-at-start i (cons end-idx form))
@@ -402,6 +675,7 @@
                                    (<= (- merge-idx i) 20)
                                    (range-unclaimed? claimed i else-end-idx))
                               (let* ([neg-sym (branch-neg-cond-sym mnem)]
+                                     [c-expr (infer-branch-cond-expr ivec i #t arch)]
                                      [then-insts (vec-slice->list ivec i end-idx)]
                                      [else-insts (vec-slice->list ivec target-idx else-end-idx)]
                                      [form
@@ -410,6 +684,7 @@
                                         #:else-pc ,target-pc
                                         #:merge-pc ,merge-pc
                                         #:cond ,neg-sym
+                                        #:cond-expr ,c-expr
                                         (then-branch ,@then-insts)
                                         (else-branch ,@else-insts))])
                                 (claim-range! claimed i else-end-idx 'if-else)
@@ -420,11 +695,13 @@
                               (if (and (<= 2 span-len 12)
                                        (range-unclaimed? claimed i end-idx))
                                   (let* ([neg-sym (branch-neg-cond-sym mnem)]
+                                         [c-expr (infer-branch-cond-expr ivec i #t arch)]
                                          [form
                                           `(when-branch
                                             #:branch-pc ,b-pc
                                             #:join-pc ,target-pc
                                             #:cond ,neg-sym
+                                            #:cond-expr ,c-expr
                                             ,@(vec-slice->list ivec i end-idx))])
                                     (claim-range! claimed i end-idx 'when-branch)
                                     (hash-set! region-at-start i (cons end-idx form))
@@ -437,11 +714,13 @@
                     [(and (<= 2 span-len 12)
                           (range-unclaimed? claimed i end-idx))
                      (define neg-sym (branch-neg-cond-sym mnem))
+                     (define c-expr (infer-branch-cond-expr ivec i #t arch))
                      (define form
                        `(when-branch
                          #:branch-pc ,b-pc
                          #:join-pc ,target-pc
                          #:cond ,neg-sym
+                         #:cond-expr ,c-expr
                          ,@(vec-slice->list ivec i end-idx)))
                      (claim-range! claimed i end-idx 'when-branch)
                      (hash-set! region-at-start i (cons end-idx form))
@@ -480,6 +759,338 @@
                      'guard-returns guard-ret-count))]))
 
 ;; ============================================================================
+;; 3B. Symbolic Expression / SSA Pseudo-Code Synthesizer (`synthesize-subroutine-pseudo-code`)
+;; ============================================================================
+
+(define (extract-kw-arg form kw [default #f])
+  (let loop ([rem (cdr form)])
+    (match rem
+      [(list* k v rest)
+       #:when (keyword? k)
+       (if (eq? k kw) v (loop rest))]
+      [_ default])))
+
+(define (drop-last-if-branch forms arch)
+  (if (and (pair? forms)
+           (let ([last-f (last forms)])
+             (and (pair? last-f)
+                  (cond-branch-mnem? (inst-mnem last-f) arch))))
+      (take forms (sub1 (length forms)))
+      forms))
+
+(define (drop-first-if-branch forms arch)
+  (if (and (pair? forms)
+           (let ([first-f (car forms)])
+             (and (pair? first-f)
+                  (cond-branch-mnem? (inst-mnem first-f) arch))))
+      (cdr forms)
+      forms))
+
+(define (drop-last-if-uncond-jump forms arch)
+  (if (and (pair? forms)
+           (uncond-jump-inst? (last forms) arch))
+      (take forms (sub1 (length forms)))
+      forms))
+
+;; Synthesize folded high-level `(decompiled-pseudo-code <stmt> ...)` from structured CFG & instructions
+(define (synthesize-subroutine-pseudo-code structured-body #:arch [arch 'mos6502])
+  (define regs (make-hasheq))
+  (for ([r (in-list '(A X Y B C D E H L BC DE HL))])
+    (hash-set! regs r r))
+
+  (define (fold-forms forms)
+    (define stmts '())
+    (define (emit! s)
+      (set! stmts (cons s stmts)))
+
+    (for ([f (in-list forms)])
+      (when (pair? f)
+        (define tag (car f))
+        (cond
+          [(eq? tag 'decompiled-pseudo-code) (void)]
+
+          [(eq? tag 'spin-wait-mmio-loop)
+           (define mmio (extract-kw-arg f '#:mmio 'PPUSTATUS))
+           (define cnd  (extract-kw-arg f '#:cond 'branch-cond))
+           (emit! `(await-mmio! ,mmio ,cnd))]
+
+          [(eq? tag 'counted-loop)
+           (define step (extract-kw-arg f '#:step 'DEX))
+           (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
+                             (extract-kw-arg f '#:cond 'not-zero)))
+           (define children (drop-last-if-branch (strip-leading-kw-args (cdr f)) arch))
+           (define body-stmts (fold-forms children))
+           (emit! `(loop-counted #:step ,step #:while ,cexpr ,@body-stmts))]
+
+          [(eq? tag 'do-while-loop)
+           (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
+                             (extract-kw-arg f '#:cond 'not-zero)))
+           (define children (drop-last-if-branch (strip-leading-kw-args (cdr f)) arch))
+           (define body-stmts (fold-forms children))
+           (emit! `(do-while #:while ,cexpr ,@body-stmts))]
+
+          [(eq? tag 'guard-return)
+           (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
+                             (extract-kw-arg f '#:cond 'branch-cond)))
+           (emit! `(when ,cexpr (return)))]
+
+          [(eq? tag 'when-branch)
+           (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
+                             (extract-kw-arg f '#:cond 'branch-cond)))
+           (define children (drop-first-if-branch (strip-leading-kw-args (cdr f)) arch))
+           (define body-stmts (fold-forms children))
+           (emit! `(when ,cexpr ,@body-stmts))]
+
+          [(eq? tag 'if-else)
+           (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
+                             (extract-kw-arg f '#:cond 'branch-cond)))
+           (define children (strip-leading-kw-args (cdr f)))
+           (define then-form (findf (lambda (c) (and (pair? c) (eq? (car c) 'then-branch))) children))
+           (define else-form (findf (lambda (c) (and (pair? c) (eq? (car c) 'else-branch))) children))
+           (define then-children
+             (if then-form
+                 (drop-last-if-uncond-jump (drop-first-if-branch (cdr then-form) arch) arch)
+                 '()))
+           (define else-children
+             (if else-form (cdr else-form) '()))
+           (emit! `(if ,cexpr
+                       (then ,@(fold-forms then-children))
+                       (else ,@(fold-forms else-children))))]
+
+          ;; Raw MOS 6502 Instructions
+          [(eq? arch 'mos6502)
+           (define mnem tag)
+           (define mode (inst-mode f))
+           (define op   (or (inst-operand f) 0))
+           (define sym  (inst-sym f))
+           (case mnem
+             [(LDA)
+              (define src (mos6502-operand->sym-expr f))
+              (hash-set! regs 'A src)
+              (when (memq src '(PPUSTATUS PPUDATA JOY1 JOY2))
+                (emit! `(io-read! ,src)))]
+             [(LDX)
+              (define src (mos6502-operand->sym-expr f))
+              (hash-set! regs 'X src)
+              (emit! `(set! X ,src))]
+             [(LDY)
+              (define src (mos6502-operand->sym-expr f))
+              (hash-set! regs 'Y src)
+              (emit! `(set! Y ,src))]
+             [(STA)
+              (define dst (mos6502-operand->sym-expr f))
+              (define val (hash-ref regs 'A 'A))
+              (emit! `(set! ,dst ,val))
+              (unless (and (symbol? dst) (set-member? ALL-HW-MMIO-SYMS dst))
+                (hash-set! regs 'A dst))]
+             [(STX)
+              (define dst (mos6502-operand->sym-expr f))
+              (emit! `(set! ,dst ,(hash-ref regs 'X 'X)))]
+             [(STY)
+              (define dst (mos6502-operand->sym-expr f))
+              (emit! `(set! ,dst ,(hash-ref regs 'Y 'Y)))]
+             [(ADC)
+              (hash-set! regs 'A `(+ ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+             [(SBC)
+              (hash-set! regs 'A `(- ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+             [(AND)
+              (hash-set! regs 'A `(bit-and ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+             [(ORA)
+              (hash-set! regs 'A `(bit-ior ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+             [(EOR)
+              (hash-set! regs 'A `(bit-xor ,(hash-ref regs 'A 'A) ,(mos6502-operand->sym-expr f)))]
+             [(ASL LSR ROL ROR)
+              (define shift-op
+                (case mnem [(ASL) 'shl] [(LSR) 'shr] [(ROL) 'rol] [(ROR) 'ror]))
+              (if (eq? mode '#:acc)
+                  (hash-set! regs 'A `(,shift-op ,(hash-ref regs 'A 'A) 1))
+                  (let ([dst (mos6502-operand->sym-expr f)])
+                    (emit! `(,(string->symbol (format "~a!" shift-op)) ,dst 1))))]
+             [(INC)
+              (emit! `(+= ,(mos6502-operand->sym-expr f) 1))]
+             [(DEC)
+              (emit! `(-= ,(mos6502-operand->sym-expr f) 1))]
+             [(INX)
+              (hash-set! regs 'X 'X)
+              (emit! '(+= X 1))]
+             [(DEX)
+              (hash-set! regs 'X 'X)
+              (emit! '(-= X 1))]
+             [(INY)
+              (hash-set! regs 'Y 'Y)
+              (emit! '(+= Y 1))]
+             [(DEY)
+              (hash-set! regs 'Y 'Y)
+              (emit! '(-= Y 1))]
+             [(TAX)
+              (define v (hash-ref regs 'A 'A))
+              (hash-set! regs 'X v)
+              (emit! `(set! X ,v))]
+             [(TAY)
+              (define v (hash-ref regs 'A 'A))
+              (hash-set! regs 'Y v)
+              (emit! `(set! Y ,v))]
+             [(TXA)
+              (hash-set! regs 'A (hash-ref regs 'X 'X))]
+             [(TYA)
+              (hash-set! regs 'A (hash-ref regs 'Y 'Y))]
+             [(TXS)
+              (emit! `(set! SP ,(hash-ref regs 'X 'X)))]
+             [(TSX)
+              (hash-set! regs 'X 'SP)]
+             [(PHA)
+              (emit! `(push! ,(hash-ref regs 'A 'A)))]
+             [(PLA)
+              (hash-set! regs 'A '(pop!))]
+             [(JSR)
+              (emit! `(call ,(or sym op)))
+              (hash-set! regs 'A 'A)]
+             [(JMP)
+              (if (eq? mode '#:ind)
+                  (emit! `(jump-indirect (deref ,op)))
+                  (emit! `(tail-call ,(or sym op))))]
+             [(RTS)
+              (emit! '(return))]
+             [(RTI)
+              (emit! '(reti))]
+             [(BPL BMI BVC BVS BCC BCS BNE BEQ)
+              (emit! `(branch-if ,(branch-cond-sym mnem) ,(or sym op)))]
+             [else (void)])]
+
+          ;; Raw Sharp SM83 Instructions
+          [(eq? arch 'sm83)
+           (define mnem tag)
+           (define m-str (symbol->string mnem))
+           (define mode (inst-mode f))
+           (define op   (or (inst-operand f) 0))
+           (define sym  (inst-sym f))
+           (cond
+             [(eq? mnem 'LD_A)      (hash-set! regs 'A op)]
+             [(eq? mnem 'LD_B)      (hash-set! regs 'B op) (emit! `(set! B ,op))]
+             [(eq? mnem 'LD_C)      (hash-set! regs 'C op) (emit! `(set! C ,op))]
+             [(eq? mnem 'LD_D)      (hash-set! regs 'D op) (emit! `(set! D ,op))]
+             [(eq? mnem 'LD_E)      (hash-set! regs 'E op) (emit! `(set! E ,op))]
+             [(eq? mnem 'LD_H)      (hash-set! regs 'H op) (emit! `(set! H ,op))]
+             [(eq? mnem 'LD_L)      (hash-set! regs 'L op) (emit! `(set! L ,op))]
+             [(eq? mnem 'LD_BC)     (hash-set! regs 'BC op) (emit! `(set! BC ,op))]
+             [(eq? mnem 'LD_DE)     (hash-set! regs 'DE op) (emit! `(set! DE ,op))]
+             [(eq? mnem 'LD_HL)     (hash-set! regs 'HL (or sym op)) (emit! `(set! HL ,(or sym op)))]
+             [(eq? mnem 'LD_SP)     (emit! `(set! SP ,op))]
+             [(eq? mnem 'XOR_A_A)   (hash-set! regs 'A 0)]
+             [(eq? mnem 'LDH_OUT)
+              (emit! `(set! ,(sm83-io-or-mem-sym f) ,(hash-ref regs 'A 'A)))]
+             [(eq? mnem 'LDH_IN)
+              (hash-set! regs 'A (sm83-io-or-mem-sym f))]
+             [(eq? mnem 'LDH_C_OUT)
+              (emit! `(set! (io-port C) ,(hash-ref regs 'A 'A)))]
+             [(eq? mnem 'LDH_C_IN)
+              (hash-set! regs 'A '(io-port C))]
+             [(eq? mnem 'LD_A16_A)
+              (emit! `(set! ,(sm83-io-or-mem-sym f) ,(hash-ref regs 'A 'A)))]
+             [(eq? mnem 'LD_A_A16)
+              (hash-set! regs 'A (sm83-io-or-mem-sym f))]
+             [(eq? mnem 'LD_HLI_A)
+              (emit! `(set! (deref HL++) ,(hash-ref regs 'A 'A)))]
+             [(eq? mnem 'LD_HLD_A)
+              (emit! `(set! (deref HL--) ,(hash-ref regs 'A 'A)))]
+             [(eq? mnem 'LD_A_HLI)
+              (hash-set! regs 'A '(deref HL++))]
+             [(eq? mnem 'LD_A_HLD)
+              (hash-set! regs 'A '(deref HL--))]
+             [(eq? mnem 'LD_A_DE_IND)
+              (hash-set! regs 'A '(deref DE))]
+             [(eq? mnem 'LD_A_BC_IND)
+              (hash-set! regs 'A '(deref BC))]
+             [(eq? mnem 'LD_DE_IND_A)
+              (emit! `(set! (deref DE) ,(hash-ref regs 'A 'A)))]
+             [(eq? mnem 'LD_BC_IND_A)
+              (emit! `(set! (deref BC) ,(hash-ref regs 'A 'A)))]
+             [(eq? mnem 'LD_HL_IND)
+              (emit! `(set! (deref HL) ,op))]
+             [(eq? mnem 'DAA)
+              (define cur-a (hash-ref regs 'A 'A))
+              (match cur-a
+                [`(+ ,x ,y) (hash-set! regs 'A `(bcd+ ,x ,y))]
+                [`(- ,x ,y) (hash-set! regs 'A `(bcd- ,x ,y))]
+                [_          (hash-set! regs 'A `(bcd-adjust ,cur-a))])]
+             [(regexp-match #px"^LD_([BCDEHLA]|HL-IND)_([BCDEHLA]|HL-IND)$" m-str)
+              => (lambda (mt)
+                   (define dst (string->symbol (second mt)))
+                   (define src (string->symbol (third mt)))
+                   (define src-val (if (eq? src 'HL-IND) '(deref HL) (hash-ref regs src src)))
+                   (if (eq? dst 'HL-IND)
+                       (emit! `(set! (deref HL) ,src-val))
+                       (begin
+                         (hash-set! regs dst src-val)
+                         (unless (eq? dst 'A)
+                           (emit! `(set! ,dst ,src-val))))))]
+             [(regexp-match #px"^(ADD|ADC|SUB|SBC|AND|XOR|OR)_A(?:_(.+))?$" m-str)
+              => (lambda (mt)
+                   (define alu (second mt))
+                   (define src-str (third mt))
+                   (define rhs
+                     (cond
+                       [(not src-str) op]
+                       [(string=? src-str "HL-IND") '(deref HL)]
+                       [else (let ([rsym (string->symbol src-str)])
+                               (hash-ref regs rsym rsym))]))
+                   (define cur-a (hash-ref regs 'A 'A))
+                   (define op-sym
+                     (cond
+                       [(or (string=? alu "ADD") (string=? alu "ADC")) '+]
+                       [(or (string=? alu "SUB") (string=? alu "SBC")) '-]
+                       [(string=? alu "AND") 'bit-and]
+                       [(string=? alu "OR")  'bit-ior]
+                       [else                 'bit-xor]))
+                   (hash-set! regs 'A `(,op-sym ,cur-a ,rhs)))]
+             [(regexp-match #px"^(INC|DEC)_(.+)$" m-str)
+              => (lambda (mt)
+                   (define dir (if (string=? (second mt) "INC") '+= '-=))
+                   (define r (string->symbol (third mt)))
+                   (define tgt (if (or (eq? r 'HL_IND) (eq? r 'HL-IND)) '(deref HL) r))
+                   (when (symbol? tgt) (hash-set! regs tgt tgt))
+                   (emit! `(,dir ,tgt 1)))]
+             [(regexp-match #px"^ADD_HL_(.+)$" m-str)
+              => (lambda (mt)
+                   (emit! `(+= HL ,(string->symbol (second mt)))))]
+             [(regexp-match #px"^(BIT|RES|SET)_([0-7])_(.+)$" m-str)
+              => (lambda (mt)
+                   (define kind (second mt))
+                   (define bit (string->number (third mt)))
+                   (define r (string->symbol (fourth mt)))
+                   (define tgt (if (eq? r 'HL-IND) '(deref HL) r))
+                   (cond
+                     [(string=? kind "RES") (emit! `(bit-clear! ,tgt ,bit))]
+                     [(string=? kind "SET") (emit! `(bit-set! ,tgt ,bit))]
+                     [else (void)]))]
+             [(eq? mode '#:cb)
+              (emit! `(bit-op! ,mnem))]
+             [(memq mnem '(CALL CALL_NZ CALL_Z CALL_NC CALL_C))
+              (emit! `(call ,(or sym op)))
+              (hash-set! regs 'A 'A)]
+             [(memq mnem '(RST_00 RST_08 RST_10 RST_18 RST_20 RST_28 RST_30 RST_38))
+              (emit! `(rst ,(or sym mnem)))]
+             [(eq? mnem 'JP)
+              (emit! `(tail-call ,(or sym op)))]
+             [(eq? mnem 'JP_HL)
+              (emit! '(jump-indirect HL))]
+             [(eq? mnem 'RET)
+              (emit! '(return))]
+             [(eq? mnem 'RETI)
+              (emit! '(reti))]
+             [(eq? mnem 'DI)
+              (emit! '(disable-interrupts!))]
+             [(eq? mnem 'EI)
+              (emit! '(enable-interrupts!))]
+             [else (void)])])))
+
+    (reverse stmts))
+
+  (define folded (fold-forms structured-body))
+  `(decompiled-pseudo-code
+    ,@(if (null? folded) '((nop)) folded)))
+
+;; ============================================================================
 ;; 4. NES (6502) State-Machine Dispatcher & High-Level Idiom Lifter
 ;; ============================================================================
 
@@ -493,7 +1104,7 @@
 (define (nes-addr->case-sym bank-idx addr sub-name-hash)
   (hash-ref sub-name-hash addr
             (lambda ()
-              (string->symbol (format "sub_b~a_~a"
+              (string->symbol (format "logic_routine_b~a_~a"
                                       bank-idx
                                       (string-upcase (~r addr #:base 16 #:min-width 4 #:pad-string "0")))))))
 
@@ -771,14 +1382,20 @@
 (define (valid-sm83-code-addr? addr)
   (and (>= addr #x0150) (<= addr #x7FFF)))
 
-(define (sm83-addr->case-sym bank-idx addr)
+(define (sm83-addr->case-sym bank-idx addr [sub-name-hash (hash)])
   (define target-bank (if (< addr #x4000) 0 bank-idx))
-  (string->symbol (format "sub_b~a_~a"
-                          target-bank
-                          (string-upcase (~r addr #:base 16 #:min-width 4 #:pad-string "0")))))
+  (or (hash-ref sub-name-hash (cons target-bank addr) #f)
+      (hash-ref sub-name-hash addr #f)
+      (if (and (= target-bank 0) (= addr #x0150))
+          'main_entry_0150
+          (string->symbol (format "game_logic_step_b~a_~a"
+                                  target-bank
+                                  (string-upcase (~r addr #:base 16 #:min-width 4 #:pad-string "0")))))))
 
 ;; Extract inline 16-bit SM83 subroutine pointers starting at `rom-pos`
-(define (extract-sm83-table-cases rom-bytes bank-idx bank-end rom-pos #:max-cases [max-cases 10])
+(define (extract-sm83-table-cases rom-bytes bank-idx bank-end rom-pos
+                                  #:sub-name-hash [sub-name-hash (hash)]
+                                  #:max-cases [max-cases 10])
   (let loop ([k 0]
              [acc '()])
     (define pos (+ rom-pos (* k 2)))
@@ -787,11 +1404,12 @@
         (let ([addr (u16-le rom-bytes pos)])
           (if (valid-sm83-code-addr? addr)
               (loop (add1 k)
-                    (cons `(case ,k -> ,(sm83-addr->case-sym bank-idx addr))
+                    (cons `(case ,k -> ,(sm83-addr->case-sym bank-idx addr sub-name-hash))
                           acc))
               (reverse acc))))))
 
 (define (lift-sm83-state-machines-and-idioms rom-bytes num-banks
+                                             #:sub-name-hash [sub-name-hash (hash)]
                                              #:max-state-machines [max-state-machines 16]
                                              #:max-idioms [max-idioms 36])
   (define rom-len (bytes-length rom-bytes))
@@ -837,7 +1455,9 @@
       ;;     inline 16-bit jump table dispatcher (as in Tetris `$0028` and Links Awakening!)
       (when (and (< (length state-machines) max-state-machines)
                  (or (= op #xEF) (= op #xC7) (= op #xDF) (= op #xE7)))
-        (define cases (extract-sm83-table-cases rom-bytes b b-end (add1 pos) #:max-cases 10))
+        (define cases (extract-sm83-table-cases rom-bytes b b-end (add1 pos)
+                                                #:sub-name-hash sub-name-hash
+                                                #:max-cases 10))
         (when (>= (length cases) 3)
           (define mech (if (= op #xEF) 'rst-28-inline-table 'rst-inline-table))
           (add-sm83-sm! b pc mech cases)))
@@ -863,7 +1483,9 @@
             [else #f]))
         (define cases
           (if tbl-rom-pos
-              (extract-sm83-table-cases rom-bytes b (min rom-len (+ tbl-rom-pos 32)) tbl-rom-pos #:max-cases 8)
+              (extract-sm83-table-cases rom-bytes b (min rom-len (+ tbl-rom-pos 32)) tbl-rom-pos
+                                        #:sub-name-hash sub-name-hash
+                                        #:max-cases 8)
               '()))
         (when (>= (length cases) 2)
           (add-sm83-sm! b pc 'jp-hl-dispatch-table cases)))

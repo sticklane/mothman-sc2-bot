@@ -65,6 +65,31 @@
       (called-functions (cprint dofade startscreen))
       (structured-ast
         (for-loop "i=0,30"))
+      (decompiled-pseudo-code
+        (call cls "0")
+        (call cartdata "\"cherrybomb\"")
+        (set! highscore "dget(0)")
+        (set! version "\"v1\"")
+        (call startscreen "")
+        (set! blinkt "1")
+        (set! t "0")
+        (set! lockout "0")
+        (set! shake "0")
+        (set! flash "0")
+        (set! debug "\"\"")
+        (set! peekerx "64")
+        (set! fadetable "{{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},{1,1,129,129,129,129,129,129,129,129,0,0,0,0,0},{2,2,2,130,130,130,130,130,128,128,128,128,128,0,0},{3,3,3,131,131,131,131,129,129,129,129,129,0,0,0},{4,4,132,132,132,132,132,132,130,128,128,128,128,0,0},{5,5,133,133,133,133,130,130,128,128,128,128,128,0,0},{6,6,134,13,13,13,141,5,5,5,133,130,128,128,0},{7,6,6,6,134,134,134,134,5,5,5,133,130,128,0},{8,8,136,136,136,136,132,132,132,130,128,128,128,128,0},{9,9,9,4,4,4,4,132,132,132,128,128,128,128,0},{10,10,138,138,138,4,4,4,132,132,133,128,128,128,0},{11,139,139,139,139,3,3,3,3,129,129,129,0,0,0},{12,12,12,140,140,140,140,131,131,131,1,129,129,129,0},{13,13,141,141,5,5,5,133,133,130,129,129,128,128,0},{14,14,14,134,134,141,141,2,2,133,130,130,128,128,0},{15,143,143,134,134,134,134,5,5,5,133,133,128,128,0}}")
+        (call cls "12")
+        (call spr "10,40,34,6,5")
+        (call cprint "\"a lazy devs game\", 64,80,7")
+        (call cprint "\"by krystian majewski\", 64,86,7")
+        (set! fadeperc "1")
+        (call dofade "")
+        (-= fadeperc "0.07")
+        (call flip "")
+        (call until "fadeperc<=0")
+        (set! fadeperc "0")
+        (call dofade ""))
       (body-lines
         "function _init()"
         " --this will clear the screen"
@@ -106,6 +131,10 @@
       (called-functions ())
       (structured-ast
         (for-loop "c=0,15"))
+      (decompiled-pseudo-code
+        (set! fadeperc "min(fadeperc,1)")
+        (for-range c "0" "15")
+        (call pal "c,fadetable[c+1][flr(fadeperc*16+1)],1"))
       (body-lines
         "function dofade()"
         " fadeperc=min(fadeperc,1)"
@@ -120,6 +149,19 @@
       (called-functions (update_game update_over update_start update_wavetext update_win))
       (structured-ast
         (if-cond "mode==\"game\""))
+      (decompiled-pseudo-code
+        (+= t "1")
+        (+= blinkt "1")
+        (when "mode==\"game\"")
+        (call update_game "")
+        (when "mode==\"start\"")
+        (call update_start "")
+        (when "mode==\"wavetext\"")
+        (call update_wavetext "")
+        (when "mode==\"over\"")
+        (call update_over "")
+        (when "mode==\"win\"")
+        (call update_win ""))
       (body-lines
         "function _update() "
         " t+=1"
@@ -145,6 +187,18 @@
       (called-functions (doshake draw_game draw_over draw_start draw_wavetext draw_win))
       (structured-ast
         (if-cond "mode==\"game\""))
+      (decompiled-pseudo-code
+        (call doshake "")
+        (when "mode==\"game\"")
+        (call draw_game "")
+        (when "mode==\"start\"")
+        (call draw_start "")
+        (when "mode==\"wavetext\"")
+        (call draw_wavetext "")
+        (when "mode==\"over\"")
+        (call draw_over "")
+        (when "mode==\"win\"")
+        (call draw_win ""))
       (body-lines
         "function _draw()"
         " doshake()"
@@ -168,6 +222,10 @@
       (called-functions (makestars))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (call makestars "")
+        (set! mode "\"start\"")
+        (call music "7"))
       (body-lines
         "function startscreen()"
         " makestars()"
@@ -182,6 +240,31 @@
       (called-functions (makespr makestars nextwave))
       (structured-ast
         (seq-block 44))
+      (decompiled-pseudo-code
+        (set! t "0")
+        (set! wave "0")
+        (set! lastwave "9")
+        (call nextwave "")
+        (set! ship "makespr()")
+        (set! ship.x "60")
+        (set! ship.y "90")
+        (set! ship.sx "0")
+        (set! ship.sy "0")
+        (set! ship.spr "2")
+        (set! flamespr "5")
+        (set! bultimer "0")
+        (set! muzzle "0")
+        (set! score "0")
+        (set! cher "0")
+        (set! lives "4")
+        (set! invul "0")
+        (set! attacfreq "60")
+        (set! firefreq "20")
+        (set! nextfire "0")
+        (call makestars "")
+        (set! buls "{}")
+        (set! ebuls "{}")
+        (set! enemies "{}"))
       (body-lines
         "function startgame()"
         " t=0"
@@ -223,6 +306,14 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,100"))
+      (decompiled-pseudo-code
+        (set! stars "{}")
+        (for-range i "1" "100")
+        (set! newstar "{}")
+        (set! newstar.x "flr(rnd(128))")
+        (set! newstar.y "flr(rnd(128))")
+        (set! newstar.spd "rnd(1.5)+0.5")
+        (call add "stars,newstar"))
       (body-lines
         "function makestars()"
         " stars={} "
@@ -242,6 +333,14 @@
       (structured-ast
         (for-loop "i=1,#stars")
         (if-cond "mystar.spd<1"))
+      (decompiled-pseudo-code
+        (for-range i "1" "#stars")
+        (set! mystar "stars[i]")
+        (set! scol "6")
+        (when "mystar.spd<1")
+        (set! scol "1")
+        (when "mystar.spd<1.5")
+        (set! scol "13"))
       (body-lines
         "function starfield()"
         " "
@@ -262,6 +361,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "spd==nil"))
+      (decompiled-pseudo-code
+        (when "spd==nil")
+        (set! spd "1"))
       (body-lines
         "function animatestars(spd)"
         " if spd==nil then"
@@ -275,6 +377,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "blinkt>#banim"))
+      (decompiled-pseudo-code
+        (set! banim "{5,5,5,5,5,5,5,5,5,5,5,6,6,7,7,6,6,5}")
+        (when "blinkt>#banim")
+        (set! blinkt "1"))
       (body-lines
         "function blink()"
         " local banim={5,5,5,5,5,5,5,5,5,5,5,6,6,7,7,6,6,5}"
@@ -290,6 +396,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (call spr "myspr.spr,myspr.x+1,myspr.y,myspr.sprw,myspr.sprh")
+        (call spr "myspr.spr,myspr.x-1,myspr.y,myspr.sprw,myspr.sprh")
+        (call spr "myspr.spr,myspr.x,myspr.y+1,myspr.sprw,myspr.sprh")
+        (call spr "myspr.spr,myspr.x,myspr.y-1,myspr.sprw,myspr.sprh"))
       (body-lines
         "function drwoutline(myspr)"
         " spr(myspr.spr,myspr.x+1,myspr.y,myspr.sprw,myspr.sprh)"
@@ -306,6 +417,13 @@
       (structured-ast
         (if-cond "myspr.shake>0")
         (if-cond "t%4<2"))
+      (decompiled-pseudo-code
+        (set! sprx "myspr.x")
+        (set! spry "myspr.y")
+        (when "myspr.shake>0")
+        (-= myspr.shake "1")
+        (when "t%4<2")
+        (+= sprx "1"))
       (body-lines
         "function drwmyspr(myspr)"
         " local sprx=myspr.x"
@@ -325,6 +443,9 @@
       (structured-ast
         (if-cond "a.ghost or b.ghost")
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (when "a.ghost or b.ghost")
+        (return "false"))
       (body-lines
         "function col(a,b)"
         " if a.ghost or b.ghost then "
@@ -338,6 +459,28 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,30"))
+      (decompiled-pseudo-code
+        (set! myp "{}")
+        (set! myp.x "expx")
+        (set! myp.y "expy")
+        (set! myp.sx "0")
+        (set! myp.sy "0")
+        (set! myp.age "0")
+        (set! myp.size "10")
+        (set! myp.maxage "0")
+        (set! myp.blue "isblue")
+        (call add "parts,myp")
+        (for-range i "1" "30")
+        (set! myp "{}")
+        (set! myp.x "expx")
+        (set! myp.y "expy")
+        (set! myp.sx "rnd()*6-3")
+        (set! myp.sy "rnd()*6-3")
+        (set! myp.age "rnd(2)")
+        (set! myp.size "1+rnd(4)")
+        (set! myp.maxage "10+rnd(10)")
+        (set! myp.blue "isblue")
+        (call add "parts,myp"))
       (body-lines
         "function explode(expx,expy,isblue)"
         " "
@@ -378,6 +521,26 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,60"))
+      (decompiled-pseudo-code
+        (set! myp "{}")
+        (set! myp.x "expx")
+        (set! myp.y "expy")
+        (set! myp.sx "0")
+        (set! myp.sy "0")
+        (set! myp.age "0")
+        (set! myp.size "25")
+        (set! myp.maxage "0")
+        (call add "parts,myp")
+        (for-range i "1" "60")
+        (set! myp "{}")
+        (set! myp.x "expx")
+        (set! myp.y "expy")
+        (set! myp.sx "rnd()*12-6")
+        (set! myp.sy "rnd()*12-6")
+        (set! myp.age "rnd(2)")
+        (set! myp.size "1+rnd(6)")
+        (set! myp.maxage "20+rnd(20)")
+        (call add "parts,myp"))
       (body-lines
         "function bigexplode(expx,expy)"
         " "
@@ -416,6 +579,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "page>5"))
+      (decompiled-pseudo-code
+        (set! col "7")
+        (when "page>5")
+        (set! col "10"))
       (body-lines
         "function page_red(page)"
         " local col=7"
@@ -431,6 +598,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "page>5"))
+      (decompiled-pseudo-code
+        (set! col "7")
+        (when "page>5")
+        (set! col "6"))
       (body-lines
         "function page_blue(page)"
         " local col=7"
@@ -446,6 +617,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "shcol==nil"))
+      (decompiled-pseudo-code
+        (when "shcol==nil")
+        (set! shcol "9"))
       (body-lines
         "function smol_shwave(shx,shy,shcol)"
         " if shcol==nil then"
@@ -459,6 +633,15 @@
       (called-functions ())
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (set! mysw "{}")
+        (set! mysw.x "shx")
+        (set! mysw.y "shy")
+        (set! mysw.r "3")
+        (set! mysw.tr "25")
+        (set! mysw.col "7")
+        (set! mysw.speed "3.5")
+        (call add "shwaves,mysw"))
       (body-lines
         "function big_shwave(shx,shy)"
         " local mysw={}"
@@ -478,6 +661,18 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,2"))
+      (decompiled-pseudo-code
+        (set! myp "{}")
+        (set! myp.x "sx")
+        (set! myp.y "sy")
+        (set! myp.sx "(rnd()-0.5)*8")
+        (set! myp.sy "(rnd()-1)*3")
+        (set! myp.age "rnd(2)")
+        (set! myp.size "1+rnd(4)")
+        (set! myp.maxage "10+rnd(10)")
+        (set! myp.blue "isblue")
+        (set! myp.spark "true")
+        (call add "parts,myp"))
       (body-lines
         "function smol_spark(sx,sy)"
         " --for i=1,2 do"
@@ -505,6 +700,21 @@
       (called-functions ())
       (structured-ast
         (return-expr "myspr"))
+      (decompiled-pseudo-code
+        (set! myspr "{}")
+        (set! myspr.x "0")
+        (set! myspr.y "0")
+        (set! myspr.sx "0")
+        (set! myspr.sy "0")
+        (set! myspr.flash "0")
+        (set! myspr.shake "0")
+        (set! myspr.aniframe "1")
+        (set! myspr.spr "0")
+        (set! myspr.sprw "1")
+        (set! myspr.sprh "1")
+        (set! myspr.colw "8")
+        (set! myspr.colh "8")
+        (return "myspr"))
       (body-lines
         "function makespr()"
         " local myspr={}"
@@ -534,6 +744,15 @@
       (structured-ast
         (if-cond "shake>10")
         (if-cond "shake<1"))
+      (decompiled-pseudo-code
+        (set! shakex "rnd(shake)-(shake/2)")
+        (set! shakey "rnd(shake)-(shake/2)")
+        (call camera "shakex,shakey")
+        (when "shake>10")
+        (*= shake "0.9")
+        (-= shake "1")
+        (when "shake<1")
+        (set! shake "0"))
       (body-lines
         "function doshake()"
         ""
@@ -557,6 +776,13 @@
       (called-functions ())
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (set! fl "{}")
+        (set! fl.x "flx")
+        (set! fl.y "fly")
+        (set! fl.txt "fltxt")
+        (set! fl.age "0")
+        (call add "floats,fl"))
       (body-lines
         "function popfloat(fltxt,flx,fly)"
         " local fl={}"
@@ -574,6 +800,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call print "txt,x-#txt*2,y,c"))
       (body-lines
         "function cprint(txt,x,y,c)"
         " print(txt,x-#txt*2,y,c)"
@@ -586,6 +814,13 @@
       (called-functions ())
       (structured-ast
         (if-cond "btn(0"))
+      (decompiled-pseudo-code
+        (set! ship.sx "0")
+        (set! ship.sy "0")
+        (set! ship.spr "2")
+        (when "btn(0)")
+        (set! ship.sx "-2")
+        (set! ship.spr "1"))
       (body-lines
         "function update_game()"
         " --controls"
@@ -605,6 +840,10 @@
       (called-functions (animatestars))
       (structured-ast
         (if-cond "btn(4"))
+      (decompiled-pseudo-code
+        (call animatestars "0.4")
+        (when "btn(4)==false and btn(5)==false")
+        (set! btnreleased "true"))
       (body-lines
         "function update_start()"
         " animatestars(0.4)"
@@ -621,6 +860,9 @@
       (structured-ast
         (if-cond "t<lockout")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "t<lockout")
+        (return ""))
       (body-lines
         "function update_over()"
         " if t<lockout then"
@@ -635,6 +877,9 @@
       (structured-ast
         (if-cond "t<lockout")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "t<lockout")
+        (return ""))
       (body-lines
         "function update_win()"
         " if t<lockout then"
@@ -648,6 +893,12 @@
       (called-functions (spawnwave update_game))
       (structured-ast
         (if-cond "wavetime<=0"))
+      (decompiled-pseudo-code
+        (call update_game "")
+        (-= wavetime "1")
+        (when "wavetime<=0")
+        (set! mode "\"game\"")
+        (call spawnwave ""))
       (body-lines
         "function update_wavetext()"
         " update_game()"
@@ -664,6 +915,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "flash>0"))
+      (decompiled-pseudo-code
+        (when "flash>0")
+        (-= flash "1")
+        (call cls "2")
+        (call cls "0"))
       (body-lines
         "function draw_game()"
         " if flash>0 then"
@@ -681,6 +937,9 @@
       (structured-ast
         (if-cond "val==0")
         (return-expr "\"0\""))
+      (decompiled-pseudo-code
+        (when "val==0")
+        (return "\"0\""))
       (body-lines
         "function makescore(val)"
         " if val==0 then"
@@ -694,6 +953,13 @@
       (called-functions (starfield))
       (structured-ast
         (if-cond "sin(time("))
+      (decompiled-pseudo-code
+        (call cls "0")
+        (call starfield "")
+        (call print "version,1,1,1")
+        (call spr "21,peekerx,28+sin(time()/3.5)*4")
+        (when "sin(time()/3.5)>0.5")
+        (set! peekerx "30+rnd(60)"))
       (body-lines
         "function draw_start()"
         " cls(0)"
@@ -713,6 +979,14 @@
       (structured-ast
         (if-cond "score>highscore")
         (if-cond "t%4<2"))
+      (decompiled-pseudo-code
+        (call draw_game "")
+        (call cprint "\"game over\",64,40,8")
+        (call cprint "\"score:\"..makescore(score),64,60,12")
+        (when "score>highscore")
+        (set! c "7")
+        (when "t%4<2")
+        (set! c "10"))
       (body-lines
         "function draw_over()"
         " draw_game()"
@@ -733,6 +1007,14 @@
       (structured-ast
         (if-cond "score>highscore")
         (if-cond "t%4<2"))
+      (decompiled-pseudo-code
+        (call draw_game "")
+        (call cprint "\"congratulations\",64,40,12")
+        (call cprint "\"score:\"..makescore(score),64,60,12")
+        (when "score>highscore")
+        (set! c "7")
+        (when "t%4<2")
+        (set! c "10"))
       (body-lines
         "function draw_win()"
         " draw_game()"
@@ -752,6 +1034,11 @@
       (called-functions (blink cprint draw_game))
       (structured-ast
         (if-cond "wave==lastwave"))
+      (decompiled-pseudo-code
+        (call draw_game "")
+        (when "wave==lastwave")
+        (call cprint "\"final wave!\",64,40,blink()")
+        (call cprint "\"wave \"..wave..\" of \"..lastwave,64,40,blink()"))
       (body-lines
         "function draw_wavetext()"
         " draw_game()"
@@ -768,6 +1055,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "wave<lastwave"))
+      (decompiled-pseudo-code
+        (when "wave<lastwave")
+        (call sfx "28")
+        (call music "10"))
       (body-lines
         "function spawnwave()"
         " if wave<lastwave then"
@@ -785,6 +1076,12 @@
         (for-loop "y=1,4")
         (for-loop "x=1,10")
         (if-cond "myline[x]!=0"))
+      (decompiled-pseudo-code
+        (for-range y "1" "4")
+        (set! myline "lvl[y]")
+        (for-range x "1" "10")
+        (when "myline[x]!=0")
+        (call spawnen "myline[x],x*12-6,4+y*12,x*3"))
       (body-lines
         "function placens(lvl)"
         ""
@@ -803,6 +1100,15 @@
       (structured-ast
         (if-cond "wave>lastwave")
         (if-cond "wave==1"))
+      (decompiled-pseudo-code
+        (+= wave "1")
+        (when "wave>lastwave")
+        (set! mode "\"win\"")
+        (set! lockout "t+30")
+        (call music "4")
+        (when "wave==1")
+        (call music "0")
+        (call music "3"))
       (body-lines
         "function nextwave()"
         " wave+=1"
@@ -825,6 +1131,31 @@
       (called-functions (makespr))
       (structured-ast
         (if-cond "entype==nil or entype==1"))
+      (decompiled-pseudo-code
+        (set! myen "makespr()")
+        (set! myen.x "enx*1.25-16")
+        (set! myen.y "eny-66")
+        (set! myen.posx "enx")
+        (set! myen.posy "eny")
+        (set! myen.type "entype")
+        (set! myen.wait "enwait")
+        (set! myen.anispd "0.4")
+        (set! myen.mission "\"flyin\"")
+        (when "entype==nil or entype==1")
+        (set! myen.spr "21")
+        (set! myen.hp "3")
+        (set! myen.ani "{21,22,23,24}")
+        (set! myen.score "1")
+        (when "entype==2")
+        (set! myen.spr "148")
+        (set! myen.hp "2")
+        (set! myen.ani "{148,149}")
+        (set! myen.score "2")
+        (when "entype==3")
+        (set! myen.spr "184")
+        (set! myen.hp "4")
+        (set! myen.ani "{184,185,186,187}")
+        (set! myen.score "3"))
       (body-lines
         "function spawnen(entype,enx,eny,enwait)"
         " local myen=makespr()"
@@ -867,6 +1198,10 @@
       (structured-ast
         (if-cond "myen.wait>0")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "myen.wait>0")
+        (-= myen.wait "1")
+        (return ""))
       (body-lines
         "function doenemy(myen)"
         " if myen.wait>0 then"
@@ -882,6 +1217,9 @@
       (structured-ast
         (if-cond "mode!=\"game\"")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "mode!=\"game\"")
+        (return ""))
       (body-lines
         "function picktimer()"
         " if mode!=\"game\" then"
@@ -897,6 +1235,17 @@
         (if-cond "myen==nil")
         (return-expr "end")
         (if-cond "myen.mission==\"protec\""))
+      (decompiled-pseudo-code
+        (set! maxnum "min(10,#enemies)")
+        (set! myindex "flr(rnd(maxnum))")
+        (set! myindex "#enemies-myindex")
+        (set! myen "enemies[myindex]")
+        (when "myen==nil" "return")
+        (when "myen.mission==\"protec\"")
+        (set! myen.mission "\"attac\"")
+        (*= myen.anispd "3")
+        (set! myen.wait "60")
+        (set! myen.shake "60"))
       (body-lines
         "function pickattac()"
         " local maxnum=min(10,#enemies)"
@@ -923,6 +1272,14 @@
         (if-cond "myen.type==4 and myen.mission==\"protec\"")
         (if-cond "rnd(")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! maxnum "min(10,#enemies)")
+        (set! myindex "flr(rnd(maxnum))")
+        (foreach myen "enemies")
+        (when "myen.type==4 and myen.mission==\"protec\"")
+        (when "rnd()<0.5")
+        (call firespread "myen,12,1.3,rnd()")
+        (return ""))
       (body-lines
         "function pickfire()"
         " local maxnum=min(10,#enemies)"
@@ -942,6 +1299,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (+= obj.x "obj.sx")
+        (+= obj.y "obj.sy"))
       (body-lines
         "function move(obj)"
         " obj.x+=obj.sx"
@@ -956,6 +1316,15 @@
       (structured-ast
         (if-cond "myen.boss")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "myen.boss")
+        (set! myen.mission "\"boss5\"")
+        (set! myen.phbegin "t")
+        (set! myen.ghost "true")
+        (set! ebuls "{}")
+        (call music "-1")
+        (call sfx "51")
+        (return ""))
       (body-lines
         "function killen(myen)"
         " if myen.boss then"
@@ -975,6 +1344,13 @@
       (called-functions (makespr))
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (set! mypick "makespr()")
+        (set! mypick.x "pix")
+        (set! mypick.y "piy")
+        (set! mypick.sy "0.75")
+        (set! mypick.spr "48")
+        (call add "pickups,mypick"))
       (body-lines
         "function dropickup(pix,piy)"
         " local mypick=makespr()"
@@ -993,6 +1369,19 @@
       (structured-ast
         (if-cond "cher>=10")
         (if-cond "lives<4"))
+      (decompiled-pseudo-code
+        (+= cher "1")
+        (call smol_shwave "mypick.x+4,mypick.y+4,14")
+        (when "cher>=10")
+        (when "lives<4")
+        (+= lives "1")
+        (call sfx "31")
+        (set! cher "0")
+        (call popfloat "\"1up!\",mypick.x+4,mypick.y+4")
+        (+= score "50")
+        (call popfloat "makescore(50),mypick.x+4,mypick.y+4")
+        (call sfx "30")
+        (set! cher "0"))
       (body-lines
         "function plogic(mypick)"
         " cher+=1"
@@ -1019,6 +1408,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "flr(myen.aniframe"))
+      (decompiled-pseudo-code
+        (+= myen.aniframe "myen.anispd")
+        (when "flr(myen.aniframe) > #myen.ani")
+        (set! myen.aniframe "1"))
       (body-lines
         "function animate(myen)"
         " myen.aniframe+=myen.anispd"
@@ -1033,6 +1426,16 @@
       (called-functions (makespr))
       (structured-ast
         (if-cond "myen.type==4"))
+      (decompiled-pseudo-code
+        (set! myebul "makespr()")
+        (set! myebul.x "myen.x+3")
+        (set! myebul.y "myen.y+6")
+        (when "myen.type==4")
+        (set! myebul.x "myen.x+7")
+        (set! myebul.y "myen.y+13")
+        (when "myen.boss")
+        (set! myebul.x "myen.x+15")
+        (set! myebul.y "myen.y+23"))
       (body-lines
         "function fire(myen,ang,spd)"
         " local myebul=makespr()"
@@ -1054,6 +1457,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "base==nil"))
+      (decompiled-pseudo-code
+        (when "base==nil")
+        (set! base "0"))
       (body-lines
         "function firespread(myen,num,spd,base)"
         " if base==nil then"
@@ -1067,6 +1473,11 @@
       (called-functions (fire))
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (set! myebul "fire(myen,0,spd)")
+        (set! ang "atan2((ship.y+4)-myebul.y,(ship.x+4)-myebul.x)")
+        (set! myebul.sx "sin(ang)*spd")
+        (set! myebul.sy "cos(ang)*spd"))
       (body-lines
         "function aimedfire(myen,spd)"
         " local myebul=fire(myen,0,spd)"
@@ -1084,6 +1495,18 @@
       (called-functions (makespr))
       (structured-ast
         (for-loop "i=0,cher*2"))
+      (decompiled-pseudo-code
+        (set! spc "0.25/(cher*2)")
+        (for-range i "0" "cher*2")
+        (set! ang "0.375+spc*i")
+        (set! newbul "makespr()")
+        (set! newbul.x "ship.x")
+        (set! newbul.y "ship.y-3")
+        (set! newbul.spr "17")
+        (set! newbul.dmg "3")
+        (set! newbul.sx "sin(ang)*4")
+        (set! newbul.sy "cos(ang)*4")
+        (call add "buls,newbul"))
       (body-lines
         "function cherbomb()"
         " local spc=0.25/(cher*2)"
@@ -1110,6 +1533,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "myen.sx==0 or myen.x>=93"))
+      (decompiled-pseudo-code
+        (set! spd "2")
+        (when "myen.sx==0 or myen.x>=93")
+        (set! myen.sx "-spd"))
       (body-lines
         "function boss1(myen)"
         " -- movement"
@@ -1127,6 +1554,12 @@
       (structured-ast
         (if-cond "myen.subphase==1")
         (if-cond "myen.x<=4"))
+      (decompiled-pseudo-code
+        (set! spd "1.5")
+        (when "myen.subphase==1")
+        (set! myen.sx "-spd")
+        (when "myen.x<=4")
+        (set! myen.subphase "2"))
       (body-lines
         "function boss2(myen)"
         " local spd=1.5"
@@ -1145,6 +1578,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "myen.sx==0 or myen.x>=93"))
+      (decompiled-pseudo-code
+        (set! spd "0.5")
+        (when "myen.sx==0 or myen.x>=93")
+        (set! myen.sx "-spd"))
       (body-lines
         "function boss3(myen)"
         " -- movement"
@@ -1162,6 +1599,12 @@
       (structured-ast
         (if-cond "myen.subphase==1")
         (if-cond "myen.x>=91"))
+      (decompiled-pseudo-code
+        (set! spd "1.5")
+        (when "myen.subphase==1")
+        (set! myen.sx "spd")
+        (when "myen.x>=91")
+        (set! myen.subphase "2"))
       (body-lines
         "function boss4(myen)"
         " local spd=1.5"
@@ -1180,6 +1623,13 @@
       (called-functions (explode))
       (structured-ast
         (if-cond "t%8==0"))
+      (decompiled-pseudo-code
+        (set! myen.shake "10")
+        (set! myen.flash "10")
+        (when "t%8==0")
+        (call explode "myen.x+rnd(32),myen.y+rnd(24)")
+        (call sfx "2")
+        (set! shake "2"))
       (body-lines
         "function boss5(myen)"
         " myen.shake=10"

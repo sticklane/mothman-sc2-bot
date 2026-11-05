@@ -66,6 +66,8 @@
       (called-functions (title_screen))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call title_screen ""))
       (body-lines
         "function _init()"
         "\ttitle_screen()"
@@ -78,6 +80,16 @@
       (called-functions (load_room))
       (structured-ast
         (for-loop "i=0,29"))
+      (decompiled-pseudo-code
+        (set! got_fruit "{}")
+        (for-range i "0" "29")
+        (set! frames "0")
+        (set! deaths "0")
+        (set! max_djump "1")
+        (set! start_game "false")
+        (set! start_game_flash "0")
+        (call music "40,0,7")
+        (call load_room "7,3"))
       (body-lines
         "function title_screen()"
         "\tgot_fruit = {}"
@@ -100,6 +112,14 @@
       (called-functions (load_room))
       (structured-ast
         (seq-block 9))
+      (decompiled-pseudo-code
+        (set! frames "0")
+        (set! seconds "0")
+        (set! minutes "0")
+        (set! music_timer "0")
+        (set! start_game "false")
+        (call music "0,0,7")
+        (call load_room "0,0"))
       (body-lines
         "function begin_game()"
         "\tframes=0"
@@ -118,6 +138,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "room.x%8+room.y*8"))
+      (decompiled-pseudo-code
+        (return "room.x%8+room.y*8"))
       (body-lines
         "function level_index()"
         "\treturn room.x%8+room.y*8"
@@ -130,6 +152,8 @@
       (called-functions (level_index))
       (structured-ast
         (return-expr "level_index()==31"))
+      (decompiled-pseudo-code
+        (return "level_index()==31"))
       (body-lines
         "function is_title()"
         "\treturn level_index()==31"
@@ -142,6 +166,21 @@
       (called-functions (create_hair))
       (structured-ast
         (seq-block 15))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.p_jump "false")
+        (set! this.p_dash "false")
+        (set! this.grace "0")
+        (set! this.jbuffer "0")
+        (set! this.djump "max_djump")
+        (set! this.dash_time "0")
+        (set! this.dash_effect_time "0")
+        (set! this.dash_target "{x=0,y=0}")
+        (set! this.dash_accel "{x=0,y=0}")
+        (set! this.hitbox "{x=1,y=3,w=6,h=5}")
+        (set! this.spr_off "0")
+        (set! this.was_on_ground "false")
+        (call create_hair "this"))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.p_jump=false"
@@ -170,6 +209,16 @@
         (if-cond "spikes_at(this.x+this.hitbox.x,this.y+this.hitbox.y,this.hitbox.")
         (if-cond "this.y>128")
         (if-cond "on_ground and not this.was_on_ground"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (when "pause_player" "return")
+        (set! input "btn(k_right) and 1 or (btn(k_left) and -1 or 0)")
+        (when "spikes_at(this.x+this.hitbox.x,this.y+this.hitbox.y,this.hitbox.w,this.hitbox.h,this.spd.x,this.spd.y)")
+        (when "this.y>128")
+        (set! on_ground "this.is_solid(0,1)")
+        (set! on_ice "this.is_ice(0,1)")
+        (when "on_ground and not this.was_on_ground")
+        (call init_object "smoke,this.x,this.y+4"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tif (pause_player) return"
@@ -199,6 +248,11 @@
       (called-functions (clamp))
       (structured-ast
         (if-cond "this.x<-1 or this.x>121"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (when "this.x<-1 or this.x>121")
+        (set! this.x "clamp(this.x,-1,121)")
+        (set! this.spd.x "0"))
       (body-lines
         "\tdraw=function(this)"
         "\t"
@@ -215,6 +269,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "sfx_timer<=0"))
+      (decompiled-pseudo-code
+        (set! psfx "function(num)")
+        (when "sfx_timer<=0")
+        (call sfx "num"))
       (body-lines
         "psfx=function(num)"
         " if sfx_timer<=0 then"
@@ -228,6 +286,11 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=0,4"))
+      (decompiled-pseudo-code
+        (set! create_hair "function(obj)")
+        (set! obj.hair "{}")
+        (for-range i "0" "4")
+        (call add "obj.hair,{x=obj.x,y=obj.y,size=max(1,min(2,3-i))}"))
       (body-lines
         "create_hair=function(obj)"
         "\tobj.hair={}"
@@ -242,6 +305,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! set_hair_color "function(djump)")
+        (call pal "8,(djump==1 and 8 or djump==2 and (7+flr((frames/3)%2)*4) or 12)"))
       (body-lines
         "set_hair_color=function(djump)"
         "\tpal(8,(djump==1 and 8 or djump==2 and (7+flr((frames/3)%2)*4) or 12))"
@@ -254,6 +320,14 @@
       (called-functions ())
       (structured-ast
         (for-loop "foreach(obj.hair,function(h)"))
+      (decompiled-pseudo-code
+        (set! draw_hair "function(obj,facing)")
+        (set! last "{x=obj.x+4-facing*2,y=obj.y+(btn(k_down) and 4 or 3)}")
+        (foreach "obj.hair" "function(h")
+        (+= h.x "(last.x-h.x)/1.5")
+        (+= h.y "(last.y+0.5-h.y)/1.5")
+        (call circfill "h.x,h.y,h.size,8")
+        (set! last "h"))
       (body-lines
         "draw_hair=function(obj,facing)"
         "\tlocal last={x=obj.x+4-facing*2,y=obj.y+(btn(k_down) and 4 or 3)}"
@@ -272,6 +346,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! unset_hair_color "function()")
+        (call pal "8,8"))
       (body-lines
         "unset_hair_color=function()"
         "\tpal(8,8)"
@@ -284,6 +361,17 @@
       (called-functions (create_hair))
       (structured-ast
         (seq-block 11))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (call sfx "4")
+        (set! this.spr "3")
+        (set! this.target "{x=this.x,y=this.y}")
+        (set! this.y "128")
+        (set! this.spd.y "-4")
+        (set! this.state "0")
+        (set! this.delay "0")
+        (set! this.solids "false")
+        (call create_hair "this"))
       (body-lines
         "\tinit=function(this)"
         "\t sfx(4)"
@@ -305,6 +393,12 @@
       (structured-ast
         (if-cond "this.state==0")
         (if-cond "this.y < this.target.y+16"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (when "this.state==0")
+        (when "this.y < this.target.y+16")
+        (set! this.state "1")
+        (set! this.delay "3"))
       (body-lines
         "\tupdate=function(this)"
         "\t\t-- jumping up"
@@ -321,6 +415,12 @@
       (called-functions (draw_hair set_hair_color unset_hair_color))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (call set_hair_color "max_djump")
+        (call draw_hair "this,1")
+        (call spr "this.spr,this.x,this.y,1,1,this.flip.x,this.flip.y")
+        (call unset_hair_color ""))
       (body-lines
         "\tdraw=function(this)"
         "\t\tset_hair_color(max_djump)"
@@ -336,6 +436,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.hide_in "0")
+        (set! this.hide_for "0"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.hide_in=0"
@@ -350,6 +454,13 @@
       (structured-ast
         (if-cond "this.hide_for>0")
         (if-cond "this.hide_for<=0"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (when "this.hide_for>0")
+        (-= this.hide_for "1")
+        (when "this.hide_for<=0")
+        (set! this.spr "18")
+        (set! this.delay "0"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tif this.hide_for>0 then"
@@ -366,6 +477,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! obj.hide_in "15"))
       (body-lines
         "function break_spring(obj)"
         "\tobj.hide_in=15"
@@ -378,6 +491,12 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.offset "rnd(1)")
+        (set! this.start "this.y")
+        (set! this.timer "0")
+        (set! this.hitbox "{x=-1,y=-1,w=10,h=10}"))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.offset=rnd(1)"
@@ -394,6 +513,18 @@
       (structured-ast
         (if-cond "this.spr==22")
         (if-cond "hit~=nil and hit.djump<max_djump"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (when "this.spr==22")
+        (+= this.offset "0.01")
+        (set! this.y "this.start+sin(this.offset)*2")
+        (set! hit "this.collide(player,0,0)")
+        (when "hit~=nil and hit.djump<max_djump")
+        (call psfx "6")
+        (call init_object "smoke,this.x,this.y")
+        (set! hit.djump "max_djump")
+        (set! this.spr "0")
+        (set! this.timer "60"))
       (body-lines
         "\tupdate=function(this) "
         "\t\tif this.spr==22 then"
@@ -415,6 +546,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "this.spr==22"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (when "this.spr==22")
+        (call spr "13+(this.offset*8)%3,this.x,this.y+6")
+        (call spr "this.spr,this.x,this.y"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tif this.spr==22 then"
@@ -429,6 +565,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.state "0")
+        (set! this.solid "true"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.state=0"
@@ -443,6 +583,11 @@
       (structured-ast
         (if-cond "this.state == 0")
         (if-cond "this.check(player,0,-1"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (when "this.state == 0")
+        (when "this.check(player,0,-1) or this.check(player,-1,0) or this.check(player,1,0)")
+        (call break_fall_floor "this"))
       (body-lines
         "\tupdate=function(this)"
         "\t\t-- idling"
@@ -459,6 +604,12 @@
       (structured-ast
         (if-cond "this.state!=2")
         (if-cond "this.state!=1"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (when "this.state!=2")
+        (when "this.state!=1")
+        (call spr "23,this.x,this.y")
+        (call spr "23+(15-this.delay)/5,this.x,this.y"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tif this.state!=2 then"
@@ -476,6 +627,15 @@
       (structured-ast
         (if-cond "obj.state==0")
         (if-cond "hit~=nil"))
+      (decompiled-pseudo-code
+        (when "obj.state==0")
+        (call psfx "15")
+        (set! obj.state "1")
+        (set! obj.delay "15")
+        (call init_object "smoke,obj.x,obj.y")
+        (set! hit "obj.collide(spring,0,-1)")
+        (when "hit~=nil")
+        (call break_spring "hit"))
       (body-lines
         "function break_fall_floor(obj)"
         " if obj.state==0 then"
@@ -495,6 +655,16 @@
       (called-functions (maybe))
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.spr "29")
+        (set! this.spd.y "-0.1")
+        (set! this.spd.x "0.3+rnd(0.2)")
+        (+= this.x "-1+rnd(2)")
+        (+= this.y "-1+rnd(2)")
+        (set! this.flip.x "maybe()")
+        (set! this.flip.y "maybe()")
+        (set! this.solids "false"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.spr=29"
@@ -514,6 +684,11 @@
       (called-functions (destroy_object))
       (structured-ast
         (if-cond "this.spr>=32"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (+= this.spr "0.2")
+        (when "this.spr>=32")
+        (call destroy_object "this"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.spr+=0.2"
@@ -528,6 +703,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.start "this.y")
+        (set! this.off "0"))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.start=this.y"
@@ -541,6 +720,15 @@
       (called-functions (collide destroy_object init_object level_index))
       (structured-ast
         (if-cond "hit~=nil"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (set! hit "this.collide(player,0,0)")
+        (when "hit~=nil")
+        (set! hit.djump "max_djump")
+        (set! sfx_timer "20")
+        (call sfx "13")
+        (call init_object "lifeup,this.x,this.y")
+        (call destroy_object "this"))
       (body-lines
         "\tupdate=function(this)"
         "\t local hit=this.collide(player,0,0)"
@@ -560,6 +748,13 @@
       (called-functions ())
       (structured-ast
         (seq-block 7))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.start "this.y")
+        (set! this.fly "false")
+        (set! this.step "0.5")
+        (set! this.solids "false")
+        (set! this.sfx_delay "8"))
       (body-lines
         "\tinit=function(this) "
         "\t\tthis.start=this.y"
@@ -578,6 +773,14 @@
         (if-cond "this.fly")
         (if-cond "this.sfx_delay>0")
         (if-cond "this.sfx_delay<=0"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (when "this.fly")
+        (when "this.sfx_delay>0")
+        (-= this.sfx_delay "1")
+        (when "this.sfx_delay<=0")
+        (set! sfx_timer "20")
+        (call sfx "14"))
       (body-lines
         "\tupdate=function(this)"
         "\t\t--fly away"
@@ -597,6 +800,13 @@
       (structured-ast
         (if-cond "not this.fly")
         (if-cond "dir<0"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (set! off "0")
+        (when "not this.fly")
+        (set! dir "sin(this.step)")
+        (when "dir<0")
+        (set! off "1+max(0,sign(this.y-this.start))"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tlocal off=0"
@@ -613,6 +823,14 @@
       (called-functions ())
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.spd.y "-0.25")
+        (set! this.duration "30")
+        (-= this.x "2")
+        (-= this.y "4")
+        (set! this.flash "0")
+        (set! this.solids "false"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.spd.y=-0.25"
@@ -630,6 +848,11 @@
       (called-functions (destroy_object))
       (structured-ast
         (if-cond "this.duration<= 0"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (-= this.duration "1")
+        (when "this.duration<= 0")
+        (call destroy_object "this"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.duration-=1"
@@ -644,6 +867,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (+= this.flash "0.5")
+        (call print "\"1000\",this.x-2,this.y,7+this.flash%2"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.flash+=0.5"
@@ -658,6 +885,22 @@
       (called-functions (collide destroy_object init_object sign))
       (structured-ast
         (if-cond "hit~=nil and hit.dash_effect_time>0"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (set! this.hitbox "{x=-1,y=-1,w=18,h=18}")
+        (set! hit "this.collide(player,0,0)")
+        (when "hit~=nil and hit.dash_effect_time>0")
+        (set! hit.spd.x "-sign(hit.spd.x)*1.5")
+        (set! hit.spd.y "-1.5")
+        (set! hit.dash_time "-1")
+        (set! sfx_timer "20")
+        (call sfx "16")
+        (call destroy_object "this")
+        (call init_object "smoke,this.x,this.y")
+        (call init_object "smoke,this.x+8,this.y")
+        (call init_object "smoke,this.x,this.y+8")
+        (call init_object "smoke,this.x+8,this.y+8")
+        (call init_object "fruit,this.x+4,this.y+4"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.hitbox={x=-1,y=-1,w=18,h=18}"
@@ -683,6 +926,12 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (call spr "64,this.x,this.y")
+        (call spr "65,this.x+8,this.y")
+        (call spr "80,this.x,this.y+8")
+        (call spr "81,this.x+8,this.y+8"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tspr(64,this.x,this.y)"
@@ -698,6 +947,13 @@
       (called-functions ())
       (structured-ast
         (if-cond "is==10 and is!=was"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (set! was "flr(this.spr)")
+        (set! this.spr "9+(sin(frames/30)+0.5)*1")
+        (set! is "flr(this.spr)")
+        (when "is==10 and is!=was")
+        (set! this.flip.x "not this.flip.x"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tlocal was=flr(this.spr)"
@@ -714,6 +970,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (-= this.x "4")
+        (set! this.start "this.x")
+        (set! this.timer "20"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.x-=4"
@@ -729,6 +990,16 @@
       (structured-ast
         (if-cond "has_key")
         (if-cond "this.timer<=0"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (when "has_key")
+        (-= this.timer "1")
+        (set! this.x "this.start-1+rnd(3)")
+        (when "this.timer<=0")
+        (set! sfx_timer "20")
+        (call sfx "16")
+        (call init_object "fruit,this.x,this.y-4")
+        (call destroy_object "this"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tif has_key then"
@@ -748,6 +1019,12 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (-= this.x "4")
+        (set! this.solids "false")
+        (set! this.hitbox.w "16")
+        (set! this.last "this.x"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.x-=4"
@@ -765,6 +1042,15 @@
         (if-cond "this.x<-16")
         (if-cond "not this.check(player,0,0")
         (if-cond "hit~=nil"))
+      (decompiled-pseudo-code
+        (set! update "function(this)")
+        (set! this.spd.x "this.dir*0.65")
+        (when "this.x<-16" "this.x=128")
+        (when "this.x>128" "this.x=-16")
+        (when "not this.check(player,0,0)")
+        (set! hit "this.collide(player,0,-1)")
+        (when "hit~=nil")
+        (call hit.move_x "this.x-this.last,1"))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.spd.x=this.dir*0.65"
@@ -783,6 +1069,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (call spr "11,this.x,this.y-1")
+        (call spr "12,this.x+8,this.y-1"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tspr(11,this.x,this.y-1)"
@@ -798,6 +1088,15 @@
         (if-cond "this.check(player,4,0")
         (if-cond "this.index<#this.text")
         (if-cond "this.index>=this.last+1"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (set! this.text "\"")
+        (when "this.check(player,4,0)")
+        (when "this.index<#this.text")
+        (+= this.index "0.5")
+        (when "this.index>=this.last+1")
+        (+= this.last "1")
+        (call sfx "35"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.text=\"-- celeste mountain --#this memorial to those# perished on the climb\""
@@ -816,6 +1115,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.state "0")
+        (set! this.hitbox.w "16"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.state=0"
@@ -830,6 +1133,21 @@
       (structured-ast
         (if-cond "this.state==0")
         (if-cond "hit~=nil and hit.is_solid(0,1"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (when "this.state==0")
+        (set! hit "this.collide(player,0,8)")
+        (when "hit~=nil and hit.is_solid(0,1)")
+        (call music "-1,500,7")
+        (call sfx "37")
+        (set! pause_player "true")
+        (set! hit.spd.x "0")
+        (set! hit.spd.y "0")
+        (set! this.state "1")
+        (call init_object "smoke,this.x,this.y")
+        (call init_object "smoke,this.x+8,this.y")
+        (set! this.timer "60")
+        (set! this.particles "{}"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tif this.state==0 then"
@@ -854,6 +1172,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.spd.y "-4")
+        (set! this.solids "false")
+        (set! this.particles "{}"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.spd.y=-4"
@@ -868,6 +1191,18 @@
       (called-functions (appr collide destroy_object))
       (structured-ast
         (if-cond "this.spd.y==0 and hit~=nil"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (set! this.spd.y "appr(this.spd.y,0,0.5)")
+        (set! hit "this.collide(player,0,0)")
+        (when "this.spd.y==0 and hit~=nil")
+        (set! music_timer "45")
+        (call sfx "51")
+        (set! freeze "10")
+        (set! shake "10")
+        (call destroy_object "this")
+        (set! max_djump "2")
+        (set! hit.djump "2"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.spd.y=appr(this.spd.y,0,0.5)"
@@ -890,6 +1225,14 @@
       (structured-ast
         (for-loop "i=1,count(got_fruit)")
         (if-cond "got_fruit[i]"))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (+= this.x "5")
+        (set! this.score "0")
+        (set! this.show "false")
+        (for-range i "1" "count(got_fruit)")
+        (when "got_fruit[i]")
+        (+= this.score "1"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.x+=5"
@@ -907,6 +1250,20 @@
       (called-functions (check draw_time))
       (structured-ast
         (if-cond "this.show"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (set! this.spr "118+(frames/5)%3")
+        (call spr "this.spr,this.x,this.y")
+        (when "this.show")
+        (call rectfill "32,2,96,31,0")
+        (call spr "26,55,6")
+        (call print "\"x\"..this.score,64,9,7")
+        (call draw_time "49,16")
+        (call print "\"deaths:\"..deaths,48,24,7")
+        (when "this.check(player,0,0)")
+        (call sfx "55")
+        (set! sfx_timer "30")
+        (set! this.show "true"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.spr=118+(frames/5)%3"
@@ -930,6 +1287,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! init "function(this)")
+        (set! this.delay "5"))
       (body-lines
         "\tinit=function(this)"
         "\t\tthis.delay=5"
@@ -943,6 +1303,19 @@
       (structured-ast
         (if-cond "this.delay<-30")
         (if-cond "room.x==3 and room.y==1"))
+      (decompiled-pseudo-code
+        (set! draw "function(this)")
+        (-= this.delay "1")
+        (when "this.delay<-30")
+        (call destroy_object "this")
+        (when "this.delay<0")
+        (call rectfill "24,58,104,70,0")
+        (when "room.x==3 and room.y==1")
+        (call print "\"old site\",48,62,7")
+        (when "level_index()==30")
+        (call print "\"summit\",52,62,7")
+        (set! level "(1+level_index())*100")
+        (call print "level..\" m\",52+(level<1000 and 2 or 0),62,7"))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.delay-=1"
@@ -970,6 +1343,9 @@
       (structured-ast
         (if-cond "type.if_not_fruit~=nil and got_fruit[1+level_index(")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "type.if_not_fruit~=nil and got_fruit[1+level_index()]")
+        (return ""))
       (body-lines
         "function init_object(type,x,y)"
         "\tif type.if_not_fruit~=nil and got_fruit[1+level_index()] then"
@@ -984,6 +1360,10 @@
       (structured-ast
         (if-cond "oy>0 and not obj.check(platform,ox,0")
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! obj.is_solid "function(ox,oy)")
+        (when "oy>0 and not obj.check(platform,ox,0) and obj.check(platform,ox,oy)")
+        (return "true"))
       (body-lines
         "\tobj.is_solid=function(ox,oy)"
         "\t\tif oy>0 and not obj.check(platform,ox,0) and obj.check(platform,ox,oy) then"
@@ -997,6 +1377,9 @@
       (called-functions (ice_at))
       (structured-ast
         (return-expr "ice_at(obj.x+obj.hitbox.x+ox,obj.y+obj.hitbox.y+oy,obj.hitbox.w,"))
+      (decompiled-pseudo-code
+        (set! obj.is_ice "function(ox,oy)")
+        (return "ice_at(obj.x+obj.hitbox.x+ox,obj.y+obj.hitbox.y+oy,obj.hitbox.w,obj.hitbox.h)"))
       (body-lines
         "\tobj.is_ice=function(ox,oy)"
         "\t\treturn ice_at(obj.x+obj.hitbox.x+ox,obj.y+obj.hitbox.y+oy,obj.hitbox.w,obj.hitbox.h)"
@@ -1010,6 +1393,11 @@
       (structured-ast
         (for-loop "i=1,count(objects)")
         (return-expr "other"))
+      (decompiled-pseudo-code
+        (set! obj.collide "function(type,ox,oy)")
+        (for-range i "1" "count(objects)")
+        (set! other "objects[i]")
+        (return "other"))
       (body-lines
         "\tobj.collide=function(type,ox,oy)"
         "\t\tlocal other"
@@ -1030,6 +1418,9 @@
       (called-functions (collide))
       (structured-ast
         (return-expr "obj.collide(type,ox,oy) ~=nil"))
+      (decompiled-pseudo-code
+        (set! obj.check "function(type,ox,oy)")
+        (return "obj.collide(type,ox,oy) ~=nil"))
       (body-lines
         "\tobj.check=function(type,ox,oy)"
         "\t\treturn obj.collide(type,ox,oy) ~=nil"
@@ -1042,6 +1433,16 @@
       (called-functions (move_x move_y))
       (structured-ast
         (seq-block 14))
+      (decompiled-pseudo-code
+        (set! obj.move "function(ox,oy)")
+        (+= obj.rem.x "ox")
+        (set! amount "flr(obj.rem.x + 0.5)")
+        (-= obj.rem.x "amount")
+        (call obj.move_x "amount,0")
+        (+= obj.rem.y "oy")
+        (set! amount "flr(obj.rem.y + 0.5)")
+        (-= obj.rem.y "amount")
+        (call obj.move_y "amount"))
       (body-lines
         "\tobj.move=function(ox,oy)"
         "\t\tlocal amount"
@@ -1067,6 +1468,15 @@
         (if-cond "obj.solids")
         (for-loop "i=start,abs(amount)")
         (if-cond "not obj.is_solid(step,0"))
+      (decompiled-pseudo-code
+        (set! obj.move_x "function(amount,start)")
+        (when "obj.solids")
+        (set! step "sign(amount)")
+        (for-range i "start" "abs(amount)")
+        (when "not obj.is_solid(step,0)")
+        (+= obj.x "step")
+        (set! obj.spd.x "0")
+        (set! obj.rem.x "0"))
       (body-lines
         "\tobj.move_x=function(amount,start)"
         "\t\tif obj.solids then"
@@ -1089,6 +1499,15 @@
         (if-cond "obj.solids")
         (for-loop "i=0,abs(amount)")
         (if-cond "not obj.is_solid(0,step"))
+      (decompiled-pseudo-code
+        (set! obj.move_y "function(amount)")
+        (when "obj.solids")
+        (set! step "sign(amount)")
+        (for-range i "0" "abs(amount)")
+        (when "not obj.is_solid(0,step)")
+        (+= obj.y "step")
+        (set! obj.spd.y "0")
+        (set! obj.rem.y "0"))
       (body-lines
         "\tobj.move_y=function(amount)"
         "\t\tif obj.solids then"
@@ -1109,6 +1528,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call del "objects,obj"))
       (body-lines
         "function destroy_object(obj)"
         "\tdel(objects,obj)"
@@ -1121,6 +1542,22 @@
       (called-functions (destroy_object restart_room))
       (structured-ast
         (for-loop "dir=0,7"))
+      (decompiled-pseudo-code
+        (set! sfx_timer "12")
+        (call sfx "0")
+        (+= deaths "1")
+        (set! shake "10")
+        (call destroy_object "obj")
+        (set! dead_particles "{}")
+        (for-range dir "0" "7")
+        (set! angle "(dir/8)")
+        (set! x "obj.x+4,")
+        (set! y "obj.y+4,")
+        (set! t "10,")
+        (set! spd "{")
+        (set! x "sin(angle)*3,")
+        (set! y "cos(angle)*3")
+        (call restart_room ""))
       (body-lines
         "function kill_player(obj)"
         "\tsfx_timer=12"
@@ -1150,6 +1587,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! will_restart "true")
+        (set! delay_restart "15"))
       (body-lines
         "function restart_room()"
         "\twill_restart=true"
@@ -1163,6 +1603,15 @@
       (called-functions ())
       (structured-ast
         (if-cond "room.x==2 and room.y==1"))
+      (decompiled-pseudo-code
+        (when "room.x==2 and room.y==1")
+        (call music "30,500,7")
+        (when "room.x==3 and room.y==1")
+        (call music "20,500,7")
+        (when "room.x==4 and room.y==2")
+        (call music "30,500,7")
+        (when "room.x==5 and room.y==3")
+        (call music "30,500,7"))
       (body-lines
         "function next_room()"
         " if room.x==2 and room.y==1 then"
@@ -1186,6 +1635,19 @@
         (for-loop "ty=0,15")
         (if-cond "tile==11")
         (if-cond "type.tile == tile"))
+      (decompiled-pseudo-code
+        (set! has_dashed "false")
+        (set! has_key "false")
+        (foreach "objects" "destroy_object")
+        (set! room.x "x")
+        (set! room.y "y")
+        (for-range tx "0" "15")
+        (for-range ty "0" "15")
+        (set! tile "mget(room.x*16+tx,room.y*16+ty);")
+        (when "tile==11")
+        (when "tile==12")
+        (when "type.tile == tile")
+        (call init_object "type,tx*8,ty*8"))
       (body-lines
         "function load_room(x,y)"
         "\thas_dashed=false"
@@ -1221,6 +1683,12 @@
       (structured-ast
         (if-cond "frames==0 and level_index(")
         (if-cond "seconds==0"))
+      (decompiled-pseudo-code
+        (set! frames "((frames+1)%30)")
+        (when "frames==0 and level_index()<30")
+        (set! seconds "((seconds+1)%60)")
+        (when "seconds==0")
+        (+= minutes "1"))
       (body-lines
         "function _update()"
         "\tframes=((frames+1)%30)"
@@ -1241,6 +1709,14 @@
         (if-cond "start_game")
         (if-cond "start_game_flash>10")
         (if-cond "frames%10<5"))
+      (decompiled-pseudo-code
+        (when "freeze>0" "return")
+        (call pal "")
+        (when "start_game")
+        (set! c "10")
+        (when "start_game_flash>10")
+        (when "frames%10<5")
+        (set! c "7"))
       (body-lines
         "function _draw()"
         "\tif freeze>0 then return end"
@@ -1263,6 +1739,11 @@
       (called-functions (draw))
       (structured-ast
         (if-cond "obj.type.draw ~=nil"))
+      (decompiled-pseudo-code
+        (when "obj.type.draw ~=nil")
+        (call obj.type.draw "obj")
+        (when "obj.spr > 0")
+        (call spr "obj.spr,obj.x,obj.y,1,1,obj.flip.x,obj.flip.y"))
       (body-lines
         "function draw_object(obj)"
         ""
@@ -1279,6 +1760,12 @@
       (called-functions ())
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (set! s "seconds")
+        (set! m "minutes%60")
+        (set! h "flr(minutes/60)")
+        (call rectfill "x,y,x+32,y+6,0")
+        (call print "(h<10 and \"0\"..h or h)..\":\"..(m<10 and \"0\"..m or m)..\":\"..(s<10 and \"0\"..s or s),x+1,y+1,7"))
       (body-lines
         "function draw_time(x,y)"
         ""
@@ -1298,6 +1785,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "max(a, min(b, val))"))
+      (decompiled-pseudo-code
+        (return "max(a, min(b, val))"))
       (body-lines
         "function clamp(val,a,b)"
         "\treturn max(a, min(b, val))"
@@ -1310,6 +1799,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "val > target"))
+      (decompiled-pseudo-code
+        (return "val > target"))
       (body-lines
         "function appr(val,target,amount)"
         " return val > target "
@@ -1324,6 +1815,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "v>0 and 1 or"))
+      (decompiled-pseudo-code
+        (return "v>0 and 1 or"))
       (body-lines
         "function sign(v)"
         "\treturn v>0 and 1 or"
@@ -1337,6 +1830,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "rnd(1)<0.5"))
+      (decompiled-pseudo-code
+        (return "rnd(1)<0.5"))
       (body-lines
         "function maybe()"
         "\treturn rnd(1)<0.5"
@@ -1349,6 +1844,8 @@
       (called-functions (tile_flag_at))
       (structured-ast
         (return-expr "tile_flag_at(x,y,w,h,0)"))
+      (decompiled-pseudo-code
+        (return "tile_flag_at(x,y,w,h,0)"))
       (body-lines
         "function solid_at(x,y,w,h)"
         " return tile_flag_at(x,y,w,h,0)"
@@ -1361,6 +1858,8 @@
       (called-functions (tile_flag_at))
       (structured-ast
         (return-expr "tile_flag_at(x,y,w,h,4)"))
+      (decompiled-pseudo-code
+        (return "tile_flag_at(x,y,w,h,4)"))
       (body-lines
         "function ice_at(x,y,w,h)"
         " return tile_flag_at(x,y,w,h,4)"
@@ -1376,6 +1875,11 @@
         (for-loop "j=max(0,flr(y/8)),min(15,(y+h-1)/8)")
         (if-cond "fget(tile_at(i,j")
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (for-range i "max(0" "flr(x/8)),min(15,(x+w-1)/8)")
+        (for-range j "max(0" "flr(y/8)),min(15,(y+h-1)/8)")
+        (when "fget(tile_at(i,j),flag)")
+        (return "true"))
       (body-lines
         "function tile_flag_at(x,y,w,h,flag)"
         " for i=max(0,flr(x/8)),min(15,(x+w-1)/8) do"
@@ -1391,6 +1895,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "mget(room.x * 16 + x, room.y * 16 + y)"))
+      (decompiled-pseudo-code
+        (return "mget(room.x * 16 + x, room.y * 16 + y)"))
       (body-lines
         "function tile_at(x,y)"
         " return mget(room.x * 16 + x, room.y * 16 + y)"
@@ -1409,6 +1915,18 @@
         (return-expr "true")
         (return-expr "true")
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (for-range i "max(0" "flr(x/8)),min(15,(x+w-1)/8)")
+        (for-range j "max(0" "flr(y/8)),min(15,(y+h-1)/8)")
+        (set! tile "tile_at(i,j)")
+        (when "tile==17 and ((y+h-1)%8>=6 or y+h==j*8+8) and yspd>=0")
+        (return "true")
+        (when "tile==27 and y%8<=2 and yspd<=0")
+        (return "true")
+        (when "tile==43 and x%8<=2 and xspd<=0")
+        (return "true")
+        (when "tile==59 and ((x+w-1)%8>=6 or x+w==i*8+8) and xspd>=0")
+        (return "true"))
       (body-lines
         "function spikes_at(x,y,w,h,xspd,yspd)"
         " for i=max(0,flr(x/8)),min(15,(x+w-1)/8) do"

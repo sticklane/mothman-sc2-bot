@@ -66,6 +66,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function _init()menuitem(1,\"erase data\",ei)I,h=split\"sword,spear,axe,hammer,knife\",dget(62)~=0and dget(62)or 1T,j,v=h,-1,dget(63)~=0and dget(63)or 2J,V,K,l,S,D,e,n=v,1,dget(0),dget(1),0,0,0,split(chr(peek(63191,50)))poke(63191,ord(nil,1,50) ..."))
     (def-pico-function
@@ -77,6 +79,8 @@
       (structured-ast
         (if-cond "type(n")
         (if-cond "type(n"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function er(n,e)e=e or 1for t,n in pairs(n)do if type(n)==\"table\"then printh(e..\"…in \"..t..\":\",\"debug\")er(n,e+1)else if type(n)~=\"boolean\"then printh(e..\"…\"..t..\"=\"..n,\"debug\")end end end end "))
     (def-pico-function
@@ -87,6 +91,8 @@
       (called-functions ())
       (structured-ast
         (if-cond "e>=300and m<1then o+=1if o==1then music\"0\"end e=0end if e>=200an"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function _update60()print\"⁶!5f100█●7🐱♪ˇ⬅️6>8☉3?⬅️⬇️\"i+=1if e<1000then e+=1end if e>=300and m<1then o+=1if o==1then music\"0\"end e=0end if e>=200and m==7then if A==20then o=8else o=5end end if b<1000and m==5then b+=1end if t()==1.5and m==-1th ..."))
     (def-pico-function
@@ -97,6 +103,8 @@
       (called-functions (s))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function X()if o==2or o==3or o==4then local e,n=s\"the sword is the most balanced\\nweapon, with average stats\\nand no weaknesses|the spear boasts the longest\\nrange, but is slower and\\ngenerates less meter|the axe may be slow, but your\\natta ..."))
     (def-pico-function
@@ -108,6 +116,8 @@
       (structured-ast
         (if-cond "m==2or m==6then h=a dset(62,h")
         (if-cond "m~=4then X("))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function e1()if m==2or m==6then h=a dset(62,h)elseif m==3then v=a dset(63,v)for e in all(M)do e[2]=1end add(M,{0,5})end if m~=4then X()end end "))
     (def-pico-function
@@ -119,6 +129,8 @@
       (structured-ast
         (if-cond "o~=1then m=o else q=a end deli(u,#u")
         (if-cond "z<=-1and o~=99then if S==0then if m<=4and m>=1or m==6then if btn"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function et()o,a=u[#u][1],u[#u][2]if o~=1then m=o else q=a end deli(u,#u)end if z<=-1and o~=99then if S==0then if m<=4and m>=1or m==6then if btnp\"2\"then a=(a-2)%#p[m]+1e1()sfx\"11\"elseif btnp\"3\"then a=(a)%#p[m]+1e1()sfx\"11\"end end if btnp\"0\" ..."))
     (def-pico-function
@@ -129,6 +141,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function _draw()cls\"0\""))
     (def-pico-function
@@ -139,6 +153,8 @@
       (called-functions (s x))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function eo(n)for e=0,15do local e=(e/15-U)%1if bxor(tonum(e>.25and e<.75),tonum(n))==0then x(s(\"x=64|y=27|dist_length=20|stretch_x=1|stretch_y=.55|scale=%3|angle=%1|time=999|color=14|stay_still=true|arsenal=%2\",e,T,3.5-abs(e-.5)*7))end end ..."))
     (def-pico-function
@@ -149,6 +165,8 @@
       (called-functions (G))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "local function n(o,a,n,d,r)for t=1,n*2do srand(t)local i=-i*n/-100local n,t=(rnd(n)-i)%n,(t+i*d)/n/2if pget(o+sin(t)*n,a+cos(t)/2*n)<=1and n>34-e then pset(o+sin(t)*n,a+cos(t)/2*n,r)end end srand(t())end camera(G(),G())srand(t())circfill(64 ..."))
     (def-pico-function
@@ -160,6 +178,8 @@
       (structured-ast
         (if-cond "e&32>0then menuitem(1,\"are you sure?\",eh")
         (return-expr "true end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function ei(e)if e&32>0then menuitem(1,\"are you sure?\",eh)end return true end "))
     (def-pico-function
@@ -171,6 +191,8 @@
       (structured-ast
         (if-cond "e&32>0then menuitem(1,\"really sure?\",es")
         (return-expr "true end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function eh(e)if e&32>0then menuitem(1,\"really sure?\",es)end return true end "))
     (def-pico-function
@@ -181,6 +203,8 @@
       (called-functions ())
       (structured-ast
         (if-cond "e&32>0then for e=0,63do dset(e,0"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function es(e)if e&32>0then for e=0,63do dset(e,0)end end extcmd\"reset\"end "))
     (def-pico-function
@@ -191,6 +215,8 @@
       (called-functions (s x))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function ea()x(s\"x=6|y=118|dist_length=0|stretch_x=1|stretch_y=.4|scale=3.5|angle=.09|time=999|color=14|stay_still=true|arsenal=1\")x(s\"x=12|y=116|dist_length=0|stretch_x=.8|stretch_y=1|scale=1.5|angle=.92|time=999|color=14|stay_still=true|a ..."))
     (def-pico-function
@@ -201,6 +227,8 @@
       (called-functions (el))
       (structured-ast
         (return-expr "el\"32\"*D end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function G()return el\"32\"*D end "))
     (def-pico-function
@@ -211,6 +239,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "rnd(e)-e/2end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function el(e)return rnd(e)-e/2end "))
     (def-pico-function
@@ -221,6 +251,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "flr(e/60)..\":\"..(flr(e)%60<10and\"0\"or\"\")..flr(e)%60end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function P(e)e=min(e,5999)return flr(e/60)..\":\"..(flr(e)%60<10and\"0\"or\"\")..flr(e)%60end "))
     (def-pico-function
@@ -231,6 +263,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function Q(a,e,n,t,d,s,o)local o,i,l,r,n,t=n*n,t*t,o or 0,max(n,t),cos(d),sin(d)local d,h,n=n*n,t*t,shl(n*t*(1/o-1/i),1)local f,t=h/o+d/i,shl(d/o+h/i,1)color(s)for o=max(e-r,0),min(e+r,127)do local e=o-e+.5local n,e=n*e,e*e*f-1local e=n*n-s ..."))
     (def-pico-function
@@ -241,6 +275,8 @@
       (called-functions (ef))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function x(e)for n in all(ed[e.arsenal])do ef(e,unpack(n))end end "))
     (def-pico-function
@@ -251,6 +287,8 @@
       (called-functions (g))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function ef(e,h,f,s,c,l,u)local a,i,t,d,r,n,o,y=e.x,e.y,e.dist_length,e.stretch_x,e.stretch_y,e.scale,e.angle,e.color local t,o,f,c,u=cos(o),sin(o),f-t,c-t,u-t local t,o,h,s,l,f=t*h+o*f,-o*h+t*f,t*s+o*c,-o*s+t*c,t*l+o*u,-o*l+t*u g(m~=1and j ..."))
     (def-pico-function
@@ -262,6 +300,8 @@
       (structured-ast
         (if-cond "e>=0and i%2==0or e>=1then return fillp(")
         (return-expr "fillp()elseif i%2==0or e<=-1then return fillp\"-0.25\"elseif e>=0t"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function g(e)if e>=0and i%2==0or e>=1then return fillp()elseif i%2==0or e<=-1then return fillp\"-0.25\"elseif e>=0then fillp(e0[flr(e*16)]|(i%2==1and 0or.25))else fillp(e0[flr(e%1*16)]|.25)end end "))
     (def-pico-function
@@ -272,6 +312,8 @@
       (called-functions ())
       (structured-ast
         (while-loop "t>e or e>a"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function e9(n,t,o,e,i,a,d)color(d)while t>e or e>a do n,t,o,e=o,e,n,t while(e>a)o,e,i,a=i,a,o,e"))
     (def-pico-function
@@ -282,6 +324,8 @@
       (called-functions ())
       (structured-ast
         (if-cond "t~=nil"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function d(e,o,n,a,i,t)camera(o,n)if t~=nil then print(e,1,0,t)print(e,-1,0)print(e,0,1)print(e,0,-1)end print(e,0,0,i)clip(0,-n+1,127,2)print(e,0,0,a)clip()camera()end "))
     (def-pico-function
@@ -292,6 +336,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "e end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function en(n,...)local e for t,n in inext,split(n,\"%\",false)do e=e and e..select(n[1],...)..sub(n,2)or n end return e end "))
     (def-pico-function
@@ -304,6 +350,8 @@
         (if-cond "not e")
         (for-loop "foreach(split(e,\"|\",false)")
         (return-expr "n end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function s(e,...)e=en(e,...)local n={}foreach(split(e,\"|\",false),function(e)local t,e=unpack(split(e,\"=\"))if not e then add(n,t)else n[t]=e==\"\"and{}or e==\"true\"and true or e end end)return n end "))
     (def-pico-function
@@ -314,6 +362,8 @@
       (called-functions (s))
       (structured-ast
         (return-expr "e end"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function k(n,...)local e={}for n in all(split(n,\"&\"))do add(e,s(n,...))end return e end "))
     (def-pico-function
@@ -324,6 +374,8 @@
       (called-functions ())
       (structured-ast
         (for-loop "e=i-e,i+e"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function e2(a,i,t,o,d,e,r,n)n=n or 1e*=n*4local n,t=cos(t)*.125/n,sin(t)*.125/n local r,h,d,o=o+n*-e,d+t*-e,r and-e or e,-e for e=i-e,i+e do tline(a-d,e,a+d,e,r-t*o,h+n*o,n,t)o+=1end end")))
   (lifted-pico8-assets

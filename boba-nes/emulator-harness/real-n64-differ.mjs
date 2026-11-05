@@ -741,7 +741,54 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       return { sexp: `(MIPS-CFC1 ${rtN} $fcr${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x04) {
-      return { sexp: `(MIPS-MTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
+      let floatSuffix = '';
+      if (regState) {
+        if (!regState.fpuDoubleHi) {
+          regState.fpuDoubleHi = new Uint32Array(32);
+          regState.fpuDoubleHiValid = new Uint8Array(32);
+        }
+        const fBuf = new ArrayBuffer(8);
+        const fDv = new DataView(fBuf);
+        const formatFloatLit = (num) => {
+          if (num === 0) return '0.0';
+          if (Number.isInteger(num) && Math.abs(num) < 1e15) return `${num}.0`;
+          const prec = Number(num.toPrecision(7));
+          const str = String(prec);
+          return str.includes('.') || str.includes('e') ? str : `${str}.0`;
+        };
+        if ((rd & 1) === 1 && rt !== 0 && regState.valid[rt] >= 1) {
+          // Odd FPU register in VR4300 32-bit FGR mode is the upper 32 bits of 64-bit IEEE-754 double $f(rd - 1)
+          const hiBits = regState.val[rt] >>> 0;
+          regState.fpuDoubleHi[rd - 1] = hiBits;
+          regState.fpuDoubleHiValid[rd - 1] = 1;
+          fDv.setUint32(0, hiBits, false);
+          fDv.setUint32(4, 0, false);
+          const dVal = fDv.getFloat64(0, false);
+          if (Number.isFinite(dVal) && dVal !== 0 && Math.abs(dVal) >= 1e-12 && Math.abs(dVal) <= 1e15) {
+            floatSuffix = ` #:float ${formatFloatLit(dVal)}`;
+          }
+        } else if ((rd & 1) === 0) {
+          if (regState.fpuDoubleHiValid?.[rd]) {
+            const hiBits = regState.fpuDoubleHi[rd] >>> 0;
+            const loBits = rt === 0 ? 0 : regState.valid[rt] >= 1 ? regState.val[rt] >>> 0 : 0;
+            regState.fpuDoubleHiValid[rd] = 0;
+            fDv.setUint32(0, hiBits, false);
+            fDv.setUint32(4, loBits, false);
+            const dVal = fDv.getFloat64(0, false);
+            if (Number.isFinite(dVal) && dVal !== 0 && Math.abs(dVal) >= 1e-12 && Math.abs(dVal) <= 1e15) {
+              floatSuffix = ` #:float ${formatFloatLit(dVal)}`;
+            }
+          } else if (rt !== 0 && regState.valid[rt] >= 1) {
+            const bits32 = regState.val[rt] >>> 0;
+            fDv.setUint32(0, bits32, false);
+            const fVal = fDv.getFloat32(0, false);
+            if (Number.isFinite(fVal) && fVal !== 0 && Math.abs(fVal) >= 1e-6 && Math.abs(fVal) <= 1e12) {
+              floatSuffix = ` #:float ${formatFloatLit(fVal)}`;
+            }
+          }
+        }
+      }
+      return { sexp: `(MIPS-MTC1 ${rtN} $f${rd}${floatSuffix})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
     }
     if (rs === 0x05) {
       return { sexp: `(MIPS-DMTC1 ${rtN} $f${rd})`, category: 'cop1-fpu', resolvedAddr: null, mmioSym: null, branchInfo: null, stepOp: null, isEpilogueInsn: false };
@@ -887,7 +934,7 @@ export function decodeMips3Instruction(word, pc, regState = null) {
   if (memOps[op]) {
     const isFpuMem = op === 0x31 || op === 0x35 || op === 0x39 || op === 0x3d;
     const is64Mem = op === 0x1a || op === 0x1b || op === 0x2c || op === 0x2d || op === 0x37 || op === 0x3f;
-    const isGprLoad = op >= 0x1a && op <= 0x27 || op === 0x37;
+    const isGprLoad = (op >= 0x1a && op <= 0x27) || op === 0x37;
     const dstLabel = isFpuMem ? `$f${rt}` : op === 0x2f ? `#x${rt.toString(16)}` : rtN;
     const isEpilogueInsn = (op === 0x23 || op === 0x37) && rs === 29 && rt === 31;
 
@@ -902,12 +949,32 @@ export function decodeMips3Instruction(word, pc, regState = null) {
       addrSuffix = ` #:addr #x${resolvedAddr.toString(16).padStart(8, '0')} #:sym "${symInfo.symbol}"`;
     }
 
+    const isStructMemOp =
+      op === 0x20 ||
+      op === 0x21 ||
+      op === 0x23 ||
+      op === 0x24 ||
+      op === 0x25 ||
+      op === 0x28 ||
+      op === 0x29 ||
+      op === 0x2b ||
+      op === 0x31 ||
+      op === 0x35 ||
+      op === 0x37 ||
+      op === 0x39 ||
+      op === 0x3d ||
+      op === 0x3f;
+    let structSuffix = '';
+    if (addrSuffix === '' && isStructMemOp && rs >= 2 && rs <= 25 && simm16 >= 0 && simm16 <= 0x400) {
+      structSuffix = ` #:struct-field "->${rsN}+0x${simm16.toString(16).toUpperCase()}"`;
+    }
+
     if (isGprLoad && rt !== 0) {
       invalidateGpr(rt);
     }
 
     return {
-      sexp: `(${memOps[op]} ${dstLabel} ${simm16}(${rsN})${addrSuffix})`,
+      sexp: `(${memOps[op]} ${dstLabel} ${simm16}(${rsN})${addrSuffix}${structSuffix})`,
       category: isFpuMem ? 'cop1-fpu' : is64Mem ? 'mips3-64' : 'mem',
       resolvedAddr,
       mmioSym,
@@ -1885,6 +1952,61 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
   let totalStructuredLoops = 0;
   let totalStructuredConditionals = 0;
 
+  const inferN64CondExpr = (insns, branchIdx, condSym) => {
+    const brDec = insns[branchIdx]?.decoded || '';
+    let m;
+    if ((m = brDec.match(/^\(MIPS-(?:BEQ|BNE|BEQL|BNEL)\s+(\S+)\s+(\S+)\s+/))) {
+      const rs = m[1];
+      const rt = m[2];
+      // Check if rs was produced by SLT/SLTI/SLTU/SLTIU right before branch
+      if (rt === 'r0') {
+        for (let k = branchIdx - 1; k >= Math.max(0, branchIdx - 2); k--) {
+          const sltM = (insns[k]?.decoded || '').match(/^\(MIPS-SLT(?:I|U|IU)?\s+(\S+)\s+(\S+)\s+([^\s)]+)/);
+          if (sltM && sltM[1] === rs) {
+            const cmpOp = condSym === 'not-equal' ? '<' : '>=';
+            return `'(${cmpOp} ${sltM[2]} ${sltM[3]})`;
+          }
+        }
+      }
+      let rhsExpr = rt === 'r0' ? '0' : rt;
+      if (rt === 'at') {
+        for (let k = branchIdx - 1; k >= Math.max(0, branchIdx - 2); k--) {
+          const immM = (insns[k]?.decoded || '').match(/^\(MIPS-(?:ADDIU|ADDI|ORI)\s+at\s+r0\s+([^\s)]+)/);
+          if (immM) {
+            rhsExpr = immM[1];
+            break;
+          }
+        }
+      }
+      const opStr = condSym === 'equal' ? '=' : '!=';
+      return `'(${opStr} ${rs} ${rhsExpr})`;
+    }
+    if ((m = brDec.match(/^\(MIPS-(?:BLEZ|BGTZ|BLTZ|BGEZ|BLEZL|BGTZL|BLTZL|BGEZL)\s+(\S+)\s+/))) {
+      const rs = m[1];
+      const opMap = {
+        'less-zero': '<',
+        'greater-equal-zero': '>=',
+        'less-equal-zero': '<=',
+        'greater-zero': '>',
+      };
+      return `'(${opMap[condSym] || '!='} ${rs} 0)`;
+    }
+    if (/^\(MIPS-BC1[FT]L?\s+/.test(brDec)) {
+      for (let k = branchIdx - 1; k >= Math.max(0, branchIdx - 3); k--) {
+        const fcM = (insns[k]?.decoded || '').match(/^\(MIPS-C\.([A-Z]+)\.[SD]\s+(\$f\d+)\s+(\$f\d+)\)/);
+        if (fcM) {
+          const cmpKind = fcM[1];
+          const isTrue = condSym === 'fpu-cc-true';
+          let opStr = isTrue ? '=' : '!=';
+          if (cmpKind.includes('LT')) opStr = isTrue ? '<' : '>=';
+          else if (cmpKind.includes('LE')) opStr = isTrue ? '<=' : '>';
+          return `'(${opStr} ${fcM[2]} ${fcM[3]})`;
+        }
+      }
+    }
+    return `'(${condSym} cc 0)`;
+  };
+
   const structureN64SubroutineCfg = (insns) => {
     const formatLeaf = (ins, indent) => `${indent}(insn "${ins.pcHex}" ${ins.wordHex} ${ins.decoded})`;
 
@@ -1936,16 +2058,17 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
               totalStructuredLoops++;
               const headerHex = insns[headerIdx].pcHex;
               const latchHex = ins.pcHex;
+              const condExpr = inferN64CondExpr(insns, idx, cond);
               if (polledMmio) {
                 lines.push(
                   `${indent}(spin-wait-mmio-loop #:header "${headerHex}" #:latch "${latchHex}" #:mmio '${polledMmio} #:cond '${cond}`
                 );
               } else if (stepOp) {
                 lines.push(
-                  `${indent}(counted-loop #:header "${headerHex}" #:latch "${latchHex}" #:step '${stepOp} #:cond '${cond}`
+                  `${indent}(counted-loop #:header "${headerHex}" #:latch "${latchHex}" #:step '${stepOp} #:cond '${cond} #:cond-expr ${condExpr}`
                 );
               } else {
-                lines.push(`${indent}(do-while-loop #:header "${headerHex}" #:latch "${latchHex}" #:cond '${cond}`);
+                lines.push(`${indent}(do-while-loop #:header "${headerHex}" #:latch "${latchHex}" #:cond '${cond} #:cond-expr ${condExpr}`);
               }
               for (const prevLine of existingBody) {
                 lines.push(`  ${prevLine}`);
@@ -1978,7 +2101,8 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
                   ? insns[joinIdx].pcHex
                   : `0x${targetPc.toString(16).padStart(8, '0').toUpperCase()}`;
               totalStructuredConditionals++;
-              lines.push(`${indent}(guard-return #:branch "${ins.pcHex}" #:epilogue "${epilogueHex}" #:cond '${cond}`);
+              const condExpr = inferN64CondExpr(insns, idx, cond);
+              lines.push(`${indent}(guard-return #:branch "${ins.pcHex}" #:epilogue "${epilogueHex}" #:cond '${cond} #:cond-expr ${condExpr}`);
               for (let k = idx; k <= latchEndIdx; k++) {
                 lines.push(formatLeaf(insns[k], `${indent}  `));
               }
@@ -2012,8 +2136,9 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
                 }
                 if (mergeIdx !== -1 && mergeIdx - joinIdx <= 14) {
                   totalStructuredConditionals++;
+                  const condExpr = inferN64CondExpr(insns, idx, negCond);
                   lines.push(
-                    `${indent}(if-else #:branch "${ins.pcHex}" #:else "${insns[joinIdx].pcHex}" #:merge "${insns[mergeIdx].pcHex}" #:cond '${negCond}`
+                    `${indent}(if-else #:branch "${ins.pcHex}" #:else "${insns[joinIdx].pcHex}" #:merge "${insns[mergeIdx].pcHex}" #:cond '${negCond} #:cond-expr ${condExpr}`
                   );
                   lines.push(`${indent}  (then-branch`);
                   lines.push(formatLeaf(ins, `${indent}    `));
@@ -2030,7 +2155,8 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
               }
 
               totalStructuredConditionals++;
-              lines.push(`${indent}(when-branch #:branch "${ins.pcHex}" #:join "${insns[joinIdx].pcHex}" #:cond '${negCond}`);
+              const condExpr = inferN64CondExpr(insns, idx, negCond);
+              lines.push(`${indent}(when-branch #:branch "${ins.pcHex}" #:join "${insns[joinIdx].pcHex}" #:cond '${negCond} #:cond-expr ${condExpr}`);
               lines.push(formatLeaf(ins, `${indent}  `));
               if (latchEndIdx > idx) lines.push(formatLeaf(insns[latchEndIdx], `${indent}  `));
               lines.push(...structRange(latchEndIdx + 1, joinIdx - 1, `${indent}  `, depth + 1));
@@ -2135,6 +2261,7 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
     const structuredBody = structureN64SubroutineCfg(insns);
     const subObj = {
       name,
+      vAddr: vAddrBase >>> 0,
       entryHex: `#x${(vAddrBase >>> 0).toString(16).padStart(8, '0')}`,
       romOffsetHex: source === 'rom' ? `#x${offset.toString(16).padStart(6, '0')}` : `#x${offset.toString(16).padStart(6, '0')}-rdram`,
       stackFrameBytes: frameSize,
@@ -2281,6 +2408,513 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
       34,
       true
     );
+  }
+
+  // 5b. Semantic Subroutine Auto-Namer & COP1 FPU + GPR Algebraic Pseudo-Code Lifter
+  const n64RenameMap = new Map();
+  const classifyN64SubroutineName = (sub) => {
+    if (sub.name === 'pif-ipl3-bootstrap' || sub.name === 'vr4300-main-boot-entry') {
+      return sub.name;
+    }
+    const addrHex = (sub.vAddr >>> 0).toString(16).padStart(8, '0').toUpperCase();
+    let hasDivD = false;
+    let hasCvtDS = false;
+    let hasFloat65536 = false;
+    let hasSqrt = false;
+    let hasMulS = false;
+    let hasAddSubS = false;
+    let hasIndirectDispatch = false;
+    let beqAtCases = 0;
+
+    for (const ins of sub.insns) {
+      const d = ins.decoded;
+      if (d.includes('MIPS-DIV.D')) hasDivD = true;
+      if (d.includes('MIPS-CVT.D.S')) hasCvtDS = true;
+      if (d.includes('#:float 65536.0')) hasFloat65536 = true;
+      if (d.includes('MIPS-SQRT.S') || d.includes('MIPS-SQRT.D')) hasSqrt = true;
+      if (d.includes('MIPS-MUL.S')) hasMulS = true;
+      if (d.includes('MIPS-ADD.S') || d.includes('MIPS-SUB.S')) hasAddSubS = true;
+      if ((d.startsWith('(MIPS-JR ') && !d.startsWith('(MIPS-JR ra)')) || d.startsWith('(MIPS-JALR ')) {
+        hasIndirectDispatch = true;
+      }
+      if (/^\(MIPS-BEQ\s+\S+\s+at\b/.test(d)) beqAtCases++;
+    }
+
+    if (hasDivD && (hasFloat65536 || hasCvtDS)) {
+      for (const cHex of sub.callees) {
+        const cAddr = parseInt(cHex.replace(/^#x/i, ''), 16) >>> 0;
+        if (!n64RenameMap.has(cAddr)) {
+          n64RenameMap.set(cAddr, `prng_next_u16_${cAddr.toString(16).padStart(8, '0').toUpperCase()}`);
+        }
+      }
+      return `fpu_norm_float_div_${addrHex}`;
+    }
+    if (hasSqrt) return `fpu_vec3_sqrt_norm_${addrHex}`;
+    if (sub.fpuOpsCount >= 4 && hasMulS && hasAddSubS) return `fpu_vec_matrix_transform_${addrHex}`;
+    if (sub.fpuOpsCount >= 1) return `fpu_float_math_${addrHex}`;
+
+    const mmioSet = new Set(sub.mmioUsed);
+    if (
+      mmioSet.has('SP_STATUS') ||
+      mmioSet.has('SP_MEM_ADDR') ||
+      mmioSet.has('SP_DRAM_ADDR') ||
+      mmioSet.has('SP_RD_LEN') ||
+      mmioSet.has('SP_WR_LEN') ||
+      [...mmioSet].some((s) => s.startsWith('RSP_OSTASK_'))
+    ) {
+      return `os_sp_rsp_task_${addrHex}`;
+    }
+    if (
+      mmioSet.has('VI_STATUS') ||
+      mmioSet.has('VI_ORIGIN') ||
+      mmioSet.has('VI_CURRENT') ||
+      mmioSet.has('VI_INTR') ||
+      mmioSet.has('VI_WIDTH')
+    ) {
+      return `os_vi_video_sync_${addrHex}`;
+    }
+    if (
+      mmioSet.has('PI_STATUS') ||
+      mmioSet.has('PI_DRAM_ADDR') ||
+      mmioSet.has('PI_CART_ADDR') ||
+      mmioSet.has('PI_WR_LEN') ||
+      mmioSet.has('PI_RD_LEN')
+    ) {
+      return `os_pi_cart_dma_${addrHex}`;
+    }
+    if (mmioSet.has('AI_DRAM_ADDR') || mmioSet.has('AI_LEN') || mmioSet.has('AI_CONTROL') || mmioSet.has('AI_STATUS')) {
+      return `os_ai_audio_dma_${addrHex}`;
+    }
+    if (mmioSet.has('SI_STATUS') || mmioSet.has('SI_DRAM_ADDR') || mmioSet.has('PIF_RAM_JOYBUS')) {
+      return `os_si_joybus_poll_${addrHex}`;
+    }
+    if (mmioSet.has('MI_INTR') || mmioSet.has('MI_INTR_MASK') || mmioSet.has('MI_MODE') || sub.cop0OpsCount >= 1) {
+      return `os_exception_irq_${addrHex}`;
+    }
+    if (hasIndirectDispatch || beqAtCases >= 2) {
+      return `state_switch_dispatch_${addrHex}`;
+    }
+    if (sub.structuredBody.includes('(counted-loop ')) {
+      return `rdram_loop_process_${addrHex}`;
+    }
+    return `engine_actor_step_${addrHex}`;
+  };
+
+  for (const sub of subroutines) {
+    const semName = classifyN64SubroutineName(sub);
+    sub.name = semName;
+    n64RenameMap.set(sub.vAddr >>> 0, semName);
+  }
+
+  const resolveN64CalleeName = (vAddr) => {
+    const addr32 = vAddr >>> 0;
+    if (n64RenameMap.has(addr32)) return n64RenameMap.get(addr32);
+    return `engine_sub_${addr32.toString(16).padStart(8, '0').toUpperCase()}`;
+  };
+
+  const synthesizeN64PseudoCode = (insns) => {
+    const gpr = { r0: '0' };
+    const fpr = {};
+    const stackGpr = {};
+    const stackFpr = {};
+    const stmts = [];
+    let wroteF0 = false;
+    let wroteV0 = false;
+
+    const pushStmt = (s) => {
+      if (stmts.length < 14 && stmts[stmts.length - 1] !== s) {
+        stmts.push(s);
+      }
+    };
+
+    const getGpr = (r) => (r === 'r0' ? '0' : gpr[r] || r);
+    const getFpr = (f) => fpr[f] || f;
+
+    const processSingleInsn = (ins) => {
+      const d = ins.decoded;
+      let m;
+
+      // Skip stack frame adjustment & callee-saved register prologue/epilogue
+      if (/^\(MIPS-(?:ADDIU|DADDIU)\s+sp\s+sp\s+/.test(d)) return;
+      if (/^\(MIPS-(?:SW|SD|LW|LD)\s+(?:ra|s[0-7]|fp)\s+-?\d+\(sp\)/.test(d)) return;
+      if (d === '(MIPS-NOP)') return;
+
+      // Argument register home-slot saves on stack (`SW a0..a3 offset(sp)`)
+      if ((m = d.match(/^\(MIPS-SW\s+(a[0-3])\s+(-?\d+)\(sp\)\)/))) {
+        stackGpr[m[2]] = m[1];
+        return;
+      }
+      // Local GPR stack store/load
+      if ((m = d.match(/^\(MIPS-SW\s+(\w+)\s+(-?\d+)\(sp\)\)/))) {
+        stackGpr[m[2]] = getGpr(m[1]);
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-LW\s+(\w+)\s+(-?\d+)\(sp\)\)/))) {
+        if (stackGpr[m[2]]) {
+          gpr[m[1]] = stackGpr[m[2]];
+        } else {
+          const offNum = Number(m[2]);
+          gpr[m[1]] = `stack_0x${Math.abs(offNum).toString(16).toUpperCase()}`;
+        }
+        return;
+      }
+      // Local FPR stack store/load
+      if ((m = d.match(/^\(MIPS-(?:SWC1|SDC1)\s+(\$f\d+)\s+(-?\d+)\(sp\)\)/))) {
+        stackFpr[m[2]] = getFpr(m[1]);
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(?:LWC1|LDC1)\s+(\$f\d+)\s+(-?\d+)\(sp\)\)/))) {
+        fpr[m[1]] = stackFpr[m[2]] || m[1];
+        return;
+      }
+
+      // COP0 system control
+      if ((m = d.match(/^\(MIPS-MTC0\s+(\S+)\s+(\S+)\)/))) {
+        pushStmt(`(set! COP0.${m[2]} ${getGpr(m[1])})`);
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-MFC0\s+(\S+)\s+(\S+)\)/))) {
+        gpr[m[1]] = `COP0.${m[2]}`;
+        return;
+      }
+
+      // LUI + resolved symbol or immediate
+      if ((m = d.match(/^\(MIPS-LUI\s+(\S+)\s+#x([0-9a-fA-F]+)\)/))) {
+        const hi = (parseInt(m[2], 16) << 16) >>> 0;
+        gpr[m[1]] = `#x${hi.toString(16).padStart(8, '0')}`;
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(?:ADDIU|ADDI|ORI)\s+(\S+)\s+(\S+)\s+[^\s)]+\s+#:addr\s+#x[0-9a-fA-F]+\s+#:sym\s+"([^"]+)"\)/))) {
+        gpr[m[1]] = m[3];
+        if (m[1] === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${m[3]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(?:ADDIU|ADDI)\s+(\S+)\s+r0\s+(-?\d+)\)/))) {
+        gpr[m[1]] = m[2];
+        if (m[1] === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${m[2]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-ORI\s+(\S+)\s+r0\s+(#x[0-9a-fA-F]+)\)/))) {
+        gpr[m[1]] = m[2];
+        if (m[1] === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${m[2]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-ANDI\s+(\S+)\s+(\S+)\s+#x([0-9a-fA-F]+)\)/))) {
+        const dst = m[1];
+        const srcExpr = getGpr(m[2]);
+        const mask = m[3].toLowerCase();
+        if (mask === 'ffff') gpr[dst] = `(u16 ${srcExpr})`;
+        else if (mask === 'ff') gpr[dst] = `(u8 ${srcExpr})`;
+        else gpr[dst] = `(bit-and ${srcExpr} #x${mask})`;
+        if (dst === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${gpr[dst]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(?:OR|ADDU|DADDU)\s+(\S+)\s+(\S+)\s+r0\)/))) {
+        gpr[m[1]] = getGpr(m[2]);
+        if (m[1] === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${gpr[m[1]]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(?:ADDIU|ADDI)\s+(\S+)\s+(\S+)\s+(-?\d+)\)/))) {
+        const dst = m[1];
+        const srcExpr = getGpr(m[2]);
+        const immNum = Number(m[3]);
+        gpr[dst] = immNum < 0 ? `(- ${srcExpr} ${-immNum})` : `(+ ${srcExpr} ${immNum})`;
+        if (dst === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${gpr[dst]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(ADDU|ADD|SUBU|SUB|AND|OR|XOR)\s+(\S+)\s+(\S+)\s+(\S+)\)/))) {
+        const opMap = {
+          ADDU: '+',
+          ADD: '+',
+          SUBU: '-',
+          SUB: '-',
+          AND: 'bit-and',
+          OR: 'bit-ior',
+          XOR: 'bit-xor',
+        };
+        const dst = m[2];
+        gpr[dst] = `(${opMap[m[1]]} ${getGpr(m[3])} ${getGpr(m[4])})`;
+        if (dst === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${gpr[dst]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(SLL|SRL|SRA)\s+(\S+)\s+(\S+)\s+(\d+)\)/))) {
+        const shMap = { SLL: 'shl', SRL: 'shr', SRA: 'asr' };
+        const dst = m[2];
+        gpr[dst] = `(${shMap[m[1]]} ${getGpr(m[3])} ${m[4]})`;
+        if (dst === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${gpr[dst]})`);
+        }
+        return;
+      }
+
+      // COP1 FPU moves & conversions
+      if ((m = d.match(/^\(MIPS-MTC1\s+(\S+)\s+(\$f(\d+))(?:\s+#:float\s+([0-9.eE+-]+))?\)/))) {
+        const rt = m[1];
+        const freg = m[2];
+        const fnum = Number(m[3]);
+        const floatLit = m[4];
+        if (floatLit) {
+          fpr[freg] = floatLit;
+          if ((fnum & 1) === 1) {
+            fpr[`$f${fnum - 1}`] = floatLit;
+          }
+        } else if (rt === 'r0') {
+          if (!fpr[freg]) fpr[freg] = '0.0';
+        } else {
+          fpr[freg] = getGpr(rt);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-MFC1\s+(\S+)\s+(\$f\d+)\)/))) {
+        gpr[m[1]] = getFpr(m[2]);
+        if (m[1] === 'v0') {
+          wroteV0 = true;
+          pushStmt(`(set! v0 ${gpr[m[1]]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-CVT\.S\.W\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        const src = getFpr(m[2]);
+        fpr[m[1]] = src.startsWith('(u16 ') ? src : `(f32 ${src})`;
+        if (m[1] === '$f0') {
+          wroteF0 = true;
+          pushStmt(`(set! $f0 ${fpr[m[1]]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-CVT\.D\.S\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        const src = getFpr(m[2]);
+        const inner = src.startsWith('(f32 ') && src.endsWith(')') ? src.slice(5, -1) : src;
+        fpr[m[1]] = `(f64 ${inner})`;
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-CVT\.S\.D\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        fpr[m[1]] = `(f32 ${getFpr(m[2])})`;
+        if (m[1] === '$f0') {
+          wroteF0 = true;
+          pushStmt(`(set! $f0 ${fpr[m[1]]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(?:TRUNC|ROUND|FLOOR|CEIL)\.W\.[SD]\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        fpr[m[1]] = `(s32 ${getFpr(m[2])})`;
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(MOV|ABS|NEG|SQRT)\.[SD]\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        const kind = m[1];
+        const dst = m[2];
+        const src = getFpr(m[3]);
+        fpr[dst] =
+          kind === 'MOV' ? src : kind === 'ABS' ? `(abs ${src})` : kind === 'NEG' ? `(- ${src})` : `(sqrt ${src})`;
+        if (dst === '$f0') {
+          wroteF0 = true;
+          pushStmt(`(set! $f0 ${fpr[dst]})`);
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(ADD|SUB|MUL|DIV)\.[SD]\s+(\$f\d+)\s+(\$f\d+)\s+(\$f\d+)\)/))) {
+        const fOpMap = { ADD: '+', SUB: '-', MUL: '*', DIV: '/' };
+        const dst = m[2];
+        fpr[dst] = `(${fOpMap[m[1]]} ${getFpr(m[3])} ${getFpr(m[4])})`;
+        if (dst === '$f0') {
+          wroteF0 = true;
+          pushStmt(`(set! $f0 ${fpr[dst]})`);
+        }
+        return;
+      }
+
+      // Memory loads/stores with resolved #:sym
+      if ((m = d.match(/^\(MIPS-(LW|LH|LHU|LB|LBU|LD|LWC1|LDC1)\s+(\S+)\s+-?\d+\(\S+\)\s+#:addr\s+#x[0-9a-fA-F]+\s+#:sym\s+"([^"]+)"/))) {
+        const dst = m[2];
+        const sym = m[3];
+        if (dst.startsWith('$f')) fpr[dst] = sym;
+        else {
+          gpr[dst] = sym;
+          if (dst === 'v0') {
+            wroteV0 = true;
+            pushStmt(`(set! v0 ${sym})`);
+          }
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(SW|SH|SB|SD|SWC1|SDC1)\s+(\S+)\s+-?\d+\(\S+\)\s+#:addr\s+#x[0-9a-fA-F]+\s+#:sym\s+"([^"]+)"/))) {
+        const src = m[2];
+        const sym = m[3];
+        const valExpr = src.startsWith('$f') ? getFpr(src) : getGpr(src);
+        pushStmt(`(set! ${sym} ${valExpr})`);
+        return;
+      }
+
+      // Struct pointer member loads/stores
+      if ((m = d.match(/^\(MIPS-(LW|LH|LHU|LB|LBU|LD|LWC1|LDC1)\s+(\S+)\s+(-?\d+)\((\w+)\)/))) {
+        const opName = m[1];
+        const dst = m[2];
+        const offNum = Number(m[3]);
+        const base = m[4];
+        if (base !== 'sp' && base !== 'r0') {
+          const typeMap = {
+            LW: ':s32',
+            LH: ':s16',
+            LHU: ':u16',
+            LB: ':s8',
+            LBU: ':u8',
+            LD: ':s64',
+            LWC1: ':f32',
+            LDC1: ':f64',
+          };
+          const baseResolved = gpr[base] && /^(a[0-3]|s[0-7]|v[0-1]|\(-> |rdram_sym_)/.test(gpr[base]) ? gpr[base] : base;
+          const offHex = offNum >= 0 ? `0x${offNum.toString(16).toUpperCase()}` : `-0x${(-offNum).toString(16).toUpperCase()}`;
+          const fieldExpr = `(-> ${baseResolved} :field_${offHex} ${typeMap[opName] || ':s32'})`;
+          if (dst.startsWith('$f')) {
+            fpr[dst] = fieldExpr;
+          } else {
+            gpr[dst] = fieldExpr;
+            if (dst === 'v0') {
+              wroteV0 = true;
+              pushStmt(`(set! v0 ${fieldExpr})`);
+            }
+          }
+        }
+        return;
+      }
+      if ((m = d.match(/^\(MIPS-(SW|SH|SB|SD|SWC1|SDC1)\s+(\S+)\s+(-?\d+)\((\w+)\)/))) {
+        const opName = m[1];
+        const src = m[2];
+        const offNum = Number(m[3]);
+        const base = m[4];
+        if (base !== 'sp' && base !== 'r0') {
+          const typeMap = { SW: ':s32', SH: ':s16', SB: ':u8', SD: ':s64', SWC1: ':f32', SDC1: ':f64' };
+          const baseResolved = gpr[base] && /^(a[0-3]|s[0-7]|v[0-1]|\(-> |rdram_sym_)/.test(gpr[base]) ? gpr[base] : base;
+          const offHex = offNum >= 0 ? `0x${offNum.toString(16).toUpperCase()}` : `-0x${(-offNum).toString(16).toUpperCase()}`;
+          const valExpr = src.startsWith('$f') ? getFpr(src) : getGpr(src);
+          pushStmt(`(set! (-> ${baseResolved} :field_${offHex} ${typeMap[opName] || ':s32'}) ${valExpr})`);
+        }
+        return;
+      }
+    };
+
+    for (let i = 0; i < insns.length; i++) {
+      const ins = insns[i];
+      const d = ins.decoded;
+
+      // Pattern 1: IDO C compiler unsigned-int-to-float conversion (`MTC1 v0 $f4; BGEZ v0; CVT.S.W $f6 $f4; LUI at #x4f80; MTC1 at $f8; NOP; ADD.S $f6 $f6 $f8`)
+      const mtcM = d.match(/^\(MIPS-MTC1\s+(\w+)\s+(\$f\d+)\)/);
+      if (
+        mtcM &&
+        i + 6 < insns.length &&
+        insns[i + 1].decoded.startsWith(`(MIPS-BGEZ ${mtcM[1]} `) &&
+        insns[i + 2].decoded.includes('MIPS-CVT.S.W') &&
+        insns[i + 3].decoded === '(MIPS-LUI at #x4f80)'
+      ) {
+        const cvtM = insns[i + 2].decoded.match(/^\(MIPS-CVT\.S\.W\s+(\$f\d+)\s+(\$f\d+)\)/);
+        if (cvtM && cvtM[2] === mtcM[2]) {
+          const srcExpr = getGpr(mtcM[1]);
+          fpr[cvtM[1]] = srcExpr.startsWith('(u16 ') ? srcExpr : `(u16 ${srcExpr})`;
+          i += 6;
+          continue;
+        }
+      }
+
+      // JAL subroutine call (execute delay slot at i + 1 before recording the call)
+      const jalM = d.match(/^\(MIPS-JAL\s+#x([0-9a-fA-F]+)/);
+      if (jalM) {
+        if (i + 1 < insns.length) {
+          processSingleInsn(insns[i + 1]);
+        }
+        const targetAddr = parseInt(jalM[1], 16) >>> 0;
+        const calleeName = resolveN64CalleeName(targetAddr);
+        let v0UsedAfter = false;
+        for (let k = i + 2; k < Math.min(insns.length, i + 9); k++) {
+          const kd = insns[k].decoded;
+          if (/^\(MIPS-JAL\s/.test(kd)) break;
+          if (/\bv0\b/.test(kd) && !/^\(MIPS-(?:LUI|LW|LH|LHU|LB|LBU|LD|ADDIU|ORI)\s+v0\b/.test(kd)) {
+            v0UsedAfter = true;
+            break;
+          }
+        }
+        if (v0UsedAfter) {
+          pushStmt(`(set! v0 (call ${calleeName}))`);
+          gpr.v0 = 'v0';
+          wroteV0 = true;
+        } else {
+          pushStmt(`(call ${calleeName})`);
+        }
+        i += 1;
+        continue;
+      }
+
+      // JR ra epilogue return (execute delay slot at i + 1 first)
+      if (d === '(MIPS-JR ra)') {
+        if (i + 1 < insns.length) {
+          processSingleInsn(insns[i + 1]);
+        }
+        if (wroteF0) pushStmt('(return $f0)');
+        else if (wroteV0) pushStmt('(return v0)');
+        else pushStmt('(return)');
+        break;
+      }
+
+      if (d.startsWith('(MIPS-JR ')) {
+        const reg = d.slice(9, -1).trim();
+        pushStmt(`(tail-call ${getGpr(reg)})`);
+        continue;
+      }
+      if (d.startsWith('(MIPS-JALR ')) {
+        const parts = d.slice(11, -1).trim().split(/\s+/);
+        const reg = parts[parts.length - 1];
+        pushStmt(`(call-indirect ${getGpr(reg)})`);
+        continue;
+      }
+
+      processSingleInsn(ins);
+    }
+
+    if (stmts.length === 0) {
+      stmts.push('(return)');
+    }
+    return `    (decompiled-pseudo-code\n${stmts.map((s) => `      ${s}`).join('\n')})`;
+  };
+
+  totalStructuredLoops = 0;
+  totalStructuredConditionals = 0;
+  for (const sub of subroutines) {
+    // Annotate JAL instructions with #:target '<semantic-name>
+    for (const ins of sub.insns) {
+      const jalM = ins.decoded.match(/^\(MIPS-JAL\s+#x([0-9a-fA-F]+)\)$/);
+      if (jalM) {
+        const cName = resolveN64CalleeName(parseInt(jalM[1], 16) >>> 0);
+        ins.decoded = `(MIPS-JAL #x${jalM[1]} #:target '${cName})`;
+      }
+    }
+    sub.callees = sub.callees.map((cHex) => {
+      const cAddr = parseInt(cHex.replace(/^#x/i, ''), 16) >>> 0;
+      return resolveN64CalleeName(cAddr);
+    });
+    const cfgBody = structureN64SubroutineCfg(sub.insns);
+    const pseudoCodeBlock = synthesizeN64PseudoCode(sub.insns);
+    sub.structuredBody = `${pseudoCodeBlock}\n${cfgBody}`;
   }
 
   // 6. Lifted RSP/RDP Display List Commands (`Fast3D` / `F3DEX` / `F3DEX2` / `S2DEX`) & Hierarchical Scene-Graph Batches

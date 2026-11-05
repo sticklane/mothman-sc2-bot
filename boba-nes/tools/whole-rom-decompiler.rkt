@@ -364,16 +364,17 @@
   (cond
     [(eq? kind 'defsub)
      (define sub-off 0)
-     (define insts '())
+     (define body-forms '())
      (let loop ([rem (cddr form)])
        (match rem
          [(list* '#:offset o rest) (set! sub-off o) (loop rest)]
          [(list* (? keyword?) _ rest) (loop rest)]
          [(cons inst rest)
-          (when (pair? inst) (set! insts (cons inst insts)))
+          (when (pair? inst) (set! body-forms (cons inst body-forms)))
           (loop rest)]
          ['() (void)]))
-     (let iloop ([rem-insts (reverse insts)]
+     (define flat-insts (flatten-structured-insts (reverse body-forms)))
+     (let iloop ([rem-insts flat-insts]
                  [cur-off (+ bank-rom-base sub-off)])
        (if (null? rem-insts)
            (- cur-off (+ bank-rom-base sub-off))
@@ -411,6 +412,7 @@
     (define-values (struct-insts cfg-stats)
       (structure-subroutine-cfg raw-insts #:arch 'mos6502))
     (hasheq 'size-bytes (- end-off start-off)
+            'raw-insts  raw-insts
             'insts      struct-insts
             'cfg-stats  cfg-stats
             'calls      (remove-duplicates (reverse rev-calls))
@@ -463,6 +465,14 @@
                               [mmio-sym mmio-sym]
                               [(memq mode-kw '(#:zp #:zpx #:zpy #:indx #:indy))
                                (string->symbol (format "zp_~a" (string-upcase (~r b1 #:base 16 #:min-width 2 #:pad-string "0"))))]
+                              [(and (memq mode-kw '(#:abs #:absx #:absy)) (< u16 #x0100))
+                               (string->symbol (format "zp_~a" (string-upcase (~r u16 #:base 16 #:min-width 2 #:pad-string "0"))))]
+                              [(and (memq mode-kw '(#:abs #:absx #:absy)) (<= #x0200 u16 #x02FF))
+                               (string->symbol (format "oam_shadow_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
+                              [(and (memq mode-kw '(#:abs #:absx #:absy)) (< u16 #x0800))
+                               (string->symbol (format "wram_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
+                              [(and (memq mode-kw '(#:abs #:absx #:absy)) (<= #x6000 u16 #x7FFF))
+                               (string->symbol (format "sram_~a" (string-upcase (~r u16 #:base 16 #:min-width 4 #:pad-string "0"))))]
                               [else #f])]
                            [inst-sexp
                             (if sym-annot
@@ -470,7 +480,7 @@
                                 `(,mnem ,mode-kw ,operand #:pc ,pc))]
                            [calls1
                             (if (or (eq? mnem 'JSR) (and (eq? mnem 'JMP) (eq? mode-kw '#:abs)))
-                                (cons sym-annot calls)
+                                (cons u16 calls)
                                 calls)]
                            [mmio1
                             (if mmio-sym (cons mmio-sym mmio) mmio)]
@@ -483,6 +493,93 @@
                       (if (memq mnem '(RTS RTI BRK JMP))
                           (finish-block next-off (cons inst-sexp insts) calls1 mmio1 zps1)
                           (loop next-off (add1 cnt) (cons inst-sexp insts) calls1 mmio1 zps1))))))))))
+
+;; Infer a semantic subroutine name for a lifted 6502 subroutine block
+(define (infer-nes-semantic-sub-name bank-idx sub-addr blk vec-names)
+  (cond
+    [(hash-ref vec-names sub-addr #f) => values]
+    [else
+     (define mmio      (hash-ref blk 'mmio '()))
+     (define raw-insts (hash-ref blk 'raw-insts '()))
+     (define s-insts   (hash-ref blk 'insts '()))
+     (define cstats    (hash-ref blk 'cfg-stats (hasheq)))
+     (define mnems     (map car raw-insts))
+     (define has-counted-loop?
+       (for/or ([f (in-list s-insts)])
+         (and (pair? f) (eq? (car f) 'counted-loop))))
+     (define has-zero-or-indy-fill?
+       (and has-counted-loop?
+            (or (for/or ([ins (in-list raw-insts)])
+                  (and (eq? (car ins) 'LDA)
+                       (eq? (cadr ins) '#:imm)
+                       (= (caddr ins) 0)))
+                (for/or ([ins (in-list raw-insts)])
+                  (and (eq? (car ins) 'STA)
+                       (eq? (cadr ins) '#:indy))))))
+     (define has-rts-dispatch?
+       (or (for/or ([ins (in-list raw-insts)])
+             (and (eq? (car ins) 'JMP) (eq? (cadr ins) '#:ind)))
+           (and (>= (count (lambda (m) (eq? m 'PHA)) mnems) 2)
+                (memq 'RTS mnems))))
+     (define hex-a (string-upcase (~r sub-addr #:base 16 #:min-width 4 #:pad-string "0")))
+     (define prefix
+       (cond
+         [(memq 'OAMDMA mmio)
+          "oam_dma_transfer"]
+         [(or (> (hash-ref cstats 'spin-waits 0) 0)
+              (memq 'PPUSTATUS mmio))
+          "wait_vblank_ppu"]
+         [(or (memq 'JOY1 mmio) (memq 'JOY2 mmio))
+          "poll_joypad_input"]
+         [(or (memq 'PPUADDR mmio) (memq 'PPUDATA mmio))
+          "ppu_vram_transfer"]
+         [(or (memq 'PPUSCROLL mmio) (memq 'PPUCTRL mmio) (memq 'PPUMASK mmio))
+          "ppu_scroll_ctrl"]
+         [(for/or ([m (in-list mmio)])
+            (memq m '(SQ1_VOL SQ1_SWEEP SQ1_LO SQ1_HI
+                      SQ2_VOL SQ2_SWEEP SQ2_LO SQ2_HI
+                      TRI_LINEAR TRI_LO TRI_HI
+                      NOISE_VOL NOISE_LO NOISE_HI
+                      DMC_FREQ DMC_RAW DMC_START DMC_LEN SND_CHN)))
+          "apu_sound_synth"]
+         [(for/or ([m (in-list mmio)])
+            (memq m '(MMC1_CTRL MMC1_CHR0 MMC1_CHR1 MAPPER_PRG_BANK)))
+          "mapper_bank_switch"]
+         [has-zero-or-indy-fill?
+          "clear_wram_pages"]
+         [has-counted-loop?
+          "memory_block_loop"]
+         [(or (memq 'ADC mnems) (memq 'SBC mnems))
+          "math_add_sub_16bit"]
+         [has-rts-dispatch?
+          "state_dispatcher"]
+         [(memq 'JSR mnems)
+          "engine_orchestrate"]
+         [else
+          "logic_routine"]))
+     (string->symbol (format "~a_b~a_~a" prefix bank-idx hex-a))]))
+
+;; Rewrite `JSR` and `JMP #:abs` target symbols in structured 6502 forms using `sub-name-map`
+(define (rewrite-nes-call-syms forms sub-name-map)
+  (for/list ([f (in-list forms)])
+    (cond
+      [(not (pair? f)) f]
+      [(memq (car f) '(when-branch if-else then-branch else-branch
+                       counted-loop spin-wait-mmio-loop do-while-loop guard-return))
+       (let loop ([rem (cdr f)]
+                  [hdr (list (car f))])
+         (match rem
+           [(list* (? keyword? k) v rest)
+            (loop rest (cons v (cons k hdr)))]
+           [_
+            (append (reverse hdr) (rewrite-nes-call-syms rem sub-name-map))]))]
+      [else
+       (match f
+         [`(,mnem #:abs ,u16 #:pc ,pc #:sym ,old-sym)
+          #:when (memq mnem '(JSR JMP))
+          (define new-sym (hash-ref sub-name-map u16 old-sym))
+          `(,mnem #:abs ,u16 #:pc ,pc #:sym ,new-sym)]
+         [_ f])])))
 
 ;; Deeply lift a 16 KB NES PRG-ROM bank into subroutines (`defsub`), data blocks (`defdata`),
 ;; MMIO usage counts, indirect jump table sites, state machines, and high-level idioms.
@@ -588,8 +685,10 @@
   (define bank-spin-waits    0)
   (define bank-conditionals  0)
   (define bank-guard-returns 0)
+  (define sub-name-map (hash-copy vec-names))
 
-  (define lifted-subs
+  ;; Pass 1: Disassemble subroutines and assign semantic names
+  (define raw-sub-entries
     (for/list ([sub-addr (in-list sorted-unique-addrs)]
                [idx (in-naturals)])
       (define next-addr
@@ -603,26 +702,41 @@
                                           #:max-insts 32
                                           #:stop-off stop-off
                                           #:vec-names vec-names))
+      (define sub-name
+        (infer-nes-semantic-sub-name bank-idx sub-addr blk vec-names))
+      (hash-set! sub-name-map sub-addr sub-name)
+      (list sub-addr sub-off blk sub-name)))
+
+  ;; Pass 2: Rewrite call targets to semantic names & synthesize `(decompiled-pseudo-code ...)`
+  (define lifted-subs
+    (for/list ([entry (in-list raw-sub-entries)])
+      (match-define (list sub-addr sub-off blk sub-name) entry)
       (define cstats (hash-ref blk 'cfg-stats (hasheq)))
       (set! bank-loops         (+ bank-loops         (hash-ref cstats 'loops 0)))
       (set! bank-spin-waits    (+ bank-spin-waits    (hash-ref cstats 'spin-waits 0)))
       (set! bank-conditionals  (+ bank-conditionals  (hash-ref cstats 'conditionals 0)))
       (set! bank-guard-returns (+ bank-guard-returns (hash-ref cstats 'guard-returns 0)))
-      (define sub-name
-        (hash-ref vec-names sub-addr
-                  (lambda ()
-                    (string->symbol (format "sub_b~a_~a"
-                                            bank-idx
-                                            (string-upcase (~r sub-addr #:base 16 #:min-width 4 #:pad-string "0")))))))
+      (define rewritten-insts
+        (rewrite-nes-call-syms (hash-ref blk 'insts) sub-name-map))
+      (define pseudo-code
+        (synthesize-subroutine-pseudo-code rewritten-insts #:arch 'mos6502))
+      (define sem-calls
+        (for/list ([c-addr (in-list (hash-ref blk 'calls))])
+          (hash-ref sub-name-map c-addr
+                    (lambda ()
+                      (string->symbol (format "sub_b~a_~a"
+                                              bank-idx
+                                              (string-upcase (~r c-addr #:base 16 #:min-width 4 #:pad-string "0"))))))))
       `(defsub ,sub-name
          #:bank ,bank-idx
          #:addr ,sub-addr
          #:offset ,sub-off
          #:size-bytes ,(hash-ref blk 'size-bytes)
-         #:calls ,(hash-ref blk 'calls)
+         #:calls ,sem-calls
          #:mmio ,(hash-ref blk 'mmio)
          #:zp-vars ,(hash-ref blk 'zp-vars)
-         ,@(hash-ref blk 'insts))))
+         ,pseudo-code
+         ,@rewritten-insts)))
 
   ;; Lift state-machine dispatch tables (`def-state-machine`) and high-level 6502 idioms in this bank
   (define sm-and-idioms
@@ -902,6 +1016,7 @@
   (define all-io              (mutable-set))
   (define all-mbc             (mutable-set))
   (define mmio-totals         (make-hasheq))
+  (define global-sm83-subs    (make-hash))
   (define total-insts         0)
   (define total-cb-ops        0)
   (define total-subs          0)
@@ -956,11 +1071,14 @@
                     'mbc-writes '()
                     'mmio-counts (hasheq)
                     'subroutines '()
+                    'sub-name-map (hash)
                     'structured-loops 0
                     'structured-spin-waits 0
                     'structured-conditionals 0
                     'structured-guard-returns 0)))
 
+      (for ([(k v) (in-hash (hash-ref analysis 'sub-name-map (hash)))])
+        (hash-set! global-sm83-subs k v))
       (for ([h (in-list (hash-ref analysis 'hram-offsets))]) (set-add! all-hram h))
       (for ([r (in-list (hash-ref analysis 'io-regs))])      (set-add! all-io r))
       (for ([m (in-list (hash-ref analysis 'mbc-writes))])   (set-add! all-mbc m))
@@ -992,7 +1110,9 @@
           ,@segs))))
 
   ;; Lift SM83 state-machine dispatch tables (`def-sm83-state-machine`) and high-level SM83 idioms
-  (define sm83-sm-and-idioms (lift-sm83-state-machines-and-idioms rom-bytes num-banks))
+  (define sm83-sm-and-idioms
+    (lift-sm83-state-machines-and-idioms rom-bytes num-banks
+                                         #:sub-name-hash global-sm83-subs))
   (define sm83-state-machines (hash-ref sm83-sm-and-idioms 'state-machines))
   (define sm83-high-idioms    (hash-ref sm83-sm-and-idioms 'high-level-idioms))
 
@@ -1147,6 +1267,74 @@
           loops
           conds))
 
+;; Synthesize clean S-expression `(decompiled-pseudo-code ...)` from PICO-8 Lua function body lines
+(define (synthesize-pico8-pseudo-code body-lines)
+  (define stmts '())
+  (define (emit! s)
+    (when (< (length stmts) 24)
+      (set! stmts (cons s stmts))))
+  (for ([raw-line (in-list body-lines)]
+        #:when (< (length stmts) 24))
+    (define no-comment (regexp-replace #px"--.*$" raw-line ""))
+    (define trimmed (string-trim no-comment))
+    (unless (or (string=? trimmed "")
+                (regexp-match? #px"^(?:local\\s+)?function\\b" trimmed)
+                (regexp-match? #px"^end\\b" trimmed)
+                (regexp-match? #px"^else\\b" trimmed))
+      (cond
+        ;; `for var=start,end do`
+        [(regexp-match #px"^for\\s+([a-zA-Z0-9_]+)\\s*=\\s*([^,]+),\\s*(.+?)\\s+do\\b" trimmed)
+         => (lambda (m)
+              (emit! `(for-range ,(string->symbol (second m))
+                                 ,(string-trim (third m))
+                                 ,(string-trim (fourth m)))))]
+        ;; `for item in all(tbl) do`
+        [(regexp-match #px"^for\\s+([a-zA-Z0-9_,\\s]+)\\s+in\\s+all\\(([^)]+)\\)\\s+do\\b" trimmed)
+         => (lambda (m)
+              (emit! `(foreach ,(string->symbol (string-trim (second m)))
+                               ,(string-trim (third m)))))]
+        ;; `foreach(tbl, fn)`
+        [(regexp-match #px"^foreach\\s*\\(([^,]+),\\s*([^)]+)\\)" trimmed)
+         => (lambda (m)
+              (emit! `(foreach ,(string-trim (second m))
+                               ,(string-trim (third m)))))]
+        ;; `if cond then stmt`
+        [(regexp-match #px"^(?:else)?if\\s+(.+?)\\s+then\\s*(.*)$" trimmed)
+         => (lambda (m)
+              (define cnd (string-trim (second m)))
+              (define tail (string-trim (regexp-replace #px"\\s*end\\s*$" (third m) "")))
+              (if (string=? tail "")
+                  (emit! `(when ,cnd))
+                  (emit! `(when ,cnd ,tail))))]
+        ;; PICO-8 short `if (cond) stmt`
+        [(regexp-match #px"^if\\s*\\(([^)]+)\\)\\s+(.+)$" trimmed)
+         => (lambda (m)
+              (emit! `(when ,(string-trim (second m)) ,(string-trim (third m)))))]
+        ;; `return expr`
+        [(regexp-match #px"^return\\b\\s*(.*)$" trimmed)
+         => (lambda (m)
+              (emit! `(return ,(string-trim (second m)))))]
+        ;; Compound assignment `lhs += rhs`, `lhs -= rhs`, `lhs *= rhs`, `lhs /= rhs`
+        [(regexp-match #px"^([a-zA-Z0-9_.\\[\\]]+)\\s*([+*/%-]=)\\s*(.+)$" trimmed)
+         => (lambda (m)
+              (emit! `(,(string->symbol (third m))
+                       ,(string->symbol (second m))
+                       ,(string-trim (fourth m)))))]
+        ;; Assignment `local lhs = rhs` or `lhs = rhs`
+        [(regexp-match #px"^(?:local\\s+)?([a-zA-Z0-9_.,\\s\\[\\]]+?)\\s*=\\s*([^=].*)$" trimmed)
+         => (lambda (m)
+              (emit! `(set! ,(string->symbol (string-trim (second m)))
+                            ,(string-trim (third m)))))]
+        ;; Function call `fn(args)`
+        [(regexp-match #px"^([a-zA-Z0-9_.:]+)\\s*\\((.*)\\)$" trimmed)
+         => (lambda (m)
+              (emit! `(call ,(string->symbol (second m))
+                            ,(string-trim (third m)))))]
+        [else (void)])))
+  (if (null? stmts)
+      '((nop))
+      (reverse stmts)))
+
 ;; Parse all Lua functions in `__lua__` into structured `(def-pico-function ...)` AST forms
 ;; and lift PICO-8 state machines (`pico8-state-machines`) & gameplay idioms (`high-level-idioms`)
 (define (lift-pico8-lua-functions lua-lines)
@@ -1190,6 +1378,8 @@
           (set-add! fn-calls (string->symbol kfn)))))
     (define-values (struct-ast fn-loops fn-conds)
       (extract-pico8-fn-structured-ast body))
+    (define pseudo-stmts
+      (synthesize-pico8-pseudo-code body))
     (set! total-loops (+ total-loops fn-loops))
     (set! total-conds (+ total-conds fn-conds))
     (set! lifted-fns
@@ -1200,6 +1390,7 @@
                    (api-calls ,(sort (set->list fn-apis) symbol<?))
                    (called-functions ,(sort (set->list fn-calls) symbol<?))
                    (structured-ast ,@struct-ast)
+                   (decompiled-pseudo-code ,@pseudo-stmts)
                    (body-lines ,@(take body (min 32 (length body)))))
                 lifted-fns)))
 
@@ -1715,19 +1906,195 @@
 (define (write-indent out n)
   (display (make-string n #\space) out))
 
+(define (format-hex2 n)
+  (format "#x~a" (string-upcase (~r n #:base 16 #:min-width 2 #:pad-string "0"))))
+
+(define (format-hex4 n)
+  (format "#x~a" (string-upcase (~r n #:base 16 #:min-width 4 #:pad-string "0"))))
+
+(define (format-hex-auto n)
+  (cond
+    [(not (and (exact-integer? n) (>= n 0))) (format "~s" n)]
+    [(< n 256) (format-hex2 n)]
+    [else      (format-hex4 n)]))
+
+(define HEX4-KEYWORDS
+  '(#:addr #:pc #:header-pc #:latch-pc #:branch-pc #:join-pc #:else-pc #:merge-pc
+    #:dispatch-pc #:ptr-or-table #:ptr #:vram-addr #:target-addr #:ram-page
+    #:vector #:offset))
+
+(define MODE-8BIT-KEYWORDS
+  '(#:imm #:zp #:zpx #:zpy #:indx #:indy #:d8 #:io8 #:cb))
+
+(define MODE-16BIT-KEYWORDS
+  '(#:abs #:absx #:absy #:ind #:rel #:d16 #:a16))
+
+;; Format a symbolic expression inside `(decompiled-pseudo-code ...)` or `#:cond-expr`
+;; with hardware addresses and bitmasks in uppercase hexadecimal `#xXXXX` / `#xXX`.
+(define (write-pseudo-expr! expr out)
+  (match expr
+    [(list (and space (or 'zp 'hram 'io)) (? exact-integer? addr))
+     (fprintf out "(~s ~a)" space (if (< addr 256) (format-hex2 addr) (format-hex4 addr)))]
+    [(list (and space (or 'wram 'sram 'rom 'vram 'oam)) (? exact-integer? addr))
+     (fprintf out "(~s ~a)" space (format-hex4 addr))]
+    [(list 'aref 'zp (? exact-integer? base) idx)
+     (fprintf out "(aref zp ~a ~s)" (format-hex2 base) idx)]
+    [(list 'aref space (? exact-integer? base) idx)
+     (fprintf out "(aref ~s ~a ~s)" space (format-hex4 base) idx)]
+    [(list (and op (or '+= '-= 'shl! 'shr! 'rol! 'ror! 'bit-test? 'bit-clear! 'bit-set!))
+           target (? exact-integer? step-or-bit))
+     (fprintf out "(~s " op)
+     (write-pseudo-expr! target out)
+     (fprintf out " ~s)" step-or-bit)]
+    [(? pair?)
+     (display "(" out)
+     (let loop ([items expr] [first? #t])
+       (unless (null? items)
+         (unless first? (display " " out))
+         (write-pseudo-expr! (car items) out)
+         (loop (cdr items) #f)))
+     (display ")" out)]
+    [(? exact-integer? n)
+     (if (>= n 0)
+         (display (format-hex-auto n) out)
+         (write n out))]
+    [_
+     (write expr out)]))
+
+;; Write a single statement inside `(decompiled-pseudo-code ...)`
+(define (write-pseudo-stmt! stmt out indent)
+  (match stmt
+    [(list* 'loop-counted '#:step step '#:while cond-expr body)
+     (write-indent out indent)
+     (fprintf out "(loop-counted #:step ~s #:while " step)
+     (write-pseudo-expr! cond-expr out)
+     (for ([child (in-list body)])
+       (newline out)
+       (write-pseudo-stmt! child out (+ indent 2)))
+     (display ")" out)]
+    [(list* 'do-while '#:while cond-expr body)
+     (write-indent out indent)
+     (display "(do-while #:while " out)
+     (write-pseudo-expr! cond-expr out)
+     (for ([child (in-list body)])
+       (newline out)
+       (write-pseudo-stmt! child out (+ indent 2)))
+     (display ")" out)]
+    [(list* 'when cond-expr body)
+     #:when (> (length body) 1)
+     (write-indent out indent)
+     (display "(when " out)
+     (write-pseudo-expr! cond-expr out)
+     (for ([child (in-list body)])
+       (newline out)
+       (write-pseudo-stmt! child out (+ indent 2)))
+     (display ")" out)]
+    [(list 'if cond-expr (cons 'then then-stmts) (cons 'else else-stmts))
+     (write-indent out indent)
+     (display "(if " out)
+     (write-pseudo-expr! cond-expr out)
+     (newline out)
+     (write-indent out (+ indent 2))
+     (display "(then" out)
+     (for ([c (in-list then-stmts)])
+       (newline out)
+       (write-pseudo-stmt! c out (+ indent 4)))
+     (display ")" out)
+     (newline out)
+     (write-indent out (+ indent 2))
+     (display "(else" out)
+     (for ([c (in-list else-stmts)])
+       (newline out)
+       (write-pseudo-stmt! c out (+ indent 4)))
+     (display "))" out)]
+    [_
+     (write-indent out indent)
+     (write-pseudo-expr! stmt out)]))
+
+(define (write-kw-val-hex! kw val out)
+  (cond
+    [(eq? kw '#:cond-expr)
+     (fprintf out " ~s " kw)
+     (write-pseudo-expr! val out)]
+    [(and (memq kw HEX4-KEYWORDS) (exact-integer? val) (>= val 0))
+     (fprintf out " ~s ~a" kw (format-hex4 val))]
+    [(and (eq? kw '#:zp) (exact-integer? val) (>= val 0))
+     (fprintf out " ~s ~a" kw (format-hex2 val))]
+    [(and (eq? kw '#:raw-operand) (exact-integer? val) (>= val 0))
+     (fprintf out " ~s ~a" kw (format-hex-auto val))]
+    [(and (eq? kw '#:zp-vars) (list? val))
+     (fprintf out " ~s (" kw)
+     (for ([v (in-list val)] [i (in-naturals 0)])
+       (when (> i 0) (display " " out))
+       (if (and (exact-integer? v) (>= v 0))
+           (display (format-hex2 v) out)
+           (write v out)))
+     (display ")" out)]
+    [(and (memq kw '(#:hram #:mbc-writes)) (list? val))
+     (fprintf out " ~s (" kw)
+     (for ([v (in-list val)] [i (in-naturals 0)])
+       (when (> i 0) (display " " out))
+       (if (and (exact-integer? v) (>= v 0))
+           (display (format-hex4 v) out)
+           (write v out)))
+     (display ")" out)]
+    [else
+     (fprintf out " ~s ~s" kw val)]))
+
+(define (cpu-inst-form? form)
+  (and (pair? form)
+       (symbol? (car form))
+       (>= (length form) 5)
+       (keyword? (cadr form))
+       (exact-integer? (caddr form))
+       (eq? (fourth form) '#:pc)
+       (exact-integer? (fifth form))))
+
+(define (write-cpu-inst-hex! form out indent)
+  (write-indent out indent)
+  (define mnem (car form))
+  (define mode-kw (cadr form))
+  (define operand (caddr form))
+  (define op-str
+    (cond
+      [(and (memq mode-kw MODE-8BIT-KEYWORDS) (>= operand 0))
+       (format-hex2 operand)]
+      [(and (memq mode-kw MODE-16BIT-KEYWORDS) (>= operand 0))
+       (format-hex4 operand)]
+      [else
+       (format "~s" operand)]))
+  (fprintf out "(~s ~s ~a" mnem mode-kw op-str)
+  (let loop ([rem (cdddr form)])
+    (match rem
+      [(list* (? keyword? kw) val rest)
+       (write-kw-val-hex! kw val out)
+       (loop rest)]
+      [(cons other rest)
+       (fprintf out " ~s" other)
+       (loop rest)]
+      ['()
+       (display ")" out)])))
+
 (define STRUCTURED-BODY-TAGS
   '(when-branch if-else then-branch else-branch
     counted-loop spin-wait-mmio-loop do-while-loop guard-return))
 
 (define (write-structured-body-form! form out indent)
   (cond
+    [(and (pair? form) (eq? (car form) 'decompiled-pseudo-code))
+     (write-indent out indent)
+     (display "(decompiled-pseudo-code" out)
+     (for ([stmt (in-list (cdr form))])
+       (newline out)
+       (write-pseudo-stmt! stmt out (+ indent 2)))
+     (display ")" out)]
     [(and (pair? form) (memq (car form) STRUCTURED-BODY-TAGS))
      (write-indent out indent)
      (fprintf out "(~s" (car form))
      (let loop ([rem (cdr form)])
        (match rem
          [(list* (? keyword? kw) val rest)
-          (fprintf out " ~s ~s" kw val)
+          (write-kw-val-hex! kw val out)
           (loop rest)]
          [(cons child rest)
           (newline out)
@@ -1735,6 +2102,8 @@
           (loop rest)]
          ['()
           (display ")" out)]))]
+    [(cpu-inst-form? form)
+     (write-cpu-inst-hex! form out indent)]
     [else
      (write-indent out indent)
      (write form out)]))
@@ -1747,7 +2116,7 @@
   (let loop ([rem (cddr form)])
     (match rem
       [(list* (? keyword? kw) val rest)
-       (fprintf out " ~s ~s" kw val)
+       (write-kw-val-hex! kw val out)
        (loop rest)]
       [(cons inst-or-block rest)
        (newline out)
@@ -1771,11 +2140,15 @@
          (when (> i 0)
            (newline out)
            (write-indent out (+ indent 3)))
-         (write c out))
+         (match c
+           [(list 'case idx '#:target-addr (? exact-integer? taddr) '#:sub sub-sym)
+            (fprintf out "(case ~s #:target-addr ~a #:sub ~s)" idx (format-hex4 taddr) sub-sym)]
+           [_
+            (write c out)]))
        (display ")" out)
        (loop rest)]
       [(list* (? keyword? kw) val rest)
-       (fprintf out " ~s ~s" kw val)
+       (write-kw-val-hex! kw val out)
        (loop rest)]
       [(cons other rest)
        (newline out)
@@ -1792,7 +2165,7 @@
   (for ([sub (in-list (cdr form))])
     (newline out)
     (cond
-      [(and (pair? sub) (memq (car sub) '(structured-ast body-lines)))
+      [(and (pair? sub) (memq (car sub) '(decompiled-pseudo-code structured-ast body-lines)))
        (write-indent out (+ indent 2))
        (fprintf out "(~s" (car sub))
        (for ([bline (in-list (cdr sub))])
@@ -1804,6 +2177,20 @@
        (write-indent out (+ indent 2))
        (write sub out)]))
   (display ")" out))
+
+(define (write-flat-kw-form-hex! form out indent)
+  (write-indent out indent)
+  (fprintf out "(~s" (car form))
+  (let loop ([rem (cdr form)])
+    (match rem
+      [(list* (? keyword? kw) val rest)
+       (write-kw-val-hex! kw val out)
+       (loop rest)]
+      [(cons item rest)
+       (fprintf out " ~s" item)
+       (loop rest)]
+      ['()
+       (display ")" out)])))
 
 ;; Domain-aware multi-line S-expression writer for `(def-whole-rom-cartridge ...)`
 (define (write-whole-rom-sexp-multiline! sexp out [indent 0])
@@ -1850,6 +2237,38 @@
     [(eq? (car sexp) 'def-pico-function)
      (write-pico-function-multiline! sexp out indent)]
 
+    ;; CPU instruction inside `disassembled-entry-prologue`
+    [(cpu-inst-form? sexp)
+     (write-cpu-inst-hex! sexp out indent)]
+
+    ;; `(origin #x8000)`
+    [(and (eq? (car sexp) 'origin)
+          (= (length sexp) 2)
+          (exact-integer? (cadr sexp)))
+     (write-indent out indent)
+     (fprintf out "(origin ~a)" (format-hex4 (cadr sexp)))]
+
+    ;; `(vector nmi #x8082 #:sym nmi_handler)`
+    [(and (eq? (car sexp) 'vector)
+          (>= (length sexp) 3)
+          (exact-integer? (caddr sexp)))
+     (write-indent out indent)
+     (fprintf out "(vector ~s ~a" (cadr sexp) (format-hex4 (caddr sexp)))
+     (let loop ([rem (cdddr sexp)])
+       (match rem
+         [(list* (? keyword? kw) val rest)
+          (write-kw-val-hex! kw val out)
+          (loop rest)]
+         [(cons item rest)
+          (fprintf out " ~s" item)
+          (loop rest)]
+         ['()
+          (display ")" out)]))]
+
+    ;; Flat keyword-bearing leaf forms (`defdata`, `jump-table-dispatch`, `idiom`)
+    [(memq (car sexp) '(defdata jump-table-dispatch idiom))
+     (write-flat-kw-form-hex! sexp out indent)]
+
     ;; Container blocks whose elements each belong on their own line
     [(or (memq (car sexp)
                '(header-spec interrupt-vectors coeffect-grades hardware-capabilities idioms
@@ -1879,7 +2298,7 @@
              (write-whole-rom-sexp-multiline! child out (+ indent 2)))
            (display ")" out)))]
 
-    ;; Compact leaf forms (`(target nes)`, `(mmio-reg ...)`, `(defdata ...)`, `(hex ...)`, `(fill ...)`, etc.)
+    ;; Compact leaf forms (`(target nes)`, `(mmio-reg ...)`, `(hex ...)`, `(fill ...)`, etc.)
     [else
      (write-indent out indent)
      (write sexp out)]))

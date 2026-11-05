@@ -68,6 +68,12 @@
         (for-loop "i,val in ipairs(v)")
         (if-cond "val~=\"\"")
         (if-cond "(glob[val]~=nil"))
+      (decompiled-pseudo-code
+        (set! d "{}")
+        (foreach l "lines")
+        (set! |o,v| "{},split(l)")
+        (when "val~=\"\"")
+        (set! |o[props[i]]| "val"))
       (body-lines
         "function dataint(lines,props,globname)"
         " local d={}"
@@ -86,6 +92,10 @@
       (called-functions (dataint))
       (structured-ast
         (return-expr "dataint(lines,props,globname)"))
+      (decompiled-pseudo-code
+        (set! lines "split(str,chr(10))")
+        (set! props "split(deli(lines,1))")
+        (return "dataint(lines,props,globname)"))
       (body-lines
         "function data(str,globname)"
         " local lines=split(str,chr(10))"
@@ -100,6 +110,8 @@
       (called-functions (dataint))
       (structured-ast
         (return-expr "dataint(split(str,chr(10)),split(propstr),globname)"))
+      (decompiled-pseudo-code
+        (return "dataint(split(str,chr(10)),split(propstr),globname)"))
       (body-lines
         "function datahdr(propstr,str,globname)"
         " return dataint(split(str,chr(10)),split(propstr),globname)"
@@ -113,6 +125,11 @@
       (structured-ast
         (for-loop "i=2,#array")
         (while-loop "j>1 and compfn(array[j-1],c)"))
+      (decompiled-pseudo-code
+        (for-range i "2" "#array")
+        (set! |c,j| "array[i],i")
+        (set! |array[j]| "array[j-1]")
+        (-= j "1"))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -130,6 +147,10 @@
       (structured-ast
         (for-loop "c in all(co)")
         (if-cond "costatus(c"))
+      (decompiled-pseudo-code
+        (foreach c "co")
+        (call del "co,c")
+        (call assert "coresume(c)"))
       (body-lines
         "function runcoroutines(co)"
         "\tfor c in all(co) do"
@@ -146,6 +167,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "(1-f)*a+f*b"))
+      (decompiled-pseudo-code
+        (return "(1-f)*a+f*b"))
       (body-lines
         "function lerp(a,b,f)"
         " return (1-f)*a+f*b"
@@ -158,6 +181,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "min(max(v,mn),mx)"))
+      (decompiled-pseudo-code
+        (return "min(max(v,mn),mx)"))
       (body-lines
         "function clamp(v,mn,mx)"
         "\treturn min(max(v,mn),mx)"
@@ -170,6 +195,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "(n%16)*8,flr(n/16)*8"))
+      (decompiled-pseudo-code
+        (return "(n%16)*8,flr(n/16)*8"))
       (body-lines
         "function sprcoords(n)"
         "\treturn (n%16)*8,flr(n/16)*8"
@@ -182,6 +209,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "n%128,flr(n/128)"))
+      (decompiled-pseudo-code
+        (return "n%128,flr(n/128)"))
       (body-lines
         "function tilecoords(n)"
         " return n%128,flr(n/128)"
@@ -194,6 +223,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "flipx"))
+      (decompiled-pseudo-code
+        (set! |dx,dy| "cw/sw,ch/sh")
+        (when "flipx")
+        (+= cx "cw")
+        (set! dx "-dx"))
       (body-lines
         "function smap(cx,cy,cw,ch,sx,sy,sw,sh,flipx,flipy)"
         " -- delta"
@@ -212,6 +246,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "self:read1()|(self:read1()<<8)"))
+      (decompiled-pseudo-code
+        (return "self:read1()|(self:read1()<<8)"))
       (body-lines
         "function read2(self)"
         " return self:read1()|(self:read1()<<8)"
@@ -224,6 +260,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "self.addr-self.baseaddr"))
+      (decompiled-pseudo-code
+        (return "self.addr-self.baseaddr"))
       (body-lines
         "function mem_size(self)"
         "\treturn self.addr-self.baseaddr"
@@ -236,6 +274,10 @@
       (called-functions ())
       (structured-ast
         (return-expr "v"))
+      (decompiled-pseudo-code
+        (set! v "peek(self.addr)")
+        (+= self.addr "1")
+        (return "v"))
       (body-lines
         "function mem_r1(self)"
         " local v=peek(self.addr)"
@@ -250,6 +292,13 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! baseaddr "addr,")
+        (set! addr "addr,")
+        (set! size "mem_size,")
+        (set! read1 "mem_r1,")
+        (set! read2 "read2"))
       (body-lines
         "function readmemstream(addr)"
         "\treturn {"
@@ -268,6 +317,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "ord(c)-(c>\"9\" and 87 or 48)"))
+      (decompiled-pseudo-code
+        (return "ord(c)-(c>\"9\" and 87 or 48)"))
       (body-lines
         "function fromhexchar(c)"
         " return ord(c)-(c>\"9\" and 87 or 48)"
@@ -280,6 +331,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "#self.str/2"))
+      (decompiled-pseudo-code
+        (return "#self.str/2"))
       (body-lines
         "function str_size(self)"
         "\treturn #self.str/2"
@@ -292,6 +345,14 @@
       (called-functions (fromhexchar))
       (structured-ast
         (return-expr "(hi<<4)|lo"))
+      (decompiled-pseudo-code
+        (set! |str,offs| "self.strs[flr(self.offs>>10)+1],self.offs&0x3ff")
+        (+= offs "1")
+        (set! hi "fromhexchar(sub(str,offs,offs))")
+        (+= offs "1")
+        (set! lo "fromhexchar(sub(str,offs,offs))")
+        (+= self.offs "2")
+        (return "(hi<<4)|lo"))
       (body-lines
         "function str_r1(self)"
         " local str,offs=self.strs[flr(self.offs>>10)+1],self.offs&0x3ff"
@@ -310,6 +371,13 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! strs "strs,")
+        (set! offs "0,")
+        (set! size "str_size,")
+        (set! read1 "str_r1,")
+        (set! read2 "read2"))
       (body-lines
         "function readstrstream(strs)"
         "\treturn {"
@@ -328,6 +396,10 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,len"))
+      (decompiled-pseudo-code
+        (set! result "\"\"")
+        (for-range i "1" "len")
+        (set! result.. "chr(stream:read1())"))
       (body-lines
         "function readstrfixed(stream,len)"
         "\tlocal result=\"\""
@@ -342,6 +414,9 @@
       (called-functions (readstrfixed))
       (structured-ast
         (return-expr "readstrfixed(stream,len)"))
+      (decompiled-pseudo-code
+        (set! len "stream:read1()")
+        (return "readstrfixed(stream,len)"))
       (body-lines
         "function readstr(stream)"
         "\tlocal len=stream:read1()"
@@ -355,6 +430,12 @@
       (called-functions (readstrfixed))
       (structured-ast
         (if-cond "hdr~=\"mas\""))
+      (decompiled-pseudo-code
+        (call printh "\"*** loading animations ***\"")
+        (set! hdr "readstrfixed(stream,3)")
+        (when "hdr~=\"mas\"")
+        (call printh "\"'mas' header not found\"")
+        (call stop ""))
       (body-lines
         "function loadanims(stream)"
         "\tprinth(\"*** loading animations ***\")"
@@ -373,6 +454,24 @@
       (called-functions (makespriteanim read2 readstr))
       (structured-ast
         (for-loop "i=1,ct"))
+      (decompiled-pseudo-code
+        (set! anim "makespriteanim()")
+        (set! anim.name "readstr(stream)")
+        (set! anim.fps "stream:read1()/4")
+        (set! anim.w "stream:read1()")
+        (set! anim.h "stream:read1()")
+        (set! anim.ox "stream:read1()/100")
+        (set! anim.oy "stream:read1()/100")
+        (set! anim.tr "stream:read1()")
+        (set! anim.frames "{}")
+        (set! ct "stream:read1()")
+        (for-range i "1" "ct")
+        (set! frame "{}")
+        (set! frame.frame "stream:read2()")
+        (set! flags "stream:read1()")
+        (set! frame.flipx "(flags&1)==1")
+        (set! frame.flipy "(flags&2)==2")
+        (call add "anim.frames,frame"))
       (body-lines
         "function loadspriteanim(stream)"
         "\tlocal anim=makespriteanim()"
@@ -408,6 +507,21 @@
         (for-loop "i=1,ct")
         (for-loop "j=1,kct")
         (if-cond "(flags&1"))
+      (decompiled-pseudo-code
+        (set! anim "maketlanim()")
+        (set! anim.name "readstr(stream)")
+        (set! anim.d "stream:read2()/100")
+        (set! anim.tls "{}")
+        (set! ct "stream:read1()")
+        (for-range i "1" "ct")
+        (set! keyframes "{}")
+        (set! kct "stream:read1()")
+        (for-range j "1" "kct")
+        (set! t "stream:read2()/100")
+        (set! k "makekeyframe(t)")
+        (set! flags "stream:read1()")
+        (when "(flags&1)~=0")
+        (set! k.anim "stream:read1()"))
       (body-lines
         "function loadtlanim(stream,typ)"
         " local anim=maketlanim()"
@@ -443,6 +557,17 @@
       (structured-ast
         (if-cond "(frame.flipx")
         (if-cond "(frame.flipy"))
+      (decompiled-pseudo-code
+        (set! f "clamp(flr(t*self.fps)+1,1,#self.frames)")
+        (set! frame "self.frames[f]")
+        (set! |dw,dh| "self.w*8*xscale,self.h*8*yscale")
+        (-= x "dw*(flipx and (1-self.ox) or self.ox)")
+        (-= y "dh*(flipy and (1-self.oy) or self.oy)")
+        (call palt "0,false")
+        (call palt "self.tr,true")
+        (set! |cx,cy| "tilecoords(frame.frame)")
+        (call palt "self.tr,false")
+        (call palt "0,true"))
       (body-lines
         "function spriteanim_draw(self,t,x,y,xscale,yscale,flipx,flipy)"
         ""
@@ -483,6 +608,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "#self.frames/self.fps"))
+      (decompiled-pseudo-code
+        (return "#self.frames/self.fps"))
       (body-lines
         "function spriteanim_duration(self)"
         "\treturn #self.frames/self.fps"
@@ -495,6 +622,18 @@
       (called-functions (makespriteframe))
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! typ "\"sprite\",")
+        (set! name "\"sprite\",")
+        (set! fps "10,")
+        (set! w "1,h=1,")
+        (set! ox "0.5,oy=0.5,")
+        (set! tr "16,")
+        (set! frames "{")
+        (set! duration "spriteanim_duration,")
+        (set! dodraw "spriteanim_draw,")
+        (set! draw "drawanim"))
       (body-lines
         "function makespriteanim()"
         "\treturn {"
@@ -520,6 +659,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! frame "n"))
       (body-lines
         "function makespriteframe(n)"
         "\treturn {"
@@ -536,6 +678,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "self.d"))
+      (decompiled-pseudo-code
+        (return "self.d"))
       (body-lines
         "function tlanim_duration(self)"
         "\treturn self.d"
@@ -550,6 +694,12 @@
         (for-loop "k in all(tl.keyframes)")
         (if-cond "k[prop]")
         (if-cond "k.t<=t and k.t>beforet"))
+      (decompiled-pseudo-code
+        (set! |beforet,aftert| "-1000,1000")
+        (foreach k "tl.keyframes")
+        (when "k[prop]")
+        (when "k.t<=t and k.t>beforet")
+        (set! |before,beforet| "k,k.t"))
       (body-lines
         "function findrefkeyframes(tl,prop,t)"
         " -- find nearest frames before/after t"
@@ -571,6 +721,19 @@
         (for-loop "prop in all(keyframeswitch)")
         (if-cond "(frame")
         (if-cond "prop==\"animt\""))
+      (decompiled-pseudo-code
+        (set! props "{")
+        (set! visible "true,")
+        (set! animt "0,animspd=1,")
+        (set! x "0,y=0,")
+        (set! xscale "1,yscale=1,")
+        (set! flipx "false,flipy=false,")
+        (set! easein "false,easeout=false")
+        (foreach prop "keyframeswitch")
+        (set! |before,after| "findrefkeyframes(tl,prop,t)")
+        (set! frame "before or after")
+        (when "prop==\"animt\"")
+        (set! animtt "before and before.t"))
       (body-lines
         "function getvirtualkeyframe(tl,t)"
         ""
@@ -610,6 +773,19 @@
         (if-cond "(props.flipx")
         (if-cond "(props.flipy")
         (if-cond "not anim_draw or anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cf"))
+      (decompiled-pseudo-code
+        (+= r "1")
+        (when "r>10" "return")
+        (foreach tl "self.tls")
+        (set! props "getvirtualkeyframe(tl,t)")
+        (when "props.visible and props.anim")
+        (set! cx "x+props.x*xscale*(flipx and -1 or 1)")
+        (set! cy "y+props.y*yscale*(flipy and -1 or 1)")
+        (set! |cxscale,cyscale| "xscale*props.xscale,yscale*props.yscale")
+        (set! |cflipx,cflipy| "flipx,flipy")
+        (set! cdt "dt and dt*props.animspd")
+        (when "not anim_draw or anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r)")
+        (call props.anim:dodraw "props.animt,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r"))
       (body-lines
         "function tlanim_draw(self,t,x,y,xscale,yscale,flipx,flipy,dt,r)"
         " -- recursion limit"
@@ -646,6 +822,18 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! t "t,")
+        (set! anim "nil,")
+        (set! loop "true,")
+        (set! after "false,")
+        (set! visible "true,")
+        (set! flipx "false,")
+        (set! flipy "false,")
+        (set! easein "false,")
+        (set! easeout "false,")
+        (set! tag "0"))
       (body-lines
         "function makekeyframe(t)"
         "\treturn {"
@@ -675,6 +863,10 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! t "t,")
+        (set! typ "\"\""))
       (body-lines
         "function makeevent(t,typ)"
         " return {"
@@ -694,6 +886,11 @@
       (called-functions (makekeyframe))
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (set! k "makekeyframe(0)")
+        (set! |k.animt,k.animspd,k.x,k.y| "0,1,0,0")
+        (return "{")
+        (set! keyframes "{k}"))
       (body-lines
         "function maketl()"
         ""
@@ -713,6 +910,16 @@
       (called-functions (maketl))
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (return "{")
+        (set! typ "\"tl\",")
+        (set! name "\"timeline\",")
+        (set! d "10,")
+        (set! tls "{ maketl() },")
+        (set! events "{ keyframes={} },")
+        (set! duration "tlanim_duration,")
+        (set! dodraw "tlanim_draw,")
+        (set! draw "drawanim"))
       (body-lines
         "function maketlanim()"
         "\treturn {"
@@ -734,6 +941,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call add "afterframeco,cocreate(fn)"))
       (body-lines
         "\tlocal function doafterframe(fn)"
         "\t\t add(afterframeco,cocreate(fn))"
@@ -746,6 +955,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! sfx "function(ev)\tsfx(ev.n)         end,"))
       (body-lines
         "  sfx=function(ev)\tsfx(ev.n)         end,"))
     (def-pico-function
@@ -756,6 +967,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! mus "function(ev) music(ev.n or -1) end,"))
       (body-lines
         "  mus=function(ev) music(ev.n or -1) end,"))
     (def-pico-function
@@ -766,6 +979,12 @@
       (called-functions (doafterframe))
       (structured-ast
         (for-loop "i=1,ev.n or 30"))
+      (decompiled-pseudo-code
+        (set! txt "function(ev)")
+        (call doafterframe "function(")
+        (for-range i "1" "ev.n or 30")
+        (call print "ev.txt,ev.x,ev.y")
+        (call yield ""))
       (body-lines
         "  txt=function(ev)"
         "   doafterframe(function()"
@@ -781,6 +1000,12 @@
       (called-functions (doafterframe))
       (structured-ast
         (for-loop "i=1,ev.n or 30"))
+      (decompiled-pseudo-code
+        (set! reltxt "function(ev,x,y)")
+        (call doafterframe "function(")
+        (for-range i "1" "ev.n or 30")
+        (call print "ev.txt,x+(ev.x or 0),y+(ev.y or 0)")
+        (call yield ""))
       (body-lines
         "  reltxt=function(ev,x,y)"
         "   doafterframe(function()"
@@ -796,6 +1021,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! clr "function()")
+        (set! afterframeco "{}"))
       (body-lines
         "\t\tclr=function()"
         "\t\t afterframeco={}"
@@ -808,6 +1036,9 @@
       (called-functions (runcoroutines))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! framedone "function()")
+        (call runcoroutines "afterframeco"))
       (body-lines
         "\t\tframedone=function()"
         "\t\t runcoroutines(afterframeco)"
@@ -820,6 +1051,17 @@
       (called-functions (loadanims readstrstream))
       (structured-ast
         (if-cond "dget(10"))
+      (decompiled-pseudo-code
+        (call cartdata "\"mot_gpp\"")
+        (set! stream "readstrstream(animdata)")
+        (set! anims "loadanims(stream)")
+        (set! anim_events.fin "fadein")
+        (when "dget(10)==0")
+        (set! |racetype,dif,lapoption,tracknum| "1,2,2,1")
+        (set! racetype "dget(10)")
+        (set! dif "dget(11)")
+        (set! tracknum "dget(12)")
+        (set! lapoption "dget(13)"))
       (body-lines
         "function _init()"
         " cartdata(\"mot_gpp\")"
@@ -849,6 +1091,12 @@
       (structured-ast
         (if-cond "(anim and animt")
         (if-cond "(confirmprompt"))
+      (decompiled-pseudo-code
+        (call cls "")
+        (call basepal "")
+        (call if "anim and animt)anim:draw(animt")
+        (call if "confirmprompt)drawconfirm(")
+        (call drawfade ""))
       (body-lines
         "function _draw()"
         " cls()"
@@ -866,6 +1114,13 @@
       (structured-ast
         (if-cond "not istransition")
         (if-cond "confirmprompt"))
+      (decompiled-pseudo-code
+        (+= frame "1")
+        (when "not istransition")
+        (when "confirmprompt")
+        (call updateconfirm "")
+        (when "mode==\"title\"")
+        (call updatemenu ""))
       (body-lines
         "function _update()"
         " frame+=1"
@@ -885,6 +1140,12 @@
       (called-functions (makerandomroster))
       (structured-ast
         (if-cond "racetype==type_race"))
+      (decompiled-pseudo-code
+        (when "racetype==type_race")
+        (set! roster "makerandomroster()")
+        (when "racetype==type_tour")
+        (set! roster "tour.roster")
+        (set! roster "nil"))
       (body-lines
         "function rungame(demo)"
         ""
@@ -903,6 +1164,11 @@
       (called-functions (basepal))
       (structured-ast
         (if-cond "tag==1"))
+      (decompiled-pseudo-code
+        (set! tag "props.tag")
+        (when "tag==1")
+        (call pal "pals[2]")
+        (call basepal ""))
       (body-lines
         "function anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r)"
         " local tag=props.tag"
@@ -919,6 +1185,13 @@
       (called-functions (cprint pprint))
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (call rectfill "0,50,128,77,3")
+        (call rect "-1,50,128,77,7")
+        (call cprint "confirmprompt,56,6")
+        (set! selcol "frame%8<4 and 7 or 6")
+        (call pprint "\"yES\",50,67,confirmx==0 and selcol or 5")
+        (call pprint "\"nO\", 69,67,confirmx==1 and selcol or 5"))
       (body-lines
         "function drawconfirm()"
         " rectfill(0,50,128,77,3)"
@@ -939,6 +1212,11 @@
         (if-cond "(btnp(➡️")
         (if-cond "btnp(❎")
         (if-cond "confirmx==0"))
+      (decompiled-pseudo-code
+        (when "btnp(❎)or btnp(🅾️)")
+        (set! confirmprompt "nil")
+        (when "confirmx==0")
+        (call confirmfn ""))
       (body-lines
         "function updateconfirm()"
         " if(btnp(⬅️))confirmx=0"
@@ -956,6 +1234,11 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=0,63"))
+      (decompiled-pseudo-code
+        (set! fadepixels "{}")
+        (for-range i "0" "63")
+        (call sset "i%8,i\\8,0")
+        (call add "fadepixels,i"))
       (body-lines
         "function fadein()"
         " fadepixels={}"
@@ -972,6 +1255,11 @@
       (structured-ast
         (if-cond "fade==\"in\"")
         (for-loop "i=0,255"))
+      (decompiled-pseudo-code
+        (when "fade==\"in\"")
+        (call palt "0,false) palt(1,true")
+        (for-range i "0" "255")
+        (call spr "0,i%16*8,i\\16*8"))
       (body-lines
         "function drawfade()"
         " if fade==\"in\" then"
@@ -988,6 +1276,12 @@
       (structured-ast
         (if-cond "fade==\"in\"")
         (for-loop "k=1,2"))
+      (decompiled-pseudo-code
+        (when "fade==\"in\"")
+        (for-range k "1" "2")
+        (set! j "rnd(fadepixels)")
+        (call del "fadepixels,j")
+        (call sset "j%8,j\\8,1"))
       (body-lines
         "function updatefade()"
         " if fade==\"in\" then"
@@ -1005,6 +1299,10 @@
       (structured-ast
         (for-loop "ox=-1,1")
         (for-loop "oy=-1,1"))
+      (decompiled-pseudo-code
+        (for-range ox "-1" "1")
+        (for-range oy "-1" "1")
+        (call print "txt,x+ox,y+oy,1"))
       (body-lines
         "function pprint(txt,x,y,c)"
         " for ox=-1,1 do"
@@ -1019,6 +1317,8 @@
       (called-functions (pprint))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call pprint "txt,65-#txt*2,y,c"))
       (body-lines
         "function cprint(txt,y,c)"
         " pprint(txt,65-#txt*2,y,c)"
@@ -1031,6 +1331,8 @@
       (called-functions (cprint))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call cprint "txt,y,menui==i and frame%8<4 and not istransition and not confirmprompt and 7 or 6"))
       (body-lines
         "function mprint(txt,y,i)"
         " cprint(txt,y,menui==i and frame%8<4 and not istransition and not confirmprompt and 7 or 6)"
@@ -1043,6 +1345,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (call pal "")
+        (call pal "pals[1],1")
+        (call poke "0x5f2e,1"))
       (body-lines
         "function basepal()"
         " pal()"
@@ -1057,6 +1363,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! |anim,doneanim,donefn| "_anim,_doneanim,_donefn")
+        (set! |animt,istransition| "0,true"))
       (body-lines
         "function transition(_anim,_doneanim,_donefn)"
         " anim,doneanim,donefn=_anim,_doneanim,_donefn"
@@ -1070,6 +1379,13 @@
       (called-functions ())
       (structured-ast
         (return-expr "{"))
+      (decompiled-pseudo-code
+        (set! modename "racetypeanims[racetype]")
+        (return "{")
+        (set! pre "anims[modename..\"pre\"],")
+        (set! _in "anims[modename..\"in\"],")
+        (set! idle "anims[modename..\"idle\"],")
+        (set! out "anims[modename..\"out\"]"))
       (body-lines
         "function getmodeanimset(racetype)"
         " local modename=racetypeanims[racetype]"
@@ -1088,6 +1404,8 @@
       (called-functions (randomnums))
       (structured-ast
         (return-expr "randomnums(14,7)"))
+      (decompiled-pseudo-code
+        (return "randomnums(14,7)"))
       (body-lines
         "function makerandomroster(t,n)"
         " return randomnums(14,7)"
@@ -1100,6 +1418,10 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,t"))
+      (decompiled-pseudo-code
+        (set! allnums "{}")
+        (for-range i "1" "t")
+        (call add "allnums,i"))
       (body-lines
         "function randomnums(t,n)"
         " local allnums={}"
@@ -1115,6 +1437,11 @@
       (structured-ast
         (for-loop "i=2,#array")
         (while-loop "j>1 and compfn(array[j-1],c)"))
+      (decompiled-pseudo-code
+        (for-range i "2" "#array")
+        (set! |c,j| "array[i],i")
+        (set! |array[j]| "array[j-1]")
+        (-= j "1"))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -1131,6 +1458,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! confirmprompt "prompt")
+        (set! confirmfn "fn")
+        (set! confirmx "1"))
       (body-lines
         "function confirm(prompt,fn)"
         " confirmprompt=prompt"
@@ -1145,6 +1476,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (call rectfill "20,6,105,37,0")
+        (call print "\"\\^pmOT'S\",44,10,7")
+        (call print "\"\\^pgRAND pRIX\",24,25,7"))
       (body-lines
         "function drawgamename()"
         " rectfill(20,6,105,37,0)"
@@ -1159,6 +1494,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "racetype~=type_prac"))
+      (decompiled-pseudo-code
+        (set! items "{menu_type}")
+        (when "racetype~=type_prac")
+        (call add "items,menu_dif")
+        (call add "items,menu_laps"))
       (body-lines
         "function getmenuitems()"
         " local items={menu_type}"
@@ -1174,6 +1514,12 @@
       (called-functions (getmenuitems))
       (structured-ast
         (if-cond "not istransition and not confirmprompt"))
+      (decompiled-pseudo-code
+        (set! items "getmenuitems()")
+        (set! yoffs "(5-#items)*3")
+        (call palt "12,false")
+        (when "not istransition and not confirmprompt")
+        (call sspr "8,0,8,8,0,menuy*8-2+yoffs,128,9"))
       (body-lines
         "function drawmenu()"
         " local items=getmenuitems()"
@@ -1195,6 +1541,19 @@
         (if-cond "(btnp(➡️")
         (if-cond "item==menu_type and d~=0")
         (if-cond "racetype+d>=1 and racetype+d<=#racetypenames"))
+      (decompiled-pseudo-code
+        (set! items "getmenuitems()")
+        (set! menui "mid(0,#items-1,menui)")
+        (set! item "items[menui+1]")
+        (set! d "0")
+        (when "item==menu_type and d~=0")
+        (when "racetype+d>=1 and racetype+d<=#racetypenames")
+        (set! prevtype "racetype")
+        (+= racetype "d")
+        (set! |animset,prevset| "getmodeanimset(racetype),getmodeanimset(prevtype)")
+        (set! animsets "{animset,prevset}")
+        (set! anim "d<0 and anims[\"tranleft\"] or anims[\"tranright\"]")
+        (call transition "anim,anims[\"idle\"]"))
       (body-lines
         "function updatemenu()"
         " -- up/down arrows"
@@ -1228,6 +1587,8 @@
       (called-functions ())
       (structured-ast
         (while-loop "p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines"))
+      (decompiled-pseudo-code
+        (set! |lines,s| "{},0 function dadd(n,v,i,p)while p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines[p-1].n>n do p-=1 end add(lines,{n=n,v=v,x=type(v)==\"table\"and\"+\"or\" \",i=i},p)end"))
       (body-lines
         "lines,s={},0 function dadd(n,v,i,p)while p>1 and lines[p-1].i==i and type(lines[p-1].n)==type(n)and lines[p-1].n>n do p-=1 end add(lines,{n=n,v=v,x=type(v)==\"table\"and\"+\"or\" \",i=i},p)end"))
     (def-pico-function
@@ -1240,6 +1601,8 @@
         (if-cond "l.x==\"+\"")
         (for-loop "n,v in pairs(l.v)do p+=1 dadd(n,v,l.i..\" \",p)end l.x=\"-\"elseif l")
         (while-loop "p<#lines and #lines[p+1].i>#lines[p].i"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function dexp(l,p)if l.x==\"+\"then for n,v in pairs(l.v)do p+=1 dadd(n,v,l.i..\" \",p)end l.x=\"-\"elseif l.x==\"-\"then while p<#lines and #lines[p+1].i>#lines[p].i do deli(lines,p+1)end\tl.x=\"+\" end end"))
     (def-pico-function
@@ -1251,6 +1614,8 @@
       (structured-ast
         (if-cond "btnp(❎")
         (if-cond "l and(x-10"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function dinp()local x,y,b,w=stat(32),stat(33),stat(34),stat(36)line(x,y,x,y+2,10)if btnp(❎) then local i=(y-10)\\6+1 local p=s+i local l=lines[p]if l and(x-10)\\4==#l.i then dexp(l,p)end end s=max(min(s-stat(36),#lines-18),0) end"))
     (def-pico-function
@@ -1263,6 +1628,8 @@
         (if-cond "l")
         (for-loop "i=1,18")
         (while-loop "true"))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function dui()while true do rectfill(10,10,118,118,1)for i=1,18 do local l=lines[i+s]if l then print(sub(\"\\fc\"..l.i..l.x..l.n..\":\\f7\"..tostr(l.v),1,31),10,(i-1)*6+10,7)end end dinp()flip()end end"))
     (def-pico-function
@@ -1273,6 +1640,8 @@
       (called-functions (dadd dui))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function dinsp(v)dadd(\"value\",v,\"\",#lines+1)poke(0x5f2d,3)cursor()pal()clip()dui()end"))
     (def-pico-function
@@ -1283,6 +1652,14 @@
       (called-functions (makerandomroster randomnums))
       (structured-ast
         (for-loop "i=1,7"))
+      (decompiled-pseudo-code
+        (set! tour.tracks "randomnums(#tracknames)")
+        (set! tour.tracknum "1")
+        (set! tour.roster "makerandomroster()")
+        (set! tour.playerpts "0")
+        (set! tour.pts "{}")
+        (for-range i "1" "7")
+        (call add "tour.pts,0"))
       (body-lines
         "function newtournament()"
         " tour.tracks=randomnums(#tracknames)"
@@ -1301,6 +1678,9 @@
       (called-functions (savetournament))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! tour.tracknum "0")
+        (call savetournament ""))
       (body-lines
         "function quittournament()"
         ""
@@ -1317,6 +1697,16 @@
       (structured-ast
         (if-cond "tour.tracknum>0")
         (for-loop "i=1,#tracknames"))
+      (decompiled-pseudo-code
+        (set! tour "{")
+        (set! tracknum "dget(40),")
+        (set! tracks "{},")
+        (set! roster "{},")
+        (set! pts "{},")
+        (set! playerpts "0")
+        (when "tour.tracknum>0")
+        (for-range i "1" "#tracknames")
+        (call add "tour.tracks,dget(40+i)"))
       (body-lines
         "function loadtournament()"
         " tour={"
@@ -1339,6 +1729,11 @@
       (structured-ast
         (if-cond "tour.tracknum>0")
         (for-loop "i=1,#tracknames"))
+      (decompiled-pseudo-code
+        (call dset "40,tour.tracknum")
+        (when "tour.tracknum>0")
+        (for-range i "1" "#tracknames")
+        (call dset "40+i,tour.tracks[i]"))
       (body-lines
         "function savetournament()"
         " dset(40,tour.tracknum)"
@@ -1354,6 +1749,11 @@
       (called-functions ())
       (structured-ast
         (for-loop "i,car in ipairs(tour.roster)"))
+      (decompiled-pseudo-code
+        (set! leaderboard "{}")
+        (set! name "aicarnames[car],")
+        (set! p "aicarpals[car],")
+        (set! pts "tour.pts[i]"))
       (body-lines
         "function updateleaderboard()"
         " leaderboard={}"
@@ -1376,6 +1776,19 @@
         (return-expr "")
         (for-loop "i,e in ipairs(leaderboard)")
         (if-cond "(e.p"))
+      (decompiled-pseudo-code
+        (call print "\"driver\",0,1,5")
+        (call print "\"points\",58,1,5")
+        (set! |y,col| "i*6+2,e.isplayer and 7 or 6")
+        (call pal "")
+        (call palt "0,false")
+        (call palt "12,true")
+        (call if "e.p)pal(e.p,0")
+        (call spr "8,0,y")
+        (call pal "")
+        (call print "e.name,10,y,col")
+        (set! txt "tostr(e.pts)")
+        (call print "txt,82-#txt*4,y,col"))
       (body-lines
         "function drawleaderboard()"
         " print(\"driver\",0,1,5)"
@@ -1401,6 +1814,12 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=1,7"))
+      (decompiled-pseudo-code
+        (set! playerpos "dget(31)")
+        (+= tour.playerpts "racepts[playerpos]")
+        (for-range i "1" "7")
+        (set! pos "dget(31+i)")
+        (+= |tour.pts[i]| "racepts[pos]"))
       (body-lines
         "function applyraceresults()"
         ""

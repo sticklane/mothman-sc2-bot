@@ -1819,12 +1819,38 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
   const structuredConditionals = [];
   const stateMachines = [];
   const highLevelIdioms = [];
+  const pseudoCodeBlocks = [];
   const gbiHistogram = {};
   const coeffectPairs = {};
+  let foldedCondExprsCount = 0;
+  let floatConstantsCount = 0;
+  let structFieldAccessesCount = 0;
 
   for (let i = 0; i < rawLines.length; i++) {
     const line = rawLines[i].trim();
     if (!line || line.startsWith(';')) continue;
+
+    if (line.includes('#:cond-expr ')) foldedCondExprsCount++;
+    if (line.includes('#:float ')) floatConstantsCount++;
+    if (line.includes('#:struct-field ') || line.includes(':field_0x') || line.includes(':offset_0x')) {
+      structFieldAccessesCount++;
+    }
+
+    if (line.startsWith('(decompiled-pseudo-code')) {
+      const stmts = [];
+      for (let k = i + 1; k < Math.min(rawLines.length, i + 20); k++) {
+        const sLine = rawLines[k].trim();
+        if (!sLine) continue;
+        stmts.push(sLine.replace(/\)+$/, (m) => (m.length > 1 ? m.slice(0, -1) : m)));
+        if (sLine.endsWith('))') || sLine === ')') break;
+      }
+      pseudoCodeBlocks.push({
+        line: i + 1,
+        statementsCount: stmts.length,
+        sampleStatements: stmts.slice(0, 6)
+      });
+      continue;
+    }
 
     // 1. MMIO Cross-References across N64, SNES, GBA, NES, GB, GBC
     let m;
@@ -1865,25 +1891,27 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     }
 
     // 2b. Structured Loops (spin-wait-mmio-loop, counted-loop, do-while-loop)
-    if ((m = line.match(/^\((spin-wait-mmio-loop|counted-loop|do-while-loop)\s+#:header\s+"([^"]+)"\s+#:latch\s+"([^"]+)"(?:\s+#:(?:mmio|step)\s+'?([^\s)]+))?(?:\s+#:cond\s+'?([^\s)]+))?/))) {
+    if ((m = line.match(/^\((spin-wait-mmio-loop|counted-loop|do-while-loop)\s+#:header\s+"([^"]+)"\s+#:latch\s+"([^"]+)"(?:\s+#:(?:mmio|step)\s+'?([^\s)]+))?(?:\s+#:cond\s+'?([^\s)]+))?(?:\s+#:cond-expr\s+(.+))?/))) {
       structuredLoops.push({
         kind: m[1],
         header: m[2],
         latch: m[3],
         mmioOrStep: m[4] || null,
-        cond: m[5] || null
+        cond: m[5] || null,
+        condExpr: m[6] || null
       });
       continue;
     }
 
     // 2c. Structured Conditionals (when-branch, if-else, guard-return)
-    if ((m = line.match(/^\((when-branch|if-else|guard-return)\s+#:branch\s+"([^"]+)"\s+#:(?:join|else|epilogue)\s+"([^"]+)"(?:\s+#:merge\s+"([^"]+)")?(?:\s+#:cond\s+'?([^\s)]+))?/))) {
+    if ((m = line.match(/^\((when-branch|if-else|guard-return)\s+#:branch\s+"([^"]+)"\s+#:(?:join|else|epilogue)\s+"([^"]+)"(?:\s+#:merge\s+"([^"]+)")?(?:\s+#:cond\s+'?([^\s)]+))?(?:\s+#:cond-expr\s+(.+))?/))) {
       structuredConditionals.push({
         kind: m[1],
         branch: m[2],
         target: m[3],
         merge: m[4] || null,
-        cond: m[5] || null
+        cond: m[5] || null,
+        condExpr: m[6] || null
       });
       continue;
     }
@@ -2057,6 +2085,10 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     }
   }
 
+  const semanticSubroutinesCount = subroutines.filter(
+    s => !/^(?:sub-|fn-vr4300-|arm32-sub-|thumb-sub-|sub_[0-9A-Fa-f]+$)/.test(s.name)
+  ).length;
+
   return {
     ok: true,
     target: targetKey,
@@ -2074,6 +2106,11 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     coeffectGrades: coeffectPairs,
     summaryMetrics: {
       subroutinesCount: subroutines.length,
+      semanticSubroutinesCount,
+      pseudoCodeBlocksCount: pseudoCodeBlocks.length,
+      foldedCondExprsCount,
+      floatConstantsCount,
+      structFieldAccessesCount,
       callGraphCount: callGraph.length,
       mmioRegistersCount: mmioCrossRefs.length,
       resolvedPointersCount: resolvedPointers.length,
@@ -2088,6 +2125,7 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     resolvedPointers,
     callGraph,
     subroutines,
+    pseudoCodeBlocks,
     structuredLoops,
     structuredConditionals,
     stateMachines,

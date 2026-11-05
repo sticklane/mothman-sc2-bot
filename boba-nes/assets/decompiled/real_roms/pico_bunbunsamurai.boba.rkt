@@ -66,6 +66,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "flr(rnd(n))"))
+      (decompiled-pseudo-code
+        (return "flr(rnd(n))"))
       (body-lines
         "function frnd(n)"
         "\treturn flr(rnd(n))"
@@ -78,6 +80,9 @@
       (called-functions (frnd))
       (structured-ast
         (return-expr "frnd(n)+addval"))
+      (decompiled-pseudo-code
+        (set! addval "o or 1")
+        (return "frnd(n)+addval"))
       (body-lines
         "function frnda(n, o)"
         "\tlocal addval = o or 1"
@@ -92,6 +97,10 @@
       (structured-ast
         (if-cond "frnd(100")
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! c "chance or 50")
+        (when "frnd(100) < c")
+        (return "true"))
       (body-lines
         "function randc(chance)"
         "\tlocal c = chance or 50"
@@ -109,6 +118,12 @@
         (return-expr "max")
         (return-expr "min")
         (return-expr "value"))
+      (decompiled-pseudo-code
+        (when "value < min")
+        (return "max")
+        (when "value > max")
+        (return "min")
+        (return "value"))
       (body-lines
         "function wrap(value, min, max)"
         "\tif value < min then"
@@ -126,6 +141,9 @@
       (called-functions ())
       (structured-ast
         (for-loop "i=0, count"))
+      (decompiled-pseudo-code
+        (set! count "#t")
+        (for-range i "0" "count"))
       (body-lines
         "function table_clear(t)"
         "\tlocal count = #t"
@@ -139,6 +157,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (call memcpy "0x1800, 0x6000, 0x0800")
+        (call memcpy "0x4300, 0x6800, 0x1800"))
       (body-lines
         "function copy_screen_to_mem()"
         "\t-- half the map/lower sprite memory area"
@@ -154,6 +175,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (call memcpy "0x6000, 0x1800, 0x0800")
+        (call memcpy "0x6800, 0x4300, 0x1800"))
       (body-lines
         "function paste_screen_from_mem()"
         "\tmemcpy(0x6000, 0x1800, 0x0800)"
@@ -168,6 +192,10 @@
       (structured-ast
         (for-loop "i=-1,1")
         (for-loop "j=-1,1"))
+      (decompiled-pseudo-code
+        (for-range i "-1" "1")
+        (for-range j "-1" "1")
+        (call printc "str, y+j, outcol or 2, (x or 64)+i"))
       (body-lines
         "function printc_o(str, y, col, outcol, x) -- print a centered string with a black outline"
         "\tfor i=-1,1 do"
@@ -182,6 +210,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call print "str, (x or 64)-#str*2, y, col or 7"))
       (body-lines
         "function printc(str, y, col, x)"
         "\tprint(str, (x or 64)-#str*2, y, col or 7)"
@@ -196,6 +226,14 @@
         (for-loop "i=1, #str")
         (for-loop "j in all(g_alphabet_sprites)")
         (if-cond "letter == j"))
+      (decompiled-pseudo-code
+        (call pal "7, color")
+        (for-range i "1" "#str")
+        (set! |letter, whichalpha| "sub(str,i,i), -1")
+        (foreach j "g_alphabet_sprites")
+        (+= whichalpha "1")
+        (when "letter == j")
+        (call spr "131 + flr(whichalpha/9)*16 + whichalpha % 9, 64-(#str*8)/2 + (i-1)*8, y"))
       (body-lines
         "function printsprite(str, y, color)"
         "\tpal(7, color)"
@@ -216,6 +254,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call pal "2, g_color_outline"))
       (body-lines
         "function set_outline()"
         "\tpal(2, g_color_outline)"
@@ -228,6 +268,14 @@
       (called-functions ())
       (structured-ast
         (seq-block 11))
+      (decompiled-pseudo-code
+        (set! x "x,")
+        (set! y "y,")
+        (set! text "text,")
+        (set! col_main "col_main or 7,")
+        (set! col_sec "col_sec or 5,")
+        (set! dur "30,")
+        (set! dur_orig "30,"))
       (body-lines
         "function m_textfloat(x,y, text, col_main, col_sec)"
         "\tadd(list_parts_front,"
@@ -248,6 +296,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.dur < self.dur_orig/3"))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (set! color "self.col_main")
+        (when "self.dur < self.dur_orig/3")
+        (set! color "self.col_sec"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color = self.col_main"
@@ -262,6 +315,12 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.dur == 0"))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (-= self.dur "1")
+        (when "self.dur == 0")
+        (call del "list_parts_front, self")
+        (-= self.y ".3"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself.dur-=1"
@@ -279,6 +338,10 @@
       (structured-ast
         (if-cond "self.invuln_frames > 0 and self.invuln_frames % 5 < 3")
         (for-loop "i=1,15"))
+      (decompiled-pseudo-code
+        (when "self.invuln_frames > 0 and self.invuln_frames % 5 < 3")
+        (for-range i "1" "15")
+        (call pal "i, 2"))
       (body-lines
         "function a_set_invuln_flash(self)"
         "\tif self.invuln_frames > 0 and self.invuln_frames % 5 < 3 then"
@@ -294,6 +357,9 @@
       (structured-ast
         (if-cond "abs(obj1.x-obj2.x")
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (when "abs(obj1.x-obj2.x) <= range and abs(obj1.y-obj2.y) <= range")
+        (return "true"))
       (body-lines
         "function is_near_objs(obj1, obj2, range)"
         "\tif abs(obj1.x-obj2.x) <= range and abs(obj1.y-obj2.y) <= range then"
@@ -308,6 +374,9 @@
       (structured-ast
         (if-cond "e1.just_spawned or e2.just_spawned")
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (when "e1.just_spawned or e2.just_spawned")
+        (return "false"))
       (body-lines
         "function int_cols(e1, e2, buffer)"
         "\tif e1.just_spawned or e2.just_spawned then"
@@ -321,6 +390,9 @@
       (called-functions (frnda m_part_angle))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! |part_details[6]| "duration or frnda(10, 50)")
+        (call m_part_angle "part_details, .65, 8, g_color_blood_burn"))
       (body-lines
         "function m_part_blood(part_details, duration)"
         "\tpart_details[6] = duration or frnda(10, 50)"
@@ -334,6 +406,18 @@
       (called-functions ())
       (structured-ast
         (seq-block 17))
+      (decompiled-pseudo-code
+        (set! size "part_details[1]-1,")
+        (set! x "part_details[2],")
+        (set! y "part_details[3],")
+        (set! angle "part_details[4],")
+        (set! speed_move "part_details[5],")
+        (set! duration "part_details[6],")
+        (set! frict "frict,")
+        (set! color "color,")
+        (set! color_sec "color_sec or color,")
+        (set! layer "layer or 0,")
+        (set! time "0,"))
       (body-lines
         "function m_part_angle(part_details, frict, color, color_sec, layer)"
         ""
@@ -360,6 +444,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.time > self.duration *.75"))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (set! |color, s2| "self.color, self.size/2")
+        (when "self.time > self.duration *.75")
+        (set! color "self.color_sec"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color, s2 = self.color, self.size/2"
@@ -375,6 +464,14 @@
       (structured-ast
         (if-cond "self.time > self.duration")
         (if-cond "self.layer == 1"))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (when "self.time > self.duration")
+        (when "self.layer == 1")
+        (call del "list_parts_back, self")
+        (when "self.layer == 2")
+        (call del "list_parts_front, self")
+        (call del "list_parts_blood, self"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.time > self.duration then"
@@ -393,6 +490,19 @@
       (called-functions ())
       (structured-ast
         (seq-block 18))
+      (decompiled-pseudo-code
+        (set! x "x,")
+        (set! y "y,")
+        (set! frame "frame,")
+        (set! col "col,")
+        (set! col_sec "col_sec or col,")
+        (set! duration "duration,")
+        (set! flipx "flipx or false,")
+        (set! is_front "is_front or false,")
+        (set! time "0,")
+        (set! dx "0,")
+        (set! dy "dy,")
+        (set! ddy "0,"))
       (body-lines
         "function m_part_sprite(frame, x,y, dy, col, col_sec, duration, flipx, is_front)"
         ""
@@ -420,6 +530,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.time < self.duration *.75"))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (when "self.time < self.duration *.75")
+        (call pal "7,self.col")
+        (call pal "7,self.col_sec"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif self.time < self.duration *.75 then"
@@ -435,6 +550,9 @@
       (called-functions (update_base))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (call self:update_base ""))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself:update_base()"
@@ -448,6 +566,12 @@
       (structured-ast
         (if-cond "self.time > self.duration")
         (if-cond "self.is_front"))
+      (decompiled-pseudo-code
+        (set! update_base "function(self)")
+        (when "self.time > self.duration")
+        (when "self.is_front")
+        (call del "list_parts_front, self")
+        (call del "list_parts_back, self"))
       (body-lines
         "\t\tupdate_base=function(self)"
         "\t\t\tif self.time > self.duration then"
@@ -464,6 +588,10 @@
       (called-functions (randc))
       (structured-ast
         (if-cond "randc("))
+      (decompiled-pseudo-code
+        (set! |color, color_second| "10, 9")
+        (when "randc()")
+        (set! |color, color_second| "7, 10"))
       (body-lines
         "function m_part_bomb_spark(x, y)"
         "\tlocal color, color_second = 10, 9"
@@ -478,6 +606,8 @@
       (called-functions (m_part_angle))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! p "m_part_angle({size, x, y, 0, 0, duration}, 0, color, color_sec, layer)"))
       (body-lines
         "function m_part_circle(x,y, size, duration, color, color_sec, layer)"
         ""
@@ -490,6 +620,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.time > self.duration * .75"))
+      (decompiled-pseudo-code
+        (set! p.draw "function(self)")
+        (set! color "self.color")
+        (when "self.time > self.duration * .75")
+        (set! color "self.color_sec"))
       (body-lines
         "\tp.draw=function(self)"
         "\t\tlocal color = self.color"
@@ -505,6 +640,14 @@
       (structured-ast
         (for-loop "i=0,36")
         (if-cond "i > 30"))
+      (decompiled-pseudo-code
+        (for-range i "0" "36")
+        (set! |size, xoff, yoff, angleoff,dur| "1, rnd(4), rnd(4), rnd(.2), rnd(8)")
+        (when "i > 30")
+        (set! dur "rnd(1)")
+        (set! size "2")
+        (when "i > 15")
+        (set! dur "rnd(4)"))
       (body-lines
         "function m_part_bloodsplash(x,y,angle)"
         ""
@@ -524,6 +667,8 @@
       (called-functions (m_part_circle))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (call m_part_circle "entity.x, entity.y, size or 7, 4, 10, 9, 1"))
       (body-lines
         "function m_part_impact(entity,size)"
         "\tm_part_circle(entity.x, entity.y, size or 7, 4, 10, 9, 1)"
@@ -536,6 +681,10 @@
       (called-functions (randc))
       (structured-ast
         (if-cond "randc("))
+      (decompiled-pseudo-code
+        (set! dir "rnd(.125)")
+        (when "randc()")
+        (set! dir "0-dir"))
       (body-lines
         "function handle_slash_recovery(speed)"
         "\tlocal dir = rnd(.125)"
@@ -550,6 +699,11 @@
       (called-functions (game_pause m_part_bloodsplash shake))
       (structured-ast
         (if-cond "not target.is_furniture"))
+      (decompiled-pseudo-code
+        (call cam:shake ".1, 3")
+        (call game_pause "2, 0")
+        (when "not target.is_furniture")
+        (call m_part_bloodsplash "target.x, target.y, p1.slash_angle"))
       (body-lines
         "function handle_slash_entity_impact(target)"
         ""
@@ -566,6 +720,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "score > 0"))
+      (decompiled-pseudo-code
+        (when "score > 0")
+        (call sfx "min(26+flr(score/1), 31)")
+        (call sfx "32"))
       (body-lines
         "function score_add(entity, score)"
         "\tif score > 0 then"
@@ -582,6 +740,14 @@
       (structured-ast
         (if-cond "abs(p1.slash_angle - reverse_angle")
         (if-cond "randc("))
+      (decompiled-pseudo-code
+        (set! reverse_angle "abs(target.angle+.5)%1")
+        (when "abs(p1.slash_angle - reverse_angle) < .25")
+        (call sfx "8")
+        (call m_part_circle "target.x, target.y, 6, 10, 7, 5, 1")
+        (set! t_dir "rnd(.125)")
+        (when "randc()")
+        (set! t_dir "0 - t_dir"))
       (body-lines
         "function attempt_deflect_target(target)"
         ""
@@ -607,6 +773,12 @@
       (called-functions (frnda handle_impact_death m_part_bloodsplash))
       (structured-ast
         (if-cond "not entity.is_furniture"))
+      (decompiled-pseudo-code
+        (set! entity.was_counted_for_combo "true")
+        (call sfx "frnda(2, 21)")
+        (call handle_impact_death "entity, target")
+        (when "not entity.is_furniture")
+        (call m_part_bloodsplash "target.x, target.y, entity.angle"))
       (body-lines
         "function combo(entity, target)"
         "\tentity.was_counted_for_combo = true"
@@ -625,6 +797,12 @@
       (called-functions (a_anim_set handle_impact handle_slash_entity_impact))
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (call sfx "25")
+        (set! |target.fly_speed, target.angle| "3, p1.slash_angle")
+        (call target:handle_impact "")
+        (call handle_slash_entity_impact "target")
+        (call a_anim_set "p1, \"attack\""))
       (body-lines
         "function slash_target(target)"
         ""
@@ -642,6 +820,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "tick_multiplier == nil"))
+      (decompiled-pseudo-code
+        (when "tick_multiplier == nil")
+        (set! tick_multiplier "1"))
       (body-lines
         "function a_anim_update(entity, anim_set, tick_multiplier)"
         "\tif tick_multiplier == nil then"
@@ -656,6 +837,8 @@
       (structured-ast
         (if-cond "(anim==entity.curanim")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! |entity.animtick, entity.curanim, entity.curframe| "character_anims[anim].ticks, anim, 1"))
       (body-lines
         "function a_anim_set(entity, anim)"
         "\tif(anim==entity.curanim)return"
@@ -671,6 +854,13 @@
       (structured-ast
         (if-cond "angle == .25 or angle == .75")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! angle "entity.angle")
+        (when "angle == .25 or angle == .75")
+        (return "")
+        (when "angle > .25 and angle < .75")
+        (set! entity.flipx "true")
+        (set! entity.flipx "false"))
       (body-lines
         "function a_doflipx(entity)"
         "\tlocal angle = entity.angle"
@@ -689,6 +879,8 @@
       (called-functions (constrain_to_borders))
       (structured-ast
         (return-expr "constrain_to_borders(obj, g_level_screen_buffer+4, g_level_scree"))
+      (decompiled-pseudo-code
+        (return "constrain_to_borders(obj, g_level_screen_buffer+4, g_level_screen_buffer+4, 124-g_level_screen_buffer, 124-g_level_screen_buffer)"))
       (body-lines
         "function constrain_to_screen(obj)"
         "\treturn constrain_to_borders(obj, g_level_screen_buffer+4, g_level_screen_buffer+4, 124-g_level_screen_buffer, 124-g_level_screen_buffer)"
@@ -701,6 +893,12 @@
       (called-functions ())
       (structured-ast
         (if-cond "x < bor_x1"))
+      (decompiled-pseudo-code
+        (set! |was_constrained, x, y| "false, obj.x, obj.y")
+        (when "x < bor_x1")
+        (set! |x, was_constrained| "bor_x1, true")
+        (when "x > bor_x2")
+        (set! |x, was_constrained| "bor_x2, true"))
       (body-lines
         "function constrain_to_borders(obj, bor_x1, bor_y1, bor_x2, bor_y2)"
         ""
@@ -718,6 +916,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! game_pause_timer "duration"))
       (body-lines
         "function game_pause(duration)"
         "\tgame_pause_timer = duration"
@@ -732,6 +932,14 @@
         (if-cond "not entity.is_furniture and not entity.is_armored")
         (if-cond "target.is_heavy")
         (if-cond "not target.is_bloody"))
+      (decompiled-pseudo-code
+        (when "not entity.is_furniture and not entity.is_armored")
+        (call split_entity "entity, (entity.angle+.5)%1")
+        (call m_part_bloodsplash "target.x, target.y, entity.angle")
+        (when "target.is_heavy")
+        (when "not target.is_bloody")
+        (+= target.sprite "16")
+        (set! target.is_bloody "true"))
       (body-lines
         "function handle_impact_death(entity, target)"
         "\tif not entity.is_furniture and not entity.is_armored then"
@@ -750,6 +958,8 @@
       (called-functions (get_dir_to_player))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function fly_reset(entity)"
         "\tentity.fly_speed, entity.is_flying, entity.is_flying_impactable, entity.angle, entity.score_multiplier ="
@@ -763,6 +973,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (nop))
       (body-lines
         "function attack_reset(entity)"
         "\tentity.attack_time_rem, entity.recovery_time_rem, entity.time_between_attacks_rem ="
@@ -776,6 +988,12 @@
       (called-functions (a_move_angle attack_reset constrain_to_screen))
       (structured-ast
         (if-cond "constrain_to_screen(entity"))
+      (decompiled-pseudo-code
+        (-= entity.attack_time_rem "1")
+        (call a_move_angle "entity, 4")
+        (when "constrain_to_screen(entity)")
+        (call sfx "20")
+        (call attack_reset "entity"))
       (body-lines
         "function a_attack(entity)"
         ""
@@ -793,6 +1011,13 @@
       (called-functions (a_move_angle fly_reset))
       (structured-ast
         (if-cond "entity.fly_speed <= .1"))
+      (decompiled-pseudo-code
+        (call a_move_angle "entity, entity.fly_speed")
+        (*= entity.fly_speed ".95")
+        (set! was_reset "false")
+        (when "entity.fly_speed <= .1")
+        (call fly_reset "entity")
+        (set! was_reset "true"))
       (body-lines
         "function a_fly(entity)"
         "\ta_move_angle(entity, entity.fly_speed)"
@@ -812,6 +1037,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "not speed"))
+      (decompiled-pseudo-code
+        (when "not speed")
+        (set! speed "entity.speed_move"))
       (body-lines
         "function a_move_angle(entity, speed)"
         "\tif not speed then"
@@ -825,6 +1053,15 @@
       (called-functions ())
       (structured-ast
         (if-cond "-.5 < angle_delta and angle_delta <= .5"))
+      (decompiled-pseudo-code
+        (set! angle_delta "desired_angle-cur_angle")
+        (set! turn_result "0")
+        (when "-.5 < angle_delta and angle_delta <= .5")
+        (set! turn_result "angle_delta")
+        (when "angle_delta > .5")
+        (set! turn_result "angle_delta - 1")
+        (when "angle_delta <= -.5")
+        (set! turn_result "angle_delta + 1"))
       (body-lines
         "function get_direction_to_turn(cur_angle, desired_angle)"
         "\tlocal angle_delta = desired_angle-cur_angle"
@@ -845,6 +1082,10 @@
       (called-functions (randc))
       (structured-ast
         (if-cond "randc("))
+      (decompiled-pseudo-code
+        (set! dir "-.125")
+        (when "randc()")
+        (set! dir ".125"))
       (body-lines
         "function get_rebound_angle_speed(angle, speed)"
         "\tlocal dir = -.125"
@@ -860,6 +1101,9 @@
       (structured-ast
         (if-cond "p1.recovery_time_rem > 0")
         (return-expr "0"))
+      (decompiled-pseudo-code
+        (when "p1.recovery_time_rem > 0")
+        (return "0"))
       (body-lines
         "function get_angle_from_input()"
         "\tif p1.recovery_time_rem > 0 then"
@@ -873,6 +1117,31 @@
       (called-functions (move))
       (structured-ast
         (seq-block 33))
+      (decompiled-pseudo-code
+        (set! name "\"\",")
+        (set! pcolor "7,")
+        (set! scolor "6,")
+        (set! is_player "true,")
+        (set! x "setx,")
+        (set! y "sety,")
+        (set! angle "0,")
+        (set! speed_move "0,")
+        (set! speed_move_max "1.25,")
+        (set! col_w "6,")
+        (set! col_h "6,")
+        (set! col_off "0,")
+        (set! curanim "\"move\",")
+        (set! curframe "1,")
+        (set! animtick "0,")
+        (set! flipx "true,")
+        (set! head_shift "0,")
+        (set! body_shift "0,")
+        (set! hp_cur "2,")
+        (set! is_dead "false,")
+        (set! recovery_time_rem "0,")
+        (set! ready_time "150,")
+        (set! invuln_frames "0,")
+        (set! is_slashing "false,"))
       (body-lines
         "function m_player(setx, sety)"
         ""
@@ -914,6 +1183,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 2))
+      (decompiled-pseudo-code
+        (set! init "function(self)"))
       (body-lines
         "\t\tinit=function(self)"
         "\t\tend,"))
@@ -926,6 +1197,10 @@
       (structured-ast
         (if-cond "self.invuln_frames > 0 and not do_kill")
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (set! damage "function(self, source, do_kill)")
+        (when "self.invuln_frames > 0 and not do_kill")
+        (return "false"))
       (body-lines
         "    damage=function(self, source, do_kill)"
         "      if self.invuln_frames > 0 and not do_kill then"
@@ -939,6 +1214,11 @@
       (called-functions (a_anim_set frnda))
       (structured-ast
         (if-cond "not self.is_slashing"))
+      (decompiled-pseudo-code
+        (set! slash "function(self)")
+        (when "not self.is_slashing")
+        (call sfx "frnda(3,4)")
+        (call a_anim_set "self, \"windup\""))
       (body-lines
         "\t\tslash=function(self)"
         "\t\t\tif not self.is_slashing then"
@@ -969,6 +1249,10 @@
       (structured-ast
         (if-cond "self.is_dead")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (when "self.is_dead")
+        (return ""))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.is_dead then"
@@ -983,6 +1267,10 @@
       (structured-ast
         (if-cond "self.is_dead")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (when "self.is_dead")
+        (return ""))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif self.is_dead then"
@@ -996,6 +1284,12 @@
       (called-functions ())
       (structured-ast
         (seq-block 9))
+      (decompiled-pseudo-code
+        (set! owner "entity,")
+        (set! curanim "emotion,")
+        (set! curframe "1,")
+        (set! animtick "0,")
+        (set! color "g_color_interface,"))
       (body-lines
         "function m_emotion(entity, emotion)"
         "\tlocal e ="
@@ -1014,6 +1308,9 @@
       (called-functions (a_anim_update))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (call a_anim_update "self, emotion_anims"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\ta_anim_update(self, emotion_anims)"
@@ -1026,6 +1323,11 @@
       (called-functions ())
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (set! |frame, c_o| "emotion_anims[self.curanim].frames[self.curframe], -4")
+        (call pal "7, self.color")
+        (call pal ""))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal frame, c_o = emotion_anims[self.curanim].frames[self.curframe], -4"
@@ -1046,6 +1348,9 @@
       (structured-ast
         (if-cond "angle > .25 and angle <= .75")
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (when "angle > .25 and angle <= .75")
+        (return "true"))
       (body-lines
         "function get_flipx_from_angle(angle)"
         "\tif angle > .25 and angle <= .75 then"
@@ -1059,6 +1364,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "(atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"))
+      (decompiled-pseudo-code
+        (return "(atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"))
       (body-lines
         "function get_dir_to_player(entity)"
         "\treturn (atan2(entity.x - p1.x, entity.y - p1.y)+.5)%1"
@@ -1073,6 +1380,10 @@
         (if-cond "self.curanim == \"move\"")
         (if-cond "self.curframe % 2 == 0")
         (return-expr "-1"))
+      (decompiled-pseudo-code
+        (when "self.curanim == \"move\"")
+        (when "self.curframe % 2 == 0")
+        (return "-1"))
       (body-lines
         "function get_yboboffset(self)"
         ""
@@ -1088,6 +1399,10 @@
       (called-functions (frnda))
       (structured-ast
         (seq-block 8))
+      (decompiled-pseudo-code
+        (set! x "x-frnda(4,2),")
+        (set! y "y,")
+        (call add "list_steps, s"))
       (body-lines
         "function m_step(x,y)"
         "\tlocal s ="
@@ -1106,6 +1421,10 @@
       (structured-ast
         (if-cond "g_season == 3 and not g_level_indoor")
         (if-cond "randc(50"))
+      (decompiled-pseudo-code
+        (when "g_season == 3 and not g_level_indoor")
+        (when "randc(50)")
+        (call m_step "self.x, self.y"))
       (body-lines
         "function check_for_footsteps(self)"
         "\t-- do snow stuff"
@@ -1121,6 +1440,11 @@
       (called-functions (a_set_invuln_flash get_yboboffset))
       (structured-ast
         (if-cond "not a_set_invuln_flash(self"))
+      (decompiled-pseudo-code
+        (set! yboboffset "get_yboboffset(self)")
+        (when "not a_set_invuln_flash(self)")
+        (call pal "6,self.scolor")
+        (call pal "7,self.pcolor"))
       (body-lines
         "function draw_character(self)"
         ""
@@ -1138,6 +1462,9 @@
       (called-functions (m_bodypart))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (call m_bodypart "entity, 42, entity.pcolor, (angle+.300+rnd(.325))%1")
+        (call m_bodypart "entity, 56+entity.head_shift, entity.scolor, abs(angle-.300-rnd(.325))%1"))
       (body-lines
         "function split_entity(entity, angle)"
         "\tm_bodypart(entity, 42, entity.pcolor, (angle+.300+rnd(.325))%1)"
@@ -1151,6 +1478,8 @@
       (called-functions (frnd))
       (structured-ast
         (return-expr "frnd(2) == 0"))
+      (decompiled-pseudo-code
+        (return "frnd(2) == 0"))
       (body-lines
         "function rndbool()"
         "\treturn frnd(2) == 0"
@@ -1163,6 +1492,15 @@
       (called-functions (frnda rndbool))
       (structured-ast
         (seq-block 14))
+      (decompiled-pseudo-code
+        (set! x "entity.x,")
+        (set! y "entity.y,")
+        (set! replace_color "replace_color,")
+        (set! angle "angle,")
+        (set! sprite "sprite,")
+        (set! speed_move ".5+rnd(.5),")
+        (set! flip_x "rndbool(),")
+        (set! decay_time "frnda(25,25),"))
       (body-lines
         "function m_bodypart(entity, sprite, replace_color, angle)"
         "\tlocal h="
@@ -1188,6 +1526,14 @@
         (if-cond "self.speed_move < .1")
         (if-cond "self.decay_time < 0")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (when "self.speed_move < .1")
+        (-= self.decay_time "1")
+        (when "self.decay_time < 0")
+        (call del "list_heads, self")
+        (call del "list_drawstuff, self")
+        (return ""))
       (body-lines
         "\t\tupdate=function(self)"
         ""
@@ -1208,6 +1554,12 @@
       (called-functions (set_outline))
       (structured-ast
         (seq-block 14))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (set! c_o "-4")
+        (call set_outline "")
+        (call pal "6, self.replace_color")
+        (call pal ""))
       (body-lines
         "\t\tdraw=function(self)"
         ""
@@ -1231,6 +1583,15 @@
       (called-functions ())
       (structured-ast
         (seq-block 12))
+      (decompiled-pseudo-code
+        (set! x "x,")
+        (set! y "y,")
+        (set! col_w "4,")
+        (set! col_h "2,")
+        (set! spritelist "spritelist,")
+        (set! sprite "1,")
+        (set! is_static "true,")
+        (set! is_deadly "is_deadly,"))
       (body-lines
         "function m_object(x, y, spritelist, is_deadly)"
         "\tlocal o ="
@@ -1252,6 +1613,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 2))
+      (decompiled-pseudo-code
+        (set! update "function(self)"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\tend,"))
@@ -1263,6 +1626,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! dealt_damage "function(self)")
+        (set! self.sprite "2"))
       (body-lines
         "\t\tdealt_damage=function(self)"
         "\t\t\tself.sprite = 2"
@@ -1275,6 +1641,13 @@
       (called-functions (set_outline))
       (structured-ast
         (seq-block 7))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (call set_outline "")
+        (call pal "14, 8")
+        (call pal "1, g_color_detail")
+        (call spr "self.spritelist[self.sprite], x-4, y-4")
+        (call pal ""))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tset_outline()"
@@ -1291,6 +1664,13 @@
       (called-functions (m_object m_part_sprite score_add))
       (structured-ast
         (seq-block 11))
+      (decompiled-pseudo-code
+        (set! o "m_object(setx, sety, {99, 99}, false)")
+        (set! p1.hp_cur "2")
+        (call m_part_sprite "106, self.x, self.y, -.1, g_color_outline, g_color_outline, 15, false, true")
+        (call score_add "self, 5")
+        (call del "list_objects, self")
+        (call del "list_drawstuff, self"))
       (body-lines
         "function m_food(setx, sety)"
         "\tlocal o = m_object(setx, sety, {99, 99}, false)"
@@ -1311,6 +1691,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "entity.is_villager"))
+      (decompiled-pseudo-code
+        (when "entity.is_villager")
+        (call add "list_villagers, entity")
+        (call add "list_enemies, entity"))
       (body-lines
         "function add_to_people(entity)"
         ""
@@ -1327,6 +1711,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "entity.is_villager"))
+      (decompiled-pseudo-code
+        (when "entity.is_villager")
+        (call del "list_villagers, entity")
+        (when "not entity.is_furniture")
+        (call del "list_enemies, entity"))
       (body-lines
         "function del_from_people(entity)"
         "\tif entity.is_villager then"
@@ -1344,6 +1733,12 @@
         (if-cond "is_level_active(")
         (return-expr "true")
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (when "is_level_active() and entity.windup_time_rem == 0 and is_near_objs(entity, p1, entity.alert_distance)")
+        (set! entity.flipx "get_flipx_from_angle(entity.desired_angle)")
+        (call a_anim_set "entity, \"windup\"")
+        (return "true")
+        (return "false"))
       (body-lines
         "function a_alert_checkforwindup(entity)"
         "\tif is_level_active() and entity.windup_time_rem == 0 and is_near_objs(entity, p1, entity.alert_distance) then"
@@ -1364,6 +1759,9 @@
       (called-functions (frnda randc))
       (structured-ast
         (if-cond "randc(10"))
+      (decompiled-pseudo-code
+        (when "randc(10)")
+        (set! entity.deviation_time "frnda(time, time)"))
       (body-lines
         "function a_deviate(entity, time)"
         "\tif randc(10) then"
@@ -1377,6 +1775,10 @@
       (called-functions (randc))
       (structured-ast
         (if-cond "randc("))
+      (decompiled-pseudo-code
+        (set! angle_adjust ".25")
+        (when "randc()")
+        (set! angle_adjust "0-angle_adjust"))
       (body-lines
         "function a_random_turn(entity)"
         "\tlocal angle_adjust = .25"
@@ -1391,6 +1793,8 @@
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! e "m_enemy(setx, sety, true)"))
       (body-lines
         "function m_enemy_villager(setx, sety)"
         "\tlocal e = m_enemy(setx, sety, true)"
@@ -1405,6 +1809,11 @@
       (called-functions (level_end_villager_died))
       (structured-ast
         (if-cond "source == p1"))
+      (decompiled-pseudo-code
+        (set! e.kill_class "function(self, source)")
+        (when "source == p1")
+        (call level_end_villager_died "true")
+        (call level_end_villager_died "false"))
       (body-lines
         "\te.kill_class=function(self, source)"
         "\t\tif source == p1 then"
@@ -1420,6 +1829,11 @@
       (called-functions (del_from_people score_add))
       (structured-ast
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! e.touch_class "function(self)")
+        (call score_add "self, 0-self.score-2.5*self.emotion_count")
+        (call del_from_people "self")
+        (return "true"))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\tscore_add(self, 0-self.score-2.5*self.emotion_count)"
@@ -1434,6 +1848,10 @@
       (called-functions (a_deviate a_random_turn))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! e.move "function(self)")
+        (call a_deviate "self, 5")
+        (call a_random_turn "self"))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 5)"
@@ -1447,6 +1865,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 2))
+      (decompiled-pseudo-code
+        (set! e.draw_class "function(self)"))
       (body-lines
         "\te.draw_class=function(self)"
         "\tend"))
@@ -1458,6 +1878,14 @@
       (called-functions ())
       (structured-ast
         (if-cond "angle>.825 or angle < .125"))
+      (decompiled-pseudo-code
+        (when "angle>.825 or angle < .125")
+        (set! angle "0")
+        (when "angle < .375")
+        (set! angle ".25")
+        (when "angle < .625")
+        (set! angle ".5")
+        (set! angle ".75"))
       (body-lines
         "function nearest_angle(angle)"
         "\tif angle>.825 or angle < .125 then"
@@ -1477,6 +1905,17 @@
       (called-functions ())
       (structured-ast
         (seq-block 14))
+      (decompiled-pseudo-code
+        (set! x "x,")
+        (set! y "y,")
+        (set! col_w "4,")
+        (set! col_h "4,")
+        (set! angle "angle,")
+        (set! speed_move "3,")
+        (set! is_static "false,")
+        (set! is_deadly "true,")
+        (set! sprite "40,")
+        (set! flipx "false,"))
       (body-lines
         "function m_arrow(x, y, angle)"
         "\tlocal a ="
@@ -1500,6 +1939,11 @@
       (called-functions (set_outline))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (call set_outline "")
+        (call spr "self.sprite, self.x-4, self.y-4, 1, 1, self.flipx")
+        (call pal ""))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tset_outline()"
@@ -1514,6 +1958,11 @@
       (called-functions (a_move_angle constrain_to_screen dealt_damage))
       (structured-ast
         (if-cond "constrain_to_screen(self"))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (call a_move_angle "self")
+        (when "constrain_to_screen(self)")
+        (call self:dealt_damage ""))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\ta_move_angle(self)"
@@ -1528,6 +1977,10 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! dealt_damage "function(self)")
+        (call del "list_objects, self")
+        (call del "list_drawstuff, self"))
       (body-lines
         "\t\tdealt_damage=function(self)"
         "\t\t\tdel(list_objects, self)"
@@ -1541,6 +1994,9 @@
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! e "m_enemy(setx, sety)")
+        (set! |e.head_shift, e.pcolor, e.scolor, e.alert_distance, e.windup_time, e.time_between_attacks, e.attack_time, e.attack_is_shot| "4, 14, 13, 60, 30, 60, 30, true"))
       (body-lines
         "function m_enemy_archer(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1554,6 +2010,11 @@
       (called-functions (a_deviate get_dir_to_player is_level_active))
       (structured-ast
         (if-cond "is_level_active("))
+      (decompiled-pseudo-code
+        (set! e.move "function(self)")
+        (call a_deviate "self, 10")
+        (when "is_level_active()")
+        (set! self.angle_desired "get_dir_to_player(self)"))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 10)"
@@ -1571,6 +2032,14 @@
         (if-cond "a_alert_checkforwindup(self")
         (return-expr "true")
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (set! e.alert_class "function(self)")
+        (when "abs(self.x - p1.x) < 5 or abs(self.y - p1.y) < 5")
+        (when "a_alert_checkforwindup(self)")
+        (set! self.desired_angle "nearest_angle(self.desired_angle)")
+        (call sfx "24")
+        (return "true")
+        (return "false"))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\tif abs(self.x - p1.x) < 5 or abs(self.y - p1.y) < 5 then"
@@ -1589,6 +2058,10 @@
       (called-functions (m_arrow))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! e.fire_arrow "function(self)")
+        (call sfx "17")
+        (call m_arrow "self.x, self.y, self.desired_angle"))
       (body-lines
         "\te.fire_arrow=function(self)"
         "\t\tsfx(17)"
@@ -1603,6 +2076,15 @@
       (structured-ast
         (if-cond "self.windup_time_rem > 0")
         (if-cond "self.desired_angle == .75"))
+      (decompiled-pseudo-code
+        (set! e.draw_class "function(self)")
+        (when "self.windup_time_rem > 0")
+        (call set_outline "")
+        (set! |arrow_sprite, doflipy| "40, false")
+        (when "self.desired_angle == .75")
+        (set! |arrow_sprite, doflipy| "41, true")
+        (when "self.desired_angle == .25")
+        (set! arrow_sprite "41"))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tif self.windup_time_rem > 0 then"
@@ -1621,6 +2103,9 @@
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! e "m_enemy(setx, sety)")
+        (set! |e.head_shift, e.pcolor| "1, 9"))
       (body-lines
         "function m_enemy_wander(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1635,6 +2120,10 @@
       (called-functions (a_deviate a_random_turn))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! e.move "function(self)")
+        (call a_deviate "self, 15")
+        (call a_random_turn "self"))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 15)"
@@ -1648,6 +2137,9 @@
       (called-functions (a_alert_checkforwindup))
       (structured-ast
         (return-expr "a_alert_checkforwindup(self)"))
+      (decompiled-pseudo-code
+        (set! e.alert_class "function(self)")
+        (return "a_alert_checkforwindup(self)"))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\treturn a_alert_checkforwindup(self)"
@@ -1660,6 +2152,8 @@
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! e "m_enemy(setx, sety)"))
       (body-lines
         "function m_enemy_bomber(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1675,6 +2169,10 @@
       (called-functions (explode))
       (structured-ast
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! e.touch_class "function(self)")
+        (call self:explode "nil, true")
+        (return "true"))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\tself:explode(nil, true)"
@@ -1688,6 +2186,11 @@
       (called-functions (is_near_objs))
       (structured-ast
         (if-cond "not self.is_fuse_lit and is_near_objs(self, p1, 25"))
+      (decompiled-pseudo-code
+        (set! e.update_class "function(self)")
+        (when "not self.is_fuse_lit and is_near_objs(self, p1, 25)")
+        (set! |self.is_fuse_lit, self.fuse_timer, self.emotion_count, self.speed_move| "true, 500, 1, self.speed_move_orig*2")
+        (call sfx "35"))
       (body-lines
         "\te.update_class=function(self)"
         "\t\tif not self.is_fuse_lit and is_near_objs(self, p1, 25) then"
@@ -1702,6 +2205,11 @@
       (called-functions (a_deviate get_dir_to_player is_level_active))
       (structured-ast
         (if-cond "is_level_active("))
+      (decompiled-pseudo-code
+        (set! e.move "function(self)")
+        (call a_deviate "self, 10")
+        (when "is_level_active()")
+        (set! self.angle_desired "get_dir_to_player(self)"))
       (body-lines
         "\te.move=function(self)"
         ""
@@ -1717,6 +2225,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "source != nil and source != p1 and not source.is_heavy"))
+      (decompiled-pseudo-code
+        (set! e.explode "function(self, source, no_score)")
+        (when "source != nil and source != p1 and not source.is_heavy")
+        (set! self.score_multiplier "source.score_multiplier + 1"))
       (body-lines
         "\te.explode=function(self, source, no_score)"
         "\t\tif source != nil and source != p1 and not source.is_heavy then"
@@ -1730,6 +2242,10 @@
       (called-functions (explode))
       (structured-ast
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! e.handle_impact_class "function(self, source)")
+        (call self:explode "source")
+        (return "true"))
       (body-lines
         "\te.handle_impact_class=function(self, source)"
         "\t\tself:explode(source)"
@@ -1743,6 +2259,10 @@
       (called-functions (explode))
       (structured-ast
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! e.kill_class "function(self, source, no_score)")
+        (call self:explode "source, no_score")
+        (return "true"))
       (body-lines
         "\te.kill_class=function(self, source, no_score)"
         "\t\tself:explode(source, no_score)"
@@ -1756,6 +2276,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.flipx"))
+      (decompiled-pseudo-code
+        (set! e.draw_class "function(self)")
+        (set! x_off "-5")
+        (when "self.flipx")
+        (set! x_off "-3"))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tlocal x_off = -5"
@@ -1770,6 +2295,10 @@
       (called-functions (init m_enemy_seeker))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! e "m_enemy_seeker(setx, sety)")
+        (set! |e.is_armored, e.head_shift, e.pcolor, e.scolor, e.speed_move_orig| "true, 5, 13, 6, .5")
+        (call e:init ""))
       (body-lines
         "function m_enemy_boss(setx, sety)"
         "\tlocal e = m_enemy_seeker(setx, sety)"
@@ -1784,6 +2313,9 @@
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! e "m_enemy(setx, sety)")
+        (set! e.head_shift "2"))
       (body-lines
         "function m_enemy_seeker(setx, sety)"
         ""
@@ -1798,6 +2330,11 @@
       (called-functions (a_deviate get_dir_to_player is_level_active))
       (structured-ast
         (if-cond "is_level_active("))
+      (decompiled-pseudo-code
+        (set! e.move "function(self)")
+        (call a_deviate "self, 10")
+        (when "is_level_active()")
+        (set! self.angle_desired "get_dir_to_player(self)"))
       (body-lines
         "\te.move=function(self)"
         "\t\ta_deviate(self, 10)"
@@ -1813,6 +2350,9 @@
       (called-functions (a_alert_checkforwindup))
       (structured-ast
         (return-expr "a_alert_checkforwindup(self)"))
+      (decompiled-pseudo-code
+        (set! e.alert_class "function(self)")
+        (return "a_alert_checkforwindup(self)"))
       (body-lines
         "\te.alert_class=function(self)"
         "\t\treturn a_alert_checkforwindup(self)"
@@ -1825,6 +2365,8 @@
       (called-functions (m_enemy))
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! e "m_enemy(setx, sety)"))
       (body-lines
         "function m_enemy_furniture(setx, sety, sprite, is_heavy)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -1837,6 +2379,11 @@
       (called-functions (a_fly check_for_footsteps))
       (structured-ast
         (if-cond "self.is_flying"))
+      (decompiled-pseudo-code
+        (set! e.update_class "function(self)")
+        (when "self.is_flying")
+        (call check_for_footsteps "self")
+        (call a_fly "self"))
       (body-lines
         "\te.update_class=function(self)"
         "\t\tif self.is_flying then"
@@ -1851,6 +2398,10 @@
       (called-functions (del_from_people))
       (structured-ast
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! e.kill_class "function(self)")
+        (call del_from_people "self")
+        (return "true"))
       (body-lines
         "\te.kill_class=function(self)"
         "\t  del_from_people(self)"
@@ -1864,6 +2415,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! e.touch_class "function(self)")
+        (return "true"))
       (body-lines
         "\te.touch_class=function(self)"
         "\t\treturn true"
@@ -1876,6 +2430,31 @@
       (called-functions (frnd move))
       (structured-ast
         (seq-block 56))
+      (decompiled-pseudo-code
+        (set! x "setx,")
+        (set! y "sety,")
+        (set! pcolor "10,")
+        (set! scolor "7,")
+        (set! is_villager "is_villager or false,")
+        (set! angle "0,")
+        (set! angle_desired "0,")
+        (set! alert_distance "15,")
+        (set! speed_turn ".01,")
+        (set! speed_move_orig ".25+rnd(.1),")
+        (set! speed_move "0,")
+        (set! windup_time "25,")
+        (set! windup_time_rem "0,")
+        (set! deviation_time "0,")
+        (set! col_w "6,")
+        (set! col_h "6,")
+        (set! col_off "0,")
+        (set! curanim "\"move\",")
+        (set! curframe "1,")
+        (set! animtick "0,")
+        (set! flipx "true,")
+        (set! head_shift "0,")
+        (set! body_shift "0,")
+        (set! emotion "nil,"))
       (body-lines
         "function m_enemy(setx, sety, is_villager)"
         "\tlocal e="
@@ -1917,6 +2496,11 @@
       (called-functions (constrain_to_screen is_level_active))
       (structured-ast
         (if-cond "is_level_active("))
+      (decompiled-pseudo-code
+        (set! init "function(self)")
+        (when "is_level_active()")
+        (set! |self.invuln_frames, self.speed_move, self.angle| "30, self.speed_move_orig, (atan2(self.x - p1.x, self.y - p1.y)+.5)%1")
+        (call constrain_to_screen "self"))
       (body-lines
         "\t\tinit=function(self)"
         "\t\t\tif is_level_active() then"
@@ -1931,6 +2515,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 2))
+      (decompiled-pseudo-code
+        (set! move "function(self)"))
       (body-lines
         "\t\tmove=function(self)"
         "\t\tend,"))
@@ -1943,6 +2529,12 @@
       (structured-ast
         (if-cond "self.attack_is_shot")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! attack_target "function(self)")
+        (when "self.attack_is_shot")
+        (call self:fire_arrow "")
+        (call attack_reset "self")
+        (return ""))
       (body-lines
         "\t\tattack_target=function(self)"
         "\t\t\tif self.attack_is_shot then"
@@ -1958,6 +2550,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (set! handle_impact_class "function(self)")
+        (return "false"))
       (body-lines
         "\t\thandle_impact_class=function(self)"
         "\t\t\treturn false"
@@ -1970,6 +2565,13 @@
       (called-functions (a_anim_set emotion_add handle_impact_class m_part_impact))
       (structured-ast
         (if-cond "not self:handle_impact_class(source"))
+      (decompiled-pseudo-code
+        (set! handle_impact "function(self, source)")
+        (when "not self:handle_impact_class(source)")
+        (set! |self.is_flying, self.is_flying_impactable, self.windup_time_rem, self.attack_time_rem| "true, true, 0, 0")
+        (call a_anim_set "self, \"fly\"")
+        (call self:emotion_add "")
+        (call m_part_impact "self"))
       (body-lines
         "\t\thandle_impact=function(self, source)"
         "\t\t\tif not self:handle_impact_class(source) then"
@@ -1986,6 +2588,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (set! kill_class "function(self)")
+        (return "false"))
       (body-lines
         "\t\tkill_class=function(self)"
         "\t\t\treturn false"
@@ -2000,6 +2605,11 @@
         (if-cond "not override")
         (if-cond "self:kill_class(source, no_score")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! kill "function(self, source, no_score, angle, override)")
+        (when "not override")
+        (when "self:kill_class(source, no_score)")
+        (return ""))
       (body-lines
         "\t\tkill=function(self, source, no_score, angle, override)"
         "\t\t\tif not override then"
@@ -2014,6 +2624,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (set! alert_class "function(self)")
+        (return "false"))
       (body-lines
         "\t\talert_class=function(self)"
         "\t\t\treturn false"
@@ -2026,6 +2639,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "false"))
+      (decompiled-pseudo-code
+        (set! touch_class "function(self)")
+        (return "false"))
       (body-lines
         "\t\ttouch_class=function(self)"
         "\t\t\treturn false"
@@ -2038,6 +2654,9 @@
       (called-functions ())
       (structured-ast
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (set! update_class "function(self)")
+        (return "true"))
       (body-lines
         "\t\tupdate_class=function(self)"
         "\t\t\treturn true"
@@ -2050,6 +2669,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.invuln_frames > 0"))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (when "self.invuln_frames > 0")
+        (-= self.invuln_frames "1")
+        (set! self.just_spawned "false"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tif self.invuln_frames > 0 then"
@@ -2065,6 +2689,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 2))
+      (decompiled-pseudo-code
+        (set! draw_class "function(self)"))
       (body-lines
         "\t\tdraw_class=function(self)"
         "\t\tend,"))
@@ -2077,6 +2703,13 @@
       (structured-ast
         (if-cond "not self.is_furniture")
         (if-cond "self.emotion and not self.is_flying"))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (when "not self.is_furniture")
+        (call draw_character "self")
+        (call self:draw_class "")
+        (when "self.emotion and not self.is_flying")
+        (call self.emotion:draw ""))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tif not self.is_furniture then"
@@ -2093,6 +2726,10 @@
       (called-functions (update))
       (structured-ast
         (if-cond "self.emotion"))
+      (decompiled-pseudo-code
+        (set! emotion_update "function(self)")
+        (when "self.emotion")
+        (call self.emotion:update ""))
       (body-lines
         "\t\temotion_update=function(self)"
         "\t\t\tif self.emotion then"
@@ -2106,6 +2743,13 @@
       (called-functions (m_emotion))
       (structured-ast
         (if-cond "self.emotion_count == 3"))
+      (decompiled-pseudo-code
+        (set! emotion_set_from_count "function(self)")
+        (when "self.emotion_count == 3")
+        (call m_emotion "self, \"angry\"")
+        (when "self.emotion_count >= 1")
+        (call m_emotion "self, \"upset\"")
+        (set! self.emotion "nil"))
       (body-lines
         "\t\temotion_set_from_count=function(self)"
         "\t\t\tif self.emotion_count == 3 then"
@@ -2123,6 +2767,10 @@
       (called-functions (emotion_set_from_count))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! emotion_add "function(self)")
+        (set! |self.emotion_count, self.emotion_timer| "min(3, self.emotion_count+1), 360")
+        (call self:emotion_set_from_count ""))
       (body-lines
         "\t\temotion_add=function(self)"
         "\t\t\tself.emotion_count, self.emotion_timer = min(3, self.emotion_count+1), 360"
@@ -2136,6 +2784,15 @@
       (called-functions (frnd))
       (structured-ast
         (if-cond "whichside == 0"))
+      (decompiled-pseudo-code
+        (set! |gen_x, gen_y, whichside| "frnd(128), frnd(128), frnd(4)")
+        (when "whichside == 0")
+        (set! gen_x "4")
+        (when "whichside == 1")
+        (set! gen_x "124")
+        (when "whichside == 2")
+        (set! gen_y "4")
+        (set! gen_y "124"))
       (body-lines
         "function get_gen_coords()"
         "\tlocal gen_x, gen_y, whichside = frnd(128), frnd(128), frnd(4)"
@@ -2158,6 +2815,13 @@
         (if-cond "enemy_type == 5")
         (if-cond "not g_spawned_boss")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! enemy_type "g_enemy_weights[frnda(#g_enemy_weights)]")
+        (when "enemy_type == 5")
+        (when "not g_spawned_boss")
+        (call m_enemy_boss "get_gen_coords()")
+        (set! g_spawned_boss "true")
+        (return ""))
       (body-lines
         "function m_enemy_random()"
         ""
@@ -2178,6 +2842,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "pos+8<64"))
+      (decompiled-pseudo-code
+        (when "pos+8<64")
+        (+= pos "min(64-(pos+8),4)"))
       (body-lines
         "function set_cam_pos(pos)"
         "\tif pos+8<64 then"
@@ -2191,6 +2858,12 @@
       (called-functions ())
       (structured-ast
         (seq-block 10))
+      (decompiled-pseudo-code
+        (call camera "")
+        (set! pos_x "64,")
+        (set! pos_y "64,")
+        (set! shake_remaining "0,")
+        (set! shake_force "0,"))
       (body-lines
         "function m_cam()"
         "\tcamera()"
@@ -2210,6 +2883,10 @@
       (called-functions (cam_pos set_cam_pos))
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! update "function(self)")
+        (set! |self.shake_remaining, self.pos_y, self.pos_x| "max(0,self.shake_remaining-1), mid(64, set_cam_pos(self.pos_y), 960), mid(64, set_cam_pos(self.pos_x), 960)")
+        (call camera "self:cam_pos()"))
       (body-lines
         "\t\tupdate=function(self)"
         "\t\t\tself.shake_remaining, self.pos_y, self.pos_x = max(0,self.shake_remaining-1), mid(64, set_cam_pos(self.pos_y), 960), mid(64, set_cam_pos(self.pos_x), 960)"
@@ -2223,6 +2900,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "self.shake_remaining>0"))
+      (decompiled-pseudo-code
+        (set! cam_pos "function(self)")
+        (set! |shk_x, shk_y, force| "0, 0, self.shake_force")
+        (when "self.shake_remaining>0")
+        (set! |shk_x, shk_y| "rnd(force)-force/2, rnd(force)-force/2"))
       (body-lines
         "\t\tcam_pos=function(self)"
         "\t\t\tlocal shk_x, shk_y, force = 0, 0, self.shake_force"
@@ -2238,6 +2920,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 3))
+      (decompiled-pseudo-code
+        (set! shake "function(self, force, duration)")
+        (set! |self.shake_force, self.shake_remaining| "force, duration"))
       (body-lines
         "\t\tshake=function(self, force, duration)"
         "\t\t\tself.shake_force, self.shake_remaining = force, duration"
@@ -2250,6 +2935,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "g_score_total >= g_high_scores[g_difficulty][1]"))
+      (decompiled-pseudo-code
+        (when "g_score_total >= g_high_scores[g_difficulty][1]")
+        (set! |g_high_scores[g_difficulty][1], g_high_scores[g_difficulty][2]| "g_score_total, g_year"))
       (body-lines
         "function save_score()"
         "\tif g_score_total >= g_high_scores[g_difficulty][1] then"
@@ -2263,6 +2951,9 @@
       (called-functions ())
       (structured-ast
         (seq-block 4))
+      (decompiled-pseudo-code
+        (set! |p1.ready_time, g_game_state, g_transition_time| "300, 6, 150")
+        (+= g_score_total "g_score_level"))
       (body-lines
         "function level_end()"
         "\tp1.ready_time, g_game_state, g_transition_time = 300, 6, 150"
@@ -2276,6 +2967,9 @@
       (called-functions (score_add))
       (structured-ast
         (if-cond "p1.hp_cur > 1"))
+      (decompiled-pseudo-code
+        (when "p1.hp_cur > 1")
+        (call score_add "p1, 25"))
       (body-lines
         "function level_end_win()"
         "\tif p1.hp_cur > 1 then"
@@ -2289,6 +2983,11 @@
       (called-functions (level_end save_score))
       (structured-ast
         (seq-block 6))
+      (decompiled-pseudo-code
+        (set! g_game_transition_to_state "8")
+        (call sfx "12")
+        (call level_end "")
+        (call save_score ""))
       (body-lines
         "function level_end_bad()"
         "\tg_game_transition_to_state = 8"
@@ -2305,6 +3004,9 @@
       (structured-ast
         (if-cond "g_difficulty < 7")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "g_difficulty < 7")
+        (return ""))
       (body-lines
         "function level_end_villager_died(killed_by_player)"
         "\tif g_difficulty < 7 then"
@@ -2318,6 +3020,10 @@
       (called-functions ())
       (structured-ast
         (if-cond "killed_by_obstacle"))
+      (decompiled-pseudo-code
+        (set! g_level_end_reason "\"slain in combat\"")
+        (when "killed_by_obstacle")
+        (set! g_level_end_reason "\"stumbled into death\""))
       (body-lines
         "function level_end_player_died(killed_by_obstacle)"
         "  g_level_end_reason = \"slain in combat\""
@@ -2332,6 +3038,10 @@
       (called-functions (frnda))
       (structured-ast
         (seq-block 7))
+      (decompiled-pseudo-code
+        (set! x "x,")
+        (set! y "y,")
+        (set! size "frnda(size_var, size_base),"))
       (body-lines
         "function m_splat(x, y, size_base, size_var)"
         "\tlocal s ="
@@ -2348,6 +3058,11 @@
       (called-functions ())
       (structured-ast
         (if-cond "color == 0"))
+      (decompiled-pseudo-code
+        (set! draw "function(self, color)")
+        (when "color == 0")
+        (call circfill "self.x, self.y, self.size+1, color")
+        (call circfill "self.x, self.y, self.size, color"))
       (body-lines
         "\t\tdraw=function(self, color)"
         "\t\t\tif color == 0 then"
@@ -2363,6 +3078,8 @@
       (called-functions ())
       (structured-ast
         (seq-block 5))
+      (decompiled-pseudo-code
+        (set! list_splats "{},"))
       (body-lines
         "function m_transition_splatter()"
         "\tlocal t ="
@@ -2378,6 +3095,14 @@
       (structured-ast
         (while-loop "wipe_position < 128")
         (if-cond "randc("))
+      (decompiled-pseudo-code
+        (set! init "function(self)")
+        (set! wipe_position "0")
+        (+= wipe_position "10")
+        (call add "self.list_splats, m_splat(wipe_position+2-rnd(4), 48-frnd(6), 10, 8)")
+        (call add "self.list_splats, m_splat(wipe_position+2-rnd(4), frnda(6, 80), 10, 8)")
+        (when "randc()")
+        (call add "self.list_splats, m_splat(wipe_position+4-rnd(8), 30-frnd(15), 2, 5)"))
       (body-lines
         "\t\tinit=function(self)"
         "\t\t\tlocal wipe_position = 0"
@@ -2399,6 +3124,11 @@
       (called-functions ())
       (structured-ast
         (for-loop "s in all(self.list_splats)"))
+      (decompiled-pseudo-code
+        (set! draw "function(self)")
+        (call rectfill "0, 41, 128, 87, 0")
+        (foreach s "self.list_splats")
+        (call s:draw "0"))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\trectfill(0, 41, 128, 87, 0)"
@@ -2415,6 +3145,9 @@
       (structured-ast
         (if-cond "g_game_state == 5 or g_game_state == 6")
         (return-expr "true"))
+      (decompiled-pseudo-code
+        (when "g_game_state == 5 or g_game_state == 6")
+        (return "true"))
       (body-lines
         "function is_level_active()"
         "\tif g_game_state == 5 or g_game_state == 6 then"
@@ -2429,6 +3162,9 @@
       (structured-ast
         (if-cond "g_weather_part_rate == 0")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (when "g_weather_part_rate == 0")
+        (return ""))
       (body-lines
         "function update_weather()"
         "\t---[["
@@ -2445,6 +3181,14 @@
         (if-cond "self.y >= self.splash_loc")
         (for-loop "i=0,1")
         (if-cond "randc(50"))
+      (decompiled-pseudo-code
+        (set! p.update "function(self)")
+        (when "self.y >= self.splash_loc")
+        (for-range i "0" "1")
+        (set! s "m_part_sprite(103, self.x, self.y, -rnd(1), 12, 12, 5, false, true)")
+        (set! |s.ddy, s.dx| ".1, rnd(.5)")
+        (when "randc(50)")
+        (set! s.dx "-rnd(.5)"))
       (body-lines
         "\t\t\t\tp.update=function(self)"
         "\t\t\t\t\tif self.y >= self.splash_loc then"
@@ -2463,6 +3207,11 @@
       (structured-ast
         (if-cond "self.y > 128")
         (return-expr ""))
+      (decompiled-pseudo-code
+        (set! p.update "function(self)")
+        (when "self.y > 128")
+        (call del "list_parts_front, self")
+        (return ""))
       (body-lines
         "\t\t\t\tp.update=function(self)"
         "\t\t\t\t\tif self.y > 128 then"
@@ -2477,6 +3226,9 @@
       (called-functions ())
       (structured-ast
         (if-cond "stat(9"))
+      (decompiled-pseudo-code
+        (+= g_ticks "1")
+        (when "stat(9) < stat(8)"))
       (body-lines
         "function _update60()"
         "\tg_ticks += 1"
@@ -2492,6 +3244,8 @@
       (called-functions (update))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! fu "function(i) i:update() end"))
       (body-lines
         "\tlocal fu = function(i) i:update() end"))
     (def-pico-function
@@ -2504,6 +3258,13 @@
         (if-cond "g_year ~= g_year_endgame")
         (if-cond "g_year ~= 1")
         (if-cond "randc(25"))
+      (decompiled-pseudo-code
+        (set! p1 "m_player(64,64)")
+        (call reload "0x2000, 0x2000, 0x1000")
+        (set! |color_choice, block_sel_x, block_sel_y| "g_season, frnd(2), 0")
+        (when "g_year ~= g_year_endgame")
+        (when "g_year ~= 1")
+        (when "randc(25)"))
       (body-lines
         "function level_create()"
         "\tp1 = m_player(64,64)"
@@ -2526,6 +3287,13 @@
       (structured-ast
         (if-cond "g_season > 3")
         (if-cond "g_year == 7"))
+      (decompiled-pseudo-code
+        (+= g_season "1")
+        (when "g_season > 3")
+        (set! g_season "0")
+        (+= g_year "1")
+        (when "g_year == 7")
+        (call add "g_enemy_weights, 5"))
       (body-lines
         "function transition_level()"
         ""
@@ -2545,6 +3313,20 @@
       (called-functions (level_create m_cam table_clear))
       (structured-ast
         (if-cond "g_game_state > 3"))
+      (decompiled-pseudo-code
+        (set! cam "m_cam()")
+        (call table_clear "list_parts_back")
+        (call table_clear "list_parts_front")
+        (call table_clear "list_parts_blood")
+        (call table_clear "list_heads")
+        (call table_clear "list_enemies")
+        (call table_clear "list_villagers")
+        (call table_clear "list_people")
+        (call table_clear "list_drawstuff")
+        (call table_clear "list_objects")
+        (call table_clear "list_steps")
+        (when "g_game_state > 3")
+        (call level_create ""))
       (body-lines
         "function reset_level()"
         "\tcam=m_cam()"
@@ -2586,6 +3368,11 @@
       (called-functions (reset_level shake))
       (structured-ast
         (seq-block 18))
+      (decompiled-pseudo-code
+        (call split "\"1,1,1,2,2,2,2\"")
+        (call reset_level "")
+        (call cam:shake "3, 20")
+        (call sfx "9"))
       (body-lines
         "function reset_game()"
         "  -- initialized variables, but change during game"
@@ -2614,6 +3401,15 @@
       (structured-ast
         (for-loop "i=1,8")
         (for-loop "j=1,2"))
+      (decompiled-pseudo-code
+        (call cartdata "\"tmirobot_bunbunsamurai_4\"")
+        (set! index "1")
+        (set! g_high_scores "{}")
+        (for-range i "1" "8")
+        (set! |g_high_scores[i]| "{}")
+        (for-range j "1" "2")
+        (set! |g_high_scores[i][j]| "dget(index)")
+        (+= index "1"))
       (body-lines
         "function _init()"
         "\tcartdata(\"tmirobot_bunbunsamurai_4\")"
@@ -2649,6 +3445,10 @@
       (structured-ast
         (for-loop "n=2,#t")
         (while-loop "i>1 and t[i].y<t[i-1].y"))
+      (decompiled-pseudo-code
+        (for-range n "2" "#t")
+        (set! i "n")
+        (-= i "1"))
       (body-lines
         "function sort_by_y(t) --insertion sort, ascending y"
         "  for n=2,#t do"
@@ -2665,6 +3465,8 @@
       (called-functions ())
       (structured-ast
         (return-expr "g_difficulty % 2 == 0"))
+      (decompiled-pseudo-code
+        (return "g_difficulty % 2 == 0"))
       (body-lines
         "function is_timed_mode()"
         "\treturn g_difficulty % 2 == 0"
@@ -2679,6 +3481,12 @@
         (if-cond "g_game_state > 3 and g_game_state < 10")
         (for-loop "a in all(list_parts_blood)")
         (if-cond "a.time == a.duration"))
+      (decompiled-pseudo-code
+        (when "g_game_state > 3 and g_game_state < 10")
+        (call paste_screen_from_mem "")
+        (foreach a "list_parts_blood")
+        (when "a.time == a.duration")
+        (call a:draw ""))
       (body-lines
         "function _draw()"
         ""
@@ -2697,6 +3505,8 @@
       (called-functions (draw))
       (structured-ast
         (seq-block 1))
+      (decompiled-pseudo-code
+        (set! fd "function(i) i:draw() end"))
       (body-lines
         "\t\tlocal fd = function(i) i:draw() end")))
   (lifted-pico8-assets

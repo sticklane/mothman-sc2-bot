@@ -77,8 +77,46 @@
  spin-wait-mmio-loop
  do-while-loop
  guard-return
+ decompiled-pseudo-code
  high-level-idioms
  pico8-state-machines
+ defsub-65c816
+ defsub-arm32
+ defsub-thumb16
+ subroutine
+ define-snes-rom-header
+ define-snes-interrupt-vectors
+ define-snes-coeffect-effect-grade
+ define-snes-mmio-profile
+ define-snes-call-graph
+ define-snes-state-machines
+ define-snes-high-level-idioms
+ define-snes-spc700-audio-driver
+ define-snes-lifted-subroutines
+ define-snes-rom-banks
+ define-snes-rom-bank-manifest
+ define-gba-rom-header
+ define-gba-coeffect-effect-grade
+ define-gba-mmio-profile
+ define-gba-bios-swi-catalog
+ define-gba-call-graph
+ define-gba-state-machines
+ define-gba-high-level-idioms
+ define-gba-lifted-lz77-assets
+ define-gba-lifted-subroutines
+ define-gba-rom-banks
+ define-gba-rom-bank-manifest
+ define-n64-rom-header
+ define-n64-coeffect-effect-grade
+ define-n64-mmio-cross-references
+ define-n64-resolved-pointers
+ define-n64-libultra-call-graph
+ define-n64-state-machines
+ define-n64-high-level-idioms
+ define-n64-lifted-subroutines
+ define-n64-rsp-rdp-display-list
+ define-n64-rom-segments
+ define-n64-rom-segment-manifest
  verify-nes-grades!)
 
 ;; Surface DSL macro for declaring a game phase state machine with verified failure recovery & victory reachability
@@ -327,9 +365,61 @@
 (define-syntax-rule (guard-return body ...)
   '(guard-return body ...))
 
+(define-syntax-rule (decompiled-pseudo-code body ...)
+  '(decompiled-pseudo-code body ...))
+
 (define-syntax-rule (high-level-idioms body ...)
   '(high-level-idioms body ...))
 
 (define-syntax-rule (pico8-state-machines body ...)
   '(pico8-state-machines body ...))
+
+(define-syntax-rule (defsub-65c816 sub-id body ...)
+  (define sub-id '(defsub-65c816 sub-id body ...)))
+
+(define-syntax-rule (defsub-arm32 sub-id body ...)
+  (define sub-id '(defsub-arm32 sub-id body ...)))
+
+(define-syntax-rule (defsub-thumb16 sub-id body ...)
+  (define sub-id '(defsub-thumb16 sub-id body ...)))
+
+(define-syntax-rule (subroutine sub-id body ...)
+  (define sub-id '(subroutine sub-id body ...)))
+
+(define-syntax-rule (define-snes-rom-header body ...) '(define-snes-rom-header body ...))
+(define-syntax-rule (define-snes-interrupt-vectors body ...) '(define-snes-interrupt-vectors body ...))
+(define-syntax-rule (define-snes-coeffect-effect-grade body ...) '(define-snes-coeffect-effect-grade body ...))
+(define-syntax-rule (define-snes-mmio-profile body ...) '(define-snes-mmio-profile body ...))
+(define-syntax-rule (define-snes-call-graph body ...) '(define-snes-call-graph body ...))
+(define-syntax-rule (define-snes-state-machines body ...) '(define-snes-state-machines body ...))
+(define-syntax-rule (define-snes-high-level-idioms body ...) '(define-snes-high-level-idioms body ...))
+(define-syntax-rule (define-snes-spc700-audio-driver body ...) '(define-snes-spc700-audio-driver body ...))
+(define-syntax-rule (define-snes-lifted-subroutines body ...) '(define-snes-lifted-subroutines body ...))
+(define-syntax-rule (define-snes-rom-banks body ...) '(define-snes-rom-banks body ...))
+(define-syntax-rule (define-snes-rom-bank-manifest body ...) '(define-snes-rom-bank-manifest body ...))
+
+(define-syntax-rule (define-gba-rom-header body ...) '(define-gba-rom-header body ...))
+(define-syntax-rule (define-gba-coeffect-effect-grade body ...) '(define-gba-coeffect-effect-grade body ...))
+(define-syntax-rule (define-gba-mmio-profile body ...) '(define-gba-mmio-profile body ...))
+(define-syntax-rule (define-gba-bios-swi-catalog body ...) '(define-gba-bios-swi-catalog body ...))
+(define-syntax-rule (define-gba-call-graph body ...) '(define-gba-call-graph body ...))
+(define-syntax-rule (define-gba-state-machines body ...) '(define-gba-state-machines body ...))
+(define-syntax-rule (define-gba-high-level-idioms body ...) '(define-gba-high-level-idioms body ...))
+(define-syntax-rule (define-gba-lifted-lz77-assets body ...) '(define-gba-lifted-lz77-assets body ...))
+(define-syntax-rule (define-gba-lifted-subroutines body ...) '(define-gba-lifted-subroutines body ...))
+(define-syntax-rule (define-gba-rom-banks body ...) '(define-gba-rom-banks body ...))
+(define-syntax-rule (define-gba-rom-bank-manifest body ...) '(define-gba-rom-bank-manifest body ...))
+
+(define-syntax-rule (define-n64-rom-header body ...) '(define-n64-rom-header body ...))
+(define-syntax-rule (define-n64-coeffect-effect-grade body ...) '(define-n64-coeffect-effect-grade body ...))
+(define-syntax-rule (define-n64-mmio-cross-references body ...) '(define-n64-mmio-cross-references body ...))
+(define-syntax-rule (define-n64-resolved-pointers body ...) '(define-n64-resolved-pointers body ...))
+(define-syntax-rule (define-n64-libultra-call-graph body ...) '(define-n64-libultra-call-graph body ...))
+(define-syntax-rule (define-n64-state-machines body ...) '(define-n64-state-machines body ...))
+(define-syntax-rule (define-n64-high-level-idioms body ...) '(define-n64-high-level-idioms body ...))
+(define-syntax-rule (define-n64-lifted-subroutines body ...) '(define-n64-lifted-subroutines body ...))
+(define-syntax-rule (define-n64-rsp-rdp-display-list body ...) '(define-n64-rsp-rdp-display-list body ...))
+(define-syntax-rule (define-n64-rom-segments body ...) '(define-n64-rom-segments body ...))
+(define-syntax-rule (define-n64-rom-segment-manifest body ...) '(define-n64-rom-segment-manifest body ...))
+
 
