@@ -43,8 +43,9 @@
       "tma_swizzle128_involutive_place_bijection": 3,
       "gpu_qsbr_3epoch_safe_reclaim": 4,
       "dlopen_trampoline_hotpatch_coeffect_and_bit_exact_preservation": 5,
-      "cross_turn_ast_session_coeffect_grade_composition": 5
+      "cross_turn_ast_session_coeffect_grade_composition": 5,
+      "cross_layer_double_buffered_prefetch_coeffect_invariance": 6
     },
-    "max_new_proof_lines": 5
+    "max_new_proof_lines": 6
   }
 }

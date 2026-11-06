@@ -263,6 +263,7 @@ def verify_lean_proof_hygiene_and_line_bounds() -> Dict[str, Any]:
         "gpu_qsbr_3epoch_safe_reclaim",
         "dlopen_trampoline_hotpatch_coeffect_and_bit_exact_preservation",
         "cross_turn_ast_session_coeffect_grade_composition",
+        "cross_layer_double_buffered_prefetch_coeffect_invariance",
     ]
     lines = txt.splitlines()
     proof_lengths: Dict[str, int] = {}
