@@ -21,6 +21,7 @@
  flatten-structured-insts
  decode-hw-bitfield-flags
  infer-subroutine-abi-signature
+ build-memory-layout-sexp
  infer-nes-rom-memory-layout
  infer-sm83-rom-memory-layout
  structure-subroutine-cfg
@@ -991,6 +992,112 @@
                 (fallback-flag-or-nop-stmts children))
             (reverse flushed-regs)))
 
+  (define (infer-loop-step-sym children arch)
+    (case arch
+      [(mos6502)
+       (or (for/or ([ins (in-list (reverse children))]
+                    #:when (pair? ins))
+             (and (memq (inst-mnem ins) '(DEX DEY INX INY DEC INC))
+                  (inst-mnem ins)))
+           'DEX)]
+      [(sm83)
+       (or (for/or ([ins (in-list (reverse children))]
+                    #:when (pair? ins))
+             (and (memq (inst-mnem ins)
+                        '(DEC_B DEC_C DEC_D DEC_E DEC_BC DEC_DE DEC_HL
+                          INC_B INC_C INC_D INC_E INC_BC INC_DE INC_HL
+                          LD_HLI_A LD_HLD_A LD_A_HLI LD_A_HLD))
+                  (inst-mnem ins)))
+           'DEC_B)]
+      [else 'step]))
+
+  ;; Inspect loop body instructions to synthesize high-level `(mem-fill! target val step)`
+  ;; or `(mem-copy! dst src step)` array intrinsics at the start of the loop body.
+  (define (infer-loop-mem-intrinsic children regs-before step-sym arch)
+    (case arch
+      [(mos6502)
+       (define indexed-src #f)
+       (define indexed-dst #f)
+       (define ppu-dst     #f)
+       (define store-reg   'A)
+       (define inline-imm  #f)
+       (for ([ins (in-list children)]
+             #:when (and (pair? ins) (not (structured-cfg-form? ins))))
+         (define mnem (inst-mnem ins))
+         (define mode (inst-mode ins))
+         (cond
+           [(and (eq? mnem 'LDA) (eq? mode '#:imm) (not indexed-dst))
+            (set! inline-imm (inst-operand ins))]
+           [(and (memq mnem '(LDA LDX LDY))
+                 (memq mode '(#:absx #:absy #:zpx #:zpy #:indx #:indy))
+                 (not indexed-src))
+            (set! indexed-src (mos6502-operand->sym-expr ins))]
+           [(and (memq mnem '(STA STX STY))
+                 (memq mode '(#:absx #:absy #:zpx #:zpy #:indx #:indy))
+                 (not indexed-dst))
+            (set! indexed-dst (mos6502-operand->sym-expr ins))
+            (set! store-reg (case mnem [(STA) 'A] [(STX) 'X] [(STY) 'Y]))]
+           [(and (eq? mnem 'STA)
+                 (eq? mode '#:abs)
+                 (let ([dst (mos6502-operand->sym-expr ins)])
+                   (or (eq? dst 'PPUDATA)
+                       (and (symbol? dst)
+                            (string-prefix? (symbol->string dst) "ppudata_mirror_")))))
+            (set! ppu-dst (mos6502-operand->sym-expr ins))]))
+       (define eff-dst (or indexed-dst ppu-dst))
+       (cond
+         [(and indexed-src eff-dst (not (equal? eff-dst indexed-src)))
+          (list `(mem-copy! ,eff-dst ,indexed-src ,step-sym))]
+         [(and indexed-dst (not indexed-src))
+          (define val-expr
+            (if (eq? store-reg 'A)
+                (or inline-imm (hash-ref regs-before 'A 'A))
+                (hash-ref regs-before store-reg store-reg)))
+          (list `(mem-fill! ,indexed-dst ,val-expr ,step-sym))]
+         [else '()])]
+
+      [(sm83)
+       (define block-src  #f)
+       (define block-dst  #f)
+       (define inline-imm #f)
+       (for ([ins (in-list children)]
+             #:when (and (pair? ins) (not (structured-cfg-form? ins))))
+         (define mnem (inst-mnem ins))
+         (cond
+           [(and (eq? mnem 'LD_A) (not block-dst))
+            (set! inline-imm (inst-operand ins))]
+           [(and (eq? mnem 'XOR_A_A) (not block-dst))
+            (set! inline-imm 0)]
+           [(and (memq mnem '(LD_A_HLI LD_A_HLD LD_A_DE_IND LD_A_DE LD_A_BC_IND LD_A_BC LD_A_HL-IND))
+                 (not block-src))
+            (set! block-src
+                  (case mnem
+                    [(LD_A_HLI)              '(deref HL++)]
+                    [(LD_A_HLD)              '(deref HL--)]
+                    [(LD_A_DE_IND LD_A_DE)   '(deref DE)]
+                    [(LD_A_BC_IND LD_A_BC)   '(deref BC)]
+                    [(LD_A_HL-IND)           '(deref HL)]))]
+           [(and (memq mnem '(LD_HLI_A LD_HLD_A LD_DE_IND_A LD_DE_A LD_BC_IND_A LD_BC_A LD_HL-IND_A LD_HL_IND))
+                 (not block-dst))
+            (when (eq? mnem 'LD_HL_IND)
+              (set! inline-imm (inst-operand ins)))
+            (set! block-dst
+                  (case mnem
+                    [(LD_HLI_A)              '(deref HL++)]
+                    [(LD_HLD_A)              '(deref HL--)]
+                    [(LD_DE_IND_A LD_DE_A)   '(deref DE)]
+                    [(LD_BC_IND_A LD_BC_A)   '(deref BC)]
+                    [(LD_HL-IND_A LD_HL_IND) '(deref HL)]))]))
+       (cond
+         [(and block-src block-dst (not (equal? block-dst block-src)))
+          (list `(mem-copy! ,block-dst ,block-src ,step-sym))]
+         [(and block-dst (not block-src))
+          (define val-expr (or inline-imm (hash-ref regs-before 'A 'A)))
+          (list `(mem-fill! ,block-dst ,val-expr ,step-sym))]
+         [else '()])]
+
+      [else '()]))
+
   (define (fold-forms forms regs dirty [in-loop? #f] [loop-start-pc #f] [loop-latch-pc #f])
     (define stmts '())
     (define last-cmp-kind #f)
@@ -1164,13 +1271,15 @@
               (define raw-body    (fold-forms children regs-loop dirty-loop #t h-pc l-pc))
               (define-values (body-stmts _flushed)
                 (ensure-non-empty-branch-stmts raw-body children regs-before regs-loop dirty-loop))
+              (define mem-intrinsics
+                (infer-loop-mem-intrinsic children regs-before step arch))
               (for ([r (in-list ALL-PSEUDO-REGS)])
                 (when (or (set-member? dirty-loop r)
                           (not (equal? (hash-ref regs-loop r r) (hash-ref regs-before r r))))
                   (hash-set! regs r r)
                   (set-remove! dirty r)))
               (set-cmp! #f #f #f)
-              (emit! `(loop-counted #:step ,step #:while ,cexpr ,@body-stmts))]
+              (emit! `(loop-counted #:step ,step #:while ,cexpr ,@mem-intrinsics ,@body-stmts))]
 
              [(eq? tag 'do-while-loop)
               (define h-pc  (extract-kw-arg f '#:header-pc #f))
@@ -1178,19 +1287,23 @@
               (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
                                 (extract-kw-arg f '#:cond 'not-zero)))
               (define children (drop-last-if-branch (strip-leading-kw-args (cdr f)) arch))
+              (define step-sym (or (extract-kw-arg f '#:step #f)
+                                   (infer-loop-step-sym children arch)))
               (define regs-before (hash-copy regs))
               (define regs-loop   (hash-copy regs))
               (define dirty-loop  (mutable-seteq))
               (define raw-body    (fold-forms children regs-loop dirty-loop #t h-pc l-pc))
               (define-values (body-stmts _flushed)
                 (ensure-non-empty-branch-stmts raw-body children regs-before regs-loop dirty-loop))
+              (define mem-intrinsics
+                (infer-loop-mem-intrinsic children regs-before step-sym arch))
               (for ([r (in-list ALL-PSEUDO-REGS)])
                 (when (or (set-member? dirty-loop r)
                           (not (equal? (hash-ref regs-loop r r) (hash-ref regs-before r r))))
                   (hash-set! regs r r)
                   (set-remove! dirty r)))
               (set-cmp! #f #f #f)
-              (emit! `(do-while #:while ,cexpr ,@body-stmts))]
+              (emit! `(do-while #:while ,cexpr ,@mem-intrinsics ,@body-stmts))]
 
              [(eq? tag 'guard-return)
               (define cexpr (or (extract-kw-arg f '#:cond-expr #f)
@@ -1674,7 +1787,59 @@
 
     (reverse stmts))
 
-  (define folded (fold-forms structured-body root-regs root-dirty))
+  (define (zp-scratch-target? lhs)
+    (match lhs
+      [(list 'zp (? (lambda (k) (and (exact-integer? k) (<= 0 k #x0F))))) #t]
+      [(? symbol? s)
+       (regexp-match? #px"^(?:zp_state_0[0-9A-F]|HRAM_FF8[0-9A-F]|hram_state_FF8[0-9A-F])$"
+                      (symbol->string s))]
+      [_ #f]))
+
+  (define (expr-mentions-target? expr target)
+    (cond
+      [(equal? expr target) #t]
+      [(pair? expr)
+       (or (expr-mentions-target? (car expr) target)
+           (expr-mentions-target? (cdr expr) target))]
+      [else #f]))
+
+  (define (fold-lexical-let-stmt stmt)
+    (match stmt
+      [(list* 'loop-counted '#:step step '#:while cexpr body)
+       `(loop-counted #:step ,step #:while ,cexpr ,@(fold-lexical-let-bindings body))]
+      [(list* 'do-while '#:while cexpr body)
+       `(do-while #:while ,cexpr ,@(fold-lexical-let-bindings body))]
+      [(list* 'when cexpr body)
+       `(when ,cexpr ,@(fold-lexical-let-bindings body))]
+      [(list 'if cexpr (cons 'then then-stmts) (cons 'else else-stmts))
+       `(if ,cexpr
+            (then ,@(fold-lexical-let-bindings then-stmts))
+            (else ,@(fold-lexical-let-bindings else-stmts)))]
+      [_ stmt]))
+
+  (define (fold-lexical-let-bindings stmt-list)
+    (let loop ([rem stmt-list]
+               [acc '()])
+      (match rem
+        ['() (reverse acc)]
+        [(list* (list 'set! (? zp-scratch-target? zv) init-expr) next-stmt rest)
+         #:when (expr-mentions-target? next-stmt zv)
+         (loop rest
+               (cons `(let ([,zv ,init-expr]) ,(fold-lexical-let-stmt next-stmt))
+                     acc))]
+        [(list* (list 'set! (? zp-scratch-target? zv) init-expr)
+                (and reg-init (list 'set! (and r (or 'X 'Y 'B 'C 'D 'E)) rval))
+                third-stmt
+                rest)
+         #:when (and (not (expr-mentions-target? rval zv))
+                     (expr-mentions-target? third-stmt zv))
+         (loop rest
+               (cons `(let ([,zv ,init-expr]) ,(fold-lexical-let-stmt third-stmt))
+                     (cons reg-init acc)))]
+        [(cons s rest)
+         (loop rest (cons (fold-lexical-let-stmt s) acc))])))
+
+  (define folded (fold-lexical-let-bindings (fold-forms structured-body root-regs root-dirty)))
   `(decompiled-pseudo-code
     ,@(if (null? folded) '((nop)) folded)))
 
@@ -1879,6 +2044,25 @@
      (values ordered-params ordered-returns)]
     [else
      (values '() '())]))
+
+(define NES-ENUM-CONSTANTS-SEXP
+  '(enum-constants
+     (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))
+     (joypad-mask-enum (#x80 JOY_BTN_A) (#x40 JOY_BTN_B) (#x20 JOY_BTN_SELECT) (#x10 JOY_BTN_START) (#x08 JOY_BTN_UP) (#x04 JOY_BTN_DOWN) (#x02 JOY_BTN_LEFT) (#x01 JOY_BTN_RIGHT))))
+
+(define SM83-ENUM-CONSTANTS-SEXP
+  '(enum-constants
+     (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+     (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
+
+(define (build-memory-layout-sexp arch . clauses)
+  (define enum-section
+    (case arch
+      [(sm83 gb gbc) SM83-ENUM-CONSTANTS-SEXP]
+      [else          NES-ENUM-CONSTANTS-SEXP]))
+  `(def-memory-layout
+     ,@clauses
+     ,enum-section))
 
 ;; Scan all PRG-ROM banks of an NES ROM to infer:
 ;;   1. MMIO shadow/mirror variables in ZP/WRAM (`ppuctrl_mirror_0778`, `ppumask_mirror_0779`, etc.)
@@ -2093,12 +2277,13 @@
       `(table ,tbsym #:addr ,tba #:accesses ,(cdr tb))))
 
   (values mirror-map
-          `(def-memory-layout
-             (mmio-mirrors ,@(reverse mirror-forms))
-             (zp-pointers ,@ptr-forms)
-             (state-variables ,@state-forms)
-             (timers ,@timer-forms)
-             (indexed-tables ,@table-forms))))
+          (build-memory-layout-sexp
+           'mos6502
+           `(mmio-mirrors ,@(reverse mirror-forms))
+           `(zp-pointers ,@ptr-forms)
+           `(state-variables ,@state-forms)
+           `(timers ,@timer-forms)
+           `(indexed-tables ,@table-forms))))
 
 ;; Scan all ROM banks of an SM83 (GB / GBC) ROM to infer:
 ;;   1. MMIO shadow/mirror variables in HRAM ($FF80..$FFFE) or WRAM ($C000..$DFFF)
@@ -2261,10 +2446,11 @@
       `(wram-var ,wsym #:addr ,wa #:accesses ,(cdr w))))
 
   (values mirror-map
-          `(def-memory-layout
-             (mmio-mirrors ,@(reverse mirror-forms))
-             (hram-variables ,@hram-forms)
-             (wram-variables ,@wram-forms))))
+          (build-memory-layout-sexp
+           'sm83
+           `(mmio-mirrors ,@(reverse mirror-forms))
+           `(hram-variables ,@hram-forms)
+           `(wram-variables ,@wram-forms))))
 
 ;; ============================================================================
 ;; 4. NES (6502) State-Machine Dispatcher & High-Level Idiom Lifter
@@ -2480,12 +2666,15 @@
 
   ;; 2. Scan bank for High-Level 6502 Hardware & Math Idioms
   (define idioms '())
-  (define (add-idiom! form)
-    (when (< (length idioms) max-idioms)
+  (define joypad-idiom-count 0)
+  (define (add-idiom! form [force-joypad? #f])
+    (when (or (< (length idioms) max-idioms)
+              (and force-joypad? (< joypad-idiom-count 4)))
+      (when force-joypad?
+        (set! joypad-idiom-count (add1 joypad-idiom-count)))
       (set! idioms (cons form idioms))))
 
-  (for ([off (in-range 0 (- (- bank-end bank-start) 10))]
-        #:when (< (length idioms) max-idioms))
+  (for ([off (in-range 0 (- (- bank-end bank-start) 10))])
     (define pos (+ bank-start off))
     (define pc  (+ bank-origin off))
     (define b0  (bytes-ref rom-bytes pos))
@@ -2546,7 +2735,16 @@
                       (or (= op3 #x85) (= op3 #x95))
                       (or (= op4 #xA5) (= op4 #xB5))
                       (or (= op5 #x65) (= op5 #x69) (= op5 #x75)))))
-      (add-idiom! `(idiom-u16-add-with-carry #:bank ,bank-idx #:pc ,pc))))
+      (add-idiom! `(idiom-u16-add-with-carry #:bank ,bank-idx #:pc ,pc)))
+
+    ;; Idiom E: `joypad-poll`
+    ;;   `LDA $4016` / `LDA $4016,X` / `LDA $4016,Y` (`AD/BD/B9 16 40`) or `$4017` (`AD/BD/B9 17 40`)
+    (when (and (or (= b0 #xAD) (= b0 #xBD) (= b0 #xB9))
+               (or (= (bytes-ref rom-bytes (+ pos 1)) #x16)
+                   (= (bytes-ref rom-bytes (+ pos 1)) #x17))
+               (= (bytes-ref rom-bytes (+ pos 2)) #x40))
+      (define jreg (if (= (bytes-ref rom-bytes (+ pos 1)) #x16) 'JOY1 'JOY2))
+      (add-idiom! `(idiom-joypad-poll #:bank ,bank-idx #:pc ,pc #:reg ,jreg) #t)))
 
   (hasheq 'state-machines    (reverse state-machines)
           'high-level-idioms (reverse idioms)))
@@ -2591,6 +2789,7 @@
   (define rom-len (bytes-length rom-bytes))
   (define state-machines '())
   (define idioms '())
+  (define joypad-idiom-count 0)
   (define seen-sm-pcs (mutable-set))
 
   (define (add-sm83-sm! bank-idx pc mechanism cases)
@@ -2611,8 +2810,11 @@
                      #:cases ,cases)
                   state-machines))))
 
-  (define (add-sm83-idiom! form)
-    (when (< (length idioms) max-idioms)
+  (define (add-sm83-idiom! form [force-joypad? #f])
+    (when (or (< (length idioms) max-idioms)
+              (and force-joypad? (< joypad-idiom-count 4)))
+      (when force-joypad?
+        (set! joypad-idiom-count (add1 joypad-idiom-count)))
       (set! idioms (cons form idioms))))
 
   (define scan-banks (min num-banks 8))
@@ -2701,7 +2903,15 @@
       (when (and (< (length idioms) max-idioms)
                  (= op #xEA)
                  (<= #x20 (bytes-ref rom-bytes (+ pos 2)) #x3F))
-        (add-sm83-idiom! `(idiom-sm83-mbc-switch #:bank ,b #:pc ,pc #:reg MBC_ROM_BANK)))))
+        (add-sm83-idiom! `(idiom-sm83-mbc-switch #:bank ,b #:pc ,pc #:reg MBC_ROM_BANK)))
+
+      ;; 2E. `joypad-poll`:
+      ;;   `LDH A, ($00)` (`0xF0 0x00`) or `LD A, ($FF00)` (`0xFA 0x00 0xFF`)
+      (when (or (and (= op #xF0) (= (bytes-ref rom-bytes (+ pos 1)) #x00))
+                (and (= op #xFA)
+                     (= (bytes-ref rom-bytes (+ pos 1)) #x00)
+                     (= (bytes-ref rom-bytes (+ pos 2)) #xFF)))
+        (add-sm83-idiom! `(idiom-joypad-poll #:bank ,b #:pc ,pc #:reg JOYP) #t))))
 
   ;; Fallback if a ROM uses direct call dispatch without an inline table yet
   (when (null? state-machines)

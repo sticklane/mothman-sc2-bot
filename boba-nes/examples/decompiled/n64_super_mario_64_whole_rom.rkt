@@ -317,6 +317,25 @@
     (field :field_0x0 #:role ':header_or_ptr_0x0 #:offset #x00 #:type ':s32 #:accesses 1))
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror os_rom_base_80000308 #:addr #x80000308 #:mmio PI_CART_ADDR)
+    (mirror vi_current_mode_8033B4A0 #:addr #x8033B4A0 #:mmio VI_CONTROL)
+    (mirror sp_task_queue_8032C000 #:addr #x8032C000 #:mmio SP_STATUS))
+  (state-variables
+    (state-var g_mario_state_8033B170 #:addr #x8033B170 #:accesses 96)
+    (state-var g_global_timer_8032D5D4 #:addr #x8032D5D4 #:accesses 72))
+  (timers
+    (timer timer_rdram_8032D5D4 #:addr #x8032D5D4 #:decrements 16)
+    (timer timer_rdram_8033B210 #:addr #x8033B210 #:decrements 11))
+  (indexed-tables
+    (table object_pool_table_8033D488 #:addr #x8033D488 #:accesses 84)
+    (table behavior_script_table_8033AF78 #:addr #x8033AF78 #:accesses 58))
+  (enum-constants
+    (enum-group RCP_SP_STATUS (CLR_HALT #x0001) (SET_HALT #x0002) (CLR_BROKE #x0004) (CLR_INTR #x0008))
+    (enum-group RCP_PI_STATUS (PI_DMA_BUSY #x0001) (PI_IO_BUSY #x0002) (PI_CLR_INTR #x0002))
+    (enum-group GBI_GEOMETRY_MODE (G_ZBUFFER #x00000001) (G_SHADE #x00000004) (G_CULL_BACK #x00002000) (G_LIGHTING #x00020000))))
+
 ;; Complete Stack-Framed MIPS III VR4300 + COP0 + COP1 FPU Lifted Subroutines (with Structured CFG)
 (define-n64-lifted-subroutines
   (subroutine pif-ipl3-bootstrap (entry #xa4000040) (offset #x000040) (stack-frame 0) (fpu-ops 0) #:params () #:returns ()
@@ -363,7 +382,8 @@
     (decompiled-pseudo-code
       (loop-counted (!= ptr_0002CED8 0)
         (set! rdram_sym_8033A580 0)
-        (set! rdram_sym_8033A584 0))
+        (set! rdram_sym_8033A584 0)
+        (mem-fill! #:dst a0 #:val 0 #:count (!= ptr_0002CED8 0)))
       (switch rdram_sym_80246DF8 (case 0 (call fpu_math_helper_80335BA0)) (case 1 (call fpu_math_helper_80335BB0)) (case 2 (call math_fixed_helper_80335BC4)) (case 3 (call fpu_math_helper_80335BDC)) (case 4 (call fpu_math_helper_80335BF0)) (case 5 (call fpu_math_helper_80335C00)))
       (tail-call rdram_sym_80246DF8))
     (insn "0x80246000" #x3C088034 (MIPS-LUI t0 #x8034))
@@ -1397,7 +1417,8 @@
           (poll-mmio PI_STATUS)))
       (set! v0 (call rdram_struct_helper_80327EB0 a2))
       (set! PI_DRAM_ADDR v0)
-      (set! PI_CART_ADDR (bit-and (bit-ior osRomBase a1) ptr_1FFFFFFF)))
+      (set! PI_CART_ADDR (bit-and (bit-ior osRomBase a1) ptr_1FFFFFFF))
+      (dma-transfer! #:engine 'PI_CART_DMA #:dram-addr v0 #:cart-addr (bit-and (bit-ior osRomBase a1) ptr_1FFFFFFF) #:len a3))
     (insn "0x803284B0" #x27BDFFD8 (MIPS-ADDIU sp sp -40))
     (insn "0x803284B4" #xAFBF001C (MIPS-SW ra 28(sp)))
     (insn "0x803284B8" #xAFA40028 (MIPS-SW a0 40(sp)))
@@ -1490,7 +1511,8 @@
       (loop-counted (< (+ 0 1) 4)
         (set! v0 (call rdram_struct_helper_802795A0 0 a1))
         (when (< v0 v0)
-          (call rdram_struct_helper_802795D4 0 a1 (+ v0 1))))
+          (call rdram_struct_helper_802795D4 0 a1 (+ v0 1)))
+        (mem-copy! #:dst a0 #:src a1 #:count (< (+ 0 1) 4)))
       (call rdram_struct_helper_802795D4 a0 a1 0)
       (set! rdram_sym_8033B4A5 1))
     (insn "0x80279650" #x27BDFFD8 (MIPS-ADDIU sp sp -40))
@@ -1744,7 +1766,8 @@
     (decompiled-pseudo-code
       (when (!= (-> t8 :field_0x60 :s32) (+ rdram_sym_803610E8 520))
         (do-while (!= (-> (-> t8 :field_0x60 :s32) :field_0x60 :s32) (+ rdram_sym_803610E8 520))
-          (call rdram_struct_helper_802C93F8 (-> t8 :field_0x60 :s32) (-> (-> t8 :field_0x60 :s32) :field_0x60 :s32) (+ rdram_sym_803610E8 520))))
+          (call rdram_struct_helper_802C93F8 (-> t8 :field_0x60 :s32) (-> (-> t8 :field_0x60 :s32) :field_0x60 :s32) (+ rdram_sym_803610E8 520))
+          (mem-copy! #:dst a0 #:src a1 #:count (!= (-> (-> t8 :field_0x60 :s32) :field_0x60 :s32) (+ rdram_sym_803610E8 520)))))
       (return))
     (insn "0x802C95B4" #x27BDFFE0 (MIPS-ADDIU sp sp -32))
     (insn "0x802C95B8" #xAFBF0014 (MIPS-SW ra 20(sp)))
@@ -1907,7 +1930,8 @@
       (loop-counted (!= (+ (+ sp 120) 12) (+ (+ sp 120) 48))
         (set! (-> t2 :field_-0x8 :s32) (-> t9 :field_0x0 :s32))
         (set! (-> t2 :field_-0x4 :s32) (-> t9 :field_-0x8 :s32))
-        (set! (-> t2 :field_0x0 :s32) (-> t9 :field_-0x4 :s32)))
+        (set! (-> t2 :field_0x0 :s32) (-> t9 :field_-0x4 :s32))
+        (mem-copy! #:dst a0 #:src a1 #:count (!= (+ (+ sp 120) 12) (+ (+ sp 120) 48))))
       (call fpu_math_helper_802CDC40 stack_0x77 stack_0x4 stack_0x8 stack_0xC))
     (insn "0x802CDF3C" #x27BDFF90 (MIPS-ADDIU sp sp -112))
     (insn "0x802CDF40" #xAFBF004C (MIPS-SW ra 76(sp)))

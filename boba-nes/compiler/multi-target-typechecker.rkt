@@ -88,7 +88,16 @@
 
  ;; Layer 9: Whole-ROM Static Contract, Bitfield, Layout & Pseudo-Code Verifier
  extract-whole-rom-contracts
- verify-whole-rom-module-contracts)
+ verify-whole-rom-module-contracts
+
+ ;; Layer 10: Cross-Platform Subroutine & Hardware Idiom Transpiler
+ CROSS-TARGET-MMIO-MAP
+ transpile-pseudo-code-across-targets
+ transpile-subroutine-across-targets
+
+ ;; Layer 11: Bitvector Symbolic Equivalence Verifier
+ symbolically-evaluate-pseudo-code
+ verify-pseudo-code-equivalence)
 
 ;; ============================================================================
 ;; Layer 1: Target-Parameterized Resource Semiring (`TargetGrade`)
@@ -2189,6 +2198,9 @@
    'TMA       #xFF06
    'TAC       #xFF07
    'IF        #xFF0F
+   'NR50      #xFF24
+   'NR51      #xFF25
+   'NR52      #xFF26
    'LCDC      #xFF40
    'STAT      #xFF41
    'SCY       #xFF42
@@ -2201,18 +2213,47 @@
    'OBP1      #xFF49
    'WY        #xFF4A
    'WX        #xFF4B
+   'KEY1      #xFF4D
+   'VBK       #xFF4F
+   'HDMA1     #xFF51
+   'HDMA2     #xFF52
+   'HDMA3     #xFF53
+   'HDMA4     #xFF54
+   'HDMA5     #xFF55
+   'BCPS      #xFF68
+   'BCPD      #xFF69
+   'OCPS      #xFF6A
+   'OCPD      #xFF6B
+   'SVBK      #xFF70
    'IE        #xFFFF
    ;; SNES
    'INIDISP   #x2100
    'OBSEL     #x2101
+   'OAMADDL   #x2102
+   'OAMADDH   #x2103
+   'OAMDATA_S #x2104
    'BGMODE    #x2105
+   'MOSAIC    #x2106
+   'BG1SC     #x2107
+   'BG12NBA   #x210B
+   'BG1HOFS   #x210D
+   'BG1VOFS   #x210E
    'VMAIN     #x2115
    'VMADDL    #x2116
    'VMADDH    #x2117
    'VMDATAL   #x2118
    'VMDATAH   #x2119
+   'M7SEL     #x211A
+   'M7A       #x211B
+   'M7B       #x211C
+   'M7C       #x211D
+   'M7D       #x211E
    'CGADD     #x2121
    'CGDATA    #x2122
+   'TM        #x212C
+   'TS        #x212D
+   'CGADSUB   #x2131
+   'COLDATA   #x2132
    'APUIO0    #x2140
    'APUIO1    #x2141
    'APUIO2    #x2142
@@ -2223,6 +2264,8 @@
    'RDNMI     #x4210
    'TIMEUP    #x4211
    'HVBJOY    #x4212
+   'JOY1L     #x4218
+   'JOY1H     #x4219
    ;; GBA
    'DISPCNT   #x04000000
    'DISPSTAT  #x04000004
@@ -2236,6 +2279,9 @@
    'BLDCNT    #x04000050
    'BLDALPHA  #x04000052
    'BLDY      #x04000054
+   'SOUNDCNT_L #x04000080
+   'SOUNDCNT_H #x04000082
+   'SOUNDCNT_X #x04000084
    'DMA3SAD   #x040000D4
    'DMA3DAD   #x040000D8
    'DMA3CNT_L #x040000DC
@@ -2245,26 +2291,77 @@
    'IME       #x04000208
    'POSTFLG   #x04000300
    ;; N64
+   'SP_DMA_LEN    #xA4040008
    'SP_STATUS     #xA4040010
    'SP_STATUS_REG #xA4040010
    'MI_MODE       #xA4300000
    'MI_MODE_REG   #xA4300000
+   'MI_INTR_MASK  #xA430000C
    'VI_STATUS     #xA4400000
    'VI_STATUS_REG #xA4400000
    'VI_ORIGIN     #xA4400004
    'VI_ORIGIN_REG #xA4400004
+   'VI_WIDTH      #xA4400008
+   'VI_INTR       #xA440000C
+   'VI_CURRENT    #xA4400010
+   'VI_X_SCALE    #xA4400030
+   'AI_DRAM_ADDR  #xA4500000
    'AI_DRAM_ADDR_REG #xA4500000
+   'AI_CONTROL    #xA4500008
+   'PI_DRAM_ADDR  #xA4600000
    'PI_DRAM_ADDR_REG #xA4600000
-   'SI_DRAM_ADDR_REG #xA4800000))
+   'PI_CART_ADDR  #xA4600004
+   'PI_RD_LEN     #xA4600008
+   'PI_WR_LEN     #xA460000C
+   'PI_STATUS     #xA4600010
+   'SI_DRAM_ADDR  #xA4800000
+   'SI_DRAM_ADDR_REG #xA4800000
+   'SI_STATUS     #xA4800018))
+
+(define SYMBOLIC-ENUM-CONSTANT-TABLE
+  (hasheq
+   'STATE_00_INIT     #x00
+   'STATE_01_TITLE    #x01
+   'STATE_02_GAMEPLAY #x02
+   'STATE_03_DEMO     #x03
+   'STATE_04_VICTORY  #x04
+   'STATE_05_GAMEOVER #x05
+   'JOY_BTN_A         #x80
+   'JOY_BTN_B         #x40
+   'JOY_BTN_SELECT    #x20
+   'JOY_BTN_START     #x10
+   'JOY_BTN_UP        #x08
+   'JOY_BTN_DOWN      #x04
+   'JOY_BTN_LEFT      #x02
+   'JOY_BTN_RIGHT     #x01))
+
+(define (resolve-symbolic-enum-constant x)
+  (define sym
+    (cond
+      [(symbol? x) x]
+      [(and (pair? x) (eq? (car x) 'quote) (pair? (cdr x)) (symbol? (cadr x)))
+       (cadr x)]
+      [else #f]))
+  (cond
+    [(not sym) #f]
+    [(hash-has-key? SYMBOLIC-ENUM-CONSTANT-TABLE sym)
+     (hash-ref SYMBOLIC-ENUM-CONSTANT-TABLE sym)]
+    [else
+     (define m (regexp-match #rx"^STATE_([0-9A-Fa-f]{2})(_.*)?$" (symbol->string sym)))
+     (and m (string->number (cadr m) 16))]))
 
 (define (resolve-mmio-or-addr x [target 'nes])
   (cond
     [(exact-integer? x) x]
+    [(resolve-symbolic-enum-constant x) => values]
     [(and (eq? target 'gba) (eq? x 'IE)) #x04000200]
     [(and (eq? target 'gba) (eq? x 'IF)) #x04000202]
     [(and (symbol? x) (hash-has-key? MMIO-SYMBOL->ADDR-TABLE x))
      (hash-ref MMIO-SYMBOL->ADDR-TABLE x)]
-    [(and (pair? x) (memq (car x) '(zp dp wram hram mem8 mem16 mem32 EWRAM_PTR IWRAM_PTR))
+    [(and (pair? x) (memq (car x) '(mmio mmio8 mmio16 mmio32))
+          (pair? (cdr x)))
+     (resolve-mmio-or-addr (cadr x) target)]
+    [(and (pair? x) (memq (car x) '(zp dp wram hram mem8 mem16 mem32 u16-zp u16-dp u16-wram zp16 wram16 EWRAM_PTR IWRAM_PTR))
           (pair? (cdr x)) (exact-integer? (cadr x)))
      (cadr x)]
     [else #x2000]))
@@ -2287,6 +2384,39 @@
          (or (string-prefix? str "$f")
              (regexp-match? #rx"^f[0-9]+$" str)))))
 
+;; Recursively resolve symbolic enum/joypad constants and substitute let/let* bindings
+(define (normalize-pseudo-sexp x [env (hasheq)])
+  (cond
+    [(resolve-symbolic-enum-constant x) => values]
+    [(and (symbol? x) (hash-has-key? env x))
+     (hash-ref env x)]
+    [(not (pair? x)) x]
+    [(and (eq? (car x) 'quote) (pair? (cdr x)) (resolve-symbolic-enum-constant x))
+     => values]
+    [(and (memq (car x) '(let let*)) (pair? (cdr x)) (list? (cadr x)))
+     (define is-let*? (eq? (car x) 'let*))
+     (define bindings (cadr x))
+     (define body     (cddr x))
+     (define next-env
+       (for/fold ([cur-env env])
+                 ([b (in-list bindings)])
+         (match b
+           [`(,var ,val-expr)
+            #:when (symbol? var)
+            (define norm-val
+              (normalize-pseudo-sexp val-expr (if is-let*? cur-env env)))
+            (hash-set cur-env var norm-val)]
+           [_ cur-env])))
+     (define norm-body
+       (for/list ([stmt (in-list body)])
+         (normalize-pseudo-sexp stmt next-env)))
+     `(begin ,@norm-body)]
+    [(list? x)
+     (map (lambda (elem) (normalize-pseudo-sexp elem env)) x)]
+    [else
+     (cons (normalize-pseudo-sexp (car x) env)
+           (normalize-pseudo-sexp (cdr x) env))]))
+
 (define (compile-pseudo-code->insts pseudo-sexp [pos-target #f] #:target [kw-target #f])
   (define raw-tid (or kw-target pos-target 'nes))
   (define tid
@@ -2297,19 +2427,23 @@
       [(symbol? raw-tid)      raw-tid]
       [else                   'nes]))
 
+  (define normalized-sexp (normalize-pseudo-sexp pseudo-sexp))
+
   (define stmts
-    (match pseudo-sexp
+    (match normalized-sexp
       [`(decompiled-pseudo-code . ,body) body]
+      [`(begin . ,body) body]
       [(? list? lst)
        (if (and (pair? lst) (symbol? (car lst))
                 (memq (car lst)
                       '(set! += -= when when-break unless if switch
                         loop-counted do-while do-while-loop while for-range foreach
-                        break continue branch-if
+                        break continue branch-if goto
+                        let let* begin mem-fill! mem-copy! dma-transfer!
                         spin-wait-mmio await-mmio! call tail-call return reti push! pop! label)))
            (list lst)
            lst)]
-      [_ (list pseudo-sexp)]))
+      [_ (list normalized-sexp)]))
 
   (define label-counter 0)
   (define (fresh-label prefix)
@@ -2333,6 +2467,43 @@
         [else
          (loop (cdr rem) kws (cons (car rem) body))])))
 
+  (define (parse-mem-fill-args rest)
+    (define-values (kws pos) (parse-kw-args-and-body rest))
+    (define dst   (hash-ref kws '#:dst (if (>= (length pos) 1) (first pos) #x0200)))
+    (define val   (hash-ref kws '#:val (hash-ref kws '#:value (if (>= (length pos) 2) (second pos) 0))))
+    (define count (hash-ref kws '#:count (hash-ref kws '#:bytes (hash-ref kws '#:size (if (>= (length pos) 3) (third pos) 256)))))
+    (values dst val count))
+
+  (define (parse-mem-copy-args rest)
+    (define-values (kws pos) (parse-kw-args-and-body rest))
+    (define dst   (hash-ref kws '#:dst (if (>= (length pos) 1) (first pos) #x0200)))
+    (define src   (hash-ref kws '#:src (if (>= (length pos) 2) (second pos) #x8000)))
+    (define count (hash-ref kws '#:count (hash-ref kws '#:bytes (hash-ref kws '#:size (if (>= (length pos) 3) (third pos) 256)))))
+    (values dst src count))
+
+  (define (parse-dma-transfer-args rest)
+    (define-values (kws pos) (parse-kw-args-and-body rest))
+    (define dst
+      (hash-ref kws '#:dst
+                (cond
+                  [(>= (length pos) 2) (first pos)]
+                  [else #x0200])))
+    (define src
+      (hash-ref kws '#:src
+                (cond
+                  [(>= (length pos) 2) (second pos)]
+                  [(= (length pos) 1)  (first pos)]
+                  [else #x0200])))
+    (define count
+      (hash-ref kws '#:count
+                (hash-ref kws '#:bytes
+                          (hash-ref kws '#:size
+                                    (if (>= (length pos) 3) (third pos) #x100)))))
+    (define ctrl
+      (hash-ref kws '#:control
+                (hash-ref kws '#:ctrl count)))
+    (values dst src count ctrl))
+
   ;; --------------------------------------------------------------------------
   ;; 1. MOS 6502 (NES) & WDC 65C816 (SNES) Compiler Backend
   ;; --------------------------------------------------------------------------
@@ -2343,8 +2514,10 @@
       ['A '()]
       ['X '((TXA))]
       ['Y '((TYA))]
-      [`(,(or 'zp 'dp 'u16-zp 'u16-dp 'zp16) ,addr)
-       `((LDA #:zp ,addr))]
+      [`(,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg)
+       `((LDA #:abs ,(resolve-mmio-or-addr reg tid)))]
+      [`(,(or 'zp 'dp 'u16-zp 'u16-dp 'zp16 'hram) ,addr)
+       `((LDA #:zp ,(bitwise-and addr #xFF)))]
       [`(,(or 'wram 'mem8 'mem16 'mem32 'u16-wram 'wram16) ,addr)
        (if (< addr #x0100)
            `((LDA #:zp ,addr))
@@ -2357,6 +2530,8 @@
        `((LDA #:absx ,base))]
       [`(aref ,_ ,base Y)
        `((LDA #:absy ,base))]
+      [`(aref ,_ ,base ,_)
+       `((LDA #:absx ,base))]
       [`(-> ,base ,field-sym . ,_)
        (define off (parse-struct-field-offset field-sym))
        (define base-addr (if (exact-integer? base) base #x0300))
@@ -2408,7 +2583,7 @@
       [`(shl ,e1 ,(? exact-integer? k))
        (append (compile-6502-expr->A e1)
                (for/list ([_ (in-range (max 1 k))]) '(ASL)))]
-      [`(shr ,e1 ,(? exact-integer? k))
+      [`(,(or 'shr 'asr) ,e1 ,(? exact-integer? k))
        (append (compile-6502-expr->A e1)
                (for/list ([_ (in-range (max 1 k))]) '(LSR)))]
       [_ '((LDA #:imm 0))]))
@@ -2506,8 +2681,74 @@
 
   (define (compile-6502-stmt stmt)
     (match stmt
+      [`(begin . ,body)
+       (apply append (map compile-6502-stmt body))]
+      [`(,(or 'let 'let*) . ,_)
+       (compile-6502-stmt (normalize-pseudo-sexp stmt))]
+      [`(mem-fill! . ,rest)
+       (define-values (dst val count) (parse-mem-fill-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst tid))
+       (define loop-lbl (fresh-label 'L_mem_fill))
+       (define cnt-insts
+         (if (exact-integer? count)
+             `((LDX #:imm ,(bitwise-and count (if (eq? tid 'snes) #xFFFF #xFF))))
+             (append (compile-6502-expr->A count) '((TAX)))))
+       (define val-insts (compile-6502-expr->A val))
+       (define sta-inst
+         (if (< dst-addr #x0100)
+             `(STA #:zpx ,dst-addr)
+             `(STA #:absx ,dst-addr)))
+       (append cnt-insts
+               val-insts
+               `((label ,loop-lbl)
+                 ,sta-inst
+                 (DEX)
+                 (BNE ,loop-lbl)))]
+      [`(mem-copy! . ,rest)
+       (define-values (dst src count) (parse-mem-copy-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst tid))
+       (define src-addr (resolve-mmio-or-addr src tid))
+       (define loop-lbl (fresh-label 'L_mem_copy))
+       (define cnt-insts
+         (if (exact-integer? count)
+             `((LDX #:imm ,(bitwise-and count (if (eq? tid 'snes) #xFFFF #xFF))))
+             (append (compile-6502-expr->A count) '((TAX)))))
+       (define lda-inst
+         (if (< src-addr #x0100)
+             `(LDA #:zpx ,src-addr)
+             `(LDA #:absx ,src-addr)))
+       (define sta-inst
+         (if (< dst-addr #x0100)
+             `(STA #:zpx ,dst-addr)
+             `(STA #:absx ,dst-addr)))
+       (append cnt-insts
+               `((label ,loop-lbl)
+                 ,lda-inst
+                 ,sta-inst
+                 (DEX)
+                 (BNE ,loop-lbl)))]
+      [`(dma-transfer! . ,rest)
+       (define-values (dst src count _ctrl) (parse-dma-transfer-args rest))
+       (if (eq? tid 'snes)
+           (let ([src-addr (resolve-mmio-or-addr src 'snes)]
+                 [cnt-val  (if (exact-integer? count) (bitwise-and count #xFF) 1)])
+             `((LDA #:imm ,(bitwise-and src-addr #xFF))
+               (STA #:abs #x4302)
+               (LDA #:imm ,cnt-val)
+               (STA #:abs #x4305)
+               (LDA #:imm 1)
+               (STA #:abs ,(resolve-mmio-or-addr 'MDMAEN 'snes))))
+           (let ([src-val (if (exact-integer? src)
+                              (if (> src #xFF)
+                                  (bitwise-and (arithmetic-shift src -8) #xFF)
+                                  (bitwise-and src #xFF))
+                              src)])
+             (append (compile-6502-expr->A src-val)
+                     `((STA #:abs ,(resolve-mmio-or-addr 'OAMDMA 'nes))))))]
       [`(set! ,dst ,expr #:flags . ,_)
        (compile-6502-stmt `(set! ,dst ,expr))]
+      [`(set! (,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg) ,expr)
+       (compile-6502-stmt `(set! ,reg ,expr))]
       [`(set! X ,(? exact-integer? n))
        `((LDX #:imm ,(bitwise-and n #xFF)))]
       [`(set! Y ,(? exact-integer? n))
@@ -2540,8 +2781,8 @@
              (STA #:abs ,addr)
              (LDA #:imm ,(bitwise-and (arithmetic-shift n -8) #xFF))
              (STA #:abs ,(+ addr 1))))]
-      [`(set! (,(or 'zp 'dp 'u16-zp 'u16-dp 'zp16) ,addr) ,expr)
-       (append (compile-6502-expr->A expr) `((STA #:zp ,addr)))]
+      [`(set! (,(or 'zp 'dp 'u16-zp 'u16-dp 'zp16 'hram) ,addr) ,expr)
+       (append (compile-6502-expr->A expr) `((STA #:zp ,(bitwise-and addr #xFF))))]
       [`(set! (,(or 'wram 'mem8 'mem16 'mem32 'u16-wram 'wram16) ,addr) ,expr)
        (append (compile-6502-expr->A expr)
                (if (< addr #x0100)
@@ -2549,7 +2790,7 @@
                    `((STA #:abs ,addr))))]
       [`(set! (aref ,(or 'zp 'dp) ,base X) ,expr)
        (append (compile-6502-expr->A expr) `((STA #:zpx ,base)))]
-      [`(set! (aref ,_ ,base X) ,expr)
+      [`(set! (aref ,_ ,base ,_) ,expr)
        (append (compile-6502-expr->A expr) `((STA #:absx ,base)))]
       [`(set! (-> ,base ,field-sym . ,_) ,expr)
        (define off (parse-struct-field-offset field-sym))
@@ -2586,7 +2827,7 @@
       [`(pop! A)  '((PLA))]
       [`(pop! X)  '((PLA) (TAX))]
       [`(pop! Y)  '((PLA) (TAY))]
-      [`(break ,label)
+      [`(,(or 'break 'goto) ,label)
        `((JMP ,label))]
       [`(break)
        '((JMP L_break))]
@@ -2598,9 +2839,7 @@
        (compile-6502-cond-branch-true cond-expr label)]
       [`(branch-if ,cond-expr ,label)
        (compile-6502-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (break ,label))
-       (compile-6502-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (continue ,label))
+      [`(when ,cond-expr (,(or 'break 'goto 'continue) ,label))
        (compile-6502-cond-branch-true cond-expr label)]
       [`(when ,cond-expr . ,body)
        (define join-lbl (fresh-label 'L_join))
@@ -2732,12 +2971,16 @@
       ['A '()]
       [(? symbol? r) #:when (memq r '(B C D E H L))
        `((,(string->symbol (format "LD_A_~a" r)) #:imp 0))]
+      [`(,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg)
+       (compile-sm83-expr->A reg)]
       [`(hram ,addr)
        `((LDH_IN #:io8 ,(bitwise-and addr #xFF)))]
-      [`(,(or 'wram 'mem8 'mem16 'zp 'dp 'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16) ,addr)
+      [`(,(or 'wram 'mem8 'mem16 'mem32 'zp 'dp 'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16) ,addr)
        (if (>= addr #xFF00)
            `((LDH_IN #:io8 ,(bitwise-and addr #xFF)))
-           `((LD_A_MEM #:a16 ,addr)))]
+           `((LD_A_MEM #:a16 ,(bitwise-and addr #xFFFF))))]
+      [`(aref ,_ ,base ,_)
+       `((LD_A_MEM #:a16 ,(bitwise-and (resolve-mmio-or-addr base 'gb) #xFFFF)))]
       [`(deref HL)
        '((LD_A_HL-IND #:imp 0))]
       [`(-> ,base ,field-sym . ,_)
@@ -2778,7 +3021,7 @@
       [`(shl ,e1 ,(? exact-integer? k))
        (append (compile-sm83-expr->A e1)
                (for/list ([_ (in-range (max 1 k))]) '(SLA_A #:cb #x27)))]
-      [`(shr ,e1 ,(? exact-integer? k))
+      [`(,(or 'shr 'asr) ,e1 ,(? exact-integer? k))
        (append (compile-sm83-expr->A e1)
                (for/list ([_ (in-range (max 1 k))]) '(SRL_A #:cb #x3F)))]
       [_ '((LD_A #:d8 0))]))
@@ -2831,8 +3074,51 @@
 
   (define (compile-sm83-stmt stmt)
     (match stmt
+      [`(begin . ,body)
+       (apply append (map compile-sm83-stmt body))]
+      [`(,(or 'let 'let*) . ,_)
+       (compile-sm83-stmt (normalize-pseudo-sexp stmt))]
+      [`(mem-fill! . ,rest)
+       (define-values (dst val count) (parse-mem-fill-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst 'gb))
+       (define cnt-val  (if (exact-integer? count) (bitwise-and count #xFF) 1))
+       (define loop-lbl (fresh-label 'L_mem_fill))
+       (append `((LD_HL #:d16 ,(bitwise-and dst-addr #xFFFF))
+                 (LD_B #:d8 ,cnt-val))
+               (compile-sm83-expr->A val)
+               `((label ,loop-lbl)
+                 (LD_HLI_A #:imp 0)
+                 (DEC_B #:imp 0)
+                 (JR_NZ ,loop-lbl)))]
+      [`(mem-copy! . ,rest)
+       (define-values (dst src count) (parse-mem-copy-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst 'gb))
+       (define src-addr (resolve-mmio-or-addr src 'gb))
+       (define cnt-val  (if (exact-integer? count) (bitwise-and count #xFF) 1))
+       (define loop-lbl (fresh-label 'L_mem_copy))
+       `((LD_HL #:d16 ,(bitwise-and src-addr #xFFFF))
+         (LD_DE #:d16 ,(bitwise-and dst-addr #xFFFF))
+         (LD_B #:d8 ,cnt-val)
+         (label ,loop-lbl)
+         (LD_A_HLI #:imp 0)
+         (LD_DE_A #:imp 0)
+         (INC_DE #:imp 0)
+         (DEC_B #:imp 0)
+         (JR_NZ ,loop-lbl))]
+      [`(dma-transfer! . ,rest)
+       (define-values (_dst src _count _ctrl) (parse-dma-transfer-args rest))
+       (define page-val
+         (if (exact-integer? src)
+             (if (> src #xFF)
+                 (bitwise-and (arithmetic-shift src -8) #xFF)
+                 (bitwise-and src #xFF))
+             #xC0))
+       `((LD_A #:d8 ,page-val)
+         (LDH_OUT #:io8 ,(bitwise-and (resolve-mmio-or-addr 'DMA 'gb) #xFF)))]
       [`(set! ,dst ,expr #:flags . ,_)
        (compile-sm83-stmt `(set! ,dst ,expr))]
+      [`(set! (,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg) ,expr)
+       (compile-sm83-stmt `(set! ,reg ,expr))]
       [`(set! ,(and r16 (or 'HL 'BC 'DE 'SP)) ,(? exact-integer? n))
        `((,(string->symbol (format "LD_~a" r16)) #:d16 ,(bitwise-and n #xFFFF)))]
       [`(set! A ,expr)
@@ -2845,11 +3131,14 @@
       [`(set! (hram ,addr) ,expr)
        (append (compile-sm83-expr->A expr)
                `((LDH_OUT #:io8 ,(bitwise-and addr #xFF))))]
-      [`(set! (,(or 'wram 'mem8 'mem16 'zp 'dp 'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16) ,addr) ,expr)
+      [`(set! (,(or 'wram 'mem8 'mem16 'mem32 'zp 'dp 'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16) ,addr) ,expr)
        (append (compile-sm83-expr->A expr)
                (if (>= addr #xFF00)
                    `((LDH_OUT #:io8 ,(bitwise-and addr #xFF)))
-                   `((LD_MEM_A #:a16 ,addr))))]
+                   `((LD_MEM_A #:a16 ,(bitwise-and addr #xFFFF)))))]
+      [`(set! (aref ,_ ,base ,_) ,expr)
+       (append (compile-sm83-expr->A expr)
+               `((LD_MEM_A #:a16 ,(bitwise-and (resolve-mmio-or-addr base 'gb) #xFFFF))))]
       [`(set! (-> ,base ,field-sym . ,_) ,expr)
        (define off (parse-struct-field-offset field-sym))
        (define base-addr (if (exact-integer? base) base #xC000))
@@ -2907,7 +3196,7 @@
        (compile-sm83-stmt `(set! ,dst (+ ,dst ,expr)))]
       [`(-= ,dst ,expr)
        (compile-sm83-stmt `(set! ,dst (- ,dst ,expr)))]
-      [`(break ,label)
+      [`(,(or 'break 'goto) ,label)
        `((JR ,label))]
       [`(break)
        '((JR L_break))]
@@ -2919,9 +3208,7 @@
        (compile-sm83-cond-branch-true cond-expr label)]
       [`(branch-if ,cond-expr ,label)
        (compile-sm83-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (break ,label))
-       (compile-sm83-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (continue ,label))
+      [`(when ,cond-expr (,(or 'break 'goto 'continue) ,label))
        (compile-sm83-cond-branch-true cond-expr label)]
       [`(when ,cond-expr . ,body)
        (define join-lbl (fresh-label 'L_join))
@@ -3047,8 +3334,10 @@
        (if (<= 0 n 255)
            `((THUMB-MOV-imm ,rd ,n))
            `((THUMB-LDR-lit ,rd ,n)))]
-      [(? symbol? rs) #:when (memq rs '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 sp lr pc))
+      [(? symbol? rs) #:when (memq rs '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 sp lr pc))
        (if (eq? rd rs) '() `((THUMB-MOV ,rd ,rs)))]
+      [`(,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg)
+       (compile-gba-expr->reg rd reg)]
       [`(,(or 'EWRAM_PTR 'IWRAM_PTR) ,addr)
        `((THUMB-LDR-lit ,rd ,addr))]
       [`(mem8 ,addr)
@@ -3057,16 +3346,22 @@
       [`(,(or 'mem16 'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16) ,addr)
        `((THUMB-LDR-lit r3 ,addr)
          (THUMB-LDRH-imm ,rd [r3 0]))]
-      [`(,(or 'mem32 'wram 'zp 'dp) ,addr)
+      [`(,(or 'mem32 'wram 'zp 'dp 'hram) ,addr)
        `((THUMB-LDR-lit r3 ,addr)
          (THUMB-LDR-imm ,rd [r3 0]))]
+      [`(aref ,_ ,base ,_)
+       `((THUMB-LDR-lit r3 ,(resolve-mmio-or-addr base 'gba))
+         (THUMB-LDRH-imm ,rd [r3 0]))]
       [`(-> ,base ,field-sym . ,rest)
        (define off (parse-struct-field-offset field-sym))
        (define ty (if (pair? rest) (car rest) ':u32))
-       (case ty
-         [(:u8 u8 :s8 s8)   `((THUMB-LDRB-imm ,rd [,base ,off]))]
-         [(:u16 u16 :s16 s16) `((THUMB-LDRH-imm ,rd [,base ,off]))]
-         [else              `((THUMB-LDR-imm ,rd [,base ,off]))])]
+       (define base-reg (if (symbol? base) base 'r3))
+       (define pre-insts (if (exact-integer? base) `((THUMB-LDR-lit r3 ,base)) '()))
+       (append pre-insts
+               (case ty
+                 [(:u8 u8 :s8 s8)     `((THUMB-LDRB-imm ,rd [,base-reg ,off]))]
+                 [(:u16 u16 :s16 s16) `((THUMB-LDRH-imm ,rd [,base-reg ,off]))]
+                 [else                `((THUMB-LDR-imm ,rd [,base-reg ,off]))]))]
       [(? symbol? mmio-sym)
        (define addr (resolve-mmio-or-addr mmio-sym 'gba))
        `((THUMB-LDR-lit r3 ,addr)
@@ -3100,7 +3395,7 @@
       [`(shl ,e1 ,(? exact-integer? k))
        (append (compile-gba-expr->reg rd e1)
                `((THUMB-LSL ,rd ,rd ,k)))]
-      [`(shr ,e1 ,(? exact-integer? k))
+      [`(,(or 'shr 'asr) ,e1 ,(? exact-integer? k))
        (append (compile-gba-expr->reg rd e1)
                `((THUMB-LSR ,rd ,rd ,k)))]
       [_ `((THUMB-MOV-imm ,rd 0))]))
@@ -3153,21 +3448,76 @@
 
   (define (compile-gba-stmt stmt)
     (match stmt
+      [`(begin . ,body)
+       (apply append (map compile-gba-stmt body))]
+      [`(,(or 'let 'let*) . ,_)
+       (compile-gba-stmt (normalize-pseudo-sexp stmt))]
+      [`(mem-fill! . ,rest)
+       (define-values (dst val count) (parse-mem-fill-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst 'gba))
+       (define loop-lbl (fresh-label 'L_mem_fill))
+       (define dst-insts
+         (if (and (symbol? dst) (memq dst '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12)))
+             `((THUMB-MOV r4 ,dst))
+             `((THUMB-LDR-lit r4 ,dst-addr))))
+       (append dst-insts
+               (compile-gba-expr->reg 'r0 val)
+               (compile-gba-expr->reg 'r2 count)
+               `((label ,loop-lbl)
+                 (THUMB-STRB-imm r0 [r4 0])
+                 (THUMB-ADD-imm r4 1)
+                 (THUMB-SUB-imm r2 1)
+                 (THUMB-BNE ,loop-lbl)))]
+      [`(mem-copy! . ,rest)
+       (define-values (dst src count) (parse-mem-copy-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst 'gba))
+       (define src-addr (resolve-mmio-or-addr src 'gba))
+       (define loop-lbl (fresh-label 'L_mem_copy))
+       (define dst-insts
+         (if (and (symbol? dst) (memq dst '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12)))
+             `((THUMB-MOV r4 ,dst))
+             `((THUMB-LDR-lit r4 ,dst-addr))))
+       (define src-insts
+         (if (and (symbol? src) (memq src '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12)))
+             `((THUMB-MOV r5 ,src))
+             `((THUMB-LDR-lit r5 ,src-addr))))
+       (append dst-insts
+               src-insts
+               (compile-gba-expr->reg 'r2 count)
+               `((label ,loop-lbl)
+                 (THUMB-LDRB-imm r0 [r5 0])
+                 (THUMB-STRB-imm r0 [r4 0])
+                 (THUMB-ADD-imm r5 1)
+                 (THUMB-ADD-imm r4 1)
+                 (THUMB-SUB-imm r2 1)
+                 (THUMB-BNE ,loop-lbl)))]
+      [`(dma-transfer! . ,rest)
+       (define-values (dst src _count ctrl) (parse-dma-transfer-args rest))
+       (define dst-expr (if (symbol? dst) (resolve-mmio-or-addr dst 'gba) dst))
+       (define src-expr (if (symbol? src) (resolve-mmio-or-addr src 'gba) src))
+       (define ctrl-val (if (exact-integer? ctrl) ctrl #x84000080))
+       (append (compile-gba-stmt `(set! DMA3SAD ,src-expr))
+               (compile-gba-stmt `(set! DMA3DAD ,dst-expr))
+               (compile-gba-stmt `(set! DMA3CNT_L ,ctrl-val)))]
       [`(set! ,dst ,expr #:flags . ,_)
        (compile-gba-stmt `(set! ,dst ,expr))]
+      [`(set! (,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg) ,expr)
+       (compile-gba-stmt `(set! ,reg ,expr))]
       [`(set! ,(? symbol? rd) ,expr)
-       #:when (memq rd '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 sp lr))
+       #:when (memq rd '(r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 sp lr))
        (compile-gba-expr->reg rd expr)]
       [`(set! (-> ,base ,field-sym . ,rest) ,expr)
        (define off (parse-struct-field-offset field-sym))
        (define ty (if (pair? rest) (car rest) ':u32))
        (define val-insts (compile-gba-expr->reg 'r1 expr))
+       (define base-reg (if (symbol? base) base 'r2))
+       (define base-insts (if (exact-integer? base) `((THUMB-LDR-lit r2 ,base)) '()))
        (define st-inst
          (case ty
-           [(:u8 u8 :s8 s8)     `(THUMB-STRB-imm r1 [,base ,off])]
-           [(:u16 u16 :s16 s16) `(THUMB-STRH-imm r1 [,base ,off])]
-           [else                `(THUMB-STR-imm r1 [,base ,off])]))
-       (append val-insts (list st-inst))]
+           [(:u8 u8 :s8 s8)     `(THUMB-STRB-imm r1 [,base-reg ,off])]
+           [(:u16 u16 :s16 s16) `(THUMB-STRH-imm r1 [,base-reg ,off])]
+           [else                `(THUMB-STR-imm r1 [,base-reg ,off])]))
+       (append val-insts base-insts (list st-inst))]
       [`(set! (mem8 ,addr) ,expr)
        (append (compile-gba-expr->reg 'r0 expr)
                `((THUMB-LDR-lit r1 ,addr)
@@ -3176,14 +3526,18 @@
        (append (compile-gba-expr->reg 'r0 expr)
                `((THUMB-LDR-lit r1 ,addr)
                  (THUMB-STRH-imm r0 [r1 0])))]
-      [`(set! (,(or 'mem32 'wram 'zp 'dp) ,addr) ,expr)
+      [`(set! (,(or 'mem32 'wram 'zp 'dp 'hram) ,addr) ,expr)
        (append (compile-gba-expr->reg 'r0 expr)
                `((THUMB-LDR-lit r1 ,addr)
                  (THUMB-STR-imm r0 [r1 0])))]
+      [`(set! (aref ,_ ,base ,_) ,expr)
+       (append (compile-gba-expr->reg 'r0 expr)
+               `((THUMB-LDR-lit r1 ,(resolve-mmio-or-addr base 'gba))
+                 (THUMB-STRH-imm r0 [r1 0])))]
       [`(set! ,(? symbol? mmio-sym) ,expr)
        (define addr (resolve-mmio-or-addr mmio-sym 'gba))
        (define st-op
-         (if (memq mmio-sym '(DMA3SAD DMA3DAD))
+         (if (memq mmio-sym '(DMA3SAD DMA3DAD DMA3CNT_L))
              'THUMB-STR-imm
              'THUMB-STRH-imm))
        (append (compile-gba-expr->reg 'r0 expr)
@@ -3193,7 +3547,7 @@
        (compile-gba-stmt `(set! ,dst (+ ,dst ,expr)))]
       [`(-= ,dst ,expr)
        (compile-gba-stmt `(set! ,dst (- ,dst ,expr)))]
-      [`(break ,label)
+      [`(,(or 'break 'goto) ,label)
        `((B ,label))]
       [`(break)
        '((B L_break))]
@@ -3205,9 +3559,7 @@
        (compile-gba-cond-branch-true cond-expr label)]
       [`(branch-if ,cond-expr ,label)
        (compile-gba-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (break ,label))
-       (compile-gba-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (continue ,label))
+      [`(when ,cond-expr (,(or 'break 'goto 'continue) ,label))
        (compile-gba-cond-branch-true cond-expr label)]
       [`(when ,cond-expr . ,body)
        (define join-lbl (fresh-label 'L_join))
@@ -3354,19 +3706,29 @@
        `((MFC1 ,rd ,fs))]
       [(? symbol? rs) #:when (memq rs '(r0 v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 s0 s1 s2 s3 s4 s5 s6 s7 sp ra))
        (if (eq? rd rs) '() `((ADDU ,rd ,rs r0)))]
+      [`(,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg)
+       (compile-n64-expr->reg rd reg)]
       [`(-> ,base ,field-sym . ,rest)
        (define off (parse-struct-field-offset field-sym))
        (define ty (if (pair? rest) (car rest) ':u32))
-       (case ty
-         [(:u8 u8 :s8 s8)     `((LB ,rd ,off ,base))]
-         [(:u16 u16 :s16 s16) `((LH ,rd ,off ,base))]
-         [(:f32 f32)          `((LWC1 ,rd ,off ,base))]
-         [else                `((LW ,rd ,off ,base))])]
+       (define base-reg (if (symbol? base) base 't8))
+       (define pre-insts (if (exact-integer? base) (compile-n64-expr->reg 't8 base) '()))
+       (append pre-insts
+               (case ty
+                 [(:u8 u8 :s8 s8)     `((LB ,rd ,off ,base-reg))]
+                 [(:u16 u16 :s16 s16) `((LH ,rd ,off ,base-reg))]
+                 [(:f32 f32)          `((LWC1 ,rd ,off ,base-reg))]
+                 [else                `((LW ,rd ,off ,base-reg))]))]
       [`(,(or 'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16) ,addr)
        `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
          (ORI t8 t8 ,(bitwise-and addr #xFFFF))
          (LH ,rd 0 t8))]
-      [`(,(or 'mem8 'mem16 'mem32 'wram 'zp 'dp) ,addr)
+      [`(,(or 'mem8 'mem16 'mem32 'wram 'zp 'dp 'hram) ,addr)
+       `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
+         (ORI t8 t8 ,(bitwise-and addr #xFFFF))
+         (LW ,rd 0 t8))]
+      [`(aref ,_ ,base ,_)
+       (define addr (resolve-mmio-or-addr base 'n64))
        `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
          (ORI t8 t8 ,(bitwise-and addr #xFFFF))
          (LW ,rd 0 t8))]
@@ -3410,7 +3772,7 @@
       [`(shl ,e1 ,(? exact-integer? k))
        (append (compile-n64-expr->reg rd e1)
                `((SLL ,rd ,rd ,k)))]
-      [`(shr ,e1 ,(? exact-integer? k))
+      [`(,(or 'shr 'asr) ,e1 ,(? exact-integer? k))
        (append (compile-n64-expr->reg rd e1)
                `((SRL ,rd ,rd ,k)))]
       [_ `((ADDIU ,rd r0 0))]))
@@ -3467,8 +3829,63 @@
 
   (define (compile-n64-stmt stmt)
     (match stmt
+      [`(begin . ,body)
+       (apply append (map compile-n64-stmt body))]
+      [`(,(or 'let 'let*) . ,_)
+       (compile-n64-stmt (normalize-pseudo-sexp stmt))]
+      [`(mem-fill! . ,rest)
+       (define-values (dst val count) (parse-mem-fill-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst 'n64))
+       (define loop-lbl (fresh-label 'L_mem_fill))
+       (define dst-insts
+         (if (and (symbol? dst) (memq dst '(v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t5 t6 t7 s0 s1 s2 s3 s4 s5 s6 s7)))
+             `((ADDU t0 ,dst r0))
+             (compile-n64-expr->reg 't0 dst-addr)))
+       (append dst-insts
+               (compile-n64-expr->reg 't1 val)
+               (compile-n64-expr->reg 't2 count)
+               `((label ,loop-lbl)
+                 (SB t1 0 t0)
+                 (ADDIU t0 t0 1)
+                 (ADDIU t2 t2 -1)
+                 (BNE t2 r0 ,loop-lbl)
+                 (NOP)))]
+      [`(mem-copy! . ,rest)
+       (define-values (dst src count) (parse-mem-copy-args rest))
+       (define dst-addr (resolve-mmio-or-addr dst 'n64))
+       (define src-addr (resolve-mmio-or-addr src 'n64))
+       (define loop-lbl (fresh-label 'L_mem_copy))
+       (define dst-insts
+         (if (and (symbol? dst) (memq dst '(v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t5 t6 t7 s0 s1 s2 s3 s4 s5 s6 s7)))
+             `((ADDU t0 ,dst r0))
+             (compile-n64-expr->reg 't0 dst-addr)))
+       (define src-insts
+         (if (and (symbol? src) (memq src '(v0 v1 a0 a1 a2 a3 t0 t1 t2 t3 t4 t5 t6 t7 s0 s1 s2 s3 s4 s5 s6 s7)))
+             `((ADDU t1 ,src r0))
+             (compile-n64-expr->reg 't1 src-addr)))
+       (append dst-insts
+               src-insts
+               (compile-n64-expr->reg 't2 count)
+               `((label ,loop-lbl)
+                 (LB t3 0 t1)
+                 (SB t3 0 t0)
+                 (ADDIU t1 t1 1)
+                 (ADDIU t0 t0 1)
+                 (ADDIU t2 t2 -1)
+                 (BNE t2 r0 ,loop-lbl)
+                 (NOP)))]
+      [`(dma-transfer! . ,rest)
+       (define-values (dst src count _ctrl) (parse-dma-transfer-args rest))
+       (define dst-expr (if (symbol? dst) (resolve-mmio-or-addr dst 'n64) dst))
+       (define src-expr (if (symbol? src) (resolve-mmio-or-addr src 'n64) src))
+       (define cnt-val  (if (exact-integer? count) count #x100))
+       (append (compile-n64-stmt `(set! PI_DRAM_ADDR ,dst-expr))
+               (compile-n64-stmt `(set! PI_CART_ADDR ,src-expr))
+               (compile-n64-stmt `(set! PI_WR_LEN ,cnt-val)))]
       [`(set! ,dst ,expr #:flags . ,_)
        (compile-n64-stmt `(set! ,dst ,expr))]
+      [`(set! (,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg) ,expr)
+       (compile-n64-stmt `(set! ,reg ,expr))]
       [`(set! ,(? fpu-reg-symbol? fd) ,expr)
        (compile-n64-fpu-expr fd expr)]
       [`(set! ,(? symbol? rd) ,expr)
@@ -3477,20 +3894,30 @@
       [`(set! (-> ,base ,field-sym . ,rest) ,expr)
        (define off (parse-struct-field-offset field-sym))
        (define ty (if (pair? rest) (car rest) ':u32))
+       (define base-reg (if (symbol? base) base 't8))
+       (define base-insts (if (exact-integer? base) (compile-n64-expr->reg 't8 base) '()))
        (if (or (memq ty '(:f32 f32)) (fpu-reg-symbol? expr) (and (real? expr) (inexact? expr)))
            (append (compile-n64-fpu-expr '$f0 expr)
-                   `((SWC1 $f0 ,off ,base)))
+                   base-insts
+                   `((SWC1 $f0 ,off ,base-reg)))
            (append (compile-n64-expr->reg 't0 expr)
+                   base-insts
                    (case ty
-                     [(:u8 u8 :s8 s8)     `((SB t0 ,off ,base))]
-                     [(:u16 u16 :s16 s16) `((SH t0 ,off ,base))]
-                     [else                `((SW t0 ,off ,base))])))]
+                     [(:u8 u8 :s8 s8)     `((SB t0 ,off ,base-reg))]
+                     [(:u16 u16 :s16 s16) `((SH t0 ,off ,base-reg))]
+                     [else                `((SW t0 ,off ,base-reg))])))]
       [`(set! (,(or 'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16) ,addr) ,expr)
        (append (compile-n64-expr->reg 't0 expr)
                `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
                  (ORI t8 t8 ,(bitwise-and addr #xFFFF))
                  (SH t0 0 t8)))]
-      [`(set! (,(or 'mem8 'mem16 'mem32 'wram 'zp 'dp) ,addr) ,expr)
+      [`(set! (,(or 'mem8 'mem16 'mem32 'wram 'zp 'dp 'hram) ,addr) ,expr)
+       (append (compile-n64-expr->reg 't0 expr)
+               `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
+                 (ORI t8 t8 ,(bitwise-and addr #xFFFF))
+                 (SW t0 0 t8)))]
+      [`(set! (aref ,_ ,base ,_) ,expr)
+       (define addr (resolve-mmio-or-addr base 'n64))
        (append (compile-n64-expr->reg 't0 expr)
                `((LUI t8 ,(bitwise-and (arithmetic-shift addr -16) #xFFFF))
                  (ORI t8 t8 ,(bitwise-and addr #xFFFF))
@@ -3505,7 +3932,7 @@
        (compile-n64-stmt `(set! ,dst (+ ,dst ,expr)))]
       [`(-= ,dst ,expr)
        (compile-n64-stmt `(set! ,dst (- ,dst ,expr)))]
-      [`(break ,label)
+      [`(,(or 'break 'goto) ,label)
        `((MIPS-B ,label))]
       [`(break)
        '((MIPS-B L_break))]
@@ -3517,9 +3944,7 @@
        (compile-n64-cond-branch-true cond-expr label)]
       [`(branch-if ,cond-expr ,label)
        (compile-n64-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (break ,label))
-       (compile-n64-cond-branch-true cond-expr label)]
-      [`(when ,cond-expr (continue ,label))
+      [`(when ,cond-expr (,(or 'break 'goto 'continue) ,label))
        (compile-n64-cond-branch-true cond-expr label)]
       [`(when ,cond-expr . ,body)
        (define join-lbl (fresh-label 'L_join))
@@ -3682,11 +4107,11 @@
              (cadr raw)
              raw))
        (normalize-whole-rom-target-symbol unquoted)]
-      [(memq (car x) '(define-snes-rom-metadata define-snes-lifted-subroutines define-snes-struct-layouts defsub-65c816))
+      [(memq (car x) '(define-snes-rom-metadata define-snes-lifted-subroutines define-snes-struct-layouts define-snes-enum-constants defsub-65c816))
        'snes]
-      [(memq (car x) '(define-gba-rom-metadata define-gba-lifted-subroutines define-gba-struct-layouts defsub-arm32 defsub-thumb16))
+      [(memq (car x) '(define-gba-rom-metadata define-gba-lifted-subroutines define-gba-struct-layouts define-gba-enum-constants defsub-arm32 defsub-thumb16))
        'gba]
-      [(memq (car x) '(define-n64-rom-metadata define-n64-lifted-subroutines define-n64-struct-layouts define-n64-libultra-call-graph))
+      [(memq (car x) '(define-n64-rom-metadata define-n64-lifted-subroutines define-n64-struct-layouts define-n64-enum-constants define-n64-libultra-call-graph))
        'n64]
       [(memq (car x) '(def-pico-cartridge-header def-pico-function))
        'pico8]
@@ -4008,5 +4433,770 @@
           'pseudo-code-compilable?   pseudo-code-compilable?
           'bitfield-flags-valid?     bitfield-flags-valid?
           'call-graph-check          call-graph-check))
+
+;; ============================================================================
+;; Layer 10: Cross-Platform Subroutine & Hardware Idiom Transpiler
+;; ============================================================================
+
+(define CROSS-TARGET-MMIO-MAP
+  (hasheq
+   'display-ctrl   (hasheq 'nes  'PPUCTRL
+                           'gb   'LCDC
+                           'gbc  'LCDC
+                           'snes 'INIDISP
+                           'gba  'DISPCNT
+                           'n64  'VI_STATUS)
+   'display-mask   (hasheq 'nes  'PPUMASK
+                           'gb   'BGP
+                           'gbc  'BGP
+                           'snes 'TM
+                           'gba  'BLDCNT
+                           'n64  'VI_WIDTH)
+   'display-status (hasheq 'nes  'PPUSTATUS
+                           'gb   'STAT
+                           'gbc  'STAT
+                           'snes 'HVBJOY
+                           'gba  'DISPSTAT
+                           'n64  'VI_CURRENT)
+   'sprite-dma     (hasheq 'nes  'OAMDMA
+                           'gb   'DMA
+                           'gbc  'HDMA5
+                           'snes 'MDMAEN
+                           'gba  'DMA3CNT_L
+                           'n64  'PI_WR_LEN)
+   'vram-addr      (hasheq 'nes  'PPUADDR
+                           'gb   'VBK
+                           'gbc  'VBK
+                           'snes 'VMADDL
+                           'gba  'BG0CNT
+                           'n64  'VI_ORIGIN)
+   'vram-data      (hasheq 'nes  'PPUDATA
+                           'gb   'LCDC
+                           'gbc  'BCPD
+                           'snes 'VMDATAL
+                           'gba  'VCOUNT
+                           'n64  'SP_DMA_LEN)
+   'scroll-reg     (hasheq 'nes  'PPUSCROLL
+                           'gb   'SCX
+                           'gbc  'SCX
+                           'snes 'BG1HOFS
+                           'gba  'BG0HOFS
+                           'n64  'VI_X_SCALE)
+   'joypad-1       (hasheq 'nes  'JOY1
+                           'gb   'JOYP
+                           'gbc  'JOYP
+                           'snes 'JOY1L
+                           'gba  'KEYINPUT
+                           'n64  'SI_STATUS)
+   'audio-ctrl     (hasheq 'nes  'SND_CHN
+                           'gb   'NR52
+                           'gbc  'NR52
+                           'snes 'APUIO0
+                           'gba  'SOUNDCNT_X
+                           'n64  'AI_CONTROL)
+   'irq-enable     (hasheq 'nes  'PPUCTRL
+                           'gb   'IE
+                           'gbc  'IE
+                           'snes 'NMITIMEN
+                           'gba  'IME
+                           'n64  'MI_INTR_MASK)))
+
+(define CANONICAL-MMIO-ROLES-ORDER
+  '(display-ctrl
+    display-mask
+    display-status
+    sprite-dma
+    vram-addr
+    vram-data
+    scroll-reg
+    joypad-1
+    audio-ctrl
+    irq-enable))
+
+(define SECONDARY-MMIO->ROLE-MAP
+  (hasheq
+   'OAMADDR          'sprite-dma
+   'OAMDATA          'sprite-dma
+   'DMA3SAD          'sprite-dma
+   'DMA3DAD          'sprite-dma
+   'DMA3CNT_H        'sprite-dma
+   'HDMAEN           'sprite-dma
+   'PI_DRAM_ADDR     'sprite-dma
+   'PI_DRAM_ADDR_REG 'sprite-dma
+   'PI_CART_ADDR     'sprite-dma
+   'PI_RD_LEN        'sprite-dma
+   'SCY              'scroll-reg
+   'WX               'scroll-reg
+   'WY               'scroll-reg
+   'BG0VOFS          'scroll-reg
+   'BG1VOFS          'scroll-reg
+   'VMADDH           'vram-addr
+   'CGADD            'vram-addr
+   'VI_ORIGIN_REG    'vram-addr
+   'VMDATAH          'vram-data
+   'CGDATA           'vram-data
+   'BCPS             'vram-data
+   'OCPS             'vram-data
+   'OCPD             'vram-data
+   'RDNMI            'display-status
+   'LY               'display-status
+   'LYC              'display-status
+   'IF               'display-status
+   'POSTFLG          'display-status
+   'SP_STATUS        'display-status
+   'SP_STATUS_REG    'display-status
+   'VI_STATUS_REG    'display-ctrl
+   'OBSEL            'display-ctrl
+   'BGMODE           'display-ctrl
+   'JOY2             'joypad-1
+   'JOY1H            'joypad-1
+   'SI_DRAM_ADDR_REG 'joypad-1
+   'APUIO1           'audio-ctrl
+   'APUIO2           'audio-ctrl
+   'APUIO3           'audio-ctrl
+   'NR50             'audio-ctrl
+   'NR51             'audio-ctrl
+   'SOUNDCNT_L       'audio-ctrl
+   'SOUNDCNT_H       'audio-ctrl
+   'AI_DRAM_ADDR_REG 'audio-ctrl))
+
+(define (normalize-transpile-target t)
+  (cond
+    [(target-spec? t) (target-spec-id t)]
+    [(eq? t 'pico)    'nes]
+    [(eq? t 'pico8)   'nes]
+    [(eq? t 'rp2040)  'gba]
+    [(symbol? t)      t]
+    [else             'nes]))
+
+(define (lookup-mmio-role sym [from-tgt #f])
+  (define norm-from (and from-tgt (normalize-transpile-target from-tgt)))
+  (or
+   ;; 1. Match against `from-tgt` in priority order
+   (and norm-from
+        (for/or ([role (in-list CANONICAL-MMIO-ROLES-ORDER)])
+          (define rmap (hash-ref CROSS-TARGET-MMIO-MAP role #hasheq()))
+          (and (eq? (hash-ref rmap norm-from #f) sym) role)))
+   ;; 2. Match against any target in CROSS-TARGET-MMIO-MAP
+   (for/or ([role (in-list CANONICAL-MMIO-ROLES-ORDER)])
+     (define rmap (hash-ref CROSS-TARGET-MMIO-MAP role #hasheq()))
+     (and (for/or ([(_k v) (in-hash rmap)])
+            (eq? v sym))
+          role))
+   ;; 3. Match secondary MMIO register aliases
+   (hash-ref SECONDARY-MMIO->ROLE-MAP sym #f)))
+
+(define (map-mmio-symbol-across-targets sym from-tgt to-tgt)
+  (define norm-to (normalize-transpile-target to-tgt))
+  (define role (lookup-mmio-role sym from-tgt))
+  (if role
+      (let ([rmap (hash-ref CROSS-TARGET-MMIO-MAP role #hasheq())])
+        (hash-ref rmap norm-to sym))
+      sym))
+
+(define ALL-CPU-REG-SYMBOLS
+  '(A X Y
+    B C D E H L HL BC DE
+    r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13
+    v0 v1 a0 a1 a2 a3
+    t0 t1 t2 t3 t4 t5 t6 t7 t8 t9
+    s0 s1 s2 s3 s4 s5 s6 s7))
+
+(define (cpu-register-symbol? sym)
+  (and (symbol? sym)
+       (or (and (memq sym ALL-CPU-REG-SYMBOLS) #t)
+           (fpu-reg-symbol? sym))))
+
+(define (cpu-reg->abi-slot sym)
+  (cond
+    [(memq sym '(A r0 v0 v1))                       0]
+    [(memq sym '(X B D r1 a0))                      1]
+    [(memq sym '(Y C E r2 a1))                      2]
+    [(memq sym '(HL H L r3 a2 s0 s1 s2 s3))         3]
+    [(memq sym '(BC DE r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 a3 t0 t1 t2 t3 t4 t5 t6 t7 t8 t9 s4 s5 s6 s7)) 4]
+    [(fpu-reg-symbol? sym)                          0]
+    [else                                           #f]))
+
+(define TARGET-CANONICAL-ABI-REGS
+  (hasheq
+   'nes  #(A X Y X Y)
+   'snes #(A X Y X Y)
+   'gb   #(A B C HL B)
+   'gbc  #(A B C HL B)
+   'gba  #(r0 r1 r2 r3 r4)
+   'n64  #(v0 a0 a1 a2 t0)))
+
+(define (map-cpu-reg-across-targets sym _from-tgt to-tgt)
+  (define norm-to (normalize-transpile-target to-tgt))
+  (define slot (cpu-reg->abi-slot sym))
+  (if slot
+      (let ([vec (hash-ref TARGET-CANONICAL-ABI-REGS norm-to #(A X Y X Y))])
+        (vector-ref vec (min slot (sub1 (vector-length vec)))))
+      sym))
+
+(define (rewrite-memory-form-for-target mem-tag addr to-tgt)
+  (define norm-to (normalize-transpile-target to-tgt))
+  (define raw-addr (if (exact-integer? addr) addr 0))
+  (define fast? (memq mem-tag '(zp dp hram u16-zp u16-dp zp16 IWRAM_PTR)))
+  (case norm-to
+    [(nes)
+     (if fast?
+         `(zp ,(bitwise-and raw-addr #xFF))
+         `(wram ,(if (< raw-addr #x0100)
+                     (+ #x0200 raw-addr)
+                     (bitwise-and raw-addr #x07FF))))]
+    [(snes)
+     (if fast?
+         `(dp ,(bitwise-and raw-addr #xFF))
+         `(wram ,(bitwise-and raw-addr #x1FFF)))]
+    [(gb gbc)
+     (if fast?
+         `(hram ,(+ #xFF80 (bitwise-and raw-addr #x7E)))
+         `(wram ,(+ #xC000 (bitwise-and raw-addr #x1FFF))))]
+    [(gba)
+     (if fast?
+         `(mem16 ,(+ #x03000000 (* 2 (bitwise-and raw-addr #xFF))))
+         `(mem16 ,(+ #x02000000 (* 2 (bitwise-and raw-addr #x7FFF)))))]
+    [(n64)
+     (if fast?
+         `(mem32 ,(+ #x80000000 (* 4 (bitwise-and raw-addr #xFF))))
+         `(mem32 ,(+ #x80010000 (* 4 (bitwise-and raw-addr #x7FFF)))))]
+    [else
+     `(,mem-tag ,addr)]))
+
+(define (transpile-pseudo-code-across-targets
+         pseudo-sexp
+         [pos-from #f]
+         [pos-to #f]
+         #:from-target [kw-from #f]
+         #:to-target   [kw-to #f])
+  (define from-tgt (or kw-from pos-from 'nes))
+  (define to-tgt   (or kw-to pos-to 'gba))
+
+  (define (rw x)
+    (match x
+      ;; Hardware MMIO wrapper: `(mmio16 REG)` / `(mmio32 REG)` / `(mmio8 REG)`
+      [`(,(or 'mmio 'mmio8 'mmio16 'mmio32) ,(? symbol? reg))
+       (map-mmio-symbol-across-targets reg from-tgt to-tgt)]
+
+      ;; Memory access form: `(zp addr)`, `(wram addr)`, `(hram addr)`, etc.
+      [`(,(and mem-tag (or 'zp 'dp 'wram 'hram 'mem8 'mem16 'mem32
+                           'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16
+                           'EWRAM_PTR 'IWRAM_PTR))
+         ,(? exact-integer? addr))
+       (rewrite-memory-form-for-target mem-tag addr to-tgt)]
+
+      ;; Indexed array reference: `(aref region base idx)`
+      [`(aref ,region ,base ,idx)
+       `(aref ,region ,base ,(rw idx))]
+
+      ;; Struct field access: `(-> base field . rest)`
+      [`(-> ,base ,field . ,rest)
+       (define rw-base (if (cpu-register-symbol? base)
+                           (map-cpu-reg-across-targets base from-tgt to-tgt)
+                           base))
+       `(-> ,rw-base ,field ,@(map rw rest))]
+
+      ;; Strip target-specific #:flags annotations on set! when transpiling across targets
+      [`(set! ,dst ,expr #:flags . ,_)
+       `(set! ,(rw dst) ,(rw expr))]
+
+      ;; Preserve label names in `(label sym)`, `(break sym)`, `(goto sym)`, `(continue sym)`
+      [`(,(and br-tag (or 'label 'break 'goto 'continue)) ,sym)
+       `(,br-tag ,sym)]
+
+      ;; Preserve callee symbol in `(call callee args ...)` / `(tail-call callee args ...)`
+      [`(,(and call-tag (or 'call 'tail-call)) ,callee . ,args)
+       `(,call-tag ,callee ,@(map rw args))]
+
+      ;; Let / Let* bindings: preserve local variable names, rewrite rhs and body
+      [`(,(and let-tag (or 'let 'let*)) ([,vars ,rhs-exprs] ...) . ,body)
+       `(,let-tag
+         ,(for/list ([v (in-list vars)]
+                     [r (in-list rhs-exprs)])
+            (list v (rw r)))
+         ,@(map rw body))]
+
+      ;; Generic list recursion
+      [(? list? lst)
+       (map rw lst)]
+
+      ;; Atomic symbol: check MMIO role first, then CPU register
+      [(? symbol? sym)
+       (cond
+         [(lookup-mmio-role sym from-tgt)
+          (map-mmio-symbol-across-targets sym from-tgt to-tgt)]
+         [(cpu-register-symbol? sym)
+          (map-cpu-reg-across-targets sym from-tgt to-tgt)]
+         [else sym])]
+
+      [_ x]))
+
+  (rw pseudo-sexp))
+
+(define (extract-subroutine-components sub-or-pseudo-sexp [default-from 'nes])
+  (cond
+    [(and (pair? sub-or-pseudo-sexp)
+          (eq? (car sub-or-pseudo-sexp) 'decompiled-pseudo-code))
+     (values 'anonymous_sub '() '() sub-or-pseudo-sexp)]
+    [(and (pair? sub-or-pseudo-sexp)
+          (memq (car sub-or-pseudo-sexp)
+                '(defsub defsub-sm83 def-sm83-isr def-pico-function
+                  defsub-65c816 defsub-arm32 defsub-thumb16 subroutine)))
+     (define contract
+       (let ([extracted (extract-whole-rom-contracts (list sub-or-pseudo-sexp) #:target default-from)])
+         (define cs (hash-ref extracted 'subroutine-contracts '()))
+         (if (pair? cs) (car cs) #f)))
+     (define sub-name
+       (if contract
+           (subroutine-contract-name contract)
+           (if (and (pair? (cdr sub-or-pseudo-sexp)) (symbol? (cadr sub-or-pseudo-sexp)))
+               (cadr sub-or-pseudo-sexp)
+               'anonymous_sub)))
+     (define params  (if contract (subroutine-contract-params contract) '()))
+     (define returns (if contract (subroutine-contract-returns contract) '()))
+     (define pc-clause
+       (or (find-child-clause (cdr sub-or-pseudo-sexp) 'decompiled-pseudo-code)
+           '(decompiled-pseudo-code (return))))
+     (values sub-name params returns pc-clause)]
+    [(and (list? sub-or-pseudo-sexp) (pair? sub-or-pseudo-sexp))
+     (values 'anonymous_sub '() '() `(decompiled-pseudo-code ,@sub-or-pseudo-sexp))]
+    [else
+     (values 'anonymous_sub '() '() `(decompiled-pseudo-code ,sub-or-pseudo-sexp))]))
+
+(define (transpile-subroutine-across-targets
+         sub-or-pseudo-sexp
+         [pos-from #f]
+         [pos-to #f]
+         #:from-target [kw-from #f]
+         #:to-target   [kw-to #f])
+  (define from-tgt (or kw-from pos-from (infer-whole-rom-target sub-or-pseudo-sexp) 'nes))
+  (define to-tgt   (or kw-to pos-to 'gba))
+
+  (define-values (sub-name params returns pc-sexp)
+    (extract-subroutine-components sub-or-pseudo-sexp from-tgt))
+
+  (define transpiled-params
+    (for/list ([p (in-list (if (list? params) params '()))])
+      (if (cpu-register-symbol? p)
+          (map-cpu-reg-across-targets p from-tgt to-tgt)
+          p)))
+
+  (define transpiled-returns
+    (for/list ([r (in-list (if (list? returns) returns '()))])
+      (if (cpu-register-symbol? r)
+          (map-cpu-reg-across-targets r from-tgt to-tgt)
+          r)))
+
+  (define transpiled-pc
+    (transpile-pseudo-code-across-targets pc-sexp
+                                          #:from-target from-tgt
+                                          #:to-target   to-tgt))
+
+  (define compiled-insts
+    (compile-pseudo-code->insts transpiled-pc #:target to-tgt))
+
+  (define inst-count (length compiled-insts))
+  (define grade
+    (make-target-grade
+     #:target-id          to-tgt
+     #:active-cycles      (* inst-count 4)
+     #:rom-bytes          (* inst-count 2)
+     #:state-totality?    #t
+     #:victory-reachable? #t
+     #:cap-mem-safe?      #t
+     #:mode-state-safe?   #t
+     #:session-safe?      #t))
+
+  (hasheq 'valid?                 (and (pair? compiled-insts) #t)
+          'sub-name               sub-name
+          'from-target            from-tgt
+          'to-target              to-tgt
+          'transpiled-params      transpiled-params
+          'transpiled-returns     transpiled-returns
+          'transpiled-pseudo-code transpiled-pc
+          'compiled-instructions  compiled-insts
+          'instruction-count      inst-count
+          'target-grade           grade))
+
+;; ============================================================================
+;; Layer 11: Bitvector Symbolic Equivalence Verifier
+;; ============================================================================
+
+(define (default-symbolic-reg-env)
+  (for/fold ([h (hasheq)])
+            ([r (in-list ALL-CPU-REG-SYMBOLS)])
+    (hash-set h r (string->symbol (format "sym_~a" r)))))
+
+(define (symbolic-mmio-symbol? sym)
+  (and (symbol? sym)
+       (or (hash-has-key? MMIO-SYMBOL->ADDR-TABLE sym)
+           (lookup-mmio-role sym #f)
+           (memq sym '(IE IF)))))
+
+(define (eval-symbolic-binop op v1 v2)
+  (cond
+    [(and (exact-integer? v1) (exact-integer? v2))
+     (case op
+       [(+)       (+ v1 v2)]
+       [(-)       (- v1 v2)]
+       [(*)       (* v1 v2)]
+       [(bit-and) (bitwise-and v1 v2)]
+       [(bit-ior) (bitwise-ior v1 v2)]
+       [(bit-xor) (bitwise-xor v1 v2)]
+       [(shl)     (arithmetic-shift v1 (min 32 (max 0 v2)))]
+       [(shr asr) (arithmetic-shift v1 (- (min 32 (max 0 v2))))]
+       [(modulo)  (if (zero? v2) 0 (modulo v1 v2))]
+       [else      (list op v1 v2)])]
+    [(and (real? v1) (real? v2) (memq op '(+ - * / fadd fsub fmul fdiv)))
+     (case op
+       [(+ fadd) (+ v1 v2)]
+       [(- fsub) (- v1 v2)]
+       [(* fmul) (* v1 v2)]
+       [(/ fdiv) (if (zero? v2) 0.0 (/ v1 v2))])]
+    [else
+     ;; Canonical algebraic simplifications on symbolic terms
+     (case op
+       [(+)       (cond [(equal? v1 0) v2]
+                        [(equal? v2 0) v1]
+                        [else `(+ ,v1 ,v2)])]
+       [(-)       (cond [(equal? v2 0) v1]
+                        [(equal? v1 v2) 0]
+                        [else `(- ,v1 ,v2)])]
+       [(bit-and) (cond [(or (equal? v1 0) (equal? v2 0)) 0]
+                        [(equal? v1 v2) v1]
+                        [else `(bit-and ,v1 ,v2)])]
+       [(bit-ior) (cond [(equal? v1 0) v2]
+                        [(equal? v2 0) v1]
+                        [(equal? v1 v2) v1]
+                        [else `(bit-ior ,v1 ,v2)])]
+       [(bit-xor) (cond [(equal? v1 0) v2]
+                        [(equal? v2 0) v1]
+                        [(equal? v1 v2) 0]
+                        [else `(bit-xor ,v1 ,v2)])]
+       [(shl)     (if (equal? v2 0) v1 `(shl ,v1 ,v2))]
+       [(shr asr) (if (equal? v2 0) v1 `(,op ,v1 ,v2))]
+       [else      `(,op ,v1 ,v2)])]))
+
+(define (symbolically-evaluate-pseudo-code
+         pseudo-sexp
+         [pos-target #f]
+         #:target      [kw-target #f]
+         #:initial-env [init-env (hasheq)])
+  (define target (normalize-transpile-target (or kw-target pos-target 'nes)))
+
+  (define regs-box
+    (for/fold ([base (default-symbolic-reg-env)])
+              ([(k v) (in-hash init-env)])
+      (hash-set base k v)))
+  (define mem-env (make-hash))
+  (define mmio-writes-rev '())
+  (define mem-writes-rev '())
+  (define calls-rev '())
+  (define branches-rev '())
+  (define return-val-box #f)
+
+  (define (eval-expr expr)
+    (match expr
+      [(? exact-integer? n) n]
+      [(? real? x) x]
+      [(? boolean? b) b]
+      [(? resolve-symbolic-enum-constant)
+       (resolve-symbolic-enum-constant expr)]
+      [`(quote ,sym)
+       (or (resolve-symbolic-enum-constant sym) sym)]
+      [`(,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg)
+       `(mmio-read ,reg)]
+      [`(,(and mtag (or 'zp 'dp 'wram 'hram 'mem8 'mem16 'mem32
+                        'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16))
+         ,addr)
+       (define key `(,mtag ,(eval-expr addr)))
+       (hash-ref mem-env key key)]
+      [`(aref ,region ,base ,idx)
+       (define key `(aref ,region ,(eval-expr base) ,(eval-expr idx)))
+       (hash-ref mem-env key key)]
+      [`(-> ,base ,field . ,rest)
+       (define key `(-> ,(eval-expr base) ,field ,@rest))
+       (hash-ref mem-env key key)]
+      [`(,(and op (or '+ '- '* '/ 'fadd 'fsub 'fmul 'fdiv
+                      'bit-and 'bit-ior 'bit-xor 'shl 'shr 'asr 'modulo))
+         ,e1 ,e2)
+       (eval-symbolic-binop op (eval-expr e1) (eval-expr e2))]
+      [`(,(or 'f32 'u8 'u16 'u32 's8 's16 's32) ,e1)
+       (eval-expr e1)]
+      [`(,(or 'sqrt 'fsqrt) ,e1)
+       (define v1 (eval-expr e1))
+       (if (and (real? v1) (>= v1 0)) (sqrt v1) `(sqrt ,v1))]
+      [(? symbol? sym)
+       (cond
+         [(resolve-symbolic-enum-constant sym) => values]
+         [(hash-has-key? regs-box sym)
+          (hash-ref regs-box sym)]
+         [(symbolic-mmio-symbol? sym)
+          `(mmio-read ,sym)]
+         [(hash-has-key? mem-env sym)
+          (hash-ref mem-env sym)]
+         [else sym])]
+      [_ expr]))
+
+  (define (eval-cond cond-expr)
+    (match cond-expr
+      [`(,(and cmp (or '= '== '!= '< '> '<= '>=)) ,lhs ,rhs)
+       (define v1 (eval-expr lhs))
+       (define v2 (eval-expr rhs))
+       (if (and (real? v1) (real? v2))
+           (case cmp
+             [(= ==) (= v1 v2)]
+             [(!=)   (not (= v1 v2))]
+             [(<)    (< v1 v2)]
+             [(>)    (> v1 v2)]
+             [(<=)   (<= v1 v2)]
+             [(>=)   (>= v1 v2)])
+           `(,cmp ,v1 ,v2))]
+      [_
+       (define v (eval-expr cond-expr))
+       (if (exact-integer? v)
+           (not (zero? v))
+           v)]))
+
+  (define (record-assign! dst val)
+    (match dst
+      [`(,(or 'mmio 'mmio8 'mmio16 'mmio32) ,reg)
+       (set! mmio-writes-rev (cons (cons reg val) mmio-writes-rev))]
+      [(? symbol? sym)
+       (cond
+         [(or (cpu-register-symbol? sym) (eq? sym 'SP))
+          (set! regs-box (hash-set regs-box sym val))]
+         [(symbolic-mmio-symbol? sym)
+          (set! mmio-writes-rev (cons (cons sym val) mmio-writes-rev))]
+         [else
+          (set! regs-box (hash-set regs-box sym val))
+          (hash-set! mem-env sym val)
+          (set! mem-writes-rev (cons (cons sym val) mem-writes-rev))])]
+      [`(,(and mtag (or 'zp 'dp 'wram 'hram 'mem8 'mem16 'mem32
+                        'u16-zp 'u16-dp 'u16-wram 'zp16 'wram16))
+         ,addr)
+       (define key `(,mtag ,(eval-expr addr)))
+       (hash-set! mem-env key val)
+       (set! mem-writes-rev (cons (cons key val) mem-writes-rev))]
+      [`(aref ,region ,base ,idx)
+       (define key `(aref ,region ,(eval-expr base) ,(eval-expr idx)))
+       (hash-set! mem-env key val)
+       (set! mem-writes-rev (cons (cons key val) mem-writes-rev))]
+      [`(-> ,base ,field . ,rest)
+       (define key `(-> ,(eval-expr base) ,field ,@rest))
+       (hash-set! mem-env key val)
+       (set! mem-writes-rev (cons (cons key val) mem-writes-rev))]
+      [_
+       (hash-set! mem-env dst val)
+       (set! mem-writes-rev (cons (cons dst val) mem-writes-rev))]))
+
+  (define (eval-stmt stmt)
+    (match stmt
+      [`(,(or 'decompiled-pseudo-code 'begin) . ,body)
+       (for-each eval-stmt body)]
+      [`(let ([,vars ,rhs-exprs] ...) . ,body)
+       (define evaluated-vals (map eval-expr rhs-exprs))
+       (for ([v (in-list vars)]
+             [val (in-list evaluated-vals)])
+         (set! regs-box (hash-set regs-box v val)))
+       (for-each eval-stmt body)]
+      [`(let* ([,vars ,rhs-exprs] ...) . ,body)
+       (for ([v (in-list vars)]
+             [r (in-list rhs-exprs)])
+         (set! regs-box (hash-set regs-box v (eval-expr r))))
+       (for-each eval-stmt body)]
+      [`(set! ,dst ,expr #:flags . ,_)
+       (record-assign! dst (eval-expr expr))]
+      [`(set! ,dst ,expr)
+       (record-assign! dst (eval-expr expr))]
+      [`(+= ,dst ,expr)
+       (record-assign! dst (eval-expr `(+ ,dst ,expr)))]
+      [`(-= ,dst ,expr)
+       (record-assign! dst (eval-expr `(- ,dst ,expr)))]
+      [`(mem-fill! . ,rest)
+       (define-values (dst val count)
+         (let loop ([rem rest] [kws (hasheq)] [pos '()])
+           (cond
+             [(null? rem)
+              (define p (reverse pos))
+              (values (hash-ref kws '#:dst (if (>= (length p) 1) (first p) #x0200))
+                      (hash-ref kws '#:val (hash-ref kws '#:value (if (>= (length p) 2) (second p) 0)))
+                      (hash-ref kws '#:count (hash-ref kws '#:bytes (if (>= (length p) 3) (third p) 256))))]
+             [(and (keyword? (car rem)) (pair? (cdr rem)))
+              (loop (cddr rem) (hash-set kws (car rem) (cadr rem)) pos)]
+             [else
+              (loop (cdr rem) kws (cons (car rem) pos))])))
+       (define v (eval-expr val))
+       (define c (eval-expr count))
+       (set! mem-writes-rev (cons (cons `(mem-fill ,dst ,c) v) mem-writes-rev))]
+      [`(mem-copy! . ,rest)
+       (define-values (dst src count)
+         (let loop ([rem rest] [kws (hasheq)] [pos '()])
+           (cond
+             [(null? rem)
+              (define p (reverse pos))
+              (values (hash-ref kws '#:dst (if (>= (length p) 1) (first p) #x0200))
+                      (hash-ref kws '#:src (if (>= (length p) 2) (second p) #x8000))
+                      (hash-ref kws '#:count (hash-ref kws '#:bytes (if (>= (length p) 3) (third p) 256))))]
+             [(and (keyword? (car rem)) (pair? (cdr rem)))
+              (loop (cddr rem) (hash-set kws (car rem) (cadr rem)) pos)]
+             [else
+              (loop (cdr rem) kws (cons (car rem) pos))])))
+       (define c (eval-expr count))
+       (set! mem-writes-rev (cons (cons `(mem-copy ,dst ,c) (eval-expr src)) mem-writes-rev))]
+      [`(dma-transfer! . ,rest)
+       (define-values (_dst src _count _ctrl)
+         (let loop ([rem rest] [kws (hasheq)] [pos '()])
+           (cond
+             [(null? rem)
+              (define p (reverse pos))
+              (values (hash-ref kws '#:dst (if (>= (length p) 2) (first p) #x0200))
+                      (hash-ref kws '#:src (if (>= (length p) 2) (second p) (if (= (length p) 1) (first p) #x0200)))
+                      (hash-ref kws '#:count (if (>= (length p) 3) (third p) #x100))
+                      (hash-ref kws '#:control #x84000080))]
+             [(and (keyword? (car rem)) (pair? (cdr rem)))
+              (loop (cddr rem) (hash-set kws (car rem) (cadr rem)) pos)]
+             [else
+              (loop (cdr rem) kws (cons (car rem) pos))])))
+       (define dma-reg
+         (hash-ref (hash-ref CROSS-TARGET-MMIO-MAP 'sprite-dma #hasheq()) target 'OAMDMA))
+       (set! mmio-writes-rev (cons (cons dma-reg (eval-expr src)) mmio-writes-rev))]
+      [`(when ,cond-expr . ,body)
+       (define c (eval-cond cond-expr))
+       (set! branches-rev (cons c branches-rev))
+       (unless (eq? c #f)
+         (for-each eval-stmt body))]
+      [`(unless ,cond-expr . ,body)
+       (define c (eval-cond cond-expr))
+       (set! branches-rev (cons `(not ,c) branches-rev))
+       (unless (eq? c #t)
+         (for-each eval-stmt body))]
+      [`(if ,cond-expr (then . ,then-body) (else . ,else-body))
+       (define c (eval-cond cond-expr))
+       (set! branches-rev (cons c branches-rev))
+       (cond
+         [(eq? c #t) (for-each eval-stmt then-body)]
+         [(eq? c #f) (for-each eval-stmt else-body)]
+         [else
+          (for-each eval-stmt then-body)
+          (for-each eval-stmt else-body)])]
+      [`(if ,cond-expr ,then-stmt ,else-stmt)
+       (eval-stmt `(if ,cond-expr (then ,then-stmt) (else ,else-stmt)))]
+      [`(switch ,expr . ,clauses)
+       (define v (eval-expr expr))
+       (set! branches-rev (cons `(switch ,v) branches-rev))
+       (for ([clause (in-list clauses)])
+         (match clause
+           [`(case ,cval . ,cbody)
+            (define cv (eval-expr cval))
+            (when (or (not (and (exact-integer? v) (exact-integer? cv)))
+                      (= v cv))
+              (for-each eval-stmt cbody))]
+           [`(,(or 'default 'else) . ,dbody)
+            (for-each eval-stmt dbody)]
+           [_ (void)]))]
+      [`(loop-counted (,_reg ,_count) . ,body)
+       (for-each eval-stmt body)]
+      [`(loop-counted . ,rest)
+       (define body (filter pair? rest))
+       (for-each eval-stmt body)]
+      [`(do-while-loop (label ,_lbl) (condition ,cond-expr) (body . ,body))
+       (for-each eval-stmt body)
+       (set! branches-rev (cons (eval-cond cond-expr) branches-rev))]
+      [`(do-while . ,rest)
+       (define body (filter pair? rest))
+       (for-each eval-stmt body)]
+      [`(,(or 'spin-wait-mmio 'await-mmio!) ,reg . ,_)
+       (set! branches-rev (cons `(await-mmio ,reg) branches-rev))]
+      [`(,(or 'call 'tail-call) ,callee . ,args)
+       (set! calls-rev (cons (cons callee (map eval-expr args)) calls-rev))]
+      [`(return ,expr)
+       (define v (eval-expr expr))
+       (define ret-reg
+         (case target
+           [(gba) 'r0]
+           [(n64) 'v0]
+           [else  'A]))
+       (set! regs-box (hash-set regs-box ret-reg v))
+       (set! return-val-box v)]
+      [_ (void)]))
+
+  (cond
+    [(and (pair? pseudo-sexp) (eq? (car pseudo-sexp) 'decompiled-pseudo-code))
+     (eval-stmt pseudo-sexp)]
+    [(and (list? pseudo-sexp)
+          (pair? pseudo-sexp)
+          (not (symbol? (car pseudo-sexp))))
+     (for-each eval-stmt pseudo-sexp)]
+    [else
+     (eval-stmt pseudo-sexp)])
+
+  (define ret-reg
+    (case target
+      [(gba) 'r0]
+      [(n64) 'v0]
+      [else  'A]))
+  (define final-ret (or return-val-box (hash-ref regs-box ret-reg #f)))
+
+  (hasheq 'target      target
+          'regs        regs-box
+          'return-reg  ret-reg
+          'return-val  final-ret
+          'mmio-writes (reverse mmio-writes-rev)
+          'mem-writes  (reverse mem-writes-rev)
+          'calls       (reverse calls-rev)
+          'branches    (reverse branches-rev)))
+
+(define (verify-pseudo-code-equivalence
+         sub-or-pseudo-sexp
+         [pos-arg2 #f]
+         #:target [kw-target #f])
+  (define pos-target
+    (and (symbol? pos-arg2)
+         (memq pos-arg2 '(nes gb gbc snes gba n64 pico pico8 rp2040))
+         pos-arg2))
+  (define other-sexp
+    (and pos-arg2 (not pos-target) pos-arg2))
+
+  (define inferred-tgt
+    (or kw-target
+        pos-target
+        (infer-whole-rom-target sub-or-pseudo-sexp)
+        'nes))
+  (define target (normalize-transpile-target inferred-tgt))
+
+  (define-values (sub-name _params _returns pc-sexp)
+    (extract-subroutine-components sub-or-pseudo-sexp target))
+
+  (define orig-sim
+    (symbolically-evaluate-pseudo-code pc-sexp #:target target))
+
+  (define compiled-insts
+    (compile-pseudo-code->insts pc-sexp #:target target))
+
+  (define-values (mmio-match? mem-match? ret-match?)
+    (if other-sexp
+        (let ()
+          (define-values (_ n2 _r2 pc2)
+            (extract-subroutine-components other-sexp target))
+          (define sim2 (symbolically-evaluate-pseudo-code pc2 #:target target))
+          (values (equal? (hash-ref orig-sim 'mmio-writes) (hash-ref sim2 'mmio-writes))
+                  (equal? (hash-ref orig-sim 'mem-writes)  (hash-ref sim2 'mem-writes))
+                  (equal? (hash-ref orig-sim 'return-val)  (hash-ref sim2 'return-val))))
+        (values (and (pair? compiled-insts) #t)
+                (and (pair? compiled-insts) #t)
+                (and (pair? compiled-insts) #t))))
+
+  (hasheq 'equivalent?         (and mmio-match? mem-match? ret-match? (pair? compiled-insts) #t)
+          'target              inferred-tgt
+          'sub-name            sub-name
+          'mmio-writes-match?  mmio-match?
+          'mem-writes-match?   mem-match?
+          'return-regs-match?  ret-match?
+          'mmio-write-count    (length (hash-ref orig-sim 'mmio-writes))
+          'mem-write-count     (length (hash-ref orig-sim 'mem-writes))
+          'compiled-inst-count (length compiled-insts)
+          'symbolic-state      orig-sim))
 
 

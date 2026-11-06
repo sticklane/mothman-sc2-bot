@@ -64,7 +64,7 @@
     (structured-conditionals 49)
     (structured-guard-returns 30)
     (lifted-state-machines 16)
-    (lifted-high-level-idioms 36))
+    (lifted-high-level-idioms 38))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (symbolic-mmio-xref
     (mmio-reg BCPS #:accesses 5)
@@ -158,7 +158,10 @@
       (wram-var wram_state_D3DA #:addr #xD3DA #:accesses 52)
       (wram-var wram_state_D051 #:addr #xD051 #:accesses 50)
       (wram-var wram_state_D06B #:addr #xD06B #:accesses 48)
-      (wram-var wram_state_D052 #:addr #xD052 #:accesses 39)))
+      (wram-var wram_state_D052 #:addr #xD052 #:accesses 39))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_22F3 #:bank 0 #:dispatch-pc #x22F3 #:mechanism rst-inline-table #:cases
       ((case 0 -> game_logic_step_b0_2AD3)
@@ -250,6 +253,8 @@
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0253 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0260 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x02A7 #:reg MBC_ROM_BANK)
+    (idiom-joypad-poll #:bank #x00 #:pc #x06A1 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x06B4 #:reg JOYP)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x138A #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x1395 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x13A3 #:reg MBC_ROM_BANK)
@@ -273,8 +278,8 @@
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x20CC #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x20D6 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x221A #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x2262 #:reg MBC_ROM_BANK)
-    (idiom-sm83-memory-loop #:bank #x00 #:pc #x2324 #:kind block-fill))
+    (idiom-joypad-poll #:bank #x02 #:pc #x5062 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x02 #:pc #x587A #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 8 #:params () #:returns () #:calls () #:mmio ()
       (decompiled-pseudo-code
@@ -1493,8 +1498,8 @@
           (BIT_3_A #:cb #x5F #:pc #x4367))
         (defsub-sm83 bitfield_flag_update_b1_459E #:bank 1 #:addr #x459E #:offset #x059E #:size-bytes 61 #:params (A BC) #:returns (A HL Carry Zero) #:calls () #:mmio () #:hram (#xFF8C #xFF8D #xFF8E) #:mbc-writes ()
           (decompiled-pseudo-code
-            (set! hram_state_FF8C A)
-            (set! (wram #xD04D) hram_state_FF8C)
+            (let ([hram_state_FF8C A])
+              (set! (wram #xD04D) hram_state_FF8C))
             (when (!= (bit-and hram_state_FF8E #x20) #x00) (goto loc_45EB))
             (when (!= (bit-and hram_state_FF8E #x80) #x00) (goto loc_460C))
             (set! HL hram_state_FF8D)
@@ -3411,6 +3416,7 @@
             (set! DE #x40CA)
             (set! HL #xCB00)
             (loop-counted #:step LD_HLI_A #:while (!= A #x00)
+              (mem-copy! (deref HL++) (deref DE) LD_HLI_A)
               (set! (deref HL++) B)
               (set! (deref HL++) C)
               (set! (deref HL++) (deref DE))
@@ -3503,8 +3509,8 @@
             (set! HL #xD082)
             (set! (deref HL++) #x00)
             (set! (deref HL) #x00)
-            (set! hram_state_FF8D #x00)
-            (set! hram_state_FF8E hram_state_FF8D)
+            (let ([hram_state_FF8D #x00])
+              (set! hram_state_FF8E hram_state_FF8D))
             (set! hram_state_FF92 hram_state_FF8E)
             (set! HRAM_FF93 hram_state_FF92)
             (set! (wram #xD064) HRAM_FF93)

@@ -138,7 +138,10 @@
       (wram-var wram_state_C201 #:addr #xC201 #:accesses 25)
       (wram-var wram_state_C627 #:addr #xC627 #:accesses 22)
       (wram-var wram_state_C628 #:addr #xC628 #:accesses 22)
-      (wram-var wram_state_C8F8 #:addr #xC8F8 #:accesses 21)))
+      (wram-var wram_state_C8F8 #:addr #xC8F8 #:accesses 21))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_0269 #:bank 0 #:dispatch-pc #x0269 #:mechanism rst-inline-table #:cases
       ((case 0 -> game_logic_step_b0_0272)
@@ -240,6 +243,8 @@
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x08AB #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0D8E #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0FEE #:reg MBC_ROM_BANK)
+    (idiom-joypad-poll #:bank #x00 #:pc #x116C #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x1175 #:reg JOYP)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x1F0B #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x1F22 #:reg MBC_ROM_BANK)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x25F2 #:kind block-copy)
@@ -253,11 +258,9 @@
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x3239)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x35F0 #:reg MBC_ROM_BANK)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x3609 #:kind block-copy)
-    (idiom-sm83-oam-dma #:bank #x00 #:pc #x37A6)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x38AE #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x38BE #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x38D5 #:reg MBC_ROM_BANK)
-    (idiom-sm83-bcd-math #:bank #x00 #:pc #x3945))
+    (idiom-joypad-poll #:bank #x00 #:pc #x3769 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x376B #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x3777 #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 3 #:params () #:returns () #:calls (rst_18) #:mmio ()
       (decompiled-pseudo-code

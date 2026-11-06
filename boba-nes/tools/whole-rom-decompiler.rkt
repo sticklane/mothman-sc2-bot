@@ -1853,8 +1853,28 @@
           (define op-sym   (string->symbol (third m)))
           (define rhs-expr (parse-pico-lua-expr (fourth m)))
           `(,op-sym ,lhs-expr ,rhs-expr))]
-    ;; Assignment `local lhs = rhs` or `lhs = rhs`
-    [(regexp-match #px"^(?:local\\s+)?([a-zA-Z_][a-zA-Z0-9_.,\\s\\[\\]]*?)\\s*=\\s*([^=].*)$" trimmed)
+    ;; Local variable declaration with initializer `local lhs = rhs`
+    [(regexp-match #px"^local\\s+([a-zA-Z_][a-zA-Z0-9_.,\\s]*?)\\s*=\\s*([^=].*)$" trimmed)
+     => (lambda (m)
+          (define lhs-raw (string-trim (second m)))
+          (define rhs-raw (string-trim (third m)))
+          (if (regexp-match? #px"^function\\s*\\(" rhs-raw)
+              #f
+              (let ([lhs-exprs (parse-pico-lua-expr-list lhs-raw)]
+                    [rhs-exprs (parse-pico-lua-expr-list rhs-raw)])
+                (cond
+                  [(and (= (length lhs-exprs) 1) (= (length rhs-exprs) 1) (symbol? (first lhs-exprs)))
+                   `(local-bind ,(first lhs-exprs) ,(first rhs-exprs))]
+                  [(and (> (length lhs-exprs) 1)
+                        (= (length lhs-exprs) (length rhs-exprs))
+                        (andmap symbol? lhs-exprs))
+                   `(local-binds ,(map list lhs-exprs rhs-exprs))]
+                  [(and (= (length lhs-exprs) 1) (= (length rhs-exprs) 1))
+                   `(set! ,(first lhs-exprs) ,(first rhs-exprs))]
+                  [else
+                   `(set-values! ,lhs-exprs ,rhs-exprs)]))))]
+    ;; Assignment `lhs = rhs`
+    [(regexp-match #px"^([a-zA-Z_][a-zA-Z0-9_.,\\s\\[\\]]*?)\\s*=\\s*([^=].*)$" trimmed)
      => (lambda (m)
           (define lhs-raw (string-trim (second m)))
           (define rhs-raw (string-trim (third m)))
@@ -1874,6 +1894,53 @@
     [else
      (define expr (parse-pico-lua-expr trimmed))
      (and (not (eq? expr 'void)) expr)]))
+
+(define (pico-expr-mentions-sym? expr sym)
+  (cond
+    [(eq? expr sym) #t]
+    [(pair? expr)
+     (or (pico-expr-mentions-sym? (car expr) sym)
+         (pico-expr-mentions-sym? (cdr expr) sym))]
+    [else #f]))
+
+(define (fold-pico-local-lets stmts)
+  (define (collect-leading-locals rem)
+    (let loop ([r rem]
+               [binds '()]
+               [raw-forms '()])
+      (match r
+        [(cons (and f (list 'local-bind v e)) rest)
+         (loop rest (cons (list v e) binds) (cons f raw-forms))]
+        [(cons (and f (list 'local-binds pairs)) rest)
+         (loop rest (append (reverse pairs) binds) (cons f raw-forms))]
+        [_
+         (values (reverse binds) (reverse raw-forms) r)])))
+
+  (let loop ([rem stmts]
+             [acc '()])
+    (cond
+      [(null? rem) (reverse acc)]
+      [(and (pair? (car rem))
+            (memq (caar rem) '(local-bind local-binds)))
+       (define-values (bindings raw-forms after-binds)
+         (collect-leading-locals rem))
+       (define bound-syms (map car bindings))
+       (cond
+         [(and (pair? after-binds)
+               (or (>= (length bindings) 2)
+                   (let ([next-s (car after-binds)])
+                     (for/or ([s (in-list bound-syms)])
+                       (pico-expr-mentions-sym? next-s s)))))
+          (loop (cdr after-binds)
+                (cons `(let ,bindings ,(car after-binds)) acc))]
+         [else
+          (define fallback-sets
+            (for/list ([b (in-list bindings)])
+              `(set! ,(first b) ,(second b))))
+          (loop after-binds
+                (append (reverse fallback-sets) acc))])]
+      [else
+       (loop (cdr rem) (cons (car rem) acc))])))
 
 ;; Synthesize clean S-expression `(decompiled-pseudo-code ...)` from PICO-8 Lua function body lines
 (define (synthesize-pico8-pseudo-code body-lines)
@@ -1936,8 +2003,8 @@
       (set! block-stack (cdr block-stack))
       (define kind (hash-ref top 'kind))
       (define hdr  (hash-ref top 'hdr))
-      (define body (reverse (hash-ref top 'stmts '())))
-      (define ebody (reverse (hash-ref top 'else-stmts '())))
+      (define body (fold-pico-local-lets (reverse (hash-ref top 'stmts '()))))
+      (define ebody (fold-pico-local-lets (reverse (hash-ref top 'else-stmts '()))))
       (define form
         (case kind
           [(if)
@@ -2033,7 +2100,7 @@
 
   (if (null? root-stmts)
       '((nop))
-      (reverse root-stmts)))
+      (fold-pico-local-lets (reverse root-stmts))))
 
 (define pico-lua-lines->pseudo-code synthesize-pico8-pseudo-code)
 
@@ -2677,6 +2744,24 @@
 ;; Write a single statement inside `(decompiled-pseudo-code ...)`
 (define (write-pseudo-stmt! stmt out indent)
   (match stmt
+    [(list* 'let bindings body)
+     (write-indent out indent)
+     (display "(let (" out)
+     (for ([b (in-list bindings)] [i (in-naturals 0)])
+       (when (> i 0) (display " " out))
+       (match b
+         [(list var val)
+          (display "[" out)
+          (write-pseudo-expr! var out)
+          (display " " out)
+          (write-pseudo-expr! val out)
+          (display "]" out)]
+         [_ (write-pseudo-expr! b out)]))
+     (display ")" out)
+     (for ([child (in-list body)])
+       (newline out)
+       (write-pseudo-stmt! child out (+ indent 2)))
+     (display ")" out)]
     [(list* 'loop-counted '#:step step '#:while cond-expr body)
      (write-indent out indent)
      (fprintf out "(loop-counted #:step ~s #:while " step)
@@ -2880,6 +2965,39 @@
       ['()
        (display ")" out)])))
 
+(define (write-pico-pseudo-stmt! s out)
+  (match s
+    [(list* 'let bindings body)
+     (display "(let (" out)
+     (for ([b (in-list bindings)] [i (in-naturals 0)])
+       (when (> i 0) (display " " out))
+       (match b
+         [(list var val)
+          (fprintf out "[~s ~s]" var val)]
+         [_ (write b out)]))
+     (display ")" out)
+     (for ([child (in-list body)])
+       (display " " out)
+       (write-pico-pseudo-stmt! child out))
+     (display ")" out)]
+    [(list* 'when cond-e body)
+     (fprintf out "(when ~s" cond-e)
+     (for ([child (in-list body)])
+       (display " " out)
+       (write-pico-pseudo-stmt! child out))
+     (display ")" out)]
+    [(list 'if cond-e (cons 'then then-b) (cons 'else else-b))
+     (fprintf out "(if ~s (then" cond-e)
+     (for ([c (in-list then-b)])
+       (display " " out)
+       (write-pico-pseudo-stmt! c out))
+     (display ") (else" out)
+     (for ([c (in-list else-b)])
+       (display " " out)
+       (write-pico-pseudo-stmt! c out))
+     (display "))" out)]
+    [_ (write s out)]))
+
 ;; Write a `def-pico-function` form across multiple lines (supporting `#:params` / `#:returns` keywords)
 (define (write-pico-function-multiline! form out indent)
   (write-indent out indent)
@@ -2893,7 +3011,15 @@
        (for ([sub (in-list rem)])
          (newline out)
          (cond
-           [(and (pair? sub) (memq (car sub) '(decompiled-pseudo-code structured-ast body-lines)))
+           [(and (pair? sub) (eq? (car sub) 'decompiled-pseudo-code))
+            (write-indent out (+ indent 2))
+            (fprintf out "(~s" (car sub))
+            (for ([bline (in-list (cdr sub))])
+              (newline out)
+              (write-indent out (+ indent 4))
+              (write-pico-pseudo-stmt! bline out))
+            (display ")" out)]
+           [(and (pair? sub) (memq (car sub) '(structured-ast body-lines)))
             (write-indent out (+ indent 2))
             (fprintf out "(~s" (car sub))
             (for ([bline (in-list (cdr sub))])
@@ -3023,9 +3149,22 @@
          ['()
           (display ")" out)]))]
 
+    ;; Enum constant tables `(game-state-enum (#x00 STATE_00_INIT) ...)` and `(joypad-mask-enum (#x80 JOY_BTN_A) ...)`
+    [(memq (car sexp) '(game-state-enum joypad-mask-enum))
+     (write-indent out indent)
+     (fprintf out "(~s" (car sexp))
+     (for ([pair-item (in-list (cdr sexp))])
+       (match pair-item
+         [(list (? exact-integer? v) sym)
+          (fprintf out " (~a ~s)" (format-hex2 v) sym)]
+         [_ (fprintf out " ~s" pair-item)]))
+     (display ")" out)]
+
     ;; Flat keyword-bearing leaf forms (`defdata`, `mirror`, `zp-ptr`, `state-var`, `timer`, `table`, `hram-var`, `wram-var`, etc.)
     [(memq (car sexp) '(defdata jump-table-dispatch jmp-indirect idiom
                         idiom-oam-dma-blit idiom-ppu-vram-seek idiom-zp-pointer-init
+                        idiom-u16-add-with-carry idiom-joypad-poll
+                        idiom-sm83-memory-loop idiom-sm83-bcd-math idiom-sm83-oam-dma idiom-sm83-mbc-switch
                         mirror zp-ptr state-var timer table hram-var wram-var))
      (write-flat-kw-form-hex! sexp out indent)]
 
@@ -3035,6 +3174,7 @@
                  high-level-idioms state-machines pico8-state-machines
                  symbolic-mmio-xref def-memory-layout
                  mmio-mirrors zp-pointers state-variables timers indexed-tables hram-variables wram-variables
+                 enum-constants
                  jump-tables disassembled-entry-prologue
                  interrupt-service-routines lifted-lua-functions lifted-pico8-assets
                  gfx-sprites gff-flags map-rows sfx-tracks music-patterns

@@ -123,6 +123,12 @@
  define-snes-struct-layouts
  define-gba-struct-layouts
  define-n64-struct-layouts
+ def-enum-constants
+ def-sm83-enum-constants
+ def-pico-enum-constants
+ define-snes-enum-constants
+ define-gba-enum-constants
+ define-n64-enum-constants
  extract-whole-rom-contracts
  verify-whole-rom-module-contracts
  verify-nes-grades!)
@@ -436,6 +442,12 @@
 (define-syntax-rule (define-snes-struct-layouts body ...) '(define-snes-struct-layouts body ...))
 (define-syntax-rule (define-gba-struct-layouts body ...) '(define-gba-struct-layouts body ...))
 (define-syntax-rule (define-n64-struct-layouts body ...) '(define-n64-struct-layouts body ...))
+(define-syntax-rule (def-enum-constants body ...) '(def-enum-constants body ...))
+(define-syntax-rule (def-sm83-enum-constants body ...) '(def-sm83-enum-constants body ...))
+(define-syntax-rule (def-pico-enum-constants body ...) '(def-pico-enum-constants body ...))
+(define-syntax-rule (define-snes-enum-constants body ...) '(define-snes-enum-constants body ...))
+(define-syntax-rule (define-gba-enum-constants body ...) '(define-gba-enum-constants body ...))
+(define-syntax-rule (define-n64-enum-constants body ...) '(define-n64-enum-constants body ...))
 
 
 

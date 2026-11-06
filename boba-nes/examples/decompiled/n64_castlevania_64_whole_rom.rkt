@@ -311,6 +311,25 @@
     (field :field_0x0 #:role ':header_or_ptr_0x0 #:offset #x00 #:type ':s32 #:accesses 6))
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror os_rom_base_80000308 #:addr #x80000308 #:mmio PI_CART_ADDR)
+    (mirror vi_current_mode_8033B4A0 #:addr #x8033B4A0 #:mmio VI_CONTROL)
+    (mirror sp_task_queue_8032C000 #:addr #x8032C000 #:mmio SP_STATUS))
+  (state-variables
+    (state-var g_mario_state_8033B170 #:addr #x8033B170 #:accesses 96)
+    (state-var g_global_timer_8032D5D4 #:addr #x8032D5D4 #:accesses 72))
+  (timers
+    (timer timer_rdram_8032D5D4 #:addr #x8032D5D4 #:decrements 16)
+    (timer timer_rdram_8033B210 #:addr #x8033B210 #:decrements 11))
+  (indexed-tables
+    (table object_pool_table_8033D488 #:addr #x8033D488 #:accesses 84)
+    (table behavior_script_table_8033AF78 #:addr #x8033AF78 #:accesses 58))
+  (enum-constants
+    (enum-group RCP_SP_STATUS (CLR_HALT #x0001) (SET_HALT #x0002) (CLR_BROKE #x0004) (CLR_INTR #x0008))
+    (enum-group RCP_PI_STATUS (PI_DMA_BUSY #x0001) (PI_IO_BUSY #x0002) (PI_CLR_INTR #x0002))
+    (enum-group GBI_GEOMETRY_MODE (G_ZBUFFER #x00000001) (G_SHADE #x00000004) (G_CULL_BACK #x00002000) (G_LIGHTING #x00020000))))
+
 ;; Complete Stack-Framed MIPS III VR4300 + COP0 + COP1 FPU Lifted Subroutines (with Structured CFG)
 (define-n64-lifted-subroutines
   (subroutine pif-ipl3-bootstrap (entry #xa4000040) (offset #x000040) (stack-frame 0) (fpu-ops 0) #:params () #:returns ()
@@ -357,7 +376,8 @@
     (decompiled-pseudo-code
       (loop-counted (!= ptr_0007DA08 0)
         (set! rdram_sym_800A7BC0 0)
-        (set! rdram_sym_800A7BC4 0))
+        (set! rdram_sym_800A7BC4 0)
+        (mem-fill! #:dst a0 #:val 0 #:count (!= ptr_0007DA08 0)))
       (switch rdram_sym_80014FA0 (case 0 (call actor_state_helper_80012A50)) (case 1 (call actor_state_helper_80012A60)) (case 2 (call actor_state_helper_80012A70)) (case 3 (call actor_state_helper_80012A80)) (case 4 (call actor_state_helper_80012A90)) (case 5 (call actor_state_helper_80012AA0)))
       (tail-call rdram_sym_80014FA0)
       (set! v0 (+ (shl (+ (shl a0 3) a0) 3) rdram_sym_800922D0)))
@@ -685,12 +705,14 @@
       (when (!= a0 0)
         (set! v0 (+ (- 0 (bit-and a2 #x3)) a2))
         (loop-counted (!= v0 a2)
-          (set! (-> a1 :field_-0x1 :u8) (-> a0 :field_0x0 :u8))))
+          (set! (-> a1 :field_-0x1 :u8) (-> a0 :field_0x0 :u8))
+          (mem-copy! #:dst a0 #:src a1 #:count (!= v0 a2))))
       (loop-counted (!= a2 0)
         (set! (-> a1 :field_-0x4 :u8) (-> a0 :field_0x0 :u8))
         (set! (-> a1 :field_-0x3 :u8) (-> a0 :field_0x1 :u8))
         (set! (-> a1 :field_-0x2 :u8) (-> v1 :field_-0x2 :u8))
-        (set! (-> a1 :field_-0x1 :u8) (-> v1 :field_-0x1 :u8)))
+        (set! (-> a1 :field_-0x1 :u8) (-> v1 :field_-0x1 :u8))
+        (mem-copy! #:dst a0 #:src a1 #:count (!= a2 0)))
       (return v0))
     (insn "0x800008D0" #x2CC10004 (MIPS-SLTIU at a2 4))
     (insn "0x800008D4" #xAFA40000 (MIPS-SW a0 0(sp)))
@@ -753,7 +775,8 @@
             (call os_rcp_driver_8008C0D0 s0)
             (set! v0 -1))
           (set! (-> rdram_sym_800A1330 :field_0x10 :s16) 8)
-          (call os_rcp_driver_80080D0C a0))))
+          (call os_rcp_driver_80080D0C a0)
+          (mem-copy! #:dst a0 #:src a1 #:count (= (-> a0 :field_0x8 :s32) 0)))))
     (insn "0x8007FBD0" #x27BDFFD8 (MIPS-ADDIU sp sp -40))
     (insn "0x8007FBD4" #xAFBF001C (MIPS-SW ra 28(sp)))
     (insn "0x8007FBD8" #xAFA40028 (MIPS-SW a0 40(sp)))
@@ -1376,6 +1399,7 @@
       (set! v0 (call engine_actor_step_80082000 a2))
       (set! PI_DRAM_ADDR v0)
       (set! PI_CART_ADDR (bit-and (bit-ior osRomBase a1) ptr_1FFFFFFF))
+      (dma-transfer! #:engine 'PI_CART_DMA #:dram-addr v0 #:cart-addr (bit-and (bit-ior osRomBase a1) ptr_1FFFFFFF) #:len a3)
       (set! v0 -1))
     (insn "0x80084770" #x27BDFFE8 (MIPS-ADDIU sp sp -24))
     (insn "0x80084774" #x3C03A460 (MIPS-LUI v1 #xa460))
@@ -1537,7 +1561,8 @@
     (decompiled-pseudo-code
       (loop-counted (>= s0 s1)
         (when (!= (bit-and rdram_sym_80271054 #x4000) 0)
-          (call math_fixed_helper_80082080 rdram_sym_80271050 rdram_sym_8027104C)))
+          (call math_fixed_helper_80082080 rdram_sym_80271050 rdram_sym_8027104C))
+        (mem-copy! #:dst a0 #:src a1 #:count (>= s0 s1)))
       (return))
     (insn "0x80000C94" #x27BDFFE0 (MIPS-ADDIU sp sp -32))
     (insn "0x80000C98" #xAFB10018 (MIPS-SW s1 24(sp)))

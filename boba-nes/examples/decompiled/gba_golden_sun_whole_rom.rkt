@@ -202,6 +202,25 @@
   )
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror dispcnt_mirror_3000000 #:addr #x03000000 #:mmio DISPCNT)
+    (mirror irq_ack_mirror_3007FF8 #:addr #x03007FF8 #:mmio IF)
+    (mirror bldcnt_mirror_3000050 #:addr #x03000050 #:mmio BLDCNT))
+  (state-variables
+    (state-var main_callback_iwram_3000004 #:addr #x03000004 #:accesses 52)
+    (state-var vblank_handler_iwram_3007FFC #:addr #x03007FFC #:accesses 44))
+  (timers
+    (timer frame_timer_iwram_3000010 #:addr #x03000010 #:decrements 14)
+    (timer anim_timer_ewram_2000100 #:addr #x02000100 #:decrements 9))
+  (indexed-tables
+    (table oam_shadow_table_3002000 #:addr #x03002000 #:accesses 64)
+    (table entity_slot_table_2020000 #:addr #x02020000 #:accesses 48))
+  (enum-constants
+    (enum-group IRQ_MASK (IRQ_VBLANK #x0001) (IRQ_HBLANK #x0002) (IRQ_VCOUNT #x0004) (IRQ_DMA3 #x0800) (IRQ_KEYPAD #x1000) (IRQ_GAMEPAK #x2000))
+    (enum-group DISPCNT_MODE (MODE_0 #x0000) (MODE_3 #x0003) (MODE_4 #x0004) (OBJ_1D_MAP #x0040) (FORCED_BLANK #x0080) (OBJ_ENABLE #x1000))
+    (enum-group DMA_CONTROL (DMA_ENABLE #x80000000) (DMA_32BIT #x04000000) (SRC_FIXED #x01000000))))
+
 (define-gba-lifted-lz77-assets
   (lz77-asset (rom-addr "0x08036A18") (rom-offset #x036a18) (decompressed-bytes 11280) (kind 'vram-tile-chr-block))
   (lz77-asset (rom-addr "0x08036FF8") (rom-offset #x036ff8) (decompressed-bytes 96) (kind 'vram-tile-chr-block))
@@ -471,7 +490,9 @@
   (defsub-thumb16 thumb-bx-entry-8002E00 (isa 'thumb16) (entry #x08002e00) (calls iwram_state_helper_8004858 dma_channel_transfer_800300C) #:params () #:returns ()
     (decompiled-pseudo-code
       (set! (mmio16 DMA0CNT_H) (bit-and #x0000C5FF (mmio16 DMA0CNT_H)))
+      (dma-transfer! #:channel 0 #:dst #x06000000 #:src r0 #:control (bit-and #x0000C5FF (mmio16 DMA0CNT_H)))
       (set! (mmio16 DMA0CNT_H) (bit-and #x00007FFF (mmio16 DMA0CNT_H)))
+      (dma-transfer! #:channel 0 #:dst #x06000000 #:src r0 #:control (bit-and #x00007FFF (mmio16 DMA0CNT_H)))
       (set! (mmio16 WAITCNT) #x00004014)
       (set! r0 r13)
       (set! (-> r0 :offset_0x0 :u32) #x0)
@@ -860,7 +881,9 @@
   (defsub-thumb16 dma_channel_transfer_8003650 (isa 'thumb16) (entry #x08003650) (calls ewram_state_helper_8006088 ewram_state_helper_800655C rom_thumb_helper_80F9018 iwram_state_update_8003ADC) #:params () #:returns ()
     (decompiled-pseudo-code
       (set! (mmio16 DMA0CNT_H) (bit-and #x0000C5FF (mmio16 DMA0CNT_H)))
+      (dma-transfer! #:channel 0 #:dst #x06000000 #:src r0 #:control (bit-and #x0000C5FF (mmio16 DMA0CNT_H)))
       (set! (mmio16 DMA0CNT_H) (bit-and #x00007FFF (mmio16 DMA0CNT_H)))
+      (dma-transfer! #:channel 0 #:dst #x06000000 #:src r0 #:control (bit-and #x00007FFF (mmio16 DMA0CNT_H)))
       (set! r1 (mmio16 DMA0CNT_H))
       (set! r3 (IWRAM_PTR #x03001CB0))
       (when (!= IWRAM_PTR #x0)

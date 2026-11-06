@@ -83,9 +83,7 @@
         (for-loop "i=0,#src-1")
         (if-cond (> addr (- (+ 19968 (* 64 offset)) 1))))
       (decompiled-pseudo-code
-        (set! offset (- (-> src :h) 128))
-        (set! addr (or (and (> offset 0) 19968) 0))
-        (set! offset (call max offset))
+        (let ([offset (- (-> src :h) 128)] [addr (or (and (> offset 0) 19968) 0)]) (set! offset (call max offset)))
         (set! src (-> src :bytes))
         (for-range i 0 (- (len src) 1) (call poke addr (call ord src (+ i 1))) (+= addr 1) (when (> addr (- (+ 19968 (* 64 offset)) 1)) (set! addr 0))))
       (body-lines
@@ -109,8 +107,7 @@
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! offset (- (-> src :h) 128))
-        (call memcpy 24576 19968 (* 64 offset))
+        (let ([offset (- (-> src :h) 128)]) (call memcpy 24576 19968 (* 64 offset)))
         (call spr 0 0 offset 16 16))
       (body-lines
         "function draw_gfx(src)"
@@ -191,10 +188,8 @@
       (structured-ast
         (seq-block 10))
       (decompiled-pseudo-code
-        (set-values! (mouse_ttl mouse_x mouse_y) (0 0 0))
-        (set-values! (anm_ttl menus) (0))
-        (set-values! (mouse_acc keyboard_mode) ((call mid (call dget 39)) (call mid (call dget 34) 0 1)))
-        (set! menus (table))
+        (let ([mouse_ttl 0] [mouse_x 0] [mouse_y 0]) (set-values! (anm_ttl menus) (0)))
+        (let ([mouse_acc (call mid (call dget 39))] [keyboard_mode (call mid (call dget 34) 0 1)]) (set! menus (table)))
         (set! select (table))
         (set! title "sELECT")
         (set! entries (table "nEW gAME" "cONTROLS"))
@@ -296,8 +291,7 @@
         (return-expr void)
         (if-cond (< fade_ttl 0)))
       (decompiled-pseudo-code
-        (set-values! (args fade_ttl) ((table ..) 32))
-        (return)
+        (let ([args (table ..)] [fade_ttl 32]) (return))
         (call function)
         (-= fade_ttl 1)
         (when (< fade_ttl 0) (call next_state (call unpack args))))
@@ -321,11 +315,7 @@
         (return-expr void)
         (if-cond (or (> ttl 600) (call btnp 4))))
       (decompiled-pseudo-code
-        (set-values! (ttl msg_ttl max_msg) (0 0 2))
-        (set! punch_perfect (and (== kills monsters) (== ammoused 0)))
-        (set! secret_perfect (and (> all_secrets 0) (== secrets all_secrets)))
-        (set! msgs (table))
-        (table (:txt "completed:"))
+        (let ([ttl 0] [msg_ttl 0] [max_msg 2] [punch_perfect (and (== kills monsters) (== ammoused 0))] [secret_perfect (and (> all_secrets 0) (== secrets all_secrets))] [msgs (table)]) (table (:txt "completed:")))
         (table (:txt (aref _maps_label id)))
         (table (:txt (string-append "time: " (call time_tostr level_time))))
         (table (:txt (string-append "kills: " (string-append kills (string-append "/" monsters)))))
@@ -390,8 +380,7 @@
         (return-expr void)
         (if-cond (or (> ttl 3000) (call btnp 4))))
       (decompiled-pseudo-code
-        (set-values! (ttl t creditsi) (0 (table) 0))
-        (return)
+        (let ([ttl 0] [t (table)] [creditsi 0]) (return))
         (call function)
         (when (or (or (> ttl 3000) (call btnp 4)) (call btnp 5)) (call next_state start_state)))
       (body-lines
@@ -412,8 +401,7 @@
       (structured-ast
         (for-loop "i=0,127"))
       (decompiled-pseudo-code
-        (set-values! (args ttl r h rr) ((call pack ..) 30 (table) (table) 0))
-        (for-range i 0 127 (set! rr (call lerp rr (call rnd 0.2) 0.1)) (set-values! ((aref r i) (aref h i)) ((+ 0.05 rr) 0))))
+        (let ([args (call pack ..)] [ttl 30] [r (table)] [h (table)] [rr 0]) (for-range i 0 127 (set! rr (call lerp rr (call rnd 0.2) 0.1)) (set-values! ((aref r i) (aref h i)) ((+ 0.05 rr) 0)))))
       (body-lines
         "function slicefade_state(...)"
         "local args,ttl,r,h,rr=pack(...),30,{},{},0"
@@ -464,8 +452,7 @@
         (call cartdata mod_name)
         (when (== (call dget 39) 0) (call dset 39 8))
         (call switch_scheme (call dget 34))
-        (set! addr 12800)
-        (for-range i 0 (len snd) (call poke2 (+ addr (* i 2)) (call tonum (string-append "0x" (call sub snd (+ (* i 4) 1) (+ (* i 4) 4)))))))
+        (let ([addr 12800]) (for-range i 0 (len snd) (call poke2 (+ addr (* i 2)) (call tonum (string-append "0x" (call sub snd (+ (* i 4) 1) (+ (* i 4) 4))))))))
       (body-lines
         "function _init()"
         "poke(0x5f36,0x10)"
@@ -523,8 +510,7 @@
       (structured-ast
         (for-loop "i=1,#s"))
       (decompiled-pseudo-code
-        (set! q "")
-        (for-range i 1 (len s) (set! c (call sub s i i)) (set! q (string-append q (or (and (== c " ") c) "?")))))
+        (let ([q ""]) (for-range i 1 (len s) (let ((c (call sub s i i))) (set! q (string-append q (or (and (== c " ") c) "?")))))))
       (body-lines
         "function masked(s)"
         "local q=\"\""

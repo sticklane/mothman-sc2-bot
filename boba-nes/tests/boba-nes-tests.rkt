@@ -2584,7 +2584,125 @@
     (check-true (> (hash-ref res 'pseudo-code-count) 0))
     (check-true (> (hash-ref res 'compiled-inst-count) 0))))
 
+;; ============================================================================
+;; 42. Phase 3 High-Level Intrinsics (mem-fill!, mem-copy!, dma-transfer!,
+;;     enum-constants), Layer 10 Cross-Target Subroutine Transpiler &
+;;     Layer 11 Bitvector Symbolic Equivalence Verifier
+;; ============================================================================
+(test-case "42. Phase 3 Intrinsics & Symbolic Enums, Layer 10 Cross-Target Transpiler & Layer 11 Bitvector Symbolic Equivalence Verifier"
+  ;; 1. Phase 3 Intrinsics & Enum Constants across NES, GB, SNES, GBA & N64 whole-ROM modules
+  (define smb-str (file->string (build-path "examples" "decompiled" "nes_super_mario_bros_whole_rom.rkt")))
+  (check-true (string-contains? smb-str "(enum-constants"))
+  (check-true (string-contains? smb-str "(game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))"))
+  (check-true (string-contains? smb-str "(joypad-mask-enum (#x80 JOY_BTN_A)"))
+  (check-true (string-contains? smb-str "(idiom-joypad-poll #:bank #x00 #:pc #x8E6D #:reg JOY1)"))
+  (check-true (string-contains? smb-str "(mem-fill! (aref oam #x0200 Y) #xF8 INY)"))
+  (check-true (string-contains? smb-str "(mem-copy! (aref wram #x0300 Y) (aref rom #x831D Y) DEY)"))
+  (check-true (string-contains? smb-str "(mem-fill! (deref-indy zp_ptr_06 Y) #x00 DEY)"))
+
+  (define gb-tetris-str (file->string (build-path "examples" "decompiled" "gb_tetris_whole_rom.rkt")))
+  (check-true (string-contains? gb-tetris-str "(enum-constants"))
+  (check-true (string-contains? gb-tetris-str "(idiom-joypad-poll #:bank #x00 #:pc #x29AA #:reg JOYP)"))
+  (check-true (string-contains? gb-tetris-str "(mem-fill! (deref HL--) #x00 LD_HLD_A)"))
+  (check-true (string-contains? gb-tetris-str "(mem-copy! (deref HL++) (deref DE) LD_HLI_A)"))
+
+  (define smw-str (file->string (build-path "examples" "decompiled" "snes_super_mario_world_whole_rom.rkt")))
+  (check-true (string-contains? smw-str "(enum-constants"))
+  (check-true (string-contains? smw-str "(dma-transfer! #:channel 1 #:trigger MDMAEN #:mask #x2)"))
+  (check-true (string-contains? smw-str "(mem-copy! #:dst wram #:src rom"))
+  (check-true (string-contains? smw-str "(mem-fill! #:dst wram #:val #x00"))
+
+  (define fusion-str (file->string (build-path "examples" "decompiled" "gba_metroid_fusion_whole_rom.rkt")))
+  (check-true (string-contains? fusion-str "(enum-constants"))
+  (check-true (string-contains? fusion-str "(dma-transfer! #:channel 3 #:dst (shl #x80 18) #:src r13 #:control #x85010000)"))
+  (check-true (string-contains? fusion-str "(mem-copy! #:dst r0 #:src r1"))
+  (check-true (string-contains? fusion-str "(mem-fill! #:dst r0 #:val #x0"))
+
+  (define sm64-str (file->string (build-path "examples" "decompiled" "n64_super_mario_64_whole_rom.rkt")))
+  (check-true (string-contains? sm64-str "(enum-constants"))
+  (check-true (string-contains? sm64-str "(dma-transfer! #:engine 'PI_CART_DMA #:dram-addr v0"))
+  (check-true (string-contains? sm64-str "(mem-fill! #:dst a0 #:val 0"))
+  (check-true (string-contains? sm64-str "(mem-copy! #:dst a0 #:src a1"))
+
+  ;; 2. Extended Layer 8: `compile-pseudo-code->insts` with `let`, `mem-fill!`, `mem-copy!`, `dma-transfer!`, and symbolic enums
+  (for ([tgt (in-list '(nes gb snes gba n64))])
+    (define p3-insts
+      (compile-pseudo-code->insts
+       '(decompiled-pseudo-code
+          (let ([tmp_state STATE_02_GAMEPLAY]
+                [btn_mask  JOY_BTN_A])
+            (set! (wram #x0770) tmp_state)
+            (set! A btn_mask))
+          (mem-fill! (wram #x0200) #xF8 64)
+          (mem-copy! (wram #x0300) (rom #x8000) 32)
+          (dma-transfer! #:channel 0 #:src #x0200 #:dst OAMDMA #:count 256)
+          (return))
+       #:target tgt))
+    (check-true (and (list? p3-insts) (> (length p3-insts) 6))
+                (format "Expected Phase 3 intrinsics to compile cleanly on target ~a" tgt)))
+
+  ;; 3. Layer 10: Cross-Target Subroutine & Hardware Idiom Transpiler (`transpile-subroutine-across-targets`)
+  (define nes-sub
+    '(defsub nmi_dma_sync #:addr #x8082 #:params (A X) #:returns (A)
+       (decompiled-pseudo-code
+         (await-mmio! PPUSTATUS plus/positive)
+         (set! PPUCTRL #x90)
+         (when (== (wram #x0770) STATE_02_GAMEPLAY)
+           (set! A JOY1))
+         (dma-transfer! #:channel 0 #:src #x0200 #:dst OAMDMA #:count 256)
+         (return))))
+
+  (for ([pair (in-list '((nes gba (r0 r1))
+                         (nes snes (A X))
+                         (nes n64 (v0 a0))
+                         (nes gb (A B))))])
+    (define from-t     (first pair))
+    (define to-t       (second pair))
+    (define exp-params (third pair))
+    (define tr-res (transpile-subroutine-across-targets nes-sub #:from-target from-t #:to-target to-t))
+    (check-true (hash-ref tr-res 'valid?))
+    (check-equal? (hash-ref tr-res 'sub-name) 'nmi_dma_sync)
+    (check-equal? (hash-ref tr-res 'from-target) from-t)
+    (check-equal? (hash-ref tr-res 'to-target) to-t)
+    (check-equal? (hash-ref tr-res 'transpiled-params) exp-params)
+    (check-true (pair? (hash-ref tr-res 'transpiled-pseudo-code)))
+    (check-true (> (hash-ref tr-res 'instruction-count) 4)))
+
+  ;; 4. Layer 11: Bitvector Symbolic Equivalence Verifier (`verify-pseudo-code-equivalence`) across all targets
+  (define eq-nes
+    (verify-pseudo-code-equivalence
+     '(decompiled-pseudo-code
+        (set! A #x10)
+        (+= A #x05)
+        (set! (zp #x12) A)
+        (set! (u16-zp #x06) #x0700)
+        (return A))
+     '(decompiled-pseudo-code
+        (let ([tmp (+ #x10 #x05)])
+          (set! A tmp)
+          (set! (zp #x12) tmp)
+          (set! (u16-zp #x06) #x0700)
+          (return tmp)))
+     #:target 'nes))
+  (check-true (hash-ref eq-nes 'equivalent?))
+  (check-true (hash-ref eq-nes 'mmio-writes-match?))
+  (check-true (hash-ref eq-nes 'mem-writes-match?))
+  (check-true (hash-ref eq-nes 'return-regs-match?))
+  (check-true (> (hash-ref eq-nes 'compiled-inst-count) 0))
+
+  (for ([tgt (in-list '(gb snes gba n64))])
+    (define eq-self
+      (verify-pseudo-code-equivalence
+       '(decompiled-pseudo-code
+          (set! A #x24)
+          (set! (zp #x04) A)
+          (return A))
+       #:target tgt))
+    (check-true (hash-ref eq-self 'equivalent?)
+                (format "Expected symbolic equivalence verification to pass on target ~a" tgt))))
+
 (printf "\nAll #lang boba-nes graded typechecker, PLT error diagnostics/resugaring, banked cartridge, authentic CHR, whole-ROM decompiler/recompiler, continuous .fm2 TAS lockstep, and 74 Multi-Architecture Side-by-Side Games (14 NES + 10 GB + 10 GBC + 10 PICO-8/RP2040 + 10 SNES + 10 GBA + 10 N64) tests PASSED (~a assertions)!\n"
         total-checks)
+
 
 

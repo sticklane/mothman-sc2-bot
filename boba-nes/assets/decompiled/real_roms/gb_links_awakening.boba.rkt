@@ -64,7 +64,7 @@
     (structured-conditionals 32)
     (structured-guard-returns 9)
     (lifted-state-machines 16)
-    (lifted-high-level-idioms 36))
+    (lifted-high-level-idioms 40))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (symbolic-mmio-xref
     (mmio-reg BCPS #:accesses 7)
@@ -147,7 +147,10 @@
       (wram-var wram_state_D600 #:addr #xD600 #:accesses 61)
       (wram-var wram_state_C11C #:addr #xC11C #:accesses 49)
       (wram-var wram_state_D368 #:addr #xD368 #:accesses 43)
-      (wram-var wram_state_C167 #:addr #xC167 #:accesses 42)))
+      (wram-var wram_state_C167 #:addr #xC167 #:accesses 42))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_04B2 #:bank 0 #:dispatch-pc #x04B2 #:mechanism rst-inline-table #:cases
       ((case 0 -> game_logic_step_b0_2E6C)
@@ -318,7 +321,11 @@
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0B24 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0B2D #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0B42 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0B77 #:reg MBC_ROM_BANK))
+    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0B77 #:reg MBC_ROM_BANK)
+    (idiom-joypad-poll #:bank #x00 #:pc #x2808 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x280A #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x2814 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x2816 #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 3 #:params () #:returns () #:calls (state_table_dispatch_b0_2872) #:mmio ()
       (decompiled-pseudo-code
@@ -2852,6 +2859,7 @@
             (set! E #x10)
             (set! HL #xD110)
             (loop-counted #:step LD_HLI_A #:while (!= E #x00)
+              (mem-fill! (deref HL++) (- A (deref HL)) LD_HLI_A)
               (set! (deref HL++) (- A (deref HL)))
               (-= E 1))
             (set! HL #xC440)

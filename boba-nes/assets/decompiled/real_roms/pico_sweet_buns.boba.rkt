@@ -380,8 +380,7 @@
         (if-cond (== (aref island id) isle))
         (for-loop "id in pairs(alive)"))
       (decompiled-pseudo-code
-        (set! isle (aref island id))
-        (when (aref awake isle) (set-values! ((aref island_sframes isle) (aref awake isle)) (0)) for))
+        (let ([isle (aref island id)]) (when (aref awake isle) (set-values! ((aref island_sframes isle) (aref awake isle)) (0)) for)))
       (body-lines
         "  local function sleep(id)"
         "    local isle = island[id]"
@@ -401,8 +400,7 @@
         (if-cond (== (aref island id) isle))
         (for-loop "id in pairs(alive)"))
       (decompiled-pseudo-code
-        (set! isle (aref island id))
-        (when (and (not (aref awake isle)) (aref dynamic isle)) (set! (aref awake isle) #t) for))
+        (let ([isle (aref island id)]) (when (and (not (aref awake isle)) (aref dynamic isle)) (set! (aref awake isle) #t) for)))
       (body-lines
         "  local function wake(id)"
         "    local isle = island[id]"
@@ -497,7 +495,7 @@
         (aref imass id1)
         (set-values! (jn3 jn6) ((- (* rx1 ny) (* ry1 nx)) (- (* ry2 nx) (* rx2 ny))))
         (when (>= (+ (- (- (+ (+ (* nx vx1) (* ny vy1)) (* jn3 va1)) (* nx vx2)) (* ny vy2)) (* jn6 va2)) 0) (return #f))
-        (when (> (+ (call abs lambdan) (call abs lambdat)) 0) (set-values! (px py) ((- (* nx lambdan) (* ny lambdat)) (+ (* ny lambdan) (* nx lambdat)))) (set-values! (vx1 vy1 va1) ((call apply_impulse id1 px py (- (* rx1 py) (* ry1 px))))) (set-values! (vx2 vy2 va2) ((call apply_impulse id2 (- px) (- py) (- (* ry2 px) (* rx2 py)))))))
+        (when (> (+ (call abs lambdan) (call abs lambdat)) 0) (let ([px (- (* nx lambdan) (* ny lambdat))] [py (+ (* ny lambdan) (* nx lambdat))]) (set-values! (vx1 vy1 va1) ((call apply_impulse id1 px py (- (* rx1 py) (* ry1 px)))))) (set-values! (vx2 vy2 va2) ((call apply_impulse id2 (- px) (- py) (- (* ry2 px) (* rx2 py)))))))
       (body-lines
         "      eval=function(dt, dist, px1, py1, px2, py2)"
         "        local rx1, ry1, rx2, ry2, vx1, vy1, va1, vx2, vy2, va2, imass1, imoi1, imass2, imoi2 ="
@@ -564,12 +562,9 @@
         (for-loop "i=1,nv"))
       (decompiled-pseudo-code
         (set! args (or args (table)))
-        (set! id (call next dead))
-        (when id (set! (aref dead id) nil))
-        (set! verts (or (and (-> args :verts) (-> args :verts)) (call rectangle 1 1)))
-        (set-values! ((aref mass id) (aref geom id)) ((or (-> args :mass) 1) (call geometry (-> verts :numv) (-> verts :x) (-> verts :y) (-> verts :r))))
-        (set! moi (-> args :moi))
-        (when (not moi) (set! moi 0) (when (> (aref mass id) 0) (set-values! (nv vx vy) ((-> (aref geom id) :numv))) (for-range i 1 nv (set-values! (vx vy) ((aref (-> (aref geom id) :x) i) (aref (-> (aref geom id) :y) i))) (+= moi (+ (expt vx 2) (expt vy 2)))))))
+        (let ([id (call next dead)]) (when id (set! (aref dead id) nil)))
+        (let ([verts (or (and (-> args :verts) (-> args :verts)) (call rectangle 1 1))]) (set-values! ((aref mass id) (aref geom id)) ((or (-> args :mass) 1) (call geometry (-> verts :numv) (-> verts :x) (-> verts :y) (-> verts :r)))))
+        (let ([moi (-> args :moi)]) (when (not moi) (set! moi 0) (when (> (aref mass id) 0) (set-values! (nv vx vy) ((-> (aref geom id) :numv))) (for-range i 1 nv (set-values! (vx vy) ((aref (-> (aref geom id) :x) i) (aref (-> (aref geom id) :y) i))) (+= moi (+ (expt vx 2) (expt vy 2))))))))
       (body-lines
         "    add_body=function(args)"
         "      args = args or {}"
@@ -748,8 +743,7 @@
         (for-loop "i=1,nv"))
       (decompiled-pseudo-code
         (set-values! (sx sy ox oy) ((* r (or sx 1)) (* r (or sy 1)) (or ox 0) (or oy 0)))
-        (set-values! (x y angle da) ((table) (table) (or (and (== nv 4) 0.78533935546875) 0) (/ (- 6.283172607421875) nv)))
-        (for-range i 1 nv (set-values! ((aref x i) (aref y i)) ((call transform 1 0 ox oy angle))) (*= (aref x i) sx) (+= angle da)))
+        (let ([x (table)] [y (table)] [angle (or (and (== nv 4) 0.78533935546875) 0)] [da (/ (- 6.283172607421875) nv)]) (for-range i 1 nv (set-values! ((aref x i) (aref y i)) ((call transform 1 0 ox oy angle))) (*= (aref x i) sx) (+= angle da))))
       (body-lines
         "function ngon(r, nv, sx, sy, ox, oy)"
         "  sx, sy, ox, oy = r*(sx or 1), r*(sy or 1), ox or 0, oy or 0"
@@ -798,9 +792,7 @@
         (return-expr (table (:numv (+ nv 2)) (:x x) (:y y))))
       (decompiled-pseudo-code
         (+= nv (modulo nv 2))
-        (set! sphere (call ngon (/ w 2) nv 1 1 ox oy))
-        (set-values! (numv sx sy x y) ((-> sphere :numv) (-> sphere :x) (-> sphere :y) (table) (table)))
-        (for-range i 1 (+ (/ nv 2) 1) (aref x (+ (len x) 1)))
+        (let ([sphere (call ngon (/ w 2) nv 1 1 ox oy)] [numv (-> sphere :numv)] [sx (-> sphere :x)] [sy (-> sphere :y)] [x (table)] [y (table)]) (for-range i 1 (+ (/ nv 2) 1) (aref x (+ (len x) 1))))
         (aref x (+ (len x) 1))
         (for-range i (+ (/ nv 2) 2) nv (aref x (+ (len x) 1)))
         (aref x (+ (len x) 1))
@@ -1115,11 +1107,7 @@
       (decompiled-pseudo-code
         (set! scale (or scale 1))
         (*= w (* scale 4))
-        (set-values! (cs ss) ((* (call cos rot) |.|) (* (call sin rot) |.|)))
-        (set-values! (sx sy) ((+ mx (* cs (- w))) (+ my (* ss (- w)))))
-        (set! hx (or (and flip (- w)) w))
-        (set! halfw (- w))
-        (for-range py (- y w) (+ y w) (call tline (- x hx) py (+ x hx) py (- sx (* ss halfw)) (+ sy (* cs halfw)) cs ss) (+= halfw 1)))
+        (let ([cs (* (call cos rot) |.|)] [ss (* (call sin rot) |.|)] [sx (+ mx (* cs (- w)))] [sy (+ my (* ss (- w)))] [hx (or (and flip (- w)) w)] [halfw (- w)]) (for-range py (- y w) (+ y w) (call tline (- x hx) py (+ x hx) py (- sx (* ss halfw)) (+ sy (* cs halfw)) cs ss) (+= halfw 1))))
       (body-lines
         "function pd_rotate(x,y,rot,mx,my,w,flip,scale)"
         "  scale=scale or 1"
@@ -1710,9 +1698,7 @@
         (if-cond is_highlighted))
       (decompiled-pseudo-code
         (when (== angle nil) (set! angle 0))
-        (set! ball (aref ball_conf ball_idx))
-        (set! c (shl (aref ball COLOR_FG) 4))
-        (when is_highlighted (call circfill x y (+ (+ (aref ball RADIUS) 4) (* (call sin (* (call t) 0.8)) 2)) 7)))
+        (let ([ball (aref ball_conf ball_idx)] [c (shl (aref ball COLOR_FG) 4)]) (when is_highlighted (call circfill x y (+ (+ (aref ball RADIUS) 4) (* (call sin (* (call t) 0.8)) 2)) 7))))
       (body-lines
         "function draw_ball(ball_idx, x, y, angle, is_highlighted)"
         "  if angle == nil then angle = 0 end"
@@ -1967,7 +1953,7 @@
       (structured-ast
         (for-loop "i=#t,1,-1"))
       (decompiled-pseudo-code
-        (for-range i (len t) 1 (- 1) (set! j (+ (call flr (call rnd i)) 1)) (set-values! ((aref t i) (aref t j)) ((aref t j) (aref t i)))))
+        (for-range i (len t) 1 (- 1) (let ((j (+ (call flr (call rnd i)) 1))) (set-values! ((aref t i) (aref t j)) ((aref t j) (aref t i))))))
       (body-lines
         "function shuffle(t)"
         " -- fisher-yates"
@@ -2002,8 +1988,7 @@
       (structured-ast
         (for-loop "i in all(initial_bag)"))
       (decompiled-pseudo-code
-        (set! initial_bag shuffle)
-        (foreach i initial_bag (call add bag i)))
+        (let ([initial_bag shuffle]) (foreach i initial_bag (call add bag i))))
       (body-lines
         "function add_balls_to_bag(bag)"
         "  local initial_bag=shuffle{1,1,2,2,3,3,4,4,5}"

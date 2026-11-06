@@ -64,7 +64,7 @@
     (structured-conditionals 30)
     (structured-guard-returns 18)
     (lifted-state-machines 16)
-    (lifted-high-level-idioms 36))
+    (lifted-high-level-idioms 38))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (symbolic-mmio-xref
     (mmio-reg BGP #:accesses 1)
@@ -132,7 +132,10 @@
       (wram-var wram_state_DFE8 #:addr #xDFE8 #:accesses 13)
       (wram-var wram_state_DFE1 #:addr #xDFE1 #:accesses 10)
       (wram-var wram_state_D00D #:addr #xD00D #:accesses 7)
-      (wram-var wram_state_DF7F #:addr #xDF7F #:accesses 7)))
+      (wram-var wram_state_DF7F #:addr #xDF7F #:accesses 7))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_0457 #:bank 0 #:dispatch-pc #x0457 #:mechanism rst-28-inline-table #:cases
       ((case 0 -> game_logic_step_b0_0492)
@@ -243,6 +246,8 @@
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x0265 #:kind block-fill)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x0271 #:kind block-fill)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x027A #:kind block-fill)
+    (idiom-joypad-poll #:bank #x00 #:pc #x05F0 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x05F4 #:reg JOYP)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x0B46 #:kind block-fill)
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x0C19)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x0C99 #:kind block-fill)
@@ -266,8 +271,8 @@
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x19DE)
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x19F9)
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x1A14)
-    (idiom-sm83-bcd-math #:bank #x00 #:pc #x1A2F)
-    (idiom-sm83-bcd-math #:bank #x00 #:pc #x1A4A))
+    (idiom-joypad-poll #:bank #x00 #:pc #x2320 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x2322 #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 3 #:params () #:returns () #:calls (lcd_ppu_control_b0_01E8) #:mmio ()
       (decompiled-pseudo-code
@@ -520,6 +525,7 @@
             (set! C #x10)
             (set! B #x00)
             (loop-counted #:step LD_HLD_A #:while (!= B #x00)
+              (mem-fill! (deref HL--) #x00 LD_HLD_A)
               (set! (deref HL--) #x00)
               (-= B 1))
             (-= C 1)

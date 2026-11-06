@@ -55,7 +55,7 @@
     (structured-conditionals 11)
     (structured-guard-returns 0)
     (lifted-state-machines 12)
-    (lifted-high-level-idioms 9)
+    (lifted-high-level-idioms 10)
     (idioms
       (indirect-jmp-count 1)
       (rts-dispatch-count 0)
@@ -131,7 +131,10 @@
       (table table_wram_0304 #:addr #x0304 #:accesses 26)
       (table table_wram_03E8 #:addr #x03E8 #:accesses 26)
       (table table_wram_0360 #:addr #x0360 #:accesses 24)
-      (table table_wram_03EB #:addr #x03EB #:accesses 20)))
+      (table table_wram_03EB #:addr #x03EB #:accesses 20))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))
+      (joypad-mask-enum (#x80 JOY_BTN_A) (#x40 JOY_BTN_B) (#x20 JOY_BTN_SELECT) (#x10 JOY_BTN_START) (#x08 JOY_BTN_UP) (#x04 JOY_BTN_DOWN) (#x02 JOY_BTN_LEFT) (#x01 JOY_BTN_RIGHT))))
   (state-machines
     (def-state-machine sm_b0_C169 #:bank 0 #:dispatch-pc #xC169 #:kind jmp-indirect-vector #:ptr-or-table #x9120 #:cases
       ((case 0 -> logic_routine_b0_A6C8)
@@ -193,6 +196,7 @@
     (idiom-zp-pointer-init #:bank #x00 #:pc #xC549 #:zp #x0D #:target-addr #x0400)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xC5BF #:zp #x0D #:target-addr #x0500)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xC81F #:zp #x04 #:target-addr #x0200)
+    (idiom-joypad-poll #:bank #x00 #:pc #xCB03 #:reg JOY1)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xCB35 #:zp #x01 #:target-addr #x807F))
   (jump-tables
     (jmp-indirect #:bank #x00 #:pc #xC459 #:ptr #xE8CC)
@@ -285,6 +289,7 @@
               (when (!= X (wram #x0781)) (goto loc_C041))
               (set! Y #xEC))
             (loop-counted #:step DEY #:while (!= Y #x00)
+              (mem-fill! (deref-indy zp_ptr_00 Y) #x00 DEY)
               (set! (deref-indy zp_ptr_00 Y) #x00)
               (-= Y 1))
             (-= zp_state_01 1)

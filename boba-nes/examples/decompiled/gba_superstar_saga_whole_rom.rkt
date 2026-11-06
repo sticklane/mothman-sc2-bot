@@ -185,6 +185,25 @@
   )
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror dispcnt_mirror_3000000 #:addr #x03000000 #:mmio DISPCNT)
+    (mirror irq_ack_mirror_3007FF8 #:addr #x03007FF8 #:mmio IF)
+    (mirror bldcnt_mirror_3000050 #:addr #x03000050 #:mmio BLDCNT))
+  (state-variables
+    (state-var main_callback_iwram_3000004 #:addr #x03000004 #:accesses 52)
+    (state-var vblank_handler_iwram_3007FFC #:addr #x03007FFC #:accesses 44))
+  (timers
+    (timer frame_timer_iwram_3000010 #:addr #x03000010 #:decrements 14)
+    (timer anim_timer_ewram_2000100 #:addr #x02000100 #:decrements 9))
+  (indexed-tables
+    (table oam_shadow_table_3002000 #:addr #x03002000 #:accesses 64)
+    (table entity_slot_table_2020000 #:addr #x02020000 #:accesses 48))
+  (enum-constants
+    (enum-group IRQ_MASK (IRQ_VBLANK #x0001) (IRQ_HBLANK #x0002) (IRQ_VCOUNT #x0004) (IRQ_DMA3 #x0800) (IRQ_KEYPAD #x1000) (IRQ_GAMEPAK #x2000))
+    (enum-group DISPCNT_MODE (MODE_0 #x0000) (MODE_3 #x0003) (MODE_4 #x0004) (OBJ_1D_MAP #x0040) (FORCED_BLANK #x0080) (OBJ_ENABLE #x1000))
+    (enum-group DMA_CONTROL (DMA_ENABLE #x80000000) (DMA_32BIT #x04000000) (SRC_FIXED #x01000000))))
+
 (define-gba-lifted-lz77-assets
   (lz77-asset (rom-addr "0x08314F80") (rom-offset #x314f80) (decompressed-bytes 1280) (kind 'vram-tile-chr-block))
   (lz77-asset (rom-addr "0x08318698") (rom-offset #x318698) (decompressed-bytes 1280) (kind 'vram-tile-chr-block))
@@ -950,8 +969,11 @@
     (decompiled-pseudo-code
       (set! (-> r1 :offset_0x0 :u8) (bit-ior (mmio8 IWRAM_PTR) #x1))
       (set! (mmio16 DMA0CNT_H) (bit-and (+ #x0000C5FF #x0) (mmio16 DMA0CNT_H)))
+      (dma-transfer! #:channel 0 #:dst #x06000000 #:src r0 #:control (bit-and (+ #x0000C5FF #x0) (mmio16 DMA0CNT_H)))
       (set! (mmio16 DMA0CNT_H) (bit-and (+ #x00007FFF #x0) (mmio16 DMA0CNT_H)))
+      (dma-transfer! #:channel 0 #:dst #x06000000 #:src r0 #:control (bit-and (+ #x00007FFF #x0) (mmio16 DMA0CNT_H)))
       (set! (mmio16 DMA1CNT_H) (bit-and (+ #x0000C5FF #x0) (mmio16 DMA1CNT_H)))
+      (dma-transfer! #:channel 1 #:dst #x06000000 #:src r0 #:control (bit-and (+ #x0000C5FF #x0) (mmio16 DMA1CNT_H)))
     )
     (insn "0x080189C4" #xB510 (THUMB-PUSH "{r4 lr}"))
     (insn "0x080189C6" #x491A (THUMB-LDR-pc r1 [pc #x68] #:literal #x0300034C #:sym 'IWRAM_PTR))

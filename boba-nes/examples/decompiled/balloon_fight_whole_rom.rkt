@@ -55,7 +55,7 @@
     (structured-conditionals 13)
     (structured-guard-returns 3)
     (lifted-state-machines 8)
-    (lifted-high-level-idioms 19)
+    (lifted-high-level-idioms 20)
     (idioms
       (indirect-jmp-count 1)
       (rts-dispatch-count 0)
@@ -130,7 +130,10 @@
       (table table_wram_0436 #:addr #x0436 #:accesses 43)
       (table table_wram_04A4 #:addr #x04A4 #:accesses 41)
       (table table_wram_042D #:addr #x042D #:accesses 31)
-      (table table_wram_0424 #:addr #x0424 #:accesses 30)))
+      (table table_wram_0424 #:addr #x0424 #:accesses 30))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))
+      (joypad-mask-enum (#x80 JOY_BTN_A) (#x40 JOY_BTN_B) (#x20 JOY_BTN_SELECT) (#x10 JOY_BTN_START) (#x08 JOY_BTN_UP) (#x04 JOY_BTN_DOWN) (#x02 JOY_BTN_LEFT) (#x01 JOY_BTN_RIGHT))))
   (state-machines
     (def-state-machine sm_b0_C3B2 #:bank 0 #:dispatch-pc #xC3B2 #:kind jmp-indirect-vector #:ptr-or-table #x0025 #:cases
       ((case 0 -> logic_routine_b0_C3C9)
@@ -201,6 +204,7 @@
     (idiom-zp-pointer-init #:bank #x00 #:pc #xD91B #:zp #x1D #:target-addr #xD92C)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xE467 #:zp #x21 #:target-addr #xE043)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xE474 #:zp #x21 #:target-addr #xE079)
+    (idiom-joypad-poll #:bank #x00 #:pc #xE776 #:reg JOY1)
     (idiom-u16-add-with-carry #:bank #x00 #:pc #xF159)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xF68F #:zp #xF9 #:target-addr #x4004))
   (jump-tables
@@ -284,6 +288,7 @@
             (set! SP #xFF)
             (set! X #x12)
             (loop-counted #:step INX #:while (!= X #x00)
+              (mem-fill! (aref ppuctrl_mirror_00 X) #x00 INX)
               (set! (aref ppuctrl_mirror_00 X) #x00 #:flags (PPUCTRL_CLEAR))
               (+= X 1))
             (set! X #x02)
@@ -293,6 +298,7 @@
             (when (< A #x00) (goto loc_C077))
             (set! X #x00)
             (loop-counted #:step INX #:while (!= X #x00)
+              (mem-fill! (aref ppuctrl_mirror_00 X) #x00 INX)
               (set! (aref ppuctrl_mirror_00 X) #x00 #:flags (PPUCTRL_CLEAR))
               (set! (aref wram #x0700 X) (aref ppuctrl_mirror_00 X))
               (+= X 1)))
@@ -431,6 +437,7 @@
             (call logic_routine_b0_C154)
             (set! Y #x00)
             (loop-counted #:step INX #:while (!= Y (zp #x56))
+              (mem-copy! (aref wram #x0300 X) (aref wram #x0057 Y) INX)
               (set! (aref wram #x0300 X) (aref wram #x0057 Y))
               (+= X 1)
               (+= Y 1))
@@ -462,6 +469,7 @@
             (set! X (zp #x53))
             (set! Y #x00)
             (loop-counted #:step INX #:while (!= Y ppuaddr_mirror_12)
+              (mem-copy! (aref wram #x0300 X) (deref-indy zp_ptr_21 Y) INX)
               (set! (aref wram #x0300 X) (deref-indy zp_ptr_21 Y))
               (+= X 1)
               (+= Y 1))
@@ -681,6 +689,7 @@
             (when (== (+ (shl (shl ppuaddr_mirror_13 #x01) #x01) ppuaddr_mirror_13) #x00) (goto loc_C5AC))
             (-= Y 1)
             (loop-counted #:step DEY #:while (!= Y #x00)
+              (mem-copy! (deref-indy zp_ptr_1F Y) (deref-indy zp_ptr_1D Y) DEY)
               (set! (deref-indy zp_ptr_1F Y) (deref-indy zp_ptr_1D Y))
               (-= Y 1))
             (set! (deref-indy zp_ptr_1F Y) (deref-indy zp_ptr_1D Y))
@@ -867,6 +876,7 @@
           (decompiled-pseudo-code
             (set! X #x01)
             (loop-counted #:step DEX #:while (>= X #x00)
+              (mem-fill! (aref wram #x0530 X) #xFF DEX)
               (set! (aref wram #x0530 X) #xFF)
               (set! (aref wram #x0544 X) (aref wram #x0530 X))
               (-= X 1))

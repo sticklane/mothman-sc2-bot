@@ -83,8 +83,7 @@
       (structured-ast
         (return-expr (+ (call frnd n) addval)))
       (decompiled-pseudo-code
-        (set! addval (or o 1))
-        (return (+ (call frnd n) addval)))
+        (let ([addval (or o 1)]) (return (+ (call frnd n) addval))))
       (body-lines
         "function frnda(n, o)"
         "\tlocal addval = o or 1"
@@ -101,8 +100,7 @@
         (if-cond (call frnd 100))
         (return-expr #t))
       (decompiled-pseudo-code
-        (set! c (or chance 50))
-        (when (< (call frnd 100) c) (return #t)))
+        (let ([c (or chance 50)]) (when (< (call frnd 100) c) (return #t))))
       (body-lines
         "function randc(chance)"
         "\tlocal c = chance or 50"
@@ -142,8 +140,7 @@
       (structured-ast
         (for-loop "i=0, count"))
       (decompiled-pseudo-code
-        (set! count (len t))
-        (for-range i 0 count (set! (aref t i) nil)))
+        (let ([count (len t)]) (for-range i 0 count (set! (aref t i) nil))))
       (body-lines
         "function table_clear(t)"
         "\tlocal count = #t"
@@ -231,7 +228,7 @@
         (if-cond (== letter j)))
       (decompiled-pseudo-code
         (call pal 7 color)
-        (for-range i 1 (len str) (set-values! (letter whichalpha) ((call sub str i i) (- 1))) (foreach j g_alphabet_sprites (+= whichalpha 1) (when (== letter j) (call spr (+ (+ 131 (* (call flr (/ whichalpha 9)) 16)) (modulo whichalpha 9)) (+ (- 64 (/ (* (len str) 8) 2)) (* (- i 1) 8)) y) break))))
+        (for-range i 1 (len str) (let ((letter (call sub str i i)) (whichalpha (- 1))) (foreach j g_alphabet_sprites (+= whichalpha 1) (when (== letter j) (call spr (+ (+ 131 (* (call flr (/ whichalpha 9)) 16)) (modulo whichalpha 9)) (+ (- 64 (/ (* (len str) 8) 2)) (* (- i 1) 8)) y) break)))))
       (body-lines
         "function printsprite(str, y, color)"
         "\tpal(7, color)"
@@ -300,8 +297,7 @@
       (structured-ast
         (if-cond (< (-> self :dur) (/ (-> self :dur_orig) 3))))
       (decompiled-pseudo-code
-        (set! color (-> self :col_main))
-        (when (< (-> self :dur) (/ (-> self :dur_orig) 3)) (set! color (-> self :col_sec))))
+        (let ([color (-> self :col_main)]) (when (< (-> self :dur) (/ (-> self :dur_orig) 3)) (set! color (-> self :col_sec)))))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color = self.col_main"
@@ -448,8 +444,7 @@
       (structured-ast
         (if-cond (> (-> self :time) (* (-> self :duration) |.|))))
       (decompiled-pseudo-code
-        (set-values! (color s2) ((-> self :color) (/ (-> self :size) 2)))
-        (when (> (-> self :time) (* (-> self :duration) |.|)) (set! color (-> self :color_sec))))
+        (let ([color (-> self :color)] [s2 (/ (-> self :size) 2)]) (when (> (-> self :time) (* (-> self :duration) |.|)) (set! color (-> self :color_sec)))))
       (body-lines
         "\t\tdraw=function(self)"
         "\t\t\tlocal color, s2 = self.color, self.size/2"
@@ -584,8 +579,7 @@
       (structured-ast
         (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set-values! (color color_second) (10 9))
-        (when (call randc) (set-values! (color color_second) (7 10))))
+        (let ([color 10] [color_second 9]) (when (call randc) (set-values! (color color_second) (7 10)))))
       (body-lines
         "function m_part_bomb_spark(x, y)"
         "\tlocal color, color_second = 10, 9"
@@ -617,8 +611,7 @@
       (structured-ast
         (if-cond (> (-> self :time) (* (-> self :duration) |.|))))
       (decompiled-pseudo-code
-        (set! color (-> self :color))
-        (when (> (-> self :time) (* (-> self :duration) |.|)) (set! color (-> self :color_sec))))
+        (let ([color (-> self :color)]) (when (> (-> self :time) (* (-> self :duration) |.|)) (set! color (-> self :color_sec)))))
       (body-lines
         "\tp.draw=function(self)"
         "\t\tlocal color = self.color"
@@ -636,7 +629,7 @@
         (for-loop "i=0,36")
         (if-cond (> i 30)))
       (decompiled-pseudo-code
-        (for-range i 0 36 (set-values! (size xoff yoff angleoff dur) (1 (call rnd 4) (call rnd 4) (call rnd |.|) (call rnd 8))) (when (> i 30) (set! dur (call rnd 1)) (set! size 2) (when (> i 15) (set! dur (call rnd 4))))))
+        (for-range i 0 36 (let ((size 1) (xoff (call rnd 4)) (yoff (call rnd 4)) (angleoff (call rnd |.|)) (dur (call rnd 8))) (when (> i 30) (set! dur (call rnd 1)) (set! size 2) (when (> i 15) (set! dur (call rnd 4)))))))
       (body-lines
         "function m_part_bloodsplash(x,y,angle)"
         ""
@@ -673,8 +666,7 @@
       (structured-ast
         (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! dir (call rnd |.|))
-        (when (call randc) (set! dir (- 0 dir))))
+        (let ([dir (call rnd |.|)]) (when (call randc) (set! dir (- 0 dir)))))
       (body-lines
         "function handle_slash_recovery(speed)"
         "\tlocal dir = rnd(.125)"
@@ -731,8 +723,7 @@
         (if-cond (call abs (- (-> p1 :slash_angle) reverse_angle)))
         (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! reverse_angle (call abs (+ (-> target :angle) |.|)))
-        (when (< (call abs (- (-> p1 :slash_angle) reverse_angle)) |.|) (call sfx 8) (call m_part_circle (-> target :x) (-> target :y) 6 10 7 5 1) (-> target :is_flying) #t (set! t_dir (call rnd |.|)) (when (call randc) (set! t_dir (- 0 t_dir)))))
+        (let ([reverse_angle (call abs (+ (-> target :angle) |.|))]) (when (< (call abs (- (-> p1 :slash_angle) reverse_angle)) |.|) (call sfx 8) (call m_part_circle (-> target :x) (-> target :y) 6 10 7 5 1) (-> target :is_flying) #t (let ([t_dir (call rnd |.|)]) (when (call randc) (set! t_dir (- 0 t_dir)))))))
       (body-lines
         "function attempt_deflect_target(target)"
         ""
@@ -844,8 +835,7 @@
         (if-cond (== angle |.|))
         (return-expr void))
       (decompiled-pseudo-code
-        (set! angle (-> entity :angle))
-        (when (== angle |.|) (return) (if (> angle |.|) (then (set! (-> entity :flipx) #t)) (else (set! (-> entity :flipx) #f)))))
+        (let ([angle (-> entity :angle)]) (when (== angle |.|) (return) (if (> angle |.|) (then (set! (-> entity :flipx) #t)) (else (set! (-> entity :flipx) #f))))))
       (body-lines
         "function a_doflipx(entity)"
         "\tlocal angle = entity.angle"
@@ -881,8 +871,7 @@
       (structured-ast
         (if-cond (< x bor_x1)))
       (decompiled-pseudo-code
-        (set-values! (was_constrained x y) (#f (-> obj :x) (-> obj :y)))
-        (when (< x bor_x1) (set-values! (x was_constrained) (bor_x1 #t)) (when (> x bor_x2) (set-values! (x was_constrained) (bor_x2 #t)))))
+        (let ([was_constrained #f] [x (-> obj :x)] [y (-> obj :y)]) (when (< x bor_x1) (set-values! (x was_constrained) (bor_x1 #t)) (when (> x bor_x2) (set-values! (x was_constrained) (bor_x2 #t))))))
       (body-lines
         "function constrain_to_borders(obj, bor_x1, bor_y1, bor_x2, bor_y2)"
         ""
@@ -998,8 +987,7 @@
       (decompiled-pseudo-code
         (call a_move_angle entity (-> entity :fly_speed))
         (*= (-> entity :fly_speed) |.|)
-        (set! was_reset #f)
-        (when (<= (-> entity :fly_speed) |.|) (call fly_reset entity) (set! was_reset #t)))
+        (let ([was_reset #f]) (when (<= (-> entity :fly_speed) |.|) (call fly_reset entity) (set! was_reset #t))))
       (body-lines
         "function a_fly(entity)"
         "\ta_move_angle(entity, entity.fly_speed)"
@@ -1037,9 +1025,7 @@
       (structured-ast
         (if-cond (- |.|)))
       (decompiled-pseudo-code
-        (set! angle_delta (- desired_angle cur_angle))
-        (set! turn_result 0)
-        (when (- |.|) (set! turn_result angle_delta) (when (> angle_delta |.|) (set! turn_result (- angle_delta 1)) (when (<= angle_delta (- |.|)) (set! turn_result (+ angle_delta 1))))))
+        (let ([angle_delta (- desired_angle cur_angle)] [turn_result 0]) (when (- |.|) (set! turn_result angle_delta) (when (> angle_delta |.|) (set! turn_result (- angle_delta 1)) (when (<= angle_delta (- |.|)) (set! turn_result (+ angle_delta 1)))))))
       (body-lines
         "function get_direction_to_turn(cur_angle, desired_angle)"
         "\tlocal angle_delta = desired_angle-cur_angle"
@@ -1062,8 +1048,7 @@
       (structured-ast
         (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! dir (- |.|))
-        (when (call randc) (set! dir |.|)))
+        (let ([dir (- |.|)]) (when (call randc) (set! dir |.|))))
       (body-lines
         "function get_rebound_angle_speed(angle, speed)"
         "\tlocal dir = -.125"
@@ -1303,8 +1288,7 @@
       (structured-ast
         (seq-block 10))
       (decompiled-pseudo-code
-        (set-values! (frame c_o) ((aref (-> (aref emotion_anims (-> self :curanim)) :frames) (-> self :curframe)) (- 4)))
-        (call pal 7 (-> self :color))
+        (let ([frame (aref (-> (aref emotion_anims (-> self :curanim)) :frames) (-> self :curframe))] [c_o (- 4)]) (call pal 7 (-> self :color)))
         (call spr frame void)
         (+ (-> (-> self :owner) :x) c_o)
         (- (+ (-> (-> self :owner) :y) c_o) 10)
@@ -1659,8 +1643,7 @@
       (structured-ast
         (seq-block 11))
       (decompiled-pseudo-code
-        (set! o (call m_object setx sety (table 99 99) #f))
-        (-> o :col_h)
+        (let ([o (call m_object setx sety (table 99 99) #f)]) (-> o :col_h))
         6
         (call function self)
         (set! (-> p1 :hp_cur) 2)
@@ -1768,8 +1751,7 @@
       (structured-ast
         (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! angle_adjust |.|)
-        (when (call randc) (set! angle_adjust (- 0 angle_adjust))))
+        (let ([angle_adjust |.|]) (when (call randc) (set! angle_adjust (- 0 angle_adjust)))))
       (body-lines
         "function a_random_turn(entity)"
         "\tlocal angle_adjust = .25"
@@ -1786,8 +1768,7 @@
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e (call m_enemy setx sety #t))
-        (-> e :head_shift)
+        (let ([e (call m_enemy setx sety #t)]) (-> e :head_shift))
         6)
       (body-lines
         "function m_enemy_villager(setx, sety)"
@@ -1986,8 +1967,7 @@
       (structured-ast
         (seq-block 4))
       (decompiled-pseudo-code
-        (set! e (call m_enemy setx sety))
-        (set-values! ((-> e :head_shift) (-> e :pcolor) (-> e :scolor) (-> e :alert_distance) (-> e :windup_time) (-> e :time_between_attacks) (-> e :attack_time) (-> e :attack_is_shot)) (4 14 13 60 30 60 30 #t)))
+        (let ([e (call m_enemy setx sety)]) (set-values! ((-> e :head_shift) (-> e :pcolor) (-> e :scolor) (-> e :alert_distance) (-> e :windup_time) (-> e :time_between_attacks) (-> e :attack_time) (-> e :attack_is_shot)) (4 14 13 60 30 60 30 #t))))
       (body-lines
         "function m_enemy_archer(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -2063,7 +2043,7 @@
         (if-cond (> (-> self :windup_time_rem) 0))
         (if-cond (== (-> self :desired_angle) |.|)))
       (decompiled-pseudo-code
-        (when (> (-> self :windup_time_rem) 0) (call set_outline) (set-values! (arrow_sprite doflipy) (40 #f)) (when (== (-> self :desired_angle) |.|) (set-values! (arrow_sprite doflipy) (41 #t)) (when (== (-> self :desired_angle) |.|) (set! arrow_sprite 41)))))
+        (when (> (-> self :windup_time_rem) 0) (call set_outline) (let ([arrow_sprite 40] [doflipy #f]) (when (== (-> self :desired_angle) |.|) (set-values! (arrow_sprite doflipy) (41 #t)) (when (== (-> self :desired_angle) |.|) (set! arrow_sprite 41))))))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tif self.windup_time_rem > 0 then"
@@ -2084,8 +2064,7 @@
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e (call m_enemy setx sety))
-        (set-values! ((-> e :head_shift) (-> e :pcolor)) (1 9)))
+        (let ([e (call m_enemy setx sety)]) (set-values! ((-> e :head_shift) (-> e :pcolor)) (1 9))))
       (body-lines
         "function m_enemy_wander(setx, sety)"
         "\tlocal e = m_enemy(setx, sety)"
@@ -2134,8 +2113,7 @@
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (set! e (call m_enemy setx sety))
-        (-> e :pcolor)
+        (let ([e (call m_enemy setx sety)]) (-> e :pcolor))
         8)
       (body-lines
         "function m_enemy_bomber(setx, sety)"
@@ -2257,8 +2235,7 @@
       (structured-ast
         (if-cond (-> self :flipx)))
       (decompiled-pseudo-code
-        (set! x_off (- 5))
-        (when (-> self :flipx) (set! x_off (- 3))))
+        (let ([x_off (- 5)]) (when (-> self :flipx) (set! x_off (- 3)))))
       (body-lines
         "\te.draw_class=function(self)"
         "\t\tlocal x_off = -5"
@@ -2275,8 +2252,7 @@
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e (call m_enemy_seeker setx sety))
-        (set-values! ((-> e :is_armored) (-> e :head_shift) (-> e :pcolor) (-> e :scolor) (-> e :speed_move_orig)) (#t 5 13 6 |.|))
+        (let ([e (call m_enemy_seeker setx sety)]) (set-values! ((-> e :is_armored) (-> e :head_shift) (-> e :pcolor) (-> e :scolor) (-> e :speed_move_orig)) (#t 5 13 6 |.|)))
         (send e :init))
       (body-lines
         "function m_enemy_boss(setx, sety)"
@@ -2294,8 +2270,7 @@
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e (call m_enemy setx sety))
-        (set! (-> e :head_shift) 2))
+        (let ([e (call m_enemy setx sety)]) (set! (-> e :head_shift) 2)))
       (body-lines
         "function m_enemy_seeker(setx, sety)"
         ""
@@ -2745,8 +2720,7 @@
       (structured-ast
         (if-cond (== whichside 0)))
       (decompiled-pseudo-code
-        (set-values! (gen_x gen_y whichside) ((call frnd 128) (call frnd 128) (call frnd 4)))
-        (when (== whichside 0) (set! gen_x 4) (when (== whichside 1) (set! gen_x 124) (if (== whichside 2) (then (set! gen_y 4)) (else (set! gen_y 124))))))
+        (let ([gen_x (call frnd 128)] [gen_y (call frnd 128)] [whichside (call frnd 4)]) (when (== whichside 0) (set! gen_x 4) (when (== whichside 1) (set! gen_x 124) (if (== whichside 2) (then (set! gen_y 4)) (else (set! gen_y 124)))))))
       (body-lines
         "function get_gen_coords()"
         "\tlocal gen_x, gen_y, whichside = frnd(128), frnd(128), frnd(4)"
@@ -2771,8 +2745,7 @@
         (if-cond (not g_spawned_boss))
         (return-expr void))
       (decompiled-pseudo-code
-        (set! enemy_type (aref g_enemy_weights (call frnda (len g_enemy_weights))))
-        (when (== enemy_type 5) (if (not g_spawned_boss) (then (call m_enemy_boss (call get_gen_coords)) (set! g_spawned_boss #t)) (else (return)))))
+        (let ([enemy_type (aref g_enemy_weights (call frnda (len g_enemy_weights)))]) (when (== enemy_type 5) (if (not g_spawned_boss) (then (call m_enemy_boss (call get_gen_coords)) (set! g_spawned_boss #t)) (else (return))))))
       (body-lines
         "function m_enemy_random()"
         ""
@@ -2856,8 +2829,7 @@
       (structured-ast
         (if-cond (> (-> self :shake_remaining) 0)))
       (decompiled-pseudo-code
-        (set-values! (shk_x shk_y force) (0 0 (-> self :shake_force)))
-        (when (> (-> self :shake_remaining) 0) (set-values! (shk_x shk_y) ((- (call rnd force) (/ force 2)) (- (call rnd force) (/ force 2))))))
+        (let ([shk_x 0] [shk_y 0] [force (-> self :shake_force)]) (when (> (-> self :shake_remaining) 0) (set-values! (shk_x shk_y) ((- (call rnd force) (/ force 2)) (- (call rnd force) (/ force 2)))))))
       (body-lines
         "\t\tcam_pos=function(self)"
         "\t\t\tlocal shk_x, shk_y, force = 0, 0, self.shake_force"
@@ -3056,8 +3028,7 @@
         (while-loop (< wipe_position 128))
         (if-cond (call randc void)))
       (decompiled-pseudo-code
-        (set! wipe_position 0)
-        (while (< wipe_position 128) (+= wipe_position 10) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 2) (call rnd 4)) (- 48 (call frnd 6)) 10 8)) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 2) (call rnd 4)) (call frnda 6 80) 10 8)) (when (call randc) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 4) (call rnd 8)) (- 30 (call frnd 15)) 2 5)))))
+        (let ([wipe_position 0]) (while (< wipe_position 128) (+= wipe_position 10) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 2) (call rnd 4)) (- 48 (call frnd 6)) 10 8)) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 2) (call rnd 4)) (call frnda 6 80) 10 8)) (when (call randc) (call add (-> self :list_splats) (call m_splat (- (+ wipe_position 4) (call rnd 8)) (- 30 (call frnd 15)) 2 5))))))
       (body-lines
         "\t\tinit=function(self)"
         "\t\t\tlocal wipe_position = 0"
@@ -3137,7 +3108,7 @@
         (for-loop "i=0,1")
         (if-cond (call randc 50)))
       (decompiled-pseudo-code
-        (when (>= (-> self :y) (-> self :splash_loc)) (for-range i 0 1 (set! s (call m_part_sprite 103 (-> self :x) (-> self :y) (- (call rnd 1)) 12 12 5 #f #t)) (set-values! ((-> s :ddy) (-> s :dx)) (|.| (call rnd |.|))) (when (call randc 50) (set! (-> s :dx) (- (call rnd |.|)))))))
+        (when (>= (-> self :y) (-> self :splash_loc)) (for-range i 0 1 (let ((s (call m_part_sprite 103 (-> self :x) (-> self :y) (- (call rnd 1)) 12 12 5 #f #t))) (set-values! ((-> s :ddy) (-> s :dx)) (|.| (call rnd |.|)))) (when (call randc 50) (set! (-> s :dx) (- (call rnd |.|)))))))
       (body-lines
         "\t\t\t\tp.update=function(self)"
         "\t\t\t\t\tif self.y >= self.splash_loc then"
@@ -3211,8 +3182,7 @@
       (decompiled-pseudo-code
         (set! p1 (call m_player 64 64))
         (call reload 8192 8192 4096)
-        (set-values! (color_choice block_sel_x block_sel_y) (g_season (call frnd 2) 0))
-        (when (!= g_year g_year_endgame) (when (!= g_year 1) (when (call randc 25) g_level_indoor #t))))
+        (let ([color_choice g_season] [block_sel_x (call frnd 2)] [block_sel_y 0]) (when (!= g_year g_year_endgame) (when (!= g_year 1) (when (call randc 25) g_level_indoor #t)))))
       (body-lines
         "function level_create()"
         "\tp1 = m_player(64,64)"
@@ -3425,7 +3395,7 @@
         (for-loop "n=2,#t")
         (while-loop (and (> i 1) (< (-> (aref t i) :y) (-> (aref t (- i 1)) :y)))))
       (decompiled-pseudo-code
-        (for-range n 2 (len t) (set! i n) (while (and (> i 1) (< (-> (aref t i) :y) (-> (aref t (- i 1)) :y))) (aref t i) (-= i 1))))
+        (for-range n 2 (len t) (let ((i n)) (while (and (> i 1) (< (-> (aref t i) :y) (-> (aref t (- i 1)) :y))) (aref t i) (-= i 1)))))
       (body-lines
         "function sort_by_y(t) --insertion sort, ascending y"
         "  for n=2,#t do"

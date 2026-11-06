@@ -124,7 +124,10 @@
       (table table_wram_042D #:addr #x042D #:accesses 5)
       (table table_wram_040D #:addr #x040D #:accesses 4)
       (table table_wram_0417 #:addr #x0417 #:accesses 4)
-      (table table_wram_0406 #:addr #x0406 #:accesses 3)))
+      (table table_wram_0406 #:addr #x0406 #:accesses 3))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))
+      (joypad-mask-enum (#x80 JOY_BTN_A) (#x40 JOY_BTN_B) (#x20 JOY_BTN_SELECT) (#x10 JOY_BTN_START) (#x08 JOY_BTN_UP) (#x04 JOY_BTN_DOWN) (#x02 JOY_BTN_LEFT) (#x01 JOY_BTN_RIGHT))))
   (state-machines
     (def-state-machine sm_b0_D0FC #:bank 0 #:dispatch-pc #xD0FC #:kind jmp-indirect-vector #:ptr-or-table #x02B0 #:cases
       ((case 0 -> reset_handler)))
@@ -264,6 +267,7 @@
             (set! Y #x00)
             (set! zp_ptr_00 #x00)
             (loop-counted #:step DEY #:while (!= Y #x00)
+              (mem-fill! (deref-indy zp_ptr_00 Y) #x00 DEY)
               (set! (deref-indy zp_ptr_00 Y) #x00)
               (-= Y 1))
             (-= zp_state_01 1)
@@ -551,6 +555,7 @@
           (decompiled-pseudo-code
             (set! Y #x00)
             (loop-counted #:step INX #:while (!= Y #x03)
+              (mem-copy! (aref zp_state_53 Y) (aref wram #x0400 X) INX)
               (set! (aref zp_state_53 Y) (aref wram #x0400 X))
               (+= X 1)
               (+= X 1)
@@ -570,6 +575,7 @@
           (decompiled-pseudo-code
             (set! Y #x00)
             (loop-counted #:step INX #:while (!= Y #x03)
+              (mem-copy! (aref wram #x0400 X) (aref zp_state_53 Y) INX)
               (set! (aref wram #x0400 X) (aref zp_state_53 Y))
               (+= X 1)
               (+= X 1)
@@ -724,6 +730,7 @@
           (decompiled-pseudo-code
             (set! X #x00)
             (loop-counted #:step INX #:while (!= X #x89)
+              (mem-fill! (aref zp #x59 X) #x00 INX)
               (set! (aref zp #x59 X) #x00)
               (set! (aref wram #x040D X) (aref zp #x59 X))
               (+= X 1))
@@ -784,6 +791,7 @@
             (set! X #x00)
             (set! Y #x00)
             (loop-counted #:step INY #:while (!= X #x05)
+              (mem-copy! (aref zp_ptr_00 X) (deref-indy zp_ptr_09 Y) INY)
               (when (== (deref-indy zp_ptr_09 Y) #xFE) (break loc_CCF3))
               (set! (aref zp_ptr_00 X) (deref-indy zp_ptr_09 Y))
               (+= Y 1)
@@ -880,6 +888,7 @@
             (set! X #x00)
             (set! Y #x00)
             (loop-counted #:step INX #:while (< (- X #x02) #x00)
+              (mem-copy! (aref oam #x02C0 Y) (aref zp #x41 X) INX)
               (when (!= (aref zp #x41 X) #x00) (goto loc_CFB8))
               (set! (aref oam #x02C0 Y) #xFF)
               (set! (aref oam #x02C4 Y) (aref oam #x02C0 Y))

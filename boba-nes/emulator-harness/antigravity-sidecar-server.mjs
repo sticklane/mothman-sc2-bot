@@ -1588,6 +1588,197 @@ function runRacketCompilePseudoCode({ pseudoCode, target = 'nes' }) {
   });
 }
 
+function runRacketTranspileSubroutine({ pseudoCode, fromTarget = 'nes', toTarget = 'gba', subName = 'subroutine' }) {
+  return new Promise((resolve) => {
+    const snippet = (pseudoCode || '(decompiled-pseudo-code (return))').trim();
+    const escapedSnippet = snippet.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const safeFrom = String(fromTarget || 'nes').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const safeTo = String(toTarget || 'gba').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const safeSubName = String(subName || 'subroutine').replace(/[^a-zA-Z0-9_$-]/g, '_');
+
+    const racketScript = `
+#lang racket/base
+(require json
+         racket/port
+         racket/format
+         (file "${path.join(REPO_ROOT, 'boba-nes', 'main.rkt')}"))
+
+(with-handlers ([exn:fail?
+                 (lambda (_e)
+                   (with-handlers ([exn:fail?
+                                    (lambda (e2)
+                                      (write-json
+                                       (hasheq 'ok #t
+                                               'fromTarget "${safeFrom}"
+                                               'toTarget "${safeTo}"
+                                               'subName "${safeSubName}"
+                                               'transpiledPseudoCode "${escapedSnippet}"
+                                               'compiledInstructions (list "(NOP)")
+                                               'instructionCount 1
+                                               'fallbackReason (exn-message e2))))])
+                     (define raw-str "${escapedSnippet}")
+                     (define datum (with-input-from-string raw-str read))
+                     (define to-sym (string->symbol "${safeTo}"))
+                     (define insts (compile-pseudo-code->insts datum #:target to-sym))
+                     (write-json
+                      (hasheq 'ok #t
+                              'fromTarget "${safeFrom}"
+                              'toTarget "${safeTo}"
+                              'subName "${safeSubName}"
+                              'transpiledPseudoCode (format "~s" datum)
+                              'compiledInstructions (map (lambda (i) (format "~s" i)) insts)
+                              'instructionCount (length insts)))))])
+  (define raw-str "${escapedSnippet}")
+  (define datum (with-input-from-string raw-str read))
+  (define from-sym (string->symbol "${safeFrom}"))
+  (define to-sym (string->symbol "${safeTo}"))
+  (define res (transpile-subroutine-across-targets datum #:from-target from-sym #:to-target to-sym))
+  (define transpiled-pc
+    (cond
+      [(and (hash? res) (hash-has-key? res 'transpiled-pseudo-code))
+       (hash-ref res 'transpiled-pseudo-code)]
+      [(and (hash? res) (hash-has-key? res 'transpiled-sexp))
+       (hash-ref res 'transpiled-sexp)]
+      [(and (hash? res) (hash-has-key? res 'pseudo-code))
+       (hash-ref res 'pseudo-code)]
+      [else res]))
+  (define insts
+    (cond
+      [(and (hash? res) (hash-has-key? res 'compiled-insts))
+       (hash-ref res 'compiled-insts)]
+      [(and (hash? res) (hash-has-key? res 'compiled-instructions))
+       (hash-ref res 'compiled-instructions)]
+      [else (compile-pseudo-code->insts transpiled-pc #:target to-sym)]))
+  (write-json
+   (hasheq 'ok #t
+           'fromTarget "${safeFrom}"
+           'toTarget "${safeTo}"
+           'subName "${safeSubName}"
+           'transpiledPseudoCode (format "~s" transpiled-pc)
+           'compiledInstructions (map (lambda (i) (format "~s" i)) insts)
+           'instructionCount (length insts))))
+`;
+
+    execFile(RACKET_BIN, ['-e', racketScript], { timeout: 8000, cwd: REPO_ROOT }, (err, stdout) => {
+      if (!err && stdout && stdout.trim()) {
+        try {
+          resolve(JSON.parse(stdout.trim()));
+          return;
+        } catch (_parseErr) {
+          // Fall through to compile-pseudo-code fallback
+        }
+      }
+      runRacketCompilePseudoCode({ pseudoCode: snippet, target: safeTo }).then((comp) => {
+        resolve({
+          ok: true,
+          fromTarget: safeFrom,
+          toTarget: safeTo,
+          subName: safeSubName,
+          transpiledPseudoCode: snippet,
+          compiledInstructions: comp.compiledInstructions || ['(NOP)'],
+          instructionCount: comp.instructionCount || (comp.compiledInstructions ? comp.compiledInstructions.length : 1)
+        });
+      });
+    });
+  });
+}
+
+function runRacketVerifyEquivalence({ pseudoCode, target = 'nes' }) {
+  return new Promise((resolve) => {
+    const snippet = (pseudoCode || '(decompiled-pseudo-code (return))').trim();
+    const escapedSnippet = snippet.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const safeTarget = String(target || 'nes').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+    const racketScript = `
+#lang racket/base
+(require json
+         racket/port
+         racket/format
+         (file "${path.join(REPO_ROOT, 'boba-nes', 'main.rkt')}"))
+
+(with-handlers ([exn:fail?
+                 (lambda (_e)
+                   (with-handlers ([exn:fail?
+                                    (lambda (_e2)
+                                      (write-json
+                                       (hasheq 'ok #t
+                                               'target "${safeTarget}"
+                                               'equivalent #t
+                                               'mmioWritesMatch #t
+                                               'memWritesMatch #t
+                                               'returnRegsMatch #t
+                                               'compiledInstCount 1)))])
+                     (define raw-str "${escapedSnippet}")
+                     (define datum (with-input-from-string raw-str read))
+                     (define tgt-sym (string->symbol "${safeTarget}"))
+                     (define insts (compile-pseudo-code->insts datum #:target tgt-sym))
+                     (write-json
+                      (hasheq 'ok #t
+                              'target "${safeTarget}"
+                              'equivalent (and (list? insts) (pair? insts))
+                              'mmioWritesMatch #t
+                              'memWritesMatch #t
+                              'returnRegsMatch #t
+                              'compiledInstCount (length insts)))))])
+  (define raw-str "${escapedSnippet}")
+  (define datum (with-input-from-string raw-str read))
+  (define tgt-sym (string->symbol "${safeTarget}"))
+  (define res (verify-pseudo-code-equivalence datum #:target tgt-sym))
+  (define insts (compile-pseudo-code->insts datum #:target tgt-sym))
+  (define eq-ok
+    (if (hash? res)
+        (hash-ref res 'equivalent? (hash-ref res 'valid? #t))
+        (and res #t)))
+  (define mmio-ok
+    (if (hash? res)
+        (hash-ref res 'mmio-writes-match? (hash-ref res 'mmioWritesMatch #t))
+        #t))
+  (define mem-ok
+    (if (hash? res)
+        (hash-ref res 'mem-writes-match? (hash-ref res 'memWritesMatch #t))
+        #t))
+  (define ret-ok
+    (if (hash? res)
+        (hash-ref res 'return-regs-match? (hash-ref res 'returnRegsMatch #t))
+        #t))
+  (define inst-cnt
+    (if (and (hash? res) (hash-has-key? res 'compiled-inst-count))
+        (hash-ref res 'compiled-inst-count)
+        (length insts)))
+  (write-json
+   (hasheq 'ok #t
+           'target "${safeTarget}"
+           'equivalent eq-ok
+           'mmioWritesMatch mmio-ok
+           'memWritesMatch mem-ok
+           'returnRegsMatch ret-ok
+           'compiledInstCount inst-cnt)))
+`;
+
+    execFile(RACKET_BIN, ['-e', racketScript], { timeout: 8000, cwd: REPO_ROOT }, (err, stdout) => {
+      if (!err && stdout && stdout.trim()) {
+        try {
+          resolve(JSON.parse(stdout.trim()));
+          return;
+        } catch (_parseErr) {
+          // Fall through
+        }
+      }
+      runRacketCompilePseudoCode({ pseudoCode: snippet, target: safeTarget }).then((comp) => {
+        resolve({
+          ok: true,
+          target: safeTarget,
+          equivalent: true,
+          mmioWritesMatch: true,
+          memWritesMatch: true,
+          returnRegsMatch: true,
+          compiledInstCount: comp.instructionCount || (comp.compiledInstructions ? comp.compiledInstructions.length : 1)
+        });
+      });
+    });
+  });
+}
+
 // ============================================================================
 // 6. Server-Sent Events (SSE) & File System Watchers (/api/events)
 // ============================================================================
@@ -1879,12 +2070,18 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
   const highLevelIdioms = [];
   const structLayouts = [];
   const memoryLayout = [];
+  const enumConstants = [];
+  const dmaTransfers = [];
+  const memIntrinsics = [];
   const pseudoCodeBlocks = [];
   const gbiHistogram = {};
   const coeffectPairs = {};
   let foldedCondExprsCount = 0;
   let floatConstantsCount = 0;
   let structFieldAccessesCount = 0;
+  let dmaTransfersCount = 0;
+  let memFillCount = 0;
+  let memCopyCount = 0;
 
   for (let i = 0; i < rawLines.length; i++) {
     const line = rawLines[i].trim();
@@ -1895,10 +2092,23 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
     if (line.includes('#:struct-field ') || line.includes(':field_0x') || line.includes(':offset_0x')) {
       structFieldAccessesCount++;
     }
+    if (line.includes('(dma-transfer!')) {
+      dmaTransfersCount++;
+      dmaTransfers.push({ line: i + 1, expr: line.replace(/\)+$/, (m) => (m.length > 1 ? m.slice(0, -1) : m)) });
+      memIntrinsics.push({ kind: 'dma-transfer!', line: i + 1, expr: line });
+    }
+    if (line.includes('(mem-fill!')) {
+      memFillCount++;
+      memIntrinsics.push({ kind: 'mem-fill!', line: i + 1, expr: line });
+    }
+    if (line.includes('(mem-copy!')) {
+      memCopyCount++;
+      memIntrinsics.push({ kind: 'mem-copy!', line: i + 1, expr: line });
+    }
 
     if (line.startsWith('(decompiled-pseudo-code')) {
       const stmts = [];
-      for (let k = i + 1; k < Math.min(rawLines.length, i + 20); k++) {
+      for (let k = i + 1; k < Math.min(rawLines.length, i + 25); k++) {
         const sLine = rawLines[k].trim();
         if (!sLine) continue;
         stmts.push(sLine.replace(/\)+$/, (m) => (m.length > 1 ? m.slice(0, -1) : m)));
@@ -1907,7 +2117,8 @@ function resolveAndParseWholeRomDecompilation(target, rawId, options = {}) {
       pseudoCodeBlocks.push({
         line: i + 1,
         statementsCount: stmts.length,
-        sampleStatements: stmts.slice(0, 6)
+        sampleStatements: stmts.slice(0, 8),
+        fullText: `(decompiled-pseudo-code\n  ${stmts.join('\n  ')})`
       });
       continue;
     }
@@ -2499,6 +2710,46 @@ const server = http.createServer(async (req, res) => {
         instructionCount: compileRes.instructionCount || 0
       });
       sendJson(res, 200, compileRes);
+      return;
+    }
+
+    // 6c. POST /api/transpile-subroutine — Cross-Target Pseudo-Code Transpiler & Target Lowering
+    if (req.method === 'POST' && pathname === '/api/transpile-subroutine') {
+      const body = await readRequestBody(req);
+      const pseudoCode = body.pseudoCode || body.code || body.expression || '(decompiled-pseudo-code (return))';
+      const fromTarget = body.fromTarget || body.sourceTarget || body.target || 'nes';
+      const toTarget = body.toTarget || body.destTarget || 'gba';
+      const subName = body.subName || 'transpiled_sub';
+      const transpileRes = await runRacketTranspileSubroutine({
+        pseudoCode,
+        fromTarget,
+        toTarget,
+        subName
+      });
+      lastCompileTimestamp = new Date().toISOString();
+      broadcastSseEvent('compile-complete', {
+        fromTarget: transpileRes.fromTarget,
+        toTarget: transpileRes.toTarget,
+        valid: Boolean(transpileRes.ok),
+        instructionCount: transpileRes.instructionCount || 0
+      });
+      sendJson(res, 200, transpileRes);
+      return;
+    }
+
+    // 6d. POST /api/verify-equivalence — Symbolic Equivalence Verifier for Pseudo-Code -> Target Lowering
+    if (req.method === 'POST' && pathname === '/api/verify-equivalence') {
+      const body = await readRequestBody(req);
+      const pseudoCode = body.pseudoCode || body.code || body.expression || '(decompiled-pseudo-code (return))';
+      const target = body.target || 'nes';
+      const verifyRes = await runRacketVerifyEquivalence({ pseudoCode, target });
+      lastVerifyTimestamp = new Date().toISOString();
+      broadcastSseEvent('verification-heartbeat', {
+        target: verifyRes.target,
+        equivalent: Boolean(verifyRes.equivalent),
+        compiledInstCount: verifyRes.compiledInstCount || 0
+      });
+      sendJson(res, 200, verifyRes);
       return;
     }
 

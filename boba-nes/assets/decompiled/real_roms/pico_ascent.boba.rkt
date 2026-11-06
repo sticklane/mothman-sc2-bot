@@ -296,7 +296,7 @@
         (for-loop "i=1,100"))
       (decompiled-pseudo-code
         (set! stars (table))
-        (for-range i 1 100 (set! newstar (table)) (set! (-> newstar :x) (call flr (call rnd 128))) (set! (-> newstar :y) (call flr (call rnd 128))) (set! (-> newstar :spd) (+ (call rnd 1.5) 0.5)) (call add stars newstar)))
+        (for-range i 1 100 (let ((newstar (table))) (set! (-> newstar :x) (call flr (call rnd 128)))) (set! (-> newstar :y) (call flr (call rnd 128))) (set! (-> newstar :spd) (+ (call rnd 1.5) 0.5)) (call add stars newstar)))
       (body-lines
         "function makestars()"
         " stars={} "
@@ -318,7 +318,7 @@
         (for-loop "i=1,#stars")
         (if-cond (< (-> mystar :spd) 1)))
       (decompiled-pseudo-code
-        (for-range i 1 (len stars) (set! mystar (aref stars i)) (set! scol 6) (when (< (-> mystar :spd) 1) (set! scol 1) (when (< (-> mystar :spd) 1.5) (set! scol 13)))))
+        (for-range i 1 (len stars) (let ((mystar (aref stars i)) (scol 6)) (when (< (-> mystar :spd) 1) (set! scol 1) (when (< (-> mystar :spd) 1.5) (set! scol 13))))))
       (body-lines
         "function starfield()"
         " "
@@ -357,8 +357,7 @@
       (structured-ast
         (if-cond (> blinkt (len banim))))
       (decompiled-pseudo-code
-        (set! banim (table 5 5 5 5 5 5 5 5 5 5 5 6 6 7 7 6 6 5))
-        (when (> blinkt (len banim)) (set! blinkt 1)))
+        (let ([banim (table 5 5 5 5 5 5 5 5 5 5 5 6 6 7 7 6 6 5)]) (when (> blinkt (len banim)) (set! blinkt 1))))
       (body-lines
         "function blink()"
         " local banim={5,5,5,5,5,5,5,5,5,5,5,6,6,7,7,6,6,5}"
@@ -398,9 +397,7 @@
         (if-cond (> (-> myspr :shake) 0))
         (if-cond (< (modulo t 4) 2)))
       (decompiled-pseudo-code
-        (set! sprx (-> myspr :x))
-        (set! spry (-> myspr :y))
-        (when (> (-> myspr :shake) 0) (-= (-> myspr :shake) 1) (when (< (modulo t 4) 2) (+= sprx 1))))
+        (let ([sprx (-> myspr :x)] [spry (-> myspr :y)]) (when (> (-> myspr :shake) 0) (-= (-> myspr :shake) 1) (when (< (modulo t 4) 2) (+= sprx 1)))))
       (body-lines
         "function drwmyspr(myspr)"
         " local sprx=myspr.x"
@@ -438,8 +435,7 @@
       (structured-ast
         (for-loop "i=1,30"))
       (decompiled-pseudo-code
-        (set! myp (table))
-        (set! (-> myp :x) expx)
+        (let ([myp (table)]) (set! (-> myp :x) expx))
         (set! (-> myp :y) expy)
         (set! (-> myp :sx) 0)
         (set! (-> myp :sy) 0)
@@ -448,7 +444,7 @@
         (set! (-> myp :maxage) 0)
         (set! (-> myp :blue) isblue)
         (call add parts myp)
-        (for-range i 1 30 (set! myp (table)) (set! (-> myp :x) expx) (set! (-> myp :y) expy) (set! (-> myp :sx) (- (* (call rnd) 6) 3)) (set! (-> myp :sy) (- (* (call rnd) 6) 3)) (set! (-> myp :age) (call rnd 2)) (set! (-> myp :size) (+ 1 (call rnd 4))) (set! (-> myp :maxage) (+ 10 (call rnd 10))) (set! (-> myp :blue) isblue) (call add parts myp)))
+        (for-range i 1 30 (let ((myp (table))) (set! (-> myp :x) expx)) (set! (-> myp :y) expy) (set! (-> myp :sx) (- (* (call rnd) 6) 3)) (set! (-> myp :sy) (- (* (call rnd) 6) 3)) (set! (-> myp :age) (call rnd 2)) (set! (-> myp :size) (+ 1 (call rnd 4))) (set! (-> myp :maxage) (+ 10 (call rnd 10))) (set! (-> myp :blue) isblue) (call add parts myp)))
       (body-lines
         "function explode(expx,expy,isblue)"
         " "
@@ -491,8 +487,7 @@
       (structured-ast
         (for-loop "i=1,60"))
       (decompiled-pseudo-code
-        (set! myp (table))
-        (set! (-> myp :x) expx)
+        (let ([myp (table)]) (set! (-> myp :x) expx))
         (set! (-> myp :y) expy)
         (set! (-> myp :sx) 0)
         (set! (-> myp :sy) 0)
@@ -500,7 +495,7 @@
         (set! (-> myp :size) 25)
         (set! (-> myp :maxage) 0)
         (call add parts myp)
-        (for-range i 1 60 (set! myp (table)) (set! (-> myp :x) expx) (set! (-> myp :y) expy) (set! (-> myp :sx) (- (* (call rnd) 12) 6)) (set! (-> myp :sy) (- (* (call rnd) 12) 6)) (set! (-> myp :age) (call rnd 2)) (set! (-> myp :size) (+ 1 (call rnd 6))) (set! (-> myp :maxage) (+ 20 (call rnd 20))) (call add parts myp)))
+        (for-range i 1 60 (let ((myp (table))) (set! (-> myp :x) expx)) (set! (-> myp :y) expy) (set! (-> myp :sx) (- (* (call rnd) 12) 6)) (set! (-> myp :sy) (- (* (call rnd) 12) 6)) (set! (-> myp :age) (call rnd 2)) (set! (-> myp :size) (+ 1 (call rnd 6))) (set! (-> myp :maxage) (+ 20 (call rnd 20))) (call add parts myp)))
       (body-lines
         "function bigexplode(expx,expy)"
         " "
@@ -541,8 +536,7 @@
       (structured-ast
         (if-cond (> page 5)))
       (decompiled-pseudo-code
-        (set! col 7)
-        (when (> page 5) (set! col 10)))
+        (let ([col 7]) (when (> page 5) (set! col 10))))
       (body-lines
         "function page_red(page)"
         " local col=7"
@@ -560,8 +554,7 @@
       (structured-ast
         (if-cond (> page 5)))
       (decompiled-pseudo-code
-        (set! col 7)
-        (when (> page 5) (set! col 6)))
+        (let ([col 7]) (when (> page 5) (set! col 6))))
       (body-lines
         "function page_blue(page)"
         " local col=7"
@@ -595,8 +588,7 @@
       (structured-ast
         (seq-block 10))
       (decompiled-pseudo-code
-        (set! mysw (table))
-        (set! (-> mysw :x) shx)
+        (let ([mysw (table)]) (set! (-> mysw :x) shx))
         (set! (-> mysw :y) shy)
         (set! (-> mysw :r) 3)
         (set! (-> mysw :tr) 25)
@@ -624,8 +616,7 @@
       (structured-ast
         (for-loop "i=1,2"))
       (decompiled-pseudo-code
-        (set! myp (table))
-        (set! (-> myp :x) sx)
+        (let ([myp (table)]) (set! (-> myp :x) sx))
         (set! (-> myp :y) sy)
         (set! (-> myp :sx) (* (- (call rnd) 0.5) 8))
         (set! (-> myp :sy) (* (- (call rnd) 1) 3))
@@ -664,8 +655,7 @@
       (structured-ast
         (return-expr myspr))
       (decompiled-pseudo-code
-        (set! myspr (table))
-        (set! (-> myspr :x) 0)
+        (let ([myspr (table)]) (set! (-> myspr :x) 0))
         (set! (-> myspr :y) 0)
         (set! (-> myspr :sx) 0)
         (set! (-> myspr :sy) 0)
@@ -709,9 +699,7 @@
         (if-cond (> shake 10))
         (if-cond (< shake 1)))
       (decompiled-pseudo-code
-        (set! shakex (- (call rnd shake) (/ shake 2)))
-        (set! shakey (- (call rnd shake) (/ shake 2)))
-        (call camera shakex shakey)
+        (let ([shakex (- (call rnd shake) (/ shake 2))] [shakey (- (call rnd shake) (/ shake 2))]) (call camera shakex shakey))
         (if (> shake 10) (then (*= shake 0.9)) (else (-= shake 1) (when (< shake 1) (set! shake 0)))))
       (body-lines
         "function doshake()"
@@ -738,8 +726,7 @@
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (set! fl (table))
-        (set! (-> fl :x) flx)
+        (let ([fl (table)]) (set! (-> fl :x) flx))
         (set! (-> fl :y) fly)
         (set! (-> fl :txt) fltxt)
         (set! (-> fl :age) 0)
@@ -942,7 +929,7 @@
         (call draw_game)
         (call cprint "game over" 64 40 8)
         (call cprint (string-append "score:" (call makescore score)) 64 60 12)
-        (when (> score highscore) (set! c 7) (when (< (modulo t 4) 2) (set! c 10))))
+        (when (> score highscore) (let ([c 7]) (when (< (modulo t 4) 2) (set! c 10)))))
       (body-lines
         "function draw_over()"
         " draw_game()"
@@ -968,7 +955,7 @@
         (call draw_game)
         (call cprint "congratulations" 64 40 12)
         (call cprint (string-append "score:" (call makescore score)) 64 60 12)
-        (when (> score highscore) (set! c 7) (when (< (modulo t 4) 2) (set! c 10))))
+        (when (> score highscore) (let ([c 7]) (when (< (modulo t 4) 2) (set! c 10)))))
       (body-lines
         "function draw_win()"
         " draw_game()"
@@ -1030,7 +1017,7 @@
         (for-loop "x=1,10")
         (if-cond (!= (aref myline x) 0)))
       (decompiled-pseudo-code
-        (for-range y 1 4 (set! myline (aref lvl y)) (for-range x 1 10 (when (!= (aref myline x) 0) (call spawnen (aref myline x) (- (* x 12) 6) (+ 4 (* y 12)) (* x 3))))))
+        (for-range y 1 4 (let ((myline (aref lvl y))) (for-range x 1 10 (when (!= (aref myline x) 0) (call spawnen (aref myline x) (- (* x 12) 6) (+ 4 (* y 12)) (* x 3)))))))
       (body-lines
         "function placens(lvl)"
         ""
@@ -1077,8 +1064,7 @@
       (structured-ast
         (if-cond (or (== entype nil) (== entype 1))))
       (decompiled-pseudo-code
-        (set! myen (call makespr))
-        (set! (-> myen :x) (- (* enx 1.25) 16))
+        (let ([myen (call makespr)]) (set! (-> myen :x) (- (* enx 1.25) 16)))
         (set! (-> myen :y) (- eny 66))
         (set! (-> myen :posx) enx)
         (set! (-> myen :posy) eny)
@@ -1167,11 +1153,8 @@
         (return-expr void)
         (if-cond (== (-> myen :mission) "protec")))
       (decompiled-pseudo-code
-        (set! maxnum (call min 10 (len enemies)))
-        (set! myindex (call flr (call rnd maxnum)))
-        (set! myindex (- (len enemies) myindex))
-        (set! myen (aref enemies myindex))
-        (when (== myen nil) (return))
+        (let ([maxnum (call min 10 (len enemies))] [myindex (call flr (call rnd maxnum))]) (set! myindex (- (len enemies) myindex)))
+        (let ([myen (aref enemies myindex)]) (when (== myen nil) (return)))
         (when (== (-> myen :mission) "protec") (set! (-> myen :mission) "attac") (*= (-> myen :anispd) 3) (set! (-> myen :wait) 60) (set! (-> myen :shake) 60)))
       (body-lines
         "function pickattac()"
@@ -1201,9 +1184,7 @@
         (if-cond (call rnd void))
         (return-expr void))
       (decompiled-pseudo-code
-        (set! maxnum (call min 10 (len enemies)))
-        (set! myindex (call flr (call rnd maxnum)))
-        (foreach myen enemies (when (and (== (-> myen :type) 4) (== (-> myen :mission) "protec")) (when (< (call rnd) 0.5) (call firespread myen 12 1.3 (call rnd)) (return)))))
+        (let ([maxnum (call min 10 (len enemies))] [myindex (call flr (call rnd maxnum))]) (foreach myen enemies (when (and (== (-> myen :type) 4) (== (-> myen :mission) "protec")) (when (< (call rnd) 0.5) (call firespread myen 12 1.3 (call rnd)) (return))))))
       (body-lines
         "function pickfire()"
         " local maxnum=min(10,#enemies)"
@@ -1265,8 +1246,7 @@
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (set! mypick (call makespr))
-        (set! (-> mypick :x) pix)
+        (let ([mypick (call makespr)]) (set! (-> mypick :x) pix))
         (set! (-> mypick :y) piy)
         (set! (-> mypick :sy) 0.75)
         (set! (-> mypick :spr) 48)
@@ -1340,8 +1320,7 @@
       (structured-ast
         (if-cond (== (-> myen :type) 4)))
       (decompiled-pseudo-code
-        (set! myebul (call makespr))
-        (set! (-> myebul :x) (+ (-> myen :x) 3))
+        (let ([myebul (call makespr)]) (set! (-> myebul :x) (+ (-> myen :x) 3)))
         (set! (-> myebul :y) (+ (-> myen :y) 6))
         (when (== (-> myen :type) 4) (set! (-> myebul :x) (+ (-> myen :x) 7)) (set! (-> myebul :y) (+ (-> myen :y) 13)) (when (-> myen :boss) (set! (-> myebul :x) (+ (-> myen :x) 15)) (set! (-> myebul :y) (+ (-> myen :y) 23)))))
       (body-lines
@@ -1383,9 +1362,7 @@
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (set! myebul (call fire myen 0 spd))
-        (set! ang (call atan2 (- (+ (-> ship :y) 4) (-> myebul :y)) (- (+ (-> ship :x) 4) (-> myebul :x))))
-        (set! (-> myebul :sx) (* (call sin ang) spd))
+        (let ([myebul (call fire myen 0 spd)] [ang (call atan2 (- (+ (-> ship :y) 4) (-> myebul :y)) (- (+ (-> ship :x) 4) (-> myebul :x)))]) (set! (-> myebul :sx) (* (call sin ang) spd)))
         (set! (-> myebul :sy) (* (call cos ang) spd)))
       (body-lines
         "function aimedfire(myen,spd)"
@@ -1406,8 +1383,7 @@
       (structured-ast
         (for-loop "i=0,cher*2"))
       (decompiled-pseudo-code
-        (set! spc (/ 0.25 (* cher 2)))
-        (for-range i 0 (* cher 2) (set! ang (+ 0.375 (* spc i))) (set! newbul (call makespr)) (set! (-> newbul :x) (-> ship :x)) (set! (-> newbul :y) (- (-> ship :y) 3)) (set! (-> newbul :spr) 17) (set! (-> newbul :dmg) 3) (set! (-> newbul :sx) (* (call sin ang) 4)) (set! (-> newbul :sy) (* (call cos ang) 4)) (call add buls newbul)))
+        (let ([spc (/ 0.25 (* cher 2))]) (for-range i 0 (* cher 2) (let ((ang (+ 0.375 (* spc i))) (newbul (call makespr))) (set! (-> newbul :x) (-> ship :x))) (set! (-> newbul :y) (- (-> ship :y) 3)) (set! (-> newbul :spr) 17) (set! (-> newbul :dmg) 3) (set! (-> newbul :sx) (* (call sin ang) 4)) (set! (-> newbul :sy) (* (call cos ang) 4)) (call add buls newbul))))
       (body-lines
         "function cherbomb()"
         " local spc=0.25/(cher*2)"
@@ -1436,8 +1412,7 @@
       (structured-ast
         (if-cond (or (== (-> myen :sx) 0) (>= (-> myen :x) 93))))
       (decompiled-pseudo-code
-        (set! spd 2)
-        (when (or (== (-> myen :sx) 0) (>= (-> myen :x) 93)) (set! (-> myen :sx) (- spd))))
+        (let ([spd 2]) (when (or (== (-> myen :sx) 0) (>= (-> myen :x) 93)) (set! (-> myen :sx) (- spd)))))
       (body-lines
         "function boss1(myen)"
         " -- movement"
@@ -1457,8 +1432,7 @@
         (if-cond (== (-> myen :subphase) 1))
         (if-cond (<= (-> myen :x) 4)))
       (decompiled-pseudo-code
-        (set! spd 1.5)
-        (when (== (-> myen :subphase) 1) (set! (-> myen :sx) (- spd)) (when (<= (-> myen :x) 4) (set! (-> myen :subphase) 2))))
+        (let ([spd 1.5]) (when (== (-> myen :subphase) 1) (set! (-> myen :sx) (- spd)) (when (<= (-> myen :x) 4) (set! (-> myen :subphase) 2)))))
       (body-lines
         "function boss2(myen)"
         " local spd=1.5"
@@ -1479,8 +1453,7 @@
       (structured-ast
         (if-cond (or (== (-> myen :sx) 0) (>= (-> myen :x) 93))))
       (decompiled-pseudo-code
-        (set! spd 0.5)
-        (when (or (== (-> myen :sx) 0) (>= (-> myen :x) 93)) (set! (-> myen :sx) (- spd))))
+        (let ([spd 0.5]) (when (or (== (-> myen :sx) 0) (>= (-> myen :x) 93)) (set! (-> myen :sx) (- spd)))))
       (body-lines
         "function boss3(myen)"
         " -- movement"
@@ -1500,8 +1473,7 @@
         (if-cond (== (-> myen :subphase) 1))
         (if-cond (>= (-> myen :x) 91)))
       (decompiled-pseudo-code
-        (set! spd 1.5)
-        (when (== (-> myen :subphase) 1) (set! (-> myen :sx) spd) (when (>= (-> myen :x) 91) (set! (-> myen :subphase) 2))))
+        (let ([spd 1.5]) (when (== (-> myen :subphase) 1) (set! (-> myen :sx) spd) (when (>= (-> myen :x) 91) (set! (-> myen :subphase) 2)))))
       (body-lines
         "function boss4(myen)"
         " local spd=1.5"

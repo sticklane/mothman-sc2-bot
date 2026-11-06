@@ -156,9 +156,7 @@
         (if-cond (and (== wagon_n 0) (== menu "game")))
         (if-cond keyboard))
       (decompiled-pseudo-code
-        (set! ox (call rrnd shake))
-        (set! oy (call rrnd shake))
-        (call camera (+ camx ox) (+ camy oy))
+        (let ([ox (call rrnd shake)] [oy (call rrnd shake)]) (call camera (+ camx ox) (+ camy oy)))
         (call cls 15)
         (call drawgrass)
         (call draw_map)
@@ -208,9 +206,7 @@
       (decompiled-pseudo-code
         (set! (-> stats :time) (call flr void))
         (* (- (call time) (-> stats :time)) 10)
-        (set! t (-> stats :time))
-        (set! s "")
-        (when (< (modulo t 60) 10) (set! s "0"))
+        (let ([t (-> stats :time)] [s ""]) (when (< (modulo t 60) 10) (set! s "0")))
         (set! (-> stats :time) (call tostr t))
         (set! (-> stats :wagon) (string-append (call tostr (+ wagon_n 1)) "/7")))
       (body-lines
@@ -236,8 +232,7 @@
       (decompiled-pseudo-code
         (call sfx 37)
         (call music)
-        (set! b (or birdchoice 0))
-        (when (== b 0) (set! b (+ (call flr (call rnd 12)) 1))))
+        (let ([b (or birdchoice 0)]) (when (== b 0) (set! b (+ (call flr (call rnd 12)) 1)))))
       (body-lines
         "function begin_game()"
         "\tsfx(37)"
@@ -329,10 +324,7 @@
         (if-cond (> px (* 128 (- wl 1))))
         (if-cond (!= wagon_n (- tl 1))))
       (decompiled-pseudo-code
-        (set! px (-> p :x))
-        (set! wl wl)
-        (set! maxlen 240)
-        (call poke 24387 0)
+        (let ([px (-> p :x)] [wl wl] [maxlen 240]) (call poke 24387 0))
         (when (> px (+ (* 128 (- wl 1)) 8)) (set! cam_follow_player #f) (set! targetcamx (* 128 (- wl 1))) (when (!= wagon_n (- tl 1)) (quote (nop)))))
       (body-lines
         "function update_camera()"
@@ -409,8 +401,7 @@
       (structured-ast
         (seq-block 7))
       (decompiled-pseudo-code
-        (set! p (aref players 1))
-        (set! (aref (-> p :gunls) 1) debuggun)
+        (let ([p (aref players 1)]) (set! (aref (-> p :gunls) 1) debuggun))
         (set! wagon_n (- tl 1))
         for
         (set! (-> i :destory) #t))
@@ -504,9 +495,7 @@
         (if-cond (call abs dx1)))
       (decompiled-pseudo-code
         (set! (-> p :iframes) (call max 0 (- (-> p :iframes) 1)))
-        (set-values! (dx dy) ((-> p :dx) (-> p :dy)))
-        (set! spd (-> p :spd))
-        (when (call allbtn) (-= (-> p :dx) spd))
+        (let ([dx (-> p :dx)] [dy (-> p :dy)] [spd (-> p :spd)]) (when (call allbtn) (-= (-> p :dx) spd)))
         (when (call allbtn) (+= (-> p :dx) spd))
         (when (call allbtn) (-= (-> p :dy) spd))
         (when (call allbtn) (+= (-> p :dy) spd))
@@ -546,7 +535,7 @@
         (if-cond (modulo (-> p :iframes) 5))
         (if-cond (== (-> (-> p :gun) :name) "sniper")))
       (decompiled-pseudo-code
-        (when (== (modulo (-> p :iframes) 5) 0) (set! x (+ (+ (call flr (-> p :x)) (* (call cos (-> p :a)) 6)) 0)) (set! y (+ (+ (call flr (-> p :y)) (* (call sin (-> p :a)) 3)) 0)) (when (== (-> (-> p :gun) :name) "sniper") (set-values! (c s) ((call cos (-> p :a)) (call sin (-> p :a)))) (call line void) (+ (+ x 4) (* c 6)) (+ (+ y 4) (* s 6)) (+ (-> p :x) (* c 128)) (+ (-> p :y) (* s 128)))))
+        (when (== (modulo (-> p :iframes) 5) 0) (let ([x (+ (+ (call flr (-> p :x)) (* (call cos (-> p :a)) 6)) 0)] [y (+ (+ (call flr (-> p :y)) (* (call sin (-> p :a)) 3)) 0)]) (when (== (-> (-> p :gun) :name) "sniper") (let ([c (call cos (-> p :a))] [s (call sin (-> p :a))]) (call line void)) (+ (+ x 4) (* c 6)) (+ (+ y 4) (* s 6)) (+ (-> p :x) (* c 128)) (+ (-> p :y) (* s 128))))))
       (body-lines
         "function draw_player()"
         "\tif (p.iframes%5) == 0  then"
@@ -575,18 +564,14 @@
         (if-cond (== i (-> p :gunn))))
       (decompiled-pseudo-code
         (call rectfill (+ camx 1) 1 (+ camx 43) 7 2)
-        (set! l (* 40 (/ (-> p :life) (-> p :maxlife))))
-        (call rectfill (+ camx 2) 2 (+ (+ camx 2) l) 6 8)
-        (set! s (string-append "♥" (string-append (-> p :life) (string-append "/" (string-append (-> p :maxlife) " ")))))
-        (call print s (+ camx 2) 2 7)
+        (let ([l (* 40 (/ (-> p :life) (-> p :maxlife)))]) (call rectfill (+ camx 2) 2 (+ (+ camx 2) l) 6 8))
+        (let ([s (string-append "♥" (string-append (-> p :life) (string-append "/" (string-append (-> p :maxlife) " "))))]) (call print s (+ camx 2) 2 7))
         (call rectfill (+ camx 84) 1 (+ (+ camx 84) 42) 7 4)
-        (set! l (* 40 (/ (-> (-> p :gun) :ammo) (-> (-> p :gun) :maxammo))))
-        (when (> (-> p :ammo) 0) (call rectfill (+ camx 85) 2 (+ (+ camx 85) l) 6 9))
-        (set-values! (s col) ((call tostr (-> (-> p :gun) :ammo)) 7))
-        (when (== s "0") (set-values! (s col) ("no ammo!" 14)))
+        (let ([l (* 40 (/ (-> (-> p :gun) :ammo) (-> (-> p :gun) :maxammo)))]) (when (> (-> p :ammo) 0) (call rectfill (+ camx 85) 2 (+ (+ camx 85) l) 6 9)))
+        (let ([s (call tostr (-> (-> p :gun) :ammo))] [col 7]) (when (== s "0") (set-values! (s col) ("no ammo!" 14))))
         (call spr 110 (+ camx 89) 2)
         (call print s (+ camx 95) 2 col)
-        (for-range i 1 2 (set! col 1) (when (== i (-> p :gunn)) (set! col 7)) (call ospr (-> (aref (-> p :gunls) i) :spr) void) (+ (+ camx 90) (* (- i 1) 10))))
+        (for-range i 1 2 (let ((col 1)) (when (== i (-> p :gunn)) (set! col 7))) (call ospr (-> (aref (-> p :gunls) i) :spr) void) (+ (+ camx 90) (* (- i 1) 10))))
       (body-lines
         "function draw_player_ui(p)"
         "\t--life counter"
@@ -725,9 +710,7 @@
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (set! x (+ (+ (call flr (-> p :x)) (* (call cos (-> p :a)) 6)) 0))
-        (set! y (+ (+ (call flr (-> p :y)) (* (call sin (-> p :a)) 3)) 0))
-        (send (-> p :kak) :fire (+ x 4) (+ y 4) (-> p :a)))
+        (let ([x (+ (+ (call flr (-> p :x)) (* (call cos (-> p :a)) 6)) 0)] [y (+ (+ (call flr (-> p :y)) (* (call sin (-> p :a)) 3)) 0)]) (send (-> p :kak) :fire (+ x 4) (+ y 4) (-> p :a))))
       (body-lines
         "function coupdekak(p)"
         "\tlocal x=flr(p.x) + cos(p.a)*6 +0"
@@ -823,10 +806,7 @@
       (decompiled-pseudo-code
         (when (<= (-> gun :burst) 0) (+= dir (call rrnd (-> gun :oa))))
         (when (-> gun :sfx) (call sfx (-> gun :sfx)))
-        (set! s 93)
-        (set! name (-> gun :name))
-        (set! palette "")
-        (when (-> gun :is_enemy) (set! s 95))
+        (let ([s 93] [name (-> gun :name)] [palette ""]) (when (-> gun :is_enemy) (set! s 95)))
         (when (== name "kak") (set! s 77))
         (when (== name "boxing glove") (set-values! (s lifspa) (77 10)))
         (when (== name "flamethrower") (set! lifspa 40))
@@ -957,9 +937,7 @@
       (structured-ast
         (seq-block 21))
       (decompiled-pseudo-code
-        (set! dx (* (call cos dir) spd))
-        (set! dy (* (call sin dir) spd))
-        (call add actors (table))
+        (let ([dx (* (call cos dir) spd)] [dy (* (call sin dir) spd)]) (call add actors (table)))
         (set-values! (x) (x y))
         (set-values! (dx) (dx dy))
         (set! r 4)
@@ -1101,7 +1079,7 @@
         (if-cond (== timer_bullet 0))
         (if-cond (== type_bullet 1)))
       (decompiled-pseudo-code
-        (when (== timer_bullet 0) (set! xy (call get_traj x y mouse_x mouse_y)) (set! traj_x (* (-> xy :x) speed)) (set! traj_y (* (-> xy :y) speed)) (set! angle (-> xy :angle)) (set! timer_bullet timer_bullet1) (when (== type_bullet 1) (set! nvelement (table)) (set-values! (x) (x y)) (set! type_bullet type_bullet) (set! traj_x traj_x) (set! traj_y traj_y) (set! sprite sprite) |}| (call rafale 10 nvelement))))
+        (when (== timer_bullet 0) (let ([xy (call get_traj x y mouse_x mouse_y)] [traj_x (* (-> xy :x) speed)] [traj_y (* (-> xy :y) speed)] [angle (-> xy :angle)]) (set! timer_bullet timer_bullet1)) (when (== type_bullet 1) (set! nvelement (table)) (set-values! (x) (x y)) (set! type_bullet type_bullet) (set! traj_x traj_x) (set! traj_y traj_y) (set! sprite sprite) |}| (call rafale 10 nvelement))))
       (body-lines
         "function spawn_bullet(x,y,type_bullet,speed,timer_bullet1,sprite,nb_bullet,ecartement)"
         "\tif timer_bullet == 0 then"
@@ -1205,8 +1183,7 @@
         (call poke 24365 1)
         (set! mx (+ (call stat 32) (call flr camx)))
         (set! my (call stat 33))
-        (set! s (call stat 34))
-        (set! lmb s)
+        (let ([s (call stat 34)]) (set! lmb s))
         (set! rmb s))
       (body-lines
         "function mouse_x_y()"
@@ -1305,13 +1282,9 @@
       (structured-ast
         (return-expr (< (+ (* dx dx) (* dy dy)) (* sr sr))))
       (decompiled-pseudo-code
-        (set! dx (- (+ (-> a :x) 4) (-> b :x)))
-        (set! dy (- (+ (-> a :y) 4) (-> b :y)))
-        (set! d (call max dx dy))
-        (/= dx d)
+        (let ([dx (- (+ (-> a :x) 4) (-> b :x))] [dy (- (+ (-> a :y) 4) (-> b :y))] [d (call max dx dy)]) (/= dx d))
         (/= dy d)
-        (set! sr (/ (+ (-> a :r) (-> b :r)) d))
-        (return (< (+ (* dx dx) (* dy dy)) (* sr sr))))
+        (let ([sr (/ (+ (-> a :r) (-> b :r)) d)]) (return (< (+ (* dx dx) (* dy dy)) (* sr sr)))))
       (body-lines
         "function circ_coll(a,b)"
         "\t--https://www.lexaloffle.com/bbs/?tid=28999"
@@ -1388,14 +1361,7 @@
       (structured-ast
         (if-cond coll_x))
       (decompiled-pseudo-code
-        (set-values! (x y) ((-> o :x) (-> o :y)))
-        (set-values! (dx dy) ((-> o :dx) (-> o :dy)))
-        (set-values! (w h) ((-> o :bw) (-> o :bh)))
-        (set-values! (ox oy) ((+ x (-> o :bx)) (+ y (-> o :by))))
-        (set! bounce bounce1)
-        (set-values! (we he) ((- w 1) (- h 1)))
-        (set! coll_x (call collision void))
-        (+ ox dx)
+        (let ([x (-> o :x)] [y (-> o :y)] [dx (-> o :dx)] [dy (-> o :dy)] [w (-> o :bw)] [h (-> o :bh)] [ox (+ x (-> o :bx))] [oy (+ y (-> o :by))] [bounce bounce1] [we (- w 1)] [he (- h 1)] [coll_x (call collision void)]) (+ ox dx))
         (set! coll_y (call collision void))
         ox
         (set! coll_xy (call collision void))
@@ -1451,10 +1417,8 @@
         (for-loop "j = 0,15")
         (for-loop "i = 0,15"))
       (decompiled-pseudo-code
-        (set! ax (* (modulo a 8) 16))
-        (set! ay a)
-        (set! room_all (table))
-        (for-range j 0 15 (for-range i 0 15 (set! t (call mget (+ ax i) (+ ay j))) (call mset (+ (* b 16) i) j t))))
+        (let ([ax (* (modulo a 8) 16)] [ay a]) (set! room_all (table)))
+        (for-range j 0 15 (for-range i 0 15 (let ((t (call mget (+ ax i) (+ ay j)))) (call mset (+ (* b 16) i) j t)))))
       (body-lines
         "function clone_room(a,b)"
         "\tlocal ax = (a%8)*16"
@@ -1480,9 +1444,7 @@
         (not enemiescleared)
         (call sfx 37)
         (call sfx 42)
-        (set! x (* (- wl 1) 16))
-        (set! g (call rnd_gun))
-        (call make_drop (+ (* x 8) 60) 56 (-> g :spr) "gun" void)
+        (let ([x (* (- wl 1) 16)] [g (call rnd_gun)]) (call make_drop (+ (* x 8) 60) 56 (-> g :spr) "gun" void))
         (call copy g)
         (set! enemiescleared #t)
         (for-range i 1 5 (call make_ptc void) (+ (* x 8) (call rrnd 8)) (+ 56 (call rrnd 8)) (+ 8 (call rnd 8))))
@@ -1537,8 +1499,7 @@
       (structured-ast
         (for-loop "i=5,9"))
       (decompiled-pseudo-code
-        (set! x (* (- wl 1) 16))
-        (call spawn_enemy (+ (* x 8) (* 8 12)) void)
+        (let ([x (* (- wl 1) 16)]) (call spawn_enemy (+ (* x 8) (* 8 12)) void))
         56
         (call mset x i 6)
         (for-range i 5 9 (call mset x i 6) (call burst_ptc (* x 8) (* i 8) 10)))
@@ -1563,7 +1524,7 @@
       (structured-ast
         (for-loop "i=0,3"))
       (decompiled-pseudo-code
-        (for-range i 0 3 (set! w (+ (* wagon_n wl) i)) (call clone_room (aref train w) i)))
+        (for-range i 0 3 (let ((w (+ (* wagon_n wl) i))) (call clone_room (aref train w) i))))
       (body-lines
         "function update_room()"
         "\tfor i=0,3 do"
@@ -1658,8 +1619,7 @@
         (if-cond (call mget x y))
         (if-cond (call rnd 4)))
       (decompiled-pseudo-code
-        (set! x1 0)
-        (when (== wagon_n 0) (set! x1 16))
+        (let ([x1 0]) (when (== wagon_n 0) (set! x1 16)))
         (for-range x x1 (* 16 (- wl 1)) (for-range y 2 12 (when (or (or (> x 3) (> (- (-> p :y) 1000) (* y 8))) (< (+ (-> p :y) 1000) (* y 8))) (when (== (call mget x y) 109) (call mset x y 39) (when (> (call rnd 4) 3) (call spawn_enemy (* x 8) (* y 8) (-> enemy :explosive_barrel))))))))
       (body-lines
         "function parcourmap()"
@@ -1780,12 +1740,10 @@
         (if-cond (== (-> a :spr) 126))
         (if-cond (< (-> a :x) 175)))
       (decompiled-pseudo-code
-        (set! a (call copy name))
-        (set! (-> a :x) x)
+        (let ([a (call copy name)]) (set! (-> a :x) x))
         (set! (-> a :y) y)
         (set! (-> a :gun) (call copy (-> a :gun)))
-        (set! r (call rnd 60))
-        (when (== (-> a :spr) 1) (set! r 0))
+        (let ([r (call rnd 60)]) (when (== (-> a :spr) 1) (set! r 0)))
         (when (!= (-> a :spr) 125) (+= (-> (-> a :gun) :cooldown) r))
         (when (== (-> a :spr) 126) (set! (-> a :spd) (+ 0.8 (call rnd 0.4))))
         (when (< (-> a :x) 175) (+= (-> (-> a :gun) :timer) 90) (set! (-> a :timer) 90)))
@@ -1841,15 +1799,14 @@
         (if-cond (== (-> e :spr) 1))
         (if-cond (== (-> e :spr) 1)))
       (decompiled-pseudo-code
-        (set! w 1)
-        (when (== (-> e :spr) 1) (set! w 2))
+        (let ([w 1]) (when (== (-> e :spr) 1) (set! w 2)))
         (set! x (+ (call flr (-> e :x)) void))
         (* (* (call cos (-> e :pangle)) 6) w)
         (set! y (+ (call flr (-> e :y)) void))
         (* (* (call sin (-> e :pangle)) 3) w)
         (call spr (-> (-> e :gun) :spr) x y 1 1 (-> e :flip))
         (call spr (-> e :spr) (-> e :x) (-> e :y) w w (-> e :flip))
-        (when (== (-> e :spr) 1) (call rectfill (+ camx 1) 120 void) (+ camx 126) (set! l (* 126 (/ (-> e :life) 300))) (call rectfill (+ camx 2) 121 (+ (+ camx 2) l) void) 125 (set! s (string-append "🐱" (string-append (call ceil (-> e :life)) (string-append "/" "300")))) (call print s (+ camx 3) 121 7)))
+        (when (== (-> e :spr) 1) (call rectfill (+ camx 1) 120 void) (+ camx 126) (let ([l (* 126 (/ (-> e :life) 300))]) (call rectfill (+ camx 2) 121 (+ (+ camx 2) l) void)) 125 (let ([s (string-append "🐱" (string-append (call ceil (-> e :life)) (string-append "/" "300")))]) (call print s (+ camx 3) 121 7))))
       (body-lines
         "function draw_enemy(e)"
         "\tlocal w = 1"
@@ -1933,10 +1890,7 @@
         (set! angle (call atan2 (- (-> pl :x) (-> e :x)) void))
         (- (-> pl :y) (-> e :y))
         (set! (-> e :a) angle)
-        (set! x (call cos angle))
-        (set! y (call sin angle))
-        (set! dist (call dist e pl))
-        (when (or (and (< (call abs dist) (-> e :agro)) (< (call abs (- (-> pl :x) (-> e :x))) 128)) (== e p)) (return (call cansee e angle x y dist)) (when (and (and (and (< (call abs dist) (-> e :seerange)) (> (call abs dist) (-> e :agro))) (-> e :chase)) (call cansee e angle x y dist)) (set! o (+ (-> e :dx) (-> e :dy))) (set! (-> e :dx) (/ (* x (* (-> e :spd) 2)) (call max dist 4))) (set! (-> e :dy) (/ (* y (* (-> e :spd) 2)) (call max dist 4))) (set! mouvrnd #f))))
+        (let ([x (call cos angle)] [y (call sin angle)] [dist (call dist e pl)]) (when (or (and (< (call abs dist) (-> e :agro)) (< (call abs (- (-> pl :x) (-> e :x))) 128)) (== e p)) (return (call cansee e angle x y dist)) (when (and (and (and (< (call abs dist) (-> e :seerange)) (> (call abs dist) (-> e :agro))) (-> e :chase)) (call cansee e angle x y dist)) (set! o (+ (-> e :dx) (-> e :dy))) (set! (-> e :dx) (/ (* x (* (-> e :spd) 2)) (call max dist 4))) (set! (-> e :dy) (/ (* y (* (-> e :spd) 2)) (call max dist 4))) (set! mouvrnd #f)))))
       (body-lines
         "function canshoot(e,pl)"
         "\tlocal angle = atan2(pl.x-e.x,"
@@ -2324,10 +2278,7 @@
       (structured-ast
         (seq-block 11))
       (decompiled-pseudo-code
-        (set-values! (x y) ((+ (aref boss_pos 1) 8) (+ (aref boss_pos 2) 8)))
-        (set! flp (aref boss_pos 3))
-        (set! t (-> m :timer))
-        (call circfill x y t 8)
+        (let ([x (+ (aref boss_pos 1) 8)] [y (+ (aref boss_pos 2) 8)] [flp (aref boss_pos 3)] [t (-> m :timer)]) (call circfill x y t 8))
         (call circfill x y (* t |.|))
         (call circfill x y (* t |.|))
         (call circfill x y (* t |.|))
@@ -2364,10 +2315,7 @@
         (set! has_active #f)
         |}|
         (set! (-> m :buttons) (table))
-        (set! names split)
-        (set! x 4)
-        (set! y 105)
-        (for-range i 1 12 (call add (-> m :buttons) (table)) (set! n i) (set! spr (+ i 79)) (set! bird (+ i 111)) (set! x (- (* i 10) 6)) (set! y 105) (set! w 9) (set! h 17) (set! col 1) (set! sh 2) (set! name (aref names i)) (set! active #f) |}|))
+        (let ([names split] [x 4] [y 105]) (for-range i 1 12 (call add (-> m :buttons) (table)) (set! n i) (set! spr (+ i 79)) (set! bird (+ i 111)) (set! x (- (* i 10) 6)) (set! y 105) (set! w 9) (set! h 17) (set! col 1) (set! sh 2) (set! name (aref names i)) (set! active #f) |}|)))
       (body-lines
         "function make_main_menu()"
         "\t--this code could be better"
@@ -2456,8 +2404,7 @@
         (if-cond (not (-> i :active)))
         (if-cond lmb))
       (decompiled-pseudo-code
-        (set! selection 1000)
-        (when (not (-> m :done)) (for-range k 0 (len (-> m :buttons)) (set! i (aref (-> m :buttons) k)) if (- (+ (-> i :x) (-> i :w)) 1) (set! (-> i :col) 7) (set! (-> i :oy) 2) (when (not (-> i :active)) (call sfx 43)) (set! (-> m :has_active) #t) (set! (-> m :sel) (-> i :n)) (set! (-> i :active) #t) (when lmb (set! selection (-> i :n))))))
+        (let ([selection 1000]) (when (not (-> m :done)) (for-range k 0 (len (-> m :buttons)) (set! i (aref (-> m :buttons) k)) if (- (+ (-> i :x) (-> i :w)) 1) (set! (-> i :col) 7) (set! (-> i :oy) 2) (when (not (-> i :active)) (call sfx 43)) (set! (-> m :has_active) #t) (set! (-> m :sel) (-> i :n)) (set! (-> i :active) #t) (when lmb (set! selection (-> i :n)))))))
       (body-lines
         "function update_main_menu(m)"
         "\tlocal selection=1000"
@@ -2594,7 +2541,7 @@
         (set! t2 "                !\\")
         (set-values! (n1 n2) ("" ""))
         (set! pre (or pre ""))
-        (for-range i 1 (len t) (set! char (call sub t i i)) (set! c (- (call ord char) 16)) (set! (string-append n1 void) (string-append (call sub t1 c c) " ")) (set! (string-append n2 void) (string-append (call sub t2 c c) " "))))
+        (for-range i 1 (len t) (let ((char (call sub t i i)) (c (- (call ord char) 16))) (set! (string-append n1 void) (string-append (call sub t1 c c) " "))) (set! (string-append n2 void) (string-append (call sub t2 c c) " "))))
       (body-lines
         "function wide(t,x,y,col,pre)"
         "\t--credit to yolwoocle uwu"
@@ -2658,7 +2605,7 @@
         (if-cond touches)
         (if-cond (== (-> d :type) "ammo")))
       (decompiled-pseudo-code
-        (foreach d drops (set! (-> d :cooldown) (call max 0 (- (-> d :cooldown) 1))) (set! touches (call touches_rect void)) (+ (-> p :x) 4) (-> d :x) (when (not touches) (set! (-> d :touched) #f)) (when touches (set! col 7) (set! txt "") (set! do_ptc #f) (when (== (-> d :type) "ammo") (set! (-> d :destroy) #t) (set! q (call flr (* (-> d :q) (-> (-> p :gun) :maxammo)))) (+= (-> (-> p :gun) :ammo) q) (set! do_ptc #t) (set! col 9) (set! txt (string-append "+" (string-append q " ammo"))) (call sfx 38) elseif (set! (-> d :destroy) #t) (+= (-> p :life) (-> d :q)) (set! do_ptc #t) (set! col 8) (set! txt (string-append "+" (string-append (-> d :q) " health"))) (call sfx 38) elseif and and (set! (-> d :touched) #t) (set! (-> d :cooldown) 60) (set! do_ptc #t) (set! col 6) (set! txt (-> (-> d :q) :name)) (set-values! ((aref (-> p :gunls) (-> p :gunn)) (-> d :q)) ((-> d :q) (aref (-> p :gunls) (-> p :gunn)))) (call update_gun p) (set! (-> d :spr) (-> (-> d :q) :spr)) (call sfx 36)))))
+        (foreach d drops (set! (-> d :cooldown) (call max 0 (- (-> d :cooldown) 1))) (set! touches (call touches_rect void)) (+ (-> p :x) 4) (-> d :x) (when (not touches) (set! (-> d :touched) #f)) (when touches (let ((col 7) (txt "") (do_ptc #f)) (when (== (-> d :type) "ammo") (set! (-> d :destroy) #t) (let ((q (call flr (* (-> d :q) (-> (-> p :gun) :maxammo))))) (+= (-> (-> p :gun) :ammo) q)) (set! do_ptc #t) (set! col 9) (set! txt (string-append "+" (string-append q " ammo"))) (call sfx 38) elseif (set! (-> d :destroy) #t) (+= (-> p :life) (-> d :q)) (set! do_ptc #t) (set! col 8) (set! txt (string-append "+" (string-append (-> d :q) " health"))) (call sfx 38) elseif and and (set! (-> d :touched) #t) (set! (-> d :cooldown) 60) (set! do_ptc #t) (set! col 6) (set! txt (-> (-> d :q) :name)) (set-values! ((aref (-> p :gunls) (-> p :gunn)) (-> d :q)) ((-> d :q) (aref (-> p :gunls) (-> p :gunn)))) (call update_gun p) (set! (-> d :spr) (-> (-> d :q) :spr)) (call sfx 36))))))
       (body-lines
         "function update_drops()"
         "\tfor d in all(drops) do"
@@ -2719,8 +2666,7 @@
       (structured-ast
         (if-cond (< r |.|)))
       (decompiled-pseudo-code
-        (set! r (call rnd 1))
-        (when (< r |.|) (set! g (call rnd_gun)) (call make_drop x y (-> g :spr) "gun" void) (call copy g) (when (< r |.|) (call make_drop x y 79 "ammo" (/ 1 4)) (when (< r |.|) (call make_drop x y 78 "health" 2) (when (< r |.|) (call make_drop x y 78 "health" 1))))))
+        (let ([r (call rnd 1)]) (when (< r |.|) (let ([g (call rnd_gun)]) (call make_drop x y (-> g :spr) "gun" void)) (call copy g) (when (< r |.|) (call make_drop x y 79 "ammo" (/ 1 4)) (when (< r |.|) (call make_drop x y 78 "health" 2) (when (< r |.|) (call make_drop x y 78 "health" 1)))))))
       (body-lines
         "function spawn_loot(x,y)"
         "\tlocal r = rnd(1)"
@@ -2758,8 +2704,7 @@
         (set! iswin iswin)
         (set! nstats 0)
         |}|
-        (set-values! (t t2) ("retry" "change bird"))
-        (when iswin (set-values! (t) ("play again" "title screen")))
+        (let ([t "retry"] [t2 "change bird"]) (when iswin (set-values! (t) ("play again" "title screen"))))
         (set! (-> m :buttons) (table))
         (set! (aref (-> m :buttons) 1) (table))
         (set! n 1)
@@ -2849,9 +2794,7 @@
       (decompiled-pseudo-code
         (call palt 0 #f)
         (call palt 1 #t)
-        (set-values! (col c2 c3 c4) (0 1 2 9))
-        (set! txtcol 7)
-        (when (-> m :iswin) (set-values! (col c2 c3 c4) (15 9 8 2)) (set! txtcol 10) (when (< (modulo (call t) 2) 1) (set! txtcol 9))))
+        (let ([col 0] [c2 1] [c3 2] [c4 9] [txtcol 7]) (when (-> m :iswin) (set-values! (col c2 c3 c4) (15 9 8 2)) (set! txtcol 10) (when (< (modulo (call t) 2) 1) (set! txtcol 9)))))
       (body-lines
         "function draw_death_menu(m)"
         "\t--circles animation"

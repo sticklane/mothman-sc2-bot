@@ -220,9 +220,7 @@
         (set! input (or (and (call btn k_right) 1) (or (and (call btn k_left) (- 1)) 0)))
         (when (call spikes_at (+ (-> this :x) (-> (-> this :hitbox) :x)) (+ (-> this :y) (-> (-> this :hitbox) :y)) (-> (-> this :hitbox) :w) (-> (-> this :hitbox) :h) (-> (-> this :spd) :x) (-> (-> this :spd) :y)) (call kill_player this))
         (when (> (-> this :y) 128) (call kill_player this))
-        (set! on_ground (call (-> this :is_solid) 0 1))
-        (set! on_ice (call (-> this :is_ice) 0 1))
-        (when (and on_ground (not (-> this :was_on_ground))) (call init_object smoke (-> this :x) (+ (-> this :y) 4))))
+        (let ([on_ground (call (-> this :is_solid) 0 1)] [on_ice (call (-> this :is_ice) 0 1)]) (when (and on_ground (not (-> this :was_on_ground))) (call init_object smoke (-> this :x) (+ (-> this :y) 4)))))
       (body-lines
         "\tupdate=function(this)"
         "\t\tif (pause_player) return"
@@ -510,7 +508,7 @@
         (if-cond (== (-> this :spr) 22))
         (if-cond (and (!= hit nil) (< (-> hit :djump) max_djump))))
       (decompiled-pseudo-code
-        (when (== (-> this :spr) 22) (+= (-> this :offset) 0.01) (set! (-> this :y) (+ (-> this :start) (* (call sin (-> this :offset)) 2))) (set! hit (call (-> this :collide) player 0 0)) (when (and (!= hit nil) (< (-> hit :djump) max_djump)) (call psfx 6) (call init_object smoke (-> this :x) (-> this :y)) (set! (-> hit :djump) max_djump) (set! (-> this :spr) 0) (set! (-> this :timer) 60))))
+        (when (== (-> this :spr) 22) (+= (-> this :offset) 0.01) (set! (-> this :y) (+ (-> this :start) (* (call sin (-> this :offset)) 2))) (let ([hit (call (-> this :collide) player 0 0)]) (when (and (!= hit nil) (< (-> hit :djump) max_djump)) (call psfx 6) (call init_object smoke (-> this :x) (-> this :y)) (set! (-> hit :djump) max_djump) (set! (-> this :spr) 0) (set! (-> this :timer) 60)))))
       (body-lines
         "\tupdate=function(this) "
         "\t\tif this.spr==22 then"
@@ -608,7 +606,7 @@
         (if-cond (== (-> obj :state) 0))
         (if-cond (!= hit nil)))
       (decompiled-pseudo-code
-        (when (== (-> obj :state) 0) (call psfx 15) (set! (-> obj :state) 1) (set! (-> obj :delay) 15) (call init_object smoke (-> obj :x) (-> obj :y)) (set! hit (call (-> obj :collide) spring 0 (- 1))) (when (!= hit nil) (call break_spring hit))))
+        (when (== (-> obj :state) 0) (call psfx 15) (set! (-> obj :state) 1) (set! (-> obj :delay) 15) (call init_object smoke (-> obj :x) (-> obj :y)) (let ([hit (call (-> obj :collide) spring 0 (- 1))]) (when (!= hit nil) (call break_spring hit)))))
       (body-lines
         "function break_fall_floor(obj)"
         " if obj.state==0 then"
@@ -694,8 +692,7 @@
       (structured-ast
         (if-cond (!= hit nil)))
       (decompiled-pseudo-code
-        (set! hit (call (-> this :collide) player 0 0))
-        (when (!= hit nil) (set! (-> hit :djump) max_djump) (set! sfx_timer 20) (call sfx 13) (aref got_fruit (+ 1 (call level_index))) (call init_object lifeup (-> this :x) (-> this :y)) (call destroy_object this)))
+        (let ([hit (call (-> this :collide) player 0 0)]) (when (!= hit nil) (set! (-> hit :djump) max_djump) (set! sfx_timer 20) (call sfx 13) (aref got_fruit (+ 1 (call level_index))) (call init_object lifeup (-> this :x) (-> this :y)) (call destroy_object this))))
       (body-lines
         "\tupdate=function(this)"
         "\t local hit=this.collide(player,0,0)"
@@ -764,8 +761,7 @@
         (if-cond (not (-> this :fly)))
         (if-cond (< dir 0)))
       (decompiled-pseudo-code
-        (set! off 0)
-        (when (not (-> this :fly)) (set! dir (call sin (-> this :step))) (when (< dir 0) (set! off (+ 1 (call max 0 (call sign (- (-> this :y) (-> this :start)))))))))
+        (let ([off 0]) (when (not (-> this :fly)) (let ([dir (call sin (-> this :step))]) (when (< dir 0) (set! off (+ 1 (call max 0 (call sign (- (-> this :y) (-> this :start)))))))))))
       (body-lines
         "\tdraw=function(this)"
         "\t\tlocal off=0"
@@ -846,8 +842,7 @@
         (if-cond (and (!= hit nil) (> (-> hit :dash_effect_time) 0))))
       (decompiled-pseudo-code
         (set! (-> this :hitbox) (table (:x (- 1)) (:y (- 1)) (:w 18) (:h 18)))
-        (set! hit (call (-> this :collide) player 0 0))
-        (when (and (!= hit nil) (> (-> hit :dash_effect_time) 0)) (set! (-> (-> hit :spd) :x) (* (- (call sign (-> (-> hit :spd) :x))) 1.5)) (set! (-> (-> hit :spd) :y) (- 1.5)) (set! (-> hit :dash_time) (- 1)) (set! sfx_timer 20) (call sfx 16) (call destroy_object this) (call init_object smoke (-> this :x) (-> this :y)) (call init_object smoke (+ (-> this :x) 8) (-> this :y)) (call init_object smoke (-> this :x) (+ (-> this :y) 8)) (call init_object smoke (+ (-> this :x) 8) (+ (-> this :y) 8)) (call init_object fruit (+ (-> this :x) 4) (+ (-> this :y) 4))))
+        (let ([hit (call (-> this :collide) player 0 0)]) (when (and (!= hit nil) (> (-> hit :dash_effect_time) 0)) (set! (-> (-> hit :spd) :x) (* (- (call sign (-> (-> hit :spd) :x))) 1.5)) (set! (-> (-> hit :spd) :y) (- 1.5)) (set! (-> hit :dash_time) (- 1)) (set! sfx_timer 20) (call sfx 16) (call destroy_object this) (call init_object smoke (-> this :x) (-> this :y)) (call init_object smoke (+ (-> this :x) 8) (-> this :y)) (call init_object smoke (-> this :x) (+ (-> this :y) 8)) (call init_object smoke (+ (-> this :x) 8) (+ (-> this :y) 8)) (call init_object fruit (+ (-> this :x) 4) (+ (-> this :y) 4)))))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.hitbox={x=-1,y=-1,w=18,h=18}"
@@ -898,8 +893,7 @@
       (decompiled-pseudo-code
         (set! was (call flr (-> this :spr)))
         (set! (-> this :spr) (+ 9 (* (+ (call sin (/ frames 30)) 0.5) 1)))
-        (set! is (call flr (-> this :spr)))
-        (when (and (== is 10) (!= is was)) (set! (-> (-> this :flip) :x) (not (-> (-> this :flip) :x)))))
+        (let ([is (call flr (-> this :spr))]) (when (and (== is 10) (!= is was)) (set! (-> (-> this :flip) :x) (not (-> (-> this :flip) :x))))))
       (body-lines
         "\tupdate=function(this)"
         "\t\tlocal was=flr(this.spr)"
@@ -984,7 +978,7 @@
         (if-cond (!= hit nil)))
       (decompiled-pseudo-code
         (set! (-> (-> this :spd) :x) (* (-> this :dir) 0.65))
-        (when (< (-> this :x) (- 16)) (set! (-> this :x) 128) (when (> (-> this :x) 128) (set! (-> this :x) (- 16))) (when (not (call (-> this :check) player 0 0)) (set! hit (call (-> this :collide) player 0 (- 1))) (when (!= hit nil) (call (-> hit :move_x) (- (-> this :x) (-> this :last)) 1)))))
+        (when (< (-> this :x) (- 16)) (set! (-> this :x) 128) (when (> (-> this :x) 128) (set! (-> this :x) (- 16))) (when (not (call (-> this :check) player 0 0)) (let ([hit (call (-> this :collide) player 0 (- 1))]) (when (!= hit nil) (call (-> hit :move_x) (- (-> this :x) (-> this :last)) 1))))))
       (body-lines
         "\tupdate=function(this)"
         "\t\tthis.spd.x=this.dir*0.65"
@@ -1064,7 +1058,7 @@
         (if-cond (== (-> this :state) 0))
         (if-cond (and (!= hit nil) (call (-> hit :is_solid) 0 1))))
       (decompiled-pseudo-code
-        (when (== (-> this :state) 0) (set! hit (call (-> this :collide) player 0 8)) (when (and (!= hit nil) (call (-> hit :is_solid) 0 1)) (call music (- 1) 500 7) (call sfx 37) (set! pause_player #t) (set! (-> (-> hit :spd) :x) 0) (set! (-> (-> hit :spd) :y) 0) (set! (-> this :state) 1) (call init_object smoke (-> this :x) (-> this :y)) (call init_object smoke (+ (-> this :x) 8) (-> this :y)) (set! (-> this :timer) 60) (set! (-> this :particles) (table)))))
+        (when (== (-> this :state) 0) (let ([hit (call (-> this :collide) player 0 8)]) (when (and (!= hit nil) (call (-> hit :is_solid) 0 1)) (call music (- 1) 500 7) (call sfx 37) (set! pause_player #t) (set! (-> (-> hit :spd) :x) 0) (set! (-> (-> hit :spd) :y) 0) (set! (-> this :state) 1) (call init_object smoke (-> this :x) (-> this :y)) (call init_object smoke (+ (-> this :x) 8) (-> this :y)) (set! (-> this :timer) 60) (set! (-> this :particles) (table))))))
       (body-lines
         "\tdraw=function(this)"
         "\t\tif this.state==0 then"
@@ -1111,8 +1105,7 @@
         (if-cond (and (== (-> (-> this :spd) :y) 0) (!= hit nil))))
       (decompiled-pseudo-code
         (set! (-> (-> this :spd) :y) (call appr (-> (-> this :spd) :y) 0 0.5))
-        (set! hit (call (-> this :collide) player 0 0))
-        (when (and (== (-> (-> this :spd) :y) 0) (!= hit nil)) (set! music_timer 45) (call sfx 51) (set! freeze 10) (set! shake 10) (call destroy_object this) (set! max_djump 2) (set! (-> hit :djump) 2)))
+        (let ([hit (call (-> this :collide) player 0 0)]) (when (and (== (-> (-> this :spd) :y) 0) (!= hit nil)) (set! music_timer 45) (call sfx 51) (set! freeze 10) (set! shake 10) (call destroy_object this) (set! max_djump 2) (set! (-> hit :djump) 2))))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.spd.y=appr(this.spd.y,0,0.5)"
@@ -1205,7 +1198,7 @@
         (if-cond (and (== (-> room :x) 3) (== (-> room :y) 1))))
       (decompiled-pseudo-code
         (-= (-> this :delay) 1)
-        (when (< (-> this :delay) (- 30)) (call destroy_object this) (when (< (-> this :delay) 0) (call rectfill 24 58 104 70 0) (when (and (== (-> room :x) 3) (== (-> room :y) 1)) (call print "old site" 48 62 7) (if (== (call level_index) 30) (then (call print "summit" 52 62 7)) (else (set! level (* (+ 1 (call level_index)) 100)) (call print (string-append level " m") (+ 52 (or (and (< level 1000) 2) 0)) 62 7)))))))
+        (when (< (-> this :delay) (- 30)) (call destroy_object this) (when (< (-> this :delay) 0) (call rectfill 24 58 104 70 0) (when (and (== (-> room :x) 3) (== (-> room :y) 1)) (call print "old site" 48 62 7) (if (== (call level_index) 30) (then (call print "summit" 52 62 7)) (else (let ([level (* (+ 1 (call level_index)) 100)]) (call print (string-append level " m") (+ 52 (or (and (< level 1000) 2) 0)) 62 7))))))))
       (body-lines
         "\tdraw=function(this)"
         "\t\tthis.delay-=1"
@@ -1359,7 +1352,7 @@
         (for-loop "i=start,abs(amount)")
         (if-cond (not (call (-> obj :is_solid) step 0))))
       (decompiled-pseudo-code
-        (when (-> obj :solids) (set! step (call sign amount)) (for-range i start (call abs amount) (if (not (call (-> obj :is_solid) step 0)) (then (+= (-> obj :x) step)) (else (set! (-> (-> obj :spd) :x) 0) (set! (-> (-> obj :rem) :x) 0) break)))))
+        (when (-> obj :solids) (let ([step (call sign amount)]) (for-range i start (call abs amount) (if (not (call (-> obj :is_solid) step 0)) (then (+= (-> obj :x) step)) (else (set! (-> (-> obj :spd) :x) 0) (set! (-> (-> obj :rem) :x) 0) break))))))
       (body-lines
         "\tobj.move_x=function(amount,start)"
         "\t\tif obj.solids then"
@@ -1384,7 +1377,7 @@
         (for-loop "i=0,abs(amount)")
         (if-cond (not (call (-> obj :is_solid) 0 step))))
       (decompiled-pseudo-code
-        (when (-> obj :solids) (set! step (call sign amount)) (for-range i 0 (call abs amount) (if (not (call (-> obj :is_solid) 0 step)) (then (+= (-> obj :y) step)) (else (set! (-> (-> obj :spd) :y) 0) (set! (-> (-> obj :rem) :y) 0) break)))))
+        (when (-> obj :solids) (let ([step (call sign amount)]) (for-range i 0 (call abs amount) (if (not (call (-> obj :is_solid) 0 step)) (then (+= (-> obj :y) step)) (else (set! (-> (-> obj :spd) :y) 0) (set! (-> (-> obj :rem) :y) 0) break))))))
       (body-lines
         "\tobj.move_y=function(amount)"
         "\t\tif obj.solids then"
@@ -1508,7 +1501,7 @@
         (foreach objects destroy_object)
         (set! (-> room :x) x)
         (set! (-> room :y) y)
-        (for-range tx 0 15 (for-range ty 0 15 (set! tile (call mget (+ (* (-> room :x) 16) tx) (+ (* (-> room :y) 16) ty))) (when (== tile 11) (-> (call init_object platform (* tx 8) (* ty 8)) :dir) (if (== tile 12) (then (-> (call init_object platform (* tx 8) (* ty 8)) :dir)) (else (call foreach types void) (call function type) (when (== (-> type :tile) tile) (call init_object type (* tx 8) (* ty 8)))))))))
+        (for-range tx 0 15 (for-range ty 0 15 (let ((tile (call mget (+ (* (-> room :x) 16) tx) (+ (* (-> room :y) 16) ty)))) (when (== tile 11) (-> (call init_object platform (* tx 8) (* ty 8)) :dir) (if (== tile 12) (then (-> (call init_object platform (* tx 8) (* ty 8)) :dir)) (else (call foreach types void) (call function type) (when (== (-> type :tile) tile) (call init_object type (* tx 8) (* ty 8))))))))))
       (body-lines
         "function load_room(x,y)"
         "\thas_dashed=false"
@@ -1572,7 +1565,7 @@
       (decompiled-pseudo-code
         (when (> freeze 0) (return))
         (call pal)
-        (when start_game (set! c 10) (when (> start_game_flash 10) (when (< (modulo frames 10) 5) (set! c 7)))))
+        (when start_game (let ([c 10]) (when (> start_game_flash 10) (when (< (modulo frames 10) 5) (set! c 7))))))
       (body-lines
         "function _draw()"
         "\tif freeze>0 then return end"
@@ -1616,10 +1609,7 @@
       (structured-ast
         (seq-block 10))
       (decompiled-pseudo-code
-        (set! s seconds)
-        (set! m (modulo minutes 60))
-        (set! h (call flr (/ minutes 60)))
-        (call rectfill x y (+ x 32) (+ y 6) 0)
+        (let ([s seconds] [m (modulo minutes 60)] [h (call flr (/ minutes 60))]) (call rectfill x y (+ x 32) (+ y 6) 0))
         (call print (string-append (or (and (< h 10) (string-append "0" h)) h) (string-append ":" (string-append (or (and (< m 10) (string-append "0" m)) m) (string-append ":" (or (and (< s 10) (string-append "0" s)) s))))) (+ x 1) (+ y 1) 7))
       (body-lines
         "function draw_time(x,y)"
@@ -1780,7 +1770,7 @@
         (return-expr #t)
         (return-expr #t))
       (decompiled-pseudo-code
-        (for-range i (call max 0 (call flr (/ x 8))) (call min 15 (/ (- (+ x w) 1) 8)) (for-range j (call max 0 (call flr (/ y 8))) (call min 15 (/ (- (+ y h) 1) 8)) (set! tile (call tile_at i j)) (when (and (and (== tile 17) (or (>= (modulo (- (+ y h) 1) 8) 6) (== (+ y h) (+ (* j 8) 8)))) (>= yspd 0)) (return #t) (when (and (and (== tile 27) (<= (modulo y 8) 2)) (<= yspd 0)) (return #t) (when (and (and (== tile 43) (<= (modulo x 8) 2)) (<= xspd 0)) (return #t) (when (and (and (== tile 59) (or (>= (modulo (- (+ x w) 1) 8) 6) (== (+ x w) (+ (* i 8) 8)))) (>= xspd 0)) (return #t))))))))
+        (for-range i (call max 0 (call flr (/ x 8))) (call min 15 (/ (- (+ x w) 1) 8)) (for-range j (call max 0 (call flr (/ y 8))) (call min 15 (/ (- (+ y h) 1) 8)) (let ((tile (call tile_at i j))) (when (and (and (== tile 17) (or (>= (modulo (- (+ y h) 1) 8) 6) (== (+ y h) (+ (* j 8) 8)))) (>= yspd 0)) (return #t) (when (and (and (== tile 27) (<= (modulo y 8) 2)) (<= yspd 0)) (return #t) (when (and (and (== tile 43) (<= (modulo x 8) 2)) (<= xspd 0)) (return #t) (when (and (and (== tile 59) (or (>= (modulo (- (+ x w) 1) 8) 6) (== (+ x w) (+ (* i 8) 8)))) (>= xspd 0)) (return #t)))))))))
       (body-lines
         "function spikes_at(x,y,w,h,xspd,yspd)"
         " for i=max(0,flr(x/8)),min(15,(x+w-1)/8) do"

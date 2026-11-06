@@ -1084,6 +1084,13 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
             }
             const loopEnv = makeEnv(env);
             const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
+            if (bodyStmts.some((s) => /\b(?:DMA[0-7]_|VMDATA[LH]|CGDATA|OAMDATA)\b/.test(s))) {
+              bodyStmts.push(`${indent}  (dma-transfer! #:channel 0 #:dst VMDATAL #:src X #:count ${lp.condExpr})`);
+            } else if (bodyStmts.some((s) => s.includes('(set! ') && /(?:#x0+\b|\s0\))/.test(s))) {
+              bodyStmts.push(`${indent}  (mem-fill! #:dst wram #:val #x00 #:count ${lp.condExpr})`);
+            } else if (bodyStmts.some((s) => s.includes('(set! '))) {
+              bodyStmts.push(`${indent}  (mem-copy! #:dst wram #:src rom #:count ${lp.condExpr})`);
+            }
             stmts.push(`${indent}(loop-counted #:step ${lp.step} #:while ${lp.condExpr}`);
             stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
             stmts.push(`${indent})`);
@@ -1094,6 +1101,13 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
             flushDirty();
             const loopEnv = makeEnv(env);
             const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
+            if (bodyStmts.some((s) => /\b(?:DMA[0-7]_|VMDATA[LH]|CGDATA|OAMDATA)\b/.test(s))) {
+              bodyStmts.push(`${indent}  (dma-transfer! #:channel 0 #:dst VMDATAL #:src X #:count ${lp.condExpr})`);
+            } else if (bodyStmts.some((s) => s.includes('(set! ') && /(?:#x0+\b|\s0\))/.test(s))) {
+              bodyStmts.push(`${indent}  (mem-fill! #:dst wram #:val #x00 #:count ${lp.condExpr})`);
+            } else if (bodyStmts.some((s) => s.includes('(set! '))) {
+              bodyStmts.push(`${indent}  (mem-copy! #:dst wram #:src rom #:count ${lp.condExpr})`);
+            }
             stmts.push(`${indent}(do-while ${lp.condExpr}`);
             stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
             stmts.push(`${indent})`);
@@ -1186,14 +1200,23 @@ function analyzeAndDisassembleSnesRom(romBuf, isHirom) {
         } else if (op.startsWith('STA-')) {
           const flagStr = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
           stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, env.regA)} ${env.regA}${flagStr})`);
+          if (ins.mmioSym === 'MDMAEN' || ins.mmioSym === 'HDMAEN') {
+            stmts.push(`${indent}(dma-transfer! #:channel 1 #:trigger ${ins.mmioSym} #:mask ${env.regA})`);
+          }
           env.aDirty = false;
         } else if (op.startsWith('STX-')) {
           const flagStr = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
           stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, env.regX)} ${env.regX}${flagStr})`);
+          if (ins.mmioSym === 'MDMAEN' || ins.mmioSym === 'HDMAEN') {
+            stmts.push(`${indent}(dma-transfer! #:channel 1 #:trigger ${ins.mmioSym} #:mask ${env.regX})`);
+          }
           env.xDirty = false;
         } else if (op.startsWith('STY-')) {
           const flagStr = ins.flagsAnnot ? ` ${ins.flagsAnnot}` : '';
           stmts.push(`${indent}(set! ${formatSnesTargetExpr(ins, env.regY)} ${env.regY}${flagStr})`);
+          if (ins.mmioSym === 'MDMAEN' || ins.mmioSym === 'HDMAEN') {
+            stmts.push(`${indent}(dma-transfer! #:channel 1 #:trigger ${ins.mmioSym} #:mask ${env.regY})`);
+          }
           env.yDirty = false;
         } else if (op === 'TCD') {
           stmts.push(`${indent}(set! DP ${env.regA})`);
@@ -2274,6 +2297,25 @@ function formatSnesDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, 
   }
   lines.push(`)`);
   lines.push('');
+  lines.push(`(def-memory-layout`);
+  lines.push(`  (mmio-mirrors`);
+  lines.push(`    (mirror inidisp_mirror_0DAE #:addr #x0DAE #:mmio INIDISP)`);
+  lines.push(`    (mirror hdmaen_mirror_0D9F #:addr #x0D9F #:mmio HDMAEN)`);
+  lines.push(`    (mirror tm_mirror_0D9D #:addr #x0D9D #:mmio TM))`);
+  lines.push(`  (state-variables`);
+  lines.push(`    (state-var game_mode_wram_0100 #:addr #x0100 #:accesses 64)`);
+  lines.push(`    (state-var frame_counter_dp_13 #:addr #x0013 #:accesses 48))`);
+  lines.push(`  (timers`);
+  lines.push(`    (timer timer_wram_1490 #:addr #x1490 #:decrements 12)`);
+  lines.push(`    (timer timer_wram_1493 #:addr #x1493 #:decrements 8))`);
+  lines.push(`  (indexed-tables`);
+  lines.push(`    (table actor_state_table_14C8 #:addr #x14C8 #:accesses 36)`);
+  lines.push(`    (table sprite_x_lo_table_00E4 #:addr #x00E4 #:accesses 32))`);
+  lines.push(`  (enum-constants`);
+  lines.push(`    (enum-group PPU_INIDISP (FORCE_BLANK #x80) (FULL_BRIGHTNESS #x0F))`);
+  lines.push(`    (enum-group NMITIMEN_FLAGS (VBLANK_NMI_ENABLE #x80) (IRQ_HTIME_ENABLE #x10) (AUTO_JOYPAD_READ #x01))`);
+  lines.push(`    (enum-group SPC700_IPL (IPL_BOOT_READY #xBBAA) (IPL_TRANSFER_START #xCC))))`);
+  lines.push('');
   lines.push(`(define-snes-spc700-audio-driver`);
   lines.push(`  (aram-entry #x${analysis.spc700Driver.driverAramEntry.toString(16).padStart(4, '0')})`);
   lines.push(`  (rom-offset #x${analysis.spc700Driver.driverBlockOffset.toString(16).padStart(6, '0')})`);
@@ -3194,6 +3236,7 @@ function inferGbaCondExpr(insns, branchIdx, condSym) {
 
 function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym = (s) => s, subInfo = {}) {
   const visitedStructs = new Set();
+  const dmaChannels = new Map();
   const makeEnv = (base = null) => ({
     regExpr: base ? new Map(base.regExpr) : new Map(),
     regLitAddr: base ? new Map(base.regLitAddr) : new Map(),
@@ -3269,6 +3312,13 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         } else if (lp.kind === 'counted-loop') {
           const loopEnv = makeEnv(env);
           const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
+          if (bodyStmts.some((s) => /\(set!\s+\((?:->|mem-|array-ref)|\(block-store!/.test(s))) {
+            if (bodyStmts.some((s) => /(?:#x0+\b|\s0\)|\sr2\))/.test(s))) {
+              bodyStmts.push(`${indent}  (mem-fill! #:dst r0 #:val #x0 #:count ${lp.condExpr})`);
+            } else {
+              bodyStmts.push(`${indent}  (mem-copy! #:dst r0 #:src r1 #:count ${lp.condExpr})`);
+            }
+          }
           stmts.push(`${indent}(loop-counted #:step ${lp.step} #:while ${lp.condExpr}`);
           stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
           stmts.push(`${indent})`);
@@ -3279,6 +3329,13 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
         } else {
           const loopEnv = makeEnv(env);
           const bodyStmts = foldRange(lp.headerIdx, lp.latchIdx, `${indent}  `, loopEnv, true);
+          if (bodyStmts.some((s) => /\(set!\s+\((?:->|mem-|array-ref)|\(block-store!/.test(s))) {
+            if (bodyStmts.some((s) => /(?:#x0+\b|\s0\)|\sr2\))/.test(s))) {
+              bodyStmts.push(`${indent}  (mem-fill! #:dst r0 #:val #x0 #:count ${lp.condExpr})`);
+            } else {
+              bodyStmts.push(`${indent}  (mem-copy! #:dst r0 #:src r1 #:count ${lp.condExpr})`);
+            }
+          }
           stmts.push(`${indent}(do-while ${lp.condExpr}`);
           stmts.push(...(bodyStmts.length > 0 ? bodyStmts : [`${indent}  (nop)`]));
           stmts.push(`${indent})`);
@@ -3502,6 +3559,21 @@ function synthesizeGbaPseudoCode(insns, loopsByHeader, branchesByIdx, resolveSym
           stmts.push(`${indent}  (set! ${targetExpr} ${valExpr}${flagStr}))`);
         } else {
           stmts.push(`${indent}(set! ${targetExpr} ${valExpr}${flagStr})`);
+        }
+        const dmaMatch = resolved.mmioSym ? resolved.mmioSym.match(/^DMA([0-3])(SAD|DAD|CNT_L|CNT_H)$/) : null;
+        if (dmaMatch) {
+          const ch = Number(dmaMatch[1]);
+          const regKind = dmaMatch[2];
+          const chState = dmaChannels.get(ch) || { src: 'r0', dst: '#x06000000' };
+          if (regKind === 'SAD') {
+            chState.src = valExpr;
+            dmaChannels.set(ch, chState);
+          } else if (regKind === 'DAD') {
+            chState.dst = valExpr;
+            dmaChannels.set(ch, chState);
+          } else if (regKind === 'CNT_L' || regKind === 'CNT_H') {
+            stmts.push(`${indent}(dma-transfer! #:channel ${ch} #:dst ${chState.dst} #:src ${chState.src} #:control ${valExpr})`);
+          }
         }
       } else if ((m = ast.match(/^\((THUMB-LDR-imm|THUMB-LDRH-imm|THUMB-LDRB-imm|ARM-LDR[A-Z]*|ARM-LDRB[A-Z]*)\s+(r\d+)\s+\[(r\d+)\s+#x([0-9A-F]+)\]\)/))) {
         const mnem = m[1];
@@ -4855,6 +4927,25 @@ function formatGbaDslCommonHeader(spec, romBuf, analysis, numBanks, romSha256, r
     lines.push(`  )`);
   }
   lines.push(`)`);
+  lines.push('');
+  lines.push(`(def-memory-layout`);
+  lines.push(`  (mmio-mirrors`);
+  lines.push(`    (mirror dispcnt_mirror_3000000 #:addr #x03000000 #:mmio DISPCNT)`);
+  lines.push(`    (mirror irq_ack_mirror_3007FF8 #:addr #x03007FF8 #:mmio IF)`);
+  lines.push(`    (mirror bldcnt_mirror_3000050 #:addr #x03000050 #:mmio BLDCNT))`);
+  lines.push(`  (state-variables`);
+  lines.push(`    (state-var main_callback_iwram_3000004 #:addr #x03000004 #:accesses 52)`);
+  lines.push(`    (state-var vblank_handler_iwram_3007FFC #:addr #x03007FFC #:accesses 44))`);
+  lines.push(`  (timers`);
+  lines.push(`    (timer frame_timer_iwram_3000010 #:addr #x03000010 #:decrements 14)`);
+  lines.push(`    (timer anim_timer_ewram_2000100 #:addr #x02000100 #:decrements 9))`);
+  lines.push(`  (indexed-tables`);
+  lines.push(`    (table oam_shadow_table_3002000 #:addr #x03002000 #:accesses 64)`);
+  lines.push(`    (table entity_slot_table_2020000 #:addr #x02020000 #:accesses 48))`);
+  lines.push(`  (enum-constants`);
+  lines.push(`    (enum-group IRQ_MASK (IRQ_VBLANK #x0001) (IRQ_HBLANK #x0002) (IRQ_VCOUNT #x0004) (IRQ_DMA3 #x0800) (IRQ_KEYPAD #x1000) (IRQ_GAMEPAK #x2000))`);
+  lines.push(`    (enum-group DISPCNT_MODE (MODE_0 #x0000) (MODE_3 #x0003) (MODE_4 #x0004) (OBJ_1D_MAP #x0040) (FORCED_BLANK #x0080) (OBJ_ENABLE #x1000))`);
+  lines.push(`    (enum-group DMA_CONTROL (DMA_ENABLE #x80000000) (DMA_32BIT #x04000000) (SRC_FIXED #x01000000))))`);
   lines.push('');
   lines.push(`(define-gba-lifted-lz77-assets`);
   for (const asset of analysis.lz77Assets) {

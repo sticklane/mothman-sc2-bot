@@ -229,6 +229,25 @@
   )
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror dispcnt_mirror_3000000 #:addr #x03000000 #:mmio DISPCNT)
+    (mirror irq_ack_mirror_3007FF8 #:addr #x03007FF8 #:mmio IF)
+    (mirror bldcnt_mirror_3000050 #:addr #x03000050 #:mmio BLDCNT))
+  (state-variables
+    (state-var main_callback_iwram_3000004 #:addr #x03000004 #:accesses 52)
+    (state-var vblank_handler_iwram_3007FFC #:addr #x03007FFC #:accesses 44))
+  (timers
+    (timer frame_timer_iwram_3000010 #:addr #x03000010 #:decrements 14)
+    (timer anim_timer_ewram_2000100 #:addr #x02000100 #:decrements 9))
+  (indexed-tables
+    (table oam_shadow_table_3002000 #:addr #x03002000 #:accesses 64)
+    (table entity_slot_table_2020000 #:addr #x02020000 #:accesses 48))
+  (enum-constants
+    (enum-group IRQ_MASK (IRQ_VBLANK #x0001) (IRQ_HBLANK #x0002) (IRQ_VCOUNT #x0004) (IRQ_DMA3 #x0800) (IRQ_KEYPAD #x1000) (IRQ_GAMEPAK #x2000))
+    (enum-group DISPCNT_MODE (MODE_0 #x0000) (MODE_3 #x0003) (MODE_4 #x0004) (OBJ_1D_MAP #x0040) (FORCED_BLANK #x0080) (OBJ_ENABLE #x1000))
+    (enum-group DMA_CONTROL (DMA_ENABLE #x80000000) (DMA_32BIT #x04000000) (SRC_FIXED #x01000000))))
+
 (define-gba-lifted-lz77-assets
   (lz77-asset (rom-addr "0x080C9DC8") (rom-offset #x0c9dc8) (decompressed-bytes 4112) (kind 'vram-tile-chr-block))
   (lz77-asset (rom-addr "0x080CACD0") (rom-offset #x0cacd0) (decompressed-bytes 4096) (kind 'bg-tilemap-or-4bpp-tileset))
@@ -643,10 +662,12 @@
         (block-load! r3 "{r0}")
         (block-store! r2 "{r0}")
         (set! r1 (- r1 #x1))
+        (mem-copy! #:dst r0 #:src r1 #:count (>= r1 #x0))
       )
       (set! (mmio32 DMA3SAD) #x080001BC)
       (set! (mmio32 DMA3DAD) r12)
       (set! (mmio32 DMA3CNT_L) #x84000048 #:flags (DMA_ENABLE START_IMMEDIATE DMA_32BIT SRC_INC DST_INC))
+      (dma-transfer! #:channel 3 #:dst r12 #:src #x080001BC #:control #x84000048)
       (set! (IRQ_HANDLER_PTR #x03007FFC) r12)
     )
     (insn "0x08000750" #xB510 (THUMB-PUSH "{r4 lr}"))
@@ -764,6 +785,7 @@
   (defsub-thumb16 dma_channel_transfer_800099C (isa 'thumb16) (entry #x0800099c) #:params () #:returns (r0)
     (decompiled-pseudo-code
       (set! (mmio32 DMA0CNT_L) #x0)
+      (dma-transfer! #:channel 0 #:dst #x06000000 #:src r0 #:control #x0)
       (set! r0 (+ #x03000380 (shl #xB8 1)))
       (set! r3 (-> r0 :offset_0x0 :u32))
       (when (= r3 #x0) (goto #x08000A48))
@@ -772,6 +794,7 @@
       (set! (mmio32 DMA0SAD) (-> r0 :offset_0x0 :u32))
       (set! (mmio32 DMA0DAD) (-> r0 :offset_0x0 :u32))
       (set! (mmio32 DMA0CNT_L) (bit-and #xCDFFFFFF r3))
+      (dma-transfer! #:channel 0 #:dst (-> r0 :offset_0x0 :u32) #:src (-> r0 :offset_0x0 :u32) #:control (bit-and #xCDFFFFFF r3))
     )
     (insn "0x0800099C" #xB530 (THUMB-PUSH "{r4 r5 lr}"))
     (insn "0x0800099E" #x4A11 (THUMB-LDR-pc r2 [pc #x44] #:literal #x040000B8 #:sym 'DMA0CNT_L))
@@ -911,6 +934,7 @@
           (set! r2 (+ r2 r5))
           (set! r0 (shl (- r1 #x1) 16))
           (set! r1 (shr (shl (- r1 #x1) 16) 16))
+          (mem-copy! #:dst r0 #:src r1 #:count (!= r1 #x0))
         )
       )
       (set! (-> r4 :offset_0xC :u32) r2)
@@ -1041,6 +1065,7 @@
         (set! (-> r1 :offset_0x0 :u16) r3)
         (set! r1 (+ r1 #x2))
         (set! r2 (+ r2 #x1))
+        (mem-fill! #:dst r0 #:val #x0 #:count (<= r2 #x3))
       )
       (return)
     )
@@ -1077,6 +1102,7 @@
         (set! (-> r4 :offset_0x15 :u8) #x4)
         (set! r4 (+ r4 #x18))
         (set! r5 (- r5 #x1))
+        (mem-fill! #:dst r0 #:val #x0 #:count (>= r5 #x0))
       )
       (return)
     )

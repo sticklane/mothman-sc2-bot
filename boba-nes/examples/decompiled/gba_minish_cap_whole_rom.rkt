@@ -240,6 +240,25 @@
   )
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror dispcnt_mirror_3000000 #:addr #x03000000 #:mmio DISPCNT)
+    (mirror irq_ack_mirror_3007FF8 #:addr #x03007FF8 #:mmio IF)
+    (mirror bldcnt_mirror_3000050 #:addr #x03000050 #:mmio BLDCNT))
+  (state-variables
+    (state-var main_callback_iwram_3000004 #:addr #x03000004 #:accesses 52)
+    (state-var vblank_handler_iwram_3007FFC #:addr #x03007FFC #:accesses 44))
+  (timers
+    (timer frame_timer_iwram_3000010 #:addr #x03000010 #:decrements 14)
+    (timer anim_timer_ewram_2000100 #:addr #x02000100 #:decrements 9))
+  (indexed-tables
+    (table oam_shadow_table_3002000 #:addr #x03002000 #:accesses 64)
+    (table entity_slot_table_2020000 #:addr #x02020000 #:accesses 48))
+  (enum-constants
+    (enum-group IRQ_MASK (IRQ_VBLANK #x0001) (IRQ_HBLANK #x0002) (IRQ_VCOUNT #x0004) (IRQ_DMA3 #x0800) (IRQ_KEYPAD #x1000) (IRQ_GAMEPAK #x2000))
+    (enum-group DISPCNT_MODE (MODE_0 #x0000) (MODE_3 #x0003) (MODE_4 #x0004) (OBJ_1D_MAP #x0040) (FORCED_BLANK #x0080) (OBJ_ENABLE #x1000))
+    (enum-group DMA_CONTROL (DMA_ENABLE #x80000000) (DMA_32BIT #x04000000) (SRC_FIXED #x01000000))))
+
 (define-gba-lifted-lz77-assets
   (lz77-asset (rom-addr "0x08004A18") (rom-offset #x004a18) (decompressed-bytes 1024) (kind 'obj-sprite-sheet-4bpp))
   (lz77-asset (rom-addr "0x080DE28C") (rom-offset #x0de28c) (decompressed-bytes 4096) (kind 'bg-tilemap-or-4bpp-tileset))
@@ -616,6 +635,7 @@
       (set! (mmio32 DMA3SAD) (shl #xA0 19))
       (set! (mmio32 DMA3DAD) #x020176A0)
       (set! (mmio32 DMA3CNT_L) #x84000080 #:flags (DMA_ENABLE START_IMMEDIATE DMA_32BIT SRC_INC DST_INC))
+      (dma-transfer! #:channel 3 #:dst #x020176A0 #:src (shl #xA0 19) #:control #x84000080)
       (call ewram_state_helper_804FF84 #x1)
       (call ewram_state_helper_8056418)
       (call ewram_state_helper_80ADD30)
@@ -854,6 +874,7 @@
         (set! r1 (+ r1 #x4))
         (set! r0 (+ r0 #x8))
         (set! r3 (- r3 #x1))
+        (mem-copy! #:dst r0 #:src r1 #:count (!= r3 0))
       )
       (return)
     )
@@ -904,6 +925,7 @@
         (set! r1 (+ r1 #x4))
         (set! r0 (+ r0 #x8))
         (set! r3 (- r3 #x1))
+        (mem-fill! #:dst r0 #:val #x0 #:count (!= r3 0))
       )
       (return)
     )

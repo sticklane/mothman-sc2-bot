@@ -204,6 +204,25 @@
   )
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror inidisp_mirror_0DAE #:addr #x0DAE #:mmio INIDISP)
+    (mirror hdmaen_mirror_0D9F #:addr #x0D9F #:mmio HDMAEN)
+    (mirror tm_mirror_0D9D #:addr #x0D9D #:mmio TM))
+  (state-variables
+    (state-var game_mode_wram_0100 #:addr #x0100 #:accesses 64)
+    (state-var frame_counter_dp_13 #:addr #x0013 #:accesses 48))
+  (timers
+    (timer timer_wram_1490 #:addr #x1490 #:decrements 12)
+    (timer timer_wram_1493 #:addr #x1493 #:decrements 8))
+  (indexed-tables
+    (table actor_state_table_14C8 #:addr #x14C8 #:accesses 36)
+    (table sprite_x_lo_table_00E4 #:addr #x00E4 #:accesses 32))
+  (enum-constants
+    (enum-group PPU_INIDISP (FORCE_BLANK #x80) (FULL_BRIGHTNESS #x0F))
+    (enum-group NMITIMEN_FLAGS (VBLANK_NMI_ENABLE #x80) (IRQ_HTIME_ENABLE #x10) (AUTO_JOYPAD_READ #x01))
+    (enum-group SPC700_IPL (IPL_BOOT_READY #xBBAA) (IPL_TRANSFER_START #xCC))))
+
 (define-snes-spc700-audio-driver
   (aram-entry #x0f00)
   (rom-offset #x000494)
@@ -279,6 +298,7 @@
       (set! NMITIMEN #x81 #:flags (VBLANK_NMI_ENABLE AUTO_JOYPAD_READ))
       (do-while (= (dp #x12) 0)
         (set! A (dp #x12))
+        (mem-copy! #:dst wram #:src rom #:count (= (dp #x12) 0))
       )
       (set! A (bit-and (dp #xF6) #x20))
       (when (!= (bit-and (dp #xF6) #x20) 0)
@@ -509,6 +529,7 @@
         (set! (mem+X #x1C00) #x0)
         (set! X (- X 1))
         (set! X (- X 1))
+        (mem-fill! #:dst wram #:val #x00 #:count (!= X 0))
       )
       (set! (wram16 #x7EC500) #x0)
       (set! (far-mem #x701FFE) #x0)
@@ -636,6 +657,7 @@
       (loop-counted #:step DEX #:while (!= A (mem+X #xDD8A))
         (set! X (- X 1))
         (set! X (- X 1))
+        (mem-copy! #:dst wram #:src rom #:count (!= A (mem+X #xDD8A)))
       )
       (set! (dp #xE6) (mem+X #xDF15))
       (set! (dp #xE8) (mem+X #xDF15))
@@ -1281,6 +1303,7 @@
         (set! (wram16 #x7E4060 X) #xDC4)
         (set! X (- X 1))
         (set! X (- X 1))
+        (mem-copy! #:dst wram #:src rom #:count (>= X 0))
       )
       (set! A #xDC4)
       (set! X (mem #x696))
@@ -1350,6 +1373,7 @@
           (set! (dp #x0) (+ (dp #x0) 1))
           (set! A (dp #x0))
           (set! X (wram16 #x7EF800 X))
+          (mem-fill! #:dst wram #:val #x00 #:count (!= (dp #x0) (mem #x4AC)))
         )
       )
       (return)
@@ -1766,6 +1790,7 @@
       (set! DMA2_A1TL (mem #xAD6))
       (set! DMA2_DASL #x20)
       (set! MDMAEN #x7)
+      (dma-transfer! #:channel 1 #:trigger MDMAEN #:mask #x7)
       (set! DMA2_DASL #x20)
     )
     (insn "$00:89E0" (REP-imm #x10) #:M 8 #:X 16)
@@ -1812,6 +1837,7 @@
         (set! DMA0_A1B #x7E)
         (set! DMA0_DASL #x14A)
         (set! MDMAEN #x1)
+        (dma-transfer! #:channel 1 #:trigger MDMAEN #:mask #x1)
       )
       (set! A (dp #x15))
       (when (!= (dp #x15) 0)
@@ -1821,6 +1847,7 @@
         (set! DMA1_A1B #x7E)
         (set! DMA1_DASL #x200)
         (set! MDMAEN #x2)
+        (dma-transfer! #:channel 1 #:trigger MDMAEN #:mask #x2)
       )
       (set! (dp #x15) #x00)
       (set! OAMADDL #x00)
@@ -1906,6 +1933,7 @@
       (set! DMA0_A1B #x7E)
       (set! DMA0_DASL #x800)
       (set! MDMAEN #x1)
+      (dma-transfer! #:channel 1 #:trigger MDMAEN #:mask #x1)
       (set! (mem #x1F0C) #x00)
       (return)
     )
@@ -1933,6 +1961,7 @@
   (defsub-65c816 dma_hdma_transfer_00_8D02 (bank #x00) (entry #x8d02) (mode-in #:M 8 #:X 8) (mode-out #:M 8 #:X 8) (cycles 30) (mmio MDMAEN) #:params (A) #:returns (A X)
     (decompiled-pseudo-code
       (set! MDMAEN #x1)
+      (dma-transfer! #:channel 1 #:trigger MDMAEN #:mask #x1)
       (set! (mem #x710) #x00)
       (set! X #xE0)
       (switch X (case 0 (call ppu_reg_helper_00_8CE3)) (case 1 (call ppu_reg_helper_00_8CB0)) (case 2 (call ppu_reg_helper_00_8CE4)) (case 3 (call dma_channel_helper_00_8D13)) (case 4 (call dma_channel_helper_00_8D62)) (case 5 (call dma_channel_helper_00_8E09)))

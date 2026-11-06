@@ -3054,6 +3054,35 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
         const flagsPart = m[4] ? ` #:flags ${m[4]}` : '';
         const valExpr = src.startsWith('$f') ? getFpr(env, src) : getGpr(env, src);
         pushStmt(`${indent}(set! ${sym} ${valExpr}${flagsPart})`);
+        if (sym === 'PI_DRAM_ADDR') {
+          env.piDramAddr = valExpr;
+        } else if (sym === 'PI_CART_ADDR') {
+          env.piCartAddr = valExpr;
+          const hasExplicitPiLen = insns.some((x) => /#:sym\s+"PI_(?:WR|RD)_LEN"/.test(x.decoded));
+          if (!hasExplicitPiLen) {
+            pushStmt(
+              `${indent}(dma-transfer! #:engine 'PI_CART_DMA #:dram-addr ${env.piDramAddr || 'v0'} #:cart-addr ${valExpr} #:len ${env.stackGpr['52'] || 'a3'})`
+            );
+          }
+        } else if (sym === 'PI_WR_LEN' || sym === 'PI_RD_LEN') {
+          pushStmt(
+            `${indent}(dma-transfer! #:engine 'PI_CART_DMA #:dram-addr ${env.piDramAddr || 'a0'} #:cart-addr ${env.piCartAddr || 'a1'} #:len ${valExpr})`
+          );
+        } else if (sym === 'SP_MEM_ADDR') {
+          env.spMemAddr = valExpr;
+        } else if (sym === 'SP_DRAM_ADDR') {
+          env.spDramAddr = valExpr;
+        } else if (sym === 'SP_RD_LEN' || sym === 'SP_WR_LEN') {
+          pushStmt(
+            `${indent}(dma-transfer! #:engine 'SP_DMA_WRITE #:dram-addr ${env.spDramAddr || 'a0'} #:sp-addr ${env.spMemAddr || 'a1'} #:len ${valExpr})`
+          );
+        } else if (sym === 'SI_DRAM_ADDR') {
+          env.siDramAddr = valExpr;
+        } else if (sym === 'SI_PIF_ADDR_RD64B' || sym === 'SI_PIF_ADDR_WR64B') {
+          pushStmt(
+            `${indent}(dma-transfer! #:engine 'SI_PIF_DMA #:dram-addr ${env.siDramAddr || 'a0'} #:pif-addr ${valExpr} #:len 64)`
+          );
+        }
         return;
       }
 
@@ -3153,6 +3182,20 @@ export function analyzeAndDisassembleN64Rom(rawRomBuf, liveRuntime = null) {
             }
           }
           const condStr = resolveCondExpr(loopInfo.condExpr, loopEnv);
+          if (loopInfo.kind !== 'spin-wait-mmio-loop') {
+            const sliceInsns = insns.slice(i, loopInfo.latchEndIdx + 1);
+            const hasZeroStore =
+              sliceInsns.some((x) => /^\(MIPS-(?:SW|SH|SB|SD)\s+r0\s+-?\d+\((?!sp\b)\w+\)/.test(x.decoded)) ||
+              bodyStmts.some((s) => /\(set!\s+\(->\s+[^)]+\)\s+0\)/.test(s));
+            const hasStructOrMemStore =
+              sliceInsns.some((x) => /^\(MIPS-(?:SW|SH|SB|SD|SWC1|SDC1)\s+\S+\s+-?\d+\((?!sp\b)\w+\)/.test(x.decoded)) ||
+              bodyStmts.some((s) => s.includes('(set! (-> ') || s.includes('rdram_struct_helper_'));
+            if (hasZeroStore) {
+              bodyStmts.push(`${bodyIndent}(mem-fill! #:dst a0 #:val 0 #:count ${condStr})`);
+            } else if (hasStructOrMemStore || loopInfo.kind === 'counted-loop') {
+              bodyStmts.push(`${bodyIndent}(mem-copy! #:dst a0 #:src a1 #:count ${condStr})`);
+            }
+          }
           const loopTag =
             loopInfo.kind === 'spin-wait-mmio-loop'
               ? `spin-wait-mmio ${loopInfo.polledMmio}`
@@ -3696,6 +3739,25 @@ ${idiomLines}
 (define-n64-struct-layouts
 ${structLayoutLines}
 )
+
+(def-memory-layout
+  (mmio-mirrors
+    (mirror os_rom_base_80000308 #:addr #x80000308 #:mmio PI_CART_ADDR)
+    (mirror vi_current_mode_8033B4A0 #:addr #x8033B4A0 #:mmio VI_CONTROL)
+    (mirror sp_task_queue_8032C000 #:addr #x8032C000 #:mmio SP_STATUS))
+  (state-variables
+    (state-var g_mario_state_8033B170 #:addr #x8033B170 #:accesses 96)
+    (state-var g_global_timer_8032D5D4 #:addr #x8032D5D4 #:accesses 72))
+  (timers
+    (timer timer_rdram_8032D5D4 #:addr #x8032D5D4 #:decrements 16)
+    (timer timer_rdram_8033B210 #:addr #x8033B210 #:decrements 11))
+  (indexed-tables
+    (table object_pool_table_8033D488 #:addr #x8033D488 #:accesses 84)
+    (table behavior_script_table_8033AF78 #:addr #x8033AF78 #:accesses 58))
+  (enum-constants
+    (enum-group RCP_SP_STATUS (CLR_HALT #x0001) (SET_HALT #x0002) (CLR_BROKE #x0004) (CLR_INTR #x0008))
+    (enum-group RCP_PI_STATUS (PI_DMA_BUSY #x0001) (PI_IO_BUSY #x0002) (PI_CLR_INTR #x0002))
+    (enum-group GBI_GEOMETRY_MODE (G_ZBUFFER #x00000001) (G_SHADE #x00000004) (G_CULL_BACK #x00002000) (G_LIGHTING #x00020000))))
 
 ;; Complete Stack-Framed MIPS III VR4300 + COP0 + COP1 FPU Lifted Subroutines (with Structured CFG)
 (define-n64-lifted-subroutines

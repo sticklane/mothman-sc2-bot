@@ -182,6 +182,25 @@
   )
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror inidisp_mirror_0DAE #:addr #x0DAE #:mmio INIDISP)
+    (mirror hdmaen_mirror_0D9F #:addr #x0D9F #:mmio HDMAEN)
+    (mirror tm_mirror_0D9D #:addr #x0D9D #:mmio TM))
+  (state-variables
+    (state-var game_mode_wram_0100 #:addr #x0100 #:accesses 64)
+    (state-var frame_counter_dp_13 #:addr #x0013 #:accesses 48))
+  (timers
+    (timer timer_wram_1490 #:addr #x1490 #:decrements 12)
+    (timer timer_wram_1493 #:addr #x1493 #:decrements 8))
+  (indexed-tables
+    (table actor_state_table_14C8 #:addr #x14C8 #:accesses 36)
+    (table sprite_x_lo_table_00E4 #:addr #x00E4 #:accesses 32))
+  (enum-constants
+    (enum-group PPU_INIDISP (FORCE_BLANK #x80) (FULL_BRIGHTNESS #x0F))
+    (enum-group NMITIMEN_FLAGS (VBLANK_NMI_ENABLE #x80) (IRQ_HTIME_ENABLE #x10) (AUTO_JOYPAD_READ #x01))
+    (enum-group SPC700_IPL (IPL_BOOT_READY #xBBAA) (IPL_TRANSFER_START #xCC))))
+
 (define-snes-spc700-audio-driver
   (aram-entry #x0400)
   (rom-offset #x042b68)
@@ -841,6 +860,7 @@
       (when (>= A #x1201)
         (do-while (!= (dp #x99) 0)
           (set! A (dp #x99))
+          (mem-copy! #:dst wram #:src rom #:count (!= (dp #x99) 0))
         )
         (set! A (dp #x92))
       )
@@ -938,6 +958,7 @@
       (set! (mem #x91) A)
       (do-while (!= (mem #x99) 0)
         (set! A (mem #x99))
+        (mem-copy! #:dst wram #:src rom #:count (!= (mem #x99) 0))
       )
       (set! (mem #x94) (dp #xE))
       (set! (mem #x96) (dp #x10))
@@ -946,11 +967,13 @@
       (do-while (always? flags)
         (do-while (!= (mem #x99) 0)
           (set! A (mem #x99))
+          (mem-copy! #:dst wram #:src rom #:count (!= (mem #x99) 0))
         )
         (call bank00_dispatch_8643)
         (set! (mem #x94) (+ (mem #x94) #x1200))
         (set! (mem #x97) (+ (mem #x97) #x900))
         (set! X (- (+ (mem #x97) #x900) #x1200))
+        (mem-copy! #:dst wram #:src rom #:count (always? flags))
       )
     )
     (insn "$00:85B7" (REP-imm #x30) #:M 16 #:X 16)
@@ -1102,6 +1125,7 @@
         (then
           (do-while (= (mem #x2B) 0)
             (set! A (mem #x2B))
+            (mem-copy! #:dst wram #:src rom #:count (= (mem #x2B) 0))
           )
           (set! (mem #x2B) #x00)
         )
@@ -1481,6 +1505,7 @@
           (tail-jump wram_actor_state_00_C953)
         )
         (set! A (bit-ior A (stack+#x4C)))
+        (mem-copy! #:dst wram #:src rom #:count (overflow-set A #x3))
       )
       (set! (stack+#xC9) (bit-ior A (stack+#x4C)))
     )

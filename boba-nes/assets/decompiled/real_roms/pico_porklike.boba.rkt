@@ -232,14 +232,11 @@
         (if-cond (> camx (- cmaxx 127)))
         (if-cond (> camy (- cmaxy 127))))
       (decompiled-pseudo-code
-        (set-values! (xoff yoff pd) (0 0 (-> player :dir)))
-        (when (and (>= pd 1) (<= pd 3)) (set! xoff 12))
+        (let ([xoff 0] [yoff 0] [pd (-> player :dir)]) (when (and (>= pd 1) (<= pd 3)) (set! xoff 12)))
         (when (and (>= pd 5) (<= pd 7)) (set! xoff (- 12)))
         (when (or (<= pd 1) (== pd 7)) (set! yoff (- 12)))
         (when (and (>= pd 3) (<= pd 5)) (set! yoff 12))
-        (set! xpoint (call max 0 (+ (+ (- (-> player :x) 64) (* (-> player :vx) 14)) xoff)))
-        (set! ypoint (call max 0 (+ (+ (- (-> player :y) 64) (* (-> player :vy) 14)) yoff)))
-        (+= camx (* (- xpoint camx) 0.1))
+        (let ([xpoint (call max 0 (+ (+ (- (-> player :x) 64) (* (-> player :vx) 14)) xoff))] [ypoint (call max 0 (+ (+ (- (-> player :y) 64) (* (-> player :vy) 14)) yoff))]) (+= camx (* (- xpoint camx) 0.1)))
         (+= camy (* (- ypoint camy) 0.1))
         (when (> camx (- cmaxx 127)) (set! camx (- cmaxx 127)))
         (when (> camy (- cmaxy 127)) (set! camy (- cmaxy 127)))
@@ -287,8 +284,7 @@
         (for-loop "i in all(roomtiles)")
         (if-cond (== i (- 1))))
       (decompiled-pseudo-code
-        (set-values! (mapx mapy) (0 0))
-        (call pal 10 0)
+        (let ([mapx 0] [mapy 0]) (call pal 10 0))
         (foreach i roomtiles (if (== i (- 1)) (then (set! mapx 0) (+= mapy 128)) (else (call map (* (modulo i 8) 16) (* (call flr (/ i 8)) 16) mapx mapy 16 16 1) (+= mapx 128)))))
       (body-lines
         "function draw_foreground()"
@@ -409,7 +405,7 @@
         (if-cond (> (-> trig :prox) 0))
         (if-cond (call dist (-> player :x) (-> player :y) (-> trig :x) (-> trig :y))))
       (decompiled-pseudo-code
-        (foreach trig triggers (set! kill #f) (when (> (-> trig :prox) 0) (set! kill #t) (when (<= (call dist (-> player :x) (-> player :y) (-> trig :x) (-> trig :y)) (-> trig :prox)) (set! (-> trig :active) 1)))))
+        (foreach trig triggers (let ((kill #f)) (when (> (-> trig :prox) 0) (set! kill #t) (when (<= (call dist (-> player :x) (-> player :y) (-> trig :x) (-> trig :y)) (-> trig :prox)) (set! (-> trig :active) 1))))))
       (body-lines
         "function update_triggers(triggers)"
         "for trig in all(triggers) do"
@@ -538,12 +534,8 @@
         (set! particles (table))
         (set! triggers (table))
         (set! hazards (table))
-        (set! r (aref rooms rm))
-        (set! roomref (table 64 64 #f))
-        (when (-> r :ref) (set! roomref (call parse (-> r :ref))))
-        (set! px (aref roomref 1))
-        (set! py (aref roomref 2))
-        (set! player (call create_player px py))
+        (let ([r (aref rooms rm)] [roomref (table 64 64 #f)]) (when (-> r :ref) (set! roomref (call parse (-> r :ref)))))
+        (let ([px (aref roomref 1)] [py (aref roomref 2)]) (set! player (call create_player px py)))
         (set! camx (call max 0 (- px 54)))
         (set! camy (call max 0 (- py 64)))
         (set! roomtiles (call parse (-> r :tiles)))
@@ -586,8 +578,7 @@
       (structured-ast
         (seq-block 49))
       (decompiled-pseudo-code
-        (set! p (call new_object x y "player"))
-        (set! (-> p :dir) 2)
+        (let ([p (call new_object x y "player")]) (set! (-> p :dir) 2))
         (set! (-> p :hp) 3)
         (set! (-> p :charge) 0)
         (set! (-> p :invinci) 0)
@@ -653,8 +644,7 @@
       (structured-ast
         (if-cond (and att (== (-> p :state) "attack"))))
       (decompiled-pseudo-code
-        (set-values! (b mx my pb) (5 0 0 (and (-> p :bigbox) att)))
-        (when (and att (== (-> p :state) "attack")) (set! b (call ternary pb 14 8))))
+        (let ([b 5] [mx 0] [my 0] [pb (and (-> p :bigbox) att)]) (when (and att (== (-> p :state) "attack")) (set! b (call ternary pb 14 8)))))
       (body-lines
         "p.abs_box=function(att)"
         "local b,mx,my,pb = 5,0,0,p.bigbox and att"
@@ -675,8 +665,7 @@
         (if-cond (> (-> p :invinci) 0)))
       (decompiled-pseudo-code
         (+= (-> p :animt) 0.01)
-        (set! state (-> p :state))
-        (if (== state "dead") (then (+= (-> p :vy) 0.04) (call apply_friction p wtrfrc) (when (== (modulo (call abs (/ (-> p :animt) 0.01)) 2) 0) (set! (-> p :flash) 0.1)) (when (>= (-> p :animt) 1) (call load_room room))) (else (if (> (-> p :invinci) 0) (then (-= (-> p :invinci) 1)) (else (set! (-> p :invinci) 0))))))
+        (let ([state (-> p :state)]) (if (== state "dead") (then (+= (-> p :vy) 0.04) (call apply_friction p wtrfrc) (when (== (modulo (call abs (/ (-> p :animt) 0.01)) 2) 0) (set! (-> p :flash) 0.1)) (when (>= (-> p :animt) 1) (call load_room room))) (else (if (> (-> p :invinci) 0) (then (-= (-> p :invinci) 1)) (else (set! (-> p :invinci) 0)))))))
       (body-lines
         "function update_player(p)"
         "p.animt+=0.01"
@@ -711,10 +700,7 @@
         (if-cond (or (== d 4) (or (== d 3) (== d 5))))
         (if-cond (>= d 5)))
       (decompiled-pseudo-code
-        (set! state (-> p :state))
-        (set! sinfo (aref (-> p :spr_info) state))
-        (set-values! (flipx flipy sprw sprh xoff yoff sprites) (#f #f 2 2 (- 4) (- 8) (table)))
-        (if (or (== state "hurt") (== state "dead")) (then (set! sprites (-> sinfo :hurt))) (else (set! d (-> p :dir)) (when (or (== d 0) (== d 4)) (set! sprites (-> sinfo :up))) (when (or (== d 1) (== d 7)) (set! sprites (-> sinfo :diagu))) (when (or (== d 2) (== d 6)) (set! sprites (-> sinfo :right))) (when (or (== d 3) (== d 5)) (set! sprites (-> sinfo :diagd))) (when (or (== d 4) (and (or (== d 3) (== d 5)) (== state "attack"))) (set! flipy #t)) (when (>= d 5) (set! flipx #t)))))
+        (let ([state (-> p :state)] [sinfo (aref (-> p :spr_info) state)] [flipx #f] [flipy #f] [sprw 2] [sprh 2] [xoff (- 4)] [yoff (- 8)] [sprites (table)]) (if (or (== state "hurt") (== state "dead")) (then (set! sprites (-> sinfo :hurt))) (else (let ([d (-> p :dir)]) (when (or (== d 0) (== d 4)) (set! sprites (-> sinfo :up)))) (when (or (== d 1) (== d 7)) (set! sprites (-> sinfo :diagu))) (when (or (== d 2) (== d 6)) (set! sprites (-> sinfo :right))) (when (or (== d 3) (== d 5)) (set! sprites (-> sinfo :diagd))) (when (or (== d 4) (and (or (== d 3) (== d 5)) (== state "attack"))) (set! flipy #t)) (when (>= d 5) (set! flipx #t))))))
       (body-lines
         "function draw_player(p)"
         "local state=p.state"
@@ -749,7 +735,7 @@
         (return-expr void)
         (if-cond (!= name "clam")))
       (decompiled-pseudo-code
-        (foreach e objects (set! att (call ternary (and (== (-> player :state) "attack") (not (-> e :invinci))) #t #f)) (when (call coll (call (-> e :abs_box)) (call (-> player :abs_box) att)) (set! name (-> e :name)) (when (== name "mine") (call change_state e "detonate") (when (== (-> player :state) "attack") (if (-> e :invinci) (then (when (> (-> player :invinci) 0) (return)) (when (!= name "clam") (call bounce e (* (-> player :vx) 0.6) (* (-> player :vy) 0.6))) (call cancel_attack) (call bounce_relative player e 3)) (else (call kill_object e))))))))
+        (foreach e objects (let ((att (call ternary (and (== (-> player :state) "attack") (not (-> e :invinci))) #t #f))) (when (call coll (call (-> e :abs_box)) (call (-> player :abs_box) att)) (let ((name (-> e :name))) (when (== name "mine") (call change_state e "detonate") (when (== (-> player :state) "attack") (if (-> e :invinci) (then (when (> (-> player :invinci) 0) (return)) (when (!= name "clam") (call bounce e (* (-> player :vx) 0.6) (* (-> player :vy) 0.6))) (call cancel_attack) (call bounce_relative player e 3)) (else (call kill_object e))))))))))
       (body-lines
         "function coll_objs()"
         "for e in all(objects) do"
@@ -853,8 +839,7 @@
       (structured-ast
         (seq-block 13))
       (decompiled-pseudo-code
-        (set! e (call new_object x y "snapper" update_snapper draw_snapper))
-        (set! (-> e :dir) 0)
+        (let ([e (call new_object x y "snapper" update_snapper draw_snapper)]) (set! (-> e :dir) 0))
         (set! (-> e :active) #f)
         (set! (-> e :spr_info) (table))
         (set! idle (table))
@@ -903,7 +888,7 @@
       (structured-ast
         (for-loop "i=1,6"))
       (decompiled-pseudo-code
-        (for-range i 1 6 (set! a (call rnd 1)) (set! d (call rnd 20)) (set! sx (+ x (* d (call cos a)))) (set! sy (+ y (* d (call sin a)))) (call create_snapper sx sy)))
+        (for-range i 1 6 (let ((a (call rnd 1)) (d (call rnd 20)) (sx (+ x (* d (call cos a)))) (sy (+ y (* d (call sin a))))) (call create_snapper sx sy))))
       (body-lines
         "function create_school(x,y)"
         "for i=1,6 do"
@@ -930,8 +915,7 @@
         (if-cond (< (+ (-> player :y) buff) (-> e :y))))
       (decompiled-pseudo-code
         (+= (-> e :animt) 0.01)
-        (set! d (call dist (-> e :x) (-> e :y) (-> player :x) (-> player :y)))
-        (if (not (-> e :active)) (then (when (<= d 120) (set! (-> e :active) #t))) (else (set-values! (spd buff) (0.1 20)) (when (<= d 20) (set! buff 4)) (local l r u d) (when (> (- (-> player :x) buff) (-> e :x)) (+= (-> e :vx) spd)) (when (< (+ (-> player :x) buff) (-> e :x)) (-= (-> e :vx) spd)) (when (> (- (-> player :y) buff) (-> e :y)) (+= (-> e :vy) spd)) (when (< (+ (-> player :y) buff) (-> e :y)) (-= (-> e :vy) spd)) (call apply_accel e 1) (call setdirection e l r u d) (call move e))))
+        (let ([d (call dist (-> e :x) (-> e :y) (-> player :x) (-> player :y))]) (if (not (-> e :active)) (then (when (<= d 120) (set! (-> e :active) #t))) (else (let ([spd 0.1] [buff 20]) (when (<= d 20) (set! buff 4))) (local l r u d) (when (> (- (-> player :x) buff) (-> e :x)) (+= (-> e :vx) spd)) (when (< (+ (-> player :x) buff) (-> e :x)) (-= (-> e :vx) spd)) (when (> (- (-> player :y) buff) (-> e :y)) (+= (-> e :vy) spd)) (when (< (+ (-> player :y) buff) (-> e :y)) (-= (-> e :vy) spd)) (call apply_accel e 1) (call setdirection e l r u d) (call move e)))))
       (body-lines
         "function update_snapper(e)"
         "e.animt+=0.01"
@@ -965,14 +949,12 @@
         (if-cond (and (>= d 3) (<= d 5)))
         (if-cond (>= d 5)))
       (decompiled-pseudo-code
-        (set-values! (sinfo flipx flipy sprites d) ((aref (-> e :spr_info) (-> e :state)) #f #f (table) (-> e :dir)))
-        (when (or (== d 0) (== d 4)) (set! sprites (-> sinfo :up)))
+        (let ([sinfo (aref (-> e :spr_info) (-> e :state))] [flipx #f] [flipy #f] [sprites (table)] [d (-> e :dir)]) (when (or (== d 0) (== d 4)) (set! sprites (-> sinfo :up))))
         (when (or (or (or (== d 1) (== d 3)) (== d 5)) (== d 7)) (set! sprites (-> sinfo :diag)))
         (when (or (== d 2) (== d 6)) (set! sprites (-> sinfo :right)))
         (when (and (>= d 3) (<= d 5)) (set! flipy #t))
         (when (>= d 5) (set! flipx #t))
-        (set! spri (aref sprites (+ (modulo (call flr (/ (-> e :animt) (-> sinfo :dt))) (len sprites)) 1)))
-        (call drawoutline spri (- (-> e :x) 4) (- (-> e :y) 4) 1 1 flipx flipy 0 #t))
+        (let ([spri (aref sprites (+ (modulo (call flr (/ (-> e :animt) (-> sinfo :dt))) (len sprites)) 1))]) (call drawoutline spri (- (-> e :x) 4) (- (-> e :y) 4) 1 1 flipx flipy 0 #t)))
       (body-lines
         "function draw_snapper(e)"
         "local sinfo,flipx,flipy,sprites,d=e.spr_info[e.state],false,false,{},e.dir"
@@ -996,8 +978,7 @@
       (structured-ast
         (seq-block 14))
       (decompiled-pseudo-code
-        (set! e (call new_object x y "puffer" update_puffer draw_puffer))
-        (set! (-> e :invinci) #f)
+        (let ([e (call new_object x y "puffer" update_puffer draw_puffer)]) (set! (-> e :invinci) #f))
         (set! (-> e :spr_info) (table))
         (set! idle (table))
         (set! sprites (table 110 111))
@@ -1033,8 +1014,7 @@
       (structured-ast
         (return-expr (call new_box (- (-> e :x) size) (- (-> e :y) size) (+ (-> e :x) size) (+ (-> e :y) size))))
       (decompiled-pseudo-code
-        (set! size (call ternary (== (-> e :state) "puffed") 7 3))
-        (return (call new_box (- (-> e :x) size) (- (-> e :y) size) (+ (-> e :x) size) (+ (-> e :y) size))))
+        (let ([size (call ternary (== (-> e :state) "puffed") 7 3)]) (return (call new_box (- (-> e :x) size) (- (-> e :y) size) (+ (-> e :x) size) (+ (-> e :y) size)))))
       (body-lines
         "e.abs_box=function()"
         "local size = ternary(e.state==\"puffed\",7,3)"
@@ -1054,11 +1034,8 @@
         (if-cond (not os)))
       (decompiled-pseudo-code
         (+= (-> e :animt) 0.01)
-        (set! os (call is_offscreen e 80))
-        (when os (return))
-        (set! state (-> e :state))
-        (set! spd (call ternary (== state "puffed") 0.06 0.1))
-        (when (and (> (-> e :animt) 1.2) (== state "idle")) (call change_state e "puffed") (set! (-> e :invinci) #t) (when (not os) (call sfx 23))))
+        (let ([os (call is_offscreen e 80)]) (when os (return)))
+        (let ([state (-> e :state)] [spd (call ternary (== state "puffed") 0.06 0.1)]) (when (and (> (-> e :animt) 1.2) (== state "idle")) (call change_state e "puffed") (set! (-> e :invinci) #t) (when (not os) (call sfx 23)))))
       (body-lines
         "function update_puffer(e)"
         "e.animt+=0.01"
@@ -1082,12 +1059,8 @@
       (structured-ast
         (if-cond (== (-> e :state) "puffed")))
       (decompiled-pseudo-code
-        (set! sinfo (aref (-> e :spr_info) (-> e :state)))
-        (set! sprites (-> sinfo :sprites))
-        (set-values! (flipx sprw sprh xoff yoff) ((call ternary (> (-> player :x) (-> e :x)) #t #f) 1 1 (- 4) (- 4)))
-        (when (== (-> e :state) "puffed") (set-values! (xoff yoff sprw sprh flipx) ((- 8) (- 8) 2 2 (not flipx))))
-        (set! spri (aref sprites (+ (modulo (call flr (/ (-> e :animt) (-> sinfo :dt))) (len sprites)) 1)))
-        (call drawoutline spri (+ (-> e :x) xoff) (+ (-> e :y) yoff) sprw sprh flipx #f 0 #t))
+        (let ([sinfo (aref (-> e :spr_info) (-> e :state))] [sprites (-> sinfo :sprites)] [flipx (call ternary (> (-> player :x) (-> e :x)) #t #f)] [sprw 1] [sprh 1] [xoff (- 4)] [yoff (- 4)]) (when (== (-> e :state) "puffed") (set-values! (xoff yoff sprw sprh flipx) ((- 8) (- 8) 2 2 (not flipx)))))
+        (let ([spri (aref sprites (+ (modulo (call flr (/ (-> e :animt) (-> sinfo :dt))) (len sprites)) 1))]) (call drawoutline spri (+ (-> e :x) xoff) (+ (-> e :y) yoff) sprw sprh flipx #f 0 #t)))
       (body-lines
         "function draw_puffer(e)"
         "local sinfo=e.spr_info[e.state]"
@@ -1108,11 +1081,9 @@
       (structured-ast
         (if-cond shark))
       (decompiled-pseudo-code
-        (set! e (call new_object x y "squid" update_squid draw_squid))
-        (set! (-> e :up) #f)
+        (let ([e (call new_object x y "squid" update_squid draw_squid)]) (set! (-> e :up) #f))
         (set! (-> e :invinci) #f)
-        (set-values! (sa sb) (76 77))
-        (when shark (set-values! ((-> e :name) (-> e :up) sa sb) ("shark" #t 74 90))))
+        (let ([sa 76] [sb 77]) (when shark (set-values! ((-> e :name) (-> e :up) sa sb) ("shark" #t 74 90)))))
       (body-lines
         "function create_squid(x,y,shark)"
         "local e=new_object(x,y,\"squid\",update_squid,draw_squid)"
@@ -1133,8 +1104,7 @@
         (if-cond (== (-> e :name) "shark"))
         (return-expr (call new_box (- (-> e :x) xa) (- (-> e :y) ya) (+ (-> e :x) xa) (+ (-> e :y) ya))))
       (decompiled-pseudo-code
-        (set-values! (xa ya) (3 7))
-        (when (== (-> e :name) "shark") (set-values! (xa ya) (7 3)))
+        (let ([xa 3] [ya 7]) (when (== (-> e :name) "shark") (set-values! (xa ya) (7 3))))
         (return (call new_box (- (-> e :x) xa) (- (-> e :y) ya) (+ (-> e :x) xa) (+ (-> e :y) ya))))
       (body-lines
         "e.abs_box=function()"
@@ -1189,11 +1159,7 @@
       (structured-ast
         (if-cond (== (-> e :name) "squid")))
       (decompiled-pseudo-code
-        (set! sinfo (aref (-> e :spr_info) (-> e :state)))
-        (set! sprites (-> sinfo :sprites))
-        (set! spri (aref sprites (+ (modulo (call flr (/ (-> e :animt) (-> sinfo :dt))) (len sprites)) 1)))
-        (set-values! (flipy flipx xa ya sx sy) (#f #f 3 7 1 2))
-        (if (== (-> e :name) "squid") (then (set! flipy (call ternary (-> e :up) #f #t))) (else (set! flipx (call ternary (-> e :up) #t #f)) (set-values! (xa ya sx sy) (7 3 2 1)))))
+        (let ([sinfo (aref (-> e :spr_info) (-> e :state))] [sprites (-> sinfo :sprites)] [spri (aref sprites (+ (modulo (call flr (/ (-> e :animt) (-> sinfo :dt))) (len sprites)) 1))] [flipy #f] [flipx #f] [xa 3] [ya 7] [sx 1] [sy 2]) (if (== (-> e :name) "squid") (then (set! flipy (call ternary (-> e :up) #f #t))) (else (set! flipx (call ternary (-> e :up) #t #f)) (set-values! (xa ya sx sy) (7 3 2 1))))))
       (body-lines
         "function draw_squid(e)"
         "local sinfo = e.spr_info[e.state]"
@@ -1216,8 +1182,7 @@
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (set! e (call new_object x y "spikey" update_spikey draw_spikey))
-        (set! (-> e :spri) 22)
+        (let ([e (call new_object x y "spikey" update_spikey draw_spikey)]) (set! (-> e :spri) 22))
         (set! (-> e :bob) #t)
         (set! (-> e :flash) 0)
         (set! (-> e :invinci) #t)
@@ -1272,8 +1237,7 @@
         (for-loop "i=1,cols")
         (for-loop "i=1,rows"))
       (decompiled-pseudo-code
-        (set! ypos y)
-        (for-range i 1 cols (for-range i 1 rows (call create_spikey x ypos mine) (+= ypos yspace))))
+        (let ([ypos y]) (for-range i 1 cols (for-range i 1 rows (call create_spikey x ypos mine) (+= ypos yspace)))))
       (body-lines
         "function create_field(x,y,cols,rows,xspace,yspace,mine)"
         "local ypos = y"
@@ -1292,8 +1256,7 @@
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (set! m (call create_mine x y))
-        (set! (-> m :state) "detonate")
+        (let ([m (call create_mine x y)]) (set! (-> m :state) "detonate"))
         (call create_field (- x 10) (- y 10) 2 2 20 20)
         (call create_bubbles x y 14 15 2 4))
       (body-lines
@@ -1318,7 +1281,7 @@
       (decompiled-pseudo-code
         (+= (-> e :vy) (call ternary (-> e :bob) 0.01 (- 0.01)))
         (when (== (modulo (+ t (-> e :seed)) 30) 0) (set! (-> e :bob) (not (-> e :bob))))
-        (when (== (-> e :state) "detonate") (+= (-> e :animt) 1) (when (>= (-> e :animt) 60) (call create_explosion (-> e :x) (-> e :y) 15) (call create_bubbles (-> e :x) (-> e :y) 10 15 2 4) (call add_shake 8) (call sfx 14) (set! pdist (call dist (-> player :x) (-> player :y) (-> e :x) (-> e :y))) (when (and (and (<= pdist 30) (!= (-> player :state) "hurt")) (== (-> player :invinci) 0)) (call hurt_player player) (call bounce_relative player e (- 9 (/ pdist 4)))))))
+        (when (== (-> e :state) "detonate") (+= (-> e :animt) 1) (when (>= (-> e :animt) 60) (call create_explosion (-> e :x) (-> e :y) 15) (call create_bubbles (-> e :x) (-> e :y) 10 15 2 4) (call add_shake 8) (call sfx 14) (let ([pdist (call dist (-> player :x) (-> player :y) (-> e :x) (-> e :y))]) (when (and (and (<= pdist 30) (!= (-> player :state) "hurt")) (== (-> player :invinci) 0)) (call hurt_player player) (call bounce_relative player e (- 9 (/ pdist 4))))))))
       (body-lines
         "function update_spikey(e)"
         "e.vy+=ternary(e.bob,0.01,-0.01)"
@@ -1368,8 +1331,7 @@
       (structured-ast
         (seq-block 7))
       (decompiled-pseudo-code
-        (set! e (call new_object x y "clam" update_clam draw_clam))
-        (set! (-> e :flipx) #f)
+        (let ([e (call new_object x y "clam" update_clam draw_clam)]) (set! (-> e :flipx) #f))
         (set! (-> e :wob) #t)
         (set! (-> e :invinci) #t)
         (set! (-> e :shakesound) #f))
@@ -1392,8 +1354,7 @@
         (if-cond (== (-> e :state) "open"))
         (return-expr box))
       (decompiled-pseudo-code
-        (set! box (call new_box (- (-> e :x) 7) (- (-> e :y) 3) (+ (-> e :x) 7) (+ (-> e :y) 3)))
-        (when (== (-> e :state) "open") (-= (-> box :y1) 4))
+        (let ([box (call new_box (- (-> e :x) 7) (- (-> e :y) 3) (+ (-> e :x) 7) (+ (-> e :y) 3))]) (when (== (-> e :state) "open") (-= (-> box :y1) 4)))
         (return box))
       (body-lines
         "e.abs_box=function()"
@@ -1445,8 +1406,7 @@
       (structured-ast
         (if-cond (== (-> e :state) "open")))
       (decompiled-pseudo-code
-        (set-values! (spri yoff h) (29 (- 7) 1))
-        (when (== (-> e :state) "open") (set-values! (spri yoff h) (8 (- 15) 2))))
+        (let ([spri 29] [yoff (- 7)] [h 1]) (when (== (-> e :state) "open") (set-values! (spri yoff h) (8 (- 15) 2)))))
       (body-lines
         "function draw_clam(e)"
         "local spri,yoff,h=29,-7,1"
@@ -1464,8 +1424,7 @@
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! e (call new_object x y "pearl" update_pearl draw_pearl))
-        (set! (-> e :vx) vx)
+        (let ([e (call new_object x y "pearl" update_pearl draw_pearl)]) (set! (-> e :vx) vx))
         (set! (-> e :vy) vy))
       (body-lines
         "function create_pearl(x,y,vx,vy)"
@@ -1564,7 +1523,7 @@
         (for-loop "i in all(objects)")
         (if-cond (or (or (== (-> i :name) "mine") (== (-> i :name) "spikey")) (== (-> i :name) "pearl"))))
       (decompiled-pseudo-code
-        (when (and (== (-> exit :combat) #t) (== (-> exit :state) "closed")) (set! no 0) (foreach i objects (when (or (or (== (-> i :name) "mine") (== (-> i :name) "spikey")) (== (-> i :name) "pearl")) (+= no 1)))))
+        (when (and (== (-> exit :combat) #t) (== (-> exit :state) "closed")) (let ([no 0]) (foreach i objects (when (or (or (== (-> i :name) "mine") (== (-> i :name) "spikey")) (== (-> i :name) "pearl")) (+= no 1))))))
       (body-lines
         "function update_exit()"
         "if exit.combat==true and exit.state==\"closed\" then"
@@ -1602,8 +1561,7 @@
       (structured-ast
         (if-cond (== (-> exit :state) "closed")))
       (decompiled-pseudo-code
-        (set-values! (ca cb) (0 0))
-        (when (== (-> exit :state) "closed") (set-values! (ca cb) (13 2)))
+        (let ([ca 0] [cb 0]) (when (== (-> exit :state) "closed") (set-values! (ca cb) (13 2))))
         (call pal 8 0)
         (call pal 9 ca)
         (call pal 10 cb)
@@ -1670,12 +1628,10 @@
         (if-cond (== (modulo t 3) 0))
         (for-loop "i=1, flr((tblen+64)/64)"))
       (decompiled-pseudo-code
-        (set! box (-> e :box))
-        (-= (-> box :y1) (-> e :uprate))
+        (let ([box (-> e :box)]) (-= (-> box :y1) (-> e :uprate)))
         (when (-> e :both) (-= (-> box :y2) (-> e :uprate)))
         (when (< (-> box :y2) 0) (call del hazards e))
-        (set! cbox (call new_box (- camx 20) (- camy 20) (+ camx 148) (+ camy 148)))
-        (when (call coll box cbox) (when (== (modulo t 3) 0) (set-values! (x1 y1 x2 y2) ((-> box :x1) (-> box :y1) (-> box :x2) (-> box :y2))) (set-values! (tblen rllen off) ((- x2 x1) (- y2 y1) 10)) (for-range i 1 (call flr (/ (+ tblen 64) 64)) (call create_particle (call flr (+ (call rnd tblen) x1)) (+ y1 off) 0 (* (+ (+ (call rnd 0.2) 0.2) (-> e :uprate)) (- 1))) (call create_particle (call flr (+ (call rnd tblen) x1)) (- y2 off) 0 (- (+ (call rnd 0.2) 0.2) (* (-> e :uprate) 0.9)))))))
+        (let ([cbox (call new_box (- camx 20) (- camy 20) (+ camx 148) (+ camy 148))]) (when (call coll box cbox) (when (== (modulo t 3) 0) (let ([x1 (-> box :x1)] [y1 (-> box :y1)] [x2 (-> box :x2)] [y2 (-> box :y2)] [tblen (- x2 x1)] [rllen (- y2 y1)] [off 10]) (for-range i 1 (call flr (/ (+ tblen 64) 64)) (call create_particle (call flr (+ (call rnd tblen) x1)) (+ y1 off) 0 (* (+ (+ (call rnd 0.2) 0.2) (-> e :uprate)) (- 1))) (call create_particle (call flr (+ (call rnd tblen) x1)) (- y2 off) 0 (- (+ (call rnd 0.2) 0.2) (* (-> e :uprate) 0.9)))))))))
       (body-lines
         "function update_ink(e)"
         "local box=e.box"
@@ -1703,9 +1659,7 @@
       (structured-ast
         (if-cond (call coll box (call (-> player :abs_box) void))))
       (decompiled-pseudo-code
-        (set! box (-> e :box))
-        (set! ps (-> player :state))
-        (when (and (and (and (call coll box (call (-> player :abs_box))) (!= ps "attack")) (!= ps "hurt")) (!= ps "dead")) (set! centre (table)) (set! (-> centre :x) (+ (-> box :x1) (/ (-> box :x2) 2))) (set! (-> centre :y) (+ (-> box :y1) (/ (-> box :y2) 2))) (call hurt_player player) (call bounce_relative player centre 2)))
+        (let ([box (-> e :box)] [ps (-> player :state)]) (when (and (and (and (call coll box (call (-> player :abs_box))) (!= ps "attack")) (!= ps "hurt")) (!= ps "dead")) (let ([centre (table)]) (set! (-> centre :x) (+ (-> box :x1) (/ (-> box :x2) 2)))) (set! (-> centre :y) (+ (-> box :y1) (/ (-> box :y2) 2))) (call hurt_player player) (call bounce_relative player centre 2))))
       (body-lines
         "function coll_ink(e)"
         "local box = e.box"
@@ -1808,8 +1762,7 @@
       (structured-ast
         (for-loop "i=1,#ol,3"))
       (decompiled-pseudo-code
-        (set! ol (call parse l))
-        (for-range i 1 (len ol) 3 (set-values! (t x y) ((aref ol i) (aref ol (+ i 1)) (aref ol (+ i 2)))) (call spawntype t x y)))
+        (let ([ol (call parse l)]) (for-range i 1 (len ol) 3 (let ((t (aref ol i)) (x (aref ol (+ i 1))) (y (aref ol (+ i 2)))) (call spawntype t x y)))))
       (body-lines
         "function spawnlist(l)"
         "local ol = parse(l)"
@@ -1948,10 +1901,7 @@
       (structured-ast
         (seq-block 8))
       (decompiled-pseudo-code
-        (set! rdist (call dist (-> p :x) (-> p :y) (-> o :x) (-> o :y)))
-        (set! bouncex (/ (- (-> p :x) (-> o :x)) rdist))
-        (set! bouncey (/ (- (-> p :y) (-> o :y)) rdist))
-        (*= bouncex str)
+        (let ([rdist (call dist (-> p :x) (-> p :y) (-> o :x) (-> o :y))] [bouncex (/ (- (-> p :x) (-> o :x)) rdist)] [bouncey (/ (- (-> p :y) (-> o :y)) rdist)]) (*= bouncex str))
         (*= bouncey str)
         (call bounce p bouncex bouncey))
       (body-lines
@@ -1990,9 +1940,7 @@
       (structured-ast
         (seq-block 6))
       (decompiled-pseudo-code
-        (set! l (call dist (-> o :vx) (-> o :vy)))
-        (set! rl (call min l tpspd))
-        (set! (-> o :vx) (* (/ (-> o :vx) l) rl))
+        (let ([l (call dist (-> o :vx) (-> o :vy))] [rl (call min l tpspd)]) (set! (-> o :vx) (* (/ (-> o :vx) l) rl)))
         (set! (-> o :vy) (* (/ (-> o :vy) l) rl)))
       (body-lines
         "function apply_accel(o,tpspd)"
@@ -2036,10 +1984,7 @@
         (for-loop "i=y1,y2")
         (if-cond (or (< (- x1 1) 0) (call issolid (- x1 1) i))))
       (decompiled-pseudo-code
-        (set! hb (call (-> o :abs_box)))
-        (set-values! (x1 x2 y1 y2 xc yc) ((-> hb :x1) (-> hb :x2) (-> hb :y1) (-> hb :y2) 0 0))
-        (set! adjust 0.1)
-        (for-range i y1 y2 (when (or (< (- x1 1) 0) (call issolid (- x1 1) i)) (+= (-> o :x) adjust) (+= xc 1))))
+        (let ([hb (call (-> o :abs_box))] [x1 (-> hb :x1)] [x2 (-> hb :x2)] [y1 (-> hb :y1)] [y2 (-> hb :y2)] [xc 0] [yc 0] [adjust 0.1]) (for-range i y1 y2 (when (or (< (- x1 1) 0) (call issolid (- x1 1) i)) (+= (-> o :x) adjust) (+= xc 1)))))
       (body-lines
         "function detectwalls(o)"
         "local hb = o.abs_box()"
@@ -2097,8 +2042,7 @@
       (structured-ast
         (seq-block 5))
       (decompiled-pseudo-code
-        (set! a (call rnd 1))
-        (+= shkx (* p (call cos a)))
+        (let ([a (call rnd 1)]) (+= shkx (* p (call cos a))))
         (+= shky (* p (call sin a))))
       (body-lines
         "function add_shake(p)"
@@ -2117,8 +2061,7 @@
         (if-cond (or (or (or (< (-> o :x) (- camx buf)) (> (-> o :x) (+ (+ camx 127) buf))) (< (-> o :y) (- camy buf))) (> (-> o :y) (+ (+ camy 127) buf))))
         (return-expr #t))
       (decompiled-pseudo-code
-        (set! buf (or buffer 0))
-        (when (or (or (or (< (-> o :x) (- camx buf)) (> (-> o :x) (+ (+ camx 127) buf))) (< (-> o :y) (- camy buf))) (> (-> o :y) (+ (+ camy 127) buf))) (return #t)))
+        (let ([buf (or buffer 0)]) (when (or (or (or (< (-> o :x) (- camx buf)) (> (-> o :x) (+ (+ camx 127) buf))) (< (-> o :y) (- camy buf))) (> (-> o :y) (+ (+ camy 127) buf))) (return #t))))
       (body-lines
         "function is_offscreen(o,buffer)"
         "local buf = buffer or 0"
@@ -2166,7 +2109,7 @@
         (if-cond (and (< (-> s :p) 3) (> (-> s :r) 4)))
         (for-loop "i=0,2"))
       (decompiled-pseudo-code
-        (when (< (-> s :p) 2) (call circfill (-> s :x) (-> s :y) (-> s :r) 0) (when (< (-> s :p) 4) (call circfill (-> s :x) (-> s :y) (-> s :r) 7) (when (and (< (-> s :p) 3) (> (-> s :r) 4)) (for-range i 0 2 (set! x (- (+ (-> s :x) (call rnd (* 2.2 (-> s :r)))) (* 1.1 (-> s :r)))) (set! y (- (+ (-> s :y) (call rnd (* 2.2 (-> s :r)))) (* 1.1 (-> s :r)))) (set! r (+ (* 0.25 (-> s :r)) (call rnd (* 0.5 (-> s :r))))) (call create_explosion x y r))))))
+        (when (< (-> s :p) 2) (call circfill (-> s :x) (-> s :y) (-> s :r) 0) (when (< (-> s :p) 4) (call circfill (-> s :x) (-> s :y) (-> s :r) 7) (when (and (< (-> s :p) 3) (> (-> s :r) 4)) (for-range i 0 2 (let ((x (- (+ (-> s :x) (call rnd (* 2.2 (-> s :r)))) (* 1.1 (-> s :r)))) (y (- (+ (-> s :y) (call rnd (* 2.2 (-> s :r)))) (* 1.1 (-> s :r)))) (r (+ (* 0.25 (-> s :r)) (call rnd (* 0.5 (-> s :r)))))) (call create_explosion x y r)))))))
       (body-lines
         "function draw_explosion(s)"
         "if s.p<2 then"
@@ -2191,7 +2134,7 @@
       (structured-ast
         (for-loop "i=1,num"))
       (decompiled-pseudo-code
-        (for-range i 1 num (set! a (call rnd 1)) (set! b (table)) (set! x (+ x (* spread (call cos a)))) (set! y (+ y (* spread (call sin a)))) (set! r (+ (call rnd (- maxsize minsize)) minsize)) (set! draw draw_bubble) |}| (call add fx b)))
+        (for-range i 1 num (let ((a (call rnd 1)) (b (table))) (set! x (+ x (* spread (call cos a))))) (set! y (+ y (* spread (call sin a)))) (set! r (+ (call rnd (- maxsize minsize)) minsize)) (set! draw draw_bubble) |}| (call add fx b)))
       (body-lines
         "function create_bubbles(x,y,num,spread,minsize,maxsize)"
         "for i=1,num do"
@@ -2380,7 +2323,7 @@
         (if-cond (> (/ (-> p :age) (-> p :maxage)) 0.8))
         (if-cond (not (-> p :pp))))
       (decompiled-pseudo-code
-        (foreach p particles (+= (-> p :age) 1) (when (or (== (-> p :age) (-> p :maxage)) (call is_offscreen p 30)) (call del particles p)) (set! ci (+ 1 (call flr (* (/ (-> p :age) (-> p :maxage)) (len (-> p :cols)))))) (set! (-> p :col) (aref (-> p :cols) ci)) (when (> (/ (-> p :age) (-> p :maxage)) 0.6) (set! (-> p :fill) (aref fades 4))) (when (> (/ (-> p :age) (-> p :maxage)) 0.8) (set! (-> p :fill) (aref fades 2)) (when (not (-> p :pp)) (set! (-> p :size) 14)))))
+        (foreach p particles (+= (-> p :age) 1) (when (or (== (-> p :age) (-> p :maxage)) (call is_offscreen p 30)) (call del particles p)) (let ((ci (+ 1 (call flr (* (/ (-> p :age) (-> p :maxage)) (len (-> p :cols))))))) (set! (-> p :col) (aref (-> p :cols) ci))) (when (> (/ (-> p :age) (-> p :maxage)) 0.6) (set! (-> p :fill) (aref fades 4))) (when (> (/ (-> p :age) (-> p :maxage)) 0.8) (set! (-> p :fill) (aref fades 2)) (when (not (-> p :pp)) (set! (-> p :size) 14)))))
       (body-lines
         "function update_particles()"
         "for p in all(particles) do"
@@ -2425,9 +2368,7 @@
         (if-cond (!= s ","))
         (if-cond (== d "true")))
       (decompiled-pseudo-code
-        (set! data (table))
-        (set! d "")
-        (for-range i 1 (len string) (set! s (call sub string i i)) (if (!= s ",") (then (set! d (string-append d s))) (else (when (== d "true") (set! d #t) (if (== d "false") (then (set! d #f)) (else (set! d (call flr d)))))))))
+        (let ([data (table)] [d ""]) (for-range i 1 (len string) (let ((s (call sub string i i))) (if (!= s ",") (then (set! d (string-append d s))) (else (when (== d "true") (set! d #t) (if (== d "false") (then (set! d #f)) (else (set! d (call flr d)))))))))))
       (body-lines
         "function parse(string)"
         "local data = {}"
@@ -2504,10 +2445,7 @@
       (structured-ast
         (return-expr tile))
       (decompiled-pseudo-code
-        (set! col (call flr (/ x 128)))
-        (set! row (call flr (/ y 128)))
-        (set! tile (aref roomtiles (+ (+ (+ (* roomcols row) row) col) 1)))
-        (return tile col row))
+        (let ([col (call flr (/ x 128))] [row (call flr (/ y 128))] [tile (aref roomtiles (+ (+ (+ (* roomcols row) row) col) 1))]) (return tile col row)))
       (body-lines
         "function gettile(x,y)"
         "local col = flr(x/128)"
@@ -2527,9 +2465,7 @@
         (return-expr (* (call sqrt (+ (* n n) 1)) d)))
       (decompiled-pseudo-code
         (when xb (set! xa (- xb xa)))
-        (set! d (call max (call abs xa) (call abs ya)))
-        (set! n (/ (call min (call abs xa) (call abs ya)) d))
-        (return (* (call sqrt (+ (* n n) 1)) d)))
+        (let ([d (call max (call abs xa) (call abs ya))] [n (/ (call min (call abs xa) (call abs ya)) d)]) (return (* (call sqrt (+ (* n n) 1)) d))))
       (body-lines
         "function dist(xa,ya,xb,yb)"
         "if xb then xa=xb-xa ya=yb-ya end"
@@ -2562,8 +2498,7 @@
       (structured-ast
         (if-cond (< min 10)))
       (decompiled-pseudo-code
-        (set-values! (min sec) (gm (call flr (/ gt 30))))
-        (when (< min 10) (set! min (string-append "0" min))))
+        (let ([min gm] [sec (call flr (/ gt 30))]) (when (< min 10) (set! min (string-append "0" min)))))
       (body-lines
         "function timer()"
         "local min,sec=gm,flr(gt/30)"

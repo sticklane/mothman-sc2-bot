@@ -64,7 +64,7 @@
     (structured-conditionals 32)
     (structured-guard-returns 21)
     (lifted-state-machines 16)
-    (lifted-high-level-idioms 36))
+    (lifted-high-level-idioms 40))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (symbolic-mmio-xref
     (mmio-reg BGP #:accesses 1)
@@ -126,7 +126,10 @@
       (wram-var wram_state_C202 #:addr #xC202 #:accesses 25)
       (wram-var wram_state_C201 #:addr #xC201 #:accesses 22)
       (wram-var wram_state_D003 #:addr #xD003 #:accesses 17)
-      (wram-var wram_state_DFE8 #:addr #xDFE8 #:accesses 17)))
+      (wram-var wram_state_DFE8 #:addr #xDFE8 #:accesses 17))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_02A5 #:bank 0 #:dispatch-pc #x02A5 #:mechanism rst-28-inline-table #:cases
       ((case 0 -> mbc_rom_bank_switch_b0_0610)
@@ -251,7 +254,11 @@
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x0EF3 #:kind block-copy)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x108C #:reg MBC_ROM_BANK)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x113E #:kind block-fill)
-    (idiom-sm83-memory-loop #:bank #x00 #:pc #x134C #:kind block-fill))
+    (idiom-sm83-memory-loop #:bank #x00 #:pc #x134C #:kind block-fill)
+    (idiom-joypad-poll #:bank #x01 #:pc #x41AD #:reg JOYP)
+    (idiom-joypad-poll #:bank #x01 #:pc #x4647 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x01 #:pc #x4811 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x01 #:pc #x482E #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 3 #:params () #:returns () #:calls (lcd_ppu_control_b0_0185) #:mmio ()
       (decompiled-pseudo-code
@@ -560,6 +567,7 @@
           (decompiled-pseudo-code
             (set! B #x14)
             (loop-counted #:step LD_HLI_A #:while (!= B #x00)
+              (mem-fill! (deref HL++) A LD_HLI_A)
               (set! (deref HL++) A)
               (-= B 1))
             (return))
@@ -583,6 +591,7 @@
             (set! HL #x9C00)
             (set! B #x5F)
             (loop-counted #:step LD_HLI_A #:while (!= B #x00)
+              (mem-fill! (deref HL++) #x2C LD_HLI_A)
               (set! (deref HL++) #x2C)
               (-= B 1))
             (call vram_wram_block_xfer_b0_05F8)
@@ -631,6 +640,7 @@
         (defsub-sm83 vram_wram_block_xfer_b0_05BE #:bank 0 #:addr #x05BE #:offset #x05BE #:size-bytes 9 #:params (BC HL) #:returns (A HL Zero) #:calls () #:mmio () #:hram () #:mbc-writes ()
           (decompiled-pseudo-code
             (loop-counted #:step LD_HLD_A #:while (!= BC #x00)
+              (mem-fill! (deref HL--) #x2C LD_HLD_A)
               (set! (deref HL--) #x2C)
               (-= BC 1)
               (set! A (bit-ior B C)))
@@ -646,6 +656,7 @@
         (defsub-sm83 vram_wram_block_xfer_b0_05C7 #:bank 0 #:addr #x05C7 #:offset #x05C7 #:size-bytes 9 #:params (BC DE HL) #:returns (A HL Zero) #:calls () #:mmio () #:hram () #:mbc-writes ()
           (decompiled-pseudo-code
             (loop-counted #:step LD_A_HLI #:while (!= BC #x00)
+              (mem-copy! (deref DE) (deref HL++) LD_A_HLI)
               (set! (deref DE) (deref HL++))
               (+= DE 1)
               (-= BC 1)
@@ -674,6 +685,7 @@
             (set! DE #xC600)
             (set! B #x08)
             (loop-counted #:step LD_A_HLI #:while (!= B #x00)
+              (mem-copy! (deref DE) (deref HL++) LD_A_HLI)
               (set! (deref DE) (deref HL++))
               (+= HL 1)
               (+= DE 1)
@@ -704,6 +716,7 @@
             (set! DE #x9800)
             (set! B #x02)
             (loop-counted #:step LD_A_HLI #:while (!= A #x14)
+              (mem-copy! (deref DE) (deref HL++) LD_A_HLI)
               (set! (deref DE) (deref HL++))
               (+= E 1))
             (set! E #x20)
@@ -830,6 +843,7 @@
             (set! DE #xC200)
             (set! B #x51)
             (loop-counted #:step LD_A_HLI #:while (!= B #x00)
+              (mem-copy! (deref DE) (deref HL++) LD_A_HLI)
               (set! (deref DE) (deref HL++))
               (+= DE 1)
               (-= B 1))
@@ -854,6 +868,7 @@
             (set! HL lcdc_mirror_FFE6)
             (set! B #x06)
             (loop-counted #:step LD_HLI_A #:while (!= B #x00)
+              (mem-fill! (deref HL++) #x00 LD_HLI_A)
               (set! (deref HL++) #x00)
               (-= B 1))
             (set! HRAM_FFA3 #x00)

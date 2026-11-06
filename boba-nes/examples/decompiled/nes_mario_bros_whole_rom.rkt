@@ -133,7 +133,10 @@
       (table table_wram_0540 #:addr #x0540 #:accesses 14)
       (table table_wram_04A8 #:addr #x04A8 #:accesses 13)
       (table table_wram_0591 #:addr #x0591 #:accesses 13)
-      (table table_wram_0300 #:addr #x0300 #:accesses 10)))
+      (table table_wram_0300 #:addr #x0300 #:accesses 10))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))
+      (joypad-mask-enum (#x80 JOY_BTN_A) (#x40 JOY_BTN_B) (#x20 JOY_BTN_SELECT) (#x10 JOY_BTN_START) (#x08 JOY_BTN_UP) (#x04 JOY_BTN_DOWN) (#x02 JOY_BTN_LEFT) (#x01 JOY_BTN_RIGHT))))
   (state-machines
     (def-state-machine sm_b0_CDB1 #:bank 0 #:dispatch-pc #xCDB1 #:kind jmp-indirect-vector #:ptr-or-table #x0014 #:cases
       ((case 0 -> irq_handler)))
@@ -194,6 +197,7 @@
     (idiom-zp-pointer-init #:bank #x00 #:pc #xCB08 #:zp #x14 #:target-addr #x0300)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xCB10 #:zp #x12 #:target-addr #x0020)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xCBC8 #:zp #x14 #:target-addr #xF296)
+    (idiom-joypad-poll #:bank #x00 #:pc #xCCD6 #:reg JOY1)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xCD03 #:zp #x00 #:target-addr #x0591)
     (idiom-u16-add-with-carry #:bank #x00 #:pc #xCDB5)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xCE16 #:zp #x03 #:target-addr #x0200)
@@ -204,8 +208,7 @@
     (idiom-zp-pointer-init #:bank #x00 #:pc #xD423 #:zp #x00 #:target-addr #xF689)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xD427 #:zp #x01 #:target-addr #x04F6)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xD59C #:zp #x13 #:target-addr #x6000)
-    (idiom-zp-pointer-init #:bank #x00 #:pc #xD5A0 #:zp #x14 #:target-addr #xF560)
-    (idiom-zp-pointer-init #:bank #x00 #:pc #xD5AB #:zp #x00 #:target-addr #x22AF))
+    (idiom-zp-pointer-init #:bank #x00 #:pc #xD5A0 #:zp #x14 #:target-addr #xF560))
   (jump-tables
     (jmp-indirect #:bank #x00 #:pc #xCDB1 #:ptr #x0014)
     (jmp-indirect #:bank #x00 #:pc #xF116 #:ptr #x6D68)
@@ -290,6 +293,7 @@
             (set! Y #x00)
             (set! ppudata_mirror_00 #x00)
             (loop-counted #:step DEY #:while (!= Y #x00)
+              (mem-fill! (deref-indy zp_ptr_00 Y) #x00 DEY)
               (set! (deref-indy zp_ptr_00 Y) #x00)
               (-= Y 1))
             (-= zp_state_01 1)
@@ -405,6 +409,7 @@
             (when (!= Y #x04) (when (!= Y #x06) (goto loc_C50B)))
             (set! X #x05)
             (loop-counted #:step DEX #:while (>= X #x00)
+              (mem-copy! (aref zp #x5A X) (aref zp #x2A X) DEX)
               (set! (aref zp #x5A X) (aref zp #x2A X))
               (-= X 1))
             (set! PPUMASK (bit-and ppumask_mirror_0A #x0E))
@@ -470,6 +475,7 @@
             (set! Y #x00)
             (set! ppudata_mirror_00 #x00)
             (loop-counted #:step DEY #:while (!= Y #x00)
+              (mem-fill! (deref-indy zp_ptr_00 Y) #xF4 DEY)
               (set! (deref-indy zp_ptr_00 Y) #xF4)
               (-= Y 1))
             (return))
@@ -840,8 +846,8 @@
           (RTS #:imp #x00 #:pc #xCE15))
         (defsub logic_routine_b0_D328 #:bank 0 #:addr #xD328 #:offset #x1328 #:size-bytes 34 #:params () #:returns (A Carry Zero) #:calls () #:mmio () #:zp-vars (#x07)
           (decompiled-pseudo-code
-            (set! (zp #x07) (bit-and (wram #x0500) #x02))
-            (when (!= (bit-xor (wram #x0501) (zp #x07)) #x00) (set! Carry #x01))
+            (let ([(zp #x07) (bit-and (wram #x0500) #x02)])
+              (when (!= (bit-xor (wram #x0501) (zp #x07)) #x00) (set! Carry #x01)))
             (ror! (wram #x0500) 1)
             (ror! (wram #x0501) 1)
             (ror! (wram #x0502) 1)
@@ -867,6 +873,7 @@
           (decompiled-pseudo-code
             (set! X #x03)
             (loop-counted #:step DEX #:while (>= X #x00)
+              (mem-fill! (aref zp #xFC X) #x00 DEX)
               (set! (aref zp #xFC X) #x00)
               (-= X 1))
             (return))

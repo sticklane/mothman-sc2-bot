@@ -144,7 +144,10 @@
       (wram-var wram_state_C162 #:addr #xC162 #:accesses 63)
       (wram-var wram_state_C168 #:addr #xC168 #:accesses 58)
       (wram-var wram_state_C163 #:addr #xC163 #:accesses 51)
-      (wram-var wram_state_C160 #:addr #xC160 #:accesses 45)))
+      (wram-var wram_state_C160 #:addr #xC160 #:accesses 45))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_0265 #:bank 0 #:dispatch-pc #x0265 #:mechanism rst-inline-table #:cases
       ((case 0 -> game_logic_step_b0_09C5)
@@ -264,14 +267,14 @@
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x1132 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x114C #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x11CB #:reg MBC_ROM_BANK)
-    (idiom-sm83-oam-dma #:bank #x00 #:pc #x1222)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x124D #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x125D #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x126B #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x1282 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x12E7 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x130A #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x1310 #:reg MBC_ROM_BANK))
+    (idiom-joypad-poll #:bank #x00 #:pc #x11E5 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x11E7 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x11F3 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x11F5 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x11F7 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x11F9 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x11FB #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x11FD #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 3 #:params () #:returns () #:calls (state_table_dispatch_b0_122A) #:mmio ()
       (decompiled-pseudo-code
@@ -1742,8 +1745,8 @@
         (defsub-sm83 game_logic_step_b3_401F #:bank 3 #:addr #x401F #:offset #x001F #:size-bytes 7 #:params (A BC) #:returns () #:calls () #:mmio () #:hram (#xFF8B #xFF8C) #:mbc-writes ()
           (decompiled-pseudo-code
             (set! B B)
-            (set! HRAM_FF8C A)
-            (set! HRAM_FF8B HRAM_FF8C))
+            (let ([HRAM_FF8C A])
+              (set! HRAM_FF8B HRAM_FF8C)))
           (LD_B_B #:imp #x00 #:pc #x401F)
           (POP_AF #:imp #x00 #:pc #x4020)
           (LDH_OUT #:io8 #x8C #:pc #x4021 #:sym HRAM_FF8C)
@@ -1828,8 +1831,8 @@
         (defsub-sm83 game_logic_step_b3_40A8 #:bank 3 #:addr #x40A8 #:offset #x00A8 #:size-bytes 33 #:params () #:returns (A Zero) #:calls (vram_wram_block_xfer_b3_781C game_logic_step_b3_737C vram_wram_block_xfer_b3_77E4 vram_wram_block_xfer_b3_7817) #:mmio () #:hram (#xFF8B #xFF8C) #:mbc-writes ()
           (decompiled-pseudo-code
             (call vram_wram_block_xfer_b3_781C)
-            (set! HRAM_FF8B #x00)
-            (set! HRAM_FF8C HRAM_FF8B)
+            (let ([HRAM_FF8B #x00])
+              (set! HRAM_FF8C HRAM_FF8B))
             (+= A 1)
             (set! (wram #xC366) A)
             (set! (wram #xC369) #x01)

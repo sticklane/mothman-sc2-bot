@@ -64,7 +64,7 @@
     (structured-conditionals 34)
     (structured-guard-returns 14)
     (lifted-state-machines 16)
-    (lifted-high-level-idioms 36))
+    (lifted-high-level-idioms 40))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (symbolic-mmio-xref
     (mmio-reg BCPS #:accesses 1)
@@ -146,7 +146,10 @@
       (wram-var wram_state_C2BF #:addr #xC2BF #:accesses 120)
       (wram-var wram_state_CE6D #:addr #xCE6D #:accesses 108)
       (wram-var wram_state_C101 #:addr #xC101 #:accesses 103)
-      (wram-var wram_state_C2C5 #:addr #xC2C5 #:accesses 92)))
+      (wram-var wram_state_C2C5 #:addr #xC2C5 #:accesses 92))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_055C #:bank 0 #:dispatch-pc #x055C #:mechanism jp-hl-dispatch-table #:cases
       ((case 0 -> game_logic_step_b0_7719)
@@ -301,7 +304,11 @@
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x2746)
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x274F)
     (idiom-sm83-bcd-math #:bank #x00 #:pc #x2758)
-    (idiom-sm83-bcd-math #:bank #x00 #:pc #x2761))
+    (idiom-sm83-bcd-math #:bank #x00 #:pc #x2761)
+    (idiom-joypad-poll #:bank #x02 #:pc #x5DCE #:reg JOYP)
+    (idiom-joypad-poll #:bank #x02 #:pc #x5E6E #:reg JOYP)
+    (idiom-joypad-poll #:bank #x02 #:pc #x608E #:reg JOYP)
+    (idiom-joypad-poll #:bank #x05 #:pc #x79C8 #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 3 #:params () #:returns () #:calls (game_logic_step_b0_12A4) #:mmio ()
       (decompiled-pseudo-code
@@ -969,6 +976,7 @@
               (set! B #x14)
               (set! C #x02))
             (loop-counted #:step DEC_B #:while (!= B #x00)
+              (mem-fill! (deref HL) #x07 DEC_B)
               (set! VBK #x01)
               (call lcd_ppu_control_b0_018C)
               (set! (deref HL) #x07)
@@ -1617,6 +1625,7 @@
             (set! HL #xC2A6)
             (set! B #x10)
             (loop-counted #:step LD_HLI_A #:while (!= B #x00)
+              (mem-fill! (deref HL++) (- A A) LD_HLI_A)
               (set! (deref HL++) (- A A))
               (-= B 1))
             (set! (wram #xC2AB) #x10)
@@ -3131,6 +3140,7 @@
             (set! HL #xCF8B)
             (set! B #x06)
             (loop-counted #:step INC_DE #:while (!= B #x00)
+              (mem-copy! (deref HL++) (deref DE) INC_DE)
               (+= DE 1)
               (set! (deref HL++) (deref DE))
               (-= B 1))
@@ -3621,6 +3631,7 @@
             (set! B #x00)
             (set! HL #xD000)
             (loop-counted #:step LD_HLI_A #:while (!= B #x00)
+              (mem-fill! (deref HL++) (- A A) LD_HLI_A)
               (set! (deref HL++) (- A A))
               (-= B 1))
             (return))

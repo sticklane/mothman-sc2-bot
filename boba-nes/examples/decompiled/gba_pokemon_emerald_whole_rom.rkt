@@ -188,6 +188,25 @@
   )
 )
 
+(def-memory-layout
+  (mmio-mirrors
+    (mirror dispcnt_mirror_3000000 #:addr #x03000000 #:mmio DISPCNT)
+    (mirror irq_ack_mirror_3007FF8 #:addr #x03007FF8 #:mmio IF)
+    (mirror bldcnt_mirror_3000050 #:addr #x03000050 #:mmio BLDCNT))
+  (state-variables
+    (state-var main_callback_iwram_3000004 #:addr #x03000004 #:accesses 52)
+    (state-var vblank_handler_iwram_3007FFC #:addr #x03007FFC #:accesses 44))
+  (timers
+    (timer frame_timer_iwram_3000010 #:addr #x03000010 #:decrements 14)
+    (timer anim_timer_ewram_2000100 #:addr #x02000100 #:decrements 9))
+  (indexed-tables
+    (table oam_shadow_table_3002000 #:addr #x03002000 #:accesses 64)
+    (table entity_slot_table_2020000 #:addr #x02020000 #:accesses 48))
+  (enum-constants
+    (enum-group IRQ_MASK (IRQ_VBLANK #x0001) (IRQ_HBLANK #x0002) (IRQ_VCOUNT #x0004) (IRQ_DMA3 #x0800) (IRQ_KEYPAD #x1000) (IRQ_GAMEPAK #x2000))
+    (enum-group DISPCNT_MODE (MODE_0 #x0000) (MODE_3 #x0003) (MODE_4 #x0004) (OBJ_1D_MAP #x0040) (FORCED_BLANK #x0080) (OBJ_ENABLE #x1000))
+    (enum-group DMA_CONTROL (DMA_ENABLE #x80000000) (DMA_32BIT #x04000000) (SRC_FIXED #x01000000))))
+
 (define-gba-lifted-lz77-assets
   (lz77-asset (rom-addr "0x082EC88C") (rom-offset #x2ec88c) (decompressed-bytes 3584) (kind 'obj-sprite-sheet-4bpp))
   (lz77-asset (rom-addr "0x082ECD34") (rom-offset #x2ecd34) (decompressed-bytes 2048) (kind 'bg-tilemap-or-4bpp-tileset))
@@ -383,10 +402,12 @@
         (block-load! r3 "{r0}")
         (block-store! r2 "{r0}")
         (set! r1 (- r1 #x1))
+        (mem-copy! #:dst r0 #:src r1 #:count (>= r1 #x0))
       )
       (set! (mmio32 DMA3SAD) #x08000248)
       (set! (mmio32 DMA3DAD) #x03002750)
       (set! (mmio32 DMA3CNT_L) #x84000200 #:flags (DMA_ENABLE START_IMMEDIATE DMA_32BIT SRC_INC DST_INC))
+      (dma-transfer! #:channel 3 #:dst #x03002750 #:src #x08000248 #:control #x84000200)
       (set! (IRQ_HANDLER_PTR #x03007FFC) #x03002750)
       (call iwram_state_helper_80006F0 #x0)
       (call iwram_state_helper_80006FC #x0)
@@ -577,8 +598,11 @@
       (call iwram_state_helper_82E0764)
       (call ewram_state_helper_80B9FB8)
       (set! (mmio16 DMA1CNT_H) (bit-and (+ #x0000C5FF #x0) (mmio16 DMA1CNT_H)))
+      (dma-transfer! #:channel 1 #:dst #x06000000 #:src r0 #:control (bit-and (+ #x0000C5FF #x0) (mmio16 DMA1CNT_H)))
       (set! (mmio16 DMA1CNT_H) (bit-and (+ #x00007FFF #x0) (mmio16 DMA1CNT_H)))
+      (dma-transfer! #:channel 1 #:dst #x06000000 #:src r0 #:control (bit-and (+ #x00007FFF #x0) (mmio16 DMA1CNT_H)))
       (set! (mmio16 DMA2CNT_H) (bit-and (+ #x0000C5FF #x0) (mmio16 DMA2CNT_H)))
+      (dma-transfer! #:channel 2 #:dst #x06000000 #:src r0 #:control (bit-and (+ #x0000C5FF #x0) (mmio16 DMA2CNT_H)))
     )
     (insn "0x080008F4" #xB510 (THUMB-PUSH "{r4 lr}"))
     (insn "0x080008F6" #x4916 (THUMB-LDR-pc r1 [pc #x58] #:literal #x04000208 #:sym 'IME))
@@ -994,6 +1018,7 @@
         (set! (-> r0 :offset_0x0 :u8) r5)
         (set! (-> r1 :offset_0x0 :u8) (bit-ior (mmio8 IWRAM_PTR) r3))
         (set! r2 (+ r2 #x1))
+        (mem-copy! #:dst r0 #:src r1 #:count (<= r2 #x5F))
       )
       (set! (IWRAM_PTR #x030008D8) #x0)
       (set! (IWRAM_PTR #x030008D9) #x0)
@@ -1039,6 +1064,7 @@
           (call irq_sync_helper_800103C)
           (set! (-> r4 :offset_0x0 :u8) #xFF)
           (set! r5 (+ r5 #x1))
+          (mem-copy! #:dst r0 #:src r1 #:count (<= r5 #x5F))
         )
       )
       (return)

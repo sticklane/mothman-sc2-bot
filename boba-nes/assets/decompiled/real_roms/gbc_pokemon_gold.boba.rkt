@@ -153,7 +153,10 @@
       (wram-var wram_state_D151 #:addr #xD151 #:accesses 70)
       (wram-var wram_state_D002 #:addr #xD002 #:accesses 55)
       (wram-var wram_state_D173 #:addr #xD173 #:accesses 55)
-      (wram-var wram_state_DA22 #:addr #xDA22 #:accesses 50)))
+      (wram-var wram_state_DA22 #:addr #xDA22 #:accesses 50))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_0167 #:bank 0 #:dispatch-pc #x0167 #:mechanism jp-hl-dispatch-table #:cases
       ((case 0 -> game_logic_step_b0_0180)
@@ -258,6 +261,14 @@
        (case 2 -> game_logic_step_b0_1F15)
        (case 3 -> game_logic_step_b0_1F1B))))
   (high-level-idioms
+    (idiom-joypad-poll #:bank #x00 #:pc #x08F5 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x08F7 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x0903 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x0905 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x0907 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x0909 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x090B #:reg JOYP)
+    (idiom-joypad-poll #:bank #x00 #:pc #x090D #:reg JOYP)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x0B3C #:kind block-fill)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0B6A #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0C78 #:reg MBC_ROM_BANK)
@@ -269,6 +280,7 @@
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x0F37 #:kind block-fill)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x12EC #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x12F9 #:reg MBC_ROM_BANK)
+    (idiom-joypad-poll #:bank #x00 #:pc #x1508 #:reg JOYP)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x1697 #:kind block-fill)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x1A57 #:kind block-fill)
     (idiom-sm83-memory-loop #:bank #x00 #:pc #x1ACA #:kind block-copy)
@@ -284,16 +296,7 @@
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3CBF #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3CD2 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3D5A #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3D63 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3D76 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3D7F #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3D89 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3D94 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3DA3 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3DB5 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3DC8 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3DDC #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3DEF #:reg MBC_ROM_BANK))
+    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x3D63 #:reg MBC_ROM_BANK))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 4 #:params () #:returns () #:calls (cart_entry) #:mmio ()
       (decompiled-pseudo-code

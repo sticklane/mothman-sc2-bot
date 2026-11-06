@@ -71,7 +71,7 @@
         (if-cond (!= (aref glob val) nil)))
       (decompiled-pseudo-code
         (set! d (table))
-        (foreach l lines (set-values! (o v) ((table) (call split l))) for (when (!= val "") (when (!= (aref glob val) nil) (set! val (aref glob val))) (set! (aref o (aref props i)) val))))
+        (foreach l lines (let ((o (table)) (v (call split l))) for) (when (!= val "") (when (!= (aref glob val) nil) (set! val (aref glob val))) (set! (aref o (aref props i)) val))))
       (body-lines
         "function dataint(lines,props,globname)"
         " local d={}"
@@ -92,9 +92,7 @@
       (structured-ast
         (return-expr (call dataint lines props globname)))
       (decompiled-pseudo-code
-        (set! lines (call split str (call chr 10)))
-        (set! props (call split (call deli lines 1)))
-        (return (call dataint lines props globname)))
+        (let ([lines (call split str (call chr 10))] [props (call split (call deli lines 1))]) (return (call dataint lines props globname))))
       (body-lines
         "function data(str,globname)"
         " local lines=split(str,chr(10))"
@@ -127,7 +125,7 @@
         (for-loop "i=2,#array")
         (while-loop (and (> j 1) (call compfn (aref array (- j 1)) c))))
       (decompiled-pseudo-code
-        (for-range i 2 (len array) (set-values! (c j) ((aref array i) i)) (while (and (> j 1) (call compfn (aref array (- j 1)) c)) (set! (aref array j) (aref array (- j 1))) (-= j 1))))
+        (for-range i 2 (len array) (let ((c (aref array i)) (j i)) (while (and (> j 1) (call compfn (aref array (- j 1)) c)) (set! (aref array j) (aref array (- j 1))) (-= j 1)))))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -226,8 +224,7 @@
       (structured-ast
         (if-cond flipx))
       (decompiled-pseudo-code
-        (set-values! (dx dy) ((/ cw sw) (/ ch sh)))
-        (when flipx (+= cx cw) (set! dx (- dx))))
+        (let ([dx (/ cw sw)] [dy (/ ch sh)]) (when flipx (+= cx cw) (set! dx (- dx)))))
       (body-lines
         "function smap(cx,cy,cw,ch,sx,sy,sw,sh,flipx,flipy)"
         " -- delta"
@@ -354,8 +351,7 @@
       (structured-ast
         (return-expr (shl hi 4)))
       (decompiled-pseudo-code
-        (set-values! (str offs) ((aref (-> self :strs) (+ (call flr (shr (-> self :offs) 10)) 1)) (-> self :offs)))
-        (+= offs 1)
+        (let ([str (aref (-> self :strs) (+ (call flr (shr (-> self :offs) 10)) 1))] [offs (-> self :offs)]) (+= offs 1))
         (set! hi (call fromhexchar (call sub str offs offs)))
         (+= offs 1)
         (set! lo (call fromhexchar (call sub str offs offs)))
@@ -408,8 +404,7 @@
       (structured-ast
         (for-loop "i=1,len"))
       (decompiled-pseudo-code
-        (set! result "")
-        (for-range i 1 len (set! (string-append result void) (call chr (send stream :read1)))))
+        (let ([result ""]) (for-range i 1 len (set! (string-append result void) (call chr (send stream :read1))))))
       (body-lines
         "function readstrfixed(stream,len)"
         "\tlocal result=\"\""
@@ -426,8 +421,7 @@
       (structured-ast
         (return-expr (call readstrfixed stream len)))
       (decompiled-pseudo-code
-        (set! len (send stream :read1))
-        (return (call readstrfixed stream len)))
+        (let ([len (send stream :read1)]) (return (call readstrfixed stream len))))
       (body-lines
         "function readstr(stream)"
         "\tlocal len=stream:read1()"
@@ -444,8 +438,7 @@
         (if-cond (!= hdr "mas")))
       (decompiled-pseudo-code
         (call printh "*** loading animations ***")
-        (set! hdr (call readstrfixed stream 3))
-        (when (!= hdr "mas") (call printh "'mas' header not found") (call stop)))
+        (let ([hdr (call readstrfixed stream 3)]) (when (!= hdr "mas") (call printh "'mas' header not found") (call stop))))
       (body-lines
         "function loadanims(stream)"
         "\tprinth(\"*** loading animations ***\")"
@@ -466,8 +459,7 @@
       (structured-ast
         (for-loop "i=1,ct"))
       (decompiled-pseudo-code
-        (set! anim (call makespriteanim))
-        (set! (-> anim :name) (call readstr stream))
+        (let ([anim (call makespriteanim)]) (set! (-> anim :name) (call readstr stream)))
         (set! (-> anim :fps) (/ (send stream :read1) 4))
         (set! (-> anim :w) (send stream :read1))
         (set! (-> anim :h) (send stream :read1))
@@ -475,8 +467,7 @@
         (set! (-> anim :oy) (/ (send stream :read1) 100))
         (set! (-> anim :tr) (send stream :read1))
         (set! (-> anim :frames) (table))
-        (set! ct (send stream :read1))
-        (for-range i 1 ct (set! frame (table)) (set! (-> frame :frame) (send stream :read2)) (set! flags (send stream :read1)) (set! (-> frame :flipx) flags) (set! (-> frame :flipy) flags) (call add (-> anim :frames) frame)))
+        (let ([ct (send stream :read1)]) (for-range i 1 ct (let ((frame (table))) (set! (-> frame :frame) (send stream :read2))) (let ((flags (send stream :read1))) (set! (-> frame :flipx) flags)) (set! (-> frame :flipy) flags) (call add (-> anim :frames) frame))))
       (body-lines
         "function loadspriteanim(stream)"
         "\tlocal anim=makespriteanim()"
@@ -514,13 +505,11 @@
         (for-loop "j=1,kct")
         (if-cond flags))
       (decompiled-pseudo-code
-        (set! anim (call maketlanim))
-        (when (== typ 3) (set! (-> anim :typ) "storyboard"))
+        (let ([anim (call maketlanim)]) (when (== typ 3) (set! (-> anim :typ) "storyboard")))
         (set! (-> anim :name) (call readstr stream))
         (set! (-> anim :d) (/ (send stream :read2) 100))
         (set! (-> anim :tls) (table))
-        (set! ct (send stream :read1))
-        (for-range i 1 ct (set! keyframes (table)) (set! kct (send stream :read1)) (for-range j 1 kct (set! t (/ (send stream :read2) 100)) (set! k (call makekeyframe t)) (set! flags (send stream :read1)) (when flags (set! (-> k :anim) (send stream :read1))))))
+        (let ([ct (send stream :read1)]) (for-range i 1 ct (let ((keyframes (table)) (kct (send stream :read1))) (for-range j 1 kct (let ((t (/ (send stream :read2) 100)) (k (call makekeyframe t)) (flags (send stream :read1))) (when flags (set! (-> k :anim) (send stream :read1)))))))))
       (body-lines
         "function loadtlanim(stream,typ)"
         " local anim=maketlanim()"
@@ -558,10 +547,7 @@
         (if-cond (-> frame :flipx))
         (if-cond (-> frame :flipy)))
       (decompiled-pseudo-code
-        (set! f (call clamp (+ (call flr (* t (-> self :fps))) 1) 1 (len (-> self :frames))))
-        (set! frame (aref (-> self :frames) f))
-        (set-values! (dw dh) ((* (* (-> self :w) 8) xscale) (* (* (-> self :h) 8) yscale)))
-        (when (-> frame :flipx) (set! flipx (not flipx)))
+        (let ([f (call clamp (+ (call flr (* t (-> self :fps))) 1) 1 (len (-> self :frames)))] [frame (aref (-> self :frames) f)] [dw (* (* (-> self :w) 8) xscale)] [dh (* (* (-> self :h) 8) yscale)]) (when (-> frame :flipx) (set! flipx (not flipx))))
         (when (-> frame :flipy) (set! flipy (not flipy)))
         (-= x (* dw (or (and flipx (- 1 (-> self :ox))) (-> self :ox))))
         (-= y (* dh (or (and flipy (- 1 (-> self :oy))) (-> self :oy))))
@@ -713,8 +699,7 @@
         (if-cond (and (<= (-> k :t) t) (> (-> k :t) beforet))))
       (decompiled-pseudo-code
         (local before after)
-        (set-values! (beforet aftert) ((- 1000) 1000))
-        (foreach k (-> tl :keyframes) (when (aref k prop) (when (and (<= (-> k :t) t) (> (-> k :t) beforet)) (set-values! (before beforet) (k (-> k :t)))))))
+        (let ([beforet (- 1000)] [aftert 1000]) (foreach k (-> tl :keyframes) (when (aref k prop) (when (and (<= (-> k :t) t) (> (-> k :t) beforet)) (set-values! (before beforet) (k (-> k :t))))))))
       (body-lines
         "function findrefkeyframes(tl,prop,t)"
         " -- find nearest frames before/after t"
@@ -747,7 +732,7 @@
         (set-values! (easein) (#f easeout))
         |}|
         (local animtt)
-        (foreach prop keyframeswitch (set-values! (before after) ((call findrefkeyframes tl prop t))) (set! frame (or before after)) (when frame (set! (aref props prop) (aref frame prop))) (when (== prop "animt") (set! animtt (and before (-> before :t))))))
+        (foreach prop keyframeswitch (set-values! (before after) ((call findrefkeyframes tl prop t))) (let ((frame (or before after))) (when frame (set! (aref props prop) (aref frame prop)))) (when (== prop "animt") (set! animtt (and before (-> before :t))))))
       (body-lines
         "function getvirtualkeyframe(tl,t)"
         ""
@@ -791,7 +776,7 @@
       (decompiled-pseudo-code
         (+= r 1)
         (when (> r 10) (return))
-        (foreach tl (-> self :tls) (set! props (call getvirtualkeyframe tl t)) (when (and (-> props :visible) (-> props :anim)) (set! cx (+ x (* (* (-> props :x) xscale) (or (and flipx (- 1)) 1)))) (set! cy (+ y (* (* (-> props :y) yscale) (or (and flipy (- 1)) 1)))) (set-values! (cxscale cyscale) ((* xscale (-> props :xscale)) (* yscale (-> props :yscale)))) (set-values! (cflipx cflipy) (flipx flipy)) (when (-> props :flipx) (set! cflipx (not cflipx))) (when (-> props :flipy) (set! cflipy (not cflipy))) (set! cdt (and dt (* dt (-> props :animspd)))) (when (or (not anim_draw) (call anim_draw props cx cy cxscale cyscale cflipx cflipy cdt r)) (send (-> props :anim) :dodraw (-> props :animt) cx cy cxscale cyscale cflipx cflipy cdt r)))))
+        (foreach tl (-> self :tls) (let ((props (call getvirtualkeyframe tl t))) (when (and (-> props :visible) (-> props :anim)) (let ((cx (+ x (* (* (-> props :x) xscale) (or (and flipx (- 1)) 1)))) (cy (+ y (* (* (-> props :y) yscale) (or (and flipy (- 1)) 1)))) (cxscale (* xscale (-> props :xscale))) (cyscale (* yscale (-> props :yscale))) (cflipx flipx) (cflipy flipy)) (when (-> props :flipx) (set! cflipx (not cflipx)))) (when (-> props :flipy) (set! cflipy (not cflipy))) (let ((cdt (and dt (* dt (-> props :animspd))))) (when (or (not anim_draw) (call anim_draw props cx cy cxscale cyscale cflipx cflipy cdt r)) (send (-> props :anim) :dodraw (-> props :animt) cx cy cxscale cyscale cflipx cflipy cdt r)))))))
       (body-lines
         "function tlanim_draw(self,t,x,y,xscale,yscale,flipx,flipy,dt,r)"
         " -- recursion limit"
@@ -898,8 +883,7 @@
       (structured-ast
         (return-expr (table)))
       (decompiled-pseudo-code
-        (set! k (call makekeyframe 0))
-        (set-values! ((-> k :animt) (-> k :animspd) (-> k :x) (-> k :y)) (0 1 0 0))
+        (let ([k (call makekeyframe 0)]) (set-values! ((-> k :animt) (-> k :animspd) (-> k :x) (-> k :y)) (0 1 0 0)))
         (return (table))
         (set! keyframes (table k))
         |}|)
@@ -1067,8 +1051,7 @@
         (if-cond (call dget 10)))
       (decompiled-pseudo-code
         (call cartdata "mot_gpp")
-        (set! stream (call readstrstream animdata))
-        (set! anims (call loadanims stream))
+        (let ([stream (call readstrstream animdata)]) (set! anims (call loadanims stream)))
         (set! (-> anim_events :fin) fadein)
         (if (== (call dget 10) 0) (then (set-values! (racetype dif lapoption tracknum) (1 2 2 1))) (else (set! racetype (call dget 10)) (set! dif (call dget 11)) (set! tracknum (call dget 12)) (set! lapoption (call dget 13)))))
       (body-lines
@@ -1170,8 +1153,7 @@
       (structured-ast
         (if-cond (== tag 1)))
       (decompiled-pseudo-code
-        (set! tag (-> props :tag))
-        (if (== tag 1) (then (call pal (aref pals 2))) (else (call basepal))))
+        (let ([tag (-> props :tag)]) (if (== tag 1) (then (call pal (aref pals 2))) (else (call basepal)))))
       (body-lines
         "function anim_draw(props,cx,cy,cxscale,cyscale,cflipx,cflipy,cdt,r)"
         " local tag=props.tag"
@@ -1193,8 +1175,7 @@
         (call rectfill 0 50 128 77 3)
         (call rect (- 1) 50 128 77 7)
         (call cprint confirmprompt 56 6)
-        (set! selcol (or (and (< (modulo frame 8) 4) 7) 6))
-        (call pprint "yES" 50 67 (or (and (== confirmx 0) selcol) 5))
+        (let ([selcol (or (and (< (modulo frame 8) 4) 7) 6)]) (call pprint "yES" 50 67 (or (and (== confirmx 0) selcol) 5)))
         (call pprint "nO" 69 67 (or (and (== confirmx 1) selcol) 5)))
       (body-lines
         "function drawconfirm()"
@@ -1279,7 +1260,7 @@
         (if-cond (== fade "in"))
         (for-loop "k=1,2"))
       (decompiled-pseudo-code
-        (when (== fade "in") (for-range k 1 2 (set! j (call rnd fadepixels)) (call del fadepixels j) (call sset (modulo j 8) j))))
+        (when (== fade "in") (for-range k 1 2 (let ((j (call rnd fadepixels))) (call del fadepixels j)) (call sset (modulo j 8) j))))
       (body-lines
         "function updatefade()"
         " if fade==\"in\" then"
@@ -1424,8 +1405,7 @@
       (structured-ast
         (for-loop "i=1,t"))
       (decompiled-pseudo-code
-        (set! allnums (table))
-        (for-range i 1 t (call add allnums i)))
+        (let ([allnums (table)]) (for-range i 1 t (call add allnums i))))
       (body-lines
         "function randomnums(t,n)"
         " local allnums={}"
@@ -1443,7 +1423,7 @@
         (for-loop "i=2,#array")
         (while-loop (and (> j 1) (call compfn (aref array (- j 1)) c))))
       (decompiled-pseudo-code
-        (for-range i 2 (len array) (set-values! (c j) ((aref array i) i)) (while (and (> j 1) (call compfn (aref array (- j 1)) c)) (set! (aref array j) (aref array (- j 1))) (-= j 1))))
+        (for-range i 2 (len array) (let ((c (aref array i)) (j i)) (while (and (> j 1) (call compfn (aref array (- j 1)) c)) (set! (aref array j) (aref array (- j 1))) (-= j 1)))))
       (body-lines
         "function sort(array,compfn)"
         " for i=2,#array do"
@@ -1500,8 +1480,7 @@
       (structured-ast
         (if-cond (!= racetype type_prac)))
       (decompiled-pseudo-code
-        (set! items (table menu_type))
-        (when (!= racetype type_prac) (call add items menu_dif) (call add items menu_laps)))
+        (let ([items (table menu_type)]) (when (!= racetype type_prac) (call add items menu_dif) (call add items menu_laps))))
       (body-lines
         "function getmenuitems()"
         " local items={menu_type}"
@@ -1519,9 +1498,7 @@
       (structured-ast
         (if-cond (and (not istransition) (not confirmprompt))))
       (decompiled-pseudo-code
-        (set! items (call getmenuitems))
-        (set! yoffs (* (- 5 (len items)) 3))
-        (call palt 12 #f)
+        (let ([items (call getmenuitems)] [yoffs (* (- 5 (len items)) 3)]) (call palt 12 #f))
         (when (and (not istransition) (not confirmprompt)) (call sspr 8 0 8 8 0 (+ (- (* menuy 8) 2) yoffs) 128 9)))
       (body-lines
         "function drawmenu()"
@@ -1548,13 +1525,10 @@
       (decompiled-pseudo-code
         (when (call btnp) (-= menui 1))
         (when (call btnp) (+= menui 1))
-        (set! items (call getmenuitems))
-        (set! menui (call mid 0 (- (len items) 1) menui))
-        (set! item (aref items (+ menui 1)))
-        (set! d 0)
-        (when (call btnp) (-= d 1))
+        (let ([items (call getmenuitems)]) (set! menui (call mid 0 (- (len items) 1) menui)))
+        (let ([item (aref items (+ menui 1))] [d 0]) (when (call btnp) (-= d 1)))
         (when (call btnp) (+= d 1))
-        (when (and (== item menu_type) (!= d 0)) (when (and (>= (+ racetype d) 1) (<= (+ racetype d) (len racetypenames))) (set! prevtype racetype) (+= racetype d) (set-values! (animset prevset) ((call getmodeanimset racetype) (call getmodeanimset prevtype))) (set! animsets (table animset prevset)) (set! anim (or (and (< d 0) (aref anims "tranleft")) (aref anims "tranright"))) (call transition anim (aref anims "idle")))))
+        (when (and (== item menu_type) (!= d 0)) (when (and (>= (+ racetype d) 1) (<= (+ racetype d) (len racetypenames))) (set! prevtype racetype) (+= racetype d) (let ([animset (call getmodeanimset racetype)] [prevset (call getmodeanimset prevtype)]) (set! animsets (table animset prevset))) (let ([anim (or (and (< d 0) (aref anims "tranleft")) (aref anims "tranright"))]) (call transition anim (aref anims "idle"))))))
       (body-lines
         "function updatemenu()"
         " -- up/down arrows"
@@ -1619,7 +1593,10 @@
         (if-cond (call btnp void))
         (if-cond (and l (- x 10))))
       (decompiled-pseudo-code
-        (set-values! (x y b w) ((call stat 32) (call stat 33) (call stat 34) (call stat 36))))
+        (set! x (call stat 32))
+        (set! y (call stat 33))
+        (set! b (call stat 34))
+        (set! w (call stat 36)))
       (body-lines
         "function dinp()local x,y,b,w=stat(32),stat(33),stat(34),stat(36)line(x,y,x,y+2,10)if btnp(❎) then local i=(y-10)\\6+1 local p=s+i local l=lines[p]if l and(x-10)\\4==#l.i then dexp(l,p)end end s=max(min(s-stat(36),#lines-18),0) end"))
     (def-pico-function #:params () #:returns ()
@@ -1793,16 +1770,14 @@
         (call print "points" 58 1 5)
         (when (== (-> tour :tracknum) 0) (return))
         for
-        (set-values! (y col) ((+ (* i 6) 2) (or (and (-> e :isplayer) 7) 6)))
-        (call pal)
+        (let ([y (+ (* i 6) 2)] [col (or (and (-> e :isplayer) 7) 6)]) (call pal))
         (call palt 0 #f)
         (call palt 12 #t)
         (when (-> e :p) (call pal (-> e :p) 0))
         (call spr 8 0 y)
         (call pal)
         (call print (-> e :name) 10 y col)
-        (set! txt (call tostr (-> e :pts)))
-        (call print txt (- 82 (* (len txt) 4)) y col))
+        (let ([txt (call tostr (-> e :pts))]) (call print txt (- 82 (* (len txt) 4)) y col)))
       (body-lines
         "function drawleaderboard()"
         " print(\"driver\",0,1,5)"
@@ -1830,9 +1805,8 @@
       (structured-ast
         (for-loop "i=1,7"))
       (decompiled-pseudo-code
-        (set! playerpos (call dget 31))
-        (+= (-> tour :playerpts) (aref racepts playerpos))
-        (for-range i 1 7 (set! pos (call dget (+ 31 i))) (+= (aref (-> tour :pts) i) (aref racepts pos))))
+        (let ([playerpos (call dget 31)]) (+= (-> tour :playerpts) (aref racepts playerpos)))
+        (for-range i 1 7 (let ((pos (call dget (+ 31 i)))) (+= (aref (-> tour :pts) i) (aref racepts pos)))))
       (body-lines
         "function applyraceresults()"
         ""

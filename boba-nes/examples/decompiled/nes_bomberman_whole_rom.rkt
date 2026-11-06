@@ -55,7 +55,7 @@
     (structured-conditionals 6)
     (structured-guard-returns 0)
     (lifted-state-machines 9)
-    (lifted-high-level-idioms 12)
+    (lifted-high-level-idioms 14)
     (idioms
       (indirect-jmp-count 0)
       (rts-dispatch-count 4)
@@ -134,7 +134,10 @@
       (table table_wram_05E4 #:addr #x05E4 #:accesses 32)
       (table table_wram_05B2 #:addr #x05B2 #:accesses 24)
       (table table_wram_03E6 #:addr #x03E6 #:accesses 21)
-      (table table_wram_0576 #:addr #x0576 #:accesses 21)))
+      (table table_wram_0576 #:addr #x0576 #:accesses 21))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))
+      (joypad-mask-enum (#x80 JOY_BTN_A) (#x40 JOY_BTN_B) (#x20 JOY_BTN_SELECT) (#x10 JOY_BTN_START) (#x08 JOY_BTN_UP) (#x04 JOY_BTN_DOWN) (#x02 JOY_BTN_LEFT) (#x01 JOY_BTN_RIGHT))))
   (state-machines
     (def-state-machine sm_b0_C4E9 #:bank 0 #:dispatch-pc #xC4E9 #:kind jmp-indirect-vector #:ptr-or-table #xC8C5 #:cases
       ((case 0 -> logic_routine_b0_E938)
@@ -199,6 +202,8 @@
        (case 3 -> logic_routine_b0_9999))))
   (high-level-idioms
     (idiom-oam-dma-blit #:bank #x00 #:pc #xC03E #:ram-page #x0007)
+    (idiom-joypad-poll #:bank #x00 #:pc #xC1CF #:reg JOY1)
+    (idiom-joypad-poll #:bank #x00 #:pc #xC1E0 #:reg JOY2)
     (idiom-oam-dma-blit #:bank #x00 #:pc #xC251 #:ram-page #x0007)
     (idiom-ppu-vram-seek #:bank #x00 #:pc #xC2D6 #:vram-addr #x3F00)
     (idiom-zp-pointer-init #:bank #x00 #:pc #xC3C7 #:zp #x73 #:target-addr #x0010)
@@ -544,6 +549,7 @@
           (decompiled-pseudo-code
             (set! Y #x1C)
             (loop-counted #:step DEY #:while (>= Y #x00)
+              (mem-fill! (aref wram #x0700 Y) #xF8 DEY)
               (set! (aref wram #x0700 Y) #xF8)
               (set! (aref wram #x0720 Y) (aref wram #x0700 Y))
               (set! (aref wram #x0740 Y) (aref wram #x0720 Y))

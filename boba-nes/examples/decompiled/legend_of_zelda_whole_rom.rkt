@@ -136,7 +136,10 @@
       (table table_wram_034F #:addr #x034F #:accesses 86)
       (table table_wram_0305 #:addr #x0305 #:accesses 60)
       (table table_wram_041F #:addr #x041F #:accesses 56)
-      (table table_wram_0412 #:addr #x0412 #:accesses 55)))
+      (table table_wram_0412 #:addr #x0412 #:accesses 55))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_DEMO))
+      (joypad-mask-enum (#x80 JOY_BTN_A) (#x40 JOY_BTN_B) (#x20 JOY_BTN_SELECT) (#x10 JOY_BTN_START) (#x08 JOY_BTN_UP) (#x04 JOY_BTN_DOWN) (#x02 JOY_BTN_LEFT) (#x01 JOY_BTN_RIGHT))))
   (state-machines
     (def-state-machine sm_b0_8D9F #:bank 0 #:dispatch-pc #x8D9F #:kind jmp-indirect-vector #:ptr-or-table #x6826 #:cases
       ((case 0 -> logic_routine_b0_8080)
@@ -654,6 +657,7 @@
             (set! (u16-zp #x02) #x6C90)
             (set! Y #x00)
             (do-while #:while (!= zp_state_03 #x7F)
+              (mem-copy! (deref-indy zp_ptr_02 Y) (deref-indy zp_ptr_00 Y) DEX)
               (set! (deref-indy zp_ptr_02 Y) (deref-indy zp_ptr_00 Y))
               (set! ppuaddr_mirror_00 (+ ppuaddr_mirror_00 #x01))
               (set! ppudata_mirror_01 (+ ppudata_mirror_01 #x00))
@@ -917,6 +921,7 @@
             (set! Y #x1F)
             (set! (aref wram #x0306 Y) #xFF)
             (loop-counted #:step DEY #:while (>= Y #x00)
+              (mem-copy! (aref wram #x0305 Y) (deref-indy zp_ptr_00 Y) DEY)
               (set! (aref wram #x0305 Y) (deref-indy zp_ptr_00 Y))
               (-= Y 1))
             (+= (wram #x0437) 1)
@@ -2262,6 +2267,7 @@
             (set! Y #x00)
             (set! X #x40)
             (loop-counted #:step INY #:while (!= X #x00)
+              (mem-fill! (aref oam #x0200 Y) #xF8 INY)
               (set! (aref oam #x0200 Y) #xF8)
               (+= Y 1)
               (+= Y 1)
@@ -2294,8 +2300,8 @@
           (decompiled-pseudo-code
             (set! JOY1 #x01)
             (set! JOY1 #x00)
-            (set! zp_state_03 #x00)
-            (set! zp_ptr_04 zp_state_03)
+            (let ([zp_state_03 #x00])
+              (set! zp_ptr_04 zp_state_03))
             (set! X zp_ptr_04)
             (call poll_joypad_input_b7_E640)
             (+= X 1))

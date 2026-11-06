@@ -64,7 +64,7 @@
     (structured-conditionals 16)
     (structured-guard-returns 10)
     (lifted-state-machines 16)
-    (lifted-high-level-idioms 36))
+    (lifted-high-level-idioms 40))
   ;; --- 4. Symbolic MMIO Cross-Reference, State Machines, Idioms & Lifted AST ---
   (symbolic-mmio-xref
     (mmio-reg DIV #:accesses 6)
@@ -136,7 +136,10 @@
       (wram-var wram_state_C3D6 #:addr #xC3D6 #:accesses 21)
       (wram-var wram_state_C3D5 #:addr #xC3D5 #:accesses 20)
       (wram-var wram_state_C3DA #:addr #xC3DA #:accesses 18)
-      (wram-var wram_state_C3DB #:addr #xC3DB #:accesses 18)))
+      (wram-var wram_state_C3DB #:addr #xC3DB #:accesses 18))
+    (enum-constants
+      (game-state-enum (#x00 STATE_00_INIT) (#x01 STATE_01_TITLE) (#x02 STATE_02_GAMEPLAY) (#x03 STATE_03_VICTORY))
+      (joypad-mask-enum (#x80 JOY_DOWN_OR_START) (#x40 JOY_UP_OR_SELECT) (#x20 JOY_LEFT_OR_B) (#x10 JOY_RIGHT_OR_A))))
   (state-machines
     (def-sm83-state-machine sm_sm83_b0_184C #:bank 0 #:dispatch-pc #x184C #:mechanism rst-inline-table #:cases
       ((case 0 -> game_logic_step_b0_131A)
@@ -281,7 +284,11 @@
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x097F #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x0999 #:reg MBC_ROM_BANK)
     (idiom-sm83-mbc-switch #:bank #x00 #:pc #x09B3 #:reg MBC_ROM_BANK)
-    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x09CD #:reg MBC_ROM_BANK))
+    (idiom-sm83-mbc-switch #:bank #x00 #:pc #x09CD #:reg MBC_ROM_BANK)
+    (idiom-joypad-poll #:bank #x01 #:pc #x7C35 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x01 #:pc #x7C37 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x01 #:pc #x7C43 #:reg JOYP)
+    (idiom-joypad-poll #:bank #x01 #:pc #x7C45 #:reg JOYP))
   (interrupt-service-routines
     (def-sm83-isr rst_00 #:vector #x0000 #:size-bytes 3 #:params () #:returns () #:calls (vram_wram_block_xfer_b0_3962) #:mmio ()
       (decompiled-pseudo-code
@@ -382,6 +389,7 @@
             (set! B HRAM_FF9B)
             (set! C hram_state_FF9A)
             (loop-counted #:step LD_A_HLI #:while (!= C #x00)
+              (mem-copy! (deref DE) (deref HL++) LD_A_HLI)
               (set! (deref DE) (deref HL++))
               (bit-set! D 2)
               (set! (deref DE) (deref HL++))
@@ -1075,6 +1083,7 @@
             (set! BC #x0F00)
             (set! HL #xC000)
             (loop-counted #:step LD_HLI_A #:while (!= BC #x00)
+              (mem-fill! (deref HL++) #x00 LD_HLI_A)
               (set! (deref HL++) #x00)
               (-= BC 1)
               (set! A (bit-ior C B)))
@@ -1082,6 +1091,7 @@
             (set! BC #x1000)
             (set! HL #xD000)
             (loop-counted #:step LD_HLI_A #:while (!= BC #x00)
+              (mem-fill! (deref HL++) #x00 LD_HLI_A)
               (set! (deref HL++) #x00)
               (-= BC 1)
               (set! A (bit-ior C B)))
@@ -2040,6 +2050,7 @@
             (set! DE #x9800)
             (set! BC #x0400)
             (loop-counted #:step LD_A_HLI #:while (!= BC #x00)
+              (mem-copy! (deref DE) (deref HL++) LD_A_HLI)
               (set! (deref DE) (deref HL++))
               (+= DE 1)
               (-= BC 1)
@@ -2124,6 +2135,7 @@
             (set! DE #x9000)
             (set! BC #x0400)
             (loop-counted #:step LD_A_HLI #:while (!= BC #x00)
+              (mem-copy! (deref DE) (deref HL++) LD_A_HLI)
               (set! (deref DE) (deref HL++))
               (+= DE 1)
               (set! (deref DE) (deref HL++))
@@ -2158,6 +2170,7 @@
           (decompiled-pseudo-code
             (set! HL #xCA70)
             (loop-counted #:step LD_HLI_A #:while (!= A #x3C)
+              (mem-fill! (deref HL++) #x00 LD_HLI_A)
               (set! (deref HL++) #x00))
             (when (!= H #xCB) (goto loc_4808))
             (call game_logic_step_b0_0B08)
