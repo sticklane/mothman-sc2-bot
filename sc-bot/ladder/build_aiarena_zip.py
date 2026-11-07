@@ -155,8 +155,9 @@ def ensure_portable_racket_archive() -> Path | None:
             if fp.is_file() and str(fp).startswith(str(RACKET_ROOT)):
                 opened_files.add(fp)
 
-    # Also trace the Pure-Racket Native WebSocket + Protobuf test suite and CLI runner
+    # Also trace the Pure-Racket Native WebSocket + Protobuf test suite, compiler/cm, and CLI runner
     for extra_cmd in (
+        ["strace", "-f", "-e", "trace=openat", str(RACKET_BIN), "-e", '(require racket/match/gen-match compiler/cm) (managed-compile-zo "sim/racket-sc2-ladder-main.rkt")'],
         ["strace", "-f", "-e", "trace=openat", str(RACKET_BIN), "tests/sc2-protobuf-ws-test.rkt"],
         ["strace", "-f", "-e", "trace=openat", str(RACKET_BIN), "sim/racket-sc2-ladder-main.rkt", "--dry-run", "--BotName", "Mothman-R"],
         ["strace", "-f", "-e", "trace=openat", str(RACKET_BIN), "sim/racket-sc2-ladder-main.rkt", "--ComputerOpponent", "--BotName", "Mothman-R", "--max-loops", "16"],

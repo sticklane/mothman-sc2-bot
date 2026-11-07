@@ -803,7 +803,9 @@
                  (translate-bot-actions->sc2-raw-commands
                   bot-actions
                   obs
-                  #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime))
+                  #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
+                  #:ws-conn conn
+                  #:enemy-base (hash-ref obs-hash 'enemy-base #f))
                  (saturate-workers-and-gas-commands obs)))
 
               (when (not (null? raw-cmds))
@@ -817,8 +819,9 @@
               (match-loop)])]))
 
       ;; 6. Clean LeaveGame / Quit & Summary
-      (with-handlers ([exn:fail? void])
-        (sc2-ws-rpc! conn (make-request-leave-game #:id (next-id!))))
+      (when computer-opponent?
+        (with-handlers ([exn:fail? void])
+          (sc2-ws-rpc! conn (make-request-leave-game #:id (next-id!)))))
       (when auto-launched-handle
         (with-handlers ([exn:fail? void])
           (sc2-ws-rpc! conn (make-request-quit #:id (next-id!)))))
@@ -868,7 +871,7 @@
   (define race-override #f)
   (define posture-override #f)
   (define map-name "Simple64")
-  (define max-loops 4032)
+  (define max-loops #f)
   (define realtime? #f)
   (define step-size 4)
   (define dry-run? #f)
@@ -902,7 +905,7 @@
    [("--Map" "--map") m "SC2 Map name"
                       (set! map-name m)]
    [("--max-loops") ml "Max game loops (0 for unlimited)"
-                    (set! max-loops (or (string->number ml) 4032))]
+                    (set! max-loops (or (string->number ml) 0))]
    [("--RealTime" "--realtime") "Run in real-time mode"
                                 (set! realtime? #t)]
    [("--step-size") ss "Game loops per RequestStep"
@@ -911,6 +914,9 @@
                   (set! dry-run? #t)]
    #:args _rest
    (void))
+
+  (define effective-max-loops
+    (or max-loops (if computer-opponent? 4032 0)))
 
   (define cfg (load-bot-config bot-name))
   (define resolved-bot-name
@@ -954,7 +960,7 @@
                              #:computer-race computer-race
                              #:computer-difficulty computer-difficulty
                              #:map-name map-name
-                             #:max-loops max-loops
+                             #:max-loops effective-max-loops
                              #:realtime? realtime?
                              #:step-size step-size))
      (displayln (jsexpr->string res))
