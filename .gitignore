@@ -1,3 +1,8 @@
 crates/okasaki-quantum-circuits/target/
 __pycache__/
 compiled/
+sc-bot/external_bots/
+sc-bot/replays/
+sc-bot/ladder/.cache/
+sc-bot/LingLover
+!sc-bot/ladder/*.zip

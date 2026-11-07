@@ -1,0 +1,148 @@
+{
+  "status": "SANDBOX_EXERCISER_100_PERCENT_PASS",
+  "part_a": {
+    "decoder_clean": {
+      "units": true,
+      "buildings": true,
+      "upgrades": true,
+      "morphs": true,
+      "spells": true
+    },
+    "runtime_emitted_counts": {
+      "units": 36,
+      "buildings": 35,
+      "upgrades": 7,
+      "morphs": 9,
+      "spells": 16
+    },
+    "runtime_gaps": {
+      "missing_units": [],
+      "missing_buildings": [],
+      "missing_upgrades": [],
+      "missing_morphs": [],
+      "missing_spells": []
+    },
+    "racket_runtime_verified": true
+  },
+  "part_b_passed": 12,
+  "part_b_total": 12,
+  "part_b_scenarios": [
+    {
+      "id": 1,
+      "name": "Scenario 1 (12-Pool 6-Zergling Flood @ frame 1200)",
+      "passed": true,
+      "checks": {
+        "emergency_spine_or_units": true,
+        "no_ premature_expand": true,
+        "focus_fire_lowest_hp": true
+      }
+    },
+    {
+      "id": 2,
+      "name": "Scenario 2 (Protoss Proxy 2-Gate Zealot Rush)",
+      "passed": true,
+      "checks": {
+        "combat_trained": true,
+        "defensive_kite_or_attack": true
+      }
+    },
+    {
+      "id": 3,
+      "name": "Scenario 3 (Terran 3-Rax Marine/Marauder Stim Timing)",
+      "passed": true,
+      "checks": {
+        "roach_or_ling_produced": true,
+        "queen_transfuse_cast": true
+      }
+    },
+    {
+      "id": 4,
+      "name": "Scenario 4 (Starved Economy 0 Minerals / 0 Gas)",
+      "passed": true,
+      "checks": {
+        "zero_affordability_crashes": true,
+        "valid_commands_only": true
+      }
+    },
+    {
+      "id": 5,
+      "name": "Scenario 5 (Supply-Capped 44/44 Crisis)",
+      "passed": true,
+      "checks": {
+        "supply_relief_ordered": true,
+        "no_illegal_supply_train": true
+      }
+    },
+    {
+      "id": 6,
+      "name": "Scenario 6 (Mutalisk Mineral-Line Harass)",
+      "passed": true,
+      "checks": {
+        "anti_air_response": true,
+        "worker_evasion_or_defense": true
+      }
+    },
+    {
+      "id": 7,
+      "name": "Scenario 7 (Terran Siege Tank + Bunker Choke)",
+      "passed": true,
+      "checks": {
+        "ravager_bile_or_flank": true
+      }
+    },
+    {
+      "id": 8,
+      "name": "Scenario 8 (Late-Game 3-Base 200/200 Max-Out)",
+      "passed": true,
+      "checks": {
+        "tier3_tech_or_units": true,
+        "decisive_multi_squad_attack": true,
+        "no_train_at_200_cap": true
+      }
+    },
+    {
+      "id": 9,
+      "name": "Scenario 9 (Fog-of-War Ghost Threat Decay)",
+      "passed": true,
+      "checks": {
+        "scout_or_cleanup_sweep": true
+      }
+    },
+    {
+      "id": 10,
+      "name": "Scenario 10 (Adaptive Race Switch Zerg -> Terran -> Protoss)",
+      "passed": true,
+      "checks": {
+        "zerg_valid": true,
+        "terran_valid": true,
+        "protoss_valid": true
+      }
+    },
+    {
+      "id": 11,
+      "name": "Scenario 11 (7 Pro Signature Mechanics)",
+      "passed": true,
+      "checks": {
+        "cancel_dying_building": true,
+        "active_creep_tumor_spread": true,
+        "choke_hold_and_addon_swap": true,
+        "warp_prism_juggle_and_drop": true,
+        "mineral_walk_changeling_shade_baneling_widowmine": true,
+        "chrono_boost_all_11_structures": true,
+        "control_group_steal_and_camera_bookmarks": true
+      }
+    },
+    {
+      "id": 12,
+      "name": "Scenario 12 (5 Adversarial Anti-Cheese & Anti-Block Countermeasures)",
+      "passed": true,
+      "checks": {
+        "anti_cannon_rush_worker_pull": true,
+        "natural_expansion_block_clear": true,
+        "anti_gas_steal_clear": true,
+        "resume_halted_terran_building": true,
+        "force_field_bile_breaker": true
+      }
+    }
+  ]
+}

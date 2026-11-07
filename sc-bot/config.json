@@ -1,0 +1,30 @@
+{
+  "BotName": "Mothman",
+  "BotRace": "Random",
+  "BotPath": "bots/Mothman.rkt",
+  "Author": "Sticklane SC-Bot Team",
+  "Version": "2.4.0-pro-gauntlet",
+  "Framework": "Racket #lang sc-bot + burnysc2 IPC Bridge",
+  "Variants": {
+    "Mothman-Z": {
+      "BotName": "Mothman-Z",
+      "BotRace": "Zerg",
+      "BotPath": "bots/Mothman-Z.rkt"
+    },
+    "Mothman-T": {
+      "BotName": "Mothman-T",
+      "BotRace": "Terran",
+      "BotPath": "bots/Mothman-T.rkt"
+    },
+    "Mothman-P": {
+      "BotName": "Mothman-P",
+      "BotRace": "Protoss",
+      "BotPath": "bots/Mothman-P.rkt"
+    },
+    "Mothman-R": {
+      "BotName": "Mothman-R",
+      "BotRace": "Random",
+      "BotPath": "bots/Mothman-R.rkt"
+    }
+  }
+}
