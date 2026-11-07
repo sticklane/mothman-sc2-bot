@@ -1,0 +1,21 @@
+{
+  "opponents": {
+    "local_opponent": {
+      "games_played": 1,
+      "wins": 0,
+      "losses": 0,
+      "ties": 1,
+      "last_result": "Tie",
+      "last_inferred_opponent_depth": 0,
+      "last_active_depth": 1,
+      "last_accuracy_pct": 67,
+      "last_toolbox_weight_pct": 10,
+      "saw_early_rush": false,
+      "saw_air_tech": false,
+      "last_posture": "Macro12Hatch",
+      "last_bottlenecks": [
+        "healthy_macro"
+      ]
+    }
+  }
+}

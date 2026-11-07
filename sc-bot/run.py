@@ -118,7 +118,13 @@ def main():
         async def _join_ladder_game():
             ws_url = f"ws://{host}:{args.GamePort}/sc2api"
             async with aiohttp.ClientSession() as session:
-                ws_connection = await session.ws_connect(ws_url, timeout=120)
+                ws_timeout_cls = getattr(aiohttp, "ClientWSTimeout", None)
+                ws_kwargs = (
+                    {"timeout": ws_timeout_cls(ws_close=120)}
+                    if ws_timeout_cls is not None
+                    else {"timeout": 120}
+                )
+                ws_connection = await session.ws_connect(ws_url, **ws_kwargs)
                 client = Client(ws_connection)
                 if getattr(bot_player.ai, "raw_affects_selection", None) is not None:
                     client.raw_affects_selection = bot_player.ai.raw_affects_selection

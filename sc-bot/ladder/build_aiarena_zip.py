@@ -157,6 +157,39 @@ def ensure_portable_racket_archive() -> Path | None:
     return archive_path
 
 
+def compile_cpplinux_binary(bot_name: str) -> Path | None:
+    """
+    Compile `ladder/cpplinux_launcher.cpp` into a stripped Linux x86_64 ELF binary
+    for AI Arena `cpplinux` (`BinaryCpp`) mode.
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cpp_src = LADDER_DIR / "cpplinux_launcher.cpp"
+    out_bin = CACHE_DIR / f"{bot_name}_elf"
+    cxx = shutil.which("g++") or shutil.which("clang++")
+    if not cpp_src.exists() or not cxx:
+        return None
+    try:
+        subprocess.run(
+            [
+                cxx,
+                "-O2",
+                "-s",
+                "-std=c++17",
+                f'-DBOT_VARIANT_NAME="{bot_name}"',
+                str(cpp_src),
+                "-o",
+                str(out_bin),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        os.chmod(out_bin, 0o755)
+        return out_bin
+    except Exception:
+        return None
+
+
 def build_variant_zip(
     bot_name: str,
     bot_race: str,
@@ -170,10 +203,9 @@ def build_variant_zip(
         "BotName": bot_name,
         "BotRace": bot_race,
         "BotPath": bot_path,
-        "Author": "Sticklane SC-Bot Team",
-        "Version": "2.5.0-aiarena-portable",
-        "Framework": "Racket #lang sc-bot (Bundled Portable Runtime + Precompiled .zo) + burnysc2 IPC Bridge",
     }
+
+    elf_bin = compile_cpplinux_binary(bot_name)
 
     files_added = 0
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
@@ -181,14 +213,30 @@ def build_variant_zip(
         zf.writestr("config.json", json.dumps(variant_config, indent=2))
         files_added += 1
 
-        # 2. Add top-level files (run.py, main.rkt, info.rkt)
+        # 2. Write native Linux x86_64 ELF binary `<BotName>` at root of zip for AI Arena `cpplinux` mode
+        if elf_bin is not None and elf_bin.exists():
+            zi = zipfile.ZipInfo(bot_name)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            # rwxr-xr-x (0o100755) in upper 16 bits of external_attr
+            zi.external_attr = 0o100755 << 16
+            zf.writestr(zi, elf_bin.read_bytes())
+            files_added += 1
+
+        # 3. Seed initial ./data/mirror_mind_opponents.json for AI Arena persistent bot_data
+        zf.writestr(
+            "data/mirror_mind_opponents.json",
+            json.dumps({"bot_name": bot_name, "opponents": {}}, indent=2),
+        )
+        files_added += 1
+
+        # 4. Add top-level files (run.py, main.rkt, info.rkt)
         for top_file in INCLUDE_TOP_FILES:
             p = ROOT_DIR / top_file
             if p.exists():
                 zf.write(p, arcname=top_file)
                 files_added += 1
 
-        # 3. Add bundled portable Racket runtime archive (ZIP_STORED since already .tar.xz)
+        # 5. Add bundled portable Racket runtime archive (ZIP_STORED since already .tar.xz)
         if portable_racket_archive is not None and portable_racket_archive.exists():
             zf.write(
                 portable_racket_archive,
@@ -197,7 +245,7 @@ def build_variant_zip(
             )
             files_added += 1
 
-        # 4. Add directories (including precompiled compiled/*.zo)
+        # 6. Add directories (including precompiled compiled/*.zo)
         for dname in INCLUDE_DIRS:
             dpath = ROOT_DIR / dname
             if not dpath.exists():
@@ -227,6 +275,7 @@ def build_variant_zip(
         "size_mb": round(size_bytes / (1024 * 1024), 2),
         "sha256": sha256_hex,
         "md5": md5_hex,
+        "cpplinux_binary_included": elf_bin is not None and elf_bin.exists(),
         "bundled_portable_racket": portable_racket_archive is not None and portable_racket_archive.exists(),
     }
 
