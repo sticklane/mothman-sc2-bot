@@ -28,7 +28,7 @@
   #:when 'frame-0-race-roll
   #:build (seq>> (bo-step '(train drone) 50 0 1)
                  (bo-step '(train overlord) 100 0 0)
-                 (bo-step '(expand 1024 1120) 300 0 0))
+                 (bo-step '(expand 50 56) 300 0 0))
   #:tactics '(frame-0-race-morph adaptive-counter-pull)
   #:transitions '(EarlyScoutCrisis AdaptiveCounterRecovery))
 

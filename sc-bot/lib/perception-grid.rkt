@@ -14,7 +14,8 @@
  perception-grid-get-choke-zipper
  perception-grid-snapshot-history
  lakefill-choke-decomposition
- fow-ghost-step-diffusion!)
+ fow-ghost-step-diffusion!
+ best-retreat-sector)
 
 (struct perception-grid
   (ally-trie
@@ -28,11 +29,11 @@
   #:transparent)
 
 (define DEFAULT-CHOKES
-  (list (hash 'id 'main-ramp 'x 760 'y 820 'span 9 'clearance 3)
-        (hash 'id 'natural-choke 'x 1024 'y 1120 'span 10 'clearance 5)
-        (hash 'id 'third-choke 'x 1280 'y 1280 'span 12 'clearance 6)
-        (hash 'id 'center-bridge 'x 1536 'y 1536 'span 10 'clearance 4)
-        (hash 'id 'enemy-natural 'x 1792 'y 1792 'span 10 'clearance 5)))
+  (list (hash 'id 'main-ramp 'x 38 'y 42 'span 9 'clearance 3)
+        (hash 'id 'natural-choke 'x 50 'y 56 'span 10 'clearance 5)
+        (hash 'id 'third-choke 'x 68 'y 72 'span 12 'clearance 6)
+        (hash 'id 'center-bridge 'x 100 'y 100 'span 10 'clearance 4)
+        (hash 'id 'enemy-natural 'x 148 'y 144 'span 10 'clearance 5)))
 
 (define (make-perception-grid [chokes DEFAULT-CHOKES])
   (perception-grid
@@ -44,8 +45,8 @@
    sbral-empty
    (make-vector 64 (/ 1.0 64.0))))
 
-;; Lakefill + Zipper-Cut Choke & Region Decomposition
-(define (lakefill-choke-decomposition grid-width grid-height obstacles)
+;; Lakefill + Zipper-Cut Choke & Region Decomposition (SC2 map tile grid, default 200x200)
+(define (lakefill-choke-decomposition [grid-width 200] [grid-height 200] [obstacles '()])
   (define chokes
     (list (hash 'id 'main-ramp
                 'x (quotient grid-width 4)
@@ -95,23 +96,72 @@
         (vector-set! belief-vec i (/ 1.0 n))))
   belief-vec)
 
+;; Selects the safest retreat sector on the 8x8 coarse sector grid (0..63),
+;; factoring in sector threat/belief, 2D neighboring sector threat, proximity to
+;; `current-sector`, and allied presence so units never blindly retreat to an
+;; isolated map corner (e.g. sector 0).
+(define (best-retreat-sector pg-or-belief [current-sector 9] [ally-sectors-pos '()] #:ally-sectors [ally-sectors-kw #f])
+  (define ally-sectors (or ally-sectors-kw ally-sectors-pos))
+  (define belief-vec
+    (cond
+      [(perception-grid? pg-or-belief) (perception-grid-fow-belief-grid pg-or-belief)]
+      [(vector? pg-or-belief) pg-or-belief]
+      [else (make-vector 64 (/ 1.0 64.0))]))
+  (define n (vector-length belief-vec))
+  (define cur-sec (max 0 (min (sub1 n) (exact-round current-sector))))
+  (define cur-r (quotient cur-sec 8))
+  (define cur-c (modulo cur-sec 8))
+  (define best-s cur-sec)
+  (define best-score +inf.0)
+  (for ([s (in-range n)])
+    (define r (quotient s 8))
+    (define c (modulo s 8))
+    (define self-threat (vector-ref belief-vec s))
+    ;; Average threat of 4-connected neighbors on the 8x8 sector grid
+    (define nbr-indices
+      (filter (lambda (idx) (and (>= idx 0) (< idx n)))
+              (list (if (> r 0) (- s 8) -1)
+                    (if (< r 7) (+ s 8) -1)
+                    (if (> c 0) (sub1 s) -1)
+                    (if (< c 7) (add1 s) -1))))
+    (define nbr-threat
+      (if (null? nbr-indices)
+          self-threat
+          (/ (for/sum ([ni (in-list nbr-indices)]) (vector-ref belief-vec ni))
+             (exact->inexact (length nbr-indices)))))
+    (define grid-dist (sqrt (+ (sqr (- r cur-r)) (sqr (- c cur-c)))))
+    (define corner-penalty
+      (if (and (or (= r 0) (= r 7)) (or (= c 0) (= c 7)) (> grid-dist 1.5))
+          0.015
+          0.0))
+    (define ally-bonus (if (memv s ally-sectors) -0.02 0.0))
+    (define score
+      (+ (* 0.70 self-threat)
+         (* 0.30 nbr-threat)
+         (* 0.004 grid-dist)
+         corner-penalty
+         ally-bonus))
+    (when (< score best-score)
+      (set! best-score score)
+      (set! best-s s)))
+  best-s)
+
 (define (perception-grid-ingest-frame! pg frame-num ally-units enemy-units [visible-sectors '()])
-  ;; Build canonical Crit-Bit Tries & Finger Tree & Braun PQ
+  ;; Build canonical Crit-Bit Tries & Finger Tree & Braun PQ in SC2 tile coordinates
   (define new-ally-trie
     (for/fold ([t critbit-empty])
               ([u (in-list ally-units)]
                [idx (in-naturals)])
-      (define x (hash-ref u 'x 600))
-      (define y (hash-ref u 'y 700))
-      ;; Offset Morton key slightly by unit id low bits if needed or pure Morton
+      (define x (exact-round (hash-ref u 'x 32)))
+      (define y (exact-round (hash-ref u 'y 32)))
       (define key (morton-encode-2d (+ x (modulo idx 3)) (+ y (quotient idx 3))))
       (critbit-insert t key u)))
   (define new-enemy-trie
     (for/fold ([t critbit-empty])
               ([u (in-list enemy-units)]
                [idx (in-naturals)])
-      (define x (hash-ref u 'x 1200))
-      (define y (hash-ref u 'y 1200))
+      (define x (exact-round (hash-ref u 'x 160)))
+      (define y (exact-round (hash-ref u 'y 160)))
       (define key (morton-encode-2d (+ x (modulo idx 3)) (+ y (quotient idx 3))))
       (critbit-insert t key u)))
   (define new-ft
@@ -125,8 +175,8 @@
                            (hash-ref u 'dps 12)
                            (hash-ref u 'hp 45)
                            (hash-ref u 'cost 50)
-                           (hash-ref u 'x 600)
-                           (hash-ref u 'y 700)))))
+                           (hash-ref u 'x 32)
+                           (hash-ref u 'y 32)))))
   (define new-pq
     (for/fold ([pq braun-empty])
               ([e (in-list enemy-units)])
@@ -152,7 +202,7 @@
   (define trie (if (eq? side 'ally)
                    (perception-grid-ally-trie pg)
                    (perception-grid-enemy-trie pg)))
-  (critbit-range-2d trie x-min y-min x-max y-max))
+  (critbit-range-2d trie (exact-floor x-min) (exact-floor y-min) (exact-ceiling x-max) (exact-ceiling y-max)))
 
 (define (perception-grid-get-choke-zipper pg)
   (perception-grid-choke-zipper pg))

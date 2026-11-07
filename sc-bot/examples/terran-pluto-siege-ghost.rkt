@@ -29,7 +29,7 @@
   #:build (seq>> (bo-step '(train scv) 50 0 1)
                  (bo-step '(build supply-depot) 100 0 0)
                  (bo-step '(build barracks) 150 0 0)
-                 (bo-step '(expand 1024 1120) 400 0 0))
+                 (bo-step '(expand 50 56) 400 0 0))
   #:tactics '(barracks-depot-wall siege-tank-leapfrog ghost-emp-snipe)
   #:transitions '(CrisisEarlyBust BunkerSiegeRecovery))
 
@@ -38,7 +38,7 @@
   #:personality CLEM-TEMPO-MULTITASK-PERSONALITY
   #:postures TERRAN-PLUTO-POSTURES
   #:counter-table TERRAN-COUNTER-TREE
-  #:macro-goals '((siege-tank . 5) (science-vessel . 2) (ghost . 3) (marine . 12))
+  #:macro-goals '((siege-tank . 5) (medivac . 2) (ghost . 3) (marine . 12))
   #:grade (sc-grade 'One 500 300 16 20 'saccade 'diffusion-prior)
   OneRaxFE)
 

@@ -118,7 +118,6 @@
    'ultralisk-cavern  (cons 150 200)
    'spine-crawler     (cons 100 0)
    'spore-crawler     (cons 75 0)
-   'sunken-colony     (cons 125 0)
    ;; Terran
    'scv               (cons 50 0)
    'marine            (cons 50 0)
@@ -216,7 +215,7 @@
 (define (safe-frame f)
   (max 0 (safe-int f 0)))
 
-(define (safe-coord v [fallback 1600])
+(define (safe-coord v [fallback 160])
   (safe-int v fallback))
 
 (define (safe-list xs)
@@ -226,10 +225,10 @@
   (if (list? xs) (filter hash? xs) '()))
 
 (define (dist2d x1 y1 x2 y2)
-  (define sx1 (safe-real x1 700.0))
-  (define sy1 (safe-real y1 760.0))
-  (define sx2 (safe-real x2 1600.0))
-  (define sy2 (safe-real y2 1600.0))
+  (define sx1 (safe-real x1 32.0))
+  (define sy1 (safe-real y1 32.0))
+  (define sx2 (safe-real x2 160.0))
+  (define sy2 (safe-real y2 160.0))
   (sqrt (+ (sqr (- sx2 sx1)) (sqr (- sy2 sy1)))))
 
 ;; =============================================================================
@@ -466,8 +465,8 @@
    'baneling
    'standard-rational-macro
    'center-map-staging
-   1024
-   1024
+   100
+   100
    1
    12
    'pace-Macro-And-Disrupt
@@ -475,7 +474,7 @@
    'patrol-and-burrow-block-expansions
    (enemy-tech-observation '() '() '() 0 0 0 0 #f #f 0 0 '() '())
    (zero-sum-exclusion-reading 'uncommitted '() #f 0 0.50 'no-tech-branch-observed-yet)
-   (enemy-army-reachability-model 0 0 34.0 30.0 20.0 5.0 0 'safe-to-expand-enemy-pinned-far)
+   (enemy-army-reachability-model 0 0 4.2 30.0 20.0 5.0 0 'safe-to-expand-enemy-pinned-far)
    '()
    '()))
 
@@ -510,7 +509,7 @@
 (define (implied-prereqs-for-sym sym)
   (case sym
     ;; Zerg
-    [(zergling queen spine-crawler spore-crawler sunken-colony spawning-pool)
+    [(zergling queen spine-crawler spore-crawler spawning-pool)
      '(spawning-pool)]
     [(baneling baneling-nest zergling-Explode)
      '(spawning-pool baneling-nest extractor)]
@@ -558,11 +557,11 @@
     ;; Protoss
     [(zealot gateway warpgate warp-gate)
      '(pylon gateway)]
-    [(stalker sentry adept shield-battery cybernetics-core dragoon)
+    [(stalker sentry adept shield-battery cybernetics-core)
      '(pylon gateway cybernetics-core assimilator)]
     [(photon-cannon forge)
      '(pylon forge)]
-    [(observer immortal warp-prism reaver shuttle robotics-facility)
+    [(observer immortal warp-prism robotics-facility)
      '(pylon gateway cybernetics-core robotics-facility assimilator)]
     [(colossus disruptor robotics-bay robotics-support-bay)
      '(pylon gateway cybernetics-core robotics-facility robotics-bay assimilator)]
@@ -802,22 +801,22 @@
          [tech-obs #f]
          [ledger #f]
          #:lookahead-sec [raw-lookahead-sec 12.0]
-         #:our-base-x [raw-our-base-x 700]
-         #:our-base-y [raw-our-base-y 760]
-         #:our-nat-x [raw-our-nat-x 1024]
-         #:our-nat-y [raw-our-nat-y 1120]
-         #:enemy-exp-x [raw-enemy-exp-x 1450]
-         #:enemy-exp-y [raw-enemy-exp-y 1350])
+         #:our-base-x [raw-our-base-x 32]
+         #:our-base-y [raw-our-base-y 32]
+         #:our-nat-x [raw-our-nat-x 50]
+         #:our-nat-y [raw-our-nat-y 56]
+         #:enemy-exp-x [raw-enemy-exp-x 142]
+         #:enemy-exp-y [raw-enemy-exp-y 136])
   (define _frame (safe-frame raw-frame))
   (define ally-units (safe-hash-list raw-ally-units))
   (define enemy-units (safe-hash-list raw-enemy-units))
   (define lookahead-sec (max 1.0 (safe-real raw-lookahead-sec 12.0)))
-  (define our-base-x (safe-coord raw-our-base-x 700))
-  (define our-base-y (safe-coord raw-our-base-y 760))
-  (define our-nat-x (safe-coord raw-our-nat-x 1024))
-  (define our-nat-y (safe-coord raw-our-nat-y 1120))
-  (define enemy-exp-x (safe-coord raw-enemy-exp-x 1450))
-  (define enemy-exp-y (safe-coord raw-enemy-exp-y 1350))
+  (define our-base-x (safe-coord raw-our-base-x 32))
+  (define our-base-y (safe-coord raw-our-base-y 32))
+  (define our-nat-x (safe-coord raw-our-nat-x 50))
+  (define our-nat-y (safe-coord raw-our-nat-y 56))
+  (define enemy-exp-x (safe-coord raw-enemy-exp-x 142))
+  (define enemy-exp-y (safe-coord raw-enemy-exp-y 136))
   (define noncombat '(drone probe scv overlord observer larva egg))
   (define real-enemy-combat
     (filter (lambda (u)
@@ -860,7 +859,7 @@
         '()))
   (define enemy-types (map unit-type-sym real-enemy-combat))
 
-  ;; Base speed in SC2 map coordinates/sec (~32 game-units per second baseline, scaled by
+  ;; Base speed in SC2 map tiles/sec (~4.2 tiles per second baseline, scaled by
   ;; unit mobility, speed upgrades, Stimpack, Blink, Medivac/Warp-Prism boost, or Nydus/Recall)
   (define has-transport-or-air?
     (ormap (lambda (t)
@@ -879,28 +878,28 @@
            enemy-types))
 
   (define eff-speed
-    (* 32.0
+    (* 4.2
        (if has-transport-or-air? 1.55 (if fast-ground? 1.25 1.0))
        (if has-speed-upgrade? 1.35 1.0)))
 
   (define-values (ex ey)
     (if (null? real-enemy-combat)
-        (values (safe-real enemy-exp-x 1450.0) (safe-real enemy-exp-y 1350.0))
+        (values (safe-real enemy-exp-x 142.0) (safe-real enemy-exp-y 136.0))
         (values (/ (for/sum ([u (in-list real-enemy-combat)])
-                     (safe-real (hash-ref u 'x enemy-exp-x) 1450.0))
+                     (safe-real (hash-ref u 'x enemy-exp-x) 142.0))
                    (max 1.0 (exact->inexact (length real-enemy-combat))))
                 (/ (for/sum ([u (in-list real-enemy-combat)])
-                     (safe-real (hash-ref u 'y enemy-exp-y) 1350.0))
+                     (safe-real (hash-ref u 'y enemy-exp-y) 136.0))
                    (max 1.0 (exact->inexact (length real-enemy-combat)))))))
 
   (define-values (ax ay)
     (if (null? real-ally-combat)
-        (values (safe-real our-nat-x 1024.0) (safe-real our-nat-y 1120.0))
+        (values (safe-real our-nat-x 50.0) (safe-real our-nat-y 56.0))
         (values (/ (for/sum ([u (in-list real-ally-combat)])
-                     (safe-real (hash-ref u 'x our-nat-x) 1024.0))
+                     (safe-real (hash-ref u 'x our-nat-x) 50.0))
                    (max 1.0 (exact->inexact (length real-ally-combat))))
                 (/ (for/sum ([u (in-list real-ally-combat)])
-                     (safe-real (hash-ref u 'y our-nat-y) 1120.0))
+                     (safe-real (hash-ref u 'y our-nat-y) 56.0))
                    (max 1.0 (exact->inexact (length real-ally-combat)))))))
 
   (define dist dist2d)
@@ -920,7 +919,7 @@
         8.0
         (/ (* path-factor (dist ex ey enemy-exp-x enemy-exp-y)) eff-speed)))
   (define our-eta-to-enemy-exp
-    (/ (* 1.1 (dist ax ay enemy-exp-x enemy-exp-y)) 38.0))
+    (/ (* 1.1 (dist ax ay enemy-exp-x enemy-exp-y)) 4.75))
   (define dist-ally-to-enemy (dist ax ay ex ey))
 
   (define reachable-threat-in-n
@@ -932,7 +931,7 @@
       ;; 1. Enemy cluster is close & smaller/isolated while unaccounted supply is low -> Surround & Crush!
       [(and (> seen-supply 0)
             (>= our-supply (max 2 (exact-round (* 1.25 seen-supply))))
-            (<= dist-ally-to-enemy 420.0)
+            (<= dist-ally-to-enemy 26.0)
             (<= unaccounted-supply 6))
        'surround-and-crush-isolated-enemy-cluster]
       ;; 2. Enemy army is seen out of position far from their exposed expansion (and cannot reach our base immediately) -> Backstab!
@@ -1365,10 +1364,10 @@
                '(phoenix oracle void-ray voidray carrier tempest
                  oracle-revelation pulsar-beam chrono-boost-active))]
       [(any-in-pool? '(robotics-bay robotics-support-bay colossus disruptor
-                       immortal reaver robotics-facility))
+                       immortal robotics-facility))
        (values 'robotics-heavy-siege
                '(stargate-air-rush fleet-beacon-carriers templar-archive-storm)
-               '(immortal colossus disruptor reaver extended-thermal-lance chrono-boost-active))]
+               '(immortal colossus disruptor extended-thermal-lance chrono-boost-active))]
       ;; Zerg branches
       [(any-in-pool? '(spire greater-spire mutalisk corruptor))
        (values 'spire-air-muta
@@ -1465,15 +1464,15 @@
 ;; =============================================================================
 
 (define (compute-opponent-shadow-ledger mstate raw-frame raw-enemy-units raw-enemy-bldgs
-                                        #:base-x [raw-base-x 700]
-                                        #:base-y [raw-base-y 760]
+                                        #:base-x [raw-base-x 32]
+                                        #:base-y [raw-base-y 32]
                                         #:observed-effects [observed-effects '()]
                                         #:enemy-workers-killed [raw-enemy-workers-killed 0]
                                         #:our-units-lost-value [_our-units-lost-value 0]
                                         #:enemy-units-lost-value [_enemy-units-lost-value 0])
   (define frame (safe-frame raw-frame))
-  (define base-x (safe-coord raw-base-x 700))
-  (define base-y (safe-coord raw-base-y 760))
+  (define base-x (safe-coord raw-base-x 32))
+  (define base-y (safe-coord raw-base-y 32))
   (define enemy-workers-killed (max 0 (safe-int raw-enemy-workers-killed 0)))
   (define enemy-units (if (list? raw-enemy-units) raw-enemy-units '()))
   (define enemy-bldgs (if (list? raw-enemy-bldgs) raw-enemy-bldgs '()))
@@ -1584,32 +1583,29 @@
            enemy-units))
   (define enemy-combat-count
     (count enemy-combat-unit? enemy-units))
-  (define near-base-thresh
-    (if (and (<= base-x 256) (<= base-y 256))
-        (* 500.0 (/ 1.0 16.0))
-        500.0))
+  (define near-base-thresh 32.0)
   (define near-enemy-combat-count
     (count (lambda (u)
              (and (enemy-combat-unit? u)
                   (<= (dist2d base-x base-y
-                              (hash-ref u 'x 1600)
-                              (hash-ref u 'y 1600))
+                              (hash-ref u 'x 160)
+                              (hash-ref u 'y 160))
                       near-base-thresh)))
            enemy-units))
   (define near-enemy-worker-count
     (count (lambda (u)
              (and (memq (unit-type-sym u) '(drone probe scv))
                   (<= (dist2d base-x base-y
-                              (hash-ref u 'x 1600)
-                              (hash-ref u 'y 1600))
+                              (hash-ref u 'x 160)
+                              (hash-ref u 'y 160))
                       near-base-thresh)))
            enemy-units))
   (define near-enemy-bldg?
     (ormap (lambda (b)
              (and (not (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
                   (<= (dist2d base-x base-y
-                              (hash-ref b 'x 1600)
-                              (hash-ref b 'y 1600))
+                              (hash-ref b 'x 160)
+                              (hash-ref b 'y 160))
                       near-base-thresh)))
            enemy-bldgs))
   ;; Exclude non-combat scouts (overlord, overseer, observer, changelings, single scouting worker)
@@ -1756,16 +1752,15 @@
 ;; =============================================================================
 
 (define (interpret-opponent-actions mstate raw-frame raw-enemy-units raw-enemy-bldgs ledger
-                                    #:base-x [raw-base-x 700]
-                                    #:base-y [raw-base-y 760]
-                                    #:nat-x [raw-nat-x 1024]
-                                    #:nat-y [raw-nat-y 1120])
+                                    #:base-x [raw-base-x 32]
+                                    #:base-y [raw-base-y 32]
+                                    #:nat-x [raw-nat-x 50]
+                                    #:nat-y [raw-nat-y 56])
   (define frame (safe-frame raw-frame))
-  (define base-x (safe-coord raw-base-x 700))
-  (define base-y (safe-coord raw-base-y 760))
-  (define nat-x (safe-coord raw-nat-x 1024))
-  (define nat-y (safe-coord raw-nat-y 1120))
-  (define c-scale (if (and (<= base-x 256) (<= base-y 256)) (/ 1.0 16.0) 1.0))
+  (define base-x (safe-coord raw-base-x 32))
+  (define base-y (safe-coord raw-base-y 32))
+  (define nat-x (safe-coord raw-nat-x 50))
+  (define nat-y (safe-coord raw-nat-y 56))
   (define enemy-units (if (list? raw-enemy-units) raw-enemy-units '()))
   (define enemy-bldgs (if (list? raw-enemy-bldgs) raw-enemy-bldgs '()))
 
@@ -1775,9 +1770,9 @@
                         '(probe scv drone overlord overseer reaper adept
                           observer phoenix hallucination mutalisk))
                   (<= (dist2d base-x base-y
-                              (hash-ref u 'x 1600)
-                              (hash-ref u 'y 1600))
-                      (* 480.0 c-scale))))
+                              (hash-ref u 'x 160)
+                              (hash-ref u 'y 160))
+                      30.0)))
            enemy-units))
   (when scout-now?
     (set-mirror-mind-state-ever-scouted-by-enemy?! mstate #t))
@@ -1788,9 +1783,9 @@
              (and (memq (unit-type-sym u)
                         '(reaper hellion adept stalker zergling roach mutalisk oracle banshee))
                   (<= (dist2d nat-x nat-y
-                              (hash-ref u 'x 1600)
-                              (hash-ref u 'y 1600))
-                      (* 420.0 c-scale))))
+                              (hash-ref u 'x 160)
+                              (hash-ref u 'y 160))
+                      26.0)))
            enemy-units))
   (define feint-detected?
     (and (>= mobile-poke-count 1)
@@ -1836,33 +1831,33 @@
     (count (lambda (u)
              (and (enemy-combat-unit? u)
                   (or (<= (dist2d nat-x nat-y
-                                  (hash-ref u 'x 1600)
-                                  (hash-ref u 'y 1600))
-                          (* 450.0 c-scale))
+                                  (hash-ref u 'x 160)
+                                  (hash-ref u 'y 160))
+                          28.0)
                       (<= (dist2d base-x base-y
-                                  (hash-ref u 'x 1600)
-                                  (hash-ref u 'y 1600))
-                          (* 500.0 c-scale)))))
+                                  (hash-ref u 'x 160)
+                                  (hash-ref u 'y 160))
+                          32.0))))
            enemy-units))
   (define near-nat-workers
     (count (lambda (u)
              (and (memq (unit-type-sym u) '(drone probe scv))
                   (or (<= (dist2d nat-x nat-y
-                                  (hash-ref u 'x 1600)
-                                  (hash-ref u 'y 1600))
-                          (* 450.0 c-scale))
+                                  (hash-ref u 'x 160)
+                                  (hash-ref u 'y 160))
+                          28.0)
                       (<= (dist2d base-x base-y
-                                  (hash-ref u 'x 1600)
-                                  (hash-ref u 'y 1600))
-                          (* 500.0 c-scale)))))
+                                  (hash-ref u 'x 160)
+                                  (hash-ref u 'y 160))
+                          32.0))))
            enemy-units))
   (define proxy-or-rush?
     (or (ormap (lambda (b)
                  (and (not (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
                       (<= (dist2d base-x base-y
-                                  (hash-ref b 'x 1600)
-                                  (hash-ref b 'y 1600))
-                          (* 600.0 c-scale))))
+                                  (hash-ref b 'x 160)
+                                  (hash-ref b 'y 160))
+                          38.0)))
                enemy-bldgs)
         (and (< frame 2688)
              (or (>= near-nat-combat 3)
@@ -1903,16 +1898,15 @@
 ;; and updates `mirror-mind-state` with recommended minimum bases and disruption priority.
 (define (evaluate-mirror-macro-verdict mstate raw-frame raw-ally-units raw-ally-bldgs
                                        raw-enemy-units raw-enemy-bldgs ledger reading
-                                       #:base-x [raw-base-x 700]
-                                       #:base-y [raw-base-y 760]
-                                       #:nat-x [raw-nat-x 1024]
-                                       #:nat-y [raw-nat-y 1120])
+                                       #:base-x [raw-base-x 32]
+                                       #:base-y [raw-base-y 32]
+                                       #:nat-x [raw-nat-x 50]
+                                       #:nat-y [raw-nat-y 56])
   (define frame (safe-frame raw-frame))
-  (define base-x (safe-coord raw-base-x 700))
-  (define base-y (safe-coord raw-base-y 760))
-  (define nat-x (safe-coord raw-nat-x 1024))
-  (define nat-y (safe-coord raw-nat-y 1120))
-  (define c-scale (if (and (<= base-x 256) (<= base-y 256)) (/ 1.0 16.0) 1.0))
+  (define base-x (safe-coord raw-base-x 32))
+  (define base-y (safe-coord raw-base-y 32))
+  (define nat-x (safe-coord raw-nat-x 50))
+  (define nat-y (safe-coord raw-nat-y 56))
   (define ally-bldgs (if (list? raw-ally-bldgs) raw-ally-bldgs '()))
   (define enemy-units (if (list? raw-enemy-units) raw-enemy-units '()))
   (define enemy-bldgs (if (list? raw-enemy-bldgs) raw-enemy-bldgs '()))
@@ -1936,8 +1930,8 @@
   (define near-combat-count
     (count (lambda (u)
              (and (enemy-combat-unit? u)
-                  (or (<= (dist2d base-x base-y (hash-ref u 'x 1600) (hash-ref u 'y 1600)) (* 450.0 c-scale))
-                      (<= (dist2d nat-x nat-y (hash-ref u 'x 1600) (hash-ref u 'y 1600)) (* 340.0 c-scale)))))
+                  (or (<= (dist2d base-x base-y (hash-ref u 'x 160) (hash-ref u 'y 160)) 28.0)
+                      (<= (dist2d nat-x nat-y (hash-ref u 'x 160) (hash-ref u 'y 160)) 22.0))))
            enemy-units))
   (define hyp (shadow-ledger-dark-matter-hypothesis ledger))
   (define turtling? (and reading (action-lens-reading-opponent-turtling? reading)))
@@ -2236,12 +2230,12 @@
 ;; Base tactical target at Depth 1 (based on opponent's capabilities & actions)
 (define (tactical-target-at-depth-1 mstate raw-obs)
   (define obs (if (hash? raw-obs) raw-obs (hash)))
-  (define base-x (safe-coord (hash-ref obs 'base-x 700) 700))
-  (define base-y (safe-coord (hash-ref obs 'base-y 760) 760))
-  (define nat-x (safe-coord (hash-ref obs 'natural-x 1024) 1024))
-  (define nat-y (safe-coord (hash-ref obs 'natural-y 1120) 1120))
-  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 1600) 1600))
-  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 1600) 1600))
+  (define base-x (safe-coord (hash-ref obs 'base-x 32) 32))
+  (define base-y (safe-coord (hash-ref obs 'base-y 32) 32))
+  (define nat-x (safe-coord (hash-ref obs 'natural-x 50) 50))
+  (define nat-y (safe-coord (hash-ref obs 'natural-y 56) 56))
+  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 160) 160))
+  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 160) 160))
   (define ledger (mirror-mind-state-last-shadow-ledger mstate))
   (define reading (mirror-mind-state-last-action-reading mstate))
 
@@ -2273,12 +2267,12 @@
 ;; opponent strike to exploit our predicted positioning?
 (define (tactical-target-at-higher-depth prev-target raw-obs)
   (define obs (if (hash? raw-obs) raw-obs (hash)))
-  (define base-x (safe-coord (hash-ref obs 'base-x 700) 700))
-  (define base-y (safe-coord (hash-ref obs 'base-y 760) 760))
-  (define nat-x (safe-coord (hash-ref obs 'natural-x 1024) 1024))
-  (define nat-y (safe-coord (hash-ref obs 'natural-y 1120) 1120))
-  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 1600) 1600))
-  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 1600) 1600))
+  (define base-x (safe-coord (hash-ref obs 'base-x 32) 32))
+  (define base-y (safe-coord (hash-ref obs 'base-y 32) 32))
+  (define nat-x (safe-coord (hash-ref obs 'natural-x 50) 50))
+  (define nat-y (safe-coord (hash-ref obs 'natural-y 56) 56))
+  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 160) 160))
+  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 160) 160))
   (case prev-target
     [(natural-choke-timing-push)
      (values 'main-mineral-line-drop-or-air base-x base-y)]
@@ -2314,8 +2308,8 @@
              #:unless (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
       (define p (hash-ref b 'preview-unit (hash-ref b 'unit-preview #f)))
       (and (symbol? p) (not (eq? p 'null)) p)))
-  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 1600) 1600))
-  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 1600) 1600))
+  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 160) 160))
+  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 160) 160))
   (define ledger (mirror-mind-state-last-shadow-ledger mstate))
   (define reading (mirror-mind-state-last-action-reading mstate))
   (define tech-obs (mirror-mind-state-last-tech-observation mstate))
@@ -2460,8 +2454,8 @@
      (define-values (tact-sym tx ty)
        (if (or bluff? (and reading (action-lens-reading-feint-or-poke-detected? reading)))
            (values 'main-mineral-line-drop-or-air
-                   (safe-coord (hash-ref obs 'base-x 700) 700)
-                   (safe-coord (hash-ref obs 'base-y 760) 760))
+                   (safe-coord (hash-ref obs 'base-x 32) 32)
+                   (safe-coord (hash-ref obs 'base-y 32) 32))
            (tactical-target-at-depth-1 mstate obs)))
      (depth-node 2
                  opp-belief-arch
@@ -2570,22 +2564,22 @@
 ;; opponent reacts and infer their true cognitive depth d*.
 (define (issue-diagnostic-depth-probe! mstate raw-frame raw-enemy-units
                                        #:probe-type [probe-type 'feint-tempo-probe]
-                                       #:probe-x [raw-probe-x 1180]
-                                       #:probe-y [raw-probe-y 1180])
+                                       #:probe-x [raw-probe-x 74]
+                                       #:probe-y [raw-probe-y 74])
   (define frame (safe-frame raw-frame))
   (define enemy-units (safe-hash-list raw-enemy-units))
-  (define probe-x (safe-coord raw-probe-x 1180))
-  (define probe-y (safe-coord raw-probe-y 1180))
+  (define probe-x (safe-coord raw-probe-x 74))
+  (define probe-y (safe-coord raw-probe-y 74))
   (define base-arch (classify-enemy-archetype enemy-units))
   (define avg-ex
     (if (null? enemy-units)
-        1600
-        (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'x 1600) 1600))
+        160
+        (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'x 160) 160))
                   (max 1 (length enemy-units)))))
   (define avg-ey
     (if (null? enemy-units)
-        1600
-        (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'y 1600) 1600))
+        160
+        (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'y 160) 160))
                   (max 1 (length enemy-units)))))
   (define pid (add1 (mirror-mind-state-probes-completed mstate)))
   (define p
@@ -2654,12 +2648,12 @@
        (define avg-ex
          (if (null? enemy-units)
              (diagnostic-probe-baseline-enemy-x p)
-             (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'x 1600) 1600))
+             (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'x 160) 160))
                        (max 1 (length enemy-units)))))
        (define avg-ey
          (if (null? enemy-units)
              (diagnostic-probe-baseline-enemy-y p)
-             (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'y 1600) 1600))
+             (quotient (for/sum ([e (in-list enemy-units)]) (safe-coord (hash-ref e 'y 160) 160))
                        (max 1 (length enemy-units)))))
        (define move-delta
          (dist2d (diagnostic-probe-baseline-enemy-x p)
@@ -2674,8 +2668,8 @@
        (define inferred-resp
          (cond
            [(and feint? arch-changed?) 'higher-order-bait-or-double-reverse]
-           [(and scouted? (or arch-changed? (> move-delta 220))) 'second-order-pivot-or-cancel]
-           [(or arch-changed? (> move-delta 120)) 'direct-counter]
+           [(and scouted? (or arch-changed? (> move-delta 14))) 'second-order-pivot-or-cancel]
+           [(or arch-changed? (> move-delta 8)) 'direct-counter]
            [else 'no-reaction]))
        (record-diagnostic-probe-response! mstate inferred-resp)]
       [else
@@ -3158,7 +3152,7 @@
 
     (define tact-hit?
       (ormap (lambda (e)
-               (<= (dist2d tx ty (hash-ref e 'x 1600) (hash-ref e 'y 1600)) 360))
+               (<= (dist2d tx ty (hash-ref e 'x 160) (hash-ref e 'y 160)) 24))
              all-enemy))
 
     (cond
@@ -3218,14 +3212,14 @@
   (define enemy-bldgs (safe-hash-list (hash-ref obs 'enemy-buildings '())))
   (define minerals (max 0 (safe-int (hash-ref obs 'minerals 200) 200)))
   (define gas (max 0 (safe-int (hash-ref obs 'gas 100) 100)))
-  (define base-x (safe-coord (hash-ref obs 'base-x 700) 700))
-  (define base-y (safe-coord (hash-ref obs 'base-y 760) 760))
-  (define nat-x (safe-coord (hash-ref obs 'natural-x 1024) 1024))
-  (define nat-y (safe-coord (hash-ref obs 'natural-y 1120) 1120))
-  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 1600) 1600))
-  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 1600) 1600))
-  (define enemy-exp-x (safe-coord (hash-ref obs 'enemy-expand-x 1450) 1450))
-  (define enemy-exp-y (safe-coord (hash-ref obs 'enemy-expand-y 1350) 1350))
+  (define base-x (safe-coord (hash-ref obs 'base-x 32) 32))
+  (define base-y (safe-coord (hash-ref obs 'base-y 32) 32))
+  (define nat-x (safe-coord (hash-ref obs 'natural-x 50) 50))
+  (define nat-y (safe-coord (hash-ref obs 'natural-y 56) 56))
+  (define enemy-x (safe-coord (hash-ref obs 'enemy-x 160) 160))
+  (define enemy-y (safe-coord (hash-ref obs 'enemy-y 160) 160))
+  (define enemy-exp-x (safe-coord (hash-ref obs 'enemy-expand-x 142) 142))
+  (define enemy-exp-y (safe-coord (hash-ref obs 'enemy-expand-y 136) 136))
   (define effects (safe-list (hash-ref obs 'effects '())))
   (define sanitized-obs
     (hash 'frame frame

@@ -242,7 +242,7 @@
     [(and (>= (count (lambda (t) (eq? t 'zergling)) types) 6)) 'zergling-flood]
     [(or (memq 'siege-tank types) (memq 'siege-tank-sieged types)) 'mech-siege]
     [(or (memq 'roach types) (memq 'ravager types)) 'roach-ravager]
-    [(and (>= (count (lambda (t) (memq t '(marine marauder medic))) types) 5)) 'bio-ball]
+    [(and (>= (count (lambda (t) (memq t '(marine marauder medivac))) types) 5)) 'bio-ball]
     [(or (memq 'oracle types) (memq 'phoenix types) (memq 'banshee types)
          (memq 'liberator types) (memq 'tempest types))
      'sky-toss]
@@ -398,32 +398,41 @@
   (ability-cast-limiter max-per-frame refractory-frames (make-hash) 0))
 
 ;; Filters action list so combat spells respect `max-combat-spells-per-frame`
-;; and per-unit refractory cooldowns, while MACRO-EXEMPT-SPELLS pass unimpeded!
+;; and per-(caster-id . ability-sym) refractory cooldowns, while MACRO-EXEMPT-SPELLS pass unimpeded!
 (define (throttle-ability-casts! limiter actions [frame 0])
   (define max-combat (ability-cast-limiter-max-combat-spells-per-frame limiter))
   (define refrac (ability-cast-limiter-refractory-frames limiter))
   (define unit-last (ability-cast-limiter-last-cast-by-unit limiter))
   (define combat-casts-this-frame 0)
   (define throttled 0)
+  (define (handle-cast act caster-id spell)
+    (cond
+      [(memq spell MACRO-EXEMPT-SPELLS)
+       #t]
+      [else
+       (define key (cons caster-id spell))
+       (define prev-f (hash-ref unit-last key -9999))
+       (cond
+         [(and (< combat-casts-this-frame max-combat)
+               (>= (- frame prev-f) refrac))
+          (set! combat-casts-this-frame (add1 combat-casts-this-frame))
+          (hash-set! unit-last key frame)
+          #t]
+         [else
+          (set! throttled (add1 throttled))
+          #f])]))
   (define kept
     (for/fold ([acc '()])
               ([act (in-list actions)])
       (match act
-        [(list (or 'cast 'cast-spell) caster-id spell _ ...)
-         (cond
-           [(memq spell MACRO-EXEMPT-SPELLS)
-            (cons act acc)]
-           [else
-            (define prev-f (hash-ref unit-last (cons caster-id spell) -9999))
-            (cond
-              [(and (< combat-casts-this-frame max-combat)
-                    (>= (- frame prev-f) refrac))
-               (set! combat-casts-this-frame (add1 combat-casts-this-frame))
-               (hash-set! unit-last (cons caster-id spell) frame)
-               (cons act acc)]
-              [else
-               (set! throttled (add1 throttled))
-               acc])])]
+        [(list (or 'cast 'cast-spell 'use-ability) caster-id spell _ ...)
+         (if (handle-cast act caster-id spell)
+             (cons act acc)
+             acc)]
+        [(list 'inject-larva caster-id _ ...)
+         (if (handle-cast act caster-id 'inject-larva)
+             (cons act acc)
+             acc)]
         [_ (cons act acc)])))
   (set-ability-cast-limiter-throttled-count! limiter throttled)
   (values (reverse kept) throttled))

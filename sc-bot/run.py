@@ -2,25 +2,25 @@
 """
 AI Arena & Local Headless Entrypoint for #lang sc-bot (Mothman / Z / T / P / R).
 Supports both:
-  1. AI Arena / LadderServer websocket client mode (--GamePort, --StartPort, --LadderServer)
-  2. Local headless SC2_x64 execution against Built-in AI or external bots (--ComputerOpponent, --bot, --race)
+  1. Pure-Racket Native WebSocket + Protobuf (`s2clientprotocol`) mode:
+     When `--GamePort` is passed (or `--native-racket` is passed, and `--use-python-bridge`
+     is not passed), unpacks `racket_runtime.tar.xz` if needed, locates `racket_runtime/bin/racket`
+     or `/home/antigravity/toolchains/racket/bin/racket`, and `os.execv`s directly into
+     `racket sim/racket-sc2-ladder-main.rkt` with all CLI arguments.
+  2. Python `burnysc2` IPC Bridge fallback mode (`--use-python-bridge` or local headless with `--save-replay`).
 """
 
 import argparse
 import json
 import os
+import shutil
 import sys
+import tarfile
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
-from sim.sc2_burny_bridge import (
-    create_racket_sc2_agent,
-    infer_bot_race_and_posture,
-    run_live_headless_sc2_match,
-)
 
 
 def load_bot_config(variant_name: str = None) -> dict:
@@ -36,6 +36,63 @@ def load_bot_config(variant_name: str = None) -> dict:
     if variant_name and "Variants" in cfg and variant_name in cfg["Variants"]:
         return cfg["Variants"][variant_name]
     return cfg
+
+
+def resolve_native_racket_command(extra_argv: list[str]) -> tuple[str, list[str]] | None:
+    """
+    Locate either the bundled portable `racket_runtime/bin/racket` (unpacking
+    `racket_runtime.tar.xz` if needed) or `/home/antigravity/toolchains/racket/bin/racket`,
+    and return `(exe_path, argv_list)` for `os.execv`.
+    """
+    ladder_script = ROOT_DIR / "sim" / "racket-sc2-ladder-main.rkt"
+    if not ladder_script.exists():
+        return None
+
+    rt_dir = ROOT_DIR / "racket_runtime"
+    rt_bin = rt_dir / "bin" / "racket"
+    rt_archive = ROOT_DIR / "racket_runtime.tar.xz"
+    if not rt_bin.exists() and rt_archive.exists():
+        try:
+            with tarfile.open(rt_archive, "r:xz") as tf:
+                tf.extractall(path=ROOT_DIR)
+        except Exception:
+            pass
+
+    if rt_bin.exists():
+        try:
+            os.chmod(rt_bin, 0o755)
+            etc_dir = rt_dir / "etc"
+            etc_dir.mkdir(parents=True, exist_ok=True)
+            cfg_rktd = etc_dir / "config.rktd"
+            if not cfg_rktd.exists():
+                cfg_rktd.write_text("#hash()\n", encoding="utf-8")
+            collects_dir = rt_dir / "collects"
+            sc_bot_collect = collects_dir / "sc-bot"
+            if not sc_bot_collect.exists() and (ROOT_DIR / "sc-bot").exists():
+                shutil.copytree(ROOT_DIR / "sc-bot", sc_bot_collect)
+            exe = str(rt_bin)
+            return (
+                exe,
+                [
+                    exe,
+                    "-X",
+                    str(collects_dir),
+                    "-G",
+                    str(etc_dir),
+                    str(ladder_script),
+                ]
+                + extra_argv,
+            )
+        except Exception:
+            pass
+
+    sys_racket = "/home/antigravity/toolchains/racket/bin/racket"
+    if not os.path.exists(sys_racket):
+        sys_racket = shutil.which("racket")
+    if sys_racket and os.path.exists(sys_racket):
+        return (sys_racket, [sys_racket, str(ladder_script)] + extra_argv)
+
+    return None
 
 
 def main():
@@ -55,9 +112,29 @@ def main():
     parser.add_argument("--max-loops", type=int, default=4032, help="Max game loops for local headless run")
     parser.add_argument("--save-replay", type=str, default=None, help="Optional path to save .SC2Replay")
     parser.add_argument("--RealTime", "--realtime", dest="realtime", action="store_true", help="Run in real-time mode")
+    parser.add_argument("--native-racket", action="store_true", help="Execute directly via Pure-Racket Native WebSocket + Protobuf runner")
+    parser.add_argument("--use-python-bridge", action="store_true", help="Force Python burnysc2 bridge instead of native Racket WebSocket client")
     parser.add_argument("--dry-run", action="store_true", help="Verify configuration and bot resolution without launching SC2")
 
     args, _unknown = parser.parse_known_args()
+
+    # Direct Pure-Racket Native WebSocket + Protobuf execution when --GamePort or --native-racket is passed
+    if not args.use_python_bridge and (args.GamePort is not None or args.native_racket):
+        filtered_argv = [
+            a for a in sys.argv[1:] if a not in ("--native-racket", "--use-python-bridge")
+        ]
+        resolved = resolve_native_racket_command(filtered_argv)
+        if resolved is not None:
+            exe_path, exec_argv = resolved
+            os.chdir(ROOT_DIR)
+            os.execv(exe_path, exec_argv)
+
+    from sim.sc2_burny_bridge import (
+        create_racket_sc2_agent,
+        infer_bot_race_and_posture,
+        run_live_headless_sc2_match,
+    )
+
     cfg = load_bot_config(args.BotName)
 
     bot_rel_path = args.bot or cfg.get("BotPath", "bots/Mothman.rkt")
@@ -85,7 +162,7 @@ def main():
         )
         return
 
-    # AI Arena LadderServer mode
+    # Python fallback AI Arena LadderServer mode (if --use-python-bridge was passed or Racket binary missing)
     if args.GamePort is not None:
         import asyncio
         import aiohttp

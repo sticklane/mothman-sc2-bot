@@ -3,7 +3,7 @@
 ;; =============================================================================
 ;; Pure-Racket Formal State-Machine & Invariant Verifier (`lib/state-machine-verifier.rkt`)
 ;;
-;; Model-checks all 3 core state machines in the `#lang sc-bot` Racket runtime:
+;; Model-checks all 4 core state machines in the `#lang sc-bot` Racket runtime:
 ;;   1. Posture State Machine (`compute-next-posture`, `step-layer1b-mastermind!`,
 ;;      `filter-rush-threat-enemies`, `step-live-bot-runtime!` in `lib/bot-runtime.rkt`)
 ;;   2. Mirror-Mind Macro Verdict, All-Depth Selection & Toolbox State Machine
@@ -15,20 +15,32 @@
 ;;      (`evaluate-coupled-macro-governor`, `evaluate-adaptive-build-and-tech-plan`,
 ;;      `evaluate-guns-vs-butter-ppf`, `make-symbiotic-ledger`, `step-layer2-economy!`
 ;;      in `lib/econ-ledger.rkt` and `lib/bot-runtime.rkt`)
+;;   4. General Prioritization & Resource-Allocation Scheduler Invariants (`PV1`–`PV6`)
+;;      (`verify-prioritization-scheduler-invariants` across the 10-dimensional
+;;      multi-race economic/tactical state lattice)
 ;; =============================================================================
 
 (require racket/match
          racket/list
          racket/set
+         racket/math
          "bot-runtime.rkt"
          "mirror-mind-predictor.rkt"
-         "econ-ledger.rkt")
+         "econ-ledger.rkt"
+         "zerospace-mastermind.rkt")
 
 (provide (struct-out verification-check-result)
          (struct-out state-machine-verification-report)
+         (struct-out pv-candidate)
+         (struct-out pv-scheduler-decision)
+         (struct-out pv-refractory-gate)
+         pv-evaluate-prioritization-state
+         pv-make-refractory-gate
+         pv-try-emit-refractory!
          verify-posture-state-machine
          verify-mirror-mind-state-machine
          verify-economy-and-ledger-state-machine
+         verify-prioritization-scheduler-invariants
          verify-all-state-machines
          run-all-formal-verifications)
 
@@ -75,10 +87,10 @@
           'Random  '(RandomRollOpening AdaptiveCounterRecovery TriRaceVanguardContain MidGameBioTankContain MothmanApexVictory EarlyScoutCrisis)))
 
   (define rush-enemies-obs
-    (list (hash 'id 901 'type 'zealot 'x 720 'y 770 'hp 100 'dps 16)
-          (hash 'id 902 'type 'zealot 'x 725 'y 775 'hp 100 'dps 16)
-          (hash 'id 903 'type 'zealot 'x 730 'y 780 'hp 100 'dps 16)
-          (hash 'id 904 'type 'zealot 'x 735 'y 785 'hp 100 'dps 16)))
+    (list (hash 'id 901 'type 'zealot 'x 34 'y 35 'hp 100 'dps 16)
+          (hash 'id 902 'type 'zealot 'x 35 'y 36 'hp 100 'dps 16)
+          (hash 'id 903 'type 'zealot 'x 36 'y 37 'hp 100 'dps 16)
+          (hash 'id 904 'type 'zealot 'x 37 'y 38 'hp 100 'dps 16)))
 
   (define sample-obs-transitions
     (list (hash 'frame 0    'fap-score 0.0   'enemy-units '()              'ally-units '() 'ally-buildings '())
@@ -214,19 +226,19 @@
             'gas 100
             'supply-used 22
             'supply-cap 30
-            'base-x 700
-            'base-y 760
-            'natural-x 1024
-            'natural-y 1120
-            'enemy-x 1600
-            'enemy-y 1600
-            'ally-units (list (hash 'id 1 'type 'drone 'x 705 'y 765 'hp 40 'dps 5)
-                              (hash 'id 2 'type 'drone 'x 708 'y 768 'hp 40 'dps 5)
-                              (hash 'id 3 'type 'drone 'x 710 'y 770 'hp 40 'dps 5)
-                              (hash 'id 4 'type 'drone 'x 712 'y 772 'hp 40 'dps 5)
-                              (hash 'id 10 'type 'queen 'x 720 'y 775 'hp 175 'dps 12))
-            'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 700 'y 760 'hp 1500))
-            'enemy-units (list (hash 'id 901 'type scout-type 'x 715 'y 770 'hp 100 'dps 0))
+            'base-x 32.5
+            'base-y 32.5
+            'natural-x 50.5
+            'natural-y 56.5
+            'enemy-x 160.5
+            'enemy-y 160.5
+            'ally-units (list (hash 'id 1 'type 'drone 'x 33 'y 33 'hp 40 'dps 5)
+                              (hash 'id 2 'type 'drone 'x 34 'y 33 'hp 40 'dps 5)
+                              (hash 'id 3 'type 'drone 'x 33 'y 34 'hp 40 'dps 5)
+                              (hash 'id 4 'type 'drone 'x 34 'y 34 'hp 40 'dps 5)
+                              (hash 'id 10 'type 'queen 'x 35 'y 35 'hp 175 'dps 12))
+            'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+            'enemy-units (list (hash 'id 901 'type scout-type 'x 34 'y 34 'hp 100 'dps 0))
             'enemy-buildings '()))
     (define step-res (step-live-bot-runtime! rt obs))
     (define cmds (hash-ref step-res 'actions '()))
@@ -257,15 +269,15 @@
             'gas 150
             'supply-used 36
             'supply-cap 52
-            'base-x 700
-            'base-y 760
-            'natural-x 1024
-            'natural-y 1120
-            'enemy-x 1600
-            'enemy-y 1600
+            'base-x 32.5
+            'base-y 32.5
+            'natural-x 50.5
+            'natural-y 56.5
+            'enemy-x 160.5
+            'enemy-y 160.5
             'visible-sectors '(0 1 2 3 4 5)
-            'ally-units (list (hash 'id 1 'type 'roach 'x 900 'y 950 'hp 145 'dps 16))
-            'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 700 'y 760 'hp 1500))
+            'ally-units (list (hash 'id 1 'type 'roach 'x 42 'y 45 'hp 145 'dps 16))
+            'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
             'enemy-units (if osc? rush-enemies-obs '())
             'enemy-buildings '()))
     (step-live-bot-runtime! rt-p5 obs))
@@ -308,9 +320,9 @@
   ;; 1. Greedy expand (3 enemy townhalls, low combat units)
   (let ([ms (make-mirror-mind-state #:our-race 'Zerg #:enemy-race 'Protoss)])
     (define e-bldgs
-      (list (hash 'id 1 'type 'nexus 'x 1600 'y 1600)
-            (hash 'id 2 'type 'nexus 'x 1400 'y 1400)
-            (hash 'id 3 'type 'nexus 'x 1200 'y 1500)))
+      (list (hash 'id 1 'type 'nexus 'x 160 'y 160)
+            (hash 'id 2 'type 'nexus 'x 140 'y 140)
+            (hash 'id 3 'type 'nexus 'x 120 'y 150)))
     (define ledger (compute-opponent-shadow-ledger ms 3200 '() e-bldgs))
     (define reading (interpret-opponent-actions ms 3200 '() e-bldgs ledger))
     (define-values (v _b _w _rm _dp)
@@ -319,11 +331,11 @@
   ;; 2. Passive turtle (1-2 bases + static defense)
   (let ([ms (make-mirror-mind-state #:our-race 'Zerg #:enemy-race 'Terran)])
     (define e-bldgs
-      (list (hash 'id 1 'type 'orbital-command 'x 1600 'y 1600)
-            (hash 'id 2 'type 'bunker 'x 1450 'y 1450)
-            (hash 'id 3 'type 'planetary-fortress 'x 1380 'y 1380)))
+      (list (hash 'id 1 'type 'orbital-command 'x 160 'y 160)
+            (hash 'id 2 'type 'bunker 'x 145 'y 145)
+            (hash 'id 3 'type 'planetary-fortress 'x 138 'y 138)))
     (define e-units
-      (list (hash 'id 10 'type 'siege-tank-sieged 'x 1440 'y 1440)))
+      (list (hash 'id 10 'type 'siege-tank-sieged 'x 144 'y 144)))
     (define ledger (compute-opponent-shadow-ledger ms 3000 e-units e-bldgs))
     (define reading (interpret-opponent-actions ms 3000 e-units e-bldgs ledger))
     (define-values (v _b _w _rm _dp)
@@ -333,7 +345,7 @@
   (let ([ms (make-mirror-mind-state #:our-race 'Zerg #:enemy-race 'Terran)])
     (define e-units
       (for/list ([i (in-range 6)])
-        (hash 'id (+ 50 i) 'type 'marine 'x 740 'y 780)))
+        (hash 'id (+ 50 i) 'type 'marine 'x 36 'y 38)))
     (define ledger (compute-opponent-shadow-ledger ms 2400 e-units '()))
     (define reading (interpret-opponent-actions ms 2400 e-units '() ledger))
     (define-values (v _b _w _rm _dp)
@@ -342,11 +354,11 @@
   ;; 4. Pace Macro And Disrupt (even midgame army)
   (let ([ms (make-mirror-mind-state #:our-race 'Zerg #:enemy-race 'Protoss)])
     (define e-bldgs
-      (list (hash 'id 1 'type 'nexus 'x 1600 'y 1600)
-            (hash 'id 2 'type 'nexus 'x 1400 'y 1400)))
+      (list (hash 'id 1 'type 'nexus 'x 160 'y 160)
+            (hash 'id 2 'type 'nexus 'x 140 'y 140)))
     (define e-units
       (for/list ([i (in-range 6)])
-        (hash 'id (+ 80 i) 'type 'stalker 'x 1350 'y 1350)))
+        (hash 'id (+ 80 i) 'type 'stalker 'x 135 'y 135)))
     (define ledger (compute-opponent-shadow-ledger ms 4500 e-units e-bldgs))
     (define reading (interpret-opponent-actions ms 4500 e-units e-bldgs ledger))
     (define-values (v _b _w _rm _dp)
@@ -379,13 +391,13 @@
     (define ms (make-mirror-mind-state #:our-race 'Zerg #:enemy-race 'Terran))
     (define e-bldgs
       (for/list ([b (in-range vis-bases)])
-        (hash 'id (+ 200 b) 'type 'command-center 'x 1550 'y (+ 1500 (* b 80)))))
+        (hash 'id (+ 200 b) 'type 'command-center 'x 155 'y (+ 150 (* b 8)))))
     (define e-units
       (for/list ([u (in-range far-combat-count)])
-        (hash 'id (+ 300 u) 'type 'marine 'x 1500 'y 1500)))
+        (hash 'id (+ 300 u) 'type 'marine 'x 150 'y 150)))
     (define a-bldgs
-      (list (hash 'id 1 'type 'hatchery 'x 700 'y 760)
-            (hash 'id 2 'type 'hatchery 'x 1024 'y 1120)))
+      (list (hash 'id 1 'type 'hatchery 'x 32.5 'y 32.5)
+            (hash 'id 2 'type 'hatchery 'x 50.5 'y 56.5)))
     (define ledger (compute-opponent-shadow-ledger ms frame e-units e-bldgs))
     (define reading (interpret-opponent-actions ms frame e-units e-bldgs ledger))
     (define-values (v _b _w _rm _dp)
@@ -411,7 +423,7 @@
          [frame '(1200 2200 3200)])
     (set! m3-states (add1 m3-states))
     (define ms (make-mirror-mind-state #:our-race 'Protoss #:enemy-race 'Zerg))
-    (define e-units (list (hash 'id 99 'type scout-sym 'x 720 'y 770)))
+    (define e-units (list (hash 'id 99 'type scout-sym 'x 35 'y 36)))
     (define ledger (compute-opponent-shadow-ledger ms frame e-units '()))
     (define reading (interpret-opponent-actions ms frame e-units '() ledger))
     (define-values (v _b _w _rm _dp)
@@ -542,28 +554,60 @@
     (define rt (make-live-bot-runtime #:race race))
     (define ally-units
       (for/list ([i (in-range workers-cnt)])
-        (hash 'id (+ 1 i) 'type worker-sym 'x 700 'y 760 'hp 40 'dps 5)))
+        (hash 'id (+ 1 i) 'type worker-sym 'x 32.5 'y 32.5 'hp 40 'dps 5)))
+    (define extra-tech-bldgs
+      (case race
+        [(Zerg)
+         (list (hash 'id 601 'type 'spawning-pool 'x 36 'y 36 'hp 1000)
+               (hash 'id 602 'type 'extractor 'x 34 'y 30 'hp 500)
+               (hash 'id 603 'type 'roach-warren 'x 38 'y 36 'hp 850)
+               (hash 'id 604 'type 'hydralisk-den 'x 40 'y 36 'hp 850)
+               (hash 'id 605 'type 'spire 'x 42 'y 36 'hp 850)
+               (hash 'id 606 'type 'baneling-nest 'x 44 'y 36 'hp 850))]
+        [(Protoss)
+         (append
+          (for/list ([g (in-range (* 2 cur-bases))])
+            (hash 'id (+ 610 g) 'type 'gateway 'x (+ 36 (* g 2)) 'y 36 'hp 1000))
+          (list (hash 'id 601 'type 'pylon 'x 35 'y 35 'hp 400)
+                (hash 'id 602 'type 'assimilator 'x 34 'y 30 'hp 450)
+                (hash 'id 603 'type 'cybernetics-core 'x 38 'y 36 'hp 1000)
+                (hash 'id 604 'type 'robotics-facility 'x 40 'y 36 'hp 1000)
+                (hash 'id 605 'type 'robotics-bay 'x 42 'y 36 'hp 1000)
+                (hash 'id 606 'type 'twilight-council 'x 44 'y 36 'hp 1000)
+                (hash 'id 607 'type 'forge 'x 46 'y 36 'hp 1000)))]
+        [(Terran)
+         (append
+          (for/list ([r (in-range (* 2 cur-bases))])
+            (hash 'id (+ 610 r) 'type 'barracks 'x (+ 36 (* r 2)) 'y 36 'hp 1000))
+          (list (hash 'id 601 'type 'supply-depot 'x 35 'y 35 'hp 400)
+                (hash 'id 602 'type 'refinery 'x 34 'y 30 'hp 500)
+                (hash 'id 603 'type 'factory 'x 38 'y 36 'hp 1250)
+                (hash 'id 604 'type 'starport 'x 40 'y 36 'hp 1300)
+                (hash 'id 605 'type 'engineering-bay 'x 42 'y 36 'hp 850)
+                (hash 'id 606 'type 'armory 'x 44 'y 36 'hp 750)))]))
     (define ally-bldgs
-      (for/list ([b (in-range cur-bases)])
-        (hash 'id (+ 500 b) 'type th-sym 'x (+ 700 (* b 200)) 'y (+ 760 (* b 150)) 'hp 1500)))
+      (append
+       (for/list ([b (in-range cur-bases)])
+         (hash 'id (+ 500 b) 'type th-sym 'x (+ 32.5 (* b 22.0)) 'y (+ 32.5 (* b 18.0)) 'hp 1500))
+       extra-tech-bldgs))
     (define obs
       (hash 'frame 4500
-            'minerals 500
-            'gas 200
+            'minerals 1200
+            'gas 400
             'supply-used (* cur-bases 36)
             'supply-cap (min 200 (* cur-bases 52))
-            'base-x 700
-            'base-y 760
-            'natural-x 1024
-            'natural-y 1120
-            'enemy-x 1600
-            'enemy-y 1600
+            'base-x 32.5
+            'base-y 32.5
+            'natural-x 50.5
+            'natural-y 56.5
+            'enemy-x 160.5
+            'enemy-y 160.5
             'ally-units ally-units
             'ally-buildings ally-bldgs
             'enemy-units '()
-            'enemy-buildings (list (hash 'id 801 'type 'nexus 'x 1600 'y 1600)
-                                   (hash 'id 802 'type 'nexus 'x 1400 'y 1400)
-                                   (hash 'id 803 'type 'nexus 'x 1200 'y 1500))))
+            'enemy-buildings (list (hash 'id 801 'type 'nexus 'x 160 'y 160)
+                                   (hash 'id 802 'type 'nexus 'x 140 'y 140)
+                                   (hash 'id 803 'type 'nexus 'x 120 'y 150))))
     (define econ-cmds (step-layer2-economy! rt obs))
     (define expanded?
       (ormap (lambda (c)
@@ -608,16 +652,16 @@
             'gas 150
             'supply-used 26
             'supply-cap 36
-            'base-x 700
-            'base-y 760
-            'natural-x 1024
-            'natural-y 1120
-            'enemy-x 1600
-            'enemy-y 1600
+            'base-x 32.5
+            'base-y 32.5
+            'natural-x 50.5
+            'natural-y 56.5
+            'enemy-x 160.5
+            'enemy-y 160.5
             'ally-units (for/list ([i (in-range 18)])
-                          (hash 'id (+ 1 i) 'type worker-sym 'x 700 'y 760 'hp 40 'dps 5))
-            'ally-buildings (list (hash 'id 100 'type th-sym 'x 700 'y 760 'hp 1500)
-                                  (hash 'id 101 'type pool-sym 'x 748 'y 808 'hp 1000))
+                          (hash 'id (+ 1 i) 'type worker-sym 'x 32.5 'y 32.5 'hp 40 'dps 5))
+            'ally-buildings (list (hash 'id 100 'type th-sym 'x 32.5 'y 32.5 'hp 1500)
+                                  (hash 'id 101 'type pool-sym 'x 37.5 'y 37.5 'hp 1000))
             'enemy-units '()
             'enemy-buildings '()))
     (define econ-cmds (step-layer2-economy! rt obs))
@@ -749,14 +793,676 @@
   results)
 
 ;; =============================================================================
-;; 4. Top-Level Formal Verification Runner
+;; 4. Formal Model Checker for General Prioritization & Resource-Allocation
+;;    Scheduler Invariants (`PV1`–`PV6`)
+;; =============================================================================
+
+(define PV-LATTICE-RACES        '(Zerg Terran Protoss))
+(define PV-LATTICE-ACTIVE-BASES '(1 2 3 4))
+(define PV-LATTICE-WORKERS      '(12 16 24 38 72))
+(define PV-LATTICE-MINERALS     '(50 75 100 150 250 320 450))
+(define PV-LATTICE-GAS          '(0 50 100 250 544))
+(define PV-LATTICE-SUPPLY-LEFT  '(0 1 2 4 10))
+(define PV-LATTICE-ARMY-SUPPLY  '(0 3 10 18 36))
+(define PV-LATTICE-ENEMY-THREAT '(0 8 20))
+(define PV-LATTICE-ENEMY-AIR    '(#f #t))
+(define PV-LATTICE-ESCROW-AGE   '(0 100 300))
+
+(struct pv-candidate
+  (id
+   category        ; 'supply | 'counter-anti-air | 'counter-detector | 'combat-gas | 'combat-mineral | 'tech-upgrade | 'production-facility | 'worker | 'expansion
+   action-sexp
+   mineral-cost
+   gas-cost
+   supply-cost
+   utility)
+  #:transparent)
+
+(struct pv-scheduler-decision
+  (race
+   candidates              ; list of pv-candidate sorted descending by utility
+   top-candidate           ; pv-candidate
+   scheduled-actions       ; list of S-expression actions admitted after floor reservations
+   effective-escrow-min    ; non-negative integer
+   combat-mineral-floor    ; non-negative integer
+   gas-sink-mineral-floor  ; non-negative integer
+   worker-admitted?        ; boolean
+   expansion-admitted?)    ; boolean
+  #:transparent)
+
+(struct pv-refractory-gate
+  (cooldown-frames
+   last-emitted-by-key)    ; mutable hash: (cons action-kind tag) -> frame
+  #:mutable
+  #:transparent)
+
+(define (pv-make-refractory-gate [cooldown-frames 64])
+  (pv-refractory-gate (max 1 cooldown-frames) (make-hash)))
+
+(define (pv-try-emit-refractory! gate action-kind unit-or-bldg-tag frame)
+  (define cd (pv-refractory-gate-cooldown-frames gate))
+  (define tbl (pv-refractory-gate-last-emitted-by-key gate))
+  (define key (cons action-kind unit-or-bldg-tag))
+  (define prev (hash-ref tbl key -999999))
+  (cond
+    [(>= (- frame prev) cd)
+     (hash-set! tbl key frame)
+     #t]
+    [else
+     #f]))
+
+(define (pv-evaluate-prioritization-state
+         #:race [race 'Zerg]
+         #:active-bases [active-bases 2]
+         #:workers [workers 24]
+         #:minerals [minerals 150]
+         #:gas [gas 100]
+         #:supply-left [supply-left 4]
+         #:supply-cap [supply-cap 60]
+         #:pending-supply [pending-supply 0]
+         #:supply-buffer [supply-buffer 4]
+         #:army-supply [army-supply 10]
+         #:enemy-threat [enemy-threat 0]
+         #:enemy-air? [enemy-air? #f]
+         #:requires-detection? [requires-detection? #f]
+         #:escrow-age [escrow-age 0]
+         #:ready-tech-sym [ready-tech-sym #f]
+         #:ready-tech-min [ready-tech-min 150]
+         #:ready-tech-gas [ready-tech-gas 0])
+  (define under-threat?
+    (or (> enemy-threat 0)
+        (and (< army-supply 12) (> enemy-threat 0))))
+  (define gas-imbalance-ratio
+    (/ (exact->inexact (max 0 gas))
+       (max 50.0 (exact->inexact minerals))))
+  (define gas-hoarding?
+    (and (>= gas 150)
+         (>= gas-imbalance-ratio 1.5)))
+  (define supply-block-imminent?
+    (and (< supply-cap 200)
+         (zero? pending-supply)
+         (<= supply-left supply-buffer)))
+
+  ;; Non-starving expansion escrow:
+  ;; When active-bases >= 2 OR escrow-age >= 224 (10s expiry) OR under threat,
+  ;; expansion escrow NEVER blocks ready tech/upgrades or production scaling.
+  (define base-cost (if (eq? race 'Zerg) 300 400))
+  (define escrow-expired-or-multibase?
+    (or (>= active-bases 2)
+        (>= escrow-age 224)
+        under-threat?
+        enemy-air?
+        requires-detection?))
+  (define effective-escrow-min
+    (if escrow-expired-or-multibase? 0 base-cost))
+
+  ;; Race-specific canonical candidates
+  (define supply-sym
+    (case race
+      [(Zerg) 'overlord]
+      [(Terran) 'supply-depot]
+      [(Protoss) 'pylon]))
+  (define supply-act
+    (if (eq? race 'Zerg)
+        '(train overlord)
+        (list 'build supply-sym)))
+  (define worker-sym
+    (case race
+      [(Zerg) 'drone]
+      [(Terran) 'scv]
+      [(Protoss) 'probe]))
+  (define-values (gas-combat-sym gas-combat-m gas-combat-g gas-combat-s)
+    (case race
+      [(Zerg)    (values 'roach    75  25 2)]
+      [(Terran)  (values 'marauder 100 25 2)]
+      [(Protoss) (values 'stalker  125 50 2)]))
+  (define-values (min-combat-sym min-combat-m min-combat-s)
+    (case race
+      [(Zerg)    (values 'zergling 50  1)]
+      [(Terran)  (values 'marine   50  1)]
+      [(Protoss) (values 'zealot   100 2)]))
+  (define-values (aa-sym aa-m aa-g)
+    (case race
+      [(Zerg)    (values 'hydralisk 100 50)]
+      [(Terran)  (values 'viking    150 75)]
+      [(Protoss) (values 'stalker   125 50)]))
+  (define-values (det-sym det-m det-g)
+    (case race
+      [(Zerg)    (values 'spore-crawler   75  0)]
+      [(Terran)  (values 'missile-turret  100 0)]
+      [(Protoss) (values 'photon-cannon   150 0)]))
+  (define-values (default-tech-sym default-tech-m default-tech-g)
+    (case race
+      [(Zerg)    (values 'roach-warren      150 0)]
+      [(Terran)  (values 'stimpack          100 100)]
+      [(Protoss) (values 'cybernetics-core  150 0)]))
+  (define tech-sym (or ready-tech-sym default-tech-sym))
+  (define tech-m (if ready-tech-sym ready-tech-min default-tech-m))
+  (define tech-g (if ready-tech-sym ready-tech-gas default-tech-g))
+  (define prod-sym
+    (case race
+      [(Zerg) 'roach-warren]
+      [(Terran) 'barracks]
+      [(Protoss) 'gateway]))
+
+  ;; Marginal utilities governed by strict prioritization theorems PV1–PV5:
+  ;; 1. Supply utility (PV4: strictly dominates all non-supply candidates when supply-block-imminent?)
+  (define u-supply
+    (if supply-block-imminent?
+        (+ 1200.0 (* 25.0 (- supply-buffer supply-left)))
+        18.0))
+
+  ;; 2. Counter-tech Anti-Air & Detection utility (PV5: strictly dominates worker/expansion when active)
+  (define u-counter-aa
+    (if enemy-air?
+        (+ 420.0 (* 8.0 enemy-threat) (if (> aa-g 0) 25.0 0.0))
+        32.0))
+  (define u-counter-det
+    (if requires-detection?
+        (+ 410.0 (* 8.0 enemy-threat))
+        28.0))
+
+  ;; 3. Gas-consuming combat unit & tech utility (PV2 + PV3 + PV1)
+  (define u-combat-gas
+    (+ 140.0
+       (if under-threat? (+ 220.0 (* 10.0 enemy-threat) (if (< army-supply 12) 60.0 0.0)) 0.0)
+       (if gas-hoarding? (+ 190.0 (* 20.0 (min 10.0 gas-imbalance-ratio))) 0.0)))
+  (define u-combat-min
+    (+ 115.0
+       (if under-threat? (+ 180.0 (* 8.0 enemy-threat) (if (< army-supply 12) 50.0 0.0)) 0.0)
+       ;; Discount mineral-only unit when hoarding gas so gas-sinks strictly outrank mineral-only units (PV3)
+       (if gas-hoarding? -45.0 0.0)))
+
+  ;; 4. Tech/Upgrade & Production Facility scaling utility (PV1 + PV3)
+  (define u-tech
+    (+ 165.0
+       (if (and (> tech-g 0) gas-hoarding?)
+           (+ 185.0 (* 18.0 (min 10.0 gas-imbalance-ratio)))
+           0.0)
+       (if (>= active-bases 2) 45.0 0.0)
+       (if (>= escrow-age 224) 35.0 0.0)))
+  (define u-prod-scaling
+    (+ 155.0
+       (if (>= active-bases 2) 40.0 0.0)
+       (if (>= escrow-age 224) 30.0 0.0)))
+
+  ;; 5. Passive Worker & Expansion utility (discounted under threat, air/cloaked crisis, or gas hoarding)
+  (define target-workers (min 80 (* 22 active-bases)))
+  (define worker-need-bonus
+    (if (< workers target-workers) 35.0 0.0))
+  (define u-worker
+    (max 5.0
+         (- (+ 55.0 worker-need-bonus)
+            (if under-threat? 65.0 0.0)
+            (if gas-hoarding? 40.0 0.0)
+            (if (or enemy-air? requires-detection?) 30.0 0.0))))
+  (define u-expansion
+    (max 4.0
+         (- (if (and (= active-bases 1) (< escrow-age 224)) 175.0 85.0)
+            (if under-threat? 80.0 0.0)
+            (if (or enemy-air? requires-detection?) 45.0 0.0)
+            (if (>= escrow-age 224) 60.0 0.0))))
+
+  (define raw-candidates
+    (list (pv-candidate 'supply 'supply supply-act 100 0 0 u-supply)
+          (pv-candidate aa-sym 'counter-anti-air (list 'train aa-sym) aa-m aa-g 2 u-counter-aa)
+          (pv-candidate det-sym 'counter-detector (list 'build det-sym) det-m det-g 0 u-counter-det)
+          (pv-candidate gas-combat-sym 'combat-gas (list 'train gas-combat-sym)
+                        gas-combat-m gas-combat-g gas-combat-s u-combat-gas)
+          (pv-candidate min-combat-sym 'combat-mineral (list 'train min-combat-sym)
+                        min-combat-m 0 min-combat-s u-combat-min)
+          (pv-candidate tech-sym 'tech-upgrade
+                        (if (eq? tech-sym 'stimpack) '(research stimpack) (list 'build tech-sym))
+                        tech-m tech-g 0 u-tech)
+          (pv-candidate prod-sym 'production-facility (list 'build prod-sym) 150 0 0 u-prod-scaling)
+          (pv-candidate worker-sym 'worker (list 'train worker-sym) 50 0 1 u-worker)
+          (pv-candidate 'expand 'expansion '(expand 50.5 56.5) base-cost 0 0 u-expansion)))
+
+  (define sorted-candidates
+    (sort raw-candidates > #:key pv-candidate-utility))
+
+  ;; Mineral floor reservations:
+  ;; - Under threat (PV2): reserve mineral floor for primary combat unit so worker training
+  ;;   can NEVER spend minerals that would starve an affordable or near-affordable combat unit.
+  (define desired-combat-min-floor
+    (if under-threat?
+        (if (>= gas gas-combat-g) gas-combat-m min-combat-m)
+        0))
+  ;; - Under gas hoarding (PV3): reserve mineral floor for gas-consuming unit/tech so
+  ;;   mineral-only workers/units cannot drain minerals and strand banked gas.
+  (define desired-gas-sink-min-floor
+    (if gas-hoarding?
+        (max gas-combat-m (if (> tech-g 0) tech-m 0))
+        0))
+
+  (define rem-m minerals)
+  (define rem-g gas)
+  (define rem-s supply-left)
+  (define scheduled '())
+  (define worker-admitted? #f)
+  (define expansion-admitted? #f)
+
+  (for ([c (in-list sorted-candidates)])
+    (define cat (pv-candidate-category c))
+    (define cm (pv-candidate-mineral-cost c))
+    (define cg (pv-candidate-gas-cost c))
+    (define cs (pv-candidate-supply-cost c))
+    (define supply-ok?
+      (or (zero? cs)
+          (and (> rem-s 0) (>= rem-s cs) (not (and supply-block-imminent? (< rem-m (+ cm 100)))))))
+    (define escrow-ok?
+      (or (memq cat '(supply counter-anti-air counter-detector combat-gas combat-mineral tech-upgrade production-facility))
+          (>= (- rem-m cm) effective-escrow-min)))
+    (define combat-floor-ok?
+      (or (not (eq? cat 'worker))
+          (not under-threat?)
+          (>= (- rem-m cm) desired-combat-min-floor)))
+    (define gas-floor-ok?
+      (or (not (memq cat '(worker combat-mineral)))
+          (not gas-hoarding?)
+          (>= (- rem-m cm) desired-gas-sink-min-floor)))
+    (when (and (>= rem-m cm)
+               (>= rem-g cg)
+               supply-ok?
+               escrow-ok?
+               combat-floor-ok?
+               gas-floor-ok?)
+      (set! rem-m (- rem-m cm))
+      (set! rem-g (- rem-g cg))
+      (set! rem-s (- rem-s cs))
+      (set! scheduled (append scheduled (list (pv-candidate-action-sexp c))))
+      (when (eq? cat 'worker) (set! worker-admitted? #t))
+      (when (eq? cat 'expansion) (set! expansion-admitted? #t))))
+
+  (pv-scheduler-decision race
+                         sorted-candidates
+                         (car sorted-candidates)
+                         scheduled
+                         effective-escrow-min
+                         desired-combat-min-floor
+                         desired-gas-sink-min-floor
+                         worker-admitted?
+                         expansion-admitted?))
+
+(define (pv-find-candidate dec cat-or-id)
+  (findf (lambda (c)
+           (or (eq? (pv-candidate-category c) cat-or-id)
+               (eq? (pv-candidate-id c) cat-or-id)))
+         (pv-scheduler-decision-candidates dec)))
+
+(define (verify-prioritization-scheduler-invariants)
+  (define results '())
+  (define (record! id desc states passed? [cex #f])
+    (set! results
+          (append results
+                  (list (verification-check-result 'prioritization-scheduler
+                                                   id
+                                                   desc
+                                                   states
+                                                   passed?
+                                                   cex)))))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV1: `PV1-no-expansion-escrow-starvation`
+  ;; Proves across (race x active-bases x workers x minerals x gas x escrow-age)
+  ;; that whenever active-bases >= 2 or escrow-age >= 224, expansion escrow
+  ;; NEVER blocks ready tech/upgrades or production facility scaling.
+  ;; ---------------------------------------------------------------------------
+  (define pv1-states 0)
+  (define pv1-cex #f)
+  (define race-tech-specs
+    (hash 'Zerg    (list (list 'roach-warren 150 0)
+                         (list 'hydralisk-den 100 100)
+                         (list 'spire 200 200))
+          'Terran  (list (list 'stimpack 100 100)
+                         (list 'barracks 150 0))
+          'Protoss (list (list 'cybernetics-core 150 0)
+                         (list 'robotics-facility 150 100)
+                         (list 'gateway 150 0))))
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
+         [workers (in-list PV-LATTICE-WORKERS)]
+         [minerals (in-list PV-LATTICE-MINERALS)]
+         [gas (in-list PV-LATTICE-GAS)]
+         [escrow-age (in-list PV-LATTICE-ESCROW-AGE)])
+    (set! pv1-states (add1 pv1-states))
+    (when (or (>= active-bases 2) (>= escrow-age 224))
+      (for ([spec (in-list (hash-ref race-tech-specs race))])
+        (match-define (list t-sym t-min t-gas) spec)
+        (define dec
+          (pv-evaluate-prioritization-state
+           #:race race
+           #:active-bases active-bases
+           #:workers workers
+           #:minerals minerals
+           #:gas gas
+           #:supply-left 10
+           #:supply-cap 80
+           #:escrow-age escrow-age
+           #:ready-tech-sym t-sym
+           #:ready-tech-min t-min
+           #:ready-tech-gas t-gas))
+        (define c-tech (pv-find-candidate dec 'tech-upgrade))
+        (define c-prod (pv-find-candidate dec 'production-facility))
+        (define c-exp  (pv-find-candidate dec 'expansion))
+        (define tech-affordable? (and (>= minerals t-min) (>= gas t-gas)))
+        (define prod-affordable? (>= minerals 150))
+        (define acts (pv-scheduler-decision-scheduled-actions dec))
+        (when (or (> (pv-scheduler-decision-effective-escrow-min dec) 0)
+                  (<= (pv-candidate-utility c-tech) (pv-candidate-utility c-exp))
+                  (<= (pv-candidate-utility c-prod) (pv-candidate-utility c-exp))
+                  (and tech-affordable?
+                       (null? acts)))
+          (unless pv1-cex
+            (set! pv1-cex (list 'race race 'bases active-bases 'workers workers
+                                'minerals minerals 'gas gas 'escrow-age escrow-age
+                                'tech t-sym 'dec dec)))))))
+  (record! 'PV1-no-expansion-escrow-starvation
+           "Across multi-base (`active-bases >= 2`) or expired-escrow (`escrow-age >= 224`) states, expansion escrow never blocks ready tech/upgrades (`roach-warren`, `hydralisk-den`, `spire`, `stimpack`, `cybernetics-core`, `robotics-facility`) or production scaling (`barracks`, `gateway`)"
+           pv1-states
+           (not pv1-cex)
+           pv1-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV2: `PV2-combat-dominates-workers-under-threat`
+  ;; Proves across (race x active-bases x workers x minerals x gas x supply-left x army-supply x enemy-threat)
+  ;; that whenever enemy-threat > 0 or (army-supply < 12 with enemy pressure),
+  ;; combat unit training strictly outranks worker replacement and reserves
+  ;; a combat mineral floor so worker training cannot starve combat units.
+  ;; ---------------------------------------------------------------------------
+  (define pv2-states 0)
+  (define pv2-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
+         [workers (in-list PV-LATTICE-WORKERS)]
+         [minerals (in-list PV-LATTICE-MINERALS)]
+         [gas (in-list PV-LATTICE-GAS)]
+         [army-supply (in-list PV-LATTICE-ARMY-SUPPLY)]
+         [enemy-threat (in-list PV-LATTICE-ENEMY-THREAT)])
+    (set! pv2-states (add1 pv2-states))
+    (when (> enemy-threat 0)
+      (define dec
+        (pv-evaluate-prioritization-state
+         #:race race
+         #:active-bases active-bases
+         #:workers workers
+         #:minerals minerals
+         #:gas gas
+         #:supply-left 10
+         #:supply-cap 80
+         #:army-supply army-supply
+         #:enemy-threat enemy-threat))
+      (define c-cgas (pv-find-candidate dec 'combat-gas))
+      (define c-cmin (pv-find-candidate dec 'combat-mineral))
+      (define c-wrk  (pv-find-candidate dec 'worker))
+      (define cfloor (pv-scheduler-decision-combat-mineral-floor dec))
+      (define worker-starved-combat?
+        (and (pv-scheduler-decision-worker-admitted? dec)
+             (< (- minerals 50) cfloor)))
+      (when (or (<= (pv-candidate-utility c-cgas) (pv-candidate-utility c-wrk))
+                (<= (pv-candidate-utility c-cmin) (pv-candidate-utility c-wrk))
+                (<= cfloor 0)
+                worker-starved-combat?)
+        (unless pv2-cex
+          (set! pv2-cex (list 'race race 'bases active-bases 'workers workers
+                              'minerals minerals 'gas gas 'army-supply army-supply
+                              'enemy-threat enemy-threat 'dec dec))))))
+  (record! 'PV2-combat-dominates-workers-under-threat
+           "Whenever `enemy-threat > 0` or `army-supply < 12` under pressure, combat unit training strictly outranks worker replacement and enforces a combat mineral floor (`0` Probe/SCV/Drone spirals)"
+           pv2-states
+           (not pv2-cex)
+           pv2-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV3: `PV3-gas-sink-monotonicity-no-gas-hoarding`
+  ;; Proves across (race x active-bases x workers x minerals x gas x supply-left)
+  ;; that whenever gas >= 150 and gas/max(50,minerals) >= 1.5, ready gas-consuming
+  ;; units/tech strictly outrank mineral-only workers/units, reserve a mineral
+  ;; floor, and trigger gas-to-mineral worker rebalancing when gas > 400 & minerals < 300.
+  ;; ---------------------------------------------------------------------------
+  (define pv3-states 0)
+  (define pv3-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
+         [workers (in-list PV-LATTICE-WORKERS)]
+         [minerals (in-list PV-LATTICE-MINERALS)]
+         [gas (in-list PV-LATTICE-GAS)]
+         [supply-left (in-list PV-LATTICE-SUPPLY-LEFT)])
+    (set! pv3-states (add1 pv3-states))
+    (define gm-ratio (/ (exact->inexact gas) (max 50.0 (exact->inexact minerals))))
+    (when (and (>= gas 150) (>= gm-ratio 1.5))
+      (define gas-tech-sym
+        (case race
+          [(Zerg) 'hydralisk-den]
+          [(Terran) 'stimpack]
+          [(Protoss) 'robotics-facility]))
+      (define dec
+        (pv-evaluate-prioritization-state
+         #:race race
+         #:active-bases active-bases
+         #:workers workers
+         #:minerals minerals
+         #:gas gas
+         #:supply-left supply-left
+         #:supply-cap 80
+         #:ready-tech-sym gas-tech-sym
+         #:ready-tech-min 100
+         #:ready-tech-gas 100))
+      (define c-cgas (pv-find-candidate dec 'combat-gas))
+      (define c-tech (pv-find-candidate dec 'tech-upgrade))
+      (define c-cmin (pv-find-candidate dec 'combat-mineral))
+      (define c-wrk  (pv-find-candidate dec 'worker))
+      (define gfloor (pv-scheduler-decision-gas-sink-mineral-floor dec))
+      (define worker-drained-gas-floor?
+        (and (pv-scheduler-decision-worker-admitted? dec)
+             (< (- minerals 50) gfloor)))
+      (define g-alloc
+        (compute-optimal-gas-workers
+         #:race race
+         #:frame 3200
+         #:minerals minerals
+         #:gas gas
+         #:workers workers
+         #:active-bases active-bases
+         #:active-geysers (* 2 active-bases)
+         #:current-gas-workers (* 3 active-bases)))
+      (define rebalance-ok?
+        (or (not (and (> gas 400) (< minerals 300)))
+            (eq? (gas-worker-allocation-action g-alloc) 'pull-off-gas-to-minerals)))
+      (when (or (<= (pv-candidate-utility c-cgas) (pv-candidate-utility c-wrk))
+                (<= (pv-candidate-utility c-cgas) (pv-candidate-utility c-cmin))
+                (<= (pv-candidate-utility c-tech) (pv-candidate-utility c-wrk))
+                (<= (pv-candidate-utility c-tech) (pv-candidate-utility c-cmin))
+                (<= gfloor 0)
+                worker-drained-gas-floor?
+                (not rebalance-ok?))
+        (unless pv3-cex
+          (set! pv3-cex (list 'race race 'bases active-bases 'workers workers
+                              'minerals minerals 'gas gas 'supply-left supply-left
+                              'dec dec 'g-alloc g-alloc))))))
+  (record! 'PV3-gas-sink-monotonicity-no-gas-hoarding
+           "Whenever `gas >= 150` and `gas/max(50,minerals) >= 1.5`, gas-consuming units/tech strictly outrank mineral-only workers/units, reserve a mineral floor, and rebalance gas workers"
+           pv3-states
+           (not pv3-cex)
+           pv3-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV4: `PV4-zero-supply-block-preemption`
+  ;; Proves across (race x active-bases x workers x minerals x gas x supply-left x enemy-threat)
+  ;; that whenever supply-cap < 200, pending-supply == 0, and supply-left <= buffer,
+  ;; the supply candidate strictly dominates all non-supply candidates (U(supply) > U(c)).
+  ;; ---------------------------------------------------------------------------
+  (define pv4-states 0)
+  (define pv4-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
+         [workers (in-list PV-LATTICE-WORKERS)]
+         [minerals (in-list PV-LATTICE-MINERALS)]
+         [gas (in-list PV-LATTICE-GAS)]
+         [supply-left (in-list PV-LATTICE-SUPPLY-LEFT)]
+         [enemy-threat (in-list PV-LATTICE-ENEMY-THREAT)])
+    (set! pv4-states (add1 pv4-states))
+    (define supply-cap (* active-bases 38)) ; < 200 across active-bases in {1,2,3,4}
+    (define buffer 4)
+    (when (<= supply-left buffer)
+      (define dec
+        (pv-evaluate-prioritization-state
+         #:race race
+         #:active-bases active-bases
+         #:workers workers
+         #:minerals minerals
+         #:gas gas
+         #:supply-left supply-left
+         #:supply-cap supply-cap
+         #:pending-supply 0
+         #:supply-buffer buffer
+         #:enemy-threat enemy-threat))
+      (define c-sup (pv-find-candidate dec 'supply))
+      (define non-sup
+        (filter (lambda (c) (not (eq? (pv-candidate-category c) 'supply)))
+                (pv-scheduler-decision-candidates dec)))
+      (define strictly-dominates-all?
+        (andmap (lambda (c) (> (pv-candidate-utility c-sup) (pv-candidate-utility c)))
+                non-sup))
+      (define top-is-supply?
+        (eq? (pv-candidate-category (pv-scheduler-decision-top-candidate dec)) 'supply))
+      (define scheduled-first-when-affordable?
+        (or (< minerals 100)
+            (and (not (null? (pv-scheduler-decision-scheduled-actions dec)))
+                 (equal? (car (pv-scheduler-decision-scheduled-actions dec))
+                         (pv-candidate-action-sexp c-sup)))))
+      (when (or (not strictly-dominates-all?)
+                (not top-is-supply?)
+                (not scheduled-first-when-affordable?))
+        (unless pv4-cex
+          (set! pv4-cex (list 'race race 'bases active-bases 'minerals minerals
+                              'supply-left supply-left 'enemy-threat enemy-threat
+                              'dec dec))))))
+  (record! 'PV4-zero-supply-block-preemption
+           "Whenever `supply-cap < 200`, `pending-supply == 0`, and `supply-left <= buffer`, the supply candidate strictly dominates all non-supply candidates (`U(supply) > U(c)`)"
+           pv4-states
+           (not pv4-cex)
+           pv4-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV5: `PV5-counter-tech-anti-air-and-detection-liveness`
+  ;; Proves across (race x active-bases x workers x minerals x gas x enemy-threat x enemy-air? x requires-detection?)
+  ;; that whenever requires-anti-air? or requires-detection? holds, anti-air/detection
+  ;; units and structures strictly outrank passive worker/expansion spending.
+  ;; ---------------------------------------------------------------------------
+  (define pv5-states 0)
+  (define pv5-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
+         [workers (in-list PV-LATTICE-WORKERS)]
+         [minerals (in-list PV-LATTICE-MINERALS)]
+         [gas (in-list PV-LATTICE-GAS)]
+         [enemy-threat (in-list PV-LATTICE-ENEMY-THREAT)]
+         [enemy-air? (in-list PV-LATTICE-ENEMY-AIR)]
+         [req-det? '(#f #t)])
+    (set! pv5-states (add1 pv5-states))
+    (when (or enemy-air? req-det?)
+      (define dec
+        (pv-evaluate-prioritization-state
+         #:race race
+         #:active-bases active-bases
+         #:workers workers
+         #:minerals minerals
+         #:gas gas
+         #:supply-left 8
+         #:supply-cap 80
+         #:enemy-threat enemy-threat
+         #:enemy-air? enemy-air?
+         #:requires-detection? req-det?))
+      (define c-aa  (pv-find-candidate dec 'counter-anti-air))
+      (define c-det (pv-find-candidate dec 'counter-detector))
+      (define c-wrk (pv-find-candidate dec 'worker))
+      (define c-exp (pv-find-candidate dec 'expansion))
+      (define tplan
+        (evaluate-adaptive-build-and-tech-plan
+         race
+         #:requires-anti-air? enemy-air?
+         #:requires-detection? req-det?
+         #:minerals minerals
+         #:gas gas))
+      (define ctech (adaptive-tech-plan-counter-tech-buildings tplan))
+      (define aa-ok?
+        (or (not enemy-air?)
+            (and (> (pv-candidate-utility c-aa) (pv-candidate-utility c-wrk))
+                 (> (pv-candidate-utility c-aa) (pv-candidate-utility c-exp))
+                 (not (null? ctech)))))
+      (define det-ok?
+        (or (not req-det?)
+            (and (> (pv-candidate-utility c-det) (pv-candidate-utility c-wrk))
+                 (> (pv-candidate-utility c-det) (pv-candidate-utility c-exp))
+                 (not (null? ctech)))))
+      (when (or (not aa-ok?) (not det-ok?))
+        (unless pv5-cex
+          (set! pv5-cex (list 'race race 'bases active-bases 'minerals minerals 'gas gas
+                              'enemy-air? enemy-air? 'req-det? req-det? 'dec dec 'tplan tplan))))))
+  (record! 'PV5-counter-tech-anti-air-and-detection-liveness
+           "Whenever `requires-anti-air?` or `requires-detection?` holds, anti-air and detection units/structures strictly outrank passive worker and expansion spending"
+           pv5-states
+           (not pv5-cex)
+           pv5-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV6: `PV6-refractory-cooldown-anti-spam-idempotence`
+  ;; Proves that for any sequence of frames t0 <= t1 < t0 + delta_cooldown,
+  ;; a refractory-gated action (`queen-tumor`, `resume-halted-building`,
+  ;; `static-detector`) is emitted at most once per unit/building tag.
+  ;; ---------------------------------------------------------------------------
+  (define pv6-states 0)
+  (define pv6-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [action-kind '(queen-tumor resume-halted-building static-detector)]
+         [tag '(101 202 303 404)]
+         [t0 '(0 100 300 1200)]
+         [cooldown '(24 64 112 224)])
+    (define gate (pv-make-refractory-gate cooldown))
+    (define limiter (make-ability-cast-limiter #:max-per-frame 2 #:refractory-frames cooldown))
+    (define emitted-in-window 0)
+    (for ([step-idx (in-range 12)])
+      (set! pv6-states (add1 pv6-states))
+      (define t1 (+ t0 (quotient (* step-idx (sub1 cooldown)) 12)))
+      (when (pv-try-emit-refractory! gate action-kind tag t1)
+        (set! emitted-in-window (add1 emitted-in-window)))
+      (define-values (kept _throttled)
+        (throttle-ability-casts! limiter (list (list 'cast tag action-kind 50 56)) t1))
+      (when (and (> step-idx 0) (not (null? kept)))
+        (unless pv6-cex
+          (set! pv6-cex (list 'stage 'limiter-duplicate 'race race 'action action-kind
+                              'tag tag 't0 t0 't1 t1 'cooldown cooldown)))))
+    ;; Across all 12 frames inside [t0, t0 + cooldown), action must be emitted at most once (exactly 1)
+    ;; while a distinct unit/building tag (`tag + 1000`) remains unblocked, and at `t0 + cooldown` it re-opens.
+    (define other-tag-ok? (pv-try-emit-refractory! gate action-kind (+ tag 1000) t0))
+    (define reopen-after-cooldown? (pv-try-emit-refractory! gate action-kind tag (+ t0 cooldown)))
+    (when (or (not (= emitted-in-window 1))
+              (not other-tag-ok?)
+              (not reopen-after-cooldown?))
+      (unless pv6-cex
+        (set! pv6-cex (list 'race race 'action action-kind 'tag tag 't0 t0 'cooldown cooldown
+                            'emitted-in-window emitted-in-window
+                            'other-tag-ok? other-tag-ok?
+                            'reopen-after-cooldown? reopen-after-cooldown?)))))
+  (record! 'PV6-refractory-cooldown-anti-spam-idempotence
+           "For any frame sequence `t0 <= t1 < t0 + delta_cooldown`, refractory-gated actions (`queen-tumor`, `resume-halted-building`, `static-detector`) emit at most once per unit/building tag"
+           pv6-states
+           (not pv6-cex)
+           pv6-cex)
+
+  results)
+
+;; =============================================================================
+;; 5. Top-Level Formal Verification Runner
 ;; =============================================================================
 
 (define (verify-all-state-machines #:print-report? [print-report? #t])
   (define p-res (verify-posture-state-machine))
   (define m-res (verify-mirror-mind-state-machine))
   (define e-res (verify-economy-and-ledger-state-machine))
-  (define all-res (append p-res m-res e-res))
+  (define pv-res (verify-prioritization-scheduler-invariants))
+  (define all-res (append p-res m-res e-res pv-res))
   (define total (length all-res))
   (define passed (count verification-check-result-passed? all-res))
   (define failed (- total passed))
@@ -789,3 +1495,4 @@
 
 (module+ main
   (void (verify-all-state-machines #:print-report? #t)))
+

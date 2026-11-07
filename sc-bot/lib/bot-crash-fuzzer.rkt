@@ -568,10 +568,10 @@
           (with-handlers ([exn:fail? (lambda (_e) (hash))])
             (parse-frame-state-sexp obs))]
          [else (hash)]))
-     (define base-x-raw (hash-ref h 'base-x 700))
-     (define base-y-raw (hash-ref h 'base-y 760))
-     (define base-x (if (finite-real? base-x-raw) base-x-raw 700))
-     (define base-y (if (finite-real? base-y-raw) base-y-raw 760))
+     (define base-x-raw (hash-ref h 'base-x 32.5))
+     (define base-y-raw (hash-ref h 'base-y 32.5))
+     (define base-x (if (finite-real? base-x-raw) base-x-raw 32.5))
+     (define base-y (if (finite-real? base-y-raw) base-y-raw 32.5))
      (define enemy-units
        (let ([eu (hash-ref h 'enemy-units '())])
          (if (list? eu) eu '())))
@@ -583,14 +583,14 @@
                  (<= (safe-dist2d base-x base-y
                                   (extract-coord e 'x 9999)
                                   (extract-coord e 'y 9999))
-                     320))
+                     12.0))
                enemy-units))
      (define nearby-bldgs
        (filter (lambda (b)
                  (<= (safe-dist2d base-x base-y
                                   (extract-coord b 'x 9999)
                                   (extract-coord b 'y 9999))
-                     320))
+                     12.0))
                enemy-bldgs))
      (define relevant-units
        (if (not (null? nearby-units)) nearby-units enemy-units))
@@ -768,8 +768,8 @@
   (define u1
     (hash 'id (field-val 0 101)
           'type (prng-pick prng (hash-ref SAMPLE-ALLY-UNITS-BY-RACE race '(drone roach)))
-          'x (field-val 6 700)
-          'y (field-val 7 760)
+          'x (field-val 6 32.5)
+          'y (field-val 7 32.5)
           'hp (field-val 8 45)
           'max-hp (field-val 9 45)
           'hp-pct (field-val 10 1.0)
@@ -778,8 +778,8 @@
   (define b1
     (hash 'id 201
           'type (prng-pick prng (hash-ref SAMPLE-ALLY-BLDGS-BY-RACE race '(hatchery spawning-pool)))
-          'x (field-val 6 700)
-          'y (field-val 7 760)
+          'x (field-val 6 32.5)
+          'y (field-val 7 32.5)
           'hp (field-val 8 1500)
           'max-hp (field-val 9 1500)
           'hp-pct (field-val 10 1.0)
@@ -789,8 +789,8 @@
   (define e1
     (hash 'id 901
           'type (prng-pick prng SAMPLE-ENEMY-UNITS)
-          'x (field-val 6 1024)
-          'y (field-val 7 1120)
+          'x (field-val 6 50.5)
+          'y (field-val 7 56.5)
           'hp (field-val 8 80)
           'max-hp (field-val 9 80)
           'hp-pct (field-val 10 0.5)
@@ -805,17 +805,17 @@
         'supply-used (field-val 3 24)
         'supply-cap (field-val 4 30)
         'supply-left (field-val 5 6)
-        'base-x (field-val 6 700)
-        'base-y (field-val 7 760)
-        'natural-x (field-val 6 1024)
-        'natural-y (field-val 7 1120)
+        'base-x (field-val 6 32.5)
+        'base-y (field-val 7 32.5)
+        'natural-x (field-val 6 50.5)
+        'natural-y (field-val 7 56.5)
         'ally-units (list u1)
         'ally-buildings (list b1)
         'enemy-units (list e1)
         'enemy-buildings (list (hash 'id 950
                                      'type 'nexus
-                                     'x (field-val 6 1600)
-                                     'y (field-val 7 1600)
+                                     'x (field-val 6 160.5)
+                                     'y (field-val 7 160.5)
                                      'hp (field-val 8 1500)
                                      'max-hp (field-val 9 1500)
                                      'hp-pct (field-val 10 1.0)
@@ -845,8 +845,8 @@
 (define (generate-degenerate-game-state-frame prng idx [race 'Zerg])
   (define kind (list-ref DEGENERATE-SCENARIO-KINDS (modulo idx (length DEGENERATE-SCENARIO-KINDS))))
   (define eff-race (if (eq? race 'Random) (list-ref '(Zerg Protoss Terran) (modulo idx 3)) race))
-  (define base-x 700)
-  (define base-y 760)
+  (define base-x 32.5)
+  (define base-y 32.5)
   (case kind
     ;; 1. 0 ally units and 0 ally buildings (total base elimination / last unit standing)
     [(zero-ally-elimination)
@@ -863,8 +863,8 @@
            'base-y base-y
            'ally-units '()
            'ally-buildings '()
-           'enemy-units (list (hash 'id 901 'type 'stalker 'x 710 'y 770 'hp 80 'max-hp 80))
-           'enemy-buildings (list (hash 'id 950 'type 'nexus 'x 1600 'y 1600 'hp 1500)))]
+           'enemy-units (list (hash 'id 901 'type 'stalker 'x 34.0 'y 34.0 'hp 80 'max-hp 80))
+           'enemy-buildings (list (hash 'id 950 'type 'nexus 'x 160.5 'y 160.5 'hp 1500)))]
 
     ;; 2. 0 enemy units and 0 enemy buildings (total fog of war)
     [(total-fog-of-war)
@@ -881,13 +881,13 @@
            'ally-units (for/list ([i (in-range 6)])
                          (hash 'id (+ 100 i)
                                'type (prng-pick prng (hash-ref SAMPLE-ALLY-UNITS-BY-RACE eff-race))
-                               'x (+ base-x (* i 12))
-                               'y (+ base-y (* i 12))
+                               'x (+ base-x (* i 1.5))
+                               'y (+ base-y (* i 1.5))
                                'hp 100
                                'max-hp 100))
            'ally-buildings (for/list ([b (in-list (hash-ref SAMPLE-ALLY-BLDGS-BY-RACE eff-race))]
                                       [i (in-naturals)])
-                             (hash 'id (+ 200 i) 'type b 'x (+ base-x (* i 20)) 'y base-y 'hp 1000))
+                             (hash 'id (+ 200 i) 'type b 'x (+ base-x (* i 2.5)) 'y base-y 'hp 1000))
            'enemy-units '()
            'enemy-buildings '())]
 
@@ -906,15 +906,15 @@
            'ally-units (for/list ([i (in-range 20)])
                          (hash 'id (+ 100 i)
                                'type (prng-pick prng (hash-ref SAMPLE-ALLY-UNITS-BY-RACE eff-race))
-                               'x (+ base-x (* i 8))
-                               'y (+ base-y (* i 8))
+                               'x (+ base-x (* i 1.0))
+                               'y (+ base-y (* i 1.0))
                                'hp 120
                                'max-hp 120))
            'ally-buildings (for/list ([b (in-list (hash-ref SAMPLE-ALLY-BLDGS-BY-RACE eff-race))]
                                       [i (in-naturals)])
-                             (hash 'id (+ 200 i) 'type b 'x (+ base-x (* i 16)) 'y base-y 'hp 1200))
-           'enemy-units (list (hash 'id 901 'type 'thor 'x 1300 'y 1300 'hp 400 'max-hp 400))
-           'enemy-buildings (list (hash 'id 950 'type 'command-center 'x 1600 'y 1600 'hp 1500)))]
+                             (hash 'id (+ 200 i) 'type b 'x (+ base-x (* i 2.0)) 'y base-y 'hp 1200))
+           'enemy-units (list (hash 'id 901 'type 'thor 'x 110.0 'y 110.0 'hp 400 'max-hp 400))
+           'enemy-buildings (list (hash 'id 950 'type 'command-center 'x 160.5 'y 160.5 'hp 1500)))]
 
     ;; 4. 0 minerals, 0 gas, 0 supply-left under massive 50-unit enemy attack at (base-x, base-y)
     [(zero-econ-50-enemy-swarm)
@@ -932,15 +932,15 @@
            'ally-units (list (hash 'id 101 'type (case eff-race [(Zerg) 'drone] [(Protoss) 'probe] [else 'scv])
                                    'x base-x 'y base-y 'hp 20 'max-hp 40)
                              (hash 'id 102 'type (case eff-race [(Zerg) 'queen] [(Protoss) 'zealot] [else 'marine])
-                                   'x (+ base-x 16) 'y base-y 'hp 45 'max-hp 100))
+                                   'x (+ base-x 2.0) 'y base-y 'hp 45 'max-hp 100))
            'ally-buildings (list (hash 'id 201
                                        'type (case eff-race [(Zerg) 'hatchery] [(Protoss) 'nexus] [else 'command-center])
                                        'x base-x 'y base-y 'hp 120 'max-hp 1500 'hp-pct 0.08 'build-progress 0.6))
            'enemy-units (for/list ([i (in-range 50)])
                           (hash 'id (+ 900 i)
                                 'type (prng-pick prng '(zergling marine zealot baneling reaper))
-                                'x (+ base-x (modulo i 10))
-                                'y (+ base-y (quotient i 10))
+                                'x (+ base-x (* 0.5 (modulo i 10)))
+                                'y (+ base-y (* 0.5 (quotient i 10)))
                                 'hp 40
                                 'max-hp 45))
            'enemy-buildings '())]
@@ -961,19 +961,19 @@
            'ally-units (for/list ([i (in-range 8)])
                          (hash 'id (+ 10 i)
                                'type (case eff-race [(Zerg) 'drone] [(Protoss) 'probe] [else 'scv])
-                               'x (+ base-x (* i 4))
-                               'y (+ base-y (* i 4))
+                               'x (+ base-x (* i 0.5))
+                               'y (+ base-y (* i 0.5))
                                'hp 40
                                'max-hp 40))
            'ally-buildings (for/list ([b (in-list (hash-ref SAMPLE-ALLY-BLDGS-BY-RACE eff-race))]
                                       [i (in-naturals)])
-                             (hash 'id (+ 200 i) 'type b 'x (+ base-x (* i 18)) 'y base-y 'hp 1000))
+                             (hash 'id (+ 200 i) 'type b 'x (+ base-x (* i 2.0)) 'y base-y 'hp 1000))
            'enemy-units (list (hash 'id 901 'type 'mutalisk 'x base-x 'y base-y 'hp 120 'max-hp 120)
-                              (hash 'id 902 'type 'void-ray 'x (+ base-x 10) 'y base-y 'hp 150 'max-hp 150 'shield 100)
-                              (hash 'id 903 'type 'banshee 'x base-x 'y (+ base-y 10) 'hp 140 'max-hp 140 'cloaked #t)
-                              (hash 'id 904 'type 'carrier 'x (+ base-x 15) 'y (+ base-y 15) 'hp 300 'max-hp 300 'shield 150)
+                              (hash 'id 902 'type 'void-ray 'x (+ base-x 2.0) 'y base-y 'hp 150 'max-hp 150 'shield 100)
+                              (hash 'id 903 'type 'banshee 'x base-x 'y (+ base-y 2.0) 'hp 140 'max-hp 140 'cloaked #t)
+                              (hash 'id 904 'type 'carrier 'x (+ base-x 3.0) 'y (+ base-y 3.0) 'hp 300 'max-hp 300 'shield 150)
                               (hash 'id 905 'type 'overlord 'x base-x 'y base-y 'hp 200 'max-hp 200)
-                              (hash 'id 906 'type 'observer 'x (+ base-x 5) 'y (+ base-y 5) 'hp 40 'max-hp 40 'cloaked #t))
+                              (hash 'id 906 'type 'observer 'x (+ base-x 1.0) 'y (+ base-y 1.0) 'hp 40 'max-hp 40 'cloaked #t))
            'enemy-buildings '())]
 
     ;; 5b. Only flying non-combat scouts (overlord, overseer, observer) right on top of (base-x, base-y)
@@ -992,16 +992,16 @@
            'ally-units (for/list ([i (in-range 12)])
                          (hash 'id (+ 10 i)
                                'type (case eff-race [(Zerg) 'drone] [(Protoss) 'probe] [else 'scv])
-                               'x (+ base-x (* i 4))
-                               'y (+ base-y (* i 4))
+                               'x (+ base-x (* i 0.5))
+                               'y (+ base-y (* i 0.5))
                                'hp 40
                                'max-hp 40))
            'ally-buildings (list (hash 'id 201
                                        'type (case eff-race [(Zerg) 'hatchery] [(Protoss) 'nexus] [else 'command-center])
                                        'x base-x 'y base-y 'hp 1500 'max-hp 1500))
-           'enemy-units (list (hash 'id 901 'type 'overlord 'x (+ base-x 20) 'y (+ base-y 20) 'hp 200 'max-hp 200)
-                              (hash 'id 902 'type 'overseer 'x (+ base-x 30) 'y (+ base-y 30) 'hp 200 'max-hp 200)
-                              (hash 'id 903 'type 'observer 'x (+ base-x 15) 'y (+ base-y 15) 'hp 40 'max-hp 40))
+           'enemy-units (list (hash 'id 901 'type 'overlord 'x (+ base-x 2.5) 'y (+ base-y 2.5) 'hp 200 'max-hp 200)
+                              (hash 'id 902 'type 'overseer 'x (+ base-x 3.5) 'y (+ base-y 3.5) 'hp 200 'max-hp 200)
+                              (hash 'id 903 'type 'observer 'x (+ base-x 1.5) 'y (+ base-y 1.5) 'hp 40 'max-hp 40))
            'enemy-buildings '())]
 
     ;; 6. Changelings and hallucinations mixed with real units
@@ -1017,18 +1017,18 @@
            'supply-left 14
            'base-x base-x
            'base-y base-y
-           'ally-units (list (hash 'id 101 'type 'sentry 'x 900 'y 950 'hp 40 'energy 100)
-                             (hash 'id 102 'type 'overseer 'x 910 'y 955 'hp 200 'energy 100)
-                             (hash 'id 103 'type 'roach 'x 920 'y 960 'hp 145))
+           'ally-units (list (hash 'id 101 'type 'sentry 'x 50.0 'y 56.0 'hp 40 'energy 100)
+                             (hash 'id 102 'type 'overseer 'x 51.0 'y 57.0 'hp 200 'energy 100)
+                             (hash 'id 103 'type 'roach 'x 52.0 'y 58.0 'hp 145))
            'ally-buildings (list (hash 'id 201 'type 'hatchery 'x base-x 'y base-y 'hp 1500))
-           'enemy-units (list (hash 'id 901 'type 'changeling 'x 720 'y 770 'hp 50 'changeling? #t)
-                              (hash 'id 902 'type 'changeling-zealot 'x 730 'y 775 'hp 50 'changeling? #t)
-                              (hash 'id 903 'type 'changeling-zergling 'x 740 'y 780 'hp 50 'changeling? #t)
-                              (hash 'id 904 'type 'changeling-marine 'x 750 'y 785 'hp 50 'changeling? #t)
-                              (hash 'id 905 'type 'phoenix 'x 950 'y 980 'hp 120 'hallucination? #t 'damage-rate-ratio 2.0)
-                              (hash 'id 906 'type 'colossus 'x 960 'y 990 'hp 200 'hallucination #t 'damage-taken-multiplier 2.0)
-                              (hash 'id 907 'type 'stalker 'x 1100 'y 1150 'hp 80 'shield 80))
-           'enemy-buildings (list (hash 'id 950 'type 'gateway 'x 1550 'y 1550 'hp 1000)))]
+           'enemy-units (list (hash 'id 901 'type 'changeling 'x 34.0 'y 34.0 'hp 50 'changeling? #t)
+                              (hash 'id 902 'type 'changeling-zealot 'x 35.0 'y 35.0 'hp 50 'changeling? #t)
+                              (hash 'id 903 'type 'changeling-zergling 'x 36.0 'y 36.0 'hp 50 'changeling? #t)
+                              (hash 'id 904 'type 'changeling-marine 'x 37.0 'y 37.0 'hp 50 'changeling? #t)
+                              (hash 'id 905 'type 'phoenix 'x 55.0 'y 60.0 'hp 120 'hallucination? #t 'damage-rate-ratio 2.0)
+                              (hash 'id 906 'type 'colossus 'x 56.0 'y 61.0 'hp 200 'hallucination #t 'damage-taken-multiplier 2.0)
+                              (hash 'id 907 'type 'stalker 'x 75.0 'y 80.0 'hp 80 'shield 80))
+           'enemy-buildings (list (hash 'id 950 'type 'gateway 'x 155.0 'y 155.0 'hp 1000)))]
 
     ;; 7. All bases mined-out (mined-out? = #t, depleting-bases = 4)
     [(all-bases-mined-out)
@@ -1047,18 +1047,18 @@
            'ally-units (for/list ([i (in-range 16)])
                          (hash 'id (+ 10 i)
                                'type (case eff-race [(Zerg) 'drone] [(Protoss) 'probe] [else 'scv])
-                               'x (+ base-x (* i 6))
+                               'x (+ base-x (* i 0.5))
                                'y base-y
                                'hp 40))
            'ally-buildings (for/list ([i (in-range 4)])
                              (hash 'id (+ 200 i)
                                    'type (case eff-race [(Zerg) 'hatchery] [(Protoss) 'nexus] [else 'orbital-command])
-                                   'x (+ base-x (* i 200))
-                                   'y (+ base-y (* i 150))
+                                   'x (+ base-x (* i 18.0))
+                                   'y (+ base-y (* i 18.0))
                                    'hp 1500
                                    'ideal-harvesters 0
                                    'assigned-harvesters 4))
-           'enemy-units (list (hash 'id 901 'type 'marauder 'x 1500 'y 1500 'hp 125))
+           'enemy-units (list (hash 'id 901 'type 'marauder 'x 145.0 'y 145.0 'hp 125))
            'enemy-buildings '())]
 
     ;; 8. Rapid non-monotonic or huge frame jumps (frame = 0, 1, 2688, 6048, 50000, 0)
@@ -1074,12 +1074,12 @@
            'supply-used 48
            'supply-cap 64
            'supply-left 16
-           'ally-units (list (hash 'id 101 'type 'roach 'x 800 'y 850 'hp 145)
-                             (hash 'id 102 'type 'drone 'x 700 'y 760 'hp 40))
+           'ally-units (list (hash 'id 101 'type 'roach 'x 44.0 'y 48.0 'hp 145)
+                             (hash 'id 102 'type 'drone 'x 32.5 'y 32.5 'hp 40))
            'ally-buildings (hash-map SAMPLE-ALLY-BLDGS-BY-RACE
-                                     (lambda (_k v) (hash 'id 201 'type (car v) 'x 700 'y 760 'hp 1000)))
-           'enemy-units (list (hash 'id 901 'type 'siege-tank 'x 1400 'y 1400 'hp 175))
-           'enemy-buildings (list (hash 'id 950 'type 'factory 'x 1550 'y 1550 'hp 1250)))]
+                                     (lambda (_k v) (hash 'id 201 'type (car v) 'x 32.5 'y 32.5 'hp 1000)))
+           'enemy-units (list (hash 'id 901 'type 'siege-tank 'x 135.0 'y 135.0 'hp 175))
+           'enemy-buildings (list (hash 'id 950 'type 'factory 'x 155.0 'y 155.0 'hp 1250)))]
 
     ;; 9. Unknown/unexpected unit or building symbols from SC2 engine
     [else
@@ -1094,28 +1094,28 @@
            'supply-left 8
            'ally-units (for/list ([sym (in-list ENGINE-UNEXPECTED-UNIT-AND-BUILDING-SYMS)]
                                   [i (in-naturals)])
-                         (hash 'id (+ 500 i) 'type sym 'x (+ 700 (* i 10)) 'y 760 'hp 50 'max-hp 50))
-           'ally-buildings (list (hash 'id 201 'type 'unbuildable-plates 'x 700 'y 760 'hp 500)
-                                 (hash 'id 202 'type 'mineral-field-750 'x 680 'y 740 'hp 1500))
+                         (hash 'id (+ 500 i) 'type sym 'x (+ 32.5 (* i 1.5)) 'y 32.5 'hp 50 'max-hp 50))
+           'ally-buildings (list (hash 'id 201 'type 'unbuildable-plates 'x 32.5 'y 32.5 'hp 500)
+                                 (hash 'id 202 'type 'mineral-field-750 'x 28.0 'y 28.0 'hp 1500))
            'enemy-units (for/list ([sym (in-list ENGINE-UNEXPECTED-UNIT-AND-BUILDING-SYMS)]
                                    [i (in-naturals)])
-                          (hash 'id (+ 800 i) 'type sym 'x (+ 1024 (* i 12)) 'y 1120 'hp 45 'max-hp 45))
-           'enemy-buildings (list (hash 'id 950 'type 'destructible-rock-ex1-vertical-huge 'x 1024 'y 1120 'hp 2000)))]))
+                          (hash 'id (+ 800 i) 'type sym 'x (+ 50.5 (* i 1.5)) 'y 56.5 'hp 45 'max-hp 45))
+           'enemy-buildings (list (hash 'id 950 'type 'destructible-rock-ex1-vertical-huge 'x 50.5 'y 56.5 'hp 2000)))]))
 
 (define (generate-degenerate-game-state-sexp prng idx [race 'Zerg])
   (define obs (generate-degenerate-game-state-frame prng idx race))
   (define (unit->tup u)
     (list (hash-ref u 'id 101)
           (hash-ref u 'type 'drone)
-          (hash-ref u 'x 700)
-          (hash-ref u 'y 760)
+          (hash-ref u 'x 32.5)
+          (hash-ref u 'y 32.5)
           (hash-ref u 'hp 40)
           (hash-ref u 'energy 0)))
   (define (bldg->tup b)
     (list (hash-ref b 'id 201)
           (hash-ref b 'type 'hatchery)
-          (hash-ref b 'x 700)
-          (hash-ref b 'y 760)
+          (hash-ref b 'x 32.5)
+          (hash-ref b 'y 32.5)
           (hash-ref b 'hp-pct 1.0)
           (hash-ref b 'build-progress 1.0)
           (hash-ref b 'halted #f)))
@@ -1127,13 +1127,13 @@
         '#:supply-used (hash-ref obs 'supply-used 12)
         '#:supply-cap (hash-ref obs 'supply-cap 15)
         '#:supply-left (hash-ref obs 'supply-left 3)
-        '#:start-pos (list (hash-ref obs 'base-x 700) (hash-ref obs 'base-y 760))
-        '#:enemy-base (list (hash-ref obs 'enemy-x 1600) (hash-ref obs 'enemy-y 1600))
+        '#:start-pos (list (hash-ref obs 'base-x 32.5) (hash-ref obs 'base-y 32.5))
+        '#:enemy-base (list (hash-ref obs 'enemy-x 160.5) (hash-ref obs 'enemy-y 160.5))
         '#:my-units (map unit->tup (hash-ref obs 'ally-units '()))
         '#:my-buildings (map bldg->tup (hash-ref obs 'ally-buildings '()))
         '#:enemy-units (map unit->tup (hash-ref obs 'enemy-units '()))
         '#:enemy-buildings (map bldg->tup (hash-ref obs 'enemy-buildings '()))
-        '#:effects '((force-field 1024 1120))))
+        '#:effects '((force-field 50.5 56.5))))
 
 ;; 3.3 Randomized Property-Based Frame & S-Expression Generator
 (define (generate-random-property-frame prng idx [race 'Zerg])
@@ -1164,26 +1164,26 @@
         'mined-out (= (prng 10) 0)
         'under-cheese-rush (= (prng 12) 0)
         'natural-blocked (= (prng 12) 0)
-        'nuke-alert (if (= (prng 20) 0) (cons 1024 1120) #f)
-        'base-x 700
-        'base-y 760
-        'natural-x 1024
-        'natural-y 1120
-        'enemy-x 1600
-        'enemy-y 1600
+        'nuke-alert (if (= (prng 20) 0) (cons 50.5 56.5) #f)
+        'base-x 32.5
+        'base-y 32.5
+        'natural-x 50.5
+        'natural-y 56.5
+        'enemy-x 160.5
+        'enemy-y 160.5
         'ally-units (for/list ([i (in-range n-ally)])
                       (hash 'id (+ 100 i)
                             'type (prng-pick prng ally-unit-pool)
-                            'x (+ 640 (prng 600))
-                            'y (+ 700 (prng 600))
+                            'x (+ 24.0 (prng 60))
+                            'y (+ 24.0 (prng 60))
                             'hp (+ 10 (prng 180))
                             'max-hp (+ 40 (prng 200))
                             'energy (prng 150)))
         'ally-buildings (for/list ([i (in-range n-bldg)])
                           (hash 'id (+ 200 i)
                                 'type (list-ref ally-bldg-pool (modulo i (length ally-bldg-pool)))
-                                'x (+ 680 (* i 24))
-                                'y (+ 740 (* i 16))
+                                'x (+ 28.0 (* i 3.0))
+                                'y (+ 28.0 (* i 2.5))
                                 'hp (+ 100 (prng 1400))
                                 'max-hp 1500
                                 'hp-pct (/ (+ 10.0 (prng 90)) 100.0)
@@ -1193,8 +1193,8 @@
         'enemy-units (for/list ([i (in-range n-enemy)])
                        (hash 'id (+ 900 i)
                              'type (prng-pick prng SAMPLE-ENEMY-UNITS)
-                             'x (+ 680 (prng 1000))
-                             'y (+ 740 (prng 1000))
+                             'x (+ 28.0 (prng 140))
+                             'y (+ 28.0 (prng 140))
                              'hp (+ 15 (prng 200))
                              'max-hp 200
                              'cloaked (= (prng 8) 0)
@@ -1202,8 +1202,8 @@
         'enemy-buildings (for/list ([i (in-range n-ebldg)])
                            (hash 'id (+ 950 i)
                                  'type (prng-pick prng '(hatchery lair spire roach-warren nexus gateway stargate robotics-facility command-center barracks factory starport photon-cannon bunker spine-crawler assimilator extractor refinery))
-                                 'x (+ 720 (prng 950))
-                                 'y (+ 780 (prng 950))
+                                 'x (+ 32.0 (prng 140))
+                                 'y (+ 32.0 (prng 140))
                                  'hp (+ 200 (prng 1300))
                                  'max-hp 1500
                                  'active? (= (prng 3) 0)
@@ -1219,34 +1219,34 @@
         '#:supply-used (hash-ref obs 'supply-used 12)
         '#:supply-cap (hash-ref obs 'supply-cap 15)
         '#:supply-left (hash-ref obs 'supply-left 3)
-        '#:start-pos '(700 760)
-        '#:enemy-base '(1600 1600)
+        '#:start-pos '(32.5 32.5)
+        '#:enemy-base '(160.5 160.5)
         '#:my-units (for/list ([u (in-list (hash-ref obs 'ally-units '()))])
                       (list (hash-ref u 'id 101)
                             (hash-ref u 'type 'drone)
-                            (hash-ref u 'x 700)
-                            (hash-ref u 'y 760)
+                            (hash-ref u 'x 32.5)
+                            (hash-ref u 'y 32.5)
                             (hash-ref u 'hp 40)
                             (hash-ref u 'energy 0)))
         '#:my-buildings (for/list ([b (in-list (hash-ref obs 'ally-buildings '()))])
                           (list (hash-ref b 'id 201)
                                 (hash-ref b 'type 'hatchery)
-                                (hash-ref b 'x 700)
-                                (hash-ref b 'y 760)
+                                (hash-ref b 'x 32.5)
+                                (hash-ref b 'y 32.5)
                                 (hash-ref b 'hp-pct 1.0)
                                 (hash-ref b 'build-progress 1.0)
                                 (hash-ref b 'halted #f)))
         '#:enemy-units (for/list ([e (in-list (hash-ref obs 'enemy-units '()))])
                          (list (hash-ref e 'id 901)
                                (hash-ref e 'type 'marine)
-                               (hash-ref e 'x 1200)
-                               (hash-ref e 'y 1200)
+                               (hash-ref e 'x 100.0)
+                               (hash-ref e 'y 100.0)
                                (hash-ref e 'hp 45)))
         '#:enemy-buildings (for/list ([eb (in-list (hash-ref obs 'enemy-buildings '()))])
                              (list (hash-ref eb 'id 950)
                                    (hash-ref eb 'type 'barracks)
-                                   (hash-ref eb 'x 1500)
-                                   (hash-ref eb 'y 1500)
+                                   (hash-ref eb 'x 150.0)
+                                   (hash-ref eb 'y 150.0)
                                    (hash-ref eb 'hp 1000)))
         '#:effects '()))
 
@@ -1765,16 +1765,16 @@
       (error 'run-contract-self-checks! "Contract self-check failed: ~a" label)))
 
   ;; 6 valid SC2 LotV actions across Zerg, Protoss, Terran
-  (check-self! "Valid Zerg build `(build spawning-pool 748 808)`"
-               (validate-emitted-action-sexp '(build spawning-pool 748 808)))
+  (check-self! "Valid Zerg build `(build spawning-pool 38 38)`"
+               (validate-emitted-action-sexp '(build spawning-pool 38 38)))
   (check-self! "Valid Zerg upgrade `(research centrifical-hooks)`"
                (validate-emitted-action-sexp '(research centrifical-hooks)))
   (check-self! "Valid Zerg upgrade `(research metabolic-boost)`"
                (validate-emitted-action-sexp '(research metabolic-boost)))
   (check-self! "Valid Protoss morph `(morph warp-gate)`"
                (validate-emitted-action-sexp '(morph warp-gate)))
-  (check-self! "Valid Protoss build `(build robotics-bay 800 860)`"
-               (validate-emitted-action-sexp '(build robotics-bay 800 860)))
+  (check-self! "Valid Protoss build `(build robotics-bay 42 42)`"
+               (validate-emitted-action-sexp '(build robotics-bay 42 42)))
   (check-self! "Valid Terran train `(train widow-mine)`"
                (validate-emitted-action-sexp '(train widow-mine)))
 
@@ -1793,7 +1793,7 @@
                         robotics-support-bay
                         warpgate))])
     (check-self! (format "Reject forbidden BroodWar/invalid symbol `~a`" sym)
-                 (and (not (validate-emitted-action-sexp (list 'build sym 700 760)))
+                 (and (not (validate-emitted-action-sexp (list 'build sym 32.5 32.5)))
                       (not (validate-emitted-action-sexp (list 'train sym))))))
 
   ;; 9 forbidden / misspelled upgrade symbols
@@ -1812,16 +1812,16 @@
   ;; 2 tactical invariant checks on `(pull-workers-attack ...)`
   (check-self! "Reject `(pull-workers-attack ...)` when only nearby enemies are flying scouts"
                (not (validate-emitted-action-sexp
-                     '(pull-workers-attack 4 705 765)
-                     (hash 'base-x 700 'base-y 760
-                           'enemy-units (list (hash 'id 901 'type 'overlord 'x 710 'y 765))
+                     '(pull-workers-attack 4 34.0 34.0)
+                     (hash 'base-x 32.5 'base-y 32.5
+                           'enemy-units (list (hash 'id 901 'type 'overlord 'x 34.0 'y 34.0))
                            'enemy-buildings '()))))
   (check-self! "Allow `(pull-workers-attack ...)` against ground proxy/cannon rush"
                (validate-emitted-action-sexp
-                '(pull-workers-attack 4 705 765)
-                (hash 'base-x 700 'base-y 760
-                      'enemy-units (list (hash 'id 902 'type 'zealot 'x 710 'y 765))
-                      'enemy-buildings (list (hash 'id 903 'type 'photon-cannon 'x 715 'y 770)))))
+                '(pull-workers-attack 4 34.0 34.0)
+                (hash 'base-x 32.5 'base-y 32.5
+                      'enemy-units (list (hash 'id 902 'type 'zealot 'x 34.0 'y 34.0))
+                      'enemy-buildings (list (hash 'id 903 'type 'photon-cannon 'x 35.0 'y 35.0)))))
 
   (when print-report?
     (printf "  Total Contract Self-Checks Passed: ~a/~a\n" passed total))

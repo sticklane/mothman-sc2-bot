@@ -3,7 +3,8 @@
 (require racket/match
          racket/list
          racket/math
-         "../compiler/syntax.rkt")
+         "../compiler/syntax.rkt"
+         "okasaki-sc.rkt")
 
 (provide
  ;; Build-Order Combinators & Locutus Worker Chaining
@@ -62,7 +63,19 @@
  (struct-out gas-worker-allocation)
  compute-optimal-gas-workers
  (struct-out guns-vs-butter-ppf)
- evaluate-guns-vs-butter-ppf)
+ evaluate-guns-vs-butter-ppf
+
+ ;; Marginal-Utility Prioritization & Braun-Heap Resource Scheduler (PV1-PV6)
+ braun-extract-min
+ (struct-out priority-candidate)
+ (struct-out priority-schedule-result)
+ compute-state-pressure-metrics
+ compute-candidate-marginal-utility
+ generate-race-priority-candidates
+ schedule-priority-candidates-with-ledger!
+ (struct-out refractory-cooldown-tracker)
+ make-refractory-cooldown-tracker
+ refractory-allow-action?!)
 
 ;; =============================================================================
 ;; 1. Build-Order Combinators & Locutus Worker Chaining
@@ -1277,4 +1290,650 @@
                       tech-sh
                       lanchester-mult
                       gas-alloc))
+
+;; =============================================================================
+;; 9. Marginal-Utility Prioritization & Braun-Heap Resource Scheduler (PV1-PV6)
+;; =============================================================================
+
+(define (normalize-ledger-race r)
+  (case r
+    [(Zerg zerg "Zerg" "zerg") 'Zerg]
+    [(Protoss protoss "Protoss" "protoss") 'Protoss]
+    [(Terran terran "Terran" "terran") 'Terran]
+    [else 'Zerg]))
+
+;; Wrapper around okasaki-sc's braun-min + braun-delete-min
+(define (braun-extract-min t)
+  (if (braun-empty? t)
+      (values #f braun-empty)
+      (let ([kv (braun-min t)])
+        (values (if (pair? kv) (cdr kv) kv)
+                (braun-delete-min t)))))
+
+;; Category is one of:
+;;   'supply | 'combat-unit | 'counter-tech | 'production-scaling
+;;   | 'tech-upgrade | 'worker | 'expansion
+(struct priority-candidate
+  (id
+   category
+   action
+   min-cost
+   gas-cost
+   supply-cost
+   utility-score
+   urgency-tier
+   blocking-allowed?)
+  #:transparent)
+
+(struct priority-schedule-result
+  (scheduled-actions
+   scheduled-candidates
+   reserved-candidate
+   remaining-minerals
+   remaining-gas
+   remaining-supply
+   category-utilities)
+  #:transparent)
+
+;; Invariant PV6: Refractory Cooldown Tracker
+(struct refractory-cooldown-tracker (table) #:mutable #:transparent)
+
+(define (make-refractory-cooldown-tracker)
+  (refractory-cooldown-tracker (make-hash)))
+
+(define (refractory-allow-action?! tracker key frame cooldown-frames)
+  (cond
+    [(not (refractory-cooldown-tracker? tracker)) #t]
+    [else
+     (define tbl
+       (let ([t (refractory-cooldown-tracker-table tracker)])
+         (if (hash? t)
+             t
+             (let ([nt (make-hash)])
+               (set-refractory-cooldown-tracker-table! tracker nt)
+               nt))))
+     (define f (safe-exact-int frame 0))
+     (define cd (max 1 (safe-exact-int cooldown-frames 1)))
+     (define last-f (hash-ref tbl key #f))
+     (cond
+       [(or (not (exact-integer? last-f))
+            (>= (- f last-f) cd))
+        (hash-set! tbl key f)
+        #t]
+       [else #f])]))
+
+;; Continuous, breakpoint-free pressure metrics (returns an immutable hash)
+(define (compute-state-pressure-metrics
+         #:race [raw-race 'Zerg]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 200]
+         #:gas [raw-gas 0]
+         #:supply-left [raw-supply-left 4]
+         #:supply-cap [raw-supply-cap 15]
+         #:pending-supply [raw-pending-supply 0]
+         #:workers [raw-workers 12]
+         #:target-workers [raw-target-workers 44]
+         #:active-bases [raw-active-bases 1]
+         #:desired-bases [raw-desired-bases 2]
+         #:production-facilities [raw-prod-facilities 1]
+         #:max-facilities [raw-max-facilities 4]
+         #:army-supply [raw-army-supply 0]
+         #:enemy-threat-supply [raw-enemy-threat-supply 0]
+         #:under-attack? [raw-under-attack? #f]
+         #:requires-anti-air? [raw-requires-anti-air? #f]
+         #:requires-detection? [raw-requires-detection? #f]
+         #:escrow-age-frames [raw-escrow-age-frames 0]
+         #:max-escrow-frames [raw-max-escrow-frames 224]
+         #:supply-at-risk? [raw-supply-at-risk? #f]
+         #:supply-buffer [override-supply-buffer #f])
+  (define race (normalize-ledger-race raw-race))
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define minerals (safe-nonneg-int raw-minerals 0))
+  (define gas (safe-nonneg-int raw-gas 0))
+  (define supply-left (max 0 (safe-exact-int raw-supply-left 4)))
+  (define supply-cap (min 200 (max 1 (safe-nonneg-int raw-supply-cap 15))))
+  (define pending-supply (safe-nonneg-int raw-pending-supply 0))
+  (define workers (safe-nonneg-int raw-workers 12))
+  (define target-workers (max 12 (safe-nonneg-int raw-target-workers 44)))
+  (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
+  (define desired-bases (max 1 (safe-nonneg-int raw-desired-bases 2)))
+  (define prod-facilities (max 1 (safe-nonneg-int raw-prod-facilities 1)))
+  (define max-facilities (max 1 (safe-nonneg-int raw-max-facilities 4)))
+  (define army-supply (max 0.0 (safe-real raw-army-supply 0.0)))
+  (define enemy-threat-supply (max 0.0 (safe-real raw-enemy-threat-supply 0.0)))
+  (define under-attack? (eq? raw-under-attack? #t))
+  (define requires-anti-air? (eq? raw-requires-anti-air? #t))
+  (define requires-detection? (eq? raw-requires-detection? #t))
+  (define escrow-age-frames (safe-nonneg-int raw-escrow-age-frames 0))
+  (define max-escrow-frames (max 1 (safe-nonneg-int raw-max-escrow-frames 224)))
+  (define supply-at-risk? (eq? raw-supply-at-risk? #t))
+
+  ;; 1. Supply buffer & continuous supply hazard in [0.0, 2.0]
+  (define supply-buffer
+    (if (and override-supply-buffer (real? override-supply-buffer) (not (nan? override-supply-buffer)))
+        (max 1.0 (exact->inexact override-supply-buffer))
+        (+ 2.0 (* 0.06 (exact->inexact supply-cap)))))
+  (define eff-supply
+    (+ (exact->inexact supply-left) (* 8.0 (exact->inexact pending-supply))))
+  (define raw-supply-hazard
+    (/ (max 0.0 (- supply-buffer eff-supply))
+       (max 1.0 supply-buffer)))
+  (define supply-hazard
+    (cond
+      [(>= supply-cap 200) 0.0]
+      [(and (> pending-supply 0) (not supply-at-risk?)) 0.0]
+      [supply-at-risk?
+       (min 2.0 (max 0.5 raw-supply-hazard))]
+      [(<= eff-supply supply-buffer)
+       ;; Strictly positive in [0.05, 2.0] whenever supply-left <= supply-buffer (PV4)
+       (min 2.0 (max 0.05 raw-supply-hazard))]
+      [else 0.0]))
+
+  ;; 2. Threat pressure
+  (define threat-pressure
+    (/ (+ (* 1.5 enemy-threat-supply)
+          (if under-attack? 12.0 0.0)
+          (max 0.0 (- (* 0.65 (exact->inexact (max 0 (- workers 14))))
+                      army-supply)))
+       (max 4.0 army-supply)))
+
+  ;; 3. Gas imbalance
+  (define gas-imbalance
+    (/ (exact->inexact gas)
+       (max 50.0 (exact->inexact minerals))))
+
+  ;; 4. Worker saturation gap (smoothly decays toward 0 under high threat-pressure)
+  (define worker-saturation-gap
+    (* (max 0.0 (/ (exact->inexact (- target-workers workers))
+                   (max 1.0 (exact->inexact target-workers))))
+       (/ 1.0 (+ 1.0 (* 1.8 threat-pressure)))))
+
+  ;; 5. Facility scaling pressure
+  (define facility-scaling-pressure
+    (* (max 0.0 (/ (exact->inexact (- max-facilities prod-facilities))
+                   (max 1.0 (exact->inexact max-facilities))))
+       (+ 1.0 (/ (exact->inexact minerals) 250.0))))
+
+  ;; 6. Expansion desire & escrow eligibility (PV1)
+  (define expansion-desire
+    (if (and (< active-bases desired-bases) (not under-attack?))
+        (* (/ (exact->inexact (- desired-bases active-bases))
+              (max 1.0 (exact->inexact desired-bases)))
+           (/ 1.0 (+ 1.0 (* 0.8 threat-pressure)))
+           (+ 0.65 (min 1.35 (/ (exact->inexact minerals) 350.0))))
+        0.0))
+  (define escrow-eligible?
+    (and (< escrow-age-frames max-escrow-frames)
+         (< threat-pressure 0.85)
+         (or (= active-bases 1) (>= army-supply 18))
+         (not under-attack?)
+         (< active-bases desired-bases)))
+
+  (hash 'race race
+        'frame frame
+        'minerals minerals
+        'gas gas
+        'supply-left supply-left
+        'supply-cap supply-cap
+        'pending-supply pending-supply
+        'supply-buffer supply-buffer
+        'supply-hazard supply-hazard
+        'supply-at-risk? supply-at-risk?
+        'workers workers
+        'target-workers target-workers
+        'active-bases active-bases
+        'desired-bases desired-bases
+        'production-facilities prod-facilities
+        'max-facilities max-facilities
+        'army-supply army-supply
+        'enemy-threat-supply enemy-threat-supply
+        'under-attack? under-attack?
+        'requires-anti-air? requires-anti-air?
+        'requires-detection? requires-detection?
+        'escrow-age-frames escrow-age-frames
+        'max-escrow-frames max-escrow-frames
+        'threat-pressure threat-pressure
+        'gas-imbalance gas-imbalance
+        'worker-saturation-gap worker-saturation-gap
+        'facility-scaling-pressure facility-scaling-pressure
+        'expansion-desire expansion-desire
+        'escrow-eligible? escrow-eligible?))
+
+(define PV5-COUNTER-TECH-AND-UNIT-SYMS
+  '(queen hydralisk corruptor spore-crawler overseer
+    viking-fighter viking missile-turret
+    stalker phoenix void-ray observer photon-cannon
+    hydralisk-den spire engineering-bay robotics-facility stargate))
+
+(define PV3-GAS-COMBAT-UNIT-SYMS
+  '(roach ravager hydralisk lurker mutalisk corruptor
+    marauder siege-tank widow-mine medivac viking viking-fighter ghost
+    stalker sentry adept immortal colossus disruptor oracle void-ray phoenix))
+
+(define PV3-MINERAL-ONLY-COMBAT-UNIT-SYMS
+  '(zergling marine zealot))
+
+(define (compute-candidate-marginal-utility cand metrics)
+  (define m (if (hash? metrics) metrics (compute-state-pressure-metrics)))
+  (define id (priority-candidate-id cand))
+  (define cat (priority-candidate-category cand))
+  (define g-cost (safe-nonneg-int (priority-candidate-gas-cost cand) 0))
+
+  (define supply-cap (safe-nonneg-int (hash-ref m 'supply-cap 15) 15))
+  (define pending-supply (safe-nonneg-int (hash-ref m 'pending-supply 0) 0))
+  (define supply-left (safe-exact-int (hash-ref m 'supply-left 4) 4))
+  (define supply-buffer (safe-real (hash-ref m 'supply-buffer (+ 2.0 (* 0.06 supply-cap))) 4.0))
+  (define supply-hazard (safe-real (hash-ref m 'supply-hazard 0.0) 0.0))
+  (define supply-at-risk? (eq? (hash-ref m 'supply-at-risk? #f) #t))
+  (define threat-pressure (safe-real (hash-ref m 'threat-pressure 0.0) 0.0))
+  (define enemy-threat-supply (safe-real (hash-ref m 'enemy-threat-supply 0.0) 0.0))
+  (define under-attack? (eq? (hash-ref m 'under-attack? #f) #t))
+  (define gas (safe-nonneg-int (hash-ref m 'gas 0) 0))
+  (define gas-imbalance (safe-real (hash-ref m 'gas-imbalance 0.0) 0.0))
+  (define worker-saturation-gap (safe-real (hash-ref m 'worker-saturation-gap 0.5) 0.5))
+  (define facility-scaling-pressure (safe-real (hash-ref m 'facility-scaling-pressure 0.2) 0.2))
+  (define expansion-desire (safe-real (hash-ref m 'expansion-desire 0.0) 0.0))
+  (define active-bases (max 1 (safe-nonneg-int (hash-ref m 'active-bases 1) 1)))
+  (define escrow-eligible? (eq? (hash-ref m 'escrow-eligible? #f) #t))
+  (define requires-anti-air? (eq? (hash-ref m 'requires-anti-air? #f) #t))
+  (define requires-detection? (eq? (hash-ref m 'requires-detection? #f) #t))
+
+  (define under-threat?
+    (or under-attack?
+        (>= threat-pressure 1.0)
+        (> enemy-threat-supply 0.0)))
+
+  (define gas-sink-active?
+    (and (>= gas 100) (>= gas-imbalance 1.5)))
+
+  (define supply-urgent?
+    (and (< supply-cap 200)
+         (or (> supply-hazard 0.0)
+             supply-at-risk?
+             (and (= pending-supply 0) (<= supply-left supply-buffer)))))
+
+  ;; PV5 boost (+ 180.0) for anti-air & detection units/tech
+  (define pv5-boost
+    (if (and (or requires-anti-air? requires-detection?)
+             (or (eq? cat 'counter-tech)
+                 (memq id PV5-COUNTER-TECH-AND-UNIT-SYMS)))
+        (+ 180.0 (if (and requires-anti-air? requires-detection?) 20.0 0.0))
+        0.0))
+
+  (case cat
+    [(supply)
+     (if supply-urgent?
+         (+ 1200.0 (* 300.0 (max 0.1 supply-hazard)))
+         12.0)]
+
+    [(counter-tech)
+     (define active-counter-need?
+       (or requires-anti-air? requires-detection?))
+     (define threat-boost
+       (cond
+         [(and active-counter-need? under-threat?)
+          (+ 135.0 (* 45.0 (min 4.0 threat-pressure)))]
+         [active-counter-need?
+          (* 30.0 (min 4.0 threat-pressure))]
+         [under-threat?
+          (+ 28.0 (* 12.0 (min 4.0 threat-pressure)))]
+         [else
+          (* 8.0 (min 3.0 threat-pressure))]))
+     (+ (if active-counter-need? 138.0 118.0) pv5-boost threat-boost)]
+
+    [(combat-unit)
+     (define gas-unit?
+       (or (> g-cost 0)
+           (memq id PV3-GAS-COMBAT-UNIT-SYMS)))
+     (define mineral-only-unit?
+       (and (not gas-unit?)
+            (or (= g-cost 0)
+                (memq id PV3-MINERAL-ONLY-COMBAT-UNIT-SYMS))))
+     (define base-combat
+       (if gas-unit? 122.0 108.0))
+     (define threat-boost
+       (cond
+         [under-attack?
+          (+ 165.0 (* 45.0 (min 4.0 threat-pressure)))]
+         [under-threat?
+          (+ 115.0 (* 35.0 (min 4.0 threat-pressure)))]
+         [else
+          (* 25.0 threat-pressure)]))
+     (define gas-sink-adj
+       (cond
+         [(and gas-sink-active? gas-unit?)
+          (+ 165.0 (* 25.0 (min 4.0 gas-imbalance)))]
+         [(and gas-sink-active? mineral-only-unit?)
+          -20.0]
+         [else 0.0]))
+     (+ base-combat threat-boost gas-sink-adj pv5-boost)]
+
+    [(tech-upgrade)
+     (define gas-ready-boost
+       (if (>= gas 100) 45.0 0.0))
+     (define threat-research-boost
+       (if (and under-threat? (not under-attack?) (>= gas 100))
+           (+ 110.0 (* 32.0 (min 4.0 threat-pressure)))
+           0.0))
+     (define gas-sink-boost
+       (if gas-sink-active?
+           (+ 165.0 (* 25.0 (min 4.0 gas-imbalance)))
+           (* 15.0 (min 2.0 gas-imbalance))))
+     (+ 145.0 gas-ready-boost threat-research-boost gas-sink-boost pv5-boost)]
+
+    [(production-scaling)
+     (+ 116.0 (* 45.0 (min 3.0 facility-scaling-pressure)) pv5-boost)]
+
+    [(worker)
+     (if under-threat?
+         (* 42.0 worker-saturation-gap)
+         (+ 35.0 (* 52.0 worker-saturation-gap)))]
+
+    [(expansion)
+     (cond
+       [(<= expansion-desire 0.0) 5.0]
+       [(and (= active-bases 1) escrow-eligible?)
+        ;; Natural expansion on 1 base when escrow-eligible: outranks passive worker
+        ;; and non-crisis units, but stays below supply (>1000), PV5 counter-tech (>=318),
+        ;; PV2 crisis combat (>=238), and PV3 gas-sink combat/tech (>=287).
+        (+ 175.0 (* 20.0 (min 1.5 expansion-desire)))]
+       [else
+        ;; PV1: When active-bases >= 2 or (not escrow-eligible?), expansion NEVER
+        ;; outranks or blocks tech-upgrade (>=142), counter-tech (>=138),
+        ;; production-scaling (>=116), or combat-unit (>=88).
+        (+ 48.0 (* 18.0 (min 1.5 expansion-desire)))])]
+
+    [else 25.0]))
+
+(define (make-scored-candidate id category action min-cost gas-cost supply-cost blocking-allowed? metrics)
+  (define raw-cand
+    (priority-candidate id category action min-cost gas-cost supply-cost 0.0 'medium blocking-allowed?))
+  (define score (compute-candidate-marginal-utility raw-cand metrics))
+  (define tier
+    (cond
+      [(>= score 1000.0) 'critical-supply]
+      [(>= score 230.0)  'high-priority]
+      [(>= score 110.0)  'standard-macro]
+      [else              'background-economy]))
+  (priority-candidate id category action min-cost gas-cost supply-cost score tier blocking-allowed?))
+
+(define (safe-tile-coord v [default 32.5])
+  (define raw (if (and (number? v) (real? v) (not (nan? v)) (not (infinite? v))) v default))
+  (define clamped (max 0.0 (min 256.0 (exact->inexact raw))))
+  (define half-rounded (/ (round (* clamped 2.0)) 2.0))
+  (if (and (exact-integer? raw) (= clamped (exact->inexact (exact-round half-rounded))))
+      (exact-round half-rounded)
+      half-rounded))
+
+(define (generate-race-priority-candidates
+         #:race [raw-race 'Zerg]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 200]
+         #:gas [raw-gas 0]
+         #:supply-left [raw-supply-left 4]
+         #:supply-cap [raw-supply-cap 15]
+         #:pending-supply [raw-pending-supply 0]
+         #:workers [raw-workers 12]
+         #:target-workers [raw-target-workers 44]
+         #:active-bases [raw-active-bases 1]
+         #:desired-bases [raw-desired-bases 2]
+         #:production-facilities [raw-prod-facilities 1]
+         #:max-facilities [raw-max-facilities 4]
+         #:army-supply [raw-army-supply 0]
+         #:enemy-threat-supply [raw-enemy-threat-supply 0]
+         #:under-attack? [raw-under-attack? #f]
+         #:requires-anti-air? [raw-requires-anti-air? #f]
+         #:requires-detection? [raw-requires-detection? #f]
+         #:escrow-age-frames [raw-escrow-age-frames 0]
+         #:max-escrow-frames [raw-max-escrow-frames 224]
+         #:supply-at-risk? [raw-supply-at-risk? #f]
+         #:supply-buffer [override-supply-buffer #f]
+         #:ally-buildings [_ally-buildings '()]
+         #:ally-units [_ally-units '()]
+         #:researched-upgrades [researched-upgrades '()]
+         #:random-stealth-plan [_random-stealth-plan #f]
+         #:base-x [raw-base-x 32.5]
+         #:base-y [raw-base-y 32.5]
+         #:nat-x [raw-nat-x 50.5]
+         #:nat-y [raw-nat-y 50.5]
+         #:third-x [raw-third-x 60.5]
+         #:third-y [raw-third-y 40.5])
+  (define race (normalize-ledger-race raw-race))
+  (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
+  (define base-x (safe-tile-coord raw-base-x 32.5))
+  (define base-y (safe-tile-coord raw-base-y 32.5))
+  (define nat-x (safe-tile-coord raw-nat-x 50.5))
+  (define nat-y (safe-tile-coord raw-nat-y 50.5))
+  (define third-x (safe-tile-coord raw-third-x 60.5))
+  (define third-y (safe-tile-coord raw-third-y 40.5))
+  (define exp-x (if (>= active-bases 2) third-x nat-x))
+  (define exp-y (if (>= active-bases 2) third-y nat-y))
+  (define upgs (if (list? researched-upgrades) researched-upgrades '()))
+
+  (define metrics
+    (compute-state-pressure-metrics
+     #:race race
+     #:frame raw-frame
+     #:minerals raw-minerals
+     #:gas raw-gas
+     #:supply-left raw-supply-left
+     #:supply-cap raw-supply-cap
+     #:pending-supply raw-pending-supply
+     #:workers raw-workers
+     #:target-workers raw-target-workers
+     #:active-bases active-bases
+     #:desired-bases raw-desired-bases
+     #:production-facilities raw-prod-facilities
+     #:max-facilities raw-max-facilities
+     #:army-supply raw-army-supply
+     #:enemy-threat-supply raw-enemy-threat-supply
+     #:under-attack? raw-under-attack?
+     #:requires-anti-air? raw-requires-anti-air?
+     #:requires-detection? raw-requires-detection?
+     #:escrow-age-frames raw-escrow-age-frames
+     #:max-escrow-frames raw-max-escrow-frames
+     #:supply-at-risk? raw-supply-at-risk?
+     #:supply-buffer override-supply-buffer))
+
+  (define escrow-ok? (eq? (hash-ref metrics 'escrow-eligible? #f) #t))
+  (define exp-blocking? (and (= active-bases 1) escrow-ok?))
+  (define supply-urgent? (> (hash-ref metrics 'supply-hazard 0.0) 0.0))
+
+  (case race
+    [(Zerg)
+     (define upg-sym
+       (cond
+         [(not (memq 'metabolic-boost upgs)) 'metabolic-boost]
+         [(not (memq 'glial-reconstitution upgs)) 'glial-reconstitution]
+         [else 'zerg-missile-weapons-1]))
+     (list
+      (make-scored-candidate 'overlord 'supply '(train overlord) 100 0 0 supply-urgent? metrics)
+      (make-scored-candidate 'spore-crawler 'counter-tech (list 'build 'spore-crawler (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (+ base-y 3.0))) 75 0 0 #t metrics)
+      (make-scored-candidate 'queen 'counter-tech '(train queen) 150 0 2 #t metrics)
+      (make-scored-candidate 'hydralisk-den 'counter-tech (list 'build 'hydralisk-den (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 5.0))) 100 100 0 #t metrics)
+      (make-scored-candidate 'overseer 'counter-tech '(morph overseer) 50 50 0 #t metrics)
+      (make-scored-candidate 'roach 'combat-unit '(train roach) 75 25 2 #t metrics)
+      (make-scored-candidate 'hydralisk 'combat-unit '(train hydralisk) 100 50 2 #t metrics)
+      (make-scored-candidate 'zergling 'combat-unit '(train zergling) 50 0 1 #t metrics)
+      (make-scored-candidate upg-sym 'tech-upgrade (list 'research upg-sym) 100 100 0 #t metrics)
+      (make-scored-candidate 'roach-warren 'production-scaling (list 'build 'roach-warren (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (- base-y 4.0))) 150 0 0 #t metrics)
+      (make-scored-candidate 'drone 'worker '(train drone) 50 0 1 #f metrics)
+      (make-scored-candidate 'hatchery 'expansion (list 'expand exp-x exp-y) 300 0 0 exp-blocking? metrics))]
+
+    [(Protoss)
+     (define upg-sym
+       (cond
+         [(not (memq 'warp-gate-research upgs)) 'warp-gate-research]
+         [(not (memq 'charge upgs)) 'charge]
+         [else 'protoss-ground-weapons-1]))
+     (list
+      (make-scored-candidate 'pylon 'supply (list 'build 'pylon (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) 100 0 0 supply-urgent? metrics)
+      (make-scored-candidate 'photon-cannon 'counter-tech (list 'build 'photon-cannon nat-x nat-y) 150 0 0 #t metrics)
+      (make-scored-candidate 'robotics-facility 'counter-tech (list 'build 'robotics-facility (safe-tile-coord (+ base-x 6.0)) (safe-tile-coord (+ base-y 6.0))) 150 100 0 #t metrics)
+      (make-scored-candidate 'observer 'counter-tech '(train observer) 25 75 1 #t metrics)
+      (make-scored-candidate 'stalker 'combat-unit '(train stalker) 125 50 2 #t metrics)
+      (make-scored-candidate 'immortal 'combat-unit '(train immortal) 275 100 4 #t metrics)
+      (make-scored-candidate 'zealot 'combat-unit '(train zealot) 100 0 2 #t metrics)
+      (make-scored-candidate upg-sym 'tech-upgrade (list 'research upg-sym) 100 100 0 #t metrics)
+      (make-scored-candidate 'gateway 'production-scaling (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) 150 0 0 #t metrics)
+      (make-scored-candidate 'probe 'worker '(train probe) 50 0 1 #f metrics)
+      (make-scored-candidate 'nexus 'expansion (list 'expand exp-x exp-y) 400 0 0 exp-blocking? metrics))]
+
+    [else ;; Terran
+     (define upg-sym
+       (cond
+         [(not (memq 'stimpack upgs)) 'stimpack]
+         [(not (memq 'combat-shield upgs)) 'combat-shield]
+         [else 'terran-infantry-weapons-1]))
+     (list
+      (make-scored-candidate 'supply-depot 'supply (list 'build 'supply-depot (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (- base-y 3.0))) 100 0 0 supply-urgent? metrics)
+      (make-scored-candidate 'missile-turret 'counter-tech (list 'build 'missile-turret (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (+ base-y 3.0))) 100 0 0 #t metrics)
+      (make-scored-candidate 'engineering-bay 'counter-tech (list 'build 'engineering-bay (safe-tile-coord (+ base-x 5.0)) (safe-tile-coord (- base-y 3.0))) 125 0 0 #t metrics)
+      (make-scored-candidate 'viking-fighter 'counter-tech '(train viking-fighter) 150 75 2 #t metrics)
+      (make-scored-candidate 'marauder 'combat-unit '(train marauder) 100 25 2 #t metrics)
+      (make-scored-candidate 'siege-tank 'combat-unit '(train siege-tank) 150 125 3 #t metrics)
+      (make-scored-candidate 'marine 'combat-unit '(train marine) 50 0 1 #t metrics)
+      (make-scored-candidate upg-sym 'tech-upgrade (list 'research upg-sym) 100 100 0 #t metrics)
+      (make-scored-candidate 'barracks 'production-scaling (list 'build 'barracks (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) 150 0 0 #t metrics)
+      (make-scored-candidate 'scv 'worker '(train scv) 50 0 1 #f metrics)
+      (make-scored-candidate 'command-center 'expansion (list 'expand exp-x exp-y) 400 0 0 exp-blocking? metrics))]))
+
+(define (schedule-priority-candidates-with-ledger!
+         candidates
+         #:minerals [raw-minerals 200]
+         #:gas [raw-gas 0]
+         #:supply-left [raw-supply-left 4]
+         #:supply-cap [raw-supply-cap 200]
+         #:escrow-eligible? [escrow-eligible? #f])
+  (define init-min (safe-nonneg-int raw-minerals 0))
+  (define init-gas (safe-nonneg-int raw-gas 0))
+  (define init-sup (max 0 (safe-exact-int raw-supply-left 0)))
+  (define supply-cap (min 200 (max 1 (safe-nonneg-int raw-supply-cap 200))))
+  (define ledger (make-symbiotic-ledger init-min init-gas init-sup))
+  (define cands (if (list? candidates) (filter priority-candidate? candidates) '()))
+
+  ;; Insert all candidates into an Okasaki Braun heap keyed by (- effective-utility)
+  ;; PV1: When (not escrow-eligible?), an 'expansion candidate NEVER outranks
+  ;; affordable 'tech-upgrade, 'counter-tech, 'production-scaling, or 'combat-unit.
+  (define min-non-exp-utility
+    (for/fold ([acc +inf.0])
+              ([c (in-list cands)]
+               #:when (memq (priority-candidate-category c)
+                            '(tech-upgrade counter-tech production-scaling combat-unit)))
+      (min acc (safe-real (priority-candidate-utility-score c) 100.0))))
+
+  (define heap
+    (for/fold ([h braun-empty])
+              ([c (in-list cands)]
+               [idx (in-naturals)])
+      (define raw-u (safe-real (priority-candidate-utility-score c) 0.0))
+      (define eff-u
+        (if (and (eq? (priority-candidate-category c) 'expansion)
+                 (or (not escrow-eligible?)
+                     (not (priority-candidate-blocking-allowed? c)))
+                 (not (infinite? min-non-exp-utility)))
+            (min raw-u (- min-non-exp-utility 1.0))
+            raw-u))
+      (define key (+ (- eff-u) (* 1e-7 idx)))
+      (braun-insert h key c)))
+
+  ;; Extract candidates in descending utility order via braun-extract-min
+  (define sorted-cands
+    (let loop ([h heap] [acc '()])
+      (if (braun-empty? h)
+          (reverse acc)
+          (let-values ([(top rest-h) (braun-extract-min h)])
+            (loop rest-h (cons top acc))))))
+
+  ;; Track category -> max utility-score map
+  (define cat-utils
+    (for/fold ([ht (hash)])
+              ([c (in-list sorted-cands)])
+      (define cat (priority-candidate-category c))
+      (define u (safe-real (priority-candidate-utility-score c) 0.0))
+      (hash-set ht cat (max u (hash-ref ht cat -inf.0)))))
+
+  (define rem-min init-min)
+  (define rem-gas init-gas)
+  (define rem-sup init-sup)
+  (define scheduled-cands '())
+  (define reserved-cand #f)
+
+  ;; Orthogonal mineral reservation floors enforcing PV1-PV4:
+  ;;   1. supply-floor: urgent supply (> 1000.0) blocks all non-supply candidates (PV4)
+  ;;   2. expansion-floor: 1-base escrow-eligible expansion blocks lower-utility candidates (PV1)
+  ;;   3. combat-floor: waiting combat-unit/counter-tech blocks worker / non-blocking candidates (PV2)
+  ;;   4. gas-sink-floor: waiting gas-consuming unit/tech blocks mineral-only worker/combat-unit (PV3)
+  (define supply-floor 0)
+  (define expansion-floor 0)
+  (define combat-floor 0)
+  (define gas-sink-floor 0)
+
+  (for ([c (in-list sorted-cands)])
+    (define cat (priority-candidate-category c))
+    (define m-cost (safe-nonneg-int (priority-candidate-min-cost c) 0))
+    (define g-cost (safe-nonneg-int (priority-candidate-gas-cost c) 0))
+    (define s-cost (safe-nonneg-int (priority-candidate-supply-cost c) 0))
+    (define u-score (safe-real (priority-candidate-utility-score c) 0.0))
+    (define blk-ok? (eq? (priority-candidate-blocking-allowed? c) #t))
+
+    (define supply-ok?
+      (or (<= s-cost 0)
+          (>= rem-sup s-cost)))
+    (define gas-ok?
+      (>= rem-gas g-cost))
+    (define min-ok?
+      (>= rem-min m-cost))
+
+    ;; Determine effective mineral reservation floor that applies to candidate `c`
+    (define applicable-floor
+      (max (if (eq? cat 'supply) 0 supply-floor)
+           (if (eq? cat 'expansion) 0 expansion-floor)
+           (if (or (eq? cat 'worker) (not blk-ok?)) combat-floor 0)
+           (if (and (= g-cost 0) (memq cat '(worker combat-unit))) gas-sink-floor 0)))
+
+    (define floor-ok?
+      (>= (- rem-min m-cost) applicable-floor))
+
+    (cond
+      [(and supply-ok? gas-ok? min-ok? floor-ok?)
+       (when (ledger-reserve! ledger (priority-candidate-id c) cat m-cost g-cost s-cost u-score)
+         (set! rem-min (- rem-min m-cost))
+         (set! rem-gas (- rem-gas g-cost))
+         (set! rem-sup (- rem-sup s-cost))
+         (set! scheduled-cands (cons c scheduled-cands)))]
+
+      [else
+       ;; Candidate was not scheduled; check if it is waiting on minerals and should reserve a floor
+       (when (< rem-min m-cost)
+         (cond
+           ;; PV4: Urgent supply reserves 100 minerals before all non-supply candidates
+           [(and (eq? cat 'supply) (< supply-cap 200) (or (> u-score 1000.0) blk-ok?))
+            (set! supply-floor (max supply-floor m-cost))
+            (unless reserved-cand (set! reserved-cand c))]
+
+           ;; PV1: Expansion only reserves minerals when escrow-eligible? AND blocking-allowed?
+           [(and (eq? cat 'expansion) escrow-eligible? blk-ok?)
+            (set! expansion-floor (max expansion-floor m-cost))
+            (unless reserved-cand (set! reserved-cand c))]
+
+           ;; PV2 & PV3: Combat units, counter-tech, and gas-consuming tech upgrades
+           [(and blk-ok? (memq cat '(combat-unit counter-tech tech-upgrade)))
+            (when (memq cat '(combat-unit counter-tech))
+              (set! combat-floor (max combat-floor m-cost))
+              (unless reserved-cand (set! reserved-cand c)))
+            (when (and (> g-cost 0) gas-ok?)
+              (set! gas-sink-floor (max gas-sink-floor m-cost))
+              (unless reserved-cand (set! reserved-cand c)))]))]))
+
+  (define final-cands (reverse scheduled-cands))
+  (define final-actions (map priority-candidate-action final-cands))
+  (priority-schedule-result final-actions
+                            final-cands
+                            reserved-cand
+                            rem-min
+                            rem-gas
+                            rem-sup
+                            cat-utils))
+
 

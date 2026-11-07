@@ -23,9 +23,10 @@
  fractran-run
  fractran-bitmask-step
 
- ;; FAP (Fast Approximated Pathfinder / Combat Evaluator) + Hysteresis
+  ;; FAP (Fast Approximated Pathfinder / Combat Evaluator) + Hysteresis
  (struct-out fap-unit)
  make-fap-unit
+ select-focus-fire-target
  fap-simulate-combat
  fap-evaluate-engagement
  fap-posture-with-hysteresis
@@ -37,7 +38,7 @@
 
 ;; =============================================================================
 ;; 1. Baba CSP Choke Wall-In Solver (`solve-choke-wall-in`)
-;;    Zergling width = 16px => gap <= 15px is zergling-tight!
+;;    Zergling width = 0.75 tiles => gap <= 15 is zergling-tight!
 ;; =============================================================================
 
 (struct wall-placement (type x y w h gap) #:transparent)
@@ -184,8 +185,8 @@
                        #:range [range 5]
                        #:speed [speed 4]
                        #:cost [cost 50]
-                       #:x [x 600]
-                       #:y [y 700])
+                       #:x [x 32]
+                       #:y [y 32])
   (fap-unit id hp dps armor range speed cost x y))
 
 (define (coerce-fap-unit u)
@@ -208,9 +209,60 @@
                (hash-ref u 'range 5)
                (hash-ref u 'speed 4)
                (hash-ref u 'cost 50)
-               (hash-ref u 'x 600)
-               (hash-ref u 'y 700))]
+               (hash-ref u 'x 32)
+               (hash-ref u 'y 32))]
     [else (make-fap-unit 0)]))
+
+;; Focus-fire target selector:
+;; Ranks enemy targets by DPS-to-HP priority (`dps / max(1, hp)`), weighted by
+;; spatial proximity / weapon range reachability when unit coordinates are present.
+;; Supports both `(select-focus-fire-target enemies)` and `(select-focus-fire-target attacker enemies)`.
+(define (select-focus-fire-target arg1 [arg2 #f] #:max-range [max-range #f])
+  (define-values (attacker enemies)
+    (if (list? arg1)
+        (values arg2 arg1)
+        (values arg1 (if (list? arg2) arg2 '()))))
+  (define alive-enemies
+    (filter (lambda (e)
+              (define hp (if (fap-unit? e) (fap-unit-hp e) (hash-ref e 'hp 45)))
+              (> hp 0))
+            enemies))
+  (cond
+    [(null? alive-enemies) #f]
+    [else
+     (define has-attacker-pos?
+       (or (fap-unit? attacker)
+           (and (hash? attacker) (hash-has-key? attacker 'x) (hash-has-key? attacker 'y))))
+     (define ax (cond [(fap-unit? attacker) (fap-unit-x attacker)]
+                      [(hash? attacker) (hash-ref attacker 'x 32.0)]
+                      [else 32.0]))
+     (define ay (cond [(fap-unit? attacker) (fap-unit-y attacker)]
+                      [(hash? attacker) (hash-ref attacker 'y 32.0)]
+                      [else 32.0]))
+     (define arange
+       (or max-range
+           (cond [(fap-unit? attacker) (fap-unit-range attacker)]
+                 [(hash? attacker) (hash-ref attacker 'range 6.0)]
+                 [else 6.0])))
+     (define best-target (car alive-enemies))
+     (define best-score -inf.0)
+     (for ([e (in-list alive-enemies)])
+       (define hp (max 1.0 (exact->inexact (if (fap-unit? e) (fap-unit-hp e) (hash-ref e 'hp 45)))))
+       (define dps (max 1.0 (exact->inexact (if (fap-unit? e) (fap-unit-dps e) (hash-ref e 'dps 12)))))
+       (define base-priority (/ dps hp))
+       (define reach-weight
+         (if has-attacker-pos?
+             (let* ([ex (if (fap-unit? e) (fap-unit-x e) (hash-ref e 'x ax))]
+                    [ey (if (fap-unit? e) (fap-unit-y e) (hash-ref e 'y ay))]
+                    [dist (sqrt (+ (sqr (- ex ax)) (sqr (- ey ay))))]
+                    [excess (max 0.0 (- dist (max 1.0 (exact->inexact arange))))])
+               (/ 1.0 (+ 1.0 (* 0.25 excess))))
+             1.0))
+       (define score (* base-priority reach-weight))
+       (when (> score best-score)
+         (set! best-score score)
+         (set! best-target e)))
+     best-target]))
 
 ;; Simulate `ticks` of combat and return net value advantage
 (define (fap-simulate-combat ally-units enemy-units [ticks 8])
@@ -221,14 +273,14 @@
     (define alive-enemies (filter (lambda (u) (> (fap-unit-hp u) 0)) enemies))
     (when (and (not (null? alive-allies))
                (not (null? alive-enemies)))
-      ;; Allies focus lowest-HP or nearest enemy
+      ;; Allies focus highest-priority reachable enemy
       (for ([a (in-list alive-allies)])
-        (define target (car alive-enemies))
+        (define target (or (select-focus-fire-target a alive-enemies) (car alive-enemies)))
         (define dmg (max 1 (- (fap-unit-dps a) (fap-unit-armor target))))
         (set-fap-unit-hp! target (- (fap-unit-hp target) dmg)))
-      ;; Enemies focus allies
+      ;; Enemies focus highest-priority reachable ally
       (for ([e (in-list alive-enemies)])
-        (define target (car alive-allies))
+        (define target (or (select-focus-fire-target e alive-allies) (car alive-allies)))
         (define dmg (max 1 (- (fap-unit-dps e) (fap-unit-armor target))))
         (set-fap-unit-hp! target (- (fap-unit-hp target) dmg)))))
   (define ally-surviving-val
@@ -274,29 +326,29 @@
 
 ;; Orders units by distance to choke (`choke-x`, `choke-y`) so front/closest-to-choke
 ;; units step through the narrow choke first without body-blocking rear units,
-;; assigning staggered retreat lanes.
+;; assigning staggered retreat lanes in SC2 map tiles.
 (define (purplewave-traffic-retreat units choke-x choke-y safe-x safe-y [choke-clearance 3])
   (define sorted-units
     (sort units
           <
           #:key (lambda (u)
-                  (define ux (if (hash? u) (hash-ref u 'x 600) (fap-unit-x u)))
-                  (define uy (if (hash? u) (hash-ref u 'y 700) (fap-unit-y u)))
+                  (define ux (if (hash? u) (hash-ref u 'x 32) (fap-unit-x u)))
+                  (define uy (if (hash? u) (hash-ref u 'y 32) (fap-unit-y u)))
                   (+ (sqr (- ux choke-x)) (sqr (- uy choke-y))))))
   (for/list ([u (in-list sorted-units)]
              [idx (in-naturals)])
     (define uid (if (hash? u) (hash-ref u 'id idx) (fap-unit-id u)))
     (define lane-offset (* (- (modulo idx (max 1 choke-clearance))
                               (quotient choke-clearance 2))
-                           16))
-    (define wave-depth (* (quotient idx (max 1 choke-clearance)) 20))
+                           2))
+    (define wave-depth (* (quotient idx (max 1 choke-clearance)) 2))
     (hash 'unit-id uid
           'order-rank idx
           'target-x (+ safe-x lane-offset)
           'target-y (- safe-y wave-depth)
           'collision-free #t)))
 
-(define (compute-kite-vector ux uy ex ey [step-dist 48])
+(define (compute-kite-vector ux uy ex ey [step-dist 3])
   (define dx (- ux ex))
   (define dy (- uy ey))
   (define mag (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))

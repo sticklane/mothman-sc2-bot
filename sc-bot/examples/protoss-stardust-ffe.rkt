@@ -30,7 +30,7 @@
                  (bo-step '(build pylon) 100 0 0)
                  (bo-step '(build forge) 150 0 0)
                  (bo-step '(build photon-cannon) 150 0 0)
-                 (bo-step '(expand 1024 1120) 400 0 0))
+                 (bo-step '(expand 50 56) 400 0 0))
   #:tactics '(ffe-choke-wall hold-position-zealot-door-guard)
   #:transitions '(CrisisZerglingFlood CannonWallRecovery))
 
@@ -39,7 +39,7 @@
   #:personality MARV-MACRO-OPEN-PERSONALITY
   #:postures PROTOSS-STARDUST-POSTURES
   #:counter-table PROTOSS-COUNTER-TREE
-  #:macro-goals '((dragoon . 8) (reaver . 2) (shuttle . 1) (zealot . 8))
+  #:macro-goals '((stalker . 8) (immortal . 2) (warp-prism . 1) (zealot . 8))
   #:grade (sc-grade 'One 500 250 14 16 'saccade 'diffusion-prior)
   ForgeFastExpand)
 

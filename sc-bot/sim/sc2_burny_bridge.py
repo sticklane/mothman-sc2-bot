@@ -200,8 +200,10 @@ BUILDING_NAME_TO_ENUM_NAME: Dict[str, str] = {
     "twilight-council": "TWILIGHTCOUNCIL",
     "robotics-facility": "ROBOTICSFACILITY",
     "robotics-bay": "ROBOTICSBAY",
+    "robotics-support-bay": "ROBOTICSBAY",
     "stargate": "STARGATE",
     "templar-archives": "TEMPLARARCHIVE",
+    "templar-archive": "TEMPLARARCHIVE",
     "dark-shrine": "DARKSHRINE",
     "fleet-beacon": "FLEETBEACON",
 }
@@ -220,24 +222,196 @@ UPGRADE_NAME_TO_ENUM_NAME: Dict[str, str] = {
     "zergling-movementspeed": "ZERGLINGMOVEMENTSPEED",
     "metabolic-boost": "ZERGLINGMOVEMENTSPEED",
     "zergling-attackspeed": "ZERGLINGATTACKSPEED",
+    "adrenal-glands": "ZERGLINGATTACKSPEED",
     "glial-reconstitution": "GLIALRECONSTITUTION",
     "grooved-spines": "EVOLVEGROOVEDSPINES",
     "muscular-augments": "EVOLVEMUSCULARAUGMENTS",
     "centrifugal-hooks": "CENTRIFICALHOOKS",
+    "centrifical-hooks": "CENTRIFICALHOOKS",
     "chitinous-plating": "CHITINOUSPLATING",
+    "anabolic-synthesis": "ANABOLICSYNTHESIS",
+    "adaptive-talons": "DIGGINGCLAWS",
+    "burrow": "BURROW",
+    "pneumatized-carapace": "OVERLORDSPEED",
+    "overlord-speed": "OVERLORDSPEED",
+    "missile-attacks-1": "ZERGMIW1",
+    "missile-attacks-2": "ZERGMIW2",
+    "missile-attacks-3": "ZERGMIW3",
+    "melee-attacks-1": "ZERGMELEEW1",
+    "melee-attacks-2": "ZERGMELEEW2",
+    "melee-attacks-3": "ZERGMELEEW3",
+    "ground-carapace-1": "ZERGGROUNDARMORSLEVEL1",
+    "ground-carapace-2": "ZERGGROUNDARMORSLEVEL2",
+    "ground-carapace-3": "ZERGGROUNDARMORSLEVEL3",
     "stimpack": "STIMPACK",
     "combat-shield": "SHIELDWALL",
     "shield-wall": "SHIELDWALL",
     "concussive-shells": "PUNISHERGRENADES",
+    "punisher-grenades": "PUNISHERGRENADES",
     "infernal-pre-igniter": "HIGHCAPACITYBARRELS",
+    "drilling-claws": "DRILLCLAWS",
+    "personal-cloaking": "PERSONALCLOAKING",
     "cloak-banshee": "BANSHEECLOAK",
+    "infantry-weapons-1": "TERRANINFANTRYWEAPONSLEVEL1",
+    "infantry-weapons-2": "TERRANINFANTRYWEAPONSLEVEL2",
+    "infantry-weapons-3": "TERRANINFANTRYWEAPONSLEVEL3",
+    "infantry-armor-1": "TERRANINFANTRYARMORSLEVEL1",
+    "infantry-armor-2": "TERRANINFANTRYARMORSLEVEL2",
+    "infantry-armor-3": "TERRANINFANTRYARMORSLEVEL3",
+    "vehicle-weapons-1": "TERRANVEHICLEWEAPONSLEVEL1",
+    "vehicle-armor-1": "TERRANVEHICLEANDSHIPARMORSLEVEL1",
     "warp-gate-research": "WARPGATERESEARCH",
     "warpgate": "WARPGATERESEARCH",
     "charge": "CHARGE",
     "blink": "BLINKTECH",
     "psi-storm": "PSISTORMTECH",
     "extended-thermal-lance": "EXTENDEDTHERMALLANCE",
+    "ground-weapons-1": "PROTOSSGROUNDWEAPONSLEVEL1",
+    "ground-weapons-2": "PROTOSSGROUNDWEAPONSLEVEL2",
+    "ground-weapons-3": "PROTOSSGROUNDWEAPONSLEVEL3",
+    "protoss-ground-weapons-1": "PROTOSSGROUNDWEAPONSLEVEL1",
+    "protoss-ground-weapons-2": "PROTOSSGROUNDWEAPONSLEVEL2",
+    "protoss-ground-weapons-3": "PROTOSSGROUNDWEAPONSLEVEL3",
+    "ground-armor-1": "PROTOSSGROUNDARMORSLEVEL1",
+    "ground-armor-2": "PROTOSSGROUNDARMORSLEVEL2",
+    "ground-armor-3": "PROTOSSGROUNDARMORSLEVEL3",
+    "protoss-ground-armors-1": "PROTOSSGROUNDARMORSLEVEL1",
+    "protoss-ground-armors-2": "PROTOSSGROUNDARMORSLEVEL2",
+    "protoss-ground-armors-3": "PROTOSSGROUNDARMORSLEVEL3",
+    "shields-1": "PROTOSSSHIELDSLEVEL1",
+    "protoss-shields-1": "PROTOSSSHIELDSLEVEL1",
 }
+
+ENUM_NAME_TO_UNIT_NAME: Dict[str, str] = {
+    "DRONE": "drone",
+    "ZERGLING": "zergling",
+    "BANELING": "baneling",
+    "ROACH": "roach",
+    "RAVAGER": "ravager",
+    "HYDRALISK": "hydralisk",
+    "LURKERMP": "lurker",
+    "LURKERMPBURROWED": "lurker",
+    "MUTALISK": "mutalisk",
+    "CORRUPTOR": "corruptor",
+    "BROODLORD": "brood-lord",
+    "ULTRALISK": "ultralisk",
+    "QUEEN": "queen",
+    "INFESTOR": "infestor",
+    "VIPER": "viper",
+    "SWARMHOSTMP": "swarm-host",
+    "OVERLORD": "overlord",
+    "OVERSEER": "overseer",
+    "OVERLORDTRANSPORT": "overlord-transport",
+    "SCV": "scv",
+    "MULE": "mule",
+    "MARINE": "marine",
+    "MARAUDER": "marauder",
+    "REAPER": "reaper",
+    "GHOST": "ghost",
+    "HELLION": "hellion",
+    "HELLIONTANK": "hellbat",
+    "WIDOWMINE": "widow-mine",
+    "WIDOWMINEBURROWED": "widow-mine",
+    "SIEGETANK": "siege-tank",
+    "SIEGETANKSIEGED": "siege-tank",
+    "CYCLONE": "cyclone",
+    "THOR": "thor",
+    "THORAP": "thor",
+    "VIKINGFIGHTER": "viking",
+    "VIKINGASSAULT": "viking",
+    "MEDIVAC": "medivac",
+    "LIBERATOR": "liberator",
+    "LIBERATORAG": "liberator",
+    "RAVEN": "raven",
+    "BANSHEE": "banshee",
+    "BATTLECRUISER": "battlecruiser",
+    "PROBE": "probe",
+    "ZEALOT": "zealot",
+    "STALKER": "stalker",
+    "SENTRY": "sentry",
+    "ADEPT": "adept",
+    "HIGHTEMPLAR": "high-templar",
+    "DARKTEMPLAR": "dark-templar",
+    "IMMORTAL": "immortal",
+    "COLOSSUS": "colossus",
+    "DISRUPTOR": "disruptor",
+    "ARCHON": "archon",
+    "OBSERVER": "observer",
+    "OBSERVERSIEGEMODE": "observer",
+    "WARPPRISM": "warp-prism",
+    "WARPPRISMPHASING": "warp-prism",
+    "PHOENIX": "phoenix",
+    "VOIDRAY": "void-ray",
+    "ORACLE": "oracle",
+    "TEMPEST": "tempest",
+    "CARRIER": "carrier",
+    "MOTHERSHIP": "mothership",
+}
+
+ENUM_NAME_TO_BUILDING_NAME: Dict[str, str] = {
+    "HATCHERY": "hatchery",
+    "LAIR": "lair",
+    "HIVE": "hive",
+    "EXTRACTOR": "extractor",
+    "SPAWNINGPOOL": "spawning-pool",
+    "ROACHWARREN": "roach-warren",
+    "BANELINGNEST": "baneling-nest",
+    "EVOLUTIONCHAMBER": "evolution-chamber",
+    "HYDRALISKDEN": "hydralisk-den",
+    "LURKERDENMP": "lurker-den-mp",
+    "SPIRE": "spire",
+    "GREATERSPIRE": "greater-spire",
+    "INFESTATIONPIT": "infestation-pit",
+    "NYDUSNETWORK": "nydus-network",
+    "ULTRALISKCAVERN": "ultralisk-cavern",
+    "SPINECRAWLER": "spine-crawler",
+    "SPORECRAWLER": "spore-crawler",
+    "CREEPTUMOR": "creep-tumor",
+    "CREEPTUMORBURROWED": "creep-tumor-burrowed",
+    "CREEPTUMORQUEEN": "creep-tumor-burrowed",
+    "COMMANDCENTER": "command-center",
+    "ORBITALCOMMAND": "orbital-command",
+    "PLANETARYFORTRESS": "planetary-fortress",
+    "SUPPLYDEPOT": "supply-depot",
+    "SUPPLYDEPOTLOWERED": "supply-depot",
+    "REFINERY": "refinery",
+    "BARRACKS": "barracks",
+    "ENGINEERINGBAY": "engineering-bay",
+    "BUNKER": "bunker",
+    "SENSORTOWER": "sensor-tower",
+    "MISSILETURRET": "missile-turret",
+    "FACTORY": "factory",
+    "GHOSTACADEMY": "ghost-academy",
+    "STARPORT": "starport",
+    "ARMORY": "armory",
+    "FUSIONCORE": "fusion-core",
+    "BARRACKSTECHLAB": "barracks-techlab",
+    "BARRACKSREACTOR": "barracks-reactor",
+    "FACTORYTECHLAB": "factory-techlab",
+    "FACTORYREACTOR": "factory-reactor",
+    "STARPORTTECHLAB": "starport-techlab",
+    "STARPORTREACTOR": "starport-reactor",
+    "NEXUS": "nexus",
+    "PYLON": "pylon",
+    "ASSIMILATOR": "assimilator",
+    "GATEWAY": "gateway",
+    "WARPGATE": "warp-gate",
+    "FORGE": "forge",
+    "PHOTONCANNON": "photon-cannon",
+    "SHIELDBATTERY": "shield-battery",
+    "CYBERNETICSCORE": "cybernetics-core",
+    "TWILIGHTCOUNCIL": "twilight-council",
+    "ROBOTICSFACILITY": "robotics-facility",
+    "ROBOTICSBAY": "robotics-bay",
+    "STARGATE": "stargate",
+    "TEMPLARARCHIVE": "templar-archives",
+    "DARKSHRINE": "dark-shrine",
+    "FLEETBEACON": "fleet-beacon",
+}
+
+ENUM_NAME_TO_UPGRADE_SYMS: Dict[str, List[str]] = {}
+for _u_sym, _u_enum in UPGRADE_NAME_TO_ENUM_NAME.items():
+    ENUM_NAME_TO_UPGRADE_SYMS.setdefault(_u_enum, []).append(_u_sym)
 
 CANONICAL_9_MORPHS = [
     "lair",
@@ -302,6 +476,7 @@ SPELL_NAME_TO_ABILITY_NAME: Dict[str, str] = {
     "spawn-locusts": "EFFECT_SPAWNLOCUSTS",
     "caustic-spray": "CAUSTICSPRAY_CAUSTICSPRAY",
     "contaminate": "CONTAMINATE_CONTAMINATE",
+    "spawn-creep-tumor": "BUILD_CREEPTUMOR_QUEEN",
     "spread-creep-tumor": "BUILD_CREEPTUMOR_TUMOR",
     "spawn-changeling": "SPAWNCHANGELING_SPAWNCHANGELING",
     "yamato-gun": "YAMATO_YAMATOGUN",
@@ -312,6 +487,7 @@ SPELL_NAME_TO_ABILITY_NAME: Dict[str, str] = {
     "scanner-sweep": "SCANNERSWEEP_SCAN",
     "calldown-mule": "CALLDOWNMULE_CALLDOWNMULE",
     "stim": "EFFECT_STIM_MARINE",
+    "stimpack": "EFFECT_STIM_MARINE",
     "kd8-charge": "KD8CHARGE_KD8CHARGE",
     "psionic-storm": "PSISTORM_PSISTORM",
     "guardian-shield": "GUARDIANSHIELD_GUARDIANSHIELD",
@@ -322,6 +498,9 @@ SPELL_NAME_TO_ABILITY_NAME: Dict[str, str] = {
     "purification-nova": "EFFECT_PURIFICATIONNOVA",
     "prismatic-alignment": "EFFECT_VOIDRAYPRISMATICALIGNMENT",
     "oracle-revelation": "ORACLEREVELATION_ORACLEREVELATION",
+    "burrow": "BURROWDOWN_LURKER",
+    "siege-mode": "SIEGEMODE_SIEGEMODE",
+    "unsiege-mode": "UNSIEGE_UNSIEGE",
 }
 
 
@@ -395,6 +574,9 @@ def decode_sexp_command(cmd: Any) -> Optional[Dict[str, Any]]:
             }
 
     op = str(cmd[0]).lower()
+
+    if op == "posture-transition" and len(cmd) >= 2:
+        return {"op": "posture-transition", "posture": str(cmd[1])}
 
     if op == "train" and len(cmd) >= 2:
         unit_name = str(cmd[1]).lower()
@@ -643,6 +825,36 @@ def decode_sexp_command(cmd: Any) -> Optional[Dict[str, Any]]:
             "op": "mirror-tech-observation",
             "implied_tech": [str(x) for x in cmd[1]] if len(cmd) >= 2 and isinstance(cmd[1], list) else ([str(cmd[1])] if len(cmd) >= 2 else []),
             "observed_upgrades": [str(x) for x in cmd[2]] if len(cmd) >= 3 and isinstance(cmd[2], list) else ([str(cmd[2])] if len(cmd) >= 3 else []),
+        }
+
+    if op in ("mirror-spatial-maneuver", "execute-spatial-maneuver") and len(cmd) >= 2:
+        return {
+            "op": op,
+            "maneuver": str(cmd[1]),
+            "x": float(cmd[2]) if len(cmd) >= 4 and isinstance(cmd[2], (int, float)) else None,
+            "y": float(cmd[3]) if len(cmd) >= 4 and isinstance(cmd[3], (int, float)) else None,
+        }
+
+    if op in ("burrow-block", "patrol-block-expansion") and len(cmd) >= 4:
+        return {
+            "op": op,
+            "unit_id": int(cmd[1]) if isinstance(cmd[1], (int, float)) else 0,
+            "x": float(cmd[2]),
+            "y": float(cmd[3]),
+        }
+
+    if op == "harass-workers" and len(cmd) >= 4:
+        return {
+            "op": "harass-workers",
+            "unit_ids": _normalize_id_list(cmd[1]),
+            "x": float(cmd[2]),
+            "y": float(cmd[3]),
+        }
+
+    if op == "snipe-enemy-changeling" and len(cmd) >= 2:
+        return {
+            "op": "snipe-enemy-changeling",
+            "target_id": int(cmd[1]) if isinstance(cmd[1], (int, float)) else 0,
         }
 
     if op in (
@@ -1040,6 +1252,11 @@ def create_racket_sc2_agent(
                 5: 58.0,
             }
             self._last_depth_snapshot_sec: float = -999.0
+            self._build_cooldown_by_type: Dict[Any, int] = {}
+            self._last_racket_cmds: List[Dict[str, Any]] = []
+            self._queen_tumor_cooldown_by_tag: Dict[int, int] = {}
+            self._addon_last_attempt_loop: Dict[int, int] = {}
+            self._retreat_until_loop: Dict[int, int] = {}
 
         @staticmethod
         def _estimate_unit_min_gas_cost(uname: str) -> Tuple[int, int]:
@@ -1813,7 +2030,7 @@ def create_racket_sc2_agent(
                     self._observed_enemy_upgrades.add("BURROW")
                     self._enemy_requires_detection = True
 
-                if getattr(eu, "is_cloaked", False) or uname in cloak_unit_names:
+                if uname in cloak_unit_names or (getattr(eu, "is_cloaked", False) and (uname != "OBSERVER" or sec >= 210.0)):
                     self._observed_enemy_upgrades.add("CLOAK")
                     self._enemy_requires_detection = True
 
@@ -2585,7 +2802,7 @@ def create_racket_sc2_agent(
             )
             self.bridge = SC2BurnySexpBridge(
                 bot_rkt_path=self.bot_rkt_path,
-                race_str=actual_race_name,
+                race_str="Random" if str(self.configured_race).lower() == "random" else actual_race_name,
                 posture_str=self.current_posture,
             )
             self.bridge.start()
@@ -2660,17 +2877,20 @@ def create_racket_sc2_agent(
             )
 
             my_units_sexp = []
-            for u in self.units.take(30):
-                ut_name = u.type_id.name.lower()
+            skip_unit_types = {UnitTypeId.LARVA, UnitTypeId.EGG}
+            for u in self.units:
+                if u.type_id in skip_unit_types:
+                    continue
+                ut_name = ENUM_NAME_TO_UNIT_NAME.get(u.type_id.name, u.type_id.name.lower())
                 my_units_sexp.append(
                     f"({u.tag} {ut_name} {u.position.x:.1f} {u.position.y:.1f} {u.health:.0f} {u.energy:.0f})"
                 )
 
             ready_tumors = [
                 t
-                for t in self.structures(UnitTypeId.CREEPTUMORBURROWED).ready
+                for t in self.structures({UnitTypeId.CREEPTUMORBURROWED, UnitTypeId.CREEPTUMORQUEEN}).ready
                 if t.tag not in self._used_creep_tumors
-            ][:2]
+            ]
             for t in ready_tumors:
                 my_units_sexp.append(
                     f"({t.tag} creep-tumor-burrowed {t.position.x:.1f} {t.position.y:.1f} {t.health:.0f} 0)"
@@ -2688,7 +2908,7 @@ def create_racket_sc2_agent(
                 UnitTypeId.PLANETARYFORTRESS,
             }
             for b in self.structures:
-                bt_name = b.type_id.name.lower()
+                bt_name = ENUM_NAME_TO_BUILDING_NAME.get(b.type_id.name, b.type_id.name.lower())
                 halted_flag = "#f"
                 if self.race == Race.Terran and b.build_progress < 1.0 and b.type_id not in addon_or_morph_types:
                     nearby_scvs = [
@@ -2706,19 +2926,17 @@ def create_racket_sc2_agent(
                 )
 
             enemy_units_sexp = []
-            for eu in self.enemy_units.take(30):
-                e_name = eu.type_id.name.lower()
+            for eu in self.enemy_units:
+                e_name = ENUM_NAME_TO_UNIT_NAME.get(eu.type_id.name, eu.type_id.name.lower())
                 enemy_units_sexp.append(
                     f"({eu.tag} {e_name} {eu.position.x:.1f} {eu.position.y:.1f} {eu.health:.0f})"
                 )
 
             enemy_bldgs_sexp = []
-            for eb in self.enemy_structures.take(25):
-                eb_name = eb.type_id.name.lower()
+            for eb in self.enemy_structures:
+                eb_name = ENUM_NAME_TO_BUILDING_NAME.get(eb.type_id.name, eb.type_id.name.lower())
                 enemy_bldgs_sexp.append(
-                    f"({eb.tag} {eb.position.x:.1f} {eb.position.y:.1f} {eb.health:.0f})"
-                    if False
-                    else f"({eb.tag} {eb_name} {eb.position.x:.1f} {eb.position.y:.1f} {eb.health:.0f})"
+                    f"({eb.tag} {eb_name} {eb.position.x:.1f} {eb.position.y:.1f} {eb.health:.0f})"
                 )
 
             effects_sexp = []
@@ -2728,8 +2946,74 @@ def create_racket_sc2_agent(
                     for pos in eff.positions:
                         effects_sexp.append(f"(force-field {pos.x:.1f} {pos.y:.1f})")
 
+            researched_syms: List[str] = []
+            seen_res = set()
+            for upg in getattr(self.state, "upgrades", []):
+                u_enum = getattr(upg, "name", str(upg))
+                for sym in ENUM_NAME_TO_UPGRADE_SYMS.get(u_enum, [u_enum.lower().replace("_", "-")]):
+                    if sym not in seen_res:
+                        seen_res.add(sym)
+                        researched_syms.append(sym)
+
+            pending_upg_syms: List[str] = []
+            seen_pend = set()
+            checked_enums = set()
+            for sym, u_enum in UPGRADE_NAME_TO_ENUM_NAME.items():
+                if u_enum in checked_enums:
+                    continue
+                checked_enums.add(u_enum)
+                upg_id = getattr(UpgradeId, u_enum, None)
+                if upg_id is not None and upg_id not in getattr(self.state, "upgrades", set()):
+                    try:
+                        prog = float(self.already_pending_upgrade(upg_id))
+                    except Exception:
+                        prog = 0.0
+                    if 0.0 < prog < 1.0:
+                        for alias_sym in ENUM_NAME_TO_UPGRADE_SYMS.get(u_enum, [sym]):
+                            if alias_sym not in seen_pend:
+                                seen_pend.add(alias_sym)
+                                pending_upg_syms.append(alias_sym)
+
+            depleting_bases = 0
+            min_harvesters = 0
+            ideal_min_harvesters = 0
+            for th in self.townhalls.ready:
+                min_harvesters += max(0, int(getattr(th, "assigned_harvesters", 0)))
+                ideal_min_harvesters += max(0, int(getattr(th, "ideal_harvesters", 16)))
+                close_mins = self.mineral_field.closer_than(10.0, th.position) if self.mineral_field else []
+                rem_min = sum(int(getattr(m, "mineral_contents", 0)) for m in close_mins)
+                if not close_mins or rem_min < 1800 or len(close_mins) <= 3:
+                    depleting_bases += 1
+
+            gas_harvesters = 0
+            ideal_gas_harvesters = 0
+            for g in self.gas_buildings.ready:
+                gas_harvesters += max(0, int(getattr(g, "assigned_harvesters", 0)))
+                ideal_gas_harvesters += max(0, int(getattr(g, "ideal_harvesters", 3)))
+
+            prod_facility_types = {
+                UnitTypeId.BARRACKS,
+                UnitTypeId.FACTORY,
+                UnitTypeId.STARPORT,
+                UnitTypeId.GATEWAY,
+                UnitTypeId.WARPGATE,
+                UnitTypeId.ROBOTICSFACILITY,
+                UnitTypeId.STARGATE,
+            }
+            busy_facilities = len(
+                self.structures.filter(lambda s: s.type_id in prod_facility_types and s.is_ready and not s.is_idle)
+            )
+            busy_townhalls = len(self.townhalls.ready.filter(lambda th: not th.is_idle))
+            army_supply = int(getattr(self, "supply_army", 0))
+
             enemy_start = self.enemy_start_locations[0] if self.enemy_start_locations else Point2((32.0, 32.0))
             our_start = self.start_location if self.start_location else Point2((16.0, 16.0))
+            nat_pos = our_start.towards(enemy_start, 18.0)
+            third_pos = our_start.towards(enemy_start, 30.0)
+            if hasattr(self, "expansion_locations_list") and len(self.expansion_locations_list) >= 3:
+                sorted_exps = sorted(self.expansion_locations_list, key=lambda p: p.distance_to(our_start))
+                nat_pos = sorted_exps[1]
+                third_pos = sorted_exps[2]
 
             return (
                 f"(frame-state "
@@ -2742,19 +3026,790 @@ def create_racket_sc2_agent(
                 f"#:supply-left {int(self.supply_left)} "
                 f"#:pending-supply {int(pending_sup)} "
                 f"#:start-pos ({our_start.x:.1f} {our_start.y:.1f}) "
+                f"#:natural-pos ({nat_pos.x:.1f} {nat_pos.y:.1f}) "
+                f"#:third-pos ({third_pos.x:.1f} {third_pos.y:.1f}) "
                 f"#:enemy-base ({enemy_start.x:.1f} {enemy_start.y:.1f}) "
                 f"#:my-units ({' '.join(my_units_sexp)}) "
                 f"#:my-buildings ({' '.join(my_bldgs_sexp)}) "
                 f"#:enemy-units ({' '.join(enemy_units_sexp)}) "
                 f"#:enemy-buildings ({' '.join(enemy_bldgs_sexp)}) "
-                f"#:effects ({' '.join(effects_sexp)}))"
+                f"#:effects ({' '.join(effects_sexp)}) "
+                f"#:researched-upgrades ({' '.join(researched_syms)}) "
+                f"#:pending-upgrades ({' '.join(pending_upg_syms)}) "
+                f"#:depleting-bases {depleting_bases} "
+                f"#:mineral-harvesters {min_harvesters} "
+                f"#:ideal-mineral-harvesters {ideal_min_harvesters} "
+                f"#:gas-harvesters {gas_harvesters} "
+                f"#:ideal-gas-harvesters {ideal_gas_harvesters} "
+                f"#:busy-facilities {busy_facilities} "
+                f"#:busy-townhalls {busy_townhalls} "
+                f"#:army-supply {army_supply})"
             )
 
+        async def _actuate_train_unit(self, ut: Any) -> bool:
+            if ut is None:
+                return False
+
+            if ut == UnitTypeId.OVERLORD:
+                if (
+                    self.race == Race.Zerg
+                    and self.supply_cap < 200
+                    and self.supply_left <= (10 if self.supply_cap >= 66 else 6)
+                    and self.already_pending(UnitTypeId.OVERLORD) < (2 if self.supply_cap >= 44 else 1)
+                    and self.can_afford(UnitTypeId.OVERLORD)
+                    and self.larva
+                ):
+                    self.larva.first.train(UnitTypeId.OVERLORD)
+                    self.commands_issued += 1
+                    return True
+                return False
+
+            if not self.can_afford(ut) or self.supply_left <= 0:
+                return False
+
+            target_workers = min(80, max(22, int(getattr(self, "last_target_workers", 66))))
+            if ut == UnitTypeId.DRONE:
+                if (
+                    self.larva
+                    and len(self.workers) + self.already_pending(UnitTypeId.DRONE) < target_workers
+                ):
+                    self.larva.random.train(UnitTypeId.DRONE)
+                    self.commands_issued += 1
+                    return True
+                return False
+
+            if ut in (UnitTypeId.SCV, UnitTypeId.PROBE):
+                idle_ths = self.townhalls.ready.idle
+                if (
+                    idle_ths
+                    and len(self.workers) + self.already_pending(ut) < target_workers
+                ):
+                    idle_ths.first.train(ut)
+                    self.commands_issued += 1
+                    return True
+                return False
+
+            if ut == UnitTypeId.QUEEN:
+                idle_ths = self.townhalls.ready.idle
+                max_queens = max(3, len(self.townhalls) + 2)
+                if (
+                    idle_ths
+                    and self.structures(UnitTypeId.SPAWNINGPOOL).ready
+                    and len(self.units(UnitTypeId.QUEEN)) + self.already_pending(UnitTypeId.QUEEN) < max_queens
+                ):
+                    idle_ths.first.train(UnitTypeId.QUEEN)
+                    self.commands_issued += 1
+                    return True
+                return False
+
+            zerg_larva_reqs = {
+                UnitTypeId.ZERGLING: UnitTypeId.SPAWNINGPOOL,
+                UnitTypeId.ROACH: UnitTypeId.ROACHWARREN,
+                UnitTypeId.HYDRALISK: UnitTypeId.HYDRALISKDEN,
+                UnitTypeId.MUTALISK: UnitTypeId.SPIRE,
+                UnitTypeId.CORRUPTOR: UnitTypeId.SPIRE,
+                UnitTypeId.ULTRALISK: UnitTypeId.ULTRALISKCAVERN,
+                UnitTypeId.INFESTOR: UnitTypeId.INFESTATIONPIT,
+                UnitTypeId.SWARMHOSTMP: UnitTypeId.INFESTATIONPIT,
+                UnitTypeId.VIPER: UnitTypeId.HIVE,
+            }
+            if ut in zerg_larva_reqs:
+                req_bldg = zerg_larva_reqs[ut]
+                has_req = bool(self.structures(req_bldg).ready) or (
+                    req_bldg == UnitTypeId.SPIRE and bool(self.structures(UnitTypeId.GREATERSPIRE).ready)
+                )
+                if has_req and self.larva:
+                    self.larva.random.train(ut)
+                    self.commands_issued += 1
+                    return True
+                return False
+
+            rax_units = {UnitTypeId.MARINE, UnitTypeId.MARAUDER, UnitTypeId.REAPER, UnitTypeId.GHOST}
+            if ut in rax_units:
+                if ut == UnitTypeId.GHOST and not self.structures(UnitTypeId.GHOSTACADEMY).ready:
+                    return False
+                need_techlab = ut in (UnitTypeId.MARAUDER, UnitTypeId.GHOST)
+                for rax in self.structures(UnitTypeId.BARRACKS).ready:
+                    if need_techlab and not rax.has_techlab:
+                        continue
+                    can_queue = len(rax.orders) == 0 or (
+                        rax.has_reactor and len(rax.orders) < 2 and ut in (UnitTypeId.MARINE, UnitTypeId.REAPER)
+                    )
+                    if can_queue:
+                        rax.train(ut)
+                        self.commands_issued += 1
+                        return True
+                return False
+
+            fac_units = {
+                UnitTypeId.HELLION,
+                UnitTypeId.HELLIONTANK,
+                UnitTypeId.WIDOWMINE,
+                UnitTypeId.SIEGETANK,
+                UnitTypeId.CYCLONE,
+                UnitTypeId.THOR,
+            }
+            if ut in fac_units:
+                if ut in (UnitTypeId.HELLIONTANK, UnitTypeId.THOR) and not self.structures(UnitTypeId.ARMORY).ready:
+                    return False
+                need_techlab = ut in (UnitTypeId.SIEGETANK, UnitTypeId.CYCLONE, UnitTypeId.THOR)
+                for fac in self.structures(UnitTypeId.FACTORY).ready:
+                    if need_techlab and not fac.has_techlab:
+                        continue
+                    can_queue = len(fac.orders) == 0 or (
+                        fac.has_reactor and len(fac.orders) < 2 and ut in (UnitTypeId.HELLION, UnitTypeId.WIDOWMINE)
+                    )
+                    if can_queue:
+                        fac.train(ut)
+                        self.commands_issued += 1
+                        return True
+                return False
+
+            sp_units = {
+                UnitTypeId.VIKINGFIGHTER,
+                UnitTypeId.MEDIVAC,
+                UnitTypeId.LIBERATOR,
+                UnitTypeId.RAVEN,
+                UnitTypeId.BANSHEE,
+                UnitTypeId.BATTLECRUISER,
+            }
+            if ut in sp_units:
+                if ut == UnitTypeId.BATTLECRUISER and not self.structures(UnitTypeId.FUSIONCORE).ready:
+                    return False
+                need_techlab = ut in (UnitTypeId.RAVEN, UnitTypeId.BANSHEE, UnitTypeId.BATTLECRUISER)
+                for sp in self.structures(UnitTypeId.STARPORT).ready:
+                    if need_techlab and not sp.has_techlab:
+                        continue
+                    can_queue = len(sp.orders) == 0 or (
+                        sp.has_reactor
+                        and len(sp.orders) < 2
+                        and ut in (UnitTypeId.VIKINGFIGHTER, UnitTypeId.MEDIVAC, UnitTypeId.LIBERATOR)
+                    )
+                    if can_queue:
+                        sp.train(ut)
+                        self.commands_issued += 1
+                        return True
+                return False
+
+            gw_units = {
+                UnitTypeId.ZEALOT,
+                UnitTypeId.STALKER,
+                UnitTypeId.SENTRY,
+                UnitTypeId.ADEPT,
+                UnitTypeId.HIGHTEMPLAR,
+                UnitTypeId.DARKTEMPLAR,
+            }
+            if ut in gw_units:
+                if ut in (UnitTypeId.STALKER, UnitTypeId.SENTRY, UnitTypeId.ADEPT) and not self.structures(UnitTypeId.CYBERNETICSCORE).ready:
+                    return False
+                if ut == UnitTypeId.HIGHTEMPLAR and not self.structures(UnitTypeId.TEMPLARARCHIVE).ready:
+                    return False
+                if ut == UnitTypeId.DARKTEMPLAR and not self.structures(UnitTypeId.DARKSHRINE).ready:
+                    return False
+                idle_gws = self.structures(UnitTypeId.GATEWAY).ready.idle
+                if idle_gws:
+                    idle_gws.first.train(ut)
+                    self.commands_issued += 1
+                    return True
+                wgs = self.structures(UnitTypeId.WARPGATE).ready
+                pylons = self.structures(UnitTypeId.PYLON).ready
+                if wgs and pylons:
+                    anchor_pylon = pylons.closest_to(self.townhalls.first.position) if self.townhalls else pylons.first
+                    for wg in wgs:
+                        try:
+                            abilities = await self.get_available_abilities(wg)
+                            warp_ab = getattr(AbilityId, f"WARPGATETRAIN_{ut.name}", None)
+                            if ut == UnitTypeId.DARKTEMPLAR and warp_ab is None:
+                                warp_ab = getattr(AbilityId, "WARPGATETRAIN_DARKTEMPLAR", None)
+                            if warp_ab in abilities:
+                                pos = anchor_pylon.position.to2.random_on_distance(3.0)
+                                placement = await self.find_placement(warp_ab, pos, placement_step=1)
+                                if placement:
+                                    wg.warp_in(ut, placement)
+                                    self.commands_issued += 1
+                                    return True
+                        except Exception:
+                            continue
+                return False
+
+            robo_units = {
+                UnitTypeId.OBSERVER,
+                UnitTypeId.IMMORTAL,
+                UnitTypeId.WARPPRISM,
+                UnitTypeId.COLOSSUS,
+                UnitTypeId.DISRUPTOR,
+            }
+            if ut in robo_units:
+                if ut in (UnitTypeId.COLOSSUS, UnitTypeId.DISRUPTOR) and not self.structures(UnitTypeId.ROBOTICSBAY).ready:
+                    return False
+                if ut == UnitTypeId.OBSERVER and len(self.units(UnitTypeId.OBSERVER)) + self.already_pending(UnitTypeId.OBSERVER) >= 2:
+                    return False
+                idle_robos = self.structures(UnitTypeId.ROBOTICSFACILITY).ready.idle
+                if idle_robos:
+                    idle_robos.first.train(ut)
+                    self.commands_issued += 1
+                    return True
+                return False
+
+            sg_units = {
+                UnitTypeId.PHOENIX,
+                UnitTypeId.ORACLE,
+                UnitTypeId.VOIDRAY,
+                UnitTypeId.TEMPEST,
+                UnitTypeId.CARRIER,
+            }
+            if ut in sg_units:
+                if ut in (UnitTypeId.TEMPEST, UnitTypeId.CARRIER) and not self.structures(UnitTypeId.FLEETBEACON).ready:
+                    return False
+                idle_sgs = self.structures(UnitTypeId.STARGATE).ready.idle
+                if idle_sgs:
+                    idle_sgs.first.train(ut)
+                    self.commands_issued += 1
+                    return True
+                return False
+
+            return False
+
+        async def _actuate_build_structure(
+            self,
+            bt: Any,
+            x: Optional[float] = None,
+            y: Optional[float] = None,
+        ) -> bool:
+            if bt is None or not self.townhalls:
+                return False
+
+            loop = int(self.state.game_loop)
+            last_cd = int(self._build_cooldown_by_type.get(bt, -999))
+            cooldown_loops = 22 if bt in (UnitTypeId.SUPPLYDEPOT, UnitTypeId.PYLON) else 44
+            if loop - last_cd < cooldown_loops:
+                return False
+
+            if bt in (UnitTypeId.HATCHERY, UnitTypeId.COMMANDCENTER, UnitTypeId.NEXUS):
+                if self.can_afford(bt):
+                    self._build_cooldown_by_type[bt] = loop
+                    return await self._try_smart_expand(bt, reason="racket_expand")
+                return False
+
+            if not self.can_afford(bt):
+                return False
+
+            main_th = self.townhalls.first
+
+            # 1. Gas buildings (Extractor / Refinery / Assimilator)
+            if bt in (UnitTypeId.EXTRACTOR, UnitTypeId.REFINERY, UnitTypeId.ASSIMILATOR):
+                max_gases = min(len(self.townhalls) * 2, 1 if len(self.workers) < 19 else len(self.townhalls) * 2)
+                if (
+                    len(self.gas_buildings) + self.already_pending(bt) >= max_gases
+                    or self.already_pending(bt) >= 2
+                ):
+                    return False
+                for th in self.townhalls.ready:
+                    vgs = self.vespene_geyser.closer_than(10.0, th)
+                    for vg in vgs:
+                        if not self.gas_buildings.closer_than(1.0, vg):
+                            w = self.select_build_worker(vg.position)
+                            if w:
+                                w.build_gas(vg)
+                                self._build_cooldown_by_type[bt] = loop
+                                self.commands_issued += 1
+                                return True
+                return False
+
+            # 2. Terran Add-ons
+            addon_parent_map = {
+                UnitTypeId.BARRACKSTECHLAB: UnitTypeId.BARRACKS,
+                UnitTypeId.BARRACKSREACTOR: UnitTypeId.BARRACKS,
+                UnitTypeId.FACTORYTECHLAB: UnitTypeId.FACTORY,
+                UnitTypeId.FACTORYREACTOR: UnitTypeId.FACTORY,
+                UnitTypeId.STARPORTTECHLAB: UnitTypeId.STARPORT,
+                UnitTypeId.STARPORTREACTOR: UnitTypeId.STARPORT,
+            }
+            if bt in addon_parent_map:
+                parent_type = addon_parent_map[bt]
+                for fac_bldg in self.structures(parent_type).ready.idle:
+                    if (
+                        fac_bldg.add_on_tag == 0
+                        and loop - int(self._addon_last_attempt_loop.get(fac_bldg.tag, -999)) >= 224
+                    ):
+                        self._addon_last_attempt_loop[fac_bldg.tag] = loop
+                        can_fit = self._can_fit_addon(fac_bldg.position)
+                        if not can_fit:
+                            try:
+                                can_fit = await self.can_place_single(UnitTypeId.SUPPLYDEPOT, fac_bldg.add_on_position)
+                            except Exception:
+                                can_fit = False
+                        if can_fit:
+                            fac_bldg.build(bt)
+                            self._build_cooldown_by_type[bt] = loop
+                            self.commands_issued += 1
+                            return True
+                return False
+
+            # 3. Supply structures (Supply Depot / Pylon)
+            if bt in (UnitTypeId.SUPPLYDEPOT, UnitTypeId.PYLON):
+                if self.supply_cap >= 200 or self.already_pending(bt) >= (2 if self.supply_cap >= 44 else 1):
+                    return False
+                near_anchor = self._get_main_build_anchor(main_th)
+                self._build_cooldown_by_type[bt] = loop
+                await self.build(bt, near=near_anchor, max_distance=18)
+                self.commands_issued += 1
+                return True
+
+            # 4. Tech buildings & static defense duplicate/prerequisite guards
+            singleton_tech = {
+                UnitTypeId.SPAWNINGPOOL,
+                UnitTypeId.ROACHWARREN,
+                UnitTypeId.BANELINGNEST,
+                UnitTypeId.HYDRALISKDEN,
+                UnitTypeId.LURKERDENMP,
+                UnitTypeId.SPIRE,
+                UnitTypeId.INFESTATIONPIT,
+                UnitTypeId.ULTRALISKCAVERN,
+                UnitTypeId.GHOSTACADEMY,
+                UnitTypeId.ARMORY,
+                UnitTypeId.FUSIONCORE,
+                UnitTypeId.CYBERNETICSCORE,
+                UnitTypeId.TWILIGHTCOUNCIL,
+                UnitTypeId.ROBOTICSBAY,
+                UnitTypeId.TEMPLARARCHIVE,
+                UnitTypeId.DARKSHRINE,
+                UnitTypeId.FLEETBEACON,
+            }
+            if bt in singleton_tech:
+                if len(self.structures(bt)) + self.already_pending(bt) >= 1:
+                    if not (bt == UnitTypeId.SPIRE and self.structures(UnitTypeId.GREATERSPIRE)):
+                        return False
+                if bt == UnitTypeId.SPIRE and (self.structures(UnitTypeId.SPIRE) or self.structures(UnitTypeId.GREATERSPIRE)):
+                    return False
+
+            if bt in (UnitTypeId.EVOLUTIONCHAMBER, UnitTypeId.ENGINEERINGBAY, UnitTypeId.FORGE):
+                max_upg_bldgs = 2 if len(self.townhalls) >= 2 else 1
+                if len(self.structures(bt)) + self.already_pending(bt) >= max_upg_bldgs or self.already_pending(bt) >= 1:
+                    return False
+
+            prod_types = {
+                UnitTypeId.BARRACKS,
+                UnitTypeId.FACTORY,
+                UnitTypeId.STARPORT,
+                UnitTypeId.GATEWAY,
+                UnitTypeId.ROBOTICSFACILITY,
+                UnitTypeId.STARGATE,
+            }
+            if bt in prod_types:
+                if self.already_pending(bt) >= 2:
+                    return False
+                max_cap = max(3, len(self.townhalls) * 3)
+                cur_count = len(self.structures(bt)) + (
+                    len(self.structures(UnitTypeId.WARPGATE)) if bt == UnitTypeId.GATEWAY else 0
+                )
+                if cur_count + self.already_pending(bt) >= max_cap:
+                    return False
+
+            static_def_types = {
+                UnitTypeId.SPINECRAWLER,
+                UnitTypeId.SPORECRAWLER,
+                UnitTypeId.BUNKER,
+                UnitTypeId.MISSILETURRET,
+                UnitTypeId.PHOTONCANNON,
+                UnitTypeId.SHIELDBATTERY,
+            }
+            if bt in static_def_types:
+                if (
+                    self.already_pending(bt) >= 1
+                    or len(self.structures(bt)) + self.already_pending(bt) >= max(2, len(self.townhalls) + 1)
+                ):
+                    return False
+
+            # Prerequisite checks so we don't issue invalid placements
+            if bt in (UnitTypeId.ROACHWARREN, UnitTypeId.BANELINGNEST, UnitTypeId.SPINECRAWLER, UnitTypeId.SPORECRAWLER):
+                if not self.structures(UnitTypeId.SPAWNINGPOOL).ready:
+                    return False
+            if bt in (UnitTypeId.HYDRALISKDEN, UnitTypeId.SPIRE, UnitTypeId.INFESTATIONPIT):
+                if not (self.structures(UnitTypeId.LAIR).ready or self.structures(UnitTypeId.HIVE).ready):
+                    return False
+            if bt == UnitTypeId.LURKERDENMP and not self.structures(UnitTypeId.HYDRALISKDEN).ready:
+                return False
+            if bt == UnitTypeId.ULTRALISKCAVERN and not self.structures(UnitTypeId.HIVE).ready:
+                return False
+            if bt == UnitTypeId.BARRACKS and not self.structures({UnitTypeId.SUPPLYDEPOT, UnitTypeId.SUPPLYDEPOTLOWERED}).ready:
+                return False
+            if bt in (UnitTypeId.FACTORY, UnitTypeId.GHOSTACADEMY, UnitTypeId.BUNKER) and not self.structures(UnitTypeId.BARRACKS).ready:
+                return False
+            if bt in (UnitTypeId.STARPORT, UnitTypeId.ARMORY) and not self.structures(UnitTypeId.FACTORY).ready:
+                return False
+            if bt == UnitTypeId.FUSIONCORE and not self.structures(UnitTypeId.STARPORT).ready:
+                return False
+            if bt == UnitTypeId.MISSILETURRET and not self.structures(UnitTypeId.ENGINEERINGBAY).ready:
+                return False
+
+            # Compute mineral-line or natural-choke anchor for static defense structures
+            mineral_line_def_pos = None
+            if bt in (UnitTypeId.SPORECRAWLER, UnitTypeId.MISSILETURRET, UnitTypeId.PHOTONCANNON):
+                for th in self.townhalls.ready:
+                    if not self.structures(bt).closer_than(10.0, th):
+                        local_mins = self.mineral_field.closer_than(10.0, th) if self.mineral_field else []
+                        if local_mins:
+                            mineral_line_def_pos = th.position.towards(local_mins.center, 2.5)
+                        else:
+                            mineral_line_def_pos = th.position.towards(self.game_info.map_center, -2.5)
+                        break
+            choke_def_pos = None
+            if bt in (UnitTypeId.BUNKER, UnitTypeId.SHIELDBATTERY, UnitTypeId.SPINECRAWLER):
+                sorted_ths = sorted(self.townhalls, key=lambda t: t.distance_to(main_th))
+                nat_th = sorted_ths[1] if len(sorted_ths) >= 2 else main_th
+                choke_def_pos = nat_th.position.towards(self.game_info.map_center, 4.5)
+
+            # Choose anchor position
+            if self.race == Race.Protoss:
+                pylons = self.structures(UnitTypeId.PYLON).ready
+                if not pylons:
+                    return False
+                if bt == UnitTypeId.CYBERNETICSCORE and not self.structures({UnitTypeId.GATEWAY, UnitTypeId.WARPGATE}).ready:
+                    return False
+                if bt in (UnitTypeId.TWILIGHTCOUNCIL, UnitTypeId.ROBOTICSFACILITY, UnitTypeId.STARGATE, UnitTypeId.SHIELDBATTERY) and not self.structures(UnitTypeId.CYBERNETICSCORE).ready:
+                    return False
+                if bt == UnitTypeId.ROBOTICSBAY and not self.structures(UnitTypeId.ROBOTICSFACILITY).ready:
+                    return False
+                if bt in (UnitTypeId.TEMPLARARCHIVE, UnitTypeId.DARKSHRINE) and not self.structures(UnitTypeId.TWILIGHTCOUNCIL).ready:
+                    return False
+                if bt == UnitTypeId.FLEETBEACON and not self.structures(UnitTypeId.STARGATE).ready:
+                    return False
+                if bt == UnitTypeId.PHOTONCANNON and not self.structures(UnitTypeId.FORGE).ready:
+                    return False
+                target_ref = mineral_line_def_pos or choke_def_pos or self._get_main_build_anchor(main_th)
+                anchor_pylon = pylons.closest_to(target_ref)
+                self._build_cooldown_by_type[bt] = loop
+                self.active_build_goal = ENUM_NAME_TO_BUILDING_NAME.get(bt.name, bt.name.lower())
+                await self.build(bt, near=anchor_pylon, max_distance=15)
+                self.commands_issued += 1
+                return True
+
+            near_pos = (
+                mineral_line_def_pos
+                or choke_def_pos
+                or (
+                    main_th.position.towards(self.game_info.map_center, 5.0)
+                    if bt in static_def_types
+                    else self._get_main_build_anchor(main_th)
+                )
+            )
+            self._build_cooldown_by_type[bt] = loop
+            self.active_build_goal = ENUM_NAME_TO_BUILDING_NAME.get(bt.name, bt.name.lower())
+            await self.build(bt, near=near_pos, max_distance=18)
+            self.commands_issued += 1
+            return True
+
+        async def _actuate_research_upgrade(self, upg: Any) -> bool:
+            if upg is None or upg in self.state.upgrades:
+                return False
+            try:
+                if self.already_pending_upgrade(upg) > 0:
+                    return False
+            except Exception:
+                pass
+            if not self.can_afford(upg):
+                return False
+
+            upg_name = getattr(upg, "name", "")
+            researcher_types: List[Any] = []
+            if upg_name in ("ZERGLINGMOVEMENTSPEED", "ZERGLINGATTACKSPEED"):
+                if upg_name == "ZERGLINGATTACKSPEED" and not self.structures(UnitTypeId.HIVE).ready:
+                    return False
+                researcher_types = [UnitTypeId.SPAWNINGPOOL]
+            elif upg_name == "GLIALRECONSTITUTION":
+                if not (self.structures(UnitTypeId.LAIR).ready or self.structures(UnitTypeId.HIVE).ready):
+                    return False
+                researcher_types = [UnitTypeId.ROACHWARREN]
+            elif upg_name == "CENTRIFICALHOOKS":
+                if not (self.structures(UnitTypeId.LAIR).ready or self.structures(UnitTypeId.HIVE).ready):
+                    return False
+                researcher_types = [UnitTypeId.BANELINGNEST]
+            elif upg_name in ("EVOLVEGROOVEDSPINES", "EVOLVEMUSCULARAUGMENTS"):
+                researcher_types = [UnitTypeId.HYDRALISKDEN]
+            elif upg_name == "DIGGINGCLAWS":
+                if not self.structures(UnitTypeId.HIVE).ready:
+                    return False
+                researcher_types = [UnitTypeId.LURKERDENMP]
+            elif upg_name in ("CHITINOUSPLATING", "ANABOLICSYNTHESIS"):
+                researcher_types = [UnitTypeId.ULTRALISKCAVERN]
+            elif upg_name.startswith("ZERG"):
+                researcher_types = [UnitTypeId.EVOLUTIONCHAMBER]
+            elif upg_name in ("BURROW", "OVERLORDSPEED"):
+                researcher_types = [UnitTypeId.HATCHERY, UnitTypeId.LAIR, UnitTypeId.HIVE]
+            elif upg_name in ("STIMPACK", "SHIELDWALL", "PUNISHERGRENADES"):
+                researcher_types = [UnitTypeId.BARRACKSTECHLAB]
+            elif upg_name in ("HIGHCAPACITYBARRELS", "DRILLCLAWS"):
+                researcher_types = [UnitTypeId.FACTORYTECHLAB]
+            elif upg_name == "BANSHEECLOAK":
+                researcher_types = [UnitTypeId.STARPORTTECHLAB]
+            elif upg_name == "PERSONALCLOAKING":
+                researcher_types = [UnitTypeId.GHOSTACADEMY]
+            elif upg_name.startswith("TERRANINFANTRY"):
+                researcher_types = [UnitTypeId.ENGINEERINGBAY]
+            elif upg_name.startswith("TERRANVEHICLE"):
+                researcher_types = [UnitTypeId.ARMORY]
+            elif upg_name == "WARPGATERESEARCH":
+                researcher_types = [UnitTypeId.CYBERNETICSCORE]
+            elif upg_name in ("CHARGE", "BLINKTECH"):
+                researcher_types = [UnitTypeId.TWILIGHTCOUNCIL]
+            elif upg_name == "EXTENDEDTHERMALLANCE":
+                researcher_types = [UnitTypeId.ROBOTICSBAY]
+            elif upg_name == "PSISTORMTECH":
+                researcher_types = [UnitTypeId.TEMPLARARCHIVE]
+            elif upg_name.startswith("PROTOSS"):
+                researcher_types = [UnitTypeId.FORGE]
+
+            for rtype in researcher_types:
+                idle_bldgs = self.structures(rtype).ready.idle
+                if idle_bldgs:
+                    idle_bldgs.first.research(upg)
+                    self.commands_issued += 1
+                    return True
+            return False
+
+        async def _actuate_morph(self, target_name: str, source_id: Optional[int] = None) -> bool:
+            t = target_name.lower()
+            if t == "lair":
+                if (
+                    self.structures(UnitTypeId.SPAWNINGPOOL).ready
+                    and not self.structures({UnitTypeId.LAIR, UnitTypeId.HIVE})
+                    and not self.already_pending(UnitTypeId.LAIR)
+                    and self.can_afford(UnitTypeId.LAIR)
+                ):
+                    hatches = self.structures(UnitTypeId.HATCHERY).ready.idle
+                    if hatches:
+                        hatches.first.build(UnitTypeId.LAIR)
+                        self.commands_issued += 1
+                        return True
+            elif t == "hive":
+                if (
+                    self.structures(UnitTypeId.INFESTATIONPIT).ready
+                    and not self.structures(UnitTypeId.HIVE)
+                    and not self.already_pending(UnitTypeId.HIVE)
+                    and self.can_afford(UnitTypeId.HIVE)
+                ):
+                    lairs = self.structures(UnitTypeId.LAIR).ready.idle
+                    if lairs:
+                        lairs.first.build(UnitTypeId.HIVE)
+                        self.commands_issued += 1
+                        return True
+            elif t == "greater-spire":
+                if (
+                    self.structures(UnitTypeId.HIVE).ready
+                    and not self.structures(UnitTypeId.GREATERSPIRE)
+                    and not self.already_pending(UnitTypeId.GREATERSPIRE)
+                    and self.can_afford(UnitTypeId.GREATERSPIRE)
+                ):
+                    spires = self.structures(UnitTypeId.SPIRE).ready.idle
+                    if spires:
+                        spires.first(AbilityId.UPGRADETOGREATERSPIRE_GREATERSPIRE)
+                        self.commands_issued += 1
+                        return True
+            elif t == "ravager":
+                roaches = self.units(UnitTypeId.ROACH).ready
+                if (
+                    roaches
+                    and self.structures(UnitTypeId.ROACHWARREN).ready
+                    and self.can_afford(UnitTypeId.RAVAGER)
+                ):
+                    src = roaches.find_by_tag(source_id) if source_id else roaches.first
+                    if src is None:
+                        src = roaches.first
+                    src(AbilityId.MORPHTORAVAGER_RAVAGER)
+                    self.commands_issued += 1
+                    return True
+            elif t == "baneling":
+                lings = self.units(UnitTypeId.ZERGLING).ready
+                if (
+                    lings
+                    and self.structures(UnitTypeId.BANELINGNEST).ready
+                    and self.can_afford(UnitTypeId.BANELING)
+                ):
+                    src = lings.find_by_tag(source_id) if source_id else lings.first
+                    if src is None:
+                        src = lings.first
+                    src(AbilityId.MORPHZERGLINGTOBANELING_BANELING)
+                    self.commands_issued += 1
+                    return True
+            elif t == "overseer":
+                ovs = self.units(UnitTypeId.OVERLORD).ready
+                if (
+                    ovs
+                    and self.structures({UnitTypeId.LAIR, UnitTypeId.HIVE}).ready
+                    and len(self.units(UnitTypeId.OVERSEER)) + self.already_pending(UnitTypeId.OVERSEER) < 2
+                    and self.minerals >= 50
+                    and self.vespene >= 50
+                ):
+                    src = ovs.find_by_tag(source_id) if source_id else ovs.first
+                    if src is None:
+                        src = ovs.first
+                    src(AbilityId.MORPH_OVERSEER)
+                    self._record_pro_mechanic("morph-overseer-detector")
+                    self.commands_issued += 1
+                    return True
+            elif t in ("lurker", "lurker-mp"):
+                hydras = self.units(UnitTypeId.HYDRALISK).ready
+                if (
+                    hydras
+                    and self.structures(UnitTypeId.LURKERDENMP).ready
+                    and self.can_afford(UnitTypeId.LURKERMP)
+                ):
+                    src = hydras.find_by_tag(source_id) if source_id else hydras.first
+                    if src is None:
+                        src = hydras.first
+                    src(AbilityId.MORPH_LURKER)
+                    self.commands_issued += 1
+                    return True
+            elif t in ("brood-lord", "broodlord"):
+                corruptors = self.units(UnitTypeId.CORRUPTOR).ready
+                if (
+                    corruptors
+                    and self.structures(UnitTypeId.GREATERSPIRE).ready
+                    and self.can_afford(UnitTypeId.BROODLORD)
+                ):
+                    src = corruptors.find_by_tag(source_id) if source_id else corruptors.first
+                    if src is None:
+                        src = corruptors.first
+                    src(AbilityId.MORPHTOBROODLORD_BROODLORD)
+                    self.commands_issued += 1
+                    return True
+            elif t == "orbital-command":
+                ccs = self.structures(UnitTypeId.COMMANDCENTER).ready.idle
+                if (
+                    ccs
+                    and self.structures(UnitTypeId.BARRACKS).ready
+                    and self.can_afford(UnitTypeId.ORBITALCOMMAND)
+                ):
+                    src = ccs.find_by_tag(source_id) if source_id else ccs.first
+                    if src is None:
+                        src = ccs.first
+                    src(AbilityId.UPGRADETOORBITAL_ORBITALCOMMAND)
+                    self.commands_issued += 1
+                    return True
+            elif t == "planetary-fortress":
+                ccs = self.structures(UnitTypeId.COMMANDCENTER).ready.idle
+                if (
+                    ccs
+                    and self.structures(UnitTypeId.ENGINEERINGBAY).ready
+                    and self.can_afford(UnitTypeId.PLANETARYFORTRESS)
+                ):
+                    src = ccs.find_by_tag(source_id) if source_id else ccs.first
+                    if src is None:
+                        src = ccs.first
+                    src(AbilityId.UPGRADETOPLANETARYFORTRESS_PLANETARYFORTRESS)
+                    self.commands_issued += 1
+                    return True
+            elif t == "warp-gate":
+                gws = self.structures(UnitTypeId.GATEWAY).ready.idle
+                if gws and UpgradeId.WARPGATERESEARCH in self.state.upgrades:
+                    src = gws.find_by_tag(source_id) if source_id else gws.first
+                    if src is None:
+                        src = gws.first
+                    src(AbilityId.MORPH_WARPGATE)
+                    self.commands_issued += 1
+                    return True
+            elif t == "archon":
+                hts = self.units({UnitTypeId.HIGHTEMPLAR, UnitTypeId.DARKTEMPLAR}).ready
+                if len(hts) >= 2:
+                    hts[0](AbilityId.ARCHON_WARP_TARGET, hts[1])
+                    self._record_pro_mechanic("morph-archon")
+                    self.commands_issued += 1
+                    return True
+            return False
+
+        def _partition_queens(self) -> Tuple[List[Any], List[Any]]:
+            """
+            Partitions ready Queens into dedicated Inject Queens (1 per ready TownHall)
+            and Creep/Defense Queens so Inject Queens never wander off to lay tumors.
+            """
+            queens = list(self.units(UnitTypeId.QUEEN).ready)
+            if not queens:
+                return [], []
+            inject_tags: set = set()
+            inject_queens: List[Any] = []
+            for th in self.townhalls.ready:
+                avail = [q for q in queens if q.tag not in inject_tags and q.distance_to(th) <= 14.0]
+                if avail:
+                    chosen_q = min(avail, key=lambda q: q.distance_to(th))
+                    inject_tags.add(chosen_q.tag)
+                    inject_queens.append((chosen_q, th))
+            creep_queens = [q for q in queens if q.tag not in inject_tags]
+            return inject_queens, creep_queens
+
+        async def _spread_single_creep_tumor(self, tumor: Any, target_dir: Any) -> bool:
+            """
+            Spreads a burrowed Creep Tumor only after its 10s burrowing cooldown has elapsed
+            (`AbilityId.BUILD_CREEPTUMOR_TUMOR in abilities`) and a valid pathable/creep spot
+            in a fan of candidate distances/angles (`5.0..9.5` tiles) is found.
+            """
+            if tumor is None or tumor.tag in self._used_creep_tumors:
+                return False
+            try:
+                abilities = await self.get_available_abilities(tumor)
+            except Exception:
+                abilities = []
+            if AbilityId.BUILD_CREEPTUMOR_TUMOR not in abilities:
+                return False
+
+            base_ang = math.atan2(
+                float(target_dir.y) - float(tumor.position.y),
+                float(target_dir.x) - float(tumor.position.x),
+            )
+            chosen_pt = None
+            for dist in (8.5, 7.0, 5.5):
+                for deg in (0.0, -25.0, 25.0, -50.0, 50.0, -80.0, 80.0):
+                    ang = base_ang + math.radians(deg)
+                    cand = Point2(
+                        (
+                            float(tumor.position.x) + dist * math.cos(ang),
+                            float(tumor.position.y) + dist * math.sin(ang),
+                        )
+                    )
+                    try:
+                        if self.in_pathing_grid(cand) and self.has_creep(cand):
+                            chosen_pt = cand
+                            break
+                    except Exception:
+                        chosen_pt = cand
+                        break
+                if chosen_pt is not None:
+                    break
+
+            if chosen_pt is None:
+                return False
+
+            tumor(AbilityId.BUILD_CREEPTUMOR_TUMOR, chosen_pt)
+            self._used_creep_tumors.add(tumor.tag)
+            self._record_pro_mechanic("active-creep-tumor-spread")
+            self.commands_issued += 1
+            return True
+
         async def _execute_decoded_commands(self, cmds: List[Dict[str, Any]]) -> None:
+            self._last_racket_cmds = list(cmds)
+            inject_queens_pairs, creep_queens = self._partition_queens() if self.race == Race.Zerg else ([], [])
+            inject_queen_tags = {q.tag for q, _ in inject_queens_pairs}
             for c in cmds:
                 op = c.get("op")
                 try:
-                    if op == "cancel":
+                    if op == "posture-transition":
+                        new_post = str(c.get("posture", "")).strip()
+                        if new_post and new_post != self.current_posture:
+                            self.current_posture = new_post
+                            self.posture_transitions.append(new_post)
+                        self.racket_commands_executed += 1
+
+                    elif op == "mirror-macro-directive":
+                        raw = c.get("raw", [])
+                        if len(raw) >= 2:
+                            directive_str = str(raw[1]).lower()
+                            if "defend" in directive_str or "all-in" in directive_str:
+                                self.mirror_macro_verdict = "defend_one_base_all_in"
+                            elif "greedy" in directive_str or "disrupt" in directive_str:
+                                self.mirror_macro_verdict = "counter_greedy_expand_and_disrupt"
+                        self.racket_commands_executed += 1
+
+                    elif op == "cancel":
                         uid = c.get("unit_id")
                         bldg = self.structures.find_by_tag(uid) if uid else None
                         if bldg and 0.25 <= bldg.build_progress < 1.0 and bldg.health_percentage < 0.18:
@@ -2767,44 +3822,49 @@ def create_racket_sc2_agent(
                         u_enum_name = c.get("unit_enum", "")
                         ut = getattr(UnitTypeId, u_enum_name, None)
                         if ut is not None:
-                            if ut == UnitTypeId.OVERLORD:
-                                if (
-                                    self.race == Race.Zerg
-                                    and self.supply_left <= 6
-                                    and self.already_pending(UnitTypeId.OVERLORD) < 2
-                                    and self.can_afford(UnitTypeId.OVERLORD)
-                                    and self.larva
-                                ):
-                                    self.larva.first.train(UnitTypeId.OVERLORD)
-                                    self.commands_issued += 1
-                                    self.racket_commands_executed += 1
-                            elif self.supply_left >= 3 and self.can_afford(ut):
+                            executed = await self._actuate_train_unit(ut)
+                            if executed or self.can_afford(ut):
                                 self.racket_commands_executed += 1
 
                     elif op == "build":
                         b_enum_name = c.get("building_enum", "")
                         bt = getattr(UnitTypeId, b_enum_name, None)
-                        if bt is not None and self.can_afford(bt):
-                            self.racket_commands_executed += 1
+                        if bt is not None:
+                            executed = await self._actuate_build_structure(bt, c.get("x"), c.get("y"))
+                            if executed or self.can_afford(bt):
+                                self.racket_commands_executed += 1
 
                     elif op == "expand":
+                        th_type = (
+                            UnitTypeId.HATCHERY
+                            if self.race == Race.Zerg
+                            else (UnitTypeId.COMMANDCENTER if self.race == Race.Terran else UnitTypeId.NEXUS)
+                        )
+                        if self.can_afford(th_type):
+                            await self._try_smart_expand(th_type, reason="racket_expand")
                         self.racket_commands_executed += 1
 
                     elif op == "research":
                         upg_enum_name = c.get("upgrade_enum", "")
                         upg = getattr(UpgradeId, upg_enum_name, None)
-                        if upg is not None and self.can_afford(upg):
-                            self.racket_commands_executed += 1
+                        if upg is not None:
+                            executed = await self._actuate_research_upgrade(upg)
+                            if executed or self.can_afford(upg):
+                                self.racket_commands_executed += 1
 
                     elif op == "morph":
+                        target_name = str(c.get("target", ""))
+                        src_id = c.get("source_id")
+                        src_tag = int(src_id) if isinstance(src_id, (int, float)) else None
+                        await self._actuate_morph(target_name, src_tag)
                         self.racket_commands_executed += 1
 
                     elif op == "inject-larva":
                         qid = c.get("queen_id")
                         hid = c.get("hatch_id")
                         queen = self.units.find_by_tag(qid) if qid else None
-                        hatch = self.structures.find_by_tag(hid) if hid else (self.townhalls.first if self.townhalls else None)
-                        if queen and hatch and queen.energy >= 25:
+                        hatch = self.structures.find_by_tag(hid) if hid else (self.townhalls.ready.first if self.townhalls.ready else None)
+                        if queen and hatch and queen.energy >= 25 and not hatch.has_buff(BuffId.QUEENSPAWNLARVATIMER):
                             queen(AbilityId.EFFECT_INJECTLARVA, hatch)
                             self.commands_issued += 1
                             self.racket_commands_executed += 1
@@ -2812,24 +3872,61 @@ def create_racket_sc2_agent(
                     elif op == "cast":
                         spell = c.get("spell")
                         cid = c.get("caster_id")
-                        if spell == "spread-creep-tumor":
-                            tumor = self.structures.find_by_tag(cid) if cid else None
-                            if tumor and tumor.tag not in self._used_creep_tumors:
-                                tx = c.get("x") or self.enemy_start_locations[0].x
-                                ty = c.get("y") or self.enemy_start_locations[0].y
-                                target_pt = tumor.position.towards(Point2((tx, ty)), 8.5)
-                                tumor(AbilityId.BUILD_CREEPTUMOR_TUMOR, target_pt)
-                                self._used_creep_tumors.add(tumor.tag)
-                                self._record_pro_mechanic("active-creep-tumor-spread")
+                        if spell == "inject-larva":
+                            queen = self.units.find_by_tag(cid) if cid else None
+                            tid = c.get("target_id")
+                            hatch = self.structures.find_by_tag(tid) if tid else (self.townhalls.ready.first if self.townhalls.ready else None)
+                            if queen and hatch and queen.energy >= 25 and not hatch.has_buff(BuffId.QUEENSPAWNLARVATIMER):
+                                queen(AbilityId.EFFECT_INJECTLARVA, hatch)
                                 self.commands_issued += 1
                                 self.racket_commands_executed += 1
+                        elif spell == "spawn-creep-tumor":
+                            queen = self.units.find_by_tag(cid) if cid else (creep_queens[0] if creep_queens else None)
+                            if queen and queen.tag in inject_queen_tags and queen.energy < 50:
+                                queen = creep_queens[0] if creep_queens else None
+                            loop = int(self.state.game_loop)
+                            if (
+                                queen
+                                and queen.energy >= 25
+                                and loop - int(self._queen_tumor_cooldown_by_tag.get(queen.tag, -999)) >= 112
+                            ):
+                                enemy_pt = self.enemy_start_locations[0] if self.enemy_start_locations else self.game_info.map_center
+                                target_pt = queen.position.towards(enemy_pt, 5.0)
+                                queen(AbilityId.BUILD_CREEPTUMOR_QUEEN, target_pt)
+                                self._queen_tumor_cooldown_by_tag[queen.tag] = loop
+                                self._record_pro_mechanic("queen-creep-tumor")
+                                self.commands_issued += 1
+                                self.racket_commands_executed += 1
+                        elif spell == "spread-creep-tumor":
+                            tumor = self.structures.find_by_tag(cid) if cid else None
+                            if tumor and tumor.tag not in self._used_creep_tumors:
+                                enemy_pt = self.enemy_start_locations[0] if self.enemy_start_locations else self.game_info.map_center
+                                if await self._spread_single_creep_tumor(tumor, enemy_pt):
+                                    self.racket_commands_executed += 1
                         elif spell == "chrono-boost":
                             nexus = self.structures.find_by_tag(cid) if cid else (self.townhalls.ready.first if self.townhalls.ready else None)
                             tid = c.get("target_id")
                             target_bldg = self.structures.find_by_tag(tid) if tid else None
-                            if nexus and target_bldg and nexus.energy >= 50:
+                            if nexus and target_bldg and nexus.energy >= 50 and not target_bldg.has_buff(BuffId.CHRONOBOOSTENERGYCOST):
                                 nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, target_bldg)
                                 self._record_pro_mechanic("chrono-boost")
+                                self.commands_issued += 1
+                                self.racket_commands_executed += 1
+                        elif spell == "calldown-mule":
+                            oc = self.structures.find_by_tag(cid) if cid else None
+                            if oc and oc.energy >= 50 and self.mineral_field and self.townhalls.ready:
+                                mf = self.mineral_field.closest_to(self.townhalls.ready.random)
+                                oc(AbilityId.CALLDOWNMULE_CALLDOWNMULE, mf)
+                                self._record_pro_mechanic("calldown-mule")
+                                self.commands_issued += 1
+                                self.racket_commands_executed += 1
+                        elif spell == "scanner-sweep":
+                            oc = self.structures.find_by_tag(cid) if cid else None
+                            if oc and oc.energy >= 50:
+                                tx = c.get("x") or self.enemy_start_locations[0].x
+                                ty = c.get("y") or self.enemy_start_locations[0].y
+                                oc(AbilityId.SCANNERSWEEP_SCAN, Point2((float(tx), float(ty))))
+                                self._record_countermeasure("scanner-sweep-cloak-reveal")
                                 self.commands_issued += 1
                                 self.racket_commands_executed += 1
                         elif spell == "corrosive-bile":
@@ -2850,6 +3947,11 @@ def create_racket_sc2_agent(
                                 self.racket_commands_executed += 1
 
                     elif op == "hold-position":
+                        uid = c.get("unit_id")
+                        u = self.units.find_by_tag(uid) if uid else None
+                        if u:
+                            u(AbilityId.HOLDPOSITION)
+                            self.commands_issued += 1
                         self._record_pro_mechanic("hold-position-door-guard")
                         self.racket_commands_executed += 1
 
@@ -2943,6 +4045,31 @@ def create_racket_sc2_agent(
                         self.racket_commands_executed += 1
 
                     elif op in ("attack-pos", "attack-unit", "kite", "move", "retreat"):
+                        uids = c.get("unit_ids", [])
+                        if uids:
+                            if op == "attack-unit":
+                                tid = c.get("target_id")
+                                target_e = (self.enemy_units | self.enemy_structures).find_by_tag(tid) if tid else None
+                                if target_e:
+                                    for uid in uids[:8]:
+                                        u = self.units.find_by_tag(uid)
+                                        if u and u.type_id not in {UnitTypeId.DRONE, UnitTypeId.SCV, UnitTypeId.PROBE}:
+                                            u.attack(target_e)
+                                            self.commands_issued += 1
+                            elif c.get("x") is not None and c.get("y") is not None:
+                                tx, ty = float(c["x"]), float(c["y"])
+                                w = float(self.game_info.map_size.width)
+                                h = float(self.game_info.map_size.height)
+                                if 1.0 <= tx <= w and 1.0 <= ty <= h:
+                                    pt = Point2((tx, ty))
+                                    for uid in uids[:8]:
+                                        u = self.units.find_by_tag(uid)
+                                        if u and u.type_id not in {UnitTypeId.DRONE, UnitTypeId.SCV, UnitTypeId.PROBE}:
+                                            if op == "attack-pos":
+                                                u.attack(pt)
+                                            else:
+                                                u.move(pt)
+                                            self.commands_issued += 1
                         self.racket_commands_executed += 1
                 except Exception:
                     pass
@@ -2964,20 +4091,16 @@ def create_racket_sc2_agent(
                     self._record_pro_mechanic("cancel-dying-building")
                     self.commands_issued += 1
 
-            # 2. Pro Mechanic #2: Active Creep Tumor Spread (capped at 2/frame)
+            # 2. Pro Mechanic #2: Active Creep Tumor Spread (capped at 2/frame, respecting 10s burrowing cooldown)
             if self.race == Race.Zerg:
                 ready_tumors = [
                     t
-                    for t in self.structures(UnitTypeId.CREEPTUMORBURROWED).ready
+                    for t in self.structures({UnitTypeId.CREEPTUMORBURROWED, UnitTypeId.CREEPTUMORQUEEN}).ready
                     if t.tag not in self._used_creep_tumors
                 ][:2]
                 enemy_loc = self.enemy_start_locations[0] if self.enemy_start_locations else self.game_info.map_center
                 for tumor in ready_tumors:
-                    target_pt = tumor.position.towards(enemy_loc, 8.5)
-                    tumor(AbilityId.BUILD_CREEPTUMOR_TUMOR, target_pt)
-                    self._used_creep_tumors.add(tumor.tag)
-                    self._record_pro_mechanic("active-creep-tumor-spread")
-                    self.commands_issued += 1
+                    await self._spread_single_creep_tumor(tumor, enemy_loc)
 
             # 3. Overlord Safe Retreat
             if self.race == Race.Zerg:
@@ -3237,12 +4360,17 @@ def create_racket_sc2_agent(
             loop = int(self.state.game_loop)
             sec = loop / 22.4
             ready_ths = self.townhalls.ready
-            pending_bases = (
-                self.already_pending(UnitTypeId.HATCHERY)
-                + self.already_pending(UnitTypeId.COMMANDCENTER)
-                + self.already_pending(UnitTypeId.NEXUS)
+            in_progress_ths = max(0, len(self.townhalls) - len(ready_ths))
+            en_route_expand = any(
+                any(
+                    k in getattr(getattr(o, "ability", None), "name", "")
+                    for o in getattr(w, "orders", [])
+                    for k in ("HATCHERY", "COMMANDCENTER", "NEXUS")
+                )
+                for w in self.workers
             )
-            total_bases = len(self.townhalls) + int(pending_bases)
+            pending_bases = in_progress_ths + (1 if (in_progress_ths == 0 and en_route_expand) else 0)
+            total_bases = len(ready_ths) + int(pending_bases)
             max_map_bases = (
                 len(self.expansion_locations_list)
                 if hasattr(self, "expansion_locations_list") and self.expansion_locations_list
@@ -3584,43 +4712,50 @@ def create_racket_sc2_agent(
                             w.gather(self.mineral_field.closest_to(w))
 
         async def _build_mirror_choke_defense(self, main_th) -> None:
-            """If Mirror-Mind detects enemy 1-base all-in after 180s, fortify natural choke before 3rd base."""
-            if self.mirror_macro_verdict != "defend_one_base_all_in" or len(self.townhalls) < 2:
+            """Fortify natural choke on 2+ bases and place mineral-line Spore/Turret/Cannon when detection/anti-air is required."""
+            if len(self.townhalls) < 2:
                 return
             sorted_ths = sorted(self.townhalls, key=lambda t: t.distance_to(main_th))
             nat_th = sorted_ths[1] if len(sorted_ths) >= 2 else main_th
             choke_pos = nat_th.position.towards(self.game_info.map_center, 4.5)
+            max_choke_def = 2 if self.mirror_macro_verdict == "defend_one_base_all_in" else 1
+            allow_choke_build = self.mirror_macro_verdict == "defend_one_base_all_in" or self.minerals >= 250
 
-            if self.race == Race.Zerg and self.structures(UnitTypeId.SPAWNINGPOOL).ready:
-                if (
-                    len(self.structures(UnitTypeId.SPINECRAWLER)) + self.already_pending(UnitTypeId.SPINECRAWLER) < 2
-                    and self.can_afford(UnitTypeId.SPINECRAWLER)
-                ):
-                    await self.build(UnitTypeId.SPINECRAWLER, near=choke_pos, max_distance=10)
-                    self._record_countermeasure("mirror-all-in-spine-wall")
-            elif self.race == Race.Terran and self.structures(UnitTypeId.BARRACKS).ready:
-                if (
-                    len(self.structures(UnitTypeId.BUNKER)) + self.already_pending(UnitTypeId.BUNKER) < 2
-                    and self.can_afford(UnitTypeId.BUNKER)
-                ):
-                    await self.build(UnitTypeId.BUNKER, near=choke_pos, max_distance=12)
-                    self._record_countermeasure("mirror-all-in-bunker-wall")
-            elif self.race == Race.Protoss and self.structures(UnitTypeId.PYLON).ready:
-                choke_pylon = self.structures(UnitTypeId.PYLON).ready.closest_to(choke_pos)
-                if (
-                    self.structures(UnitTypeId.CYBERNETICSCORE).ready
-                    and len(self.structures(UnitTypeId.SHIELDBATTERY)) + self.already_pending(UnitTypeId.SHIELDBATTERY) < 1
-                    and self.can_afford(UnitTypeId.SHIELDBATTERY)
-                ):
-                    await self.build(UnitTypeId.SHIELDBATTERY, near=choke_pylon, max_distance=10)
-                    self._record_countermeasure("mirror-all-in-battery-wall")
-                elif (
-                    self.structures(UnitTypeId.FORGE).ready
-                    and len(self.structures(UnitTypeId.PHOTONCANNON)) + self.already_pending(UnitTypeId.PHOTONCANNON) < 2
-                    and self.can_afford(UnitTypeId.PHOTONCANNON)
-                ):
-                    await self.build(UnitTypeId.PHOTONCANNON, near=choke_pylon, max_distance=10)
-                    self._record_countermeasure("mirror-all-in-cannon-wall")
+            if allow_choke_build:
+                if self.race == Race.Zerg and self.structures(UnitTypeId.SPAWNINGPOOL).ready:
+                    if (
+                        len(self.structures(UnitTypeId.SPINECRAWLER)) + self.already_pending(UnitTypeId.SPINECRAWLER) < max_choke_def
+                        and self.can_afford(UnitTypeId.SPINECRAWLER)
+                    ):
+                        if await self._actuate_build_structure(UnitTypeId.SPINECRAWLER, choke_pos.x, choke_pos.y):
+                            self._record_countermeasure("mirror-all-in-spine-wall")
+                elif self.race == Race.Terran and self.structures(UnitTypeId.BARRACKS).ready:
+                    if (
+                        len(self.structures(UnitTypeId.BUNKER)) + self.already_pending(UnitTypeId.BUNKER) < max_choke_def
+                        and self.can_afford(UnitTypeId.BUNKER)
+                    ):
+                        if await self._actuate_build_structure(UnitTypeId.BUNKER, choke_pos.x, choke_pos.y):
+                            self._record_countermeasure("mirror-all-in-bunker-wall")
+                elif self.race == Race.Protoss and self.structures(UnitTypeId.PYLON).ready:
+                    if (
+                        self.structures(UnitTypeId.CYBERNETICSCORE).ready
+                        and len(self.structures(UnitTypeId.SHIELDBATTERY)) + self.already_pending(UnitTypeId.SHIELDBATTERY) < 1
+                        and self.can_afford(UnitTypeId.SHIELDBATTERY)
+                    ):
+                        if await self._actuate_build_structure(UnitTypeId.SHIELDBATTERY, choke_pos.x, choke_pos.y):
+                            self._record_countermeasure("mirror-all-in-battery-wall")
+
+            if self._enemy_requires_detection or self._enemy_requires_anti_air or self._mirror_air_alert:
+                det_type = (
+                    UnitTypeId.SPORECRAWLER
+                    if self.race == Race.Zerg
+                    else (UnitTypeId.MISSILETURRET if self.race == Race.Terran else UnitTypeId.PHOTONCANNON)
+                )
+                if self.already_pending(det_type) == 0 and self.can_afford(det_type):
+                    for th in self.townhalls.ready:
+                        if not self.structures(det_type).closer_than(10.0, th):
+                            await self._actuate_build_structure(det_type)
+                            break
 
         def _get_enemy_candidate_expansions(self) -> List[Any]:
             if not hasattr(self, "expansion_locations_list") or not self.expansion_locations_list:
@@ -3671,21 +4806,26 @@ def create_racket_sc2_agent(
 
             enemy_exp_candidates = self._get_enemy_candidate_expansions()
             greedy_boost = self.mirror_macro_verdict == "counter_greedy_expand_and_disrupt"
-            max_blockers = (
-                3
-                if (
-                    (len(self.townhalls) >= 3 and self.supply_army >= 20)
-                    or (greedy_boost and len(self.townhalls) >= 2 and self.supply_army >= 12)
+            if self.race == Race.Zerg:
+                max_blockers = (
+                    3
+                    if (
+                        (len(self.townhalls) >= 3 and self.supply_army >= 20)
+                        or (greedy_boost and len(self.townhalls) >= 2 and self.supply_army >= 14)
+                    )
+                    else (
+                        2
+                        if (len(self.townhalls) >= 2 and self.supply_army >= 14)
+                        else (1 if (len(self.townhalls) >= 2 and self.supply_army >= 8) else 0)
+                    )
                 )
-                else (
-                    2
-                    if (len(self.townhalls) >= 2 and self.supply_army >= 12)
-                    else (1 if (len(self.townhalls) >= 2 and self.supply_army >= 6) else 0)
-                )
-            )
+                allowed_blocker_types = {UnitTypeId.ZERGLING}
+            else:
+                max_blockers = 1 if (len(self.townhalls) >= 2 and self.supply_army >= 28) else 0
+                allowed_blocker_types = {UnitTypeId.MARINE, UnitTypeId.ZEALOT}
             if len(self._expansion_blocker_targets) < max_blockers and enemy_exp_candidates:
                 cheap_pool = self.units.filter(
-                    lambda u: u.type_id in {UnitTypeId.ZERGLING, UnitTypeId.MARINE, UnitTypeId.ZEALOT}
+                    lambda u: u.type_id in allowed_blocker_types
                     and u.tag not in self._expansion_blocker_targets
                     and u.tag not in self._harass_raider_tags
                 )
@@ -3783,16 +4923,16 @@ def create_racket_sc2_agent(
                     else:
                         blocker(AbilityId.HOLDPOSITION)
 
-            # 2. Maintain Dedicated 2-5 Unit Peripheral Economic Harassment Raider Squad
+            # 2. Maintain Dedicated 2-4 Unit Peripheral Economic Harassment Raider Squad
             want_raiders = (
                 len(self.townhalls) >= 2
-                and self.supply_army >= (12 if greedy_boost else 16)
+                and self.supply_army >= (20 if greedy_boost else 26)
                 and len(threats_home) == 0
             )
             target_raider_count = (
-                5
-                if (greedy_boost and self.supply_army >= 22)
-                else (4 if self.supply_army >= 32 else (3 if (greedy_boost and want_raiders) else (2 if want_raiders else 0)))
+                4
+                if (greedy_boost and self.supply_army >= 30)
+                else (3 if self.supply_army >= 36 else (2 if want_raiders else 0))
             )
             if len(self._harass_raider_tags) < target_raider_count:
                 raider_candidates = self.units.filter(
@@ -3945,7 +5085,9 @@ def create_racket_sc2_agent(
                 elif self.race == Race.Terran:
                     for rax in self.structures(UnitTypeId.BARRACKS).ready:
                         max_orders = 2 if rax.has_reactor else 1
-                        while len(rax.orders) < max_orders and self.supply_left >= 1 and self.minerals >= escrow + 50:
+                        for _ in range(max(0, max_orders - len(rax.orders))):
+                            if self.supply_left < 1 or self.minerals < escrow + 50:
+                                break
                             if rax.has_techlab and self.supply_left >= 2 and self.can_afford(UnitTypeId.MARAUDER):
                                 rax.train(UnitTypeId.MARAUDER)
                                 self.commands_issued += 1
@@ -4025,1102 +5167,113 @@ def create_racket_sc2_agent(
                     if idle_facilities:
                         self.idle_unit_production_loops += step_loops
 
-        async def _execute_build_tech_and_upgrade(self, main_th, macro_state: Dict[str, Any]) -> None:
-            """
-            Counter-adapts to observed enemy upgrades, active enemy research buildings,
-            cloak/burrow (`_enemy_requires_detection`), and air tech (`_enemy_requires_anti_air`).
-            """
-            escrow = int(macro_state.get("escrow_minerals", 0))
-            saving_for_expand = escrow >= 300 and self.minerals < escrow + 75
-            enemy_upg_total = self._max_enemy_atk_upg + self._max_enemy_arm_upg + self._max_enemy_shd_upg
-            need_upgrade_catchup = (
-                enemy_upg_total > len(self.state.upgrades)
-                or bool(self._active_enemy_research_buildings)
-            )
-            plaza_pos = self._get_main_build_anchor(main_th)
-
-            # 1. Counter-Adapt to Cloak / Burrow (Mobile + Static Detection)
-            if self._enemy_requires_detection and not saving_for_expand:
-                if self.race == Race.Zerg and self.structures(UnitTypeId.SPAWNINGPOOL).ready:
-                    if (
-                        len(self.structures(UnitTypeId.SPORECRAWLER)) + self.already_pending(UnitTypeId.SPORECRAWLER) < min(3, len(self.townhalls))
-                        and self.can_afford(UnitTypeId.SPORECRAWLER)
-                    ):
-                        await self.build(UnitTypeId.SPORECRAWLER, near=main_th.position.towards(self.game_info.map_center, 4.0))
-                        self._record_countermeasure("anti-cloak-spore-detector")
-                    if self.structures(UnitTypeId.LAIR).ready or self.structures(UnitTypeId.HIVE).ready:
-                        if (
-                            len(self.units(UnitTypeId.OVERSEER)) + self.already_pending(UnitTypeId.OVERSEER) < 2
-                            and self.units(UnitTypeId.OVERLORD)
-                            and self.minerals >= 50
-                            and self.vespene >= 50
-                        ):
-                            self.units(UnitTypeId.OVERLORD).first(AbilityId.MORPH_OVERSEER)
-                            self._record_pro_mechanic("morph-overseer-detector")
-                            self.commands_issued += 1
-                    elif (
-                        main_th.is_idle
-                        and not self.already_pending(UnitTypeId.LAIR)
-                        and self.can_afford(UnitTypeId.LAIR)
-                    ):
-                        main_th.build(UnitTypeId.LAIR)
-                        self.commands_issued += 1
-
-                elif self.race == Race.Terran:
-                    hidden_enemies = self.enemy_units.filter(
-                        lambda u: (getattr(u, "is_cloaked", False) or getattr(u, "is_burrowed", False))
-                        and any(f.distance_to(u) <= 13.0 for f in (self.units | self.structures))
-                    )
-                    if hidden_enemies:
-                        for oc in self.townhalls(UnitTypeId.ORBITALCOMMAND).ready:
-                            if oc.energy >= 50:
-                                oc(AbilityId.SCANNERSWEEP_SCAN, hidden_enemies.first.position)
-                                self._record_countermeasure("scanner-sweep-cloak-reveal")
-                                self.commands_issued += 1
-                                break
-                    if not self.structures(UnitTypeId.ENGINEERINGBAY) and not self.already_pending(UnitTypeId.ENGINEERINGBAY):
-                        if self.can_afford(UnitTypeId.ENGINEERINGBAY):
-                            await self.build(UnitTypeId.ENGINEERINGBAY, near=plaza_pos, max_distance=16)
-                    elif (
-                        self.structures(UnitTypeId.ENGINEERINGBAY).ready
-                        and len(self.structures(UnitTypeId.MISSILETURRET)) + self.already_pending(UnitTypeId.MISSILETURRET) < min(3, len(self.townhalls))
-                        and self.can_afford(UnitTypeId.MISSILETURRET)
-                    ):
-                        await self.build(UnitTypeId.MISSILETURRET, near=main_th.position.towards(self.game_info.map_center, 4.5))
-                        self._record_countermeasure("anti-cloak-missile-turret")
-
-                elif self.race == Race.Protoss and self.structures(UnitTypeId.PYLON).ready:
-                    pylon = self.structures(UnitTypeId.PYLON).ready.first
-                    if (
-                        self.structures(UnitTypeId.CYBERNETICSCORE).ready
-                        and not self.structures(UnitTypeId.ROBOTICSFACILITY)
-                        and not self.already_pending(UnitTypeId.ROBOTICSFACILITY)
-                        and self.can_afford(UnitTypeId.ROBOTICSFACILITY)
-                    ):
-                        await self.build(UnitTypeId.ROBOTICSFACILITY, near=pylon, max_distance=15)
-                    for robo in self.structures(UnitTypeId.ROBOTICSFACILITY).ready.idle:
-                        if (
-                            len(self.units(UnitTypeId.OBSERVER)) + self.already_pending(UnitTypeId.OBSERVER) < 2
-                            and self.supply_left >= 1
-                            and self.can_afford(UnitTypeId.OBSERVER)
-                        ):
-                            robo.train(UnitTypeId.OBSERVER)
-                            self.commands_issued += 1
-                    if (
-                        self.structures(UnitTypeId.FORGE).ready
-                        and len(self.structures(UnitTypeId.PHOTONCANNON)) + self.already_pending(UnitTypeId.PHOTONCANNON) < min(2, len(self.townhalls))
-                        and self.can_afford(UnitTypeId.PHOTONCANNON)
-                    ):
-                        await self.build(UnitTypeId.PHOTONCANNON, near=pylon, max_distance=12)
-
-            # 2. Counter-Adapt to Air Tech (`_enemy_requires_anti_air`)
-            if self._enemy_requires_anti_air and not saving_for_expand and len(self.townhalls) >= 2:
-                if self.race == Race.Zerg and self.structures(UnitTypeId.SPAWNINGPOOL).ready:
-                    if (
-                        len(self.structures(UnitTypeId.SPORECRAWLER)) + self.already_pending(UnitTypeId.SPORECRAWLER) < min(3, len(self.townhalls))
-                        and self.can_afford(UnitTypeId.SPORECRAWLER)
-                    ):
-                        await self.build(UnitTypeId.SPORECRAWLER, near=main_th.position.towards(self.game_info.map_center, 4.0))
-                elif self.race == Race.Terran and self.structures(UnitTypeId.ENGINEERINGBAY).ready:
-                    if (
-                        len(self.structures(UnitTypeId.MISSILETURRET)) + self.already_pending(UnitTypeId.MISSILETURRET) < min(3, len(self.townhalls))
-                        and self.can_afford(UnitTypeId.MISSILETURRET)
-                    ):
-                        await self.build(UnitTypeId.MISSILETURRET, near=main_th.position.towards(self.game_info.map_center, 4.5))
-                elif self.race == Race.Protoss and self.structures(UnitTypeId.FORGE).ready and self.structures(UnitTypeId.PYLON).ready:
-                    if (
-                        len(self.structures(UnitTypeId.PHOTONCANNON)) + self.already_pending(UnitTypeId.PHOTONCANNON) < min(2, len(self.townhalls))
-                        and self.can_afford(UnitTypeId.PHOTONCANNON)
-                    ):
-                        await self.build(UnitTypeId.PHOTONCANNON, near=self.structures(UnitTypeId.PYLON).ready.first, max_distance=12)
-
-            # 3. Counter-Adapt to Enemy Weapon/Armor Upgrade Arms Race
-            if need_upgrade_catchup and not saving_for_expand and len(self.workers) >= 16:
-                if self.race == Race.Zerg and self.structures(UnitTypeId.SPAWNINGPOOL).ready:
-                    if not self.structures(UnitTypeId.EVOLUTIONCHAMBER) and not self.already_pending(UnitTypeId.EVOLUTIONCHAMBER) and self.can_afford(UnitTypeId.EVOLUTIONCHAMBER):
-                        await self.build(UnitTypeId.EVOLUTIONCHAMBER, near=main_th.position.towards(self.game_info.map_center, -4.5))
-                elif self.race == Race.Terran and self.structures(UnitTypeId.BARRACKS).ready:
-                    if not self.structures(UnitTypeId.ENGINEERINGBAY) and not self.already_pending(UnitTypeId.ENGINEERINGBAY) and self.can_afford(UnitTypeId.ENGINEERINGBAY):
-                        await self.build(UnitTypeId.ENGINEERINGBAY, near=plaza_pos, max_distance=16)
-                elif self.race == Race.Protoss and self.structures(UnitTypeId.GATEWAY).ready and self.structures(UnitTypeId.PYLON).ready:
-                    if not self.structures(UnitTypeId.FORGE) and not self.already_pending(UnitTypeId.FORGE) and self.can_afford(UnitTypeId.FORGE):
-                        await self.build(UnitTypeId.FORGE, near=self.structures(UnitTypeId.PYLON).ready.first, max_distance=15)
-
         async def _run_race_macro_and_tactics(self, iteration: int) -> None:
+            """
+            Prioritized Actuator & Continuous Production/Micro Executor driven by Racket's
+            S-expression command stream (`self._last_racket_cmds`).
+            """
             if not self.townhalls:
                 return
             main_th = self.townhalls.first
             macro_state = self._evaluate_coupled_macro_state(main_th)
+            escrow = int(macro_state.get("escrow_minerals", 0))
 
             await self._ensure_zero_supply_block()
             if iteration % 6 == 0:
                 await self._transfer_depleted_base_workers()
-
             await self._build_mirror_choke_defense(main_th)
-            await self._execute_build_tech_and_upgrade(main_th, macro_state)
 
-            buffer_needed = 2 if self.supply_cap <= 15 else (5 if self.supply_cap < 36 else (8 if self.supply_cap < 80 else 12))
+            buffer_needed = (
+                2 if self.supply_cap <= 15 else (5 if self.supply_cap < 36 else (8 if self.supply_cap < 80 else 12))
+            )
             pending_sup = (
                 self.already_pending(UnitTypeId.OVERLORD)
                 + self.already_pending(UnitTypeId.SUPPLYDEPOT)
                 + self.already_pending(UnitTypeId.PYLON)
             )
-            # Reserve 100 minerals when supply_left <= buffer_needed and no supply structure is pending yet!
             if self.supply_cap < 200 and self.supply_left <= buffer_needed and pending_sup == 0 and self.minerals < 150:
                 await self._run_economic_disruption_and_base_blocking(main_th)
                 await self._micro_combat_army(main_th)
                 return
 
-            can_spend_supply = self.supply_left >= 1 or self.supply_cap >= 200
-
-            if self.race == Race.Zerg:
-                await self._macro_zerg(main_th, can_spend_supply, macro_state)
-            elif self.race == Race.Terran:
-                await self._macro_terran(main_th, can_spend_supply, macro_state)
+            # 1. Execute continuous racial macro mechanics (MULEs, Injects, Creep, Chrono, WarpGate/Archon morph)
+            if self.race == Race.Terran:
+                for depot in self.structures(UnitTypeId.SUPPLYDEPOT).ready:
+                    depot(AbilityId.MORPH_SUPPLYDEPOT_LOWER)
+                for oc in self.townhalls(UnitTypeId.ORBITALCOMMAND).ready:
+                    if oc.energy >= 50 and self.mineral_field:
+                        local_m = self.mineral_field.closer_than(10.0, oc)
+                        target_m = local_m.closest_to(oc) if local_m else self.mineral_field.closest_to(oc)
+                        oc(AbilityId.CALLDOWNMULE_CALLDOWNMULE, target_m)
+                        self._record_pro_mechanic("calldown-mule")
+            elif self.race == Race.Zerg:
+                inject_queens, _creep_queens = self._partition_queens()
+                for queen, th in inject_queens:
+                    if queen.energy >= 25 and not th.has_buff(BuffId.QUEENSPAWNLARVATIMER):
+                        queen(AbilityId.EFFECT_INJECTLARVA, th)
+                enemy_pt = self.enemy_start_locations[0] if self.enemy_start_locations else self.game_info.map_center
+                for t in self.structures({UnitTypeId.CREEPTUMORBURROWED, UnitTypeId.CREEPTUMORQUEEN}).ready:
+                    if t.tag not in self._used_creep_tumors:
+                        await self._spread_single_creep_tumor(t, enemy_pt)
             elif self.race == Race.Protoss:
-                await self._macro_protoss(main_th, can_spend_supply, macro_state)
+                for gw in self.structures(UnitTypeId.GATEWAY).ready.idle:
+                    if UpgradeId.WARPGATERESEARCH in self.state.upgrades:
+                        gw(AbilityId.MORPH_WARPGATE)
+                hts = self.units({UnitTypeId.HIGHTEMPLAR, UnitTypeId.DARKTEMPLAR}).ready
+                if len(hts) >= 2:
+                    hts[0](AbilityId.ARCHON_WARP_TARGET, hts[1])
+                    self._record_pro_mechanic("morph-archon")
+                for nexus in self.townhalls.ready:
+                    if nexus.energy >= 50:
+                        busy_targets = self.structures.ready.filter(
+                            lambda b: not b.is_idle and not b.has_buff(BuffId.CHRONOBOOSTENERGYCOST)
+                        )
+                        if busy_targets:
+                            nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, busy_targets.first)
+                            self._record_pro_mechanic("chrono-boost")
 
+            # 2. Execute Racket's prioritized expand / morph / research / build / train queue
+            th_type = (
+                UnitTypeId.HATCHERY
+                if self.race == Race.Zerg
+                else (UnitTypeId.COMMANDCENTER if self.race == Race.Terran else UnitTypeId.NEXUS)
+            )
+            if (
+                macro_state.get("safe_to_expand")
+                and (macro_state.get("want_saturation_expand") or macro_state.get("want_depletion_expand"))
+                and self.can_afford(th_type)
+            ):
+                reason = "depletion_replace" if macro_state.get("want_depletion_expand") else "saturation_expand"
+                if await self._try_smart_expand(th_type, reason=reason):
+                    if macro_state.get("want_depletion_expand"):
+                        self.depletion_expansions_started += 1
+
+            if iteration % 2 != 0 or not self.bridge:
+                for c in self._last_racket_cmds:
+                    op = c.get("op")
+                    if op == "expand" and self.can_afford(th_type):
+                        await self._try_smart_expand(th_type, reason="racket_expand")
+                    elif op == "morph":
+                        await self._actuate_morph(str(c.get("target", "")), None)
+                    elif op == "research" and (self.minerals >= escrow or len(self.townhalls) >= 2):
+                        upg = getattr(UpgradeId, c.get("upgrade_enum", ""), None)
+                        if upg is not None:
+                            await self._actuate_research_upgrade(upg)
+                    elif op == "build":
+                        bt = getattr(UnitTypeId, c.get("building_enum", ""), None)
+                        if bt is not None and (self.minerals >= escrow or len(self.townhalls) >= 2 or self.minerals >= 300):
+                            await self._actuate_build_structure(bt, c.get("x"), c.get("y"))
+                    elif op == "train" and (self.minerals >= escrow or self.supply_army < 20 or len(self.townhalls) >= 2):
+                        ut = getattr(UnitTypeId, c.get("unit_enum", ""), None)
+                        if ut is not None:
+                            await self._actuate_train_unit(ut)
+
+            # 3. Continuous worker/unit fill guided by marginal-utility priority order & idle metric recording
             await self._eliminate_unused_production_and_record_metrics(macro_state)
+
+            # 4. Run economic disruption (base-blockers & worker-harass raiders) and tactical army micro
             await self._run_economic_disruption_and_base_blocking(main_th)
             await self._micro_combat_army(main_th)
-
-        async def _macro_zerg(self, main_th, can_spend_supply: bool, macro_state: Dict[str, Any]) -> None:
-            safe_build_pos = main_th.position.towards(self.game_info.map_center, -4.5)
-            escrow = int(macro_state["escrow_minerals"])
-            saving_for_hatch = escrow >= 300 and self.minerals < 350
-
-            # Train 13th/14th Drone in opening frames (<300 gl)
-            if (
-                self.state.game_loop < 300
-                and len(self.workers) < 14
-                and self.already_pending(UnitTypeId.DRONE) == 0
-                and self.supply_left >= 1
-            ):
-                if self.can_afford(UnitTypeId.DRONE) and self.larva:
-                    self.larva.first.train(UnitTypeId.DRONE)
-                    self.active_build_goal = "opening-drones"
-
-            # 1. Spawning Pool first
-            if not self.structures(UnitTypeId.SPAWNINGPOOL) and not self.already_pending(UnitTypeId.SPAWNINGPOOL):
-                self.active_build_goal = "spawning-pool"
-                if self.can_afford(UnitTypeId.SPAWNINGPOOL) and (len(self.workers) >= 13 or self.state.game_loop >= 400):
-                    await self.build(UnitTypeId.SPAWNINGPOOL, near=safe_build_pos)
-
-            # 2. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion
-            enemy_combat_near = self.enemy_units.filter(
-                lambda e: e.distance_to(main_th) <= 24.0
-                and e.type_id not in {
-                    UnitTypeId.DRONE,
-                    UnitTypeId.SCV,
-                    UnitTypeId.PROBE,
-                    UnitTypeId.OVERLORD,
-                    UnitTypeId.OVERSEER,
-                    UnitTypeId.OBSERVER,
-                    UnitTypeId.LARVA,
-                    UnitTypeId.EGG,
-                }
-                and not getattr(e, "is_hallucination", False)
-            )
-            enemy_near = len(enemy_combat_near) >= 3 or bool(self.enemy_structures.closer_than(26.0, main_th))
-            total_hatches = macro_state["total_bases"]
-            want_natural_hatch = (
-                macro_state["safe_to_expand"]
-                and total_hatches == 1
-                and len(self.workers) >= 14
-                and (len(self.structures(UnitTypeId.SPAWNINGPOOL)) + self.already_pending(UnitTypeId.SPAWNINGPOOL) >= 1 or self.minerals >= 300)
-            )
-            want_multi_or_depletion_hatch = (
-                macro_state["safe_to_expand"]
-                and total_hatches >= 2
-                and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
-            )
-            saving_for_hatch = (escrow >= 300 or want_natural_hatch or want_multi_or_depletion_hatch) and self.minerals < 350
-            if (want_natural_hatch or want_multi_or_depletion_hatch) and self.minerals >= 300:
-                self.active_build_goal = "expand-hatchery"
-                reason = "depletion_replace_hatch" if macro_state["want_depletion_expand"] else "saturation_expand_hatch"
-                if await self._try_smart_expand(UnitTypeId.HATCHERY, reason=reason):
-                    saving_for_hatch = False
-                    if macro_state["want_depletion_expand"]:
-                        self.depletion_expansions_started += 1
-
-            # 3. Queen production, Larva Inject, Creep Tumor Spread, & Burrow Research
-            if self.structures(UnitTypeId.SPAWNINGPOOL).ready:
-                enemy_air = self.enemy_units.filter(
-                    lambda u: u.is_flying and u.type_id not in {UnitTypeId.OVERLORD, UnitTypeId.OVERSEER, UnitTypeId.OBSERVER}
-                )
-                target_queens = min(8, len(self.townhalls) + (3 if enemy_air else 1))
-                if not saving_for_hatch and (self.supply_left >= 2 or self.supply_cap >= 200) and len(self.units(UnitTypeId.QUEEN)) < target_queens:
-                    for th in self.townhalls.ready.idle:
-                        if self.can_afford(UnitTypeId.QUEEN):
-                            th.train(UnitTypeId.QUEEN)
-                            break
-
-                # Research Burrow on 2+ bases once Zergling speed is underway
-                if (
-                    not saving_for_hatch
-                    and len(self.townhalls) >= 2
-                    and self.already_pending_upgrade(UpgradeId.ZERGLINGMOVEMENTSPEED) > 0
-                    and self.already_pending_upgrade(UpgradeId.BURROW) == 0
-                    and self.can_afford(UpgradeId.BURROW)
-                ):
-                    for th in self.townhalls.ready.idle:
-                        th.research(UpgradeId.BURROW)
-                        self._record_pro_mechanic("research-burrow")
-                        break
-
-                active_tumors = len(self.structures(UnitTypeId.CREEPTUMOR)) + len(self.structures(UnitTypeId.CREEPTUMORBURROWED))
-                for q_idx, queen in enumerate(self.units(UnitTypeId.QUEEN)):
-                    injured = (self.units | self.structures).filter(
-                        lambda u: u.health_percentage < 0.55 and u.health_max >= 120 and u.distance_to(queen) <= 7.5
-                    )
-                    if injured and queen.energy >= 50:
-                        queen(AbilityId.TRANSFUSION_TRANSFUSION, injured.first)
-                        self._record_pro_mechanic("queen-transfusion")
-                    elif queen.energy >= 25:
-                        th = self.townhalls.closest_to(queen)
-                        has_inject_buff = th.has_buff(BuffId.QUEENSPAWNLARVATIMER)
-                        if (has_inject_buff or (q_idx >= len(self.townhalls) and active_tumors < 4)) and active_tumors < 8:
-                            tumor_spot = th.position.towards(self.game_info.map_center, 6.5)
-                            queen(AbilityId.BUILD_CREEPTUMOR_QUEEN, tumor_spot)
-                            self._record_pro_mechanic("queen-spawn-creep-tumor")
-                        else:
-                            queen(AbilityId.EFFECT_INJECTLARVA, th)
-                    else:
-                        near_q = self.enemy_units.closer_than(14.0, queen)
-                        if near_q:
-                            queen.attack(near_q.closest_to(queen))
-
-            # 4. Extractor scaling (throttled when in mineral_recovery_gas_pull regime)
-            if (
-                self.structures(UnitTypeId.SPAWNINGPOOL)
-                and self.vespene_geyser
-                and self.guns_vs_butter_regime != "mineral_recovery_gas_pull"
-            ):
-                target_gases = 1 if len(self.townhalls) == 1 else min(8, int(2 * macro_state["eff_bases"]))
-                if not saving_for_hatch and len(self.gas_buildings) + self.already_pending(UnitTypeId.EXTRACTOR) < target_gases:
-                    if self.can_afford(UnitTypeId.EXTRACTOR) and len(self.workers) >= 14:
-                        for th in self.townhalls.ready:
-                            vgs = self.vespene_geyser.closer_than(11.0, th)
-                            for vg in vgs:
-                                if not self.gas_buildings.closer_than(1.0, vg):
-                                    w = self.select_build_worker(vg)
-                                    if w:
-                                        w.build_gas(vg)
-                                        break
-
-            # 5. SpawningPool upgrades (MetabolicBoost -> AdrenalGlands at Hive) & RoachWarren & BanelingNest
-            if self.structures(UnitTypeId.SPAWNINGPOOL).ready:
-                pool = self.structures(UnitTypeId.SPAWNINGPOOL).ready.first
-                if pool.is_idle:
-                    if self.already_pending_upgrade(UpgradeId.ZERGLINGMOVEMENTSPEED) == 0 and self.can_afford(UpgradeId.ZERGLINGMOVEMENTSPEED):
-                        self.active_build_goal = "metabolic-boost"
-                        pool.research(UpgradeId.ZERGLINGMOVEMENTSPEED)
-                    elif (
-                        self.structures(UnitTypeId.HIVE).ready
-                        and self.already_pending_upgrade(UpgradeId.ZERGLINGATTACKSPEED) == 0
-                        and self.can_afford(UpgradeId.ZERGLINGATTACKSPEED)
-                    ):
-                        self.active_build_goal = "adrenal-glands"
-                        pool.research(UpgradeId.ZERGLINGATTACKSPEED)
-
-                if not saving_for_hatch and not self.structures(UnitTypeId.ROACHWARREN) and not self.already_pending(UnitTypeId.ROACHWARREN):
-                    if self.can_afford(UnitTypeId.ROACHWARREN) and len(self.workers) >= 14:
-                        self.active_build_goal = "roach-warren"
-                        await self.build(UnitTypeId.ROACHWARREN, near=safe_build_pos)
-
-                enemy_bio_or_ling = self.enemy_units.filter(
-                    lambda u: u.type_id in {UnitTypeId.MARINE, UnitTypeId.ZERGLING, UnitTypeId.ZEALOT}
-                )
-                if (
-                    not saving_for_hatch
-                    and len(self.townhalls) >= 2
-                    and (len(enemy_bio_or_ling) >= 4 or len(self.townhalls) >= 3)
-                    and not self.structures(UnitTypeId.BANELINGNEST)
-                    and not self.already_pending(UnitTypeId.BANELINGNEST)
-                    and self.can_afford(UnitTypeId.BANELINGNEST)
-                ):
-                    self.active_build_goal = "baneling-nest"
-                    await self.build(UnitTypeId.BANELINGNEST, near=safe_build_pos)
-
-            # 6. Evolution Chamber (+1/+1 -> +2/+2 -> +3/+3 Missile & Carapace)
-            if len(self.townhalls) >= 2 and self.structures(UnitTypeId.ROACHWARREN).ready:
-                if not saving_for_hatch and not self.structures(UnitTypeId.EVOLUTIONCHAMBER) and not self.already_pending(UnitTypeId.EVOLUTIONCHAMBER):
-                    if self.can_afford(UnitTypeId.EVOLUTIONCHAMBER):
-                        self.active_build_goal = "evolution-chamber"
-                        await self.build(UnitTypeId.EVOLUTIONCHAMBER, near=safe_build_pos)
-                for evo in self.structures(UnitTypeId.EVOLUTIONCHAMBER).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.ZERGMISSILEWEAPONSLEVEL1) == 0 and self.can_afford(UpgradeId.ZERGMISSILEWEAPONSLEVEL1):
-                        evo.research(UpgradeId.ZERGMISSILEWEAPONSLEVEL1)
-                    elif self.already_pending_upgrade(UpgradeId.ZERGGROUNDARMORSLEVEL1) == 0 and self.can_afford(UpgradeId.ZERGGROUNDARMORSLEVEL1):
-                        evo.research(UpgradeId.ZERGGROUNDARMORSLEVEL1)
-                    elif self.structures(UnitTypeId.LAIR).ready or self.structures(UnitTypeId.HIVE).ready:
-                        if self.already_pending_upgrade(UpgradeId.ZERGMISSILEWEAPONSLEVEL2) == 0 and self.can_afford(UpgradeId.ZERGMISSILEWEAPONSLEVEL2):
-                            evo.research(UpgradeId.ZERGMISSILEWEAPONSLEVEL2)
-                        elif self.already_pending_upgrade(UpgradeId.ZERGGROUNDARMORSLEVEL2) == 0 and self.can_afford(UpgradeId.ZERGGROUNDARMORSLEVEL2):
-                            evo.research(UpgradeId.ZERGGROUNDARMORSLEVEL2)
-                        elif self.structures(UnitTypeId.HIVE).ready:
-                            if self.already_pending_upgrade(UpgradeId.ZERGMISSILEWEAPONSLEVEL3) == 0 and self.can_afford(UpgradeId.ZERGMISSILEWEAPONSLEVEL3):
-                                evo.research(UpgradeId.ZERGMISSILEWEAPONSLEVEL3)
-                            elif self.already_pending_upgrade(UpgradeId.ZERGGROUNDARMORSLEVEL3) == 0 and self.can_afford(UpgradeId.ZERGGROUNDARMORSLEVEL3):
-                                evo.research(UpgradeId.ZERGGROUNDARMORSLEVEL3)
-
-            # 7. Lair -> GlialReconstitution + Overseer + HydraliskDen + Baneling Hooks + Spire -> InfestationPit -> Hive -> UltraliskCavern
-            has_lair_or_hive = bool(self.structures(UnitTypeId.LAIR).ready or self.structures(UnitTypeId.HIVE).ready)
-            if (
-                self.structures(UnitTypeId.SPAWNINGPOOL).ready
-                and not self.structures(UnitTypeId.LAIR)
-                and not self.structures(UnitTypeId.HIVE)
-                and not self.already_pending(UnitTypeId.LAIR)
-            ):
-                if main_th.is_idle and self.can_afford(UnitTypeId.LAIR) and (len(self.units(UnitTypeId.ROACH)) >= 4 or len(self.townhalls) >= 2):
-                    self.active_build_goal = "morph-lair"
-                    main_th.build(UnitTypeId.LAIR)
-
-            if has_lair_or_hive:
-                # Morph 1 Overseer for mobile detection
-                if (
-                    len(self.units(UnitTypeId.OVERSEER)) + self.already_pending(UnitTypeId.OVERSEER) < 1
-                    and self.units(UnitTypeId.OVERLORD)
-                    and self.minerals >= 50
-                    and self.vespene >= 50
-                ):
-                    self.units(UnitTypeId.OVERLORD).first(AbilityId.MORPH_OVERSEER)
-                    self._record_pro_mechanic("morph-overseer-detector")
-
-                for rw in self.structures(UnitTypeId.ROACHWARREN).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.GLIALRECONSTITUTION) == 0 and self.can_afford(UpgradeId.GLIALRECONSTITUTION):
-                        self.active_build_goal = "glial-reconstitution"
-                        rw.research(UpgradeId.GLIALRECONSTITUTION)
-
-                for bnest in self.structures(UnitTypeId.BANELINGNEST).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.CENTRIFICALHOOKS) == 0 and self.can_afford(UpgradeId.CENTRIFICALHOOKS):
-                        bnest.research(UpgradeId.CENTRIFICALHOOKS)
-
-                if not saving_for_hatch and not self.structures(UnitTypeId.HYDRALISKDEN) and not self.already_pending(UnitTypeId.HYDRALISKDEN):
-                    if self.can_afford(UnitTypeId.HYDRALISKDEN):
-                        self.active_build_goal = "hydralisk-den"
-                        await self.build(UnitTypeId.HYDRALISKDEN, near=safe_build_pos)
-
-                for hden in self.structures(UnitTypeId.HYDRALISKDEN).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.EVOLVEGROOVEDSPINES) == 0 and self.can_afford(UpgradeId.EVOLVEGROOVEDSPINES):
-                        self.active_build_goal = "grooved-spines"
-                        hden.research(UpgradeId.EVOLVEGROOVEDSPINES)
-                    elif self.already_pending_upgrade(UpgradeId.EVOLVEMUSCULARAUGMENTS) == 0 and self.can_afford(UpgradeId.EVOLVEMUSCULARAUGMENTS):
-                        self.active_build_goal = "muscular-augments"
-                        hden.research(UpgradeId.EVOLVEMUSCULARAUGMENTS)
-
-                enemy_air_or_colossus = self.enemy_units.filter(
-                    lambda u: (u.is_flying and u.type_id not in {UnitTypeId.OVERLORD, UnitTypeId.OVERSEER, UnitTypeId.OBSERVER})
-                    or u.type_id == UnitTypeId.COLOSSUS
-                )
-                if (
-                    not saving_for_hatch
-                    and (enemy_air_or_colossus or self._mirror_air_alert or len(self.townhalls) >= 3)
-                    and not self.structures(UnitTypeId.SPIRE)
-                    and not self.structures(UnitTypeId.GREATERSPIRE)
-                    and not self.already_pending(UnitTypeId.SPIRE)
-                    and self.can_afford(UnitTypeId.SPIRE)
-                ):
-                    self.active_build_goal = "spire"
-                    await self.build(UnitTypeId.SPIRE, near=safe_build_pos)
-
-                if (
-                    not saving_for_hatch
-                    and len(self.townhalls) >= 3
-                    and self.structures(UnitTypeId.HYDRALISKDEN).ready
-                    and not self.structures(UnitTypeId.INFESTATIONPIT)
-                    and not self.already_pending(UnitTypeId.INFESTATIONPIT)
-                    and self.can_afford(UnitTypeId.INFESTATIONPIT)
-                ):
-                    self.active_build_goal = "infestation-pit"
-                    await self.build(UnitTypeId.INFESTATIONPIT, near=safe_build_pos)
-
-                if (
-                    self.structures(UnitTypeId.INFESTATIONPIT).ready
-                    and self.structures(UnitTypeId.LAIR).ready
-                    and not self.structures(UnitTypeId.HIVE)
-                    and not self.already_pending(UnitTypeId.HIVE)
-                ):
-                    lair = self.structures(UnitTypeId.LAIR).ready.first
-                    if lair.is_idle and self.can_afford(UnitTypeId.HIVE):
-                        self.active_build_goal = "morph-hive"
-                        lair(AbilityId.UPGRADETOHIVE_HIVE)
-
-                if self.structures(UnitTypeId.HIVE).ready:
-                    if (
-                        not saving_for_hatch
-                        and not self.structures(UnitTypeId.ULTRALISKCAVERN)
-                        and not self.already_pending(UnitTypeId.ULTRALISKCAVERN)
-                        and self.can_afford(UnitTypeId.ULTRALISKCAVERN)
-                    ):
-                        self.active_build_goal = "ultralisk-cavern"
-                        await self.build(UnitTypeId.ULTRALISKCAVERN, near=safe_build_pos)
-                    for ucav in self.structures(UnitTypeId.ULTRALISKCAVERN).ready.idle:
-                        if self.already_pending_upgrade(UpgradeId.CHITINOUSPLATING) == 0 and self.can_afford(UpgradeId.CHITINOUSPLATING):
-                            self.active_build_goal = "chitinous-plating"
-                            ucav.research(UpgradeId.CHITINOUSPLATING)
-
-            # Ravager & Baneling morphs when gas available
-            if not saving_for_hatch and self.structures(UnitTypeId.ROACHWARREN).ready and self.vespene >= 75 and self.minerals >= 25:
-                if len(self.units(UnitTypeId.RAVAGER)) < 4 and len(self.units(UnitTypeId.ROACH)) >= 4:
-                    self.units(UnitTypeId.ROACH).first(AbilityId.MORPHTORAVAGER_RAVAGER)
-            if not saving_for_hatch and self.structures(UnitTypeId.BANELINGNEST).ready and self.vespene >= 25 and self.minerals >= 25:
-                if len(self.units(UnitTypeId.BANELING)) < 4 and len(self.units(UnitTypeId.ZERGLING)) >= 6:
-                    self.units(UnitTypeId.ZERGLING).first(AbilityId.MORPHZERGLINGTOBANELING_BANELING)
-
-            if not can_spend_supply:
-                return
-
-            army_count = (
-                len(self.units(UnitTypeId.ZERGLING))
-                + 2 * len(self.units(UnitTypeId.ROACH))
-                + 2 * len(self.units(UnitTypeId.RAVAGER))
-                + 2 * len(self.units(UnitTypeId.HYDRALISK))
-                + 6 * len(self.units(UnitTypeId.ULTRALISK))
-            )
-            desired_drones = macro_state["target_workers"]
-            need_blocker_lings = (
-                len(self.townhalls) >= 2
-                and self.supply_army >= 24
-                and self.structures(UnitTypeId.SPAWNINGPOOL).ready
-                and len(self.units(UnitTypeId.ZERGLING)) + len(self.units(UnitTypeId.ZERGLINGBURROWED)) < 4
-            )
-            has_spire = bool(self.structures(UnitTypeId.SPIRE).ready or self.structures(UnitTypeId.GREATERSPIRE).ready)
-            enemy_colossus_or_cap = self.enemy_units.filter(
-                lambda u: u.type_id in {UnitTypeId.COLOSSUS, UnitTypeId.CARRIER, UnitTypeId.BATTLECRUISER, UnitTypeId.TEMPEST}
-            )
-
-            for larva in self.larva:
-                if self.supply_left < 1 and self.supply_cap < 200:
-                    break
-                if self.minerals < (escrow + 50 if self.supply_army >= 18 else 50):
-                    break
-                if need_blocker_lings and self.can_afford(UnitTypeId.ZERGLING):
-                    larva.train(UnitTypeId.ZERGLING)
-                    need_blocker_lings = False
-                    continue
-                want_drone_now = (
-                    (len(self.workers) < 19 and (not enemy_near or self.supply_army >= 6))
-                    or (
-                        not enemy_near
-                        and len(self.workers) < desired_drones
-                        and self.supply_army >= max(12, int((len(self.workers) - 16) * 0.85))
-                        and (len(self.workers) < 26 or (larva.tag + self.state.game_loop // 8) % 3 == 0)
-                    )
-                )
-                if want_drone_now and self.can_afford(UnitTypeId.DRONE):
-                    larva.train(UnitTypeId.DRONE)
-                    continue
-                if (
-                    self.structures(UnitTypeId.ULTRALISKCAVERN).ready
-                    and len(self.units(UnitTypeId.ULTRALISK)) < 4
-                    and (self.supply_left >= 6 or self.supply_cap >= 200)
-                    and self.can_afford(UnitTypeId.ULTRALISK)
-                ):
-                    larva.train(UnitTypeId.ULTRALISK)
-                elif (
-                    has_spire
-                    and enemy_colossus_or_cap
-                    and len(self.units(UnitTypeId.CORRUPTOR)) < 6
-                    and (self.supply_left >= 2 or self.supply_cap >= 200)
-                    and self.can_afford(UnitTypeId.CORRUPTOR)
-                ):
-                    larva.train(UnitTypeId.CORRUPTOR)
-                elif (
-                    has_spire
-                    and self._mirror_air_alert
-                    and len(self.units(UnitTypeId.MUTALISK)) < 6
-                    and (self.supply_left >= 2 or self.supply_cap >= 200)
-                    and self.can_afford(UnitTypeId.MUTALISK)
-                ):
-                    larva.train(UnitTypeId.MUTALISK)
-                elif (
-                    self.structures(UnitTypeId.HYDRALISKDEN).ready
-                    and (self.supply_left >= 2 or self.supply_cap >= 200)
-                    and self.can_afford(UnitTypeId.HYDRALISK)
-                ):
-                    larva.train(UnitTypeId.HYDRALISK)
-                elif (
-                    self.structures(UnitTypeId.ROACHWARREN).ready
-                    and (self.supply_left >= 2 or self.supply_cap >= 200)
-                    and self.can_afford(UnitTypeId.ROACH)
-                ):
-                    larva.train(UnitTypeId.ROACH)
-                elif self.structures(UnitTypeId.SPAWNINGPOOL).ready and self.can_afford(UnitTypeId.ZERGLING):
-                    larva.train(UnitTypeId.ZERGLING)
-                elif (
-                    len(self.workers) < desired_drones
-                    and (self.supply_army >= 14 or self.minerals >= 350)
-                    and self.can_afford(UnitTypeId.DRONE)
-                ):
-                    larva.train(UnitTypeId.DRONE)
-
-        async def _macro_terran(self, main_th, can_spend_supply: bool, macro_state: Dict[str, Any]) -> None:
-            plaza_build_pos = self._get_main_build_anchor(main_th)
-            escrow = int(macro_state["escrow_minerals"])
-            total_ccs = macro_state["total_bases"]
-            rax_total = len(self.structures(UnitTypeId.BARRACKS)) + self.already_pending(UnitTypeId.BARRACKS)
-            want_natural_cc = (
-                macro_state["safe_to_expand"]
-                and total_ccs == 1
-                and rax_total >= 1
-                and (len(self.workers) >= 15 or self.state.game_loop >= 1568)
-            )
-            want_multi_or_depletion_cc = (
-                macro_state["safe_to_expand"]
-                and total_ccs >= 2
-                and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
-            )
-            saving_for_cc = (escrow >= 400 or want_natural_cc or want_multi_or_depletion_cc) and self.minerals < 450
-
-            # Ensure first Supply Depot is started immediately at 13+ supply in open main-base plaza
-            if (
-                len(self.structures(UnitTypeId.SUPPLYDEPOT))
-                + len(self.structures(UnitTypeId.SUPPLYDEPOTLOWERED))
-                + self.already_pending(UnitTypeId.SUPPLYDEPOT)
-                == 0
-            ):
-                if self.supply_used >= 13 and self.can_afford(UnitTypeId.SUPPLYDEPOT):
-                    self.active_build_goal = "opening-supply-depot"
-                    await self.build(UnitTypeId.SUPPLYDEPOT, near=plaza_build_pos, max_distance=15)
-
-            # 1. MULE Calldowns from Orbital Command & Continuous SCV Production FIRST (Zero-Unused-Production!)
-            for oc in self.townhalls(UnitTypeId.ORBITALCOMMAND).ready:
-                if oc.energy >= 50 and self.mineral_field:
-                    local_m = self.mineral_field.closer_than(10.0, oc)
-                    target_m = local_m.closest_to(oc) if local_m else self.mineral_field.closest_to(oc)
-                    oc(AbilityId.CALLDOWNMULE_CALLDOWNMULE, target_m)
-
-            # Upgrade Orbital Command as soon as 1st Barracks finishes
-            if (
-                self.structures(UnitTypeId.BARRACKS).ready
-                and len(self.townhalls(UnitTypeId.ORBITALCOMMAND)) < len(self.townhalls)
-                and self.already_pending(UnitTypeId.ORBITALCOMMAND) == 0
-                and (not saving_for_cc or len(self.townhalls(UnitTypeId.ORBITALCOMMAND)) == 0)
-            ):
-                ccs = self.townhalls(UnitTypeId.COMMANDCENTER).ready.idle
-                if ccs and self.can_afford(UnitTypeId.ORBITALCOMMAND):
-                    self.active_build_goal = "orbital-command"
-                    ccs.first(AbilityId.UPGRADETOORBITAL_ORBITALCOMMAND)
-
-            desired_scvs = macro_state["target_workers"]
-            if not saving_for_cc and can_spend_supply and len(self.workers) < desired_scvs:
-                scv_trained_this_step = 0
-                throttle_scvs = (
-                    len(self.workers) >= 24
-                    and self.supply_army < max(14, int((len(self.workers) - 16) * 0.85))
-                    and self.minerals < 400
-                )
-                for th in self.townhalls.ready.idle:
-                    if throttle_scvs and scv_trained_this_step >= 1:
-                        break
-                    if (self.supply_left >= 1 or self.supply_cap >= 200) and self.minerals >= escrow + 50 and self.can_afford(UnitTypeId.SCV):
-                        th.train(UnitTypeId.SCV)
-                        scv_trained_this_step += 1
-
-            # 2. Build 1st Barracks, then Natural Command Center (1-Rax FE), then 2nd Barracks & Refineries
-            has_depot = (
-                len(self.structures(UnitTypeId.SUPPLYDEPOT).ready)
-                + len(self.structures(UnitTypeId.SUPPLYDEPOTLOWERED).ready)
-                >= 1
-            )
-            rax_spot = main_th.position.towards(plaza_build_pos, 5.5 + (rax_total % 3) * 3.0)
-            if has_depot and rax_total < 1:
-                if self.can_afford(UnitTypeId.BARRACKS):
-                    self.active_build_goal = "opening-barracks"
-                    await self.build(UnitTypeId.BARRACKS, near=rax_spot, max_distance=16)
-
-            # 3. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion (Executed BEFORE extra Barracks/Addons!)
-            if (want_natural_cc or want_multi_or_depletion_cc) and self.minerals >= 400:
-                self.active_build_goal = "expand-command-center"
-                reason = "depletion_replace_cc" if macro_state["want_depletion_expand"] else "saturation_expand_cc"
-                if await self._try_smart_expand(UnitTypeId.COMMANDCENTER, reason=reason):
-                    saving_for_cc = False
-                    if macro_state["want_depletion_expand"]:
-                        self.depletion_expansions_started += 1
-
-            if has_depot and rax_total < 2 and (not saving_for_cc or total_ccs >= 2):
-                if self.can_afford(UnitTypeId.BARRACKS) and self.already_pending(UnitTypeId.BARRACKS) < 2:
-                    self.active_build_goal = "second-barracks"
-                    await self.build(UnitTypeId.BARRACKS, near=rax_spot, max_distance=16)
-
-            if self.guns_vs_butter_regime != "mineral_recovery_gas_pull":
-                target_refineries = 1 if len(self.townhalls) == 1 else min(8, int(2 * macro_state["eff_bases"]))
-                if not saving_for_cc and len(self.structures(UnitTypeId.BARRACKS)) >= 1 and len(self.gas_buildings) + self.already_pending(UnitTypeId.REFINERY) < target_refineries:
-                    if self.can_afford(UnitTypeId.REFINERY) and len(self.workers) >= 14:
-                        for th in self.townhalls.ready:
-                            vgs = self.vespene_geyser.closer_than(11.0, th)
-                            for vg in vgs:
-                                if not self.gas_buildings.closer_than(1.0, vg):
-                                    w = self.select_build_worker(vg)
-                                    if w:
-                                        w.build_gas(vg)
-                                        break
-
-            # 4. Attach TechLabs / Reactors on idle Barracks so no facility sits un-upgraded!
-            max_techlabs = 1 if (rax_total < 3 or self.already_pending_upgrade(UpgradeId.STIMPACK) == 0) else min(4, (rax_total + 1) // 2)
-            for rax in self.structures(UnitTypeId.BARRACKS).ready.idle:
-                if not rax.has_add_on and rax.tag not in self._addon_attempted_tags and not saving_for_cc:
-                    if (
-                        len(self.structures(UnitTypeId.BARRACKSTECHLAB)) + self.already_pending(UnitTypeId.BARRACKSTECHLAB) < max_techlabs
-                        and self.can_afford(UnitTypeId.BARRACKSTECHLAB)
-                    ):
-                        self._addon_attempted_tags.add(rax.tag)
-                        if await self.can_place_single(UnitTypeId.SUPPLYDEPOT, rax.add_on_position):
-                            rax.build(UnitTypeId.BARRACKSTECHLAB)
-                            break
-                    elif (
-                        len(self.townhalls) >= 2
-                        and self.already_pending_upgrade(UpgradeId.STIMPACK) > 0
-                        and self.can_afford(UnitTypeId.BARRACKSREACTOR)
-                    ):
-                        self._addon_attempted_tags.add(rax.tag)
-                        if await self.can_place_single(UnitTypeId.SUPPLYDEPOT, rax.add_on_position):
-                            rax.build(UnitTypeId.BARRACKSREACTOR)
-                            break
-
-            # 5. Research Stimpack, Combat Shield, AND Concussive Shells at BarracksTechLab
-            if not saving_for_cc:
-                for tlab in self.structures(UnitTypeId.BARRACKSTECHLAB).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.STIMPACK) == 0 and self.can_afford(UpgradeId.STIMPACK):
-                        self.active_build_goal = "stimpack"
-                        tlab.research(UpgradeId.STIMPACK)
-                    elif self.already_pending_upgrade(UpgradeId.SHIELDWALL) == 0 and self.can_afford(UpgradeId.SHIELDWALL):
-                        self.active_build_goal = "combat-shield"
-                        tlab.research(UpgradeId.SHIELDWALL)
-                    elif self.already_pending_upgrade(UpgradeId.PUNISHERGRENADES) == 0 and self.can_afford(UpgradeId.PUNISHERGRENADES):
-                        self.active_build_goal = "concussive-shells"
-                        tlab.research(UpgradeId.PUNISHERGRENADES)
-
-            # 6. Mid/Late-Game Tech on 2+ Bases: Engineering Bay (+1/+1/+2/+2/+3/+3), Factory (TechLab + SiegeTank), Starport (Medivacs + Vikings), Armory!
-            if len(self.townhalls) >= 2 and not saving_for_cc:
-                if not self.structures(UnitTypeId.ENGINEERINGBAY) and not self.already_pending(UnitTypeId.ENGINEERINGBAY):
-                    if self.can_afford(UnitTypeId.ENGINEERINGBAY):
-                        self.active_build_goal = "engineering-bay"
-                        await self.build(UnitTypeId.ENGINEERINGBAY, near=plaza_build_pos, max_distance=18)
-                for ebay in self.structures(UnitTypeId.ENGINEERINGBAY).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.TERRANINFANTRYWEAPONSLEVEL1) == 0 and self.can_afford(UpgradeId.TERRANINFANTRYWEAPONSLEVEL1):
-                        ebay.research(UpgradeId.TERRANINFANTRYWEAPONSLEVEL1)
-                    elif self.already_pending_upgrade(UpgradeId.TERRANINFANTRYARMORSLEVEL1) == 0 and self.can_afford(UpgradeId.TERRANINFANTRYARMORSLEVEL1):
-                        ebay.research(UpgradeId.TERRANINFANTRYARMORSLEVEL1)
-                    elif self.structures(UnitTypeId.ARMORY).ready:
-                        if self.already_pending_upgrade(UpgradeId.TERRANINFANTRYWEAPONSLEVEL2) == 0 and self.can_afford(UpgradeId.TERRANINFANTRYWEAPONSLEVEL2):
-                            ebay.research(UpgradeId.TERRANINFANTRYWEAPONSLEVEL2)
-                        elif self.already_pending_upgrade(UpgradeId.TERRANINFANTRYARMORSLEVEL2) == 0 and self.can_afford(UpgradeId.TERRANINFANTRYARMORSLEVEL2):
-                            ebay.research(UpgradeId.TERRANINFANTRYARMORSLEVEL2)
-                        elif self.already_pending_upgrade(UpgradeId.TERRANINFANTRYWEAPONSLEVEL3) == 0 and self.can_afford(UpgradeId.TERRANINFANTRYWEAPONSLEVEL3):
-                            ebay.research(UpgradeId.TERRANINFANTRYWEAPONSLEVEL3)
-                        elif self.already_pending_upgrade(UpgradeId.TERRANINFANTRYARMORSLEVEL3) == 0 and self.can_afford(UpgradeId.TERRANINFANTRYARMORSLEVEL3):
-                            ebay.research(UpgradeId.TERRANINFANTRYARMORSLEVEL3)
-
-                if self.already_pending_upgrade(UpgradeId.STIMPACK) > 0:
-                    if not self.structures(UnitTypeId.FACTORY) and not self.already_pending(UnitTypeId.FACTORY):
-                        if self.can_afford(UnitTypeId.FACTORY):
-                            self.active_build_goal = "factory"
-                            await self.build(UnitTypeId.FACTORY, near=plaza_build_pos, max_distance=18)
-                    elif self.structures(UnitTypeId.FACTORY).ready and not self.structures(UnitTypeId.STARPORT) and not self.already_pending(UnitTypeId.STARPORT):
-                        if self.can_afford(UnitTypeId.STARPORT):
-                            self.active_build_goal = "starport"
-                            await self.build(UnitTypeId.STARPORT, near=plaza_build_pos, max_distance=18)
-
-                # Attach FactoryTechLab and train SiegeTanks (or Hellions/Thors)
-                for fac in self.structures(UnitTypeId.FACTORY).ready.idle:
-                    if not fac.has_add_on and fac.tag not in self._addon_attempted_tags and self.can_afford(UnitTypeId.FACTORYTECHLAB):
-                        self._addon_attempted_tags.add(fac.tag)
-                        if await self.can_place_single(UnitTypeId.SUPPLYDEPOT, fac.add_on_position):
-                            fac.build(UnitTypeId.FACTORYTECHLAB)
-                            continue
-                    if can_spend_supply:
-                        if fac.has_techlab and (self.supply_left >= 3 or self.supply_cap >= 200) and self.can_afford(UnitTypeId.SIEGETANK):
-                            self.active_build_goal = "siege-tank-production"
-                            fac.train(UnitTypeId.SIEGETANK)
-                        elif (self.supply_left >= 2 or self.supply_cap >= 200) and self.minerals >= escrow + 150 and self.can_afford(UnitTypeId.HELLION):
-                            fac.train(UnitTypeId.HELLION)
-
-                # Build Armory once Factory + EngineeringBay are ready to unlock +2/+2 Infantry & Vehicle upgrades
-                if (
-                    self.structures(UnitTypeId.FACTORY).ready
-                    and self.structures(UnitTypeId.ENGINEERINGBAY).ready
-                    and not self.structures(UnitTypeId.ARMORY)
-                    and not self.already_pending(UnitTypeId.ARMORY)
-                    and (self.already_pending_upgrade(UpgradeId.TERRANINFANTRYWEAPONSLEVEL1) > 0 or len(self.townhalls) >= 3)
-                    and self.can_afford(UnitTypeId.ARMORY)
-                ):
-                    self.active_build_goal = "armory"
-                    await self.build(UnitTypeId.ARMORY, near=plaza_build_pos, max_distance=18)
-
-                for arm in self.structures(UnitTypeId.ARMORY).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.TERRANVEHICLEWEAPONSLEVEL1) == 0 and self.can_afford(UpgradeId.TERRANVEHICLEWEAPONSLEVEL1):
-                        arm.research(UpgradeId.TERRANVEHICLEWEAPONSLEVEL1)
-                    elif self.already_pending_upgrade(UpgradeId.TERRANVEHICLEANDSHIPARMORSLEVEL1) == 0 and self.can_afford(UpgradeId.TERRANVEHICLEANDSHIPARMORSLEVEL1):
-                        arm.research(UpgradeId.TERRANVEHICLEANDSHIPARMORSLEVEL1)
-
-                # Starport: Medivacs + Vikings vs Air/Colossus + Reactor attachment
-                enemy_air_or_col = self.enemy_units.filter(
-                    lambda u: (u.is_flying and u.type_id not in {UnitTypeId.OVERLORD, UnitTypeId.OVERSEER, UnitTypeId.OBSERVER})
-                    or u.type_id == UnitTypeId.COLOSSUS
-                )
-                for sp in self.structures(UnitTypeId.STARPORT).ready.idle:
-                    if (
-                        not sp.has_add_on
-                        and sp.tag not in self._addon_attempted_tags
-                        and len(self.units(UnitTypeId.MEDIVAC)) >= 2
-                        and self.can_afford(UnitTypeId.STARPORTREACTOR)
-                    ):
-                        self._addon_attempted_tags.add(sp.tag)
-                        if await self.can_place_single(UnitTypeId.SUPPLYDEPOT, sp.add_on_position):
-                            sp.build(UnitTypeId.STARPORTREACTOR)
-                            continue
-                    if can_spend_supply and (self.supply_left >= 2 or self.supply_cap >= 200):
-                        if (enemy_air_or_col or self._mirror_air_alert) and len(self.units(UnitTypeId.VIKINGFIGHTER)) < 6 and self.can_afford(UnitTypeId.VIKINGFIGHTER):
-                            sp.train(UnitTypeId.VIKINGFIGHTER)
-                        elif len(self.units(UnitTypeId.MEDIVAC)) + self.already_pending(UnitTypeId.MEDIVAC) < 6 and self.can_afford(UnitTypeId.MEDIVAC):
-                            sp.train(UnitTypeId.MEDIVAC)
-                        elif len(self.units(UnitTypeId.VIKINGFIGHTER)) < 4 and self.can_afford(UnitTypeId.VIKINGFIGHTER):
-                            sp.train(UnitTypeId.VIKINGFIGHTER)
-
-            # 7. Coupled Production Facility Scaling (driven by effective mining bases & escrow)
-            max_rax = macro_state["max_prod_facilities"]
-            if not saving_for_cc and has_depot and rax_total >= 2 and rax_total < max_rax:
-                if self.can_afford(UnitTypeId.BARRACKS) and self.already_pending(UnitTypeId.BARRACKS) < 2 and self.minerals >= escrow + 175:
-                    await self.build(UnitTypeId.BARRACKS, near=rax_spot, max_distance=16)
-
-            # 8. Continuous Marauder & Marine Production from all ready Barracks (including 2x on Reactors)
-            saving_gas_for_bio_upgrade = (
-                bool(self.structures(UnitTypeId.BARRACKSTECHLAB))
-                and self.already_pending_upgrade(UpgradeId.STIMPACK) == 0
-                and self.vespene < 100
-            )
-            eff_rax_escrow = 0 if (self.supply_army < 20 and total_ccs >= 2) else escrow
-            if (not saving_for_cc or self.supply_army < 20 or total_ccs >= 2) and can_spend_supply:
-                for rax in self.structures(UnitTypeId.BARRACKS).ready:
-                    max_orders = 2 if rax.has_reactor else 1
-                    while len(rax.orders) < max_orders:
-                        if self.supply_left < 1 and self.supply_cap < 200:
-                            break
-                        if self.minerals < eff_rax_escrow + 50:
-                            break
-                        if (
-                            rax.has_techlab
-                            and not saving_gas_for_bio_upgrade
-                            and (self.supply_left >= 2 or self.supply_cap >= 200)
-                            and self.can_afford(UnitTypeId.MARAUDER)
-                        ):
-                            rax.train(UnitTypeId.MARAUDER)
-                        elif self.can_afford(UnitTypeId.MARINE):
-                            rax.train(UnitTypeId.MARINE)
-                        else:
-                            break
-
-        async def _macro_protoss(self, main_th, can_spend_supply: bool, macro_state: Dict[str, Any]) -> None:
-            safe_build_pos = self._get_main_build_anchor(main_th)
-            escrow = int(macro_state["escrow_minerals"])
-            total_nexuses = macro_state["total_bases"]
-            gw_total = (
-                len(self.structures(UnitTypeId.GATEWAY))
-                + len(self.structures(UnitTypeId.WARPGATE))
-                + self.already_pending(UnitTypeId.GATEWAY)
-            )
-            want_natural_nexus = (
-                macro_state["safe_to_expand"]
-                and total_nexuses == 1
-                and gw_total >= 1
-                and (len(self.workers) >= 15 or self.state.game_loop >= 1568)
-            )
-            want_multi_or_depletion_nexus = (
-                macro_state["safe_to_expand"]
-                and total_nexuses >= 2
-                and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
-            )
-            saving_for_nexus = (escrow >= 400 or want_natural_nexus or want_multi_or_depletion_nexus) and self.minerals < 450
-
-            # Ensure first Pylon is built immediately in the open main-base plaza
-            if len(self.structures(UnitTypeId.PYLON)) + self.already_pending(UnitTypeId.PYLON) == 0:
-                if self.supply_used >= 13 and self.can_afford(UnitTypeId.PYLON):
-                    self.active_build_goal = "opening-pylon"
-                    await self.build(UnitTypeId.PYLON, near=safe_build_pos, max_distance=15)
-
-            # 1. Pro Mechanic #6: Chrono Boost (prioritize busy Robotics Facility, RoboticsBay, Forge, Twilight, & Gateways)
-            for nexus in self.townhalls.ready:
-                if nexus.energy >= 50:
-                    targets = (
-                        self.structures(UnitTypeId.ROBOTICSFACILITY).ready.filter(lambda s: not s.is_idle)
-                        | self.structures(UnitTypeId.ROBOTICSBAY).ready.filter(lambda s: not s.is_idle)
-                        | self.structures(UnitTypeId.FORGE).ready.filter(lambda s: not s.is_idle)
-                        | self.structures(UnitTypeId.TWILIGHTCOUNCIL).ready.filter(lambda s: not s.is_idle)
-                        | self.structures(UnitTypeId.CYBERNETICSCORE).ready.filter(lambda s: not s.is_idle)
-                        | self.structures(UnitTypeId.GATEWAY).ready.filter(lambda s: not s.is_idle)
-                        | self.townhalls.ready.filter(lambda s: not s.is_idle)
-                    )
-                    if targets:
-                        nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, targets.first)
-                        self._record_pro_mechanic("chrono-boost")
-
-            # Continuous Probe Production FIRST (throttled when army is starved on 2+ bases)
-            desired_probes = macro_state["target_workers"]
-            if not saving_for_nexus and can_spend_supply and len(self.workers) < desired_probes:
-                probes_trained_this_step = 0
-                throttle_probes = (
-                    len(self.workers) >= 24
-                    and self.supply_army < max(14, int((len(self.workers) - 16) * 0.85))
-                    and self.minerals < 400
-                )
-                for nexus in self.townhalls.ready.idle:
-                    if throttle_probes and probes_trained_this_step >= 1:
-                        break
-                    if (self.supply_left >= 1 or self.supply_cap >= 200) and self.minerals >= escrow + 50 and self.can_afford(UnitTypeId.PROBE):
-                        nexus.train(UnitTypeId.PROBE)
-                        probes_trained_this_step += 1
-
-            if not self.structures(UnitTypeId.PYLON).ready:
-                return
-
-            pylons_ready = self.structures(UnitTypeId.PYLON).ready
-            safe_pylon = (
-                pylons_ready[self.state.game_loop // 16 % len(pylons_ready)]
-                if len(pylons_ready) > 1
-                else pylons_ready.first
-            )
-
-            # 2. Build 1st Gateway, then Natural Nexus (1-Gate FE), then Cybernetics Core & Assimilators
-            if gw_total < 1:
-                if self.can_afford(UnitTypeId.GATEWAY):
-                    self.active_build_goal = "opening-gateway"
-                    await self.build(UnitTypeId.GATEWAY, near=safe_pylon, max_distance=15)
-                return
-
-            # 3. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion (Executed BEFORE extra buildings!)
-            if (want_natural_nexus or want_multi_or_depletion_nexus) and self.minerals >= 400:
-                self.active_build_goal = "expand-nexus"
-                reason = "depletion_replace_nexus" if macro_state["want_depletion_expand"] else "saturation_expand_nexus"
-                if await self._try_smart_expand(UnitTypeId.NEXUS, reason=reason):
-                    saving_for_nexus = False
-                    if macro_state["want_depletion_expand"]:
-                        self.depletion_expansions_started += 1
-
-            if self.guns_vs_butter_regime != "mineral_recovery_gas_pull":
-                target_assim = 1 if len(self.townhalls) == 1 else min(8, int(2 * macro_state["eff_bases"]))
-                if not saving_for_nexus and gw_total >= 1 and len(self.gas_buildings) + self.already_pending(UnitTypeId.ASSIMILATOR) < target_assim:
-                    if self.can_afford(UnitTypeId.ASSIMILATOR) and len(self.workers) >= 14:
-                        for th in self.townhalls.ready:
-                            vgs = self.vespene_geyser.closer_than(11.0, th)
-                            for vg in vgs:
-                                if not self.gas_buildings.closer_than(1.0, vg):
-                                    w = self.select_build_worker(vg)
-                                    if w:
-                                        w.build_gas(vg)
-                                        break
-
-            # 4. Build Cybernetics Core & Research WarpGateResearch
-            need_cyber = (
-                (self.structures(UnitTypeId.GATEWAY).ready or self.structures(UnitTypeId.WARPGATE).ready)
-                and not self.structures(UnitTypeId.CYBERNETICSCORE)
-                and not self.already_pending(UnitTypeId.CYBERNETICSCORE)
-            )
-            if need_cyber and (not saving_for_nexus or total_nexuses >= 2) and self.can_afford(UnitTypeId.CYBERNETICSCORE):
-                self.active_build_goal = "cybernetics-core"
-                await self.build(UnitTypeId.CYBERNETICSCORE, near=safe_pylon, max_distance=15)
-
-            if not saving_for_nexus or total_nexuses >= 2:
-                for cyber in self.structures(UnitTypeId.CYBERNETICSCORE).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH) == 0 and self.can_afford(UpgradeId.WARPGATERESEARCH):
-                        self.active_build_goal = "warpgate-research"
-                        cyber.research(UpgradeId.WARPGATERESEARCH)
-
-            # 5. Build 2nd Gateway & Robotics Facility
-            if not need_cyber and (not saving_for_nexus or total_nexuses >= 2) and gw_total < 2 and self.can_afford(UnitTypeId.GATEWAY):
-                await self.build(UnitTypeId.GATEWAY, near=safe_pylon, max_distance=15)
-
-            target_robos = 1 if len(self.townhalls) < 3 else 2
-            need_robo = (
-                self.structures(UnitTypeId.CYBERNETICSCORE).ready
-                and len(self.structures(UnitTypeId.ROBOTICSFACILITY)) + self.already_pending(UnitTypeId.ROBOTICSFACILITY) < target_robos
-            )
-            if need_robo and (not saving_for_nexus or total_nexuses >= 2) and self.can_afford(UnitTypeId.ROBOTICSFACILITY):
-                self.active_build_goal = "robotics-facility"
-                await self.build(UnitTypeId.ROBOTICSFACILITY, near=safe_pylon, max_distance=15)
-
-            # 5b. Full Adaptive Tech & Upgrades on 2+ Bases:
-            # Forge (+1/+1/+2/+2/+3/+3 Ground), Twilight Council (Charge + Blink), Robotics Bay (Colossus + ExtendedThermalLance), Templar Archive (Archon)
-            if len(self.townhalls) >= 2 and not saving_for_nexus:
-                if not self.structures(UnitTypeId.FORGE) and not self.already_pending(UnitTypeId.FORGE):
-                    if self.can_afford(UnitTypeId.FORGE):
-                        self.active_build_goal = "forge"
-                        await self.build(UnitTypeId.FORGE, near=safe_pylon, max_distance=15)
-                for forge in self.structures(UnitTypeId.FORGE).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1) == 0 and self.can_afford(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1):
-                        forge.research(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1)
-                    elif self.already_pending_upgrade(UpgradeId.PROTOSSGROUNDARMORSLEVEL1) == 0 and self.can_afford(UpgradeId.PROTOSSGROUNDARMORSLEVEL1):
-                        forge.research(UpgradeId.PROTOSSGROUNDARMORSLEVEL1)
-                    elif self.structures(UnitTypeId.TWILIGHTCOUNCIL).ready:
-                        if self.already_pending_upgrade(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2) == 0 and self.can_afford(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2):
-                            forge.research(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2)
-                        elif self.already_pending_upgrade(UpgradeId.PROTOSSGROUNDARMORSLEVEL2) == 0 and self.can_afford(UpgradeId.PROTOSSGROUNDARMORSLEVEL2):
-                            forge.research(UpgradeId.PROTOSSGROUNDARMORSLEVEL2)
-                        elif self.already_pending_upgrade(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL3) == 0 and self.can_afford(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL3):
-                            forge.research(UpgradeId.PROTOSSGROUNDWEAPONSLEVEL3)
-                        elif self.already_pending_upgrade(UpgradeId.PROTOSSGROUNDARMORSLEVEL3) == 0 and self.can_afford(UpgradeId.PROTOSSGROUNDARMORSLEVEL3):
-                            forge.research(UpgradeId.PROTOSSGROUNDARMORSLEVEL3)
-
-                if self.structures(UnitTypeId.CYBERNETICSCORE).ready and not self.structures(UnitTypeId.TWILIGHTCOUNCIL) and not self.already_pending(UnitTypeId.TWILIGHTCOUNCIL):
-                    if self.can_afford(UnitTypeId.TWILIGHTCOUNCIL):
-                        self.active_build_goal = "twilight-council"
-                        await self.build(UnitTypeId.TWILIGHTCOUNCIL, near=safe_pylon, max_distance=15)
-                for tc in self.structures(UnitTypeId.TWILIGHTCOUNCIL).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.CHARGE) == 0 and self.can_afford(UpgradeId.CHARGE):
-                        self.active_build_goal = "charge"
-                        tc.research(UpgradeId.CHARGE)
-                    elif self.already_pending_upgrade(UpgradeId.BLINKTECH) == 0 and self.can_afford(UpgradeId.BLINKTECH):
-                        self.active_build_goal = "blink"
-                        tc.research(UpgradeId.BLINKTECH)
-
-                if (
-                    self.structures(UnitTypeId.ROBOTICSFACILITY).ready
-                    and self.structures(UnitTypeId.TWILIGHTCOUNCIL).ready
-                    and not self.structures(UnitTypeId.ROBOTICSBAY)
-                    and not self.already_pending(UnitTypeId.ROBOTICSBAY)
-                    and self.can_afford(UnitTypeId.ROBOTICSBAY)
-                ):
-                    self.active_build_goal = "robotics-bay"
-                    await self.build(UnitTypeId.ROBOTICSBAY, near=safe_pylon, max_distance=15)
-
-                for rbay in self.structures(UnitTypeId.ROBOTICSBAY).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.EXTENDEDTHERMALLANCE) == 0 and self.can_afford(UpgradeId.EXTENDEDTHERMALLANCE):
-                        self.active_build_goal = "extended-thermal-lance"
-                        rbay.research(UpgradeId.EXTENDEDTHERMALLANCE)
-
-                if (
-                    len(self.townhalls) >= 3
-                    and self.structures(UnitTypeId.TWILIGHTCOUNCIL).ready
-                    and not self.structures(UnitTypeId.TEMPLARARCHIVE)
-                    and not self.already_pending(UnitTypeId.TEMPLARARCHIVE)
-                    and self.can_afford(UnitTypeId.TEMPLARARCHIVE)
-                ):
-                    self.active_build_goal = "templar-archive"
-                    await self.build(UnitTypeId.TEMPLARARCHIVE, near=safe_pylon, max_distance=15)
-
-                enemy_air = self.enemy_units.filter(
-                    lambda u: u.is_flying and u.type_id not in {UnitTypeId.OVERLORD, UnitTypeId.OVERSEER, UnitTypeId.OBSERVER}
-                )
-                if (
-                    (enemy_air or self._mirror_air_alert or len(self.townhalls) >= 3)
-                    and self.structures(UnitTypeId.CYBERNETICSCORE).ready
-                    and not self.structures(UnitTypeId.STARGATE)
-                    and not self.already_pending(UnitTypeId.STARGATE)
-                    and self.can_afford(UnitTypeId.STARGATE)
-                ):
-                    await self.build(UnitTypeId.STARGATE, near=safe_pylon, max_distance=15)
-
-            # Morph High Templar pairs into Archons
-            hts = self.units(UnitTypeId.HIGHTEMPLAR).ready
-            if len(hts) >= 2:
-                hts[0](AbilityId.ARCHON_WARP_TARGET, hts[1])
-                self._record_pro_mechanic("morph-archon")
-
-            # 6. RoboticsFacility (Observer + Colossus + Immortal + WarpPrism) & Stargate Production
-            eff_protoss_escrow = 0 if (self.supply_army < 22 and total_nexuses >= 2) else escrow
-            if (not saving_for_nexus or self.supply_army < 22 or total_nexuses >= 2) and can_spend_supply:
-                for robo in self.structures(UnitTypeId.ROBOTICSFACILITY).ready.idle:
-                    if (
-                        len(self.units(UnitTypeId.OBSERVER)) + self.already_pending(UnitTypeId.OBSERVER) < 1
-                        and (self.supply_left >= 1 or self.supply_cap >= 200)
-                        and self.can_afford(UnitTypeId.OBSERVER)
-                    ):
-                        robo.train(UnitTypeId.OBSERVER)
-                    elif (
-                        self.structures(UnitTypeId.ROBOTICSBAY).ready
-                        and len(self.units(UnitTypeId.COLOSSUS)) < 4
-                        and (self.supply_left >= 6 or self.supply_cap >= 200)
-                        and self.can_afford(UnitTypeId.COLOSSUS)
-                    ):
-                        self.active_build_goal = "colossus-production"
-                        robo.train(UnitTypeId.COLOSSUS)
-                    elif (self.supply_left >= 4 or self.supply_cap >= 200) and self.can_afford(UnitTypeId.IMMORTAL):
-                        robo.train(UnitTypeId.IMMORTAL)
-                    elif (
-                        len(self.townhalls) >= 2
-                        and len(self.units(UnitTypeId.WARPPRISM)) + self.already_pending(UnitTypeId.WARPPRISM) < 1
-                        and (self.supply_left >= 2 or self.supply_cap >= 200)
-                        and self.can_afford(UnitTypeId.WARPPRISM)
-                    ):
-                        robo.train(UnitTypeId.WARPPRISM)
-
-                for sg in self.structures(UnitTypeId.STARGATE).ready.idle:
-                    if (self.supply_left >= 4 or self.supply_cap >= 200) and self.can_afford(UnitTypeId.VOIDRAY):
-                        sg.train(UnitTypeId.VOIDRAY)
-                    elif (self.supply_left >= 2 or self.supply_cap >= 200) and self.can_afford(UnitTypeId.PHOENIX):
-                        sg.train(UnitTypeId.PHOENIX)
-
-            # 7. Continuous Gateway Training & Automatic WarpGate Warp-Ins near ready Pylons!
-            if (not saving_for_nexus or self.supply_army < 22 or total_nexuses >= 2) and can_spend_supply:
-                has_wg_tech = UpgradeId.WARPGATERESEARCH in self.state.upgrades
-                for gw in self.structures(UnitTypeId.GATEWAY).ready.idle:
-                    if has_wg_tech:
-                        gw(AbilityId.MORPH_WARPGATE)
-                        continue
-                    if self.supply_left < 2 and self.supply_cap < 200:
-                        break
-                    if self.minerals < eff_protoss_escrow + 100:
-                        break
-                    if self.structures(UnitTypeId.CYBERNETICSCORE).ready and self.can_afford(UnitTypeId.STALKER) and (
-                        len(self.units(UnitTypeId.STALKER)) <= 2 * len(self.units(UnitTypeId.ZEALOT)) + 4
-                        or self.already_pending_upgrade(UpgradeId.CHARGE) == 0
-                    ):
-                        gw.train(UnitTypeId.STALKER)
-                    elif self.can_afford(UnitTypeId.ZEALOT):
-                        gw.train(UnitTypeId.ZEALOT)
-
-                ready_wgs = self.structures(UnitTypeId.WARPGATE).ready
-                if ready_wgs and pylons_ready and (self.supply_left >= 2 or self.supply_cap >= 200) and self.minerals >= eff_protoss_escrow + 100:
-                    warp_pylon = pylons_ready.closest_to(self.game_info.map_center)
-                    for idx, wg in enumerate(ready_wgs):
-                        if self.supply_left < 2 and self.supply_cap < 200:
-                            break
-                        if self.minerals < eff_protoss_escrow + 100:
-                            break
-                        try:
-                            abilities = await self.get_available_abilities(wg)
-                        except Exception:
-                            abilities = []
-                        if AbilityId.WARPGATETRAIN_ZEALOT not in abilities and AbilityId.WARPGATETRAIN_STALKER not in abilities:
-                            continue
-                        if (
-                            self.structures(UnitTypeId.TEMPLARARCHIVE).ready
-                            and AbilityId.WARPGATETRAIN_HIGHTEMPLAR in abilities
-                            and len(self.units(UnitTypeId.HIGHTEMPLAR)) < 2
-                            and self.can_afford(UnitTypeId.HIGHTEMPLAR)
-                        ):
-                            unit_to_warp = UnitTypeId.HIGHTEMPLAR
-                            warp_ab = AbilityId.WARPGATETRAIN_HIGHTEMPLAR
-                        elif (
-                            AbilityId.WARPGATETRAIN_STALKER in abilities
-                            and self.can_afford(UnitTypeId.STALKER)
-                            and (
-                                len(self.units(UnitTypeId.STALKER)) <= 2 * len(self.units(UnitTypeId.ZEALOT)) + 4
-                                or self.already_pending_upgrade(UpgradeId.CHARGE) == 0
-                            )
-                        ):
-                            unit_to_warp = UnitTypeId.STALKER
-                            warp_ab = AbilityId.WARPGATETRAIN_STALKER
-                        elif AbilityId.WARPGATETRAIN_ZEALOT in abilities and self.can_afford(UnitTypeId.ZEALOT):
-                            unit_to_warp = UnitTypeId.ZEALOT
-                            warp_ab = AbilityId.WARPGATETRAIN_ZEALOT
-                        else:
-                            continue
-                        try:
-                            pos = await self.find_placement(warp_ab, warp_pylon.position.to2, placement_step=1)
-                            if pos is not None:
-                                wg.warp_in(unit_to_warp, pos)
-                                self._record_pro_mechanic("warpgate-warp-in")
-                                self.commands_issued += 1
-                        except Exception:
-                            pass
-
-            # 8. Coupled Gateway Scaling (driven by effective mining bases & escrow)
-            max_gw = macro_state["max_prod_facilities"]
-            if not saving_for_nexus and gw_total < max_gw and (self.supply_army >= 6 or self.minerals >= escrow + 250):
-                if self.can_afford(UnitTypeId.GATEWAY) and self.already_pending(UnitTypeId.GATEWAY) < 2 and self.minerals >= escrow + 200:
-                    await self.build(UnitTypeId.GATEWAY, near=safe_pylon, max_distance=15)
 
         async def _execute_deception_auras_and_buff_positioning(
             self,
@@ -5435,7 +5588,7 @@ def create_racket_sc2_agent(
                     if wings[wi]:
                         a = ang0 + math.radians(deg)
                         w_pt = self._quantize_point(
-                            Point2((float(enemy_center.x) + 6.0 * math.cos(a), float(enemy_center.y) + 6.0 * math.sin(a))),
+                            Point2((float(arc_anchor.x) + 3.5 * math.cos(a), float(arc_anchor.y) + 3.5 * math.sin(a))),
                             grid=1.5,
                         )
                         self._issue_batched_group_order(wings[wi], AbilityId.ATTACK, w_pt, tol=2.2)
@@ -5654,11 +5807,21 @@ def create_racket_sc2_agent(
 
             terran_stim_ready_for_march = (
                 self.race != Race.Terran
+                or self.blind_start
                 or not self.structures(UnitTypeId.BARRACKSTECHLAB)
                 or self.already_pending_upgrade(UpgradeId.STIMPACK) >= 0.80
-                or self.supply_army >= 34
+                or self.supply_army >= 30
             )
-            if (uncommitted_supply >= wave_threshold and terran_stim_ready_for_march) or self.supply_used >= 180:
+            random_stealth_wave_ready = (
+                self.blind_start
+                and self.waves_launched == 0
+                and self.supply_army >= 14
+            )
+            if (
+                random_stealth_wave_ready
+                or ((uncommitted_supply >= wave_threshold or self.supply_army >= wave_threshold + 4) and terran_stim_ready_for_march)
+                or self.supply_used >= 170
+            ):
                 if not self._offensive_launched:
                     self.waves_launched += 1
                     self._emit_telemetry(
@@ -5695,6 +5858,36 @@ def create_racket_sc2_agent(
             for u in army:
                 if u.tag in special_handled_tags:
                     continue
+                # Widow Mine tactical burrow/unburrow reflex (Random Terran stealth-harass & standard 1-1-1)
+                if u.type_id == UnitTypeId.WIDOWMINE:
+                    enemies_in_wm_range = enemy_targets.filter(
+                        lambda e: e.type_id not in {UnitTypeId.LARVA, UnitTypeId.EGG}
+                        and not getattr(e, "is_structure", False)
+                        and u.distance_to(e) <= 6.5
+                    )
+                    if enemies_in_wm_range:
+                        u(AbilityId.BURROWDOWN_WIDOWMINE)
+                        continue
+                elif u.type_id == UnitTypeId.WIDOWMINEBURROWED:
+                    enemies_near_wm = enemy_targets.filter(
+                        lambda e: e.type_id not in {UnitTypeId.LARVA, UnitTypeId.EGG}
+                        and not getattr(e, "is_structure", False)
+                        and u.distance_to(e) <= 9.0
+                    )
+                    if not enemies_near_wm:
+                        u(AbilityId.BURROWUP_WIDOWMINE)
+                    continue
+
+                # Oracle Pulsar Beam reflex (Random Protoss stealth-harass)
+                if u.type_id == UnitTypeId.ORACLE:
+                    light_or_workers_near = self.enemy_units.filter(
+                        lambda e: not getattr(e, "is_flying", False)
+                        and u.distance_to(e) <= 5.5
+                    )
+                    if light_or_workers_near and getattr(u, "energy", 0) >= 25 and not u.has_buff(BuffId.ORACLEWEAPON):
+                        u(AbilityId.BEHAVIOR_PULSARBEAMON)
+                        continue
+
                 # Siege Tank tactical siege/unsiege reflex
                 if u.type_id == UnitTypeId.SIEGETANK:
                     ground_enemies_in_siege = enemy_targets.filter(
@@ -5841,8 +6034,13 @@ def create_racket_sc2_agent(
                             u.ground_range > 2
                             and u.weapon_cooldown > 0
                             and not target.is_structure
-                            and target.ground_range <= 2
-                            and u.distance_to(target) < u.ground_range
+                            and (
+                                (target.ground_range <= 2 and u.distance_to(target) < u.ground_range)
+                                or (
+                                    u.ground_range >= 4.0
+                                    and (u.health_percentage < 0.65 or u.distance_to(target) < u.ground_range - 0.5)
+                                )
+                            )
                         ):
                             kite_pt = self._quantize_point(u.position.towards(target.position, -2.2), grid=1.0)
                             if not self._unit_already_has_order(u, AbilityId.MOVE, kite_pt, tolerance=1.5):
@@ -5851,7 +6049,7 @@ def create_racket_sc2_agent(
                                 self.redundant_orders_skipped += 1
                         elif (
                             u.distance_to(target)
-                            <= ((u.air_range if target.is_flying else u.ground_range) + u.radius + target.radius + 0.3)
+                            <= ((u.air_range if target.is_flying else u.ground_range) + u.radius + target.radius + 4.0)
                             or target.is_structure
                         ):
                             if not self._unit_already_has_order(u, AbilityId.ATTACK, target, tolerance=2.0):
@@ -5867,7 +6065,11 @@ def create_racket_sc2_agent(
                         continue
 
                 if unit_deployed:
-                    # Local Lanchester retreat check: don't suicide outnumbered small squads onto enemy creep!
+                    # 5-second (112-loop) retreat hysteresis latch + Local Lanchester retreat check
+                    retreat_until = int(self._retreat_until_loop.get(u.tag, 0))
+                    if self.state.game_loop < retreat_until and u.distance_to(home_anchor) > 16.0:
+                        retreat_rally_batch.append(u)
+                        continue
                     if (
                         u.distance_to(home_anchor) > 34.0
                         and self.supply_army < 150
@@ -5883,6 +6085,7 @@ def create_racket_sc2_agent(
                             e_power = sum(2.0 if e.health_max >= 80 else 1.0 for e in local_enemies)
                             f_power = sum(2.2 if f.health_max >= 80 else 1.0 for f in local_friends)
                             if e_power > 1.50 * f_power:
+                                self._retreat_until_loop[u.tag] = int(self.state.game_loop) + 112
                                 retreat_rally_batch.append(u)
                                 if self.state.game_loop % 64 == 0:
                                     self.squad_retreats += 1
@@ -5980,8 +6183,13 @@ def create_racket_sc2_agent(
                                 u.ground_range > 2
                                 and u.weapon_cooldown > 0
                                 and not target.is_structure
-                                and target.ground_range <= 2
-                                and u.distance_to(target) < u.ground_range
+                                and (
+                                    (target.ground_range <= 2 and u.distance_to(target) < u.ground_range)
+                                    or (
+                                        u.ground_range >= 4.0
+                                        and (u.health_percentage < 0.65 or u.distance_to(target) < u.ground_range - 0.5)
+                                    )
+                                )
                             ):
                                 kite_pt = self._quantize_point(u.position.towards(target.position, -2.2), grid=1.0)
                                 if not self._unit_already_has_order(u, AbilityId.MOVE, kite_pt, tolerance=1.5):
@@ -5990,7 +6198,7 @@ def create_racket_sc2_agent(
                                     self.redundant_orders_skipped += 1
                             elif (
                                 u.distance_to(target)
-                                <= ((u.air_range if target.is_flying else u.ground_range) + u.radius + target.radius + 0.3)
+                                <= ((u.air_range if target.is_flying else u.ground_range) + u.radius + target.radius + 4.0)
                                 or target.is_structure
                             ):
                                 if not self._unit_already_has_order(u, AbilityId.ATTACK, target, tolerance=2.0):
@@ -6085,7 +6293,7 @@ def create_racket_sc2_agent(
             self._observe_enemy_upgrades_and_implied_tech()
 
             # 1. Step Racket S-expression IPC subprocess (with Layer 5 HumanCortex APM & saccade filter)
-            if self.bridge and iteration % 8 == 0:
+            if self.bridge and iteration % 2 == 0:
                 obs_sexp = self._build_frame_observation()
                 cmds = self.bridge.step_sexp(obs_sexp)
                 if cmds:

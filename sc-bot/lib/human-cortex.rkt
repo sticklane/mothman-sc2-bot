@@ -37,8 +37,8 @@
  hellinger-distance
  classify-player-fingerprint)
 
-(define VIEWPORT-WIDTH 640)
-(define VIEWPORT-HEIGHT 480)
+(define VIEWPORT-WIDTH 24)
+(define VIEWPORT-HEIGHT 18)
 (define TAU-FIXATION-MS 160)
 (define TAU-FIXATION-FRAMES 4)
 
@@ -78,8 +78,8 @@
             (lambda () (hash-ref PRO-CORTEX-PROFILES 'Serral))))
 
 (define (make-human-cortex #:profile [profile 'Serral]
-                           #:cam-x [cam-x 600]
-                           #:cam-y [cam-y 700]
+                           #:cam-x [cam-x 32.0]
+                           #:cam-y [cam-y 32.0]
                            #:epm-cap [epm-cap 360]
                            #:max-tokens [max-tokens 16])
   (human-cortex
@@ -98,15 +98,15 @@
    '()))
 
 (define (in-camera-viewport? cx cy x y [w VIEWPORT-WIDTH] [h VIEWPORT-HEIGHT])
-  (define half-w (quotient w 2))
-  (define half-h (quotient h 2))
+  (define half-w (/ (exact->inexact w) 2.0))
+  (define half-h (/ (exact->inexact h) 2.0))
   (and (>= x (- cx half-w))
        (<= x (+ cx half-w))
        (>= y (- cy half-h))
        (<= y (+ cy half-h))))
 
-;; Fitts's Law Saccade Duration: T = a + b * log2(1 + D / W)
-(define (fitts-saccade-ms x1 y1 x2 y2 [target-width 64.0] [a 42.0] [b 18.5])
+;; Fitts's Law Saccade Duration in SC2 map tiles: T = a + b * log2(1 + D / W)
+(define (fitts-saccade-ms x1 y1 x2 y2 [target-width 4.0] [a 42.0] [b 18.5])
   (define dist (sqrt (+ (sqr (- x2 x1)) (sqr (- y2 y1)))))
   (+ a (* b (/ (log (+ 1.0 (/ dist (max 1.0 target-width)))) (log 2.0)))))
 
@@ -178,45 +178,68 @@
 
 (define (action-priority act)
   (match act
-    [(list 'posture-transition _ ...) 100]
-    [(list 'move-camera _ ...)        99]
-    [(list 'camera-bookmark-save _ ...) 98]
-    [(list 'camera-bookmark-jump _ ...) 98]
-    [(list 'control-group-steal _ ...)  97]
-    [(list 'cancel _ ...)             96]
-    [(list 'pull-workers-attack _ ...) 95]
-    [(list 'clear-expansion-block _ ...) 94]
-    [(list 'clear-gas-steal _ ...)    94]
-    [(list 'resume-halted-building _ ...) 93]
-    [(list 'hold-position _ ...)      92]
-    [(list 'swap-addon _ ...)         92]
-    [(list 'transport-juggle _ ...)   91]
-    [(list 'multi-prong-drop _ ...)   90]
-    [(list 'mineral-walk _ ...)       90]
-    [(list 'worker-harass _ ...)      89]
-    [(list 'harvest-gas _ ...)        88]
-    [(list 'harvest-mineral _ ...)    87]
-    [(list (or 'cast 'cast-spell) _ ...) 85]
-    [(list 'morph _ ...)              82]
-    [(list 'build _ ...)              80]
-    [(list 'expand _ ...)             79]
-    [(list 'research _ ...)           76]
-    [(list 'train _ ...)              74]
-    [(list 'kite _ ...)               65]
-    [(list 'attack-unit _ ...)        60]
-    [(list 'attack-pos _ ...)         55]
-    [_                                50]))
+    [(list 'posture-transition _ ...)        100]
+    [(list 'move-camera _ ...)               99]
+    [(list 'camera-focus _ ...)              99]
+    [(list 'camera-bookmark-save _ ...)      98]
+    [(list 'camera-bookmark-jump _ ...)      98]
+    [(list 'control-group-steal _ ...)       97]
+    [(list 'cancel _ ...)                    96]
+    [(list 'pull-workers-attack _ ...)       95]
+    [(list 'clear-expansion-block _ ...)     94]
+    [(list 'clear-gas-steal _ ...)           94]
+    [(list 'resume-halted-building _ ...)    93]
+    [(list 'hold-position _ ...)             92]
+    [(list 'swap-addon _ ...)                92]
+    [(list 'transport-juggle _ ...)          91]
+    [(list 'multi-prong-drop _ ...)          90]
+    [(list 'mineral-walk _ ...)              90]
+    [(list 'worker-harass _ ...)             89]
+    [(list 'inject-larva _ ...)              88]
+    [(list 'chrono-boost _ ...)              88]
+    [(list 'calldown-mule _ ...)             88]
+    [(list (or 'cast 'cast-spell 'use-ability) _ ...) 86]
+    [(list 'morph _ ...)                     84]
+    [(list 'build _ ...)                     82]
+    [(list 'expand _ ...)                    81]
+    [(list 'research _ ...)                  79]
+    [(list 'train _ ...)                     78]
+    [(list 'execute-spatial-maneuver _ ...)  75]
+    [(list 'mirror-spatial-maneuver _ ...)   74]
+    [(list 'mirror-macro-directive _ ...)    73]
+    [(list 'mirror-prediction _ ...)         72]
+    [(list 'mirror-tech-observation _ ...)   71]
+    [(list 'mirror-zero-sum-exclusion _ ...) 70]
+    [(list 'kite _ ...)                      68]
+    [(list 'attack-unit _ ...)               64]
+    [(list 'attack-pos _ ...)                60]
+    [(list 'harvest-gas _ ...)               42]
+    [(list 'harvest-mineral _ ...)           40]
+    [_                                       55]))
 
-;; Filter candidate actions through the human cortex token bucket and camera viewport
+;; Filter candidate actions through the human cortex token bucket and camera viewport.
+;; Ranks candidates by `action-priority` so high-priority macro, spell, tactical, and
+;; Mirror-Mind directives are never dropped behind low-priority worker harvest/movement spam.
 (define (cortex-filter-actions! cortex candidate-actions #:budget [budget #f])
-  (define cap (or budget (human-cortex-max-tokens cortex)))
-  ;; Preserve relative order within high-priority macro vs micro
+  (define cap (max 0 (or budget (human-cortex-max-tokens cortex))))
   (define total (length candidate-actions))
   (define accepted
-    (if (<= total cap)
-        candidate-actions
-        (take candidate-actions cap)))
+    (cond
+      [(<= total cap)
+       candidate-actions]
+      [else
+       (define indexed
+         (for/list ([a (in-list candidate-actions)]
+                    [i (in-naturals)])
+           (cons i a)))
+       ;; Stable sort by descending action-priority, then take top `cap`,
+       ;; then restore original relative order among accepted commands
+       (define top-indexed
+         (take (sort indexed > #:key (lambda (p) (action-priority (cdr p))))
+               cap))
+       (map cdr (sort top-indexed < #:key car))]))
   (define dropped (max 0 (- total (length accepted))))
+  (set-human-cortex-tokens! cortex (max 0 (- cap (length accepted))))
   (set-human-cortex-accepted-count!
    cortex (+ (human-cortex-accepted-count cortex) (length accepted)))
   (set-human-cortex-dropped-count!

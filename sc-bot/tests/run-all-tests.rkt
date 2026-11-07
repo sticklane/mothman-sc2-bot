@@ -54,7 +54,7 @@
 ;; 1.1 Okasaki-Gill Canonical Crit-Bit Trie
 ;; =============================================================================
 (run-suite "1.1 Okasaki-Gill Canonical Crit-Bit Trie: History Independence & Morton 2D Range Query"
-  (define pts '((100 200 u1) (350 420 u2) (600 700 u3) (1024 1120 u4) (610 715 u5) (80 90 u6)))
+  (define pts '((10 20 u1) (35 42 u2) (60 70 u3) (102 112 u4) (61 71 u5) (8 9 u6)))
   (define t-forward
     (for/fold ([t critbit-empty]) ([p (in-list pts)])
       (critbit-insert t (morton-encode-2d (first p) (second p)) (third p))))
@@ -70,12 +70,12 @@
     (define-values (dx dy) (morton-decode-2d k))
     (assert-eq! dx (first p))
     (assert-eq! dy (second p)))
-  (define in-box (critbit-range-2d t-forward 580 680 650 750))
+  (define in-box (critbit-range-2d t-forward 58 68 65 75))
   (assert-eq! (length in-box) 2)
   (assert-true! (and (memq 'u3 in-box) (memq 'u5 in-box)))
-  (define t-del (critbit-delete t-forward (morton-encode-2d 600 700)))
+  (define t-del (critbit-delete t-forward (morton-encode-2d 60 70)))
   (assert-eq! (critbit-size t-del) 5)
-  (assert-eq! (critbit-lookup t-del (morton-encode-2d 600 700)) #f))
+  (assert-eq! (critbit-lookup t-del (morton-encode-2d 60 70)) #f))
 
 ;; =============================================================================
 ;; 1.2 Hinze-Paterson 2-3 Monoidal Finger Tree
@@ -83,7 +83,7 @@
 (run-suite "1.2 Hinze-Paterson 2-3 Monoidal Finger Tree: Cached Measure & O(log N) split-by-dps"
   (define units
     (for/list ([i (in-range 1 21)])
-      (unit-entry i 'marine 10 45 50 (+ 500 (* i 5)) 700)))
+      (unit-entry i 'marine 10 45 50 (+ 30 (* i 2)) 32)))
   (define ft (ft-from-list units))
   (define m (ft-measure ft))
   (assert-eq! (combat-measure-count m) 20)
@@ -219,7 +219,7 @@
   (define bo
     (seq>> (auto-supply 'Zerg (bo-step '(train drone) 50 0 1))
            (saturate-bases 'Zerg 2)
-           (chain-worker>> 10 '((700 . 760) (860 . 940) (1024 . 1120)) '(expand 1024 1120) 300 0)))
+           (chain-worker>> 10 '((32 . 32) (42 . 44) (50 . 56)) '(expand 50 56) 300 0)))
   (define steps (compile-build-order bo))
   (assert-true! (>= (length steps) 9))
   (assert-eq! (first steps) '(train overlord))
@@ -253,7 +253,7 @@
 ;; 3.3 Lakefill + Zipper-Cut, Baba Wall-In Solver, FRACTRAN Bitmask VM, FAP Hysteresis & Traffic Retreat
 ;; =============================================================================
 (run-suite "3.3 Lakefill + Zipper-Cut, Baba Wall-In Solver, FRACTRAN Bitmask VM, FAP Hysteresis & Traffic Retreat"
-  (define decomp (lakefill-choke-decomposition 2048 2048 '((760 . 820) (1024 . 1120))))
+  (define decomp (lakefill-choke-decomposition 200 200 '((38 . 42) (50 . 56))))
   (assert-eq! (length (hash-ref decomp 'chokes)) 3)
   (define ffe-wall (solve-choke-wall-in 30 30 9 PROTOSS-FFE-BUILDINGS))
   (assert-true! (wall-solution-valid-ref ffe-wall))
@@ -273,30 +273,43 @@
   (assert-eq! (fap-posture-with-hysteresis 10 'retreat) 'retreat)
   (assert-eq! (fap-posture-with-hysteresis 30 'retreat) 'attack)
   (assert-eq! (fap-posture-with-hysteresis 5 'attack) 'attack)
-  ;; PurpleWave Traffic Retreat
+  ;; PurpleWave Traffic Retreat (SC2 map tiles)
   (define retreat-orders
     (purplewave-traffic-retreat
-     (list (hash 'id 1 'x 1020 'y 1110)
-           (hash 'id 2 'x 980 'y 1080)
-           (hash 'id 3 'x 1024 'y 1120))
-     1024 1120 700 760 3))
-  (assert-eq! (hash-ref (first retreat-orders) 'unit-id) 3))
+     (list (hash 'id 1 'x 48 'y 54)
+           (hash 'id 2 'x 44 'y 50)
+           (hash 'id 3 'x 50 'y 56))
+     50 56 32 32 3))
+  (assert-eq! (hash-ref (first retreat-orders) 'unit-id) 3)
+  ;; Safe retreat sector selection (avoids corner sector 0 when allied sector is near)
+  (define pgrid (make-perception-grid))
+  (define retreat-sec (best-retreat-sector pgrid 18 '(9 10)))
+  (assert-true! (not (= retreat-sec 0)) "best-retreat-sector should prefer nearby allied sector over corner 0")
+  ;; Focus-fire target selection with range/proximity weighting
+  (define ff-target
+    (select-focus-fire-target
+     (list (hash 'id 91 'hp 40 'dps 20 'x 36 'y 36)
+           (hash 'id 92 'hp 40 'dps 20 'x 150 'y 150))
+     (hash 'id 1 'hp 100 'dps 15 'x 34 'y 34 'range 6.0)))
+  (assert-eq! (hash-ref ff-target 'id) 91 "select-focus-fire-target should prefer in-range target over far target"))
 
 ;; =============================================================================
-;; 3.4 Human Cortex: 640x480 Camera Fixation, APM Token-Bucket/Window, FoW Diffusion & Fingerprinting
+;; 3.4 Human Cortex: SC2 Tile Camera Fixation, APM Token-Bucket/Window, FoW Diffusion & Fingerprinting
 ;; =============================================================================
-(run-suite "3.4 Human Cortex: 640x480 Camera Fixation, APM Token-Bucket/Window, FoW Diffusion & Fingerprinting"
-  (define cortex (make-human-cortex #:profile 'Serral #:cam-x 600 #:cam-y 700 #:max-tokens 6))
-  (assert-true! (in-camera-viewport? 600 700 720 800))
-  (assert-true! (not (in-camera-viewport? 600 700 1500 1500)))
-  (assert-true! (> (fitts-saccade-ms 600 700 1600 1600) (fitts-saccade-ms 600 700 680 740)))
+(run-suite "3.4 Human Cortex: SC2 Tile Camera Fixation, APM Token-Bucket/Window, FoW Diffusion & Fingerprinting"
+  (define cortex (make-human-cortex #:profile 'Serral #:cam-x 32.0 #:cam-y 32.0 #:max-tokens 6))
+  (assert-true! (in-camera-viewport? 32.0 32.0 38.0 38.0))
+  (assert-true! (not (in-camera-viewport? 32.0 32.0 160.0 160.0)))
+  (assert-true! (> (fitts-saccade-ms 32.0 32.0 160.0 160.0) (fitts-saccade-ms 32.0 32.0 36.0 36.0)))
   (define-values (acc drop-cnt)
     (cortex-filter-actions! cortex
-                            '((train drone) (train overlord) (build spawning-pool)
-                              (attack-unit 1 2) (attack-unit 3 4) (attack-unit 5 6)
-                              (attack-unit 7 8) (attack-unit 9 10))))
+                            '((harvest-mineral 10 504) (harvest-gas 10 103)
+                              (train drone) (train overlord) (build spawning-pool)
+                              (attack-unit 1 2) (attack-unit 3 4) (attack-unit 5 6))))
   (assert-eq! (length acc) 6)
   (assert-eq! drop-cnt 2)
+  (assert-true! (member '(train overlord) acc))
+  (assert-true! (member '(build spawning-pool) acc))
   (assert-eq! (human-cortex-offscreen-violations cortex) 0)
   (define belief (make-vector 64 (/ 1.0 64.0)))
   (fow-ghost-step-diffusion! belief '(0 1 2 3))
@@ -342,7 +355,7 @@
 ;; 4.5 Native C FFI (`libbw_bridge.so`) & Python `sc2_burny_bridge.py` Wire Protocol Round-Trip
 ;; =============================================================================
 (run-suite "4.5 Native C FFI (`libbw_bridge.so`) & Python `sc2_burny_bridge.py` Wire Protocol Round-Trip"
-  (define rt-res (bw-wire-sexp-roundtrip '((train zergling) (build spawning-pool 748 808) (expand 1024 1120))))
+  (define rt-res (bw-wire-sexp-roundtrip '((train zergling) (build spawning-pool 36 36) (expand 50 56))))
   (assert-true! (hash-ref rt-res 'roundtrip-exact?))
   (assert-true! (> (bw-ffi-step-frame 10 200 50) 0)))
 
@@ -384,10 +397,10 @@
   (define sample-sexp
     '(frame-state #:frame 320 #:race zerg #:minerals 350 #:gas 100
                   #:supply-used 18 #:supply-cap 22 #:supply-left 4 #:pending-supply 0
-                  #:start-pos (700.0 760.0) #:enemy-base (1600.0 1600.0)
-                  #:my-units ((10 drone 700.0 760.0 40 0) (120 queen 710.0 765.0 175 30))
-                  #:my-buildings ((101 hatchery 700.0 760.0 1.0 1.0 #f)
-                                  (102 spawning-pool 748.0 808.0 1.0 1.0 #f))
+                  #:start-pos (32.5 32.5) #:enemy-base (160.5 160.5)
+                  #:my-units ((10 drone 32.5 32.5 40 0) (120 queen 33.5 33.5 175 30))
+                  #:my-buildings ((101 hatchery 32.5 32.5 1.0 1.0 #f)
+                                  (102 spawning-pool 35.5 35.5 1.0 1.0 #f))
                   #:enemy-units () #:enemy-buildings () #:effects ()))
   (define parsed (parse-frame-state-sexp sample-sexp))
   (assert-eq! (hash-ref parsed 'frame) 320)
@@ -409,8 +422,8 @@
            'supply-cap 14
            'supply-left 1
            'pending-supply 0
-           'ally-units (list (hash 'id 10 'type 'drone 'x 700 'y 760 'hp 40))
-           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500))
+           'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
            'enemy-units '())))
   (define acts (hash-ref res 'actions))
   (assert-true! (not (null? acts)))
@@ -433,20 +446,24 @@
   (define p-fallback (resolve-demand-pull PROTOSS-COUNTER-TREE 'bio-ball '(gateway) #:minerals 50 #:gas 0))
   (assert-eq! (hash-ref p-fallback 'selected-unit) 'stalker)
   (assert-true! (hash-ref p-fallback 'fallback-used?))
-  ;; Ability Cast Limiter
+  ;; Ability Cast Limiter (per-caster + per-ability refractory tracking)
   (define lim (make-ability-cast-limiter #:max-per-frame 1 #:refractory-frames 24))
   (define-values (kept throttled)
     (throttle-ability-casts!
      lim
      '((cast-spell 120 inject-larva 101)
-       (cast 702 spread-creep-tumor 800 900)
+       (cast-spell 120 transfusion 141)
+       (cast-spell 120 inject-larva 102)
+       (cast 702 spread-creep-tumor 42 46)
        (cast-spell 320 siege-mode 9001)
        (cast-spell 321 siege-mode 9001)
        (cast-spell 322 siege-mode 9001))
      100))
-  (assert-eq! throttled 2)
+  (assert-eq! throttled 3)
   (assert-true! (member '(cast-spell 120 inject-larva 101) kept))
-  (assert-true! (member '(cast 702 spread-creep-tumor 800 900) kept))
+  (assert-true! (member '(cast-spell 120 transfusion 141) kept)
+                "Same caster (120) must be able to cast distinct ability (transfusion) in the same window")
+  (assert-true! (member '(cast 702 spread-creep-tumor 42 46) kept))
   ;; PDA Diagnostics
   (assert-eq! (diagnose-bot-anomaly (make-pda-trace #:scouted-sectors 0)) 'perception-blindspot)
   (assert-eq! (diagnose-bot-anomaly (make-pda-trace #:posture-switches 8)) 'decision-oscillation-thrash)
@@ -471,14 +488,14 @@
            'supply-used 24
            'supply-cap 36
            'supply-left 12
-           'ally-units (list (hash 'id 10 'type 'drone 'x 700 'y 760 'hp 40)
-                             (hash 'id 120 'type 'queen 'x 710 'y 765 'hp 175 'energy 50)
-                             (hash 'id 140 'type 'roach 'x 800 'y 850 'hp 145 'dps 16)
-                             (hash 'id 141 'type 'roach 'x 810 'y 855 'hp 145 'dps 16)
-                             (hash 'id 142 'type 'roach 'x 820 'y 860 'hp 145 'dps 16))
-           'ally-buildings (list (hash 'id 101 'type 'lair 'x 700 'y 760 'hp 1500)
-                                 (hash 'id 102 'type 'spawning-pool 'x 748 'y 808 'hp 1000))
-           'enemy-units (list (hash 'id 9001 'type 'lurker 'x 1040 'y 1120 'hp 200 'dps 30)))))
+           'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40)
+                             (hash 'id 120 'type 'queen 'x 33.5 'y 33.5 'hp 175 'energy 50)
+                             (hash 'id 140 'type 'roach 'x 40.5 'y 42.5 'hp 145 'dps 16)
+                             (hash 'id 141 'type 'roach 'x 41.5 'y 43.0 'hp 145 'dps 16)
+                             (hash 'id 142 'type 'roach 'x 42.5 'y 43.5 'hp 145 'dps 16))
+           'ally-buildings (list (hash 'id 101 'type 'lair 'x 32.5 'y 32.5 'hp 1500)
+                                 (hash 'id 102 'type 'spawning-pool 'x 35.5 'y 35.5 'hp 1000))
+           'enemy-units (list (hash 'id 9001 'type 'lurker 'x 50.5 'y 56.5 'hp 200 'dps 30)))))
   (define tel (hash-ref res 'telemetry))
   (assert-eq! (hash-ref tel 'enemy-archetype) 'lurker-contain)
   (assert-eq! (hash-ref tel 'double-reactions) 1)
@@ -505,7 +522,7 @@
              'supply-used 12
              'supply-cap 15
              'supply-left 3
-             'ally-units (list (hash 'id 10 'type unit-sym 'x 700 'y 760 'hp 40))
+             'ally-units (list (hash 'id 10 'type unit-sym 'x 32.5 'y 32.5 'hp 40))
              'ally-buildings '()
              'enemy-units '())))
     (assert-eq! (hash-ref res 'actual-race) actual-r)))
@@ -526,14 +543,16 @@
            'supply-used 20
            'supply-cap 30
            'supply-left 10
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
            'enable-worker-harass #t
-           'ally-units (list (hash 'id 10 'type 'drone 'x 700 'y 760 'hp 15 'max-hp 40)
-                             (hash 'id 190 'type 'overseer 'x 800 'y 820 'hp 200 'energy 60)
-                             (hash 'id 702 'type 'creep-tumor-burrowed 'x 850 'y 900 'hp 50))
-           'ally-buildings (list (hash 'id 701 'type 'hatchery 'x 1024 'y 1120 'hp 40 'max-hp 1500
+           'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 15 'max-hp 40)
+                             (hash 'id 190 'type 'overseer 'x 38.5 'y 38.5 'hp 200 'energy 60)
+                             (hash 'id 702 'type 'creep-tumor-burrowed 'x 42.5 'y 46.5 'hp 50))
+           'ally-buildings (list (hash 'id 701 'type 'hatchery 'x 50.5 'y 56.5 'hp 40 'max-hp 1500
                                        'hp-pct 0.10 'build-progress 0.45 'under-attack #t)
-                                 (hash 'id 102 'type 'spawning-pool 'x 748 'y 808 'hp 1000))
-           'enemy-units (list (hash 'id 9001 'type 'zealot 'x 710 'y 765 'hp 100)))))
+                                 (hash 'id 102 'type 'spawning-pool 'x 35.5 'y 35.5 'hp 1000))
+           'enemy-units (list (hash 'id 9001 'type 'zealot 'x 33.5 'y 33.5 'hp 100)))))
   (define acts-z (hash-ref res-z 'actions))
   (assert-true! (member '(cancel 701) acts-z) "Expected (cancel 701) for dying unfinished building")
   (assert-true! (ormap (lambda (a) (match a [(list 'cast 702 'spread-creep-tumor _ _) #t] [_ #f])) acts-z)
@@ -555,22 +574,24 @@
            'supply-used 30
            'supply-cap 46
            'supply-left 16
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
            'door-guard #t
-           'ally-units (list (hash 'id 10 'type 'probe 'x 700 'y 760 'hp 40)
-                             (hash 'id 703 'type 'zealot 'x 1024 'y 1120 'hp 100)
-                             (hash 'id 706 'type 'warp-prism 'x 900 'y 950 'hp 100)
-                             (hash 'id 707 'type 'immortal 'x 910 'y 955 'hp 40 'max-hp 200))
-           'ally-buildings (list (hash 'id 201 'type 'nexus 'x 700 'y 760 'hp 1000 'energy 60)
-                                 (hash 'id 205 'type 'gateway 'x 764 'y 824 'hp 500)
-                                 (hash 'id 208 'type 'robotics-facility 'x 796 'y 856 'hp 500))
-           'enemy-units (list (hash 'id 9010 'type 'roach 'x 920 'y 960 'hp 145)))))
+           'ally-units (list (hash 'id 10 'type 'probe 'x 32.5 'y 32.5 'hp 40)
+                             (hash 'id 703 'type 'zealot 'x 50.5 'y 56.5 'hp 100)
+                             (hash 'id 706 'type 'warp-prism 'x 44.5 'y 48.5 'hp 100)
+                             (hash 'id 707 'type 'immortal 'x 45.5 'y 49.5 'hp 40 'max-hp 200))
+           'ally-buildings (list (hash 'id 201 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'energy 60)
+                                 (hash 'id 205 'type 'gateway 'x 36.5 'y 36.5 'hp 500)
+                                 (hash 'id 208 'type 'robotics-facility 'x 38.5 'y 38.5 'hp 500))
+           'enemy-units (list (hash 'id 9010 'type 'roach 'x 46.5 'y 50.5 'hp 145)))))
   (define acts-p (hash-ref res-p 'actions))
-  (assert-true! (member '(hold-position 703 1024 1120) acts-p) "Expected hold-position door guard")
+  (assert-true! (member '(hold-position 703 50.5 56.5) acts-p) "Expected hold-position door guard")
   (assert-true! (member '(control-group-steal 2 (703)) acts-p) "Expected control-group-steal")
   (assert-true! (not (memq 703 (cortex-get-control-group (live-bot-runtime-cortex rt-p) 1)))
                 "Unit 703 must be removed from control group 1 after steal to group 2")
   (assert-true! (memq 703 (cortex-get-control-group (live-bot-runtime-cortex rt-p) 2)))
-  (assert-true! (member '(transport-juggle 706 707 700 760) acts-p) "Expected transport-juggle on wounded immortal")
+  (assert-true! (member '(transport-juggle 706 707 32.5 32.5) acts-p) "Expected transport-juggle on wounded immortal")
   (assert-true! (member '(cast-spell 201 chrono-boost 208) acts-p) "Expected Chrono Boost shifted to Robotics Facility")
 
   ;; 3b: Terran Addon Swap
@@ -584,9 +605,9 @@
            'supply-used 22
            'supply-cap 30
            'supply-left 8
-           'ally-units (list (hash 'id 10 'type 'scv 'x 700 'y 760 'hp 45))
-           'ally-buildings (list (hash 'id 704 'type 'barracks 'x 764 'y 824 'hp 1000 'addon 'reactor)
-                                 (hash 'id 705 'type 'factory 'x 796 'y 824 'hp 1250 'addon #f))
+           'ally-units (list (hash 'id 10 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 704 'type 'barracks 'x 36.5 'y 36.5 'hp 1000 'addon 'reactor)
+                                 (hash 'id 705 'type 'factory 'x 38.5 'y 36.5 'hp 1250 'addon #f))
            'enemy-units '())))
   (define acts-t (hash-ref res-t 'actions))
   (assert-true! (member '(swap-addon 704 705) acts-t) "Expected (swap-addon 704 705)"))
@@ -606,19 +627,21 @@
            'supply-used 14
            'supply-cap 22
            'supply-left 8
-           'ally-units (list (hash 'id 10 'type 'drone 'x 700 'y 760 'hp 40)
-                             (hash 'id 11 'type 'drone 'x 705 'y 762 'hp 40)
-                             (hash 'id 12 'type 'drone 'x 710 'y 765 'hp 40))
-           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500))
-           'enemy-units (list (hash 'id 8801 'type 'probe 'x 780 'y 810 'hp 40))
-           'enemy-buildings (list (hash 'id 8802 'type 'pylon 'x 775 'y 805 'hp 200)
-                                  (hash 'id 8803 'type 'photon-cannon 'x 782 'y 812 'hp 150)))))
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40)
+                             (hash 'id 11 'type 'drone 'x 33.0 'y 32.5 'hp 40)
+                             (hash 'id 12 'type 'drone 'x 33.5 'y 33.0 'hp 40))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+           'enemy-units (list (hash 'id 8801 'type 'probe 'x 36.5 'y 36.5 'hp 40))
+           'enemy-buildings (list (hash 'id 8802 'type 'pylon 'x 36.0 'y 36.0 'hp 200)
+                                  (hash 'id 8803 'type 'photon-cannon 'x 37.0 'y 37.0 'hp 150)))))
   (define acts-a (hash-ref res-a 'actions))
   (assert-true! (ormap (lambda (a) (match a [(list 'pull-workers-attack _ _ _) #t] [_ #f])) acts-a)
                 "Scenario A: Expected pull-workers-attack against cannon rush")
   (assert-true! (ormap (lambda (a) (match a [(list 'worker-harass _ _ _) #t] [_ #f])) acts-a)
                 "Scenario A: Expected worker-harass on enemy proxy probe")
-  (assert-true! (not (member '(expand 1024 1120) acts-a))
+  (assert-true! (not (member '(expand 50.5 56.5) acts-a))
                 "Scenario A: Exposed natural expansion must be suppressed during cannon rush")
 
   ;; Scenario B: Blocked Natural Expansion -> Clear Block + High-Ground CC (Terran) / 3rd Base (Zerg/Protoss)
@@ -632,13 +655,15 @@
            'supply-used 18
            'supply-cap 23
            'supply-left 5
-           'ally-units (list (hash 'id 10 'type 'scv 'x 700 'y 760 'hp 45))
-           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 700 'y 760 'hp 1500)
-                                 (hash 'id 302 'type 'barracks 'x 764 'y 824 'hp 1000))
-           'enemy-buildings (list (hash 'id 8901 'type 'pylon 'x 1024 'y 1120 'hp 200)))))
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'ally-units (list (hash 'id 10 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5 'hp 1500)
+                                 (hash 'id 302 'type 'barracks 'x 36.5 'y 36.5 'hp 1000))
+           'enemy-buildings (list (hash 'id 8901 'type 'pylon 'x 50.5 'y 56.5 'hp 200)))))
   (define acts-b-terran (hash-ref res-b-terran 'actions))
-  (assert-true! (member '(clear-expansion-block 1024 1120) acts-b-terran))
-  (assert-true! (member '(build command-center 764 760) acts-b-terran)
+  (assert-true! (member '(clear-expansion-block 50.5 56.5) acts-b-terran))
+  (assert-true! (member '(build command-center 36.5 32.5) acts-b-terran)
                 "Scenario B (Terran): Expected in-base high-ground Command Center when natural is blocked")
 
   (define rt-b-zerg (make-zerg-overmind-runtime))
@@ -651,13 +676,16 @@
            'supply-used 16
            'supply-cap 22
            'supply-left 6
-           'ally-units (list (hash 'id 10 'type 'drone 'x 700 'y 760 'hp 40))
-           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500))
-           'enemy-units (list (hash 'id 8902 'type 'probe 'x 1024 'y 1120 'hp 40)))))
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'third-x 68.5 'third-y 72.5
+           'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+           'enemy-units (list (hash 'id 8902 'type 'probe 'x 50.5 'y 56.5 'hp 40)))))
   (define acts-b-zerg (hash-ref res-b-zerg 'actions))
-  (assert-true! (member '(clear-expansion-block 1024 1120) acts-b-zerg))
-  (assert-true! (member '(expand 1280 1280) acts-b-zerg)
-                "Scenario B (Zerg): Expected fallback expansion to unobstructed 3rd base (1280, 1280)")
+  (assert-true! (member '(clear-expansion-block 50.5 56.5) acts-b-zerg))
+  (assert-true! (member '(expand 68.5 72.5) acts-b-zerg)
+                "Scenario B (Zerg): Expected fallback expansion to unobstructed 3rd base (68.5, 72.5)")
 
   ;; Scenario C & D: Enemy Gas Steal + Halted Terran Building SCV Resume
   (define rt-cd (make-terran-pluto-runtime))
@@ -670,14 +698,15 @@
            'supply-used 15
            'supply-cap 23
            'supply-left 8
-           'ally-units (list (hash 'id 10 'type 'scv 'x 700 'y 760 'hp 45))
-           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 700 'y 760 'hp 1500)
-                                 (hash 'id 902 'type 'barracks 'x 764 'y 824 'hp 600
+           'base-x 32.5 'base-y 32.5
+           'ally-units (list (hash 'id 10 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5 'hp 1500)
+                                 (hash 'id 902 'type 'barracks 'x 36.5 'y 36.5 'hp 600
                                        'build-progress 0.60 'halted #t))
-           'enemy-buildings (list (hash 'id 901 'type 'assimilator 'x 740 'y 800 'hp 450)))))
+           'enemy-buildings (list (hash 'id 901 'type 'assimilator 'x 35.5 'y 35.5 'hp 450)))))
   (define acts-cd (hash-ref res-cd 'actions))
-  (assert-true! (member '(clear-gas-steal 901 740 800) acts-cd)
-                "Scenario C: Expected (clear-gas-steal 901 740 800)")
+  (assert-true! (member '(clear-gas-steal 901 35.5 35.5) acts-cd)
+                "Scenario C: Expected (clear-gas-steal 901 35.5 35.5)")
   (assert-true! (member '(resume-halted-building 10 902) acts-cd)
                 "Scenario D: Expected (resume-halted-building 10 902)")
 
@@ -692,15 +721,17 @@
            'supply-used 24
            'supply-cap 36
            'supply-left 12
-           'ally-units (list (hash 'id 10 'type 'drone 'x 700 'y 760 'hp 40)
-                             (hash 'id 140 'type 'ravager 'x 980 'y 1080 'hp 120)
-                             (hash 'id 141 'type 'zergling 'x 1150 'y 1250 'hp 35))
-           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500)
-                                 (hash 'id 102 'type 'spawning-pool 'x 748 'y 808 'hp 1000))
-           'enemy-units (list (hash 'id 9050 'type 'reaper 'x 1200 'y 1300 'hp 60))
-           'effects (list (hash 'type 'force-field 'x 1024 'y 1120)))))
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40)
+                             (hash 'id 140 'type 'ravager 'x 48.5 'y 54.5 'hp 120)
+                             (hash 'id 141 'type 'zergling 'x 56.5 'y 62.5 'hp 35))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500)
+                                 (hash 'id 102 'type 'spawning-pool 'x 35.5 'y 35.5 'hp 1000))
+           'enemy-units (list (hash 'id 9050 'type 'reaper 'x 60.5 'y 66.5 'hp 60))
+           'effects (list (hash 'type 'force-field 'x 50.5 'y 56.5)))))
   (define acts-e (hash-ref res-e 'actions))
-  (assert-true! (member '(cast-spell 140 corrosive-bile 1024 1120) acts-e)
+  (assert-true! (member '(cast-spell 140 corrosive-bile 50.5 56.5) acts-e)
                 "Scenario E: Expected Ravager corrosive-bile on enemy Force Field")
   (assert-true! (ormap (lambda (a) (match a [(list 'kite 141 _ _) #t] [_ #f])) acts-e)
                 "Scenario E: Expected anti-kite leash pullback on over-extended zergling"))
@@ -718,25 +749,25 @@
     (hash 'frame 2400
           'minerals 350
           'gas 200
-          'base-x 700
-          'base-y 760
-          'natural-x 1024
-          'natural-y 1120
-          'enemy-x 1600
-          'enemy-y 1600
-          'ally-units (list (hash 'id 101 'type 'roach 'x 900 'y 950 'hp 145)
-                            (hash 'id 102 'type 'roach 'x 910 'y 960 'hp 145)
-                            (hash 'id 103 'type 'ravager 'x 920 'y 970 'hp 120))
-          'ally-buildings (list (hash 'id 201 'type 'hatchery 'x 700 'y 760 'hp 1500)
-                                (hash 'id 202 'type 'spawning-pool 'x 740 'y 800 'hp 1000)
-                                (hash 'id 203 'type 'roach-warren 'x 760 'y 820 'hp 850)
-                                (hash 'id 204 'type 'lair 'x 1024 'y 1120 'hp 1800)
-                                (hash 'id 205 'type 'hydralisk-den 'x 780 'y 840 'hp 850)
-                                (hash 'id 206 'type 'spire 'x 800 'y 860 'hp 850))
-          'enemy-units (list (hash 'id 901 'type 'adept 'x 1000 'y 1100 'hp 70)
-                             (hash 'id 902 'type 'probe 'x 750 'y 790 'hp 40))
-          'enemy-buildings (list (hash 'id 950 'type 'nexus 'x 1600 'y 1600 'hp 1500)
-                                 (hash 'id 951 'type 'gateway 'x 1550 'y 1550 'hp 500))))
+          'base-x 32
+          'base-y 32
+          'natural-x 50
+          'natural-y 56
+          'enemy-x 160
+          'enemy-y 160
+          'ally-units (list (hash 'id 101 'type 'roach 'x 44 'y 48 'hp 145)
+                            (hash 'id 102 'type 'roach 'x 45 'y 49 'hp 145)
+                            (hash 'id 103 'type 'ravager 'x 46 'y 50 'hp 120))
+          'ally-buildings (list (hash 'id 201 'type 'hatchery 'x 32 'y 32 'hp 1500)
+                                (hash 'id 202 'type 'spawning-pool 'x 35 'y 35 'hp 1000)
+                                (hash 'id 203 'type 'roach-warren 'x 36 'y 36 'hp 850)
+                                (hash 'id 204 'type 'lair 'x 50 'y 56 'hp 1800)
+                                (hash 'id 205 'type 'hydralisk-den 'x 37 'y 37 'hp 850)
+                                (hash 'id 206 'type 'spire 'x 38 'y 38 'hp 850))
+          'enemy-units (list (hash 'id 901 'type 'adept 'x 48 'y 54 'hp 70)
+                             (hash 'id 902 'type 'probe 'x 35 'y 34 'hp 40))
+          'enemy-buildings (list (hash 'id 950 'type 'nexus 'x 160 'y 160 'hp 1500)
+                                 (hash 'id 951 'type 'gateway 'x 155 'y 155 'hp 500))))
 
   ;; Compute shadow ledger & action reading at frame 2400
   (define ledger
@@ -798,11 +829,11 @@
   (assert-true! (ormap (lambda (a) (match a [(list* 'mirror-prediction 2 _) #t] [_ #f])) mm-acts)
                 "Expected (mirror-prediction 2 ...) directive at default depth 2")
 
-  ;; Confirm prediction at frame 2800 by revealing enemy Void Ray at main mineral line (700, 760)
+  ;; Confirm prediction at frame 2800 by revealing enemy Void Ray at main mineral line (32, 32)
   (define hit-obs
     (hash-set (hash-set sample-obs 'frame 2800)
               'enemy-units
-              (list (hash 'id 999 'type 'void-ray 'x 710 'y 770 'hp 250))))
+              (list (hash 'id 999 'type 'void-ray 'x 33 'y 34 'hp 250))))
   (step-mirror-mind-predictor! mm hit-obs)
   (assert-true! (> (mirror-mind-state-overall-accuracy mm) 0.70)
                 "Confirmed forecast hit should boost overall accuracy above 0.70")
@@ -820,10 +851,10 @@
                             'hidden-air-or-cloak-transition
                             'carrier
                             'main-mineral-line-drop-or-air
-                            700
-                            760)))
+                            32
+                            32)))
     (resolve-pending-forecasts! mm miss-frame
-                                (list (hash 'id (+ 5000 step-idx) 'type 'zealot 'x 1500 'y 1500 'hp 100))
+                                (list (hash 'id (+ 5000 step-idx) 'type 'zealot 'x 150 'y 150 'hp 100))
                                 '()))
   (assert-true! (< (mirror-mind-state-overall-accuracy mm) 0.45)
                 "Repeated forecast misses should decay overall accuracy below 0.45")
@@ -993,13 +1024,13 @@
     (hash 'frame 2000
           'minerals 350
           'gas 100
-          'ally-units (list (hash 'id 1 'type 'zergling 'x 800 'y 850 'hp 35)
-                            (hash 'id 2 'type 'zergling 'x 810 'y 855 'hp 35))
-          'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500))
-          'enemy-units (list (hash 'id 901 'type 'marine 'x 1550 'y 1550 'hp 45))
-          'enemy-buildings (list (hash 'id 950 'type 'command-center 'x 1600 'y 1600 'hp 1500)
-                                 (hash 'id 951 'type 'orbital-command 'x 1400 'y 1450 'hp 1500)
-                                 (hash 'id 952 'type 'command-center 'x 1250 'y 1350 'hp 1500))))
+          'ally-units (list (hash 'id 1 'type 'zergling 'x 40 'y 42 'hp 35)
+                            (hash 'id 2 'type 'zergling 'x 41 'y 43 'hp 35))
+          'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32 'y 32 'hp 1500))
+          'enemy-units (list (hash 'id 901 'type 'marine 'x 155 'y 155 'hp 45))
+          'enemy-buildings (list (hash 'id 950 'type 'command-center 'x 160 'y 160 'hp 1500)
+                                 (hash 'id 951 'type 'orbital-command 'x 142 'y 136 'hp 1500)
+                                 (hash 'id 952 'type 'command-center 'x 125 'y 125 'hp 1500))))
   (define greedy-acts (step-mirror-mind-predictor! mm-macro greedy-obs))
   (assert-eq! (mirror-mind-state-mirror-macro-verdict mm-macro) 'punish-And-Deny-Greedy-Expand
               "Enemy on 3 bases with 1 Marine must trigger 'punish-And-Deny-Greedy-Expand")
@@ -1013,12 +1044,12 @@
     (hash 'frame 2400
           'minerals 400
           'gas 150
-          'ally-units (list (hash 'id 1 'type 'roach 'x 800 'y 850 'hp 145))
-          'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500)
-                                (hash 'id 102 'type 'hatchery 'x 1024 'y 1120 'hp 1500))
-          'enemy-units (list (hash 'id 902 'type 'siege-tank-sieged 'x 1520 'y 1520 'hp 175))
-          'enemy-buildings (list (hash 'id 960 'type 'command-center 'x 1600 'y 1600 'hp 1500)
-                                 (hash 'id 961 'type 'bunker 'x 1500 'y 1500 'hp 400))))
+          'ally-units (list (hash 'id 1 'type 'roach 'x 40 'y 42 'hp 145))
+          'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32 'y 32 'hp 1500)
+                                (hash 'id 102 'type 'hatchery 'x 50 'y 56 'hp 1500))
+          'enemy-units (list (hash 'id 902 'type 'siege-tank-sieged 'x 152 'y 152 'hp 175))
+          'enemy-buildings (list (hash 'id 960 'type 'command-center 'x 160 'y 160 'hp 1500)
+                                 (hash 'id 961 'type 'bunker 'x 150 'y 150 'hp 400))))
   (step-mirror-mind-predictor! mm-macro turtle-obs)
   (assert-eq! (mirror-mind-state-mirror-macro-verdict mm-macro) 'out-Expand-Passive-Turtle
               "Turtling enemy on 1 base with Bunker + Siege Tank must trigger 'out-Expand-Passive-Turtle")
@@ -1029,16 +1060,16 @@
     (hash 'frame 1800
           'minerals 200
           'gas 50
-          'base-x 700
-          'base-y 760
-          'ally-units (list (hash 'id 1 'type 'roach 'x 750 'y 800 'hp 145))
-          'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500))
-          'enemy-units (list (hash 'id 910 'type 'marine 'x 820 'y 860 'hp 45)
-                             (hash 'id 911 'type 'marine 'x 825 'y 865 'hp 45)
-                             (hash 'id 912 'type 'marine 'x 830 'y 870 'hp 45)
-                             (hash 'id 913 'type 'marauder 'x 835 'y 875 'hp 125)
-                             (hash 'id 914 'type 'marauder 'x 840 'y 880 'hp 125))
-          'enemy-buildings (list (hash 'id 970 'type 'command-center 'x 1600 'y 1600 'hp 1500))))
+          'base-x 32
+          'base-y 32
+          'ally-units (list (hash 'id 1 'type 'roach 'x 36 'y 36 'hp 145))
+          'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32 'y 32 'hp 1500))
+          'enemy-units (list (hash 'id 910 'type 'marine 'x 40 'y 42 'hp 45)
+                             (hash 'id 911 'type 'marine 'x 41 'y 42 'hp 45)
+                             (hash 'id 912 'type 'marine 'x 42 'y 43 'hp 45)
+                             (hash 'id 913 'type 'marauder 'x 43 'y 43 'hp 125)
+                             (hash 'id 914 'type 'marauder 'x 44 'y 44 'hp 125))
+          'enemy-buildings (list (hash 'id 970 'type 'command-center 'x 160 'y 160 'hp 1500))))
   (step-mirror-mind-predictor! mm-macro allin-obs)
   (assert-eq! (mirror-mind-state-mirror-macro-verdict mm-macro) 'defend-All-In-Then-Counter-Expand
               "1-base enemy pushing with 5 combat units near base must trigger 'defend-All-In-Then-Counter-Expand")
@@ -1055,12 +1086,12 @@
            'supply-cap 30
            'supply-left 8
            'enable-economic-disruption #t
-           'ally-units (list (hash 'id 10 'type 'drone 'x 700 'y 760 'hp 40)
-                             (hash 'id 110 'type 'zergling 'x 1100 'y 1150 'hp 35)
-                             (hash 'id 111 'type 'zergling 'x 1110 'y 1160 'hp 35)
-                             (hash 'id 112 'type 'zergling 'x 1120 'y 1170 'hp 35))
-           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500)
-                                 (hash 'id 102 'type 'spawning-pool 'x 748 'y 808 'hp 1000))
+           'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40)
+                             (hash 'id 110 'type 'zergling 'x 100 'y 105 'hp 35)
+                             (hash 'id 111 'type 'zergling 'x 101 'y 106 'hp 35)
+                             (hash 'id 112 'type 'zergling 'x 102 'y 107 'hp 35))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500)
+                                 (hash 'id 102 'type 'spawning-pool 'x 35.5 'y 35.5 'hp 1000))
            'enemy-units '())))
   (define acts-disrupt-z (hash-ref res-disrupt-z 'actions))
   (assert-true! (ormap (lambda (a) (match a [(list 'burrow-block 110 _ _) #t] [_ #f])) acts-disrupt-z)
@@ -1079,11 +1110,11 @@
            'supply-cap 30
            'supply-left 8
            'enable-economic-disruption #t
-           'ally-units (list (hash 'id 10 'type 'scv 'x 700 'y 760 'hp 45)
-                             (hash 'id 210 'type 'marine 'x 1100 'y 1150 'hp 45)
-                             (hash 'id 211 'type 'reaper 'x 1110 'y 1160 'hp 60))
-           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 700 'y 760 'hp 1500)
-                                 (hash 'id 302 'type 'barracks 'x 764 'y 824 'hp 1000))
+           'ally-units (list (hash 'id 10 'type 'scv 'x 32.5 'y 32.5 'hp 45)
+                             (hash 'id 210 'type 'marine 'x 100 'y 105 'hp 45)
+                             (hash 'id 211 'type 'reaper 'x 101 'y 106 'hp 60))
+           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5 'hp 1500)
+                                 (hash 'id 302 'type 'barracks 'x 36.5 'y 36.5 'hp 1000))
            'enemy-units '())))
   (define acts-disrupt-t (hash-ref res-disrupt-t 'actions))
   (assert-true! (ormap (lambda (a) (match a [(list 'patrol-block-expansion 210 _ _) #t] [_ #f])) acts-disrupt-t)
@@ -1191,9 +1222,9 @@
   ;; 1. Transitive Implied Tech Tree from enemy units (even when tech buildings are in fog)
   (define obs-muta
     (infer-enemy-implied-tech-and-upgrades
-     (list (hash 'id 1 'type 'mutalisk 'x 1200 'y 1200 'hp 120)
-           (hash 'id 2 'type 'zergling 'x 1180 'y 1180 'hp 35 'speed 4.58)
-           (hash 'id 3 'type 'lurker 'x 1160 'y 1160 'hp 200 'burrowed? #t))
+     (list (hash 'id 1 'type 'mutalisk 'x 120 'y 120 'hp 120)
+           (hash 'id 2 'type 'zergling 'x 118 'y 118 'hp 35 'speed 4.58)
+           (hash 'id 3 'type 'lurker 'x 116 'y 116 'hp 200 'burrowed? #t))
      '()
      #:our-upgrade-tier 0))
   (assert-true! (memq 'spawning-pool (enemy-tech-observation-implied-tech-buildings obs-muta)))
@@ -1215,9 +1246,9 @@
   ;; 2. Terran Marine 55HP Combat Shield + +1/+1 Upgrades + Siege Tank implied tech
   (define obs-terran
     (infer-enemy-implied-tech-and-upgrades
-     (list (hash 'id 10 'type 'marine 'x 1400 'y 1400 'hp 55 'max-hp 55 'atk-upg 1 'arm-upg 1)
-           (hash 'id 11 'type 'siege-tank 'x 1420 'y 1420 'hp 175))
-     (list (hash 'id 20 'type 'engineering-bay 'x 1500 'y 1500 'hp 850 'active? #t))
+     (list (hash 'id 10 'type 'marine 'x 140 'y 140 'hp 55 'max-hp 55 'atk-upg 1 'arm-upg 1)
+           (hash 'id 11 'type 'siege-tank 'x 142 'y 142 'hp 175))
+     (list (hash 'id 20 'type 'engineering-bay 'x 150 'y 150 'hp 850 'active? #t))
      #:our-upgrade-tier 0))
   (assert-true! (memq 'combat-shield (enemy-tech-observation-observed-upgrades obs-terran))
                 "55HP Marine must infer Combat Shield upgrade")
@@ -1232,8 +1263,8 @@
   ;; 3. Protoss Immortal + Dark Shrine implied tech & detection trigger
   (define obs-protoss
     (infer-enemy-implied-tech-and-upgrades
-     (list (hash 'id 30 'type 'immortal 'x 1400 'y 1400 'hp 200 'shd-upg 1))
-     (list (hash 'id 31 'type 'dark-shrine 'x 1550 'y 1550 'hp 500))
+     (list (hash 'id 30 'type 'immortal 'x 140 'y 140 'hp 200 'shd-upg 1))
+     (list (hash 'id 31 'type 'dark-shrine 'x 155 'y 155 'hp 500))
      #:our-upgrade-tier 0))
   (assert-true! (memq 'robotics-facility (enemy-tech-observation-implied-tech-buildings obs-protoss))
                 "Immortal must imply Robotics Facility")
@@ -1251,10 +1282,10 @@
      (hash 'frame 2600
            'minerals 300
            'gas 150
-           'ally-units (list (hash 'id 1 'type 'roach 'x 800 'y 850 'hp 145))
-           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500))
-           'enemy-units (list (hash 'id 901 'type 'banshee 'x 1300 'y 1300 'hp 140 'cloaked? #t))
-           'enemy-buildings (list (hash 'id 950 'type 'command-center 'x 1600 'y 1600 'hp 1500)))))
+           'ally-units (list (hash 'id 1 'type 'roach 'x 40 'y 42 'hp 145))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32 'y 32 'hp 1500))
+           'enemy-units (list (hash 'id 901 'type 'banshee 'x 130 'y 130 'hp 140 'cloaked? #t))
+           'enemy-buildings (list (hash 'id 950 'type 'command-center 'x 160 'y 160 'hp 1500)))))
   (assert-true!
    (ormap (lambda (a)
             (match a
@@ -1286,9 +1317,9 @@
       (step-pro-human-camera-and-apm-governor!
        rt-pro
        (hash 'frame f
-             'base-x 700 'base-y 760
-             'natural-x 1024 'natural-y 1120
-             'enemy-x 1600 'enemy-y 1600)))
+             'base-x 32.5 'base-y 32.5
+             'natural-x 50.5 'natural-y 56.5
+             'enemy-x 160.5 'enemy-y 160.5)))
     (define cam-act (findf (lambda (a) (and (pair? a) (eq? (car a) 'camera-focus))) gov-acts))
     (define apm-act (findf (lambda (a) (and (pair? a) (eq? (car a) 'human-apm-discipline))) gov-acts))
     (assert-true! (pair? cam-act) "Governor must emit (camera-focus <zone> <x> <y>)")
@@ -1306,9 +1337,9 @@
 (run-suite "Suite 5.14: Zero-Sum Exclusions, Tech Destruction, Depth Propagation, Hallucinations & Concave/High-Ground"
   ;; 1. Zero-Sum Negative Exclusion vs. Tech Bluff vs. Chrono Boost Confirmation
   (define p-commit-units
-    (list (hash 'id 1 'type 'high-templar 'x 1400 'y 1400 'hp 40 'spells '(psi-storm))))
+    (list (hash 'id 1 'type 'high-templar 'x 140 'y 140 'hp 40 'spells '(psi-storm))))
   (define p-commit-bldgs
-    (list (hash 'id 10 'type 'templar-archive 'x 1500 'y 1500 'hp 500)))
+    (list (hash 'id 10 'type 'templar-archive 'x 150 'y 150 'hp 500)))
   (define p-commit-tech
     (infer-enemy-implied-tech-and-upgrades p-commit-units p-commit-bldgs))
   (define low-gas-ledger
@@ -1326,7 +1357,7 @@
 
   ;; Idle Templar Archive with 0 HTs and >= 250 unaccounted gas -> Suspected Tech Bluff!
   (define p-bluff-bldgs
-    (list (hash 'id 10 'type 'templar-archive 'x 1500 'y 1500 'hp 500 'active? #f)))
+    (list (hash 'id 10 'type 'templar-archive 'x 150 'y 150 'hp 500 'active? #f)))
   (define p-bluff-tech
     (infer-enemy-implied-tech-and-upgrades '() p-bluff-bldgs))
   (define high-gas-ledger
@@ -1342,7 +1373,7 @@
 
   ;; Chrono-Boosted Templar Archive confirms commitment even before HTs are seen
   (define p-chrono-bldgs
-    (list (hash 'id 10 'type 'templar-archive 'x 1500 'y 1500 'hp 500 'chrono? #t)))
+    (list (hash 'id 10 'type 'templar-archive 'x 150 'y 150 'hp 500 'chrono? #t)))
   (define p-chrono-tech
     (infer-enemy-implied-tech-and-upgrades '() p-chrono-bldgs))
   (define zs-chrono
@@ -1365,7 +1396,7 @@
 
   ;; 3. Tech Building Destruction: Sunk Cost, Anti-Ghost-Resurrection & Rebuild / 2nd Copy
   (define mm-dest (make-mirror-mind-state #:our-race 'Protoss #:enemy-race 'Zerg #:depth 2))
-  (define pre-muta (list (hash 'id 501 'type 'mutalisk 'x 1300 'y 1300 'hp 120 'atk-upg 1)))
+  (define pre-muta (list (hash 'id 501 'type 'mutalisk 'x 130 'y 130 'hp 120 'atk-upg 1)))
   (define ledger-before
     (compute-opponent-shadow-ledger mm-dest 2800 pre-muta '()))
   (define gas-before (shadow-ledger-accounted-gas ledger-before))
@@ -1386,8 +1417,8 @@
 
   ;; Now a NEW Mutalisk id=999 spawns (or a 2nd Spire exists), proving Spire was rebuilt / had a 2nd copy!
   (define post-mutas
-    (list (hash 'id 501 'type 'mutalisk 'x 1300 'y 1300 'hp 120 'atk-upg 1)
-          (hash 'id 999 'type 'mutalisk 'x 1350 'y 1350 'hp 120 'atk-upg 1)))
+    (list (hash 'id 501 'type 'mutalisk 'x 130 'y 130 'hp 120 'atk-upg 1)
+          (hash 'id 999 'type 'mutalisk 'x 135 'y 135 'hp 120 'atk-upg 1)))
   (define ledger-after-rebuild
     (compute-opponent-shadow-ledger mm-dest 3100 post-mutas '()))
   (define tech-after-rebuild (mirror-mind-state-last-tech-observation mm-dest))
@@ -1407,9 +1438,9 @@
    mm-prop
    (hash 'frame 2600
          'minerals 300 'gas 200
-         'ally-units (list (hash 'id 1 'type 'hydralisk 'x 800 'y 850 'hp 90))
-         'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 700 'y 760 'hp 1500)
-                               (hash 'id 102 'type 'hydralisk-den 'x 720 'y 780 'hp 850))
+         'ally-units (list (hash 'id 1 'type 'hydralisk 'x 40 'y 42 'hp 90))
+         'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32 'y 32 'hp 1500)
+                               (hash 'id 102 'type 'hydralisk-den 'x 34 'y 34 'hp 850))
          'enemy-units p-commit-units
          'enemy-buildings p-commit-bldgs))
   (define prop-nodes (mirror-mind-state-last-hierarchy mm-prop))
@@ -1427,8 +1458,8 @@
     (build-mirror-hierarchy
      mm-bluff-hier
      (hash 'frame 2600
-           'ally-units (list (hash 'id 1 'type 'roach 'x 800 'y 850 'hp 145))
-           'ally-buildings (list (hash 'id 101 'type 'roach-warren 'x 720 'y 780 'hp 850))
+           'ally-units (list (hash 'id 1 'type 'roach 'x 40 'y 42 'hp 145))
+           'ally-buildings (list (hash 'id 101 'type 'roach-warren 'x 34 'y 34 'hp 850))
            'enemy-units '()
            'enemy-buildings p-bluff-bldgs)))
   (define d1-bluff (findf (lambda (n) (= (depth-node-depth n) 1)) bluff-nodes))
@@ -1442,7 +1473,7 @@
 
   ;; 5. Hallucination Detection (2.0x damage-rate-ratio) & Changeling Sniping
   (define halluc-phoenix
-    (hash 'id 777 'type 'phoenix 'x 900 'y 950 'hp 60 'damage-rate-ratio 2.0))
+    (hash 'id 777 'type 'phoenix 'x 45 'y 48 'hp 60 'damage-rate-ratio 2.0))
   (assert-eq! (enemy-unit-hallucination? halluc-phoenix) #t
               "Enemy Phoenix taking 2.0x damage rate must be detected as a Hallucination")
   (define obs-halluc
@@ -1465,10 +1496,12 @@
      (hash 'frame 2400
            'our-terrain-z 14
            'enemy-terrain-z 10
-           'ally-units (list (hash 'id 1 'type 'sentry 'x 1000 'y 1100 'hp 40 'energy 100)
-                             (hash 'id 2 'type 'stalker 'x 1020 'y 1110 'hp 80))
-           'enemy-units (list (hash 'id 901 'type 'marine 'x 1300 'y 1300 'hp 45)
-                              (hash 'id 902 'type 'changeling-zealot 'x 1010 'y 1105 'hp 50)))
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'ally-units (list (hash 'id 1 'type 'sentry 'x 50.0 'y 55.0 'hp 40 'energy 100)
+                             (hash 'id 2 'type 'stalker 'x 51.0 'y 56.0 'hp 80))
+           'enemy-units (list (hash 'id 901 'type 'marine 'x 130.0 'y 130.0 'hp 45)
+                              (hash 'id 902 'type 'changeling-zealot 'x 50.5 'y 55.5 'hp 50)))
      10))
   (assert-true! (member '(snipe-enemy-changeling 902) tact-acts)
                 "Tactics layer must immediately snipe detected enemy Changeling")
@@ -1498,7 +1531,7 @@
   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'form-concave-arc)))
                        tact-acts)
                 "Tactics layer must emit (form-concave-arc ...)")
-  (assert-true! (member '(high-ground-tactics hold-high-ground-ramp-arc 1024 1120 #f) tact-acts)
+  (assert-true! (member '(high-ground-tactics hold-high-ground-ramp-arc 50.5 56.5 #f) tact-acts)
                 "When our-terrain-z > enemy-terrain-z, tactics must hold the high-ground ramp arc")
 
   ;; Verify uphill attack requires high-ground spotter vision (#t)
@@ -1508,10 +1541,10 @@
      (hash 'frame 2450
            'our-terrain-z 10
            'enemy-terrain-z 14
-           'ally-units (list (hash 'id 2 'type 'stalker 'x 1200 'y 1200 'hp 80))
-           'enemy-units (list (hash 'id 901 'type 'siege-tank 'x 1400 'y 1400 'hp 175)))
+           'ally-units (list (hash 'id 2 'type 'stalker 'x 120 'y 120 'hp 80))
+           'enemy-units (list (hash 'id 901 'type 'siege-tank 'x 140 'y 140 'hp 175)))
      5))
-  (assert-true! (member '(high-ground-tactics uphill-vision-spotter-and-concave 1400 1400 #t)
+  (assert-true! (member '(high-ground-tactics uphill-vision-spotter-and-concave 140.0 140.0 #t)
                         uphill-acts)
                 "When attacking uphill (enemy-terrain-z > our-terrain-z), tactics must require a high-ground vision spotter (#t)")
 
@@ -1594,13 +1627,13 @@
   (define zgr-ledger
     (compute-opponent-shadow-ledger
      mm-zgr 2000
-     (list (hash 'id 1 'type 'zergling 'x 900 'y 900)
-           (hash 'id 2 'type 'zergling 'x 910 'y 900)
-           (hash 'id 3 'type 'zergling 'x 920 'y 900)
-           (hash 'id 4 'type 'zergling 'x 930 'y 900)
-           (hash 'id 5 'type 'zergling 'x 940 'y 900))
-     (list (hash 'id 10 'type 'hatchery 'x 1600 'y 1600)
-           (hash 'id 11 'type 'spawning-pool 'x 1580 'y 1580))
+     (list (hash 'id 1 'type 'zergling 'x 46 'y 46)
+           (hash 'id 2 'type 'zergling 'x 47 'y 46)
+           (hash 'id 3 'type 'zergling 'x 48 'y 46)
+           (hash 'id 4 'type 'zergling 'x 49 'y 46)
+           (hash 'id 5 'type 'zergling 'x 50 'y 46))
+     (list (hash 'id 10 'type 'hatchery 'x 160 'y 160)
+           (hash 'id 11 'type 'spawning-pool 'x 156 'y 156))
      #:enemy-workers-killed 5))
   (assert-eq! (shadow-ledger-expected-gas zgr-ledger) 0
               "1-base zero-gas Zergling flood must calibrate expected-gas to 0 (not false hidden air)")
@@ -1612,19 +1645,19 @@
   (define reach-unseen
     (evaluate-enemy-army-spatio-temporal-reachability
      2400
-     (list (hash 'id 1 'type 'roach 'x 1024 'y 1120))
-     (list (hash 'id 90 'type 'marine 'x 1600 'y 1600))
+     (list (hash 'id 1 'type 'roach 'x 50 'y 56))
+     (list (hash 'id 90 'type 'marine 'x 160 'y 160))
      #f
      (shadow-ledger 1500 300 400 100 1100 200 11 'hidden-expansion-or-macro-boom 2 28 'pace-Macro-And-Disrupt)))
   (define reach-seen-cluster
     (evaluate-enemy-army-spatio-temporal-reachability
      2400
-     (list (hash 'id 1 'type 'roach 'x 1024 'y 1120))
-     (list (hash 'id 90 'type 'marine 'x 1600 'y 1600)
-           (hash 'id 91 'type 'marauder 'x 1600 'y 1600)
-           (hash 'id 92 'type 'siege-tank 'x 1600 'y 1600)
-           (hash 'id 93 'type 'siege-tank 'x 1600 'y 1600)
-           (hash 'id 94 'type 'medivac 'x 1600 'y 1600))
+     (list (hash 'id 1 'type 'roach 'x 50 'y 56))
+     (list (hash 'id 90 'type 'marine 'x 160 'y 160)
+           (hash 'id 91 'type 'marauder 'x 160 'y 160)
+           (hash 'id 92 'type 'siege-tank 'x 160 'y 160)
+           (hash 'id 93 'type 'siege-tank 'x 160 'y 160)
+           (hash 'id 94 'type 'medivac 'x 160 'y 160))
      #f
      (shadow-ledger 1500 300 400 100 1100 200 11 'hidden-expansion-or-macro-boom 2 28 'pace-Macro-And-Disrupt)))
   (assert-true! (> (enemy-army-reachability-model-seen-army-supply reach-seen-cluster)
@@ -1643,12 +1676,12 @@
      '()))
   (define reach-slow
     (evaluate-enemy-army-spatio-temporal-reachability
-     2400 '() (list (hash 'id 90 'type 'marine 'x 1500 'y 1500)) slow-tech-obs #f))
+     2400 '() (list (hash 'id 90 'type 'marine 'x 150 'y 150)) slow-tech-obs #f))
   (define reach-fast
     (evaluate-enemy-army-spatio-temporal-reachability
      2400 '()
-     (list (hash 'id 90 'type 'marine 'x 1500 'y 1500)
-           (hash 'id 94 'type 'medivac 'x 1500 'y 1500))
+     (list (hash 'id 90 'type 'marine 'x 150 'y 150)
+           (hash 'id 94 'type 'medivac 'x 150 'y 150))
      fast-tech-obs #f))
   (assert-true! (> (enemy-army-reachability-model-effective-move-speed reach-fast)
                    (enemy-army-reachability-model-effective-move-speed reach-slow))
@@ -1661,11 +1694,11 @@
   (define reach-surround
     (evaluate-enemy-army-spatio-temporal-reachability
      2400
-     (list (hash 'id 1 'type 'roach 'x 1100 'y 1150)
-           (hash 'id 2 'type 'roach 'x 1110 'y 1150)
-           (hash 'id 3 'type 'ravager 'x 1120 'y 1150)
-           (hash 'id 4 'type 'hydralisk 'x 1130 'y 1150))
-     (list (hash 'id 90 'type 'stalker 'x 1250 'y 1250))
+     (list (hash 'id 1 'type 'roach 'x 52 'y 56)
+           (hash 'id 2 'type 'roach 'x 53 'y 56)
+           (hash 'id 3 'type 'ravager 'x 54 'y 56)
+           (hash 'id 4 'type 'hydralisk 'x 55 'y 56))
+     (list (hash 'id 90 'type 'stalker 'x 62 'y 62))
      slow-tech-obs #f))
   (assert-eq! (enemy-army-reachability-model-recommended-spatial-maneuver reach-surround)
               'surround-and-crush-isolated-enemy-cluster
@@ -1674,11 +1707,11 @@
   (define reach-backstab
     (evaluate-enemy-army-spatio-temporal-reachability
      2400
-     (list (hash 'id 1 'type 'zergling 'x 1380 'y 1300))
-     (list (hash 'id 90 'type 'siege-tank 'x 400 'y 1500)
-           (hash 'id 91 'type 'siege-tank 'x 410 'y 1500))
+     (list (hash 'id 1 'type 'zergling 'x 135 'y 128))
+     (list (hash 'id 90 'type 'siege-tank 'x 36 'y 150)
+           (hash 'id 91 'type 'siege-tank 'x 37 'y 150))
      slow-tech-obs #f
-     #:enemy-exp-x 1450 #:enemy-exp-y 1350))
+     #:enemy-exp-x 142 #:enemy-exp-y 136))
   (assert-eq! (enemy-army-reachability-model-recommended-spatial-maneuver reach-backstab)
               'backstab-undefended-enemy-expansion
               "Enemy army seen far out of position from their exposed expansion must recommend backstab-undefended-enemy-expansion")
@@ -1686,10 +1719,10 @@
   (define reach-intercept
     (evaluate-enemy-army-spatio-temporal-reachability
      2400
-     (list (hash 'id 1 'type 'roach 'x 700 'y 760))
-     (list (hash 'id 90 'type 'marine 'x 1120 'y 1180)
-           (hash 'id 91 'type 'marauder 'x 1125 'y 1185)
-           (hash 'id 92 'type 'medivac 'x 1130 'y 1190))
+     (list (hash 'id 1 'type 'roach 'x 32 'y 32))
+     (list (hash 'id 90 'type 'marine 'x 58 'y 64)
+           (hash 'id 91 'type 'marauder 'x 59 'y 65)
+           (hash 'id 92 'type 'medivac 'x 60 'y 66))
      fast-tech-obs #f))
   (assert-eq! (enemy-army-reachability-model-recommended-spatial-maneuver reach-intercept)
               'pre-rotate-intercept-incoming-threat
@@ -1698,8 +1731,8 @@
   (define reach-safe-expand
     (evaluate-enemy-army-spatio-temporal-reachability
      2400
-     (list (hash 'id 1 'type 'roach 'x 1024 'y 1120))
-     (list (hash 'id 90 'type 'marine 'x 1750 'y 1750))
+     (list (hash 'id 1 'type 'roach 'x 50 'y 56))
+     (list (hash 'id 90 'type 'marine 'x 175 'y 175))
      slow-tech-obs #f))
   (assert-eq! (enemy-army-reachability-model-recommended-spatial-maneuver reach-safe-expand)
               'safe-to-expand-enemy-pinned-far
@@ -1711,10 +1744,10 @@
     (step-live-bot-runtime!
      rt-sp
      (hash 'frame 2400
-           'ally-units (list (hash 'id 1 'type 'roach 'x 1100 'y 1150 'hp 145)
-                             (hash 'id 2 'type 'roach 'x 1110 'y 1150 'hp 145)
-                             (hash 'id 3 'type 'ravager 'x 1120 'y 1150 'hp 120))
-           'enemy-units (list (hash 'id 90 'type 'stalker 'x 1250 'y 1250 'hp 80)))))
+           'ally-units (list (hash 'id 1 'type 'roach 'x 52 'y 56 'hp 145)
+                             (hash 'id 2 'type 'roach 'x 53 'y 56 'hp 145)
+                             (hash 'id 3 'type 'ravager 'x 54 'y 56 'hp 120))
+           'enemy-units (list (hash 'id 90 'type 'stalker 'x 62 'y 62 'hp 80)))))
   (define sp-acts (hash-ref sp-res 'actions))
   (define sp-mirror-acts (hash-ref sp-res 'mirror-actions '()))
   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mirror-spatial-maneuver))) sp-mirror-acts)
@@ -1724,12 +1757,12 @@
 
   ;; 11. All-Depth d = 0..5 Online Accuracy Selection & Resource-Weighted + Transition-Sensitive Scoring
   (define past-zerg-units
-    (list (hash 'id 10 'type 'zergling 'x 1500 'y 1500)))
+    (list (hash 'id 10 'type 'zergling 'x 150 'y 150)))
   (define now-muta-transition-units
-    (list (hash 'id 10 'type 'zergling 'x 1500 'y 1500) ; leftover tier-1 unit from t_past
-          (hash 'id 201 'type 'mutalisk 'x 1400 'y 1400)
-          (hash 'id 202 'type 'mutalisk 'x 1410 'y 1400)
-          (hash 'id 203 'type 'mutalisk 'x 1420 'y 1400)))
+    (list (hash 'id 10 'type 'zergling 'x 150 'y 150) ; leftover tier-1 unit from t_past
+          (hash 'id 201 'type 'mutalisk 'x 140 'y 140)
+          (hash 'id 202 'type 'mutalisk 'x 141 'y 140)
+          (hash 'id 203 'type 'mutalisk 'x 142 'y 140)))
   (define depth-scores
     (score-depth-predictions
      (hash 0 'zergling 1 'roach 2 'mutalisk 3 'hydralisk 4 'ultralisk 5 'corruptor)
@@ -1754,21 +1787,81 @@
 (set! total-assertions (max 605 total-assertions))
 
 ;; =============================================================================
-;; Suite 5.15: Formal State-Machine Verification (15/15 Invariants) & Crash/Contract Fuzzing
+;; Suite 5.15: Formal State-Machine Verification (21/21 Invariants, PV1-PV6) & Crash/Contract Fuzzing
 ;; =============================================================================
-(run-suite "Suite 5.15: Formal State-Machine Verification (15/15 Invariants) & Crash/Contract Fuzzing"
+(run-suite "Suite 5.15: Formal State-Machine Verification (21/21 Invariants, PV1-PV6) & Crash/Contract Fuzzing"
   (define sm-rep (verify-all-state-machines #:print-report? #f))
-  (assert-eq! (state-machine-verification-report-total-checks sm-rep) 15
-              "Formal state-machine verifier must run all 15 invariants")
-  (assert-eq! (state-machine-verification-report-passed-checks sm-rep) 15
-              "All 15 formal state-machine invariants must pass")
+  (assert-eq! (state-machine-verification-report-total-checks sm-rep) 21
+              "Formal state-machine verifier must run all 21 invariants (P1-P5, M1-M5, E1-E5, PV1-PV6)")
+  (assert-eq! (state-machine-verification-report-passed-checks sm-rep) 21
+              "All 21 formal state-machine invariants must pass")
   (assert-eq! (state-machine-verification-report-failed-checks sm-rep) 0
               "Zero formal state-machine invariants may fail")
-  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 3358
-              "Formal state-machine verifier must explore all 3358 state transitions")
+  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 115270
+              "Formal state-machine verifier must explore all 115,270 state transitions")
   (for ([chk (in-list (state-machine-verification-report-check-results sm-rep))])
     (assert-true! (verification-check-result-passed? chk)
-                  (format "Formal invariant ~a must pass" (verification-check-result-id chk))))
+                  (format "Formal invariant ~a must pass" (verification-check-result-id chk)))
+    (assert-eq! (verification-check-result-counterexample chk) #f
+                (format "Formal invariant ~a must have 0 counterexamples" (verification-check-result-id chk))))
+
+  ;; Direct verification of verify-prioritization-scheduler-invariants (PV1-PV6)
+  (define pv-results (verify-prioritization-scheduler-invariants))
+  (assert-eq! (length pv-results) 6
+              "verify-prioritization-scheduler-invariants must return all 6 PV theorems (PV1-PV6)")
+  (assert-eq! (map verification-check-result-id pv-results)
+              '(PV1-no-expansion-escrow-starvation
+                PV2-combat-dominates-workers-under-threat
+                PV3-gas-sink-monotonicity-no-gas-hoarding
+                PV4-zero-supply-block-preemption
+                PV5-counter-tech-anti-air-and-detection-liveness
+                PV6-refractory-cooldown-anti-spam-idempotence)
+              "PV theorem IDs must match PV1-PV6 in exact order")
+  (for ([pv-chk (in-list pv-results)])
+    (assert-eq! (verification-check-result-domain pv-chk) 'prioritization-scheduler)
+    (assert-true! (verification-check-result-passed? pv-chk))
+    (assert-eq! (verification-check-result-counterexample pv-chk) #f)
+    (assert-true! (>= (verification-check-result-states-explored pv-chk) 6300)))
+
+  ;; Replay Pathology Property 1 (Matches #5105114 & #5105115): Multi-base / expired-escrow tech & production liveness
+  (define dec-5105115
+    (pv-evaluate-prioritization-state
+     #:race 'Terran #:active-bases 4 #:workers 48 #:minerals 150 #:gas 100
+     #:supply-left 10 #:supply-cap 120 #:escrow-age 300
+     #:ready-tech-sym 'stimpack #:ready-tech-min 100 #:ready-tech-gas 100))
+  (assert-eq! (pv-scheduler-decision-effective-escrow-min dec-5105115) 0
+              "Match #5105115: 4-base Terran must have 0 blocking expansion escrow against Stimpack/Barracks")
+  (assert-true! (member '(research stimpack) (pv-scheduler-decision-scheduled-actions dec-5105115))
+                "Match #5105115: 4-base Terran with 150M/100G must schedule (research stimpack)")
+
+  ;; Replay Pathology Property 2 (Matches #5105116 & #5105117): Combat dominates workers & blocks worker mineral drain under threat
+  (define dec-5105116
+    (pv-evaluate-prioritization-state
+     #:race 'Protoss #:active-bases 2 #:workers 24 #:minerals 75 #:gas 50
+     #:supply-left 6 #:supply-cap 60 #:army-supply 6 #:enemy-threat 12))
+  (assert-eq! (pv-scheduler-decision-worker-admitted? dec-5105116) #f
+              "Match #5105116: Probe training at 75M/50G under enemy threat must be blocked to save for 125M/50G Stalker")
+  (assert-true! (>= (pv-scheduler-decision-combat-mineral-floor dec-5105116) 100)
+                "Match #5105116: Combat mineral floor under threat must reserve >= 100M for Protoss combat unit")
+
+  ;; Replay Pathology Property 3 (Match #5105118): 544-gas / 50-mineral Zerg gas-hoarding prevention
+  (define dec-5105118
+    (pv-evaluate-prioritization-state
+     #:race 'Zerg #:active-bases 2 #:workers 28 #:minerals 50 #:gas 544
+     #:supply-left 8 #:supply-cap 60))
+  (assert-eq! (pv-scheduler-decision-worker-admitted? dec-5105118) #f
+              "Match #5105118: At 50M / 544G, Drone training must be blocked by the gas-sink mineral floor (>= 75M for Roach)")
+  (assert-true! (>= (pv-scheduler-decision-gas-sink-mineral-floor dec-5105118) 75)
+                "Match #5105118: Gas-sink mineral floor at 544G must be >= 75M")
+
+  ;; Replay Pathology Property 4 (Matches #5105114 & #5105115): Refractory cooldown gate idempotence
+  (define r-gate (pv-make-refractory-gate 64))
+  (assert-eq! (pv-try-emit-refractory! r-gate 'queen-tumor 101 200) #t
+              "First queen-tumor emission at frame 200 must succeed")
+  (assert-eq! (pv-try-emit-refractory! r-gate 'queen-tumor 101 220) #f
+              "Duplicate queen-tumor emission within 64-frame refractory window (frame 220) must be blocked")
+  (assert-eq! (pv-try-emit-refractory! r-gate 'queen-tumor 101 264) #t
+              "queen-tumor emission after cooldown expiry (frame 264) must succeed")
 
   (define self-chk (run-contract-self-checks! #:print-report? #f))
   (assert-eq! (car self-chk) 30 "All 30 SC2 LotV actuator contract self-checks must pass")
@@ -1786,3 +1879,4 @@
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"
         total-assertions)
 (printf "============================================================================\n")
+

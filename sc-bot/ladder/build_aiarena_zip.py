@@ -64,7 +64,9 @@ def precompile_racket_zo() -> bool:
         return False
     targets = [
         "main.rkt",
+        "lib/sc2-protobuf-ws.rkt",
         "sim/racket_sc2_ipc_bot.rkt",
+        "sim/racket-sc2-ladder-main.rkt",
         "bots/Mothman.rkt",
         "bots/Mothman-Z.rkt",
         "bots/Mothman-T.rkt",
@@ -87,16 +89,34 @@ def precompile_racket_zo() -> bool:
         return False
 
 
+def _archive_has_native_ws_deps(archive_path: Path) -> bool:
+    """Check whether cached racket_runtime.tar.xz contains file/sha1, net/base64, and json."""
+    if not archive_path.exists() or archive_path.stat().st_size < 1_000_000:
+        return False
+    try:
+        with tarfile.open(archive_path, "r:xz") as tf:
+            names = set(tf.getnames())
+        has_sha1 = any("collects/file/" in n and "sha1" in n for n in names)
+        has_b64 = any("collects/net/" in n and "base64" in n for n in names)
+        has_json = any("collects/json/" in n for n in names)
+        return has_sha1 and has_b64 and has_json
+    except Exception:
+        return False
+
+
 def ensure_portable_racket_archive() -> Path | None:
     """
-    Build or reuse cached `ladder/.cache/racket_runtime.tar.xz` (~8.3 MB) containing
+    Build or reuse cached `ladder/.cache/racket_runtime.tar.xz` (~8.5 MB) containing
     `racket_runtime/bin/racket` + the exact precompiled `.zo`/`.rktd` files needed by
+    both `sim/racket-sc2-ladder-main.rkt` (`lib/sc2-protobuf-ws.rkt`) and
     `sim/racket_sc2_ipc_bot.rkt` on Debian 12 Bookworm x86_64 (`aiarena-docker-base`).
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     archive_path = CACHE_DIR / "racket_runtime.tar.xz"
-    if archive_path.exists() and archive_path.stat().st_size > 1_000_000:
-        return archive_path
+    if archive_path.exists():
+        if _archive_has_native_ws_deps(archive_path):
+            return archive_path
+        archive_path.unlink(missing_ok=True)
 
     if not RACKET_BIN.exists() or not shutil.which("strace"):
         return None
@@ -126,6 +146,23 @@ def ensure_portable_racket_archive() -> Path | None:
                 "balanced-opening",
             ],
             input=obs,
+            text=True,
+            capture_output=True,
+            cwd=str(ROOT_DIR),
+        )
+        for m in re.finditer(r'"(/home/antigravity/toolchains/racket/[^"]+)"', proc.stderr):
+            fp = Path(m.group(1)).resolve()
+            if fp.is_file() and str(fp).startswith(str(RACKET_ROOT)):
+                opened_files.add(fp)
+
+    # Also trace the Pure-Racket Native WebSocket + Protobuf test suite and CLI runner
+    for extra_cmd in (
+        ["strace", "-f", "-e", "trace=openat", str(RACKET_BIN), "tests/sc2-protobuf-ws-test.rkt"],
+        ["strace", "-f", "-e", "trace=openat", str(RACKET_BIN), "sim/racket-sc2-ladder-main.rkt", "--dry-run", "--BotName", "Mothman-R"],
+        ["strace", "-f", "-e", "trace=openat", str(RACKET_BIN), "sim/racket-sc2-ladder-main.rkt", "--ComputerOpponent", "--BotName", "Mothman-R", "--max-loops", "16"],
+    ):
+        proc = subprocess.run(
+            extra_cmd,
             text=True,
             capture_output=True,
             cwd=str(ROOT_DIR),
