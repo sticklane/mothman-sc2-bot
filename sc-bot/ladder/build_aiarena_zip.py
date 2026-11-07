@@ -261,6 +261,12 @@ def build_variant_zip(
                     zf.write(full_p, arcname=rel_p)
                     files_added += 1
 
+        names_in_zip = set(zf.namelist())
+        if "sim/scbot_telemetry.py" not in names_in_zip and (ROOT_DIR / "sim" / "scbot_telemetry.py").exists():
+            zf.write(ROOT_DIR / "sim" / "scbot_telemetry.py", arcname="sim/scbot_telemetry.py")
+            names_in_zip.add("sim/scbot_telemetry.py")
+            files_added += 1
+
     raw_bytes = zip_path.read_bytes()
     size_bytes = len(raw_bytes)
     sha256_hex = hashlib.sha256(raw_bytes).hexdigest()
@@ -277,6 +283,7 @@ def build_variant_zip(
         "md5": md5_hex,
         "cpplinux_binary_included": elf_bin is not None and elf_bin.exists(),
         "bundled_portable_racket": portable_racket_archive is not None and portable_racket_archive.exists(),
+        "telemetry_module_included": "sim/scbot_telemetry.py" in names_in_zip,
     }
 
 

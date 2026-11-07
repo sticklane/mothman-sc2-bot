@@ -1,17 +1,26 @@
 {
   "opponents": {
     "local_opponent": {
-      "games_played": 1,
+      "schema_version": "2.0",
+      "games_played": 2,
       "wins": 0,
       "losses": 0,
-      "ties": 1,
+      "ties": 2,
       "last_result": "Tie",
-      "last_inferred_opponent_depth": 0,
-      "last_active_depth": 1,
+      "last_inferred_opponent_depth": 1,
+      "last_active_depth": 2,
       "last_accuracy_pct": 67,
-      "last_toolbox_weight_pct": 10,
+      "last_toolbox_weight_pct": 12,
+      "observed_enemy_bases": 1,
+      "avg_enemy_bases": 1.0,
+      "macro_profile": "standard_macro",
       "saw_early_rush": false,
       "saw_air_tech": false,
+      "saw_cloak_or_burrow": false,
+      "saw_greedy_macro": false,
+      "observed_enemy_upgrades": [],
+      "implied_enemy_tech_buildings": [],
+      "last_mirror_macro_verdict": "macro_parity_pressure",
       "last_posture": "Macro12Hatch",
       "last_bottlenecks": [
         "healthy_macro"

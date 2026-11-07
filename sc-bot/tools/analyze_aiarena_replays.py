@@ -246,6 +246,47 @@ def analyze_replay(rep_path: str) -> Dict[str, Any]:
     if not upgrades[our_pid]:
         findings.append("ZERO_UPGRADES_COMPLETED: Completed 0 combat/tech upgrades during match.")
 
+    # Extract Schema 2.0 structured telemetry summary if present in match_log.zip
+    schema2_summary: Dict[str, Any] = {}
+    for ev in log_info["telemetry_events"]:
+        if ev.get("event") in ("PERIODIC_SNAPSHOT", "MATCH_END_SUMMARY"):
+            schema2_summary.update(
+                {
+                    k: ev[k]
+                    for k in (
+                        "schema_version",
+                        "guns_vs_butter_regime",
+                        "target_resource_ratio",
+                        "worker_prod_utilization_pct",
+                        "unit_prod_utilization_pct",
+                        "observed_enemy_upgrades",
+                        "observed_enemy_spells",
+                        "implied_enemy_tech_buildings",
+                        "active_implied_enemy_tech_buildings",
+                        "crippled_enemy_tech_buildings",
+                        "inferred_enemy_active_research",
+                        "stargate_preview_units",
+                        "confirmed_enemy_hallucinations",
+                        "enemy_committed_branch",
+                        "enemy_excluded_branches",
+                        "enemy_bluff_suspected",
+                        "our_lost_minerals",
+                        "our_lost_gas",
+                        "enemy_lost_minerals",
+                        "enemy_lost_gas",
+                        "estimated_enemy_workers",
+                        "estimated_apm",
+                        "estimated_epm",
+                        "estimated_spm",
+                        "deception_spells_cast",
+                        "protective_auras_cast",
+                        "presplit_concave_maneuvers",
+                        "bottlenecks",
+                    )
+                    if k in ev
+                }
+            )
+
     print("=" * 98)
     print(
         f"MATCH {match_id_str} | Map: {map_name} | "
@@ -255,6 +296,8 @@ def analyze_replay(rep_path: str) -> Dict[str, Any]:
     print(f"  Match Log Tags: {log_info['tags']} | Telemetry Events: {len(log_info['telemetry_events'])} | Stderr Lines: {len(log_info['stderr_lines'])}")
     print(f"  Our TownHalls after 0s: {townhall_timings[our_pid]} | Opponent: {townhall_timings[opp_pid]}")
     print(f"  Our Upgrades: {upgrades[our_pid]} | Opponent: {upgrades[opp_pid]}")
+    if schema2_summary:
+        print(f"  Schema 2.0 Telemetry Summary: {schema2_summary}")
     print(f"  Forensic Root-Cause Findings:")
     for f_str in findings:
         print(f"    - {f_str}")
@@ -265,7 +308,7 @@ def analyze_replay(rep_path: str) -> Dict[str, Any]:
         d1 = {u: c for (mm, u), c in deaths_by_min[our_pid].items() if mm == m}
         print(
             f"    Min {m:2d} | Us: W={s1.get('workers',0):2d} Sup={s1.get('food_used',0):3d}/{s1.get('food_made',0):3d} "
-            f"Bank={s1.get('min_cur',0):4d}M/{s1.get('gas_cur',0):4d}G Rate={s1.get('min_rate',0):4d}M "
+            f"Bank={s1.get('min_cur',0):4d}M/{s1.get('gas_cur',0):4d} Rate={s1.get('min_rate',0):4d}M "
             f"Army={s1.get('army_min',0)+s1.get('army_gas',0):5d} Lost={s1.get('lost_min',0)+s1.get('lost_gas',0):5d} "
             f"|| Opp: W={s2.get('workers',0):3d} Sup={s2.get('food_used',0):3d}/{s2.get('food_made',0):3d} "
             f"Rate={s2.get('min_rate',0):4d}M Army={s2.get('army_min',0)+s2.get('army_gas',0):5d} | OurDeaths={d1}"
@@ -286,6 +329,7 @@ def analyze_replay(rep_path: str) -> Dict[str, Any]:
         "supply_blocked_snapshots": supply_blocked_steps[our_pid],
         "tags": log_info["tags"],
         "telemetry_events": log_info["telemetry_events"],
+        "schema2_summary": schema2_summary,
         "findings": findings,
     }
 

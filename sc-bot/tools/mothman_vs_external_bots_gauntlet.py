@@ -284,6 +284,34 @@ def install_legacy_sc2_shims() -> None:
     sys.modules["keras"].models = sys.modules["keras.models"]
     sys.modules["benchmarks"].benchmark = sys.modules["benchmarks.benchmark"]
 
+    if "sc2.helpers" not in sys.modules:
+        helpers_mod = types.ModuleType("sc2.helpers")
+
+        class ControlGroup(set):
+            def __init__(self, units=()):
+                super().__init__(u.tag if hasattr(u, "tag") else u for u in units)
+
+            def select_units(self, units):
+                return units.filter(lambda u: u.tag in self)
+
+            def add_unit(self, u):
+                self.add(u.tag if hasattr(u, "tag") else u)
+
+            def add_units(self, units):
+                for u in units:
+                    self.add_unit(u)
+
+            def remove_unit(self, u):
+                self.discard(u.tag if hasattr(u, "tag") else u)
+
+            @property
+            def amount(self) -> int:
+                return len(self)
+
+        helpers_mod.ControlGroup = ControlGroup
+        sys.modules["sc2.helpers"] = helpers_mod
+        sc2.helpers = helpers_mod
+
 
 def make_legacy_bot_mixin():
     install_legacy_sc2_shims()
@@ -639,7 +667,394 @@ def build_external_opponent_bot(bot_key: str):
         )
         return cls()
 
+    if bot_key == "AtlasStyleMacroZergBot":
+        return make_atlas_style_macro_zerg_bot()
+
+    if bot_key == "WarpGateBot":
+        cls = load_class_from_file(examples_dir / "protoss" / "warpgate_push.py", "WarpGateBot", use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "BCRushBot":
+        cls = load_class_from_file(examples_dir / "terran" / "onebase_battlecruiser.py", "BCRushBot", use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "RampWallBot":
+        cls = load_class_from_file(examples_dir / "terran" / "ramp_wall.py", "RampWallBot", use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "BanesBanesBanes":
+        cls = load_class_from_file(examples_dir / "zerg" / "banes_banes_banes.py", "BanesBanesBanes", use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "BroodlordBot":
+        cls = load_class_from_file(examples_dir / "zerg" / "onebase_broodlord.py", "BroodlordBot", use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "ZergRushBot":
+        cls = load_class_from_file(examples_dir / "zerg" / "zerg_rush.py", "ZergRushBot", use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "ExpandEverywhere":
+        cls = load_class_from_file(examples_dir / "zerg" / "expand_everywhere.py", "ExpandEverywhere", use_legacy_mixin=False)
+        return cls()
+
+    ted_dir = ROOT_DIR / "external_bots" / "TedChun3-sc2-ai-bot"
+    if bot_key == "TedChunProtossBot":
+        cls = load_class_from_file(ted_dir / "bot.py", "ProtossBot", extra_sys_paths=[ted_dir], use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "TedChunTerranBot":
+        cls = load_class_from_file(ted_dir / "terran_bot.py", "TerranBot", extra_sys_paths=[ted_dir], use_legacy_mixin=False)
+        return cls()
+
+    if bot_key == "TedChunZergBot":
+        cls = load_class_from_file(ted_dir / "zerg_bot.py", "ZergBot", extra_sys_paths=[ted_dir], use_legacy_mixin=False)
+        return cls()
+
+    greedy_dir = ROOT_DIR / "external_bots" / "Greedy_bot"
+    if bot_key == "GreedyJackBot":
+        cls = load_class_from_file(greedy_dir / "jack_bot.py", "EarlyAggro", extra_sys_paths=[greedy_dir], use_legacy_mixin=True)
+        return cls()
+
+    cozy_dir = ROOT_DIR / "external_bots" / "CozyFlower-sc2-ai-agents" / "python-sc2"
+    if bot_key == "Nexus7":
+        cls = load_class_from_file(cozy_dir / "Nexus7.py", "Nexus7", extra_sys_paths=[cozy_dir], use_legacy_mixin=True)
+        return cls()
+
+    if bot_key == "DeckardBot":
+        cls = load_class_from_file(cozy_dir / "deckard.py", "DeckardBot", extra_sys_paths=[cozy_dir], use_legacy_mixin=True)
+        return cls()
+
+    if bot_key == "SN_10L":
+        cls = load_class_from_file(cozy_dir / "SN_10L.py", "SN_10L", extra_sys_paths=[cozy_dir], use_legacy_mixin=True)
+        return cls()
+
+    if bot_key == "Model2E":
+        cls = load_class_from_file(cozy_dir / "Model2E.py", "Model2E", extra_sys_paths=[cozy_dir], use_legacy_mixin=True)
+        return cls()
+
+    rock_dir = ROOT_DIR / "external_bots" / "RockBot"
+    if bot_key == "RockBot":
+        cls = load_class_from_file(rock_dir / "rockBot.py", "rockBot", extra_sys_paths=[rock_dir], use_legacy_mixin=True)
+        return cls()
+
     raise ValueError(f"Unknown external bot key: {bot_key}")
+
+
+def make_atlas_style_macro_zerg_bot():
+    """
+    Constructs `AtlasStyleMacroZergBot`, modeled directly on `Atlas`'s forensic
+    replay timings from AI Arena matches `5105059`–`5105066`:
+      - Natural Hatchery at ~41s, 3rd Hatchery at ~94s, expanding to 6–9 bases
+        by 260s–465s (`opp_expansions` in `forensic_summary.json`).
+      - 75–81 active Drones, 7–8 Extractors, 7–8 Queens injecting + spreading creep,
+        2–3 Spore Crawlers.
+      - Triple Evolution Chamber (`+1/+2` Melee, `+1/+2` Carapace, `+1` Missile),
+        `Metabolic Boost` (~217s), `Burrow`, `Lair` -> `HydraliskDen` (`Grooved Spines`
+        + `Muscular Augments`) + `Spire` (`Flyer Attacks +1`) + `InfestationPit` ->
+        `Hive` -> `UltraliskCavern`.
+      - Burrow expansion-blocking Zerglings at enemy natural/3rd/4th bases +
+        tactical burrow regeneration (`health_percentage < 0.35`) + relentless
+        multi-base Speedling/Hydralisk/Mutalisk/Ultralisk waves.
+    """
+    from sc2.bot_ai import BotAI
+    from sc2.ids.ability_id import AbilityId
+    from sc2.ids.unit_typeid import UnitTypeId
+    from sc2.ids.upgrade_id import UpgradeId
+
+    class AtlasStyleMacroZergBot(BotAI):
+        def __init__(self):
+            super().__init__()
+            self._expansion_blockers_assigned: Dict[int, Any] = {}
+
+        async def on_step(self, iteration: int):
+            sec = self.time
+            await self.distribute_workers()
+
+            # 1. Supply (Overlords) with generous buffer for multi-hatchery larva surges
+            if (
+                self.supply_left < (6 if sec < 150 else 14)
+                and self.supply_cap < 200
+                and self.already_pending(UnitTypeId.OVERLORD) < (1 if sec < 150 else 3)
+                and self.larva
+                and self.can_afford(UnitTypeId.OVERLORD)
+            ):
+                self.larva.random.train(UnitTypeId.OVERLORD)
+
+            # 2. Exact Atlas Expansion Schedule:
+            #    - 2nd base (natural) at ~41s (or >=16 supply)
+            #    - 3rd base at ~92s (before Lair)
+            #    - 4th..9th bases at 240s, 290s, 340s, 375s, 410s, 450s (or when minerals > 500)
+            th_total = self.townhalls.amount + self.already_pending(UnitTypeId.HATCHERY)
+            target_bases = 1
+            if sec >= 38 or self.supply_used >= 16:
+                target_bases = 2
+            if sec >= 88 or (th_total >= 2 and self.workers.amount >= 24):
+                target_bases = 3
+            if sec >= 230 or (th_total >= 3 and self.workers.amount >= 44):
+                target_bases = 4
+            if sec >= 280 or (th_total >= 4 and self.workers.amount >= 56):
+                target_bases = 5
+            if sec >= 330 or (th_total >= 5 and self.workers.amount >= 66):
+                target_bases = 6
+            if sec >= 365:
+                target_bases = 7
+            if sec >= 400:
+                target_bases = 8
+            if sec >= 445:
+                target_bases = 9
+
+            if th_total < target_bases and self.already_pending(UnitTypeId.HATCHERY) == 0:
+                if self.can_afford(UnitTypeId.HATCHERY):
+                    await self.expand_now()
+            elif self.minerals >= 750 and th_total < 9 and self.already_pending(UnitTypeId.HATCHERY) == 0:
+                await self.expand_now()
+
+            # 3. Spawning Pool & Extractors (up to 7-8 Extractors across bases)
+            pool_total = self.structures(UnitTypeId.SPAWNINGPOOL).amount + self.already_pending(UnitTypeId.SPAWNINGPOOL)
+            if th_total >= 2 and pool_total == 0 and self.can_afford(UnitTypeId.SPAWNINGPOOL):
+                await self.build(UnitTypeId.SPAWNINGPOOL, near=self.townhalls.first.position.towards(self.game_info.map_center, 5))
+
+            gas_total = self.gas_buildings.amount + self.already_pending(UnitTypeId.EXTRACTOR)
+            desired_gas = 1 if sec < 115 else (2 if th_total < 3 else min(8, th_total + 1))
+            if pool_total >= 1 and gas_total < desired_gas and self.can_afford(UnitTypeId.EXTRACTOR) and self.workers:
+                for th in self.townhalls.ready:
+                    vgs = self.vespene_geyser.closer_than(10.0, th)
+                    for vg in vgs:
+                        if not self.gas_buildings.closer_than(1.0, vg):
+                            w = self.select_build_worker(vg.position)
+                            if w:
+                                w.build_gas(vg)
+                                break
+
+            # 4. Queens (up to 8) + Larva Inject + Creep Spread
+            if self.structures(UnitTypeId.SPAWNINGPOOL).ready:
+                queen_total = self.units(UnitTypeId.QUEEN).amount + self.already_pending(UnitTypeId.QUEEN)
+                if queen_total < min(8, self.townhalls.ready.amount + 2) and self.can_afford(UnitTypeId.QUEEN):
+                    for th in self.townhalls.ready.idle:
+                        th.train(UnitTypeId.QUEEN)
+                        break
+
+            for q in self.units(UnitTypeId.QUEEN):
+                if q.energy >= 25 and self.townhalls.ready:
+                    th = self.townhalls.ready.closest_to(q)
+                    if not th.has_buff(
+                        getattr(__import__("sc2.ids.buff_id", fromlist=["BuffId"]).BuffId, "QUEENSPAWNLARVATIMER", None)
+                    ):
+                        q(AbilityId.EFFECT_INJECTLARVA, th)
+
+            # 5. Tech & Upgrades: Metabolic Boost, Burrow, Lair, 3x Evo Chambers, Hydra Den, Spire, Infestation Pit, Hive, Ultra Cavern
+            for pool in self.structures(UnitTypeId.SPAWNINGPOOL).ready.idle:
+                if self.already_pending_upgrade(UpgradeId.ZERGLINGMOVEMENTSPEED) == 0 and self.can_afford(UpgradeId.ZERGLINGMOVEMENTSPEED):
+                    pool.research(UpgradeId.ZERGLINGMOVEMENTSPEED)
+                elif (
+                    self.already_pending_upgrade(UpgradeId.ZERGLINGATTACKSPEED) == 0
+                    and self.structures(UnitTypeId.HIVE).ready
+                    and self.can_afford(UpgradeId.ZERGLINGATTACKSPEED)
+                ):
+                    pool.research(UpgradeId.ZERGLINGATTACKSPEED)
+
+            if (
+                self.structures(UnitTypeId.SPAWNINGPOOL).ready
+                and self.already_pending_upgrade(UpgradeId.BURROW) == 0
+                and self.can_afford(UpgradeId.BURROW)
+                and self.townhalls.ready.idle
+            ):
+                self.townhalls.ready.idle.first.research(UpgradeId.BURROW)
+
+            lair_or_hive = (
+                self.structures(UnitTypeId.LAIR).amount
+                + self.structures(UnitTypeId.HIVE).amount
+                + self.already_pending(UnitTypeId.LAIR)
+                + self.already_pending(UnitTypeId.HIVE)
+            )
+            if self.structures(UnitTypeId.SPAWNINGPOOL).ready and lair_or_hive == 0 and sec >= 135:
+                if self.can_afford(UnitTypeId.LAIR) and self.townhalls(UnitTypeId.HATCHERY).ready.idle:
+                    self.townhalls(UnitTypeId.HATCHERY).ready.idle.first.build(UnitTypeId.LAIR)
+
+            # 3x Evolution Chambers (Atlas signature)
+            evo_total = self.structures(UnitTypeId.EVOLUTIONCHAMBER).amount + self.already_pending(UnitTypeId.EVOLUTIONCHAMBER)
+            if sec >= 165 and evo_total < 3 and self.can_afford(UnitTypeId.EVOLUTIONCHAMBER) and self.townhalls.ready:
+                await self.build(
+                    UnitTypeId.EVOLUTIONCHAMBER,
+                    near=self.townhalls.first.position.towards(self.game_info.map_center, 6),
+                )
+
+            for evo in self.structures(UnitTypeId.EVOLUTIONCHAMBER).ready.idle:
+                for upg in (
+                    UpgradeId.ZERGMELEEWEAPONSLEVEL1,
+                    UpgradeId.ZERGGROUNDARMORSLEVEL1,
+                    UpgradeId.ZERGMISSILEWEAPONSLEVEL1,
+                    UpgradeId.ZERGMELEEWEAPONSLEVEL2,
+                    UpgradeId.ZERGGROUNDARMORSLEVEL2,
+                    UpgradeId.ZERGMISSILEWEAPONSLEVEL2,
+                ):
+                    if self.already_pending_upgrade(upg) == 0 and self.can_afford(upg):
+                        evo.research(upg)
+                        break
+
+            # Spore Crawlers (2-3)
+            spore_total = self.structures(UnitTypeId.SPORECRAWLER).amount + self.already_pending(UnitTypeId.SPORECRAWLER)
+            if sec >= 210 and spore_total < min(3, self.townhalls.ready.amount) and self.can_afford(UnitTypeId.SPORECRAWLER):
+                th = self.townhalls.ready.random
+                await self.build(UnitTypeId.SPORECRAWLER, near=th.position.towards(self.game_info.map_center, 4))
+
+            if self.structures(UnitTypeId.LAIR).ready or self.structures(UnitTypeId.HIVE).ready:
+                if (
+                    self.structures(UnitTypeId.HYDRALISKDEN).amount + self.already_pending(UnitTypeId.HYDRALISKDEN) == 0
+                    and self.can_afford(UnitTypeId.HYDRALISKDEN)
+                ):
+                    await self.build(UnitTypeId.HYDRALISKDEN, near=self.townhalls.first.position.towards(self.game_info.map_center, 7))
+                if (
+                    sec >= 240
+                    and self.structures(UnitTypeId.SPIRE).amount + self.already_pending(UnitTypeId.SPIRE) == 0
+                    and self.can_afford(UnitTypeId.SPIRE)
+                ):
+                    await self.build(UnitTypeId.SPIRE, near=self.townhalls.first.position.towards(self.game_info.map_center, 8))
+                if (
+                    sec >= 290
+                    and self.structures(UnitTypeId.INFESTATIONPIT).amount + self.already_pending(UnitTypeId.INFESTATIONPIT) == 0
+                    and self.can_afford(UnitTypeId.INFESTATIONPIT)
+                ):
+                    await self.build(
+                        UnitTypeId.INFESTATIONPIT, near=self.townhalls.first.position.towards(self.game_info.map_center, 8)
+                    )
+
+            for hden in self.structures(UnitTypeId.HYDRALISKDEN).ready.idle:
+                for upg in (UpgradeId.EVOLVEGROOVEDSPINES, UpgradeId.EVOLVEMUSCULARAUGMENTS):
+                    if self.already_pending_upgrade(upg) == 0 and self.can_afford(upg):
+                        hden.research(upg)
+                        break
+
+            for spire in self.structures(UnitTypeId.SPIRE).ready.idle:
+                if self.already_pending_upgrade(UpgradeId.ZERGFLYERWEAPONSLEVEL1) == 0 and self.can_afford(UpgradeId.ZERGFLYERWEAPONSLEVEL1):
+                    spire.research(UpgradeId.ZERGFLYERWEAPONSLEVEL1)
+
+            if (
+                self.structures(UnitTypeId.INFESTATIONPIT).ready
+                and self.structures(UnitTypeId.HIVE).amount + self.already_pending(UnitTypeId.HIVE) == 0
+                and self.structures(UnitTypeId.LAIR).ready.idle
+                and self.can_afford(UnitTypeId.HIVE)
+            ):
+                self.structures(UnitTypeId.LAIR).ready.idle.first.build(UnitTypeId.HIVE)
+
+            if (
+                self.structures(UnitTypeId.HIVE).ready
+                and self.structures(UnitTypeId.ULTRALISKCAVERN).amount + self.already_pending(UnitTypeId.ULTRALISKCAVERN) == 0
+                and self.can_afford(UnitTypeId.ULTRALISKCAVERN)
+            ):
+                await self.build(
+                    UnitTypeId.ULTRALISKCAVERN, near=self.townhalls.first.position.towards(self.game_info.map_center, 8)
+                )
+
+            # 6. Greedy 76-Drone Economy vs Mass Speedling/Hydra/Muta/Ultra Production
+            drone_count = self.workers.amount + self.already_pending(UnitTypeId.DRONE)
+            desired_drones = min(78, self.townhalls.amount * 16 + self.gas_buildings.amount * 3)
+            enemies_near_bases = any(
+                self.enemy_units.closer_than(18.0, th.position).amount >= 4 for th in self.townhalls
+            )
+
+            for larva in self.larva:
+                if self.supply_left <= 0:
+                    break
+                # Early safety lings at Spawning Pool completion
+                if (
+                    self.structures(UnitTypeId.SPAWNINGPOOL).ready
+                    and self.units(UnitTypeId.ZERGLING).amount + self.already_pending(UnitTypeId.ZERGLING) * 2 < 8
+                    and self.can_afford(UnitTypeId.ZERGLING)
+                ):
+                    larva.train(UnitTypeId.ZERGLING)
+                    continue
+                # Greedily drone to 76-78 unless under immediate attack
+                if (
+                    drone_count < desired_drones
+                    and not enemies_near_bases
+                    and (sec < 210 or self.units(UnitTypeId.ZERGLING).amount >= 16 or iteration % 2 == 0)
+                    and self.can_afford(UnitTypeId.DRONE)
+                ):
+                    larva.train(UnitTypeId.DRONE)
+                    drone_count += 1
+                    continue
+                # Combat unit mix matching Atlas replays: Ultralisks (1-3), Mutalisks (7-10), Hydralisks (12-19), and 250+ Speedlings
+                if (
+                    self.structures(UnitTypeId.ULTRALISKCAVERN).ready
+                    and self.units(UnitTypeId.ULTRALISK).amount < 3
+                    and self.can_afford(UnitTypeId.ULTRALISK)
+                ):
+                    larva.train(UnitTypeId.ULTRALISK)
+                elif (
+                    self.structures(UnitTypeId.SPIRE).ready
+                    and self.units(UnitTypeId.MUTALISK).amount < 10
+                    and self.can_afford(UnitTypeId.MUTALISK)
+                ):
+                    larva.train(UnitTypeId.MUTALISK)
+                elif (
+                    self.structures(UnitTypeId.HYDRALISKDEN).ready
+                    and self.units(UnitTypeId.HYDRALISK).amount < 18
+                    and self.can_afford(UnitTypeId.HYDRALISK)
+                ):
+                    larva.train(UnitTypeId.HYDRALISK)
+                elif self.structures(UnitTypeId.SPAWNINGPOOL).ready and self.can_afford(UnitTypeId.ZERGLING):
+                    larva.train(UnitTypeId.ZERGLING)
+
+            # 7. Burrow Expansion-Blocking & Tactical Burrow Regeneration
+            has_burrow = UpgradeId.BURROW in self.state.upgrades
+            if has_burrow and self.expansion_locations_list and self.enemy_start_locations:
+                estart = self.enemy_start_locations[0]
+                enemy_expos = sorted(
+                    [p for p in self.expansion_locations_list if p.distance_to(estart) > 8.0],
+                    key=lambda p: p.distance_to(estart),
+                )[:3]
+                lings = self.units(UnitTypeId.ZERGLING)
+                for idx, expo_pos in enumerate(enemy_expos):
+                    tag = self._expansion_blockers_assigned.get(idx)
+                    alive_blocker = self.units.find_by_tag(tag) if tag else None
+                    if alive_blocker is None and lings.amount >= 6:
+                        cand = lings.closest_to(expo_pos)
+                        self._expansion_blockers_assigned[idx] = cand.tag
+                        alive_blocker = cand
+                    if alive_blocker is not None and alive_blocker.type_id == UnitTypeId.ZERGLING:
+                        if alive_blocker.distance_to(expo_pos) > 2.0:
+                            alive_blocker.move(expo_pos)
+                        else:
+                            alive_blocker(AbilityId.BURROWDOWN_ZERGLING)
+
+                # Tactical burrow for low-HP lings/hydras/drones and unburrow when healed
+                for u in self.units.of_type({UnitTypeId.ZERGLING, UnitTypeId.HYDRALISK, UnitTypeId.DRONE}):
+                    if u.tag in self._expansion_blockers_assigned.values():
+                        continue
+                    if u.health_percentage < 0.35 and self.enemy_units.closer_than(9.0, u):
+                        u(AbilityId.BURROWDOWN)
+                for bu in self.units.of_type(
+                    {UnitTypeId.ZERGLINGBURROWED, UnitTypeId.HYDRALISKBURROWED, UnitTypeId.DRONEBURROWED}
+                ):
+                    if bu.tag in self._expansion_blockers_assigned.values():
+                        continue
+                    if bu.health_percentage > 0.75 or not self.enemy_units.closer_than(9.0, bu):
+                        bu(AbilityId.BURROWUP)
+
+            # 8. Multi-Prong Army Control (Defend Bases + Speedling Runbys + Main Hydra/Muta/Ling Swarm)
+            blocker_tags = set(self._expansion_blockers_assigned.values())
+            combat_units = self.units.of_type(
+                {UnitTypeId.ZERGLING, UnitTypeId.HYDRALISK, UnitTypeId.MUTALISK, UnitTypeId.ULTRALISK}
+            ).filter(lambda u: u.tag not in blocker_tags)
+
+            if enemies_near_bases and self.enemy_units:
+                for u in combat_units:
+                    u.attack(self.enemy_units.closest_to(u).position)
+            elif combat_units.amount >= 28 or sec >= 230:
+                target = (
+                    self.enemy_structures.random.position
+                    if self.enemy_structures
+                    else self.enemy_start_locations[0]
+                )
+                for u in combat_units:
+                    if self.enemy_units.closer_than(12.0, u):
+                        u.attack(self.enemy_units.closest_to(u).position)
+                    else:
+                        u.attack(target)
+
+    return AtlasStyleMacroZergBot()
 
 
 GAUNTLET_MATCHES: List[Dict[str, Any]] = [
@@ -846,6 +1261,222 @@ GAUNTLET_MATCHES: List[Dict[str, Any]] = [
         "opponent_name": "CreepyBot (BurnySc2/burny-bots-python-sc2, 2,154 LOC)",
         "opponent_race": "Zerg",
         "archetype": "PvZ vs Multi-Base Creep-Highway Queen/Ling/Roach/Hydra Swarm",
+    },
+    {
+        "match_id": 18,
+        "mothman_variant": "Mothman-T",
+        "mothman_bot_path": "bots/Mothman-T.rkt",
+        "mothman_race": "Terran",
+        "posture": None,
+        "map_name": "AutomatonLE",
+        "opponent_key": "AtlasStyleMacroZergBot",
+        "opponent_name": "AtlasStyleMacroZergBot (Atlas 5105059-5105066 8-Base 78-Drone Burrow Zerg)",
+        "opponent_race": "Zerg",
+        "archetype": "TvZ vs Atlas-Grade 41s Nat / 94s 3rd / 8-Base 78-Drone Speedling/Hydra/Muta + Burrow",
+    },
+    {
+        "match_id": 19,
+        "mothman_variant": "Mothman-P",
+        "mothman_bot_path": "bots/Mothman-P.rkt",
+        "mothman_race": "Protoss",
+        "posture": None,
+        "map_name": "CyberForestLE",
+        "opponent_key": "AtlasStyleMacroZergBot",
+        "opponent_name": "AtlasStyleMacroZergBot (Atlas 5105059-5105066 8-Base 78-Drone Burrow Zerg)",
+        "opponent_race": "Zerg",
+        "archetype": "PvZ vs Atlas-Grade 41s Nat / 94s 3rd / 8-Base 78-Drone Speedling/Hydra/Muta + Burrow",
+    },
+    {
+        "match_id": 20,
+        "mothman_variant": "Mothman-Z",
+        "mothman_bot_path": "bots/Mothman-Z.rkt",
+        "mothman_race": "Zerg",
+        "posture": None,
+        "map_name": "KairosJunctionLE",
+        "opponent_key": "AtlasStyleMacroZergBot",
+        "opponent_name": "AtlasStyleMacroZergBot (Atlas 5105059-5105066 8-Base 78-Drone Burrow Zerg)",
+        "opponent_race": "Zerg",
+        "archetype": "ZvZ vs Atlas-Grade 41s Nat / 94s 3rd / 8-Base 78-Drone Speedling/Hydra/Muta + Burrow",
+    },
+    {
+        "match_id": 21,
+        "mothman_variant": "Mothman-R",
+        "mothman_bot_path": "bots/Mothman-R.rkt",
+        "mothman_race": "Random",
+        "posture": None,
+        "map_name": "KingsCoveLE",
+        "opponent_key": "AtlasStyleMacroZergBot",
+        "opponent_name": "AtlasStyleMacroZergBot (Atlas 5105059-5105066 8-Base 78-Drone Burrow Zerg)",
+        "opponent_race": "Zerg",
+        "archetype": "RvZ vs Atlas-Grade 41s Nat / 94s 3rd / 8-Base 78-Drone Speedling/Hydra/Muta + Burrow",
+    },
+    {
+        "match_id": 22,
+        "mothman_variant": "Mothman-Z",
+        "mothman_bot_path": "bots/Mothman-Z.rkt",
+        "mothman_race": "Zerg",
+        "posture": None,
+        "map_name": "PortAleksanderLE",
+        "opponent_key": "WarpGateBot",
+        "opponent_name": "WarpGateBot (BurnySc2/python-sc2)",
+        "opponent_race": "Protoss",
+        "archetype": "Protoss 4-WarpGate Proxy Pylon Stalker/Zealot All-In",
+    },
+    {
+        "match_id": 23,
+        "mothman_variant": "Mothman-T",
+        "mothman_bot_path": "bots/Mothman-T.rkt",
+        "mothman_race": "Terran",
+        "posture": None,
+        "map_name": "BlueshiftLE",
+        "opponent_key": "BCRushBot",
+        "opponent_name": "BCRushBot (BurnySc2/python-sc2)",
+        "opponent_race": "Terran",
+        "archetype": "Terran Fusion Core Battlecruiser Tactical Jump Rush",
+    },
+    {
+        "match_id": 24,
+        "mothman_variant": "Mothman-P",
+        "mothman_bot_path": "bots/Mothman-P.rkt",
+        "mothman_race": "Protoss",
+        "posture": None,
+        "map_name": "AbyssalReefLE",
+        "opponent_key": "RampWallBot",
+        "opponent_name": "RampWallBot (BurnySc2/python-sc2)",
+        "opponent_race": "Terran",
+        "archetype": "Terran Ramp Wall-Off & Barracks Marine Push",
+    },
+    {
+        "match_id": 25,
+        "mothman_variant": "Mothman-R",
+        "mothman_bot_path": "bots/Mothman-R.rkt",
+        "mothman_race": "Random",
+        "posture": None,
+        "map_name": "BelShirVestigeLE",
+        "opponent_key": "BanesBanesBanes",
+        "opponent_name": "BanesBanesBanes (BurnySc2/python-sc2)",
+        "opponent_race": "Zerg",
+        "archetype": "Zerg Speedling/Baneling Bust All-In",
+    },
+    {
+        "match_id": 26,
+        "mothman_variant": "Mothman-Z",
+        "mothman_bot_path": "bots/Mothman-Z.rkt",
+        "mothman_race": "Zerg",
+        "posture": None,
+        "map_name": "NewkirkPrecinctTE",
+        "opponent_key": "BroodlordBot",
+        "opponent_name": "BroodlordBot (BurnySc2/python-sc2)",
+        "opponent_race": "Zerg",
+        "archetype": "Zerg Hive Greater Spire Broodlord Tech Rush",
+    },
+    {
+        "match_id": 27,
+        "mothman_variant": "Mothman-T",
+        "mothman_bot_path": "bots/Mothman-T.rkt",
+        "mothman_race": "Terran",
+        "posture": None,
+        "map_name": "ProximaStationLE",
+        "opponent_key": "ZergRushBot",
+        "opponent_name": "ZergRushBot (BurnySc2/python-sc2)",
+        "opponent_race": "Zerg",
+        "archetype": "Zerg Early Pool Speedling & Queen Rush",
+    },
+    {
+        "match_id": 28,
+        "mothman_variant": "Mothman-P",
+        "mothman_bot_path": "bots/Mothman-P.rkt",
+        "mothman_race": "Protoss",
+        "posture": None,
+        "map_name": "AutomatonLE",
+        "opponent_key": "ExpandEverywhere",
+        "opponent_name": "ExpandEverywhere (BurnySc2/python-sc2)",
+        "opponent_race": "Zerg",
+        "archetype": "Zerg Map-Wide Multi-Hatchery Macro Swarm",
+    },
+    {
+        "match_id": 29,
+        "mothman_variant": "Mothman-Z",
+        "mothman_bot_path": "bots/Mothman-Z.rkt",
+        "mothman_race": "Zerg",
+        "posture": None,
+        "map_name": "CyberForestLE",
+        "opponent_key": "TedChunProtossBot",
+        "opponent_name": "ProtossBot (TedChun3/sc2-ai-bot)",
+        "opponent_race": "Protoss",
+        "archetype": "Protoss Multi-Base Zealot/Stalker/Sentry/Immortal/Colossus Deathball",
+    },
+    {
+        "match_id": 30,
+        "mothman_variant": "Mothman-P",
+        "mothman_bot_path": "bots/Mothman-P.rkt",
+        "mothman_race": "Protoss",
+        "posture": None,
+        "map_name": "KairosJunctionLE",
+        "opponent_key": "TedChunTerranBot",
+        "opponent_name": "TerranBot (TedChun3/sc2-ai-bot)",
+        "opponent_race": "Terran",
+        "archetype": "Terran Reaper Opening into Marine/Marauder/Medivac/Siege Tank Bio",
+    },
+    {
+        "match_id": 31,
+        "mothman_variant": "Mothman-T",
+        "mothman_bot_path": "bots/Mothman-T.rkt",
+        "mothman_race": "Terran",
+        "posture": None,
+        "map_name": "KingsCoveLE",
+        "opponent_key": "TedChunZergBot",
+        "opponent_name": "ZergBot (TedChun3/sc2-ai-bot)",
+        "opponent_race": "Zerg",
+        "archetype": "Zerg Hatchery First into Zergling/Roach/Hydralisk Macro",
+    },
+    {
+        "match_id": 32,
+        "mothman_variant": "Mothman-R",
+        "mothman_bot_path": "bots/Mothman-R.rkt",
+        "mothman_race": "Random",
+        "posture": None,
+        "map_name": "PortAleksanderLE",
+        "opponent_key": "GreedyJackBot",
+        "opponent_name": "EarlyAggro (lladdy/Greedy_bot)",
+        "opponent_race": "Zerg",
+        "archetype": "Zerg Multi-Module Creep/Evo/Cavern/Expansion Macro Bot",
+    },
+    {
+        "match_id": 33,
+        "mothman_variant": "Mothman-Z",
+        "mothman_bot_path": "bots/Mothman-Z.rkt",
+        "mothman_race": "Zerg",
+        "posture": None,
+        "map_name": "BlueshiftLE",
+        "opponent_key": "DeckardBot",
+        "opponent_name": "DeckardBot (CozyFlower/sc2-ai-agents)",
+        "opponent_race": "Terran",
+        "archetype": "Terran Multi-Base Reaper/Bio/Siege Tank Macro Bot",
+    },
+    {
+        "match_id": 34,
+        "mothman_variant": "Mothman-T",
+        "mothman_bot_path": "bots/Mothman-T.rkt",
+        "mothman_race": "Terran",
+        "posture": None,
+        "map_name": "AbyssalReefLE",
+        "opponent_key": "SN_10L",
+        "opponent_name": "SN_10L (CozyFlower/sc2-ai-agents)",
+        "opponent_race": "Zerg",
+        "archetype": "Zerg Queen-Assigned Multi-Hatchery Macro Bot",
+    },
+    {
+        "match_id": 35,
+        "mothman_variant": "Mothman-P",
+        "mothman_bot_path": "bots/Mothman-P.rkt",
+        "mothman_race": "Protoss",
+        "posture": None,
+        "map_name": "BelShirVestigeLE",
+        "opponent_key": "RockBot",
+        "opponent_name": "RockBot (oxrock/RockBot_python_sc2_bot)",
+        "opponent_race": "Terran",
+        "archetype": "Terran Bio + Infantry Upgrades + Flying Barracks Macro Bot",
     },
 ]
 

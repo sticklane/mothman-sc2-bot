@@ -23,6 +23,7 @@
  step-layer2-economy!
  step-layer3-and-4-tactics!
  step-layer5-human-cortex!
+ step-pro-human-camera-and-apm-governor!
  step-live-bot-runtime!
  parse-frame-state-sexp
  runtime-step-sexp!)
@@ -436,6 +437,88 @@
           (emit! (list 'expand third-x third-y)))))
 
   ;; ---------------------------------------------------------------------------
+  ;; Coupled Macro Governor, Adaptive Build/Tech Planner & Guns-vs-Butter PPF
+  ;; ---------------------------------------------------------------------------
+  (define townhalls
+    (filter (lambda (b)
+              (memq (unit-type-sym b)
+                    '(hatchery lair hive nexus command-center orbital-command planetary-fortress)))
+            ally-bldgs))
+  (define active-bases (max 1 (length townhalls)))
+  (define depleting-bases
+    (hash-ref obs 'depleting-bases (if (hash-ref obs 'mined-out #f) 1 0)))
+  (define prod-facilities
+    (filter (lambda (b)
+              (memq (unit-type-sym b)
+                    '(hatchery lair hive gateway warpgate robotics-facility stargate
+                      barracks factory starport)))
+            ally-bldgs))
+  (define gas-bldgs
+    (filter (lambda (b) (memq (unit-type-sym b) '(extractor assimilator refinery)))
+            ally-bldgs))
+  (define mmstate (live-bot-runtime-mirror-mind rt))
+  (define mstate (live-bot-runtime-mastermind rt))
+  (define tech-obs
+    (or (mirror-mind-state-last-tech-observation mmstate)
+        (infer-enemy-implied-tech-and-upgrades enemy-units enemy-bldgs)))
+  (define macro-plan
+    (evaluate-coupled-macro-governor
+     #:race race
+     #:frame frame
+     #:minerals minerals
+     #:gas gas
+     #:supply-left supply-left
+     #:active-bases active-bases
+     #:depleting-bases depleting-bases
+     #:workers (length workers)
+     #:pending-workers pending-workers
+     #:production-facilities (max 1 (length prod-facilities))
+     #:busy-facilities (hash-ref obs 'busy-facilities 0)
+     #:busy-townhalls (hash-ref obs 'busy-townhalls 0)
+     #:under-crisis? under-early-cheese?
+     #:recommended-min-bases (mirror-mind-state-recommended-min-bases mmstate)))
+  (define target-workers (coupled-macro-plan-target-workers macro-plan))
+  (define tech-plan
+    (evaluate-adaptive-build-and-tech-plan
+     race
+     #:ally-buildings bldg-types
+     #:ally-units unit-types
+     #:researched-upgrades (hash-ref obs 'researched-upgrades '())
+     #:enemy-archetype (mastermind-state-enemy-archetype mstate)
+     #:mirror-predicted-unit (mirror-mind-state-predicted-enemy-unit mmstate)
+     #:mirror-macro-verdict (mirror-mind-state-mirror-macro-verdict mmstate)
+     #:requires-detection? (enemy-tech-observation-requires-detection? tech-obs)
+     #:requires-anti-air? (enemy-tech-observation-requires-anti-air? tech-obs)
+     #:enemy-upgrade-advantage (enemy-tech-observation-enemy-upgrade-advantage tech-obs)
+     #:minerals minerals
+     #:gas gas))
+  (define ppf
+    (evaluate-guns-vs-butter-ppf
+     #:race race
+     #:frame frame
+     #:minerals minerals
+     #:gas gas
+     #:supply-left supply-left
+     #:supply-cap supply-cap
+     #:workers total-workers
+     #:target-workers target-workers
+     #:active-bases active-bases
+     #:depleting-bases depleting-bases
+     #:active-geysers (length gas-bldgs)
+     #:current-gas-workers (hash-ref obs 'gas-workers (* 3 (length gas-bldgs)))
+     #:production-facilities (max 1 (length prod-facilities))
+     #:busy-facilities (hash-ref obs 'busy-facilities 0)
+     #:army-count (length (filter combat-unit-record? ally-units))
+     #:missing-synergy-count (length (adaptive-tech-plan-missing-synergy-reqs tech-plan))
+     #:under-crisis? under-early-cheese?
+     #:mirror-macro-verdict (mirror-mind-state-mirror-macro-verdict mmstate)
+     #:enemy-upgrade-advantage (enemy-tech-observation-enemy-upgrade-advantage tech-obs)
+     #:enemy-active-research-count (length (enemy-tech-observation-active-research-buildings tech-obs))
+     #:requires-detection? (enemy-tech-observation-requires-detection? tech-obs)
+     #:requires-anti-air? (enemy-tech-observation-requires-anti-air? tech-obs)))
+  (define gas-alloc (guns-vs-butter-ppf-recommended-gas-allocation ppf))
+
+  ;; ---------------------------------------------------------------------------
   ;; Worker Mineral-Walk Escape (Pro Mechanic #5) & Resource Harvesting
   ;; ---------------------------------------------------------------------------
   (for ([w (in-list workers)])
@@ -450,11 +533,13 @@
                enemy-close?)
       (emit! (list 'mineral-walk (hash-ref w 'id 10) base-x base-y))))
 
-  ;; Standard Gas & Mineral Harvesting
+  ;; Standard Gas & Mineral Harvesting (governed by Guns-vs-Butter Gas Allocation)
   (define gas-bldg
     (findf (lambda (b) (memq (unit-type-sym b) '(extractor assimilator refinery)))
            ally-bldgs))
-  (when (and gas-bldg (not (null? workers)))
+  (when (and gas-bldg
+             (not (null? workers))
+             (> (gas-worker-allocation-desired-gas-workers gas-alloc) 0))
     (emit! (list 'harvest-gas (hash-ref (car workers) 'id 10) (hash-ref gas-bldg 'id 103))))
   (when (not (null? workers))
     (define patch-id (hash-ref obs 'mineral-patch-id 504))
@@ -464,9 +549,12 @@
   (when (and (hash-ref obs 'enable-worker-harass #f) (not (null? workers)))
     (emit! (list 'worker-harass (hash-ref (last workers) 'id 10) enemy-x enemy-y)))
 
-  ;; Mined-out base detection (Scenario 3): auto-expand & transfer workers
-  (when (and (hash-ref obs 'mined-out #f) (not natural-blocked?) (not under-early-cheese?))
-    (emit! (list 'expand nat-x nat-y)))
+  ;; Mined-out / Depleting base detection (Scenario 3): auto-expand & transfer workers
+  (when (and (or (hash-ref obs 'mined-out #f) (> depleting-bases 0))
+             (not natural-blocked?)
+             (not under-early-cheese?))
+    (emit! (list 'expand (if (>= active-bases 2) third-x nat-x)
+                         (if (>= active-bases 2) third-y nat-y))))
 
   ;; ---------------------------------------------------------------------------
   ;; Zero-Supply-Block & Supply-At-Risk Preemption (Scenario 1)
@@ -658,7 +746,7 @@
           (emit! '(train baneling)))
         (emit! '(train zergling))])
 
-     (when (and (< total-workers 22) (>= minerals 50) (can-spend-supply? 1))
+     (when (and (< total-workers target-workers) (>= minerals 50) (can-spend-supply? 1))
        (emit! '(train drone)))]
 
     [(Protoss)
@@ -738,7 +826,7 @@
          [(memq 'gateway bldg-types)
           (emit! '(train zealot))]))
 
-     (when (and (< total-workers 22) (>= minerals 50) (can-spend-supply? 1))
+     (when (and (< total-workers target-workers) (>= minerals 50) (can-spend-supply? 1))
        (emit! '(train probe)))]
 
     [(Terran)
@@ -836,7 +924,7 @@
          [(memq 'barracks bldg-types)
           (emit! '(train marine))]))
 
-     (when (and (< total-workers 22) (>= minerals 50) (can-spend-supply? 1))
+     (when (and (< total-workers target-workers) (>= minerals 50) (can-spend-supply? 1))
        (emit! '(train scv)))])
 
   ;; ---------------------------------------------------------------------------
@@ -1022,9 +1110,177 @@
         [else
          (emit! (list 'attack-unit uid eid))])))
 
+  ;; ---------------------------------------------------------------------------
+  ;; Pro Mechanic #8: Burrowed Zergling Base-Blocker, Cheap Patrol Expansion
+  ;;                  Blocker, & Peripheral Economic Harassment Raider Squad
+  ;; ---------------------------------------------------------------------------
+  (define cheap-blockers
+    (filter (lambda (u) (memq (unit-type-sym u) '(zergling marine zealot reaper adept)))
+            combat-units))
+  (define mm-verdict
+    (mirror-mind-state-mirror-macro-verdict (live-bot-runtime-mirror-mind rt)))
+  (when (and (not (null? cheap-blockers))
+             (or (hash-ref obs 'enable-economic-disruption #f)
+                 (eq? mm-verdict 'punish-And-Deny-Greedy-Expand)
+                 (and (null? enemy-units) (>= (length cheap-blockers) 3))))
+    (define blocker (car cheap-blockers))
+    (define bid (hash-ref blocker 'id 110))
+    (define enemy-exp-x (hash-ref obs 'enemy-expand-x (- enemy-x 180)))
+    (define enemy-exp-y (hash-ref obs 'enemy-expand-y (- enemy-y 140)))
+    (if (eq? (unit-type-sym blocker) 'zergling)
+        (emit! (list 'burrow-block bid enemy-exp-x enemy-exp-y))
+        (emit! (list 'patrol-block-expansion bid enemy-exp-x enemy-exp-y)))
+    (when (>= (length cheap-blockers) 2)
+      (define raider-ids
+        (map (lambda (u) (hash-ref u 'id 111))
+             (take (cdr cheap-blockers) (min 3 (length (cdr cheap-blockers))))))
+      (emit! (list 'harass-workers raider-ids enemy-x enemy-y))))
+
   (when (and (null? enemy-units) (>= (length combat-units) 2))
     (for ([u (in-list (take combat-units 2))])
       (emit! (list 'attack-pos (hash-ref u 'id 110) nat-x nat-y))))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Pro Mechanic #9: Enemy Changeling Sniping & Active Deception/Scout Spells
+  ;;                  (Sentry Hallucination Phoenix/Archon + Overseer Changeling)
+  ;; ---------------------------------------------------------------------------
+  (define enemy-changelings
+    (filter (lambda (e)
+              (or (eq? (hash-ref e 'changeling? #f) #t)
+                  (memq (unit-type-sym e)
+                        '(changeling changeling-zealot changeling-marine
+                          changeling-marine-shield changeling-zergling
+                          changeling-zergling-wings))))
+            enemy-units))
+  (for ([ec (in-list enemy-changelings)])
+    (emit! (list 'snipe-enemy-changeling (hash-ref ec 'id 9099))))
+
+  (define ally-sentries
+    (filter (lambda (u) (eq? (unit-type-sym u) 'sentry)) ally-units))
+  (define ally-overseers
+    (filter (lambda (u) (eq? (unit-type-sym u) 'overseer)) ally-units))
+  (define ally-infestors
+    (filter (lambda (u) (eq? (unit-type-sym u) 'infestor)) ally-units))
+
+  (when (or (hash-ref obs 'enable-deception-and-buffs #f)
+            (not (null? ally-sentries))
+            (not (null? ally-overseers)))
+    (emit! '(cast-deception-and-scout-spells
+             sentry-hallucination-phoenix-scout
+             sentry-hallucination-archon-tank
+             overseer-spawn-changeling)))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Pro Mechanic #10: Protective Buff Aura (Guardian Shield / Microbial Shroud)
+  ;;                   + Inside-Aura Positioning with Anti-Splash Spreading,
+  ;;                   Pre-Split 3-Wing Squads, Concave Arc, & High-Ground Mastery
+  ;; ---------------------------------------------------------------------------
+  (define army-cx
+    (if (null? combat-units)
+        nat-x
+        (quotient (for/sum ([u (in-list combat-units)]) (hash-ref u 'x nat-x))
+                  (length combat-units))))
+  (define army-cy
+    (if (null? combat-units)
+        nat-y
+        (quotient (for/sum ([u (in-list combat-units)]) (hash-ref u 'y nat-y))
+                  (length combat-units))))
+  (define target-ex
+    (if (null? enemy-units)
+        enemy-x
+        (quotient (for/sum ([e (in-list enemy-units)]) (hash-ref e 'x enemy-x))
+                  (length enemy-units))))
+  (define target-ey
+    (if (null? enemy-units)
+        enemy-y
+        (quotient (for/sum ([e (in-list enemy-units)]) (hash-ref e 'y enemy-y))
+                  (length enemy-units))))
+
+  (when (or (hash-ref obs 'enable-deception-and-buffs #f)
+            (not (null? ally-sentries))
+            (not (null? ally-infestors))
+            (and (not (null? enemy-units)) (not (null? combat-units))))
+    (define use-shroud?
+      (or (not (null? ally-infestors))
+          (eq? (live-bot-runtime-actual-race rt) 'Zerg)))
+    (define aura-type (if use-shroud? 'microbial-shroud 'guardian-shield))
+    (define aura-radius (if use-shroud? 3.5 4.5))
+    (emit! (list 'cast-protective-buff-aura aura-type army-cx army-cy aura-radius))
+    (emit! (list 'position-in-buff-aura-with-splash-spread
+                 aura-type army-cx army-cy aura-radius 1.6 #t)))
+
+  ;; Pre-Split 3-Wing Formation & Concave Arc Formation
+  (when (or (not (null? enemy-units))
+            (hash-ref obs 'pre-split-engage #f)
+            (hash-ref obs 'form-concave #f))
+    (define dx (- target-ex army-cx))
+    (define dy (- target-ey army-cy))
+    (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+    (define nx (/ (- dy) d))
+    (define ny (/ dx d))
+    (define wing-spread 96.0)
+    (define mid-x (exact-round (+ army-cx (* 0.5 dx))))
+    (define mid-y (exact-round (+ army-cy (* 0.5 dy))))
+    (define left-x (exact-round (+ mid-x (* wing-spread nx))))
+    (define left-y (exact-round (+ mid-y (* wing-spread ny))))
+    (define right-x (exact-round (- mid-x (* wing-spread nx))))
+    (define right-y (exact-round (- mid-y (* wing-spread ny))))
+    (emit! (list 'pre-split-wings left-x left-y mid-x mid-y right-x right-y))
+    (emit! (list 'form-concave-arc target-ex target-ey 160 120)))
+
+  ;; High-Ground Terrain & Vision Mastery
+  (define our-z
+    (hash-ref obs 'our-terrain-z
+              (if (not (null? combat-units))
+                  (hash-ref (car combat-units) 'z 10)
+                  10)))
+  (define enemy-z
+    (hash-ref obs 'enemy-terrain-z
+              (if (not (null? enemy-units))
+                  (hash-ref (car enemy-units) 'z 10)
+                  10)))
+  (when (or (not (= our-z enemy-z))
+            (not (null? enemy-units))
+            (hash-ref obs 'high-ground-check #f))
+    (cond
+      [(> our-z enemy-z)
+       (emit! (list 'high-ground-tactics 'hold-high-ground-ramp-arc nat-x nat-y #f))]
+      [(> enemy-z our-z)
+       (emit! (list 'high-ground-tactics 'uphill-vision-spotter-and-concave target-ex target-ey #t))]
+      [else
+       (emit! (list 'high-ground-tactics 'contest-high-ground-control nat-x nat-y #f))]))
+
+  ;; Spatio-Temporal Enemy Army Reachability & Counter-Positioning / Backstab / Surround Maneuver
+  (define mm-rt (live-bot-runtime-mirror-mind rt))
+  (define reach-m
+    (evaluate-enemy-army-spatio-temporal-reachability
+     (hash-ref obs 'frame 0)
+     ally-units
+     enemy-units
+     (mirror-mind-state-last-tech-observation mm-rt)
+     (mirror-mind-state-last-shadow-ledger mm-rt)
+     #:our-base-x base-x #:our-base-y base-y
+     #:our-nat-x nat-x #:our-nat-y nat-y
+     #:enemy-exp-x (hash-ref obs 'enemy-expand-x 1450)
+     #:enemy-exp-y (hash-ref obs 'enemy-expand-y 1350)))
+  (set-mirror-mind-state-last-reachability-model! mm-rt reach-m)
+  (define sp-maneuver
+    (enemy-army-reachability-model-recommended-spatial-maneuver reach-m))
+  (define-values (sp-tx sp-ty)
+    (case sp-maneuver
+      [(backstab-undefended-enemy-expansion)
+       (values (hash-ref obs 'enemy-expand-x 1450)
+               (hash-ref obs 'enemy-expand-y 1350))]
+      [(surround-and-crush-isolated-enemy-cluster)
+       (values target-ex target-ey)]
+      [(pre-rotate-intercept-incoming-threat)
+       (values nat-x nat-y)]
+      [(safe-to-expand-enemy-pinned-far)
+       (values (hash-ref obs 'third-x 1280)
+               (hash-ref obs 'third-y 1280))]
+      [else
+       (values target-ex target-ey)]))
+  (emit! (list 'execute-spatial-maneuver sp-maneuver sp-tx sp-ty))
 
   (values (reverse actions) vanguard-count reserve-count))
 
@@ -1066,6 +1322,64 @@
   (values accepted dropped spell-throttled))
 
 ;; =============================================================================
+;; Layer 5b: Pro-Human Camera Saccade (60-90 SPM) & APM/EPM Discipline Governor
+;; =============================================================================
+
+(define PRO-CAMERA-SACCADE-ZONES
+  '(home-macro-base
+    natural-expansion
+    active-army-front
+    harass-or-blocker-zone))
+
+(define (step-pro-human-camera-and-apm-governor! rt [obs (hash)])
+  (define frame (hash-ref obs 'frame 0))
+  (define cortex (live-bot-runtime-cortex rt))
+  (define bmarks (human-cortex-camera-bookmarks cortex))
+  (define base-x (hash-ref obs 'base-x 700))
+  (define base-y (hash-ref obs 'base-y 760))
+  (define nat-x (hash-ref obs 'natural-x 1024))
+  (define nat-y (hash-ref obs 'natural-y 1120))
+  (define enemy-x (hash-ref obs 'enemy-x 1600))
+  (define enemy-y (hash-ref obs 'enemy-y 1600))
+  (define enemy-units (hash-ref obs 'enemy-units '()))
+
+  (define last-frame (hash-ref bmarks 'last-saccade-frame #f))
+  (define cur-idx (hash-ref bmarks 'saccade-zone-idx 0))
+  ;; Pro humans dwell ~16-22 frames (~0.75s = 60-90 SPM) per camera zone before saccading
+  (define next-idx
+    (cond
+      [(not last-frame) 0]
+      [(or (= frame last-frame) (>= (abs (- frame last-frame)) 16))
+       (modulo (add1 cur-idx) (length PRO-CAMERA-SACCADE-ZONES))]
+      [else cur-idx]))
+  (hash-set! bmarks 'last-saccade-frame frame)
+  (hash-set! bmarks 'saccade-zone-idx next-idx)
+
+  (define zone (list-ref PRO-CAMERA-SACCADE-ZONES next-idx))
+  (define-values (zx zy)
+    (case zone
+      [(home-macro-base)
+       (values base-x base-y)]
+      [(natural-expansion)
+       (values nat-x nat-y)]
+      [(active-army-front)
+       (if (not (null? enemy-units))
+           (values (hash-ref (car enemy-units) 'x nat-x)
+                   (hash-ref (car enemy-units) 'y nat-y))
+           (values (quotient (+ nat-x enemy-x) 2)
+                   (quotient (+ nat-y enemy-y) 2)))]
+      [(harass-or-blocker-zone)
+       (values (hash-ref obs 'enemy-expand-x (- enemy-x 180))
+               (hash-ref obs 'enemy-expand-y (- enemy-y 140)))]
+      [else
+       (values base-x base-y)]))
+
+  (define prof (get-pro-cortex-profile (human-cortex-profile-name cortex)))
+  (define target-apm (hash-ref prof 'mean-epm 350))
+  (list (list 'camera-focus zone zx zy)
+        (list 'human-apm-discipline target-apm 3 #t #t)))
+
+;; =============================================================================
 ;; Top-Level 5-Layer Step (`step-live-bot-runtime!`)
 ;; =============================================================================
 
@@ -1096,12 +1410,31 @@
   ;; Layer 5
   (define-values (accepted dropped spell-throttled)
     (step-layer5-human-cortex! rt raw-actions obs))
+  ;; Layer 5b: Pro-Human Camera Saccade (60-90 SPM) & APM/EPM Discipline Governor
+  (define pro-apm-acts
+    (step-pro-human-camera-and-apm-governor! rt obs))
+  (define preserved-tactical-directives
+    (filter (lambda (a)
+              (and (pair? a)
+                   (memq (car a)
+                         '(snipe-enemy-changeling
+                           cast-deception-and-scout-spells
+                           cast-protective-buff-aura
+                           position-in-buff-aura-with-splash-spread
+                           pre-split-wings
+                           form-concave-arc
+                           high-ground-tactics
+                           execute-spatial-maneuver))
+                   (not (member a accepted))))
+            tactic-acts))
 
   (define cortex (live-bot-runtime-cortex rt))
   (define mstate (live-bot-runtime-mastermind rt))
   (define mmstate (live-bot-runtime-mirror-mind rt))
   (define mmledger (mirror-mind-state-last-shadow-ledger mmstate))
   (define mmalloc (mirror-mind-state-toolbox-allocation mmstate))
+  (define mmtech (mirror-mind-state-last-tech-observation mmstate))
+  (define mmzs (mirror-mind-state-last-zero-sum-reading mmstate))
   (define pda
     (make-pda-trace #:scouted-sectors 8
                     #:posture-switches 1
@@ -1145,13 +1478,28 @@
           'mirror-trust-mode (mirror-mind-state-trust-mode mmstate)
           'mirror-unaccounted-minerals (shadow-ledger-unaccounted-minerals mmledger)
           'mirror-unaccounted-gas (shadow-ledger-unaccounted-gas mmledger)
+          'mirror-predicted-enemy-bases (mirror-mind-state-predicted-enemy-bases mmstate)
+          'mirror-predicted-enemy-workers (mirror-mind-state-predicted-enemy-workers mmstate)
+          'mirror-macro-verdict (mirror-mind-state-mirror-macro-verdict mmstate)
+          'mirror-recommended-min-bases (mirror-mind-state-recommended-min-bases mmstate)
+          'mirror-disruption-priority (mirror-mind-state-disruption-priority mmstate)
+          'mirror-observed-upgrades (enemy-tech-observation-observed-upgrades mmtech)
+          'mirror-implied-tech-buildings (enemy-tech-observation-implied-tech-buildings mmtech)
+          'mirror-enemy-upgrade-advantage (enemy-tech-observation-enemy-upgrade-advantage mmtech)
+          'mirror-requires-detection? (enemy-tech-observation-requires-detection? mmtech)
+          'mirror-requires-anti-air? (enemy-tech-observation-requires-anti-air? mmtech)
+          'mirror-observed-spells (enemy-tech-observation-observed-spells mmtech)
+          'mirror-crippled-tech-buildings (enemy-tech-observation-crippled-tech-buildings mmtech)
+          'mirror-committed-branch (zero-sum-exclusion-reading-committed-primary-branch mmzs)
+          'mirror-excluded-branches (zero-sum-exclusion-reading-excluded-tech-branches mmzs)
+          'mirror-bluff-suspected? (zero-sum-exclusion-reading-bluff-or-feint-suspected? mmzs)
           'vanguard-count vanguard-cnt
           'reserve-count reserve-cnt
           'personality (bot-personality-name (mastermind-state-personality mstate))
           'pda-bucket (diagnose-bot-anomaly pda)))
 
   (set-live-bot-runtime-last-telemetry! rt telemetry)
-  (hash 'actions accepted
+  (hash 'actions (append accepted preserved-tactical-directives pro-apm-acts)
         'mirror-actions mirror-acts
         'telemetry telemetry
         'posture (live-bot-runtime-posture rt)

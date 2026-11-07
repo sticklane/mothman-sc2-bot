@@ -182,9 +182,15 @@
   [standard-macro   roach      zergling (roach-warren)            150]
   [bio-ball         baneling   zergling (spawning-pool baneling-nest) 150]
   [zealot-rush      roach      zergling (roach-warren)            150]
-  [mech-siege       mutalisk   roach    (lair spire)              400]
+  [mech-siege       ravager    roach    (roach-warren)            150]
   [air-fleet        corruptor  queen    (lair spire)              350]
-  [lurker-contain   mutalisk   roach    (lair spire)              400])
+  [lurker-contain   mutalisk   roach    (lair spire)              400]
+  [roach-ravager    hydralisk  roach    (lair hydralisk-den)      250]
+  [ling-bane-hydra  roach      baneling (roach-warren)            150]
+  [stalker-colossus hydralisk  roach    (lair hydralisk-den)      250]
+  [sky-toss         hydralisk  queen    (lair hydralisk-den)      250]
+  [muta-flock       hydralisk  queen    (lair hydralisk-den)      250]
+  [early-rush       roach      zergling (roach-warren)            150])
 
 (def-plausible-counter-tree PROTOSS-COUNTER-TREE
   #:race Protoss
@@ -194,7 +200,13 @@
   [roach-ravager    immortal   stalker  (cybernetics-core robotics-facility) 350]
   [lurker-contain   immortal   zealot   (cybernetics-core robotics-facility) 350]
   [bio-ball         colossus   stalker  (robotics-facility robotics-support-bay) 500]
-  [air-fleet        stalker    archon   (cybernetics-core)        150])
+  [air-fleet        stalker    archon   (cybernetics-core)        150]
+  [mech-siege       immortal   stalker  (cybernetics-core robotics-facility) 350]
+  [stalker-colossus immortal   stalker  (cybernetics-core robotics-facility) 350]
+  [sky-toss         stalker    archon   (cybernetics-core)        150]
+  [muta-flock       phoenix    stalker  (cybernetics-core stargate) 300]
+  [ling-bane-hydra  colossus   adept    (robotics-facility robotics-bay) 500]
+  [early-rush       stalker    zealot   (cybernetics-core)        150])
 
 (def-plausible-counter-tree TERRAN-COUNTER-TREE
   #:race Terran
@@ -204,7 +216,14 @@
   [roach-ravager    marauder   marine   (barracks-techlab)        100]
   [lurker-contain   siege-tank marine   (factory)                 250]
   [protoss-deathball ghost     marauder (barracks-techlab)        300]
-  [air-fleet        viking     marine   (starport)                250])
+  [air-fleet        viking     marine   (starport)                250]
+  [bio-ball         siege-tank marauder (factory)                 250]
+  [mech-siege       siege-tank marauder (factory)                 250]
+  [stalker-colossus marauder   marine   (barracks-techlab)        100]
+  [sky-toss         viking     marine   (starport)                250]
+  [muta-flock       thor       marine   (factory armory)          300]
+  [ling-bane-hydra  siege-tank hellion  (factory)                 250]
+  [early-rush       marauder   marine   (barracks-techlab)        100])
 
 (define (get-race-counter-tree race)
   (case race
@@ -224,6 +243,23 @@
     [(or (memq 'siege-tank types) (memq 'siege-tank-sieged types)) 'mech-siege]
     [(or (memq 'roach types) (memq 'ravager types)) 'roach-ravager]
     [(and (>= (count (lambda (t) (memq t '(marine marauder medic))) types) 5)) 'bio-ball]
+    [(or (memq 'oracle types) (memq 'phoenix types) (memq 'banshee types)
+         (memq 'liberator types) (memq 'tempest types))
+     'sky-toss]
+    [(or (memq 'colossus types) (memq 'immortal types) (memq 'archon types)
+         (memq 'disruptor types) (memq 'high-templar types) (memq 'stalker types))
+     'stalker-colossus]
+    [(or (memq 'hellion types) (memq 'hellbat types) (memq 'cyclone types)
+         (memq 'thor types) (memq 'widow-mine types))
+     'mech-siege]
+    [(or (memq 'hydralisk types) (memq 'baneling types))
+     'ling-bane-hydra]
+    [(or (memq 'marauder types) (memq 'reaper types) (memq 'ghost types) (memq 'marine types))
+     'bio-ball]
+    [(or (memq 'zealot types) (memq 'adept types) (memq 'sentry types) (memq 'dark-templar types))
+     'stalker-colossus]
+    [(memq 'zergling types)
+     'ling-bane-hydra]
     [else 'standard-macro]))
 
 (define (compute-switching-cost required-buildings existing-buildings
