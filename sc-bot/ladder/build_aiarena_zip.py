@@ -54,6 +54,7 @@ VARIANTS = [
     ("Mothman-T", "Terran", "bots/Mothman-T.rkt"),
     ("Mothman-P", "Protoss", "bots/Mothman-P.rkt"),
     ("Mothman-R", "Random", "bots/Mothman-R.rkt"),
+    ("Mothman-X", "Random", "bots/Mothman-R.rkt"),
 ]
 
 

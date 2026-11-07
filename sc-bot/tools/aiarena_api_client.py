@@ -197,7 +197,7 @@ def main():
         # Ensure legacy python Mothman-R (#1457) stays paused
         set_competition_active(1457, COMPETITION_ID, False)
         mapping = [
-            (1461, root / "ladder" / "Mothman-R.zip"),  # Mothman-X (cpplinux Random)
+            (1461, root / "ladder" / "Mothman-X.zip"),  # Mothman-X (cpplinux Random)
             (1458, root / "ladder" / "Mothman-Z.zip"),
             (1459, root / "ladder" / "Mothman-T.zip"),
             (1460, root / "ladder" / "Mothman-P.zip"),
