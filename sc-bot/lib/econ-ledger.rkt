@@ -187,6 +187,21 @@
 ;; 3. BOSS Branch-and-Bound Goal Synthesis
 ;; =============================================================================
 
+(define (finite-real? v)
+  (and (number? v) (real? v) (not (nan? v)) (not (infinite? v))))
+
+(define (safe-real v [default 0.0])
+  (if (finite-real? v) (exact->inexact v) default))
+
+(define (safe-exact-int v [default 0])
+  (if (finite-real? v) (exact-round v) default))
+
+(define (safe-nonneg-int v [default 0])
+  (max 0 (safe-exact-int v default)))
+
+(define (safe-list v)
+  (if (list? v) v '()))
+
 (struct boss-plan (race goal-units steps makespan-frames total-minerals total-gas)
   #:transparent)
 
@@ -196,29 +211,31 @@
     [(roach ravager) 'roach-warren]
     [(hydralisk lurker) 'hydralisk-den]
     [(mutalisk corruptor) 'spire]
-    [(zealot) 'gateway]
-    [(dragoon stalker sentry) 'cybernetics-core]
-    [(reaver immortal colossus observer shuttle) 'robotics-facility]
-    [(marine marauder medic) 'barracks]
-    [(siege-tank vulture hellion) 'factory]
-    [(science-vessel medivac viking) 'starport]
-    [(ghost) 'covert-ops]
+    [(zealot adept) 'gateway]
+    [(stalker sentry) 'cybernetics-core]
+    [(immortal colossus disruptor observer warp-prism) 'robotics-facility]
+    [(marine marauder reaper) 'barracks]
+    [(siege-tank hellion widow-mine cyclone thor) 'factory]
+    [(medivac viking liberator banshee raven) 'starport]
+    [(ghost) 'ghost-academy]
     [else #f]))
 
 (define (boss-synthesize-build-plan race goal-alist #:existing-buildings [existing '()])
   ;; goal-alist: list of `(cons unit-type count)`
+  (define safe-goals (filter pair? (safe-list goal-alist)))
+  (define safe-existing (safe-list existing))
   (define needed-prereqs
     (remove-duplicates
-     (filter (lambda (b) (and b (not (memq b existing))))
-             (map (lambda (pair) (unit-prereq-building (car pair))) goal-alist))))
+     (filter (lambda (b) (and b (not (memq b safe-existing))))
+             (map (lambda (pair) (unit-prereq-building (car pair))) safe-goals))))
   (define prereq-steps
     (for/list ([b (in-list needed-prereqs)])
       (list 'build b)))
   (define unit-steps
     (append-map
      (lambda (pair)
-       (make-list (cdr pair) (list 'train (car pair))))
-     goal-alist))
+       (make-list (safe-nonneg-int (cdr pair) 0) (list 'train (car pair))))
+     safe-goals))
   (define all-steps (append prereq-steps unit-steps))
   (define g (derive-grades-from-bot-ast all-steps))
   ;; Makespan lower-bounded by prerequisite build frames + parallel production cycles
@@ -226,7 +243,7 @@
     (+ (* 360 (length prereq-steps))
        (* 120 (length unit-steps))))
   (boss-plan race
-             goal-alist
+             safe-goals
              all-steps
              makespan
              (sc-grade-minerals g)
@@ -278,8 +295,16 @@
   #:mutable
   #:transparent)
 
+(define (safe-ledger-int v [default 0])
+  (if (and (number? v) (real? v) (not (nan? v)) (not (infinite? v)))
+      (max 0 (exact-round v))
+      default))
+
 (define (make-symbiotic-ledger [minerals 500] [gas 200] [supply 10])
-  (symbiotic-ledger minerals gas supply 0 0 0 0 0 0 '()))
+  (symbiotic-ledger (safe-ledger-int minerals 500)
+                    (safe-ledger-int gas 200)
+                    (safe-ledger-int supply 10)
+                    0 0 0 0 0 0 '()))
 
 (define (ledger-available-minerals l)
   (- (symbiotic-ledger-total-minerals l)
@@ -313,7 +338,11 @@
        (>= (ledger-available-gas l) 0)
        (>= (ledger-available-supply l) 0)))
 
-(define (ledger-reserve! l lease-id owner m g s [priority 1])
+(define (ledger-reserve! l lease-id owner raw-m raw-g raw-s [raw-priority 1])
+  (define m (safe-ledger-int raw-m 0))
+  (define g (safe-ledger-int raw-g 0))
+  (define s (safe-ledger-int raw-s 0))
+  (define priority (safe-ledger-int raw-priority 1))
   (when (or (< (ledger-available-minerals l) m)
             (< (ledger-available-gas l) g)
             (< (ledger-available-supply l) s))
@@ -326,7 +355,11 @@
   lease)
 
 ;; Symbiotic borrowing: borrow from an idle low-priority reservation without violating total accounting
-(define (ledger-borrow! l borrower-id m g s [priority 5])
+(define (ledger-borrow! l borrower-id raw-m raw-g raw-s [raw-priority 5])
+  (define m (safe-ledger-int raw-m 0))
+  (define g (safe-ledger-int raw-g 0))
+  (define s (safe-ledger-int raw-s 0))
+  (define priority (safe-ledger-int raw-priority 5))
   (cond
     [(and (>= (ledger-available-minerals l) m)
           (>= (ledger-available-gas l) g)
@@ -341,7 +374,11 @@
      ;; Preempt/borrow from lower-priority reserved leases
      (ledger-preempt-for-crisis! l borrower-id m g s priority)]))
 
-(define (ledger-preempt-for-crisis! l crisis-id m g s [priority 10])
+(define (ledger-preempt-for-crisis! l crisis-id raw-m raw-g raw-s [raw-priority 10])
+  (define m (safe-ledger-int raw-m 0))
+  (define g (safe-ledger-int raw-g 0))
+  (define s (safe-ledger-int raw-s 0))
+  (define priority (safe-ledger-int raw-priority 10))
   ;; Release lower-priority reserved leases until (m, g, s) can be allocated to crisis-id
   (for ([lease (in-list (symbiotic-ledger-leases l))]
         #:when (and (eq? (ledger-lease-status lease) 'reserved)
@@ -425,31 +462,83 @@
 
 (define (evaluate-coupled-macro-governor
          #:race [race 'Zerg]
-         #:frame [frame 0]
-         #:minerals [minerals 200]
-         #:gas [gas 100]
-         #:supply-left [supply-left 4]
-         #:active-bases [active-bases 1]
-         #:depleting-bases [depleting-bases 0]
-         #:workers [workers 12]
-         #:pending-workers [pending-workers 0]
-         #:production-facilities [production-facilities 1]
-         #:busy-facilities [busy-facilities 0]
-         #:busy-townhalls [busy-townhalls 0]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 200]
+         #:gas [raw-gas 100]
+         #:supply-left [raw-supply-left 4]
+         #:active-bases [raw-active-bases 1]
+         #:depleting-bases [raw-depleting-bases 0]
+         #:workers [raw-workers 12]
+         #:pending-workers [raw-pending-workers 0]
+         #:mineral-harvesters [raw-mineral-harvesters #f]
+         #:ideal-mineral-harvesters [raw-ideal-mineral-harvesters #f]
+         #:gas-harvesters [raw-gas-harvesters #f]
+         #:ideal-gas-harvesters [raw-ideal-gas-harvesters #f]
+         #:production-facilities [raw-production-facilities 1]
+         #:busy-facilities [raw-busy-facilities 0]
+         #:busy-townhalls [raw-busy-townhalls 0]
          #:under-crisis? [under-crisis? #f]
-         #:recommended-min-bases [recommended-min-bases 1]
-         #:max-map-bases [max-map-bases 16])
+         #:recommended-min-bases [raw-recommended-min-bases 1]
+         #:max-map-bases [raw-max-map-bases 16])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define minerals (safe-nonneg-int raw-minerals 0))
+  (define gas (safe-nonneg-int raw-gas 0))
+  (define supply-left (safe-exact-int raw-supply-left 0))
+  (define active-bases (safe-nonneg-int raw-active-bases 1))
+  (define depleting-bases (safe-nonneg-int raw-depleting-bases 0))
+  (define workers (safe-nonneg-int raw-workers 12))
+  (define pending-workers (safe-nonneg-int raw-pending-workers 0))
+  (define production-facilities (max 1 (safe-nonneg-int raw-production-facilities 1)))
+  (define busy-facilities (safe-nonneg-int raw-busy-facilities 0))
+  (define busy-townhalls (safe-nonneg-int raw-busy-townhalls 0))
+  (define recommended-min-bases (max 1 (safe-nonneg-int raw-recommended-min-bases 1)))
+  (define max-map-bases (max 1 (safe-nonneg-int raw-max-map-bases 16)))
+
   (define eff-bases (max 1 active-bases))
   (define healthy-bases (max 0 (- eff-bases depleting-bases)))
   (define total-workers (+ workers pending-workers))
   (define base-cost (if (memq race '(Zerg zerg)) 300 400))
 
+  ;; Live mineral & gas harvester saturation check (replaces hard 36/50 worker cutoffs
+  ;; whenever live harvester assignment/capacity telemetry is supplied).
+  (define explicit-harvester-telemetry?
+    (or (not (eq? raw-mineral-harvesters #f))
+        (not (eq? raw-ideal-mineral-harvesters #f))
+        (not (eq? raw-gas-harvesters #f))
+        (not (eq? raw-ideal-gas-harvesters #f))))
+  (define ideal-min-h
+    (if (not (eq? raw-ideal-mineral-harvesters #f))
+        (safe-nonneg-int raw-ideal-mineral-harvesters (* 16 (max 1 healthy-bases)))
+        (* 16 (max 1 healthy-bases))))
+  (define cur-min-h
+    (if (not (eq? raw-mineral-harvesters #f))
+        (safe-nonneg-int raw-mineral-harvesters (max 0 (- total-workers (* 3 (max 1 healthy-bases)))))
+        (max 0 (- total-workers (* 3 (max 1 healthy-bases))))))
+  (define ideal-gas-h
+    (if (not (eq? raw-ideal-gas-harvesters #f))
+        (safe-nonneg-int raw-ideal-gas-harvesters (* 3 (max 1 healthy-bases)))
+        (* 3 (max 1 healthy-bases))))
+  (define cur-gas-h
+    (if (not (eq? raw-gas-harvesters #f))
+        (safe-nonneg-int raw-gas-harvesters (* 3 (max 1 healthy-bases)))
+        (* 3 (max 1 healthy-bases))))
+  (define mineral-saturated?
+    (and (> ideal-min-h 0)
+         (>= cur-min-h (max 1 (- ideal-min-h 2)))))
+  (define gas-saturated?
+    (or (<= ideal-gas-h 0)
+        (>= cur-gas-h (max 1 (- ideal-gas-h 1)))))
+  (define harvesters-saturated?
+    (if explicit-harvester-telemetry?
+        (and mineral-saturated? gas-saturated?)
+        (>= total-workers (* 18 (max 1 healthy-bases)))))
+
   ;; Unconstrained map-wide expansion target: scales up to max-map-bases (default 16)
-  ;; whenever workers saturate healthy bases, bases deplete, minerals float, or
-  ;; Mirror-Mind recommends out-expanding the opponent.
+  ;; whenever mineral+gas harvesters saturate healthy bases, bases deplete, minerals float,
+  ;; or Mirror-Mind recommends out-expanding the opponent.
   (define time-bases (add1 (quotient (max 0 frame) 2200)))
   (define saturation-bases
-    (if (>= total-workers (* 18 (max 1 healthy-bases)))
+    (if harvesters-saturated?
         (+ eff-bases (max 1 depleting-bases))
         eff-bases))
   (define float-bases
@@ -481,7 +570,7 @@
     (cond
       [under-crisis?                           'crisis-hold-expansion]
       [(> depleting-bases 0)                   'depletion-replacement-expand]
-      [(>= total-workers (* 18 (max 1 healthy-bases))) 'macro-saturation-expand]
+      [harvesters-saturated?                   'macro-saturation-expand]
       [(> recommended-min-bases eff-bases)     'mirror-macro-directive-expand]
       [(> float-bases eff-bases)               'mineral-float-macro-expand]
       [(> desired-bases eff-bases)             'map-wide-time-expand]
@@ -560,24 +649,30 @@
     [(or (memq enemy-archetype '(mech-siege stalker-colossus roach-ravager lurker-contain))
          (memq mirror-predicted-unit
                '(siege-tank siege-tank-sieged thor cyclone immortal colossus
-                 reaver roach ravager lurker ultralisk)))
+                 disruptor roach ravager lurker ultralisk)))
      'armored-mech-siege]
     [else
      'bio-swarm-light]))
 
 (define (evaluate-adaptive-build-and-tech-plan
          race
-         #:ally-buildings [ally-buildings '()]
-         #:ally-units [ally-units '()]
-         #:researched-upgrades [researched-upgrades '()]
+         #:ally-buildings [raw-ally-buildings '()]
+         #:ally-units [raw-ally-units '()]
+         #:researched-upgrades [raw-researched-upgrades '()]
          #:enemy-archetype [enemy-archetype 'standard-macro]
          #:mirror-predicted-unit [mirror-predicted-unit 'marine]
          #:mirror-macro-verdict [mirror-macro-verdict 'pace-Macro-And-Disrupt]
          #:requires-detection? [requires-detection? #f]
          #:requires-anti-air? [requires-anti-air? #f]
-         #:enemy-upgrade-advantage [enemy-upgrade-advantage 0]
-         #:minerals [minerals 300]
-         #:gas [gas 150])
+         #:enemy-upgrade-advantage [raw-enemy-upgrade-advantage 0]
+         #:minerals [raw-minerals 300]
+         #:gas [raw-gas 150])
+  (define ally-buildings (safe-list raw-ally-buildings))
+  (define ally-units (safe-list raw-ally-units))
+  (define researched-upgrades (safe-list raw-researched-upgrades))
+  (define enemy-upgrade-advantage (safe-exact-int raw-enemy-upgrade-advantage 0))
+  (define minerals (safe-nonneg-int raw-minerals 300))
+  (define gas (safe-nonneg-int raw-gas 150))
   (define norm-race
     (case race
       [(Zerg zerg) 'Zerg]
@@ -614,9 +709,9 @@
          [(air-fleet)
           '(zergling-movementspeed burrow grooved-spines muscular-augments missile-attacks-1 ground-carapace-1)]
          [(armored-mech-siege)
-          '(zergling-movementspeed burrow glial-reconstitution grooved-spines lurker-aspect missile-attacks-1 ground-carapace-1)]
+          '(zergling-movementspeed burrow glial-reconstitution grooved-spines adaptive-talons missile-attacks-1 ground-carapace-1)]
          [else
-          '(zergling-movementspeed burrow centrifugal-hooks glial-reconstitution chitinous-plating missile-attacks-1 ground-carapace-1)]))
+          '(zergling-movementspeed burrow centrifical-hooks glial-reconstitution chitinous-plating missile-attacks-1 ground-carapace-1)]))
      (define prio-morphs
        (remove-duplicates
         (append (if requires-detection? '(overseer) '())
@@ -886,18 +981,28 @@
 
 (define (compute-optimal-gas-workers
          #:race [race 'Zerg]
-         #:frame [frame 0]
-         #:minerals [minerals 200]
-         #:gas [gas 0]
-         #:workers [workers 16]
-         #:active-bases [active-bases 1]
-         #:active-geysers [active-geysers 1]
-         #:current-gas-workers [current-gas-workers 3]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 200]
+         #:gas [raw-gas 0]
+         #:workers [raw-workers 16]
+         #:active-bases [raw-active-bases 1]
+         #:active-geysers [raw-active-geysers 1]
+         #:current-gas-workers [raw-current-gas-workers 3]
          #:should-expand? [should-expand? #f]
-         #:escrow-minerals [escrow-minerals 0]
-         #:tech-gas-demand [tech-gas-demand 100]
-         #:unit-gas-ratio [unit-gas-ratio 0.35]
+         #:escrow-minerals [raw-escrow-minerals 0]
+         #:tech-gas-demand [raw-tech-gas-demand 100]
+         #:unit-gas-ratio [raw-unit-gas-ratio 0.35]
          #:under-crisis? [under-crisis? #f])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define minerals (safe-nonneg-int raw-minerals 0))
+  (define gas (safe-nonneg-int raw-gas 0))
+  (define workers (safe-nonneg-int raw-workers 16))
+  (define active-bases (safe-nonneg-int raw-active-bases 1))
+  (define active-geysers (safe-nonneg-int raw-active-geysers 1))
+  (define current-gas-workers (safe-nonneg-int raw-current-gas-workers 0))
+  (define escrow-minerals (safe-nonneg-int raw-escrow-minerals 0))
+  (define tech-gas-demand (safe-nonneg-int raw-tech-gas-demand 0))
+  (define unit-gas-ratio (max 0.0 (min 1.0 (safe-real raw-unit-gas-ratio 0.35))))
   (define eff-bases (max 1 active-bases))
   (define max-geysers (* 2 eff-bases))
   (define cur-gm-ratio
@@ -1006,28 +1111,47 @@
 
 (define (evaluate-guns-vs-butter-ppf
          #:race [race 'Zerg]
-         #:frame [frame 0]
-         #:minerals [minerals 200]
-         #:gas [gas 100]
-         #:supply-left [supply-left 6]
-         #:supply-cap [supply-cap 22]
-         #:workers [workers 16]
-         #:target-workers [target-workers 44]
-         #:active-bases [active-bases 1]
-         #:depleting-bases [depleting-bases 0]
-         #:active-geysers [active-geysers 1]
-         #:current-gas-workers [current-gas-workers 3]
-         #:production-facilities [production-facilities 1]
-         #:busy-facilities [busy-facilities 0]
-         #:army-count [army-count 4]
-         #:missing-synergy-count [missing-synergy-count 2]
-         #:fap-score [fap-score 0]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 200]
+         #:gas [raw-gas 100]
+         #:supply-left [raw-supply-left 6]
+         #:supply-cap [raw-supply-cap 22]
+         #:workers [raw-workers 16]
+         #:target-workers [raw-target-workers 44]
+         #:active-bases [raw-active-bases 1]
+         #:depleting-bases [raw-depleting-bases 0]
+         #:active-geysers [raw-active-geysers 1]
+         #:current-gas-workers [raw-current-gas-workers 3]
+         #:production-facilities [raw-production-facilities 1]
+         #:busy-facilities [raw-busy-facilities 0]
+         #:army-count [raw-army-count 4]
+         #:missing-synergy-count [raw-missing-synergy-count 2]
+         #:fap-score [raw-fap-score 0]
          #:under-crisis? [under-crisis? #f]
          #:mirror-macro-verdict [mirror-macro-verdict 'pace-Macro-And-Disrupt]
-         #:enemy-upgrade-advantage [enemy-upgrade-advantage 0]
-         #:enemy-active-research-count [enemy-active-research-count 0]
+         #:enemy-upgrade-advantage [raw-enemy-upgrade-advantage 0]
+         #:enemy-active-research-count [raw-enemy-active-research-count 0]
          #:requires-detection? [requires-detection? #f]
          #:requires-anti-air? [requires-anti-air? #f])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define minerals (safe-nonneg-int raw-minerals 0))
+  (define gas (safe-nonneg-int raw-gas 0))
+  (define supply-left (safe-exact-int raw-supply-left 0))
+  (define supply-cap (safe-nonneg-int raw-supply-cap 15))
+  (define workers (safe-nonneg-int raw-workers 12))
+  (define target-workers (max 1 (safe-nonneg-int raw-target-workers 44)))
+  (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
+  (define depleting-bases (safe-nonneg-int raw-depleting-bases 0))
+  (define active-geysers (safe-nonneg-int raw-active-geysers 1))
+  (define current-gas-workers (safe-nonneg-int raw-current-gas-workers 0))
+  (define production-facilities (max 1 (safe-nonneg-int raw-production-facilities 1)))
+  (define busy-facilities (safe-nonneg-int raw-busy-facilities 0))
+  (define army-count (safe-nonneg-int raw-army-count 0))
+  (define missing-synergy-count (safe-nonneg-int raw-missing-synergy-count 0))
+  (define fap-score (safe-real raw-fap-score 0.0))
+  (define enemy-upgrade-advantage (safe-exact-int raw-enemy-upgrade-advantage 0))
+  (define enemy-active-research-count (safe-nonneg-int raw-enemy-active-research-count 0))
+
   ;; 1. Butter — Economy (bases + workers):
   ;;    Compounding rate r_econ ~ 0.95 min^-1, boosted by worker deficit, depleting bases,
   ;;    or passive turtle opponent; heavily discounted under immediate crisis/all-in.

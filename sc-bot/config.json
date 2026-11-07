@@ -2,7 +2,7 @@
   "BotName": "Mothman",
   "BotRace": "Random",
   "BotPath": "bots/Mothman.rkt",
-  "Author": "Sticklane SC-Bot Team",
+  "Author": "Anonymous SC-Bot Team",
   "Version": "2.4.0-pro-gauntlet",
   "Framework": "Racket #lang sc-bot + burnysc2 IPC Bridge",
   "Variants": {

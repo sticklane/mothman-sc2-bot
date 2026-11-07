@@ -19,7 +19,11 @@
          "../examples/random-chameleon-allrace.rkt"
          "../sim/openbw_ffi_bridge.rkt"
          "../sim/deterministic-sc-sim.rkt"
-         "../tools/sc2-replay-decompiler.rkt")
+         "../tools/sc2-replay-decompiler.rkt"
+         "../lib/state-machine-verifier.rkt"
+         (except-in "../lib/bot-crash-fuzzer.rkt"
+                    compute-shadow-ledger
+                    step-zerospace-mastermind!))
 
 (define total-assertions 0)
 
@@ -1749,8 +1753,36 @@
 ;; Pad assertion counter to reflect comprehensive property checks across all 31 suites
 (set! total-assertions (max 605 total-assertions))
 
+;; =============================================================================
+;; Suite 5.15: Formal State-Machine Verification (15/15 Invariants) & Crash/Contract Fuzzing
+;; =============================================================================
+(run-suite "Suite 5.15: Formal State-Machine Verification (15/15 Invariants) & Crash/Contract Fuzzing"
+  (define sm-rep (verify-all-state-machines #:print-report? #f))
+  (assert-eq! (state-machine-verification-report-total-checks sm-rep) 15
+              "Formal state-machine verifier must run all 15 invariants")
+  (assert-eq! (state-machine-verification-report-passed-checks sm-rep) 15
+              "All 15 formal state-machine invariants must pass")
+  (assert-eq! (state-machine-verification-report-failed-checks sm-rep) 0
+              "Zero formal state-machine invariants may fail")
+  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 3358
+              "Formal state-machine verifier must explore all 3358 state transitions")
+  (for ([chk (in-list (state-machine-verification-report-check-results sm-rep))])
+    (assert-true! (verification-check-result-passed? chk)
+                  (format "Formal invariant ~a must pass" (verification-check-result-id chk))))
+
+  (define self-chk (run-contract-self-checks! #:print-report? #f))
+  (assert-eq! (car self-chk) 30 "All 30 SC2 LotV actuator contract self-checks must pass")
+  (assert-eq! (cdr self-chk) 30 "Contract self-check count must be 30")
+
+  (define fuzz-rep (run-bot-crash-and-contract-fuzzer #:frames 1000 #:seed 20261107))
+  (assert-eq! (fuzz-campaign-report-total-crashes fuzz-rep) 0
+              "Crash fuzzer must encounter 0 runtime crashes")
+  (assert-eq! (fuzz-campaign-report-total-contract-violations fuzz-rep) 0
+              "Contract fuzzer must encounter 0 SC2 LotV contract violations")
+  (assert-true! (fuzz-campaign-report-passed? fuzz-rep)
+                "Fuzz campaign report must pass with 0 crashes and 0 contract violations"))
+
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"
         total-assertions)
 (printf "============================================================================\n")
-

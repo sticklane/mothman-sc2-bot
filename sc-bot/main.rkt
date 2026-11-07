@@ -6,4 +6,4 @@
          (all-from-out "compiler/syntax.rkt"))
 
 (module reader syntax/module-reader
-  #:language '(file "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/main.rkt"))
+  #:language 'sc-bot/main)

@@ -19,7 +19,7 @@
   "total_wall_time_s": 105.18,
   "matches": [
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-Z.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-Z.rkt",
       "configured_race": "Zerg",
       "actual_race_played": "Zerg",
       "blind_start": true,
@@ -69,7 +69,7 @@
         "anti-cannon-proxy-pull": 661,
         "force-field-bile-breaker": 22
       },
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_01_Mothman-Z_vs_CannonRushBot_AutomatonLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_01_Mothman-Z_vs_CannonRushBot_AutomatonLE.SC2Replay",
       "match_id": 1,
       "mothman_variant": "Mothman-Z",
       "opponent_key": "CannonRushBot",
@@ -103,7 +103,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-T.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-T.rkt",
       "configured_race": "Terran",
       "actual_race_played": "Terran",
       "blind_start": true,
@@ -156,7 +156,7 @@
         "anti-cannon-proxy-pull": 284,
         "clear-gas-steal": 71
       },
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_02_Mothman-T_vs_CannonLoverBot_CyberForestLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_02_Mothman-T_vs_CannonLoverBot_CyberForestLE.SC2Replay",
       "match_id": 2,
       "mothman_variant": "Mothman-T",
       "opponent_key": "CannonLoverBot",
@@ -196,7 +196,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-P.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-P.rkt",
       "configured_race": "Protoss",
       "actual_race_played": "Protoss",
       "blind_start": true,
@@ -243,7 +243,7 @@
       "countermeasures_triggered": {
         "clear-gas-steal": 184
       },
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_03_Mothman-P_vs_SentdeBot_KairosJunctionLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_03_Mothman-P_vs_SentdeBot_KairosJunctionLE.SC2Replay",
       "match_id": 3,
       "mothman_variant": "Mothman-P",
       "opponent_key": "SentdeBot",
@@ -281,7 +281,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-R.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-R.rkt",
       "configured_race": "Random",
       "actual_race_played": "Terran",
       "blind_start": true,
@@ -337,7 +337,7 @@
         "pull-workers-attack": 12,
         "worker-rush-defense": 84
       },
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_04_Mothman-R_vs_WorkerRushBot_KingsCoveLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_04_Mothman-R_vs_WorkerRushBot_KingsCoveLE.SC2Replay",
       "match_id": 4,
       "mothman_variant": "Mothman-R",
       "opponent_key": "WorkerRushBot",
@@ -365,7 +365,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-Z.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-Z.rkt",
       "configured_race": "Zerg",
       "actual_race_played": "Zerg",
       "blind_start": true,
@@ -429,7 +429,7 @@
       "mirror_accuracy_pct": 85,
       "mirror_trust_mode": "level2-preemptive-mirror",
       "mirror_predictions_received": 336,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_05_Mothman-Z_vs_ProxyRaxBot_PortAleksanderLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_05_Mothman-Z_vs_ProxyRaxBot_PortAleksanderLE.SC2Replay",
       "match_id": 5,
       "mothman_variant": "Mothman-Z",
       "opponent_key": "ProxyRaxBot",
@@ -465,7 +465,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-T.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-T.rkt",
       "configured_race": "Terran",
       "actual_race_played": "Terran",
       "blind_start": true,
@@ -523,7 +523,7 @@
       "mirror_accuracy_pct": 38,
       "mirror_trust_mode": "skeptical-observational-fallback",
       "mirror_predictions_received": 308,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_06_Mothman-T_vs_LingLoverBot_BlueshiftLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_06_Mothman-T_vs_LingLoverBot_BlueshiftLE.SC2Replay",
       "match_id": 6,
       "mothman_variant": "Mothman-T",
       "opponent_key": "LingLoverBot",
@@ -561,7 +561,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-P.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-P.rkt",
       "configured_race": "Protoss",
       "actual_race_played": "Protoss",
       "blind_start": true,
@@ -625,7 +625,7 @@
       "mirror_accuracy_pct": 73,
       "mirror_trust_mode": "level2-preemptive-mirror",
       "mirror_predictions_received": 274,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_07_Mothman-P_vs_HarstemsAunt_AbyssalReefLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_07_Mothman-P_vs_HarstemsAunt_AbyssalReefLE.SC2Replay",
       "match_id": 7,
       "mothman_variant": "Mothman-P",
       "opponent_key": "HarstemsAunt",
@@ -663,7 +663,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-R.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-R.rkt",
       "configured_race": "Random",
       "actual_race_played": "Protoss",
       "blind_start": true,
@@ -724,7 +724,7 @@
       "mirror_accuracy_pct": 88,
       "mirror_trust_mode": "level2-preemptive-mirror",
       "mirror_predictions_received": 396,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_08_Mothman-R_vs_DragonBot_BelShirVestigeLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_08_Mothman-R_vs_DragonBot_BelShirVestigeLE.SC2Replay",
       "match_id": 8,
       "mothman_variant": "Mothman-R",
       "opponent_key": "DragonBot",
@@ -759,7 +759,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-Z.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-Z.rkt",
       "configured_race": "Zerg",
       "actual_race_played": "Zerg",
       "blind_start": true,
@@ -809,7 +809,7 @@
         "clear-gas-steal": 271,
         "pull-workers-attack": 23
       },
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_09_Mothman-Z_vs_ThreebaseVoidrayBot_NewkirkPrecinctTE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_09_Mothman-Z_vs_ThreebaseVoidrayBot_NewkirkPrecinctTE.SC2Replay",
       "match_id": 9,
       "mothman_variant": "Mothman-Z",
       "opponent_key": "ThreebaseVoidrayBot",
@@ -849,7 +849,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-T.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-T.rkt",
       "configured_race": "Terran",
       "actual_race_played": "Terran",
       "blind_start": true,
@@ -893,7 +893,7 @@
       "countermeasures_triggered": {
         "clear-gas-steal": 108
       },
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_10_Mothman-T_vs_Hydralisk_ProximaStationLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_10_Mothman-T_vs_Hydralisk_ProximaStationLE.SC2Replay",
       "match_id": 10,
       "mothman_variant": "Mothman-T",
       "opponent_key": "Hydralisk",
@@ -930,7 +930,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-P.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-P.rkt",
       "configured_race": "Protoss",
       "actual_race_played": "Protoss",
       "blind_start": true,
@@ -993,7 +993,7 @@
       "mirror_accuracy_pct": 64,
       "mirror_trust_mode": "balanced-bayesian-hedged",
       "mirror_predictions_received": 283,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_11_Mothman-P_vs_CyclonePush_AutomatonLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_11_Mothman-P_vs_CyclonePush_AutomatonLE.SC2Replay",
       "match_id": 11,
       "mothman_variant": "Mothman-P",
       "opponent_key": "CyclonePush",
@@ -1029,7 +1029,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-Z.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-Z.rkt",
       "configured_race": "Zerg",
       "actual_race_played": "Zerg",
       "blind_start": true,
@@ -1076,7 +1076,7 @@
         "force-field-bile-breaker": 112,
         "clear-gas-steal": 64
       },
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_12_Mothman-Z_vs_MassReaper_CyberForestLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_12_Mothman-Z_vs_MassReaper_CyberForestLE.SC2Replay",
       "match_id": 12,
       "mothman_variant": "Mothman-Z",
       "opponent_key": "MassReaper",
@@ -1115,7 +1115,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-T.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-T.rkt",
       "configured_race": "Terran",
       "actual_race_played": "Terran",
       "blind_start": true,
@@ -1176,7 +1176,7 @@
       "mirror_accuracy_pct": 33,
       "mirror_trust_mode": "skeptical-observational-fallback",
       "mirror_predictions_received": 369,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_13_Mothman-T_vs_CreepyBot_KairosJunctionLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_13_Mothman-T_vs_CreepyBot_KairosJunctionLE.SC2Replay",
       "match_id": 13,
       "mothman_variant": "Mothman-T",
       "opponent_key": "CreepyBot",
@@ -1214,7 +1214,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-P.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-P.rkt",
       "configured_race": "Protoss",
       "actual_race_played": "Protoss",
       "blind_start": true,
@@ -1283,7 +1283,7 @@
       "mirror_accuracy_pct": 46,
       "mirror_trust_mode": "balanced-bayesian-hedged",
       "mirror_predictions_received": 365,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_14_Mothman-P_vs_MadBot_KingsCoveLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_14_Mothman-P_vs_MadBot_KingsCoveLE.SC2Replay",
       "match_id": 14,
       "mothman_variant": "Mothman-P",
       "opponent_key": "MadBot",
@@ -1322,7 +1322,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-Z.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-Z.rkt",
       "configured_race": "Zerg",
       "actual_race_played": "Zerg",
       "blind_start": true,
@@ -1387,7 +1387,7 @@
       "mirror_accuracy_pct": 88,
       "mirror_trust_mode": "level2-preemptive-mirror",
       "mirror_predictions_received": 415,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_15_Mothman-Z_vs_LingLoverBot_AbyssalReefLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_15_Mothman-Z_vs_LingLoverBot_AbyssalReefLE.SC2Replay",
       "match_id": 15,
       "mothman_variant": "Mothman-Z",
       "opponent_key": "LingLoverBot",
@@ -1428,7 +1428,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-T.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-T.rkt",
       "configured_race": "Terran",
       "actual_race_played": "Terran",
       "blind_start": true,
@@ -1488,7 +1488,7 @@
       "mirror_accuracy_pct": 56,
       "mirror_trust_mode": "balanced-bayesian-hedged",
       "mirror_predictions_received": 260,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_16_Mothman-T_vs_CyclonePush_BelShirVestigeLE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_16_Mothman-T_vs_CyclonePush_BelShirVestigeLE.SC2Replay",
       "match_id": 16,
       "mothman_variant": "Mothman-T",
       "opponent_key": "CyclonePush",
@@ -1524,7 +1524,7 @@
       }
     },
     {
-      "bot_rkt_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/bots/Mothman-P.rkt",
+      "bot_rkt_path": "sc-bot/bots/Mothman-P.rkt",
       "configured_race": "Protoss",
       "actual_race_played": "Protoss",
       "blind_start": true,
@@ -1593,7 +1593,7 @@
       "mirror_accuracy_pct": 87,
       "mirror_trust_mode": "level2-preemptive-mirror",
       "mirror_predictions_received": 330,
-      "replay_path": "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/replays/external_gauntlet/match_17_Mothman-P_vs_CreepyBot_NewkirkPrecinctTE.SC2Replay",
+      "replay_path": "sc-bot/replays/external_gauntlet/match_17_Mothman-P_vs_CreepyBot_NewkirkPrecinctTE.SC2Replay",
       "match_id": 17,
       "mothman_variant": "Mothman-P",
       "opponent_key": "CreepyBot",

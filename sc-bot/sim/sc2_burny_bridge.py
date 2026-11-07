@@ -223,7 +223,7 @@ UPGRADE_NAME_TO_ENUM_NAME: Dict[str, str] = {
     "glial-reconstitution": "GLIALRECONSTITUTION",
     "grooved-spines": "EVOLVEGROOVEDSPINES",
     "muscular-augments": "EVOLVEMUSCULARAUGMENTS",
-    "centrifugal-hooks": "CENTRIFUGALHOOKS",
+    "centrifugal-hooks": "CENTRIFICALHOOKS",
     "chitinous-plating": "CHITINOUSPLATING",
     "stimpack": "STIMPACK",
     "combat-shield": "SHIELDWALL",
@@ -1175,7 +1175,7 @@ def create_racket_sc2_agent(
                 "GLIALRECONSTITUTION",
                 "EVOLVEGROOVEDSPINES",
                 "EVOLVEMUSCULARAUGMENTS",
-                "CENTRIFUGALHOOKS",
+                "CENTRIFICALHOOKS",
                 "ZERGLINGATTACKSPEED",
                 "CHITINOUSPLATING",
                 "ZERGMISSILEWEAPONSLEVEL1",
@@ -1353,7 +1353,7 @@ def create_racket_sc2_agent(
             inferred_research_map = {
                 "SPAWNINGPOOL": "ZERGLINGMOVEMENTSPEED",
                 "ROACHWARREN": "GLIALRECONSTITUTION",
-                "BANELINGNEST": "CENTRIFUGALHOOKS",
+                "BANELINGNEST": "CENTRIFICALHOOKS",
                 "HYDRALISKDEN": "GROOVEDSPINES_OR_MUSCULARAUGMENTS",
                 "LURKERDENMP": "LURKERRANGE",
                 "SPIRE": "ZERGFLYER_UPGRADE",
@@ -3332,12 +3332,28 @@ def create_racket_sc2_agent(
                     base_scaled = max(base_scaled, 66)
                 target_workers = min(max_worker_cap, base_scaled)
 
-            enemy_near_expand = (
-                self.enemy_units.closer_than(32.0, main_th)
-                | self.enemy_structures.closer_than(36.0, main_th)
+            non_combat_scout_types = {
+                UnitTypeId.DRONE,
+                UnitTypeId.SCV,
+                UnitTypeId.PROBE,
+                UnitTypeId.OVERLORD,
+                UnitTypeId.OVERSEER,
+                UnitTypeId.OBSERVER,
+                UnitTypeId.LARVA,
+                UnitTypeId.EGG,
+            }
+            enemy_combat_near_main = self.enemy_units.filter(
+                lambda e: any(e.distance_to(th) <= 28.0 for th in self.townhalls)
+                and e.type_id not in non_combat_scout_types
+                and not getattr(e, "is_hallucination", False)
             )
+            enemy_proxies_near_main = self.enemy_structures.filter(
+                lambda s: any(s.distance_to(th) <= 32.0 for th in self.townhalls)
+            )
+            enemy_near_expand = len(enemy_combat_near_main) >= 3 or len(enemy_proxies_near_main) >= 1
             visible_enemy_combat = self.enemy_units.filter(
-                lambda e: e.type_id not in {UnitTypeId.DRONE, UnitTypeId.SCV, UnitTypeId.PROBE, UnitTypeId.OVERLORD, UnitTypeId.LARVA, UnitTypeId.EGG}
+                lambda e: e.type_id not in non_combat_scout_types
+                and not getattr(e, "is_hallucination", False)
             )
             enemy_army_est = max(len(visible_enemy_combat) * 2, int(self.supply_army * 0.6) if loop > 2688 else 4)
             army_ratio = float(self.supply_army + 4) / float(max(4, enemy_army_est))
@@ -3345,11 +3361,11 @@ def create_racket_sc2_agent(
             # 3. Mirror-Mind Macro/Eco/Base Prediction & Verdict
             nat_recently_empty = (loop - self._enemy_natural_scouted_empty_loop) < 1344
             is_rush_hyp = self.mirror_strategic_hypothesis == "opponent-committed-early-all-in"
-            if sec >= 180.0 and enemy_known_bases <= 1 and (nat_recently_empty or is_rush_hyp):
+            if 140.0 <= sec <= 270.0 and enemy_known_bases <= 1 and (nat_recently_empty or is_rush_hyp):
                 predicted_enemy_bases = 1
             else:
-                time_expected_bases = 3 if sec >= 330.0 else (2 if sec >= 135.0 else 1)
-                predicted_enemy_bases = max(enemy_known_bases, 1 if is_rush_hyp else time_expected_bases)
+                time_expected_bases = 4 if sec >= 450.0 else (3 if sec >= 300.0 else (2 if sec >= 115.0 else 1))
+                predicted_enemy_bases = max(enemy_known_bases, 1 if (is_rush_hyp and sec <= 270.0) else time_expected_bases)
 
             vis_enemy_workers = len(
                 self.enemy_units.filter(lambda u: u.type_id in {UnitTypeId.DRONE, UnitTypeId.SCV, UnitTypeId.PROBE})
@@ -3361,9 +3377,11 @@ def create_racket_sc2_agent(
             self.predicted_enemy_bases = predicted_enemy_bases
             self.predicted_enemy_workers = predicted_enemy_workers
 
-            if sec >= 180.0 and enemy_known_bases <= 1 and (nat_recently_empty or is_rush_hyp or len(visible_enemy_combat) >= 6):
+            if sec <= 270.0 and enemy_known_bases <= 1 and (
+                (140.0 <= sec and (nat_recently_empty or is_rush_hyp)) or len(enemy_combat_near_main) >= 4
+            ):
                 mirror_macro_verdict = "defend_one_base_all_in"
-            elif (enemy_known_bases >= len(self.townhalls) and (sec >= 90.0 or enemy_known_bases >= 2)) or predicted_enemy_bases > total_bases:
+            elif (enemy_known_bases >= len(self.townhalls) and (sec >= 90.0 or enemy_known_bases >= 2)) or predicted_enemy_bases >= total_bases:
                 mirror_macro_verdict = "counter_greedy_expand_and_disrupt"
             elif total_bases > predicted_enemy_bases:
                 mirror_macro_verdict = "macro_eco_lead"
@@ -3387,17 +3405,16 @@ def create_racket_sc2_agent(
             )
 
             exp_cost = 300 if self.race == Race.Zerg else 400
+            army_ready_for_multi_expand = (
+                total_bases == 1
+                or (total_bases == 2 and (self.supply_army >= 18 or self.minerals >= exp_cost + 200))
+                or (total_bases >= 3 and (self.supply_army >= 28 or self.minerals >= exp_cost + 300 or depleting_bases >= 1))
+            )
             safe_to_expand = (
                 not enemy_near_expand
                 and total_bases < max_map_bases
-                and (not all_in_alert or total_bases < 2 or has_choke_defense or self.supply_army >= 26)
-                and (
-                    total_bases == 1
-                    or greedy_accel
-                    or army_ratio >= 0.65
-                    or self.supply_army >= 20
-                    or self.minerals >= exp_cost + 150
-                )
+                and (not all_in_alert or total_bases < 2 or has_choke_defense or self.supply_army >= 22)
+                and army_ready_for_multi_expand
             )
 
             want_depletion_expand = (
@@ -3408,31 +3425,46 @@ def create_racket_sc2_agent(
                     depleting_bases >= 1
                     or mineral_workers > total_ideal_harvesters - 2
                 )
-                and (self.supply_army >= 8 or self.minerals >= exp_cost + 50)
+                and (self.supply_army >= 16 or self.minerals >= exp_cost + 150)
             )
 
-            nat_w_req = (14 if greedy_accel else 15) if self.race == Race.Zerg else (16 if greedy_accel else 18)
-            multi_w_req = int((13.5 if greedy_accel else 15.0) * eff_bases)
-            multi_min_req = exp_cost + (75 if greedy_accel else 125)
+            nat_w_req = 14 if self.race == Race.Zerg else 15
+            total_ideal_gas_harvesters = sum(
+                int(getattr(g, "ideal_harvesters", 3)) for g in self.gas_buildings.ready
+            )
+            mineral_saturated = (
+                total_ideal_harvesters > 0
+                and max(total_assigned_harvesters, mineral_workers) >= max(1, total_ideal_harvesters - 2)
+            )
+            gas_saturated = (
+                total_ideal_gas_harvesters == 0
+                or gas_workers >= max(1, total_ideal_gas_harvesters - 1)
+            )
+            multi_harvesters_saturated = mineral_saturated and gas_saturated
+            multi_min_req = exp_cost + (200 if greedy_accel else 250)
 
             want_saturation_expand = (
                 total_bases < max_map_bases
                 and pending_bases == 0
                 and (
-                    (total_bases == 1 and len(self.workers) >= nat_w_req)
-                    or (total_bases >= 2 and (len(self.workers) >= multi_w_req or self.minerals >= multi_min_req))
+                    (total_bases == 1 and (len(self.workers) >= nat_w_req or loop >= 1568))
+                    or (total_bases >= 2 and (multi_harvesters_saturated or self.minerals >= multi_min_req))
                 )
             )
 
             should_expand = safe_to_expand and (want_saturation_expand or want_depletion_expand)
 
-            # Bounded escrow window (max 96 game loops = ~4.3s per cycle) so army production is never starved indefinitely
+            # Escrow window: hold on 1 base once natural expansion is due (unless under direct attack),
+            # and on 2+ bases only hold escrow when army supply is healthy (>= 18) or minerals are already high.
             escrow_minerals = 0
-            if should_expand and self.minerals >= int(0.55 * exp_cost):
-                if self._escrow_started_loop < 0 or loop - self._escrow_started_loop > 192:
-                    self._escrow_started_loop = loop
-                if loop - self._escrow_started_loop <= 96:
+            if should_expand:
+                if total_bases == 1:
                     escrow_minerals = exp_cost
+                elif (self.supply_army >= 18 or self.minerals >= exp_cost + 100) and self.minerals >= int(0.45 * exp_cost):
+                    if self._escrow_started_loop < 0 or loop - self._escrow_started_loop > 336:
+                        self._escrow_started_loop = loop
+                    if loop - self._escrow_started_loop <= 224:
+                        escrow_minerals = exp_cost
 
             # 4. Dynamic Gas-vs-Mineral Worker Throttling (Guns-vs-Butter Allocation)
             gas_to_mineral_ratio = round(float(gas_workers) / float(max(1, mineral_workers)), 2)
@@ -4008,7 +4040,7 @@ def create_racket_sc2_agent(
             plaza_pos = self._get_main_build_anchor(main_th)
 
             # 1. Counter-Adapt to Cloak / Burrow (Mobile + Static Detection)
-            if self._enemy_requires_detection:
+            if self._enemy_requires_detection and not saving_for_expand:
                 if self.race == Race.Zerg and self.structures(UnitTypeId.SPAWNINGPOOL).ready:
                     if (
                         len(self.structures(UnitTypeId.SPORECRAWLER)) + self.already_pending(UnitTypeId.SPORECRAWLER) < min(3, len(self.townhalls))
@@ -4175,23 +4207,39 @@ def create_racket_sc2_agent(
                     await self.build(UnitTypeId.SPAWNINGPOOL, near=safe_build_pos)
 
             # 2. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion
-            enemy_near = self.enemy_units.closer_than(24.0, main_th) | self.enemy_structures.closer_than(26.0, main_th)
+            enemy_combat_near = self.enemy_units.filter(
+                lambda e: e.distance_to(main_th) <= 24.0
+                and e.type_id not in {
+                    UnitTypeId.DRONE,
+                    UnitTypeId.SCV,
+                    UnitTypeId.PROBE,
+                    UnitTypeId.OVERLORD,
+                    UnitTypeId.OVERSEER,
+                    UnitTypeId.OBSERVER,
+                    UnitTypeId.LARVA,
+                    UnitTypeId.EGG,
+                }
+                and not getattr(e, "is_hallucination", False)
+            )
+            enemy_near = len(enemy_combat_near) >= 3 or bool(self.enemy_structures.closer_than(26.0, main_th))
             total_hatches = macro_state["total_bases"]
             want_natural_hatch = (
                 macro_state["safe_to_expand"]
                 and total_hatches == 1
-                and len(self.workers) >= (14 if self.mirror_macro_verdict == "counter_greedy_expand_and_disrupt" else 15)
-                and (len(self.structures(UnitTypeId.SPAWNINGPOOL)) >= 1 or self.minerals >= 350)
+                and len(self.workers) >= 14
+                and (len(self.structures(UnitTypeId.SPAWNINGPOOL)) + self.already_pending(UnitTypeId.SPAWNINGPOOL) >= 1 or self.minerals >= 300)
             )
             want_multi_or_depletion_hatch = (
                 macro_state["safe_to_expand"]
                 and total_hatches >= 2
                 and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
             )
+            saving_for_hatch = (escrow >= 300 or want_natural_hatch or want_multi_or_depletion_hatch) and self.minerals < 350
             if (want_natural_hatch or want_multi_or_depletion_hatch) and self.minerals >= 300:
                 self.active_build_goal = "expand-hatchery"
                 reason = "depletion_replace_hatch" if macro_state["want_depletion_expand"] else "saturation_expand_hatch"
                 if await self._try_smart_expand(UnitTypeId.HATCHERY, reason=reason):
+                    saving_for_hatch = False
                     if macro_state["want_depletion_expand"]:
                         self.depletion_expansions_started += 1
 
@@ -4345,8 +4393,8 @@ def create_racket_sc2_agent(
                         rw.research(UpgradeId.GLIALRECONSTITUTION)
 
                 for bnest in self.structures(UnitTypeId.BANELINGNEST).ready.idle:
-                    if self.already_pending_upgrade(UpgradeId.CENTRIFUGALHOOKS) == 0 and self.can_afford(UpgradeId.CENTRIFUGALHOOKS):
-                        bnest.research(UpgradeId.CENTRIFUGALHOOKS)
+                    if self.already_pending_upgrade(UpgradeId.CENTRIFICALHOOKS) == 0 and self.can_afford(UpgradeId.CENTRIFICALHOOKS):
+                        bnest.research(UpgradeId.CENTRIFICALHOOKS)
 
                 if not saving_for_hatch and not self.structures(UnitTypeId.HYDRALISKDEN) and not self.already_pending(UnitTypeId.HYDRALISKDEN):
                     if self.can_afford(UnitTypeId.HYDRALISKDEN):
@@ -4433,6 +4481,7 @@ def create_racket_sc2_agent(
             desired_drones = macro_state["target_workers"]
             need_blocker_lings = (
                 len(self.townhalls) >= 2
+                and self.supply_army >= 24
                 and self.structures(UnitTypeId.SPAWNINGPOOL).ready
                 and len(self.units(UnitTypeId.ZERGLING)) + len(self.units(UnitTypeId.ZERGLINGBURROWED)) < 4
             )
@@ -4444,18 +4493,24 @@ def create_racket_sc2_agent(
             for larva in self.larva:
                 if self.supply_left < 1 and self.supply_cap < 200:
                     break
-                if self.minerals < escrow + 50:
+                if self.minerals < (escrow + 50 if self.supply_army >= 18 else 50):
                     break
                 if need_blocker_lings and self.can_afford(UnitTypeId.ZERGLING):
                     larva.train(UnitTypeId.ZERGLING)
                     need_blocker_lings = False
                     continue
-                if (len(self.workers) < 18 and (not enemy_near or army_count >= 4)) or (
-                    not enemy_near and len(self.workers) < desired_drones and army_count >= 6
-                ):
-                    if self.can_afford(UnitTypeId.DRONE):
-                        larva.train(UnitTypeId.DRONE)
-                        continue
+                want_drone_now = (
+                    (len(self.workers) < 19 and (not enemy_near or self.supply_army >= 6))
+                    or (
+                        not enemy_near
+                        and len(self.workers) < desired_drones
+                        and self.supply_army >= max(12, int((len(self.workers) - 16) * 0.85))
+                        and (len(self.workers) < 26 or (larva.tag + self.state.game_loop // 8) % 3 == 0)
+                    )
+                )
+                if want_drone_now and self.can_afford(UnitTypeId.DRONE):
+                    larva.train(UnitTypeId.DRONE)
+                    continue
                 if (
                     self.structures(UnitTypeId.ULTRALISKCAVERN).ready
                     and len(self.units(UnitTypeId.ULTRALISK)) < 4
@@ -4493,13 +4548,30 @@ def create_racket_sc2_agent(
                     larva.train(UnitTypeId.ROACH)
                 elif self.structures(UnitTypeId.SPAWNINGPOOL).ready and self.can_afford(UnitTypeId.ZERGLING):
                     larva.train(UnitTypeId.ZERGLING)
-                elif len(self.workers) < desired_drones and self.can_afford(UnitTypeId.DRONE):
+                elif (
+                    len(self.workers) < desired_drones
+                    and (self.supply_army >= 14 or self.minerals >= 350)
+                    and self.can_afford(UnitTypeId.DRONE)
+                ):
                     larva.train(UnitTypeId.DRONE)
 
         async def _macro_terran(self, main_th, can_spend_supply: bool, macro_state: Dict[str, Any]) -> None:
             plaza_build_pos = self._get_main_build_anchor(main_th)
             escrow = int(macro_state["escrow_minerals"])
-            saving_for_cc = escrow >= 400 and self.minerals < 450
+            total_ccs = macro_state["total_bases"]
+            rax_total = len(self.structures(UnitTypeId.BARRACKS)) + self.already_pending(UnitTypeId.BARRACKS)
+            want_natural_cc = (
+                macro_state["safe_to_expand"]
+                and total_ccs == 1
+                and rax_total >= 1
+                and (len(self.workers) >= 15 or self.state.game_loop >= 1568)
+            )
+            want_multi_or_depletion_cc = (
+                macro_state["safe_to_expand"]
+                and total_ccs >= 2
+                and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
+            )
+            saving_for_cc = (escrow >= 400 or want_natural_cc or want_multi_or_depletion_cc) and self.minerals < 450
 
             # Ensure first Supply Depot is started immediately at 13+ supply in open main-base plaza
             if (
@@ -4524,6 +4596,7 @@ def create_racket_sc2_agent(
                 self.structures(UnitTypeId.BARRACKS).ready
                 and len(self.townhalls(UnitTypeId.ORBITALCOMMAND)) < len(self.townhalls)
                 and self.already_pending(UnitTypeId.ORBITALCOMMAND) == 0
+                and (not saving_for_cc or len(self.townhalls(UnitTypeId.ORBITALCOMMAND)) == 0)
             ):
                 ccs = self.townhalls(UnitTypeId.COMMANDCENTER).ready.idle
                 if ccs and self.can_afford(UnitTypeId.ORBITALCOMMAND):
@@ -4532,21 +4605,43 @@ def create_racket_sc2_agent(
 
             desired_scvs = macro_state["target_workers"]
             if not saving_for_cc and can_spend_supply and len(self.workers) < desired_scvs:
+                scv_trained_this_step = 0
+                throttle_scvs = (
+                    len(self.workers) >= 24
+                    and self.supply_army < max(14, int((len(self.workers) - 16) * 0.85))
+                    and self.minerals < 400
+                )
                 for th in self.townhalls.ready.idle:
+                    if throttle_scvs and scv_trained_this_step >= 1:
+                        break
                     if (self.supply_left >= 1 or self.supply_cap >= 200) and self.minerals >= escrow + 50 and self.can_afford(UnitTypeId.SCV):
                         th.train(UnitTypeId.SCV)
+                        scv_trained_this_step += 1
 
-            # 2. Build first 2 Barracks & Refineries (throttled when in mineral_recovery_gas_pull)
+            # 2. Build 1st Barracks, then Natural Command Center (1-Rax FE), then 2nd Barracks & Refineries
             has_depot = (
                 len(self.structures(UnitTypeId.SUPPLYDEPOT).ready)
                 + len(self.structures(UnitTypeId.SUPPLYDEPOTLOWERED).ready)
                 >= 1
             )
-            rax_total = len(self.structures(UnitTypeId.BARRACKS)) + self.already_pending(UnitTypeId.BARRACKS)
             rax_spot = main_th.position.towards(plaza_build_pos, 5.5 + (rax_total % 3) * 3.0)
-            if has_depot and rax_total < 2:
-                if self.can_afford(UnitTypeId.BARRACKS) and self.already_pending(UnitTypeId.BARRACKS) < 2:
+            if has_depot and rax_total < 1:
+                if self.can_afford(UnitTypeId.BARRACKS):
                     self.active_build_goal = "opening-barracks"
+                    await self.build(UnitTypeId.BARRACKS, near=rax_spot, max_distance=16)
+
+            # 3. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion (Executed BEFORE extra Barracks/Addons!)
+            if (want_natural_cc or want_multi_or_depletion_cc) and self.minerals >= 400:
+                self.active_build_goal = "expand-command-center"
+                reason = "depletion_replace_cc" if macro_state["want_depletion_expand"] else "saturation_expand_cc"
+                if await self._try_smart_expand(UnitTypeId.COMMANDCENTER, reason=reason):
+                    saving_for_cc = False
+                    if macro_state["want_depletion_expand"]:
+                        self.depletion_expansions_started += 1
+
+            if has_depot and rax_total < 2 and (not saving_for_cc or total_ccs >= 2):
+                if self.can_afford(UnitTypeId.BARRACKS) and self.already_pending(UnitTypeId.BARRACKS) < 2:
+                    self.active_build_goal = "second-barracks"
                     await self.build(UnitTypeId.BARRACKS, near=rax_spot, max_distance=16)
 
             if self.guns_vs_butter_regime != "mineral_recovery_gas_pull":
@@ -4562,7 +4657,7 @@ def create_racket_sc2_agent(
                                         w.build_gas(vg)
                                         break
 
-            # 3. Attach TechLabs / Reactors on idle Barracks so no facility sits un-upgraded!
+            # 4. Attach TechLabs / Reactors on idle Barracks so no facility sits un-upgraded!
             max_techlabs = 1 if (rax_total < 3 or self.already_pending_upgrade(UpgradeId.STIMPACK) == 0) else min(4, (rax_total + 1) // 2)
             for rax in self.structures(UnitTypeId.BARRACKS).ready.idle:
                 if not rax.has_add_on and rax.tag not in self._addon_attempted_tags and not saving_for_cc:
@@ -4584,38 +4679,18 @@ def create_racket_sc2_agent(
                             rax.build(UnitTypeId.BARRACKSREACTOR)
                             break
 
-            # 4. Research Stimpack, Combat Shield, AND Concussive Shells at BarracksTechLab
-            for tlab in self.structures(UnitTypeId.BARRACKSTECHLAB).ready.idle:
-                if self.already_pending_upgrade(UpgradeId.STIMPACK) == 0 and self.can_afford(UpgradeId.STIMPACK):
-                    self.active_build_goal = "stimpack"
-                    tlab.research(UpgradeId.STIMPACK)
-                elif self.already_pending_upgrade(UpgradeId.SHIELDWALL) == 0 and self.can_afford(UpgradeId.SHIELDWALL):
-                    self.active_build_goal = "combat-shield"
-                    tlab.research(UpgradeId.SHIELDWALL)
-                elif self.already_pending_upgrade(UpgradeId.PUNISHERGRENADES) == 0 and self.can_afford(UpgradeId.PUNISHERGRENADES):
-                    self.active_build_goal = "concussive-shells"
-                    tlab.research(UpgradeId.PUNISHERGRENADES)
-
-            # 5. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion
-            total_ccs = macro_state["total_bases"]
-            want_natural_cc = (
-                macro_state["safe_to_expand"]
-                and total_ccs == 1
-                and rax_total >= 2
-                and len(self.workers) >= (16 if self.mirror_macro_verdict == "counter_greedy_expand_and_disrupt" else 18)
-                and (self.supply_army >= 8 or self.minerals >= 350)
-            )
-            want_multi_or_depletion_cc = (
-                macro_state["safe_to_expand"]
-                and total_ccs >= 2
-                and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
-            )
-            if (want_natural_cc or want_multi_or_depletion_cc) and self.minerals >= 400:
-                self.active_build_goal = "expand-command-center"
-                reason = "depletion_replace_cc" if macro_state["want_depletion_expand"] else "saturation_expand_cc"
-                if await self._try_smart_expand(UnitTypeId.COMMANDCENTER, reason=reason):
-                    if macro_state["want_depletion_expand"]:
-                        self.depletion_expansions_started += 1
+            # 5. Research Stimpack, Combat Shield, AND Concussive Shells at BarracksTechLab
+            if not saving_for_cc:
+                for tlab in self.structures(UnitTypeId.BARRACKSTECHLAB).ready.idle:
+                    if self.already_pending_upgrade(UpgradeId.STIMPACK) == 0 and self.can_afford(UpgradeId.STIMPACK):
+                        self.active_build_goal = "stimpack"
+                        tlab.research(UpgradeId.STIMPACK)
+                    elif self.already_pending_upgrade(UpgradeId.SHIELDWALL) == 0 and self.can_afford(UpgradeId.SHIELDWALL):
+                        self.active_build_goal = "combat-shield"
+                        tlab.research(UpgradeId.SHIELDWALL)
+                    elif self.already_pending_upgrade(UpgradeId.PUNISHERGRENADES) == 0 and self.can_afford(UpgradeId.PUNISHERGRENADES):
+                        self.active_build_goal = "concussive-shells"
+                        tlab.research(UpgradeId.PUNISHERGRENADES)
 
             # 6. Mid/Late-Game Tech on 2+ Bases: Engineering Bay (+1/+1/+2/+2/+3/+3), Factory (TechLab + SiegeTank), Starport (Medivacs + Vikings), Armory!
             if len(self.townhalls) >= 2 and not saving_for_cc:
@@ -4716,13 +4791,14 @@ def create_racket_sc2_agent(
                 and self.already_pending_upgrade(UpgradeId.STIMPACK) == 0
                 and self.vespene < 100
             )
-            if not saving_for_cc and can_spend_supply:
+            eff_rax_escrow = 0 if (self.supply_army < 20 and total_ccs >= 2) else escrow
+            if (not saving_for_cc or self.supply_army < 20 or total_ccs >= 2) and can_spend_supply:
                 for rax in self.structures(UnitTypeId.BARRACKS).ready:
                     max_orders = 2 if rax.has_reactor else 1
                     while len(rax.orders) < max_orders:
                         if self.supply_left < 1 and self.supply_cap < 200:
                             break
-                        if self.minerals < escrow + 50:
+                        if self.minerals < eff_rax_escrow + 50:
                             break
                         if (
                             rax.has_techlab
@@ -4739,7 +4815,24 @@ def create_racket_sc2_agent(
         async def _macro_protoss(self, main_th, can_spend_supply: bool, macro_state: Dict[str, Any]) -> None:
             safe_build_pos = self._get_main_build_anchor(main_th)
             escrow = int(macro_state["escrow_minerals"])
-            saving_for_nexus = escrow >= 400 and self.minerals < 450
+            total_nexuses = macro_state["total_bases"]
+            gw_total = (
+                len(self.structures(UnitTypeId.GATEWAY))
+                + len(self.structures(UnitTypeId.WARPGATE))
+                + self.already_pending(UnitTypeId.GATEWAY)
+            )
+            want_natural_nexus = (
+                macro_state["safe_to_expand"]
+                and total_nexuses == 1
+                and gw_total >= 1
+                and (len(self.workers) >= 15 or self.state.game_loop >= 1568)
+            )
+            want_multi_or_depletion_nexus = (
+                macro_state["safe_to_expand"]
+                and total_nexuses >= 2
+                and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
+            )
+            saving_for_nexus = (escrow >= 400 or want_natural_nexus or want_multi_or_depletion_nexus) and self.minerals < 450
 
             # Ensure first Pylon is built immediately in the open main-base plaza
             if len(self.structures(UnitTypeId.PYLON)) + self.already_pending(UnitTypeId.PYLON) == 0:
@@ -4763,12 +4856,21 @@ def create_racket_sc2_agent(
                         nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, targets.first)
                         self._record_pro_mechanic("chrono-boost")
 
-            # Continuous Probe Production FIRST (Zero-Unused-Production!)
+            # Continuous Probe Production FIRST (throttled when army is starved on 2+ bases)
             desired_probes = macro_state["target_workers"]
             if not saving_for_nexus and can_spend_supply and len(self.workers) < desired_probes:
+                probes_trained_this_step = 0
+                throttle_probes = (
+                    len(self.workers) >= 24
+                    and self.supply_army < max(14, int((len(self.workers) - 16) * 0.85))
+                    and self.minerals < 400
+                )
                 for nexus in self.townhalls.ready.idle:
+                    if throttle_probes and probes_trained_this_step >= 1:
+                        break
                     if (self.supply_left >= 1 or self.supply_cap >= 200) and self.minerals >= escrow + 50 and self.can_afford(UnitTypeId.PROBE):
                         nexus.train(UnitTypeId.PROBE)
+                        probes_trained_this_step += 1
 
             if not self.structures(UnitTypeId.PYLON).ready:
                 return
@@ -4779,21 +4881,25 @@ def create_racket_sc2_agent(
                 if len(pylons_ready) > 1
                 else pylons_ready.first
             )
-            gw_total = (
-                len(self.structures(UnitTypeId.GATEWAY))
-                + len(self.structures(UnitTypeId.WARPGATE))
-                + self.already_pending(UnitTypeId.GATEWAY)
-            )
 
-            # 2. Build 1st Gateway & Assimilators (throttled when in mineral_recovery_gas_pull)
+            # 2. Build 1st Gateway, then Natural Nexus (1-Gate FE), then Cybernetics Core & Assimilators
             if gw_total < 1:
                 if self.can_afford(UnitTypeId.GATEWAY):
                     self.active_build_goal = "opening-gateway"
                     await self.build(UnitTypeId.GATEWAY, near=safe_pylon, max_distance=15)
                 return
 
+            # 3. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion (Executed BEFORE extra buildings!)
+            if (want_natural_nexus or want_multi_or_depletion_nexus) and self.minerals >= 400:
+                self.active_build_goal = "expand-nexus"
+                reason = "depletion_replace_nexus" if macro_state["want_depletion_expand"] else "saturation_expand_nexus"
+                if await self._try_smart_expand(UnitTypeId.NEXUS, reason=reason):
+                    saving_for_nexus = False
+                    if macro_state["want_depletion_expand"]:
+                        self.depletion_expansions_started += 1
+
             if self.guns_vs_butter_regime != "mineral_recovery_gas_pull":
-                target_assim = 2 if len(self.townhalls) == 1 else min(8, int(2 * macro_state["eff_bases"]))
+                target_assim = 1 if len(self.townhalls) == 1 else min(8, int(2 * macro_state["eff_bases"]))
                 if not saving_for_nexus and gw_total >= 1 and len(self.gas_buildings) + self.already_pending(UnitTypeId.ASSIMILATOR) < target_assim:
                     if self.can_afford(UnitTypeId.ASSIMILATOR) and len(self.workers) >= 14:
                         for th in self.townhalls.ready:
@@ -4805,44 +4911,24 @@ def create_racket_sc2_agent(
                                         w.build_gas(vg)
                                         break
 
-            # 3. Build Cybernetics Core & Research WarpGateResearch
+            # 4. Build Cybernetics Core & Research WarpGateResearch
             need_cyber = (
                 (self.structures(UnitTypeId.GATEWAY).ready or self.structures(UnitTypeId.WARPGATE).ready)
                 and not self.structures(UnitTypeId.CYBERNETICSCORE)
                 and not self.already_pending(UnitTypeId.CYBERNETICSCORE)
             )
-            if need_cyber and self.can_afford(UnitTypeId.CYBERNETICSCORE):
+            if need_cyber and (not saving_for_nexus or total_nexuses >= 2) and self.can_afford(UnitTypeId.CYBERNETICSCORE):
                 self.active_build_goal = "cybernetics-core"
                 await self.build(UnitTypeId.CYBERNETICSCORE, near=safe_pylon, max_distance=15)
 
-            for cyber in self.structures(UnitTypeId.CYBERNETICSCORE).ready.idle:
-                if self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH) == 0 and self.can_afford(UpgradeId.WARPGATERESEARCH):
-                    self.active_build_goal = "warpgate-research"
-                    cyber.research(UpgradeId.WARPGATERESEARCH)
-
-            # 4. Coupled Depletion-Driven & Saturation-Driven Unconstrained Map-Wide Expansion
-            total_nexuses = macro_state["total_bases"]
-            want_natural_nexus = (
-                macro_state["safe_to_expand"]
-                and total_nexuses == 1
-                and not need_cyber
-                and len(self.workers) >= (16 if self.mirror_macro_verdict == "counter_greedy_expand_and_disrupt" else 18)
-                and (self.supply_army >= 4 or self.minerals >= 350)
-            )
-            want_multi_or_depletion_nexus = (
-                macro_state["safe_to_expand"]
-                and total_nexuses >= 2
-                and (macro_state["want_saturation_expand"] or macro_state["want_depletion_expand"])
-            )
-            if (want_natural_nexus or want_multi_or_depletion_nexus) and self.minerals >= 400:
-                self.active_build_goal = "expand-nexus"
-                reason = "depletion_replace_nexus" if macro_state["want_depletion_expand"] else "saturation_expand_nexus"
-                if await self._try_smart_expand(UnitTypeId.NEXUS, reason=reason):
-                    if macro_state["want_depletion_expand"]:
-                        self.depletion_expansions_started += 1
+            if not saving_for_nexus or total_nexuses >= 2:
+                for cyber in self.structures(UnitTypeId.CYBERNETICSCORE).ready.idle:
+                    if self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH) == 0 and self.can_afford(UpgradeId.WARPGATERESEARCH):
+                        self.active_build_goal = "warpgate-research"
+                        cyber.research(UpgradeId.WARPGATERESEARCH)
 
             # 5. Build 2nd Gateway & Robotics Facility
-            if not need_cyber and not saving_for_nexus and gw_total < 2 and self.can_afford(UnitTypeId.GATEWAY):
+            if not need_cyber and (not saving_for_nexus or total_nexuses >= 2) and gw_total < 2 and self.can_afford(UnitTypeId.GATEWAY):
                 await self.build(UnitTypeId.GATEWAY, near=safe_pylon, max_distance=15)
 
             target_robos = 1 if len(self.townhalls) < 3 else 2
@@ -4850,7 +4936,7 @@ def create_racket_sc2_agent(
                 self.structures(UnitTypeId.CYBERNETICSCORE).ready
                 and len(self.structures(UnitTypeId.ROBOTICSFACILITY)) + self.already_pending(UnitTypeId.ROBOTICSFACILITY) < target_robos
             )
-            if need_robo and not saving_for_nexus and self.can_afford(UnitTypeId.ROBOTICSFACILITY):
+            if need_robo and (not saving_for_nexus or total_nexuses >= 2) and self.can_afford(UnitTypeId.ROBOTICSFACILITY):
                 self.active_build_goal = "robotics-facility"
                 await self.build(UnitTypeId.ROBOTICSFACILITY, near=safe_pylon, max_distance=15)
 
@@ -4932,7 +5018,8 @@ def create_racket_sc2_agent(
                 self._record_pro_mechanic("morph-archon")
 
             # 6. RoboticsFacility (Observer + Colossus + Immortal + WarpPrism) & Stargate Production
-            if not saving_for_nexus and can_spend_supply:
+            eff_protoss_escrow = 0 if (self.supply_army < 22 and total_nexuses >= 2) else escrow
+            if (not saving_for_nexus or self.supply_army < 22 or total_nexuses >= 2) and can_spend_supply:
                 for robo in self.structures(UnitTypeId.ROBOTICSFACILITY).ready.idle:
                     if (
                         len(self.units(UnitTypeId.OBSERVER)) + self.already_pending(UnitTypeId.OBSERVER) < 1
@@ -4965,7 +5052,7 @@ def create_racket_sc2_agent(
                         sg.train(UnitTypeId.PHOENIX)
 
             # 7. Continuous Gateway Training & Automatic WarpGate Warp-Ins near ready Pylons!
-            if not saving_for_nexus and can_spend_supply:
+            if (not saving_for_nexus or self.supply_army < 22 or total_nexuses >= 2) and can_spend_supply:
                 has_wg_tech = UpgradeId.WARPGATERESEARCH in self.state.upgrades
                 for gw in self.structures(UnitTypeId.GATEWAY).ready.idle:
                     if has_wg_tech:
@@ -4973,7 +5060,7 @@ def create_racket_sc2_agent(
                         continue
                     if self.supply_left < 2 and self.supply_cap < 200:
                         break
-                    if self.minerals < escrow + 100:
+                    if self.minerals < eff_protoss_escrow + 100:
                         break
                     if self.structures(UnitTypeId.CYBERNETICSCORE).ready and self.can_afford(UnitTypeId.STALKER) and (
                         len(self.units(UnitTypeId.STALKER)) <= 2 * len(self.units(UnitTypeId.ZEALOT)) + 4
@@ -4984,12 +5071,12 @@ def create_racket_sc2_agent(
                         gw.train(UnitTypeId.ZEALOT)
 
                 ready_wgs = self.structures(UnitTypeId.WARPGATE).ready
-                if ready_wgs and pylons_ready and (self.supply_left >= 2 or self.supply_cap >= 200) and self.minerals >= escrow + 100:
+                if ready_wgs and pylons_ready and (self.supply_left >= 2 or self.supply_cap >= 200) and self.minerals >= eff_protoss_escrow + 100:
                     warp_pylon = pylons_ready.closest_to(self.game_info.map_center)
                     for idx, wg in enumerate(ready_wgs):
                         if self.supply_left < 2 and self.supply_cap < 200:
                             break
-                        if self.minerals < escrow + 100:
+                        if self.minerals < eff_protoss_escrow + 100:
                             break
                         try:
                             abilities = await self.get_available_abilities(wg)
