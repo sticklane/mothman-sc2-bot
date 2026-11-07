@@ -31,8 +31,6 @@
          racket/system
          compiler/cm
          file/gzip
-         file/sha1
-         openssl/sha1
          json)
 
 (define-runtime-path LADDER-DIR ".")
@@ -81,8 +79,19 @@
 (define (write-u32le v out)
   (write-bytes (integer->integer-bytes (bitwise-and v #xffffffff) 4 #f #f) out))
 
-(struct zip-entry-spec (name raw-bytes store-only? unix-mode) #:transparent)
+(struct zip-entry-spec (name raw-len crc final-bstr final-len method unix-mode) #:transparent)
 (struct cd-record (name-bytes method crc comp-len raw-len unix-mode local-offset) #:transparent)
+
+(define (make-zip-entry-spec name raw-bstr store-only? unix-mode)
+  (define raw-len (bytes-length raw-bstr))
+  (define crc (bytes-crc32 raw-bstr))
+  (define store? (or store-only? (< raw-len 64)))
+  (define comp-bstr (if store? raw-bstr (deflate-bytes raw-bstr)))
+  (define use-store? (or store? (>= (bytes-length comp-bstr) raw-len)))
+  (define final-bstr (if use-store? raw-bstr comp-bstr))
+  (define final-len (bytes-length final-bstr))
+  (define method (if use-store? 0 8))
+  (zip-entry-spec name raw-len crc final-bstr final-len method unix-mode))
 
 (define (write-pkzip-archive! zip-path entries)
   (make-parent-directory* zip-path)
@@ -92,15 +101,11 @@
       (define cd-records '())
       (for ([ent (in-list entries)])
         (define name-bstr (string->bytes/utf-8 (zip-entry-spec-name ent)))
-        (define raw-bstr (zip-entry-spec-raw-bytes ent))
-        (define raw-len (bytes-length raw-bstr))
-        (define crc (bytes-crc32 raw-bstr))
-        (define store? (or (zip-entry-spec-store-only? ent) (< raw-len 64)))
-        (define comp-bstr (if store? raw-bstr (deflate-bytes raw-bstr)))
-        (define use-store? (or store? (>= (bytes-length comp-bstr) raw-len)))
-        (define final-bstr (if use-store? raw-bstr comp-bstr))
-        (define final-len (bytes-length final-bstr))
-        (define method (if use-store? 0 8))
+        (define raw-len (zip-entry-spec-raw-len ent))
+        (define crc (zip-entry-spec-crc ent))
+        (define final-bstr (zip-entry-spec-final-bstr ent))
+        (define final-len (zip-entry-spec-final-len ent))
+        (define method (zip-entry-spec-method ent))
         (define local-offset (file-position out))
 
         ;; Local file header (#x04034b50)
@@ -227,7 +232,7 @@
   (define (add-spec! arcname bstr store? mode)
     (unless (hash-has-key? seen arcname)
       (hash-set! seen arcname #t)
-      (set! specs (cons (zip-entry-spec arcname bstr store? mode) specs))))
+      (set! specs (cons (make-zip-entry-spec arcname bstr store? mode) specs))))
 
   ;; Top-level files
   (for ([top-f (in-list INCLUDE-TOP-FILES)])
@@ -270,11 +275,11 @@
   (define elf-path (compile-cpplinux-elf bot-name))
   (define header-entries
     (append
-     (list (zip-entry-spec "config.json" config-bstr #f #o100644))
+     (list (make-zip-entry-spec "config.json" config-bstr #f #o100644))
      (if (and elf-path (file-exists? elf-path))
-         (list (zip-entry-spec bot-name (file->bytes elf-path) #f #o100755))
+         (list (make-zip-entry-spec bot-name (file->bytes elf-path) #f #o100755))
          '())
-     (list (zip-entry-spec "data/mirror_mind_opponents.json" seed-data-bstr #f #o100644))))
+     (list (make-zip-entry-spec "data/mirror_mind_opponents.json" seed-data-bstr #f #o100644))))
   (define all-entries (append header-entries shared-entries))
   (write-pkzip-archive! zip-path all-entries)
   (define sz (file-size zip-path))
