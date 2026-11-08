@@ -399,6 +399,8 @@
      2375  ;; BEHAVIOR_PULSARBEAMON
      2376  ;; BEHAVIOR_PULSARBEAMOFF
      2393  ;; EFFECT_VOIDRAYPRISMATICALIGNMENT
+     556   ;; MORPH_SUPPLYDEPOT_LOWER
+     558   ;; MORPH_SUPPLYDEPOT_RAISE
      3661  ;; BURROWDOWN
      3662  ;; BURROWUP
      3675  ;; EFFECT_STIM
@@ -451,3 +453,147 @@
      3755  ;; EFFECT_CHRONOBOOSTENERGYCOST
      4107  ;; BATTERYOVERCHARGE_BATTERYOVERCHARGE
      )))
+
+;; -----------------------------------------------------------------------------
+;; 7. Tactical Mirror Brain, In-Progress Order Ledger, Control Groups & Walling
+;; -----------------------------------------------------------------------------
+(define SC2-TACTICAL-ARENA-CLUSTER-RADIUS   12.0)  ;; Squad linkage radius (tiles)
+(define SC2-TACTICAL-ARENA-ENGAGE-RADIUS    18.0)  ;; Enemy inclusion radius (tiles)
+(define SC2-TACTICAL-REINFORCE-RADIUS       36.0)  ;; Reinforcement horizon radius (tiles)
+(define SC2-TACTICAL-SIM-DT-SEC             0.25)  ;; 5.6 frames per kinematic tick
+(define SC2-TACTICAL-DEPTH1-SEC             0.50)  ;; 11 frames (2 ticks): immediate swing
+(define SC2-TACTICAL-DEPTH2-SEC             2.00)  ;; 45 frames (8 ticks): skirmish trade
+(define SC2-TACTICAL-DEPTH3-SEC             5.00)  ;; 112 frames (20 ticks): fight & reinf
+(define SC2-TACTICAL-DEPTH1-WEIGHT          0.30)
+(define SC2-TACTICAL-DEPTH2-WEIGHT          0.45)
+(define SC2-TACTICAL-DEPTH3-WEIGHT          0.25)
+(define SC2-TACTICAL-MINIMAX-LAMBDA         0.35)  ;; Weight on worst-case enemy counter
+(define SC2-TACTICAL-HYSTERESIS-BONUS       18.0)  ;; Stickiness bonus for current micro action
+(define SC2-TACTICAL-PREEMPT-MULTIPLIER     2.50)  ;; Multiplier to break lock early
+(define SC2-TACTICAL-MIN-LOCK-FRAMES        11)    ;; ~0.5s minimum micro commitment
+(define SC2-TACTICAL-RETREAT-LOCK-FRAMES    22)    ;; ~1.0s commitment for retreat/harass
+(define SC2-WEAPON-READY-COOLDOWN-THRESH    0.08)  ;; Cooldown threshold to issue fire order
+(define SC2-WEAPON-KITE-COOLDOWN-THRESH     0.15)  ;; Cooldown threshold to kite during backswing
+(define SC2-BANSHEE-CLOAK-MIN-ENERGY        25)
+(define SC2-WORKER-KILL-ECONOMIC-VALUE      75.0)
+(define SC2-HERO-UNIT-LOSS-PENALTY          60.0)
+(define SC2-POSITIONAL-SURVIVAL-BONUS       15.0)
+
+;; In-Progress Order Tracking, Deduplication & Build-Site Reservation Constants
+(define SC2-ORDER-EQUIV-DIST-TOLERANCE      1.75)  ;; Tiles within which a move/attack-pos order is equivalent
+(define SC2-ORDER-LEDGER-TTL-FRAMES         45)    ;; ~2.0s in-flight order memory before engine expiry
+(define SC2-BUILD-SITE-RESERVATION-TTL      180)   ;; ~8.0s build-site footprint reservation while builder walks
+(define SC2-BUILD-SITE-MIN-CLEARANCE        3.0)   ;; Minimum clearance around reserved in-transit build site
+(define SC2-MAX-PENDING-SUPPLY-EARLY        1)     ;; Max concurrent supply providers when supply-cap < 66
+(define SC2-MAX-PENDING-SUPPLY-LATE         2)     ;; Max concurrent supply providers when supply-cap >= 66
+
+;; Camera Hotkey & Control Group Constants
+(define SC2-CONTROL-GROUP-COUNT             10)    ;; Groups 0..9
+(define SC2-CONTROL-GROUP-ACTION-RECALL           1)
+(define SC2-CONTROL-GROUP-ACTION-SET              2)
+(define SC2-CONTROL-GROUP-ACTION-APPEND           3)
+(define SC2-CONTROL-GROUP-ACTION-SET-AND-STEAL    4)
+(define SC2-CONTROL-GROUP-ACTION-APPEND-AND-STEAL 5)
+(define SC2-CAMERA-BOOKMARK-COUNT           8)     ;; Slots 1..8 (F1..F8)
+(define SC2-CAMERA-SACCADE-MIN-DWELL-FRAMES 16)    ;; ~0.71s minimum fixation dwell between routine jumps
+(define SC2-CAMERA-MOVE-DEDUP-DIST          2.0)   ;; Minimum camera shift (tiles) to emit ActionRawCameraMove
+(define SC2-BOOKMARK-DRIFT-UPDATE-DIST      4.0)   ;; Minimum drift (tiles) to re-save dynamic camera bookmark
+
+;; Terran Ramp Wall-In & East (+X) Add-on Geometry Constants
+(define SC2-TERRAN-ADDON-OFFSET-X           2.5)   ;; Add-on center X offset from 3x3 facility center
+(define SC2-TERRAN-ADDON-OFFSET-Y          -0.5)   ;; Add-on center Y offset from 3x3 facility center
+(define SC2-TERRAN-ADDON-CLEARANCE-RADIUS   1.6)   ;; Reserved radius around (bx + 2.5, by - 0.5)
+(define SC2-ADDON-FOOTPRINT-HALF-SIZE       1.6)   ;; Alias for add-on footprint clearance radius
+(define SC2-TERRAN-FACILITY-STEP-X          6.0)   ;; Horizontal spacing for 3x3 facility + 2x2 add-on (5+1 tiles)
+(define SC2-TERRAN-FACILITY-STEP-Y          3.5)   ;; Vertical spacing for 3x3 facility rows
+(define SC2-DEPOT-RAISE-THREAT-RADIUS       10.0)  ;; Raise Supply Depot when enemy ground unit within 10 tiles
+(define SC2-DEPOT-RAISE-ENEMY-RADIUS        10.0)  ;; Alias for depot raise threat radius
+(define SC2-RAMP-SEARCH-MIN-RADIUS          5.0)
+(define SC2-RAMP-SEARCH-MAX-RADIUS          24.0)
+
+;; -----------------------------------------------------------------------------
+;; 8. Canonical SC2 LotV Unit Combat & Kinematic Stats Table
+;; -----------------------------------------------------------------------------
+(define SC2-UNIT-COMBAT-STATS-TABLE
+  (hasheq
+   ;; Workers
+   'scv               (hasheq 'max-hp 45  'max-shield 0   'armor 0 'speed 3.94 'ground-dps 4.7  'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 1.07  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   'probe             (hasheq 'max-hp 20  'max-shield 20  'armor 0 'speed 3.94 'ground-dps 4.7  'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 1.07  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   'drone             (hasheq 'max-hp 40  'max-shield 0   'armor 0 'speed 3.94 'ground-dps 4.7  'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 1.07  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   ;; Terran Combat & Support
+   'marine            (hasheq 'max-hp 45  'max-shield 0   'armor 0 'speed 3.15 'ground-dps 9.8  'air-dps 9.8  'ground-range 5.0  'air-range 5.0  'weapon-period 0.61  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   'marauder          (hasheq 'max-hp 125 'max-shield 0   'armor 1 'speed 3.15 'ground-dps 13.9 'air-dps 0.0  'ground-range 6.0  'air-range 0.0  'weapon-period 1.07  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5625)
+   'reaper            (hasheq 'max-hp 60  'max-shield 0   'armor 0 'speed 5.25 'ground-dps 10.1 'air-dps 0.0  'ground-range 5.0  'air-range 0.0  'weapon-period 0.79  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   'ghost             (hasheq 'max-hp 100 'max-shield 0   'armor 0 'speed 3.94 'ground-dps 14.4 'air-dps 14.4 'ground-range 6.0  'air-range 6.0  'weapon-period 1.07  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.375)
+   'hellion           (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 5.95 'ground-dps 6.5  'air-dps 0.0  'ground-range 5.0  'air-range 0.0  'weapon-period 1.79  'damage-point 0.18 'splash-radius 0.8  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.625)
+   'hellbat           (hasheq 'max-hp 135 'max-shield 0   'armor 0 'speed 3.15 'ground-dps 16.8 'air-dps 0.0  'ground-range 2.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.18 'splash-radius 1.2  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.625)
+   'widow-mine        (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 3.94 'ground-dps 18.0 'air-dps 18.0 'ground-range 5.0  'air-range 5.0  'weapon-period 29.0  'damage-point 1.07 'splash-radius 1.75 'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5)
+   'widow-mine-burrowed (hasheq 'max-hp 90 'max-shield 0  'armor 0 'speed 0.0  'ground-dps 25.0 'air-dps 25.0 'ground-range 5.0  'air-range 5.0  'weapon-period 29.0  'damage-point 1.07 'splash-radius 1.75 'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5)
+   'cyclone           (hasheq 'max-hp 130 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 22.4 'air-dps 22.4 'ground-range 6.0  'air-range 6.0  'weapon-period 0.48  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'siege-tank        (hasheq 'max-hp 175 'max-shield 0   'armor 1 'speed 3.15 'ground-dps 26.0 'air-dps 0.0  'ground-range 7.0  'air-range 0.0  'weapon-period 1.49  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.875)
+   'siege-tank-sieged (hasheq 'max-hp 175 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 23.4 'air-dps 0.0  'ground-range 13.0 'air-range 0.0  'weapon-period 2.14  'damage-point 0.12 'splash-radius 1.25 'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.875)
+   'thor              (hasheq 'max-hp 400 'max-shield 0   'armor 1 'speed 2.62 'ground-dps 65.9 'air-dps 33.6 'ground-range 7.0  'air-range 11.0 'weapon-period 0.91  'damage-point 0.25 'splash-radius 0.5  'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+   'viking            (hasheq 'max-hp 135 'max-shield 0   'armor 0 'speed 3.85 'ground-dps 0.0  'air-dps 14.0 'ground-range 0.0  'air-range 9.0  'weapon-period 1.43  'damage-point 0.08 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'viking-fighter    (hasheq 'max-hp 135 'max-shield 0   'armor 0 'speed 3.85 'ground-dps 0.0  'air-dps 14.0 'ground-range 0.0  'air-range 9.0  'weapon-period 1.43  'damage-point 0.08 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'viking-assault    (hasheq 'max-hp 135 'max-shield 0   'armor 0 'speed 3.15 'ground-dps 16.8 'air-dps 0.0  'ground-range 6.0  'air-range 0.0  'weapon-period 0.71  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'medivac           (hasheq 'max-hp 150 'max-shield 0   'armor 1 'speed 3.50 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'liberator         (hasheq 'max-hp 180 'max-shield 0   'armor 0 'speed 4.72 'ground-dps 35.0 'air-dps 7.8  'ground-range 10.0 'air-range 5.0  'weapon-period 1.14  'damage-point 0.12 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'raven             (hasheq 'max-hp 140 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #t 'can-cloak? #f 'radius 0.625)
+   'banshee           (hasheq 'max-hp 140 'max-shield 0   'armor 0 'speed 3.85 'ground-dps 27.0 'air-dps 0.0  'ground-range 6.0  'air-range 0.0  'weapon-period 0.89  'damage-point 0.17 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #t 'radius 0.75)
+   'battlecruiser     (hasheq 'max-hp 550 'max-shield 0   'armor 3 'speed 2.62 'ground-dps 49.8 'air-dps 31.1 'ground-range 6.0  'air-range 6.0  'weapon-period 0.16  'damage-point 0.04 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
+   'missile-turret    (hasheq 'max-hp 250 'max-shield 0   'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 39.3 'ground-range 0.0  'air-range 7.0  'weapon-period 0.61  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)
+   'bunker            (hasheq 'max-hp 400 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 39.2 'air-dps 39.2 'ground-range 6.0  'air-range 6.0  'weapon-period 0.61  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.5)
+   'planetary-fortress (hasheq 'max-hp 1500 'max-shield 0 'armor 3 'speed 0.0  'ground-dps 28.0 'air-dps 0.0  'ground-range 6.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.12 'splash-radius 1.25 'flying? #f 'detector? #f 'can-cloak? #f 'radius 2.5)
+   ;; Zerg Combat & Support
+   'overlord          (hasheq 'max-hp 200 'max-shield 0   'armor 0 'speed 0.90 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'queen             (hasheq 'max-hp 175 'max-shield 0   'armor 1 'speed 1.31 'ground-dps 11.2 'air-dps 12.6 'ground-range 5.0  'air-range 8.0  'weapon-period 0.71  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.875)
+   'zergling          (hasheq 'max-hp 35  'max-shield 0   'armor 0 'speed 4.13 'ground-dps 10.0 'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 0.497 'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   'baneling          (hasheq 'max-hp 30  'max-shield 0   'armor 0 'speed 3.50 'ground-dps 80.0 'air-dps 0.0  'ground-range 0.25 'air-range 0.0  'weapon-period 1.0   'damage-point 0.05 'splash-radius 2.2  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   'roach             (hasheq 'max-hp 145 'max-shield 0   'armor 1 'speed 3.15 'ground-dps 11.2 'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5)
+   'ravager           (hasheq 'max-hp 120 'max-shield 0   'armor 1 'speed 3.85 'ground-dps 14.0 'air-dps 0.0  'ground-range 6.0  'air-range 0.0  'weapon-period 1.14  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'hydralisk         (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 3.15 'ground-dps 20.4 'air-dps 20.4 'ground-range 6.0  'air-range 6.0  'weapon-period 0.59  'damage-point 0.07 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.625)
+   'lurker            (hasheq 'max-hp 200 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 20.0 'air-dps 0.0  'ground-range 8.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.18 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.75)
+   'lurker-burrowed   (hasheq 'max-hp 200 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 20.0 'air-dps 0.0  'ground-range 8.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.18 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.75)
+   'mutalisk          (hasheq 'max-hp 120 'max-shield 0   'armor 0 'speed 5.60 'ground-dps 11.9 'air-dps 11.9 'ground-range 3.0  'air-range 3.0  'weapon-period 1.09  'damage-point 0.08 'splash-radius 1.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.5)
+   'corruptor         (hasheq 'max-hp 200 'max-shield 0   'armor 2 'speed 4.72 'ground-dps 0.0  'air-dps 14.7 'ground-range 0.0  'air-range 6.0  'weapon-period 1.36  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.625)
+   'brood-lord        (hasheq 'max-hp 225 'max-shield 0   'armor 1 'speed 1.97 'ground-dps 22.4 'air-dps 0.0  'ground-range 10.0 'air-range 0.0  'weapon-period 1.79  'damage-point 0.12 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.0)
+   'ultralisk         (hasheq 'max-hp 500 'max-shield 0   'armor 2 'speed 4.13 'ground-dps 57.4 'air-dps 0.0  'ground-range 1.0  'air-range 0.0  'weapon-period 0.61  'damage-point 0.16 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+   'overseer          (hasheq 'max-hp 200 'max-shield 0   'armor 1 'speed 4.72 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #t 'can-cloak? #f 'radius 0.75)
+   'spine-crawler     (hasheq 'max-hp 300 'max-shield 0   'armor 2 'speed 0.0  'ground-dps 20.2 'air-dps 0.0  'ground-range 7.0  'air-range 0.0  'weapon-period 1.32  'damage-point 0.15 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+   'spore-crawler     (hasheq 'max-hp 400 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 0.0  'air-dps 24.6 'ground-range 0.0  'air-range 7.0  'weapon-period 0.61  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)
+   ;; Protoss Combat & Support
+   'zealot            (hasheq 'max-hp 100 'max-shield 50  'armor 1 'speed 3.15 'ground-dps 18.6 'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 0.86  'damage-point 0.10 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5)
+   'stalker           (hasheq 'max-hp 80  'max-shield 80  'armor 1 'speed 4.13 'ground-dps 13.4 'air-dps 13.4 'ground-range 6.0  'air-range 6.0  'weapon-period 1.34  'damage-point 0.17 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.625)
+   'sentry            (hasheq 'max-hp 40  'max-shield 40  'armor 1 'speed 3.15 'ground-dps 8.4  'air-dps 8.4  'ground-range 5.0  'air-range 5.0  'weapon-period 0.71  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5)
+   'adept             (hasheq 'max-hp 70  'max-shield 70  'armor 1 'speed 3.50 'ground-dps 9.6  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.61  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5)
+   'high-templar      (hasheq 'max-hp 40  'max-shield 40  'armor 0 'speed 2.62 'ground-dps 3.2  'air-dps 0.0  'ground-range 6.0  'air-range 0.0  'weapon-period 1.25  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+   'dark-templar      (hasheq 'max-hp 40  'max-shield 80  'armor 1 'speed 3.94 'ground-dps 37.2 'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 1.21  'damage-point 0.25 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.375)
+   'archon            (hasheq 'max-hp 10  'max-shield 350 'armor 0 'speed 3.94 'ground-dps 25.0 'air-dps 25.0 'ground-range 3.0  'air-range 3.0  'weapon-period 1.25  'damage-point 0.18 'splash-radius 1.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+   'immortal          (hasheq 'max-hp 200 'max-shield 100 'armor 1 'speed 3.15 'ground-dps 29.0 'air-dps 0.0  'ground-range 6.0  'air-range 0.0  'weapon-period 1.04  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'colossus          (hasheq 'max-hp 200 'max-shield 150 'armor 1 'speed 3.15 'ground-dps 26.8 'air-dps 0.0  'ground-range 9.0  'air-range 0.0  'weapon-period 1.07  'damage-point 0.16 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+   'disruptor         (hasheq 'max-hp 100 'max-shield 100 'armor 1 'speed 3.15 'ground-dps 20.0 'air-dps 0.0  'ground-range 9.0  'air-range 0.0  'weapon-period 21.4  'damage-point 1.50 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5)
+   'observer          (hasheq 'max-hp 40  'max-shield 20  'armor 0 'speed 3.01 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #t 'can-cloak? #t 'radius 0.375)
+   'phoenix           (hasheq 'max-hp 120 'max-shield 60  'armor 0 'speed 5.95 'ground-dps 0.0  'air-dps 14.0 'ground-range 0.0  'air-range 5.0  'weapon-period 0.79  'damage-point 0.06 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'void-ray          (hasheq 'max-hp 150 'max-shield 100 'armor 0 'speed 3.85 'ground-dps 22.4 'air-dps 22.4 'ground-range 6.0  'air-range 6.0  'weapon-period 0.36  'damage-point 0.05 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.875)
+   'oracle            (hasheq 'max-hp 100 'max-shield 60  'armor 0 'speed 5.60 'ground-dps 24.4 'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 0.61  'damage-point 0.05 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+   'carrier           (hasheq 'max-hp 300 'max-shield 150 'armor 2 'speed 2.62 'ground-dps 37.5 'air-dps 37.5 'ground-range 8.0  'air-range 8.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
+   'tempest           (hasheq 'max-hp 200 'max-shield 100 'armor 2 'speed 3.15 'ground-dps 16.8 'air-dps 14.3 'ground-range 10.0 'air-range 14.0 'weapon-period 2.36  'damage-point 0.15 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
+   'photon-cannon     (hasheq 'max-hp 150 'max-shield 150 'armor 1 'speed 0.0  'ground-dps 22.4 'air-dps 22.4 'ground-range 7.0  'air-range 7.0  'weapon-period 0.89  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)))
+
+(define (sc2-unit-combat-stats sym)
+  (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym
+            (lambda ()
+              (hasheq 'max-hp 80 'max-shield 0 'armor 0 'speed 3.15
+                      'ground-dps 10.0 'air-dps 0.0 'ground-range 5.0 'air-range 0.0
+                      'weapon-period 1.0 'damage-point 0.10 'splash-radius 0.0
+                      'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5))))
+
+(define (sc2-unit-can-attack-air? sym)
+  (> (hash-ref (sc2-unit-combat-stats sym) 'air-dps 0.0) 0.0))
+
+(define (sc2-unit-can-attack-ground? sym)
+  (> (hash-ref (sc2-unit-combat-stats sym) 'ground-dps 0.0) 0.0))
+
+(define (sc2-unit-is-detector-sym? sym)
+  (eq? (hash-ref (sc2-unit-combat-stats sym) 'detector? #f) #t))
+

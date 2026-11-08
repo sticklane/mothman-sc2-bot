@@ -2014,6 +2014,158 @@
   (assert-true! (fuzz-campaign-report-passed? fuzz-rep)
                 "Fuzz campaign report must pass with 0 crashes and 0 contract violations"))
 
+;; =============================================================================
+;; 5.15 Multi-Depth Mirrored Tactical Micro Brain, In-Progress Order Ledger,
+;;      Orientation-Aware Terran Walling, Control Groups & Camera Bookmarks
+;; =============================================================================
+(run-suite "5.15 Multi-Depth Mirrored Tactical Micro Brain, In-Progress Order Ledger, Orientation-Aware Terran Walling, Control Groups & Camera Bookmarks"
+  ;; 1. Orientation-Aware Terran Ramp Wall-In (`solve-terran-ramp-wall`)
+  ;;    East-facing ramp (nat-x > base-x) vs West-facing ramp (nat-x < base-x) must produce
+  ;;    different Barracks & Depot coordinates because Terran add-ons ALWAYS attach on the East (+X)!
+  (define wall-east (solve-terran-ramp-wall 32.0 32.0 52.0 32.0))
+  (define wall-west (solve-terran-ramp-wall 52.0 32.0 32.0 32.0))
+  (assert-eq! (hash-ref wall-east 'orientation) 'east-facing-ramp-addon-walls
+              "Ramp descending East (nat-x > base-x) must be classified as 'east-facing-ramp-addon-walls")
+  (assert-eq! (hash-ref wall-west 'orientation) 'west-facing-ramp-addon-inside
+              "Ramp descending West (nat-x < base-x) must be classified as 'west-facing-ramp-addon-inside")
+  (assert-true! (not (equal? (hash-ref wall-east 'barracks) (hash-ref wall-west 'barracks)))
+                "East-facing vs West-facing Terran ramp wall must shift Barracks position to protect East (+X) add-on")
+  (define east-rax (hash-ref wall-east 'barracks))
+  (define east-addon (hash-ref wall-east 'barracks-addon))
+  (assert-true! (< (abs (- (- (car east-addon) (car east-rax)) 2.5)) 0.01)
+                "Terran add-on X offset from Barracks center must equal +2.5")
+  (assert-true! (< (abs (- (- (cdr east-addon) (cdr east-rax)) -0.5)) 0.01)
+                "Terran add-on Y offset from Barracks center must equal -0.5")
+
+  ;; 2. In-Progress Order Ledger (`make-order-ledger`, build-site reservation, and order equivalence)
+  (define oled (make-order-ledger))
+  (define-values (b1x b1y)
+    (order-ledger-resolve-build-coords! oled 'pylon 36.0 36.0 '() 100))
+  (order-ledger-record-issued! oled 11 'build 'pylon #:target-x b1x #:target-y b1y #:frame 100)
+  (define-values (b2x b2y)
+    (order-ledger-resolve-build-coords! oled 'pylon 36.0 36.0 '() 104))
+  (assert-true! (> (sqrt (+ (sqr (- b2x b1x)) (sqr (- b2y b1y)))) 2.0)
+                "Second Pylon requested while first Pylon build site is reserved must be offset by > 2.0 tiles")
+  (assert-eq! (order-ledger-pending-count-for-type oled 'pylon 104) 1
+              "Order ledger must count 1 in-flight Pylon build before structure appears in observation")
+
+  ;; Equivalent combat order deduplication
+  (define oled-combat (make-order-ledger))
+  (order-ledger-record-issued! oled-combat 501 'kite 'move #:target-x 50.0 #:target-y 50.0 #:frame 200)
+  ;; Clear step-issued-units by reconciling at frame 204 so we test cross-frame order equivalence
+  (define kite-unit-204
+    (hash 'id 501 'type 'banshee 'x 48.0 'y 48.0 'hp 140 'max-hp 140
+          'order-ability-id 16 'order-target-x 50.0 'order-target-y 50.0))
+  (order-ledger-reconcile-observation! oled-combat (hash 'frame 204 'ally-units (list kite-unit-204) 'ally-buildings '()))
+  (assert-true! (order-ledger-order-equivalent? oled-combat kite-unit-204 'kite 0 50.5 50.5 204)
+                "Move/kite order within SC2-ORDER-EQUIV-DIST-TOLERANCE (1.75 tiles) must be treated as equivalent")
+  (assert-eq! (order-ledger-order-equivalent? oled-combat kite-unit-204 'kite 0 65.0 65.0 204) #f
+              "Move/kite order > 1.75 tiles away must not be treated as equivalent")
+
+  ;; Weapon-swing guard prevents cancelling a Banshee's attack windup
+  (define banshee-swing-u
+    (hash 'id 502 'type 'banshee 'x 60.0 'y 60.0 'hp 140 'max-hp 140
+          'order-ability-id 23 'engaged-target-tag 900 'weapon-cooldown 0.04))
+  (assert-true! (order-ledger-unit-in-attack-swing? oled-combat banshee-swing-u 204)
+                "Banshee with order-ability-id=23, engaged-target-tag > 0, and low weapon-cooldown must be protected during attack swing")
+
+  ;; 3. Multi-Depth Mirrored Tactical Micro Brain (`step-tactical-mirror-brain!`)
+  (define tbrain (make-tactical-mirror-brain))
+  (define oled-tb (make-order-ledger))
+  ;; 3a. Banshee vs Ground-Only Zerglings: must free-fire (`attack-unit`), never retreat from ground-only units!
+  (define obs-air
+    (hash 'frame 300
+          'base-x 32.0 'base-y 32.0
+          'ally-units (list (hash 'id 601 'type 'banshee 'x 70.0 'y 70.0 'hp 140 'max-hp 140
+                                  'energy 60 'flying? #t 'cloaked #f 'weapon-cooldown 0.0 'engaged-target-tag 0))
+          'enemy-units (list (hash 'id 801 'type 'zergling 'x 71.0 'y 70.0 'hp 35 'max-hp 35 'flying? #f)
+                             (hash 'id 802 'type 'zergling 'x 71.5 'y 70.5 'hp 35 'max-hp 35 'flying? #f)
+                             (hash 'id 803 'type 'roach 'x 72.0 'y 70.0 'hp 145 'max-hp 145 'flying? #f))))
+  (order-ledger-reconcile-observation! oled-tb obs-air)
+  (define-values (tb-acts-air tb-tags-air _tb-decs-air)
+    (step-tactical-mirror-brain! tbrain obs-air oled-tb))
+  (assert-true! (set-member? tb-tags-air 601)
+                "Tactical mirror brain must claim Banshee 601 in active arena")
+  (assert-true! (ormap (lambda (a) (match a [(list 'attack-unit 601 _) #t] [_ #f])) tb-acts-air)
+                "Banshee facing ground-only enemies (Zerglings/Roaches) must issue attack-unit (free-fire), never retreat")
+
+  ;; 3b. Banshee with energy >= 25 vs Marines without detector: must cloak (`cloak-banshee`) and hold
+  ;;     commitment lock across consecutive steps without oscillating!
+  (define obs-cloak-400
+    (hash 'frame 400
+          'base-x 32.0 'base-y 32.0
+          'ally-units (list (hash 'id 602 'type 'banshee 'x 80.0 'y 80.0 'hp 140 'max-hp 140
+                                  'energy 50 'flying? #t 'cloaked #f 'weapon-cooldown 0.0 'engaged-target-tag 0))
+          'enemy-units (list (hash 'id 810 'type 'marine 'x 83.0 'y 80.0 'hp 45 'max-hp 45 'flying? #f)
+                             (hash 'id 811 'type 'marine 'x 83.5 'y 80.5 'hp 45 'max-hp 45 'flying? #f))))
+  (order-ledger-reconcile-observation! oled-tb obs-cloak-400)
+  (define-values (tb-acts-cloak _tb-tags-c tb-decs-c)
+    (step-tactical-mirror-brain! tbrain obs-cloak-400 oled-tb))
+  (assert-true! (member '(cast-spell 602 cloak-banshee) tb-acts-cloak)
+                "Uncloaked Banshee with energy >= 25 vs Marines without detection must cast cloak-banshee")
+  (define dec-400 (hash-ref (first tb-decs-c) 'committed-action))
+  ;; Step 4 frames later (frame 404, within SC2-TACTICAL-MIN-LOCK-FRAMES = 11): decision must not oscillate!
+  (define obs-cloak-404
+    (hash 'frame 404
+          'base-x 32.0 'base-y 32.0
+          'ally-units (list (hash 'id 602 'type 'banshee 'x 80.2 'y 80.0 'hp 134 'max-hp 140
+                                  'energy 35 'flying? #t 'cloaked #t 'weapon-cooldown 0.5 'engaged-target-tag 810))
+          'enemy-units (list (hash 'id 810 'type 'marine 'x 82.8 'y 80.0 'hp 33 'max-hp 45 'flying? #f)
+                             (hash 'id 811 'type 'marine 'x 83.3 'y 80.5 'hp 45 'max-hp 45 'flying? #f))))
+  (order-ledger-reconcile-observation! oled-tb obs-cloak-404)
+  (define-values (_tb-acts-404 _tb-tags-404 tb-decs-404)
+    (step-tactical-mirror-brain! tbrain obs-cloak-404 oled-tb))
+  (assert-eq! (hash-ref (first tb-decs-404) 'committed-action) dec-400
+              "Hysteresis commitment lock must prevent Banshee tactical action oscillation within lock window")
+
+  ;; 4. Building & Army Control Groups (`0..9`) & Camera Bookmarks (`F1..F8`)
+  (define hc (make-human-cortex #:epm-cap 300))
+  (define cg-obs
+    (hash 'frame 500
+          'base-x 32.0 'base-y 32.0
+          'natural-x 52.0 'natural-y 56.0
+          'third-x 72.0 'third-y 36.0
+          'enemy-x 144.0 'enemy-y 144.0
+          'ally-buildings (list (hash 'id 401 'type 'orbital-command 'x 32.0 'y 32.0 'build-progress 1.0 'order-count 0)
+                                (hash 'id 402 'type 'orbital-command 'x 52.0 'y 56.0 'build-progress 1.0 'order-count 1)
+                                (hash 'id 501 'type 'barracks 'x 36.0 'y 36.0 'build-progress 1.0 'order-count 0 'addon 'reactor)
+                                (hash 'id 502 'type 'barracks 'x 42.0 'y 36.0 'build-progress 1.0 'order-count 0 'addon 'techlab)
+                                (hash 'id 601 'type 'starport 'x 36.0 'y 40.0 'build-progress 1.0 'order-count 0 'addon 'techlab)
+                                (hash 'id 701 'type 'engineering-bay 'x 30.0 'y 36.0 'build-progress 1.0 'order-count 0)
+                                (hash 'id 901 'type 'supply-depot 'x 44.0 'y 44.0 'build-progress 1.0 'order-count 0))
+          'ally-units (list (hash 'id 101 'type 'marine 'x 54.0 'y 58.0 'hp 45)
+                            (hash 'id 102 'type 'marauder 'x 54.5 'y 58.5 'hp 125)
+                            (hash 'id 201 'type 'banshee 'x 90.0 'y 90.0 'hp 140 'flying? #t)
+                            (hash 'id 301 'type 'siege-tank 'x 53.0 'y 57.0 'hp 175)
+                            (hash 'id 801 'type 'reaper 'x 110.0 'y 110.0 'hp 60))))
+  (define cg-acts (cortex-sync-control-groups! hc
+                                               (hash-ref cg-obs 'ally-units)
+                                               (hash-ref cg-obs 'ally-buildings)
+                                               32.0
+                                               32.0))
+  (assert-eq! (cortex-get-control-group hc 4) '(401 402)
+              "Control Group 4 must bind all Townhalls (401, 402)")
+  (assert-eq! (cortex-get-control-group hc 5) '(501 502)
+              "Control Group 5 must bind Primary Production facilities (Barracks 501, 502)")
+  (assert-eq! (cortex-get-control-group hc 6) '(601)
+              "Control Group 6 must bind Tech Production facilities (Starport 601)")
+  (assert-eq! (cortex-get-control-group hc 7) '(701)
+              "Control Group 7 must bind Upgrade structures (Engineering Bay 701)")
+  (assert-eq! (cortex-get-control-group hc 2) '(201 801)
+              "Control Group 2 must bind Harass/Air squad (Banshee 201, Reaper 801)")
+  (assert-true! (not (member 201 (cortex-get-control-group hc 1)))
+                "Banshee 201 stolen into Control Group 2 must not be overwritten back into Main Army Group 1")
+  (define cg5-cap (cortex-production-group-capacity hc (hash-ref cg-obs 'ally-buildings) 5))
+  (assert-eq! (hash-ref cg5-cap 'open-slot-count) 3
+              "Building Control Group 5 capacity with 1 idle Reactor Barracks (2 slots) + 1 idle TechLab Barracks (1 slot) must equal 3")
+  (define bm-acts (cortex-sync-camera-bookmarks! hc cg-obs))
+  (assert-true! (pair? (cortex-get-camera-bookmark hc 1))
+                "Camera Bookmark F1 (Main Base) must be bound")
+  (assert-true! (pair? (cortex-get-camera-bookmark hc 2))
+                "Camera Bookmark F2 (Natural Base) must be bound")
+  (assert-true! (pair? (cortex-get-camera-bookmark hc 5))
+                "Camera Bookmark F5 (Primary Combat Front) must be bound"))
+
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"
         total-assertions)

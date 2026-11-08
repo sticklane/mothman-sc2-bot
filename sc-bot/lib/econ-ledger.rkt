@@ -1423,7 +1423,9 @@
     (cond
       [(>= supply-cap 200) 0.0]
       [(and (> pending-supply 0) (not supply-at-risk?)) 0.0]
-      [supply-at-risk?
+      [(and supply-at-risk?
+            (< pending-supply 2)
+            (<= eff-supply (+ supply-buffer 6.0)))
        (min 2.0 (max 0.5 raw-supply-hazard))]
       [(<= eff-supply supply-buffer)
        ;; Strictly positive in [0.05, 2.0] whenever supply-left <= supply-buffer (PV4)
@@ -1434,8 +1436,10 @@
   (define threat-pressure
     (/ (+ (* 1.5 enemy-threat-supply)
           (if under-attack? 12.0 0.0)
-          (max 0.0 (- (* 0.65 (exact->inexact (max 0 (- workers 14))))
-                      army-supply)))
+          (if (or under-attack? (> enemy-threat-supply 0.0))
+              (max 0.0 (- (* 0.65 (exact->inexact (max 0 (- workers 14))))
+                          army-supply))
+              0.0))
        (max 4.0 army-supply)))
 
   ;; 3. Gas imbalance
@@ -1547,10 +1551,11 @@
   (define gas-sink-active?
     (and (>= gas 100) (>= gas-imbalance 1.5)))
 
+  (define eff-supply (+ (exact->inexact supply-left) (* 8.0 (exact->inexact pending-supply))))
   (define supply-urgent?
     (and (< supply-cap 200)
          (or (> supply-hazard 0.0)
-             supply-at-risk?
+             (and supply-at-risk? (< pending-supply 2) (<= eff-supply (+ supply-buffer 6.0)))
              (and (= pending-supply 0) (<= supply-left supply-buffer)))))
 
   ;; PV5 boost (+ 180.0) for anti-air & detection units/tech

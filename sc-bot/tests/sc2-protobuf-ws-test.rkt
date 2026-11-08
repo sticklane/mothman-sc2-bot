@@ -309,14 +309,16 @@
                         #:ideal [ideal 0]
                         #:minerals [min-contents 1500]
                         #:vespene [vesp-contents 1500]
-                        #:orders [orders '()])
+                        #:orders [orders '()]
+                        #:add-on-tag [add-on-tag 0]
+                        #:flying? [flying? #f])
   (sc2-unit 1 alliance tag unit-type (if (= alliance 1) 1 2)
             (sc2-point3d x y 8.0) 0.0 1.0 1.0 0 #f #f #f
             hp hp 0.0 0.0 energy 200.0
             (if (= alliance 3) min-contents 0)
             (if (or (= alliance 3) (memv unit-type '(88 61 20))) vesp-contents 0)
-            #f #f #f #t #f
-            orders 0 '() assigned ideal 0.0 0 0 0 0))
+            flying? #f #f #t #f
+            orders add-on-tag '() assigned ideal 0.0 0 0 0 0))
 
 (define (make-test-obs loop minerals vespene units)
   (sc2-observation loop
@@ -452,6 +454,96 @@
                           (not (sc2-raw-unit-command-target-pos c))
                           (= (sc2-raw-unit-command-target-unit-tag c) 0)))
                    pt-cmds))
+
+;; Verify UI Control Groups, Camera Bookmarks, Reactor Multi-Slot Production,
+;; Terran East (+X) Add-On Reservation, Depot Lower/Raise, and Combat Order Deduplication
+(define cg-wire (encode-sc2-action (sc2-ui-control-group 4 2)))
+(check-true "ui-control-group-wire-nonempty" (> (bytes-length cg-wire) 0))
+
+(define terran-wall-obs
+  (make-test-obs
+   400 300 150
+   (list ;; SCV (45) at (34, 34)
+         (make-test-unit 701 45 1 34.0 34.0)
+         (make-test-unit 702 45 1 35.0 34.0)
+         ;; Raised Supply Depot (19) at (40, 40) - no enemy near -> should auto-lower (556)
+         (make-test-unit 710 19 1 40.0 40.0)
+         ;; Barracks (21) at (44, 44) with attached BarracksReactor (38, tag 721)
+         (make-test-unit 720 21 1 44.0 44.0 #:add-on-tag 721)
+         (make-test-unit 721 38 1 46.5 43.5)
+         ;; Cloaked Banshee (55) at (60, 60)
+         (make-test-unit 730 55 1 60.0 60.0 #:flying? #t))))
+
+;; 1. East (+X) add-on slot of Barracks at (44, 44) is (46.5, 43.5); spiral candidates around (46.5, 43.5)
+;;    must never place a building on top of the East add-on slot!
+(define addon-cands
+  (collect-spiral-candidates 46.5 43.5 (sc2-observation-units terran-wall-obs)
+                             #:min-spacing 2.5 #:max-radius 8.0 #:step 2.0))
+(check-true "terran-east-addon-slot-reserved"
+            (for/and ([pt (in-list addon-cands)])
+              (> (sqrt (+ (sqr (- (sc2-point2d-x pt) 46.5))
+                          (sqr (- (sc2-point2d-y pt) 43.5))))
+                 2.0)))
+
+;; 2. Reactor Barracks (720) with 0 orders returns tag 720 twice so 2 Marines train in 1 step!
+(define reactor-prod-tags
+  (select-producer-tags-for-unit 'marine (sc2-observation-units terran-wall-obs)))
+(check-eqv "reactor-barracks-two-open-slots"
+           (count (lambda (t) (= t 720)) reactor-prod-tags)
+           2)
+
+;; 3. Translate batch with 2 Marines, 2 Pylons at same anchor, Control Group Set/Steal/Recall,
+;;    Camera Bookmark Jump deduplication, and conflicting Banshee orders in same step
+(define tw-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((train marine)
+     (train marine)
+     (build supply-depot 36.0 36.0)
+     (build supply-depot 36.0 36.0)
+     (control-group-set 5 (720))
+     (control-group-steal 2 (730))
+     (control-group-recall 5)
+     (camera-bookmark-jump 1 32.0 32.0)
+     (move-camera 32.5 32.5) ;; within 2.0 tiles -> deduplicated!
+     (kite 730 55.0 55.0)
+     (attack-pos (730) 90.0 90.0)) ;; conflicting lower-priority order on 730 -> suppressed!
+   terran-wall-obs))
+
+(check-eqv "reactor-barracks-emits-two-marine-trains-in-one-step"
+           (count (lambda (c)
+                    (and (sc2-raw-unit-command? c)
+                         (= (sc2-raw-unit-command-ability-id c) 560)
+                         (equal? (sc2-raw-unit-command-unit-tags c) '(720))))
+                  tw-cmds)
+           2)
+
+(define depot-build-pts
+  (for/list ([c (in-list tw-cmds)]
+             #:when (and (sc2-raw-unit-command? c)
+                         (= (sc2-raw-unit-command-ability-id c) 319)))
+    (sc2-raw-unit-command-target-pos c)))
+(check-eqv "two-depots-built-in-same-step" (length depot-build-pts) 2)
+(check-true "two-depots-have-distinct-reserved-coords"
+            (not (equal? (first depot-build-pts) (second depot-build-pts))))
+
+(check-eqv "ui-control-group-commands-emitted"
+           (count sc2-ui-control-group? tw-cmds)
+           3)
+(check-eqv "camera-moves-deduplicated-within-step"
+           (count sc2-raw-camera-move? tw-cmds)
+           1)
+(check-eqv "banshee-730-receives-exactly-one-combat-order-per-step"
+           (count (lambda (c)
+                    (and (sc2-raw-unit-command? c)
+                         (member 730 (sc2-raw-unit-command-unit-tags c))))
+                  tw-cmds)
+           1)
+(check-true "raised-depot-710-auto-lowers-when-safe"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 556)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(710))))
+                   tw-cmds))
 
 ;; -----------------------------------------------------------------------------
 ;; 5. Full Mock SC2_x64 RFC 6455 WebSocket Server + Match Loop Integration Test

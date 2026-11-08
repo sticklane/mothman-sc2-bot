@@ -213,6 +213,8 @@
     camera-bookmark-save
     camera-bookmark-jump
     control-group-steal
+    control-group-set
+    control-group-recall
     human-apm-discipline
     mirror-prediction
     mirror-macro-directive
