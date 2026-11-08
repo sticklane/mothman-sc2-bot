@@ -4,6 +4,7 @@
          racket/list
          racket/math
          "../compiler/syntax.rkt"
+         "sc2-game-constants.rkt"
          "okasaki-sc.rkt")
 
 (provide
@@ -1739,6 +1740,16 @@
   (define exp-blocking? (and (= active-bases 1) escrow-ok?))
   (define supply-urgent? (> (hash-ref metrics 'supply-hazard 0.0) 0.0))
 
+  (define (cand id category action blocking-allowed?)
+    (make-scored-candidate id
+                           category
+                           action
+                           (sc2-min-cost id)
+                           (sc2-gas-cost id)
+                           (sc2-supply-cost id 0)
+                           blocking-allowed?
+                           metrics))
+
   (case race
     [(Zerg)
      (define upg-sym
@@ -1747,18 +1758,18 @@
          [(not (memq 'glial-reconstitution upgs)) 'glial-reconstitution]
          [else 'zerg-missile-weapons-1]))
      (list
-      (make-scored-candidate 'overlord 'supply '(train overlord) 100 0 0 supply-urgent? metrics)
-      (make-scored-candidate 'spore-crawler 'counter-tech (list 'build 'spore-crawler (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (+ base-y 3.0))) 75 0 0 #t metrics)
-      (make-scored-candidate 'queen 'counter-tech '(train queen) 150 0 2 #t metrics)
-      (make-scored-candidate 'hydralisk-den 'counter-tech (list 'build 'hydralisk-den (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 5.0))) 100 100 0 #t metrics)
-      (make-scored-candidate 'overseer 'counter-tech '(morph overseer) 50 50 0 #t metrics)
-      (make-scored-candidate 'roach 'combat-unit '(train roach) 75 25 2 #t metrics)
-      (make-scored-candidate 'hydralisk 'combat-unit '(train hydralisk) 100 50 2 #t metrics)
-      (make-scored-candidate 'zergling 'combat-unit '(train zergling) 50 0 1 #t metrics)
-      (make-scored-candidate upg-sym 'tech-upgrade (list 'research upg-sym) 100 100 0 #t metrics)
-      (make-scored-candidate 'roach-warren 'production-scaling (list 'build 'roach-warren (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (- base-y 4.0))) 150 0 0 #t metrics)
-      (make-scored-candidate 'drone 'worker '(train drone) 50 0 1 #f metrics)
-      (make-scored-candidate 'hatchery 'expansion (list 'expand exp-x exp-y) 300 0 0 exp-blocking? metrics))]
+      (cand 'overlord 'supply '(train overlord) supply-urgent?)
+      (cand 'spore-crawler 'counter-tech (list 'build 'spore-crawler (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (+ base-y 3.0))) #t)
+      (cand 'queen 'counter-tech '(train queen) #t)
+      (cand 'hydralisk-den 'counter-tech (list 'build 'hydralisk-den (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 5.0))) #t)
+      (cand 'overseer 'counter-tech '(morph overseer) #t)
+      (cand 'roach 'combat-unit '(train roach) #t)
+      (cand 'hydralisk 'combat-unit '(train hydralisk) #t)
+      (cand 'zergling 'combat-unit '(train zergling) #t)
+      (cand upg-sym 'tech-upgrade (list 'research upg-sym) #t)
+      (cand 'roach-warren 'production-scaling (list 'build 'roach-warren (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (- base-y 4.0))) #t)
+      (cand 'drone 'worker '(train drone) #f)
+      (cand 'hatchery 'expansion (list 'expand exp-x exp-y) exp-blocking?))]
 
     [(Protoss)
      (define upg-sym
@@ -1767,17 +1778,17 @@
          [(not (memq 'charge upgs)) 'charge]
          [else 'protoss-ground-weapons-1]))
      (list
-      (make-scored-candidate 'pylon 'supply (list 'build 'pylon (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) 100 0 0 supply-urgent? metrics)
-      (make-scored-candidate 'photon-cannon 'counter-tech (list 'build 'photon-cannon nat-x nat-y) 150 0 0 #t metrics)
-      (make-scored-candidate 'robotics-facility 'counter-tech (list 'build 'robotics-facility (safe-tile-coord (+ base-x 6.0)) (safe-tile-coord (+ base-y 6.0))) 150 100 0 #t metrics)
-      (make-scored-candidate 'observer 'counter-tech '(train observer) 25 75 1 #t metrics)
-      (make-scored-candidate 'stalker 'combat-unit '(train stalker) 125 50 2 #t metrics)
-      (make-scored-candidate 'immortal 'combat-unit '(train immortal) 275 100 4 #t metrics)
-      (make-scored-candidate 'zealot 'combat-unit '(train zealot) 100 0 2 #t metrics)
-      (make-scored-candidate upg-sym 'tech-upgrade (list 'research upg-sym) 100 100 0 #t metrics)
-      (make-scored-candidate 'gateway 'production-scaling (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) 150 0 0 #t metrics)
-      (make-scored-candidate 'probe 'worker '(train probe) 50 0 1 #f metrics)
-      (make-scored-candidate 'nexus 'expansion (list 'expand exp-x exp-y) 400 0 0 exp-blocking? metrics))]
+      (cand 'pylon 'supply (list 'build 'pylon (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) supply-urgent?)
+      (cand 'photon-cannon 'counter-tech (list 'build 'photon-cannon nat-x nat-y) #t)
+      (cand 'robotics-facility 'counter-tech (list 'build 'robotics-facility (safe-tile-coord (+ base-x 6.0)) (safe-tile-coord (+ base-y 6.0))) #t)
+      (cand 'observer 'counter-tech '(train observer) #t)
+      (cand 'stalker 'combat-unit '(train stalker) #t)
+      (cand 'immortal 'combat-unit '(train immortal) #t)
+      (cand 'zealot 'combat-unit '(train zealot) #t)
+      (cand upg-sym 'tech-upgrade (list 'research upg-sym) #t)
+      (cand 'gateway 'production-scaling (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) #t)
+      (cand 'probe 'worker '(train probe) #f)
+      (cand 'nexus 'expansion (list 'expand exp-x exp-y) exp-blocking?))]
 
     [else ;; Terran
      (define upg-sym
@@ -1786,17 +1797,17 @@
          [(not (memq 'combat-shield upgs)) 'combat-shield]
          [else 'terran-infantry-weapons-1]))
      (list
-      (make-scored-candidate 'supply-depot 'supply (list 'build 'supply-depot (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (- base-y 3.0))) 100 0 0 supply-urgent? metrics)
-      (make-scored-candidate 'missile-turret 'counter-tech (list 'build 'missile-turret (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (+ base-y 3.0))) 100 0 0 #t metrics)
-      (make-scored-candidate 'engineering-bay 'counter-tech (list 'build 'engineering-bay (safe-tile-coord (+ base-x 5.0)) (safe-tile-coord (- base-y 3.0))) 125 0 0 #t metrics)
-      (make-scored-candidate 'viking-fighter 'counter-tech '(train viking-fighter) 150 75 2 #t metrics)
-      (make-scored-candidate 'marauder 'combat-unit '(train marauder) 100 25 2 #t metrics)
-      (make-scored-candidate 'siege-tank 'combat-unit '(train siege-tank) 150 125 3 #t metrics)
-      (make-scored-candidate 'marine 'combat-unit '(train marine) 50 0 1 #t metrics)
-      (make-scored-candidate upg-sym 'tech-upgrade (list 'research upg-sym) 100 100 0 #t metrics)
-      (make-scored-candidate 'barracks 'production-scaling (list 'build 'barracks (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) 150 0 0 #t metrics)
-      (make-scored-candidate 'scv 'worker '(train scv) 50 0 1 #f metrics)
-      (make-scored-candidate 'command-center 'expansion (list 'expand exp-x exp-y) 400 0 0 exp-blocking? metrics))]))
+      (cand 'supply-depot 'supply (list 'build 'supply-depot (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (- base-y 3.0))) supply-urgent?)
+      (cand 'missile-turret 'counter-tech (list 'build 'missile-turret (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (+ base-y 3.0))) #t)
+      (cand 'engineering-bay 'counter-tech (list 'build 'engineering-bay (safe-tile-coord (+ base-x 5.0)) (safe-tile-coord (- base-y 3.0))) #t)
+      (cand 'viking-fighter 'counter-tech '(train viking-fighter) #t)
+      (cand 'marauder 'combat-unit '(train marauder) #t)
+      (cand 'siege-tank 'combat-unit '(train siege-tank) #t)
+      (cand 'marine 'combat-unit '(train marine) #t)
+      (cand upg-sym 'tech-upgrade (list 'research upg-sym) #t)
+      (cand 'barracks 'production-scaling (list 'build 'barracks (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0))) #t)
+      (cand 'scv 'worker '(train scv) #f)
+      (cand 'command-center 'expansion (list 'expand exp-x exp-y) exp-blocking?))]))
 
 (define (schedule-priority-candidates-with-ledger!
          candidates

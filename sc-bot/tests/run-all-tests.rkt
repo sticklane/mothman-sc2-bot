@@ -1948,6 +1948,64 @@
   (assert-true! (not (member '(train zergling) acts-5106683))
                 "Matches #5106683 & #5106687: Zerg at 50M and 16 Drones on 2 Hatcheries must not starve Drone production by spending last 50M on Zerglings")
 
+  ;; Replay Pathology Property 8 (Bugs #15 & #16): Queens at >= 45 energy continue injecting when tumor is on cooldown and skip in-transit Hatcheries
+  (define rt-queen-inject (make-zerg-overmind-runtime))
+  (define _res-q1
+    (step-live-bot-runtime!
+     rt-queen-inject
+     (hash 'frame 1000
+           'minerals 200 'gas 50 'supply-used 24 'supply-cap 36 'supply-left 12
+           'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+           'ally-units (list (hash 'id 55 'type 'queen 'x 32.5 'y 32.5 'hp 175 'energy 65))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 999999 'type 'hatchery 'x 50.5 'y 56.5 'hp 150 'build-progress 0.01)
+                                 (hash 'id 103 'type 'spawning-pool 'x 35.5 'y 35.5 'hp 1000 'build-progress 1.0))
+           'enemy-units '())))
+  ;; Step 4 frames later (tumor still on 224-frame cooldown): Queen at 65 energy must inject ready Hatchery 101, not fake tag 999999!
+  (define res-q2
+    (step-live-bot-runtime!
+     rt-queen-inject
+     (hash 'frame 1004
+           'minerals 200 'gas 50 'supply-used 24 'supply-cap 36 'supply-left 12
+           'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+           'ally-units (list (hash 'id 55 'type 'queen 'x 32.5 'y 32.5 'hp 175 'energy 65))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 999999 'type 'hatchery 'x 50.5 'y 56.5 'hp 150 'build-progress 0.01)
+                                 (hash 'id 103 'type 'spawning-pool 'x 35.5 'y 35.5 'hp 1000 'build-progress 1.0))
+           'enemy-units '())))
+  (define acts-q2 (hash-ref res-q2 'actions))
+  (assert-true! (member '(cast-spell 55 inject-larva 101) acts-q2)
+                "Bug #15 & #16: Queen with >= 45 energy must emit (cast-spell 55 inject-larva 101) when tumor is on cooldown and skip unbuilt Hatchery 999999")
+  (assert-true! (not (member '(cast-spell 55 inject-larva 999999) acts-q2))
+                "Bug #16: Queen must never target in-transit/unbuilt Hatchery (build-progress 0.01) with inject-larva")
+
+  ;; Replay Pathology Property 9 (Bug #18): Terran with barracks-tech-lab researches stimpack
+  (define rt-stim (make-terran-pluto-runtime))
+  (define res-stim
+    (step-live-bot-runtime!
+     rt-stim
+     (hash 'frame 2400
+           'minerals 250 'gas 150 'supply-used 30 'supply-cap 46 'supply-left 16
+           'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+           'ally-units (for/list ([i (in-range 22)])
+                         (hash 'id (+ 10 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 302 'type 'orbital-command 'x 50.5 'y 56.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 303 'type 'barracks 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0)
+                                 (hash 'id 304 'type 'barracks-tech-lab 'x 39.0 'y 36.5 'hp 400 'build-progress 1.0))
+           'researched-upgrades '()
+           'enemy-units '())))
+  (assert-true! (member '(research stimpack) (hash-ref res-stim 'actions))
+                "Bug #18: Terran with completed barracks-tech-lab and 100M/100G must emit (research stimpack)")
+
+  ;; Replay Pathology Property 10 (Bug #21): Human Cortex prioritizes real SC2 combat micro over symbolic formation metadata
+  (assert-true! (> (action-priority '(attack-unit 105 300))
+                   (action-priority '(execute-spatial-maneuver 140.0 140.0 130.0 130.0)))
+                "Bug #21: Direct unit micro (attack-unit) must outrank global execute-spatial-maneuver in Human Cortex")
+  (assert-true! (> (action-priority '(kite 105 30.0 30.0))
+                   (action-priority '(concave-arc 140.0 140.0 6.0 100.0 100.0)))
+                "Bug #21: Direct unit kiting (kite) must outrank symbolic concave-arc metadata in Human Cortex")
+
   (define fuzz-rep (run-bot-crash-and-contract-fuzzer #:frames 1000 #:seed 20261107))
   (assert-eq! (fuzz-campaign-report-total-crashes fuzz-rep) 0
               "Crash fuzzer must encounter 0 runtime crashes")

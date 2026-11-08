@@ -64,6 +64,7 @@ def precompile_racket_zo() -> bool:
         return False
     targets = [
         "main.rkt",
+        "lib/sc2-game-constants.rkt",
         "lib/sc2-protobuf-ws.rkt",
         "sim/racket_sc2_ipc_bot.rkt",
         "sim/racket-sc2-ladder-main.rkt",

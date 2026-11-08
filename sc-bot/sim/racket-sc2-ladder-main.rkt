@@ -791,22 +791,30 @@
                                          (filter (lambda (u) (= (sc2-unit-alliance u) 1))
                                                  (sc2-observation-units obs))))))
 
-              ;; Step cognitive architecture
+              ;; Step cognitive architecture (primary actions first so individual unit micro
+              ;; populates commanded-combat-tags before any global spatial maneuver)
               (define step-res (step-live-bot-runtime! runtime obs-hash))
               (define bot-actions
-                (append (hash-ref step-res 'mirror-actions '())
-                        (hash-ref step-res 'actions '())))
+                (append (hash-ref step-res 'actions '())
+                        (hash-ref step-res 'mirror-actions '())))
 
               ;; Translate S-expression actions + automatic worker/gas saturation
+              ;; (excluding workers commanded to build/expand/defend in this frame)
+              (define commanded-workers (mutable-seteqv))
+              (define action-cmds
+                (translate-bot-actions->sc2-raw-commands
+                 bot-actions
+                 obs
+                 #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
+                 #:ws-conn conn
+                 #:enemy-base (hash-ref obs-hash 'enemy-base #f)
+                 #:commanded-workers commanded-workers))
               (define raw-cmds
                 (append
-                 (translate-bot-actions->sc2-raw-commands
-                  bot-actions
+                 action-cmds
+                 (saturate-workers-and-gas-commands
                   obs
-                  #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
-                  #:ws-conn conn
-                  #:enemy-base (hash-ref obs-hash 'enemy-base #f))
-                 (saturate-workers-and-gas-commands obs)))
+                  #:excluded-worker-tags commanded-workers)))
 
               (when (not (null? raw-cmds))
                 (sc2-ws-rpc! conn (make-request-action raw-cmds #:id (next-id!)))

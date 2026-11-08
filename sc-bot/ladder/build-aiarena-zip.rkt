@@ -180,6 +180,7 @@
   (define targets
     '("main.rkt"
       "compiler/syntax.rkt"
+      "lib/sc2-game-constants.rkt"
       "lib/okasaki-sc.rkt"
       "lib/perception-grid.rkt"
       "lib/econ-ledger.rkt"

@@ -13,6 +13,7 @@
          racket/set
          racket/string
          racket/tcp
+         "../lib/sc2-game-constants.rkt"
          "../lib/sc2-protobuf-ws.rkt"
          "../sim/racket-sc2-ladder-main.rkt")
 
@@ -289,6 +290,168 @@
                           (= (sc2-raw-unit-command-ability-id c) 3666)
                           (= (sc2-raw-unit-command-target-unit-tag c) 200)))
                    raw-cmds))
+
+;; Regression Tests for Bugs #8–#20 & Central SC2 Game Constants
+(check-eqv "constants-queen-inject-energy" SC2-QUEEN-INJECT-ENERGY 25)
+(check-eqv "constants-queen-tumor-surplus-energy" SC2-QUEEN-TUMOR-SURPLUS-ENERGY 45)
+(check-eqv "constants-pylon-total-max-hp" SC2-PYLON-TOTAL-MAX-HP 400)
+(check-eqv "constants-stalker-cost"
+           (list (sc2-min-cost 'stalker) (sc2-gas-cost 'stalker) (sc2-supply-cost 'stalker))
+           '(125 50 2))
+(check-eqv "constants-barracks-techlab-alias"
+           (unit-symbol->sc2-id 'barracks-techlab)
+           (unit-symbol->sc2-id 'barracks-tech-lab))
+
+(define (make-test-unit tag unit-type alliance x y
+                        #:hp [hp 100.0]
+                        #:energy [energy 0.0]
+                        #:assigned [assigned 0]
+                        #:ideal [ideal 0]
+                        #:minerals [min-contents 1500]
+                        #:vespene [vesp-contents 1500]
+                        #:orders [orders '()])
+  (sc2-unit 1 alliance tag unit-type (if (= alliance 1) 1 2)
+            (sc2-point3d x y 8.0) 0.0 1.0 1.0 0 #f #f #f
+            hp hp 0.0 0.0 energy 200.0
+            (if (= alliance 3) min-contents 0)
+            (if (or (= alliance 3) (memv unit-type '(88 61 20))) vesp-contents 0)
+            #f #f #f #t #f
+            orders 0 '() assigned ideal 0.0 0 0 0 0))
+
+(define (make-test-obs loop minerals vespene units)
+  (sc2-observation loop
+                   (sc2-player-common 1 minerals vespene 44 24 8 16 0 4 0 3)
+                   units '() '() #f '() '() '() '() '() '()))
+
+;; Bug #8: Gas harvester near Extractor (`<= 3.5` tiles) or targeting Extractor is not re-ordered
+(define bug8-obs
+  (make-test-obs
+   448 200 50
+   (append
+    (list (make-test-unit 1 86 1 32.0 32.0 #:assigned 14 #:ideal 16)
+          ;; Ready Extractor (88) at (32.0, 25.0) needing 1 more worker (2/3)
+          (make-test-unit 2 88 1 32.0 25.0 #:assigned 2 #:ideal 3)
+          ;; Drone #10 right next to Extractor (dist 1.0 <= 3.5) returning gas to Hatchery
+          (make-test-unit 10 104 1 32.0 26.0 #:orders (list (sc2-unit-order 299 #f 1 0.0)))
+          ;; Drone #11 mining minerals closer to Extractor than other mineral drones (dist 5.0 > 3.5)
+          (make-test-unit 11 104 1 28.0 28.0 #:orders (list (sc2-unit-order 298 #f 50 0.0)))
+          (make-test-unit 50 341 3 24.0 28.0))
+    ;; 12 more mineral drones farther away at (22.0, 32.0) so total workers = 14 (>= SC2-MIN-WORKERS-FOR-GAS)
+    (for/list ([i (in-range 12)])
+      (make-test-unit (+ 100 i) 104 1 22.0 32.0 #:orders (list (sc2-unit-order 298 #f 50 0.0)))))))
+(define bug8-cmds (saturate-workers-and-gas-commands bug8-obs))
+(check-true "bug8-picks-mineral-drone-11-not-gas-drone-10"
+            (and (ormap (lambda (c)
+                          (and (sc2-raw-unit-command? c)
+                               (equal? (sc2-raw-unit-command-unit-tags c) '(11))
+                               (= (sc2-raw-unit-command-target-unit-tag c) 2)))
+                        bug8-cmds)
+                 (not (ormap (lambda (c)
+                               (and (sc2-raw-unit-command? c)
+                                    (equal? (sc2-raw-unit-command-unit-tags c) '(10))))
+                             bug8-cmds))))
+
+;; Bug #9: Over-saturated main (20/16) transfers worker to under-saturated natural (2/16),
+;; and gas float (gas > 600, minerals < 200) pulls worker from gas to minerals
+(define bug9-obs
+  (make-test-obs
+   2000 120 750
+   (list ;; Main Hatchery over-saturated (20/16)
+         (make-test-unit 1 86 1 32.0 32.0 #:assigned 20 #:ideal 16)
+         ;; Natural Hatchery under-saturated (2/16)
+         (make-test-unit 2 86 1 60.0 32.0 #:assigned 2 #:ideal 16)
+         ;; Extractor (3/3)
+         (make-test-unit 3 88 1 32.0 25.0 #:assigned 3 #:ideal 3)
+         ;; Drone #20 mining main minerals
+         (make-test-unit 20 104 1 26.0 32.0 #:orders (list (sc2-unit-order 298 #f 50 0.0)))
+         ;; Drone #21 mining gas at Extractor #3
+         (make-test-unit 21 104 1 32.0 25.5 #:orders (list (sc2-unit-order 298 #f 3 0.0)))
+         ;; Main mineral field #50 & Natural mineral field #51
+         (make-test-unit 50 341 3 25.0 32.0)
+         (make-test-unit 51 341 3 66.0 32.0))))
+(define bug9-cmds (saturate-workers-and-gas-commands bug9-obs))
+(check-true "bug9-transfers-worker-20-to-natural-mineral-51"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(20))
+                          (= (sc2-raw-unit-command-target-unit-tag c) 51)))
+                   bug9-cmds))
+(check-true "bug9-pulls-gas-worker-21-to-minerals-on-high-gas-float"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(21))
+                          (memv (sc2-raw-unit-command-target-unit-tag c) '(50 51))))
+                   bug9-cmds))
+
+;; Bug #10: Commanded builder worker is excluded from saturate-workers-and-gas-commands
+(define bug10-commanded (mutable-set))
+(define _bug10-build-cmds
+  (translate-bot-actions->sc2-raw-commands '((build spawning-pool 36.0 36.0))
+                                           decoded-obs
+                                           #:commanded-workers bug10-commanded))
+(check-true "bug10-builder-worker-recorded-in-commanded-set"
+            (set-member? bug10-commanded 103))
+(define bug10-sat-cmds
+  (saturate-workers-and-gas-commands decoded-obs #:excluded-worker-tags bug10-commanded))
+(check-true "bug10-saturate-does-not-overwrite-builder-worker-103"
+            (not (ormap (lambda (c)
+                          (and (sc2-raw-unit-command? c)
+                               (member 103 (sc2-raw-unit-command-unit-tags c))))
+                        bug10-sat-cmds)))
+
+;; Bug #11: execute-spatial-maneuver does not trickle-feed < 8 combat units or overwrite micro
+(define bug11-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((attack-unit 105 300)
+     (execute-spatial-maneuver 140.0 140.0 130.0 130.0))
+   decoded-obs))
+(check-eqv "bug11-only-micro-command-emitted-no-trickle-override"
+           (length bug11-cmds)
+           1)
+(check-eqv "bug11-micro-targets-enemy-unit-300"
+           (sc2-raw-unit-command-target-unit-tag (car bug11-cmds))
+           300)
+
+;; Bug #14, #17, #19: MULE target mineral patch, WarpGate warp-in, and Target.None abilities
+(define protoss-terran-obs
+  (make-test-obs
+   600 300 200
+   (list ;; Orbital Command (132) at (32, 32)
+         (make-test-unit 500 132 1 32.0 32.0 #:energy 100.0 #:assigned 16 #:ideal 16)
+         ;; Pylon (60) at (38, 38)
+         (make-test-unit 501 60 1 38.0 38.0)
+         ;; WarpGate (133) at (40, 38)
+         (make-test-unit 502 133 1 40.0 38.0)
+         ;; Marine (48) at (42, 42)
+         (make-test-unit 503 48 1 42.0 42.0)
+         ;; Mineral Field (341) at (26, 32)
+         (make-test-unit 600 341 3 26.0 32.0))))
+(define pt-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((cast-spell 500 calldown-mule 504)
+     (train stalker)
+     (cast-spell 503 stimpack 503))
+   protoss-terran-obs))
+(check-true "bug14-mule-resolves-real-mineral-field-600"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 171)
+                          (= (sc2-raw-unit-command-target-unit-tag c) 600)))
+                   pt-cmds))
+(check-true "bug17-warpgate-trains-stalker-via-warp-in-1414-at-point"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 1414)
+                          (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                          (= (sc2-raw-unit-command-target-unit-tag c) 0)))
+                   pt-cmds))
+(check-true "bug19-stimpack-uses-target-none"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (memv (sc2-raw-unit-command-ability-id c) '(380 3675))
+                          (not (sc2-raw-unit-command-target-pos c))
+                          (= (sc2-raw-unit-command-target-unit-tag c) 0)))
+                   pt-cmds))
 
 ;; -----------------------------------------------------------------------------
 ;; 5. Full Mock SC2_x64 RFC 6455 WebSocket Server + Match Loop Integration Test

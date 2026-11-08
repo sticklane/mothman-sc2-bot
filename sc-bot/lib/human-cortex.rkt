@@ -17,6 +17,7 @@
  fitts-saccade-ms
  fitts-saccade-frames
  cortex-move-camera!
+ action-priority
  cortex-filter-actions!
 
  ;; Control Groups (0..9) & Pro Control-Group Stealing (Alt+Group)
@@ -204,15 +205,20 @@
     [(list 'expand _ ...)                    81]
     [(list 'research _ ...)                  79]
     [(list 'train _ ...)                     78]
-    [(list 'execute-spatial-maneuver _ ...)  75]
-    [(list 'mirror-spatial-maneuver _ ...)   74]
-    [(list 'mirror-macro-directive _ ...)    73]
-    [(list 'mirror-prediction _ ...)         72]
-    [(list 'mirror-tech-observation _ ...)   71]
-    [(list 'mirror-zero-sum-exclusion _ ...) 70]
-    [(list 'kite _ ...)                      68]
-    [(list 'attack-unit _ ...)               64]
-    [(list 'attack-pos _ ...)                60]
+    [(list 'kite _ ...)                      77]
+    [(list (or 'attack 'attack-unit) _ ...)  76]
+    [(list 'attack-pos _ ...)                75]
+    [(list 'execute-spatial-maneuver _ ...)  74]
+    [(list 'mirror-spatial-maneuver _ ...)   73]
+    [(list 'mirror-macro-directive _ ...)    72]
+    [(list 'mirror-prediction _ ...)         71]
+    [(list 'mirror-tech-observation _ ...)   70]
+    [(list 'mirror-zero-sum-exclusion _ ...) 69]
+    [(list (or 'cast-protective-buff-aura
+               'position-in-buff-aura-with-splash-spread
+               'pre-split-wings
+               'form-concave-arc
+               'high-ground-tactics) _ ...)  52]
     [(list 'harvest-gas _ ...)               42]
     [(list 'harvest-mineral _ ...)           40]
     [_                                       55]))
