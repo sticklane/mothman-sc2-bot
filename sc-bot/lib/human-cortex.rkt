@@ -342,7 +342,8 @@
     (define used-slots
       (max (hash-ref b 'order-count 0)
            (length (hash-ref b 'orders '()))
-           (if (hash-ref b 'order-ability-id #f) 1 0)))
+           (let ([aid (hash-ref b 'order-ability-id #f)])
+             (if (and (exact-integer? aid) (> aid 0)) 1 0))))
     (define open-slots (max 0 (- max-slots used-slots)))
     (set! ready-tags (cons id ready-tags))
     (when (> open-slots 0)

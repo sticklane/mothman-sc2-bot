@@ -663,6 +663,8 @@
                               #:computer-opponent? [computer-opponent? #f]
                               #:computer-race [computer-race "Protoss"]
                               #:computer-difficulty [computer-difficulty "VeryHard"]
+                              #:host-2p-opponent-race [host-2p-opponent-race #f]
+                              #:save-replay-path [save-replay-path #f]
                               #:map-name [map-name "Simple64.SC2Map"]
                               #:max-loops [max-loops 4032]
                               #:realtime? [realtime? #f]
@@ -693,16 +695,31 @@
     (lambda ()
       (set! conn (connect-sc2-ws-with-retry host effective-port #:path "/sc2api")))
     (lambda ()
-      ;; 1. Optional CreateGame when playing against Built-in SC2 Computer
-      (when computer-opponent?
-        (define cg-req
-          (make-request-create-game #:map-path effective-map
-                                    #:our-race our-race
-                                    #:computer-race computer-race
-                                    #:computer-difficulty computer-difficulty
-                                    #:realtime? realtime?
-                                    #:id (next-id!)))
-        (sc2-ws-rpc! conn cg-req))
+      ;; 1. Optional CreateGame when playing against Built-in SC2 Computer OR hosting a 2-bot game
+      (cond
+        [computer-opponent?
+         (define cg-req
+           (make-request-create-game #:map-path effective-map
+                                     #:our-race our-race
+                                     #:computer-race computer-race
+                                     #:computer-difficulty computer-difficulty
+                                     #:realtime? realtime?
+                                     #:id (next-id!)))
+         (sc2-ws-rpc! conn cg-req)]
+        [host-2p-opponent-race
+         (define cg-req
+           (make-request-create-game #:map-path effective-map
+                                     #:include-map-data? #t
+                                     #:player-setups (list (list 1 our-race)
+                                                           (list 1 host-2p-opponent-race))
+                                     #:realtime? realtime?
+                                     #:id (next-id!)))
+         (define cg-resp (sc2-ws-rpc! conn cg-req))
+         (fprintf (current-error-port)
+                  "[HOST-2P] RequestCreateGame completed (status=~a map=~a)\n"
+                  (sc2-response-status cg-resp)
+                  effective-map)
+         (flush-output (current-error-port))])
 
       ;; 2. JoinGame
       (define pcfg (compute-ladder-port-config (and (not computer-opponent?) start-port)))
@@ -717,6 +734,12 @@
       (define jg-info (sc2-response-join-game jg-resp))
       (define our-player-id
         (if (hash? jg-info) (hash-ref jg-info 'player-id 1) 1))
+      (when host-2p-opponent-race
+        (fprintf (current-error-port)
+                 "[HOST-2P] RequestJoinGame completed (player-id=~a status=~a)\n"
+                 our-player-id
+                 (sc2-response-status jg-resp))
+        (flush-output (current-error-port)))
 
       ;; 3. RequestGameInfo & RequestData
       (define gi-resp (sc2-ws-rpc! conn (make-request-game-info #:id (next-id!))))
@@ -745,89 +768,97 @@
       (define last-game-loop 0)
       (define match-result "Undecided")
 
-      ;; 5. Main WebSocket Match Loop
-      (let match-loop ()
-        (define obs-resp (sc2-ws-rpc! conn (make-request-observation #:id (next-id!))))
-        (define status (sc2-response-status obs-resp))
-        (define obs (sc2-response-observation obs-resp))
-        (cond
-          [(or (not obs) (memq status '(ended quit)))
-           (when (and obs (not (null? (sc2-observation-player-results obs))))
-             (for ([pr (in-list (sc2-observation-player-results obs))])
+      ;; 5. Main WebSocket Match Loop (catch SIGINT/SIGTERM break so SaveReplay still runs)
+      (with-handlers ([exn:break? (lambda (_e)
+                                    (when (string=? match-result "Undecided")
+                                      (set! match-result "Interrupted")))])
+        (let match-loop ()
+          (define obs-resp (sc2-ws-rpc! conn (make-request-observation #:id (next-id!))))
+          (define status (sc2-response-status obs-resp))
+          (define obs (sc2-response-observation obs-resp))
+          (cond
+            [(or (not obs) (memq status '(ended quit)))
+             (when (and obs (not (null? (sc2-observation-player-results obs))))
+               (for ([pr (in-list (sc2-observation-player-results obs))])
+                 (when (= (sc2-player-result-player-id pr) our-player-id)
+                   (set! match-result (symbol->string (sc2-player-result-result pr))))))
+             (void)]
+            [else
+             (set! last-game-loop (sc2-observation-game-loop obs))
+             (define pres (sc2-observation-player-results obs))
+             (for ([pr (in-list pres)])
                (when (= (sc2-player-result-player-id pr) our-player-id)
-                 (set! match-result (symbol->string (sc2-player-result-result pr))))))
-           (void)]
-          [else
-           (set! last-game-loop (sc2-observation-game-loop obs))
-           (define pres (sc2-observation-player-results obs))
-           (for ([pr (in-list pres)])
-             (when (= (sc2-player-result-player-id pr) our-player-id)
-               (set! match-result (symbol->string (sc2-player-result-result pr)))))
+                 (set! match-result (symbol->string (sc2-player-result-result pr)))))
 
-           (cond
-             [(or (not (null? pres))
-                  (and (> max-loops 0) (>= last-game-loop max-loops)))
-              (when (string=? match-result "Undecided")
-                (set! match-result "Tie"))
-              (void)]
-             [else
-              (define obs-hash
-                (sc2-observation->runtime-obs-hash
-                 obs
-                 #:game-info game-info
-                 #:our-player-id our-player-id
-                 #:configured-race configured-race-sym
-                 #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)))
+             (cond
+               [(or (not (null? pres))
+                    (and (> max-loops 0) (>= last-game-loop max-loops)))
+                (when (string=? match-result "Undecided")
+                  (set! match-result "Tie"))
+                (void)]
+               [else
+                (define obs-hash
+                  (sc2-observation->runtime-obs-hash
+                   obs
+                   #:game-info game-info
+                   #:our-player-id our-player-id
+                   #:configured-race configured-race-sym
+                   #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)))
 
-              (define actual-race (hash-ref obs-hash 'race 'Zerg))
-              (set-live-bot-runtime-actual-race! runtime actual-race)
+                (define actual-race (hash-ref obs-hash 'race 'Zerg))
+                (set-live-bot-runtime-actual-race! runtime actual-race)
 
-              (define pc (sc2-observation-player-common obs))
-              (set! peak-workers (max peak-workers (sc2-player-common-food-workers pc)))
-              (set! peak-army-supply (max peak-army-supply (sc2-player-common-food-army pc)))
-              (set! peak-bases
-                    (max peak-bases
-                         (length (filter sc2-unit-is-townhall?
-                                         (filter (lambda (u) (= (sc2-unit-alliance u) 1))
-                                                 (sc2-observation-units obs))))))
+                (define pc (sc2-observation-player-common obs))
+                (set! peak-workers (max peak-workers (sc2-player-common-food-workers pc)))
+                (set! peak-army-supply (max peak-army-supply (sc2-player-common-food-army pc)))
+                (set! peak-bases
+                      (max peak-bases
+                           (length (filter sc2-unit-is-townhall?
+                                           (filter (lambda (u) (= (sc2-unit-alliance u) 1))
+                                                   (sc2-observation-units obs))))))
 
-              ;; Step cognitive architecture (primary actions first so individual unit micro
-              ;; populates commanded-combat-tags before any global spatial maneuver)
-              (define step-res (step-live-bot-runtime! runtime obs-hash))
-              (define bot-actions
-                (append (hash-ref step-res 'actions '())
-                        (hash-ref step-res 'mirror-actions '())))
+                ;; Step cognitive architecture (primary actions first so individual unit micro
+                ;; populates commanded-combat-tags before any global spatial maneuver)
+                (define step-res (step-live-bot-runtime! runtime obs-hash))
+                (define bot-actions
+                  (append (hash-ref step-res 'actions '())
+                          (hash-ref step-res 'mirror-actions '())))
 
-              ;; Translate S-expression actions + automatic worker/gas saturation
-              ;; (excluding workers commanded to build/expand/defend in this frame)
-              (define commanded-workers (mutable-seteqv))
-              (define action-cmds
-                (translate-bot-actions->sc2-raw-commands
-                 bot-actions
-                 obs
-                 #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
-                 #:ws-conn conn
-                 #:enemy-base (hash-ref obs-hash 'enemy-base #f)
-                 #:commanded-workers commanded-workers))
-              (define raw-cmds
-                (append
-                 action-cmds
-                 (saturate-workers-and-gas-commands
-                  obs
-                  #:excluded-worker-tags commanded-workers)))
+                ;; Translate S-expression actions + automatic worker/gas saturation
+                ;; (excluding workers commanded to build/expand/defend in this frame)
+                (define commanded-workers (mutable-seteqv))
+                (define action-cmds
+                  (translate-bot-actions->sc2-raw-commands
+                   bot-actions
+                   obs
+                   #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
+                   #:ws-conn conn
+                   #:enemy-base (hash-ref obs-hash 'enemy-base #f)
+                   #:commanded-workers commanded-workers))
+                (define raw-cmds
+                  (append
+                   action-cmds
+                   (saturate-workers-and-gas-commands
+                    obs
+                    #:excluded-worker-tags commanded-workers)))
 
-              (when (not (null? raw-cmds))
-                (sc2-ws-rpc! conn (make-request-action raw-cmds #:id (next-id!)))
-                (set! total-raw-cmds-sent (+ total-raw-cmds-sent (length raw-cmds))))
+                (when (not (null? raw-cmds))
+                  (sc2-ws-rpc! conn (make-request-action raw-cmds #:id (next-id!)))
+                  (set! total-raw-cmds-sent (+ total-raw-cmds-sent (length raw-cmds))))
 
-              (unless realtime?
-                (sc2-ws-rpc! conn (make-request-step step-size #:id (next-id!))))
+                (unless realtime?
+                  (sc2-ws-rpc! conn (make-request-step step-size #:id (next-id!))))
 
-              (set! total-steps (add1 total-steps))
-              (match-loop)])]))
+                (set! total-steps (add1 total-steps))
+                (match-loop)])])))
 
-      ;; 6. Clean LeaveGame / Quit & Summary
-      (when computer-opponent?
+      ;; 6. Optional SaveReplay + Clean LeaveGame / Quit & Summary
+      (define saved-replay-bytes
+        (if (and save-replay-path (not (string=? save-replay-path "")))
+            (with-handlers ([exn:fail? (lambda (_e) #f)])
+              (sc2-ws-save-replay! conn save-replay-path #:id (next-id!)))
+            #f))
+      (when (or computer-opponent? host-2p-opponent-race)
         (with-handlers ([exn:fail? void])
           (sc2-ws-rpc! conn (make-request-leave-game #:id (next-id!)))))
       (when auto-launched-handle
@@ -855,7 +886,9 @@
                 'commands_sent total-raw-cmds-sent
                 'peak_workers peak-workers
                 'peak_bases peak-bases
-                'peak_army_supply peak-army-supply))
+                'peak_army_supply peak-army-supply
+                'saved_replay_path (or (and saved-replay-bytes save-replay-path) "")
+                'saved_replay_bytes (or saved-replay-bytes 0)))
       (append-native-telemetry! root-dir summary)
       summary)
     (lambda ()
@@ -874,6 +907,8 @@
   (define computer-opponent? #f)
   (define computer-race "Protoss")
   (define computer-difficulty "VeryHard")
+  (define host-2p-opponent-race #f)
+  (define save-replay-path #f)
   (define bot-name #f)
   (define bot-file #f)
   (define race-override #f)
@@ -902,6 +937,10 @@
                        (set! computer-race cr)]
    [("--ComputerDifficulty") cd "Built-in Computer Difficulty"
                              (set! computer-difficulty cd)]
+   [("--Host2POpponentRace" "--host-2p-opponent-race") orace "Host a 2-participant game with opponent race"
+                                                       (set! host-2p-opponent-race orace)]
+   [("--SaveReplay" "--save-replay") srp "Path to save .SC2Replay file at match end"
+                                     (set! save-replay-path srp)]
    [("--BotName") bn "Variant name in config.json"
                   (set! bot-name bn)]
    [("--bot") bf "Path to .rkt bot file"
@@ -967,6 +1006,8 @@
                              #:computer-opponent? computer-opponent?
                              #:computer-race computer-race
                              #:computer-difficulty computer-difficulty
+                             #:host-2p-opponent-race host-2p-opponent-race
+                             #:save-replay-path save-replay-path
                              #:map-name map-name
                              #:max-loops effective-max-loops
                              #:realtime? realtime?

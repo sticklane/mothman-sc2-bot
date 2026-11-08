@@ -78,6 +78,9 @@
  make-request-action
  make-request-step
  make-request-query-placement
+ make-request-save-replay
+ decode-response-save-replay-bytes
+ sc2-ws-save-replay!
  make-request-leave-game
  make-request-quit
  make-request-ping
@@ -1580,6 +1583,7 @@
 
 (define (make-request-create-game #:map-path [map-path "Simple64.SC2Map"]
                                   #:battlenet-map-name [bnet-map #f]
+                                  #:include-map-data? [include-map-data? #f]
                                   #:player-setups [player-setups #f]
                                   #:our-race [our-race 'Random]
                                   #:computer-race [computer-race 'Protoss]
@@ -1588,10 +1592,17 @@
                                   #:disable-fog? [disable-fog? #f]
                                   #:random-seed [random-seed #f]
                                   #:id [req-id #f])
+  (define map-data-bytes
+    (if (and include-map-data? (string? map-path) (file-exists? map-path))
+        (with-handlers ([exn:fail? (lambda (_e) #"")])
+          (encode-bytes-field 7 (call-with-input-file map-path port->bytes)))
+        #""))
   (define map-part
     (if bnet-map
         (encode-string-field 2 bnet-map)
-        (encode-submessage-field 1 (encode-string-field 1 map-path))))
+        (encode-submessage-field 1
+                                 (bytes-append (encode-string-field 1 map-path)
+                                               map-data-bytes))))
   (define setups-bytes
     (if (and (list? player-setups) (not (null? player-setups)))
         (apply bytes-append
@@ -1806,6 +1817,29 @@
      p-bytes
      (if ignore-res? (encode-bool 4 #t) #"")))
   (wrap-sc2-request 14 body req-id))
+
+(define (make-request-save-replay #:id [req-id #f])
+  (wrap-sc2-request 15 #"" req-id))
+
+(define (decode-response-save-replay-bytes bstr)
+  (and (bytes? bstr)
+       (let* ([fields (decode-protobuf-message bstr)]
+              [sr-b (field-first-bytes fields 15 #f)])
+         (and sr-b
+              (let ([sr-fields (decode-protobuf-message sr-b)])
+                (field-first-bytes sr-fields 1 #f))))))
+
+(define (sc2-ws-save-replay! conn replay-path #:id [req-id #f])
+  (sc2-ws-send-binary! conn (make-request-save-replay #:id req-id))
+  (define resp-bytes (sc2-ws-recv-binary! conn))
+  (define replay-bytes (and (bytes? resp-bytes) (decode-response-save-replay-bytes resp-bytes)))
+  (cond
+    [(and (bytes? replay-bytes) (> (bytes-length replay-bytes) 0))
+     (call-with-output-file replay-path
+       (lambda (out) (write-bytes replay-bytes out))
+       #:exists 'replace)
+     (bytes-length replay-bytes)]
+    [else #f]))
 
 (define (make-request-ping #:id [req-id #f])
   (wrap-sc2-request 19 #"" req-id))
@@ -2255,11 +2289,51 @@
         (set! clusters (cons (list cx cy members) clusters)))))
   (reverse clusters))
 
+(define SC2-WARPGATE-LAST-LOOP (box 0))
+(define SC2-WARPGATE-COOLDOWN-UNTIL (make-hasheqv))
+(define SC2-HOME-BASE-ANCHOR (box #f))
+
+(define (sort-townhalls-main-first ths)
+  (define anchor (unbox SC2-HOME-BASE-ANCHOR))
+  (sort ths
+        <
+        #:key (lambda (u)
+                (define p (sc2-unit-pos u))
+                (define incomplete-penalty
+                  (if (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS) 0.0 10000.0))
+                (define dist-score
+                  (if anchor
+                      (pt-dist (car anchor) (cdr anchor) (sc2-point3d-x p) (sc2-point3d-y p))
+                      0.0))
+                (+ incomplete-penalty
+                   dist-score
+                   (/ (modulo (sc2-unit-tag u) 1000000) 100000000.0)))))
+
+(define (any-point? pt)
+  (or (sc2-point2d? pt) (sc2-point3d? pt)))
+
+(define (any-point-x pt)
+  (cond
+    [(sc2-point2d? pt) (sc2-point2d-x pt)]
+    [(sc2-point3d? pt) (sc2-point3d-x pt)]
+    [else 0.0]))
+
+(define (any-point-y pt)
+  (cond
+    [(sc2-point2d? pt) (sc2-point2d-y pt)]
+    [(sc2-point3d? pt) (sc2-point3d-y pt)]
+    [else 0.0]))
+
 (define (sc2-observation->runtime-obs-hash obs
                                            #:game-info [game-info #f]
                                            #:our-player-id [our-player-id 1]
                                            #:configured-race [configured-race 'Random]
                                            #:used-creep-tumors [used-tumors (seteqv)])
+  (define cur-loop (sc2-observation-game-loop obs))
+  (when (< cur-loop (unbox SC2-WARPGATE-LAST-LOOP))
+    (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL)
+    (set-box! SC2-HOME-BASE-ANCHOR #f))
+  (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
   (define pc (sc2-observation-player-common obs))
   (define units (sc2-observation-units obs))
   (define actual-race
@@ -2270,7 +2344,13 @@
   (define neutral-all (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
 
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-all))
-  (define my-townhalls (filter sc2-unit-is-townhall? self-units))
+  (define raw-my-townhalls (filter sc2-unit-is-townhall? self-units))
+  (when (and (= (length raw-my-townhalls) 1)
+             (or (not (unbox SC2-HOME-BASE-ANCHOR))
+                 (<= cur-loop 20)))
+    (define p0 (sc2-unit-pos (first raw-my-townhalls)))
+    (set-box! SC2-HOME-BASE-ANCHOR (cons (sc2-point3d-x p0) (sc2-point3d-y p0))))
+  (define my-townhalls (sort-townhalls-main-first raw-my-townhalls))
   (define ready-townhalls
     (filter (lambda (u) (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)) my-townhalls))
   (define my-gas-bldgs (filter sc2-unit-is-gas-building? self-units))
@@ -2283,7 +2363,10 @@
     (if (not (null? my-townhalls))
         (let ([p (sc2-unit-pos (first my-townhalls))])
           (values (sc2-point3d-x p) (sc2-point3d-y p)))
-        (values SC2-DEFAULT-HOME-BASE-X SC2-DEFAULT-HOME-BASE-Y)))
+        (let ([anchor (unbox SC2-HOME-BASE-ANCHOR)])
+          (if anchor
+              (values (car anchor) (cdr anchor))
+              (values SC2-DEFAULT-HOME-BASE-X SC2-DEFAULT-HOME-BASE-Y)))))
 
   (define-values (enemy-x enemy-y)
     (cond
@@ -2394,7 +2477,8 @@
              'x (sc2-point3d-x p)
              'y (sc2-point3d-y p)
              'z (sc2-point3d-z p)
-             'hp (max 1 (exact-round (sc2-unit-health u)))
+             'hp (max 1 (exact-round (+ (sc2-unit-health u) (sc2-unit-shield u))))
+             'hull-hp (max 1 (exact-round (sc2-unit-health u)))
              'max-hp (max 1 (exact-round (+ (sc2-unit-health-max u) (sc2-unit-shield-max u))))
              'shield (max 0 (exact-round (sc2-unit-shield u)))
              'energy (max 0 (exact-round (sc2-unit-energy u)))
@@ -2407,9 +2491,10 @@
              'buffs u-buffs
              'order-count (length ords)
              'order-ability-id (if ord0 (sc2-unit-order-ability-id ord0) 0)
+             'order-ability-sym (if ord0 (sc2-id->ability-symbol (sc2-unit-order-ability-id ord0) #f) #f)
              'order-target-id (if ord0 (sc2-unit-order-target-unit-tag ord0) 0)
-             'order-target-x (and (sc2-point3d? ord0-pos) (sc2-point3d-x ord0-pos))
-             'order-target-y (and (sc2-point3d? ord0-pos) (sc2-point3d-y ord0-pos))
+             'order-target-x (and (any-point? ord0-pos) (any-point-x ord0-pos))
+             'order-target-y (and (any-point? ord0-pos) (any-point-y ord0-pos))
              'order-progress (if ord0 (sc2-unit-order-progress ord0) 0.0)
              'has-build-order? (not (not (ormap (lambda (o)
                                                   (define s (sc2-id->ability-symbol (sc2-unit-order-ability-id o) #f))
@@ -2443,13 +2528,13 @@
                    (let* ([bsym (string->symbol (substring ab-str 6))]
                           [wp (sc2-unit-pos w)]
                           [tpos (sc2-unit-order-target-pos ord)]
-                          [tx (if (sc2-point3d? tpos) (sc2-point3d-x tpos) (sc2-point3d-x wp))]
-                          [ty (if (sc2-point3d? tpos) (sc2-point3d-y tpos) (sc2-point3d-y wp))])
-                     ;; Synthesize if no new under-construction footprint of this type already exists at (tx, ty)
+                          [tx (if (any-point? tpos) (any-point-x tpos) (sc2-point3d-x wp))]
+                          [ty (if (any-point? tpos) (any-point-y tpos) (sc2-point3d-y wp))])
+                     ;; Synthesize only while no under-construction footprint of this type exists at (tx, ty)
                      (and (not (ormap (lambda (b)
                                         (define bp (sc2-unit-pos b))
                                         (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type b)) bsym)
-                                             (< (sc2-unit-build-progress b) SC2-NEW-FOOTPRINT-PROGRESS-MAX)
+                                             (< (sc2-unit-build-progress b) SC2-BUILD-COMPLETE-PROGRESS)
                                              (<= (pt-dist tx ty (sc2-point3d-x bp) (sc2-point3d-y bp)) 5.0)))
                                       self-units))
                           (hash 'id (+ 9000000 (sc2-unit-tag w))
@@ -2463,10 +2548,11 @@
                                 'buffs '())))))))
      my-workers))
 
+  (define sorted-self-structures
+    (sort-townhalls-main-first (filter sc2-unit-is-structure? self-units)))
   (define ally-bldg-records
     (append
-     (for/list ([b (in-list self-units)]
-                #:when (sc2-unit-is-structure? b))
+     (for/list ([b (in-list sorted-self-structures)])
        (define p (sc2-unit-pos b))
        (define bx (sc2-point3d-x p))
        (define by (sc2-point3d-y p))
@@ -2507,6 +2593,10 @@
            [else #f]))
        (define b-ords (sc2-unit-orders b))
        (define b-ord0 (and (pair? b-ords) (first b-ords)))
+       (define wg-busy?
+         (and (= (sc2-unit-unit-type b) 133)
+              (< cur-loop (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL (sc2-unit-tag b) 0))))
+       (define eff-order-count (if wg-busy? (max 1 (length b-ords)) (length b-ords)))
        (define b-buffs
          (filter-map (lambda (bid) (buff-id->symbol bid #f))
                      (sc2-unit-buff-ids b)))
@@ -2517,14 +2607,17 @@
              'hp (max 1 (exact-round cur-hp+sh))
              'max-hp (max 1 (exact-round hp-max))
              'hp-pct eff-hp-pct
+             'energy (exact-round (sc2-unit-energy b))
              'build-progress bprog
              'halted halted?
              'add-on-tag addon-tag
              'addon addon-kind
              'addon-type addon-sym
              'buffs b-buffs
-             'order-count (length b-ords)
-             'order-ability-id (if b-ord0 (sc2-unit-order-ability-id b-ord0) 0)))
+             'order-count eff-order-count
+             'busy? (or wg-busy? (pair? b-ords))
+             'order-ability-id (if b-ord0 (sc2-unit-order-ability-id b-ord0) 0)
+             'order-ability-sym (if b-ord0 (sc2-id->ability-symbol (sc2-unit-order-ability-id b-ord0) #f) #f)))
      in-transit-bldg-records))
 
   ;; Enemy units & buildings
@@ -2537,7 +2630,8 @@
             'x (sc2-point3d-x p)
             'y (sc2-point3d-y p)
             'z (sc2-point3d-z p)
-            'hp (max 1 (exact-round (sc2-unit-health eu)))
+            'hp (max 1 (exact-round (+ (sc2-unit-health eu) (sc2-unit-shield eu))))
+            'hull-hp (max 1 (exact-round (sc2-unit-health eu)))
             'max-hp (max 1 (exact-round (+ (sc2-unit-health-max eu) (sc2-unit-shield-max eu))))
             'shield (max 0 (exact-round (sc2-unit-shield eu)))
             'flying? (sc2-unit-is-flying eu)
@@ -2666,7 +2760,9 @@
               #:when (and (set-member? PRODUCTION-FACILITY-SYMS
                                        (sc2-id->unit-symbol (sc2-unit-unit-type b)))
                           (>= (sc2-unit-build-progress b) SC2-BUILD-COMPLETE-PROGRESS)
-                          (pair? (sc2-unit-orders b))))
+                          (or (pair? (sc2-unit-orders b))
+                              (and (= (sc2-unit-unit-type b) 133)
+                                   (< cur-loop (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL (sc2-unit-tag b) 0))))))
       1))
 
   (define busy-townhalls
@@ -2674,14 +2770,23 @@
               #:when (pair? (sc2-unit-orders th)))
       1))
 
+  ;; Deduct unpaid mineral/gas cost of walking builders in `in-transit-bldg-records`
+  ;; because SC2 does not deduct building cost from `player_common` until the worker arrives at the build site!
+  (define in-transit-min-cost
+    (for/sum ([b (in-list in-transit-bldg-records)])
+      (sc2-min-cost (hash-ref b 'type 'pylon) 0)))
+  (define in-transit-gas-cost
+    (for/sum ([b (in-list in-transit-bldg-records)])
+      (sc2-gas-cost (hash-ref b 'type 'pylon) 0)))
+
   (define supply-cap (min SC2-MAX-SUPPLY (max 0 (sc2-player-common-food-cap pc))))
   (define supply-used (max 0 (sc2-player-common-food-used pc)))
   (define supply-left (max 0 (- supply-cap supply-used)))
 
-  (hash 'frame (sc2-observation-game-loop obs)
+  (hash 'frame cur-loop
         'race actual-race
-        'minerals (max 0 (sc2-player-common-minerals pc))
-        'gas (max 0 (sc2-player-common-vespene pc))
+        'minerals (max 0 (- (sc2-player-common-minerals pc) in-transit-min-cost))
+        'gas (max 0 (- (sc2-player-common-vespene pc) in-transit-gas-cost))
         'supply-used supply-used
         'supply-cap supply-cap
         'supply-left supply-left
@@ -2786,7 +2891,8 @@
                                    #:max-radius [max-radius 14.0]
                                    #:step [step 2.0]
                                    #:limit [limit 24]
-                                   #:extra-reserved-points [extra-reserved-points '()])
+                                   #:extra-reserved-points [extra-reserved-points '()]
+                                   #:ws-active-placement? [ws-active-placement? #f])
   ;; Collect in-transit worker build target points and existing Terran East (+X) add-on footprints
   (define in-transit-build-pts
     (for*/list ([u (in-list existing-units)]
@@ -2795,8 +2901,9 @@
                 [ab-sym (in-value (sc2-id->ability-symbol (sc2-unit-order-ability-id o) #f))]
                 #:when (and ab-sym
                             (string-prefix? (symbol->string ab-sym) "build-")
-                            (sc2-point2d? (sc2-unit-order-target-pos o))))
-      (sc2-unit-order-target-pos o)))
+                            (any-point? (sc2-unit-order-target-pos o))))
+      (define tp (sc2-unit-order-target-pos o))
+      (sc2-point2d (any-point-x tp) (any-point-y tp))))
   (define terran-addon-pts
     (for/list ([u (in-list existing-units)]
                #:when (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
@@ -2816,10 +2923,12 @@
                               (sc2-unit-is-vespene-geyser? u)))
            (define p (sc2-unit-pos u))
            (> (pt-dist cx cy (sc2-point3d-x p) (sc2-point3d-y p))
-              (+ min-spacing (max 0.5 (sc2-unit-radius u)))))
+              (if ws-active-placement?
+                  (max 2.0 (+ 0.85 (max 0.5 (sc2-unit-radius u))))
+                  (+ min-spacing (max 0.5 (sc2-unit-radius u))))))
          (for/and ([rp (in-list all-reserved-pts)]
-                   #:when (sc2-point2d? rp))
-           (> (pt-dist cx cy (sc2-point2d-x rp) (sc2-point2d-y rp))
+                   #:when (any-point? rp))
+           (> (pt-dist cx cy (any-point-x rp) (any-point-y rp))
               (max 2.5 min-spacing)))))
   (define acc '())
   (when (clear-spot? anchor-x anchor-y)
@@ -2858,10 +2967,12 @@
                                           #:min-spacing [min-spacing 3.5]
                                           #:max-radius [max-radius 14.0]
                                           #:step [step 2.0]
-                                          #:extra-reserved-points [extra-reserved-points '()])
+                                          #:extra-reserved-points [extra-reserved-points '()]
+                                          #:anchor-points [anchor-points #f])
   ;; For Terran production facilities (Barracks=321, Factory=328, Starport=329), also filter out
   ;; candidates whose East (+X) add-on footprint at (cx + 2.5, cy - 0.5) collides with structures.
   (define needs-terran-addon-clearance? (memv ab-id '(321 328 329)))
+  (define ws-active? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
   (define (filter-addon-clear c-list)
     (filter (lambda (pt)
               (define ax (+ (sc2-point2d-x pt) SC2-TERRAN-ADDON-OFFSET-X))
@@ -2876,13 +2987,22 @@
                      (> (pt-dist ax ay (sc2-point3d-x p) (sc2-point3d-y p))
                         (+ SC2-ADDON-FOOTPRINT-HALF-SIZE (max 0.5 (sc2-unit-radius u)))))))
             c-list))
+  (define anchors
+    (if (and (list? anchor-points) (not (null? anchor-points)))
+        anchor-points
+        (list (cons anchor-x anchor-y))))
   (define raw-cands
-    (collect-spiral-candidates anchor-x anchor-y existing-units
-                               #:min-spacing min-spacing
-                               #:max-radius max-radius
-                               #:step step
-                               #:limit 24
-                               #:extra-reserved-points extra-reserved-points))
+    (let ([all-pts
+           (append*
+            (for/list ([ap (in-list anchors)])
+              (collect-spiral-candidates (car ap) (cdr ap) existing-units
+                                         #:min-spacing min-spacing
+                                         #:max-radius max-radius
+                                         #:step step
+                                         #:limit 24
+                                         #:extra-reserved-points extra-reserved-points
+                                         #:ws-active-placement? ws-active?)))])
+      (take all-pts (min 64 (length all-pts)))))
   (define cands
     (if needs-terran-addon-clearance?
         (let ([addon-clear (filter-addon-clear raw-cands)])
@@ -3093,7 +3213,11 @@
                       (or (not needs-techlab?)
                           (not any-addon-on-type?)
                           (facility-has-techlab? u))))
-      (define n-orders (length (sc2-unit-orders u)))
+      (define wg-busy?
+        (and (= (sc2-unit-unit-type u) 133)
+             (< (unbox SC2-WARPGATE-LAST-LOOP)
+                (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL (sc2-unit-tag u) 0))))
+      (define n-orders (if wg-busy? (max 1 (length (sc2-unit-orders u))) (length (sc2-unit-orders u))))
       (define has-reactor? (and (not needs-techlab?) (facility-has-reactor? u)))
       (define utag (sc2-unit-tag u))
       (cond
@@ -3258,10 +3382,11 @@
   (define neutral-units (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-units))
   (define ready-townhalls
-    (filter (lambda (u)
-              (and (sc2-unit-is-townhall? u)
-                   (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
-            self-units))
+    (sort-townhalls-main-first
+     (filter (lambda (u)
+               (and (sc2-unit-is-townhall? u)
+                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+             self-units)))
   (define ready-gas-bldgs
     (filter (lambda (u)
               (and (sc2-unit-is-gas-building? u)
@@ -3278,8 +3403,16 @@
   (define idle-workers (filter (lambda (w) (null? (sc2-unit-orders w))) workers))
   (define under-gas
     (filter (lambda (u)
-              (< (sc2-unit-assigned-harvesters u)
-                 (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u))))
+              (define gp (sc2-unit-pos u))
+              (and (< (sc2-unit-assigned-harvesters u)
+                      (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u)))
+                   (or (null? ready-townhalls)
+                       (ormap (lambda (th)
+                                (define tp (sc2-unit-pos th))
+                                (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
+                                             (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                    SC2-BASE-RESOURCE-RADIUS))
+                              ready-townhalls))))
             ready-gas-bldgs))
   (define under-townhalls
     (filter (lambda (th)
@@ -3331,8 +3464,8 @@
       (issue-gather! w (sc2-unit-tag best-min))))
 
   ;; 2. Assign 1 worker per frame to under-saturated gas building (Bug #8 fix:
-  ;;    never re-order workers already targeting gas OR within SC2-GAS-HARVESTER-EXCLUSION-RADIUS
-  ;;    of a gas building so returning gas harvesters are never canceled!)
+  ;;    never re-order workers already targeting gas, carrying gas buffs 273/274/275,
+  ;;    returning cargo 3667, OR within SC2-GAS-HARVESTER-EXCLUSION-RADIUS of a gas building)
   (define gas-over-banked?
     (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
          (< cur-min SC2-MINERAL-STARVED-THRESHOLD)))
@@ -3343,8 +3476,11 @@
     (define gp (sc2-unit-pos gb))
     (define (eligible-for-gas? w)
       (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+           (not (ormap (lambda (bid) (memv bid '(273 274 275)))
+                       (sc2-unit-buff-ids w)))
            (not (ormap (lambda (o)
-                         (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
+                         (or (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o))
+                             (memv (sc2-unit-order-ability-id o) '(296 299 1184 3667))))
                        (sc2-unit-orders w)))
            (or (null? (sc2-unit-orders w))
                (for/and ([other-gb (in-list ready-gas-bldgs)])
@@ -3378,6 +3514,12 @@
       (filter (lambda (w)
                 (define wp (sc2-unit-pos w))
                 (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                     (not (ormap (lambda (bid) (memv bid '(273 274 275)))
+                                 (sc2-unit-buff-ids w)))
+                     (not (ormap (lambda (o)
+                                   (or (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o))
+                                       (memv (sc2-unit-order-ability-id o) '(296 299 1184 3667))))
+                                 (sc2-unit-orders w)))
                      (<= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
                                   (sc2-point3d-x wp) (sc2-point3d-y wp))
                          SC2-BASE-RESOURCE-RADIUS)
@@ -3433,7 +3575,7 @@
   (define neutral-units (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-units))
   (define workers (filter sc2-unit-is-worker? self-units))
-  (define townhalls (filter sc2-unit-is-townhall? self-units))
+  (define townhalls (sort-townhalls-main-first (filter sc2-unit-is-townhall? self-units)))
   (define combat-units
     (filter (lambda (u)
               (and (not (sc2-unit-is-structure? u))
@@ -3456,7 +3598,10 @@
     (if (not (null? townhalls))
         (let ([p (sc2-unit-pos (first townhalls))])
           (values (sc2-point3d-x p) (sc2-point3d-y p)))
-        (values SC2-DEFAULT-HOME-BASE-X SC2-DEFAULT-HOME-BASE-Y)))
+        (let ([anchor (unbox SC2-HOME-BASE-ANCHOR)])
+          (if anchor
+              (values (car anchor) (cdr anchor))
+              (values SC2-DEFAULT-HOME-BASE-X SC2-DEFAULT-HOME-BASE-Y)))))
 
   ;; Track producer, worker, geyser, combat tags, and build-site reservations within this step
   (define used-producer-tags (mutable-seteqv))
@@ -3522,8 +3667,11 @@
                                        SC2-GEYSER-OCCUPIED-RADIUS))
                                  gas-bldgs))))
               geysers))
+    (define mature-ths
+      (filter (lambda (th) (>= (sc2-unit-build-progress th) 0.70)) townhalls))
+    (define geyser-ths (if (not (null? mature-ths)) mature-ths townhalls))
     (define open-near-th
-      (if (null? townhalls)
+      (if (null? geyser-ths)
           open-all
           (filter (lambda (g)
                     (define gp (sc2-unit-pos g))
@@ -3532,7 +3680,7 @@
                              (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
                                           (sc2-point3d-x tp) (sc2-point3d-y tp))
                                  SC2-BASE-RESOURCE-RADIUS))
-                           townhalls))
+                           geyser-ths))
                   open-all)))
     (define open (if (not (null? open-near-th)) open-near-th open-all))
     (if (null? open)
@@ -3545,30 +3693,27 @@
           (set-add! used-geyser-tags (sc2-unit-tag chosen))
           chosen)))
 
+  (define (pylon-power-anchors [near-x home-x] [near-y home-y])
+    (define ps-pts
+      (for/list ([ps (in-list power-sources)])
+        (define p (sc2-power-source-pos ps))
+        (cons (sc2-point3d-x p) (sc2-point3d-y p))))
+    (define pylon-pts
+      (for/list ([u (in-list self-units)]
+                 #:when (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'pylon)
+                             (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+        (define p (sc2-unit-pos u))
+        (cons (sc2-point3d-x p) (sc2-point3d-y p))))
+    (define combined (remove-duplicates (append ps-pts pylon-pts)))
+    (if (null? combined)
+        (list (cons near-x near-y))
+        (sort combined
+              <
+              #:key (lambda (pt) (pt-dist near-x near-y (car pt) (cdr pt))))))
+
   (define (pylon-power-anchor [near-x home-x] [near-y home-y])
-    (cond
-      [(not (null? power-sources))
-       (define best-ps
-         (argmin (lambda (ps)
-                   (define p (sc2-power-source-pos ps))
-                   (pt-dist near-x near-y (sc2-point3d-x p) (sc2-point3d-y p)))
-                 power-sources))
-       (define ps-pos (sc2-power-source-pos best-ps))
-       (values (sc2-point3d-x ps-pos) (sc2-point3d-y ps-pos))]
-      [else
-       (define pylons
-         (filter (lambda (u)
-                   (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'pylon)
-                        (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
-                 self-units))
-       (if (not (null? pylons))
-           (let ([pp (sc2-unit-pos
-                      (argmin (lambda (u)
-                                (define p (sc2-unit-pos u))
-                                (pt-dist near-x near-y (sc2-point3d-x p) (sc2-point3d-y p)))
-                              pylons))])
-             (values (sc2-point3d-x pp) (sc2-point3d-y pp)))
-           (values near-x near-y))]))
+    (define anchors (pylon-power-anchors near-x near-y))
+    (values (caar anchors) (cdar anchors)))
 
   ;; Checks whether unit `t` is already executing an equivalent order in `self-units`
   ;; so we do not spam redundant orders that reset turn rate / movement acceleration.
@@ -3581,11 +3726,11 @@
                 (cond
                   [(> target-unit-id 0)
                    (= (sc2-unit-order-target-unit-tag o) target-unit-id)]
-                  [(sc2-point2d? target-pt)
+                  [(any-point? target-pt)
                    (define op (sc2-unit-order-target-pos o))
-                   (and (sc2-point2d? op)
-                        (<= (pt-dist (sc2-point2d-x target-pt) (sc2-point2d-y target-pt)
-                                     (sc2-point2d-x op) (sc2-point2d-y op))
+                   (and (any-point? op)
+                        (<= (pt-dist (any-point-x target-pt) (any-point-y target-pt)
+                                     (any-point-x op) (any-point-y op))
                             SC2-ORDER-EQUIV-DIST-TOLERANCE))]
                   [(= ab-id 18) #t]
                   [else #f])))))
@@ -3598,9 +3743,12 @@
   (define (claim-combat-tags-for-order! raw-ids ab-id target-pt target-unit-id)
     (define candidates
       (filter (lambda (t)
+                (define u (and (exact-integer? t) (hash-ref self-unit-by-tag t #f)))
                 (and (exact-integer? t)
                      (> t 0)
                      (not (set-member? commanded-combat-tags t))
+                     (not (set-member? used-worker-tags t))
+                     (not (and u (worker-has-build-order? u)))
                      (not (unit-has-protected-queen-order? t))))
               (if (list? raw-ids) raw-ids (list raw-ids))))
     (for/list ([t (in-list candidates)]
@@ -3642,6 +3790,9 @@
          ;; Bug #17 fix: if producer is a WarpGate (133), issue WARP_IN_* at a verified Pylon power point
          (cond
            [(and prod-u (= (sc2-unit-unit-type prod-u) 133))
+            (when (and (sc2-observation? obs) (> (sc2-observation-game-loop obs) 0))
+              (set-box! SC2-WARPGATE-LAST-LOOP (sc2-observation-game-loop obs))
+              (hash-set! SC2-WARPGATE-COOLDOWN-UNTIL ptag (+ (sc2-observation-game-loop obs) 515)))
             (define warp-ab (or (unit-symbol->warp-in-ability-id unit-sym) ab-id))
             (define-values (px py) (pylon-power-anchor))
             (define warp-pt
@@ -3649,7 +3800,8 @@
                                                 #:min-spacing 1.5
                                                 #:max-radius 6.0
                                                 #:step 1.5
-                                                #:extra-reserved-points step-reserved-build-pts))
+                                                #:extra-reserved-points step-reserved-build-pts
+                                                #:anchor-points (pylon-power-anchors px py)))
             (reserve-step-build-pt! warp-pt warp-ab)
             (emit! (sc2-raw-unit-command warp-ab warp-pt 0 (list ptag) #f))]
            [else
@@ -3750,7 +3902,7 @@
               (when wtag
                 (emit! (sc2-raw-unit-command ab-id #f (sc2-unit-tag geyser) (list wtag) #f))))]
 
-           ;; Protoss structures requiring Pylon power field
+           ;; Protoss structures requiring Pylon power field (searches across all Pylons)
            [(memq norm '(gateway forge cybernetics-core photon-cannon shield-battery
                          twilight-council robotics-facility robotics-bay robotics-support-bay
                          stargate templar-archive templar-archives dark-shrine fleet-beacon))
@@ -3758,9 +3910,10 @@
             (define place-pt
               (find-verified-building-placement ws-conn ab-id px py units
                                                 #:min-spacing 2.5
-                                                #:max-radius 6.0
+                                                #:max-radius 6.5
                                                 #:step 1.5
-                                                #:extra-reserved-points step-reserved-build-pts))
+                                                #:extra-reserved-points step-reserved-build-pts
+                                                #:anchor-points (pylon-power-anchors req-x req-y)))
             (reserve-step-build-pt! place-pt ab-id)
             (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
             (when wtag
@@ -4042,17 +4195,28 @@
       ;; 10. Spatial maneuvers: `(execute-spatial-maneuver <name> <x> <y>)` or `(mirror-spatial-maneuver ...)`
       ;;     Bug #11 fix: never overwrite units that already received individual micro orders in this step,
       ;;     exclude Queens and units currently engaged in local combat within 16 tiles of an enemy,
-      ;;     and only push across the map when army size >= SC2-ATTACK-WAVE-MIN-COMBAT-UNITS
-      ;;     (unless units are empty in unit tests where synthetic maneuver translation is checked).
+      ;;     and prevent 1-by-1 reinforcement streaming ("conga line of death") by requiring units near
+      ;;     home (`<= 48` tiles) to gather into a wave of `>= SC2-ATTACK-WAVE-MIN-COMBAT-UNITS` before
+      ;;     marching across the map.
       [(list (or 'execute-spatial-maneuver 'mirror-spatial-maneuver) _ raw-x raw-y)
        (define tx (scale-bot-coord-to-world raw-x home-x))
        (define ty (scale-bot-coord-to-world raw-y home-y))
        (define target-pt (sc2-point2d tx ty))
+       (define home-staged-count
+         (count (lambda (u)
+                  (define up (sc2-unit-pos u))
+                  (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 48.0))
+                combat-units))
        (define uncommanded-combat
          (filter (lambda (u)
                    (define up (sc2-unit-pos u))
+                   (define near-home?
+                     (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 48.0))
                    (and (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
                         (not (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'queen))
+                        (or (not near-home?)
+                            (>= home-staged-count SC2-ATTACK-WAVE-MIN-COMBAT-UNITS)
+                            (null? townhalls))
                         (not (ormap (lambda (e)
                                       (define ep (sc2-unit-pos e))
                                       (<= (pt-dist (sc2-point3d-x up) (sc2-point3d-y up)
@@ -4061,7 +4225,7 @@
                                     enemy-units))))
                  combat-units))
        (when (and (not (null? uncommanded-combat))
-                  (or (>= (length combat-units) SC2-ATTACK-WAVE-MIN-COMBAT-UNITS)
+                  (or (>= (length combat-units) 14)
                       (null? townhalls)))
          (define ctags
            (claim-combat-tags-for-order! (map sc2-unit-tag uncommanded-combat) 23 target-pt 0))
@@ -4139,31 +4303,72 @@
                                         SC2-BASE-DEFENSE-RADIUS))
                                   townhalls)))
         e))
+    (define-values (att-x att-y)
+      (cond
+        [(not (null? targetable-enemy-units))
+         (define nearest-e
+           (argmin (lambda (e)
+                     (define ep (sc2-unit-pos e))
+                     (pt-dist home-x home-y (sc2-point3d-x ep) (sc2-point3d-y ep)))
+                   targetable-enemy-units))
+         (define ep (sc2-unit-pos nearest-e))
+         (values (sc2-point3d-x ep) (sc2-point3d-y ep))]
+        [(and (list? enemy-base) (>= (length enemy-base) 2))
+         (values (exact->inexact (first enemy-base))
+                 (exact->inexact (second enemy-base)))]
+        [else
+         (values (- SC2-DEFAULT-MAP-WIDTH home-x)
+                 (- SC2-DEFAULT-MAP-HEIGHT home-y))]))
+    (define-values (stage-x stage-y)
+      (let* ([dx (- att-x home-x)]
+             [dy (- att-y home-y)]
+             [d (max 1.0 (sqrt (+ (sqr dx) (sqr dy))))]
+             [step-d (min 18.0 (* 0.25 d))])
+        (values (+ home-x (* step-d (/ dx d)))
+                (+ home-y (* step-d (/ dy d))))))
+    (define home-staged-combat
+      (filter (lambda (u)
+                (define up (sc2-unit-pos u))
+                (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 48.0))
+              combat-units))
     (cond
       [base-threat
        (define ep (sc2-unit-pos base-threat))
        (emit! (sc2-raw-unit-command 23
                                     (sc2-point2d (sc2-point3d-x ep) (sc2-point3d-y ep))
                                     0 idle-tags #f))]
-      [(>= (length combat-units) SC2-ATTACK-WAVE-MIN-COMBAT-UNITS)
-       (define-values (att-x att-y)
-         (cond
-           [(not (null? targetable-enemy-units))
-            (define nearest-e
-              (argmin (lambda (e)
-                        (define ep (sc2-unit-pos e))
-                        (pt-dist home-x home-y (sc2-point3d-x ep) (sc2-point3d-y ep)))
-                      targetable-enemy-units))
-            (define ep (sc2-unit-pos nearest-e))
-            (values (sc2-point3d-x ep) (sc2-point3d-y ep))]
-           [(and (list? enemy-base) (>= (length enemy-base) 2))
-            (values (exact->inexact (first enemy-base))
-                    (exact->inexact (second enemy-base)))]
-           [else
-            (values (- SC2-DEFAULT-MAP-WIDTH home-x)
-                    (- SC2-DEFAULT-MAP-HEIGHT home-y))]))
+      [(and (>= (length combat-units) 14)
+            (>= (length home-staged-combat) SC2-ATTACK-WAVE-MIN-COMBAT-UNITS))
        (emit! (sc2-raw-unit-command 23
                                     (sc2-point2d att-x att-y)
-                                    0 idle-tags #f))]))
+                                    0 idle-tags #f))]
+      [(>= (length combat-units) 14)
+       ;; Forward units (> 48 tiles from home) continue attacking; newly spawned home units stage at natural choke
+       (define forward-idle-tags
+         (for/list ([u (in-list idle-combat-units)]
+                    #:when (> (let ([up (sc2-unit-pos u)])
+                                (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)))
+                              48.0))
+           (sc2-unit-tag u)))
+       (define home-idle-tags
+         (for/list ([u (in-list idle-combat-units)]
+                    #:when (let ([up (sc2-unit-pos u)])
+                             (and (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 48.0)
+                                  (> (pt-dist stage-x stage-y (sc2-point3d-x up) (sc2-point3d-y up)) 8.0))))
+           (sc2-unit-tag u)))
+       (when (not (null? forward-idle-tags))
+         (emit! (sc2-raw-unit-command 23 (sc2-point2d att-x att-y) 0 forward-idle-tags #f)))
+       (when (not (null? home-idle-tags))
+         (emit! (sc2-raw-unit-command 23 (sc2-point2d stage-x stage-y) 0 home-idle-tags #f)))]
+      [else
+       ;; Army < 14: rally idle units that spawned at main base (> 8 tiles from front stage) to our natural choke
+       (define unplaced-home-tags
+         (for/list ([u (in-list idle-combat-units)]
+                    #:when (let ([up (sc2-unit-pos u)])
+                             (and (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 48.0)
+                                  (> (pt-dist stage-x stage-y (sc2-point3d-x up) (sc2-point3d-y up)) 8.0))))
+           (sc2-unit-tag u)))
+       (when (and (not (null? unplaced-home-tags)) (not (null? townhalls)))
+         (emit! (sc2-raw-unit-command 23 (sc2-point2d stage-x stage-y) 0 unplaced-home-tags #f)))]))
 
   (reverse raw-cmds))

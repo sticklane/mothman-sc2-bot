@@ -2131,7 +2131,7 @@
       (pro-bo-goal 'build 'barracks 1 16 'supply-depot)
       (pro-bo-goal 'build 'refinery 1 16 'supply-depot)
       (pro-bo-goal 'morph 'orbital-command 1 19 'barracks)
-      (pro-bo-goal 'expand 'command-center 2 20 'barracks)
+      (pro-bo-goal 'expand 'command-center 2 20 #f)
       (pro-bo-goal 'build 'supply-depot 2 21 'barracks)
       (pro-bo-goal 'research 'stimpack 1 21 'barracks-techlab)
       (pro-bo-goal 'build 'factory 1 21 'barracks)
@@ -2158,7 +2158,7 @@
       (pro-bo-goal 'build 'pylon 1 14 #f)
       (pro-bo-goal 'build 'gateway 1 16 'pylon)
       (pro-bo-goal 'build 'assimilator 1 16 'pylon)
-      (pro-bo-goal 'expand 'nexus 2 19 'gateway)
+      (pro-bo-goal 'expand 'nexus 2 19 #f)
       (pro-bo-goal 'build 'cybernetics-core 1 19 'gateway)
       (pro-bo-goal 'build 'assimilator 2 21 'cybernetics-core)
       (pro-bo-goal 'build 'pylon 2 21 'cybernetics-core)
@@ -2172,10 +2172,10 @@
       (pro-bo-goal 'train 'observer 1 36 'robotics-facility)
       (pro-bo-goal 'research 'charge 1 38 'twilight-council)
       (pro-bo-goal 'build 'assimilator 3 42 'robotics-facility)
-      (pro-bo-goal 'expand 'nexus 3 48 'robotics-facility)
-      (pro-bo-goal 'build 'forge 1 50 'cybernetics-core)
-      (pro-bo-goal 'research 'protoss-ground-weapons-1 1 54 'forge)
-      (pro-bo-goal 'build 'robotics-bay 1 58 'robotics-facility)
+      (pro-bo-goal 'build 'forge 1 48 'cybernetics-core)
+      (pro-bo-goal 'research 'protoss-ground-weapons-1 1 52 'forge)
+      (pro-bo-goal 'build 'robotics-bay 1 56 'robotics-facility)
+      (pro-bo-goal 'expand 'nexus 3 60 'robotics-facility)
       (pro-bo-goal 'research 'extended-thermal-lance 1 64 'robotics-bay))]))
 
 (define (evaluate-build-order-next-step
@@ -2368,7 +2368,7 @@
        ;; Prerequisite is ready, but waiting on resources -> reserve minerals/gas for first waiting step
        (unless active-head
          (set! active-head g)
-         (when (memq kind '(build expand morph research))
+         (when (memq kind '(build expand morph research train))
            (set! res-min m-cost)
            (set! res-gas g-cost)))]
       [else
