@@ -2905,6 +2905,14 @@
        (sc2-unit-tag u))]
     [(eq? norm 'queen)
      (idle-ready-of-types '(hatchery lair hive))]
+    [(eq? norm 'lair)
+     (idle-ready-of-types '(hatchery))]
+    [(eq? norm 'hive)
+     (idle-ready-of-types '(lair))]
+    [(eq? norm 'greater-spire)
+     (idle-ready-of-types '(spire))]
+    [(memq norm '(lurker-den lurker-den-mp))
+     (idle-ready-of-types '(hydralisk-den))]
     [(eq? norm 'baneling)
      (idle-ready-of-types '(zergling))]
     [(eq? norm 'ravager)
@@ -2915,9 +2923,13 @@
      (idle-ready-of-types '(corruptor))]
     [(eq? norm 'overseer)
      (idle-ready-of-types '(overlord overlord-transport))]
+    [(eq? norm 'overlord-transport)
+     (idle-ready-of-types '(overlord))]
     ;; Terran
     [(eq? norm 'scv)
      (idle-ready-of-types '(command-center orbital-command planetary-fortress))]
+    [(memq norm '(orbital-command planetary-fortress))
+     (idle-ready-of-types '(command-center))]
     [(memq norm '(marine marauder reaper ghost))
      (idle-ready-of-types '(barracks))]
     [(memq norm '(hellion hellbat widow-mine siege-tank cyclone thor))
@@ -2927,6 +2939,8 @@
     ;; Protoss
     [(memq norm '(probe mothership))
      (idle-ready-of-types '(nexus))]
+    [(memq norm '(warp-gate warpgate))
+     (idle-ready-of-types '(gateway))]
     [(memq norm '(zealot stalker sentry adept high-templar dark-templar))
      (define gws (idle-ready-of-types '(gateway)))
      (if (not (null? gws))
@@ -2978,7 +2992,7 @@
       [(or (string-contains? str "terran-vehicle")
            (string-contains? str "terran-ship"))
        '(armory)]
-      [(memq norm '(warpgate warp-gate))
+      [(memq norm '(warpgate warp-gate warp-gate-research))
        '(cybernetics-core)]
       [(memq norm '(charge blink resonating-glaives adept-piercing-attack))
        '(twilight-council)]
@@ -3197,11 +3211,18 @@
               (and (not (sc2-unit-is-structure? u))
                    (not (sc2-unit-is-worker? u))
                    (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
-                              '(larva egg overlord)))))
+                              '(larva egg overlord queen overseer observer)))))
             self-units))
   (define self-unit-by-tag
     (for/hasheqv ([u (in-list self-units)])
       (values (sc2-unit-tag u) u)))
+
+  (define (unit-has-protected-queen-order? t)
+    (define u (hash-ref self-unit-by-tag t #f))
+    (and u
+         (pair? (sc2-unit-orders u))
+         (memv (sc2-unit-order-ability-id (first (sc2-unit-orders u)))
+               '(251 1694))))
 
   (define-values (home-x home-y)
     (if (not (null? townhalls))
@@ -3279,8 +3300,8 @@
   (define (pylon-power-anchor)
     (cond
       [(not (null? power-sources))
-       (define ps-pos (sc2-power-source-pos (first power-sources)))
-       (values (sc2-point3d-x ps-pos) (sc2-point3d-y ps-pos))]
+        (define ps-pos (sc2-power-source-pos (first power-sources)))
+        (values (sc2-point3d-x ps-pos) (sc2-point3d-y ps-pos))]
       [else
        (define pylons
          (filter (lambda (u)
@@ -3314,14 +3335,16 @@
 
   ;; Filters a list of combat unit tags:
   ;;   1. Skips tags already commanded earlier in this step (`commanded-combat-tags`).
-  ;;   2. Marks remaining tags as commanded so lower-priority maneuvers cannot overwrite them.
-  ;;   3. Skips re-issuing an order that is already active on the unit in SC2.
+  ;;   2. Skips Queens that are currently executing Inject Larva (251) or Spawn Creep Tumor (1694).
+  ;;   3. Marks remaining tags as commanded so lower-priority maneuvers cannot overwrite them.
+  ;;   4. Skips re-issuing an order that is already active on the unit in SC2.
   (define (claim-combat-tags-for-order! raw-ids ab-id target-pt target-unit-id)
     (define candidates
       (filter (lambda (t)
                 (and (exact-integer? t)
                      (> t 0)
-                     (not (set-member? commanded-combat-tags t))))
+                     (not (set-member? commanded-combat-tags t))
+                     (not (unit-has-protected-queen-order? t))))
               (if (list? raw-ids) raw-ids (list raw-ids))))
     (for/list ([t (in-list candidates)]
                #:when (begin
@@ -3578,17 +3601,19 @@
 
       ;; 7. Queen Inject Larva: `(inject-larva <queen-id> <hatch-id>)`
       [(list 'inject-larva queen-id hatch-id)
-       (emit! (sc2-raw-unit-command 251 #f hatch-id (list queen-id) #f))]
+       (set-add! commanded-combat-tags queen-id)
+       (unless (unit-has-protected-queen-order? queen-id)
+         (emit! (sc2-raw-unit-command 251 #f hatch-id (list queen-id) #f)))]
 
       ;; 8. Spells: `(cast <caster-id> <spell-sym> ...)` or `(cast-spell <caster-id> <spell-sym> ...)`
       ;;    Enforces canonical SC2 ability target mode (Target.None / Target.Point / Target.Unit)
       ;;    and verifies creep tumor placement & MULE mineral patch targets (Bugs #14, #15, #19).
       [(list (or 'cast 'cast-spell) caster-id spell-sym rest ...)
        (define norm-spell (normalize-sc2-name->symbol spell-sym))
+       (define caster-u (hash-ref self-unit-by-tag caster-id #f))
        (define ab-id
          (cond
            [(memq norm-spell '(spread-creep-tumor spawn-creep-tumor))
-            (define caster-u (hash-ref self-unit-by-tag caster-id #f))
             (if (and caster-u (memq (sc2-id->unit-symbol (sc2-unit-unit-type caster-u))
                                     '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
                 (begin
@@ -3606,18 +3631,33 @@
 
            ;; Case B: Creep Tumor placement (must be verified on Creep via QueryPlacement)
            [(or (= ab-id 1694) (= ab-id 1733))
-            (define raw-x (if (>= (length rest) 2) (first rest) home-x))
-            (define raw-y (if (>= (length rest) 2) (second rest) home-y))
-            (define tx (scale-bot-coord-to-world raw-x home-x))
-            (define ty (scale-bot-coord-to-world raw-y home-y))
-            (define tumor-pt
-              (find-verified-building-placement ws-conn ab-id tx ty units
-                                                #:min-spacing 1.5
-                                                #:max-radius 7.5
-                                                #:step 1.5
-                                                #:extra-reserved-points step-reserved-build-pts))
-            (reserve-step-build-pt! tumor-pt ab-id)
-            (emit! (sc2-raw-unit-command ab-id tumor-pt 0 (list caster-id) #f))]
+            (unless (and (= ab-id 1694) (unit-has-protected-queen-order? caster-id))
+              (define raw-x (if (>= (length rest) 2) (first rest) home-x))
+              (define raw-y (if (>= (length rest) 2) (second rest) home-y))
+              (define tx (scale-bot-coord-to-world raw-x home-x))
+              (define ty (scale-bot-coord-to-world raw-y home-y))
+              ;; For Queen Creep Tumor (1694), anchor within 3.5 tiles of the Queen's own position
+              ;; toward (tx, ty) so placement is on the Hatchery's existing creep radius!
+              (define-values (anchor-x anchor-y)
+                (if (and (= ab-id 1694) caster-u)
+                    (let* ([qp (sc2-unit-pos caster-u)]
+                           [qx (sc2-point3d-x qp)]
+                           [qy (sc2-point3d-y qp)]
+                           [dx (- tx qx)]
+                           [dy (- ty qy)]
+                           [d (max 1.0 (sqrt (+ (sqr dx) (sqr dy))))]
+                           [step-d (min d 3.5)])
+                      (values (+ qx (* step-d (/ dx d)))
+                              (+ qy (* step-d (/ dy d)))))
+                    (values tx ty)))
+              (define tumor-pt
+                (find-verified-building-placement ws-conn ab-id anchor-x anchor-y units
+                                                  #:min-spacing 1.5
+                                                  #:max-radius 7.5
+                                                  #:step 1.5
+                                                  #:extra-reserved-points step-reserved-build-pts))
+              (reserve-step-build-pt! tumor-pt ab-id)
+              (emit! (sc2-raw-unit-command ab-id tumor-pt 0 (list caster-id) #f)))]
 
            ;; Case C: Orbital Command Calldown MULE (171) -> resolve to real mineral field tag
            [(= ab-id 171)
@@ -3657,12 +3697,13 @@
                 [else (values home-x home-y)]))
             (emit! (sc2-raw-unit-command ab-id (sc2-point2d tx ty) 0 (list caster-id) #f))]
 
-           ;; Case E: Unit-target ability (Chrono Boost, Transfusion, Feedback, Snipe, Yamato, Abduct, etc.)
+           ;; Case E: Unit-target ability (Inject Larva, Chrono Boost, Transfusion, Feedback, Snipe, Yamato, Abduct, etc.)
            [else
-            (define target-id (if (pair? rest) (first rest) 0))
-            (if (and (exact-integer? target-id) (> target-id 0))
-                (emit! (sc2-raw-unit-command ab-id #f target-id (list caster-id) #f))
-                (emit! (sc2-raw-unit-command ab-id #f 0 (list caster-id) #f)))]))]
+            (unless (and (= ab-id 251) (unit-has-protected-queen-order? caster-id))
+              (define target-id (if (pair? rest) (first rest) 0))
+              (if (and (exact-integer? target-id) (> target-id 0))
+                  (emit! (sc2-raw-unit-command ab-id #f target-id (list caster-id) #f))
+                  (emit! (sc2-raw-unit-command ab-id #f 0 (list caster-id) #f))))]))]
 
       ;; 9. Anti-cheese & Pro-mechanics
       [(list 'pull-workers-attack worker-ids raw-x raw-y)

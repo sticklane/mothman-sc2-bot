@@ -545,6 +545,62 @@
                           (equal? (sc2-raw-unit-command-unit-tags c) '(710))))
                    tw-cmds))
 
+;; 4. Bug #21 & #22: `(morph lair)` / `(morph warp-gate)` producer resolution,
+;;    Queen active Inject (251) / Tumor (1694) order protection, and Queen tumor creep anchoring
+(define queen-morph-obs
+  (make-test-obs
+   1200 300 150
+   (list ;; Idle Hatchery (86, tag 801) at (32, 32)
+         (make-test-unit 801 86 1 32.0 32.0)
+         ;; Idle Gateway (62, tag 802) at (38, 38)
+         (make-test-unit 802 62 1 38.0 38.0)
+         ;; Queen #810 actively executing Inject Larva (251) on Hatchery #801
+         (make-test-unit 810 126 1 33.0 32.0 #:energy 50.0
+                         #:orders (list (sc2-unit-order 251 #f 801 0.0)))
+         ;; Idle Queen #811 at (32.5, 32.5)
+         (make-test-unit 811 126 1 32.5 32.5 #:energy 50.0))))
+
+(define qm-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((morph lair)
+     (morph warp-gate)
+     ;; Attempt to interrupt Queen #810 (already executing 251) with tumor, inject, and attack-pos:
+     (cast-spell 810 spawn-creep-tumor 60.0 60.0)
+     (inject-larva 810 801)
+     (attack-pos (810) 90.0 90.0)
+     ;; Idle Queen #811 spawns a creep tumor requested far away at (80.0, 80.0) -> anchored near (32.5, 32.5)!
+     (cast-spell 811 spawn-creep-tumor 80.0 80.0))
+   queen-morph-obs))
+
+(check-true "morph-lair-resolves-idle-hatchery-801"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 1216)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(801))))
+                   qm-cmds))
+(check-true "morph-warpgate-resolves-idle-gateway-802"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 1518)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(802))))
+                   qm-cmds))
+(check-true "busy-injecting-queen-810-never-cancelled"
+            (not (ormap (lambda (c)
+                          (and (sc2-raw-unit-command? c)
+                               (member 810 (sc2-raw-unit-command-unit-tags c))))
+                        qm-cmds)))
+(check-true "idle-queen-811-tumor-anchored-near-queen-on-creep"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 1694)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(811))
+                          (let ([pt (sc2-raw-unit-command-target-pos c)])
+                            (and (sc2-point2d? pt)
+                                 (<= (sqrt (+ (sqr (- (sc2-point2d-x pt) 32.5))
+                                              (sqr (- (sc2-point2d-y pt) 32.5))))
+                                     10.0)))))
+                   qm-cmds))
+
 ;; -----------------------------------------------------------------------------
 ;; 5. Full Mock SC2_x64 RFC 6455 WebSocket Server + Match Loop Integration Test
 ;; -----------------------------------------------------------------------------

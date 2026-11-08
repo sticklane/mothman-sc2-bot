@@ -546,6 +546,8 @@
     [(or (memv ab-id '(318 880 1152))
          (memq ab-sym '(build-command-center build-nexus build-hatchery)))
      'expand]
+    [(memv ab-id '(1216 1218 1220 2112 1516 1450 1518))
+     'morph]
     [(string-prefix? s "build-")
      'build]
     [(string-prefix? s "train-")
@@ -565,6 +567,16 @@
     [(= ab-id 524)  'scv]
     [(= ab-id 1006) 'probe]
     [(= ab-id 1342) 'drone]
+    [(= ab-id 1216) 'lair]
+    [(= ab-id 1218) 'hive]
+    [(= ab-id 1220) 'greater-spire]
+    [(= ab-id 2112) 'lurker-den]
+    [(= ab-id 1516) 'orbital-command]
+    [(= ab-id 1450) 'planetary-fortress]
+    [(= ab-id 1518) 'warp-gate]
+    [(= ab-id 251)  'inject-larva]
+    [(= ab-id 1694) 'spawn-creep-tumor]
+    [(= ab-id 1733) 'spread-creep-tumor]
     [(string-prefix? s "build-")    (string->symbol (substring s 6))]
     [(string-prefix? s "train-")    (string->symbol (substring s 6))]
     [(string-prefix? s "morph-")    (string->symbol (substring s 6))]
