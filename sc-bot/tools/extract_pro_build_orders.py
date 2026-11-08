@@ -1654,20 +1654,21 @@ def build_random_opening_summaries(
 
 
 def main() -> None:
+    default_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     parser = argparse.ArgumentParser(description="Extract canonical LotV pro build orders and supply curves")
     parser.add_argument(
         "--base-dir",
-        default="/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot",
+        default=default_base,
         help="Root directory of sc-bot workspace",
     )
     parser.add_argument(
         "--out-sexp",
-        default="/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/data/pro_build_orders.sexp",
+        default=os.path.join(default_base, "data", "pro_build_orders.sexp"),
         help="Output S-expression path",
     )
     parser.add_argument(
         "--out-json",
-        default="/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/data/pro_build_orders_summary.json",
+        default=os.path.join(default_base, "data", "pro_build_orders_summary.json"),
         help="Output JSON summary path",
     )
     args = parser.parse_args()
