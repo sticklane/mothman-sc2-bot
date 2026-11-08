@@ -1867,6 +1867,87 @@
   (assert-eq! (car self-chk) 30 "All 30 SC2 LotV actuator contract self-checks must pass")
   (assert-eq! (cdr self-chk) 30 "Contract self-check count must be 30")
 
+  ;; Replay Pathology Property 5 (Matches #5106685 & #5106686): Healthy 200-HP Pylon must NOT trigger supply-at-risk Pylon spam
+  (define rt-5106685 (make-protoss-stardust-runtime))
+  (define res-5106685
+    (step-live-bot-runtime!
+     rt-5106685
+     (hash 'frame 1200
+           'minerals 180
+           'gas 50
+           'supply-used 18
+           'supply-cap 31
+           'supply-left 13
+           'pending-supply 0
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'ally-units (for/list ([i (in-range 16)])
+                         (hash 'id (+ 10 i) 'type 'probe 'x 32.5 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 201 'type 'nexus 'x 32.5 'y 32.5 'hp 2000 'max-hp 2000 'hp-pct 1.0 'build-progress 1.0)
+                                 (hash 'id 202 'type 'pylon 'x 36.5 'y 36.5 'hp 200 'max-hp 200 'hp-pct 1.0 'build-progress 1.0)
+                                 (hash 'id 203 'type 'gateway 'x 38.5 'y 36.5 'hp 500 'max-hp 1000 'hp-pct 0.5 'build-progress 0.45))
+           'enemy-units '())))
+  (define acts-5106685 (hash-ref res-5106685 'actions))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'pylon))) acts-5106685))
+                "Matches #5106685 & #5106686: Healthy Pylon (200 HP / 1.0 hp-pct) with 13 free supply must NOT trigger emergency Pylon spam")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'cybernetics-core))) acts-5106685))
+                "Matches #5106685 & #5106686: Unfinished Gateway (build-progress 0.45) must NOT prematurely emit CyberneticsCore")
+
+  ;; Replay Pathology Property 6 (Match #5106684): Terran Factory & Barracks-TechLab must be reachable after Refinery exists
+  (define rt-5106684 (make-terran-pluto-runtime))
+  (define res-5106684
+    (step-live-bot-runtime!
+     rt-5106684
+     (hash 'frame 2000
+           'minerals 260
+           'gas 140
+           'supply-used 24
+           'supply-cap 39
+           'supply-left 15
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'ally-units (for/list ([i (in-range 20)])
+                         (hash 'id (+ 10 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 302 'type 'orbital-command 'x 50.5 'y 56.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 303 'type 'barracks 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0)
+                                 (hash 'id 304 'type 'refinery 'x 35.5 'y 37.5 'hp 500 'build-progress 1.0)
+                                 (hash 'id 305 'type 'refinery 'x 30.5 'y 35.5 'hp 500 'build-progress 1.0))
+           'enemy-units '())))
+  (define acts-5106684 (hash-ref res-5106684 'actions))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'factory))) acts-5106684)
+                "Match #5106684: Terran must build Factory once Barracks is ready and gas >= 100 even when Refinery already exists")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'barracks-techlab))) acts-5106684)
+                "Match #5106684: Terran must build Barracks-TechLab once Barracks is ready and gas >= 25")
+
+  ;; Replay Pathology Property 7 (Matches #5106683 & #5106687): Zerg Drone saturation priority at 16 Drones on 2 Hatcheries
+  (define rt-5106683 (make-zerg-overmind-runtime))
+  (define res-5106683
+    (step-live-bot-runtime!
+     rt-5106683
+     (hash 'frame 1800
+           'minerals 50
+           'gas 20
+           'supply-used 22
+           'supply-cap 36
+           'supply-left 14
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'ally-units (append (for/list ([i (in-range 16)])
+                                 (hash 'id (+ 10 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                               (for/list ([i (in-range 8)])
+                                 (hash 'id (+ 100 i) 'type 'zergling 'x 48.5 'y 52.5 'hp 35)))
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 102 'type 'hatchery 'x 50.5 'y 56.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 103 'type 'spawning-pool 'x 35.5 'y 35.5 'hp 1000 'build-progress 1.0)
+                                 (hash 'id 104 'type 'extractor 'x 36.5 'y 36.5 'hp 500 'build-progress 1.0))
+           'enemy-units '())))
+  (define acts-5106683 (hash-ref res-5106683 'actions))
+  (assert-true! (member '(train drone) acts-5106683)
+                "Matches #5106683 & #5106687: Zerg at 16 Drones on 2 Hatcheries with 8 Zerglings and 0 threat must prioritize (train drone) over Zergling flood")
+  (assert-true! (not (member '(train zergling) acts-5106683))
+                "Matches #5106683 & #5106687: Zerg at 50M and 16 Drones on 2 Hatcheries must not starve Drone production by spending last 50M on Zerglings")
+
   (define fuzz-rep (run-bot-crash-and-contract-fuzzer #:frames 1000 #:seed 20261107))
   (assert-eq! (fuzz-campaign-report-total-crashes fuzz-rep) 0
               "Crash fuzzer must encounter 0 runtime crashes")

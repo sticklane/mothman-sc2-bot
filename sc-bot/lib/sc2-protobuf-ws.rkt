@@ -2148,12 +2148,17 @@
   (define third-x (+ base-x (* 42.0 ux)))
   (define third-y (+ base-y (* 42.0 uy)))
 
-  ;; Pending supply (Overlord eggs / in-progress Depots / in-progress Pylons)
+  ;; Pending supply (Overlord eggs / in-progress Depots / in-progress Pylons / in-transit worker build orders)
   (define pending-supply
     (+ (for/sum ([u (in-list self-units)]
                  #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
                                    '(supply-depot pylon))
                              (< (sc2-unit-build-progress u) 0.999)))
+         1)
+       (for/sum ([w (in-list my-workers)]
+                 #:when (and (pair? (sc2-unit-orders w))
+                             (memq (sc2-unit-order-ability-id (first (sc2-unit-orders w)))
+                                   '(319 881)))) ;; TERRANBUILD_SUPPLYDEPOT=319, PROTOSSBUILD_PYLON=881
          1)
        (for/sum ([u (in-list self-units)]
                  #:when (= (sc2-unit-unit-type u) 103)) ;; EGG
@@ -2161,6 +2166,19 @@
                     (sc2-unit-orders u))
              1
              0))))
+
+  ;; Pending workers (in-progress SCV / Probe / Drone eggs)
+  (define pending-workers
+    (+ (for/sum ([th (in-list ready-townhalls)]
+                 #:when (and (pair? (sc2-unit-orders th))
+                             (memq (sc2-unit-order-ability-id (first (sc2-unit-orders th)))
+                                   '(524 1006)))) ;; TRAIN_SCV=524, TRAIN_PROBE=1006
+         1)
+       (for/sum ([u (in-list self-units)]
+                 #:when (and (= (sc2-unit-unit-type u) 103)
+                             (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1342))
+                                    (sc2-unit-orders u)))) ;; TRAIN_DRONE=1342
+         1)))
 
   ;; Convert ally mobile units (plus ready unused creep tumors for tumor spread!)
   (define ally-unit-records
@@ -2189,36 +2207,65 @@
              'hp (max 1 (exact-round (sc2-unit-health u)))
              'energy 0))))
 
-  ;; Convert ally buildings
+  ;; Convert ally buildings (plus in-transit worker build orders so buildings aren't spammed while worker walks)
+  (define in-transit-bldg-records
+    (filter-map
+     (lambda (w)
+       (and (pair? (sc2-unit-orders w))
+            (let* ([ord (first (sc2-unit-orders w))]
+                   [ab-id (sc2-unit-order-ability-id ord)]
+                   [ab-sym (sc2-id->ability-symbol ab-id #f)]
+                   [ab-str (if ab-sym (symbol->string ab-sym) "")])
+              (and (string-prefix? ab-str "build-")
+                   (let ([bsym (string->symbol (substring ab-str 6))]
+                         [wp (sc2-unit-pos w)])
+                     ;; Only synthesize if no under-construction building of this type already exists nearby
+                     (and (not (ormap (lambda (b)
+                                        (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type b)) bsym)
+                                             (< (sc2-unit-build-progress b) 0.25)))
+                                      self-units))
+                          (hash 'id (+ 9000000 (sc2-unit-tag w))
+                                'type bsym
+                                'x (sc2-point3d-x wp)
+                                'y (sc2-point3d-y wp)
+                                'hp 200
+                                'hp-pct 1.0
+                                'build-progress 0.05
+                                'halted #f)))))))
+     my-workers))
+
   (define ally-bldg-records
-    (for/list ([b (in-list self-units)]
-               #:when (sc2-unit-is-structure? b))
-      (define p (sc2-unit-pos b))
-      (define bx (sc2-point3d-x p))
-      (define by (sc2-point3d-y p))
-      (define bsym (sc2-id->unit-symbol (sc2-unit-unit-type b)))
-      (define bprog (max 0.0 (min 1.0 (sc2-unit-build-progress b))))
-      (define hp-max (max 1.0 (sc2-unit-health-max b)))
-      (define raw-pct (/ (sc2-unit-health b) hp-max))
-      (define expected-frac (+ 0.10 (* 0.90 bprog)))
-      (define eff-hp-pct (if (< bprog 0.999) (min 1.0 (/ raw-pct (max 0.10 expected-frac))) raw-pct))
-      (define halted?
-        (and (eq? actual-race 'Terran)
-             (< bprog 0.999)
-             (not (memq bsym '(barracks-tech-lab barracks-reactor factory-tech-lab factory-reactor
-                               starport-tech-lab starport-reactor orbital-command planetary-fortress)))
-             (not (ormap (lambda (w)
-                           (define wp (sc2-unit-pos w))
-                           (<= (pt-dist bx by (sc2-point3d-x wp) (sc2-point3d-y wp)) 5.5))
-                         my-workers))))
-      (hash 'id (sc2-unit-tag b)
-            'type bsym
-            'x bx
-            'y by
-            'hp (max 1 (exact-round (sc2-unit-health b)))
-            'hp-pct eff-hp-pct
-            'build-progress bprog
-            'halted halted?)))
+    (append
+     (for/list ([b (in-list self-units)]
+                #:when (sc2-unit-is-structure? b))
+       (define p (sc2-unit-pos b))
+       (define bx (sc2-point3d-x p))
+       (define by (sc2-point3d-y p))
+       (define bsym (sc2-id->unit-symbol (sc2-unit-unit-type b)))
+       (define bprog (max 0.0 (min 1.0 (sc2-unit-build-progress b))))
+       (define hp-max (max 1.0 (+ (sc2-unit-health-max b) (sc2-unit-shield-max b))))
+       (define cur-hp+sh (+ (sc2-unit-health b) (sc2-unit-shield b)))
+       (define raw-pct (/ cur-hp+sh hp-max))
+       (define expected-frac (+ 0.10 (* 0.90 bprog)))
+       (define eff-hp-pct (if (< bprog 0.999) (min 1.0 (/ raw-pct (max 0.10 expected-frac))) raw-pct))
+       (define halted?
+         (and (eq? actual-race 'Terran)
+              (< bprog 0.999)
+              (not (memq bsym '(barracks-tech-lab barracks-reactor factory-tech-lab factory-reactor
+                                starport-tech-lab starport-reactor orbital-command planetary-fortress)))
+              (not (ormap (lambda (w)
+                            (define wp (sc2-unit-pos w))
+                            (<= (pt-dist bx by (sc2-point3d-x wp) (sc2-point3d-y wp)) 5.5))
+                          my-workers))))
+       (hash 'id (sc2-unit-tag b)
+             'type bsym
+             'x bx
+             'y by
+             'hp (max 1 (exact-round cur-hp+sh))
+             'hp-pct eff-hp-pct
+             'build-progress bprog
+             'halted halted?))
+     in-transit-bldg-records))
 
   ;; Enemy units & buildings
   (define enemy-unit-records
@@ -2291,10 +2338,10 @@
                   (define mp (sc2-unit-pos m))
                   (<= (pt-dist (sc2-point3d-x p) (sc2-point3d-y p)
                                (sc2-point3d-x mp) (sc2-point3d-y mp))
-                      10.5))
+                      12.0))
                 mineral-fields))
       (define rem-min (for/sum ([m (in-list close-mins)]) (sc2-unit-mineral-contents m)))
-      (if (or (null? close-mins) (< rem-min 1800) (<= (length close-mins) 3)) 1 0)))
+      (if (and (not (null? close-mins)) (< rem-min 1200)) 1 0)))
 
   (define busy-facilities
     (for/sum ([b (in-list self-units)]
@@ -2321,6 +2368,7 @@
         'supply-cap supply-cap
         'supply-left supply-left
         'pending-supply pending-supply
+        'pending-workers pending-workers
         'base-x base-x
         'base-y base-y
         'natural-x nat-x
