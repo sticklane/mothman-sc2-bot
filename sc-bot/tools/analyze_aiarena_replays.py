@@ -30,6 +30,7 @@ BOT_IDS = {
     1458: "Mothman-Z",
     1459: "Mothman-T",
     1460: "Mothman-P",
+    1461: "Mothman-X",
 }
 TH_NAMES = {
     "CommandCenter",

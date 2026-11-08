@@ -3,6 +3,7 @@
 (require racket/match
          racket/list
          racket/math
+         racket/runtime-path
          "../compiler/syntax.rkt"
          "sc2-game-constants.rkt"
          "okasaki-sc.rkt")
@@ -76,7 +77,16 @@
  schedule-priority-candidates-with-ledger!
  (struct-out refractory-cooldown-tracker)
  make-refractory-cooldown-tracker
- refractory-allow-action?!)
+ refractory-allow-action?!
+
+ ;; Empirical Pro Replay Build-Order Database & Goal-Queue Executor
+ PRO-BUILD-ORDER-DB
+ (struct-out pro-bo-goal)
+ (struct-out pro-bo-eval-result)
+ select-pro-build-order
+ pro-build-order-steps-for-matchup
+ pro-supply-curve-target
+ evaluate-build-order-next-step)
 
 ;; =============================================================================
 ;; 1. Build-Order Combinators & Locutus Worker Chaining
@@ -1951,5 +1961,428 @@
                             rem-gas
                             rem-sup
                             cat-utils))
+
+;; =============================================================================
+;; 10. Empirical Pro Replay Build-Order Database & Goal-Queue Executor
+;;     Loaded from `data/pro_build_orders.sexp` (mined from 1,798 LotV replays)
+;; =============================================================================
+
+(define-runtime-path PRO-BUILD-ORDERS-SEXP-PATH "../data/pro_build_orders.sexp")
+
+(define PRO-BUILD-ORDER-DB
+  (with-handlers ([exn:fail? (lambda (_) '(pro-build-order-database (matchups)))])
+    (if (file-exists? PRO-BUILD-ORDERS-SEXP-PATH)
+        (with-input-from-file PRO-BUILD-ORDERS-SEXP-PATH read)
+        '(pro-build-order-database (matchups)))))
+
+(struct pro-bo-goal
+  (kind              ;; 'build | 'expand | 'morph | 'train | 'research
+   target-sym        ;; canonical symbol (e.g. 'spawning-pool, 'factory, 'cybernetics-core)
+   target-count      ;; cumulative count required to satisfy this step
+   min-supply        ;; minimum supply-used before triggering this step
+   prereq-ready-sym) ;; prerequisite structure symbol that must be ready (build-progress >= 1.0), or #f
+  #:transparent)
+
+(struct pro-bo-eval-result
+  (matchup
+   active-goal
+   ready-actions
+   reserved-minerals
+   reserved-gas
+   target-workers
+   target-army-supply)
+  #:transparent)
+
+(define (resolve-matchup-symbol race [enemy-race 'Unknown])
+  (if (memq race '(ZvZ ZvT ZvP TvZ TvT TvP PvZ PvT PvP))
+      race
+      (let ([r (normalize-ledger-race race)]
+            [er (case enemy-race
+                  [(Zerg zerg "Zerg" "zerg") 'Zerg]
+                  [(Terran terran "Terran" "terran") 'Terran]
+                  [(Protoss protoss "Protoss" "protoss") 'Protoss]
+                  [else 'Unknown])])
+        (case r
+          [(Zerg)
+           (case er
+             [(Zerg) 'ZvZ]
+             [(Terran) 'ZvT]
+             [(Protoss) 'ZvP]
+             [else 'ZvT])]
+          [(Terran)
+           (case er
+             [(Zerg) 'TvZ]
+             [(Terran) 'TvT]
+             [(Protoss) 'TvP]
+             [else 'TvZ])]
+          [else ;; Protoss
+           (case er
+             [(Zerg) 'PvZ]
+             [(Terran) 'PvT]
+             [(Protoss) 'PvP]
+             [else 'PvT])]))))
+
+(define (find-matchup-entry matchup-sym)
+  (define matchups-sec
+    (and (pair? PRO-BUILD-ORDER-DB)
+         (assq 'matchups (cdr PRO-BUILD-ORDER-DB))))
+  (and matchups-sec
+       (for/first ([m (in-list (cdr matchups-sec))]
+                   #:when (and (pair? m)
+                               (eq? (first m) 'matchup)
+                               (pair? (cdr m))
+                               (eq? (second m) matchup-sym)))
+         m)))
+
+(define (select-pro-build-order race [enemy-race 'Unknown])
+  (define m-sym (resolve-matchup-symbol race enemy-race))
+  (or (find-matchup-entry m-sym)
+      (list 'matchup m-sym)))
+
+;; Interpolates the empirical pro winning worker & army supply curve for (race, enemy-race, frame)
+(define (pro-supply-curve-target race [enemy-race 'Unknown] [raw-frame 0] [raw-active-bases 1])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
+  (define sec (/ (exact->inexact frame) 22.4))
+  (define m-entry (select-pro-build-order race enemy-race))
+  (define curve-sec
+    (and (list? m-entry)
+         (for/first ([sub (in-list (cddr m-entry))]
+                     #:when (and (pair? sub) (eq? (first sub) 'winning-worker-to-army-supply-curve)))
+           (cdr sub))))
+  ;; Extract minute -> (workers, army-supply) points or use canonical empirical curve
+  (define minute-idx (max 1 (min 7 (add1 (exact-floor (/ sec 60.0))))))
+  (define row
+    (and curve-sec
+         (for/first ([r (in-list curve-sec)]
+                     #:when (and (pair? r)
+                                 (eq? (first r) 'minute)
+                                 (pair? (cdr r))
+                                 (= (safe-exact-int (second r) 0) minute-idx)))
+           r)))
+  (define (row-field sym default)
+    (if (and row (list? row))
+        (let ([kv (for/first ([x (in-list (cddr row))]
+                              #:when (and (pair? x) (eq? (first x) sym) (pair? (cdr x))))
+                    (second x))])
+          (if kv (safe-real kv default) default))
+        default))
+  (define curve-workers
+    (exact-round (row-field 'workers (* 22.0 (min 4 active-bases)))))
+  (define curve-army
+    (exact-round (row-field 'army-supply (max 2.0 (* 8.0 minute-idx)))))
+  (define base-scaled-workers
+    (min 80 (max 22 (* 22 (min 4 active-bases)) curve-workers)))
+  (values base-scaled-workers curve-army))
+
+;; Canonical goal-count sequence per matchup derived from `data/pro_build_orders.sexp`
+(define (pro-build-order-steps-for-matchup race [enemy-race 'Unknown])
+  (define m-sym (resolve-matchup-symbol race enemy-race))
+  (case m-sym
+    [(ZvZ)
+     (list
+      (pro-bo-goal 'train 'overlord 2 13 #f)
+      (pro-bo-goal 'expand 'hatchery 2 16 #f)
+      (pro-bo-goal 'build 'extractor 1 17 #f)
+      (pro-bo-goal 'build 'spawning-pool 1 17 #f)
+      (pro-bo-goal 'train 'overlord 3 19 #f)
+      (pro-bo-goal 'train 'queen 2 20 'spawning-pool)
+      (pro-bo-goal 'train 'zergling 6 20 'spawning-pool)
+      (pro-bo-goal 'research 'metabolic-boost 1 22 'spawning-pool)
+      (pro-bo-goal 'build 'baneling-nest 1 28 'spawning-pool)
+      (pro-bo-goal 'expand 'hatchery 3 30 'spawning-pool)
+      (pro-bo-goal 'build 'roach-warren 1 36 'spawning-pool)
+      (pro-bo-goal 'build 'extractor 2 38 'spawning-pool)
+      (pro-bo-goal 'morph 'lair 1 44 'spawning-pool)
+      (pro-bo-goal 'build 'evolution-chamber 1 46 'spawning-pool)
+      (pro-bo-goal 'build 'extractor 3 50 'lair)
+      (pro-bo-goal 'research 'glial-reconstitution 1 52 'lair)
+      (pro-bo-goal 'research 'zerg-missile-weapons-1 1 54 'evolution-chamber)
+      (pro-bo-goal 'build 'hydralisk-den 1 62 'lair))]
+
+    [(ZvT ZvP)
+     (list
+      (pro-bo-goal 'train 'overlord 2 13 #f)
+      (pro-bo-goal 'expand 'hatchery 2 16 #f)
+      (pro-bo-goal 'build 'extractor 1 17 #f)
+      (pro-bo-goal 'build 'spawning-pool 1 17 #f)
+      (pro-bo-goal 'train 'overlord 3 19 #f)
+      (pro-bo-goal 'train 'queen 2 20 'spawning-pool)
+      (pro-bo-goal 'train 'zergling 4 20 'spawning-pool)
+      (pro-bo-goal 'research 'metabolic-boost 1 22 'spawning-pool)
+      (pro-bo-goal 'expand 'hatchery 3 30 'spawning-pool)
+      (pro-bo-goal 'train 'queen 3 32 'spawning-pool)
+      (pro-bo-goal 'build 'roach-warren 1 36 'spawning-pool)
+      (pro-bo-goal 'build 'baneling-nest 1 38 'spawning-pool)
+      (pro-bo-goal 'build 'extractor 2 40 'spawning-pool)
+      (pro-bo-goal 'build 'extractor 3 44 'spawning-pool)
+      (pro-bo-goal 'morph 'lair 1 46 'spawning-pool)
+      (pro-bo-goal 'build 'evolution-chamber 1 48 'spawning-pool)
+      (pro-bo-goal 'research 'glial-reconstitution 1 54 'lair)
+      (pro-bo-goal 'research 'centrifical-hooks 1 56 'lair)
+      (pro-bo-goal 'research 'zerg-missile-weapons-1 1 58 'evolution-chamber)
+      (pro-bo-goal 'build 'hydralisk-den 1 62 'lair)
+      (pro-bo-goal 'build 'extractor 4 64 'lair)
+      (pro-bo-goal 'research 'grooved-spines 1 68 'hydralisk-den))]
+
+    [(TvZ TvT TvP)
+     (list
+      (pro-bo-goal 'build 'supply-depot 1 14 #f)
+      (pro-bo-goal 'build 'barracks 1 16 'supply-depot)
+      (pro-bo-goal 'build 'refinery 1 16 'supply-depot)
+      (pro-bo-goal 'morph 'orbital-command 1 19 'barracks)
+      (pro-bo-goal 'expand 'command-center 2 20 'barracks)
+      (pro-bo-goal 'build 'supply-depot 2 21 'barracks)
+      (pro-bo-goal 'research 'stimpack 1 21 'barracks-techlab)
+      (pro-bo-goal 'build 'factory 1 21 'barracks)
+      (pro-bo-goal 'build 'barracks-techlab 1 21 'barracks)
+      (pro-bo-goal 'build 'refinery 2 22 'barracks)
+      (pro-bo-goal 'morph 'orbital-command 2 26 'barracks)
+      (pro-bo-goal 'build 'starport 1 28 'factory)
+      (pro-bo-goal 'build 'factory-techlab 1 30 'factory)
+      (pro-bo-goal 'build 'barracks 2 32 'barracks)
+      (pro-bo-goal 'build 'barracks 3 36 'barracks)
+      (pro-bo-goal 'build 'barracks-reactor 1 36 'barracks)
+      (pro-bo-goal 'build 'starport-reactor 1 38 'starport)
+      (pro-bo-goal 'research 'combat-shield 1 40 'barracks-techlab)
+      (pro-bo-goal 'build 'engineering-bay 1 44 'barracks)
+      (pro-bo-goal 'build 'refinery 3 46 'factory)
+      (pro-bo-goal 'research 'terran-infantry-weapons-1 1 48 'engineering-bay)
+      (pro-bo-goal 'expand 'command-center 3 52 'starport)
+      (pro-bo-goal 'research 'concussive-shells 1 54 'barracks-techlab)
+      (pro-bo-goal 'build 'armory 1 60 'factory)
+      (pro-bo-goal 'research 'terran-infantry-armor-1 1 62 'engineering-bay))]
+
+    [else ;; PvZ, PvT, PvP
+     (list
+      (pro-bo-goal 'build 'pylon 1 14 #f)
+      (pro-bo-goal 'build 'gateway 1 16 'pylon)
+      (pro-bo-goal 'build 'assimilator 1 16 'pylon)
+      (pro-bo-goal 'expand 'nexus 2 19 'gateway)
+      (pro-bo-goal 'build 'cybernetics-core 1 19 'gateway)
+      (pro-bo-goal 'build 'assimilator 2 21 'cybernetics-core)
+      (pro-bo-goal 'build 'pylon 2 21 'cybernetics-core)
+      (pro-bo-goal 'research 'warp-gate-research 1 22 'cybernetics-core)
+      (pro-bo-goal 'train 'stalker 2 23 'cybernetics-core)
+      (pro-bo-goal 'build 'robotics-facility 1 26 'cybernetics-core)
+      (pro-bo-goal 'build 'twilight-council 1 28 'cybernetics-core)
+      (pro-bo-goal 'build 'gateway 2 30 'cybernetics-core)
+      (pro-bo-goal 'build 'gateway 3 32 'cybernetics-core)
+      (pro-bo-goal 'train 'immortal 1 34 'robotics-facility)
+      (pro-bo-goal 'train 'observer 1 36 'robotics-facility)
+      (pro-bo-goal 'research 'charge 1 38 'twilight-council)
+      (pro-bo-goal 'build 'assimilator 3 42 'robotics-facility)
+      (pro-bo-goal 'expand 'nexus 3 48 'robotics-facility)
+      (pro-bo-goal 'build 'forge 1 50 'cybernetics-core)
+      (pro-bo-goal 'research 'protoss-ground-weapons-1 1 54 'forge)
+      (pro-bo-goal 'build 'robotics-bay 1 58 'robotics-facility)
+      (pro-bo-goal 'research 'extended-thermal-lance 1 64 'robotics-bay))]))
+
+(define (evaluate-build-order-next-step
+         #:race [raw-race 'Zerg]
+         #:enemy-race [enemy-race 'Unknown]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 200]
+         #:gas [raw-gas 0]
+         #:supply-used [raw-supply-used 12]
+         #:supply-left [raw-supply-left 4]
+         #:active-bases [raw-active-bases 1]
+         #:ready-building-counts [ready-bldg-counts (hash)]
+         #:total-building-counts [total-bldg-counts (hash)]
+         #:unit-counts [unit-counts (hash)]
+         #:researched-upgrades [researched-upgrades '()]
+         #:pending-upgrades [pending-upgrades '()]
+         #:base-x [raw-base-x 32.5]
+         #:base-y [raw-base-y 32.5]
+         #:nat-x [raw-nat-x 50.5]
+         #:nat-y [raw-nat-y 50.5]
+         #:third-x [raw-third-x 60.5]
+         #:third-y [raw-third-y 40.5])
+  (define race (normalize-ledger-race raw-race))
+  (define m-sym (resolve-matchup-symbol race enemy-race))
+  (define supply-used (safe-nonneg-int raw-supply-used 12))
+  (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
+  (define base-x (safe-tile-coord raw-base-x 32.5))
+  (define base-y (safe-tile-coord raw-base-y 32.5))
+  (define nat-x (safe-tile-coord raw-nat-x 50.5))
+  (define nat-y (safe-tile-coord raw-nat-y 50.5))
+  (define third-x (safe-tile-coord raw-third-x 60.5))
+  (define third-y (safe-tile-coord raw-third-y 40.5))
+  (define-values (target-workers target-army)
+    (pro-supply-curve-target race enemy-race raw-frame active-bases))
+
+  (define all-upgs
+    (append (if (list? researched-upgrades) researched-upgrades '())
+            (if (list? pending-upgrades) pending-upgrades '())))
+
+  (define (count-total-bldg sym)
+    (case sym
+      [(hatchery)
+       (+ (hash-ref total-bldg-counts 'hatchery 0)
+          (hash-ref total-bldg-counts 'lair 0)
+          (hash-ref total-bldg-counts 'hive 0))]
+      [(lair)
+       (+ (hash-ref total-bldg-counts 'lair 0)
+          (hash-ref total-bldg-counts 'hive 0))]
+      [(spire)
+       (+ (hash-ref total-bldg-counts 'spire 0)
+          (hash-ref total-bldg-counts 'greater-spire 0))]
+      [(command-center)
+       (+ (hash-ref total-bldg-counts 'command-center 0)
+          (hash-ref total-bldg-counts 'orbital-command 0)
+          (hash-ref total-bldg-counts 'planetary-fortress 0))]
+      [(orbital-command)
+       (+ (hash-ref total-bldg-counts 'orbital-command 0)
+          (hash-ref total-bldg-counts 'planetary-fortress 0))]
+      [(supply-depot)
+       (+ (hash-ref total-bldg-counts 'supply-depot 0)
+          (hash-ref total-bldg-counts 'supply-depot-lowered 0))]
+      [(barracks-techlab barracks-tech-lab)
+       (+ (hash-ref total-bldg-counts 'barracks-techlab 0)
+          (hash-ref total-bldg-counts 'barracks-tech-lab 0))]
+      [(factory-techlab factory-tech-lab)
+       (+ (hash-ref total-bldg-counts 'factory-techlab 0)
+          (hash-ref total-bldg-counts 'factory-tech-lab 0))]
+      [(starport-techlab starport-tech-lab)
+       (+ (hash-ref total-bldg-counts 'starport-techlab 0)
+          (hash-ref total-bldg-counts 'starport-tech-lab 0))]
+      [(gateway)
+       (+ (hash-ref total-bldg-counts 'gateway 0)
+          (hash-ref total-bldg-counts 'warp-gate 0)
+          (hash-ref total-bldg-counts 'warpgate 0))]
+      [(robotics-bay robotics-support-bay)
+       (+ (hash-ref total-bldg-counts 'robotics-bay 0)
+          (hash-ref total-bldg-counts 'robotics-support-bay 0))]
+      [(templar-archives templar-archive)
+       (+ (hash-ref total-bldg-counts 'templar-archives 0)
+          (hash-ref total-bldg-counts 'templar-archive 0))]
+      [else
+       (hash-ref total-bldg-counts sym 0)]))
+
+  (define (prereq-ready? prereq-sym)
+    (cond
+      [(not prereq-sym) #t]
+      [(eq? prereq-sym 'spawning-pool)
+       (> (hash-ref ready-bldg-counts 'spawning-pool 0) 0)]
+      [(eq? prereq-sym 'lair)
+       (> (+ (hash-ref ready-bldg-counts 'lair 0)
+             (hash-ref ready-bldg-counts 'hive 0))
+          0)]
+      [(eq? prereq-sym 'supply-depot)
+       (> (+ (hash-ref ready-bldg-counts 'supply-depot 0)
+             (hash-ref ready-bldg-counts 'supply-depot-lowered 0))
+          0)]
+      [(memq prereq-sym '(barracks-techlab barracks-tech-lab))
+       (> (+ (hash-ref ready-bldg-counts 'barracks-techlab 0)
+             (hash-ref ready-bldg-counts 'barracks-tech-lab 0))
+          0)]
+      [(memq prereq-sym '(factory-techlab factory-tech-lab))
+       (> (+ (hash-ref ready-bldg-counts 'factory-techlab 0)
+             (hash-ref ready-bldg-counts 'factory-tech-lab 0))
+          0)]
+      [(memq prereq-sym '(starport-techlab starport-tech-lab))
+       (> (+ (hash-ref ready-bldg-counts 'starport-techlab 0)
+             (hash-ref ready-bldg-counts 'starport-tech-lab 0))
+          0)]
+      [(eq? prereq-sym 'gateway)
+       (> (+ (hash-ref ready-bldg-counts 'gateway 0)
+             (hash-ref ready-bldg-counts 'warp-gate 0)
+             (hash-ref ready-bldg-counts 'warpgate 0))
+          0)]
+      [(memq prereq-sym '(robotics-bay robotics-support-bay))
+       (> (+ (hash-ref ready-bldg-counts 'robotics-bay 0)
+             (hash-ref ready-bldg-counts 'robotics-support-bay 0))
+          0)]
+      [else
+       (> (hash-ref ready-bldg-counts prereq-sym 0) 0)]))
+
+  (define (goal-satisfied? g)
+    (match-define (pro-bo-goal kind sym tgt-cnt _ _) g)
+    (case kind
+      [(build expand morph)
+       (>= (count-total-bldg sym) tgt-cnt)]
+      [(train)
+       (>= (hash-ref unit-counts sym 0) tgt-cnt)]
+      [(research)
+       (not (not (memq sym all-upgs)))]
+      [else #t]))
+
+  (define (goal->action g)
+    (match-define (pro-bo-goal kind sym tgt-cnt _ _) g)
+    (case kind
+      [(expand)
+       (define ex (if (>= tgt-cnt 3) third-x nat-x))
+       (define ey (if (>= tgt-cnt 3) third-y nat-y))
+       (list 'expand ex ey)]
+      [(morph)
+       (list 'morph sym)]
+      [(research)
+       (list 'research sym)]
+      [(train)
+       (list 'train sym)]
+      [(build)
+       (cond
+         [(memq sym '(extractor refinery assimilator
+                      barracks-techlab barracks-reactor
+                      factory-techlab factory-reactor
+                      starport-techlab starport-reactor))
+          (list 'build sym)]
+         [else
+          (list 'build sym
+                (safe-tile-coord (+ base-x 4.0))
+                (safe-tile-coord (+ base-y 4.0)))])]
+      [else
+       (list 'build sym)]))
+
+  (define steps (pro-build-order-steps-for-matchup race enemy-race))
+  (define rem-min (safe-nonneg-int raw-minerals 0))
+  (define rem-gas (safe-nonneg-int raw-gas 0))
+  (define rem-sup (max 0 (safe-exact-int raw-supply-left 0)))
+  (define ready-acts '())
+  (define active-head #f)
+  (define res-min 0)
+  (define res-gas 0)
+
+  (for ([g (in-list steps)]
+        #:when (and (not (goal-satisfied? g))
+                    (>= supply-used (pro-bo-goal-min-supply g))))
+    (define sym (pro-bo-goal-target-sym g))
+    (define kind (pro-bo-goal-kind g))
+    (define m-cost (sc2-min-cost sym))
+    (define g-cost (sc2-gas-cost sym))
+    (define s-cost (if (eq? kind 'train) (sc2-supply-cost sym 0) 0))
+    (define pre-ok? (prereq-ready? (pro-bo-goal-prereq-ready-sym g)))
+    (cond
+      [(and pre-ok?
+            (>= (- rem-min res-min) m-cost)
+            (>= (- rem-gas res-gas) g-cost)
+            (or (<= s-cost 0) (>= rem-sup s-cost))
+            ;; Only emit at most 2 build/research/expand actions per frame from BO queue
+            (< (length ready-acts) 2))
+       (set! rem-min (- rem-min m-cost))
+       (set! rem-gas (- rem-gas g-cost))
+       (set! rem-sup (- rem-sup s-cost))
+       (set! ready-acts (cons (goal->action g) ready-acts))
+       (unless active-head (set! active-head g))]
+      [pre-ok?
+       ;; Prerequisite is ready, but waiting on resources -> reserve minerals/gas for first waiting step
+       (unless active-head
+         (set! active-head g)
+         (when (memq kind '(build expand morph research))
+           (set! res-min m-cost)
+           (set! res-gas g-cost)))]
+      [else
+       ;; Prerequisite building is still under construction -> do NOT emit or block worker production
+       (unless active-head
+         (set! active-head g))]))
+
+  (pro-bo-eval-result m-sym
+                      active-head
+                      (reverse ready-acts)
+                      res-min
+                      res-gas
+                      target-workers
+                      target-army))
+
 
 

@@ -248,6 +248,7 @@
    ;; Protoss Structures
    'gateway                 '(150 0 0)
    'warp-gate               '(150 0 0)
+   'warpgate                '(150 0 0)
    'cybernetics-core        '(150 0 0)
    'forge                   '(150 0 0)
    'photon-cannon           '(150 0 0)
@@ -258,6 +259,7 @@
    'robotics-support-bay    '(150 150 0)
    'stargate                '(150 150 0)
    'templar-archive         '(150 200 0)
+   'templar-archives        '(150 200 0)
    'dark-shrine             '(150 150 0)
    'fleet-beacon            '(300 200 0)
 
@@ -321,29 +323,87 @@
    'banshee                 '(150 100 3)
    'battlecruiser           '(400 300 6)
 
-   ;; Key Upgrades
-   'metabolic-boost         '(100 100 0)
-   'zergling-movementspeed  '(100 100 0)
-   'adrenal-glands          '(200 200 0)
-   'glial-reconstitution    '(100 100 0)
-   'centrifugal-hooks       '(150 150 0)
-   'grooved-spines          '(100 100 0)
-   'muscular-augments       '(100 100 0)
-   'adaptive-talons         '(150 150 0)
-   'lurker-range            '(150 150 0)
-   'zerg-missile-weapons-1  '(100 100 0)
-   'stimpack                '(100 100 0)
-   'combat-shield           '(100 100 0)
-   'concussive-shells       '(50 50 0)
-   'drilling-claws          '(75 75 0)
-   'personal-cloaking       '(150 150 0)
+   ;; Key Upgrades (all race canonical names & aliases)
+   'metabolic-boost          '(100 100 0)
+   'zergling-movementspeed   '(100 100 0)
+   'adrenal-glands           '(200 200 0)
+   'zergling-attackspeed     '(200 200 0)
+   'glial-reconstitution     '(100 100 0)
+   'tunneling-claws          '(150 150 0)
+   'centrifugal-hooks        '(150 150 0)
+   'grooved-spines           '(100 100 0)
+   'muscular-augments        '(100 100 0)
+   'adaptive-talons          '(150 150 0)
+   'lurker-range             '(150 150 0)
+   'seismic-spines           '(150 150 0)
+   'burrow                   '(100 100 0)
+   'pneumatized-carapace     '(100 100 0)
+   'overlord-speed           '(100 100 0)
+   'chitinous-plating        '(150 150 0)
+   'anabolic-synthesis       '(150 150 0)
+   'neural-parasite          '(150 150 0)
+   'zerg-melee-weapons-1     '(100 100 0)
+   'zerg-melee-weapons-2     '(150 150 0)
+   'zerg-melee-weapons-3     '(200 200 0)
+   'zerg-missile-weapons-1   '(100 100 0)
+   'zerg-missile-weapons-2   '(150 150 0)
+   'zerg-missile-weapons-3   '(200 200 0)
+   'missile-attacks-1        '(100 100 0)
+   'zerg-ground-armor-1      '(150 150 0)
+   'zerg-ground-armor-2      '(225 225 0)
+   'zerg-ground-armor-3      '(300 300 0)
+   'zerg-ground-carapace-1   '(150 150 0)
+   'ground-carapace-1        '(150 150 0)
+   'zerg-flyer-weapons-1     '(100 100 0)
+   'zerg-flyer-armor-1       '(150 150 0)
+   'stimpack                 '(100 100 0)
+   'combat-shield            '(100 100 0)
+   'concussive-shells        '(50 50 0)
+   'infernal-preigniter      '(100 100 0)
+   'infernal-pre-igniter     '(100 100 0)
+   'drilling-claws           '(75 75 0)
+   'smart-servos             '(100 100 0)
+   'banshee-cloak            '(100 100 0)
+   'hyperflight-rotors       '(150 150 0)
+   'personal-cloaking        '(150 150 0)
+   'weapon-refit             '(150 150 0)
    'terran-infantry-weapons-1 '(100 100 0)
-   'warpgate                '(50 50 0)
-   'warp-gate-research      '(100 100 0)
-   'charge                  '(100 100 0)
-   'blink                   '(150 150 0)
-   'extended-thermal-lance  '(150 150 0)
-   'protoss-ground-weapons-1 '(100 100 0)))
+   'terran-infantry-weapons-2 '(175 175 0)
+   'terran-infantry-weapons-3 '(250 250 0)
+   'infantry-weapons-1       '(100 100 0)
+   'terran-infantry-armor-1  '(100 100 0)
+   'terran-infantry-armor-2  '(175 175 0)
+   'terran-infantry-armor-3  '(250 250 0)
+   'infantry-armor-1         '(100 100 0)
+   'terran-vehicle-weapons-1 '(100 100 0)
+   'vehicle-weapons-1        '(100 100 0)
+   'terran-vehicle-plating-1 '(100 100 0)
+   'terran-ship-weapons-1    '(100 100 0)
+   'warpgate                 '(50 50 0)
+   'warp-gate-research       '(50 50 0)
+   'warpgate-research        '(50 50 0)
+   'charge                   '(100 100 0)
+   'blink                    '(150 150 0)
+   'resonating-glaives       '(100 100 0)
+   'shadow-strike            '(100 100 0)
+   'psi-storm                '(200 200 0)
+   'extended-thermal-lance   '(150 150 0)
+   'gravitic-booster         '(100 100 0)
+   'gravitic-drive           '(100 100 0)
+   'flux-vanes               '(100 100 0)
+   'protoss-ground-weapons-1 '(100 100 0)
+   'protoss-ground-weapons-2 '(150 150 0)
+   'protoss-ground-weapons-3 '(200 200 0)
+   'ground-weapons-1         '(100 100 0)
+   'protoss-ground-armor-1   '(100 100 0)
+   'protoss-ground-armor-2   '(150 150 0)
+   'protoss-ground-armor-3   '(200 200 0)
+   'ground-armor-1           '(100 100 0)
+   'protoss-shields-1        '(150 150 0)
+   'protoss-shields-2        '(225 225 0)
+   'protoss-shields-3        '(300 300 0)
+   'protoss-air-weapons-1    '(100 100 0)
+   'protoss-air-armor-1      '(150 150 0)))
 
 (define (sc2-min-cost sym [default 50])
   (match (hash-ref SC2-LOTV-COST-TABLE sym #f)
@@ -394,6 +454,10 @@
      76    ;; GUARDIANSHIELD_GUARDIANSHIELD
      154   ;; HALLUCINATION_PHOENIX
      146   ;; HALLUCINATION_ARCHON
+     2095  ;; BURROWDOWN_WIDOWMINE
+     2097  ;; BURROWUP_WIDOWMINE
+     2108  ;; BURROWDOWN_LURKER
+     2110  ;; BURROWUP_LURKER
      2116  ;; EFFECT_MEDIVACIGNITEAFTERBURNERS
      2328  ;; EFFECT_IMMORTALBARRIER
      2375  ;; BEHAVIOR_PULSARBEAMON
@@ -597,3 +661,86 @@
 (define (sc2-unit-is-detector-sym? sym)
   (eq? (hash-ref (sc2-unit-combat-stats sym) 'detector? #f) #t))
 
+(define (sc2-unit-is-flying-sym? sym)
+  (eq? (hash-ref (sc2-unit-combat-stats sym) 'flying? #f) #t))
+
+;; Invulnerable shades, phased projectiles, eggs/larvae, and decoys that should
+;; never be selected as primary combat attack targets:
+(define SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS
+  '(adept-phase-shift
+    disruptor-phased
+    kd8-charge
+    parasitic-bomb-dummy
+    larva
+    egg
+    cocoon
+    broodling-escort
+    changeling
+    changeling-zealot
+    changeling-marine-shield
+    changeling-marine
+    changeling-zergling-wings
+    changeling-zergling))
+
+;; Non-combat scouts and untargetable units that should not trigger building cancels,
+;; worker flee panic, or cheese-rush emergencies:
+(define SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS
+  '(adept-phase-shift
+    disruptor-phased
+    kd8-charge
+    parasitic-bomb-dummy
+    larva
+    egg
+    cocoon
+    broodling-escort
+    changeling
+    changeling-zealot
+    changeling-marine-shield
+    changeling-marine
+    changeling-zergling-wings
+    changeling-zergling
+    overlord
+    overlord-cocoon
+    overseer
+    overseer-siege-mode
+    observer
+    observer-siege-mode))
+
+;; Terran units that strictly require a completed TechLab attached to their producer:
+(define SC2-TECHLAB-REQUIRED-UNIT-SYMS
+  '(marauder
+    ghost
+    siege-tank
+    thor
+    banshee
+    raven
+    battlecruiser))
+
+(define (sc2-unit-requires-techlab? sym)
+  (and (memq sym SC2-TECHLAB-REQUIRED-UNIT-SYMS) #t))
+
+(define (sc2-enemy-unit-targetable? e)
+  (cond
+    [(hash? e)
+     (and (not (memq (hash-ref e 'type 'unknown) SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS))
+          (not (eq? (hash-ref e 'hallucination #f) #t)))]
+    [(symbol? e)
+     (not (memq e SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS))]
+    [else #t]))
+
+(define (sc2-attacker-can-hit-enemy? attacker-sym e [enemy-flying-override #f])
+  (define eflying?
+    (cond
+      [(hash? e)
+       (or (eq? (hash-ref e 'flying #f) #t)
+           (eq? (hash-ref e 'flying? #f) #t)
+           (eq? (hash-ref e 'is-flying #f) #t)
+           (sc2-unit-is-flying-sym? (hash-ref e 'type 'marine)))]
+      [(symbol? e)
+       (or (eq? enemy-flying-override #t)
+           (sc2-unit-is-flying-sym? e))]
+      [else (eq? enemy-flying-override #t)]))
+  (and (sc2-enemy-unit-targetable? e)
+       (if eflying?
+           (sc2-unit-can-attack-air? attacker-sym)
+           (sc2-unit-can-attack-ground? attacker-sym))))

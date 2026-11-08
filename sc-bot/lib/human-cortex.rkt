@@ -88,7 +88,7 @@
                            #:cam-x [cam-x 32.0]
                            #:cam-y [cam-y 32.0]
                            #:epm-cap [epm-cap 360]
-                           #:max-tokens [max-tokens 24])
+                           #:max-tokens [max-tokens 48])
   (human-cortex
    profile
    cam-x
@@ -325,11 +325,18 @@
   (define reactor-idle-tags '())
   (define total-open-slots 0)
   (define open-slots-by-type (make-hash))
+  (define techlab-open-slots-by-type (make-hash))
   (define idle-tags-by-type (make-hash))
 
   (for ([b (in-list ready-bldgs)])
     (define id (hash-ref b 'id 0))
-    (define t (hash-ref b 'type 'unknown))
+    (define raw-t (hash-ref b 'type 'unknown))
+    (define t
+      (case raw-t
+        [(warpgate)             'warp-gate]
+        [(robotics-support-bay) 'robotics-bay]
+        [(templar-archives)     'templar-archive]
+        [else                   raw-t]))
     (define addon-kind (facility-addon-kind b))
     (define max-slots (if (eq? addon-kind 'reactor) 2 1))
     (define used-slots
@@ -342,7 +349,9 @@
       (set! idle-tags (cons id idle-tags))
       (set! total-open-slots (+ total-open-slots open-slots))
       (when (eq? addon-kind 'tech-lab)
-        (set! techlab-idle-tags (cons id techlab-idle-tags)))
+        (set! techlab-idle-tags (cons id techlab-idle-tags))
+        (hash-set! techlab-open-slots-by-type t
+                   (+ (hash-ref techlab-open-slots-by-type t 0) open-slots)))
       (when (eq? addon-kind 'reactor)
         (set! reactor-idle-tags (cons id reactor-idle-tags)))
       (hash-set! open-slots-by-type t
@@ -358,6 +367,7 @@
         'reactor-idle-tags (reverse reactor-idle-tags)
         'open-slot-count total-open-slots
         'open-slots-by-type open-slots-by-type
+        'techlab-open-slots-by-type techlab-open-slots-by-type
         'idle-tags-by-type idle-tags-by-type))
 
 (define (cortex-idle-facilities-in-group cortex ally-buildings group-id [bldg-type #f])

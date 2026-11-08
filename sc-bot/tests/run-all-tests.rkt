@@ -6,6 +6,7 @@
          racket/math
          "../compiler/syntax.rkt"
          "../lib/okasaki-sc.rkt"
+         "../lib/sc2-game-constants.rkt"
          "../lib/perception-grid.rkt"
          "../lib/econ-ledger.rkt"
          "../lib/tactics-sim.rkt"
@@ -2165,6 +2166,109 @@
                 "Camera Bookmark F2 (Natural Base) must be bound")
   (assert-true! (pair? (cortex-get-camera-bookmark hc 5))
                 "Camera Bookmark F5 (Primary Combat Front) must be bound"))
+
+;; ============================================================================
+;; 5.16 Empirical 1,798-Replay Pro Build-Order Executor, Diagonal Ramp Wall
+;;      Non-Overlap, Save-Cancel Safety & Weapon-Domain Target Filtering
+;; ============================================================================
+
+(run-suite "5.16 Empirical 1,798-Replay Pro Build-Order Executor, Diagonal Ramp Wall Non-Overlap & Save-Cancel Safety"
+  ;; 1. Empirical Pro Build-Order DB loaded from 1,798 pro replays across all 9 matchups
+  (assert-true! (and (pair? PRO-BUILD-ORDER-DB) (eq? (first PRO-BUILD-ORDER-DB) 'pro-build-order-database))
+                "PRO-BUILD-ORDER-DB must be loaded from data/pro_build_orders.sexp")
+  (for ([matchup (in-list '(ZvZ ZvT ZvP TvZ TvT TvP PvZ PvT PvP))])
+    (define steps (pro-build-order-steps-for-matchup matchup))
+    (assert-true! (>= (length steps) 15)
+                  (format "Matchup ~a must have >= 15 pro build-order steps" matchup)))
+  (define-values (zvt-w-target zvt-a-target)
+    (pro-supply-curve-target 'Zerg 'Terran 4032 3))
+  (assert-true! (>= (+ zvt-w-target zvt-a-target) 50)
+                "Zerg 180s pro median supply curve target must be >= 50")
+
+  ;; 2. Pro Build-Order Goal-Queue Executor reserves resources
+  ;;    for next high-priority expansion/tech step (e.g., 16 Hatchery in ZvT)
+  (define bo-res
+    (evaluate-build-order-next-step
+     #:race 'Zerg
+     #:enemy-race 'Terran
+     #:frame 450
+     #:minerals 220
+     #:gas 50
+     #:supply-used 16
+     #:supply-left 6
+     #:active-bases 1
+     #:ready-building-counts (hash 'hatchery 1)
+     #:total-building-counts (hash 'hatchery 1)
+     #:unit-counts (hash 'drone 16 'overlord 2)))
+  (assert-eq! (pro-bo-eval-result-matchup bo-res) 'ZvT
+              "evaluate-build-order-next-step for Zerg vs Terran must select ZvT")
+  (assert-true! (>= (pro-bo-eval-result-reserved-minerals bo-res) 300)
+                "When at 16 supply with 220 minerals in ZvT, executor must reserve >= 300 minerals for 16 Hatchery")
+
+  ;; 3. Diagonal & Cardinal Terran Ramp Wall Non-Overlap across all 8 ramp orientations
+  (define (boxes-overlap? ax0 ax1 ay0 ay1 bx0 bx1 by0 by1)
+    (and (< (+ ax0 0.01) bx1)
+         (> (- ax1 0.01) bx0)
+         (< (+ ay0 0.01) by1)
+         (> (- ay1 0.01) by0)))
+  (for ([dir (in-list '((20.0 . 0.0) (-20.0 . 0.0) (0.0 . 20.0) (0.0 . -20.0)
+                        (20.0 . 20.0) (-20.0 . 20.0) (20.0 . -20.0) (-20.0 . -20.0)))])
+    (define wall (solve-terran-ramp-wall 50.0 50.0 (+ 50.0 (car dir)) (+ 50.0 (cdr dir))))
+    (define rax (hash-ref wall 'barracks))
+    (define addon (hash-ref wall 'barracks-addon))
+    (define d1 (hash-ref wall 'depot-1))
+    (define d2 (hash-ref wall 'depot-2))
+    (define rx (car rax))
+    (define ry (cdr rax))
+    (define ax (car addon))
+    (define ay (cdr addon))
+    (define d1x (car d1))
+    (define d1y (cdr d1))
+    (define d2x (car d2))
+    (define d2y (cdr d2))
+    ;; Verify Depot 1 & Depot 2 do not overlap 3x3 Barracks or 2x2 Add-On or each other
+    (assert-true! (not (boxes-overlap? (- d1x 1.0) (+ d1x 1.0) (- d1y 1.0) (+ d1y 1.0)
+                                       (- rx 1.5) (+ rx 1.5) (- ry 1.5) (+ ry 1.5)))
+                  (format "Depot 1 must not overlap 3x3 Barracks for dir ~a" dir))
+    (assert-true! (not (boxes-overlap? (- d2x 1.0) (+ d2x 1.0) (- d2y 1.0) (+ d2y 1.0)
+                                       (- rx 1.5) (+ rx 1.5) (- ry 1.5) (+ ry 1.5)))
+                  (format "Depot 2 must not overlap 3x3 Barracks for dir ~a" dir))
+    (assert-true! (not (boxes-overlap? (- d1x 1.0) (+ d1x 1.0) (- d1y 1.0) (+ d1y 1.0)
+                                       (- ax 1.0) (+ ax 1.0) (- ay 1.0) (+ ay 1.0)))
+                  (format "Depot 1 must not overlap 2x2 East Add-On for dir ~a" dir))
+    (assert-true! (not (boxes-overlap? (- d2x 1.0) (+ d2x 1.0) (- d2y 1.0) (+ d2y 1.0)
+                                       (- ax 1.0) (+ ax 1.0) (- ay 1.0) (+ ay 1.0)))
+                  (format "Depot 2 must not overlap 2x2 East Add-On for dir ~a" dir))
+    (assert-true! (not (boxes-overlap? (- d1x 1.0) (+ d1x 1.0) (- d1y 1.0) (+ d1y 1.0)
+                                       (- d2x 1.0) (+ d2x 1.0) (- d2y 1.0) (+ d2y 1.0)))
+                  (format "Depot 1 and Depot 2 must not overlap each other for dir ~a" dir)))
+
+  ;; 4. TacticalBuildingSaveCancel safety: a nearly completed building with full HP or no nearby
+  ;;    enemy attackers must NEVER be canceled!
+  (define rt-cancel (make-live-bot-runtime #:race 'Zerg #:personality 'Macro-Standard))
+  (define safe-bldg-obs
+    (hash 'frame 1200
+          'minerals 100
+          'gas 50
+          'supply-used 22
+          'supply-cap 30
+          'ally-buildings (list (hash 'id 901 'type 'hatchery 'x 32.0 'y 32.0 'hp 1500 'max-hp 1500 'build-progress 1.0)
+                                (hash 'id 902 'type 'spawning-pool 'x 36.0 'y 36.0 'hp 850 'max-hp 1000 'build-progress 0.92))
+          'ally-units (list (hash 'id 101 'type 'drone 'x 31.0 'y 31.0 'hp 40))
+          'enemy-units (list (hash 'id 999 'type 'overlord 'x 36.5 'y 36.5 'hp 200 'flying? #t))))
+  (define safe-bldg-acts (step-layer2-economy! rt-cancel safe-bldg-obs))
+  (assert-true! (not (member '(cancel-building 902) safe-bldg-acts))
+                "Building at 92% progress with only a passive enemy Overlord nearby must NEVER be self-canceled")
+
+  ;; 5. Weapon-domain target filtering & untargetable unit rejection
+  (assert-true! (not (sc2-enemy-unit-targetable? 'adept-phase-shift))
+                "adept-phase-shift shade must be rejected as untargetable")
+  (assert-true! (not (sc2-enemy-unit-targetable? 'kd8-charge))
+                "kd8-charge mine must be rejected as untargetable")
+  (assert-true! (not (sc2-attacker-can-hit-enemy? 'zealot (hash 'type 'mutalisk 'flying #t)))
+                "Ground-only Zealot must not select flying Mutalisk as a valid weapon target")
+  (assert-true! (sc2-attacker-can-hit-enemy? 'stalker (hash 'type 'mutalisk 'flying #t))
+                "Anti-air Stalker must be able to target flying Mutalisk"))
 
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"

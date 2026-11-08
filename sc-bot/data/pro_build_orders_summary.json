@@ -1,0 +1,7994 @@
+{
+  "lotv_replays": 298,
+  "total_perspectives": 596,
+  "matchups": {
+    "ZvZ": {
+      "matchup": "ZvZ",
+      "total_perspectives": 130,
+      "pro_perspectives": 116,
+      "winning_perspectives": 66,
+      "pro_winning_perspectives": 59,
+      "exemplar_player": "Serral",
+      "exemplar_opponent": "Elazer",
+      "exemplar_map": "Ascension to Aiur LE",
+      "exemplar_replay": "Starcraft2ReplayPackager_d4d9a3ea4005_Serral_vs_Elazer_ZvZ__Ascension_to_Aiur_LE_WCS_Montreal.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 13,
+          "sec": 12.6,
+          "workers": 12,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 17,
+          "sec": 51.1,
+          "workers": 17,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 18,
+          "sec": 68.9,
+          "workers": 17,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 17,
+          "sec": 72.5,
+          "workers": 17,
+          "action": "build",
+          "symbol": "spawning-pool"
+        },
+        {
+          "supply": 19,
+          "sec": 99.5,
+          "workers": 18,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 30,
+          "sec": 148.5,
+          "workers": 21,
+          "action": "build",
+          "symbol": "baneling-nest"
+        },
+        {
+          "supply": 31,
+          "sec": 170.4,
+          "workers": 24,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 31,
+          "sec": 177.9,
+          "workers": 23,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 33,
+          "sec": 187.6,
+          "workers": 24,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 197.6,
+          "workers": 26,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 203.4,
+          "workers": 26,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 44,
+          "sec": 232.9,
+          "workers": 26,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 44,
+          "sec": 238.8,
+          "workers": 26,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 51,
+          "sec": 270.2,
+          "workers": 29,
+          "action": "build",
+          "symbol": "roach-warren"
+        },
+        {
+          "supply": 54,
+          "sec": 292.4,
+          "workers": 31,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 54,
+          "sec": 304.5,
+          "workers": 37,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 51,
+          "sec": 311.5,
+          "workers": 39,
+          "action": "build",
+          "symbol": "evolution-chamber"
+        },
+        {
+          "supply": 59,
+          "sec": 324.1,
+          "workers": 41,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 58,
+          "sec": 324.6,
+          "workers": 40,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 84,
+          "sec": 378.0,
+          "complete_sec": 435.0,
+          "workers": 55,
+          "action": "morph",
+          "symbol": "lair"
+        },
+        {
+          "supply": 84,
+          "sec": 383.7,
+          "workers": 57,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 84,
+          "sec": 383.7,
+          "workers": 57,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 83,
+          "sec": 385.0,
+          "workers": 56,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 89,
+          "sec": 392.1,
+          "workers": 61,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 92,
+          "sec": 398.9,
+          "workers": 61,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 92,
+          "sec": 403.7,
+          "workers": 61,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 100,
+          "sec": 413.5,
+          "workers": 64,
+          "action": "build",
+          "symbol": "extractor"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "zergling-movementspeed",
+          "start_sec": 128.0,
+          "complete_sec": 207.1,
+          "supply": 26,
+          "workers": 19
+        },
+        {
+          "symbol": "zerg-missile-weapons-1",
+          "start_sec": 361.7,
+          "complete_sec": 475.7,
+          "supply": 76,
+          "workers": 48
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 21,
+          "sec": 119.1,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 22,
+          "sec": 119.8,
+          "symbol": "zergling",
+          "count": 2
+        },
+        {
+          "supply": 25,
+          "sec": 122.3,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 26,
+          "sec": 123.0,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 34,
+          "sec": 191.7,
+          "symbol": "zergling",
+          "count": 3
+        },
+        {
+          "supply": 36,
+          "sec": 206.0,
+          "symbol": "baneling",
+          "count": 4
+        },
+        {
+          "supply": 37,
+          "sec": 210.9,
+          "symbol": "zergling",
+          "count": 3
+        },
+        {
+          "supply": 40,
+          "sec": 217.5,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 40,
+          "sec": 221.3,
+          "symbol": "baneling",
+          "count": 8
+        },
+        {
+          "supply": 43,
+          "sec": 226.5,
+          "symbol": "zergling",
+          "count": 3
+        },
+        {
+          "supply": 46,
+          "sec": 226.9,
+          "symbol": "zergling",
+          "count": 6
+        },
+        {
+          "supply": 49,
+          "sec": 260.0,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 51,
+          "sec": 261.2,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 51,
+          "sec": 264.9,
+          "symbol": "baneling",
+          "count": 1
+        },
+        {
+          "supply": 52,
+          "sec": 312.1,
+          "symbol": "roach",
+          "count": 2
+        },
+        {
+          "supply": 55,
+          "sec": 316.3,
+          "symbol": "roach",
+          "count": 2
+        },
+        {
+          "supply": 58,
+          "sec": 319.9,
+          "symbol": "zergling",
+          "count": 5
+        },
+        {
+          "supply": 62,
+          "sec": 332.9,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 60,
+          "sec": 337.4,
+          "symbol": "ravager",
+          "count": 1
+        },
+        {
+          "supply": 68,
+          "sec": 345.5,
+          "symbol": "ravager",
+          "count": 1
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 58,
+          "median_sec": 51.1,
+          "median_supply": 17,
+          "median_workers": 16
+        },
+        {
+          "base_num": 3,
+          "count": 54,
+          "median_sec": 158.7,
+          "median_supply": 32,
+          "median_workers": 24
+        },
+        {
+          "base_num": 4,
+          "count": 15,
+          "median_sec": 364.5,
+          "median_supply": 78,
+          "median_workers": 55
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 58,
+          "median_sec": 67.8,
+          "median_supply": 18,
+          "median_workers": 16
+        },
+        {
+          "gas_num": 2,
+          "count": 51,
+          "median_sec": 240.8,
+          "median_supply": 47,
+          "median_workers": 32
+        },
+        {
+          "gas_num": 3,
+          "count": 49,
+          "median_sec": 263.5,
+          "median_supply": 55,
+          "median_workers": 36
+        },
+        {
+          "gas_num": 4,
+          "count": 38,
+          "median_sec": 312.1,
+          "median_supply": 67,
+          "median_workers": 42
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "overlord",
+          "frequency": 0.97,
+          "median_sec": 13.3,
+          "median_supply": 13,
+          "median_workers": 13
+        },
+        {
+          "symbol": "hatchery",
+          "frequency": 0.97,
+          "median_sec": 51.1,
+          "median_supply": 17,
+          "median_workers": 16
+        },
+        {
+          "symbol": "extractor",
+          "frequency": 0.97,
+          "median_sec": 67.8,
+          "median_supply": 18,
+          "median_workers": 16
+        },
+        {
+          "symbol": "spawning-pool",
+          "frequency": 0.97,
+          "median_sec": 71.9,
+          "median_supply": 17,
+          "median_workers": 17
+        },
+        {
+          "symbol": "baneling-nest",
+          "frequency": 0.64,
+          "median_sec": 166.7,
+          "median_supply": 31,
+          "median_workers": 24
+        },
+        {
+          "symbol": "evolution-chamber",
+          "frequency": 0.76,
+          "median_sec": 233.5,
+          "median_supply": 45,
+          "median_workers": 31
+        },
+        {
+          "symbol": "roach-warren",
+          "frequency": 0.76,
+          "median_sec": 233.9,
+          "median_supply": 46,
+          "median_workers": 33
+        },
+        {
+          "symbol": "spine-crawler",
+          "frequency": 0.2,
+          "median_sec": 268.4,
+          "median_supply": 58,
+          "median_workers": 40
+        },
+        {
+          "symbol": "lair",
+          "frequency": 0.66,
+          "median_sec": 279.2,
+          "median_supply": 55,
+          "median_workers": 38
+        },
+        {
+          "symbol": "spire",
+          "frequency": 0.15,
+          "median_sec": 347.1,
+          "median_supply": 70,
+          "median_workers": 41
+        },
+        {
+          "symbol": "spore-crawler",
+          "frequency": 0.2,
+          "median_sec": 366.8,
+          "median_supply": 84,
+          "median_workers": 42
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "zergling-movementspeed",
+          "count": 50,
+          "median_start_sec": 129.5,
+          "median_complete_sec": 208.5,
+          "median_supply": 26,
+          "median_workers": 20
+        },
+        {
+          "symbol": "zerg-melee-weapons-1",
+          "count": 5,
+          "median_start_sec": 225.2,
+          "median_complete_sec": 339.2,
+          "median_supply": 40,
+          "median_workers": 35
+        },
+        {
+          "symbol": "zerg-missile-weapons-1",
+          "count": 34,
+          "median_start_sec": 277.4,
+          "median_complete_sec": 391.4,
+          "median_supply": 59,
+          "median_workers": 39
+        },
+        {
+          "symbol": "centrifugal-hooks",
+          "count": 1,
+          "median_start_sec": 323.0,
+          "median_complete_sec": 402.0,
+          "median_supply": 67,
+          "median_workers": 50
+        },
+        {
+          "symbol": "glial-reconstitution",
+          "count": 23,
+          "median_start_sec": 340.4,
+          "median_complete_sec": 419.5,
+          "median_supply": 74,
+          "median_workers": 47
+        },
+        {
+          "symbol": "pneumatized-carapace",
+          "count": 7,
+          "median_start_sec": 340.5,
+          "median_complete_sec": 383.5,
+          "median_supply": 85,
+          "median_workers": 55
+        },
+        {
+          "symbol": "zerg-ground-carapace-1",
+          "count": 7,
+          "median_start_sec": 342.1,
+          "median_complete_sec": 456.2,
+          "median_supply": 77,
+          "median_workers": 42
+        },
+        {
+          "symbol": "burrow",
+          "count": 2,
+          "median_start_sec": 356.8,
+          "median_complete_sec": 427.8,
+          "median_supply": 70,
+          "median_workers": 40
+        },
+        {
+          "symbol": "zerg-missile-weapons-2",
+          "count": 13,
+          "median_start_sec": 381.7,
+          "median_complete_sec": 517.7,
+          "median_supply": 105,
+          "median_workers": 50
+        },
+        {
+          "symbol": "tunneling-claws",
+          "count": 1,
+          "median_start_sec": 397.1,
+          "median_complete_sec": 476.2,
+          "median_supply": 72,
+          "median_workers": 38
+        },
+        {
+          "symbol": "zerg-flyer-carapace-1",
+          "count": 1,
+          "median_start_sec": 401.0,
+          "median_complete_sec": 515.0,
+          "median_supply": 73,
+          "median_workers": 44
+        },
+        {
+          "symbol": "zerg-flyer-weapons-1",
+          "count": 1,
+          "median_start_sec": 415.6,
+          "median_complete_sec": 529.6,
+          "median_supply": 107,
+          "median_workers": 67
+        }
+      ],
+      "macro_mechanics": {
+        "queen_1": {
+          "start_sec": 118.6,
+          "born_sec": 154.6,
+          "supply": 22
+        },
+        "queen_2": {
+          "start_sec": 122.1,
+          "born_sec": 158.1,
+          "supply": 25
+        },
+        "queen_3": {
+          "start_sec": 202.6,
+          "born_sec": 238.6,
+          "supply": 41
+        },
+        "queen_4": {
+          "start_sec": 273.6,
+          "born_sec": 309.6,
+          "supply": 54
+        },
+        "first_inject_sec": 156.5,
+        "first_creep_tumor_sec": 218.2
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 10,
+          "top_combat_units": [
+            [
+              "zergling",
+              31
+            ],
+            [
+              "queen",
+              4
+            ],
+            [
+              "marine",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 5,
+          "top_combat_units": [
+            [
+              "queen",
+              108
+            ],
+            [
+              "zergling",
+              107
+            ],
+            [
+              "baneling",
+              24
+            ],
+            [
+              "marine",
+              6
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 10,
+          "top_combat_units": [
+            [
+              "zergling",
+              340
+            ],
+            [
+              "baneling",
+              136
+            ],
+            [
+              "queen",
+              34
+            ],
+            [
+              "roach",
+              9
+            ],
+            [
+              "marine",
+              2
+            ],
+            [
+              "raven",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 14,
+          "top_combat_units": [
+            [
+              "zergling",
+              487
+            ],
+            [
+              "baneling",
+              249
+            ],
+            [
+              "roach",
+              191
+            ],
+            [
+              "queen",
+              36
+            ],
+            [
+              "mutalisk",
+              7
+            ],
+            [
+              "overseer",
+              4
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 7,
+          "top_combat_units": [
+            [
+              "roach",
+              544
+            ],
+            [
+              "zergling",
+              366
+            ],
+            [
+              "baneling",
+              175
+            ],
+            [
+              "queen",
+              30
+            ],
+            [
+              "ravager",
+              30
+            ],
+            [
+              "overseer",
+              19
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 1,
+          "top_combat_units": [
+            [
+              "roach",
+              320
+            ],
+            [
+              "zergling",
+              95
+            ],
+            [
+              "baneling",
+              49
+            ],
+            [
+              "ravager",
+              29
+            ],
+            [
+              "queen",
+              13
+            ],
+            [
+              "mutalisk",
+              8
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 58,
+          "median_workers": 15.0,
+          "mean_workers": 15.3,
+          "median_army_supply": 2.0,
+          "mean_army_supply": 1.6,
+          "median_total_supply": 17.0,
+          "median_supply_cap": 22.0,
+          "worker_to_army_ratio": 7.5,
+          "army_supply_pct": 11.8,
+          "median_bases": 2.0,
+          "median_gases": 0.0,
+          "median_army_value": 0,
+          "median_min_rate": 839,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 58,
+          "median_workers": 20.0,
+          "mean_workers": 19.2,
+          "median_army_supply": 4.0,
+          "mean_army_supply": 4.0,
+          "median_total_supply": 23.0,
+          "median_supply_cap": 28.0,
+          "worker_to_army_ratio": 5.0,
+          "army_supply_pct": 17.4,
+          "median_bases": 2.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 923,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 58,
+          "median_workers": 24.5,
+          "mean_workers": 23.3,
+          "median_army_supply": 8.0,
+          "mean_army_supply": 8.8,
+          "median_total_supply": 33.0,
+          "median_supply_cap": 36.0,
+          "worker_to_army_ratio": 3.06,
+          "army_supply_pct": 24.2,
+          "median_bases": 3.0,
+          "median_gases": 1.0,
+          "median_army_value": 400,
+          "median_min_rate": 1231,
+          "median_gas_rate": 120
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 57,
+          "median_workers": 34.0,
+          "mean_workers": 31.9,
+          "median_army_supply": 16.0,
+          "mean_army_supply": 16.2,
+          "median_total_supply": 50.0,
+          "median_supply_cap": 58.0,
+          "worker_to_army_ratio": 2.12,
+          "army_supply_pct": 32.0,
+          "median_bases": 3.0,
+          "median_gases": 1.0,
+          "median_army_value": 700,
+          "median_min_rate": 1567,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 56,
+          "median_workers": 38.0,
+          "mean_workers": 38.4,
+          "median_army_supply": 26.0,
+          "mean_army_supply": 25.9,
+          "median_total_supply": 67.0,
+          "median_supply_cap": 74.0,
+          "worker_to_army_ratio": 1.46,
+          "army_supply_pct": 38.8,
+          "median_bases": 3.0,
+          "median_gases": 3.0,
+          "median_army_value": 1112,
+          "median_min_rate": 1763,
+          "median_gas_rate": 302
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 56,
+          "median_workers": 42.0,
+          "mean_workers": 43.1,
+          "median_army_supply": 38.0,
+          "mean_army_supply": 37.0,
+          "median_total_supply": 80.0,
+          "median_supply_cap": 98.0,
+          "worker_to_army_ratio": 1.11,
+          "army_supply_pct": 47.5,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 1688,
+          "median_min_rate": 1861,
+          "median_gas_rate": 470
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 52,
+          "median_workers": 48.0,
+          "mean_workers": 47.8,
+          "median_army_supply": 54.5,
+          "mean_army_supply": 54.2,
+          "median_total_supply": 106.5,
+          "median_supply_cap": 130.0,
+          "worker_to_army_ratio": 0.88,
+          "army_supply_pct": 51.2,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 2638,
+          "median_min_rate": 1973,
+          "median_gas_rate": 537
+        }
+      ]
+    },
+    "ZvT": {
+      "matchup": "ZvT",
+      "total_perspectives": 64,
+      "pro_perspectives": 43,
+      "winning_perspectives": 39,
+      "pro_winning_perspectives": 23,
+      "exemplar_player": "Serral",
+      "exemplar_opponent": "SpeCial",
+      "exemplar_map": "Proxima Station LE",
+      "exemplar_replay": "Starcraft2ReplayPackager_935a0d2f58ac_SpeCial_vs_Serral_TvZ__Proxima_Station_LE_WCS_Austin.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 13,
+          "sec": 12.8,
+          "workers": 13,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 17,
+          "sec": 52.9,
+          "workers": 17,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 18,
+          "sec": 71.0,
+          "workers": 17,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 17,
+          "sec": 75.0,
+          "workers": 16,
+          "action": "build",
+          "symbol": "spawning-pool"
+        },
+        {
+          "supply": 19,
+          "sec": 100.1,
+          "workers": 18,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 31,
+          "sec": 164.4,
+          "workers": 23,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 34,
+          "sec": 177.9,
+          "workers": 23,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 189.0,
+          "workers": 25,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 196.8,
+          "workers": 27,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 48,
+          "sec": 225.7,
+          "workers": 33,
+          "action": "build",
+          "symbol": "spine-crawler"
+        },
+        {
+          "supply": 47,
+          "sec": 228.2,
+          "complete_sec": 285.2,
+          "workers": 32,
+          "action": "morph",
+          "symbol": "lair"
+        },
+        {
+          "supply": 56,
+          "sec": 248.0,
+          "workers": 37,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 58,
+          "sec": 255.6,
+          "workers": 38,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 72,
+          "sec": 316.6,
+          "workers": 50,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 73,
+          "sec": 317.9,
+          "workers": 49,
+          "action": "build",
+          "symbol": "spire"
+        },
+        {
+          "supply": 73,
+          "sec": 323.7,
+          "workers": 48,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 73,
+          "sec": 326.2,
+          "workers": 48,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 72,
+          "sec": 327.2,
+          "workers": 47,
+          "action": "build",
+          "symbol": "baneling-nest"
+        },
+        {
+          "supply": 71,
+          "sec": 328.2,
+          "workers": 48,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 73,
+          "sec": 339.7,
+          "workers": 52,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 74,
+          "sec": 343.0,
+          "workers": 52,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 78,
+          "sec": 363.8,
+          "workers": 60,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 77,
+          "sec": 364.5,
+          "workers": 59,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 96,
+          "sec": 395.5,
+          "workers": 68,
+          "action": "build",
+          "symbol": "evolution-chamber"
+        },
+        {
+          "supply": 95,
+          "sec": 395.8,
+          "workers": 67,
+          "action": "build",
+          "symbol": "evolution-chamber"
+        },
+        {
+          "supply": 97,
+          "sec": 408.7,
+          "workers": 67,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 97,
+          "sec": 409.2,
+          "workers": 67,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 97,
+          "sec": 411.4,
+          "workers": 67,
+          "action": "train",
+          "symbol": "overlord"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "zergling-movementspeed",
+          "start_sec": 130.9,
+          "complete_sec": 210.0,
+          "supply": 26,
+          "workers": 20
+        },
+        {
+          "symbol": "centrifugal-hooks",
+          "start_sec": 390.9,
+          "complete_sec": 470.0,
+          "supply": 94,
+          "workers": 68
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 22,
+          "sec": 121.3,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 21,
+          "sec": 121.9,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 23,
+          "sec": 124.6,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 24,
+          "sec": 125.2,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 27,
+          "sec": 132.1,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 34,
+          "sec": 172.8,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 41,
+          "sec": 202.2,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 45,
+          "sec": 215.7,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 46,
+          "sec": 217.4,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 53,
+          "sec": 240.3,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 55,
+          "sec": 243.7,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 60,
+          "sec": 261.0,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 68,
+          "sec": 283.4,
+          "symbol": "zergling",
+          "count": 3
+        },
+        {
+          "supply": 71,
+          "sec": 288.0,
+          "symbol": "zergling",
+          "count": 3
+        },
+        {
+          "supply": 70,
+          "sec": 315.6,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 75,
+          "sec": 340.4,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 85,
+          "sec": 375.5,
+          "symbol": "zergling",
+          "count": 2
+        },
+        {
+          "supply": 86,
+          "sec": 389.6,
+          "symbol": "mutalisk",
+          "count": 2
+        },
+        {
+          "supply": 90,
+          "sec": 389.9,
+          "symbol": "mutalisk",
+          "count": 2
+        },
+        {
+          "supply": 94,
+          "sec": 390.2,
+          "symbol": "mutalisk",
+          "count": 1
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 22,
+          "median_sec": 52.5,
+          "median_supply": 17,
+          "median_workers": 17
+        },
+        {
+          "base_num": 3,
+          "count": 21,
+          "median_sec": 172.0,
+          "median_supply": 33,
+          "median_workers": 23
+        },
+        {
+          "base_num": 4,
+          "count": 12,
+          "median_sec": 377.9,
+          "median_supply": 86,
+          "median_workers": 57
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 22,
+          "median_sec": 68.0,
+          "median_supply": 18,
+          "median_workers": 17
+        },
+        {
+          "gas_num": 2,
+          "count": 22,
+          "median_sec": 233.3,
+          "median_supply": 46,
+          "median_workers": 31
+        },
+        {
+          "gas_num": 3,
+          "count": 19,
+          "median_sec": 271.3,
+          "median_supply": 59,
+          "median_workers": 41
+        },
+        {
+          "gas_num": 4,
+          "count": 19,
+          "median_sec": 317.4,
+          "median_supply": 72,
+          "median_workers": 48
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "overlord",
+          "frequency": 0.96,
+          "median_sec": 13.4,
+          "median_supply": 13,
+          "median_workers": 13
+        },
+        {
+          "symbol": "hatchery",
+          "frequency": 0.96,
+          "median_sec": 52.5,
+          "median_supply": 17,
+          "median_workers": 17
+        },
+        {
+          "symbol": "extractor",
+          "frequency": 0.96,
+          "median_sec": 68.0,
+          "median_supply": 18,
+          "median_workers": 17
+        },
+        {
+          "symbol": "spawning-pool",
+          "frequency": 0.96,
+          "median_sec": 71.1,
+          "median_supply": 17,
+          "median_workers": 17
+        },
+        {
+          "symbol": "spine-crawler",
+          "frequency": 0.22,
+          "median_sec": 225.7,
+          "median_supply": 48,
+          "median_workers": 33
+        },
+        {
+          "symbol": "roach-warren",
+          "frequency": 0.52,
+          "median_sec": 249.7,
+          "median_supply": 55,
+          "median_workers": 40
+        },
+        {
+          "symbol": "lair",
+          "frequency": 0.91,
+          "median_sec": 262.0,
+          "median_supply": 58,
+          "median_workers": 39
+        },
+        {
+          "symbol": "spore-crawler",
+          "frequency": 0.74,
+          "median_sec": 295.7,
+          "median_supply": 66,
+          "median_workers": 44
+        },
+        {
+          "symbol": "evolution-chamber",
+          "frequency": 0.74,
+          "median_sec": 301.9,
+          "median_supply": 72,
+          "median_workers": 44
+        },
+        {
+          "symbol": "baneling-nest",
+          "frequency": 0.65,
+          "median_sec": 309.0,
+          "median_supply": 72,
+          "median_workers": 44
+        },
+        {
+          "symbol": "spire",
+          "frequency": 0.35,
+          "median_sec": 362.0,
+          "median_supply": 74,
+          "median_workers": 51
+        },
+        {
+          "symbol": "infestation-pit",
+          "frequency": 0.17,
+          "median_sec": 366.9,
+          "median_supply": 98,
+          "median_workers": 62
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "zergling-movementspeed",
+          "count": 20,
+          "median_start_sec": 140.8,
+          "median_complete_sec": 219.8,
+          "median_supply": 28,
+          "median_workers": 20
+        },
+        {
+          "symbol": "pneumatized-carapace",
+          "count": 4,
+          "median_start_sec": 190.4,
+          "median_complete_sec": 233.4,
+          "median_supply": 36,
+          "median_workers": 27
+        },
+        {
+          "symbol": "zerg-ground-carapace-1",
+          "count": 14,
+          "median_start_sec": 331.0,
+          "median_complete_sec": 445.0,
+          "median_supply": 73,
+          "median_workers": 48
+        },
+        {
+          "symbol": "glial-reconstitution",
+          "count": 7,
+          "median_start_sec": 345.3,
+          "median_complete_sec": 424.3,
+          "median_supply": 85,
+          "median_workers": 53
+        },
+        {
+          "symbol": "zerg-melee-weapons-1",
+          "count": 8,
+          "median_start_sec": 354.2,
+          "median_complete_sec": 468.2,
+          "median_supply": 76,
+          "median_workers": 52
+        },
+        {
+          "symbol": "zerg-missile-weapons-1",
+          "count": 4,
+          "median_start_sec": 374.1,
+          "median_complete_sec": 488.2,
+          "median_supply": 94,
+          "median_workers": 59
+        },
+        {
+          "symbol": "burrow",
+          "count": 1,
+          "median_start_sec": 375.8,
+          "median_complete_sec": 446.8,
+          "median_supply": 59,
+          "median_workers": 46
+        },
+        {
+          "symbol": "centrifugal-hooks",
+          "count": 6,
+          "median_start_sec": 382.0,
+          "median_complete_sec": 461.0,
+          "median_supply": 90,
+          "median_workers": 59
+        },
+        {
+          "symbol": "zerg-ground-carapace-2",
+          "count": 2,
+          "median_start_sec": 401.4,
+          "median_complete_sec": 537.4,
+          "median_supply": 101,
+          "median_workers": 61
+        },
+        {
+          "symbol": "zerg-melee-weapons-2",
+          "count": 1,
+          "median_start_sec": 403.9,
+          "median_complete_sec": 539.9,
+          "median_supply": 82,
+          "median_workers": 51
+        }
+      ],
+      "macro_mechanics": {
+        "queen_1": {
+          "start_sec": 119.1,
+          "born_sec": 155.1,
+          "supply": 22
+        },
+        "queen_2": {
+          "start_sec": 124.8,
+          "born_sec": 160.8,
+          "supply": 24
+        },
+        "queen_3": {
+          "start_sec": 161.2,
+          "born_sec": 197.2,
+          "supply": 31
+        },
+        "queen_4": {
+          "start_sec": 206.2,
+          "born_sec": 242.2,
+          "supply": 43
+        },
+        "first_inject_sec": 158.6,
+        "first_creep_tumor_sec": 187.5
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 10,
+          "top_combat_units": [
+            [
+              "zergling",
+              4
+            ],
+            [
+              "queen",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 4,
+          "top_combat_units": [
+            [
+              "queen",
+              45
+            ],
+            [
+              "zergling",
+              42
+            ],
+            [
+              "roach",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 11,
+          "top_combat_units": [
+            [
+              "zergling",
+              29
+            ],
+            [
+              "queen",
+              28
+            ],
+            [
+              "roach",
+              14
+            ],
+            [
+              "ravager",
+              6
+            ],
+            [
+              "overseer",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 14,
+          "top_combat_units": [
+            [
+              "zergling",
+              114
+            ],
+            [
+              "queen",
+              38
+            ],
+            [
+              "roach",
+              18
+            ],
+            [
+              "baneling",
+              6
+            ],
+            [
+              "mutalisk",
+              2
+            ],
+            [
+              "ravager",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 24,
+          "top_combat_units": [
+            [
+              "zergling",
+              167
+            ],
+            [
+              "roach",
+              65
+            ],
+            [
+              "baneling",
+              54
+            ],
+            [
+              "ravager",
+              18
+            ],
+            [
+              "queen",
+              14
+            ],
+            [
+              "mutalisk",
+              14
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 4,
+          "top_combat_units": [
+            [
+              "roach",
+              74
+            ],
+            [
+              "zergling",
+              38
+            ],
+            [
+              "ravager",
+              7
+            ],
+            [
+              "infestor",
+              2
+            ],
+            [
+              "queen",
+              1
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 22,
+          "median_workers": 15.0,
+          "mean_workers": 15.4,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.0,
+          "median_total_supply": 17.0,
+          "median_supply_cap": 22.0,
+          "worker_to_army_ratio": 15.0,
+          "army_supply_pct": 5.9,
+          "median_bases": 2.0,
+          "median_gases": 0.0,
+          "median_army_value": 0,
+          "median_min_rate": 811,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 22,
+          "median_workers": 19.0,
+          "mean_workers": 19.0,
+          "median_army_supply": 4.0,
+          "mean_army_supply": 4.0,
+          "median_total_supply": 22.5,
+          "median_supply_cap": 28.0,
+          "worker_to_army_ratio": 4.75,
+          "army_supply_pct": 17.8,
+          "median_bases": 2.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 923,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 22,
+          "median_workers": 24.0,
+          "mean_workers": 23.7,
+          "median_army_supply": 10.0,
+          "mean_army_supply": 10.2,
+          "median_total_supply": 34.0,
+          "median_supply_cap": 36.0,
+          "worker_to_army_ratio": 2.4,
+          "army_supply_pct": 29.4,
+          "median_bases": 3.0,
+          "median_gases": 1.0,
+          "median_army_value": 400,
+          "median_min_rate": 1189,
+          "median_gas_rate": 67
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 22,
+          "median_workers": 35.0,
+          "mean_workers": 34.5,
+          "median_army_supply": 17.0,
+          "mean_army_supply": 16.0,
+          "median_total_supply": 52.5,
+          "median_supply_cap": 59.0,
+          "worker_to_army_ratio": 2.06,
+          "army_supply_pct": 32.4,
+          "median_bases": 3.0,
+          "median_gases": 2.0,
+          "median_army_value": 700,
+          "median_min_rate": 1679,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 22,
+          "median_workers": 44.5,
+          "mean_workers": 43.0,
+          "median_army_supply": 23.5,
+          "mean_army_supply": 24.3,
+          "median_total_supply": 68.5,
+          "median_supply_cap": 82.0,
+          "worker_to_army_ratio": 1.89,
+          "army_supply_pct": 34.3,
+          "median_bases": 3.0,
+          "median_gases": 2.5,
+          "median_army_value": 1175,
+          "median_min_rate": 1847,
+          "median_gas_rate": 302
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 21,
+          "median_workers": 49.0,
+          "mean_workers": 50.2,
+          "median_army_supply": 29.0,
+          "mean_army_supply": 30.7,
+          "median_total_supply": 81.0,
+          "median_supply_cap": 98.0,
+          "worker_to_army_ratio": 1.69,
+          "army_supply_pct": 35.8,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 1625,
+          "median_min_rate": 2099,
+          "median_gas_rate": 380
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 20,
+          "median_workers": 63.5,
+          "mean_workers": 60.0,
+          "median_army_supply": 38.0,
+          "mean_army_supply": 40.6,
+          "median_total_supply": 97.0,
+          "median_supply_cap": 110.0,
+          "worker_to_army_ratio": 1.67,
+          "army_supply_pct": 39.2,
+          "median_bases": 4.0,
+          "median_gases": 6.0,
+          "median_army_value": 2275,
+          "median_min_rate": 2575,
+          "median_gas_rate": 626
+        }
+      ]
+    },
+    "ZvP": {
+      "matchup": "ZvP",
+      "total_perspectives": 81,
+      "pro_perspectives": 43,
+      "winning_perspectives": 44,
+      "pro_winning_perspectives": 27,
+      "exemplar_player": "Serral",
+      "exemplar_opponent": "sOs",
+      "exemplar_map": "Lost and Found LE",
+      "exemplar_replay": "Starcraft2ReplayPackager_d50aea3825a6_Lost_and_Found_LE__3_.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 13,
+          "sec": 12.4,
+          "workers": 12,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 16,
+          "sec": 48.7,
+          "workers": 16,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 18,
+          "sec": 69.2,
+          "workers": 17,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 17,
+          "sec": 73.3,
+          "workers": 17,
+          "action": "build",
+          "symbol": "spawning-pool"
+        },
+        {
+          "supply": 25,
+          "sec": 144.0,
+          "workers": 22,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 33,
+          "sec": 182.6,
+          "workers": 27,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 35,
+          "sec": 193.9,
+          "workers": 27,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 205.9,
+          "workers": 30,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 45,
+          "sec": 226.9,
+          "workers": 36,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 50,
+          "sec": 237.1,
+          "workers": 38,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 55,
+          "sec": 254.8,
+          "workers": 43,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 58,
+          "sec": 263.4,
+          "workers": 45,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 60,
+          "sec": 270.0,
+          "workers": 48,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 62,
+          "sec": 272.2,
+          "complete_sec": 329.2,
+          "workers": 48,
+          "action": "morph",
+          "symbol": "lair"
+        },
+        {
+          "supply": 62,
+          "sec": 276.0,
+          "workers": 48,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 63,
+          "sec": 277.6,
+          "workers": 48,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 66,
+          "sec": 285.8,
+          "workers": 48,
+          "action": "build",
+          "symbol": "roach-warren"
+        },
+        {
+          "supply": 70,
+          "sec": 296.7,
+          "workers": 53,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 70,
+          "sec": 296.9,
+          "workers": 53,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 71,
+          "sec": 305.1,
+          "workers": 58,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 70,
+          "sec": 305.5,
+          "workers": 57,
+          "action": "build",
+          "symbol": "evolution-chamber"
+        },
+        {
+          "supply": 73,
+          "sec": 316.1,
+          "workers": 57,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 73,
+          "sec": 316.2,
+          "workers": 57,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 86,
+          "sec": 339.4,
+          "workers": 61,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 94,
+          "sec": 350.0,
+          "workers": 61,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 93,
+          "sec": 350.6,
+          "workers": 60,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 106,
+          "sec": 370.1,
+          "workers": 63,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 106,
+          "sec": 370.3,
+          "workers": 63,
+          "action": "train",
+          "symbol": "overlord"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "zergling-movementspeed",
+          "start_sec": 217.5,
+          "complete_sec": 296.5,
+          "supply": 41,
+          "workers": 31
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 24,
+          "sec": 121.5,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 25,
+          "sec": 139.4,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 27,
+          "sec": 151.4,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 41,
+          "sec": 214.3,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 54,
+          "sec": 250.0,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 56,
+          "sec": 256.5,
+          "symbol": "zergling",
+          "count": 1
+        },
+        {
+          "supply": 59,
+          "sec": 264.3,
+          "symbol": "queen",
+          "count": 1
+        },
+        {
+          "supply": 75,
+          "sec": 326.0,
+          "symbol": "roach",
+          "count": 1
+        },
+        {
+          "supply": 85,
+          "sec": 326.1,
+          "symbol": "roach",
+          "count": 6
+        },
+        {
+          "supply": 86,
+          "sec": 332.3,
+          "symbol": "overseer",
+          "count": 2
+        },
+        {
+          "supply": 88,
+          "sec": 340.8,
+          "symbol": "roach",
+          "count": 2
+        },
+        {
+          "supply": 94,
+          "sec": 353.7,
+          "symbol": "roach",
+          "count": 2
+        },
+        {
+          "supply": 98,
+          "sec": 359.0,
+          "symbol": "roach",
+          "count": 2
+        },
+        {
+          "supply": 102,
+          "sec": 363.1,
+          "symbol": "roach",
+          "count": 2
+        },
+        {
+          "supply": 106,
+          "sec": 367.2,
+          "symbol": "roach",
+          "count": 2
+        },
+        {
+          "supply": 112,
+          "sec": 373.4,
+          "symbol": "roach",
+          "count": 3
+        },
+        {
+          "supply": 116,
+          "sec": 378.2,
+          "symbol": "roach",
+          "count": 1
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 27,
+          "median_sec": 48.7,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "base_num": 3,
+          "count": 26,
+          "median_sec": 162.9,
+          "median_supply": 32,
+          "median_workers": 25
+        },
+        {
+          "base_num": 4,
+          "count": 19,
+          "median_sec": 339.2,
+          "median_supply": 81,
+          "median_workers": 56
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 27,
+          "median_sec": 64.8,
+          "median_supply": 17,
+          "median_workers": 16
+        },
+        {
+          "gas_num": 2,
+          "count": 26,
+          "median_sec": 227.5,
+          "median_supply": 44,
+          "median_workers": 31
+        },
+        {
+          "gas_num": 3,
+          "count": 24,
+          "median_sec": 278.1,
+          "median_supply": 62,
+          "median_workers": 47
+        },
+        {
+          "gas_num": 4,
+          "count": 24,
+          "median_sec": 308.1,
+          "median_supply": 74,
+          "median_workers": 51
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "overlord",
+          "frequency": 1.0,
+          "median_sec": 13.1,
+          "median_supply": 13,
+          "median_workers": 13
+        },
+        {
+          "symbol": "hatchery",
+          "frequency": 1.0,
+          "median_sec": 48.7,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "symbol": "extractor",
+          "frequency": 1.0,
+          "median_sec": 64.8,
+          "median_supply": 17,
+          "median_workers": 16
+        },
+        {
+          "symbol": "spawning-pool",
+          "frequency": 1.0,
+          "median_sec": 73.3,
+          "median_supply": 17,
+          "median_workers": 17
+        },
+        {
+          "symbol": "spore-crawler",
+          "frequency": 0.78,
+          "median_sec": 212.7,
+          "median_supply": 44,
+          "median_workers": 32
+        },
+        {
+          "symbol": "spine-crawler",
+          "frequency": 0.22,
+          "median_sec": 219.3,
+          "median_supply": 41,
+          "median_workers": 30
+        },
+        {
+          "symbol": "lair",
+          "frequency": 0.93,
+          "median_sec": 277.9,
+          "median_supply": 62,
+          "median_workers": 42
+        },
+        {
+          "symbol": "roach-warren",
+          "frequency": 0.78,
+          "median_sec": 280.8,
+          "median_supply": 58,
+          "median_workers": 44
+        },
+        {
+          "symbol": "evolution-chamber",
+          "frequency": 0.81,
+          "median_sec": 304.5,
+          "median_supply": 72,
+          "median_workers": 50
+        },
+        {
+          "symbol": "spire",
+          "frequency": 0.15,
+          "median_sec": 344.4,
+          "median_supply": 89,
+          "median_workers": 56
+        },
+        {
+          "symbol": "hydralisk-den",
+          "frequency": 0.37,
+          "median_sec": 362.8,
+          "median_supply": 86,
+          "median_workers": 62
+        },
+        {
+          "symbol": "baneling-nest",
+          "frequency": 0.26,
+          "median_sec": 394.9,
+          "median_supply": 97,
+          "median_workers": 62
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "zergling-movementspeed",
+          "count": 26,
+          "median_start_sec": 134.6,
+          "median_complete_sec": 213.6,
+          "median_supply": 28,
+          "median_workers": 21
+        },
+        {
+          "symbol": "zerg-melee-weapons-1",
+          "count": 11,
+          "median_start_sec": 337.3,
+          "median_complete_sec": 451.3,
+          "median_supply": 79,
+          "median_workers": 51
+        },
+        {
+          "symbol": "zerg-ground-carapace-1",
+          "count": 2,
+          "median_start_sec": 341.0,
+          "median_complete_sec": 455.0,
+          "median_supply": 78,
+          "median_workers": 60
+        },
+        {
+          "symbol": "glial-reconstitution",
+          "count": 13,
+          "median_start_sec": 341.7,
+          "median_complete_sec": 420.7,
+          "median_supply": 86,
+          "median_workers": 51
+        },
+        {
+          "symbol": "pneumatized-carapace",
+          "count": 5,
+          "median_start_sec": 345.7,
+          "median_complete_sec": 388.7,
+          "median_supply": 84,
+          "median_workers": 58
+        },
+        {
+          "symbol": "zerg-missile-weapons-1",
+          "count": 11,
+          "median_start_sec": 365.6,
+          "median_complete_sec": 479.6,
+          "median_supply": 94,
+          "median_workers": 62
+        },
+        {
+          "symbol": "grooved-spines",
+          "count": 2,
+          "median_start_sec": 388.8,
+          "median_complete_sec": 438.8,
+          "median_supply": 96,
+          "median_workers": 64
+        },
+        {
+          "symbol": "muscular-augments",
+          "count": 3,
+          "median_start_sec": 391.2,
+          "median_complete_sec": 441.2,
+          "median_supply": 97,
+          "median_workers": 69
+        }
+      ],
+      "macro_mechanics": {
+        "queen_1": {
+          "start_sec": 120.8,
+          "born_sec": 156.8,
+          "supply": 22
+        },
+        "queen_2": {
+          "start_sec": 121.9,
+          "born_sec": 157.9,
+          "supply": 24
+        },
+        "queen_3": {
+          "start_sec": 170.0,
+          "born_sec": 206.0,
+          "supply": 34
+        },
+        "queen_4": {
+          "start_sec": 210.4,
+          "born_sec": 246.4,
+          "supply": 44
+        },
+        "first_inject_sec": 158.8,
+        "first_creep_tumor_sec": 191.4
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 10,
+          "top_combat_units": [
+            [
+              "zergling",
+              4
+            ]
+          ]
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 5,
+          "top_combat_units": [
+            [
+              "queen",
+              51
+            ],
+            [
+              "zergling",
+              39
+            ],
+            [
+              "roach",
+              3
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 11,
+          "top_combat_units": [
+            [
+              "zergling",
+              57
+            ],
+            [
+              "queen",
+              32
+            ],
+            [
+              "roach",
+              6
+            ],
+            [
+              "ravager",
+              4
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 20,
+          "top_combat_units": [
+            [
+              "zergling",
+              120
+            ],
+            [
+              "queen",
+              53
+            ],
+            [
+              "roach",
+              23
+            ],
+            [
+              "ravager",
+              7
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 23,
+          "top_combat_units": [
+            [
+              "zergling",
+              188
+            ],
+            [
+              "roach",
+              132
+            ],
+            [
+              "hydralisk",
+              29
+            ],
+            [
+              "queen",
+              21
+            ],
+            [
+              "overseer",
+              14
+            ],
+            [
+              "ravager",
+              6
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 0,
+          "top_combat_units": [
+            [
+              "zergling",
+              124
+            ],
+            [
+              "roach",
+              117
+            ],
+            [
+              "hydralisk",
+              53
+            ],
+            [
+              "ravager",
+              16
+            ],
+            [
+              "queen",
+              12
+            ],
+            [
+              "corruptor",
+              9
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 27,
+          "median_workers": 15.0,
+          "mean_workers": 15.1,
+          "median_army_supply": 2.0,
+          "mean_army_supply": 2.0,
+          "median_total_supply": 17.0,
+          "median_supply_cap": 22.0,
+          "worker_to_army_ratio": 7.5,
+          "army_supply_pct": 11.8,
+          "median_bases": 2.0,
+          "median_gases": 0.0,
+          "median_army_value": 0,
+          "median_min_rate": 811,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 27,
+          "median_workers": 20.0,
+          "mean_workers": 19.8,
+          "median_army_supply": 2.0,
+          "mean_army_supply": 2.8,
+          "median_total_supply": 22.0,
+          "median_supply_cap": 28.0,
+          "worker_to_army_ratio": 10.0,
+          "army_supply_pct": 9.1,
+          "median_bases": 2.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 923,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 26,
+          "median_workers": 25.0,
+          "mean_workers": 24.7,
+          "median_army_supply": 10.0,
+          "mean_army_supply": 9.4,
+          "median_total_supply": 35.0,
+          "median_supply_cap": 36.0,
+          "worker_to_army_ratio": 2.5,
+          "army_supply_pct": 28.6,
+          "median_bases": 3.0,
+          "median_gases": 1.0,
+          "median_army_value": 425,
+          "median_min_rate": 1343,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 26,
+          "median_workers": 35.0,
+          "mean_workers": 35.4,
+          "median_army_supply": 16.0,
+          "mean_army_supply": 15.6,
+          "median_total_supply": 51.0,
+          "median_supply_cap": 58.0,
+          "worker_to_army_ratio": 2.19,
+          "army_supply_pct": 31.4,
+          "median_bases": 3.0,
+          "median_gases": 2.0,
+          "median_army_value": 675,
+          "median_min_rate": 1735,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 26,
+          "median_workers": 48.0,
+          "mean_workers": 46.6,
+          "median_army_supply": 21.0,
+          "mean_army_supply": 21.0,
+          "median_total_supply": 69.0,
+          "median_supply_cap": 82.0,
+          "worker_to_army_ratio": 2.29,
+          "army_supply_pct": 30.4,
+          "median_bases": 3.0,
+          "median_gases": 3.0,
+          "median_army_value": 1075,
+          "median_min_rate": 2127,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 26,
+          "median_workers": 58.5,
+          "mean_workers": 55.9,
+          "median_army_supply": 28.0,
+          "mean_army_supply": 32.5,
+          "median_total_supply": 88.5,
+          "median_supply_cap": 106.0,
+          "worker_to_army_ratio": 2.09,
+          "army_supply_pct": 31.6,
+          "median_bases": 4.0,
+          "median_gases": 5.5,
+          "median_army_value": 1512,
+          "median_min_rate": 2393,
+          "median_gas_rate": 492
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 26,
+          "median_workers": 62.0,
+          "mean_workers": 60.9,
+          "median_army_supply": 51.0,
+          "mean_army_supply": 53.4,
+          "median_total_supply": 117.0,
+          "median_supply_cap": 136.0,
+          "worker_to_army_ratio": 1.22,
+          "army_supply_pct": 43.6,
+          "median_bases": 4.0,
+          "median_gases": 6.0,
+          "median_army_value": 2375,
+          "median_min_rate": 2617,
+          "median_gas_rate": 772
+        }
+      ]
+    },
+    "TvZ": {
+      "matchup": "TvZ",
+      "total_perspectives": 64,
+      "pro_perspectives": 43,
+      "winning_perspectives": 25,
+      "pro_winning_perspectives": 20,
+      "exemplar_player": "GuMiho",
+      "exemplar_opponent": "Serral",
+      "exemplar_map": "Abyssal Reef LE",
+      "exemplar_replay": "Starcraft2ReplayPackager_d178c16e60e6_Abyssal_Reef_LE__3_.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 14,
+          "sec": 17.1,
+          "workers": 13,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 15,
+          "sec": 28.9,
+          "workers": 14,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 16,
+          "sec": 44.6,
+          "workers": 15,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 19,
+          "sec": 91.1,
+          "complete_sec": 116.1,
+          "workers": 19,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 20,
+          "sec": 103.2,
+          "workers": 19,
+          "action": "build",
+          "symbol": "command-center"
+        },
+        {
+          "supply": 20,
+          "sec": 114.4,
+          "workers": 19,
+          "action": "build",
+          "symbol": "factory"
+        },
+        {
+          "supply": 21,
+          "sec": 123.8,
+          "workers": 19,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 21,
+          "sec": 125.5,
+          "workers": 19,
+          "action": "build",
+          "symbol": "barracks-reactor"
+        },
+        {
+          "supply": 22,
+          "sec": 135.3,
+          "workers": 20,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 24,
+          "sec": 161.8,
+          "workers": 22,
+          "action": "build",
+          "symbol": "starport"
+        },
+        {
+          "supply": 29,
+          "sec": 175.9,
+          "complete_sec": 200.9,
+          "workers": 23,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 32,
+          "sec": 192.4,
+          "workers": 24,
+          "action": "build",
+          "symbol": "factory-techlab"
+        },
+        {
+          "supply": 39,
+          "sec": 209.4,
+          "workers": 26,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 41,
+          "sec": 220.1,
+          "workers": 28,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 46,
+          "sec": 229.2,
+          "workers": 29,
+          "action": "build",
+          "symbol": "barracks-techlab"
+        },
+        {
+          "supply": 59,
+          "sec": 267.5,
+          "workers": 36,
+          "action": "build",
+          "symbol": "command-center"
+        },
+        {
+          "supply": 61,
+          "sec": 282.9,
+          "workers": 38,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 61,
+          "sec": 289.6,
+          "workers": 39,
+          "action": "build",
+          "symbol": "factory-reactor"
+        },
+        {
+          "supply": 62,
+          "sec": 291.7,
+          "workers": 40,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 62,
+          "sec": 294.7,
+          "workers": 40,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 62,
+          "sec": 295.1,
+          "workers": 40,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 67,
+          "sec": 313.0,
+          "workers": 41,
+          "action": "build",
+          "symbol": "engineering-bay"
+        },
+        {
+          "supply": 69,
+          "sec": 313.8,
+          "workers": 41,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 67,
+          "sec": 314.6,
+          "workers": 41,
+          "action": "build",
+          "symbol": "engineering-bay"
+        },
+        {
+          "supply": 67,
+          "sec": 315.0,
+          "workers": 41,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 70,
+          "sec": 325.0,
+          "workers": 43,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 70,
+          "sec": 325.8,
+          "workers": 43,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 72,
+          "sec": 339.6,
+          "workers": 45,
+          "action": "build",
+          "symbol": "factory-reactor"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "stimpack",
+          "start_sec": 270.9,
+          "complete_sec": 370.9,
+          "supply": 59,
+          "workers": 36
+        },
+        {
+          "symbol": "terran-infantry-weapons-1",
+          "start_sec": 343.0,
+          "complete_sec": 457.1,
+          "supply": 73,
+          "workers": 47
+        },
+        {
+          "symbol": "terran-infantry-armor-1",
+          "start_sec": 343.1,
+          "complete_sec": 457.1,
+          "supply": 73,
+          "workers": 47
+        },
+        {
+          "symbol": "combat-shield",
+          "start_sec": 387.0,
+          "complete_sec": 466.0,
+          "supply": 82,
+          "workers": 52
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 20,
+          "sec": 91.7,
+          "symbol": "reaper",
+          "count": 1
+        },
+        {
+          "supply": 25,
+          "sec": 162.2,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 31,
+          "sec": 170.8,
+          "symbol": "widow-mine",
+          "count": 1
+        },
+        {
+          "supply": 30,
+          "sec": 180.6,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 35,
+          "sec": 198.6,
+          "symbol": "medivac",
+          "count": 1
+        },
+        {
+          "supply": 36,
+          "sec": 201.2,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 43,
+          "sec": 224.7,
+          "symbol": "hellion",
+          "count": 2
+        },
+        {
+          "supply": 53,
+          "sec": 246.1,
+          "symbol": "hellion",
+          "count": 2
+        },
+        {
+          "supply": 57,
+          "sec": 250.4,
+          "symbol": "raven",
+          "count": 1
+        },
+        {
+          "supply": 63,
+          "sec": 304.2,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 69,
+          "sec": 313.2,
+          "symbol": "raven",
+          "count": 1
+        },
+        {
+          "supply": 70,
+          "sec": 322.0,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 73,
+          "sec": 339.8,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 76,
+          "sec": 361.2,
+          "symbol": "marine",
+          "count": 4
+        },
+        {
+          "supply": 83,
+          "sec": 375.4,
+          "symbol": "marine",
+          "count": 5
+        },
+        {
+          "supply": 92,
+          "sec": 394.1,
+          "symbol": "widow-mine",
+          "count": 2
+        },
+        {
+          "supply": 96,
+          "sec": 399.0,
+          "symbol": "medivac",
+          "count": 2
+        },
+        {
+          "supply": 98,
+          "sec": 410.4,
+          "symbol": "marine",
+          "count": 1
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 19,
+          "median_sec": 103.2,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "base_num": 3,
+          "count": 16,
+          "median_sec": 257.1,
+          "median_supply": 54,
+          "median_workers": 34
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 19,
+          "median_sec": 43.4,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "gas_num": 2,
+          "count": 19,
+          "median_sec": 138.3,
+          "median_supply": 22,
+          "median_workers": 20
+        },
+        {
+          "gas_num": 3,
+          "count": 17,
+          "median_sec": 288.8,
+          "median_supply": 62,
+          "median_workers": 40
+        },
+        {
+          "gas_num": 4,
+          "count": 17,
+          "median_sec": 329.0,
+          "median_supply": 67,
+          "median_workers": 44
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "supply-depot",
+          "frequency": 0.95,
+          "median_sec": 17.8,
+          "median_supply": 14,
+          "median_workers": 13
+        },
+        {
+          "symbol": "refinery",
+          "frequency": 0.95,
+          "median_sec": 43.4,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "symbol": "barracks",
+          "frequency": 0.95,
+          "median_sec": 44.5,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "symbol": "orbital-command",
+          "frequency": 0.95,
+          "median_sec": 91.8,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "command-center",
+          "frequency": 0.95,
+          "median_sec": 103.2,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "factory",
+          "frequency": 0.95,
+          "median_sec": 128.1,
+          "median_supply": 23,
+          "median_workers": 20
+        },
+        {
+          "symbol": "barracks-reactor",
+          "frequency": 0.95,
+          "median_sec": 134.2,
+          "median_supply": 21,
+          "median_workers": 20
+        },
+        {
+          "symbol": "starport",
+          "frequency": 0.95,
+          "median_sec": 176.1,
+          "median_supply": 27,
+          "median_workers": 24
+        },
+        {
+          "symbol": "barracks-techlab",
+          "frequency": 0.9,
+          "median_sec": 194.9,
+          "median_supply": 32,
+          "median_workers": 25
+        },
+        {
+          "symbol": "factory-techlab",
+          "frequency": 0.4,
+          "median_sec": 206.1,
+          "median_supply": 35,
+          "median_workers": 26
+        },
+        {
+          "symbol": "bunker",
+          "frequency": 0.2,
+          "median_sec": 235.6,
+          "median_supply": 36,
+          "median_workers": 26
+        },
+        {
+          "symbol": "engineering-bay",
+          "frequency": 0.8,
+          "median_sec": 289.4,
+          "median_supply": 61,
+          "median_workers": 39
+        },
+        {
+          "symbol": "factory-reactor",
+          "frequency": 0.6,
+          "median_sec": 290.6,
+          "median_supply": 60,
+          "median_workers": 39
+        },
+        {
+          "symbol": "starport-reactor",
+          "frequency": 0.6,
+          "median_sec": 318.9,
+          "median_supply": 66,
+          "median_workers": 44
+        },
+        {
+          "symbol": "armory",
+          "frequency": 0.65,
+          "median_sec": 326.4,
+          "median_supply": 68,
+          "median_workers": 44
+        },
+        {
+          "symbol": "missile-turret",
+          "frequency": 0.15,
+          "median_sec": 382.9,
+          "median_supply": 80,
+          "median_workers": 45
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "cloaking-field",
+          "count": 4,
+          "median_start_sec": 247.8,
+          "median_complete_sec": 326.9,
+          "median_supply": 48,
+          "median_workers": 30
+        },
+        {
+          "symbol": "stimpack",
+          "count": 14,
+          "median_start_sec": 273.2,
+          "median_complete_sec": 373.2,
+          "median_supply": 54,
+          "median_workers": 38
+        },
+        {
+          "symbol": "terran-vehicle-plating-1",
+          "count": 1,
+          "median_start_sec": 293.7,
+          "median_complete_sec": 407.7,
+          "median_supply": 60,
+          "median_workers": 41
+        },
+        {
+          "symbol": "terran-vehicle-weapons-1",
+          "count": 2,
+          "median_start_sec": 295.5,
+          "median_complete_sec": 409.5,
+          "median_supply": 66,
+          "median_workers": 41
+        },
+        {
+          "symbol": "terran-infantry-weapons-1",
+          "count": 12,
+          "median_start_sec": 317.0,
+          "median_complete_sec": 431.0,
+          "median_supply": 58,
+          "median_workers": 42
+        },
+        {
+          "symbol": "terran-infantry-armor-1",
+          "count": 12,
+          "median_start_sec": 319.9,
+          "median_complete_sec": 433.9,
+          "median_supply": 63,
+          "median_workers": 42
+        },
+        {
+          "symbol": "combat-shield",
+          "count": 8,
+          "median_start_sec": 366.5,
+          "median_complete_sec": 445.5,
+          "median_supply": 84,
+          "median_workers": 52
+        },
+        {
+          "symbol": "drilling-claws",
+          "count": 1,
+          "median_start_sec": 366.7,
+          "median_complete_sec": 445.7,
+          "median_supply": 78,
+          "median_workers": 43
+        },
+        {
+          "symbol": "terran-infantry-weapons-2",
+          "count": 4,
+          "median_start_sec": 388.7,
+          "median_complete_sec": 524.7,
+          "median_supply": 94,
+          "median_workers": 56
+        },
+        {
+          "symbol": "terran-infantry-armor-2",
+          "count": 4,
+          "median_start_sec": 400.4,
+          "median_complete_sec": 536.5,
+          "median_supply": 94,
+          "median_workers": 54
+        }
+      ],
+      "macro_mechanics": {
+        "orbital_1": {
+          "start_sec": 91.8,
+          "complete_sec": 116.8,
+          "supply": 20
+        },
+        "orbital_2": {
+          "start_sec": 176.1,
+          "complete_sec": 201.1,
+          "supply": 28
+        },
+        "orbital_3": {
+          "start_sec": 278.0,
+          "complete_sec": 303.0,
+          "supply": 46
+        },
+        "first_mule_sec": 117.9
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 7,
+          "top_combat_units": []
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 6,
+          "top_combat_units": [
+            [
+              "marine",
+              21
+            ],
+            [
+              "reaper",
+              19
+            ],
+            [
+              "hellion",
+              13
+            ],
+            [
+              "siege-tank",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 6,
+          "top_combat_units": [
+            [
+              "marine",
+              41
+            ],
+            [
+              "hellion",
+              37
+            ],
+            [
+              "widow-mine",
+              5
+            ],
+            [
+              "medivac",
+              4
+            ],
+            [
+              "viking",
+              3
+            ],
+            [
+              "banshee",
+              3
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 11,
+          "top_combat_units": [
+            [
+              "marine",
+              96
+            ],
+            [
+              "hellion",
+              39
+            ],
+            [
+              "banshee",
+              9
+            ],
+            [
+              "siege-tank",
+              4
+            ],
+            [
+              "medivac",
+              3
+            ],
+            [
+              "raven",
+              3
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 13,
+          "top_combat_units": [
+            [
+              "marine",
+              177
+            ],
+            [
+              "medivac",
+              33
+            ],
+            [
+              "hellion",
+              17
+            ],
+            [
+              "siege-tank",
+              10
+            ],
+            [
+              "widow-mine",
+              7
+            ],
+            [
+              "thor",
+              4
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 2,
+          "top_combat_units": [
+            [
+              "marine",
+              45
+            ],
+            [
+              "siege-tank",
+              5
+            ],
+            [
+              "hellion",
+              4
+            ],
+            [
+              "medivac",
+              3
+            ],
+            [
+              "widow-mine",
+              2
+            ],
+            [
+              "marauder",
+              1
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 19,
+          "median_workers": 16.0,
+          "mean_workers": 16.0,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.0,
+          "median_total_supply": 17.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 16.0,
+          "army_supply_pct": 5.9,
+          "median_bases": 1.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 755,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 19,
+          "median_workers": 19.0,
+          "mean_workers": 19.4,
+          "median_army_supply": 2.0,
+          "mean_army_supply": 1.8,
+          "median_total_supply": 21.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 9.5,
+          "army_supply_pct": 9.5,
+          "median_bases": 2.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 811,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 19,
+          "median_workers": 23.0,
+          "mean_workers": 23.3,
+          "median_army_supply": 4.0,
+          "mean_army_supply": 4.5,
+          "median_total_supply": 28.0,
+          "median_supply_cap": 38.0,
+          "worker_to_army_ratio": 5.75,
+          "army_supply_pct": 14.3,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 100,
+          "median_min_rate": 1091,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 19,
+          "median_workers": 31.0,
+          "mean_workers": 30.5,
+          "median_army_supply": 14.0,
+          "mean_army_supply": 14.1,
+          "median_total_supply": 46.0,
+          "median_supply_cap": 54.0,
+          "worker_to_army_ratio": 2.21,
+          "army_supply_pct": 30.4,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 450,
+          "median_min_rate": 1567,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 19,
+          "median_workers": 40.0,
+          "mean_workers": 38.6,
+          "median_army_supply": 21.0,
+          "mean_army_supply": 20.5,
+          "median_total_supply": 61.0,
+          "median_supply_cap": 69.0,
+          "worker_to_army_ratio": 1.9,
+          "army_supply_pct": 34.4,
+          "median_bases": 3.0,
+          "median_gases": 3.0,
+          "median_army_value": 850,
+          "median_min_rate": 1931,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 18,
+          "median_workers": 49.0,
+          "mean_workers": 47.5,
+          "median_army_supply": 31.5,
+          "mean_army_supply": 29.2,
+          "median_total_supply": 76.5,
+          "median_supply_cap": 89.5,
+          "worker_to_army_ratio": 1.56,
+          "army_supply_pct": 41.2,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 1288,
+          "median_min_rate": 1973,
+          "median_gas_rate": 492
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 17,
+          "median_workers": 58.0,
+          "mean_workers": 56.3,
+          "median_army_supply": 41.0,
+          "mean_army_supply": 40.9,
+          "median_total_supply": 96.0,
+          "median_supply_cap": 117.0,
+          "worker_to_army_ratio": 1.41,
+          "army_supply_pct": 42.7,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 2050,
+          "median_min_rate": 2491,
+          "median_gas_rate": 649
+        }
+      ]
+    },
+    "TvT": {
+      "matchup": "TvT",
+      "total_perspectives": 10,
+      "pro_perspectives": 8,
+      "winning_perspectives": 4,
+      "pro_winning_perspectives": 3,
+      "exemplar_player": "<NWMI> OneScotch",
+      "exemplar_opponent": "Eternal",
+      "exemplar_map": "Ulrena",
+      "exemplar_replay": "sc2reader_2cc116699e5b_4.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 14,
+          "sec": 17.8,
+          "workers": 13,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 16,
+          "sec": 42.7,
+          "workers": 15,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 16,
+          "sec": 45.9,
+          "workers": 15,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 19,
+          "sec": 98.1,
+          "complete_sec": 123.1,
+          "workers": 19,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 20,
+          "sec": 108.6,
+          "workers": 19,
+          "action": "build",
+          "symbol": "command-center"
+        },
+        {
+          "supply": 21,
+          "sec": 127.9,
+          "workers": 19,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 21,
+          "sec": 141.2,
+          "workers": 20,
+          "action": "build",
+          "symbol": "barracks-reactor"
+        },
+        {
+          "supply": 21,
+          "sec": 141.6,
+          "workers": 20,
+          "action": "build",
+          "symbol": "factory"
+        },
+        {
+          "supply": 22,
+          "sec": 150.4,
+          "workers": 20,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 22,
+          "sec": 159.8,
+          "workers": 21,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 26,
+          "sec": 180.2,
+          "complete_sec": 205.2,
+          "workers": 22,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 28,
+          "sec": 189.0,
+          "workers": 23,
+          "action": "build",
+          "symbol": "starport"
+        },
+        {
+          "supply": 33,
+          "sec": 214.6,
+          "workers": 24,
+          "action": "build",
+          "symbol": "barracks-techlab"
+        },
+        {
+          "supply": 39,
+          "sec": 224.5,
+          "workers": 26,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 48,
+          "sec": 258.0,
+          "workers": 30,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 50,
+          "sec": 268.1,
+          "workers": 31,
+          "action": "build",
+          "symbol": "factory-techlab"
+        },
+        {
+          "supply": 52,
+          "sec": 278.8,
+          "workers": 33,
+          "action": "build",
+          "symbol": "starport-reactor"
+        },
+        {
+          "supply": 54,
+          "sec": 281.2,
+          "workers": 33,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 55,
+          "sec": 286.0,
+          "workers": 33,
+          "action": "build",
+          "symbol": "engineering-bay"
+        },
+        {
+          "supply": 61,
+          "sec": 316.1,
+          "workers": 35,
+          "action": "build",
+          "symbol": "missile-turret"
+        },
+        {
+          "supply": 61,
+          "sec": 318.3,
+          "workers": 35,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 62,
+          "sec": 336.2,
+          "workers": 37,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 70,
+          "sec": 341.2,
+          "workers": 38,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 73,
+          "sec": 358.2,
+          "workers": 40,
+          "action": "build",
+          "symbol": "missile-turret"
+        },
+        {
+          "supply": 76,
+          "sec": 360.1,
+          "workers": 40,
+          "action": "build",
+          "symbol": "barracks-reactor"
+        },
+        {
+          "supply": 78,
+          "sec": 364.2,
+          "workers": 41,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 78,
+          "sec": 366.7,
+          "workers": 41,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 83,
+          "sec": 388.3,
+          "workers": 43,
+          "action": "build",
+          "symbol": "refinery"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "stimpack",
+          "start_sec": 264.8,
+          "complete_sec": 364.8,
+          "supply": 48,
+          "workers": 31
+        },
+        {
+          "symbol": "terran-infantry-weapons-1",
+          "start_sec": 331.1,
+          "complete_sec": 445.1,
+          "supply": 62,
+          "workers": 37
+        },
+        {
+          "symbol": "combat-shield",
+          "start_sec": 389.3,
+          "complete_sec": 468.3,
+          "supply": 83,
+          "workers": 43
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 20,
+          "sec": 99.5,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 25,
+          "sec": 177.4,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 31,
+          "sec": 192.9,
+          "symbol": "widow-mine",
+          "count": 1
+        },
+        {
+          "supply": 32,
+          "sec": 199.6,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 39,
+          "sec": 223.9,
+          "symbol": "widow-mine",
+          "count": 1
+        },
+        {
+          "supply": 41,
+          "sec": 226.0,
+          "symbol": "medivac",
+          "count": 1
+        },
+        {
+          "supply": 40,
+          "sec": 229.1,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 43,
+          "sec": 235.2,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 46,
+          "sec": 253.3,
+          "symbol": "marine",
+          "count": 3
+        },
+        {
+          "supply": 51,
+          "sec": 271.1,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 55,
+          "sec": 281.3,
+          "symbol": "marine",
+          "count": 3
+        },
+        {
+          "supply": 58,
+          "sec": 305.8,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 61,
+          "sec": 306.7,
+          "symbol": "siege-tank",
+          "count": 1
+        },
+        {
+          "supply": 63,
+          "sec": 339.6,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 68,
+          "sec": 339.7,
+          "symbol": "medivac",
+          "count": 2
+        },
+        {
+          "supply": 71,
+          "sec": 342.3,
+          "symbol": "marine",
+          "count": 3
+        },
+        {
+          "supply": 76,
+          "sec": 358.3,
+          "symbol": "siege-tank",
+          "count": 1
+        },
+        {
+          "supply": 77,
+          "sec": 360.1,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 80,
+          "sec": 378.3,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 83,
+          "sec": 382.5,
+          "symbol": "medivac",
+          "count": 1
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 3,
+          "median_sec": 108.6,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "base_num": 3,
+          "count": 1,
+          "median_sec": 377.1,
+          "median_supply": 90,
+          "median_workers": 48
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 3,
+          "median_sec": 45.9,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "gas_num": 2,
+          "count": 3,
+          "median_sec": 150.4,
+          "median_supply": 22,
+          "median_workers": 20
+        },
+        {
+          "gas_num": 3,
+          "count": 3,
+          "median_sec": 287.5,
+          "median_supply": 57,
+          "median_workers": 34
+        },
+        {
+          "gas_num": 4,
+          "count": 3,
+          "median_sec": 325.6,
+          "median_supply": 70,
+          "median_workers": 38
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "supply-depot",
+          "frequency": 1.0,
+          "median_sec": 17.8,
+          "median_supply": 14,
+          "median_workers": 13
+        },
+        {
+          "symbol": "barracks",
+          "frequency": 1.0,
+          "median_sec": 41.7,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "symbol": "refinery",
+          "frequency": 1.0,
+          "median_sec": 45.9,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "symbol": "orbital-command",
+          "frequency": 1.0,
+          "median_sec": 93.3,
+          "median_supply": 19,
+          "median_workers": 19
+        },
+        {
+          "symbol": "command-center",
+          "frequency": 1.0,
+          "median_sec": 108.6,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "factory",
+          "frequency": 1.0,
+          "median_sec": 131.4,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "barracks-reactor",
+          "frequency": 1.0,
+          "median_sec": 141.2,
+          "median_supply": 21,
+          "median_workers": 20
+        },
+        {
+          "symbol": "starport",
+          "frequency": 1.0,
+          "median_sec": 177.3,
+          "median_supply": 28,
+          "median_workers": 23
+        },
+        {
+          "symbol": "factory-reactor",
+          "frequency": 0.33,
+          "median_sec": 181.9,
+          "median_supply": 30,
+          "median_workers": 23
+        },
+        {
+          "symbol": "factory-techlab",
+          "frequency": 1.0,
+          "median_sec": 224.9,
+          "median_supply": 38,
+          "median_workers": 28
+        },
+        {
+          "symbol": "starport-reactor",
+          "frequency": 0.67,
+          "median_sec": 258.4,
+          "median_supply": 44,
+          "median_workers": 30
+        },
+        {
+          "symbol": "barracks-techlab",
+          "frequency": 1.0,
+          "median_sec": 266.8,
+          "median_supply": 44,
+          "median_workers": 29
+        },
+        {
+          "symbol": "engineering-bay",
+          "frequency": 1.0,
+          "median_sec": 300.9,
+          "median_supply": 61,
+          "median_workers": 36
+        },
+        {
+          "symbol": "missile-turret",
+          "frequency": 0.33,
+          "median_sec": 316.1,
+          "median_supply": 61,
+          "median_workers": 35
+        },
+        {
+          "symbol": "sensor-tower",
+          "frequency": 0.33,
+          "median_sec": 365.6,
+          "median_supply": 85,
+          "median_workers": 46
+        },
+        {
+          "symbol": "armory",
+          "frequency": 0.33,
+          "median_sec": 405.5,
+          "median_supply": 99,
+          "median_workers": 52
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "stimpack",
+          "count": 3,
+          "median_start_sec": 293.7,
+          "median_complete_sec": 393.7,
+          "median_supply": 57,
+          "median_workers": 33
+        },
+        {
+          "symbol": "terran-infantry-weapons-1",
+          "count": 2,
+          "median_start_sec": 331.6,
+          "median_complete_sec": 445.6,
+          "median_supply": 67,
+          "median_workers": 40
+        },
+        {
+          "symbol": "combat-shield",
+          "count": 2,
+          "median_start_sec": 350.1,
+          "median_complete_sec": 429.1,
+          "median_supply": 73,
+          "median_workers": 40
+        },
+        {
+          "symbol": "terran-infantry-armor-1",
+          "count": 1,
+          "median_start_sec": 370.9,
+          "median_complete_sec": 485.0,
+          "median_supply": 90,
+          "median_workers": 46
+        }
+      ],
+      "macro_mechanics": {
+        "orbital_1": {
+          "start_sec": 93.3,
+          "complete_sec": 118.3,
+          "supply": 19
+        },
+        "orbital_2": {
+          "start_sec": 180.2,
+          "complete_sec": 205.2,
+          "supply": 30
+        },
+        "first_mule_sec": 120.9
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 7,
+          "top_combat_units": []
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 4,
+          "top_combat_units": [
+            [
+              "marine",
+              9
+            ],
+            [
+              "reaper",
+              3
+            ],
+            [
+              "hellion",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 7,
+          "top_combat_units": [
+            [
+              "marine",
+              14
+            ],
+            [
+              "widow-mine",
+              2
+            ],
+            [
+              "medivac",
+              1
+            ],
+            [
+              "hellion",
+              1
+            ],
+            [
+              "siege-tank",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 9,
+          "top_combat_units": [
+            [
+              "marine",
+              26
+            ],
+            [
+              "medivac",
+              3
+            ],
+            [
+              "siege-tank",
+              3
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 10,
+          "top_combat_units": [
+            [
+              "marine",
+              41
+            ],
+            [
+              "medivac",
+              6
+            ],
+            [
+              "siege-tank",
+              3
+            ],
+            [
+              "viking",
+              3
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 2,
+          "top_combat_units": [
+            [
+              "marine",
+              7
+            ],
+            [
+              "marauder",
+              2
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 4,
+          "median_workers": 16.0,
+          "mean_workers": 16.0,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.0,
+          "median_total_supply": 17.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 16.0,
+          "army_supply_pct": 5.9,
+          "median_bases": 1.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 741,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 4,
+          "median_workers": 19.0,
+          "mean_workers": 19.0,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.5,
+          "median_total_supply": 20.0,
+          "median_supply_cap": 27.0,
+          "worker_to_army_ratio": 19.0,
+          "army_supply_pct": 5.0,
+          "median_bases": 1.5,
+          "median_gases": 1.0,
+          "median_army_value": 25,
+          "median_min_rate": 825,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 4,
+          "median_workers": 23.0,
+          "mean_workers": 22.8,
+          "median_army_supply": 7.0,
+          "mean_army_supply": 6.5,
+          "median_total_supply": 30.0,
+          "median_supply_cap": 35.0,
+          "worker_to_army_ratio": 3.29,
+          "army_supply_pct": 23.3,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 200,
+          "median_min_rate": 951,
+          "median_gas_rate": 201
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 4,
+          "median_workers": 28.5,
+          "mean_workers": 28.2,
+          "median_army_supply": 15.5,
+          "mean_army_supply": 15.8,
+          "median_total_supply": 44.0,
+          "median_supply_cap": 54.0,
+          "worker_to_army_ratio": 1.84,
+          "army_supply_pct": 35.2,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 450,
+          "median_min_rate": 1245,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 4,
+          "median_workers": 35.5,
+          "mean_workers": 35.8,
+          "median_army_supply": 24.0,
+          "mean_army_supply": 24.0,
+          "median_total_supply": 61.0,
+          "median_supply_cap": 66.0,
+          "worker_to_army_ratio": 1.48,
+          "army_supply_pct": 39.3,
+          "median_bases": 2.0,
+          "median_gases": 3.5,
+          "median_army_value": 1050,
+          "median_min_rate": 1595,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 4,
+          "median_workers": 43.0,
+          "mean_workers": 43.0,
+          "median_army_supply": 37.0,
+          "mean_army_supply": 37.0,
+          "median_total_supply": 82.0,
+          "median_supply_cap": 86.0,
+          "worker_to_army_ratio": 1.16,
+          "army_supply_pct": 45.1,
+          "median_bases": 2.0,
+          "median_gases": 4.0,
+          "median_army_value": 1688,
+          "median_min_rate": 1959,
+          "median_gas_rate": 582
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 4,
+          "median_workers": 49.5,
+          "mean_workers": 50.8,
+          "median_army_supply": 52.5,
+          "mean_army_supply": 53.0,
+          "median_total_supply": 104.5,
+          "median_supply_cap": 106.0,
+          "worker_to_army_ratio": 0.94,
+          "army_supply_pct": 50.2,
+          "median_bases": 2.5,
+          "median_gases": 4.0,
+          "median_army_value": 2850,
+          "median_min_rate": 2029,
+          "median_gas_rate": 649
+        }
+      ]
+    },
+    "TvP": {
+      "matchup": "TvP",
+      "total_perspectives": 59,
+      "pro_perspectives": 28,
+      "winning_perspectives": 34,
+      "pro_winning_perspectives": 17,
+      "exemplar_player": "VITmaru",
+      "exemplar_opponent": "ShoWTimE",
+      "exemplar_map": "Pylon LE",
+      "exemplar_replay": "sc2readerjs_ec72e1287ad6_QM_-_ShoWTimE_vs_Maru_-_G2_-_Pylon.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 14,
+          "sec": 17.7,
+          "workers": 13,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 16,
+          "sec": 39.8,
+          "workers": 15,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 16,
+          "sec": 42.7,
+          "workers": 15,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 17,
+          "sec": 52.9,
+          "workers": 16,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 20,
+          "sec": 87.9,
+          "complete_sec": 112.9,
+          "workers": 19,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 20,
+          "sec": 101.2,
+          "workers": 19,
+          "action": "build",
+          "symbol": "factory"
+        },
+        {
+          "supply": 20,
+          "sec": 107.7,
+          "workers": 19,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 21,
+          "sec": 120.1,
+          "workers": 19,
+          "action": "build",
+          "symbol": "barracks-techlab"
+        },
+        {
+          "supply": 22,
+          "sec": 137.7,
+          "workers": 20,
+          "action": "build",
+          "symbol": "command-center"
+        },
+        {
+          "supply": 27,
+          "sec": 158.6,
+          "workers": 22,
+          "action": "build",
+          "symbol": "starport"
+        },
+        {
+          "supply": 28,
+          "sec": 167.3,
+          "workers": 23,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 28,
+          "sec": 170.0,
+          "workers": 23,
+          "action": "build",
+          "symbol": "barracks-reactor"
+        },
+        {
+          "supply": 41,
+          "sec": 210.0,
+          "complete_sec": 235.0,
+          "workers": 26,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 40,
+          "sec": 217.1,
+          "workers": 27,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 40,
+          "sec": 225.1,
+          "workers": 28,
+          "action": "build",
+          "symbol": "starport-techlab"
+        },
+        {
+          "supply": 43,
+          "sec": 230.3,
+          "workers": 28,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 54,
+          "sec": 256.6,
+          "workers": 31,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 56,
+          "sec": 264.7,
+          "workers": 33,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 61,
+          "sec": 275.7,
+          "workers": 34,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 62,
+          "sec": 284.3,
+          "workers": 35,
+          "action": "build",
+          "symbol": "engineering-bay"
+        },
+        {
+          "supply": 62,
+          "sec": 285.5,
+          "workers": 35,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 73,
+          "sec": 312.7,
+          "workers": 40,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 73,
+          "sec": 313.3,
+          "workers": 40,
+          "action": "build",
+          "symbol": "starport-reactor"
+        },
+        {
+          "supply": 76,
+          "sec": 333.3,
+          "workers": 43,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 78,
+          "sec": 338.3,
+          "workers": 44,
+          "action": "build",
+          "symbol": "barracks-techlab"
+        },
+        {
+          "supply": 78,
+          "sec": 348.2,
+          "workers": 46,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 78,
+          "sec": 348.3,
+          "workers": 46,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 86,
+          "sec": 360.5,
+          "workers": 46,
+          "action": "build",
+          "symbol": "supply-depot"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "stimpack",
+          "start_sec": 308.0,
+          "complete_sec": 408.0,
+          "supply": 72,
+          "workers": 39
+        },
+        {
+          "symbol": "terran-infantry-weapons-1",
+          "start_sec": 327.5,
+          "complete_sec": 441.5,
+          "supply": 76,
+          "workers": 42
+        },
+        {
+          "symbol": "combat-shield",
+          "start_sec": 356.5,
+          "complete_sec": 435.5,
+          "supply": 84,
+          "workers": 46
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 20,
+          "sec": 86.9,
+          "symbol": "reaper",
+          "count": 1
+        },
+        {
+          "supply": 27,
+          "sec": 153.6,
+          "symbol": "cyclone",
+          "count": 1
+        },
+        {
+          "supply": 33,
+          "sec": 186.0,
+          "symbol": "widow-mine",
+          "count": 1
+        },
+        {
+          "supply": 34,
+          "sec": 195.0,
+          "symbol": "medivac",
+          "count": 1
+        },
+        {
+          "supply": 36,
+          "sec": 206.7,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 41,
+          "sec": 207.4,
+          "symbol": "widow-mine",
+          "count": 1
+        },
+        {
+          "supply": 42,
+          "sec": 225.8,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 46,
+          "sec": 233.6,
+          "symbol": "siege-tank",
+          "count": 1
+        },
+        {
+          "supply": 49,
+          "sec": 244.4,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 52,
+          "sec": 248.7,
+          "symbol": "raven",
+          "count": 1
+        },
+        {
+          "supply": 55,
+          "sec": 262.2,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 60,
+          "sec": 272.0,
+          "symbol": "siege-tank",
+          "count": 1
+        },
+        {
+          "supply": 62,
+          "sec": 288.0,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 65,
+          "sec": 296.3,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 68,
+          "sec": 305.8,
+          "symbol": "marine",
+          "count": 2
+        },
+        {
+          "supply": 72,
+          "sec": 307.4,
+          "symbol": "siege-tank",
+          "count": 1
+        },
+        {
+          "supply": 72,
+          "sec": 316.3,
+          "symbol": "marine",
+          "count": 1
+        },
+        {
+          "supply": 75,
+          "sec": 323.6,
+          "symbol": "marine",
+          "count": 3
+        },
+        {
+          "supply": 80,
+          "sec": 354.6,
+          "symbol": "marine",
+          "count": 3
+        },
+        {
+          "supply": 84,
+          "sec": 354.8,
+          "symbol": "siege-tank",
+          "count": 1
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 14,
+          "median_sec": 136.6,
+          "median_supply": 22,
+          "median_workers": 20
+        },
+        {
+          "base_num": 3,
+          "count": 6,
+          "median_sec": 383.7,
+          "median_supply": 87,
+          "median_workers": 48
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 17,
+          "median_sec": 43.2,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "gas_num": 2,
+          "count": 15,
+          "median_sec": 53.2,
+          "median_supply": 17,
+          "median_workers": 16
+        },
+        {
+          "gas_num": 3,
+          "count": 13,
+          "median_sec": 264.2,
+          "median_supply": 52,
+          "median_workers": 32
+        },
+        {
+          "gas_num": 4,
+          "count": 10,
+          "median_sec": 342.7,
+          "median_supply": 70,
+          "median_workers": 42
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "supply-depot",
+          "frequency": 1.0,
+          "median_sec": 17.3,
+          "median_supply": 14,
+          "median_workers": 13
+        },
+        {
+          "symbol": "barracks",
+          "frequency": 1.0,
+          "median_sec": 40.3,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "symbol": "refinery",
+          "frequency": 1.0,
+          "median_sec": 43.2,
+          "median_supply": 16,
+          "median_workers": 15
+        },
+        {
+          "symbol": "orbital-command",
+          "frequency": 0.94,
+          "median_sec": 87.5,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "factory",
+          "frequency": 0.94,
+          "median_sec": 103.5,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "barracks-techlab",
+          "frequency": 0.82,
+          "median_sec": 119.9,
+          "median_supply": 21,
+          "median_workers": 19
+        },
+        {
+          "symbol": "command-center",
+          "frequency": 0.82,
+          "median_sec": 136.6,
+          "median_supply": 22,
+          "median_workers": 20
+        },
+        {
+          "symbol": "barracks-reactor",
+          "frequency": 0.88,
+          "median_sec": 158.0,
+          "median_supply": 27,
+          "median_workers": 22
+        },
+        {
+          "symbol": "starport",
+          "frequency": 0.88,
+          "median_sec": 161.5,
+          "median_supply": 27,
+          "median_workers": 23
+        },
+        {
+          "symbol": "factory-techlab",
+          "frequency": 0.47,
+          "median_sec": 186.7,
+          "median_supply": 28,
+          "median_workers": 24
+        },
+        {
+          "symbol": "starport-techlab",
+          "frequency": 0.53,
+          "median_sec": 231.7,
+          "median_supply": 43,
+          "median_workers": 28
+        },
+        {
+          "symbol": "bunker",
+          "frequency": 0.47,
+          "median_sec": 257.6,
+          "median_supply": 48,
+          "median_workers": 26
+        },
+        {
+          "symbol": "engineering-bay",
+          "frequency": 0.71,
+          "median_sec": 288.8,
+          "median_supply": 60,
+          "median_workers": 36
+        },
+        {
+          "symbol": "starport-reactor",
+          "frequency": 0.65,
+          "median_sec": 337.3,
+          "median_supply": 69,
+          "median_workers": 41
+        },
+        {
+          "symbol": "factory-reactor",
+          "frequency": 0.29,
+          "median_sec": 344.5,
+          "median_supply": 74,
+          "median_workers": 42
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "cloaking-field",
+          "count": 1,
+          "median_start_sec": 259.1,
+          "median_complete_sec": 338.1,
+          "median_supply": 49,
+          "median_workers": 28
+        },
+        {
+          "symbol": "stimpack",
+          "count": 9,
+          "median_start_sec": 308.0,
+          "median_complete_sec": 408.0,
+          "median_supply": 65,
+          "median_workers": 39
+        },
+        {
+          "symbol": "terran-infantry-weapons-1",
+          "count": 9,
+          "median_start_sec": 327.5,
+          "median_complete_sec": 441.5,
+          "median_supply": 68,
+          "median_workers": 40
+        },
+        {
+          "symbol": "combat-shield",
+          "count": 9,
+          "median_start_sec": 356.5,
+          "median_complete_sec": 435.5,
+          "median_supply": 70,
+          "median_workers": 44
+        },
+        {
+          "symbol": "concussive-shells",
+          "count": 4,
+          "median_start_sec": 367.9,
+          "median_complete_sec": 410.9,
+          "median_supply": 88,
+          "median_workers": 43
+        },
+        {
+          "symbol": "terran-infantry-armor-1",
+          "count": 1,
+          "median_start_sec": 419.0,
+          "median_complete_sec": 533.0,
+          "median_supply": 118,
+          "median_workers": 54
+        }
+      ],
+      "macro_mechanics": {
+        "orbital_1": {
+          "start_sec": 87.5,
+          "complete_sec": 112.5,
+          "supply": 20
+        },
+        "orbital_2": {
+          "start_sec": 210.0,
+          "complete_sec": 235.0,
+          "supply": 35
+        },
+        "orbital_3": {
+          "start_sec": 179.6,
+          "complete_sec": 204.6,
+          "supply": 29
+        },
+        "first_mule_sec": 113.0
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 7,
+          "top_combat_units": [
+            [
+              "marauder",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 5,
+          "top_combat_units": [
+            [
+              "marine",
+              23
+            ],
+            [
+              "cyclone",
+              10
+            ],
+            [
+              "reaper",
+              10
+            ],
+            [
+              "marauder",
+              5
+            ],
+            [
+              "hellion",
+              2
+            ],
+            [
+              "siege-tank",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 4,
+          "top_combat_units": [
+            [
+              "marine",
+              75
+            ],
+            [
+              "widow-mine",
+              14
+            ],
+            [
+              "medivac",
+              11
+            ],
+            [
+              "marauder",
+              9
+            ],
+            [
+              "siege-tank",
+              9
+            ],
+            [
+              "cyclone",
+              4
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 10,
+          "top_combat_units": [
+            [
+              "marine",
+              132
+            ],
+            [
+              "siege-tank",
+              23
+            ],
+            [
+              "banshee",
+              8
+            ],
+            [
+              "raven",
+              5
+            ],
+            [
+              "widow-mine",
+              2
+            ],
+            [
+              "viking",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 10,
+          "top_combat_units": [
+            [
+              "marine",
+              116
+            ],
+            [
+              "marauder",
+              35
+            ],
+            [
+              "siege-tank",
+              17
+            ],
+            [
+              "medivac",
+              15
+            ],
+            [
+              "widow-mine",
+              11
+            ],
+            [
+              "banshee",
+              4
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 2,
+          "top_combat_units": [
+            [
+              "marine",
+              15
+            ],
+            [
+              "marauder",
+              12
+            ],
+            [
+              "widow-mine",
+              9
+            ],
+            [
+              "viking",
+              2
+            ],
+            [
+              "medivac",
+              1
+            ],
+            [
+              "siege-tank",
+              1
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 17,
+          "median_workers": 16.0,
+          "mean_workers": 15.9,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 0.9,
+          "median_total_supply": 17.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 16.0,
+          "army_supply_pct": 5.9,
+          "median_bases": 1.0,
+          "median_gases": 2.0,
+          "median_army_value": 0,
+          "median_min_rate": 755,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 17,
+          "median_workers": 19.0,
+          "mean_workers": 18.9,
+          "median_army_supply": 2.0,
+          "mean_army_supply": 2.2,
+          "median_total_supply": 21.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 9.5,
+          "army_supply_pct": 9.5,
+          "median_bases": 1.0,
+          "median_gases": 2.0,
+          "median_army_value": 100,
+          "median_min_rate": 755,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 17,
+          "median_workers": 24.0,
+          "mean_workers": 22.9,
+          "median_army_supply": 5.0,
+          "mean_army_supply": 6.1,
+          "median_total_supply": 29.0,
+          "median_supply_cap": 31.0,
+          "worker_to_army_ratio": 4.8,
+          "army_supply_pct": 17.2,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 100,
+          "median_min_rate": 1007,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 16,
+          "median_workers": 28.0,
+          "mean_workers": 27.2,
+          "median_army_supply": 18.5,
+          "mean_army_supply": 18.4,
+          "median_total_supply": 46.5,
+          "median_supply_cap": 54.0,
+          "worker_to_army_ratio": 1.51,
+          "army_supply_pct": 39.8,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 850,
+          "median_min_rate": 1349,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 16,
+          "median_workers": 36.5,
+          "mean_workers": 33.0,
+          "median_army_supply": 26.0,
+          "mean_army_supply": 26.2,
+          "median_total_supply": 62.5,
+          "median_supply_cap": 70.0,
+          "worker_to_army_ratio": 1.4,
+          "army_supply_pct": 41.6,
+          "median_bases": 2.0,
+          "median_gases": 3.0,
+          "median_army_value": 1375,
+          "median_min_rate": 1721,
+          "median_gas_rate": 380
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 14,
+          "median_workers": 43.5,
+          "mean_workers": 40.2,
+          "median_army_supply": 32.0,
+          "mean_army_supply": 33.8,
+          "median_total_supply": 76.5,
+          "median_supply_cap": 86.0,
+          "worker_to_army_ratio": 1.36,
+          "army_supply_pct": 41.8,
+          "median_bases": 2.0,
+          "median_gases": 3.5,
+          "median_army_value": 1838,
+          "median_min_rate": 1945,
+          "median_gas_rate": 481
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 13,
+          "median_workers": 47.0,
+          "mean_workers": 42.5,
+          "median_army_supply": 44.0,
+          "mean_army_supply": 45.4,
+          "median_total_supply": 92.0,
+          "median_supply_cap": 110.0,
+          "worker_to_army_ratio": 1.07,
+          "army_supply_pct": 47.8,
+          "median_bases": 2.0,
+          "median_gases": 4.0,
+          "median_army_value": 2575,
+          "median_min_rate": 1931,
+          "median_gas_rate": 559
+        }
+      ]
+    },
+    "PvZ": {
+      "matchup": "PvZ",
+      "total_perspectives": 81,
+      "pro_perspectives": 43,
+      "winning_perspectives": 37,
+      "pro_winning_perspectives": 16,
+      "exemplar_player": "Stats",
+      "exemplar_opponent": "Serral",
+      "exemplar_map": "Fracture LE",
+      "exemplar_replay": "Starcraft2ReplayPackager_cd1bf6ef1d5b_Fracture_LE.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 14,
+          "sec": 17.5,
+          "workers": 13,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 16,
+          "sec": 44.5,
+          "workers": 15,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 16,
+          "sec": 46.8,
+          "workers": 16,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 20,
+          "sec": 86.2,
+          "workers": 19,
+          "action": "build",
+          "symbol": "nexus"
+        },
+        {
+          "supply": 20,
+          "sec": 95.0,
+          "workers": 20,
+          "action": "build",
+          "symbol": "cybernetics-core"
+        },
+        {
+          "supply": 21,
+          "sec": 102.7,
+          "workers": 20,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 22,
+          "sec": 111.5,
+          "workers": 21,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 26,
+          "sec": 145.0,
+          "workers": 23,
+          "action": "build",
+          "symbol": "twilight-council"
+        },
+        {
+          "supply": 36,
+          "sec": 182.8,
+          "workers": 29,
+          "action": "build",
+          "symbol": "robotics-facility"
+        },
+        {
+          "supply": 39,
+          "sec": 204.3,
+          "workers": 32,
+          "action": "build",
+          "symbol": "dark-shrine"
+        },
+        {
+          "supply": 40,
+          "sec": 217.6,
+          "workers": 34,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 40,
+          "sec": 219.1,
+          "workers": 34,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 42,
+          "sec": 220.7,
+          "workers": 34,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 42,
+          "sec": 232.7,
+          "workers": 36,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 44,
+          "sec": 236.6,
+          "workers": 38,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 44,
+          "sec": 238.5,
+          "workers": 38,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 48,
+          "sec": 258.3,
+          "workers": 40,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 48,
+          "sec": 258.6,
+          "complete_sec": 265.6,
+          "workers": 40,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 48,
+          "sec": 264.7,
+          "complete_sec": 271.7,
+          "workers": 40,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 48,
+          "sec": 266.7,
+          "complete_sec": 273.8,
+          "workers": 40,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 48,
+          "sec": 268.0,
+          "complete_sec": 275.0,
+          "workers": 40,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 59,
+          "sec": 297.8,
+          "workers": 45,
+          "action": "build",
+          "symbol": "nexus"
+        },
+        {
+          "supply": 59,
+          "sec": 314.5,
+          "workers": 45,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 59,
+          "sec": 314.6,
+          "workers": 45,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 64,
+          "sec": 324.4,
+          "workers": 45,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 64,
+          "sec": 324.4,
+          "workers": 45,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 64,
+          "sec": 327.3,
+          "workers": 45,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 60,
+          "sec": 329.4,
+          "workers": 45,
+          "action": "build",
+          "symbol": "gateway"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "warp-gate-research",
+          "start_sec": 156.9,
+          "complete_sec": 256.9,
+          "supply": 30,
+          "workers": 24
+        },
+        {
+          "symbol": "charge",
+          "start_sec": 310.1,
+          "complete_sec": 410.1,
+          "supply": 59,
+          "workers": 45
+        },
+        {
+          "symbol": "protoss-ground-weapons-1",
+          "start_sec": 402.2,
+          "complete_sec": 516.2,
+          "supply": 93,
+          "workers": 55
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 24,
+          "sec": 119.8,
+          "symbol": "adept",
+          "count": 1
+        },
+        {
+          "supply": 28,
+          "sec": 140.6,
+          "symbol": "adept",
+          "count": 1
+        },
+        {
+          "supply": 33,
+          "sec": 165.7,
+          "symbol": "stalker",
+          "count": 1
+        },
+        {
+          "supply": 42,
+          "sec": 219.2,
+          "symbol": "warp-prism",
+          "count": 1
+        },
+        {
+          "supply": 52,
+          "sec": 277.3,
+          "symbol": "dark-templar",
+          "count": 2
+        },
+        {
+          "supply": 56,
+          "sec": 277.5,
+          "symbol": "dark-templar",
+          "count": 2
+        },
+        {
+          "supply": 60,
+          "sec": 312.9,
+          "symbol": "observer",
+          "count": 1
+        },
+        {
+          "supply": 63,
+          "sec": 317.1,
+          "symbol": "archon",
+          "count": 1
+        },
+        {
+          "supply": 67,
+          "sec": 318.0,
+          "symbol": "archon",
+          "count": 1
+        },
+        {
+          "supply": 64,
+          "sec": 322.4,
+          "symbol": "immortal",
+          "count": 1
+        },
+        {
+          "supply": 72,
+          "sec": 350.1,
+          "symbol": "immortal",
+          "count": 1
+        },
+        {
+          "supply": 74,
+          "sec": 365.8,
+          "symbol": "sentry",
+          "count": 2
+        },
+        {
+          "supply": 78,
+          "sec": 366.0,
+          "symbol": "sentry",
+          "count": 1
+        },
+        {
+          "supply": 83,
+          "sec": 372.5,
+          "symbol": "sentry",
+          "count": 1
+        },
+        {
+          "supply": 87,
+          "sec": 378.3,
+          "symbol": "immortal",
+          "count": 1
+        },
+        {
+          "supply": 97,
+          "sec": 405.9,
+          "symbol": "immortal",
+          "count": 1
+        },
+        {
+          "supply": 98,
+          "sec": 415.5,
+          "symbol": "zealot",
+          "count": 2
+        },
+        {
+          "supply": 102,
+          "sec": 415.6,
+          "symbol": "zealot",
+          "count": 2
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 16,
+          "median_sec": 86.2,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "base_num": 3,
+          "count": 13,
+          "median_sec": 235.8,
+          "median_supply": 50,
+          "median_workers": 37
+        },
+        {
+          "base_num": 4,
+          "count": 1,
+          "median_sec": 389.1,
+          "median_supply": 91,
+          "median_workers": 67
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 16,
+          "median_sec": 49.3,
+          "median_supply": 16,
+          "median_workers": 16
+        },
+        {
+          "gas_num": 2,
+          "count": 16,
+          "median_sec": 103.7,
+          "median_supply": 21,
+          "median_workers": 20
+        },
+        {
+          "gas_num": 3,
+          "count": 14,
+          "median_sec": 247.5,
+          "median_supply": 52,
+          "median_workers": 38
+        },
+        {
+          "gas_num": 4,
+          "count": 14,
+          "median_sec": 252.6,
+          "median_supply": 53,
+          "median_workers": 38
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "pylon",
+          "frequency": 1.0,
+          "median_sec": 19.6,
+          "median_supply": 14,
+          "median_workers": 13
+        },
+        {
+          "symbol": "gateway",
+          "frequency": 1.0,
+          "median_sec": 41.1,
+          "median_supply": 15,
+          "median_workers": 15
+        },
+        {
+          "symbol": "assimilator",
+          "frequency": 1.0,
+          "median_sec": 49.3,
+          "median_supply": 16,
+          "median_workers": 16
+        },
+        {
+          "symbol": "nexus",
+          "frequency": 1.0,
+          "median_sec": 86.2,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "cybernetics-core",
+          "frequency": 1.0,
+          "median_sec": 94.9,
+          "median_supply": 20,
+          "median_workers": 20
+        },
+        {
+          "symbol": "stargate",
+          "frequency": 0.81,
+          "median_sec": 141.0,
+          "median_supply": 26,
+          "median_workers": 23
+        },
+        {
+          "symbol": "dark-shrine",
+          "frequency": 0.12,
+          "median_sec": 206.6,
+          "median_supply": 34,
+          "median_workers": 28
+        },
+        {
+          "symbol": "warpgate",
+          "frequency": 1.0,
+          "median_sec": 248.4,
+          "median_supply": 52,
+          "median_workers": 38
+        },
+        {
+          "symbol": "twilight-council",
+          "frequency": 0.94,
+          "median_sec": 276.0,
+          "median_supply": 59,
+          "median_workers": 42
+        },
+        {
+          "symbol": "forge",
+          "frequency": 0.81,
+          "median_sec": 289.2,
+          "median_supply": 63,
+          "median_workers": 44
+        },
+        {
+          "symbol": "shield-battery",
+          "frequency": 0.75,
+          "median_sec": 314.1,
+          "median_supply": 70,
+          "median_workers": 46
+        },
+        {
+          "symbol": "robotics-facility",
+          "frequency": 0.56,
+          "median_sec": 328.8,
+          "median_supply": 73,
+          "median_workers": 45
+        },
+        {
+          "symbol": "templar-archive",
+          "frequency": 0.62,
+          "median_sec": 369.0,
+          "median_supply": 84,
+          "median_workers": 58
+        },
+        {
+          "symbol": "photon-cannon",
+          "frequency": 0.44,
+          "median_sec": 395.6,
+          "median_supply": 95,
+          "median_workers": 66
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "warp-gate-research",
+          "count": 16,
+          "median_start_sec": 147.1,
+          "median_complete_sec": 247.1,
+          "median_supply": 27,
+          "median_workers": 23
+        },
+        {
+          "symbol": "resonating-glaives",
+          "count": 1,
+          "median_start_sec": 255.9,
+          "median_complete_sec": 355.9,
+          "median_supply": 53,
+          "median_workers": 41
+        },
+        {
+          "symbol": "charge",
+          "count": 8,
+          "median_start_sec": 317.2,
+          "median_complete_sec": 417.2,
+          "median_supply": 70,
+          "median_workers": 46
+        },
+        {
+          "symbol": "blink",
+          "count": 8,
+          "median_start_sec": 318.6,
+          "median_complete_sec": 439.6,
+          "median_supply": 70,
+          "median_workers": 48
+        },
+        {
+          "symbol": "protoss-ground-weapons-1",
+          "count": 12,
+          "median_start_sec": 336.9,
+          "median_complete_sec": 450.9,
+          "median_supply": 80,
+          "median_workers": 52
+        },
+        {
+          "symbol": "psi-storm",
+          "count": 6,
+          "median_start_sec": 382.4,
+          "median_complete_sec": 461.4,
+          "median_supply": 90,
+          "median_workers": 64
+        },
+        {
+          "symbol": "protoss-ground-armor-1",
+          "count": 1,
+          "median_start_sec": 415.8,
+          "median_complete_sec": 529.8,
+          "median_supply": 108,
+          "median_workers": 67
+        }
+      ],
+      "macro_mechanics": {
+        "chrono_1": {
+          "sec": 38.1,
+          "supply": 15,
+          "target": "nexus"
+        },
+        "chrono_2": {
+          "sec": 132.1,
+          "supply": 23,
+          "target": "warpgate"
+        },
+        "chrono_3": {
+          "sec": 156.1,
+          "supply": 29,
+          "target": "nexus"
+        },
+        "chrono_4": {
+          "sec": 190.2,
+          "supply": 38,
+          "target": "stargate"
+        },
+        "chrono_5": {
+          "sec": 214.6,
+          "supply": 42,
+          "target": "stargate"
+        }
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 7,
+          "top_combat_units": []
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 6,
+          "top_combat_units": [
+            [
+              "adept",
+              25
+            ],
+            [
+              "stalker",
+              4
+            ],
+            [
+              "zealot",
+              4
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 9,
+          "top_combat_units": [
+            [
+              "adept",
+              19
+            ],
+            [
+              "oracle",
+              12
+            ],
+            [
+              "dark-templar",
+              4
+            ],
+            [
+              "stalker",
+              4
+            ],
+            [
+              "warp-prism",
+              3
+            ],
+            [
+              "zealot",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 12,
+          "top_combat_units": [
+            [
+              "adept",
+              30
+            ],
+            [
+              "oracle",
+              16
+            ],
+            [
+              "zealot",
+              15
+            ],
+            [
+              "dark-templar",
+              4
+            ],
+            [
+              "stalker",
+              4
+            ],
+            [
+              "archon",
+              3
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 17,
+          "top_combat_units": [
+            [
+              "stalker",
+              52
+            ],
+            [
+              "adept",
+              19
+            ],
+            [
+              "zealot",
+              18
+            ],
+            [
+              "high-templar",
+              13
+            ],
+            [
+              "sentry",
+              7
+            ],
+            [
+              "immortal",
+              6
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 0,
+          "top_combat_units": [
+            [
+              "stalker",
+              18
+            ],
+            [
+              "zealot",
+              11
+            ],
+            [
+              "high-templar",
+              4
+            ],
+            [
+              "immortal",
+              1
+            ],
+            [
+              "warp-prism",
+              1
+            ],
+            [
+              "archon",
+              1
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 16,
+          "median_workers": 17.0,
+          "mean_workers": 16.9,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.0,
+          "median_total_supply": 18.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 17.0,
+          "army_supply_pct": 5.6,
+          "median_bases": 1.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 811,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 16,
+          "median_workers": 21.0,
+          "mean_workers": 21.1,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.3,
+          "median_total_supply": 22.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 21.0,
+          "army_supply_pct": 4.5,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 0,
+          "median_min_rate": 951,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 16,
+          "median_workers": 28.0,
+          "mean_workers": 26.8,
+          "median_army_supply": 6.0,
+          "mean_army_supply": 6.8,
+          "median_total_supply": 35.0,
+          "median_supply_cap": 46.0,
+          "worker_to_army_ratio": 4.67,
+          "army_supply_pct": 17.1,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 250,
+          "median_min_rate": 1091,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 16,
+          "median_workers": 38.0,
+          "mean_workers": 34.9,
+          "median_army_supply": 14.0,
+          "mean_army_supply": 12.0,
+          "median_total_supply": 50.5,
+          "median_supply_cap": 54.0,
+          "worker_to_army_ratio": 2.71,
+          "army_supply_pct": 27.7,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 675,
+          "median_min_rate": 1679,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 15,
+          "median_workers": 45.0,
+          "mean_workers": 42.2,
+          "median_army_supply": 20.0,
+          "mean_army_supply": 19.2,
+          "median_total_supply": 64.0,
+          "median_supply_cap": 70.0,
+          "worker_to_army_ratio": 2.25,
+          "army_supply_pct": 31.2,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 1325,
+          "median_min_rate": 1819,
+          "median_gas_rate": 604
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 15,
+          "median_workers": 54.0,
+          "mean_workers": 51.6,
+          "median_army_supply": 24.0,
+          "mean_army_supply": 26.4,
+          "median_total_supply": 81.0,
+          "median_supply_cap": 93.0,
+          "worker_to_army_ratio": 2.25,
+          "army_supply_pct": 29.6,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 1900,
+          "median_min_rate": 2211,
+          "median_gas_rate": 649
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 14,
+          "median_workers": 65.0,
+          "mean_workers": 61.6,
+          "median_army_supply": 32.5,
+          "mean_army_supply": 35.4,
+          "median_total_supply": 99.5,
+          "median_supply_cap": 117.0,
+          "worker_to_army_ratio": 2.0,
+          "army_supply_pct": 32.7,
+          "median_bases": 3.0,
+          "median_gases": 6.0,
+          "median_army_value": 2825,
+          "median_min_rate": 2631,
+          "median_gas_rate": 784
+        }
+      ]
+    },
+    "PvT": {
+      "matchup": "PvT",
+      "total_perspectives": 59,
+      "pro_perspectives": 28,
+      "winning_perspectives": 25,
+      "pro_winning_perspectives": 11,
+      "exemplar_player": "Classic",
+      "exemplar_opponent": "Bunny",
+      "exemplar_map": "Ultralove",
+      "exemplar_replay": "sc2readerjs_c609fa7c0528_QM_-_Classic_vs_Bunny_-_G1_-_Ultralove.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 14,
+          "sec": 17.4,
+          "workers": 13,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 16,
+          "sec": 35.5,
+          "workers": 14,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 16,
+          "sec": 46.8,
+          "workers": 16,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 20,
+          "sec": 82.4,
+          "workers": 19,
+          "action": "build",
+          "symbol": "cybernetics-core"
+        },
+        {
+          "supply": 20,
+          "sec": 93.1,
+          "workers": 20,
+          "action": "build",
+          "symbol": "nexus"
+        },
+        {
+          "supply": 20,
+          "sec": 98.8,
+          "workers": 20,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 23,
+          "sec": 109.2,
+          "workers": 20,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 28,
+          "sec": 151.2,
+          "workers": 24,
+          "action": "build",
+          "symbol": "twilight-council"
+        },
+        {
+          "supply": 37,
+          "sec": 192.3,
+          "workers": 29,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 42,
+          "sec": 220.6,
+          "complete_sec": 227.6,
+          "workers": 34,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 42,
+          "sec": 220.8,
+          "workers": 34,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 44,
+          "sec": 233.0,
+          "workers": 36,
+          "action": "build",
+          "symbol": "nexus"
+        },
+        {
+          "supply": 44,
+          "sec": 238.9,
+          "workers": 37,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 44,
+          "sec": 239.0,
+          "complete_sec": 246.0,
+          "workers": 37,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 46,
+          "sec": 248.7,
+          "workers": 38,
+          "action": "build",
+          "symbol": "robotics-facility"
+        },
+        {
+          "supply": 46,
+          "sec": 253.8,
+          "workers": 39,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 52,
+          "sec": 267.5,
+          "workers": 41,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 52,
+          "sec": 270.2,
+          "workers": 42,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 54,
+          "sec": 283.3,
+          "workers": 42,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 54,
+          "sec": 285.7,
+          "workers": 43,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 54,
+          "sec": 288.3,
+          "workers": 44,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 54,
+          "sec": 295.4,
+          "workers": 44,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 61,
+          "sec": 311.4,
+          "workers": 44,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 61,
+          "sec": 314.1,
+          "complete_sec": 321.1,
+          "workers": 44,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 61,
+          "sec": 316.8,
+          "complete_sec": 323.8,
+          "workers": 44,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 67,
+          "sec": 324.3,
+          "workers": 47,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 69,
+          "sec": 330.0,
+          "complete_sec": 337.0,
+          "workers": 47,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 69,
+          "sec": 332.2,
+          "complete_sec": 339.2,
+          "workers": 47,
+          "action": "morph",
+          "symbol": "warpgate"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "warp-gate-research",
+          "start_sec": 120.4,
+          "complete_sec": 220.4,
+          "supply": 22,
+          "workers": 21
+        },
+        {
+          "symbol": "blink",
+          "start_sec": 167.5,
+          "complete_sec": 288.5,
+          "supply": 33,
+          "workers": 25
+        },
+        {
+          "symbol": "charge",
+          "start_sec": 275.6,
+          "complete_sec": 375.6,
+          "supply": 54,
+          "workers": 42
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 23,
+          "sec": 108.3,
+          "symbol": "adept",
+          "count": 1
+        },
+        {
+          "supply": 26,
+          "sec": 126.9,
+          "symbol": "stalker",
+          "count": 1
+        },
+        {
+          "supply": 31,
+          "sec": 152.4,
+          "symbol": "stalker",
+          "count": 1
+        },
+        {
+          "supply": 42,
+          "sec": 209.1,
+          "symbol": "phoenix",
+          "count": 2
+        },
+        {
+          "supply": 43,
+          "sec": 228.8,
+          "symbol": "sentry",
+          "count": 1
+        },
+        {
+          "supply": 50,
+          "sec": 258.8,
+          "symbol": "stalker",
+          "count": 2
+        },
+        {
+          "supply": 56,
+          "sec": 298.4,
+          "symbol": "sentry",
+          "count": 1
+        },
+        {
+          "supply": 58,
+          "sec": 298.6,
+          "symbol": "stalker",
+          "count": 1
+        },
+        {
+          "supply": 65,
+          "sec": 322.0,
+          "symbol": "stalker",
+          "count": 3
+        },
+        {
+          "supply": 69,
+          "sec": 326.5,
+          "symbol": "stalker",
+          "count": 1
+        },
+        {
+          "supply": 71,
+          "sec": 338.8,
+          "symbol": "zealot",
+          "count": 2
+        },
+        {
+          "supply": 77,
+          "sec": 346.1,
+          "symbol": "zealot",
+          "count": 2
+        },
+        {
+          "supply": 77,
+          "sec": 357.1,
+          "symbol": "sentry",
+          "count": 1
+        },
+        {
+          "supply": 77,
+          "sec": 357.2,
+          "symbol": "zealot",
+          "count": 2
+        },
+        {
+          "supply": 81,
+          "sec": 357.3,
+          "symbol": "zealot",
+          "count": 2
+        },
+        {
+          "supply": 85,
+          "sec": 368.3,
+          "symbol": "zealot",
+          "count": 2
+        },
+        {
+          "supply": 89,
+          "sec": 368.6,
+          "symbol": "zealot",
+          "count": 4
+        },
+        {
+          "supply": 95,
+          "sec": 382.4,
+          "symbol": "zealot",
+          "count": 2
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 11,
+          "median_sec": 93.1,
+          "median_supply": 20,
+          "median_workers": 20
+        },
+        {
+          "base_num": 3,
+          "count": 8,
+          "median_sec": 245.4,
+          "median_supply": 48,
+          "median_workers": 38
+        },
+        {
+          "base_num": 4,
+          "count": 2,
+          "median_sec": 395.4,
+          "median_supply": 94,
+          "median_workers": 60
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 11,
+          "median_sec": 46.5,
+          "median_supply": 16,
+          "median_workers": 16
+        },
+        {
+          "gas_num": 2,
+          "count": 11,
+          "median_sec": 107.8,
+          "median_supply": 21,
+          "median_workers": 20
+        },
+        {
+          "gas_num": 3,
+          "count": 9,
+          "median_sec": 246.7,
+          "median_supply": 49,
+          "median_workers": 39
+        },
+        {
+          "gas_num": 4,
+          "count": 6,
+          "median_sec": 343.4,
+          "median_supply": 76,
+          "median_workers": 56
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "pylon",
+          "frequency": 1.0,
+          "median_sec": 17.1,
+          "median_supply": 14,
+          "median_workers": 13
+        },
+        {
+          "symbol": "gateway",
+          "frequency": 1.0,
+          "median_sec": 36.1,
+          "median_supply": 16,
+          "median_workers": 14
+        },
+        {
+          "symbol": "assimilator",
+          "frequency": 1.0,
+          "median_sec": 46.5,
+          "median_supply": 16,
+          "median_workers": 16
+        },
+        {
+          "symbol": "cybernetics-core",
+          "frequency": 1.0,
+          "median_sec": 84.3,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "nexus",
+          "frequency": 1.0,
+          "median_sec": 93.1,
+          "median_supply": 20,
+          "median_workers": 20
+        },
+        {
+          "symbol": "stargate",
+          "frequency": 0.36,
+          "median_sec": 157.9,
+          "median_supply": 28,
+          "median_workers": 22
+        },
+        {
+          "symbol": "twilight-council",
+          "frequency": 0.91,
+          "median_sec": 167.4,
+          "median_supply": 30,
+          "median_workers": 24
+        },
+        {
+          "symbol": "warpgate",
+          "frequency": 1.0,
+          "median_sec": 223.1,
+          "median_supply": 42,
+          "median_workers": 34
+        },
+        {
+          "symbol": "robotics-facility",
+          "frequency": 0.73,
+          "median_sec": 250.8,
+          "median_supply": 50,
+          "median_workers": 38
+        },
+        {
+          "symbol": "shield-battery",
+          "frequency": 1.0,
+          "median_sec": 281.8,
+          "median_supply": 51,
+          "median_workers": 33
+        },
+        {
+          "symbol": "robotics-bay",
+          "frequency": 0.36,
+          "median_sec": 307.5,
+          "median_supply": 62,
+          "median_workers": 46
+        },
+        {
+          "symbol": "templar-archive",
+          "frequency": 0.18,
+          "median_sec": 331.8,
+          "median_supply": 56,
+          "median_workers": 44
+        },
+        {
+          "symbol": "forge",
+          "frequency": 0.64,
+          "median_sec": 357.3,
+          "median_supply": 70,
+          "median_workers": 45
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "warp-gate-research",
+          "count": 11,
+          "median_start_sec": 123.0,
+          "median_complete_sec": 223.0,
+          "median_supply": 23,
+          "median_workers": 21
+        },
+        {
+          "symbol": "blink",
+          "count": 10,
+          "median_start_sec": 189.2,
+          "median_complete_sec": 310.2,
+          "median_supply": 37,
+          "median_workers": 28
+        },
+        {
+          "symbol": "charge",
+          "count": 7,
+          "median_start_sec": 310.8,
+          "median_complete_sec": 410.8,
+          "median_supply": 61,
+          "median_workers": 44
+        },
+        {
+          "symbol": "psi-storm",
+          "count": 2,
+          "median_start_sec": 355.4,
+          "median_complete_sec": 434.4,
+          "median_supply": 64,
+          "median_workers": 45
+        },
+        {
+          "symbol": "protoss-ground-weapons-1",
+          "count": 5,
+          "median_start_sec": 358.7,
+          "median_complete_sec": 472.7,
+          "median_supply": 73,
+          "median_workers": 55
+        },
+        {
+          "symbol": "extended-thermal-lance",
+          "count": 1,
+          "median_start_sec": 361.4,
+          "median_complete_sec": 461.4,
+          "median_supply": 91,
+          "median_workers": 59
+        }
+      ],
+      "macro_mechanics": {
+        "chrono_1": {
+          "sec": 37.3,
+          "supply": 16,
+          "target": "nexus"
+        },
+        "chrono_2": {
+          "sec": 125.4,
+          "supply": 23,
+          "target": "warpgate"
+        },
+        "chrono_3": {
+          "sec": 157.7,
+          "supply": 30,
+          "target": "nexus"
+        },
+        "chrono_4": {
+          "sec": 200.0,
+          "supply": 37,
+          "target": "twilight-council"
+        },
+        "chrono_5": {
+          "sec": 259.4,
+          "supply": 48,
+          "target": "twilight-council"
+        }
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 7,
+          "top_combat_units": []
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 6,
+          "top_combat_units": [
+            [
+              "stalker",
+              13
+            ],
+            [
+              "adept",
+              7
+            ],
+            [
+              "sentry",
+              2
+            ],
+            [
+              "zealot",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 11,
+          "top_combat_units": [
+            [
+              "stalker",
+              10
+            ],
+            [
+              "phoenix",
+              6
+            ],
+            [
+              "sentry",
+              3
+            ],
+            [
+              "void-ray",
+              3
+            ],
+            [
+              "oracle",
+              3
+            ],
+            [
+              "immortal",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 13,
+          "top_combat_units": [
+            [
+              "stalker",
+              47
+            ],
+            [
+              "phoenix",
+              11
+            ],
+            [
+              "zealot",
+              8
+            ],
+            [
+              "observer",
+              7
+            ],
+            [
+              "sentry",
+              6
+            ],
+            [
+              "adept",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 6,
+          "top_combat_units": [
+            [
+              "zealot",
+              36
+            ],
+            [
+              "stalker",
+              35
+            ],
+            [
+              "high-templar",
+              4
+            ],
+            [
+              "immortal",
+              3
+            ],
+            [
+              "observer",
+              3
+            ],
+            [
+              "colossus",
+              3
+            ]
+          ]
+        },
+        {
+          "band": "100-200",
+          "median_workers_trained": 0,
+          "top_combat_units": [
+            [
+              "zealot",
+              21
+            ],
+            [
+              "colossus",
+              3
+            ],
+            [
+              "sentry",
+              2
+            ],
+            [
+              "phoenix",
+              1
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 11,
+          "median_workers": 17.0,
+          "mean_workers": 16.6,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.0,
+          "median_total_supply": 18.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 17.0,
+          "army_supply_pct": 5.6,
+          "median_bases": 1.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 867,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 11,
+          "median_workers": 21.0,
+          "mean_workers": 20.9,
+          "median_army_supply": 3.0,
+          "mean_army_supply": 2.4,
+          "median_total_supply": 23.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 7.0,
+          "army_supply_pct": 13.0,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 0,
+          "median_min_rate": 951,
+          "median_gas_rate": 156
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 11,
+          "median_workers": 27.0,
+          "mean_workers": 25.6,
+          "median_army_supply": 8.0,
+          "mean_army_supply": 7.7,
+          "median_total_supply": 33.0,
+          "median_supply_cap": 46.0,
+          "worker_to_army_ratio": 3.38,
+          "army_supply_pct": 24.2,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 300,
+          "median_min_rate": 979,
+          "median_gas_rate": 335
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 11,
+          "median_workers": 38.0,
+          "mean_workers": 34.6,
+          "median_army_supply": 11.0,
+          "mean_army_supply": 10.3,
+          "median_total_supply": 46.0,
+          "median_supply_cap": 54.0,
+          "worker_to_army_ratio": 3.45,
+          "army_supply_pct": 23.9,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 625,
+          "median_min_rate": 1567,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 11,
+          "median_workers": 44.0,
+          "mean_workers": 40.0,
+          "median_army_supply": 16.0,
+          "mean_army_supply": 16.4,
+          "median_total_supply": 58.0,
+          "median_supply_cap": 70.0,
+          "worker_to_army_ratio": 2.75,
+          "army_supply_pct": 27.6,
+          "median_bases": 3.0,
+          "median_gases": 3.0,
+          "median_army_value": 1200,
+          "median_min_rate": 1735,
+          "median_gas_rate": 335
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 10,
+          "median_workers": 48.5,
+          "mean_workers": 47.9,
+          "median_army_supply": 23.0,
+          "mean_army_supply": 23.5,
+          "median_total_supply": 75.5,
+          "median_supply_cap": 85.0,
+          "worker_to_army_ratio": 2.11,
+          "army_supply_pct": 30.5,
+          "median_bases": 3.0,
+          "median_gases": 3.5,
+          "median_army_value": 1650,
+          "median_min_rate": 2183,
+          "median_gas_rate": 448
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 9,
+          "median_workers": 60.0,
+          "mean_workers": 54.0,
+          "median_army_supply": 30.0,
+          "mean_army_supply": 38.9,
+          "median_total_supply": 89.0,
+          "median_supply_cap": 109.0,
+          "worker_to_army_ratio": 2.0,
+          "army_supply_pct": 33.7,
+          "median_bases": 3.0,
+          "median_gases": 4.0,
+          "median_army_value": 2425,
+          "median_min_rate": 2183,
+          "median_gas_rate": 604
+        }
+      ]
+    },
+    "PvP": {
+      "matchup": "PvP",
+      "total_perspectives": 48,
+      "pro_perspectives": 4,
+      "winning_perspectives": 24,
+      "pro_winning_perspectives": 2,
+      "exemplar_player": "<Exper> KaelThas",
+      "exemplar_opponent": "VOID",
+      "exemplar_map": "Turbo Cruise '84 LE",
+      "exemplar_replay": "Starcraft2Metrics_6ae1a113f78a_2019-07-05_-__P_VOID_VS__P_KaelThas.SC2Replay",
+      "exemplar_structures": [
+        {
+          "supply": 14,
+          "sec": 19.7,
+          "workers": 13,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 16,
+          "sec": 42.4,
+          "workers": 15,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 16,
+          "sec": 47.7,
+          "workers": 15,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 17,
+          "sec": 58.7,
+          "workers": 16,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 19,
+          "sec": 75.8,
+          "workers": 18,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 20,
+          "sec": 90.8,
+          "workers": 19,
+          "action": "build",
+          "symbol": "cybernetics-core"
+        },
+        {
+          "supply": 26,
+          "sec": 133.3,
+          "workers": 22,
+          "action": "build",
+          "symbol": "shield-battery"
+        },
+        {
+          "supply": 27,
+          "sec": 142.4,
+          "workers": 22,
+          "action": "build",
+          "symbol": "shield-battery"
+        },
+        {
+          "supply": 28,
+          "sec": 160.2,
+          "workers": 24,
+          "action": "build",
+          "symbol": "nexus"
+        },
+        {
+          "supply": 28,
+          "sec": 168.4,
+          "workers": 24,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 29,
+          "sec": 174.5,
+          "workers": 24,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 31,
+          "sec": 205.2,
+          "workers": 26,
+          "action": "build",
+          "symbol": "robotics-facility"
+        },
+        {
+          "supply": 32,
+          "sec": 217.7,
+          "workers": 27,
+          "action": "build",
+          "symbol": "twilight-council"
+        },
+        {
+          "supply": 32,
+          "sec": 217.9,
+          "workers": 27,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 32,
+          "sec": 227.6,
+          "workers": 28,
+          "action": "build",
+          "symbol": "shield-battery"
+        },
+        {
+          "supply": 32,
+          "sec": 230.4,
+          "complete_sec": 237.5,
+          "workers": 28,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 32,
+          "sec": 230.6,
+          "complete_sec": 237.6,
+          "workers": 28,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 34,
+          "sec": 264.4,
+          "complete_sec": 271.4,
+          "workers": 22,
+          "action": "morph",
+          "symbol": "warpgate"
+        },
+        {
+          "supply": 41,
+          "sec": 296.6,
+          "workers": 22,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 41,
+          "sec": 297.0,
+          "workers": 22,
+          "action": "build",
+          "symbol": "gateway"
+        }
+      ],
+      "exemplar_upgrades": [
+        {
+          "symbol": "warp-gate-research",
+          "start_sec": 130.2,
+          "complete_sec": 230.2,
+          "supply": 26,
+          "workers": 22
+        }
+      ],
+      "exemplar_combat_sequence": [
+        {
+          "supply": 24,
+          "sec": 117.4,
+          "symbol": "adept",
+          "count": 2
+        },
+        {
+          "supply": 33,
+          "sec": 241.8,
+          "symbol": "stalker",
+          "count": 2
+        },
+        {
+          "supply": 34,
+          "sec": 258.6,
+          "symbol": "immortal",
+          "count": 1
+        },
+        {
+          "supply": 36,
+          "sec": 270.5,
+          "symbol": "stalker",
+          "count": 1
+        },
+        {
+          "supply": 38,
+          "sec": 272.1,
+          "symbol": "zealot",
+          "count": 2
+        },
+        {
+          "supply": 43,
+          "sec": 301.4,
+          "symbol": "sentry",
+          "count": 1
+        },
+        {
+          "supply": 44,
+          "sec": 321.5,
+          "symbol": "stalker",
+          "count": 2
+        }
+      ],
+      "expansions": [
+        {
+          "base_num": 2,
+          "count": 20,
+          "median_sec": 194.2,
+          "median_supply": 32,
+          "median_workers": 24
+        },
+        {
+          "base_num": 3,
+          "count": 8,
+          "median_sec": 369.5,
+          "median_supply": 72,
+          "median_workers": 41
+        }
+      ],
+      "gases": [
+        {
+          "gas_num": 1,
+          "count": 23,
+          "median_sec": 48.8,
+          "median_supply": 17,
+          "median_workers": 16
+        },
+        {
+          "gas_num": 2,
+          "count": 21,
+          "median_sec": 61.5,
+          "median_supply": 18,
+          "median_workers": 17
+        },
+        {
+          "gas_num": 3,
+          "count": 14,
+          "median_sec": 331.4,
+          "median_supply": 57,
+          "median_workers": 35
+        },
+        {
+          "gas_num": 4,
+          "count": 12,
+          "median_sec": 348.5,
+          "median_supply": 58,
+          "median_workers": 38
+        }
+      ],
+      "tech_timings": [
+        {
+          "symbol": "pylon",
+          "frequency": 0.96,
+          "median_sec": 18.8,
+          "median_supply": 14,
+          "median_workers": 13
+        },
+        {
+          "symbol": "gateway",
+          "frequency": 0.96,
+          "median_sec": 41.0,
+          "median_supply": 15,
+          "median_workers": 15
+        },
+        {
+          "symbol": "assimilator",
+          "frequency": 0.96,
+          "median_sec": 48.8,
+          "median_supply": 17,
+          "median_workers": 16
+        },
+        {
+          "symbol": "cybernetics-core",
+          "frequency": 0.92,
+          "median_sec": 90.3,
+          "median_supply": 20,
+          "median_workers": 19
+        },
+        {
+          "symbol": "nexus",
+          "frequency": 0.83,
+          "median_sec": 194.2,
+          "median_supply": 32,
+          "median_workers": 24
+        },
+        {
+          "symbol": "robotics-facility",
+          "frequency": 0.79,
+          "median_sec": 205.2,
+          "median_supply": 36,
+          "median_workers": 26
+        },
+        {
+          "symbol": "shield-battery",
+          "frequency": 0.62,
+          "median_sec": 233.5,
+          "median_supply": 38,
+          "median_workers": 26
+        },
+        {
+          "symbol": "warpgate",
+          "frequency": 0.92,
+          "median_sec": 235.4,
+          "median_supply": 38,
+          "median_workers": 26
+        },
+        {
+          "symbol": "twilight-council",
+          "frequency": 0.67,
+          "median_sec": 282.4,
+          "median_supply": 46,
+          "median_workers": 31
+        },
+        {
+          "symbol": "forge",
+          "frequency": 0.46,
+          "median_sec": 326.8,
+          "median_supply": 55,
+          "median_workers": 33
+        }
+      ],
+      "upgrade_timings": [
+        {
+          "symbol": "warp-gate-research",
+          "count": 22,
+          "median_start_sec": 133.1,
+          "median_complete_sec": 233.1,
+          "median_supply": 24,
+          "median_workers": 22
+        },
+        {
+          "symbol": "charge",
+          "count": 9,
+          "median_start_sec": 320.0,
+          "median_complete_sec": 420.0,
+          "median_supply": 60,
+          "median_workers": 38
+        },
+        {
+          "symbol": "protoss-ground-weapons-1",
+          "count": 8,
+          "median_start_sec": 320.8,
+          "median_complete_sec": 434.8,
+          "median_supply": 61,
+          "median_workers": 38
+        },
+        {
+          "symbol": "protoss-ground-weapons-2",
+          "count": 3,
+          "median_start_sec": 408.6,
+          "median_complete_sec": 544.6,
+          "median_supply": 77,
+          "median_workers": 48
+        }
+      ],
+      "macro_mechanics": {
+        "chrono_1": {
+          "sec": 42.1,
+          "supply": 16,
+          "target": "nexus"
+        },
+        "chrono_2": {
+          "sec": 194.7,
+          "supply": 32,
+          "target": "cybernetics-core"
+        },
+        "chrono_3": {
+          "sec": 241.6,
+          "supply": 40,
+          "target": "cybernetics-core"
+        },
+        "chrono_4": {
+          "sec": 273.5,
+          "supply": 47,
+          "target": "robotics-facility"
+        },
+        "chrono_5": {
+          "sec": 299.2,
+          "supply": 50,
+          "target": "nexus"
+        }
+      },
+      "unit_production_bands": [
+        {
+          "band": "12-20",
+          "median_workers_trained": 7,
+          "top_combat_units": [
+            [
+              "zealot",
+              2
+            ]
+          ]
+        },
+        {
+          "band": "20-30",
+          "median_workers_trained": 5,
+          "top_combat_units": [
+            [
+              "stalker",
+              25
+            ],
+            [
+              "sentry",
+              7
+            ],
+            [
+              "adept",
+              6
+            ],
+            [
+              "zealot",
+              3
+            ],
+            [
+              "phoenix",
+              1
+            ]
+          ]
+        },
+        {
+          "band": "30-44",
+          "median_workers_trained": 5,
+          "top_combat_units": [
+            [
+              "stalker",
+              59
+            ],
+            [
+              "sentry",
+              19
+            ],
+            [
+              "phoenix",
+              15
+            ],
+            [
+              "zealot",
+              10
+            ],
+            [
+              "immortal",
+              6
+            ],
+            [
+              "observer",
+              6
+            ]
+          ]
+        },
+        {
+          "band": "44-66",
+          "median_workers_trained": 8,
+          "top_combat_units": [
+            [
+              "zealot",
+              42
+            ],
+            [
+              "stalker",
+              40
+            ],
+            [
+              "immortal",
+              21
+            ],
+            [
+              "sentry",
+              11
+            ],
+            [
+              "phoenix",
+              11
+            ],
+            [
+              "observer",
+              8
+            ]
+          ]
+        },
+        {
+          "band": "66-100",
+          "median_workers_trained": 4,
+          "top_combat_units": [
+            [
+              "stalker",
+              19
+            ],
+            [
+              "immortal",
+              16
+            ],
+            [
+              "zealot",
+              15
+            ],
+            [
+              "phoenix",
+              7
+            ],
+            [
+              "observer",
+              2
+            ],
+            [
+              "sentry",
+              1
+            ]
+          ]
+        }
+      ],
+      "winning_supply_curves": [
+        {
+          "minute": 1,
+          "sec": 60,
+          "time_label": "1:00",
+          "samples": 23,
+          "median_workers": 17.0,
+          "mean_workers": 16.2,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 0.8,
+          "median_total_supply": 17.0,
+          "median_supply_cap": 23.0,
+          "worker_to_army_ratio": 17.0,
+          "army_supply_pct": 5.9,
+          "median_bases": 1.0,
+          "median_gases": 1.0,
+          "median_army_value": 0,
+          "median_min_rate": 783,
+          "median_gas_rate": 0
+        },
+        {
+          "minute": 2,
+          "sec": 120,
+          "time_label": "2:00",
+          "samples": 22,
+          "median_workers": 22.0,
+          "mean_workers": 21.2,
+          "median_army_supply": 1.0,
+          "mean_army_supply": 1.5,
+          "median_total_supply": 23.0,
+          "median_supply_cap": 31.0,
+          "worker_to_army_ratio": 22.0,
+          "army_supply_pct": 4.3,
+          "median_bases": 1.0,
+          "median_gases": 2.0,
+          "median_army_value": 0,
+          "median_min_rate": 867,
+          "median_gas_rate": 257
+        },
+        {
+          "minute": 3,
+          "sec": 180,
+          "time_label": "3:00",
+          "samples": 22,
+          "median_workers": 24.0,
+          "mean_workers": 24.1,
+          "median_army_supply": 8.0,
+          "mean_army_supply": 7.0,
+          "median_total_supply": 31.5,
+          "median_supply_cap": 39.0,
+          "worker_to_army_ratio": 3.0,
+          "army_supply_pct": 25.4,
+          "median_bases": 1.0,
+          "median_gases": 2.0,
+          "median_army_value": 325,
+          "median_min_rate": 909,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 4,
+          "sec": 240,
+          "time_label": "4:00",
+          "samples": 22,
+          "median_workers": 26.0,
+          "mean_workers": 26.4,
+          "median_army_supply": 11.5,
+          "mean_army_supply": 12.3,
+          "median_total_supply": 39.5,
+          "median_supply_cap": 47.0,
+          "worker_to_army_ratio": 2.26,
+          "army_supply_pct": 29.1,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 738,
+          "median_min_rate": 993,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 5,
+          "sec": 300,
+          "time_label": "5:00",
+          "samples": 22,
+          "median_workers": 29.5,
+          "mean_workers": 29.2,
+          "median_army_supply": 19.0,
+          "mean_army_supply": 19.6,
+          "median_total_supply": 50.5,
+          "median_supply_cap": 62.0,
+          "worker_to_army_ratio": 1.55,
+          "army_supply_pct": 37.6,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 1350,
+          "median_min_rate": 1091,
+          "median_gas_rate": 313
+        },
+        {
+          "minute": 6,
+          "sec": 360,
+          "time_label": "6:00",
+          "samples": 21,
+          "median_workers": 35.0,
+          "mean_workers": 32.5,
+          "median_army_supply": 25.0,
+          "mean_army_supply": 26.2,
+          "median_total_supply": 62.0,
+          "median_supply_cap": 70.0,
+          "worker_to_army_ratio": 1.4,
+          "army_supply_pct": 40.3,
+          "median_bases": 2.0,
+          "median_gases": 2.0,
+          "median_army_value": 1800,
+          "median_min_rate": 1455,
+          "median_gas_rate": 335
+        },
+        {
+          "minute": 7,
+          "sec": 420,
+          "time_label": "7:00",
+          "samples": 21,
+          "median_workers": 40.0,
+          "mean_workers": 36.3,
+          "median_army_supply": 32.0,
+          "mean_army_supply": 31.5,
+          "median_total_supply": 73.0,
+          "median_supply_cap": 86.0,
+          "worker_to_army_ratio": 1.25,
+          "army_supply_pct": 43.8,
+          "median_bases": 2.0,
+          "median_gases": 4.0,
+          "median_army_value": 2375,
+          "median_min_rate": 1623,
+          "median_gas_rate": 425
+        }
+      ]
+    }
+  },
+  "random_variants": {
+    "RvX-Rolled-Zerg": {
+      "samples": 9,
+      "description": "Random player rolling Zerg: 13 Overlord -> 16 Hatchery -> 18 Extractor -> 17 Spawning Pool -> 20 Overlord -> 2x Queen + 4 Zerglings (universal safe opening before opponent race adaptation)",
+      "scout_supply": 13,
+      "opening_steps": [
+        {
+          "supply": 13,
+          "sec": 12.8,
+          "workers": 13,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 17,
+          "sec": 52.9,
+          "workers": 17,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 18,
+          "sec": 71.0,
+          "workers": 17,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 17,
+          "sec": 75.0,
+          "workers": 16,
+          "action": "build",
+          "symbol": "spawning-pool"
+        },
+        {
+          "supply": 19,
+          "sec": 100.1,
+          "workers": 18,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 31,
+          "sec": 164.4,
+          "workers": 23,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 34,
+          "sec": 177.9,
+          "workers": 23,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 189.0,
+          "workers": 25,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 196.8,
+          "workers": 27,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 48,
+          "sec": 225.7,
+          "workers": 33,
+          "action": "build",
+          "symbol": "spine-crawler"
+        }
+      ]
+    },
+    "RvX-Rolled-Terran": {
+      "samples": 14,
+      "description": "Random player rolling Terran: 14 Supply Depot (ramp wall) -> 16 Barracks -> 16 Refinery -> 19 Orbital Command + Reaper scout -> 20 Command Center (Natural) -> 21 Factory",
+      "scout_supply": 14,
+      "opening_steps": [
+        {
+          "supply": 14,
+          "sec": 17.1,
+          "workers": 13,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 15,
+          "sec": 28.9,
+          "workers": 14,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 16,
+          "sec": 44.6,
+          "workers": 15,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 19,
+          "sec": 91.1,
+          "complete_sec": 116.1,
+          "workers": 19,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 20,
+          "sec": 103.2,
+          "workers": 19,
+          "action": "build",
+          "symbol": "command-center"
+        },
+        {
+          "supply": 20,
+          "sec": 114.4,
+          "workers": 19,
+          "action": "build",
+          "symbol": "factory"
+        },
+        {
+          "supply": 21,
+          "sec": 123.8,
+          "workers": 19,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 21,
+          "sec": 125.5,
+          "workers": 19,
+          "action": "build",
+          "symbol": "barracks-reactor"
+        },
+        {
+          "supply": 22,
+          "sec": 135.3,
+          "workers": 20,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 24,
+          "sec": 161.8,
+          "workers": 22,
+          "action": "build",
+          "symbol": "starport"
+        }
+      ]
+    },
+    "RvX-Rolled-Protoss": {
+      "samples": 8,
+      "description": "Random player rolling Protoss: 14 Pylon (low-ground/ramp wall) -> 16 Gateway (Probe scout) -> 17 Assimilator -> 20 Nexus -> 20 Cybernetics Core -> 21 Assimilator -> 22 Pylon",
+      "scout_supply": 16,
+      "opening_steps": [
+        {
+          "supply": 14,
+          "sec": 17.4,
+          "workers": 13,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 16,
+          "sec": 35.5,
+          "workers": 14,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 16,
+          "sec": 46.8,
+          "workers": 16,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 20,
+          "sec": 82.4,
+          "workers": 19,
+          "action": "build",
+          "symbol": "cybernetics-core"
+        },
+        {
+          "supply": 20,
+          "sec": 93.1,
+          "workers": 20,
+          "action": "build",
+          "symbol": "nexus"
+        },
+        {
+          "supply": 20,
+          "sec": 98.8,
+          "workers": 20,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 23,
+          "sec": 109.2,
+          "workers": 20,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 28,
+          "sec": 151.2,
+          "workers": 24,
+          "action": "build",
+          "symbol": "twilight-council"
+        },
+        {
+          "supply": 37,
+          "sec": 192.3,
+          "workers": 29,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 42,
+          "sec": 220.6,
+          "complete_sec": 227.6,
+          "workers": 34,
+          "action": "morph",
+          "symbol": "warpgate"
+        }
+      ]
+    },
+    "ZvR-Anti-Random-Zerg": {
+      "samples": 14,
+      "description": "Zerg vs unknown Random opponent: 13 Overlord + 14 Drone scout -> 16 Hatchery -> 18 Extractor -> 17 Spawning Pool (holds 2nd Overlord & Bane Nest/Roach Warren choice until Drone scout identifies T/P/Z at ~1:05)",
+      "scout_supply": 14,
+      "opening_steps": [
+        {
+          "supply": 13,
+          "sec": 12.6,
+          "workers": 12,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 17,
+          "sec": 51.1,
+          "workers": 17,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 18,
+          "sec": 68.9,
+          "workers": 17,
+          "action": "build",
+          "symbol": "extractor"
+        },
+        {
+          "supply": 17,
+          "sec": 72.5,
+          "workers": 17,
+          "action": "build",
+          "symbol": "spawning-pool"
+        },
+        {
+          "supply": 19,
+          "sec": 99.5,
+          "workers": 18,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 30,
+          "sec": 148.5,
+          "workers": 21,
+          "action": "build",
+          "symbol": "baneling-nest"
+        },
+        {
+          "supply": 31,
+          "sec": 170.4,
+          "workers": 24,
+          "action": "build",
+          "symbol": "hatchery"
+        },
+        {
+          "supply": 31,
+          "sec": 177.9,
+          "workers": 23,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 33,
+          "sec": 187.6,
+          "workers": 24,
+          "action": "train",
+          "symbol": "overlord"
+        },
+        {
+          "supply": 36,
+          "sec": 197.6,
+          "workers": 26,
+          "action": "train",
+          "symbol": "overlord"
+        }
+      ]
+    },
+    "TvR-Anti-Random-Terran": {
+      "samples": 4,
+      "description": "Terran vs unknown Random opponent: 14 Supply Depot at main ramp -> 16 Barracks + 16 SCV scout -> 16 Refinery -> 19 Reaper + Orbital Command -> 20 Command Center on high/low ground after SCV confirms race",
+      "scout_supply": 16,
+      "opening_steps": [
+        {
+          "supply": 14,
+          "sec": 17.7,
+          "workers": 13,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 16,
+          "sec": 39.8,
+          "workers": 15,
+          "action": "build",
+          "symbol": "barracks"
+        },
+        {
+          "supply": 16,
+          "sec": 42.7,
+          "workers": 15,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 17,
+          "sec": 52.9,
+          "workers": 16,
+          "action": "build",
+          "symbol": "refinery"
+        },
+        {
+          "supply": 20,
+          "sec": 87.9,
+          "complete_sec": 112.9,
+          "workers": 19,
+          "action": "morph",
+          "symbol": "orbital-command"
+        },
+        {
+          "supply": 20,
+          "sec": 101.2,
+          "workers": 19,
+          "action": "build",
+          "symbol": "factory"
+        },
+        {
+          "supply": 20,
+          "sec": 107.7,
+          "workers": 19,
+          "action": "build",
+          "symbol": "supply-depot"
+        },
+        {
+          "supply": 21,
+          "sec": 120.1,
+          "workers": 19,
+          "action": "build",
+          "symbol": "barracks-techlab"
+        },
+        {
+          "supply": 22,
+          "sec": 137.7,
+          "workers": 20,
+          "action": "build",
+          "symbol": "command-center"
+        },
+        {
+          "supply": 27,
+          "sec": 158.6,
+          "workers": 22,
+          "action": "build",
+          "symbol": "starport"
+        }
+      ]
+    },
+    "PvR-Anti-Random-Protoss": {
+      "samples": 13,
+      "description": "Protoss vs unknown Random opponent: 14 Pylon at natural/ramp wall -> 16 Gateway + immediate 16 Probe scout -> 17 Assimilator -> 20 Cybernetics Core before/after 20 Nexus depending on Zerg/Terran/Protoss identification",
+      "scout_supply": 16,
+      "opening_steps": [
+        {
+          "supply": 14,
+          "sec": 17.5,
+          "workers": 13,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 16,
+          "sec": 44.5,
+          "workers": 15,
+          "action": "build",
+          "symbol": "gateway"
+        },
+        {
+          "supply": 16,
+          "sec": 46.8,
+          "workers": 16,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 20,
+          "sec": 86.2,
+          "workers": 19,
+          "action": "build",
+          "symbol": "nexus"
+        },
+        {
+          "supply": 20,
+          "sec": 95.0,
+          "workers": 20,
+          "action": "build",
+          "symbol": "cybernetics-core"
+        },
+        {
+          "supply": 21,
+          "sec": 102.7,
+          "workers": 20,
+          "action": "build",
+          "symbol": "assimilator"
+        },
+        {
+          "supply": 22,
+          "sec": 111.5,
+          "workers": 21,
+          "action": "build",
+          "symbol": "pylon"
+        },
+        {
+          "supply": 26,
+          "sec": 145.0,
+          "workers": 23,
+          "action": "build",
+          "symbol": "twilight-council"
+        },
+        {
+          "supply": 36,
+          "sec": 182.8,
+          "workers": 29,
+          "action": "build",
+          "symbol": "robotics-facility"
+        },
+        {
+          "supply": 39,
+          "sec": 204.3,
+          "workers": 32,
+          "action": "build",
+          "symbol": "dark-shrine"
+        }
+      ]
+    }
+  }
+}

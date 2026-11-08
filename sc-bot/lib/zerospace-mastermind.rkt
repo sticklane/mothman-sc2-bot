@@ -199,7 +199,7 @@
   [zergling-flood   zealot     stalker  (gateway)                 150]
   [roach-ravager    immortal   stalker  (cybernetics-core robotics-facility) 350]
   [lurker-contain   immortal   zealot   (cybernetics-core robotics-facility) 350]
-  [bio-ball         colossus   stalker  (robotics-facility robotics-support-bay) 500]
+  [bio-ball         colossus   stalker  (robotics-facility robotics-bay) 500]
   [air-fleet        stalker    archon   (cybernetics-core)        150]
   [mech-siege       immortal   stalker  (cybernetics-core robotics-facility) 350]
   [stalker-colossus immortal   stalker  (cybernetics-core robotics-facility) 350]
@@ -262,12 +262,20 @@
      'ling-bane-hydra]
     [else 'standard-macro]))
 
+(define (normalize-mastermind-bldg-sym sym)
+  (case sym
+    [(robotics-support-bay) 'robotics-bay]
+    [(templar-archives)     'templar-archive]
+    [(warpgate)             'warp-gate]
+    [else                   sym]))
+
 (define (compute-switching-cost required-buildings existing-buildings
                                 #:available-minerals [minerals 300]
                                 #:available-gas [gas 150])
-  (define existing-set (list->set existing-buildings))
+  (define existing-set (list->set (map normalize-mastermind-bldg-sym existing-buildings)))
   (define missing
-    (filter (lambda (b) (not (set-member? existing-set b))) required-buildings))
+    (filter (lambda (b) (not (set-member? existing-set (normalize-mastermind-bldg-sym b))))
+            required-buildings))
   (define total-cost (* 150 (length missing)))
   (define feasible? (or (null? missing)
                         (and (<= (length missing) 1)
@@ -379,11 +387,7 @@
     chrono-boost
     spawn-creep-tumor
     spread-creep-tumor
-    spawn-changeling
-    psionic-transfer
-    cancel
-    emp-round
-    corrosive-bile))
+    cancel))
 
 (struct ability-cast-limiter
   (max-combat-spells-per-frame

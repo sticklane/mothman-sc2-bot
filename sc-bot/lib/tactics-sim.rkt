@@ -118,17 +118,9 @@
   (define dist (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
   (define ux (/ dx dist))
   (define uy (/ dy dist))
-  ;; Perpendicular tangent vector along the high-ground ramp crest
-  (define tx (- uy))
-  (define ty ux)
   ;; High-ground ramp crest lies ~32% of the way from main TownHall to Natural
   (define crest-x (+ base-x (* 0.32 dx)))
   (define crest-y (+ base-y (* 0.32 dy)))
-  ;; Two 2x2 corner Supply Depots on either flank of the ramp crest
-  (define d1-x (snap-2x2-coord (+ crest-x (* 2.5 tx))))
-  (define d1-y (snap-2x2-coord (+ crest-y (* 2.5 ty))))
-  (define d2-x (snap-2x2-coord (- crest-x (* 2.5 tx))))
-  (define d2-y (snap-2x2-coord (- crest-y (* 2.5 ty))))
   ;; Orientation-dependent 3x3 Barracks & 2x2 East (+X) Add-on placement:
   ;; If ramp faces East (dx >= 0), shift Barracks 2.0 tiles West (-X) into high ground
   ;; so its East (+X) add-on at (bx + 2.5, by - 0.5) forms the wall instead of hanging off the cliff!
@@ -139,6 +131,13 @@
   (define by (snap-3x3-coord raw-by))
   (define addon-x (+ bx SC2-TERRAN-ADDON-OFFSET-X))
   (define addon-y (+ by SC2-TERRAN-ADDON-OFFSET-Y))
+  ;; Two 2x2 corner Supply Depots placed on exact non-overlapping half-tile offsets
+  ;; flanking the 3x3 Barracks + 2x2 East Add-on wall (guaranteeing max(|dx|,|dy|) >= 2.5 from Barracks
+  ;; and >= 2.0 from Add-on on all diagonal and axis-aligned ramps):
+  (define d1-x (snap-2x2-coord (if east-facing-ramp? (+ bx 0.5) (- bx 0.5))))
+  (define d1-y (snap-2x2-coord (+ by 2.5)))
+  (define d2-x (snap-2x2-coord (if east-facing-ramp? (- bx 0.5) (- bx 0.5))))
+  (define d2-y (snap-2x2-coord (- by 2.5)))
   ;; Safe high-ground production grid origin (stepped toward ramp/interior, with 6.0x3.5 spacing)
   (define prod-x (snap-3x3-coord (if east-facing-ramp? (- base-x 7.5) (+ base-x 4.5))))
   (define prod-y (snap-3x3-coord (if (>= dy 0.0) (- base-y 4.5) (+ base-y 4.5))))
@@ -342,11 +341,23 @@
     (if (list? arg1)
         (values arg2 arg1)
         (values arg1 (if (list? arg2) arg2 '()))))
-  (define alive-enemies
+  (define attacker-type
+    (and (hash? attacker) (hash-ref attacker 'type #f)))
+  (define raw-alive-enemies
     (filter (lambda (e)
               (define hp (if (fap-unit? e) (fap-unit-hp e) (hash-ref e 'hp 45)))
-              (> hp 0))
+              (and (> hp 0)
+                   (or (fap-unit? e) (sc2-enemy-unit-targetable? e))))
             enemies))
+  (define domain-matched-enemies
+    (if attacker-type
+        (filter (lambda (e)
+                  (or (fap-unit? e)
+                      (sc2-attacker-can-hit-enemy? attacker-type e)))
+                raw-alive-enemies)
+        raw-alive-enemies))
+  (define alive-enemies
+    (if (null? domain-matched-enemies) raw-alive-enemies domain-matched-enemies))
   (cond
     [(null? alive-enemies) #f]
     [else
@@ -1031,10 +1042,12 @@
 (define (clone-tactical-sim-unit su)
   (struct-copy tactical-sim-unit su))
 
-(define (cluster-tactical-arenas ally-units enemy-units enemy-bldgs
+(define (cluster-tactical-arenas ally-units raw-enemy-units enemy-bldgs
                                  #:chokes [chokes '()]
                                  #:our-z [our-z 10]
                                  #:enemy-z [enemy-z 10])
+  (define enemy-units
+    (filter sc2-enemy-unit-targetable? raw-enemy-units))
   (define combat-allies
     (filter (lambda (u)
               (and (hash? u)
@@ -1325,19 +1338,35 @@
    hero-units-lost
    net-val))
 
+(define (compress-arena-sim-units units [max-rep 4])
+  (define n (length units))
+  (if (<= n max-rep)
+      units
+      (let ([scale (/ (exact->inexact n) (exact->inexact max-rep))])
+        (for/list ([u (in-list (take units max-rep))])
+          (struct-copy tactical-sim-unit u
+                       [hp (* scale (tactical-sim-unit-hp u))]
+                       [max-hp (* scale (tactical-sim-unit-max-hp u))]
+                       [shield (* scale (tactical-sim-unit-shield u))]
+                       [ground-dps (* scale (tactical-sim-unit-ground-dps u))]
+                       [air-dps (* scale (tactical-sim-unit-air-dps u))]
+                       [cost (* scale (tactical-sim-unit-cost u))])))))
+
 (define (simulate-mirrored-arena-pair arena our-action enemy-action)
   (define init-allies
-    (append (tactical-arena-ally-units arena)
-            (tactical-arena-reinforcing-allies arena)))
+    (compress-arena-sim-units
+     (append (tactical-arena-ally-units arena)
+             (tactical-arena-reinforcing-allies arena))))
   (define init-enemies
-    (append (tactical-arena-enemy-units arena)
-            (tactical-arena-reinforcing-enemies arena)))
+    (compress-arena-sim-units
+     (append (tactical-arena-enemy-units arena)
+             (tactical-arena-reinforcing-enemies arena))))
   (define sim-allies (map clone-tactical-sim-unit init-allies))
   (define sim-enemies (map clone-tactical-sim-unit init-enemies))
-  (define dt SC2-TACTICAL-SIM-DT-SEC)
-  (define d1-ticks (max 1 (exact-round (/ SC2-TACTICAL-DEPTH1-SEC dt)))) ;; 2 ticks (0.5s)
-  (define d2-ticks (max 2 (exact-round (/ SC2-TACTICAL-DEPTH2-SEC dt)))) ;; 8 ticks (2.0s)
-  (define d3-ticks (max 4 (exact-round (/ SC2-TACTICAL-DEPTH3-SEC dt)))) ;; 20 ticks (5.0s)
+  (define dt (* 2.0 SC2-TACTICAL-SIM-DT-SEC))
+  (define d1-ticks (max 1 (exact-round (/ SC2-TACTICAL-DEPTH1-SEC dt)))) ;; 1 tick (0.5s)
+  (define d2-ticks (max 2 (exact-round (/ SC2-TACTICAL-DEPTH2-SEC dt)))) ;; 4 ticks (2.0s)
+  (define d3-ticks (max 4 (exact-round (/ SC2-TACTICAL-DEPTH3-SEC dt)))) ;; 10 ticks (5.0s)
 
   (define d1-eval #f)
   (define d2-eval #f)
@@ -1527,26 +1556,42 @@
       (define in-swing?
         (and ledger (order-ledger-unit-in-attack-swing? ledger u-hash frame)))
 
-      ;; Trigger Banshee/Ghost cloak when entering CloakHarassWorkers or when enemies are near
+      ;; Trigger Banshee cloak when researched (or in synthetic test without researched-upgrades key),
+      ;; facing anti-air without detection, and energy >= 25
+      (define has-banshee-cloak?
+        (if (hash-has-key? obs 'researched-upgrades)
+            (memq 'banshee-cloak (hash-ref obs 'researched-upgrades '()))
+            #t))
+      (define enemy-has-aa?
+        (ormap (lambda (e) (> (tactical-sim-unit-air-dps e) 0.0)) arena-enemies))
       (when (and (eq? utype 'banshee)
+                 has-banshee-cloak?
                  (not (tactical-sim-unit-cloaked? su))
-                 (>= (tactical-sim-unit-energy su) SC2-BANSHEE-CLOAK-MIN-ENERGY))
+                 (>= (tactical-sim-unit-energy su) SC2-BANSHEE-CLOAK-MIN-ENERGY)
+                 (or (eq? committed-act 'CloakHarassWorkers)
+                     (and enemy-has-aa? (not (tactical-arena-enemy-has-detection? arena)))))
         (emit! (list 'cast-spell uid 'cloak-banshee)))
 
       (unless in-swing?
+        (define hittable-arena-enemies
+          (filter (lambda (e) (> (sim-unit-weapon-dps-vs su e) 0.0))
+                  arena-enemies))
         (define target-su
           (cond
             [(and (eq? committed-act 'CloakHarassWorkers)
-                  (not (null? arena-workers)))
+                  (not (null? arena-workers))
+                  (> (tactical-sim-unit-ground-dps su) 0.0))
              (define best-w
                (argmin (lambda (w) (+ (hash-ref w 'hp 40) (hash-ref w 'shield 0))) arena-workers))
              (unit-hash->tactical-sim-unit best-w 'enemy)]
-            [(not (null? arena-enemies))
+            [(not (null? hittable-arena-enemies))
              (argmax (lambda (e)
                        (define d (max 1.0 (dist2d-pts ux uy (tactical-sim-unit-x e) (tactical-sim-unit-y e))))
                        (/ (+ 5.0 (tactical-sim-unit-ground-dps e) (tactical-sim-unit-air-dps e))
                           (* (+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)) d)))
-                     arena-enemies)]
+                     hittable-arena-enemies)]
+            [(and (eq? committed-act 'DisengageRetreat) (not (null? arena-enemies)))
+             (first arena-enemies)]
             [else #f]))
 
         (when target-su

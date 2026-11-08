@@ -184,6 +184,7 @@
       "lib/okasaki-sc.rkt"
       "lib/perception-grid.rkt"
       "lib/econ-ledger.rkt"
+      "lib/build-orders.rkt"
       "lib/tactics-sim.rkt"
       "lib/human-cortex.rkt"
       "lib/zerospace-mastermind.rkt"

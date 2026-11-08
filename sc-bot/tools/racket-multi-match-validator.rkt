@@ -163,10 +163,10 @@
                 'gas (+ 120 (* step 40))
                 'supply-used (+ 24 (* step 14))
                 'supply-cap (min 200 (+ 36 (* step 18)))
-                'ally-units (list (hash 'id 1 'type 'roach 'x 800 'y 850 'hp 145))
-                'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 700 'y 760 'hp 1500))
-                'enemy-units (list (hash 'id 901 'type 'stalker 'x 1300 'y 1350 'hp 80))
-                'enemy-buildings (list (hash 'id 801 'type 'nexus 'x 1600 'y 1600 'hp 1500))))
+                'ally-units (list (hash 'id 1 'type 'roach 'x 80.0 'y 85.0 'hp 145))
+                'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 70.0 'y 76.0 'hp 1500))
+                'enemy-units (list (hash 'id 901 'type 'stalker 'x 130.0 'y 135.0 'hp 80))
+                'enemy-buildings (list (hash 'id 801 'type 'nexus 'x 160.0 'y 160.0 'hp 1500))))
         (with-handlers ([exn:fail? (lambda (_e)
                                      (set! match-crashes (add1 match-crashes))
                                      (set! total-crashes (add1 total-crashes)))])
@@ -264,24 +264,24 @@
     (set! minerals (+ minerals (* cur-min-h 14)))
     (set! gas (+ gas (* cur-gas-h 10)))
 
-    ;; Construct ally units & buildings with live harvester saturation telemetry
+    ;; Construct ally units & buildings with live harvester saturation telemetry (SC2 LotV tile coords)
     (define worker-units
       (for/list ([i (in-range our-workers)])
-        (hash 'id (+ 1 i) 'type w-sym 'x (+ 700 (modulo i 12)) 'y (+ 760 (quotient i 12)) 'hp 40 'dps 5)))
+        (hash 'id (+ 1 i) 'type w-sym 'x (+ 32.0 (modulo i 12)) 'y (+ 36.0 (quotient i 12)) 'hp 40 'dps 5)))
     (define combat-units
       (for/list ([j (in-range our-army-cnt)])
         (hash 'id (+ 200 j)
               'type (if (zero? (modulo j 3)) u2-sym u1-sym)
-              'x (+ 920 (* (modulo j 6) 8))
-              'y (+ 960 (* (quotient j 6) 8))
+              'x (+ 52.0 (* (modulo j 6) 1.5))
+              'y (+ 56.0 (* (quotient j 6) 1.5))
               'hp 125 'dps 16)))
     (define th-bldgs
       (for/list ([b (in-range our-bases)])
         (define per-th-min (quotient cur-min-h (max 1 our-bases)))
         (hash 'id (+ 500 b)
               'type th-sym
-              'x (+ 700 (* b 180))
-              'y (+ 760 (* b 140))
+              'x (+ 32.0 (* b 18.0))
+              'y (+ 36.0 (* b 14.0))
               'hp 1500
               'assigned-harvesters per-th-min
               'ideal-harvesters 16)))
@@ -290,15 +290,15 @@
         (define per-g (quotient cur-gas-h (max 1 (* our-bases 2))))
         (hash 'id (+ 600 g)
               'type gas-sym
-              'x (+ 720 (* g 90))
-              'y (+ 780 (* g 70))
+              'x (+ 34.0 (* g 9.0))
+              'y (+ 38.0 (* g 7.0))
               'hp 500
               'assigned-harvesters per-g
               'ideal-harvesters 3)))
     (define tech-bldgs
       (for/list ([tsym (in-list (take tech-syms (min (length tech-syms) (max 1 (quotient step 6)))))]
                  [ti (in-naturals)])
-        (hash 'id (+ 700 ti) 'type tsym 'x (+ 740 (* ti 25)) 'y (+ 800 (* ti 25)) 'hp 1000)))
+        (hash 'id (+ 700 ti) 'type tsym 'x (+ 36.0 (* ti 4.0)) 'y (+ 40.0 (* ti 4.0)) 'hp 1000)))
 
     ;; Opponent trajectory based on opp-style
     (define opp-bases
@@ -309,8 +309,8 @@
         [else             (min 3 (add1 (quotient frame 2000)))]))
     (define opp-attack-near?
       (and (eq? opp-style 'one-base-allin) (>= frame 1200) (<= frame 4200)))
-    (define opp-x (if opp-attack-near? 780 1450))
-    (define opp-y (if opp-attack-near? 820 1480))
+    (define opp-x (if opp-attack-near? 54.0 145.0))
+    (define opp-y (if opp-attack-near? 58.0 148.0))
     (define opp-cnt
       (case opp-style
         [(one-base-allin) (if (<= frame 4200) 6 3)]
@@ -321,15 +321,15 @@
       (for/list ([k (in-range opp-cnt)])
         (hash 'id (+ 900 k)
               'type (if (and (>= step 16) (zero? (modulo k 2))) opp-u2 opp-u1)
-              'x (+ opp-x (* k 6))
-              'y (+ opp-y (* k 6))
+              'x (+ opp-x (* k 1.0))
+              'y (+ opp-y (* k 1.0))
               'hp 100 'dps 12)))
     (define enemy-bldgs
       (for/list ([eb (in-range opp-bases)])
         (hash 'id (+ 800 eb)
               'type opp-th-sym
-              'x (- 1600 (* eb 180))
-              'y (- 1600 (* eb 140))
+              'x (- 160.0 (* eb 18.0))
+              'y (- 160.0 (* eb 14.0))
               'hp 1500)))
 
     (define supply-used (min 200 (+ our-workers (* our-army-cnt 2))))
@@ -349,9 +349,9 @@
             'gas-harvesters cur-gas-h
             'ideal-gas-harvesters ideal-gas-h
             'fap-score fap-score
-            'base-x 700 'base-y 760
-            'natural-x 1024 'natural-y 1120
-            'enemy-x 1600 'enemy-y 1600
+            'base-x 32.0 'base-y 36.0
+            'natural-x 52.0 'natural-y 56.0
+            'enemy-x 160.0 'enemy-y 160.0
             'ally-units (append worker-units combat-units)
             'ally-buildings (append th-bldgs gas-bldgs tech-bldgs)
             'enemy-units enemy-units
@@ -431,22 +431,29 @@
 
   ;; Part A.2: 48 Closed-Loop Multi-Match Games vs. Division-1 Opponents
   (printf "[Part A.2] Running 48 Closed-Loop Multi-Match Games vs. Division-1 Opponents (Atlas, Eris, Phobos, Deimos)...\n")
+  (flush-output)
+  (define div1-idx 0)
   (define div1-results
     (for*/list ([bot-row (in-list MOTHMAN-BOTS)]
                 [opp-row (in-list DIV1-OPPONENTS)]
-                [map-name (in-list LADDER-MAPS)]
-                [m-idx (in-naturals)])
+                [map-name (in-list LADDER-MAPS)])
+      (define m-idx div1-idx)
+      (set! div1-idx (add1 div1-idx))
       (match-define (list bname brace) bot-row)
       (match-define (list oname orace ostyle ou1 ou2) opp-row)
       (simulate-closed-loop-match! bname brace oname orace ostyle ou1 ou2 map-name m-idx)))
   (printf "  -> Completed 48 closed-loop Division-1 multi-match simulations (10,000 frames/match).\n\n")
+  (flush-output)
 
   ;; Part B: 68 Closed-Loop Multi-Match Games vs. All 17 External Bots
   (printf "[Part B] Running 68 Closed-Loop Multi-Match Games vs. All 17 External Bots (`external_bots/`)...\n")
+  (flush-output)
+  (define ext-idx 0)
   (define ext-results
     (for*/list ([bot-row (in-list MOTHMAN-BOTS)]
-                [ext-row (in-list EXTERNAL-BOTS)]
-                [m-idx (in-naturals)])
+                [ext-row (in-list EXTERNAL-BOTS)])
+      (define m-idx ext-idx)
+      (set! ext-idx (add1 ext-idx))
       (match-define (list bname brace) bot-row)
       (match-define (list oname orace ostyle ou1 ou2) ext-row)
       (define map-name (list-ref LADDER-MAPS (modulo m-idx (length LADDER-MAPS))))
