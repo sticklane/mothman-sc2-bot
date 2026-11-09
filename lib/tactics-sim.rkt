@@ -378,9 +378,12 @@
      (define best-target (car alive-enemies))
      (define best-score -inf.0)
      (for ([e (in-list alive-enemies)])
+       (define etype (if (fap-unit? e) 'unknown (hash-ref e 'type 'unknown)))
+       (define decoy-mult
+         (if (memq etype SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05 1.0))
        (define hp (max 1.0 (exact->inexact (if (fap-unit? e) (fap-unit-hp e) (hash-ref e 'hp 45)))))
        (define dps (max 1.0 (exact->inexact (if (fap-unit? e) (fap-unit-dps e) (hash-ref e 'dps 12)))))
-       (define base-priority (/ dps hp))
+       (define base-priority (* decoy-mult (/ dps hp)))
        (define reach-weight
          (if has-attacker-pos?
              (let* ([ex (if (fap-unit? e) (fap-unit-x e) (hash-ref e 'x ax))]
@@ -1609,8 +1612,10 @@
                      (let ([e (car rem)])
                        (if (> (sim-unit-weapon-dps-vs su e) 0.0)
                            (let* ([d (max 1.0 (dist2d-pts ux uy (tactical-sim-unit-x e) (tactical-sim-unit-y e)))]
-                                  [sc (/ (+ 5.0 (tactical-sim-unit-ground-dps e) (tactical-sim-unit-air-dps e))
-                                         (* (+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)) d))])
+                                  [decoy-mult (if (memq (tactical-sim-unit-type e) SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05 1.0)]
+                                  [sc (* decoy-mult
+                                         (/ (+ 5.0 (tactical-sim-unit-ground-dps e) (tactical-sim-unit-air-dps e))
+                                            (* (+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)) d)))])
                              (if (> sc best-sc)
                                  (loop (cdr rem) e sc)
                                  (loop (cdr rem) best best-sc)))
@@ -1634,10 +1639,11 @@
 
             [(StutterKiteBack CloakHarassWorkers)
              ;; Phase-locked stutter-step micro:
-             ;; - Weapon on cooldown (> 0.15s): glide to standoff kite vector away from anti-air/melee threat
-             ;; - Weapon ready (<= 0.15s): fire at high-priority target (or worker) without resetting ongoing attack
+             ;; - Weapon on cooldown (> 0.15s) and not suicide Baneling: glide to standoff kite vector
+             ;; - Weapon ready (<= 0.15s) or Baneling: fire/advance at high-priority target
              (cond
-               [(> w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH)
+               [(and (not (eq? utype 'baneling))
+                     (> w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH))
                 (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
                 (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
                   (when ledger

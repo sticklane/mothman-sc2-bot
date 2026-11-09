@@ -841,6 +841,92 @@
 (check-eqv "auto-launch-loops" (hash-ref auto-summary 'game_loops) 32)
 (check-true "auto-launch-commands" (> (hash-ref auto-summary 'commands_sent) 0))
 
+;; 6. Unseen Units (Lurker Den 1163 Drone Build, Seismic Spines 3710, Carrier Build Interceptors 1042),
+;;    Auto-Unsiege/Unburrow (SiegeTankSieged 32 -> 390, LurkerMPBurrowed 503 -> 2110, WidowMineBurrowed 500 -> 2097),
+;;    and Section 13 Multi-Tag Command Coalescing on the Wire
+(define unseen-units-obs
+  (make-test-obs
+   2400 400 300
+   (list ;; Hatchery (86, tag 900) at (32, 32)
+         (make-test-unit 900 86 1 32.0 32.0)
+         ;; Idle Drone (104, tag 901) at (34, 32)
+         (make-test-unit 901 104 1 34.0 32.0)
+         ;; Completed LurkerDenMP (504, tag 902) at (36, 34)
+         (make-test-unit 902 504 1 36.0 34.0)
+         ;; Carrier (79, tag 903) at (50, 50)
+         (make-test-unit 903 79 1 50.0 50.0 #:flying? #t)
+         ;; SiegeTankSieged (32, tag 904) at (40, 40) - no enemy near -> auto-unsiege (390)
+         (make-test-unit 904 32 1 40.0 40.0)
+         ;; LurkerMPBurrowed (503, tag 905) at (42, 40) - no enemy near -> auto-unburrow (2110)
+         (make-test-unit 905 503 1 42.0 40.0)
+         ;; WidowMineBurrowed (500, tag 906) at (44, 40) - no enemy near -> auto-unburrow (2097)
+         (make-test-unit 906 500 1 44.0 40.0)
+         ;; 4 Marines (48, tags 911..914) at (60, 60)
+         (make-test-unit 911 48 1 60.0 60.0)
+         (make-test-unit 912 48 1 60.5 60.0)
+         (make-test-unit 913 48 1 61.0 60.0)
+         (make-test-unit 914 48 1 61.5 60.0)
+         ;; Enemy Roach (110, tag 999) far away at (120, 120)
+         (make-test-unit 999 110 2 120.0 120.0))))
+
+(define uu-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((build lurker-den 37.0 35.0)
+     (research seismic-spines)
+     (cast-spell 903 build-interceptors 903)
+     (attack-unit 911 999)
+     (attack-unit 912 999)
+     (attack-unit 913 999)
+     (attack-unit 914 999))
+   unseen-units-obs))
+
+(check-true "lurker-den-built-by-drone-901-at-point-1163"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 1163)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(901))
+                          (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+                   uu-cmds))
+(check-true "seismic-spines-researched-at-lurker-den-902-ability-3710"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 3710)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(902))))
+                   uu-cmds))
+(check-true "carrier-903-builds-interceptors-1042-target-none"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 1042)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(903))
+                          (not (sc2-raw-unit-command-target-pos c))
+                          (= (sc2-raw-unit-command-target-unit-tag c) 0)))
+                   uu-cmds))
+(check-true "siege-tank-sieged-32-auto-unsieges-390-when-clear"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 390)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(904))))
+                   uu-cmds))
+(check-true "lurker-burrowed-503-auto-unburrows-2110-when-clear"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 2110)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(905))))
+                   uu-cmds))
+(check-true "widow-mine-burrowed-500-auto-unburrows-2097-when-clear"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 2097)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(906))))
+                   uu-cmds))
+(check-true "four-marine-attack-unit-commands-coalesced-into-single-multi-tag-wire-cmd"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (memv (sc2-raw-unit-command-ability-id c) '(23 3674))
+                          (= (sc2-raw-unit-command-target-unit-tag c) 999)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(911 912 913 914))))
+                   uu-cmds))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

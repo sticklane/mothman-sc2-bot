@@ -968,7 +968,8 @@
          #:observed-effects [raw-observed-effects '()]
          #:destroyed-enemy-bldgs [raw-destroyed-enemy-bldgs '()]
          #:pre-destruction-unit-ids [raw-pre-destruction-unit-ids '()]
-         #:historical-upgrades [raw-historical-upgrades '()])
+         #:historical-upgrades [raw-historical-upgrades '()]
+         #:historical-implied-buildings [raw-historical-implied-bldgs '()])
   (define enemy-units (safe-hash-list raw-enemy-units))
   (define enemy-bldgs (safe-hash-list raw-enemy-bldgs))
   (define our-upgrade-tier (safe-int raw-our-upgrade-tier 0))
@@ -976,6 +977,7 @@
   (define destroyed-enemy-bldgs (safe-list raw-destroyed-enemy-bldgs))
   (define pre-destruction-unit-ids (safe-list raw-pre-destruction-unit-ids))
   (define historical-upgrades (safe-list raw-historical-upgrades))
+  (define historical-implied-bldgs (safe-list raw-historical-implied-bldgs))
   (define historical-bldgs '())
   (define post-destruction-bldgs '())
   (define obs-upgrades '())
@@ -1007,6 +1009,10 @@
   ;; Completed upgrades persist even if their research building is later destroyed
   (for ([hu (in-list historical-upgrades)])
     (add-upg! hu))
+  ;; Scouted tech buildings persist across fog-of-war blackouts unless destroyed
+  (for ([hb (in-list historical-implied-bldgs)]
+        #:unless (memq hb destroyed-enemy-bldgs))
+    (add-hist-bldg! hb))
   ;; Destroyed buildings still count toward sunk historical tech cost
   (for ([db (in-list destroyed-enemy-bldgs)])
     (add-hist-bldg! db)
@@ -1533,7 +1539,11 @@
      #:pre-destruction-unit-ids (mirror-mind-state-pre-destruction-unit-ids mstate)
      #:historical-upgrades (if prev-tech-obs
                                (enemy-tech-observation-observed-upgrades prev-tech-obs)
-                               '())))
+                               '())
+     #:historical-implied-buildings
+     (if (and prev-tech-obs (null? enemy-units) (null? enemy-bldgs))
+         (enemy-tech-observation-implied-tech-buildings prev-tech-obs)
+         '())))
   (set-mirror-mind-state-last-tech-observation! mstate tech-obs)
   (define visible-bldg-types (map unit-type-sym enemy-bldgs))
   (define unseen-implied-bldgs
@@ -2535,7 +2545,11 @@
        #:pre-destruction-unit-ids (mirror-mind-state-pre-destruction-unit-ids mstate)
        #:historical-upgrades (if prev-tech
                                  (enemy-tech-observation-observed-upgrades prev-tech)
-                                 '())))
+                                 '())
+       #:historical-implied-buildings
+       (if (and prev-tech (null? e-units) (null? e-bldgs))
+           (enemy-tech-observation-implied-tech-buildings prev-tech)
+           '())))
     (set-mirror-mind-state-last-tech-observation! mstate tech-obs)
     (define zs-reading
       (evaluate-zero-sum-negative-exclusions
@@ -3311,8 +3325,10 @@
   (set-mirror-mind-state-last-reachability-model! mstate reach-model)
 
   ;; 3b. Evaluate pending diagnostic probes & periodically issue a new test probe
+  ;;     when enemy units are in visual contact
   (evaluate-pending-diagnostic-probes! mstate frame enemy-units reading)
   (when (and (> frame 672)
+             (not (null? enemy-units))
              (null? (mirror-mind-state-diagnostic-probes mstate))
              (zero? (modulo frame 1344)))
     (issue-diagnostic-depth-probe! mstate frame enemy-units

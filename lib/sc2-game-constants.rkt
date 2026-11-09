@@ -469,9 +469,10 @@
      3662  ;; BURROWUP
      3675  ;; EFFECT_STIM
      3741  ;; MORPH_OBSERVERSIEGEMODE
-     1528  ;; MORPH_WARPPRISMPHASINGMODE
-     1530  ;; MORPH_WARPPRISMTRANSPORTMODE
-     )))
+      1528  ;; MORPH_WARPPRISMPHASINGMODE
+      1530  ;; MORPH_WARPPRISMTRANSPORTMODE
+      1042  ;; BUILD_INTERCEPTORS
+      )))
 
 (define SC2-POINT-TARGET-ABILITY-IDS
   (list->seteqv
@@ -641,6 +642,7 @@
    'void-ray          (hasheq 'max-hp 150 'max-shield 100 'armor 0 'speed 3.85 'ground-dps 22.4 'air-dps 22.4 'ground-range 6.0  'air-range 6.0  'weapon-period 0.36  'damage-point 0.05 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.875)
    'oracle            (hasheq 'max-hp 100 'max-shield 60  'armor 0 'speed 5.60 'ground-dps 24.4 'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 0.61  'damage-point 0.05 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
    'carrier           (hasheq 'max-hp 300 'max-shield 150 'armor 2 'speed 2.62 'ground-dps 37.5 'air-dps 37.5 'ground-range 8.0  'air-range 8.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
+   'interceptor       (hasheq 'max-hp 40  'max-shield 40  'armor 0 'speed 10.5 'ground-dps 5.0  'air-dps 5.0  'ground-range 2.0  'air-range 2.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.25)
    'tempest           (hasheq 'max-hp 200 'max-shield 100 'armor 2 'speed 3.15 'ground-dps 16.8 'air-dps 14.3 'ground-range 10.0 'air-range 14.0 'weapon-period 2.36  'damage-point 0.15 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
    'photon-cannon     (hasheq 'max-hp 150 'max-shield 150 'armor 1 'speed 0.0  'ground-dps 22.4 'air-dps 22.4 'ground-range 7.0  'air-range 7.0  'weapon-period 0.89  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)))
 
@@ -682,8 +684,8 @@
     changeling-zergling-wings
     changeling-zergling))
 
-;; Non-combat scouts and untargetable units that should not trigger building cancels,
-;; worker flee panic, or cheese-rush emergencies:
+;; Non-combat scouts, summoned minions/interceptors, and untargetable units that
+;; should be heavily de-prioritized in favor of parent Carriers / Brood Lords / real threats:
 (define SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS
   '(adept-phase-shift
     disruptor-phased
@@ -693,6 +695,10 @@
     egg
     cocoon
     broodling-escort
+    broodling
+    interceptor
+    locust
+    locust-flying
     changeling
     changeling-zealot
     changeling-marine-shield

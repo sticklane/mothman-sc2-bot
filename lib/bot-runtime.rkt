@@ -42,6 +42,7 @@
  parse-frame-state-sexp
  runtime-step-sexp!
  filter-rush-threat-enemies
+ select-target-enemy-for-unit
  compute-next-posture)
 
 (define WORKER-AND-NONCOMBAT-SYMS
@@ -1466,12 +1467,23 @@
       (if (> pend 0)
           (hash-update ht sym (lambda (c) (+ c pend)) 0)
           ht)))
+  (define (normalize-unit-count-sym t)
+    (case t
+      [(baneling-cocoon) 'baneling]
+      [(ravager-cocoon) 'ravager]
+      [(lurker-egg lurker-mp-egg lurker-mp lurker-burrowed lurker-mp-burrowed) 'lurker]
+      [(brood-lord-cocoon broodlord) 'brood-lord]
+      [(overlord-cocoon overseer-siege-mode) 'overseer]
+      [(widow-mine-burrowed) 'widow-mine]
+      [(siege-tank-sieged) 'siege-tank]
+      [(disruptor-phased) 'disruptor]
+      [else t]))
   (define unit-counts
     (for/fold ([ht (for/fold ([h0 (hash)]) ([t (in-list unit-types)])
-                     (hash-update h0 t add1 0))])
-              ([usym (in-list '(drone overlord queen zergling baneling roach ravager hydralisk lurker mutalisk corruptor
-                                probe zealot stalker sentry adept immortal observer warp-prism colossus
-                                scv marine marauder reaper hellion widow-mine siege-tank medivac viking banshee))])
+                     (hash-update h0 (normalize-unit-count-sym t) add1 0))])
+              ([usym (in-list '(drone overlord overseer queen zergling baneling roach ravager hydralisk lurker mutalisk corruptor brood-lord ultralisk infestor viper
+                                probe zealot stalker sentry adept high-templar dark-templar archon immortal observer warp-prism colossus disruptor phoenix void-ray oracle carrier tempest
+                                scv marine marauder reaper ghost hellion hellbat widow-mine siege-tank cyclone thor medivac viking liberator raven banshee battlecruiser))])
       (define pend (order-ledger-pending-count-for-type oledger usym frame))
       (if (> pend 0)
           (hash-update ht usym (lambda (c) (+ c pend)) 0)
@@ -1529,6 +1541,7 @@
           [(factory-tech-lab factory-techlab) 'factory-techlab]
           [(starport-tech-lab starport-techlab) 'starport-techlab]
           [(templar-archive templar-archives) 'templar-archive]
+          [(lurker-den lurker-den-mp) 'lurker-den]
           [else btype]))
       (hash-update! open-prod-slots norm-k (lambda (old) (+ old cnt)) 0)))
   ;; Fallback for synthetic tests where buildings might not yet be synced in control groups
@@ -1543,6 +1556,7 @@
         [(factory-tech-lab factory-techlab) 'factory-techlab]
         [(starport-tech-lab starport-techlab) 'starport-techlab]
         [(templar-archive templar-archives) 'templar-archive]
+        [(lurker-den lurker-den-mp) 'lurker-den]
         [else bt]))
     (define b-ords (hash-ref b 'order-count (let ([o (hash-ref b 'orders '())]) (if (list? o) (length o) 0))))
     (define b-max (if (eq? (hash-ref b 'addon #f) 'reactor) 2 1))
@@ -1561,6 +1575,15 @@
              (if live-larva-tracking?
                  explicit-larvae
                  (* 3 (max 1 active-bases))))
+  ;; Zerg unit-morph producer slots (`zergling -> baneling`, `roach -> ravager`,
+  ;; `hydralisk -> lurker`, `corruptor -> brood-lord`, `overlord -> overseer`):
+  (for ([msym (in-list '(zergling roach hydralisk corruptor overlord))])
+    (define avail-morph-sources
+      (count (lambda (u)
+               (and (eq? (unit-type-sym u) msym)
+                    (not (order-ledger-facility-busy? oledger u frame))))
+             ally-units))
+    (hash-set! open-prod-slots msym avail-morph-sources))
 
   (define live-game? live-game-obs?)
   (define open-prod-slots-snapshot
@@ -1927,9 +1950,23 @@
                   (>= gas (sc2-gas-cost 'hydralisk-den)))
          (emit-build-verified! 'hydralisk-den (safe-coord (+ base-x 4.0)) (safe-coord (+ base-y 5.0))))
        (when (and (memq 'hydralisk-den ready-bldg-types)
+                  (not (building-present-or-pending? 'lurker-den))
+                  (not (memq 'lurker-den-mp bldg-types))
+                  (>= minerals (sc2-min-cost 'lurker-den))
+                  (>= gas (sc2-gas-cost 'lurker-den)))
+         (emit-build-verified! 'lurker-den (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 5.0))))
+       (when (and (or (memq 'lurker-den ready-bldg-types)
+                      (memq 'lurker-den-mp ready-bldg-types)
+                      (and (not live-game?) (memq 'hydralisk-den ready-bldg-types)))
                   (>= gas (sc2-gas-cost 'adaptive-talons))
                   (upgrade-needed? 'adaptive-talons))
-         (emit-research-verified! 'adaptive-talons)))
+         (emit-research-verified! 'adaptive-talons))
+       (when (and (or (memq 'lurker-den ready-bldg-types)
+                      (memq 'lurker-den-mp ready-bldg-types))
+                  (memq 'hive ready-bldg-types)
+                  (>= gas (sc2-gas-cost 'seismic-spines))
+                  (upgrade-needed? 'seismic-spines))
+         (emit-research-verified! 'seismic-spines)))
 
      ;; Cloaked / Air / Spore defense & Overseer morph
      (define enemy-cloaked-or-air?
@@ -1957,9 +1994,19 @@
        (when (>= (hash-ref ov 'energy SC2-OVERSEER-CHANGELING-ENERGY) SC2-OVERSEER-CHANGELING-ENERGY)
          (emit! (list 'cast (hash-ref ov 'id 190) 'spawn-changeling enemy-x enemy-y))))
 
+     (when (or (and (memq 'spire ready-bldg-types) (memq 'hydralisk-den ready-bldg-types))
+               (and (or (memq 'lurker-den ready-bldg-types) (memq 'lurker-den-mp ready-bldg-types))
+                    (memq 'hydralisk unit-types)
+                    (>= minerals (sc2-min-cost 'lurker))
+                    (>= gas (sc2-gas-cost 'lurker))))
+       (emit! '(morph lurker)))
      (when (and (memq 'spire ready-bldg-types) (memq 'hydralisk-den ready-bldg-types))
-       (emit! '(morph lurker))
        (emit! '(morph hive)))
+     (when (and (memq 'greater-spire ready-bldg-types)
+                (memq 'corruptor unit-types)
+                (>= minerals (sc2-min-cost 'brood-lord))
+                (>= gas (sc2-gas-cost 'brood-lord)))
+       (emit! '(morph brood-lord)))
 
      ;; 5. Zerg Worker Saturation Priority vs Combat Unit Training (via Control Group 4 Larvae)
      (define zerg-drone-priority?
@@ -1981,6 +2028,16 @@
 
      ;; Zerg Combat Unit Training (via Control Group 4 Townhalls / Larvae, gated by `open-prod-slots`)
      (unless zerg-saving-for-expand?
+       ;; Decoupled Baneling morph: morph Zerglings into Banelings whenever Baneling Nest is ready,
+       ;; even after Roach Warren, Hydralisk Den, or Spire is completed.
+       (when (and (memq 'baneling-nest ready-bldg-types)
+                  (memq 'zergling unit-types)
+                  (< (hash-ref unit-counts 'baneling 0)
+                     (max 4 (quotient (max 1 (hash-ref unit-counts 'zergling 0)) 2)))
+                  (>= minerals (sc2-min-cost 'baneling))
+                  (>= gas (sc2-gas-cost 'baneling)))
+         (emit! '(morph baneling))
+         (spend-resources-and-supply! (sc2-min-cost 'baneling) (sc2-gas-cost 'baneling) 0))
        (cond
          [(and (memq 'spire ready-bldg-types)
                (>= minerals (sc2-min-cost 'corruptor))
@@ -2011,12 +2068,6 @@
                    (>= total-workers (add1 SC2-PRIORITY-WORKERS-PER-BASE))
                    (< (length ally-combat-units) SC2-ATTACK-WAVE-MIN-COMBAT-UNITS)
                    (>= minerals (sc2-min-cost 'queen))))
-          (when (and (memq 'baneling-nest ready-bldg-types)
-                     (memq 'zergling unit-types)
-                     (>= minerals (sc2-min-cost 'baneling))
-                     (>= gas (sc2-gas-cost 'baneling)))
-            (emit! '(morph baneling))
-            (spend-resources-and-supply! (sc2-min-cost 'baneling) (sc2-gas-cost 'baneling) 0))
           (try-train-unit! 'zergling 'larva 4 #:respect-bo-reserve? #t)]))
 
      (when (and (not zerg-drone-priority?)
@@ -2178,7 +2229,7 @@
          [(upgrade-needed? 'blink)
           (emit-research-verified! 'blink)]))
 
-     ;; Priority Robotics Facility production (Group 6): First Immortal -> Observer (if none) -> Colossus -> Immortal
+     ;; Priority Robotics Facility production (Group 6): First Immortal -> Observer (if none) -> Colossus / Disruptor -> Immortal
      (when (and (not protoss-saving-for-expand?)
                 (memq 'robotics-facility ready-bldg-types)
                 (can-spend-supply? (sc2-supply-cost 'observer)))
@@ -2190,8 +2241,22 @@
                       (memq 'robotics-support-bay ready-bldg-types))
                   (can-spend-supply? (sc2-supply-cost 'colossus)))
          (try-train-unit! 'colossus 'robotics-facility 6))
+       (when (and (or (memq 'robotics-bay ready-bldg-types)
+                      (memq 'robotics-support-bay ready-bldg-types))
+                  (< (hash-ref unit-counts 'disruptor 0) 2)
+                  (or (member '(train disruptor) prio-scheduled-actions)
+                      (>= (hash-ref unit-counts 'colossus 0) 1))
+                  (can-spend-supply? (sc2-supply-cost 'disruptor)))
+         (try-train-unit! 'disruptor 'robotics-facility 6))
        (when (can-spend-supply? (sc2-supply-cost 'immortal))
          (try-train-unit! 'immortal 'robotics-facility 6)))
+
+     ;; Stargate + Fleet Beacon Carrier production (Group 5)
+     (when (and (not protoss-saving-for-expand?)
+                (memq 'stargate ready-bldg-types)
+                (memq 'fleet-beacon ready-bldg-types)
+                (can-spend-supply? (sc2-supply-cost 'carrier)))
+       (try-train-unit! 'carrier 'stargate 5))
 
      ;; Scale Gateways according to Pro Build Order (3->5 Gateways on 2 bases after CyberCore, up to 8 on 3+ bases),
      ;; governed by the general Braun-heap priority scheduler (`can-spend-by-priority?`).
@@ -2705,8 +2770,14 @@
 
 ;; Select the best targetable enemy unit for `attacker-type` within weapon domain
 ;; (filters out untargetable projectiles/larva/eggs, enforces air/ground weapon
-;; domain matching, and de-prioritizes passive scouts/decoys when real threats exist).
+;; domain matching, de-prioritizes passive scouts/decoys/interceptors/broodlings
+;; when real threats exist, and prioritizes Light/Bio clumps for Banelings).
 (define (select-target-enemy-for-unit ux uy enemy-units [attacker-type 'marine])
+  (define baneling-attacker? (eq? attacker-type 'baneling))
+  (define light-bio-syms
+    '(marine zergling zealot adept hydralisk probe scv drone reaper hellion sentry high-templar ghost))
+  (define armored-syms
+    '(marauder roach stalker immortal siege-tank siege-tank-sieged thor ultralisk colossus))
   (let loop ([rem enemy-units]
              [best-valid #f]
              [best-valid-sc +inf.0]
@@ -2716,16 +2787,35 @@
         (or best-valid best-any)
         (let* ([e (car rem)]
                [et (unit-type-sym e)]
-               [eflying? (and (hash-ref e 'is-flying #f) #t)]
-               [valid? (and (sc2-enemy-unit-targetable? et)
-                            (sc2-attacker-can-hit-enemy? attacker-type et eflying?))])
+               [ex (hash-ref e 'x ux)]
+               [ey (hash-ref e 'y uy)]
+               [eflying? (or (and (hash-ref e 'is-flying #f) #t)
+                             (and (hash-ref e 'flying? #f) #t)
+                             (and (hash-ref e 'flying #f) #t))]
+               [valid? (and (sc2-enemy-unit-targetable? e)
+                            (sc2-attacker-can-hit-enemy? attacker-type e eflying?))]
+               [bane-adj
+                (if baneling-attacker?
+                    (cond
+                      [(memq et light-bio-syms)
+                       (define nearby-light
+                         (count (lambda (o)
+                                  (and (memq (unit-type-sym o) light-bio-syms)
+                                       (<= (dist2d ex ey (hash-ref o 'x ex) (hash-ref o 'y ey)) 2.2)))
+                                enemy-units))
+                       (- (+ 45.0 (* 12.0 nearby-light)))]
+                      [(or (memq et armored-syms) (memq et SC2-ALL-STRUCTURE-SYMS))
+                       80.0]
+                      [else 0.0])
+                    0.0)])
           (cond
             [valid?
-             (define d (dist2d ux uy (hash-ref e 'x ux) (hash-ref e 'y uy)))
+             (define d (dist2d ux uy ex ey))
              (define hp (safe-finite-real (hash-ref e 'hp 100) 100.0))
              (define passive-penalty
                (+ (if (memq et SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 250.0 0.0)
-                  (if (memq et SC2-ALL-STRUCTURE-SYMS) 30.0 0.0)))
+                  (if (memq et SC2-ALL-STRUCTURE-SYMS) 30.0 0.0)
+                  bane-adj))
              (define sc
                (+ passive-penalty
                   (if (<= d SC2-ENGAGEMENT-FOCUS-FIRE-RADIUS)
@@ -2735,11 +2825,12 @@
                  (loop (cdr rem) e sc best-any best-any-sc)
                  (loop (cdr rem) best-valid best-valid-sc best-any best-any-sc))]
             [(not best-valid)
-             (define d (dist2d ux uy (hash-ref e 'x ux) (hash-ref e 'y uy)))
+             (define d (dist2d ux uy ex ey))
              (define hp (safe-finite-real (hash-ref e 'hp 100) 100.0))
              (define passive-penalty
                (+ (if (memq et SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 250.0 0.0)
-                  (if (memq et SC2-ALL-STRUCTURE-SYMS) 30.0 0.0)))
+                  (if (memq et SC2-ALL-STRUCTURE-SYMS) 30.0 0.0)
+                  bane-adj))
              (define sc
                (+ passive-penalty
                   (if (<= d SC2-ENGAGEMENT-FOCUS-FIRE-RADIUS)
@@ -2888,6 +2979,161 @@
         (emit! (list 'kite (hash-ref u 'id 101) nat-x nat-y)))))
 
   ;; ---------------------------------------------------------------------------
+  ;; Pro Splash & Micro Countermeasures:
+  ;;   1. Hostile Ground Effects (`psi-storm`, `corrosive-bile`, `blinding-cloud`) &
+  ;;      Enemy `disruptor-phased` (Purification Nova) Emergency Radial Evasion
+  ;;   2. Enemy `widow-mine` / `widow-mine-burrowed` Target Pull-Back & Ally Split
+  ;;   3. Enemy `baneling` Light-Unit Radial Pre-Split (Armored units hold & fire)
+  ;;   4. Enemy `hellion` & `lurker-burrowed` Collinear Lateral Scatter (+/- n-hat)
+  ;; ---------------------------------------------------------------------------
+  (define splash-evading-tags (mutable-seteqv))
+
+  ;; 1. Emergency Ground-Effect & Purification Nova (`disruptor-phased`) Evasion
+  (define hazard-zones
+    (append
+     (for/list ([eff (in-list effects)]
+                #:when (and (hash? eff)
+                            (memq (hash-ref eff 'type 'none)
+                                  '(psi-storm psionic-storm corrosive-bile blinding-cloud nuke-persistent))))
+       (list (hash-ref eff 'x nat-x)
+             (hash-ref eff 'y nat-y)
+             (safe-finite-real (hash-ref eff 'radius 3.0) 3.0)))
+     (for/list ([e (in-list enemy-units)]
+                #:when (eq? (unit-type-sym e) 'disruptor-phased))
+       (list (hash-ref e 'x nat-x)
+             (hash-ref e 'y nat-y)
+             4.5))))
+  (when (not (null? hazard-zones))
+    (for ([u (in-list combat-units)])
+      (define uid (hash-ref u 'id 101))
+      (define ux (hash-ref u 'x base-x))
+      (define uy (hash-ref u 'y base-y))
+      (unless (order-ledger-unit-in-attack-swing? oledger u)
+        (for ([hz (in-list hazard-zones)]
+              #:unless (set-member? splash-evading-tags uid))
+          (define hx (first hz))
+          (define hy (second hz))
+          (define hrad (third hz))
+          (when (<= (dist2d ux uy hx hy) hrad)
+            (define-values (kx ky) (compute-kite-vector ux uy hx hy 3.5))
+            (set-add! splash-evading-tags uid)
+            (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))))))
+
+  ;; 2. Enemy Widow Mine Target Pull-Back & Nearby Ally Radial Split
+  (define enemy-widow-mines
+    (filter (lambda (e) (memq (unit-type-sym e) '(widow-mine widow-mine-burrowed)))
+            enemy-units))
+  (for ([wm (in-list enemy-widow-mines)])
+    (define wmx (hash-ref wm 'x nat-x))
+    (define wmy (hash-ref wm 'y nat-y))
+    (define explicit-target-id (hash-ref wm 'target-id #f))
+    (define targeted-ally
+      (or (and explicit-target-id
+               (findf (lambda (u) (equal? (hash-ref u 'id -1) explicit-target-id)) ally-units))
+          (let loop ([rem ally-units] [best-u #f] [best-d 5.3])
+            (if (null? rem)
+                best-u
+                (let* ([u (car rem)]
+                       [d (dist2d wmx wmy (hash-ref u 'x base-x) (hash-ref u 'y base-y))])
+                  (if (< d best-d)
+                      (loop (cdr rem) u d)
+                      (loop (cdr rem) best-u best-d)))))))
+    (when targeted-ally
+      (define tid (hash-ref targeted-ally 'id 101))
+      (define tx (hash-ref targeted-ally 'x base-x))
+      (define ty (hash-ref targeted-ally 'y base-y))
+      (unless (set-member? splash-evading-tags tid)
+        (define-values (kx ky) (compute-kite-vector tx ty wmx wmy 3.5))
+        (set-add! splash-evading-tags tid)
+        (emit! (list 'kite tid (safe-coord kx tx) (safe-coord ky ty))))
+      ;; Split nearby allies within 2.2 tiles of the targeted unit away from the blast radius
+      (for ([ally (in-list combat-units)])
+        (define aid (hash-ref ally 'id 101))
+        (define ax (hash-ref ally 'x base-x))
+        (define ay (hash-ref ally 'y base-y))
+        (when (and (not (equal? aid tid))
+                   (not (set-member? splash-evading-tags aid))
+                   (<= (dist2d tx ty ax ay) 2.2))
+          (define-values (sx sy) (compute-kite-vector ax ay tx ty 2.8))
+          (set-add! splash-evading-tags aid)
+          (emit! (list 'kite aid (safe-coord sx ax) (safe-coord sy ay)))))))
+
+  ;; 3. Enemy Baneling Light-Unit Radial Pre-Split (Armored units hold & focus-fire)
+  (define enemy-banelings
+    (filter (lambda (e) (eq? (unit-type-sym e) 'baneling)) enemy-units))
+  (define light-split-syms
+    '(marine zergling zealot adept hydralisk reaper ghost sentry high-templar))
+  (when (not (null? enemy-banelings))
+    (for ([u (in-list combat-units)])
+      (define uid (hash-ref u 'id 101))
+      (define ut (unit-type-sym u))
+      (define ux (hash-ref u 'x base-x))
+      (define uy (hash-ref u 'y base-y))
+      (when (and (memq ut light-split-syms)
+                 (not (set-member? splash-evading-tags uid))
+                 (not (order-ledger-unit-in-attack-swing? oledger u)))
+        (define closest-bane
+          (let loop ([rem enemy-banelings] [best-b #f] [best-d 4.5])
+            (if (null? rem)
+                best-b
+                (let* ([b (car rem)]
+                       [d (dist2d ux uy (hash-ref b 'x nat-x) (hash-ref b 'y nat-y))])
+                  (if (<= d best-d)
+                      (loop (cdr rem) b d)
+                      (loop (cdr rem) best-b best-d))))))
+        (when closest-bane
+          (define bx (hash-ref closest-bane 'x nat-x))
+          (define by (hash-ref closest-bane 'y nat-y))
+          (define-values (kx ky) (compute-kite-vector ux uy bx by 3.0))
+          (set-add! splash-evading-tags uid)
+          (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy)))))))
+
+  ;; 4. Enemy Hellion & Burrowed Lurker Linear Splash Lateral Scatter (+/- perpendicular n-hat)
+  (define linear-splash-enemies
+    (filter (lambda (e)
+              (or (eq? (unit-type-sym e) 'hellion)
+                  (eq? (unit-type-sym e) 'lurker-burrowed)
+                  (and (eq? (unit-type-sym e) 'lurker)
+                       (or (hash-ref e 'burrowed #f) (hash-ref e 'burrowed? #f)))))
+            enemy-units))
+  (when (and (not (null? linear-splash-enemies)) (>= (length combat-units) 2))
+    (for ([u (in-list combat-units)])
+      (define uid (hash-ref u 'id 101))
+      (define ux (hash-ref u 'x base-x))
+      (define uy (hash-ref u 'y base-y))
+      (when (and (not (sc2-unit-is-flying-sym? (unit-type-sym u)))
+                 (not (set-member? splash-evading-tags uid))
+                 (not (order-ledger-unit-in-attack-swing? oledger u)))
+        (for ([le (in-list linear-splash-enemies)]
+              #:unless (set-member? splash-evading-tags uid))
+          (define lex (hash-ref le 'x nat-x))
+          (define ley (hash-ref le 'y nat-y))
+          (define max-line-range (if (eq? (unit-type-sym le) 'hellion) 6.5 9.5))
+          (define d (dist2d ux uy lex ley))
+          (when (and (> d 0.25) (<= d max-line-range))
+            (define vx (/ (- ux lex) d))
+            (define vy (/ (- uy ley) d))
+            ;; Check if any other ground ally lies close to the same line-of-fire ray
+            (define collinear-ally?
+              (for/or ([o (in-list combat-units)]
+                       #:when (not (equal? (hash-ref o 'id -1) uid)))
+                (define ox (hash-ref o 'x base-x))
+                (define oy (hash-ref o 'y base-y))
+                (define odx (- ox lex))
+                (define ody (- oy ley))
+                (define proj (+ (* odx vx) (* ody vy)))
+                (define perp (abs (- (* odx vy) (* ody vx))))
+                (and (> proj 0.5) (<= proj (+ max-line-range 1.0)) (<= perp 1.1))))
+            (when collinear-ally?
+              (define sign (if (even? uid) 1.0 -1.0))
+              (define nx (* sign (- vy)))
+              (define ny (* sign vx))
+              (define lx (+ ux (* 2.5 nx)))
+              (define ly (+ uy (* 2.5 ny)))
+              (set-add! splash-evading-tags uid)
+              (emit! (list 'kite uid (safe-coord lx ux) (safe-coord ly uy)))))))))
+
+  ;; ---------------------------------------------------------------------------
   ;; Active Combat Spells & Engagement Micro (Protected by Weapon-Swing Lock
   ;; & Guided by Multi-Depth Mirrored Tactical Micro Brain)
   ;; ---------------------------------------------------------------------------
@@ -2900,6 +3146,13 @@
     (if live-obs?
         (append enemy-units enemy-bldgs)
         enemy-units))
+  (define ally-siege-tanks
+    (filter (lambda (u) (memq (unit-type-sym u) '(siege-tank siege-tank-sieged)))
+            combat-units))
+  (define static-defense-syms
+    '(spine-crawler photon-cannon bunker planetary-fortress))
+  (define short-range-bio-syms
+    '(marine marauder zergling roach hydralisk zealot stalker adept))
 
   (when (not (null? engagement-enemies))
     ;; Queen transfusion on wounded ally
@@ -2919,21 +3172,40 @@
       (define u-buffs (hash-ref u 'buffs '()))
       (define target-enemy (select-target-enemy-for-unit ux uy engagement-enemies ut))
       (define eid (hash-ref target-enemy 'id 9001))
+      (define etype (unit-type-sym target-enemy))
       (define ex (hash-ref target-enemy 'x nat-x))
       (define ey (hash-ref target-enemy 'y nat-y))
       (define edist (dist2d ux uy ex ey))
+      (define can-hit-target?
+        (or (not live-obs?)
+            (sc2-attacker-can-hit-enemy? ut target-enemy)))
       (define enemy-near-our-territory?
         (<= (min (dist2d ex ey base-x base-y)
                  (dist2d ex ey nat-x nat-y)
                  (dist2d ex ey third-x third-y))
             34.0))
       (define unit-should-engage-target?
-        (or (not live-obs?)
-            (<= edist 22.0)
-            enemy-near-our-territory?
-            (>= (length combat-units) live-attack-wave-min)))
+        (and can-hit-target?
+             (or (not live-obs?)
+                 (<= edist 22.0)
+                 enemy-near-our-territory?
+                 (>= (length combat-units) live-attack-wave-min))))
+      ;; Siege Tank Range-Leashing for Bio vs Static Defense (Spine Crawler / Cannon / Bunker):
+      ;; When a friendly Siege Tank is within 15.5 tiles of an enemy static defense structure,
+      ;; hold short-range bio outside the static defense's 7.0 range (at 8.5 tiles) so the
+      ;; Siege Tank (range 13) shells it down without feeding Marines/Roaches into Spine Crawlers!
+      (define tank-supporting-vs-static?
+        (and (memq ut short-range-bio-syms)
+             (memq etype static-defense-syms)
+             (<= edist 8.0)
+             (ormap (lambda (tk)
+                      (<= (dist2d ex ey (hash-ref tk 'x ux) (hash-ref tk 'y uy)) 15.5))
+                    ally-siege-tanks)))
       (define (emit-engage-or-rally!)
         (cond
+          [tank-supporting-vs-static?
+           (define-values (kx ky) (compute-kite-vector ux uy ex ey 2.5))
+           (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy)))]
           [unit-should-engage-target?
            (emit! (list 'attack-unit uid eid))]
           [(> (dist2d ux uy nat-x nat-y) 10.0)
@@ -2946,11 +3218,77 @@
            (when (or (not live-upgrades-tracked?) (<= edist 9.5))
              (emit! (list 'cast-spell uid 'corrosive-bile ex ey)))
            (emit-engage-or-rally!)]
-          [(lurker widow-mine)
-           (when (and (not (hash-ref u 'burrowed #f))
-                      (or (not live-upgrades-tracked?) (<= edist 11.0)))
-             (emit! (list 'cast-spell uid 'burrow eid)))
+          [(lurker lurker-burrowed)
+           (define is-burrowed? (or (eq? ut 'lurker-burrowed) (hash-ref u 'burrowed #f)))
+           (define min-ground-dist
+             (for/fold ([best +inf.0])
+                       ([e (in-list engagement-enemies)]
+                        #:when (not (sc2-unit-is-flying-sym? (unit-type-sym e))))
+               (min best (dist2d ux uy (hash-ref e 'x ex) (hash-ref e 'y ey)))))
+           (cond
+             [(and is-burrowed? (> min-ground-dist 10.5))
+              (emit! (list 'cast-spell uid 'burrow-up uid))]
+             [(and (not is-burrowed?)
+                   (or (not live-upgrades-tracked?) (<= min-ground-dist 9.0)))
+              (emit! (list 'cast-spell uid 'burrow eid))
+              (emit-engage-or-rally!)]
+             [else
+              (emit-engage-or-rally!)])]
+          [(widow-mine widow-mine-burrowed)
+           (define is-burrowed? (or (eq? ut 'widow-mine-burrowed) (hash-ref u 'burrowed #f)))
+           (define min-enemy-dist
+             (for/fold ([best +inf.0]) ([e (in-list engagement-enemies)])
+               (min best (dist2d ux uy (hash-ref e 'x ex) (hash-ref e 'y ey)))))
+           (cond
+             [(and is-burrowed? (> min-enemy-dist 6.5))
+              (emit! (list 'cast-spell uid 'widow-mine-unburrow uid))]
+             [is-burrowed?
+              ;; Active Widow Mine retargeting: aim Sentinel Missile at the enemy with the most
+              ;; nearby non-decoy allies within 1.75 splash radius
+              (define best-cluster-enemy
+                (let loop ([rem engagement-enemies] [best-e target-enemy] [best-cnt -1])
+                  (if (null? rem)
+                      best-e
+                      (let* ([e (car rem)]
+                             [et2 (unit-type-sym e)]
+                             [ex2 (hash-ref e 'x ex)]
+                             [ey2 (hash-ref e 'y ey)]
+                             [d2 (dist2d ux uy ex2 ey2)])
+                        (if (and (<= d2 5.0)
+                                 (not (memq et2 SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS)))
+                            (let ([cnt (count (lambda (o)
+                                                (<= (dist2d ex2 ey2 (hash-ref o 'x ex2) (hash-ref o 'y ey2)) 1.75))
+                                              engagement-enemies)])
+                              (if (> cnt best-cnt)
+                                  (loop (cdr rem) e cnt)
+                                  (loop (cdr rem) best-e best-cnt)))
+                            (loop (cdr rem) best-e best-cnt))))))
+              (emit! (list 'attack-unit uid (hash-ref best-cluster-enemy 'id eid)))]
+             [(or (not live-upgrades-tracked?) (<= min-enemy-dist 5.5))
+              (emit! (list 'cast-spell uid 'burrow eid))
+              (emit-engage-or-rally!)]
+             [else
+              (emit-engage-or-rally!)])]
+          [(baneling)
+           ;; Banelings roll directly through the center of Light/Bio clumps before detonating
+           (when (and (> edist 1.8) (<= edist 10.0))
+             (emit! (list 'kite uid (safe-coord ex ux) (safe-coord ey uy))))
            (emit-engage-or-rally!)]
+          [(carrier)
+           (emit! (list 'cast-spell uid 'build-interceptors uid))
+           (if (and (< edist 7.5) (> edist 0.1))
+               (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 2.5)])
+                 (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))
+               (emit-engage-or-rally!))]
+          [(disruptor)
+           (when (<= edist 11.0)
+             (emit! (list 'cast-spell uid 'purification-nova ex ey)))
+           (if (< edist 7.5)
+               (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 3.0)])
+                 (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))
+               (emit-engage-or-rally!))]
+          [(disruptor-phased)
+           (emit! (list 'kite uid (safe-coord ex ux) (safe-coord ey uy)))]
           [(sentry)
            (cond
              [(and (>= (hash-ref u 'energy SC2-SENTRY-FORCE-FIELD-ENERGY) SC2-SENTRY-GUARDIAN-SHIELD-ENERGY)
@@ -3002,7 +3340,8 @@
                       (>= u-hp SC2-MARINE-STIM-MIN-HP)
                       (or (not live-upgrades-tracked?) (<= edist 9.5)))
              (emit! (list 'cast-spell uid 'stimpack eid)))
-           (emit-engage-or-rally!)]
+           (unless (set-member? splash-evading-tags uid)
+             (emit-engage-or-rally!))]
           [(mutalisk)
            (if (< u-hp SC2-MUTALISK-KITE-HP-THRESH)
                (let-values ([(kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE)])
@@ -3014,9 +3353,10 @@
                (for ([ma (in-list mirrored-acts)]) (emit! ma))
                (emit-engage-or-rally!))]
           [else
-           (if (and (not (null? mirrored-acts)) unit-should-engage-target?)
-               (for ([ma (in-list mirrored-acts)]) (emit! ma))
-               (emit-engage-or-rally!))]))))
+           (unless (set-member? splash-evading-tags uid)
+             (if (and (not (null? mirrored-acts)) unit-should-engage-target?)
+                 (for ([ma (in-list mirrored-acts)]) (emit! ma))
+                 (emit-engage-or-rally!)))]))))
 
   ;; ---------------------------------------------------------------------------
   ;; Pro Mechanic #8: Burrowed Zergling Base-Blocker, Cheap Patrol Expansion
@@ -3254,7 +3594,22 @@
                             (human-cortex-cam-y cortex))
        '()]))
 
-  (define combined (append cam-actions unthrottled-actions))
+  ;; 3. Optimal Human Selection & Control-Group Compiler:
+  ;;    Coalesce per-unit commands into multi-tag squad orders and compile raw desired
+  ;;    unit selections into minimal-APM combinations of `control-group-recall`,
+  ;;    on-screen `select-box`, `select-ctrl-type`, `deselect-ctrl-type`, and on-the-fly
+  ;;    control-group updates.
+  (define selection-compiled-actions
+    (if (or (hash-has-key? raw-obs 'mineral-harvesters)
+            (hash-ref raw-obs 'compile-human-selections? #f))
+        (cortex-collapse-and-compile-selections!
+         cortex
+         unthrottled-actions
+         (hash-ref obs 'ally-units '())
+         (hash-ref obs 'ally-buildings '()))
+        unthrottled-actions))
+
+  (define combined (append cam-actions selection-compiled-actions))
   (define-values (accepted dropped)
     (cortex-filter-actions! cortex combined))
   (values accepted dropped spell-throttled))

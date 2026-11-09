@@ -36,6 +36,16 @@
  cortex-jump-camera-bookmark!
  cortex-sync-camera-bookmarks!
 
+ ;; Optimal Human Selection & Control-Group Compiler (On-Screen Box, Ctrl-Click, Control Group)
+ cortex-active-selection
+ set-cortex-active-selection!
+ units-in-camera-viewport
+ simulate-box-drag-on-screen
+ simulate-ctrl-click-subselect
+ simulate-shift-ctrl-deselect-type
+ compile-optimal-unit-selection!
+ cortex-collapse-and-compile-selections!
+
  ;; 7-Year (2019-2026) Pro Tournament Cortex Calibration & Fingerprinting
  PRO-CORTEX-PROFILES
  get-pro-cortex-profile
@@ -444,6 +454,599 @@
   (reverse actions))
 
 ;; =============================================================================
+;; Optimal Human Selection & Control-Group Compiler
+;;   Combines:
+;;     1. Active Selection Reuse (0 APM)
+;;     2. Control Group Recall (1 APM, off-screen or on-screen)
+;;     3. On-Screen Mouse Box-Drag `[x0, x1] x [y0, y1]` (strictly inside camera
+;;        viewport, capturing ALL friendly mobile units inside the rectangle)
+;;     4. On-Screen Single Click (`select-click`) & On-Screen Ctrl-Click Type
+;;     5. Within-Selection Wireframe Ctrl-Click (`select-ctrl-type`) &
+;;        Shift+Ctrl-Click Deselect (`deselect-ctrl-type`)
+;;     6. On-the-Fly Control Group Updates (`control-group-steal` / `control-group-set`)
+;; =============================================================================
+
+(define NON-COMBAT-SELECTION-INTRUDER-TYPES
+  '(drone probe scv mule larva egg cocoon baneling-cocoon ravager-cocoon
+    lurker-mp-egg brood-lord-cocoon overlord-cocoon overlord creep-tumor creep-tumor-burrowed))
+
+(define (cortex-active-selection cortex)
+  (hash-ref (human-cortex-camera-bookmarks cortex) 'active-selection '()))
+
+(define (set-cortex-active-selection! cortex unit-ids)
+  (define clean
+    (sort (remove-duplicates (filter (lambda (id) (and (exact-integer? id) (> id 0)))
+                                     (if (list? unit-ids) unit-ids (list unit-ids))))
+          <))
+  (hash-set! (human-cortex-camera-bookmarks cortex) 'active-selection clean)
+  clean)
+
+(define (units-in-camera-viewport units cam-x cam-y [w VIEWPORT-WIDTH] [h VIEWPORT-HEIGHT])
+  (filter (lambda (u)
+            (and (hash? u)
+                 (in-camera-viewport? cam-x cam-y
+                                      (hash-ref u 'x cam-x)
+                                      (hash-ref u 'y cam-y)
+                                      w h)))
+          units))
+
+;; Simulate a physical mouse drag-box `[x0, x1] x [y0, y1]` on the current screen:
+;; 1. Clamps the box to the camera viewport `[cam-x - w/2, cam-x + w/2] x [cam-y - h/2, cam-y + h/2]`.
+;;    Units outside the camera viewport can NEVER be selected by a box drag.
+;; 2. Selects ALL on-screen units whose `(x, y)` falls inside the clamped box (no cherry-picking).
+(define (simulate-box-drag-on-screen x0 y0 x1 y1 units
+                                     [cam-x #f] [cam-y #f]
+                                     [w VIEWPORT-WIDTH] [h VIEWPORT-HEIGHT])
+  (define screen-pool
+    (if (and (real? cam-x) (real? cam-y))
+        (units-in-camera-viewport units cam-x cam-y w h)
+        units))
+  (define half-w (/ (exact->inexact w) 2.0))
+  (define half-h (/ (exact->inexact h) 2.0))
+  (define raw-min-x (min (exact->inexact x0) (exact->inexact x1)))
+  (define raw-max-x (max (exact->inexact x0) (exact->inexact x1)))
+  (define raw-min-y (min (exact->inexact y0) (exact->inexact y1)))
+  (define raw-max-y (max (exact->inexact y0) (exact->inexact y1)))
+  (define bx0
+    (- (if (real? cam-x) (max (- cam-x half-w) raw-min-x) raw-min-x) 0.05))
+  (define bx1
+    (+ (if (real? cam-x) (min (+ cam-x half-w) raw-max-x) raw-max-x) 0.05))
+  (define by0
+    (- (if (real? cam-y) (max (- cam-y half-h) raw-min-y) raw-min-y) 0.05))
+  (define by1
+    (+ (if (real? cam-y) (min (+ cam-y half-h) raw-max-y) raw-max-y) 0.05))
+  (cond
+    [(or (> raw-min-x (+ (or cam-x raw-max-x) half-w))
+         (< raw-max-x (- (or cam-x raw-min-x) half-w))
+         (> raw-min-y (+ (or cam-y raw-max-y) half-h))
+         (< raw-max-y (- (or cam-y raw-min-y) half-h)))
+     '()]
+    [else
+     (filter (lambda (u)
+               (define ux (exact->inexact (hash-ref u 'x 0.0)))
+               (define uy (exact->inexact (hash-ref u 'y 0.0)))
+               (and (>= ux bx0) (<= ux bx1)
+                    (>= uy by0) (<= uy by1)))
+             screen-pool)]))
+
+;; Simulate Ctrl+clicking a unit portrait in the selection wireframe (or on screen):
+;; Filters `candidate-units` down to `{u in candidate-units | type(u) == target-type}`.
+(define (simulate-ctrl-click-subselect target-type candidate-units)
+  (filter (lambda (u)
+            (eq? (hash-ref u 'type 'unknown) target-type))
+          candidate-units))
+
+;; Simulate Shift+Ctrl+clicking a unit portrait in the selection wireframe:
+;; Deselects all units of `unwanted-type` from `candidate-units`.
+(define (simulate-shift-ctrl-deselect-type unwanted-type candidate-units)
+  (filter (lambda (u)
+            (not (eq? (hash-ref u 'type 'unknown) unwanted-type)))
+          candidate-units))
+
+(define (infer-natural-control-group-for-units unit-records)
+  (define types (remove-duplicates (map (lambda (u) (hash-ref u 'type 'unknown)) unit-records)))
+  (define harass-types
+    '(banshee mutalisk oracle phoenix void-ray warp-prism medivac reaper hellion adept viking))
+  (define caster-siege-types
+    '(queen raven viper infestor high-templar sentry disruptor
+      siege-tank siege-tank-sieged liberator lurker lurker-burrowed observer overseer))
+  (cond
+    [(null? types) #f]
+    [(andmap (lambda (t) (memq t caster-siege-types)) types) 3]
+    [(andmap (lambda (t) (memq t harass-types)) types) 2]
+    [(andmap (lambda (t) (not (memq t NON-COMBAT-SELECTION-INTRUDER-TYPES))) types) 1]
+    [else #f]))
+
+;; Compile a raw desired list of unit IDs into the minimum-APM physically valid
+;; sequence of StarCraft II selection actions:
+;;   - `keep-selection` (0 APM)
+;;   - `select-ctrl-type` / `deselect-ctrl-type` within `active-selection` (1 APM)
+;;   - `control-group-recall` [+ optional `select-ctrl-type` / `deselect-ctrl-type`] (1-2 APM)
+;;   - On-screen `select-click` / `select-ctrl-type` / `select-box` [+ optional wireframe filter] (1-2 APM)
+;;   - Optional on-the-fly control group binding (`control-group-steal`) when new units are boxed.
+(define (compile-optimal-unit-selection! cortex
+                                         raw-desired-ids
+                                         ally-units
+                                         [ally-buildings '()]
+                                         #:allow-superset? [allow-superset? #t]
+                                         #:compatible-pred [compatible-pred #f]
+                                         #:allow-camera-move? [allow-camera-move? #t]
+                                         #:allow-on-the-fly-cg-update? [allow-cg-update? #t])
+  (define desired-list
+    (sort (remove-duplicates
+           (filter (lambda (id) (and (exact-integer? id) (> id 0)))
+                   (if (list? raw-desired-ids) raw-desired-ids (list raw-desired-ids))))
+          <))
+  (define desired-set (list->seteqv desired-list))
+  (define all-records (append ally-units ally-buildings))
+  (define unit-by-id
+    (for/hasheqv ([u (in-list all-records)]
+                  #:when (and (hash? u) (exact-integer? (hash-ref u 'id #f))))
+      (values (hash-ref u 'id) u)))
+  (define desired-records
+    (filter-map (lambda (id) (hash-ref unit-by-id id #f)) desired-list))
+  (define desired-types
+    (remove-duplicates (map (lambda (u) (hash-ref u 'type 'unknown)) desired-records)))
+  (define single-desired-type
+    (and (= (length desired-types) 1) (car desired-types)))
+  (define desired-are-combat?
+    (and (not (null? desired-records))
+         (andmap (lambda (u)
+                   (not (memq (hash-ref u 'type 'unknown) NON-COMBAT-SELECTION-INTRUDER-TYPES)))
+                 desired-records)))
+
+  (define (unit-compatible? u)
+    (define id (hash-ref u 'id 0))
+    (define ut (hash-ref u 'type 'unknown))
+    (or (set-member? desired-set id)
+        (and allow-superset?
+             (if compatible-pred
+                 (compatible-pred u)
+                 (and desired-are-combat?
+                      (not (memq ut NON-COMBAT-SELECTION-INTRUDER-TYPES))
+                      (not (eq? ut 'queen))
+                      (not (eq? ut 'siege-tank-sieged))
+                      (not (eq? ut 'lurker-burrowed)))))))
+
+  (define (ids->records ids)
+    (filter-map (lambda (id) (hash-ref unit-by-id id #f)) ids))
+
+  (define (selection-valid-and-covers? cand-ids [min-coverage-ratio 0.70])
+    (define clean-ids
+      (sort (remove-duplicates (filter (lambda (id) (hash-has-key? unit-by-id id)) cand-ids)) <))
+    (define recs (ids->records clean-ids))
+    (define covered
+      (count (lambda (id) (set-member? desired-set id)) clean-ids))
+    (define min-needed
+      (max 1 (exact-ceiling (* min-coverage-ratio (max 1 (length desired-records))))))
+    (and (not (null? clean-ids))
+         (>= covered min-needed)
+         (andmap unit-compatible? recs)
+         clean-ids))
+
+  (cond
+    [(null? desired-records)
+     ;; If unit tags are synthetic test IDs not present in `ally-units`, pass through directly
+     (values '() desired-list)]
+    [else
+     (define active-ids
+       (filter (lambda (id) (hash-has-key? unit-by-id id))
+               (cortex-active-selection cortex)))
+     (define active-recs (ids->records active-ids))
+     (define candidates '())
+     (define (add-candidate! apm-cost covered-count seq realized-ids [box-origin? #f])
+       (when (and (pair? realized-ids) (> covered-count 0))
+         (set! candidates
+               (cons (list apm-cost covered-count seq (sort (remove-duplicates realized-ids) <) box-origin?)
+                     candidates))))
+
+     ;; -----------------------------------------------------------------------
+     ;; 1. Active Selection Reuse (0 APM) or Active Wireframe Sub-Select (1 APM)
+     ;; -----------------------------------------------------------------------
+     (when (not (null? active-ids))
+       (define valid-active (selection-valid-and-covers? active-ids 0.85))
+       (when valid-active
+         (add-candidate! 0
+                         (count (lambda (id) (set-member? desired-set id)) valid-active)
+                         '()
+                         valid-active
+                         #f))
+       ;; 1b. Ctrl-click single unit type `T` inside current `active-selection` (1 APM)
+       (when single-desired-type
+         (define sub-recs (simulate-ctrl-click-subselect single-desired-type active-recs))
+         (define sub-ids (map (lambda (u) (hash-ref u 'id 0)) sub-recs))
+         (define valid-sub (selection-valid-and-covers? sub-ids 0.75))
+         (when valid-sub
+           (add-candidate! 1
+                           (count (lambda (id) (set-member? desired-set id)) valid-sub)
+                           (list (list 'select-ctrl-type single-desired-type valid-sub))
+                           valid-sub
+                           #f)))
+       ;; 1c. Shift+Ctrl-click deselect single intruder type from `active-selection` (1 APM)
+       (define bad-types
+         (remove-duplicates
+          (map (lambda (u) (hash-ref u 'type 'unknown))
+               (filter (lambda (u) (not (unit-compatible? u))) active-recs))))
+       (when (= (length bad-types) 1)
+         (define bad-t (car bad-types))
+         (define desel-recs (simulate-shift-ctrl-deselect-type bad-t active-recs))
+         (define desel-ids (map (lambda (u) (hash-ref u 'id 0)) desel-recs))
+         (define valid-desel (selection-valid-and-covers? desel-ids 0.75))
+         (when valid-desel
+           (add-candidate! 1
+                           (count (lambda (id) (set-member? desired-set id)) valid-desel)
+                           (list (list 'deselect-ctrl-type bad-t valid-desel))
+                           valid-desel
+                           #f))))
+
+     ;; -----------------------------------------------------------------------
+     ;; 2. Control Group Recall (1 APM) or Recall + Wireframe Ctrl-Click (2 APM)
+     ;; -----------------------------------------------------------------------
+     (for ([g (in-list '(1 2 3 8 4 5 6 7 9 0))])
+       (define cg-ids
+         (filter (lambda (id) (hash-has-key? unit-by-id id))
+                 (cortex-get-control-group cortex g)))
+       (when (not (null? cg-ids))
+         (define cg-recs (ids->records cg-ids))
+         ;; 2a. Direct Control Group Recall (1 APM)
+         (define valid-cg (selection-valid-and-covers? cg-ids 0.75))
+         (when valid-cg
+           (add-candidate! 1
+                           (count (lambda (id) (set-member? desired-set id)) valid-cg)
+                           (list (list 'control-group-recall g valid-cg))
+                           valid-cg
+                           #f))
+         ;; 2b. Control Group Recall + Wireframe Ctrl-Click Type (2 APM)
+         (when single-desired-type
+           (define sub-recs (simulate-ctrl-click-subselect single-desired-type cg-recs))
+           (define sub-ids (map (lambda (u) (hash-ref u 'id 0)) sub-recs))
+           (define valid-sub (selection-valid-and-covers? sub-ids 0.75))
+           (when valid-sub
+             (add-candidate! 2
+                             (count (lambda (id) (set-member? desired-set id)) valid-sub)
+                             (list (list 'control-group-recall g cg-ids)
+                                   (list 'select-ctrl-type single-desired-type valid-sub))
+                             valid-sub
+                             #f)))
+         ;; 2c. Control Group Recall + Wireframe Shift+Ctrl-Click Deselect Intruder Type (2 APM)
+         (define cg-bad-types
+           (remove-duplicates
+            (map (lambda (u) (hash-ref u 'type 'unknown))
+                 (filter (lambda (u) (not (unit-compatible? u))) cg-recs))))
+         (when (= (length cg-bad-types) 1)
+           (define bad-t (car cg-bad-types))
+           (define desel-recs (simulate-shift-ctrl-deselect-type bad-t cg-recs))
+           (define desel-ids (map (lambda (u) (hash-ref u 'id 0)) desel-recs))
+           (define valid-desel (selection-valid-and-covers? desel-ids 0.75))
+           (when valid-desel
+             (add-candidate! 2
+                             (count (lambda (id) (set-member? desired-set id)) valid-desel)
+                             (list (list 'control-group-recall g cg-ids)
+                                   (list 'deselect-ctrl-type bad-t valid-desel))
+                             valid-desel
+                             #f)))))
+
+     ;; -----------------------------------------------------------------------
+     ;; 3. On-Screen Box-Drag, Single-Click & On-Screen Ctrl-Click Type
+     ;;    (Strictly restricted to units inside the camera viewport!)
+     ;; -----------------------------------------------------------------------
+     (define cur-cam-x (human-cortex-cam-x cortex))
+     (define cur-cam-y (human-cortex-cam-y cortex))
+     (define on-screen-desired-now
+       (units-in-camera-viewport desired-records cur-cam-x cur-cam-y))
+     (define need-camera-move?
+       (and allow-camera-move?
+            (< (length on-screen-desired-now)
+               (max 1 (exact-ceiling (* 0.50 (length desired-records)))))))
+     (define-values (eff-cam-x eff-cam-y cam-prefix cam-cost)
+       (if need-camera-move?
+           (let* ([cx (/ (for/sum ([u (in-list desired-records)])
+                           (exact->inexact (hash-ref u 'x cur-cam-x)))
+                         (max 1.0 (exact->inexact (length desired-records))))]
+                  [cy (/ (for/sum ([u (in-list desired-records)])
+                           (exact->inexact (hash-ref u 'y cur-cam-y)))
+                         (max 1.0 (exact->inexact (length desired-records))))])
+             (values cx cy (list (list 'move-camera cx cy)) 1))
+           (values cur-cam-x cur-cam-y '() 0)))
+
+     (define screen-ally-units
+       (units-in-camera-viewport ally-units eff-cam-x eff-cam-y))
+     (define screen-desired
+       (units-in-camera-viewport desired-records eff-cam-x eff-cam-y))
+
+     (when (not (null? screen-desired))
+       ;; 3a. Single-Unit Click on screen (1 APM + cam-cost)
+       (when (= (length screen-desired) 1)
+         (define u0 (car screen-desired))
+         (define u0-id (hash-ref u0 'id 0))
+         (define u0-x (hash-ref u0 'x eff-cam-x))
+         (define u0-y (hash-ref u0 'y eff-cam-y))
+         (add-candidate! (+ 1 cam-cost)
+                         1
+                         (append cam-prefix (list (list 'select-click u0-id u0-x u0-y (list u0-id))))
+                         (list u0-id)
+                         #f))
+
+       ;; 3b. On-Screen Ctrl+Click Unit Type (1 APM + cam-cost)
+       (when single-desired-type
+         (define screen-same-type
+           (simulate-ctrl-click-subselect single-desired-type screen-ally-units))
+         (when (and (not (null? screen-same-type))
+                    (andmap unit-compatible? screen-same-type))
+           (define u0 (car screen-desired))
+           (define st-ids (map (lambda (u) (hash-ref u 'id 0)) screen-same-type))
+           (define cov (count (lambda (id) (set-member? desired-set id)) st-ids))
+           (add-candidate! (+ 1 cam-cost)
+                           cov
+                           (append cam-prefix
+                                   (list (list 'select-ctrl-type
+                                               single-desired-type
+                                               (hash-ref u0 'x eff-cam-x)
+                                               (hash-ref u0 'y eff-cam-y)
+                                               st-ids)))
+                           st-ids
+                           #t)))
+
+       ;; 3c. On-Screen Axis-Aligned Box-Drag `[x0, x1] x [y0, y1]`
+       (define x0 (apply min (map (lambda (u) (exact->inexact (hash-ref u 'x eff-cam-x))) screen-desired)))
+       (define x1 (apply max (map (lambda (u) (exact->inexact (hash-ref u 'x eff-cam-x))) screen-desired)))
+       (define y0 (apply min (map (lambda (u) (exact->inexact (hash-ref u 'y eff-cam-y))) screen-desired)))
+       (define y1 (apply max (map (lambda (u) (exact->inexact (hash-ref u 'y eff-cam-y))) screen-desired)))
+       (define boxed-units
+         (simulate-box-drag-on-screen x0 y0 x1 y1 screen-ally-units eff-cam-x eff-cam-y))
+       (define boxed-ids (map (lambda (u) (hash-ref u 'id 0)) boxed-units))
+       (define incompatible-in-box
+         (filter (lambda (u) (not (unit-compatible? u))) boxed-units))
+
+       (cond
+         ;; Clean Box: zero incompatible intruders inside `[x0, x1] x [y0, y1]` (1 APM + cam-cost)
+         [(null? incompatible-in-box)
+          (define cov (count (lambda (id) (set-member? desired-set id)) boxed-ids))
+          (add-candidate! (+ 1 cam-cost)
+                          cov
+                          (append cam-prefix
+                                  (list (list 'select-box x0 y0 x1 y1 boxed-ids)))
+                          boxed-ids
+                          #t)]
+         [else
+          ;; Option i: Box + Wireframe Ctrl-Click Type (2 APM + cam-cost)
+          (when single-desired-type
+            (define sub-recs (simulate-ctrl-click-subselect single-desired-type boxed-units))
+            (define sub-ids (map (lambda (u) (hash-ref u 'id 0)) sub-recs))
+            (when (and (not (null? sub-ids))
+                       (andmap unit-compatible? sub-recs))
+              (define cov (count (lambda (id) (set-member? desired-set id)) sub-ids))
+              (add-candidate! (+ 2 cam-cost)
+                              cov
+                              (append cam-prefix
+                                      (list (list 'select-box x0 y0 x1 y1 boxed-ids)
+                                            (list 'select-ctrl-type single-desired-type sub-ids)))
+                              sub-ids
+                              #t)))
+
+          ;; Option ii: Box + Wireframe Shift+Ctrl-Click Deselect Intruder Type (2 APM + cam-cost)
+          (define intruder-types
+            (remove-duplicates (map (lambda (u) (hash-ref u 'type 'unknown)) incompatible-in-box)))
+          (when (= (length intruder-types) 1)
+            (define bad-t (car intruder-types))
+            (define cleaned-recs (simulate-shift-ctrl-deselect-type bad-t boxed-units))
+            (define cleaned-ids (map (lambda (u) (hash-ref u 'id 0)) cleaned-recs))
+            (when (and (not (null? cleaned-ids))
+                       (andmap unit-compatible? cleaned-recs))
+              (define cov (count (lambda (id) (set-member? desired-set id)) cleaned-ids))
+              (add-candidate! (+ 2 cam-cost)
+                              cov
+                              (append cam-prefix
+                                      (list (list 'select-box x0 y0 x1 y1 boxed-ids)
+                                            (list 'deselect-ctrl-type bad-t cleaned-ids)))
+                              cleaned-ids
+                              #t)))
+
+          ;; Option iii: Intruder-Pruned Sub-Box (shrink box to exclude incompatible intruders, 1 APM + cam-cost)
+          (let prune-loop ([sub-desired screen-desired])
+            (when (>= (length sub-desired) 1)
+              (define sx0 (apply min (map (lambda (u) (exact->inexact (hash-ref u 'x eff-cam-x))) sub-desired)))
+              (define sx1 (apply max (map (lambda (u) (exact->inexact (hash-ref u 'x eff-cam-x))) sub-desired)))
+              (define sy0 (apply min (map (lambda (u) (exact->inexact (hash-ref u 'y eff-cam-y))) sub-desired)))
+              (define sy1 (apply max (map (lambda (u) (exact->inexact (hash-ref u 'y eff-cam-y))) sub-desired)))
+              (define sub-boxed
+                (simulate-box-drag-on-screen sx0 sy0 sx1 sy1 screen-ally-units eff-cam-x eff-cam-y))
+              (define sub-bad (filter (lambda (u) (not (unit-compatible? u))) sub-boxed))
+              (cond
+                [(null? sub-bad)
+                 (define sb-ids (map (lambda (u) (hash-ref u 'id 0)) sub-boxed))
+                 (define cov (count (lambda (id) (set-member? desired-set id)) sb-ids))
+                 (add-candidate! (+ 1 cam-cost)
+                                 cov
+                                 (append cam-prefix
+                                         (list (if (= (length sb-ids) 1)
+                                                   (list 'select-click (car sb-ids) sx0 sy0 sb-ids)
+                                                   (list 'select-box sx0 sy0 sx1 sy1 sb-ids))))
+                                 sb-ids
+                                 (> (length sb-ids) 1))]
+                [(> (length sub-desired) 1)
+                 (define cx (/ (for/sum ([u (in-list sub-desired)]) (exact->inexact (hash-ref u 'x eff-cam-x)))
+                               (exact->inexact (length sub-desired))))
+                 (define cy (/ (for/sum ([u (in-list sub-desired)]) (exact->inexact (hash-ref u 'y eff-cam-y)))
+                               (exact->inexact (length sub-desired))))
+                 (define outlier
+                   (argmax (lambda (u)
+                             (+ (sqr (- (hash-ref u 'x cx) cx))
+                                (sqr (- (hash-ref u 'y cy) cy))))
+                           sub-desired))
+                 (prune-loop (remq outlier sub-desired))])))]))
+
+     ;; -----------------------------------------------------------------------
+     ;; 4. Pick Minimum-APM Candidate (tie-broken by highest desired coverage)
+     ;; -----------------------------------------------------------------------
+     (cond
+       [(null? candidates)
+        ;; No units could be selected (e.g. all desired units are off-screen and camera movement was disallowed)
+        (set-human-cortex-offscreen-violations!
+         cortex (add1 (human-cortex-offscreen-violations cortex)))
+        (values '() '())]
+       [else
+        (define best
+          (argmin (lambda (c)
+                    (define apm-cost (first c))
+                    (define cov (second c))
+                    ;; Primary key: minimize APM when coverage >= 70% of desired; otherwise penalize missing coverage
+                    (- (* 10.0 apm-cost) (* 3.5 cov)))
+                  (reverse candidates)))
+        (match-define (list _cost _cov best-seq best-ids from-box?) best)
+        ;; Update camera if `move-camera` was emitted in `best-seq`
+        (for ([act (in-list best-seq)])
+          (match act
+            [(list 'move-camera mcx mcy)
+             (cortex-move-camera! cortex mcx mcy)]
+            [_ (void)]))
+        ;; Update active selection in cortex
+        (set-cortex-active-selection! cortex best-ids)
+        ;; 5. On-the-Fly Control Group Update (`control-group-steal`) when a multi-unit
+        ;;    selection was formed via box/ctrl-click and expands its natural control group
+        (define cg-update-tail
+          (if (and allow-cg-update? from-box? (>= (length best-ids) 2))
+              (let* ([realized-recs (ids->records best-ids)]
+                     [nat-g (infer-natural-control-group-for-units realized-recs)])
+                (if nat-g
+                    (let* ([cur-cg (cortex-get-control-group cortex nat-g)]
+                           [cur-set (list->seteqv cur-cg)]
+                           [has-new? (ormap (lambda (id) (not (set-member? cur-set id))) best-ids)])
+                      (if has-new?
+                          (let ([merged-cg (remove-duplicates (append cur-cg best-ids))])
+                            (cortex-steal-control-group! cortex nat-g merged-cg)
+                            (list (list 'control-group-steal nat-g merged-cg)))
+                          '()))
+                    '()))
+              '()))
+        (values (append best-seq cg-update-tail) best-ids)])]))
+
+;; Coalesce per-unit tactical commands into shared group commands, order broad-group
+;; commands before narrowed wireframe `select-ctrl-type` commands, and compile each
+;; command's unit selection into minimal-APM `select-box` / `control-group-recall` /
+;; `select-ctrl-type` / `deselect-ctrl-type` sequences.
+(define (cortex-collapse-and-compile-selections! cortex
+                                                 candidate-actions
+                                                 ally-units
+                                                 [ally-buildings '()]
+                                                 #:allow-camera-move? [allow-camera-move? #t])
+  (define (quantize-pt v)
+    (/ (round (* (exact->inexact v) 0.5)) 0.5))
+
+  (define (unit-command-coalesce-key act)
+    (match act
+      [(list (and op (or 'attack 'attack-unit)) uid target-id)
+       #:when (and (or (exact-integer? uid) (list? uid)) (exact-integer? target-id))
+       (list 'attack-unit target-id)]
+      [(list (and op (or 'attack-pos 'move 'kite 'retreat)) uid x y)
+       #:when (and (or (exact-integer? uid) (list? uid)) (real? x) (real? y))
+       (list op (quantize-pt x) (quantize-pt y))]
+      [(list 'hold-position uid _ ...)
+       #:when (or (exact-integer? uid) (list? uid))
+       (list 'hold-position)]
+      [(list (and op (or 'cast 'cast-spell)) uid spell-sym args ...)
+       #:when (and (or (exact-integer? uid) (list? uid))
+                   (memq spell-sym '(stimpack guardian-shield siege-mode unsiege-mode
+                                     corrosive-bile blink burrow unburrow)))
+       (cons 'cast-spell
+             (cons spell-sym
+                   (map (lambda (a) (if (real? a) (quantize-pt a) a)) args)))]
+      [_ #f]))
+
+  (define (extract-action-uids act)
+    (define raw (second act))
+    (if (list? raw) raw (list raw)))
+
+  (define (rebuild-coalesced-action template-act uids)
+    (define uid-arg (if (= (length uids) 1) (car uids) uids))
+    (match template-act
+      [(list (or 'attack 'attack-unit) _ target-id)
+       (list 'attack-unit uid-arg target-id)]
+      [(list op _ rest ...)
+       (cons op (cons uid-arg rest))]))
+
+  ;; 1. Coalesce per-unit commands sharing the same equivalence key
+  (define key->uids (make-hash))
+  (define key->template (make-hash))
+  (for ([act (in-list candidate-actions)])
+    (define k (unit-command-coalesce-key act))
+    (when k
+      (unless (hash-has-key? key->template k)
+        (hash-set! key->template k act))
+      (hash-set! key->uids k
+                 (append (hash-ref key->uids k '()) (extract-action-uids act)))))
+
+  (define emitted-keys (mutable-set))
+  (define coalesced-list '())
+  (for ([act (in-list candidate-actions)])
+    (define k (unit-command-coalesce-key act))
+    (cond
+      [(not k)
+       (set! coalesced-list (cons act coalesced-list))]
+      [(not (set-member? emitted-keys k))
+       (set-add! emitted-keys k)
+       (define uids (remove-duplicates (hash-ref key->uids k '())))
+       (set! coalesced-list
+             (cons (rebuild-coalesced-action (hash-ref key->template k act) uids)
+                   coalesced-list))]))
+  (define ordered-coalesced (reverse coalesced-list))
+
+  ;; 2. Sort adjacent combat commands so larger multi-type group commands (`attack-unit` / `attack-pos`)
+  ;;    execute BEFORE smaller single-type spell/siege commands (`cast-spell`), enabling 1-click
+  ;;    `select-ctrl-type` wireframe narrowing from the active army selection!
+  (define combat-cmds
+    (filter (lambda (a) (unit-command-coalesce-key a)) ordered-coalesced))
+  (define sorted-combat-cmds
+    (sort combat-cmds
+          >
+          #:key (lambda (a)
+                  (define uids (extract-action-uids a))
+                  (+ (* 10 (length uids))
+                     (if (memq (car a) '(attack-unit attack attack-pos move kite)) 5 0)))))
+  (define combat-queue sorted-combat-cmds)
+  (define reordered-actions
+    (for/list ([a (in-list ordered-coalesced)])
+      (if (unit-command-coalesce-key a)
+          (begin0 (car combat-queue)
+            (set! combat-queue (cdr combat-queue)))
+          a)))
+
+  ;; 3. Compile each coalesced unit command through `compile-optimal-unit-selection!`
+  (define compiled-out '())
+  (for ([act (in-list reordered-actions)])
+    (define k (unit-command-coalesce-key act))
+    (cond
+      [(not k)
+       ;; Keep cortex camera & control-group state synced with explicit framing actions
+       (match act
+         [(list (or 'move-camera 'camera-focus) (? real? cx) (? real? cy))
+          (cortex-move-camera! cortex cx cy)]
+         [(list 'camera-focus _ (? real? cx) (? real? cy))
+          (cortex-move-camera! cortex cx cy)]
+         [(list 'control-group-recall (? exact-integer? g) _ ...)
+          (set-cortex-active-selection! cortex (cortex-get-control-group cortex g))]
+         [_ (void)])
+       (set! compiled-out (append compiled-out (list act)))]
+      [else
+       (define desired-uids (extract-action-uids act))
+       (define is-spell? (memq (car act) '(cast cast-spell)))
+       (define-values (sel-seq realized-uids)
+         (compile-optimal-unit-selection!
+          cortex
+          desired-uids
+          ally-units
+          ally-buildings
+          #:allow-superset? (not is-spell?)
+          #:allow-camera-move? allow-camera-move?
+          #:allow-on-the-fly-cg-update? (not is-spell?)))
+       (when (not (null? realized-uids))
+         (set! compiled-out
+               (append compiled-out
+                       sel-seq
+                       (list (rebuild-coalesced-action act realized-uids)))))]))
+  compiled-out)
+
+;; =============================================================================
 ;; Action Prioritization & Viewport / Token-Bucket Filtering
 ;; =============================================================================
 
@@ -456,7 +1059,13 @@
                'camera-bookmark-jump
                'control-group-steal
                'control-group-set
+               'control-group-append
+               'control-group-append-steal
                'control-group-recall
+               'select-box
+               'select-click
+               'select-ctrl-type
+               'deselect-ctrl-type
                'mirror-spatial-maneuver
                'mirror-macro-directive
                'mirror-prediction
@@ -503,7 +1112,13 @@
     [(list 'camera-bookmark-jump _ ...)      67]
     [(list 'control-group-steal _ ...)       66]
     [(list 'control-group-set _ ...)         66]
+    [(list 'control-group-append _ ...)      66]
+    [(list 'control-group-append-steal _ ...) 66]
     [(list 'control-group-recall _ ...)      66]
+    [(list 'select-box _ ...)                66]
+    [(list 'select-click _ ...)              66]
+    [(list 'select-ctrl-type _ ...)          66]
+    [(list 'deselect-ctrl-type _ ...)        66]
     [(list (or 'cast-protective-buff-aura
                'position-in-buff-aura-with-splash-spread
                'pre-split-wings
@@ -514,9 +1129,9 @@
     [_                                       55]))
 
 ;; Filter candidate actions through the human cortex token bucket and camera viewport.
-;; UI/framing actions (`move-camera`, `camera-bookmark-*`, `control-group-*`, `posture-transition`,
-;; `mirror-*`) are zero-token-cost cognitive framing directives so they never starve `build`,
-;; `train`, `kite`, or `attack-unit` out of the unit/macro token budget (`cap`).
+;; UI/framing actions (`move-camera`, `camera-bookmark-*`, `control-group-*`, `select-*`,
+;; `posture-transition`, `mirror-*`) are zero-token-cost cognitive framing directives so they
+;; never starve `build`, `train`, `kite`, or `attack-unit` out of the unit/macro token budget (`cap`).
 (define (cortex-filter-actions! cortex candidate-actions #:budget [budget #f])
   (define cap (max 0 (or budget (human-cortex-max-tokens cortex))))
   (define indexed

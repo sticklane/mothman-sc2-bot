@@ -2387,6 +2387,171 @@
   (assert-true! (not (priority-schedule-can-spend? t-sched-open 'marauder 100 150 #:category 'combat-unit))
                 "Open Factory+TechLab waiting on minerals for Siege Tank (100M/150G) must escrow against Marauder"))
 
+(run-suite "5.18 Optimal Human Selection & Control-Group Compiler, Unseen Pro Units/Splash Micro & Mirror-Mind FoW Persistence"
+  ;; 1. Optimal Human Selection & Control-Group Compiler (`lib/human-cortex.rkt`):
+  ;;    - `simulate-box-drag-on-screen` strictly selects only units inside the current camera viewport
+  ;;    - 1-APM `control-group-recall`, 2-APM `control-group-recall` + `select-ctrl-type` wireframe sub-selection,
+  ;;      2-APM `select-box` + `deselect-ctrl-type` wireframe deselection, and on-the-fly control-group merge
+  (define sel-cortex (make-human-cortex #:cam-x 50.0 #:cam-y 50.0))
+  (define on-screen-units
+    (list (hash 'id 101 'type 'marine 'x 48.0 'y 48.0)
+          (hash 'id 102 'type 'marine 'x 49.0 'y 48.5)
+          (hash 'id 103 'type 'marine 'x 50.0 'y 49.0)
+          (hash 'id 104 'type 'siege-tank 'x 48.2 'y 48.2)
+          (hash 'id 105 'type 'siege-tank 'x 51.5 'y 49.8)
+          ;; Off-screen reinforcement Marine at (120, 120) outside viewport (50, 50)
+          (hash 'id 199 'type 'marine 'x 120.0 'y 120.0)))
+
+  ;; 1a. Box drag on screen cannot select off-screen unit 199
+  (define boxed-ids
+    (map (lambda (u) (hash-ref u 'id))
+         (simulate-box-drag-on-screen 40.0 40.0 60.0 60.0 on-screen-units 50.0 50.0)))
+  (assert-true! (and (member 101 boxed-ids) (member 104 boxed-ids) (not (member 199 boxed-ids)))
+                "simulate-box-drag-on-screen must select on-screen units 101..105 and reject off-screen unit 199")
+
+  ;; 1b. Pre-seed Control Group 1 with all 6 units (including off-screen 199), then compile selection for `{104, 105}` (Siege Tanks):
+  ;;     Compiler should use 2-APM `control-group-recall 1` + `select-ctrl-type siege-tank` (or `select-box` + `select-ctrl-type`)!
+  (cortex-set-control-group! sel-cortex 1 '(101 102 103 104 105 199))
+  (set-cortex-active-selection! sel-cortex '(101 102 103 104 105 199))
+  (define-values (tank-sel-seq tank-realized)
+    (compile-optimal-unit-selection! sel-cortex '(104 105) on-screen-units '()
+                                     #:allow-superset? #f
+                                     #:allow-on-the-fly-cg-update? #f))
+  (assert-eq! tank-realized '(104 105))
+  (assert-eq! (length tank-sel-seq) 1)
+  (assert-eq! (caar tank-sel-seq) 'select-ctrl-type)
+  (assert-eq! (cadar tank-sel-seq) 'siege-tank)
+
+  ;; 1c. Shift+Ctrl+Click Deselect Type (`deselect-ctrl-type`):
+  ;;     Active selection is `{101, 102, 103, 104, 105}` (3 Marines + 2 Siege Tanks), desired is `{101, 102, 103}` (all except Siege Tanks):
+  (set-cortex-active-selection! sel-cortex '(101 102 103 104 105))
+  (define-values (marine-sel-seq marine-realized)
+    (compile-optimal-unit-selection! sel-cortex '(101 102 103) on-screen-units '()
+                                     #:allow-superset? #f
+                                     #:allow-on-the-fly-cg-update? #f))
+  (assert-eq! marine-realized '(101 102 103))
+  (assert-true! (or (member '(deselect-ctrl-type siege-tank (101 102 103)) marine-sel-seq)
+                    (member '(select-ctrl-type marine (101 102 103)) marine-sel-seq))
+                "Compiler must collapse `{101, 102, 103}` from `{101..105}` into 1-click wireframe `select-ctrl-type` or `deselect-ctrl-type`")
+
+  ;; 1d. `cortex-collapse-and-compile-selections!` coalesces per-unit commands and preserves off-screen CG members on steal:
+  (cortex-set-control-group! sel-cortex 1 '(199))
+  (set-cortex-active-selection! sel-cortex '())
+  (define collapsed-cmds
+    (cortex-collapse-and-compile-selections!
+     sel-cortex
+     '((attack-unit 101 9001)
+       (attack-unit 102 9001)
+       (attack-unit 103 9001)
+       (attack-unit 104 9001)
+       (attack-unit 105 9001)
+       (cast-spell 104 siege-mode 9001)
+       (cast-spell 105 siege-mode 9001))
+     on-screen-units
+     '()))
+  (assert-true! (ormap (lambda (a)
+                         (and (eq? (car a) 'attack-unit)
+                              (list? (second a))
+                              (= (length (second a)) 5)))
+                       collapsed-cmds)
+                "cortex-collapse-and-compile-selections! must coalesce 5 individual attack-unit orders into 1 multi-tag command")
+  (assert-true! (ormap (lambda (a)
+                         (and (eq? (car a) 'cast-spell)
+                              (equal? (second a) '(104 105))
+                              (eq? (third a) 'siege-mode)))
+                       collapsed-cmds)
+                "cortex-collapse-and-compile-selections! must coalesce 2 Siege Tank siege-mode casts into 1 multi-tag command")
+  (assert-true! (member 199 (cortex-get-control-group sel-cortex 1))
+                "On-the-fly control-group update must merge on-screen boxed units without dropping off-screen member 199")
+
+  ;; 2. Unseen Units & Pro Splash/Micro Tactics (`lib/tactics-sim.rkt` & `lib/bot-runtime.rkt`):
+  ;; 2a. Carrier / Brood Lord decoy deprioritization (`interceptor` & `broodling`):
+  (define carrier-vs-interceptor-target
+    (select-target-enemy-for-unit
+     50.0 50.0
+     (list (hash 'id 801 'type 'interceptor 'x 52.0 'y 50.0 'hp 80 'is-flying #t)
+           (hash 'id 802 'type 'carrier 'x 55.0 'y 50.0 'hp 450 'is-flying #t))
+     'marine))
+  (assert-eq! (hash-ref carrier-vs-interceptor-target 'id) 802)
+
+  ;; 2b. Baneling Light/Bio clump target selection over single Armored Marauder:
+  (define bane-target
+    (select-target-enemy-for-unit
+     50.0 50.0
+     (list (hash 'id 810 'type 'marauder 'x 52.0 'y 50.0 'hp 125)
+           (hash 'id 811 'type 'marine 'x 54.0 'y 50.0 'hp 45)
+           (hash 'id 812 'type 'marine 'x 54.5 'y 50.5 'hp 45)
+           (hash 'id 813 'type 'marine 'x 53.8 'y 50.2 'hp 45))
+     'baneling))
+  (assert-true! (memv (hash-ref bane-target 'id) '(811 812 813))
+                "Baneling must target the Marine Light/Bio clump (811..813) over the front-most Armored Marauder (810)")
+
+  ;; 2c. Pro Splash Evasion (Purification Nova / Widow Mine / Baneling / Hellion) & Siege Tank Bio Range-Leashing vs Spine Crawler:
+  (define splash-rt (make-live-bot-runtime #:race 'Terran))
+  (define-values (splash-acts _vc _rc)
+    (step-layer3-and-4-tactics!
+     splash-rt
+     (hash 'frame 2000
+           'mineral-harvesters 24
+           'researched-upgrades '(stimpack)
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 50.0
+           'ally-units (list (hash 'id 201 'type 'marine 'x 58.0 'y 50.0 'hp 45 'max-hp 45)
+                             (hash 'id 202 'type 'marine 'x 58.8 'y 50.0 'hp 45 'max-hp 45)
+                             (hash 'id 203 'type 'siege-tank-sieged 'x 53.0 'y 50.0 'hp 175 'max-hp 175 'sieged #t))
+           'enemy-units (list (hash 'id 901 'type 'widow-mine-burrowed 'x 61.0 'y 50.0 'hp 90 'burrowed #t 'target-id 201))
+           'enemy-buildings (list (hash 'id 950 'type 'spine-crawler 'x 64.0 'y 50.0 'hp 300)))
+     0))
+  ;; Both targeted Marine 201 and nearby Marine 202 (within 2.2 tiles of 201) must kite/split away!
+  (assert-true! (ormap (lambda (a) (and (eq? (car a) 'kite) (= (second a) 201))) splash-acts)
+                "Targeted Marine 201 must pull back from Widow Mine 901")
+  (assert-true! (ormap (lambda (a) (and (eq? (car a) 'kite) (= (second a) 202))) splash-acts)
+                "Nearby Marine 202 within 2.2 tiles of targeted Marine 201 must radially split away from Widow Mine blast")
+
+  ;; Siege Tank range-leashing: when only enemy Spine Crawler (950) at (64, 50) is present within 6 tiles of Marine 201 at (58, 50)
+  ;; and friendly Siege Tank 203 is at (53, 50) (within 15.5 tiles), Marine 201 leashes back via `kite` instead of feeding into Spine Crawler!
+  (define-values (leash-acts _vc2 _rc2)
+    (step-layer3-and-4-tactics!
+     (make-live-bot-runtime #:race 'Terran)
+     (hash 'frame 2020
+           'mineral-harvesters 24
+           'researched-upgrades '(stimpack)
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 50.0
+           'ally-units (list (hash 'id 201 'type 'marine 'x 58.0 'y 50.0 'hp 45 'max-hp 45)
+                             (hash 'id 203 'type 'siege-tank-sieged 'x 53.0 'y 50.0 'hp 175 'max-hp 175 'sieged #t))
+           'enemy-units '()
+           'enemy-buildings (list (hash 'id 950 'type 'spine-crawler 'x 64.0 'y 50.0 'hp 300)))
+     0))
+  (assert-true! (ormap (lambda (a) (and (eq? (car a) 'kite) (= (second a) 201))) leash-acts)
+                "Marine 201 within 6 tiles of Spine Crawler 950 with Siege Tank 203 in range must leash back (`kite`) outside Spine range")
+
+  ;; 3. Mirror-Mind Fog-of-War Persistence & Zero-Vision Probe Guard (`lib/mirror-mind-predictor.rkt`):
+  (define fow-mm (make-mirror-mind-state #:our-race 'Terran #:enemy-race 'Zerg #:depth 2))
+  ;; At frame 1344 with zero enemy units in sight, `step-mirror-mind-predictor!` must NOT issue a blind probe or lock active-depth = 1
+  (step-mirror-mind-predictor! fow-mm (hash 'frame 1344 'enemy-units '() 'enemy-buildings '()))
+  (step-mirror-mind-predictor! fow-mm (hash 'frame 1600 'enemy-units '() 'enemy-buildings '()))
+  (assert-eq! (mirror-mind-state-last-probe-response fow-mm) 'untested)
+  (assert-eq! (mirror-mind-state-active-depth fow-mm) 2)
+  ;; At frame 6000, we scout an enemy Hydralisk Den; at frame 7000 our scout leaves vision (`enemy-units = '()`, `enemy-buildings = '()`)
+  (step-mirror-mind-predictor!
+   fow-mm
+   (hash 'frame 6000
+         'enemy-units (list (hash 'id 7001 'type 'hydralisk 'x 150 'y 150 'hp 90))
+         'enemy-buildings (list (hash 'id 7100 'type 'hydralisk-den 'x 155 'y 155 'hp 850))))
+  (step-mirror-mind-predictor!
+   fow-mm
+   (hash 'frame 7000
+         'enemy-units '()
+         'enemy-buildings '()))
+  (assert-true! (memq 'hydralisk-den
+                      (enemy-tech-observation-implied-tech-buildings
+                       (mirror-mind-state-last-tech-observation fow-mm)))
+                "Scouted hydralisk-den must persist across fog-of-war blackouts in Mirror-Mind")
+  (assert-eq! (zero-sum-exclusion-reading-committed-primary-branch
+               (mirror-mind-state-last-zero-sum-reading fow-mm))
+              'hydra-lurker-den))
+
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"
         total-assertions)
