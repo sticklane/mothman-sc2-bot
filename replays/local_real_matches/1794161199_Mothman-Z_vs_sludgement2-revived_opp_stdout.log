@@ -1,0 +1,6 @@
+INFO:sc2.protocol:Client status changed to Status.launched (was None)
+INFO:sc2.protocol:Client status changed to Status.launched (was None)
+INFO:root:Player 0 - sludgement2
+INFO:sc2.sc2process:kill_switch: Process cleanup
+INFO:sc2.sc2process:Cleaning up...
+INFO:sc2.sc2process:Cleanup complete

@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "ladder.py", line 87, in <module>
+    main()
+  File "ladder.py", line 80, in main
+    result = asyncio.get_event_loop().run_until_complete(
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/python/lib/python3.8/asyncio/base_events.py", line 616, in run_until_complete
+    return future.result()
+  File "ladder.py", line 57, in join
+    result = await sc2.main._play_game(player, client, False, portconfig)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/sc2/main.py", line 222, in _play_game
+    result = await _play_game_ai(client, player_id, player.ai, realtime, step_time_limit, game_time_limit)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/sc2/main.py", line 94, in _play_game_ai
+    game_data = await client.get_game_data()
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/sc2/client.py", line 135, in get_game_data
+    result = await self._execute(
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/sc2/protocol.py", line 70, in _execute
+    raise ProtocolError(f"{response.error}")
+sc2.protocol.ProtocolError: ['A game has not been started yet']

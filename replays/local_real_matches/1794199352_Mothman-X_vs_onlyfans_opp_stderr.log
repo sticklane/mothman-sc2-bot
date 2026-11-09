@@ -1,0 +1,9 @@
+
+thread 'hp-server' (2751) panicked at /Users/tristam/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hotpath-0.10.1/src/metrics_server.rs:62:25:
+Failed to bind metrics server to 127.0.0.1:6770: Address in use (os error 98). Customize the port using the HOTPATH_METRICS_PORT environment variable.
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/std/src/panicking.rs:689:5
+   1: core::panicking::panic_fmt
+             at /rustc/59807616e1fa2540724bfbac14d7976d7e4a3860/library/core/src/panicking.rs:80:14
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.

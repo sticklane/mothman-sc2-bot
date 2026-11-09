@@ -1,0 +1,2537 @@
+[
+  {
+    "match_id": "5105059",
+    "map": "Magannatha AIE",
+    "our_race": "Terran",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        276.9,
+        "init:CommandCenter"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        41.7,
+        "init:Hatchery"
+      ],
+      [
+        92.4,
+        "init:Hatchery"
+      ],
+      [
+        311.5,
+        "init:Hatchery"
+      ],
+      [
+        350.8,
+        "init:Hatchery"
+      ],
+      [
+        360.7,
+        "init:Hatchery"
+      ],
+      [
+        414.9,
+        "init:Hatchery"
+      ],
+      [
+        423.4,
+        "init:Hatchery"
+      ],
+      [
+        464.2,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        242.9,
+        "Stimpack"
+      ],
+      [
+        297.5,
+        "ShieldWall"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        217.0,
+        "zerglingmovementspeed"
+      ],
+      [
+        384.8,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        474.3,
+        "EvolveGroovedSpines"
+      ],
+      [
+        509.0,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        523.8,
+        "ZergGroundArmorsLevel2"
+      ],
+      [
+        526.3,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        544.4,
+        "EvolveMuscularAugments"
+      ]
+    ],
+    "max_our_workers": 33,
+    "max_opp_workers": 76,
+    "max_our_gas": 676,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_1_opp_0",
+      "posture_timing-push"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 276.9s (>180s).",
+      "MACRO_BASE_DEFICIT: 2 bases vs opponent 9 bases.",
+      "WORKER_DEFICIT: Peak 33 workers vs opponent 76 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 676 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5105060",
+    "map": "Persephone AIE",
+    "our_race": "Protoss",
+    "opp_race": "Zerg",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        41.7,
+        "init:Hatchery"
+      ],
+      [
+        94.7,
+        "init:Hatchery"
+      ],
+      [
+        292.1,
+        "init:Hatchery"
+      ],
+      [
+        364.6,
+        "init:Hatchery"
+      ],
+      [
+        378.1,
+        "init:Hatchery"
+      ],
+      [
+        387.0,
+        "init:Hatchery"
+      ],
+      [
+        419.9,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [],
+    "opp_upgrades": [
+      [
+        217.5,
+        "zerglingmovementspeed"
+      ],
+      [
+        288.1,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        443.7,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        453.3,
+        "EvolveGroovedSpines"
+      ],
+      [
+        510.7,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        517.3,
+        "ZergMeleeWeaponsLevel2"
+      ],
+      [
+        517.7,
+        "EvolveMuscularAugments"
+      ]
+    ],
+    "max_our_workers": 21,
+    "max_opp_workers": 76,
+    "max_our_gas": 184,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_1_opp_0",
+      "posture_timing-push"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "MACRO_BASE_DEFICIT: 1 bases vs opponent 8 bases.",
+      "WORKER_DEFICIT: Peak 21 workers vs opponent 76 workers.",
+      "ZERO_UPGRADES_COMPLETED: Completed 0 combat/tech upgrades during match."
+    ]
+  },
+  {
+    "match_id": "5105061",
+    "map": "Ley Lines AIE",
+    "our_race": "Terran",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        295.0,
+        "init:CommandCenter"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        41.8,
+        "init:Hatchery"
+      ],
+      [
+        97.6,
+        "init:Hatchery"
+      ],
+      [
+        335.8,
+        "init:Hatchery"
+      ],
+      [
+        370.8,
+        "init:Hatchery"
+      ],
+      [
+        378.9,
+        "init:Hatchery"
+      ],
+      [
+        428.7,
+        "init:Hatchery"
+      ],
+      [
+        438.9,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        246.5,
+        "Stimpack"
+      ],
+      [
+        303.4,
+        "ShieldWall"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        217.5,
+        "zerglingmovementspeed"
+      ],
+      [
+        487.8,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        489.1,
+        "EvolveGroovedSpines"
+      ],
+      [
+        527.0,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        545.7,
+        "ZergMissileWeaponsLevel1"
+      ]
+    ],
+    "max_our_workers": 21,
+    "max_opp_workers": 76,
+    "max_our_gas": 201,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_4_opp_2",
+      "posture_macro-expand"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 295.0s (>180s).",
+      "MACRO_BASE_DEFICIT: 2 bases vs opponent 8 bases.",
+      "WORKER_DEFICIT: Peak 21 workers vs opponent 76 workers."
+    ]
+  },
+  {
+    "match_id": "5105062",
+    "map": "Ley Lines AIE",
+    "our_race": "Terran",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        294.1,
+        "init:CommandCenter"
+      ],
+      [
+        526.4,
+        "init:CommandCenter"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        41.9,
+        "init:Hatchery"
+      ],
+      [
+        96.7,
+        "init:Hatchery"
+      ],
+      [
+        321.7,
+        "init:Hatchery"
+      ],
+      [
+        360.8,
+        "init:Hatchery"
+      ],
+      [
+        368.4,
+        "init:Hatchery"
+      ],
+      [
+        395.0,
+        "init:Hatchery"
+      ],
+      [
+        402.8,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        241.3,
+        "Stimpack"
+      ],
+      [
+        285.0,
+        "ShieldWall"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        218.1,
+        "zerglingmovementspeed"
+      ],
+      [
+        474.6,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        515.2,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        581.1,
+        "ZergFlyerWeaponsLevel1"
+      ],
+      [
+        589.8,
+        "overlordspeed"
+      ]
+    ],
+    "max_our_workers": 37,
+    "max_opp_workers": 81,
+    "max_our_gas": 473,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_1_opp_0",
+      "posture_timing-push"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 294.1s (>180s).",
+      "MACRO_BASE_DEFICIT: 3 bases vs opponent 8 bases.",
+      "WORKER_DEFICIT: Peak 37 workers vs opponent 81 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 473 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5105063",
+    "map": "Magannatha AIE",
+    "our_race": "Terran",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        273.8,
+        "init:CommandCenter"
+      ],
+      [
+        359.4,
+        "init:CommandCenter"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        41.4,
+        "init:Hatchery"
+      ],
+      [
+        93.0,
+        "init:Hatchery"
+      ],
+      [
+        313.1,
+        "init:Hatchery"
+      ],
+      [
+        347.9,
+        "init:Hatchery"
+      ],
+      [
+        358.1,
+        "init:Hatchery"
+      ],
+      [
+        413.0,
+        "init:Hatchery"
+      ],
+      [
+        433.8,
+        "init:Hatchery"
+      ],
+      [
+        465.0,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        255.2,
+        "Stimpack"
+      ],
+      [
+        309.3,
+        "ShieldWall"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        217.9,
+        "zerglingmovementspeed"
+      ],
+      [
+        361.8,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        485.5,
+        "EvolveGroovedSpines"
+      ],
+      [
+        512.3,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        523.1,
+        "ZergGroundArmorsLevel2"
+      ],
+      [
+        530.1,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        549.9,
+        "EvolveMuscularAugments"
+      ]
+    ],
+    "max_our_workers": 33,
+    "max_opp_workers": 76,
+    "max_our_gas": 604,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_1_opp_0",
+      "posture_macro-expand"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 273.8s (>180s).",
+      "MACRO_BASE_DEFICIT: 3 bases vs opponent 9 bases.",
+      "WORKER_DEFICIT: Peak 33 workers vs opponent 76 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 604 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5105064",
+    "map": "Pylon AIE",
+    "our_race": "Protoss",
+    "opp_race": "Zerg",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        41.6,
+        "init:Hatchery"
+      ],
+      [
+        90.9,
+        "init:Hatchery"
+      ],
+      [
+        261.3,
+        "init:Hatchery"
+      ],
+      [
+        316.8,
+        "init:Hatchery"
+      ],
+      [
+        345.6,
+        "init:Hatchery"
+      ],
+      [
+        380.4,
+        "init:Hatchery"
+      ],
+      [
+        397.8,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [],
+    "opp_upgrades": [
+      [
+        216.2,
+        "zerglingmovementspeed"
+      ],
+      [
+        291.5,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        429.2,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        512.5,
+        "ZergMeleeWeaponsLevel2"
+      ]
+    ],
+    "max_our_workers": 21,
+    "max_opp_workers": 76,
+    "max_our_gas": 284,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_1_opp_0",
+      "posture_timing-push"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "MACRO_BASE_DEFICIT: 1 bases vs opponent 8 bases.",
+      "WORKER_DEFICIT: Peak 21 workers vs opponent 76 workers.",
+      "ZERO_UPGRADES_COMPLETED: Completed 0 combat/tech upgrades during match."
+    ]
+  },
+  {
+    "match_id": "5105065",
+    "map": "Ultralove AIE",
+    "our_race": "Terran",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        295.8,
+        "init:CommandCenter"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        41.6,
+        "init:Hatchery"
+      ],
+      [
+        94.7,
+        "init:Hatchery"
+      ],
+      [
+        280.6,
+        "init:Hatchery"
+      ],
+      [
+        348.6,
+        "init:Hatchery"
+      ],
+      [
+        366.7,
+        "init:Hatchery"
+      ],
+      [
+        389.2,
+        "init:Hatchery"
+      ],
+      [
+        396.8,
+        "init:Hatchery"
+      ],
+      [
+        458.7,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        253.4,
+        "Stimpack"
+      ],
+      [
+        300.9,
+        "ShieldWall"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        217.3,
+        "zerglingmovementspeed"
+      ],
+      [
+        454.7,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        495.6,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        533.5,
+        "EvolveGroovedSpines"
+      ],
+      [
+        565.8,
+        "ZergFlyerWeaponsLevel1"
+      ],
+      [
+        592.4,
+        "ZergGroundArmorsLevel2"
+      ],
+      [
+        598.0,
+        "EvolveMuscularAugments"
+      ],
+      [
+        598.4,
+        "ZergMissileWeaponsLevel1"
+      ]
+    ],
+    "max_our_workers": 32,
+    "max_opp_workers": 76,
+    "max_our_gas": 661,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_1_opp_0",
+      "posture_macro-expand"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 295.8s (>180s).",
+      "MACRO_BASE_DEFICIT: 2 bases vs opponent 9 bases.",
+      "WORKER_DEFICIT: Peak 32 workers vs opponent 76 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 661 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5105066",
+    "map": "Pylon AIE",
+    "our_race": "Protoss",
+    "opp_race": "Zerg",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        41.9,
+        "init:Hatchery"
+      ],
+      [
+        93.4,
+        "init:Hatchery"
+      ],
+      [
+        289.6,
+        "init:Hatchery"
+      ],
+      [
+        326.8,
+        "init:Hatchery"
+      ],
+      [
+        346.2,
+        "init:Hatchery"
+      ],
+      [
+        393.9,
+        "init:Hatchery"
+      ],
+      [
+        403.8,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [],
+    "opp_upgrades": [
+      [
+        214.6,
+        "zerglingmovementspeed"
+      ],
+      [
+        287.4,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        433.3,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        455.9,
+        "EvolveGroovedSpines"
+      ],
+      [
+        510.9,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        514.1,
+        "ZergMeleeWeaponsLevel2"
+      ],
+      [
+        521.7,
+        "EvolveMuscularAugments"
+      ]
+    ],
+    "max_our_workers": 21,
+    "max_opp_workers": 76,
+    "max_our_gas": 188,
+    "supply_blocked_snapshots": 1,
+    "tags": [
+      "depth_3_opp_2",
+      "posture_timing-push"
+    ],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "MACRO_BASE_DEFICIT: 1 bases vs opponent 8 bases.",
+      "WORKER_DEFICIT: Peak 21 workers vs opponent 76 workers.",
+      "ZERO_UPGRADES_COMPLETED: Completed 0 combat/tech upgrades during match."
+    ]
+  },
+  {
+    "match_id": "5107137",
+    "map": "Torches AIE",
+    "our_race": "Zerg",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        168.5,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        137.2,
+        "init:CommandCenter"
+      ],
+      [
+        213.0,
+        "init:CommandCenter"
+      ],
+      [
+        334.0,
+        "init:CommandCenter"
+      ],
+      [
+        490.4,
+        "init:CommandCenter"
+      ],
+      [
+        572.2,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        224.0,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        451.5,
+        "ShieldWall"
+      ],
+      [
+        453.1,
+        "TerranInfantryWeaponsLevel1"
+      ],
+      [
+        508.2,
+        "TerranInfantryArmorsLevel1"
+      ],
+      [
+        551.6,
+        "Stimpack"
+      ]
+    ],
+    "max_our_workers": 40,
+    "max_opp_workers": 83,
+    "max_our_gas": 627,
+    "supply_blocked_snapshots": 0,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "MACRO_BASE_DEFICIT: 2 bases vs opponent 6 bases.",
+      "WORKER_DEFICIT: Peak 40 workers vs opponent 83 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 627 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5107267",
+    "map": "Incorporeal AIE",
+    "our_race": "Protoss",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        225.3,
+        "init:Nexus"
+      ],
+      [
+        289.9,
+        "init:Nexus"
+      ],
+      [
+        303.3,
+        "init:Nexus"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        139.0,
+        "init:CommandCenter"
+      ],
+      [
+        313.1,
+        "init:CommandCenter"
+      ],
+      [
+        557.9,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        455.8,
+        "ExtendedThermalLance"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        286.8,
+        "ShieldWall"
+      ],
+      [
+        302.2,
+        "Stimpack"
+      ],
+      [
+        454.7,
+        "TerranInfantryWeaponsLevel1"
+      ],
+      [
+        571.1,
+        "TerranInfantryArmorsLevel1"
+      ]
+    ],
+    "max_our_workers": 30,
+    "max_opp_workers": 66,
+    "max_our_gas": 649,
+    "supply_blocked_snapshots": 6,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 225.3s (>180s).",
+      "WORKER_DEFICIT: Peak 30 workers vs opponent 66 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 649 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5107269",
+    "map": "Ley Lines AIE",
+    "our_race": "Zerg",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        199.9,
+        "init:Hatchery"
+      ],
+      [
+        371.5,
+        "init:Hatchery"
+      ],
+      [
+        436.5,
+        "init:Hatchery"
+      ],
+      [
+        467.1,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        120.0,
+        "init:CommandCenter"
+      ],
+      [
+        286.3,
+        "init:CommandCenter"
+      ],
+      [
+        384.1,
+        "init:CommandCenter"
+      ],
+      [
+        439.1,
+        "init:CommandCenter"
+      ],
+      [
+        617.7,
+        "init:CommandCenter"
+      ],
+      [
+        720.5,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        194.3,
+        "zerglingmovementspeed"
+      ],
+      [
+        319.2,
+        "GlialReconstitution"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        367.7,
+        "Stimpack"
+      ],
+      [
+        383.6,
+        "ShieldWall"
+      ],
+      [
+        543.8,
+        "PunisherGrenades"
+      ],
+      [
+        630.9,
+        "TerranInfantryWeaponsLevel1"
+      ],
+      [
+        642.2,
+        "TerranInfantryArmorsLevel1"
+      ],
+      [
+        664.0,
+        "SmartServos"
+      ],
+      [
+        699.7,
+        "TerranVehicleAndShipArmorsLevel1"
+      ]
+    ],
+    "max_our_workers": 64,
+    "max_opp_workers": 76,
+    "max_our_gas": 617,
+    "supply_blocked_snapshots": 0,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 199.9s (>180s).",
+      "UNSPENT_GAS_FLOAT: Floated up to 617 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5107274",
+    "map": "Ultralove AIE",
+    "our_race": "Protoss",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        204.8,
+        "init:Nexus"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        96.5,
+        "init:Hatchery"
+      ],
+      [
+        451.8,
+        "init:Hatchery"
+      ],
+      [
+        600.3,
+        "init:Hatchery"
+      ],
+      [
+        635.1,
+        "init:Hatchery"
+      ],
+      [
+        686.5,
+        "init:Hatchery"
+      ],
+      [
+        868.8,
+        "init:Hatchery"
+      ],
+      [
+        891.8,
+        "init:Hatchery"
+      ],
+      [
+        911.4,
+        "init:Hatchery"
+      ],
+      [
+        915.4,
+        "init:Hatchery"
+      ],
+      [
+        935.0,
+        "init:Hatchery"
+      ],
+      [
+        950.2,
+        "init:Hatchery"
+      ],
+      [
+        982.9,
+        "init:Hatchery"
+      ],
+      [
+        1023.2,
+        "init:Hatchery"
+      ],
+      [
+        1042.9,
+        "init:Hatchery"
+      ],
+      [
+        1169.1,
+        "init:Hatchery"
+      ],
+      [
+        1204.1,
+        "init:Hatchery"
+      ],
+      [
+        1352.2,
+        "init:Hatchery"
+      ],
+      [
+        1381.3,
+        "init:Hatchery"
+      ],
+      [
+        1410.9,
+        "init:Hatchery"
+      ],
+      [
+        1526.7,
+        "init:Hatchery"
+      ],
+      [
+        1903.8,
+        "init:Hatchery"
+      ],
+      [
+        2616.6,
+        "init:Hatchery"
+      ],
+      [
+        2698.1,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [],
+    "opp_upgrades": [
+      [
+        245.2,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "max_our_workers": 31,
+    "max_opp_workers": 82,
+    "max_our_gas": 843,
+    "supply_blocked_snapshots": 0,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 204.8s (>180s).",
+      "MACRO_BASE_DEFICIT: 2 bases vs opponent 24 bases.",
+      "WORKER_DEFICIT: Peak 31 workers vs opponent 82 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 843 Vespene without sufficient gas tech/upgrades.",
+      "ZERO_UPGRADES_COMPLETED: Completed 0 combat/tech upgrades during match."
+    ]
+  },
+  {
+    "match_id": "5107275",
+    "map": "Pylon AIE",
+    "our_race": "Zerg",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        97.4,
+        "init:Hatchery"
+      ],
+      [
+        497.9,
+        "init:Hatchery"
+      ],
+      [
+        554.7,
+        "init:Hatchery"
+      ],
+      [
+        716.6,
+        "init:Hatchery"
+      ],
+      [
+        793.8,
+        "init:Hatchery"
+      ],
+      [
+        880.4,
+        "init:Hatchery"
+      ],
+      [
+        899.6,
+        "init:Hatchery"
+      ],
+      [
+        918.3,
+        "init:Hatchery"
+      ],
+      [
+        979.5,
+        "init:Hatchery"
+      ],
+      [
+        992.9,
+        "init:Hatchery"
+      ],
+      [
+        1000.5,
+        "init:Hatchery"
+      ],
+      [
+        1022.1,
+        "init:Hatchery"
+      ],
+      [
+        1039.5,
+        "init:Hatchery"
+      ],
+      [
+        1053.0,
+        "init:Hatchery"
+      ],
+      [
+        1099.0,
+        "init:Hatchery"
+      ],
+      [
+        1104.6,
+        "init:Hatchery"
+      ],
+      [
+        1154.9,
+        "init:Hatchery"
+      ],
+      [
+        1323.8,
+        "init:Hatchery"
+      ],
+      [
+        1339.2,
+        "init:Hatchery"
+      ],
+      [
+        1384.1,
+        "init:Hatchery"
+      ],
+      [
+        1402.2,
+        "init:Hatchery"
+      ],
+      [
+        1418.6,
+        "init:Hatchery"
+      ],
+      [
+        1433.1,
+        "init:Hatchery"
+      ],
+      [
+        1508.6,
+        "init:Hatchery"
+      ],
+      [
+        1523.2,
+        "init:Hatchery"
+      ],
+      [
+        1747.5,
+        "init:Hatchery"
+      ],
+      [
+        2052.8,
+        "init:Hatchery"
+      ],
+      [
+        2367.9,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [],
+    "our_upgrades": [
+      [
+        227.0,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        227.5,
+        "Stimpack"
+      ],
+      [
+        306.3,
+        "ShieldWall"
+      ],
+      [
+        333.4,
+        "DrillClaws"
+      ]
+    ],
+    "max_our_workers": 84,
+    "max_opp_workers": 20,
+    "max_our_gas": 1601,
+    "supply_blocked_snapshots": 3,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "UNSPENT_GAS_FLOAT: Floated up to 1601 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5107276",
+    "map": "Magannatha AIE",
+    "our_race": "Terran",
+    "opp_race": "Protoss",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        354.3,
+        "init:Nexus"
+      ],
+      [
+        437.1,
+        "init:Nexus"
+      ],
+      [
+        496.6,
+        "init:Nexus"
+      ],
+      [
+        597.7,
+        "init:Nexus"
+      ],
+      [
+        727.1,
+        "init:Nexus"
+      ],
+      [
+        1021.3,
+        "init:Nexus"
+      ],
+      [
+        1333.1,
+        "init:Nexus"
+      ],
+      [
+        1403.1,
+        "init:Nexus"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        226.3,
+        "Stimpack"
+      ],
+      [
+        305.0,
+        "ShieldWall"
+      ],
+      [
+        322.9,
+        "DrillClaws"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        387.9,
+        "ExtendedThermalLance"
+      ],
+      [
+        801.7,
+        "ProtossGroundWeaponsLevel1"
+      ]
+    ],
+    "max_our_workers": 20,
+    "max_opp_workers": 84,
+    "max_our_gas": 633,
+    "supply_blocked_snapshots": 216,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "MACRO_BASE_DEFICIT: 1 bases vs opponent 9 bases.",
+      "WORKER_DEFICIT: Peak 20 workers vs opponent 84 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 633 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5107277",
+    "map": "Ley Lines AIE",
+    "our_race": "Zerg",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        103.5,
+        "init:Hatchery"
+      ],
+      [
+        343.8,
+        "init:Hatchery"
+      ],
+      [
+        521.7,
+        "init:Hatchery"
+      ],
+      [
+        641.6,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        79.4,
+        "init:Hatchery"
+      ],
+      [
+        314.3,
+        "init:Hatchery"
+      ],
+      [
+        354.3,
+        "init:Hatchery"
+      ],
+      [
+        427.2,
+        "init:Hatchery"
+      ],
+      [
+        542.3,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        375.8,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        227.5,
+        "zerglingmovementspeed"
+      ],
+      [
+        321.7,
+        "Burrow"
+      ],
+      [
+        427.4,
+        "EvolveGroovedSpines"
+      ],
+      [
+        450.9,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        493.1,
+        "EvolveMuscularAugments"
+      ],
+      [
+        583.1,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        599.0,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        631.5,
+        "Frenzy"
+      ],
+      [
+        669.0,
+        "GlialReconstitution"
+      ],
+      [
+        718.3,
+        "DiggingClaws"
+      ],
+      [
+        721.1,
+        "NeuralParasite"
+      ],
+      [
+        738.3,
+        "ZergMissileWeaponsLevel2"
+      ],
+      [
+        753.6,
+        "ZergMeleeWeaponsLevel2"
+      ]
+    ],
+    "max_our_workers": 63,
+    "max_opp_workers": 92,
+    "max_our_gas": 680,
+    "supply_blocked_snapshots": 3,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "WORKER_DEFICIT: Peak 63 workers vs opponent 92 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 680 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5107288",
+    "map": "Persephone AIE",
+    "our_race": "Zerg",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        110.2,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        139.2,
+        "init:CommandCenter"
+      ],
+      [
+        323.8,
+        "init:CommandCenter"
+      ],
+      [
+        525.7,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        195.6,
+        "zerglingmovementspeed"
+      ],
+      [
+        366.1,
+        "GlialReconstitution"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        259.3,
+        "ShieldWall"
+      ],
+      [
+        276.1,
+        "Stimpack"
+      ],
+      [
+        451.1,
+        "TerranInfantryWeaponsLevel1"
+      ]
+    ],
+    "max_our_workers": 46,
+    "max_opp_workers": 66,
+    "max_our_gas": 392,
+    "supply_blocked_snapshots": 1,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": []
+  },
+  {
+    "match_id": "5107289",
+    "map": "Pylon AIE",
+    "our_race": "Terran",
+    "opp_race": "Terran",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        136.4,
+        "init:CommandCenter"
+      ],
+      [
+        310.2,
+        "init:CommandCenter"
+      ],
+      [
+        326.5,
+        "init:CommandCenter"
+      ],
+      [
+        575.2,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        225.4,
+        "Stimpack"
+      ],
+      [
+        304.2,
+        "ShieldWall"
+      ],
+      [
+        348.1,
+        "DrillClaws"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        260.4,
+        "ShieldWall"
+      ],
+      [
+        276.5,
+        "Stimpack"
+      ],
+      [
+        453.3,
+        "TerranInfantryWeaponsLevel1"
+      ],
+      [
+        572.2,
+        "TerranInfantryArmorsLevel1"
+      ]
+    ],
+    "max_our_workers": 20,
+    "max_opp_workers": 66,
+    "max_our_gas": 618,
+    "supply_blocked_snapshots": 6,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "MACRO_BASE_DEFICIT: 1 bases vs opponent 5 bases.",
+      "WORKER_DEFICIT: Peak 20 workers vs opponent 66 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 618 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5107290",
+    "map": "Pylon AIE",
+    "our_race": "Protoss",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        189.2,
+        "init:Nexus"
+      ],
+      [
+        297.6,
+        "init:Nexus"
+      ],
+      [
+        374.5,
+        "init:Nexus"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        139.8,
+        "init:CommandCenter"
+      ],
+      [
+        306.6,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [],
+    "opp_upgrades": [
+      [
+        263.6,
+        "ShieldWall"
+      ],
+      [
+        277.5,
+        "Stimpack"
+      ],
+      [
+        459.0,
+        "TerranInfantryWeaponsLevel1"
+      ]
+    ],
+    "max_our_workers": 34,
+    "max_opp_workers": 66,
+    "max_our_gas": 1325,
+    "supply_blocked_snapshots": 1,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "DELAYED_NATURAL_EXPANSION: First expansion started at 189.2s (>180s).",
+      "WORKER_DEFICIT: Peak 34 workers vs opponent 66 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 1325 Vespene without sufficient gas tech/upgrades.",
+      "ZERO_UPGRADES_COMPLETED: Completed 0 combat/tech upgrades during match."
+    ]
+  },
+  {
+    "match_id": "5107455",
+    "map": "Pylon AIE",
+    "our_race": "Zerg",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        96.5,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        119.2,
+        "init:CommandCenter"
+      ],
+      [
+        287.5,
+        "init:CommandCenter"
+      ],
+      [
+        362.1,
+        "init:CommandCenter"
+      ],
+      [
+        450.1,
+        "init:CommandCenter"
+      ],
+      [
+        561.7,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        227.2,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        435.0,
+        "Stimpack"
+      ],
+      [
+        488.2,
+        "ShieldWall"
+      ],
+      [
+        548.7,
+        "PunisherGrenades"
+      ],
+      [
+        630.9,
+        "TerranInfantryWeaponsLevel1"
+      ],
+      [
+        637.9,
+        "SmartServos"
+      ],
+      [
+        646.7,
+        "TerranInfantryArmorsLevel1"
+      ],
+      [
+        673.7,
+        "TerranVehicleAndShipArmorsLevel1"
+      ]
+    ],
+    "max_our_workers": 40,
+    "max_opp_workers": 77,
+    "max_our_gas": 711,
+    "supply_blocked_snapshots": 0,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "MACRO_BASE_DEFICIT: 2 bases vs opponent 6 bases.",
+      "WORKER_DEFICIT: Peak 40 workers vs opponent 77 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 711 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5108098",
+    "map": "Pylon AIE",
+    "our_race": "Zerg",
+    "opp_race": "Terran",
+    "our_expansions": [
+      [
+        96.0,
+        "init:Hatchery"
+      ],
+      [
+        893.1,
+        "init:Hatchery"
+      ],
+      [
+        947.7,
+        "init:Hatchery"
+      ],
+      [
+        992.3,
+        "init:Hatchery"
+      ],
+      [
+        1122.0,
+        "init:Hatchery"
+      ],
+      [
+        1138.0,
+        "init:Hatchery"
+      ],
+      [
+        1166.9,
+        "init:Hatchery"
+      ],
+      [
+        1180.3,
+        "init:Hatchery"
+      ],
+      [
+        1188.0,
+        "init:Hatchery"
+      ],
+      [
+        1203.8,
+        "init:Hatchery"
+      ],
+      [
+        1230.6,
+        "init:Hatchery"
+      ],
+      [
+        1233.6,
+        "init:Hatchery"
+      ],
+      [
+        1245.5,
+        "init:Hatchery"
+      ],
+      [
+        1278.2,
+        "init:Hatchery"
+      ],
+      [
+        1351.8,
+        "init:Hatchery"
+      ],
+      [
+        1363.7,
+        "init:Hatchery"
+      ],
+      [
+        1407.9,
+        "init:Hatchery"
+      ],
+      [
+        1450.4,
+        "init:Hatchery"
+      ],
+      [
+        1464.4,
+        "init:Hatchery"
+      ],
+      [
+        1474.2,
+        "init:Hatchery"
+      ],
+      [
+        1649.6,
+        "init:Hatchery"
+      ],
+      [
+        1698.8,
+        "init:Hatchery"
+      ],
+      [
+        1742.1,
+        "init:Hatchery"
+      ],
+      [
+        1772.4,
+        "init:Hatchery"
+      ],
+      [
+        1841.9,
+        "init:Hatchery"
+      ],
+      [
+        1845.8,
+        "init:Hatchery"
+      ],
+      [
+        1937.6,
+        "init:Hatchery"
+      ],
+      [
+        2015.3,
+        "init:Hatchery"
+      ],
+      [
+        2038.4,
+        "init:Hatchery"
+      ],
+      [
+        2061.7,
+        "init:Hatchery"
+      ],
+      [
+        2122.6,
+        "init:Hatchery"
+      ],
+      [
+        2165.7,
+        "init:Hatchery"
+      ],
+      [
+        2178.8,
+        "init:Hatchery"
+      ],
+      [
+        2192.5,
+        "init:Hatchery"
+      ],
+      [
+        2271.0,
+        "init:Hatchery"
+      ],
+      [
+        2324.8,
+        "init:Hatchery"
+      ],
+      [
+        2341.1,
+        "init:Hatchery"
+      ],
+      [
+        2647.3,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [],
+    "our_upgrades": [
+      [
+        244.7,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        231.7,
+        "Stimpack"
+      ],
+      [
+        310.4,
+        "ShieldWall"
+      ],
+      [
+        337.9,
+        "DrillClaws"
+      ]
+    ],
+    "max_our_workers": 79,
+    "max_opp_workers": 20,
+    "max_our_gas": 5749,
+    "supply_blocked_snapshots": 1,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "UNSPENT_GAS_FLOAT: Floated up to 5749 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5108100",
+    "map": "Persephone AIE",
+    "our_race": "Zerg",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        112.7,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        79.5,
+        "init:Hatchery"
+      ],
+      [
+        324.4,
+        "init:Hatchery"
+      ],
+      [
+        456.9,
+        "init:Hatchery"
+      ],
+      [
+        505.4,
+        "init:Hatchery"
+      ],
+      [
+        525.9,
+        "init:Hatchery"
+      ],
+      [
+        682.0,
+        "init:Hatchery"
+      ],
+      [
+        695.9,
+        "init:Hatchery"
+      ],
+      [
+        735.3,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        228.8,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        229.0,
+        "zerglingmovementspeed"
+      ],
+      [
+        325.9,
+        "Burrow"
+      ],
+      [
+        426.1,
+        "EvolveGroovedSpines"
+      ],
+      [
+        460.8,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        490.6,
+        "EvolveMuscularAugments"
+      ],
+      [
+        553.8,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        576.5,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        584.7,
+        "NeuralParasite"
+      ],
+      [
+        644.9,
+        "Frenzy"
+      ],
+      [
+        736.8,
+        "DiggingClaws"
+      ]
+    ],
+    "max_our_workers": 40,
+    "max_opp_workers": 89,
+    "max_our_gas": 640,
+    "supply_blocked_snapshots": 2,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "MACRO_BASE_DEFICIT: 2 bases vs opponent 9 bases.",
+      "WORKER_DEFICIT: Peak 40 workers vs opponent 89 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 640 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5108105",
+    "map": "Pylon AIE",
+    "our_race": "Terran",
+    "opp_race": "Protoss",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        209.2,
+        "init:Nexus"
+      ],
+      [
+        318.4,
+        "init:Nexus"
+      ],
+      [
+        380.3,
+        "init:Nexus"
+      ],
+      [
+        445.4,
+        "init:Nexus"
+      ],
+      [
+        506.0,
+        "init:Nexus"
+      ],
+      [
+        1043.2,
+        "init:Nexus"
+      ],
+      [
+        1052.3,
+        "init:Nexus"
+      ],
+      [
+        1073.4,
+        "init:Nexus"
+      ],
+      [
+        1082.2,
+        "init:Nexus"
+      ],
+      [
+        1096.2,
+        "init:Nexus"
+      ],
+      [
+        1109.7,
+        "init:Nexus"
+      ],
+      [
+        1164.6,
+        "init:Nexus"
+      ],
+      [
+        1183.8,
+        "init:Nexus"
+      ],
+      [
+        1205.2,
+        "init:Nexus"
+      ],
+      [
+        1223.9,
+        "init:Nexus"
+      ],
+      [
+        1404.7,
+        "init:Nexus"
+      ],
+      [
+        1555.8,
+        "init:Nexus"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        232.4,
+        "Stimpack"
+      ],
+      [
+        311.1,
+        "ShieldWall"
+      ],
+      [
+        420.8,
+        "DrillClaws"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        639.2,
+        "ExtendedThermalLance"
+      ],
+      [
+        701.8,
+        "ProtossGroundWeaponsLevel1"
+      ]
+    ],
+    "max_our_workers": 20,
+    "max_opp_workers": 84,
+    "max_our_gas": 625,
+    "supply_blocked_snapshots": 212,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "MACRO_BASE_DEFICIT: 1 bases vs opponent 18 bases.",
+      "WORKER_DEFICIT: Peak 20 workers vs opponent 84 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 625 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5108106",
+    "map": "Incorporeal AIE",
+    "our_race": "Terran",
+    "opp_race": "Zerg",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        78.9,
+        "init:Hatchery"
+      ],
+      [
+        287.4,
+        "init:Hatchery"
+      ],
+      [
+        659.3,
+        "init:Hatchery"
+      ],
+      [
+        673.5,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        226.3,
+        "Stimpack"
+      ],
+      [
+        305.0,
+        "ShieldWall"
+      ],
+      [
+        329.3,
+        "DrillClaws"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        227.0,
+        "zerglingmovementspeed"
+      ],
+      [
+        288.8,
+        "Burrow"
+      ],
+      [
+        450.9,
+        "EvolveGroovedSpines"
+      ],
+      [
+        462.2,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        544.5,
+        "GlialReconstitution"
+      ],
+      [
+        577.5,
+        "ZergMeleeWeaponsLevel1"
+      ],
+      [
+        608.3,
+        "EvolveMuscularAugments"
+      ],
+      [
+        612.0,
+        "ZergGroundArmorsLevel1"
+      ],
+      [
+        626.3,
+        "TunnelingClaws"
+      ],
+      [
+        673.6,
+        "Frenzy"
+      ]
+    ],
+    "max_our_workers": 20,
+    "max_opp_workers": 91,
+    "max_our_gas": 640,
+    "supply_blocked_snapshots": 8,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "MACRO_BASE_DEFICIT: 1 bases vs opponent 5 bases.",
+      "WORKER_DEFICIT: Peak 20 workers vs opponent 91 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 640 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5108340",
+    "map": "Ultralove AIE",
+    "our_race": "Zerg",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        104.2,
+        "init:Hatchery"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        41.7,
+        "init:Hatchery"
+      ],
+      [
+        94.5,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        194.5,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        218.6,
+        "zerglingmovementspeed"
+      ]
+    ],
+    "max_our_workers": 36,
+    "max_opp_workers": 31,
+    "max_our_gas": 232,
+    "supply_blocked_snapshots": 0,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": []
+  },
+  {
+    "match_id": "5108341",
+    "map": "Ultralove AIE",
+    "our_race": "Terran",
+    "opp_race": "Zerg",
+    "our_expansions": [
+      [
+        103.3,
+        "init:CommandCenter"
+      ],
+      [
+        503.2,
+        "init:CommandCenter"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        45.0,
+        "init:Hatchery"
+      ],
+      [
+        94.2,
+        "init:Hatchery"
+      ],
+      [
+        361.4,
+        "init:Hatchery"
+      ],
+      [
+        514.2,
+        "init:Hatchery"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        157.0,
+        "PunisherGrenades"
+      ],
+      [
+        257.2,
+        "Stimpack"
+      ],
+      [
+        335.9,
+        "ShieldWall"
+      ],
+      [
+        498.3,
+        "DrillClaws"
+      ],
+      [
+        534.0,
+        "TerranInfantryWeaponsLevel1"
+      ],
+      [
+        535.4,
+        "PersonalCloaking"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        217.8,
+        "zerglingmovementspeed"
+      ],
+      [
+        281.4,
+        "Burrow"
+      ],
+      [
+        470.8,
+        "GlialReconstitution"
+      ],
+      [
+        488.8,
+        "ZergMissileWeaponsLevel1"
+      ],
+      [
+        529.9,
+        "EvolveMuscularAugments"
+      ],
+      [
+        551.7,
+        "TunnelingClaws"
+      ],
+      [
+        561.8,
+        "overlordspeed"
+      ],
+      [
+        580.2,
+        "EvolveGroovedSpines"
+      ]
+    ],
+    "max_our_workers": 47,
+    "max_opp_workers": 72,
+    "max_our_gas": 631,
+    "supply_blocked_snapshots": 1,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "WORKER_DEFICIT: Peak 47 workers vs opponent 72 workers.",
+      "UNSPENT_GAS_FLOAT: Floated up to 631 Vespene without sufficient gas tech/upgrades."
+    ]
+  },
+  {
+    "match_id": "5108342",
+    "map": "Torches AIE",
+    "our_race": "Protoss",
+    "opp_race": "Terran",
+    "our_expansions": [],
+    "opp_expansions": [
+      [
+        228.9,
+        "init:CommandCenter"
+      ],
+      [
+        357.8,
+        "init:CommandCenter"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        209.3,
+        "WarpGateResearch"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        273.5,
+        "BansheeCloak"
+      ],
+      [
+        364.8,
+        "CycloneLockOnDamageUpgrade"
+      ],
+      [
+        383.6,
+        "Stimpack"
+      ],
+      [
+        421.7,
+        "TerranInfantryWeaponsLevel1"
+      ],
+      [
+        436.7,
+        "BansheeSpeed"
+      ],
+      [
+        480.9,
+        "TerranShipWeaponsLevel1"
+      ],
+      [
+        483.0,
+        "ShieldWall"
+      ],
+      [
+        487.1,
+        "PunisherGrenades"
+      ]
+    ],
+    "max_our_workers": 23,
+    "max_opp_workers": 67,
+    "max_our_gas": 369,
+    "supply_blocked_snapshots": 1,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "CRITICAL_ZERO_EXPANSIONS: Never built a 2nd TownHall; starved on 1 base (~21 workers).",
+      "WORKER_DEFICIT: Peak 23 workers vs opponent 67 workers."
+    ]
+  },
+  {
+    "match_id": "5108343",
+    "map": "Ley Lines AIE",
+    "our_race": "Protoss",
+    "opp_race": "Protoss",
+    "our_expansions": [
+      [
+        169.6,
+        "init:Nexus"
+      ],
+      [
+        395.5,
+        "init:Nexus"
+      ],
+      [
+        527.3,
+        "init:Nexus"
+      ]
+    ],
+    "opp_expansions": [
+      [
+        277.6,
+        "init:Nexus"
+      ],
+      [
+        570.5,
+        "init:Nexus"
+      ],
+      [
+        737.9,
+        "init:Nexus"
+      ],
+      [
+        751.7,
+        "init:Nexus"
+      ],
+      [
+        835.6,
+        "init:Nexus"
+      ]
+    ],
+    "our_upgrades": [
+      [
+        211.8,
+        "WarpGateResearch"
+      ],
+      [
+        347.7,
+        "Charge"
+      ],
+      [
+        469.3,
+        "BlinkTech"
+      ],
+      [
+        597.5,
+        "ExtendedThermalLance"
+      ],
+      [
+        652.9,
+        "ProtossGroundWeaponsLevel1"
+      ]
+    ],
+    "opp_upgrades": [
+      [
+        214.9,
+        "WarpGateResearch"
+      ],
+      [
+        626.8,
+        "BlinkTech"
+      ],
+      [
+        639.8,
+        "ProtossGroundWeaponsLevel1"
+      ],
+      [
+        747.0,
+        "ProtossAirWeaponsLevel1"
+      ],
+      [
+        830.9,
+        "TempestGroundAttackUpgrade"
+      ]
+    ],
+    "max_our_workers": 82,
+    "max_opp_workers": 69,
+    "max_our_gas": 691,
+    "supply_blocked_snapshots": 5,
+    "tags": [],
+    "telemetry_events": [],
+    "schema2_summary": {},
+    "findings": [
+      "UNSPENT_GAS_FLOAT: Floated up to 691 Vespene without sufficient gas tech/upgrades."
+    ]
+  }
+]

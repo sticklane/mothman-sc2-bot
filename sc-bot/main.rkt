@@ -1,9 +1,9 @@
 #lang racket/base
 
-(require "compiler/syntax.rkt")
+(require "../compiler/syntax.rkt")
 
 (provide (all-from-out racket/base)
-         (all-from-out "compiler/syntax.rkt"))
+         (all-from-out "../compiler/syntax.rkt"))
 
 (module reader syntax/module-reader
-  #:language 'sc-bot/main)
+  sc-bot)

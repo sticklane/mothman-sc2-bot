@@ -1,0 +1,5 @@
+INFO:sc2.protocol:Client status changed to Status.launched (was None)
+INFO:sc2.protocol:Client status changed to Status.in_game (was None)
+INFO:root:Player 2 - sludgement2
+INFO:sc2.protocol:Client status changed to Status.ended (was Status.in_game)
+INFO:root:Result for player 2 - sludgement2: Victory

@@ -1,0 +1,31 @@
+INFO:sc2.protocol:Client status changed to Status.launched (was None)
+INFO:sc2.protocol:Client status changed to Status.in_game (was None)
+INFO:root:Player 2 - sludgement2
+ERROR:sc2.main:AI step threw an error
+Traceback (most recent call last):
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/sc2/main.py", line 145, in _play_game_ai
+    await ai.on_step(iteration)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/main.py", line 83, in on_step
+    await self.logic.on_step(iteration)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/default_logic.py", line 116, in on_step
+    await self.unit_manager.on_step()
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/unit_manager_v3.py", line 71, in on_step
+    a = await self.spending_actions.build(self.state.build_queue, builder_units)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/spending_actions/default_spending_actions.py", line 36, in build
+    spending_actions = await self.get_spending_actions(spending_list, units)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/spending_actions/default_spending_actions.py", line 45, in get_spending_actions
+    action = await self.get_spending_action(type_id, units)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/spending_actions/default_spending_actions.py", line 61, in get_spending_action
+    return builder.build(target_id)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/sc2/unit.py", line 725, in build
+    return self(UnitGameData._game_data.units[unit.value].creation_ability.id, target=position, queue=queue)
+AttributeError: 'NoneType' object has no attribute 'id'
+ERROR:sc2.main:Error: 'NoneType' object has no attribute 'id'
+ERROR:sc2.main:Resigning due to previous error
+INFO:root:Result for player 2 - sludgement2: Defeat
+INFO:sc2.protocol:Client status changed to Status.launched (was Status.in_game)
+INFO:sc2.protocol:Client status changed to Status.quit (was Status.launched)
+INFO:sc2.sc2process:kill_switch: Process cleanup
+INFO:sc2.sc2process:Cleaning up...
+INFO:sc2.sc2process:Cleanup complete
+sludgement2 result: Result.Defeat

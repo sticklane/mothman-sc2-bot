@@ -1,0 +1,99 @@
+ts=2026-11-09T04:57:38.009289217Z level=info target=faerie message="joining remote game"
+ts=2026-11-09T04:57:46.732208872Z level=info target=faerie message="joined game" player_id=2
+ts=2026-11-09T04:57:46.745338038Z level=info target=faerie message="against enemy" enemy_race=Protoss
+ts=2026-11-09T04:57:46.773586029Z level=info target=faerie::map message="map loaded" map="Acropolis LE" overlord_spots=47
+ts=2026-11-09T04:57:46.777121983Z level=info target=faerie::mediator message="All unit types on this map" all_unit_types="[(341, Some(MineralField)), (665, Some(LabMineralField)), (343, Some(SpacePlatformGeyser)), (473, Some(UnbuildableBricksDestructible)), (483, Some(MineralField750)), (666, Some(LabMineralField750)), (365, Some(DestructibleDebris6x6)), (342, Some(VespeneGeyser)), (149, Some(XelNagaTower)), (642, Some(DestructibleRockEx1VerticalHuge)), (639, Some(DestructibleRockEx16x6)), (45, Some(SCV)), (18, Some(CommandCenter))]"
+ts=2026-11-09T04:57:46.777355877Z level=info target=faerie::mediator message="Start location" position="Point2 { x: 124.5, y: 15.5 }"
+ts=2026-11-09T04:57:46.777366152Z level=info target=faerie::mediator message="Enemy start location" position="Point2 { x: 15.5, y: 120.5 }"
+ts=2026-11-09T04:57:50.013928587Z level=info target=faerie::behaviour::mining message="worker assignments" mining=12 bulding=0 scouting=0
+ts=2026-11-09T04:57:50.057977611Z level=info target=faerie::mediator message="Committing structure build immediately" unit=Refinery position="Point2 { x: 131.5, y: 18.5 }"
+ts=2026-11-09T04:57:51.795084905Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=SupplyDepot position="Point2 { x: 116.0, y: 30.0 }" eta_start=6.130268096923828 travel_secs=6.852791786193848 premove_lead_secs=0.0 afford_secs=6.130268096923828 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:57:51.814519444Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Barracks position="Point2 { x: 12.5, y: 68.5 }" eta_start=28.28136444091797 travel_secs=47.96954345703125 premove_lead_secs=0.0 afford_secs=11.494253158569336 tech_secs=28.28136444091797 timed_dispatch=true
+ts=2026-11-09T04:57:51.838931409Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Barracks position="Point2 { x: 12.5, y: 71.5 }" eta_start=28.28136444091797 travel_secs=48.73096466064453 premove_lead_secs=0.0 afford_secs=11.494253158569336 tech_secs=28.28136444091797 timed_dispatch=true
+ts=2026-11-09T04:57:52.771661362Z level=info target=faerie::behaviour::mining message="worker assignments" mining=9 bulding=4 scouting=0
+ts=2026-11-09T04:57:54.060983273Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=SupplyDepot worker=Tag(4352901121) location="Point2 { x: 116.0, y: 30.0 }" target=None
+ts=2026-11-09T04:57:55.334083567Z level=info target=faerie::behaviour::mining message="worker assignments" mining=10 bulding=4 scouting=0
+ts=2026-11-09T04:57:58.066201419Z level=info target=faerie::behaviour::mining message="worker assignments" mining=10 bulding=3 scouting=0
+ts=2026-11-09T04:58:00.375109326Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Barracks worker=Tag(4352638977) location="Point2 { x: 12.5, y: 68.5 }" target=None
+ts=2026-11-09T04:58:00.386006946Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Barracks worker=Tag(4353163265) location="Point2 { x: 12.5, y: 71.5 }" target=None
+ts=2026-11-09T04:58:00.518750771Z level=info target=faerie::behaviour::mining message="worker assignments" mining=11 bulding=2 scouting=0
+ts=2026-11-09T04:58:01.81474288Z level=info target=faerie::mediator message="Committing structure build immediately" unit=Refinery position="Point2 { x: 120.5, y: 8.5 }"
+ts=2026-11-09T04:58:03.176168757Z level=info target=faerie::behaviour::mining message="worker assignments" mining=11 bulding=3 scouting=0
+ts=2026-11-09T04:58:06.273030335Z level=info target=faerie::behaviour::mining message="worker assignments" mining=11 bulding=3 scouting=0
+ts=2026-11-09T04:58:08.653993149Z level=info target=faerie::behaviour::early_rush_defense message="assigning worker Tag(4353949697) to scout"
+ts=2026-11-09T04:58:09.186401583Z level=info target=faerie::behaviour::mining message="worker assignments" mining=11 bulding=3 scouting=1
+ts=2026-11-09T04:58:11.829614253Z level=info target=faerie::behaviour::mining message="MACRO: collected 795 minerals, 92 vespene by 1:20"
+ts=2026-11-09T04:58:11.955221047Z level=info target=faerie::behaviour::mining message="worker assignments" mining=12 bulding=2 scouting=1
+ts=2026-11-09T04:58:14.6553643Z level=info target=faerie::behaviour::mining message="worker assignments" mining=13 bulding=2 scouting=1
+ts=2026-11-09T04:58:16.941517412Z level=info target=faerie::behaviour::mining message="worker assignments" mining=13 bulding=2 scouting=1
+ts=2026-11-09T04:58:19.018012527Z level=info target=faerie::behaviour::early_rush_defense message="Enemy natural missing at deadline, entering early-rush defense mode" time=105.0
+ts=2026-11-09T04:58:19.702695036Z level=info target=faerie::behaviour::mining message="worker assignments" mining=15 bulding=1 scouting=1
+ts=2026-11-09T04:58:22.516078495Z level=info target=faerie::behaviour::mining message="worker assignments" mining=15 bulding=1 scouting=1
+ts=2026-11-09T04:58:22.964974641Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=SupplyDepot position="Point2 { x: 118.0, y: 29.0 }" eta_start=0.0 travel_secs=5.583756446838379 premove_lead_secs=0.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:58:22.969377422Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=SupplyDepot worker=Tag(4352376833) location="Point2 { x: 118.0, y: 29.0 }" target=None
+ts=2026-11-09T04:58:25.380603878Z level=info target=faerie::behaviour::mining message="worker assignments" mining=15 bulding=2 scouting=1
+ts=2026-11-09T04:58:28.034050504Z level=info target=faerie::behaviour::mining message="worker assignments" mining=17 bulding=1 scouting=1
+ts=2026-11-09T04:58:30.997294334Z level=info target=faerie::behaviour::mining message="worker assignments" mining=20 bulding=0 scouting=1
+ts=2026-11-09T04:58:34.40520978Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=0 scouting=1
+ts=2026-11-09T04:58:37.967295806Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=0 scouting=1
+ts=2026-11-09T04:58:39.13669371Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=SupplyDepot position="Point2 { x: 115.0, y: 32.0 }" eta_start=0.0 travel_secs=2.284263849258423 premove_lead_secs=0.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:58:39.141424952Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=SupplyDepot worker=Tag(4353163265) location="Point2 { x: 115.0, y: 32.0 }" target=None
+ts=2026-11-09T04:58:40.829332679Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=1 scouting=1
+ts=2026-11-09T04:58:44.035647577Z level=info target=faerie::behaviour::mining message="worker assignments" mining=18 bulding=1 scouting=1
+ts=2026-11-09T04:58:46.475320964Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Barracks position="Point2 { x: 118.5, y: 18.5 }" eta_start=0.0 travel_secs=2.284263849258423 premove_lead_secs=0.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:58:46.485010113Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Barracks worker=Tag(4355260417) location="Point2 { x: 118.5, y: 18.5 }" target=None
+ts=2026-11-09T04:58:46.846296943Z level=info target=faerie::behaviour::mining message="worker assignments" mining=18 bulding=1 scouting=1
+ts=2026-11-09T04:58:50.053300473Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=1 scouting=1
+ts=2026-11-09T04:58:53.532220922Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=1 scouting=1
+ts=2026-11-09T04:58:55.105330435Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=SupplyDepot position="Point2 { x: 120.0, y: 16.0 }" eta_start=0.0 travel_secs=1.7766497135162354 premove_lead_secs=0.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:58:55.121538736Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=SupplyDepot worker=Tag(4360241153) location="Point2 { x: 120.0, y: 16.0 }" target=None
+ts=2026-11-09T04:58:57.352343863Z level=info target=faerie::behaviour::mining message="worker assignments" mining=18 bulding=2 scouting=1
+ts=2026-11-09T04:59:00.70235458Z level=info target=faerie::behaviour::mining message="worker assignments" mining=18 bulding=2 scouting=1
+ts=2026-11-09T04:59:04.017227384Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=1 scouting=1
+ts=2026-11-09T04:59:07.58067371Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=0 scouting=1
+ts=2026-11-09T04:59:10.914735032Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=0 scouting=1
+ts=2026-11-09T04:59:11.79033235Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=SupplyDepot position="Point2 { x: 121.0, y: 20.0 }" eta_start=0.0 travel_secs=2.030456781387329 premove_lead_secs=0.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:59:11.816571544Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=SupplyDepot worker=Tag(4355260417) location="Point2 { x: 121.0, y: 20.0 }" target=None
+ts=2026-11-09T04:59:14.295849201Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=1 scouting=1
+ts=2026-11-09T04:59:17.989337281Z level=info target=faerie::behaviour::mining message="worker assignments" mining=18 bulding=1 scouting=1
+ts=2026-11-09T04:59:21.328372836Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=0 scouting=1
+ts=2026-11-09T04:59:21.599308918Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=SupplyDepot position="Point2 { x: 118.0, y: 16.0 }" eta_start=0.0 travel_secs=1.7766497135162354 premove_lead_secs=0.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:59:21.611780922Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=SupplyDepot worker=Tag(4355260417) location="Point2 { x: 118.0, y: 16.0 }" target=None
+ts=2026-11-09T04:59:25.527273879Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=1 scouting=1
+ts=2026-11-09T04:59:28.929132428Z level=info target=faerie::behaviour::mining message="worker assignments" mining=18 bulding=1 scouting=1
+ts=2026-11-09T04:59:31.229236877Z level=info target=faerie message="match result" result=Victory
+[hotpath] timing - Execution duration of functions.
+oberon::main: 114.02s (15/19)
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| Function                                         | Calls | Avg       | P99       | Total     | % Total |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| oberon::main                                     | 1     | 114.02 s  | 114.02 s  | 114.02 s  | 100.00% |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::step                                     | 6723  | 15.53 ms  | 32.96 ms  | 104.41 s  | 91.57%  |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::do_step_abilities                        | 6722  | 3.05 ms   | 7.32 ms   | 20.49 s   | 17.96%  |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::do_step_actions                          | 6722  | 2.53 ms   | 6.49 ms   | 16.98 s   | 14.89%  |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::do_step_debug                            | 6722  | 2.26 ms   | 6.02 ms   | 15.19 s   | 13.32%  |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| stutter_step::micro_combat_units_pure_aggression | 2913  | 1.39 ms   | 3.38 ms   | 4.05 s    | 3.54%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| stutter_step::stutter_group_with_priorities      | 5064  | 767.55 µs | 1.82 ms   | 3.89 s    | 3.40%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| flow::new                                        | 5066  | 724.30 µs | 1.68 ms   | 3.67 s    | 3.21%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| mediator::update                                 | 6722  | 318.65 µs | 550.91 µs | 2.14 s    | 1.87%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| mining::on_step                                  | 6722  | 91.45 µs  | 473.86 µs | 614.75 ms | 0.53%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| scouting::on_step                                | 6722  | 72.88 µs  | 225.92 µs | 489.87 ms | 0.42%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| pixel::find_path_distance                        | 6406  | 65.13 µs  | 233.34 µs | 417.24 ms | 0.36%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| protoss_natural_wall::natural_wall_layout        | 1     | 302.64 ms | 302.78 ms | 302.64 ms | 0.26%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| mediator::find_building_placement_with_options   | 1253  | 163.79 µs | 360.45 µs | 205.23 ms | 0.18%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| pixel::find_empty_blocks_sorted_by_distance      | 676   | 193.42 µs | 279.04 µs | 130.75 ms | 0.11%   |
++--------------------------------------------------+-------+-----------+-----------+-----------+---------+

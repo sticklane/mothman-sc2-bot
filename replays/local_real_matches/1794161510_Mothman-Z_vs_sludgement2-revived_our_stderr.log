@@ -1,0 +1,4 @@
+lib/sc2-protobuf-ws.rkt:1598:33: file->bytes: unbound identifier
+  in: file->bytes
+  location...:
+   lib/sc2-protobuf-ws.rkt:1598:33

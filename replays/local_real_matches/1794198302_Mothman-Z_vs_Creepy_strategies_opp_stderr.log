@@ -1,0 +1,27 @@
+Unclosed client session
+client_session: <aiohttp.client.ClientSession object at 0x7c6d2c7185b0>
+Traceback (most recent call last):
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/main.py", line 137, in initialize_first_step
+    await ai._prepare_step(gs, proto_game_info)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/bot_ai_internal.py", line 730, in _prepare_step
+    self._unit_abilities = _unit_only_abilities | _structure_abilities
+TypeError: unsupported operand type(s) for |: 'dict' and 'dict'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "run.py", line 84, in <module>
+    result = loop.run_until_complete(game)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/python/lib/python3.8/asyncio/base_events.py", line 616, in run_until_complete
+    return future.result()
+  File "run.py", line 38, in join_ladder_game
+    result = await _play_game(players[0], client, realtime, portconfig, game_time_limit)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/main.py", line 233, in _play_game
+    result = await _play_game_ai(client, player_id, player.ai, realtime, game_time_limit)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/main.py", line 149, in _play_game_ai
+    result = await initialize_first_step()
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/main.py", line 146, in initialize_first_step
+    await ai.on_end(Result.Defeat)
+  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Creepy_strategies/BOT_META/bot_meta.py", line 230, in on_end
+    self.cle_contexte_figee, self.race_figee, self.nom_cerveau, victoire=game_result == Result.Victory
+AttributeError: 'BotMeta_autonomie' object has no attribute 'cle_contexte_figee'

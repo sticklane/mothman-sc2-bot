@@ -1,0 +1,13 @@
+[tick pregame] Connecting to 127.0.0.1 port 23407
+[tick pregame] Connecting to 127.0.0.1:23407...
+[tick pregame] Connected to 127.0.0.1:23407
+[tick pregame] Waiting for the JoinGame response.
+[tick pregame] WaitJoinGame finished successfully.
+[tick 0] Loaded opponent memory. Games: 0, wins: 0, losses: 0, Banshee games: 0, early rush games: 0, last game early rush: no
+[tick 0] CryptBotRevival started: DarkTemplarRush opening selected.
+[tick 0] Dark Templar rush: detection score 0/4 (before shrine; static=0 mobile=0 robo=0 forge=0 evo=0 lair=0 ebay=0 scans=0 lost=0 kills=0).
+[tick 0] Successfully joined game
+[tick 8] Building strategy switched to: DarkTemplarRush
+[tick 1008] Enemy natural confirmed from mineral line at 148.875, 54.625 (nearest cluster fallback)
+[tick 5652] Game ended; result received (loss).
+[tick 5652] Saved opponent memory.

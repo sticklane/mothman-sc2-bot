@@ -1,0 +1,1 @@
+[SCBOT_PRIORITY] f=0 race=Zerg bank=50M/0G sup=12/14 bo=none saving_for=overlord(floor=300M/0G) sched=() escrow_queue=(overlord(escrowed-saving,u=1288.7,floor=0M),hatchery(escrowed-saving,u=182.9,floor=100M),zergling(blocked-by-escrow,u=108.0,floor=300M),drone(blocked-by-escrow,u=72.8,floor=300M))

@@ -1,0 +1,4 @@
+[HOST-2P] RequestCreateGame completed (status=init-game map=/home/antigravity/sc2_headless/StarCraftII/Maps/Ladder2019Season3/AcropolisLE.SC2Map)
+[HOST-2P] RequestJoinGame completed (player-id=1 status=in-game)
+[SCBOT_PRIORITY] f=0 race=Terran bank=50M/0G sup=12/15 bo=none saving_for=none(floor=0M/0G) sched=(marine@108.0) escrow_queue=() step_ms=11.34
+[SCBOT_PRIORITY] f=112 race=Terran bank=5M/0G sup=13/15 bo=none saving_for=none(floor=0M/0G) sched=() escrow_queue=() step_ms=3.44

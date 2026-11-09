@@ -1,0 +1,78 @@
+[tick pregame] Connecting to 127.0.0.1 port 21239
+[tick pregame] Connecting to 127.0.0.1:21239...
+[tick pregame] Connected to 127.0.0.1:21239
+[tick pregame] Waiting for the JoinGame response.
+[tick pregame] WaitJoinGame finished successfully.
+[tick 0] Loaded opponent memory. Games: 0, wins: 0, losses: 0, Banshee games: 0, early rush games: 0, last game early rush: no
+[tick 0] CryptBotRevival started: OracleTempest opening selected.
+[tick 0] Successfully joined game
+[tick 3] Chrono Boost: Nexus 4351328257 -> 4351328257 (type=59, priority=Probe production).
+[tick 8] Building strategy switched to: OracleTempest
+[tick 224] Supply blocked at 14/15: no Pylon started (reserved money is protecting something else).
+[tick 1853] Chrono Boost: Nexus 4351328257 -> 4351328257 (type=59, priority=Probe production).
+[tick 2734] Offence: targeting 33.5, 138.5 (search)
+[tick 2831] Worker: Probe 4352114689 returned to minerals after warp started (60).
+[tick 2845] Chrono Boost: Nexus 4351328257 -> 4357619713 (type=62, priority=unit production).
+[tick 2846] Chrono Boost: Nexus 4351328257 -> 4351328257 (type=59, priority=Probe production).
+[tick 3690] Enemy expansion confirmed at 31.5, 113.5
+[tick 3690] Expansion candidate 144.632, 58.8676 route=33.1082 economy=12.2579
+[tick 3690] Expansion candidate 143.886, 86.8334 route=58.9714 economy=11.9831
+[tick 3690] Expansion candidate 117.632, 60.8676 route=63.6799 economy=12.5633
+[tick 3690] Expansion candidate 146.632, 118.132 route=92.0903 economy=12.2579
+[tick 3690] Expansion candidate 102.632, 33.8676 route=95.2529 economy=12.5633
+[tick 3690] Expansion candidate 107.886, 129.167 route=112.91 economy=12.1962
+[tick 3690] Expansion candidate 128.632, 143.132 route=115.879 economy=12.5633
+[tick 3690] Expansion candidate 68.1138, 42.8334 route=121.781 economy=12.1962
+[tick 3690] Expansion candidate 58.3676, 111.132 route=130.415 economy=12.5633
+[tick 3690] Expansion candidate 73.3676, 138.132 route=136.136 economy=12.5633
+[tick 3690] Expansion candidate 47.3676, 28.8676 route=144.927 economy=12.5633
+[tick 3690] Expansion candidate 32.1138, 85.1666 route=151.291 economy=11.9831
+[tick 3690] Expansion candidate 36.3638, 113.548 route=155.062 economy=18.7375
+[tick 3690] Expansion candidate 29.3676, 53.8676 route=157.224 economy=12.2579
+[tick 3690] Selected reachable natural at 144.632, 58.8676
+[tick 3690] Reservation: saving 400 minerals / 0 gas for unit type 59 priority 1.
+[tick 3690] Saving 400 minerals for first natural at 144.632, 58.8676 (enemy expanded)
+[tick 3690] Building expansion Nexus at 144.632, 58.8676; Probes=22, bank=470, after worker orders=470, current attack threat=0
+[tick 3690] Spend plan: bank 470/246, ~616/min; next claim unit type 59 400/0 (priority 1) affordable
+[tick 3694] Offence: targeting 31.5, 113.5 (scouted structure)
+[tick 3696] Oracle: enemy natural mineral line at 32, 119.5
+[tick 3729] Expansion: releasing Nexus mineral reservation (second Nexus unfinished), threat=0, workers=22.
+[tick 3731] Worker: Probe 4352114689 returned to minerals after warp started (59).
+[tick 3732] Worker: Probe 4352114689 returned to minerals after warp started (59).
+[tick 3735] Worker: Probe 4352114689 returned to minerals after warp started (59).
+[tick 3736] Worker: Probe 4352114689 returned to minerals after warp started (59).
+[tick 3739] Worker: Probe 4352114689 returned to minerals after warp started (59).
+[tick 3740] Worker: Probe 4352114689 returned to minerals after warp started (59).
+[tick 4267] Chrono Boost: Nexus 4351328257 -> 4363911169 (type=67, priority=unit production).
+[tick 4672] Reservation: saving 300 minerals / 200 gas for unit type 64 priority 2.
+[tick 4672] Spend plan: bank 245/336, ~784/min; next claim unit type 64 300/200 (priority 2) ~4s away
+[tick 4892] Spend plan: bank 255/238, ~672/min; next claim unit type 64 300/200 (priority 2) ~4s away
+[tick 4944] Reservation: saving 300 minerals / 200 gas for unit type 64 priority 2.
+[tick 5086] Offence: no motion for vanguard 4362338305 near 28.4604, 136.892; route 25.8069, detour 39.4472, 122.185, army 2.
+[tick 5329] Chrono Boost: Nexus 4366270465 -> 4357619713 (type=62, priority=unit production).
+[tick 5330] Chrono Boost: Nexus 4366270465 -> 4363911169 (type=67, priority=unit production).
+[tick 5484] Oracle flank staging at 50.2826, 148.715
+[tick 5689] Chrono Boost: Nexus 4351328257 -> 4351328257 (type=59, priority=Probe production).
+[tick 5690] Chrono Boost: Nexus 4351328257 -> 4366270465 (type=59, priority=Probe production).
+[tick 5760] Anti-Reaper: rush identified (Reapers=0, Barracks=3, at home=no).
+[tick 5760] Reservation: saving 125 minerals / 50 gas for unit type 74 priority 0.
+[tick 5760] Spend plan: bank 80/246, ~896/min; next claim unit type 74 125/50 (priority 0) ~3s away
+[tick 5952] Anti-Reaper: emergency mineral-line Shield Battery at 135.196, 31
+[tick 5980] Spend plan: bank 155/306, ~896/min; next claim unit type 74 125/50 (priority 0) affordable
+[tick 6040] Oracle 4367319048 activating beam near main workers; energy 98.1289
+[tick 6048] Oracle 4359716868 activating beam near main workers; energy 69.8984
+[tick 6104] Oracle 4367319048 attacking worker 4350541825 near main mineral line.
+[tick 6104] Oracle 4359716868 attacking worker 4350541825 near main mineral line.
+[tick 6128] Oracle 4359716868 disengaging at energy 38.2109 (beam depleted)
+[tick 6164] Oracle 4367319048 activating beam near main workers; energy 66.9883
+[tick 6188] Oracle 4367319048 attacking worker 4348706817 near main mineral line.
+[tick 6200] Spend plan: bank 230/370, ~784/min; next claim unit type 74 125/50 (priority 0) affordable
+[tick 6220] Oracle 4367319048 disengaging at energy 37.457 (beam depleted)
+[tick 6328] Reservation: saving 125 minerals / 50 gas for unit type 74 priority 0.
+[tick 6329] Reservation: saving 125 minerals / 50 gas for unit type 74 priority 0.
+[tick 6420] Spend plan: bank 165/396, ~896/min; next claim unit type 74 125/50 (priority 0) affordable
+[tick 6600] Third base: not saving (workers below recovery floor), workers=32, threat=0.
+[tick 6640] Spend plan: bank 250/484, ~952/min; next claim unit type 74 125/50 (priority 0) affordable
+[tick 6686] Offence: no motion for vanguard 4362338305 near 40.627, 138.714; route 23.1814, detour 37.5637, 130.251, army 3.
+[tick 6722] Game ended; result received (win).
+[tick 6722] Saved opponent memory.

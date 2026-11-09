@@ -1,0 +1,264 @@
+ts=2026-11-09T04:49:29.798469888Z level=info target=mini_puck message="starting mini-puck" bot_version=955b8fa
+ts=2026-11-09T04:49:29.799865062Z level=info target=faerie message="joining remote game"
+ts=2026-11-09T04:49:46.800074539Z level=info target=faerie message="joined game" player_id=2
+ts=2026-11-09T04:49:46.817678665Z level=info target=faerie message="against enemy" enemy_race=Terran
+ts=2026-11-09T04:49:46.878783624Z level=info target=faerie::map message="map loaded" map="Acropolis LE" overlord_spots=47
+ts=2026-11-09T04:49:46.882094139Z level=info target=faerie::mediator message="All unit types on this map" all_unit_types="[(341, Some(MineralField)), (666, Some(LabMineralField750)), (665, Some(LabMineralField)), (473, Some(UnbuildableBricksDestructible)), (343, Some(SpacePlatformGeyser)), (365, Some(DestructibleDebris6x6)), (483, Some(MineralField750)), (342, Some(VespeneGeyser)), (642, Some(DestructibleRockEx1VerticalHuge)), (639, Some(DestructibleRockEx16x6)), (149, Some(XelNagaTower)), (59, Some(Nexus)), (84, Some(Probe))]"
+ts=2026-11-09T04:49:46.882289736Z level=info target=faerie::mediator message="Start location" position="Point2 { x: 124.5, y: 15.5 }"
+ts=2026-11-09T04:49:46.882302197Z level=info target=faerie::mediator message="Enemy start location" position="Point2 { x: 15.5, y: 120.5 }"
+ts=2026-11-09T04:49:46.927200482Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=0 workers_estimate=0 visible_workers=0 since_seen=0.0446428582072258 since_rise=0.0446428582072258 held=0.0 droning_stopped=false committed=false sentries=0 phoenixes=0 time=0.0446428582072258
+ts=2026-11-09T04:49:47.533600874Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=0 tick=1
+ts=2026-11-09T04:49:47.547437654Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=0 tick=2
+ts=2026-11-09T04:49:49.367972229Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=0 tick=184
+ts=2026-11-09T04:49:49.368107318Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Pylon position="Point2 { x: 124.0, y: 44.0 }" eta_start=12.080536842346191 travel_secs=11.675127029418945 premove_lead_secs=10.0 afford_secs=12.080536842346191 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:49:49.36812288Z level=info target=faerie::behaviour::build_order message="Creating unit" step=0 tick=184 unit=Pylon supply=14
+ts=2026-11-09T04:49:49.537155618Z level=info target=faerie::behaviour::mining message="worker assignments" mining=12 bulding=1 scouting=0
+ts=2026-11-09T04:49:50.996723602Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Pylon worker=Tag(4352901121) location="Point2 { x: 124.0, y: 44.0 }" target=None
+ts=2026-11-09T04:49:51.525299693Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4352901121) structure=Pylon
+ts=2026-11-09T04:49:51.526094099Z level=info target=faerie::behaviour::build_order message="Step 0: completed Pylon at 0:16"
+ts=2026-11-09T04:49:51.863265278Z level=info target=faerie::behaviour::mining message="worker assignments" mining=14 bulding=0 scouting=0
+ts=2026-11-09T04:49:52.33935232Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=1 tick=435
+ts=2026-11-09T04:49:52.355124631Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=1 tick=436
+ts=2026-11-09T04:49:54.800753559Z level=info target=faerie::behaviour::mining message="worker assignments" mining=14 bulding=0 scouting=0
+ts=2026-11-09T04:49:55.459273865Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=0 workers_estimate=0 visible_workers=0 since_seen=29.46428680419922 since_rise=29.46428680419922 held=0.0 droning_stopped=false committed=false sentries=0 phoenixes=0 time=29.46428680419922
+ts=2026-11-09T04:49:55.459849693Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center=None stalkers=0 known_townhalls=0 time=29.46428680419922
+ts=2026-11-09T04:49:55.466193819Z level=info target=mini_puck::army message="army roles" free_orders={} stalkers=0 fighting=0 free=0 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center=None destination="Point2 { x: 124.5, y: 45.95 }" time=29.46428680419922
+ts=2026-11-09T04:49:55.96119898Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Gateway position="Point2 { x: 119.5, y: 48.5 }" eta_start=3.3482143878936768 travel_secs=11.928934097290039 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=3.3482143878936768 timed_dispatch=true
+ts=2026-11-09T04:49:55.961239655Z level=info target=faerie::behaviour::build_order message="Creating unit" step=1 tick=700 unit=Gateway supply=16
+ts=2026-11-09T04:49:55.972716447Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Gateway worker=Tag(4352901121) location="Point2 { x: 119.5, y: 48.5 }" target=None
+ts=2026-11-09T04:49:57.245040562Z level=info target=faerie::behaviour::mining message="worker assignments" mining=14 bulding=1 scouting=0
+ts=2026-11-09T04:49:58.811488352Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4352901121) structure=Gateway
+ts=2026-11-09T04:49:58.812320259Z level=info target=faerie::behaviour::build_order message="Step 1: completed Gateway at 0:41"
+ts=2026-11-09T04:49:58.824559221Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=2 tick=922
+ts=2026-11-09T04:49:58.834591752Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=2 tick=923
+ts=2026-11-09T04:49:59.796292692Z level=info target=faerie::behaviour::mining message="worker assignments" mining=15 bulding=0 scouting=0
+ts=2026-11-09T04:50:01.19422159Z level=info target=mini_puck message="sending probe scout" tag=Tag(4353425409)
+ts=2026-11-09T04:50:02.356546372Z level=info target=faerie::mediator message="Committing structure build immediately" unit=Assimilator position="Point2 { x: 131.5, y: 18.5 }"
+ts=2026-11-09T04:50:02.356587223Z level=info target=faerie::behaviour::build_order message="Creating unit" step=2 tick=1195 unit=Assimilator supply=17
+ts=2026-11-09T04:50:02.425034525Z level=info target=faerie::behaviour::mining message="worker assignments" mining=14 bulding=1 scouting=1
+ts=2026-11-09T04:50:02.894722436Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4355260417) structure=Assimilator
+ts=2026-11-09T04:50:02.897133415Z level=info target=faerie::behaviour::build_order message="Step 2: completed Assimilator at 0:54"
+ts=2026-11-09T04:50:04.277423379Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center=None stalkers=0 known_townhalls=0 time=58.92857360839844
+ts=2026-11-09T04:50:04.283467091Z level=info target=mini_puck::army message="army roles" free_orders={} stalkers=0 fighting=0 free=0 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center=None destination="Point2 { x: 124.5, y: 45.95 }" time=58.92857360839844
+ts=2026-11-09T04:50:04.67980758Z level=info target=faerie message="action rate" actions_per_minute=1415 time=60.0
+ts=2026-11-09T04:50:05.506794446Z level=info target=faerie::behaviour::mining message="worker assignments" mining=15 bulding=0 scouting=1
+ts=2026-11-09T04:50:06.293809826Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=3 tick=1453
+ts=2026-11-09T04:50:06.305213624Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=3 tick=1454
+ts=2026-11-09T04:50:08.417143281Z level=info target=faerie::behaviour::mining message="worker assignments" mining=16 bulding=0 scouting=1
+ts=2026-11-09T04:50:10.98654036Z level=info target=faerie::behaviour::mining message="MACRO: collected 1125 minerals, 0 vespene by 1:20"
+ts=2026-11-09T04:50:11.103380966Z level=info target=faerie::behaviour::mining message="worker assignments" mining=17 bulding=0 scouting=1
+ts=2026-11-09T04:50:11.338468502Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=3 tick=1817
+ts=2026-11-09T04:50:11.338589509Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Nexus position="Point2 { x: 126.5, y: 40.5 }" eta_start=0.0 travel_secs=11.167512893676758 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:11.338605304Z level=info target=faerie::behaviour::build_order message="Creating unit" step=3 tick=1817 unit=Nexus supply=20
+ts=2026-11-09T04:50:11.346668255Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Nexus worker=Tag(4358930433) location="Point2 { x: 126.5, y: 40.5 }" target=None
+ts=2026-11-09T04:50:13.272274338Z level=info target=mini_puck::production message="gateway rallied" tag=Tag(4357095425) ability=RallyBuilding rally="Point2 { x: 124.5, y: 45.95 }" time=87.5
+ts=2026-11-09T04:50:13.50583232Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center=None stalkers=0 known_townhalls=0 time=88.39286041259766
+ts=2026-11-09T04:50:13.510918565Z level=info target=mini_puck::army message="army roles" free_orders={} stalkers=0 fighting=0 free=0 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center=None destination="Point2 { x: 124.5, y: 45.95 }" time=88.39286041259766
+ts=2026-11-09T04:50:13.589103193Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4358930433) structure=Nexus
+ts=2026-11-09T04:50:13.590045412Z level=info target=faerie::behaviour::build_order message="Step 3: completed Nexus at 1:28"
+ts=2026-11-09T04:50:13.601253919Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=CyberneticsCore position="Point2 { x: 126.5, y: 48.5 }" eta_start=0.0 travel_secs=3.045685291290283 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:13.601286284Z level=info target=faerie::behaviour::build_order message="Creating unit" step=4 tick=1987 unit=CyberneticsCore supply=20
+ts=2026-11-09T04:50:13.6098693Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=CyberneticsCore worker=Tag(4358930433) location="Point2 { x: 126.5, y: 48.5 }" target=None
+ts=2026-11-09T04:50:13.794834973Z level=info target=faerie::behaviour::mining message="worker assignments" mining=17 bulding=1 scouting=1
+ts=2026-11-09T04:50:14.65729201Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4358930433) structure=CyberneticsCore
+ts=2026-11-09T04:50:14.659212918Z level=info target=faerie::behaviour::build_order message="Step 4: completed CyberneticsCore at 1:32"
+ts=2026-11-09T04:50:14.66812316Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=5 tick=2070
+ts=2026-11-09T04:50:14.668200792Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Assimilator position="Point2 { x: 133.5, y: 43.5 }" eta_start=1.1916583776474 travel_secs=0.7883594632148743 premove_lead_secs=10.0 afford_secs=1.1916583776474 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:14.668213358Z level=info target=faerie::behaviour::build_order message="Creating unit" step=5 tick=2070 unit=Assimilator supply=21
+ts=2026-11-09T04:50:14.679424154Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Assimilator worker=Tag(4358930433) location="Point2 { x: 133.5, y: 43.5 }" target=Some(Tag(4316987393))
+ts=2026-11-09T04:50:15.38726293Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4358930433) structure=Assimilator
+ts=2026-11-09T04:50:15.388780467Z level=info target=faerie::behaviour::build_order message="Step 5: completed Assimilator at 1:35"
+ts=2026-11-09T04:50:16.072426554Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=0 scouting=1
+ts=2026-11-09T04:50:16.745785472Z level=info target=mini_puck message="probe scout returning" threatened=false hurt=false hp=20.0 shield=20.0 pos="Point2 { x: 16.504639, y: 116.31177 }" near="[\"Refinery@11.6\", \"SCV@9.1(w)\", \"SCV@9.7(w)\", \"SCV@8.4(w)\", \"Refinery@11.6\", \"SCV@7.5(w)\", \"Barracks@3.0\", \"SCV@6.2(w)\", \"SCV@6.4(w)\", \"SCV@6.7(w)\", \"SCV@7.9(w)\", \"CommandCenter@4.3\", \"SCV@10.0(w)\", \"Barracks@3.0\", \"SCV@9.7(w)\", \"SCV@7.1(w)\", \"SCV@9.6(w)\", \"SCV@8.7(w)\", \"SCV@9.7(w)\", \"SCV@8.8(w)\", \"SCV@9.7(w)\", \"SCV@7.2(w)\", \"SupplyDepot@1.5\", \"SCV@8.4(w)\", \"SCV@7.4(w)\"]" time=100.84821319580078
+ts=2026-11-09T04:50:17.435983955Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=19 workers_estimate=19 visible_workers=19 since_seen=0.0 since_rise=5.044639587402344 held=0.7142791748046875 droning_stopped=false committed=false sentries=0 phoenixes=0 time=103.125
+ts=2026-11-09T04:50:17.928941964Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=6 tick=2343
+ts=2026-11-09T04:50:17.929075055Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Pylon position="Point2 { x: 113.0, y: 27.0 }" eta_start=0.0 travel_secs=4.060913562774658 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:17.929086095Z level=info target=faerie::behaviour::build_order message="Creating unit" step=6 tick=2343 unit=Pylon supply=22
+ts=2026-11-09T04:50:17.94269332Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Pylon worker=Tag(4358930433) location="Point2 { x: 113.0, y: 27.0 }" target=None
+ts=2026-11-09T04:50:18.818058492Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=1 scouting=0
+ts=2026-11-09T04:50:18.992252004Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4358930433) structure=Pylon
+ts=2026-11-09T04:50:18.994706767Z level=info target=faerie::behaviour::build_order message="Step 6: completed Pylon at 1:47"
+ts=2026-11-09T04:50:21.52826308Z level=info target=faerie::behaviour::mining message="worker assignments" mining=19 bulding=0 scouting=0
+ts=2026-11-09T04:50:21.79142308Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=7 tick=2616
+ts=2026-11-09T04:50:21.812578779Z level=info target=faerie::behaviour::build_order message="training worker to fulfill supply requirements" step=7 tick=2617
+ts=2026-11-09T04:50:22.13847268Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=19 workers_estimate=19 visible_workers=5 since_seen=0.0 since_rise=19.77678680419922 held=0.7142791748046875 droning_stopped=false committed=false sentries=0 phoenixes=0 time=117.85714721679688
+ts=2026-11-09T04:50:22.140279922Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center=None stalkers=0 known_townhalls=1 time=117.85714721679688
+ts=2026-11-09T04:50:22.142208147Z level=info target=mini_puck::army message="army roles" free_orders={} stalkers=0 fighting=0 free=0 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center=None destination="Point2 { x: 124.5, y: 45.95 }" time=117.85714721679688
+ts=2026-11-09T04:50:22.704502305Z level=info target=faerie message="action rate" actions_per_minute=1780 time=120.0
+ts=2026-11-09T04:50:23.89049202Z level=info target=faerie::behaviour::mining message="worker assignments" mining=20 bulding=0 scouting=0
+ts=2026-11-09T04:50:24.605948814Z level=info target=faerie::behaviour::build_order message="Creating unit" step=7 tick=2869 unit=Stalker supply=23
+ts=2026-11-09T04:50:24.615957199Z level=info target=faerie::behaviour::build_order message="Starting upgrade" step=8 tick=2870 upgrade=WarpGateResearch supply=23
+ts=2026-11-09T04:50:25.738105214Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=19 workers_estimate=19 visible_workers=2 since_seen=11.071434020996094 since_rise=34.508934020996094 held=0.7142791748046875 droning_stopped=false committed=false sentries=0 phoenixes=0 time=132.58929443359375
+ts=2026-11-09T04:50:26.039262456Z level=info target=faerie::behaviour::mining message="worker assignments" mining=21 bulding=0 scouting=0
+ts=2026-11-09T04:50:28.275434448Z level=info target=faerie::behaviour::mining message="worker assignments" mining=23 bulding=0 scouting=0
+ts=2026-11-09T04:50:29.270127572Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=19 workers_estimate=19 visible_workers=2 since_seen=25.803565979003906 since_rise=49.241065979003906 held=0.7142791748046875 droning_stopped=false committed=false sentries=0 phoenixes=0 time=147.32142639160156
+ts=2026-11-09T04:50:29.270782056Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center=None stalkers=0 known_townhalls=1 time=147.32142639160156
+ts=2026-11-09T04:50:29.274619587Z level=info target=mini_puck::army message="army roles" free_orders={} stalkers=0 fighting=0 free=0 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center=None destination="Point2 { x: 124.5, y: 45.95 }" time=147.32142639160156
+ts=2026-11-09T04:50:30.430040047Z level=info target=faerie::behaviour::mining message="worker assignments" mining=22 bulding=0 scouting=0
+ts=2026-11-09T04:50:32.797207825Z level=info target=faerie::behaviour::mining message="worker assignments" mining=22 bulding=0 scouting=0
+ts=2026-11-09T04:50:33.11909664Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=19 workers_estimate=19 visible_workers=2 since_seen=40.53571319580078 since_rise=63.97321319580078 held=4.6875 droning_stopped=true committed=false sentries=0 phoenixes=0 time=162.05357360839844
+ts=2026-11-09T04:50:33.833125229Z level=info target=mini_puck message="opening deadline: handing over to macro" time=165.04464721679688
+ts=2026-11-09T04:50:33.833456096Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=TwilightCouncil position="Point2 { x: 122.5, y: 48.5 }" eta_start=0.0 travel_secs=3.5532994270324707 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:33.833751723Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Assimilator position="Point2 { x: 129.5, y: 47.5 }" eta_start=0.0 travel_secs=1.159917950630188 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:33.834202354Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Gateway position="Point2 { x: 122.5, y: 48.5 }" eta_start=0.0 travel_secs=6.091370582580566 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:33.858942218Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=TwilightCouncil worker=Tag(4363124737) location="Point2 { x: 122.5, y: 48.5 }" target=None
+ts=2026-11-09T04:50:33.85897825Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Assimilator worker=Tag(4358930433) location="Point2 { x: 129.5, y: 47.5 }" target=Some(Tag(4325113857))
+ts=2026-11-09T04:50:33.858992281Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Gateway worker=Tag(4363649025) location="Point2 { x: 122.5, y: 48.5 }" target=None
+ts=2026-11-09T04:50:33.861059296Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Forge position="Point2 { x: 114.5, y: 31.5 }" eta_start=0.0 travel_secs=7.106598854064941 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:33.86164711Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Gateway position="Point2 { x: 114.5, y: 31.5 }" eta_start=0.0 travel_secs=7.106598854064941 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:33.879734236Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Forge worker=Tag(4359454721) location="Point2 { x: 114.5, y: 31.5 }" target=None
+ts=2026-11-09T04:50:33.879770751Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Gateway worker=Tag(4360241153) location="Point2 { x: 114.5, y: 31.5 }" target=None
+ts=2026-11-09T04:50:33.9097264Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Gateway position="Point2 { x: 116.5, y: 28.5 }" eta_start=0.0 travel_secs=6.34517765045166 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:34.583622555Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4358930433) structure=Assimilator
+ts=2026-11-09T04:50:34.66799206Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4363124737) structure=TwilightCouncil
+ts=2026-11-09T04:50:35.220253369Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Gateway worker=Tag(4353949697) location="Point2 { x: 116.5, y: 28.5 }" target=None
+ts=2026-11-09T04:50:35.246328621Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Gateway position="Point2 { x: 117.5, y: 22.5 }" eta_start=0.0 travel_secs=4.314720630645752 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:35.283721054Z level=info target=faerie::behaviour::mining message="worker assignments" mining=16 bulding=5 scouting=0
+ts=2026-11-09T04:50:35.444162656Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=135 bank_vesp=32 food_used=29 food_cap=46 producers=1 idle=0 sentries=0 time=170.0
+ts=2026-11-09T04:50:35.475642995Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4359454721) structure=Forge
+ts=2026-11-09T04:50:35.680513389Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Gateway worker=Tag(4352376833) location="Point2 { x: 117.5, y: 22.5 }" target=None
+ts=2026-11-09T04:50:36.153179219Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4363649025) structure=Gateway
+ts=2026-11-09T04:50:36.153235644Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4360241153) structure=Gateway
+ts=2026-11-09T04:50:36.153238808Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4353949697) structure=Gateway
+ts=2026-11-09T04:50:36.589224225Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4352376833) structure=Gateway
+ts=2026-11-09T04:50:36.978274847Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=55 bank_vesp=44 food_used=30 food_cap=46 producers=1 idle=0 sentries=0 time=174.9107208251953
+ts=2026-11-09T04:50:37.521261782Z level=info target=mini_puck::sentry_scout message="enemy economy read" peak_workers=19 workers_estimate=19 visible_workers=2 since_seen=55.267860412597656 since_rise=78.70536041259766 held=9.151779174804688 droning_stopped=false committed=false sentries=0 phoenixes=0 time=176.7857208251953
+ts=2026-11-09T04:50:37.521595938Z level=info target=mini_puck::production message="probe cap" probes=22 pending=2 probe_cap=44 bases=2 mining=2 townhalls=2 time=176.7857208251953
+ts=2026-11-09T04:50:37.521713891Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 124.5, y: 15.5 }" spot="Point2 { x: 126.745766, y: 13.510895 }" spot_powered=false nearest_power="Some((19.258818, 6.5))" powered_footing=None power_sources=2 time=176.7857208251953
+ts=2026-11-09T04:50:37.521757958Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 126.5, y: 40.5 }" spot="Point2 { x: 128.74576, y: 38.510895 }" spot_powered=false nearest_power="Some((7.256204, 6.5))" powered_footing="Some(Point2 { x: 125.74576, y: 38.010895 })" power_sources=2 time=176.7857208251953
+ts=2026-11-09T04:50:37.521814862Z level=info target=mini_puck::production message=expansion bases=2 probes=22 townhalls=2 pending_th=0 third_strike=false mining_score=2.0 want=None affordable=false minerals=40 vespene=6 time=176.7857208251953
+ts=2026-11-09T04:50:37.522649788Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center="Some(Point2 { x: 123.76489, y: 45.999268 })" stalkers=1 known_townhalls=1 time=176.7857208251953
+ts=2026-11-09T04:50:37.526444333Z level=info target=mini_puck::army message="army roles" free_orders="{\"idle\": 1}" stalkers=1 fighting=0 free=1 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center="Some(Point2 { x: 123.76489, y: 45.999268 })" destination="Point2 { x: 124.5, y: 45.95 }" time=176.7857208251953
+ts=2026-11-09T04:50:38.001056273Z level=info target=faerie::behaviour::mining message="worker assignments" mining=23 bulding=0 scouting=0
+ts=2026-11-09T04:50:38.332371732Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=30 reserved_vesp=0 bank_min=30 bank_vesp=18 food_used=31 food_cap=46 producers=1 idle=0 sentries=0 time=179.82142639160156
+ts=2026-11-09T04:50:38.384501484Z level=info target=faerie message="action rate" actions_per_minute=2778 time=180.0
+ts=2026-11-09T04:50:39.813455481Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=65 bank_vesp=50 food_used=32 food_cap=46 producers=1 idle=0 sentries=0 time=184.73214721679688
+ts=2026-11-09T04:50:40.694623994Z level=info target=faerie::behaviour::mining message="worker assignments" mining=24 bulding=0 scouting=0
+ts=2026-11-09T04:50:41.303220408Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=165 reserved_vesp=73 bank_min=165 bank_vesp=74 food_used=32 food_cap=46 producers=1 idle=0 sentries=0 time=189.64285278320313
+ts=2026-11-09T04:50:42.605316363Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=275 reserved_vesp=97 bank_min=275 bank_vesp=98 food_used=32 food_cap=46 producers=1 idle=0 sentries=0 time=194.55357360839844
+ts=2026-11-09T04:50:43.038893292Z level=info target=faerie::behaviour::mining message="worker assignments" mining=26 bulding=0 scouting=0
+ts=2026-11-09T04:50:43.83355703Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=375 reserved_vesp=133 bank_min=375 bank_vesp=134 food_used=32 food_cap=46 producers=1 idle=1 sentries=0 time=199.46429443359375
+ts=2026-11-09T04:50:45.224055616Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=225 reserved_vesp=65 bank_min=225 bank_vesp=66 food_used=34 food_cap=46 producers=1 idle=1 sentries=0 time=204.375
+ts=2026-11-09T04:50:45.531628989Z level=info target=faerie::behaviour::mining message="worker assignments" mining=25 bulding=0 scouting=0
+ts=2026-11-09T04:50:45.916658663Z level=info target=mini_puck::production message="probe cap" probes=25 pending=3 probe_cap=44 bases=2 mining=2 townhalls=2 time=206.25
+ts=2026-11-09T04:50:45.916800536Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 124.5, y: 15.5 }" spot="Point2 { x: 126.745766, y: 13.510895 }" spot_powered=false nearest_power="Some((19.258818, 6.5))" powered_footing=None power_sources=2 time=206.25
+ts=2026-11-09T04:50:45.916838375Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 126.5, y: 40.5 }" spot="Point2 { x: 128.74576, y: 38.510895 }" spot_powered=false nearest_power="Some((7.256204, 6.5))" powered_footing="Some(Point2 { x: 125.74576, y: 38.010895 })" power_sources=2 time=206.25
+ts=2026-11-09T04:50:45.916898218Z level=info target=mini_puck::production message=expansion bases=2 probes=25 townhalls=2 pending_th=0 third_strike=false mining_score=2.0 want=None affordable=false minerals=275 vespene=78 time=206.25
+ts=2026-11-09T04:50:45.917716854Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center="Some(Point2 { x: 123.99243, y: 45.956665 })" stalkers=2 known_townhalls=1 time=206.25
+ts=2026-11-09T04:50:45.920619941Z level=info target=mini_puck::army message="army roles" free_orders="{\"idle\": 2}" stalkers=2 fighting=0 free=2 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center="Some(Point2 { x: 123.99243, y: 45.956665 })" destination="Point2 { x: 124.5, y: 45.95 }" time=206.25
+ts=2026-11-09T04:50:46.881261824Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=325 reserved_vesp=97 bank_min=325 bank_vesp=98 food_used=34 food_cap=46 producers=1 idle=1 sentries=0 time=209.2857208251953
+ts=2026-11-09T04:50:48.412452449Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=435 reserved_vesp=141 bank_min=435 bank_vesp=142 food_used=34 food_cap=46 producers=1 idle=1 sentries=0 time=214.19642639160156
+ts=2026-11-09T04:50:48.438697241Z level=info target=faerie::behaviour::mining message="worker assignments" mining=26 bulding=0 scouting=0
+ts=2026-11-09T04:50:49.661106398Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Gateway position="Point2 { x: 113.5, y: 21.5 }" eta_start=0.0 travel_secs=2.7918782234191895 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:49.66128525Z level=info target=mini_puck::production message="gateway rallied" tag=Tag(4366532609) ability=RallyBuilding rally="Point2 { x: 124.5, y: 45.95 }" time=218.48214721679688
+ts=2026-11-09T04:50:49.672459138Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Gateway worker=Tag(4370464769) location="Point2 { x: 113.5, y: 21.5 }" target=None
+ts=2026-11-09T04:50:49.690546609Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Gateway position="Point2 { x: 109.5, y: 22.5 }" eta_start=0.0 travel_secs=6.34517765045166 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:49.847039027Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=145 bank_vesp=24 food_used=36 food_cap=46 producers=2 idle=2 sentries=0 time=219.10714721679688
+ts=2026-11-09T04:50:49.883359869Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Gateway worker=Tag(4353687553) location="Point2 { x: 109.5, y: 22.5 }" target=None
+ts=2026-11-09T04:50:50.108625442Z level=info target=mini_puck::production message="gateway rallied" tag=Tag(4367056897) ability=RallyBuilding rally="Point2 { x: 124.5, y: 45.95 }" time=219.9553680419922
+ts=2026-11-09T04:50:50.351767945Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4370464769) structure=Gateway
+ts=2026-11-09T04:50:51.151815907Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4353687553) structure=Gateway
+ts=2026-11-09T04:50:51.156612153Z level=info target=faerie::behaviour::mining message="worker assignments" mining=27 bulding=0 scouting=0
+ts=2026-11-09T04:50:51.396375992Z level=info target=mini_puck::production message="army production blocked" want="Some((50, 100))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=90 bank_vesp=60 food_used=36 food_cap=46 producers=3 idle=3 sentries=0 time=224.0178680419922
+ts=2026-11-09T04:50:53.442768673Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Pylon position="Point2 { x: 117.0, y: 15.0 }" eta_start=0.0 travel_secs=2.5380709171295166 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:53.452179721Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Pylon worker=Tag(4354473985) location="Point2 { x: 117.0, y: 15.0 }" target=None
+ts=2026-11-09T04:50:53.715628718Z level=info target=faerie::behaviour::mining message="worker assignments" mining=28 bulding=1 scouting=0
+ts=2026-11-09T04:50:54.128965874Z level=info target=mini_puck::production message="army production blocked" want="Some((125, 50))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=45 reserved_vesp=0 bank_min=45 bank_vesp=44 food_used=40 food_cap=46 producers=3 idle=2 sentries=0 time=233.52679443359375
+ts=2026-11-09T04:50:54.140888365Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4354473985) structure=Pylon
+ts=2026-11-09T04:50:54.781476874Z level=info target=mini_puck::production message="probe cap" probes=29 pending=3 probe_cap=44 bases=2 mining=2 townhalls=2 time=235.71429443359375
+ts=2026-11-09T04:50:54.781582662Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 124.5, y: 15.5 }" spot="Point2 { x: 126.745766, y: 13.510895 }" spot_powered=false nearest_power="Some((19.258818, 6.5))" powered_footing=None power_sources=2 time=235.71429443359375
+ts=2026-11-09T04:50:54.781621111Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 126.5, y: 40.5 }" spot="Point2 { x: 128.74576, y: 38.510895 }" spot_powered=false nearest_power="Some((7.256204, 6.5))" powered_footing="Some(Point2 { x: 125.74576, y: 38.010895 })" power_sources=2 time=235.71429443359375
+ts=2026-11-09T04:50:54.781683651Z level=info target=mini_puck::production message=expansion bases=2 probes=29 townhalls=2 pending_th=0 third_strike=false mining_score=2.0 want=None affordable=false minerals=105 vespene=56 time=235.71429443359375
+ts=2026-11-09T04:50:54.782571941Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center="Some(Point2 { x: 123.99243, y: 45.956665 })" stalkers=2 known_townhalls=1 time=235.71429443359375
+ts=2026-11-09T04:50:54.785379584Z level=info target=mini_puck::army message="army roles" free_orders="{\"idle\": 2}" stalkers=2 fighting=0 free=2 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center="Some(Point2 { x: 123.99243, y: 45.956665 })" destination="Point2 { x: 124.5, y: 45.95 }" time=235.71429443359375
+ts=2026-11-09T04:50:56.110596821Z level=info target=faerie message="action rate" actions_per_minute=2107 time=240.0
+ts=2026-11-09T04:50:56.413825966Z level=info target=faerie::behaviour::mining message="worker assignments" mining=31 bulding=0 scouting=0
+ts=2026-11-09T04:50:56.563462978Z level=info target=mini_puck::production message="army production blocked" want="Some((125, 50))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=75 bank_vesp=54 food_used=44 food_cap=46 producers=3 idle=1 sentries=0 time=241.60714721679688
+ts=2026-11-09T04:50:58.604182172Z level=info target=faerie::behaviour::train_unit message="train composition refused" candidates=1 gateways=3 idle=0 food_used=46 food_cap=46 minerals=130 vespene=64 time=248.79464721679688
+ts=2026-11-09T04:50:58.986520366Z level=info target=faerie::behaviour::mining message="worker assignments" mining=31 bulding=0 scouting=0
+ts=2026-11-09T04:50:59.453478021Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Pylon position="Point2 { x: 123.0, y: 22.0 }" eta_start=0.0 travel_secs=2.5380709171295166 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:50:59.463176262Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Pylon worker=Tag(4361027585) location="Point2 { x: 123.0, y: 22.0 }" target=None
+ts=2026-11-09T04:51:00.23217095Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4361027585) structure=Pylon
+ts=2026-11-09T04:51:00.893473837Z level=info target=mini_puck::production message="army production blocked" want="Some((125, 50))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=80 bank_vesp=124 food_used=48 food_cap=54 producers=3 idle=0 sentries=1 time=256.4285888671875
+ts=2026-11-09T04:51:01.512707235Z level=info target=faerie::behaviour::train_unit message="train composition refused" candidates=1 gateways=3 idle=0 food_used=48 food_cap=54 minerals=125 vespene=140 time=258.21429443359375
+ts=2026-11-09T04:51:01.752154872Z level=info target=faerie::behaviour::mining message="worker assignments" mining=34 bulding=0 scouting=0
+ts=2026-11-09T04:51:03.216384542Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 118.5, y: 25.5 }"
+ts=2026-11-09T04:51:03.233229531Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 118.5, y: 25.5 }"
+ts=2026-11-09T04:51:03.302172718Z level=info target=faerie::behaviour::train_unit message="train composition refused" candidates=1 gateways=3 idle=1 food_used=50 food_cap=54 minerals=125 vespene=126 time=263.125
+ts=2026-11-09T04:51:04.053702313Z level=info target=mini_puck::production message="probe cap" probes=34 pending=2 probe_cap=44 bases=2 mining=2 townhalls=2 time=265.1785888671875
+ts=2026-11-09T04:51:04.05383861Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 126.5, y: 40.5 }" spot="Point2 { x: 128.74576, y: 38.510895 }" spot_powered=false nearest_power="Some((7.256204, 6.5))" powered_footing="Some(Point2 { x: 125.74576, y: 38.010895 })" power_sources=3 time=265.1785888671875
+ts=2026-11-09T04:51:04.053887594Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 124.5, y: 15.5 }" spot="Point2 { x: 126.745766, y: 13.510895 }" spot_powered=false nearest_power="Some((9.858873, 6.5))" powered_footing=None power_sources=3 time=265.1785888671875
+ts=2026-11-09T04:51:04.055940712Z level=info target=mini_puck::production message=expansion bases=2 probes=34 townhalls=2 pending_th=0 third_strike=false mining_score=2.0 want=None affordable=false minerals=195 vespene=142 time=265.1785888671875
+ts=2026-11-09T04:51:04.056754148Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center="Some(Point2 { x: 123.99243, y: 45.956665 })" stalkers=2 known_townhalls=1 time=265.1785888671875
+ts=2026-11-09T04:51:04.060615079Z level=info target=mini_puck::army message="army roles" free_orders="{\"idle\": 2}" stalkers=2 fighting=0 free=2 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center="Some(Point2 { x: 123.99243, y: 45.956665 })" destination="Point2 { x: 124.5, y: 45.95 }" time=265.1785888671875
+ts=2026-11-09T04:51:04.82255299Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Pylon position="Point2 { x: 111.0, y: 15.0 }" eta_start=0.0 travel_secs=4.060913562774658 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:51:04.822968922Z level=info target=mini_puck::production message="gateway rallied" tag=Tag(4371513345) ability=RallyBuilding rally="Point2 { x: 124.5, y: 45.95 }" time=267.1428527832031
+ts=2026-11-09T04:51:04.838792626Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Pylon worker=Tag(4354473985) location="Point2 { x: 111.0, y: 15.0 }" target=None
+ts=2026-11-09T04:51:05.132851256Z level=info target=faerie::behaviour::mining message="worker assignments" mining=34 bulding=1 scouting=0
+ts=2026-11-09T04:51:05.828636676Z level=info target=faerie::behaviour::train_unit message="train composition refused" candidates=1 gateways=4 idle=1 food_used=52 food_cap=54 minerals=125 vespene=178 time=269.46429443359375
+ts=2026-11-09T04:51:05.911574697Z level=info target=mini_puck::production message="gateway rallied" tag=Tag(4371775489) ability=RallyBuilding rally="Point2 { x: 124.5, y: 45.95 }" time=269.6428527832031
+ts=2026-11-09T04:51:06.406662094Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4354473985) structure=Pylon
+ts=2026-11-09T04:51:07.440443944Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Pylon position="Point2 { x: 95.0, y: 41.0 }" eta_start=0.0 travel_secs=15.482233047485352 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:51:07.450443925Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Pylon worker=Tag(4377018369) location="Point2 { x: 95.0, y: 41.0 }" target=None
+ts=2026-11-09T04:51:08.135534798Z level=info target=mini_puck::production message="army production blocked" want="Some((125, 50))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=35 reserved_vesp=0 bank_min=35 bank_vesp=172 food_used=54 food_cap=62 producers=5 idle=3 sentries=1 time=274.6428527832031
+ts=2026-11-09T04:51:09.157379253Z level=info target=faerie::behaviour::mining message="worker assignments" mining=35 bulding=1 scouting=0
+ts=2026-11-09T04:51:10.251739491Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 120.5, y: 44.5 }"
+ts=2026-11-09T04:51:10.283101673Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 120.5, y: 44.5 }"
+ts=2026-11-09T04:51:12.240605353Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 120.5, y: 19.5 }"
+ts=2026-11-09T04:51:12.258634699Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 117.5, y: 19.5 }"
+ts=2026-11-09T04:51:13.457246121Z level=info target=faerie::behaviour::mining message="worker assignments" mining=36 bulding=1 scouting=0
+ts=2026-11-09T04:51:13.775205883Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4377018369) structure=Pylon
+ts=2026-11-09T04:51:13.994164574Z level=info target=mini_puck::sentry_scout message="hallucinated phoenix" sentry=Tag(4375969793) energy=75.03125 time=286.78570556640625
+ts=2026-11-09T04:51:14.430578453Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 117.5, y: 19.5 }"
+ts=2026-11-09T04:51:14.45988825Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 117.5, y: 19.5 }"
+ts=2026-11-09T04:51:16.015802462Z level=info target=faerie::mediator message="Pre-moving worker for structure build" unit=Pylon position="Point2 { x: 121.0, y: 54.0 }" eta_start=0.0 travel_secs=4.060913562774658 premove_lead_secs=10.0 afford_secs=0.0 tech_secs=0.0 timed_dispatch=true
+ts=2026-11-09T04:51:16.042893939Z level=info target=faerie::mediator message="Transitioning build order PreMove -> Committed" structure=Pylon worker=Tag(4368629761) location="Point2 { x: 121.0, y: 54.0 }" target=None
+ts=2026-11-09T04:51:17.243190632Z level=info target=mini_puck::production message="army production blocked" want="Some((125, 50))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=10 reserved_vesp=0 bank_min=10 bank_vesp=166 food_used=63 food_cap=70 producers=5 idle=4 sentries=1 time=292.6339416503906
+ts=2026-11-09T04:51:17.860162429Z level=info target=faerie::mediator message="Reassigning worker to mining after starting building" worker=Tag(4368629761) structure=Pylon
+ts=2026-11-09T04:51:18.26367333Z level=info target=mini_puck::production message="probe cap" probes=39 pending=2 probe_cap=44 bases=2 mining=2 townhalls=2 time=294.6428527832031
+ts=2026-11-09T04:51:18.26379334Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 126.5, y: 40.5 }" spot="Point2 { x: 128.74576, y: 38.510895 }" spot_powered=false nearest_power="Some((7.256204, 6.5))" powered_footing="Some(Point2 { x: 125.74576, y: 38.010895 })" power_sources=5 time=294.6428527832031
+ts=2026-11-09T04:51:18.263832294Z level=info target=mini_puck::production message="mineral line power" nexus="Point2 { x: 124.5, y: 15.5 }" spot="Point2 { x: 126.745766, y: 13.510895 }" spot_powered=false nearest_power="Some((9.278775, 6.5))" powered_footing=None power_sources=5 time=294.6428527832031
+ts=2026-11-09T04:51:18.263871395Z level=info target=mini_puck::production message=expansion bases=2 probes=39 townhalls=2 pending_th=0 third_strike=false mining_score=2.0 want=None affordable=false minerals=25 vespene=182 time=294.6428527832031
+ts=2026-11-09T04:51:18.267926958Z level=info target=faerie::behaviour::mining message="worker assignments" mining=39 bulding=0 scouting=1
+ts=2026-11-09T04:51:18.268694915Z level=info target=mini_puck::army message="army status" posture=Gather destination="Point2 { x: 124.5, y: 45.95 }" army_center="Some(Point2 { x: 122.79486, y: 44.123016 })" stalkers=8 known_townhalls=1 time=294.6428527832031
+ts=2026-11-09T04:51:18.272224118Z level=info target=mini_puck::army message="army roles" free_orders="{\"MoveMove\": 1, \"idle\": 7}" stalkers=8 fighting=0 free=8 guard=0 raid=0 hunters=0 clearing=0 responders=0 harass=0 harass_lines=[] targets={} free_center="Some(Point2 { x: 122.79486, y: 44.123016 })" destination="Point2 { x: 124.5, y: 45.95 }" time=294.6428527832031
+ts=2026-11-09T04:51:19.715739385Z level=info target=mini_puck::production message="army production blocked" want="Some((125, 50))" block=None stalker_block=None cyber_all=1 cyber_ready=1 reserved_min=0 reserved_vesp=0 bank_min=115 bank_vesp=202 food_used=64 food_cap=70 producers=5 idle=4 sentries=1 time=297.5446472167969
+ts=2026-11-09T04:51:19.743370292Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 118.5, y: 25.5 }"
+ts=2026-11-09T04:51:19.754711134Z level=info target=faerie::mediator message="warping unit in" unit=Stalker position="Point2 { x: 118.5, y: 25.5 }"
+ts=2026-11-09T04:51:20.870789525Z level=info target=faerie message="action rate" actions_per_minute=3183 time=300.0
+ts=2026-11-09T04:51:21.087673263Z level=info target=faerie message="match result" result=Victory
+[hotpath] timing - Execution duration of functions.
+mini_puck::main: 112.86s
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| Function                                       | Calls | Avg       | P99       | Total     | % Total |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| mini_puck::main                                | 1     | 112.86 s  | 112.88 s  | 112.86 s  | 100.00% |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::step                                   | 6723  | 14.01 ms  | 29.20 ms  | 94.17 s   | 83.44%  |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::do_step_abilities                      | 6722  | 2.27 ms   | 6.46 ms   | 15.25 s   | 13.51%  |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::do_step_actions                        | 6722  | 1.68 ms   | 5.10 ms   | 11.32 s   | 10.02%  |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| pixel::find_path_distance                      | 60327 | 97.53 µs  | 1.69 ms   | 5.88 s    | 5.21%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| faerie::do_step_debug                          | 6722  | 660.36 µs | 3.97 ms   | 4.44 s    | 3.93%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| mediator::update                               | 6722  | 394.28 µs | 2.33 ms   | 2.65 s    | 2.34%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| mining::on_step                                | 6722  | 194.29 µs | 2.55 ms   | 1.31 s    | 1.15%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| scouting::on_step                              | 6722  | 99.35 µs  | 363.01 µs | 667.83 ms | 0.59%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| protoss_natural_wall::natural_wall_layout      | 1     | 606.26 ms | 606.60 ms | 606.26 ms | 0.53%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| train_unit::train_composition                  | 275   | 65.51 µs  | 1.09 ms   | 18.02 ms  | 0.01%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| build_production::build_production             | 6     | 314.53 µs | 386.56 µs | 1.89 ms   | 0.00%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| flow::new                                      | 2     | 2.29 ms   | 2.76 ms   | 4.57 ms   | 0.00%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| pixel::find_empty_blocks_sorted_by_distance    | 33    | 58.25 µs  | 375.81 µs | 1.92 ms   | 0.00%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
+| mediator::find_building_placement_with_options | 25    | 48.75 µs  | 392.45 µs | 1.22 ms   | 0.00%   |
++------------------------------------------------+-------+-----------+-----------+-----------+---------+
