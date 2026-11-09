@@ -52,11 +52,12 @@
 ;; - Standard tier max upload: 50 MiB (52,428,800 bytes)
 ;; - Bronze Patreon max upload: 100 MiB (104,857,600 bytes)
 ;; - Strict repository safety budget: 25 MB (25,000,000 bytes) max, 3 MB (3,000,000 bytes) min
+;; - True untethered Racket CS ELF (.rackboot + .rackprog, original-exe?=#t): >= 45 MB uncompressed
 (define AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024))
 (define AIARENA-BRONZE-MAX-ZIP-BYTES   (* 100 1024 1024))
 (define MAX-BOT-ZIP-SIZE-BYTES         25000000)
 (define MIN-BOT-ZIP-SIZE-BYTES         3000000)
-(define MIN-STANDALONE-ELF-BYTES       10000000)
+(define MIN-STANDALONE-ELF-BYTES       45000000)
 
 (define INCLUDE-DIRS '("sc-bot" "compiler" "lib" "sim" "bots" "ffi"))
 (define INCLUDE-TOP-FILES '("run.py" "main.rkt" "info.rkt" "data/pro_build_orders.sexp"))
@@ -192,7 +193,7 @@
       (write-u16le 0 out))))
 
 ;; -----------------------------------------------------------------------------
-;; 2. Precompile `.zo` Bytecode & `cpplinux_launcher.cpp` ELF Binary
+;; 2. Precompile `.zo` Bytecode
 ;; -----------------------------------------------------------------------------
 
 (define (precompile-all-racket-zo!)
@@ -229,19 +230,24 @@
   #t)
 
 ;; -----------------------------------------------------------------------------
-;; 2b. Standalone Native Linux x86_64 ELF Compilation (`compiler/embed`)
-;;     Embeds the Racket CS runtime + all `#lang sc-bot` modules directly into
-;;     the `.rackprog` section of `<BotName>` with zero external runtime archive
-;;     or fallback interpreter needed.
+;; 2b. Untethered Standalone Native Linux x86_64 ELF Compilation (`compiler/embed`)
+;;     Passes `#:aux '((original-exe? . #t) (config-dir . #<path:etc>))` and
+;;     `#:collects-path "collects"` so `create-embedding-executable` embeds
+;;     both `.rackboot` (Chez Scheme + Racket CS kernel/boot images) and
+;;     `.rackprog` (all `#lang sc-bot` modules) directly into the full ELF
+;;     executable instead of a `starter` wrapper that looks for a host `racket`.
 ;; -----------------------------------------------------------------------------
 
 (define (compile-standalone-racket-elf!)
   (make-directory* CACHE-DIR)
   (current-directory ROOT-DIR)
   (define out-bin (build-path CACHE-DIR "mothman_standalone_elf"))
-  (printf "  -> Compiling standalone native Linux x86_64 ELF executable via compiler/embed...\n")
+  (printf "  -> Compiling untethered standalone native Linux x86_64 ELF executable via compiler/embed (original-exe?=#t)...\n")
   (create-embedding-executable
    out-bin
+   #:aux (list (cons 'original-exe? #t)
+               (cons 'config-dir (string->path "etc")))
+   #:collects-path "collects"
    #:modules (list (list #f (build-path ROOT-DIR "sim/racket-sc2-ladder-main.rkt") '(main))
                    (list #f (build-path ROOT-DIR "bots/Mothman-Z.rkt"))
                    (list #f (build-path ROOT-DIR "bots/Mothman-T.rkt"))
@@ -256,7 +262,8 @@
   (unless (and (file-exists? out-bin)
                (>= (file-size out-bin) MIN-STANDALONE-ELF-BYTES))
     (error 'compile-standalone-racket-elf!
-           "Failed to build standalone ELF executable ~a" out-bin))
+           "Failed to build untethered standalone ELF executable ~a (>= ~a bytes required)"
+           out-bin MIN-STANDALONE-ELF-BYTES))
   (file-or-directory-permissions out-bin #o755)
   out-bin)
 
@@ -265,11 +272,7 @@
 ;; -----------------------------------------------------------------------------
 
 (define (bytes-contains-subbytes? haystack needle)
-  (define hlen (bytes-length haystack))
-  (define nlen (bytes-length needle))
-  (and (>= hlen nlen)
-       (for/or ([i (in-range 0 (add1 (- hlen nlen)))])
-         (bytes=? (subbytes haystack i (+ i nlen)) needle))))
+  (not (not (regexp-match-positions (regexp-quote needle) haystack))))
 
 (define (validate-bot-zip-archive! zip-path
                                    #:bot-name [bot-name #f]
@@ -295,9 +298,14 @@
   (when elf-bytes
     (unless (and (>= (bytes-length elf-bytes) MIN-STANDALONE-ELF-BYTES)
                  (bytes=? (subbytes elf-bytes 0 4) #"\x7fELF")
-                 (bytes-contains-subbytes? elf-bytes #".rackprog"))
+                 (bytes-contains-subbytes? elf-bytes #".rackboot")
+                 (bytes-contains-subbytes? elf-bytes #".rackprog")
+                 (not (bytes-contains-subbytes? elf-bytes #"cOnFiG:"))
+                 (not (bytes-contains-subbytes? elf-bytes #"failed to start "))
+                 (not (bytes-contains-subbytes? elf-bytes #"coLLECTs dIRECTORy:/home/"))
+                 (not (bytes-contains-subbytes? elf-bytes #"coNFIg dIRECTORy:/home/")))
       (error 'validate-bot-zip-archive!
-             "BotZip ~a executable ~a is not a standalone Racket CS ELF binary with embedded .rackprog section"
+             "BotZip ~a executable ~a is not an untethered standalone Racket CS ELF binary (.rackboot + .rackprog with no starter/host paths)"
              zip-path bot-name)))
   (for ([ename (in-list entry-names)])
     (when (or (string-suffix? ename ".zip")

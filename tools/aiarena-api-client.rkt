@@ -140,8 +140,10 @@
                         'mapSelectionType "map_pool"
                         'mapPool pool-gql))
      token))
-  (define rm (hash-ref (hash-ref resp 'data (hash)) 'requestMatch (hash)))
-  (define errs (hash-ref rm 'errors '()))
+  (define data-obj (let ([d (hash-ref resp 'data (hash))]) (if (hash? d) d (hash))))
+  (define rm (let ([r (hash-ref data-obj 'requestMatch (hash))]) (if (hash? r) r (hash))))
+  (define errs (or (and (pair? (hash-ref rm 'errors '())) (hash-ref rm 'errors '()))
+                   (hash-ref resp 'errors '())))
   (define match-obj (hash-ref rm 'match #f))
   (printf "  [REQUEST] ~a (#~a) vs ~a (#~a) -> match=~v errors=~v\n"
           bot1-name bot1-id bot2-name bot2-id match-obj errs)
