@@ -706,6 +706,21 @@
     observer
     observer-siege-mode))
 
+(define SC2-ALL-STRUCTURE-SYMS
+  '(hatchery lair hive extractor spawning-pool roach-warren baneling-nest
+    evolution-chamber hydralisk-den lurker-den spire greater-spire
+    infestation-pit ultralisk-cavern spine-crawler spore-crawler nydus-network
+    nexus pylon assimilator gateway warp-gate warpgate cybernetics-core forge
+    photon-cannon shield-battery twilight-council robotics-facility robotics-bay
+    robotics-support-bay stargate fleet-beacon templar-archive templar-archives dark-shrine
+    command-center orbital-command planetary-fortress supply-depot supply-depot-lowered
+    refinery barracks factory starport engineering-bay bunker missile-turret
+    sensor-tower ghost-academy armory fusion-core
+    barracks-techlab barracks-tech-lab barracks-reactor
+    factory-techlab factory-tech-lab factory-reactor
+    starport-techlab starport-tech-lab starport-reactor
+    tech-lab reactor))
+
 ;; Terran units that strictly require a completed TechLab attached to their producer:
 (define SC2-TECHLAB-REQUIRED-UNIT-SYMS
   '(marauder

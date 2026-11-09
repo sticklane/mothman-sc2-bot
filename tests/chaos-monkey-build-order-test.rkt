@@ -3,7 +3,8 @@
 (require racket/list
          racket/match
          "../lib/econ-ledger.rkt"
-         "../lib/priority-macro-brain.rkt")
+         "../lib/priority-macro-brain.rkt"
+         "../lib/bot-runtime.rkt")
 
 (define total-checks 0)
 
@@ -273,5 +274,67 @@
               (map chaos-monkey-event-state-summary (chaos-monkey-trial-result-chaos-events res))))
     (check-true (chaos-monkey-trial-result-recovered-all-bo-goals? res)
                 (format "Extreme 8-wave Chaos Monkey for ~a must recover 100% of build order" r))))
+
+;; -----------------------------------------------------------------------------
+;; 9. Live Runtime Integration: step-live-bot-runtime! Uses priority-macro-brain
+;; -----------------------------------------------------------------------------
+(test-case "step-live-bot-runtime! tracks peak-supply-reached & self-heals deleted Spawning Pool when Roach Warren is orphaned"
+  (define rt (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  ;; Step 1: Reach 42 supply with Hatchery, Spawning Pool, Roach Warren
+  (define obs1
+    (hash 'frame 2400
+          'minerals 250
+          'gas 100
+          'supply-used 42
+          'supply-cap 54
+          'ally-units (for/list ([i (in-range 22)])
+                        (hash 'id (+ 100 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+          'ally-buildings (list (hash 'id 1 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 2 'type 'hatchery 'x 45.0 'y 45.0 'hp 1500 'build-progress 1.0)
+                                (hash 'id 3 'type 'spawning-pool 'x 35.0 'y 32.5 'hp 1000 'build-progress 1.0)
+                                (hash 'id 4 'type 'roach-warren 'x 36.0 'y 32.5 'hp 850 'build-progress 1.0)
+                                (hash 'id 5 'type 'extractor 'x 30.0 'y 32.5 'hp 500 'build-progress 1.0))))
+  (step-live-bot-runtime! rt obs1)
+  (check-equal? (hash-ref (live-bot-runtime-last-telemetry rt) 'peak-supply-reached 0) 42)
+  ;; Step 2: Chaos Monkey snipes Spawning Pool and kills units down to 24 supply
+  (define obs2
+    (hash 'frame 2500
+          'minerals 250
+          'gas 100
+          'supply-used 24
+          'supply-cap 54
+          'ally-units (for/list ([i (in-range 18)])
+                        (hash 'id (+ 100 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+          'ally-buildings (list (hash 'id 1 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 2 'type 'hatchery 'x 45.0 'y 45.0 'hp 1500 'build-progress 1.0)
+                                (hash 'id 4 'type 'roach-warren 'x 36.0 'y 32.5 'hp 850 'build-progress 1.0)
+                                (hash 'id 5 'type 'extractor 'x 30.0 'y 32.5 'hp 500 'build-progress 1.0))))
+  (define res2 (step-live-bot-runtime! rt obs2))
+  (define cmds2 (hash-ref res2 'actions '()))
+  (define tel2 (live-bot-runtime-last-telemetry rt))
+  (check-equal? (hash-ref tel2 'peak-supply-reached 0) 42)
+  (check-not-false (memq 'spawning-pool (hash-ref tel2 'priority-repaired-prereqs '())))
+  (check-not-false (ormap (lambda (c) (and (pair? c) (eq? (car c) 'build) (eq? (cadr c) 'spawning-pool))) cmds2))
+
+  ;; Step 3: Protoss live runtime test — Cybernetics Core sniped while Twilight Council is alive
+  (define rt-p (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define obs-p
+    (hash 'frame 3000
+          'minerals 200
+          'gas 100
+          'supply-used 46
+          'supply-cap 62
+          'ally-units (for/list ([i (in-range 22)])
+                        (hash 'id (+ 300 i) 'type 'probe 'x 32.5 'y 32.5 'hp 40))
+          'ally-buildings (list (hash 'id 11 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'build-progress 1.0)
+                                (hash 'id 12 'type 'pylon 'x 35.0 'y 32.5 'hp 400 'build-progress 1.0)
+                                (hash 'id 13 'type 'gateway 'x 36.0 'y 32.5 'hp 500 'build-progress 1.0)
+                                (hash 'id 14 'type 'twilight-council 'x 37.0 'y 32.5 'hp 500 'build-progress 1.0)
+                                (hash 'id 15 'type 'assimilator 'x 30.0 'y 32.5 'hp 450 'build-progress 1.0))))
+  (define res-p (step-live-bot-runtime! rt-p obs-p))
+  (define cmds-p (hash-ref res-p 'actions '()))
+  (define tel-p (live-bot-runtime-last-telemetry rt-p))
+  (check-not-false (memq 'cybernetics-core (hash-ref tel-p 'priority-repaired-prereqs '())))
+  (check-not-false (ormap (lambda (c) (and (pair? c) (eq? (car c) 'build) (eq? (cadr c) 'cybernetics-core))) cmds-p)))
 
 (printf "=== All Chaos Monkey & Priority Macro Brain Tests PASSED! ===\n")
