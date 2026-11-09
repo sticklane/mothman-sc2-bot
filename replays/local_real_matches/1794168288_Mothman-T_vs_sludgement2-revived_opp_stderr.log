@@ -1,24 +1,24 @@
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/services/state/unit_memory.py:73: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
+downloaded_bots/sludgement2-revived/checkout/bot/services/state/unit_memory.py:73: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
   temp: Units = Units([], self.bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/services/state/unit_memory.py:73: DeprecationWarning: You can safely remove it from your Units objects initializations.
+downloaded_bots/sludgement2-revived/checkout/bot/services/state/unit_memory.py:73: DeprecationWarning: You can safely remove it from your Units objects initializations.
   temp: Units = Units([], self.bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/spending_actions/default_spending_actions.py:26: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
+downloaded_bots/sludgement2-revived/checkout/bot/logic/spending_actions/default_spending_actions.py:26: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
   assigned = Units([], self._bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/spending_actions/default_spending_actions.py:26: DeprecationWarning: You can safely remove it from your Units objects initializations.
+downloaded_bots/sludgement2-revived/checkout/bot/logic/spending_actions/default_spending_actions.py:26: DeprecationWarning: You can safely remove it from your Units objects initializations.
   assigned = Units([], self._bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/services/state_service.py:394: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
+downloaded_bots/sludgement2-revived/checkout/bot/services/state_service.py:394: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
   geysers: Units = Units([], self._bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/services/state_service.py:394: DeprecationWarning: You can safely remove it from your Units objects initializations.
+downloaded_bots/sludgement2-revived/checkout/bot/services/state_service.py:394: DeprecationWarning: You can safely remove it from your Units objects initializations.
   geysers: Units = Units([], self._bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/services/unit_group_service.py:48: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
+downloaded_bots/sludgement2-revived/checkout/bot/services/unit_group_service.py:48: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
   groups.append(self.create_group(Units([unit], self.bot._game_data), no_range=True))
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/services/unit_group_service.py:48: DeprecationWarning: You can safely remove it from your Units objects initializations.
+downloaded_bots/sludgement2-revived/checkout/bot/services/unit_group_service.py:48: DeprecationWarning: You can safely remove it from your Units objects initializations.
   groups.append(self.create_group(Units([unit], self.bot._game_data), no_range=True))
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/unit_manager_v3.py:196: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
+downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/unit_manager_v3.py:196: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
   t.units = Units([], self.state._bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/unit_manager_v3.py:196: DeprecationWarning: You can safely remove it from your Units objects initializations.
+downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/unit_manager_v3.py:196: DeprecationWarning: You can safely remove it from your Units objects initializations.
   t.units = Units([], self.state._bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/group_tactics.py:60: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
+downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/group_tactics.py:60: DeprecationWarning: Keyword argument 'game_data' in Units function '__init__' is deprecated.
   nearby_units = Units([], self.state._bot._game_data)
-/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/group_tactics.py:60: DeprecationWarning: You can safely remove it from your Units objects initializations.
+downloaded_bots/sludgement2-revived/checkout/bot/logic/unit_manager/group_tactics.py:60: DeprecationWarning: You can safely remove it from your Units objects initializations.
   nearby_units = Units([], self.state._bot._game_data)

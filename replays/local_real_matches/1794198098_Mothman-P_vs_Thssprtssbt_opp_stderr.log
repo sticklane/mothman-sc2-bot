@@ -1,6 +1,6 @@
 Traceback (most recent call last):
   File "run.py", line 5, in <module>
     from ladder import run_ladder_game
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Thssprtssbt/ladder.py", line 15, in <module>
+  File "downloaded_bots/Thssprtssbt/ladder.py", line 15, in <module>
     from sc2.protocol import ConnectionAlreadyClosedError
-ImportError: cannot import name 'ConnectionAlreadyClosedError' from 'sc2.protocol' (/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/protocol.py)
+ImportError: cannot import name 'ConnectionAlreadyClosedError' from 'sc2.protocol' (downloaded_bots/Tartarus/sc2/protocol.py)

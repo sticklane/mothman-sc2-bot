@@ -2,7 +2,7 @@
 [HOST-2P] RequestJoinGame completed (player-id=1 status=ended)
 sc2-ws-send-frame!: WebSocket connection is closed
   context...:
-   /home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/lib/sc2-protobuf-ws.rkt:339:0: sc2-ws-rpc!
-   /home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/sim/racket-sc2-ladder-main.rkt:697:4
-   /home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/sim/racket-sc2-ladder-main.rkt:918:0: run-racket-sc2-cli
-   body of (submod "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/sim/racket-sc2-ladder-main.rkt" main)
+   lib/sc2-protobuf-ws.rkt:339:0: sc2-ws-rpc!
+   sim/racket-sc2-ladder-main.rkt:697:4
+   sim/racket-sc2-ladder-main.rkt:918:0: run-racket-sc2-cli
+   body of (submod "sim/racket-sc2-ladder-main.rkt" main)

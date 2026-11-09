@@ -27190,5 +27190,5 @@ new_dico_target :  {}
 best_targets :  []
 self.dico_target  :  {}
 
-Rapport strategies (brut) : /home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Creepy_strategies/data/rapport_strategies_brut.md
-Rapport strategies (pondere) : /home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Creepy_strategies/data/rapport_strategies_pondere.md
+Rapport strategies (brut) : downloaded_bots/Creepy_strategies/data/rapport_strategies_brut.md
+Rapport strategies (pondere) : downloaded_bots/Creepy_strategies/data/rapport_strategies_pondere.md

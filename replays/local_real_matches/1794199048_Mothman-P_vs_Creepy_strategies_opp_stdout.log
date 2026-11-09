@@ -33637,5 +33637,5 @@ new_dico_target :  {4351328257: {'target': Unit(name='Nexus', tag=4351328257), '
 best_targets :  [Unit(name='Nexus', tag=4351328257)]
 self.dico_target  :  {4351328257: {'target': Unit(name='Nexus', tag=4351328257), 'first_time': 222.1875, 'first_progress': 0.003676474094390869, 'last_time': 300.0446428571429, 'last_progress': 0.4375, 'cost': 50.0}}
 
-Rapport strategies (brut) : /home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Creepy_strategies/data/rapport_strategies_brut.md
-Rapport strategies (pondere) : /home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Creepy_strategies/data/rapport_strategies_pondere.md
+Rapport strategies (brut) : downloaded_bots/Creepy_strategies/data/rapport_strategies_brut.md
+Rapport strategies (pondere) : downloaded_bots/Creepy_strategies/data/rapport_strategies_pondere.md

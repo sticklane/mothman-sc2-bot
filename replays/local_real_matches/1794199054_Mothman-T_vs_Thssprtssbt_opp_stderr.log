@@ -3,22 +3,22 @@ client_session: <aiohttp.client.ClientSession object at 0x7f9dc7ff67c0>
 Traceback (most recent call last):
   File "run.py", line 26, in <module>
     result, opponentid = run_ladder_game(bot)
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Thssprtssbt/ladder.py", line 64, in run_ladder_game
+  File "downloaded_bots/Thssprtssbt/ladder.py", line 64, in run_ladder_game
     result = asyncio.get_event_loop().run_until_complete(g)
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/sludgement2-revived/python/lib/python3.8/asyncio/base_events.py", line 616, in run_until_complete
+  File "downloaded_bots/sludgement2-revived/python/lib/python3.8/asyncio/base_events.py", line 616, in run_until_complete
     return future.result()
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Thssprtssbt/ladder.py", line 85, in join_ladder_game
+  File "downloaded_bots/Thssprtssbt/ladder.py", line 85, in join_ladder_game
     result = await sc2.main._play_game(
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/main.py", line 233, in _play_game
+  File "downloaded_bots/Tartarus/sc2/main.py", line 233, in _play_game
     result = await _play_game_ai(client, player_id, player.ai, realtime, game_time_limit)
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/main.py", line 200, in _play_game_ai
+  File "downloaded_bots/Tartarus/sc2/main.py", line 200, in _play_game_ai
     await run_bot_iteration(iteration)  # Main bot loop
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Tartarus/sc2/main.py", line 160, in run_bot_iteration
+  File "downloaded_bots/Tartarus/sc2/main.py", line 160, in run_bot_iteration
     await ai.on_step(iteration)
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Thssprtssbt/thssprtssbt.py", line 55, in on_step
+  File "downloaded_bots/Thssprtssbt/thssprtssbt.py", line 55, in on_step
     await Datafiles.on_step(self, iteration)
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Thssprtssbt/botcode/datafiles.py", line 53, in on_step
+  File "downloaded_bots/Thssprtssbt/botcode/datafiles.py", line 53, in on_step
     await self.read_learned()
-  File "/home/antigravity/sticklane/ws13-okasaki-quantum-data-structures/sc-bot/downloaded_bots/Thssprtssbt/botcode/datafiles.py", line 71, in read_learned
+  File "downloaded_bots/Thssprtssbt/botcode/datafiles.py", line 71, in read_learned
     pl = open(filename, "r")
 FileNotFoundError: [Errno 2] No such file or directory: 'data/learned.txt'
