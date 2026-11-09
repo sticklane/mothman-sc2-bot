@@ -71,7 +71,11 @@
  simulate-mirrored-arena-pair
  evaluate-arena-minimax-and-regret!
  resolve-committed-micro-action!
- step-tactical-mirror-brain!)
+ step-tactical-mirror-brain!
+ execute-roach-tunneling-burrow-micro
+ execute-infestor-burrow-cast-micro
+ execute-shimmer-and-burrow-ripple-response
+ plan-terran-addon-swap)
 
 ;; =============================================================================
 ;; 1. Baba CSP Choke Wall-In Solver (`solve-choke-wall-in`) &
@@ -337,13 +341,19 @@
 ;; Ranks enemy targets by DPS-to-HP priority (`dps / max(1, hp)`), weighted by
 ;; spatial proximity / weapon range reachability when unit coordinates are present.
 ;; Supports both `(select-focus-fire-target enemies)` and `(select-focus-fire-target attacker enemies)`.
-(define (select-focus-fire-target arg1 [arg2 #f] #:max-range [max-range #f])
+(define (select-focus-fire-target arg1 [arg2 #f]
+                                  #:max-range [max-range #f]
+                                  #:ally-has-stealth? [ally-has-stealth? #f])
   (define-values (attacker enemies)
     (if (list? arg1)
         (values arg2 arg1)
         (values arg1 (if (list? arg2) arg2 '()))))
   (define attacker-type
     (and (hash? attacker) (hash-ref attacker 'type #f)))
+  (define stealth-active?
+    (or ally-has-stealth?
+        (and attacker-type (memq attacker-type SC2-CLOAKED-OR-BURROW-STEALTH-SYMS) #t)
+        (and (hash? attacker) (or (hash-ref attacker 'cloaked #f) (hash-ref attacker 'burrowed #f)) #t)))
   (define raw-alive-enemies
     (filter (lambda (e)
               (define hp (if (fap-unit? e) (fap-unit-hp e) (hash-ref e 'hp 45)))
@@ -380,10 +390,28 @@
      (define best-score -inf.0)
      (for ([e (in-list alive-enemies)])
        (define etype (if (fap-unit? e) 'unknown (hash-ref e 'type 'unknown)))
+       (define detector-target?
+         (or (memq etype SC2-MOBILE-DETECTOR-SYMS)
+             (memq etype SC2-STATIC-DETECTOR-SYMS)))
+       (define changeling-target?
+         (or (memq etype SC2-CHANGELING-UNIT-SYMS)
+             (and (hash? e) (hash-ref e 'changeling? #f))))
        (define decoy-mult
-         (if (memq etype SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05 1.0))
+         (cond
+           [changeling-target? 4.0]
+           [(and detector-target? stealth-active?) SC2-DETECTOR-SNIPE-PRIORITY-BONUS]
+           [(memq etype SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05]
+           [else 1.0]))
        (define hp (max 1.0 (exact->inexact (if (fap-unit? e) (fap-unit-hp e) (hash-ref e 'hp 45)))))
-       (define dps (max 1.0 (exact->inexact (if (fap-unit? e) (fap-unit-dps e) (hash-ref e 'dps 12)))))
+       (define dps
+         (max 1.0
+              (exact->inexact
+               (cond
+                 [(and detector-target? stealth-active?)
+                  (max 18.0 (if (fap-unit? e) (fap-unit-dps e) (hash-ref e 'dps 18)))]
+                 [changeling-target? 20.0]
+                 [(fap-unit? e) (fap-unit-dps e)]
+                 [else (hash-ref e 'dps 12)]))))
        (define base-priority (* decoy-mult (/ dps hp)))
        (define reach-weight
          (if has-attacker-pos?
@@ -1638,6 +1666,11 @@
     (define arena-workers (tactical-arena-enemy-workers arena))
     (define enemy-has-aa?
       (ormap (lambda (e) (> (tactical-sim-unit-air-dps e) 0.0)) arena-enemies))
+    (define arena-has-stealth?
+      (ormap (lambda (a)
+               (or (tactical-sim-unit-cloaked? a)
+                   (memq (tactical-sim-unit-type a) SC2-CLOAKED-OR-BURROW-STEALTH-SYMS)))
+             (tactical-arena-ally-units arena)))
     (for ([su (in-list (tactical-arena-ally-units arena))])
       (define uid (tactical-sim-unit-id su))
       (define utype (tactical-sim-unit-type su))
@@ -1681,10 +1714,23 @@
                      best
                      (let ([e (car rem)])
                        (if (> (sim-unit-weapon-dps-vs su e) 0.0)
-                           (let* ([d (max 1.0 (dist2d-pts ux uy (tactical-sim-unit-x e) (tactical-sim-unit-y e)))]
-                                  [decoy-mult (if (memq (tactical-sim-unit-type e) SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05 1.0)]
+                           (let* ([etype (tactical-sim-unit-type e)]
+                                  [d (max 1.0 (dist2d-pts ux uy (tactical-sim-unit-x e) (tactical-sim-unit-y e)))]
+                                  [det? (or (memq etype SC2-MOBILE-DETECTOR-SYMS)
+                                            (memq etype SC2-STATIC-DETECTOR-SYMS))]
+                                  [chg? (memq etype SC2-CHANGELING-UNIT-SYMS)]
+                                  [decoy-mult
+                                   (cond
+                                     [chg? 4.0]
+                                     [(and det? arena-has-stealth?) SC2-DETECTOR-SNIPE-PRIORITY-BONUS]
+                                     [(memq etype SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05]
+                                     [else 1.0])]
+                                  [eff-dps
+                                   (if (and det? arena-has-stealth?)
+                                       (max 22.0 (+ 5.0 (tactical-sim-unit-ground-dps e) (tactical-sim-unit-air-dps e)))
+                                       (+ 5.0 (tactical-sim-unit-ground-dps e) (tactical-sim-unit-air-dps e)))]
                                   [sc (* decoy-mult
-                                         (/ (+ 5.0 (tactical-sim-unit-ground-dps e) (tactical-sim-unit-air-dps e))
+                                         (/ eff-dps
                                             (* (+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)) d)))])
                              (if (> sc best-sc)
                                  (loop (cdr rem) e sc)
@@ -1745,4 +1791,295 @@
 
   (set-tactical-mirror-brain-last-decisions! brain (reverse decisions))
   (values (reverse actions) committed-tags (reverse decisions)))
+
+;; =============================================================================
+;; 7. Burrowed Roach / Infestor Movement Micro, Shimmer/Burrow-Ripple Skillshots
+;;    & Pro Terran Add-On Swapping (1,649 / 1,685 Replay Empirical Models)
+;; =============================================================================
+
+;; Burrowed Roach (`TunnelingClaws`) movement & regeneration micro:
+;; - When Roach HP ratio <= `SC2-ROACH-BURROW-HP-PCT-THRESH` (0.38) and Burrow is
+;;   researched: burrow down (`burrow-down`) and tunnel-move toward `base-x, base-y`
+;;   (`roach-tunnel-move`) if `tunneling-claws` is researched (or enemy has detection).
+;; - When Burrowed Roach HP ratio >= `SC2-ROACH-UNBURROW-HP-PCT-THRESH` (0.82), or
+;;   when flanking within `SC2-ROACH-TUNNEL-FLANK-RANGE` (4.0) of enemy backline:
+;;   unburrow (`burrow-up`) to re-engage!
+(define (execute-roach-tunneling-burrow-micro obs)
+  (define sanitized-obs (if (hash? obs) obs (hash)))
+  (define upgrades (hash-ref sanitized-obs 'researched-upgrades '()))
+  (define has-burrow?
+    (or (not (hash-has-key? sanitized-obs 'researched-upgrades))
+        (and (memq 'burrow upgrades) #t)
+        (and (memq 'tunneling-claws upgrades) #t)))
+  (define has-tunneling?
+    (or (not (hash-has-key? sanitized-obs 'researched-upgrades))
+        (and (memq 'tunneling-claws upgrades) #t)))
+  (define base-x (exact-round (hash-ref sanitized-obs 'base-x SC2-DEFAULT-HOME-BASE-X)))
+  (define base-y (exact-round (hash-ref sanitized-obs 'base-y SC2-DEFAULT-HOME-BASE-Y)))
+  (define ally-units (hash-ref sanitized-obs 'ally-units '()))
+  (define enemy-units (hash-ref sanitized-obs 'enemy-units '()))
+  (define actions '())
+  (define (emit! a) (set! actions (cons a actions)))
+
+  (when has-burrow?
+    (for ([u (in-list ally-units)]
+          #:when (and (hash? u)
+                      (memq (hash-ref u 'type 'unknown) '(roach roach-burrowed))))
+      (define uid (hash-ref u 'id 0))
+      (define utype (hash-ref u 'type 'roach))
+      (define burrowed?
+        (or (eq? utype 'roach-burrowed)
+            (hash-ref u 'burrowed #f)
+            (hash-ref u 'is-burrowed? #f)))
+      (define hp (max 1.0 (exact->inexact (hash-ref u 'hp 145))))
+      (define max-hp (max 1.0 (exact->inexact (hash-ref u 'max-hp 145))))
+      (define hp-pct (/ hp max-hp))
+      (define ux (exact->inexact (hash-ref u 'x base-x)))
+      (define uy (exact->inexact (hash-ref u 'y base-y)))
+      (define nearest-e
+        (and (not (null? enemy-units))
+             (argmin (lambda (e)
+                       (dist2d-pts ux uy
+                                   (exact->inexact (hash-ref e 'x 160))
+                                   (exact->inexact (hash-ref e 'y 160))))
+                     enemy-units)))
+      (define dist-e
+        (if nearest-e
+            (dist2d-pts ux uy
+                        (exact->inexact (hash-ref nearest-e 'x 160))
+                        (exact->inexact (hash-ref nearest-e 'y 160)))
+            999.0))
+      (cond
+        ;; Unburrowed Roach at low HP under fire -> Burrow down (+ tunnel retreat if TunnelingClaws)
+        [(and (not burrowed?)
+              (<= hp-pct SC2-ROACH-BURROW-HP-PCT-THRESH)
+              (<= dist-e 12.0))
+         (emit! (list 'burrow-down uid 'roach-regen-escape))
+         (when has-tunneling?
+           (define-values (kx ky)
+             (if nearest-e
+                 (compute-kite-vector (exact-round ux) (exact-round uy)
+                                      (exact-round (hash-ref nearest-e 'x 160))
+                                      (exact-round (hash-ref nearest-e 'y 160))
+                                      5)
+                 (values base-x base-y)))
+           (emit! (list 'roach-tunnel-move uid kx ky)))]
+        ;; Burrowed Roach still low HP -> Tunnel-move to safety or flank
+        [(and burrowed? (< hp-pct SC2-ROACH-UNBURROW-HP-PCT-THRESH))
+         (when has-tunneling?
+           (define-values (kx ky)
+             (if (and nearest-e (<= dist-e 10.0))
+                 (compute-kite-vector (exact-round ux) (exact-round uy)
+                                      (exact-round (hash-ref nearest-e 'x 160))
+                                      (exact-round (hash-ref nearest-e 'y 160))
+                                      5)
+                 (values base-x base-y)))
+           (emit! (list 'roach-tunnel-move uid kx ky)))]
+        ;; Burrowed Roach healed (>= 82% HP) or in flank range -> Unburrow!
+        [(and burrowed? (>= hp-pct SC2-ROACH-UNBURROW-HP-PCT-THRESH))
+         (emit! (list 'burrow-up uid 'roach-healed-reengage))])))
+  (reverse actions))
+
+;; Burrowed Infestor movement, cast & escape micro (`1,105` Infestors in 1,649 replays):
+;; - Infestors burrow-approach (`burrow-down` + `infestor-burrow-move`) when within
+;;   `SC2-INFESTOR-BURROW-APPROACH-RANGE` (16.0) of enemy army.
+;; - Cast `fungal-growth` (range 10, energy >= 75) on enemy clusters or `neural-parasite`
+;;   (range 9, energy >= 100, playable while burrowed) on high-value capital units
+;;   (`thor`, `battlecruiser`, `siege-tank`, `siege-tank-sieged`, `colossus`, `immortal`,
+;;   `archon`, `carrier`, `tempest`, `mothership`).
+;; - After casting (`energy < 75`), immediately burrow-retreat toward `base-x, base-y`.
+(define (execute-infestor-burrow-cast-micro obs)
+  (define sanitized-obs (if (hash? obs) obs (hash)))
+  (define base-x (exact-round (hash-ref sanitized-obs 'base-x SC2-DEFAULT-HOME-BASE-X)))
+  (define base-y (exact-round (hash-ref sanitized-obs 'base-y SC2-DEFAULT-HOME-BASE-Y)))
+  (define ally-units (hash-ref sanitized-obs 'ally-units '()))
+  (define enemy-units (hash-ref sanitized-obs 'enemy-units '()))
+  (define capital-syms
+    '(thor battlecruiser siege-tank siege-tank-sieged colossus immortal archon carrier tempest mothership ultralisk))
+  (define actions '())
+  (define (emit! a) (set! actions (cons a actions)))
+
+  (for ([u (in-list ally-units)]
+        #:when (and (hash? u)
+                    (memq (hash-ref u 'type 'unknown) '(infestor infestor-burrowed))))
+    (define uid (hash-ref u 'id 0))
+    (define utype (hash-ref u 'type 'infestor))
+    (define burrowed?
+      (or (eq? utype 'infestor-burrowed)
+          (hash-ref u 'burrowed #f)
+          (hash-ref u 'is-burrowed? #f)))
+    (define energy (exact->inexact (hash-ref u 'energy 75)))
+    (define ux (exact->inexact (hash-ref u 'x base-x)))
+    (define uy (exact->inexact (hash-ref u 'y base-y)))
+    (define nearest-e
+      (and (not (null? enemy-units))
+           (argmin (lambda (e)
+                     (dist2d-pts ux uy
+                                 (exact->inexact (hash-ref e 'x 160))
+                                 (exact->inexact (hash-ref e 'y 160))))
+                   enemy-units)))
+    (when nearest-e
+      (define ex (exact-round (hash-ref nearest-e 'x 160)))
+      (define ey (exact-round (hash-ref nearest-e 'y 160)))
+      (define dist-e (dist2d-pts ux uy (exact->inexact ex) (exact->inexact ey)))
+      (define capital-target
+        (findf (lambda (e)
+                 (and (memq (hash-ref e 'type 'unknown) capital-syms)
+                      (<= (dist2d-pts ux uy
+                                      (exact->inexact (hash-ref e 'x 160))
+                                      (exact->inexact (hash-ref e 'y 160)))
+                          (+ SC2-INFESTOR-NEURAL-CAST-RANGE 2.0))))
+               enemy-units))
+      (cond
+        ;; Energy spent (< 75) -> ensure burrowed and burrow-move retreat to home base
+        [(< energy SC2-INFESTOR-FUNGAL-ENERGY)
+         (unless burrowed?
+           (emit! (list 'burrow-down uid 'infestor-post-cast-hide)))
+         (emit! (list 'infestor-burrow-move uid base-x base-y))]
+        ;; High-value capital unit in range and energy >= 100 -> Neural Parasite
+        [(and capital-target (>= energy SC2-INFESTOR-NEURAL-ENERGY))
+         (define cx (exact-round (hash-ref capital-target 'x ex)))
+         (define cy (exact-round (hash-ref capital-target 'y ey)))
+         (unless burrowed?
+           (emit! (list 'burrow-down uid 'infestor-stealth-neural)))
+         (emit! (list 'infestor-burrow-cast uid 'neural-parasite cx cy))]
+        ;; Within Fungal Growth range (<= 10.5) and energy >= 75 -> Unburrow (if needed) & cast Fungal Growth
+        [(and (<= dist-e (+ SC2-INFESTOR-FUNGAL-CAST-RANGE 0.5))
+              (>= energy SC2-INFESTOR-FUNGAL-ENERGY))
+         (when burrowed?
+           (emit! (list 'burrow-up uid 'infestor-unburrow-for-fungal)))
+         (emit! (list 'infestor-burrow-cast uid 'fungal-growth ex ey))]
+        ;; Within approach range (<= 16.0) -> Burrow down & sneak into Fungal/Neural range
+        [(<= dist-e SC2-INFESTOR-BURROW-APPROACH-RANGE)
+         (unless burrowed?
+           (emit! (list 'burrow-down uid 'infestor-stealth-approach)))
+         (emit! (list 'infestor-burrow-move uid ex ey))])))
+  (reverse actions))
+
+;; Blind AoE Skillshot & Emergency Detector Response on Cloaked Shimmer / Burrow Ripples:
+;; When an enemy unit is observed with `display-type = 2 (Hidden)`, `cloak-state = 2`,
+;; `is-shimmer? = #t`, or burrowed movement ripples (`shimmer-and-burrow-ripples`),
+;; fire available AoE / reveal spells (`corrosive-bile`, `psi-storm`, `fungal-growth`,
+;; `purification-nova`, `emp-round`, `scanner-sweep`, `oracle-revelation`) at the
+;; exact shimmer/ripple coordinates and emit `emergency-detector-response`.
+(define (execute-shimmer-and-burrow-ripple-response obs)
+  (define sanitized-obs (if (hash? obs) obs (hash)))
+  (define ally-units (hash-ref sanitized-obs 'ally-units '()))
+  (define ally-bldgs (hash-ref sanitized-obs 'ally-buildings '()))
+  (define enemy-units (hash-ref sanitized-obs 'enemy-units '()))
+  (define explicit-ripples (hash-ref sanitized-obs 'shimmer-and-burrow-ripples '()))
+  (define shimmer-targets
+    (append
+     (filter hash? explicit-ripples)
+     (filter (lambda (e)
+               (and (hash? e)
+                    (or (hash-ref e 'is-shimmer? #f)
+                        (= (hash-ref e 'display-type 1) SC2-SHIMMER-DISPLAY-TYPE-HIDDEN)
+                        (= (hash-ref e 'cloak-state 0) 2)
+                        (hash-ref e 'burrowed #f))))
+             enemy-units)))
+  (cond
+    [(null? shimmer-targets) '()]
+    [else
+     (define tgt (first shimmer-targets))
+     (define tx (exact-round (hash-ref tgt 'x 160)))
+     (define ty (exact-round (hash-ref tgt 'y 160)))
+     (define kind (hash-ref tgt 'indicator-kind 'cloaked-shimmer))
+     (define actions (list (list 'emergency-detector-response kind tx ty)))
+     (define (emit! a) (set! actions (cons a actions)))
+
+     ;; Check friendly AoE casters / revealers
+     (for ([u (in-list ally-units)]
+           #:when (hash? u))
+       (define uid (hash-ref u 'id 0))
+       (define utype (hash-ref u 'type 'unknown))
+       (define energy (exact->inexact (hash-ref u 'energy 75)))
+       (case utype
+         [(ravager)
+          (emit! (list 'blind-skillshot-shimmer uid 'corrosive-bile tx ty))]
+         [(high-templar)
+          (when (>= energy 75.0)
+            (emit! (list 'blind-skillshot-shimmer uid 'psi-storm tx ty)))]
+         [(infestor infestor-burrowed)
+          (when (>= energy 75.0)
+            (emit! (list 'blind-skillshot-shimmer uid 'fungal-growth tx ty)))]
+         [(disruptor)
+          (emit! (list 'blind-skillshot-shimmer uid 'purification-nova tx ty))]
+         [(ghost)
+          (when (>= energy 75.0)
+            (emit! (list 'blind-skillshot-shimmer uid 'emp-round tx ty)))]
+         [(oracle)
+          (when (>= energy 25.0)
+            (emit! (list 'blind-skillshot-shimmer uid 'oracle-revelation tx ty)))]))
+
+     ;; Check Orbital Command Scanner Sweep
+     (for ([b (in-list ally-bldgs)]
+           #:when (and (hash? b)
+                       (eq? (hash-ref b 'type 'unknown) 'orbital-command)
+                       (>= (exact->inexact (hash-ref b 'energy 50)) 50.0)))
+       (emit! (list 'blind-skillshot-shimmer (hash-ref b 'id 0) 'scanner-sweep tx ty)))
+
+     (reverse actions)]))
+
+;; Pro Terran Building Lift-Off & Add-On Swapping (`480` swaps across 1,245 Terran pro replays,
+;; median first swap at `198.6s` = frame `4,448`):
+;; Swaps idle `Barracks` / `Factory` / `Starport` onto a pre-built `TechLab` or `Reactor`
+;; when either:
+;;   1. An unattached add-on (`free-addons`) is present and a production facility lacks an add-on, or
+;;   2. A `Barracks` built a `Reactor` or `TechLab` for a newly completed `Factory` or `Starport`
+;;      (`Barracks->Factory: 111`, `Factory->Barracks: 110`, `Barracks->Starport: 77`).
+(define (plan-terran-addon-swap obs)
+  (define sanitized-obs (if (hash? obs) obs (hash)))
+  (define frame (hash-ref sanitized-obs 'frame 0))
+  (define ally-bldgs (filter hash? (hash-ref sanitized-obs 'ally-buildings '())))
+  (define free-addons (filter hash? (hash-ref sanitized-obs 'free-addons '())))
+  (define bare-fac-or-port
+    (findf (lambda (b)
+             (and (memq (hash-ref b 'type 'unknown) '(factory starport))
+                  (not (hash-ref b 'has-addon? #f))
+                  (not (hash-ref b 'busy? #f))))
+           ally-bldgs))
+  (define donor-rax-or-fac
+    (findf (lambda (b)
+             (and (memq (hash-ref b 'type 'unknown) '(barracks factory))
+                  (hash-ref b 'has-addon? #f)
+                  (not (hash-ref b 'busy? #f))))
+           ally-bldgs))
+  (cond
+    ;; Case 1: Free unattached TechLab/Reactor available + bare Barracks/Factory/Starport
+    [(and (not (null? free-addons))
+          (or bare-fac-or-port
+              (findf (lambda (b)
+                       (and (eq? (hash-ref b 'type 'unknown) 'barracks)
+                            (not (hash-ref b 'has-addon? #f))
+                            (not (hash-ref b 'busy? #f))))
+                     ally-bldgs)))
+     (define addon (first free-addons))
+     (define receiver
+       (or bare-fac-or-port
+           (findf (lambda (b)
+                    (and (eq? (hash-ref b 'type 'unknown) 'barracks)
+                         (not (hash-ref b 'has-addon? #f))
+                         (not (hash-ref b 'busy? #f))))
+                  ally-bldgs)))
+     (define ax (exact->inexact (hash-ref addon 'x 34.5)))
+     (define ay (exact->inexact (hash-ref addon 'y 31.5)))
+     (list (list 'terran-addon-swap 0 (hash-ref receiver 'id 0) ax ay))]
+    ;; Case 2: Active pro swap (`frame >= SC2-TERRAN-FIRST-ADDON-SWAP-FRAME` or explicit swap-ready)
+    [(and bare-fac-or-port
+          donor-rax-or-fac
+          (not (eq? (hash-ref bare-fac-or-port 'type 'unknown)
+                    (hash-ref donor-rax-or-fac 'type 'unknown)))
+          (>= frame SC2-TERRAN-FIRST-ADDON-SWAP-FRAME))
+     (define dx (exact->inexact (hash-ref donor-rax-or-fac 'x 32.0)))
+     (define dy (exact->inexact (hash-ref donor-rax-or-fac 'y 32.0)))
+     (define ax (exact->inexact (hash-ref donor-rax-or-fac 'addon-x (+ dx 2.5))))
+     (define ay (exact->inexact (hash-ref donor-rax-or-fac 'addon-y (- dy 0.5))))
+     (list (list 'terran-addon-swap
+                 (hash-ref donor-rax-or-fac 'id 0)
+                 (hash-ref bare-fac-or-port 'id 0)
+                 ax
+                 ay))]
+    [else '()]))
+
 

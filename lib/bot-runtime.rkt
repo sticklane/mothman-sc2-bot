@@ -1247,16 +1247,27 @@
                enemy-close?)
       (emit! (list 'mineral-walk (hash-ref w 'id 10) base-x base-y))))
 
-  ;; Standard Gas & Mineral Harvesting (governed by Guns-vs-Butter Gas Allocation)
+  ;; Standard Gas & Mineral Harvesting (governed by Guns-vs-Butter Gas Allocation
+  ;; + Pro Gas-Float Harvester Rebalancing when gas >= 350 and minerals < 180)
+  (define gas-float-starved?
+    (and (>= gas SC2-GAS-FLOAT-REBALANCE-THRESH)
+         (< minerals SC2-MINERAL-STARVED-REBALANCE-THRESH)))
   (define gas-bldg
     (findf (lambda (b) (memq (unit-type-sym b) '(extractor assimilator refinery)))
            ally-bldgs))
   (when (and gas-bldg
              (not (null? workers))
+             (not gas-float-starved?)
              (> (gas-worker-allocation-desired-gas-workers gas-alloc) 0))
     (emit! (list 'harvest-gas (hash-ref (car workers) 'id 10) (hash-ref gas-bldg 'id 103))))
   (when (not (null? workers))
     (define patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
+    (when gas-float-starved?
+      (define pull-workers
+        (take workers (min (if (>= gas SC2-GAS-FLOAT-CRITICAL-THRESH) 4 2) (length workers))))
+      (emit! (list 'rebalance-gas-to-minerals
+                   (map (lambda (w) (hash-ref w 'id 10)) pull-workers)
+                   patch-id)))
     (emit! (list 'harvest-mineral (hash-ref (car workers) 'id 10) patch-id))
     (define idle-return-workers
       (filter (lambda (w)
@@ -1280,9 +1291,10 @@
   (when (and (hash-ref obs 'enable-worker-harass #f) (not (null? workers)))
     (emit! (list 'worker-harass (hash-ref (last workers) 'id 10) enemy-x enemy-y)))
 
-  ;; Mined-out / Depleting base detection (Scenario 3): auto-expand & transfer workers
+  ;; Mined-out / Proactive 90s Pre-Depleting base detection (Scenario 3): auto-expand & transfer workers
+  (define pre-depleting-bases (safe-nonneg-int (hash-ref obs 'pre-depleting-bases depleting-bases) depleting-bases))
   (when (and (or (hash-ref obs 'mined-out #f)
-                 (and (> depleting-bases 0)
+                 (and (> (max depleting-bases pre-depleting-bases) 0)
                       (>= minerals (sc2-race-townhall-min-cost race))))
              (not natural-blocked?)
              (not under-early-cheese?)
@@ -2052,10 +2064,45 @@
                 (or under-early-cheese? (>= total-workers SC2-IDEAL-WORKERS-PER-BASE)))
        (emit-build-verified! 'spine-crawler nat-x nat-y 2.0))
 
+     (when (and (memq 'spawning-pool ready-bldg-types)
+                (>= supply-used 36)
+                (not (building-present-or-pending? 'evolution-chamber))
+                (>= minerals (sc2-min-cost 'evolution-chamber)))
+       (emit-build-verified! 'evolution-chamber (safe-coord (+ base-x 3.0)) (safe-coord (- base-y 4.0))))
+
+     (when (memq 'evolution-chamber ready-bldg-types)
+       (cond
+         [(upgrade-needed? 'zerg-missile-weapons-1)
+          (emit-research-verified! 'zerg-missile-weapons-1)]
+         [(upgrade-needed? 'zerg-ground-armor-1)
+          (emit-research-verified! 'zerg-ground-armor-1)]
+         [(and (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+               (upgrade-needed? 'zerg-missile-weapons-2))
+          (emit-research-verified! 'zerg-missile-weapons-2)]
+         [(and (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+               (upgrade-needed? 'zerg-ground-armor-2))
+          (emit-research-verified! 'zerg-ground-armor-2)]
+         [(and (memq 'hive ready-bldg-types)
+               (upgrade-needed? 'zerg-missile-weapons-3))
+          (emit-research-verified! 'zerg-missile-weapons-3)]
+         [(and (memq 'hive ready-bldg-types)
+               (upgrade-needed? 'zerg-ground-armor-3))
+          (emit-research-verified! 'zerg-ground-armor-3)]))
+
      (when (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
-       (when (and (memq 'roach-warren ready-bldg-types)
-                  (upgrade-needed? 'glial-reconstitution))
-         (emit-research-verified! 'glial-reconstitution))
+       (when (and (upgrade-needed? 'burrow)
+                  (>= minerals (sc2-min-cost 'burrow))
+                  (>= gas (sc2-gas-cost 'burrow)))
+         (emit-research-verified! 'burrow))
+       (when (memq 'roach-warren ready-bldg-types)
+         (cond
+           [(upgrade-needed? 'glial-reconstitution)
+            (emit-research-verified! 'glial-reconstitution)]
+           [(upgrade-needed? 'tunneling-claws)
+            (emit-research-verified! 'tunneling-claws)]))
+       (when (and (memq 'baneling-nest ready-bldg-types)
+                  (upgrade-needed? 'centrifical-hooks))
+         (emit-research-verified! 'centrifical-hooks))
        (when (and (not (building-present-or-pending? 'spire))
                   (>= minerals (sc2-min-cost 'spire))
                   (>= gas (sc2-gas-cost 'spire)))
@@ -2064,6 +2111,22 @@
                   (>= minerals (sc2-min-cost 'hydralisk-den))
                   (>= gas (sc2-gas-cost 'hydralisk-den)))
          (emit-build-verified! 'hydralisk-den (safe-coord (+ base-x 4.0)) (safe-coord (+ base-y 5.0))))
+       (when (memq 'hydralisk-den ready-bldg-types)
+         (cond
+           [(upgrade-needed? 'grooved-spines)
+            (emit-research-verified! 'grooved-spines)]
+           [(upgrade-needed? 'muscular-augments)
+            (emit-research-verified! 'muscular-augments)]))
+       (when (and (memq 'infestation-pit ready-bldg-types)
+                  (upgrade-needed? 'neural-parasite))
+         (emit-research-verified! 'neural-parasite))
+       (when (and (memq 'hive ready-bldg-types)
+                  (memq 'spawning-pool ready-bldg-types)
+                  (upgrade-needed? 'zergling-attackspeed))
+         (emit-research-verified! 'zergling-attackspeed))
+       (when (and (memq 'ultralisk-cavern ready-bldg-types)
+                  (upgrade-needed? 'chitinous-plating))
+         (emit-research-verified! 'chitinous-plating))
        (when (and (memq 'hydralisk-den ready-bldg-types)
                   (not (building-present-or-pending? 'lurker-den))
                   (not (memq 'lurker-den-mp bldg-types))
@@ -2342,7 +2405,9 @@
          [(upgrade-needed? 'charge)
           (emit-research-verified! 'charge)]
          [(upgrade-needed? 'blink)
-          (emit-research-verified! 'blink)]))
+          (emit-research-verified! 'blink)]
+         [(upgrade-needed? 'resonating-glaives)
+          (emit-research-verified! 'resonating-glaives)]))
 
      ;; Priority Robotics Facility production (Group 6): First Immortal -> Observer (if none) -> Colossus / Disruptor -> Immortal
      (when (and (not protoss-saving-for-expand?)
@@ -2417,10 +2482,21 @@
                 (>= minerals (sc2-min-cost 'forge)))
        (emit-build-verified! 'forge (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
 
-     (when (and (memq 'forge ready-bldg-types)
-                (can-spend-by-priority? 'protoss-ground-weapons-1 'tech-upgrade)
-                (upgrade-needed? 'protoss-ground-weapons-1))
-       (emit-research-verified! 'protoss-ground-weapons-1))
+     (when (memq 'forge ready-bldg-types)
+       (cond
+         [(and (can-spend-by-priority? 'protoss-ground-weapons-1 'tech-upgrade)
+               (upgrade-needed? 'protoss-ground-weapons-1))
+          (emit-research-verified! 'protoss-ground-weapons-1)]
+         [(upgrade-needed? 'protoss-ground-armor-1)
+          (emit-research-verified! 'protoss-ground-armor-1)]
+         [(and (memq 'twilight-council ready-bldg-types)
+               (upgrade-needed? 'protoss-ground-weapons-2))
+          (emit-research-verified! 'protoss-ground-weapons-2)]
+         [(and (memq 'twilight-council ready-bldg-types)
+               (upgrade-needed? 'protoss-ground-armor-2))
+          (emit-research-verified! 'protoss-ground-armor-2)]
+         [(upgrade-needed? 'protoss-shields-1)
+          (emit-research-verified! 'protoss-shields-1)]))
 
      (when (and (memq 'twilight-council ready-bldg-types)
                 (not protoss-saving-for-expand?)
@@ -2431,6 +2507,11 @@
                 (>= gas 250)
                 (>= minerals (sc2-min-cost 'templar-archive)))
        (emit-build-verified! 'templar-archive (safe-coord (+ base-x 6.0)) (safe-coord (- base-y 6.0))))
+
+     (when (and (or (memq 'templar-archive ready-bldg-types)
+                    (memq 'templar-archives ready-bldg-types))
+                (upgrade-needed? 'psi-storm))
+       (emit-research-verified! 'psi-storm))
 
      (when (and (memq 'robotics-facility ready-bldg-types)
                 (can-spend-by-priority? 'robotics-bay 'tech-upgrade)
@@ -2448,10 +2529,13 @@
                                         SC2-STATIC-DETECTOR-COOLDOWN-FRAMES)
          (emit! (list 'build 'photon-cannon nat-x nat-y))))
 
-     (when (and (or (memq 'robotics-bay ready-bldg-types)
-                    (memq 'robotics-support-bay ready-bldg-types))
-                (upgrade-needed? 'extended-thermal-lance))
-       (emit-research-verified! 'extended-thermal-lance))
+     (when (or (memq 'robotics-bay ready-bldg-types)
+               (memq 'robotics-support-bay ready-bldg-types))
+       (cond
+         [(upgrade-needed? 'extended-thermal-lance)
+          (emit-research-verified! 'extended-thermal-lance)]
+         [(upgrade-needed? 'gravitic-booster)
+          (emit-research-verified! 'gravitic-booster)]))
 
      ;; Morph Archons whenever >= 2 Templars are on the field
      (when (>= (count (lambda (u) (memq (unit-type-sym u) '(high-templar dark-templar))) ally-units) 2)
@@ -2592,6 +2676,8 @@
        (emit! (list 'swap-addon
                     (hash-ref rax-with-reactor 'id 704)
                     (hash-ref fac-needing-addon 'id 705))))
+     (for ([swap-act (in-list (plan-terran-addon-swap obs))])
+       (emit! swap-act))
 
      ;; 3. Pro Build-Order Expansion Sequencing (20 Command Center -> 52 3rd Command Center -> 4th+ CC)
      (when (and (>= minerals (sc2-min-cost 'command-center))
@@ -2771,9 +2857,34 @@
        (when (and (not (building-present-or-pending? 'engineering-bay))
                   (>= minerals (sc2-min-cost 'engineering-bay)))
          (emit-build-verified! 'engineering-bay (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
-       (when (and (memq 'engineering-bay ready-bldg-types)
-                  (upgrade-needed? 'terran-infantry-weapons-1))
-         (emit-research-verified! 'terran-infantry-weapons-1))
+       (when (memq 'engineering-bay ready-bldg-types)
+         (cond
+           [(upgrade-needed? 'terran-infantry-weapons-1)
+            (emit-research-verified! 'terran-infantry-weapons-1)]
+           [(upgrade-needed? 'terran-infantry-armor-1)
+            (emit-research-verified! 'terran-infantry-armor-1)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-weapons-2))
+            (emit-research-verified! 'terran-infantry-weapons-2)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-armor-2))
+            (emit-research-verified! 'terran-infantry-armor-2)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-weapons-3))
+            (emit-research-verified! 'terran-infantry-weapons-3)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-armor-3))
+            (emit-research-verified! 'terran-infantry-armor-3)]))
+       (when (memq 'armory ready-bldg-types)
+         (cond
+           [(upgrade-needed? 'terran-vehicle-weapons-1)
+            (emit-research-verified! 'terran-vehicle-weapons-1)]
+           [(upgrade-needed? 'terran-vehicle-and-ship-plating-1)
+            (emit-research-verified! 'terran-vehicle-and-ship-plating-1)]))
+       (when (and (or (memq 'starport-techlab ready-bldg-types)
+                      (memq 'starport-tech-lab ready-bldg-types))
+                  (upgrade-needed? 'banshee-cloak))
+         (emit-research-verified! 'banshee-cloak))
        (when (and (not (building-present-or-pending? 'ghost-academy))
                   (>= supply-used 56)
                   (>= minerals (sc2-min-cost 'ghost-academy))
@@ -2893,8 +3004,11 @@
 ;; (filters out untargetable projectiles/larva/eggs, enforces air/ground weapon
 ;; domain matching, de-prioritizes passive scouts/decoys/interceptors/broodlings
 ;; when real threats exist, and prioritizes Light/Bio clumps for Banelings).
-(define (select-target-enemy-for-unit ux uy enemy-units [attacker-type 'marine])
+(define (select-target-enemy-for-unit ux uy enemy-units [attacker-type 'marine] [ally-has-stealth? #f])
   (define baneling-attacker? (eq? attacker-type 'baneling))
+  (define stealth-active?
+    (or ally-has-stealth?
+        (and (memq attacker-type SC2-CLOAKED-OR-BURROW-STEALTH-SYMS) #t)))
   (define light-bio-syms
     '(marine zergling zealot adept hydralisk probe scv drone reaper hellion sentry high-templar ghost))
   (define armored-syms
@@ -2915,6 +3029,16 @@
                              (and (hash-ref e 'flying #f) #t))]
                [valid? (and (sc2-enemy-unit-targetable? e)
                             (sc2-attacker-can-hit-enemy? attacker-type e eflying?))]
+               [changeling-or-detector-adj
+                (+ (if (or (memq et SC2-CHANGELING-UNIT-SYMS)
+                           (eq? (hash-ref e 'changeling? #f) #t))
+                       -220.0
+                       0.0)
+                   (if (and stealth-active?
+                            (or (memq et SC2-MOBILE-DETECTOR-SYMS)
+                                (memq et SC2-STATIC-DETECTOR-SYMS)))
+                       -180.0
+                       0.0))]
                [bane-adj
                 (if baneling-attacker?
                     (cond
@@ -2934,8 +3058,12 @@
              (define d (dist2d ux uy ex ey))
              (define hp (safe-finite-real (hash-ref e 'hp 100) 100.0))
              (define passive-penalty
-               (+ (if (memq et SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 250.0 0.0)
+               (+ (if (and (memq et SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS)
+                           (not (and stealth-active? (memq et SC2-MOBILE-DETECTOR-SYMS))))
+                      250.0
+                      0.0)
                   (if (memq et SC2-ALL-STRUCTURE-SYMS) 30.0 0.0)
+                  changeling-or-detector-adj
                   bane-adj))
              (define sc
                (+ passive-penalty
@@ -2949,8 +3077,12 @@
              (define d (dist2d ux uy ex ey))
              (define hp (safe-finite-real (hash-ref e 'hp 100) 100.0))
              (define passive-penalty
-               (+ (if (memq et SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 250.0 0.0)
+               (+ (if (and (memq et SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS)
+                           (not (and stealth-active? (memq et SC2-MOBILE-DETECTOR-SYMS))))
+                      250.0
+                      0.0)
                   (if (memq et SC2-ALL-STRUCTURE-SYMS) 30.0 0.0)
+                  changeling-or-detector-adj
                   bane-adj))
              (define sc
                (+ passive-penalty
@@ -3442,6 +3574,13 @@
   (define short-range-bio-syms
     '(marine marauder zergling roach hydralisk zealot stalker adept))
 
+  (define ally-has-stealth?
+    (ormap (lambda (u)
+             (or (and (memq (unit-type-sym u) SC2-CLOAKED-OR-BURROW-STEALTH-SYMS) #t)
+                 (and (hash-ref u 'cloaked #f) #t)
+                 (and (hash-ref u 'burrowed #f) #t)))
+           combat-units))
+
   (when (not (null? engagement-enemies))
     ;; Queen transfusion on wounded ally
     (define queens (filter (lambda (u) (eq? (unit-type-sym u) 'queen)) ally-units))
@@ -3458,7 +3597,7 @@
       (define uy (hash-ref u 'y base-y))
       (define u-hp (hash-ref u 'hp 100))
       (define u-buffs (hash-ref u 'buffs '()))
-      (define target-enemy (select-target-enemy-for-unit ux uy engagement-enemies ut))
+      (define target-enemy (select-target-enemy-for-unit ux uy engagement-enemies ut ally-has-stealth?))
       (define eid (hash-ref target-enemy 'id 9001))
       (define etype (unit-type-sym target-enemy))
       (define ex (hash-ref target-enemy 'x nat-x))
@@ -3698,12 +3837,21 @@
   (for ([ec (in-list enemy-changelings)])
     (emit! (list 'snipe-enemy-changeling (hash-ref ec 'id 9099))))
 
+  ;; Pro Mechanic #9b: Burrowed Roach Tunneling Claws micro, Burrowed Infestor
+  ;;                   Fungal/Neural/Shroud micro, & Shimmer / Burrow-Ripple AoE skillshots
+  (for ([ba (in-list (execute-roach-tunneling-burrow-micro obs))])
+    (emit! ba))
+  (for ([ia (in-list (execute-infestor-burrow-cast-micro obs))])
+    (emit! ia))
+  (for ([sa (in-list (execute-shimmer-and-burrow-ripple-response obs))])
+    (emit! sa))
+
   (define ally-sentries
     (filter (lambda (u) (eq? (unit-type-sym u) 'sentry)) ally-units))
   (define ally-overseers
     (filter (lambda (u) (eq? (unit-type-sym u) 'overseer)) ally-units))
   (define ally-infestors
-    (filter (lambda (u) (eq? (unit-type-sym u) 'infestor)) ally-units))
+    (filter (lambda (u) (memq (unit-type-sym u) '(infestor infestor-burrowed))) ally-units))
 
   (when (or (hash-ref obs 'enable-deception-and-buffs #f)
             (not (null? ally-sentries))
@@ -4026,19 +4174,34 @@
   (define pro-apm-acts
     (step-pro-human-camera-and-apm-governor! rt obs))
   (define preserved-tactical-directives
-    (filter (lambda (a)
-              (and (pair? a)
-                   (memq (car a)
-                         '(snipe-enemy-changeling
-                           cast-deception-and-scout-spells
-                           cast-protective-buff-aura
-                           position-in-buff-aura-with-splash-spread
-                           pre-split-wings
-                           form-concave-arc
-                           high-ground-tactics
-                           execute-spatial-maneuver))
-                   (not (member a accepted))))
-            tactic-acts))
+    (append
+     (filter (lambda (a)
+               (and (pair? a)
+                    (memq (car a)
+                          '(rebalance-gas-to-minerals
+                            terran-addon-swap))
+                    (not (member a accepted))))
+             econ-acts)
+     (filter (lambda (a)
+               (and (pair? a)
+                    (memq (car a)
+                          '(snipe-enemy-changeling
+                            cast-deception-and-scout-spells
+                            cast-protective-buff-aura
+                            position-in-buff-aura-with-splash-spread
+                            pre-split-wings
+                            form-concave-arc
+                            high-ground-tactics
+                            execute-spatial-maneuver
+                            burrow-down
+                            burrow-up
+                            roach-tunnel-move
+                            infestor-burrow-move
+                            infestor-burrow-cast
+                            blind-skillshot-shimmer
+                            emergency-detector-response))
+                    (not (member a accepted))))
+             tactic-acts)))
 
   (define cortex (live-bot-runtime-cortex rt))
   (define mstate (live-bot-runtime-mastermind rt))

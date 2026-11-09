@@ -140,8 +140,12 @@
 (define (find-sc2-x64-binary [sc2-root (find-sc2-root)])
   (define versions-dir (build-path sc2-root "Versions"))
   (define support64-dir (build-path sc2-root "Support64"))
+  (define build-info (build-path sc2-root ".build.info"))
+  (define sc2data-dir (build-path sc2-root "SC2Data"))
   (define preferred-bin (build-path versions-dir "Base75689" "SC2_x64"))
   (cond
+    [(not (and (file-exists? build-info) (directory-exists? sc2data-dir)))
+     (values #f #f)]
     [(file-exists? preferred-bin)
      (values (path->string (simplify-path preferred-bin))
              (path->string (simplify-path (if (directory-exists? support64-dir) support64-dir sc2-root))))]

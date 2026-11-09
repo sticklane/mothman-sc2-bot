@@ -1,0 +1,628 @@
+{
+  "evaluated_by": "Full Replay Corpus Stealth, Burrow-Move & Detector-Sniping Forensics Evaluator",
+  "total_raw_sc2replay_files_on_disk": 3721,
+  "unique_sc2replay_archives_scanned": 1888,
+  "valid_decoded_replays": 1649,
+  "cohorts": {
+    "all": {
+      "replays_scanned": 1649,
+      "detector_sniping_and_unlock": {
+        "mobile_detectors_spawned_total": 2543,
+        "mobile_detectors_killed_total": 1668,
+        "mobile_detector_mortality_pct": 65.6,
+        "static_detectors_spawned_total": 2553,
+        "static_detectors_killed_total": 851,
+        "static_detector_mortality_pct": 33.3,
+        "detectors_spawned_by_type": {
+          "MissileTurret": 317,
+          "Observer": 344,
+          "ObserverSiegeMode": 111,
+          "Overseer": 855,
+          "OverseerSiegeMode": 115,
+          "PhotonCannon": 1009,
+          "Raven": 1118,
+          "SporeCrawler": 1227
+        },
+        "detectors_killed_by_type": {
+          "MissileTurret": 139,
+          "Observer": 144,
+          "ObserverSiegeMode": 27,
+          "Overseer": 370,
+          "OverseerSiegeMode": 25,
+          "PhotonCannon": 454,
+          "Raven": 1102,
+          "SporeCrawler": 258
+        },
+        "detection_spells_cast": {
+          "ScannerSweep": 833,
+          "OracleRevelation": 334
+        },
+        "detector_snipe_opportunity_events": 654,
+        "local_combat_detector_snipe_events": 198,
+        "mobile_detector_snipe_events": 304,
+        "static_detector_snipe_events": 350,
+        "replays_with_detector_snipe": 101,
+        "replays_with_detector_snipe_pct": 6.1,
+        "player_perspectives_with_snipe": 122,
+        "win_rate_when_sniping_detector_pct": 58.2,
+        "player_perspectives_with_stealth_no_snipe": 217,
+        "win_rate_with_stealth_without_detector_snipe_pct": 57.6,
+        "post_snipe_cloaked_burrowed_kills_60s": 3701,
+        "post_snipe_cloaked_burrowed_kills_total": 6822,
+        "post_snipe_damage_resources_60s": 425725,
+        "post_snipe_damage_resources_per_snipe_60s": 651.0,
+        "post_snipe_damage_resources_total": 769600,
+        "post_snipe_damage_hp_60s": 470775,
+        "post_snipe_damage_hp_total": 832015
+      },
+      "burrowed_roach_and_infestor_micro": {
+        "upgrades_researched": {
+          "Burrow": 262,
+          "TunnelingClaws": 29,
+          "NeuralParasite": 11,
+          "ChitinousPlating": 217,
+          "GlialReconstitution": 332,
+          "InfestorEnergyUpgrade": 7,
+          "DrillClaws": 225,
+          "DiggingClaws": 19,
+          "LurkerRange": 14,
+          "BansheeCloak": 219,
+          "PersonalCloaking": 10,
+          "ObserverGraviticBooster": 3,
+          "DarkTemplarBlinkUpgrade": 2
+        },
+        "burrowed_unit_transitions": {
+          "RoachBurrowed": 1593,
+          "InfestorBurrowed": 299,
+          "LurkerMPBurrowed": 3901,
+          "ZerglingBurrowed": 284,
+          "BanelingBurrowed": 35,
+          "DroneBurrowed": 400,
+          "WidowMineBurrowed": 1990,
+          "SwarmHostBurrowedMP": 460
+        },
+        "cloaked_burrowed_units_spawned": {
+          "DarkTemplar": 1461,
+          "Banshee": 485,
+          "Ghost": 1020,
+          "Mothership": 75,
+          "LurkerMP": 1001,
+          "Roach": 10443,
+          "Infestor": 1043,
+          "WidowMine": 1426,
+          "SwarmHostMP": 551
+        },
+        "roach_burrow_micro": {
+          "roach_burrow_transitions": 1593,
+          "roach_combat_burrow_events": 960,
+          "roach_tunneling_move_events": 505,
+          "roach_tunneling_tiles_moved": 16147.0,
+          "roach_unburrow_transitions": 1430,
+          "roach_unburrow_reengage_or_flank_events": 907,
+          "replays_with_roach_burrow_micro": 29,
+          "replays_with_roach_burrow_micro_pct": 1.8
+        },
+        "infestor_burrow_micro": {
+          "infestor_burrow_transitions": 299,
+          "infestor_unburrow_transitions": 223,
+          "infestor_burrowed_move_events": 88,
+          "infestor_burrowed_tiles_moved": 3736.6,
+          "infestor_burrowed_approach_or_cast_events": 168,
+          "infestor_burrow_escape_events": 137,
+          "infestor_spells_cast": {
+            "FungalGrowth": 134,
+            "NeuralParasite": 36,
+            "MicrobialShroud": 1
+          },
+          "replays_with_infestor_burrow_micro": 19,
+          "replays_with_infestor_burrow_micro_pct": 1.2
+        }
+      },
+      "shimmer_and_undetected_burrow_response": {
+        "replays_with_cloaked_or_burrowed_engagement": 196,
+        "replays_with_cloaked_or_burrowed_engagement_pct": 11.9,
+        "stealth_contact_windows_without_detection": 3449,
+        "aoe_skillshots_total": {
+          "CorrosiveBile": 2645,
+          "FungalGrowth": 134,
+          "PsiStorm": 425,
+          "PurificationNova": 204,
+          "EMP": 17,
+          "ScannerSweep": 833,
+          "OracleRevelation": 334
+        },
+        "aoe_skillshots_on_shimmer_or_burrow": {
+          "CorrosiveBile": 208,
+          "FungalGrowth": 30,
+          "PsiStorm": 79,
+          "PurificationNova": 15,
+          "EMP": 0,
+          "ScannerSweep": 30,
+          "OracleRevelation": 76
+        },
+        "aoe_skillshots_blind_without_detector": {
+          "CorrosiveBile": 165,
+          "FungalGrowth": 12,
+          "PsiStorm": 53,
+          "PurificationNova": 15,
+          "EMP": 0,
+          "ScannerSweep": 28,
+          "OracleRevelation": 45
+        },
+        "emergency_detector_responses": {
+          "emergency_overseer_morphs": 202,
+          "emergency_overseer_pulls": 226,
+          "emergency_observer_warps_or_pulls": 99,
+          "emergency_raven_pulls_or_spawns": 53,
+          "emergency_static_spore_cannon_turret_starts": 416,
+          "non_detector_kite_back_events": 3375
+        }
+      }
+    },
+    "pro_all": {
+      "replays_scanned": 1559,
+      "detector_sniping_and_unlock": {
+        "mobile_detectors_spawned_total": 2283,
+        "mobile_detectors_killed_total": 1621,
+        "mobile_detector_mortality_pct": 71.0,
+        "static_detectors_spawned_total": 1983,
+        "static_detectors_killed_total": 774,
+        "static_detector_mortality_pct": 39.0,
+        "detectors_spawned_by_type": {
+          "MissileTurret": 246,
+          "Observer": 307,
+          "ObserverSiegeMode": 111,
+          "Overseer": 639,
+          "OverseerSiegeMode": 115,
+          "PhotonCannon": 1007,
+          "Raven": 1111,
+          "SporeCrawler": 730
+        },
+        "detectors_killed_by_type": {
+          "MissileTurret": 99,
+          "Observer": 133,
+          "ObserverSiegeMode": 27,
+          "Overseer": 334,
+          "OverseerSiegeMode": 25,
+          "PhotonCannon": 454,
+          "Raven": 1102,
+          "SporeCrawler": 221
+        },
+        "detection_spells_cast": {
+          "ScannerSweep": 368,
+          "OracleRevelation": 334
+        },
+        "detector_snipe_opportunity_events": 604,
+        "local_combat_detector_snipe_events": 168,
+        "mobile_detector_snipe_events": 286,
+        "static_detector_snipe_events": 318,
+        "replays_with_detector_snipe": 87,
+        "replays_with_detector_snipe_pct": 5.6,
+        "player_perspectives_with_snipe": 106,
+        "win_rate_when_sniping_detector_pct": 55.7,
+        "player_perspectives_with_stealth_no_snipe": 200,
+        "win_rate_with_stealth_without_detector_snipe_pct": 58.5,
+        "post_snipe_cloaked_burrowed_kills_60s": 3417,
+        "post_snipe_cloaked_burrowed_kills_total": 6455,
+        "post_snipe_damage_resources_60s": 402350,
+        "post_snipe_damage_resources_per_snipe_60s": 666.1,
+        "post_snipe_damage_resources_total": 740750,
+        "post_snipe_damage_hp_60s": 440425,
+        "post_snipe_damage_hp_total": 796075
+      },
+      "burrowed_roach_and_infestor_micro": {
+        "upgrades_researched": {
+          "Burrow": 247,
+          "TunnelingClaws": 24,
+          "NeuralParasite": 9,
+          "ChitinousPlating": 217,
+          "GlialReconstitution": 310,
+          "InfestorEnergyUpgrade": 7,
+          "DrillClaws": 213,
+          "DiggingClaws": 17,
+          "LurkerRange": 13,
+          "BansheeCloak": 212,
+          "PersonalCloaking": 5,
+          "ObserverGraviticBooster": 3,
+          "DarkTemplarBlinkUpgrade": 2
+        },
+        "burrowed_unit_transitions": {
+          "RoachBurrowed": 1408,
+          "InfestorBurrowed": 195,
+          "LurkerMPBurrowed": 3880,
+          "ZerglingBurrowed": 196,
+          "BanelingBurrowed": 35,
+          "DroneBurrowed": 380,
+          "WidowMineBurrowed": 1827,
+          "SwarmHostBurrowedMP": 460
+        },
+        "cloaked_burrowed_units_spawned": {
+          "DarkTemplar": 1461,
+          "Banshee": 469,
+          "Ghost": 1020,
+          "Mothership": 75,
+          "LurkerMP": 994,
+          "Roach": 9713,
+          "Infestor": 1018,
+          "WidowMine": 1242,
+          "SwarmHostMP": 549
+        },
+        "roach_burrow_micro": {
+          "roach_burrow_transitions": 1408,
+          "roach_combat_burrow_events": 795,
+          "roach_tunneling_move_events": 446,
+          "roach_tunneling_tiles_moved": 15098.4,
+          "roach_unburrow_transitions": 1259,
+          "roach_unburrow_reengage_or_flank_events": 748,
+          "replays_with_roach_burrow_micro": 20,
+          "replays_with_roach_burrow_micro_pct": 1.3
+        },
+        "infestor_burrow_micro": {
+          "infestor_burrow_transitions": 195,
+          "infestor_unburrow_transitions": 123,
+          "infestor_burrowed_move_events": 78,
+          "infestor_burrowed_tiles_moved": 3217.6,
+          "infestor_burrowed_approach_or_cast_events": 86,
+          "infestor_burrow_escape_events": 70,
+          "infestor_spells_cast": {
+            "FungalGrowth": 104,
+            "NeuralParasite": 36,
+            "MicrobialShroud": 1
+          },
+          "replays_with_infestor_burrow_micro": 16,
+          "replays_with_infestor_burrow_micro_pct": 1.0
+        }
+      },
+      "shimmer_and_undetected_burrow_response": {
+        "replays_with_cloaked_or_burrowed_engagement": 169,
+        "replays_with_cloaked_or_burrowed_engagement_pct": 10.8,
+        "stealth_contact_windows_without_detection": 2945,
+        "aoe_skillshots_total": {
+          "CorrosiveBile": 265,
+          "FungalGrowth": 104,
+          "PsiStorm": 425,
+          "PurificationNova": 204,
+          "EMP": 17,
+          "ScannerSweep": 368,
+          "OracleRevelation": 334
+        },
+        "aoe_skillshots_on_shimmer_or_burrow": {
+          "CorrosiveBile": 20,
+          "FungalGrowth": 30,
+          "PsiStorm": 79,
+          "PurificationNova": 15,
+          "EMP": 0,
+          "ScannerSweep": 6,
+          "OracleRevelation": 76
+        },
+        "aoe_skillshots_blind_without_detector": {
+          "CorrosiveBile": 17,
+          "FungalGrowth": 12,
+          "PsiStorm": 53,
+          "PurificationNova": 15,
+          "EMP": 0,
+          "ScannerSweep": 4,
+          "OracleRevelation": 45
+        },
+        "emergency_detector_responses": {
+          "emergency_overseer_morphs": 164,
+          "emergency_overseer_pulls": 217,
+          "emergency_observer_warps_or_pulls": 96,
+          "emergency_raven_pulls_or_spawns": 53,
+          "emergency_static_spore_cannon_turret_starts": 300,
+          "non_detector_kite_back_events": 2859
+        }
+      }
+    },
+    "aiarena_ladder": {
+      "replays_scanned": 64,
+      "detector_sniping_and_unlock": {
+        "mobile_detectors_spawned_total": 249,
+        "mobile_detectors_killed_total": 47,
+        "mobile_detector_mortality_pct": 18.9,
+        "static_detectors_spawned_total": 553,
+        "static_detectors_killed_total": 76,
+        "static_detector_mortality_pct": 13.7,
+        "detectors_spawned_by_type": {
+          "MissileTurret": 54,
+          "Observer": 29,
+          "ObserverSiegeMode": 0,
+          "Overseer": 213,
+          "OverseerSiegeMode": 0,
+          "PhotonCannon": 2,
+          "Raven": 7,
+          "SporeCrawler": 497
+        },
+        "detectors_killed_by_type": {
+          "MissileTurret": 39,
+          "Observer": 11,
+          "ObserverSiegeMode": 0,
+          "Overseer": 36,
+          "OverseerSiegeMode": 0,
+          "PhotonCannon": 0,
+          "Raven": 0,
+          "SporeCrawler": 37
+        },
+        "detection_spells_cast": {
+          "ScannerSweep": 456,
+          "OracleRevelation": 0
+        },
+        "detector_snipe_opportunity_events": 50,
+        "local_combat_detector_snipe_events": 30,
+        "mobile_detector_snipe_events": 18,
+        "static_detector_snipe_events": 32,
+        "replays_with_detector_snipe": 14,
+        "replays_with_detector_snipe_pct": 21.9,
+        "player_perspectives_with_snipe": 16,
+        "win_rate_when_sniping_detector_pct": 75.0,
+        "player_perspectives_with_stealth_no_snipe": 17,
+        "win_rate_with_stealth_without_detector_snipe_pct": 47.1,
+        "post_snipe_cloaked_burrowed_kills_60s": 284,
+        "post_snipe_cloaked_burrowed_kills_total": 367,
+        "post_snipe_damage_resources_60s": 23375,
+        "post_snipe_damage_resources_per_snipe_60s": 467.5,
+        "post_snipe_damage_resources_total": 28850,
+        "post_snipe_damage_hp_60s": 30350,
+        "post_snipe_damage_hp_total": 35940
+      },
+      "burrowed_roach_and_infestor_micro": {
+        "upgrades_researched": {
+          "Burrow": 15,
+          "TunnelingClaws": 5,
+          "NeuralParasite": 2,
+          "ChitinousPlating": 0,
+          "GlialReconstitution": 15,
+          "InfestorEnergyUpgrade": 0,
+          "DrillClaws": 11,
+          "DiggingClaws": 2,
+          "LurkerRange": 1,
+          "BansheeCloak": 7,
+          "PersonalCloaking": 1,
+          "ObserverGraviticBooster": 0,
+          "DarkTemplarBlinkUpgrade": 0
+        },
+        "burrowed_unit_transitions": {
+          "RoachBurrowed": 185,
+          "InfestorBurrowed": 104,
+          "LurkerMPBurrowed": 21,
+          "ZerglingBurrowed": 88,
+          "BanelingBurrowed": 0,
+          "DroneBurrowed": 20,
+          "WidowMineBurrowed": 163,
+          "SwarmHostBurrowedMP": 0
+        },
+        "cloaked_burrowed_units_spawned": {
+          "DarkTemplar": 0,
+          "Banshee": 16,
+          "Ghost": 0,
+          "Mothership": 0,
+          "LurkerMP": 7,
+          "Roach": 568,
+          "Infestor": 25,
+          "WidowMine": 180,
+          "SwarmHostMP": 2
+        },
+        "roach_burrow_micro": {
+          "roach_burrow_transitions": 185,
+          "roach_combat_burrow_events": 165,
+          "roach_tunneling_move_events": 59,
+          "roach_tunneling_tiles_moved": 1048.5,
+          "roach_unburrow_transitions": 171,
+          "roach_unburrow_reengage_or_flank_events": 159,
+          "replays_with_roach_burrow_micro": 9,
+          "replays_with_roach_burrow_micro_pct": 14.1
+        },
+        "infestor_burrow_micro": {
+          "infestor_burrow_transitions": 104,
+          "infestor_unburrow_transitions": 100,
+          "infestor_burrowed_move_events": 10,
+          "infestor_burrowed_tiles_moved": 519.0,
+          "infestor_burrowed_approach_or_cast_events": 82,
+          "infestor_burrow_escape_events": 67,
+          "infestor_spells_cast": {
+            "FungalGrowth": 30,
+            "NeuralParasite": 0,
+            "MicrobialShroud": 0
+          },
+          "replays_with_infestor_burrow_micro": 3,
+          "replays_with_infestor_burrow_micro_pct": 4.7
+        }
+      },
+      "shimmer_and_undetected_burrow_response": {
+        "replays_with_cloaked_or_burrowed_engagement": 27,
+        "replays_with_cloaked_or_burrowed_engagement_pct": 42.2,
+        "stealth_contact_windows_without_detection": 504,
+        "aoe_skillshots_total": {
+          "CorrosiveBile": 2321,
+          "FungalGrowth": 30,
+          "PsiStorm": 0,
+          "PurificationNova": 0,
+          "EMP": 0,
+          "ScannerSweep": 456,
+          "OracleRevelation": 0
+        },
+        "aoe_skillshots_on_shimmer_or_burrow": {
+          "CorrosiveBile": 188,
+          "FungalGrowth": 0,
+          "PsiStorm": 0,
+          "PurificationNova": 0,
+          "EMP": 0,
+          "ScannerSweep": 24,
+          "OracleRevelation": 0
+        },
+        "aoe_skillshots_blind_without_detector": {
+          "CorrosiveBile": 148,
+          "FungalGrowth": 0,
+          "PsiStorm": 0,
+          "PurificationNova": 0,
+          "EMP": 0,
+          "ScannerSweep": 24,
+          "OracleRevelation": 0
+        },
+        "emergency_detector_responses": {
+          "emergency_overseer_morphs": 38,
+          "emergency_overseer_pulls": 9,
+          "emergency_observer_warps_or_pulls": 3,
+          "emergency_raven_pulls_or_spawns": 0,
+          "emergency_static_spore_cannon_turret_starts": 116,
+          "non_detector_kite_back_events": 516
+        }
+      }
+    },
+    "local_real_matches": {
+      "replays_scanned": 26,
+      "detector_sniping_and_unlock": {
+        "mobile_detectors_spawned_total": 11,
+        "mobile_detectors_killed_total": 0,
+        "mobile_detector_mortality_pct": 0.0,
+        "static_detectors_spawned_total": 17,
+        "static_detectors_killed_total": 1,
+        "static_detector_mortality_pct": 5.9,
+        "detectors_spawned_by_type": {
+          "MissileTurret": 17,
+          "Observer": 8,
+          "ObserverSiegeMode": 0,
+          "Overseer": 3,
+          "OverseerSiegeMode": 0,
+          "PhotonCannon": 0,
+          "Raven": 0,
+          "SporeCrawler": 0
+        },
+        "detectors_killed_by_type": {
+          "MissileTurret": 1,
+          "Observer": 0,
+          "ObserverSiegeMode": 0,
+          "Overseer": 0,
+          "OverseerSiegeMode": 0,
+          "PhotonCannon": 0,
+          "Raven": 0,
+          "SporeCrawler": 0
+        },
+        "detection_spells_cast": {
+          "ScannerSweep": 9,
+          "OracleRevelation": 0
+        },
+        "detector_snipe_opportunity_events": 0,
+        "local_combat_detector_snipe_events": 0,
+        "mobile_detector_snipe_events": 0,
+        "static_detector_snipe_events": 0,
+        "replays_with_detector_snipe": 0,
+        "replays_with_detector_snipe_pct": 0.0,
+        "player_perspectives_with_snipe": 0,
+        "win_rate_when_sniping_detector_pct": 0.0,
+        "player_perspectives_with_stealth_no_snipe": 0,
+        "win_rate_with_stealth_without_detector_snipe_pct": 0.0,
+        "post_snipe_cloaked_burrowed_kills_60s": 0,
+        "post_snipe_cloaked_burrowed_kills_total": 0,
+        "post_snipe_damage_resources_60s": 0,
+        "post_snipe_damage_resources_per_snipe_60s": 0.0,
+        "post_snipe_damage_resources_total": 0,
+        "post_snipe_damage_hp_60s": 0,
+        "post_snipe_damage_hp_total": 0
+      },
+      "burrowed_roach_and_infestor_micro": {
+        "upgrades_researched": {
+          "Burrow": 0,
+          "TunnelingClaws": 0,
+          "NeuralParasite": 0,
+          "ChitinousPlating": 0,
+          "GlialReconstitution": 7,
+          "InfestorEnergyUpgrade": 0,
+          "DrillClaws": 1,
+          "DiggingClaws": 0,
+          "LurkerRange": 0,
+          "BansheeCloak": 0,
+          "PersonalCloaking": 4,
+          "ObserverGraviticBooster": 0,
+          "DarkTemplarBlinkUpgrade": 0
+        },
+        "burrowed_unit_transitions": {
+          "RoachBurrowed": 0,
+          "InfestorBurrowed": 0,
+          "LurkerMPBurrowed": 0,
+          "ZerglingBurrowed": 0,
+          "BanelingBurrowed": 0,
+          "DroneBurrowed": 0,
+          "WidowMineBurrowed": 0,
+          "SwarmHostBurrowedMP": 0
+        },
+        "cloaked_burrowed_units_spawned": {
+          "DarkTemplar": 0,
+          "Banshee": 0,
+          "Ghost": 0,
+          "Mothership": 0,
+          "LurkerMP": 0,
+          "Roach": 162,
+          "Infestor": 0,
+          "WidowMine": 4,
+          "SwarmHostMP": 0
+        },
+        "roach_burrow_micro": {
+          "roach_burrow_transitions": 0,
+          "roach_combat_burrow_events": 0,
+          "roach_tunneling_move_events": 0,
+          "roach_tunneling_tiles_moved": 0.0,
+          "roach_unburrow_transitions": 0,
+          "roach_unburrow_reengage_or_flank_events": 0,
+          "replays_with_roach_burrow_micro": 0,
+          "replays_with_roach_burrow_micro_pct": 0.0
+        },
+        "infestor_burrow_micro": {
+          "infestor_burrow_transitions": 0,
+          "infestor_unburrow_transitions": 0,
+          "infestor_burrowed_move_events": 0,
+          "infestor_burrowed_tiles_moved": 0.0,
+          "infestor_burrowed_approach_or_cast_events": 0,
+          "infestor_burrow_escape_events": 0,
+          "infestor_spells_cast": {
+            "FungalGrowth": 0,
+            "NeuralParasite": 0,
+            "MicrobialShroud": 0
+          },
+          "replays_with_infestor_burrow_micro": 0,
+          "replays_with_infestor_burrow_micro_pct": 0.0
+        }
+      },
+      "shimmer_and_undetected_burrow_response": {
+        "replays_with_cloaked_or_burrowed_engagement": 0,
+        "replays_with_cloaked_or_burrowed_engagement_pct": 0.0,
+        "stealth_contact_windows_without_detection": 0,
+        "aoe_skillshots_total": {
+          "CorrosiveBile": 59,
+          "FungalGrowth": 0,
+          "PsiStorm": 0,
+          "PurificationNova": 0,
+          "EMP": 0,
+          "ScannerSweep": 9,
+          "OracleRevelation": 0
+        },
+        "aoe_skillshots_on_shimmer_or_burrow": {
+          "CorrosiveBile": 0,
+          "FungalGrowth": 0,
+          "PsiStorm": 0,
+          "PurificationNova": 0,
+          "EMP": 0,
+          "ScannerSweep": 0,
+          "OracleRevelation": 0
+        },
+        "aoe_skillshots_blind_without_detector": {
+          "CorrosiveBile": 0,
+          "FungalGrowth": 0,
+          "PsiStorm": 0,
+          "PurificationNova": 0,
+          "EMP": 0,
+          "ScannerSweep": 0,
+          "OracleRevelation": 0
+        },
+        "emergency_detector_responses": {
+          "emergency_overseer_morphs": 0,
+          "emergency_overseer_pulls": 0,
+          "emergency_observer_warps_or_pulls": 0,
+          "emergency_raven_pulls_or_spawns": 0,
+          "emergency_static_spore_cannon_turret_starts": 0,
+          "non_detector_kite_back_events": 0
+        }
+      }
+    }
+  }
+}

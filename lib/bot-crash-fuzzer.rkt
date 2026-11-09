@@ -229,6 +229,15 @@
     trigger-stasis-ward-single-unit
     stasis-worker-stoppage-compensation
     return-workers-to-gather
+    rebalance-gas-to-minerals
+    terran-addon-swap
+    burrow-down
+    burrow-up
+    roach-tunnel-move
+    infestor-burrow-move
+    infestor-burrow-cast
+    blind-skillshot-shimmer
+    emergency-detector-response
     chat
     log
     noop))
@@ -338,10 +347,14 @@
     psi-storm
     extended-thermal-lance
     gravitic-boosters
+    gravitic-booster
     gravitic-drive
     flux-vanes
     anion-pulse-crystals
     shadow-stride
+    shadow-strike
+    psionic-storm
+    tectonic-destabilizers
     protoss-ground-weapons-1
     protoss-ground-weapons-2
     protoss-ground-weapons-3
@@ -384,13 +397,16 @@
     smart-servos
     hyperflight-rotors
     cloaking-field
+    banshee-cloak
     personal-cloaking
     weapon-refit
+    yamato-cannon
     advanced-ballistics
     siege-mode
     hisec-auto-tracking
     neosteel-armor
     caduceus-reactor
+    medivac-caduceus-reactor
     corvid-reactor
     behemoth-reactor
     hurricane-thrusters

@@ -247,8 +247,10 @@
 
   ;; Bundled portable Racket runtime (`racket_runtime.tar.xz`)
   (define rt-archive (build-path CACHE-DIR "racket_runtime.tar.xz"))
-  (when (file-exists? rt-archive)
-    (add-spec! "racket_runtime.tar.xz" (file->bytes rt-archive) #t #o100644))
+  (unless (file-exists? rt-archive)
+    (error 'collect-shared-tree-entries
+           "Missing ladder/.cache/racket_runtime.tar.xz — required for native Racket BotZip execution on AI Arena"))
+  (add-spec! "racket_runtime.tar.xz" (file->bytes rt-archive) #t #o100644)
 
   ;; Source & bytecode directories
   (for ([dname (in-list INCLUDE-DIRS)])
@@ -260,7 +262,13 @@
           (unless (or (string-contains? rel "__pycache__")
                       (string-contains? rel "/.git/")
                       (string-suffix? rel ".pyc")
-                      (string-suffix? rel ".o"))
+                      (string-suffix? rel ".o")
+                      (string-suffix? rel ".zip")
+                      (string-suffix? rel ".SC2Replay")
+                      ;; In `sc-bot/`, only pack `sc-bot/main.rkt` and `sc-bot/compiled/*`
+                      (and (string-prefix? rel "sc-bot/")
+                           (not (equal? rel "sc-bot/main.rkt"))
+                           (not (string-prefix? rel "sc-bot/compiled/"))))
             (define store? (string-suffix? rel ".so"))
             (add-spec! rel (file->bytes p) store? #o100644))))))
 

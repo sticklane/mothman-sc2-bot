@@ -566,7 +566,7 @@
   ;; Unconstrained map-wide expansion target: scales up to max-map-bases (default 16)
   ;; whenever mineral+gas harvesters saturate healthy bases, bases deplete, minerals float,
   ;; or Mirror-Mind recommends out-expanding the opponent.
-  (define time-bases (add1 (quotient (max 0 frame) 2200)))
+  (define time-bases (add1 (quotient (max 0 frame) 1600)))
   (define saturation-bases
     (if harvesters-saturated?
         (+ eff-bases (max 1 depleting-bases))
@@ -587,9 +587,9 @@
               float-bases
               time-bases)))
 
-  ;; Target workers coupled to healthy + desired bases (22 per active/desired base, up to 80)
+  ;; Target workers coupled to healthy + desired bases (22 per active/desired base, up to 84)
   (define target-workers
-    (min 80 (max 22 (* 22 (min 4 (max healthy-bases desired-bases))))))
+    (min 84 (max 22 (* 22 (min 5 (max healthy-bases desired-bases))))))
 
   (define should-expand?
     (and (not under-crisis?)
@@ -1863,15 +1863,31 @@
        (cond
          [(not (memq 'metabolic-boost upgs)) 'metabolic-boost]
          [(not (memq 'glial-reconstitution upgs)) 'glial-reconstitution]
-         [else 'zerg-missile-weapons-1]))
+         [(not (memq 'zerg-missile-weapons-1 upgs)) 'zerg-missile-weapons-1]
+         [(not (memq 'burrow upgs)) 'burrow]
+         [(not (memq 'tunneling-claws upgs)) 'tunneling-claws]
+         [(not (memq 'zerg-ground-armor-1 upgs)) 'zerg-ground-armor-1]
+         [(not (memq 'grooved-spines upgs)) 'grooved-spines]
+         [(not (memq 'muscular-augments upgs)) 'muscular-augments]
+         [(not (memq 'zerg-missile-weapons-2 upgs)) 'zerg-missile-weapons-2]
+         [(not (memq 'zerg-ground-armor-2 upgs)) 'zerg-ground-armor-2]
+         [(not (memq 'centrifical-hooks upgs)) 'centrifical-hooks]
+         [else 'zerg-missile-weapons-3]))
+     (define has-lair-or-hive?
+       (or (not (not (memq 'lair r-bldgs)))
+           (not (not (memq 'hive r-bldgs)))))
      (define zerg-upg-ready?
        (if (hash? open-prod-slots)
            (case upg-sym
              [(metabolic-boost) (not (not (memq 'spawning-pool r-bldgs)))]
-             [(glial-reconstitution)
-              (and (not (not (memq 'roach-warren r-bldgs)))
-                   (or (not (not (memq 'lair r-bldgs)))
-                       (not (not (memq 'hive r-bldgs)))))]
+             [(burrow) (or (not (not (memq 'hatchery r-bldgs))) has-lair-or-hive?)]
+             [(glial-reconstitution tunneling-claws)
+              (and (not (not (memq 'roach-warren r-bldgs))) has-lair-or-hive?)]
+             [(grooved-spines) (not (not (memq 'hydralisk-den r-bldgs)))]
+             [(muscular-augments) (and (not (not (memq 'hydralisk-den r-bldgs))) has-lair-or-hive?)]
+             [(centrifical-hooks) (and (not (not (memq 'baneling-nest r-bldgs))) has-lair-or-hive?)]
+             [(zerg-missile-weapons-2 zerg-ground-armor-2)
+              (and (not (not (memq 'evolution-chamber r-bldgs))) has-lair-or-hive?)]
              [else (not (not (memq 'evolution-chamber r-bldgs)))])
            #t))
      (list
@@ -1897,7 +1913,13 @@
        (cond
          [(not (memq 'warp-gate-research upgs)) 'warp-gate-research]
          [(not (memq 'charge upgs)) 'charge]
-         [else 'protoss-ground-weapons-1]))
+         [(not (memq 'protoss-ground-weapons-1 upgs)) 'protoss-ground-weapons-1]
+         [(not (memq 'blink upgs)) 'blink]
+         [(not (memq 'protoss-ground-armor-1 upgs)) 'protoss-ground-armor-1]
+         [(not (memq 'extended-thermal-lance upgs)) 'extended-thermal-lance]
+         [(not (memq 'protoss-ground-weapons-2 upgs)) 'protoss-ground-weapons-2]
+         [(not (memq 'protoss-ground-armor-2 upgs)) 'protoss-ground-armor-2]
+         [else 'protoss-shields-1]))
      (define robo-open?
        (and (facility-slot-open? 'robotics-facility 'robotics-facility)
             (if (hash? open-prod-slots)
@@ -1921,7 +1943,12 @@
             (if (hash? open-prod-slots)
                 (case upg-sym
                   [(warp-gate-research) (not (not (memq 'cybernetics-core r-bldgs)))]
-                  [(charge) (not (not (memq 'twilight-council r-bldgs)))]
+                  [(charge blink) (not (not (memq 'twilight-council r-bldgs)))]
+                  [(extended-thermal-lance) (or (not (not (memq 'robotics-bay r-bldgs)))
+                                                (not (not (memq 'robotics-support-bay r-bldgs))))]
+                  [(protoss-ground-weapons-2 protoss-ground-armor-2)
+                   (and (not (not (memq 'forge r-bldgs)))
+                        (not (not (memq 'twilight-council r-bldgs))))]
                   [else (not (not (memq 'forge r-bldgs)))])
                 #t))
       (cand 'gateway 'production-scaling (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
@@ -1934,7 +1961,13 @@
        (cond
          [(not (memq 'stimpack upgs)) 'stimpack]
          [(not (memq 'combat-shield upgs)) 'combat-shield]
-         [else 'terran-infantry-weapons-1]))
+         [(not (memq 'terran-infantry-weapons-1 upgs)) 'terran-infantry-weapons-1]
+         [(not (memq 'concussive-shells upgs)) 'concussive-shells]
+         [(not (memq 'terran-infantry-armor-1 upgs)) 'terran-infantry-armor-1]
+         [(not (memq 'terran-infantry-weapons-2 upgs)) 'terran-infantry-weapons-2]
+         [(not (memq 'terran-infantry-armor-2 upgs)) 'terran-infantry-armor-2]
+         [(not (memq 'banshee-cloak upgs)) 'banshee-cloak]
+         [else 'terran-infantry-weapons-3]))
      (define has-rax-tl?
        (or (memq 'barracks-techlab r-bldgs)
            (memq 'barracks-tech-lab r-bldgs)))
@@ -1970,7 +2003,13 @@
        (cand upg-sym 'tech-upgrade (list 'research upg-sym)
              (if (hash? open-prod-slots)
                  (case upg-sym
-                   [(stimpack combat-shield) has-rax-tl?]
+                   [(stimpack combat-shield concussive-shells) has-rax-tl?]
+                   [(terran-infantry-weapons-2 terran-infantry-armor-2 terran-infantry-weapons-3)
+                    (and (not (not (memq 'engineering-bay r-bldgs)))
+                         (not (not (memq 'armory r-bldgs))))]
+                   [(banshee-cloak)
+                    (or (not (not (memq 'starport-techlab r-bldgs)))
+                        (not (not (memq 'starport-tech-lab r-bldgs))))]
                    [else (not (not (memq 'engineering-bay r-bldgs)))])
                  #t))
        (cand 'barracks 'production-scaling (list 'build 'barracks (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
@@ -2475,6 +2514,7 @@
       (pro-bo-goal 'build 'extractor 3 50 'lair)
       (pro-bo-goal 'research 'glial-reconstitution 1 52 'lair)
       (pro-bo-goal 'research 'zerg-missile-weapons-1 1 54 'evolution-chamber)
+      (pro-bo-goal 'research 'burrow 1 58 'lair)
       (pro-bo-goal 'build 'hydralisk-den 1 62 'lair))]
 
     [(ZvT ZvP)
@@ -2526,9 +2566,8 @@
       (pro-bo-goal 'build 'refinery 3 46 'factory)
       (pro-bo-goal 'research 'terran-infantry-weapons-1 1 48 'engineering-bay)
       (pro-bo-goal 'expand 'command-center 3 52 'starport)
-      (pro-bo-goal 'research 'concussive-shells 1 54 'barracks-techlab)
-      (pro-bo-goal 'build 'armory 1 60 'factory)
-      (pro-bo-goal 'research 'terran-infantry-armor-1 1 62 'engineering-bay))]
+      (pro-bo-goal 'research 'concussive-shells 1 56 'barracks-techlab)
+      (pro-bo-goal 'build 'armory 1 60 'factory))]
 
     [else ;; PvZ, PvT, PvP
      (list

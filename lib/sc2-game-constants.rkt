@@ -645,8 +645,15 @@
    'interceptor       (hasheq 'max-hp 40  'max-shield 40  'armor 0 'speed 10.5 'ground-dps 5.0  'air-dps 5.0  'ground-range 2.0  'air-range 2.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.25)
    'tempest           (hasheq 'max-hp 200 'max-shield 100 'armor 2 'speed 3.15 'ground-dps 16.8 'air-dps 14.3 'ground-range 10.0 'air-range 14.0 'weapon-period 2.36  'damage-point 0.15 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
    'photon-cannon     (hasheq 'max-hp 150 'max-shield 150 'armor 1 'speed 0.0  'ground-dps 22.4 'air-dps 22.4 'ground-range 7.0  'air-range 7.0  'weapon-period 0.89  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)
-   'oracle-stasis-trap (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)
-   'stasis-ward       (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)))
+    'oracle-stasis-trap (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)
+    'stasis-ward       (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)
+    'roach-burrowed    (hasheq 'max-hp 145 'max-shield 0   'armor 1 'speed 2.80 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5)
+    'infestor          (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 3.15 'ground-dps 0.0  'air-dps 0.0  'ground-range 10.0 'air-range 10.0 'weapon-period 1.0   'damage-point 0.0  'splash-radius 2.25 'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.75)
+    'infestor-burrowed (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 2.80 'ground-dps 0.0  'air-dps 0.0  'ground-range 10.0 'air-range 10.0 'weapon-period 1.0   'damage-point 0.0  'splash-radius 2.25 'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.75)
+    'swarm-host        (hasheq 'max-hp 160 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 18.0 'air-dps 0.0  'ground-range 10.0 'air-range 0.0  'weapon-period 2.0   'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.875)
+    'swarm-host-burrowed (hasheq 'max-hp 160 'max-shield 0 'armor 1 'speed 0.0  'ground-dps 18.0 'air-dps 0.0  'ground-range 10.0 'air-range 0.0  'weapon-period 2.0   'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.875)
+    'viper             (hasheq 'max-hp 150 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 0.0  'air-dps 0.0  'ground-range 9.0  'air-range 9.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 2.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.875)
+    'mothership        (hasheq 'max-hp 350 'max-shield 350 'armor 2 'speed 2.62 'ground-dps 37.8 'air-dps 37.8 'ground-range 7.0  'air-range 7.0  'weapon-period 1.58  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #t 'radius 1.375)))
 
 (define (sc2-unit-combat-stats sym)
   (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym
@@ -767,3 +774,55 @@
        (if eflying?
            (sc2-unit-can-attack-air? attacker-sym)
            (sc2-unit-can-attack-ground? attacker-sym))))
+
+;; -----------------------------------------------------------------------------
+;; 9. Empirical 1,649/1,685-Replay Stealth, Burrow-Move, Detector-Sniping,
+;;    Shimmer/Ripple, Upgrade-Timing, Terran Add-On Swap & Depletion Constants
+;; -----------------------------------------------------------------------------
+;; Detector-sniping & 60s post-snipe stealth unlock (`benchmarks/full_corpus_stealth_burrow_detector_report.json`):
+;;   - 65.6% mobile detector mortality across 1,649 replays
+;;   - 58.2% win rate when sniping enemy detectors
+;;   - 651.0 avg post-snipe resource damage inflicted in the 60s (1,344-frame) stealth window
+(define SC2-DETECTOR-SNIPE-PRIORITY-BONUS         3.5)
+(define SC2-POST-SNIPE-STEALTH-UNLOCK-FRAMES      1344)   ;; 60.0s at 22.4 fps
+(define SC2-POST-SNIPE-EXPECTED-DAMAGE-RES        651.0)
+(define SC2-MOBILE-DETECTOR-SYMS
+  '(observer observer-siege-mode overseer overseer-siege-mode raven))
+(define SC2-STATIC-DETECTOR-SYMS
+  '(missile-turret photon-cannon spore-crawler))
+(define SC2-CHANGELING-UNIT-SYMS
+  '(changeling changeling-zealot changeling-marine-shield
+    changeling-marine changeling-zergling-wings changeling-zergling))
+(define SC2-CLOAKED-OR-BURROW-STEALTH-SYMS
+  '(banshee dark-templar ghost mothership lurker lurker-mp lurker-burrowed
+    lurker-mp-burrowed roach-burrowed infestor infestor-burrowed
+    widow-mine widow-mine-burrowed swarm-host-burrowed observer))
+
+;; Burrowed Roach (`TunnelingClaws`) & Burrowed Infestor movement/cast/escape micro:
+(define SC2-ROACH-BURROW-HP-PCT-THRESH            0.38)
+(define SC2-ROACH-UNBURROW-HP-PCT-THRESH          0.82)
+(define SC2-ROACH-TUNNEL-FLANK-RANGE              5.5)
+(define SC2-INFESTOR-BURROW-APPROACH-RANGE        13.0)
+(define SC2-INFESTOR-FUNGAL-CAST-RANGE            10.0)
+(define SC2-INFESTOR-NEURAL-CAST-RANGE            9.0)
+(define SC2-INFESTOR-FUNGAL-ENERGY                75)
+(define SC2-INFESTOR-NEURAL-ENERGY                100)
+
+;; Subtle burrowed-movement ripple & cloaked shimmer detection (`display_type = Hidden (2)`):
+(define SC2-SHIMMER-DISPLAY-TYPE-HIDDEN           2)
+(define SC2-BURROW-RIPPLE-MIN-SPEED               0.15)
+(define SC2-BLIND-AOE-SKILLSHOT-SPELLS
+  '(corrosive-bile psi-storm fungal-growth purification-nova emp-round scanner-sweep oracle-revelation))
+
+;; Pro Upgrade Timings, Gas-Float Harvester Rebalancing, Terran Add-On Swapping
+;; & Proactive Pre-Depletion Expansion (`benchmarks/full_corpus_upgrades_and_addon_swaps_report.json`):
+;;   - 69.2% win rate for upgrade lead at 8:00 (93.2% on AI Arena ladder)
+;;   - 480 pro Terran add-on swaps (median first swap 198.6s = 4,448 frames)
+;;   - Proactive pre-depletion expansion 90s (~2,016 frames / < 2,400M remaining) before base mines out
+(define SC2-GAS-FLOAT-REBALANCE-THRESH            350)
+(define SC2-GAS-FLOAT-CRITICAL-THRESH             550)
+(define SC2-MINERAL-STARVED-REBALANCE-THRESH      180)
+(define SC2-TERRAN-FIRST-ADDON-SWAP-FRAME         4448)   ;; 198.6s median pro first add-on swap
+(define SC2-PRE-DEPLETION-PROACTIVE-MINERAL-THRESH 2400)  ;; ~90s of full 16-worker mining remaining
+(define SC2-BASE-STARTING-MINERAL-LEDGER          10800)  ;; 4x1800 + 4x900 standard LotV base minerals
+

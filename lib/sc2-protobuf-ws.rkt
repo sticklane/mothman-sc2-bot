@@ -250,33 +250,37 @@
   (sc2-ws-send-frame! conn 2 payload #:fin? #t #:mask-key mask-key))
 
 (define (read-exact-bytes in n)
-  (cond
-    [(<= n 0) #""]
-    [else
-     (define b (read-bytes n in))
-     (cond
-       [(eof-object? b) eof]
-       [(= (bytes-length b) n) b]
-       [else
-        (let loop ([acc (list b)]
-                   [rem (- n (bytes-length b))])
-          (if (<= rem 0)
-              (apply bytes-append (reverse acc))
-              (let ([chunk (read-bytes rem in)])
-                (if (eof-object? chunk)
-                    eof
-                    (loop (cons chunk acc) (- rem (bytes-length chunk)))))))])]))
+  (with-handlers ([exn:fail? (lambda (_e) eof)])
+    (cond
+      [(<= n 0) #""]
+      [else
+       (define b (read-bytes n in))
+       (cond
+         [(eof-object? b) eof]
+         [(= (bytes-length b) n) b]
+         [else
+          (let loop ([acc (list b)]
+                     [rem (- n (bytes-length b))])
+            (if (<= rem 0)
+                (apply bytes-append (reverse acc))
+                (let ([chunk (read-bytes rem in)])
+                  (if (eof-object? chunk)
+                      eof
+                      (loop (cons chunk acc) (- rem (bytes-length chunk)))))))])])))
 
 (define (sc2-ws-recv-binary! conn)
   (if (sc2-ws-conn-closed? conn)
       eof
-      (let ([in (sc2-ws-conn-in conn)])
-        (let loop ([fragments '()])
-          (define hdr2 (read-exact-bytes in 2))
-          (cond
-            [(eof-object? hdr2)
-             (set-sc2-ws-conn-closed?! conn #t)
-             eof]
+      (with-handlers ([exn:fail? (lambda (_e)
+                                   (set-sc2-ws-conn-closed?! conn #t)
+                                   eof)])
+        (let ([in (sc2-ws-conn-in conn)])
+          (let loop ([fragments '()])
+            (define hdr2 (read-exact-bytes in 2))
+            (cond
+              [(eof-object? hdr2)
+               (set-sc2-ws-conn-closed?! conn #t)
+               eof]
             [else
              (define b0 (bytes-ref hdr2 0))
              (define b1 (bytes-ref hdr2 1))
@@ -324,7 +328,7 @@
                           (apply bytes-append (reverse next-frags))
                           (loop next-frags))]
                      [else
-                      (loop fragments)])])])])))))
+                      (loop fragments)])])])]))))))
 
 (define (sc2-ws-close! conn)
   (unless (sc2-ws-conn-closed? conn)
@@ -2852,13 +2856,21 @@
              'order-ability-sym (if b-ord0 (sc2-id->ability-symbol (sc2-unit-order-ability-id b-ord0) #f) #f)))
      in-transit-bldg-records))
 
-  ;; Enemy units & buildings
+  ;; Enemy units & buildings (including subtle shimmer / display_type = Hidden (2) & Changeling detection)
   (define enemy-unit-records
     (for/list ([eu (in-list enemy-all)]
                #:when (not (sc2-unit-is-structure? eu)))
       (define p (sc2-unit-pos eu))
+      (define utype (sc2-id->unit-symbol (sc2-unit-unit-type eu)))
+      (define disp-type (sc2-unit-display-type eu))
+      (define cloak-st (sc2-unit-cloak eu))
+      (define shimmer?
+        (or (= disp-type SC2-SHIMMER-DISPLAY-TYPE-HIDDEN)
+            (= cloak-st 2)))
+      (define changeling?
+        (not (not (memq utype SC2-CHANGELING-UNIT-SYMS))))
       (hash 'id (sc2-unit-tag eu)
-            'type (sc2-id->unit-symbol (sc2-unit-unit-type eu))
+            'type utype
             'x (sc2-point3d-x p)
             'y (sc2-point3d-y p)
             'z (sc2-point3d-z p)
@@ -2868,10 +2880,35 @@
             'shield (max 0 (exact-round (sc2-unit-shield eu)))
             'build-progress (max 0.0 (min 1.0 (sc2-unit-build-progress eu)))
             'flying? (sc2-unit-is-flying eu)
-            'cloaked (or (= (sc2-unit-cloak eu) 1) (= (sc2-unit-cloak eu) 2))
+            'display-type disp-type
+            'cloak-state cloak-st
+            'is-shimmer? shimmer?
+            'changeling? changeling?
+            'cloaked (or (= cloak-st 1) (= cloak-st 2) shimmer?)
             'burrowed (sc2-unit-is-burrowed eu)
             'weapon-cooldown (sc2-unit-weapon-cooldown eu)
             'engaged-target-tag (sc2-unit-engaged-target-tag eu))))
+
+  (define shimmer-and-burrow-ripples
+    (filter (lambda (eu)
+              (or (hash-ref eu 'is-shimmer? #f)
+                  (hash-ref eu 'burrowed #f)))
+            enemy-unit-records))
+
+  (define attached-addon-tags
+    (list->seteqv
+     (filter (lambda (t) (> t 0))
+             (map (lambda (b) (hash-ref b 'add-on-tag 0)) ally-bldg-records))))
+  (define free-addons
+    (filter (lambda (b)
+              (and (memq (hash-ref b 'type 'unknown)
+                         '(barracks-techlab barracks-tech-lab barracks-reactor
+                           factory-techlab factory-tech-lab factory-reactor
+                           starport-techlab starport-tech-lab starport-reactor
+                           tech-lab reactor))
+                   (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                   (not (set-member? attached-addon-tags (hash-ref b 'id 0)))))
+            ally-bldg-records))
 
   (define enemy-bldg-records
     (for/list ([eb (in-list enemy-all)]
@@ -3015,7 +3052,10 @@
                       SC2-BASE-RESOURCE-RADIUS))
                 mineral-fields))
       (define rem-min (for/sum ([m (in-list close-mins)]) (sc2-unit-mineral-contents m)))
-      (if (and (not (null? close-mins)) (< rem-min SC2-BASE-DEPLETION-MINERAL-THRESH)) 1 0)))
+      ;; Proactive 90s pre-depletion trigger (< 2,400M remaining) so replacement TownHall finishes before mining out!
+      (if (and (not (null? close-mins)) (< rem-min SC2-PRE-DEPLETION-PROACTIVE-MINERAL-THRESH)) 1 0)))
+
+  (define pre-depleting-bases depleting-bases)
 
   (define busy-facilities
     (for/sum ([b (in-list self-units)]
@@ -3069,10 +3109,13 @@
         'ally-buildings ally-bldg-records
         'enemy-units enemy-unit-records
         'enemy-buildings enemy-bldg-records
+        'shimmer-and-burrow-ripples shimmer-and-burrow-ripples
+        'free-addons free-addons
         'effects effect-records
         'researched-upgrades researched-upgrades
         'pending-upgrades pending-upgrades
         'depleting-bases depleting-bases
+        'pre-depleting-bases pre-depleting-bases
         'stasis-frozen-worker-count stasis-frozen-worker-count
         'stasis-frozen-unit-ids stasis-frozen-unit-ids
         'raw-mineral-harvesters raw-min-harvesters
@@ -3923,6 +3966,10 @@
       (when (set-mutable? commanded-workers)
         (set-add! commanded-workers wtag))))
 
+  (define (record-unit-used! utag)
+    (when utag
+      (set-add! commanded-combat-tags utag)))
+
   (define (pick-worker-near tx ty)
     (define avail-workers
       (filter (lambda (w)
@@ -4645,6 +4692,90 @@
        (define ctags (map sc2-unit-tag (if (not (null? combat-units)) combat-units workers)))
        (when (and (not (null? ctags)) (exact-integer? changeling-id))
          (emit! (sc2-raw-unit-command 23 #f changeling-id (list (first ctags)) #f)))]
+
+      [(list 'burrow-down uid _ ...)
+       (when (and (exact-integer? uid) (> uid 0))
+         (record-unit-used! uid)
+         (emit! (sc2-raw-unit-command 3661 #f 0 (list uid) #f)))]
+
+      [(list 'burrow-up uid _ ...)
+       (when (and (exact-integer? uid) (> uid 0))
+         (record-unit-used! uid)
+         (emit! (sc2-raw-unit-command 3662 #f 0 (list uid) #f)))]
+
+      [(list (or 'roach-tunnel-move 'infestor-burrow-move) uid raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0))
+         (record-unit-used! uid)
+         (emit! (sc2-raw-unit-command 16
+                                      (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                                                   (scale-bot-coord-to-world raw-y home-y))
+                                      0 (list uid) #f)))]
+
+      [(list 'infestor-burrow-cast uid spell-sym raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0))
+         (define ability-id
+           (case spell-sym
+             [(fungal-growth) 74]
+             [(neural-parasite) 249]
+             [else 74]))
+         (record-unit-used! uid)
+         (emit! (sc2-raw-unit-command ability-id
+                                      (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                                                   (scale-bot-coord-to-world raw-y home-y))
+                                      0 (list uid) #f)))]
+
+      [(list 'blind-skillshot-shimmer uid spell-sym raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0))
+         (define ability-id
+           (case spell-sym
+             [(corrosive-bile) 2338]
+             [(psi-storm) 1036]
+             [(fungal-growth) 74]
+             [(purification-nova) 2346]
+             [(emp-round) 1628]
+             [(scanner-sweep) 399]
+             [(oracle-revelation) 2146]
+             [else 2338]))
+         (record-unit-used! uid)
+         (emit! (sc2-raw-unit-command ability-id
+                                      (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                                                   (scale-bot-coord-to-world raw-y home-y))
+                                      0 (list uid) #f)))]
+
+      [(list 'emergency-detector-response _ ...)
+       (void)]
+
+      [(list 'rebalance-gas-to-minerals wid patch-id)
+       (define wlist
+         (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                 (if (list? wid) wid (list wid))))
+       (define eff-patch-id
+         (cond
+           [(and (exact-integer? patch-id)
+                 (ormap (lambda (m) (= (sc2-unit-tag m) patch-id)) mineral-fields))
+            patch-id]
+           [(not (null? mineral-fields))
+            (sc2-unit-tag
+             (argmin (lambda (m)
+                       (define mp (sc2-unit-pos m))
+                       (pt-dist home-x home-y (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                     mineral-fields))]
+           [(and (exact-integer? patch-id) (> patch-id 0)) patch-id]
+           [else 0]))
+       (when (and (not (null? wlist)) (> eff-patch-id 0))
+         (for ([wt (in-list wlist)])
+           (record-worker-used! wt))
+         (emit! (sc2-raw-unit-command 3666 #f eff-patch-id wlist #f)))]
+
+      [(list 'terran-addon-swap lift-bldg-id land-bldg-id addon-x addon-y)
+       (when (and (exact-integer? lift-bldg-id) (> lift-bldg-id 0))
+         (emit! (sc2-raw-unit-command 3679 #f 0 (list lift-bldg-id) #f)))
+       (when (and (exact-integer? land-bldg-id) (> land-bldg-id 0)
+                  (real? addon-x) (real? addon-y))
+         (emit! (sc2-raw-unit-command 3678
+                                      (sc2-point2d (- (exact->inexact addon-x) 2.5)
+                                                   (+ (exact->inexact addon-y) 0.5))
+                                      0 (list land-bldg-id) #f)))]
 
       ;; 10. Spatial maneuvers: `(execute-spatial-maneuver <name> <x> <y>)` or `(mirror-spatial-maneuver ...)`
       ;;     Bug #11 fix: never overwrite units that already received individual micro orders in this step,
