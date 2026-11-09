@@ -857,10 +857,24 @@
 
   (define bldg-types (map unit-type-sym ally-bldgs))
   (define unit-types (map unit-type-sym ally-units))
-  (define workers
+  (define (unit-stasis-frozen? u)
+    (define b (hash-ref u 'buffs '()))
+    (and (list? b)
+         (or (memq 'oracle-stasis-trap-target b)
+             (memq 'stasis-ward-target b))))
+  (define raw-workers
     (filter (lambda (u) (memq (unit-type-sym u) '(drone probe scv))) ally-units))
+  (define workers
+    (filter (lambda (w) (not (unit-stasis-frozen? w))) raw-workers))
+  (define frozen-worker-count
+    (max (count unit-stasis-frozen? raw-workers)
+         (safe-nonneg-int (hash-ref obs 'stasis-frozen-worker-count 0) 0)))
+  (define active-worker-count
+    (max 0 (- (length raw-workers) frozen-worker-count)))
   (define pending-workers (hash-ref obs 'pending-workers 0))
-  (define total-workers (+ (length workers) pending-workers))
+  (define total-workers (+ active-worker-count pending-workers))
+  (when (> frozen-worker-count 0)
+    (emit! (list 'stasis-worker-stoppage-compensation frozen-worker-count)))
 
   ;; ---------------------------------------------------------------------------
   ;; Pro Signature Mechanic #1: Tactical Building Save-Cancel (<18% HP-pct under attack)
@@ -968,8 +982,15 @@
     (define threat (car proxy-or-cheese-enemies))
     (define tx (hash-ref threat 'x (safe-coord (+ base-x 5.0))))
     (define ty (hash-ref threat 'y (safe-coord (+ base-y 5.0))))
+    (define drill-patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
     (unless (null? pull-ids)
-      (emit! (list 'pull-workers-attack pull-ids tx ty)))
+      (emit! (list 'pull-workers-attack pull-ids tx ty))
+      (emit! (list 'worker-drill-stack-attack
+                   pull-ids
+                   drill-patch-id
+                   (hash-ref threat 'id 0)
+                   (exact-round tx)
+                   (exact-round ty))))
     ;; Harass enemy proxy builder if present
     (define enemy-builder
       (findf (lambda (e)
@@ -981,6 +1002,83 @@
                    (hash-ref (car healthy-workers) 'id 10)
                    (hash-ref enemy-builder 'x tx)
                    (hash-ref enemy-builder 'y ty)))))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Preemptive Anti-Stasis Worker Evacuation & Counter-Enemy Worker Drill
+  ;; ---------------------------------------------------------------------------
+  (define stasis-threats
+    (filter (lambda (e)
+              (and (memq (unit-type-sym e) '(oracle-stasis-trap stasis-ward oracle))
+                   (let ([ex (hash-ref e 'x 9999)]
+                         [ey (hash-ref e 'y 9999)])
+                     (or (<= (dist2d base-x base-y ex ey) 7.5)
+                         (ormap (lambda (w)
+                                  (<= (dist2d (hash-ref w 'x base-x) (hash-ref w 'y base-y) ex ey) 7.5))
+                                workers)))))
+            (append enemy-units enemy-bldgs)))
+  (when (and (not (null? stasis-threats)) (not (null? workers)))
+    (define st (car stasis-threats))
+    (define stx (hash-ref st 'x base-x))
+    (define sty (hash-ref st 'y base-y))
+    (define evac-workers
+      (filter (lambda (w)
+                (<= (dist2d stx sty (hash-ref w 'x base-x) (hash-ref w 'y base-y)) 6.5))
+              workers))
+    (when (not (null? evac-workers))
+      (define ref-x (if (> (dist2d stx sty base-x base-y) 1.0) base-x nat-x))
+      (define ref-y (if (> (dist2d stx sty base-x base-y) 1.0) base-y nat-y))
+      (define dx (- ref-x stx))
+      (define dy (- ref-y sty))
+      (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+      (define safe-x (safe-coord (+ stx (* 8.5 (/ dx d))) base-x))
+      (define safe-y (safe-coord (+ sty (* 8.5 (/ dy d))) base-y))
+      (define evac-ids (map (lambda (w) (hash-ref w 'id 10)) evac-workers))
+      (emit! (list 'evacuate-workers-from-stasis-ward evac-ids safe-x safe-y))
+      (for ([wid (in-list evac-ids)])
+        (emit! (list 'mineral-walk wid safe-x safe-y)))))
+
+  (define enemy-workers-near-base
+    (filter (lambda (e)
+              (and (memq (unit-type-sym e) '(drone probe scv))
+                   (let ([ex (hash-ref e 'x 9999)]
+                         [ey (hash-ref e 'y 9999)])
+                     (or (<= (dist2d base-x base-y ex ey) 20.0)
+                         (ormap (lambda (u)
+                                  (<= (dist2d (hash-ref u 'x base-x) (hash-ref u 'y base-y) ex ey) 10.0))
+                                ally-units)))))
+            enemy-units))
+  (define stacked-enemy-workers
+    (if (< (length enemy-workers-near-base) 4)
+        '()
+        (let ([anchor
+               (findf (lambda (ew)
+                        (define ex (hash-ref ew 'x base-x))
+                        (define ey (hash-ref ew 'y base-y))
+                        (>= (count (lambda (o)
+                                     (<= (dist2d ex ey (hash-ref o 'x ex) (hash-ref o 'y ey)) 1.8))
+                                   enemy-workers-near-base)
+                            4))
+                      enemy-workers-near-base)])
+          (if anchor
+              (let ([ax (hash-ref anchor 'x base-x)]
+                    [ay (hash-ref anchor 'y base-y)])
+                (filter (lambda (o)
+                          (<= (dist2d ax ay (hash-ref o 'x ax) (hash-ref o 'y ay)) 1.8))
+                        enemy-workers-near-base))
+              '()))))
+  (when (>= (length stacked-enemy-workers) 4)
+    (define ew0 (car stacked-enemy-workers))
+    (define ewx (hash-ref ew0 'x base-x))
+    (define ewy (hash-ref ew0 'y base-y))
+    (define dx (- base-x ewx))
+    (define dy (- base-y ewy))
+    (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+    (define perp-x (safe-coord (+ ewx (* 4.0 (- (/ dy d)))) base-x))
+    (define perp-y (safe-coord (+ ewy (* 4.0 (/ dx d))) base-y))
+    (emit! (list 'counter-enemy-worker-drill (length stacked-enemy-workers) perp-x perp-y))
+    (for ([w (in-list workers)]
+          #:when (<= (dist2d ewx ewy (hash-ref w 'x base-x) (hash-ref w 'y base-y)) 8.0))
+      (emit! (list 'move (hash-ref w 'id 10) perp-x perp-y))))
 
   ;; ---------------------------------------------------------------------------
   ;; Coupled Macro Governor, Adaptive Build/Tech Planner & Guns-vs-Butter PPF
@@ -1075,7 +1173,7 @@
      #:supply-left supply-left
      #:active-bases active-bases
      #:depleting-bases depleting-bases
-     #:workers (length workers)
+     #:workers active-worker-count
      #:pending-workers pending-workers
      #:mineral-harvesters live-min-harvesters
      #:ideal-mineral-harvesters live-ideal-min-harvesters
@@ -1159,7 +1257,24 @@
     (emit! (list 'harvest-gas (hash-ref (car workers) 'id 10) (hash-ref gas-bldg 'id 103))))
   (when (not (null? workers))
     (define patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
-    (emit! (list 'harvest-mineral (hash-ref (car workers) 'id 10) patch-id)))
+    (emit! (list 'harvest-mineral (hash-ref (car workers) 'id 10) patch-id))
+    (define idle-return-workers
+      (filter (lambda (w)
+                (define wx (hash-ref w 'x base-x))
+                (define wy (hash-ref w 'y base-y))
+                (and (hash-has-key? w 'orders)
+                     (let ([ords (hash-ref w 'orders '())])
+                       (or (null? ords) (equal? ords '(idle))))
+                     (not (ormap (lambda (e)
+                                   (<= (dist2d wx wy (hash-ref e 'x 9999) (hash-ref e 'y 9999)) 6.5))
+                                 (append enemy-units enemy-bldgs)))))
+              workers))
+    (when (not (null? idle-return-workers))
+      (define idle-ids (map (lambda (w) (hash-ref w 'id 10)) idle-return-workers))
+      (emit! (list 'return-workers-to-gather idle-ids))
+      (for ([wid (in-list idle-ids)]
+            #:unless (equal? wid (hash-ref (car workers) 'id 10)))
+        (emit! (list 'harvest-mineral wid patch-id)))))
 
   ;; Early Worker Scout / Harass (Pro Mechanic #5)
   (when (and (hash-ref obs 'enable-worker-harass #f) (not (null? workers)))
@@ -2251,12 +2366,18 @@
        (when (can-spend-supply? (sc2-supply-cost 'immortal))
          (try-train-unit! 'immortal 'robotics-facility 6)))
 
-     ;; Stargate + Fleet Beacon Carrier production (Group 5)
+     ;; Stargate + Fleet Beacon Carrier & Oracle production (Group 5)
      (when (and (not protoss-saving-for-expand?)
-                (memq 'stargate ready-bldg-types)
-                (memq 'fleet-beacon ready-bldg-types)
-                (can-spend-supply? (sc2-supply-cost 'carrier)))
-       (try-train-unit! 'carrier 'stargate 5))
+                (memq 'stargate ready-bldg-types))
+       (when (and (memq 'fleet-beacon ready-bldg-types)
+                  (can-spend-supply? (sc2-supply-cost 'carrier)))
+         (try-train-unit! 'carrier 'stargate 5))
+       (when (and (or (< (hash-ref unit-counts 'oracle 0) 1)
+                      (and (< (hash-ref unit-counts 'oracle 0) 2)
+                           (>= minerals 200)
+                           (>= gas 200)))
+                  (can-spend-supply? (sc2-supply-cost 'oracle)))
+         (try-train-unit! 'oracle 'stargate 5)))
 
      ;; Scale Gateways according to Pro Build Order (3->5 Gateways on 2 bases after CyberCore, up to 8 on 3+ bases),
      ;; governed by the general Braun-heap priority scheduler (`can-spend-by-priority?`).
@@ -2848,6 +2969,7 @@
   (define oledger (live-bot-runtime-order-ledger rt))
   (define tbrain (live-bot-runtime-tactical-brain rt))
   (define ally-units (hash-ref obs 'ally-units '()))
+  (define ally-bldgs (hash-ref obs 'ally-buildings '()))
   (define enemy-units (hash-ref obs 'enemy-units '()))
   (define enemy-bldgs (hash-ref obs 'enemy-buildings '()))
   (define effects (hash-ref obs 'effects '()))
@@ -2867,7 +2989,14 @@
   (define enemy-exp-x (hash-ref obs 'enemy-expand-x SC2-DEFAULT-ENEMY-EXPAND-X))
   (define enemy-exp-y (hash-ref obs 'enemy-expand-y SC2-DEFAULT-ENEMY-EXPAND-Y))
 
-  (define combat-units (filter combat-unit-record? ally-units))
+  (define combat-units
+    (filter (lambda (u)
+              (and (combat-unit-record? u)
+                   (let ([b (hash-ref u 'buffs '())])
+                     (not (and (list? b)
+                               (or (memq 'oracle-stasis-trap-target b)
+                                   (memq 'stasis-ward-target b)))))))
+            ally-units))
   (define ft (perception-grid-squad-finger-tree (live-bot-runtime-perception rt)))
   (define total-dps (combat-measure-dps (ft-measure ft)))
   (define-values (vanguard-ft reserve-ft)
@@ -3132,6 +3261,165 @@
               (define ly (+ uy (* 2.5 ny)))
               (set-add! splash-evading-tags uid)
               (emit! (list 'kite uid (safe-coord lx ux) (safe-coord ly uy)))))))))
+
+  ;; 5. Counter-Micro vs. Enemy `oracle-stasis-trap` / `stasis-ward`
+  (define enemy-stasis-traps
+    (filter (lambda (e) (memq (unit-type-sym e) '(oracle-stasis-trap stasis-ward)))
+            (append enemy-units enemy-bldgs)))
+  (define ally-has-detector?
+    (ormap (lambda (u) (sc2-unit-is-detector-sym? (unit-type-sym u)))
+           (append ally-units ally-bldgs)))
+  (for ([trap (in-list enemy-stasis-traps)])
+    (define trap-id (hash-ref trap 'id 9001))
+    (define tx (hash-ref trap 'x nat-x))
+    (define ty (hash-ref trap 'y nat-y))
+    (define trap-prog (exact->inexact (hash-ref trap 'build-progress 1.0)))
+    (define trap-cloaked? (eq? (hash-ref trap 'cloaked #f) #t))
+    (define trap-targetable?
+      (or (< trap-prog 1.0)
+          (not trap-cloaked?)
+          ally-has-detector?))
+    (define ranged-snipers
+      (filter (lambda (u)
+                (define ut (unit-type-sym u))
+                (define gr (exact->inexact
+                            (hash-ref u 'ground-range
+                                      (hash-ref (sc2-unit-combat-stats ut) 'ground-range 0.0))))
+                (and (>= gr 4.5)
+                     (<= (dist2d tx ty (hash-ref u 'x base-x) (hash-ref u 'y base-y)) 11.0)))
+              combat-units))
+    (cond
+      [(and trap-targetable? (not (null? ranged-snipers)))
+       (for ([r (in-list ranged-snipers)])
+         (define rid (hash-ref r 'id 101))
+         (set-add! splash-evading-tags rid)
+         (emit! (list 'attack-unit rid trap-id)))
+       (for ([u (in-list combat-units)])
+         (define uid (hash-ref u 'id 101))
+         (define ut (unit-type-sym u))
+         (define gr (exact->inexact
+                     (hash-ref u 'ground-range
+                               (hash-ref (sc2-unit-combat-stats ut) 'ground-range 0.0))))
+         (define ux (hash-ref u 'x base-x))
+         (define uy (hash-ref u 'y base-y))
+         (when (and (< gr 4.5)
+                    (not (sc2-unit-is-flying-sym? ut))
+                    (<= (dist2d tx ty ux uy) 6.0))
+           (define-values (kx ky) (compute-kite-vector ux uy tx ty 6.8))
+           (set-add! splash-evading-tags uid)
+           (emit! (list 'kite uid (safe-coord kx base-x) (safe-coord ky base-y)))))]
+      [(>= trap-prog 1.0)
+       (define nearby-ground
+         (filter (lambda (u)
+                   (and (not (sc2-unit-is-flying-sym? (unit-type-sym u)))
+                        (<= (dist2d tx ty (hash-ref u 'x base-x) (hash-ref u 'y base-y)) 12.0)))
+                 combat-units))
+       (when (not (null? nearby-ground))
+         (define cheap-cands
+           (filter (lambda (u) (memq (unit-type-sym u) '(zergling marine zealot adept)))
+                   nearby-ground))
+         (define sac-unit
+           (argmin (lambda (u) (hash-ref u 'hp 100))
+                   (if (not (null? cheap-cands)) cheap-cands nearby-ground)))
+         (define sac-id (hash-ref sac-unit 'id 101))
+         (set-add! splash-evading-tags sac-id)
+         (emit! (list 'trigger-stasis-ward-single-unit
+                      sac-id trap-id (exact-round tx) (exact-round ty)))
+         (emit! (list 'move sac-id (exact-round tx) (exact-round ty)))
+         (for ([u (in-list nearby-ground)]
+               #:when (not (equal? (hash-ref u 'id -1) sac-id)))
+           (define uid (hash-ref u 'id 101))
+           (define ux (hash-ref u 'x base-x))
+           (define uy (hash-ref u 'y base-y))
+           (when (<= (dist2d tx ty ux uy) 6.5)
+             (define-values (kx ky) (compute-kite-vector ux uy tx ty 6.8))
+             (set-add! splash-evading-tags uid)
+             (emit! (list 'kite uid (safe-coord kx base-x) (safe-coord ky base-y))))))]))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Friendly Oracle Spell Micro (`stasis-ward` & `pulsar-beam`)
+  ;; ---------------------------------------------------------------------------
+  (define friendly-stasis-traps
+    (filter (lambda (u) (memq (unit-type-sym u) '(oracle-stasis-trap stasis-ward)))
+            (append ally-units ally-bldgs)))
+  (define enemy-townhalls
+    (filter (lambda (eb)
+              (memq (unit-type-sym eb)
+                    '(hatchery lair hive nexus command-center orbital-command planetary-fortress)))
+            enemy-bldgs))
+  (for ([u (in-list combat-units)]
+        #:when (eq? (unit-type-sym u) 'oracle))
+    (define uid (hash-ref u 'id 101))
+    (define ux (hash-ref u 'x base-x))
+    (define uy (hash-ref u 'y base-y))
+    (define u-energy (hash-ref u 'energy 0))
+    (define u-buffs (hash-ref u 'buffs '()))
+    (define nearby-enemy-workers
+      (filter (lambda (e)
+                (and (memq (unit-type-sym e) '(drone scv probe))
+                     (<= (dist2d ux uy (hash-ref e 'x 9999) (hash-ref e 'y 9999)) 10.0)))
+              enemy-units))
+    (define nearby-enemy-th
+      (findf (lambda (th)
+               (<= (dist2d ux uy (hash-ref th 'x 9999) (hash-ref th 'y 9999)) 10.0))
+             enemy-townhalls))
+    (define close-enemy-workers
+      (filter (lambda (ew)
+                (<= (dist2d ux uy (hash-ref ew 'x 9999) (hash-ref ew 'y 9999)) 5.0))
+              nearby-enemy-workers))
+    (when (>= u-energy 50)
+      (cond
+        ;; 1. Mineral-line Stasis Harass
+        [(or (>= (length nearby-enemy-workers) 2) nearby-enemy-th)
+         (define-values (wx wy)
+           (if (not (null? nearby-enemy-workers))
+               (let ([n (length nearby-enemy-workers)])
+                 (values (exact-round (/ (for/sum ([w (in-list nearby-enemy-workers)])
+                                           (hash-ref w 'x ux))
+                                         n))
+                         (exact-round (/ (for/sum ([w (in-list nearby-enemy-workers)])
+                                           (hash-ref w 'y uy))
+                                         n))))
+               (values (exact-round (hash-ref nearby-enemy-th 'x ux))
+                       (exact-round (hash-ref nearby-enemy-th 'y uy)))))
+         (emit! (list 'cast-spell uid 'stasis-ward wx wy))
+         (when (not (null? close-enemy-workers))
+           (define nearest-ew
+             (argmin (lambda (ew) (dist2d ux uy (hash-ref ew 'x ux) (hash-ref ew 'y uy)))
+                     close-enemy-workers))
+           (emit! (list 'cast-spell uid 'pulsar-beam (hash-ref nearest-ew 'id 0))))]
+        ;; 2. Expansion Disruption
+        [(and (<= (dist2d ux uy enemy-exp-x enemy-exp-y) 15.0)
+              (not (ormap (lambda (th)
+                            (<= (dist2d enemy-exp-x enemy-exp-y
+                                        (hash-ref th 'x 9999) (hash-ref th 'y 9999))
+                                5.0))
+                          enemy-townhalls))
+              (not (ormap (lambda (ft)
+                            (<= (dist2d enemy-exp-x enemy-exp-y
+                                        (hash-ref ft 'x 9999) (hash-ref ft 'y 9999))
+                                5.0))
+                          friendly-stasis-traps)))
+         (emit! (list 'cast-spell uid 'stasis-ward enemy-exp-x enemy-exp-y))]
+        ;; 3. Defensive Choke Stasis Ward
+        [(and (<= (dist2d ux uy nat-x nat-y) 15.0)
+              (not (ormap (lambda (ft)
+                            (<= (dist2d nat-x nat-y
+                                        (hash-ref ft 'x 9999) (hash-ref ft 'y 9999))
+                                5.0))
+                          friendly-stasis-traps))
+              (or (>= u-energy 75)
+                  (ormap (lambda (e)
+                           (<= (dist2d ux uy (hash-ref e 'x 9999) (hash-ref e 'y 9999)) 18.0))
+                         enemy-units)))
+         (emit! (list 'cast-spell uid 'stasis-ward nat-x nat-y))]))
+    ;; Deactivate Pulsar Beam if active and no enemy within 6.5 tiles
+    (when (and (list? u-buffs)
+               (or (memq 'pulsar-beam u-buffs) (memq 'oracle-weapon u-buffs))
+               (not (ormap (lambda (e)
+                             (<= (dist2d ux uy (hash-ref e 'x 9999) (hash-ref e 'y 9999)) 6.5))
+                           enemy-units)))
+      (emit! (list 'cast-spell uid 'pulsar-beam-off uid))))
 
   ;; ---------------------------------------------------------------------------
   ;; Active Combat Spells & Engagement Micro (Protected by Weapon-Swing Lock
@@ -3710,7 +3998,26 @@
   (define-values (tactic-acts vanguard-cnt reserve-cnt)
     (step-layer3-and-4-tactics! rt obs fap-score))
 
-  (define raw-actions (append posture-acts econ-acts tactic-acts))
+  (define all-layer-actions (append posture-acts econ-acts tactic-acts))
+  (define extended-stasis-and-drill-heads
+    '(worker-drill-stack-attack
+      evacuate-workers-from-stasis-ward
+      trigger-stasis-ward-single-unit
+      counter-enemy-worker-drill
+      stasis-worker-stoppage-compensation
+      return-workers-to-gather))
+  (define stasis-and-drill-actions
+    (filter (lambda (a)
+              (and (pair? a) (memq (car a) extended-stasis-and-drill-heads)))
+            all-layer-actions))
+  (define raw-actions
+    (if (and (hash? raw-obs)
+             (or (hash-has-key? raw-obs 'raw-mineral-harvesters)
+                 (hash-ref raw-obs 'include-extended-drill-actions? #f)))
+        all-layer-actions
+        (filter (lambda (a)
+                  (not (and (pair? a) (memq (car a) extended-stasis-and-drill-heads))))
+                all-layer-actions)))
 
   ;; Layer 5
   (define-values (accepted dropped spell-throttled)

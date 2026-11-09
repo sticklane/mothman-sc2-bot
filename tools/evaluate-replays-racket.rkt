@@ -80,7 +80,7 @@
 
 (define (evaluate-corpus-sexp sexp-path)
   (define cohorts (make-hash))
-  (for ([ck '("pro_tournament" "pro_corpus" "pro_all" "aiarena_ladder" "external_gauntlet" "bots_all" "all")])
+  (for ([ck '("pro_tournament" "pro_corpus" "pro_all" "aiarena_ladder" "local_real_matches" "external_gauntlet" "bots_all" "all")])
     (hash-set! cohorts ck (make-cohort-bucket)))
 
   (define players (make-hash))
@@ -103,7 +103,7 @@
             [(list 'checkpoint cohort-str replay-id obs-p obs-name our-race
                    opp-name opp-race frame true-w true-min true-gas
                    opp-wk tcx10 tcy10
-                   ally-u-list ally-b-list opp-u-list opp-b-list fut-syms)
+                   ally-u-list ally-b-list opp-u-list opp-b-list fut-syms _rest ...)
              (define p-key (cons replay-id obs-p))
              (define p-state
                (hash-ref! perspective-states p-key
@@ -330,7 +330,7 @@
           'minerals_mae_calibrated (round1 (/ (apply + cal-m-errs) (max 1 (length cal-m-errs))))
           'gas_mae_old (round1 (/ (apply + old-g-errs) (max 1 (length old-g-errs))))
           'gas_mae_calibrated (round1 (/ (apply + cal-g-errs) (max 1 (length cal-g-errs))))
-          'cohorts (for/hash ([ck (in-list '("pro_tournament" "pro_corpus" "pro_all" "aiarena_ladder" "external_gauntlet" "bots_all" "all"))]
+          'cohorts (for/hash ([ck (in-list '("pro_tournament" "pro_corpus" "pro_all" "aiarena_ladder" "local_real_matches" "external_gauntlet" "bots_all" "all"))]
                               #:when (> (hash-ref (hash-ref cohorts ck) 'evals) 0))
                      (values (string->symbol ck) (format-cohort-json (hash-ref cohorts ck))))
           'top_players top-players-json))

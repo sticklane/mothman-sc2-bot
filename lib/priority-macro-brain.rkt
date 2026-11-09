@@ -153,6 +153,7 @@
    (sc2-tech-node 'colossus            'Protoss 'train    'combat-unit        300 200 6  0 1200 'robotics-facility '(robotics-facility robotics-bay)   #f)
    (sc2-tech-node 'disruptor           'Protoss 'train    'combat-unit        150 150 3  0  800 'robotics-facility '(robotics-facility robotics-bay)   #f)
    (sc2-tech-node 'stargate            'Protoss 'build    'production-scaling 150 150 0  0  960 'worker            '(pylon cybernetics-core)           #t)
+   (sc2-tech-node 'oracle              'Protoss 'train    'combat-unit        150 150 3  0  830 'stargate          '(stargate)                         #f)
    (sc2-tech-node 'fleet-beacon        'Protoss 'build    'tech-upgrade       300 200 0  0  960 'worker            '(pylon stargate)                   #t)
    (sc2-tech-node 'carrier             'Protoss 'train    'combat-unit        350 250 6  0 1440 'stargate          '(stargate fleet-beacon)            #f)
    (sc2-tech-node 'twilight-council    'Protoss 'build    'tech-upgrade       150 100 0  0  800 'worker            '(pylon cybernetics-core)           #t)
@@ -642,7 +643,8 @@
                    (bldg-count-equivalent total-bldg-counts 'factory)
                    (bldg-count-equivalent total-bldg-counts 'starport))]
       [else (+ (bldg-count-equivalent total-bldg-counts 'gateway)
-               (bldg-count-equivalent total-bldg-counts 'robotics-facility))]))
+               (bldg-count-equivalent total-bldg-counts 'robotics-facility)
+               (bldg-count-equivalent total-bldg-counts 'stargate))]))
   (define max-fac-count (max 2 (* 3 active-bases)))
 
   (define base-metrics
@@ -741,6 +743,7 @@
   ;; Augment candidate list with:
   ;;   - Active build-order goal (`bo-goal-sym`) if not already in `raw-cands`
   ;;   - Any missing repaired prerequisites (`repaired-prereqs`)
+  ;;   - Stargate Oracle (`oracle`) when Protoss has a ready Stargate and < 1 Oracle (or < 2 with >= 200M/200G)
   ;;   - Gas building (`extractor`/`refinery`/`assimilator`) if needed by BO or if 0 gas buildings exist when gas tech is needed
   (define existing-ids (map priority-candidate-id raw-cands))
   (define extra-syms
@@ -752,6 +755,12 @@
                     (not (sc2-tech-already-satisfied? s total-bldg-counts researched-upgrades pending-upgrades))))
              (append repaired-prereqs
                      (if bo-goal-sym (list bo-goal-sym) '())
+                     (if (and (eq? race 'Protoss)
+                              (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0)
+                              (< (hash-ref unit-counts 'oracle 0)
+                                 (if (and (>= minerals 200) (>= gas 200)) 2 1)))
+                         (list 'oracle)
+                         '())
                      (if (and (= total-gas-bldgs 0) (>= workers 14))
                          (list gas-bldg-sym)
                          '())))

@@ -1023,10 +1023,13 @@
           (purification-nova 2346 #t)
           (graviton-beam 173 #t)
           (prismatic-alignment 2393 #t)
-          (pulsar-beam-on 2375 #t)
+          (pulsar-beam 2375 #t)
+          (pulsar-beam-on 2375 #f)
           (pulsar-beam-off 2376 #t)
           (oracle-revelation 2146 #t)
           (stasis-ward 2505 #t)
+          (oracle-stasis-ward 2505 #f)
+          (build-stasis-trap 2505 #f)
           (build-interceptors 1042 #t)
           ;; Research Abilities
           (research-zergling-movementspeed 1253 #t)
@@ -1289,6 +1292,10 @@
           (transfusion 28 #t)
           (oracle-revelation 49 #t)
           (oracle-cloak-field 55 #t)
+          (oracle-weapon 56 #t)
+          (pulsar-beam 56 #f)
+          (oracle-stasis-trap-target 57 #t)
+          (stasis-ward-target 57 #f)
           (blinding-cloud 83 #t)
           (medivac-speed-boost 89 #t)
           (immortal-overload 102 #t)
@@ -2859,6 +2866,7 @@
             'hull-hp (max 1 (exact-round (sc2-unit-health eu)))
             'max-hp (max 1 (exact-round (+ (sc2-unit-health-max eu) (sc2-unit-shield-max eu))))
             'shield (max 0 (exact-round (sc2-unit-shield eu)))
+            'build-progress (max 0.0 (min 1.0 (sc2-unit-build-progress eu)))
             'flying? (sc2-unit-is-flying eu)
             'cloaked (or (= (sc2-unit-cloak eu) 1) (= (sc2-unit-cloak eu) 2))
             'burrowed (sc2-unit-is-burrowed eu)
@@ -2873,7 +2881,9 @@
             'type (sc2-id->unit-symbol (sc2-unit-unit-type eb))
             'x (sc2-point3d-x p)
             'y (sc2-point3d-y p)
-            'hp (max 1 (exact-round (sc2-unit-health eb))))))
+            'hp (max 1 (exact-round (sc2-unit-health eb)))
+            'build-progress (max 0.0 (min 1.0 (sc2-unit-build-progress eb)))
+            'cloaked (or (= (sc2-unit-cloak eb) 1) (= (sc2-unit-cloak eb) 2)))))
 
   ;; Persistent effects
   (define effect-records
@@ -2952,10 +2962,36 @@
                    #f))))
       self-units)))
 
-  ;; Harvester & depletion metrics
-  (define min-harvesters
+  ;; Stasis-frozen friendly unit & worker tracking (Oracle Stasis Ward buff 57 = 21.4s / 480 frames)
+  (define (unit-record-stasis-frozen? u)
+    (define bfs (hash-ref u 'buffs '()))
+    (or (memq 'oracle-stasis-trap-target bfs)
+        (memq 'stasis-ward-target bfs)))
+  (define stasis-frozen-unit-ids
+    (for/list ([u (in-list ally-unit-records)]
+               #:when (unit-record-stasis-frozen? u))
+      (hash-ref u 'id 0)))
+  (define stasis-frozen-worker-count
+    (for/sum ([u (in-list ally-unit-records)]
+              #:when (and (memq (hash-ref u 'type 'unknown) '(drone probe scv))
+                          (unit-record-stasis-frozen? u)))
+      1))
+
+  (define mineral-patch-records
+    (for/list ([m (in-list mineral-fields)])
+      (define mp (sc2-unit-pos m))
+      (hash 'id (sc2-unit-tag m)
+            'x (sc2-point3d-x mp)
+            'y (sc2-point3d-y mp)
+            'minerals (sc2-unit-mineral-contents m))))
+
+  ;; Harvester & depletion metrics (deduct stasis-frozen workers from active mineral-harvesters
+  ;; so the economy layer immediately trains/transfers replacement workers during a 21.4s stasis freeze!)
+  (define raw-min-harvesters
     (for/sum ([th (in-list ready-townhalls)])
       (max 0 (sc2-unit-assigned-harvesters th))))
+  (define min-harvesters
+    (max 0 (- raw-min-harvesters stasis-frozen-worker-count)))
   (define ideal-min-harvesters
     (for/sum ([th (in-list ready-townhalls)])
       (max 0 (let ([ih (sc2-unit-ideal-harvesters th)])
@@ -3028,6 +3064,7 @@
         'enemy-y enemy-y
         'enemy-base (list enemy-x enemy-y)
         'mineral-patch-id closest-mineral-patch-id
+        'mineral-patches mineral-patch-records
         'ally-units ally-unit-records
         'ally-buildings ally-bldg-records
         'enemy-units enemy-unit-records
@@ -3036,6 +3073,9 @@
         'researched-upgrades researched-upgrades
         'pending-upgrades pending-upgrades
         'depleting-bases depleting-bases
+        'stasis-frozen-worker-count stasis-frozen-worker-count
+        'stasis-frozen-unit-ids stasis-frozen-unit-ids
+        'raw-mineral-harvesters raw-min-harvesters
         'mineral-harvesters min-harvesters
         'ideal-mineral-harvesters ideal-min-harvesters
         'gas-harvesters gas-harvesters
@@ -3628,6 +3668,7 @@
   (define workers
     (filter (lambda (w)
               (and (sc2-unit-is-worker? w)
+                   (not (memv 57 (sc2-unit-buff-ids w)))
                    (not (set-member? excluded-worker-tags (sc2-unit-tag w)))
                    (not (worker-has-build-order? w))))
             self-units))
@@ -3809,12 +3850,32 @@
   (define enemy-units (filter (lambda (u) (= (sc2-unit-alliance u) 4)) units))
   (define neutral-units (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-units))
-  (define workers (filter sc2-unit-is-worker? self-units))
+  (define hash-mineral-patches
+    (if (hash? obs)
+        (filter (lambda (m)
+                  (and (hash? m)
+                       (exact-integer? (hash-ref m 'id #f))
+                       (> (hash-ref m 'id 0) 0)))
+                (append (hash-ref obs 'mineral-patches '())
+                        (hash-ref obs 'mineral-fields '())))
+        '()))
+  (define hash-ally-by-id
+    (if (hash? obs)
+        (for/hasheqv ([u (in-list (hash-ref obs 'ally-units '()))]
+                      #:when (and (hash? u) (exact-integer? (hash-ref u 'id #f))))
+          (values (hash-ref u 'id) u))
+        (hasheqv)))
+  (define workers
+    (filter (lambda (w)
+              (and (sc2-unit-is-worker? w)
+                   (not (memv 57 (sc2-unit-buff-ids w)))))
+            self-units))
   (define townhalls (sort-townhalls-main-first (filter sc2-unit-is-townhall? self-units)))
   (define combat-units
     (filter (lambda (u)
               (and (not (sc2-unit-is-structure? u))
                    (not (sc2-unit-is-worker? u))
+                   (not (memv 57 (sc2-unit-buff-ids u)))
                    (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
                               '(larva egg overlord queen overseer observer)))))
             self-units))
@@ -4008,8 +4069,9 @@
 
   (for ([act (in-list actions)])
     (match act
-      ;; 1. Train unit: `(train <unit-sym>)`
-      [(list 'train unit-sym)
+      ;; 1. Train unit: `(train <unit-sym>)` or `(train-unit <prod-id> <unit-sym>)`
+      [(or (list 'train unit-sym)
+           (list 'train-unit _ unit-sym))
        (define ab-id (train-symbol->ability-id unit-sym))
        (define all-prod-tags (select-producer-tags-for-unit unit-sym self-units))
        (define prod-tags
@@ -4287,7 +4349,55 @@
        (when (not (null? tag-list))
          (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
 
-      [(list (or 'move 'kite 'retreat 'mineral-walk 'worker-harass 'multi-prong-drop) uid raw-x raw-y)
+      [(list 'mineral-walk uid patch-id raw-x raw-y)
+       (define tx (scale-bot-coord-to-world raw-x home-x))
+       (define ty (scale-bot-coord-to-world raw-y home-y))
+       (define wlist
+         (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                 (if (list? uid) uid (list uid))))
+       (when (not (null? wlist))
+         (for ([wt (in-list wlist)])
+           (record-worker-used! wt))
+         (if (and (exact-integer? patch-id) (> patch-id 0))
+             (emit! (sc2-raw-unit-command 3666 #f patch-id wlist #f))
+             (emit! (sc2-raw-unit-command 16 (sc2-point2d tx ty) 0 wlist #f))))]
+
+      [(list 'mineral-walk uid raw-x raw-y)
+       (define tx (scale-bot-coord-to-world raw-x home-x))
+       (define ty (scale-bot-coord-to-world raw-y home-y))
+       (define best-min-tag
+         (cond
+           [(not (null? mineral-fields))
+            (sc2-unit-tag
+             (argmin (lambda (m)
+                       (define mp (sc2-unit-pos m))
+                       (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                     mineral-fields))]
+           [(not (null? hash-mineral-patches))
+            (hash-ref
+             (argmin (lambda (m)
+                       (pt-dist tx ty
+                                (exact->inexact (hash-ref m 'x home-x))
+                                (exact->inexact (hash-ref m 'y home-y))))
+                     hash-mineral-patches)
+             'id 0)]
+           [else 0]))
+       (cond
+         [(> best-min-tag 0)
+          (define wlist
+            (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                    (if (list? uid) uid (list uid))))
+          (when (not (null? wlist))
+            (for ([wt (in-list wlist)])
+              (record-worker-used! wt))
+            (emit! (sc2-raw-unit-command 3666 #f best-min-tag wlist #f)))]
+         [else
+          (define target-pt (sc2-point2d tx ty))
+          (define tag-list (claim-combat-tags-for-order! uid 16 target-pt 0))
+          (when (not (null? tag-list))
+            (emit! (sc2-raw-unit-command 16 target-pt 0 tag-list #f)))])]
+
+      [(list (or 'move 'kite 'retreat 'worker-harass 'multi-prong-drop) uid raw-x raw-y)
        (define tx (scale-bot-coord-to-world raw-x home-x))
        (define ty (scale-bot-coord-to-world raw-y home-y))
        (define target-pt (sc2-point2d tx ty))
@@ -4352,12 +4462,12 @@
              (memq norm-spell
                    '(stimpack stim stim-marine stim-marauder guardian-shield
                      cloak-banshee medivac-boost immortal-barrier prismatic-alignment
-                     build-interceptors)))
+                     build-interceptors pulsar-beam pulsar-beam-on pulsar-beam-off)))
            (unless off-gcd-buff?
              (for ([cid (in-list caster-ids)])
                (set-add! commanded-combat-tags cid)))
            (cond
-             ;; Case A: Ability requires NO target (Stimpack, Guardian Shield, Siege/Unsiege, Burrow, Cloak, Build Interceptors, etc.)
+             ;; Case A: Ability requires NO target (Stimpack, Guardian Shield, Siege/Unsiege, Burrow, Cloak, Build Interceptors, Pulsar Beam, etc.)
              [(set-member? SC2-NO-TARGET-ABILITY-IDS ab-id)
               (emit! (sc2-raw-unit-command ab-id #f 0 caster-ids #f))]
 
@@ -4409,7 +4519,7 @@
               (when (> resolved-min-tag 0)
                 (emit! (sc2-raw-unit-command ab-id #f resolved-min-tag caster-ids #f)))]
 
-             ;; Case D: Point-target ability (Blink, Force Field, Psi Storm, Corrosive Bile, EMP, Scanner Sweep, Phase Shift, Purification Nova)
+             ;; Case D: Point-target ability (Blink, Force Field, Psi Storm, Corrosive Bile, EMP, Scanner Sweep, Phase Shift, Purification Nova, Stasis Ward)
              [(or (set-member? SC2-POINT-TARGET-ABILITY-IDS ab-id)
                   (>= (length rest) 2))
               (define-values (tx ty)
@@ -4444,6 +4554,78 @@
          (for ([wt (in-list wlist)] #:when (exact-integer? wt))
            (record-worker-used! wt))
          (emit! (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 wlist #f)))]
+
+      [(list 'worker-drill-stack-attack worker-ids patch-id target-id raw-x raw-y)
+       (define tx (scale-bot-coord-to-world raw-x home-x))
+       (define ty (scale-bot-coord-to-world raw-y home-y))
+       (define wlist
+         (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                 (if (list? worker-ids) worker-ids (list worker-ids))))
+       (define eff-patch-id
+         (cond
+           [(and (exact-integer? patch-id) (> patch-id 0))
+            (if (and (not (null? mineral-fields))
+                     (not (ormap (lambda (m) (= (sc2-unit-tag m) patch-id)) mineral-fields)))
+                (sc2-unit-tag
+                 (argmin (lambda (m)
+                           (define mp (sc2-unit-pos m))
+                           (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                         mineral-fields))
+                patch-id)]
+           [else 0]))
+       (define drill-wids '())
+       (define strike-wids '())
+       (for ([wid (in-list wlist)])
+         (record-worker-used! wid)
+         (define-values (wx wy)
+           (cond
+             [(hash-ref self-unit-by-tag wid #f)
+              => (lambda (u)
+                   (define p (sc2-unit-pos u))
+                   (values (sc2-point3d-x p) (sc2-point3d-y p)))]
+             [(hash-ref hash-ally-by-id wid #f)
+              => (lambda (u)
+                   (values (exact->inexact (hash-ref u 'x home-x))
+                           (exact->inexact (hash-ref u 'y home-y))))]
+             [else (values home-x home-y)]))
+         (if (and (> eff-patch-id 0) (> (pt-dist wx wy tx ty) 1.5))
+             (set! drill-wids (cons wid drill-wids))
+             (set! strike-wids (cons wid strike-wids))))
+       (when (not (null? drill-wids))
+         (emit! (sc2-raw-unit-command 3666 #f eff-patch-id (reverse drill-wids) #f)))
+       (when (not (null? strike-wids))
+         (if (and (exact-integer? target-id) (> target-id 0))
+             (emit! (sc2-raw-unit-command 23 #f target-id (reverse strike-wids) #f))
+             (emit! (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 (reverse strike-wids) #f))))]
+
+      [(list 'harvest-mineral wid patch-id)
+       (define wlist
+         (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                 (if (list? wid) wid (list wid))))
+       (define eff-patch-id
+         (cond
+           [(and (exact-integer? patch-id)
+                 (ormap (lambda (m) (= (sc2-unit-tag m) patch-id)) mineral-fields))
+            patch-id]
+           [(not (null? mineral-fields))
+            (sc2-unit-tag
+             (argmin (lambda (m)
+                       (define mp (sc2-unit-pos m))
+                       (pt-dist home-x home-y (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                     mineral-fields))]
+           [(and (exact-integer? patch-id) (> patch-id 0)) patch-id]
+           [else 0]))
+       (when (and (not (null? wlist)) (> eff-patch-id 0))
+         (for ([wt (in-list wlist)])
+           (record-worker-used! wt))
+         (emit! (sc2-raw-unit-command 3666 #f eff-patch-id wlist #f)))]
+
+      [(list (or 'evacuate-workers-from-stasis-ward
+                 'trigger-stasis-ward-single-unit
+                 'counter-enemy-worker-drill
+                 'stasis-worker-stoppage-compensation
+                 'return-workers-to-gather) _ ...)
+       (void)]
 
       [(list 'resume-halted-building scv-id bldg-id)
        (record-worker-used! scv-id)

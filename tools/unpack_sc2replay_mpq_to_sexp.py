@@ -64,12 +64,24 @@ CAMEL_TO_KEBAB = {
     'Observer': 'observer', 'WarpPrism': 'warp-prism', 'Immortal': 'immortal', 'Colossus': 'colossus',
     'Disruptor': 'disruptor', 'Phoenix': 'phoenix', 'VoidRay': 'void-ray', 'Oracle': 'oracle',
     'Tempest': 'tempest', 'Carrier': 'carrier', 'Nexus': 'nexus', 'Pylon': 'pylon',
+    'OracleStasisTrap': 'oracle-stasis-trap',
     'Assimilator': 'assimilator', 'Gateway': 'gateway', 'WarpGate': 'warpgate', 'Forge': 'forge',
     'CyberneticsCore': 'cybernetics-core', 'PhotonCannon': 'photon-cannon',
     'ShieldBattery': 'shield-battery', 'TwilightCouncil': 'twilight-council', 'Stargate': 'stargate',
     'RoboticsFacility': 'robotics-facility', 'RoboticsBay': 'robotics-bay',
     'FleetBeacon': 'fleet-beacon', 'TemplarArchive': 'templar-archive', 'DarkShrine': 'dark-shrine',
 }
+
+HORIZONS_SEC = [
+    (15, 336),
+    (30, 672),
+    (45, 1008),
+    (60, 1344),
+    (75, 1680),
+    (90, 2016),
+    (105, 2352),
+    (130, 2912),
+]
 
 
 def to_sym(utype):
@@ -126,9 +138,9 @@ def unpack_single_replay(item):
     stats_snap = {1: {}, 2: {}}
     seen_by_opponent = {1: {}, 2: {}}
 
-    checkpoints = [1344, 2016, 2688, 3360, 4032, 4704, 5376]
+    checkpoints = [1008, 1344, 2016, 2688, 3360, 4032, 4704, 5376, 6720, 8064, 9408]
     cp_idx = 0
-    replay_id = clean_str(os.path.basename(path))
+    replay_id = clean_str(path)
     sexp_lines = []
 
     for ev in tracker:
@@ -174,6 +186,10 @@ def unpack_single_replay(item):
                     ut_sym for (s_gl, ut_sym) in future_spawns[opp_p]
                     if cp_gl < s_gl <= (cp_gl + 1344)
                 )
+                fut_horizons_sexp = " ".join(
+                    f"({h_sec} ({' '.join(ut_sym for (s_gl, ut_sym) in future_spawns[opp_p] if cp_gl < s_gl <= (cp_gl + h_gl))}))"
+                    for (h_sec, h_gl) in HORIZONS_SEC
+                )
                 true_opp_combat = [u for u in opp_alive if u['raw_type'] not in WORKER_RAW and u['raw_type'] not in BLDG_RAW and u['raw_type'] not in SUPPLY_RAW and u['raw_type'] not in IGNORE_RAW and not u['raw_type'].startswith('Beacon')]
                 if true_opp_combat:
                     tcx = int(sum(u['x']*10 for u in true_opp_combat) / len(true_opp_combat))
@@ -185,7 +201,7 @@ def unpack_single_replay(item):
                     f'(checkpoint "{cohort}" "{replay_id}" {obs_p} "{players[obs_p]["name"]}" {players[obs_p]["race"]} '
                     f'"{players[opp_p]["name"]}" {players[opp_p]["race"]} {cp_gl} {true_w} {int(true_cum_min)} {int(true_cum_gas)} '
                     f'{workers_lost[opp_p]} {tcx} {tcy} '
-                    f'({ally_u_sexp}) ({ally_b_sexp}) ({opp_u_sexp}) ({opp_b_sexp}) ({fut_sexp}))'
+                    f'({ally_u_sexp}) ({ally_b_sexp}) ({opp_u_sexp}) ({opp_b_sexp}) ({fut_sexp}) ({fut_horizons_sexp}))'
                 )
             cp_idx += 1
 
@@ -237,8 +253,12 @@ def collect_replay_paths():
         ('pro_corpus', 'replays/pro_corpus/**/*.SC2Replay'),
         ('pro_corpus', 'replays/pro_corpus/*.SC2Replay'),
         ('aiarena_ladder', 'replays/aiarena_matches/*.SC2Replay'),
+        ('aiarena_ladder', 'replays/aiarena_matches/**/*.SC2Replay'),
+        ('aiarena_ladder', 'data/aiarena_latest/**/*.SC2Replay'),
         ('aiarena_ladder', 'replays/aiarena_corpus/**/*.SC2Replay'),
         ('aiarena_ladder', 'replays/aiarena_corpus/*.SC2Replay'),
+        ('local_real_matches', 'replays/local_real_matches/**/*.SC2Replay'),
+        ('local_real_matches', 'replays/*.SC2Replay'),
         ('external_gauntlet', 'replays/external_gauntlet/*.SC2Replay'),
         ('external_gauntlet', 'replays/external_bots_gauntlet/*.SC2Replay'),
     ]
@@ -251,7 +271,7 @@ def collect_replay_paths():
                 if sz < 1000:
                     continue
                 with open(p, 'rb') as fh:
-                    h = hashlib.md5(fh.read(8192)).hexdigest()
+                    h = hashlib.md5(fh.read()).hexdigest()
                 key = (sz, h)
                 if key not in seen_hashes:
                     seen_hashes.add(key)

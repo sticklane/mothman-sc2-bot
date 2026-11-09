@@ -311,6 +311,7 @@
                         #:vespene [vesp-contents 1500]
                         #:orders [orders '()]
                         #:add-on-tag [add-on-tag 0]
+                        #:buffs [buffs '()]
                         #:flying? [flying? #f])
   (sc2-unit 1 alliance tag unit-type (if (= alliance 1) 1 2)
             (sc2-point3d x y 8.0) 0.0 1.0 1.0 0 #f #f #f
@@ -318,7 +319,7 @@
             (if (= alliance 3) min-contents 0)
             (if (or (= alliance 3) (memv unit-type '(88 61 20))) vesp-contents 0)
             flying? #f #f #t #f
-            orders add-on-tag '() assigned ideal 0.0 0 0 0 0))
+            orders add-on-tag buffs assigned ideal 0.0 0 0 0 0))
 
 (define (make-test-obs loop minerals vespene units)
   (sc2-observation loop
@@ -926,6 +927,83 @@
                           (= (sc2-raw-unit-command-target-unit-tag c) 999)
                           (equal? (sc2-raw-unit-command-unit-tags c) '(911 912 913 914))))
                    uu-cmds))
+
+;; 10. Oracle Stasis Ward (2505), Pulsar Beam (2375/2376), Stasis-Frozen Worker Accounting (buff 57),
+;;     Mineral-Walk HARVEST_GATHER (3666), and Worker-Drill Stack Attack
+(check-eqv "ability-id-pulsar-beam" (ability-symbol->sc2-id 'pulsar-beam) 2375)
+(check-eqv "ability-id-pulsar-beam-off" (ability-symbol->sc2-id 'pulsar-beam-off) 2376)
+(check-eqv "ability-id-stasis-ward" (ability-symbol->sc2-id 'stasis-ward) 2505)
+(check-eqv "buff-id-oracle-stasis-trap-target" (buff-id->symbol 57) 'oracle-stasis-trap-target)
+
+(define stasis-drill-obs
+  (make-test-obs
+   1600 400 200
+   (list ;; Nexus (59, tag 950) at (32, 32) with 16 assigned harvesters
+         (make-test-unit 950 59 1 32.0 32.0 #:assigned 16 #:ideal 16)
+         ;; Probe #951 (84) at (34, 32) - unfrozen
+         (make-test-unit 951 84 1 34.0 32.0)
+         ;; Probe #952 (84) at (59.5, 60.0) - already within 1.5 tiles of drill target (60, 60)
+         (make-test-unit 952 84 1 59.5 60.0)
+         ;; Probe #953 (84) at (35, 32) - frozen by Oracle Stasis Trap (buff 57)
+         (make-test-unit 953 84 1 35.0 32.0 #:buffs '(57))
+         ;; Friendly Oracle #960 (495) at (50, 50)
+         (make-test-unit 960 495 1 50.0 50.0 #:flying? #t #:energy 75.0)
+         ;; Neutral Mineral Field #9500 (341) at (36, 40)
+         (make-test-unit 9500 341 3 36.0 40.0)
+         ;; Enemy Roach #999 (110) at (60, 60)
+         (make-test-unit 999 110 4 60.0 60.0))))
+
+(define stasis-rt-hash (sc2-observation->runtime-obs-hash stasis-drill-obs))
+(check-eqv "stasis-frozen-worker-count-detected"
+           (hash-ref stasis-rt-hash 'stasis-frozen-worker-count 0)
+           1)
+(check-eqv "stasis-frozen-unit-ids-detected"
+           (hash-ref stasis-rt-hash 'stasis-frozen-unit-ids '())
+           '(953))
+(check-eqv "raw-mineral-harvesters-preserved"
+           (hash-ref stasis-rt-hash 'raw-mineral-harvesters 0)
+           16)
+(check-eqv "mineral-harvesters-deducts-stasis-frozen-workers"
+           (hash-ref stasis-rt-hash 'mineral-harvesters 0)
+           15)
+
+(define sd-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((mineral-walk 951 36.0 40.0)
+     (worker-drill-stack-attack (951 952) 9500 999 60.0 60.0)
+     (cast-spell 960 stasis-ward 55.0 55.0)
+     (cast-spell 960 pulsar-beam 999))
+   stasis-drill-obs))
+
+(check-true "mineral-walk-targets-mineral-patch-3666"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 3666)
+                          (= (sc2-raw-unit-command-target-unit-tag c) 9500)
+                          (member 951 (sc2-raw-unit-command-unit-tags c))))
+                   sd-cmds))
+(check-true "worker-drill-stack-attack-strikes-when-within-1.5-tiles"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 23)
+                          (= (sc2-raw-unit-command-target-unit-tag c) 999)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(952))))
+                   sd-cmds))
+(check-true "oracle-stasis-ward-2505-point-target"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 2505)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(960))
+                          (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+                   sd-cmds))
+(check-true "oracle-pulsar-beam-2375-no-target-toggle"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 2375)
+                          (equal? (sc2-raw-unit-command-unit-tags c) '(960))
+                          (not (sc2-raw-unit-command-target-pos c))
+                          (= (sc2-raw-unit-command-target-unit-tag c) 0)))
+                   sd-cmds))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

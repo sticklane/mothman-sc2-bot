@@ -2552,8 +2552,387 @@
                (mirror-mind-state-last-zero-sum-reading fow-mm))
               'hydra-lurker-den))
 
+;; =============================================================================
+;; 5.19 Build-Order Tree Space (T_R), Bayesian Bluff Posteriors, Multi-Horizon
+;;      Snapshot Curve (15s..130s), Oracle Stasis Ward, Worker Drill & Attribute DPS
+;; =============================================================================
+(run-suite "5.19 Build-Order Tree Space (T_R), Bayesian Bluff Posteriors, Multi-Horizon Snapshot Curve, Oracle Stasis Ward & Worker Drill"
+  ;; 1. Build-Order Tree Space (T_R) for self and opponent
+  (for ([race-sym (in-list '(Zerg Terran Protoss))])
+    (define tree (lookup-race-build-order-tree race-sym))
+    (assert-true! (and (list? tree) (>= (length tree) 7))
+                  (format "Race ~a must have >= 7 canonical build-order tree nodes" race-sym))
+    (assert-true! (andmap build-order-tree-node? tree)
+                  (format "All entries in ~a build-order tree must be build-order-tree-node structs" race-sym)))
+
+  (define self-proj
+    (project-self-build-order-tree
+     (hash 'race 'Zerg
+           'frame 2800
+           'minerals 260
+           'gas 160
+           'ally-buildings (list (hash 'type 'hatchery)
+                                 (hash 'type 'spawning-pool)
+                                 (hash 'type 'roach-warren)
+                                 (hash 'type 'extractor))
+           'ally-units (list (hash 'type 'drone)
+                             (hash 'type 'zergling)
+                             (hash 'type 'roach)))
+     60.0))
+  (assert-true! (build-order-tree-projection? self-proj)
+                "project-self-build-order-tree must return a build-order-tree-projection struct")
+  (assert-eq! (build-order-tree-projection-perspective self-proj) 'self)
+  (assert-eq! (build-order-tree-projection-active-node-id self-proj) 'zerg-roach-warren
+              "Zerg with Hatchery + Spawning Pool + Roach Warren must project to zerg-roach-warren")
+  (define self-post-sum
+    (apply + (hash-values (build-order-tree-projection-branch-posteriors self-proj))))
+  (assert-true! (< (abs (- self-post-sum 1.0)) 1e-4)
+                "Self build-order tree branch posteriors must sum to 1.0")
+  (assert-true! (and (pair? (memq 'roach (build-order-tree-projection-immediately-producible-units self-proj)))
+                     (pair? (memq 'ravager (build-order-tree-projection-immediately-producible-units self-proj))))
+                "zerg-roach-warren must unlock roach and ravager as immediately producible units")
+  (assert-true! (pair? (build-order-tree-projection-horizon-reachable-units self-proj))
+                "Self projection at 60s horizon must have non-empty horizon-reachable-units")
+  (assert-true! (symbol? (build-order-tree-projection-recommended-next-build-step self-proj))
+                "Self projection must recommend a symbolic next build step")
+
+  (define opp-proj
+    (project-opponent-build-order-tree
+     (hash 'enemy-race 'Protoss
+           'frame 3600
+           'unaccounted-gas 220.0
+           'enemy-buildings (list (hash 'type 'nexus)
+                                  (hash 'type 'gateway)
+                                  (hash 'type 'cybernetics-core)
+                                  (hash 'type 'stargate)
+                                  (hash 'type 'assimilator)
+                                  (hash 'type 'assimilator))
+           'enemy-units (list (hash 'type 'stalker)
+                              (hash 'type 'oracle)))
+     60.0))
+  (assert-eq! (build-order-tree-projection-perspective opp-proj) 'opponent)
+  (assert-eq! (build-order-tree-projection-active-node-id opp-proj) 'protoss-stargate-air
+              "Opponent Protoss with Stargate + Oracle must project to protoss-stargate-air")
+  (define opp-post-sum
+    (apply + (hash-values (build-order-tree-projection-branch-posteriors opp-proj))))
+  (assert-true! (< (abs (- opp-post-sum 1.0)) 1e-4)
+                "Opponent build-order tree branch posteriors must sum to 1.0")
+  (assert-true! (pair? (memq 'oracle (build-order-tree-projection-immediately-producible-units opp-proj)))
+                "protoss-stargate-air must include oracle in immediately-producible-units")
+  (assert-true! (or (pair? (memq 'carrier (build-order-tree-projection-horizon-reachable-units opp-proj)))
+                    (pair? (memq 'immortal (build-order-tree-projection-horizon-reachable-units opp-proj))))
+                "protoss-stargate-air at 60s horizon must include 1-hop child units (carrier / immortal) in horizon-reachable-units")
+  (assert-true! (pair? (memq (build-order-tree-projection-recommended-next-build-step opp-proj)
+                             '(fleet-beacon robotics-facility)))
+                "protoss-stargate-air recommended next build step must be fleet-beacon or robotics-facility")
+
+  ;; 2. Bayesian Bluff Priors & Posteriors (compute-bayesian-bluff-posterior & compute-bayesian-strategic-posteriors)
+  (define p-normal-macro-gas
+    (compute-bayesian-bluff-posterior
+     #:candidate-branch 'spire-air-muta
+     #:confirmed-commitment? #f
+     #:remaining-gas 240
+     #:fake-builds '()
+     #:canceled-research-status 'no-research-cancel
+     #:combat-hallucination-bait? #f
+     #:idle-bluff-structures '()
+     #:enemy-scouted-us? #f
+     #:active-research-count 0))
+  (assert-true! (and (> p-normal-macro-gas 0.08) (< p-normal-macro-gas 0.55))
+                "Normal macro gas bank (rem-gas=240, no cancel, no idle bait) must keep bluff-posterior < 0.55")
+
+  (define p-fake-bldg-cancel
+    (compute-bayesian-bluff-posterior
+     #:candidate-branch 'spire-air-muta
+     #:confirmed-commitment? #f
+     #:remaining-gas 100
+     #:fake-builds '(spire)))
+  (assert-true! (>= p-fake-bldg-cancel 0.55)
+                "Unforced structure cancel (fake-builds non-empty) must push bluff-posterior >= 0.55")
+
+  (define p-fake-research-cancel
+    (compute-bayesian-bluff-posterior
+     #:candidate-branch 'twilight-templar-ground
+     #:confirmed-commitment? #f
+     #:remaining-gas 150
+     #:canceled-research-status 'fake-research-bluff-canceled))
+  (assert-true! (>= p-fake-research-cancel 0.55)
+                "Unforced research cancel must push bluff-posterior >= 0.55")
+
+  (define p-halluc-bait
+    (compute-bayesian-bluff-posterior
+     #:candidate-branch 'stargate-sky-fleet
+     #:confirmed-commitment? #f
+     #:remaining-gas 180
+     #:combat-hallucination-bait? #t))
+  (assert-true! (>= p-halluc-bait 0.55)
+                "Combat hallucination bait without real tech units must push bluff-posterior >= 0.55")
+
+  (define p-confirmed-real
+    (compute-bayesian-bluff-posterior
+     #:candidate-branch 'spire-air-muta
+     #:confirmed-commitment? #t
+     #:remaining-gas 80
+     #:active-research-count 1))
+  (assert-true! (< p-confirmed-real 0.05)
+                "Active research + confirmed branch units must push bluff-posterior < 0.05")
+
+  (define strat-post
+    (compute-bayesian-strategic-posteriors
+     (hash 'frame 3000
+           'enemy-race 'Protoss
+           'enemy-buildings (list (hash 'type 'nexus) (hash 'type 'gateway) (hash 'type 'twilight-council))
+           'enemy-units (list (hash 'type 'stalker)))))
+  (assert-true! (bayesian-strategic-priors? strat-post)
+                "compute-bayesian-strategic-posteriors must return a bayesian-strategic-priors struct")
+  (assert-eq! (bayesian-strategic-priors-bluff-prior strat-post) 0.08)
+
+  ;; 3. Multi-Horizon Future Snapshot Curve (15/30/45/60/75/90/105/130s)
+  (assert-eq! MIRROR-HORIZON-SNAPSHOTS-SEC '(15 30 45 60 75 90 105 130))
+  (define mh-mm (make-mirror-mind-state #:our-race 'Terran #:enemy-race 'Zerg #:depth 2))
+  (define mh-obs
+    (hash 'frame 3600
+          'our-race 'Terran
+          'enemy-race 'Zerg
+          'minerals 300
+          'gas 200
+          'ally-buildings (list (hash 'type 'command-center) (hash 'type 'barracks) (hash 'type 'factory))
+          'ally-units (list (hash 'id 101 'type 'marine 'x 40.0 'y 40.0 'hp 45))
+          'enemy-buildings (list (hash 'id 901 'type 'hatchery 'x 150.0 'y 150.0 'hp 1500)
+                                 (hash 'id 902 'type 'spawning-pool 'x 152.0 'y 150.0 'hp 1000)
+                                 (hash 'id 903 'type 'roach-warren 'x 154.0 'y 150.0 'hp 850))
+          'enemy-units (list (hash 'id 801 'type 'roach 'x 140.0 'y 140.0 'hp 145))))
+  (define mh-curve (predict-multi-horizon-snapshots mh-obs mh-mm))
+  (assert-eq! (length mh-curve) 8
+              "predict-multi-horizon-snapshots must return 8 horizon-snapshot-forecast records")
+  (assert-eq! (map exact-round (map horizon-snapshot-forecast-horizon-sec mh-curve))
+              '(15 30 45 60 75 90 105 130)
+              "Horizon snapshot curve must match MIRROR-HORIZON-SNAPSHOTS-SEC")
+  (for ([prev (in-list (take mh-curve 7))]
+        [next (in-list (drop mh-curve 1))])
+    (assert-true! (> (horizon-snapshot-forecast-certainty-level prev)
+                     (horizon-snapshot-forecast-certainty-level next))
+                  (format "Calibrated certainty must strictly decrease from ~as to ~as"
+                          (horizon-snapshot-forecast-horizon-sec prev)
+                          (horizon-snapshot-forecast-horizon-sec next)))
+    (assert-true! (<= (horizon-snapshot-forecast-optimal-depth prev)
+                      (horizon-snapshot-forecast-optimal-depth next))
+                  (format "Optimal cognitive depth d* must be non-decreasing from ~as to ~as"
+                          (horizon-snapshot-forecast-horizon-sec prev)
+                          (horizon-snapshot-forecast-horizon-sec next))))
+  (assert-true! (<= (horizon-snapshot-forecast-optimal-depth (first mh-curve)) 1)
+                "15s horizon optimal depth must be 0 or 1")
+  (assert-eq! (horizon-snapshot-forecast-optimal-depth (last mh-curve)) 3
+              "130s horizon optimal depth must be 3")
+
+  (define mm-step-acts (step-mirror-mind-predictor! mh-mm mh-obs))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mirror-bo-tree-prediction))) mm-step-acts)
+                "step-mirror-mind-predictor! must emit (mirror-bo-tree-prediction ...)")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mirror-horizon-curve))) mm-step-acts)
+                "step-mirror-mind-predictor! must emit (mirror-horizon-curve ...)")
+
+  ;; 4. Oracle Stasis Ward (stasis-ward / oracle-stasis-trap) & Anti-Stasis Worker Handling
+  ;; 4a. Friendly Oracle mineral-line harass (stasis-ward + pulsar-beam)
+  (define oracle-rt (make-live-bot-runtime #:race 'Protoss))
+  (define-values (oracle-harass-acts _ovc1 _orc1)
+    (step-layer3-and-4-tactics!
+     oracle-rt
+     (hash 'frame 2400
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 56.0
+           'enemy-x 160.0 'enemy-y 160.0
+           'enemy-expand-x 142.0 'enemy-expand-y 136.0
+           'ally-units (list (hash 'id 301 'type 'oracle 'x 158.0 'y 158.0 'hp 100 'shield 60 'energy 80 'flying? #t))
+           'enemy-units (list (hash 'id 911 'type 'drone 'x 160.0 'y 160.0 'hp 40)
+                              (hash 'id 912 'type 'drone 'x 161.0 'y 160.0 'hp 40))
+           'enemy-buildings (list (hash 'id 951 'type 'hatchery 'x 160.0 'y 160.0 'hp 1500)))
+     0))
+  (assert-true! (ormap (lambda (a)
+                         (match a
+                           [(list 'cast-spell 301 'stasis-ward _ _) #t]
+                           [_ #f]))
+                       oracle-harass-acts)
+                "Friendly Oracle near enemy mineral line with >= 50 energy must cast stasis-ward")
+  (assert-true! (ormap (lambda (a)
+                         (match a
+                           [(list 'cast-spell 301 'pulsar-beam _) #t]
+                           [_ #f]))
+                       oracle-harass-acts)
+                "Friendly Oracle within 5 tiles of enemy workers with >= 50 energy must activate pulsar-beam")
+
+  ;; 4b. Friendly Oracle expansion disruption at (enemy-expand-x, enemy-expand-y)
+  (define-values (oracle-exp-acts _ovc2 _orc2)
+    (step-layer3-and-4-tactics!
+     (make-live-bot-runtime #:race 'Protoss)
+     (hash 'frame 2600
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 56.0
+           'enemy-x 160.0 'enemy-y 160.0
+           'enemy-expand-x 142.0 'enemy-expand-y 136.0
+           'ally-units (list (hash 'id 302 'type 'oracle 'x 140.0 'y 135.0 'hp 100 'shield 60 'energy 75 'flying? #t))
+           'enemy-units '()
+           'enemy-buildings '())
+     0))
+  (assert-true! (member '(cast-spell 302 stasis-ward 142.0 136.0) oracle-exp-acts)
+                "Friendly Oracle near unbuilt enemy expansion must plant stasis-ward at (enemy-expand-x, enemy-expand-y)")
+
+  ;; 4c. Friendly Oracle defensive choke Stasis Ward at (nat-x, nat-y)
+  (define-values (oracle-def-acts _ovc3 _orc3)
+    (step-layer3-and-4-tactics!
+     (make-live-bot-runtime #:race 'Protoss)
+     (hash 'frame 2800
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 56.0
+           'enemy-x 160.0 'enemy-y 160.0
+           'enemy-expand-x 142.0 'enemy-expand-y 136.0
+           'ally-units (list (hash 'id 303 'type 'oracle 'x 48.0 'y 54.0 'hp 100 'shield 60 'energy 85 'flying? #t))
+           'enemy-units '()
+           'enemy-buildings '())
+     0))
+  (assert-true! (member '(cast-spell 303 stasis-ward 50.0 56.0) oracle-def-acts)
+                "Friendly Oracle near natural choke with >= 75 energy must plant defensive stasis-ward at (nat-x, nat-y)")
+
+  ;; 4d. Enemy oracle-stasis-trap near workers triggers evacuation + mineral-walk, and frozen workers
+  ;;     trigger stasis-worker-stoppage-compensation + replacement worker training while excluded from combat micro
+  (define anti-stasis-rt (make-live-bot-runtime #:race 'Zerg))
+  (define anti-stasis-econ-acts
+    (step-layer2-economy!
+     anti-stasis-rt
+     (hash 'frame 2800
+           'minerals 700
+           'gas 50
+           'supply-used 20
+           'supply-cap 36
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 56.0
+           'ally-buildings (list (hash 'id 201 'type 'hatchery 'x 32.0 'y 32.0 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 203 'type 'hatchery 'x 50.0 'y 56.0 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 202 'type 'spawning-pool 'x 35.0 'y 35.0 'hp 1000 'build-progress 1.0))
+           'ally-units (list (hash 'id 11 'type 'drone 'x 33.0 'y 33.0 'hp 40)
+                             (hash 'id 12 'type 'drone 'x 33.5 'y 33.5 'hp 40)
+                             (hash 'id 13 'type 'drone 'x 34.0 'y 34.0 'hp 40
+                                   'buffs '(oracle-stasis-trap-target))
+                             (hash 'id 14 'type 'drone 'x 34.5 'y 34.5 'hp 40
+                                   'buffs '(oracle-stasis-trap-target)))
+           'enemy-units (list (hash 'id 990 'type 'oracle-stasis-trap 'x 34.0 'y 33.0 'hp 30 'shield 30)))))
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (eq? (car a) 'evacuate-workers-from-stasis-ward)
+                              (equal? (second a) '(11 12))))
+                       anti-stasis-econ-acts)
+                "Unfrozen workers (11, 12) near enemy oracle-stasis-trap must evacuate via evacuate-workers-from-stasis-ward")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk) (= (second a) 11)))
+                       anti-stasis-econ-acts)
+                "Evacuating workers must mineral-walk away from stasis trap")
+  (assert-true! (member '(stasis-worker-stoppage-compensation 2) anti-stasis-econ-acts)
+                "2 stasis-frozen workers must emit (stasis-worker-stoppage-compensation 2)")
+  (assert-true! (member '(train drone) anti-stasis-econ-acts)
+                "Stasis-frozen worker stoppage must trigger replacement worker training")
+
+  ;; Verify stasis-frozen combat units are excluded from combat micro, ranged units snipe uncloaked/detected traps,
+  ;; and melee-only armies dispatch a single sacrificial unit via trigger-stasis-ward-single-unit
+  (define-values (ranged-snipe-acts _rvc _rrc)
+    (step-layer3-and-4-tactics!
+     (make-live-bot-runtime #:race 'Terran)
+     (hash 'frame 2500
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 56.0
+           'ally-units (list (hash 'id 401 'type 'marine 'x 48.0 'y 55.0 'hp 45 'ground-range 5.0)
+                             (hash 'id 402 'type 'marine 'x 49.0 'y 55.0 'hp 45 'ground-range 5.0
+                                   'buffs '(oracle-stasis-trap-target)))
+           'enemy-units (list (hash 'id 991 'type 'oracle-stasis-trap 'x 52.0 'y 56.0 'hp 30 'shield 30
+                                    'build-progress 0.5 'cloaked #f)))
+     0))
+  (assert-true! (member '(attack-unit 401 991) ranged-snipe-acts)
+                "Unfrozen ranged Marine 401 (range 5.0 >= 4.5) must snipe uncloaked enemy oracle-stasis-trap 991")
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a) (>= (length a) 2) (equal? (second a) 402)))
+                            ranged-snipe-acts))
+                "Stasis-frozen Marine 402 must be excluded from combat micro")
+
+  (define-values (melee-sac-acts _mvc _mrc)
+    (step-layer3-and-4-tactics!
+     (make-live-bot-runtime #:race 'Zerg)
+     (hash 'frame 2520
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 56.0
+           'ally-units (list (hash 'id 501 'type 'zergling 'x 49.0 'y 55.0 'hp 20 'ground-range 0.1)
+                             (hash 'id 502 'type 'zergling 'x 49.5 'y 55.5 'hp 35 'ground-range 0.1)
+                             (hash 'id 503 'type 'zergling 'x 50.0 'y 55.0 'hp 35 'ground-range 0.1))
+           'enemy-units (list (hash 'id 992 'type 'oracle-stasis-trap 'x 52.0 'y 56.0 'hp 30 'shield 30
+                                    'build-progress 1.0 'cloaked #t)))
+     0))
+  (assert-true! (member '(trigger-stasis-ward-single-unit 501 992 52 56) melee-sac-acts)
+                "Melee-only Zergling squad facing armed cloaked stasis trap must send lowest-HP Zergling 501 via trigger-stasis-ward-single-unit")
+  (assert-true! (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite) (= (second a) 502))) melee-sac-acts)
+                     (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite) (= (second a) 503))) melee-sac-acts))
+                "Other melee Zerglings (502, 503) must kite back outside stasis detonation radius")
+
+  ;; 5. Mineral Walking & Drone Drilling (worker-drill-stack-attack & counter-enemy-worker-drill)
+  (define cheese-drill-acts
+    (step-layer2-economy!
+     (make-live-bot-runtime #:race 'Zerg)
+     (hash 'frame 900
+           'minerals 150
+           'gas 0
+           'supply-used 14
+           'supply-cap 14
+           'base-x 32.0 'base-y 32.0
+           'natural-x 50.0 'natural-y 56.0
+           'mineral-patch-id 9001
+           'ally-buildings (list (hash 'id 201 'type 'hatchery 'x 32.0 'y 32.0 'hp 1500 'build-progress 1.0))
+           'ally-units (list (hash 'id 11 'type 'drone 'x 31.0 'y 31.0 'hp 40)
+                             (hash 'id 12 'type 'drone 'x 31.5 'y 31.5 'hp 40)
+                             (hash 'id 13 'type 'drone 'x 32.0 'y 31.0 'hp 40)
+                             (hash 'id 14 'type 'drone 'x 32.5 'y 31.5 'hp 40)
+                             (hash 'id 15 'type 'drone 'x 33.0 'y 31.0 'hp 40)
+                             (hash 'id 16 'type 'drone 'x 33.5 'y 31.5 'hp 40)
+                             (hash 'id 17 'type 'drone 'x 34.0 'y 31.0 'hp 40)
+                             (hash 'id 18 'type 'drone 'x 34.5 'y 31.5 'hp 40))
+           'enemy-units (list (hash 'id 801 'type 'zealot 'x 35.0 'y 35.0 'hp 100)
+                              (hash 'id 802 'type 'probe 'x 35.2 'y 35.0 'hp 20)
+                              (hash 'id 803 'type 'probe 'x 35.4 'y 35.2 'hp 20)
+                              (hash 'id 804 'type 'probe 'x 35.1 'y 35.3 'hp 20)
+                              (hash 'id 805 'type 'probe 'x 35.3 'y 35.1 'hp 20)))))
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (eq? (car a) 'worker-drill-stack-attack)
+                              (= (third a) 9001)))
+                       cheese-drill-acts)
+                "Early in-base cheese pull must emit (worker-drill-stack-attack pull-ids mineral-patch-id ...)")
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (eq? (car a) 'counter-enemy-worker-drill)
+                              (= (second a) 4)))
+                       cheese-drill-acts)
+                "Stacked enemy worker drill (4 enemy Probes within 1.8 tiles) must emit (counter-enemy-worker-drill 4 ...)")
+
+  ;; 6. Tactical Mirror Brain Attribute Multipliers (sim-unit-weapon-dps-vs)
+  (define sim-immortal (unit-hash->tactical-sim-unit (hash 'id 1 'type 'immortal 'x 50.0 'y 50.0 'hp 200 'shield 100) 'ally))
+  (define sim-roach    (unit-hash->tactical-sim-unit (hash 'id 2 'type 'roach    'x 52.0 'y 50.0 'hp 145) 'enemy))
+  (define sim-zealot   (unit-hash->tactical-sim-unit (hash 'id 3 'type 'zealot   'x 52.0 'y 50.0 'hp 100 'shield 50) 'enemy))
+  (define sim-colossus (unit-hash->tactical-sim-unit (hash 'id 4 'type 'colossus 'x 50.0 'y 50.0 'hp 200 'shield 150) 'ally))
+  (define sim-oracle   (unit-hash->tactical-sim-unit (hash 'id 5 'type 'oracle   'x 50.0 'y 50.0 'hp 100 'shield 60 'flying? #t) 'ally))
+  (define sim-marine   (unit-hash->tactical-sim-unit (hash 'id 6 'type 'marine   'x 52.0 'y 50.0 'hp 45) 'enemy))
+
+  (define imm-vs-roach  (sim-unit-weapon-dps-vs sim-immortal sim-roach))
+  (define imm-vs-zealot (sim-unit-weapon-dps-vs sim-immortal sim-zealot))
+  (assert-true! (< (abs (- (/ imm-vs-roach imm-vs-zealot) 1.45)) 1e-4)
+                "Immortal vs Armored Roach must apply 1.45x Anti-Armored multiplier compared to Light Zealot")
+
+  (define col-vs-marine (sim-unit-weapon-dps-vs sim-colossus sim-marine))
+  (define col-vs-roach  (sim-unit-weapon-dps-vs sim-colossus sim-roach))
+  (assert-true! (< (abs (- (/ col-vs-marine col-vs-roach) 1.55)) 1e-4)
+                "Colossus vs Light Marine must apply 1.55x Anti-Light multiplier compared to Armored Roach")
+
+  (define ora-vs-marine (sim-unit-weapon-dps-vs sim-oracle sim-marine))
+  (define ora-vs-roach  (sim-unit-weapon-dps-vs sim-oracle sim-roach))
+  (assert-true! (< (abs (- (/ ora-vs-marine ora-vs-roach) 1.55)) 1e-4)
+                "Oracle vs Light Marine must apply 1.55x Anti-Light multiplier compared to Armored Roach"))
+
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"
         total-assertions)
 (printf "============================================================================\n")
+
 

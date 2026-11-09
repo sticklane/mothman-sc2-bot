@@ -6,3 +6,6 @@ sc-bot/replays/
 sc-bot/ladder/.cache/
 sc-bot/LingLover
 !sc-bot/ladder/*.zip
+
+replays/corpus_checkpoints.sexp
+replays/*_mirror_perspective_audit.json

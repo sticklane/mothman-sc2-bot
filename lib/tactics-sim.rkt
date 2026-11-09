@@ -66,6 +66,7 @@
  (struct-out tactical-mirror-brain)
  make-tactical-mirror-brain
  unit-hash->tactical-sim-unit
+ sim-unit-weapon-dps-vs
  cluster-tactical-arenas
  simulate-mirrored-arena-pair
  evaluate-arena-minimax-and-regret!
@@ -1139,9 +1140,29 @@
      (reverse arenas)]))
 
 (define (sim-unit-weapon-dps-vs attacker target)
-  (if (tactical-sim-unit-flying? target)
-      (tactical-sim-unit-air-dps attacker)
-      (tactical-sim-unit-ground-dps attacker)))
+  (define base-dps
+    (if (tactical-sim-unit-flying? target)
+        (tactical-sim-unit-air-dps attacker)
+        (tactical-sim-unit-ground-dps attacker)))
+  (define atype (tactical-sim-unit-type attacker))
+  (define ttype (tactical-sim-unit-type target))
+  (define attr-mult
+    (cond
+      [(and (memq atype '(immortal marauder stalker siege-tank siege-tank-sieged
+                          lurker-mp-burrowed lurker lurker-burrowed void-ray
+                          corruptor viking ultralisk))
+            (memq ttype '(roach marauder stalker immortal siege-tank siege-tank-sieged
+                          thor ultralisk colossus lurker-mp-burrowed lurker lurker-burrowed
+                          viking void-ray corruptor battlecruiser carrier tempest)))
+       1.45]
+      [(and (memq atype '(baneling hellion hellbat colossus oracle archon
+                          adept reaper phoenix mutalisk))
+            (memq ttype '(zergling baneling hydralisk marine reaper hellion
+                          zealot adept high-templar dark-templar sentry
+                          drone scv probe mutalisk phoenix oracle)))
+       1.55]
+      [else 1.0]))
+  (* base-dps attr-mult))
 
 (define (sim-unit-weapon-range-vs attacker target)
   (if (tactical-sim-unit-flying? target)
@@ -1160,6 +1181,24 @@
                                          arena dt)
   (define ally-det? (tactical-arena-ally-has-detection? arena))
   (define enemy-det? (tactical-arena-enemy-has-detection? arena))
+  (define our-z (exact->inexact (tactical-arena-our-z arena)))
+  (define enemy-z (exact->inexact (tactical-arena-enemy-z arena)))
+  (define enemy-stasis-pts
+    (append
+     (for/list ([e (in-list sim-enemies)]
+                #:when (and (> (tactical-sim-unit-hp e) 0.0)
+                            (memq (tactical-sim-unit-type e) '(oracle-stasis-trap stasis-ward))))
+       (cons (tactical-sim-unit-x e) (tactical-sim-unit-y e)))
+     (for/list ([eb (in-list (tactical-arena-enemy-structures arena))]
+                #:when (and (hash? eb)
+                            (memq (hash-ref eb 'type #f) '(oracle-stasis-trap stasis-ward))))
+       (cons (exact->inexact (hash-ref eb 'x 999.0))
+             (exact->inexact (hash-ref eb 'y 999.0))))))
+  (define ally-worker-count
+    (count (lambda (a)
+             (and (> (tactical-sim-unit-hp a) 0.0)
+                  (memq (tactical-sim-unit-type a) '(scv probe drone))))
+           sim-allies))
 
   ;; Activate cloak on CloakHarassWorkers if unit can cloak and has energy >= 25
   (when (eq? our-action 'CloakHarassWorkers)
@@ -1175,8 +1214,29 @@
     (when (> (tactical-sim-unit-weapon-cooldown u) 0.0)
       (set-tactical-sim-unit-weapon-cooldown! u (max 0.0 (- (tactical-sim-unit-weapon-cooldown u) dt)))))
 
+  ;; Oracle Stasis Ward hazard penalty: penalize CommitFocusFire / KiteForwardChase when an enemy
+  ;; stasis trap is within 4.5 tiles of friendly short-range units, rewarding StutterKiteBack / FlankSurround
+  (when (not (null? enemy-stasis-pts))
+    (for ([a (in-list sim-allies)]
+          #:when (and (> (tactical-sim-unit-hp a) 0.0)
+                      (not (tactical-sim-unit-flying? a))
+                      (<= (tactical-sim-unit-ground-range a) 4.5)))
+      (define ax (tactical-sim-unit-x a))
+      (define ay (tactical-sim-unit-y a))
+      (define near-trap?
+        (ormap (lambda (pt)
+                 (<= (dist2d-pts ax ay (car pt) (cdr pt)) 4.5))
+               enemy-stasis-pts))
+      (when (and near-trap? (memq our-action '(CommitFocusFire KiteForwardChase HoldChoke)))
+        (set-tactical-sim-unit-hp! a (max 1.0 (- (tactical-sim-unit-hp a) (* 18.0 dt)))))))
+
   ;; Step movement & weapon fire for one side against the other
-  (define (step-side! actors opponents action opp-det?)
+  (define (step-side! actors opponents action opp-det? side-z opp-z ally-side?)
+    (define elev-mult
+      (cond
+        [(> side-z (+ opp-z 0.5)) 1.15]
+        [(< side-z (- opp-z 0.5)) 0.85]
+        [else 1.0]))
     (define alive-opps
       (filter (lambda (o)
                 (and (> (tactical-sim-unit-hp o) 0.0)
@@ -1225,12 +1285,20 @@
       (define dist (max 0.25 (sqrt (+ (* dx dx) (* dy dy)))))
       (define nx (/ dx dist))
       (define ny (/ dy dist))
-      (define wrange (+ (sim-unit-weapon-range-vs u target)
-                        (tactical-sim-unit-radius u)
-                        (tactical-sim-unit-radius target)))
+      (define wrange (* elev-mult
+                        (+ (sim-unit-weapon-range-vs u target)
+                           (tactical-sim-unit-radius u)
+                           (tactical-sim-unit-radius target))))
       (define spd (tactical-sim-unit-speed u))
       (define cd (tactical-sim-unit-weapon-cooldown u))
       (define can-hit? (sim-unit-can-target? u target opp-det?))
+      (define drill-mult
+        (if (and ally-side?
+                 (>= ally-worker-count 3)
+                 (memq (tactical-sim-unit-type u) '(scv probe drone))
+                 (<= dist 4.0))
+            1.35
+            1.0))
 
       (cond
         ;; Pure retreat: 100% movement away from threat, no stopping to fire
@@ -1241,7 +1309,9 @@
         ;; Weapon ready & in range: fire volley!
         [(and can-hit? (<= dist wrange) (<= cd 0.0))
          (define burst-dmg
-           (* (sim-unit-weapon-dps-vs u target)
+           (* elev-mult
+              drill-mult
+              (sim-unit-weapon-dps-vs u target)
               (tactical-sim-unit-weapon-period u)))
          (define eff-dmg (max 1.0 (- burst-dmg (tactical-sim-unit-armor target))))
          (define shd (tactical-sim-unit-shield target))
@@ -1288,8 +1358,8 @@
          (set-tactical-sim-unit-x! u (+ ux (* spd dt nx)))
          (set-tactical-sim-unit-y! u (+ uy (* spd dt ny)))])))
 
-  (step-side! sim-allies sim-enemies our-action enemy-det?)
-  (step-side! sim-enemies sim-allies enemy-action ally-det?))
+  (step-side! sim-allies sim-enemies our-action enemy-det? our-z enemy-z #t)
+  (step-side! sim-enemies sim-allies enemy-action ally-det? enemy-z our-z #f))
 
 (define (evaluate-arena-horizon-state depth-sec init-allies init-enemies sim-allies sim-enemies)
   (define init-ally-cost (for/sum ([a (in-list init-allies)]) (tactical-sim-unit-cost a)))

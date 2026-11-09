@@ -644,7 +644,9 @@
    'carrier           (hasheq 'max-hp 300 'max-shield 150 'armor 2 'speed 2.62 'ground-dps 37.5 'air-dps 37.5 'ground-range 8.0  'air-range 8.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
    'interceptor       (hasheq 'max-hp 40  'max-shield 40  'armor 0 'speed 10.5 'ground-dps 5.0  'air-dps 5.0  'ground-range 2.0  'air-range 2.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.25)
    'tempest           (hasheq 'max-hp 200 'max-shield 100 'armor 2 'speed 3.15 'ground-dps 16.8 'air-dps 14.3 'ground-range 10.0 'air-range 14.0 'weapon-period 2.36  'damage-point 0.15 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
-   'photon-cannon     (hasheq 'max-hp 150 'max-shield 150 'armor 1 'speed 0.0  'ground-dps 22.4 'air-dps 22.4 'ground-range 7.0  'air-range 7.0  'weapon-period 0.89  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)))
+   'photon-cannon     (hasheq 'max-hp 150 'max-shield 150 'armor 1 'speed 0.0  'ground-dps 22.4 'air-dps 22.4 'ground-range 7.0  'air-range 7.0  'weapon-period 0.89  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)
+   'oracle-stasis-trap (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)
+   'stasis-ward       (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)))
 
 (define (sc2-unit-combat-stats sym)
   (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym

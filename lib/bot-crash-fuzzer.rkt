@@ -221,6 +221,14 @@
     mirror-tech-observation
     mirror-zero-sum-exclusion
     mirror-spatial-maneuver
+    mirror-bo-tree-prediction
+    mirror-horizon-curve
+    worker-drill-stack-attack
+    counter-enemy-worker-drill
+    evacuate-workers-from-stasis-ward
+    trigger-stasis-ward-single-unit
+    stasis-worker-stoppage-compensation
+    return-workers-to-gather
     chat
     log
     noop))

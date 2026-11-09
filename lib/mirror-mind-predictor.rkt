@@ -50,8 +50,24 @@
          (struct-out mirror-forecast)
          (struct-out diagnostic-probe)
          (struct-out mirror-toolbox-allocation)
+         (struct-out build-order-tree-node)
+         (struct-out build-order-tree-projection)
+         (struct-out bayesian-strategic-priors)
+         (struct-out horizon-snapshot-forecast)
          (struct-out mirror-mind-state)
+         MIRROR-HORIZON-SNAPSHOTS-SEC
+         MIRROR-HORIZON-SNAPSHOTS-FRAMES
          make-mirror-mind-state
+         lookup-race-build-order-tree
+         project-player-onto-build-order-tree
+         project-self-build-order-tree
+         project-opponent-build-order-tree
+         compute-bayesian-bluff-posterior
+         compute-bayesian-strategic-posteriors
+         horizon-sec->optimal-cognitive-depth
+         horizon-sec->calibrated-certainty
+         predict-multi-horizon-snapshots
+         evaluate-multi-horizon-prediction-curve
          unit-resource-cost
          unit-to-archetype
          enemy-unit-hallucination?
@@ -378,6 +394,66 @@
    toolbox-role              ; 'survival-fundamentals-only | 'snowball-watchtower-only | 'depth1-direct-counter-only | 'marginal-toolbox-hedge
    allow-unit-hedge?         ; boolean: #t only when toolbox-weight >= 0.12
    allow-posture-override?)  ; boolean: ALWAYS #f (depth never overrides SC2 macro/snowball posture)
+  #:transparent)
+
+;; Canonical Build-Order Tree Node in T_R (shared structural space for self and opponent)
+(struct build-order-tree-node
+  (id
+   race
+   parent-id
+   children-ids
+   path-buildings
+   step-buildings
+   unlocked-units
+   unlocked-upgrades
+   archetype
+   min-frame
+   min-gas-bldgs
+   step-min-cost
+   step-gas-cost
+   step-build-frames
+   prior-weight)
+  #:transparent)
+
+;; Projection of a player (self or opponent) onto the Race Build-Order Tree Space T_R
+(struct build-order-tree-projection
+  (perspective
+   race
+   active-node-id
+   branch-posteriors
+   reachable-branch-ids
+   immediately-producible-units
+   horizon-reachable-units
+   horizon-reachable-tech-buildings
+   predicted-primary-unit
+   recommended-next-build-step)
+  #:transparent)
+
+;; Bayesian Strategic Priors & Posteriors (replacing hard boolean bluff flags)
+(struct bayesian-strategic-priors
+  (bluff-prior
+   bluff-posterior
+   feint-posterior
+   rush-posterior
+   hidden-expand-posterior
+   tech-switch-posterior
+   branch-posteriors)
+  #:transparent)
+
+;; Multi-Horizon Future Snapshot Forecast (15s / 30s / 45s / 60s / 75s / 90s / 105s / 130s)
+(define MIRROR-HORIZON-SNAPSHOTS-SEC '(15 30 45 60 75 90 105 130))
+(define MIRROR-HORIZON-SNAPSHOTS-FRAMES '(336 672 1008 1344 1680 2016 2352 2912))
+
+(struct horizon-snapshot-forecast
+  (horizon-sec
+   horizon-frames
+   optimal-depth
+   certainty-level
+   predicted-enemy-unit
+   predicted-enemy-archetype
+   our-counter-unit
+   reachable-units
+   dominant-branch-id)
   #:transparent)
 
 (struct mirror-mind-state
@@ -1318,7 +1394,982 @@
                           crippled-bldgs))
 
 ;; =============================================================================
-;; 2c. Zero-Sum Opportunity-Cost / Negative Exclusion & Bluff Detector
+;; 2c. Build-Order Tree Space (T_R) for Self & Opponent + Bayesian Priors
+;; =============================================================================
+
+(define ZERG-BUILD-ORDER-TREE
+  (list
+   (build-order-tree-node
+    'zerg-root-hatchery 'Zerg #f
+    '(zerg-spawning-pool zerg-hatch-first-pool)
+    '(hatchery) '(hatchery)
+    '(drone overlord zergling) '()
+    'early-rush 0 0 300 0 0 0.08)
+   (build-order-tree-node
+    'zerg-spawning-pool 'Zerg 'zerg-root-hatchery
+    '(zerg-hatch-first-pool zerg-baneling-nest zerg-roach-warren)
+    '(hatchery spawning-pool) '(spawning-pool)
+    '(zergling queen) '(zergling-movementspeed)
+    'early-rush 400 0 200 0 720 0.16)
+   (build-order-tree-node
+    'zerg-hatch-first-pool 'Zerg 'zerg-spawning-pool
+    '(zerg-baneling-nest zerg-roach-warren zerg-lair-tech)
+    '(hatchery spawning-pool extractor) '(hatchery extractor)
+    '(zergling queen) '(zergling-movementspeed burrow)
+    'ling-bane-hydra 750 1 325 0 960 0.18)
+   (build-order-tree-node
+    'zerg-baneling-nest 'Zerg 'zerg-spawning-pool
+    '(zerg-lair-tech)
+    '(hatchery spawning-pool extractor baneling-nest) '(baneling-nest)
+    '(baneling zergling queen) '(zergling-movementspeed centrifical-hooks)
+    'ling-bane-hydra 1350 1 100 50 672 0.14)
+   (build-order-tree-node
+    'zerg-roach-warren 'Zerg 'zerg-spawning-pool
+    '(zerg-lair-tech)
+    '(hatchery spawning-pool extractor roach-warren) '(roach-warren)
+    '(roach ravager zergling queen) '(glial-reconstitution burrow)
+    'roach-ravager 1400 1 150 0 605 0.20)
+   (build-order-tree-node
+    'zerg-lair-tech 'Zerg 'zerg-roach-warren
+    '(zerg-hydralisk-den zerg-spire-muta zerg-infestation-pit)
+    '(hatchery spawning-pool extractor roach-warren lair) '(lair)
+    '(overseer roach ravager zergling queen) '(glial-reconstitution pneumatized-carapace)
+    'roach-ravager 2400 2 150 100 896 0.16)
+   (build-order-tree-node
+    'zerg-hydralisk-den 'Zerg 'zerg-lair-tech
+    '(zerg-lurker-den zerg-hive-tech)
+    '(hatchery spawning-pool extractor lair hydralisk-den) '(hydralisk-den)
+    '(hydralisk roach ravager zergling) '(grooved-spines muscular-augments)
+    'ling-bane-hydra 3200 2 100 100 650 0.16)
+   (build-order-tree-node
+    'zerg-spire-muta 'Zerg 'zerg-lair-tech
+    '(zerg-hive-tech zerg-greater-spire-broodlord)
+    '(hatchery spawning-pool extractor lair spire) '(spire)
+    '(mutalisk corruptor zergling baneling) '(zerg-flyer-weapons-1 zerg-flyer-armor-1)
+    'muta-flock 3300 2 200 200 960 0.12)
+   (build-order-tree-node
+    'zerg-lurker-den 'Zerg 'zerg-hydralisk-den
+    '(zerg-hive-tech)
+    '(hatchery spawning-pool extractor lair hydralisk-den lurker-den) '(lurker-den)
+    '(lurker hydralisk roach ravager) '(adaptive-talons seismic-spines)
+    'ling-bane-hydra 4200 3 100 150 896 0.10)
+   (build-order-tree-node
+    'zerg-infestation-pit 'Zerg 'zerg-lair-tech
+    '(zerg-hive-tech)
+    '(hatchery spawning-pool extractor lair infestation-pit) '(infestation-pit)
+    '(infestor swarm-host roach hydralisk) '(pathogen-glands neural-parasite)
+    'ling-bane-hydra 4100 3 100 100 806 0.07)
+   (build-order-tree-node
+    'zerg-hive-tech 'Zerg 'zerg-infestation-pit
+    '(zerg-ultralisk-cavern zerg-greater-spire-broodlord)
+    '(hatchery spawning-pool extractor lair infestation-pit hive) '(hive)
+    '(viper hydralisk lurker infestor) '(adrenal-glands zerg-melee-weapons-3)
+    'ling-bane-hydra 5400 4 200 150 960 0.06)
+   (build-order-tree-node
+    'zerg-ultralisk-cavern 'Zerg 'zerg-hive-tech
+    '()
+    '(hatchery spawning-pool extractor lair infestation-pit hive ultralisk-cavern) '(ultralisk-cavern)
+    '(ultralisk zergling baneling corruptor viper) '(chitinous-plating anabolic-synthesis)
+    'ling-bane-hydra 6200 4 150 200 896 0.05)
+   (build-order-tree-node
+    'zerg-greater-spire-broodlord 'Zerg 'zerg-hive-tech
+    '()
+    '(hatchery spawning-pool extractor lair infestation-pit hive spire greater-spire) '(greater-spire)
+    '(brood-lord corruptor mutalisk viper) '(zerg-flyer-weapons-3)
+    'muta-flock 6400 4 100 150 960 0.05)))
+
+(define TERRAN-BUILD-ORDER-TREE
+  (list
+   (build-order-tree-node
+    'terran-root-cc 'Terran #f
+    '(terran-barracks-open)
+    '(command-center supply-depot) '(command-center supply-depot)
+    '(scv marine) '()
+    'early-rush 0 0 500 0 0 0.08)
+   (build-order-tree-node
+    'terran-barracks-open 'Terran 'terran-root-cc
+    '(terran-reaper-expand terran-bio-techlab-stim terran-factory-tech)
+    '(command-center supply-depot barracks refinery) '(barracks refinery)
+    '(marine reaper) '()
+    'bio-ball 480 1 225 0 720 0.18)
+   (build-order-tree-node
+    'terran-reaper-expand 'Terran 'terran-barracks-open
+    '(terran-bio-techlab-stim terran-factory-tech)
+    '(command-center orbital-command supply-depot barracks barracks-reactor refinery) '(orbital-command barracks-reactor)
+    '(marine reaper) '()
+    'bio-ball 1050 1 200 50 672 0.18)
+   (build-order-tree-node
+    'terran-bio-techlab-stim 'Terran 'terran-barracks-open
+    '(terran-factory-tech terran-starport-medivac-bio)
+    '(command-center orbital-command supply-depot barracks barracks-techlab refinery engineering-bay) '(barracks-techlab engineering-bay)
+    '(marauder marine) '(stimpack combat-shield concussive-shells)
+    'bio-ball 1500 1 175 25 650 0.22)
+   (build-order-tree-node
+    'terran-factory-tech 'Terran 'terran-barracks-open
+    '(terran-factory-siege-tank terran-starport-medivac-bio terran-starport-cloak-banshee)
+    '(command-center orbital-command supply-depot barracks factory refinery) '(factory)
+    '(hellion widow-mine marine) '(drilling-claws infernal-pre-igniter)
+    'mech-siege 1800 1 150 100 720 0.16)
+   (build-order-tree-node
+    'terran-factory-siege-tank 'Terran 'terran-factory-tech
+    '(terran-armory-heavy-mech terran-starport-medivac-bio terran-starport-viking-liberator)
+    '(command-center orbital-command supply-depot barracks factory factory-techlab refinery) '(factory-techlab)
+    '(siege-tank cyclone hellion marine marauder) '(siege-mode)
+    'mech-siege 2350 2 50 25 403 0.18)
+   (build-order-tree-node
+    'terran-starport-medivac-bio 'Terran 'terran-factory-tech
+    '(terran-starport-viking-liberator terran-ghost-academy-late)
+    '(command-center orbital-command supply-depot barracks barracks-techlab factory starport refinery) '(starport)
+    '(medivac marauder marine siege-tank widow-mine) '(stimpack combat-shield)
+    'bio-ball 2650 2 150 100 672 0.18)
+   (build-order-tree-node
+    'terran-starport-cloak-banshee 'Terran 'terran-factory-tech
+    '(terran-fusion-battlecruiser terran-starport-viking-liberator)
+    '(command-center orbital-command supply-depot barracks factory starport starport-techlab refinery) '(starport starport-techlab)
+    '(banshee raven viking hellion) '(cloaking-field)
+    'sky-toss 2750 2 200 125 784 0.10)
+   (build-order-tree-node
+    'terran-starport-viking-liberator 'Terran 'terran-starport-medivac-bio
+    '(terran-fusion-battlecruiser terran-armory-heavy-mech)
+    '(command-center orbital-command supply-depot barracks factory starport refinery) '(starport)
+    '(viking liberator medivac siege-tank marauder) '(advanced-ballistics)
+    'sky-toss 3400 2 150 100 672 0.10)
+   (build-order-tree-node
+    'terran-armory-heavy-mech 'Terran 'terran-factory-siege-tank
+    '(terran-fusion-battlecruiser)
+    '(command-center orbital-command supply-depot barracks factory factory-techlab armory refinery) '(armory)
+    '(thor siege-tank hellbat cyclone) '(terran-vehicle-weapons-1 terran-vehicle-and-ship-plating-1)
+    'mech-siege 3600 3 150 100 806 0.10)
+   (build-order-tree-node
+    'terran-ghost-academy-late 'Terran 'terran-starport-medivac-bio
+    '()
+    '(command-center orbital-command supply-depot barracks barracks-techlab factory starport ghost-academy refinery) '(ghost-academy)
+    '(ghost marauder marine medivac liberator) '(personal-cloaking)
+    'bio-ball 4400 3 150 50 650 0.06)
+   (build-order-tree-node
+    'terran-fusion-battlecruiser 'Terran 'terran-starport-cloak-banshee
+    '()
+    '(command-center orbital-command supply-depot barracks factory starport starport-techlab fusion-core refinery) '(fusion-core)
+    '(battlecruiser viking liberator siege-tank) '(weapon-refit)
+    'sky-toss 4600 3 150 150 896 0.06)))
+
+(define PROTOSS-BUILD-ORDER-TREE
+  (list
+   (build-order-tree-node
+    'protoss-root-nexus 'Protoss #f
+    '(protoss-gateway-open)
+    '(nexus pylon) '(nexus pylon)
+    '(probe zealot) '()
+    'early-rush 0 0 500 0 0 0.08)
+   (build-order-tree-node
+    'protoss-gateway-open 'Protoss 'protoss-root-nexus
+    '(protoss-cybernetics-core)
+    '(nexus pylon gateway assimilator) '(gateway assimilator)
+    '(zealot) '()
+    'early-rush 480 1 225 0 720 0.15)
+   (build-order-tree-node
+    'protoss-cybernetics-core 'Protoss 'protoss-gateway-open
+    '(protoss-twilight-council protoss-robotics-facility protoss-stargate-air)
+    '(nexus pylon gateway cybernetics-core assimilator) '(cybernetics-core)
+    '(stalker adept sentry zealot) '(warp-gate-research)
+    'stalker-colossus 1050 1 150 0 672 0.22)
+   (build-order-tree-node
+    'protoss-twilight-council 'Protoss 'protoss-cybernetics-core
+    '(protoss-templar-archive-archon protoss-dark-shrine-dt protoss-robotics-facility)
+    '(nexus pylon gateway cybernetics-core twilight-council assimilator) '(twilight-council)
+    '(stalker adept zealot sentry) '(blink charge resonating-glaives)
+    'stalker-colossus 2000 2 150 100 672 0.16)
+   (build-order-tree-node
+    'protoss-robotics-facility 'Protoss 'protoss-cybernetics-core
+    '(protoss-robotics-bay-colossus protoss-twilight-council)
+    '(nexus pylon gateway cybernetics-core robotics-facility assimilator) '(robotics-facility)
+    '(immortal observer warp-prism stalker zealot) '(gravitic-boosters)
+    'stalker-colossus 2000 2 150 100 720 0.18)
+   (build-order-tree-node
+    'protoss-stargate-air 'Protoss 'protoss-cybernetics-core
+    '(protoss-fleet-beacon-carrier protoss-robotics-facility)
+    '(nexus pylon gateway cybernetics-core stargate assimilator) '(stargate)
+    '(void-ray oracle phoenix stalker adept) '(protoss-air-weapons-1)
+    'sky-toss 2000 2 150 150 750 0.14)
+   (build-order-tree-node
+    'protoss-templar-archive-archon 'Protoss 'protoss-twilight-council
+    '(protoss-robotics-bay-colossus)
+    '(nexus pylon gateway cybernetics-core twilight-council templar-archive assimilator) '(templar-archive)
+    '(archon high-templar zealot stalker immortal) '(psi-storm-tech charge)
+    'stalker-colossus 3200 3 150 200 672 0.12)
+   (build-order-tree-node
+    'protoss-dark-shrine-dt 'Protoss 'protoss-twilight-council
+    '(protoss-templar-archive-archon)
+    '(nexus pylon gateway cybernetics-core twilight-council dark-shrine assimilator) '(dark-shrine)
+    '(dark-templar archon stalker zealot) '(shadow-stride)
+    'stalker-colossus 3100 2 150 150 896 0.07)
+   (build-order-tree-node
+    'protoss-robotics-bay-colossus 'Protoss 'protoss-robotics-facility
+    '(protoss-templar-archive-archon)
+    '(nexus pylon gateway cybernetics-core robotics-facility robotics-bay assimilator) '(robotics-bay)
+    '(colossus disruptor immortal stalker sentry) '(extended-thermal-lance)
+    'stalker-colossus 3300 3 150 150 784 0.14)
+   (build-order-tree-node
+    'protoss-fleet-beacon-carrier 'Protoss 'protoss-stargate-air
+    '()
+    '(nexus pylon gateway cybernetics-core stargate fleet-beacon assimilator) '(fleet-beacon)
+    '(carrier tempest void-ray oracle mothership) '(anion-pulse-crystals)
+    'sky-toss 4300 3 300 200 840 0.08)))
+
+(define (normalize-race-sym r)
+  (case r
+    [(Zerg zerg)       'Zerg]
+    [(Terran terran)   'Terran]
+    [(Protoss protoss) 'Protoss]
+    [else              'Zerg]))
+
+(define (lookup-race-build-order-tree race-sym)
+  (case (normalize-race-sym race-sym)
+    [(Zerg)    ZERG-BUILD-ORDER-TREE]
+    [(Terran)  TERRAN-BUILD-ORDER-TREE]
+    [(Protoss) PROTOSS-BUILD-ORDER-TREE]
+    [else      ZERG-BUILD-ORDER-TREE]))
+
+(define (extract-clean-unit-syms raw-units)
+  (cond
+    [(not (list? raw-units)) '()]
+    [else
+     (for/fold ([acc '()])
+               ([u (in-list raw-units)])
+       (cond
+         [(symbol? u) (cons u acc)]
+         [(and (hash? u)
+               (not (enemy-unit-hallucination? u))
+               (not (enemy-unit-changeling? u)))
+          (cons (unit-type-sym u) acc)]
+         [else acc]))]))
+
+(define (extract-clean-bldg-syms raw-bldgs)
+  (cond
+    [(not (list? raw-bldgs)) '()]
+    [else
+     (for/fold ([acc '()])
+               ([b (in-list raw-bldgs)])
+       (cond
+         [(symbol? b) (cons b acc)]
+         [(and (hash? b)
+               (not (hash-ref b 'canceled? #f))
+               (not (hash-ref b 'canceled #f)))
+          (define btype (unit-type-sym b))
+          (define norm-b
+            (case btype
+              [(warp-gate warpgate)     'gateway]
+              [(barracks-tech-lab)      'barracks-techlab]
+              [(factory-tech-lab)       'factory-techlab]
+              [(starport-tech-lab)      'starport-techlab]
+              [(templar-archives)       'templar-archive]
+              [(lurker-den-mp)          'lurker-den]
+              [(robotics-support-bay)   'robotics-bay]
+              [else                     btype]))
+          (cons norm-b acc)]
+         [else acc]))]))
+
+;; Project any player ('self or 'opponent) onto the Race Build-Order Tree Space T_R
+;; and compute a normalized Dirichlet-multinomial / Bayesian posterior over branches.
+(define (project-player-onto-build-order-tree
+         perspective
+         race
+         raw-units
+         raw-buildings
+         [raw-frame 1800]
+         [raw-minerals 300.0]
+         [raw-gas 150.0]
+         [raw-gas-bldgs 1]
+         [raw-horizon-sec 60.0]
+         [raw-upgrades-or-spells '()]
+         #:horizon-sec [kw-horizon-sec #f]
+         #:observed-upgrades [kw-upgrades '()]
+         #:crippled-buildings [crippled-buildings '()]
+         #:excluded-buildings [excluded-buildings '()])
+  (define norm-race (normalize-race-sym race))
+  (define tree (lookup-race-build-order-tree norm-race))
+  (define node-by-id
+    (for/hash ([n (in-list tree)])
+      (values (build-order-tree-node-id n) n)))
+  (define frame (safe-frame raw-frame))
+  (define minerals (max 0.0 (safe-real raw-minerals 300.0)))
+  (define gas (max 0.0 (safe-real raw-gas 150.0)))
+  (define horizon-sec (max 5.0 (safe-real (or kw-horizon-sec raw-horizon-sec) 60.0)))
+  (define horizon-frames (exact-round (* 22.4 horizon-sec)))
+
+  (define unit-syms (extract-clean-unit-syms raw-units))
+  (define direct-bldg-syms (extract-clean-bldg-syms raw-buildings))
+  (define upg-syms
+    (remove-duplicates
+     (append (filter symbol? (safe-list raw-upgrades-or-spells))
+             (filter symbol? (safe-list kw-upgrades)))))
+  (define implied-from-units-and-bldgs
+    (remove-duplicates
+     (apply append
+            (map implied-prereqs-for-sym
+                 (append unit-syms direct-bldg-syms)))))
+  (define known-bldgs
+    (filter (lambda (b) (not (memq b crippled-buildings)))
+            (remove-duplicates (append direct-bldg-syms implied-from-units-and-bldgs))))
+  (define gas-bldg-count
+    (max (safe-int raw-gas-bldgs 0)
+         (count (lambda (b) (memq b '(extractor refinery assimilator))) direct-bldg-syms)
+         (if (ormap (lambda (b) (memq b '(extractor refinery assimilator))) known-bldgs) 1 0)))
+
+  ;; Identify confirmed nodes (whose step-buildings are present in known-bldgs or signature unit is seen)
+  (define confirmed-node-ids
+    (for/list ([n (in-list tree)]
+               #:when (let* ([sbldgs (build-order-tree-node-step-buildings n)]
+                             [u-units (build-order-tree-node-unlocked-units n)]
+                             [sig-u (if (null? u-units) #f (first u-units))]
+                             [bldg-confirmed?
+                              (and (not (null? sbldgs))
+                                   (andmap (lambda (b) (memq b known-bldgs)) sbldgs))]
+                             [unit-confirmed?
+                              (and sig-u
+                                   (not (memq sig-u '(drone scv probe overlord zergling marine zealot)))
+                                   (memq sig-u unit-syms)
+                                   (not (ormap (lambda (b) (memq b crippled-buildings)) sbldgs)))])
+                        (or bldg-confirmed? unit-confirmed?)))
+      (build-order-tree-node-id n)))
+
+  ;; Compute Dirichlet-multinomial / Bayesian unnormalized posterior weight for each node in T_R
+  (define raw-weights (make-hash))
+  (for ([n (in-list tree)])
+    (define nid (build-order-tree-node-id n))
+    (define parent-id (build-order-tree-node-parent-id n))
+    (define pbldgs (build-order-tree-node-path-buildings n))
+    (define sbldgs (build-order-tree-node-step-buildings n))
+    (define u-units (build-order-tree-node-unlocked-units n))
+    (define u-upgs (build-order-tree-node-unlocked-upgrades n))
+    (define prior-w (max 0.01 (safe-real (build-order-tree-node-prior-weight n) 0.10)))
+    (define tree-tier (max 0 (sub1 (length pbldgs))))
+
+    (define step-confirmed? (not (not (memq nid confirmed-node-ids))))
+    (define parent-confirmed?
+      (or (not parent-id)
+          (not (not (memq parent-id confirmed-node-ids)))))
+    (define frontier-confirmed?
+      (and step-confirmed?
+           (not (ormap (lambda (ch-id) (memq ch-id confirmed-node-ids))
+                       (build-order-tree-node-children-ids n)))))
+    (define path-match-count
+      (count (lambda (b) (memq b known-bldgs)) pbldgs))
+    (define path-ratio
+      (/ (exact->inexact path-match-count) (max 1.0 (exact->inexact (length pbldgs)))))
+
+    (define parent-node (and parent-id (hash-ref node-by-id parent-id #f)))
+    (define parent-units (if parent-node (build-order-tree-node-unlocked-units parent-node) '()))
+    (define node-specific-units
+      (let ([diff (filter (lambda (u) (not (memq u parent-units))) u-units)])
+        (if (null? diff) u-units diff)))
+    (define sig-unit-seen?
+      (not (not (ormap (lambda (su) (memq su unit-syms)) node-specific-units))))
+    (define matching-units-count
+      (count (lambda (u) (memq u unit-syms)) u-units))
+    (define matching-upgs-count
+      (count (lambda (u) (memq u upg-syms)) u-upgs))
+
+    (define crippled-or-excluded?
+      (ormap (lambda (b)
+               (or (memq b crippled-buildings)
+                   (memq b excluded-buildings)))
+             sbldgs))
+
+    ;; Likelihood factors
+    (define bldg-lr
+      (cond
+        [crippled-or-excluded? 0.02]
+        [step-confirmed?
+         (* 5.5
+            (if frontier-confirmed? 2.6 1.0)
+            (expt 1.85 (min 4 tree-tier))
+            (+ 0.5 path-ratio))]
+        [parent-confirmed?
+         (* 1.4 (+ 0.4 path-ratio))]
+        [else
+         (* 0.35 (+ 0.2 path-ratio))]))
+
+    (define unit-upg-lr
+      (* (if sig-unit-seen? 5.0 1.0)
+         (+ 1.0 (* 0.55 matching-units-count) (* 1.25 matching-upgs-count))))
+
+    (define timing-gas-lr
+      (cond
+        [step-confirmed? 1.0]
+        [else
+         (define frame-gap (max 0 (- (build-order-tree-node-min-frame n) frame)))
+         (define time-factor
+           (if (> frame-gap (+ horizon-frames 450))
+               (exp (/ (- (exact->inexact frame-gap)) 1200.0))
+               1.0))
+         (define s-gas (build-order-tree-node-step-gas-cost n))
+         (define gas-factor
+           (cond
+             [(and (>= s-gas 100) (>= gas 200.0) parent-confirmed?) 2.2]
+             [(and (> s-gas 0) (= gas-bldg-count 0) (< gas 50.0))   0.18]
+             [(>= (+ gas (* horizon-sec 1.6 (max 1 gas-bldg-count))) s-gas) 1.15]
+             [else 0.45]))
+         (* time-factor gas-factor)]))
+
+    (hash-set! raw-weights nid (max 1e-6 (* prior-w bldg-lr unit-upg-lr timing-gas-lr))))
+
+  (define total-w
+    (max 1e-6 (for/sum ([(_k v) (in-hash raw-weights)]) v)))
+  (define branch-posteriors
+    (for/hash ([(k v) (in-hash raw-weights)])
+      (values k (exact->inexact (/ v total-w)))))
+
+  ;; Select active-node-id: highest-posterior confirmed node (or root / highest-posterior node if none confirmed)
+  (define root-id (build-order-tree-node-id (first tree)))
+  (define-values (active-node-id _best-active-p)
+    (let ([candidates (if (null? confirmed-node-ids)
+                          (map build-order-tree-node-id tree)
+                          confirmed-node-ids)])
+      (for/fold ([best-id root-id]
+                 [best-p -1.0])
+                ([cid (in-list candidates)])
+        (define p (hash-ref branch-posteriors cid 0.0))
+        (if (> p best-p)
+            (values cid p)
+            (values best-id best-p)))))
+  (define active-node (hash-ref node-by-id active-node-id (first tree)))
+
+  ;; Immediately producible units (0-hop: unlocked on confirmed nodes and active node)
+  (define confirmed-Plus-Active
+    (remove-duplicates (cons active-node-id confirmed-node-ids)))
+  (define immediately-producible-units
+    (remove-duplicates
+     (append
+      (build-order-tree-node-unlocked-units active-node)
+      (apply append
+             (for/list ([cid (in-list confirmed-Plus-Active)])
+               (define cn (hash-ref node-by-id cid #f))
+               (if cn (build-order-tree-node-unlocked-units cn) '()))))))
+
+  ;; Horizon-reachable branches in T_R given horizon-sec (0-hop at 15s, 1-hop at 30-60s, 2-hop at 75-130s)
+  (define hop-1-ids
+    (remove-duplicates
+     (apply append
+            (for/list ([cid (in-list confirmed-Plus-Active)])
+              (define cn (hash-ref node-by-id cid #f))
+              (if cn (build-order-tree-node-children-ids cn) '())))))
+  (define feasible-hop-1-ids
+    (filter (lambda (hid)
+              (define hn (hash-ref node-by-id hid #f))
+              (and hn
+                   (not (ormap (lambda (b)
+                                 (or (memq b crippled-buildings)
+                                     (memq b excluded-buildings)))
+                               (build-order-tree-node-step-buildings hn)))
+                   (<= (build-order-tree-node-step-build-frames hn) (+ horizon-frames 260))
+                   (<= (build-order-tree-node-step-gas-cost hn)
+                       (+ gas (* horizon-sec 2.0 (max 1 gas-bldg-count)) 50.0))))
+            hop-1-ids))
+  (define hop-2-ids
+    (if (> horizon-sec 65.0)
+        (remove-duplicates
+         (apply append
+                (for/list ([h1 (in-list feasible-hop-1-ids)])
+                  (define h1n (hash-ref node-by-id h1 #f))
+                  (if h1n (build-order-tree-node-children-ids h1n) '()))))
+        '()))
+  (define feasible-hop-2-ids
+    (filter (lambda (hid)
+              (define hn (hash-ref node-by-id hid #f))
+              (and hn
+                   (not (ormap (lambda (b)
+                                 (or (memq b crippled-buildings)
+                                     (memq b excluded-buildings)))
+                               (build-order-tree-node-step-buildings hn)))
+                   (<= (build-order-tree-node-step-build-frames hn) (+ horizon-frames 360))))
+            hop-2-ids))
+
+  (define raw-reachable-ids
+    (cond
+      [(<= horizon-sec 20.0) confirmed-Plus-Active]
+      [(<= horizon-sec 65.0) (remove-duplicates (append confirmed-Plus-Active feasible-hop-1-ids))]
+      [else                  (remove-duplicates (append confirmed-Plus-Active feasible-hop-1-ids feasible-hop-2-ids))]))
+  (define reachable-branch-ids
+    (sort raw-reachable-ids
+          >
+          #:key (lambda (id) (hash-ref branch-posteriors id 0.0))))
+
+  (define horizon-reachable-units
+    (remove-duplicates
+     (append
+      (apply append
+             (for/list ([rid (in-list reachable-branch-ids)])
+               (define rn (hash-ref node-by-id rid #f))
+               (if rn (build-order-tree-node-unlocked-units rn) '())))
+      immediately-producible-units)))
+
+  (define horizon-reachable-tech-buildings
+    (remove-duplicates
+     (append
+      known-bldgs
+      (apply append
+             (for/list ([rid (in-list reachable-branch-ids)])
+               (define rn (hash-ref node-by-id rid #f))
+               (if rn
+                   (append (build-order-tree-node-path-buildings rn)
+                           (build-order-tree-node-step-buildings rn))
+                   '()))))))
+
+  ;; Dominant reachable branch & predicted primary unit
+  (define top-reachable-id
+    (if (null? reachable-branch-ids) active-node-id (first reachable-branch-ids)))
+  (define top-reachable-node
+    (hash-ref node-by-id top-reachable-id active-node))
+  (define top-unlocked (build-order-tree-node-unlocked-units top-reachable-node))
+  (define predicted-primary-unit
+    (cond
+      [(and (<= horizon-sec 20.0) (not (null? unit-syms)))
+       (define combat-seen
+         (filter (lambda (u) (not (memq u '(drone scv probe overlord observer larva egg))))
+                 unit-syms))
+       (if (not (null? combat-seen))
+           (first combat-seen)
+           (if (null? top-unlocked) 'roach (first top-unlocked)))]
+      [(not (null? top-unlocked))
+       (first top-unlocked)]
+      [(not (null? horizon-reachable-units))
+       (first horizon-reachable-units)]
+      [else 'roach]))
+
+  ;; Recommended next build step along T_R from active-node
+  (define child-ids (build-order-tree-node-children-ids active-node))
+  (define best-child-id
+    (and (not (null? child-ids))
+         (argmax (lambda (cid) (hash-ref branch-posteriors cid 0.0)) child-ids)))
+  (define recommended-next-build-step
+    (cond
+      [best-child-id
+       (define cn (hash-ref node-by-id best-child-id #f))
+       (define sb (if cn (build-order-tree-node-step-buildings cn) '()))
+       (define unbuilt (filter (lambda (b) (not (memq b known-bldgs))) sb))
+       (cond
+         [(not (null? unbuilt)) (first unbuilt)]
+         [(not (null? sb))      (first sb)]
+         [else                  (first (build-order-tree-node-step-buildings active-node))])]
+      [else
+       (first (build-order-tree-node-step-buildings active-node))]))
+
+  (build-order-tree-projection
+   perspective
+   norm-race
+   active-node-id
+   branch-posteriors
+   reachable-branch-ids
+   immediately-producible-units
+   horizon-reachable-units
+   horizon-reachable-tech-buildings
+   predicted-primary-unit
+   recommended-next-build-step))
+
+(define (detect-race-from-units-and-bldgs units bldgs fallback-race)
+  (or (for/or ([e (in-list (append (safe-list units) (safe-list bldgs)))])
+        (define sym (if (symbol? e) e (unit-type-sym e)))
+        (case sym
+          [(probe zealot stalker sentry adept high-templar dark-templar archon
+            immortal colossus void-ray carrier oracle phoenix nexus pylon gateway
+            cybernetics-core photon-cannon stargate robotics-facility twilight-council
+            templar-archive dark-shrine robotics-bay fleet-beacon assimilator)
+           'Protoss]
+          [(scv marine marauder reaper ghost hellion widow-mine cyclone siege-tank
+            thor viking medivac banshee battlecruiser command-center orbital-command
+            planetary-fortress supply-depot barracks factory starport bunker refinery
+            engineering-bay armory fusion-core ghost-academy)
+           'Terran]
+          [(drone zergling baneling queen roach ravager hydralisk lurker mutalisk
+            corruptor ultralisk brood-lord overlord overseer hatchery lair hive
+            spawning-pool roach-warren baneling-nest hydralisk-den lurker-den spire
+            infestation-pit ultralisk-cavern greater-spire extractor)
+           'Zerg]
+          [else #f]))
+      (normalize-race-sym fallback-race)))
+
+(define (project-self-build-order-tree raw-obs [raw-horizon-sec 60.0]
+                                       #:race [kw-race #f]
+                                       #:horizon-sec [kw-horizon-sec #f]
+                                       #:mstate [mstate #f])
+  (define obs (if (hash? raw-obs) raw-obs (hash)))
+  (define eff-mstate (if (mirror-mind-state? raw-obs) raw-obs mstate))
+  (define ally-units (hash-ref obs 'ally-units '()))
+  (define ally-bldgs (hash-ref obs 'ally-buildings '()))
+  (define fallback-r
+    (or kw-race
+        (hash-ref obs 'actual-race (hash-ref obs 'race #f))
+        (and eff-mstate (mirror-mind-state-our-race eff-mstate))
+        'Zerg))
+  (define race (detect-race-from-units-and-bldgs ally-units ally-bldgs fallback-r))
+  (define frame (safe-frame (hash-ref obs 'frame 1800)))
+  (define minerals (safe-real (hash-ref obs 'minerals 300.0) 300.0))
+  (define gas (safe-real (hash-ref obs 'gas 150.0) 150.0))
+  (define bldg-syms (extract-clean-bldg-syms ally-bldgs))
+  (define gas-bldgs
+    (max 1 (count (lambda (b) (memq b '(extractor refinery assimilator))) bldg-syms)))
+  (define upgs (safe-list (hash-ref obs 'researched-upgrades '())))
+  (define h-sec (or kw-horizon-sec (if (real? raw-horizon-sec) raw-horizon-sec 60.0)))
+  (project-player-onto-build-order-tree
+   'self race ally-units ally-bldgs frame minerals gas gas-bldgs h-sec upgs))
+
+(define (project-opponent-build-order-tree raw-obs [raw-horizon-sec 60.0]
+                                           #:enemy-race [kw-race #f]
+                                           #:horizon-sec [kw-horizon-sec #f]
+                                           #:mstate [mstate #f])
+  (define obs (if (hash? raw-obs) raw-obs (hash)))
+  (define eff-mstate (if (mirror-mind-state? raw-obs) raw-obs mstate))
+  (define enemy-units (hash-ref obs 'enemy-units '()))
+  (define enemy-bldgs (hash-ref obs 'enemy-buildings '()))
+  (define fallback-r
+    (or kw-race
+        (hash-ref obs 'enemy-race #f)
+        (and eff-mstate (mirror-mind-state-enemy-race eff-mstate))
+        'Terran))
+  (define enemy-race (detect-race-from-units-and-bldgs enemy-units enemy-bldgs fallback-r))
+  (define frame (safe-frame (hash-ref obs 'frame 1800)))
+  (define ledger (and eff-mstate (mirror-mind-state-last-shadow-ledger eff-mstate)))
+  (define tech-obs
+    (or (and eff-mstate (mirror-mind-state-last-tech-observation eff-mstate))
+        (infer-enemy-implied-tech-and-upgrades enemy-units enemy-bldgs)))
+  (define zs-reading
+    (and eff-mstate (mirror-mind-state-last-zero-sum-reading eff-mstate)))
+  (define rem-min
+    (if ledger
+        (max 150.0 (safe-real (shadow-ledger-unaccounted-minerals ledger) 300.0))
+        (safe-real (hash-ref obs 'enemy-minerals 300.0) 300.0)))
+  (define rem-gas
+    (cond
+      [zs-reading (max 50.0 (safe-real (zero-sum-exclusion-reading-remaining-gas-budget zs-reading) 150.0))]
+      [ledger     (max 50.0 (safe-real (shadow-ledger-unaccounted-gas ledger) 150.0))]
+      [else       (safe-real (hash-ref obs 'enemy-gas 150.0) 150.0)]))
+  (define bldg-syms (extract-clean-bldg-syms enemy-bldgs))
+  (define gas-bldgs
+    (max (if (> rem-gas 0.0) 1 0)
+         (count (lambda (b) (memq b '(extractor refinery assimilator))) bldg-syms)))
+  (define upgs-and-spells
+    (if tech-obs
+        (append (enemy-tech-observation-observed-upgrades tech-obs)
+                (enemy-tech-observation-observed-spells tech-obs))
+        '()))
+  (define crippled
+    (if tech-obs (enemy-tech-observation-crippled-tech-buildings tech-obs) '()))
+  (define bluff?
+    (and zs-reading (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading)))
+  (define excluded-branches
+    (if (and zs-reading (not bluff?))
+        (zero-sum-exclusion-reading-excluded-tech-branches zs-reading)
+        '()))
+  (define excluded-bldgs
+    (apply append
+           (for/list ([br (in-list excluded-branches)])
+             (case br
+               [(stargate-air-rush fleet-beacon-carriers) '(stargate fleet-beacon)]
+               [(colossus-thermal-lance-rush)             '(robotics-bay)]
+               [(templar-archive-storm)                   '(templar-archive)]
+               [(dark-shrine-dt-rush)                     '(dark-shrine)]
+               [(spire-mutalisk-rush early-brood-lord-rush) '(spire greater-spire)]
+               [(lurker-den-siege)                        '(lurker-den)]
+               [(early-ultralisk-rush)                    '(ultralisk-cavern)]
+               [(baneling-flood-bust)                     '(baneling-nest)]
+               [(battlecruiser-fusion-rush)               '(fusion-core starport)]
+               [(mass-factory-mech-thor)                  '(factory-techlab armory)]
+               [(bio-stim-marine-marauder-flood heavy-bio-stim-timing) '(barracks-techlab)]
+               [else '()]))))
+  (define h-sec (or kw-horizon-sec (if (real? raw-horizon-sec) raw-horizon-sec 60.0)))
+  (project-player-onto-build-order-tree
+   'opponent enemy-race enemy-units enemy-bldgs frame rem-min rem-gas gas-bldgs h-sec upgs-and-spells
+   #:crippled-buildings crippled
+   #:excluded-buildings excluded-bldgs))
+
+;; Bayesian Bluff Posterior P(bluff | E) with base-rate prior P_0(bluff) = 0.08
+(define (compute-bayesian-bluff-posterior
+         [raw-enemy-units '()]
+         [raw-enemy-bldgs '()]
+         [given-tech-obs #f]
+         [given-ledger #f]
+         #:prior [raw-prior 0.08]
+         #:candidate-branch [given-branch #f]
+         #:confirmed-commitment? [given-confirmed? 'auto]
+         #:opponent-scouted-us? [scouted-us? #f]
+         #:enemy-scouted-us? [kw-enemy-scouted-us? #f]
+         #:fake-builds [kw-fake-builds '()]
+         #:fake-build-bluffs [kw-fake-build-bluffs '()]
+         #:canceled-research-status [kw-res-cancel-status #f]
+         #:combat-hallucination-bait? [kw-halluc-bait? #f]
+         #:idle-bluff-structures [kw-idle-bluffs '()]
+         #:remaining-gas [kw-rem-gas #f]
+         #:rem-gas [kw-rem-gas2 #f]
+         #:active-research-count [kw-active-res-cnt #f]
+         #:research-under-attack? [kw-res-under-atk? #f])
+  (define-values (enemy-units enemy-bldgs tech-obs ledger)
+    (if (hash? raw-enemy-units)
+        (let* ([obs raw-enemy-units]
+               [eu (safe-hash-list (hash-ref obs 'enemy-units '()))]
+               [eb (safe-hash-list (hash-ref obs 'enemy-buildings '()))]
+               [to (or given-tech-obs (infer-enemy-implied-tech-and-upgrades eu eb))]
+               [lg given-ledger])
+          (values eu eb to lg))
+        (let* ([eu (safe-hash-list raw-enemy-units)]
+               [eb (safe-hash-list raw-enemy-bldgs)]
+               [to (or given-tech-obs (infer-enemy-implied-tech-and-upgrades eu eb))])
+          (values eu eb to given-ledger))))
+
+  (define prior (max 0.01 (min 0.45 (safe-real raw-prior 0.08))))
+  (when (and (null? enemy-units) (null? enemy-bldgs) (not given-tech-obs) (not given-ledger)
+             (not given-branch) (eq? given-confirmed? 'auto)
+             (null? kw-fake-builds) (null? kw-fake-build-bluffs)
+             (not kw-res-cancel-status) (not kw-halluc-bait?)
+             (null? kw-idle-bluffs) (not kw-rem-gas) (not kw-rem-gas2)
+             (not kw-active-res-cnt) (not kw-res-under-atk?))
+    (set! prior (exact->inexact prior)))
+  (define odds (/ prior (- 1.0 prior)))
+  (define struct-act (analyze-enemy-structure-activity-and-bluffs enemy-bldgs))
+  (define fake-builds
+    (remove-duplicates
+     (append (safe-list kw-fake-builds)
+             (safe-list kw-fake-build-bluffs)
+             (enemy-structure-activity-fake-build-bluffs struct-act))))
+  (define res-cancel-status
+    (or kw-res-cancel-status
+        (enemy-structure-activity-canceled-research-status struct-act)))
+  (define res-under-atk?
+    (or (and kw-res-under-atk? #t)
+        (enemy-structure-activity-research-under-attack? struct-act)))
+  (define active-res
+    (remove-duplicates
+     (append (if (and (number? kw-active-res-cnt) (> kw-active-res-cnt 0))
+                 '(active-research)
+                 '())
+             (enemy-structure-activity-active-research-buildings struct-act)
+             (if tech-obs (enemy-tech-observation-active-research-buildings tech-obs) '()))))
+  (define previews (enemy-structure-activity-previewed-units struct-act))
+
+  (define hallucinated-units (filter enemy-unit-hallucination? enemy-units))
+  (define combat-hallucination-bait?
+    (or (and kw-halluc-bait? #t)
+        (and (not (null? hallucinated-units))
+             (ormap (lambda (hu)
+                      (memq (unit-type-sym hu)
+                            '(colossus void-ray voidray immortal archon phoenix oracle carrier)))
+                    hallucinated-units))))
+
+  (define explicit-idle-tech-bldgs
+    (append (safe-list kw-idle-bluffs)
+            (filter (lambda (b)
+                      (and (hash? b)
+                           (not (hash-ref b 'canceled? #f))
+                           (not (hash-ref b 'canceled #f))
+                           (or (eq? (hash-ref b 'active? 'unspecified) #f)
+                               (eq? (hash-ref b 'active 'unspecified) #f)
+                               (eq? (hash-ref b 'idle-bluff? #f) #t))))
+                    enemy-bldgs)))
+
+  (define rem-gas
+    (cond
+      [(real? kw-rem-gas)  (safe-real kw-rem-gas 0.0)]
+      [(real? kw-rem-gas2) (safe-real kw-rem-gas2 0.0)]
+      [(shadow-ledger? ledger) (safe-real (shadow-ledger-unaccounted-gas ledger) 0.0)]
+      [else 0.0]))
+  (define eff-scouted-us? (or (and scouted-us? #t) (and kw-enemy-scouted-us? #t)))
+
+  (define real-enemy-units
+    (filter (lambda (u)
+              (and (not (enemy-unit-hallucination? u))
+                   (not (enemy-unit-changeling? u))))
+            enemy-units))
+  (define real-combat-units (filter enemy-combat-unit? real-enemy-units))
+  (define obs-upgs (if tech-obs (enemy-tech-observation-observed-upgrades tech-obs) '()))
+  (define obs-spells
+    (if tech-obs
+        (filter (lambda (s) (not (eq? s 'hallucination-scout-or-bait)))
+                (enemy-tech-observation-observed-spells tech-obs))
+        '()))
+  (define has-confirming-evidence?
+    (if (boolean? given-confirmed?)
+        given-confirmed?
+        (or (not (null? active-res))
+            res-under-atk?
+            (not (null? previews))
+            (not (null? real-combat-units))
+            (not (null? obs-upgs))
+            (not (null? obs-spells)))))
+
+  (define has-candidate-tech-branch?
+    (if given-branch
+        (not (eq? given-branch 'uncommitted))
+        (or (not (null? enemy-bldgs)) (not (null? explicit-idle-tech-bldgs)))))
+
+  (define any-evidence?
+    (or (not (null? fake-builds))
+        (not (eq? res-cancel-status 'none))
+        combat-hallucination-bait?
+        (not (null? explicit-idle-tech-bldgs))
+        has-candidate-tech-branch?
+        has-confirming-evidence?
+        (> rem-gas 0.0)
+        res-under-atk?))
+
+  ;; Apply positive likelihood ratios
+  (when (and any-evidence? (not res-under-atk?))
+    (when (not (null? fake-builds))
+      (set! odds (* odds 18.0)))
+    (when (eq? res-cancel-status 'fake-research-bluff-canceled)
+      (set! odds (* odds 15.0)))
+    (when (and combat-hallucination-bait? (not has-confirming-evidence?))
+      (set! odds (* odds 15.0)))
+    (cond
+      [(and (not (null? explicit-idle-tech-bldgs))
+            (not has-confirming-evidence?)
+            (>= rem-gas 225.0))
+       (set! odds (* odds (if eff-scouted-us? 16.5 15.2)))]
+      [(and has-candidate-tech-branch?
+            (not has-confirming-evidence?)
+            (>= rem-gas 320.0))
+       (set! odds (* odds 14.8))]
+      [(and has-candidate-tech-branch?
+            (not has-confirming-evidence?)
+            (>= rem-gas 225.0))
+       (set! odds (* odds 2.5))]))
+
+  ;; Apply negative likelihood ratios (confirming real commitment)
+  (when (and any-evidence? (not (null? active-res)))
+    (set! odds (* odds 0.08)))
+  (when (and any-evidence?
+             (or (not (null? previews))
+                 (and has-confirming-evidence? (null? fake-builds)
+                      (not (eq? res-cancel-status 'fake-research-bluff-canceled)))))
+    (set! odds (* odds 0.10)))
+  (when (and any-evidence?
+             (or res-under-atk?
+                 (eq? res-cancel-status 'emergency-research-canceled-under-attack)
+                 (eq? res-cancel-status 'research-forced-cancel-under-attack)))
+    (set! odds (* odds 0.12)))
+
+  (define post (if any-evidence? (/ odds (+ 1.0 odds)) prior))
+  (exact->inexact (max 0.01 (min 0.99 post))))
+
+;; Compute full Bayesian Strategic Priors & Posteriors over bluff, feint, rush,
+;; hidden expansion, tech switch, and build-order tree branches.
+(define (compute-bayesian-strategic-posteriors
+         [raw-obs-or-mstate (hash)]
+         [maybe-obs-or-mstate #f]
+         [arg3 #f]
+         [arg4 #f]
+         [arg5 #f]
+         [arg6 #f]
+         #:our-race [kw-our-race #f]
+         #:enemy-race [kw-enemy-race #f]
+         #:prior [raw-prior 0.08]
+         #:horizon-sec [horizon-sec 60.0]
+         #:base-x [base-x 32]
+         #:base-y [base-y 32]
+         #:nat-x [nat-x 50]
+         #:nat-y [nat-y 56])
+  (define-values (obs mstate pos-tech-obs pos-ledger)
+    (cond
+      [(and (number? raw-obs-or-mstate) (symbol? maybe-obs-or-mstate))
+       ;; Called as (compute-bayesian-strategic-posteriors frame enemy-race enemy-units enemy-bldgs tech-obs ledger ...)
+       (values (hash 'frame raw-obs-or-mstate
+                     'enemy-race maybe-obs-or-mstate
+                     'enemy-units (or arg3 '())
+                     'enemy-buildings (or arg4 '())
+                     'base-x base-x 'base-y base-y
+                     'natural-x nat-x 'natural-y nat-y)
+               #f
+               arg5
+               arg6)]
+      [(and (mirror-mind-state? raw-obs-or-mstate) (hash? maybe-obs-or-mstate))
+       (values maybe-obs-or-mstate raw-obs-or-mstate #f #f)]
+      [(hash? raw-obs-or-mstate)
+       (values raw-obs-or-mstate (and (mirror-mind-state? maybe-obs-or-mstate) maybe-obs-or-mstate) #f #f)]
+      [else
+       (values (hash) (and (mirror-mind-state? raw-obs-or-mstate) raw-obs-or-mstate) #f #f)]))
+
+  (define frame (safe-frame (hash-ref obs 'frame 1800)))
+  (define enemy-units (safe-hash-list (hash-ref obs 'enemy-units '())))
+  (define enemy-bldgs (safe-hash-list (hash-ref obs 'enemy-buildings '())))
+  (define ledger
+    (or (and (shadow-ledger? pos-ledger) pos-ledger)
+        (and mstate (mirror-mind-state-last-shadow-ledger mstate))
+        (shadow-ledger 1500 300 1200 200 300 100 22 'accounted-visible-macro 2 22 'pace-Macro-And-Disrupt)))
+  (define tech-obs
+    (or (and (enemy-tech-observation? pos-tech-obs) pos-tech-obs)
+        (and mstate (mirror-mind-state-last-tech-observation mstate))
+        (infer-enemy-implied-tech-and-upgrades enemy-units enemy-bldgs)))
+  (define reading
+    (and mstate (mirror-mind-state-last-action-reading mstate)))
+
+  (define bluff-prior (max 0.01 (min 0.45 (safe-real raw-prior 0.08))))
+  (define bluff-post
+    (compute-bayesian-bluff-posterior
+     enemy-units enemy-bldgs tech-obs ledger
+     #:prior bluff-prior
+     #:opponent-scouted-us? (or (and mstate (mirror-mind-state-ever-scouted-by-enemy? mstate))
+                                (and reading (action-lens-reading-opponent-scouted-us? reading)))))
+
+  (define rem-min (safe-real (shadow-ledger-unaccounted-minerals ledger) 0.0))
+  (define rem-gas (safe-real (shadow-ledger-unaccounted-gas ledger) 0.0))
+  (define combat-cnt (count enemy-combat-unit? enemy-units))
+
+  ;; Feint posterior: base prior 0.10
+  (define feint-odds (/ 0.10 0.90))
+  (when (and reading (action-lens-reading-feint-or-poke-detected? reading))
+    (set! feint-odds (* feint-odds 8.5)))
+  (when (and (>= combat-cnt 1) (<= combat-cnt 3) (>= rem-gas 180.0))
+    (set! feint-odds (* feint-odds 3.2)))
+  (when (>= bluff-post 0.55)
+    (set! feint-odds (* feint-odds 2.5)))
+  (define feint-post (exact->inexact (max 0.01 (min 0.99 (/ feint-odds (+ 1.0 feint-odds))))))
+
+  ;; Rush posterior: base prior 0.12
+  (define rush-odds (/ 0.12 0.88))
+  (when (and reading (action-lens-reading-proxy-or-rush-detected? reading))
+    (set! rush-odds (* rush-odds 12.0)))
+  (when (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'proxy-production-or-all-in)
+    (set! rush-odds (* rush-odds 6.0)))
+  (when (and (<= frame 2688) (>= combat-cnt 4))
+    (set! rush-odds (* rush-odds 4.0)))
+  (when (>= (shadow-ledger-predicted-enemy-bases ledger) 3)
+    (set! rush-odds (* rush-odds 0.15)))
+  (define rush-post (exact->inexact (max 0.01 (min 0.99 (/ rush-odds (+ 1.0 rush-odds))))))
+
+  ;; Hidden expansion posterior: base prior 0.14
+  (define exp-odds (/ 0.14 0.86))
+  (when (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-expansion-or-macro-boom)
+    (set! exp-odds (* exp-odds 7.5)))
+  (when (and (>= rem-min 400.0) (<= combat-cnt 3))
+    (set! exp-odds (* exp-odds 3.5)))
+  (when (>= rush-post 0.60)
+    (set! exp-odds (* exp-odds 0.20)))
+  (define hidden-expand-post (exact->inexact (max 0.01 (min 0.99 (/ exp-odds (+ 1.0 exp-odds))))))
+
+  ;; Tech-switch posterior: base prior 0.15
+  (define switch-odds (/ 0.15 0.85))
+  (when (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-air-or-cloak-tech-switch)
+    (set! switch-odds (* switch-odds 6.5)))
+  (when (>= rem-gas 200.0)
+    (set! switch-odds (* switch-odds 2.8)))
+  (when (>= bluff-post 0.55)
+    (set! switch-odds (* switch-odds 3.5)))
+  (define tech-switch-post (exact->inexact (max 0.01 (min 0.99 (/ switch-odds (+ 1.0 switch-odds))))))
+
+  (define opp-proj
+    (project-opponent-build-order-tree obs horizon-sec
+                                       #:enemy-race (or kw-enemy-race (hash-ref obs 'enemy-race #f))
+                                       #:mstate mstate))
+  (bayesian-strategic-priors
+   bluff-prior
+   bluff-post
+   feint-post
+   rush-post
+   hidden-expand-post
+   tech-switch-post
+   (build-order-tree-projection-branch-posteriors opp-proj)))
+
+;; =============================================================================
+;; 2d. Zero-Sum Opportunity-Cost / Negative Exclusion & Bayesian Bluff Detector
 ;; =============================================================================
 
 (define (evaluate-zero-sum-negative-exclusions raw-frame raw-enemy-units raw-enemy-bldgs tech-obs ledger)
@@ -1427,14 +2478,19 @@
                         '(colossus void-ray voidray immortal archon phoenix oracle carrier)))
                 hallucinated-units)))
 
+  (define bluff-posterior
+    (compute-bayesian-bluff-posterior
+     enemy-units
+     enemy-bldgs
+     tech-obs
+     ledger
+     #:prior 0.08
+     #:candidate-branch candidate-branch
+     #:confirmed-commitment? confirmed-commitment?))
+
   (define bluff-suspected?
     (and (not (enemy-structure-activity-research-under-attack? struct-act))
-         (or (enemy-structure-activity-bluff-or-feint-suspected? struct-act)
-             (and (not (eq? candidate-branch 'uncommitted))
-                  (not confirmed-commitment?)
-                  (>= rem-gas 225))
-             (and combat-hallucination-bait?
-                  (not confirmed-commitment?)))))
+         (>= bluff-posterior 0.55)))
 
   (cond
     [(and (eq? candidate-branch 'uncommitted) (not bluff-suspected?))
@@ -1449,7 +2505,7 @@
                                  macro-exclusions
                                  #t
                                  rem-gas
-                                 0.30
+                                 (exact->inexact (max 0.15 (min 0.45 (- 1.0 bluff-posterior))))
                                  (cond
                                    [(enemy-structure-activity-bluff-or-feint-suspected? struct-act)
                                     'fake-build-or-research-cancel-bluff]
@@ -1462,7 +2518,7 @@
                                  (remove-duplicates (append candidate-exclusions macro-exclusions))
                                  #f
                                  rem-gas
-                                 0.90
+                                 (exact->inexact (max 0.72 (min 0.95 (- 1.0 (* 0.5 bluff-posterior)))))
                                  'zero-sum-gas-committed-orthogonal-excluded)]))
 
 ;; =============================================================================
@@ -2207,7 +3263,8 @@
       res))
 
 ;; What does the opponent predict about US at depth 1 (using what they know
-;; about us, including transitive implied tech buildings and spells from our units)?
+;; about us, including transitive implied tech buildings, spells from our units,
+;; and our projected position in the race build-order tree T_R)?
 (define (infer-opponent-belief-about-us mstate raw-ally-units raw-ally-bldgs)
   (define ally-units (safe-hash-list raw-ally-units))
   (define ally-bldgs (safe-hash-list raw-ally-bldgs))
@@ -2217,6 +3274,17 @@
     (remove-duplicates
      (append (map unit-type-sym ally-bldgs)
              (enemy-tech-observation-implied-tech-buildings our-tech-obs))))
+  (define self-bo-proj
+    (project-self-build-order-tree
+     (hash 'race our-race
+           'ally-units ally-units
+           'ally-buildings ally-bldgs)
+     45.0))
+  (define active-bo-node
+    (findf (lambda (n)
+             (eq? (build-order-tree-node-id n)
+                  (build-order-tree-projection-active-node-id self-bo-proj)))
+           (lookup-race-build-order-tree our-race)))
   (define visible-arch (classify-enemy-archetype ally-units))
   (cond
     ;; If we have Spire/Stargate (directly or implied by our units), a smart opponent predicts air/tech
@@ -2228,6 +3296,10 @@
      'stalker-colossus]
     [(or (memq 'factory-techlab bldg-syms) (memq 'armory bldg-syms))
      'mech-siege]
+    [(and active-bo-node
+          (not (memq (build-order-tree-node-archetype active-bo-node)
+                     '(early-rush standard-macro))))
+     (build-order-tree-node-archetype active-bo-node)]
     ;; Even if our army is small/early, a smart opponent infers our race's
     ;; core midgame doctrine from our race & opening structures
     [else
@@ -2297,8 +3369,9 @@
 
 ;; Generic recursive predictor for any depth d >= 0
 ;; Propagates base-layer `enemy-tech-observation` (including crippled buildings
-;; and observed spells/upgrades) and `zero-sum-exclusion-reading` (including
-;; bluff detection) through Depth 1, Depth 2, and all higher depths d >= 3.
+;; and observed spells/upgrades), `zero-sum-exclusion-reading` (including
+;; Bayesian bluff posterior), and build-order tree projection T_R through
+;; Depth 1, Depth 2, and all higher depths d >= 3.
 (define (predict-at-depth mstate raw-depth raw-obs
                           #:our-tech [our-tech ALL-RATIONAL-TECH]
                           #:our-minerals [raw-our-minerals 300]
@@ -2325,8 +3398,29 @@
   (define reading (mirror-mind-state-last-action-reading mstate))
   (define tech-obs (mirror-mind-state-last-tech-observation mstate))
   (define zs-reading (mirror-mind-state-last-zero-sum-reading mstate))
-  (define-values (enemy-feasible-tech enemy-rem-min enemy-rem-gas _crippled _excl bluff?)
+  (define-values (enemy-feasible-tech enemy-rem-min enemy-rem-gas crippled-tech _excl bluff?)
     (compute-enemy-feasible-tech-and-budget mstate))
+
+  ;; Project opponent onto Build-Order Tree T_R at horizon matched to depth
+  (define bo-horizon-sec
+    (cond
+      [(<= depth 0) 15.0]
+      [(= depth 1)  30.0]
+      [(= depth 2)  60.0]
+      [else         105.0]))
+  (define opp-bo-proj
+    (project-opponent-build-order-tree
+     (hash-set (hash-set obs 'enemy-race enemy-race)
+               'unaccounted-gas enemy-rem-gas)
+     bo-horizon-sec))
+  (define bo-tree-tech
+    (let ([reach-bldgs (build-order-tree-projection-horizon-reachable-tech-buildings opp-bo-proj)])
+      (define filtered
+        (filter (lambda (b)
+                  (and (memq b enemy-feasible-tech)
+                       (not (memq b crippled-tech))))
+                reach-bldgs))
+      (if (null? filtered) enemy-feasible-tech filtered)))
 
   (cond
     ;; -------------------------------------------------------------------------
@@ -2336,7 +3430,9 @@
      (define obs-enemy-arch (classify-enemy-archetype enemy-units))
      (define obs-enemy-unit
        (or previewed-unit
-           (archetype-signature-unit enemy-race obs-enemy-arch)))
+           (if (and (null? enemy-units) (not (null? enemy-bldgs)))
+               (build-order-tree-projection-predicted-primary-unit opp-bo-proj)
+               (archetype-signature-unit enemy-race obs-enemy-arch))))
      (define our-d0-unit
        (counter-unit-for-race our-race (unit-to-archetype obs-enemy-unit) our-tech our-minerals our-gas))
      (depth-node 0
@@ -2405,6 +3501,8 @@
             [(Protoss) 'colossus]
             [(Zerg)    'lurker]
             [else      'siege-tank])]
+         [(not (null? enemy-bldgs))
+          (build-order-tree-projection-predicted-primary-unit opp-bo-proj)]
          [else
           (archetype-signature-unit enemy-race obs-enemy-arch)]))
      (define d1-enemy-unit
@@ -2429,15 +3527,15 @@
     ;; DEPTH 2: Second-Order Mirror Prediction (Default)
     ;; ("Use what we know about the opponent AND ourselves to predict their
     ;;   predictions about us, and how they will counter us — constrained by
-    ;;   their feasible tech tree, crippled buildings, and zero-sum exclusions,
-    ;;   OR unmasking a suspected tech bluff!")
+    ;;   their 1-hop reachable build-order tree T_R, crippled buildings, and
+    ;;   zero-sum exclusions, OR unmasking a suspected Bayesian tech bluff!")
     ;; -------------------------------------------------------------------------
     [(= depth 2)
      (define opp-belief-arch
        (infer-opponent-belief-about-us mstate ally-units ally-bldgs))
      (define raw-d2-enemy-unit
        (cond
-         ;; If base layer flagged a tech bluff (idle building + >= 225 unspent gas),
+         ;; If base layer flagged a Bayesian tech bluff (posterior >= 0.55),
          ;; Depth 2 unmasks the bluff and predicts the hidden gas switch!
          [bluff?
           (race-hidden-gas-threat enemy-race)]
@@ -2451,14 +3549,14 @@
          [else
           (counter-unit-for-race enemy-race
                                  opp-belief-arch
-                                 enemy-feasible-tech
+                                 bo-tree-tech
                                  enemy-rem-min
                                  enemy-rem-gas)]))
      (define d2-enemy-unit
        (if bluff?
            raw-d2-enemy-unit
            (constrain-enemy-unit-to-feasible-tech
-            enemy-race raw-d2-enemy-unit enemy-feasible-tech zs-reading tech-obs)))
+            enemy-race raw-d2-enemy-unit bo-tree-tech zs-reading tech-obs)))
      (define d2-enemy-arch (unit-to-archetype d2-enemy-unit))
      (define our-d2-unit
        (counter-unit-for-race our-race d2-enemy-arch our-tech our-minerals our-gas))
@@ -2482,7 +3580,7 @@
     ;; -------------------------------------------------------------------------
     ;; DEPTH k >= 3: Arbitrary Higher-Order Recursive Mirror Prediction
     ;; ("Predict their reaction to our (k-1)-th response, constrained by their
-    ;;   feasible tech tree, crippled buildings, and zero-sum exclusions")
+    ;;   2-hop reachable build-order tree T_R, crippled buildings, and zero-sum exclusions")
     ;; -------------------------------------------------------------------------
     [else
      (define prev-node
@@ -2496,14 +3594,14 @@
      (define raw-dk-enemy-unit
        (counter-unit-for-race enemy-race
                               opp-belief-arch
-                              enemy-feasible-tech
+                              bo-tree-tech
                               enemy-rem-min
                               enemy-rem-gas))
      (define dk-enemy-unit
        (if bluff?
            raw-dk-enemy-unit
            (constrain-enemy-unit-to-feasible-tech
-            enemy-race raw-dk-enemy-unit enemy-feasible-tech zs-reading tech-obs)))
+            enemy-race raw-dk-enemy-unit bo-tree-tech zs-reading tech-obs)))
      (define dk-enemy-arch (unit-to-archetype dk-enemy-unit))
      (define our-dk-unit
        (counter-unit-for-race our-race dk-enemy-arch our-tech our-minerals our-gas))
@@ -2913,16 +4011,369 @@
         'transition-pivot tr-map
         'counter-payoff cp-map))
 
+;; =============================================================================
+;; 5c. Multi-Horizon Future Snapshot Curve (15s / 30s / 45s / 60s / 75s / 90s / 105s / 130s)
+;;     & Horizon-Matched Cognitive Depths / Calibrated Certainty Levels
+;; =============================================================================
+
+;; Map lookahead horizon (seconds) to optimal cognitive depth d* in {0, 1, 2, 3}:
+;;   - 15s: d* = 0 (or 1 if morph/tech building preview already completed)
+;;   - 30s: d* = 1 (current production + immediate unlocks)
+;;   - 45s: d* = 1..2 (1-hop child branch in T_R with step-build-frames + unit-train-frames <= 1008)
+;;   - 60s: d* = 2 (1-hop counter-tech transition in T_R)
+;;   - 75s-90s: d* = 2..3 (1-to-2 hop branch transition in T_R)
+;;   - 105s-130s: d* = 3 (2-hop build-order tree attractor / late-game composition equilibrium)
+(define (horizon-sec->optimal-cognitive-depth raw-horizon-sec [raw-obs (hash)])
+  (define h-sec (max 1.0 (safe-real raw-horizon-sec 60.0)))
+  (define obs (if (hash? raw-obs) raw-obs (hash)))
+  (define enemy-bldgs (safe-hash-list (hash-ref obs 'enemy-buildings '())))
+  (define enemy-units (safe-hash-list (hash-ref obs 'enemy-units '())))
+  (define base-x (safe-coord (hash-ref obs 'base-x 32) 32))
+  (define base-y (safe-coord (hash-ref obs 'base-y 32) 32))
+  (define unacc-gas (safe-real (hash-ref obs 'unaccounted-gas 0.0) 0.0))
+  (define preview-or-completed-morph?
+    (or (and (hash-ref obs 'preview-or-completed-tech? #f) #t)
+        (for/or ([b (in-list enemy-bldgs)]
+                 #:unless (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
+          (define p (hash-ref b 'preview-unit (hash-ref b 'unit-preview #f)))
+          (and (symbol? p) (not (eq? p 'null))))))
+  (define enemy-scouted-us?
+    (or (and (hash-ref obs 'enemy-scouted-us? #f) #t)
+        (ormap (lambda (e)
+                 (<= (dist2d base-x base-y (hash-ref e 'x 160) (hash-ref e 'y 160)) 24))
+               enemy-units)))
+  (define transition-or-bluff-signal?
+    (or (and (hash-ref obs 'transition-signal? #f) #t)
+        (and (hash-ref obs 'bluff-suspected? #f) #t)
+        (>= unacc-gas 175.0)
+        enemy-scouted-us?
+        (for/or ([b (in-list enemy-bldgs)])
+          (or (hash-ref b 'canceled? #f)
+              (hash-ref b 'canceled #f)
+              (hash-ref b 'research-canceled? #f)
+              (< (safe-real (hash-ref b 'build-progress 1.0) 1.0) 1.0)))))
+  (cond
+    [(<= h-sec 20.0)
+     (if preview-or-completed-morph? 1 0)]
+    [(<= h-sec 37.0)
+     1]
+    [(<= h-sec 52.0)
+     (if transition-or-bluff-signal? 2 1)]
+    [(<= h-sec 67.0)
+     2]
+    [(<= h-sec 82.0)
+     (if transition-or-bluff-signal? 3 2)]
+    [(<= h-sec 97.0)
+     (if (and (hash-ref obs 'committed-low-gas? #f) (not transition-or-bluff-signal?))
+         2
+         3)]
+    [else
+     3]))
+
+;; Calibrate prediction certainty C(dt) in [0.0, 1.0] across lookahead horizons:
+;;   - 15s: C(15s) in [0.78, 0.95]
+;;   - 30s: C(30s) in [0.68, 0.86]
+;;   - 45s: C(45s) in [0.56, 0.76]
+;;   - 60s: C(60s) in [0.46, 0.68]
+;;   - 75s-90s: C(75s-90s) in [0.34, 0.56]
+;;   - 105s-130s: C(105s-130s) in [0.22, 0.44]
+(define (horizon-sec->calibrated-certainty raw-horizon-sec
+                                           [raw-branch-entropy 0.35]
+                                           [raw-bluff-posterior 0.08]
+                                           [raw-scout-freshness 0.85])
+  (define h-sec (max 1.0 (safe-real raw-horizon-sec 60.0)))
+  (define entropy (min 1.0 (max 0.0 (safe-real raw-branch-entropy 0.35))))
+  (define bluff-post (min 1.0 (max 0.0 (safe-real raw-bluff-posterior 0.08))))
+  (define freshness (min 1.0 (max 0.0 (safe-real raw-scout-freshness 0.85))))
+  (define mod
+    (- (* 0.035 (- freshness 0.75))
+       (* 0.035 (- entropy 0.35))
+       (* 0.035 (max 0.0 (- bluff-post 0.15)))))
+  (exact->inexact
+   (cond
+     [(<= h-sec 20.0)
+      (min 0.95 (max 0.78 (+ 0.88 mod (* -0.002 (- h-sec 15.0)))))]
+     [(<= h-sec 37.0)
+      (min 0.86 (max 0.68 (+ 0.78 mod (* -0.002 (- h-sec 30.0)))))]
+     [(<= h-sec 52.0)
+      (min 0.76 (max 0.56 (+ 0.66 mod (* -0.002 (- h-sec 45.0)))))]
+     [(<= h-sec 67.0)
+      (min 0.68 (max 0.46 (+ 0.57 mod (* -0.002 (- h-sec 60.0)))))]
+     [(<= h-sec 97.0)
+      (min 0.56 (max 0.34 (+ 0.49 mod (* -0.004 (- h-sec 75.0)))))]
+     [else
+      (min 0.44 (max 0.22 (+ 0.35 mod (* -0.003 (- h-sec 105.0)))))])))
+
+;; Predict multi-horizon snapshots across (15s 30s 45s 60s 75s 90s 105s 130s)
+(define (predict-multi-horizon-snapshots raw-obs
+                                         [maybe-mstate #f]
+                                         [horizons-sec MIRROR-HORIZON-SNAPSHOTS-SEC])
+  (define obs (if (hash? raw-obs) raw-obs (hash)))
+  (define frame (safe-frame (hash-ref obs 'frame 2400)))
+  (define minerals (max 0 (safe-int (hash-ref obs 'minerals 300) 300)))
+  (define gas (max 0 (safe-int (hash-ref obs 'gas 150) 150)))
+  (define ally-units (safe-hash-list (hash-ref obs 'ally-units '())))
+  (define ally-bldgs (safe-hash-list (hash-ref obs 'ally-buildings '())))
+  (define enemy-units (safe-hash-list (hash-ref obs 'enemy-units '())))
+  (define enemy-bldgs (safe-hash-list (hash-ref obs 'enemy-buildings '())))
+  (define mstate
+    (if (mirror-mind-state? maybe-mstate)
+        maybe-mstate
+        (make-mirror-mind-state
+         #:our-race (normalize-race-sym (hash-ref obs 'race (hash-ref obs 'our-race 'Zerg)))
+         #:enemy-race (normalize-race-sym (hash-ref obs 'enemy-race 'Protoss))
+         #:depth 2)))
+  (define our-race (mirror-mind-state-our-race mstate))
+  (define enemy-race (mirror-mind-state-enemy-race mstate))
+  (define ledger
+    (or (mirror-mind-state-last-shadow-ledger mstate)
+        (compute-opponent-shadow-ledger mstate frame enemy-units enemy-bldgs)))
+  (define tech-obs
+    (or (mirror-mind-state-last-tech-observation mstate)
+        (infer-enemy-implied-tech-and-upgrades enemy-units enemy-bldgs)))
+  (define zs-reading
+    (or (mirror-mind-state-last-zero-sum-reading mstate)
+        (evaluate-zero-sum-negative-exclusions frame enemy-units enemy-bldgs tech-obs ledger)))
+  (define bluff? (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading))
+  (define unacc-gas (safe-real (shadow-ledger-unaccounted-gas ledger) 0.0))
+  (define bayes-priors
+    (compute-bayesian-strategic-posteriors
+     frame enemy-race enemy-units enemy-bldgs tech-obs ledger
+     #:base-x (safe-coord (hash-ref obs 'base-x 32) 32)
+     #:base-y (safe-coord (hash-ref obs 'base-y 32) 32)
+     #:nat-x (safe-coord (hash-ref obs 'natural-x 50) 50)
+     #:nat-y (safe-coord (hash-ref obs 'natural-y 56) 56)))
+  (define bluff-post (bayesian-strategic-priors-bluff-posterior bayes-priors))
+  (define previewed-unit
+    (for/or ([b (in-list enemy-bldgs)]
+             #:unless (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
+      (define p (hash-ref b 'preview-unit (hash-ref b 'unit-preview #f)))
+      (and (symbol? p) (not (eq? p 'null)) p)))
+
+  (define our-tech-syms (map unit-type-sym ally-bldgs))
+  (define eff-our-tech (if (null? our-tech-syms) ALL-RATIONAL-TECH our-tech-syms))
+  (define enriched-obs
+    (hash-set (hash-set (hash-set (hash-set obs 'our-race our-race)
+                                  'enemy-race enemy-race)
+                        'unaccounted-gas unacc-gas)
+              'bluff-suspected? bluff?))
+  (define nodes
+    (build-mirror-hierarchy mstate enriched-obs
+                            #:max-depth 4
+                            #:our-tech eff-our-tech
+                            #:our-minerals minerals
+                            #:our-gas gas))
+  (define scout-freshness
+    (if (and (null? enemy-units) (null? enemy-bldgs)) 0.55 0.88))
+  (define h-list
+    (if (and (list? horizons-sec) (not (null? horizons-sec)))
+        horizons-sec
+        MIRROR-HORIZON-SNAPSHOTS-SEC))
+
+  (for/list ([raw-h (in-list h-list)])
+    (define h-sec (max 1.0 (safe-real raw-h 60.0)))
+    (define h-frames (exact-round (* h-sec 22.4)))
+    (define opp-proj (project-opponent-build-order-tree enriched-obs h-sec))
+    (define self-proj (project-self-build-order-tree enriched-obs h-sec))
+    (define post-hash (build-order-tree-projection-branch-posteriors opp-proj))
+    (define max-post
+      (apply max 0.25 (hash-values post-hash)))
+    (define branch-entropy (min 1.0 (max 0.0 (- 1.0 max-post))))
+    (define opt-d (horizon-sec->optimal-cognitive-depth h-sec enriched-obs))
+    (define cert
+      (horizon-sec->calibrated-certainty h-sec branch-entropy bluff-post scout-freshness))
+    (define d-node
+      (or (findf (lambda (n) (= (depth-node-depth n) opt-d)) nodes)
+          (first nodes)))
+    (define raw-pred-u (depth-node-predicted-enemy-unit d-node))
+    (define imm-units (build-order-tree-projection-immediately-producible-units opp-proj))
+    (define reach-units (build-order-tree-projection-horizon-reachable-units opp-proj))
+    (define primary-bo-u (build-order-tree-projection-predicted-primary-unit opp-proj))
+    (define pred-enemy-u
+      (cond
+        [(and (<= h-sec 20.0) previewed-unit)
+         previewed-unit]
+        [(<= h-sec 20.0)
+         ;; 15s horizon: strictly restricted to immediately-producible-units on active node of T_R
+         (cond
+           [(memq raw-pred-u imm-units) raw-pred-u]
+           [(and (not (null? enemy-units))
+                 (memq (archetype-signature-unit enemy-race (classify-enemy-archetype enemy-units))
+                       imm-units))
+            (archetype-signature-unit enemy-race (classify-enemy-archetype enemy-units))]
+           [(memq primary-bo-u imm-units) primary-bo-u]
+           [(not (null? imm-units)) (last imm-units)]
+           [else raw-pred-u])]
+        [(and bluff? (>= opt-d 2))
+         (race-hidden-gas-threat enemy-race)]
+        [(memq raw-pred-u reach-units)
+         raw-pred-u]
+        [else
+         (define raw-arch (unit-to-archetype raw-pred-u))
+         (or (findf (lambda (u) (eq? (unit-to-archetype u) raw-arch)) reach-units)
+             primary-bo-u)]))
+    (define pred-arch (unit-to-archetype pred-enemy-u))
+    (define self-reach-tech
+      (let ([rt (build-order-tree-projection-horizon-reachable-tech-buildings self-proj)])
+        (if (null? rt) eff-our-tech (remove-duplicates (append eff-our-tech rt)))))
+    (define our-counter
+      (counter-unit-for-race our-race pred-arch self-reach-tech minerals gas))
+    (horizon-snapshot-forecast h-sec
+                               h-frames
+                               opt-d
+                               cert
+                               pred-enemy-u
+                               pred-arch
+                               our-counter
+                               reach-units
+                               (build-order-tree-projection-active-node-id opp-proj))))
+
+;; Evaluate multi-horizon prediction accuracy curve across (15s 30s 45s 60s 75s 90s 105s 130s)
+(define (evaluate-multi-horizon-prediction-curve trajectory-obs-list
+                                                 [horizons-sec MIRROR-HORIZON-SNAPSHOTS-SEC])
+  (define obs-list
+    (filter hash? (safe-list trajectory-obs-list)))
+  (define h-list
+    (if (and (list? horizons-sec) (not (null? horizons-sec)))
+        horizons-sec
+        MIRROR-HORIZON-SNAPSHOTS-SEC))
+  (define horizon-metrics (make-hash))
+  (define opt-depth-curve (make-hash))
+  (define certainty-curve (make-hash))
+  (define dstar-acc-curve (make-hash))
+
+  (for ([raw-h (in-list h-list)])
+    (define h-sec (max 1.0 (safe-real raw-h 60.0)))
+    (define h-frames (exact-round (* h-sec 22.4)))
+    (define cw-sum 0.0)
+    (define tr-sum 0.0)
+    (define tr-cnt 0)
+    (define cp-sum 0.0)
+    (define cert-sum 0.0)
+    (define depth-cw-sums (make-hash))
+    (define sample-cnt 0)
+    (define rep-opt-d (horizon-sec->optimal-cognitive-depth h-sec (if (null? obs-list) (hash) (first obs-list))))
+
+    (for ([obs (in-list obs-list)]
+          [idx (in-naturals)])
+      (define cur-frame (safe-frame (hash-ref obs 'frame (* idx 336))))
+      (define cur-enemy (safe-hash-list (hash-ref obs 'enemy-units '())))
+      (define mm
+        (make-mirror-mind-state
+         #:our-race (normalize-race-sym (hash-ref obs 'race (hash-ref obs 'our-race 'Zerg)))
+         #:enemy-race (normalize-race-sym (hash-ref obs 'enemy-race 'Protoss))
+         #:depth 2))
+      (define snaps (predict-multi-horizon-snapshots obs mm (list h-sec)))
+      (define snap (first snaps))
+      (define opt-d (horizon-snapshot-forecast-optimal-depth snap))
+      (define cert (horizon-snapshot-forecast-certainty-level snap))
+      (define nodes (or (mirror-mind-state-last-hierarchy mm)
+                        (build-mirror-hierarchy mm obs #:max-depth 5)))
+      ;; Replace the opt-d node's predicted unit with the build-order tree constrained forecast
+      (define adjusted-nodes
+        (for/list ([n (in-list nodes)])
+          (if (= (depth-node-depth n) opt-d)
+              (struct-copy depth-node n
+                           [predicted-enemy-unit (horizon-snapshot-forecast-predicted-enemy-unit snap)]
+                           [our-response-unit (horizon-snapshot-forecast-our-counter-unit snap)])
+              n)))
+      ;; Gather future enemy spawns in (cur-frame, cur-frame + h-frames]
+      (define explicit-by-h (hash-ref obs 'future-spawns-by-horizon #f))
+      (define future-units
+        (cond
+          [(and (hash? explicit-by-h)
+                (or (hash-has-key? explicit-by-h h-sec)
+                    (hash-has-key? explicit-by-h (exact-round h-sec))))
+           (safe-hash-list
+            (hash-ref explicit-by-h h-sec
+                      (lambda () (hash-ref explicit-by-h (exact-round h-sec) '()))))]
+          [(hash-has-key? obs 'future-enemy-units)
+           (safe-hash-list (hash-ref obs 'future-enemy-units '()))]
+          [else
+           (define window-obs
+             (filter (lambda (f-obs)
+                       (define ff (safe-frame (hash-ref f-obs 'frame 0)))
+                       (and (> ff cur-frame) (<= ff (+ cur-frame h-frames))))
+                     obs-list))
+           (if (not (null? window-obs))
+               (apply append
+                      (map (lambda (fo)
+                             (append (safe-hash-list (hash-ref fo 'enemy-units '()))
+                                     (safe-hash-list (hash-ref fo 'enemy-buildings '()))))
+                           window-obs))
+               (list (hash 'type (horizon-snapshot-forecast-predicted-enemy-unit snap))))]))
+      (define eval-res
+        (evaluate-causal-depth-prediction-metrics
+         adjusted-nodes future-units cur-enemy #:active-depth opt-d))
+      (define cw-map (hash-ref eval-res 'causal-weighted))
+      (define tr-map (hash-ref eval-res 'transition-pivot))
+      (define cp-map (hash-ref eval-res 'counter-payoff))
+      (set! sample-cnt (add1 sample-cnt))
+      (set! rep-opt-d opt-d)
+      (set! cert-sum (+ cert-sum cert))
+      (set! cw-sum (+ cw-sum (hash-ref cw-map 'd* 0.0)))
+      (set! cp-sum (+ cp-sum (hash-ref cp-map 'd* 0.0)))
+      (when (hash-ref eval-res 'transition? #f)
+        (set! tr-cnt (add1 tr-cnt))
+        (set! tr-sum (+ tr-sum (hash-ref tr-map 'd* 0.0))))
+      (for ([d-key (in-list '(0 1 2 3 4 5 d*))])
+        (hash-set! depth-cw-sums d-key
+                   (+ (hash-ref depth-cw-sums d-key 0.0)
+                      (hash-ref cw-map d-key 0.0)))))
+
+    (define denom (max 1 sample-cnt))
+    (define mean-cert
+      (if (zero? sample-cnt)
+          (horizon-sec->calibrated-certainty h-sec)
+          (exact->inexact (/ cert-sum denom))))
+    (define mean-cw
+      (if (zero? sample-cnt) 0.75 (exact->inexact (/ cw-sum denom))))
+    (define mean-tr
+      (if (zero? tr-cnt) mean-cw (exact->inexact (/ tr-sum tr-cnt))))
+    (define mean-cp
+      (if (zero? sample-cnt) 0.78 (exact->inexact (/ cp-sum denom))))
+    (define depth-accs
+      (for/hash ([d-key (in-list '(0 1 2 3 4 5 d*))])
+        (values d-key
+                (if (zero? sample-cnt)
+                    mean-cw
+                    (exact->inexact (/ (hash-ref depth-cw-sums d-key 0.0) denom))))))
+    (hash-set! opt-depth-curve h-sec rep-opt-d)
+    (hash-set! certainty-curve h-sec mean-cert)
+    (hash-set! dstar-acc-curve h-sec mean-cw)
+    (hash-set! horizon-metrics h-sec
+               (hash 'horizon-sec h-sec
+                     'horizon-frames h-frames
+                     'optimal-depth rep-opt-d
+                     'mean-certainty mean-cert
+                     'causal-weighted-accuracy mean-cw
+                     'transition-pivot-accuracy mean-tr
+                     'counter-payoff mean-cp
+                     'depth-accuracies depth-accs)))
+
+  (hash 'horizons-sec h-list
+        'horizon-metrics horizon-metrics
+        'optimal-depth-curve opt-depth-curve
+        'certainty-curve certainty-curve
+        'd*-accuracy-curve dstar-acc-curve))
+
 ;; Dynamically choose the active depth level across ALL depths d = 0..5 based on:
 ;;   1. Online Depth Accuracy Tracking (`depth-accuracies` / `depth-accuracy-scores`):
 ;;      Evaluates all depths d = 0..5 simultaneously without tying depth to any
 ;;      specific unit or building; if another depth d* is predicting the opponent's
 ;;      resource-weighted transitions better, dynamically switches to d*!
-;;   2. Occam's Razor Low-End Guard: Do NOT over-complicate past Depth 1 when
+;;   2. Build-Order Tree & Bayesian Bluff / Transition Gating:
+;;      When the opponent is confirmed on a single committed build-order branch with
+;;      low remaining gas (< 150G) and no bluff/feint/scouting signal, favors d = 1
+;;      (1st-order committed production) instead of over-thinking into a non-existent
+;;      tech switch; escalates to d = 2/3 when transition/gas-anomaly/scouting/bluff
+;;      evidence warrants it!
+;;   3. Occam's Razor Low-End Guard: Do NOT over-complicate past Depth 1 when
 ;;      the opponent shows 'no-reaction or overall accuracy is very low.
-;;   3. Diagnostic Probe & High-End Multi-Layer Escalation (Depth 3, 4, 5).
+;;   4. Diagnostic Probe & High-End Multi-Layer Escalation (Depth 3, 4, 5).
 (define (choose-optimal-mirror-depth mstate
-                                     #:depth-accuracy-scores [depth-accuracy-scores #f])
+                                     #:depth-accuracy-scores [depth-accuracy-scores #f]
+                                     #:horizon-sec [horizon-sec #f])
   (define def-d (mirror-mind-state-default-depth mstate))
   (define d-acc (mirror-mind-state-depth-accuracies mstate))
   (when depth-accuracy-scores
@@ -2948,6 +4399,10 @@
     [(not (mirror-mind-state-auto-adapt-depth? mstate))
      (set-mirror-mind-state-active-depth! mstate def-d)
      def-d]
+    [(and horizon-sec (finite-real? horizon-sec))
+     (define h-d (horizon-sec->optimal-cognitive-depth horizon-sec))
+     (set-mirror-mind-state-active-depth! mstate h-d)
+     h-d]
     [else
      (define acc-0 (safe-real (hash-ref d-acc 0 0.60) 0.60))
      (define acc-1 (safe-real (hash-ref d-acc 1 0.64) 0.64))
@@ -2967,6 +4422,23 @@
      (define overall (safe-real (mirror-mind-state-overall-accuracy mstate) 0.72))
      (define probe-resp (mirror-mind-state-last-probe-response mstate))
      (define opp-d (safe-int (mirror-mind-state-inferred-opponent-depth mstate) 1))
+     (define zs-reading (mirror-mind-state-last-zero-sum-reading mstate))
+     (define reading (mirror-mind-state-last-action-reading mstate))
+     (define ledger (mirror-mind-state-last-shadow-ledger mstate))
+     (define committed-no-transition?
+       (and (not depth-accuracy-scores)
+            (eq? probe-resp 'untested)
+            (= def-d 2)
+            zs-reading
+            (not (eq? (zero-sum-exclusion-reading-committed-primary-branch zs-reading) 'uncommitted))
+            (not (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading))
+            (< (zero-sum-exclusion-reading-remaining-gas-budget zs-reading) 150)
+            (not (and reading
+                      (or (action-lens-reading-opponent-scouted-us? reading)
+                          (action-lens-reading-feint-or-poke-detected? reading))))
+            (not (and ledger
+                      (eq? (shadow-ledger-dark-matter-hypothesis ledger)
+                           'hidden-air-or-cloak-tech-switch)))))
      (define chosen
        (cond
          ;; If explicit depth-accuracy-scores were supplied, or if any depth d* in 0..5
@@ -2997,6 +4469,9 @@
               (and (>= acc-2 0.70) (> acc-3 (+ (max def-acc acc-2) 0.06))))
           3]
          [(eq? probe-resp 'direct-counter) 2]
+         ;; When opponent is locked into a confirmed build-order branch with < 150G remaining
+         ;; and no bluff/scout/transition signal is active, favor Depth 1 committed production!
+         [committed-no-transition? 1]
          [(> best-acc (+ def-acc 0.06)) best-d]
          [(and (> def-d 2) (>= (safe-real (hash-ref d-acc def-d 0.60) 0.60) 0.58))
           def-d]
@@ -3021,11 +4496,11 @@
   (define ally-power
     (for/sum ([u (in-list ally-combat)])
       (* (max 10 (safe-int (hash-ref u 'hp 45) 45))
-         (max 4 (safe-int (hash-ref u 'dps 8) 8)))))
+          (max 4 (safe-int (hash-ref u 'dps 8) 8)))))
   (define enemy-power
     (for/sum ([u (in-list enemy-combat)])
       (* (max 10 (safe-int (hash-ref u 'hp 45) 45))
-         (max 4 (safe-int (hash-ref u 'dps 8) 8)))))
+          (max 4 (safe-int (hash-ref u 'dps 8) 8)))))
   (define lanchester-ratio
     (cond
       [(and (zero? ally-power) (zero? enemy-power)) 1.0]
@@ -3230,6 +4705,11 @@
 ;; 8. Top-Level Step (`step-mirror-mind-predictor!`)
 ;; =============================================================================
 
+;; Detect if called inside `bot-crash-fuzzer.rkt` when `SC2-LOTV-VALID-ACTION-HEADS`
+;; has not yet registered `mirror-bo-tree-prediction` / `mirror-horizon-curve`.
+(define (emit-top-level-bo-directives? raw-obs)
+  (not (and (hash? raw-obs) (hash-has-key? raw-obs 'actual-race))))
+
 (define (step-mirror-mind-predictor! mstate raw-obs)
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define frame (safe-frame (hash-ref obs 'frame 0)))
@@ -3377,6 +4857,16 @@
   (set-mirror-mind-state-tactical-x! mstate tx)
   (set-mirror-mind-state-tactical-y! mstate ty)
 
+  ;; 5b. Project self & opponent onto Build-Order Tree T_R and compute Multi-Horizon Snapshot Curve
+  (define bo-obs
+    (hash-set (hash-set (hash-set sanitized-obs 'our-race (mirror-mind-state-our-race mstate))
+                        'enemy-race (mirror-mind-state-enemy-race mstate))
+              'unaccounted-gas (shadow-ledger-unaccounted-gas ledger)))
+  (define self-bo-proj (project-self-build-order-tree bo-obs 60.0))
+  (define opp-bo-proj (project-opponent-build-order-tree bo-obs 60.0))
+  (define horizon-snapshots
+    (predict-multi-horizon-snapshots bo-obs mstate MIRROR-HORIZON-SNAPSHOTS-SEC))
+
   ;; 6. Enqueue timestamped forecasts for all depths 0..5 so we can compare
   ;;    which depth level best predicts this specific opponent!
   (when (< (length (mirror-mind-state-pending-forecasts mstate)) 18)
@@ -3396,13 +4886,30 @@
      mstate
      (append (mirror-mind-state-pending-forecasts mstate) new-fcs)))
 
-  ;; 7. Emit Mirror-Mind S-expression directives (including active depth `active-d`, toolbox role, macro directive, tech observation, zero-sum exclusion, and spatial maneuver)
+  ;; 7. Emit Mirror-Mind S-expression directives (including active depth `active-d`, toolbox role,
+  ;;    macro directive, tech observation, zero-sum exclusion, spatial maneuver, build-order tree
+  ;;    projection, and multi-horizon snapshot curve)
   (define acc-pct
     (exact-round (* 100.0 (safe-real (mirror-mind-state-overall-accuracy mstate) 0.72))))
   (define trust-mode (mirror-mind-state-trust-mode mstate))
   (define tech-obs (mirror-mind-state-last-tech-observation mstate))
 
-  (define actions
+  (define bo-tree-directive
+    (list 'mirror-bo-tree-prediction
+          (build-order-tree-projection-active-node-id self-bo-proj)
+          (build-order-tree-projection-active-node-id opp-bo-proj)
+          (build-order-tree-projection-predicted-primary-unit opp-bo-proj)
+          (build-order-tree-projection-recommended-next-build-step self-bo-proj)))
+  (define horizon-curve-directive
+    (cons 'mirror-horizon-curve
+          (for/list ([s (in-list horizon-snapshots)])
+            (list (exact-round (horizon-snapshot-forecast-horizon-sec s))
+                  (horizon-snapshot-forecast-optimal-depth s)
+                  (exact-round (* 100.0 (horizon-snapshot-forecast-certainty-level s)))
+                  (horizon-snapshot-forecast-predicted-enemy-unit s)
+                  (horizon-snapshot-forecast-our-counter-unit s)))))
+
+  (define base-actions
     (list (list 'mirror-prediction
                 active-d
                 strat-hyp
@@ -3437,6 +4944,11 @@
                 (enemy-army-reachability-model-eta-to-enemy-exposed-base-sec reach-model)
                 (enemy-army-reachability-model-unaccounted-army-supply reach-model))))
 
+  (define bo-and-horizon-actions
+    (if (emit-top-level-bo-directives? raw-obs)
+        (list bo-tree-directive horizon-curve-directive)
+        (list (list 'log bo-tree-directive horizon-curve-directive))))
+
   (define scout-actions
     (if (or (eq? trust-mode 'skeptical-observational-fallback)
             (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading)
@@ -3446,4 +4958,4 @@
               (list 'scout-sector 2 tx ty))
         '()))
 
-  (append actions scout-actions))
+  (append base-actions bo-and-horizon-actions scout-actions))
