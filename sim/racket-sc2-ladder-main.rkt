@@ -956,6 +956,29 @@
           (stop-fn))))))
 
 (define (run-racket-sc2-cli [argv (current-command-line-arguments)])
+  ;; When launched as a standalone compiled ELF binary (`/path/to/bot_dir/Mothman-Z`),
+  ;; chdir into the binary's directory if `config.json` resides there and ensure `./data` exists.
+  (define run-file-path
+    (with-handlers ([exn:fail? (lambda (_e) #f)])
+      (path->complete-path (find-system-path 'run-file))))
+  (when run-file-path
+    (define exe-dir (path-only run-file-path))
+    (when (and exe-dir
+               (not (file-exists? "config.json"))
+               (file-exists? (build-path exe-dir "config.json")))
+      (current-directory exe-dir)))
+  (with-handlers ([exn:fail? (lambda (_e) (void))])
+    (make-directory* "data"))
+
+  (define run-file-name
+    (and run-file-path
+         (let ([fn (file-name-from-path run-file-path)])
+           (and fn (path->string fn)))))
+  (define argv0-bot-name
+    (and run-file-name
+         (member run-file-name '("Mothman" "Mothman-X" "Mothman-Z" "Mothman-T" "Mothman-P" "Mothman-R"))
+         run-file-name))
+
   (define game-port #f)
   (define start-port #f)
   (define ladder-server "127.0.0.1")
@@ -974,9 +997,10 @@
   (define realtime? #f)
   (define step-size 4)
   (define dry-run? #f)
+  (define ipc-sexp? #f)
 
   (command-line
-   #:program "racket-sc2-ladder-main"
+   #:program (or argv0-bot-name "racket-sc2-ladder-main")
    #:argv argv
    #:once-each
    [("--GamePort") gp "SC2 GamePort for AI Arena / WebSocket"
@@ -1013,6 +1037,8 @@
                                 (set! realtime? #t)]
    [("--step-size") ss "Game loops per RequestStep"
                     (set! step-size (max 1 (or (string->number ss) 4)))]
+   [("--ipc-sexp") "Run line-oriented stdin/stdout S-expression IPC loop"
+                   (set! ipc-sexp? #t)]
    [("--dry-run") "Verify configuration and runtime without connecting to SC2"
                   (set! dry-run? #t)]
    #:args _rest
@@ -1021,9 +1047,10 @@
   (define effective-max-loops
     (or max-loops (if computer-opponent? 4032 0)))
 
-  (define cfg (load-bot-config bot-name))
+  (define effective-bot-hint (or bot-name argv0-bot-name))
+  (define cfg (load-bot-config effective-bot-hint))
   (define resolved-bot-name
-    (or bot-name (hash-ref cfg 'BotName "Mothman")))
+    (or bot-name (hash-ref cfg 'BotName #f) argv0-bot-name "Mothman"))
   (define resolved-bot-path
     (or bot-file (hash-ref cfg 'BotPath "bots/Mothman.rkt")))
   (define-values (inferred-race inferred-posture)
@@ -1034,6 +1061,29 @@
     (or posture-override inferred-posture))
 
   (cond
+    [ipc-sexp?
+     (define rt
+       (make-live-bot-runtime #:bot-name (string->symbol resolved-bot-name)
+                              #:race (string->symbol resolved-race)
+                              #:initial-posture (string->symbol resolved-posture)))
+     (let loop ()
+       (define line (read-line (current-input-port) 'any))
+       (unless (eof-object? line)
+         (define trimmed (string-trim line))
+         (cond
+           [(or (string=? trimmed "") (string=? trimmed "(quit)"))
+            (void)]
+           [else
+            (with-handlers ([exn:fail? (lambda (_e)
+                                         (printf "()\n")
+                                         (flush-output))])
+              (define sexp (read (open-input-string trimmed)))
+              (if (equal? sexp '(quit))
+                  (void)
+                  (let ([cmds (runtime-step-sexp! rt sexp)])
+                    (printf "~s\n" cmds)
+                    (flush-output)
+                    (loop))))])))]
     [dry-run?
      (define rt
       (make-live-bot-runtime #:bot-name (string->symbol resolved-bot-name)
@@ -1072,7 +1122,7 @@
      res]
     [else
      (error 'racket-sc2-ladder-main
-            "Specify --GamePort <port>, --ComputerOpponent, or --dry-run")]))
+            "Specify --GamePort <port>, --ComputerOpponent, --ipc-sexp, or --dry-run")]))
 
 (module+ main
   (void (run-racket-sc2-cli)))

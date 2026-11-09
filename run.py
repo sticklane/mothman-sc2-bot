@@ -38,59 +38,40 @@ def load_bot_config(variant_name: str = None) -> dict:
     return cfg
 
 
-def resolve_native_racket_command(extra_argv: list[str]) -> tuple[str, list[str]] | None:
+def resolve_native_racket_command(extra_argv: list[str], variant_name: str = None) -> tuple[str, list[str]] | None:
     """
-    Locate either the bundled portable `racket_runtime/bin/racket` (unpacking
-    `racket_runtime.tar.xz` if needed) or `/home/antigravity/toolchains/racket/bin/racket`,
-    and return `(exe_path, argv_list)` for `os.execv`.
+    Locate the standalone compiled native Linux x86_64 ELF binary (`<BotName>`
+    or `ladder/.cache/mothman_standalone_elf`), the bundled `racket_runtime/bin/racket`,
+    or `/home/antigravity/toolchains/racket_full/bin/racket`, and return
+    `(exe_path, argv_list)` for `os.execv`.
     """
+    elf_candidates = []
+    if variant_name:
+        elf_candidates.append(ROOT_DIR / variant_name)
+    for name in ("Mothman", "Mothman-X", "Mothman-Z", "Mothman-T", "Mothman-P", "Mothman-R"):
+        elf_candidates.append(ROOT_DIR / name)
+    elf_candidates.append(ROOT_DIR / "ladder" / ".cache" / "mothman_standalone_elf")
+
+    for cand in elf_candidates:
+        if cand.exists() and cand.is_file() and cand.stat().st_size >= 10_000_000:
+            try:
+                os.chmod(cand, 0o755)
+            except Exception:
+                pass
+            exe = str(cand)
+            return (exe, [exe] + extra_argv)
+
     ladder_script = ROOT_DIR / "sim" / "racket-sc2-ladder-main.rkt"
     if not ladder_script.exists():
         return None
 
-    rt_dir = ROOT_DIR / "racket_runtime"
-    rt_bin = rt_dir / "bin" / "racket"
-    rt_archive = ROOT_DIR / "racket_runtime.tar.xz"
-    if not rt_bin.exists() and rt_archive.exists():
-        try:
-            with tarfile.open(rt_archive, "r:xz") as tf:
-                tf.extractall(path=ROOT_DIR)
-        except Exception:
-            pass
-
-    if rt_bin.exists():
-        try:
-            os.chmod(rt_bin, 0o755)
-            etc_dir = rt_dir / "etc"
-            etc_dir.mkdir(parents=True, exist_ok=True)
-            cfg_rktd = etc_dir / "config.rktd"
-            if not cfg_rktd.exists():
-                cfg_rktd.write_text("#hash()\n", encoding="utf-8")
-            collects_dir = rt_dir / "collects"
-            sc_bot_collect = collects_dir / "sc-bot"
-            if not sc_bot_collect.exists() and (ROOT_DIR / "sc-bot").exists():
-                shutil.copytree(ROOT_DIR / "sc-bot", sc_bot_collect)
-            exe = str(rt_bin)
-            return (
-                exe,
-                [
-                    exe,
-                    "-X",
-                    str(collects_dir),
-                    "-G",
-                    str(etc_dir),
-                    str(ladder_script),
-                ]
-                + extra_argv,
-            )
-        except Exception:
-            pass
-
-    sys_racket = "/home/antigravity/toolchains/racket/bin/racket"
-    if not os.path.exists(sys_racket):
-        sys_racket = shutil.which("racket")
-    if sys_racket and os.path.exists(sys_racket):
-        return (sys_racket, [sys_racket, str(ladder_script)] + extra_argv)
+    for rk_cand in (
+        "/home/antigravity/toolchains/racket_full/bin/racket",
+        "/home/antigravity/toolchains/racket/bin/racket",
+        shutil.which("racket"),
+    ):
+        if rk_cand and os.path.exists(rk_cand):
+            return (rk_cand, [rk_cand, str(ladder_script)] + extra_argv)
 
     return None
 

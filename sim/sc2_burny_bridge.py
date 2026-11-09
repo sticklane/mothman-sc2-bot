@@ -949,7 +949,6 @@ class SC2BurnySexpBridge:
 
     def _resolve_ipc_command(self, ipc_script: Path) -> List[str]:
         import shutil
-        import tarfile
 
         bot_args = [
             "--bot",
@@ -960,44 +959,31 @@ class SC2BurnySexpBridge:
             self.posture_str,
         ]
 
-        # 1. Local system / toolchain Racket (fastest when pre-installed)
-        sys_racket = RACKET_BIN if os.path.exists(RACKET_BIN) else shutil.which("racket")
-        if sys_racket and os.path.exists(sys_racket):
-            return [sys_racket, str(ipc_script)] + bot_args
+        # 1. Standalone compiled native Linux x86_64 ELF binary (`<BotName> --ipc-sexp`)
+        for elf_cand in (
+            ROOT_DIR / "Mothman",
+            ROOT_DIR / "Mothman-X",
+            ROOT_DIR / "Mothman-Z",
+            ROOT_DIR / "Mothman-T",
+            ROOT_DIR / "Mothman-P",
+            ROOT_DIR / "Mothman-R",
+            ROOT_DIR / "ladder" / ".cache" / "mothman_standalone_elf",
+        ):
+            if elf_cand.exists() and elf_cand.is_file() and elf_cand.stat().st_size >= 10_000_000:
+                try:
+                    os.chmod(elf_cand, 0o755)
+                except Exception:
+                    pass
+                return [str(elf_cand), "--ipc-sexp"] + bot_args
 
-        # 2. Bundled AI Arena portable Linux x86_64 Racket runtime (racket_runtime/ or racket_runtime.tar.xz)
-        rt_dir = ROOT_DIR / "racket_runtime"
-        rt_bin = rt_dir / "bin" / "racket"
-        rt_archive = ROOT_DIR / "racket_runtime.tar.xz"
-        if not rt_bin.exists() and rt_archive.exists():
-            try:
-                with tarfile.open(rt_archive, "r:xz") as tf:
-                    tf.extractall(path=ROOT_DIR)
-            except Exception:
-                pass
-
-        if rt_bin.exists():
-            try:
-                os.chmod(rt_bin, 0o755)
-                etc_dir = rt_dir / "etc"
-                etc_dir.mkdir(parents=True, exist_ok=True)
-                cfg_rktd = etc_dir / "config.rktd"
-                if not cfg_rktd.exists():
-                    cfg_rktd.write_text("#hash()\n", encoding="utf-8")
-                collects_dir = rt_dir / "collects"
-                sc_bot_collect = collects_dir / "sc-bot"
-                if not sc_bot_collect.exists() and (ROOT_DIR / "sc-bot").exists():
-                    shutil.copytree(ROOT_DIR / "sc-bot", sc_bot_collect)
-                return [
-                    str(rt_bin),
-                    "-X",
-                    str(collects_dir),
-                    "-G",
-                    str(etc_dir),
-                    str(ipc_script),
-                ] + bot_args
-            except Exception:
-                pass
+        # 2. Local system / toolchain Racket
+        for rk_cand in (
+            "/home/antigravity/toolchains/racket_full/bin/racket",
+            RACKET_BIN,
+            shutil.which("racket"),
+        ):
+            if rk_cand and os.path.exists(rk_cand):
+                return [rk_cand, str(ipc_script)] + bot_args
 
         # 3. Cross-platform pure-Python S-expression IPC fallback
         fallback_py = ROOT_DIR / "sim" / "racket_sexp_fallback.py"

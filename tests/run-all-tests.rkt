@@ -4,6 +4,11 @@
          racket/list
          racket/set
          racket/math
+         racket/file
+         racket/path
+         racket/port
+         racket/string
+         racket/system
          "../compiler/syntax.rkt"
          "../lib/okasaki-sc.rkt"
          "../lib/sc2-game-constants.rkt"
@@ -22,6 +27,7 @@
          "../sim/deterministic-sc-sim.rkt"
          "../tools/sc2-replay-decompiler.rkt"
          "../lib/state-machine-verifier.rkt"
+         "../ladder/build-aiarena-zip.rkt"
          (except-in "../lib/bot-crash-fuzzer.rkt"
                     compute-shadow-ledger
                     step-zerospace-mastermind!))
@@ -2929,6 +2935,85 @@
   (define ora-vs-roach  (sim-unit-weapon-dps-vs sim-oracle sim-roach))
   (assert-true! (< (abs (- (/ ora-vs-marine ora-vs-roach) 1.55)) 1e-4)
                 "Oracle vs Light Marine must apply 1.55x Anti-Light multiplier compared to Armored Roach"))
+
+;; =============================================================================
+;; 19. AI Arena BotZip Size Limit & Standalone Native ELF Binary Verification
+;; =============================================================================
+
+(run-suite "19. AI Arena BotZip Size Limit (<= 25 MB / 50 MiB) & Standalone Native ELF Binary"
+  ;; 1. Verify constants enforce a strict safety margin well below AI Arena's 50 MiB standard cap
+  (assert-eq! AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024)
+              "AI Arena standard tier max zip size must be 50 MiB (52,428,800 bytes)")
+  (assert-true! (<= MAX-BOT-ZIP-SIZE-BYTES (* 25 1000 1000))
+                "Repository BotZip safety limit must be <= 25 MB")
+  (assert-true! (< MAX-BOT-ZIP-SIZE-BYTES AIARENA-STANDARD-MAX-ZIP-BYTES)
+                "MAX-BOT-ZIP-SIZE-BYTES must be strictly less than AIARENA-STANDARD-MAX-ZIP-BYTES")
+
+  ;; 2. Verify all 6 ladder BotZip archives exist and obey size & structure limits
+  (for ([row (in-list VARIANTS)])
+    (define bname (first row))
+    (define zpath (build-path "ladder" (format "~a.zip" bname)))
+    (assert-true! (file-exists? zpath)
+                  (format "Ladder BotZip ~a must exist on disk" zpath))
+    (define zsize (file-size zpath))
+    (assert-true! (>= zsize MIN-BOT-ZIP-SIZE-BYTES)
+                  (format "~a (~a bytes) must be >= ~a bytes (standalone ELF floor)"
+                          zpath zsize MIN-BOT-ZIP-SIZE-BYTES))
+    (assert-true! (<= zsize MAX-BOT-ZIP-SIZE-BYTES)
+                  (format "~a (~a bytes) must be <= ~a bytes (25 MB safety ceiling)"
+                          zpath zsize MAX-BOT-ZIP-SIZE-BYTES))
+    (assert-true! (< zsize AIARENA-STANDARD-MAX-ZIP-BYTES)
+                  (format "~a (~a bytes) must be < ~a bytes (50 MiB AI Arena limit)"
+                          zpath zsize AIARENA-STANDARD-MAX-ZIP-BYTES))
+    (assert-eq! (validate-bot-zip-archive! zpath #:bot-name bname) #t
+                (format "validate-bot-zip-archive! must pass for ~a" zpath)))
+
+  ;; 3. Verify validate-bot-zip-archive! rejects oversized, undersized, non-ELF, and nested-zip archives
+  (define sample-zip (build-path "ladder" "Mothman-Z.zip"))
+  (define oversize-rejected?
+    (with-handlers ([exn:fail? (lambda (_e) #t)])
+      (validate-bot-zip-archive! sample-zip #:bot-name "Mothman-Z" #:max-bytes 1024)
+      #f))
+  (assert-eq! oversize-rejected? #t
+              "validate-bot-zip-archive! must reject archives that exceed #:max-bytes")
+
+  (define undersize-rejected?
+    (with-handlers ([exn:fail? (lambda (_e) #t)])
+      (validate-bot-zip-archive! sample-zip #:bot-name "Mothman-Z" #:min-bytes 90000000)
+      #f))
+  (assert-eq! undersize-rejected? #t
+              "validate-bot-zip-archive! must reject archives smaller than #:min-bytes")
+
+  (define bad-elf-rejected?
+    (with-handlers ([exn:fail? (lambda (_e) #t)])
+      (validate-bot-zip-archive! sample-zip #:bot-name "Mothman-Z" #:elf-bytes #"#!/bin/sh\necho bad\n")
+      #f))
+  (assert-eq! bad-elf-rejected? #t
+              "validate-bot-zip-archive! must reject non-ELF or non-.rackprog binaries")
+
+  (define nested-zip-rejected?
+    (with-handlers ([exn:fail? (lambda (_e) #t)])
+      (validate-bot-zip-archive! sample-zip
+                                 #:bot-name "Mothman-Z"
+                                 #:entry-names '("config.json" "sc-bot/ladder/Mothman-Z.zip"))
+      #f))
+  (assert-eq! nested-zip-rejected? #t
+              "validate-bot-zip-archive! must reject nested .zip files inside a BotZip")
+
+  ;; 4. Verify standalone compiled native ELF binary runs directly without Racket or Python
+  (define standalone-elf (build-path "ladder" ".cache" "mothman_standalone_elf"))
+  (assert-true! (file-exists? standalone-elf)
+                "Standalone compiled native ELF binary ladder/.cache/mothman_standalone_elf must exist")
+  (assert-true! (>= (file-size standalone-elf) MIN-STANDALONE-ELF-BYTES)
+                "Standalone compiled native ELF binary must be >= 10 MB")
+  (define dry-run-out
+    (with-output-to-string
+      (lambda ()
+        (system* standalone-elf "--BotName" "Mothman-Z" "--dry-run"))))
+  (assert-true! (string-contains? dry-run-out "\"status\":\"DRY_RUN_OK\"")
+                "Standalone ELF binary --dry-run must output status DRY_RUN_OK")
+  (assert-true! (string-contains? dry-run-out "\"engine\":\"racket_native_protobuf_ws\"")
+                "Standalone ELF binary --dry-run must report racket_native_protobuf_ws engine"))
 
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"

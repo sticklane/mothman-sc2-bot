@@ -2383,13 +2383,26 @@
 ;;     Loaded from `data/pro_build_orders.sexp` (mined from 1,798 LotV replays)
 ;; =============================================================================
 
-(define-runtime-path PRO-BUILD-ORDERS-SEXP-PATH "../data/pro_build_orders.sexp")
+(require (for-syntax racket/base racket/path))
+
+(define-syntax (compile-time-pro-build-order-db stx)
+  (define src (syntax-source stx))
+  (define src-dir (if (path? src) (or (path-only src) (current-directory)) (current-directory)))
+  (define p (simplify-path (build-path src-dir ".." "data" "pro_build_orders.sexp")))
+  (define db
+    (with-handlers ([exn:fail? (lambda (_) #f)])
+      (and (file-exists? p) (with-input-from-file p read))))
+  #`'#,db)
+
+(define COMPILED-PRO-BUILD-ORDER-DB (compile-time-pro-build-order-db))
 
 (define PRO-BUILD-ORDER-DB
-  (with-handlers ([exn:fail? (lambda (_) '(pro-build-order-database (matchups)))])
-    (if (file-exists? PRO-BUILD-ORDERS-SEXP-PATH)
-        (with-input-from-file PRO-BUILD-ORDERS-SEXP-PATH read)
-        '(pro-build-order-database (matchups)))))
+  (or COMPILED-PRO-BUILD-ORDER-DB
+      (with-handlers ([exn:fail? (lambda (_) '(pro-build-order-database (matchups)))])
+        (cond
+          [(file-exists? "data/pro_build_orders.sexp")
+           (with-input-from-file "data/pro_build_orders.sexp" read)]
+          [else '(pro-build-order-database (matchups))]))))
 
 (struct pro-bo-goal
   (kind              ;; 'build | 'expand | 'morph | 'train | 'research

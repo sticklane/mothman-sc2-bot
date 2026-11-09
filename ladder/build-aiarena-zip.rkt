@@ -21,7 +21,8 @@
 ;;    `/tmp` or `/var/tmp` or invoking Python.
 ;; =============================================================================
 
-(require racket/cmdline
+(require racket/bytes
+         racket/cmdline
          racket/file
          racket/list
          racket/path
@@ -30,15 +31,35 @@
          racket/string
          racket/system
          compiler/cm
+         compiler/embed
          file/gzip
          json)
+
+(provide AIARENA-STANDARD-MAX-ZIP-BYTES
+         AIARENA-BRONZE-MAX-ZIP-BYTES
+         MAX-BOT-ZIP-SIZE-BYTES
+         MIN-BOT-ZIP-SIZE-BYTES
+         MIN-STANDALONE-ELF-BYTES
+         VARIANTS
+         validate-bot-zip-archive!
+         build-all-aiarena-zips!)
 
 (define-runtime-path LADDER-DIR ".")
 (define ROOT-DIR (simplify-path (build-path LADDER-DIR "..")))
 (define CACHE-DIR (build-path LADDER-DIR ".cache"))
 
+;; AI Arena BotZip size limits:
+;; - Standard tier max upload: 50 MiB (52,428,800 bytes)
+;; - Bronze Patreon max upload: 100 MiB (104,857,600 bytes)
+;; - Strict repository safety budget: 25 MB (25,000,000 bytes) max, 3 MB (3,000,000 bytes) min
+(define AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024))
+(define AIARENA-BRONZE-MAX-ZIP-BYTES   (* 100 1024 1024))
+(define MAX-BOT-ZIP-SIZE-BYTES         25000000)
+(define MIN-BOT-ZIP-SIZE-BYTES         3000000)
+(define MIN-STANDALONE-ELF-BYTES       10000000)
+
 (define INCLUDE-DIRS '("sc-bot" "compiler" "lib" "sim" "bots" "ffi"))
-(define INCLUDE-TOP-FILES '("run.py" "main.rkt" "info.rkt"))
+(define INCLUDE-TOP-FILES '("run.py" "main.rkt" "info.rkt" "data/pro_build_orders.sexp"))
 
 (define VARIANTS
   '(("Mothman"   "Random"  "bots/Mothman.rkt")
@@ -207,28 +228,85 @@
   (printf "  -> All .zo bytecode modules up to date.\n")
   #t)
 
-(define (compile-cpplinux-elf bot-name)
+;; -----------------------------------------------------------------------------
+;; 2b. Standalone Native Linux x86_64 ELF Compilation (`compiler/embed`)
+;;     Embeds the Racket CS runtime + all `#lang sc-bot` modules directly into
+;;     the `.rackprog` section of `<BotName>` with zero external runtime archive
+;;     or fallback interpreter needed.
+;; -----------------------------------------------------------------------------
+
+(define (compile-standalone-racket-elf!)
   (make-directory* CACHE-DIR)
-  (define cpp-src (build-path LADDER-DIR "cpplinux_launcher.cpp"))
-  (define out-bin (build-path CACHE-DIR (format "~a_elf" bot-name)))
-  (define g++-path (or (find-executable-path "g++")
-                       (find-executable-path "clang++")))
-  (cond
-    [(and (file-exists? cpp-src) g++-path)
-     (define ok?
-       (system* g++-path
-                "-O2" "-s" "-std=c++17"
-                (format "-DBOT_VARIANT_NAME=\"~a\"" bot-name)
-                (path->string cpp-src)
-                "-o" (path->string out-bin)))
-     (when (and ok? (file-exists? out-bin))
-       (file-or-directory-permissions out-bin #o755))
-     (and ok? (file-exists? out-bin) out-bin)]
-    [else #f]))
+  (current-directory ROOT-DIR)
+  (define out-bin (build-path CACHE-DIR "mothman_standalone_elf"))
+  (printf "  -> Compiling standalone native Linux x86_64 ELF executable via compiler/embed...\n")
+  (create-embedding-executable
+   out-bin
+   #:modules (list (list #f (build-path ROOT-DIR "sim/racket-sc2-ladder-main.rkt") '(main))
+                   (list #f (build-path ROOT-DIR "bots/Mothman-Z.rkt"))
+                   (list #f (build-path ROOT-DIR "bots/Mothman-T.rkt"))
+                   (list #f (build-path ROOT-DIR "bots/Mothman-P.rkt"))
+                   (list #f (build-path ROOT-DIR "bots/Mothman-R.rkt"))
+                   (list #f (build-path ROOT-DIR "bots/Mothman.rkt")))
+   #:configure-via-first-module? #t
+   #:literal-expression
+   (parameterize ([current-namespace (make-base-namespace)])
+     (compile '(namespace-require '(submod 'racket-sc2-ladder-main main))))
+   #:cmdline '("-U" "--"))
+  (unless (and (file-exists? out-bin)
+               (>= (file-size out-bin) MIN-STANDALONE-ELF-BYTES))
+    (error 'compile-standalone-racket-elf!
+           "Failed to build standalone ELF executable ~a" out-bin))
+  (file-or-directory-permissions out-bin #o755)
+  out-bin)
 
 ;; -----------------------------------------------------------------------------
-;; 3. Collect Common Files & Build Each Variant Zip
+;; 3. Collect Common Files, Validate Size/Binary Bounds & Build Each Variant Zip
 ;; -----------------------------------------------------------------------------
+
+(define (bytes-contains-subbytes? haystack needle)
+  (define hlen (bytes-length haystack))
+  (define nlen (bytes-length needle))
+  (and (>= hlen nlen)
+       (for/or ([i (in-range 0 (add1 (- hlen nlen)))])
+         (bytes=? (subbytes haystack i (+ i nlen)) needle))))
+
+(define (validate-bot-zip-archive! zip-path
+                                   #:bot-name [bot-name #f]
+                                   #:elf-bytes [elf-bytes #f]
+                                   #:entry-names [entry-names '()]
+                                   #:max-bytes [max-bytes MAX-BOT-ZIP-SIZE-BYTES]
+                                   #:min-bytes [min-bytes MIN-BOT-ZIP-SIZE-BYTES])
+  (unless (file-exists? zip-path)
+    (error 'validate-bot-zip-archive! "BotZip archive does not exist: ~a" zip-path))
+  (define sz (file-size zip-path))
+  (when (> sz AIARENA-STANDARD-MAX-ZIP-BYTES)
+    (error 'validate-bot-zip-archive!
+           "BotZip ~a (~a bytes) exceeds AI Arena 50 MiB standard upload limit (~a bytes)"
+           zip-path sz AIARENA-STANDARD-MAX-ZIP-BYTES))
+  (when (> sz max-bytes)
+    (error 'validate-bot-zip-archive!
+           "BotZip ~a (~a bytes) exceeds strict safety budget (~a bytes)"
+           zip-path sz max-bytes))
+  (when (< sz min-bytes)
+    (error 'validate-bot-zip-archive!
+           "BotZip ~a (~a bytes) is smaller than minimum standalone ELF archive floor (~a bytes)"
+           zip-path sz min-bytes))
+  (when elf-bytes
+    (unless (and (>= (bytes-length elf-bytes) MIN-STANDALONE-ELF-BYTES)
+                 (bytes=? (subbytes elf-bytes 0 4) #"\x7fELF")
+                 (bytes-contains-subbytes? elf-bytes #".rackprog"))
+      (error 'validate-bot-zip-archive!
+             "BotZip ~a executable ~a is not a standalone Racket CS ELF binary with embedded .rackprog section"
+             zip-path bot-name)))
+  (for ([ename (in-list entry-names)])
+    (when (or (string-suffix? ename ".zip")
+              (string-suffix? ename ".SC2Replay")
+              (string-suffix? ename ".tar.xz"))
+      (error 'validate-bot-zip-archive!
+             "BotZip ~a contains forbidden nested archive/replay artifact: ~a"
+             zip-path ename)))
+  #t)
 
 (define (collect-shared-tree-entries)
   (define specs '())
@@ -245,14 +323,7 @@
       (define mode (if (equal? top-f "run.py") #o100755 #o100644))
       (add-spec! top-f (file->bytes p) #f mode)))
 
-  ;; Bundled portable Racket runtime (`racket_runtime.tar.xz`)
-  (define rt-archive (build-path CACHE-DIR "racket_runtime.tar.xz"))
-  (unless (file-exists? rt-archive)
-    (error 'collect-shared-tree-entries
-           "Missing ladder/.cache/racket_runtime.tar.xz — required for native Racket BotZip execution on AI Arena"))
-  (add-spec! "racket_runtime.tar.xz" (file->bytes rt-archive) #t #o100644)
-
-  ;; Source & bytecode directories
+  ;; Source & bytecode directories (excluding lakefillq* compiler research files)
   (for ([dname (in-list INCLUDE-DIRS)])
     (define dpath (build-path ROOT-DIR dname))
     (when (directory-exists? dpath)
@@ -265,6 +336,8 @@
                       (string-suffix? rel ".o")
                       (string-suffix? rel ".zip")
                       (string-suffix? rel ".SC2Replay")
+                      (string-suffix? rel ".tar.xz")
+                      (string-prefix? rel "compiler/lakefillq")
                       ;; In `sc-bot/`, only pack `sc-bot/main.rkt` and `sc-bot/compiled/*`
                       (and (string-prefix? rel "sc-bot/")
                            (not (equal? rel "sc-bot/main.rkt"))
@@ -274,29 +347,33 @@
 
   (reverse specs))
 
-(define (build-variant-zip! bot-name bot-race bot-path shared-entries)
+(define (build-variant-zip! bot-name bot-race bot-path elf-bstr shared-entries)
   (define zip-path (build-path LADDER-DIR (format "~a.zip" bot-name)))
   (define config-bstr
     (string->bytes/utf-8
-     (format "{\n  \"BotName\": ~s,\n  \"BotRace\": ~s,\n  \"BotPath\": ~s\n}\n"
-             bot-name bot-race bot-path)))
+      (format "{\n  \"BotName\": ~s,\n  \"BotRace\": ~s,\n  \"BotPath\": ~s\n}\n"
+              bot-name bot-race bot-path)))
   (define seed-data-bstr
     (string->bytes/utf-8
-     (format "{\n  \"bot_name\": ~s,\n  \"opponents\": {}\n}\n"
-             bot-name)))
-  (define elf-path (compile-cpplinux-elf bot-name))
+      (format "{\n  \"bot_name\": ~s,\n  \"opponents\": {}\n}\n"
+              bot-name)))
   (define header-entries
-    (append
-     (list (make-zip-entry-spec "config.json" config-bstr #f #o100644))
-     (if (and elf-path (file-exists? elf-path))
-         (list (make-zip-entry-spec bot-name (file->bytes elf-path) #f #o100755))
-         '())
-     (list (make-zip-entry-spec "data/mirror_mind_opponents.json" seed-data-bstr #f #o100644))))
+    (list (make-zip-entry-spec "config.json" config-bstr #f #o100644)
+          (make-zip-entry-spec bot-name elf-bstr #f #o100755)
+          (make-zip-entry-spec "data/mirror_mind_opponents.json" seed-data-bstr #f #o100644)))
   (define all-entries (append header-entries shared-entries))
   (write-pkzip-archive! zip-path all-entries)
+  (validate-bot-zip-archive! zip-path
+                             #:bot-name bot-name
+                             #:elf-bytes elf-bstr
+                             #:entry-names (map zip-entry-spec-name all-entries))
   (define sz (file-size zip-path))
   (define sz-mb (/ (round (* 100.0 (/ sz (* 1024.0 1024.0)))) 100.0))
-  (printf "  -> Built ~a (~a MB, ~a files)\n" (path->string zip-path) sz-mb (length all-entries))
+  (printf "  -> Built ~a (~a MB, ~a files, standalone ELF=~a MB)\n"
+          (path->string zip-path)
+          sz-mb
+          (length all-entries)
+          (/ (round (* 100.0 (/ (bytes-length elf-bstr) (* 1024.0 1024.0)))) 100.0))
   (hash 'bot_name bot-name
         'race bot-race
         'bot_path bot-path
@@ -304,20 +381,14 @@
         'files_added (length all-entries)
         'size_bytes sz
         'size_mb sz-mb
-        'cpplinux_binary_included (and elf-path (file-exists? elf-path) #t)
-        'bundled_portable_racket (file-exists? (build-path CACHE-DIR "racket_runtime.tar.xz"))))
+        'standalone_elf_bytes (bytes-length elf-bstr)
+        'cpplinux_binary_included #t))
 
-(module+ main
-  (define build-all? #t)
-  (define target-variant #f)
-  (command-line
-   #:program "build-aiarena-zip.rkt"
-   #:once-each
-   [("--all-races") "Build all race-specific zips plus Mothman.zip" (set! build-all? #t)]
-   [("--variant") v "Build a single variant only" (set! target-variant v)])
-
+(define (build-all-aiarena-zips! [target-variant #f])
   (precompile-all-racket-zo!)
-  (printf "[2/4] Building AI Arena BotZip archives in pure Racket...\n")
+  (printf "[2/4] Building standalone native ELF + AI Arena BotZip archives in pure Racket...\n")
+  (define elf-path (compile-standalone-racket-elf!))
+  (define elf-bstr (file->bytes elf-path))
   (define shared-entries (collect-shared-tree-entries))
   (define selected-variants
     (if target-variant
@@ -325,6 +396,18 @@
         VARIANTS))
   (define results
     (for/list ([row (in-list selected-variants)])
-      (build-variant-zip! (first row) (second row) (third row) shared-entries)))
-  (printf "[3/4] Verified ~a AI Arena BotZip archives built in pure Racket.\n" (length results))
-  (printf "[4/4] Done.\n"))
+      (build-variant-zip! (first row) (second row) (third row) elf-bstr shared-entries)))
+  (printf "[3/4] Verified ~a AI Arena BotZip archives (all <= ~a MB limit).\n"
+          (length results)
+          (/ MAX-BOT-ZIP-SIZE-BYTES 1000000.0))
+  (printf "[4/4] Done.\n")
+  results)
+
+(module+ main
+  (define target-variant #f)
+  (command-line
+   #:program "build-aiarena-zip.rkt"
+   #:once-each
+   [("--all-races") "Build all race-specific zips plus Mothman.zip" (void)]
+   [("--variant") v "Build a single variant only" (set! target-variant v)])
+  (void (build-all-aiarena-zips! target-variant)))

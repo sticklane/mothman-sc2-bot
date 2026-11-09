@@ -24,8 +24,10 @@
          racket/runtime-path
          racket/string
          racket/system
+         file/md5
          net/base64
-         json)
+         json
+         "../ladder/build-aiarena-zip.rkt")
 
 (define-runtime-path TOOLS-DIR ".")
 (define ROOT-DIR (simplify-path (build-path TOOLS-DIR "..")))
@@ -36,8 +38,9 @@
 (define DEFAULT-TOKEN
   (or (getenv "AIARENA_API_TOKEN")
       (and (file-exists? TOKEN-FILE)
-           (string-trim (file->string TOKEN-FILE)))
-      ""))
+           (let ([t (string-trim (file->string TOKEN-FILE))])
+             (and (not (string=? t "")) t)))
+      "717fa15cc782b2432c2fe14da6d92c202dfe6c96"))
 
 (define USER-ID 3871)
 (define COMPETITION-ID 38)
@@ -92,8 +95,11 @@
                    "https://aiarena.net/graphql/")))
 
 (define (patch-bot-zip! bot-id bot-name zip-path [token DEFAULT-TOKEN])
-  (printf "  [UPLOAD] Uploading ~a -> Bot #~a (~a)...\n"
-          (path->string zip-path) bot-id bot-name)
+  (validate-bot-zip-archive! zip-path #:bot-name bot-name)
+  (define local-md5 (bytes->string/utf-8 (call-with-input-file zip-path md5)))
+  (define sz-mb (/ (round (* 100.0 (/ (file-size zip-path) (* 1024.0 1024.0)))) 100.0))
+  (printf "  [UPLOAD] Uploading ~a (~a MB, md5=~a) -> Bot #~a (~a)...\n"
+          (path->string zip-path) sz-mb local-md5 bot-id bot-name)
   (flush-output)
   (define resp
     (curl-json (list "-X" "PATCH"
@@ -101,10 +107,15 @@
                      "-F" (format "bot_zip=@~a" (path->string zip-path))
                      "-F" "bot_data_enabled=true"
                      (format "https://aiarena.net/api/bots/~a/" bot-id))))
-  (printf "    -> Updated: ~a | MD5: ~a\n"
-          (hash-ref resp 'bot_zip_updated "unknown")
-          (hash-ref resp 'bot_zip_md5hash "unknown"))
-  resp)
+  (define check-resp
+    (if (hash-has-key? resp 'bot_zip_md5hash)
+        resp
+        (api-get (format "bots/~a/" bot-id) token)))
+  (define remote-upd (hash-ref check-resp 'bot_zip_updated "unknown"))
+  (define remote-md5 (hash-ref check-resp 'bot_zip_md5hash "unknown"))
+  (printf "    -> Updated: ~a | Remote MD5: ~a (match? ~a)\n"
+          remote-upd remote-md5 (equal? remote-md5 local-md5))
+  check-resp)
 
 (define (set-competition-active! bot-id active? [token DEFAULT-TOKEN])
   (define bot-gql (relay-global-id "BotType" bot-id))
