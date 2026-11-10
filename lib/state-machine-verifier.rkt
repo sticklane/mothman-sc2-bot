@@ -27,6 +27,8 @@
          "bot-runtime.rkt"
          "mirror-mind-predictor.rkt"
          "econ-ledger.rkt"
+         "priority-macro-brain.rkt"
+         "sc2-protobuf-ws.rkt"
          "zerospace-mastermind.rkt")
 
 (provide (struct-out verification-check-result)
@@ -1450,6 +1452,354 @@
            pv6-states
            (not pv6-cex)
            pv6-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV7: `PV7-multi-step-escrow-liveness-no-deadlock`
+  ;; Proves across multi-step trajectories for all races (`Zerg`, `Protoss`, `Terran`)
+  ;; that unplaced expansion escrow (`Saving for expansion: ...`) CANNOT deadlock
+  ;; combat unit production or tech progression:
+  ;;   1. If an expansion cannot be placed across consecutive steps, `escrow-age-frames`
+  ;;      monotonically advances and expires within `<= 224` frames (`10s`), immediately
+  ;;      admitting ready combat units and tech upgrades;
+  ;;   2. Whenever `enemy-threat-supply > 0` or `under-base-attack?` holds at any frame
+  ;;      (including mid/late game `frame >= 2500`), expansion escrow is immediately
+  ;;      preempted (`0` frames of combat starvation).
+  ;; ---------------------------------------------------------------------------
+  (define pv7-states 0)
+  (define pv7-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [minerals '(150 225 275 325)]
+         [gas '(50 100 150)]
+         [scenario '(escrow-timeout threat-preemption stale-intel-preemption)])
+    (define rt (make-live-bot-runtime #:race race))
+    (define base-bldg
+      (case race
+        [(Zerg)    (list (hash 'id 100 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500)
+                         (hash 'id 101 'type 'spawning-pool 'x 35.0 'y 35.0 'hp 1000)
+                         (hash 'id 102 'type 'roach-warren 'x 36.0 'y 35.0 'hp 850))]
+        [(Protoss) (list (hash 'id 100 'type 'nexus 'x 32.5 'y 32.5 'hp 2000)
+                         (hash 'id 101 'type 'pylon 'x 35.0 'y 35.0 'hp 400)
+                         (hash 'id 102 'type 'gateway 'x 36.5 'y 35.0 'hp 1000)
+                         (hash 'id 103 'type 'cybernetics-core 'x 38.0 'y 35.0 'hp 1100))]
+        [(Terran)  (list (hash 'id 100 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500)
+                         (hash 'id 101 'type 'supply-depot 'x 35.0 'y 35.0 'hp 400)
+                         (hash 'id 102 'type 'barracks 'x 36.5 'y 35.0 'hp 1000))]))
+    (define worker-sym (case race [(Zerg) 'drone] [(Protoss) 'probe] [(Terran) 'scv]))
+    (define workers-list
+      (for/list ([i (in-range 22)])
+        (hash 'id (+ 1 i) 'type worker-sym 'x (+ 31.0 (modulo i 5)) 'y (+ 31.0 (quotient i 5)) 'hp 40 'dps 5)))
+    (define combat-admitted-within-bound? #f)
+    ;; Seed enemy contact at frame 1800 so `escrow-timeout` isolates pure escrow expiry (`<= 224` frames)
+    ;; while `stale-intel-preemption` leaves enemy contact at frame 0 (`intel-staleness-frames >= 268`).
+    (unless (eq? scenario 'stale-intel-preemption)
+      (set-live-bot-runtime-last-telemetry!
+       rt
+       (hash-set (live-bot-runtime-last-telemetry rt) 'last-enemy-contact-frame 1800)))
+    (for ([step-idx (in-range 16)])
+      (set! pv7-states (add1 pv7-states))
+      (define frame (+ 1800 (* step-idx 24)))
+      (unless (eq? scenario 'stale-intel-preemption)
+        (set-live-bot-runtime-last-telemetry!
+         rt
+         (hash-set (live-bot-runtime-last-telemetry rt) 'last-enemy-contact-frame frame)))
+      (define e-units
+        (if (eq? scenario 'threat-preemption)
+            (list (hash 'id 901 'type 'stalker 'x 36.0 'y 36.0 'hp 160 'dps 14)
+                  (hash 'id 902 'type 'stalker 'x 37.0 'y 36.0 'hp 160 'dps 14))
+            '()))
+      (define obs
+        (hash 'frame frame
+              'minerals minerals
+              'gas gas
+              'supply-used 24
+              'supply-cap 46
+              'mineral-harvesters 16
+              'base-x 32.5
+              'base-y 32.5
+              'natural-x 50.5
+              'natural-y 56.5
+              'enemy-x 160.5
+              'enemy-y 160.5
+              'ally-units workers-list
+              'ally-buildings base-bldg
+              'enemy-units e-units
+              'enemy-buildings '()))
+      (define res (step-live-bot-runtime! rt obs))
+      (define acts (hash-ref res 'actions '()))
+      (define trained-combat?
+        (ormap (lambda (a)
+                 (and (pair? a)
+                      (memq (car a) '(train train-unit))
+                      (not (memq (last a) '(drone probe scv overlord)))))
+               acts))
+      (when trained-combat?
+        (set! combat-admitted-within-bound? #t))
+      ;; Under threat or stale intel, combat unit must be admitted on the VERY FIRST step (step 0)
+      (when (and (= step-idx 0)
+                 (memq scenario '(threat-preemption stale-intel-preemption))
+                 (not trained-combat?))
+        (unless pv7-cex
+          (set! pv7-cex (list 'race race 'scenario scenario 'minerals minerals 'gas gas
+                              'step step-idx 'acts acts)))))
+    (unless combat-admitted-within-bound?
+      (unless pv7-cex
+        (set! pv7-cex (list 'race race 'scenario scenario 'minerals minerals 'gas gas
+                            'reason 'combat-never-admitted-across-trajectory)))))
+  (record! 'PV7-multi-step-escrow-liveness-no-deadlock
+           "Unplaced expansion escrow expires within `<= 224` frames (`10s`) and is immediately preempted on step 0 under enemy threat (`enemy-threat > 0`) or stale opponent intel (`intel-staleness >= 268` with low army), guaranteeing `0` escrow deadlocks"
+           pv7-states
+           (not pv7-cex)
+           pv7-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV8: `PV8-builder-and-scout-order-non-cancellation`
+  ;; Proves across all action-list permutations and worker states that:
+  ;;   1. `translate-bot-actions->sc2-raw-commands` NEVER emits a conflicting
+  ;;      `HARVEST_GATHER (3666)` on a home mineral patch or gas building for a
+  ;;      worker that is executing `build`, `expand`, `resume-halted-building`,
+  ;;      `worker-scout`, or `mineral-harass` in the same step or already holds
+  ;;      an in-flight `BUILD_*` order (`has-build-order? #t`);
+  ;;   2. `step-layer2-economy!` NEVER selects a worker with `has-build-order? #t`
+  ;;      or the active `scout-worker-id` for routine `harvest-mineral` / `harvest-gas`.
+  ;; ---------------------------------------------------------------------------
+  (define pv8-states 0)
+  (define pv8-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [builder-order-First? '(#t #f)]
+         [in-flight-build? '(#t #f)]
+         [worker-role '(build expand resume-halted-building worker-scout mineral-harass)])
+    (set! pv8-states (add1 pv8-states))
+    (define worker-sym (case race [(Zerg) 'drone] [(Protoss) 'probe] [(Terran) 'scv]))
+    (define bldg-sym (case race [(Zerg) 'spawning-pool] [(Protoss) 'pylon] [(Terran) 'supply-depot]))
+    (define w1-id 11)
+    (define w2-id 12)
+    (define home-patch-id 9001)
+    (define enemy-patch-id 9002)
+    (define role-act
+      (case worker-role
+        [(build) (list 'build bldg-sym 38.0 38.0)]
+        [(expand) '(expand 50.5 56.5)]
+        [(resume-halted-building) (list 'resume-halted-building w1-id 501)]
+        [(worker-scout) (list 'worker-scout w1-id 160.5 160.5)]
+        [(mineral-harass) (list 'mineral-harass w1-id 160.5 160.5 140.5 140.5)]))
+    (define harvest-act (list 'harvest-mineral (list w1-id w2-id) home-patch-id))
+    (define gas-act (list 'harvest-gas (list w1-id) 8001))
+    (define rebalance-act (list 'rebalance-gas-to-minerals (list w1-id) home-patch-id))
+    (define actions-list
+      (if builder-order-First?
+          (list role-act harvest-act gas-act rebalance-act)
+          (list harvest-act gas-act rebalance-act role-act)))
+    (define obs-hash
+      (hash 'frame 900
+            'ally-units (list (hash 'id w1-id 'type worker-sym 'x 34.0 'y 34.0 'hp 40
+                                    'has-build-order? in-flight-build?)
+                              (hash 'id w2-id 'type worker-sym 'x 50.0 'y 50.0 'hp 40
+                                    'has-build-order? #t))
+            'mineral-patches (list (hash 'id home-patch-id 'x 30.0 'y 30.0)
+                                   (hash 'id enemy-patch-id 'x 162.0 'y 162.0))))
+    (define raw-cmds (translate-bot-actions->sc2-raw-commands actions-list obs-hash))
+    ;; Check that no raw command sends `HARVEST_GATHER (3666)` on `home-patch-id` or `8001` to `w1-id` or `w2-id`
+    ;; when `in-flight-build?` is #t or when `w1-id` was claimed by `resume-halted-building` / `worker-scout` / `mineral-harass`
+    (define w1-cancelled-by-home-harvest?
+      (ormap (lambda (c)
+               (and (sc2-raw-unit-command? c)
+                    (= (sc2-raw-unit-command-ability-id c) 3666)
+                    (memv (sc2-raw-unit-command-target-unit-tag c) (list home-patch-id 8001))
+                    (memv w1-id (sc2-raw-unit-command-unit-tags c))
+                    (or in-flight-build?
+                        (memq worker-role '(resume-halted-building worker-scout mineral-harass)))))
+             raw-cmds))
+    (define w2-cancelled-by-home-harvest?
+      (ormap (lambda (c)
+               (and (sc2-raw-unit-command? c)
+                    (= (sc2-raw-unit-command-ability-id c) 3666)
+                    (memv w2-id (sc2-raw-unit-command-unit-tags c))))
+             raw-cmds))
+    ;; Also check `step-layer2-economy!` with all workers marked `has-build-order? #t`
+    (define rt (make-live-bot-runtime #:race race))
+    (define step-res
+      (step-live-bot-runtime!
+       rt
+       (hash 'frame 900 'minerals 200 'gas 50 'supply-used 16 'supply-cap 22
+             'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+             'enemy-x 160.5 'enemy-y 160.5
+             'ally-units (list (hash 'id w1-id 'type worker-sym 'x 34.0 'y 34.0 'hp 40 'has-build-order? #t))
+             'ally-buildings (list (hash 'id 100 'type 'nexus 'x 32.5 'y 32.5 'hp 2000))
+             'enemy-units '() 'enemy-buildings '()
+             'mineral-patches (list (hash 'id home-patch-id 'x 30.0 'y 30.0)))))
+    (define rt-acts (hash-ref step-res 'actions '()))
+    (define layer2-harvested-builder?
+      (ormap (lambda (a)
+               (and (pair? a)
+                    (memq (car a) '(harvest-mineral harvest-gas worker-scout))
+                    (equal? (second a) w1-id)))
+             rt-acts))
+    (when (or w1-cancelled-by-home-harvest?
+              w2-cancelled-by-home-harvest?
+              layer2-harvested-builder?)
+      (unless pv8-cex
+        (set! pv8-cex (list 'race race 'builder-order-first? builder-order-First?
+                            'in-flight-build? in-flight-build? 'role worker-role
+                            'raw-cmds raw-cmds 'rt-acts rt-acts)))))
+  (record! 'PV8-builder-and-scout-order-non-cancellation
+           "Action-list ordering and worker filters guarantee `0` conflicting `HARVEST_GATHER (3666)` cancellations on workers executing `build`, `expand`, `resume-halted-building`, `worker-scout`, or `mineral-harass`"
+           pv8-states
+           (not pv8-cex)
+           pv8-cex)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Theorem PV9: `PV9-opponent-intel-gathering-priority-and-threat-memory`
+  ;; Proves across all races (`Zerg`, `Protoss`, `Terran`), staleness windows,
+  ;; and army levels that:
+  ;;   1. Whenever opponent information is stale (`intel-staleness-frames >= 268`,
+  ;;      so `intel-pressure >= 1.0`), opponent information gathering (`'intel-gathering`
+  ;;      and mobile scouting/harassment/attacking units in `PV-INTEL-GATHERING-UNIT-SYMS`)
+  ;;      strictly outranks passive `'worker` and `'expansion` spending;
+  ;;   2. `select-intel-gathering-method` cleanly selects among `'scouting` (early/low-army),
+  ;;      `'harassment` (mid-army mobile raiders), and `'attacking` (probing/recon-in-force);
+  ;;   3. Live runtime dispatches opening Overlord/worker scouting + mineral harassment +
+  ;;      periodic recon within bounded staleness, and persists scouted enemy combat threat
+  ;;      in `live-enemy-threat-supply` for `<= 672` frames (`30s`) after enemy leaves vision.
+  ;; ---------------------------------------------------------------------------
+  (define pv9-states 0)
+  (define pv9-cex #f)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [staleness '(268 336 448 672)]
+         [army-supply '(0 4 8 14)]
+         [frame '(900 1800 3200)])
+    (set! pv9-states (add1 pv9-states))
+    (define pm
+      (compute-state-pressure-metrics
+       #:race race
+       #:frame frame
+       #:minerals 200
+       #:gas 100
+       #:supply-left 20
+       #:supply-cap 46
+       #:active-bases 2
+       #:workers 24
+       #:army-supply army-supply
+       #:enemy-threat-supply 0
+       #:intel-staleness-frames staleness))
+    (define intel-method
+      (select-intel-gathering-method
+       #:race race
+       #:frame frame
+       #:army-supply army-supply
+       #:intel-staleness-frames staleness))
+    (define recon-unit-sym
+      (case race
+        [(Zerg) 'zergling]
+        [(Protoss) 'stalker]
+        [(Terran) 'reaper]))
+    (define worker-sym (case race [(Zerg) 'drone] [(Protoss) 'probe] [(Terran) 'scv]))
+    (define u-intel
+      (compute-candidate-marginal-utility
+       (priority-candidate intel-method 'intel-gathering (list 'scout intel-method) 0 0 0 0.0 'high #f)
+       pm))
+    (define u-recon-unit
+      (compute-candidate-marginal-utility
+       (priority-candidate recon-unit-sym 'combat-unit (list 'train recon-unit-sym) 50 0 1 0.0 'high #t)
+       pm))
+    (define u-worker
+      (compute-candidate-marginal-utility
+       (priority-candidate worker-sym 'worker (list 'train worker-sym) 50 0 1 0.0 'medium #f)
+       pm))
+    (define u-expand
+      (compute-candidate-marginal-utility
+       (priority-candidate 'hatchery 'expansion '(expand 50.5 56.5) 300 0 0 0.0 'medium #f)
+       pm))
+    (define expected-method
+      (cond
+        [(>= army-supply 10) 'attacking]
+        [(>= army-supply 4) 'harassment]
+        [else 'scouting]))
+    (when (or (< (hash-ref pm 'intel-pressure 0.0) 1.0)
+              (not (eq? intel-method expected-method))
+              (<= u-intel u-worker)
+              (<= u-intel u-expand)
+              (<= u-recon-unit u-worker)
+              (<= u-recon-unit u-expand))
+      (unless pv9-cex
+        (set! pv9-cex (list 'race race 'staleness staleness 'army-supply army-supply
+                            'frame frame 'intel-method intel-method 'expected expected-method
+                            'u-intel u-intel 'u-recon-unit u-recon-unit
+                            'u-worker u-worker 'u-expand u-expand)))))
+
+  ;; Verify live runtime scouting/harassment dispatch & 30s enemy threat memory persistence
+  (for ([race (in-list PV-LATTICE-RACES)])
+    (set! pv9-states (+ pv9-states 3))
+    (define rt (make-live-bot-runtime #:race race))
+    (define worker-sym (case race [(Zerg) 'drone] [(Protoss) 'probe] [(Terran) 'scv]))
+    (define combat-sym (case race [(Zerg) 'roach] [(Protoss) 'stalker] [(Terran) 'marine]))
+    (define ally-units-open
+      (append
+       (for/list ([i (in-range 14)])
+         (hash 'id (+ 1 i) 'type worker-sym 'x 33.0 'y 33.0 'hp 40 'dps 5))
+       (if (eq? race 'Zerg)
+           (list (hash 'id 50 'type 'overlord 'x 34.0 'y 34.0 'hp 200 'dps 0))
+           '())))
+    ;; Step A: Opening scout at frame 400 (`worker-scout` + `overlord-scout` for Zerg)
+    (define res-open
+      (step-live-bot-runtime!
+       rt
+       (hash 'frame 400 'minerals 150 'gas 0 'supply-used 14 'supply-cap 22
+             'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+             'enemy-x 160.5 'enemy-y 160.5
+             'ally-units ally-units-open
+             'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+             'enemy-units '() 'enemy-buildings '())))
+    (define acts-open (hash-ref res-open 'actions '()))
+    (define has-open-scout?
+      (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'worker-scout))) acts-open)
+           (or (not (eq? race 'Zerg))
+               (ormap (lambda (a) (and (pair? a) (eq? (car a) 'overlord-scout))) acts-open))))
+    ;; Step B: Scout reaches enemy base at frame 900 and spots an enemy army (`3` Stalkers)
+    (define scout-id (hash-ref (live-bot-runtime-last-telemetry rt) 'scout-worker-id 1))
+    (define res-spot
+      (step-live-bot-runtime!
+       rt
+       (hash 'frame 900 'minerals 200 'gas 50 'supply-used 18 'supply-cap 30
+             'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+             'enemy-x 160.5 'enemy-y 160.5
+             'ally-units (cons (hash 'id scout-id 'type worker-sym 'x 155.0 'y 155.0 'hp 40 'dps 5)
+                               (cdr ally-units-open))
+             'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+             'enemy-units (list (hash 'id 901 'type 'stalker 'x 152.0 'y 152.0 'hp 160 'dps 14)
+                                (hash 'id 902 'type 'stalker 'x 153.0 'y 152.0 'hp 160 'dps 14)
+                                (hash 'id 903 'type 'stalker 'x 154.0 'y 152.0 'hp 160 'dps 14))
+             'enemy-buildings '())))
+    (define acts-spot (hash-ref res-spot 'actions '()))
+    (define has-mineral-harass?
+      (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-harass))) acts-spot))
+    ;; Step C: Enemy army marches out of vision at frame 1100 (`200` frames later < `672`);
+    ;; verify `remembered-enemy-threat-supply` persists (> 0) and prevents blind expansion escrow!
+    (define res-memory
+      (step-live-bot-runtime!
+       rt
+       (hash 'frame 1100 'minerals 200 'gas 50 'supply-used 22 'supply-cap 38
+             'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+             'enemy-x 160.5 'enemy-y 160.5
+             'ally-units (append ally-units-open
+                                 (for/list ([k (in-range 5)])
+                                   (hash 'id (+ 200 k) 'type combat-sym 'x 40.0 'y 40.0 'hp 100 'dps 12)))
+             'ally-buildings (list (hash 'id 100 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+             'enemy-units '() 'enemy-buildings '())))
+    (define telem-mem (live-bot-runtime-last-telemetry rt))
+    (define rem-threat (hash-ref telem-mem 'remembered-enemy-threat-supply 0.0))
+    (when (or (not has-open-scout?)
+              (not has-mineral-harass?)
+              (<= rem-threat 0.0))
+      (unless pv9-cex
+        (set! pv9-cex (list 'race race 'has-open-scout? has-open-scout?
+                            'has-mineral-harass? has-mineral-harass?
+                            'rem-threat rem-threat)))))
+
+  (record! 'PV9-opponent-intel-gathering-priority-and-threat-memory
+           "Opponent information gathering (`scouting`, `harassment`, `attacking`) strictly outranks passive worker/expansion spending when `intel-staleness >= 268` (`12s`), dispatches opening/periodic scouts + mineral-patch harassment, and retains scouted enemy threat memory across fog-of-war transit (`<= 672` frames)"
+           pv9-states
+           (not pv9-cex)
+           pv9-cex)
 
   results)
 

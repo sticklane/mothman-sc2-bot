@@ -669,7 +669,18 @@
        (hash-set! u-orders uid
                   (tracked-order uid kind tsym eff-tgt-id eff-tx eff-ty
                                  issued-f frame eff-prog 'engine))
-       (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0)))]
+       (define already-in-ally-bldgs?
+         (and (memq kind '(build expand))
+              (ormap (lambda (b)
+                       (and (hash? b)
+                            (eq? (hash-ref b 'type #f) tsym)
+                            (or (= (hash-ref b 'id 0) (+ 9000000 uid))
+                                (= (hash-ref b 'id 0) eff-tgt-id)
+                                (hash-ref b 'in-transit? #f)
+                                (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
+                     ally-bldgs)))
+       (unless already-in-ally-bldgs?
+         (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0))))]
       [else
        ;; Unit has no engine order; keep recently issued order only within short latency window
        (define prev (hash-ref u-orders uid #f))
@@ -685,11 +696,21 @@
                         (add1 (hash-ref t-counts (tracked-order-ability-sym prev) 0)))
              (hash-remove! u-orders uid)))]))
 
-  ;; 2. Prune dead units or expired pseudo-unit orders (e.g. macro pseudo-keys)
+  ;; 2. Prune dead units, materialized build/expand pseudo-orders, or expired pseudo-unit orders
   (for ([(uid tord) (in-hash (hash-copy u-orders))])
-    (when (and (not (set-member? alive-ids uid))
-               (> (- frame (tracked-order-issued-frame tord)) 12))
-      (hash-remove! u-orders uid)))
+    (when (not (set-member? alive-ids uid))
+      (define tsym (tracked-order-ability-sym tord))
+      (define bldg-materialized?
+        (and (memq (tracked-order-kind tord) '(build expand))
+             (ormap (lambda (b)
+                      (and (hash? b)
+                           (eq? (hash-ref b 'type #f) tsym)
+                           (or (hash-ref b 'in-transit? #f)
+                               (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
+                    ally-bldgs)))
+      (when (or bldg-materialized?
+                (> (- frame (tracked-order-issued-frame tord)) 12))
+        (hash-remove! u-orders uid))))
 
   ;; 3. Prune build-site reservations that have materialized as buildings or expired
   (define active-sites

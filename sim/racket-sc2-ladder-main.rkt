@@ -772,6 +772,12 @@
       (define last-game-loop 0)
       (define last-logged-saving-for #f)
       (define priority-logs-emitted 0)
+      (define scout-cmds-emitted 0)
+      (define harass-cmds-emitted 0)
+      (define max-intel-staleness-frames 0)
+      (define max-escrow-age-frames 0)
+      (define enemy-first-seen-loop #f)
+      (define peak-remembered-threat 0)
       (define step-total-ms-list '())
       (define sum-obs-ms 0.0)
       (define sum-runtime-ms 0.0)
@@ -820,6 +826,11 @@
                 (define actual-race (hash-ref obs-hash 'race 'Zerg))
                 (set-live-bot-runtime-actual-race! runtime actual-race)
 
+                (when (and (not enemy-first-seen-loop)
+                           (or (pair? (hash-ref obs-hash 'enemy-units '()))
+                               (pair? (hash-ref obs-hash 'enemy-buildings '()))))
+                  (set! enemy-first-seen-loop last-game-loop))
+
                 (define pc (sc2-observation-player-common obs))
                 (set! peak-workers (max peak-workers (sc2-player-common-food-workers pc)))
                 (set! peak-army-supply (max peak-army-supply (sc2-player-common-food-army pc)))
@@ -837,10 +848,24 @@
                 (define prio-sum (hash-ref step-tel 'priority-summary (hash)))
                 (define prio-line (hash-ref step-tel 'priority-log-line ""))
                 (define cur-saving-for (hash-ref prio-sum 'saving-for 'none))
+                (set! max-intel-staleness-frames
+                      (max max-intel-staleness-frames (hash-ref step-tel 'intel-staleness-frames 0)))
+                (set! max-escrow-age-frames
+                      (max max-escrow-age-frames (hash-ref step-tel 'escrow-age-frames 0)))
+                (set! peak-remembered-threat
+                      (max peak-remembered-threat (hash-ref step-tel 'remembered-enemy-threat-supply 0)))
 
                 (define bot-actions
                   (append (hash-ref step-res 'actions '())
                           (hash-ref step-res 'mirror-actions '())))
+
+                (for ([ba (in-list bot-actions)])
+                  (when (pair? ba)
+                    (case (car ba)
+                      [(worker-scout overlord-scout periodic-scout scout scout-sector)
+                       (set! scout-cmds-emitted (add1 scout-cmds-emitted))]
+                      [(mineral-harass harass-workers worker-harass harass)
+                       (set! harass-cmds-emitted (add1 harass-cmds-emitted))])))
 
                 ;; Translate S-expression actions + automatic worker/gas saturation
                 ;; (excluding workers commanded to build/expand/defend in this frame)
@@ -934,6 +959,12 @@
                 'steps_executed total-steps
                 'commands_sent total-raw-cmds-sent
                 'priority_logs_emitted priority-logs-emitted
+                'scout_commands_emitted scout-cmds-emitted
+                'harass_commands_emitted harass-cmds-emitted
+                'enemy_first_seen_loop (or enemy-first-seen-loop -1)
+                'max_intel_staleness_frames max-intel-staleness-frames
+                'max_escrow_age_frames max-escrow-age-frames
+                'peak_remembered_enemy_threat peak-remembered-threat
                 'avg_step_ms avg-step-ms
                 'p95_step_ms p95-step-ms
                 'max_step_ms max-step-ms

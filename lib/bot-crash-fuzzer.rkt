@@ -148,9 +148,13 @@
     ability
     scout
     scout-sector
+    worker-scout
+    overlord-scout
+    periodic-scout
     harass
     harass-workers
     worker-harass
+    mineral-harass
     drop
     multi-prong-drop
     multiprong

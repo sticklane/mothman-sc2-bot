@@ -932,15 +932,18 @@
                       [utility-score (+ u0 emergency-worker-boost)]
                       [blocking-allowed? (and (< workers 8) has-mineral-income?)])]
 
-        ;; Expansion candidate: high priority when active BO goal or 1-base natural ready
+        ;; Expansion candidate: high priority when active BO goal or 1-base natural ready,
+        ;; but NEVER blocks combat units when under-attack? or enemy-threat-supply > 0 (PV1/PV2/PV7)
         [(eq? cat 'expansion)
          (define exp-ok?
            (and (or blk0 is-bo-goal? is-repaired?)
                 (not under-attack?)
+                (<= enemy-threat-supply 0)
                 (>= workers (if (eq? race 'Zerg) 14 16))
                 has-mineral-income?))
          (define exp-u
            (cond
+             [(or under-attack? (> enemy-threat-supply 0)) (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
              [(and is-bo-goal? exp-ok?) (max 430.0 u0)]
              [exp-ok? (max 210.0 u0)]
@@ -955,6 +958,7 @@
                is-bo-goal?
                under-attack?
                (> enemy-threat-supply 0)
+               (and (>= frame 1800) (< army-supply 6))
                (>= workers (min target-workers (* 16 active-bases)))))
          (define can-esc?
            (and (or blk0 is-bo-goal? is-repaired?)

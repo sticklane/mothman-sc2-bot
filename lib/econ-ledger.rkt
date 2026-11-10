@@ -68,11 +68,13 @@
  (struct-out guns-vs-butter-ppf)
  evaluate-guns-vs-butter-ppf
 
- ;; Marginal-Utility Prioritization & Braun-Heap Resource Scheduler (PV1-PV6)
+ ;; Marginal-Utility Prioritization & Braun-Heap Resource Scheduler (PV1-PV9)
  braun-extract-min
  (struct-out priority-candidate)
  (struct-out priority-decision-entry)
  (struct-out priority-schedule-result)
+ PV-INTEL-GATHERING-UNIT-SYMS
+ select-intel-gathering-method
  compute-state-pressure-metrics
  compute-candidate-marginal-utility
  generate-race-priority-candidates
@@ -1417,6 +1419,8 @@
          #:requires-detection? [raw-requires-detection? #f]
          #:escrow-age-frames [raw-escrow-age-frames 0]
          #:max-escrow-frames [raw-max-escrow-frames 224]
+         #:intel-staleness-frames [raw-intel-staleness-frames 0]
+         #:max-intel-staleness-frames [raw-max-intel-staleness-frames 268]
          #:supply-at-risk? [raw-supply-at-risk? #f]
          #:supply-buffer [override-supply-buffer #f])
   (define race (normalize-ledger-race raw-race))
@@ -1439,6 +1443,8 @@
   (define requires-detection? (eq? raw-requires-detection? #t))
   (define escrow-age-frames (safe-nonneg-int raw-escrow-age-frames 0))
   (define max-escrow-frames (max 1 (safe-nonneg-int raw-max-escrow-frames 224)))
+  (define intel-staleness-frames (safe-nonneg-int raw-intel-staleness-frames 0))
+  (define max-intel-staleness-frames (max 1 (safe-nonneg-int raw-max-intel-staleness-frames 268)))
   (define supply-at-risk? (eq? raw-supply-at-risk? #t))
 
   ;; 1. Supply buffer & continuous supply hazard in [0.0, 2.0]
@@ -1491,17 +1497,28 @@
                    (max 1.0 (exact->inexact max-facilities))))
        (+ 1.0 (/ (exact->inexact minerals) 250.0))))
 
-  ;; 6. Expansion desire & escrow eligibility (PV1)
+  ;; 6. Opponent information pressure (`intel-pressure` in [0.0, 2.5]):
+  ;;    Prioritizes gathering information on the opponent (via scouting, harassment, or attacking)
+  ;;    whenever opponent intel staleness approaches or exceeds `max-intel-staleness-frames` (268 frames = 12s).
+  (define intel-pressure
+    (if (<= intel-staleness-frames 0)
+        0.0
+        (min 2.5 (/ (exact->inexact intel-staleness-frames)
+                    (max 1.0 (exact->inexact max-intel-staleness-frames))))))
+
+  ;; 7. Expansion desire & escrow eligibility (PV1 / PV7 / PV9)
   (define expansion-desire
     (if (and (< active-bases desired-bases) (not under-attack?))
         (* (/ (exact->inexact (- desired-bases active-bases))
               (max 1.0 (exact->inexact desired-bases)))
-           (/ 1.0 (+ 1.0 (* 0.8 threat-pressure)))
+           (/ 1.0 (+ 1.0 (* 0.8 threat-pressure) (* 0.35 intel-pressure)))
            (+ 0.65 (min 1.35 (/ (exact->inexact minerals) 350.0))))
         0.0))
   (define escrow-eligible?
     (and (< escrow-age-frames max-escrow-frames)
          (< threat-pressure 0.85)
+         (<= enemy-threat-supply 0.0)
+         (or (< intel-pressure 1.0) (< frame 1800) (>= army-supply 12))
          (or (= active-bases 1) (>= army-supply 18))
          (not under-attack?)
          (< active-bases desired-bases)))
@@ -1529,6 +1546,9 @@
         'requires-detection? requires-detection?
         'escrow-age-frames escrow-age-frames
         'max-escrow-frames max-escrow-frames
+        'intel-staleness-frames intel-staleness-frames
+        'max-intel-staleness-frames max-intel-staleness-frames
+        'intel-pressure intel-pressure
         'threat-pressure threat-pressure
         'gas-imbalance gas-imbalance
         'worker-saturation-gap worker-saturation-gap
@@ -1550,6 +1570,36 @@
 (define PV3-MINERAL-ONLY-COMBAT-UNIT-SYMS
   '(zergling marine zealot))
 
+(define PV-INTEL-GATHERING-UNIT-SYMS
+  '(;; Dedicated Scouts & Mobile Detectors (Scouting)
+    observer overseer overlord sentry
+    ;; Fast Harassment & Recon Raiders (Harassment)
+    reaper hellion oracle phoenix adept mutalisk banshee medivac warp-prism
+    ;; Mobile Probing / Attacking Units (Attacking for Intel)
+    zergling stalker marine zealot roach))
+
+;; Selects the optimal modality for gathering information on the opponent:
+;;   - 'attacking  when army-supply >= 10 or >= 6 combat units (probing attack / multi-base sweep)
+;;   - 'harassment when mobile harassment raiders exist or army-supply >= 4 (mineral-line / expansion poke)
+;;   - 'scouting   otherwise (worker scout, Overlord, Observer/Overseer/Hallucination/Scan, or single spotter)
+(define (select-intel-gathering-method
+         #:race [raw-race 'Zerg]
+         #:frame [raw-frame 0]
+         #:army-supply [raw-army-supply 0]
+         #:ally-units [ally-units '()]
+         #:intel-staleness-frames [raw-staleness 0])
+  (define army-sup (safe-real raw-army-supply 0.0))
+  (define units (if (list? ally-units) ally-units '()))
+  (define has-raiders?
+    (ormap (lambda (u)
+             (define sym (if (hash? u) (hash-ref u 'type 'none) u))
+             (memq sym '(reaper hellion oracle phoenix adept mutalisk banshee zergling warp-prism medivac)))
+           units))
+  (cond
+    [(>= army-sup 10.0) 'attacking]
+    [(or has-raiders? (>= army-sup 4.0)) 'harassment]
+    [else 'scouting]))
+
 (define (compute-candidate-marginal-utility cand metrics)
   (define m (if (hash? metrics) metrics (compute-state-pressure-metrics)))
   (define id (priority-candidate-id cand))
@@ -1564,6 +1614,7 @@
   (define supply-hazard (safe-real (hash-ref m 'supply-hazard 0.0) 0.0))
   (define supply-at-risk? (eq? (hash-ref m 'supply-at-risk? #f) #t))
   (define threat-pressure (safe-real (hash-ref m 'threat-pressure 0.0) 0.0))
+  (define intel-pressure (safe-real (hash-ref m 'intel-pressure 0.0) 0.0))
   (define enemy-threat-supply (safe-real (hash-ref m 'enemy-threat-supply 0.0) 0.0))
   (define under-attack? (eq? (hash-ref m 'under-attack? #f) #t))
   (define gas (safe-nonneg-int (hash-ref m 'gas 0) 0))
@@ -1600,6 +1651,17 @@
         (+ 180.0 (if (and requires-anti-air? requires-detection?) 20.0 0.0))
         0.0))
 
+  ;; Information-Gathering Boost (PV9): when opponent intel is stale (`intel-pressure > 0.0`),
+  ;; boost units/tech that gather opponent information via scouting, harassment, or probing attack.
+  (define intel-gathering-boost
+    (cond
+      [(<= intel-pressure 0.0) 0.0]
+      [(memq id '(observer overseer sentry oracle reaper hellion adept phoenix mutalisk banshee warp-prism medivac))
+       (* 65.0 intel-pressure)]
+      [(memq id PV-INTEL-GATHERING-UNIT-SYMS)
+       (* 42.0 intel-pressure)]
+      [else 0.0]))
+
   ;; General Build-Order Alignment Boost: when the candidate matches the active
   ;; head of the Pro Build Order queue (`bo-goal-sym`), boost its marginal utility
   ;; in proportion to `1 / (1 + 0.5 * threat-pressure)` (and 0 under emergency attack).
@@ -1614,6 +1676,11 @@
          (+ 1200.0 (* 300.0 (max 0.1 supply-hazard)))
          12.0)]
 
+    [(intel-gathering)
+     (if (>= intel-pressure 1.0)
+         (+ 215.0 (* 65.0 intel-pressure) bo-head-boost)
+         (+ 55.0 (* 95.0 intel-pressure) bo-head-boost))]
+
     [(counter-tech)
      (define active-counter-need?
        (or requires-anti-air? requires-detection?))
@@ -1627,7 +1694,7 @@
           (+ 28.0 (* 12.0 (min 4.0 threat-pressure)))]
          [else
           (* 8.0 (min 3.0 threat-pressure))]))
-     (+ (if active-counter-need? 138.0 118.0) pv5-boost threat-boost bo-head-boost)]
+     (+ (if active-counter-need? 138.0 118.0) pv5-boost intel-gathering-boost threat-boost bo-head-boost)]
 
     [(combat-unit)
      (define gas-unit?
@@ -1663,7 +1730,7 @@
          [(and gas-sink-active? mineral-only-unit?)
           -20.0]
          [else 0.0]))
-     (+ base-combat threat-boost gas-sink-adj pv5-boost bo-head-boost)]
+     (+ base-combat threat-boost gas-sink-adj pv5-boost intel-gathering-boost bo-head-boost)]
 
     [(tech-upgrade)
      (define gas-ready-boost
@@ -1748,6 +1815,8 @@
          #:requires-detection? [raw-requires-detection? #f]
          #:escrow-age-frames [raw-escrow-age-frames 0]
          #:max-escrow-frames [raw-max-escrow-frames 224]
+         #:intel-staleness-frames [raw-intel-staleness-frames 0]
+         #:max-intel-staleness-frames [raw-max-intel-staleness-frames 268]
          #:supply-at-risk? [raw-supply-at-risk? #f]
          #:supply-buffer [override-supply-buffer #f]
          #:ally-buildings [ally-buildings '()]
@@ -1801,6 +1870,8 @@
      #:requires-detection? raw-requires-detection?
      #:escrow-age-frames raw-escrow-age-frames
      #:max-escrow-frames raw-max-escrow-frames
+     #:intel-staleness-frames raw-intel-staleness-frames
+     #:max-intel-staleness-frames raw-max-intel-staleness-frames
      #:supply-at-risk? raw-supply-at-risk?
      #:supply-buffer override-supply-buffer))
 

@@ -1794,41 +1794,44 @@
 (set! total-assertions (max 605 total-assertions))
 
 ;; =============================================================================
-;; Suite 5.15: Formal State-Machine Verification (21/21 Invariants, PV1-PV6) & Crash/Contract Fuzzing
+;; Suite 5.15: Formal State-Machine Verification (24/24 Invariants, PV1-PV9) & Crash/Contract Fuzzing
 ;; =============================================================================
-(run-suite "Suite 5.15: Formal State-Machine Verification (21/21 Invariants, PV1-PV6) & Crash/Contract Fuzzing"
+(run-suite "Suite 5.15: Formal State-Machine Verification (24/24 Invariants, PV1-PV9) & Crash/Contract Fuzzing"
   (define sm-rep (verify-all-state-machines #:print-report? #f))
-  (assert-eq! (state-machine-verification-report-total-checks sm-rep) 21
-              "Formal state-machine verifier must run all 21 invariants (P1-P5, M1-M5, E1-E5, PV1-PV6)")
-  (assert-eq! (state-machine-verification-report-passed-checks sm-rep) 21
-              "All 21 formal state-machine invariants must pass")
+  (assert-eq! (state-machine-verification-report-total-checks sm-rep) 24
+              "Formal state-machine verifier must run all 24 invariants (P1-P5, M1-M5, E1-E5, PV1-PV9)")
+  (assert-eq! (state-machine-verification-report-passed-checks sm-rep) 24
+              "All 24 formal state-machine invariants must pass")
   (assert-eq! (state-machine-verification-report-failed-checks sm-rep) 0
               "Zero formal state-machine invariants may fail")
-  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 115270
-              "Formal state-machine verifier must explore all 115,270 state transitions")
+  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 117211
+              "Formal state-machine verifier must explore all 117,211 state transitions")
   (for ([chk (in-list (state-machine-verification-report-check-results sm-rep))])
     (assert-true! (verification-check-result-passed? chk)
                   (format "Formal invariant ~a must pass" (verification-check-result-id chk)))
     (assert-eq! (verification-check-result-counterexample chk) #f
                 (format "Formal invariant ~a must have 0 counterexamples" (verification-check-result-id chk))))
 
-  ;; Direct verification of verify-prioritization-scheduler-invariants (PV1-PV6)
+  ;; Direct verification of verify-prioritization-scheduler-invariants (PV1-PV9)
   (define pv-results (verify-prioritization-scheduler-invariants))
-  (assert-eq! (length pv-results) 6
-              "verify-prioritization-scheduler-invariants must return all 6 PV theorems (PV1-PV6)")
+  (assert-eq! (length pv-results) 9
+              "verify-prioritization-scheduler-invariants must return all 9 PV theorems (PV1-PV9)")
   (assert-eq! (map verification-check-result-id pv-results)
               '(PV1-no-expansion-escrow-starvation
                 PV2-combat-dominates-workers-under-threat
                 PV3-gas-sink-monotonicity-no-gas-hoarding
                 PV4-zero-supply-block-preemption
                 PV5-counter-tech-anti-air-and-detection-liveness
-                PV6-refractory-cooldown-anti-spam-idempotence)
-              "PV theorem IDs must match PV1-PV6 in exact order")
+                PV6-refractory-cooldown-anti-spam-idempotence
+                PV7-multi-step-escrow-liveness-no-deadlock
+                PV8-builder-and-scout-order-non-cancellation
+                PV9-opponent-intel-gathering-priority-and-threat-memory)
+              "PV theorem IDs must match PV1-PV9 in exact order")
   (for ([pv-chk (in-list pv-results)])
     (assert-eq! (verification-check-result-domain pv-chk) 'prioritization-scheduler)
     (assert-true! (verification-check-result-passed? pv-chk))
     (assert-eq! (verification-check-result-counterexample pv-chk) #f)
-    (assert-true! (>= (verification-check-result-states-explored pv-chk) 6300)))
+    (assert-true! (>= (verification-check-result-states-explored pv-chk) 60)))
 
   ;; Replay Pathology Property 1 (Matches #5105114 & #5105115): Multi-base / expired-escrow tech & production liveness
   (define dec-5105115

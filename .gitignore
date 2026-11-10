@@ -9,3 +9,8 @@ sc-bot/LingLover
 
 replays/corpus_checkpoints.sexp
 replays/*_mirror_perspective_audit.json
+downloaded_bots/
+replays/local_real_matches/tmp_sc2_*
+replays/local_real_matches/.active_locks/
+replays/local_real_matches/*_stdout.log
+replays/local_real_matches/*_stderr.log
