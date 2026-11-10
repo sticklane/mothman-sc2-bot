@@ -2482,7 +2482,179 @@
                               (hash 'id 307 'type 'zergling 'x 53.5 'y 56.0 'hp 35)))
            'enemy-units (list (hash 'id 991 'type 'reaper 'x 74.0 'y 74.0 'hp 60)))))
   (assert-true! (not (member '(train zergling) acts-unowned3rd))
-                "Lone enemy Reaper near unowned 3rd base must not trigger false panic or drain 100M into Zerglings"))
+                "Lone enemy Reaper near unowned 3rd base must not trigger false panic or drain 100M into Zerglings")
+
+  ;; 7. Match #5112038 Regression (Zerg Drone Priority Escrow Respect & No Lair Escrow Under Base Attack):
+  ;;    (a) On 2 bases with 24 Drones at 60M/380G when bo=baneling-nest (100M/50G),
+  ;;        zerg-drone-priority? must respect the 100M baneling-nest reserve and NOT spend 50M on a Drone!
+  (define rt-z5112038 (make-live-bot-runtime #:race 'Zerg))
+  (define acts-z5112038-peace
+    (step-layer2-economy!
+     rt-z5112038
+     (hash 'frame 4500
+           'minerals 60
+           'gas 380
+           'supply-used 34
+           'supply-cap 44
+           'mineral-harvesters 21
+           'vespene-harvesters 3
+           'researched-upgrades '(metabolic-boost)
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'third-x 75.5 'third-y 75.5
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0 'larva-count 2)
+                                 (hash 'id 102 'type 'hatchery 'x 50.5 'y 56.5 'hp 1500 'build-progress 1.0 'larva-count 2)
+                                 (hash 'id 103 'type 'spawning-pool 'x 36.0 'y 36.0 'hp 1000 'build-progress 1.0)
+                                 (hash 'id 104 'type 'roach-warren 'x 38.0 'y 36.0 'hp 850 'build-progress 1.0)
+                                 (hash 'id 105 'type 'extractor 'x 30.0 'y 35.0 'hp 500 'build-progress 1.0))
+           'ally-units (append
+                        (for/list ([i (in-range 24)])
+                          (hash 'id (+ 200 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                        (list (hash 'id 301 'type 'queen 'x 33.5 'y 33.5 'hp 175 'energy 10)
+                              (hash 'id 302 'type 'queen 'x 51.5 'y 56.5 'hp 175 'energy 10)
+                              (hash 'id 303 'type 'roach 'x 52.0 'y 56.0 'hp 145)
+                              (hash 'id 304 'type 'roach 'x 52.5 'y 56.0 'hp 145)
+                              (hash 'id 305 'type 'zergling 'x 53.0 'y 56.0 'hp 35)
+                              (hash 'id 306 'type 'zergling 'x 53.5 'y 56.0 'hp 35)))
+           'enemy-units '())))
+  (assert-true! (not (member '(train drone) acts-z5112038-peace))
+                "Match #5112038: Zerg with 24 Drones at 60M/380G must not spend 50M on a Drone while saving 100M for Baneling Nest")
+  ;;    (b) Under active base attack with ready Spawning Pool and Roach Warren at 120M/480G,
+  ;;        Lair must NOT escrow 150M/100G or block Roach/Zergling reinforcement!
+  (define z-attack-state
+    (make-macro-world-state
+     #:race 'Zerg
+     #:frame 9200
+     #:minerals 120
+     #:gas 480
+     #:supply-used 42
+     #:supply-cap 58
+     #:supply-left 16
+     #:workers 32
+     #:active-bases 2
+     #:ready-building-counts (hash 'hatchery 2 'extractor 2 'spawning-pool 1 'roach-warren 1 'baneling-nest 1)
+     #:total-building-counts (hash 'hatchery 2 'extractor 2 'spawning-pool 1 'roach-warren 1 'baneling-nest 1)
+     #:unit-counts (hash 'drone 32 'queen 2 'roach 3 'zergling 4 'overlord 5)
+     #:researched-upgrades '(metabolic-boost)
+     #:open-facility-slots (hash 'larva 3 'townhall 2)
+     #:army-supply 12
+     #:enemy-threat-supply 20
+     #:under-attack? #t))
+  (define z-attack-dec (step-priority-macro-brain z-attack-state))
+  (assert-true! (macro-brain-can-spend? z-attack-dec 'roach 120 480 'combat-unit)
+                "Match #5112038: Under active base attack at 120M/480G, Lair must not block Roach reinforcement")
+
+  ;; 8. Match #5112039 Regression (Terran Engineering Bay vs Reactor Starport & No Blind Viking Escrow):
+  ;;    When Starport already has a Starport-Reactor at 135M/260G and 0 Engineering Bays,
+  ;;    step-layer2-economy! must build Engineering Bay (125M) and must NOT emit an invalid starport-techlab order!
+  (define rt-t5112039 (make-live-bot-runtime #:race 'Terran))
+  (define acts-t5112039
+    (step-layer2-economy!
+     rt-t5112039
+     (hash 'frame 6800
+           'minerals 135
+           'gas 260
+           'supply-used 52
+           'supply-cap 62
+           'mineral-harvesters 36
+           'vespene-harvesters 6
+           'researched-upgrades '(stimpack combat-shield)
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'third-x 75.5 'third-y 75.5
+           'ally-buildings (list (hash 'id 101 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0 'energy 25)
+                                 (hash 'id 102 'type 'orbital-command 'x 50.5 'y 56.5 'hp 1500 'build-progress 1.0 'energy 25)
+                                 (hash 'id 103 'type 'barracks 'x 38.5 'y 32.5 'hp 1000 'build-progress 1.0)
+                                 (hash 'id 104 'type 'barracks-techlab 'x 41.0 'y 32.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 105 'type 'factory 'x 38.5 'y 36.5 'hp 1250 'build-progress 1.0)
+                                 (hash 'id 106 'type 'factory-techlab 'x 41.0 'y 36.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 107 'type 'starport 'x 38.5 'y 40.5 'hp 1300 'build-progress 1.0)
+                                 (hash 'id 108 'type 'starport-reactor 'x 41.0 'y 40.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 109 'type 'refinery 'x 30.0 'y 35.0 'hp 500 'build-progress 1.0)
+                                 (hash 'id 110 'type 'refinery 'x 48.0 'y 59.0 'hp 500 'build-progress 1.0))
+           'ally-units (append
+                        (for/list ([i (in-range 42)])
+                          (hash 'id (+ 200 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                        (list (hash 'id 301 'type 'marine 'x 52.0 'y 56.0 'hp 55)
+                              (hash 'id 302 'type 'marauder 'x 52.5 'y 56.0 'hp 125)
+                              (hash 'id 303 'type 'siege-tank 'x 53.0 'y 56.0 'hp 175)
+                              (hash 'id 304 'type 'medivac 'x 53.5 'y 56.0 'hp 150)))
+           'enemy-units '())))
+  (assert-true! (for/or ([a (in-list acts-t5112039)])
+                  (and (list? a) (>= (length a) 2) (eq? (first a) 'build) (eq? (second a) 'engineering-bay)))
+                "Match #5112039: Terran at 135M/260G with Reactor Starport must build Engineering Bay")
+  (assert-true! (not (for/or ([a (in-list acts-t5112039)])
+                       (and (list? a) (>= (length a) 2) (eq? (first a) 'build) (eq? (second a) 'starport-techlab))))
+                "Match #5112039: Terran must not emit starport-techlab when Starport already has a Starport-Reactor")
+
+  ;; 9. Match #5112040 Regression (step-live-bot! Preserves Escrow Peak/Prev Minerals Across Frames):
+  ;;    When Protoss saves for 19-Nexus across frames with steadily rising minerals (100M -> 140M -> 185M),
+  ;;    step-live-bot! must preserve 'escrow-peak-min and reset 'escrow-age-frames to 0!
+  (define rt-p5112040 (make-live-bot-runtime #:race 'Protoss))
+  (define (make-p5112040-obs f min-val)
+    (hash 'frame f
+          'minerals min-val
+          'gas 100
+          'supply-used 21
+          'supply-cap 23
+          'mineral-harvesters 16
+          'vespene-harvesters 3
+          'researched-upgrades '()
+          'base-x 32.5 'base-y 32.5
+          'natural-x 50.5 'natural-y 56.5
+          'third-x 75.5 'third-y 75.5
+          'ally-buildings (list (hash 'id 101 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'build-progress 1.0)
+                                (hash 'id 102 'type 'pylon 'x 36.0 'y 36.0 'hp 200 'build-progress 1.0)
+                                (hash 'id 103 'type 'gateway 'x 38.0 'y 36.0 'hp 500 'build-progress 1.0)
+                                (hash 'id 104 'type 'cybernetics-core 'x 38.0 'y 39.0 'hp 550 'build-progress 1.0)
+                                (hash 'id 105 'type 'assimilator 'x 30.0 'y 35.0 'hp 450 'build-progress 1.0))
+          'ally-units (append
+                       (for/list ([i (in-range 19)])
+                         (hash 'id (+ 200 i) 'type 'probe 'x 32.5 'y 32.5 'hp 20))
+                       (list (hash 'id 301 'type 'zealot 'x 50.0 'y 55.0 'hp 100)))
+          'enemy-units '()))
+  (void (step-live-bot-runtime! rt-p5112040 (make-p5112040-obs 2000 100)))
+  (void (step-live-bot-runtime! rt-p5112040 (make-p5112040-obs 2100 140)))
+  (define res-p5112040 (step-live-bot-runtime! rt-p5112040 (make-p5112040-obs 2250 185)))
+  (define tel-p5112040 (hash-ref res-p5112040 'telemetry))
+  (assert-eq! (hash-ref tel-p5112040 'escrow-peak-min 0) 185
+              "Match #5112040: step-live-bot! telemetry must preserve escrow-peak-min = 185")
+  (assert-eq! (hash-ref tel-p5112040 'escrow-age-frames 999) 0
+              "Match #5112040: Rising minerals during Nexus escrow must reset escrow-age-frames to 0")
+
+  ;; 10. Match #5112041 Regression (0-Gas BO Zergling Must Not Preempt Roach Warren at >= 80G):
+  ;;     At 155M/168G with 2 Hatcheries, 2 Queens, 1 Spawning Pool, 0 Roach Warrens, and only 2 Zerglings
+  ;;     (so raw BO step is 19 Zergling), first-unsatisfied-macro-bo-goal must advance to roach-warren (u = 465.0)
+  ;;     and block 0G zergling from spending 50M out of 155M!
+  (define z-5112041-state
+    (make-macro-world-state
+     #:race 'Zerg
+     #:frame 4032
+     #:minerals 155
+     #:gas 168
+     #:supply-used 28
+     #:supply-cap 36
+     #:supply-left 8
+     #:workers 22
+     #:active-bases 2
+     #:ready-building-counts (hash 'hatchery 2 'extractor 1 'spawning-pool 1)
+     #:total-building-counts (hash 'hatchery 2 'extractor 1 'spawning-pool 1)
+     #:unit-counts (hash 'drone 22 'queen 2 'zergling 2 'overlord 3)
+     #:researched-upgrades '(metabolic-boost)
+     #:open-facility-slots (hash 'larva 3 'townhall 2)
+     #:army-supply 6
+     #:enemy-threat-supply 0
+     #:under-attack? #f))
+  (define z-5112041-dec (step-priority-macro-brain z-5112041-state))
+  (assert-true! (member 'roach-warren (macro-brain-decision-scheduled-ids z-5112041-dec))
+                "Match #5112041: At 155M/168G on 2 bases with 2 Queens, Roach Warren (150M) must be scheduled in Band 1")
+  (assert-true! (not (member 'zergling (macro-brain-decision-scheduled-ids z-5112041-dec)))
+                "Match #5112041: At 155M/168G, 0G Zergling must not preempt Roach Warren in scheduled-ids")
+  (define z-5112041-120-state
+    (struct-copy macro-world-state z-5112041-state [minerals 120]))
+  (define z-5112041-120-dec (step-priority-macro-brain z-5112041-120-state))
+  (assert-true! (not (macro-brain-can-spend? z-5112041-120-dec 'zergling 120 168 'combat-unit))
+                "Match #5112041: At 120M/168G, Roach Warren (150M) must escrow and block 0G Zergling from draining 50M"))
 
 (run-suite "5.18 Optimal Human Selection & Control-Group Compiler, Unseen Pro Units/Splash Micro & Mirror-Mind FoW Persistence"
   ;; 1. Optimal Human Selection & Control-Group Compiler (`lib/human-cortex.rkt`):

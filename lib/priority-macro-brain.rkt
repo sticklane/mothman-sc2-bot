@@ -644,7 +644,11 @@
       [(and first-unsatisfied-macro-bo-goal
             (or (not bo-raw-goal)
                 (and (eq? (pro-bo-goal-kind bo-raw-goal) 'train)
-                     (> effective-phase-supply (+ (pro-bo-goal-min-supply bo-raw-goal) 6)))))
+                     (or (> effective-phase-supply (+ (pro-bo-goal-min-supply bo-raw-goal) 6))
+                         (and (hash? open-facility-slots)
+                              (>= gas 80)
+                              (>= army-supply 4)
+                              (memq (pro-bo-goal-target-sym bo-raw-goal) '(zergling marine zealot hellion)))))))
        first-unsatisfied-macro-bo-goal]
       [else bo-raw-goal]))
 
@@ -884,6 +888,11 @@
                (define cur-cnt (hash-ref unit-counts id 0))
                (define max-cnt (if (eq? id 'queen) (min 6 (add1 active-bases)) 1))
                (and blk0 (< cur-cnt max-cnt))]
+              [(memq id '(viking-fighter corruptor))
+               (and blk0
+                    (or requires-anti-air?
+                        (not (hash? open-facility-slots))
+                        (and bo-goal-sym (eq? id bo-goal-sym))))]
               [(memq id '(spore-crawler photon-cannon missile-turret overseer))
                (and (or requires-anti-air? requires-detection?)
                     (< (bldg-count-equivalent total-bldg-counts id) 1)
@@ -906,6 +915,12 @@
                      (>= workers (min 24 (* 11 active-bases)))))]
            [else blk0])))
 
+  (define root-combat-facility-ready?
+    (case race
+      [(Zerg) (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)]
+      [(Terran) (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)]
+      [else (> (bldg-count-equivalent ready-bldg-counts 'gateway) 0)]))
+
   (define all-adjusted-cands
     (for/list ([c (in-list (append raw-cands extra-cands))]
                #:when (cand-wanted-now? c))
@@ -913,7 +928,16 @@
       (define cat (priority-candidate-category c))
       (define u0 (priority-candidate-utility-score c))
       (define blk0 (priority-candidate-blocking-allowed? c))
-      (define is-repaired? (not (not (memq sym repaired-prereqs))))
+      (define is-repaired-raw? (not (not (memq sym repaired-prereqs))))
+      ;; When under active attack in a live game and our primary combat production facility is already ready,
+      ;; only root production/supply prerequisites (`spawning-pool`, `barracks`, `gateway`, `pylon`, `supply-depot`, `overlord`)
+      ;; receive emergency repair preemption over combat units; mid-game tech (`lair`, `engineering-bay`) yields to defense!
+      (define is-repaired?
+        (and is-repaired-raw?
+             (or (not (hash? open-facility-slots))
+                 (and (not under-attack?) (<= enemy-threat-supply 0))
+                 (not root-combat-facility-ready?)
+                 (memq sym '(spawning-pool barracks gateway pylon supply-depot overlord)))))
       (define is-bo-goal? (and bo-goal-sym (eq? sym bo-goal-sym)))
       (cond
         ;; Supply candidate during supply crisis (e.g. deleted Pylon/Overlord/Depot -> negative free supply)
@@ -1008,23 +1032,42 @@
                 (memq sym '(zergling marine zealot hellion))
                 (not under-attack?)
                 (<= enemy-threat-supply 0)
-                (>= gas 100)
+                (>= gas 80)
                 (>= army-supply 4)))
+         (define effective-bo-goal?
+           (and is-bo-goal?
+                (not mineral-only-gas-locked?)))
          (define u-after-gas-lock
            (if mineral-only-gas-locked?
                (/ u0 (+ 1.0 (expt (/ (exact->inexact gas) 100.0) 2)))
                u0))
          (define combat-escrow-ok?
-           (and (not (and mineral-only-gas-locked? (>= army-supply 6)))
+           (and (not (and mineral-only-gas-locked? (>= army-supply 4)))
                 (or (not (eq? cat 'combat-unit))
-                    is-bo-goal?
+                    effective-bo-goal?
                     under-attack?
                     (> enemy-threat-supply 0)
                     (and (>= frame 1800) (< army-supply 6))
                     (>= workers (min target-workers worker-sat-thresh)))))
+         (define queen-escrow-ok?
+           (or (not (hash? open-facility-slots))
+               (not (eq? sym 'queen))
+               inject-queen-boost?
+               effective-bo-goal?
+               requires-anti-air?))
+         (define tech-under-attack-escrow-ok?
+           (or (not (hash? open-facility-slots))
+               (and (not under-attack?) (<= enemy-threat-supply 0))
+               (eq? cat 'combat-unit)
+               (eq? cat 'supply)
+               is-repaired?
+               requires-anti-air?
+               requires-detection?))
          (define can-esc?
-           (and (or blk0 is-bo-goal? is-repaired? inject-queen-boost? gas-unlock-tech-boost?)
+           (and (or blk0 effective-bo-goal? is-repaired? inject-queen-boost? gas-unlock-tech-boost?)
                 combat-escrow-ok?
+                queen-escrow-ok?
+                tech-under-attack-escrow-ok?
                 (cand-can-escrow? sym)
                 (> workers 0)))
          ;; Hierarchical Priority Banding:
@@ -1035,7 +1078,8 @@
          (define boosted-u
            (cond
              [is-repaired? (max (+ 380.0 u0) 520.0)]
-             [(and is-bo-goal? (not under-attack?)) (max (+ 200.0 u0) 465.0)]
+             [(and effective-bo-goal? (not under-attack?) (<= enemy-threat-supply 0))
+              (max (+ 200.0 u0) 465.0)]
              [gas-unlock-tech-boost? (max 445.0 u0)]
              [inject-queen-boost?
               (if (and (hash? open-facility-slots) (not under-attack?) (<= enemy-threat-supply 0))
@@ -1046,6 +1090,9 @@
                    (<= enemy-threat-supply 0)
                    (>= army-supply 2))
               (min 415.0 u-after-gas-lock)]
+             [(and is-repaired-raw? (not is-repaired?))
+              ;; Subtract the +300 repair boost when under attack so combat units outrank non-root tech
+              (max 50.0 (- u-after-gas-lock 300.0))]
              [else u-after-gas-lock]))
          (struct-copy priority-candidate c
                       [utility-score boosted-u]

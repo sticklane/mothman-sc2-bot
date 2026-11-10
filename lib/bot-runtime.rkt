@@ -2145,11 +2145,12 @@
       (if (and sf (not (eq? sf 'none)))
           sf
           bo-goal-sym)))
+  (define obs-minerals (safe-nonneg-int (hash-ref obs 'minerals 0)))
   (define prev-escrow-goal (hash-ref prev-telemetry-ht 'escrow-goal-sym #f))
   (define prev-escrow-age (hash-ref prev-telemetry-ht 'escrow-age-frames 0))
   (define prev-escrow-frame (hash-ref prev-telemetry-ht 'escrow-last-frame frame))
-  (define prev-escrow-peak-min (hash-ref prev-telemetry-ht 'escrow-peak-min minerals))
-  (define prev-escrow-min (hash-ref prev-telemetry-ht 'escrow-prev-min minerals))
+  (define prev-escrow-peak-min (hash-ref prev-telemetry-ht 'escrow-peak-min obs-minerals))
+  (define prev-escrow-min (hash-ref prev-telemetry-ht 'escrow-prev-min obs-minerals))
   (define prev-escrow-start-frame (hash-ref prev-telemetry-ht 'escrow-start-frame frame))
   (define escrow-same-goal?
     (and active-escrow-sym
@@ -2163,12 +2164,11 @@
          (> total-workers 0)
          (not natural-blocked?)
          (< (- frame cur-escrow-start-frame) 896)
-         (or (>= (- minerals prev-escrow-peak-min) 15)
-             (>= (- minerals prev-escrow-min) 5))))
+         (> obs-minerals prev-escrow-peak-min)))
   (define cur-escrow-peak-min
     (if escrow-same-goal?
-        (max prev-escrow-peak-min minerals)
-        minerals))
+        (max prev-escrow-peak-min obs-minerals)
+        obs-minerals))
   (define cur-escrow-age-frames
     (cond
       [(not escrow-same-goal?) 0]
@@ -2228,7 +2228,10 @@
     (define m-cost (sc2-min-cost unit-sym))
     (define g-cost (sc2-gas-cost unit-sym))
     (define s-cost (sc2-supply-cost unit-sym))
-    (define is-bo-head? (eq? bo-goal-sym unit-sym))
+    (define is-bo-head?
+      (or (eq? bo-goal-sym unit-sym)
+          (and live-game?
+               (not (not (memq unit-sym (macro-brain-decision-scheduled-ids macro-decision)))))))
     (define max-batch
       (cond
         [(not live-game?) 1]
@@ -2241,8 +2244,8 @@
         [else 4]))
     (let loop ([trained 0])
       (define avail-slots (hash-ref open-prod-slots producer-key 0))
-      (define eff-min (if (and respect-bo? (not is-bo-head?)) (- minerals bo-reserved-min) minerals))
-      (define eff-gas (if (and respect-bo? (not is-bo-head?)) (- gas bo-reserved-gas) gas))
+      (define eff-min (if (and respect-bo? (not (and is-bo-head? (= trained 0)))) (- minerals bo-reserved-min) minerals))
+      (define eff-gas (if (and respect-bo? (not (and is-bo-head? (= trained 0)))) (- gas bo-reserved-gas) gas))
       (cond
         [(and (< trained max-batch)
               (> avail-slots 0)
@@ -2680,7 +2683,7 @@
        (and (or (not zerg-saving-for-expand?)
                 (and (< total-workers 16) (< minerals 250)))
             (not urgent-combat-or-intel-need?)
-            (or (< total-workers (* 20 (max 1 (length hatcheries))))
+            (or (< total-workers 16)
                 (can-spend-by-priority? 'drone 'worker))
             (< total-workers (min target-workers (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length hatcheries)))))
             (or (not live-game?)
@@ -2693,7 +2696,11 @@
             (not under-early-cheese?)
             (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.75)))
      (when zerg-drone-priority?
-       (try-train-unit! 'drone 'larva 4))
+       (try-train-unit! 'drone 'larva 4
+                        #:respect-bo-reserve?
+                        (and live-game?
+                             (>= total-workers 16)
+                             (not (memq bo-goal-sym '(hatchery nexus command-center drone probe scv))))))
 
      ;; Zerg Combat Unit Training (via Control Group 4 Townhalls / Larvae, gated by `open-prod-slots`)
      (unless zerg-saving-for-expand?
@@ -3070,7 +3077,7 @@
        (and (or (not protoss-saving-for-expand?)
                 (and (< total-workers 19) (< minerals 350)))
             (not urgent-combat-or-intel-need?)
-            (or (< total-workers (max 32 (* 20 (max 1 (length nexuses)))))
+            (or (< total-workers 16)
                 (can-spend-by-priority? 'probe 'worker))
             (< total-workers (min 68 target-workers (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length nexuses)))))
             (or (not live-game?)
@@ -3083,7 +3090,11 @@
             (not under-early-cheese?)
             (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)))
      (when protoss-probe-priority?
-       (try-train-unit! 'probe 'townhall 4))
+       (try-train-unit! 'probe 'townhall 4
+                        #:respect-bo-reserve?
+                        (and live-game?
+                             (>= total-workers 16)
+                             (not (memq bo-goal-sym '(hatchery nexus command-center drone probe scv))))))
 
      ;; Protoss Gateway / WarpGate Unit Training (Group 5), governed by `can-spend-by-priority?`
      (when (and (not protoss-saving-for-expand?)
@@ -3259,6 +3270,10 @@
                 (or (null? refineries) (not terran-saving-for-expand?))
                 (< (+ (length refineries) (order-ledger-pending-count-for-type oledger 'refinery frame))
                    desired-refineries)
+                (or (not live-game?)
+                    (< (length refineries) 2)
+                    (< gas 150)
+                    (>= (- minerals (sc2-min-cost 'refinery)) bo-reserved-min))
                 (>= minerals (sc2-min-cost 'refinery))
                 (non-combat-min-ok? (sc2-min-cost 'refinery)))
        (emit-gas-build-verified! 'refinery (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 5.0))))
@@ -3298,6 +3313,8 @@
                      (>= gas (sc2-gas-cost 'combat-shield)))
             (emit-research-verified! 'combat-shield))]
          [(and (upgrade-needed? 'concussive-shells)
+               (or (not live-game?)
+                   (>= (- minerals (sc2-min-cost 'concussive-shells)) bo-reserved-min))
                (>= minerals (sc2-min-cost 'concussive-shells))
                (>= gas (sc2-gas-cost 'concussive-shells)))
           (emit-research-verified! 'concussive-shells)]))
@@ -3378,6 +3395,7 @@
                                (safe-coord (+ base-x SC2-TERRAN-FACILITY-STEP-X))
                                (safe-coord (+ base-y (* 2.0 SC2-TERRAN-FACILITY-STEP-Y)))))
        (when (and (not (building-present-or-pending? 'armory))
+                  (or (not live-game?) (memq 'engineering-bay bldg-types))
                   (>= supply-used 52)
                   (>= minerals (sc2-min-cost 'armory))
                   (>= gas (sc2-gas-cost 'armory)))
@@ -3390,16 +3408,19 @@
                 (not urgent-combat-or-intel-need?)
                 (memq 'starport ready-bldg-types)
                 (>= minerals (sc2-min-cost 'engineering-bay)))
-       (when (not (or (memq 'starport-techlab bldg-types)
-                      (memq 'starport-tech-lab bldg-types)
-                      (> (order-ledger-pending-count-for-type oledger 'starport-techlab frame) 0)))
+       (when (and (not (building-present-or-pending? 'engineering-bay))
+                  (>= minerals (sc2-min-cost 'engineering-bay)))
+         (emit-build-verified! 'engineering-bay (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
+       (when (and (not (or (memq 'starport-techlab bldg-types)
+                           (memq 'starport-tech-lab bldg-types)
+                           (and live-game? (memq 'starport-reactor bldg-types))
+                           (> (order-ledger-pending-count-for-type oledger 'starport-techlab frame) 0)))
+                  (>= minerals (sc2-min-cost 'starport-techlab))
+                  (>= gas (sc2-gas-cost 'starport-techlab)))
          (recall-building-group! 6)
          (emit! (list 'build 'starport-techlab (safe-coord (+ base-x 8.5)) (safe-coord (+ base-y 6.5))))
          (order-ledger-record-issued! oledger (+ 840000 (modulo frame 10000)) 'build 'starport-techlab (+ base-x 8.5) (+ base-y 6.5) frame)
          (spend-resources-and-supply! (sc2-min-cost 'starport-techlab) (sc2-gas-cost 'starport-techlab) 0))
-       (when (and (not (building-present-or-pending? 'engineering-bay))
-                  (>= minerals (sc2-min-cost 'engineering-bay)))
-         (emit-build-verified! 'engineering-bay (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
        (when (memq 'engineering-bay ready-bldg-types)
          (cond
            [(upgrade-needed? 'terran-infantry-weapons-1)
@@ -3460,7 +3481,7 @@
                 (and (not terran-saving-for-orbital?) (< total-workers 19) (< minerals 350)))
             (not terran-saving-for-orbital?)
             (not urgent-combat-or-intel-need?)
-            (or (< total-workers (* 20 (max 1 (length ccs))))
+            (or (< total-workers 16)
                 (can-spend-by-priority? 'scv 'worker))
             (< total-workers (min 68 target-workers (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length ccs)))))
             (or (not live-game?)
@@ -3473,7 +3494,11 @@
             (not under-early-cheese?)
             (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)))
      (when terran-scv-priority?
-       (try-train-unit! 'scv 'townhall 4))
+       (try-train-unit! 'scv 'townhall 4
+                        #:respect-bo-reserve?
+                        (and live-game?
+                             (>= total-workers 16)
+                             (not (memq bo-goal-sym '(hatchery nexus command-center drone probe scv))))))
 
      ;; Terran Unit Training (dispatched via Building Control Groups 5 [Barracks] & 6 [Factory/Starport],
      ;; gated by `open-prod-slots`, `can-spend-by-priority?`, and Pro Build-Order sequence)
@@ -3567,8 +3592,8 @@
               'remembered-enemy-threat-frame remembered-enemy-threat-frame
               'escrow-goal-sym active-escrow-sym
               'escrow-age-frames (if (>= cur-escrow-age-frames max-escrow-timeout-frames) 0 cur-escrow-age-frames)
-              'escrow-peak-min (if (>= cur-escrow-age-frames max-escrow-timeout-frames) minerals cur-escrow-peak-min)
-              'escrow-prev-min minerals
+              'escrow-peak-min (if (>= cur-escrow-age-frames max-escrow-timeout-frames) obs-minerals cur-escrow-peak-min)
+              'escrow-prev-min obs-minerals
               'escrow-start-frame (if (>= cur-escrow-age-frames max-escrow-timeout-frames) frame cur-escrow-start-frame)
               'escrow-last-frame frame))
 
@@ -4951,6 +4976,9 @@
           'remembered-enemy-threat-frame (hash-ref last-tel-ht 'remembered-enemy-threat-frame -9999)
           'escrow-goal-sym (hash-ref last-tel-ht 'escrow-goal-sym #f)
           'escrow-age-frames (hash-ref last-tel-ht 'escrow-age-frames 0)
+          'escrow-peak-min (hash-ref last-tel-ht 'escrow-peak-min 0)
+          'escrow-prev-min (hash-ref last-tel-ht 'escrow-prev-min 0)
+          'escrow-start-frame (hash-ref last-tel-ht 'escrow-start-frame 0)
           'escrow-last-frame (hash-ref last-tel-ht 'escrow-last-frame 0)
           'vanguard-count vanguard-cnt
           'reserve-count reserve-cnt
