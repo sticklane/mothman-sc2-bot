@@ -1527,27 +1527,110 @@
   (define live-enemy-threat-supply
     (max visible-enemy-threat-supply remembered-enemy-threat-supply))
 
-  ;; Track opponent intel freshness (`last-enemy-seen-frame`) and dispatch Periodic Recon (PV9)
-  ;; whenever intel is stale (>= 268 frames = 12s) or on a 448-frame (20s) recon cadence.
+  ;; Track opponent intel Freshness x Coverage across 4 sectors (`enemy-main`, `enemy-natural`,
+  ;; `enemy-third`, `corridor-army`) via `evaluate-opponent-intel-quality` (PV9).
+  ;; Sector timestamps update whenever an enemy unit/building is seen in that sector OR an
+  ;; allied scout/Overlord/unit has live vision proximity (<= 15.0 tiles) to that sector!
+  (define enemy-third-x (hash-ref obs 'enemy-third-x (safe-coord (* 0.72 enemy-x) 132.0)))
+  (define enemy-third-y (hash-ref obs 'enemy-third-y (safe-coord (* 0.72 enemy-y) 132.0)))
+  (define all-visible-enemies (append enemy-units enemy-bldgs))
+  (define (ally-has-vision-of? sx sy)
+    (ormap (lambda (u)
+             (and (hash-has-key? u 'x)
+                  (hash-has-key? u 'y)
+                  (<= (dist2d (hash-ref u 'x base-x) (hash-ref u 'y base-y) sx sy) 15.0)))
+           ally-units))
+  (define (enemy-seen-near? sx sy radius)
+    (ormap (lambda (e)
+             (and (hash-has-key? e 'x)
+                  (hash-has-key? e 'y)
+                  (<= (dist2d (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0) sx sy) radius)))
+           all-visible-enemies))
+  (define last-seen-main-frame
+    (cond
+      [(hash-has-key? obs 'last-seen-main-frame)
+       (hash-ref obs 'last-seen-main-frame 0)]
+      [(or (not (null? enemy-bldgs))
+           (enemy-seen-near? enemy-x enemy-y 28.0)
+           (ally-has-vision-of? enemy-x enemy-y))
+       frame]
+      [else
+       (hash-ref prev-tel-early 'last-seen-main-frame 0)]))
+  (define last-seen-natural-frame
+    (cond
+      [(hash-has-key? obs 'last-seen-natural-frame)
+       (hash-ref obs 'last-seen-natural-frame 0)]
+      [(or (enemy-seen-near? enemy-exp-x enemy-exp-y 22.0)
+           (ally-has-vision-of? enemy-exp-x enemy-exp-y))
+       frame]
+      [else
+       (hash-ref prev-tel-early 'last-seen-natural-frame 0)]))
+  (define last-seen-third-frame
+    (cond
+      [(hash-has-key? obs 'last-seen-third-frame)
+       (hash-ref obs 'last-seen-third-frame 0)]
+      [(or (enemy-seen-near? enemy-third-x enemy-third-y 22.0)
+           (ally-has-vision-of? enemy-third-x enemy-third-y))
+       frame]
+      [else
+       (hash-ref prev-tel-early 'last-seen-third-frame 0)]))
+  (define last-seen-army-frame
+    (cond
+      [(hash-has-key? obs 'last-seen-army-frame)
+       (hash-ref obs 'last-seen-army-frame 0)]
+      [(or (not (null? enemy-units))
+           (enemy-seen-near? corridor-mid-x corridor-mid-y 25.0)
+           (and (>= frame 336) (ally-has-vision-of? corridor-mid-x corridor-mid-y)))
+       frame]
+      [else
+       (hash-ref prev-tel-early 'last-seen-army-frame 0)]))
   (define last-enemy-seen-frame
-    (if (or (not (null? enemy-units)) (not (null? enemy-bldgs)))
-        frame
-        (hash-ref prev-tel-early 'last-enemy-seen-frame 0)))
+    (if (hash-has-key? obs 'last-enemy-seen-frame)
+        (hash-ref obs 'last-enemy-seen-frame 0)
+        (max last-seen-main-frame
+             last-seen-natural-frame
+             last-seen-third-frame
+             last-seen-army-frame
+             (if (or (not (null? enemy-units)) (not (null? enemy-bldgs)))
+                 frame
+                 (hash-ref prev-tel-early 'last-enemy-seen-frame 0)))))
   (define intel-staleness-frames (max 0 (- frame last-enemy-seen-frame)))
+  (define intel-qual
+    (evaluate-opponent-intel-quality
+     #:frame frame
+     #:last-seen-main-frame last-seen-main-frame
+     #:last-seen-natural-frame last-seen-natural-frame
+     #:last-seen-third-frame last-seen-third-frame
+     #:last-seen-army-frame last-seen-army-frame
+     #:intel-staleness-frames (if (and (<= last-seen-main-frame 0)
+                                       (<= last-seen-natural-frame 0)
+                                       (<= last-seen-army-frame 0))
+                                  intel-staleness-frames
+                                  #f)
+     #:army-supply live-army-supply
+     #:ally-units ally-combat-units))
+  (define intel-freshness (opponent-intel-quality-freshness intel-qual))
+  (define intel-coverage (opponent-intel-quality-coverage intel-qual))
+  (define intel-confidence (opponent-intel-quality-confidence intel-qual))
+  (define intel-deficit (opponent-intel-quality-deficit intel-qual))
+  (define intel-priority-sector (opponent-intel-quality-priority-sector intel-qual))
+  (define intel-target-goal (opponent-intel-quality-target-goal intel-qual))
+
   (when (and (>= frame 448)
-             (or (>= intel-staleness-frames 268)
-                 (zero? (modulo frame 448))))
-    (define recon-phase (modulo (quotient frame 224) 3))
+             (or (< intel-confidence 0.65)
+                 (zero? (modulo frame 672))))
     (define recon-tx
-      (case recon-phase
-        [(0) enemy-exp-x]
-        [(1) enemy-x]
-        [else corridor-mid-x]))
+      (case intel-priority-sector
+        [(enemy-natural) enemy-exp-x]
+        [(enemy-main)    enemy-x]
+        [(enemy-third)   enemy-third-x]
+        [else            corridor-mid-x]))
     (define recon-ty
-      (case recon-phase
-        [(0) enemy-exp-y]
-        [(1) enemy-y]
-        [else corridor-mid-y]))
+      (case intel-priority-sector
+        [(enemy-natural) enemy-exp-y]
+        [(enemy-main)    enemy-y]
+        [(enemy-third)   enemy-third-y]
+        [else            corridor-mid-y]))
     ;; 1. Zero-risk spell / detector recon (Hallucinated Phoenix, Changeling, Observer, Orbital Scan)
     (case race
       [(Protoss)
@@ -1560,12 +1643,12 @@
                        (>= (hash-ref u 'energy 0) 75)))
                 ally-units))
        (when (and sentry-caster
-                  (>= intel-staleness-frames 224)
+                  (< intel-confidence 0.65)
                   (refractory-allow-action?! cd-tracker 'periodic-hallucination-scout frame 448))
          (emit! (list 'cast-deception-and-scout-spells
                       'sentry-hallucination-phoenix-scout
                       (hash-ref sentry-caster 'id 180)
-                      enemy-x enemy-y)))]
+                      recon-tx recon-ty)))]
       [(Zerg)
        (define ovs-caster
          (findf (lambda (u)
@@ -1574,7 +1657,7 @@
                 ally-units))
        (when (and ovs-caster
                   (refractory-allow-action?! cd-tracker 'periodic-changeling-scout frame 336))
-         (emit! (list 'cast (hash-ref ovs-caster 'id 190) 'spawn-changeling enemy-exp-x enemy-exp-y)))]
+         (emit! (list 'cast (hash-ref ovs-caster 'id 190) 'spawn-changeling recon-tx recon-ty)))]
       [(Terran)
        (define scan-oc
          (findf (lambda (b)
@@ -1583,10 +1666,10 @@
                        (>= (hash-ref b 'energy 0) (if (>= frame 3000) 50 75))))
                 ally-bldgs))
        (when (and scan-oc
-                  (>= intel-staleness-frames 336)
-                  (refractory-allow-action?! cd-tracker 'periodic-scanner-sweep frame 448))
+                  (< intel-confidence 0.50)
+                  (refractory-allow-action?! cd-tracker 'periodic-scanner-sweep frame 672))
          (emit! (list 'cast-spell (hash-ref scan-oc 'id 301) 'scanner-sweep recon-tx recon-ty)))])
-    ;; 2. Fast spotter unit recon along the attack corridor -> enemy natural -> enemy main
+    ;; 2. Fast spotter unit recon toward `intel-priority-sector`
     (define spotter-candidates
       (filter (lambda (u)
                 (memq (unit-type-sym u)
@@ -1602,7 +1685,7 @@
     (cond
       [chosen-spotter
        (emit! (list 'periodic-scout (hash-ref chosen-spotter 'id 101) recon-tx recon-ty))]
-      [(and scout-worker-id (>= intel-staleness-frames 268))
+      [(and scout-worker-id (< intel-confidence 0.65))
        (emit! (list 'periodic-scout scout-worker-id recon-tx recon-ty))]))
 
   ;; Full-game base/natural attack & incoming-army threat detection (never expires at frame 2500!)
@@ -1658,6 +1741,9 @@
      #:requires-anti-air? (enemy-tech-observation-requires-anti-air? tech-obs)
      #:requires-detection? (enemy-tech-observation-requires-detection? tech-obs)
      #:intel-staleness-frames intel-staleness-frames
+     #:intel-freshness intel-freshness
+     #:intel-coverage intel-coverage
+     #:intel-confidence intel-confidence
      #:supply-at-risk? supply-at-risk?
      #:supply-buffer (and live-game-obs? supply-threshold)))
   (define max-pending-supply
@@ -2005,15 +2091,18 @@
              (> (+ bo-reserved-min bo-reserved-gas) 0))
         (+ prev-escrow-age (max 1 (- frame prev-escrow-frame)))
         0))
+  (define severe-intel-blindness?
+    (and (>= frame 1800)
+         (or (>= supply-used 22) (>= frame 2240) (>= active-bases 2))
+         (>= intel-staleness-frames 896)
+         (< intel-confidence 0.35)))
   (define urgent-combat-or-intel-need?
     (and (< live-army-supply 8)
          (or under-base-attack?
              (> live-enemy-threat-supply 0)
              (and live-game?
                   (or (>= cur-escrow-age-frames 224)
-                      (and (>= frame 1800)
-                           (or (>= supply-used 22) (>= frame 2240) (>= active-bases 2))
-                           (>= intel-staleness-frames 268))
+                      severe-intel-blindness?
                       (and (or (>= frame 2688) (>= active-bases 2))
                            (< live-army-supply 4)))))))
   (define (non-combat-min-ok? cost)
@@ -2049,10 +2138,7 @@
              (or under-base-attack?
                  (> live-enemy-threat-supply 0)
                  (>= cur-escrow-age-frames 224)
-                 (and (>= frame 1800)
-                      (or (>= supply-used 22) (>= frame 2240) (>= active-bases 2))
-                      (>= intel-staleness-frames 268)
-                      (< live-army-supply 8))
+                 (and severe-intel-blindness? (< live-army-supply 8))
                  (and (or (>= frame 2688) (>= active-bases 2)) (< live-army-supply 4))))
         (macro-brain-can-spend? macro-decision id-sym minerals gas cat-sym)))
 
@@ -2121,9 +2207,10 @@
   ;; (`16 Hatchery`, `19 Nexus`, `20 Command Center`, or `3rd Base`) or when current bases
   ;; are saturated AND our 3rd-base supply/army thresholds are met, hold mineral spending
   ;; until we reach `(sc2-min-cost race-th-sym)` (300M Zerg / 400M Protoss & Terran).
-  ;; Dynamic threat, intel-staleness & tech-repair preemption: never lock minerals for expansion
-  ;; if under attack, if enemy threat is active, if escrow age >= 224 frames, if intel is stale
-  ;; without probing units, or if a prerequisite in our SC2-TECH-GRAPH (`repaired-prereqs`) was destroyed!
+  ;; Dynamic threat, severe-intel-blindness & tech-repair preemption: never lock minerals for expansion
+  ;; if under attack, if enemy threat is active, if escrow age >= 224 frames, if intel is severely
+  ;; blind (>= 896 frames stale and confidence < 0.35) without probing units, or if a prerequisite
+  ;; in our SC2-TECH-GRAPH (`repaired-prereqs`) was destroyed!
   (define race-th-sym
     (case race
       [(Zerg) 'hatchery]
@@ -2136,7 +2223,7 @@
          (not urgent-combat-or-intel-need?)
          (< cur-escrow-age-frames 224)
          (or (not live-game?) (< frame 2688) (>= live-army-supply 4))
-         (or (not live-game?) (< frame 1800) (< intel-staleness-frames 268) (>= live-army-supply 8))
+         (or (not live-game?) (not severe-intel-blindness?) (>= live-army-supply 8))
          (null? orphaned-prereqs)
          (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)
          (not natural-blocked?)
@@ -3330,7 +3417,17 @@
               'priority-repaired-prereqs repaired-prereqs
               'scout-worker-id scout-worker-id
               'last-enemy-seen-frame last-enemy-seen-frame
+              'last-seen-main-frame last-seen-main-frame
+              'last-seen-natural-frame last-seen-natural-frame
+              'last-seen-third-frame last-seen-third-frame
+              'last-seen-army-frame last-seen-army-frame
               'intel-staleness-frames intel-staleness-frames
+              'intel-freshness intel-freshness
+              'intel-coverage intel-coverage
+              'intel-confidence intel-confidence
+              'intel-deficit intel-deficit
+              'intel-priority-sector intel-priority-sector
+              'intel-target-goal intel-target-goal
               'intel-pressure (hash-ref pressure-metrics 'intel-pressure 0.0)
               'intel-gathering-method active-intel-method
               'remembered-enemy-threat-supply remembered-enemy-threat-supply
@@ -4663,7 +4760,17 @@
           'priority-repaired-prereqs (hash-ref last-tel-ht 'priority-repaired-prereqs '())
           'scout-worker-id (hash-ref last-tel-ht 'scout-worker-id #f)
           'last-enemy-seen-frame (hash-ref last-tel-ht 'last-enemy-seen-frame 0)
+          'last-seen-main-frame (hash-ref last-tel-ht 'last-seen-main-frame 0)
+          'last-seen-natural-frame (hash-ref last-tel-ht 'last-seen-natural-frame 0)
+          'last-seen-third-frame (hash-ref last-tel-ht 'last-seen-third-frame 0)
+          'last-seen-army-frame (hash-ref last-tel-ht 'last-seen-army-frame 0)
           'intel-staleness-frames (hash-ref last-tel-ht 'intel-staleness-frames 0)
+          'intel-freshness (hash-ref last-tel-ht 'intel-freshness 1.0)
+          'intel-coverage (hash-ref last-tel-ht 'intel-coverage 1.0)
+          'intel-confidence (hash-ref last-tel-ht 'intel-confidence 1.0)
+          'intel-deficit (hash-ref last-tel-ht 'intel-deficit 0.0)
+          'intel-priority-sector (hash-ref last-tel-ht 'intel-priority-sector 'enemy-natural)
+          'intel-target-goal (hash-ref last-tel-ht 'intel-target-goal 'maintain-vision)
           'intel-pressure (hash-ref last-tel-ht 'intel-pressure 0.0)
           'intel-gathering-method (hash-ref last-tel-ht 'intel-gathering-method 'scouting)
           'remembered-enemy-threat-supply (hash-ref last-tel-ht 'remembered-enemy-threat-supply 0)

@@ -1489,19 +1489,29 @@
       (for/list ([i (in-range 22)])
         (hash 'id (+ 1 i) 'type worker-sym 'x (+ 31.0 (modulo i 5)) 'y (+ 31.0 (quotient i 5)) 'hp 40 'dps 5)))
     (define combat-admitted-within-bound? #f)
-    ;; Seed enemy contact at frame 1800 so `escrow-timeout` isolates pure escrow expiry (`<= 224` frames)
-    ;; while `stale-intel-preemption` leaves enemy contact at frame 0 (`intel-staleness-frames >= 268`).
+    ;; Seed enemy sector contact at frame 1800 so `escrow-timeout` isolates pure escrow expiry (`<= 224` frames)
+    ;; while `stale-intel-preemption` leaves enemy contact at frame 0 (`intel-staleness-frames = 1800 >= 896`, `confidence < 0.35`).
     (unless (eq? scenario 'stale-intel-preemption)
       (set-live-bot-runtime-last-telemetry!
        rt
-       (hash-set (live-bot-runtime-last-telemetry rt) 'last-enemy-contact-frame 1800)))
+       (hash-set* (live-bot-runtime-last-telemetry rt)
+                  'last-enemy-contact-frame 1800
+                  'last-enemy-seen-frame 1800
+                  'last-seen-main-frame 1800
+                  'last-seen-natural-frame 1800
+                  'last-seen-army-frame 1800)))
     (for ([step-idx (in-range 16)])
       (set! pv7-states (add1 pv7-states))
       (define frame (+ 1800 (* step-idx 24)))
       (unless (eq? scenario 'stale-intel-preemption)
         (set-live-bot-runtime-last-telemetry!
          rt
-         (hash-set (live-bot-runtime-last-telemetry rt) 'last-enemy-contact-frame frame)))
+         (hash-set* (live-bot-runtime-last-telemetry rt)
+                    'last-enemy-contact-frame frame
+                    'last-enemy-seen-frame frame
+                    'last-seen-main-frame frame
+                    'last-seen-natural-frame frame
+                    'last-seen-army-frame frame)))
       (define e-units
         (if (eq? scenario 'threat-preemption)
             (list (hash 'id 901 'type 'stalker 'x 36.0 'y 36.0 'hp 160 'dps 14)
@@ -1534,7 +1544,7 @@
                acts))
       (when trained-combat?
         (set! combat-admitted-within-bound? #t))
-      ;; Under threat or stale intel, combat unit must be admitted on the VERY FIRST step (step 0)
+      ;; Under threat or severe intel blindness, combat unit must be admitted on the VERY FIRST step (step 0)
       (when (and (= step-idx 0)
                  (memq scenario '(threat-preemption stale-intel-preemption))
                  (not trained-combat?))
@@ -1546,7 +1556,7 @@
         (set! pv7-cex (list 'race race 'scenario scenario 'minerals minerals 'gas gas
                             'reason 'combat-never-admitted-across-trajectory)))))
   (record! 'PV7-multi-step-escrow-liveness-no-deadlock
-           "Unplaced expansion escrow expires within `<= 224` frames (`10s`) and is immediately preempted on step 0 under enemy threat (`enemy-threat > 0`) or stale opponent intel (`intel-staleness >= 268` with low army), guaranteeing `0` escrow deadlocks"
+           "Unplaced expansion escrow expires within `<= 224` frames (`10s`) and is immediately preempted on step 0 under enemy threat (`enemy-threat > 0`) or severe intel blindness (`intel-staleness >= 896` and `confidence < 0.35` with low army), guaranteeing `0` escrow deadlocks"
            pv7-states
            (not pv7-cex)
            pv7-cex)
@@ -1649,24 +1659,32 @@
 
   ;; ---------------------------------------------------------------------------
   ;; Theorem PV9: `PV9-opponent-intel-gathering-priority-and-threat-memory`
-  ;; Proves across all races (`Zerg`, `Protoss`, `Terran`), staleness windows,
-  ;; and army levels that:
-  ;;   1. Whenever opponent information is stale (`intel-staleness-frames >= 268`,
-  ;;      so `intel-pressure >= 1.0`), opponent information gathering (`'intel-gathering`
-  ;;      and mobile scouting/harassment/attacking units in `PV-INTEL-GATHERING-UNIT-SYMS`)
+  ;; Proves across all races (`Zerg`, `Protoss`, `Terran`), Freshness x Coverage
+  ;; sector states, and army levels that:
+  ;;   1. Continuous `Freshness x Coverage` (`evaluate-opponent-intel-quality`) is NOT
+  ;;      all-or-nothing: moderate staleness (`268..448` frames / `12s..20s`) or partial
+  ;;      sector coverage (`0.35 <= confidence < 0.65`) keeps `intel-pressure < 1.0`
+  ;;      (preserving expansion escrow `escrow-eligible? = #t`) while selecting the
+  ;;      highest-uncertainty uncovered sector (`priority-sector`) and appropriate
+  ;;      information-gathering goal (`'expand-coverage` / `'refresh-tech-intel` / `'harass-and-probe`);
+  ;;   2. Whenever opponent information is severely stale (`intel-staleness-frames >= 896` = `40s`
+  ;;      or `confidence < 0.35`, so `intel-pressure >= 1.0`), opponent information gathering
+  ;;      (`'intel-gathering` and mobile scouting/harassment/attacking units in `PV-INTEL-GATHERING-UNIT-SYMS`)
   ;;      strictly outranks passive `'worker` and `'expansion` spending;
-  ;;   2. `select-intel-gathering-method` cleanly selects among `'scouting` (early/low-army),
+  ;;   3. `select-intel-gathering-method` cleanly selects among `'scouting` (early/low-army),
   ;;      `'harassment` (mid-army mobile raiders), and `'attacking` (probing/recon-in-force);
-  ;;   3. Live runtime dispatches opening Overlord/worker scouting + mineral harassment +
-  ;;      periodic recon within bounded staleness, and persists scouted enemy combat threat
-  ;;      in `live-enemy-threat-supply` for `<= 672` frames (`30s`) after enemy leaves vision.
+  ;;   4. Live runtime dispatches opening Overlord/worker scouting + mineral harassment +
+  ;;      sector-targeted periodic recon, updates sector freshness from allied unit vision
+  ;;      proximity (`<= 15.0` tiles), and persists scouted enemy combat threat in
+  ;;      `live-enemy-threat-supply` for `<= 672` frames (`30s`) after enemy leaves vision.
   ;; ---------------------------------------------------------------------------
   (define pv9-states 0)
   (define pv9-cex #f)
+  ;; Part A: Severe staleness (`>= 896` frames / `40s`) -> `intel-pressure >= 1.0`, outranks passive macro
   (for* ([race (in-list PV-LATTICE-RACES)]
-         [staleness '(268 336 448 672)]
+         [staleness '(896 1120 1344 1792)]
          [army-supply '(0 4 8 14)]
-         [frame '(900 1800 3200)])
+         [frame '(1800 2400 3600)])
     (set! pv9-states (add1 pv9-states))
     (define pm
       (compute-state-pressure-metrics
@@ -1721,12 +1739,51 @@
               (<= u-recon-unit u-worker)
               (<= u-recon-unit u-expand))
       (unless pv9-cex
-        (set! pv9-cex (list 'race race 'staleness staleness 'army-supply army-supply
-                            'frame frame 'intel-method intel-method 'expected expected-method
+        (set! pv9-cex (list 'part 'severe-staleness 'race race 'staleness staleness
+                            'army-supply army-supply 'frame frame
+                            'intel-method intel-method 'expected expected-method
                             'u-intel u-intel 'u-recon-unit u-recon-unit
                             'u-worker u-worker 'u-expand u-expand)))))
 
-  ;; Verify live runtime scouting/harassment dispatch & 30s enemy threat memory persistence
+  ;; Part B: Graduated Freshness x Coverage (non-aggressive at 12s-20s, targets uncovered sectors)
+  (for* ([race (in-list PV-LATTICE-RACES)]
+         [mod-staleness '(268 336 448)])
+    (set! pv9-states (add1 pv9-states))
+    (define pm-mod
+      (compute-state-pressure-metrics
+       #:race race
+       #:frame 2000
+       #:minerals 250
+       #:gas 50
+       #:supply-left 8
+       #:supply-cap 30
+       #:active-bases 1
+       #:desired-bases 2
+       #:workers 18
+       #:army-supply 4
+       #:enemy-threat-supply 0
+       #:intel-staleness-frames mod-staleness))
+    ;; Partial coverage: `enemy-main` freshly seen at 1960, `enemy-natural` and `corridor-army` unseen
+    (define iq-partial
+      (evaluate-opponent-intel-quality
+       #:frame 2000
+       #:last-seen-main-frame 1960
+       #:last-seen-natural-frame 0
+       #:last-seen-third-frame 0
+       #:last-seen-army-frame 0
+       #:army-supply 2))
+    (when (or (>= (hash-ref pm-mod 'intel-pressure 0.0) 1.0)
+              (not (hash-ref pm-mod 'escrow-eligible? #f))
+              (not (eq? (opponent-intel-quality-priority-sector iq-partial) 'enemy-natural))
+              (not (eq? (opponent-intel-quality-target-goal iq-partial) 'expand-coverage))
+              (<= (opponent-intel-quality-coverage iq-partial) 0.20)
+              (>= (opponent-intel-quality-coverage iq-partial) 0.55))
+      (unless pv9-cex
+        (set! pv9-cex (list 'part 'graduated-freshness-coverage 'race race
+                            'mod-staleness mod-staleness 'pm-mod pm-mod
+                            'iq-partial iq-partial)))))
+
+  ;; Part C: Verify live runtime scouting/harassment dispatch, vision-based sector refresh & 30s threat memory
   (for ([race (in-list PV-LATTICE-RACES)])
     (set! pv9-states (+ pv9-states 3))
     (define rt (make-live-bot-runtime #:race race))
@@ -1773,7 +1830,7 @@
     (define has-mineral-harass?
       (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-harass))) acts-spot))
     ;; Step C: Enemy army marches out of vision at frame 1100 (`200` frames later < `672`);
-    ;; verify `remembered-enemy-threat-supply` persists (> 0) and prevents blind expansion escrow!
+    ;; verify `remembered-enemy-threat-supply` persists (> 0) and `last-seen-main-frame = 900`!
     (define res-memory
       (step-live-bot-runtime!
        rt
@@ -1787,16 +1844,18 @@
              'enemy-units '() 'enemy-buildings '())))
     (define telem-mem (live-bot-runtime-last-telemetry rt))
     (define rem-threat (hash-ref telem-mem 'remembered-enemy-threat-supply 0.0))
+    (define seen-main (hash-ref telem-mem 'last-seen-main-frame 0))
     (when (or (not has-open-scout?)
               (not has-mineral-harass?)
-              (<= rem-threat 0.0))
+              (<= rem-threat 0.0)
+              (not (= seen-main 900)))
       (unless pv9-cex
         (set! pv9-cex (list 'race race 'has-open-scout? has-open-scout?
                             'has-mineral-harass? has-mineral-harass?
-                            'rem-threat rem-threat)))))
+                            'rem-threat rem-threat 'seen-main seen-main)))))
 
   (record! 'PV9-opponent-intel-gathering-priority-and-threat-memory
-           "Opponent information gathering (`scouting`, `harassment`, `attacking`) strictly outranks passive worker/expansion spending when `intel-staleness >= 268` (`12s`), dispatches opening/periodic scouts + mineral-patch harassment, and retains scouted enemy threat memory across fog-of-war transit (`<= 672` frames)"
+           "Continuous `Freshness x Coverage` model (`evaluate-opponent-intel-quality`) preserves expansion escrow under moderate staleness (`12s-20s`), targets uncovered sectors (`priority-sector`), elevates intel gathering above passive macro when severely blind (`>= 896` frames / `confidence < 0.35`), and retains scouted threat memory (`<= 672` frames)"
            pv9-states
            (not pv9-cex)
            pv9-cex)

@@ -73,7 +73,9 @@
  (struct-out priority-candidate)
  (struct-out priority-decision-entry)
  (struct-out priority-schedule-result)
+ (struct-out opponent-intel-quality)
  PV-INTEL-GATHERING-UNIT-SYMS
+ evaluate-opponent-intel-quality
  select-intel-gathering-method
  compute-state-pressure-metrics
  compute-candidate-marginal-utility
@@ -1398,6 +1400,145 @@
        [else #f])]))
 
 ;; Continuous, breakpoint-free pressure metrics (returns an immutable hash)
+;; =============================================================================
+;; Opponent Intelligence Freshness & Coverage Model (`opponent-intel-quality`)
+;;
+;; Models opponent knowledge as two continuous dimensions in [0.0, 1.0] across
+;; 4 spatial/functional opponent sectors rather than an all-or-nothing timer:
+;;   1. `enemy-main`    (half-life = 1344 frames / 60s: tech tree & main production)
+;;   2. `enemy-natural` (half-life = 1120 frames / 50s: natural expansion & defense)
+;;   3. `enemy-third`   (half-life = 1344 frames / 60s: 3rd+ bases, active at frame >= 3360)
+;;   4. `corridor-army` (half-life = 784 frames  / 35s: mobile army & attack corridor)
+;;
+;; Produces:
+;;   - `freshness`  in [0.0, 1.0]: weighted exponential decay across opponent sectors
+;;   - `coverage`   in [0.0, 1.0]: fraction of active opponent sectors with non-expired intel
+;;   - `confidence` in [0.0, 1.0]: `0.55 * freshness + 0.45 * coverage`
+;;   - `deficit`    in [0.0, 1.0]: `1.0 - confidence`
+;;   - `priority-sector`: `'enemy-natural` | `'enemy-main` | `'enemy-third` | `'corridor-army`
+;;                        (the sector with largest weighted uncertainty `w_s * (1 - F_s)`)
+;;   - `target-goal`:     `'maintain-vision` | `'expand-coverage` | `'refresh-tech-intel`
+;;                        | `'harass-and-probe` | `'recon-in-force`
+;; =============================================================================
+
+(struct opponent-intel-quality
+  (freshness
+   coverage
+   confidence
+   deficit
+   priority-sector
+   target-goal
+   sector-freshness-hash)
+  #:transparent)
+
+(define (sector-decay-freshness frame last-seen-frame half-life-frames [fallback-staleness #f])
+  (define age
+    (cond
+      [(and (real? last-seen-frame) (> last-seen-frame 0))
+       (max 0.0 (- (exact->inexact frame) (exact->inexact last-seen-frame)))]
+      [(and (real? fallback-staleness) (>= fallback-staleness 0))
+       (max 0.0 (exact->inexact fallback-staleness))]
+      [else
+       (max 0.0 (exact->inexact frame))]))
+  ;; Opening grace curve: before frame 1120 (50s), while the opening scout is still walking
+  ;; across the map, smoothly decay from 1.0 rather than treating frame 300 as "blind".
+  (define raw-f
+    (if (and (or (not (real? last-seen-frame)) (<= last-seen-frame 0))
+             (not fallback-staleness)
+             (< frame 1120))
+        (max 0.45 (- 1.0 (/ (exact->inexact frame) 1680.0)))
+        (exp (* -0.6931471805599453 (/ age (max 1.0 (exact->inexact half-life-frames)))))))
+  (max 0.0 (min 1.0 raw-f)))
+
+(define (evaluate-opponent-intel-quality
+         #:frame [raw-frame 0]
+         #:last-seen-main-frame [last-main -1]
+         #:last-seen-natural-frame [last-nat -1]
+         #:last-seen-third-frame [last-third -1]
+         #:last-seen-army-frame [last-army -1]
+         #:intel-staleness-frames [fallback-staleness #f]
+         #:army-supply [raw-army-supply 0.0]
+         #:ally-units [ally-units '()])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define army-sup (safe-real raw-army-supply 0.0))
+  (define f-main (sector-decay-freshness frame last-main 1120.0 fallback-staleness))
+  (define f-nat  (sector-decay-freshness frame last-nat  784.0  fallback-staleness))
+  (define f-third
+    (if (< frame 3360)
+        1.0
+        (sector-decay-freshness frame last-third 1120.0 fallback-staleness)))
+  (define f-army (sector-decay-freshness frame last-army 448.0  fallback-staleness))
+
+  ;; Phase-dependent sector weights (3rd base becomes relevant at frame >= 3360 = 2m30s)
+  (define w-main  (if (>= frame 3360) 0.32 0.38))
+  (define w-nat   (if (>= frame 3360) 0.28 0.36))
+  (define w-third (if (>= frame 3360) 0.15 0.00))
+  (define w-army  (if (>= frame 3360) 0.25 0.26))
+
+  (define freshness
+    (max 0.0 (min 1.0 (+ (* w-main f-main)
+                         (* w-nat f-nat)
+                         (* w-third f-third)
+                         (* w-army f-army)))))
+
+  ;; Sector coverage: an observed sector with freshness >= 0.65 counts as fully covered (1.0),
+  ;; tapering smoothly to 0.0 at freshness <= 0.35; unobserved sectors after opening grace have 0.0 coverage.
+  (define (sec-cov f last-sec)
+    (cond
+      [(and (or (not (real? last-sec)) (<= last-sec 0))
+            (not fallback-staleness)
+            (>= frame 1120))
+       0.0]
+      [else
+       (max 0.0 (min 1.0 (/ (- f 0.35) 0.30)))]))
+  (define coverage
+    (max 0.0 (min 1.0 (+ (* w-main (sec-cov f-main last-main))
+                         (* w-nat (sec-cov f-nat last-nat))
+                         (* w-third (if (< frame 3360) 1.0 (sec-cov f-third last-third)))
+                         (* w-army (sec-cov f-army last-army))))))
+
+  (define confidence (max 0.0 (min 1.0 (+ (* 0.55 freshness) (* 0.45 coverage)))))
+  (define deficit (max 0.0 (- 1.0 confidence)))
+
+  ;; Pick the priority sector with largest weighted uncertainty `w_s * (1 - F_s)`
+  (define sector-gaps
+    (list (cons 'enemy-natural (* w-nat (- 1.0 f-nat)))
+          (cons 'enemy-main    (* w-main (- 1.0 f-main)))
+          (cons 'corridor-army (* w-army (- 1.0 f-army)))
+          (cons 'enemy-third   (* w-third (- 1.0 f-third)))))
+  (define priority-sector
+    (car (argmax cdr sector-gaps)))
+
+  (define has-raiders?
+    (and (list? ally-units)
+         (ormap (lambda (u)
+                  (define sym (if (hash? u) (hash-ref u 'type 'none) u))
+                  (memq sym '(reaper hellion oracle phoenix adept mutalisk banshee zergling warp-prism medivac)))
+                ally-units)))
+
+  ;; Graduated info-gathering goal based on Freshness x Coverage:
+  (define target-goal
+    (cond
+      [(>= confidence 0.65) 'maintain-vision]
+      [(and (< confidence 0.35) (>= army-sup 10.0)) 'recon-in-force]
+      [(and (< confidence 0.35) (or has-raiders? (>= army-sup 4.0))) 'harass-and-probe]
+      [(< coverage 0.55) 'expand-coverage]
+      [(< f-main 0.45) 'refresh-tech-intel]
+      [(or has-raiders? (>= army-sup 4.0)) 'harass-and-probe]
+      [else 'expand-coverage]))
+
+  (opponent-intel-quality
+   freshness
+   coverage
+   confidence
+   deficit
+   priority-sector
+   target-goal
+   (hash 'enemy-main f-main
+         'enemy-natural f-nat
+         'enemy-third f-third
+         'corridor-army f-army)))
+
 (define (compute-state-pressure-metrics
          #:race [raw-race 'Zerg]
          #:frame [raw-frame 0]
@@ -1406,7 +1547,7 @@
          #:supply-left [raw-supply-left 4]
          #:supply-cap [raw-supply-cap 15]
          #:pending-supply [raw-pending-supply 0]
-         #:workers [raw-workers 12]
+         #:workers [raw-workers 16]
          #:target-workers [raw-target-workers 44]
          #:active-bases [raw-active-bases 1]
          #:desired-bases [raw-desired-bases 2]
@@ -1420,7 +1561,10 @@
          #:escrow-age-frames [raw-escrow-age-frames 0]
          #:max-escrow-frames [raw-max-escrow-frames 224]
          #:intel-staleness-frames [raw-intel-staleness-frames 0]
-         #:max-intel-staleness-frames [raw-max-intel-staleness-frames 268]
+         #:max-intel-staleness-frames [raw-max-intel-staleness-frames 896]
+         #:intel-freshness [override-intel-freshness #f]
+         #:intel-coverage [override-intel-coverage #f]
+         #:intel-confidence [override-intel-confidence #f]
          #:supply-at-risk? [raw-supply-at-risk? #f]
          #:supply-buffer [override-supply-buffer #f])
   (define race (normalize-ledger-race raw-race))
@@ -1444,7 +1588,7 @@
   (define escrow-age-frames (safe-nonneg-int raw-escrow-age-frames 0))
   (define max-escrow-frames (max 1 (safe-nonneg-int raw-max-escrow-frames 224)))
   (define intel-staleness-frames (safe-nonneg-int raw-intel-staleness-frames 0))
-  (define max-intel-staleness-frames (max 1 (safe-nonneg-int raw-max-intel-staleness-frames 268)))
+  (define max-intel-staleness-frames (max 1 (safe-nonneg-int raw-max-intel-staleness-frames 896)))
   (define supply-at-risk? (eq? raw-supply-at-risk? #t))
 
   ;; 1. Supply buffer & continuous supply hazard in [0.0, 2.0]
@@ -1497,28 +1641,55 @@
                    (max 1.0 (exact->inexact max-facilities))))
        (+ 1.0 (/ (exact->inexact minerals) 250.0))))
 
-  ;; 6. Opponent information pressure (`intel-pressure` in [0.0, 2.5]):
-  ;;    Prioritizes gathering information on the opponent (via scouting, harassment, or attacking)
-  ;;    whenever opponent intel staleness approaches or exceeds `max-intel-staleness-frames` (268 frames = 12s).
-  (define intel-pressure
+  ;; 6. Continuous Opponent Information Freshness, Coverage & Pressure (`intel-pressure` in [0.0, 2.5]):
+  ;;    Combines sector-level `intel-freshness` and `intel-coverage` (`intel-confidence = 0.55*F + 0.45*C`)
+  ;;    with `intel-staleness-frames / max-intel-staleness-frames` (default 896 frames = 40s):
+  ;;      - High confidence (>= 0.65) and low staleness -> 0.0 pressure (zero macro interference)
+  ;;      - Moderate deficit (0.35 <= confidence < 0.65) -> smooth [0.1, 0.95] pressure (recon goal, no escrow cancel)
+  ;;      - Severe blindness (confidence < 0.35 or staleness >= max-intel-staleness-frames) -> >= 1.0 pressure
+  (define default-iq
+    (evaluate-opponent-intel-quality
+     #:frame frame
+     #:intel-staleness-frames intel-staleness-frames
+     #:army-supply army-supply))
+  (define iq-freshness
+    (if (and override-intel-freshness (real? override-intel-freshness))
+        (max 0.0 (min 1.0 (exact->inexact override-intel-freshness)))
+        (opponent-intel-quality-freshness default-iq)))
+  (define iq-coverage
+    (if (and override-intel-coverage (real? override-intel-coverage))
+        (max 0.0 (min 1.0 (exact->inexact override-intel-coverage)))
+        (opponent-intel-quality-coverage default-iq)))
+  (define iq-confidence
+    (if (and override-intel-confidence (real? override-intel-confidence))
+        (max 0.0 (min 1.0 (exact->inexact override-intel-confidence)))
+        (max 0.0 (min 1.0 (+ (* 0.55 iq-freshness) (* 0.45 iq-coverage))))))
+  (define staleness-ratio
     (if (<= intel-staleness-frames 0)
         0.0
-        (min 2.5 (/ (exact->inexact intel-staleness-frames)
-                    (max 1.0 (exact->inexact max-intel-staleness-frames))))))
+        (/ (exact->inexact intel-staleness-frames)
+           (max 1.0 (exact->inexact max-intel-staleness-frames)))))
+  (define confidence-pressure
+    (cond
+      [(>= iq-confidence 0.65) 0.0]
+      [(>= iq-confidence 0.35) (* 0.95 (/ (- 0.65 iq-confidence) 0.30))]
+      [else (+ 1.0 (min 1.5 (/ (- 0.35 iq-confidence) 0.25)))]))
+  (define intel-pressure
+    (min 2.5 (max staleness-ratio confidence-pressure)))
 
   ;; 7. Expansion desire & escrow eligibility (PV1 / PV7 / PV9)
   (define expansion-desire
     (if (and (< active-bases desired-bases) (not under-attack?))
         (* (/ (exact->inexact (- desired-bases active-bases))
               (max 1.0 (exact->inexact desired-bases)))
-           (/ 1.0 (+ 1.0 (* 0.8 threat-pressure) (* 0.35 intel-pressure)))
+           (/ 1.0 (+ 1.0 (* 0.8 threat-pressure) (* 0.25 intel-pressure)))
            (+ 0.65 (min 1.35 (/ (exact->inexact minerals) 350.0))))
         0.0))
   (define escrow-eligible?
     (and (< escrow-age-frames max-escrow-frames)
          (< threat-pressure 0.85)
          (<= enemy-threat-supply 0.0)
-         (or (< intel-pressure 1.0) (< frame 1800) (>= army-supply 12))
+         (or (< intel-pressure 1.0) (< frame 2688) (>= army-supply 12))
          (or (= active-bases 1) (>= army-supply 18))
          (not under-attack?)
          (< active-bases desired-bases)))
@@ -1548,6 +1719,9 @@
         'max-escrow-frames max-escrow-frames
         'intel-staleness-frames intel-staleness-frames
         'max-intel-staleness-frames max-intel-staleness-frames
+        'intel-freshness iq-freshness
+        'intel-coverage iq-coverage
+        'intel-confidence iq-confidence
         'intel-pressure intel-pressure
         'threat-pressure threat-pressure
         'gas-imbalance gas-imbalance
@@ -1578,8 +1752,9 @@
     ;; Mobile Probing / Attacking Units (Attacking for Intel)
     zergling stalker marine zealot roach))
 
-;; Selects the optimal modality for gathering information on the opponent:
-;;   - 'attacking  when army-supply >= 10 or >= 6 combat units (probing attack / multi-base sweep)
+;; Selects the optimal modality for gathering information on the opponent based on
+;; continuous Freshness x Coverage (`intel-confidence`, `intel-coverage`) and army state:
+;;   - 'attacking  when army-supply >= 10 (recon-in-force / multi-base probing sweep)
 ;;   - 'harassment when mobile harassment raiders exist or army-supply >= 4 (mineral-line / expansion poke)
 ;;   - 'scouting   otherwise (worker scout, Overlord, Observer/Overseer/Hallucination/Scan, or single spotter)
 (define (select-intel-gathering-method
@@ -1587,7 +1762,9 @@
          #:frame [raw-frame 0]
          #:army-supply [raw-army-supply 0]
          #:ally-units [ally-units '()]
-         #:intel-staleness-frames [raw-staleness 0])
+         #:intel-staleness-frames [raw-staleness 0]
+         #:intel-freshness [raw-freshness #f]
+         #:intel-coverage [raw-coverage #f])
   (define army-sup (safe-real raw-army-supply 0.0))
   (define units (if (list? ally-units) ally-units '()))
   (define has-raiders?

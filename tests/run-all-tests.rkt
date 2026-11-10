@@ -1804,8 +1804,8 @@
               "All 24 formal state-machine invariants must pass")
   (assert-eq! (state-machine-verification-report-failed-checks sm-rep) 0
               "Zero formal state-machine invariants may fail")
-  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 117211
-              "Formal state-machine verifier must explore all 117,211 state transitions")
+  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 117220
+              "Formal state-machine verifier must explore all 117,220 state transitions")
   (for ([chk (in-list (state-machine-verification-report-check-results sm-rep))])
     (assert-true! (verification-check-result-passed? chk)
                   (format "Formal invariant ~a must pass" (verification-check-result-id chk)))
