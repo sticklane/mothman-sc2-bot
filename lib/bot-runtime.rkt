@@ -1492,17 +1492,34 @@
     (hash-ref obs 'army-supply
               (for/sum ([u (in-list ally-combat-units)])
                 (unit-supply-cost (unit-type-sym u)))))
+  ;; Layer 1: Owned-Base Spatial Threat & Net Force-Deficit Field
+  ;; Measure enemy proximity ONLY relative to bases we currently own (`base` always,
+  ;; `nat` when `active-bases >= 2`, `third` when `active-bases >= 3`) using smooth
+  ;; inverse-square spatial attenuation w(d) = 1 / (1 + (max(0, d - 28) / 18)^2),
+  ;; and compute `live-enemy-threat-supply` as the Net Force Deficit relative to our
+  ;; defending force (`live-defending-force-supply`) so a lone scout/harasser near an
+  ;; unowned 3rd base never triggers a false macro crisis while real pushes immediately
+  ;; preempt passive greed.
+  (define (min-dist-to-owned-base ex ey)
+    (min (dist2d ex ey base-x base-y)
+         (if (>= active-bases 2) (dist2d ex ey nat-x nat-y) +inf.0)
+         (if (>= active-bases 3) (dist2d ex ey third-x third-y) +inf.0)))
   (define (enemy-proximate-to-our-bases? e)
     (define ex (hash-ref e 'x base-x))
     (define ey (hash-ref e 'y base-y))
-    (<= (min (dist2d ex ey base-x base-y)
-             (dist2d ex ey nat-x nat-y)
-             (dist2d ex ey third-x third-y))
-        65.0))
+    (<= (min-dist-to-owned-base ex ey) 55.0))
   (define proximate-enemy-threat-supply
-    (for/sum ([e (in-list rush-threat-enemies)]
-              #:when (or (not live-obs-harvesters?) (enemy-proximate-to-our-bases? e)))
-      (unit-supply-cost (unit-type-sym e))))
+    (if live-obs-harvesters?
+        (exact-round
+         (for/sum ([e (in-list rush-threat-enemies)]
+                   #:when (enemy-proximate-to-our-bases? e))
+           (define ex (hash-ref e 'x base-x))
+           (define ey (hash-ref e 'y base-y))
+           (define d (min-dist-to-owned-base ex ey))
+           (define w (/ 1.0 (+ 1.0 (expt (/ (max 0.0 (- d 28.0)) 18.0) 2))))
+           (* w (unit-supply-cost (unit-type-sym e)))))
+        (for/sum ([e (in-list rush-threat-enemies)])
+          (unit-supply-cost (unit-type-sym e)))))
   (define distant-enemy-combat-supply
     (if live-obs-harvesters?
         (for/sum ([e (in-list rush-threat-enemies)]
@@ -1527,10 +1544,17 @@
         (if (>= (length enemy-prod-bldgs) 2)
             (* 2 (length enemy-prod-bldgs))
             0)))
+  (define live-defending-force-supply
+    (+ live-army-supply
+       (* 2 (count (lambda (u) (eq? (unit-type-sym u) 'queen)) ally-units))
+       (* 2 (count (lambda (b)
+                     (memq (unit-type-sym b)
+                           '(spine-crawler photon-cannon bunker planetary-fortress)))
+                   ready-bldgs))))
   (define distant-excess-threat
     (if live-obs-harvesters?
         (max 0 (- (max distant-enemy-combat-supply implied-prod-threat-supply)
-                  (+ live-army-supply 10)))
+                  (+ live-defending-force-supply 8)))
         implied-prod-threat-supply))
   (define visible-enemy-threat-supply
     (+ proximate-enemy-threat-supply
@@ -1553,13 +1577,13 @@
        (values prev-rem-threat prev-rem-frame)]
       [else
        (values 0 prev-rem-frame)]))
+  (define raw-enemy-threat-supply
+    (max visible-enemy-threat-supply remembered-enemy-threat-supply))
   (define live-enemy-threat-supply
     (if (and live-obs-harvesters?
-             (not (hash-ref obs 'under-attack #f))
-             (<= proximate-enemy-threat-supply 0))
-        (max 0 (- (max visible-enemy-threat-supply remembered-enemy-threat-supply)
-                  live-army-supply))
-        (max visible-enemy-threat-supply remembered-enemy-threat-supply)))
+             (not (hash-ref obs 'under-attack #f)))
+        (max 0 (exact-round (- raw-enemy-threat-supply (* 0.85 live-defending-force-supply))))
+        raw-enemy-threat-supply))
 
   ;; Track opponent intel Freshness x Coverage across 4 sectors (`enemy-main`, `enemy-natural`,
   ;; `enemy-third`, `corridor-army`) via `evaluate-opponent-intel-quality` (PV9).
@@ -1722,17 +1746,22 @@
       [(and scout-worker-id (< intel-confidence 0.65))
        (emit! (list 'periodic-scout scout-worker-id recon-tx recon-ty))]))
 
-  ;; Full-game base/natural attack & incoming-army threat detection (never expires at frame 2500!)
+  ;; Full-game owned-base attack & incoming-army threat detection (never expires at frame 2500!)
+  (define bldg-actively-damaged?
+    (ormap (lambda (b) (eq? (hash-ref b 'under-attack #f) #t)) ally-bldgs))
+  (define enemy-inside-owned-base-perimeter?
+    (ormap (lambda (e)
+             (define ex (hash-ref e 'x 9999))
+             (define ey (hash-ref e 'y 9999))
+             (<= (min-dist-to-owned-base ex ey) 28.0))
+           rush-threat-enemies))
   (define enemy-attacking-base-or-nat?
     (or under-early-cheese?
-        (ormap (lambda (b) (eq? (hash-ref b 'under-attack #f) #t)) ally-bldgs)
-        (ormap (lambda (e)
-                 (define ex (hash-ref e 'x 9999))
-                 (define ey (hash-ref e 'y 9999))
-                 (or (<= (dist2d base-x base-y ex ey) 32.0)
-                     (<= (dist2d nat-x nat-y ex ey) 28.0)
-                     (<= (dist2d third-x third-y ex ey) 22.0)))
-               rush-threat-enemies)))
+        bldg-actively-damaged?
+        (and enemy-inside-owned-base-perimeter?
+             (or (not live-obs-harvesters?)
+                 (> live-enemy-threat-supply 0)
+                 (<= live-defending-force-supply 2)))))
   (define under-base-attack?
     (or enemy-attacking-base-or-nat?
         (and (> live-enemy-threat-supply 0)
@@ -2120,14 +2149,22 @@
   (define prev-escrow-age (hash-ref prev-telemetry-ht 'escrow-age-frames 0))
   (define prev-escrow-frame (hash-ref prev-telemetry-ht 'escrow-last-frame frame))
   (define prev-escrow-peak-min (hash-ref prev-telemetry-ht 'escrow-peak-min minerals))
+  (define prev-escrow-min (hash-ref prev-telemetry-ht 'escrow-prev-min minerals))
+  (define prev-escrow-start-frame (hash-ref prev-telemetry-ht 'escrow-start-frame frame))
   (define escrow-same-goal?
     (and active-escrow-sym
          (eq? active-escrow-sym prev-escrow-goal)
          (> (+ bo-reserved-min bo-reserved-gas) 0)))
+  (define cur-escrow-start-frame
+    (if escrow-same-goal? prev-escrow-start-frame frame))
   (define escrow-making-progress?
     (and escrow-same-goal?
          (memq active-escrow-sym '(hatchery nexus command-center))
-         (>= (- minerals prev-escrow-peak-min) 15)))
+         (> total-workers 0)
+         (not natural-blocked?)
+         (< (- frame cur-escrow-start-frame) 896)
+         (or (>= (- minerals prev-escrow-peak-min) 15)
+             (>= (- minerals prev-escrow-min) 5))))
   (define cur-escrow-peak-min
     (if escrow-same-goal?
         (max prev-escrow-peak-min minerals)
@@ -2456,7 +2493,9 @@
      (when (and (memq 'spawning-pool ready-bldg-types)
                 (not zerg-saving-for-expand?)
                 (not (building-present-or-pending? 'roach-warren))
-                (or (>= supply-used 32) (>= total-workers SC2-PRIORITY-WORKERS-PER-BASE))
+                (or (>= supply-used 26)
+                    (>= gas 80)
+                    (>= total-workers SC2-PRIORITY-WORKERS-PER-BASE))
                 (>= minerals (sc2-min-cost 'roach-warren))
                 (non-combat-min-ok? (sc2-min-cost 'roach-warren)))
        (emit-build-verified! 'roach-warren (safe-coord (+ base-x 4.0)) (safe-coord (- base-y 4.0))))
@@ -2668,6 +2707,15 @@
                   (>= gas (sc2-gas-cost 'baneling)))
          (emit! '(morph baneling))
          (spend-resources-and-supply! (sc2-min-cost 'baneling) (sc2-gas-cost 'baneling) 0))
+       (define zerg-needs-queen-or-warren-minerals?
+         (and live-game?
+              (not under-base-attack?)
+              (<= live-enemy-threat-supply 0)
+              (>= live-army-supply 4)
+              (or (< (+ (length queens) (order-ledger-pending-count-for-type oledger 'queen frame))
+                     (length hatcheries))
+                  (and (>= gas 80)
+                       (not (building-present-or-pending? 'roach-warren))))))
        (cond
          [(and (memq 'spire ready-bldg-types)
                (>= minerals (sc2-min-cost 'corruptor))
@@ -2688,9 +2736,13 @@
                (>= gas (sc2-gas-cost 'roach)))
           (try-train-unit! 'roach 'larva 4 #:respect-bo-reserve? #t)
           (when (and (memq 'spawning-pool ready-bldg-types)
+                     (not zerg-needs-queen-or-warren-minerals?)
+                     (or (< gas (sc2-gas-cost 'roach)) (>= minerals 200))
                      (can-spend-by-priority? 'zergling 'combat-unit))
             (try-train-unit! 'zergling 'larva 4 #:respect-bo-reserve? #t))]
          [(and (memq 'spawning-pool ready-bldg-types)
+               (or (not zerg-needs-queen-or-warren-minerals?)
+                   (>= minerals (+ (sc2-min-cost 'queen) (sc2-min-cost 'zergling))))
                (can-spend-by-priority? 'zergling 'combat-unit)
                (>= minerals (sc2-min-cost 'zergling))
                (or under-early-cheese?
@@ -3516,6 +3568,8 @@
               'escrow-goal-sym active-escrow-sym
               'escrow-age-frames (if (>= cur-escrow-age-frames max-escrow-timeout-frames) 0 cur-escrow-age-frames)
               'escrow-peak-min (if (>= cur-escrow-age-frames max-escrow-timeout-frames) minerals cur-escrow-peak-min)
+              'escrow-prev-min minerals
+              'escrow-start-frame (if (>= cur-escrow-age-frames max-escrow-timeout-frames) frame cur-escrow-start-frame)
               'escrow-last-frame frame))
 
   (reverse actions))
@@ -4099,6 +4153,17 @@
   (define live-combat-supply
     (for/sum ([u (in-list combat-units)])
       (unit-supply-cost (unit-type-sym u))))
+  (define visible-enemy-combat-supply
+    (for/sum ([e (in-list enemy-units)])
+      (unit-supply-cost (unit-type-sym e))))
+  (define lanchester-force-ratio
+    (/ (exact->inexact live-combat-supply)
+       (max 8.0 (exact->inexact visible-enemy-combat-supply))))
+  (define live-owned-townhalls
+    (count (lambda (b)
+             (memq (unit-type-sym b)
+                   '(hatchery lair hive nexus command-center orbital-command planetary-fortress)))
+           ally-bldgs))
   (define live-attack-wave-min
     (if live-obs?
         22
@@ -4150,14 +4215,15 @@
       (define enemy-near-our-territory?
         (<= (min (dist2d ex ey base-x base-y)
                  (dist2d ex ey nat-x nat-y)
-                 (dist2d ex ey third-x third-y))
-            38.0))
+                 (if (>= live-owned-townhalls 3) (dist2d ex ey third-x third-y) +inf.0))
+            36.0))
       (define unit-should-engage-target?
         (and can-hit-target?
              (or (not live-obs?)
                  (<= edist 22.0)
                  enemy-near-our-territory?
-                 (>= live-combat-supply 36)
+                 (and (>= live-combat-supply 26) (>= lanchester-force-ratio 1.35))
+                 (>= live-combat-supply 40)
                  (>= (length combat-units) live-attack-wave-min))))
       ;; Siege Tank Range-Leashing for Bio vs Static Defense (Spine Crawler / Cannon / Bunker):
       ;; When a friendly Siege Tank is within 15.5 tiles of an enemy static defense structure,

@@ -949,7 +949,7 @@
            (cond
              [(or under-attack? (> enemy-threat-supply 0)) (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
-             [(and is-bo-goal? exp-ok?) (max 430.0 u0)]
+             [(and is-bo-goal? exp-ok?) (max 465.0 u0)]
              [exp-ok? (max 210.0 u0)]
              [else u0]))
          (struct-copy priority-candidate c
@@ -961,30 +961,92 @@
            (if (hash? open-facility-slots)
                (* 21 active-bases)
                (* 16 active-bases)))
-         (define combat-escrow-ok?
-           (or (not (eq? cat 'combat-unit))
-               is-bo-goal?
-               under-attack?
-               (> enemy-threat-supply 0)
-               (and (>= frame 1800) (< army-supply 6))
-               (>= workers (min target-workers worker-sat-thresh))))
-         (define can-esc?
-           (and (or blk0 is-bo-goal? is-repaired?)
-                combat-escrow-ok?
-                (cand-can-escrow? sym)
-                (> workers 0)))
          ;; Zerg Queens up to `active-bases` are Zerg's primary larva-inject macro engine,
          ;; not merely anti-air counter-tech!
          (define inject-queen-boost?
            (and (eq? sym 'queen)
                 (< (hash-ref unit-counts 'queen 0) active-bases)
                 (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)))
+         ;; Gas-Lock Tech Promotion: when floating >= 80G while a core gas-unlocking structure
+         ;; is still unbuilt, promote that structure into Band 1 (u >= 445.0) so mineral-only
+         ;; units never starve gas tech progression.
+         (define gas-unlock-tech-boost?
+           (and (hash? open-facility-slots)
+                (not under-attack?)
+                (<= enemy-threat-supply 0)
+                (>= gas 80)
+                (or (and (eq? sym 'roach-warren)
+                         (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+                         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0))
+                    (and (eq? sym 'lair)
+                         (>= gas 100)
+                         (= (bldg-count-equivalent total-bldg-counts 'lair) 0)
+                         (= (bldg-count-equivalent total-bldg-counts 'hive) 0)
+                         (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0))
+                    (and (eq? sym 'cybernetics-core)
+                         (= (bldg-count-equivalent total-bldg-counts 'cybernetics-core) 0)
+                         (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                               (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0))
+                    (and (eq? sym 'robotics-facility)
+                         (>= gas 100)
+                         (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
+                         (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
+                    (and (eq? sym 'factory)
+                         (>= gas 100)
+                         (= (bldg-count-equivalent total-bldg-counts 'factory) 0)
+                         (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0))
+                    (and (eq? sym 'starport)
+                         (>= gas 100)
+                         (= (bldg-count-equivalent total-bldg-counts 'starport) 0)
+                         (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)))))
+         ;; Continuous Gas-Lock Attenuation for 0-gas mineral-only combat units:
+         ;; When floating >= 100G in peace time, attenuate 0G units (`zergling`, `marine`, `zealot`, `hellion`)
+         ;; by 1 / (1 + (gas / 100)^2) so minerals flow into Queens, Tech Structures, and Gas Units.
+         (define mineral-only-gas-locked?
+           (and (hash? open-facility-slots)
+                (eq? cat 'combat-unit)
+                (memq sym '(zergling marine zealot hellion))
+                (not under-attack?)
+                (<= enemy-threat-supply 0)
+                (>= gas 100)
+                (>= army-supply 4)))
+         (define u-after-gas-lock
+           (if mineral-only-gas-locked?
+               (/ u0 (+ 1.0 (expt (/ (exact->inexact gas) 100.0) 2)))
+               u0))
+         (define combat-escrow-ok?
+           (and (not (and mineral-only-gas-locked? (>= army-supply 6)))
+                (or (not (eq? cat 'combat-unit))
+                    is-bo-goal?
+                    under-attack?
+                    (> enemy-threat-supply 0)
+                    (and (>= frame 1800) (< army-supply 6))
+                    (>= workers (min target-workers worker-sat-thresh)))))
+         (define can-esc?
+           (and (or blk0 is-bo-goal? is-repaired? inject-queen-boost? gas-unlock-tech-boost?)
+                combat-escrow-ok?
+                (cand-can-escrow? sym)
+                (> workers 0)))
+         ;; Hierarchical Priority Banding:
+         ;; - Band 1: Repaired Prereqs (>= 520), Active BO Head (>= 465), Gas-Unlocking Tech (>= 445),
+         ;;           and Per-Base Larva-Inject Queens (>= 440 in live games / 225 in synthetic unit tests).
+         ;; - Band 2: Repeatable combat units in peace time when army-supply >= 2 are bounded to <= 415.0
+         ;;           so they never outrank Band-1 macro milestones.
          (define boosted-u
            (cond
              [is-repaired? (max (+ 380.0 u0) 520.0)]
-             [(and is-bo-goal? (not under-attack?)) (max (+ 180.0 u0) 430.0)]
-             [inject-queen-boost? (max 225.0 u0)]
-             [else u0]))
+             [(and is-bo-goal? (not under-attack?)) (max (+ 200.0 u0) 465.0)]
+             [gas-unlock-tech-boost? (max 445.0 u0)]
+             [inject-queen-boost?
+              (if (and (hash? open-facility-slots) (not under-attack?) (<= enemy-threat-supply 0))
+                  (max 440.0 u0)
+                  (max 225.0 u0))]
+             [(and (eq? cat 'combat-unit)
+                   (not under-attack?)
+                   (<= enemy-threat-supply 0)
+                   (>= army-supply 2))
+              (min 415.0 u-after-gas-lock)]
+             [else u-after-gas-lock]))
          (struct-copy priority-candidate c
                       [utility-score boosted-u]
                       [blocking-allowed? can-esc?])])))

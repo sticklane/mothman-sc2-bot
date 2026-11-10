@@ -2394,7 +2394,95 @@
   (assert-true! (not (priority-schedule-can-spend? t-sched-open 'marine 100 150 #:category 'combat-unit))
                 "Open Factory+TechLab waiting on minerals for Siege Tank (100M/150G) must escrow against Marine")
   (assert-true! (not (priority-schedule-can-spend? t-sched-open 'marauder 100 150 #:category 'combat-unit))
-                "Open Factory+TechLab waiting on minerals for Siege Tank (100M/150G) must escrow against Marauder"))
+                "Open Factory+TechLab waiting on minerals for Siege Tank (100M/150G) must escrow against Marauder")
+
+  ;; 4. Match #5112034 Regression (Gas-Lock Attenuation & Band-1 Queen/Roach-Warren Priority):
+  ;;    Zerg on 2 bases with 1 Queen, 0 Roach Warrens, 6 Zerglings, and 100M/260G in peace time:
+  ;;    Band-1 Roach Warren (u >= 445) & 2nd Queen (u >= 440) must outrank 0G Zergling and block Zergling from draining 100M!
+  (define z-gaslock-state
+    (make-macro-world-state
+     #:race 'Zerg
+     #:frame 3800
+     #:minerals 100
+     #:gas 260
+     #:supply-used 26
+     #:supply-cap 36
+     #:supply-left 10
+     #:workers 21
+     #:active-bases 2
+     #:ready-building-counts (hash 'hatchery 2 'extractor 1 'spawning-pool 1)
+     #:total-building-counts (hash 'hatchery 2 'extractor 1 'spawning-pool 1)
+     #:unit-counts (hash 'drone 21 'queen 1 'zergling 6 'overlord 3)
+     #:researched-upgrades '(metabolic-boost)
+     #:open-facility-slots (hash 'larva 3 'townhall 2)
+     #:army-supply 4
+     #:enemy-threat-supply 0
+     #:under-attack? #f))
+  (define z-gaslock-dec (step-priority-macro-brain z-gaslock-state))
+  (assert-true! (not (macro-brain-can-spend? z-gaslock-dec 'zergling 100 260 'combat-unit))
+                "0G Zergling at 100M/260G must not drain minerals needed for Band-1 Queen / Roach Warren")
+
+  ;; 5. Match #5112033 Regression (Band-1 Expansion BO Head vs Band-2 Repeatable Stalker at High Gas):
+  ;;    Protoss on 1 base at 85M/256G with 19 Probes (BO goal = nexus):
+  ;;    Band-1 Nexus (u >= 465) must strictly outrank Band-2 Stalker (u <= 415) and block Stalker from spending 85M!
+  (define p-1base-state
+    (make-macro-world-state
+     #:race 'Protoss
+     #:frame 3800
+     #:minerals 85
+     #:gas 256
+     #:supply-used 25
+     #:supply-cap 31
+     #:supply-left 6
+     #:workers 19
+     #:active-bases 1
+     #:ready-building-counts (hash 'nexus 1 'pylon 2 'assimilator 2 'gateway 1 'cybernetics-core 1)
+     #:total-building-counts (hash 'nexus 1 'pylon 2 'assimilator 2 'gateway 1 'cybernetics-core 1)
+     #:unit-counts (hash 'probe 19 'stalker 2)
+     #:researched-upgrades '(warp-gate-research)
+     #:open-facility-slots (hash 'gateway 1 'townhall 1)
+     #:army-supply 4
+     #:enemy-threat-supply 0
+     #:under-attack? #f))
+  (define p-1base-dec (step-priority-macro-brain p-1base-state))
+  (assert-true! (not (macro-brain-can-spend? p-1base-dec 'stalker 85 256 'combat-unit))
+                "Band-1 1-base Nexus BO goal (u >= 465) must outrank and block Band-2 Stalker (u <= 415) even at 256G")
+
+  ;; 6. Owned-Base Spatial Threat Field Regression:
+  ;;    On 2 bases (active-bases = 2) with 6 Zerglings + 1 Queen, a lone enemy Reaper near the UNOWNED 3rd base
+  ;;    must NOT trigger false base-attack panic or allow Zerglings to starve Queen / Roach Warren at 100M/260G!
+  (define rt-unowned3rd (make-live-bot-runtime #:race 'Zerg))
+  (define acts-unowned3rd
+    (step-layer2-economy!
+     rt-unowned3rd
+     (hash 'frame 3800
+           'minerals 100
+           'gas 260
+           'supply-used 26
+           'supply-cap 36
+           'mineral-harvesters 18
+           'vespene-harvesters 3
+           'researched-upgrades '(metabolic-boost)
+           'base-x 32.5 'base-y 32.5
+           'natural-x 50.5 'natural-y 56.5
+           'third-x 75.5 'third-y 75.5
+           'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0 'larva-count 2)
+                                 (hash 'id 102 'type 'hatchery 'x 50.5 'y 56.5 'hp 1500 'build-progress 1.0 'larva-count 1)
+                                 (hash 'id 103 'type 'spawning-pool 'x 36.0 'y 36.0 'hp 1000 'build-progress 1.0)
+                                 (hash 'id 104 'type 'extractor 'x 30.0 'y 35.0 'hp 500 'build-progress 1.0))
+           'ally-units (append
+                        (for/list ([i (in-range 20)])
+                          (hash 'id (+ 200 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                        (list (hash 'id 301 'type 'queen 'x 33.5 'y 33.5 'hp 175 'energy 10)
+                              (hash 'id 302 'type 'zergling 'x 51.0 'y 56.0 'hp 35)
+                              (hash 'id 303 'type 'zergling 'x 51.5 'y 56.0 'hp 35)
+                              (hash 'id 304 'type 'zergling 'x 52.0 'y 56.0 'hp 35)
+                              (hash 'id 305 'type 'zergling 'x 52.5 'y 56.0 'hp 35)
+                              (hash 'id 306 'type 'zergling 'x 53.0 'y 56.0 'hp 35)
+                              (hash 'id 307 'type 'zergling 'x 53.5 'y 56.0 'hp 35)))
+           'enemy-units (list (hash 'id 991 'type 'reaper 'x 74.0 'y 74.0 'hp 60)))))
+  (assert-true! (not (member '(train zergling) acts-unowned3rd))
+                "Lone enemy Reaper near unowned 3rd base must not trigger false panic or drain 100M into Zerglings"))
 
 (run-suite "5.18 Optimal Human Selection & Control-Group Compiler, Unseen Pro Units/Splash Micro & Mirror-Mind FoW Persistence"
   ;; 1. Optimal Human Selection & Control-Group Compiler (`lib/human-cortex.rkt`):
