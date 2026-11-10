@@ -1492,14 +1492,29 @@
     (hash-ref obs 'army-supply
               (for/sum ([u (in-list ally-combat-units)])
                 (unit-supply-cost (unit-type-sym u)))))
-  (define visible-enemy-threat-supply
-    (for/sum ([e (in-list rush-threat-enemies)])
+  (define (enemy-proximate-to-our-bases? e)
+    (define ex (hash-ref e 'x base-x))
+    (define ey (hash-ref e 'y base-y))
+    (<= (min (dist2d ex ey base-x base-y)
+             (dist2d ex ey nat-x nat-y)
+             (dist2d ex ey third-x third-y))
+        65.0))
+  (define proximate-enemy-threat-supply
+    (for/sum ([e (in-list rush-threat-enemies)]
+              #:when (or (not live-obs-harvesters?) (enemy-proximate-to-our-bases? e)))
       (unit-supply-cost (unit-type-sym e))))
+  (define distant-enemy-combat-supply
+    (if live-obs-harvesters?
+        (for/sum ([e (in-list rush-threat-enemies)]
+                  #:when (not (enemy-proximate-to-our-bases? e)))
+          (unit-supply-cost (unit-type-sym e)))
+        0))
 
-  ;; Persistent 30-second (672-frame) Scouted Threat Memory & Implied Production Threat (PV9):
+  ;; Persistent Scouted Threat Memory & Implied Production Threat (PV9):
   ;; When a forward scout / Overlord / Hallucination / Changeling / Scanner Sweep spots an enemy
   ;; army or multiple combat production facilities, retain the scouted threat level across fog-of-war
-  ;; transit so the macro brain ramps up defense BEFORE the enemy army arrives at our base!
+  ;; transit so the macro brain ramps up defense BEFORE an overwhelming enemy army arrives at our base,
+  ;; without treating normal passive enemy home units/buildings as an active base-attack crisis!
   (define enemy-prod-bldgs
     (filter (lambda (eb)
               (memq (unit-type-sym eb)
@@ -1507,25 +1522,44 @@
                       roach-warren hydralisk-den baneling-nest spire)))
             enemy-bldgs))
   (define implied-prod-threat-supply
-    (if (>= (length enemy-prod-bldgs) 2)
-        (* 2 (length enemy-prod-bldgs))
-        0))
+    (if live-obs-harvesters?
+        (* 2 (max 0 (- (length enemy-prod-bldgs) (+ 1 (* 2 (max 1 active-bases))))))
+        (if (>= (length enemy-prod-bldgs) 2)
+            (* 2 (length enemy-prod-bldgs))
+            0)))
+  (define distant-excess-threat
+    (if live-obs-harvesters?
+        (max 0 (- (max distant-enemy-combat-supply implied-prod-threat-supply)
+                  (+ live-army-supply 10)))
+        implied-prod-threat-supply))
+  (define visible-enemy-threat-supply
+    (+ proximate-enemy-threat-supply
+       (if live-obs-harvesters? distant-excess-threat 0)))
   (define prev-rem-threat (hash-ref prev-tel-early 'remembered-enemy-threat-supply 0))
   (define prev-rem-frame (hash-ref prev-tel-early 'remembered-enemy-threat-frame -9999))
-  (define cur-visible-or-implied-threat (max visible-enemy-threat-supply implied-prod-threat-supply))
+  (define rem-window-frames (if live-obs-harvesters? 224 672))
+  (define cur-visible-or-implied-threat
+    (if live-obs-harvesters?
+        visible-enemy-threat-supply
+        (max visible-enemy-threat-supply implied-prod-threat-supply)))
   (define-values (remembered-enemy-threat-supply remembered-enemy-threat-frame)
     (cond
       [(> cur-visible-or-implied-threat 0)
-       (values (if (<= (- frame prev-rem-frame) 672)
+       (values (if (<= (- frame prev-rem-frame) rem-window-frames)
                    (max cur-visible-or-implied-threat prev-rem-threat)
                    cur-visible-or-implied-threat)
                frame)]
-      [(and (> prev-rem-threat 0) (<= (- frame prev-rem-frame) 672))
+      [(and (> prev-rem-threat 0) (<= (- frame prev-rem-frame) rem-window-frames))
        (values prev-rem-threat prev-rem-frame)]
       [else
        (values 0 prev-rem-frame)]))
   (define live-enemy-threat-supply
-    (max visible-enemy-threat-supply remembered-enemy-threat-supply))
+    (if (and live-obs-harvesters?
+             (not (hash-ref obs 'under-attack #f))
+             (<= proximate-enemy-threat-supply 0))
+        (max 0 (- (max visible-enemy-threat-supply remembered-enemy-threat-supply)
+                  live-army-supply))
+        (max visible-enemy-threat-supply remembered-enemy-threat-supply)))
 
   ;; Track opponent intel Freshness x Coverage across 4 sectors (`enemy-main`, `enemy-natural`,
   ;; `enemy-third`, `corridor-army`) via `evaluate-opponent-intel-quality` (PV9).
@@ -2085,32 +2119,44 @@
   (define prev-escrow-goal (hash-ref prev-telemetry-ht 'escrow-goal-sym #f))
   (define prev-escrow-age (hash-ref prev-telemetry-ht 'escrow-age-frames 0))
   (define prev-escrow-frame (hash-ref prev-telemetry-ht 'escrow-last-frame frame))
+  (define prev-escrow-peak-min (hash-ref prev-telemetry-ht 'escrow-peak-min minerals))
+  (define escrow-same-goal?
+    (and active-escrow-sym
+         (eq? active-escrow-sym prev-escrow-goal)
+         (> (+ bo-reserved-min bo-reserved-gas) 0)))
+  (define escrow-making-progress?
+    (and escrow-same-goal?
+         (memq active-escrow-sym '(hatchery nexus command-center))
+         (>= (- minerals prev-escrow-peak-min) 15)))
+  (define cur-escrow-peak-min
+    (if escrow-same-goal?
+        (max prev-escrow-peak-min minerals)
+        minerals))
   (define cur-escrow-age-frames
-    (if (and active-escrow-sym
-             (eq? active-escrow-sym prev-escrow-goal)
-             (> (+ bo-reserved-min bo-reserved-gas) 0))
-        (+ prev-escrow-age (max 1 (- frame prev-escrow-frame)))
-        0))
+    (cond
+      [(not escrow-same-goal?) 0]
+      [escrow-making-progress? 0]
+      [else (+ prev-escrow-age (max 1 (- frame prev-escrow-frame)))]))
+  (define max-escrow-timeout-frames 224)
   (define severe-intel-blindness?
     (and (>= frame 1800)
          (or (>= supply-used 22) (>= frame 2240) (>= active-bases 2))
          (>= intel-staleness-frames 896)
          (< intel-confidence 0.35)))
   (define urgent-combat-or-intel-need?
-    (and (< live-army-supply 8)
-         (or under-base-attack?
-             (> live-enemy-threat-supply 0)
-             (and live-game?
-                  (or (>= cur-escrow-age-frames 224)
-                      severe-intel-blindness?
-                      (and (or (>= frame 2688) (>= active-bases 2))
-                           (< live-army-supply 4)))))))
+    (or (and (< live-army-supply 8)
+             (or under-base-attack?
+                 (> live-enemy-threat-supply 0)))
+        (and live-game?
+             (null? ally-combat-units)
+             (or (>= cur-escrow-age-frames max-escrow-timeout-frames)
+                 severe-intel-blindness?))))
   (define (non-combat-min-ok? cost)
     (>= (- minerals cost) (if urgent-combat-or-intel-need? 125 0)))
   (define (non-combat-gas-ok? cost)
     (or (<= cost 0)
         (>= (- gas cost) (if urgent-combat-or-intel-need? 50 0))))
-  (when (or (>= cur-escrow-age-frames 224)
+  (when (or (>= cur-escrow-age-frames max-escrow-timeout-frames)
             urgent-combat-or-intel-need?)
     (set! bo-reserved-min 0)
     (set! bo-reserved-gas 0))
@@ -2137,9 +2183,8 @@
         (and (eq? cat-sym 'combat-unit)
              (or under-base-attack?
                  (> live-enemy-threat-supply 0)
-                 (>= cur-escrow-age-frames 224)
-                 (and severe-intel-blindness? (< live-army-supply 8))
-                 (and (or (>= frame 2688) (>= active-bases 2)) (< live-army-supply 4))))
+                 (>= cur-escrow-age-frames max-escrow-timeout-frames)
+                 (and severe-intel-blindness? (null? ally-combat-units))))
         (macro-brain-can-spend? macro-decision id-sym minerals gas cat-sym)))
 
   (define (try-train-unit! unit-sym producer-key [recall-group #f] #:respect-bo-reserve? [respect-bo? #f])
@@ -2148,9 +2193,15 @@
     (define s-cost (sc2-supply-cost unit-sym))
     (define is-bo-head? (eq? bo-goal-sym unit-sym))
     (define max-batch
-      (if (and live-game? (not (memq unit-sym '(drone probe scv overlord observer sentry))))
-          4
-          1))
+      (cond
+        [(not live-game?) 1]
+        [(and (eq? unit-sym 'drone)
+              (>= active-bases 2)
+              (< total-workers (* 20 active-bases))
+              (>= live-army-supply (* 6 active-bases)))
+         2]
+        [(memq unit-sym '(drone probe scv overlord observer sentry)) 1]
+        [else 4]))
     (let loop ([trained 0])
       (define avail-slots (hash-ref open-prod-slots producer-key 0))
       (define eff-min (if (and respect-bo? (not is-bo-head?)) (- minerals bo-reserved-min) minerals))
@@ -2208,7 +2259,7 @@
   ;; are saturated AND our 3rd-base supply/army thresholds are met, hold mineral spending
   ;; until we reach `(sc2-min-cost race-th-sym)` (300M Zerg / 400M Protoss & Terran).
   ;; Dynamic threat, severe-intel-blindness & tech-repair preemption: never lock minerals for expansion
-  ;; if under attack, if enemy threat is active, if escrow age >= 224 frames, if intel is severely
+  ;; if under attack, if enemy threat is active, if escrow age >= max-escrow-timeout-frames, if intel is severely
   ;; blind (>= 896 frames stale and confidence < 0.35) without probing units, or if a prerequisite
   ;; in our SC2-TECH-GRAPH (`repaired-prereqs`) was destroyed!
   (define race-th-sym
@@ -2221,9 +2272,11 @@
     (and (not under-base-attack?)
          (<= live-enemy-threat-supply 0)
          (not urgent-combat-or-intel-need?)
-         (< cur-escrow-age-frames 224)
-         (or (not live-game?) (< frame 2688) (>= live-army-supply 4))
-         (or (not live-game?) (not severe-intel-blindness?) (>= live-army-supply 8))
+         (< cur-escrow-age-frames max-escrow-timeout-frames)
+         (or (not live-game?)
+             (and (= cur-base-count 1) (< frame 3800))
+             (>= live-army-supply 2))
+         (or (not live-game?) (not severe-intel-blindness?) (not (null? ally-combat-units)))
          (null? orphaned-prereqs)
          (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)
          (not natural-blocked?)
@@ -2244,16 +2297,19 @@
              (and live-game?
                   (eq? bo-goal-sym race-th-sym)
                   (or (= cur-base-count 1)
-                      (and (>= eff-phase-supply (case race [(Protoss) 60] [(Terran) 50] [else 42]))
-                           (>= live-army-supply 20)))
+                      (and (>= eff-phase-supply (case race [(Protoss) 50] [(Terran) 46] [else 30]))
+                           (>= live-army-supply (if (eq? race 'Zerg) 2 14))))
                   (>= total-workers (if (eq? race 'Zerg) 15 18)))
              (and (> frame 1800)
                   (< cur-base-count desired-bases)
-                  (>= total-workers (* (max 1 cur-base-count) SC2-IDEAL-WORKERS-PER-BASE))
+                  (>= total-workers
+                      (if (and live-game? (= cur-base-count 2))
+                          (if (eq? race 'Zerg) 28 35)
+                          (* (max 1 cur-base-count) SC2-IDEAL-WORKERS-PER-BASE)))
                   (if live-game?
                       (or (= cur-base-count 1)
-                          (and (>= eff-phase-supply (case race [(Protoss) 60] [(Terran) 50] [else 42]))
-                               (>= live-army-supply (* 10 cur-base-count))))
+                          (and (>= eff-phase-supply (case race [(Protoss) 50] [(Terran) 46] [else 30]))
+                               (>= live-army-supply (* (if (eq? race 'Zerg) 4 7) cur-base-count))))
                       (>= (length ally-combat-units) 4))))))
 
   ;; ---------------------------------------------------------------------------
@@ -2398,6 +2454,7 @@
        (emit-research-verified! 'metabolic-boost))
 
      (when (and (memq 'spawning-pool ready-bldg-types)
+                (not zerg-saving-for-expand?)
                 (not (building-present-or-pending? 'roach-warren))
                 (or (>= supply-used 32) (>= total-workers SC2-PRIORITY-WORKERS-PER-BASE))
                 (>= minerals (sc2-min-cost 'roach-warren))
@@ -2421,6 +2478,9 @@
      (when (and (memq 'roach-warren ready-bldg-types)
                 (memq 'roach unit-types)
                 (not zerg-saving-for-expand?)
+                (or (not live-game?)
+                    (< (hash-ref unit-counts 'ravager 0)
+                       (max 2 (quotient (max 1 (hash-ref unit-counts 'roach 0)) 2))))
                 (can-spend-by-priority? 'ravager 'combat-unit)
                 (>= minerals (sc2-min-cost 'ravager))
                 (>= gas (sc2-gas-cost 'ravager)))
@@ -2428,6 +2488,11 @@
        (spend-resources-and-supply! (sc2-min-cost 'ravager) (sc2-gas-cost 'ravager) 0))
 
      (when (and (memq 'spawning-pool ready-bldg-types)
+                (not zerg-saving-for-expand?)
+                (or (not live-game?)
+                    (>= supply-used 42)
+                    (eq? bo-goal-sym 'lair)
+                    (memq 'roach-warren bldg-types))
                 (>= minerals (sc2-min-cost 'lair))
                 (>= gas (sc2-gas-cost 'lair))
                 (non-combat-min-ok? (sc2-min-cost 'lair))
@@ -2440,6 +2505,7 @@
        (spend-resources-and-supply! (sc2-min-cost 'lair) (sc2-gas-cost 'lair) 0))
 
      (when (and (memq 'spawning-pool ready-bldg-types)
+                (not zerg-saving-for-expand?)
                 (>= minerals (+ (sc2-min-cost 'spine-crawler) (sc2-min-cost 'roach-warren)))
                 (non-combat-min-ok? (sc2-min-cost 'spine-crawler))
                 (not (building-present-or-pending? 'spine-crawler))
@@ -2447,6 +2513,7 @@
        (emit-build-verified! 'spine-crawler nat-x nat-y 2.0))
 
      (when (and (memq 'spawning-pool ready-bldg-types)
+                (not zerg-saving-for-expand?)
                 (>= supply-used 36)
                 (not (building-present-or-pending? 'evolution-chamber))
                 (>= minerals (sc2-min-cost 'evolution-chamber))
@@ -2574,7 +2641,8 @@
        (and (or (not zerg-saving-for-expand?)
                 (and (< total-workers 16) (< minerals 250)))
             (not urgent-combat-or-intel-need?)
-            (or (< total-workers 30) (can-spend-by-priority? 'drone 'worker))
+            (or (< total-workers (* 20 (max 1 (length hatcheries))))
+                (can-spend-by-priority? 'drone 'worker))
             (< total-workers (min target-workers (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length hatcheries)))))
             (or (not live-game?)
                 (< total-workers 19)
@@ -2950,7 +3018,8 @@
        (and (or (not protoss-saving-for-expand?)
                 (and (< total-workers 19) (< minerals 350)))
             (not urgent-combat-or-intel-need?)
-            (or (< total-workers 32) (can-spend-by-priority? 'probe 'worker))
+            (or (< total-workers (max 32 (* 20 (max 1 (length nexuses)))))
+                (can-spend-by-priority? 'probe 'worker))
             (< total-workers (min 68 target-workers (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length nexuses)))))
             (or (not live-game?)
                 (< total-workers 20)
@@ -3339,7 +3408,8 @@
                 (and (not terran-saving-for-orbital?) (< total-workers 19) (< minerals 350)))
             (not terran-saving-for-orbital?)
             (not urgent-combat-or-intel-need?)
-            (or (< total-workers 30) (can-spend-by-priority? 'scv 'worker))
+            (or (< total-workers (* 20 (max 1 (length ccs))))
+                (can-spend-by-priority? 'scv 'worker))
             (< total-workers (min 68 target-workers (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length ccs)))))
             (or (not live-game?)
                 (< total-workers 20)
@@ -3357,18 +3427,29 @@
      ;; gated by `open-prod-slots`, `can-spend-by-priority?`, and Pro Build-Order sequence)
      (when (and (not terran-saving-for-expand?)
                 (can-spend-supply? (sc2-supply-cost 'marine)))
-       ;; Starport production (Group 6)
-       (when (memq 'starport ready-bldg-types)
-         (try-train-unit! 'medivac 'starport 6)
-         (try-train-unit! 'viking 'starport 6))
-       ;; Factory production (Group 6)
+       ;; Factory production first (Group 6): ensure Siege Tank on Factory-TechLab is never starved or
+       ;; slot-locked by Starport Viking or 0G Hellion!
        (when (and (memq 'factory ready-bldg-types)
                   (or (not live-game?) has-fac-techlab-any? (< gas (sc2-gas-cost 'factory-techlab))))
          (if has-fac-tl?
              (try-train-unit! 'siege-tank 'factory 6)
              (try-train-unit! 'widow-mine 'factory 6))
-         (when (or (not live-game?) (< gas (sc2-gas-cost 'siege-tank)) (>= minerals 250))
+         (when (if live-game?
+                   (and (or (not has-fac-tl?) (and (>= minerals 400) (< gas 50)))
+                        (< (hash-ref unit-counts 'hellion 0) 4))
+                   (or (< gas (sc2-gas-cost 'siege-tank)) (>= minerals 250)))
            (try-train-unit! 'hellion 'factory 6)))
+       ;; Starport production (Group 6)
+       (when (memq 'starport ready-bldg-types)
+         (when (or (not live-game?)
+                   (< (hash-ref unit-counts 'medivac 0) 4)
+                   (can-spend-by-priority? 'medivac 'combat-unit))
+           (try-train-unit! 'medivac 'starport 6 #:respect-bo-reserve? #t))
+         (when (or (not live-game?)
+                   (enemy-tech-observation-requires-anti-air? tech-obs)
+                   (and (>= (hash-ref unit-counts 'medivac 0) 2)
+                        (can-spend-by-priority? 'viking 'combat-unit)))
+           (try-train-unit! 'viking 'starport 6 #:respect-bo-reserve? #t)))
        ;; Barracks production (Group 5)
        (when (and (memq 'barracks ready-bldg-types)
                   (or (not live-game?) urgent-combat-or-intel-need? has-rax-techlab? (< gas (sc2-gas-cost 'barracks-techlab))))
@@ -3433,7 +3514,8 @@
               'remembered-enemy-threat-supply remembered-enemy-threat-supply
               'remembered-enemy-threat-frame remembered-enemy-threat-frame
               'escrow-goal-sym active-escrow-sym
-              'escrow-age-frames (if (>= cur-escrow-age-frames 224) 0 cur-escrow-age-frames)
+              'escrow-age-frames (if (>= cur-escrow-age-frames max-escrow-timeout-frames) 0 cur-escrow-age-frames)
+              'escrow-peak-min (if (>= cur-escrow-age-frames max-escrow-timeout-frames) minerals cur-escrow-peak-min)
               'escrow-last-frame frame))
 
   (reverse actions))
@@ -3628,6 +3710,7 @@
   (define transports
     (filter (lambda (u) (memq (unit-type-sym u) '(warp-prism warp-prism-phasing medivac overlord-transport)))
             ally-units))
+  (define live-tactics-obs? (hash-has-key? raw-obs 'mineral-harvesters))
   (for ([tr (in-list transports)])
     (define tr-id (hash-ref tr 'id 706))
     (define tx (hash-ref tr 'x base-x))
@@ -3641,9 +3724,21 @@
                               (max 1 (hash-ref u 'max-hp 100)))
                            SC2-WOUNDED-PASSENGER-HP-PCT))))
              combat-units))
-    (if wounded-passenger
-        (emit! (list 'transport-juggle tr-id (hash-ref wounded-passenger 'id 707) base-x base-y))
-        (emit! (list 'multi-prong-drop tr-id enemy-x enemy-y))))
+    (cond
+      [wounded-passenger
+       (emit! (list 'transport-juggle tr-id (hash-ref wounded-passenger 'id 707) base-x base-y))]
+      [(not live-tactics-obs?)
+       (emit! (list 'multi-prong-drop tr-id enemy-x enemy-y))]
+      [(not (null? combat-units))
+       (define n-cu (length combat-units))
+       (define escort-x
+         (safe-coord (/ (for/sum ([u (in-list combat-units)]) (hash-ref u 'x nat-x)) n-cu) nat-x))
+       (define escort-y
+         (safe-coord (/ (for/sum ([u (in-list combat-units)]) (hash-ref u 'y nat-y)) n-cu) nat-y))
+       (when (> (dist2d tx ty escort-x escort-y) 6.0)
+         (emit! (list 'attack-pos tr-id escort-x escort-y)))]
+      [(> (dist2d tx ty nat-x nat-y) 8.0)
+       (emit! (list 'attack-pos tr-id nat-x nat-y))]))
 
   ;; ---------------------------------------------------------------------------
   ;; Adversarial Countermeasure #5: Ramp Force-Field Corrosive-Bile Breaker
@@ -4001,9 +4096,12 @@
   ;; & Guided by Multi-Depth Mirrored Tactical Micro Brain)
   ;; ---------------------------------------------------------------------------
   (define live-obs? (hash-has-key? raw-obs 'mineral-harvesters))
+  (define live-combat-supply
+    (for/sum ([u (in-list combat-units)])
+      (unit-supply-cost (unit-type-sym u))))
   (define live-attack-wave-min
     (if live-obs?
-        14
+        22
         SC2-ATTACK-WAVE-MIN-COMBAT-UNITS))
   (define engagement-enemies
     (if live-obs?
@@ -4053,12 +4151,13 @@
         (<= (min (dist2d ex ey base-x base-y)
                  (dist2d ex ey nat-x nat-y)
                  (dist2d ex ey third-x third-y))
-            34.0))
+            38.0))
       (define unit-should-engage-target?
         (and can-hit-target?
              (or (not live-obs?)
                  (<= edist 22.0)
                  enemy-near-our-territory?
+                 (>= live-combat-supply 36)
                  (>= (length combat-units) live-attack-wave-min))))
       ;; Siege Tank Range-Leashing for Bio vs Static Defense (Spine Crawler / Cannon / Bunker):
       ;; When a friendly Siege Tank is within 15.5 tiles of an enemy static defense structure,
@@ -4247,16 +4346,25 @@
             combat-units))
   (define mm-verdict
     (mirror-mind-state-mirror-macro-verdict (live-bot-runtime-mirror-mind rt)))
-  (when (and (not (null? cheap-blockers))
-             (or (hash-ref obs 'enable-economic-disruption #f)
-                 (and (>= cur-intel-staleness 224)
-                      (>= (length combat-units) 4)
-                      (>= (length cheap-blockers) 2))
-                 (and (eq? mm-verdict 'punish-And-Deny-Greedy-Expand)
-                      (>= (length combat-units) (min 6 live-attack-wave-min)))
-                 (and (null? enemy-units)
-                      (>= (length combat-units) (min 6 live-attack-wave-min))
-                      (>= (length cheap-blockers) 3))))
+  (define allow-harass-raid?
+    (if live-obs?
+        (or (hash-ref obs 'enable-economic-disruption #f)
+            (and (>= live-combat-supply 28)
+                 (>= (length cheap-blockers) 4)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            (list 'live-harass-raid)
+                                            frame
+                                            672)))
+        (or (hash-ref obs 'enable-economic-disruption #f)
+            (and (>= cur-intel-staleness 224)
+                 (>= (length combat-units) 4)
+                 (>= (length cheap-blockers) 2))
+            (and (eq? mm-verdict 'punish-And-Deny-Greedy-Expand)
+                 (>= (length combat-units) (min 6 live-attack-wave-min)))
+            (and (null? enemy-units)
+                 (>= (length combat-units) (min 6 live-attack-wave-min))
+                 (>= (length cheap-blockers) 3)))))
+  (when (and (not (null? cheap-blockers)) allow-harass-raid?)
     (define blocker (car cheap-blockers))
     (define bid (hash-ref blocker 'id 110))
     (if (eq? (unit-type-sym blocker) 'zergling)

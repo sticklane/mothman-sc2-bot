@@ -236,6 +236,10 @@
     [(starport-techlab starport-tech-lab)
      (+ (hash-ref ht 'starport-techlab 0)
         (hash-ref ht 'starport-tech-lab 0))]
+    [(starport-reactor)
+     (+ (hash-ref ht 'starport-reactor 0)
+        (hash-ref ht 'starport-techlab 0)
+        (hash-ref ht 'starport-tech-lab 0))]
     [(gateway)
      (+ (hash-ref ht 'gateway 0)
         (hash-ref ht 'warp-gate 0)
@@ -844,7 +848,7 @@
   (define need-worker-saturation?
     (and (not under-attack?)
          (<= enemy-threat-supply 0)
-         (< workers (min target-workers (* 20 active-bases)))
+         (< workers (min target-workers (* 22 active-bases)))
          (or (< workers 20) (>= army-supply (* 4 active-bases)))))
 
   (define (cand-wanted-now? c)
@@ -926,7 +930,7 @@
              [(= workers 0) 1500.0]
              [(< workers 8) (+ 600.0 (* 100.0 (- 8.0 workers)))]
              [(< workers 14) (* 180.0 (/ (- 14.0 workers) 14.0))]
-             [need-worker-saturation? 75.0]
+             [need-worker-saturation? 115.0]
              [else 0.0]))
          (struct-copy priority-candidate c
                       [utility-score (+ u0 emergency-worker-boost)]
@@ -953,13 +957,17 @@
                       [blocking-allowed? exp-ok?])]
 
         [else
+         (define worker-sat-thresh
+           (if (hash? open-facility-slots)
+               (* 21 active-bases)
+               (* 16 active-bases)))
          (define combat-escrow-ok?
            (or (not (eq? cat 'combat-unit))
                is-bo-goal?
                under-attack?
                (> enemy-threat-supply 0)
                (and (>= frame 1800) (< army-supply 6))
-               (>= workers (min target-workers (* 16 active-bases)))))
+               (>= workers (min target-workers worker-sat-thresh))))
          (define can-esc?
            (and (or blk0 is-bo-goal? is-repaired?)
                 combat-escrow-ok?

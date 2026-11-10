@@ -2923,6 +2923,10 @@
       [(starport-techlab starport-tech-lab)
        (+ (hash-ref total-bldg-counts 'starport-techlab 0)
           (hash-ref total-bldg-counts 'starport-tech-lab 0))]
+      [(starport-reactor)
+       (+ (hash-ref total-bldg-counts 'starport-reactor 0)
+          (hash-ref total-bldg-counts 'starport-techlab 0)
+          (hash-ref total-bldg-counts 'starport-tech-lab 0))]
       [(gateway)
        (+ (hash-ref total-bldg-counts 'gateway 0)
           (hash-ref total-bldg-counts 'warp-gate 0)
