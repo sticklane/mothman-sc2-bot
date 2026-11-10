@@ -20,11 +20,16 @@
  (struct-out live-bot-runtime)
  (struct-out random-stealth-harass-plan)
  (struct-out sc2-tech-node)
+ (struct-out plan-goal-node)
+ (struct-out dynamic-macro-plan)
  (struct-out macro-world-state)
  (struct-out macro-brain-decision)
  SC2-TECH-GRAPH
  lookup-sc2-tech-node
  find-all-broken-tech-dependencies
+ translate-goal-to-next-action
+ synthesize-dynamic-macro-plan
+ macro-brain-decision-dynamic-plan
  make-macro-world-state
  obs-hash->macro-world-state
  step-priority-macro-brain
@@ -2127,6 +2132,15 @@
      #:nat-x nat-x #:nat-y nat-y
      #:third-x third-x #:third-y third-y))
   (define macro-decision (step-priority-macro-brain macro-world))
+  (define dyn-plan (macro-brain-decision-dynamic-plan macro-decision))
+  (define plan-next-actions-ht
+    (if (dynamic-macro-plan? dyn-plan)
+        (dynamic-macro-plan-translated-next-actions dyn-plan)
+        (hasheq)))
+  (define (plan-wants-now? sym)
+    (or (eq? bo-goal-sym sym)
+        (hash-has-key? plan-next-actions-ht sym)
+        (not (not (memq sym (macro-brain-decision-scheduled-ids macro-decision))))))
   (define repaired-prereqs (macro-brain-decision-repaired-prereqs macro-decision))
   (when (and live-game? (macro-brain-decision-bo-active-goal macro-decision))
     (set! bo-active-goal (macro-brain-decision-bo-active-goal macro-decision))
@@ -2496,7 +2510,8 @@
      (when (and (memq 'spawning-pool ready-bldg-types)
                 (not zerg-saving-for-expand?)
                 (not (building-present-or-pending? 'roach-warren))
-                (or (>= supply-used 26)
+                (or (plan-wants-now? 'roach-warren)
+                    (>= supply-used 26)
                     (>= gas 80)
                     (>= total-workers SC2-PRIORITY-WORKERS-PER-BASE))
                 (>= minerals (sc2-min-cost 'roach-warren))
@@ -2507,7 +2522,7 @@
      (when (and (memq 'spawning-pool ready-bldg-types)
                 (not zerg-saving-for-expand?)
                 (not (building-present-or-pending? 'baneling-nest))
-                (or (eq? bo-goal-sym 'baneling-nest)
+                (or (plan-wants-now? 'baneling-nest)
                     (>= supply-used 36)
                     (memq 'lair ready-bldg-types)
                     (memq 'hive ready-bldg-types))
@@ -2533,7 +2548,7 @@
                 (not zerg-saving-for-expand?)
                 (or (not live-game?)
                     (>= supply-used 42)
-                    (eq? bo-goal-sym 'lair)
+                    (plan-wants-now? 'lair)
                     (memq 'roach-warren bldg-types))
                 (>= minerals (sc2-min-cost 'lair))
                 (>= gas (sc2-gas-cost 'lair))
@@ -2556,7 +2571,8 @@
 
      (when (and (memq 'spawning-pool ready-bldg-types)
                 (not zerg-saving-for-expand?)
-                (>= supply-used 36)
+                (or (plan-wants-now? 'evolution-chamber)
+                    (>= supply-used 36))
                 (not (building-present-or-pending? 'evolution-chamber))
                 (>= minerals (sc2-min-cost 'evolution-chamber))
                 (non-combat-min-ok? (sc2-min-cost 'evolution-chamber)))
@@ -3396,7 +3412,7 @@
                                (safe-coord (+ base-y (* 2.0 SC2-TERRAN-FACILITY-STEP-Y)))))
        (when (and (not (building-present-or-pending? 'armory))
                   (or (not live-game?) (memq 'engineering-bay bldg-types))
-                  (>= supply-used 52)
+                  (or (plan-wants-now? 'armory) (>= supply-used 52))
                   (>= minerals (sc2-min-cost 'armory))
                   (>= gas (sc2-gas-cost 'armory)))
          (emit-build-verified! 'armory (safe-coord (- base-x 4.0)) (safe-coord (+ base-y 4.0))))
@@ -3406,12 +3422,15 @@
 
      (when (and (not terran-saving-for-expand?)
                 (not urgent-combat-or-intel-need?)
-                (memq 'starport ready-bldg-types)
+                (or (plan-wants-now? 'engineering-bay)
+                    (plan-wants-now? 'missile-turret)
+                    (memq 'starport ready-bldg-types))
                 (>= minerals (sc2-min-cost 'engineering-bay)))
        (when (and (not (building-present-or-pending? 'engineering-bay))
                   (>= minerals (sc2-min-cost 'engineering-bay)))
          (emit-build-verified! 'engineering-bay (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
-       (when (and (not (or (memq 'starport-techlab bldg-types)
+       (when (and (memq 'starport ready-bldg-types)
+                  (not (or (memq 'starport-techlab bldg-types)
                            (memq 'starport-tech-lab bldg-types)
                            (and live-game? (memq 'starport-reactor bldg-types))
                            (> (order-ledger-pending-count-for-type oledger 'starport-techlab frame) 0)))
@@ -3457,7 +3476,7 @@
        (when (and (or (not live-game?)
                       (and (memq 'engineering-bay ready-bldg-types)
                            (not (building-present-or-pending? 'missile-turret))
-                           (>= supply-used 60)))
+                           (or (plan-wants-now? 'missile-turret) (>= supply-used 60))))
                   (refractory-allow-action?! cd-tracker
                                              (list 'static-detector 'missile-turret)
                                              frame
@@ -3570,6 +3589,15 @@
    (hash-set* (if (hash? prev-tel) prev-tel (hash))
               'priority-summary prio-summary
               'priority-log-line prio-log-line
+              'dynamic-plan dyn-plan
+              'dynamic-plan-next-actions
+              (if (dynamic-macro-plan? dyn-plan)
+                  (map plan-goal-node-next-action-sym (dynamic-macro-plan-actionable-goals dyn-plan))
+                  '())
+              'dynamic-plan-in-progress
+              (if (dynamic-macro-plan? dyn-plan)
+                  (dynamic-macro-plan-in-progress-syms dyn-plan)
+                  '())
               'peak-supply-reached cur-peak-supply
               'repaired-prereqs repaired-prereqs
               'priority-repaired-prereqs repaired-prereqs

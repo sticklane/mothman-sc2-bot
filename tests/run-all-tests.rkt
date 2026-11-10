@@ -2654,7 +2654,88 @@
     (struct-copy macro-world-state z-5112041-state [minerals 120]))
   (define z-5112041-120-dec (step-priority-macro-brain z-5112041-120-state))
   (assert-true! (not (macro-brain-can-spend? z-5112041-120-dec 'zergling 120 168 'combat-unit))
-                "Match #5112041: At 120M/168G, Roach Warren (150M) must escrow and block 0G Zergling from draining 50M"))
+                "Match #5112041: At 120M/168G, Roach Warren (150M) must escrow and block 0G Zergling from draining 50M")
+
+  ;; 11. Dynamic Multi-Track Goal-Plan & Next-Action Translator (`translate-goal-to-next-action`, `synthesize-dynamic-macro-plan`):
+  ;;     (a) Missing structure prerequisite backward-chains to ready prerequisite (`terran-infantry-weapons-1 -> engineering-bay`)
+  (define tr-weap1
+    (translate-goal-to-next-action 'terran-infantry-weapons-1 'tech-infrastructure 'research 1 460.0 'macro-tech-plan
+                                   (hasheq 'command-center 1 'supply-depot 1 'barracks 1)
+                                   (hasheq 'command-center 1 'supply-depot 1 'barracks 1)
+                                   (hasheq 'scv 20) '() '()))
+  (assert-eq! (plan-goal-node-status tr-weap1) 'needs-prereq
+              "terran-infantry-weapons-1 without Engineering Bay must have status 'needs-prereq")
+  (assert-eq! (plan-goal-node-next-action-sym tr-weap1) 'engineering-bay
+              "terran-infantry-weapons-1 without Engineering Bay must translate to next-action-sym 'engineering-bay")
+  ;;     (b) Unit morph (`ravager`) with ready `roach-warren` and 0 `roach` translates to `'roach`
+  (define tr-ravager
+    (translate-goal-to-next-action 'ravager 'army-production 'morph 2 450.0 'army-milestone-plan
+                                   (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1)
+                                   (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1)
+                                   (hasheq 'drone 22 'roach 0) '() '()))
+  (assert-eq! (plan-goal-node-status tr-ravager) 'needs-prereq
+              "ravager morph with ready roach-warren and 0 roaches must have status 'needs-prereq")
+  (assert-eq! (plan-goal-node-next-action-sym tr-ravager) 'roach
+              "ravager morph with ready roach-warren and 0 roaches must translate to next-action-sym 'roach")
+  ;;     (c) In-progress structure (`roach-warren` with total=1, ready=0) has status `'in-progress` and `next-action-sym = #f`,
+  ;;         and dependent unit (`roach`) has status `'waiting-on-in-progress-prereq` and `next-action-sym = #f`
+  (define tr-rw-inprog
+    (translate-goal-to-next-action 'roach-warren 'tech-infrastructure 'build 1 465.0 'macro-tech-plan
+                                   (hasheq 'hatchery 2 'spawning-pool 1)
+                                   (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1)
+                                   (hasheq 'drone 22) '() '()))
+  (assert-eq! (plan-goal-node-status tr-rw-inprog) 'in-progress
+              "Under-construction Roach Warren (total=1, ready=0) must have status 'in-progress")
+  (assert-eq! (plan-goal-node-next-action-sym tr-rw-inprog) #f
+              "Under-construction Roach Warren must have next-action-sym #f so it does not stall or double-escrow")
+  (define tr-roach-wait
+    (translate-goal-to-next-action 'roach 'army-production 'train 4 460.0 'army-milestone-plan
+                                   (hasheq 'hatchery 2 'spawning-pool 1)
+                                   (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1)
+                                   (hasheq 'drone 22) '() '()))
+  (assert-eq! (plan-goal-node-status tr-roach-wait) 'waiting-on-in-progress-prereq
+              "Roach goal when Roach Warren is under construction must have status 'waiting-on-in-progress-prereq")
+  ;;     (d) Parallel multi-track progression + dynamic detection translation in `synthesize-dynamic-macro-plan`
+  (define z-parallel-plan
+    (synthesize-dynamic-macro-plan
+     (make-macro-world-state
+      #:race 'Zerg
+      #:enemy-race 'Terran
+      #:frame 3600
+      #:minerals 150
+      #:gas 100
+      #:supply-used 38
+      #:supply-cap 46
+      #:workers 28
+      #:active-bases 3
+      #:ready-building-counts (hasheq 'hatchery 3 'spawning-pool 1 'extractor 1)
+      #:total-building-counts (hasheq 'hatchery 3 'spawning-pool 1 'extractor 1 'roach-warren 1)
+      #:unit-counts (hasheq 'drone 28 'queen 2 'zergling 4 'overlord 4)
+      #:researched-upgrades '(metabolic-boost))))
+  (assert-true! (memq 'roach-warren (dynamic-macro-plan-in-progress-syms z-parallel-plan))
+                "synthesize-dynamic-macro-plan must track in-progress Roach Warren in in-progress-syms")
+  (assert-true! (hash-has-key? (dynamic-macro-plan-translated-next-actions z-parallel-plan) 'baneling-nest)
+                "While Roach Warren is in-progress, parallel Baneling Nest goal must be actionable in translated-next-actions")
+  (assert-true! (hash-has-key? (dynamic-macro-plan-translated-next-actions z-parallel-plan) 'queen)
+                "While Roach Warren is in-progress, parallel 3rd Queen goal must be actionable in translated-next-actions")
+  (define t-detect-plan
+    (synthesize-dynamic-macro-plan
+     (make-macro-world-state
+      #:race 'Terran
+      #:enemy-race 'Protoss
+      #:frame 3200
+      #:minerals 150
+      #:gas 50
+      #:supply-used 28
+      #:supply-cap 39
+      #:workers 22
+      #:active-bases 2
+      #:ready-building-counts (hasheq 'command-center 1 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 2)
+      #:total-building-counts (hasheq 'command-center 1 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 6)
+      #:requires-detection? #t)))
+  (assert-true! (hash-has-key? (dynamic-macro-plan-translated-next-actions t-detect-plan) 'engineering-bay)
+                "When requires-detection? is #t and Terran lacks Engineering Bay, missile-turret goal must translate to 'engineering-bay"))
 
 (run-suite "5.18 Optimal Human Selection & Control-Group Compiler, Unseen Pro Units/Splash Micro & Mirror-Mind FoW Persistence"
   ;; 1. Optimal Human Selection & Control-Group Compiler (`lib/human-cortex.rkt`):

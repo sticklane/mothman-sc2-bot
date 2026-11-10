@@ -17,9 +17,14 @@
  resolve-missing-prereq-chain
  find-all-broken-tech-dependencies
 
- ;; 2. Decoupled Macro World State & Priority Macro Brain
+ ;; 2. Decoupled Macro World State, Dynamic Goal-Plan & Priority Macro Brain
+ (struct-out plan-goal-node)
+ (struct-out dynamic-macro-plan)
  (struct-out macro-world-state)
  (struct-out macro-brain-decision)
+ translate-goal-to-next-action
+ synthesize-dynamic-macro-plan
+ macro-brain-decision-dynamic-plan
  make-macro-world-state
  obs-hash->macro-world-state
  step-priority-macro-brain
@@ -560,8 +565,352 @@
     [else
      (list 'build sym (+ base-x 4.0) (+ base-y 4.0))]))
 
-;; Pure Core Priority & Build-Order Brain Step:
-;; Evaluates build-order progression, self-heals broken/deleted prerequisite chains,
+;; =============================================================================
+;; 2b. Dynamic Multi-Track Goal Plan & Next-Action Translator
+;; =============================================================================
+;; Replaces static FIFO build-order queue scanning with a live, multi-track
+;; strategic plan (`dynamic-macro-plan`) that continuously updates goal statuses
+;; (`'satisfied`, `'in-progress`, `'waiting-on-in-progress-prereq`, `'needs-prereq`,
+;; `'actionable-now`) and translates every active goal into its concrete ready
+;; next action (`next-action-sym`) via backward-chaining over `SC2-TECH-GRAPH`.
+
+(struct plan-goal-node
+  (id              ;; symbol: target goal (e.g. 'terran-infantry-weapons-1, 'roach-warren, 'observer)
+   track           ;; symbol: 'survival-supply | 'economy-expansion | 'tech-infrastructure | 'army-production | 'intel-recon
+   kind            ;; symbol: 'build | 'expand | 'morph | 'research | 'train | 'addon
+   target-count    ;; exact positive integer
+   current-ready   ;; exact nonnegative integer
+   current-total   ;; exact nonnegative integer (ready + under-construction/pending)
+   status          ;; symbol: 'satisfied | 'in-progress | 'waiting-on-in-progress-prereq | 'needs-prereq | 'actionable-now
+   next-action-sym ;; symbol or #f: concrete executable next action translated from this goal
+   priority-weight ;; flonum: dynamic plan utility weight computed from current world state
+   reason)         ;; symbol: provenance tag
+  #:transparent)
+
+(struct dynamic-macro-plan
+  (race                    ;; 'Zerg | 'Terran | 'Protoss
+   frame                   ;; exact nonnegative integer
+   phase-supply            ;; exact nonnegative integer
+   all-goals               ;; list of plan-goal-node across all tracks
+   active-goals            ;; list of unsatisfied plan-goal-node (status != 'satisfied)
+   actionable-goals        ;; list of plan-goal-node with non-#f next-action-sym, sorted by descending weight
+   translated-next-actions ;; immutable hash: next-action-sym -> highest-priority plan-goal-node
+   in-progress-syms)       ;; list of symbols currently 'in-progress or 'waiting-on-in-progress-prereq
+  #:transparent)
+
+;; Translates a single high-level plan goal `(id, track, kind, target-count, priority-weight, reason)`
+;; into a `plan-goal-node` with its live lifecycle `status` and concrete `next-action-sym`.
+(define (translate-goal-to-next-action id track kind target-count priority-weight reason
+                                       ready-bldg-counts total-bldg-counts unit-counts
+                                       researched-upgrades pending-upgrades)
+  (define unit-morph?
+    (and (eq? kind 'morph)
+         (memq id '(ravager baneling lurker brood-lord overseer))))
+  (define current-ready
+    (cond
+      [(eq? kind 'research)
+       (if (memq id researched-upgrades) 1 0)]
+      [(or (eq? kind 'train) unit-morph?)
+       (hash-ref unit-counts id 0)]
+      [else
+       (bldg-count-equivalent ready-bldg-counts id)]))
+  (define current-total
+    (cond
+      [(eq? kind 'research)
+       (if (or (memq id researched-upgrades) (memq id pending-upgrades)) 1 0)]
+      [(or (eq? kind 'train) unit-morph?)
+       (hash-ref unit-counts id 0)]
+      [else
+       (bldg-count-equivalent total-bldg-counts id)]))
+
+  (define-values (status next-action-sym)
+    (cond
+      ;; 1. Goal is already completely ready/satisfied
+      [(>= current-ready target-count)
+       (values 'satisfied #f)]
+
+      ;; 2. Goal is already under construction / morphing / researching (`total >= target > ready`)
+      [(>= current-total target-count)
+       (define missing-up
+         (resolve-missing-prereq-chain id ready-bldg-counts total-bldg-counts))
+       (if (and (pair? missing-up)
+                (sc2-tech-prereqs-ready? (first missing-up) ready-bldg-counts unit-counts))
+           (values 'needs-prereq (first missing-up))
+           (values 'in-progress #f))]
+
+      ;; 3. Goal has all prerequisites ready right now -> translates directly to `id`!
+      [(sc2-tech-prereqs-ready? id ready-bldg-counts unit-counts)
+       (values 'actionable-now id)]
+
+      ;; 4. Goal is missing one or more prerequisites -> resolve via backward-chaining over SC2-TECH-GRAPH
+      [else
+       (define missing-chain
+         (resolve-missing-prereq-chain id ready-bldg-counts total-bldg-counts))
+       (cond
+         [(pair? missing-chain)
+          (define root-missing (first missing-chain))
+          (if (sc2-tech-prereqs-ready? root-missing ready-bldg-counts unit-counts)
+              (values 'needs-prereq root-missing)
+              (values 'waiting-on-in-progress-prereq #f))]
+         [unit-morph?
+          ;; Structure prerequisites for unit morph are present; check if morph source unit is missing
+          (define node (lookup-sc2-tech-node id))
+          (define src-sym (and node (sc2-tech-node-producer-slot node)))
+          (define struct-prereqs-ready?
+            (and node
+                 (for/and ([p (in-list (sc2-tech-node-prereqs node))])
+                   (single-prereq-ready? ready-bldg-counts p))))
+          (if (and struct-prereqs-ready?
+                   src-sym
+                   (= (hash-ref unit-counts src-sym 0) 0)
+                   (sc2-tech-prereqs-ready? src-sym ready-bldg-counts unit-counts))
+              (values 'needs-prereq src-sym)
+              (values 'waiting-on-in-progress-prereq #f))]
+         [else
+          ;; Required prerequisite structure is already under construction (`total > 0, ready == 0`)
+          (values 'waiting-on-in-progress-prereq #f)])]))
+
+  (plan-goal-node id track kind target-count current-ready current-total
+                  status next-action-sym (exact->inexact priority-weight) reason))
+
+;; Synthesizes the live 5-track `dynamic-macro-plan` from `macro-world-state` on every frame.
+(define (synthesize-dynamic-macro-plan state)
+  (match-define (macro-world-state
+                 race enemy-race frame minerals gas
+                 supply-used supply-cap supply-left pending-supply
+                 workers active-bases
+                 ready-bldg-counts total-bldg-counts unit-counts
+                 researched-upgrades pending-upgrades open-facility-slots
+                 army-supply enemy-threat-supply
+                 under-attack? requires-anti-air? requires-detection? supply-at-risk?
+                 peak-supply-reached
+                 base-x base-y nat-x nat-y third-x third-y)
+    state)
+
+  (define effective-phase-supply (max supply-used peak-supply-reached))
+  (define all-upgs (remove-duplicates (append researched-upgrades pending-upgrades) eq?))
+  (define live-slots? (hash? open-facility-slots))
+  (define peaceful? (and (not under-attack?) (<= enemy-threat-supply 0)))
+  (define root-combat-facility-ready?
+    (case race
+      [(Zerg) (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)]
+      [(Terran) (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)]
+      [else (> (bldg-count-equivalent ready-bldg-counts 'gateway) 0)]))
+
+  (define steps-so-far
+    (filter (lambda (g) (>= effective-phase-supply (pro-bo-goal-min-supply g)))
+            (pro-build-order-steps-for-matchup race enemy-race)))
+  (define repaired-prereqs
+    (find-all-broken-tech-dependencies
+     race ready-bldg-counts total-bldg-counts
+     #:active-goals steps-so-far))
+
+  (define raw-goal-specs '())
+  (define (add-goal-spec! id track kind target-count weight reason)
+    (when (lookup-sc2-tech-node id)
+      (set! raw-goal-specs
+            (cons (list id track kind target-count weight reason)
+                  raw-goal-specs))))
+
+  ;; Track 1: Survival & Broken Prerequisite Repair
+  (for ([rep-sym (in-list repaired-prereqs)]
+        [idx (in-naturals 0)])
+    (define node (lookup-sc2-tech-node rep-sym))
+    (when node
+      (define root-repair?
+        (or (not live-slots?)
+            peaceful?
+            (not root-combat-facility-ready?)
+            (memq rep-sym '(spawning-pool barracks gateway pylon supply-depot overlord))))
+      (define w (if root-repair? (- 560.0 (* 4.0 idx)) 160.0))
+      (add-goal-spec! rep-sym 'survival-supply (sc2-tech-node-kind node) 1 w 'prereq-repair)))
+
+  ;; Track 2 & 3 & 4: Evaluate ALL eligible Matchup Plan Milestones concurrently (not a FIFO queue!)
+  (define macro-step-rank 0)
+  (for ([g (in-list steps-so-far)])
+    (match-define (pro-bo-goal kind sym tgt-cnt min-sup _) g)
+    ;; Skip `starport-techlab` in live games if Starport already has a `starport-reactor`
+    (define reactor-occupies-starport?
+      (and live-slots?
+           (eq? sym 'starport-techlab)
+           (>= (bldg-count-equivalent total-bldg-counts 'starport-reactor)
+               (max 1 (bldg-count-equivalent total-bldg-counts 'starport)))))
+    (unless reactor-occupies-starport?
+      (cond
+        [(eq? kind 'expand)
+         (define exp-w (if peaceful? (- 476.0 (* 3.0 macro-step-rank)) 42.0))
+         (set! macro-step-rank (add1 macro-step-rank))
+         (add-goal-spec! sym 'economy-expansion 'expand tgt-cnt exp-w 'expansion-plan)]
+        [(memq kind '(build morph research addon))
+         (define non-defensive-tech-under-attack?
+           (and live-slots?
+                (not peaceful?)
+                root-combat-facility-ready?
+                (not requires-anti-air?)
+                (not requires-detection?)
+                (memq sym '(lair hive spire infestation-pit evolution-chamber
+                            engineering-bay armory twilight-council forge robotics-bay))))
+         (define tech-w
+           (if non-defensive-tech-under-attack?
+               140.0
+               (max 442.0 (- 476.0 (* 3.5 macro-step-rank)))))
+         (set! macro-step-rank (add1 macro-step-rank))
+         (add-goal-spec! sym 'tech-infrastructure kind tgt-cnt tech-w 'macro-tech-plan)]
+        [(eq? kind 'train)
+         (define gas-locked-0g?
+           (and live-slots?
+                peaceful?
+                (>= gas 80)
+                (>= army-supply 4)
+                (memq sym '(zergling marine zealot hellion))))
+         (define past-opening-window?
+           (> effective-phase-supply (+ min-sup 6)))
+         (define train-w
+           (cond
+             [(or gas-locked-0g? past-opening-window?) 390.0]
+             [peaceful? 466.0]
+             [else 420.0]))
+         (add-goal-spec! sym 'army-production 'train tgt-cnt train-w 'army-milestone-plan)])))
+
+  ;; Track 2b: Zerg Per-Base Larva-Inject Queen Engine
+  (when (and (eq? race 'Zerg)
+             (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+             (< (hash-ref unit-counts 'queen 0) active-bases))
+    (add-goal-spec! 'queen 'economy-expansion 'train active-bases
+                    (if (and live-slots? peaceful?) 445.0 230.0)
+                    'larva-inject-engine))
+
+  ;; Track 3b: Dynamic Gas-Unlock Tech Progression when floating >= 80G in peace time
+  (when (and live-slots? peaceful? (>= gas 80))
+    (case race
+      [(Zerg)
+       (when (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+         (add-goal-spec! 'roach-warren 'tech-infrastructure 'build 1 455.0 'gas-unlock-tech))
+       (when (and (>= gas 100)
+                  (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+                  (= (bldg-count-equivalent total-bldg-counts 'lair) 0)
+                  (= (bldg-count-equivalent total-bldg-counts 'hive) 0))
+         (add-goal-spec! 'lair 'tech-infrastructure 'morph 1 448.0 'gas-unlock-tech))]
+      [(Protoss)
+       (when (= (bldg-count-equivalent total-bldg-counts 'cybernetics-core) 0)
+         (add-goal-spec! 'cybernetics-core 'tech-infrastructure 'build 1 455.0 'gas-unlock-tech))
+       (when (and (>= gas 100)
+                  (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+                  (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0))
+         (add-goal-spec! 'robotics-facility 'tech-infrastructure 'build 1 450.0 'gas-unlock-tech))]
+      [(Terran)
+       (when (and (>= gas 100)
+                  (= (bldg-count-equivalent total-bldg-counts 'factory) 0))
+         (add-goal-spec! 'factory 'tech-infrastructure 'build 1 455.0 'gas-unlock-tech))
+       (when (and (>= gas 100)
+                  (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
+                  (= (bldg-count-equivalent total-bldg-counts 'starport) 0))
+         (add-goal-spec! 'starport 'tech-infrastructure 'build 1 450.0 'gas-unlock-tech))]))
+
+  ;; Track 5: Dynamic Counter-Tech & Intel/Detection Goals (automatically backward-chained into missing prereqs!)
+  (when requires-anti-air?
+    (case race
+      [(Zerg)
+       (add-goal-spec! 'queen 'survival-supply 'train (+ active-bases 1) 495.0 'anti-air-response)
+       (add-goal-spec! 'hydralisk 'army-production 'train 4 490.0 'anti-air-response)]
+      [(Terran)
+       (add-goal-spec! 'marine 'army-production 'train 6 495.0 'anti-air-response)
+       (add-goal-spec! 'viking-fighter 'army-production 'train 2 490.0 'anti-air-response)]
+      [(Protoss)
+       (add-goal-spec! 'stalker 'army-production 'train 4 495.0 'anti-air-response)]))
+
+  (when requires-detection?
+    (case race
+      [(Zerg)
+       (add-goal-spec! 'spore-crawler 'intel-recon 'build 1 495.0 'detection-response)
+       (add-goal-spec! 'overseer 'intel-recon 'morph 1 490.0 'detection-response)]
+      [(Terran)
+       (add-goal-spec! 'missile-turret 'intel-recon 'build 1 495.0 'detection-response)]
+      [(Protoss)
+       (add-goal-spec! 'observer 'intel-recon 'train 1 495.0 'detection-response)
+       (add-goal-spec! 'photon-cannon 'intel-recon 'build 1 490.0 'detection-response)]))
+
+  (define all-nodes
+    (for/list ([spec (in-list (reverse raw-goal-specs))])
+      (match-define (list id track kind tgt-cnt w reason) spec)
+      (define base-node
+        (translate-goal-to-next-action id track kind tgt-cnt w reason
+                                       ready-bldg-counts total-bldg-counts unit-counts
+                                       researched-upgrades pending-upgrades))
+      (define w-sym (case race [(Zerg) 'drone] [(Terran) 'scv] [else 'probe]))
+      (define th-sym (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
+      (define min-exp-workers (if (eq? race 'Zerg) 14 16))
+      (cond
+        ;; If an expansion goal is ready structurally but we have fewer than `min-exp-workers`
+        ;; (e.g., after a worker raid/wipeout), translate the expansion goal into worker recovery!
+        [(and (eq? kind 'expand)
+              (eq? (plan-goal-node-status base-node) 'actionable-now)
+              (< workers min-exp-workers))
+         (struct-copy plan-goal-node base-node
+                      [status 'needs-prereq]
+                      [next-action-sym w-sym])]
+        ;; If a gas-building goal exceeds `2 * active-bases` available geysers, it requires an expansion first!
+        [(and (memq id '(extractor refinery assimilator))
+              (not (eq? (plan-goal-node-status base-node) 'satisfied))
+              (> tgt-cnt (* 2 active-bases)))
+         (struct-copy plan-goal-node base-node
+                      [status 'needs-prereq]
+                      [next-action-sym (if (< workers min-exp-workers) w-sym th-sym)])]
+        ;; If Zerg has fewer than 13 workers and already has a Spawning Pool, non-survival build goals
+        ;; (which sacrifice a Drone) translate into Drone production first so economy doesn't collapse!
+        [(and (eq? race 'Zerg)
+              (eq? kind 'build)
+              (eq? (plan-goal-node-status base-node) 'actionable-now)
+              (< workers 13)
+              (> (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)
+              (not (memq id '(spawning-pool spine-crawler spore-crawler)))
+              (or (not (eq? id 'extractor))
+                  (> (bldg-count-equivalent total-bldg-counts 'extractor) 0)))
+         (struct-copy plan-goal-node base-node
+                      [status 'needs-prereq]
+                      [next-action-sym 'drone])]
+        [else base-node])))
+
+  (define active-nodes
+    (filter (lambda (n) (not (eq? (plan-goal-node-status n) 'satisfied)))
+            all-nodes))
+
+  (define in-prog-syms
+    (remove-duplicates
+     (for/list ([n (in-list active-nodes)]
+                #:when (memq (plan-goal-node-status n) '(in-progress waiting-on-in-progress-prereq)))
+       (plan-goal-node-id n))
+     eq?))
+
+  (define actionable-nodes
+    (sort (filter (lambda (n) (symbol? (plan-goal-node-next-action-sym n)))
+                  active-nodes)
+          >
+          #:key plan-goal-node-priority-weight))
+
+  (define translated-map
+    (for/fold ([ht (hasheq)]) ([n (in-list actionable-nodes)])
+      (define act-sym (plan-goal-node-next-action-sym n))
+      (define prev (hash-ref ht act-sym #f))
+      (if (or (not prev)
+              (> (plan-goal-node-priority-weight n)
+                 (plan-goal-node-priority-weight prev)))
+          (hash-set ht act-sym n)
+          ht)))
+
+  (dynamic-macro-plan
+   race frame effective-phase-supply
+   all-nodes active-nodes actionable-nodes
+   translated-map in-prog-syms))
+
+(define (macro-brain-decision-dynamic-plan decision)
+  (define sched (macro-brain-decision-priority-schedule decision))
+  (define cat-ht (priority-schedule-result-category-utilities sched))
+  (and (hash? cat-ht) (hash-ref cat-ht 'dynamic-plan #f)))
+
+;; Pure Core Priority & Dynamic Plan Brain Step:
+;; Synthesizes the live 5-track `dynamic-macro-plan`, translates active goals into
+;; concrete ready next-actions, self-heals broken/deleted prerequisite chains,
 ;; checks income feasibility for mineral & gas escrows, and runs the Okasaki Braun-heap
 ;; scheduler with dual-resource (mineral + gas) and facility-slot reservations.
 (define (step-priority-macro-brain state)
@@ -580,8 +929,7 @@
   (define effective-phase-supply (max supply-used peak-supply-reached))
   (define all-upgs (remove-duplicates (append researched-upgrades pending-upgrades) eq?))
 
-  ;; 1. Evaluate pro build-order queue at `effective-phase-supply` so mid-game unit/worker
-  ;;    losses (Chaos Monkey deletions) do not prevent rebuilding mid-game tech structures.
+  ;; 1. Evaluate pro supply curve targets & synthesize live Dynamic Macro Plan
   (define bo-eval
     (evaluate-build-order-next-step
      #:race race
@@ -603,9 +951,11 @@
 
   (define bo-raw-goal (pro-bo-eval-result-active-goal bo-eval))
   (define target-workers (pro-bo-eval-result-target-workers bo-eval))
+  (define dyn-plan (synthesize-dynamic-macro-plan state))
+  (define plan-actionable-nodes (dynamic-macro-plan-actionable-goals dyn-plan))
+  (define plan-next-actions-ht (dynamic-macro-plan-translated-next-actions dyn-plan))
 
   ;; 2. Self-Healing Tech Prerequisite DAG Check:
-  ;;    Find any destroyed/missing prerequisite for owned buildings or the active BO goal.
   (define steps-so-far
     (filter (lambda (g) (>= effective-phase-supply (pro-bo-goal-min-supply g)))
             (pro-build-order-steps-for-matchup race enemy-race)))
@@ -614,42 +964,23 @@
      race ready-bldg-counts total-bldg-counts
      #:active-goals (if bo-raw-goal (cons bo-raw-goal steps-so-far) steps-so-far)))
 
-  ;; Find the first unsatisfied structural/expansion/upgrade BO goal at `<= effective-phase-supply`
-  ;; so mid-game combat unit losses never regress the macro build order back to early unit-train steps.
-  (define first-unsatisfied-macro-bo-goal
-    (for/first ([g (in-list steps-so-far)]
-                #:when (and (memq (pro-bo-goal-kind g) '(build expand morph research addon))
-                            (case (pro-bo-goal-kind g)
-                              [(build expand morph addon)
-                               (< (bldg-count-equivalent total-bldg-counts (pro-bo-goal-target-sym g))
-                                  (pro-bo-goal-target-count g))]
-                              [(research)
-                               (not (memq (pro-bo-goal-target-sym g) all-upgs))]
-                              [else #f])))
-      g))
-
-  ;; If a prerequisite was destroyed (e.g., spawning-pool, supply-depot, pylon, gateway,
-  ;; cybernetics-core, barracks, barracks-techlab, factory), promote the earliest missing
-  ;; prerequisite as the active repair goal!
+  ;; Derive top actionable goal from the Dynamic Plan (translating any blocked goal
+  ;; directly into its ready `next-action-sym` instead of stalling on a static queue head!)
+  (define top-plan-node
+    (and (pair? plan-actionable-nodes)
+         (first plan-actionable-nodes)))
   (define effective-bo-goal
     (cond
-      [(and (pair? repaired-prereqs)
-            (let ([rep-sym (first repaired-prereqs)])
-              (lookup-sc2-tech-node rep-sym)))
+      [(and top-plan-node
+            (lookup-sc2-tech-node (plan-goal-node-next-action-sym top-plan-node)))
        => (lambda (node)
-            (define rep-sym (sc2-tech-node-id node))
+            (define next-sym (sc2-tech-node-id node))
             (define p-list (sc2-tech-node-prereqs node))
             (pro-bo-goal (if (eq? (sc2-tech-node-kind node) 'addon) 'build (sc2-tech-node-kind node))
-                         rep-sym 1 0 (and (pair? p-list) (first p-list))))]
-      [(and first-unsatisfied-macro-bo-goal
-            (or (not bo-raw-goal)
-                (and (eq? (pro-bo-goal-kind bo-raw-goal) 'train)
-                     (or (> effective-phase-supply (+ (pro-bo-goal-min-supply bo-raw-goal) 6))
-                         (and (hash? open-facility-slots)
-                              (>= gas 80)
-                              (>= army-supply 4)
-                              (memq (pro-bo-goal-target-sym bo-raw-goal) '(zergling marine zealot hellion)))))))
-       first-unsatisfied-macro-bo-goal]
+                         next-sym
+                         (plan-goal-node-target-count top-plan-node)
+                         0
+                         (and (pair? p-list) (first p-list))))]
       [else bo-raw-goal]))
 
   (define bo-goal-sym
@@ -729,13 +1060,6 @@
       [(not (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts)) #f]
       [else (slot-available? (sc2-tech-node-producer-slot node))]))
 
-  ;; Can candidate `sym` set a mineral/gas escrow floor when currently unaffordable?
-  ;; Requires:
-  ;;   1. Tech prerequisites are already READY (`sc2-tech-prereqs-ready?`),
-  ;;   2. Not already researched/pending/unique-built,
-  ;;   3. Economic survival threshold: `workers >= 6` (never escrow 100-400M buildings/units while starving 50M worker recovery!),
-  ;;   4. If mineral deficit > 0, `has-mineral-income?` (`workers > 0`) MUST hold,
-  ;;   5. If gas deficit > 0, `has-gas-income?` (`ready-gas-bldgs > 0` and `workers > 3`) MUST hold.
   (define (cand-can-escrow? sym)
     (define node (lookup-sc2-tech-node sym))
     (and node
@@ -745,8 +1069,8 @@
          (or (>= minerals (sc2-tech-node-min-cost node)) has-mineral-income?)
          (or (>= gas (sc2-tech-node-gas-cost node)) has-gas-income?)))
 
-  ;; 4. Generate base candidates from `econ-ledger` + inject any missing repaired prerequisites,
-  ;;    active build-order goals, and emergency gas/worker recovery candidates.
+  ;; 4. Generate base candidates from `econ-ledger` + inject all translated next-actions
+  ;;    from `dyn-plan`, any missing repaired prerequisites, and emergency recovery candidates.
   (define raw-cands
     (generate-race-priority-candidates
      #:race race
@@ -779,12 +1103,8 @@
      #:nat-x nat-x #:nat-y nat-y
      #:third-x third-x #:third-y third-y))
 
-  ;; Augment candidate list with:
-  ;;   - Active build-order goal (`bo-goal-sym`) if not already in `raw-cands`
-  ;;   - Any missing repaired prerequisites (`repaired-prereqs`)
-  ;;   - Stargate Oracle (`oracle`) when Protoss has a ready Stargate and < 1 Oracle (or < 2 with >= 200M/200G)
-  ;;   - Gas building (`extractor`/`refinery`/`assimilator`) if needed by BO or if 0 gas buildings exist when gas tech is needed
   (define existing-ids (map priority-candidate-id raw-cands))
+  (define plan-translated-syms (map plan-goal-node-next-action-sym plan-actionable-nodes))
   (define extra-syms
     (remove-duplicates
      (filter (lambda (s)
@@ -793,6 +1113,7 @@
                     (lookup-sc2-tech-node s)
                     (not (sc2-tech-already-satisfied? s total-bldg-counts researched-upgrades pending-upgrades))))
              (append repaired-prereqs
+                     plan-translated-syms
                      (if bo-goal-sym (list bo-goal-sym) '())
                      (if (and (eq? race 'Protoss)
                               (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0)
@@ -830,19 +1151,11 @@
                                 (sc2-tech-node-supply-cost node)
                                 (cand-can-escrow? sym)
                                 metrics))
-      ;; If `sym` is a repaired prerequisite (e.g., destroyed Spawning Pool / Pylon / Depot / Barracks / TechLab),
-      ;; ensure its utility reflects prerequisite repair urgency (+300.0) so it is rebuilt immediately!
       (if (memq sym repaired-prereqs)
           (struct-copy priority-candidate raw-cand
                        [utility-score (+ 300.0 (priority-candidate-utility-score raw-cand))])
           raw-cand)))
 
-  ;; Normalize every candidate's utility and `blocking-allowed?` for:
-  ;;   - Emergency Zero-Worker / Low-Worker Recovery (Chaos Monkey / Worker Rush resilience)
-  ;;   - Negative / Zero Supply Recovery (`supply-used >= supply-cap` when `pending-supply == 0`)
-  ;;   - Active Build-Order Goal & Repaired Prerequisite priority boost
-  ;;   - Worker saturation priority over passive combat units when peaceful
-  ;;   - Income-Feasibility Escrow Gating (`cand-can-escrow?`)
   (define supply-crisis?
     (and (< supply-cap 200)
          (< pending-supply (if (< supply-left 0) 3 2))
@@ -860,20 +1173,30 @@
     (define cat (priority-candidate-category c))
     (define blk0 (priority-candidate-blocking-allowed? c))
     (define node (lookup-sc2-tech-node id))
-    ;; Anti-cannibalization: Zerg building/expansion consumes a Drone permanently,
-    ;; so never morph a Drone into a structure when Zerg has < 5 Drones!
+    (define plan-node (hash-ref plan-next-actions-ht id #f))
+    (define geyser-cap-ok?
+      (or (not (memq id '(extractor refinery assimilator)))
+          (< (bldg-count-equivalent total-bldg-counts id) (* 2 active-bases))))
     (define zerg-drone-sacrifice-ok?
       (or (not (eq? race 'Zerg))
           (not node)
           (not (memq (sc2-tech-node-kind node) '(build expand)))
-          (>= workers 5)))
-    (and zerg-drone-sacrifice-ok?
+          (and (>= workers 5)
+               (or (>= workers 13)
+                   (= (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)
+                   (memq id '(spawning-pool spine-crawler spore-crawler))
+                   (and (eq? id 'extractor)
+                        (= (bldg-count-equivalent total-bldg-counts 'extractor) 0))))))
+    (and geyser-cap-ok?
+         zerg-drone-sacrifice-ok?
          (cond
            [(memq id repaired-prereqs) #t]
            [(eq? cat 'supply)
             (or supply-crisis?
-                (and bo-goal-sym (eq? id bo-goal-sym) (<= pending-supply 0)))]
+                (and (or (and bo-goal-sym (eq? id bo-goal-sym)) plan-node)
+                     (<= pending-supply 0)))]
            [(and bo-goal-sym (eq? id bo-goal-sym)) #t]
+           [(and plan-node (>= (plan-goal-node-priority-weight plan-node) 440.0)) #t]
            [(eq? cat 'worker)
             (< workers (min 80 (max target-workers (* 22 active-bases))))]
            [(eq? cat 'expansion)
@@ -929,38 +1252,46 @@
       (define u0 (priority-candidate-utility-score c))
       (define blk0 (priority-candidate-blocking-allowed? c))
       (define is-repaired-raw? (not (not (memq sym repaired-prereqs))))
-      ;; When under active attack in a live game and our primary combat production facility is already ready,
-      ;; only root production/supply prerequisites (`spawning-pool`, `barracks`, `gateway`, `pylon`, `supply-depot`, `overlord`)
-      ;; receive emergency repair preemption over combat units; mid-game tech (`lair`, `engineering-bay`) yields to defense!
       (define is-repaired?
         (and is-repaired-raw?
              (or (not (hash? open-facility-slots))
                  (and (not under-attack?) (<= enemy-threat-supply 0))
                  (not root-combat-facility-ready?)
                  (memq sym '(spawning-pool barracks gateway pylon supply-depot overlord)))))
-      (define is-bo-goal? (and bo-goal-sym (eq? sym bo-goal-sym)))
+      (define plan-node (hash-ref plan-next-actions-ht sym #f))
+      (define plan-weight (if plan-node (plan-goal-node-priority-weight plan-node) 0.0))
+      (define is-plan-milestone? (and plan-node (>= plan-weight 440.0)))
+      (define is-bo-goal?
+        (or (and bo-goal-sym (eq? sym bo-goal-sym))
+            is-plan-milestone?))
       (cond
-        ;; Supply candidate during supply crisis (e.g. deleted Pylon/Overlord/Depot -> negative free supply)
+        ;; Supply candidate during supply crisis
         [(eq? cat 'supply)
          (define u-sup (if supply-crisis? (max 1350.0 u0) (max 280.0 u0)))
          (struct-copy priority-candidate c
                       [utility-score u-sup]
                       [blocking-allowed? has-mineral-income?])]
 
-        ;; Worker candidate: emergency recovery when workers < 10, and saturation priority when peaceful
+        ;; Worker candidate: emergency recovery when workers < 14, and saturation priority when peaceful
         [(eq? cat 'worker)
          (define emergency-worker-boost
            (cond
              [(= workers 0) 1500.0]
              [(< workers 8) (+ 600.0 (* 100.0 (- 8.0 workers)))]
-             [(< workers 14) (* 180.0 (/ (- 14.0 workers) 14.0))]
+             [(< workers 14) (+ 120.0 (* 25.0 (- 14.0 workers)))]
              [need-worker-saturation? 115.0]
              [else 0.0]))
+         (define w-plan-boost
+           (if (and (< workers (if (eq? race 'Zerg) 14 16))
+                    (not under-attack?)
+                    (<= enemy-threat-supply 0))
+               plan-weight
+               0.0))
          (struct-copy priority-candidate c
-                      [utility-score (+ u0 emergency-worker-boost)]
+                      [utility-score (max w-plan-boost (+ u0 emergency-worker-boost))]
                       [blocking-allowed? (and (< workers 8) has-mineral-income?)])]
 
-        ;; Expansion candidate: high priority when active BO goal or 1-base natural ready,
+        ;; Expansion candidate: high priority when active plan expansion goal or 1-base natural ready,
         ;; but NEVER blocks combat units when under-attack? or enemy-threat-supply > 0 (PV1/PV2/PV7)
         [(eq? cat 'expansion)
          (define exp-ok?
@@ -973,7 +1304,7 @@
            (cond
              [(or under-attack? (> enemy-threat-supply 0)) (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
-             [(and is-bo-goal? exp-ok?) (max 465.0 u0)]
+             [(and is-bo-goal? exp-ok?) (max plan-weight 465.0 u0)]
              [exp-ok? (max 210.0 u0)]
              [else u0]))
          (struct-copy priority-candidate c
@@ -985,15 +1316,10 @@
            (if (hash? open-facility-slots)
                (* 21 active-bases)
                (* 16 active-bases)))
-         ;; Zerg Queens up to `active-bases` are Zerg's primary larva-inject macro engine,
-         ;; not merely anti-air counter-tech!
          (define inject-queen-boost?
            (and (eq? sym 'queen)
                 (< (hash-ref unit-counts 'queen 0) active-bases)
                 (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)))
-         ;; Gas-Lock Tech Promotion: when floating >= 80G while a core gas-unlocking structure
-         ;; is still unbuilt, promote that structure into Band 1 (u >= 445.0) so mineral-only
-         ;; units never starve gas tech progression.
          (define gas-unlock-tech-boost?
            (and (hash? open-facility-slots)
                 (not under-attack?)
@@ -1023,9 +1349,6 @@
                          (>= gas 100)
                          (= (bldg-count-equivalent total-bldg-counts 'starport) 0)
                          (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)))))
-         ;; Continuous Gas-Lock Attenuation for 0-gas mineral-only combat units:
-         ;; When floating >= 100G in peace time, attenuate 0G units (`zergling`, `marine`, `zealot`, `hellion`)
-         ;; by 1 / (1 + (gas / 100)^2) so minerals flow into Queens, Tech Structures, and Gas Units.
          (define mineral-only-gas-locked?
            (and (hash? open-facility-slots)
                 (eq? cat 'combat-unit)
@@ -1070,17 +1393,15 @@
                 tech-under-attack-escrow-ok?
                 (cand-can-escrow? sym)
                 (> workers 0)))
-         ;; Hierarchical Priority Banding:
-         ;; - Band 1: Repaired Prereqs (>= 520), Active BO Head (>= 465), Gas-Unlocking Tech (>= 445),
-         ;;           and Per-Base Larva-Inject Queens (>= 440 in live games / 225 in synthetic unit tests).
-         ;; - Band 2: Repeatable combat units in peace time when army-supply >= 2 are bounded to <= 415.0
-         ;;           so they never outrank Band-1 macro milestones.
          (define boosted-u
            (cond
              [is-repaired? (max (+ 380.0 u0) 520.0)]
-             [(and effective-bo-goal? (not under-attack?) (<= enemy-threat-supply 0))
-              (max (+ 200.0 u0) 465.0)]
-             [gas-unlock-tech-boost? (max 445.0 u0)]
+             [(and effective-bo-goal?
+                   (or (and (not under-attack?) (<= enemy-threat-supply 0))
+                       requires-anti-air?
+                       requires-detection?))
+              (max plan-weight (if (and bo-goal-sym (eq? sym bo-goal-sym)) (+ 200.0 u0) 0.0) 465.0)]
+             [gas-unlock-tech-boost? (max plan-weight 445.0 u0)]
              [inject-queen-boost?
               (if (and (hash? open-facility-slots) (not under-attack?) (<= enemy-threat-supply 0))
                   (max 440.0 u0)
@@ -1091,7 +1412,6 @@
                    (>= army-supply 2))
               (min 415.0 u-after-gas-lock)]
              [(and is-repaired-raw? (not is-repaired?))
-              ;; Subtract the +300 repair boost when under attack so combat units outrank non-root tech
               (max 50.0 (- u-after-gas-lock 300.0))]
              [else u-after-gas-lock]))
          (struct-copy priority-candidate c
@@ -1134,6 +1454,7 @@
         (hash-copy open-facility-slots)
         #f))
   (define reserved-slots '())
+  (define worker-build-escrowed? #f)
   (define min-floor 0)
   (define gas-floor 0)
   (define scheduled-cands '())
@@ -1193,12 +1514,19 @@
       [else
        ;; If candidate is ready (`prereq-ok?` and `slot-ok?`) and `blk-ok?` (income-feasible),
        ;; and waiting on minerals or gas (with sufficient supply), reserve mineral/gas/slot escrow!
+       ;; Only the highest-priority unaffordable worker-built structure sets the building escrow floor
+       ;; so lower-ranked structures do not stack spurious gas/mineral floors on top of the primary building goal.
+       (define worker-slot-escrow-ok?
+         (or (not (eq? pslot 'worker))
+             (not worker-build-escrowed?)))
        (define escrowed-now? #f)
-       (when (and prereq-ok? slot-ok? blk-ok? supply-ok?
+       (when (and prereq-ok? slot-ok? worker-slot-escrow-ok? blk-ok? supply-ok?
                   (or (< rem-min m-cost) (< rem-gas g-cost)))
          (set! min-floor (max min-floor m-cost))
          (when (> g-cost 0)
            (set! gas-floor (max gas-floor g-cost)))
+         (when (eq? pslot 'worker)
+           (set! worker-build-escrowed? #t))
          (when (and pslot (not (memq pslot '(worker larva townhall))))
            (set! reserved-slots (cons pslot reserved-slots)))
          (set! escrowed-now? #t)
@@ -1236,7 +1564,8 @@
                          'escrowed-entries final-escrowed
                          'candidate-utilities cand-utils
                          'reserved-min-floor min-floor
-                         'reserved-gas-floor gas-floor)])
+                         'reserved-gas-floor gas-floor
+                         'dynamic-plan dyn-plan)])
               ([c (in-list sorted-cands)])
       (define cat (priority-candidate-category c))
       (define u (priority-candidate-utility-score c))
