@@ -3793,6 +3793,137 @@
                   "High-bank checkpoint (950M/300G at 90/130 supply) must schedule spending actions"))
   )
 
+;; =============================================================================
+;; 23. Decoupled 8-Stream Resource & Bank Manager + 200/200 Max-Supply Manager
+;; =============================================================================
+(run-suite "23. Decoupled 8-Stream Resource & Bank Manager + 200/200 Late-Game Supply Manager"
+  ;; 1. Verify all 8 concurrent goal streams and normalized budget slices
+  (assert-eq! DEC-GOAL-STREAMS
+              '(workers supply expansion tech upgrades production-facilities static-defense army)
+              "DEC-GOAL-STREAMS must enumerate all 8 concurrent macro goal streams")
+
+  ;; 2. Verify race-specific bank targets (Zerg Larva-surge, Terran wave-sync, Protoss Warp-Gate batch)
+  (define bt-zerg
+    (compute-bank-targets #:race 'Zerg #:supply-used 76 #:larva-count 6 #:in-progress-buildings '(spire)))
+  (assert-true! (race-bank-target-active? bt-zerg) "Zerg Spire morph must activate Larva-surge bank")
+  (assert-eq! (race-bank-target-surge-kind bt-zerg) 'zerg-muta-corruptor-larva-surge
+              "Zerg Spire bank target surge kind")
+  (assert-eq! (race-bank-target-target-minerals bt-zerg) 600 "6-Larva Spire bank minerals = 600")
+  (assert-eq! (race-bank-target-target-gas bt-zerg) 600 "6-Larva Spire bank gas = 600")
+
+  (define bt-terran
+    (compute-bank-targets #:race 'Terran #:supply-used 72 #:production-facility-count 5))
+  (assert-true! (race-bank-target-active? bt-terran) "Terran 5-facility mid-game must activate wave-sync bank")
+  (assert-eq! (race-bank-target-surge-kind bt-terran) 'terran-production-wave-sync
+              "Terran production-wave sync surge kind")
+
+  (define bt-protoss
+    (compute-bank-targets #:race 'Protoss #:supply-used 112 #:warpgate-count 5 #:in-progress-buildings '(robotics-bay)))
+  (assert-true! (race-bank-target-active? bt-protoss) "Protoss Robo-Bay + 5 Warp-Gates must activate capital batch bank")
+  (assert-eq! (race-bank-target-surge-kind bt-protoss) 'protoss-capital-warpgate-batch
+              "Protoss capital Warp-Gate batch surge kind")
+
+  (define bt-crisis
+    (compute-bank-targets #:race 'Zerg #:supply-used 36 #:larva-count 8 #:in-progress-buildings '(spire) #:under-attack? #t))
+  (assert-true! (not (race-bank-target-active? bt-crisis))
+                "Under early/mid-game attack, macro bank target must immediately release to emergency-spend-all")
+
+  ;; 3. Verify decoupled non-blocking stream admission when tech/upgrades are prereq- or gas-starved
+  (define dec-alloc
+    (allocate-decoupled-goal-streams
+     #:race 'Terran #:frame 3400 #:minerals 450 #:gas 0
+     #:supply-used 36 #:supply-cap 46 #:pending-supply 0
+     #:workers 26 #:active-bases 1 #:gas-harvesters 0
+     #:wants-expand? #t
+     #:tech-goal-sym 'starport #:tech-prereq-ready? #f
+     #:upgrade-goal-sym 'stimpack #:upgrade-prereq-ready? #f))
+  (assert-eq! (hash-count (decoupled-bank-allocation-slices-by-stream dec-alloc)) 8
+              "Decoupled allocation must produce budget slices for all 8 streams")
+  (assert-true! (stream-budget-slice-blocked-by-prereq?
+                 (hash-ref (decoupled-bank-allocation-slices-by-stream dec-alloc) 'tech))
+                "Prereq-missing Starport must be marked blocked-by-prereq? in tech stream")
+  (assert-eq! (stream-budget-slice-reserved-minerals
+               (hash-ref (decoupled-bank-allocation-slices-by-stream dec-alloc) 'tech))
+              0
+              "Blocked tech stream must reserve 0 minerals so economy/expansion never starve")
+  (assert-true! (decoupled-stream-can-spend? dec-alloc 'expansion 400 0)
+                "Expansion stream must be admitted at 450M despite blocked tech/upgrade goals")
+  (assert-true! (decoupled-stream-can-spend? dec-alloc 'workers 50 0)
+                "Workers stream must be admitted at 450M despite blocked tech/upgrade goals")
+  (assert-true! (not (decoupled-stream-can-spend? dec-alloc 'tech 150 100))
+                "Blocked tech stream must not be admitted")
+
+  ;; 4. Verify 200/200 Max-Supply Manager: Fist of Neeb, Zerg 204/200 Spore trick, and cheap-unit sack
+  ;; (a) Protoss Fist of Neeb + Zealot sack at 198/200 with 1100M/500G
+  (define msp-p
+    (evaluate-max-supply-manager
+     #:race 'Protoss #:minerals 1100 #:gas 500 #:supply-used 198 #:supply-cap 200 #:workers 70 #:active-bases 4
+     #:ally-units (list (hash 'id 701 'type 'zealot 'x 70.0 'y 70.0)
+                        (hash 'id 702 'type 'probe 'x 32.5 'y 32.5))
+     #:ally-buildings (list (hash 'id 801 'type 'forge 'build-progress 1.0)
+                            (hash 'id 802 'type 'cybernetics-core 'build-progress 1.0))))
+  (assert-true! (max-supply-plan-active? msp-p) "Protoss 198/200 with 1100M/500G must activate max-supply manager")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'photon-cannon)))
+                       (max-supply-plan-fist-of-neeb-actions msp-p))
+                "Protoss Fist of Neeb must build Photon Cannon")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'shield-battery)))
+                       (max-supply-plan-fist-of-neeb-actions msp-p))
+                "Protoss Fist of Neeb must build Shield Battery")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-pos) (= (cadr a) 701)))
+                       (max-supply-plan-cheap-unit-sack-actions msp-p))
+                "Protoss cheap-unit sack must trade low-tier Zealot (id=701)")
+
+  ;; (b) Terran Fist of Neeb (Turret + Planetary Fortress morph) + Marine sack
+  (define msp-t
+    (evaluate-max-supply-manager
+     #:race 'Terran #:minerals 1000 #:gas 500 #:supply-used 199 #:supply-cap 200 #:workers 66 #:active-bases 4
+     #:ally-units (list (hash 'id 711 'type 'marine 'x 70.0 'y 70.0))
+     #:ally-buildings (list (hash 'id 811 'type 'engineering-bay 'build-progress 1.0)
+                            (hash 'id 812 'type 'command-center 'build-progress 1.0))))
+  (assert-true! (not (not (member '(morph planetary-fortress) (max-supply-plan-fist-of-neeb-actions msp-t))))
+                "Terran Fist of Neeb at 1000M with bare CC + EngBay must morph Planetary Fortress")
+
+  ;; (c) Zerg Spore Crawler Trick Phase A (morph Spores + queue Ultralisk -> target 204) & Phase B (cancel Spore at 200/200)
+  (define msp-z-a
+    (evaluate-max-supply-manager
+     #:race 'Zerg #:minerals 1000 #:gas 500 #:supply-used 199 #:supply-cap 200 #:workers 68 #:active-bases 4
+     #:ally-units (list (hash 'id 721 'type 'zergling 'x 70.0 'y 70.0))
+     #:ally-buildings (list (hash 'id 821 'type 'spawning-pool 'build-progress 1.0)
+                            (hash 'id 822 'type 'ultralisk-cavern 'build-progress 1.0))))
+  (assert-eq! (max-supply-plan-overcap-target-supply msp-z-a) 204
+              "Zerg Spore trick Phase A must target 204/200 supply overcap")
+  (assert-true! (not (not (member '(train ultralisk) (max-supply-plan-spore-trick-actions msp-z-a))))
+                "Zerg Spore trick Phase A must queue Ultralisk into freed supply")
+
+  (define msp-z-b
+    (evaluate-max-supply-manager
+     #:race 'Zerg #:minerals 850 #:gas 400 #:supply-used 200 #:supply-cap 200 #:workers 66 #:active-bases 4
+     #:ally-buildings (list (hash 'id 821 'type 'spawning-pool 'build-progress 1.0)
+                            (hash 'id 909 'type 'spore-crawler 'build-progress 0.4))))
+  (assert-true! (not (not (member '(cancel-building 909) (max-supply-plan-spore-trick-actions msp-z-b))))
+                "Zerg Spore trick Phase B at 200/200 must cancel pending Spore (id=909) to exceed 200 supply")
+
+  ;; 5. Live step-live-bot-runtime! integration at 200/200 supply
+  (define rt-maxz (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-maxz
+    (step-live-bot-runtime!
+     rt-maxz
+     (hash 'frame 12000 'minerals 1800 'gas 900 'supply-used 200 'supply-cap 200
+           'mineral-harvesters 56 'vespene-harvesters 12
+           'ally-units (list (hash 'id 951 'type 'zergling 'x 64.0 'y 64.0 'hp 35)
+                             (hash 'id 952 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 961 'type 'hive 'x 32.5 'y 32.5 'hp 2500 'build-progress 1.0)
+                                 (hash 'id 962 'type 'spawning-pool 'x 36.0 'y 32.5 'hp 1000 'build-progress 1.0)
+                                 (hash 'id 963 'type 'spore-crawler 'x 34.5 'y 34.5 'hp 200 'build-progress 0.3)))))
+  (define tel-maxz (hash-ref res-maxz 'telemetry (hash)))
+  (define acts-maxz (hash-ref res-maxz 'actions '()))
+  (assert-eq! (hash-ref tel-maxz 'goal-streams '()) DEC-GOAL-STREAMS
+              "Live runtime telemetry must expose all 8 DEC-GOAL-STREAMS")
+  (assert-true! (decoupled-bank-allocation? (hash-ref tel-maxz 'goal-stream-allocation #f))
+                "Live runtime telemetry must include decoupled-bank-allocation")
+  (assert-true! (not (not (member '(cancel-building 963) acts-maxz)))
+                "Live Zerg runtime at 200/200 with pending Spore must emit (cancel-building 963)"))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")

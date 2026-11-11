@@ -49,7 +49,16 @@
  sanitize-stale-target-actions
  filter-rush-threat-enemies
  select-target-enemy-for-unit
- compute-next-posture)
+ compute-next-posture
+ DEC-GOAL-STREAMS
+ (struct-out race-bank-target)
+ (struct-out stream-budget-slice)
+ (struct-out decoupled-bank-allocation)
+ (struct-out max-supply-plan)
+ compute-bank-targets
+ allocate-decoupled-goal-streams
+ decoupled-stream-can-spend?
+ evaluate-max-supply-manager)
 
 ;; Per-runtime weak map caching last-known `(cons x y)` coordinates for enemy UnitTags
 ;; so stale/dead/snapshot target tags (`ActionResult=207 Error_CantTargetThatUnit`) downgrade
@@ -3773,6 +3782,81 @@
        (try-train-unit! 'scv 'townhall 4))])
 
   ;; ---------------------------------------------------------------------------
+  ;; Decoupled 8-Stream Resource & Bank Manager + 200/200 Late-Game Supply Manager
+  ;; ---------------------------------------------------------------------------
+  (define in-prog-bldg-syms
+    (for/list ([b (in-list ally-bldgs)]
+               #:when (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))
+      (unit-type-sym b)))
+  (define larva-slot-cnt
+    (cond
+      [(hash? open-prod-slots-snapshot) (hash-ref open-prod-slots-snapshot 'larva 0)]
+      [(hash? open-prod-slots) (hash-ref open-prod-slots 'larva 0)]
+      [else 0]))
+  (define wg-slot-cnt
+    (+ (hash-ref total-bldg-counts 'warp-gate 0)
+       (hash-ref total-bldg-counts 'gateway 0)))
+  (define bank-target
+    (compute-bank-targets
+     #:race race
+     #:frame frame
+     #:minerals minerals
+     #:gas gas
+     #:supply-used supply-used
+     #:supply-cap supply-cap
+     #:workers total-workers
+     #:active-bases active-bases
+     #:larva-count larva-slot-cnt
+     #:warpgate-count wg-slot-cnt
+     #:production-facility-count (max 1 (length prod-facilities))
+     #:ready-buildings ready-bldg-types
+     #:in-progress-buildings in-prog-bldg-syms
+     #:under-attack? under-base-attack?))
+  (define goal-stream-alloc
+    (allocate-decoupled-goal-streams
+     #:race race
+     #:frame frame
+     #:minerals minerals
+     #:gas gas
+     #:supply-used supply-used
+     #:supply-cap supply-cap
+     #:pending-supply pending-supply
+     #:workers total-workers
+     #:active-bases active-bases
+     #:gas-harvesters (safe-nonneg-int (hash-ref obs 'vespene-harvesters 3))
+     #:under-attack? under-base-attack?
+     #:wants-expand? (and (< active-bases desired-bases) (not under-base-attack?))
+     #:tech-goal-sym bo-goal-sym
+     #:tech-prereq-ready? (null? orphaned-prereqs)
+     #:bank-target bank-target))
+  (define max-sup-plan
+    (evaluate-max-supply-manager
+     #:race race
+     #:minerals minerals
+     #:gas gas
+     #:supply-used supply-used
+     #:supply-cap supply-cap
+     #:workers total-workers
+     #:active-bases active-bases
+     #:ally-units ally-units
+     #:ally-buildings ally-bldgs
+     #:base-x base-x
+     #:base-y base-y
+     #:nat-x nat-x
+     #:nat-y nat-y
+     #:third-x third-x
+     #:third-y third-y
+     #:enemy-x (hash-ref obs 'enemy-x SC2-DEFAULT-ENEMY-BASE-X)
+     #:enemy-y (hash-ref obs 'enemy-y SC2-DEFAULT-ENEMY-BASE-Y)))
+  (when (and (max-supply-plan-active? max-sup-plan)
+             (refractory-allow-action?! cd-tracker
+                                        (list 'max-supply-manager race)
+                                        frame
+                                        48))
+    (for ([ms-act (in-list (max-supply-plan-combined-actions max-sup-plan))])
+      (emit! ms-act)))
+
+  ;; ---------------------------------------------------------------------------
   ;; Pro Mechanic #7: Camera Bookmark Save (Slots F1..F8 = 1..8)
   ;; ---------------------------------------------------------------------------
   (define cam-bmark-save-acts
@@ -3791,6 +3875,10 @@
    (hash-set* (if (hash? prev-tel) prev-tel (hash))
               'priority-summary prio-summary
               'priority-log-line prio-log-line
+              'bank-target bank-target
+              'goal-stream-allocation goal-stream-alloc
+              'goal-streams DEC-GOAL-STREAMS
+              'max-supply-plan max-sup-plan
               'dynamic-plan dyn-plan
               'dynamic-plan-next-actions
               (if (dynamic-macro-plan? dyn-plan)
@@ -5058,19 +5146,28 @@
   ;; Layer 5b: Pro-Human Camera Saccade (60-90 SPM) & APM/EPM Discipline Governor
   (define pro-apm-acts
     (step-pro-human-camera-and-apm-governor! rt obs))
+  (define cur-msp
+    (let ([lt (live-bot-runtime-last-telemetry rt)])
+      (and (hash? lt) (hash-ref lt 'max-supply-plan #f))))
+  (define msp-set
+    (if (and (max-supply-plan? cur-msp) (max-supply-plan-active? cur-msp))
+        (max-supply-plan-combined-actions cur-msp)
+        '()))
   (define preserved-tactical-directives
     (append
      (filter (lambda (a)
                (and (pair? a)
-                    (memq (car a)
-                          '(rebalance-gas-to-minerals
-                            terran-addon-swap
-                            land-building
-                            worker-scout
-                            overlord-scout
-                            mineral-harass
-                            periodic-scout
-                            cast-deception-and-scout-spells))
+                    (or (memq (car a)
+                              '(rebalance-gas-to-minerals
+                                terran-addon-swap
+                                land-building
+                                cancel-building
+                                worker-scout
+                                overlord-scout
+                                mineral-harass
+                                periodic-scout
+                                cast-deception-and-scout-spells))
+                        (not (not (member a msp-set))))
                     (not (member a accepted))))
              econ-acts)
      (filter (lambda (a)
@@ -5187,6 +5284,10 @@
           'active-orders-tracked (hash-count (in-progress-order-ledger-unit-orders oledger))
           'priority-summary (hash-ref last-tel-ht 'priority-summary (hash))
           'priority-log-line (hash-ref last-tel-ht 'priority-log-line "")
+          'bank-target (hash-ref last-tel-ht 'bank-target #f)
+          'goal-stream-allocation (hash-ref last-tel-ht 'goal-stream-allocation #f)
+          'goal-streams (hash-ref last-tel-ht 'goal-streams DEC-GOAL-STREAMS)
+          'max-supply-plan (hash-ref last-tel-ht 'max-supply-plan #f)
           'peak-supply-reached (hash-ref last-tel-ht 'peak-supply-reached 0)
           'repaired-prereqs (hash-ref last-tel-ht 'priority-repaired-prereqs '())
           'priority-repaired-prereqs (hash-ref last-tel-ht 'priority-repaired-prereqs '())

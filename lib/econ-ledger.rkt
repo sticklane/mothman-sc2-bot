@@ -97,7 +97,18 @@
  pro-build-order-steps-for-matchup
  pro-supply-curve-target
  evaluate-build-order-next-step
- compute-natural-expansion-mineral-reserve)
+ compute-natural-expansion-mineral-reserve
+
+ ;; Decoupled 8-Stream Resource & Bank Manager + 200/200 Late-Game Max-Supply Manager
+ DEC-GOAL-STREAMS
+ (struct-out race-bank-target)
+ (struct-out stream-budget-slice)
+ (struct-out decoupled-bank-allocation)
+ (struct-out max-supply-plan)
+ compute-bank-targets
+ allocate-decoupled-goal-streams
+ decoupled-stream-can-spend?
+ evaluate-max-supply-manager)
 
 ;; =============================================================================
 ;; 1. Build-Order Combinators & Locutus Worker Chaining
@@ -3109,5 +3120,560 @@
                       target-workers
                       target-army))
 
+;; =============================================================================
+;; 11. Decoupled 8-Stream Resource & Bank Manager + 200/200 Max-Supply Manager
+;; =============================================================================
 
+(define DEC-GOAL-STREAMS
+  '(workers
+    supply
+    expansion
+    tech
+    upgrades
+    production-facilities
+    static-defense
+    army))
 
+(struct race-bank-target
+  (race
+   target-minerals
+   target-gas
+   surge-kind
+   trigger-reason
+   active?)
+  #:transparent)
+
+(struct stream-budget-slice
+  (stream
+   weight-min
+   weight-gas
+   allocated-minerals
+   allocated-gas
+   reserved-minerals
+   reserved-gas
+   active-goal-sym
+   blocked-by-prereq?)
+  #:transparent)
+
+(struct decoupled-bank-allocation
+  (race
+   frame
+   total-minerals
+   total-gas
+   bank-target
+   slices-by-stream
+   hard-reserved-minerals
+   hard-reserved-gas
+   spendable-by-stream)
+  #:transparent)
+
+(struct max-supply-plan
+  (active?
+   overcap-target-supply
+   fist-of-neeb-actions
+   spore-trick-actions
+   cheap-unit-sack-actions
+   combined-actions
+   reason)
+  #:transparent)
+
+(define (compute-bank-targets
+         #:race [raw-race 'Zerg]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 0]
+         #:gas [raw-gas 0]
+         #:supply-used [raw-supply-used 12]
+         #:supply-cap [raw-supply-cap 15]
+         #:workers [raw-workers 12]
+         #:active-bases [raw-bases 1]
+         #:larva-count [raw-larva 3]
+         #:warpgate-count [raw-warpgates 0]
+         #:production-facility-count [raw-prod-facs 1]
+         #:ready-buildings [raw-ready-bldgs '()]
+         #:in-progress-buildings [raw-pending-bldgs '()]
+         #:under-attack? [under-attack? #f])
+  (define race (normalize-ledger-race raw-race))
+  (define supply-used (safe-nonneg-int raw-supply-used 12))
+  (define workers (safe-nonneg-int raw-workers 12))
+  (define bases (max 1 (safe-nonneg-int raw-bases 1)))
+  (define larva-cnt (safe-nonneg-int raw-larva 0))
+  (define wg-cnt (safe-nonneg-int raw-warpgates 0))
+  (define prod-cnt (safe-nonneg-int raw-prod-facs 1))
+  (define ready-syms (if (list? raw-ready-bldgs) (filter symbol? raw-ready-bldgs) '()))
+  (define pending-syms (if (list? raw-pending-bldgs) (filter symbol? raw-pending-bldgs) '()))
+
+  (cond
+    ;; Never hold macro bank when fighting an early/mid-game survival crisis
+    [(and under-attack? (< supply-used 90))
+     (race-bank-target race 0 0 'emergency-spend-all 'under-attack-crisis #f)]
+    [(< workers 12)
+     (race-bank-target race 0 0 'worker-recovery 'critical-worker-deficit #f)]
+
+    ;; Zerg: Larva-surge & Spire / Hive tech-switch morph banking
+    [(eq? race 'Zerg)
+     (cond
+       [(or (memq 'spire pending-syms)
+            (memq 'greater-spire pending-syms)
+            (and (or (memq 'spire ready-syms) (memq 'greater-spire ready-syms))
+                 (>= larva-cnt 5)))
+        (define eff-l (max 4 (min 8 (if (> larva-cnt 0) larva-cnt 6))))
+        (race-bank-target race (* eff-l 100) (* eff-l 100)
+                          'zerg-muta-corruptor-larva-surge
+                          'spire-morph-wave
+                          #t)]
+       [(or (memq 'ultralisk-cavern pending-syms)
+            (memq 'lurker-den pending-syms)
+            (and (or (memq 'ultralisk-cavern ready-syms) (memq 'lurker-den ready-syms))
+                 (>= larva-cnt 4)
+                 (>= supply-used 100)))
+        (define eff-l (max 3 (min 6 (if (> larva-cnt 0) larva-cnt 4))))
+        (race-bank-target race (* eff-l 150) (* eff-l 100)
+                          'zerg-hive-splash-larva-surge
+                          'hive-tech-switch-wave
+                          #t)]
+       [(and (>= larva-cnt 6) (>= bases 2) (>= supply-used 40))
+        (define eff-l (min 12 larva-cnt))
+        (race-bank-target race (* eff-l 75) (* eff-l 25)
+                          'zerg-inject-larva-surge
+                          'pooled-inject-larva-batch
+                          #t)]
+       [else
+        (race-bank-target race 0 0 'none 'steady-macro-spend #f)])]
+
+    ;; Terran: Production-wave cycle sync & capital transition banking
+    [(eq? race 'Terran)
+     (cond
+       [(or (memq 'fusion-core pending-syms)
+            (and (memq 'fusion-core ready-syms) (>= supply-used 110)))
+        (race-bank-target race 400 300
+                          'terran-capital-wave-sync
+                          'battlecruiser-liberator-wave
+                          #t)]
+       [(and (>= prod-cnt 3) (>= supply-used 48))
+        (define eff-p (min 8 prod-cnt))
+        (race-bank-target race (* eff-p 100) (* eff-p 50)
+                          'terran-production-wave-sync
+                          'multi-facility-cycle-sync
+                          #t)]
+       [else
+        (race-bank-target race 0 0 'none 'steady-macro-spend #f)])]
+
+    ;; Protoss: Warp-Gate cooldown batching & Robotics/Fleet capital surge banking
+    [else
+     (cond
+       [(or (memq 'fleet-beacon pending-syms)
+            (memq 'robotics-bay pending-syms)
+            (memq 'templar-archive pending-syms)
+            (memq 'templar-archives pending-syms)
+            (and (or (memq 'fleet-beacon ready-syms)
+                     (memq 'robotics-bay ready-syms)
+                     (memq 'templar-archive ready-syms))
+                 (>= supply-used 100)))
+        (define eff-wg (max 3 (min 8 wg-cnt)))
+        (race-bank-target race (+ 200 (* eff-wg 100)) 300
+                          'protoss-capital-warpgate-batch
+                          'capital-splash-and-warpin-batch
+                          #t)]
+       [(and (>= wg-cnt 3) (>= supply-used 38))
+        (define eff-wg (min 10 wg-cnt))
+        (race-bank-target race (* eff-wg 100) (* eff-wg 50)
+                          'protoss-warpgate-cycle-batch
+                          'warpgate-cooldown-batch
+                          #t)]
+       [else
+        (race-bank-target race 0 0 'none 'steady-macro-spend #f)])]))
+
+(define (allocate-decoupled-goal-streams
+         #:race [raw-race 'Zerg]
+         #:frame [raw-frame 0]
+         #:minerals [raw-minerals 0]
+         #:gas [raw-gas 0]
+         #:supply-used [raw-supply-used 12]
+         #:supply-cap [raw-supply-cap 15]
+         #:pending-supply [raw-pending-sup 0]
+         #:workers [raw-workers 12]
+         #:active-bases [raw-bases 1]
+         #:gas-harvesters [raw-gas-harv 3]
+         #:under-attack? [under-attack? #f]
+         #:wants-expand? [wants-expand? #f]
+         #:tech-goal-sym [tech-goal-sym #f]
+         #:tech-prereq-ready? [tech-prereq-ready? #t]
+         #:upgrade-goal-sym [upgrade-goal-sym #f]
+         #:upgrade-prereq-ready? [upgrade-prereq-ready? #t]
+         #:bank-target [explicit-bank-target #f])
+  (define race (normalize-ledger-race raw-race))
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define minerals (safe-nonneg-int raw-minerals 0))
+  (define gas (safe-nonneg-int raw-gas 0))
+  (define supply-used (safe-nonneg-int raw-supply-used 12))
+  (define supply-cap (max 1 (safe-nonneg-int raw-supply-cap 15)))
+  (define supply-left (- supply-cap supply-used))
+  (define pending-sup (safe-nonneg-int raw-pending-sup 0))
+  (define workers (safe-nonneg-int raw-workers 12))
+  (define bases (max 1 (safe-nonneg-int raw-bases 1)))
+  (define gas-harv (safe-nonneg-int raw-gas-harv 0))
+
+  (define btarget
+    (if (race-bank-target? explicit-bank-target)
+        explicit-bank-target
+        (compute-bank-targets
+         #:race race
+         #:frame frame
+         #:minerals minerals
+         #:gas gas
+         #:supply-used supply-used
+         #:supply-cap supply-cap
+         #:workers workers
+         #:active-bases bases
+         #:under-attack? under-attack?)))
+
+  (define ideal-workers (min 80 (* 22 bases)))
+  (define need-workers? (< workers ideal-workers))
+  (define need-supply? (and (< supply-cap 200) (<= (+ supply-left pending-sup) 4)))
+  (define critical-supply? (and (< supply-cap 200) (<= supply-left 2) (= pending-sup 0)))
+  (define need-static-def? (or under-attack? (>= supply-used 190)))
+
+  ;; Decoupled Non-Blocking Prerequisite & Gas-Feasibility Gate:
+  ;; If a tech or upgrade goal has unready prerequisites OR requires gas we do not have
+  ;; while 0 gas harvesters are active, mark it blocked so it reserves 0 minerals!
+  (define tech-min-cost (if (symbol? tech-goal-sym) (sc2-min-cost tech-goal-sym) 0))
+  (define tech-gas-cost (if (symbol? tech-goal-sym) (sc2-gas-cost tech-goal-sym) 0))
+  (define tech-blocked?
+    (and (symbol? tech-goal-sym)
+         (or (not tech-prereq-ready?)
+             (and (> tech-gas-cost gas) (= gas-harv 0)))))
+
+  (define upg-min-cost (if (symbol? upgrade-goal-sym) (sc2-min-cost upgrade-goal-sym) 0))
+  (define upg-gas-cost (if (symbol? upgrade-goal-sym) (sc2-gas-cost upgrade-goal-sym) 0))
+  (define upg-blocked?
+    (and (symbol? upgrade-goal-sym)
+         (or (not upgrade-prereq-ready?)
+             (and (> upg-gas-cost gas) (= gas-harv 0)))))
+
+  ;; Raw priority weights across all 8 streams (`DEC-GOAL-STREAMS`)
+  (define raw-min-weights
+    (hasheq 'workers               (cond [(< workers 12) 0.45] [need-workers? 0.22] [else 0.03])
+            'supply                (cond [critical-supply? 0.35] [need-supply? 0.16] [else 0.04])
+            'expansion             (cond [(and wants-expand? (not under-attack?)) 0.28] [else 0.08])
+            'tech                  (cond [tech-blocked? 0.02] [(symbol? tech-goal-sym) 0.14] [else 0.08])
+            'upgrades              (cond [upg-blocked? 0.02] [(symbol? upgrade-goal-sym) 0.10] [else 0.07])
+            'production-facilities (cond [(>= minerals 450) 0.18] [else 0.10])
+            'static-defense        (cond [under-attack? 0.20] [(>= supply-used 190) 0.24] [else 0.04])
+            'army                  (cond [under-attack? 0.42] [else 0.28])))
+
+  (define raw-gas-weights
+    (hasheq 'workers               0.00
+            'supply                0.00
+            'expansion             0.00
+            'tech                  (cond [tech-blocked? 0.02] [(symbol? tech-goal-sym) 0.32] [else 0.22])
+            'upgrades              (cond [upg-blocked? 0.02] [(symbol? upgrade-goal-sym) 0.28] [else 0.20])
+            'production-facilities 0.08
+            'static-defense        0.02
+            'army                  (if under-attack? 0.65 0.48)))
+
+  (define sum-mw (max 0.001 (for/sum ([s (in-list DEC-GOAL-STREAMS)]) (hash-ref raw-min-weights s 0.0))))
+  (define sum-gw (max 0.001 (for/sum ([s (in-list DEC-GOAL-STREAMS)]) (hash-ref raw-gas-weights s 0.0))))
+
+  ;; Hard crisis/macro mineral & gas reserves (strictly decoupled!)
+  (define res-supply-min (if critical-supply? 100 0))
+  (define res-worker-min (if (and need-workers? (not under-attack?)) 50 0))
+  (define exp-cost (case race [(Zerg) 300] [else 400]))
+  (define res-expand-min (if (and wants-expand? (not under-attack?) (not critical-supply?)) exp-cost 0))
+  (define res-def-min (if (and under-attack? (< supply-used 60)) 100 0))
+  (define res-tech-min (if (and (symbol? tech-goal-sym) (not tech-blocked?) (not under-attack?))
+                           (min 200 tech-min-cost)
+                           0))
+  (define res-tech-gas (if (and (symbol? tech-goal-sym) (not tech-blocked?) (not under-attack?))
+                           tech-gas-cost
+                           0))
+  (define res-upg-gas  (if (and (symbol? upgrade-goal-sym) (not upg-blocked?) (not under-attack?))
+                           upg-gas-cost
+                           0))
+
+  (define hard-res-min (+ res-supply-min res-worker-min res-expand-min res-def-min))
+  (define hard-res-gas (+ res-tech-gas res-upg-gas))
+
+  (define slices-ht
+    (for/hasheq ([s (in-list DEC-GOAL-STREAMS)])
+      (define wm (/ (hash-ref raw-min-weights s 0.0) sum-mw))
+      (define wg (/ (hash-ref raw-gas-weights s 0.0) sum-gw))
+      (define alloc-m (exact-round (* wm minerals)))
+      (define alloc-g (exact-round (* wg gas)))
+      (define r-m
+        (case s
+          [(supply) res-supply-min]
+          [(workers) res-worker-min]
+          [(expansion) res-expand-min]
+          [(static-defense) res-def-min]
+          [(tech) res-tech-min]
+          [else 0]))
+      (define r-g
+        (case s
+          [(tech) res-tech-gas]
+          [(upgrades) res-upg-gas]
+          [else 0]))
+      (define g-sym
+        (case s
+          [(workers) (case race [(Zerg) 'drone] [(Terran) 'scv] [else 'probe])]
+          [(supply) (case race [(Zerg) 'overlord] [(Terran) 'supply-depot] [else 'pylon])]
+          [(expansion) (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus])]
+          [(tech) tech-goal-sym]
+          [(upgrades) upgrade-goal-sym]
+          [else #f]))
+      (define blk?
+        (case s
+          [(tech) tech-blocked?]
+          [(upgrades) upg-blocked?]
+          [else #f]))
+      (values s (stream-budget-slice s wm wg alloc-m alloc-g r-m r-g g-sym blk?))))
+
+  (define spendable-ht
+    (for/hasheq ([s (in-list DEC-GOAL-STREAMS)])
+      (define own-rm (stream-budget-slice-reserved-minerals (hash-ref slices-ht s)))
+      (define own-rg (stream-budget-slice-reserved-gas (hash-ref slices-ht s)))
+      ;; Survival streams (`supply`, `workers`, `static-defense`, `expansion`) spend against their own floor;
+      ;; downstream streams (`production-facilities`, `army`, `upgrades`, `tech`) respect higher survival floors
+      ;; while blocked `tech`/`upgrades` never subtract from `workers`/`supply`/`expansion`/`army`!
+      (define other-hard-min
+        (case s
+          [(supply) 0]
+          [(workers) res-supply-min]
+          [(static-defense) res-supply-min]
+          [(expansion) (+ res-supply-min res-def-min)]
+          [else (max 0 (- hard-res-min own-rm))]))
+      (define other-hard-gas
+        (case s
+          [(tech) 0]
+          [(upgrades) res-tech-gas]
+          [(army) (if under-attack? 0 (max 0 (- hard-res-gas own-rg)))]
+          [else hard-res-gas]))
+      (values s (cons (max 0 (- minerals other-hard-min))
+                      (max 0 (- gas other-hard-gas))))))
+
+  (decoupled-bank-allocation
+   race
+   frame
+   minerals
+   gas
+   btarget
+   slices-ht
+   hard-res-min
+   hard-res-gas
+   spendable-ht))
+
+(define (decoupled-stream-can-spend? alloc stream-sym min-cost [gas-cost 0])
+  (cond
+    [(not (decoupled-bank-allocation? alloc)) #f]
+    [else
+     (define sl (hash-ref (decoupled-bank-allocation-slices-by-stream alloc) stream-sym #f))
+     (define sp (hash-ref (decoupled-bank-allocation-spendable-by-stream alloc) stream-sym '(0 . 0)))
+     (and sl
+          (not (stream-budget-slice-blocked-by-prereq? sl))
+          (>= (car sp) (safe-nonneg-int min-cost 0))
+          (>= (cdr sp) (safe-nonneg-int gas-cost 0)))]))
+
+(define (extract-record-sym rec)
+  (cond
+    [(hash? rec)
+     (define t (hash-ref rec 'type 'unknown))
+     (cond
+       [(symbol? t) t]
+       [(string? t) (string->symbol (string-downcase t))]
+       [else 'unknown])]
+    [(symbol? rec) rec]
+    [else 'unknown]))
+
+(define (evaluate-max-supply-manager
+         #:race [raw-race 'Zerg]
+         #:minerals [raw-minerals 0]
+         #:gas [raw-gas 0]
+         #:supply-used [raw-supply-used 0]
+         #:supply-cap [raw-supply-cap 200]
+         #:workers [raw-workers 0]
+         #:active-bases [raw-bases 1]
+         #:ally-units [raw-ally-units '()]
+         #:ally-buildings [raw-ally-bldgs '()]
+         #:base-x [raw-base-x 32.5]
+         #:base-y [raw-base-y 32.5]
+         #:nat-x [raw-nat-x 50.5]
+         #:nat-y [raw-nat-y 50.5]
+         #:third-x [raw-third-x 68.5]
+         #:third-y [raw-third-y 50.5]
+         #:enemy-x [raw-enemy-x 160.5]
+         #:enemy-y [raw-enemy-y 160.5])
+  (define race (normalize-ledger-race raw-race))
+  (define minerals (safe-nonneg-int raw-minerals 0))
+  (define gas (safe-nonneg-int raw-gas 0))
+  (define supply-used (safe-nonneg-int raw-supply-used 0))
+  (define supply-cap (max 1 (safe-nonneg-int raw-supply-cap 200)))
+  (define workers (safe-nonneg-int raw-workers 0))
+  (define ally-units (if (list? raw-ally-units) raw-ally-units '()))
+  (define ally-bldgs (if (list? raw-ally-bldgs) raw-ally-bldgs '()))
+  (define base-x (safe-tile-coord raw-base-x 32.5))
+  (define base-y (safe-tile-coord raw-base-y 32.5))
+  (define third-x (safe-tile-coord raw-third-x 68.5))
+  (define third-y (safe-tile-coord raw-third-y 50.5))
+  (define enemy-x (safe-tile-coord raw-enemy-x 160.5))
+  (define enemy-y (safe-tile-coord raw-enemy-y 160.5))
+
+  (define has-pending-spore-overcap?
+    (and (eq? race 'Zerg)
+         (>= supply-used 200)
+         (>= supply-cap 198)
+         (ormap (lambda (b)
+                  (and (hash? b)
+                       (eq? (extract-record-sym b) 'spore-crawler)
+                       (let ([bp (hash-ref b 'build-progress 1.0)]
+                             [bid (hash-ref b 'id 0)])
+                         (and (real? bp) (< bp 0.95) (exact-integer? bid) (> bid 0)))))
+                ally-bldgs)))
+
+  (define maxed-window?
+    (or has-pending-spore-overcap?
+        (and (>= supply-cap 198)
+             (>= supply-used 194)
+             (or (>= minerals 350) (>= gas 300)))))
+
+  (cond
+    [(not maxed-window?)
+     (max-supply-plan #f supply-cap '() '() '() '() 'below-max-supply-threshold)]
+    [else
+     (define ready-bldg-syms
+       (for/list ([b (in-list ally-bldgs)]
+                  #:when (or (symbol? b)
+                             (and (hash? b)
+                                  (let ([bp (hash-ref b 'build-progress 1.0)])
+                                    (or (not (real? bp)) (>= bp 0.99))))))
+         (extract-record-sym b)))
+     (define has-bldg-info? (not (null? ally-bldgs)))
+     (define (bldg-ready-or-assumed? sym)
+       (or (not has-bldg-info?)
+           (not (not (memq sym ready-bldg-syms)))))
+
+     ;; 1. Fist of Neeb: Convert surplus late-game mineral bank (>= 600M at >= 194/200)
+     ;;    into 0-supply forward static defense batteries / Planetary Fortresses!
+     (define def-x third-x)
+     (define def-y third-y)
+     (define def-x2 (safe-tile-coord (min 248.0 (+ def-x 2.0)) def-x))
+     (define neeb-acts
+       (cond
+         [(< minerals 600) '()]
+         [(eq? race 'Protoss)
+          (define p1
+            (if (bldg-ready-or-assumed? 'forge)
+                (list (list 'build 'photon-cannon def-x def-y))
+                (list (list 'build 'pylon def-x def-y))))
+          (define p2
+            (if (and (>= minerals 750) (bldg-ready-or-assumed? 'cybernetics-core))
+                (list (list 'build 'shield-battery def-x2 def-y))
+                '()))
+          (append p1 p2)]
+         [(eq? race 'Terran)
+          (define t1
+            (if (bldg-ready-or-assumed? 'engineering-bay)
+                (list (list 'build 'missile-turret def-x def-y))
+                '()))
+          (define t2
+            (cond
+              [(and (>= minerals 900)
+                    (bldg-ready-or-assumed? 'engineering-bay)
+                    (memq 'command-center ready-bldg-syms))
+               (list '(morph planetary-fortress))]
+              [(and (>= minerals 750) (bldg-ready-or-assumed? 'barracks))
+               (list (list 'build 'bunker def-x2 def-y))]
+              [else '()]))
+          (append t1 t2)]
+         [else ;; Zerg
+          (if (bldg-ready-or-assumed? 'spawning-pool)
+              (list (list 'build 'spine-crawler def-x def-y)
+                    (list 'build 'spore-crawler def-x2 def-y))
+              '())]))
+
+     ;; 2. Zerg Spore Crawler Trick (`204/200` Supply Overcap):
+     ;;    - If temporary in-progress `spore-crawler`s exist while `supply-used >= 200`,
+     ;;      cancel them (`cancel-building`) to pop Drones above the 200/200 cap (`202..204/200`)!
+     ;;    - Otherwise at `198..200 / 200` with `minerals >= 350` and Pool ready, morph temporary
+     ;;      Spores to dip to `196..198/200` and queue high-tier units into the freed supply!
+     (define pending-spores
+       (filter (lambda (b)
+                 (and (hash? b)
+                      (eq? (extract-record-sym b) 'spore-crawler)
+                      (let ([bp (hash-ref b 'build-progress 1.0)]
+                            [bid (hash-ref b 'id 0)])
+                        (and (real? bp) (< bp 0.95) (exact-integer? bid) (> bid 0)))))
+               ally-bldgs))
+     (define zerg-overcap-unit
+       (cond
+         [(and (bldg-ready-or-assumed? 'ultralisk-cavern) (>= gas 200)) 'ultralisk]
+         [(and (or (bldg-ready-or-assumed? 'spire) (bldg-ready-or-assumed? 'greater-spire)) (>= gas 150)) 'corruptor]
+         [(bldg-ready-or-assumed? 'roach-warren) 'roach]
+         [else 'drone]))
+     (define spore-acts
+       (cond
+         [(not (eq? race 'Zerg)) '()]
+         [(and (>= supply-used 200) (not (null? pending-spores)))
+          (for/list ([sp (in-list (take pending-spores (min 4 (length pending-spores))))])
+            (list 'cancel-building (hash-ref sp 'id)))]
+         [(and (>= supply-used 198)
+               (>= supply-cap 200)
+               (>= minerals 350)
+               (bldg-ready-or-assumed? 'spawning-pool))
+          (define sx1 (safe-tile-coord (min 248.0 (+ base-x 2.0)) base-x))
+          (define sy1 (safe-tile-coord (min 248.0 (+ base-y 2.0)) base-y))
+          (define sx2 (safe-tile-coord (min 248.0 (+ base-x 4.0)) base-x))
+          (list (list 'build 'spore-crawler sx1 sy1)
+                (list 'build 'spore-crawler sx2 sy1)
+                (list 'train zerg-overcap-unit))]
+         [else '()]))
+
+     (define overcap-target
+       (if (and (eq? race 'Zerg) (not (null? spore-acts)))
+           204
+           supply-cap))
+
+     ;; 3. Cheap-Unit Sack / Supply Trading:
+     ;;    At >= 196/200 supply with high bank (>= 700M & >= 350G), send up to 4 low-tier
+     ;;    supply-inefficient combat units (or surplus workers > 68) on an immediate runby
+     ;;    trade (`attack-pos`) so freed supply refills with high-tier capital/splash units!
+     (define cheap-tier-syms
+       (case race
+         [(Zerg)    '(zergling roach)]
+         [(Terran)  '(marine hellion reaper)]
+         [else      '(zealot adept)]))
+     (define worker-sym
+       (case race [(Zerg) 'drone] [(Terran) 'scv] [else 'probe]))
+     (define sack-candidates
+       (if (and (>= supply-used 196) (>= minerals 700) (>= gas 350))
+           (let ([low-combat
+                  (filter (lambda (u)
+                            (and (hash? u)
+                                 (memq (extract-record-sym u) cheap-tier-syms)
+                                 (let ([uid (hash-ref u 'id 0)])
+                                   (and (exact-integer? uid) (> uid 0)))))
+                          ally-units)]
+                 [surplus-workers
+                  (if (> workers 68)
+                      (filter (lambda (u)
+                                (and (hash? u)
+                                     (eq? (extract-record-sym u) worker-sym)
+                                     (let ([uid (hash-ref u 'id 0)])
+                                       (and (exact-integer? uid) (> uid 0)))))
+                              ally-units)
+                      '())])
+             (append low-combat surplus-workers))
+           '()))
+     (define sack-acts
+       (for/list ([u (in-list (take sack-candidates (min 4 (length sack-candidates))))])
+         (list 'attack-pos (hash-ref u 'id) enemy-x enemy-y)))
+
+     (define combined
+       (append spore-acts neeb-acts sack-acts))
+     (define active-now? (not (null? combined)))
+     (max-supply-plan
+      active-now?
+      overcap-target
+      neeb-acts
+      spore-acts
+      sack-acts
+      combined
+      (if active-now? 'max-supply-conversion-active 'max-supply-idle))]))

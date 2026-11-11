@@ -361,4 +361,64 @@
   (check-not-false (memq 'cybernetics-core (hash-ref tel-p 'priority-repaired-prereqs '())))
   (check-not-false (ormap (lambda (c) (and (pair? c) (eq? (car c) 'build) (eq? (cadr c) 'cybernetics-core))) cmds-p)))
 
+;; -----------------------------------------------------------------------------
+;; 10. Decoupled 8-Stream Resource & Bank Manager + 200/200 Max-Supply Manager
+;; -----------------------------------------------------------------------------
+(test-case "Decoupled Resource & Bank Manager allocates 8 goal streams and triggers 200/200-manager (Fist of Neeb, Spore trick, cheap-unit sack)"
+  (check-equal? (length DEC-GOAL-STREAMS) 8)
+  (check-equal? DEC-GOAL-STREAMS
+                '(workers supply expansion tech upgrades production-facilities static-defense army))
+
+  ;; Bank targets across Zerg, Terran, and Protoss
+  (define bt-z (compute-bank-targets #:race 'Zerg #:supply-used 72 #:larva-count 6 #:in-progress-buildings '(spire)))
+  (check-true (race-bank-target-active? bt-z))
+  (check-equal? (race-bank-target-surge-kind bt-z) 'zerg-muta-corruptor-larva-surge)
+
+  (define bt-t (compute-bank-targets #:race 'Terran #:supply-used 68 #:production-facility-count 5))
+  (check-true (race-bank-target-active? bt-t))
+  (check-equal? (race-bank-target-surge-kind bt-t) 'terran-production-wave-sync)
+
+  (define bt-p (compute-bank-targets #:race 'Protoss #:supply-used 60 #:warpgate-count 4))
+  (check-true (race-bank-target-active? bt-p))
+  (check-equal? (race-bank-target-surge-kind bt-p) 'protoss-warpgate-cycle-batch)
+
+  ;; Decoupled 8-stream non-blocking allocation when tech goal is prereq-blocked
+  (define alloc
+    (allocate-decoupled-goal-streams
+     #:race 'Zerg #:frame 3600 #:minerals 350 #:gas 0
+     #:supply-used 34 #:supply-cap 44 #:workers 28 #:active-bases 2
+     #:gas-harvesters 0 #:wants-expand? #t
+     #:tech-goal-sym 'lair #:tech-prereq-ready? #f))
+  (check-equal? (hash-count (decoupled-bank-allocation-slices-by-stream alloc)) 8)
+  (check-true (stream-budget-slice-blocked-by-prereq?
+               (hash-ref (decoupled-bank-allocation-slices-by-stream alloc) 'tech)))
+  (check-true (decoupled-stream-can-spend? alloc 'workers 50 0))
+  (check-true (decoupled-stream-can-spend? alloc 'expansion 300 0))
+
+  ;; 200/200 manager: Fist of Neeb, Zerg Spore trick (204/200 overcap), and cheap-unit sack
+  (define msp-z1
+    (evaluate-max-supply-manager
+     #:race 'Zerg #:minerals 1200 #:gas 600 #:supply-used 199 #:supply-cap 200 #:workers 70 #:active-bases 4
+     #:ally-units (list (hash 'id 501 'type 'zergling 'x 60.0 'y 60.0)
+                        (hash 'id 502 'type 'drone 'x 32.5 'y 32.5))
+     #:ally-buildings (list (hash 'id 601 'type 'hive 'build-progress 1.0)
+                            (hash 'id 602 'type 'spawning-pool 'build-progress 1.0)
+                            (hash 'id 603 'type 'ultralisk-cavern 'build-progress 1.0))))
+  (check-true (max-supply-plan-active? msp-z1))
+  (check-equal? (max-supply-plan-overcap-target-supply msp-z1) 204)
+  (check-not-false (member '(train ultralisk) (max-supply-plan-spore-trick-actions msp-z1)))
+  (check-not-false (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'spine-crawler)))
+                          (max-supply-plan-fist-of-neeb-actions msp-z1)))
+  (check-not-false (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-pos) (= (cadr a) 501)))
+                          (max-supply-plan-cheap-unit-sack-actions msp-z1)))
+
+  ;; Phase B of Zerg Spore trick: cancel pending Spore at 200/200 to pop Drones to 202..204/200!
+  (define msp-z2
+    (evaluate-max-supply-manager
+     #:race 'Zerg #:minerals 900 #:gas 400 #:supply-used 200 #:supply-cap 200 #:workers 66 #:active-bases 4
+     #:ally-buildings (list (hash 'id 602 'type 'spawning-pool 'build-progress 1.0)
+                            (hash 'id 777 'type 'spore-crawler 'build-progress 0.35))))
+  (check-not-false (member '(cancel-building 777) (max-supply-plan-spore-trick-actions msp-z2))))
+
 (printf "=== All Chaos Monkey & Priority Macro Brain Tests PASSED! ===\n")
+
