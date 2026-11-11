@@ -575,6 +575,19 @@
   (sqrt (+ (sqr (- (exact->inexact x2) (exact->inexact x1)))
            (sqr (- (exact->inexact y2) (exact->inexact y1))))))
 
+(define KNOWN-BUILDING-ORDER-SYMS
+  '(command-center orbital-command planetary-fortress supply-depot refinery
+    barracks barracks-techlab barracks-tech-lab barracks-reactor
+    factory factory-techlab factory-tech-lab factory-reactor
+    starport starport-techlab starport-tech-lab starport-reactor
+    engineering-bay missile-turret bunker sensor-tower ghost-academy armory fusion-core
+    nexus pylon assimilator gateway warp-gate forge cybernetics-core
+    photon-cannon shield-battery twilight-council stargate
+    templar-archive templar-archives dark-shrine robotics-bay robotics-facility fleet-beacon
+    hatchery lair hive extractor spawning-pool evolution-chamber roach-warren baneling-nest
+    spine-crawler spore-crawler hydralisk-den lurker-den spire greater-spire
+    infestation-pit nydus-network ultralisk-cavern))
+
 (define (classify-engine-order-kind ab-id ab-sym)
   (define s (if ab-sym (symbol->string ab-sym) ""))
   (cond
@@ -587,11 +600,17 @@
     [(or (= ab-id 17) (eq? ab-sym 'patrol))
      'patrol]
     [(or (memv ab-id '(318 880 1152))
-         (memq ab-sym '(build-command-center build-nexus build-hatchery)))
+         (memq ab-sym '(build-command-center build-nexus build-hatchery
+                        command-center nexus hatchery expand)))
      'expand]
     [(memv ab-id '(1216 1218 1220 2112 1516 1450 1518))
      'morph]
-    [(string-prefix? s "build-")
+    [(or (memv ab-id '(319 320 321 324 325 326 327 328 329 330 331 333
+                       368 370 372 421 422 454 455
+                       881 882 883 884 885 886 887 889 890 891 892 893 894 1909
+                       1154 1155 1156 1157 1158 1159 1160 1161 1162 1163 1165 1166 1167))
+         (string-prefix? s "build-")
+         (memq ab-sym KNOWN-BUILDING-ORDER-SYMS))
      'build]
     [(string-prefix? s "train-")
      'train]
@@ -604,8 +623,51 @@
 (define (engine-order-target-symbol ab-id ab-sym)
   (define s (if ab-sym (symbol->string ab-sym) ""))
   (cond
+    [(= ab-id 318)  'command-center]
     [(= ab-id 319)  'supply-depot]
+    [(= ab-id 320)  'refinery]
+    [(= ab-id 321)  'barracks]
+    [(= ab-id 324)  'engineering-bay]
+    [(= ab-id 325)  'missile-turret]
+    [(= ab-id 326)  'bunker]
+    [(= ab-id 328)  'factory]
+    [(= ab-id 329)  'starport]
+    [(= ab-id 330)  'ghost-academy]
+    [(= ab-id 331)  'armory]
+    [(= ab-id 333)  'fusion-core]
+    [(= ab-id 421)  'barracks-techlab]
+    [(= ab-id 422)  'barracks-reactor]
+    [(= ab-id 454)  'factory-techlab]
+    [(= ab-id 455)  'factory-reactor]
+    [(= ab-id 880)  'nexus]
     [(= ab-id 881)  'pylon]
+    [(= ab-id 882)  'assimilator]
+    [(= ab-id 883)  'gateway]
+    [(= ab-id 884)  'forge]
+    [(= ab-id 885)  'fleet-beacon]
+    [(= ab-id 886)  'twilight-council]
+    [(= ab-id 887)  'photon-cannon]
+    [(= ab-id 889)  'stargate]
+    [(= ab-id 890)  'templar-archives]
+    [(= ab-id 891)  'dark-shrine]
+    [(= ab-id 892)  'robotics-bay]
+    [(= ab-id 893)  'robotics-facility]
+    [(= ab-id 894)  'cybernetics-core]
+    [(= ab-id 1909) 'shield-battery]
+    [(= ab-id 1152) 'hatchery]
+    [(= ab-id 1154) 'extractor]
+    [(= ab-id 1155) 'spawning-pool]
+    [(= ab-id 1156) 'evolution-chamber]
+    [(= ab-id 1157) 'hydralisk-den]
+    [(= ab-id 1158) 'spire]
+    [(= ab-id 1159) 'ultralisk-cavern]
+    [(= ab-id 1160) 'infestation-pit]
+    [(= ab-id 1161) 'nydus-network]
+    [(= ab-id 1162) 'baneling-nest]
+    [(= ab-id 1163) 'lurker-den]
+    [(= ab-id 1165) 'roach-warren]
+    [(= ab-id 1166) 'spine-crawler]
+    [(= ab-id 1167) 'spore-crawler]
     [(= ab-id 1344) 'overlord]
     [(= ab-id 524)  'scv]
     [(= ab-id 1006) 'probe]
@@ -627,6 +689,37 @@
     [ab-sym ab-sym]
     [else 'unknown]))
 
+(define (normalize-in-progress-order-entry entry race-hint)
+  (define default-th
+    (case race-hint
+      [(Zerg zerg) 'hatchery]
+      [(Protoss protoss) 'nexus]
+      [else 'command-center]))
+  (cond
+    [(symbol? entry)
+     (if (eq? entry 'expand)
+         default-th
+         (engine-order-target-symbol 0 entry))]
+    [(hash? entry)
+     (define raw-sym
+       (or (hash-ref entry 'type #f)
+           (hash-ref entry 'target #f)
+           (hash-ref entry 'building #f)
+           (hash-ref entry 'ability-sym #f)))
+     (define raw-id (hash-ref entry 'ability-id 0))
+     (define resolved (engine-order-target-symbol (if (exact-integer? raw-id) raw-id 0) raw-sym))
+     (if (eq? resolved 'expand) default-th resolved)]
+    [(pair? entry)
+     (match entry
+       [(list 'expand (? symbol? th-sym) _ ...) th-sym]
+       [(list 'expand _ ...) default-th]
+       [(list (or 'build 'morph 'train 'research) (? symbol? sym) _ ...)
+        (engine-order-target-symbol 0 sym)]
+       [(cons (? symbol? sym) _)
+        (engine-order-target-symbol 0 sym)]
+       [_ 'unknown])]
+    [else 'unknown]))
+
 (define (order-ledger-reconcile-observation! ledger obs)
   (define frame (hash-ref obs 'frame 0))
   (define u-orders (in-progress-order-ledger-unit-orders ledger))
@@ -645,7 +738,9 @@
     (set-add! alive-ids uid)
     (define eng-orders (hash-ref u 'orders '()))
     (define ab-id (hash-ref u 'order-ability-id 0))
-    (define ab-sym (hash-ref u 'order-ability-sym #f))
+    (define ab-sym (or (hash-ref u 'order-ability-sym #f)
+                       (and (hash-ref u 'has-build-order? #f)
+                            (hash-ref u 'build-target #f))))
     (define tgt-id (hash-ref u 'order-target-id (hash-ref u 'engaged-target-tag 0)))
     (define tgt-x (hash-ref u 'order-target-x #f))
     (define tgt-y (hash-ref u 'order-target-y #f))
@@ -696,10 +791,28 @@
                         (add1 (hash-ref t-counts (tracked-order-ability-sym prev) 0)))
              (hash-remove! u-orders uid)))]))
 
+  ;; 1b. Ingest explicit en-route worker build orders from `(hash-ref obs 'in-progress-orders '())`
+  (define obs-in-prog (hash-ref obs 'in-progress-orders '()))
+  (when (list? obs-in-prog)
+    (define race-hint (hash-ref obs 'race 'Terran))
+    (for ([entry (in-list obs-in-prog)])
+      (define tsym (normalize-in-progress-order-entry entry race-hint))
+      (when (and (symbol? tsym) (not (eq? tsym 'unknown)))
+        (define already-under-construction?
+          (ormap (lambda (b)
+                   (and (hash? b)
+                        (eq? (hash-ref b 'type #f) tsym)
+                        (or (hash-ref b 'in-transit? #f)
+                            (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
+                 ally-bldgs))
+        (unless already-under-construction?
+          (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0)))))))
+
   ;; 2. Prune dead units, materialized build/expand pseudo-orders, or expired pseudo-unit orders
   (for ([(uid tord) (in-hash (hash-copy u-orders))])
     (when (not (set-member? alive-ids uid))
       (define tsym (tracked-order-ability-sym tord))
+      (define age (- frame (tracked-order-issued-frame tord)))
       (define bldg-materialized?
         (and (memq (tracked-order-kind tord) '(build expand))
              (ormap (lambda (b)
@@ -708,9 +821,14 @@
                            (or (hash-ref b 'in-transit? #f)
                                (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
                     ally-bldgs)))
-      (when (or bldg-materialized?
-                (> (- frame (tracked-order-issued-frame tord)) 12))
-        (hash-remove! u-orders uid))))
+      (cond
+        [(or bldg-materialized? (> age 12))
+         (hash-remove! u-orders uid)]
+        [(and (memq (tracked-order-kind tord) '(build expand))
+              (>= age 0)
+              (<= age 8)
+              (<= (hash-ref t-counts tsym 0) 0))
+         (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0)))])))
 
   ;; 3. Prune build-site reservations that have materialized as buildings or expired
   (define active-sites
@@ -2052,27 +2170,107 @@
 (define (plan-terran-addon-swap obs)
   (define sanitized-obs (if (hash? obs) obs (hash)))
   (define frame (hash-ref sanitized-obs 'frame 0))
+  (define base-x (exact->inexact (hash-ref sanitized-obs 'base-x 32.0)))
+  (define base-y (exact->inexact (hash-ref sanitized-obs 'base-y 32.0)))
   (define ally-bldgs (filter hash? (hash-ref sanitized-obs 'ally-buildings '())))
-  (define free-addons (filter hash? (hash-ref sanitized-obs 'free-addons '())))
+  (define addon-syms
+    '(barracks-techlab barracks-tech-lab barracks-reactor
+      factory-techlab factory-tech-lab factory-reactor
+      starport-techlab starport-tech-lab starport-reactor
+      tech-lab reactor))
+  (define all-ally-addons
+    (filter (lambda (b)
+              (and (memq (hash-ref b 'type 'unknown) addon-syms)
+                   (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+            ally-bldgs))
+  (define attached-addon-ids
+    (for/fold ([acc '()]) ([b (in-list ally-bldgs)])
+      (define atag (hash-ref b 'add-on-tag 0))
+      (if (and (exact-integer? atag) (> atag 0))
+          (cons atag acc)
+          acc)))
+  (define (bldg-is-flying-prod? b)
+    (define bt (hash-ref b 'type 'unknown))
+    (or (memq bt '(barracks-flying factory-flying starport-flying))
+        (and (memq bt '(barracks factory starport))
+             (or (eq? (hash-ref b 'flying? #f) #t)
+                 (eq? (hash-ref b 'is-flying #f) #t)))))
+  (define (bldg-has-addon? b)
+    (or (eq? (hash-ref b 'has-addon? #f) #t)
+        (not (not (hash-ref b 'addon #f)))
+        (> (hash-ref b 'add-on-tag 0) 0)
+        (let ([bx (exact->inexact (hash-ref b 'x 0.0))]
+              [by (exact->inexact (hash-ref b 'y 0.0))])
+          (ormap (lambda (ad)
+                   (<= (dist2d-pts (+ bx SC2-TERRAN-ADDON-OFFSET-X)
+                                   (+ by SC2-TERRAN-ADDON-OFFSET-Y)
+                                   (exact->inexact (hash-ref ad 'x 9999.0))
+                                   (exact->inexact (hash-ref ad 'y 9999.0)))
+                       1.25))
+                 all-ally-addons))))
+  (define orphaned-addons
+    (filter (lambda (ad)
+              (define aid (hash-ref ad 'id 0))
+              (define ax (exact->inexact (hash-ref ad 'x 34.5)))
+              (define ay (exact->inexact (hash-ref ad 'y 31.5)))
+              (and (not (memv aid attached-addon-ids))
+                   (not (ormap (lambda (b)
+                                 (and (memq (hash-ref b 'type 'unknown) '(barracks factory starport))
+                                      (not (bldg-is-flying-prod? b))
+                                      (<= (dist2d-pts (- ax SC2-TERRAN-ADDON-OFFSET-X)
+                                                      (+ ay (- SC2-TERRAN-ADDON-OFFSET-Y))
+                                                      (exact->inexact (hash-ref b 'x 9999.0))
+                                                      (exact->inexact (hash-ref b 'y 9999.0)))
+                                          1.25)))
+                               ally-bldgs))))
+            all-ally-addons))
+  (define explicit-free-addons (filter hash? (hash-ref sanitized-obs 'free-addons '())))
+  (define free-addons
+    (append explicit-free-addons
+            (filter (lambda (ad)
+                      (not (ormap (lambda (ef)
+                                    (equal? (hash-ref ef 'id -1) (hash-ref ad 'id -2)))
+                                  explicit-free-addons)))
+                    orphaned-addons)))
+  (define idle-lifted-prod
+    (findf (lambda (b)
+             (and (bldg-is-flying-prod? b)
+                  (not (hash-ref b 'busy? #f))
+                  (= (hash-ref b 'order-count 0) 0)))
+           ally-bldgs))
   (define bare-fac-or-port
     (findf (lambda (b)
              (and (memq (hash-ref b 'type 'unknown) '(factory starport))
-                  (not (hash-ref b 'has-addon? #f))
+                  (not (bldg-is-flying-prod? b))
+                  (not (bldg-has-addon? b))
                   (not (hash-ref b 'busy? #f))))
            ally-bldgs))
   (define donor-rax-or-fac
     (findf (lambda (b)
              (and (memq (hash-ref b 'type 'unknown) '(barracks factory))
-                  (hash-ref b 'has-addon? #f)
+                  (not (bldg-is-flying-prod? b))
+                  (bldg-has-addon? b)
                   (not (hash-ref b 'busy? #f))))
            ally-bldgs))
   (cond
-    ;; Case 1: Free unattached TechLab/Reactor available + bare Barracks/Factory/Starport
+    ;; Case 0a: Idle lifted Barracks/Factory/Starport + unattached TechLab/Reactor -> land & attach immediately!
+    [(and idle-lifted-prod (not (null? free-addons)))
+     (define addon (first free-addons))
+     (define ax (exact->inexact (hash-ref addon 'x (+ base-x 6.5))))
+     (define ay (exact->inexact (hash-ref addon 'y (+ base-y 3.5))))
+     (list (list 'terran-addon-swap 0 (hash-ref idle-lifted-prod 'id 0) ax ay))]
+    ;; Case 0b: Stranded idle lifted Barracks/Factory/Starport with no free add-on -> land on clear ground!
+    [idle-lifted-prod
+     (define bx (exact->inexact (hash-ref idle-lifted-prod 'x (+ base-x 4.0))))
+     (define by (exact->inexact (hash-ref idle-lifted-prod 'y (+ base-y 4.0))))
+     (list (list 'land-building (hash-ref idle-lifted-prod 'id 0) bx by))]
+    ;; Case 1: Free unattached TechLab/Reactor available + bare grounded Barracks/Factory/Starport
     [(and (not (null? free-addons))
           (or bare-fac-or-port
               (findf (lambda (b)
                        (and (eq? (hash-ref b 'type 'unknown) 'barracks)
-                            (not (hash-ref b 'has-addon? #f))
+                            (not (bldg-is-flying-prod? b))
+                            (not (bldg-has-addon? b))
                             (not (hash-ref b 'busy? #f))))
                      ally-bldgs)))
      (define addon (first free-addons))
@@ -2080,7 +2278,8 @@
        (or bare-fac-or-port
            (findf (lambda (b)
                     (and (eq? (hash-ref b 'type 'unknown) 'barracks)
-                         (not (hash-ref b 'has-addon? #f))
+                         (not (bldg-is-flying-prod? b))
+                         (not (bldg-has-addon? b))
                          (not (hash-ref b 'busy? #f))))
                   ally-bldgs)))
      (define ax (exact->inexact (hash-ref addon 'x 34.5)))

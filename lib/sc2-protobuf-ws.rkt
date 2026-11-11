@@ -2862,6 +2862,8 @@
              'energy (exact-round (sc2-unit-energy b))
              'build-progress bprog
              'halted halted?
+             'flying? (sc2-unit-is-flying b)
+             'has-addon? (> addon-tag 0)
              'add-on-tag addon-tag
              'addon addon-kind
              'addon-type addon-sym
@@ -2930,12 +2932,15 @@
     (for/list ([eb (in-list enemy-all)]
                #:when (sc2-unit-is-structure? eb))
       (define p (sc2-unit-pos eb))
+      (define disp-type (sc2-unit-display-type eb))
       (hash 'id (sc2-unit-tag eb)
             'type (sc2-id->unit-symbol (sc2-unit-unit-type eb))
             'x (sc2-point3d-x p)
             'y (sc2-point3d-y p)
             'hp (max 1 (exact-round (sc2-unit-health eb)))
             'build-progress (max 0.0 (min 1.0 (sc2-unit-build-progress eb)))
+            'display-type disp-type
+            'snapshot? (not (= disp-type 1))
             'cloaked (or (= (sc2-unit-cloak eb) 1) (= (sc2-unit-cloak eb) 2)))))
 
   ;; Persistent effects
@@ -3902,6 +3907,8 @@
     [(adept)        1419]
     [else           #f]))
 
+(define SC2-LAST-KNOWN-ENEMY-POS (make-hasheqv))
+
 (define (translate-bot-actions->sc2-raw-commands actions obs
                                                  #:used-creep-tumors [used-tumors #f]
                                                  #:ws-conn [ws-conn #f]
@@ -3913,6 +3920,38 @@
   (define enemy-units (filter (lambda (u) (= (sc2-unit-alliance u) 4)) units))
   (define neutral-units (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-units))
+  (define live-visible-enemy-tags (mutable-seteqv))
+  (for ([eu (in-list enemy-units)])
+    (define etag (sc2-unit-tag eu))
+    (define ep (sc2-unit-pos eu))
+    (when (> etag 0)
+      (hash-set! SC2-LAST-KNOWN-ENEMY-POS etag
+                 (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))
+      (when (and (= (sc2-unit-display-type eu) 1)
+                 (> (+ (sc2-unit-health eu) (sc2-unit-shield eu)) 0.0))
+        (set-add! live-visible-enemy-tags etag))))
+  (when (hash? obs)
+    (for ([eh (in-list (append (hash-ref obs 'enemy-units '())
+                               (hash-ref obs 'enemy-buildings '())))]
+          #:when (hash? eh))
+      (define eid (hash-ref eh 'id 0))
+      (when (and (exact-integer? eid) (> eid 0))
+        (define ex (hash-ref eh 'x #f))
+        (define ey (hash-ref eh 'y #f))
+        (when (and (real? ex) (real? ey))
+          (hash-set! SC2-LAST-KNOWN-ENEMY-POS eid
+                     (cons (exact->inexact ex) (exact->inexact ey))))
+        (when (and (> (hash-ref eh 'hp 1) 0)
+                   (not (eq? (hash-ref eh 'snapshot? #f) #t))
+                   (= (hash-ref eh 'display-type 1) 1))
+          (set-add! live-visible-enemy-tags eid)))))
+  ;; Synthetic test compatibility: if `obs` has neither `sc2-observation` units nor explicit
+  ;; `enemy-units`/`enemy-buildings` keys, treat explicit integer target tags as valid unless cached stale.
+  (define enforce-live-enemy-tag-filter?
+    (or (sc2-observation? obs)
+        (and (hash? obs)
+             (or (hash-has-key? obs 'enemy-units)
+                 (hash-has-key? obs 'enemy-buildings)))))
   (define hash-mineral-patches
     (if (hash? obs)
         (filter (lambda (m)
@@ -4463,9 +4502,51 @@
 
       [(list (or 'attack 'attack-unit) uid target-id)
        #:when (and (or (exact-integer? uid) (list? uid)) (exact-integer? target-id))
-       (define tag-list (claim-combat-tags-for-order! uid 23 #f target-id))
-       (when (not (null? tag-list))
-         (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
+       (cond
+         [(or (not enforce-live-enemy-tag-filter?)
+              (set-member? live-visible-enemy-tags target-id))
+          (define tag-list (claim-combat-tags-for-order! uid 23 #f target-id))
+          (when (not (null? tag-list))
+            (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
+         [else
+          (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
+          (define fallback-pt
+            (if (pair? cached-pt)
+                (sc2-point2d (car cached-pt) (cdr cached-pt))
+                (let ([ebx (if (and (list? enemy-base) (>= (length enemy-base) 2))
+                               (exact->inexact (first enemy-base))
+                               (- SC2-DEFAULT-MAP-WIDTH home-x))]
+                      [eby (if (and (list? enemy-base) (>= (length enemy-base) 2))
+                               (exact->inexact (second enemy-base))
+                               (- SC2-DEFAULT-MAP-HEIGHT home-y))])
+                  (sc2-point2d ebx eby))))
+          (define tag-list (claim-combat-tags-for-order! uid 23 fallback-pt 0))
+          (when (not (null? tag-list))
+            (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f)))])]
+
+      [(list 'focus-fire uid target-id rest ...)
+       #:when (and (or (exact-integer? uid) (list? uid)) (exact-integer? target-id))
+       (cond
+         [(or (not enforce-live-enemy-tag-filter?)
+              (set-member? live-visible-enemy-tags target-id))
+          (define tag-list (claim-combat-tags-for-order! uid 23 #f target-id))
+          (when (not (null? tag-list))
+            (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
+         [else
+          (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
+          (define fallback-pt
+            (cond
+              [(pair? cached-pt)
+               (sc2-point2d (car cached-pt) (cdr cached-pt))]
+              [(and (>= (length rest) 2) (real? (first rest)) (real? (second rest)))
+               (sc2-point2d (scale-bot-coord-to-world (first rest) home-x)
+                            (scale-bot-coord-to-world (second rest) home-y))]
+              [else
+               (sc2-point2d (- SC2-DEFAULT-MAP-WIDTH home-x)
+                            (- SC2-DEFAULT-MAP-HEIGHT home-y))]))
+          (define tag-list (claim-combat-tags-for-order! uid 23 fallback-pt 0))
+          (when (not (null? tag-list))
+            (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f)))])]
 
       [(list 'mineral-walk uid patch-id raw-x raw-y)
        (define tx (scale-bot-coord-to-world raw-x home-x))
@@ -4995,17 +5076,36 @@
       [(list 'clear-gas-steal enemy-gas-id raw-x raw-y)
        (define ctags (map sc2-unit-tag combat-units))
        (when (not (null? ctags))
-         (if (and (exact-integer? enemy-gas-id) (> enemy-gas-id 0))
+         (if (and (exact-integer? enemy-gas-id)
+                  (> enemy-gas-id 0)
+                  (or (not enforce-live-enemy-tag-filter?)
+                      (set-member? live-visible-enemy-tags enemy-gas-id)))
              (emit! (sc2-raw-unit-command 23 #f enemy-gas-id ctags #f))
              (emit! (sc2-raw-unit-command 23
                                           (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
                                                        (scale-bot-coord-to-world raw-y home-y))
                                           0 ctags #f))))]
 
-      [(list 'snipe-enemy-changeling changeling-id _ ...)
+      [(list 'snipe-enemy-changeling changeling-id rest ...)
        (define ctags (map sc2-unit-tag (if (not (null? combat-units)) combat-units workers)))
        (when (and (not (null? ctags)) (exact-integer? changeling-id))
-         (emit! (sc2-raw-unit-command 23 #f changeling-id (list (first ctags)) #f)))]
+         (cond
+           [(and (> changeling-id 0)
+                 (or (not enforce-live-enemy-tag-filter?)
+                     (set-member? live-visible-enemy-tags changeling-id)))
+            (emit! (sc2-raw-unit-command 23 #f changeling-id (list (first ctags)) #f))]
+           [else
+            (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS changeling-id #f))
+            (define fallback-pt
+              (cond
+                [(pair? cached-pt)
+                 (sc2-point2d (car cached-pt) (cdr cached-pt))]
+                [(and (>= (length rest) 2) (real? (first rest)) (real? (second rest)))
+                 (sc2-point2d (scale-bot-coord-to-world (first rest) home-x)
+                              (scale-bot-coord-to-world (second rest) home-y))]
+                [else
+                 (sc2-point2d home-x home-y)]))
+            (emit! (sc2-raw-unit-command 23 fallback-pt 0 (list (first ctags)) #f))]))]
 
       [(list 'burrow-down uid _ ...)
        (when (and (exact-integer? uid) (> uid 0))
@@ -5088,15 +5188,29 @@
            (record-worker-used! wt))
          (emit! (sc2-raw-unit-command 3666 #f eff-patch-id wlist #f)))]
 
+      [(list 'land-building bldg-id raw-x raw-y)
+       (when (and (exact-integer? bldg-id) (> bldg-id 0) (real? raw-x) (real? raw-y))
+         (emit! (sc2-raw-unit-command 3678
+                                      (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                                                   (scale-bot-coord-to-world raw-y home-y))
+                                      0 (list bldg-id) #f)))]
+
       [(list 'terran-addon-swap lift-bldg-id land-bldg-id addon-x addon-y)
        (when (and (exact-integer? lift-bldg-id) (> lift-bldg-id 0))
          (emit! (sc2-raw-unit-command 3679 #f 0 (list lift-bldg-id) #f)))
        (when (and (exact-integer? land-bldg-id) (> land-bldg-id 0)
                   (real? addon-x) (real? addon-y))
-         (emit! (sc2-raw-unit-command 3678
-                                      (sc2-point2d (- (exact->inexact addon-x) 2.5)
-                                                   (+ (exact->inexact addon-y) 0.5))
-                                      0 (list land-bldg-id) #f)))]
+         (define land-u (hash-ref self-unit-by-tag land-bldg-id #f))
+         (if (and (= lift-bldg-id 0)
+                  land-u
+                  (not (sc2-unit-is-flying land-u))
+                  (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type land-u))
+                             '(barracks-flying factory-flying starport-flying command-center-flying orbital-command-flying))))
+             (emit! (sc2-raw-unit-command 3679 #f 0 (list land-bldg-id) #f))
+             (emit! (sc2-raw-unit-command 3678
+                                          (sc2-point2d (- (exact->inexact addon-x) 2.5)
+                                                       (+ (exact->inexact addon-y) 0.5))
+                                          0 (list land-bldg-id) #f))))]
 
       ;; 10. Spatial maneuvers: `(execute-spatial-maneuver <name> <x> <y>)` or `(mirror-spatial-maneuver ...)`
       ;;     Bug #11 fix: never overwrite units that already received individual micro orders in this step,

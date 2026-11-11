@@ -28,6 +28,8 @@
    #:race (string->symbol (race-arg))
    #:initial-posture (string->symbol (posture-arg))))
 
+(define ipc-enemy-pos-cache (make-hasheqv))
+
 (let loop ()
   (define line (read-line (current-input-port) 'any))
   (unless (eof-object? line)
@@ -42,7 +44,9 @@
          (define sexp (read (open-input-string trimmed)))
          (if (equal? sexp '(quit))
              (void)
-             (let ([cmds (runtime-step-sexp! runtime sexp)])
+             (let* ([obs (parse-frame-state-sexp sexp)]
+                    [raw-cmds (runtime-step-sexp! runtime obs)]
+                    [cmds (sanitize-stale-target-actions raw-cmds obs #:pos-cache ipc-enemy-pos-cache)])
                (printf "~s\n" cmds)
                (flush-output)
                (loop))))])))

@@ -77,9 +77,9 @@ if ! command -v racket >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[1/4] Synchronizing .zo bytecode via raco make -j 4..."
-if [[ "${SKIP_MAKE}" -eq 0 ]] && command -v raco >/dev/null 2>&1; then
-  raco make -j 4 tests/run-all-tests.rkt
+echo "[1/4] Synchronizing .zo bytecode..."
+if [[ "${SKIP_MAKE}" -eq 0 ]]; then
+  racket -e '(require compiler/cm) (managed-compile-zo "tests/run-all-tests.rkt")'
 fi
 
 if [[ "${REBUILD_ZIPS}" -eq 1 ]]; then
@@ -98,13 +98,14 @@ echo "[3/4] Configuring anonymized git identity & staging verified changes..."
 git config user.name "anonymous"
 git config user.email "anonymous@noreply.localhost"
 
+OWNER_NAME="$(basename "$(dirname "${REPO_ROOT}")")"
 git add -A
 if git diff --cached --quiet; then
   echo "[3/4] Working tree already clean and committed; pushing HEAD to origin/main & origin/master..."
 else
-  if git grep -i "sticklane" -- ':!AGENTS.md' >/dev/null 2>&1; then
+  if [[ -n "${OWNER_NAME}" ]] && git grep -i "${OWNER_NAME}" -- ':!AGENTS.md' >/dev/null 2>&1; then
     echo "[atomic-test-and-push] ERROR: Forbidden username found in tracked files!" >&2
-    git grep -n -i "sticklane" -- ':!AGENTS.md' >&2 || true
+    git grep -n -i "${OWNER_NAME}" -- ':!AGENTS.md' >&2 || true
     exit 1
   fi
   git commit -m "${COMMIT_MSG}"

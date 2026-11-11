@@ -96,7 +96,8 @@
  select-pro-build-order
  pro-build-order-steps-for-matchup
  pro-supply-curve-target
- evaluate-build-order-next-step)
+ evaluate-build-order-next-step
+ compute-natural-expansion-mineral-reserve)
 
 ;; =============================================================================
 ;; 1. Build-Order Combinators & Locutus Worker Chaining
@@ -2199,10 +2200,17 @@
                         (not (not (memq 'twilight-council r-bldgs))))]
                   [else (not (not (memq 'forge r-bldgs)))])
                 #t))
-      (cand 'gateway 'production-scaling (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
-            (if (hash? open-prod-slots) (< raw-prod-facilities raw-max-facilities) #t))
-      (cand 'probe 'worker '(train probe) #f)
-      (cand 'nexus 'expansion (list 'expand exp-x exp-y) exp-blocking?))]
+       (cand 'gateway 'production-scaling (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
+             (if (hash? open-prod-slots)
+                 (and (< raw-prod-facilities raw-max-facilities)
+                      (or (> active-bases 1)
+                          (< raw-prod-facilities 1)
+                          (not escrow-ok?)
+                          (< raw-frame 1500)
+                          (>= (- raw-minerals 400) (sc2-min-cost 'gateway))))
+                 #t))
+       (cand 'probe 'worker '(train probe) #f)
+       (cand 'nexus 'expansion (list 'expand exp-x exp-y) exp-blocking?))]
 
     [else ;; Terran
      (define upg-sym
@@ -2261,9 +2269,45 @@
                    [else (not (not (memq 'engineering-bay r-bldgs)))])
                  #t))
        (cand 'barracks 'production-scaling (list 'build 'barracks (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
-             (if (hash? open-prod-slots) (< raw-prod-facilities raw-max-facilities) #t))
+             (if (hash? open-prod-slots)
+                 (and (< raw-prod-facilities raw-max-facilities)
+                      (or (> active-bases 1)
+                          (< raw-prod-facilities 1)
+                          (not escrow-ok?)
+                          (< raw-frame 1500)
+                          (>= (- raw-minerals 400) (sc2-min-cost 'barracks))))
+                 #t))
        (cand 'scv 'worker '(train scv) #f)
        (cand 'command-center 'expansion (list 'expand exp-x exp-y) exp-blocking?)))]))
+
+;; Computes reserved minerals for the natural expansion (`400M` Terran/Protoss, `300M` Zerg)
+;; when on 1 base (`active-bases + pending-bases < 2`) at `frame >= 1500` (or `workers >= 18/15`)
+;; without active base attack, enemy threat, or blocked natural, preventing a `150M` 2nd Barracks
+;; or Gateway from starving the natural TownHall (Match 5115348 root-cause fix).
+(define (compute-natural-expansion-mineral-reserve
+         #:race [raw-race 'Terran]
+         #:frame [raw-frame 0]
+         #:active-bases [raw-active-bases 1]
+         #:pending-bases [raw-pending-bases 0]
+         #:workers [raw-workers 12]
+         #:under-attack? [under-attack? #f]
+         #:enemy-threat-supply [enemy-threat 0]
+         #:natural-blocked? [natural-blocked? #f]
+         #:escrow-expired? [escrow-expired? #f])
+  (define race (normalize-ledger-race raw-race))
+  (define total-bases (+ (safe-nonneg-int raw-active-bases 1)
+                         (safe-nonneg-int raw-pending-bases 0)))
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define workers (safe-nonneg-int raw-workers 12))
+  (if (and (< total-bases 2)
+           (not under-attack?)
+           (<= (safe-real enemy-threat 0.0) 0.0)
+           (not natural-blocked?)
+           (not escrow-expired?)
+           (or (>= frame 1500)
+               (>= workers (if (eq? race 'Zerg) 15 18))))
+      (sc2-race-townhall-min-cost race)
+      0))
 
 (define (schedule-priority-candidates-with-ledger!
          candidates

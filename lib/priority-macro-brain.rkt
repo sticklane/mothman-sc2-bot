@@ -143,6 +143,7 @@
    (sc2-tech-node 'medivac             'Terran 'train    'combat-unit        100 100 2  0  670 'starport          '(starport)                         #f)
    (sc2-tech-node 'viking-fighter      'Terran 'train    'counter-tech       150  75 2  0  670 'starport          '(starport)                         #f)
    (sc2-tech-node 'engineering-bay     'Terran 'build    'counter-tech       125   0 0  0  560 'worker            '(command-center)                   #t)
+   (sc2-tech-node 'bunker              'Terran 'build    'counter-tech       100   0 0  0  640 'worker            '(barracks)                         #f)
    (sc2-tech-node 'missile-turret      'Terran 'build    'counter-tech       100   0 0  0  400 'worker            '(engineering-bay)                  #f)
    (sc2-tech-node 'armory              'Terran 'build    'tech-upgrade       150 100 0  0 1040 'worker            '(factory)                          #t)
    (sc2-tech-node 'stimpack            'Terran 'research 'tech-upgrade       100 100 0  0 2240 'barracks-techlab  '(barracks-techlab)                 #t)
@@ -1165,8 +1166,22 @@
   (define need-worker-saturation?
     (and (not under-attack?)
          (<= enemy-threat-supply 0)
-         (< workers (min target-workers (* 22 active-bases)))
-         (or (< workers 20) (>= army-supply (* 4 active-bases)))))
+         (< workers (min 80 (max target-workers (* 22 active-bases))))))
+
+  (define total-townhalls-incl-pending
+    (case race
+      [(Zerg) (bldg-count-equivalent total-bldg-counts 'hatchery)]
+      [(Terran) (bldg-count-equivalent total-bldg-counts 'command-center)]
+      [else (bldg-count-equivalent total-bldg-counts 'nexus)]))
+  (define nat-exp-min-reserve
+    (compute-natural-expansion-mineral-reserve
+     #:race race
+     #:frame frame
+     #:active-bases active-bases
+     #:pending-bases (max 0 (- total-townhalls-incl-pending active-bases))
+     #:workers workers
+     #:under-attack? under-attack?
+     #:enemy-threat-supply enemy-threat-supply))
 
   (define (cand-wanted-now? c)
     (define id (priority-candidate-id c))
@@ -1187,8 +1202,14 @@
                    (memq id '(spawning-pool spine-crawler spore-crawler))
                    (and (eq? id 'extractor)
                         (= (bldg-count-equivalent total-bldg-counts 'extractor) 0))))))
+    (define nat-reserve-allows-2nd-fac?
+      (or (not (memq id '(gateway barracks)))
+          (= (bldg-count-equivalent total-bldg-counts id) 0)
+          (<= nat-exp-min-reserve 0)
+          (>= (- minerals nat-exp-min-reserve) (priority-candidate-min-cost c))))
     (and geyser-cap-ok?
          zerg-drone-sacrifice-ok?
+         nat-reserve-allows-2nd-fac?
          (cond
            [(memq id repaired-prereqs) #t]
            [(eq? cat 'supply)
@@ -1225,7 +1246,7 @@
             (cond
               [(memq id '(gateway barracks))
                (and (< (bldg-count-equivalent total-bldg-counts id)
-                       (min 8 (* (if (eq? id 'gateway) 2 2) active-bases)))
+                       (min 8 (if (< total-townhalls-incl-pending 2) 1 (* 2 active-bases))))
                     (>= workers (* 18 active-bases)))]
               [(memq id '(extractor refinery assimilator))
                (< (bldg-count-equivalent total-bldg-counts id) (* 2 active-bases))]
@@ -1272,21 +1293,28 @@
                       [utility-score u-sup]
                       [blocking-allowed? has-mineral-income?])]
 
-        ;; Worker candidate: emergency recovery when workers < 14, and saturation priority when peaceful
+        ;; Worker candidate: emergency recovery when workers < 14, and sustained saturation up to min(80, 22 * bases)
         [(eq? cat 'worker)
+         (define sat-target (min 80 (* 22 active-bases)))
          (define emergency-worker-boost
            (cond
              [(= workers 0) 1500.0]
              [(< workers 8) (+ 600.0 (* 100.0 (- 8.0 workers)))]
              [(< workers 14) (+ 120.0 (* 25.0 (- 14.0 workers)))]
+             [(and need-worker-saturation? (< workers sat-target)) 135.0]
              [need-worker-saturation? 115.0]
              [else 0.0]))
          (define w-plan-boost
-           (if (and (< workers (if (eq? race 'Zerg) 14 16))
-                    (not under-attack?)
-                    (<= enemy-threat-supply 0))
-               plan-weight
-               0.0))
+           (cond
+             [(and (< workers (if (eq? race 'Zerg) 14 16))
+                   (not under-attack?)
+                   (<= enemy-threat-supply 0))
+              plan-weight]
+             [(and need-worker-saturation?
+                   (< workers sat-target)
+                   (< gas 250))
+              430.0]
+             [else 0.0]))
          (struct-copy priority-candidate c
                       [utility-score (max w-plan-boost (+ u0 emergency-worker-boost))]
                       [blocking-allowed? (and (< workers 8) has-mineral-income?)])]

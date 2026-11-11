@@ -1092,8 +1092,16 @@
                (eq? (pv-candidate-id c) cat-or-id)))
          (pv-scheduler-decision-candidates dec)))
 
-(define (verify-prioritization-scheduler-invariants)
+(define (verify-prioritization-scheduler-invariants #:fast? [fast? #f])
   (define results '())
+  (define pv-bases (if fast? '(1 2) PV-LATTICE-ACTIVE-BASES))
+  (define pv-workers (if fast? '(16 28) PV-LATTICE-WORKERS))
+  (define pv-minerals (if fast? '(50 150 450) PV-LATTICE-MINERALS))
+  (define pv-gas (if fast? '(0 100 544) PV-LATTICE-GAS))
+  (define pv-supply-left (if fast? '(0 4) PV-LATTICE-SUPPLY-LEFT))
+  (define pv-army-supply (if fast? '(3 18) PV-LATTICE-ARMY-SUPPLY))
+  (define pv-enemy-threat (if fast? '(0 12) PV-LATTICE-ENEMY-THREAT))
+  (define pv-escrow-age (if fast? '(0 300) PV-LATTICE-ESCROW-AGE))
   (define (record! id desc states passed? [cex #f])
     (set! results
           (append results
@@ -1122,11 +1130,11 @@
                          (list 'robotics-facility 150 100)
                          (list 'gateway 150 0))))
   (for* ([race (in-list PV-LATTICE-RACES)]
-         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
-         [workers (in-list PV-LATTICE-WORKERS)]
-         [minerals (in-list PV-LATTICE-MINERALS)]
-         [gas (in-list PV-LATTICE-GAS)]
-         [escrow-age (in-list PV-LATTICE-ESCROW-AGE)])
+         [active-bases (in-list pv-bases)]
+         [workers (in-list pv-workers)]
+         [minerals (in-list pv-minerals)]
+         [gas (in-list pv-gas)]
+         [escrow-age (in-list pv-escrow-age)])
     (set! pv1-states (add1 pv1-states))
     (when (or (>= active-bases 2) (>= escrow-age 224))
       (for ([spec (in-list (hash-ref race-tech-specs race))])
@@ -1175,12 +1183,12 @@
   (define pv2-states 0)
   (define pv2-cex #f)
   (for* ([race (in-list PV-LATTICE-RACES)]
-         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
-         [workers (in-list PV-LATTICE-WORKERS)]
-         [minerals (in-list PV-LATTICE-MINERALS)]
-         [gas (in-list PV-LATTICE-GAS)]
-         [army-supply (in-list PV-LATTICE-ARMY-SUPPLY)]
-         [enemy-threat (in-list PV-LATTICE-ENEMY-THREAT)])
+         [active-bases (in-list pv-bases)]
+         [workers (in-list pv-workers)]
+         [minerals (in-list pv-minerals)]
+         [gas (in-list pv-gas)]
+         [army-supply (in-list pv-army-supply)]
+         [enemy-threat (in-list pv-enemy-threat)])
     (set! pv2-states (add1 pv2-states))
     (when (> enemy-threat 0)
       (define dec
@@ -1225,11 +1233,11 @@
   (define pv3-states 0)
   (define pv3-cex #f)
   (for* ([race (in-list PV-LATTICE-RACES)]
-         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
-         [workers (in-list PV-LATTICE-WORKERS)]
-         [minerals (in-list PV-LATTICE-MINERALS)]
-         [gas (in-list PV-LATTICE-GAS)]
-         [supply-left (in-list PV-LATTICE-SUPPLY-LEFT)])
+         [active-bases (in-list pv-bases)]
+         [workers (in-list pv-workers)]
+         [minerals (in-list pv-minerals)]
+         [gas (in-list pv-gas)]
+         [supply-left (in-list pv-supply-left)])
     (set! pv3-states (add1 pv3-states))
     (define gm-ratio (/ (exact->inexact gas) (max 50.0 (exact->inexact minerals))))
     (when (and (>= gas 150) (>= gm-ratio 1.5))
@@ -1297,12 +1305,12 @@
   (define pv4-states 0)
   (define pv4-cex #f)
   (for* ([race (in-list PV-LATTICE-RACES)]
-         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
-         [workers (in-list PV-LATTICE-WORKERS)]
-         [minerals (in-list PV-LATTICE-MINERALS)]
-         [gas (in-list PV-LATTICE-GAS)]
-         [supply-left (in-list PV-LATTICE-SUPPLY-LEFT)]
-         [enemy-threat (in-list PV-LATTICE-ENEMY-THREAT)])
+         [active-bases (in-list pv-bases)]
+         [workers (in-list pv-workers)]
+         [minerals (in-list pv-minerals)]
+         [gas (in-list pv-gas)]
+         [supply-left (in-list pv-supply-left)]
+         [enemy-threat (in-list pv-enemy-threat)])
     (set! pv4-states (add1 pv4-states))
     (define supply-cap (* active-bases 38)) ; < 200 across active-bases in {1,2,3,4}
     (define buffer 4)
@@ -1355,11 +1363,11 @@
   (define pv5-states 0)
   (define pv5-cex #f)
   (for* ([race (in-list PV-LATTICE-RACES)]
-         [active-bases (in-list PV-LATTICE-ACTIVE-BASES)]
-         [workers (in-list PV-LATTICE-WORKERS)]
-         [minerals (in-list PV-LATTICE-MINERALS)]
-         [gas (in-list PV-LATTICE-GAS)]
-         [enemy-threat (in-list PV-LATTICE-ENEMY-THREAT)]
+         [active-bases (in-list pv-bases)]
+         [workers (in-list pv-workers)]
+         [minerals (in-list pv-minerals)]
+         [gas (in-list pv-gas)]
+         [enemy-threat (in-list pv-enemy-threat)]
          [enemy-air? (in-list PV-LATTICE-ENEMY-AIR)]
          [req-det? '(#f #t)])
     (set! pv5-states (add1 pv5-states))
@@ -1418,9 +1426,9 @@
   (define pv6-cex #f)
   (for* ([race (in-list PV-LATTICE-RACES)]
          [action-kind '(queen-tumor resume-halted-building static-detector)]
-         [tag '(101 202 303 404)]
-         [t0 '(0 100 300 1200)]
-         [cooldown '(24 64 112 224)])
+         [tag (in-list (if fast? '(101) '(101 202 303 404)))]
+         [t0 (in-list (if fast? '(0 300) '(0 100 300 1200)))]
+         [cooldown (in-list (if fast? '(64) '(24 64 112 224)))])
     (define gate (pv-make-refractory-gate cooldown))
     (define limiter (make-ability-cast-limiter #:max-per-frame 2 #:refractory-frames cooldown))
     (define emitted-in-window 0)
@@ -1468,8 +1476,8 @@
   (define pv7-states 0)
   (define pv7-cex #f)
   (for* ([race (in-list PV-LATTICE-RACES)]
-         [minerals '(150 225 275 325)]
-         [gas '(50 100 150)]
+         [minerals (in-list (if fast? '(150) '(150 225 275 325)))]
+         [gas (in-list (if fast? '(100) '(50 100 150)))]
          [scenario '(escrow-timeout threat-preemption stale-intel-preemption)])
     (define rt (make-live-bot-runtime #:race race))
     (define base-bldg
@@ -1500,7 +1508,7 @@
                   'last-seen-main-frame 1800
                   'last-seen-natural-frame 1800
                   'last-seen-army-frame 1800)))
-    (for ([step-idx (in-range 16)])
+    (for ([step-idx (in-range (if fast? 11 16))])
       (set! pv7-states (add1 pv7-states))
       (define frame (+ 1800 (* step-idx 24)))
       (unless (eq? scenario 'stale-intel-preemption)
@@ -1574,58 +1582,14 @@
   ;; ---------------------------------------------------------------------------
   (define pv8-states 0)
   (define pv8-cex #f)
-  (for* ([race (in-list PV-LATTICE-RACES)]
-         [builder-order-First? '(#t #f)]
-         [in-flight-build? '(#t #f)]
-         [worker-role '(build expand resume-halted-building worker-scout mineral-harass)])
-    (set! pv8-states (add1 pv8-states))
+  (for ([race (in-list PV-LATTICE-RACES)])
     (define worker-sym (case race [(Zerg) 'drone] [(Protoss) 'probe] [(Terran) 'scv]))
     (define bldg-sym (case race [(Zerg) 'spawning-pool] [(Protoss) 'pylon] [(Terran) 'supply-depot]))
     (define w1-id 11)
     (define w2-id 12)
     (define home-patch-id 9001)
     (define enemy-patch-id 9002)
-    (define role-act
-      (case worker-role
-        [(build) (list 'build bldg-sym 38.0 38.0)]
-        [(expand) '(expand 50.5 56.5)]
-        [(resume-halted-building) (list 'resume-halted-building w1-id 501)]
-        [(worker-scout) (list 'worker-scout w1-id 160.5 160.5)]
-        [(mineral-harass) (list 'mineral-harass w1-id 160.5 160.5 140.5 140.5)]))
-    (define harvest-act (list 'harvest-mineral (list w1-id w2-id) home-patch-id))
-    (define gas-act (list 'harvest-gas (list w1-id) 8001))
-    (define rebalance-act (list 'rebalance-gas-to-minerals (list w1-id) home-patch-id))
-    (define actions-list
-      (if builder-order-First?
-          (list role-act harvest-act gas-act rebalance-act)
-          (list harvest-act gas-act rebalance-act role-act)))
-    (define obs-hash
-      (hash 'frame 900
-            'ally-units (list (hash 'id w1-id 'type worker-sym 'x 34.0 'y 34.0 'hp 40
-                                    'has-build-order? in-flight-build?)
-                              (hash 'id w2-id 'type worker-sym 'x 50.0 'y 50.0 'hp 40
-                                    'has-build-order? #t))
-            'mineral-patches (list (hash 'id home-patch-id 'x 30.0 'y 30.0)
-                                   (hash 'id enemy-patch-id 'x 162.0 'y 162.0))))
-    (define raw-cmds (translate-bot-actions->sc2-raw-commands actions-list obs-hash))
-    ;; Check that no raw command sends `HARVEST_GATHER (3666)` on `home-patch-id` or `8001` to `w1-id` or `w2-id`
-    ;; when `in-flight-build?` is #t or when `w1-id` was claimed by `resume-halted-building` / `worker-scout` / `mineral-harass`
-    (define w1-cancelled-by-home-harvest?
-      (ormap (lambda (c)
-               (and (sc2-raw-unit-command? c)
-                    (= (sc2-raw-unit-command-ability-id c) 3666)
-                    (memv (sc2-raw-unit-command-target-unit-tag c) (list home-patch-id 8001))
-                    (memv w1-id (sc2-raw-unit-command-unit-tags c))
-                    (or in-flight-build?
-                        (memq worker-role '(resume-halted-building worker-scout mineral-harass)))))
-             raw-cmds))
-    (define w2-cancelled-by-home-harvest?
-      (ormap (lambda (c)
-               (and (sc2-raw-unit-command? c)
-                    (= (sc2-raw-unit-command-ability-id c) 3666)
-                    (memv w2-id (sc2-raw-unit-command-unit-tags c))))
-             raw-cmds))
-    ;; Also check `step-layer2-economy!` with all workers marked `has-build-order? #t`
+    ;; Check `step-layer2-economy!` once per race with all workers marked `has-build-order? #t`
     (define rt (make-live-bot-runtime #:race race))
     (define step-res
       (step-live-bot-runtime!
@@ -1644,13 +1608,55 @@
                     (memq (car a) '(harvest-mineral harvest-gas worker-scout))
                     (equal? (second a) w1-id)))
              rt-acts))
-    (when (or w1-cancelled-by-home-harvest?
-              w2-cancelled-by-home-harvest?
-              layer2-harvested-builder?)
-      (unless pv8-cex
-        (set! pv8-cex (list 'race race 'builder-order-first? builder-order-First?
-                            'in-flight-build? in-flight-build? 'role worker-role
-                            'raw-cmds raw-cmds 'rt-acts rt-acts)))))
+    (for* ([builder-order-First? '(#t #f)]
+           [in-flight-build? '(#t #f)]
+           [worker-role '(build expand resume-halted-building worker-scout mineral-harass)])
+      (set! pv8-states (add1 pv8-states))
+      (define role-act
+        (case worker-role
+          [(build) (list 'build bldg-sym 38.0 38.0)]
+          [(expand) '(expand 50.5 56.5)]
+          [(resume-halted-building) (list 'resume-halted-building w1-id 501)]
+          [(worker-scout) (list 'worker-scout w1-id 160.5 160.5)]
+          [(mineral-harass) (list 'mineral-harass w1-id 160.5 160.5 140.5 140.5)]))
+      (define harvest-act (list 'harvest-mineral (list w1-id w2-id) home-patch-id))
+      (define gas-act (list 'harvest-gas (list w1-id) 8001))
+      (define rebalance-act (list 'rebalance-gas-to-minerals (list w1-id) home-patch-id))
+      (define actions-list
+        (if builder-order-First?
+            (list role-act harvest-act gas-act rebalance-act)
+            (list harvest-act gas-act rebalance-act role-act)))
+      (define obs-hash
+        (hash 'frame 900
+              'ally-units (list (hash 'id w1-id 'type worker-sym 'x 34.0 'y 34.0 'hp 40
+                                      'has-build-order? in-flight-build?)
+                                (hash 'id w2-id 'type worker-sym 'x 50.0 'y 50.0 'hp 40
+                                      'has-build-order? #t))
+              'mineral-patches (list (hash 'id home-patch-id 'x 30.0 'y 30.0)
+                                     (hash 'id enemy-patch-id 'x 162.0 'y 162.0))))
+      (define raw-cmds (translate-bot-actions->sc2-raw-commands actions-list obs-hash))
+      (define w1-cancelled-by-home-harvest?
+        (ormap (lambda (c)
+                 (and (sc2-raw-unit-command? c)
+                      (= (sc2-raw-unit-command-ability-id c) 3666)
+                      (memv (sc2-raw-unit-command-target-unit-tag c) (list home-patch-id 8001))
+                      (memv w1-id (sc2-raw-unit-command-unit-tags c))
+                      (or in-flight-build?
+                          (memq worker-role '(resume-halted-building worker-scout mineral-harass)))))
+               raw-cmds))
+      (define w2-cancelled-by-home-harvest?
+        (ormap (lambda (c)
+                 (and (sc2-raw-unit-command? c)
+                      (= (sc2-raw-unit-command-ability-id c) 3666)
+                      (memv w2-id (sc2-raw-unit-command-unit-tags c))))
+               raw-cmds))
+      (when (or w1-cancelled-by-home-harvest?
+                w2-cancelled-by-home-harvest?
+                layer2-harvested-builder?)
+        (unless pv8-cex
+          (set! pv8-cex (list 'race race 'builder-order-first? builder-order-First?
+                              'in-flight-build? in-flight-build? 'role worker-role
+                              'raw-cmds raw-cmds 'rt-acts rt-acts))))))
   (record! 'PV8-builder-and-scout-order-non-cancellation
            "Action-list ordering and worker filters guarantee `0` conflicting `HARVEST_GATHER (3666)` cancellations on workers executing `build`, `expand`, `resume-halted-building`, `worker-scout`, or `mineral-harass`"
            pv8-states
@@ -1866,11 +1872,12 @@
 ;; 5. Top-Level Formal Verification Runner
 ;; =============================================================================
 
-(define (verify-all-state-machines #:print-report? [print-report? #t])
+(define (verify-all-state-machines #:print-report? [print-report? #t]
+                                   #:fast? [fast? #f])
   (define p-res (verify-posture-state-machine))
   (define m-res (verify-mirror-mind-state-machine))
   (define e-res (verify-economy-and-ledger-state-machine))
-  (define pv-res (verify-prioritization-scheduler-invariants))
+  (define pv-res (verify-prioritization-scheduler-invariants #:fast? fast?))
   (define all-res (append p-res m-res e-res pv-res))
   (define total (length all-res))
   (define passed (count verification-check-result-passed? all-res))

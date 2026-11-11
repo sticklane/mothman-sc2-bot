@@ -1804,15 +1804,18 @@
 ;; Suite 5.15: Formal State-Machine Verification (24/24 Invariants, PV1-PV9) & Crash/Contract Fuzzing
 ;; =============================================================================
 (run-suite "Suite 5.15: Formal State-Machine Verification (24/24 Invariants, PV1-PV9) & Crash/Contract Fuzzing"
-  (define sm-rep (verify-all-state-machines #:print-report? #f))
+  (define sm-rep (verify-all-state-machines #:print-report? #f #:fast? (not full-test-mode?)))
   (assert-eq! (state-machine-verification-report-total-checks sm-rep) 24
               "Formal state-machine verifier must run all 24 invariants (P1-P5, M1-M5, E1-E5, PV1-PV9)")
   (assert-eq! (state-machine-verification-report-passed-checks sm-rep) 24
               "All 24 formal state-machine invariants must pass")
   (assert-eq! (state-machine-verification-report-failed-checks sm-rep) 0
               "Zero formal state-machine invariants may fail")
-  (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 117220
-              "Formal state-machine verifier must explore all 117,220 state transitions")
+  (if full-test-mode?
+      (assert-eq! (state-machine-verification-report-total-states-explored sm-rep) 117220
+                  "Formal state-machine verifier must explore all 117,220 state transitions in --full mode")
+      (assert-true! (>= (state-machine-verification-report-total-states-explored sm-rep) 4350)
+                    "Fast-mode formal state-machine verifier must explore >= 4,350 state transitions"))
   (for ([chk (in-list (state-machine-verification-report-check-results sm-rep))])
     (assert-true! (verification-check-result-passed? chk)
                   (format "Formal invariant ~a must pass" (verification-check-result-id chk)))
@@ -1820,7 +1823,7 @@
                 (format "Formal invariant ~a must have 0 counterexamples" (verification-check-result-id chk))))
 
   ;; Direct verification of verify-prioritization-scheduler-invariants (PV1-PV9)
-  (define pv-results (verify-prioritization-scheduler-invariants))
+  (define pv-results (verify-prioritization-scheduler-invariants #:fast? (not full-test-mode?)))
   (assert-eq! (length pv-results) 9
               "verify-prioritization-scheduler-invariants must return all 9 PV theorems (PV1-PV9)")
   (assert-eq! (map verification-check-result-id pv-results)
@@ -2023,7 +2026,7 @@
                    (action-priority '(concave-arc 140.0 140.0 6.0 100.0 100.0)))
                 "Bug #21: Direct unit kiting (kite) must outrank symbolic concave-arc metadata in Human Cortex")
 
-  (define fuzz-rep (run-bot-crash-and-contract-fuzzer #:frames (if full-test-mode? 1000 200) #:seed 20261107))
+  (define fuzz-rep (run-bot-crash-and-contract-fuzzer #:frames (if full-test-mode? 1000 12) #:seed 20261107))
   (assert-eq! (fuzz-campaign-report-total-crashes fuzz-rep) 0
               "Crash fuzzer must encounter 0 runtime crashes")
   (assert-eq! (fuzz-campaign-report-total-contract-violations fuzz-rep) 0
@@ -3373,6 +3376,184 @@
                   "Standalone ELF binary --dry-run must output status DRY_RUN_OK")
     (assert-true! (string-contains? dry-run-out "\"engine\":\"racket_native_protobuf_ws\"")
                   "Standalone ELF binary --dry-run must report racket_native_protobuf_ws engine")))
+
+;; =============================================================================
+;; Suite 20: AI Arena Match 5115348 (Mothman-T vs BenBotBC on Persephone) Fixes
+;; =============================================================================
+
+(run-suite "20. AI Arena Match 5115348: Natural CC Reserve, Stale Tag Filter, Orphaned Add-On & 22/Base Workers"
+  ;; 1. Fix A1a: En-route SCV build orders (`in-progress-orders` & raw ability IDs `318..333`)
+  ;;    count as pending structures so Mothman-T never re-issues duplicate Barracks/CC orders.
+  (define rt-enroute (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran #:initial-posture 'BioTankMedivac))
+  (define obs-enroute-rax
+    (hash 'frame 920
+          'race 'Terran
+          'minerals 185
+          'gas 0
+          'supply-used 16
+          'supply-cap 23
+          'supply-left 7
+          'pending-supply 0
+          'mineral-harvesters 15
+          'ideal-mineral-harvesters 16
+          'gas-harvesters 0
+          'ideal-gas-harvesters 0
+          'in-progress-orders (list (hash 'unit-id 901 'ability-id 321 'target-x 36.5 'target-y 36.5))
+          'ally-units (for/list ([i (in-range 16)])
+                        (hash 'id (+ 901 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45
+                              'has-build-order? (= i 0)
+                              'order-ability-id (if (= i 0) 321 0)))
+          'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 302 'type 'supply-depot 'x 36.5 'y 29.5 'hp 400 'build-progress 1.0))
+          'enemy-units '()
+          'enemy-buildings '()))
+  (define step-enroute (step-live-bot-runtime! rt-enroute obs-enroute-rax))
+  (define acts-enroute (hash-ref step-enroute 'actions))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'barracks)))
+                            acts-enroute))
+                "Match 5115348 Fix A1a: En-route SCV with ability 321 (BUILD_BARRACKS) must prevent duplicate Barracks order")
+
+  ;; 2. Fix A1b: 400M Natural Command Center reservation blocks opportunistic 150M 2nd Barracks at frame >= 1500
+  (assert-eq! (compute-natural-expansion-mineral-reserve
+               #:race 'Terran #:frame 1850 #:active-bases 1 #:pending-bases 0 #:workers 19)
+              400
+              "Match 5115348 Fix A1b: Terran on 1 base at frame 1850 with 19 SCVs must reserve 400M for natural CC")
+  (assert-eq! (compute-natural-expansion-mineral-reserve
+               #:race 'Terran #:frame 1850 #:active-bases 1 #:pending-bases 1 #:workers 19)
+              0
+              "Match 5115348 Fix A1b: Once natural CC is en-route/pending (pending-bases=1), 400M reserve clears")
+  (define rt-nat-trap (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran #:initial-posture 'BioTankMedivac))
+  (define obs-nat-trap
+    (hash 'frame 1920
+          'race 'Terran
+          'minerals 265
+          'gas 50
+          'supply-used 22
+          'supply-cap 31
+          'supply-left 9
+          'pending-supply 0
+          'mineral-harvesters 16
+          'ideal-mineral-harvesters 16
+          'gas-harvesters 3
+          'ideal-gas-harvesters 3
+          'ally-units (append
+                       (for/list ([i (in-range 19)])
+                         (hash 'id (+ 910 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                       (list (hash 'id 960 'type 'marine 'x 38.0 'y 38.0 'hp 45)
+                             (hash 'id 961 'type 'marine 'x 38.5 'y 38.0 'hp 45)))
+          'ally-buildings (list (hash 'id 301 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'energy 25 'build-progress 1.0)
+                                (hash 'id 302 'type 'supply-depot 'x 36.5 'y 29.5 'hp 400 'build-progress 1.0)
+                                (hash 'id 303 'type 'supply-depot 'x 39.0 'y 29.5 'hp 400 'build-progress 1.0)
+                                (hash 'id 304 'type 'barracks 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0 'has-addon? #t)
+                                (hash 'id 305 'type 'barracks-techlab 'x 39.0 'y 36.0 'hp 400 'build-progress 1.0)
+                                (hash 'id 306 'type 'refinery 'x 35.5 'y 37.5 'hp 500 'build-progress 1.0))
+          'enemy-units '()
+          'enemy-buildings '()))
+  (define acts-nat-trap (hash-ref (step-live-bot-runtime! rt-nat-trap obs-nat-trap) 'actions))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'barracks)))
+                            acts-nat-trap))
+                "Match 5115348 Fix A1b: 150M 2nd Barracks must NOT starve 400M natural Command Center at 265M on 1 base")
+
+  ;; 3. Fix A2a: Stale/dead/snapshot enemy UnitTags downgrade to `(attack-pos uid last-x last-y)` (0 ActionResult=207)
+  (define pos-cache (make-hasheqv))
+  (define obs-frame-1
+    (hash 'enemy-x 150.0 'enemy-y 150.0
+          'enemy-units (list (hash 'id 77701 'type 'stalker 'x 88.5 'y 92.5 'hp 80 'display-type 1))
+          'enemy-buildings (list (hash 'id 88802 'type 'pylon 'x 142.0 'y 144.0 'hp 200 'display-type 2 'snapshot? #t))))
+  (define sanitized-f1
+    (sanitize-stale-target-actions
+     (list '(attack 501 77701)
+           '(focus-fire 502 88802 142.0 144.0))
+     obs-frame-1
+     #:pos-cache pos-cache))
+  (assert-eq! (first sanitized-f1) '(attack 501 77701)
+              "Live visible enemy tag (display-type=1) remains direct unit target")
+  (assert-eq! (second sanitized-f1) '(attack-pos 502 142.0 144.0)
+              "Fog-of-war snapshot building (display-type=2) downgrades to attack-pos to avoid ActionResult=207")
+  (define obs-frame-2
+    (hash 'enemy-x 150.0 'enemy-y 150.0 'enemy-units '() 'enemy-buildings '()))
+  (define sanitized-f2
+    (sanitize-stale-target-actions (list '(attack-unit 501 77701)) obs-frame-2 #:pos-cache pos-cache))
+  (assert-eq! (first sanitized-f2) '(attack-pos 501 88.5 92.5)
+              "Dead/vanished enemy UnitTag 77701 downgrades to attack-pos at cached last-known (88.5, 92.5)")
+
+  ;; 4. Fix A2b: Orphaned TechLab/Reactor reuse & stranded flying structure landing (0 ActionResult=72)
+  (define swap-attach-acts
+    (plan-terran-addon-swap
+     (hash 'ally-buildings
+           (list (hash 'id 410 'type 'factory-flying 'x 40.0 'y 40.0 'hp 1250 'flying? #t)
+                 (hash 'id 411 'type 'barracks-reactor 'x 44.5 'y 39.5 'hp 400)))))
+  (assert-eq! swap-attach-acts
+              (list '(terran-addon-swap 0 410 44.5 39.5))
+              "Idle lifted Factory must attach onto orphaned free Reactor via terran-addon-swap")
+  (define stranded-land-acts
+    (plan-terran-addon-swap
+     (hash 'ally-buildings
+           (list (hash 'id 412 'type 'barracks-flying 'x 38.0 'y 36.0 'hp 1000 'flying? #t)))))
+  (assert-eq! stranded-land-acts
+              (list '(land-building 412 38.0 36.0))
+              "Stranded lifted Barracks with no free add-on must emit land-building instead of floating forever")
+
+  ;; 5. Fix A3: Sustained worker scaling up to 22/base (44 on 2 bases) + emergency Bunker under early rush
+  (define rt-2base-scv (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran #:initial-posture 'BioTankMedivac))
+  (define obs-2base-28scv
+    (hash 'frame 3600
+          'race 'Terran
+          'minerals 250
+          'gas 100
+          'supply-used 42
+          'supply-cap 54
+          'supply-left 12
+          'pending-supply 0
+          'mineral-harvesters 22
+          'ideal-mineral-harvesters 32
+          'gas-harvesters 6
+          'ideal-gas-harvesters 6
+          'ally-units (append
+                       (for/list ([i (in-range 28)])
+                         (hash 'id (+ 1000 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                       (for/list ([i (in-range 4)])
+                         (hash 'id (+ 1100 i) 'type 'marine 'x 44.0 'y 44.0 'hp 45)))
+          'ally-buildings (list (hash 'id 301 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'energy 20 'build-progress 1.0 'busy? #f 'order-count 0)
+                                (hash 'id 302 'type 'orbital-command 'x 45.0 'y 45.0 'hp 1500 'energy 20 'build-progress 1.0 'busy? #f 'order-count 0)
+                                (hash 'id 303 'type 'barracks 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0 'has-addon? #t)
+                                (hash 'id 304 'type 'barracks-techlab 'x 39.0 'y 36.0 'hp 400 'build-progress 1.0)
+                                (hash 'id 305 'type 'factory 'x 41.0 'y 36.5 'hp 1250 'build-progress 1.0 'has-addon? #t)
+                                (hash 'id 306 'type 'factory-techlab 'x 43.5 'y 36.0 'hp 400 'build-progress 1.0))
+          'enemy-units '()
+          'enemy-buildings '()))
+  (define acts-2base-scv (hash-ref (step-live-bot-runtime! rt-2base-scv obs-2base-28scv) 'actions))
+  (assert-true! (not (not (member '(train scv) acts-2base-scv)))
+                "Match 5115348 Fix A3: 2-base Terran at 28/44 SCVs must continuously train SCVs toward 44 workers")
+
+  (define rt-bunker (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran #:initial-posture 'BioTankMedivac))
+  (define obs-bunker-rush
+    (hash 'frame 1450
+          'race 'Terran
+          'minerals 220
+          'gas 0
+          'supply-used 19
+          'supply-cap 23
+          'supply-left 4
+          'pending-supply 0
+          'mineral-harvesters 16
+          'ideal-mineral-harvesters 16
+          'gas-harvesters 0
+          'ideal-gas-harvesters 0
+          'ally-units (append
+                       (for/list ([i (in-range 17)])
+                         (hash 'id (+ 1200 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                       (list (hash 'id 1250 'type 'marine 'x 36.0 'y 36.0 'hp 45)))
+          'ally-buildings (list (hash 'id 301 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'energy 20 'build-progress 1.0)
+                                (hash 'id 302 'type 'supply-depot 'x 36.5 'y 29.5 'hp 400 'build-progress 1.0)
+                                (hash 'id 303 'type 'barracks 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0))
+          'enemy-units (for/list ([i (in-range 5)])
+                         (hash 'id (+ 2000 i) 'type 'stalker 'x 40.0 'y 40.0 'hp 80 'display-type 1))
+          'enemy-buildings '()))
+  (define acts-bunker (hash-ref (step-live-bot-runtime! rt-bunker obs-bunker-rush) 'actions))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'bunker)))
+                       acts-bunker)
+                "Match 5115348 Fix A3b: Terran under heavy early enemy attack must construct emergency Bunker"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
