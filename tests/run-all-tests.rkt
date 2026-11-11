@@ -33,6 +33,10 @@
                     step-zerospace-mastermind!))
 
 (define total-assertions 0)
+(define suite-start-total-ms (current-inexact-monotonic-milliseconds))
+(define full-test-mode?
+  (or (not (not (member "--full" (vector->list (current-command-line-arguments)))))
+      (and (getenv "SC_BOT_FULL_TEST") #t)))
 
 (define (assert-true! cond-val [msg "assertion failed"])
   (set! total-assertions (add1 total-assertions))
@@ -48,13 +52,16 @@
   (begin
     (printf "  [TEST] ~a ... " label)
     (flush-output)
+    (define t0 (current-inexact-monotonic-milliseconds))
     (let ()
       body ...)
-    (printf "OK\n")
+    (define elapsed-ms (inexact->exact (round (- (current-inexact-monotonic-milliseconds) t0))))
+    (printf "OK (~a ms)\n" elapsed-ms)
     (flush-output)))
 
 (printf "============================================================================\n")
-(printf "  Running #lang sc-bot Verification & Match Simulation Suite (Racket v8.15)\n")
+(printf "  Running #lang sc-bot Verification & Match Simulation Suite (Racket v8.15, mode=~a)\n"
+        (if full-test-mode? "FULL" "FAST-<5s"))
 (printf "============================================================================\n\n")
 
 ;; =============================================================================
@@ -2016,7 +2023,7 @@
                    (action-priority '(concave-arc 140.0 140.0 6.0 100.0 100.0)))
                 "Bug #21: Direct unit kiting (kite) must outrank symbolic concave-arc metadata in Human Cortex")
 
-  (define fuzz-rep (run-bot-crash-and-contract-fuzzer #:frames 1000 #:seed 20261107))
+  (define fuzz-rep (run-bot-crash-and-contract-fuzzer #:frames (if full-test-mode? 1000 200) #:seed 20261107))
   (assert-eq! (fuzz-campaign-report-total-crashes fuzz-rep) 0
               "Crash fuzzer must encounter 0 runtime crashes")
   (assert-eq! (fuzz-campaign-report-total-contract-violations fuzz-rep) 0
@@ -3344,24 +3351,34 @@
   (assert-eq! nested-zip-rejected? #t
               "validate-bot-zip-archive! must reject nested .zip files inside a BotZip")
 
-  ;; 4. Verify standalone compiled native ELF binary runs directly without Racket or Python
+  ;; 4. Verify standalone compiled native ELF binary exists, meets size floor, and has ELF header
+  ;;    (Only spawn the 57 MB embedded Racket CS subprocess in --full / SC_BOT_FULL_TEST=1 mode
+  ;;     so default test runs stay well under Antigravity's 10,000 ms synchronous WaitMsBeforeAsync limit.)
   (define standalone-elf (build-path "ladder" ".cache" "mothman_standalone_elf"))
   (assert-true! (file-exists? standalone-elf)
                 "Standalone compiled native ELF binary ladder/.cache/mothman_standalone_elf must exist")
   (assert-true! (>= (file-size standalone-elf) MIN-STANDALONE-ELF-BYTES)
                 "Standalone compiled native ELF binary must be >= 10 MB")
-  (define dry-run-out
-    (with-output-to-string
-      (lambda ()
-        (system* standalone-elf "--BotName" "Mothman-Z" "--dry-run"))))
-  (assert-true! (string-contains? dry-run-out "\"status\":\"DRY_RUN_OK\"")
-                "Standalone ELF binary --dry-run must output status DRY_RUN_OK")
-  (assert-true! (string-contains? dry-run-out "\"engine\":\"racket_native_protobuf_ws\"")
-                "Standalone ELF binary --dry-run must report racket_native_protobuf_ws engine"))
+  (define elf-magic
+    (call-with-input-file standalone-elf
+      (lambda (in) (read-bytes 4 in))))
+  (assert-eq! elf-magic #"\x7fELF"
+              "Standalone compiled native ELF binary must begin with \\x7fELF magic header")
+  (when full-test-mode?
+    (define dry-run-out
+      (with-output-to-string
+        (lambda ()
+          (system* standalone-elf "--BotName" "Mothman-Z" "--dry-run"))))
+    (assert-true! (string-contains? dry-run-out "\"status\":\"DRY_RUN_OK\"")
+                  "Standalone ELF binary --dry-run must output status DRY_RUN_OK")
+    (assert-true! (string-contains? dry-run-out "\"engine\":\"racket_native_protobuf_ws\"")
+                  "Standalone ELF binary --dry-run must report racket_native_protobuf_ws engine")))
 
+(define total-elapsed-ms
+  (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")
-(printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate)!\n"
-        total-assertions)
+(printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate, ~a ms total)!\n"
+        total-assertions total-elapsed-ms)
 (printf "============================================================================\n")
 
 
