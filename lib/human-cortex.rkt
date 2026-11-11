@@ -190,28 +190,59 @@
 ;;   8: Active Scouts (forward scouts > 28 tiles from home base)
 ;;   9: Static Defense & Ramp Wall Depots
 ;;   0: All-In / Emergency Mobilization Reserve
+(define NON-COMBAT-SELECTION-INTRUDER-TYPES
+  '(drone drone-burrowed probe scv mule
+    larva egg cocoon baneling-cocoon ravager-cocoon
+    lurker-egg lurker-mp-egg brood-lord-cocoon overlord-cocoon
+    overlord overlord-transport
+    creep-tumor creep-tumor-burrowed creep-tumor-queen
+    auto-turret point-defense-drone raven-repair-drone
+    kd8-charge parasitic-bomb-dummy adept-phase-shift interceptor))
+
+(define CORTEX-HARASS-UNIT-TYPES
+  '(banshee mutalisk oracle phoenix void-ray voidray
+    warp-prism warp-prism-phasing medivac reaper hellion adept
+    viking viking-fighter viking-assault))
+
+(define CORTEX-CASTER-SIEGE-UNIT-TYPES
+  '(queen queen-burrowed raven viper infestor infestor-burrowed
+    high-templar sentry disruptor disruptor-phased
+    siege-tank siege-tank-sieged liberator liberator-ag
+    lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+    widow-mine widow-mine-burrowed
+    swarm-host swarmhost swarm-host-mp swarm-host-burrowed
+    observer observer-siege-mode overseer overseer-siege-mode))
+
 (define (cortex-sync-control-groups! cortex ally-units ally-buildings base-x base-y)
   (define actions '())
   (define (emit! a) (set! actions (cons a actions)))
-  (define harass-types
-    '(banshee mutalisk oracle phoenix void-ray warp-prism medivac reaper hellion adept viking))
-  (define caster-siege-types
-    '(queen raven viper infestor high-templar sentry disruptor
-      siege-tank siege-tank-sieged liberator lurker lurker-burrowed observer overseer))
-  (define worker-types '(drone probe scv mule larva egg cocoon overlord))
   (define townhall-types
-    '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
-  (define primary-prod-types '(barracks gateway warp-gate))
-  (define tech-prod-types '(factory starport robotics-facility stargate))
+    '(hatchery lair hive nexus
+      command-center command-center-flying
+      orbital-command orbital-command-flying
+      planetary-fortress))
+  (define primary-prod-types '(barracks barracks-flying gateway warp-gate warpgate))
+  (define tech-prod-types
+    '(factory factory-flying starport starport-flying robotics-facility stargate))
   (define upgrade-bldg-types
     '(engineering-bay armory fusion-core ghost-academy
       barracks-tech-lab barracks-techlab factory-tech-lab factory-techlab starport-tech-lab starport-techlab
-      forge cybernetics-core twilight-council robotics-bay fleet-beacon templar-archive dark-shrine
+      forge cybernetics-core twilight-council robotics-bay robotics-support-bay
+      fleet-beacon templar-archive templar-archives dark-shrine
       evolution-chamber spire greater-spire spawning-pool infestation-pit
-      baneling-nest roach-warren hydralisk-den lurker-den ultralisk-cavern))
+      baneling-nest roach-warren hydralisk-den lurker-den lurker-den-mp ultralisk-cavern))
   (define defense-wall-types
-    '(supply-depot supply-depot-lowered bunker missile-turret
-      photon-cannon shield-battery spine-crawler spore-crawler))
+    '(supply-depot supply-depot-lowered bunker missile-turret sensor-tower
+      pylon-overcharged photon-cannon shield-battery
+      spine-crawler spine-crawler-uprooted spore-crawler spore-crawler-uprooted))
+
+  (define th-coords
+    (let ([pts (for/list ([b (in-list ally-buildings)]
+                          #:when (and (not (hash-ref b 'in-transit? #f))
+                                      (< (hash-ref b 'id 0) 9000000)
+                                      (memq (hash-ref b 'type 'unknown) townhall-types)))
+                 (cons (hash-ref b 'x base-x) (hash-ref b 'y base-y)))])
+      (if (null? pts) (list (cons base-x base-y)) pts)))
 
   (define vec (human-cortex-control-groups cortex))
   (define existing-g2-set (list->set (vector-ref vec 2)))
@@ -221,26 +252,40 @@
     (define t (hash-ref u 'type 'unknown))
     (define ux (hash-ref u 'x base-x))
     (define uy (hash-ref u 'y base-y))
-    (define d-home (sqrt (+ (sqr (- ux base-x)) (sqr (- uy base-y)))))
+    (define d-nearest-th
+      (apply min
+             (for/list ([pt (in-list th-coords)])
+               (sqrt (+ (sqr (- ux (car pt))) (sqr (- uy (cdr pt))))))))
+    (define worker-building?
+      (or (hash-ref u 'has-build-order? #f)
+          (and (hash-ref u 'build-target #f) #t)
+          (memq (hash-ref u 'order-kind #f) '(build expand))))
     (when (> id 0)
       (cond
-        [(and (memq t '(drone probe scv overlord observer)) (> d-home 28.0))
+        [(and (or (eq? t 'overlord)
+                  (and (memq t '(drone probe scv))
+                       (not worker-building?)))
+              (> d-nearest-th 28.0))
          (vector-set! group-tags 8 (cons id (vector-ref group-tags 8)))]
-        [(or (memq t harass-types) (set-member? existing-g2-set id))
+        [(and (not (memq t NON-COMBAT-SELECTION-INTRUDER-TYPES))
+              (or (memq t CORTEX-HARASS-UNIT-TYPES)
+                  (set-member? existing-g2-set id)))
          (vector-set! group-tags 2 (cons id (vector-ref group-tags 2)))
          (vector-set! group-tags 0 (cons id (vector-ref group-tags 0)))]
-        [(memq t caster-siege-types)
+        [(memq t CORTEX-CASTER-SIEGE-UNIT-TYPES)
          (vector-set! group-tags 3 (cons id (vector-ref group-tags 3)))
-         (when (not (eq? t 'queen))
+         (when (not (memq t '(queen queen-burrowed)))
            (vector-set! group-tags 0 (cons id (vector-ref group-tags 0))))]
-        [(not (memq t worker-types))
+        [(not (memq t NON-COMBAT-SELECTION-INTRUDER-TYPES))
          (vector-set! group-tags 1 (cons id (vector-ref group-tags 1)))
          (vector-set! group-tags 0 (cons id (vector-ref group-tags 0)))])))
 
   (for ([b (in-list ally-buildings)])
     (define id (hash-ref b 'id 0))
     (define t (hash-ref b 'type 'unknown))
-    (when (> id 0)
+    (when (and (> id 0)
+               (< id 9000000)
+               (not (hash-ref b 'in-transit? #f)))
       (cond
         [(memq t townhall-types)
          (vector-set! group-tags 4 (cons id (vector-ref group-tags 4)))]
@@ -257,16 +302,19 @@
   (for ([g (in-list '(4 5 6 7 9 1 2 3 8 0))])
     (define desired (sort (remove-duplicates (vector-ref group-tags g)) <))
     (define current (sort (remove-duplicates (vector-ref vec g)) <))
-    (when (and (not (null? desired))
-               (not (equal? desired current)))
-      (cond
-        [(memv g '(1 2 3 8))
-         (cortex-steal-control-group! cortex g desired)
-         (vector-set! vec g desired)
-         (emit! (list 'control-group-steal g desired))]
-        [else
-         (cortex-set-control-group! cortex g desired)
-         (emit! (list 'control-group-set g desired))])))
+    (cond
+      [(and (null? desired) (not (null? current)))
+       (vector-set! vec g '())]
+      [(and (not (null? desired))
+            (not (equal? desired current)))
+       (cond
+         [(memv g '(1 2 3 8))
+          (cortex-steal-control-group! cortex g desired)
+          (vector-set! vec g desired)
+          (emit! (list 'control-group-steal g desired))]
+         [else
+          (cortex-set-control-group! cortex g desired)
+          (emit! (list 'control-group-set g desired))])]))
   (reverse actions))
 
 ;; Inspect a building control group (`4` = Townhalls, `5` = Primary Production,
@@ -274,19 +322,20 @@
 ;; open production/research slot capacity across all ready structures in that group.
 ;; - Reactor-attached facilities provide 2 concurrent production slots.
 ;; - TechLab-attached or naked facilities provide 1 production slot.
-;; - Busy facilities (`order-count >= max-slots`) provide 0 open slots.
+;; - Busy facilities (`order-count >= max-slots`), unpowered Protoss structures, and flying structures provide 0 open slots.
 (define (cortex-production-group-capacity cortex ally-buildings group-id)
   (define group-tag-set (list->set (cortex-get-control-group cortex group-id)))
   (define default-types-for-group
     (case group-id
       [(4) '(hatchery lair hive nexus command-center orbital-command planetary-fortress)]
-      [(5) '(barracks gateway warp-gate)]
+      [(5) '(barracks gateway warp-gate warpgate)]
       [(6) '(factory starport robotics-facility stargate)]
       [(7) '(engineering-bay armory fusion-core ghost-academy
              barracks-tech-lab barracks-techlab factory-tech-lab factory-techlab starport-tech-lab starport-techlab
-             forge cybernetics-core twilight-council robotics-bay fleet-beacon templar-archive dark-shrine
+             forge cybernetics-core twilight-council robotics-bay robotics-support-bay
+             fleet-beacon templar-archive templar-archives dark-shrine
              evolution-chamber spire greater-spire spawning-pool infestation-pit
-             baneling-nest roach-warren hydralisk-den lurker-den ultralisk-cavern)]
+             baneling-nest roach-warren hydralisk-den lurker-den lurker-den-mp ultralisk-cavern)]
       [else '()]))
 
   (define ready-bldgs
@@ -294,40 +343,57 @@
               (define id (hash-ref b 'id 0))
               (define t (hash-ref b 'type 'unknown))
               (define prog (hash-ref b 'build-progress 1.0))
-              (and (>= prog 1.0)
+              (and (> id 0)
+                   (< id 9000000)
+                   (not (hash-ref b 'in-transit? #f))
+                   (>= prog SC2-BUILD-COMPLETE-PROGRESS)
+                   (not (hash-ref b 'flying? #f))
+                   (not (memq t '(command-center-flying orbital-command-flying
+                                  barracks-flying factory-flying starport-flying
+                                  spine-crawler-uprooted spore-crawler-uprooted)))
+                   (not (eq? (hash-ref b 'powered? #t) #f))
                    (or (set-member? group-tag-set id)
                        (memq t default-types-for-group))))
             ally-buildings))
 
   (define (facility-addon-kind b)
-    (define explicit (hash-ref b 'addon #f))
+    (define canon-fac (sc2-canonical-structure-sym (hash-ref b 'type 'unknown)))
     (cond
-      [(memq explicit '(reactor barracks-reactor factory-reactor starport-reactor)) 'reactor]
-      [(memq explicit '(tech-lab techlab barracks-tech-lab barracks-techlab
-                        factory-tech-lab factory-techlab starport-tech-lab starport-techlab))
-       'tech-lab]
+      [(not (memq canon-fac '(barracks factory starport))) 'none]
       [else
-       (define bx (hash-ref b 'x 0.0))
-       (define by (hash-ref b 'y 0.0))
-       (define ax (+ bx SC2-TERRAN-ADDON-OFFSET-X))
-       (define ay (+ by SC2-TERRAN-ADDON-OFFSET-Y))
-       (define nearby-addon
-         (findf (lambda (other)
-                  (and (>= (hash-ref other 'build-progress 1.0) 1.0)
-                       (<= (sqrt (+ (sqr (- (hash-ref other 'x 0.0) ax))
-                                    (sqr (- (hash-ref other 'y 0.0) ay))))
-                           1.75)
-                       (memq (hash-ref other 'type 'unknown)
-                             '(reactor barracks-reactor factory-reactor starport-reactor
-                               tech-lab techlab barracks-tech-lab barracks-techlab
-                               factory-tech-lab factory-techlab starport-tech-lab starport-techlab))))
-                ally-buildings))
+       (define explicit (hash-ref b 'addon #f))
+       (define addon-ready? (hash-ref b 'addon-ready? #t))
        (cond
-         [(not nearby-addon) 'none]
-         [(memq (hash-ref nearby-addon 'type 'unknown)
-                '(reactor barracks-reactor factory-reactor starport-reactor))
-          'reactor]
-         [else 'tech-lab])]))
+         [(or (eq? explicit 'addon-building) (eq? addon-ready? #f)) 'none]
+         [(memq explicit '(reactor barracks-reactor factory-reactor starport-reactor)) 'reactor]
+         [(memq explicit '(tech-lab techlab barracks-tech-lab barracks-techlab
+                           factory-tech-lab factory-techlab starport-tech-lab starport-techlab))
+          'tech-lab]
+         [else
+          (define bx (hash-ref b 'x 0.0))
+          (define by (hash-ref b 'y 0.0))
+          (define ax (+ bx SC2-TERRAN-ADDON-OFFSET-X))
+          (define ay (+ by SC2-TERRAN-ADDON-OFFSET-Y))
+          (define nearby-addon
+            (findf (lambda (other)
+                     (and (>= (hash-ref other 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                          (not (hash-ref other 'in-transit? #f))
+                          (not (hash-ref other 'flying? #f))
+                          (<= (sqrt (+ (sqr (- (hash-ref other 'x 0.0) ax))
+                                       (sqr (- (hash-ref other 'y 0.0) ay))))
+                              1.75)
+                          (memq (hash-ref other 'type 'unknown)
+                                '(barracks-reactor factory-reactor starport-reactor
+                                  barracks-tech-lab barracks-techlab
+                                  factory-tech-lab factory-techlab
+                                  starport-tech-lab starport-techlab))))
+                   ally-buildings))
+          (cond
+            [(not nearby-addon) 'none]
+            [(memq (hash-ref nearby-addon 'type 'unknown)
+                   '(barracks-reactor factory-reactor starport-reactor))
+             'reactor]
+            [else 'tech-lab])])]))
 
   (define ready-tags '())
   (define idle-tags '())
@@ -341,17 +407,13 @@
   (for ([b (in-list ready-bldgs)])
     (define id (hash-ref b 'id 0))
     (define raw-t (hash-ref b 'type 'unknown))
-    (define t
-      (case raw-t
-        [(warpgate)             'warp-gate]
-        [(robotics-support-bay) 'robotics-bay]
-        [(templar-archives)     'templar-archive]
-        [else                   raw-t]))
+    (define t (sc2-canonical-structure-sym raw-t))
     (define addon-kind (facility-addon-kind b))
     (define max-slots (if (eq? addon-kind 'reactor) 2 1))
     (define used-slots
       (max (hash-ref b 'order-count 0)
            (length (hash-ref b 'orders '()))
+           (if (hash-ref b 'busy? #f) 1 0)
            (let ([aid (hash-ref b 'order-ability-id #f)])
              (if (and (exact-integer? aid) (> aid 0)) 1 0))))
     (define open-slots (max 0 (- max-slots used-slots)))
@@ -384,7 +446,9 @@
 (define (cortex-idle-facilities-in-group cortex ally-buildings group-id [bldg-type #f])
   (define cap (cortex-production-group-capacity cortex ally-buildings group-id))
   (if bldg-type
-      (hash-ref (hash-ref cap 'idle-tags-by-type (hash)) bldg-type '())
+      (hash-ref (hash-ref cap 'idle-tags-by-type (hash))
+                (sc2-canonical-structure-sym bldg-type)
+                '())
       (hash-ref cap 'idle-tags '())))
 
 ;; =============================================================================
@@ -466,10 +530,6 @@
 ;;     6. On-the-Fly Control Group Updates (`control-group-steal` / `control-group-set`)
 ;; =============================================================================
 
-(define NON-COMBAT-SELECTION-INTRUDER-TYPES
-  '(drone probe scv mule larva egg cocoon baneling-cocoon ravager-cocoon
-    lurker-mp-egg brood-lord-cocoon overlord-cocoon overlord creep-tumor creep-tumor-burrowed))
-
 (define (cortex-active-selection cortex)
   (hash-ref (human-cortex-camera-bookmarks cortex) 'active-selection '()))
 
@@ -545,15 +605,10 @@
 
 (define (infer-natural-control-group-for-units unit-records)
   (define types (remove-duplicates (map (lambda (u) (hash-ref u 'type 'unknown)) unit-records)))
-  (define harass-types
-    '(banshee mutalisk oracle phoenix void-ray warp-prism medivac reaper hellion adept viking))
-  (define caster-siege-types
-    '(queen raven viper infestor high-templar sentry disruptor
-      siege-tank siege-tank-sieged liberator lurker lurker-burrowed observer overseer))
   (cond
     [(null? types) #f]
-    [(andmap (lambda (t) (memq t caster-siege-types)) types) 3]
-    [(andmap (lambda (t) (memq t harass-types)) types) 2]
+    [(andmap (lambda (t) (memq t CORTEX-CASTER-SIEGE-UNIT-TYPES)) types) 3]
+    [(andmap (lambda (t) (memq t CORTEX-HARASS-UNIT-TYPES)) types) 2]
     [(andmap (lambda (t) (not (memq t NON-COMBAT-SELECTION-INTRUDER-TYPES))) types) 1]
     [else #f]))
 
@@ -604,9 +659,10 @@
                  (compatible-pred u)
                  (and desired-are-combat?
                       (not (memq ut NON-COMBAT-SELECTION-INTRUDER-TYPES))
-                      (not (eq? ut 'queen))
-                      (not (eq? ut 'siege-tank-sieged))
-                      (not (eq? ut 'lurker-burrowed)))))))
+                      (not (memq ut '(queen queen-burrowed
+                                      siege-tank-sieged liberator-ag
+                                      lurker-burrowed lurker-mp-burrowed
+                                      widow-mine-burrowed swarm-host-burrowed))))))))
 
   (define (ids->records ids)
     (filter-map (lambda (id) (hash-ref unit-by-id id #f)) ids))

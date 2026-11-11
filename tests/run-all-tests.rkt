@@ -39,7 +39,8 @@
                   sc2-raw-unit-command-ability-id
                   sc2-raw-unit-command-target-unit-tag
                   sc2-raw-unit-command-unit-tags
-                  saturate-workers-and-gas-commands)
+                  saturate-workers-and-gas-commands
+                  translate-bot-actions->sc2-raw-commands)
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
                   mpq-hash
@@ -4104,9 +4105,167 @@
   (assert-true! (procedure? parse-sc2-replay)
                 "lib/sc2-mpq-replay-parser.rkt must export parse-sc2-replay"))
 
+;; =============================================================================
+;; 25. Generalized Bank Streams, Canonical Equivalence, Escrow Liveness,
+;;     Emergency Pylon Power, Random Personality & Brain-Actuator Alignment
+;; =============================================================================
+(run-suite "25. Generalized Bank Streams, Equivalence, Escrow Liveness & Brain-Actuator Alignment"
+  ;; 25.1 Canonical structure & unit equivalence (flying, morphed, rich, uprooted, free add-ons)
+  (define eq-counts
+    (hasheq 'factory-flying 1
+            'greater-spire 1
+            'hive 1
+            'lurker-den-mp 1
+            'refinery-rich 1
+            'pylon-overcharged 1
+            'spore-crawler-uprooted 1
+            'templar-archive 1
+            'tech-lab 1
+            'starport-techlab 1))
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'factory) 1
+              "Flying Factory must count toward existing Factory structures")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'spire) 1
+              "Greater Spire must satisfy Spire structure equivalence")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'hatchery) 1
+              "Hive must satisfy Hatchery/Lair structure equivalence")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'lurker-den) 1
+              "lurker-den-mp must satisfy lurker-den equivalence")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'refinery) 1
+              "refinery-rich must satisfy refinery equivalence")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'pylon) 1
+              "pylon-overcharged must satisfy pylon equivalence")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'templar-archives) 1
+              "templar-archive must satisfy templar-archives equivalence")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'barracks-techlab #t) 1
+              "Unattached tech-lab must count when include-free-addons? is #t")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'barracks-techlab #f) 0
+              "Unattached tech-lab must NOT satisfy attached TechLab research/unit prereqs when #f")
+  (assert-eq! (sc2-count-equivalent-structures eq-counts 'starport-reactor) 0
+              "starport-techlab must NEVER be double-counted as starport-reactor")
+  (assert-true! (sc2-unit-is-detector-sym? 'observer-siege-mode)
+                "observer-siege-mode must be classified as a detector in combat stats")
+  (assert-true! (sc2-unit-is-detector-sym? 'overseer-siege-mode)
+                "overseer-siege-mode must be classified as a detector in combat stats")
+  (assert-eq! (sc2-min-cost 'siege-tank-sieged) 150
+              "siege-tank-sieged must preserve full 150M cost in minimax trade valuation")
+
+  ;; 25.2 Decoupled 8-stream bank `other-hard-min` survival protection
+  (define gsa-surv
+    (allocate-decoupled-goal-streams
+     #:race 'Zerg
+     #:frame 3600
+     #:minerals 250
+     #:gas 200
+     #:supply-used 42
+     #:supply-cap 44
+     #:pending-supply 0
+     #:workers 28
+     #:active-bases 2
+     #:gas-harvesters 6
+     #:tech-goal-sym 'spire
+     #:tech-prereq-ready? #t))
+  (define tech-spendable-m
+    (car (hash-ref (decoupled-bank-allocation-spendable-by-stream gsa-surv) 'tech '(0 . 0))))
+  (assert-true! (<= tech-spendable-m 100)
+                "Decoupled 'tech stream must NOT subtract its own 200M soft reserve from hard survival supply+worker reserves")
+
+  ;; 25.3 `greater-spire` morph prereq unlock & `macro-brain-can-spend?` no 2x self-blocking
+  (assert-true! (sc2-tech-prereqs-ready?
+                 'greater-spire
+                 (hasheq 'hive 1 'spawning-pool 1 'spire 1 'infestation-pit 1 'extractor 4)
+                 (hasheq 'drone 60 'corruptor 6))
+                "sc2-tech-prereqs-ready? must recognize ready 'spire in ready-building-counts for greater-spire morph")
+
+  (define ws-imm-self
+    (make-macro-world-state
+     #:race 'Protoss #:enemy-race 'Terran #:frame 3800
+     #:minerals 180 #:gas 150 #:supply-used 46 #:supply-cap 62
+     #:workers 32 #:army-supply 14 #:active-bases 2
+     #:ready-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 1 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+     #:total-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 1 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+     #:unit-counts (hasheq 'probe 32 'stalker 7)
+     #:researched-upgrades '(warp-gate-research) #:pending-upgrades '()
+     #:open-facility-slots (hasheq 'robotics-facility 1 'townhall 0)))
+  (define dec-imm-self (step-priority-macro-brain ws-imm-self))
+  (when (eq? (macro-brain-decision-saving-for dec-imm-self) 'immortal)
+    (assert-true! (macro-brain-can-spend? dec-imm-self 'immortal 280 150 'combat-unit)
+                  "macro-brain-can-spend? must allow saving-for target 'immortal at 280M without 2x self-blocking"))
+
+  ;; 25.4 Match #5117327 Protoss emergency Pylon recovery when 0 Pylons / unpowered Gateway at 23/30 supply
+  (define rt-unpow (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-unpow
+    (step-live-bot-runtime!
+     rt-unpow
+     (hash 'frame 2200 'minerals 150 'gas 50 'supply-used 23 'supply-cap 30 'supply-left 7
+           'mineral-harvesters 20 'vespene-harvesters 3
+           'base-x 32.5 'base-y 32.5 'natural-x 52.5 'natural-y 56.5
+           'ally-units (for/list ([i (in-range 23)])
+                         (hash 'id (+ 10 i) 'type 'probe 'x 32.5 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 301 'type 'nexus 'x 32.5 'y 32.5 'hp 2000 'build-progress 1.0)
+                                 (hash 'id 302 'type 'nexus 'x 52.5 'y 56.5 'hp 2000 'build-progress 1.0)
+                                 (hash 'id 303 'type 'gateway 'x 38.5 'y 36.5 'hp 1000 'build-progress 1.0 'powered? #f))
+           'enemy-units '())))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'pylon)))
+                       (hash-ref res-unpow 'actions '()))
+                "Match #5117327: Protoss with 0 Pylons / unpowered Gateway at 23/30 supply must immediately build an emergency Pylon")
+
+  ;; 25.5 Mothman-X Random frame-0 personality re-binding & Layer-2 telemetry merge
+  (define rt-rand-z (make-live-bot-runtime #:bot-name 'Mothman-X #:race 'Random))
+  (define res-rand-z
+    (step-live-bot-runtime!
+     rt-rand-z
+     (hash 'frame 0 'minerals 50 'gas 0 'supply-used 12 'supply-cap 14 'supply-left 2
+           'mineral-harvesters 12 'vespene-harvesters 0
+           'ally-units (list (hash 'id 11 'type 'drone 'x 32.5 'y 32.5 'hp 40)
+                             (hash 'id 12 'type 'overlord 'x 34.5 'y 34.5 'hp 200))
+           'ally-buildings (list (hash 'id 21 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0 'larva-count 3))
+           'enemy-units '())))
+  (assert-eq! (live-bot-runtime-actual-race rt-rand-z) 'Zerg
+              "Mothman-X rolling Zerg must resolve actual-race to 'Zerg on frame 0")
+  (assert-eq! (bot-personality-name (mastermind-state-personality (live-bot-runtime-mastermind rt-rand-z)))
+              'SCARLETT-CREEP-SWARM-PERSONALITY
+              "Mothman-X rolling Zerg must re-bind personality from initial CLEM to SCARLETT-CREEP-SWARM-PERSONALITY")
+  (assert-true! (hash-has-key? (hash-ref res-rand-z 'telemetry (hash)) 'decoupled-stream-spendable)
+                "step-live-bot-runtime! telemetry must merge and preserve Layer-2 'decoupled-stream-spendable")
+
+  ;; 25.6 Blizzard AbilityId mapping, 3x3 half-tile coordinate snapping & 2-tag Archon wire morph
+  (assert-eq! (engine-order-target-symbol 324 #f) 'bunker
+              "Blizzard AbilityId 324 (build-bunker) must map to 'bunker, not 'engineering-bay")
+  (assert-eq! (engine-order-target-symbol 322 #f) 'engineering-bay
+              "Blizzard AbilityId 322 (build-engineering-bay) must map to 'engineering-bay")
+  (assert-eq! (engine-order-target-symbol 895 #f) 'shield-battery
+              "Blizzard AbilityId 895 (build-shield-battery) must map to 'shield-battery")
+  (define ol-snap (make-order-ledger))
+  (define-values (gw-x _gw-y) (order-ledger-resolve-build-coords! ol-snap 'gateway 38.1 36.2 '() 100))
+  (define-values (py-x _py-y) (order-ledger-resolve-build-coords! ol-snap 'pylon 34.4 34.6 '() 100))
+  (assert-eq! (- gw-x (floor gw-x)) 0.5
+              "3x3 Gateway footprint must snap to half-tile (x.5) coordinate")
+  (assert-eq! (- py-x (floor py-x)) 0.0
+              "2x2 Pylon footprint must snap to integer (x.0) coordinate")
+
+  (define (mk-ht-unit tag x y)
+    (sc2-unit 1 1 tag 75 1 (sc2-point3d x y 8.0) 0.0 0.375 1.0 0 #f #f #f
+              40.0 40.0 40.0 40.0 50.0 200.0 0 0 #f #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 0))
+  (define obs-1ht
+    (sc2-observation 4000 (sc2-player-common 1 200 200 60 80 30 30 0 0 0 0)
+                     (list (mk-ht-unit 801 40.0 40.0))
+                     '() '() #f '() '() '() '() '() '()))
+  (define obs-2ht
+    (sc2-observation 4000 (sc2-player-common 1 200 200 60 80 30 30 0 0 0 0)
+                     (list (mk-ht-unit 801 40.0 40.0) (mk-ht-unit 802 41.0 40.0))
+                     '() '() #f '() '() '() '() '() '()))
+  (assert-eq! (translate-bot-actions->sc2-raw-commands '((morph archon)) obs-1ht) '()
+              "Archon morph with only 1 Templar must emit 0 wire commands")
+  (define cmds-2ht (translate-bot-actions->sc2-raw-commands '((morph archon)) obs-2ht))
+  (assert-eq! (length cmds-2ht) 1
+              "Archon morph with 2 Templars must emit 1 wire command")
+  (assert-eq! (length (sc2-raw-unit-command-unit-tags (car cmds-2ht))) 2
+              "Archon morph wire command must carry exactly 2 Templar tags"))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate, ~a ms total)!\n"
         total-assertions total-elapsed-ms)
 (printf "============================================================================\n")
+

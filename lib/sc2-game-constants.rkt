@@ -10,7 +10,8 @@
 ;; of truth rather than inlined as magic literals.
 ;; =============================================================================
 
-(require racket/match
+(require racket/list
+         racket/match
          racket/math
          racket/set)
 
@@ -403,7 +404,80 @@
    'protoss-shields-2        '(225 225 0)
    'protoss-shields-3        '(300 300 0)
    'protoss-air-weapons-1    '(100 100 0)
-   'protoss-air-armor-1      '(150 150 0)))
+   'protoss-air-weapons-2    '(175 175 0)
+   'protoss-air-weapons-3    '(250 250 0)
+   'protoss-air-armor-1      '(150 150 0)
+   'protoss-air-armor-2      '(225 225 0)
+   'protoss-air-armor-3      '(300 300 0)
+   'warp-gate                '(50 50 0)
+   'adept-piercing-attack    '(100 100 0)
+   'cyclone-lock-on-damage   '(100 100 0)
+   'zerg-flyer-weapons-2     '(175 175 0)
+   'zerg-flyer-weapons-3     '(250 250 0)
+   'zerg-flyer-armor-2       '(225 225 0)
+   'zerg-flyer-armor-3       '(300 300 0)
+   'terran-vehicle-weapons-2 '(175 175 0)
+   'terran-vehicle-weapons-3 '(250 250 0)
+   'terran-vehicle-plating-2 '(175 175 0)
+   'terran-vehicle-plating-3 '(250 250 0)
+   'terran-vehicle-and-ship-plating-1 '(100 100 0)
+   'terran-vehicle-and-ship-plating-2 '(175 175 0)
+   'terran-vehicle-and-ship-plating-3 '(250 250 0)
+   'terran-ship-weapons-2    '(175 175 0)
+   'terran-ship-weapons-3    '(250 250 0)
+
+   ;; Missing Structures, Flying/Uprooted/Lowered/Rich Variants & Free Add-Ons
+   'nydus-network            '(150 150 0)
+   'nydus-worm               '(75 75 0)
+   'nydus-canal              '(75 75 0)
+   'lurker-den-mp            '(100 150 0)
+   'command-center-flying    '(400 0 0)
+   'orbital-command-flying   '(150 0 0)
+   'barracks-flying          '(150 0 0)
+   'factory-flying           '(150 100 0)
+   'starport-flying          '(150 100 0)
+   'supply-depot-lowered     '(100 0 0)
+   'extractor-rich           '(25 0 0)
+   'assimilator-rich         '(75 0 0)
+   'refinery-rich            '(75 0 0)
+   'pylon-overcharged        '(100 0 0)
+   'spine-crawler-uprooted   '(100 0 0)
+   'spore-crawler-uprooted   '(75 0 0)
+   'tech-lab                 '(50 25 0)
+   'techlab                  '(50 25 0)
+   'reactor                  '(50 50 0)
+
+   ;; Unit Mode, Burrowed, Sieged & Cocoon Variants (for tactical trade & ledger valuation)
+   'siege-tank-sieged        '(150 125 3)
+   'widow-mine-burrowed      '(75 25 2)
+   'thor-ap                  '(300 200 6)
+   'viking-assault           '(150 75 2)
+   'liberator-ag             '(150 125 3)
+   'drone-burrowed           '(50 0 1)
+   'queen-burrowed           '(150 0 2)
+   'zergling-burrowed        '(50 0 1)
+   'baneling-burrowed        '(50 25 1)
+   'roach-burrowed           '(75 25 2)
+   'hydralisk-burrowed       '(100 50 2)
+   'lurker-mp                '(50 100 1)
+   'lurker-burrowed          '(150 150 3)
+   'lurker-mp-burrowed       '(150 150 3)
+   'infestor-burrowed        '(100 150 2)
+   'swarm-host-burrowed      '(100 75 3)
+   'swarmhost                '(100 75 3)
+   'ultralisk-burrowed       '(275 200 6)
+   'broodlord                '(150 150 2)
+   'overlord-transport       '(25 25 0)
+   'overseer-siege-mode      '(50 50 0)
+   'observer-siege-mode      '(25 75 1)
+   'warp-prism-phasing       '(250 0 2)
+   'voidray                  '(250 150 4)
+   'baneling-cocoon          '(25 25 1)
+   'ravager-cocoon           '(25 75 1)
+   'lurker-egg               '(50 100 1)
+   'lurker-mp-egg            '(50 100 1)
+   'brood-lord-cocoon        '(150 150 2)
+   'overlord-cocoon          '(50 50 0)))
 
 (define (sc2-min-cost sym [default 50])
   (match (hash-ref SC2-LOTV-COST-TABLE sym #f)
@@ -451,9 +525,15 @@
      390   ;; UNSIEGE_UNSIEGE
      392   ;; BEHAVIOR_CLOAKON_BANSHEE
      393   ;; BEHAVIOR_CLOAKOFF_BANSHEE
+     403   ;; MORPH_VIKINGASSAULTMODE
+     405   ;; MORPH_VIKINGFIGHTERMODE
      76    ;; GUARDIANSHIELD_GUARDIANSHIELD
      154   ;; HALLUCINATION_PHOENIX
      146   ;; HALLUCINATION_ARCHON
+     1518  ;; MORPH_WARPGATE
+     1520  ;; MORPH_GATEWAY
+     1978  ;; MORPH_HELLION
+     1998  ;; MORPH_HELLBAT
      2095  ;; BURROWDOWN_WIDOWMINE
      2097  ;; BURROWUP_WIDOWMINE
      2108  ;; BURROWDOWN_LURKER
@@ -463,16 +543,19 @@
      2375  ;; BEHAVIOR_PULSARBEAMON
      2376  ;; BEHAVIOR_PULSARBEAMOFF
      2393  ;; EFFECT_VOIDRAYPRISMATICALIGNMENT
+     2560  ;; MORPH_LIBERATORAAMODE
+     2708  ;; MORPH_OVERLORDTRANSPORT
      556   ;; MORPH_SUPPLYDEPOT_LOWER
      558   ;; MORPH_SUPPLYDEPOT_RAISE
      3661  ;; BURROWDOWN
      3662  ;; BURROWUP
      3675  ;; EFFECT_STIM
+     3679  ;; LIFT
      3741  ;; MORPH_OBSERVERSIEGEMODE
-      1528  ;; MORPH_WARPPRISMPHASINGMODE
-      1530  ;; MORPH_WARPPRISMTRANSPORTMODE
-      1042  ;; BUILD_INTERCEPTORS
-      )))
+     1528  ;; MORPH_WARPPRISMPHASINGMODE
+     1530  ;; MORPH_WARPPRISMTRANSPORTMODE
+     1042  ;; BUILD_INTERCEPTORS
+     )))
 
 (define SC2-POINT-TARGET-ABILITY-IDS
   (list->seteqv
@@ -484,6 +567,7 @@
      1628  ;; EMP_EMP
      1694  ;; BUILD_CREEPTUMOR_QUEEN
      1733  ;; BUILD_CREEPTUMOR_TUMOR
+     1990  ;; EFFECT_SPAWNLOCUSTS
      2063  ;; BLINDINGCLOUD_BLINDINGCLOUD
      2146  ;; ORACLEREVELATION_ORACLEREVELATION
      2338  ;; EFFECT_CORROSIVEBILE
@@ -491,7 +575,9 @@
      2358  ;; EFFECT_TACTICALJUMP
      2505  ;; BUILD_STASISTRAP
      2544  ;; EFFECT_ADEPTPHASESHIFT
+     2558  ;; MORPH_LIBERATORAGMODE
      2588  ;; KD8CHARGE_KD8CHARGE
+     3678  ;; LAND
      3687  ;; EFFECT_BLINK
      )))
 
@@ -653,7 +739,30 @@
     'swarm-host        (hasheq 'max-hp 160 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 18.0 'air-dps 0.0  'ground-range 10.0 'air-range 0.0  'weapon-period 2.0   'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.875)
     'swarm-host-burrowed (hasheq 'max-hp 160 'max-shield 0 'armor 1 'speed 0.0  'ground-dps 18.0 'air-dps 0.0  'ground-range 10.0 'air-range 0.0  'weapon-period 2.0   'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.875)
     'viper             (hasheq 'max-hp 150 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 0.0  'air-dps 0.0  'ground-range 9.0  'air-range 9.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 2.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.875)
-    'mothership        (hasheq 'max-hp 350 'max-shield 350 'armor 2 'speed 2.62 'ground-dps 37.8 'air-dps 37.8 'ground-range 7.0  'air-range 7.0  'weapon-period 1.58  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #t 'radius 1.375)))
+    'mothership        (hasheq 'max-hp 350 'max-shield 350 'armor 2 'speed 2.62 'ground-dps 37.8 'air-dps 37.8 'ground-range 7.0  'air-range 7.0  'weapon-period 1.58  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #t 'radius 1.375)
+    ;; Alt-Mode, Sieged, Burrowed, Transport & Summoned Combat Stats
+    'thor-ap           (hasheq 'max-hp 400 'max-shield 0   'armor 1 'speed 2.62 'ground-dps 65.9 'air-dps 40.0 'ground-range 7.0  'air-range 10.0 'weapon-period 0.91  'damage-point 0.25 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+    'liberator-ag      (hasheq 'max-hp 180 'max-shield 0   'armor 0 'speed 0.0  'ground-dps 65.8 'air-dps 0.0  'ground-range 10.0 'air-range 0.0  'weapon-period 1.14  'damage-point 0.12 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+    'observer-siege-mode (hasheq 'max-hp 40 'max-shield 20 'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #t 'can-cloak? #t 'radius 0.375)
+    'overseer-siege-mode (hasheq 'max-hp 200 'max-shield 0 'armor 1 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #t 'can-cloak? #f 'radius 0.75)
+    'warp-prism        (hasheq 'max-hp 80  'max-shield 100 'armor 0 'speed 4.13 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.875)
+    'warp-prism-phasing (hasheq 'max-hp 80 'max-shield 100 'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.875)
+    'overlord-transport (hasheq 'max-hp 200 'max-shield 0  'armor 0 'speed 0.90 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+    'lurker-mp         (hasheq 'max-hp 200 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 20.0 'air-dps 0.0  'ground-range 8.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.18 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.75)
+    'lurker-mp-burrowed (hasheq 'max-hp 200 'max-shield 0  'armor 1 'speed 0.0  'ground-dps 20.0 'air-dps 0.0  'ground-range 8.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.18 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.75)
+    'zergling-burrowed (hasheq 'max-hp 35  'max-shield 0   'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 0.497 'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.375)
+    'baneling-burrowed (hasheq 'max-hp 30  'max-shield 0   'armor 0 'speed 0.0  'ground-dps 80.0 'air-dps 0.0  'ground-range 0.25 'air-range 0.0  'weapon-period 1.0   'damage-point 0.05 'splash-radius 2.2  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.375)
+    'hydralisk-burrowed (hasheq 'max-hp 90 'max-shield 0   'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 0.59  'damage-point 0.07 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.625)
+    'ultralisk-burrowed (hasheq 'max-hp 500 'max-shield 0  'armor 2 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 0.61  'damage-point 0.16 'splash-radius 1.5  'flying? #f 'detector? #f 'can-cloak? #t 'radius 1.0)
+    'queen-burrowed    (hasheq 'max-hp 175 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 0.71  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.875)
+    'drone-burrowed    (hasheq 'max-hp 40  'max-shield 0   'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.07  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.375)
+    'spine-crawler-uprooted (hasheq 'max-hp 300 'max-shield 0 'armor 2 'speed 1.40 'ground-dps 0.0 'air-dps 0.0 'ground-range 0.0 'air-range 0.0 'weapon-period 1.32 'damage-point 0.15 'splash-radius 0.0 'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+    'spore-crawler-uprooted (hasheq 'max-hp 400 'max-shield 0 'armor 1 'speed 1.40 'ground-dps 0.0 'air-dps 0.0 'ground-range 0.0 'air-range 0.0 'weapon-period 0.61 'damage-point 0.05 'splash-radius 0.0 'flying? #f 'detector? #f 'can-cloak? #f 'radius 1.0)
+    'locust            (hasheq 'max-hp 50  'max-shield 0   'armor 0 'speed 2.62 'ground-dps 23.3 'air-dps 0.0  'ground-range 3.0  'air-range 0.0  'weapon-period 0.43  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.375)
+    'locust-flying     (hasheq 'max-hp 50  'max-shield 0   'armor 0 'speed 2.62 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.375)
+    'broodling         (hasheq 'max-hp 30  'max-shield 0   'armor 0 'speed 5.37 'ground-dps 8.7  'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 0.46  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.25)
+    'mule              (hasheq 'max-hp 60  'max-shield 0   'armor 0 'speed 3.94 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5)
+    'auto-turret       (hasheq 'max-hp 150 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 31.5 'air-dps 31.5 'ground-range 6.0  'air-range 6.0  'weapon-period 0.57  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)))
 
 (define (sc2-unit-combat-stats sym)
   (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym
@@ -722,19 +831,25 @@
     observer-siege-mode))
 
 (define SC2-ALL-STRUCTURE-SYMS
-  '(hatchery lair hive extractor spawning-pool roach-warren baneling-nest
-    evolution-chamber hydralisk-den lurker-den spire greater-spire
-    infestation-pit ultralisk-cavern spine-crawler spore-crawler nydus-network
-    nexus pylon assimilator gateway warp-gate warpgate cybernetics-core forge
+  '(hatchery lair hive extractor extractor-rich spawning-pool roach-warren baneling-nest
+    evolution-chamber hydralisk-den lurker-den lurker-den-mp spire greater-spire
+    infestation-pit ultralisk-cavern spine-crawler spine-crawler-uprooted
+    spore-crawler spore-crawler-uprooted nydus-network nydus-worm nydus-canal
+    creep-tumor creep-tumor-burrowed creep-tumor-queen
+    nexus pylon pylon-overcharged assimilator assimilator-rich
+    gateway warp-gate warpgate cybernetics-core forge
     photon-cannon shield-battery twilight-council robotics-facility robotics-bay
     robotics-support-bay stargate fleet-beacon templar-archive templar-archives dark-shrine
-    command-center orbital-command planetary-fortress supply-depot supply-depot-lowered
-    refinery barracks factory starport engineering-bay bunker missile-turret
+    oracle-stasis-trap
+    command-center command-center-flying orbital-command orbital-command-flying
+    planetary-fortress supply-depot supply-depot-lowered
+    refinery refinery-rich barracks barracks-flying factory factory-flying
+    starport starport-flying engineering-bay bunker missile-turret
     sensor-tower ghost-academy armory fusion-core
     barracks-techlab barracks-tech-lab barracks-reactor
     factory-techlab factory-tech-lab factory-reactor
     starport-techlab starport-tech-lab starport-reactor
-    tech-lab reactor))
+    tech-lab techlab reactor))
 
 ;; Terran units that strictly require a completed TechLab attached to their producer:
 (define SC2-TECHLAB-REQUIRED-UNIT-SYMS
@@ -826,3 +941,208 @@
 (define SC2-PRE-DEPLETION-PROACTIVE-MINERAL-THRESH 2400)  ;; ~90s of full 16-worker mining remaining
 (define SC2-BASE-STARTING-MINERAL-LEDGER          10800)  ;; 4x1800 + 4x900 standard LotV base minerals
 
+;; -----------------------------------------------------------------------------
+;; 10. Canonical Structure, Unit & Footprint Equivalence Helpers
+;; -----------------------------------------------------------------------------
+;; Single source of truth for SC2 structure/unit state transitions, flying/lowered/
+;; uprooted/rich/overcharged variants, morphed tech structures, and spelling aliases.
+
+(define (sc2-canonical-structure-sym sym)
+  (case sym
+    [(warpgate)                    'warp-gate]
+    [(robotics-support-bay)        'robotics-bay]
+    [(templar-archives)            'templar-archive]
+    [(lurker-den-mp)               'lurker-den]
+    [(barracks-tech-lab)           'barracks-techlab]
+    [(factory-tech-lab)            'factory-techlab]
+    [(starport-tech-lab)           'starport-techlab]
+    [(techlab)                     'tech-lab]
+    [(pylon-overcharged)           'pylon]
+    [(supply-depot-lowered)        'supply-depot]
+    [(extractor-rich)              'extractor]
+    [(refinery-rich)               'refinery]
+    [(assimilator-rich)            'assimilator]
+    [(spine-crawler-uprooted)      'spine-crawler]
+    [(spore-crawler-uprooted)      'spore-crawler]
+    [(barracks-flying)             'barracks]
+    [(factory-flying)              'factory]
+    [(starport-flying)             'starport]
+    [(command-center-flying)       'command-center]
+    [(orbital-command-flying)      'orbital-command]
+    [else                          sym]))
+
+(define (sc2-structure-equivalent-syms sym [include-free-addons? #f])
+  (case sym
+    [(hatchery)
+     '(hatchery lair hive)]
+    [(lair)
+     '(lair hive)]
+    [(hive)
+     '(hive)]
+    [(spire)
+     '(spire greater-spire)]
+    [(greater-spire)
+     '(greater-spire)]
+    [(lurker-den lurker-den-mp)
+     '(lurker-den lurker-den-mp)]
+    [(extractor extractor-rich)
+     '(extractor extractor-rich)]
+    [(spine-crawler spine-crawler-uprooted)
+     '(spine-crawler spine-crawler-uprooted)]
+    [(spore-crawler spore-crawler-uprooted)
+     '(spore-crawler spore-crawler-uprooted)]
+    [(nydus-worm nydus-canal)
+     '(nydus-worm nydus-canal)]
+    [(gateway)
+     '(gateway warp-gate warpgate)]
+    [(warp-gate warpgate)
+     '(warp-gate warpgate)]
+    [(pylon pylon-overcharged)
+     '(pylon pylon-overcharged)]
+    [(assimilator assimilator-rich)
+     '(assimilator assimilator-rich)]
+    [(robotics-bay robotics-support-bay)
+     '(robotics-bay robotics-support-bay)]
+    [(templar-archive templar-archives)
+     '(templar-archive templar-archives)]
+    [(command-center command-center-flying)
+     '(command-center command-center-flying orbital-command orbital-command-flying planetary-fortress)]
+    [(orbital-command orbital-command-flying)
+     '(orbital-command orbital-command-flying)]
+    [(supply-depot supply-depot-lowered)
+     '(supply-depot supply-depot-lowered)]
+    [(refinery refinery-rich)
+     '(refinery refinery-rich)]
+    [(barracks barracks-flying)
+     '(barracks barracks-flying)]
+    [(factory factory-flying)
+     '(factory factory-flying)]
+    [(starport starport-flying)
+     '(starport starport-flying)]
+    [(barracks-techlab barracks-tech-lab)
+     (if include-free-addons?
+         '(barracks-techlab barracks-tech-lab tech-lab techlab)
+         '(barracks-techlab barracks-tech-lab))]
+    [(factory-techlab factory-tech-lab)
+     (if include-free-addons?
+         '(factory-techlab factory-tech-lab tech-lab techlab)
+         '(factory-techlab factory-tech-lab))]
+    [(starport-techlab starport-tech-lab)
+     (if include-free-addons?
+         '(starport-techlab starport-tech-lab tech-lab techlab)
+         '(starport-techlab starport-tech-lab))]
+    [(barracks-reactor)
+     (if include-free-addons?
+         '(barracks-reactor reactor)
+         '(barracks-reactor))]
+    [(factory-reactor)
+     (if include-free-addons?
+         '(factory-reactor reactor)
+         '(factory-reactor))]
+    [(starport-reactor)
+     (if include-free-addons?
+         '(starport-reactor reactor)
+         '(starport-reactor))]
+    [(tech-lab techlab)
+     '(tech-lab techlab)]
+    [else
+     (list sym)]))
+
+(define (sc2-structure-matches-target? actual-sym target-sym [include-free-addons? #f])
+  (and (memq actual-sym (sc2-structure-equivalent-syms target-sym include-free-addons?)) #t))
+
+(define (sc2-count-equivalent-structures counts-hash sym [include-free-addons? #f])
+  (for/sum ([s (in-list (remove-duplicates (sc2-structure-equivalent-syms sym include-free-addons?) eq?))])
+    (hash-ref counts-hash s 0)))
+
+(define (sc2-canonical-unit-sym sym)
+  (case sym
+    [(viking-fighter viking-assault)   'viking]
+    [(siege-tank-sieged)               'siege-tank]
+    [(widow-mine-burrowed)             'widow-mine]
+    [(thor-ap)                         'thor]
+    [(liberator-ag)                    'liberator]
+    [(lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg) 'lurker]
+    [(baneling-burrowed baneling-cocoon) 'baneling]
+    [(ravager-cocoon)                  'ravager]
+    [(broodlord brood-lord-cocoon)     'brood-lord]
+    [(overlord-cocoon overseer-siege-mode) 'overseer]
+    [(overlord-transport)              'overlord]
+    [(roach-burrowed)                  'roach]
+    [(zergling-burrowed)               'zergling]
+    [(hydralisk-burrowed)              'hydralisk]
+    [(infestor-burrowed)               'infestor]
+    [(swarm-host-burrowed swarmhost)   'swarm-host]
+    [(ultralisk-burrowed)              'ultralisk]
+    [(queen-burrowed)                  'queen]
+    [(drone-burrowed)                  'drone]
+    [(observer-siege-mode)             'observer]
+    [(warp-prism-phasing)              'warp-prism]
+    [(voidray)                         'void-ray]
+    [else                              sym]))
+
+(define (sc2-unit-equivalent-syms sym)
+  (case sym
+    [(viking viking-fighter viking-assault)
+     '(viking viking-fighter viking-assault)]
+    [(siege-tank siege-tank-sieged)
+     '(siege-tank siege-tank-sieged)]
+    [(widow-mine widow-mine-burrowed)
+     '(widow-mine widow-mine-burrowed)]
+    [(thor thor-ap)
+     '(thor thor-ap)]
+    [(liberator liberator-ag)
+     '(liberator liberator-ag)]
+    [(hellion hellbat)
+     (list sym)]
+    [(lurker lurker-mp lurker-burrowed lurker-mp-burrowed)
+     '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed)]
+    [(roach roach-burrowed)
+     '(roach roach-burrowed)]
+    [(zergling zergling-burrowed)
+     '(zergling zergling-burrowed)]
+    [(baneling baneling-burrowed)
+     '(baneling baneling-burrowed)]
+    [(hydralisk hydralisk-burrowed)
+     '(hydralisk hydralisk-burrowed)]
+    [(infestor infestor-burrowed)
+     '(infestor infestor-burrowed)]
+    [(swarm-host swarm-host-burrowed swarmhost)
+     '(swarm-host swarm-host-burrowed swarmhost)]
+    [(ultralisk ultralisk-burrowed)
+     '(ultralisk ultralisk-burrowed)]
+    [(queen queen-burrowed)
+     '(queen queen-burrowed)]
+    [(drone drone-burrowed)
+     '(drone drone-burrowed)]
+    [(brood-lord broodlord)
+     '(brood-lord broodlord)]
+    [(overlord overlord-transport)
+     '(overlord overlord-transport)]
+    [(overseer overseer-siege-mode)
+     '(overseer overseer-siege-mode)]
+    [(observer observer-siege-mode)
+     '(observer observer-siege-mode)]
+    [(warp-prism warp-prism-phasing)
+     '(warp-prism warp-prism-phasing)]
+    [(void-ray voidray)
+     '(void-ray voidray)]
+    [else
+     (list sym)]))
+
+;; True for 3x3 and 5x5 SC2 structures whose footprint centers snap to (x.5, y.5)
+;; rather than 2x2 integer centers (x.0, y.0).
+(define SC2-2X2-STRUCTURE-SYMS
+  '(supply-depot supply-depot-lowered missile-turret sensor-tower
+    pylon pylon-overcharged photon-cannon shield-battery dark-shrine oracle-stasis-trap
+    spire greater-spire spine-crawler spine-crawler-uprooted
+    spore-crawler spore-crawler-uprooted
+    barracks-techlab barracks-tech-lab barracks-reactor
+    factory-techlab factory-tech-lab factory-reactor
+    starport-techlab starport-tech-lab starport-reactor
+    tech-lab techlab reactor))
+
+(define (sc2-odd-footprint-structure? sym)
+  (and (memq sym SC2-ALL-STRUCTURE-SYMS)
+       (not (memq sym SC2-2X2-STRUCTURE-SYMS))
+       #t))

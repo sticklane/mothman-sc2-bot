@@ -575,6 +575,7 @@
           (hydralisk 107 #t)
           (hydralisk-burrowed 117 #t)
           (lurker-egg 501 #t)
+          (lurker-mp-egg 501 #f)
           (lurker 502 #t)
           (lurker-mp 502 #f)
           (lurker-burrowed 503 #t)
@@ -595,9 +596,16 @@
           (ultralisk-burrowed 131 #t)
           (viper 499 #t)
           (changeling 12 #t)
+          (changeling-zealot 13 #t)
+          (changeling-marine-shield 14 #t)
+          (changeling-marine 15 #t)
+          (changeling-zergling-wings 16 #t)
+          (changeling-zergling 17 #t)
           (locust 489 #t)
           (locust-flying 693 #t)
           (broodling 289 #t)
+          (broodling-escort 143 #t)
+          (parasitic-bomb-dummy 824 #t)
           ;; Zerg Structures
           (hatchery 86 #t)
           (lair 100 #t)
@@ -651,6 +659,9 @@
           (raven 56 #t)
           (banshee 55 #t)
           (battlecruiser 57 #t)
+          (auto-turret 31 #t)
+          (kd8-charge 830 #t)
+          (raven-repair-drone 1913 #t)
           ;; Terran Structures
           (command-center 18 #t)
           (command-center-flying 36 #t)
@@ -675,6 +686,7 @@
           (ghost-academy 26 #t)
           (fusion-core 30 #t)
           (tech-lab 5 #t)
+          (techlab 5 #f)
           (reactor 6 #t)
           (barracks-tech-lab 37 #t)
           (barracks-techlab 37 #f)
@@ -1079,14 +1091,23 @@
           (research-zerg-ground-carapace-3 1191 #f)
           (research-zerg-flyer-weapons-1 1312 #t)
           (research-flyer-attacks-1 1312 #f)
+          (research-zerg-flyer-weapons-2 1313 #t)
+          (research-flyer-attacks-2 1313 #f)
+          (research-zerg-flyer-weapons-3 1314 #t)
+          (research-flyer-attacks-3 1314 #f)
           (research-zerg-flyer-armor-1 1315 #t)
           (research-flyer-carapace-1 1315 #f)
+          (research-zerg-flyer-armor-2 1316 #t)
+          (research-flyer-carapace-2 1316 #f)
+          (research-zerg-flyer-armor-3 1317 #t)
+          (research-flyer-carapace-3 1317 #f)
           (research-stimpack 730 #t)
           (research-combat-shield 731 #t)
           (research-concussive-shells 732 #t)
           (research-infernal-preigniter 761 #t)
           (research-infernal-pre-igniter 761 #f)
           (research-drilling-claws 764 #t)
+          (research-smart-servos 766 #t)
           (research-cyclone-lock-on-damage 769 #t)
           (research-mag-field-accelerator 769 #f)
           (research-banshee-cloak 790 #t)
@@ -1108,11 +1129,25 @@
           (research-infantry-armor-3 658 #f)
           (research-terran-vehicle-weapons-1 855 #t)
           (research-vehicle-weapons-1 855 #f)
+          (research-terran-vehicle-weapons-2 856 #t)
+          (research-vehicle-weapons-2 856 #f)
+          (research-terran-vehicle-weapons-3 857 #t)
+          (research-vehicle-weapons-3 857 #f)
           (research-terran-vehicle-plating-1 864 #t)
           (research-terran-vehicle-and-ship-plating-1 864 #f)
           (research-vehicle-and-ship-plating-1 864 #f)
+          (research-terran-vehicle-plating-2 865 #t)
+          (research-terran-vehicle-and-ship-plating-2 865 #f)
+          (research-vehicle-and-ship-plating-2 865 #f)
+          (research-terran-vehicle-plating-3 866 #t)
+          (research-terran-vehicle-and-ship-plating-3 866 #f)
+          (research-vehicle-and-ship-plating-3 866 #f)
           (research-terran-ship-weapons-1 861 #t)
           (research-ship-weapons-1 861 #f)
+          (research-terran-ship-weapons-2 862 #t)
+          (research-ship-weapons-2 862 #f)
+          (research-terran-ship-weapons-3 863 #t)
+          (research-ship-weapons-3 863 #f)
           (research-warpgate 1568 #t)
           (research-warp-gate 1568 #f)
           (research-warp-gate-research 1568 #f)
@@ -1131,6 +1166,7 @@
           (research-gravitic-booster 1093 #t)
           (research-gravitic-boosters 1093 #f)
           (research-gravitic-drive 1094 #t)
+          (research-flux-vanes 48 #t)
           (research-protoss-ground-weapons-1 1062 #t)
           (research-ground-weapons-1 1062 #f)
           (research-protoss-ground-weapons-2 1063 #t)
@@ -1151,8 +1187,16 @@
           (research-shields-3 1070 #f)
           (research-protoss-air-weapons-1 1562 #t)
           (research-air-weapons-1 1562 #f)
+          (research-protoss-air-weapons-2 1563 #t)
+          (research-air-weapons-2 1563 #f)
+          (research-protoss-air-weapons-3 1564 #t)
+          (research-air-weapons-3 1564 #f)
           (research-protoss-air-armor-1 1565 #t)
-          (research-air-armor-1 1565 #f)))])
+          (research-air-armor-1 1565 #f)
+          (research-protoss-air-armor-2 1566 #t)
+          (research-air-armor-2 1566 #f)
+          (research-protoss-air-armor-3 1567 #t)
+          (research-air-armor-3 1567 #f)))])
   (match-define (list sym id prim?) entry)
   (register-id-pair! SC2-ABILITY-SYM->ID SC2-ABILITY-ID->SYM sym id #:primary? prim?))
 
@@ -1202,8 +1246,16 @@
           (zerg-ground-carapace-3 58 #f)
           (zerg-flyer-weapons-1 68 #t)
           (flyer-attacks-1 68 #f)
+          (zerg-flyer-weapons-2 69 #t)
+          (flyer-attacks-2 69 #f)
+          (zerg-flyer-weapons-3 70 #t)
+          (flyer-attacks-3 70 #f)
           (zerg-flyer-armor-1 71 #t)
           (flyer-carapace-1 71 #f)
+          (zerg-flyer-armor-2 72 #t)
+          (flyer-carapace-2 72 #f)
+          (zerg-flyer-armor-3 73 #t)
+          (flyer-carapace-3 73 #f)
           (stimpack 15 #t)
           (combat-shield 16 #t)
           (shield-wall 16 #f)
@@ -1212,12 +1264,13 @@
           (infernal-preigniter 19 #t)
           (infernal-pre-igniter 19 #f)
           (drilling-claws 122 #t)
+          (smart-servos 289 #t)
           (cyclone-lock-on-damage 144 #t)
           (mag-field-accelerator 144 #f)
           (banshee-cloak 20 #t)
           (cloaking-field 20 #f)
           (personal-cloaking 25 #t)
-          (weapon-refit 69 #t)
+          (weapon-refit 76 #t)
           (hyperflight-rotors 138 #t)
           (terran-infantry-weapons-1 7 #t)
           (infantry-weapons-1 7 #f)
@@ -1233,11 +1286,25 @@
           (infantry-armor-3 13 #f)
           (terran-vehicle-weapons-1 30 #t)
           (vehicle-weapons-1 30 #f)
+          (terran-vehicle-weapons-2 31 #t)
+          (vehicle-weapons-2 31 #f)
+          (terran-vehicle-weapons-3 32 #t)
+          (vehicle-weapons-3 32 #f)
           (terran-vehicle-plating-1 116 #t)
           (terran-vehicle-and-ship-plating-1 116 #f)
           (vehicle-and-ship-plating-1 116 #f)
+          (terran-vehicle-plating-2 117 #t)
+          (terran-vehicle-and-ship-plating-2 117 #f)
+          (vehicle-and-ship-plating-2 117 #f)
+          (terran-vehicle-plating-3 118 #t)
+          (terran-vehicle-and-ship-plating-3 118 #f)
+          (vehicle-and-ship-plating-3 118 #f)
           (terran-ship-weapons-1 36 #t)
           (ship-weapons-1 36 #f)
+          (terran-ship-weapons-2 37 #t)
+          (ship-weapons-2 37 #f)
+          (terran-ship-weapons-3 38 #t)
+          (ship-weapons-3 38 #f)
           (warpgate 84 #t)
           (warp-gate 84 #f)
           (warp-gate-research 84 #f)
@@ -1257,6 +1324,7 @@
           (gravitic-booster 48 #t)
           (gravitic-boosters 48 #f)
           (gravitic-drive 49 #t)
+          (flux-vanes 288 #t)
           (protoss-ground-weapons-1 39 #t)
           (ground-weapons-1 39 #f)
           (protoss-ground-weapons-2 40 #t)
@@ -1277,8 +1345,16 @@
           (shields-3 47 #f)
           (protoss-air-weapons-1 78 #t)
           (air-weapons-1 78 #f)
+          (protoss-air-weapons-2 79 #t)
+          (air-weapons-2 79 #f)
+          (protoss-air-weapons-3 80 #t)
+          (air-weapons-3 80 #f)
           (protoss-air-armor-1 81 #t)
-          (air-armor-1 81 #f)))])
+          (air-armor-1 81 #f)
+          (protoss-air-armor-2 82 #t)
+          (air-armor-2 82 #f)
+          (protoss-air-armor-3 83 #t)
+          (air-armor-3 83 #f)))])
   (match-define (list sym id prim?) entry)
   (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM sym id #:primary? prim?))
 
@@ -1378,10 +1454,13 @@
 
 (define (morph-symbol->ability-id target-sym)
   (define norm (normalize-sc2-name->symbol target-sym))
-  (define prefixed (string->symbol (format "morph-~a" norm)))
-  (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
-      (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "build-~a" norm)) #f)
-      (hash-ref SC2-ABILITY-SYM->ID norm #f)))
+  (cond
+    [(memq norm '(lurker-den lurker-den-mp)) 1163]
+    [else
+     (define prefixed (string->symbol (format "morph-~a" norm)))
+     (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
+         (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "build-~a" norm)) #f)
+         (hash-ref SC2-ABILITY-SYM->ID norm #f))]))
 
 (define (spell-symbol->ability-id spell-sym)
   (define norm (normalize-sc2-name->symbol spell-sym))
@@ -2371,8 +2450,10 @@
      supply-depot supply-depot-lowered refinery refinery-rich
      barracks barracks-flying factory factory-flying starport starport-flying
      engineering-bay armory bunker missile-turret sensor-tower ghost-academy fusion-core
-     tech-lab reactor barracks-tech-lab barracks-reactor factory-tech-lab factory-reactor
-     starport-tech-lab starport-reactor
+     tech-lab techlab reactor
+     barracks-tech-lab barracks-techlab barracks-reactor
+     factory-tech-lab factory-techlab factory-reactor
+     starport-tech-lab starport-techlab starport-reactor
      nexus pylon pylon-overcharged assimilator assimilator-rich gateway warp-gate warpgate
      forge cybernetics-core photon-cannon shield-battery twilight-council
      robotics-facility robotics-bay robotics-support-bay stargate templar-archive templar-archives
@@ -2445,9 +2526,10 @@
     [(and from-gi (not (eq? from-gi 'Random))) from-gi]
     [else
      (define my-syms
-       (for/list ([u (in-list units)]
-                  #:when (= (sc2-unit-alliance u) 1))
-         (sc2-id->unit-symbol (sc2-unit-unit-type u))))
+      (for/list ([u (in-list units)]
+                 #:when (and (= (sc2-unit-alliance u) 1)
+                             (not (= (sc2-unit-display-type u) 4))))
+        (sc2-id->unit-symbol (sc2-unit-unit-type u))))
      (cond
        [(ormap (lambda (s) (memq s '(hatchery lair hive drone overlord larva))) my-syms) 'Zerg]
        [(ormap (lambda (s) (memq s '(command-center orbital-command planetary-fortress scv marine))) my-syms) 'Terran]
@@ -2539,8 +2621,15 @@
   (define actual-race
     (detect-actual-race-from-units units game-info our-player-id configured-race))
 
-  (define self-units (filter (lambda (u) (= (sc2-unit-alliance u) 1)) units))
-  (define enemy-all (filter (lambda (u) (= (sc2-unit-alliance u) 4)) units))
+  ;; Filter out DisplayType.Placeholder (= 4) ghosts whose unset build_progress defaults to 1.0!
+  (define self-units
+    (filter (lambda (u) (and (= (sc2-unit-alliance u) 1)
+                             (not (= (sc2-unit-display-type u) 4))))
+            units))
+  (define enemy-all
+    (filter (lambda (u) (and (= (sc2-unit-alliance u) 4)
+                             (not (= (sc2-unit-display-type u) 4))))
+            units))
   (define neutral-all (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
 
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-all))
@@ -2552,38 +2641,49 @@
     (set-box! SC2-HOME-BASE-ANCHOR (cons (sc2-point3d-x p0) (sc2-point3d-y p0)))
     (set-box! SC2-CLEARED-ENEMY-BASES '()))
   (define my-townhalls (sort-townhalls-main-first raw-my-townhalls))
+  ;; Exclude flying townhalls so lifted CCs/OCs never add +16 phantom ideal harvesters or rally SCVs!
   (define ready-townhalls
-    (filter (lambda (u) (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)) my-townhalls))
+    (filter (lambda (u)
+              (and (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                   (not (sc2-unit-is-flying u))
+                   (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                              '(command-center-flying orbital-command-flying)))))
+            my-townhalls))
   (define my-gas-bldgs (filter sc2-unit-is-gas-building? self-units))
   (define ready-gas-bldgs
     (filter (lambda (u) (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)) my-gas-bldgs))
   (define my-workers (filter sc2-unit-is-worker? self-units))
 
-  ;; Update worker build-order movement/construction timestamps:
+  ;; Update worker build-order movement/construction timestamps across ALL queued orders:
   ;; A worker is NEVER stuck while it is actively moving (> 0.5 tiles) toward its build site
-  ;; or actively constructing a building; it only expires after standing still > 112 loops (~5s)
-  ;; without an under-construction footprint at the target site.
+  ;; or actively constructing a building (including Rich Vespene geysers); it only expires
+  ;; after standing still > 112 loops (~5s) without an under-construction footprint at the site.
   (for ([w (in-list my-workers)])
     (define wtag (sc2-unit-tag w))
-    (define ords (sc2-unit-orders w))
-    (define ord0 (and (pair? ords) (first ords)))
-    (define ab-id (if ord0 (sc2-unit-order-ability-id ord0) 0))
-    (define ab-sym (and (> ab-id 0) (sc2-id->ability-symbol ab-id #f)))
-    (define ab-str (if ab-sym (symbol->string ab-sym) ""))
+    (define build-ord
+      (findf (lambda (o)
+               (define s (sc2-id->ability-symbol (sc2-unit-order-ability-id o) #f))
+               (and s (string-prefix? (symbol->string s) "build-")))
+             (sc2-unit-orders w)))
     (cond
-      [(string-prefix? ab-str "build-")
-       (define bsym (string->symbol (substring ab-str 6)))
+      [build-ord
+       (define ab-id (sc2-unit-order-ability-id build-ord))
+       (define ab-sym (sc2-id->ability-symbol ab-id #f))
+       (define ab-str (if ab-sym (symbol->string ab-sym) ""))
+       (define bsym (sc2-canonical-structure-sym (string->symbol (substring ab-str 6))))
        (define wp (sc2-unit-pos w))
        (define wx (sc2-point3d-x wp))
        (define wy (sc2-point3d-y wp))
-       (define tpos (sc2-unit-order-target-pos ord0))
-       (define tgt-tag (sc2-unit-order-target-unit-tag ord0))
+       (define tpos (sc2-unit-order-target-pos build-ord))
+       (define tgt-tag (sc2-unit-order-target-unit-tag build-ord))
        (define tx (if (any-point? tpos) (any-point-x tpos) wx))
        (define ty (if (any-point? tpos) (any-point-y tpos) wy))
        (define actively-constructing?
          (ormap (lambda (b)
                   (define bp (sc2-unit-pos b))
-                  (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type b)) bsym)
+                  (and (sc2-structure-matches-target?
+                        (sc2-id->unit-symbol (sc2-unit-unit-type b))
+                        bsym)
                        (< (sc2-unit-build-progress b) SC2-BUILD-COMPLETE-PROGRESS)
                        (or (= tgt-tag (sc2-unit-tag b))
                            (<= (pt-dist tx ty (sc2-point3d-x bp) (sc2-point3d-y bp)) 6.0)
@@ -2672,15 +2772,14 @@
   (define pending-supply
     (+ (for/sum ([u (in-list self-units)]
                  #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
-                                   '(supply-depot pylon))
+                                   '(supply-depot supply-depot-lowered pylon pylon-overcharged))
                              (< (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
          1)
        (for/sum ([w (in-list my-workers)]
-                 #:when (and (pair? (sc2-unit-orders w))
-                             (not (worker-build-order-stuck? w cur-loop))
-                             (memq (sc2-unit-order-ability-id (first (sc2-unit-orders w)))
-                                   '(319 881)))) ;; TERRANBUILD_SUPPLYDEPOT=319, PROTOSSBUILD_PYLON=881
-         1)
+                 #:when (not (worker-build-order-stuck? w cur-loop)))
+         (count (lambda (o)
+                  (memv (sc2-unit-order-ability-id o) '(319 881))) ;; TERRANBUILD_SUPPLYDEPOT=319, PROTOSSBUILD_PYLON=881
+                (sc2-unit-orders w)))
        (for/sum ([u (in-list self-units)]
                  #:when (= (sc2-unit-unit-type u) 103)) ;; EGG
          (if (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1344))
@@ -2688,13 +2787,12 @@
              1
              0))))
 
-  ;; Pending workers (in-progress SCV / Probe / Drone eggs)
+  ;; Pending workers (all queued SCV / Probe train orders + Drone eggs)
   (define pending-workers
-    (+ (for/sum ([th (in-list ready-townhalls)]
-                 #:when (and (pair? (sc2-unit-orders th))
-                             (memq (sc2-unit-order-ability-id (first (sc2-unit-orders th)))
-                                   '(524 1006)))) ;; TRAIN_SCV=524, TRAIN_PROBE=1006
-         1)
+    (+ (for/sum ([th (in-list ready-townhalls)])
+         (count (lambda (o)
+                  (memv (sc2-unit-order-ability-id o) '(524 1006))) ;; TRAIN_SCV=524, TRAIN_PROBE=1006
+                (sc2-unit-orders th)))
        (for/sum ([u (in-list self-units)]
                  #:when (and (= (sc2-unit-unit-type u) 103)
                              (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1342))
@@ -2716,6 +2814,18 @@
        (define u-buffs
          (filter-map (lambda (bid) (buff-id->symbol bid #f))
                      (sc2-unit-buff-ids u)))
+       (define build-ord
+         (and (not (worker-build-order-stuck? u cur-loop))
+              (findf (lambda (o)
+                       (define s (sc2-id->ability-symbol (sc2-unit-order-ability-id o) #f))
+                       (and s (string-prefix? (symbol->string s) "build-")))
+                     ords)))
+       (define build-target-sym
+         (and build-ord
+              (let* ([s (sc2-id->ability-symbol (sc2-unit-order-ability-id build-ord) #f)]
+                     [st (if s (symbol->string s) "")])
+                (and (string-prefix? st "build-")
+                     (sc2-canonical-structure-sym (string->symbol (substring st 6)))))))
        (hash 'id (sc2-unit-tag u)
              'type utype-sym
              'x (sc2-point3d-x p)
@@ -2729,7 +2839,7 @@
              'flying? (sc2-unit-is-flying u)
              'cloaked (or (= (sc2-unit-cloak u) 1) (= (sc2-unit-cloak u) 2))
              'burrowed (sc2-unit-is-burrowed u)
-             'sieged (not (not (memq utype-sym '(siege-tank-sieged liberator-ag widow-mine-burrowed lurker-burrowed))))
+             'sieged (not (not (memq utype-sym '(siege-tank-sieged liberator-ag widow-mine-burrowed lurker-burrowed lurker-mp-burrowed))))
              'weapon-cooldown (sc2-unit-weapon-cooldown u)
              'engaged-target-tag (sc2-unit-engaged-target-tag u)
              'buffs u-buffs
@@ -2740,11 +2850,8 @@
              'order-target-x (and (any-point? ord0-pos) (any-point-x ord0-pos))
              'order-target-y (and (any-point? ord0-pos) (any-point-y ord0-pos))
              'order-progress (if ord0 (sc2-unit-order-progress ord0) 0.0)
-             'has-build-order? (and (not (worker-build-order-stuck? u cur-loop))
-                                    (not (not (ormap (lambda (o)
-                                                       (define s (sc2-id->ability-symbol (sc2-unit-order-ability-id o) #f))
-                                                       (and s (string-prefix? (symbol->string s) "build-")))
-                                                     ords))))))
+             'has-build-order? (not (not build-ord))
+             'build-target build-target-sym))
      (for/list ([u (in-list self-units)]
                 #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
                                   '(creep-tumor-burrowed creep-tumor-queen))
@@ -2759,46 +2866,57 @@
              'energy 0
              'buffs '()))))
 
-  ;; Convert ally buildings (plus in-transit worker build orders at their target build coordinates
-  ;; so buildings aren't spammed while the worker walks to the site)
+  ;; Convert ally buildings (plus in-transit worker build orders across ALL queued worker orders
+  ;; so buildings aren't spammed while the worker finishes a mineral return or walks to the site)
   (define in-transit-bldg-records
-    (filter-map
-     (lambda (w)
-       (and (pair? (sc2-unit-orders w))
-            (not (worker-build-order-stuck? w cur-loop))
-            (let* ([ord (first (sc2-unit-orders w))]
-                   [ab-id (sc2-unit-order-ability-id ord)]
-                   [ab-sym (sc2-id->ability-symbol ab-id #f)]
-                   [ab-str (if ab-sym (symbol->string ab-sym) "")])
-              (and (string-prefix? ab-str "build-")
-                   (let* ([bsym (string->symbol (substring ab-str 6))]
-                          [wp (sc2-unit-pos w)]
-                          [wx (sc2-point3d-x wp)]
-                          [wy (sc2-point3d-y wp)]
-                          [tpos (sc2-unit-order-target-pos ord)]
-                          [tgt-tag (sc2-unit-order-target-unit-tag ord)]
-                          [tx (if (any-point? tpos) (any-point-x tpos) wx)]
-                          [ty (if (any-point? tpos) (any-point-y tpos) wy)])
-                     ;; Synthesize only while no under-construction footprint of this type exists at (tx, ty)
-                     (and (not (ormap (lambda (b)
-                                        (define bp (sc2-unit-pos b))
-                                        (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type b)) bsym)
-                                             (< (sc2-unit-build-progress b) SC2-BUILD-COMPLETE-PROGRESS)
-                                             (or (= tgt-tag (sc2-unit-tag b))
-                                                 (<= (pt-dist tx ty (sc2-point3d-x bp) (sc2-point3d-y bp)) 6.0)
-                                                 (<= (pt-dist wx wy (sc2-point3d-x bp) (sc2-point3d-y bp)) 6.0))))
-                                      self-units))
-                          (hash 'id (+ 9000000 (sc2-unit-tag w))
-                                'type bsym
-                                'x tx
-                                'y ty
-                                'hp SC2-PYLON-HULL-MAX-HP
-                                'hp-pct 1.0
-                                'build-progress SC2-IN-TRANSIT-BUILD-PROGRESS
-                                'in-transit? #t
-                                'halted #f
-                                'buffs '())))))))
-     my-workers))
+    (append*
+     (for/list ([w (in-list my-workers)]
+                #:when (and (pair? (sc2-unit-orders w))
+                            (not (worker-build-order-stuck? w cur-loop))))
+       (define wp (sc2-unit-pos w))
+       (define wx (sc2-point3d-x wp))
+       (define wy (sc2-point3d-y wp))
+       (define build-ords
+         (filter (lambda (o)
+                   (define s (sc2-id->ability-symbol (sc2-unit-order-ability-id o) #f))
+                   (and s (string-prefix? (symbol->string s) "build-")))
+                 (sc2-unit-orders w)))
+       (filter-map
+        (lambda (ord b-idx)
+          (define ab-id (sc2-unit-order-ability-id ord))
+          (define ab-sym (sc2-id->ability-symbol ab-id #f))
+          (define ab-str (if ab-sym (symbol->string ab-sym) ""))
+          (define bsym (sc2-canonical-structure-sym (string->symbol (substring ab-str 6))))
+          (define tpos (sc2-unit-order-target-pos ord))
+          (define tgt-tag (sc2-unit-order-target-unit-tag ord))
+          (define tx (if (any-point? tpos) (any-point-x tpos) wx))
+          (define ty (if (any-point? tpos) (any-point-y tpos) wy))
+          ;; Synthesize only while no under-construction footprint of an equivalent type exists at (tx, ty)
+          (and (not (ormap (lambda (b)
+                             (define bp (sc2-unit-pos b))
+                             (and (sc2-structure-matches-target?
+                                   (sc2-id->unit-symbol (sc2-unit-unit-type b))
+                                   bsym)
+                                  (< (sc2-unit-build-progress b) SC2-BUILD-COMPLETE-PROGRESS)
+                                  (or (= tgt-tag (sc2-unit-tag b))
+                                      (<= (pt-dist tx ty (sc2-point3d-x bp) (sc2-point3d-y bp)) 6.0)
+                                      (<= (pt-dist wx wy (sc2-point3d-x bp) (sc2-point3d-y bp)) 6.0))))
+                           self-units))
+               (hash 'id (+ 9000000 (* b-idx 100000) (sc2-unit-tag w))
+                     'type bsym
+                     'x tx
+                     'y ty
+                     'hp SC2-PYLON-HULL-MAX-HP
+                     'hp-pct 1.0
+                     'build-progress SC2-IN-TRANSIT-BUILD-PROGRESS
+                     'in-transit? #t
+                     'powered? #t
+                     'addon-ready? #f
+                     'orders '()
+                     'halted #f
+                     'buffs '())))
+        build-ords
+        (range (length build-ords))))))
 
   (define sorted-self-structures
     (sort-townhalls-main-first (filter sc2-unit-is-structure? self-units)))
@@ -2836,15 +2954,33 @@
               (for/first ([au (in-list self-units)] #:when (= (sc2-unit-tag au) addon-tag)) au)))
        (define addon-sym
          (and addon-unit (sc2-id->unit-symbol (sc2-unit-unit-type addon-unit))))
-       (define addon-kind
+       (define addon-ready?
+         (and (not (not addon-unit))
+              (>= (sc2-unit-build-progress addon-unit) SC2-BUILD-COMPLETE-PROGRESS)))
+       (define raw-addon-kind
          (cond
            [(memq addon-sym '(barracks-reactor factory-reactor starport-reactor reactor)) 'reactor]
            [(memq addon-sym '(barracks-tech-lab barracks-techlab
                               factory-tech-lab factory-techlab
                               starport-tech-lab starport-techlab tech-lab techlab)) 'techlab]
            [else #f]))
+       (define addon-kind
+         (cond
+           [(not raw-addon-kind) #f]
+           [addon-ready? raw-addon-kind]
+           [else 'addon-building]))
        (define b-ords (sc2-unit-orders b))
        (define b-ord0 (and (pair? b-ords) (first b-ords)))
+       (define b-order-records
+         (for/list ([o (in-list b-ords)])
+           (define o-aid (sc2-unit-order-ability-id o))
+           (define o-pos (sc2-unit-order-target-pos o))
+           (hasheq 'ability-id o-aid
+                   'ability-sym (sc2-id->ability-symbol o-aid #f)
+                   'target-id (sc2-unit-order-target-unit-tag o)
+                   'target-x (and (any-point? o-pos) (any-point-x o-pos))
+                   'target-y (and (any-point? o-pos) (any-point-y o-pos))
+                   'progress (sc2-unit-order-progress o))))
        (define wg-busy?
          (and (= (sc2-unit-unit-type b) 133)
               (< cur-loop (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL (sc2-unit-tag b) 0))))
@@ -2863,11 +2999,14 @@
              'build-progress bprog
              'halted halted?
              'flying? (sc2-unit-is-flying b)
+             'powered? (sc2-unit-is-powered b)
              'has-addon? (> addon-tag 0)
              'add-on-tag addon-tag
              'addon addon-kind
+             'addon-ready? addon-ready?
              'addon-type addon-sym
              'buffs b-buffs
+             'orders b-order-records
              'order-count eff-order-count
              'busy? (or wg-busy? (pair? b-ords))
              'order-ability-id (if b-ord0 (sc2-unit-order-ability-id b-ord0) 0)
@@ -2923,7 +3062,7 @@
                          '(barracks-techlab barracks-tech-lab barracks-reactor
                            factory-techlab factory-tech-lab factory-reactor
                            starport-techlab starport-tech-lab starport-reactor
-                           tech-lab reactor))
+                           tech-lab techlab reactor))
                    (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
                    (not (set-member? attached-addon-tags (hash-ref b 'id 0)))))
             ally-bldg-records))
@@ -2959,7 +3098,8 @@
      (append*
       (for/list ([u (in-list upgs)])
         (case u
-          [(warpgate warp-gate-research) '(warpgate warp-gate-research)]
+          [(warpgate warp-gate warp-gate-research warpgate-research)
+           '(warpgate warp-gate warp-gate-research warpgate-research)]
           [(zergling-movementspeed metabolic-boost) '(zergling-movementspeed metabolic-boost)]
           [(zergling-attackspeed adrenal-glands) '(zergling-attackspeed adrenal-glands)]
           [(centrifugal-hooks centrifical-hooks) '(centrifugal-hooks centrifical-hooks)]
@@ -2971,11 +3111,21 @@
           [(zerg-missile-weapons-1 missile-attacks-1) '(zerg-missile-weapons-1 missile-attacks-1)]
           [(zerg-missile-weapons-2 missile-attacks-2) '(zerg-missile-weapons-2 missile-attacks-2)]
           [(zerg-missile-weapons-3 missile-attacks-3) '(zerg-missile-weapons-3 missile-attacks-3)]
-          [(zerg-ground-armor-1 ground-carapace-1) '(zerg-ground-armor-1 ground-carapace-1)]
-          [(zerg-ground-armor-2 ground-carapace-2) '(zerg-ground-armor-2 ground-carapace-2)]
-          [(zerg-ground-armor-3 ground-carapace-3) '(zerg-ground-armor-3 ground-carapace-3)]
+          [(zerg-ground-armor-1 zerg-ground-carapace-1 ground-carapace-1)
+           '(zerg-ground-armor-1 zerg-ground-carapace-1 ground-carapace-1)]
+          [(zerg-ground-armor-2 zerg-ground-carapace-2 ground-carapace-2)
+           '(zerg-ground-armor-2 zerg-ground-carapace-2 ground-carapace-2)]
+          [(zerg-ground-armor-3 zerg-ground-carapace-3 ground-carapace-3)
+           '(zerg-ground-armor-3 zerg-ground-carapace-3 ground-carapace-3)]
           [(zerg-flyer-weapons-1 flyer-attacks-1) '(zerg-flyer-weapons-1 flyer-attacks-1)]
-          [(zerg-flyer-armor-1 flyer-carapace-1) '(zerg-flyer-armor-1 flyer-carapace-1)]
+          [(zerg-flyer-weapons-2 flyer-attacks-2) '(zerg-flyer-weapons-2 flyer-attacks-2)]
+          [(zerg-flyer-weapons-3 flyer-attacks-3) '(zerg-flyer-weapons-3 flyer-attacks-3)]
+          [(zerg-flyer-armor-1 zerg-flyer-carapace-1 flyer-carapace-1)
+           '(zerg-flyer-armor-1 zerg-flyer-carapace-1 flyer-carapace-1)]
+          [(zerg-flyer-armor-2 zerg-flyer-carapace-2 flyer-carapace-2)
+           '(zerg-flyer-armor-2 zerg-flyer-carapace-2 flyer-carapace-2)]
+          [(zerg-flyer-armor-3 zerg-flyer-carapace-3 flyer-carapace-3)
+           '(zerg-flyer-armor-3 zerg-flyer-carapace-3 flyer-carapace-3)]
           [(infernal-preigniter infernal-pre-igniter) '(infernal-preigniter infernal-pre-igniter)]
           [(banshee-cloak cloaking-field) '(banshee-cloak cloaking-field)]
           [(terran-infantry-weapons-1 infantry-weapons-1) '(terran-infantry-weapons-1 infantry-weapons-1)]
@@ -2985,10 +3135,23 @@
           [(terran-infantry-armor-2 infantry-armor-2) '(terran-infantry-armor-2 infantry-armor-2)]
           [(terran-infantry-armor-3 infantry-armor-3) '(terran-infantry-armor-3 infantry-armor-3)]
           [(terran-vehicle-weapons-1 vehicle-weapons-1) '(terran-vehicle-weapons-1 vehicle-weapons-1)]
-          [(terran-vehicle-and-ship-plating-1 vehicle-and-ship-plating-1)
-           '(terran-vehicle-and-ship-plating-1 vehicle-and-ship-plating-1)]
+          [(terran-vehicle-weapons-2 vehicle-weapons-2) '(terran-vehicle-weapons-2 vehicle-weapons-2)]
+          [(terran-vehicle-weapons-3 vehicle-weapons-3) '(terran-vehicle-weapons-3 vehicle-weapons-3)]
+          [(terran-vehicle-plating-1 terran-vehicle-and-ship-plating-1 vehicle-and-ship-plating-1)
+           '(terran-vehicle-plating-1 terran-vehicle-and-ship-plating-1 vehicle-and-ship-plating-1)]
+          [(terran-vehicle-plating-2 terran-vehicle-and-ship-plating-2 vehicle-and-ship-plating-2)
+           '(terran-vehicle-plating-2 terran-vehicle-and-ship-plating-2 vehicle-and-ship-plating-2)]
+          [(terran-vehicle-plating-3 terran-vehicle-and-ship-plating-3 vehicle-and-ship-plating-3)
+           '(terran-vehicle-plating-3 terran-vehicle-and-ship-plating-3 vehicle-and-ship-plating-3)]
           [(terran-ship-weapons-1 ship-weapons-1) '(terran-ship-weapons-1 ship-weapons-1)]
-          [(psi-storm psistorm) '(psi-storm psistorm)]
+          [(terran-ship-weapons-2 ship-weapons-2) '(terran-ship-weapons-2 ship-weapons-2)]
+          [(terran-ship-weapons-3 ship-weapons-3) '(terran-ship-weapons-3 ship-weapons-3)]
+          [(psi-storm psistorm psistorm-tech psi-storm-tech)
+           '(psi-storm psistorm psistorm-tech psi-storm-tech)]
+          [(blink blink-tech) '(blink blink-tech)]
+          [(shadow-strike shadow-stride) '(shadow-strike shadow-stride)]
+          [(gravitic-booster gravitic-boosters) '(gravitic-booster gravitic-boosters)]
+          [(resonating-glaives adept-piercing-attack) '(resonating-glaives adept-piercing-attack)]
           [(protoss-ground-weapons-1 ground-weapons-1) '(protoss-ground-weapons-1 ground-weapons-1)]
           [(protoss-ground-weapons-2 ground-weapons-2) '(protoss-ground-weapons-2 ground-weapons-2)]
           [(protoss-ground-weapons-3 ground-weapons-3) '(protoss-ground-weapons-3 ground-weapons-3)]
@@ -2996,8 +3159,14 @@
           [(protoss-ground-armor-2 ground-armor-2) '(protoss-ground-armor-2 ground-armor-2)]
           [(protoss-ground-armor-3 ground-armor-3) '(protoss-ground-armor-3 ground-armor-3)]
           [(protoss-shields-1 shields-1) '(protoss-shields-1 shields-1)]
+          [(protoss-shields-2 shields-2) '(protoss-shields-2 shields-2)]
+          [(protoss-shields-3 shields-3) '(protoss-shields-3 shields-3)]
           [(protoss-air-weapons-1 air-weapons-1) '(protoss-air-weapons-1 air-weapons-1)]
+          [(protoss-air-weapons-2 air-weapons-2) '(protoss-air-weapons-2 air-weapons-2)]
+          [(protoss-air-weapons-3 air-weapons-3) '(protoss-air-weapons-3 air-weapons-3)]
           [(protoss-air-armor-1 air-armor-1) '(protoss-air-armor-1 air-armor-1)]
+          [(protoss-air-armor-2 air-armor-2) '(protoss-air-armor-2 air-armor-2)]
+          [(protoss-air-armor-3 air-armor-3) '(protoss-air-armor-3 air-armor-3)]
           [else (list u)])))))
 
   ;; Researched & pending upgrades
@@ -3008,17 +3177,21 @@
 
   (define pending-upgrades
     (expand-upgrade-aliases
-     (filter-map
-      (lambda (b)
-        (and (sc2-unit-is-structure? b)
-             (pair? (sc2-unit-orders b))
-             (let* ([ab-id (sc2-unit-order-ability-id (first (sc2-unit-orders b)))]
-                    [ab-sym (sc2-id->ability-symbol ab-id #f)]
-                    [ab-str (if ab-sym (symbol->string ab-sym) "")])
-               (if (string-prefix? ab-str "research-")
-                   (string->symbol (substring ab-str 9))
-                   #f))))
-      self-units)))
+     (append*
+      (for/list ([b (in-list self-units)]
+                 #:when (sc2-unit-is-structure? b))
+        (filter-map
+         (lambda (o)
+           (define ab-id (sc2-unit-order-ability-id o))
+           (define ab-sym (sc2-id->ability-symbol ab-id #f))
+           (define ab-str (if ab-sym (symbol->string ab-sym) ""))
+           (cond
+             [(string-prefix? ab-str "research-")
+              (string->symbol (substring ab-str 9))]
+             [(eq? ab-sym 'weapon-refit)
+              'weapon-refit]
+             [else #f]))
+         (sc2-unit-orders b))))))
 
   ;; Stasis-frozen friendly unit & worker tracking (Oracle Stasis Ward buff 57 = 21.4s / 480 frames)
   (define (unit-record-stasis-frozen? u)
@@ -3532,7 +3705,8 @@
   (define unit-by-tag-cache #f)
   (define (get-unit-by-tag)
     (or unit-by-tag-cache
-        (let ([h (for/hasheqv ([u (in-list self-units)])
+        (let ([h (for/hasheqv ([u (in-list self-units)]
+                               #:when (not (= (sc2-unit-display-type u) 4)))
                    (values (sc2-unit-tag u) u))])
           (set! unit-by-tag-cache h)
           h)))
@@ -3540,41 +3714,38 @@
     (define addon-tag (sc2-unit-add-on-tag u))
     (and (> addon-tag 0)
          (let ([addon-u (hash-ref (get-unit-by-tag) addon-tag #f)])
-           (if addon-u
-               (memq (sc2-id->unit-symbol (sc2-unit-unit-type addon-u))
-                     '(barracks-reactor factory-reactor starport-reactor reactor))
-               ;; If add-on unit wasn't separately listed in synthetic unit test, treat positive add-on-tag
-               ;; on non-TechLab-requiring units as Reactor-capable
-               #t))))
+           (and addon-u
+                (>= (sc2-unit-build-progress addon-u) SC2-BUILD-COMPLETE-PROGRESS)
+                (not (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type addon-u))
+                                '(barracks-reactor factory-reactor starport-reactor reactor))))))))
   (define (facility-has-techlab? u)
     (define addon-tag (sc2-unit-add-on-tag u))
     (and (> addon-tag 0)
          (let ([addon-u (hash-ref (get-unit-by-tag) addon-tag #f)])
-           (if addon-u
-               (memq (sc2-id->unit-symbol (sc2-unit-unit-type addon-u))
-                     '(barracks-tech-lab barracks-techlab
-                       factory-tech-lab factory-techlab
-                       starport-tech-lab starport-techlab
-                       tech-lab techlab))
-               #t))))
+           (and addon-u
+                (>= (sc2-unit-build-progress addon-u) SC2-BUILD-COMPLETE-PROGRESS)
+                (not (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type addon-u))
+                                '(barracks-tech-lab barracks-techlab
+                                  factory-tech-lab factory-techlab
+                                  starport-tech-lab starport-techlab
+                                  tech-lab techlab))))))))
   (define needs-techlab? (sc2-unit-requires-techlab? norm))
   ;; Returns producer tags ordered with completely idle (0-order) facilities first,
   ;; and includes a 0-order Reactor facility's tag twice so multi-unit production waves
   ;; can utilize both Reactor queue slots in a single step.
   (define (idle-ready-of-types syms)
-    (define any-addon-on-type?
-      (ormap (lambda (u)
-               (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) syms)
-                    (> (sc2-unit-add-on-tag u) 0)))
-             self-units))
     (define zero-order-tags '())
     (define second-slot-reactor-tags '())
     (for ([u (in-list self-units)]
-          #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) syms)
-                      (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                      (or (not needs-techlab?)
-                          (not any-addon-on-type?)
-                          (facility-has-techlab? u))))
+          #:when (let ([usym (sc2-id->unit-symbol (sc2-unit-unit-type u))])
+                   (and (not (= (sc2-unit-display-type u) 4))
+                        (memq usym syms)
+                        (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                        (not (and (sc2-unit-is-structure? u) (sc2-unit-is-flying u)))
+                        (or (not (memq usym '(gateway warp-gate warpgate robotics-facility stargate)))
+                            (sc2-unit-is-powered u))
+                        (or (not needs-techlab?)
+                            (facility-has-techlab? u)))))
       (define wg-busy?
         (and (= (sc2-unit-unit-type u) 133)
              (< (unbox SC2-WARPGATE-LAST-LOOP)
@@ -3595,7 +3766,8 @@
     [(memq norm '(drone overlord zergling roach hydralisk mutalisk corruptor
                   infestor swarm-host swarmhost ultralisk viper))
      (for/list ([u (in-list self-units)]
-                #:when (= (sc2-unit-unit-type u) 151)) ;; LARVA
+                #:when (and (= (sc2-unit-unit-type u) 151)
+                            (not (= (sc2-unit-display-type u) 4)))) ;; LARVA
        (sc2-unit-tag u))]
     [(eq? norm 'queen)
      (idle-ready-of-types '(hatchery lair hive))]
@@ -3606,7 +3778,7 @@
     [(eq? norm 'greater-spire)
      (idle-ready-of-types '(spire))]
     [(memq norm '(lurker-den lurker-den-mp))
-     (idle-ready-of-types '(hydralisk-den))]
+     (idle-ready-of-types '(drone))]
     [(eq? norm 'baneling)
      (idle-ready-of-types '(zergling))]
     [(eq? norm 'ravager)
@@ -3665,6 +3837,8 @@
        '(hydralisk-den)]
       [(memq norm '(adaptive-talons lurker-range seismic-spines))
        '(lurker-den lurker-den-mp)]
+      [(memq norm '(neural-parasite pathogen-glands microbial-shroud))
+       '(infestation-pit)]
       [(memq norm '(chitinous-plating anabolic-synthesis))
        '(ultralisk-cavern)]
       [(or (string-contains? str "zerg-flyer")
@@ -3678,39 +3852,46 @@
            (string-contains? str "zerg-ground")
            (string-contains? str "ground-carapace"))
        '(evolution-chamber)]
-      [(memq norm '(burrow overlord-speed pneumatized-carapace))
+      [(memq norm '(burrow overlord-speed overlordspeed pneumatized-carapace))
        '(hatchery lair hive)]
+      ;; Attached TechLabs only — unattached 'tech-lab (5) cannot research!
       [(memq norm '(stimpack combat-shield concussive-shells))
-       '(barracks-tech-lab barracks-techlab tech-lab)]
-      [(memq norm '(infernal-preigniter infernal-pre-igniter drilling-claws cyclone-lock-on-damage smart-servos))
-       '(factory-tech-lab factory-techlab tech-lab)]
-      [(memq norm '(banshee-cloak cloaking-field hyperflight-rotors))
-       '(starport-tech-lab starport-techlab tech-lab)]
+       '(barracks-tech-lab barracks-techlab)]
+      [(memq norm '(infernal-preigniter infernal-pre-igniter drilling-claws
+                    cyclone-lock-on-damage mag-field-accelerator smart-servos))
+       '(factory-tech-lab factory-techlab)]
+      [(memq norm '(banshee-cloak cloaking-field hyperflight-rotors
+                    corvid-reactor caduceus-reactor medivac-caduceus-reactor
+                    advanced-ballistics interference-matrix hurricane-thrusters))
+       '(starport-tech-lab starport-techlab)]
       [(eq? norm 'personal-cloaking)
        '(ghost-academy)]
-      [(eq? norm 'weapon-refit)
+      [(memq norm '(weapon-refit yamato-cannon behemoth-reactor))
        '(fusion-core)]
       [(or (string-contains? str "terran-infantry")
            (string-contains? str "infantry-weapons")
            (string-contains? str "infantry-armor")
-           (memq norm '(hi-sec-auto-tracking neosteel-armor)))
+           (memq norm '(hi-sec-auto-tracking hisec-auto-tracking neosteel-armor)))
        '(engineering-bay)]
       [(or (string-contains? str "terran-vehicle")
            (string-contains? str "vehicle-weapons")
+           (string-contains? str "vehicle-plating")
            (string-contains? str "vehicle-and-ship-plating")
            (string-contains? str "terran-ship")
            (string-contains? str "ship-weapons"))
        '(armory)]
-      [(memq norm '(warpgate warp-gate warp-gate-research))
+      [(memq norm '(warpgate warp-gate warp-gate-research warpgate-research))
        '(cybernetics-core)]
-      [(memq norm '(charge blink resonating-glaives adept-piercing-attack))
+      [(memq norm '(charge blink blink-tech resonating-glaives adept-piercing-attack))
        '(twilight-council)]
-      [(memq norm '(psi-storm psistorm))
+      [(memq norm '(psi-storm psistorm psistorm-tech psi-storm-tech psionic-storm))
        '(templar-archive templar-archives)]
-      [(eq? norm 'shadow-strike)
+      [(memq norm '(shadow-strike shadow-stride))
        '(dark-shrine)]
-      [(memq norm '(extended-thermal-lance gravitic-booster gravitic-drive))
+      [(memq norm '(extended-thermal-lance gravitic-booster gravitic-boosters gravitic-drive))
        '(robotics-bay robotics-support-bay)]
+      [(memq norm '(flux-vanes anion-pulse-crystals tectonic-destabilizers))
+       '(fleet-beacon)]
       [(or (string-contains? str "protoss-ground")
            (string-contains? str "ground-weapons")
            (string-contains? str "ground-armor")
@@ -3723,9 +3904,16 @@
        '(cybernetics-core)]
       [else '()]))
   (for/first ([u (in-list self-units)]
-              #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) target-bldgs)
-                          (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                          (null? (sc2-unit-orders u))))
+              #:when (let ([usym (sc2-id->unit-symbol (sc2-unit-unit-type u))])
+                       (and (not (= (sc2-unit-display-type u) 4))
+                            (memq usym target-bldgs)
+                            (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                            (not (sc2-unit-is-flying u))
+                            (or (not (memq usym '(cybernetics-core forge twilight-council
+                                                  templar-archive templar-archives dark-shrine
+                                                  robotics-bay robotics-support-bay fleet-beacon)))
+                                (sc2-unit-is-powered u))
+                            (null? (sc2-unit-orders u)))))
     (sc2-unit-tag u)))
 
 (define (worker-has-build-order? w)
@@ -3741,14 +3929,20 @@
   (define cur-min (sc2-player-common-minerals pc))
   (define cur-gas (sc2-player-common-vespene pc))
   (define units (sc2-observation-units obs))
-  (define self-units (filter (lambda (u) (= (sc2-unit-alliance u) 1)) units))
+  (define self-units
+    (filter (lambda (u) (and (= (sc2-unit-alliance u) 1)
+                             (not (= (sc2-unit-display-type u) 4))))
+            units))
   (define neutral-units (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-units))
   (define ready-townhalls
     (sort-townhalls-main-first
      (filter (lambda (u)
                (and (sc2-unit-is-townhall? u)
-                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                    (not (sc2-unit-is-flying u))
+                    (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                               '(command-center-flying orbital-command-flying)))))
              self-units)))
   (define ready-gas-bldgs
     (filter (lambda (u)
@@ -3987,8 +4181,16 @@
                                                  #:commanded-workers [commanded-workers #f])
   (define units (if (sc2-observation? obs) (sc2-observation-units obs) '()))
   (define power-sources (if (sc2-observation? obs) (sc2-observation-power-sources obs) '()))
-  (define self-units (filter (lambda (u) (= (sc2-unit-alliance u) 1)) units))
-  (define enemy-units (filter (lambda (u) (= (sc2-unit-alliance u) 4)) units))
+  (define self-units
+    (filter (lambda (u)
+              (and (= (sc2-unit-alliance u) 1)
+                   (not (= (sc2-unit-display-type u) 4))))
+            units))
+  (define enemy-units
+    (filter (lambda (u)
+              (and (= (sc2-unit-alliance u) 4)
+                   (not (= (sc2-unit-display-type u) 4))))
+            units))
   (define neutral-units (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
   (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-units))
   (define live-visible-enemy-tags (mutable-seteqv))
@@ -4199,7 +4401,8 @@
         (cons (sc2-point3d-x p) (sc2-point3d-y p))))
     (define pylon-pts
       (for/list ([u (in-list self-units)]
-                 #:when (and (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'pylon)
+                 #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                                   '(pylon pylon-overcharged warp-prism-phasing))
                              (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
         (define p (sc2-unit-pos u))
         (cons (sc2-point3d-x p) (sc2-point3d-y p))))
@@ -4317,9 +4520,16 @@
          ;; and falls back to the Pylon center!)
          (cond
            [(and prod-u (= (sc2-unit-unit-type prod-u) 133))
+            (define wg-cd-loops
+              (case (normalize-sc2-name->symbol unit-sym)
+                [(zealot adept)               448]
+                [(stalker sentry)             515]
+                [(high-templar dark-templar)  717]
+                [else                         515]))
             (when (and (sc2-observation? obs) (> (sc2-observation-game-loop obs) 0))
               (set-box! SC2-WARPGATE-LAST-LOOP (sc2-observation-game-loop obs))
-              (hash-set! SC2-WARPGATE-COOLDOWN-UNTIL ptag (+ (sc2-observation-game-loop obs) 360)))
+              (hash-set! SC2-WARPGATE-COOLDOWN-UNTIL ptag
+                         (+ (sc2-observation-game-loop obs) wg-cd-loops)))
             (define warp-ab (or (unit-symbol->warp-in-ability-id unit-sym) ab-id))
             (define-values (px py) (pylon-power-anchor))
             (define anchors (pylon-power-anchors px py))
@@ -4539,28 +4749,117 @@
 
       ;; 5. Morph unit/structure: `(morph <unit-id-or-ids> <target-sym>)` or `(morph <target-sym>)`
       [(list 'morph uid target-sym)
-       (define ab-id (morph-symbol->ability-id target-sym))
-       (define uid-list
-         (filter (lambda (t)
-                   (and (exact-integer? t)
-                        (> t 0)
-                        (not (set-member? used-producer-tags t))))
-                 (if (list? uid) uid (list uid))))
-       (when (and ab-id (not (null? uid-list)))
-         (for ([t (in-list uid-list)])
-           (set-add! used-producer-tags t)
-           (hash-set! used-producer-counts t (add1 (hash-ref used-producer-counts t 0))))
-         (emit! (sc2-raw-unit-command ab-id #f 0 uid-list #f)))]
+       (define norm-target (normalize-sc2-name->symbol target-sym))
+       (cond
+         [(memq norm-target '(lurker-den lurker-den-mp))
+          (define creep-anchors
+            (filter (lambda (u)
+                      (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                                 '(hatchery lair hive creep-tumor-burrowed))
+                           (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                    self-units))
+          (define-values (cx cy)
+            (if (not (null? creep-anchors))
+                (let ([cp (sc2-unit-pos
+                           (argmin (lambda (u)
+                                     (define p (sc2-unit-pos u))
+                                     (pt-dist home-x home-y (sc2-point3d-x p) (sc2-point3d-y p)))
+                                   creep-anchors))])
+                  (values (sc2-point3d-x cp) (sc2-point3d-y cp)))
+                (values home-x home-y)))
+          (define place-pt
+            (find-verified-building-placement ws-conn 1163 cx cy units
+                                              #:min-spacing 2.0
+                                              #:max-radius 8.5
+                                              #:step 1.0
+                                              #:extra-reserved-points step-reserved-build-pts))
+          (reserve-step-build-pt! place-pt 1163)
+          (define explicit-drone-tag
+            (for/first ([t (in-list (if (list? uid) uid (list uid)))]
+                        #:when (and (exact-integer? t)
+                                    (> t 0)
+                                    (not (set-member? used-worker-tags t))
+                                    (let ([du (hash-ref self-unit-by-tag t #f)])
+                                      (and du (sc2-unit-is-worker? du)))))
+              t))
+          (define wtag
+            (if explicit-drone-tag
+                (begin (record-worker-used! explicit-drone-tag #t) explicit-drone-tag)
+                (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt))))
+          (when wtag
+            (emit! (sc2-raw-unit-command 1163 place-pt 0 (list wtag) #f)))]
+         [else
+          (define ab-id (morph-symbol->ability-id norm-target))
+          (define raw-uid-list
+            (filter (lambda (t)
+                      (and (exact-integer? t)
+                           (> t 0)
+                           (not (set-member? used-producer-tags t))))
+                    (if (list? uid) uid (list uid))))
+          (define uid-list
+            (if (eq? norm-target 'archon)
+                (let* ([extra (filter (lambda (t)
+                                        (and (not (set-member? used-producer-tags t))
+                                             (not (memv t raw-uid-list))))
+                                      (select-producer-tags-for-unit 'archon self-units))]
+                       [combined (append raw-uid-list extra)])
+                  (if (>= (length combined) 2) (take combined 2) '()))
+                raw-uid-list))
+          (when (and ab-id (not (null? uid-list)))
+            (for ([t (in-list uid-list)])
+              (set-add! used-producer-tags t)
+              (hash-set! used-producer-counts t (add1 (hash-ref used-producer-counts t 0))))
+            (emit! (sc2-raw-unit-command ab-id #f 0 uid-list #f)))])]
       [(list 'morph target-sym)
-       (define ab-id (morph-symbol->ability-id target-sym))
-       (define ptags
-         (filter (lambda (t) (not (set-member? used-producer-tags t)))
-                 (select-producer-tags-for-unit target-sym self-units)))
-       (when (and ab-id (not (null? ptags)))
-         (define ptag (first ptags))
-         (set-add! used-producer-tags ptag)
-         (hash-set! used-producer-counts ptag (add1 (hash-ref used-producer-counts ptag 0)))
-         (emit! (sc2-raw-unit-command ab-id #f 0 (list ptag) #f)))]
+       (define norm-target (normalize-sc2-name->symbol target-sym))
+       (cond
+         [(memq norm-target '(lurker-den lurker-den-mp))
+          (define creep-anchors
+            (filter (lambda (u)
+                      (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                                 '(hatchery lair hive creep-tumor-burrowed))
+                           (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                    self-units))
+          (define-values (cx cy)
+            (if (not (null? creep-anchors))
+                (let ([cp (sc2-unit-pos
+                           (argmin (lambda (u)
+                                     (define p (sc2-unit-pos u))
+                                     (pt-dist home-x home-y (sc2-point3d-x p) (sc2-point3d-y p)))
+                                   creep-anchors))])
+                  (values (sc2-point3d-x cp) (sc2-point3d-y cp)))
+                (values home-x home-y)))
+          (define place-pt
+            (find-verified-building-placement ws-conn 1163 cx cy units
+                                              #:min-spacing 2.0
+                                              #:max-radius 8.5
+                                              #:step 1.0
+                                              #:extra-reserved-points step-reserved-build-pts))
+          (reserve-step-build-pt! place-pt 1163)
+          (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
+          (when wtag
+            (emit! (sc2-raw-unit-command 1163 place-pt 0 (list wtag) #f)))]
+         [(eq? norm-target 'archon)
+          (define ab-id (morph-symbol->ability-id norm-target))
+          (define ptags
+            (filter (lambda (t) (not (set-member? used-producer-tags t)))
+                    (select-producer-tags-for-unit norm-target self-units)))
+          (when (and ab-id (>= (length ptags) 2))
+            (define chosen2 (take ptags 2))
+            (for ([t (in-list chosen2)])
+              (set-add! used-producer-tags t)
+              (hash-set! used-producer-counts t (add1 (hash-ref used-producer-counts t 0))))
+            (emit! (sc2-raw-unit-command ab-id #f 0 chosen2 #f)))]
+         [else
+          (define ab-id (morph-symbol->ability-id norm-target))
+          (define ptags
+            (filter (lambda (t) (not (set-member? used-producer-tags t)))
+                    (select-producer-tags-for-unit norm-target self-units)))
+          (when (and ab-id (not (null? ptags)))
+            (define ptag (first ptags))
+            (set-add! used-producer-tags ptag)
+            (hash-set! used-producer-counts ptag (add1 (hash-ref used-producer-counts ptag 0)))
+            (emit! (sc2-raw-unit-command ab-id #f 0 (list ptag) #f)))])]
 
       ;; 6. Attack / Move / Kite / Hold-Position / Retreat (with per-step & in-flight order deduplication)
       [(list 'attack-pos ids raw-x raw-y)

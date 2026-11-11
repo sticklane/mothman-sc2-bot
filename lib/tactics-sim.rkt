@@ -44,6 +44,8 @@
  (struct-out tracked-order)
  (struct-out reserved-build-site)
  (struct-out in-progress-order-ledger)
+ classify-engine-order-kind
+ engine-order-target-symbol
  make-order-ledger
  order-ledger-reconcile-observation!
  order-ledger-record-issued!
@@ -580,13 +582,15 @@
     barracks barracks-techlab barracks-tech-lab barracks-reactor
     factory factory-techlab factory-tech-lab factory-reactor
     starport starport-techlab starport-tech-lab starport-reactor
+    tech-lab techlab reactor
     engineering-bay missile-turret bunker sensor-tower ghost-academy armory fusion-core
-    nexus pylon assimilator gateway warp-gate forge cybernetics-core
+    nexus pylon assimilator gateway warp-gate warpgate forge cybernetics-core
     photon-cannon shield-battery twilight-council stargate
-    templar-archive templar-archives dark-shrine robotics-bay robotics-facility fleet-beacon
+    templar-archive templar-archives dark-shrine robotics-bay robotics-support-bay
+    robotics-facility fleet-beacon
     hatchery lair hive extractor spawning-pool evolution-chamber roach-warren baneling-nest
-    spine-crawler spore-crawler hydralisk-den lurker-den spire greater-spire
-    infestation-pit nydus-network ultralisk-cavern))
+    spine-crawler spore-crawler hydralisk-den lurker-den lurker-den-mp spire greater-spire
+    infestation-pit nydus-network nydus-worm nydus-canal ultralisk-cavern))
 
 (define (classify-engine-order-kind ab-id ab-sym)
   (define s (if ab-sym (symbol->string ab-sym) ""))
@@ -605,10 +609,10 @@
      'expand]
     [(memv ab-id '(1216 1218 1220 2112 1516 1450 1518))
      'morph]
-    [(or (memv ab-id '(319 320 321 324 325 326 327 328 329 330 331 333
-                       368 370 372 421 422 454 455
-                       881 882 883 884 885 886 887 889 890 891 892 893 894 1909
-                       1154 1155 1156 1157 1158 1159 1160 1161 1162 1163 1165 1166 1167))
+    [(or (memv ab-id '(319 320 321 322 323 324 326 327 328 329 331 333
+                       3682 3683 421 422 454 455 487 488
+                       881 882 883 884 885 886 887 889 890 891 892 893 894 895 1909
+                       1154 1155 1156 1157 1158 1159 1160 1161 1162 1163 1165 1166 1167 1768))
          (string-prefix? s "build-")
          (memq ab-sym KNOWN-BUILDING-ORDER-SYMS))
      'build]
@@ -627,18 +631,23 @@
     [(= ab-id 319)  'supply-depot]
     [(= ab-id 320)  'refinery]
     [(= ab-id 321)  'barracks]
-    [(= ab-id 324)  'engineering-bay]
-    [(= ab-id 325)  'missile-turret]
-    [(= ab-id 326)  'bunker]
+    [(= ab-id 322)  'engineering-bay]
+    [(= ab-id 323)  'missile-turret]
+    [(= ab-id 324)  'bunker]
+    [(= ab-id 326)  'sensor-tower]
+    [(= ab-id 327)  'ghost-academy]
     [(= ab-id 328)  'factory]
     [(= ab-id 329)  'starport]
-    [(= ab-id 330)  'ghost-academy]
     [(= ab-id 331)  'armory]
     [(= ab-id 333)  'fusion-core]
+    [(= ab-id 3682) 'tech-lab]
+    [(= ab-id 3683) 'reactor]
     [(= ab-id 421)  'barracks-techlab]
     [(= ab-id 422)  'barracks-reactor]
     [(= ab-id 454)  'factory-techlab]
     [(= ab-id 455)  'factory-reactor]
+    [(= ab-id 487)  'starport-techlab]
+    [(= ab-id 488)  'starport-reactor]
     [(= ab-id 880)  'nexus]
     [(= ab-id 881)  'pylon]
     [(= ab-id 882)  'assimilator]
@@ -648,11 +657,12 @@
     [(= ab-id 886)  'twilight-council]
     [(= ab-id 887)  'photon-cannon]
     [(= ab-id 889)  'stargate]
-    [(= ab-id 890)  'templar-archives]
+    [(= ab-id 890)  'templar-archive]
     [(= ab-id 891)  'dark-shrine]
     [(= ab-id 892)  'robotics-bay]
     [(= ab-id 893)  'robotics-facility]
     [(= ab-id 894)  'cybernetics-core]
+    [(= ab-id 895)  'shield-battery]
     [(= ab-id 1909) 'shield-battery]
     [(= ab-id 1152) 'hatchery]
     [(= ab-id 1154) 'extractor]
@@ -668,6 +678,7 @@
     [(= ab-id 1165) 'roach-warren]
     [(= ab-id 1166) 'spine-crawler]
     [(= ab-id 1167) 'spore-crawler]
+    [(= ab-id 1768) 'nydus-worm]
     [(= ab-id 1344) 'overlord]
     [(= ab-id 524)  'scv]
     [(= ab-id 1006) 'probe]
@@ -682,12 +693,28 @@
     [(= ab-id 251)  'inject-larva]
     [(= ab-id 1694) 'spawn-creep-tumor]
     [(= ab-id 1733) 'spread-creep-tumor]
-    [(string-prefix? s "build-")    (string->symbol (substring s 6))]
-    [(string-prefix? s "train-")    (string->symbol (substring s 6))]
-    [(string-prefix? s "morph-")    (string->symbol (substring s 6))]
-    [(string-prefix? s "research-") (string->symbol (substring s 9))]
-    [ab-sym ab-sym]
+    [(string-prefix? s "build-")
+     (sc2-canonical-structure-sym (string->symbol (substring s 6)))]
+    [(string-prefix? s "train-")
+     (string->symbol (substring s 6))]
+    [(string-prefix? s "morph-")
+     (define raw (string->symbol (substring s 6)))
+     (if (set-member? SC2-ALL-STRUCTURE-SYMS raw)
+         (sc2-canonical-structure-sym raw)
+         raw)]
+    [(string-prefix? s "research-")
+     (string->symbol (substring s 9))]
+    [ab-sym
+     (if (set-member? SC2-ALL-STRUCTURE-SYMS ab-sym)
+         (sc2-canonical-structure-sym ab-sym)
+         ab-sym)]
     [else 'unknown]))
+
+;; Per-ledger step-issued count table so Reactor facilities (2 slots) are only
+;; marked busy after BOTH slots are filled (`order-cnt + step-issued >= max-slots`).
+(define LEDGER-STEP-ISSUED-COUNTS (make-weak-hasheq))
+(define (ledger-get-step-counts-table ledger)
+  (hash-ref! LEDGER-STEP-ISSUED-COUNTS ledger make-hasheqv))
 
 (define (normalize-in-progress-order-entry entry race-hint)
   (define default-th
@@ -711,7 +738,7 @@
      (if (eq? resolved 'expand) default-th resolved)]
     [(pair? entry)
      (match entry
-       [(list 'expand (? symbol? th-sym) _ ...) th-sym]
+       [(list 'expand (? symbol? th-sym) _ ...) (sc2-canonical-structure-sym th-sym)]
        [(list 'expand _ ...) default-th]
        [(list (or 'build 'morph 'train 'research) (? symbol? sym) _ ...)
         (engine-order-target-symbol 0 sym)]
@@ -726,16 +753,44 @@
   (define t-counts (in-progress-order-ledger-type-order-counts ledger))
   (hash-clear! t-counts)
   (set-clear! (in-progress-order-ledger-step-issued-units ledger))
+  (hash-clear! (ledger-get-step-counts-table ledger))
 
   (define ally-units (hash-ref obs 'ally-units '()))
   (define ally-bldgs (hash-ref obs 'ally-buildings '()))
   (define all-allies (append ally-units ally-bldgs))
   (define alive-ids (mutable-seteqv))
 
-  ;; 1. Ingest live SC2 engine orders from all allied units and structures
+  (define (bldg-matches-order? b tsym uid o-tgt-id o-tx o-ty [ux #f] [uy #f])
+    (and (hash? b)
+         (sc2-structure-matches-target? (hash-ref b 'type #f) tsym)
+         (let ([bid (hash-ref b 'id 0)]
+               [bx (hash-ref b 'x #f)]
+               [by (hash-ref b 'y #f)]
+               [in-tr? (hash-ref b 'in-transit? #f)]
+               [inc? (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)])
+           (or (and (> uid 0)
+                    (or (= bid (+ 9000000 uid))
+                        (and (>= bid 9000000) (= (modulo (- bid 9000000) 100000) uid))))
+               (and (> o-tgt-id 0) (= bid o-tgt-id))
+               (and (or in-tr? inc?)
+                    (cond
+                      [(and (real? o-tx) (real? o-ty) (real? bx) (real? by))
+                       (<= (dist2d-pts o-tx o-ty bx by) 4.0)]
+                      [(and (real? ux) (real? uy) (real? bx) (real? by))
+                       (<= (dist2d-pts ux uy bx by) 4.0)]
+                      [(not (and (real? bx) (real? by)))
+                       #t]
+                      [(and (>= uid 800000) (not (and (real? o-tx) (real? o-ty))))
+                       in-tr?]
+                      [else #f]))))))
+
+  ;; 1. Ingest live SC2 engine orders from all allied units and structures (including multi-order Reactors)
   (for ([u (in-list all-allies)] #:when (hash? u))
     (define uid (hash-ref u 'id 0))
     (set-add! alive-ids uid)
+    (define utype (hash-ref u 'type #f))
+    (define ux (hash-ref u 'x #f))
+    (define uy (hash-ref u 'y #f))
     (define eng-orders (hash-ref u 'orders '()))
     (define ab-id (hash-ref u 'order-ability-id 0))
     (define ab-sym (or (hash-ref u 'order-ability-sym #f)
@@ -747,35 +802,44 @@
     (define prog (hash-ref u 'order-progress 0.0))
     (cond
       [(or (pair? eng-orders) (> ab-id 0) ab-sym)
-       (define first-o (if (pair? eng-orders) (first eng-orders) #f))
-       (define eff-ab-id (if (hash? first-o) (hash-ref first-o 'ability-id ab-id) ab-id))
-       (define eff-ab-sym (if (hash? first-o) (hash-ref first-o 'ability-sym ab-sym) ab-sym))
-       (define eff-tgt-id (if (hash? first-o) (hash-ref first-o 'target-id tgt-id) tgt-id))
-       (define eff-tx (if (hash? first-o) (hash-ref first-o 'target-x tgt-x) tgt-x))
-       (define eff-ty (if (hash? first-o) (hash-ref first-o 'target-y tgt-y) tgt-y))
-       (define eff-prog (if (hash? first-o) (hash-ref first-o 'progress prog) prog))
-       (define kind (classify-engine-order-kind eff-ab-id eff-ab-sym))
-       (define tsym (engine-order-target-symbol eff-ab-id eff-ab-sym))
-       (define prev (hash-ref u-orders uid #f))
-       (define issued-f
-         (if (and prev (eq? (tracked-order-ability-sym prev) tsym))
-             (tracked-order-issued-frame prev)
-             frame))
-       (hash-set! u-orders uid
-                  (tracked-order uid kind tsym eff-tgt-id eff-tx eff-ty
-                                 issued-f frame eff-prog 'engine))
-       (define already-in-ally-bldgs?
-         (and (memq kind '(build expand))
-              (ormap (lambda (b)
-                       (and (hash? b)
-                            (eq? (hash-ref b 'type #f) tsym)
-                            (or (= (hash-ref b 'id 0) (+ 9000000 uid))
-                                (= (hash-ref b 'id 0) eff-tgt-id)
-                                (hash-ref b 'in-transit? #f)
-                                (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
-                     ally-bldgs)))
-       (unless already-in-ally-bldgs?
-         (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0))))]
+       (define order-specs
+         (if (pair? eng-orders)
+             (for/list ([o (in-list eng-orders)]
+                        [idx (in-naturals)])
+               (if (hash? o)
+                   (list (hash-ref o 'ability-id (if (= idx 0) ab-id 0))
+                         (hash-ref o 'ability-sym (if (= idx 0) ab-sym #f))
+                         (hash-ref o 'target-id (if (= idx 0) tgt-id 0))
+                         (hash-ref o 'target-x (if (= idx 0) tgt-x #f))
+                         (hash-ref o 'target-y (if (= idx 0) tgt-y #f))
+                         (hash-ref o 'progress (if (= idx 0) prog 0.0)))
+                   (list ab-id ab-sym tgt-id tgt-x tgt-y prog)))
+             (list (list ab-id ab-sym tgt-id tgt-x tgt-y prog))))
+       (for ([spec (in-list order-specs)]
+             [idx (in-naturals)])
+         (match-define (list o-ab-id o-ab-sym o-tgt-id o-tx o-ty o-prog) spec)
+         (define kind (classify-engine-order-kind o-ab-id o-ab-sym))
+         (define tsym (engine-order-target-symbol o-ab-id o-ab-sym))
+         (when (= idx 0)
+           (define prev (hash-ref u-orders uid #f))
+           (define issued-f
+             (if (and prev (eq? (tracked-order-ability-sym prev) tsym))
+                 (tracked-order-issued-frame prev)
+                 frame))
+           (hash-set! u-orders uid
+                      (tracked-order uid kind tsym o-tgt-id o-tx o-ty
+                                     issued-f frame o-prog 'engine)))
+         (define already-in-ally-bldgs?
+           (and (memq kind '(build expand))
+                (ormap (lambda (b)
+                         (bldg-matches-order? b tsym uid o-tgt-id o-tx o-ty ux uy))
+                       ally-bldgs)))
+         (define cocoon-self-morph?
+           (and (eq? kind 'morph)
+                (memq utype '(baneling-cocoon ravager-cocoon lurker-egg lurker-mp-egg
+                              brood-lord-cocoon overlord-cocoon))))
+         (unless (or already-in-ally-bldgs? cocoon-self-morph?)
+           (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0)))))]
       [else
        ;; Unit has no engine order; keep recently issued order only within short latency window
        (define prev (hash-ref u-orders uid #f))
@@ -798,34 +862,64 @@
     (for ([entry (in-list obs-in-prog)])
       (define tsym (normalize-in-progress-order-entry entry race-hint))
       (when (and (symbol? tsym) (not (eq? tsym 'unknown)))
+        (define e-uid (if (hash? entry) (hash-ref entry 'unit-id 0) 0))
+        (define e-tid (if (hash? entry) (hash-ref entry 'target-id 0) 0))
+        (define e-tx (if (hash? entry) (hash-ref entry 'target-x #f) #f))
+        (define e-ty (if (hash? entry) (hash-ref entry 'target-y #f) #f))
+        (define already-recorded-by-unit?
+          (and (> e-uid 0)
+               (let ([uo (hash-ref u-orders e-uid #f)])
+                 (and uo
+                      (eq? (tracked-order-source uo) 'engine)
+                      (sc2-structure-matches-target? (tracked-order-ability-sym uo) tsym)))))
         (define already-under-construction?
-          (ormap (lambda (b)
-                   (and (hash? b)
-                        (eq? (hash-ref b 'type #f) tsym)
-                        (or (hash-ref b 'in-transit? #f)
-                            (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
-                 ally-bldgs))
-        (unless already-under-construction?
+          (if (or (> e-uid 0) (> e-tid 0) (and (real? e-tx) (real? e-ty)))
+              (ormap (lambda (b)
+                       (bldg-matches-order? b tsym e-uid e-tid e-tx e-ty))
+                     ally-bldgs)
+              (ormap (lambda (b)
+                       (and (hash? b)
+                            (sc2-structure-matches-target? (hash-ref b 'type #f) tsym)
+                            (or (hash-ref b 'in-transit? #f)
+                                (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
+                     ally-bldgs)))
+        (unless (or already-recorded-by-unit? already-under-construction?)
           (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0)))))))
 
   ;; 2. Prune dead units, materialized build/expand pseudo-orders, or expired pseudo-unit orders
+  (define pseudo-build-ttl (min 16 SC2-ORDER-LEDGER-TTL-FRAMES))
   (for ([(uid tord) (in-hash (hash-copy u-orders))])
     (when (not (set-member? alive-ids uid))
+      (define tkind (tracked-order-kind tord))
       (define tsym (tracked-order-ability-sym tord))
       (define age (- frame (tracked-order-issued-frame tord)))
+      (define pseudo-uid? (>= uid 800000))
+      (define max-ttl (if pseudo-uid? pseudo-build-ttl 12))
       (define bldg-materialized?
-        (and (memq (tracked-order-kind tord) '(build expand))
+        (and (memq tkind '(build expand))
              (ormap (lambda (b)
-                      (and (hash? b)
-                           (eq? (hash-ref b 'type #f) tsym)
-                           (or (hash-ref b 'in-transit? #f)
-                               (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))))
+                      (bldg-matches-order? b tsym uid
+                                           (tracked-order-target-id tord)
+                                           (tracked-order-target-x tord)
+                                           (tracked-order-target-y tord)))
                     ally-bldgs)))
+      (define morph-already-counted?
+        (and (eq? tkind 'morph)
+             (or (> (hash-ref t-counts tsym 0) 0)
+                 (ormap (lambda (a)
+                          (and (hash? a)
+                               (let ([at (hash-ref a 'type #f)])
+                                 (or (sc2-structure-matches-target? at tsym)
+                                     (memq at (sc2-unit-equivalent-syms tsym))))))
+                        all-allies))))
       (cond
-        [(or bldg-materialized? (> age 12))
+        [(or bldg-materialized? morph-already-counted? (< age 0) (> age max-ttl))
          (hash-remove! u-orders uid)]
-        [(and (memq (tracked-order-kind tord) '(build expand))
-              (>= age 0)
+        [(and (memq tkind '(build expand))
+              (<= age (if pseudo-uid? pseudo-build-ttl 8))
+              (or pseudo-uid? (<= (hash-ref t-counts tsym 0) 0)))
+         (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0)))]
+        [(and (eq? tkind 'morph)
               (<= age 8)
               (<= (hash-ref t-counts tsym 0) 0))
          (hash-set! t-counts tsym (add1 (hash-ref t-counts tsym 0)))])))
@@ -840,7 +934,7 @@
        (define materialized?
          (ormap (lambda (b)
                   (and (hash? b)
-                       (eq? (hash-ref b 'type #f) bsym)
+                       (sc2-structure-matches-target? (hash-ref b 'type #f) bsym)
                        (<= (dist2d-pts sx sy (hash-ref b 'x 0.0) (hash-ref b 'y 0.0))
                            SC2-BUILD-SITE-MIN-CLEARANCE)))
                 ally-bldgs))
@@ -859,26 +953,59 @@
   ;;  1. `(order-ledger-record-issued! ledger frame act)` where `act` is an action S-expr
   ;;  2. `(order-ledger-record-issued! ledger uid kind ability-sym tx ty frame)`
   ;;  3. `(order-ledger-record-issued! ledger uid kind ability-sym #:target-id ...)`
+  (define (unit-id-list v)
+    (cond
+      [(exact-integer? v) (list v)]
+      [(and (list? v) (andmap exact-integer? v)) v]
+      [else '()]))
   (cond
     [(and (exact-integer? arg1) (pair? arg2) (not arg3))
      (define frame (or kw-frame arg1))
      (define act arg2)
      (match act
-       [(list (and (or 'attack 'attack-unit) k) (? exact-integer? uid) (? exact-integer? tid))
-        (order-ledger-record-issued! ledger uid k k #:target-id tid #:frame frame)]
-       [(list (and (or 'kite 'move 'retreat 'attack-pos) k) (? exact-integer? uid) (? real? tx) (? real? ty))
-        (order-ledger-record-issued! ledger uid k k #:target-x tx #:target-y ty #:frame frame)]
-       [(list (or 'cast 'cast-spell) (? exact-integer? uid) (? symbol? sp) rest ...)
-        (define tid (if (and (pair? rest) (exact-integer? (car rest))) (car rest) 0))
-        (define tx (if (>= (length rest) 2) (first rest) #f))
-        (define ty (if (>= (length rest) 2) (second rest) #f))
-        (order-ledger-record-issued! ledger uid 'cast-spell sp
-                                     #:target-id tid #:target-x tx #:target-y ty #:frame frame)]
+       [(list (and (or 'attack 'attack-unit) k) uids (? exact-integer? tid))
+        (for ([uid (in-list (unit-id-list uids))])
+          (order-ledger-record-issued! ledger uid k k #:target-id tid #:frame frame))
+        ledger]
+       [(list (and (or 'kite 'move 'retreat 'attack-pos) k) uids (? real? tx) (? real? ty))
+        (for ([uid (in-list (unit-id-list uids))])
+          (order-ledger-record-issued! ledger uid k k #:target-x tx #:target-y ty #:frame frame))
+        ledger]
+       [(list 'hold-position uids)
+        (for ([uid (in-list (unit-id-list uids))])
+          (order-ledger-record-issued! ledger uid 'hold-position 'hold-position #:frame frame))
+        ledger]
+       [(list 'train-unit uids (? symbol? usym))
+        (for ([uid (in-list (unit-id-list uids))])
+          (order-ledger-record-issued! ledger uid 'train usym #:frame frame))
+        ledger]
+       [(list 'morph uids (? symbol? msym))
+        (for ([uid (in-list (unit-id-list uids))])
+          (order-ledger-record-issued! ledger uid 'morph msym #:frame frame))
+        ledger]
+       [(list (or 'cast 'cast-spell) uids (? symbol? sp) rest ...)
+        (define point-targeted?
+          (and (>= (length rest) 2) (real? (first rest)) (real? (second rest))))
+        (define tid
+          (if (and (not point-targeted?) (= (length rest) 1) (exact-integer? (first rest)))
+              (first rest)
+              0))
+        (define tx (if point-targeted? (first rest) #f))
+        (define ty (if point-targeted? (second rest) #f))
+        (for ([uid (in-list (unit-id-list uids))])
+          (order-ledger-record-issued! ledger uid 'cast-spell sp
+                                       #:target-id tid #:target-x tx #:target-y ty #:frame frame))
+        ledger]
        [_ ledger])]
     [else
      (define uid arg1)
      (define kind arg2)
-     (define ability-sym arg3)
+     (define ability-sym
+       (if (and (symbol? arg3)
+                (memq kind '(build expand morph))
+                (set-member? SC2-ALL-STRUCTURE-SYMS arg3))
+           (sc2-canonical-structure-sym arg3)
+           arg3))
      (define target-id (or kw-target-id 0))
      (define target-x (or kw-target-x (and (real? arg4) arg4)))
      (define target-y (or kw-target-y (and (real? arg5) arg5)))
@@ -886,7 +1013,22 @@
      (define u-orders (in-progress-order-ledger-unit-orders ledger))
      (define t-counts (in-progress-order-ledger-type-order-counts ledger))
      (when (and (exact-integer? uid) (> uid 0))
+       (define prev (hash-ref u-orders uid #f))
+       (define prev-step-cnt (hash-ref (ledger-get-step-counts-table ledger) uid 0))
+       (define reactor-second-train-slot?
+         (and prev
+              (eq? (tracked-order-kind prev) 'train)
+              (eq? kind 'train)
+              (= prev-step-cnt 1)))
+       (when (and prev (not reactor-second-train-slot?))
+         (define prev-sym (tracked-order-ability-sym prev))
+         (when prev-sym
+           (define next-cnt (sub1 (hash-ref t-counts prev-sym 0)))
+           (if (<= next-cnt 0)
+               (hash-remove! t-counts prev-sym)
+               (hash-set! t-counts prev-sym next-cnt))))
        (set-add! (in-progress-order-ledger-step-issued-units ledger) uid)
+       (hash-update! (ledger-get-step-counts-table ledger) uid add1 0)
        (hash-set! u-orders uid
                   (tracked-order uid kind ability-sym target-id target-x target-y
                                  frame frame 0.0 'issued)))
@@ -905,19 +1047,41 @@
         (and tord (memq (tracked-order-kind tord) '(build expand)) #t))))
 
 (define (order-ledger-pending-count-for-type ledger target-sym [_frame 0])
-  (hash-ref (in-progress-order-ledger-type-order-counts ledger) target-sym 0))
+  (define t-counts (in-progress-order-ledger-type-order-counts ledger))
+  (if (and (symbol? target-sym) (set-member? SC2-ALL-STRUCTURE-SYMS target-sym))
+      (let ([canon (sc2-canonical-structure-sym target-sym)])
+        (if (eq? canon target-sym)
+            (hash-ref t-counts canon 0)
+            (+ (hash-ref t-counts canon 0) (hash-ref t-counts target-sym 0))))
+      (hash-ref t-counts target-sym 0)))
 
 (define (order-ledger-facility-busy? ledger bldg-hash [_frame 0])
   (define bid (hash-ref bldg-hash 'id 0))
-  (define order-cnt (hash-ref bldg-hash 'order-count
-                              (length (hash-ref bldg-hash 'orders '()))))
-  (define has-reactor?
-    (or (eq? (hash-ref bldg-hash 'addon #f) 'reactor)
-        (memq (hash-ref bldg-hash 'addon-type #f)
-              '(barracks-reactor factory-reactor starport-reactor))))
-  (define max-slots (if has-reactor? 2 1))
-  (or (>= order-cnt max-slots)
-      (set-member? (in-progress-order-ledger-step-issued-units ledger) bid)))
+  (define prog (hash-ref bldg-hash 'build-progress 1.0))
+  (cond
+    [(or (< prog SC2-BUILD-COMPLETE-PROGRESS)
+         (hash-ref bldg-hash 'in-transit? #f)
+         (hash-ref bldg-hash 'flying? #f)
+         (eq? (hash-ref bldg-hash 'powered? #t) #f))
+     #t]
+    [else
+     (define order-cnt
+       (max (hash-ref bldg-hash 'order-count 0)
+            (length (hash-ref bldg-hash 'orders '()))))
+     (define addon-val (hash-ref bldg-hash 'addon #f))
+     (define addon-type (hash-ref bldg-hash 'addon-type #f))
+     (define addon-ready? (not (eq? (hash-ref bldg-hash 'addon-ready? #t) #f)))
+     (define has-reactor?
+       (and addon-ready?
+            (not (eq? addon-val 'addon-building))
+            (or (eq? addon-val 'reactor)
+                (memq addon-type '(barracks-reactor factory-reactor starport-reactor)))))
+     (define max-slots (if has-reactor? 2 1))
+     (define step-counts (ledger-get-step-counts-table ledger))
+     (define step-cnt
+       (max (hash-ref step-counts bid 0)
+            (if (set-member? (in-progress-order-ledger-step-issued-units ledger) bid) 1 0)))
+     (>= (+ order-cnt step-cnt) max-slots)]))
 
 ;; Returns #t if combat unit `u` is currently in its weapon attack-point / backswing lock
 ;; or within its minimum commitment window so a new order should NOT cancel its shot!
@@ -992,8 +1156,10 @@
                         SC2-ORDER-EQUIV-DIST-TOLERANCE)))))]))
 
 (define (order-ledger-reserve-build-site! ledger bldg-sym x y [builder-id 0] [frame 0])
+  (define canon-sym
+    (if (symbol? bldg-sym) (sc2-canonical-structure-sym bldg-sym) bldg-sym))
   (define site
-    (reserved-build-site bldg-sym
+    (reserved-build-site canon-sym
                          (exact->inexact x)
                          (exact->inexact y)
                          builder-id
@@ -1016,27 +1182,53 @@
   (define frame (or kw-frame pos-frame))
   (define clearance (or kw-clearance pos-clearance))
   (define sites (in-progress-order-ledger-reserved-sites ledger))
-  (define is-3x3-addon-fac? (memq bldg-sym '(barracks factory starport)))
-  (define snap-fn (if is-3x3-addon-fac? snap-3x3-coord snap-2x2-coord))
+  (define canon-bldg
+    (if (symbol? bldg-sym) (sc2-canonical-structure-sym bldg-sym) bldg-sym))
+  (define is-3x3-addon-fac? (memq canon-bldg '(barracks factory starport)))
+  (define odd-footprint? (sc2-odd-footprint-structure? canon-bldg))
+  (define snap-fn (if odd-footprint? snap-3x3-coord snap-2x2-coord))
   (define x0 (snap-fn raw-x))
   (define y0 (snap-fn raw-y))
   (define (spot-free? cx cy)
+    (define new-ax (+ cx SC2-TERRAN-ADDON-OFFSET-X))
+    (define new-ay (+ cy SC2-TERRAN-ADDON-OFFSET-Y))
     (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
          (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
+         (or (not is-3x3-addon-fac?)
+             (and (>= new-ax SC2-MAP-PLAYABLE-MIN-COORD) (<= new-ax SC2-MAP-PLAYABLE-MAX-COORD)
+                  (>= new-ay SC2-MAP-PLAYABLE-MIN-COORD) (<= new-ay SC2-MAP-PLAYABLE-MAX-COORD)))
          (for/and ([s (in-list sites)])
-           (> (dist2d-pts cx cy (reserved-build-site-x s) (reserved-build-site-y s))
-              clearance))
+           (define sx (reserved-build-site-x s))
+           (define sy (reserved-build-site-y s))
+           (define stype
+             (let ([raw (reserved-build-site-bldg-sym s)])
+               (if (symbol? raw) (sc2-canonical-structure-sym raw) raw)))
+           (and (> (dist2d-pts cx cy sx sy) clearance)
+                (or (not (memq stype '(barracks factory starport)))
+                    (> (dist2d-pts cx cy
+                                   (+ sx SC2-TERRAN-ADDON-OFFSET-X)
+                                   (+ sy SC2-TERRAN-ADDON-OFFSET-Y))
+                       SC2-TERRAN-ADDON-CLEARANCE-RADIUS))
+                (or (not is-3x3-addon-fac?)
+                    (> (dist2d-pts new-ax new-ay sx sy)
+                       SC2-TERRAN-ADDON-CLEARANCE-RADIUS))))
          (for/and ([b (in-list ally-bldgs)] #:when (hash? b))
            (define bx (hash-ref b 'x 0.0))
            (define by (hash-ref b 'y 0.0))
-           (define btype (hash-ref b 'type #f))
+           (define raw-btype (hash-ref b 'type #f))
+           (define btype
+             (if (symbol? raw-btype) (sc2-canonical-structure-sym raw-btype) raw-btype))
            (and (> (dist2d-pts cx cy bx by) clearance)
                 ;; Also avoid existing Terran facilities' East (+X) add-on slots!
                 (or (not (memq btype '(barracks factory starport)))
                     (> (dist2d-pts cx cy
                                    (+ bx SC2-TERRAN-ADDON-OFFSET-X)
                                    (+ by SC2-TERRAN-ADDON-OFFSET-Y))
-                       clearance))))))
+                       clearance))
+                ;; And if placing a Terran 3x3 facility, keep its own East add-on slot clear!
+                (or (not is-3x3-addon-fac?)
+                    (> (dist2d-pts new-ax new-ay bx by)
+                       SC2-TERRAN-ADDON-CLEARANCE-RADIUS))))))
   (define-values (chosen-x chosen-y)
     (if (spot-free? x0 y0)
         (values x0 y0)
@@ -1053,7 +1245,7 @@
                 (if found
                     (values (car found) (cdr found))
                     (search (+ r 3.0))))))))
-  (order-ledger-reserve-build-site! ledger bldg-sym chosen-x chosen-y builder-id frame)
+  (order-ledger-reserve-build-site! ledger canon-bldg chosen-x chosen-y builder-id frame)
   (values chosen-x chosen-y))
 
 ;; =============================================================================
