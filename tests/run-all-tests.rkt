@@ -28,6 +28,7 @@
          "../tools/sc2-replay-decompiler.rkt"
          "../lib/state-machine-verifier.rkt"
          "../ladder/build-aiarena-zip.rkt"
+         "../lib/priority-macro-brain.rkt"
          (except-in "../lib/bot-crash-fuzzer.rkt"
                     compute-shadow-ledger
                     step-zerospace-mastermind!))
@@ -3554,6 +3555,154 @@
   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'bunker)))
                        acts-bunker)
                 "Match 5115348 Fix A3b: Terran under heavy early enemy attack must construct emergency Bunker"))
+
+;; ============================================================================
+;; Suite 21: Chaos Monkey Build-Order & Tech-DAG Self-Healing Suite
+;; ============================================================================
+(run-suite "21. Chaos Monkey Build-Order & Tech-DAG Self-Healing (ZvP/PvT/TvZ/ZvZ/TvP/PvZ/RvT/RvZ/RvP)"
+  ;; 1. Multi-step missing prerequisite chain & orphaned structure self-healing
+  (assert-eq! (resolve-missing-prereq-chain 'stimpack (hasheq 'command-center 1) (hasheq 'command-center 1))
+              '(supply-depot barracks barracks-techlab)
+              "Stimpack missing prereq chain must resolve topological order")
+  (assert-eq! (resolve-missing-prereq-chain 'immortal (hasheq 'nexus 1) (hasheq 'nexus 1))
+              '(pylon gateway cybernetics-core robotics-facility)
+              "Immortal missing prereq chain must resolve topological order")
+  (assert-eq! (resolve-missing-prereq-chain 'glial-reconstitution (hasheq 'lair 1) (hasheq 'lair 1))
+              '(spawning-pool roach-warren)
+              "Glial Reconstitution missing prereq chain must resolve spawning-pool -> roach-warren")
+  (assert-true! (not (not (memq 'spawning-pool
+                                (find-all-broken-tech-dependencies
+                                 'Zerg
+                                 (hasheq 'lair 1 'hydralisk-den 1)
+                                 (hasheq 'lair 1 'hydralisk-den 1)))))
+                "Orphaned Lair + Hydralisk Den must flag missing Spawning Pool")
+  (assert-eq! (find-all-broken-tech-dependencies
+               'Protoss
+               (hasheq 'nexus 1 'cybernetics-core 1 'twilight-council 1)
+               (hasheq 'nexus 1 'cybernetics-core 1 'twilight-council 1))
+              '(pylon gateway)
+              "Orphaned Cybernetics Core + Twilight Council must flag missing Pylon + Gateway")
+
+  ;; 2. Zero-worker recovery, 0-gas-building deadlock prevention, slot escrow & negative supply recovery
+  (for ([race-pair (in-list '((Protoss probe nexus gateway)
+                              (Terran scv command-center barracks)
+                              (Zerg drone hatchery spawning-pool)))])
+    (match-define (list r w-sym th-sym fac-sym) race-pair)
+    (define st-0w
+      (make-macro-world-state
+       #:race r #:frame 2600 #:minerals 75 #:gas 0 #:supply-used 0 #:supply-cap 23
+       #:workers 0 #:active-bases 1
+       #:ready-building-counts (hasheq th-sym 1 fac-sym 1 'pylon 1 'supply-depot 1)
+       #:total-building-counts (hasheq th-sym 1 fac-sym 1 'pylon 1 'supply-depot 1)
+       #:unit-counts (hasheq)
+       #:open-facility-slots (hasheq 'townhall 1 'larva 3 'gateway 1 'barracks 1)
+       #:under-attack? #t))
+    (define dec-0w (step-priority-macro-brain st-0w))
+    (assert-true! (not (not (memq w-sym (macro-brain-decision-scheduled-ids dec-0w))))
+                  "0-worker crisis at 75M must immediately schedule worker")
+    (assert-eq! (macro-brain-decision-reserved-min-floor dec-0w) 0
+                "0-worker crisis must not escrow minerals away from workers"))
+
+  (define dec-0gas
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:frame 3000 #:minerals 120 #:gas 25 #:supply-used 24 #:supply-cap 36
+      #:workers 20 #:active-bases 2
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1)
+      #:unit-counts (hasheq 'drone 20 'overlord 3 'queen 2)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4 'spawning-pool 1))))
+  (assert-true! (not (not (memq 'extractor (macro-brain-decision-scheduled-ids dec-0gas))))
+                "0-extractor Zerg must schedule Extractor instead of deadlocking on Lair/Speed gas")
+  (assert-eq! (macro-brain-decision-reserved-gas-floor dec-0gas) 0
+              "0-extractor Zerg must not reserve gas floor")
+
+  (define dec-negsup
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:frame 3600 #:minerals 150 #:gas 100 #:supply-used 38 #:supply-cap 15
+      #:supply-left -23 #:pending-supply 0 #:workers 22 #:active-bases 1
+      #:ready-building-counts (hasheq 'nexus 1 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 22 'stalker 6 'zealot 2)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2 'cybernetics-core 1))))
+  (assert-true! (not (not (memq 'pylon (macro-brain-decision-scheduled-ids dec-negsup))))
+                "Negative supply (-23) after Pylon wipeout must schedule Pylon immediately")
+
+  ;; 3. Live runtime self-healing of assassinated Spawning Pool & Cybernetics Core
+  (define rt-cm-z (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (step-live-bot-runtime!
+   rt-cm-z
+   (hash 'frame 2400 'minerals 250 'gas 100 'supply-used 42 'supply-cap 54
+         'ally-units (for/list ([i (in-range 22)]) (hash 'id (+ 100 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+         'ally-buildings (list (hash 'id 1 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                               (hash 'id 2 'type 'hatchery 'x 45.0 'y 45.0 'hp 1500 'build-progress 1.0)
+                               (hash 'id 3 'type 'spawning-pool 'x 35.0 'y 32.5 'hp 1000 'build-progress 1.0)
+                               (hash 'id 4 'type 'roach-warren 'x 36.0 'y 32.5 'hp 850 'build-progress 1.0))))
+  (define res-cm-z2
+    (step-live-bot-runtime!
+     rt-cm-z
+     (hash 'frame 2500 'minerals 250 'gas 100 'supply-used 24 'supply-cap 54
+           'ally-units (for/list ([i (in-range 18)]) (hash 'id (+ 100 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 1 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 2 'type 'hatchery 'x 45.0 'y 45.0 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 4 'type 'roach-warren 'x 36.0 'y 32.5 'hp 850 'build-progress 1.0)))))
+  (assert-true! (ormap (lambda (c) (and (pair? c) (eq? (car c) 'build) (eq? (cadr c) 'spawning-pool)))
+                       (hash-ref res-cm-z2 'actions '()))
+                "Live Zerg runtime must rebuild assassinated Spawning Pool when Roach Warren is orphaned")
+
+  ;; 4. Fast representative 144-frame Chaos Monkey disruption subset across all 9 matchups (incl. RvT/RvZ/RvP)
+  (for ([spec (in-list '((ZvP 10 Zerg Protoss)
+                         (PvT 11 Protoss Terran)
+                         (TvZ 12 Terran Zerg)
+                         (ZvZ 13 Zerg Zerg)
+                         (TvP 14 Terran Protoss)
+                         (PvZ 15 Protoss Zerg)
+                         (RvT 0 Zerg Terran)
+                         (RvZ 1 Terran Zerg)
+                         (RvP 2 Protoss Protoss)))])
+    (match-define (list m-sym sd exp-r exp-er) spec)
+    (define fast-res
+      (run-chaos-monkey-build-order-trial
+       #:race m-sym
+       #:seed sd
+       #:max-frames 144
+       #:dt-frames 8
+       #:deletion-frames '(48 96)
+       #:forced-deletion-categories '(worker supply)
+       #:severity 0.5))
+    (assert-eq! (chaos-monkey-trial-result-race fast-res) exp-r
+                "Chaos Monkey trial race morphing must match expected race")
+    (assert-eq! (chaos-monkey-trial-result-enemy-race fast-res) exp-er
+                "Chaos Monkey trial enemy-race resolution must match expected enemy race")
+    (assert-eq! (chaos-monkey-trial-result-chaos-deletions-count fast-res) 2
+                "Fast 144-frame Chaos Monkey trial must execute 2 adversarial disruptions without crash/hang")
+    (assert-true! (> (chaos-monkey-trial-result-final-workers fast-res) 0)
+                  "Fast 144-frame Chaos Monkey trial must preserve/recover positive worker count"))
+
+  ;; 5. Full 36-trial (540,000-frame) + 8-wave Extreme Adversarial sweep in --full mode
+  (when full-test-mode?
+    (define full-results
+      (run-chaos-monkey-campaign
+       #:trials-per-race 3
+       #:max-frames 15000
+       #:severity 0.65
+       #:include-random? #t))
+    (assert-eq! (length full-results) 36 "Full Chaos Monkey campaign must run 36 trials (9 standard + 3 Random x 3)")
+    (for ([r (in-list full-results)])
+      (assert-true! (chaos-monkey-trial-result-recovered-all-bo-goals? r)
+                    "Full Chaos Monkey trial must recover 100% of build-order goals")
+      (assert-true! (>= (chaos-monkey-trial-result-final-bases r) 2)
+                    "Full Chaos Monkey trial must recover >= 2 active bases"))
+    (for ([r-sym (in-list '(Zerg Terran Protoss))])
+      (define ext-res
+        (run-chaos-monkey-build-order-trial
+         #:race r-sym #:enemy-race 'Terran #:seed 999 #:max-frames 18000
+         #:deletion-frames '(1200 2200 3200 4200 5200 6200 7200 8200)
+         #:forced-deletion-categories '(supply worker tech-building addon gas-building expansion tech-building worker)
+         #:severity 0.85))
+      (assert-true! (chaos-monkey-trial-result-recovered-all-bo-goals? ext-res)
+                    "Extreme 8-wave Chaos Monkey trial must recover 100% of build-order goals"))))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

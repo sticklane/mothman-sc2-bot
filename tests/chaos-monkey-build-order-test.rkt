@@ -276,6 +276,30 @@
                 (format "Extreme 8-wave Chaos Monkey for ~a must recover 100% of build order" r))))
 
 ;; -----------------------------------------------------------------------------
+;; 8b. Random Frame-0 Race Morphing (RvT, RvZ, RvP) Chaos Monkey Recovery
+;; -----------------------------------------------------------------------------
+(test-case "Random Frame-0 morphing (RvT/RvZ/RvP) recovers 100% of tech DAG and expansions"
+  (for ([spec (in-list '((RvT 0 Zerg Terran)
+                         (RvZ 1 Terran Zerg)
+                         (RvP 2 Protoss Protoss)))])
+    (match-define (list matchup sd expected-race expected-enemy) spec)
+    (define res
+      (run-chaos-monkey-build-order-trial
+       #:race matchup
+       #:seed sd
+       #:max-frames 15000
+       #:forced-deletion-categories '(supply worker tech-building expansion)
+       #:severity 0.65))
+    (check-equal? (chaos-monkey-trial-result-race res) expected-race)
+    (check-equal? (chaos-monkey-trial-result-enemy-race res) expected-enemy)
+    (check-true (chaos-monkey-trial-result-recovered-all-bo-goals? res)
+                (format "~a (morphed ~a vs ~a) must recover 100% of build-order goals"
+                        matchup expected-race expected-enemy))
+    (check-true (>= (chaos-monkey-trial-result-final-bases res) 2))
+    (check-true (>= (chaos-monkey-trial-result-final-workers res) 20))))
+
+
+;; -----------------------------------------------------------------------------
 ;; 9. Live Runtime Integration: step-live-bot-runtime! Uses priority-macro-brain
 ;; -----------------------------------------------------------------------------
 (test-case "step-live-bot-runtime! tracks peak-supply-reached & self-heals deleted Spawning Pool when Roach Warren is orphaned"

@@ -1709,12 +1709,23 @@
    sample-priority-logs)
   #:transparent)
 
-(define (make-initial-macro-sim-state race [enemy-race 'Unknown])
+(define (make-initial-macro-sim-state race [enemy-race 'Unknown] #:seed [seed 0])
   (define r-sym
     (case race
       [(Zerg zerg ZvZ ZvT ZvP) 'Zerg]
       [(Terran terran TvZ TvT TvP) 'Terran]
+      [(Protoss protoss PvZ PvT PvP) 'Protoss]
+      [(Random random RvZ RvT RvP)
+       (list-ref '(Zerg Terran Protoss) (modulo (abs seed) 3))]
       [else 'Protoss]))
+  (define resolved-enemy-race
+    (if (not (eq? enemy-race 'Unknown))
+        enemy-race
+        (case race
+          [(ZvZ TvZ PvZ RvZ) 'Zerg]
+          [(ZvT TvT PvT RvT) 'Terran]
+          [(ZvP TvP PvP RvP) 'Protoss]
+          [else 'Unknown])))
   (define rb (make-hasheq))
   (define un (make-hasheq))
   (case r-sym
@@ -1728,7 +1739,7 @@
     [else
      (hash-set! rb 'nexus 1)
      (hash-set! un 'probe 12)])
-  (macro-sim-state r-sym enemy-race 0 50 0 0.0 0.0 rb '() un '() 3 12 '() '()))
+  (macro-sim-state r-sym resolved-enemy-race 0 50 0 0.0 0.0 rb '() un '() 3 12 '() '()))
 
 (define (sim-recompute-supply st)
   (define rb (macro-sim-state-ready-buildings st))
@@ -2147,7 +2158,9 @@
     (vector->pseudo-random-generator
      (vector (seed-elem 1) (seed-elem 7) (seed-elem 13)
              (seed-elem 29) (seed-elem 53) (seed-elem 97))))
-  (define st (make-initial-macro-sim-state race enemy-race))
+  (define st (make-initial-macro-sim-state race enemy-race #:seed seed))
+  (define resolved-race (macro-sim-state-race st))
+  (define resolved-enemy-race (macro-sim-state-enemy-race st))
   (define del-table
     (for/hash ([f (in-list deletion-frames)]
                [idx (in-naturals)])
@@ -2167,7 +2180,7 @@
   (define uc (macro-world-state-unit-counts wstate))
   (define upgs (append (macro-world-state-researched-upgrades wstate)
                        (macro-world-state-pending-upgrades wstate)))
-  (define steps (pro-build-order-steps-for-matchup race enemy-race))
+  (define steps (pro-build-order-steps-for-matchup resolved-race resolved-enemy-race))
 
   ;; Check which build-order structural/upgrade goals are satisfied at the end of recovery
   (define unsatisfied
@@ -2187,8 +2200,8 @@
             steps))
 
   (chaos-monkey-trial-result
-   (macro-world-state-race wstate)
-   enemy-race
+   resolved-race
+   resolved-enemy-race
    seed
    max-frames
    (length (macro-sim-state-chaos-events st))
@@ -2205,14 +2218,19 @@
    (reverse (take (macro-sim-state-priority-logs st)
                   (min 8 (length (macro-sim-state-priority-logs st)))))))
 
-;; Runs a multi-matchup Chaos Monkey campaign across Zerg, Terran, and Protoss build orders
+;; Runs a multi-matchup Chaos Monkey campaign across Zerg, Terran, Protoss (and optional Random) build orders
 (define (run-chaos-monkey-campaign
          #:trials-per-race [trials-per-race 6]
          #:max-frames [max-frames 14000]
-         #:severity [severity 0.65])
-  (define matchups '((Zerg Zerg) (Zerg Terran) (Zerg Protoss)
-                     (Terran Zerg) (Terran Terran) (Terran Protoss)
-                     (Protoss Zerg) (Protoss Terran) (Protoss Protoss)))
+         #:severity [severity 0.65]
+         #:include-random? [include-random? #f])
+  (define base-matchups '((Zerg Zerg) (Zerg Terran) (Zerg Protoss)
+                          (Terran Zerg) (Terran Terran) (Terran Protoss)
+                          (Protoss Zerg) (Protoss Terran) (Protoss Protoss)))
+  (define matchups
+    (if include-random?
+        (append base-matchups '((Random Terran) (Random Zerg) (Random Protoss)))
+        base-matchups))
   (define category-rotations
     '((supply tech-building addon worker)
       (worker gas-building tech-building supply)
@@ -2229,3 +2247,4 @@
      #:max-frames max-frames
      #:forced-deletion-categories rot
      #:severity severity)))
+
