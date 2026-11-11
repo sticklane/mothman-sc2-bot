@@ -1104,6 +1104,32 @@
      #:nat-x nat-x #:nat-y nat-y
      #:third-x third-x #:third-y third-y))
 
+  (define supply-crisis?
+    (and (< supply-cap 200)
+         (< pending-supply (if (< supply-left 0) 3 2))
+         (or (and (= pending-supply 0) (<= supply-left supply-buffer))
+             (<= (+ supply-left (* 8 pending-supply)) (max 0 (quotient supply-buffer 2))))))
+
+  (define total-townhalls-incl-pending
+    (case race
+      [(Zerg) (bldg-count-equivalent total-bldg-counts 'hatchery)]
+      [(Terran) (bldg-count-equivalent total-bldg-counts 'command-center)]
+      [else (bldg-count-equivalent total-bldg-counts 'nexus)]))
+
+  (define overdue-1base-expand?
+    (and (>= minerals 400)
+         (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (>= frame 2688)
+         (not under-attack?)
+         (<= enemy-threat-supply 0)
+         (>= workers 12)))
+
+  (define race-supply-sym
+    (case race [(Zerg) 'overlord] [(Terran) 'supply-depot] [else 'pylon]))
+  (define race-expand-sym
+    (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
+
   (define existing-ids (map priority-candidate-id raw-cands))
   (define plan-translated-syms (map plan-goal-node-next-action-sym plan-actionable-nodes))
   (define extra-syms
@@ -1113,7 +1139,9 @@
                     (not (memq s existing-ids))
                     (lookup-sc2-tech-node s)
                     (not (sc2-tech-already-satisfied? s total-bldg-counts researched-upgrades pending-upgrades))))
-             (append repaired-prereqs
+             (append (if supply-crisis? (list race-supply-sym) '())
+                     (if overdue-1base-expand? (list race-expand-sym) '())
+                     repaired-prereqs
                      plan-translated-syms
                      (if bo-goal-sym (list bo-goal-sym) '())
                      (if (and (eq? race 'Protoss)
@@ -1157,22 +1185,11 @@
                        [utility-score (+ 300.0 (priority-candidate-utility-score raw-cand))])
           raw-cand)))
 
-  (define supply-crisis?
-    (and (< supply-cap 200)
-         (< pending-supply (if (< supply-left 0) 3 2))
-         (or (and (= pending-supply 0) (<= supply-left supply-buffer))
-             (<= (+ supply-left (* 8 pending-supply)) (max 0 (quotient supply-buffer 2))))))
-
   (define need-worker-saturation?
     (and (not under-attack?)
          (<= enemy-threat-supply 0)
          (< workers (min 80 (max target-workers (* 22 active-bases))))))
 
-  (define total-townhalls-incl-pending
-    (case race
-      [(Zerg) (bldg-count-equivalent total-bldg-counts 'hatchery)]
-      [(Terran) (bldg-count-equivalent total-bldg-counts 'command-center)]
-      [else (bldg-count-equivalent total-bldg-counts 'nexus)]))
   (define nat-exp-min-reserve
     (compute-natural-expansion-mineral-reserve
      #:race race
@@ -1198,6 +1215,7 @@
           (not (memq (sc2-tech-node-kind node) '(build expand)))
           (and (>= workers 5)
                (or (>= workers 13)
+                   overdue-1base-expand?
                    (= (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)
                    (memq id '(spawning-pool spine-crawler spore-crawler))
                    (and (eq? id 'extractor)
@@ -1222,10 +1240,11 @@
             (< workers (min 80 (max target-workers (* 22 active-bases))))]
            [(eq? cat 'expansion)
             (and (not under-attack?)
-                 (< active-bases (if (>= effective-phase-supply 30) 3 2))
-                 (>= workers (if (= active-bases 1)
-                                 (if (eq? race 'Zerg) 15 18)
-                                 24)))]
+                 (or overdue-1base-expand?
+                     (and (< active-bases (if (>= effective-phase-supply 30) 3 2))
+                          (>= workers (if (= active-bases 1)
+                                          (if (eq? race 'Zerg) 15 18)
+                                          24)))))]
            [(eq? cat 'counter-tech)
             (cond
               [(memq id '(queen observer))
@@ -1323,15 +1342,17 @@
         ;; but NEVER blocks combat units when under-attack? or enemy-threat-supply > 0 (PV1/PV2/PV7)
         [(eq? cat 'expansion)
          (define exp-ok?
-           (and (or blk0 is-bo-goal? is-repaired?)
+           (and (or blk0 is-bo-goal? is-repaired? overdue-1base-expand?)
                 (not under-attack?)
                 (<= enemy-threat-supply 0)
-                (>= workers (if (eq? race 'Zerg) 14 16))
+                (or overdue-1base-expand?
+                    (>= workers (if (eq? race 'Zerg) 14 16)))
                 has-mineral-income?))
          (define exp-u
            (cond
              [(or under-attack? (> enemy-threat-supply 0)) (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
+             [overdue-1base-expand? (max 490.0 plan-weight u0)]
              [(and is-bo-goal? exp-ok?) (max plan-weight 465.0 u0)]
              [exp-ok? (max 210.0 u0)]
              [else u0]))

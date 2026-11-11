@@ -29,6 +29,7 @@
          "../lib/state-machine-verifier.rkt"
          "../ladder/build-aiarena-zip.rkt"
          "../lib/priority-macro-brain.rkt"
+         "../lib/pro-replay-starvation-audit.rkt"
          (except-in "../lib/bot-crash-fuzzer.rkt"
                     compute-shadow-ledger
                     step-zerospace-mastermind!))
@@ -3704,11 +3705,97 @@
       (assert-true! (chaos-monkey-trial-result-recovered-all-bo-goals? ext-res)
                     "Extreme 8-wave Chaos Monkey trial must recover 100% of build-order goals"))))
 
+;; =============================================================================
+;; 22. 5,575-Checkpoint Pro-Replay Starvation & Deadlock Audit (Z/P/T/Random)
+;; =============================================================================
+(run-suite "22. 5,575-Checkpoint Pro-Replay Starvation & Deadlock Audit (Zerg/Protoss/Terran/Random)"
+  ;; 1. Strided real pro-replay corpus audit in FAST-<5s mode (< 50 ms) or full 5,575 sweep in --full mode
+  (define pro-audit-rep
+    (if full-test-mode?
+        (run-pro-replay-starvation-audit #:max-checkpoints 5575 #:stride 1)
+        (run-pro-replay-starvation-audit #:max-checkpoints 100 #:stride 55)))
+  (assert-eq! (pro-starvation-audit-report-checkpoints-evaluated pro-audit-rep)
+              (if full-test-mode? 5575 100)
+              "Pro-replay starvation audit must evaluate expected checkpoint count")
+  (assert-eq! (pro-starvation-audit-report-races-evaluated pro-audit-rep)
+              '(Zerg Protoss Terran Random)
+              "Pro-replay starvation audit must cover Zerg, Protoss, Terran, and Random")
+  (assert-eq! (pro-starvation-audit-report-expansion-starvation-failures pro-audit-rep) 0
+              "Zero expansion starvation failures (minerals >= 400, bases == 1, frame >= 2688)")
+  (assert-eq! (pro-starvation-audit-report-worker-stall-failures pro-audit-rep) 0
+              "Zero worker-production stalls (workers < 20 * bases)")
+  (assert-eq! (pro-starvation-audit-report-supply-deadlock-failures pro-audit-rep) 0
+              "Zero supply-block deadlocks (supply_left == 0, minerals >= 100, pending_supply == 0)")
+  (assert-eq! (pro-starvation-audit-report-hoarding-stall-failures pro-audit-rep) 0
+              "Zero unspent-resource hoarding stalls")
+  (define formatted-pro-rep (format-pro-starvation-audit-report pro-audit-rep))
+  (assert-true! (string-contains? formatted-pro-rep "PRO-REPLAY 15s-LOOKAHEAD PRIORITY & STARVATION AUDIT")
+                "Formatted pro-replay audit report must include header and race coverage tables")
+
+  ;; 2. Deterministic synthetic boundary verification across Zerg, Protoss, and Terran for all 4 invariants
+  (for ([spec (in-list '((Zerg hatchery overlord drone
+                               ((hatchery . 1) (spawning-pool . 1) (roach-warren . 1) (extractor . 2)))
+                         (Terran command-center supply-depot scv
+                                 ((command-center . 1) (supply-depot . 2) (barracks . 2) (factory . 1) (refinery . 2)))
+                         (Protoss nexus pylon probe
+                                  ((nexus . 1) (pylon . 2) (gateway . 2) (cybernetics-core . 1) (assimilator . 2)))))])
+    (match-define (list r-sym exp-sym sup-sym w-sym b-pairs) spec)
+    (define b-ht (make-immutable-hasheq b-pairs))
+
+    ;; (a) Overdue 1-base expansion at frame 3200 with 450M/150G and 20 workers
+    (define dec-exp
+      (step-priority-macro-brain
+       (make-macro-world-state
+        #:race r-sym #:frame 3200 #:minerals 450 #:gas 150
+        #:supply-used 28 #:supply-cap 38 #:supply-left 10 #:pending-supply 0
+        #:workers 20 #:active-bases 1
+        #:ready-building-counts b-ht #:total-building-counts b-ht
+        #:unit-counts (hasheq w-sym 20))))
+    (assert-true! (or (not (not (memq exp-sym (macro-brain-decision-scheduled-ids dec-exp))))
+                      (macro-brain-can-spend? dec-exp exp-sym 450 150 'expansion))
+                  "Overdue 1-base checkpoint at 450M & frame >= 2688 must schedule/admit natural expansion")
+
+    ;; (b) Supply-block deadlock boundary: supply_left == 0, minerals == 120, pending_supply == 0
+    (define dec-sup
+      (step-priority-macro-brain
+       (make-macro-world-state
+        #:race r-sym #:frame 3600 #:minerals 120 #:gas 80
+        #:supply-used 38 #:supply-cap 38 #:supply-left 0 #:pending-supply 0
+        #:workers 22 #:active-bases 2
+        #:ready-building-counts b-ht #:total-building-counts b-ht
+        #:unit-counts (hasheq w-sym 22))))
+    (assert-true! (not (not (memq sup-sym (macro-brain-decision-scheduled-ids dec-sup))))
+                  "Supply-blocked checkpoint at 120M & 0 pending supply must schedule supply provider immediately")
+
+    ;; (c) Worker-production stall boundary: 14 workers on 2 bases (< 20 * bases) at 100M
+    (define b2-ht (hash-set b-ht exp-sym 2))
+    (define dec-wrk
+      (step-priority-macro-brain
+       (make-macro-world-state
+        #:race r-sym #:frame 3400 #:minerals 100 #:gas 50
+        #:supply-used 22 #:supply-cap 44 #:supply-left 22 #:pending-supply 0
+        #:workers 14 #:active-bases 2
+        #:ready-building-counts b2-ht #:total-building-counts b2-ht
+        #:unit-counts (hasheq w-sym 14))))
+    (assert-true! (pair? (macro-brain-decision-scheduled-ids dec-wrk))
+                  "Under-saturated 2-base checkpoint (14 workers) at 100M must schedule economy progress")
+
+    ;; (d) Unspent-resource hoarding boundary: 950M/300G at 90/130 supply must never idle
+    (define dec-hoard
+      (step-priority-macro-brain
+       (make-macro-world-state
+        #:race r-sym #:frame 6500 #:minerals 950 #:gas 300
+        #:supply-used 90 #:supply-cap 130 #:supply-left 40 #:pending-supply 0
+        #:workers 44 #:active-bases 2
+        #:ready-building-counts b2-ht #:total-building-counts b2-ht
+        #:unit-counts (hasheq w-sym 44))))
+    (assert-true! (pair? (macro-brain-decision-scheduled-ids dec-hoard))
+                  "High-bank checkpoint (950M/300G at 90/130 supply) must schedule spending actions"))
+  )
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")
 (printf "  ALL #lang sc-bot TESTS PASSED (~a assertions, 12/12 mutation kill rate, ~a ms total)!\n"
         total-assertions total-elapsed-ms)
 (printf "============================================================================\n")
-
-
