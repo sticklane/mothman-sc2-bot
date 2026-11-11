@@ -102,7 +102,41 @@ To prevent conversation hangs and unpushed work loss while `RC-001` remains open
 - `racket ladder/build-aiarena-zip.rkt --all-races` links a `57 MB` embedded ELF binary and compresses `111 MB` across 6 `.zip` archives (`~8–14 seconds`).
 - Only run `--all-races` when final BotZip deliverables need updating, and **always** run it via `./scripts/atomic-test-and-push.sh --rebuild-zips "feat: ..."` so the rebuilt archives are committed and pushed in the same shell invocation.
 
-### Rule 8: Avoid `python3 -c` Multi-Line One-Liners & `invoke_subagent` on Hot Code Paths
-- Use `view_file` and `replace_file_content` instead of ad-hoc `python3 -c` file-inspection scripts (which waste `run_command` turns and risk syntax errors).
-- Do not call `invoke_subagent` during core code-edit/test/push cycles (`RC-001B` can stall the parent agent if a subagent hits an inner `600s` command timeout).
+### Rule 8: Zero Python (`python3` / `*.py`) — Use Pure Racket Exclusively
+- Use `view_file` and `replace_file_content` for file inspection/editing.
+- Do not call `invoke_subagent` during core `lib/`/`sim/` code-edit/test/push cycles (`RC-001B` can stall the parent agent if a subagent hits an inner `600s` command timeout).
 
+---
+
+## 4. Mandatory 100% Pure-Racket Policy (Zero Python for Analysis, Replay Forensics, or Tooling)
+
+> **CRITICAL REPOSITORY LANGUAGE RULE**:
+> **ALL bot logic, `.SC2Replay` MPQ/S2Protocol parsing, `match_log.zip` telemetry analysis, AI Arena REST/GraphQL match operations, corpus audits, and local `SC2_x64` match harnesses MUST be written and executed in 100% Pure Racket (`#lang racket` / `#lang racket/base` / `#lang sc-bot`).**
+> **NEVER write, modify, or invoke Python (`python3`, `*.py`, `pip`, `uv`) for analysis, replay inspection, or ad-hoc scratch scripts.**
+
+### Canonical Pure-Racket Tooling (`tools/*.rkt` & `lib/*.rkt`)
+Always use the repository's compiled Racket tools (`/home/antigravity/toolchains/racket_full/bin/racket`) instead of writing new scripts or running legacy `.py` files:
+1. **AI Arena BotZip Sync, Match Requests & Live Status**:
+   ```bash
+   /home/antigravity/toolchains/racket_full/bin/racket tools/aiarena-api-client.rkt --status
+   /home/antigravity/toolchains/racket_full/bin/racket tools/aiarena-api-client.rkt --sync-zips --request-matches 8 --status
+   ```
+2. **Pure-Racket AI Arena Replay MPQ + S2Protocol & `match_log.zip` Forensics**:
+   - Library decoder: `lib/sc2-mpq-replay-parser.rkt` (pure-Racket Blizzard MPQ decryptor + `file/gunzip` inflate + S2Protocol `VersionedDecoder` for `replay.details` & `replay.tracker.events`).
+   - CLI analyzer:
+     ```bash
+     /home/antigravity/toolchains/racket_full/bin/racket tools/analyze-aiarena-replays.rkt --fetch --since-match 5117325
+     ```
+3. **Real 2-Player Headless `SC2_x64` Match Harness & Priority Queue Auditor**:
+   ```bash
+   /home/antigravity/toolchains/racket_full/bin/racket tools/run-real-sc2-bot-match.rkt --bot Mothman-Z --opponent Creepy_strategies --max-loops 6720
+   ```
+4. **Pro-Replay Starvation Audit & Multi-Match Validator**:
+   ```bash
+   /home/antigravity/toolchains/racket_full/bin/racket tools/audit-pro-replay-starvation.rkt
+   /home/antigravity/toolchains/racket_full/bin/racket tools/racket-multi-match-validator.rkt
+   ```
+
+### Enforcement
+- `./scripts/atomic-test-and-push.sh` rejects newly added `.py` files in staging unless explicitly bypassed for frozen third-party opponent harnesses.
+- Never create scratch `.py` scripts in `<appDataDir>/brain/.../scratch/`; if a one-off check is ever needed, either add a reusable flag to `tools/analyze-aiarena-replays.rkt` / `tools/aiarena-api-client.rkt` or use `racket -e '...'`.

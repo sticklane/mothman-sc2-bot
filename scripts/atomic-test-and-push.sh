@@ -103,6 +103,12 @@ git add -A
 if git diff --cached --quiet; then
   echo "[3/4] Working tree already clean and committed; pushing HEAD to origin/main & origin/master..."
 else
+  NEW_PY_FILES="$(git diff --cached --diff-filter=A --name-only | grep -E '\.py$' || true)"
+  if [[ -n "${NEW_PY_FILES}" ]] && [[ "${ALLOW_NEW_PYTHON:-0}" -ne 1 ]]; then
+    echo "[atomic-test-and-push] ERROR: Newly added Python (.py) files are forbidden by AGENTS.md Section 4 (100% Pure-Racket Policy):" >&2
+    echo "${NEW_PY_FILES}" >&2
+    exit 1
+  fi
   if [[ -n "${OWNER_NAME}" ]] && git grep -i "${OWNER_NAME}" -- ':!AGENTS.md' >/dev/null 2>&1; then
     echo "[atomic-test-and-push] ERROR: Forbidden username found in tracked files!" >&2
     git grep -n -i "${OWNER_NAME}" -- ':!AGENTS.md' >&2 || true

@@ -730,13 +730,38 @@
   (define macro-step-rank 0)
   (for ([g (in-list steps-so-far)])
     (match-define (pro-bo-goal kind sym tgt-cnt min-sup _) g)
-    ;; Skip `starport-techlab` in live games if Starport already has a `starport-reactor`
-    (define reactor-occupies-starport?
+    ;; Skip add-ons on facilities whose add-on slots are already 100% occupied,
+    ;; extra gas geysers when already banking >= 250G, and Armory/GhostAcademy before 18 army supply
+    ;; so `priority-macro-brain` never escrows items that `bot-runtime` intentionally defers (`#5117326`/`#5117331`).
+    (define addon-occupies-facility?
       (and live-slots?
-           (eq? sym 'starport-techlab)
-           (>= (bldg-count-equivalent total-bldg-counts 'starport-reactor)
-               (max 1 (bldg-count-equivalent total-bldg-counts 'starport)))))
-    (unless reactor-occupies-starport?
+           (cond
+             [(memq sym '(barracks-techlab barracks-reactor))
+              (>= (+ (bldg-count-equivalent total-bldg-counts 'barracks-techlab)
+                     (bldg-count-equivalent total-bldg-counts 'barracks-reactor))
+                  (max 1 (bldg-count-equivalent ready-bldg-counts 'barracks)))]
+             [(memq sym '(factory-techlab factory-reactor))
+              (>= (+ (bldg-count-equivalent total-bldg-counts 'factory-techlab)
+                     (bldg-count-equivalent total-bldg-counts 'factory-reactor))
+                  (max 1 (bldg-count-equivalent ready-bldg-counts 'factory)))]
+             [(memq sym '(starport-techlab starport-reactor))
+              (>= (+ (bldg-count-equivalent total-bldg-counts 'starport-techlab)
+                     (bldg-count-equivalent total-bldg-counts 'starport-reactor))
+                  (max 1 (bldg-count-equivalent total-bldg-counts 'starport)))]
+             [else #f])))
+    (define extra-geyser-deferred-by-gas-bank?
+      (and live-slots?
+           (memq sym '(extractor refinery assimilator))
+           (> (bldg-count-equivalent total-bldg-counts sym) 0)
+           (>= gas 250)))
+    (define late-tech-deferred-by-low-army?
+      (and live-slots?
+           (memq sym '(armory ghost-academy))
+           (< army-supply 18)
+           (not (memq sym repaired-prereqs))))
+    (unless (or addon-occupies-facility?
+                extra-geyser-deferred-by-gas-bank?
+                late-tech-deferred-by-low-army?)
       (cond
         [(eq? kind 'expand)
          (define exp-w (if peaceful? (- 476.0 (* 3.0 macro-step-rank)) 42.0))
@@ -1208,7 +1233,31 @@
     (define plan-node (hash-ref plan-next-actions-ht id #f))
     (define geyser-cap-ok?
       (or (not (memq id '(extractor refinery assimilator)))
-          (< (bldg-count-equivalent total-bldg-counts id) (* 2 active-bases))))
+          (and (< (bldg-count-equivalent total-bldg-counts id) (* 2 active-bases))
+               (or (not (hash? open-facility-slots))
+                   (= (bldg-count-equivalent total-bldg-counts id) 0)
+                   (< gas 250)))))
+    (define addon-slot-free-ok?
+      (or (not (hash? open-facility-slots))
+          (cond
+            [(memq id '(barracks-techlab barracks-reactor))
+             (< (+ (bldg-count-equivalent total-bldg-counts 'barracks-techlab)
+                   (bldg-count-equivalent total-bldg-counts 'barracks-reactor))
+                (bldg-count-equivalent ready-bldg-counts 'barracks))]
+            [(memq id '(factory-techlab factory-reactor))
+             (< (+ (bldg-count-equivalent total-bldg-counts 'factory-techlab)
+                   (bldg-count-equivalent total-bldg-counts 'factory-reactor))
+                (bldg-count-equivalent ready-bldg-counts 'factory))]
+            [(memq id '(starport-techlab starport-reactor))
+             (< (+ (bldg-count-equivalent total-bldg-counts 'starport-techlab)
+                   (bldg-count-equivalent total-bldg-counts 'starport-reactor))
+                (bldg-count-equivalent ready-bldg-counts 'starport))]
+            [else #t])))
+    (define late-tech-army-ok?
+      (or (not (hash? open-facility-slots))
+          (not (memq id '(armory ghost-academy)))
+          (memq id repaired-prereqs)
+          (>= army-supply 18)))
     (define zerg-drone-sacrifice-ok?
       (or (not (eq? race 'Zerg))
           (not node)
@@ -1226,6 +1275,8 @@
           (<= nat-exp-min-reserve 0)
           (>= (- minerals nat-exp-min-reserve) (priority-candidate-min-cost c))))
     (and geyser-cap-ok?
+         addon-slot-free-ok?
+         late-tech-army-ok?
          zerg-drone-sacrifice-ok?
          nat-reserve-allows-2nd-fac?
          (cond

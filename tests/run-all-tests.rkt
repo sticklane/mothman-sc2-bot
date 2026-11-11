@@ -30,6 +30,20 @@
          "../ladder/build-aiarena-zip.rkt"
          "../lib/priority-macro-brain.rkt"
          "../lib/pro-replay-starvation-audit.rkt"
+         (only-in "../lib/sc2-protobuf-ws.rkt"
+                  sc2-point3d
+                  sc2-unit-order
+                  sc2-unit
+                  sc2-player-common
+                  sc2-observation
+                  sc2-raw-unit-command-ability-id
+                  sc2-raw-unit-command-target-unit-tag
+                  sc2-raw-unit-command-unit-tags
+                  saturate-workers-and-gas-commands)
+         (only-in "../lib/sc2-mpq-replay-parser.rkt"
+                  STORM-CRYPT
+                  mpq-hash
+                  parse-sc2-replay)
          (except-in "../lib/bot-crash-fuzzer.rkt"
                     compute-shadow-ledger
                     step-zerospace-mastermind!))
@@ -3923,6 +3937,172 @@
                 "Live runtime telemetry must include decoupled-bank-allocation")
   (assert-true! (not (not (member '(cancel-building 963) acts-maxz)))
                 "Live Zerg runtime at 200/200 with pending Spore must emit (cancel-building 963)"))
+
+;; =============================================================================
+;; 24. AI Arena Match #5117325-#5117332 Forensics: Worker Mining Stability,
+;;     Core-Tech Surcharge Exemption, Terran Marine Unblock & Pure-Racket MPQ
+;; =============================================================================
+(run-suite "24. AI Arena Match #5117325-#5117332 Forensics & Pure-Racket MPQ Replay Parser"
+  (define (mk-sc2-u tag utype alliance x y
+                    #:orders [orders '()]
+                    #:buffs [buffs '()]
+                    #:assigned [assigned 0]
+                    #:ideal [ideal 0]
+                    #:mins [mins 0]
+                    #:gas [gas 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 16)
+              (sc2-point3d x y 8.0) 0.0 0.5 1.0 0 #f #f #f
+              45.0 45.0 0.0 0.0 0.0 0.0 mins gas
+              #f #f #f #t #t orders 0 buffs assigned ideal 0.0 0 0 0 0))
+
+  ;; 1a. In-flight gas worker counting prevents pulling extra mineral workers off minerals
+  (define obs-gas-inflight
+    (sc2-observation
+     1200
+     (sc2-player-common 1 200 100 39 24 4 18 0 2 0 0)
+     (append
+      (list (mk-sc2-u 400 132 1 32.5 32.5 #:assigned 14 #:ideal 16) ; OrbitalCommand
+            (mk-sc2-u 500 20 1 36.5 34.5 #:assigned 2 #:ideal 3 #:gas 1500) ; Refinery (2/3 assigned)
+            (mk-sc2-u 700 341 3 26.5 32.5 #:mins 1500) ; MineralField
+            (mk-sc2-u 701 341 3 26.5 34.5 #:mins 1500)
+            ;; 1 SCV already walking to Refinery 500 -> effective gas harvesters = max(2, 3) = 3!
+            (mk-sc2-u 101 45 1 35.5 34.5 #:orders (list (sc2-unit-order 3666 #f 500 0.0)))
+            (mk-sc2-u 102 45 1 36.0 34.5 #:orders (list (sc2-unit-order 3666 #f 500 0.0)))
+            (mk-sc2-u 103 45 1 33.5 33.5 #:orders (list (sc2-unit-order 3666 #f 500 0.0))))
+      (for/list ([i (in-range 14)])
+        (mk-sc2-u (+ 200 i) 45 1 28.0 32.5 #:orders (list (sc2-unit-order 3666 #f 700 0.0)))))
+     '() '() #f '() '() '() '() '() '()))
+  (define cmds-gas-inflight (saturate-workers-and-gas-commands obs-gas-inflight))
+  (assert-true! (not (ormap (lambda (c) (= (sc2-raw-unit-command-target-unit-tag c) 500))
+                            cmds-gas-inflight))
+                "saturate-workers-and-gas-commands must count in-flight gas workers and not over-pull mineral SCVs")
+
+  ;; 1b. Gas-over-banked (>= 350G with < 250M) pulls 1 gas worker back to minerals & sends 0 into gas
+  (define obs-gas-float
+    (sc2-observation
+     2400
+     (sc2-player-common 1 120 420 46 32 10 20 0 5 0 0)
+     (append
+      (list (mk-sc2-u 400 132 1 32.5 32.5 #:assigned 14 #:ideal 16)
+            (mk-sc2-u 500 20 1 36.5 34.5 #:assigned 2 #:ideal 3 #:gas 1200)
+            (mk-sc2-u 700 341 3 26.5 32.5 #:mins 1500)
+            (mk-sc2-u 101 45 1 35.5 34.5 #:orders (list (sc2-unit-order 3666 #f 500 0.0)))
+            (mk-sc2-u 102 45 1 36.0 34.5 #:buffs '(273) #:orders (list (sc2-unit-order 296 #f 400 0.0))))
+      (for/list ([i (in-range 14)])
+        (mk-sc2-u (+ 200 i) 45 1 28.0 32.5 #:orders (list (sc2-unit-order 3666 #f 700 0.0)))))
+     '() '() #f '() '() '() '() '() '()))
+  (define cmds-gas-float (saturate-workers-and-gas-commands obs-gas-float))
+  (assert-true! (not (ormap (lambda (c) (= (sc2-raw-unit-command-target-unit-tag c) 500))
+                            cmds-gas-float))
+                "At 120M/420G (gas over-banked), saturate-workers-and-gas-commands must NOT send workers into gas")
+  (assert-true! (ormap (lambda (c)
+                         (and (= (sc2-raw-unit-command-ability-id c) 3666)
+                              (= (sc2-raw-unit-command-target-unit-tag c) 700)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(101))))
+                       cmds-gas-float)
+                "At 120M/420G, saturate-workers-and-gas-commands must pull non-carrying gas worker 101 to minerals")
+
+  ;; 1c. Expansion transfer deduplication skips re-commanding when surplus is already in flight
+  (define obs-exp-xfer
+    (sc2-observation
+     2600
+     (sc2-player-common 1 200 100 46 30 8 20 0 4 0 0)
+     (append
+      (list (mk-sc2-u 400 132 1 32.5 32.5 #:assigned 17 #:ideal 16) ; 1 surplus worker at main
+            (mk-sc2-u 401 132 1 60.5 60.5 #:assigned 0 #:ideal 16)  ; 16 deficit at natural
+            (mk-sc2-u 700 341 3 26.5 32.5 #:mins 1500)
+            (mk-sc2-u 702 341 3 66.5 60.5 #:mins 1500)              ; Natural mineral patch
+            ;; Worker 299 is still near main (34, 34) but ALREADY ordered to natural patch 702!
+            (mk-sc2-u 299 45 1 34.0 34.0 #:orders (list (sc2-unit-order 3666 #f 702 0.0))))
+      (for/list ([i (in-range 16)])
+        (mk-sc2-u (+ 200 i) 45 1 28.0 32.5 #:orders (list (sc2-unit-order 3666 #f 700 0.0)))))
+     '() '() #f '() '() '() '() '() '()))
+  (assert-eq! (saturate-workers-and-gas-commands obs-exp-xfer) '()
+              "Expansion worker transfer must count in-flight worker 299 and emit 0 redundant gather resets")
+
+  ;; 2. Live runtime does NOT emit gather-resetting harvest-gas / rebalance-gas-to-minerals & throttles scout spam
+  (define rt-live-no-thrash (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define (mk-live-z-obs fr)
+    (hash 'frame fr 'minerals 110 'gas 450 'supply-used 34 'supply-cap 44 'supply-left 10
+          'mineral-harvesters 18 'vespene-harvesters 6
+          'base-x 32.5 'base-y 32.5 'natural-x 52.5 'natural-y 56.5
+          'enemy-x 140.0 'enemy-y 140.0
+          'ally-units (append (for/list ([i (in-range 24)])
+                                (hash 'id (+ 10 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                              (for/list ([i (in-range 8)])
+                                (hash 'id (+ 100 i) 'type 'zergling 'x 52.5 'y 56.5 'hp 35)))
+          'ally-buildings (list (hash 'id 201 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0 'larva-count 2)
+                                (hash 'id 202 'type 'hatchery 'x 52.5 'y 56.5 'hp 1500 'build-progress 1.0 'larva-count 2)
+                                (hash 'id 203 'type 'spawning-pool 'x 36.0 'y 36.0 'hp 1000 'build-progress 1.0)
+                                (hash 'id 204 'type 'extractor 'x 30.0 'y 35.0 'hp 500 'build-progress 1.0))
+          'enemy-units '()))
+  (define res-thrash-1 (step-live-bot-runtime! rt-live-no-thrash (mk-live-z-obs 1000)))
+  (define res-thrash-2 (step-live-bot-runtime! rt-live-no-thrash (mk-live-z-obs 1004)))
+  (define acts-thrash-1 (hash-ref res-thrash-1 'actions '()))
+  (define acts-thrash-2 (hash-ref res-thrash-2 'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(harvest-gas rebalance-gas-to-minerals))))
+                            acts-thrash-1))
+                "Live observation mode must delegate gas/mineral worker orders to saturate-workers-and-gas-commands without 4-frame gather resets")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'periodic-scout))) acts-thrash-2))
+                "Live observation mode must throttle periodic-scout on a 96-frame cooldown (no repeat 4 frames later)")
+
+  ;; 3. Match #5117108 & #5117327 Regression: Protoss CyberneticsCore builds at 165M despite severe-intel-blindness?
+  (define rt-cyber (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-cyber
+    (step-live-bot-runtime!
+     rt-cyber
+     (hash 'frame 2400 'minerals 165 'gas 120 'supply-used 24 'supply-cap 39 'supply-left 15
+           'mineral-harvesters 19 'vespene-harvesters 3
+           'intel-staleness-frames 1200
+           'base-x 32.5 'base-y 32.5 'natural-x 52.5 'natural-y 56.5
+           'ally-units (for/list ([i (in-range 22)])
+                         (hash 'id (+ 10 i) 'type 'probe 'x 32.5 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 301 'type 'nexus 'x 32.5 'y 32.5 'hp 2000 'build-progress 1.0)
+                                 (hash 'id 302 'type 'nexus 'x 52.5 'y 56.5 'hp 2000 'build-progress 1.0)
+                                 (hash 'id 303 'type 'pylon 'x 36.5 'y 36.5 'hp 400 'build-progress 1.0)
+                                 (hash 'id 304 'type 'gateway 'x 38.5 'y 36.5 'hp 1000 'build-progress 1.0 'order-count 1)
+                                 (hash 'id 305 'type 'assimilator 'x 30.5 'y 35.5 'hp 900 'build-progress 1.0))
+           'enemy-units '())))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'cybernetics-core)))
+                       (hash-ref res-cyber 'actions '()))
+                "Matches #5117108 & #5117327: CyberneticsCore must build at 165M without +125M surcharge deadlock")
+
+  ;; 4. Match #5117326 Regression: Terran Barracks trains Marines even when gas >= 100 & has-rax-techlab? is #f
+  (define rt-marine (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define acts-marine
+    (step-layer2-economy!
+     rt-marine
+     (hash 'frame 3600 'minerals 200 'gas 320 'supply-used 52 'supply-cap 62 'supply-left 10
+           'mineral-harvesters 40 'vespene-harvesters 6
+           'base-x 32.5 'base-y 32.5 'natural-x 52.5 'natural-y 56.5
+           'ally-units (append (for/list ([i (in-range 46)])
+                                 (hash 'id (+ 10 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                               (for/list ([i (in-range 4)])
+                                 (hash 'id (+ 200 i) 'type 'marine 'x 52.5 'y 56.5 'hp 45)))
+           'ally-buildings (list (hash 'id 401 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0 'order-count 1)
+                                 (hash 'id 402 'type 'orbital-command 'x 52.5 'y 56.5 'hp 1500 'build-progress 1.0 'order-count 1)
+                                 ;; 2 Reactor-attached Barracks so has-rax-techlab? = #f while open-prod-slots['barracks] = 4
+                                 (hash 'id 403 'type 'barracks 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0 'order-count 0 'addon 'reactor)
+                                 (hash 'id 404 'type 'barracks-reactor 'x 39.0 'y 36.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 411 'type 'barracks 'x 36.5 'y 40.5 'hp 1000 'build-progress 1.0 'order-count 0 'addon 'reactor)
+                                 (hash 'id 412 'type 'barracks-reactor 'x 39.0 'y 40.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 405 'type 'refinery 'x 30.5 'y 35.5 'hp 500 'build-progress 1.0)
+                                 (hash 'id 406 'type 'factory 'x 42.5 'y 36.5 'hp 1250 'build-progress 1.0 'order-count 1 'addon 'techlab)
+                                 (hash 'id 409 'type 'factory-tech-lab 'x 45.0 'y 36.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 407 'type 'starport 'x 42.5 'y 40.5 'hp 1300 'build-progress 1.0 'order-count 1 'addon 'techlab)
+                                 (hash 'id 410 'type 'starport-tech-lab 'x 45.0 'y 40.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 408 'type 'engineering-bay 'x 46.5 'y 36.5 'hp 850 'build-progress 1.0 'order-count 1))
+           'enemy-units '())))
+  (assert-true! (not (not (member '(train marine) acts-marine)))
+                "Match #5117326: Terran Barracks must train Marines even when gas >= 25 and has-rax-techlab? is #f")
+
+  ;; 5. Pure-Racket Blizzard MPQ & S2Protocol Replay Parser (`lib/sc2-mpq-replay-parser.rkt`)
+  (assert-eq! (vector-length STORM-CRYPT) 1280
+              "Pure-Racket StormLib STORM-CRYPT table must initialize all 1,280 uint32 entries")
+  (assert-eq! (mpq-hash "(hash table)" 3) #xC3AF3770
+              "Pure-Racket StormLib mpq-hash('(hash table)', 3) must match canonical Blizzard key 0xC3AF3770")
+  (assert-true! (procedure? parse-sc2-replay)
+                "lib/sc2-mpq-replay-parser.rkt must export parse-sc2-replay"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

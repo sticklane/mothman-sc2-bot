@@ -14,3 +14,5 @@ replays/local_real_matches/tmp_sc2_*
 replays/local_real_matches/.active_locks/
 replays/local_real_matches/*_stdout.log
 replays/local_real_matches/*_stderr.log
+replays/aiarena_live_cache/
+

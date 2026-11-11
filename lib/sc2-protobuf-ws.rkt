@@ -3424,6 +3424,7 @@
 
 (define (find-best-expansion-placement ws-conn th-ab home-x home-y units)
   (define neutral-units (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
+  (define enemy-units (filter (lambda (u) (= (sc2-unit-alliance u) 4)) units))
   (define all-townhalls (filter sc2-unit-is-townhall? units))
   (define resources
     (filter (lambda (u)
@@ -3433,7 +3434,7 @@
   (define clusters (cluster-resource-centroids resources))
 
   ;; Filter to un-taken clusters (no existing TownHall within SC2-TOWNHALL-EXCLUSION-RADIUS)
-  (define open-clusters
+  (define raw-open-clusters
     (filter (lambda (c)
               (define cx (first c))
               (define cy (second c))
@@ -3444,63 +3445,86 @@
                                      SC2-TOWNHALL-EXCLUSION-RADIUS))
                                all-townhalls))))
             clusters))
+  (define uncontested-open-clusters
+    (filter (lambda (c)
+              (define cx (first c))
+              (define cy (second c))
+              (not (ormap (lambda (e)
+                            (define ep (sc2-unit-pos e))
+                            (<= (pt-dist cx cy (sc2-point3d-x ep) (sc2-point3d-y ep)) 10.0))
+                          enemy-units)))
+            raw-open-clusters))
+  (define open-clusters
+    (sort (if (not (null? uncontested-open-clusters))
+              uncontested-open-clusters
+              raw-open-clusters)
+          <
+          #:key (lambda (c) (pt-dist home-x home-y (first c) (second c)))))
+
+  (define (candidates-for-cluster c)
+    (define cx (first c))
+    (define cy (second c))
+    (define members (third c))
+    ;; Compute vector pointing away from the mineral/geyser arc relative to map center as tie-breaker seed,
+    ;; while generating a full [-10..+10] half-tile grid around (cx, cy) so pocket/cliff-backed expansions
+    ;; facing away from map center are covered equally well.
+    (define dir-x (- SC2-DEFAULT-MAP-CENTER-X cx))
+    (define dir-y (- SC2-DEFAULT-MAP-CENTER-Y cy))
+    (define norm-d (max 1.0 (sqrt (+ (sqr dir-x) (sqr dir-y)))))
+    (define seed-x (+ cx (* SC2-EXPANSION-SEED-OFFSET (/ dir-x norm-d))))
+    (define seed-y (+ cy (* SC2-EXPANSION-SEED-OFFSET (/ dir-y norm-d))))
+    (define raw-cands
+      (for*/list ([r (in-list '(3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0))]
+                  [dx (in-range (- r) (+ r 0.1) 1.0)]
+                  [dy (in-range (- r) (+ r 0.1) 1.0)]
+                  #:when (or (= (abs dx) r) (= (abs dy) r))
+                  [px (in-value (+ (floor cx) 0.5 dx))]
+                  [py (in-value (+ (floor cy) 0.5 dy))]
+                  #:when (and (>= px SC2-MAP-PLAYABLE-MIN-COORD) (<= px SC2-MAP-PLAYABLE-MAX-COORD)
+                              (>= py SC2-MAP-PLAYABLE-MIN-COORD) (<= py SC2-MAP-PLAYABLE-MAX-COORD)
+                              (for/and ([m (in-list members)])
+                                (define mp (sc2-unit-pos m))
+                                (>= (pt-dist px py (sc2-point3d-x mp) (sc2-point3d-y mp))
+                                    SC2-EXPANSION-MINERAL-STANDOFF))))
+        (sc2-point2d px py)))
+    (define cands
+      (sort raw-cands <
+            #:key (lambda (pt)
+                    ;; Prefer positions close to ideal TownHall standoff (~6.2 tiles from resource centroid)
+                    ;; and oriented toward seed-x, seed-y first, while still testing opposite-arc positions
+                    (+ (* 1.5 (abs (- (pt-dist cx cy (sc2-point2d-x pt) (sc2-point2d-y pt)) 6.2)))
+                       (* 0.35 (pt-dist seed-x seed-y (sc2-point2d-x pt) (sc2-point2d-y pt)))))))
+    (values seed-x seed-y cands))
 
   (cond
     [(null? open-clusters)
      (find-verified-building-placement ws-conn th-ab (+ home-x 20.0) (+ home-y 20.0) units
                                        #:min-spacing 4.5 #:max-radius 12.0 #:step 1.0)]
+    [(and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn)))
+     ;; Try up to 4 nearest open resource clusters in distance order until QueryPlacement confirms a valid (= 1) pad!
+     (define cluster-subset (take open-clusters (min 4 (length open-clusters))))
+     (define fallback-pt #f)
+     (or (for/or ([c (in-list cluster-subset)])
+           (define-values (seed-x seed-y cands) (candidates-for-cluster c))
+           (when (not fallback-pt)
+             (set! fallback-pt (if (null? cands) (sc2-point2d seed-x seed-y) (first cands))))
+           (and (not (null? cands))
+                (let* ([batch (take cands (min 220 (length cands)))]
+                       [q-items (for/list ([pt (in-list batch)])
+                                  (sc2-query-placement th-ab (sc2-point2d-x pt) (sc2-point2d-y pt) 0))]
+                       [q-resp (sc2-ws-rpc! ws-conn
+                                            (make-request-query-placement q-items
+                                                                          #:ignore-resource-requirements? #t))]
+                       [q-results (sc2-response-query-placements q-resp)])
+                  (for/first ([pt (in-list batch)]
+                              [res (in-list q-results)]
+                              #:when (= res 1))
+                    pt))))
+         fallback-pt
+         (sc2-point2d (+ home-x 20.0) (+ home-y 20.0)))]
     [else
-     (define best-cluster
-       (argmin (lambda (c) (pt-dist home-x home-y (first c) (second c)))
-               open-clusters))
-     (define cx (first best-cluster))
-     (define cy (second best-cluster))
-     (define members (third best-cluster))
-     ;; Offset SC2-EXPANSION-SEED-OFFSET tiles from mineral centroid toward map center
-     (define dir-x (- SC2-DEFAULT-MAP-CENTER-X cx))
-     (define dir-y (- SC2-DEFAULT-MAP-CENTER-Y cy))
-     (define norm-d (max 1.0 (sqrt (+ (sqr dir-x) (sqr dir-y)))))
-     (define seed-x (+ cx (* SC2-EXPANSION-SEED-OFFSET (/ dir-x norm-d))))
-     (define seed-y (+ cy (* SC2-EXPANSION-SEED-OFFSET (/ dir-y norm-d))))
-     ;; Generate candidate half-tile centers around (seed-x, seed-y), sorted by distance to seed
-     (define raw-cands
-       (for*/list ([r (in-list '(0.0 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0))]
-                   [dx (in-range (- r) (+ r 0.1) 1.0)]
-                   [dy (in-range (- r) (+ r 0.1) 1.0)]
-                   #:when (or (= r 0.0) (= (abs dx) r) (= (abs dy) r))
-                   [px (in-value (+ (floor seed-x) 0.5 dx))]
-                   [py (in-value (+ (floor seed-y) 0.5 dy))]
-                   #:when (and (>= px SC2-MAP-PLAYABLE-MIN-COORD) (<= px SC2-MAP-PLAYABLE-MAX-COORD)
-                               (>= py SC2-MAP-PLAYABLE-MIN-COORD) (<= py SC2-MAP-PLAYABLE-MAX-COORD)
-                               (for/and ([m (in-list members)])
-                                 (define mp (sc2-unit-pos m))
-                                 (>= (pt-dist px py (sc2-point3d-x mp) (sc2-point3d-y mp))
-                                     SC2-EXPANSION-MINERAL-STANDOFF))))
-         (sc2-point2d px py)))
-     (define cands
-       (sort raw-cands <
-             #:key (lambda (pt)
-                     (pt-dist seed-x seed-y (sc2-point2d-x pt) (sc2-point2d-y pt)))))
-     (cond
-       [(null? cands)
-        (sc2-point2d seed-x seed-y)]
-       [(and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn)))
-        (define batch (take cands (min 196 (length cands))))
-        (define q-items
-          (for/list ([pt (in-list batch)])
-            (sc2-query-placement th-ab (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
-        (define q-resp
-          (sc2-ws-rpc! ws-conn
-                       (make-request-query-placement q-items
-                                                     #:ignore-resource-requirements? #t)))
-        (define q-results (sc2-response-query-placements q-resp))
-        (or (for/first ([pt (in-list batch)]
-                        [res (in-list q-results)]
-                        #:when (= res 1))
-              pt)
-            (first batch))]
-       [else
-        (first cands)])]))
+     (define-values (seed-x seed-y cands) (candidates-for-cluster (first open-clusters)))
+     (if (null? cands) (sc2-point2d seed-x seed-y) (first cands))]))
 
 (define (select-producer-tags-for-unit unit-sym self-units)
   (define norm (normalize-sc2-name->symbol unit-sym))
@@ -3745,10 +3769,18 @@
               (or (null? (sc2-unit-orders w))
                   (worker-build-order-stuck? w)))
             workers))
+  (define (in-flight-workers-targeting-tag tag)
+    (count (lambda (w)
+             (ormap (lambda (o) (= (sc2-unit-order-target-unit-tag o) tag))
+                    (sc2-unit-orders w)))
+           workers))
   (define under-gas
     (filter (lambda (u)
               (define gp (sc2-unit-pos u))
-              (and (< (sc2-unit-assigned-harvesters u)
+              (define eff-assigned
+                (max (sc2-unit-assigned-harvesters u)
+                     (in-flight-workers-targeting-tag (sc2-unit-tag u))))
+              (and (< eff-assigned
                       (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u)))
                    (or (null? ready-townhalls)
                        (ormap (lambda (th)
@@ -3807,14 +3839,24 @@
                 candidate-mins))
       (issue-gather! w (sc2-unit-tag best-min))))
 
-  ;; 2. Assign 1 worker per frame to under-saturated gas building (Bug #8 fix:
-  ;;    never re-order workers already targeting gas, carrying gas buffs 273/274/275,
-  ;;    returning cargo 3667, OR within SC2-GAS-HARVESTER-EXCLUSION-RADIUS of a gas building)
+  ;; 2. Assign 1 worker per step to under-saturated gas building, unified with 350G/600G float caps
+  ;;    and preserving at least 12 active mineral workers when mineral patches exist.
   (define gas-over-banked?
-    (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
-         (< cur-min SC2-MINERAL-STARVED-THRESHOLD)))
+    (or (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH)
+             (< cur-min 250))
+        (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
+             (< cur-min 450))))
+  (define active-gas-worker-count
+    (count (lambda (w)
+             (or (ormap (lambda (bid) (memv bid '(273 274 275))) (sc2-unit-buff-ids w))
+                 (ormap (lambda (o)
+                          (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
+                        (sc2-unit-orders w))))
+           workers))
   (when (and (not (null? under-gas))
              (>= (length workers) SC2-MIN-WORKERS-FOR-GAS)
+             (or (null? mineral-fields)
+                 (>= (- (length workers) active-gas-worker-count) 12))
              (not gas-over-banked?))
     (define gb (first under-gas))
     (define gp (sc2-unit-pos gb))
@@ -3846,22 +3888,42 @@
                 candidate-workers))
       (issue-gather! best-w (sc2-unit-tag gb))))
 
-  ;; 3. Transfer 1 worker per step from over-saturated / mined-out TownHall to under-saturated expansion (Bug #9 fix)
+  ;; 3. Transfer 1 worker per step from over-saturated TownHall to under-saturated expansion,
+  ;;    skipping workers already ordered to `dst-mins` and capping in-flight transfers to actual surplus!
   (when (and (not (null? over-townhalls))
              (not (null? under-townhalls))
              (not (null? mineral-fields)))
     (define src-th (first over-townhalls))
     (define dst-th (first under-townhalls))
     (define sp (sc2-unit-pos src-th))
+    (define dp (sc2-unit-pos dst-th))
+    (define src-ih (let ([ih (sc2-unit-ideal-harvesters src-th)])
+                     (if (> ih 0) ih SC2-IDEAL-WORKERS-PER-MINERAL-LINE)))
+    (define dst-ih (let ([ih (sc2-unit-ideal-harvesters dst-th)])
+                     (if (> ih 0) ih SC2-IDEAL-WORKERS-PER-MINERAL-LINE)))
+    (define src-surplus (max 0 (- (sc2-unit-assigned-harvesters src-th) src-ih)))
+    (define dst-deficit (max 0 (- dst-ih (sc2-unit-assigned-harvesters dst-th))))
     (define dst-mins (minerals-near-townhall dst-th))
+    (define dst-min-tags (list->seteqv (map sc2-unit-tag dst-mins)))
+    (define in-flight-to-dst
+      (count (lambda (w)
+               (define wp (sc2-unit-pos w))
+               (and (> (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
+                                (sc2-point3d-x wp) (sc2-point3d-y wp))
+                       8.0)
+                    (ormap (lambda (o)
+                             (set-member? dst-min-tags (sc2-unit-order-target-unit-tag o)))
+                           (sc2-unit-orders w))))
+             workers))
     (define transferable
       (filter (lambda (w)
                 (define wp (sc2-unit-pos w))
                 (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                     (not (ormap (lambda (bid) (memv bid '(273 274 275)))
+                     (not (ormap (lambda (bid) (memv bid '(273 274 275 271 272)))
                                  (sc2-unit-buff-ids w)))
                      (not (ormap (lambda (o)
                                    (or (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o))
+                                       (set-member? dst-min-tags (sc2-unit-order-target-unit-tag o))
                                        (memv (sc2-unit-order-ability-id o) '(296 299 1184 3667))))
                                  (sc2-unit-orders w)))
                      (<= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
@@ -3873,14 +3935,23 @@
                                    (sc2-point3d-x wp) (sc2-point3d-y wp))
                           SC2-GAS-HARVESTER-EXCLUSION-RADIUS))))
               workers))
-    (when (and (not (null? transferable)) (not (null? dst-mins)))
+    (when (and (> src-surplus in-flight-to-dst)
+               (> dst-deficit in-flight-to-dst)
+               (not (null? transferable))
+               (not (null? dst-mins)))
       (issue-gather! (first transferable) (sc2-unit-tag (first dst-mins)))))
 
-  ;; 4. Pull 1 gas worker back to minerals when floating >600 gas while <200 minerals (Bug #9 part 2)
+  ;; 4. Pull 1 gas worker back to minerals when floating gas while mineral-starved
   (when (and gas-over-banked? (not (null? mineral-fields)) (not (null? ready-gas-bldgs)))
+    (define cand-mins
+      (if (not (null? under-townhalls))
+          (minerals-near-townhall (first under-townhalls))
+          mineral-fields))
     (define gas-worker
       (for/first ([w (in-list workers)]
                   #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                              (not (ormap (lambda (bid) (memv bid '(273 274 275)))
+                                          (sc2-unit-buff-ids w)))
                               (ormap (lambda (o)
                                        (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
                                      (sc2-unit-orders w))))
@@ -3892,7 +3963,7 @@
                   (define mp (sc2-unit-pos m))
                   (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
                            (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                mineral-fields))
+                cand-mins))
       (issue-gather! gas-worker (sc2-unit-tag best-min))))
 
   (reverse cmds))
@@ -4387,9 +4458,9 @@
             (define-values (px py) (pylon-power-anchor req-x req-y))
             (define place-pt
               (find-verified-building-placement ws-conn ab-id px py units
-                                                #:min-spacing 2.5
+                                                #:min-spacing 2.0
                                                 #:max-radius 6.5
-                                                #:step 1.5
+                                                #:step 1.0
                                                 #:extra-reserved-points step-reserved-build-pts
                                                 #:anchor-points (pylon-power-anchors req-x req-y)))
             (reserve-step-build-pt! place-pt ab-id)
@@ -4418,9 +4489,9 @@
                   (values req-x req-y)))
             (define place-pt
               (find-verified-building-placement ws-conn ab-id cx cy units
-                                                #:min-spacing 3.0
-                                                #:max-radius 7.5
-                                                #:step 1.5
+                                                #:min-spacing 2.0
+                                                #:max-radius 8.5
+                                                #:step 1.0
                                                 #:extra-reserved-points step-reserved-build-pts))
             (reserve-step-build-pt! place-pt ab-id)
             (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
@@ -5160,6 +5231,8 @@
        (void)]
 
       [(list 'rebalance-gas-to-minerals wid patch-id)
+       (define gas-bldg-tags
+         (list->seteqv (map sc2-unit-tag (filter sc2-unit-is-gas-building? self-units))))
        (define wlist
          (filter (lambda (t)
                    (define u (and (exact-integer? t) (hash-ref self-unit-by-tag t #f)))
@@ -5168,25 +5241,50 @@
                         (> t 0)
                         (not (set-member? used-worker-tags t))
                         (not (and u (worker-has-build-order? u)))
-                        (not (and uh (hash-ref uh 'has-build-order? #f)))))
+                        (not (and uh (hash-ref uh 'has-build-order? #f)))
+                        (or (null? self-units)
+                            (and u
+                                 (not (ormap (lambda (bid) (memv bid '(273 274 275)))
+                                             (sc2-unit-buff-ids u)))
+                                 (ormap (lambda (o)
+                                          (set-member? gas-bldg-tags (sc2-unit-order-target-unit-tag o)))
+                                        (sc2-unit-orders u))))))
                  (if (list? wid) wid (list wid))))
-       (define eff-patch-id
-         (cond
-           [(and (exact-integer? patch-id)
-                 (ormap (lambda (m) (= (sc2-unit-tag m) patch-id)) mineral-fields))
-            patch-id]
-           [(not (null? mineral-fields))
-            (sc2-unit-tag
-             (argmin (lambda (m)
-                       (define mp (sc2-unit-pos m))
-                       (pt-dist home-x home-y (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                     mineral-fields))]
-           [(and (exact-integer? patch-id) (> patch-id 0)) patch-id]
-           [else 0]))
-       (when (and (not (null? wlist)) (> eff-patch-id 0))
-         (for ([wt (in-list wlist)])
-           (record-worker-used! wt))
-         (emit! (sc2-raw-unit-command 3666 #f eff-patch-id wlist #f)))]
+       (cond
+         [(and (not (null? self-units))
+               (not (null? wlist))
+               (not (null? mineral-fields)))
+          (for ([wt (in-list wlist)])
+            (define u (hash-ref self-unit-by-tag wt #f))
+            (define wp (and u (sc2-unit-pos u)))
+            (define best-min
+              (argmin (lambda (m)
+                        (define mp (sc2-unit-pos m))
+                        (pt-dist (if wp (sc2-point3d-x wp) home-x)
+                                 (if wp (sc2-point3d-y wp) home-y)
+                                 (sc2-point3d-x mp)
+                                 (sc2-point3d-y mp)))
+                      mineral-fields))
+            (record-worker-used! wt)
+            (emit! (sc2-raw-unit-command 3666 #f (sc2-unit-tag best-min) (list wt) #f)))]
+         [else
+          (define eff-patch-id
+            (cond
+              [(and (exact-integer? patch-id)
+                    (ormap (lambda (m) (= (sc2-unit-tag m) patch-id)) mineral-fields))
+               patch-id]
+              [(not (null? mineral-fields))
+               (sc2-unit-tag
+                (argmin (lambda (m)
+                          (define mp (sc2-unit-pos m))
+                          (pt-dist home-x home-y (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                        mineral-fields))]
+              [(and (exact-integer? patch-id) (> patch-id 0)) patch-id]
+              [else 0]))
+          (when (and (not (null? wlist)) (> eff-patch-id 0))
+            (for ([wt (in-list wlist)])
+              (record-worker-used! wt))
+            (emit! (sc2-raw-unit-command 3666 #f eff-patch-id wlist #f)))])]
 
       [(list 'land-building bldg-id raw-x raw-y)
        (when (and (exact-integer? bldg-id) (> bldg-id 0) (real? raw-x) (real? raw-y))
