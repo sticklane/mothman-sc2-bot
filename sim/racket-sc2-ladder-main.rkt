@@ -322,6 +322,9 @@
    (encode-float32 17 (hash-ref u 'energy 0.0))
    (encode-float32 37 (hash-ref u 'energy-max 0.0))
    (encode-float32 20 (hash-ref u 'build-progress 1.0))
+   (if (member (hash-ref u 'unit-type 0) '(20 61 88 342 343 344))
+       (encode-int32 19 (hash-ref u 'vespene-contents 1500))
+       #"")
    orders-bytes
    (encode-int32 28 (hash-ref u 'assigned-harvesters 0))
    (encode-int32 29 (hash-ref u 'ideal-harvesters 0))
@@ -783,6 +786,8 @@
       (define sum-runtime-ms 0.0)
       (define sum-translate-ms 0.0)
       (define match-result "Undecided")
+      (define wire-apm-gov (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+      (define frame0-split-done? #f)
 
       ;; 5. Main WebSocket Match Loop (catch SIGINT/SIGTERM break and clean LadderServer socket close at 45m tie cap)
       (with-handlers ([exn:break? (lambda (_e)
@@ -844,7 +849,9 @@
                 (set! peak-bases
                       (max peak-bases
                            (length (filter sc2-unit-is-townhall?
-                                           (filter (lambda (u) (= (sc2-unit-alliance u) 1))
+                                           (filter (lambda (u)
+                                                     (and (= (sc2-unit-alliance u) 1)
+                                                          (not (= (sc2-unit-display-type u) 4))))
                                                    (sc2-observation-units obs))))))
 
                 ;; Step cognitive architecture (primary actions first so individual unit micro
@@ -874,9 +881,21 @@
                       [(mineral-harass harass-workers worker-harass harass)
                        (set! harass-cmds-emitted (add1 harass-cmds-emitted))])))
 
-                ;; Translate S-expression actions + automatic worker/gas saturation
-                ;; (excluding workers commanded to build/expand/defend in this frame)
+                ;; Translate S-expression actions + frame-0 pro worker split + automatic worker/gas saturation
                 (define commanded-workers (mutable-seteqv))
+                (define split-cmds
+                  (if (and (not frame0-split-done?) (<= last-game-loop 8))
+                      (let ([sc (frame0-pro-worker-split-commands obs)])
+                        (when (pair? sc)
+                          (set! frame0-split-done? #t)
+                          (for ([c (in-list sc)]
+                                #:when (sc2-raw-unit-command? c))
+                            (for ([wt (in-list (sc2-raw-unit-command-unit-tags c))])
+                              (set-add! commanded-workers wt))))
+                        sc)
+                      '()))
+                (define step-role-leases (hash-ref step-res 'role-leases #f))
+                (define step-reserved-aabbs (hash-ref step-res 'wall-reserved-aabbs '()))
                 (define action-cmds
                   (translate-bot-actions->sc2-raw-commands
                    bot-actions
@@ -884,13 +903,20 @@
                    #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
                    #:ws-conn conn
                    #:enemy-base (hash-ref obs-hash 'enemy-base #f)
-                   #:commanded-workers commanded-workers))
+                   #:commanded-workers commanded-workers
+                   #:role-leases step-role-leases
+                   #:reserved-aabbs step-reserved-aabbs
+                   #:game-info game-info))
+                (define sat-cmds
+                  (saturate-workers-and-gas-commands
+                   obs
+                   #:excluded-worker-tags commanded-workers
+                   #:role-leases step-role-leases
+                   #:reserved-aabbs step-reserved-aabbs
+                   #:game-info game-info))
+                (define raw-cmds0 (append split-cmds action-cmds sat-cmds))
                 (define raw-cmds
-                  (append
-                   action-cmds
-                   (saturate-workers-and-gas-commands
-                    obs
-                    #:excluded-worker-tags commanded-workers)))
+                  (govern-sc2-wire-actions! wire-apm-gov raw-cmds0 last-game-loop obs))
                 (define t-tr-1 (current-inexact-monotonic-milliseconds))
 
                 (define step-ms (- t-tr-1 t-step-0))

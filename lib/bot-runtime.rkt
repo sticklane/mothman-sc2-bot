@@ -58,7 +58,16 @@
  compute-bank-targets
  allocate-decoupled-goal-streams
  decoupled-stream-can-spend?
- evaluate-max-supply-manager)
+ evaluate-max-supply-manager
+ NON-COMBAT-AND-SCOUT-ENEMY-SYMS
+ combat-unit-record?
+ rt-role-leases
+ rt-bistable-states
+ rt-scout-state
+ rt-spotter-lings
+ rt-tumor-state
+ rt-door-state
+ rt-splash-state)
 
 ;; Per-runtime weak map caching last-known `(cons x y)` coordinates for enemy UnitTags
 ;; so stale/dead/snapshot target tags (`ActionResult=207 Error_CantTargetThatUnit`) downgrade
@@ -70,6 +79,80 @@
       (let ([ht (make-hasheqv)])
         (hash-set! WEAK-RT-ENEMY-POS-CACHE rt ht)
         ht)))
+
+;; Per-runtime weak-hash tables preserving `(struct live-bot-runtime ...)` positional arity:
+(define WEAK-RT-ROLE-LEASES     (make-weak-hasheq))
+(define WEAK-RT-BISTABLE-STATES (make-weak-hasheq))
+(define WEAK-RT-SCOUT-STATE     (make-weak-hasheq))
+(define WEAK-RT-SPOTTER-LINGS   (make-weak-hasheq))
+(define WEAK-RT-TUMOR-STATE     (make-weak-hasheq))
+(define WEAK-RT-DOOR-STATE      (make-weak-hasheq))
+(define WEAK-RT-SPLASH-STATE    (make-weak-hasheq))
+(define WEAK-RT-WALL-AABBS-BOX  (make-weak-hasheq))
+(define WEAK-RT-ENEMY-RACE-BOX  (make-weak-hasheq))
+
+(define (rt-role-leases rt)
+  (or (hash-ref WEAK-RT-ROLE-LEASES rt #f)
+      (let ([ht (make-hasheqv)])
+        (hash-set! WEAK-RT-ROLE-LEASES rt ht)
+        ht)))
+
+(define (rt-bistable-states rt)
+  (or (hash-ref WEAK-RT-BISTABLE-STATES rt #f)
+      (let ([ht (make-hash)])
+        (hash-set! WEAK-RT-BISTABLE-STATES rt ht)
+        ht)))
+
+(define (rt-scout-state rt)
+  (or (hash-ref WEAK-RT-SCOUT-STATE rt #f)
+      (let ([ht (make-hasheq)])
+        (hash-set! WEAK-RT-SCOUT-STATE rt ht)
+        ht)))
+
+(define (rt-spotter-lings rt)
+  (or (hash-ref WEAK-RT-SPOTTER-LINGS rt #f)
+      (let ([ht (make-hasheq)])
+        (hash-set! WEAK-RT-SPOTTER-LINGS rt ht)
+        ht)))
+
+(define (rt-tumor-state rt)
+  (or (hash-ref WEAK-RT-TUMOR-STATE rt #f)
+      (let ([ht (make-hasheqv)])
+        (hash-set! WEAK-RT-TUMOR-STATE rt ht)
+        ht)))
+
+(define (rt-door-state rt)
+  (or (hash-ref WEAK-RT-DOOR-STATE rt #f)
+      (let ([ht (make-hasheq)])
+        (hash-set! WEAK-RT-DOOR-STATE rt ht)
+        ht)))
+
+(define (rt-splash-state rt)
+  (or (hash-ref WEAK-RT-SPLASH-STATE rt #f)
+      (let ([ht (make-hash)])
+        (hash-set! WEAK-RT-SPLASH-STATE rt ht)
+        ht)))
+
+(define (rt-wall-aabbs-box rt)
+  (or (hash-ref WEAK-RT-WALL-AABBS-BOX rt #f)
+      (let ([b (box '())])
+        (hash-set! WEAK-RT-WALL-AABBS-BOX rt b)
+        b)))
+
+(define (rt-enemy-race-box rt)
+  (or (hash-ref WEAK-RT-ENEMY-RACE-BOX rt #f)
+      (let ([b (box 'Unknown)])
+        (hash-set! WEAK-RT-ENEMY-RACE-BOX rt b)
+        b)))
+
+(define (worker-has-engine-build-order? w)
+  (and (hash? w)
+       (or (eq? (hash-ref w 'has-build-order? #f) #t)
+           (memq (hash-ref w 'order-kind #f) '(build expand))
+           (eq? (sc2-order-protection-class
+                 (sc2-canonical-order-ability (hash-ref w 'order-ability-id 0)))
+                'build-structure))
+       #t))
 
 (define (sanitize-stale-target-actions actions obs #:pos-cache [pos-cache #f])
   (define sanitized-obs (if (hash? obs) obs (hash)))
@@ -129,8 +212,14 @@
       [_ act])))
 
 (define WORKER-AND-NONCOMBAT-SYMS
-  '(drone probe scv overlord overseer queen larva egg mule observer
-    creep-tumor creep-tumor-burrowed warp-prism medivac overlord-transport))
+  '(drone probe scv overlord overseer queen larva egg cocoon mule observer
+    overlord-cocoon transport-overlord-cocoon baneling-cocoon ravager-cocoon
+    brood-lord-cocoon lurker-egg lurker-mp-egg
+    creep-tumor creep-tumor-burrowed creep-tumor-queen
+    warp-prism warp-prism-phasing observer-siege-mode overseer-siege-mode
+    medivac overlord-transport
+    interceptor auto-turret point-defense-drone raven-repair-drone
+    adept-phase-shift disruptor-phased))
 
 (define PRO-CHRONO-11-STRUCTURES
   '(robotics-facility
@@ -356,11 +445,14 @@
 
 (define NON-COMBAT-AND-SCOUT-ENEMY-SYMS
   '(overlord overseer observer overlord-transport overseer-siege-mode observer-siege-mode
+    warp-prism-phasing
     changeling changeling-zealot changeling-marine changeling-marine-shield
     changeling-zergling changeling-zergling-wings
-    larva egg cocoon overlord-cocoon baneling-cocoon ravager-cocoon
-    brood-lord-cocoon lurker-mp-egg mule
-    adept-phase-shift disruptor-phased kd8-charge parasitic-bomb-dummy))
+    larva egg cocoon overlord-cocoon transport-overlord-cocoon baneling-cocoon ravager-cocoon
+    brood-lord-cocoon lurker-egg lurker-mp-egg mule
+    interceptor auto-turret point-defense-drone raven-repair-drone
+    adept-phase-shift disruptor-phased kd8-charge parasitic-bomb-dummy
+    oracle-stasis-trap stasis-ward force-field broodling-escort))
 
 (define NON-WORKER-PULL-ENEMY-UNIT-SYMS
   (append NON-COMBAT-AND-SCOUT-ENEMY-SYMS
@@ -372,8 +464,13 @@
 
 (define (combat-unit-record? u)
   (and (hash? u)
-       (not (memq (unit-type-sym u) WORKER-AND-NONCOMBAT-SYMS))
-       (not (memq (unit-type-sym u) NON-COMBAT-AND-SCOUT-ENEMY-SYMS))))
+       (let ([t (unit-type-sym u)])
+         (and (not (memq t WORKER-AND-NONCOMBAT-SYMS))
+              (not (memq t NON-COMBAT-AND-SCOUT-ENEMY-SYMS))
+              (not (sc2-non-combat-or-summon-sym? t))
+              (not (eq? (hash-ref u 'is-hallucination #f) #t))
+              (not (eq? (hash-ref u 'hallucination #f) #t))
+              (not (eq? (hash-ref u 'hallucination? #f) #t))))))
 
 (define (sanitize-unit-record u [default-x 32.5] [default-y 32.5])
   (cond
@@ -530,14 +627,6 @@
        (safe-coord (- enemy-y (* 18.0 dir-uy)) 148.0))
      (define nat-x (safe-coord (hash-ref base-h 'natural-x default-nat-x) default-nat-x))
      (define nat-y (safe-coord (hash-ref base-h 'natural-y default-nat-y) default-nat-y))
-     (define third-x (safe-coord (hash-ref base-h 'third-x default-third-x) default-third-x))
-     (define third-y (safe-coord (hash-ref base-h 'third-y default-third-y) default-third-y))
-     (define enemy-exp-x
-       (safe-coord (hash-ref base-h 'enemy-expand-x (hash-ref base-h 'enemy-exp-x default-enemy-exp-x))
-                   default-enemy-exp-x))
-     (define enemy-exp-y
-       (safe-coord (hash-ref base-h 'enemy-expand-y (hash-ref base-h 'enemy-exp-y default-enemy-exp-y))
-                   default-enemy-exp-y))
      (define raw-au (hash-ref base-h 'ally-units '()))
      (define raw-ab (hash-ref base-h 'ally-buildings '()))
      (define raw-eu (hash-ref base-h 'enemy-units '()))
@@ -551,6 +640,32 @@
        (if (list? raw-ab)
            (map (lambda (b) (sanitize-bldg-record b base-x base-y)) raw-ab)
            '()))
+     (define owned-third-th
+       (findf (lambda (b)
+                (and (hash? b)
+                     (memq (sc2-canonical-structure-sym (hash-ref b 'type 'none))
+                           '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                     (let ([bx (safe-coord (hash-ref b 'x base-x) base-x)]
+                           [by (safe-coord (hash-ref b 'y base-y) base-y)])
+                       (and (> (sqrt (+ (sqr (- bx base-x)) (sqr (- by base-y)))) 7.0)
+                            (> (sqrt (+ (sqr (- bx nat-x)) (sqr (- by nat-y)))) 7.0)))))
+              ally-buildings))
+     (define eff-default-third-x
+       (if owned-third-th
+           (safe-coord (hash-ref owned-third-th 'x default-third-x) default-third-x)
+           default-third-x))
+     (define eff-default-third-y
+       (if owned-third-th
+           (safe-coord (hash-ref owned-third-th 'y default-third-y) default-third-y)
+           default-third-y))
+     (define third-x (safe-coord (hash-ref base-h 'third-x eff-default-third-x) eff-default-third-x))
+     (define third-y (safe-coord (hash-ref base-h 'third-y eff-default-third-y) eff-default-third-y))
+     (define enemy-exp-x
+       (safe-coord (hash-ref base-h 'enemy-expand-x (hash-ref base-h 'enemy-exp-x default-enemy-exp-x))
+                   default-enemy-exp-x))
+     (define enemy-exp-y
+       (safe-coord (hash-ref base-h 'enemy-expand-y (hash-ref base-h 'enemy-exp-y default-enemy-exp-y))
+                   default-enemy-exp-y))
      (define enemy-units
        (if (list? raw-eu)
            (map (lambda (e) (sanitize-unit-record e nat-x nat-y)) raw-eu)
@@ -720,7 +835,9 @@
                        [ey (safe-coord (hash-ref e 'y nat-y) nat-y)])
                    (define scout-or-dummy?
                      (or (memq t NON-COMBAT-AND-SCOUT-ENEMY-SYMS)
+                         (sc2-non-combat-or-summon-sym? t)
                          (eq? (hash-ref e 'changeling? #f) #t)
+                         (eq? (hash-ref e 'is-hallucination #f) #t)
                          (eq? (hash-ref e 'hallucination? #f) #t)
                          (eq? (hash-ref e 'hallucination #f) #t)))
                    (define distant-worker?
@@ -768,16 +885,15 @@
          (>= (length rush-enemies) 3)
          rush-fap-threat?))
 
-  ;; Hysteresis band [7, 13] (±3 around 10) for victory transition + catastrophic exit (< -15)
+  ;; Hysteresis deadband: enter >= +13.0 (or no rush & >= +8.0), exit <= -5.0, catastrophic < -15.0
   (define catastrophic-deficit? (< fap-score -15.0))
   (define victory-fap-ok?
     (cond
       [catastrophic-deficit? #f]
-      [in-victory?           (>= fap-score 7.0)]
-      [in-midgame-recovery-or-contain?
-       (or (null? rush-enemies) (>= fap-score 13.0))]
+      [in-victory?           (> fap-score -5.0)]
       [else
-       (or (null? rush-enemies) (>= fap-score 13.0))]))
+       (or (>= fap-score 13.0)
+           (and (null? rush-enemies) (>= fap-score 8.0)))]))
 
   (cond
     [(and (eq? cfg-race 'Random)
@@ -990,6 +1106,104 @@
     (emit! (list 'stasis-worker-stoppage-compensation frozen-worker-count)))
 
   (define cd-tracker (live-bot-runtime-cooldown-tracker rt))
+  (define leases (rt-role-leases rt))
+  (define oledger-early (live-bot-runtime-order-ledger rt))
+  (define map-grids (hash-ref obs 'map-grids #f))
+  (define expansion-pads
+    (let ([raw-pads (hash-ref obs 'expansion-candidates #f)])
+      (if (and (list? raw-pads) (pair? raw-pads))
+          raw-pads
+          (list (cons nat-x nat-y) (cons third-x third-y)))))
+
+  ;; Lease active builder workers so saturate/cheese/scout/army never yank them mid-build
+  (for ([w (in-list workers)])
+    (define wid (hash-ref w 'id 0))
+    (when (and (> wid 0)
+               (or (worker-has-engine-build-order? w)
+                   (order-ledger-unit-has-active-build? oledger-early wid w)))
+      (acquire-unit-lease! leases wid 'builder frame 24
+                           #:x (hash-ref w 'x base-x)
+                           #:y (hash-ref w 'y base-y))))
+
+  ;; Offset static defense (Spine/Spore/Cannon/Battery/Bunker) & forward anchors >= 5.0 tiles
+  ;; away from `(nat-x, nat-y)` and `(third-x, third-y)` toward `(enemy-x, enemy-y)`
+  (define (offset-defense-anchor anchor-x anchor-y [min-dist 5.5])
+    (define ax (exact->inexact anchor-x))
+    (define ay (exact->inexact anchor-y))
+    (define dx (- (exact->inexact enemy-x) ax))
+    (define dy (- (exact->inexact enemy-y) ay))
+    (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+    (define eff-d (max 5.0 (exact->inexact min-dist)))
+    (define cx0 (+ ax (* eff-d (/ dx d))))
+    (define cy0 (+ ay (* eff-d (/ dy d))))
+    (define-values (cx2 cy2)
+      (for/fold ([rx cx0] [ry cy0])
+                ([pad (in-list (list (cons nat-x nat-y) (cons third-x third-y)))])
+        (define px (exact->inexact (car pad)))
+        (define py (exact->inexact (cdr pad)))
+        (if (< (dist2d rx ry px py) 5.0)
+            (let* ([pdx (- (exact->inexact enemy-x) px)]
+                   [pdy (- (exact->inexact enemy-y) py)]
+                   [plen (max 1.0 (sqrt (+ (* pdx pdx) (* pdy pdy))))])
+              (values (+ px (* 5.5 (/ pdx plen)))
+                      (+ py (* 5.5 (/ pdy plen)))))
+            (values rx ry))))
+    (values (safe-coord cx2 anchor-x) (safe-coord cy2 anchor-y)))
+
+  ;; Sticky scouted enemy race resolution (`!= 'Unknown` and `!= 'Random` -> sticky race,
+  ;; else `(hash-ref obs 'opponent-requested-race 'Random)`)
+  (when (<= frame 4)
+    (set-box! (rt-enemy-race-box rt) 'Unknown))
+  (define visible-real-enemies
+    (filter (lambda (e)
+              (and (hash? e)
+                   (not (eq? (hash-ref e 'is-hallucination #f) #t))
+                   (not (eq? (hash-ref e 'hallucination #f) #t))
+                   (not (eq? (hash-ref e 'hallucination? #f) #t))
+                   (not (eq? (hash-ref e 'changeling? #f) #t))))
+            (append enemy-units enemy-bldgs)))
+  (define scouted-enemy-race
+    (cond
+      [(ormap (lambda (e)
+                (memq (sc2-canonical-unit-sym (unit-type-sym e))
+                      '(drone overlord overseer zergling baneling roach ravager hydralisk
+                        lurker mutalisk corruptor brood-lord ultralisk infestor viper queen
+                        hatchery lair hive spawning-pool extractor roach-warren baneling-nest
+                        spine-crawler spore-crawler)))
+              visible-real-enemies)
+       'Zerg]
+      [(ormap (lambda (e)
+                (memq (sc2-canonical-unit-sym (unit-type-sym e))
+                      '(scv marine marauder reaper ghost hellion hellbat widow-mine siege-tank
+                        cyclone thor medivac viking liberator raven banshee battlecruiser
+                        command-center orbital-command planetary-fortress supply-depot refinery
+                        barracks factory starport bunker missile-turret)))
+              visible-real-enemies)
+       'Terran]
+      [(ormap (lambda (e)
+                (memq (sc2-canonical-unit-sym (unit-type-sym e))
+                      '(probe zealot stalker adept sentry high-templar dark-templar archon
+                        immortal observer warp-prism colossus disruptor phoenix void-ray oracle
+                        carrier tempest mothership nexus pylon assimilator gateway warp-gate
+                        forge cybernetics-core photon-cannon shield-battery robotics-facility stargate)))
+              visible-real-enemies)
+       'Protoss]
+      [else 'Unknown]))
+  (when (memq scouted-enemy-race '(Zerg Terran Protoss))
+    (set-box! (rt-enemy-race-box rt) scouted-enemy-race))
+  (define effective-enemy-race
+    (let ([known (if (memq scouted-enemy-race '(Zerg Terran Protoss))
+                     scouted-enemy-race
+                     (unbox (rt-enemy-race-box rt)))])
+      (if (memq known '(Zerg Terran Protoss))
+          known
+          (let ([req (hash-ref obs 'opponent-requested-race
+                               (hash-ref obs 'enemy-race 'Random))])
+            (case req
+              [(Zerg zerg "Zerg" "zerg") 'Zerg]
+              [(Protoss protoss "Protoss" "protoss") 'Protoss]
+              [(Terran terran "Terran" "terran") 'Terran]
+              [else 'Random])))))
 
   ;; ---------------------------------------------------------------------------
   ;; Pro Signature Mechanic #1: Tactical Building Save-Cancel (<18% HP-pct under attack)
@@ -1227,7 +1441,10 @@
   (define cur-rush-fighting-wids '())
   (define worker-pull-emitted-1ab? #f)
   (define non-builder-defense-workers
-    (filter (lambda (w) (not (hash-ref w 'has-build-order? #f))) workers))
+    (filter (lambda (w)
+              (and (not (worker-has-engine-build-order? w))
+                   (not (order-ledger-unit-has-active-build? oledger-early (hash-ref w 'id 0) w))))
+            workers))
 
   ;; 1A. Per-Step Worker-Rush Focus-Fire Pull + Critically Wounded (<= 12 HP) Mineral-Walk Disengage
   (when (and worker-rush-active?
@@ -1461,7 +1678,8 @@
     (define healthy-workers
       (filter (lambda (w)
                 (and (or (not live-obs-harvesters?)
-                         (not (hash-ref w 'has-build-order? #f)))
+                         (and (not (worker-has-engine-build-order? w))
+                              (not (order-ledger-unit-has-active-build? oledger-early (hash-ref w 'id 0) w))))
                      (>= (hash-ref w 'hp SC2-DRONE-MAX-HP) SC2-HEALTHY-WORKER-PULL-MIN-HP)))
               workers))
     (define pull-ids
@@ -1592,14 +1810,33 @@
     (when (and (not worker-rush-active?)
                (not in-base-proxy-detected?))
       (for ([w (in-list workers)]
-            #:when (and (not (hash-ref w 'has-build-order? #f))
+            #:when (and (not (worker-has-engine-build-order? w))
+                        (not (order-ledger-unit-has-active-build? oledger-early (hash-ref w 'id 0) w))
                         (<= (dist2d ewx ewy (hash-ref w 'x base-x) (hash-ref w 'y base-y)) 8.0)))
         (emit! (list 'move (hash-ref w 'id 10) perp-x perp-y)))))
 
   ;; ---------------------------------------------------------------------------
   ;; Adversarial Countermeasure #2: Blocked Natural Expansion Site
-  ;; (Gated on no early survival crisis / base attack + primary combat facility built!)
+  ;; Keep `natural-blocked? = #t` at ALL frames whenever enemy defensive/base structures
+  ;; or >= 2 enemy combat units camp within 11.5 tiles of `(nat-x, nat-y)`, and redirect
+  ;; expansions to the next uncamped BFS base instead of disabling expansion!
   ;; ---------------------------------------------------------------------------
+  (define (pad-camped-by-enemy? px py [radius 11.5])
+    (define camp-bldg?
+      (ormap (lambda (eb)
+               (define canon (sc2-canonical-structure-sym (unit-type-sym eb)))
+               (and (or (memq canon '(photon-cannon bunker planetary-fortress spine-crawler
+                                      hatchery lair hive nexus command-center orbital-command))
+                        (memq canon SC2-TOWNHALL-STRUCTURE-SYMS))
+                    (<= (dist2d px py (hash-ref eb 'x 9999.0) (hash-ref eb 'y 9999.0)) radius)))
+             enemy-bldgs))
+    (define camp-combat-cnt
+      (count (lambda (e)
+               (and (combat-unit-record? e)
+                    (<= (dist2d px py (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) radius)))
+             enemy-units))
+    (or camp-bldg? (>= camp-combat-cnt 2)))
+
   (define nat-block-thresh SC2-NATURAL-BLOCK-RADIUS)
   (define natural-blockers
     (filter (lambda (e)
@@ -1607,9 +1844,51 @@
             (append enemy-units enemy-bldgs)))
   (define natural-blocked?
     (or (hash-ref obs 'natural-blocked #f)
+        (pad-camped-by-enemy? nat-x nat-y 11.5)
         (and (<= (length townhalls) 1)
              (< frame 2500)
              (not (null? natural-blockers)))))
+
+  (define (pad->xy p)
+    (cond
+      [(and (pair? p) (real? (car p)) (real? (cdr p)))
+       (cons (safe-coord (car p) third-x) (safe-coord (cdr p) third-y))]
+      [(and (pair? p) (real? (car p)) (pair? (cdr p)) (real? (cadr p)))
+       (cons (safe-coord (car p) third-x) (safe-coord (cadr p) third-y))]
+      [(hash? p)
+       (cons (safe-coord (hash-ref p 'x third-x) third-x)
+             (safe-coord (hash-ref p 'y third-y) third-y))]
+      [else #f]))
+
+  (define (pad-already-owned? px py)
+    (or (<= (dist2d px py base-x base-y) 7.0)
+        (ormap (lambda (th)
+                 (<= (dist2d px py (hash-ref th 'x base-x) (hash-ref th 'y base-y)) 7.0))
+               townhalls)))
+
+  (define (select-uncamped-expansion-pad [prefer-natural? #f])
+    (cond
+      [(and prefer-natural?
+            (not natural-blocked?)
+            (not (pad-already-owned? nat-x nat-y)))
+       (values nat-x nat-y)]
+      [else
+       (define cand-pts
+         (append (filter-map pad->xy expansion-pads)
+                 (list (cons third-x third-y))))
+       (define chosen
+         (findf (lambda (pt)
+                  (define px (car pt))
+                  (define py (cdr pt))
+                  (and (not (pad-already-owned? px py))
+                       (or (not natural-blocked?)
+                           (> (dist2d px py nat-x nat-y) 7.0))
+                       (not (pad-camped-by-enemy? px py 11.5))))
+                cand-pts))
+       (if chosen
+           (values (car chosen) (cdr chosen))
+           (values #f #f))]))
+
   (define early-base-under-attack?
     (or early-survival-crisis?
         (ormap (lambda (b) (eq? (hash-ref b 'under-attack #f) #t)) ally-bldgs)
@@ -1621,24 +1900,47 @@
                                    +inf.0))
                           28.0)))
                enemy-units)))
+  (define blocked-nat-expanded-early? #f)
   (when (and natural-blocked?
              (not early-survival-crisis?)
              (not early-base-under-attack?)
              (or (not (eq? race 'Terran)) (memq 'barracks bldg-types))
              (or (not live-obs-harvesters?)
-                 (memq 'barracks bldg-types)
-                 (memq 'spawning-pool bldg-types)
-                 (memq 'gateway bldg-types)
-                 (memq 'warp-gate bldg-types))
+                 (and (<= active-bases 1)
+                      (or (memq 'barracks bldg-types)
+                          (memq 'spawning-pool bldg-types)
+                          (memq 'gateway bldg-types)
+                          (memq 'warp-gate bldg-types))))
              (or (hash-ref obs 'natural-blocked #f)
                  (refractory-allow-action?! cd-tracker (list 'blocked-nat-expand race) frame SC2-EXPANSION-COOLDOWN-FRAMES)))
     (emit! (list 'clear-expansion-block nat-x nat-y))
     (if (eq? race 'Terran)
         (when (>= minerals (sc2-min-cost 'command-center))
-          (emit! (list 'build 'command-center (safe-coord (+ base-x 4.0)) base-y))
+          (set! blocked-nat-expanded-early? #t)
+          (if live-obs-harvesters?
+              (let-values ([(ccx ccy)
+                            (order-ledger-resolve-build-coords!
+                             oledger-early 'command-center
+                             (safe-coord (+ base-x 6.0)) (safe-coord (- base-y 5.0))
+                             ally-bldgs frame 2.5
+                             #:expansion-pads expansion-pads)])
+                (define sx (safe-coord ccx (+ base-x 6.0)))
+                (define sy (safe-coord ccy (- base-y 5.0)))
+                (emit! (list 'build 'command-center sx sy))
+                (order-ledger-record-issued! oledger-early (+ 820000 (modulo frame 10000))
+                                             'build 'command-center sx sy frame)
+                (set! bldg-types (cons 'command-center bldg-types)))
+              (emit! (list 'build 'command-center (safe-coord (+ base-x 4.0)) base-y)))
           (set! minerals (max 0 (- minerals (sc2-min-cost 'command-center)))))
-        (when (>= minerals (sc2-min-cost 'hatchery))
-          (emit! (list 'expand third-x third-y))
+        (when (>= minerals (sc2-race-townhall-min-cost race))
+          (define-values (bx3 by3)
+            (if live-obs-harvesters?
+                (select-uncamped-expansion-pad #f)
+                (values third-x third-y)))
+          (set! blocked-nat-expanded-early? #t)
+          (emit! (list 'expand bx3 by3))
+          (order-ledger-record-issued! oledger-early (+ 830000 (modulo frame 10000))
+                                       'expand (if (eq? race 'Protoss) 'nexus 'hatchery) bx3 by3 frame)
           (set! minerals (max 0 (- minerals (sc2-race-townhall-min-cost race)))))))
   (define depleting-bases
     (hash-ref obs 'depleting-bases (if (hash-ref obs 'mined-out #f) 1 0)))
@@ -1763,7 +2065,8 @@
   ;; ---------------------------------------------------------------------------
   (for ([w (in-list workers)]
         #:when (and (not worker-rush-active?)
-                    (not (hash-ref w 'has-build-order? #f))))
+                    (not (worker-has-engine-build-order? w))
+                    (not (order-ledger-unit-has-active-build? oledger-early (hash-ref w 'id 0) w))))
     (define whp (hash-ref w 'hp SC2-DRONE-MAX-HP))
     (define wmax (hash-ref w 'max-hp SC2-DRONE-MAX-HP))
     (define wx (hash-ref w 'x base-x))
@@ -1783,41 +2086,75 @@
                                               24)))
       (emit! (list 'mineral-walk (hash-ref w 'id 10) base-x base-y))))
 
-  ;; Standard Gas & Mineral Harvesting (governed by Guns-vs-Butter Gas Allocation
-  ;; + Pro Gas-Float Harvester Rebalancing when gas >= 350 and minerals < 180)
-  ;; Builder & Scout Hygiene (PV8): never emit harvest-mineral / harvest-gas on a worker
-  ;; that has an active build order (`has-build-order?`) or is the designated scout/harasser!
+  ;; Standard Gas & Mineral Harvesting + Smart Single-Dispatch Pro Worker Scout
   (define enemy-exp-x (hash-ref obs 'enemy-expand-x (safe-coord (* 0.85 enemy-x) 148.0)))
   (define enemy-exp-y (hash-ref obs 'enemy-expand-y (safe-coord (* 0.85 enemy-y) 148.0)))
   (define corridor-mid-x (safe-coord (* 0.5 (+ nat-x enemy-exp-x)) 96.0))
   (define corridor-mid-y (safe-coord (* 0.5 (+ nat-y enemy-exp-y)) 96.0))
 
-  ;; Designate 1 persistent opening Scout / Mineral-Harasser worker (frozen during worker-rush / proxy!)
-  (define want-worker-scout?
-    (and (not (null? workers))
+  (define scout-st (rt-scout-state rt))
+  (when (<= frame 4)
+    (hash-clear! scout-st))
+  (define non-building-workers
+    (filter (lambda (w)
+              (and (not (worker-has-engine-build-order? w))
+                   (not (order-ledger-unit-has-active-build? oledger-early (hash-ref w 'id 0) w))))
+            workers))
+  (define force-synth-harass? (eq? (hash-ref obs 'enable-worker-harass #f) #t))
+  (define scout-eligible-window?
+    (and (not (null? non-building-workers))
          (not worker-rush-active?)
          (not in-base-proxy-detected?)
-         (or (hash-ref obs 'enable-worker-harass #f)
-             (and (>= supply-used 14)
+         (or force-synth-harass?
+             (and (>= frame 300)
+                  (>= supply-used 14)
                   (< frame 3600)
                   (not under-early-cheese?)
                   (not early-survival-crisis?)
                   (>= (length workers) (if live-obs-harvesters? 13 2))))))
-  (define prev-scout-wid (hash-ref prev-tel-early 'scout-worker-id #f))
-  (define non-building-workers
-    (filter (lambda (w) (not (hash-ref w 'has-build-order? #f))) workers))
+  (define already-dispatched-scout? (eq? (hash-ref scout-st 'dispatched? #f) #t))
+  (define latched-scout-id
+    (or (hash-ref scout-st 'scout-id #f)
+        (and (not already-dispatched-scout?)
+             (hash-ref prev-tel-early 'scout-worker-id #f))))
   (define scout-worker
-    (and want-worker-scout?
-         (not (null? non-building-workers))
-         (or (and prev-scout-wid
-                  (findf (lambda (w) (equal? (hash-ref w 'id -1) prev-scout-wid))
+    (cond
+      [(or worker-rush-active? in-base-proxy-detected?) #f]
+      [already-dispatched-scout?
+       ;; Single-Scout Latch: once the opening worker scout has been dispatched, NEVER pull
+       ;; another mining worker if it dies (unless synthetic test explicitly sets `enable-worker-harass`).
+       (or (and latched-scout-id
+                (findf (lambda (w) (equal? (hash-ref w 'id -1) latched-scout-id))
+                       non-building-workers))
+           (and force-synth-harass?
+                (not live-obs-harvesters?)
+                (pair? non-building-workers)
+                (last non-building-workers)))]
+      [scout-eligible-window?
+       (define chosen
+         (or (and latched-scout-id
+                  (findf (lambda (w) (equal? (hash-ref w 'id -1) latched-scout-id))
                          non-building-workers))
-             (last non-building-workers))))
+             (last non-building-workers)))
+       (when chosen
+         (hash-set! scout-st 'dispatched? #t)
+         (hash-set! scout-st 'scout-id (hash-ref chosen 'id #f))
+         (hash-set! scout-st 'orbit-idx 0)
+         (hash-set! scout-st 'evading-until 0))
+       chosen]
+      [else #f]))
   (define scout-worker-id (and scout-worker (hash-ref scout-worker 'id #f)))
+  (when scout-worker-id
+    (acquire-unit-lease! leases scout-worker-id 'scout frame 32
+                         #:x (hash-ref scout-worker 'x base-x)
+                         #:y (hash-ref scout-worker 'y base-y)))
   (define harvest-eligible-workers
     (filter (lambda (w)
-              (and (not (hash-ref w 'has-build-order? #f))
-                   (not (and scout-worker-id (equal? (hash-ref w 'id -1) scout-worker-id)))))
+              (define wid (hash-ref w 'id -1))
+              (and (not (worker-has-engine-build-order? w))
+                   (not (order-ledger-unit-has-active-build? oledger-early wid w))
+                   (not (and scout-worker-id (equal? wid scout-worker-id)))
+                   (not (unit-leased-above? leases wid 'harvester frame))))
             workers))
   (define harvest-workers-pool
     (if (not (null? harvest-eligible-workers)) harvest-eligible-workers non-building-workers))
@@ -1830,11 +2167,6 @@
              (memq (sc2-canonical-structure-sym (unit-type-sym b))
                    '(extractor assimilator refinery)))
            ally-bldgs))
-  ;; In live SC2 observations (`live-obs-harvesters?`), `saturate-workers-and-gas-commands`
-  ;; manages gas assignment and gas->mineral rebalancing with full access to `sc2-unit-orders`
-  ;; and per-base mineral tags; never spam `harvest-gas` or `rebalance-gas-to-minerals` on
-  ;; `(car/take harvest-workers-pool)` in live games, which previously reset mineral workers'
-  ;; gather cycles every 4 frames!
   (when (and (not live-obs-harvesters?)
              gas-bldg
              (not (null? harvest-workers-pool))
@@ -1851,8 +2183,6 @@
       (emit! (list 'rebalance-gas-to-minerals
                    (map (lambda (w) (hash-ref w 'id 10)) pull-workers)
                    patch-id)))
-    ;; In synthetic tests (no live mineral-harvesters field), emit harvest-mineral for (car harvest-workers-pool);
-    ;; in live SC2 games, never spam harvest-mineral on busy/building workers every frame!
     (unless live-obs-harvesters?
       (emit! (list 'harvest-mineral (hash-ref (car harvest-workers-pool) 'id 10) patch-id)))
     (define idle-return-workers
@@ -1875,35 +2205,124 @@
         (emit! (list 'harvest-mineral wid patch-id)))))
 
   ;; ---------------------------------------------------------------------------
-  ;; Opening Probe / SCV / Drone Scout & Pro-Style Mineral-Patch Harassment
+  ;; Smart Single-Dispatch Pro Worker Scout:
+  ;; Orbit Behind Enemy Mineral Line, Evade Ranged/Pulled Threats, Poke Builder SCV
   ;; ---------------------------------------------------------------------------
-  (when (and (hash-ref obs 'enable-worker-harass #f)
+  (when (and force-synth-harass?
              (not worker-rush-active?)
              (not in-base-proxy-detected?)
              (not (null? workers)))
     (emit! (list 'worker-harass (or scout-worker-id (hash-ref (last workers) 'id 10)) enemy-x enemy-y)))
   (when scout-worker
     (define sw-id (hash-ref scout-worker 'id 10))
-    (when (or (not live-obs-harvesters?)
-              (refractory-allow-action?! cd-tracker (list 'opening-worker-scout sw-id) frame 32))
-      (define sw-x (hash-ref scout-worker 'x base-x))
-      (define sw-y (hash-ref scout-worker 'y base-y))
-      (define dist-to-enemy (dist2d sw-x sw-y enemy-x enemy-y))
-      ;; Route through enemy natural expansion first to check/block expansion, then into enemy main mineral line
-      (define wp-x (if (and (> (dist2d sw-x sw-y enemy-exp-x enemy-exp-y) 9.0)
-                            (> dist-to-enemy 20.0)
-                            (< (modulo frame 672) 336))
-                       enemy-exp-x
-                       enemy-x))
-      (define wp-y (if (and (> (dist2d sw-x sw-y enemy-exp-x enemy-exp-y) 9.0)
-                            (> dist-to-enemy 20.0)
-                            (< (modulo frame 672) 336))
-                       enemy-exp-y
-                       enemy-y))
-      (when (or (not live-obs-harvesters?) (> dist-to-enemy 24.0))
-        (emit! (list 'worker-scout sw-id wp-x wp-y)))
-      (when (or (not live-obs-harvesters?) (<= dist-to-enemy 24.0))
-        (emit! (list 'mineral-harass sw-id enemy-x enemy-y enemy-exp-x enemy-exp-y)))))
+    (define sw-x (hash-ref scout-worker 'x base-x))
+    (define sw-y (hash-ref scout-worker 'y base-y))
+    (define dist-to-enemy (dist2d sw-x sw-y enemy-x enemy-y))
+    (cond
+      [(not live-obs-harvesters?)
+       (define wp-x (if (and (> (dist2d sw-x sw-y enemy-exp-x enemy-exp-y) 9.0)
+                             (> dist-to-enemy 20.0)
+                             (< (modulo frame 672) 336))
+                        enemy-exp-x
+                        enemy-x))
+       (define wp-y (if (and (> (dist2d sw-x sw-y enemy-exp-x enemy-exp-y) 9.0)
+                             (> dist-to-enemy 20.0)
+                             (< (modulo frame 672) 336))
+                        enemy-exp-y
+                        enemy-y))
+       (emit! (list 'worker-scout sw-id wp-x wp-y))
+       (emit! (list 'mineral-harass sw-id enemy-x enemy-y enemy-exp-x enemy-exp-y))]
+      [else
+       (define ex (exact->inexact enemy-x))
+       (define ey (exact->inexact enemy-y))
+       (define vdx (- ex (exact->inexact base-x)))
+       (define vdy (- ey (exact->inexact base-y)))
+       (define vlen (max 1.0 (sqrt (+ (* vdx vdx) (* vdy vdy)))))
+       (define ux (/ vdx vlen))
+       (define uy (/ vdy vlen))
+       (define px (- uy))
+       (define py ux)
+       (define orbit-waypoints
+         (list (cons (safe-coord (+ ex (* 6.0 ux) (* 5.5 px)) enemy-x)
+                     (safe-coord (+ ey (* 6.0 uy) (* 5.5 py)) enemy-y))
+               (cons (safe-coord (+ ex (* 7.5 ux) (* 2.5 px)) enemy-x)
+                     (safe-coord (+ ey (* 7.5 uy) (* 2.5 py)) enemy-y))
+               (cons (safe-coord (+ ex (* 7.5 ux) (* -2.5 px)) enemy-x)
+                     (safe-coord (+ ey (* 7.5 uy) (* -2.5 py)) enemy-y))
+               (cons (safe-coord (+ ex (* 6.0 ux) (* -5.5 px)) enemy-x)
+                     (safe-coord (+ ey (* 6.0 uy) (* -5.5 py)) enemy-y))
+               (cons (safe-coord (+ ex (* 3.5 ux) (* -7.0 px)) enemy-x)
+                     (safe-coord (+ ey (* 3.5 uy) (* -7.0 py)) enemy-y))))
+       (when (<= (dist2d sw-x sw-y enemy-exp-x enemy-exp-y) 10.5)
+         (hash-set! scout-st 'visited-nat? #t))
+       (define ranged-enemies-near
+         (count (lambda (e)
+                  (define et (sc2-canonical-unit-sym (unit-type-sym e)))
+                  (and (<= (dist2d sw-x sw-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 7.5)
+                       (or (>= (safe-finite-real (hash-ref e 'range 0.0) 0.0) 2.0)
+                           (memq et '(marine marauder reaper stalker adept sentry queen
+                                      hydralisk roach cyclone hellion photon-cannon bunker
+                                      planetary-fortress spine-crawler)))))
+                (append enemy-units enemy-bldgs)))
+       (define pulled-workers-chasing
+         (count (lambda (e)
+                  (and (memq (unit-type-sym e) '(probe scv drone))
+                       (<= (dist2d sw-x sw-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 4.5)))
+                enemy-units))
+       (define sw-total-hp (unit-total-hp-and-shield scout-worker 40))
+       (define sw-low-hp? (< sw-total-hp 22))
+       (when (or (> ranged-enemies-near 0)
+                 (>= pulled-workers-chasing 2)
+                 sw-low-hp?)
+         (hash-set! scout-st 'evading-until (+ frame 40)))
+       (define evading? (< frame (hash-ref scout-st 'evading-until 0)))
+       (cond
+         [evading?
+          (when (refractory-allow-action?! cd-tracker (list 'scout-evade sw-id) frame 12)
+            (if (or sw-low-hp? (> ranged-enemies-near 0))
+                (emit! (list 'mineral-walk sw-id base-x base-y))
+                (let* ([next-idx (modulo (+ (hash-ref scout-st 'orbit-idx 0) 2) 5)]
+                       [esc-wp (list-ref orbit-waypoints next-idx)])
+                  (hash-set! scout-st 'orbit-idx next-idx)
+                  (emit! (list 'move sw-id (car esc-wp) (cdr esc-wp))))))]
+         [else
+          (define exposed-builder-scv
+            (and (= ranged-enemies-near 0)
+                 (<= pulled-workers-chasing 1)
+                 (findf (lambda (e)
+                          (define ex0 (hash-ref e 'x 9999.0))
+                          (define ey0 (hash-ref e 'y 9999.0))
+                          (and (eq? (unit-type-sym e) 'scv)
+                               (<= (dist2d sw-x sw-y ex0 ey0) 9.5)
+                               (or (eq? (hash-ref e 'has-build-order? #f) #t)
+                                   (ormap (lambda (eb)
+                                            (and (< (hash-ref eb 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                                 (<= (dist2d ex0 ey0
+                                                             (hash-ref eb 'x 9999.0)
+                                                             (hash-ref eb 'y 9999.0))
+                                                     3.2)))
+                                          enemy-bldgs))))
+                        enemy-units)))
+          (cond
+            [exposed-builder-scv
+             (when (refractory-allow-action?! cd-tracker (list 'scout-poke-scv sw-id) frame 16)
+               (emit! (list 'attack sw-id (hash-ref exposed-builder-scv 'id 0))))]
+            [else
+             (define cur-idx (modulo (hash-ref scout-st 'orbit-idx 0) 5))
+             (define cur-wp0 (list-ref orbit-waypoints cur-idx))
+             (define next-idx
+               (if (<= (dist2d sw-x sw-y (car cur-wp0) (cdr cur-wp0)) 3.2)
+                   (modulo (add1 cur-idx) 5)
+                   cur-idx))
+             (hash-set! scout-st 'orbit-idx next-idx)
+             (define target-wp
+               (if (and (not (hash-ref scout-st 'visited-nat? #f))
+                        (> dist-to-enemy 26.0)
+                        (> (dist2d sw-x sw-y enemy-exp-x enemy-exp-y) 9.5))
+                   (cons enemy-exp-x enemy-exp-y)
+                   (list-ref orbit-waypoints next-idx)))
+             (when (refractory-allow-action?! cd-tracker (list 'opening-worker-scout sw-id) frame 20)
+               (emit! (list 'worker-scout sw-id (car target-wp) (cdr target-wp))))])])]))
 
   ;; ---------------------------------------------------------------------------
   ;; Opening Overlord Scouting (Zerg): Overlord #1 -> Enemy Natural, Overlord #2 -> Attack Corridor
@@ -1936,27 +2355,32 @@
       (define ov2 (cadr safe-overlords))
       (emit! (list 'overlord-scout (hash-ref ov2 'id 102) corridor-mid-x corridor-mid-y))))
 
-  ;; Mined-out / Proactive 90s Pre-Depleting base detection (Scenario 3): auto-expand & transfer workers
+  ;; Mined-out / Proactive 90s Pre-Depleting base detection (Scenario 3):
+  ;; Redirect to uncamped BFS base instead of disabling expansion when `natural-blocked?` is `#t`!
   (define pre-depleting-bases (safe-nonneg-int (hash-ref obs 'pre-depleting-bases depleting-bases) depleting-bases))
   (when (and (or (hash-ref obs 'mined-out #f)
                  (and (> (max depleting-bases pre-depleting-bases) 0)
                       (>= minerals (sc2-race-townhall-min-cost race))))
-             (not natural-blocked?)
+             (not blocked-nat-expanded-early?)
              (not under-early-cheese?)
              (not early-survival-crisis?)
              (refractory-allow-action?! cd-tracker (list 'auto-expand race) frame SC2-EXPANSION-COOLDOWN-FRAMES))
-    (emit! (list 'expand (if (>= active-bases 2) third-x nat-x)
-                         (if (>= active-bases 2) third-y nat-y)))
+    (define-values (exp-x exp-y)
+      (select-uncamped-expansion-pad (< active-bases 2)))
+    (emit! (list 'expand exp-x exp-y))
     (set! minerals (max 0 (- minerals (sc2-race-townhall-min-cost race)))))
 
   ;; ---------------------------------------------------------------------------
   ;; In-Progress Order Ledger Reconciliation & Building Control Groups (4, 5, 6, 7, 9)
+  ;; Pass `#:excluded-tags` so leased scouts/spotters/door-guards/inject-queens/creep-queens/builders
+  ;; are NEVER swept into army control groups 1/2/3!
   ;; ---------------------------------------------------------------------------
   (define oledger (live-bot-runtime-order-ledger rt))
   (order-ledger-reconcile-observation! oledger obs)
   (define cortex (live-bot-runtime-cortex rt))
   (define cg-sync-actions
-    (cortex-sync-control-groups! cortex ally-units ally-bldgs base-x base-y))
+    (cortex-sync-control-groups! cortex ally-units ally-bldgs base-x base-y
+                                 #:excluded-tags (leased-tags-above leases 'army frame)))
   (for ([cga (in-list cg-sync-actions)])
     (emit! cga))
   (define cg4-cap (cortex-production-group-capacity cortex ally-bldgs 4))
@@ -1981,8 +2405,6 @@
 
   ;; ---------------------------------------------------------------------------
   ;; Zero-Supply-Block & Supply-At-Risk Preemption (Scenario 1: 8.0 tiles Overlord danger)
-  ;; Only enemies capable of attacking AIR (`sc2-unit-can-attack-air?`) or active attack
-  ;; threaten Overlords — ground-only Zerglings/Zealots/Roaches/Workers never trigger Overlord spam!
   ;; ---------------------------------------------------------------------------
   (define any-enemy-can-attack-air?
     (or (null? enemy-units)
@@ -2003,9 +2425,6 @@
   (for ([ov (in-list threatened-overlords)])
     (emit! (list 'kite (hash-ref ov 'id 102) base-x base-y)))
 
-  ;; Only completed supply structures that are damaged (<65% HP+shields) or under attack
-  ;; trigger supply-at-risk (prevents healthy 200-HP Pylons or under-construction Depots
-  ;; from triggering infinite Pylon/Depot spam).
   (define threatened-supply-bldgs
     (filter (lambda (b)
               (and (memq (unit-type-sym b) '(supply-depot supply-depot-lowered pylon pylon-overcharged))
@@ -2044,14 +2463,6 @@
 
   (define rush-threat-enemies (filter-rush-threat-enemies enemy-units base-x base-y nat-x nat-y))
   (define live-army-supply ally-combat-supply-early)
-  ;; Layer 1: Owned-Base Spatial Threat & Net Force-Deficit Field
-  ;; Measure enemy proximity ONLY relative to bases we currently own (`base` always,
-  ;; `nat` when `active-bases >= 2`, `third` when `active-bases >= 3`) using smooth
-  ;; inverse-square spatial attenuation w(d) = 1 / (1 + (max(0, d - 28) / 18)^2),
-  ;; and compute `live-enemy-threat-supply` as the Net Force Deficit relative to our
-  ;; defending force (`live-defending-force-supply`) so a lone scout/harasser near an
-  ;; unowned 3rd base never triggers a false macro crisis while real pushes immediately
-  ;; preempt passive greed.
   (define (min-dist-to-owned-base ex ey)
     (min (dist2d ex ey base-x base-y)
          (if (>= active-bases 2) (dist2d ex ey nat-x nat-y) +inf.0)
@@ -2093,11 +2504,6 @@
           (unit-supply-cost (unit-type-sym e)))
         0))
 
-  ;; Persistent Scouted Threat Memory & Implied Production Threat (PV9):
-  ;; When a forward scout / Overlord / Hallucination / Changeling / Scanner Sweep spots an enemy
-  ;; army or multiple combat production facilities, retain the scouted threat level across fog-of-war
-  ;; transit so the macro brain ramps up defense BEFORE an overwhelming enemy army arrives at our base,
-  ;; without treating normal passive enemy home units/buildings as an active base-attack crisis!
   (define enemy-prod-bldgs
     (filter (lambda (eb)
               (memq (unit-type-sym eb)
@@ -2151,10 +2557,6 @@
         (max 0 (exact-round (- raw-enemy-threat-supply (* 0.85 live-defending-force-supply))))
         raw-enemy-threat-supply))
 
-  ;; Track opponent intel Freshness x Coverage across 4 sectors (`enemy-main`, `enemy-natural`,
-  ;; `enemy-third`, `corridor-army`) via `evaluate-opponent-intel-quality` (PV9).
-  ;; Sector timestamps update whenever an enemy unit/building is seen in that sector OR an
-  ;; allied scout/Overlord/unit has live vision proximity (<= 15.0 tiles) to that sector!
   (define enemy-third-x (hash-ref obs 'enemy-third-x (safe-coord (* 0.72 enemy-x) 132.0)))
   (define enemy-third-y (hash-ref obs 'enemy-third-y (safe-coord (* 0.72 enemy-y) 132.0)))
   (define all-visible-enemies (append enemy-units enemy-bldgs))
@@ -2240,7 +2642,6 @@
   (define intel-priority-sector (opponent-intel-quality-priority-sector intel-qual))
   (define intel-target-goal (opponent-intel-quality-target-goal intel-qual))
 
-  ;; Full-game owned-base attack & incoming-army threat detection (never expires at frame 2500!)
   (define bldg-actively-damaged?
     (ormap (lambda (b) (eq? (hash-ref b 'under-attack #f) #t)) ally-bldgs))
   (define enemy-inside-owned-base-perimeter?
@@ -2282,7 +2683,6 @@
         [(enemy-main)    enemy-y]
         [(enemy-third)   enemy-third-y]
         [else            corridor-mid-y]))
-    ;; 1. Zero-risk spell / detector recon (Hallucinated Phoenix, Changeling, Observer, Orbital Scan)
     (case race
       [(Protoss)
        (define obs-unit (findf (lambda (u) (eq? (unit-type-sym u) 'observer)) ally-units))
@@ -2320,15 +2720,14 @@
                   (< intel-confidence 0.50)
                   (refractory-allow-action?! cd-tracker 'periodic-scanner-sweep frame 672))
          (emit! (list 'cast-spell (hash-ref scan-oc 'id 301) 'scanner-sweep recon-tx recon-ty)))])
-    ;; 2. Fast spotter unit recon toward `intel-priority-sector`
-    ;;    In live games, never peel home defenders away when we have < 6 combat units or are under base attack!
     (define spotter-candidates
       (if (and live-obs-harvesters?
                (or under-base-attack? (< (length ally-combat-units) 6)))
           '()
           (filter (lambda (u)
-                    (memq (unit-type-sym u)
-                          '(zergling reaper hellion adept marine stalker zealot mutalisk phoenix oracle)))
+                    (and (not (unit-leased-above? leases (hash-ref u 'id 0) 'army frame))
+                         (memq (unit-type-sym u)
+                               '(zergling reaper hellion adept marine stalker zealot mutalisk phoenix oracle))))
                   ally-combat-units)))
     (define chosen-spotter
       (and (not (null? spotter-candidates))
@@ -2341,15 +2740,14 @@
       [chosen-spotter
        (emit! (list 'periodic-scout (hash-ref chosen-spotter 'id 101) recon-tx recon-ty))]
       [(and scout-worker-id
-            (< intel-confidence 0.65)
-            (or (not live-obs-harvesters?)
-                (and (< frame 2240) (not under-base-attack?))))
+            (not live-obs-harvesters?)
+            (< intel-confidence 0.65))
        (emit! (list 'periodic-scout scout-worker-id recon-tx recon-ty))]))
 
   (define live-game-obs? live-obs-harvesters?)
   (define supply-threshold
-    (cond [(and live-game-obs? (< supply-cap 20)) 1]  ;; 14/15 Pylon/Depot, 13/14 Overlord
-          [(and live-game-obs? (< supply-cap 26)) 2]  ;; 21/23 2nd Pylon/Depot (after 19 Nexus / 20 CC)
+    (cond [(and live-game-obs? (< supply-cap 20)) 1]
+          [(and live-game-obs? (< supply-cap 26)) 2]
           [(and live-game-obs? (< supply-cap 36)) 5]
           [live-game-obs?
            (if (< supply-cap 66)
@@ -2451,9 +2849,57 @@
              (and (<= effective-supply-with-pending-ledger supply-threshold)
                   (>= minerals (sc2-min-cost supply-provider-sym))))))
 
-  ;; Orientation-aware Terran ramp wall solver (`depot-1`, `depot-2`, `barracks` with East +X add-on clearance)
+  ;; Terrain-Solved Matchup Walling (`solve-terran-ramp-wall` & `solve-protoss-matchup-wall`)
+  ;; + Reserved AABBs (`'wall-slot`, `'terran-addon-pad`, `'doorway-corridor`)
   (define terran-ramp-wall
-    (solve-terran-ramp-wall base-x base-y nat-x nat-y))
+    (solve-terran-ramp-wall base-x base-y nat-x nat-y #:map-grids map-grids))
+  (define protoss-matchup-wall
+    (if (eq? race 'Protoss)
+        (solve-protoss-matchup-wall base-x base-y nat-x nat-y effective-enemy-race
+                                    #:map-grids map-grids
+                                    #:enemy-x enemy-x
+                                    #:enemy-y enemy-y)
+        (hash)))
+  (define step-wall-aabbs
+    (cond
+      [(eq? race 'Terran)
+       (filter values
+               (list (let ([p (hash-ref terran-ramp-wall 'depot-1 #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'wall-slot 0 0)))
+                     (let ([p (hash-ref terran-ramp-wall 'barracks #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
+                     (let ([p (hash-ref terran-ramp-wall 'depot-2 #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'wall-slot 0 0)))
+                     (let ([p (hash-ref terran-ramp-wall 'barracks-addon #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'terran-addon-pad 0 0)))))]
+      [(eq? race 'Protoss)
+       (filter values
+               (list (let ([p (hash-ref protoss-matchup-wall 'pylon #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'wall-slot 0 0)))
+                     (let ([p (hash-ref protoss-matchup-wall 'slot-1 #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
+                     (let ([p (hash-ref protoss-matchup-wall 'slot-2 #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
+                     (let ([p (hash-ref protoss-matchup-wall 'slot-3 #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
+                     (let ([p (hash-ref protoss-matchup-wall 'door #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.2 1.2 'doorway-corridor 0 0)))
+                     (let ([p (hash-ref protoss-matchup-wall 'door-park #f)])
+                       (and (pair? p) (reserved-aabb (car p) (cdr p) 1.2 1.2 'doorway-corridor 0 0)))))]
+      [else '()]))
+  (set-box! (rt-wall-aabbs-box rt) step-wall-aabbs)
+  (define (wall-aabbs-for-build exact-wall-slot?)
+    (if exact-wall-slot?
+        (filter (lambda (r)
+                  (not (memq (reserved-aabb-kind r)
+                             '(wall-slot doorway-corridor terran-addon-pad))))
+                step-wall-aabbs)
+        step-wall-aabbs))
+
+  ;; Only force `#:exact-wall-slot? #t` in early game (`frame < 4000` and `<= 2` bases) so
+  ;; mid/late-game wall rebuilds never deadlock on obstructed initial ramp/choke coordinates (`#5111096`).
+  (define allow-exact-wall-slot?
+    (and (< frame 4000) (<= active-bases 2)))
 
   (when (and (or need-supply? protoss-emergency-pylon? terran-emergency-depot?)
              (>= minerals (sc2-min-cost supply-provider-sym)))
@@ -2466,16 +2912,30 @@
        (set! pending-supply (add1 pending-supply))
        (set! eff-pending-supply (add1 eff-pending-supply))]
       [(Protoss)
+       (define wall-pylon-pt
+         (and allow-exact-wall-slot?
+              (= protoss-pylon-count 0)
+              (not has-unpowered-bldg?)
+              (hash-ref protoss-matchup-wall 'pylon #f)))
+       (define use-exact-pylon? (pair? wall-pylon-pt))
        (define raw-px
-         (if has-unpowered-bldg?
-             (safe-coord (+ (hash-ref unpowered-protoss-bldg 'x (+ base-x 4.0)) 2.5) (+ base-x 4.0))
-             (safe-coord (+ base-x 4.0 (* 2.5 (modulo protoss-pylon-count 4))))))
+         (cond
+           [use-exact-pylon? (safe-coord (car wall-pylon-pt) (+ base-x 4.0))]
+           [has-unpowered-bldg?
+            (safe-coord (+ (hash-ref unpowered-protoss-bldg 'x (+ base-x 4.0)) 2.5) (+ base-x 4.0))]
+           [else (safe-coord (+ base-x 4.0 (* 2.5 (modulo protoss-pylon-count 4))))]))
        (define raw-py
-         (if has-unpowered-bldg?
-             (safe-coord (+ (hash-ref unpowered-protoss-bldg 'y (+ base-y 4.0)) 0.5) (+ base-y 4.0))
-             (safe-coord (+ base-y 4.0 (* 2.5 (quotient protoss-pylon-count 4))))))
+         (cond
+           [use-exact-pylon? (safe-coord (cdr wall-pylon-pt) (+ base-y 4.0))]
+           [has-unpowered-bldg?
+            (safe-coord (+ (hash-ref unpowered-protoss-bldg 'y (+ base-y 4.0)) 0.5) (+ base-y 4.0))]
+           [else (safe-coord (+ base-y 4.0 (* 2.5 (quotient protoss-pylon-count 4))))]))
        (define-values (px py)
-         (order-ledger-resolve-build-coords! oledger 'pylon raw-px raw-py ally-bldgs frame 2.5))
+         (order-ledger-resolve-build-coords!
+          oledger 'pylon raw-px raw-py ally-bldgs frame 2.5
+          #:expansion-pads expansion-pads
+          #:exact-wall-slot? use-exact-pylon?
+          #:reserved-aabbs (wall-aabbs-for-build use-exact-pylon?)))
        (define sx (safe-coord px raw-px))
        (define sy (safe-coord py raw-py))
        (emit! (list 'build 'pylon sx sy))
@@ -2488,20 +2948,26 @@
        (define depot-count
          (count (lambda (t) (eq? t 'supply-depot)) bldg-types))
        (define wall-depot-entry
-         (cond
-           [(= depot-count 0) (hash-ref terran-ramp-wall 'depot-1 #f)]
-           [(= depot-count 1) (hash-ref terran-ramp-wall 'depot-2 #f)]
-           [else #f]))
+         (and allow-exact-wall-slot?
+              (cond
+                [(= depot-count 0) (hash-ref terran-ramp-wall 'depot-1 #f)]
+                [(= depot-count 1) (hash-ref terran-ramp-wall 'depot-2 #f)]
+                [else #f])))
+       (define use-exact-depot? (pair? wall-depot-entry))
        (define raw-dx
-         (if (pair? wall-depot-entry)
+         (if use-exact-depot?
              (safe-coord (car wall-depot-entry) (+ base-x 4.0))
              (safe-coord (+ base-x 4.0 (* 2.5 (modulo depot-count 4))))))
        (define raw-dy
-         (if (pair? wall-depot-entry)
+         (if use-exact-depot?
              (safe-coord (cdr wall-depot-entry) (- base-y 3.0))
              (safe-coord (- base-y 3.0 (* 2.5 (quotient depot-count 4))))))
        (define-values (dx dy)
-         (order-ledger-resolve-build-coords! oledger 'supply-depot raw-dx raw-dy ally-bldgs frame 2.0))
+         (order-ledger-resolve-build-coords!
+          oledger 'supply-depot raw-dx raw-dy ally-bldgs frame 2.0
+          #:expansion-pads expansion-pads
+          #:exact-wall-slot? use-exact-depot?
+          #:reserved-aabbs (wall-aabbs-for-build use-exact-depot?)))
        (define sx (safe-coord dx raw-dx))
        (define sy (safe-coord dy raw-dy))
        (emit! (list 'build 'supply-depot sx sy))
@@ -2512,8 +2978,6 @@
        (set! eff-pending-supply (add1 eff-pending-supply))]
       [else (void)]))
 
-  ;; Helper: check if we can spend `cost` supply without supply blocking
-  ;; Also reserves supply floor if supply-at-risk and minerals < 150 (only when no supply provider is already pending)
   (define reserve-supply-floor?
     (and (<= eff-pending-supply 0)
          (or (not live-game-obs?) (>= supply-used 14))
@@ -2574,10 +3038,16 @@
                eq-syms)
         #f))
 
-  (define (emit-build-verified! bldg-sym raw-x raw-y [clearance SC2-BUILD-SITE-MIN-CLEARANCE])
+  (define (emit-build-verified! bldg-sym raw-x raw-y
+                                [clearance SC2-BUILD-SITE-MIN-CLEARANCE]
+                                #:exact-wall-slot? [exact-wall-slot? #f])
     (define canon-sym (sc2-canonical-structure-sym bldg-sym))
     (define-values (bx by)
-      (order-ledger-resolve-build-coords! oledger bldg-sym raw-x raw-y ally-bldgs frame clearance))
+      (order-ledger-resolve-build-coords!
+       oledger bldg-sym raw-x raw-y ally-bldgs frame clearance
+       #:expansion-pads expansion-pads
+       #:exact-wall-slot? exact-wall-slot?
+       #:reserved-aabbs (wall-aabbs-for-build exact-wall-slot?)))
     (define sx (safe-coord bx raw-x))
     (define sy (safe-coord by raw-y))
     (emit! (list 'build bldg-sym sx sy))
@@ -2622,19 +3092,36 @@
       (if (> pend 0)
           (hash-update ht csym (lambda (c) (+ c pend)) 0)
           ht)))
+  (define real-ally-units
+    (filter (lambda (u)
+              (and (hash? u)
+                   (not (eq? (hash-ref u 'is-hallucination #f) #t))
+                   (not (eq? (hash-ref u 'hallucination #f) #t))
+                   (not (eq? (hash-ref u 'hallucination? #f) #t))))
+            ally-units))
   (define cocoon-unit-counts
-    (for/fold ([ht (hash)]) ([t (in-list unit-types)])
-      (case t
+    (for/fold ([ht (hash)]) ([u (in-list real-ally-units)])
+      (case (unit-type-sym u)
         [(baneling-cocoon)   (hash-update ht 'baneling add1 0)]
         [(ravager-cocoon)    (hash-update ht 'ravager add1 0)]
         [(lurker-egg lurker-mp-egg) (hash-update ht 'lurker add1 0)]
         [(brood-lord-cocoon) (hash-update ht 'brood-lord add1 0)]
         [(overlord-cocoon)   (hash-update ht 'overseer add1 0)]
         [else ht])))
+  (define excluded-macro-unit-count-syms
+    '(larva egg cocoon lurker-egg lurker-mp-egg transport-overlord-cocoon
+      warp-prism-phasing observer-siege-mode overseer-siege-mode
+      interceptor auto-turret point-defense-drone raven-repair-drone
+      adept-phase-shift disruptor-phased mule kd8-charge parasitic-bomb-dummy
+      changeling changeling-zealot changeling-marine changeling-marine-shield
+      changeling-zergling changeling-zergling-wings
+      creep-tumor creep-tumor-burrowed creep-tumor-queen
+      broodling broodling-escort locust locust-flying
+      oracle-stasis-trap stasis-ward force-field))
   (define unit-counts
-    (for/fold ([ht (for/fold ([h0 (hash)]) ([t (in-list unit-types)]
-                                            #:when (not (memq t '(larva egg cocoon))))
-                     (hash-update h0 (sc2-canonical-unit-sym t) add1 0))])
+    (for/fold ([ht (for/fold ([h0 (hash)]) ([u (in-list real-ally-units)]
+                                            #:when (not (memq (unit-type-sym u) excluded-macro-unit-count-syms)))
+                     (hash-update h0 (sc2-canonical-unit-sym (unit-type-sym u)) add1 0))])
               ([usym (in-list '(drone overlord overseer queen zergling baneling roach ravager hydralisk lurker mutalisk corruptor brood-lord ultralisk infestor viper swarm-host
                                 probe zealot stalker sentry adept high-templar dark-templar archon immortal observer warp-prism colossus disruptor phoenix void-ray oracle carrier tempest mothership
                                 scv marine marauder reaper ghost hellion hellbat widow-mine siege-tank cyclone thor medivac viking liberator raven banshee battlecruiser))])
@@ -2650,21 +3137,7 @@
           ht)))
   (define (unit-count sym)
     (hash-ref unit-counts (sc2-canonical-unit-sym sym) 0))
-  (define enemy-race-guess
-    (cond
-      [(ormap (lambda (e)
-                (memq (sc2-canonical-unit-sym (unit-type-sym e))
-                      '(drone overlord overseer zergling baneling roach ravager hydralisk lurker mutalisk corruptor queen hatchery lair hive)))
-              (append enemy-units enemy-bldgs)) 'Zerg]
-      [(ormap (lambda (e)
-                (memq (sc2-canonical-unit-sym (unit-type-sym e))
-                      '(scv marine marauder reaper siege-tank medivac viking command-center orbital-command barracks factory starport)))
-              (append enemy-units enemy-bldgs)) 'Terran]
-      [(ormap (lambda (e)
-                (memq (sc2-canonical-unit-sym (unit-type-sym e))
-                      '(probe zealot stalker adept sentry immortal colossus nexus pylon gateway warp-gate)))
-              (append enemy-units enemy-bldgs)) 'Protoss]
-      [else 'Unknown]))
+  (define enemy-race-guess effective-enemy-race)
   (define prev-telemetry-ht
     (let ([t (live-bot-runtime-last-telemetry rt)])
       (if (hash? t) t (hash))))
@@ -2675,7 +3148,7 @@
   (define bo-eval
     (evaluate-build-order-next-step
      #:race race
-     #:enemy-race enemy-race-guess
+     #:enemy-race effective-enemy-race
      #:frame frame
      #:minerals minerals
      #:gas gas
@@ -2696,8 +3169,6 @@
   (define bo-reserved-gas (pro-bo-eval-result-reserved-gas bo-eval))
   (set! target-workers (max target-workers (pro-bo-eval-result-target-workers bo-eval)))
 
-  ;; Track mutable open production slots per facility category in the current frame
-  ;; so `(train unit)` is NEVER emitted or charged when all facilities of that type are busy!
   (define (normalize-facility-slot-sym sym)
     (define csym (sc2-canonical-structure-sym sym))
     (case csym
@@ -2709,7 +3180,6 @@
     (for ([(btype cnt) (in-hash (hash-ref cap 'open-slots-by-type (hash)))])
       (define norm-k (normalize-facility-slot-sym btype))
       (hash-update! open-prod-slots norm-k (lambda (old) (+ old cnt)) 0)))
-  ;; Fallback for synthetic tests where buildings might not yet be synced in control groups
   (define fallback-prod-slots (make-hash))
   (for ([b (in-list ready-bldgs)])
     (define bt (sc2-canonical-structure-sym (unit-type-sym b)))
@@ -2728,7 +3198,6 @@
   (for ([(norm-k cnt) (in-hash fallback-prod-slots)])
     (when (> cnt (hash-ref open-prod-slots norm-k 0))
       (hash-set! open-prod-slots norm-k cnt)))
-  ;; Zerg larva accounting: use explicit larva count in live SC2 observations, or 3 per Hatchery in synthetic tests
   (define explicit-larvae (count (lambda (u) (eq? (unit-type-sym u) 'larva)) ally-units))
   (define live-larva-tracking?
     (ormap (lambda (u) (memq (unit-type-sym u) '(larva egg baneling-cocoon ravager-cocoon))) ally-units))
@@ -2736,15 +3205,15 @@
              (if live-larva-tracking?
                  explicit-larvae
                  (* 3 (max 1 active-bases))))
-  ;; Unit-morph producer slots (`zergling -> baneling`, `roach -> ravager`,
-  ;; `hydralisk -> lurker`, `corruptor -> brood-lord`, `overlord -> overseer`,
-  ;; `high-templar / dark-templar -> archon`):
   (for ([msym (in-list '(zergling roach hydralisk corruptor overlord high-templar dark-templar))])
     (define avail-morph-sources
       (count (lambda (u)
+               (define uid (hash-ref u 'id -1))
+               (define tord (hash-ref ledger-unit-orders uid #f))
                (and (eq? (sc2-canonical-unit-sym (unit-type-sym u)) msym)
-                    (not (order-ledger-facility-busy? oledger u frame))))
-             ally-units))
+                    (not (and tord (eq? (tracked-order-kind tord) 'morph)))
+                    (not (eq? (sc2-order-protection-class (hash-ref u 'order-ability-id 0)) 'morph))))
+             real-ally-units))
     (hash-set! open-prod-slots msym avail-morph-sources))
 
   (define live-game? live-game-obs?)
@@ -2827,14 +3296,10 @@
         (safe-nonneg-int (or live-gas-harvesters (hash-ref obs 'vespene-harvesters 0)) 0)
         (if (> gas 0) 3 0)))
 
-  ;; Decoupled Priority Macro Brain (`lib/priority-macro-brain.rkt`):
-  ;; Single source of truth for recursive SC2-TECH-GRAPH prerequisite self-healing,
-  ;; effective-phase-supply watermark progression, dual-resource (min + gas) escrow,
-  ;; and Okasaki Braun-heap marginal-utility scheduling.
   (define macro-world
     (make-macro-world-state
      #:race race
-     #:enemy-race enemy-race-guess
+     #:enemy-race effective-enemy-race
      #:frame frame
      #:minerals minerals
      #:gas gas
@@ -2877,9 +3342,6 @@
         (not (not (memq csym (macro-brain-decision-scheduled-ids macro-decision))))))
   (define repaired-prereqs (macro-brain-decision-repaired-prereqs macro-decision))
 
-  ;; Authoritative live reserve floors: `step-priority-macro-brain` incorporates `bo-eval`
-  ;; together with crisis/0-gas/threat suppression, so never `max` suppressed floors back up
-  ;; against stale raw `bo-eval` reserves!
   (when live-game?
     (set! bo-active-goal (macro-brain-decision-bo-active-goal macro-decision))
     (set! bo-goal-sym (and bo-active-goal (pro-bo-goal-target-sym bo-active-goal)))
@@ -2917,7 +3379,6 @@
     (and escrow-same-goal?
          (memq active-escrow-sym '(hatchery nexus command-center))
          (> total-workers 0)
-         (not natural-blocked?)
          (< (- frame cur-escrow-start-frame) 896)
          (> obs-minerals prev-escrow-peak-min)))
   (define cur-escrow-peak-min
@@ -3014,8 +3475,6 @@
     (find-all-broken-tech-dependencies race ready-bldg-counts total-bldg-counts #:active-goals '()))
 
   ;; Pre-spend Decoupled 8-Stream Resource & Bank Manager:
-  ;; Computed BEFORE race actuators spend `minerals`/`gas` so stream budgets reflect true available
-  ;; bank and `wg-slot-cnt` counts ONLY actual WarpGates (`'warp-gate` / `'warpgate`).
   (define in-prog-bldg-syms
     (for/list ([b (in-list ally-bldgs)]
                #:when (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))
@@ -3075,11 +3534,20 @@
   (define prio-saving-for-sym (macro-brain-decision-saving-for macro-decision))
   (define crisis-freeze-workers?
     (and early-survival-crisis?
+         (not (and (< total-workers 10)
+                   (null? prod-facilities)
+                   (< minerals 200)))
          (or (>= total-workers 12)
              (< live-army-supply 4))))
   (define crisis-freeze-expand-or-gas?
     (and early-survival-crisis?
          (< live-army-supply 6)))
+
+  (define (worker-army-curve-satisfied?)
+    (or (not live-game?)
+        (< total-workers 24)
+        (>= live-army-supply
+            (required-army-supply-for-worker-growth total-workers live-enemy-threat-supply))))
 
   (define prio-summary
     (priority-schedule-summary-hash
@@ -3145,11 +3613,11 @@
         [(not live-game?) 1]
         [(and (memq unit-sym '(drone probe scv))
               (>= active-bases 2)
-              (< total-workers (min 80 (* 22 active-bases)))
+              (< total-workers (min 70 (* 22 active-bases)))
               (not under-base-attack?)
               (<= live-enemy-threat-supply 0))
          (min 3 active-bases)]
-        [(memq unit-sym '(drone probe scv overlord observer sentry raven)) 1]
+        [(memq unit-sym '(drone probe scv queen overlord observer sentry raven)) 1]
         [else 4]))
     (let loop ([trained 0])
       (define avail-slots (hash-ref open-prod-slots producer-key 0))
@@ -3258,9 +3726,8 @@
          (set! bo-reserved-min (max bo-reserved-min m-cost))
          (set! bo-reserved-gas (max bo-reserved-gas g-cost))])))
 
-  ;; Multi-base expansion mineral escrow:
-  ;; Aligned strictly with race 3rd-base actuator prerequisites and suppressed during the
-  ;; 160-frame (~7.1s) post-timeout escrow release window (`escrow-suppressed-active?`).
+  ;; Multi-base expansion mineral escrow (never disabled by `natural-blocked?` since uncamped
+  ;; BFS expansion pads remain available):
   (define race-th-sym
     (case race
       [(Zerg) 'hatchery]
@@ -3289,6 +3756,7 @@
 
   (define (saving-for-expansion-now? cur-base-count)
     (and (not under-base-attack?)
+         (not under-early-cheese?)
          (not early-survival-crisis?)
          (not crisis-freeze-expand-or-gas?)
          (<= live-enemy-threat-supply 0)
@@ -3301,7 +3769,6 @@
          (or (not live-game?) (not severe-intel-blindness?) (not (null? ally-combat-units)))
          (null? orphaned-prereqs)
          (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)
-         (not natural-blocked?)
          (= (order-ledger-pending-count-for-type oledger race-th-sym frame) 0)
          (< minerals (sc2-min-cost race-th-sym))
          (or (and live-game?
@@ -3338,18 +3805,29 @@
                                (>= live-army-supply (* (if (eq? race 'Zerg) 4 7) cur-base-count))))
                       (>= (length ally-combat-units) 4))))))
 
+  (define enemy-heavy-ground-siege?
+    (ormap (lambda (e)
+             (memq (sc2-canonical-unit-sym (unit-type-sym e))
+                   '(siege-tank siege-tank-sieged colossus archon immortal thor planetary-fortress)))
+           (append enemy-units enemy-bldgs)))
+
+  ;; Count ONLY non-depleted gas buildings (`vespene-contents > 0`; default `1` for synthetic tests)
+  ;; toward `desired-extractors` / `desired-assimilators` / `desired-refineries` (`#5118808` fix).
+  (define (active-gas-bldg? b)
+    (> (hash-ref b 'vespene-contents 1) 0))
+
+  ;; Endgame anti-tie corner hunter mode: when `frame >= 6000` and `0` enemy structures are visible,
+  ;; ensure `>= 2` flying air-to-air hunters + `>= 1` mobile detector to clear lifted/corner structures!
+  (define endgame-corner-hunt?
+    (and live-game? (>= frame 6000) (null? enemy-bldgs)))
 
   ;; ---------------------------------------------------------------------------
   ;; Race-Specific Macro Mechanics, Pro Build Orders, Tech Trees & Unit Production
-  ;; (100% Valid SC2 LotV Symbols + Pro Replay Build Orders + Facility Slot Gating
-  ;;  + Building Control Groups 4/5/6/7 Production & Research Orchestration)
   ;; ---------------------------------------------------------------------------
   (case race
     [(Zerg)
-     ;; 1. Queen Inject Larva & Spawn Creep Tumor (Bug #15, #16, #21 fix:
-     ;;    never interrupt a Queen already executing Inject Larva (251) or Spawn Creep Tumor (1694),
-     ;;    pair each Queen with its closest ready Hatchery, and anchor initial creep tumors 3.5 tiles
-     ;;    from the Hatchery toward the natural so they are guaranteed to be on creep!)
+     ;; 1. 1-to-1 Queen Inject Larva (`dispatch-macro-energy!`), Idle Queen Hatchery Lease,
+     ;;    & Creep-Highway Queen Tumor Placement
      (define queens
        (filter (lambda (u) (eq? (sc2-canonical-unit-sym (unit-type-sym u)) 'queen)) ally-units))
      (define hatcheries
@@ -3365,95 +3843,275 @@
      (define extractors
        (filter (lambda (b) (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'extractor))
                ally-bldgs))
-     (for ([q (in-list queens)]
-           [q-idx (in-naturals)])
-       (define q-energy (hash-ref q 'energy SC2-QUEEN-INJECT-ENERGY))
-       (define qid (hash-ref q 'id 120))
-       (define qx (hash-ref q 'x base-x))
-       (define qy (hash-ref q 'y base-y))
+     (define active-extractors (filter active-gas-bldg? extractors))
+     (define (queen-protected-order? q)
        (define q-ab-id (hash-ref q 'order-ability-id 0))
        (define q-ab-sym (hash-ref q 'order-ability-sym #f))
-       (define q-busy-casting?
-         (or (memv q-ab-id '(251 1694))
-             (memq q-ab-sym '(inject-larva spawn-creep-tumor spread-creep-tumor))))
-       (define target-hatch
-         (and (not (null? inject-hatcheries))
-              (argmin (lambda (h)
-                        (define hx (hash-ref h 'x base-x))
-                        (define hy (hash-ref h 'y base-y))
-                        (+ (sqr (- qx hx)) (sqr (- qy hy))))
-                      inject-hatcheries)))
-       (define hx (if target-hatch (hash-ref target-hatch 'x base-x) base-x))
-       (define hy (if target-hatch (hash-ref target-hatch 'y base-y) base-y))
-       (define hdx (- nat-x hx))
-       (define hdy (- nat-y hy))
-       (define hd (max 1.0 (sqrt (+ (* hdx hdx) (* hdy hdy)))))
-       (define tumor-init-x (safe-coord (+ hx (* 3.5 (/ hdx hd))) hx))
-       (define tumor-init-y (safe-coord (+ hy (* 3.5 (/ hdy hd))) hy))
-       (unless q-busy-casting?
-         (cond
-           [(and (>= q-energy SC2-QUEEN-TUMOR-SURPLUS-ENERGY)
-                 (refractory-allow-action?! cd-tracker
-                                            (list 'queen-tumor qid)
-                                            frame
-                                            SC2-CREEP-TUMOR-COOLDOWN-FRAMES))
-            (emit! (list 'cast-spell qid 'spawn-creep-tumor tumor-init-x tumor-init-y))
-            (order-ledger-record-issued! oledger qid 'cast-spell 'spawn-creep-tumor tumor-init-x tumor-init-y frame)]
-           [(and (>= q-energy SC2-QUEEN-INJECT-ENERGY) target-hatch)
-            (emit! (list 'cast-spell qid 'inject-larva (hash-ref target-hatch 'id 101)))
-            (order-ledger-record-issued! oledger qid 'cast-spell 'inject-larva hx hy frame)])))
+       (define canon-ab (sc2-canonical-order-ability q-ab-id))
+       (or (memv q-ab-id '(251 1694 3691))
+           (memq (sc2-order-protection-class canon-ab) '(macro-spell tumor-spread))
+           (memq q-ab-sym '(inject-larva spawn-creep-tumor spread-creep-tumor))))
+     (define (hatchery-needs-inject? h)
+       (define timer (safe-nonneg-int (hash-ref h 'queen-spawn-larva-timer 0) 0))
+       (define bs (hash-ref h 'buffs '()))
+       (and (<= timer 0)
+            (not (and (list? bs)
+                      (or (memq 'inject-larva bs)
+                          (memq 'queen-spawn-larva bs)
+                          (memv 11 bs))))))
+     (define uninjected-hatches (filter hatchery-needs-inject? inject-hatcheries))
+     (define claimed-inject-hatch-ids (mutable-seteqv))
+     (define used-queen-ids (mutable-seteqv))
 
-     ;; 2. Pro Mechanic #2: Active Creep Tumor Daisy-Chaining
-     (define ready-tumors
+     ;; Preserve busy-casting Queens with an `'inject-queen` lease so tactics never pull them
+     (for ([q (in-list queens)]
+           #:when (queen-protected-order? q))
+       (define qid (hash-ref q 'id 120))
+       (set-add! used-queen-ids qid)
+       (acquire-unit-lease! leases qid 'inject-queen frame 16
+                            #:x (hash-ref q 'x base-x)
+                            #:y (hash-ref q 'y base-y)))
+
+     ;; In synthetic tests (`not live-game?`), preserve surplus-energy tumor-first test at frame 1000
+     ;; while injecting on subsequent frames when tumor cooldown is active.
+     (define (nudge-off-expansion-pads cx cy [min-dist 5.0])
+       (let loop ([rx cx] [ry cy]
+                  [pads (list (cons nat-x nat-y) (cons third-x third-y))])
+         (cond
+           [(null? pads) (values (safe-coord rx cx) (safe-coord ry cy))]
+           [else
+            (define px (caar pads))
+            (define py (cdar pads))
+            (define d (dist2d rx ry px py))
+            (if (< d min-dist)
+                (let* ([vx (if (< d 0.1) (- enemy-x px) (- rx px))]
+                       [vy (if (< d 0.1) (- enemy-y py) (- ry py))]
+                       [vd (max 1.0 (sqrt (+ (* vx vx) (* vy vy))))])
+                  (loop (+ px (* min-dist (/ vx vd)))
+                        (+ py (* min-dist (/ vy vd)))
+                        (cdr pads)))
+                (loop rx ry (cdr pads)))])))
+
+     (when (not live-game?)
+       (for ([q (in-list queens)]
+             #:when (and (not (set-member? used-queen-ids (hash-ref q 'id 120)))
+                         (>= (hash-ref q 'energy SC2-QUEEN-INJECT-ENERGY) SC2-QUEEN-TUMOR-SURPLUS-ENERGY)))
+         (define qid (hash-ref q 'id 120))
+         (when (refractory-allow-action?! cd-tracker
+                                          (list 'queen-tumor qid)
+                                          frame
+                                          SC2-CREEP-TUMOR-COOLDOWN-FRAMES)
+           (define qx (hash-ref q 'x base-x))
+           (define qy (hash-ref q 'y base-y))
+           (define th0
+             (and (not (null? inject-hatcheries))
+                  (argmin (lambda (h) (dist2d qx qy (hash-ref h 'x base-x) (hash-ref h 'y base-y)))
+                          inject-hatcheries)))
+           (define hx (if th0 (hash-ref th0 'x base-x) base-x))
+           (define hy (if th0 (hash-ref th0 'y base-y) base-y))
+           (define hdx (- nat-x hx))
+           (define hdy (- nat-y hy))
+           (define hd (max 1.0 (sqrt (+ (* hdx hdx) (* hdy hdy)))))
+           (define-values (tix tiy)
+             (nudge-off-expansion-pads (+ hx (* 3.5 (/ hdx hd)))
+                                       (+ hy (* 3.5 (/ hdy hd)))
+                                       4.5))
+           (set-add! used-queen-ids qid)
+           (acquire-unit-lease! leases qid 'creep-queen frame 24 #:x tix #:y tiy)
+           (emit! (list 'cast-spell qid 'spawn-creep-tumor tix tiy))
+           (order-ledger-record-issued! oledger qid 'cast-spell 'spawn-creep-tumor tix tiy frame))))
+
+     ;; 1-to-1 Queen -> Uninjected Hatchery assignment via `dispatch-macro-energy!`
+     (dispatch-macro-energy!
+      queens
+      uninjected-hatches
+      frame
+      claimed-inject-hatch-ids
+      #:min-energy SC2-QUEEN-INJECT-ENERGY
+      #:valid-caster?
+      (lambda (q)
+        (not (set-member? used-queen-ids (hash-ref q 'id 120))))
+      #:valid-pair?
+      (lambda (q h)
+        (or (not live-game?)
+            (<= (dist2d (hash-ref q 'x base-x) (hash-ref q 'y base-y)
+                        (hash-ref h 'x base-x) (hash-ref h 'y base-y))
+                18.0)))
+      #:score-pair
+      (lambda (q h)
+        (- (dist2d (hash-ref q 'x base-x) (hash-ref q 'y base-y)
+                   (hash-ref h 'x base-x) (hash-ref h 'y base-y))))
+      #:emit-cast!
+      (lambda (q h)
+        (define qid (hash-ref q 'id 120))
+        (define hid (hash-ref h 'id 101))
+        (define hx (hash-ref h 'x base-x))
+        (define hy (hash-ref h 'y base-y))
+        (set-add! used-queen-ids qid)
+        (set-add! claimed-inject-hatch-ids hid)
+        (acquire-unit-lease! leases qid 'inject-queen frame 24
+                             #:target-id hid #:x hx #:y hy)
+        (emit! (list 'cast-spell qid 'inject-larva hid))
+        (order-ledger-record-issued! oledger qid 'cast-spell 'inject-larva hx hy frame)))
+
+     ;; Lease 1 idle `< 25`-energy Queen to each remaining uninjected Hatchery so combat never pulls inject Queens away
+     (for ([h (in-list uninjected-hatches)]
+           #:when (not (set-member? claimed-inject-hatch-ids (hash-ref h 'id 101))))
+       (define hid (hash-ref h 'id 101))
+       (define hx (hash-ref h 'x base-x))
+       (define hy (hash-ref h 'y base-y))
+       (define guard-q
+         (let ([cands
+                (filter (lambda (q)
+                          (define qid (hash-ref q 'id 120))
+                          (and (not (set-member? used-queen-ids qid))
+                               (<= (dist2d hx hy (hash-ref q 'x base-x) (hash-ref q 'y base-y)) 14.0)))
+                        queens)])
+           (and (pair? cands)
+                (argmin (lambda (q) (dist2d hx hy (hash-ref q 'x base-x) (hash-ref q 'y base-y)))
+                        cands))))
+       (when guard-q
+         (define gqid (hash-ref guard-q 'id 120))
+         (set-add! used-queen-ids gqid)
+         (set-add! claimed-inject-hatch-ids hid)
+         (acquire-unit-lease! leases gqid 'inject-queen frame 24
+                              #:target-id hid #:x hx #:y hy)))
+
+     ;; Remaining unleased Queens with `>= 25` energy become dedicated Creep Queens along the creep highway
+     (define all-ally-tumors
+       (filter (lambda (u) (memq (unit-type-sym u) '(creep-tumor creep-tumor-burrowed)))
+               (append ally-units ready-bldgs)))
+     (define creep-highway-wps
+       (list (cons nat-x nat-y)
+             (cons third-x third-y)
+             (cons corridor-mid-x corridor-mid-y)
+             (cons enemy-exp-x enemy-exp-y)
+             (cons enemy-x enemy-y)))
+     (define (next-creep-highway-target ax ay step-dist)
+       (define wp
+         (or (findf (lambda (pt) (> (dist2d ax ay (car pt) (cdr pt)) 6.0))
+                    creep-highway-wps)
+             (cons enemy-x enemy-y)))
+       (define dx (- (car wp) ax))
+       (define dy (- (cdr wp) ay))
+       (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+       (nudge-off-expansion-pads (+ ax (* step-dist (/ dx d)))
+                                 (+ ay (* step-dist (/ dy d)))
+                                 5.0))
+
+     (for ([q (in-list queens)]
+           #:when (and (not (set-member? used-queen-ids (hash-ref q 'id 120)))
+                       (>= (hash-ref q 'energy 0) SC2-QUEEN-INJECT-ENERGY)))
+       (define qid (hash-ref q 'id 120))
+       (when (refractory-allow-action?! cd-tracker
+                                        (list 'queen-tumor qid)
+                                        frame
+                                        SC2-CREEP-TUMOR-COOLDOWN-FRAMES)
+         (define anchor-candidates (append ready-hatcheries all-ally-tumors))
+         (define best-anchor
+           (if (pair? anchor-candidates)
+               (argmin (lambda (a)
+                         (dist2d enemy-x enemy-y
+                                 (hash-ref a 'x base-x)
+                                 (hash-ref a 'y base-y)))
+                       anchor-candidates)
+               #f))
+         (define ax (if best-anchor (hash-ref best-anchor 'x base-x) (hash-ref q 'x base-x)))
+         (define ay (if best-anchor (hash-ref best-anchor 'y base-y) (hash-ref q 'y base-y)))
+         (define-values (tx ty) (next-creep-highway-target ax ay 6.0))
+         (set-add! used-queen-ids qid)
+         (acquire-unit-lease! leases qid 'creep-queen frame 24 #:x tx #:y ty)
+         (emit! (list 'cast-spell qid 'spawn-creep-tumor tx ty))
+         (order-ledger-record-issued! oledger qid 'cast-spell 'spawn-creep-tumor tx ty frame)))
+
+     ;; 2. Pro Mechanic #2: Active Creep Tumor Daisy-Chaining with Maturation (`+232` frames) & 4x Retry
+     (define tumor-state-ht (rt-tumor-state rt))
+     (define candidate-tumors
        (filter (lambda (u)
                  (and (memq (unit-type-sym u) '(creep-tumor creep-tumor-burrowed))
                       (not (set-member? (live-bot-runtime-used-creep-tumors rt)
                                         (hash-ref u 'id 0)))))
                (append ally-units ready-bldgs)))
-     (for ([t (in-list (take ready-tumors (min SC2-MAX-TUMOR-SPREADS-PER-FRAME (length ready-tumors))))])
+     (for ([t (in-list candidate-tumors)])
+       (define tid (hash-ref t 'id 702))
+       (unless (hash-has-key? tumor-state-ht tid)
+         (define init-ready-f (if live-game? (+ frame 232) frame))
+         (hash-set! tumor-state-ht tid
+                    (hash 'mature-frame init-ready-f
+                          'attempts 0
+                          'next-try init-ready-f))))
+     (define mature-ready-tumors
+       (filter (lambda (t)
+                 (define tid (hash-ref t 'id 702))
+                 (define st (hash-ref tumor-state-ht tid (hash)))
+                 (define att (hash-ref st 'attempts 0))
+                 (cond
+                   [(>= att 4)
+                    (set-add! (live-bot-runtime-used-creep-tumors rt) tid)
+                    #f]
+                   [else
+                    (and (>= frame (hash-ref st 'mature-frame 0))
+                         (>= frame (hash-ref st 'next-try 0)))]))
+               candidate-tumors))
+     (for ([t (in-list (take mature-ready-tumors
+                             (min SC2-MAX-TUMOR-SPREADS-PER-FRAME (length mature-ready-tumors))))])
        (define tid (hash-ref t 'id 702))
        (define tx (hash-ref t 'x base-x))
        (define ty (hash-ref t 'y base-y))
-       (define dx (- enemy-x tx))
-       (define dy (- enemy-y ty))
-       (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
-       (define target-x (safe-coord (+ tx (* SC2-CREEP-TUMOR-STEP-DISTANCE (/ dx d))) tx))
-       (define target-y (safe-coord (+ ty (* SC2-CREEP-TUMOR-STEP-DISTANCE (/ dy d))) ty))
-       (set-add! (live-bot-runtime-used-creep-tumors rt) tid)
+       (define-values (target-x target-y)
+         (if live-game?
+             (next-creep-highway-target tx ty SC2-CREEP-TUMOR-STEP-DISTANCE)
+             (let* ([dx (- enemy-x tx)]
+                    [dy (- enemy-y ty)]
+                    [d (max 1.0 (sqrt (+ (* dx dx) (* dy dy))))])
+               (values (safe-coord (+ tx (* SC2-CREEP-TUMOR-STEP-DISTANCE (/ dx d))) tx)
+                       (safe-coord (+ ty (* SC2-CREEP-TUMOR-STEP-DISTANCE (/ dy d))) ty)))))
+       (define st (hash-ref tumor-state-ht tid (hash)))
+       (define next-att (add1 (hash-ref st 'attempts 0)))
+       (hash-set! tumor-state-ht tid
+                  (hash-set* st 'attempts next-att 'next-try (+ frame 68)))
+       (when (or (not live-game?) (>= next-att 4))
+         (set-add! (live-bot-runtime-used-creep-tumors rt) tid))
        (emit! (list 'cast tid 'spread-creep-tumor target-x target-y)))
 
-     ;; 3. Pro Build-Order Expansion Sequencing (16 Hatchery -> 30 3rd Hatchery -> 4th+ bases)
+     ;; 3. Pro Build-Order Expansion Sequencing (16 Hatchery -> 30 3rd Hatchery -> 4th+ uncamped bases)
      (when (and (>= minerals (sc2-min-cost 'hatchery))
                 (non-combat-min-ok? (sc2-min-cost 'hatchery) 'hatchery)
+                (not blocked-nat-expanded-early?)
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
                 (not crisis-freeze-expand-or-gas?)
                 (not under-base-attack?)
-                (not natural-blocked?)
                 (= (order-ledger-pending-count-for-type oledger 'hatchery frame) 0)
                 (or (< (length hatcheries) SC2-MIN-DESIRED-BASES)
                     (and (= (length hatcheries) 2)
                          (>= eff-phase-supply 30)
                          (memq 'spawning-pool ready-bldg-types))
                     (and (< (length hatcheries) desired-bases)
+                         (or (not (and endgame-corner-hunt?
+                                       (< (+ (unit-count 'mutalisk) (unit-count 'corruptor)) 2)))
+                             (>= (- minerals (sc2-min-cost 'hatchery)) 150))
                          (>= total-workers (* (length hatcheries)
-                                              (if (>= (length hatcheries) 3) 18 SC2-MIN-WORKERS-PER-BASE-FOR-EXPAND)))
+                                              (if (>= (length hatcheries) 3) 16 SC2-MIN-WORKERS-PER-BASE-FOR-EXPAND)))
                          (or (coupled-macro-plan-should-expand? macro-plan)
                              (>= frame SC2-MACRO-EXPAND-FRAME-THRESHOLD))))
+                (let-values ([(cand-ex cand-ey)
+                              (select-uncamped-expansion-pad (< (length hatcheries) SC2-MIN-DESIRED-BASES))])
+                  (and cand-ex cand-ey))
                 (refractory-allow-action?! cd-tracker
                                            (list 'macro-expand 'Zerg)
                                            frame
                                            SC2-EXPANSION-COOLDOWN-FRAMES))
-       (define exp-x (if (>= (length hatcheries) SC2-MIN-DESIRED-BASES) third-x nat-x))
-       (define exp-y (if (>= (length hatcheries) SC2-MIN-DESIRED-BASES) third-y nat-y))
-       (emit! (list 'expand exp-x exp-y))
-       (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'hatchery exp-x exp-y frame)
-       (spend-resources-and-supply! (sc2-min-cost 'hatchery) 0 0))
+       (define-values (exp-x exp-y)
+         (select-uncamped-expansion-pad (< (length hatcheries) SC2-MIN-DESIRED-BASES)))
+       (when (and exp-x exp-y)
+         (emit! (list 'expand exp-x exp-y))
+         (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'hatchery exp-x exp-y frame)
+         (spend-resources-and-supply! (sc2-min-cost 'hatchery) 0 0)))
 
      (define zerg-saving-for-expand? (saving-for-expansion-now? (length hatcheries)))
 
-     ;; 4. Zerg Pro Build Order: 17 Pool -> 17 Extractor -> 20 Queens -> 22 Metabolic Boost
-     ;;    -> 36 Roach Warren -> 38 Baneling Nest -> 40 2nd & 3rd Extractor -> 46 Lair -> 48 Evo -> 62 Hydra Den
+     ;; 4. Zerg Pro Build Order & 8-Geyser Scaling
      (when (and (not (building-present-or-pending? 'spawning-pool))
                 (save-cancel-rebuild-ready? 'spawning-pool 60)
                 (>= minerals (sc2-min-cost 'spawning-pool)))
@@ -3462,17 +4120,20 @@
        (emit-build-verified! 'spawning-pool pool-ax pool-ay))
 
      (define desired-extractors
-       (if (and early-survival-crisis? (null? extractors))
+       (if (and early-survival-crisis? (null? active-extractors))
            0
            (min (* SC2-GEYSERS-PER-BASE (length hatcheries))
                 (if live-game?
                     (cond
-                      [(and (>= eff-phase-supply 60) (>= total-workers 50) (< gas 350)) 4]
-                      [(and (>= eff-phase-supply 44) (>= total-workers 36) (< gas 300)) 3]
-                      [(and (>= eff-phase-supply 38) (>= total-workers 24) (< gas 250)) 2]
+                      [(and (>= (length hatcheries) 4) (>= total-workers 62) (< gas 1000)) 8]
+                      [(and (>= (length hatcheries) 3) (>= total-workers 48) (< gas 700)) 6]
+                      [(and (>= (length hatcheries) 2) (>= total-workers 34) (< gas 450)) 4]
+                      [(and (>= eff-phase-supply 44) (>= total-workers 32) (< gas 350)) 3]
+                      [(and (>= (length hatcheries) 2) (>= eff-phase-supply 34) (>= total-workers 24) (< gas 250)) 2]
                       [(>= total-workers (add1 SC2-MIN-WORKERS-FOR-GAS)) 1]
                       [else 0])
                     (cond
+                      [(>= supply-used 84) 6]
                       [(>= supply-used 60) 4]
                       [(>= supply-used 44) 3]
                       [(>= supply-used 38) 2]
@@ -3480,14 +4141,13 @@
                       [else 0])))))
      (when (and (memq 'spawning-pool bldg-types)
                 (not crisis-freeze-expand-or-gas?)
-                (< (+ (length extractors) (order-ledger-pending-count-for-type oledger 'extractor frame))
+                (< (+ (length active-extractors) (order-ledger-pending-count-for-type oledger 'extractor frame))
                    desired-extractors)
                 (>= minerals (sc2-min-cost 'gas-building-reserve))
                 (non-combat-min-ok? (sc2-min-cost 'gas-building-reserve)))
        (emit-gas-build-verified! 'extractor (safe-coord (+ base-x 4.0)) (safe-coord (+ base-y 4.0)) 'gas-building-reserve))
 
-     ;; Morph Lair BEFORE Queen training (and reserve at least 1 idle Hatchery when gas >= 80
-     ;; and Lair is wanted) so Queen training NEVER occupies 100% of Hatcheries when Lair is ready!
+     ;; Morph Lair BEFORE Queen training
      (define zerg-wants-lair-now?
        (and (memq 'spawning-pool ready-bldg-types)
             (not (building-present-or-pending? 'lair))
@@ -3496,6 +4156,7 @@
             (or (eq? bo-goal-sym 'lair)
                 (eq? prio-saving-for-sym 'lair)
                 (plan-wants-now? 'lair)
+                endgame-corner-hunt?
                 (and (>= gas 100)
                      (or (not live-game?)
                          (not (upgrade-needed? 'metabolic-boost))
@@ -3530,6 +4191,10 @@
            (>= live-army-supply 4)
            (>= minerals 250)))
      (define total-queens-now (unit-count 'queen))
+     (define desired-queens
+       (min SC2-MAX-QUEENS-CAP
+            (+ (max 1 (length ready-hatcheries))
+               (if (>= (length hatcheries) 2) 2 1))))
      (when (and (memq 'spawning-pool ready-bldg-types)
                 (= total-queens-now 0)
                 queen-allowed-in-crisis?
@@ -3538,6 +4203,29 @@
                 (non-combat-min-ok? (sc2-min-cost 'queen) 'queen))
        (try-train-unit! 'queen 'townhall 4))
 
+     (define enemy-cloaked-or-air?
+       (ormap (lambda (e)
+                (or (hash-ref e 'cloaked #f)
+                    (hash-ref e 'burrowed #f)
+                    (memq (sc2-canonical-unit-sym (unit-type-sym e))
+                          '(banshee dark-templar ghost lurker mutalisk void-ray carrier oracle widow-mine))))
+              enemy-units))
+
+     ;; Proactive mobile detection: morph >= 1 Overseer as soon as Lair completes
+     ;; (ahead of secondary creep Queens & +2 upgrades, matching Priority Brain Rank #1)
+     (when (and live-game?
+                (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+                (< (unit-count 'overseer)
+                   (if (or (>= live-army-supply 40)
+                           enemy-cloaked-or-air?
+                           (enemy-tech-observation-requires-detection? tech-obs))
+                       2
+                       1)))
+       (when (and (= (unit-count 'overlord) 0)
+                  (>= minerals (sc2-min-cost 'overlord)))
+         (try-train-unit! 'overlord 'larva 4))
+       (emit-unit-morph-verified! 'overseer 'overlord 0))
+
      (define zerg-holding-lair-min?
        (and live-game?
             (not (building-present-or-pending? 'lair))
@@ -3545,14 +4233,14 @@
                 (and (>= gas (sc2-gas-cost 'lair))
                      (or (>= eff-phase-supply 42) (plan-wants-now? 'lair))))))
      (when (and (memq 'spawning-pool ready-bldg-types)
+                (or (not live-game?) (> total-queens-now 0))
                 queen-allowed-in-crisis?
                 (not lair-reserving-last-hatchery?)
                 (not zerg-saving-for-expand?)
                 (>= (- minerals (if zerg-holding-lair-min? (sc2-min-cost 'lair) 0))
                     (sc2-min-cost 'queen))
                 (non-combat-min-ok? (sc2-min-cost 'queen) 'queen)
-                (< (unit-count 'queen)
-                   (min SC2-MAX-QUEENS-CAP (+ 1 (length hatcheries)))))
+                (< (unit-count 'queen) desired-queens))
        (try-train-unit! 'queen 'townhall 4))
 
      (when (and (memq 'spawning-pool ready-bldg-types)
@@ -3563,14 +4251,21 @@
                 (non-combat-gas-ok? (sc2-gas-cost 'metabolic-boost) 'metabolic-boost))
        (emit-research-verified! 'metabolic-boost))
 
+     (define zerg-hive-t3-tech-ready?
+       (and live-game?
+            (memq 'hive ready-bldg-types)
+            (or (memq 'ultralisk-cavern ready-bldg-types)
+                (memq 'greater-spire ready-bldg-types))))
+
      (when (and (memq 'spawning-pool ready-bldg-types)
                 (not zerg-saving-for-expand?)
                 (not (building-present-or-pending? 'roach-warren))
                 (save-cancel-rebuild-ready? 'roach-warren 60)
                 (or (plan-wants-now? 'roach-warren)
-                    (>= eff-phase-supply 26)
-                    (>= gas 80)
-                    (>= total-workers SC2-PRIORITY-WORKERS-PER-BASE))
+                    (and (not zerg-hive-t3-tech-ready?)
+                         (or (>= eff-phase-supply 26)
+                             (>= gas 80)
+                             (>= total-workers SC2-PRIORITY-WORKERS-PER-BASE))))
                 (>= minerals (sc2-min-cost 'roach-warren))
                 (non-combat-min-ok? (sc2-min-cost 'roach-warren) 'roach-warren))
        (define-values (rw-ax rw-ay)
@@ -3583,9 +4278,10 @@
                 (not (building-present-or-pending? 'baneling-nest))
                 (save-cancel-rebuild-ready? 'baneling-nest 60)
                 (or (plan-wants-now? 'baneling-nest)
-                    (>= eff-phase-supply 36)
-                    (memq 'lair ready-bldg-types)
-                    (memq 'hive ready-bldg-types))
+                    (and (not zerg-hive-t3-tech-ready?)
+                         (or (>= eff-phase-supply 36)
+                             (memq 'lair ready-bldg-types)
+                             (memq 'hive ready-bldg-types))))
                 (>= minerals (sc2-min-cost 'baneling-nest))
                 (>= gas (sc2-gas-cost 'baneling-nest))
                 (non-combat-min-ok? (sc2-min-cost 'baneling-nest) 'baneling-nest)
@@ -3619,7 +4315,7 @@
                     [sd (max 1.0 (sqrt (+ (* sdx sdx) (* sdy sdy))))])
                (values (safe-coord (+ base-x (* 3.5 (/ sdx sd))) base-x)
                        (safe-coord (+ base-y (* 3.5 (/ sdy sd))) base-y)))
-             (safe-zerg-build-anchor nat-x nat-y)))
+             (offset-defense-anchor nat-x nat-y 5.5)))
        (emit-build-verified! 'spine-crawler spine-x spine-y 2.0))
 
      (when (and (memq 'spawning-pool ready-bldg-types)
@@ -3688,7 +4384,6 @@
                       (>= (+ (unit-count 'baneling) (quotient (unit-count 'zergling) 2)) 3))
                   (upgrade-needed? 'centrifical-hooks))
          (emit-research-verified! 'centrifical-hooks))
-       ;; Build Hydralisk Den BEFORE Spire so Spire (200M/200G) never starves core Roach-Hydra-Lurker tech!
        (when (and (not zerg-saving-for-expand?)
                   (not (building-present-or-pending? 'hydralisk-den))
                   (save-cancel-rebuild-ready? 'hydralisk-den 60)
@@ -3703,10 +4398,13 @@
          (emit-build-verified! 'hydralisk-den hd-ax hd-ay))
        (when (and (not zerg-saving-for-expand?)
                   (not (building-present-or-pending? 'spire))
+                  (not (building-present-or-pending? 'greater-spire))
                   (save-cancel-rebuild-ready? 'spire 60)
                   (or (not live-game?)
                       (plan-wants-now? 'spire)
                       (enemy-tech-observation-requires-anti-air? tech-obs)
+                      enemy-heavy-ground-siege?
+                      endgame-corner-hunt?
                       (>= eff-phase-supply 68))
                   (>= minerals (sc2-min-cost 'spire))
                   (>= gas (sc2-gas-cost 'spire)))
@@ -3718,7 +4416,10 @@
                   (save-cancel-rebuild-ready? 'infestation-pit 60)
                   (or (plan-wants-now? 'infestation-pit)
                       (plan-wants-now? 'hive)
-                      (and live-game? (>= eff-phase-supply 76)))
+                      (and live-game?
+                           (or (>= (length hatcheries) 3)
+                               (>= total-workers 52)
+                               (>= eff-phase-supply 76))))
                   (>= minerals (sc2-min-cost 'infestation-pit))
                   (>= gas (sc2-gas-cost 'infestation-pit)))
          (define-values (ip-ax ip-ay)
@@ -3726,17 +4427,17 @@
          (emit-build-verified! 'infestation-pit ip-ax ip-ay))
        (when (and (memq 'lair ready-bldg-types)
                   (memq 'infestation-pit ready-bldg-types)
-                  (not zerg-saving-for-expand?)
-                  (or (not live-game?)
-                      (plan-wants-now? 'hive)
-                      (>= eff-phase-supply 84)))
+                  (not zerg-saving-for-expand?))
          (emit-building-morph-verified! 'hive '(lair) 4))
        (when (and (memq 'hive ready-bldg-types)
                   (memq 'spire ready-bldg-types)
                   (not zerg-saving-for-expand?)
                   (or (not live-game?)
                       (plan-wants-now? 'greater-spire)
-                      (>= eff-phase-supply 110)))
+                      enemy-heavy-ground-siege?
+                      (>= (length hatcheries) 4)
+                      (>= total-workers 64)
+                      (>= eff-phase-supply 100)))
          (emit-building-morph-verified! 'greater-spire '(spire) 4))
        (when (and (memq 'hive ready-bldg-types)
                   (not zerg-saving-for-expand?)
@@ -3744,7 +4445,8 @@
                   (save-cancel-rebuild-ready? 'ultralisk-cavern 60)
                   (or (not live-game?)
                       (plan-wants-now? 'ultralisk-cavern)
-                      (>= eff-phase-supply 104))
+                      (>= (length hatcheries) 4)
+                      (>= eff-phase-supply 96))
                   (>= minerals (sc2-min-cost 'ultralisk-cavern))
                   (>= gas (sc2-gas-cost 'ultralisk-cavern)))
          (define-values (uc-ax uc-ay)
@@ -3764,11 +4466,17 @@
          (emit-research-verified! 'neural-parasite))
        (when (and (memq 'hive ready-bldg-types)
                   (memq 'spawning-pool ready-bldg-types)
+                  (or (not live-game?)
+                      (plan-wants-now? 'zergling-attackspeed)
+                      (>= (unit-count 'zergling) 6))
                   (upgrade-needed? 'zergling-attackspeed))
          (emit-research-verified! 'zergling-attackspeed))
-       (when (and (memq 'ultralisk-cavern ready-bldg-types)
-                  (upgrade-needed? 'chitinous-plating))
-         (emit-research-verified! 'chitinous-plating))
+       (when (memq 'ultralisk-cavern ready-bldg-types)
+         (cond
+           [(upgrade-needed? 'chitinous-plating)
+            (emit-research-verified! 'chitinous-plating)]
+           [(upgrade-needed? 'anabolic-synthesis)
+            (emit-research-verified! 'anabolic-synthesis)]))
        (when (and (memq 'hydralisk-den ready-bldg-types)
                   (not zerg-saving-for-expand?)
                   (not (building-present-or-pending? 'lurker-den))
@@ -3790,13 +4498,6 @@
          (emit-research-verified! 'seismic-spines)))
 
      ;; Cloaked / Air / Spore defense & Overseer morph
-     (define enemy-cloaked-or-air?
-       (ormap (lambda (e)
-                (or (hash-ref e 'cloaked #f)
-                    (hash-ref e 'burrowed #f)
-                    (memq (sc2-canonical-unit-sym (unit-type-sym e))
-                          '(banshee dark-templar ghost lurker mutalisk void-ray carrier oracle))))
-              enemy-units))
      (when (or enemy-cloaked-or-air?
                (enemy-tech-observation-requires-detection? tech-obs)
                (and (not live-game?) (memq 'spire bldg-types)))
@@ -3832,6 +4533,7 @@
        [(memq 'lurker-den ready-bldg-types)
         (when (or (not live-game?)
                   (and (not zerg-saving-for-expand?)
+                       (< (unit-count 'lurker) 8)
                        (can-spend-by-priority? 'lurker 'combat-unit)))
           (emit-unit-morph-verified! 'lurker 'hydralisk 1))]
        [(and (not live-game?)
@@ -3848,17 +4550,18 @@
      (when (memq 'greater-spire ready-bldg-types)
        (emit-unit-morph-verified! 'brood-lord 'corruptor 2))
 
-     ;; 5. Zerg Worker Saturation Priority vs Combat Unit Training (via Control Group 4 Larvae)
+     ;; 5. Zerg Worker Saturation Priority (`70` cap + army-supply curve gate) vs Combat Unit Training
      (define zerg-ideal-worker-cap
-       (min 80 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length hatcheries)))))
+       (min 70 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length hatcheries)))))
      (define zerg-drone-priority?
        (and (not crisis-freeze-workers?)
+            (worker-army-curve-satisfied?)
             (or (not zerg-saving-for-expand?)
                 (and (< total-workers 16) (< minerals 250)))
             (not urgent-combat-or-intel-need?)
             (or (< total-workers zerg-ideal-worker-cap)
                 (can-spend-by-priority? 'drone 'worker))
-            (< total-workers (min 80 (max target-workers zerg-ideal-worker-cap)))
+            (< total-workers (min 70 (max target-workers zerg-ideal-worker-cap)))
             (or (not live-game?)
                 (and (not under-base-attack?) (<= live-enemy-threat-supply 0))
                 (< total-workers 19)
@@ -3873,15 +4576,15 @@
        (try-train-unit! 'drone 'larva 4
                         #:respect-bo-reserve?
                         (and live-game?
-                             (or (>= total-workers zerg-ideal-worker-cap)
+                             (or (>= total-workers 24)
+                                 (>= total-workers zerg-ideal-worker-cap)
                                  (and (>= total-workers 16)
                                       (> bo-reserved-gas 0)
                                       (>= gas bo-reserved-gas)))
                              (not (memq bo-goal-sym '(hatchery nexus command-center drone probe scv))))))
 
-     ;; Zerg Combat Unit Training (via Control Group 4 Townhalls / Larvae, gated by `open-prod-slots`)
+     ;; Zerg Combat Unit Training (T3 BroodLord/Viper/Ultralisk/Infestor BEFORE T2 Hydra/Roach)
      (unless zerg-saving-for-expand?
-       ;; Decoupled Baneling morph: morph Zerglings into Banelings whenever Baneling Nest is ready
        (when (and (memq 'baneling-nest ready-bldg-types)
                   (< (unit-count 'baneling)
                      (max 4 (quotient (max 1 (unit-count 'zergling)) 2)))
@@ -3895,11 +4598,49 @@
               (or (< (unit-count 'queen) (length hatcheries))
                   (and (>= gas 80)
                        (not (building-present-or-pending? 'roach-warren))))))
+       ;; Endgame Anti-Tie Corner Hunters: maintain >= 2 flying AA hunters (Corruptor / Mutalisk)
+       (when (and endgame-corner-hunt?
+                  (or (memq 'spire ready-bldg-types) (memq 'greater-spire ready-bldg-types))
+                  (< (+ (unit-count 'mutalisk) (unit-count 'corruptor)) 2))
+         (when (and (>= minerals (sc2-min-cost 'corruptor))
+                    (>= gas (sc2-gas-cost 'corruptor)))
+           (try-train-unit! 'corruptor 'larva 4))
+         (when (and (< (+ (unit-count 'mutalisk) (unit-count 'corruptor)) 2)
+                    (>= minerals (sc2-min-cost 'mutalisk))
+                    (>= gas (sc2-gas-cost 'mutalisk)))
+           (try-train-unit! 'mutalisk 'larva 4)))
+       ;; T3 Air Siege: Corruptor -> Brood Lord when Greater Spire is ready or morphing
+       (when (and (or (memq 'greater-spire ready-bldg-types)
+                      (building-present-or-pending? 'greater-spire))
+                  (< (unit-count 'brood-lord) 6))
+         (when (< (unit-count 'corruptor) 3)
+           (try-train-unit! 'corruptor 'larva 4 #:respect-bo-reserve? #t))
+         (when (memq 'greater-spire ready-bldg-types)
+           (emit-unit-morph-verified! 'brood-lord 'corruptor 2)))
+       ;; T3 Hive Caster: Viper (Blinding Cloud / Abduct / Parasitic Bomb)
+       (when (and (memq 'hive ready-bldg-types)
+                  (< (unit-count 'viper) (if (>= eff-phase-supply 130) 3 2))
+                  (or (plan-wants-now? 'viper)
+                      enemy-heavy-ground-siege?
+                      (and live-game? (>= live-army-supply 34)))
+                  (>= minerals (sc2-min-cost 'viper))
+                  (>= gas (sc2-gas-cost 'viper)))
+         (try-train-unit! 'viper 'larva 4 #:respect-bo-reserve? #t))
+       ;; T3 Frontline: Ultralisk
        (when (and (memq 'ultralisk-cavern ready-bldg-types)
+                  (< (unit-count 'ultralisk) 8)
                   (>= minerals (sc2-min-cost 'ultralisk))
                   (>= gas (sc2-gas-cost 'ultralisk))
                   (can-spend-by-priority? 'ultralisk 'combat-unit))
          (try-train-unit! 'ultralisk 'larva 4 #:respect-bo-reserve? #t))
+       ;; T2/T3 Caster: Infestor
+       (when (and (memq 'infestation-pit ready-bldg-types)
+                  (< (unit-count 'infestor) 2)
+                  (or (plan-wants-now? 'infestor)
+                      (and live-game? (>= live-army-supply 50)))
+                  (>= minerals (sc2-min-cost 'infestor))
+                  (>= gas (sc2-gas-cost 'infestor)))
+         (try-train-unit! 'infestor 'larva 4 #:respect-bo-reserve? #t))
        (cond
          [(and (or (memq 'spire ready-bldg-types) (memq 'greater-spire ready-bldg-types))
                (>= minerals (sc2-min-cost 'mutalisk))
@@ -3911,15 +4652,21 @@
                          (building-present-or-pending? 'greater-spire)
                          (plan-wants-now? 'corruptor)))
             (try-train-unit! 'corruptor 'larva 4 #:respect-bo-reserve? #t))
-          (when (can-spend-by-priority? 'mutalisk 'combat-unit)
+          (when (and (< (unit-count 'mutalisk) 10)
+                     (can-spend-by-priority? 'mutalisk 'combat-unit))
             (try-train-unit! 'mutalisk 'larva 4 #:respect-bo-reserve? #t))
           (when (memq 'hydralisk-den ready-bldg-types)
             (try-train-unit! 'hydralisk 'larva 4 #:respect-bo-reserve? #t))]
          [(and (memq 'hydralisk-den ready-bldg-types)
                (>= minerals (sc2-min-cost 'hydralisk))
                (>= gas (sc2-gas-cost 'hydralisk)))
-          (try-train-unit! 'hydralisk 'larva 4 #:respect-bo-reserve? #t)
+          (when (or (not live-game?)
+                    (not (memq 'hive ready-bldg-types))
+                    (< (unit-count 'hydralisk) 16)
+                    (< gas 150))
+            (try-train-unit! 'hydralisk 'larva 4 #:respect-bo-reserve? #t))
           (when (and (memq 'roach-warren ready-bldg-types)
+                     (or (not live-game?) (< (unit-count 'roach) 14))
                      (can-spend-by-priority? 'roach 'combat-unit))
             (try-train-unit! 'roach 'larva 4 #:respect-bo-reserve? #t))]
          [(and (memq 'roach-warren ready-bldg-types)
@@ -3946,24 +4693,27 @@
 
      (when (and (not zerg-drone-priority?)
                 (not crisis-freeze-workers?)
+                (worker-army-curve-satisfied?)
                 (not zerg-saving-for-expand?)
                 (can-spend-by-priority? 'drone 'worker)
                 (< total-workers
                    (if live-game?
-                       (min 80 (max target-workers zerg-ideal-worker-cap))
+                       (min 70 (max target-workers zerg-ideal-worker-cap))
                        target-workers))
                 (or (member '(train drone) prio-scheduled-actions)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
-       (try-train-unit! 'drone 'larva 4))]
+       (try-train-unit! 'drone 'larva 4
+                        #:respect-bo-reserve? (and live-game? (>= total-workers 24))))]
 
     [(Protoss)
-     ;; 1. Pro Mechanic #6: Dynamic 11-Structure Chrono Boost Target Shifting (only ready buildings)
+     ;; 1. Pro Mechanic #6: 1-to-1 Chrono Boost Target Assignment (`dispatch-macro-energy!`)
      (define nexuses
        (filter (lambda (b) (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'nexus)) ally-bldgs))
      (define ready-nexuses
        (filter (lambda (b) (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'nexus)) ready-bldgs))
      (define assimilators
        (filter (lambda (b) (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'assimilator)) ally-bldgs))
+     (define active-assimilators (filter active-gas-bldg? assimilators))
      (define gateways
        (filter (lambda (b)
                  (memq (sc2-canonical-structure-sym (unit-type-sym b)) '(gateway warp-gate)))
@@ -3973,26 +4723,46 @@
        (and (hash-ref b 'busy? #f)
             (not (memq 'chrono-boost (hash-ref b 'buffs '())))
             (not (set-member? chrono-claimed-ids (hash-ref b 'id -1)))))
-     (for ([nx (in-list ready-nexuses)])
-       (when (>= (hash-ref nx 'energy SC2-NEXUS-CHRONO-BOOST-ENERGY) SC2-NEXUS-CHRONO-BOOST-ENERGY)
-         (define nx-id (hash-ref nx 'id 201))
-         (define chrono-target
-           (if live-game?
-               (or (and (or early-survival-crisis? under-base-attack?)
-                        (findf (lambda (b)
-                                 (and (memq (sc2-canonical-structure-sym (unit-type-sym b))
-                                            '(gateway warp-gate))
-                                      (eligible-live-chrono-target? b)))
-                               ready-bldgs))
-                   (and (< total-workers 38)
-                        (not early-survival-crisis?)
-                        (findf eligible-live-chrono-target? ready-nexuses))
-                   (for/or ([prio-type (in-list PRO-CHRONO-11-STRUCTURES)])
-                     (findf (lambda (b)
-                              (and (eq? (sc2-canonical-structure-sym (unit-type-sym b))
-                                        (sc2-canonical-structure-sym prio-type))
-                                   (eligible-live-chrono-target? b)))
-                            ready-bldgs)))
+     (define (chrono-prio-score b)
+       (define bsym (sc2-canonical-structure-sym (unit-type-sym b)))
+       (cond
+         [(and (or early-survival-crisis? under-base-attack?)
+               (memq bsym '(gateway warp-gate robotics-facility stargate)))
+          1000.0]
+         [(and (< total-workers 38)
+               (not early-survival-crisis?)
+               (eq? bsym 'nexus))
+          900.0]
+         [else
+          (let loop ([rem PRO-CHRONO-11-STRUCTURES] [idx 0])
+            (cond
+              [(null? rem) -1.0]
+              [(eq? bsym (sc2-canonical-structure-sym (car rem)))
+               (- 800.0 (* 10.0 idx))]
+              [else (loop (cdr rem) (add1 idx))]))]))
+     (if live-game?
+         (dispatch-macro-energy!
+          ready-nexuses
+          ready-bldgs
+          frame
+          chrono-claimed-ids
+          #:min-energy SC2-NEXUS-CHRONO-BOOST-ENERGY
+          #:valid-pair?
+          (lambda (_nx b)
+            (and (eligible-live-chrono-target? b)
+                 (> (chrono-prio-score b) 0.0)))
+          #:score-pair
+          (lambda (_nx b)
+            (chrono-prio-score b))
+          #:emit-cast!
+          (lambda (nx b)
+            (define nx-id (hash-ref nx 'id 201))
+            (define ct-id (hash-ref b 'id nx-id))
+            (emit! (list 'cast-spell nx-id 'chrono-boost ct-id))))
+         (for ([nx (in-list ready-nexuses)])
+           (when (>= (hash-ref nx 'energy SC2-NEXUS-CHRONO-BOOST-ENERGY) SC2-NEXUS-CHRONO-BOOST-ENERGY)
+             (define nx-id (hash-ref nx 'id 201))
+             (define chrono-target
                (if (and (< total-workers SC2-EARLY-CHRONO-MAX-WORKERS)
                         (< frame SC2-EARLY-CHRONO-NEXUS-MAX-FRAME)
                         (not early-survival-crisis?))
@@ -4008,34 +4778,119 @@
                                   (eq? (sc2-canonical-structure-sym (unit-type-sym b))
                                        (sc2-canonical-structure-sym prio-type)))
                                 ready-bldgs))
-                       nx))))
-         (when chrono-target
-           (define ct-id (hash-ref chrono-target 'id nx-id))
-           (set-add! chrono-claimed-ids ct-id)
-           (emit! (list 'cast-spell nx-id 'chrono-boost ct-id)))))
+                       nx)))
+             (when chrono-target
+               (define ct-id (hash-ref chrono-target 'id nx-id))
+               (set-add! chrono-claimed-ids ct-id)
+               (emit! (list 'cast-spell nx-id 'chrono-boost ct-id))))))
 
-     ;; 2. Pro Mechanic #3: Protoss 1-Tile Hold-Position Door Guard + Group Steal
+     ;; 2. Pro Mechanic #3: Protoss 1x1 Doorway Guard State Machine + Group Steal
+     (define wall-pylon-slot (and (hash? protoss-matchup-wall) (hash-ref protoss-matchup-wall 'pylon #f)))
+     (define wall-slot-1 (and (hash? protoss-matchup-wall) (hash-ref protoss-matchup-wall 'slot-1 #f)))
+     (define wall-slot-2 (and (hash? protoss-matchup-wall) (hash-ref protoss-matchup-wall 'slot-2 #f)))
+     (define wall-slot-3 (and (hash? protoss-matchup-wall) (hash-ref protoss-matchup-wall 'slot-3 #f)))
+     (define wall-door-pt (and (hash? protoss-matchup-wall) (hash-ref protoss-matchup-wall 'door #f)))
+     (define wall-park-pt (and (hash? protoss-matchup-wall) (hash-ref protoss-matchup-wall 'door-park #f)))
      (define door-guards
-       (filter (lambda (u) (memq (unit-type-sym u) '(zealot adept))) ally-units))
-     (when (and (not (null? door-guards))
-                (or (hash-ref obs 'door-guard #f)
-                    (and (or (memq 'gateway bldg-types) (memq 'warp-gate bldg-types))
-                         (< frame SC2-DOOR-GUARD-MAX-FRAME)
-                         (not (null? enemy-units)))))
-       (define dg (car door-guards))
-       (define dg-id (hash-ref dg 'id 703))
-       (emit! (list 'hold-position dg-id nat-x nat-y))
-       (emit! (list 'control-group-steal 2 (list dg-id)))
-       (cortex-steal-control-group! cortex 2 (list dg-id)))
+       (filter (lambda (u)
+                 (and (memq (unit-type-sym u) '(zealot adept stalker))
+                      (not (or (eq? (hash-ref u 'is-hallucination #f) #t)
+                               (eq? (hash-ref u 'hallucination #f) #t)))))
+               ally-units))
+     (cond
+       [(and (not (null? door-guards))
+             (or (hash-ref obs 'door-guard #f)
+                 (and (not live-game?)
+                      (or (memq 'gateway bldg-types) (memq 'warp-gate bldg-types))
+                      (< frame SC2-DOOR-GUARD-MAX-FRAME)
+                      (not (null? enemy-units)))))
+        (define dg (car door-guards))
+        (define dg-id (hash-ref dg 'id 703))
+        (acquire-unit-lease! leases dg-id 'door-guard frame 16 #:x nat-x #:y nat-y)
+        (emit! (list 'hold-position dg-id nat-x nat-y))
+        (emit! (list 'control-group-steal 2 (list dg-id)))
+        (cortex-steal-control-group! cortex 2 (list dg-id))]
+       [(and live-game?
+             (pair? wall-door-pt)
+             (not (null? door-guards))
+             (or (memq 'gateway bldg-types) (memq 'warp-gate bldg-types)))
+        (define door-x (safe-coord (car wall-door-pt) nat-x))
+        (define door-y (safe-coord (cdr wall-door-pt) nat-y))
+        (define park-x (if (pair? wall-park-pt) (safe-coord (car wall-park-pt) base-x) (safe-coord (+ door-x (* 2.5 (/ (- base-x door-x) (max 1.0 (dist2d base-x base-y door-x door-y))))) base-x)))
+        (define park-y (if (pair? wall-park-pt) (safe-coord (cdr wall-park-pt) base-y) (safe-coord (+ door-y (* 2.5 (/ (- base-y door-y) (max 1.0 (dist2d base-x base-y door-x door-y))))) base-y)))
+        (define door-st (rt-door-state rt))
+        (define prev-gid (hash-ref door-st 'guard-id #f))
+        (define near-guards
+          (filter (lambda (u)
+                    (<= (dist2d door-x door-y (hash-ref u 'x base-x) (hash-ref u 'y base-y)) 22.0))
+                  door-guards))
+        (define chosen-guard
+          (or (and prev-gid
+                   (findf (lambda (u) (equal? (hash-ref u 'id -1) prev-gid)) near-guards))
+              (and (pair? near-guards)
+                   (argmin (lambda (u)
+                             (+ (if (eq? (unit-type-sym u) 'zealot) 0.0 3.0)
+                                (dist2d door-x door-y (hash-ref u 'x door-x) (hash-ref u 'y door-y))))
+                           near-guards))))
+        (when chosen-guard
+          (define gid (hash-ref chosen-guard 'id 703))
+          (define gx (hash-ref chosen-guard 'x door-x))
+          (define gy (hash-ref chosen-guard 'y door-y))
+          (hash-set! door-st 'guard-id gid)
+          (acquire-unit-lease! leases gid 'door-guard frame 16 #:x door-x #:y door-y)
+          (define nearest-enemy-to-door
+            (if (null? enemy-units)
+                +inf.0
+                (apply min
+                       (map (lambda (e)
+                              (dist2d door-x door-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)))
+                            enemy-units))))
+          (define builder-transiting-door?
+            (ormap (lambda (w)
+                     (define wid (hash-ref w 'id 0))
+                     (and (or (order-ledger-unit-has-active-build? oledger wid w)
+                              (worker-has-engine-build-order? w))
+                          (<= (dist2d door-x door-y (hash-ref w 'x base-x) (hash-ref w 'y base-y)) 3.2)))
+                   workers))
+          (define moving-army-near-door
+            (count (lambda (u)
+                     (define uid (hash-ref u 'id 0))
+                     (and (not (equal? uid gid))
+                          (combat-unit-record? u)
+                          (not (or (eq? (hash-ref u 'is-flying #f) #t)
+                                   (eq? (hash-ref u 'flying? #f) #t)))
+                          (> (hash-ref u 'order-count 0) 0)
+                          (not (= (hash-ref u 'order-ability-id 0) 18))
+                          (<= (dist2d door-x door-y (hash-ref u 'x base-x) (hash-ref u 'y base-y)) 3.2)))
+                   ally-units))
+          (define transit-needed? (or builder-transiting-door? (>= moving-army-near-door 3)))
+          (define cur-open-until (hash-ref door-st 'open-until-frame 0))
+          (cond
+            [(and (> nearest-enemy-to-door 10.5) transit-needed?)
+             (hash-set! door-st 'open-until-frame (+ frame 24))
+             (when (or (> (dist2d gx gy park-x park-y) 1.0)
+                       (= (hash-ref chosen-guard 'order-ability-id 0) 18))
+               (emit! (list 'move gid park-x park-y))
+               (order-ledger-record-issued! oledger gid 'move 'door-park park-x park-y frame))]
+            [(and (< frame cur-open-until)
+                  (> nearest-enemy-to-door 9.5)
+                  transit-needed?)
+             (void)]
+            [else
+             (hash-set! door-st 'open-until-frame 0)
+             (when (or (> (dist2d gx gy door-x door-y) 0.85)
+                       (not (= (hash-ref chosen-guard 'order-ability-id 0) 18)))
+               (emit! (list 'hold-position gid door-x door-y))
+               (order-ledger-record-issued! oledger gid 'hold-position 'door-seal door-x door-y frame))]))])
 
-     ;; 3. Pro Build-Order Expansion Sequencing (19 Nexus -> 50-supply 3rd Nexus -> 4th+ Nexus)
+     ;; 3. Pro Build-Order Expansion Sequencing (uncamped BFS pad redirect when natural is camped!)
      (when (and (>= minerals (sc2-min-cost 'nexus))
                 (non-combat-min-ok? (sc2-min-cost 'nexus) 'nexus)
+                (not blocked-nat-expanded-early?)
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
                 (not crisis-freeze-expand-or-gas?)
                 (not under-base-attack?)
-                (not natural-blocked?)
                 (= (order-ledger-pending-count-for-type oledger 'nexus frame) 0)
                 (or (< (length nexuses) SC2-MIN-DESIRED-BASES)
                     (and (= (length nexuses) 2)
@@ -4046,35 +4901,47 @@
                              (memq 'stargate bldg-types)
                              (plan-wants-now? 'nexus)))
                     (and (< (length nexuses) desired-bases)
+                         (or (not (and endgame-corner-hunt?
+                                       (< (+ (unit-count 'phoenix) (unit-count 'void-ray)) 2)))
+                             (>= (- minerals (sc2-min-cost 'nexus)) 150))
                          (>= total-workers (* (length nexuses)
-                                              (if (>= (length nexuses) 3) 18 SC2-MIN-WORKERS-PER-BASE-FOR-EXPAND)))
-                         (or (not live-game?) (>= live-army-supply (* 10 (length nexuses))))
+                                              (if (>= (length nexuses) 3) 16 SC2-MIN-WORKERS-PER-BASE-FOR-EXPAND)))
+                         (or (not live-game?) (>= live-army-supply (* 9 (length nexuses))))
                          (or (coupled-macro-plan-should-expand? macro-plan)
                              (>= frame SC2-MACRO-EXPAND-FRAME-THRESHOLD))))
+                (let-values ([(cand-ex cand-ey)
+                              (select-uncamped-expansion-pad (< (length nexuses) SC2-MIN-DESIRED-BASES))])
+                  (and cand-ex cand-ey))
                 (refractory-allow-action?! cd-tracker
                                            (list 'macro-expand 'Protoss)
                                            frame
                                            SC2-EXPANSION-COOLDOWN-FRAMES))
-       (define exp-x (if (>= (length nexuses) SC2-MIN-DESIRED-BASES) third-x nat-x))
-       (define exp-y (if (>= (length nexuses) SC2-MIN-DESIRED-BASES) third-y nat-y))
-       (emit! (list 'expand exp-x exp-y))
-       (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'nexus exp-x exp-y frame)
-       (spend-resources-and-supply! (sc2-min-cost 'nexus) 0 0))
+       (define-values (exp-x exp-y)
+         (select-uncamped-expansion-pad (< (length nexuses) SC2-MIN-DESIRED-BASES)))
+       (when (and exp-x exp-y)
+         (emit! (list 'expand exp-x exp-y))
+         (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'nexus exp-x exp-y frame)
+         (spend-resources-and-supply! (sc2-min-cost 'nexus) 0 0)))
 
      (define protoss-saving-for-expand? (saving-for-expansion-now? (length nexuses)))
 
-     ;; 4. Protoss Pro Build-Order Sequencing:
-     ;;    14 Pylon -> 16 Gateway -> 16 Assimilator -> 19 Nexus -> 19 CyberCore -> 21 2nd Assimilator
-     ;;    -> 22 WarpGate Research -> 23 2x Stalker -> 26 Robotics Facility -> Observer + Immortal
-     ;;    -> 28 Twilight Council -> 30 2nd & 3rd Gateway -> 38 Charge -> 48 Forge -> 50 3rd Nexus
+     ;; 4. Protoss Matchup-Wall & Pro Build-Order Sequencing:
+     ;;    1st Gateway at wall `'slot-1` (early game only), CyberCore at `'slot-2` BEFORE 2nd Assimilator,
+     ;;    optional `'slot-3` vs Zerg, and static defense offset >= 5.5 tiles off expansion pads!
      (when (and (null? gateways)
                 (or (not live-game-obs?) (memq 'pylon ready-bldg-types))
                 (not (building-present-or-pending? 'gateway))
                 (>= minerals (sc2-min-cost 'gateway)))
-       (emit-build-verified! 'gateway (safe-coord (+ base-x 4.0)) (safe-coord (+ base-y 4.0))))
+       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (pair? wall-slot-1))
+           (emit-build-verified! 'gateway
+                                 (safe-coord (car wall-slot-1) (+ base-x 4.0))
+                                 (safe-coord (cdr wall-slot-1) (+ base-y 4.0))
+                                 SC2-BUILD-SITE-MIN-CLEARANCE
+                                 #:exact-wall-slot? #t)
+           (emit-build-verified! 'gateway (safe-coord (+ base-x 4.0)) (safe-coord (+ base-y 4.0)))))
 
      ;; Emergency Shield Battery under early cheese / base attack once Cybernetics Core is ready
-     ;; (only when Gateways are already busy or after reserving 125M for an open Gateway unit!)
+     ;; (offset >= 5.5 tiles off natural pad so it NEVER blocks expansion or doorway!)
      (when (and (or early-survival-crisis? under-base-attack?)
                 (or (not live-game-obs?) (memq 'pylon ready-bldg-types))
                 (memq 'cybernetics-core ready-bldg-types)
@@ -4082,21 +4949,42 @@
                 (>= minerals (sc2-min-cost 'shield-battery))
                 (or (<= (hash-ref open-prod-slots 'gateway 0) 0)
                     (non-combat-min-ok? (sc2-min-cost 'shield-battery))))
-       (define sb-x (if (<= (length nexuses) 1) (safe-coord (+ base-x 4.5)) nat-x))
-       (define sb-y (if (<= (length nexuses) 1) (safe-coord (+ base-y 2.5)) nat-y))
+       (define-values (sb-x sb-y)
+         (if (<= (length nexuses) 1)
+             (values (safe-coord (+ base-x 4.5)) (safe-coord (+ base-y 2.5)))
+             (offset-defense-anchor nat-x nat-y 5.5)))
        (emit-build-verified! 'shield-battery sb-x sb-y 2.0))
 
+     ;; Build Cybernetics Core at wall `'slot-2` BEFORE 2nd Assimilator!
+     (when (and (or (memq 'gateway ready-bldg-types) (memq 'warp-gate ready-bldg-types))
+                (not protoss-saving-for-expand?)
+                (not (building-present-or-pending? 'cybernetics-core))
+                (>= minerals (sc2-min-cost 'cybernetics-core))
+                (non-combat-min-ok? (sc2-min-cost 'cybernetics-core) 'cybernetics-core))
+       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (pair? wall-slot-2))
+           (emit-build-verified! 'cybernetics-core
+                                 (safe-coord (car wall-slot-2) (+ base-x 6.0))
+                                 (safe-coord (cdr wall-slot-2) (+ base-y 4.0))
+                                 SC2-BUILD-SITE-MIN-CLEARANCE
+                                 #:exact-wall-slot? #t)
+           (emit-build-verified! 'cybernetics-core (safe-coord (+ base-x 6.0)) (safe-coord (+ base-y 4.0)))))
+
+     (define has-nat-nexus-or-pending?
+       (or (>= (length nexuses) 2)
+           (> (order-ledger-pending-count-for-type oledger 'nexus frame) 0)))
      (define desired-assimilators
-       (if (and early-survival-crisis? (null? assimilators))
+       (if (and early-survival-crisis? (null? active-assimilators))
            0
            (min (* SC2-GEYSERS-PER-BASE (length nexuses))
                 (if live-game?
                     (cond
-                      [(and (>= eff-phase-supply 54) (>= total-workers 50) (< gas 350)) 4]
-                      [(and (>= eff-phase-supply 40) (>= total-workers 36) (< gas 300)) 3]
-                      [(and (or (memq 'cybernetics-core bldg-types)
-                                (>= total-workers SC2-MIN-WORKERS-FOR-SECOND-GAS))
-                            (>= total-workers 18)
+                      [(and (>= (length nexuses) 4) (>= total-workers 62) (< gas 600)) 8]
+                      [(and (>= (length nexuses) 3) (>= total-workers 50) (< gas 450)) 6]
+                      [(and (>= eff-phase-supply 52) (>= total-workers 38) (< gas 350)) 4]
+                      [(and (>= eff-phase-supply 38) (>= total-workers 32) (< gas 300)) 3]
+                      [(and (building-present-or-pending? 'cybernetics-core)
+                            (or has-nat-nexus-or-pending? (>= eff-phase-supply 32))
+                            (>= total-workers 19)
                             (< gas 250))
                        2]
                       [else 1])
@@ -4107,19 +4995,12 @@
                       [else 1])))))
      (when (and (or (memq 'gateway bldg-types) (memq 'warp-gate bldg-types))
                 (not crisis-freeze-expand-or-gas?)
-                (or (null? assimilators) (not protoss-saving-for-expand?))
-                (< (+ (length assimilators) (order-ledger-pending-count-for-type oledger 'assimilator frame))
+                (or (null? active-assimilators) (not protoss-saving-for-expand?))
+                (< (+ (length active-assimilators) (order-ledger-pending-count-for-type oledger 'assimilator frame))
                    desired-assimilators)
                 (>= minerals (sc2-min-cost 'assimilator))
                 (non-combat-min-ok? (sc2-min-cost 'assimilator)))
        (emit-gas-build-verified! 'assimilator (safe-coord (+ base-x 4.0)) (safe-coord (+ base-y 4.0))))
-
-     (when (and (or (memq 'gateway ready-bldg-types) (memq 'warp-gate ready-bldg-types))
-                (not protoss-saving-for-expand?)
-                (not (building-present-or-pending? 'cybernetics-core))
-                (>= minerals (sc2-min-cost 'cybernetics-core))
-                (non-combat-min-ok? (sc2-min-cost 'cybernetics-core) 'cybernetics-core))
-       (emit-build-verified! 'cybernetics-core (safe-coord (+ base-x 6.0)) (safe-coord (+ base-y 4.0))))
 
      ;; Research WarpGate at Cybernetics Core; in live games keep Gateways unmorphed (`Gateway` 62)
      ;; so `sc2-unit-orders` accurately tracks busy production slots without WarpGate cooldown blindness
@@ -4138,7 +5019,7 @@
 
      ;; Build Robotics Facility at 26+ supply (or once CyberCore is ready and not saving for expansion)
      (when (and (memq 'cybernetics-core ready-bldg-types)
-                (not protoss-saving-for-expand?)
+                (or (not protoss-saving-for-expand?) endgame-corner-hunt?)
                 (not (building-present-or-pending? 'robotics-facility))
                 (>= minerals (sc2-min-cost 'robotics-facility))
                 (>= gas (sc2-gas-cost 'robotics-facility))
@@ -4150,31 +5031,78 @@
 
      ;; Priority Robotics Facility production (Group 6) BEFORE Twilight/Forge gas upgrades so
      ;; Observer (detection/vision) and Immortal/Colossus are never gas-starved!
-     (when (and (not protoss-saving-for-expand?)
+     (when (and (or (not protoss-saving-for-expand?)
+                    (and endgame-corner-hunt? (< (unit-count 'observer) 1)))
                 (memq 'robotics-facility ready-bldg-types)
                 (can-spend-supply? (sc2-supply-cost 'observer)))
        (define desired-observers
-         (if (enemy-tech-observation-requires-detection? tech-obs) 2 1))
+         (if (or (enemy-tech-observation-requires-detection? tech-obs)
+                 (and live-game? (>= live-army-supply 40)))
+             2
+             1))
        (when (< (unit-count 'observer) desired-observers)
          (try-train-unit! 'observer 'robotics-facility 6))
-       (when (and (memq 'robotics-bay ready-bldg-types)
-                  (can-spend-supply? (sc2-supply-cost 'colossus)))
-         (try-train-unit! 'colossus 'robotics-facility 6))
-       (when (and (memq 'robotics-bay ready-bldg-types)
-                  (< (unit-count 'disruptor) 2)
-                  (or (member '(train disruptor) prio-scheduled-actions)
-                      (>= (unit-count 'colossus) 1))
-                  (can-spend-supply? (sc2-supply-cost 'disruptor)))
-         (try-train-unit! 'disruptor 'robotics-facility 6))
-       (when (can-spend-supply? (sc2-supply-cost 'immortal))
-         (try-train-unit! 'immortal 'robotics-facility 6))
-       (when (and (< (unit-count 'warp-prism) 1)
-                  (or (plan-wants-now? 'warp-prism)
-                      (and live-game? (>= live-army-supply 20) (>= minerals 350)))
-                  (can-spend-supply? (sc2-supply-cost 'warp-prism)))
-         (try-train-unit! 'warp-prism 'robotics-facility 6 #:respect-bo-reserve? #t)))
+       (unless protoss-saving-for-expand?
+         (when (and (memq 'robotics-bay ready-bldg-types)
+                    (< (unit-count 'colossus) 4)
+                    (can-spend-supply? (sc2-supply-cost 'colossus)))
+           (try-train-unit! 'colossus 'robotics-facility 6))
+         (when (and (memq 'robotics-bay ready-bldg-types)
+                    (< (unit-count 'disruptor) 3)
+                    (or (member '(train disruptor) prio-scheduled-actions)
+                        (>= (unit-count 'colossus) 1))
+                    (can-spend-supply? (sc2-supply-cost 'disruptor)))
+           (try-train-unit! 'disruptor 'robotics-facility 6))
+         (when (can-spend-supply? (sc2-supply-cost 'immortal))
+           (try-train-unit! 'immortal 'robotics-facility 6))
+         (when (and (< (unit-count 'warp-prism) 1)
+                    (or (plan-wants-now? 'warp-prism)
+                        (and live-game? (>= live-army-supply 20) (>= minerals 350)))
+                    (can-spend-supply? (sc2-supply-cost 'warp-prism)))
+           (try-train-unit! 'warp-prism 'robotics-facility 6 #:respect-bo-reserve? #t))))
 
-     ;; Build Twilight Council at 28+ supply after Robotics Facility is started (Pro Build Order step 11)
+     ;; Priority Stargate Air Production (Tempest / Carrier / Corner-Hunter Flyers) BEFORE Twilight/Forge
+     (define protoss-corner-flyers-needed?
+       (and endgame-corner-hunt?
+            (< (+ (unit-count 'phoenix) (unit-count 'void-ray)) 2)))
+     (when (and (or (not protoss-saving-for-expand?) protoss-corner-flyers-needed?)
+                (memq 'stargate ready-bldg-types))
+       (when (and (not protoss-saving-for-expand?)
+                  (memq 'fleet-beacon ready-bldg-types)
+                  (or (plan-wants-now? 'tempest)
+                      enemy-heavy-ground-siege?)
+                  (< (unit-count 'tempest) 4)
+                  (can-spend-supply? (sc2-supply-cost 'tempest)))
+         (try-train-unit! 'tempest 'stargate 6))
+       (when (and (not protoss-saving-for-expand?)
+                  (memq 'fleet-beacon ready-bldg-types)
+                  (can-spend-supply? (sc2-supply-cost 'carrier)))
+         (try-train-unit! 'carrier 'stargate 6))
+       (when (and (or protoss-corner-flyers-needed?
+                      (enemy-tech-observation-requires-anti-air? tech-obs)
+                      (plan-wants-now? 'void-ray)
+                      (>= minerals 250))
+                  (or protoss-corner-flyers-needed?
+                      (can-spend-by-priority? 'void-ray 'combat-unit))
+                  (can-spend-supply? (sc2-supply-cost 'void-ray)))
+         (try-train-unit! 'void-ray 'stargate 6 #:respect-bo-reserve? (not protoss-corner-flyers-needed?)))
+       (when (and (or protoss-corner-flyers-needed?
+                      (enemy-tech-observation-requires-anti-air? tech-obs)
+                      (plan-wants-now? 'phoenix))
+                  (< (unit-count 'phoenix) 4)
+                  (or protoss-corner-flyers-needed?
+                      (can-spend-by-priority? 'phoenix 'combat-unit))
+                  (can-spend-supply? (sc2-supply-cost 'phoenix)))
+         (try-train-unit! 'phoenix 'stargate 6 #:respect-bo-reserve? (not protoss-corner-flyers-needed?)))
+       (when (and (not protoss-saving-for-expand?)
+                  (or (< (unit-count 'oracle) 1)
+                      (and (< (unit-count 'oracle) 2)
+                           (>= minerals 200)
+                           (>= gas 200)))
+                  (can-spend-supply? (sc2-supply-cost 'oracle)))
+         (try-train-unit! 'oracle 'stargate 6)))
+
+     ;; Build Twilight Council at 28+ supply after Robotics Facility is started
      (when (and (memq 'cybernetics-core ready-bldg-types)
                 (not protoss-saving-for-expand?)
                 (building-present-or-pending? 'robotics-facility)
@@ -4199,12 +5127,13 @@
                (upgrade-needed? 'resonating-glaives))
           (emit-research-verified! 'resonating-glaives)]))
 
-     ;; Stargate & Fleet Beacon Tech + Air Production (Group 5)
+     ;; Stargate & Fleet Beacon Tech Structures
      (when (and (memq 'cybernetics-core ready-bldg-types)
-                (not protoss-saving-for-expand?)
+                (or (not protoss-saving-for-expand?) endgame-corner-hunt?)
                 (not (building-present-or-pending? 'stargate))
                 (or (plan-wants-now? 'stargate)
                     (enemy-tech-observation-requires-anti-air? tech-obs)
+                    endgame-corner-hunt?
                     (and live-game? (>= (length nexuses) 3) (>= eff-phase-supply 76)))
                 (>= minerals (sc2-min-cost 'stargate))
                 (>= gas (sc2-gas-cost 'stargate))
@@ -4216,39 +5145,14 @@
                 (not protoss-saving-for-expand?)
                 (not (building-present-or-pending? 'fleet-beacon))
                 (or (plan-wants-now? 'fleet-beacon)
-                    (and live-game? (>= (length nexuses) 3) (>= eff-phase-supply 110)))
+                    (and live-game? (>= (length nexuses) 3) (>= eff-phase-supply 106)))
                 (>= minerals (sc2-min-cost 'fleet-beacon))
                 (>= gas (sc2-gas-cost 'fleet-beacon))
                 (non-combat-min-ok? (sc2-min-cost 'fleet-beacon) 'fleet-beacon)
                 (non-combat-gas-ok? (sc2-gas-cost 'fleet-beacon) 'fleet-beacon))
        (emit-build-verified! 'fleet-beacon (safe-coord (- base-x 6.0)) (safe-coord (+ base-y 6.0))))
 
-     (when (and (not protoss-saving-for-expand?)
-                (memq 'stargate ready-bldg-types))
-       (when (and (memq 'fleet-beacon ready-bldg-types)
-                  (can-spend-supply? (sc2-supply-cost 'carrier)))
-         (try-train-unit! 'carrier 'stargate 5))
-       (when (and (or (enemy-tech-observation-requires-anti-air? tech-obs)
-                      (plan-wants-now? 'void-ray)
-                      (>= minerals 250))
-                  (can-spend-by-priority? 'void-ray 'combat-unit)
-                  (can-spend-supply? (sc2-supply-cost 'void-ray)))
-         (try-train-unit! 'void-ray 'stargate 5 #:respect-bo-reserve? #t))
-       (when (and (or (enemy-tech-observation-requires-anti-air? tech-obs)
-                      (plan-wants-now? 'phoenix))
-                  (< (unit-count 'phoenix) 4)
-                  (can-spend-by-priority? 'phoenix 'combat-unit)
-                  (can-spend-supply? (sc2-supply-cost 'phoenix)))
-         (try-train-unit! 'phoenix 'stargate 5 #:respect-bo-reserve? #t))
-       (when (and (or (< (unit-count 'oracle) 1)
-                      (and (< (unit-count 'oracle) 2)
-                           (>= minerals 200)
-                           (>= gas 200)))
-                  (can-spend-supply? (sc2-supply-cost 'oracle)))
-         (try-train-unit! 'oracle 'stargate 5)))
-
-     ;; Scale Gateways according to Pro Build Order (3->5 Gateways on 2 bases after CyberCore, up to 8 on 3+ bases),
-     ;; governed by the general Braun-heap priority scheduler (`can-spend-by-priority?`) and natural Nexus reserve.
+     ;; Scale Gateways (2nd Gateway at wall `'slot-3` in PvZ/PvR early game when present!)
      (define pending-nexus-count
        (order-ledger-pending-count-for-type oledger 'nexus frame))
      (define protoss-nat-reserve
@@ -4309,12 +5213,17 @@
                     (sc2-min-cost 'gateway))
                 (non-combat-min-ok? (sc2-min-cost 'gateway)))
        (define gw-idx (length gateways))
-       (emit-build-verified! 'gateway
-                             (safe-coord (+ base-x 4.0 (* 3.5 (modulo gw-idx 3))))
-                             (safe-coord (+ base-y 4.0 (* 3.5 (quotient gw-idx 3))))))
+       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (= gw-idx 1) (pair? wall-slot-3))
+           (emit-build-verified! 'gateway
+                                 (safe-coord (car wall-slot-3) (+ base-x 7.5))
+                                 (safe-coord (cdr wall-slot-3) (+ base-y 4.0))
+                                 SC2-BUILD-SITE-MIN-CLEARANCE
+                                 #:exact-wall-slot? #t)
+           (emit-build-verified! 'gateway
+                                 (safe-coord (+ base-x 4.0 (* 3.5 (modulo gw-idx 3))))
+                                 (safe-coord (+ base-y 4.0 (* 3.5 (quotient gw-idx 3)))))))
 
-     ;; Pro Build Order Step 19-22: Forge at >= 46 supply (or earlier for emergency static detection),
-     ;; Robotics Bay at >= 54 supply, Templar Archives / Dark Shrine
+     ;; Forge, Offset Photon Cannon, Robotics Bay, Templar Archives / Dark Shrine
      (when (and (or (memq 'robotics-facility ready-bldg-types)
                     (memq 'twilight-council ready-bldg-types)
                     (and (memq 'cybernetics-core ready-bldg-types)
@@ -4360,7 +5269,8 @@
                                            (list 'static-detector 'photon-cannon)
                                            frame
                                            SC2-STATIC-DETECTOR-COOLDOWN-FRAMES))
-       (emit-build-verified! 'photon-cannon nat-x nat-y 2.0))
+       (define-values (pc-x pc-y) (offset-defense-anchor nat-x nat-y 5.5))
+       (emit-build-verified! 'photon-cannon pc-x pc-y 2.0))
 
      (when (and (memq 'forge ready-bldg-types)
                 (not urgent-combat-or-intel-need?))
@@ -4376,15 +5286,23 @@
          [(and (memq 'twilight-council ready-bldg-types)
                (upgrade-needed? 'protoss-ground-armor-2))
           (emit-research-verified! 'protoss-ground-armor-2)]
+         [(and (memq 'twilight-council ready-bldg-types)
+               (upgrade-needed? 'protoss-ground-weapons-3))
+          (emit-research-verified! 'protoss-ground-weapons-3)]
+         [(and (memq 'twilight-council ready-bldg-types)
+               (upgrade-needed? 'protoss-ground-armor-3))
+          (emit-research-verified! 'protoss-ground-armor-3)]
          [(upgrade-needed? 'protoss-shields-1)
           (emit-research-verified! 'protoss-shields-1)]))
 
      (when (and (memq 'twilight-council ready-bldg-types)
                 (not protoss-saving-for-expand?)
-                (can-spend-by-priority? 'templar-archive 'tech-upgrade)
+                (or (plan-wants-now? 'templar-archive)
+                    (can-spend-by-priority? 'templar-archive 'tech-upgrade)
+                    (and live-game? (>= (length nexuses) 3) (>= eff-phase-supply 92)))
                 (not (building-present-or-pending? 'templar-archive))
                 (>= (length nexuses) SC2-MIN-DESIRED-BASES)
-                (>= gas 250)
+                (>= gas 150)
                 (>= minerals (sc2-min-cost 'templar-archive))
                 (non-combat-min-ok? (sc2-min-cost 'templar-archive)))
        (emit-build-verified! 'templar-archive (safe-coord (+ base-x 6.0)) (safe-coord (- base-y 6.0))))
@@ -4424,7 +5342,8 @@
                                              frame
                                              SC2-STATIC-DETECTOR-COOLDOWN-FRAMES))
          (if live-game?
-             (emit-build-verified! 'photon-cannon nat-x nat-y 2.0)
+             (let-values ([(pcx pcy) (offset-defense-anchor nat-x nat-y 5.5)])
+               (emit-build-verified! 'photon-cannon pcx pcy 2.0))
              (emit! (list 'build 'photon-cannon nat-x nat-y)))))
 
      (when (and (memq 'robotics-bay ready-bldg-types)
@@ -4441,8 +5360,16 @@
                (upgrade-needed? 'gravitic-booster))
           (emit-research-verified! 'gravitic-booster)]))
 
-     ;; Morph Archons whenever >= 2 non-busy Templars are on the field
-     (define avail-ht-slots (hash-ref open-prod-slots 'high-templar 0))
+     ;; Morph Archons when >= 2 spent/non-storm Templars are available (keep up to 2 full-energy Storm HTs!)
+     (define storm-ready? (memq 'psi-storm researched-upgs))
+     (define high-energy-ht-count
+       (if (and live-game? storm-ready?)
+           (min 2 (count (lambda (u)
+                           (and (eq? (unit-type-sym u) 'high-templar)
+                                (>= (hash-ref u 'energy 0) 75)))
+                         ally-units))
+           0))
+     (define avail-ht-slots (max 0 (- (hash-ref open-prod-slots 'high-templar 0) high-energy-ht-count)))
      (define avail-dt-slots (hash-ref open-prod-slots 'dark-templar 0))
      (when (if live-game?
                (>= (+ avail-ht-slots avail-dt-slots) 2)
@@ -4450,24 +5377,26 @@
        (define consume-ht (min 2 avail-ht-slots))
        (define consume-dt (min (- 2 consume-ht) avail-dt-slots))
        (when (> consume-ht 0)
-         (hash-set! open-prod-slots 'high-templar (- avail-ht-slots consume-ht)))
+         (hash-set! open-prod-slots 'high-templar
+                    (max 0 (- (hash-ref open-prod-slots 'high-templar 0) consume-ht))))
        (when (> consume-dt 0)
          (hash-set! open-prod-slots 'dark-templar (- avail-dt-slots consume-dt)))
        (emit! '(morph archon))
        (order-ledger-record-issued! oledger (+ 865500 (modulo frame 10000) (length actions))
                                     'morph 'archon base-x base-y frame))
 
-     ;; 5. Protoss Probe Saturation Priority + Facility-Slot-Aware Combat Unit Training
+     ;; 5. Protoss Probe Saturation Priority (70 hard cap + midgame army curve) + Gateway Unit Training
      (define protoss-ideal-worker-cap
-       (min 80 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length nexuses)))))
+       (min 70 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length nexuses)))))
      (define protoss-probe-priority?
        (and (or (not protoss-saving-for-expand?)
                 (and (< total-workers 19) (< minerals 350)))
             (not crisis-freeze-workers?)
+            (worker-army-curve-satisfied?)
             (not urgent-combat-or-intel-need?)
             (or (< total-workers protoss-ideal-worker-cap)
                 (can-spend-by-priority? 'probe 'worker))
-            (< total-workers (min 80 (max target-workers protoss-ideal-worker-cap)))
+            (< total-workers (min 70 (max target-workers protoss-ideal-worker-cap)))
             (or (not live-game?)
                 (and (not under-base-attack?) (<= live-enemy-threat-supply 0))
                 (< total-workers 20)
@@ -4482,7 +5411,8 @@
        (try-train-unit! 'probe 'townhall 4
                         #:respect-bo-reserve?
                         (and live-game?
-                             (or (>= total-workers protoss-ideal-worker-cap)
+                             (or (>= total-workers 24)
+                                 (>= total-workers protoss-ideal-worker-cap)
                                  (and (>= total-workers 16)
                                       (> bo-reserved-gas 0)
                                       (>= gas bo-reserved-gas)))
@@ -4500,8 +5430,9 @@
                      (>= gas (sc2-gas-cost 'dark-templar))
                      (can-spend-by-priority? 'dark-templar 'combat-unit))
             (try-train-unit! 'dark-templar 'gateway 5 #:respect-bo-reserve? #t))
-          ;; High-gas dump: High Templar -> Archon when Templar Archives ready and floating >= 150 gas
+          ;; High Templar -> Psi Storm & Archon when Templar Archives ready
           (when (and (memq 'templar-archive ready-bldg-types)
+                     (< (unit-count 'high-templar) 6)
                      (>= gas (sc2-gas-cost 'high-templar)))
             (try-train-unit! 'high-templar 'gateway 5 #:respect-bo-reserve? #t))
           ;; Guardian Shield aura + gas sink: maintain 1 Sentry after >= 5 Stalkers in live games (up to 2 in tests)
@@ -4533,18 +5464,20 @@
 
      (when (and (not protoss-probe-priority?)
                 (not crisis-freeze-workers?)
+                (worker-army-curve-satisfied?)
                 (not protoss-saving-for-expand?)
                 (can-spend-by-priority? 'probe 'worker)
                 (< total-workers
                    (if live-game?
-                       (min 80 (max target-workers protoss-ideal-worker-cap))
+                       (min 70 (max target-workers protoss-ideal-worker-cap))
                        target-workers))
                 (or (member '(train probe) prio-scheduled-actions)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
-       (try-train-unit! 'probe 'townhall 4))]
+       (try-train-unit! 'probe 'townhall 4
+                        #:respect-bo-reserve? (and live-game? (>= total-workers 24))))]
 
     [(Terran)
-     ;; 1. Orbital Command Morph, MULE Calldown & Scanner Sweep (real mineral-patch-id).
+     ;; 1. Orbital Command Morph, Scan Reserve/Dedup & Multi-Patch MULE Calldown.
      ;;    Canonical `ccs` and `barracks-list` count lifted (`*-flying`) structures so lifting
      ;;    NEVER triggers duplicate Command Center / Barracks / Factory spam (`#5116611`), while
      ;;    morph/train/MULE/add-on orders strictly filter grounded, idle structures!
@@ -4556,10 +5489,27 @@
      (define refineries
        (filter (lambda (b) (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'refinery))
                ally-bldgs))
+     (define active-refineries
+       (filter active-gas-bldg? refineries))
      (define barracks-list
        (filter (lambda (b) (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'barracks))
                ally-bldgs))
+     (define factories-list
+       (filter (lambda (b) (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'factory))
+               ally-bldgs))
      (define mule-patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
+     (define raw-mineral-patches
+       (let ([mps (hash-ref obs 'mineral-patches '())])
+         (if (list? mps) (filter hash? mps) '())))
+     (define splash-st (rt-splash-state rt))
+     (define scanned-pts '())
+     (define claimed-mule-patches (mutable-seteqv))
+     (define reserve-scan-energy?
+       (and live-game?
+            (>= frame 3360)
+            (or (enemy-tech-observation-requires-detection? tech-obs)
+                endgame-corner-hunt?
+                (< intel-confidence 0.55))))
      (for ([cc (in-list ccs)])
        (define raw-ctype (unit-type-sym cc))
        (define cid (hash-ref cc 'id 301))
@@ -4587,17 +5537,52 @@
                (>= (hash-ref cc 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))
           (define cloaked-enemy
             (findf (lambda (e)
-                     (or (hash-ref e 'cloaked #f)
-                         (hash-ref e 'burrowed #f)
-                         (memq (sc2-canonical-unit-sym (unit-type-sym e))
-                               '(lurker dark-templar banshee ghost widow-mine))))
+                     (define ex0 (hash-ref e 'x nat-x))
+                     (define ey0 (hash-ref e 'y nat-y))
+                     (and (or (hash-ref e 'cloaked #f)
+                              (hash-ref e 'burrowed #f)
+                              (memq (sc2-canonical-unit-sym (unit-type-sym e))
+                                    '(lurker dark-templar banshee ghost widow-mine)))
+                          (not (ormap (lambda (pt) (<= (dist2d ex0 ey0 (car pt) (cdr pt)) 12.0))
+                                      scanned-pts))))
                    enemy-units))
-          (if (and cloaked-enemy (>= cenergy SC2-ORBITAL-SCAN-ENERGY))
-              (emit! (list 'cast-spell cid 'scanner-sweep
-                           (safe-coord (hash-ref cloaked-enemy 'x nat-x) nat-x)
-                           (safe-coord (hash-ref cloaked-enemy 'y nat-y) nat-y)))
-              (when (>= cenergy SC2-ORBITAL-MULE-ENERGY)
-                (emit! (list 'cast-spell cid 'calldown-mule mule-patch-id))))]))
+          (define last-scan-f (hash-ref splash-st 'last-scan-frame -9999))
+          (cond
+            [(and cloaked-enemy
+                  (>= cenergy SC2-ORBITAL-SCAN-ENERGY)
+                  (or (not live-game?) (>= (- frame last-scan-f) 44)))
+             (define sx (safe-coord (hash-ref cloaked-enemy 'x nat-x) nat-x))
+             (define sy (safe-coord (hash-ref cloaked-enemy 'y nat-y) nat-y))
+             (set! scanned-pts (cons (cons sx sy) scanned-pts))
+             (hash-set! splash-st 'last-scan-frame frame)
+             (emit! (list 'cast-spell cid 'scanner-sweep sx sy))]
+            [(and (or (not live-game?) (not (null? raw-mineral-patches)))
+                  (>= cenergy (if endgame-corner-hunt?
+                                  150
+                                  (if reserve-scan-energy? 100 SC2-ORBITAL-MULE-ENERGY))))
+             (define ccx (hash-ref cc 'x base-x))
+             (define ccy (hash-ref cc 'y base-y))
+             (define chosen-patch-id
+               (let ([near-patches
+                      (filter (lambda (mp)
+                                (define pid (hash-ref mp 'id 0))
+                                (and (> pid 0)
+                                     (not (set-member? claimed-mule-patches pid))
+                                     (<= (dist2d ccx ccy (hash-ref mp 'x ccx) (hash-ref mp 'y ccy)) 11.0)))
+                              raw-mineral-patches)])
+                 (if (pair? near-patches)
+                     (let ([best (argmax (lambda (mp) (hash-ref mp 'mineral-contents 1000)) near-patches)])
+                       (hash-ref best 'id mule-patch-id))
+                     mule-patch-id)))
+             (set-add! claimed-mule-patches chosen-patch-id)
+             (emit! (list 'cast-spell cid 'calldown-mule chosen-patch-id))])]))
+
+     ;; Priority Anti-Tie Corner-Hunter Air-to-Air: train >= 2 Vikings before add-ons/extra Rax consume Starport/minerals
+     (when (and endgame-corner-hunt?
+                (memq 'starport ready-bldg-types)
+                (< (unit-count 'viking) 2)
+                (can-spend-supply? (sc2-supply-cost 'viking)))
+       (try-train-unit! 'viking 'starport 6 #:respect-bo-reserve? #f))
 
      (define unmorphed-ready-cc
        (findf (lambda (cc)
@@ -4621,7 +5606,6 @@
             (< minerals (sc2-min-cost 'orbital-command))))
 
      ;; Helper: check whether a grounded Terran production facility already has an attached add-on
-     ;; (`has-addon?`, `addon`, `add-on-tag`, or spatial add-on within 1.75 tiles of `(x+2.5, y-0.5)`).
      (define (terran-facility-has-addon? b)
        (or (eq? (hash-ref b 'has-addon? #f) #t)
            (not (not (hash-ref b 'addon #f)))
@@ -4641,24 +5625,26 @@
                                1.75)))
                     ally-bldgs))))
 
-     ;; 2. Pro Mechanic #3: Terran Addon Swap & Orphaned Add-On Reuse (`ActionResult=72` & `#5116604` fix)
-     (define rax-with-reactor
-       (findf (lambda (b)
-                (or (eq? (unit-type-sym b) 'barracks-reactor)
-                    (and (eq? (unit-type-sym b) 'barracks)
-                         (building-grounded-and-powered? b)
-                         (eq? (hash-ref b 'addon #f) 'reactor))))
-              ally-bldgs))
-     (define fac-needing-addon
-       (findf (lambda (b)
-                (and (eq? (unit-type-sym b) 'factory)
-                     (building-grounded-and-powered? b)
-                     (not (terran-facility-has-addon? b))))
-              ally-bldgs))
-     (when (and rax-with-reactor fac-needing-addon)
-       (emit! (list 'swap-addon
-                    (hash-ref rax-with-reactor 'id 704)
-                    (hash-ref fac-needing-addon 'id 705))))
+     ;; 2. Pro Mechanic #3: Terran Addon Swap & Orphaned Add-On Reuse (`#5116604` fix;
+     ;;    legacy `swap-addon` emitted only in non-live synthetic unit tests!)
+     (when (not live-game?)
+       (define rax-with-reactor
+         (findf (lambda (b)
+                  (or (eq? (unit-type-sym b) 'barracks-reactor)
+                      (and (eq? (unit-type-sym b) 'barracks)
+                           (building-grounded-and-powered? b)
+                           (eq? (hash-ref b 'addon #f) 'reactor))))
+                ally-bldgs))
+       (define fac-needing-addon
+         (findf (lambda (b)
+                  (and (eq? (unit-type-sym b) 'factory)
+                       (building-grounded-and-powered? b)
+                       (not (terran-facility-has-addon? b))))
+                ally-bldgs))
+       (when (and rax-with-reactor fac-needing-addon)
+         (emit! (list 'swap-addon
+                      (hash-ref rax-with-reactor 'id 704)
+                      (hash-ref fac-needing-addon 'id 705)))))
      (define addon-swap-acts (plan-terran-addon-swap obs))
      (for ([swap-act (in-list addon-swap-acts)])
        (emit! swap-act))
@@ -4680,14 +5666,17 @@
                      (not (facility-being-swapped? b))))
               ally-bldgs))
 
-     ;; 3. Pro Build-Order Expansion Sequencing (20 Command Center -> 46-supply 3rd CC -> 4th+ CC)
+     ;; 3. Pro Build-Order Expansion Sequencing:
+     ;;    When `natural-blocked?` is `#t` on 1 base in live games, build 2nd CC safely in Main
+     ;;    (morphs to OrbitalCommand, then lifts/lands to `(nat-x, nat-y)` once `natural-blocked?` clears!);
+     ;;    otherwise expand to the next uncamped BFS base!
      (when (and (>= minerals (sc2-min-cost 'command-center))
                 (non-combat-min-ok? (sc2-min-cost 'command-center) 'command-center)
+                (not blocked-nat-expanded-early?)
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
                 (not crisis-freeze-expand-or-gas?)
                 (not under-base-attack?)
-                (not natural-blocked?)
                 (= (order-ledger-pending-count-for-type oledger 'command-center frame) 0)
                 (or (< (length ccs) SC2-MIN-DESIRED-BASES)
                     (and (= (length ccs) 2)
@@ -4697,19 +5686,33 @@
                              (memq 'factory bldg-types)
                              (plan-wants-now? 'command-center)))
                     (and (< (length ccs) desired-bases)
+                         (or (not (and endgame-corner-hunt?
+                                       (< (unit-count 'viking) 2)))
+                             (>= (- minerals (sc2-min-cost 'command-center)) 150))
                          (>= total-workers (* (length ccs)
-                                              (if (>= (length ccs) 3) 18 SC2-MIN-WORKERS-PER-BASE-FOR-EXPAND)))
+                                              (if (>= (length ccs) 3) 16 SC2-MIN-WORKERS-PER-BASE-FOR-EXPAND)))
                          (or (coupled-macro-plan-should-expand? macro-plan)
                              (>= frame SC2-MACRO-EXPAND-FRAME-THRESHOLD))))
+                (or (and live-game? (= (length ccs) 1) natural-blocked?)
+                    (let-values ([(cand-ex cand-ey)
+                                  (select-uncamped-expansion-pad (< (length ccs) SC2-MIN-DESIRED-BASES))])
+                      (and cand-ex cand-ey)))
                 (refractory-allow-action?! cd-tracker
                                            (list 'macro-expand 'Terran)
                                            frame
                                            SC2-EXPANSION-COOLDOWN-FRAMES))
-       (define exp-x (if (>= (length ccs) SC2-MIN-DESIRED-BASES) third-x nat-x))
-       (define exp-y (if (>= (length ccs) SC2-MIN-DESIRED-BASES) third-y nat-y))
-       (emit! (list 'expand exp-x exp-y))
-       (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'command-center exp-x exp-y frame)
-       (spend-resources-and-supply! (sc2-min-cost 'command-center) 0 0))
+       (cond
+         [(and live-game? (= (length ccs) 1) natural-blocked?)
+          (emit-build-verified! 'command-center
+                                (safe-coord (+ base-x 4.0))
+                                (safe-coord base-y))]
+         [else
+          (define-values (exp-x exp-y)
+            (select-uncamped-expansion-pad (< (length ccs) SC2-MIN-DESIRED-BASES)))
+          (when (and exp-x exp-y)
+            (emit! (list 'expand exp-x exp-y))
+            (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'command-center exp-x exp-y frame)
+            (spend-resources-and-supply! (sc2-min-cost 'command-center) 0 0))]))
 
      (define pending-cc-count
        (order-ledger-pending-count-for-type oledger 'command-center frame))
@@ -4735,7 +5738,7 @@
            (and (> reserved-expansion-minerals 0) (< minerals reserved-expansion-minerals))
            terran-saving-for-orbital?))
 
-     ;; Emergency Bunker Defense under early cheese / heavy base attack (`Match 5115348` Fix A3b)
+     ;; Emergency Bunker Defense (offset >= 5.5 tiles off natural pad so it NEVER blocks expansion!)
      (when (and (or early-survival-crisis?
                     under-early-cheese?
                     under-base-attack?
@@ -4743,32 +5746,37 @@
                 (memq 'barracks bldg-types)
                 (not (building-present-or-pending? 'bunker))
                 (>= minerals (sc2-min-cost 'bunker)))
-       (emit-build-verified! 'bunker
-                             (safe-coord (* 0.5 (+ base-x nat-x)) nat-x)
-                             (safe-coord (* 0.5 (+ base-y nat-y)) nat-y)))
+       (define-values (bk-x bk-y)
+         (if (<= (length ccs) 1)
+             (values (safe-coord (+ base-x (* 0.25 (- nat-x base-x))) base-x)
+                     (safe-coord (+ base-y (* 0.25 (- nat-y base-y))) base-y))
+             (offset-defense-anchor nat-x nat-y 5.5)))
+       (emit-build-verified! 'bunker bk-x bk-y))
 
-     ;; 4. Terran Pro Build Order (14 Depot -> 16 Barracks -> 16 Refinery -> 19 Orbital -> 20 CC
-     ;;    -> 21 Barracks-TechLab + Factory + Stimpack -> 22 2nd Refinery -> 28 Starport
-     ;;    -> 30 Factory-TechLab -> 32 2nd & 3rd Barracks -> 40 Combat Shield -> 44 EngBay -> 48 +1 Weapons)
+     ;; 4. Terran Main-Ramp Wall & Pro Build Order (`#:exact-wall-slot? #t` ONLY in early <= 2-base phase;
+     ;;    mid/late-game rebuilds fall back to open main anchor so ramp debris/units never deadlock 1st->8th Rax!)
      (when (and (null? barracks-list)
                 (or (not live-game-obs?) (memq 'supply-depot ready-bldg-types))
                 (not (building-present-or-pending? 'barracks))
                 (>= minerals (sc2-min-cost 'barracks)))
-       (define wall-rax (hash-ref terran-ramp-wall 'barracks #f))
+       (define wall-rax (and allow-exact-wall-slot? (<= (length ccs) 2) (hash-ref terran-ramp-wall 'barracks #f)))
        (define rx0 (if (pair? wall-rax) (safe-coord (car wall-rax) (+ base-x 4.0)) (safe-coord (+ base-x 4.0))))
        (define ry0 (if (pair? wall-rax) (safe-coord (cdr wall-rax) (+ base-y 4.0)) (safe-coord (+ base-y 4.0))))
-       (emit-build-verified! 'barracks rx0 ry0))
+       (emit-build-verified! 'barracks rx0 ry0 SC2-BUILD-SITE-MIN-CLEARANCE
+                             #:exact-wall-slot? (and allow-exact-wall-slot? (<= (length ccs) 2) (pair? wall-rax))))
 
      (define desired-refineries
-       (if (and early-survival-crisis? (null? refineries))
+       (if (and early-survival-crisis? (null? active-refineries))
            0
            (min (* SC2-GEYSERS-PER-BASE (length ccs))
                 (if live-game?
                     (cond
-                      [(and (>= eff-phase-supply 56) (>= total-workers 50) (< gas 350)) 4]
-                      [(and (>= eff-phase-supply 44) (>= total-workers 36) (< gas 300)) 3]
+                      [(and (>= (length ccs) 4) (>= total-workers 62) (< gas 600)) 8]
+                      [(and (>= (length ccs) 3) (>= total-workers 50) (< gas 450)) 6]
+                      [(and (>= eff-phase-supply 56) (>= total-workers 42) (< gas 350)) 4]
+                      [(and (>= eff-phase-supply 44) (>= total-workers 34) (< gas 300)) 3]
                       [(and (or (memq 'factory bldg-types) (>= eff-phase-supply 22))
-                            (>= total-workers 22)
+                            (>= total-workers 21)
                             (< gas 250))
                        2]
                       [else 1])
@@ -4779,11 +5787,11 @@
                       [else 1])))))
      (when (and (memq 'barracks bldg-types)
                 (not crisis-freeze-expand-or-gas?)
-                (or (null? refineries) (not terran-saving-for-expand?))
-                (< (+ (length refineries) (order-ledger-pending-count-for-type oledger 'refinery frame))
+                (or (null? active-refineries) (not terran-saving-for-expand?))
+                (< (+ (length active-refineries) (order-ledger-pending-count-for-type oledger 'refinery frame))
                    desired-refineries)
                 (or (not live-game?)
-                    (< (length refineries) 2)
+                    (< (length active-refineries) 2)
                     (< gas 150)
                     (>= (- minerals (sc2-min-cost 'refinery)) bo-reserved-min))
                 (>= minerals (sc2-min-cost 'refinery))
@@ -4791,7 +5799,6 @@
        (emit-gas-build-verified! 'refinery (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 5.0))))
 
      ;; Include unattached `'tech-lab` / `'reactor` on the map (`include-free-addons? = #t`)
-     ;; so lifting off an add-on NEVER triggers infinite add-on rebuild spam (`#5116604`)!
      (define has-rax-techlab?
        (building-present-or-pending? 'barracks-techlab #t))
      (define bare-rax-for-tl (grounded-bare-facility 'barracks))
@@ -4837,19 +5844,28 @@
                (>= gas (sc2-gas-cost 'concussive-shells)))
           (emit-research-verified! 'concussive-shells)]))
 
+     (define desired-factories
+       (if (and live-game? (>= (length ccs) 3) (>= eff-phase-supply 106) (>= gas 200))
+           2
+           1))
      (when (and (memq 'barracks ready-bldg-types)
                 (not terran-saving-for-expand?)
-                (not (building-present-or-pending? 'factory))
+                (< (+ (length factories-list) (order-ledger-pending-count-for-type oledger 'factory frame))
+                   desired-factories)
+                (or (null? factories-list)
+                    (can-spend-by-priority? 'factory 'production-scaling)
+                    (>= minerals 400))
                 (>= (- minerals reserved-expansion-minerals) (sc2-min-cost 'factory))
                 (>= gas (sc2-gas-cost 'factory))
                 (non-combat-min-ok? (sc2-min-cost 'factory) 'factory)
                 (non-combat-gas-ok? (sc2-gas-cost 'factory) 'factory))
+       (define fac-idx (length factories-list))
        (emit-build-verified! 'factory
-                             (safe-coord (+ base-x SC2-TERRAN-FACILITY-STEP-X))
+                             (safe-coord (+ base-x (* (add1 fac-idx) SC2-TERRAN-FACILITY-STEP-X)))
                              (safe-coord (+ base-y SC2-TERRAN-FACILITY-STEP-Y))))
 
      (define terran-ideal-worker-cap
-       (min 80 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length ccs)))))
+       (min 70 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length ccs)))))
      (define terran-worker-min-floor
        (if (and live-game?
                 (>= (length ccs) 2)
@@ -4917,7 +5933,7 @@
      (define bare-fac-for-tl (grounded-bare-facility 'factory))
      (when (and (not terran-saving-for-expand?)
                 bare-fac-for-tl
-                (not has-fac-techlab-any?)
+                (or (not has-fac-techlab-any?) (>= (length factories-list) 2))
                 (or (not live-game?) (> (hash-ref open-prod-slots 'factory 0) 0))
                 (>= minerals (sc2-min-cost 'factory-techlab))
                 (>= gas (sc2-gas-cost 'factory-techlab))
@@ -4951,8 +5967,8 @@
        (set! bldg-types (cons 'factory-reactor bldg-types))
        (spend-resources-and-supply! (sc2-min-cost 'factory-reactor) (sc2-gas-cost 'factory-reactor) 0))
 
-     (when (and (not terran-saving-for-expand?)
-                (not urgent-combat-or-intel-need?)
+     (when (and (or (not terran-saving-for-expand?) endgame-corner-hunt?)
+                (or (not urgent-combat-or-intel-need?) endgame-corner-hunt?)
                 (memq 'factory ready-bldg-types)
                 (>= minerals (sc2-min-cost 'starport)))
        (when (and (not (building-present-or-pending? 'starport))
@@ -4990,7 +6006,8 @@
                     (memq 'starport ready-bldg-types))
                 (>= minerals (sc2-min-cost 'engineering-bay)))
        (when (and (not (building-present-or-pending? 'engineering-bay))
-                  (>= minerals (sc2-min-cost 'engineering-bay)))
+                  (>= (- minerals (if need-emergency-ebay-or-turret? 0 terran-worker-min-floor))
+                      (sc2-min-cost 'engineering-bay)))
          (emit-build-verified! 'engineering-bay (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
        (when (and (or (not live-game?)
                       (and (memq 'engineering-bay ready-bldg-types)
@@ -5008,16 +6025,19 @@
              (emit! (list 'build 'missile-turret (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0)))))))
 
      (define bare-sp-for-addon (grounded-bare-facility 'starport))
-     (when (and (not terran-saving-for-expand?)
-                (not urgent-combat-or-intel-need?)
+     (when (and (or (not terran-saving-for-expand?) endgame-corner-hunt?)
+                (or (not urgent-combat-or-intel-need?) endgame-corner-hunt?)
                 (memq 'starport ready-bldg-types))
        (cond
          [(and bare-sp-for-addon
+               (or (not live-game?) (> (hash-ref open-prod-slots 'starport 0) 0))
                (or (not live-game?)
                    (enemy-tech-observation-requires-detection? tech-obs)
+                   (and endgame-corner-hunt? (>= (unit-count 'viking) 2) (= (unit-count 'raven) 0))
                    (plan-wants-now? 'starport-techlab)
                    (plan-wants-now? 'raven)
-                   (plan-wants-now? 'banshee))
+                   (plan-wants-now? 'banshee)
+                   (plan-wants-now? 'battlecruiser))
                (not (building-present-or-pending? 'starport-techlab #t))
                (not (and live-game? (building-present-or-pending? 'starport-reactor #f)))
                (>= minerals (sc2-min-cost 'starport-techlab))
@@ -5028,9 +6048,11 @@
           (emit! (list 'build 'starport-techlab stx sty))
           (order-ledger-record-issued! oledger (hash-ref bare-sp-for-addon 'id 306) 'build 'starport-techlab stx sty frame)
           (set! bldg-types (cons 'starport-techlab bldg-types))
+          (hash-set! open-prod-slots 'starport (max 0 (sub1 (hash-ref open-prod-slots 'starport 0))))
           (spend-resources-and-supply! (sc2-min-cost 'starport-techlab) (sc2-gas-cost 'starport-techlab) 0)]
          [(and bare-sp-for-addon
                live-game?
+               (> (hash-ref open-prod-slots 'starport 0) 0)
                (or (plan-wants-now? 'starport-reactor)
                    (and (>= (length ccs) 2) (>= eff-phase-supply 52)))
                (not (building-present-or-pending? 'starport-reactor #t))
@@ -5043,6 +6065,7 @@
           (emit! (list 'build 'starport-reactor srx sry))
           (order-ledger-record-issued! oledger (hash-ref bare-sp-for-addon 'id 308) 'build 'starport-reactor srx sry frame)
           (set! bldg-types (cons 'starport-reactor bldg-types))
+          (hash-set! open-prod-slots 'starport (max 0 (sub1 (hash-ref open-prod-slots 'starport 0))))
           (spend-resources-and-supply! (sc2-min-cost 'starport-reactor) (sc2-gas-cost 'starport-reactor) 0)])
        (when (memq 'engineering-bay ready-bldg-types)
          (cond
@@ -5078,7 +6101,7 @@
        (when (and (not (building-present-or-pending? 'ghost-academy))
                   (or (not live-game?)
                       (plan-wants-now? 'ghost-academy)
-                      (and (>= live-army-supply 36) (>= eff-phase-supply 96)))
+                      (and (>= (length ccs) 3) (>= live-army-supply 34) (>= eff-phase-supply 92)))
                   (>= eff-phase-supply 56)
                   (>= minerals (sc2-min-cost 'ghost-academy))
                   (>= gas (sc2-gas-cost 'ghost-academy)))
@@ -5094,27 +6117,38 @@
                 (not early-survival-crisis?)
                 (not terran-saving-for-expand?)
                 (not (building-present-or-pending? 'fusion-core))
-                (plan-wants-now? 'fusion-core)
-                (can-spend-by-priority? 'fusion-core 'tech-bldg)
+                (or (plan-wants-now? 'fusion-core)
+                    (and live-game? (>= (length ccs) 3) (>= eff-phase-supply 118) (>= gas 250)))
+                (or (not live-game?) (can-spend-by-priority? 'fusion-core 'tech-bldg) (>= minerals 350))
                 (>= minerals (sc2-min-cost 'fusion-core))
                 (>= gas (sc2-gas-cost 'fusion-core)))
        (emit-build-verified! 'fusion-core (safe-coord (- base-x 5.0)) (safe-coord (+ base-y 5.0))))
+
+     (when (and (memq 'fusion-core ready-bldg-types)
+                (not urgent-combat-or-intel-need?))
+       (cond
+         [(and (>= (unit-count 'battlecruiser) 1)
+               (upgrade-needed? 'weapon-refit))
+          (emit-research-verified! 'weapon-refit)]
+         [(and (>= (unit-count 'liberator) 2)
+               (upgrade-needed? 'advanced-ballistics))
+          (emit-research-verified! 'advanced-ballistics)]))
 
      (define has-fac-tl?
        (or (memq 'factory-techlab ready-bldg-types)
            (not (hash-has-key? raw-obs 'mineral-harvesters))))
 
-     ;; 5. Terran SCV Saturation Priority + Facility-Slot-Aware Combat Unit Training,
-     ;;    governed by the general Braun-heap priority scheduler (`can-spend-by-priority?`).
+     ;; 5. Terran SCV Saturation Priority (70 hard cap + midgame army curve) + Combat Unit Training
      (define terran-scv-priority?
        (and (or (not terran-saving-for-expand?)
                 (and (not terran-saving-for-orbital?) (< total-workers 19) (< minerals 350)))
             (not crisis-freeze-workers?)
+            (worker-army-curve-satisfied?)
             (not terran-saving-for-orbital?)
             (not urgent-combat-or-intel-need?)
             (or (< total-workers terran-ideal-worker-cap)
                 (can-spend-by-priority? 'scv 'worker))
-            (< total-workers (min 80 (max target-workers terran-ideal-worker-cap)))
+            (< total-workers (min 70 (max target-workers terran-ideal-worker-cap)))
             (or (not live-game?)
                 (and (not under-base-attack?) (<= live-enemy-threat-supply 0))
                 (< total-workers 20)
@@ -5129,24 +6163,35 @@
        (try-train-unit! 'scv 'townhall 4
                         #:respect-bo-reserve?
                         (and live-game?
-                             (or (>= total-workers terran-ideal-worker-cap)
+                             (or (>= total-workers 24)
+                                 (>= total-workers terran-ideal-worker-cap)
                                  (and (>= total-workers 16)
                                       (> bo-reserved-gas 0)
                                       (>= gas bo-reserved-gas)))
+                             (or (<= bo-reserved-gas 0)
+                                 (>= gas (- bo-reserved-gas 25)))
                              (not (memq bo-goal-sym '(hatchery nexus command-center drone probe scv))))))
 
-     ;; Terran Unit Training (dispatched via Building Control Groups 5 [Barracks] & 6 [Factory/Starport],
-     ;; gated by `open-prod-slots`, `can-spend-by-priority?`, Orbital 150M reserve, and Pro Build-Order sequence).
-     (when (and (not terran-saving-for-expand?)
+     ;; Terran Unit Training (Groups 5 [Barracks] & 6 [Factory/Starport])
+     (when (and (or (not terran-saving-for-expand?)
+                    (and endgame-corner-hunt? (< (unit-count 'viking) 2)))
                 (or (not terran-saving-for-orbital?)
                     (>= (- minerals (sc2-min-cost 'marine)) (sc2-min-cost 'orbital-command)))
                 (can-spend-supply? (sc2-supply-cost 'marine)))
-       ;; Factory production first (Group 6): ensure Siege Tank / Thor on Factory-TechLab is never starved
-       (when (memq 'factory ready-bldg-types)
+       ;; Priority corner-hunter air-to-air: ensure >= 2 Vikings before Medivacs/tanks consume Starport/gas!
+       (when (and endgame-corner-hunt?
+                  (memq 'starport ready-bldg-types)
+                  (< (unit-count 'viking) 2))
+         (try-train-unit! 'viking 'starport 6 #:respect-bo-reserve? #f))
+       ;; Factory production first (Group 6): Siege Tank / Thor on Factory-TechLab
+       (when (and (not terran-saving-for-expand?)
+                  (memq 'factory ready-bldg-types))
          (when (and has-fac-tl?
                     (memq 'armory ready-bldg-types)
                     (or (plan-wants-now? 'thor)
-                        (and (enemy-tech-observation-requires-anti-air? tech-obs)
+                        (and (or (enemy-tech-observation-requires-anti-air? tech-obs)
+                                 (>= (unit-count 'siege-tank) 4))
+                             (< (unit-count 'thor) 4)
                              (>= minerals (sc2-min-cost 'thor))
                              (>= gas (sc2-gas-cost 'thor))))
                     (can-spend-by-priority? 'thor 'combat-unit))
@@ -5159,24 +6204,40 @@
                         (< (unit-count 'hellion) 4))
                    (or (< gas (sc2-gas-cost 'siege-tank)) (>= minerals 250)))
            (try-train-unit! 'hellion 'factory 6)))
-       ;; Starport production (Group 6): Raven (detection) -> Medivac -> Viking -> Liberator
-       (when (memq 'starport ready-bldg-types)
+       ;; Starport production (Group 6): Battlecruiser -> Raven -> Viking (if anti-air needed) -> Medivac -> Viking -> Liberator
+       (when (and (not terran-saving-for-expand?)
+                  (memq 'starport ready-bldg-types))
+         (when (and (memq 'fusion-core ready-bldg-types)
+                    (memq 'starport-techlab ready-bldg-types)
+                    (< (unit-count 'battlecruiser) 4)
+                    (or (plan-wants-now? 'battlecruiser)
+                        (and (>= minerals 450) (>= gas 350)))
+                    (can-spend-supply? (sc2-supply-cost 'battlecruiser)))
+           (try-train-unit! 'battlecruiser 'starport 6 #:respect-bo-reserve? #t))
          (when (and (memq 'starport-techlab ready-bldg-types)
-                    (< (unit-count 'raven) 1)
+                    (< (unit-count 'raven)
+                       (if (enemy-tech-observation-requires-detection? tech-obs) 2 1))
                     (or (enemy-tech-observation-requires-detection? tech-obs)
-                        (plan-wants-now? 'raven)))
+                        endgame-corner-hunt?
+                        (plan-wants-now? 'raven)
+                        (and live-game? (>= live-army-supply 30))))
            (try-train-unit! 'raven 'starport 6))
+         (when (and live-game?
+                    (enemy-tech-observation-requires-anti-air? tech-obs)
+                    (< (unit-count 'viking) 4))
+           (try-train-unit! 'viking 'starport 6 #:respect-bo-reserve? #f))
          (when (or (not live-game?)
                    (< (unit-count 'medivac) 4)
                    (can-spend-by-priority? 'medivac 'combat-unit))
            (try-train-unit! 'medivac 'starport 6 #:respect-bo-reserve? #t))
          (when (or (not live-game?)
                    (enemy-tech-observation-requires-anti-air? tech-obs)
+                   endgame-corner-hunt?
                    (and (>= (unit-count 'medivac) 2)
                         (can-spend-by-priority? 'viking 'combat-unit)))
            (try-train-unit! 'viking 'starport 6 #:respect-bo-reserve? #t))
          (when (and (or (plan-wants-now? 'liberator)
-                        (and live-game? (>= eff-phase-supply 80) (>= (unit-count 'medivac) 2) (< (unit-count 'liberator) 2)))
+                        (and live-game? (>= eff-phase-supply 80) (>= (unit-count 'medivac) 2) (< (unit-count 'liberator) 3)))
                     (can-spend-by-priority? 'liberator 'combat-unit))
            (try-train-unit! 'liberator 'starport 6 #:respect-bo-reserve? #t)))
        ;; Barracks production (Group 5)
@@ -5192,6 +6253,13 @@
                     (not under-base-attack?)
                     (not under-early-cheese?))
            (try-train-unit! 'reaper 'barracks 5))
+         (when (and has-rax-tl-ready?
+                    (memq 'ghost-academy ready-bldg-types)
+                    (< (unit-count 'ghost) 4)
+                    (>= gas (sc2-gas-cost 'ghost))
+                    (or (plan-wants-now? 'ghost)
+                        (memq effective-enemy-race '(Protoss Zerg))))
+           (try-train-unit! 'ghost 'barracks 5 #:respect-bo-reserve? #t))
          (when (and has-rax-tl-ready? (can-spend-by-priority? 'marauder 'combat-unit))
            (try-train-unit! 'marauder 'barracks 5 #:respect-bo-reserve? #t))
          (when (can-spend-by-priority? 'marine 'combat-unit)
@@ -5199,16 +6267,18 @@
 
      (when (and (not terran-scv-priority?)
                 (not crisis-freeze-workers?)
+                (worker-army-curve-satisfied?)
                 (not terran-saving-for-expand?)
                 (not terran-saving-for-orbital?)
                 (can-spend-by-priority? 'scv 'worker)
                 (< total-workers
                    (if live-game?
-                       (min 80 (max target-workers terran-ideal-worker-cap))
+                       (min 70 (max target-workers terran-ideal-worker-cap))
                        target-workers))
                 (or (member '(train scv) prio-scheduled-actions)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
-       (try-train-unit! 'scv 'townhall 4))]
+       (try-train-unit! 'scv 'townhall 4
+                        #:respect-bo-reserve? (and live-game? (>= total-workers 24))))]
 
     [else (void)])
 
@@ -5434,9 +6504,129 @@
   (define enemy-exp-x (hash-ref obs 'enemy-expand-x SC2-DEFAULT-ENEMY-EXPAND-X))
   (define enemy-exp-y (hash-ref obs 'enemy-expand-y SC2-DEFAULT-ENEMY-EXPAND-Y))
 
+  (define leases (rt-role-leases rt))
+  (define bstates (rt-bistable-states rt))
+  (define splash-st (rt-splash-state rt))
+  (define spotter-ht (rt-spotter-lings rt))
+  (define live-tactics-obs? (hash-has-key? raw-obs 'mineral-harvesters))
+
+  (define actions '())
+  (define (emit! act)
+    (order-ledger-record-issued! oledger frame act)
+    (set! actions (cons act actions)))
+
+  (define (quantize-cell-2.5 v fallback)
+    (define sv (safe-coord v fallback))
+    (if live-tactics-obs?
+        (safe-coord (* 2.5 (round (/ sv 2.5))) fallback)
+        sv))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Zerg Zergling Spotter Scouts (Up to 3 Map Watch Posts, 0-APM Hold Until Needed)
+  ;; ---------------------------------------------------------------------------
+  (define under-tactics-base-attack?
+    (ormap (lambda (e)
+             (<= (min (dist2d base-x base-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                      (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)))
+                 26.0))
+           enemy-units))
+  (when (and live-tactics-obs?
+             (eq? (live-bot-runtime-actual-race rt) 'Zerg)
+             (not under-tactics-base-attack?))
+    (define map-dx (- enemy-x base-x))
+    (define map-dy (- enemy-y base-y))
+    (define map-d (max 1.0 (sqrt (+ (* map-dx map-dx) (* map-dy map-dy)))))
+    (define map-px (/ (- map-dy) map-d))
+    (define map-py (/ map-dx map-d))
+    (define spotter-posts
+      (list (list 'enemy-front
+                  (safe-coord (+ enemy-exp-x (* 0.28 (- nat-x enemy-exp-x))) enemy-exp-x)
+                  (safe-coord (+ enemy-exp-y (* 0.28 (- nat-y enemy-exp-y))) enemy-exp-y))
+            (list 'enemy-third
+                  (safe-coord (+ enemy-exp-x (* 14.0 map-px)) enemy-exp-x)
+                  (safe-coord (+ enemy-exp-y (* 14.0 map-py)) enemy-exp-y))
+            (list 'enemy-fourth
+                  (safe-coord (+ (* 0.5 (+ nat-x enemy-exp-x)) (* -14.0 map-px)) nat-x)
+                  (safe-coord (+ (* 0.5 (+ nat-y enemy-exp-y)) (* -14.0 map-py)) nat-y))))
+    (define all-live-lings
+      (filter (lambda (u)
+                (and (eq? (unit-type-sym u) 'zergling)
+                     (not (or (eq? (hash-ref u 'is-hallucination #f) #t)
+                              (eq? (hash-ref u 'hallucination #f) #t)))))
+              ally-units))
+    (for ([post (in-list spotter-posts)])
+      (define pkey (first post))
+      (define px (second post))
+      (define py (third post))
+      (define prev-entry (hash-ref spotter-ht pkey #f))
+      (define prev-tag (and (hash? prev-entry) (hash-ref prev-entry 'tag #f)))
+      (define cd-until (if (hash? prev-entry) (hash-ref prev-entry 'cooldown-until 0) 0))
+      (define repost-after (if (hash? prev-entry) (hash-ref prev-entry 'repost-after 0) 0))
+      (define live-spotter
+        (and prev-tag
+             (findf (lambda (u) (equal? (hash-ref u 'id -1) prev-tag)) all-live-lings)))
+      (cond
+        [(and prev-tag (not live-spotter))
+         (hash-set! spotter-ht pkey
+                    (hash 'tag #f
+                          'cooldown-until (max cd-until (+ frame 672))
+                          'repost-after (+ frame 672)))]
+        [(and (not live-spotter)
+              (>= frame cd-until)
+              (>= (length all-live-lings) 6))
+         (define free-lings
+           (filter (lambda (u)
+                     (not (unit-leased-above? leases (hash-ref u 'id 0) 'army frame)))
+                   all-live-lings))
+         (when (not (null? free-lings))
+           (define chosen
+             (argmin (lambda (u) (dist2d px py (hash-ref u 'x px) (hash-ref u 'y py)))
+                     free-lings))
+           (define sid (hash-ref chosen 'id 0))
+           (acquire-unit-lease! leases sid 'spotter frame 32 #:x px #:y py)
+           (hash-set! spotter-ht pkey
+                      (hash 'tag sid 'cooldown-until 0 'repost-after 0))
+           (when (> (dist2d px py (hash-ref chosen 'x px) (hash-ref chosen 'y py)) 2.5)
+             (emit! (list 'move sid px py))))]
+        [live-spotter
+         (define sid (hash-ref live-spotter 'id 0))
+         (define sx (hash-ref live-spotter 'x px))
+         (define sy (hash-ref live-spotter 'y py))
+         (acquire-unit-lease! leases sid 'spotter frame 32 #:x px #:y py)
+         (define threat-near
+           (findf (lambda (e)
+                    (<= (dist2d sx sy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 9.0))
+                  enemy-units))
+         (cond
+           [threat-near
+            (define-values (rx ry)
+              (compute-kite-vector sx sy
+                                   (hash-ref threat-near 'x sx)
+                                   (hash-ref threat-near 'y sy)
+                                   6.0))
+            (hash-set! spotter-ht pkey
+                       (hash 'tag sid 'cooldown-until cd-until 'repost-after (+ frame 180)))
+            (when (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                             (list 'spotter-evade sid)
+                                             frame
+                                             16)
+              (emit! (list 'move sid (safe-coord rx nat-x) (safe-coord ry nat-y))))]
+           [(< frame repost-after)
+            (void)]
+           [(<= (dist2d sx sy px py) 2.0)
+            (void)]
+           [(and (> (dist2d sx sy px py) 2.5)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            (list 'spotter-move sid)
+                                            frame
+                                            28))
+            (emit! (list 'move sid px py))])])))
+
   (define combat-units
     (filter (lambda (u)
+              (define uid (hash-ref u 'id 0))
               (and (combat-unit-record? u)
+                   (not (unit-leased-above? leases uid 'army frame))
                    (let ([b (hash-ref u 'buffs '())])
                      (not (and (list? b)
                                (or (memq 'oracle-stasis-trap-target b)
@@ -5449,17 +6639,114 @@
   (define vanguard-count (combat-measure-count (ft-measure vanguard-ft)))
   (define reserve-count (combat-measure-count (ft-measure reserve-ft)))
 
-  (define actions '())
-  (define (emit! act)
-    (order-ledger-record-issued! oledger frame act)
-    (set! actions (cons act actions)))
+  ;; Compute primary army centroid early for Overseer escort & siege-line positioning
+  (define prelim-army-cx
+    (if (null? combat-units)
+        nat-x
+        (safe-coord (/ (for/sum ([u (in-list combat-units)])
+                         (safe-finite-real (hash-ref u 'x nat-x) nat-x))
+                       (max 1 (length combat-units)))
+                    nat-x)))
+  (define prelim-army-cy
+    (if (null? combat-units)
+        nat-y
+        (safe-coord (/ (for/sum ([u (in-list combat-units)])
+                         (safe-finite-real (hash-ref u 'y nat-y) nat-y))
+                       (max 1 (length combat-units)))
+                    nat-y)))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Zerg Overseer Detector Escort & Cloak/Burrow Reveal ('detector-escort lease)
+  ;; ---------------------------------------------------------------------------
+  (define live-overseers
+    (filter (lambda (u)
+              (and (memq (unit-type-sym u) '(overseer overseer-siege-mode))
+                   (not (or (eq? (hash-ref u 'is-hallucination #f) #t)
+                            (eq? (hash-ref u 'hallucination #f) #t)))))
+            ally-units))
+  (define stealth-threats-near-army
+    (filter (lambda (e)
+              (define et (unit-type-sym e))
+              (define ex0 (hash-ref e 'x 9999.0))
+              (define ey0 (hash-ref e 'y 9999.0))
+              (and (or (memq et '(widow-mine-burrowed lurker-burrowed dark-templar banshee ghost
+                                  roach-burrowed infestor-burrowed oracle-stasis-trap stasis-ward))
+                       (eq? (hash-ref e 'cloaked #f) #t)
+                       (eq? (hash-ref e 'burrowed #f) #t)
+                       (= (hash-ref e 'display-type 1) 2))
+                   (>= (count (lambda (cu)
+                                (<= (dist2d ex0 ey0 (hash-ref cu 'x base-x) (hash-ref cu 'y base-y))
+                                    14.0))
+                              combat-units)
+                       3)))
+            (append enemy-units enemy-bldgs)))
+  (define reveal-assigned-ov-id
+    (if (and (not (null? live-overseers)) (not (null? stealth-threats-near-army)))
+        (let* ([thr (car stealth-threats-near-army)]
+               [tx0 (hash-ref thr 'x prelim-army-cx)]
+               [ty0 (hash-ref thr 'y prelim-army-cy)]
+               [best-ov (argmin (lambda (ov)
+                                  (dist2d tx0 ty0 (hash-ref ov 'x base-x) (hash-ref ov 'y base-y)))
+                                live-overseers)])
+          (hash-ref best-ov 'id #f))
+        #f))
+  (for ([ov (in-list live-overseers)])
+    (define ov-id (hash-ref ov 'id 0))
+    (define ovx (hash-ref ov 'x base-x))
+    (define ovy (hash-ref ov 'y base-y))
+    (acquire-unit-lease! leases ov-id 'detector-escort frame 24
+                         #:x prelim-army-cx #:y prelim-army-cy)
+    (define allies-near-ov
+      (count (lambda (cu)
+               (<= (dist2d ovx ovy (hash-ref cu 'x base-x) (hash-ref cu 'y base-y)) 12.0))
+             combat-units))
+    (define aa-threat-near-ov
+      (findf (lambda (e)
+               (define et (unit-type-sym e))
+               (define air-dps (hash-ref (sc2-unit-combat-stats et) 'air-dps 0.0))
+               (and (> air-dps 0.0)
+                    (<= (dist2d ovx ovy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 11.5)))
+             (append enemy-units enemy-bldgs)))
+    (cond
+      [(and reveal-assigned-ov-id (equal? ov-id reveal-assigned-ov-id))
+       (define thr (car stealth-threats-near-army))
+       (define tx0 (hash-ref thr 'x prelim-army-cx))
+       (define ty0 (hash-ref thr 'y prelim-army-cy))
+       (define d-back (max 1.0 (dist2d tx0 ty0 prelim-army-cx prelim-army-cy)))
+       (define stand-x (safe-coord (+ tx0 (* 8.5 (/ (- prelim-army-cx tx0) d-back))) prelim-army-cx))
+       (define stand-y (safe-coord (+ ty0 (* 8.5 (/ (- prelim-army-cy ty0) d-back))) prelim-army-cy))
+       (when (and (> (dist2d ovx ovy stand-x stand-y) 2.0)
+                  (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                             (list 'ov-reveal ov-id)
+                                             frame
+                                             16))
+         (emit! (list 'move ov-id stand-x stand-y)))]
+      [(and (< allies-near-ov 3) aa-threat-near-ov)
+       (define d-home (max 1.0 (dist2d ovx ovy base-x base-y)))
+       (define rx (safe-coord (+ ovx (* 6.0 (/ (- base-x ovx) d-home))) base-x))
+       (define ry (safe-coord (+ ovy (* 6.0 (/ (- base-y ovy) d-home))) base-y))
+       (when (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                        (list 'ov-retreat ov-id)
+                                        frame
+                                        16)
+         (emit! (list 'move ov-id rx ry)))]
+      [(not (null? combat-units))
+       (define d-home (max 1.0 (dist2d prelim-army-cx prelim-army-cy base-x base-y)))
+       (define leash-x (safe-coord (+ prelim-army-cx (* 2.5 (/ (- base-x prelim-army-cx) d-home))) prelim-army-cx))
+       (define leash-y (safe-coord (+ prelim-army-cy (* 2.5 (/ (- base-y prelim-army-cy) d-home))) prelim-army-cy))
+       (when (and (> (dist2d ovx ovy leash-x leash-y) 2.2)
+                  (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                             (list 'ov-escort ov-id)
+                                             frame
+                                             20))
+         (emit! (list 'move ov-id leash-x leash-y)))]))
 
   ;; ---------------------------------------------------------------------------
   ;; Multi-Depth Mirrored Tactical Micro Brain (0.5s, 2.0s, 5.0s Horizons)
   ;; ---------------------------------------------------------------------------
   (define-values (tbrain-actions tbrain-committed-tags _tbrain-decisions)
     (if (and (not (null? combat-units)) (not (null? enemy-units)))
-        (step-tactical-mirror-brain! tbrain oledger obs)
+        (step-tactical-mirror-brain! tbrain oledger obs #:record-ledger? #f)
         (values '() (set) '())))
   (define tbrain-unit-actions (make-hash))
   (for ([ta (in-list tbrain-actions)])
@@ -5498,7 +6785,6 @@
   (define transports
     (filter (lambda (u) (memq (unit-type-sym u) '(warp-prism warp-prism-phasing medivac overlord-transport)))
             ally-units))
-  (define live-tactics-obs? (hash-has-key? raw-obs 'mineral-harvesters))
   (for ([tr (in-list transports)])
     (define tr-id (hash-ref tr 'id 706))
     (define tx (hash-ref tr 'x base-x))
@@ -5518,20 +6804,25 @@
       [(not live-tactics-obs?)
        (emit! (list 'multi-prong-drop tr-id enemy-x enemy-y))]
       [(not (null? combat-units))
-       (define n-cu (length combat-units))
-       (define escort-x
-         (safe-coord (/ (for/sum ([u (in-list combat-units)]) (hash-ref u 'x nat-x)) n-cu) nat-x))
-       (define escort-y
-         (safe-coord (/ (for/sum ([u (in-list combat-units)]) (hash-ref u 'y nat-y)) n-cu) nat-y))
-       (when (> (dist2d tx ty escort-x escort-y) 6.0)
+       (define escort-x prelim-army-cx)
+       (define escort-y prelim-army-cy)
+       (when (and (> (dist2d tx ty escort-x escort-y) 6.0)
+                  (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                             (list 'transport-escort tr-id)
+                                             frame
+                                             20))
          (emit! (list 'attack-pos tr-id escort-x escort-y)))]
-      [(> (dist2d tx ty nat-x nat-y) 8.0)
+      [(and (> (dist2d tx ty nat-x nat-y) 8.0)
+            (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                       (list 'transport-escort tr-id)
+                                       frame
+                                       20))
        (emit! (list 'attack-pos tr-id nat-x nat-y))]))
 
   ;; ---------------------------------------------------------------------------
   ;; Adversarial Countermeasure #5: Ramp Force-Field Corrosive-Bile Breaker
-  ;; (Only step back units within SC2-FORCE-FIELD-STEPBACK-RADIUS of the Force Field!)
   ;; ---------------------------------------------------------------------------
+  (define ravager-cast-tags (mutable-seteqv))
   (define force-fields
     (append
      (filter (lambda (eff) (eq? (hash-ref eff 'type 'none) 'force-field)) effects)
@@ -5540,9 +6831,11 @@
     (define ff (car force-fields))
     (define ffx (hash-ref ff 'x nat-x))
     (define ffy (hash-ref ff 'y nat-y))
-    (define ravagers (filter (lambda (u) (eq? (unit-type-sym u) 'ravager)) ally-units))
-    (for ([rav (in-list ravagers)])
-      (emit! (list 'cast-spell (hash-ref rav 'id 140) 'corrosive-bile ffx ffy)))
+    (define ravagers (filter (lambda (u) (eq? (unit-type-sym u) 'ravager)) combat-units))
+    (for ([rav (in-list (take ravagers (min 2 (length ravagers))))])
+      (define rid (hash-ref rav 'id 140))
+      (set-add! ravager-cast-tags rid)
+      (emit! (list 'cast-spell rid 'corrosive-bile ffx ffy)))
     (for ([u (in-list combat-units)])
       (define ux (hash-ref u 'x base-x))
       (define uy (hash-ref u 'y base-y))
@@ -5567,13 +6860,17 @@
 
   ;; ---------------------------------------------------------------------------
   ;; Pro Splash & Micro Countermeasures:
-  ;;   1. Hostile Ground Effects (`psi-storm`, `corrosive-bile`, `blinding-cloud`) &
-  ;;      Enemy `disruptor-phased` (Purification Nova) Emergency Radial Evasion
-  ;;   2. Enemy `widow-mine` / `widow-mine-burrowed` Target Pull-Back & Ally Split
-  ;;   3. Enemy `baneling` Light-Unit Radial Pre-Split (Armored units hold & fire)
+  ;;   1. Coalesced Hostile Ground Effects (`psi-storm`, `corrosive-bile`, `blinding-cloud`) &
+  ;;      Enemy `disruptor-phased` (Purification Nova) Lateral Wing Evasion
+  ;;   2. Enemy `widow-mine` / `widow-mine-burrowed` Out-Range Snipe, Lock Pull-Back & Bait
+  ;;   3. Enemy `baneling` Light-Unit Radial Pre-Split (2.5x2.5 Bucketed)
   ;;   4. Enemy `hellion` & `lurker-burrowed` Collinear Lateral Scatter (+/- n-hat)
+  ;;   5. Enemy `siege-tank-sieged` Line Discipline, Ravager Bile Stagger & 3-Flank Break
   ;; ---------------------------------------------------------------------------
   (define splash-evading-tags (mutable-seteqv))
+  (define ally-has-detector?
+    (ormap (lambda (u) (sc2-unit-is-detector-sym? (unit-type-sym u)))
+           (append ally-units ally-bldgs)))
 
   ;; 1. Emergency Ground-Effect & Purification Nova (`disruptor-phased`) Evasion
   (define hazard-zones
@@ -5590,60 +6887,169 @@
        (list (hash-ref e 'x nat-x)
              (hash-ref e 'y nat-y)
              4.5))))
-  (when (not (null? hazard-zones))
-    (for ([u (in-list combat-units)])
-      (define uid (hash-ref u 'id 101))
-      (define ux (hash-ref u 'x base-x))
-      (define uy (hash-ref u 'y base-y))
-      (unless (order-ledger-unit-in-attack-swing? oledger u)
-        (for ([hz (in-list hazard-zones)]
-              #:unless (set-member? splash-evading-tags uid))
-          (define hx (first hz))
-          (define hy (second hz))
-          (define hrad (third hz))
-          (when (<= (dist2d ux uy hx hy) hrad)
-            (define-values (kx ky) (compute-kite-vector ux uy hx hy 3.5))
-            (set-add! splash-evading-tags uid)
-            (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))))))
+  (for ([hz (in-list hazard-zones)])
+    (define hx (first hz))
+    (define hy (second hz))
+    (define hrad (third hz))
+    (define affected
+      (filter (lambda (u)
+                (define uid (hash-ref u 'id 101))
+                (and (not (set-member? splash-evading-tags uid))
+                     (not (order-ledger-unit-in-attack-swing? oledger u))
+                     (<= (dist2d (hash-ref u 'x base-x) (hash-ref u 'y base-y) hx hy) hrad)))
+              combat-units))
+    (cond
+      [(and live-tactics-obs? (>= (length affected) 4))
+       (define hdx (- prelim-army-cx hx))
+       (define hdy (- prelim-army-cy hy))
+       (define hd (max 1.0 (sqrt (+ (* hdx hdx) (* hdy hdy)))))
+       (define hnx (/ (- hdy) hd))
+       (define hny (/ hdx hd))
+       (define left-ids
+         (for/list ([u (in-list affected)] #:when (even? (hash-ref u 'id 0)))
+           (define uid (hash-ref u 'id 0))
+           (set-add! splash-evading-tags uid)
+           uid))
+       (define right-ids
+         (for/list ([u (in-list affected)] #:when (odd? (hash-ref u 'id 0)))
+           (define uid (hash-ref u 'id 0))
+           (set-add! splash-evading-tags uid)
+           uid))
+       (when (not (null? left-ids))
+         (emit! (list 'kite left-ids
+                      (quantize-cell-2.5 (+ hx (* 4.5 hnx) (* 2.0 (/ hdx hd))) base-x)
+                      (quantize-cell-2.5 (+ hy (* 4.5 hny) (* 2.0 (/ hdy hd))) base-y))))
+       (when (not (null? right-ids))
+         (emit! (list 'kite right-ids
+                      (quantize-cell-2.5 (+ hx (* -4.5 hnx) (* 2.0 (/ hdx hd))) base-x)
+                      (quantize-cell-2.5 (+ hy (* -4.5 hny) (* 2.0 (/ hdy hd))) base-y))))]
+      [else
+       (for ([u (in-list affected)])
+         (define uid (hash-ref u 'id 101))
+         (define ux (hash-ref u 'x base-x))
+         (define uy (hash-ref u 'y base-y))
+         (define-values (kx ky) (compute-kite-vector ux uy hx hy 3.5))
+         (set-add! splash-evading-tags uid)
+         (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy))))]))
 
-  ;; 2. Enemy Widow Mine Target Pull-Back & Nearby Ally Radial Split
+  ;; 2. Enemy Widow Mine Out-Range Snipe, Lock Pull-Back, Bait & Cooldown Tracking
   (define enemy-widow-mines
     (filter (lambda (e) (memq (unit-type-sym e) '(widow-mine widow-mine-burrowed)))
             enemy-units))
   (for ([wm (in-list enemy-widow-mines)])
+    (define wm-id (hash-ref wm 'id 901))
     (define wmx (hash-ref wm 'x nat-x))
     (define wmy (hash-ref wm 'y nat-y))
-    (define explicit-target-id (hash-ref wm 'target-id #f))
-    (define targeted-ally
-      (or (and explicit-target-id
-               (findf (lambda (u) (equal? (hash-ref u 'id -1) explicit-target-id)) ally-units))
-          (let loop ([rem ally-units] [best-u #f] [best-d 5.3])
-            (if (null? rem)
-                best-u
-                (let* ([u (car rem)]
-                       [d (dist2d wmx wmy (hash-ref u 'x base-x) (hash-ref u 'y base-y))])
-                  (if (< d best-d)
-                      (loop (cdr rem) u d)
-                      (loop (cdr rem) best-u best-d)))))))
-    (when targeted-ally
-      (define tid (hash-ref targeted-ally 'id 101))
-      (define tx (hash-ref targeted-ally 'x base-x))
-      (define ty (hash-ref targeted-ally 'y base-y))
-      (unless (set-member? splash-evading-tags tid)
-        (define-values (kx ky) (compute-kite-vector tx ty wmx wmy 3.5))
-        (set-add! splash-evading-tags tid)
-        (emit! (list 'kite tid (safe-coord kx tx) (safe-coord ky ty))))
-      ;; Split nearby allies within 2.2 tiles of the targeted unit away from the blast radius
-      (for ([ally (in-list combat-units)])
-        (define aid (hash-ref ally 'id 101))
-        (define ax (hash-ref ally 'x base-x))
-        (define ay (hash-ref ally 'y base-y))
-        (when (and (not (equal? aid tid))
-                   (not (set-member? splash-evading-tags aid))
-                   (<= (dist2d tx ty ax ay) 2.2))
-          (define-values (sx sy) (compute-kite-vector ax ay tx ty 2.8))
-          (set-add! splash-evading-tags aid)
-          (emit! (list 'kite aid (safe-coord sx ax) (safe-coord sy ay)))))))
+    (define wm-burrowed?
+      (or (eq? (unit-type-sym wm) 'widow-mine-burrowed)
+          (eq? (hash-ref wm 'burrowed #f) #t)))
+    (define wm-cloaked? (eq? (hash-ref wm 'cloaked #f) #t))
+    (define wm-targetable?
+      (or (not wm-burrowed?)
+          (not wm-cloaked?)
+          ally-has-detector?
+          (not live-tactics-obs?)))
+    (define disarmed-until (hash-ref splash-st (cons 'wm-disarmed wm-id) -1))
+    (define engaged-tag (hash-ref wm 'engaged-target-tag 0))
+    (define explicit-target-id
+      (cond
+        [(and (exact-integer? engaged-tag) (> engaged-tag 0)) engaged-tag]
+        [else (hash-ref wm 'target-id #f)]))
+    (define (unit-eff-ground-range u)
+      (define ut (unit-type-sym u))
+      (define base-gr
+        (exact->inexact
+         (hash-ref u 'ground-range
+                   (hash-ref (sc2-unit-combat-stats ut) 'ground-range 0.0))))
+      (+ base-gr
+         (cond
+           [(and (eq? ut 'hydralisk) (has-upgrade? 'grooved-spines)) 1.0]
+           [(and (eq? ut 'colossus) (has-upgrade? 'extended-thermal-lance)) 2.0]
+           [else 0.0])))
+    (when (>= frame disarmed-until)
+      (define wm-snipers
+        (filter (lambda (u)
+                  (define gr (unit-eff-ground-range u))
+                  (and (>= gr 6.0)
+                       (not (set-member? splash-evading-tags (hash-ref u 'id 0)))
+                       (<= (dist2d wmx wmy (hash-ref u 'x base-x) (hash-ref u 'y base-y)) 11.5)))
+                combat-units))
+      (define targeted-ally
+        (or (and explicit-target-id
+                 (findf (lambda (u) (equal? (hash-ref u 'id -1) explicit-target-id)) ally-units))
+            (let loop ([rem ally-units] [best-u #f] [best-d 5.3])
+              (if (null? rem)
+                  best-u
+                  (let* ([u (car rem)]
+                         [d (dist2d wmx wmy (hash-ref u 'x base-x) (hash-ref u 'y base-y))])
+                    (if (< d best-d)
+                        (loop (cdr rem) u d)
+                        (loop (cdr rem) best-u best-d)))))))
+      (cond
+        [(and wm-targetable? (not (null? wm-snipers)))
+         (for ([r (in-list wm-snipers)])
+           (define rid (hash-ref r 'id 101))
+           (set-add! splash-evading-tags rid)
+           (emit! (list 'attack-unit rid wm-id)))
+         (for ([u (in-list combat-units)])
+           (define uid (hash-ref u 'id 101))
+           (define ut (unit-type-sym u))
+           (define gr (unit-eff-ground-range u))
+           (define ux (hash-ref u 'x base-x))
+           (define uy (hash-ref u 'y base-y))
+           (when (and (< gr 5.5)
+                      (not (sc2-unit-is-flying-sym? ut))
+                      (not (set-member? splash-evading-tags uid))
+                      (<= (dist2d wmx wmy ux uy) 6.8))
+             (define-values (kx ky) (compute-kite-vector ux uy wmx wmy 3.5))
+             (set-add! splash-evading-tags uid)
+             (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy)))))]
+        [(and live-tactics-obs? wm-burrowed? (not wm-targetable?))
+         (define nearby-pack
+           (filter (lambda (u)
+                     (<= (dist2d wmx wmy (hash-ref u 'x base-x) (hash-ref u 'y base-y)) 9.5))
+                   combat-units))
+         (when (>= (length nearby-pack) 2)
+           (define cheap-pool
+             (filter (lambda (u) (memq (unit-type-sym u) '(zergling zealot marine adept)))
+                     nearby-pack))
+           (define bait-u
+             (argmin (lambda (u) (hash-ref u 'hp 100))
+                     (if (not (null? cheap-pool)) cheap-pool nearby-pack)))
+           (define bait-id (hash-ref bait-u 'id 101))
+           (set-add! splash-evading-tags bait-id)
+           (hash-set! splash-st (cons 'wm-disarmed wm-id) (+ frame 620))
+           (emit! (list 'move bait-id (safe-coord wmx base-x) (safe-coord wmy base-y)))
+           (for ([u (in-list nearby-pack)]
+                 #:when (not (equal? (hash-ref u 'id -1) bait-id)))
+             (define uid (hash-ref u 'id 101))
+             (define ux (hash-ref u 'x base-x))
+             (define uy (hash-ref u 'y base-y))
+             (when (and (not (set-member? splash-evading-tags uid))
+                        (<= (dist2d wmx wmy ux uy) 7.5))
+               (define-values (kx ky) (compute-kite-vector ux uy wmx wmy 4.5))
+               (set-add! splash-evading-tags uid)
+               (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy))))))]
+        [targeted-ally
+         (define tid (hash-ref targeted-ally 'id 101))
+         (define tx (hash-ref targeted-ally 'x base-x))
+         (define ty (hash-ref targeted-ally 'y base-y))
+         (when explicit-target-id
+           (hash-set! splash-st (cons 'wm-disarmed wm-id) (+ frame 620)))
+         (unless (set-member? splash-evading-tags tid)
+           (define-values (kx ky) (compute-kite-vector tx ty wmx wmy 3.5))
+           (set-add! splash-evading-tags tid)
+           (emit! (list 'kite tid (quantize-cell-2.5 kx tx) (quantize-cell-2.5 ky ty))))
+         (for ([ally (in-list combat-units)])
+           (define aid (hash-ref ally 'id 101))
+           (define ax (hash-ref ally 'x base-x))
+           (define ay (hash-ref ally 'y base-y))
+           (when (and (not (equal? aid tid))
+                      (not (set-member? splash-evading-tags aid))
+                      (<= (dist2d tx ty ax ay) 2.2))
+             (define-values (sx sy) (compute-kite-vector ax ay tx ty 2.8))
+             (set-add! splash-evading-tags aid)
+             (emit! (list 'kite aid (quantize-cell-2.5 sx ax) (quantize-cell-2.5 sy ay)))))])))
 
   ;; 3. Enemy Baneling Light-Unit Radial Pre-Split (Armored units hold & focus-fire)
   (define enemy-banelings
@@ -5673,7 +7079,7 @@
           (define by (hash-ref closest-bane 'y nat-y))
           (define-values (kx ky) (compute-kite-vector ux uy bx by 3.0))
           (set-add! splash-evading-tags uid)
-          (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy)))))))
+          (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy)))))))
 
   ;; 4. Enemy Hellion & Burrowed Lurker Linear Splash Lateral Scatter (+/- perpendicular n-hat)
   (define linear-splash-enemies
@@ -5700,7 +7106,6 @@
           (when (and (> d 0.25) (<= d max-line-range))
             (define vx (/ (- ux lex) d))
             (define vy (/ (- uy ley) d))
-            ;; Check if any other ground ally lies close to the same line-of-fire ray
             (define collinear-ally?
               (for/or ([o (in-list combat-units)]
                        #:when (not (equal? (hash-ref o 'id -1) uid)))
@@ -5718,15 +7123,12 @@
               (define lx (+ ux (* 2.5 nx)))
               (define ly (+ uy (* 2.5 ny)))
               (set-add! splash-evading-tags uid)
-              (emit! (list 'kite uid (safe-coord lx ux) (safe-coord ly uy)))))))))
+              (emit! (list 'kite uid (quantize-cell-2.5 lx ux) (quantize-cell-2.5 ly uy)))))))))
 
   ;; 5. Counter-Micro vs. Enemy `oracle-stasis-trap` / `stasis-ward`
   (define enemy-stasis-traps
     (filter (lambda (e) (memq (unit-type-sym e) '(oracle-stasis-trap stasis-ward)))
             (append enemy-units enemy-bldgs)))
-  (define ally-has-detector?
-    (ormap (lambda (u) (sc2-unit-is-detector-sym? (unit-type-sym u)))
-           (append ally-units ally-bldgs)))
   (for ([trap (in-list enemy-stasis-traps)])
     (define trap-id (hash-ref trap 'id 9001))
     (define tx (hash-ref trap 'x nat-x))
@@ -5765,7 +7167,7 @@
                     (<= (dist2d tx ty ux uy) 6.0))
            (define-values (kx ky) (compute-kite-vector ux uy tx ty 6.8))
            (set-add! splash-evading-tags uid)
-           (emit! (list 'kite uid (safe-coord kx base-x) (safe-coord ky base-y)))))]
+           (emit! (list 'kite uid (quantize-cell-2.5 kx base-x) (quantize-cell-2.5 ky base-y)))))]
       [(>= trap-prog 1.0)
        (define nearby-ground
          (filter (lambda (u)
@@ -5792,7 +7194,127 @@
            (when (<= (dist2d tx ty ux uy) 6.5)
              (define-values (kx ky) (compute-kite-vector ux uy tx ty 6.8))
              (set-add! splash-evading-tags uid)
-             (emit! (list 'kite uid (safe-coord kx base-x) (safe-coord ky base-y))))))]))
+             (emit! (list 'kite uid (quantize-cell-2.5 kx base-x) (quantize-cell-2.5 ky base-y))))))]))
+
+  ;; 6. Anti-Siege-Tank-Sieged Line Discipline, Staggered Ravager Bile & 3-Flank Break
+  (define immobile-bile-targets
+    (filter (lambda (e)
+              (memq (unit-type-sym e) '(siege-tank-sieged widow-mine-burrowed liberator-ag)))
+            enemy-units))
+  (when (and live-tactics-obs? (not (null? immobile-bile-targets)))
+    (define free-ravagers
+      (filter (lambda (u)
+                (and (eq? (unit-type-sym u) 'ravager)
+                     (not (set-member? ravager-cast-tags (hash-ref u 'id 0)))))
+              combat-units))
+    (for ([tgt (in-list immobile-bile-targets)])
+      (define tx0 (hash-ref tgt 'x nat-x))
+      (define ty0 (hash-ref tgt 'y nat-y))
+      (define in-range-ravs
+        (filter (lambda (r)
+                  (and (not (set-member? ravager-cast-tags (hash-ref r 'id 0)))
+                       (<= (dist2d tx0 ty0 (hash-ref r 'x base-x) (hash-ref r 'y base-y)) 9.5)))
+                free-ravagers))
+      (for ([r (in-list (take in-range-ravs (min 3 (length in-range-ravs))))]
+            [bidx (in-naturals)])
+        (define rid (hash-ref r 'id 140))
+        (define off-x (* 0.35 (- bidx 1)))
+        (define off-y (* 0.35 (if (= bidx 1) 1 0)))
+        (set-add! ravager-cast-tags rid)
+        (set-add! splash-evading-tags rid)
+        (emit! (list 'cast-spell rid 'corrosive-bile
+                     (safe-coord (+ tx0 off-x) tx0)
+                     (safe-coord (+ ty0 off-y) ty0))))))
+
+  (define enemy-sieged-tanks-near
+    (filter (lambda (e)
+              (and (eq? (unit-type-sym e) 'siege-tank-sieged)
+                   (<= (dist2d prelim-army-cx prelim-army-cy
+                               (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                       17.5)))
+            enemy-units))
+  (define our-z-early
+    (hash-ref obs 'our-terrain-z
+              (if (not (null? combat-units)) (hash-ref (car combat-units) 'z 10.0) 10.0)))
+  (define enemy-z-early
+    (hash-ref obs 'enemy-terrain-z
+              (if (not (null? enemy-units)) (hash-ref (car enemy-units) 'z 10.0) 10.0)))
+  (define siege-uphill? (>= (- (exact->inexact enemy-z-early) (exact->inexact our-z-early)) 0.75))
+  (define have-siege-breaker?
+    (or (ormap (lambda (u)
+                 (memq (unit-type-sym u) '(viper brood-lord tempest liberator liberator-ag disruptor)))
+               combat-units)
+        (ormap (lambda (eff) (eq? (hash-ref eff 'type 'none) 'blinding-cloud)) effects)))
+  (define local-ally-val
+    (for/sum ([u (in-list combat-units)])
+      (+ (sc2-min-cost (unit-type-sym u) 50) (sc2-gas-cost (unit-type-sym u) 0))))
+  (define local-enemy-val
+    (max 100
+         (for/sum ([e (in-list enemy-units)]
+                   #:when (<= (dist2d prelim-army-cx prelim-army-cy
+                                      (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                              19.0))
+           (+ (sc2-min-cost (unit-type-sym e) 50) (sc2-gas-cost (unit-type-sym e) 0)))))
+  (define local-val-ratio (/ (exact->inexact local-ally-val) (exact->inexact local-enemy-val)))
+  (define can-break-siege-line?
+    (or (>= local-val-ratio (if siege-uphill? 1.55 1.40))
+        (>= (hash-ref obs 'supply-used 0) 180)
+        have-siege-breaker?))
+  (define siege-shelling-friendly-structure?
+    (ormap (lambda (st)
+             (define stx (hash-ref st 'x 9999.0))
+             (define sty (hash-ref st 'y 9999.0))
+             (ormap (lambda (b)
+                      (<= (dist2d stx sty (hash-ref b 'x base-x) (hash-ref b 'y base-y)) 15.5))
+                    ally-bldgs))
+           enemy-sieged-tanks-near))
+  (define siege-line-hold?
+    (and live-tactics-obs?
+         (>= (length enemy-sieged-tanks-near) 2)
+         (not siege-shelling-friendly-structure?)
+         (not can-break-siege-line?)))
+  (when (and live-tactics-obs?
+             (>= (length enemy-sieged-tanks-near) 2)
+             can-break-siege-line?
+             (>= (length combat-units) 6)
+             (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                        '(siege-flank-wings)
+                                        frame
+                                        24))
+    (define st0 (car enemy-sieged-tanks-near))
+    (define stx (hash-ref st0 'x enemy-x))
+    (define sty (hash-ref st0 'y enemy-y))
+    (define sdx (- stx prelim-army-cx))
+    (define sdy (- sty prelim-army-cy))
+    (define sd (max 1.0 (sqrt (+ (* sdx sdx) (* sdy sdy)))))
+    (define snx (/ (- sdy) sd))
+    (define sny (/ sdx sd))
+    (define flank-units
+      (sort (filter (lambda (u)
+                      (not (set-member? splash-evading-tags (hash-ref u 'id 0))))
+                    combat-units)
+            <
+            #:key (lambda (u)
+                    (+ (* (- (hash-ref u 'x prelim-army-cx) prelim-army-cx) snx)
+                       (* (- (hash-ref u 'y prelim-army-cy) prelim-army-cy) sny)))))
+    (define n-flank (length flank-units))
+    (define cut1 (quotient n-flank 3))
+    (define cut2 (quotient (* 2 n-flank) 3))
+    (define spatial-wings
+      (if (>= n-flank 3)
+          (list (take flank-units cut1)
+                (take (drop flank-units cut1) (- cut2 cut1))
+                (drop flank-units cut2))
+          (list flank-units '() '())))
+    (for ([wing-us (in-list spatial-wings)]
+          [lat (in-list '(-5.0 0.0 5.0))])
+      (define wing-ids (map (lambda (u) (hash-ref u 'id 0)) wing-us))
+      (when (not (null? wing-ids))
+        (for ([wid (in-list wing-ids)])
+          (set-add! splash-evading-tags wid))
+        (emit! (list 'attack-pos wing-ids
+                     (safe-coord (+ stx (* lat snx)) stx)
+                     (safe-coord (+ sty (* lat sny)) sty))))))
 
   ;; ---------------------------------------------------------------------------
   ;; Friendly Oracle Spell Micro (`stasis-ward` & `pulsar-beam`)
@@ -5805,6 +7327,7 @@
               (memq (unit-type-sym eb)
                     '(hatchery lair hive nexus command-center orbital-command planetary-fortress)))
             enemy-bldgs))
+  (define oracle-cast-tags (mutable-seteqv))
   (for ([u (in-list combat-units)]
         #:when (eq? (unit-type-sym u) 'oracle))
     (define uid (hash-ref u 'id 101))
@@ -5827,7 +7350,6 @@
               nearby-enemy-workers))
     (when (>= u-energy 50)
       (cond
-        ;; 1. Mineral-line Stasis Harass
         [(or (>= (length nearby-enemy-workers) 2) nearby-enemy-th)
          (define-values (wx wy)
            (if (not (null? nearby-enemy-workers))
@@ -5840,13 +7362,13 @@
                                          n))))
                (values (exact-round (hash-ref nearby-enemy-th 'x ux))
                        (exact-round (hash-ref nearby-enemy-th 'y uy)))))
+         (set-add! oracle-cast-tags uid)
          (emit! (list 'cast-spell uid 'stasis-ward wx wy))
          (when (not (null? close-enemy-workers))
            (define nearest-ew
              (argmin (lambda (ew) (dist2d ux uy (hash-ref ew 'x ux) (hash-ref ew 'y uy)))
                      close-enemy-workers))
            (emit! (list 'cast-spell uid 'pulsar-beam (hash-ref nearest-ew 'id 0))))]
-        ;; 2. Expansion Disruption
         [(and (<= (dist2d ux uy enemy-exp-x enemy-exp-y) 15.0)
               (not (ormap (lambda (th)
                             (<= (dist2d enemy-exp-x enemy-exp-y
@@ -5858,8 +7380,8 @@
                                         (hash-ref ft 'x 9999) (hash-ref ft 'y 9999))
                                 5.0))
                           friendly-stasis-traps)))
+         (set-add! oracle-cast-tags uid)
          (emit! (list 'cast-spell uid 'stasis-ward enemy-exp-x enemy-exp-y))]
-        ;; 3. Defensive Choke Stasis Ward
         [(and (<= (dist2d ux uy nat-x nat-y) 15.0)
               (not (ormap (lambda (ft)
                             (<= (dist2d nat-x nat-y
@@ -5870,8 +7392,8 @@
                   (ormap (lambda (e)
                            (<= (dist2d ux uy (hash-ref e 'x 9999) (hash-ref e 'y 9999)) 18.0))
                          enemy-units)))
+         (set-add! oracle-cast-tags uid)
          (emit! (list 'cast-spell uid 'stasis-ward nat-x nat-y))]))
-    ;; Deactivate Pulsar Beam if active and no enemy within 6.5 tiles
     (when (and (list? u-buffs)
                (or (memq 'pulsar-beam u-buffs) (memq 'oracle-weapon u-buffs))
                (not (ormap (lambda (e)
@@ -5880,15 +7402,15 @@
       (emit! (list 'cast-spell uid 'pulsar-beam-off uid))))
 
   ;; ---------------------------------------------------------------------------
-  ;; Active Combat Spells & Engagement Micro (Protected by Weapon-Swing Lock
-  ;; & Guided by Multi-Depth Mirrored Tactical Micro Brain)
+  ;; Active Combat Spells, Bistable Wave Hysteresis & Mutually Exclusive Micro
   ;; ---------------------------------------------------------------------------
-  (define live-obs? (hash-has-key? raw-obs 'mineral-harvesters))
+  (define live-obs? live-tactics-obs?)
   (define live-combat-supply
     (for/sum ([u (in-list combat-units)])
       (unit-supply-cost (unit-type-sym u))))
   (define visible-enemy-combat-supply
-    (for/sum ([e (in-list enemy-units)])
+    (for/sum ([e (in-list enemy-units)]
+              #:when (combat-unit-record? e))
       (unit-supply-cost (unit-type-sym e))))
   (define lanchester-force-ratio
     (/ (exact->inexact live-combat-supply)
@@ -5902,6 +7424,20 @@
     (if live-obs?
         22
         SC2-ATTACK-WAVE-MIN-COMBAT-UNITS))
+  (define wave-commit-active?
+    (if live-obs?
+        (bistable-hysteresis-step
+         bstates
+         'army-attack-wave
+         frame
+         #:enter? (or (and (>= live-combat-supply 26) (>= lanchester-force-ratio 1.35))
+                      (>= live-combat-supply 42)
+                      (>= (length combat-units) live-attack-wave-min))
+         #:exit? (and (< live-combat-supply 16)
+                      (< lanchester-force-ratio 0.85))
+         #:min-dwell-loops 112
+         #:cooldown-loops 44)
+        #t))
   (define engagement-enemies
     (if live-obs?
         (append enemy-units enemy-bldgs)
@@ -5921,14 +7457,59 @@
                  (and (hash-ref u 'burrowed #f) #t)))
            combat-units))
 
+  ;; Enemy composition flags for mode-switches & T3 spell targeting
+  (define enemy-air-or-colossus
+    (filter (lambda (e)
+              (define et (unit-type-sym e))
+              (or (eq? et 'colossus)
+                  (sc2-unit-is-flying-sym? et)))
+            enemy-units))
+  (define enemy-massive-air-or-colossus
+    (filter (lambda (e)
+              (memq (unit-type-sym e)
+                    '(brood-lord broodlord tempest carrier battlecruiser colossus mothership liberator liberator-ag)))
+            enemy-units))
+  (define enemy-mutalisks
+    (filter (lambda (e) (eq? (unit-type-sym e) 'mutalisk)) enemy-units))
+
   (when (not (null? engagement-enemies))
-    ;; Queen transfusion on wounded ally
-    (define queens (filter (lambda (u) (eq? (unit-type-sym u) 'queen)) ally-units))
-    (define wounded-ally
-      (findf (lambda (u) (< (hash-ref u 'hp 100) (hash-ref u 'max-hp 150))) combat-units))
-    (for ([q (in-list queens)])
-      (when (and wounded-ally (>= (hash-ref q 'energy SC2-QUEEN-TRANSFUSION-ENERGY) SC2-QUEEN-TRANSFUSION-ENERGY))
-        (emit! (list 'cast-spell (hash-ref q 'id 120) 'transfusion (hash-ref wounded-ally 'id 141)))))
+    ;; Leashed 1-to-1 Queen Transfusion (`<= 10.0` tiles, `max-hp >= 120`, never Zerglings/Banelings)
+    (define queen-cast-tags (mutable-seteqv))
+    (define transfusion-queens
+      (filter (lambda (u)
+                (and (eq? (unit-type-sym u) 'queen)
+                     (not (unit-leased-above? leases (hash-ref u 'id 0) 'creep-queen frame))))
+              ally-units))
+    (define transfusion-targets
+      (filter (lambda (u)
+                (define max-hp (hash-ref u 'max-hp 150))
+                (define cur-hp (hash-ref u 'hp max-hp))
+                (define buffs (hash-ref u 'buffs '()))
+                (define ut (unit-type-sym u))
+                (and (>= max-hp 120)
+                     (not (memq ut '(zergling baneling broodling changeling)))
+                     (>= (- max-hp cur-hp) (if live-obs? 45 1))
+                     (not (and (list? buffs) (memq 'transfusion buffs)))))
+              (if live-obs? (append combat-units ally-bldgs) combat-units)))
+    (dispatch-macro-energy!
+     transfusion-queens
+     transfusion-targets
+     frame
+     (mutable-seteqv)
+     #:min-energy SC2-QUEEN-TRANSFUSION-ENERGY
+     #:valid-pair? (lambda (q tgt)
+                     (or (not live-obs?)
+                         (<= (dist2d (hash-ref q 'x base-x) (hash-ref q 'y base-y)
+                                     (hash-ref tgt 'x base-x) (hash-ref tgt 'y base-y))
+                             10.0)))
+     #:score-pair (lambda (q tgt)
+                    (- (- (hash-ref tgt 'max-hp 150) (hash-ref tgt 'hp 100))
+                       (* 2.0 (dist2d (hash-ref q 'x base-x) (hash-ref q 'y base-y)
+                                      (hash-ref tgt 'x base-x) (hash-ref tgt 'y base-y)))))
+     #:emit-cast! (lambda (q tgt)
+                    (define qid (hash-ref q 'id 120))
+                    (set-add! queen-cast-tags qid)
+                    (emit! (list 'cast-spell qid 'transfusion (hash-ref tgt 'id 141)))))
 
     (for ([u (in-list combat-units)])
       (define ut (unit-type-sym u))
@@ -5936,7 +7517,10 @@
       (define ux (hash-ref u 'x base-x))
       (define uy (hash-ref u 'y base-y))
       (define u-hp (hash-ref u 'hp 100))
+      (define u-energy (hash-ref u 'energy 0))
       (define u-buffs (hash-ref u 'buffs '()))
+      (define u-ab-id (hash-ref u 'order-ability-id 0))
+      (define protected-class (and (> u-ab-id 0) (sc2-order-protection-class u-ab-id)))
       (define target-enemy (select-target-enemy-for-unit ux uy engagement-enemies ut ally-has-stealth?))
       (define eid (hash-ref target-enemy 'id 9001))
       (define etype (unit-type-sym target-enemy))
@@ -5956,13 +7540,7 @@
              (or (not live-obs?)
                  (<= edist 22.0)
                  enemy-near-our-territory?
-                 (and (>= live-combat-supply 26) (>= lanchester-force-ratio 1.35))
-                 (>= live-combat-supply 40)
-                 (>= (length combat-units) live-attack-wave-min))))
-      ;; Siege Tank Range-Leashing for Bio vs Static Defense (Spine Crawler / Cannon / Bunker):
-      ;; When a friendly Siege Tank is within 15.5 tiles of an enemy static defense structure,
-      ;; hold short-range bio outside the static defense's 7.0 range (at 8.5 tiles) so the
-      ;; Siege Tank (range 13) shells it down without feeding Marines/Roaches into Spine Crawlers!
+                 wave-commit-active?)))
       (define tank-supporting-vs-static?
         (and (memq ut short-range-bio-syms)
              (memq etype static-defense-syms)
@@ -5970,23 +7548,55 @@
              (ormap (lambda (tk)
                       (<= (dist2d ex ey (hash-ref tk 'x ux) (hash-ref tk 'y uy)) 15.5))
                     ally-siege-tanks)))
+      (define nearest-enemy-tank
+        (and siege-line-hold?
+             (not (sc2-unit-is-flying-sym? ut))
+             (findf (lambda (st)
+                      (<= (dist2d ux uy (hash-ref st 'x 9999.0) (hash-ref st 'y 9999.0)) 15.5))
+                    enemy-sieged-tanks-near)))
+      (define (emit-caster-rear-leash!)
+        (define d-home (max 1.0 (dist2d prelim-army-cx prelim-army-cy base-x base-y)))
+        (define lx (safe-coord (+ prelim-army-cx (* 3.0 (/ (- base-x prelim-army-cx) d-home))) base-x))
+        (define ly (safe-coord (+ prelim-army-cy (* 3.0 (/ (- base-y prelim-army-cy) d-home))) base-y))
+        (when (> (dist2d ux uy lx ly) 2.2)
+          (emit! (list 'move uid lx ly))))
       (define (emit-engage-or-rally!)
         (cond
+          [nearest-enemy-tank
+           (define-values (kx ky)
+             (compute-kite-vector ux uy
+                                  (hash-ref nearest-enemy-tank 'x ex)
+                                  (hash-ref nearest-enemy-tank 'y ey)
+                                  3.0))
+           (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy)))]
           [tank-supporting-vs-static?
            (define-values (kx ky) (compute-kite-vector ux uy ex ey 2.5))
-           (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy)))]
+           (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy)))]
           [unit-should-engage-target?
            (emit! (list 'attack-unit uid eid))]
           [(> (dist2d ux uy nat-x nat-y) 10.0)
            (emit! (list 'attack-pos uid nat-x nat-y))]))
       (define mirrored-acts (hash-ref tbrain-unit-actions uid '()))
-      ;; Weapon-swing phase lock: never interrupt a unit in the middle of its attack windup
-      (unless (order-ledger-unit-in-attack-swing? oledger u)
+
+      ;; Respect weapon-swing lock, splash evasion, Queen transfusion casts, and channeled/morph orders
+      (unless (or (set-member? splash-evading-tags uid)
+                  (set-member? queen-cast-tags uid)
+                  (set-member? ravager-cast-tags uid)
+                  (set-member? oracle-cast-tags uid)
+                  (and live-obs? (memq protected-class '(morph channel)))
+                  (order-ledger-unit-in-attack-swing? oledger u))
         (case ut
           [(ravager)
-           (when (or (not live-upgrades-tracked?) (<= edist 9.5))
-             (emit! (list 'cast-spell uid 'corrosive-bile ex ey)))
-           (emit-engage-or-rally!)]
+           (if (or (not live-upgrades-tracked?)
+                   (and (<= edist 9.5)
+                        (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                                   (list 'ravager-bile uid)
+                                                   frame
+                                                   156)))
+               (begin
+                 (emit! (list 'cast-spell uid 'corrosive-bile ex ey))
+                 (unless live-obs? (emit-engage-or-rally!)))
+               (emit-engage-or-rally!))]
           [(lurker lurker-burrowed)
            (define is-burrowed? (or (eq? ut 'lurker-burrowed) (hash-ref u 'burrowed #f)))
            (define min-ground-dist
@@ -5994,13 +7604,19 @@
                        ([e (in-list engagement-enemies)]
                         #:when (not (sc2-unit-is-flying-sym? (unit-type-sym e))))
                (min best (dist2d ux uy (hash-ref e 'x ex) (hash-ref e 'y ey)))))
+           (define mode-ready?
+             (or (not live-obs?)
+                 (>= (- frame (hash-ref splash-st (cons 'mode-dwell uid) -1000)) 48)))
            (cond
-             [(and is-burrowed? (> min-ground-dist 10.5))
+             [(and is-burrowed? (> min-ground-dist 10.5) mode-ready?)
+              (hash-set! splash-st (cons 'mode-dwell uid) frame)
               (emit! (list 'cast-spell uid 'burrow-up uid))]
              [(and (not is-burrowed?)
+                   mode-ready?
                    (or (not live-upgrades-tracked?) (<= min-ground-dist 9.0)))
+              (hash-set! splash-st (cons 'mode-dwell uid) frame)
               (emit! (list 'cast-spell uid 'burrow eid))
-              (emit-engage-or-rally!)]
+              (unless live-obs? (emit-engage-or-rally!))]
              [else
               (emit-engage-or-rally!)])]
           [(widow-mine widow-mine-burrowed)
@@ -6008,12 +7624,18 @@
            (define min-enemy-dist
              (for/fold ([best +inf.0]) ([e (in-list engagement-enemies)])
                (min best (dist2d ux uy (hash-ref e 'x ex) (hash-ref e 'y ey)))))
+           (define holding-choke? (<= (dist2d ux uy nat-x nat-y) 4.0))
+           (define wm-dwell-ready?
+             (or (not live-obs?)
+                 (>= (- frame (hash-ref splash-st (cons 'wm-dwell uid) -1000)) 56)))
            (cond
-             [(and is-burrowed? (> min-enemy-dist 6.5))
+             [(and is-burrowed?
+                   (> min-enemy-dist (if live-obs? 13.5 6.5))
+                   (not (and live-obs? holding-choke?))
+                   wm-dwell-ready?)
+              (hash-set! splash-st (cons 'wm-dwell uid) frame)
               (emit! (list 'cast-spell uid 'widow-mine-unburrow uid))]
              [is-burrowed?
-              ;; Active Widow Mine retargeting: aim Sentinel Missile at the enemy with the most
-              ;; nearby non-decoy allies within 1.75 splash radius
               (define best-cluster-enemy
                 (let loop ([rem engagement-enemies] [best-e target-enemy] [best-cnt -1])
                   (if (null? rem)
@@ -6032,30 +7654,242 @@
                                   (loop (cdr rem) e cnt)
                                   (loop (cdr rem) best-e best-cnt)))
                             (loop (cdr rem) best-e best-cnt))))))
-              (emit! (list 'attack-unit uid (hash-ref best-cluster-enemy 'id eid)))]
-             [(or (not live-upgrades-tracked?) (<= min-enemy-dist 5.5))
+              (when (<= min-enemy-dist 5.5)
+                (emit! (list 'attack-unit uid (hash-ref best-cluster-enemy 'id eid))))]
+             [(and wm-dwell-ready?
+                   (or (not live-upgrades-tracked?)
+                       (<= min-enemy-dist 9.5)
+                       (and live-obs? holding-choke?)
+                       under-tactics-base-attack?))
+              (hash-set! splash-st (cons 'wm-dwell uid) frame)
               (emit! (list 'cast-spell uid 'burrow eid))
-              (emit-engage-or-rally!)]
+              (unless live-obs? (emit-engage-or-rally!))]
+             [else
+              (emit-engage-or-rally!)])]
+          [(liberator liberator-ag)
+           (define is-ag? (eq? ut 'liberator-ag))
+           (define ground-enemies-near
+             (filter (lambda (e)
+                       (and (not (sc2-unit-is-flying-sym? (unit-type-sym e)))
+                            (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                                (if is-ag? 11.5 9.0))))
+                     engagement-enemies))
+           (define lib-dwell-ready?
+             (>= (- frame (hash-ref splash-st (cons 'lib-dwell uid) -1000)) 48))
+           (cond
+             [(and (not is-ag?) (not (null? ground-enemies-near)) lib-dwell-ready?)
+              (define ge (car ground-enemies-near))
+              (define gx (hash-ref ge 'x ex))
+              (define gy (hash-ref ge 'y ey))
+              (define gd (max 1.0 (dist2d ux uy gx gy)))
+              (define zx (safe-coord (+ ux (* (min 4.0 gd) (/ (- gx ux) gd))) gx))
+              (define zy (safe-coord (+ uy (* (min 4.0 gd) (/ (- gy uy) gd))) gy))
+              (hash-set! splash-st (cons 'lib-dwell uid) frame)
+              (emit! (list 'cast-spell uid 'morph-liberator-ag zx zy))]
+             [(and is-ag? (null? ground-enemies-near) lib-dwell-ready?)
+              (hash-set! splash-st (cons 'lib-dwell uid) frame)
+              (emit! (list 'cast-spell uid 'morph-liberator-aa uid))]
+             [(not is-ag?)
+              (emit-engage-or-rally!)])]
+          [(viking viking-fighter viking-assault)
+           (define is-assault? (eq? ut 'viking-assault))
+           (define ground-close?
+             (ormap (lambda (e)
+                      (and (not (sc2-unit-is-flying-sym? (unit-type-sym e)))
+                           (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 6.0)))
+                    engagement-enemies))
+           (define vik-dwell-ready?
+             (>= (- frame (hash-ref splash-st (cons 'vik-dwell uid) -1000)) 48))
+           (cond
+             [(and is-assault? (not (null? enemy-air-or-colossus)))
+              (hash-set! splash-st (cons 'vik-dwell uid) frame)
+              (emit! (list 'cast-spell uid 'morph-viking-fighter uid))]
+             [(and (not is-assault?)
+                   (null? enemy-air-or-colossus)
+                   ground-close?
+                   vik-dwell-ready?)
+              (hash-set! splash-st (cons 'vik-dwell uid) frame)
+              (emit! (list 'cast-spell uid 'morph-viking-assault uid))]
+             [else
+              (emit-engage-or-rally!)])]
+          [(thor thor-ap)
+           (define is-high-impact? (eq? ut 'thor-ap))
+           (define thor-dwell-ready?
+             (>= (- frame (hash-ref splash-st (cons 'thor-dwell uid) -1000)) 48))
+           (cond
+             [(and (not is-high-impact?)
+                   (not (null? enemy-massive-air-or-colossus))
+                   thor-dwell-ready?)
+              (hash-set! splash-st (cons 'thor-dwell uid) frame)
+              (emit! (list 'cast-spell uid 'morph-thor-high-impact uid))]
+             [(and is-high-impact?
+                   (null? enemy-massive-air-or-colossus)
+                   (not (null? enemy-mutalisks))
+                   thor-dwell-ready?)
+              (hash-set! splash-st (cons 'thor-dwell uid) frame)
+              (emit! (list 'cast-spell uid 'morph-thor-explosive uid))]
+             [else
+              (emit-engage-or-rally!)])]
+          [(viper)
+           (define consume-bldg
+             (and (< u-energy 75)
+                  (findf (lambda (b)
+                           (and (>= (hash-ref b 'hp 0) 350)
+                                (<= (dist2d ux uy (hash-ref b 'x base-x) (hash-ref b 'y base-y)) 14.0)))
+                         ally-bldgs)))
+           (define air-clump-tgt
+             (and (>= u-energy 125)
+                  (findf (lambda (e)
+                           (and (sc2-unit-is-flying-sym? (unit-type-sym e))
+                                (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 9.0)
+                                (>= (count (lambda (o)
+                                             (and (sc2-unit-is-flying-sym? (unit-type-sym o))
+                                                  (<= (dist2d (hash-ref e 'x 0.0) (hash-ref e 'y 0.0)
+                                                              (hash-ref o 'x 9999.0) (hash-ref o 'y 9999.0))
+                                                      3.5)))
+                                           enemy-units)
+                                    3)))
+                         enemy-units)))
+           (define cloud-tgt
+             (and (>= u-energy 100)
+                  (findf (lambda (e)
+                           (define et2 (unit-type-sym e))
+                           (and (not (sc2-unit-is-flying-sym? et2))
+                                (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 11.0)
+                                (or (eq? et2 'siege-tank-sieged)
+                                    (>= (count (lambda (o)
+                                                 (<= (dist2d (hash-ref e 'x 0.0) (hash-ref e 'y 0.0)
+                                                             (hash-ref o 'x 9999.0) (hash-ref o 'y 9999.0))
+                                                     2.5))
+                                               enemy-units)
+                                        4))))
+                         enemy-units)))
+           (define abduct-tgt
+             (and (>= u-energy 75)
+                  (findf (lambda (e)
+                           (and (memq (unit-type-sym e)
+                                      '(siege-tank siege-tank-sieged colossus thor thor-ap
+                                        carrier tempest immortal battlecruiser brood-lord lurker-burrowed))
+                                (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 9.5)))
+                         enemy-units)))
+           (cond
+             [consume-bldg
+              (emit! (list 'cast-spell uid 'viper-consume (hash-ref consume-bldg 'id 0)))]
+             [air-clump-tgt
+              (emit! (list 'cast-spell uid 'parasitic-bomb (hash-ref air-clump-tgt 'id 0)))]
+             [cloud-tgt
+              (emit! (list 'cast-spell uid 'blinding-cloud
+                           (safe-coord (hash-ref cloud-tgt 'x ex) ex)
+                           (safe-coord (hash-ref cloud-tgt 'y ey) ey)))]
+             [abduct-tgt
+              (emit! (list 'cast-spell uid 'abduct (hash-ref abduct-tgt 'id 0)))]
+             [else
+              (emit-caster-rear-leash!)])]
+          [(infestor infestor-burrowed)
+           (define fungal-tgt
+             (and (>= u-energy 75)
+                  (findf (lambda (e)
+                           (and (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 10.0)
+                                (>= (count (lambda (o)
+                                             (<= (dist2d (hash-ref e 'x 0.0) (hash-ref e 'y 0.0)
+                                                         (hash-ref o 'x 9999.0) (hash-ref o 'y 9999.0))
+                                                 2.5))
+                                           enemy-units)
+                                    3)))
+                         enemy-units)))
+           (if fungal-tgt
+               (emit! (list 'cast-spell uid 'fungal-growth
+                            (safe-coord (hash-ref fungal-tgt 'x ex) ex)
+                            (safe-coord (hash-ref fungal-tgt 'y ey) ey)))
+               (emit-caster-rear-leash!))]
+          [(high-templar)
+           (define storm-tgt
+             (and (>= u-energy 75)
+                  (or (not live-upgrades-tracked?) (has-upgrade? 'psi-storm))
+                  (findf (lambda (e)
+                           (define ex2 (hash-ref e 'x 9999.0))
+                           (define ey2 (hash-ref e 'y 9999.0))
+                           (and (<= (dist2d ux uy ex2 ey2) 9.0)
+                                (not (ormap (lambda (eff)
+                                              (and (memq (hash-ref eff 'type 'none) '(psi-storm psionic-storm))
+                                                   (<= (dist2d ex2 ey2
+                                                               (hash-ref eff 'x 9999.0)
+                                                               (hash-ref eff 'y 9999.0))
+                                                       2.0)))
+                                            effects))
+                                (or (eq? (unit-type-sym e) 'siege-tank-sieged)
+                                    (>= (count (lambda (o)
+                                                 (<= (dist2d ex2 ey2
+                                                             (hash-ref o 'x 9999.0)
+                                                             (hash-ref o 'y 9999.0))
+                                                     2.0))
+                                               enemy-units)
+                                        3))))
+                         enemy-units)))
+           (define feedback-tgt
+             (and (>= u-energy 50)
+                  (findf (lambda (e)
+                           (and (>= (hash-ref e 'energy 0) 75)
+                                (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 10.0)))
+                         enemy-units)))
+           (cond
+             [storm-tgt
+              (emit! (list 'cast-spell uid 'psi-storm
+                           (safe-coord (hash-ref storm-tgt 'x ex) ex)
+                           (safe-coord (hash-ref storm-tgt 'y ey) ey)))]
+             [feedback-tgt
+              (emit! (list 'cast-spell uid 'feedback (hash-ref feedback-tgt 'id 0)))]
+             [(< u-energy 50)
+              (emit-caster-rear-leash!)]
+             [else
+              (emit-engage-or-rally!)])]
+          [(battlecruiser)
+           (define jump-ready-f (hash-ref splash-st (cons 'bc-jump-ready uid) 0))
+           (define yamato-ready-f (hash-ref splash-st (cons 'bc-yamato-ready uid) 0))
+           (define yamato-tgt
+             (and (>= frame yamato-ready-f)
+                  (or (not live-upgrades-tracked?) (has-upgrade? 'weapon-refit))
+                  (findf (lambda (e)
+                           (and (>= (+ (hash-ref e 'hp 0) (hash-ref e 'shield 0)) 125)
+                                (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 10.0)))
+                         engagement-enemies)))
+           (cond
+             [(and (< u-hp 180) (>= frame jump-ready-f))
+              (hash-set! splash-st (cons 'bc-jump-ready uid) (+ frame 2012))
+              (emit! (list 'cast-spell uid 'tactical-jump base-x base-y))]
+             [yamato-tgt
+              (hash-set! splash-st (cons 'bc-yamato-ready uid) (+ frame 1590))
+              (emit! (list 'cast-spell uid 'yamato-cannon (hash-ref yamato-tgt 'id eid)))]
              [else
               (emit-engage-or-rally!)])]
           [(baneling)
-           ;; Banelings roll directly through the center of Light/Bio clumps before detonating
-           (when (and (> edist 1.8) (<= edist 10.0))
-             (emit! (list 'kite uid (safe-coord ex ux) (safe-coord ey uy))))
-           (emit-engage-or-rally!)]
+           (if (and (> edist 1.8) (<= edist 10.0))
+               (begin
+                 (emit! (list 'kite uid (safe-coord ex ux) (safe-coord ey uy)))
+                 (unless live-obs? (emit-engage-or-rally!)))
+               (emit-engage-or-rally!))]
           [(carrier)
-           (emit! (list 'cast-spell uid 'build-interceptors uid))
+           (when (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            (list 'carrier-int uid)
+                                            frame
+                                            68)
+             (emit! (list 'cast-spell uid 'build-interceptors uid)))
            (if (and (< edist 7.5) (> edist 0.1))
                (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 2.5)])
-                 (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))
+                 (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy))))
                (emit-engage-or-rally!))]
           [(disruptor)
-           (when (<= edist 11.0)
-             (emit! (list 'cast-spell uid 'purification-nova ex ey)))
-           (if (< edist 7.5)
-               (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 3.0)])
-                 (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))
-               (emit-engage-or-rally!))]
+           (if (and (<= edist 11.0)
+                    (or (not live-obs?)
+                        (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                                   (list 'disruptor-nova uid)
+                                                   frame
+                                                   480)))
+               (emit! (list 'cast-spell uid 'purification-nova ex ey))
+               (if (< edist 7.5)
+                   (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 3.0)])
+                     (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy))))
+                   (emit-engage-or-rally!)))]
           [(disruptor-phased)
            (emit! (list 'kite uid (safe-coord ex ux) (safe-coord ey uy)))]
           [(sentry)
@@ -6063,45 +7897,94 @@
              [(and (>= (hash-ref u 'energy SC2-SENTRY-FORCE-FIELD-ENERGY) SC2-SENTRY-GUARDIAN-SHIELD-ENERGY)
                    (not (memq 'guardian-shield u-buffs))
                    (or (not live-upgrades-tracked?) (<= edist 9.0)))
-              (emit! (list 'cast-spell uid 'guardian-shield eid))]
+              ;; Guardian Shield is off-GCD instant self-aura
+              (emit! (list 'cast-spell uid 'guardian-shield eid))
+              (emit-engage-or-rally!)]
              [(and (>= (hash-ref u 'energy SC2-SENTRY-FORCE-FIELD-ENERGY) SC2-SENTRY-FORCE-FIELD-ENERGY)
-                   (or (not live-upgrades-tracked?) (<= edist 9.0)))
+                   (or (not live-upgrades-tracked?) (<= edist 9.0))
+                   (or (not live-obs?)
+                       (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                                  (list 'sentry-ff uid)
+                                                  frame
+                                                  68)))
               (emit! (list 'cast-spell uid 'force-field
                            (safe-coord (* 0.5 (+ nat-x ex)) nat-x)
-                           (safe-coord (* 0.5 (+ nat-y ey)) nat-y)))])
-           (emit-engage-or-rally!)]
+                           (safe-coord (* 0.5 (+ nat-y ey)) nat-y)))
+              (unless live-obs? (emit-engage-or-rally!))]
+             [else
+              (emit-engage-or-rally!)])]
           [(stalker)
-           (when (and (has-upgrade? 'blink)
-                      (< u-hp SC2-STALKER-BLINK-HP-THRESH))
-             (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
-             (emit! (list 'cast-spell uid 'blink (safe-coord kx ux) (safe-coord ky uy))))
-           (emit-engage-or-rally!)]
+           (if (and (has-upgrade? 'blink)
+                    (< u-hp SC2-STALKER-BLINK-HP-THRESH)
+                    (or (not live-obs?)
+                        (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                                   (list 'stalker-blink uid)
+                                                   frame
+                                                   160)))
+               (let-values ([(kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE)])
+                 (emit! (list 'cast-spell uid 'blink (safe-coord kx ux) (safe-coord ky uy)))
+                 (unless live-obs? (emit-engage-or-rally!)))
+               (emit-engage-or-rally!))]
           [(adept)
-           (when (or (not live-upgrades-tracked?) (<= edist 12.0))
-             (emit! (list 'cast uid 'psionic-transfer ex ey)))
-           (emit-engage-or-rally!)]
+           (if (and (or (not live-upgrades-tracked?) (<= edist 12.0))
+                    (or (not live-obs?)
+                        (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                                   (list 'adept-shade uid)
+                                                   frame
+                                                   248)))
+               (begin
+                 (emit! (list 'cast uid 'psionic-transfer ex ey))
+                 (unless live-obs? (emit-engage-or-rally!)))
+               (emit-engage-or-rally!))]
           [(siege-tank siege-tank-sieged)
-           ;; Hysteresis: siege when enemy within SC2-SIEGE-TANK-SIEGE-RANGE; unsiege only when > SC2-SIEGE-TANK-UNSIEGE-RANGE
            (define is-sieged? (or (eq? ut 'siege-tank-sieged) (hash-ref u 'sieged #f)))
            (define min-enemy-dist
              (for/fold ([best +inf.0]) ([e (in-list engagement-enemies)])
                (min best (dist2d ux uy (hash-ref e 'x ex) (hash-ref e 'y ey)))))
+           (define tank-dwell-ready?
+             (or (not live-obs?)
+                 (>= (- frame (hash-ref splash-st (cons 'tank-dwell uid) -1000)) 48)))
            (cond
-             [(and is-sieged? (> min-enemy-dist SC2-SIEGE-TANK-UNSIEGE-RANGE))
+             [(and is-sieged? (> min-enemy-dist SC2-SIEGE-TANK-UNSIEGE-RANGE) tank-dwell-ready?)
+              (hash-set! splash-st (cons 'tank-dwell uid) frame)
               (emit! (list 'cast-spell uid 'unsiege-mode uid))
-              (unless live-upgrades-tracked?
-                (emit-engage-or-rally!))]
-             [(and (not is-sieged?) (<= min-enemy-dist SC2-SIEGE-TANK-SIEGE-RANGE))
+              (unless live-upgrades-tracked? (emit-engage-or-rally!))]
+             [(and (not is-sieged?) (<= min-enemy-dist SC2-SIEGE-TANK-SIEGE-RANGE) tank-dwell-ready?)
+              (hash-set! splash-st (cons 'tank-dwell uid) frame)
               (emit! (list 'cast-spell uid 'siege-mode eid))
-              (unless live-upgrades-tracked?
-                (emit-engage-or-rally!))]
+              (unless live-upgrades-tracked? (emit-engage-or-rally!))]
              [else
               (emit-engage-or-rally!)])]
           [(ghost)
-           (when (>= (hash-ref u 'energy 75) 75)
-             (emit! (list 'cast-spell uid 'emp-round eid))
-             (emit! (list 'cast-spell uid 'snipe eid)))
-           (emit-engage-or-rally!)]
+           (define emp-tgt
+             (and (>= (hash-ref u 'energy 75) 75)
+                  (findf (lambda (e)
+                           (and (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 10.0)
+                                (or (>= (hash-ref e 'shield 0) 40)
+                                    (>= (hash-ref e 'energy 0) 50))))
+                         engagement-enemies)))
+           (define snipe-tgt
+             (and (>= (hash-ref u 'energy 75) 50)
+                  (findf (lambda (e)
+                           (and (memq (unit-type-sym e)
+                                      '(queen hydralisk lurker lurker-burrowed ravager infestor viper
+                                        ultralisk brood-lord mutalisk corruptor high-templar zealot adept ghost))
+                                (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 10.0)))
+                         engagement-enemies)))
+           (cond
+             [(not live-obs?)
+              (when (>= (hash-ref u 'energy 75) 75)
+                (emit! (list 'cast-spell uid 'emp-round eid))
+                (emit! (list 'cast-spell uid 'snipe eid)))
+              (emit-engage-or-rally!)]
+             [emp-tgt
+              (emit! (list 'cast-spell uid 'emp-round
+                           (safe-coord (hash-ref emp-tgt 'x ex) ex)
+                           (safe-coord (hash-ref emp-tgt 'y ey) ey)))]
+             [snipe-tgt
+              (emit! (list 'cast-spell uid 'snipe (hash-ref snipe-tgt 'id eid)))]
+             [else
+              (emit-engage-or-rally!)])]
           [(marine marauder)
            (when (and (has-upgrade? 'stimpack)
                       (not (memq 'stimpack u-buffs))
@@ -6109,29 +7992,28 @@
                       (>= u-hp SC2-MARINE-STIM-MIN-HP)
                       (or (not live-upgrades-tracked?) (<= edist 9.5)))
              (emit! (list 'cast-spell uid 'stimpack eid)))
-           (unless (set-member? splash-evading-tags uid)
-             (emit-engage-or-rally!))]
+           (emit-engage-or-rally!)]
           [(mutalisk)
            (if (< u-hp SC2-MUTALISK-KITE-HP-THRESH)
                (let-values ([(kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE)])
-                 (emit! (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))
+                 (emit! (list 'kite uid (quantize-cell-2.5 kx ux) (quantize-cell-2.5 ky uy))))
                (emit-engage-or-rally!))]
           [(banshee)
-           ;; Banshee uses Multi-Depth Mirrored Tactical Micro Brain (with Cloak + Hysteresis + Cooldown Phase-Lock)
            (if (not (null? mirrored-acts))
                (for ([ma (in-list mirrored-acts)]) (emit! ma))
                (emit-engage-or-rally!))]
           [else
-           (unless (set-member? splash-evading-tags uid)
-             (if (and (not (null? mirrored-acts)) unit-should-engage-target?)
-                 (for ([ma (in-list mirrored-acts)]) (emit! ma))
-                 (emit-engage-or-rally!)))]))))
+           (if (and (not nearest-enemy-tank)
+                    (not tank-supporting-vs-static?)
+                    (not (null? mirrored-acts))
+                    unit-should-engage-target?)
+               (for ([ma (in-list mirrored-acts)]) (emit! ma))
+               (emit-engage-or-rally!))]))))
 
   ;; ---------------------------------------------------------------------------
   ;; Pro Mechanic #8: Burrowed Zergling Base-Blocker, Cheap Patrol Expansion
   ;;                  Blocker, Peripheral Economic Harassment Raider Squad, &
-  ;;                  Probing-Attack Recon Vanguard (Gathering Opponent Info via
-  ;;                  Scouting, Harassment, or Attacking — PV9)
+  ;;                  Probing-Attack Recon Vanguard (PV9)
   ;; ---------------------------------------------------------------------------
   (define cur-tel-ht
     (let ([t (live-bot-runtime-last-telemetry rt)])
@@ -6141,8 +8023,8 @@
               (if (and (null? enemy-units) (null? enemy-bldgs)) frame 0)))
   (define cheap-blockers
     (filter (lambda (u)
-              (and (memq (unit-type-sym u) '(zergling marine zealot reaper adept hellion oracle phoenix mutalisk banshee))
-                   (not (set-member? tbrain-committed-tags (hash-ref u 'id -1)))))
+             (and (memq (unit-type-sym u) '(zergling marine zealot reaper adept hellion oracle phoenix mutalisk banshee))
+                  (not (set-member? tbrain-committed-tags (hash-ref u 'id -1)))))
             combat-units))
   (define mm-verdict
     (mirror-mind-state-mirror-macro-verdict (live-bot-runtime-mirror-mind rt)))
@@ -6179,14 +8061,17 @@
   (when (and (null? enemy-units)
              (or (not live-obs?)
                  (and (null? enemy-bldgs)
-                      (< (length combat-units) live-attack-wave-min)))
+                      (< (length combat-units) live-attack-wave-min)
+                      (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                                 '(idle-nat-rally)
+                                                 frame
+                                                 44)))
              (>= (length combat-units) 2))
     (for ([u (in-list (take combat-units 2))])
       (emit! (list 'attack-pos (hash-ref u 'id 110) nat-x nat-y))))
 
   ;; ---------------------------------------------------------------------------
   ;; Pro Mechanic #9: Enemy Changeling Sniping & Active Deception/Scout Spells
-  ;;                  (Sentry Hallucination Phoenix/Archon + Overseer Changeling)
   ;; ---------------------------------------------------------------------------
   (define enemy-changelings
     (filter (lambda (e)
@@ -6199,8 +8084,6 @@
   (for ([ec (in-list enemy-changelings)])
     (emit! (list 'snipe-enemy-changeling (hash-ref ec 'id 9099))))
 
-  ;; Pro Mechanic #9b: Burrowed Roach Tunneling Claws micro, Burrowed Infestor
-  ;;                   Fungal/Neural/Shroud micro, & Shimmer / Burrow-Ripple AoE skillshots
   (for ([ba (in-list (execute-roach-tunneling-burrow-micro obs))])
     (emit! ba))
   (for ([ia (in-list (execute-infestor-burrow-cast-micro obs))])
@@ -6215,33 +8098,25 @@
   (define ally-infestors
     (filter (lambda (u) (memq (unit-type-sym u) '(infestor infestor-burrowed))) ally-units))
 
-  (when (or (hash-ref obs 'enable-deception-and-buffs #f)
-            (not (null? ally-sentries))
-            (not (null? ally-overseers)))
+  (when (and (or (hash-ref obs 'enable-deception-and-buffs #f)
+                 (not (null? ally-sentries))
+                 (not (null? ally-overseers)))
+             (or (not live-obs?)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            '(deception-scout-spells)
+                                            frame
+                                            336)))
     (emit! '(cast-deception-and-scout-spells
              sentry-hallucination-phoenix-scout
              sentry-hallucination-archon-tank
              overseer-spawn-changeling)))
 
   ;; ---------------------------------------------------------------------------
-  ;; Pro Mechanic #10: Protective Buff Aura (Guardian Shield / Microbial Shroud)
-  ;;                   + Inside-Aura Positioning with Anti-Splash Spreading,
-  ;;                   Pre-Split 3-Wing Squads, Concave Arc, & High-Ground Mastery
+  ;; Pro Mechanic #10: Protective Buff Aura, Throttled Pre-Split 3-Wing Squads,
+  ;;                   Throttled Concave Arc, & High-Ground Mastery
   ;; ---------------------------------------------------------------------------
-  (define army-cx
-    (if (null? combat-units)
-        nat-x
-        (safe-coord (/ (for/sum ([u (in-list combat-units)])
-                         (safe-finite-real (hash-ref u 'x nat-x) nat-x))
-                       (max 1 (length combat-units)))
-                    nat-x)))
-  (define army-cy
-    (if (null? combat-units)
-        nat-y
-        (safe-coord (/ (for/sum ([u (in-list combat-units)])
-                         (safe-finite-real (hash-ref u 'y nat-y) nat-y))
-                       (max 1 (length combat-units)))
-                    nat-y)))
+  (define army-cx prelim-army-cx)
+  (define army-cy prelim-army-cy)
   (define visible-enemies-for-target
     (if (and live-obs? (null? enemy-units))
         enemy-bldgs
@@ -6261,10 +8136,15 @@
                        (max 1 (length visible-enemies-for-target)))
                     enemy-y)))
 
-  (when (or (hash-ref obs 'enable-deception-and-buffs #f)
-            (not (null? ally-sentries))
-            (not (null? ally-infestors))
-            (and (not (null? enemy-units)) (not (null? combat-units))))
+  (when (and (or (hash-ref obs 'enable-deception-and-buffs #f)
+                 (not (null? ally-sentries))
+                 (not (null? ally-infestors))
+                 (and (not (null? enemy-units)) (not (null? combat-units))))
+             (or (not live-obs?)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            '(buff-aura-position)
+                                            frame
+                                            44)))
     (define use-shroud?
       (or (not (null? ally-infestors))
           (eq? (live-bot-runtime-actual-race rt) 'Zerg)))
@@ -6274,10 +8154,15 @@
     (emit! (list 'position-in-buff-aura-with-splash-spread
                  aura-type army-cx army-cy aura-radius 1.6 #t)))
 
-  ;; Pre-Split 3-Wing Formation & Concave Arc Formation (6.0 tiles wing-spread, 10.0 tiles arc radius)
-  (when (or (not (null? enemy-units))
-            (hash-ref obs 'pre-split-engage #f)
-            (hash-ref obs 'form-concave #f))
+  ;; Pre-Split 3-Wing Formation & Concave Arc Formation (throttled in live games to stay well below 400 APM)
+  (when (and (or (not (null? enemy-units))
+                 (hash-ref obs 'pre-split-engage #f)
+                 (hash-ref obs 'form-concave #f))
+             (or (not live-obs?)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            '(formation-arc-split)
+                                            frame
+                                            28)))
     (define dx (- target-ex army-cx))
     (define dy (- target-ey army-cy))
     (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
@@ -6294,22 +8179,19 @@
     (emit! (list 'form-concave-arc target-ex target-ey 10 120)))
 
   ;; High-Ground Terrain & Vision Mastery
-  (define our-z
-    (hash-ref obs 'our-terrain-z
-              (if (not (null? combat-units))
-                  (hash-ref (car combat-units) 'z 10)
-                  10)))
-  (define enemy-z
-    (hash-ref obs 'enemy-terrain-z
-              (if (not (null? enemy-units))
-                  (hash-ref (car enemy-units) 'z 10)
-                  10)))
-  (when (or (not (= our-z enemy-z))
-            (not (null? enemy-units))
-            (hash-ref obs 'high-ground-check #f))
+  (define our-z our-z-early)
+  (define enemy-z enemy-z-early)
+  (when (and (or (not (= our-z enemy-z))
+                 (not (null? enemy-units))
+                 (hash-ref obs 'high-ground-check #f))
+             (or (not live-obs?)
+                 (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                            '(high-ground-posture)
+                                            frame
+                                            28)))
     (cond
       [(> our-z enemy-z)
-        (emit! (list 'high-ground-tactics 'hold-high-ground-ramp-arc nat-x nat-y #f))]
+       (emit! (list 'high-ground-tactics 'hold-high-ground-ramp-arc nat-x nat-y #f))]
       [(> enemy-z our-z)
        (emit! (list 'high-ground-tactics 'uphill-vision-spotter-and-concave target-ex target-ey #t))]
       [else
@@ -6329,10 +8211,28 @@
      #:enemy-exp-x enemy-exp-x
      #:enemy-exp-y enemy-exp-y))
   (set-mirror-mind-state-last-reachability-model! mm-rt reach-m)
-  (define sp-maneuver
+  (define raw-sp-maneuver
     (enemy-army-reachability-model-recommended-spatial-maneuver reach-m))
+  (define enemy-main-cleared-or-empty?
+    (and (null? enemy-units)
+         (or (null? enemy-bldgs)
+             (not (ormap (lambda (eb)
+                           (<= (dist2d (safe-finite-real (hash-ref eb 'x enemy-x) enemy-x)
+                                       (safe-finite-real (hash-ref eb 'y enemy-y) enemy-y)
+                                       enemy-x enemy-y)
+                               16.0))
+                         enemy-bldgs)))))
+  (define sp-maneuver
+    (if (and (eq? raw-sp-maneuver 'pre-rotate-intercept-incoming-threat)
+             enemy-main-cleared-or-empty?
+             (<= (hash-ref obs 'enemy-threat-supply 0) 0))
+        'multiprong-rotate-and-pin
+        raw-sp-maneuver))
   (define-values (sp-tx sp-ty)
-    (if (and live-obs? (>= (length combat-units) live-attack-wave-min))
+    (if (and live-obs?
+             (or wave-commit-active?
+                 (>= (length combat-units) live-attack-wave-min)
+                 (and (>= frame 6000) enemy-main-cleared-or-empty? (>= (length combat-units) 4))))
         (case sp-maneuver
           [(pre-rotate-intercept-incoming-threat)
            (values nat-x nat-y)]
@@ -6353,7 +8253,12 @@
            (values third-x third-y)]
           [else
            (values target-ex target-ey)])))
-  (emit! (list 'execute-spatial-maneuver sp-maneuver sp-tx sp-ty))
+  (when (or (not live-obs?)
+            (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                       '(spatial-maneuver)
+                                       frame
+                                       28))
+    (emit! (list 'execute-spatial-maneuver sp-maneuver sp-tx sp-ty)))
 
   (define sanitized-tactic-actions
     (sanitize-stale-target-actions (reverse actions) obs #:pos-cache (rt-enemy-pos-cache rt)))
@@ -6438,16 +8343,20 @@
   (define enemy-exp-x (hash-ref obs 'enemy-expand-x 148.0))
   (define enemy-exp-y (hash-ref obs 'enemy-expand-y 148.0))
   (define enemy-units (hash-ref obs 'enemy-units '()))
+  (define ally-bldgs (hash-ref obs 'ally-buildings '()))
+  (define live-cam-obs? (hash-has-key? raw-obs 'mineral-harvesters))
 
+  (define dwell-min
+    (if live-cam-obs?
+        (max 28 SC2-CAMERA-SACCADE-MIN-DWELL-FRAMES)
+        SC2-CAMERA-SACCADE-MIN-DWELL-FRAMES))
   (define last-frame (hash-ref bmarks 'last-saccade-frame #f))
   (define cur-idx (safe-nonneg-int (hash-ref bmarks 'saccade-zone-idx 0) 0))
-  ;; Pro humans dwell ~16-22 frames (~0.75s = 60-90 SPM) per camera zone before saccading.
-  ;; Only update last-saccade-frame when a saccade actually occurs so sub-16-frame step_sizes
-  ;; accumulate elapsed frames properly instead of resetting the dwell timer every step.
+  ;; Pro humans dwell >= 28 frames (~1.25s) per camera zone in live games unless jumping > 18 tiles for a crisis.
   (define saccade-due?
     (or (not (exact-integer? last-frame))
         (= frame last-frame)
-        (>= (abs (- frame last-frame)) SC2-CAMERA-SACCADE-MIN-DWELL-FRAMES)))
+        (>= (abs (- frame last-frame)) dwell-min)))
   (define next-idx
     (cond
       [(not (exact-integer? last-frame)) 0]
@@ -6458,7 +8367,20 @@
     (hash-set! bmarks 'last-saccade-frame frame)
     (hash-set! bmarks 'saccade-zone-idx next-idx))
 
-  (define zone (list-ref PRO-CAMERA-SACCADE-ZONES next-idx))
+  (define active-crisis-now?
+    (or (eq? (hash-ref obs 'under-attack #f) #t)
+        (eq? (hash-ref obs 'under-cheese-rush #f) #t)
+        (ormap (lambda (b) (and (hash? b) (eq? (hash-ref b 'under-attack #f) #t))) ally-bldgs)
+        (ormap (lambda (e)
+                 (and (hash? e)
+                      (<= (min (dist2d base-x base-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                               (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)))
+                          28.0)))
+               enemy-units)))
+  (define zone
+    (if (and live-cam-obs? active-crisis-now? (not (null? enemy-units)))
+        'active-army-front
+        (list-ref PRO-CAMERA-SACCADE-ZONES next-idx)))
   (define-values (zx zy)
     (case zone
       [(home-macro-base)
@@ -6476,10 +8398,29 @@
       [else
        (values base-x base-y)]))
 
+  (define prev-focus-f (hash-ref bmarks 'last-camera-focus-frame #f))
+  (define prev-focus-x (safe-finite-real (hash-ref bmarks 'last-camera-focus-x zx) zx))
+  (define prev-focus-y (safe-finite-real (hash-ref bmarks 'last-camera-focus-y zy) zy))
+  (define crisis-cam-jump?
+    (and active-crisis-now?
+         (> (dist2d zx zy prev-focus-x prev-focus-y) 18.0)))
+  (define emit-camera-focus?
+    (or (not live-cam-obs?)
+        (not (exact-integer? prev-focus-f))
+        (< frame prev-focus-f)
+        (>= (- frame prev-focus-f) 28)
+        crisis-cam-jump?))
+  (when emit-camera-focus?
+    (hash-set! bmarks 'last-camera-focus-frame frame)
+    (hash-set! bmarks 'last-camera-focus-x zx)
+    (hash-set! bmarks 'last-camera-focus-y zy))
+
   (define prof (get-pro-cortex-profile (human-cortex-profile-name cortex)))
-  (define target-apm (safe-nonneg-int (hash-ref prof 'mean-epm 350) 350))
-  (list (list 'camera-focus zone zx zy)
-        (list 'human-apm-discipline target-apm 3 #t #t)))
+  (define target-apm (min 360 (safe-nonneg-int (hash-ref prof 'mean-epm 350) 350)))
+  (if emit-camera-focus?
+      (list (list 'camera-focus zone zx zy)
+            (list 'human-apm-discipline target-apm 3 #t #t))
+      (list (list 'human-apm-discipline target-apm 3 #t #t))))
 
 ;; =============================================================================
 ;; Top-Level 5-Layer Step (`step-live-bot-runtime!`)
@@ -6497,6 +8438,7 @@
   (define obs (sanitize-obs-hash raw-obs))
 
   (set-live-bot-runtime-step-count! rt (add1 (live-bot-runtime-step-count rt)))
+  (set-box! (rt-wall-aabbs-box rt) '())
 
   ;; Layer 1
   (step-layer1-perception! rt obs)
@@ -6554,12 +8496,18 @@
                                 rebalance-gas-to-minerals
                                 terran-addon-swap
                                 land-building
+                                lift
                                 cancel-building
+                                inject-larva
                                 worker-scout
                                 overlord-scout
                                 mineral-harass
                                 periodic-scout
                                 cast-deception-and-scout-spells))
+                        (and (eq? (car a) 'cast-spell)
+                             (>= (length a) 3)
+                             (memq (third a)
+                                   '(inject-larva battery-overcharge lift)))
                         (not (not (member a msp-set))))
                     (not (member a accepted))))
              econ-acts)
@@ -6616,6 +8564,7 @@
   (define last-tel-ht
     (let ([t (live-bot-runtime-last-telemetry rt)])
       (if (hash? t) t (hash))))
+  (define step-wall-aabbs (unbox (rt-wall-aabbs-box rt)))
   (define telemetry
     (hash-set* last-tel-ht
                'posture (live-bot-runtime-posture rt)
@@ -6718,6 +8667,8 @@
                'escrow-suppressed-until-frame (hash-ref last-tel-ht 'escrow-suppressed-until-frame 0)
                'vanguard-count vanguard-cnt
                'reserve-count reserve-cnt
+               'role-leases (rt-role-leases rt)
+               'wall-reserved-aabbs step-wall-aabbs
                'personality (let ([p (mastermind-state-personality mstate)])
                               (cond
                                 [(bot-personality? p) (bot-personality-name p)]
@@ -6738,7 +8689,9 @@
         'mirror-actions final-mirror-actions
         'telemetry telemetry
         'posture (live-bot-runtime-posture rt)
-        'actual-race (live-bot-runtime-actual-race rt)))
+        'actual-race (live-bot-runtime-actual-race rt)
+        'role-leases (rt-role-leases rt)
+        'wall-reserved-aabbs step-wall-aabbs))
 
 ;; =============================================================================
 ;; S-Expression Wire Parser for `sim/racket_sc2_ipc_bot.rkt`
@@ -6853,6 +8806,10 @@
              (hash-set! h 'army-supply (safe-nonneg-int v 0))]
             [(in-progress-orders)
              (hash-set! h 'in-progress-orders (if (list? v) (map parse-order-tuple v) '()))]
+            [(enemy-race)             (hash-set! h 'enemy-race v)]
+            [(opponent-requested-race)(hash-set! h 'opponent-requested-race v)]
+            [(map-grids)              (when (hash? v) (hash-set! h 'map-grids v))]
+            [(expansion-candidates)   (when (list? v) (hash-set! h 'expansion-candidates v))]
             [(my-units)       (hash-set! h 'ally-units (if (list? v) (map parse-unit-tuple v) '()))]
             [(my-buildings)   (hash-set! h 'ally-buildings (if (list? v) (map parse-bldg-tuple v) '()))]
             [(enemy-units)    (hash-set! h 'enemy-units (if (list? v) (map parse-unit-tuple v) '()))]

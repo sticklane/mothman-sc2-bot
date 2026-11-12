@@ -87,7 +87,7 @@
 (define SC2-MAX-PRODUCTION-FACILITIES      8)
 (define SC2-TERRAN-FACILITIES-PER-BASE     2)
 (define SC2-PROTOSS-FACILITIES-PER-BASE    3)
-(define SC2-MAX-QUEENS-CAP                 4)
+(define SC2-MAX-QUEENS-CAP                 8)
 
 ;; Depletion & Gas/Mineral Rebalancing Thresholds
 (define SC2-BASE-DEPLETION-MINERAL-THRESH  1200)
@@ -480,10 +480,14 @@
    'voidray                  '(250 150 4)
    'baneling-cocoon          '(25 25 1)
    'ravager-cocoon           '(25 75 1)
+   'ravager-burrowed         '(100 100 3)
    'lurker-egg               '(50 100 1)
    'lurker-mp-egg            '(50 100 1)
    'brood-lord-cocoon        '(150 150 2)
-   'overlord-cocoon          '(50 50 0)))
+   'overlord-cocoon          '(50 50 0)
+   'transport-overlord-cocoon '(25 25 0)
+   'point-defense-drone      '(0 0 0)
+   'advanced-ballistics      '(150 150 0)))
 
 (define (sc2-min-cost sym [default 50])
   (match (hash-ref SC2-LOTV-COST-TABLE sym #f)
@@ -536,8 +540,11 @@
      76    ;; GUARDIANSHIELD_GUARDIANSHIELD
      154   ;; HALLUCINATION_PHOENIX
      146   ;; HALLUCINATION_ARCHON
+     1372  ;; MORPH_BROODLORD
+     1448  ;; MORPH_OVERSEER
      1518  ;; MORPH_WARPGATE
      1520  ;; MORPH_GATEWAY
+     1766  ;; MORPH_ARCHON
      1978  ;; MORPH_HELLION
      1998  ;; MORPH_HELLBAT
      2095  ;; BURROWDOWN_WIDOWMINE
@@ -546,6 +553,8 @@
      2110  ;; BURROWUP_LURKER
      2116  ;; EFFECT_MEDIVACIGNITEAFTERBURNERS
      2328  ;; EFFECT_IMMORTALBARRIER
+     2362  ;; MORPH_THORHIGHIMPACTMODE
+     2364  ;; MORPH_THOREXPLOSIVEMODE
      2375  ;; BEHAVIOR_PULSARBEAMON
      2376  ;; BEHAVIOR_PULSARBEAMOFF
      2393  ;; EFFECT_VOIDRAYPRISMATICALIGNMENT
@@ -557,7 +566,10 @@
      3662  ;; BURROWUP
      3675  ;; EFFECT_STIM
      3679  ;; LIFT
+     3739  ;; MORPH_OBSERVERMODE
      3741  ;; MORPH_OBSERVERSIEGEMODE
+     3743  ;; MORPH_OVERSEERMODE
+     3745  ;; MORPH_OVERSIGHTMODE
      1528  ;; MORPH_WARPPRISMPHASINGMODE
      1530  ;; MORPH_WARPPRISMTRANSPORTMODE
      1042  ;; BUILD_INTERCEPTORS
@@ -566,6 +578,7 @@
 (define SC2-POINT-TARGET-ABILITY-IDS
   (list->seteqv
    '(74    ;; FUNGALGROWTH_FUNGALGROWTH
+     197   ;; FORCEFIELD
      399   ;; SCAN_MOVE (Scanner Sweep)
      1036  ;; PSISTORM_PSISTORM
      1442  ;; EFFECT_BLINK_STALKER
@@ -585,6 +598,8 @@
      2588  ;; KD8CHARGE_KD8CHARGE
      3678  ;; LAND
      3687  ;; EFFECT_BLINK
+     3691  ;; BUILD_CREEPTUMOR
+     3692  ;; BUILD_CREEPTUMOR_TUMOR
      )))
 
 (define SC2-UNIT-TARGET-ABILITY-IDS
@@ -600,6 +615,7 @@
      1664  ;; TRANSFUSION_TRANSFUSION
      1825  ;; CONTAMINATE_CONTAMINATE
      2067  ;; EFFECT_ABDUCT
+     2069  ;; VIPERCONSUMESTRUCTURE
      2073  ;; VIPERCONSUME_VIPERCONSUME
      2324  ;; EFFECT_CAUSTICSPRAY
      2542  ;; EFFECT_PARASITICBOMB
@@ -684,7 +700,7 @@
    'ghost             (hasheq 'max-hp 100 'max-shield 0   'armor 0 'speed 3.94 'ground-dps 14.4 'air-dps 14.4 'ground-range 6.0  'air-range 6.0  'weapon-period 1.07  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.375)
    'hellion           (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 5.95 'ground-dps 6.5  'air-dps 0.0  'ground-range 5.0  'air-range 0.0  'weapon-period 1.79  'damage-point 0.18 'splash-radius 0.8  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.625)
    'hellbat           (hasheq 'max-hp 135 'max-shield 0   'armor 0 'speed 3.15 'ground-dps 16.8 'air-dps 0.0  'ground-range 2.0  'air-range 0.0  'weapon-period 1.43  'damage-point 0.18 'splash-radius 1.2  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.625)
-   'widow-mine        (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 3.94 'ground-dps 18.0 'air-dps 18.0 'ground-range 5.0  'air-range 5.0  'weapon-period 29.0  'damage-point 1.07 'splash-radius 1.75 'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5)
+   'widow-mine        (hasheq 'max-hp 90  'max-shield 0   'armor 0 'speed 3.94 'ground-dps 0.0  'air-dps 0.0  'ground-range 5.0  'air-range 5.0  'weapon-period 29.0  'damage-point 1.07 'splash-radius 1.75 'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5)
    'widow-mine-burrowed (hasheq 'max-hp 90 'max-shield 0  'armor 0 'speed 0.0  'ground-dps 25.0 'air-dps 25.0 'ground-range 5.0  'air-range 5.0  'weapon-period 29.0  'damage-point 1.07 'splash-radius 1.75 'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5)
    'cyclone           (hasheq 'max-hp 130 'max-shield 0   'armor 1 'speed 4.13 'ground-dps 22.4 'air-dps 22.4 'ground-range 6.0  'air-range 6.0  'weapon-period 0.48  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)
    'siege-tank        (hasheq 'max-hp 175 'max-shield 0   'armor 1 'speed 3.15 'ground-dps 26.0 'air-dps 0.0  'ground-range 7.0  'air-range 0.0  'weapon-period 1.49  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.875)
@@ -768,6 +784,9 @@
     'locust-flying     (hasheq 'max-hp 50  'max-shield 0   'armor 0 'speed 2.62 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.375)
     'broodling         (hasheq 'max-hp 30  'max-shield 0   'armor 0 'speed 5.37 'ground-dps 8.7  'air-dps 0.0  'ground-range 0.1  'air-range 0.0  'weapon-period 0.46  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.25)
     'mule              (hasheq 'max-hp 60  'max-shield 0   'armor 0 'speed 3.94 'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5)
+    'ravager-burrowed  (hasheq 'max-hp 120 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.14  'damage-point 0.12 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.75)
+    'transport-overlord-cocoon (hasheq 'max-hp 200 'max-shield 0 'armor 0 'speed 0.0 'ground-dps 0.0 'air-dps 0.0 'ground-range 0.0 'air-range 0.0 'weapon-period 1.0 'damage-point 0.0 'splash-radius 0.0 'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
+    'point-defense-drone (hasheq 'max-hp 50 'max-shield 0  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.5)
     'auto-turret       (hasheq 'max-hp 150 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 31.5 'air-dps 31.5 'ground-range 6.0  'air-range 6.0  'weapon-period 0.57  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)))
 
 (define (sc2-unit-combat-stats sym)
@@ -1079,10 +1098,10 @@
     [(liberator-ag)                    'liberator]
     [(lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg) 'lurker]
     [(baneling-burrowed baneling-cocoon) 'baneling]
-    [(ravager-cocoon)                  'ravager]
+    [(ravager-cocoon ravager-burrowed) 'ravager]
     [(broodlord brood-lord-cocoon)     'brood-lord]
     [(overlord-cocoon overseer-siege-mode) 'overseer]
-    [(overlord-transport)              'overlord]
+    [(overlord-transport transport-overlord-cocoon) 'overlord]
     [(roach-burrowed)                  'roach]
     [(zergling-burrowed)               'zergling]
     [(hydralisk-burrowed)              'hydralisk]
@@ -1110,14 +1129,16 @@
      '(liberator liberator-ag)]
     [(hellion hellbat)
      (list sym)]
-    [(lurker lurker-mp lurker-burrowed lurker-mp-burrowed)
-     '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed)]
+    [(lurker lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg)
+     '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg)]
     [(roach roach-burrowed)
      '(roach roach-burrowed)]
     [(zergling zergling-burrowed)
      '(zergling zergling-burrowed)]
-    [(baneling baneling-burrowed)
-     '(baneling baneling-burrowed)]
+    [(baneling baneling-burrowed baneling-cocoon)
+     '(baneling baneling-burrowed baneling-cocoon)]
+    [(ravager ravager-burrowed ravager-cocoon)
+     '(ravager ravager-burrowed ravager-cocoon)]
     [(hydralisk hydralisk-burrowed)
      '(hydralisk hydralisk-burrowed)]
     [(infestor infestor-burrowed)
@@ -1130,12 +1151,12 @@
      '(queen queen-burrowed)]
     [(drone drone-burrowed)
      '(drone drone-burrowed)]
-    [(brood-lord broodlord)
-     '(brood-lord broodlord)]
-    [(overlord overlord-transport)
-     '(overlord overlord-transport)]
-    [(overseer overseer-siege-mode)
-     '(overseer overseer-siege-mode)]
+    [(brood-lord broodlord brood-lord-cocoon)
+     '(brood-lord broodlord brood-lord-cocoon)]
+    [(overlord overlord-transport transport-overlord-cocoon)
+     '(overlord overlord-transport transport-overlord-cocoon)]
+    [(overseer overseer-siege-mode overlord-cocoon)
+     '(overseer overseer-siege-mode overlord-cocoon)]
     [(observer observer-siege-mode)
      '(observer observer-siege-mode)]
     [(warp-prism warp-prism-phasing)
@@ -1157,7 +1178,347 @@
     starport-techlab starport-tech-lab starport-reactor
     tech-lab techlab reactor))
 
+(define SC2-TOWNHALL-STRUCTURE-SYMS
+  '(hatchery lair hive
+    nexus
+    command-center command-center-flying
+    orbital-command orbital-command-flying
+    planetary-fortress))
+
 (define (sc2-odd-footprint-structure? sym)
   (and (memq sym SC2-ALL-STRUCTURE-SYMS)
        (not (memq sym SC2-2X2-STRUCTURE-SYMS))
        #t))
+
+;; -----------------------------------------------------------------------------
+;; 11. Generalized Cross-Cutting Ontology, Order Protection, Role-Lease Registry,
+;;     Bistable Hysteresis, Chebyshev AABB Footprints & Macro Energy Dispatcher
+;; -----------------------------------------------------------------------------
+
+;; Canonical mapping from generic/smart vs race-specific Unit.orders ability IDs.
+(define (sc2-canonical-order-ability ab-id)
+  (case ab-id
+    [(166 295 298 1183 3666) 'harvest-gather]
+    [(167 296 299 1184 3667) 'harvest-return]
+    [(168 316 3685)          'repair]
+    [(16 19 20 3794)         'move]
+    [(17 3795)               'patrol]
+    [(18 3793)               'hold-position]
+    [(4 5 6 7 3665)          'stop]
+    [(23 24 25 2099 3674 3771) 'attack]
+    [(417 452 485 518 1522 3679) 'lift]
+    [(419 520 522 554 1524 3678) 'land]
+    [(421 454 487 3682)      'build-techlab]
+    [(422 455 488 3683)      'build-reactor]
+    [(1374 1378 1382 1386 1390 1433 1444 1512 2014 2095 2108 2340 3661) 'burrow-down]
+    [(1376 1380 1384 1388 1392 1435 1446 1514 2016 2097 2110 2342 3662) 'burrow-up]
+    [(1394 1396 3680)        'uproot]
+    [(1398 1400 3681)        'root]
+    [(1694 1733 3691 3692)   'spawn-creep-tumor]
+    [(253 380 3675)          'stim]
+    [(1442 3687)             'blink]
+    [(142 3686 3757)         'mass-recall]
+    [(1163 2112)             'build-lurker-den]
+    [(895 1909)              'build-shield-battery]
+    [else                    ab-id]))
+
+;; Protected Unit.orders classes that must not be overwritten by generic army/idle commands:
+;;   'morph       — unit/structure morphs (Baneling/Ravager/BroodLord/Overseer/Archon/Lair/Hive/Lurker/etc.)
+;;   'channel     — channeled abilities (Yamato/TacticalJump/Snipe/Neural/Graviton/Consume/Recall/etc.)
+;;   'mode-switch — siege/unsiege, burrow/unburrow, lift/land, uproot/root, fighter/assault, depot raise/lower
+;;   'cast-walk   — walk-to-cast spells (Inject, CreepTumor, Transfusion, EMP, Storm, Feedback, Fungal, Bile, etc.)
+(define SC2-PROTECTED-ORDER-CLASS-TABLE
+  (let ([ht (make-hasheqv)])
+    (for ([id (in-list '(80 2330 2332 1372 1448 2708 1766 1216 1218 1220 1516 1450 1518))])
+      (hash-set! ht id 'morph))
+    (for ([id (in-list '(401 2358 2714 249 173 2073 2069 2324 258 3757 142 3686))])
+      (hash-set! ht id 'channel))
+    (for ([id (in-list '(388 390 2558 2560 403 405 1978 1998 2362 2364
+                         3739 3741 3743 3745 1528 1530 556 558
+                         1374 1378 1382 1386 1390 1433 1444 1512 2014 2095 2108 2340 3661
+                         1376 1380 1384 1388 1392 1435 1446 1514 2016 2097 2110 2342 3662
+                         417 452 485 518 1522 3679
+                         419 520 522 554 1524 3678
+                         1394 1396 3680
+                         1398 1400 3681))])
+      (hash-set! ht id 'mode-switch))
+    (for ([id (in-list '(251 1694 3691 1733 3692 1664 1628 1036 140 74 3763
+                         2338 2346 2067 2063 2542 3747 3753 181 2505 197 1526))])
+      (hash-set! ht id 'cast-walk))
+    (for/hasheqv ([(k v) (in-hash ht)])
+      (values k v))))
+
+(define (sc2-order-protection-class ab-id)
+  (or (hash-ref SC2-PROTECTED-ORDER-CLASS-TABLE ab-id #f)
+      (case (sc2-canonical-order-ability ab-id)
+        [(burrow-down burrow-up lift land uproot root) 'mode-switch]
+        [(spawn-creep-tumor) 'cast-walk]
+        [(mass-recall) 'channel]
+        [else #f])))
+
+;; Non-combat morphing cocoons/eggs, temporary summons, wards, scouts, and auxiliary transports.
+(define SC2-COCOON-AND-EGG-SYMS
+  '(larva
+    egg
+    cocoon
+    baneling-cocoon
+    ravager-cocoon
+    brood-lord-cocoon
+    overlord-cocoon
+    transport-overlord-cocoon
+    lurker-egg
+    lurker-mp-egg))
+
+(define SC2-NON-ARMY-SUMMON-AND-AUX-SYMS
+  (append
+   SC2-COCOON-AND-EGG-SYMS
+   '(mule
+     interceptor
+     adept-phase-shift
+     disruptor-phased
+     auto-turret
+     point-defense-drone
+     raven-repair-drone
+     kd8-charge
+     parasitic-bomb-dummy
+     changeling
+     changeling-zealot
+     changeling-marine-shield
+     changeling-marine
+     changeling-zergling-wings
+     changeling-zergling
+     creep-tumor
+     creep-tumor-burrowed
+     creep-tumor-queen
+     oracle-stasis-trap
+     stasis-ward
+     force-field
+     overlord
+     overlord-transport
+     overseer
+     overseer-siege-mode
+     observer
+     observer-siege-mode
+     warp-prism
+     warp-prism-phasing
+     broodling-escort)))
+
+(define SC2-NON-ARMY-SUMMON-AND-AUX-SET
+  (list->seteq SC2-NON-ARMY-SUMMON-AND-AUX-SYMS))
+
+(define (sc2-non-combat-or-summon-sym? sym)
+  (and (symbol? sym)
+       (or (set-member? SC2-NON-ARMY-SUMMON-AND-AUX-SET sym)
+           (let ([s (symbol->string sym)])
+             (or (regexp-match? #rx"^changeling" s)
+                 (regexp-match? #rx"^creep-tumor" s)
+                 (regexp-match? #rx"-cocoon$" s)
+                 (regexp-match? #rx"-egg$" s))))
+       #t))
+
+;; Unit Role-Lease Registry
+(struct unit-role-lease (role priority target-id target-x target-y expires-frame) #:transparent)
+
+(define (role-lease-priority role)
+  (case role
+    [(builder)         100]
+    [(inject-queen)     95]
+    [(door-guard)       90]
+    [(mule)             90]
+    [(cargo-returner)   80]
+    [(detector-escort)  75]
+    [(scout)            70]
+    [(spotter)          68]
+    [(creep-queen)      65]
+    [(army)             20]
+    [(harvester)        10]
+    [else                0]))
+
+(define (acquire-unit-lease! lease-ht uid role frame ttl #:target-id [tid 0] #:x [tx 0.0] #:y [ty 0.0])
+  (cond
+    [(and (hash? lease-ht) (not (immutable? lease-ht)) (integer? uid) (> uid 0))
+     (define new-prio (role-lease-priority role))
+     (define existing (hash-ref lease-ht uid #f))
+     (cond
+       [(or (not (unit-role-lease? existing))
+            (<= (unit-role-lease-expires-frame existing) frame)
+            (>= new-prio (unit-role-lease-priority existing)))
+        (define lease
+          (unit-role-lease role
+                           new-prio
+                           tid
+                           (exact->inexact tx)
+                           (exact->inexact ty)
+                           (+ frame (max 1 ttl))))
+        (hash-set! lease-ht uid lease)
+        #t]
+       [else #f])]
+    [else #f]))
+
+(define (unit-leased-above? lease-ht uid caller-role frame)
+  (and (hash? lease-ht)
+       uid
+       (let ([existing (hash-ref lease-ht uid #f)])
+         (and (unit-role-lease? existing)
+              (> (unit-role-lease-expires-frame existing) frame)
+              (> (unit-role-lease-priority existing) (role-lease-priority caller-role))
+              #t))))
+
+(define (leased-tags-above lease-ht caller-role frame)
+  (cond
+    [(hash? lease-ht)
+     (define caller-prio (role-lease-priority caller-role))
+     (for/fold ([acc (seteqv)])
+               ([(uid lease) (in-hash lease-ht)])
+       (if (and (unit-role-lease? lease)
+                (> (unit-role-lease-expires-frame lease) frame)
+                (> (unit-role-lease-priority lease) caller-prio))
+           (set-add acc uid)
+           acc))]
+    [else (seteqv)]))
+
+;; Bistable Hysteresis Controller (Schmitt trigger + minimum dwell + re-entry cooldown)
+(struct bistable-state (active? changed-frame cooldown-until-frame) #:transparent)
+
+(define (bistable-hysteresis-step state-ht key frame
+                                  #:enter? enter-now?
+                                  #:exit? exit-now?
+                                  #:min-dwell-loops [min-dwell 44]
+                                  #:cooldown-loops [cooldown 22])
+  (define raw-prev (and (hash? state-ht) (hash-ref state-ht key #f)))
+  (define prev
+    (if (and (bistable-state? raw-prev)
+             (>= frame (bistable-state-changed-frame raw-prev)))
+        raw-prev
+        (bistable-state #f -100000 0)))
+  (define next
+    (cond
+      [(bistable-state-active? prev)
+       (if (and exit-now?
+                (>= (- frame (bistable-state-changed-frame prev)) min-dwell))
+           (bistable-state #f frame (+ frame cooldown))
+           prev)]
+      [else
+       (if (and enter-now?
+                (>= frame (bistable-state-cooldown-until-frame prev)))
+           (bistable-state #t frame (bistable-state-cooldown-until-frame prev))
+           prev)]))
+  (when (and (hash? state-ht) (not (immutable? state-ht)))
+    (hash-set! state-ht key next))
+  (bistable-state-active? next))
+
+;; Chebyshev / Axis-Aligned Bounding Box Reserved Spatial Footprint
+(struct reserved-aabb (cx cy half-w half-h kind owner-tag expires-frame) #:transparent)
+
+(define (aabb-overlaps? cx1 cy1 hw1 hh1 b)
+  (and (reserved-aabb? b)
+       (< (abs (- (exact->inexact cx1) (exact->inexact (reserved-aabb-cx b))))
+          (- (+ (exact->inexact hw1) (exact->inexact (reserved-aabb-half-w b))) 1e-6))
+       (< (abs (- (exact->inexact cy1) (exact->inexact (reserved-aabb-cy b))))
+          (- (+ (exact->inexact hh1) (exact->inexact (reserved-aabb-half-h b))) 1e-6))
+       #t))
+
+(define (sc2-structure-half-dims bldg-sym)
+  (define canon (sc2-canonical-structure-sym bldg-sym))
+  (cond
+    [(or (memq bldg-sym SC2-TOWNHALL-STRUCTURE-SYMS)
+         (memq canon SC2-TOWNHALL-STRUCTURE-SYMS))
+     (values 2.5 2.5)]
+    [(or (memq bldg-sym SC2-2X2-STRUCTURE-SYMS)
+         (memq canon SC2-2X2-STRUCTURE-SYMS))
+     (values 1.0 1.0)]
+    [else
+     (values 1.5 1.5)]))
+
+;; Generalized 1-to-1 Macro Energy Dispatcher
+(define (dispatch-macro-energy! casters
+                                candidates
+                                frame
+                                claimed-targets-set
+                                #:min-energy min-energy
+                                #:valid-caster? [valid-caster? (lambda (_c) #t)]
+                                #:valid-pair? valid-pair?
+                                #:score-pair score-pair
+                                #:emit-cast! emit-cast!)
+  (define local-claimed-casters (mutable-set))
+  (define local-claimed-targets (mutable-set))
+  (define (entity-key x)
+    (cond
+      [(hash? x) (or (hash-ref x 'id #f) (hash-ref x 'tag #f) x)]
+      [else x]))
+  (define (target-claimed? tkey raw-cand)
+    (or (set-member? local-claimed-targets tkey)
+        (cond
+          [(and (set-mutable? claimed-targets-set))
+           (or (set-member? claimed-targets-set tkey)
+               (set-member? claimed-targets-set raw-cand))]
+          [(set? claimed-targets-set)
+           (or (set-member? claimed-targets-set tkey)
+               (set-member? claimed-targets-set raw-cand))]
+          [(hash? claimed-targets-set)
+           (or (hash-has-key? claimed-targets-set tkey)
+               (hash-has-key? claimed-targets-set raw-cand))]
+          [else #f])))
+  (define (claim-target! tkey)
+    (set-add! local-claimed-targets tkey)
+    (cond
+      [(set-mutable? claimed-targets-set)
+       (set-add! claimed-targets-set tkey)]
+      [(and (hash? claimed-targets-set) (not (immutable? claimed-targets-set)))
+       (hash-set! claimed-targets-set tkey frame)]
+      [else (void)]))
+  (define eligible-casters
+    (for/list ([c (in-list casters)]
+               #:when (and (or (not (hash? c))
+                               (>= (hash-ref c 'energy 0.0) min-energy))
+                           (if (procedure-arity-includes? valid-caster? 2)
+                               (valid-caster? c frame)
+                               (valid-caster? c))))
+      c))
+  (define scored-pairs
+    (for*/fold ([acc '()])
+               ([c (in-list eligible-casters)]
+                [cand (in-list candidates)])
+      (define tkey (entity-key cand))
+      (if (and (not (target-claimed? tkey cand))
+               (if (procedure-arity-includes? valid-pair? 3)
+                   (valid-pair? c cand frame)
+                   (valid-pair? c cand)))
+          (let ([sc (if (procedure-arity-includes? score-pair 3)
+                        (score-pair c cand frame)
+                        (score-pair c cand))])
+            (if (and (real? sc) (not (nan? sc)))
+                (cons (vector (exact->inexact sc) c cand (entity-key c) tkey) acc)
+                acc))
+          acc)))
+  (define sorted-pairs
+    (sort scored-pairs > #:key (lambda (v) (vector-ref v 0))))
+  (define emitted '())
+  (for ([v (in-list sorted-pairs)])
+    (define c (vector-ref v 1))
+    (define cand (vector-ref v 2))
+    (define ckey (vector-ref v 3))
+    (define tkey (vector-ref v 4))
+    (unless (or (set-member? local-claimed-casters ckey)
+                (target-claimed? tkey cand))
+      (set-add! local-claimed-casters ckey)
+      (claim-target! tkey)
+      (define res
+        (if (procedure-arity-includes? emit-cast! 3)
+            (emit-cast! c cand frame)
+            (emit-cast! c cand)))
+      (when (and res (not (void? res)))
+        (set! emitted (cons res emitted)))))
+  (reverse emitted))
+
+;; Midgame Economy-to-Army Curve (prevents pure-drone / pure-probe greed deaths vs pushes)
+(define (required-army-supply-for-worker-growth total-workers [enemy-threat-supply 0.0])
+  (max (* 0.85 (exact->inexact enemy-threat-supply))
+       (cond
+         [(< total-workers 26) 0.0]
+         [(< total-workers 34) 4.0]
+         [(< total-workers 44) 14.0]
+         [(< total-workers 54) 26.0]
+         [(< total-workers 64) 40.0]
+         [else 54.0])))
+

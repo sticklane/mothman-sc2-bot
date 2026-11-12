@@ -266,9 +266,19 @@
     (attack-pos (105) 140.0 140.0)
     (camera-focus home-macro-base 32.0 32.0)))
 
+(define sample-multi-drone-obs
+  (sc2-response-observation
+   (decode-sc2-response
+    (encode-synthetic-observation-response
+     224 350 100 16 22
+     (append synth-units
+             (list (encode-synthetic-unit 106 104 1 31.0 26.0 40.0 0.0)
+                   (encode-synthetic-unit 107 104 1 35.0 35.0 40.0 0.0)
+                   (encode-synthetic-unit 108 104 1 28.0 31.0 40.0 0.0)))))))
+
 (define raw-cmds
-  (append (translate-bot-actions->sc2-raw-commands sample-bot-actions decoded-obs)
-          (saturate-workers-and-gas-commands decoded-obs)))
+  (append (translate-bot-actions->sc2-raw-commands sample-bot-actions sample-multi-drone-obs)
+          (saturate-workers-and-gas-commands sample-multi-drone-obs)))
 (check-true "translated-raw-cmds-non-empty" (>= (length raw-cmds) 8))
 (check-true "translated-includes-train-zergling"
             (ormap (lambda (c)
@@ -527,9 +537,9 @@
 (check-true "two-depots-have-distinct-reserved-coords"
             (not (equal? (first depot-build-pts) (second depot-build-pts))))
 
-(check-eqv "ui-control-group-commands-emitted"
+(check-eqv "ui-control-group-raw-wire-noop"
            (count sc2-ui-control-group? tw-cmds)
-           3)
+           0)
 (check-eqv "camera-moves-deduplicated-within-step"
            (count sc2-raw-camera-move? tw-cmds)
            1)

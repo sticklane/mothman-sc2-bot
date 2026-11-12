@@ -213,9 +213,20 @@
     swarm-host swarmhost swarm-host-mp swarm-host-burrowed
     observer observer-siege-mode overseer overseer-siege-mode))
 
-(define (cortex-sync-control-groups! cortex ally-units ally-buildings base-x base-y)
+(define (cortex-sync-control-groups! cortex ally-units ally-buildings base-x base-y
+                                     #:excluded-tags [excluded-tags #f])
   (define actions '())
   (define (emit! a) (set! actions (cons a actions)))
+  (define (tag-excluded? id)
+    (cond
+      [(not excluded-tags) #f]
+      [(set? excluded-tags) (set-member? excluded-tags id)]
+      [(hash? excluded-tags) (hash-has-key? excluded-tags id)]
+      [(list? excluded-tags) (not (not (memv id excluded-tags)))]
+      [else #f]))
+  (define (unit-is-hallucination? u)
+    (or (eq? (hash-ref u 'is-hallucination #f) #t)
+        (eq? (hash-ref u 'hallucination #f) #t)))
   (define townhall-types
     '(hatchery lair hive nexus
       command-center command-center-flying
@@ -260,23 +271,29 @@
       (or (hash-ref u 'has-build-order? #f)
           (and (hash-ref u 'build-target #f) #t)
           (memq (hash-ref u 'order-kind #f) '(build expand))))
-    (when (> id 0)
+    (define non-combat-or-summon?
+      (or (sc2-non-combat-or-summon-sym? t)
+          (memq t NON-COMBAT-SELECTION-INTRUDER-TYPES)))
+    (when (and (> id 0)
+               (not (tag-excluded? id))
+               (not (unit-is-hallucination? u)))
       (cond
         [(and (or (eq? t 'overlord)
                   (and (memq t '(drone probe scv))
                        (not worker-building?)))
               (> d-nearest-th 28.0))
          (vector-set! group-tags 8 (cons id (vector-ref group-tags 8)))]
-        [(and (not (memq t NON-COMBAT-SELECTION-INTRUDER-TYPES))
+        [(and (not non-combat-or-summon?)
               (or (memq t CORTEX-HARASS-UNIT-TYPES)
                   (set-member? existing-g2-set id)))
          (vector-set! group-tags 2 (cons id (vector-ref group-tags 2)))
          (vector-set! group-tags 0 (cons id (vector-ref group-tags 0)))]
-        [(memq t CORTEX-CASTER-SIEGE-UNIT-TYPES)
+        [(and (not non-combat-or-summon?)
+              (memq t CORTEX-CASTER-SIEGE-UNIT-TYPES))
          (vector-set! group-tags 3 (cons id (vector-ref group-tags 3)))
          (when (not (memq t '(queen queen-burrowed)))
            (vector-set! group-tags 0 (cons id (vector-ref group-tags 0))))]
-        [(not (memq t NON-COMBAT-SELECTION-INTRUDER-TYPES))
+        [(not non-combat-or-summon?)
          (vector-set! group-tags 1 (cons id (vector-ref group-tags 1)))
          (vector-set! group-tags 0 (cons id (vector-ref group-tags 0)))])))
 
@@ -648,7 +665,11 @@
   (define desired-are-combat?
     (and (not (null? desired-records))
          (andmap (lambda (u)
-                   (not (memq (hash-ref u 'type 'unknown) NON-COMBAT-SELECTION-INTRUDER-TYPES)))
+                   (define ut (hash-ref u 'type 'unknown))
+                   (and (not (memq ut NON-COMBAT-SELECTION-INTRUDER-TYPES))
+                        (not (sc2-non-combat-or-summon-sym? ut))
+                        (not (hash-ref u 'is-hallucination #f))
+                        (not (hash-ref u 'hallucination #f))))
                  desired-records)))
 
   (define (unit-compatible? u)
@@ -660,6 +681,9 @@
                  (compatible-pred u)
                  (and desired-are-combat?
                       (not (memq ut NON-COMBAT-SELECTION-INTRUDER-TYPES))
+                      (not (sc2-non-combat-or-summon-sym? ut))
+                      (not (hash-ref u 'is-hallucination #f))
+                      (not (hash-ref u 'hallucination #f))
                       (not (memq ut '(queen queen-burrowed
                                       siege-tank-sieged liberator-ag
                                       lurker-burrowed lurker-mp-burrowed
@@ -676,8 +700,14 @@
       (count (lambda (id) (set-member? desired-set id)) clean-ids))
     (define min-needed
       (max 1 (exact-ceiling (* min-coverage-ratio (max 1 (length desired-records))))))
+    (define max-allowed
+      (if allow-superset?
+          (max (length desired-records)
+               (exact-ceiling (* 1.35 (max 1 (length desired-records)))))
+          (length desired-records)))
     (and (not (null? clean-ids))
          (>= covered min-needed)
+         (<= (length clean-ids) max-allowed)
          (andmap unit-compatible? recs)
          clean-ids))
 
@@ -1003,8 +1033,18 @@
        (list 'hold-position)]
       [(list (and op (or 'cast 'cast-spell)) uid spell-sym args ...)
        #:when (and (or (exact-integer? uid) (list? uid))
-                   (memq spell-sym '(stimpack guardian-shield siege-mode unsiege-mode
-                                     corrosive-bile blink burrow unburrow)))
+                   (memq spell-sym '(stimpack stim guardian-shield
+                                     siege-mode morph-siege-mode unsiege-mode unsiege
+                                     blink
+                                     burrow unburrow burrow-down burrow-up
+                                     widow-mine-burrow widow-mine-unburrow
+                                     lurker-burrow lurker-unburrow
+                                     morph-liberator-ag morph-liberator-aa
+                                     liberator-ag-mode liberator-aa-mode
+                                     morph-viking-assault morph-viking-fighter
+                                     morph-hellbat morph-hellion
+                                     morph-thor-high-impact morph-thor-explosive
+                                     cloak-banshee)))
        (cons 'cast-spell
              (cons spell-sym
                    (map (lambda (a) (if (real? a) (quantize-pt a) a)) args)))]
@@ -1021,6 +1061,41 @@
        (list 'attack-unit uid-arg target-id)]
       [(list op _ rest ...)
        (cons op (cons uid-arg rest))]))
+
+  ;; Collect unit IDs with pending explicit mode-switch, morph, burrow/unburrow, or spell commands
+  ;; (plus units currently in protected morph/channel orders in the SC2 engine) so generic
+  ;; `attack`/`move` superset box-drags never overwrite them!
+  (define protected-mode-or-spell-uids
+    (for/fold ([s (seteqv)]) ([act (in-list candidate-actions)])
+      (match act
+        [(list (or 'cast 'cast-spell 'use-ability
+                   'burrow-down 'burrow-up 'burrow 'unburrow
+                   'siege-mode 'unsiege-mode 'morph 'archon-warp
+                   'inject-larva 'spawn-creep-tumor 'spread-creep-tumor)
+               raw-uid _ ...)
+         (define uids
+           (filter exact-integer? (if (list? raw-uid) raw-uid (list raw-uid))))
+         (for/fold ([acc s]) ([id (in-list uids)])
+           (set-add acc id))]
+        [_ s])))
+
+  (define all-explicitly-commanded-uids
+    (for/fold ([s (seteqv)]) ([act (in-list candidate-actions)])
+      (if (or (ui-or-framing-action? act) (< (length act) 2))
+          s
+          (let* ([raw-uid (second act)]
+                 [uids (filter (lambda (id) (and (exact-integer? id) (> id 0)))
+                               (if (list? raw-uid) raw-uid (list raw-uid)))])
+            (for/fold ([acc s]) ([id (in-list uids)])
+              (set-add acc id))))))
+
+  (define protected-in-engine-uids
+    (for/fold ([s (seteqv)]) ([u (in-list ally-units)] #:when (hash? u))
+      (define uid (hash-ref u 'id 0))
+      (define pclass (sc2-order-protection-class (hash-ref u 'order-ability-id 0)))
+      (if (and (exact-integer? uid) (> uid 0) (memq pclass '(morph channel)))
+          (set-add s uid)
+          s)))
 
   ;; 1. Coalesce per-unit commands sharing the same equivalence key
   (define key->uids (make-hash))
@@ -1048,8 +1123,9 @@
                    coalesced-list))]))
   (define ordered-coalesced (reverse coalesced-list))
 
-  ;; 2. Sort adjacent combat commands so larger multi-type group commands (`attack-unit` / `attack-pos`)
-  ;;    execute BEFORE smaller single-type spell/siege commands (`cast-spell`), enabling 1-click
+  ;; 2. Sort combat commands so generic movement/attack commands ALWAYS execute BEFORE
+  ;;    mode-switch/morph/spell commands (`cast-spell`), both preventing a generic `attack`/`move`
+  ;;    from overwriting a mode-switch later in the same frame and enabling 1-click
   ;;    `select-ctrl-type` wireframe narrowing from the active army selection!
   (define combat-cmds
     (filter (lambda (a) (unit-command-coalesce-key a)) ordered-coalesced))
@@ -1058,7 +1134,9 @@
           >
           #:key (lambda (a)
                   (define uids (extract-action-uids a))
-                  (+ (* 10 (length uids))
+                  (define is-spell-cmd? (memq (car a) '(cast cast-spell)))
+                  (+ (if is-spell-cmd? 0 100000)
+                     (* 10 (length uids))
                      (if (memq (car a) '(attack-unit attack attack-pos move kite)) 5 0)))))
   (define combat-queue sorted-combat-cmds)
   (define reordered-actions
@@ -1087,15 +1165,34 @@
       [else
        (define desired-uids (extract-action-uids act))
        (define is-spell? (memq (car act) '(cast cast-spell)))
+       (define allow-superset-for-cmd?
+         (and (not is-spell?)
+              (> (length desired-uids) 1)
+              (not (eq? (car act) 'hold-position))))
+       (define superset-compat-pred
+         (and allow-superset-for-cmd?
+              (lambda (u)
+                (define uid (hash-ref u 'id 0))
+                (define ut (hash-ref u 'type 'unknown))
+                (and (not (set-member? all-explicitly-commanded-uids uid))
+                     (not (set-member? protected-mode-or-spell-uids uid))
+                     (not (set-member? protected-in-engine-uids uid))
+                     (not (sc2-non-combat-or-summon-sym? ut))
+                     (not (memq ut NON-COMBAT-SELECTION-INTRUDER-TYPES))
+                     (not (memq ut '(queen queen-burrowed
+                                     siege-tank-sieged liberator-ag
+                                     lurker-burrowed lurker-mp-burrowed
+                                     widow-mine-burrowed swarm-host-burrowed)))))))
        (define-values (sel-seq realized-uids)
          (compile-optimal-unit-selection!
           cortex
           desired-uids
           ally-units
           ally-buildings
-          #:allow-superset? (not is-spell?)
+          #:allow-superset? allow-superset-for-cmd?
+          #:compatible-pred superset-compat-pred
           #:allow-camera-move? allow-camera-move?
-          #:allow-on-the-fly-cg-update? (not is-spell?)))
+          #:allow-on-the-fly-cg-update? allow-superset-for-cmd?))
        (when (not (null? realized-uids))
          (set! compiled-out
                (append compiled-out
@@ -1140,20 +1237,21 @@
     [(list 'clear-gas-steal _ ...)           94]
     [(list 'resume-halted-building _ ...)    93]
     [(list 'hold-position _ ...)             92]
-    [(list 'swap-addon _ ...)                92]
-    [(list 'transport-juggle _ ...)          91]
+    [(list (or 'swap-addon 'terran-addon-swap 'land-building) _ ...) 92]
+    [(list (or 'burrow-down 'burrow-up 'transport-juggle) _ ...) 91]
     [(list 'multi-prong-drop _ ...)          90]
     [(list 'mineral-walk _ ...)              90]
-    [(list 'worker-harass _ ...)             89]
+    [(list 'morph _ ...)                     90]
+    [(list (or 'worker-harass 'mineral-harass) _ ...) 89]
+    [(list 'build _ ...)                     89]
+    [(list 'expand _ ...)                    89]
     [(list 'inject-larva _ ...)              88]
     [(list 'chrono-boost _ ...)              88]
     [(list 'calldown-mule _ ...)             88]
+    [(list 'research _ ...)                  87]
+    [(list (or 'emergency-detector-response 'blind-skillshot-shimmer) _ ...) 87]
     [(list (or 'cast 'cast-spell 'use-ability) _ ...) 86]
-    [(list 'morph _ ...)                     84]
-    [(list 'build _ ...)                     82]
-    [(list 'expand _ ...)                    81]
-    [(list 'research _ ...)                  79]
-    [(list 'train _ ...)                     78]
+    [(list 'train _ ...)                     86]
     [(list 'kite _ ...)                      77]
     [(list (or 'attack 'attack-unit) _ ...)  76]
     [(list 'attack-pos _ ...)                75]
@@ -1187,10 +1285,17 @@
 
 ;; Filter candidate actions through the human cortex token bucket and camera viewport.
 ;; UI/framing actions (`move-camera`, `camera-bookmark-*`, `control-group-*`, `select-*`,
-;; `posture-transition`, `mirror-*`) are zero-token-cost cognitive framing directives so they
-;; never starve `build`, `train`, `kite`, or `attack-unit` out of the unit/macro token budget (`cap`).
+;; `posture-transition`, `mirror-*`) are zero-token-cost cognitive framing directives, and
+;; critical macro/economy/survival directives (`action-priority >= 85`: `morph`, `build`,
+;; `expand`, `research`, `train`, `inject-larva`, `chrono-boost`, `calldown-mule`, `cast-spell`)
+;; are NEVER dropped when combat micro bursts exceed the step token budget.
 (define (cortex-filter-actions! cortex candidate-actions #:budget [budget #f])
-  (define cap (max 0 (or budget (human-cortex-max-tokens cortex))))
+  (define step-replenish
+    (max 4 (exact-ceiling (/ (exact->inexact (max 60 (human-cortex-epm-cap cortex))) 45.0))))
+  (define replenished-tokens
+    (min (human-cortex-max-tokens cortex)
+         (+ (human-cortex-tokens cortex) step-replenish)))
+  (define cap (max 0 (or budget replenished-tokens)))
   (define indexed
     (for/list ([a (in-list candidate-actions)]
                [i (in-naturals)])
@@ -1198,13 +1303,23 @@
   (define ui-indexed (filter (lambda (p) (ui-or-framing-action? (cdr p))) indexed))
   (define unit-indexed (filter (lambda (p) (not (ui-or-framing-action? (cdr p)))) indexed))
   (define total-unit (length unit-indexed))
+  (define critical-indexed
+    (filter (lambda (p) (>= (action-priority (cdr p)) 85)) unit-indexed))
+  (define lower-indexed
+    (filter (lambda (p) (< (action-priority (cdr p)) 85)) unit-indexed))
   (define accepted-unit-indexed
     (cond
       [(<= total-unit cap)
        unit-indexed]
+      [(>= (length critical-indexed) cap)
+       (if budget
+           (take (sort critical-indexed > #:key (lambda (p) (action-priority (cdr p)))) cap)
+           critical-indexed)]
       [else
-       (take (sort unit-indexed > #:key (lambda (p) (action-priority (cdr p))))
-             cap)]))
+       (define rem-cap (- cap (length critical-indexed)))
+       (append critical-indexed
+               (take (sort lower-indexed > #:key (lambda (p) (action-priority (cdr p))))
+                     (min (length lower-indexed) rem-cap)))]))
   (define accepted
     (map cdr (sort (append ui-indexed accepted-unit-indexed) < #:key car)))
   (define dropped (max 0 (- total-unit (length accepted-unit-indexed))))

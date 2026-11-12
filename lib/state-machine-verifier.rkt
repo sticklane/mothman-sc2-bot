@@ -1834,7 +1834,10 @@
              'enemy-buildings '())))
     (define acts-spot (hash-ref res-spot 'actions '()))
     (define has-mineral-harass?
-      (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-harass))) acts-spot))
+      (ormap (lambda (a)
+               (and (pair? a)
+                    (not (not (memq (car a) '(mineral-harass mineral-walk))))))
+             acts-spot))
     ;; Step C: Enemy army marches out of vision at frame 1100 (`200` frames later < `672`);
     ;; verify `remembered-enemy-threat-supply` persists (> 0) and `last-seen-main-frame = 900`!
     (define res-memory

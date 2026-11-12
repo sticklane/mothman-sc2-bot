@@ -1291,16 +1291,25 @@
               (memq utype '(dark-templar banshee ghost mothership lurker lurker-mp widow-mine widowmine observer)))
       (set! req-det? #t))
 
-    ;; Air threat trigger
-    (when (memq utype '(mutalisk corruptor brood-lord broodlord viper
-                        viking viking-fighter medivac liberator banshee raven battlecruiser
-                        phoenix oracle void-ray voidray carrier tempest mothership))
+    ;; Air threat trigger (unit type OR explicit flying? / flying / is-flying flag)
+    (when (or (hash-ref u 'flying? #f)
+              (hash-ref u 'flying #f)
+              (hash-ref u 'is-flying #f)
+              (memq utype '(mutalisk corruptor brood-lord broodlord viper
+                            viking viking-fighter medivac liberator banshee raven battlecruiser
+                            phoenix oracle void-ray voidray carrier tempest mothership)))
       (set! req-aa? #t)))
 
   ;; 3. Inspect enemy buildings for active research, Chrono Boost, & implied detection/anti-air
   (for ([b (in-list enemy-bldgs)]
         #:unless (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
     (define btype (unit-type-sym b))
+    (when (or (hash-ref b 'flying? #f)
+              (hash-ref b 'flying #f)
+              (hash-ref b 'is-flying #f)
+              (memq btype '(command-center-flying orbital-command-flying
+                            barracks-flying factory-flying starport-flying)))
+      (set! req-aa? #t))
     (define b-spells
       (append (safe-list (hash-ref b 'spells '()))
               (safe-list (hash-ref b 'buffs '()))
@@ -4714,6 +4723,8 @@
 (define (emit-top-level-bo-directives? raw-obs)
   (not (and (hash? raw-obs) (hash-has-key? raw-obs 'actual-race))))
 
+(define MIRROR-SCOUT-LAST-EMIT-FRAME (make-weak-hasheq))
+
 (define (step-mirror-mind-predictor! mstate raw-obs)
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define frame (safe-frame (hash-ref obs 'frame 0)))
@@ -4953,13 +4964,25 @@
         (list bo-tree-directive horizon-curve-directive)
         (list (list 'log bo-tree-directive horizon-curve-directive))))
 
+  (define want-mirror-scout?
+    (or (eq? trust-mode 'skeptical-observational-fallback)
+        (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading)
+        (memq (shadow-ledger-dark-matter-hypothesis ledger)
+              '(hidden-expansion-or-macro-boom hidden-air-or-cloak-tech-switch))))
+  (define prev-scout-entry (hash-ref MIRROR-SCOUT-LAST-EMIT-FRAME mstate #f))
+  (define last-scout-emit (if (pair? prev-scout-entry) (car prev-scout-entry) -1000))
+  (define prev-scout-mode (if (pair? prev-scout-entry) (cdr prev-scout-entry) #f))
+  (define newly-skeptical?
+    (and (eq? trust-mode 'skeptical-observational-fallback)
+         (not (eq? prev-scout-mode 'skeptical-observational-fallback))))
   (define scout-actions
-    (if (or (eq? trust-mode 'skeptical-observational-fallback)
-            (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading)
-            (memq (shadow-ledger-dark-matter-hypothesis ledger)
-                  '(hidden-expansion-or-macro-boom hidden-air-or-cloak-tech-switch)))
-        (list (list 'scout-sector 1 enemy-x enemy-y)
-              (list 'scout-sector 2 tx ty))
+    (if (and want-mirror-scout?
+             (or newly-skeptical?
+                 (< frame last-scout-emit)
+                 (>= (- frame last-scout-emit) 112)))
+        (begin
+          (hash-set! MIRROR-SCOUT-LAST-EMIT-FRAME mstate (cons frame trust-mode))
+          (list (list 'scout-sector 1 enemy-x enemy-y)))
         '()))
 
   (append base-actions bo-and-horizon-actions scout-actions))

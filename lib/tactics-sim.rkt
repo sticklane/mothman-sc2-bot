@@ -8,13 +8,15 @@
          "sc2-game-constants.rkt")
 
 (provide
- ;; Baba CSP Choke Wall-In Solver & Orientation-Aware Terran Ramp Wall Solver
+ ;; Baba CSP Choke Wall-In Solver, Terrain-Grid Main-Ramp & Matchup Wall Solvers
  PROTOSS-FFE-BUILDINGS
  TERRAN-BARRACKS-DEPOT-BUILDINGS
  (struct-out wall-placement)
  (struct-out wall-solution)
  solve-choke-wall-in
+ find-main-ramp-geometry
  solve-terran-ramp-wall
+ solve-protoss-matchup-wall
  wall-solution-valid-ref
  wall-solution-zergling-tight-ref
  wall-solution-max-gap-ref
@@ -119,7 +121,287 @@
 (define (snap-2x2-coord c)
   (exact->inexact (round (exact->inexact c))))
 
-(define (solve-terran-ramp-wall base-x base-y nat-x nat-y)
+(define (wall-dist2d x1 y1 x2 y2)
+  (sqrt (+ (sqr (- (exact->inexact x2) (exact->inexact x1)))
+           (sqr (- (exact->inexact y2) (exact->inexact y1))))))
+
+(define (grid-cell-positive? v)
+  (cond
+    [(number? v) (> v 0)]
+    [(boolean? v) v]
+    [else (not (not v))]))
+
+(define (grid-height-val href ix iy [default 0.0])
+  (if (procedure? href)
+      (let ([v (href ix iy)])
+        (if (real? v) (exact->inexact v) default))
+      default))
+
+(define (footprints-disjoint? cx1 cy1 hw1 hh1 cx2 cy2 hw2 hh2)
+  (or (>= (abs (- cx1 cx2)) (- (+ hw1 hw2) 1e-6))
+      (>= (abs (- cy1 cy2)) (- (+ hh1 hh2) 1e-6))))
+
+(define (footprint-buildable-at-height? cx cy hw hh w h bref href target-h [check-height? #t])
+  (define x0 (exact-round (- cx hw)))
+  (define x1 (exact-round (+ cx hw)))
+  (define y0 (exact-round (- cy hh)))
+  (define y1 (exact-round (+ cy hh)))
+  (and (>= x0 0) (<= x1 w) (>= y0 0) (<= y1 h)
+       (for*/and ([ix (in-range x0 x1)]
+                  [iy (in-range y0 y1)])
+         (and (grid-cell-positive? (bref ix iy))
+              (or (not check-height?)
+                  (not (procedure? href))
+                  (<= (abs (- (grid-height-val href ix iy target-h) target-h)) 2.0))))))
+
+(define (make-local-4conn-bfs cx-f cy-f src-fx src-fy dst-fx dst-fy w h pref)
+  (define win-size 28)
+  (define win-x0 (max 0 (min (max 0 (- w win-size)) (- (exact-round cx-f) 14))))
+  (define win-y0 (max 0 (min (max 0 (- h win-size)) (- (exact-round cy-f) 14))))
+  (define win-w (max 1 (min win-size (- w win-x0))))
+  (define win-h (max 1 (min win-size (- h win-y0))))
+  (define n-cells (* win-w win-h))
+  (define base-pass (make-bytes n-cells 0))
+  (for* ([ly (in-range win-h)]
+         [lx (in-range win-w)])
+    (when (grid-cell-positive? (pref (+ win-x0 lx) (+ win-y0 ly)))
+      (bytes-set! base-pass (+ (* ly win-w) lx) 1)))
+
+  (define (snap-passable-local target-wx target-wy)
+    (define clx (max 0 (min (sub1 win-w) (- (exact-floor target-wx) win-x0))))
+    (define cly (max 0 (min (sub1 win-h) (- (exact-floor target-wy) win-y0))))
+    (if (= (bytes-ref base-pass (+ (* cly win-w) clx)) 1)
+        (cons clx cly)
+        (let loop ([r 1])
+          (if (> r 7)
+              #f
+              (or (for*/first ([dy (in-range (- r) (add1 r))]
+                               [dx (in-range (- r) (add1 r))]
+                               #:when (let ([nx (+ clx dx)]
+                                            [ny (+ cly dy)])
+                                        (and (>= nx 0) (< nx win-w)
+                                             (>= ny 0) (< ny win-h)
+                                             (= (bytes-ref base-pass (+ (* ny win-w) nx)) 1))))
+                    (cons (+ clx dx) (+ cly dy)))
+                  (loop (add1 r)))))))
+
+  (define src-pt (snap-passable-local src-fx src-fy))
+  (define dst-pt (snap-passable-local dst-fx dst-fy))
+  (define qbuf (make-vector n-cells 0))
+
+  (define (bfs-reachable? blocked-rects
+                          [s-lx (and src-pt (car src-pt))]
+                          [s-ly (and src-pt (cdr src-pt))]
+                          [g-lx (and dst-pt (car dst-pt))]
+                          [g-ly (and dst-pt (cdr dst-pt))])
+    (and (exact-integer? s-lx) (exact-integer? s-ly)
+         (exact-integer? g-lx) (exact-integer? g-ly)
+         (>= s-lx 0) (< s-lx win-w) (>= s-ly 0) (< s-ly win-h)
+         (>= g-lx 0) (< g-lx win-w) (>= g-ly 0) (< g-ly win-h)
+         (let ([vis (bytes-copy base-pass)])
+           (for ([r (in-list blocked-rects)])
+             (match-define (list rcx rcy rhw rhh) r)
+             (define rx0 (max 0 (- (exact-round (- rcx rhw)) win-x0)))
+             (define rx1 (min win-w (- (exact-round (+ rcx rhw)) win-x0)))
+             (define ry0 (max 0 (- (exact-round (- rcy rhh)) win-y0)))
+             (define ry1 (min win-h (- (exact-round (+ rcy rhh)) win-y0)))
+             (for* ([ly (in-range ry0 ry1)]
+                    [lx (in-range rx0 rx1)])
+               (bytes-set! vis (+ (* ly win-w) lx) 0)))
+           (define s-idx (+ (* s-ly win-w) s-lx))
+           (define g-idx (+ (* g-ly win-w) g-lx))
+           (cond
+             [(or (= (bytes-ref vis s-idx) 0) (= (bytes-ref vis g-idx) 0)) #f]
+             [(= s-idx g-idx) #t]
+             [else
+              (bytes-set! vis s-idx 0)
+              (vector-set! qbuf 0 s-idx)
+              (let loop ([head 0] [tail 1])
+                (cond
+                  [(>= head tail) #f]
+                  [else
+                   (define cur (vector-ref qbuf head))
+                   (define cy (quotient cur win-w))
+                   (define cx (remainder cur win-w))
+                   (define tail1 tail)
+                   (define reached? #f)
+                   (define-syntax-rule (try-step! nx ny)
+                     (when (and (not reached?) (>= nx 0) (< nx win-w) (>= ny 0) (< ny win-h))
+                       (define nidx (+ (* ny win-w) nx))
+                       (when (= (bytes-ref vis nidx) 1)
+                         (if (= nidx g-idx)
+                             (set! reached? #t)
+                             (begin
+                               (bytes-set! vis nidx 0)
+                               (vector-set! qbuf tail1 nidx)
+                               (set! tail1 (add1 tail1)))))))
+                   (try-step! (add1 cx) cy)
+                   (try-step! (sub1 cx) cy)
+                   (try-step! cx (add1 cy))
+                   (try-step! cx (sub1 cy))
+                   (if reached? #t (loop (add1 head) tail1))]))]))))
+
+  (hash 'valid? (and src-pt dst-pt (bfs-reachable? '()) #t)
+        'win-x0 win-x0
+        'win-y0 win-y0
+        'win-w win-w
+        'win-h win-h
+        'src-pt src-pt
+        'dst-pt dst-pt
+        'bfs-reachable? bfs-reachable?))
+
+(define (wall-grid-fingerprint map-grids base-x base-y nat-x nat-y)
+  (cond
+    [(not (hash? map-grids)) #f]
+    [else
+     (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
+     (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
+     (define pref (hash-ref map-grids 'pathing-ref #f))
+     (define bref (hash-ref map-grids 'placement-ref #f))
+     (define href (hash-ref map-grids 'height-ref #f))
+     (define (sample fx fy)
+       (define ix (max 0 (min (sub1 (max 1 w)) (exact-floor (exact->inexact fx)))))
+       (define iy (max 0 (min (sub1 (max 1 h)) (exact-floor (exact->inexact fy)))))
+       (list (and (procedure? pref) (grid-cell-positive? (pref ix iy)))
+             (and (procedure? bref) (grid-cell-positive? (bref ix iy)))
+             (round (grid-height-val href ix iy 0.0))))
+     (define mx (+ base-x (* 0.35 (- nat-x base-x))))
+     (define my (+ base-y (* 0.35 (- nat-y base-y))))
+     (list w h
+           (sample base-x base-y)
+           (sample nat-x nat-y)
+           (sample mx my)
+           (sample (+ mx 2.0) (- my 2.0)))]))
+
+(define (find-main-ramp-geometry base-x base-y nat-x nat-y [map-grids #f])
+  (define bx-f (exact->inexact base-x))
+  (define by-f (exact->inexact base-y))
+  (define nx-f (exact->inexact nat-x))
+  (define ny-f (exact->inexact nat-y))
+  (define dx (- nx-f bx-f))
+  (define dy (- ny-f by-f))
+  (define dist (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+  (define ux (/ dx dist))
+  (define uy (/ dy dist))
+  (define fallback-rx (+ bx-f (* 0.32 dx)))
+  (define fallback-ry (+ by-f (* 0.32 dy)))
+  (cond
+    [(and (hash? map-grids)
+          (procedure? (hash-ref map-grids 'pathing-ref #f))
+          (procedure? (hash-ref map-grids 'placement-ref #f)))
+     (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
+     (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
+     (define pref (hash-ref map-grids 'pathing-ref))
+     (define bref (hash-ref map-grids 'placement-ref))
+     (define href (hash-ref map-grids 'height-ref #f))
+     (define b-ix (max 0 (min (sub1 (max 1 w)) (exact-floor bx-f))))
+     (define b-iy (max 0 (min (sub1 (max 1 h)) (exact-floor by-f))))
+     (define n-ix (max 0 (min (sub1 (max 1 w)) (exact-floor nx-f))))
+     (define n-iy (max 0 (min (sub1 (max 1 h)) (exact-floor ny-f))))
+     (define h-main (grid-height-val href b-ix b-iy 128.0))
+     (define h-nat  (grid-height-val href n-ix n-iy 112.0))
+     (define h-lo   (min h-main h-nat))
+     (define h-hi   (max h-main h-nat))
+     (define mid-x  (+ bx-f (* 0.35 dx)))
+     (define mid-y  (+ by-f (* 0.35 dy)))
+     (define sx0 (max 1 (- (exact-round mid-x) 22)))
+     (define sx1 (min (- w 1) (+ (exact-round mid-x) 22)))
+     (define sy0 (max 1 (- (exact-round mid-y) 22)))
+     (define sy1 (min (- h 1) (+ (exact-round mid-y) 22)))
+     (define strict-ramp-candidates
+       (if (> (- h-hi h-lo) 1.0)
+           (for*/list ([iy (in-range sy0 sy1)]
+                       [ix (in-range sx0 sx1)]
+                       #:when (and (grid-cell-positive? (pref ix iy))
+                                   (not (grid-cell-positive? (bref ix iy)))
+                                   (let ([th (grid-height-val href ix iy h-lo)])
+                                     (and (> th (+ h-lo 0.25))
+                                          (< th (- h-hi 0.25))))))
+             (cons ix iy))
+           '()))
+     (define raw-ramp-candidates
+       (if (pair? strict-ramp-candidates)
+           strict-ramp-candidates
+           (for*/list ([iy (in-range sy0 sy1)]
+                       [ix (in-range sx0 sx1)]
+                       #:when (and (grid-cell-positive? (pref ix iy))
+                                   (not (grid-cell-positive? (bref ix iy)))
+                                   (<= (wall-dist2d (+ ix 0.5) (+ iy 0.5) mid-x mid-y) 14.0)))
+             (cons ix iy))))
+     ;; Focus on the ramp cluster nearest the base->natural 0.35 corridor point
+     (define nearest-ramp-seed
+       (and (pair? raw-ramp-candidates)
+            (argmin (lambda (pt)
+                      (wall-dist2d (+ (car pt) 0.5) (+ (cdr pt) 0.5) mid-x mid-y))
+                    raw-ramp-candidates)))
+     (define ramp-tiles
+       (if nearest-ramp-seed
+           (filter (lambda (pt)
+                     (<= (wall-dist2d (car pt) (cdr pt)
+                                      (car nearest-ramp-seed) (cdr nearest-ramp-seed))
+                         8.5))
+                   raw-ramp-candidates)
+           '()))
+     (define top-tiles
+       (if (pair? ramp-tiles)
+           (for*/list ([iy (in-range sy0 sy1)]
+                       [ix (in-range sx0 sx1)]
+                       #:when (and (grid-cell-positive? (bref ix iy))
+                                   (grid-cell-positive? (pref ix iy))
+                                   (or (not (procedure? href))
+                                       (<= (abs (- (grid-height-val href ix iy h-main) h-main)) 2.0))
+                                   (ormap (lambda (rt)
+                                            (and (<= (abs (- ix (car rt))) 2)
+                                                 (<= (abs (- iy (cdr rt))) 2)))
+                                          ramp-tiles)))
+             (cons ix iy))
+           '()))
+     (cond
+       [(and (pair? ramp-tiles) (pair? top-tiles))
+        (define n-r (length ramp-tiles))
+        (define rx (/ (for/sum ([pt (in-list ramp-tiles)]) (+ (car pt) 0.5)) n-r))
+        (define ry (/ (for/sum ([pt (in-list ramp-tiles)]) (+ (cdr pt) 0.5)) n-r))
+        (define n-t (length top-tiles))
+        (define tcx (/ (for/sum ([pt (in-list top-tiles)]) (+ (car pt) 0.5)) n-t))
+        (define tcy (/ (for/sum ([pt (in-list top-tiles)]) (+ (cdr pt) 0.5)) n-t))
+        (define vdx (- rx tcx))
+        (define vdy (- ry tcy))
+        (define vmag (sqrt (+ (* vdx vdx) (* vdy vdy))))
+        (define rdx (if (>= vmag 0.2) (/ vdx vmag) ux))
+        (define rdy (if (>= vmag 0.2) (/ vdy vmag) uy))
+        (hash 'ramp-x rx
+              'ramp-y ry
+              'ramp-dx rdx
+              'ramp-dy rdy
+              'top-tiles top-tiles
+              'ramp-tiles ramp-tiles
+              'h-main h-main
+              'h-nat h-nat
+              'grid-solved? #t)]
+       [else
+        (hash 'ramp-x fallback-rx
+              'ramp-y fallback-ry
+              'ramp-dx ux
+              'ramp-dy uy
+              'top-tiles '()
+              'ramp-tiles '()
+              'h-main h-main
+              'h-nat h-nat
+              'grid-solved? #f)])]
+    [else
+     (hash 'ramp-x fallback-rx
+           'ramp-y fallback-ry
+           'ramp-dx ux
+           'ramp-dy uy
+           'top-tiles '()
+           'ramp-tiles '()
+           'h-main 0.0
+           'h-nat 0.0
+           'grid-solved? #f)]))
+
+(define TERRAN-RAMP-WALL-CACHE (make-hash))
+
+(define (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)
   (define dx (exact->inexact (- nat-x base-x)))
   (define dy (exact->inexact (- nat-y base-y)))
   (define dist (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
@@ -160,7 +442,567 @@
         'depot-2 (cons d2-x d2-y)
         'barracks (cons bx by)
         'barracks-addon (cons addon-x addon-y)
-        'production-origin (cons prod-x prod-y)))
+        'production-origin (cons prod-x prod-y)
+        'grid-solved? #f))
+
+(define (solve-terran-ramp-wall base-x base-y nat-x nat-y #:map-grids [map-grids #f])
+  (define cache-key
+    (list 'terran
+          (round base-x) (round base-y)
+          (round nat-x) (round nat-y)
+          (wall-grid-fingerprint map-grids base-x base-y nat-x nat-y)))
+  (cond
+    [(hash-ref TERRAN-RAMP-WALL-CACHE cache-key #f) => values]
+    [else
+     (define result
+       (cond
+         [(not (hash? map-grids))
+          (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)]
+         [else
+          (define rgeom (find-main-ramp-geometry base-x base-y nat-x nat-y map-grids))
+          (cond
+            [(not (hash-ref rgeom 'grid-solved? #f))
+             (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)]
+            [else
+             (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
+             (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
+             (define pref (hash-ref map-grids 'pathing-ref))
+             (define bref (hash-ref map-grids 'placement-ref))
+             (define href (hash-ref map-grids 'height-ref #f))
+             (define rx (hash-ref rgeom 'ramp-x))
+             (define ry (hash-ref rgeom 'ramp-y))
+             (define rdx (hash-ref rgeom 'ramp-dx))
+             (define rdy (hash-ref rgeom 'ramp-dy))
+             (define h-main (hash-ref rgeom 'h-main))
+             (define top-tiles (hash-ref rgeom 'top-tiles '()))
+             ;; High-ground source toward `(floor base-x, floor base-y)` and low-ground exit toward `(nat-x, nat-y)`
+             (define src-fx
+               (if (<= (wall-dist2d base-x base-y rx ry) 12.5)
+                   (exact->inexact (floor base-x))
+                   (- rx (* 7.5 rdx))))
+             (define src-fy
+               (if (<= (wall-dist2d base-x base-y rx ry) 12.5)
+                   (exact->inexact (floor base-y))
+                   (- ry (* 7.5 rdy))))
+             (define dst-fx (+ rx (* 6.5 rdx)))
+             (define dst-fy (+ ry (* 6.5 rdy)))
+             (define bfs-ctx (make-local-4conn-bfs rx ry src-fx src-fy dst-fx dst-fy w h pref))
+             (cond
+               [(not (hash-ref bfs-ctx 'valid? #f))
+                (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)]
+               [else
+                (define bfs-reach? (hash-ref bfs-ctx 'bfs-reachable?))
+                (define (near-top-tile? cx cy max-d)
+                  (ormap (lambda (pt)
+                           (<= (wall-dist2d cx cy (+ (car pt) 0.5) (+ (cdr pt) 0.5)) max-d))
+                         top-tiles))
+                (define tang-x (- rdy))
+                (define tang-y rdx)
+                (define (tangent-proj cx cy)
+                  (+ (* (- cx rx) tang-x) (* (- cy ry) tang-y)))
+
+                ;; Candidate 3x3 Barracks centers on high ground near top-tiles
+                (define rax-cands
+                  (for*/list ([dy-i (in-range -6 7)]
+                              [dx-i (in-range -6 7)]
+                              #:do [(define bx (+ (floor rx) dx-i 0.5))
+                                    (define by (+ (floor ry) dy-i 0.5))]
+                              #:when (and (near-top-tile? bx by 3.2)
+                                          ;; Keep main TownHall 5x5 pad clear
+                                          (footprints-disjoint? bx by 1.5 1.5 base-x base-y 2.5 2.5)
+                                          (footprint-buildable-at-height? bx by 1.5 1.5 w h bref href h-main #t)))
+                    (define ax (+ bx SC2-TERRAN-ADDON-OFFSET-X))
+                    (define ay (+ by SC2-TERRAN-ADDON-OFFSET-Y))
+                    (define addon-hg?
+                      (and (footprints-disjoint? ax ay 1.0 1.0 base-x base-y 2.5 2.5)
+                           (footprint-buildable-at-height? ax ay 1.0 1.0 w h bref href h-main #t)))
+                    (list bx by ax ay addon-hg? (tangent-proj bx by))))
+
+                ;; Candidate 2x2 Depot centers on high ground near top-tiles
+                (define depot-cands
+                  (for*/list ([dy-i (in-range -6 7)]
+                              [dx-i (in-range -6 7)]
+                              #:do [(define dx0 (exact->inexact (+ (exact-round rx) dx-i)))
+                                    (define dy0 (exact->inexact (+ (exact-round ry) dy-i)))]
+                              #:when (and (near-top-tile? dx0 dy0 3.2)
+                                          (footprints-disjoint? dx0 dy0 1.0 1.0 base-x base-y 2.5 2.5)
+                                          (footprint-buildable-at-height? dx0 dy0 1.0 1.0 w h bref href h-main #t)))
+                    (list dx0 dy0 (tangent-proj dx0 dy0))))
+
+                (define best-score -1e9)
+                (define best-sol #f)
+                (for ([rc (in-list rax-cands)])
+                  (match-define (list bx by ax ay addon-hg? r-proj) rc)
+                  (define left-depots
+                    (filter (lambda (dc)
+                              (match-define (list d1x d1y d1-proj) dc)
+                              (and (< d1-proj (- r-proj 0.3))
+                                   (<= (wall-dist2d d1x d1y bx by) 5.5)
+                                   (footprints-disjoint? d1x d1y 1.0 1.0 bx by 1.5 1.5)
+                                   (footprints-disjoint? d1x d1y 1.0 1.0 ax ay 1.0 1.0)))
+                            depot-cands))
+                  (define right-depots
+                    (filter (lambda (dc)
+                              (match-define (list d2x d2y d2-proj) dc)
+                              (and (> d2-proj (+ r-proj 0.3))
+                                   (<= (wall-dist2d d2x d2y bx by) 5.5)
+                                   (footprints-disjoint? d2x d2y 1.0 1.0 bx by 1.5 1.5)
+                                   (footprints-disjoint? d2x d2y 1.0 1.0 ax ay 1.0 1.0)))
+                            depot-cands))
+                  (for* ([d1 (in-list left-depots)]
+                         [d2 (in-list right-depots)])
+                    (match-define (list d1x d1y _) d1)
+                    (match-define (list d2x d2y _) d2)
+                    (when (footprints-disjoint? d1x d1y 1.0 1.0 d2x d2y 1.0 1.0)
+                      (define bare-rects
+                        (list (list d1x d1y 1.0 1.0)
+                              (list bx by 1.5 1.5)
+                              (list d2x d2y 1.0 1.0)))
+                      (define seals-bare? (not (bfs-reach? bare-rects)))
+                      (define seals-with-addon?
+                        (and (not seals-bare?)
+                             addon-hg?
+                             (>= rdx 0.0)
+                             (not (bfs-reach? (cons (list ax ay 1.0 1.0) bare-rects)))))
+                      (when (or seals-bare? seals-with-addon?)
+                        (define dist-pen
+                          (+ (wall-dist2d bx by rx ry)
+                             (* 0.65 (wall-dist2d d1x d1y rx ry))
+                             (* 0.65 (wall-dist2d d2x d2y rx ry))))
+                        (define sc
+                          (+ (if addon-hg? 1000.0 0.0)
+                             (if seals-bare? 500.0 0.0)
+                             (- (* 10.0 dist-pen))))
+                        (when (> sc best-score)
+                          (set! best-score sc)
+                          (set! best-sol (list d1x d1y d2x d2y bx by ax ay addon-hg? seals-with-addon?)))))))
+
+                (cond
+                  [best-sol
+                   (match-define (list d1x d1y d2x d2y bx by ax ay _addon-hg? seals-with-addon?) best-sol)
+                   (define east-facing? (or (>= rdx 0.0) seals-with-addon?))
+                   (define dy-tot (exact->inexact (- nat-y base-y)))
+                   (define prod-x (snap-3x3-coord (if east-facing? (- base-x 7.5) (+ base-x 4.5))))
+                   (define prod-y (snap-3x3-coord (if (>= dy-tot 0.0) (- base-y 4.5) (+ base-y 4.5))))
+                   (hash 'orientation (if east-facing?
+                                          'east-facing-ramp-addon-walls
+                                          'west-facing-ramp-addon-inside)
+                         'east-facing-ramp? east-facing?
+                         'ramp-x rx
+                         'ramp-y ry
+                         'ramp-dx rdx
+                         'ramp-dy rdy
+                         'depot-1 (cons d1x d1y)
+                         'depot-2 (cons d2x d2y)
+                         'barracks (cons bx by)
+                         'barracks-addon (cons ax ay)
+                         'production-origin (cons prod-x prod-y)
+                         'grid-solved? #t)]
+                  [else
+                   (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)])])])]))
+     (hash-set! TERRAN-RAMP-WALL-CACHE cache-key result)
+     result]))
+
+(define PROTOSS-MATCHUP-WALL-CACHE (make-hash))
+
+(define (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)
+  (define bx-f (exact->inexact base-x))
+  (define by-f (exact->inexact base-y))
+  (define nx-f (exact->inexact nat-x))
+  (define ny-f (exact->inexact nat-y))
+  (define ex-f (exact->inexact enemy-x))
+  (define ey-f (exact->inexact enemy-y))
+  (cond
+    [(eq? locus 'natural-choke)
+     (define edx (- ex-f nx-f))
+     (define edy (- ey-f ny-f))
+     (define edist (max 1.0 (sqrt (+ (* edx edx) (* edy edy)))))
+     (define eux (/ edx edist))
+     (define euy (/ edy edist))
+     (cond
+       [(>= (abs euy) (abs eux))
+        (define sy (if (>= euy 0.0) 1.0 -1.0))
+        (define door-x (snap-3x3-coord (+ nx-f (* 2.5 eux))))
+        (define door-y (snap-3x3-coord (+ ny-f (* 9.0 sy))))
+        (define s1 (cons (- door-x 2.0) door-y))
+        (define s2 (cons (+ door-x 2.0) door-y))
+        (define s3 (cons (+ door-x 5.0) door-y))
+        (define px (snap-2x2-coord (+ door-x 1.5)))
+        (define py (snap-2x2-coord (- door-y (* 3.5 sy))))
+        (define park-x (- door-x (* 2.2 eux)))
+        (define park-y (- door-y (* 2.2 sy)))
+        (hash 'locus 'natural-choke
+              'door (cons door-x door-y)
+              'door-x door-x
+              'door-y door-y
+              'door-park (cons park-x park-y)
+              'pylon (cons px py)
+              'slot-1 s1
+              'slot-2 s2
+              'slot-3 s3
+              'grid-solved? #f)]
+       [else
+        (define sx (if (>= eux 0.0) 1.0 -1.0))
+        (define door-x (snap-3x3-coord (+ nx-f (* 9.0 sx))))
+        (define door-y (snap-3x3-coord (+ ny-f (* 2.5 euy))))
+        (define s1 (cons door-x (- door-y 2.0)))
+        (define s2 (cons door-x (+ door-y 2.0)))
+        (define s3 (cons door-x (+ door-y 5.0)))
+        (define px (snap-2x2-coord (- door-x (* 3.5 sx))))
+        (define py (snap-2x2-coord (+ door-y 1.5)))
+        (define park-x (- door-x (* 2.2 sx)))
+        (define park-y (- door-y (* 2.2 euy)))
+        (hash 'locus 'natural-choke
+              'door (cons door-x door-y)
+              'door-x door-x
+              'door-y door-y
+              'door-park (cons park-x park-y)
+              'pylon (cons px py)
+              'slot-1 s1
+              'slot-2 s2
+              'slot-3 s3
+              'grid-solved? #f)])]
+    [else
+     (define dx (- nx-f bx-f))
+     (define dy (- ny-f by-f))
+     (define dist (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+     (define ux (/ dx dist))
+     (define uy (/ dy dist))
+     (define crest-x (+ bx-f (* 0.32 dx)))
+     (define crest-y (+ by-f (* 0.32 dy)))
+     (define door-x (snap-3x3-coord crest-x))
+     (define door-y (snap-3x3-coord crest-y))
+     (cond
+       [(>= (abs uy) (abs ux))
+        (define sy (if (>= uy 0.0) 1.0 -1.0))
+        (define s1 (cons (- door-x 2.0) door-y))
+        (define s2 (cons (+ door-x 2.0) door-y))
+        (define px (snap-2x2-coord (- door-x 0.5)))
+        (define py (snap-2x2-coord (- door-y (* 3.5 sy))))
+        (hash 'locus 'main-ramp
+              'door (cons door-x door-y)
+              'door-x door-x
+              'door-y door-y
+              'door-park (cons (- door-x (* 2.2 ux)) (- door-y (* 2.2 uy)))
+              'pylon (cons px py)
+              'slot-1 s1
+              'slot-2 s2
+              'slot-3 #f
+              'grid-solved? #f)]
+       [else
+        (define sx (if (>= ux 0.0) 1.0 -1.0))
+        (define s1 (cons door-x (- door-y 2.0)))
+        (define s2 (cons door-x (+ door-y 2.0)))
+        (define px (snap-2x2-coord (- door-x (* 3.5 sx))))
+        (define py (snap-2x2-coord (- door-y 0.5)))
+        (hash 'locus 'main-ramp
+              'door (cons door-x door-y)
+              'door-x door-x
+              'door-y door-y
+              'door-park (cons (- door-x (* 2.2 ux)) (- door-y (* 2.2 uy)))
+              'pylon (cons px py)
+              'slot-1 s1
+              'slot-2 s2
+              'slot-3 #f
+              'grid-solved? #f)])]))
+
+(define (solve-protoss-matchup-wall base-x base-y nat-x nat-y enemy-race
+                                    #:map-grids [map-grids #f]
+                                    #:enemy-x [enemy-x 160.5]
+                                    #:enemy-y [enemy-y 160.5])
+  (define vs-zerg?
+    (or (memq enemy-race '(Zerg zerg ZERG))
+        (and (string? enemy-race) (string-ci=? enemy-race "zerg"))))
+  (define locus (if vs-zerg? 'natural-choke 'main-ramp))
+  (define cache-key
+    (list 'protoss
+          (round base-x) (round base-y)
+          (round nat-x) (round nat-y)
+          locus
+          (round enemy-x) (round enemy-y)
+          (wall-grid-fingerprint map-grids base-x base-y nat-x nat-y)))
+  (cond
+    [(hash-ref PROTOSS-MATCHUP-WALL-CACHE cache-key #f) => values]
+    [else
+     (define result
+       (cond
+         [(not (and (hash? map-grids)
+                    (procedure? (hash-ref map-grids 'pathing-ref #f))
+                    (procedure? (hash-ref map-grids 'placement-ref #f))))
+          (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)]
+         [else
+          (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
+          (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
+          (define pref (hash-ref map-grids 'pathing-ref))
+          (define bref (hash-ref map-grids 'placement-ref))
+          (define href (hash-ref map-grids 'height-ref #f))
+          (define bx-f (exact->inexact base-x))
+          (define by-f (exact->inexact base-y))
+          (define nx-f (exact->inexact nat-x))
+          (define ny-f (exact->inexact nat-y))
+          (define ex-f (exact->inexact enemy-x))
+          (define ey-f (exact->inexact enemy-y))
+          (define (outside-nexus-pads? cx cy hw hh)
+            (and (footprints-disjoint? cx cy hw hh bx-f by-f 2.5 2.5)
+                 (footprints-disjoint? cx cy hw hh nx-f ny-f 2.5 2.5)
+                 (or (not (eq? locus 'natural-choke))
+                     (>= (max (abs (- cx nx-f)) (abs (- cy ny-f))) 4.5))))
+
+          ;; Determine wall search center, inward anchor, outward direction, and target height
+          (define-values (solve-ok? center-x center-y out-dx out-dy anchor-x anchor-y target-h)
+            (cond
+              [(eq? locus 'main-ramp)
+               (define rgeom (find-main-ramp-geometry bx-f by-f nx-f ny-f map-grids))
+               (if (hash-ref rgeom 'grid-solved? #f)
+                   (values #t
+                           (hash-ref rgeom 'ramp-x)
+                           (hash-ref rgeom 'ramp-y)
+                           (hash-ref rgeom 'ramp-dx)
+                           (hash-ref rgeom 'ramp-dy)
+                           bx-f by-f
+                           (hash-ref rgeom 'h-main))
+                   (values #f 0.0 0.0 1.0 0.0 bx-f by-f 0.0))]
+              [else
+               (define edx (- ex-f nx-f))
+               (define edy (- ey-f ny-f))
+               (define edist (max 1.0 (sqrt (+ (* edx edx) (* edy edy)))))
+               (define eux (/ edx edist))
+               (define euy (/ edy edist))
+               (define n-ix (max 0 (min (sub1 (max 1 w)) (exact-floor nx-f))))
+               (define n-iy (max 0 (min (sub1 (max 1 h)) (exact-floor ny-f))))
+               (define h-nat (grid-height-val href n-ix n-iy 112.0))
+               ;; Scan outward 6.5..12.5 tiles from natural toward enemy for narrowest choke
+               (define best-choke #f)
+               (define best-span 999)
+               (for ([step-d (in-list '(7.0 8.0 9.0 10.0 11.0 6.5 12.0))])
+                 (define cx0 (+ nx-f (* step-d eux)))
+                 (define cy0 (+ ny-f (* step-d euy)))
+                 (when (>= (max (abs (- cx0 nx-f)) (abs (- cy0 ny-f))) 5.0)
+                   (define ix0 (max 0 (min (sub1 w) (exact-floor cx0))))
+                   (define iy0 (max 0 (min (sub1 h) (exact-floor cy0))))
+                   (when (grid-cell-positive? (pref ix0 iy0))
+                     ;; Measure perpendicular walkable span
+                     (define tx (- euy))
+                     (define ty eux)
+                     (define pos-span
+                       (let loop ([k 1])
+                         (define kx (exact-floor (+ cx0 (* k tx))))
+                         (define ky (exact-floor (+ cy0 (* k ty))))
+                         (if (and (<= k 10) (>= kx 0) (< kx w) (>= ky 0) (< ky h)
+                                  (grid-cell-positive? (pref kx ky)))
+                             (loop (add1 k))
+                             (sub1 k))))
+                     (define neg-span
+                       (let loop ([k 1])
+                         (define kx (exact-floor (- cx0 (* k tx))))
+                         (define ky (exact-floor (- cy0 (* k ty))))
+                         (if (and (<= k 10) (>= kx 0) (< kx w) (>= ky 0) (< ky h)
+                                  (grid-cell-positive? (pref kx ky)))
+                             (loop (add1 k))
+                             (sub1 k))))
+                     (define span (+ 1 pos-span neg-span))
+                     (when (and (<= span 10) (< span best-span))
+                       (set! best-span span)
+                       (set! best-choke
+                             (cons (+ cx0 (* 0.5 (- pos-span neg-span) tx))
+                                   (+ cy0 (* 0.5 (- pos-span neg-span) ty))))))))
+               (if best-choke
+                   (values #t (car best-choke) (cdr best-choke) eux euy nx-f ny-f h-nat)
+                   (values #f 0.0 0.0 eux euy nx-f ny-f h-nat))]))
+
+          (cond
+            [(not solve-ok?)
+             (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)]
+            [else
+             (define src-fx
+               (if (<= (wall-dist2d anchor-x anchor-y center-x center-y) 12.0)
+                   anchor-x
+                   (- center-x (* 6.5 out-dx))))
+             (define src-fy
+               (if (<= (wall-dist2d anchor-x anchor-y center-x center-y) 12.0)
+                   anchor-y
+                   (- center-y (* 6.5 out-dy))))
+             (define dst-fx (+ center-x (* 6.5 out-dx)))
+             (define dst-fy (+ center-y (* 6.5 out-dy)))
+             (define bfs-ctx (make-local-4conn-bfs center-x center-y src-fx src-fy dst-fx dst-fy w h pref))
+             (cond
+               [(not (hash-ref bfs-ctx 'valid? #f))
+                (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)]
+               [else
+                (define bfs-reach? (hash-ref bfs-ctx 'bfs-reachable?))
+                (define win-x0 (hash-ref bfs-ctx 'win-x0))
+                (define win-y0 (hash-ref bfs-ctx 'win-y0))
+                (define src-pt (hash-ref bfs-ctx 'src-pt))
+                (define dst-pt (hash-ref bfs-ctx 'dst-pt))
+                (define slot3x3-cands
+                  (for*/list ([dy-i (in-range -6 7)]
+                              [dx-i (in-range -6 7)]
+                              #:do [(define sx (+ (floor center-x) dx-i 0.5))
+                                    (define sy (+ (floor center-y) dy-i 0.5))]
+                              #:when (and (<= (wall-dist2d sx sy center-x center-y) 6.0)
+                                          (outside-nexus-pads? sx sy 1.5 1.5)
+                                          (footprint-buildable-at-height? sx sy 1.5 1.5 w h bref href target-h #t)))
+                    (cons sx sy)))
+                (define door-cands
+                  (for*/list ([dy-i (in-range -4 5)]
+                              [dx-i (in-range -4 5)]
+                              #:do [(define ix (+ (exact-floor center-x) dx-i))
+                                    (define iy (+ (exact-floor center-y) dy-i))
+                                    (define dx0 (+ ix 0.5))
+                                    (define dy0 (+ iy 0.5))]
+                              #:when (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
+                                          (<= (wall-dist2d dx0 dy0 center-x center-y) 4.2)
+                                          (outside-nexus-pads? dx0 dy0 0.5 0.5)
+                                          (grid-cell-positive? (pref ix iy))))
+                    (list dx0 dy0 (- ix win-x0) (- iy win-y0))))
+
+                (define (find-rear-pylon wall-slots door-x door-y)
+                  (define wcx (/ (for/sum ([s (in-list wall-slots)]) (car s)) (max 1 (length wall-slots))))
+                  (define wcy (/ (for/sum ([s (in-list wall-slots)]) (cdr s)) (max 1 (length wall-slots))))
+                  (define best-p #f)
+                  (define best-psc -1e9)
+                  (for* ([dy-i (in-range -6 7)]
+                         [dx-i (in-range -6 7)])
+                    (define px (exact->inexact (+ (exact-round wcx) dx-i)))
+                    (define py (exact->inexact (+ (exact-round wcy) dy-i)))
+                    (define rear-proj (- (+ (* (- px wcx) out-dx) (* (- py wcy) out-dy))))
+                    (define rear-dist (wall-dist2d px py wcx wcy))
+                    (when (and (>= rear-proj 2.0)
+                               (>= rear-dist 2.5)
+                               (<= rear-dist 5.5)
+                               (outside-nexus-pads? px py 1.0 1.0)
+                               (footprints-disjoint? px py 1.0 1.0 door-x door-y 0.5 0.5)
+                               (andmap (lambda (s)
+                                         (and (footprints-disjoint? px py 1.0 1.0 (car s) (cdr s) 1.5 1.5)
+                                              (<= (wall-dist2d px py (car s) (cdr s)) 6.2)))
+                                       wall-slots)
+                               (footprint-buildable-at-height? px py 1.0 1.0 w h bref href target-h #t))
+                      (define ideal-band? (and (>= rear-dist 3.5) (<= rear-dist 5.0)))
+                      (define psc
+                        (+ (if ideal-band? 200.0 0.0)
+                           (* 10.0 rear-proj)
+                           (- (* 4.0 (abs (- rear-dist 4.0))))))
+                      (when (> psc best-psc)
+                        (set! best-psc psc)
+                        (set! best-p (cons px py)))))
+                  best-p)
+
+                (define (compute-door-park door-x door-y wall-rects)
+                  (define raw-px (- door-x (* 2.2 out-dx)))
+                  (define raw-py (- door-y (* 2.2 out-dy)))
+                  (define (walkable-unblocked? wx wy)
+                    (define ix (exact-floor wx))
+                    (define iy (exact-floor wy))
+                    (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
+                         (grid-cell-positive? (pref ix iy))
+                         (andmap (lambda (r)
+                                   (footprints-disjoint? (+ ix 0.5) (+ iy 0.5) 0.5 0.5
+                                                         (first r) (second r) (third r) (fourth r)))
+                                 wall-rects)))
+                  (if (walkable-unblocked? raw-px raw-py)
+                      (cons raw-px raw-py)
+                      (or (for*/first ([r (in-list '(0.5 1.0 1.5))]
+                                       [ang (in-list '(0.0 0.785 -0.785 1.57 -1.57 3.14))]
+                                       #:do [(define wx (+ raw-px (* r (cos ang))))
+                                             (define wy (+ raw-py (* r (sin ang))))]
+                                       #:when (walkable-unblocked? wx wy))
+                            (cons wx wy))
+                          (cons raw-px raw-py))))
+
+                ;; 1. Try 2x 3x3 slots + 1x1 doorway
+                (define best-wall #f)
+                (define best-wsc -1e9)
+                (for ([dc (in-list door-cands)])
+                  (match-define (list door-x door-y dlx dly) dc)
+                  ;; Candidate 3x3 slots within 4.0 tiles of doorway (touching or near doorway)
+                  (define near-s
+                    (filter (lambda (s)
+                              (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
+                                   (<= (wall-dist2d (car s) (cdr s) door-x door-y) 5.0)))
+                            slot3x3-cands))
+                  (for* ([i (in-range (length near-s))]
+                         [j (in-range (add1 i) (length near-s))])
+                    (define s1 (list-ref near-s i))
+                    (define s2 (list-ref near-s j))
+                    (when (and (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5)
+                               (or (<= (max (abs (- (car s1) door-x)) (abs (- (cdr s1) door-y))) 2.05)
+                                   (<= (max (abs (- (car s2) door-x)) (abs (- (cdr s2) door-y))) 2.05)))
+                      (define w-rects
+                        (list (list (car s1) (cdr s1) 1.5 1.5)
+                              (list (car s2) (cdr s2) 1.5 1.5)))
+                      (when (and (not (bfs-reach? (cons (list door-x door-y 0.5 0.5) w-rects)))
+                                 (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
+                                 (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
+                        (define pyl (find-rear-pylon (list s1 s2) door-x door-y))
+                        (when pyl
+                          (define sc
+                            (- 500.0
+                               (* 8.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
+                                         (wall-dist2d (car s2) (cdr s2) center-x center-y)
+                                         (wall-dist2d door-x door-y center-x center-y)))))
+                          (when (> sc best-wsc)
+                            (set! best-wsc sc)
+                            (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects))))))))
+
+                ;; 2. If 2x 3x3 did not seal (wide natural choke), try 3x 3x3 slots + 1x1 doorway
+                (when (not best-wall)
+                  (for ([dc (in-list door-cands)])
+                    (match-define (list door-x door-y dlx dly) dc)
+                    (define adj-s
+                      (filter (lambda (s)
+                                (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
+                                     (<= (max (abs (- (car s) door-x)) (abs (- (cdr s) door-y))) 2.05)))
+                              slot3x3-cands))
+                    (define other-s
+                      (filter (lambda (s)
+                                (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5))
+                              slot3x3-cands))
+                    (for* ([s1 (in-list adj-s)]
+                           [i (in-range (length other-s))]
+                           #:do [(define s2 (list-ref other-s i))]
+                           #:when (and (not (equal? s1 s2))
+                                       (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5))
+                           [j (in-range (add1 i) (length other-s))]
+                           #:do [(define s3 (list-ref other-s j))]
+                           #:when (and (not (equal? s1 s3))
+                                       (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)
+                                       (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)))
+                      (define w-rects
+                        (list (list (car s1) (cdr s1) 1.5 1.5)
+                              (list (car s2) (cdr s2) 1.5 1.5)
+                              (list (car s3) (cdr s3) 1.5 1.5)))
+                      (when (and (not (bfs-reach? (cons (list door-x door-y 0.5 0.5) w-rects)))
+                                 (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
+                                 (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
+                        (define pyl (find-rear-pylon (list s1 s2 s3) door-x door-y))
+                        (when pyl
+                          (define sc
+                            (- 350.0
+                               (* 6.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
+                                         (wall-dist2d (car s2) (cdr s2) center-x center-y)
+                                         (wall-dist2d (car s3) (cdr s3) center-x center-y)))))
+                          (when (> sc best-wsc)
+                            (set! best-wsc sc)
+                            (set! best-wall (list s1 s2 s3 door-x door-y pyl w-rects))))))))
+
+                (cond
+                  [best-wall
+                   (match-define (list s1 s2 s3 door-x door-y pyl w-rects) best-wall)
+                   (define park (compute-door-park door-x door-y w-rects))
+                   (hash 'locus locus
+                         'door (cons door-x door-y)
+                         'door-x door-x
+                         'door-y door-y
+                         'door-park park
+                         'pylon pyl
+                         'slot-1 s1
+                         'slot-2 s2
+                         'slot-3 s3
+                         'grid-solved? #t)]
+                  [else
+                   (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)])])])]))
+     (hash-set! PROTOSS-MATCHUP-WALL-CACHE cache-key result)
+     result]))
 
 (define (solve-choke-wall-in choke-x choke-y span
                              [positional-buildings #f]
@@ -593,23 +1435,37 @@
     infestation-pit nydus-network nydus-worm nydus-canal ultralisk-cavern))
 
 (define (classify-engine-order-kind ab-id ab-sym)
+  (define canon (sc2-canonical-order-ability ab-id))
   (define s (if ab-sym (symbol->string ab-sym) ""))
   (cond
-    [(or (= ab-id 23) (eq? ab-sym 'attack) (eq? ab-sym 'attack-attack))
+    [(or (eq? canon 'attack) (eq? ab-sym 'attack) (eq? ab-sym 'attack-attack))
      'attack]
-    [(or (= ab-id 16) (eq? ab-sym 'move) (eq? ab-sym 'smart))
+    [(or (eq? canon 'move) (eq? ab-sym 'move) (eq? ab-sym 'smart))
      'move]
-    [(or (= ab-id 18) (eq? ab-sym 'hold-position))
+    [(or (eq? canon 'hold-position) (eq? ab-sym 'hold-position))
      'hold-position]
-    [(or (= ab-id 17) (eq? ab-sym 'patrol))
+    [(or (eq? canon 'patrol) (eq? ab-sym 'patrol))
      'patrol]
+    [(or (memq canon '(harvest-gather harvest-return))
+         (memq ab-sym '(harvest harvest-gather harvest-return)))
+     'harvest]
+    [(or (eq? canon 'repair) (eq? ab-sym 'repair))
+     'repair]
+    [(or (eq? canon 'lift) (memq ab-sym '(lift lift-building)))
+     'lift]
+    [(or (eq? canon 'land) (memq ab-sym '(land land-building)))
+     'land]
+    [(or (memq canon '(burrow-down burrow-up uproot root))
+         (memq ab-sym '(burrow-down burrow-up uproot root)))
+     (if (symbol? canon) canon ab-sym)]
     [(or (memv ab-id '(318 880 1152))
          (memq ab-sym '(build-command-center build-nexus build-hatchery
                         command-center nexus hatchery expand)))
      'expand]
     [(memv ab-id '(1216 1218 1220 2112 1516 1450 1518))
      'morph]
-    [(or (memv ab-id '(319 320 321 322 323 324 326 327 328 329 331 333
+    [(or (memq canon '(build-techlab build-reactor build-lurker-den build-shield-battery))
+         (memv ab-id '(319 320 321 322 323 324 326 327 328 329 331 333
                        3682 3683 421 422 454 455 487 488
                        881 882 883 884 885 886 887 889 890 891 892 893 894 895 1909
                        1154 1155 1156 1157 1158 1159 1160 1161 1162 1163 1165 1166 1167 1768))
@@ -625,6 +1481,7 @@
     [else 'cast-spell]))
 
 (define (engine-order-target-symbol ab-id ab-sym)
+  (define canon (sc2-canonical-order-ability ab-id))
   (define s (if ab-sym (symbol->string ab-sym) ""))
   (cond
     [(= ab-id 318)  'command-center]
@@ -662,8 +1519,7 @@
     [(= ab-id 892)  'robotics-bay]
     [(= ab-id 893)  'robotics-facility]
     [(= ab-id 894)  'cybernetics-core]
-    [(= ab-id 895)  'shield-battery]
-    [(= ab-id 1909) 'shield-battery]
+    [(eq? canon 'build-shield-battery) 'shield-battery]
     [(= ab-id 1152) 'hatchery]
     [(= ab-id 1154) 'extractor]
     [(= ab-id 1155) 'spawning-pool]
@@ -674,7 +1530,7 @@
     [(= ab-id 1160) 'infestation-pit]
     [(= ab-id 1161) 'nydus-network]
     [(= ab-id 1162) 'baneling-nest]
-    [(= ab-id 1163) 'lurker-den]
+    [(eq? canon 'build-lurker-den) 'lurker-den]
     [(= ab-id 1165) 'roach-warren]
     [(= ab-id 1166) 'spine-crawler]
     [(= ab-id 1167) 'spore-crawler]
@@ -686,7 +1542,6 @@
     [(= ab-id 1216) 'lair]
     [(= ab-id 1218) 'hive]
     [(= ab-id 1220) 'greater-spire]
-    [(= ab-id 2112) 'lurker-den]
     [(= ab-id 1516) 'orbital-command]
     [(= ab-id 1450) 'planetary-fortress]
     [(= ab-id 1518) 'warp-gate]
@@ -708,6 +1563,7 @@
      (if (set-member? SC2-ALL-STRUCTURE-SYMS ab-sym)
          (sc2-canonical-structure-sym ab-sym)
          ab-sym)]
+    [(symbol? canon) canon]
     [else 'unknown]))
 
 ;; Per-ledger step-issued count table so Reactor facilities (2 slots) are only
@@ -1120,25 +1976,48 @@
     [else
      (define tord (order-ledger-unit-active-order ledger uid))
      (define u-ab-id (if (hash? u) (hash-ref u 'order-ability-id 0) 0))
+     (define u-canon (sc2-canonical-order-ability u-ab-id))
      (define u-tgt-id (if (hash? u) (hash-ref u 'order-target-id (hash-ref u 'engaged-target-tag 0)) 0))
      (define u-tx (if (hash? u) (hash-ref u 'order-target-x #f) #f))
      (define u-ty (if (hash? u) (hash-ref u 'order-target-y #f) #f))
      (or
-      ;; Check live engine order on unit hash
+      ;; Check live engine order on unit hash via canonical SC2 ability mapping
       (and (memq kind '(attack attack-unit))
-           (= u-ab-id 23)
+           (eq? u-canon 'attack)
            (> target-id 0)
            (= u-tgt-id target-id))
-      (and (memq kind '(move kite retreat))
-           (= u-ab-id 16)
+      (and (memq kind '(move kite retreat mineral-walk))
+           (eq? u-canon 'move)
            (real? tx) (real? ty) (real? u-tx) (real? u-ty)
            (<= (dist2d-pts tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
       (and (eq? kind 'attack-pos)
-           (= u-ab-id 23)
+           (eq? u-canon 'attack)
+           (real? tx) (real? ty) (real? u-tx) (real? u-ty)
+           (<= (dist2d-pts tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
+      (and (eq? kind 'patrol)
+           (eq? u-canon 'patrol)
            (real? tx) (real? ty) (real? u-tx) (real? u-ty)
            (<= (dist2d-pts tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
       (and (eq? kind 'hold-position)
-           (= u-ab-id 18))
+           (eq? u-canon 'hold-position))
+      (and (eq? kind 'stop)
+           (eq? u-canon 'stop))
+      (and (memq kind '(harvest harvest-gather harvest-return))
+           (memq u-canon '(harvest-gather harvest-return))
+           (or (<= target-id 0) (= u-tgt-id target-id) (eq? u-canon 'harvest-return)))
+      (and (eq? kind 'repair)
+           (eq? u-canon 'repair)
+           (or (<= target-id 0) (= u-tgt-id target-id)))
+      (and (memq kind '(lift lift-building))
+           (eq? u-canon 'lift))
+      (and (memq kind '(land land-building))
+           (eq? u-canon 'land)
+           (or (not (and (real? tx) (real? ty) (real? u-tx) (real? u-ty)))
+               (<= (dist2d-pts tx ty u-tx u-ty) 1.0)))
+      (and (eq? kind 'burrow-down)
+           (eq? u-canon 'burrow-down))
+      (and (eq? kind 'burrow-up)
+           (eq? u-canon 'burrow-up))
       ;; Check ledger tracked order
       (and tord
            (<= (- frame (tracked-order-last-seen-frame tord)) 12)
@@ -1146,7 +2025,24 @@
                     (memq (tracked-order-kind tord) '(attack attack-unit))
                     (> target-id 0)
                     (= (tracked-order-target-id tord) target-id))
-               (and (memq kind '(move kite retreat attack-pos))
+               (and (memq kind '(harvest harvest-gather harvest-return))
+                    (memq (tracked-order-kind tord) '(harvest harvest-gather harvest-return))
+                    (or (<= target-id 0) (= (tracked-order-target-id tord) target-id)))
+               (and (eq? kind 'repair)
+                    (eq? (tracked-order-kind tord) 'repair)
+                    (or (<= target-id 0) (= (tracked-order-target-id tord) target-id)))
+               (and (memq kind '(lift lift-building))
+                    (memq (tracked-order-kind tord) '(lift lift-building)))
+               (and (memq kind '(land land-building))
+                    (memq (tracked-order-kind tord) '(land land-building))
+                    (real? tx) (real? ty)
+                    (real? (tracked-order-target-x tord))
+                    (real? (tracked-order-target-y tord))
+                    (<= (dist2d-pts tx ty
+                                    (tracked-order-target-x tord)
+                                    (tracked-order-target-y tord))
+                        1.0))
+               (and (memq kind '(move kite retreat attack-pos patrol))
                     (eq? (tracked-order-kind tord) kind)
                     (real? tx) (real? ty)
                     (real? (tracked-order-target-x tord))
@@ -1172,82 +2068,159 @@
   site)
 
 ;; Ensures a proposed build coordinate `(x, y)` does not collide with any active
-;; `reserved-build-site` or existing `ally-buildings` (including add-on slots!),
+;; `reserved-build-site`, `reserved-aabb`, expansion pad, or existing `ally-buildings`
+;; (using exact Chebyshev `sc2-structure-half-dims` + `aabb-overlaps?` and reserving
+;; `(bx + 2.5, by - 0.5)` East add-on pads for `barracks`/`factory`/`starport`),
 ;; spiraling outward if needed and reserving the chosen site.
-(define (order-ledger-resolve-build-coords! ledger bldg-sym raw-x raw-y ally-bldgs
+(define (order-ledger-resolve-build-coords! ledger bldg-sym raw-x raw-y
+                                            [ally-bldgs '()]
                                             [pos-frame 0]
                                             [pos-clearance SC2-BUILD-SITE-MIN-CLEARANCE]
                                             #:builder-id [builder-id 0]
                                             #:frame [kw-frame #f]
-                                            #:clearance [kw-clearance #f])
+                                            #:clearance [kw-clearance #f]
+                                            #:expansion-pads [expansion-pads '()]
+                                            #:exact-wall-slot? [exact-wall-slot? #f]
+                                            #:reserved-aabbs [reserved-aabbs '()])
   (define frame (or kw-frame pos-frame))
-  (define clearance (or kw-clearance pos-clearance))
+  (define _unused-clearance (or kw-clearance pos-clearance))
   (define sites (in-progress-order-ledger-reserved-sites ledger))
   (define canon-bldg
     (if (symbol? bldg-sym) (sc2-canonical-structure-sym bldg-sym) bldg-sym))
+  (define-values (cand-hw cand-hh)
+    (if (symbol? canon-bldg) (sc2-structure-half-dims canon-bldg) (values 1.5 1.5)))
+  (define is-townhall?
+    (or (memq bldg-sym SC2-TOWNHALL-STRUCTURE-SYMS)
+        (memq canon-bldg SC2-TOWNHALL-STRUCTURE-SYMS)))
   (define is-3x3-addon-fac? (memq canon-bldg '(barracks factory starport)))
   (define odd-footprint? (sc2-odd-footprint-structure? canon-bldg))
   (define snap-fn (if odd-footprint? snap-3x3-coord snap-2x2-coord))
-  (define x0 (snap-fn raw-x))
-  (define y0 (snap-fn raw-y))
+
+  ;; Build exact Chebyshev AABB lists for physical footprints vs reserved Terran add-on pads
+  (define physical-aabbs '())
+  (define addon-pad-aabbs '())
+  (define (push-phys! box) (set! physical-aabbs (cons box physical-aabbs)))
+  (define (push-addon! box) (set! addon-pad-aabbs (cons box addon-pad-aabbs)))
+
+  (for ([r (in-list (if (list? reserved-aabbs) reserved-aabbs '()))]
+        #:when (and (reserved-aabb? r)
+                    (or (<= (reserved-aabb-expires-frame r) 0)
+                        (> (reserved-aabb-expires-frame r) frame))))
+    (if (eq? (reserved-aabb-kind r) 'addon-pad)
+        (push-addon! r)
+        (push-phys! r)))
+
+  (for ([s (in-list sites)])
+    (define sx (reserved-build-site-x s))
+    (define sy (reserved-build-site-y s))
+    (define raw-st (reserved-build-site-bldg-sym s))
+    (define stype (if (symbol? raw-st) (sc2-canonical-structure-sym raw-st) raw-st))
+    (define-values (shw shh)
+      (if (symbol? stype) (sc2-structure-half-dims stype) (values 1.5 1.5)))
+    (define exp-f (reserved-build-site-expires-frame s))
+    (when (<= frame exp-f)
+      (push-phys! (reserved-aabb sx sy shw shh 'reserved-site (reserved-build-site-builder-id s) exp-f))
+      (when (memq stype '(barracks factory starport))
+        (push-addon! (reserved-aabb (+ sx SC2-TERRAN-ADDON-OFFSET-X)
+                                    (+ sy SC2-TERRAN-ADDON-OFFSET-Y)
+                                    1.0 1.0 'addon-pad (reserved-build-site-builder-id s) exp-f)))))
+
+  (for ([b (in-list (if (list? ally-bldgs) ally-bldgs '()))]
+        #:when (hash? b))
+    (define raw-bt (hash-ref b 'type #f))
+    (define flying?
+      (or (memq raw-bt '(barracks-flying factory-flying starport-flying
+                         command-center-flying orbital-command-flying
+                         spine-crawler-uprooted spore-crawler-uprooted))
+          (eq? (hash-ref b 'flying? #f) #t)
+          (eq? (hash-ref b 'is-flying #f) #t)))
+    (unless flying?
+      (define bx (exact->inexact (hash-ref b 'x 0.0)))
+      (define by (exact->inexact (hash-ref b 'y 0.0)))
+      (define btype (if (symbol? raw-bt) (sc2-canonical-structure-sym raw-bt) raw-bt))
+      (define-values (bhw bhh)
+        (if (symbol? btype) (sc2-structure-half-dims btype) (values 1.5 1.5)))
+      (define bid (hash-ref b 'id 0))
+      (push-phys! (reserved-aabb bx by bhw bhh 'ally-bldg bid 0))
+      (when (memq btype '(barracks factory starport))
+        (push-addon! (reserved-aabb (+ bx SC2-TERRAN-ADDON-OFFSET-X)
+                                    (+ by SC2-TERRAN-ADDON-OFFSET-Y)
+                                    1.0 1.0 'addon-pad bid 0)))))
+
+  (define (overlaps-phys? cx cy hw hh)
+    (ormap (lambda (b) (aabb-overlaps? cx cy hw hh b)) physical-aabbs))
+
+  (define (overlaps-addon-pad? cx cy hw hh)
+    (ormap (lambda (b) (aabb-overlaps? cx cy hw hh b)) addon-pad-aabbs))
+
+  (define (overlaps-expansion-pad? cx cy)
+    (and (not is-townhall?)
+         (list? expansion-pads)
+         (ormap (lambda (p)
+                  (define-values (ok? px py)
+                    (cond
+                      [(and (pair? p) (real? (car p)) (real? (cdr p)))
+                       (values #t (exact->inexact (car p)) (exact->inexact (cdr p)))]
+                      [(and (pair? p) (real? (car p)) (pair? (cdr p)) (real? (cadr p)))
+                       (values #t (exact->inexact (car p)) (exact->inexact (cadr p)))]
+                      [(hash? p)
+                       (values #t
+                               (exact->inexact (hash-ref p 'x -999.0))
+                               (exact->inexact (hash-ref p 'y -999.0)))]
+                      [(reserved-aabb? p)
+                       (values #t (reserved-aabb-cx p) (reserved-aabb-cy p))]
+                      [else (values #f 0.0 0.0)]))
+                  (and ok?
+                       (< (max (abs (- cx px)) (abs (- cy py))) 4.5)))
+                expansion-pads)))
+
+  (define (in-playable-bounds? cx cy)
+    (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
+         (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)))
+
   (define (spot-free? cx cy)
     (define new-ax (+ cx SC2-TERRAN-ADDON-OFFSET-X))
     (define new-ay (+ cy SC2-TERRAN-ADDON-OFFSET-Y))
-    (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
-         (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
+    (and (in-playable-bounds? cx cy)
+         (not (overlaps-expansion-pad? cx cy))
+         (not (overlaps-phys? cx cy cand-hw cand-hh))
+         (not (overlaps-addon-pad? cx cy cand-hw cand-hh))
          (or (not is-3x3-addon-fac?)
-             (and (>= new-ax SC2-MAP-PLAYABLE-MIN-COORD) (<= new-ax SC2-MAP-PLAYABLE-MAX-COORD)
-                  (>= new-ay SC2-MAP-PLAYABLE-MIN-COORD) (<= new-ay SC2-MAP-PLAYABLE-MAX-COORD)))
-         (for/and ([s (in-list sites)])
-           (define sx (reserved-build-site-x s))
-           (define sy (reserved-build-site-y s))
-           (define stype
-             (let ([raw (reserved-build-site-bldg-sym s)])
-               (if (symbol? raw) (sc2-canonical-structure-sym raw) raw)))
-           (and (> (dist2d-pts cx cy sx sy) clearance)
-                (or (not (memq stype '(barracks factory starport)))
-                    (> (dist2d-pts cx cy
-                                   (+ sx SC2-TERRAN-ADDON-OFFSET-X)
-                                   (+ sy SC2-TERRAN-ADDON-OFFSET-Y))
-                       SC2-TERRAN-ADDON-CLEARANCE-RADIUS))
-                (or (not is-3x3-addon-fac?)
-                    (> (dist2d-pts new-ax new-ay sx sy)
-                       SC2-TERRAN-ADDON-CLEARANCE-RADIUS))))
-         (for/and ([b (in-list ally-bldgs)] #:when (hash? b))
-           (define bx (hash-ref b 'x 0.0))
-           (define by (hash-ref b 'y 0.0))
-           (define raw-btype (hash-ref b 'type #f))
-           (define btype
-             (if (symbol? raw-btype) (sc2-canonical-structure-sym raw-btype) raw-btype))
-           (and (> (dist2d-pts cx cy bx by) clearance)
-                ;; Also avoid existing Terran facilities' East (+X) add-on slots!
-                (or (not (memq btype '(barracks factory starport)))
-                    (> (dist2d-pts cx cy
-                                   (+ bx SC2-TERRAN-ADDON-OFFSET-X)
-                                   (+ by SC2-TERRAN-ADDON-OFFSET-Y))
-                       clearance))
-                ;; And if placing a Terran 3x3 facility, keep its own East add-on slot clear!
-                (or (not is-3x3-addon-fac?)
-                    (> (dist2d-pts new-ax new-ay bx by)
-                       SC2-TERRAN-ADDON-CLEARANCE-RADIUS))))))
-  (define-values (chosen-x chosen-y)
-    (if (spot-free? x0 y0)
-        (values x0 y0)
-        (let search ([r 3.0])
-          (if (> r 15.0)
-              (values x0 y0)
-              (let ([found
-                     (for*/first ([dx (in-list (list 0.0 r (- r)))]
-                                  [dy (in-list (list 0.0 r (- r)))]
-                                  #:when (and (or (not (zero? dx)) (not (zero? dy)))
-                                              (spot-free? (snap-fn (+ x0 dx))
-                                                          (snap-fn (+ y0 dy)))))
-                       (cons (snap-fn (+ x0 dx)) (snap-fn (+ y0 dy))))])
-                (if found
-                    (values (car found) (cdr found))
-                    (search (+ r 3.0))))))))
-  (order-ledger-reserve-build-site! ledger canon-bldg chosen-x chosen-y builder-id frame)
-  (values chosen-x chosen-y))
+             exact-wall-slot?
+             (and (in-playable-bounds? new-ax new-ay)
+                  (not (overlaps-expansion-pad? new-ax new-ay))
+                  (not (overlaps-phys? new-ax new-ay 1.0 1.0))
+                  (not (overlaps-addon-pad? new-ax new-ay 1.0 1.0))))))
+
+  (cond
+    ;; Exact ramp/choke wall slot: preserve `(raw-x, raw-y)` unchanged if physically non-overlapping!
+    [(and exact-wall-slot?
+          (in-playable-bounds? raw-x raw-y)
+          (not (overlaps-expansion-pad? (exact->inexact raw-x) (exact->inexact raw-y)))
+          (not (overlaps-phys? (exact->inexact raw-x) (exact->inexact raw-y) cand-hw cand-hh)))
+     (order-ledger-reserve-build-site! ledger canon-bldg raw-x raw-y builder-id frame)
+     (values raw-x raw-y)]
+    [else
+     (define x0 (snap-fn raw-x))
+     (define y0 (snap-fn raw-y))
+     (define-values (chosen-x chosen-y)
+       (if (spot-free? x0 y0)
+           (values x0 y0)
+           (let search ([r 3.0])
+             (if (> r 18.0)
+                 (values x0 y0)
+                 (let ([found
+                        (for*/first ([dx (in-list (list 0.0 r (- r)))]
+                                     [dy (in-list (list 0.0 r (- r)))]
+                                     #:when (and (or (not (zero? dx)) (not (zero? dy)))
+                                                 (spot-free? (snap-fn (+ x0 dx))
+                                                             (snap-fn (+ y0 dy)))))
+                          (cons (snap-fn (+ x0 dx)) (snap-fn (+ y0 dy))))])
+                   (if found
+                       (values (car found) (cdr found))
+                       (search (+ r 3.0))))))))
+     (order-ledger-reserve-build-site! ledger canon-bldg chosen-x chosen-y builder-id frame)
+     (values chosen-x chosen-y)]))
 
 ;; =============================================================================
 ;; 6. Multi-Depth Mirrored Tactical Micro Brain (`step-tactical-mirror-brain!`)
@@ -1939,6 +2912,7 @@
 
 (define (step-tactical-mirror-brain! brain arg1 [arg2 #f]
                                      #:order-ledger [kw-ledger #f]
+                                     #:record-ledger? [record-ledger? #t]
                                      #:chokes [chokes '()]
                                      #:strategic-opp-depth [opp-d 1])
   (define-values (obs ledger)
@@ -2081,7 +3055,7 @@
           (case committed-act
             [(DisengageRetreat)
              (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 base-x base-y frame))
-               (when ledger
+               (when (and ledger record-ledger?)
                  (order-ledger-record-issued! ledger uid 'kite 'move #:target-x base-x #:target-y base-y #:frame frame))
                (emit! (list 'kite uid base-x base-y)))]
 
@@ -2094,12 +3068,12 @@
                      (> w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH))
                 (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
                 (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
-                  (when ledger
+                  (when (and ledger record-ledger?)
                     (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
                   (emit! (list 'kite uid kx ky)))]
                [else
                 (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
-                  (when ledger
+                  (when (and ledger record-ledger?)
                     (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
                   (emit! (list 'attack-unit uid eid)))])]
 
@@ -2107,17 +3081,17 @@
              (define dist-to-nat (dist2d-pts ux uy nat-x nat-y))
              (if (<= dist-to-nat 3.5)
                  (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'hold-position 0 nat-x nat-y frame))
-                   (when ledger
+                   (when (and ledger record-ledger?)
                      (order-ledger-record-issued! ledger uid 'hold-position 'hold-position #:frame frame))
                    (emit! (list 'hold-position uid nat-x nat-y)))
                  (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
-                   (when ledger
+                   (when (and ledger record-ledger?)
                      (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
                    (emit! (list 'attack-unit uid eid))))]
 
             [else ;; CommitFocusFire, KiteForwardChase, FlankSurround
              (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
-               (when ledger
+               (when (and ledger record-ledger?)
                  (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
                (emit! (list 'attack-unit uid eid)))])))))
 
@@ -2263,29 +3237,32 @@
                           (+ SC2-INFESTOR-NEURAL-CAST-RANGE 2.0))))
                enemy-units))
       (cond
-        ;; Energy spent (< 75) -> ensure burrowed and burrow-move retreat to home base
+        ;; Energy spent (< 75) -> ensure burrowed and move-retreat to home base
         [(< energy SC2-INFESTOR-FUNGAL-ENERGY)
          (unless burrowed?
            (emit! (list 'burrow-down uid 'infestor-post-cast-hide)))
-         (emit! (list 'infestor-burrow-move uid base-x base-y))]
+         (emit! (list 'move uid base-x base-y))]
         ;; High-value capital unit in range and energy >= 100 -> Neural Parasite
         [(and capital-target (>= energy SC2-INFESTOR-NEURAL-ENERGY))
+         (define ctag (hash-ref capital-target 'id 0))
          (define cx (exact-round (hash-ref capital-target 'x ex)))
          (define cy (exact-round (hash-ref capital-target 'y ey)))
          (unless burrowed?
            (emit! (list 'burrow-down uid 'infestor-stealth-neural)))
-         (emit! (list 'infestor-burrow-cast uid 'neural-parasite cx cy))]
+         (if (and (exact-integer? ctag) (> ctag 0))
+             (emit! (list 'cast-spell uid 'neural-parasite ctag))
+             (emit! (list 'cast-spell uid 'neural-parasite cx cy)))]
         ;; Within Fungal Growth range (<= 10.5) and energy >= 75 -> Unburrow (if needed) & cast Fungal Growth
         [(and (<= dist-e (+ SC2-INFESTOR-FUNGAL-CAST-RANGE 0.5))
               (>= energy SC2-INFESTOR-FUNGAL-ENERGY))
          (when burrowed?
            (emit! (list 'burrow-up uid 'infestor-unburrow-for-fungal)))
-         (emit! (list 'infestor-burrow-cast uid 'fungal-growth ex ey))]
+         (emit! (list 'cast-spell uid 'fungal-growth ex ey))]
         ;; Within approach range (<= 16.0) -> Burrow down & sneak into Fungal/Neural range
         [(<= dist-e SC2-INFESTOR-BURROW-APPROACH-RANGE)
          (unless burrowed?
            (emit! (list 'burrow-down uid 'infestor-stealth-approach)))
-         (emit! (list 'infestor-burrow-move uid ex ey))])))
+         (emit! (list 'move uid ex ey))])))
   (reverse actions))
 
 ;; Blind AoE Skillshot & Emergency Detector Response on Cloaked Shimmer / Burrow Ripples:
@@ -2316,6 +3293,8 @@
      (define tgt (first shimmer-targets))
      (define tx (exact-round (hash-ref tgt 'x 160)))
      (define ty (exact-round (hash-ref tgt 'y 160)))
+     (define tx-f (exact->inexact tx))
+     (define ty-f (exact->inexact ty))
      (define kind (hash-ref tgt 'indicator-kind 'cloaked-shimmer))
      (define actions (list (list 'emergency-detector-response kind tx ty)))
      (define (emit! a) (set! actions (cons a actions)))
@@ -2344,155 +3323,380 @@
           (when (>= energy 25.0)
             (emit! (list 'blind-skillshot-shimmer uid 'oracle-revelation tx ty)))]))
 
-     ;; Check Orbital Command Scanner Sweep
-     (for ([b (in-list ally-bldgs)]
-           #:when (and (hash? b)
-                       (eq? (hash-ref b 'type 'unknown) 'orbital-command)
-                       (>= (exact->inexact (hash-ref b 'energy 50)) 50.0)))
-       (emit! (list 'blind-skillshot-shimmer (hash-ref b 'id 0) 'scanner-sweep tx ty)))
+     ;; Emit Scanner Sweep from AT MOST ONE Orbital Command (highest energy >= 50),
+     ;; ONLY when friendly combat units are within 13.0 tiles and no Raven/Turret is within 10.0 tiles!
+     (define friendly-combat-within-13?
+       (ormap (lambda (u)
+                (and (hash? u)
+                     (let ([ut (hash-ref u 'type 'unknown)])
+                       (and (not (memq ut '(scv probe drone drone-burrowed)))
+                            (not (sc2-non-combat-or-summon-sym? ut))
+                            (not (hash-ref u 'is-hallucination #f))
+                            (<= (dist2d-pts (exact->inexact (hash-ref u 'x 999.0))
+                                            (exact->inexact (hash-ref u 'y 999.0))
+                                            tx-f ty-f)
+                                13.0)))))
+              ally-units))
+     (define raven-or-turret-within-10?
+       (or (ormap (lambda (u)
+                    (and (hash? u)
+                         (eq? (hash-ref u 'type 'unknown) 'raven)
+                         (<= (dist2d-pts (exact->inexact (hash-ref u 'x 999.0))
+                                         (exact->inexact (hash-ref u 'y 999.0))
+                                         tx-f ty-f)
+                             10.0)))
+                  ally-units)
+           (ormap (lambda (b)
+                    (and (hash? b)
+                         (eq? (hash-ref b 'type 'unknown) 'missile-turret)
+                         (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                         (<= (dist2d-pts (exact->inexact (hash-ref b 'x 999.0))
+                                         (exact->inexact (hash-ref b 'y 999.0))
+                                         tx-f ty-f)
+                             10.0)))
+                  ally-bldgs)))
+     (when (and friendly-combat-within-13? (not raven-or-turret-within-10?))
+       (define ready-orbitals
+         (filter (lambda (b)
+                   (and (hash? b)
+                        (eq? (hash-ref b 'type 'unknown) 'orbital-command)
+                        (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                        (>= (exact->inexact (hash-ref b 'energy 50)) 50.0)))
+                 ally-bldgs))
+       (when (pair? ready-orbitals)
+         (define best-oc
+           (argmax (lambda (b) (exact->inexact (hash-ref b 'energy 50))) ready-orbitals))
+         (emit! (list 'blind-skillshot-shimmer (hash-ref best-oc 'id 0) 'scanner-sweep tx ty))))
 
      (reverse actions)]))
+
+;; Module-level anti-thrash state for Terran add-on swaps:
+;; - `TERRAN-RELIFT-COOLDOWN-UNTIL`: `bldg-tag -> cooldown-until-frame` (`448` loops = `20.0s`)
+;; - `TERRAN-DONOR-OFFSET-PAD`: `donor-tag -> (list issued-frame expires-frame pad-x pad-y donated-ax donated-ay)`
+;; - `TERRAN-ADDON-CLAIM-LOCK`: `addon-key -> (list claimer-tag issued-frame expires-frame)`
+(define SC2-TERRAN-ADDON-RELIFT-COOLDOWN-FRAMES 448)
+(define TERRAN-RELIFT-COOLDOWN-UNTIL (make-hasheqv))
+(define TERRAN-DONOR-OFFSET-PAD      (make-hasheqv))
+(define TERRAN-ADDON-CLAIM-LOCK      (make-hasheqv))
+(define LAST-TERRAN-SWAP-OBS-FRAME   (box -1))
 
 ;; Pro Terran Building Lift-Off & Add-On Swapping (`480` swaps across 1,245 Terran pro replays,
 ;; median first swap at `198.6s` = frame `4,448`):
 ;; Swaps idle `Barracks` / `Factory` / `Starport` onto a pre-built `TechLab` or `Reactor`
-;; when either:
-;;   1. An unattached add-on (`free-addons`) is present and a production facility lacks an add-on, or
-;;   2. A `Barracks` built a `Reactor` or `TechLab` for a newly completed `Factory` or `Starport`
-;;      (`Barracks->Factory: 111`, `Factory->Barracks: 110`, `Barracks->Starport: 77`).
+;; with strict anti-thrash invariants:
+;;   1. Both donor and recipient must have `build-progress >= 0.999`,
+;;   2. Never strip `factory-techlab` off a `Factory` unless explicitly swapping a `Barracks` add-on,
+;;   3. Abort swaps (`'()`) when any enemy combat threat is within `18.0` tiles of `(base-x, base-y)`,
+;;   4. Enforce a 1-to-1 add-on claim lock (at most 1 lifted/claiming building per free add-on)
+;;      and a `448`-loop (`20s`) per-building re-lift cooldown, landing donors at `(donor-x, donor-y + 4.0)`.
 (define (plan-terran-addon-swap obs)
   (define sanitized-obs (if (hash? obs) obs (hash)))
   (define frame (hash-ref sanitized-obs 'frame 0))
+  (when (or (<= frame 0) (< frame (unbox LAST-TERRAN-SWAP-OBS-FRAME)))
+    (hash-clear! TERRAN-RELIFT-COOLDOWN-UNTIL)
+    (hash-clear! TERRAN-DONOR-OFFSET-PAD)
+    (hash-clear! TERRAN-ADDON-CLAIM-LOCK))
+  (set-box! LAST-TERRAN-SWAP-OBS-FRAME frame)
+
   (define base-x (exact->inexact (hash-ref sanitized-obs 'base-x 32.0)))
   (define base-y (exact->inexact (hash-ref sanitized-obs 'base-y 32.0)))
   (define ally-bldgs (filter hash? (hash-ref sanitized-obs 'ally-buildings '())))
-  (define addon-syms
-    '(barracks-techlab barracks-tech-lab barracks-reactor
-      factory-techlab factory-tech-lab factory-reactor
-      starport-techlab starport-tech-lab starport-reactor
-      tech-lab reactor))
-  (define all-ally-addons
-    (filter (lambda (b)
-              (and (memq (hash-ref b 'type 'unknown) addon-syms)
-                   (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
-            ally-bldgs))
-  (define attached-addon-ids
-    (for/fold ([acc '()]) ([b (in-list ally-bldgs)])
-      (define atag (hash-ref b 'add-on-tag 0))
-      (if (and (exact-integer? atag) (> atag 0))
-          (cons atag acc)
-          acc)))
-  (define (bldg-is-flying-prod? b)
-    (define bt (hash-ref b 'type 'unknown))
-    (or (memq bt '(barracks-flying factory-flying starport-flying))
-        (and (memq bt '(barracks factory starport))
-             (or (eq? (hash-ref b 'flying? #f) #t)
-                 (eq? (hash-ref b 'is-flying #f) #t)))))
-  (define (bldg-has-addon? b)
-    (or (eq? (hash-ref b 'has-addon? #f) #t)
-        (not (not (hash-ref b 'addon #f)))
-        (> (hash-ref b 'add-on-tag 0) 0)
-        (let ([bx (exact->inexact (hash-ref b 'x 0.0))]
-              [by (exact->inexact (hash-ref b 'y 0.0))])
-          (ormap (lambda (ad)
-                   (<= (dist2d-pts (+ bx SC2-TERRAN-ADDON-OFFSET-X)
-                                   (+ by SC2-TERRAN-ADDON-OFFSET-Y)
-                                   (exact->inexact (hash-ref ad 'x 9999.0))
-                                   (exact->inexact (hash-ref ad 'y 9999.0)))
-                       1.25))
-                 all-ally-addons))))
-  (define orphaned-addons
-    (filter (lambda (ad)
-              (define aid (hash-ref ad 'id 0))
-              (define ax (exact->inexact (hash-ref ad 'x 34.5)))
-              (define ay (exact->inexact (hash-ref ad 'y 31.5)))
-              (and (not (memv aid attached-addon-ids))
-                   (not (ormap (lambda (b)
-                                 (and (memq (hash-ref b 'type 'unknown) '(barracks factory starport))
-                                      (not (bldg-is-flying-prod? b))
-                                      (<= (dist2d-pts (- ax SC2-TERRAN-ADDON-OFFSET-X)
-                                                      (+ ay (- SC2-TERRAN-ADDON-OFFSET-Y))
-                                                      (exact->inexact (hash-ref b 'x 9999.0))
-                                                      (exact->inexact (hash-ref b 'y 9999.0)))
-                                          1.25)))
-                               ally-bldgs))))
-            all-ally-addons))
-  (define explicit-free-addons (filter hash? (hash-ref sanitized-obs 'free-addons '())))
-  (define free-addons
-    (append explicit-free-addons
-            (filter (lambda (ad)
-                      (not (ormap (lambda (ef)
-                                    (equal? (hash-ref ef 'id -1) (hash-ref ad 'id -2)))
-                                  explicit-free-addons)))
-                    orphaned-addons)))
-  (define idle-lifted-prod
-    (findf (lambda (b)
-             (and (bldg-is-flying-prod? b)
-                  (not (hash-ref b 'busy? #f))
-                  (= (hash-ref b 'order-count 0) 0)))
-           ally-bldgs))
-  (define bare-fac-or-port
-    (findf (lambda (b)
-             (and (memq (hash-ref b 'type 'unknown) '(factory starport))
-                  (not (bldg-is-flying-prod? b))
-                  (not (bldg-has-addon? b))
-                  (not (hash-ref b 'busy? #f))))
-           ally-bldgs))
-  (define donor-rax-or-fac
-    (findf (lambda (b)
-             (and (memq (hash-ref b 'type 'unknown) '(barracks factory))
-                  (not (bldg-is-flying-prod? b))
-                  (bldg-has-addon? b)
-                  (not (hash-ref b 'busy? #f))))
-           ally-bldgs))
-  (cond
-    ;; Case 0a: Idle lifted Barracks/Factory/Starport + unattached TechLab/Reactor -> land & attach immediately!
-    [(and idle-lifted-prod (not (null? free-addons)))
-     (define addon (first free-addons))
-     (define ax (exact->inexact (hash-ref addon 'x (+ base-x 6.5))))
-     (define ay (exact->inexact (hash-ref addon 'y (+ base-y 3.5))))
-     (list (list 'terran-addon-swap 0 (hash-ref idle-lifted-prod 'id 0) ax ay))]
-    ;; Case 0b: Stranded idle lifted Barracks/Factory/Starport with no free add-on -> land on clear ground!
-    [idle-lifted-prod
-     (define bx (exact->inexact (hash-ref idle-lifted-prod 'x (+ base-x 4.0))))
-     (define by (exact->inexact (hash-ref idle-lifted-prod 'y (+ base-y 4.0))))
-     (list (list 'land-building (hash-ref idle-lifted-prod 'id 0) bx by))]
-    ;; Case 1: Free unattached TechLab/Reactor available + bare grounded Barracks/Factory/Starport
-    [(and (not (null? free-addons))
-          (or bare-fac-or-port
-              (findf (lambda (b)
-                       (and (eq? (hash-ref b 'type 'unknown) 'barracks)
-                            (not (bldg-is-flying-prod? b))
-                            (not (bldg-has-addon? b))
-                            (not (hash-ref b 'busy? #f))))
-                     ally-bldgs)))
-     (define addon (first free-addons))
-     (define receiver
-       (or bare-fac-or-port
-           (findf (lambda (b)
-                    (and (eq? (hash-ref b 'type 'unknown) 'barracks)
-                         (not (bldg-is-flying-prod? b))
-                         (not (bldg-has-addon? b))
-                         (not (hash-ref b 'busy? #f))))
-                  ally-bldgs)))
-     (define ax (exact->inexact (hash-ref addon 'x 34.5)))
-     (define ay (exact->inexact (hash-ref addon 'y 31.5)))
-     (list (list 'terran-addon-swap 0 (hash-ref receiver 'id 0) ax ay))]
-    ;; Case 2: Active pro swap (`frame >= SC2-TERRAN-FIRST-ADDON-SWAP-FRAME` or explicit swap-ready)
-    [(and bare-fac-or-port
-          donor-rax-or-fac
-          (not (eq? (hash-ref bare-fac-or-port 'type 'unknown)
-                    (hash-ref donor-rax-or-fac 'type 'unknown)))
-          (>= frame SC2-TERRAN-FIRST-ADDON-SWAP-FRAME))
-     (define dx (exact->inexact (hash-ref donor-rax-or-fac 'x 32.0)))
-     (define dy (exact->inexact (hash-ref donor-rax-or-fac 'y 32.0)))
-     (define ax (exact->inexact (hash-ref donor-rax-or-fac 'addon-x (+ dx 2.5))))
-     (define ay (exact->inexact (hash-ref donor-rax-or-fac 'addon-y (- dy 0.5))))
-     (list (list 'terran-addon-swap
-                 (hash-ref donor-rax-or-fac 'id 0)
-                 (hash-ref bare-fac-or-port 'id 0)
-                 ax
-                 ay))]
-    [else '()]))
+  (define enemy-units (filter hash? (hash-ref sanitized-obs 'enemy-units '())))
 
+  ;; Abort swaps immediately when any enemy combat threat is within 18.0 tiles of `(base-x, base-y)`
+  (define enemy-threat-near-base?
+    (ormap (lambda (e)
+             (define et (hash-ref e 'type 'unknown))
+             (and (not (sc2-non-combat-or-summon-sym? et))
+                  (not (memq et '(larva egg drone probe scv drone-burrowed)))
+                  (not (hash-ref e 'is-hallucination #f))
+                  (<= (dist2d-pts base-x base-y
+                                  (exact->inexact (hash-ref e 'x 999.0))
+                                  (exact->inexact (hash-ref e 'y 999.0)))
+                      18.0)))
+           enemy-units))
+  (cond
+    [enemy-threat-near-base? '()]
+    [else
+     (define addon-syms
+       '(barracks-techlab barracks-tech-lab barracks-reactor
+         factory-techlab factory-tech-lab factory-reactor
+         starport-techlab starport-tech-lab starport-reactor
+         tech-lab techlab reactor))
+     (define (bldg-complete? b)
+       (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))
+     (define all-ally-addons
+       (filter (lambda (b)
+                 (and (memq (hash-ref b 'type 'unknown) addon-syms)
+                      (bldg-complete? b)))
+               ally-bldgs))
+     (define attached-addon-ids
+       (for/fold ([acc '()]) ([b (in-list ally-bldgs)])
+         (define atag (hash-ref b 'add-on-tag 0))
+         (if (and (exact-integer? atag) (> atag 0))
+             (cons atag acc)
+             acc)))
+     (define (bldg-is-flying-prod? b)
+       (define bt (hash-ref b 'type 'unknown))
+       (or (memq bt '(barracks-flying factory-flying starport-flying))
+           (and (memq bt '(barracks factory starport))
+                (or (eq? (hash-ref b 'flying? #f) #t)
+                    (eq? (hash-ref b 'is-flying #f) #t)))))
+     (define (bldg-has-addon? b)
+       (or (eq? (hash-ref b 'has-addon? #f) #t)
+           (not (not (hash-ref b 'addon #f)))
+           (> (hash-ref b 'add-on-tag 0) 0)
+           (let ([bx (exact->inexact (hash-ref b 'x 0.0))]
+                 [by (exact->inexact (hash-ref b 'y 0.0))])
+             (ormap (lambda (ad)
+                      (<= (dist2d-pts (+ bx SC2-TERRAN-ADDON-OFFSET-X)
+                                      (+ by SC2-TERRAN-ADDON-OFFSET-Y)
+                                      (exact->inexact (hash-ref ad 'x 9999.0))
+                                      (exact->inexact (hash-ref ad 'y 9999.0)))
+                          1.25))
+                    all-ally-addons))))
+     (define (bldg-attached-addon-sym b)
+       (define explicit (hash-ref b 'addon #f))
+       (cond
+         [(symbol? explicit) explicit]
+         [else
+          (define atag (hash-ref b 'add-on-tag 0))
+          (define by-tag
+            (and (exact-integer? atag) (> atag 0)
+                 (findf (lambda (ad) (= (hash-ref ad 'id -1) atag)) all-ally-addons)))
+          (cond
+            [by-tag (hash-ref by-tag 'type 'unknown)]
+            [else
+             (define bx (exact->inexact (hash-ref b 'x 0.0)))
+             (define by (exact->inexact (hash-ref b 'y 0.0)))
+             (define near-ad
+               (findf (lambda (ad)
+                        (<= (dist2d-pts (+ bx SC2-TERRAN-ADDON-OFFSET-X)
+                                        (+ by SC2-TERRAN-ADDON-OFFSET-Y)
+                                        (exact->inexact (hash-ref ad 'x 9999.0))
+                                        (exact->inexact (hash-ref ad 'y 9999.0)))
+                            1.25))
+                      all-ally-addons))
+             (if near-ad (hash-ref near-ad 'type 'unknown) 'unknown)])]))
+
+     (define ally-bldg-by-id
+       (for/hasheqv ([b (in-list ally-bldgs)]
+                     #:when (exact-integer? (hash-ref b 'id #f)))
+         (values (hash-ref b 'id) b)))
+
+     ;; Prune expired or satisfied add-on claims and donor offset records
+     (for ([(akey entry) (in-hash (hash-copy TERRAN-ADDON-CLAIM-LOCK))])
+       (match-define (list ctag _if exp-f) entry)
+       (define cb (hash-ref ally-bldg-by-id ctag #f))
+       (when (or (and (> frame 0) (>= frame exp-f))
+                 (not cb)
+                 (and (not (bldg-is-flying-prod? cb)) (bldg-has-addon? cb)))
+         (hash-remove! TERRAN-ADDON-CLAIM-LOCK akey)))
+     (for ([(dtag entry) (in-hash (hash-copy TERRAN-DONOR-OFFSET-PAD))])
+       (match-define (list _if exp-f pad-x pad-y _dax _day) entry)
+       (define db (hash-ref ally-bldg-by-id dtag #f))
+       (when (or (and (> frame 0) (>= frame exp-f))
+                 (not db)
+                 (and (not (bldg-is-flying-prod? db))
+                      (<= (dist2d-pts (exact->inexact (hash-ref db 'x 0.0))
+                                      (exact->inexact (hash-ref db 'y 0.0))
+                                      pad-x pad-y)
+                          1.5)))
+         (hash-remove! TERRAN-DONOR-OFFSET-PAD dtag)))
+
+     (define (addon-claim-key ad)
+       (define aid (hash-ref ad 'id 0))
+       (if (and (exact-integer? aid) (> aid 0))
+           aid
+           (+ (* 10000 (exact-round (* 2.0 (exact->inexact (hash-ref ad 'x 0.0)))))
+              (exact-round (* 2.0 (exact->inexact (hash-ref ad 'y 0.0)))))))
+
+     (define (addon-claim-key-xy ax ay [ad-opt #f])
+       (if ad-opt
+           (addon-claim-key ad-opt)
+           (+ (* 10000 (exact-round (* 2.0 ax)))
+              (exact-round (* 2.0 ay)))))
+
+     (define (bldg-on-relift-cooldown? bid)
+       (and (> frame 0)
+            (< frame (hash-ref TERRAN-RELIFT-COOLDOWN-UNTIL bid 0))))
+
+     (define (bldg-donated-addon? bid ax ay)
+       (define dentry (hash-ref TERRAN-DONOR-OFFSET-PAD bid #f))
+       (and dentry
+            (<= (dist2d-pts ax ay (fifth dentry) (sixth dentry)) 2.0)))
+
+     (define (addon-available-for-bldg? ad bid)
+       (define ax (exact->inexact (hash-ref ad 'x 34.5)))
+       (define ay (exact->inexact (hash-ref ad 'y 31.5)))
+       (and (not (bldg-donated-addon? bid ax ay))
+            (let ([lock (hash-ref TERRAN-ADDON-CLAIM-LOCK (addon-claim-key ad) #f)]
+                  [xy-lock (hash-ref TERRAN-ADDON-CLAIM-LOCK (addon-claim-key-xy ax ay #f) #f)])
+              (and (or (not lock) (= (first lock) bid))
+                   (or (not xy-lock) (= (first xy-lock) bid))))))
+
+     (define (claim-addon-for-bldg! ad-or-false ax ay bid)
+       (when (> bid 0)
+         (define exp-f (+ (max 1 frame) SC2-TERRAN-ADDON-RELIFT-COOLDOWN-FRAMES))
+         (when ad-or-false
+           (hash-set! TERRAN-ADDON-CLAIM-LOCK (addon-claim-key ad-or-false) (list bid frame exp-f)))
+         (hash-set! TERRAN-ADDON-CLAIM-LOCK (addon-claim-key-xy ax ay #f) (list bid frame exp-f))))
+
+     (define orphaned-addons
+       (filter (lambda (ad)
+                 (define aid (hash-ref ad 'id 0))
+                 (define ax (exact->inexact (hash-ref ad 'x 34.5)))
+                 (define ay (exact->inexact (hash-ref ad 'y 31.5)))
+                 (and (not (memv aid attached-addon-ids))
+                      (not (ormap (lambda (b)
+                                    (and (memq (hash-ref b 'type 'unknown) '(barracks factory starport))
+                                         (not (bldg-is-flying-prod? b))
+                                         (<= (dist2d-pts (- ax SC2-TERRAN-ADDON-OFFSET-X)
+                                                         (+ ay (- SC2-TERRAN-ADDON-OFFSET-Y))
+                                                         (exact->inexact (hash-ref b 'x 9999.0))
+                                                         (exact->inexact (hash-ref b 'y 9999.0)))
+                                             1.25)))
+                                  ally-bldgs))))
+               all-ally-addons))
+     (define explicit-free-addons (filter hash? (hash-ref sanitized-obs 'free-addons '())))
+     (define free-addons
+       (append explicit-free-addons
+               (filter (lambda (ad)
+                         (not (ormap (lambda (ef)
+                                       (equal? (hash-ref ef 'id -1) (hash-ref ad 'id -2)))
+                                     explicit-free-addons)))
+                       orphaned-addons)))
+
+     (define idle-lifted-list
+       (filter (lambda (b)
+                 (and (bldg-is-flying-prod? b)
+                      (not (hash-ref b 'busy? #f))
+                      (= (hash-ref b 'order-count 0) 0)))
+               ally-bldgs))
+
+     ;; Separate lifted donors (which MUST land at `(donor-x, donor-y + 4.0)` away from the add-on
+     ;; they just donated!) from lifted recipients/other idle lifted buildings.
+     (define lifted-donor
+       (findf (lambda (b) (hash-has-key? TERRAN-DONOR-OFFSET-PAD (hash-ref b 'id 0)))
+              idle-lifted-list))
+     (define idle-lifted-recipient
+       (findf (lambda (b) (not (hash-has-key? TERRAN-DONOR-OFFSET-PAD (hash-ref b 'id 0))))
+              idle-lifted-list))
+
+     (define bare-fac-or-port
+       (findf (lambda (b)
+                (define bid (hash-ref b 'id 0))
+                (and (memq (hash-ref b 'type 'unknown) '(factory starport))
+                     (bldg-complete? b)
+                     (not (bldg-is-flying-prod? b))
+                     (not (bldg-has-addon? b))
+                     (not (hash-ref b 'busy? #f))
+                     (or (not (bldg-on-relift-cooldown? bid))
+                         (ormap (lambda (ad)
+                                  (define lk (hash-ref TERRAN-ADDON-CLAIM-LOCK (addon-claim-key ad) #f))
+                                  (and lk (= (first lk) bid)))
+                                free-addons))))
+              ally-bldgs))
+
+     ;; Donor eligibility:
+     ;; - Must be complete (`build-progress >= 0.999`), grounded, idle, and NOT on `448`-loop cooldown.
+     ;; - Never strip `factory-techlab` off a `Factory` (needed for SiegeTank/Thor production & upgrades)
+     ;;   unless `allow-factory-techlab-strip?` is explicitly `#t`; `Barracks` add-on swaps remain allowed!
+     (define allow-fac-tl-strip? (eq? (hash-ref sanitized-obs 'allow-factory-techlab-strip? #f) #t))
+     (define donor-rax-or-fac
+       (findf (lambda (b)
+                (define bid (hash-ref b 'id 0))
+                (define btype (hash-ref b 'type 'unknown))
+                (and (memq btype '(barracks factory))
+                     (bldg-complete? b)
+                     (not (bldg-is-flying-prod? b))
+                     (bldg-has-addon? b)
+                     (not (hash-ref b 'busy? #f))
+                     (not (bldg-on-relift-cooldown? bid))
+                     (or (eq? btype 'barracks)
+                         allow-fac-tl-strip?
+                         (memq (bldg-attached-addon-sym b) '(factory-reactor reactor)))))
+              ally-bldgs))
+
+     (define donor-land-actions
+       (if lifted-donor
+           (let* ([did (hash-ref lifted-donor 'id 0)]
+                  [drec (hash-ref TERRAN-DONOR-OFFSET-PAD did)]
+                  [pad-x (third drec)]
+                  [pad-y (fourth drec)])
+             (list (list 'land-building did pad-x pad-y)))
+           '()))
+
+     (define recipient-or-swap-actions
+       (cond
+         ;; Case 0a: Idle lifted non-donor Barracks/Factory/Starport + unclaimed/owned free TechLab/Reactor -> land & attach!
+         [(and idle-lifted-recipient
+               (findf (lambda (ad) (addon-available-for-bldg? ad (hash-ref idle-lifted-recipient 'id 0)))
+                      free-addons))
+          => (lambda (addon)
+               (define rid (hash-ref idle-lifted-recipient 'id 0))
+               (define ax (exact->inexact (hash-ref addon 'x (+ base-x 6.5))))
+               (define ay (exact->inexact (hash-ref addon 'y (+ base-y 3.5))))
+               (claim-addon-for-bldg! addon ax ay rid)
+               (when (> frame 0)
+                 (hash-set! TERRAN-RELIFT-COOLDOWN-UNTIL rid (+ frame SC2-TERRAN-ADDON-RELIFT-COOLDOWN-FRAMES)))
+               (list (list 'terran-addon-swap 0 rid ax ay)))]
+         ;; Case 0b: Stranded idle lifted non-donor Barracks/Factory/Starport with no available free add-on -> land on clear ground!
+         [idle-lifted-recipient
+          (define bx (exact->inexact (hash-ref idle-lifted-recipient 'x (+ base-x 4.0))))
+          (define by (exact->inexact (hash-ref idle-lifted-recipient 'y (+ base-y 4.0))))
+          (list (list 'land-building (hash-ref idle-lifted-recipient 'id 0) bx by))]
+         ;; Case 1: Free unattached TechLab/Reactor available + completed bare grounded Barracks/Factory/Starport
+         [(and (not (null? free-addons))
+               (let ([cand-rec
+                      (or bare-fac-or-port
+                          (findf (lambda (b)
+                                   (define bid (hash-ref b 'id 0))
+                                   (and (eq? (hash-ref b 'type 'unknown) 'barracks)
+                                        (bldg-complete? b)
+                                        (not (bldg-is-flying-prod? b))
+                                        (not (bldg-has-addon? b))
+                                        (not (hash-ref b 'busy? #f))
+                                        (not (bldg-on-relift-cooldown? bid))))
+                                 ally-bldgs))])
+                 (and cand-rec
+                      (let ([avail-ad (findf (lambda (ad) (addon-available-for-bldg? ad (hash-ref cand-rec 'id 0)))
+                                             free-addons)])
+                        (and avail-ad (cons cand-rec avail-ad))))))
+          => (lambda (pair-ca)
+               (define receiver (car pair-ca))
+               (define addon (cdr pair-ca))
+               (define rid (hash-ref receiver 'id 0))
+               (define ax (exact->inexact (hash-ref addon 'x 34.5)))
+               (define ay (exact->inexact (hash-ref addon 'y 31.5)))
+               (claim-addon-for-bldg! addon ax ay rid)
+               (list (list 'terran-addon-swap 0 rid ax ay)))]
+         ;; Case 2: Active pro swap (`frame >= SC2-TERRAN-FIRST-ADDON-SWAP-FRAME`)
+         [(and (null? donor-land-actions)
+               bare-fac-or-port
+               donor-rax-or-fac
+               (not (eq? (hash-ref bare-fac-or-port 'type 'unknown)
+                         (hash-ref donor-rax-or-fac 'type 'unknown)))
+               (>= frame SC2-TERRAN-FIRST-ADDON-SWAP-FRAME))
+          (define did (hash-ref donor-rax-or-fac 'id 0))
+          (define rid (hash-ref bare-fac-or-port 'id 0))
+          (define dx (exact->inexact (hash-ref donor-rax-or-fac 'x 32.0)))
+          (define dy (exact->inexact (hash-ref donor-rax-or-fac 'y 32.0)))
+          (define ax (exact->inexact (hash-ref donor-rax-or-fac 'addon-x (+ dx 2.5))))
+          (define ay (exact->inexact (hash-ref donor-rax-or-fac 'addon-y (- dy 0.5))))
+          (define donor-ad
+            (findf (lambda (ad)
+                     (<= (dist2d-pts ax ay
+                                     (exact->inexact (hash-ref ad 'x 9999.0))
+                                     (exact->inexact (hash-ref ad 'y 9999.0)))
+                         1.25))
+                   all-ally-addons))
+          (define exp-f (+ frame SC2-TERRAN-ADDON-RELIFT-COOLDOWN-FRAMES))
+          (hash-set! TERRAN-RELIFT-COOLDOWN-UNTIL did exp-f)
+          (hash-set! TERRAN-DONOR-OFFSET-PAD did (list frame exp-f dx (+ dy 4.0) ax ay))
+          (claim-addon-for-bldg! donor-ad ax ay rid)
+          (list (list 'terran-addon-swap did rid ax ay))]
+         [else '()]))
+
+     (append donor-land-actions recipient-or-swap-actions)]))
 
