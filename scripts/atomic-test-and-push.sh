@@ -79,7 +79,7 @@ fi
 
 echo "[1/4] Synchronizing .zo bytecode..."
 if [[ "${SKIP_MAKE}" -eq 0 ]]; then
-  racket -e '(require compiler/cm) (managed-compile-zo "tests/run-all-tests.rkt")'
+  racket -e '(require compiler/cm) (define root (current-directory)) (parameterize ([current-directory-for-user root] [current-write-relative-directory (cons root root)]) (for-each managed-compile-zo (list "lib/sc2-typed-commands.rkt" "lib/sc2-proto-wire-verifier.rkt" "lib/mirror-mind-predictor.rkt" "lib/bot-runtime.rkt" "lib/bot-crash-fuzzer.rkt" "lib/state-machine-verifier.rkt" "tools/fuzz-sc2-protobuf-output.rkt" "tests/typed-commands-test.rkt" "tests/sc2-protobuf-ws-test.rkt" "tests/run-all-tests.rkt")))'
 fi
 
 if [[ "${REBUILD_ZIPS}" -eq 1 ]]; then

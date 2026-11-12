@@ -526,9 +526,62 @@
 ;; - NO-TARGET-ABILITY-IDS must be sent with target_world_space_pos=#f, target_unit_tag=0
 ;; - POINT-TARGET-ABILITY-IDS must be sent with target_world_space_pos=Point2D, target_unit_tag=0
 ;; - UNIT-TARGET-ABILITY-IDS must be sent with target_world_space_pos=#f, target_unit_tag=tag
+;; Canonical LotV active spell -> ability_id map (ground-truth `s2clientprotocol` IDs):
+;;   - `emp-round` = `1628` (`EFFECT_EMP`, PointTarget; never `381`!)
+;;   - `oracle-revelation` = `2146` (`EFFECT_ORACLEREVELATION`, PointTarget; `1632` is `TRAIN_QUEEN`!)
+;;   - `microbial-shroud` = `2545` (`EFFECT_MICROBIALSHROUD`, PointTarget)
+;;   - `guardian-shield` = `76` (`GUARDIANSHIELD_GUARDIANSHIELD`, NoTarget)
+(define SC2-SPELL-ABILITY-IDS
+  (hasheq
+   'emp-round            1628
+   'oracle-revelation    2146
+   'microbial-shroud     2545
+   'guardian-shield      76
+   'force-field          1526
+   'psi-storm            1036
+   'feedback             140
+   'fungal-growth        74
+   'neural-parasite      249
+   'corrosive-bile       2338
+   'inject-larva         251
+   'transfusion          1664
+   'spawn-creep-tumor    1694
+   'spread-creep-tumor   1733
+   'build-creep-tumor    3691
+   'build-nydus-worm     1768
+   'calldown-mule        171
+   'scanner-sweep        399
+   'supply-drop          255
+   'stimpack             3675
+   'stim-marine          380
+   'stim-marauder        253
+   'steady-targeting     2714
+   'snipe                2714
+   'yamato-cannon        401
+   'tactical-jump        2358
+   'auto-turret          349
+   'interference-matrix  3747
+   'anti-armor-missile   3753
+   'salvage              32
+   'chrono-boost         3755
+   'battery-overcharge   4107
+   'mass-recall          3757
+   'blink                3687
+   'blink-stalker        1442
+   'adept-phase-shift    2544
+   'purification-nova    2346
+   'stasis-ward          2505
+   'pulsar-beam          2375
+   'abduct               2067
+   'blinding-cloud       2063
+   'parasitic-bomb       2542
+   'viper-consume        2073
+   'spawn-changeling     181))
+
 (define SC2-NO-TARGET-ABILITY-IDS
   (list->seteqv
-   '(181   ;; SPAWNCHANGELING_SPAWNCHANGELING
+   '(32    ;; EFFECT_SALVAGE
+     181   ;; SPAWNCHANGELING_SPAWNCHANGELING
      253   ;; EFFECT_STIM_MARAUDER
      380   ;; EFFECT_STIM_MARINE
      388   ;; SIEGEMODE_SIEGEMODE
@@ -578,7 +631,7 @@
 (define SC2-POINT-TARGET-ABILITY-IDS
   (list->seteqv
    '(74    ;; FUNGALGROWTH_FUNGALGROWTH
-     197   ;; FORCEFIELD
+     349   ;; BUILD_AUTOTURRET
      399   ;; SCAN_MOVE (Scanner Sweep)
      1036  ;; PSISTORM_PSISTORM
      1442  ;; EFFECT_BLINK_STALKER
@@ -586,6 +639,7 @@
      1628  ;; EMP_EMP
      1694  ;; BUILD_CREEPTUMOR_QUEEN
      1733  ;; BUILD_CREEPTUMOR_TUMOR
+     1768  ;; BUILD_NYDUSWORM
      1990  ;; EFFECT_SPAWNLOCUSTS
      2063  ;; BLINDINGCLOUD_BLINDINGCLOUD
      2146  ;; ORACLEREVELATION_ORACLEREVELATION
@@ -594,12 +648,13 @@
      2358  ;; EFFECT_TACTICALJUMP
      2505  ;; BUILD_STASISTRAP
      2544  ;; EFFECT_ADEPTPHASESHIFT
+     2545  ;; EFFECT_MICROBIALSHROUD
      2558  ;; MORPH_LIBERATORAGMODE
      2588  ;; KD8CHARGE_KD8CHARGE
      3678  ;; LAND
      3687  ;; EFFECT_BLINK
      3691  ;; BUILD_CREEPTUMOR
-     3692  ;; BUILD_CREEPTUMOR_TUMOR
+     3757  ;; EFFECT_MASSRECALL_NEXUS
      )))
 
 (define SC2-UNIT-TARGET-ABILITY-IDS
@@ -1214,7 +1269,7 @@
     [(1376 1380 1384 1388 1392 1435 1446 1514 2016 2097 2110 2342 3662) 'burrow-up]
     [(1394 1396 3680)        'uproot]
     [(1398 1400 3681)        'root]
-    [(1694 1733 3691 3692)   'spawn-creep-tumor]
+    [(1662 1694 1733 3691)   'spawn-creep-tumor]
     [(253 380 3675)          'stim]
     [(1442 3687)             'blink]
     [(142 3686 3757)         'mass-recall]
@@ -1242,8 +1297,8 @@
                          1394 1396 3680
                          1398 1400 3681))])
       (hash-set! ht id 'mode-switch))
-    (for ([id (in-list '(251 1694 3691 1733 3692 1664 1628 1036 140 74 3763
-                         2338 2346 2067 2063 2542 3747 3753 181 2505 197 1526))])
+    (for ([id (in-list '(251 1662 1694 3691 1733 1664 1628 1036 140 74 3763
+                         2338 2346 2067 2063 2542 2545 3747 3753 181 2505 1526))])
       (hash-set! ht id 'cast-walk))
     (for/hasheqv ([(k v) (in-hash ht)])
       (values k v))))

@@ -905,6 +905,31 @@
   (define under-early-rush-crisis?
     (and (< frame 3000)
          (or under-attack? (>= enemy-threat-supply 4))))
+  (define plan-supply-sym
+    (case race [(Zerg) 'overlord] [(Terran) 'supply-depot] [else 'pylon]))
+  (define plan-cur-supply-cnt
+    (case race
+      [(Zerg) (unit-count-equivalent unit-counts 'overlord)]
+      [(Terran) (bldg-count-equivalent total-bldg-counts 'supply-depot)]
+      [else (bldg-count-equivalent total-bldg-counts 'pylon)]))
+  (define hard-supply-block?
+    (and (< supply-cap 200)
+         (<= pending-supply 0)
+         (or (<= supply-left 0)
+             (>= supply-used supply-cap))))
+  (define zero-supply-provider-lockout?
+    (and (< supply-cap 200)
+         (<= pending-supply 0)
+         (<= supply-left 1)
+         (<= supply-cap (* 15 (max 1 active-bases)))
+         (or (and (eq? race 'Protoss)
+                  (= (bldg-count-equivalent total-bldg-counts 'pylon) 0)
+                  (>= supply-used 14))
+             (and (eq? race 'Terran)
+                  (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0)
+                  (>= supply-used 14)))))
+  (define supply-lockout-active?
+    (or hard-supply-block? zero-supply-provider-lockout?))
   (define plan-total-townhalls
     (case race
       [(Zerg) (bldg-count-equivalent total-bldg-counts 'hatchery)]
@@ -926,7 +951,15 @@
             (cons (list id track kind target-count weight reason)
                   raw-goal-specs))))
 
-  ;; Track 1: Survival, Emergency Worker-Rush / In-Base Proxy Override & Broken Prereq Repair
+  ;; Track 1: Survival, Hard Supply-Lockout Unblock, Worker-Rush Override & Broken Prereq Repair
+  (when supply-lockout-active?
+    (add-goal-spec! plan-supply-sym
+                    'survival-supply
+                    (if (eq? race 'Zerg) 'train 'build)
+                    (add1 plan-cur-supply-cnt)
+                    980.0
+                    'emergency-supply-unblock))
+
   (when under-early-rush-crisis?
     (cond
       [(not root-combat-facility-ready?)
@@ -997,6 +1030,8 @@
            (let ([cur-gb (bldg-count-equivalent total-bldg-counts sym)])
              (or (< workers (min-workers-for-next-gas-bldg cur-gb))
                  early-zero-army-attack?
+                 (and supply-lockout-active?
+                      (< minerals (+ (sc2-min-cost plan-supply-sym 100) (sc2-min-cost sym 75))))
                  protoss-1base-2nd-gas-capped?
                  (and live-slots? (> cur-gb 0) (>= gas 250))))))
     (define late-tech-deferred-by-low-army?
@@ -1011,7 +1046,13 @@
                 late-tech-deferred-by-low-army?)
       (cond
         [(eq? kind 'expand)
-         (define exp-w (if peaceful? (- 476.0 (* 3.0 macro-step-rank)) 42.0))
+         (define exp-w
+           (cond
+             [(and supply-lockout-active?
+                   (< minerals (+ (sc2-min-cost plan-supply-sym 100) (sc2-min-cost sym 300))))
+              25.0]
+             [peaceful? (- 476.0 (* 3.0 macro-step-rank))]
+             [else 42.0]))
          (set! macro-step-rank (add1 macro-step-rank))
          (add-goal-spec! sym 'economy-expansion 'expand tgt-cnt exp-w 'expansion-plan)]
         [(memq kind '(build morph research addon))
@@ -1355,9 +1396,31 @@
       [(Terran) (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)]
       [else (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
                   (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)]))
+  (define race-supply-sym
+    (case race [(Zerg) 'overlord] [(Terran) 'supply-depot] [else 'pylon]))
+  (define hard-supply-block?
+    (and (< supply-cap 200)
+         (<= pending-supply 0)
+         (or (<= supply-left 0)
+             (>= supply-used supply-cap))))
+  (define zero-supply-provider-lockout?
+    (and (< supply-cap 200)
+         (<= pending-supply 0)
+         (<= supply-left 1)
+         (<= supply-cap (* 15 (max 1 active-bases)))
+         (or (and (eq? race 'Protoss)
+                  (= (bldg-count-equivalent total-bldg-counts 'pylon) 0)
+                  (>= supply-used 14))
+             (and (eq? race 'Terran)
+                  (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0)
+                  (>= supply-used 14)))))
+  (define supply-lockout-active?
+    (or hard-supply-block? zero-supply-provider-lockout?))
   (define emergency-army-before-workers?
     (and (or under-attack? (> enemy-threat-supply 0))
-         (< army-supply 4)
+         (< army-supply (if (and (< frame 3000) (>= enemy-threat-supply 4))
+                            (max 8 (+ enemy-threat-supply 4))
+                            4))
          root-combat-facility-ready?
          (>= workers 1)))
   (define top-plan-node
@@ -1366,7 +1429,10 @@
   (define (bo-fallback-goal-allowed? g)
     (and (pro-bo-goal? g)
          (let ([gsym (pro-bo-goal-target-sym g)])
-           (and (or (not (memq gsym '(extractor refinery assimilator)))
+           (and (not (and supply-lockout-active?
+                          (memq gsym '(extractor refinery assimilator
+                                       hatchery nexus command-center))))
+                (or (not (memq gsym '(extractor refinery assimilator)))
                     (let ([cur-gb (bldg-count-equivalent total-bldg-counts gsym)])
                       (and (< cur-gb (* 2 active-bases))
                            (>= workers (min-workers-for-next-gas-bldg cur-gb))
@@ -1414,9 +1480,10 @@
   (define ready-gas-bldgs (bldg-count-equivalent ready-bldg-counts gas-bldg-sym))
   (define total-gas-bldgs (bldg-count-equivalent total-bldg-counts gas-bldg-sym))
   (define has-mineral-income?
-    (if (exact-integer? mineral-harvesters)
-        (or (> mineral-harvesters 0) (> workers 0))
-        (> workers 0)))
+    (and (> workers 0)
+         (if (exact-integer? mineral-harvesters)
+             (> mineral-harvesters 0)
+             #t)))
   (define has-gas-income?
     (if (exact-integer? gas-harvesters)
         (and (> gas-harvesters 0) (> ready-gas-bldgs 0))
@@ -1464,7 +1531,7 @@
      #:under-attack? under-attack?
      #:requires-anti-air? requires-anti-air?
      #:requires-detection? requires-detection?
-     #:supply-at-risk? (or supply-at-risk? (< supply-left 0))
+     #:supply-at-risk? (or supply-at-risk? (< supply-left 0) supply-lockout-active?)
      #:supply-buffer supply-buffer))
 
   (define metrics
@@ -1537,7 +1604,7 @@
      #:under-attack? under-attack?
      #:requires-anti-air? requires-anti-air?
      #:requires-detection? requires-detection?
-     #:supply-at-risk? (or supply-at-risk? (< supply-left 0))
+     #:supply-at-risk? (or supply-at-risk? (< supply-left 0) supply-lockout-active?)
      #:supply-buffer supply-buffer
      #:ally-buildings (counts-hash->symbol-list total-bldg-counts)
      #:ready-buildings (counts-hash->symbol-list ready-bldg-counts)
@@ -1550,10 +1617,15 @@
      #:third-x third-x #:third-y third-y))
 
   (define supply-crisis?
-    (and (< supply-cap 200)
-         (< pending-supply (if (< supply-left 0) 3 2))
-         (or (and (= pending-supply 0) (<= supply-left supply-buffer))
-             (<= (+ supply-left (* 8 pending-supply)) (max 0 (quotient supply-buffer 2))))))
+    (or supply-lockout-active?
+        (and (< supply-cap 200)
+             (< (+ supply-cap (* 8 pending-supply)) 200)
+             (< pending-supply (if (< supply-left 0) 3 2))
+             (or (and (= pending-supply 0) (<= supply-left supply-buffer))
+                 (<= (+ supply-left (* 8 pending-supply)) (max 0 (quotient supply-buffer 2)))
+                 (and (>= active-bases 3)
+                      (>= minerals 400)
+                      (<= (+ supply-left (* 8 pending-supply)) (max 8 supply-buffer)))))))
 
   (define total-townhalls-incl-pending
     (case race
@@ -1570,8 +1642,6 @@
          (<= enemy-threat-supply 0)
          (>= workers 12)))
 
-  (define race-supply-sym
-    (case race [(Zerg) 'overlord] [(Terran) 'supply-depot] [else 'pylon]))
   (define race-expand-sym
     (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
 
@@ -1709,6 +1779,9 @@
       (or (not (memq id '(extractor refinery assimilator)))
           (let ([cur-gas-bldgs (bldg-count-equivalent total-bldg-counts id)])
             (and (not protoss-1base-2nd-gas-capped?)
+                 (or (not supply-lockout-active?)
+                     (>= minerals (+ (sc2-min-cost race-supply-sym 100)
+                                     (priority-candidate-min-cost c))))
                  (< cur-gas-bldgs (* 2 active-bases))
                  (>= workers (min-workers-for-next-gas-bldg cur-gas-bldgs))
                  (not early-zero-army-attack?)
@@ -1741,6 +1814,10 @@
       (or (not (eq? race 'Zerg))
           (not node)
           (not (memq (sc2-tech-node-kind node) '(build expand)))
+          (and under-early-rush-crisis?
+               (>= workers 2)
+               (memq id '(spawning-pool spine-crawler))
+               (>= minerals 200))
           (and (>= workers 5)
                (or (>= workers 13)
                    overdue-1base-expand?
@@ -1757,12 +1834,18 @@
                (< (bldg-count-equivalent total-bldg-counts 'gateway) 2))
           (<= nat-exp-min-reserve 0)
           (>= (- minerals nat-exp-min-reserve) (priority-candidate-min-cost c))))
+    (define supply-lockout-allows-expand?
+      (or (not (eq? cat 'expansion))
+          (not supply-lockout-active?)
+          (>= minerals (+ (sc2-min-cost race-supply-sym 100)
+                          (priority-candidate-min-cost c)))))
     (and geyser-cap-ok?
          addon-slot-free-ok?
          (not redundant-scaling-fac-idle?)
          late-tech-army-ok?
          zerg-drone-sacrifice-ok?
          nat-reserve-allows-2nd-fac?
+         supply-lockout-allows-expand?
          (cond
            [(ormap (lambda (r) (same-brain-sym? id r)) repaired-prereqs) #t]
            [(memq id emergency-rush-syms) #t]
@@ -1863,12 +1946,17 @@
         (or (and bo-goal-sym (same-brain-sym? sym bo-goal-sym))
             is-plan-milestone?))
       (cond
-        ;; Supply candidate during supply crisis
+        ;; Supply candidate during supply crisis or hard 15/15 lockout
         [(eq? cat 'supply)
-         (define u-sup (if supply-crisis? (max 1350.0 u0) (max 280.0 u0)))
+         (define u-sup
+           (cond
+             [supply-lockout-active? (max 2200.0 u0)]
+             [supply-crisis? (max 1350.0 u0)]
+             [else (max 280.0 u0)]))
          (struct-copy priority-candidate c
                       [utility-score u-sup]
-                      [blocking-allowed? has-mineral-income?])]
+                      [blocking-allowed? (or has-mineral-income?
+                                             (>= minerals (priority-candidate-min-cost c)))])]
 
         ;; Worker candidate: emergency recovery when workers < 14, and sustained saturation up to min(70, 22 * bases)
         ;; Gated by `worker-army-curve-ok?` (`required-army-supply-for-worker-growth`) at `workers >= 24`.
@@ -2075,7 +2163,8 @@
                 tech-under-attack-escrow-ok?
                 (not secondary-starving-primary-slots?)
                 (not (and (memq sym '(spine-crawler bunker shield-battery))
-                          (< army-supply 4)))
+                          (< army-supply 4)
+                          (< minerals 200)))
                 (cand-can-escrow? sym)
                 (> workers 0)))
          (define boosted-u
@@ -2085,7 +2174,7 @@
              [(and emergency-rush-def-boost? (eq? cat 'combat-unit))
               (max 620.0 (+ 340.0 u0))]
              [emergency-rush-def-boost?
-              (if (< army-supply 4)
+              (if (and (< army-supply 4) (< minerals 200))
                   (min 390.0 u-after-gas-lock)
                   (max 515.0 (+ 200.0 u0)))]
              [is-repaired? (max (+ 380.0 u0) 520.0)]
@@ -2259,8 +2348,15 @@
   (define final-ids (map priority-candidate-id final-cands))
   (define final-trace (reverse decision-entries))
   (define final-escrowed (reverse escrowed-entries))
+  (define base-cand-utils
+    (for/fold ([ht (hash)]) ([c (in-list (append raw-cands extra-cands))])
+      (define cid (priority-candidate-id c))
+      (define base-u (min 120.0 (priority-candidate-utility-score c)))
+      (hash-set (hash-set ht cid base-u)
+                (normalize-brain-sym cid)
+                base-u)))
   (define cand-utils
-    (for/fold ([ht (hash)]) ([c (in-list sorted-cands)])
+    (for/fold ([ht base-cand-utils]) ([c (in-list sorted-cands)])
       (define cid (priority-candidate-id c))
       (hash-set (hash-set ht cid (priority-candidate-utility-score c))
                 (normalize-brain-sym cid)
@@ -2285,10 +2381,24 @@
                               rem-gas
                               rem-sup
                               cat-utils))
+  (define bo-goal-deadlocked?
+    (and bo-goal-sym
+         (not reserved-cand)
+         (not (ormap (lambda (s) (same-brain-sym? s bo-goal-sym)) final-ids))
+         (let ([g-mcost (sc2-min-cost bo-goal-sym 0)]
+               [g-gcost (sc2-gas-cost bo-goal-sym 0)])
+           (or (<= workers 0)
+               (and (< minerals g-mcost) (not has-mineral-income?))
+               (and (> g-gcost 0) (< gas g-gcost) (not has-gas-income?))))))
+  (define final-effective-bo-goal
+    (if bo-goal-deadlocked? #f effective-bo-goal))
+  (define final-bo-goal-sym
+    (and (pro-bo-goal? final-effective-bo-goal)
+         (pro-bo-goal-target-sym final-effective-bo-goal)))
   (define saving-id
     (if reserved-cand
         (priority-candidate-id reserved-cand)
-        (or bo-goal-sym 'none)))
+        (or (and has-mineral-income? final-bo-goal-sym) 'none)))
   (define log-str
     (format-priority-schedule-log-line
      sched-result
@@ -2298,7 +2408,7 @@
      #:gas gas
      #:supply-used supply-used
      #:supply-cap supply-cap
-     #:bo-goal-sym bo-goal-sym
+     #:bo-goal-sym (and has-mineral-income? final-bo-goal-sym)
      #:bo-reserved-min min-floor
      #:bo-reserved-gas gas-floor))
 
@@ -2309,7 +2419,7 @@
    min-floor
    gas-floor
    (reverse reserved-slots)
-   effective-bo-goal
+   final-effective-bo-goal
    repaired-prereqs
    sched-result
    log-str))
@@ -2319,27 +2429,48 @@
   (define node (lookup-sc2-tech-node norm-id))
   (define m-cost (if node (sc2-tech-node-min-cost node) (sc2-min-cost norm-id 0)))
   (define g-cost (if node (sc2-tech-node-gas-cost node) (sc2-gas-cost norm-id 0)))
+  (define pslot (and node (sc2-tech-node-producer-slot node)))
+  (define slot-blocked-by-escrow?
+    (and node
+         (memq (sc2-tech-node-kind node) '(research addon))
+         pslot
+         (memq pslot (macro-brain-decision-reserved-slots decision))
+         (not (ormap (lambda (s) (same-brain-sym? norm-id s))
+                     (macro-brain-decision-scheduled-ids decision)))))
   (and (>= cur-min m-cost)
        (>= cur-gas g-cost)
        (or (eq? cat-sym 'supply)
            (same-brain-sym? norm-id (macro-brain-decision-saving-for decision))
            (ormap (lambda (r) (same-brain-sym? norm-id r))
                   (macro-brain-decision-repaired-prereqs decision))
-           (let* ([sched (macro-brain-decision-priority-schedule decision)]
-                  [cat-ht (if (priority-schedule-result? sched)
-                              (priority-schedule-result-category-utilities sched)
-                              (hash))]
-                  [escrowed (if (hash? cat-ht) (hash-ref cat-ht 'escrowed-entries '()) '())]
-                  [bo-goal (macro-brain-decision-bo-active-goal decision)]
-                  [bo-sym (and (pro-bo-goal? bo-goal) (pro-bo-goal-target-sym bo-goal))])
-             (priority-schedule-can-spend?
-              sched norm-id cur-min cur-gas
-              #:category cat-sym
-              #:min-cost m-cost
-              #:gas-cost g-cost
-              #:bo-goal-sym bo-sym
-              #:bo-reserved-min (if (pair? escrowed) 0 (macro-brain-decision-reserved-min-floor decision))
-              #:bo-reserved-gas (if (pair? escrowed) 0 (macro-brain-decision-reserved-gas-floor decision)))))))
+           (and (not slot-blocked-by-escrow?)
+                (let* ([sched (macro-brain-decision-priority-schedule decision)]
+                       [cat-ht (if (priority-schedule-result? sched)
+                                   (priority-schedule-result-category-utilities sched)
+                                   (hash))]
+                       [escrowed (if (hash? cat-ht) (hash-ref cat-ht 'escrowed-entries '()) '())]
+                       [cat-Lookup-u (and (hash? cat-ht)
+                                          (let ([cu-map (hash-ref cat-ht 'candidate-utilities (hash))])
+                                            (hash-ref cu-map norm-id #f)))]
+                       [sched-eff
+                        (if (or cat-Lookup-u (not (priority-schedule-result? sched)) (not (hash? cat-ht)))
+                            sched
+                            (let ([cu-map (hash-ref cat-ht 'candidate-utilities (hash))])
+                              (struct-copy priority-schedule-result sched
+                                           [category-utilities
+                                            (hash-set cat-ht 'candidate-utilities
+                                                      (hash-set cu-map norm-id
+                                                                (if (eq? cat-sym 'worker) 65.0 110.0)))])))])
+                  (define bo-goal (macro-brain-decision-bo-active-goal decision))
+                  (define bo-sym (and (pro-bo-goal? bo-goal) (pro-bo-goal-target-sym bo-goal)))
+                  (priority-schedule-can-spend?
+                   sched-eff norm-id cur-min cur-gas
+                   #:category cat-sym
+                   #:min-cost m-cost
+                   #:gas-cost g-cost
+                   #:bo-goal-sym bo-sym
+                   #:bo-reserved-min (if (pair? escrowed) 0 (macro-brain-decision-reserved-min-floor decision))
+                   #:bo-reserved-gas (if (pair? escrowed) 0 (macro-brain-decision-reserved-gas-floor decision))))))))
 
 ;; =============================================================================
 ;; 3. Fast Standalone Macro Simulator & Chaos Monkey Engine
@@ -2443,11 +2574,15 @@
     (+ (* 6 (+ (hash-ref rb 'hatchery 0) (hash-ref rb 'lair 0) (hash-ref rb 'hive 0)))
        (* 15 (+ (hash-ref rb 'command-center 0) (hash-ref rb 'orbital-command 0) (hash-ref rb 'planetary-fortress 0)))
        (* 15 (hash-ref rb 'nexus 0))
-       (* 8 (hash-ref un 'overlord 0))
+       (* 8 (+ (hash-ref un 'overlord 0)
+               (hash-ref un 'overseer 0)
+               (for/sum ([t (in-list tasks)]
+                         #:when (eq? (macro-sim-task-id t) 'overseer))
+                 1)))
        (* 8 (+ (hash-ref rb 'supply-depot 0) (hash-ref rb 'supply-depot-lowered 0)))
        (* 8 (hash-ref rb 'pylon 0))))
   (define supply-cap (min 200 cap-raw))
-  ;; Supply used from alive units + in-progress unit trainings
+  ;; Supply used from alive units + in-progress unit trainings/morphs
   (define used-alive
     (for/sum ([(sym cnt) (in-hash un)])
       (define node (lookup-sc2-tech-node sym))
@@ -2455,7 +2590,11 @@
   (define used-pending
     (for/sum ([t (in-list tasks)])
       (define node (lookup-sc2-tech-node (macro-sim-task-id t)))
-      (if (and node (eq? (sc2-tech-node-kind node) 'train))
+      (if (and node
+               (or (eq? (sc2-tech-node-kind node) 'train)
+                   (and (eq? (sc2-tech-node-kind node) 'morph)
+                        (memq (sc2-tech-node-producer-slot node)
+                              '(roach zergling hydralisk corruptor)))))
           (sc2-tech-node-supply-cost node)
           0)))
   (define supply-used (+ used-alive used-pending))

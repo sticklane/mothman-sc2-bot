@@ -1643,6 +1643,23 @@
     [(Protoss) PROTOSS-BUILD-ORDER-TREE]
     [else      ZERG-BUILD-ORDER-TREE]))
 
+(define ZERG-BO-NODE-BY-ID
+  (for/hash ([n (in-list ZERG-BUILD-ORDER-TREE)])
+    (values (build-order-tree-node-id n) n)))
+(define TERRAN-BO-NODE-BY-ID
+  (for/hash ([n (in-list TERRAN-BUILD-ORDER-TREE)])
+    (values (build-order-tree-node-id n) n)))
+(define PROTOSS-BO-NODE-BY-ID
+  (for/hash ([n (in-list PROTOSS-BUILD-ORDER-TREE)])
+    (values (build-order-tree-node-id n) n)))
+
+(define (lookup-race-bo-node-by-id race-sym)
+  (case (normalize-race-sym race-sym)
+    [(Zerg)    ZERG-BO-NODE-BY-ID]
+    [(Terran)  TERRAN-BO-NODE-BY-ID]
+    [(Protoss) PROTOSS-BO-NODE-BY-ID]
+    [else      ZERG-BO-NODE-BY-ID]))
+
 (define (extract-clean-unit-syms raw-units)
   (cond
     [(not (list? raw-units)) '()]
@@ -1682,33 +1699,41 @@
           (cons norm-b acc)]
          [else acc]))]))
 
-;; Project any player ('self or 'opponent) onto the Race Build-Order Tree Space T_R
-;; and compute a normalized Dirichlet-multinomial / Bayesian posterior over branches.
-(define (project-player-onto-build-order-tree
+(struct bo-tree-frame-ctx
+  (perspective
+   norm-race
+   tree
+   node-by-id
+   gas
+   unit-syms
+   known-bldgs
+   gas-bldg-count
+   confirmed-node-ids
+   crippled-buildings
+   excluded-buildings
+   node-factors)
+  #:transparent)
+
+;; Precompute horizon-independent frame evidence over T_R so multi-horizon sweeps
+;; do not recompute unit/building extraction, implied prereqs, and node likelihoods 8-9x per tick.
+(define (prepare-bo-tree-frame-context
          perspective
          race
          raw-units
          raw-buildings
          [raw-frame 1800]
-         [raw-minerals 300.0]
+         [_raw-minerals 300.0]
          [raw-gas 150.0]
          [raw-gas-bldgs 1]
-         [raw-horizon-sec 60.0]
          [raw-upgrades-or-spells '()]
-         #:horizon-sec [kw-horizon-sec #f]
          #:observed-upgrades [kw-upgrades '()]
          #:crippled-buildings [crippled-buildings '()]
          #:excluded-buildings [excluded-buildings '()])
   (define norm-race (normalize-race-sym race))
   (define tree (lookup-race-build-order-tree norm-race))
-  (define node-by-id
-    (for/hash ([n (in-list tree)])
-      (values (build-order-tree-node-id n) n)))
+  (define node-by-id (lookup-race-bo-node-by-id norm-race))
   (define frame (safe-frame raw-frame))
-  (define minerals (max 0.0 (safe-real raw-minerals 300.0)))
   (define gas (max 0.0 (safe-real raw-gas 150.0)))
-  (define horizon-sec (max 5.0 (safe-real (or kw-horizon-sec raw-horizon-sec) 60.0)))
-  (define horizon-frames (exact-round (* 22.4 horizon-sec)))
 
   (define unit-syms (extract-clean-unit-syms raw-units))
   (define direct-bldg-syms (extract-clean-bldg-syms raw-buildings))
@@ -1729,7 +1754,6 @@
          (count (lambda (b) (memq b '(extractor refinery assimilator))) direct-bldg-syms)
          (if (ormap (lambda (b) (memq b '(extractor refinery assimilator))) known-bldgs) 1 0)))
 
-  ;; Identify confirmed nodes (whose step-buildings are present in known-bldgs or signature unit is seen)
   (define confirmed-node-ids
     (for/list ([n (in-list tree)]
                #:when (let* ([sbldgs (build-order-tree-node-step-buildings n)]
@@ -1746,77 +1770,119 @@
                         (or bldg-confirmed? unit-confirmed?)))
       (build-order-tree-node-id n)))
 
-  ;; Compute Dirichlet-multinomial / Bayesian unnormalized posterior weight for each node in T_R
+  (define node-factors
+    (for/vector ([n (in-list tree)])
+      (define nid (build-order-tree-node-id n))
+      (define parent-id (build-order-tree-node-parent-id n))
+      (define pbldgs (build-order-tree-node-path-buildings n))
+      (define sbldgs (build-order-tree-node-step-buildings n))
+      (define u-units (build-order-tree-node-unlocked-units n))
+      (define u-upgs (build-order-tree-node-unlocked-upgrades n))
+      (define prior-w (max 0.01 (safe-real (build-order-tree-node-prior-weight n) 0.10)))
+      (define tree-tier (max 0 (sub1 (length pbldgs))))
+
+      (define step-confirmed? (not (not (memq nid confirmed-node-ids))))
+      (define parent-confirmed?
+        (or (not parent-id)
+            (not (not (memq parent-id confirmed-node-ids)))))
+      (define frontier-confirmed?
+        (and step-confirmed?
+             (not (ormap (lambda (ch-id) (memq ch-id confirmed-node-ids))
+                         (build-order-tree-node-children-ids n)))))
+      (define path-match-count
+        (count (lambda (b) (memq b known-bldgs)) pbldgs))
+      (define path-ratio
+        (/ (exact->inexact path-match-count) (max 1.0 (exact->inexact (length pbldgs)))))
+
+      (define parent-node (and parent-id (hash-ref node-by-id parent-id #f)))
+      (define parent-units (if parent-node (build-order-tree-node-unlocked-units parent-node) '()))
+      (define node-specific-units
+        (let ([diff (filter (lambda (u) (not (memq u parent-units))) u-units)])
+          (if (null? diff) u-units diff)))
+      (define sig-unit-seen?
+        (not (not (ormap (lambda (su) (memq su unit-syms)) node-specific-units))))
+      (define matching-units-count
+        (count (lambda (u) (memq u unit-syms)) u-units))
+      (define matching-upgs-count
+        (count (lambda (u) (memq u upg-syms)) u-upgs))
+
+      (define crippled-or-excluded?
+        (ormap (lambda (b)
+                 (or (memq b crippled-buildings)
+                     (memq b excluded-buildings)))
+               sbldgs))
+
+      (define bldg-lr
+        (cond
+          [crippled-or-excluded? 0.02]
+          [step-confirmed?
+           (* 5.5
+              (if frontier-confirmed? 2.6 1.0)
+              (expt 1.85 (min 4 tree-tier))
+              (+ 0.5 path-ratio))]
+          [parent-confirmed?
+           (* 1.4 (+ 0.4 path-ratio))]
+          [else
+           (* 0.35 (+ 0.2 path-ratio))]))
+
+      (define unit-upg-lr
+        (* (if sig-unit-seen? 5.0 1.0)
+           (+ 1.0 (* 0.55 matching-units-count) (* 1.25 matching-upgs-count))))
+
+      (vector nid
+              step-confirmed?
+              parent-confirmed?
+              (* prior-w bldg-lr unit-upg-lr)
+              (max 0 (- (build-order-tree-node-min-frame n) frame))
+              (build-order-tree-node-step-gas-cost n))))
+
+  (bo-tree-frame-ctx perspective
+                     norm-race
+                     tree
+                     node-by-id
+                     gas
+                     unit-syms
+                     known-bldgs
+                     gas-bldg-count
+                     confirmed-node-ids
+                     crippled-buildings
+                     excluded-buildings
+                     node-factors))
+
+(define (evaluate-bo-tree-frame-context ctx raw-horizon-sec)
+  (match-define
+    (bo-tree-frame-ctx perspective
+                       norm-race
+                       tree
+                       node-by-id
+                       gas
+                       unit-syms
+                       known-bldgs
+                       gas-bldg-count
+                       confirmed-node-ids
+                       crippled-buildings
+                       excluded-buildings
+                       node-factors)
+    ctx)
+  (define horizon-sec (max 5.0 (safe-real raw-horizon-sec 60.0)))
+  (define horizon-frames (exact-round (* 22.4 horizon-sec)))
+
   (define raw-weights (make-hash))
-  (for ([n (in-list tree)])
-    (define nid (build-order-tree-node-id n))
-    (define parent-id (build-order-tree-node-parent-id n))
-    (define pbldgs (build-order-tree-node-path-buildings n))
-    (define sbldgs (build-order-tree-node-step-buildings n))
-    (define u-units (build-order-tree-node-unlocked-units n))
-    (define u-upgs (build-order-tree-node-unlocked-upgrades n))
-    (define prior-w (max 0.01 (safe-real (build-order-tree-node-prior-weight n) 0.10)))
-    (define tree-tier (max 0 (sub1 (length pbldgs))))
-
-    (define step-confirmed? (not (not (memq nid confirmed-node-ids))))
-    (define parent-confirmed?
-      (or (not parent-id)
-          (not (not (memq parent-id confirmed-node-ids)))))
-    (define frontier-confirmed?
-      (and step-confirmed?
-           (not (ormap (lambda (ch-id) (memq ch-id confirmed-node-ids))
-                       (build-order-tree-node-children-ids n)))))
-    (define path-match-count
-      (count (lambda (b) (memq b known-bldgs)) pbldgs))
-    (define path-ratio
-      (/ (exact->inexact path-match-count) (max 1.0 (exact->inexact (length pbldgs)))))
-
-    (define parent-node (and parent-id (hash-ref node-by-id parent-id #f)))
-    (define parent-units (if parent-node (build-order-tree-node-unlocked-units parent-node) '()))
-    (define node-specific-units
-      (let ([diff (filter (lambda (u) (not (memq u parent-units))) u-units)])
-        (if (null? diff) u-units diff)))
-    (define sig-unit-seen?
-      (not (not (ormap (lambda (su) (memq su unit-syms)) node-specific-units))))
-    (define matching-units-count
-      (count (lambda (u) (memq u unit-syms)) u-units))
-    (define matching-upgs-count
-      (count (lambda (u) (memq u upg-syms)) u-upgs))
-
-    (define crippled-or-excluded?
-      (ormap (lambda (b)
-               (or (memq b crippled-buildings)
-                   (memq b excluded-buildings)))
-             sbldgs))
-
-    ;; Likelihood factors
-    (define bldg-lr
-      (cond
-        [crippled-or-excluded? 0.02]
-        [step-confirmed?
-         (* 5.5
-            (if frontier-confirmed? 2.6 1.0)
-            (expt 1.85 (min 4 tree-tier))
-            (+ 0.5 path-ratio))]
-        [parent-confirmed?
-         (* 1.4 (+ 0.4 path-ratio))]
-        [else
-         (* 0.35 (+ 0.2 path-ratio))]))
-
-    (define unit-upg-lr
-      (* (if sig-unit-seen? 5.0 1.0)
-         (+ 1.0 (* 0.55 matching-units-count) (* 1.25 matching-upgs-count))))
-
+  (for ([nf (in-vector node-factors)])
+    (define nid (vector-ref nf 0))
+    (define step-confirmed? (vector-ref nf 1))
+    (define parent-confirmed? (vector-ref nf 2))
+    (define base-w (vector-ref nf 3))
+    (define frame-gap (vector-ref nf 4))
+    (define s-gas (vector-ref nf 5))
     (define timing-gas-lr
       (cond
         [step-confirmed? 1.0]
         [else
-         (define frame-gap (max 0 (- (build-order-tree-node-min-frame n) frame)))
          (define time-factor
            (if (> frame-gap (+ horizon-frames 450))
                (exp (/ (- (exact->inexact frame-gap)) 1200.0))
                1.0))
-         (define s-gas (build-order-tree-node-step-gas-cost n))
          (define gas-factor
            (cond
              [(and (>= s-gas 100) (>= gas 200.0) parent-confirmed?) 2.2]
@@ -1824,8 +1890,7 @@
              [(>= (+ gas (* horizon-sec 1.6 (max 1 gas-bldg-count))) s-gas) 1.15]
              [else 0.45]))
          (* time-factor gas-factor)]))
-
-    (hash-set! raw-weights nid (max 1e-6 (* prior-w bldg-lr unit-upg-lr timing-gas-lr))))
+    (hash-set! raw-weights nid (max 1e-6 (* base-w timing-gas-lr))))
 
   (define total-w
     (max 1e-6 (for/sum ([(_k v) (in-hash raw-weights)]) v)))
@@ -1980,6 +2045,32 @@
    predicted-primary-unit
    recommended-next-build-step))
 
+;; Project any player ('self or 'opponent) onto the Race Build-Order Tree Space T_R
+;; and compute a normalized Dirichlet-multinomial / Bayesian posterior over branches.
+(define (project-player-onto-build-order-tree
+         perspective
+         race
+         raw-units
+         raw-buildings
+         [raw-frame 1800]
+         [raw-minerals 300.0]
+         [raw-gas 150.0]
+         [raw-gas-bldgs 1]
+         [raw-horizon-sec 60.0]
+         [raw-upgrades-or-spells '()]
+         #:horizon-sec [kw-horizon-sec #f]
+         #:observed-upgrades [kw-upgrades '()]
+         #:crippled-buildings [crippled-buildings '()]
+         #:excluded-buildings [excluded-buildings '()])
+  (define ctx
+    (prepare-bo-tree-frame-context
+     perspective race raw-units raw-buildings
+     raw-frame raw-minerals raw-gas raw-gas-bldgs raw-upgrades-or-spells
+     #:observed-upgrades kw-upgrades
+     #:crippled-buildings crippled-buildings
+     #:excluded-buildings excluded-buildings))
+  (evaluate-bo-tree-frame-context ctx (or kw-horizon-sec raw-horizon-sec)))
+
 (define (detect-race-from-units-and-bldgs units bldgs fallback-race)
   (or (for/or ([e (in-list (append (safe-list units) (safe-list bldgs)))])
         (define sym (if (symbol? e) e (unit-type-sym e)))
@@ -2002,10 +2093,9 @@
           [else #f]))
       (normalize-race-sym fallback-race)))
 
-(define (project-self-build-order-tree raw-obs [raw-horizon-sec 60.0]
-                                       #:race [kw-race #f]
-                                       #:horizon-sec [kw-horizon-sec #f]
-                                       #:mstate [mstate #f])
+(define (prepare-self-bo-tree-context raw-obs
+                                      #:race [kw-race #f]
+                                      #:mstate [mstate #f])
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define eff-mstate (if (mirror-mind-state? raw-obs) raw-obs mstate))
   (define ally-units (hash-ref obs 'ally-units '()))
@@ -2023,14 +2113,21 @@
   (define gas-bldgs
     (max 1 (count (lambda (b) (memq b '(extractor refinery assimilator))) bldg-syms)))
   (define upgs (safe-list (hash-ref obs 'researched-upgrades '())))
-  (define h-sec (or kw-horizon-sec (if (real? raw-horizon-sec) raw-horizon-sec 60.0)))
-  (project-player-onto-build-order-tree
-   'self race ally-units ally-bldgs frame minerals gas gas-bldgs h-sec upgs))
+  (prepare-bo-tree-frame-context
+   'self race ally-units ally-bldgs frame minerals gas gas-bldgs upgs))
 
-(define (project-opponent-build-order-tree raw-obs [raw-horizon-sec 60.0]
-                                           #:enemy-race [kw-race #f]
-                                           #:horizon-sec [kw-horizon-sec #f]
-                                           #:mstate [mstate #f])
+(define (project-self-build-order-tree raw-obs [raw-horizon-sec 60.0]
+                                       #:race [kw-race #f]
+                                       #:horizon-sec [kw-horizon-sec #f]
+                                       #:mstate [mstate #f])
+  (define h-sec (or kw-horizon-sec (if (real? raw-horizon-sec) raw-horizon-sec 60.0)))
+  (evaluate-bo-tree-frame-context
+   (prepare-self-bo-tree-context raw-obs #:race kw-race #:mstate mstate)
+   h-sec))
+
+(define (prepare-opponent-bo-tree-context raw-obs
+                                          #:enemy-race [kw-race #f]
+                                          #:mstate [mstate #f])
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define eff-mstate (if (mirror-mind-state? raw-obs) raw-obs mstate))
   (define enemy-units (hash-ref obs 'enemy-units '()))
@@ -2090,11 +2187,19 @@
                [(mass-factory-mech-thor)                  '(factory-techlab armory)]
                [(bio-stim-marine-marauder-flood heavy-bio-stim-timing) '(barracks-techlab)]
                [else '()]))))
-  (define h-sec (or kw-horizon-sec (if (real? raw-horizon-sec) raw-horizon-sec 60.0)))
-  (project-player-onto-build-order-tree
-   'opponent enemy-race enemy-units enemy-bldgs frame rem-min rem-gas gas-bldgs h-sec upgs-and-spells
+  (prepare-bo-tree-frame-context
+   'opponent enemy-race enemy-units enemy-bldgs frame rem-min rem-gas gas-bldgs upgs-and-spells
    #:crippled-buildings crippled
    #:excluded-buildings excluded-bldgs))
+
+(define (project-opponent-build-order-tree raw-obs [raw-horizon-sec 60.0]
+                                           #:enemy-race [kw-race #f]
+                                           #:horizon-sec [kw-horizon-sec #f]
+                                           #:mstate [mstate #f])
+  (define h-sec (or kw-horizon-sec (if (real? raw-horizon-sec) raw-horizon-sec 60.0)))
+  (evaluate-bo-tree-frame-context
+   (prepare-opponent-bo-tree-context raw-obs #:enemy-race kw-race #:mstate mstate)
+   h-sec))
 
 ;; Bayesian Bluff Posterior P(bluff | E) with base-rate prior P_0(bluff) = 0.08
 (define (compute-bayesian-bluff-posterior
@@ -3389,7 +3494,8 @@
                           #:our-tech [our-tech ALL-RATIONAL-TECH]
                           #:our-minerals [raw-our-minerals 300]
                           #:our-gas [raw-our-gas 150]
-                          #:prev-node [given-prev-node #f])
+                          #:prev-node [given-prev-node #f]
+                          #:preprepared-opp-ctx [pre-opp-ctx #f])
   (define depth (max 0 (safe-int raw-depth 0)))
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define our-minerals (max 0 (safe-int raw-our-minerals 300)))
@@ -3422,10 +3528,12 @@
       [(= depth 2)  60.0]
       [else         105.0]))
   (define opp-bo-proj
-    (project-opponent-build-order-tree
-     (hash-set (hash-set obs 'enemy-race enemy-race)
-               'unaccounted-gas enemy-rem-gas)
-     bo-horizon-sec))
+    (if pre-opp-ctx
+        (evaluate-bo-tree-frame-context pre-opp-ctx bo-horizon-sec)
+        (project-opponent-build-order-tree
+         (hash-set (hash-set obs 'enemy-race enemy-race)
+                   'unaccounted-gas enemy-rem-gas)
+         bo-horizon-sec)))
   (define bo-tree-tech
     (let ([reach-bldgs (build-order-tree-projection-horizon-reachable-tech-buildings opp-bo-proj)])
       (define filtered
@@ -3601,7 +3709,8 @@
            (predict-at-depth mstate (sub1 depth) obs
                              #:our-tech our-tech
                              #:our-minerals our-minerals
-                             #:our-gas our-gas)))
+                             #:our-gas our-gas
+                             #:preprepared-opp-ctx pre-opp-ctx)))
      (define opp-belief-arch
        (unit-to-archetype (depth-node-our-response-unit prev-node)))
      (define raw-dk-enemy-unit
@@ -3634,14 +3743,17 @@
                                 #:max-depth [max-depth #f]
                                 #:our-tech [our-tech ALL-RATIONAL-TECH]
                                 #:our-minerals [raw-our-minerals 300]
-                                #:our-gas [raw-our-gas 150])
+                                #:our-gas [raw-our-gas 150]
+                                #:sync-observations? [sync-obs? #t]
+                                #:preprepared-opp-ctx [pre-opp-ctx #f])
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define our-minerals (max 0 (safe-int raw-our-minerals 300)))
   (define our-gas (max 0 (safe-int raw-our-gas 150)))
   ;; Ensure base-layer observations/implications & zero-sum exclusions are synchronized with `obs`
-  (when (or (hash-has-key? obs 'enemy-units)
-            (hash-has-key? obs 'enemy-buildings)
-            (hash-has-key? obs 'effects))
+  (when (and sync-obs?
+             (or (hash-has-key? obs 'enemy-units)
+                 (hash-has-key? obs 'enemy-buildings)
+                 (hash-has-key? obs 'effects)))
     (define frame (safe-frame (hash-ref obs 'frame 0)))
     (define e-units (safe-hash-list (hash-ref obs 'enemy-units '())))
     (define e-bldgs (safe-hash-list (hash-ref obs 'enemy-buildings '())))
@@ -3667,6 +3779,14 @@
        frame e-units e-bldgs tech-obs (mirror-mind-state-last-shadow-ledger mstate)))
     (set-mirror-mind-state-last-zero-sum-reading! mstate zs-reading))
 
+  (define shared-opp-ctx
+    (or pre-opp-ctx
+        (let-values ([(_ft _rmin enemy-rem-gas _ct _ex _bl)
+                      (compute-enemy-feasible-tech-and-budget mstate)])
+          (prepare-opponent-bo-tree-context
+           (hash-set (hash-set obs 'enemy-race (mirror-mind-state-enemy-race mstate))
+                     'unaccounted-gas enemy-rem-gas)))))
+
   (define top-d
     (if (and max-depth (finite-real? max-depth))
         (max (safe-int max-depth 5) (add1 (mirror-mind-state-inferred-opponent-depth mstate)))
@@ -3683,7 +3803,8 @@
                                         #:our-tech our-tech
                                         #:our-minerals our-minerals
                                         #:our-gas our-gas
-                                        #:prev-node prev)])
+                                        #:prev-node prev
+                                        #:preprepared-opp-ctx shared-opp-ctx)])
             (loop (add1 d) node (cons node acc))))))
   (set-mirror-mind-state-last-hierarchy! mstate nodes)
   nodes)
@@ -4120,7 +4241,10 @@
 ;; Predict multi-horizon snapshots across (15s 30s 45s 60s 75s 90s 105s 130s)
 (define (predict-multi-horizon-snapshots raw-obs
                                          [maybe-mstate #f]
-                                         [horizons-sec MIRROR-HORIZON-SNAPSHOTS-SEC])
+                                         [horizons-sec MIRROR-HORIZON-SNAPSHOTS-SEC]
+                                         #:precomputed-nodes [pre-nodes #f]
+                                         #:preprepared-self-ctx [pre-self-ctx #f]
+                                         #:preprepared-opp-ctx [pre-opp-ctx #f])
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define frame (safe-frame (hash-ref obs 'frame 2400)))
   (define minerals (max 0 (safe-int (hash-ref obs 'minerals 300) 300)))
@@ -4171,11 +4295,15 @@
                         'unaccounted-gas unacc-gas)
               'bluff-suspected? bluff?))
   (define nodes
-    (build-mirror-hierarchy mstate enriched-obs
-                            #:max-depth 4
-                            #:our-tech eff-our-tech
-                            #:our-minerals minerals
-                            #:our-gas gas))
+    (if (and (list? pre-nodes) (pair? pre-nodes))
+        pre-nodes
+        (build-mirror-hierarchy mstate enriched-obs
+                                #:max-depth 4
+                                #:our-tech eff-our-tech
+                                #:our-minerals minerals
+                                #:our-gas gas)))
+  (define opp-ctx (or pre-opp-ctx (prepare-opponent-bo-tree-context enriched-obs)))
+  (define self-ctx (or pre-self-ctx (prepare-self-bo-tree-context enriched-obs)))
   (define scout-freshness
     (if (and (null? enemy-units) (null? enemy-bldgs)) 0.55 0.88))
   (define h-list
@@ -4186,8 +4314,8 @@
   (for/list ([raw-h (in-list h-list)])
     (define h-sec (max 1.0 (safe-real raw-h 60.0)))
     (define h-frames (exact-round (* h-sec 22.4)))
-    (define opp-proj (project-opponent-build-order-tree enriched-obs h-sec))
-    (define self-proj (project-self-build-order-tree enriched-obs h-sec))
+    (define opp-proj (evaluate-bo-tree-frame-context opp-ctx h-sec))
+    (define self-proj (evaluate-bo-tree-frame-context self-ctx h-sec))
     (define post-hash (build-order-tree-projection-branch-posteriors opp-proj))
     (define max-post
       (apply max 0.25 (hash-values post-hash)))
@@ -4843,12 +4971,20 @@
   (define our-tech-syms (map unit-type-sym ally-bldgs))
   (define eff-tech (if (null? our-tech-syms) ALL-RATIONAL-TECH our-tech-syms))
   (define active-d (choose-optimal-mirror-depth mstate))
+  (define bo-obs
+    (hash-set (hash-set (hash-set sanitized-obs 'our-race (mirror-mind-state-our-race mstate))
+                        'enemy-race (mirror-mind-state-enemy-race mstate))
+              'unaccounted-gas (shadow-ledger-unaccounted-gas ledger)))
+  (define self-bo-ctx (prepare-self-bo-tree-context bo-obs))
+  (define opp-bo-ctx (prepare-opponent-bo-tree-context bo-obs))
   (define nodes
     (build-mirror-hierarchy mstate sanitized-obs
                             #:max-depth (max 5 active-d)
                             #:our-tech eff-tech
                             #:our-minerals minerals
-                            #:our-gas gas))
+                            #:our-gas gas
+                            #:sync-observations? #f
+                            #:preprepared-opp-ctx opp-bo-ctx))
   (define active-node
     (or (findf (lambda (n) (= (depth-node-depth n) active-d)) nodes)
         (last nodes)))
@@ -4873,14 +5009,13 @@
   (set-mirror-mind-state-tactical-y! mstate ty)
 
   ;; 5b. Project self & opponent onto Build-Order Tree T_R and compute Multi-Horizon Snapshot Curve
-  (define bo-obs
-    (hash-set (hash-set (hash-set sanitized-obs 'our-race (mirror-mind-state-our-race mstate))
-                        'enemy-race (mirror-mind-state-enemy-race mstate))
-              'unaccounted-gas (shadow-ledger-unaccounted-gas ledger)))
-  (define self-bo-proj (project-self-build-order-tree bo-obs 60.0))
-  (define opp-bo-proj (project-opponent-build-order-tree bo-obs 60.0))
+  (define self-bo-proj (evaluate-bo-tree-frame-context self-bo-ctx 60.0))
+  (define opp-bo-proj (evaluate-bo-tree-frame-context opp-bo-ctx 60.0))
   (define horizon-snapshots
-    (predict-multi-horizon-snapshots bo-obs mstate MIRROR-HORIZON-SNAPSHOTS-SEC))
+    (predict-multi-horizon-snapshots bo-obs mstate MIRROR-HORIZON-SNAPSHOTS-SEC
+                                     #:precomputed-nodes nodes
+                                     #:preprepared-self-ctx self-bo-ctx
+                                     #:preprepared-opp-ctx opp-bo-ctx))
 
   ;; 6. Enqueue timestamped forecasts for all depths 0..5 so we can compare
   ;;    which depth level best predicts this specific opponent!

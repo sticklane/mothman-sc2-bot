@@ -218,7 +218,19 @@
     camera-bookmark-jump
     control-group-steal
     control-group-set
+    control-group-append
+    control-group-append-steal
     control-group-recall
+    select-box
+    select-click
+    select-ctrl-type
+    deselect-ctrl-type
+    wall-off-natural
+    door-unit-hold
+    door-unit-open
+    build-nydus-worm
+    train-unit
+    harvest
     human-apm-discipline
     mirror-prediction
     mirror-macro-directive
@@ -242,6 +254,7 @@
     infestor-burrow-cast
     blind-skillshot-shimmer
     emergency-detector-response
+    team-chat
     chat
     log
     noop))

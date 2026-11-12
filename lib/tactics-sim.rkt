@@ -141,23 +141,73 @@
   (or (>= (abs (- cx1 cx2)) (- (+ hw1 hw2) 1e-6))
       (>= (abs (- cy1 cy2)) (- (+ hh1 hh2) 1e-6))))
 
-(define (footprint-buildable-at-height? cx cy hw hh w h bref href target-h [check-height? #t])
+(define (footprints-touch-gap cx1 cy1 hw1 hh1 cx2 cy2 hw2 hh2)
+  (max (- (abs (- cx1 cx2)) (+ hw1 hw2))
+       (- (abs (- cy1 cy2)) (+ hh1 hh2))))
+
+(define (footprints-share-edge? cx1 cy1 hw1 hh1 cx2 cy2 hw2 hh2)
+  (define dx (abs (- cx1 cx2)))
+  (define dy (abs (- cy1 cy2)))
+  (define sx (+ hw1 hw2))
+  (define sy (+ hh1 hh2))
+  (and (footprints-disjoint? cx1 cy1 hw1 hh1 cx2 cy2 hw2 hh2)
+       (or (and (<= (abs (- dx sx)) 0.05) (<= dy (- sy 0.9)))
+           (and (<= (abs (- dy sy)) 0.05) (<= dx (- sx 0.9))))))
+
+(define (extract-map-grid-accessors map-grids)
+  (cond
+    [(not (hash? map-grids))
+     (values #f 0 0 #f #f #f)]
+    [else
+     (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
+     (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
+     (define pref (or (hash-ref map-grids 'pathing-ref #f)
+                      (hash-ref map-grids 'pathing-pred #f)))
+     (define bref (or (hash-ref map-grids 'placement-ref #f)
+                      (hash-ref map-grids 'placement-pred #f)))
+     (define href (or (hash-ref map-grids 'height-ref #f)
+                      (hash-ref map-grids 'height-pred #f)))
+     (values (and (> w 0) (> h 0) (procedure? pref) (procedure? bref))
+             w h pref bref href)]))
+
+(define (footprint-buildable-at-height? cx cy hw hh w h bref href target-h
+                                        [check-height? #t]
+                                        [pref #f])
   (define x0 (exact-round (- cx hw)))
   (define x1 (exact-round (+ cx hw)))
   (define y0 (exact-round (- cy hh)))
   (define y1 (exact-round (+ cy hh)))
   (and (>= x0 0) (<= x1 w) (>= y0 0) (<= y1 h)
-       (for*/and ([ix (in-range x0 x1)]
-                  [iy (in-range y0 y1)])
-         (and (grid-cell-positive? (bref ix iy))
+       (let ([min-th +inf.0]
+             [max-th -inf.0]
+             [total-cells (* (- x1 x0) (- y1 y0))]
+             [pathable-cells 0])
+         (and (> total-cells 0)
+              (for*/and ([ix (in-range x0 x1)]
+                         [iy (in-range y0 y1)])
+                (when (and (procedure? pref) (grid-cell-positive? (pref ix iy)))
+                  (set! pathable-cells (add1 pathable-cells)))
+                (and (grid-cell-positive? (bref ix iy))
+                     (or (not check-height?)
+                         (not (procedure? href))
+                         (let ([th (grid-height-val href ix iy target-h)])
+                           (set! min-th (min min-th th))
+                           (set! max-th (max max-th th))
+                           (<= (abs (- th target-h)) 1.75)))))
+              (or (not (procedure? pref))
+                  (>= (* 2 pathable-cells) total-cells))
               (or (not check-height?)
                   (not (procedure? href))
-                  (<= (abs (- (grid-height-val href ix iy target-h) target-h)) 2.0))))))
+                  (> min-th max-th)
+                  (<= (- max-th min-th) 1.5))))))
 
-(define (make-local-4conn-bfs cx-f cy-f src-fx src-fy dst-fx dst-fy w h pref)
-  (define win-size 28)
-  (define win-x0 (max 0 (min (max 0 (- w win-size)) (- (exact-round cx-f) 14))))
-  (define win-y0 (max 0 (min (max 0 (- h win-size)) (- (exact-round cy-f) 14))))
+(define (make-local-4conn-bfs cx-f cy-f src-fx src-fy dst-fx dst-fy w h pref
+                              #:snap-src-pred [snap-src-pred #f]
+                              #:snap-dst-pred [snap-dst-pred #f])
+  (define win-size 44)
+  (define half-win (quotient win-size 2))
+  (define win-x0 (max 0 (min (max 0 (- w win-size)) (- (exact-round cx-f) half-win))))
+  (define win-y0 (max 0 (min (max 0 (- h win-size)) (- (exact-round cy-f) half-win))))
   (define win-w (max 1 (min win-size (- w win-x0))))
   (define win-h (max 1 (min win-size (- h win-y0))))
   (define n-cells (* win-w win-h))
@@ -167,27 +217,41 @@
     (when (grid-cell-positive? (pref (+ win-x0 lx) (+ win-y0 ly)))
       (bytes-set! base-pass (+ (* ly win-w) lx) 1)))
 
-  (define (snap-passable-local target-wx target-wy)
+  (define (snap-passable-local target-wx target-wy [cell-ok? #f])
     (define clx (max 0 (min (sub1 win-w) (- (exact-floor target-wx) win-x0))))
     (define cly (max 0 (min (sub1 win-h) (- (exact-floor target-wy) win-y0))))
-    (if (= (bytes-ref base-pass (+ (* cly win-w) clx)) 1)
+    (define (ok-local? lx ly)
+      (and (>= lx 0) (< lx win-w)
+           (>= ly 0) (< ly win-h)
+           (= (bytes-ref base-pass (+ (* ly win-w) lx)) 1)
+           (or (not (procedure? cell-ok?))
+               (cell-ok? (+ win-x0 lx) (+ win-y0 ly)))))
+    (if (ok-local? clx cly)
         (cons clx cly)
         (let loop ([r 1])
-          (if (> r 7)
+          (if (> r 8)
               #f
               (or (for*/first ([dy (in-range (- r) (add1 r))]
                                [dx (in-range (- r) (add1 r))]
-                               #:when (let ([nx (+ clx dx)]
-                                            [ny (+ cly dy)])
-                                        (and (>= nx 0) (< nx win-w)
-                                             (>= ny 0) (< ny win-h)
-                                             (= (bytes-ref base-pass (+ (* ny win-w) nx)) 1))))
+                               #:when (ok-local? (+ clx dx) (+ cly dy)))
                     (cons (+ clx dx) (+ cly dy)))
                   (loop (add1 r)))))))
 
-  (define src-pt (snap-passable-local src-fx src-fy))
-  (define dst-pt (snap-passable-local dst-fx dst-fy))
+  (define src-pt
+    (or (snap-passable-local src-fx src-fy snap-src-pred)
+        (and snap-src-pred (snap-passable-local src-fx src-fy #f))))
+  (define dst-pt
+    (or (snap-passable-local dst-fx dst-fy snap-dst-pred)
+        (and snap-dst-pred (snap-passable-local dst-fx dst-fy #f))))
   (define qbuf (make-vector n-cells 0))
+
+  (define (point-covered-by-rects? lx ly blocked-rects)
+    (define wx (+ win-x0 lx 0.5))
+    (define wy (+ win-y0 ly 0.5))
+    (ormap (lambda (r)
+             (match-define (list rcx rcy rhw rhh) r)
+             (not (footprints-disjoint? wx wy 0.5 0.5 rcx rcy rhw rhh)))
+           blocked-rects))
 
   (define (bfs-reachable? blocked-rects
                           [s-lx (and src-pt (car src-pt))]
@@ -241,37 +305,49 @@
                    (try-step! cx (sub1 cy))
                    (if reached? #t (loop (add1 head) tail1))]))]))))
 
-  (hash 'valid? (and src-pt dst-pt (bfs-reachable? '()) #t)
+  ;; True choke cut check: never treat covering `src-pt` or `dst-pt` with a building footprint
+  ;; as sealing the choke (`#5119039` Pylon AIE floating-Barracks bug).
+  (define (seals-cleanly? blocked-rects)
+    (and src-pt dst-pt
+         (not (point-covered-by-rects? (car src-pt) (cdr src-pt) blocked-rects))
+         (not (point-covered-by-rects? (car dst-pt) (cdr dst-pt) blocked-rects))
+         (not (bfs-reachable? blocked-rects))))
+
+  (hash 'valid? (and src-pt dst-pt (not (equal? src-pt dst-pt)) (bfs-reachable? '()) #t)
         'win-x0 win-x0
         'win-y0 win-y0
         'win-w win-w
         'win-h win-h
         'src-pt src-pt
         'dst-pt dst-pt
-        'bfs-reachable? bfs-reachable?))
+        'bfs-reachable? bfs-reachable?
+        'seals-cleanly? seals-cleanly?
+        'point-covered? point-covered-by-rects?))
 
 (define (wall-grid-fingerprint map-grids base-x base-y nat-x nat-y)
+  (define-values (ok? w h pref bref href) (extract-map-grid-accessors map-grids))
   (cond
     [(not (hash? map-grids)) #f]
     [else
-     (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
-     (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
-     (define pref (hash-ref map-grids 'pathing-ref #f))
-     (define bref (hash-ref map-grids 'placement-ref #f))
-     (define href (hash-ref map-grids 'height-ref #f))
+     (define eff-w (if (> w 0) w (exact-floor (exact->inexact (hash-ref map-grids 'width 256)))))
+     (define eff-h (if (> h 0) h (exact-floor (exact->inexact (hash-ref map-grids 'height 256)))))
      (define (sample fx fy)
-       (define ix (max 0 (min (sub1 (max 1 w)) (exact-floor (exact->inexact fx)))))
-       (define iy (max 0 (min (sub1 (max 1 h)) (exact-floor (exact->inexact fy)))))
-       (list (and (procedure? pref) (grid-cell-positive? (pref ix iy)))
-             (and (procedure? bref) (grid-cell-positive? (bref ix iy)))
+       (define ix (max 0 (min (sub1 (max 1 eff-w)) (exact-floor (exact->inexact fx)))))
+       (define iy (max 0 (min (sub1 (max 1 eff-h)) (exact-floor (exact->inexact fy)))))
+       (list (and ok? (grid-cell-positive? (pref ix iy)))
+             (and ok? (grid-cell-positive? (bref ix iy)))
              (round (grid-height-val href ix iy 0.0))))
      (define mx (+ base-x (* 0.35 (- nat-x base-x))))
      (define my (+ base-y (* 0.35 (- nat-y base-y))))
-     (list w h
+     (list eff-w eff-h
            (sample base-x base-y)
            (sample nat-x nat-y)
            (sample mx my)
-           (sample (+ mx 2.0) (- my 2.0)))]))
+           (sample (+ mx 2.0) (- my 2.0))
+           (sample (+ nat-x 8.0) nat-y)
+           (sample (- nat-x 8.0) (- nat-y 4.0))
+           (sample nat-x (+ nat-y 8.0))
+           (sample (+ base-x 15.0) (- base-y 8.0)))]))
 
 (define (find-main-ramp-geometry base-x base-y nat-x nat-y [map-grids #f])
   (define bx-f (exact->inexact base-x))
@@ -285,15 +361,9 @@
   (define uy (/ dy dist))
   (define fallback-rx (+ bx-f (* 0.32 dx)))
   (define fallback-ry (+ by-f (* 0.32 dy)))
+  (define-values (grids-ok? w h pref bref href) (extract-map-grid-accessors map-grids))
   (cond
-    [(and (hash? map-grids)
-          (procedure? (hash-ref map-grids 'pathing-ref #f))
-          (procedure? (hash-ref map-grids 'placement-ref #f)))
-     (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
-     (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
-     (define pref (hash-ref map-grids 'pathing-ref))
-     (define bref (hash-ref map-grids 'placement-ref))
-     (define href (hash-ref map-grids 'height-ref #f))
+    [grids-ok?
      (define b-ix (max 0 (min (sub1 (max 1 w)) (exact-floor bx-f))))
      (define b-iy (max 0 (min (sub1 (max 1 h)) (exact-floor by-f))))
      (define n-ix (max 0 (min (sub1 (max 1 w)) (exact-floor nx-f))))
@@ -304,35 +374,121 @@
      (define h-hi   (max h-main h-nat))
      (define mid-x  (+ bx-f (* 0.35 dx)))
      (define mid-y  (+ by-f (* 0.35 dy)))
-     (define sx0 (max 1 (- (exact-round mid-x) 22)))
-     (define sx1 (min (- w 1) (+ (exact-round mid-x) 22)))
-     (define sy0 (max 1 (- (exact-round mid-y) 22)))
-     (define sy1 (min (- h 1) (+ (exact-round mid-y) 22)))
+     ;; Search +/-26 tiles around Main TownHall so sideways/southern ramps (e.g. Pylon AIE
+     ;; Main (72,171) -> ramp (89,162)) are always inside the window regardless of `nat` angle.
+     (define sx0 (max 1 (min (- (exact-round bx-f) 26) (- (exact-round mid-x) 20))))
+     (define sx1 (min (- w 1) (max (+ (exact-round bx-f) 26) (+ (exact-round mid-x) 20))))
+     (define sy0 (max 1 (min (- (exact-round by-f) 26) (- (exact-round mid-y) 20))))
+     (define sy1 (min (- h 1) (max (+ (exact-round by-f) 26) (+ (exact-round mid-y) 20))))
+     (define sw (max 1 (- sx1 sx0)))
+     (define sh (max 1 (- sy1 sy0)))
+     (define sn (* sw sh))
+     (define b-dist (make-vector sn -1))
+     (define hg-plat (make-bytes sn 0))
+     (define qbuf (make-vector sn 0))
+
+     ;; Seed 4-connected ground BFS from Main TownHall to reject disconnected cliffs and low-ground plates
+     (define seed-pt
+       (let ([slx (max 0 (min (sub1 sw) (- b-ix sx0)))]
+             [sly (max 0 (min (sub1 sh) (- b-iy sy0)))])
+         (if (grid-cell-positive? (pref (+ sx0 slx) (+ sy0 sly)))
+             (cons slx sly)
+             (for*/first ([r (in-range 1 5)]
+                          [dy-i (in-range (- r) (add1 r))]
+                          [dx-i (in-range (- r) (add1 r))]
+                          #:do [(define lx (+ slx dx-i))
+                                (define ly (+ sly dy-i))]
+                          #:when (and (>= lx 0) (< lx sw) (>= ly 0) (< ly sh)
+                                      (grid-cell-positive? (pref (+ sx0 lx) (+ sy0 ly)))))
+               (cons lx ly)))))
+
+     (when seed-pt
+       (define sidx (+ (* (cdr seed-pt) sw) (car seed-pt)))
+       (vector-set! b-dist sidx 0)
+       (bytes-set! hg-plat sidx 1)
+       (vector-set! qbuf 0 sidx)
+       (let loop ([head 0] [tail 1])
+         (when (< head tail)
+           (define cur (vector-ref qbuf head))
+           (define d0 (vector-ref b-dist cur))
+           (define cy (quotient cur sw))
+           (define cx (remainder cur sw))
+           (define cur-hg? (= (bytes-ref hg-plat cur) 1))
+           (define tail1 tail)
+           (when (< d0 38)
+             (define-syntax-rule (step! nx ny)
+               (when (and (>= nx 0) (< nx sw) (>= ny 0) (< ny sh))
+                 (define nidx (+ (* ny sw) nx))
+                 (define gx (+ sx0 nx))
+                 (define gy (+ sy0 ny))
+                 (when (and (= (vector-ref b-dist nidx) -1)
+                            (grid-cell-positive? (pref gx gy)))
+                   (vector-set! b-dist nidx (add1 d0))
+                   (when (and cur-hg?
+                              (grid-cell-positive? (bref gx gy))
+                              (or (not (procedure? href))
+                                  (<= (- h-hi h-lo) 2.0)
+                                  (<= (abs (- (grid-height-val href gx gy h-main) h-main)) 1.75)))
+                     (bytes-set! hg-plat nidx 1))
+                   (vector-set! qbuf tail1 nidx)
+                   (set! tail1 (add1 tail1)))))
+             (step! (add1 cx) cy)
+             (step! (sub1 cx) cy)
+             (step! cx (add1 cy))
+             (step! cx (sub1 cy)))
+           (loop (add1 head) tail1))))
+
+     (define (borders-hg-plateau? gx gy)
+       (for*/or ([dy-i (in-range -2 3)]
+                 [dx-i (in-range -2 3)])
+         (define lx (- (+ gx dx-i) sx0))
+         (define ly (- (+ gy dy-i) sy0))
+         (and (>= lx 0) (< lx sw) (>= ly 0) (< ly sh)
+              (= (bytes-ref hg-plat (+ (* ly sw) lx)) 1))))
+
+     (define (reachable-from-main? gx gy)
+       (define lx (- gx sx0))
+       (define ly (- gy sy0))
+       (and (>= lx 0) (< lx sw) (>= ly 0) (< ly sh)
+            (>= (vector-ref b-dist (+ (* ly sw) lx)) 0)))
+
      (define strict-ramp-candidates
        (if (> (- h-hi h-lo) 1.0)
            (for*/list ([iy (in-range sy0 sy1)]
                        [ix (in-range sx0 sx1)]
                        #:when (and (grid-cell-positive? (pref ix iy))
                                    (not (grid-cell-positive? (bref ix iy)))
+                                   (or (not seed-pt) (reachable-from-main? ix iy))
                                    (let ([th (grid-height-val href ix iy h-lo)])
                                      (and (> th (+ h-lo 0.25))
                                           (< th (- h-hi 0.25))))))
              (cons ix iy))
            '()))
+     (define hg-bordered-strict
+       (filter (lambda (pt) (borders-hg-plateau? (car pt) (cdr pt))) strict-ramp-candidates))
      (define raw-ramp-candidates
-       (if (pair? strict-ramp-candidates)
-           strict-ramp-candidates
-           (for*/list ([iy (in-range sy0 sy1)]
-                       [ix (in-range sx0 sx1)]
-                       #:when (and (grid-cell-positive? (pref ix iy))
-                                   (not (grid-cell-positive? (bref ix iy)))
-                                   (<= (wall-dist2d (+ ix 0.5) (+ iy 0.5) mid-x mid-y) 14.0)))
-             (cons ix iy))))
-     ;; Focus on the ramp cluster nearest the base->natural 0.35 corridor point
+       (cond
+         [(pair? hg-bordered-strict) hg-bordered-strict]
+         [(pair? strict-ramp-candidates) strict-ramp-candidates]
+         [else
+          (for*/list ([iy (in-range sy0 sy1)]
+                      [ix (in-range sx0 sx1)]
+                      #:when (and (grid-cell-positive? (pref ix iy))
+                                  (not (grid-cell-positive? (bref ix iy)))
+                                  (or (not seed-pt) (borders-hg-plateau? ix iy))
+                                  (<= (wall-dist2d (+ ix 0.5) (+ iy 0.5) bx-f by-f) 24.0)))
+            (cons ix iy))]))
+     ;; Focus on the ramp cluster exiting the Main plateau along the shortest corridor toward Natural
      (define nearest-ramp-seed
        (and (pair? raw-ramp-candidates)
             (argmin (lambda (pt)
-                      (wall-dist2d (+ (car pt) 0.5) (+ (cdr pt) 0.5) mid-x mid-y))
+                      (define lx (- (car pt) sx0))
+                      (define ly (- (cdr pt) sy0))
+                      (define bd (if (and (>= lx 0) (< lx sw) (>= ly 0) (< ly sh))
+                                     (max 0 (vector-ref b-dist (+ (* ly sw) lx)))
+                                     30))
+                      (+ (* 0.6 bd)
+                         (* 0.4 (wall-dist2d (+ (car pt) 0.5) (+ (cdr pt) 0.5) mid-x mid-y))))
                     raw-ramp-candidates)))
      (define ramp-tiles
        (if nearest-ramp-seed
@@ -348,8 +504,10 @@
                        [ix (in-range sx0 sx1)]
                        #:when (and (grid-cell-positive? (bref ix iy))
                                    (grid-cell-positive? (pref ix iy))
+                                   (or (not seed-pt)
+                                       (= (bytes-ref hg-plat (+ (* (- iy sy0) sw) (- ix sx0))) 1))
                                    (or (not (procedure? href))
-                                       (<= (abs (- (grid-height-val href ix iy h-main) h-main)) 2.0))
+                                       (<= (abs (- (grid-height-val href ix iy h-main) h-main)) 1.75))
                                    (ormap (lambda (rt)
                                             (and (<= (abs (- ix (car rt))) 2)
                                                  (<= (abs (- iy (cdr rt))) 2)))
@@ -369,10 +527,61 @@
         (define vmag (sqrt (+ (* vdx vdx) (* vdy vdy))))
         (define rdx (if (>= vmag 0.2) (/ vdx vmag) ux))
         (define rdy (if (>= vmag 0.2) (/ vdy vmag) uy))
+
+        ;; Select an interior high-ground anchor >= 7.5 tiles behind ramp so candidate wall footprints
+        ;; never step onto `src-pt`, and a low-ground exit >= 5.5 tiles past the ramp.
+        (define hg-src
+          (or (and (>= (wall-dist2d bx-f by-f rx ry) 7.5)
+                   (<= (wall-dist2d bx-f by-f rx ry) 18.0)
+                   (cons (+ b-ix 0.5) (+ b-iy 0.5)))
+              (let ([best-hg #f]
+                    [best-hg-sc -1e9])
+                (for* ([ly (in-range sh)]
+                       [lx (in-range sw)]
+                       #:when (= (bytes-ref hg-plat (+ (* ly sw) lx)) 1))
+                  (define wx (+ sx0 lx 0.5))
+                  (define wy (+ sy0 ly 0.5))
+                  (define dr (wall-dist2d wx wy rx ry))
+                  (when (and (>= dr 7.5) (<= dr 14.5))
+                    (define sc (- 50.0 (abs (- dr 9.5)) (* 0.25 (wall-dist2d wx wy bx-f by-f))))
+                    (when (> sc best-hg-sc)
+                      (set! best-hg-sc sc)
+                      (set! best-hg (cons wx wy)))))
+                best-hg)
+              (cons (- rx (* 9.0 rdx)) (- ry (* 9.0 rdy)))))
+
+        (define lg-dst
+          (let ([best-lg #f]
+                [best-lg-sc -1e9])
+            (for* ([ly (in-range sh)]
+                   [lx (in-range sw)])
+              (define idx (+ (* ly sw) lx))
+              (define gx (+ sx0 lx))
+              (define gy (+ sy0 ly))
+              (when (and (>= (vector-ref b-dist idx) 0)
+                         (= (bytes-ref hg-plat idx) 0)
+                         (grid-cell-positive? (pref gx gy))
+                         (or (not (procedure? href))
+                             (<= (- h-hi h-lo) 2.0)
+                             (<= (abs (- (grid-height-val href gx gy h-nat) h-nat)) 2.0)))
+                (define wx (+ gx 0.5))
+                (define wy (+ gy 0.5))
+                (define dr (wall-dist2d wx wy rx ry))
+                (define proj (+ (* (- wx rx) rdx) (* (- wy ry) rdy)))
+                (when (and (>= dr 5.5) (<= dr 13.5) (>= proj 2.5))
+                  (define sc (+ (if (grid-cell-positive? (bref gx gy)) 20.0 0.0)
+                                (- 40.0 (abs (- dr 7.5)))))
+                  (when (> sc best-lg-sc)
+                    (set! best-lg-sc sc)
+                    (set! best-lg (cons wx wy))))))
+            (or best-lg (cons (+ rx (* 7.5 rdx)) (+ ry (* 7.5 rdy))))))
+
         (hash 'ramp-x rx
               'ramp-y ry
               'ramp-dx rdx
               'ramp-dy rdy
+              'hg-src hg-src
+              'lg-dst lg-dst
               'top-tiles top-tiles
               'ramp-tiles ramp-tiles
               'h-main h-main
@@ -454,9 +663,10 @@
   (cond
     [(hash-ref TERRAN-RAMP-WALL-CACHE cache-key #f) => values]
     [else
+     (define-values (grids-ok? w h pref bref href) (extract-map-grid-accessors map-grids))
      (define result
        (cond
-         [(not (hash? map-grids))
+         [(not grids-ok?)
           (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)]
          [else
           (define rgeom (find-main-ramp-geometry base-x base-y nat-x nat-y map-grids))
@@ -464,34 +674,48 @@
             [(not (hash-ref rgeom 'grid-solved? #f))
              (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)]
             [else
-             (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
-             (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
-             (define pref (hash-ref map-grids 'pathing-ref))
-             (define bref (hash-ref map-grids 'placement-ref))
-             (define href (hash-ref map-grids 'height-ref #f))
              (define rx (hash-ref rgeom 'ramp-x))
              (define ry (hash-ref rgeom 'ramp-y))
              (define rdx (hash-ref rgeom 'ramp-dx))
              (define rdy (hash-ref rgeom 'ramp-dy))
              (define h-main (hash-ref rgeom 'h-main))
+             (define h-nat (hash-ref rgeom 'h-nat))
              (define top-tiles (hash-ref rgeom 'top-tiles '()))
-             ;; High-ground source toward `(floor base-x, floor base-y)` and low-ground exit toward `(nat-x, nat-y)`
-             (define src-fx
-               (if (<= (wall-dist2d base-x base-y rx ry) 12.5)
-                   (exact->inexact (floor base-x))
-                   (- rx (* 7.5 rdx))))
-             (define src-fy
-               (if (<= (wall-dist2d base-x base-y rx ry) 12.5)
-                   (exact->inexact (floor base-y))
-                   (- ry (* 7.5 rdy))))
-             (define dst-fx (+ rx (* 6.5 rdx)))
-             (define dst-fy (+ ry (* 6.5 rdy)))
-             (define bfs-ctx (make-local-4conn-bfs rx ry src-fx src-fy dst-fx dst-fy w h pref))
+             (define ramp-tiles (hash-ref rgeom 'ramp-tiles '()))
+             (define ramp-tile-set (for/set ([rt (in-list ramp-tiles)]) rt))
+             (define hg-src (hash-ref rgeom 'hg-src (cons (- rx (* 9.0 rdx)) (- ry (* 9.0 rdy)))))
+             (define lg-dst (hash-ref rgeom 'lg-dst (cons (+ rx (* 7.5 rdx)) (+ ry (* 7.5 rdy)))))
+             (define (hg-cell-ok? ix iy)
+               (and (grid-cell-positive? (bref ix iy))
+                    (not (set-member? ramp-tile-set (cons ix iy)))
+                    (or (not (procedure? href))
+                        (<= (abs (- (grid-height-val href ix iy h-main) h-main)) 1.75))))
+             (define (lg-cell-ok? ix iy)
+               (and (not (set-member? ramp-tile-set (cons ix iy)))
+                    (or (not (procedure? href))
+                        (<= (abs (- h-main h-nat)) 2.0)
+                        (<= (abs (- (grid-height-val href ix iy h-nat) h-nat)) 2.0))))
+             (define bfs-ctx
+               (make-local-4conn-bfs rx ry
+                                     (car hg-src) (cdr hg-src)
+                                     (car lg-dst) (cdr lg-dst)
+                                     w h pref
+                                     #:snap-src-pred hg-cell-ok?
+                                     #:snap-dst-pred lg-cell-ok?))
              (cond
                [(not (hash-ref bfs-ctx 'valid? #f))
                 (solve-terran-ramp-wall-analytical base-x base-y nat-x nat-y)]
                [else
-                (define bfs-reach? (hash-ref bfs-ctx 'bfs-reachable?))
+                (define seals-cleanly? (hash-ref bfs-ctx 'seals-cleanly?))
+                (define (strict-hg-footprint? cx cy hw hh)
+                  (and (footprint-buildable-at-height? cx cy hw hh w h bref href h-main #t pref)
+                       (let ([x0 (exact-round (- cx hw))]
+                             [x1 (exact-round (+ cx hw))]
+                             [y0 (exact-round (- cy hh))]
+                             [y1 (exact-round (+ cy hh))])
+                         (for*/and ([ix (in-range x0 x1)]
+                                    [iy (in-range y0 y1)])
+                           (not (set-member? ramp-tile-set (cons ix iy)))))))
                 (define (near-top-tile? cx cy max-d)
                   (ormap (lambda (pt)
                            (<= (wall-dist2d cx cy (+ (car pt) 0.5) (+ (cdr pt) 0.5)) max-d))
@@ -501,32 +725,33 @@
                 (define (tangent-proj cx cy)
                   (+ (* (- cx rx) tang-x) (* (- cy ry) tang-y)))
 
-                ;; Candidate 3x3 Barracks centers on high ground near top-tiles
+                ;; Candidate 3x3 Barracks centers strictly on high-ground `placement-grid = #t` tiles
                 (define rax-cands
-                  (for*/list ([dy-i (in-range -6 7)]
-                              [dx-i (in-range -6 7)]
+                  (for*/list ([dy-i (in-range -7 8)]
+                              [dx-i (in-range -7 8)]
                               #:do [(define bx (+ (floor rx) dx-i 0.5))
-                                    (define by (+ (floor ry) dy-i 0.5))]
-                              #:when (and (near-top-tile? bx by 3.2)
+                                    (define by (+ (floor ry) dy-i 0.5))
+                                    (define ax (+ bx SC2-TERRAN-ADDON-OFFSET-X))
+                                    (define ay (+ by SC2-TERRAN-ADDON-OFFSET-Y))
+                                    (define addon-hg?
+                                      (and (footprints-disjoint? ax ay 1.0 1.0 base-x base-y 2.5 2.5)
+                                           (strict-hg-footprint? ax ay 1.0 1.0)))]
+                              #:when (and (or (near-top-tile? bx by 3.6)
+                                              (and addon-hg? (near-top-tile? ax ay 2.6)))
                                           ;; Keep main TownHall 5x5 pad clear
                                           (footprints-disjoint? bx by 1.5 1.5 base-x base-y 2.5 2.5)
-                                          (footprint-buildable-at-height? bx by 1.5 1.5 w h bref href h-main #t)))
-                    (define ax (+ bx SC2-TERRAN-ADDON-OFFSET-X))
-                    (define ay (+ by SC2-TERRAN-ADDON-OFFSET-Y))
-                    (define addon-hg?
-                      (and (footprints-disjoint? ax ay 1.0 1.0 base-x base-y 2.5 2.5)
-                           (footprint-buildable-at-height? ax ay 1.0 1.0 w h bref href h-main #t)))
+                                          (strict-hg-footprint? bx by 1.5 1.5)))
                     (list bx by ax ay addon-hg? (tangent-proj bx by))))
 
-                ;; Candidate 2x2 Depot centers on high ground near top-tiles
+                ;; Candidate 2x2 Depot centers strictly on high-ground `placement-grid = #t` tiles
                 (define depot-cands
-                  (for*/list ([dy-i (in-range -6 7)]
-                              [dx-i (in-range -6 7)]
+                  (for*/list ([dy-i (in-range -7 8)]
+                              [dx-i (in-range -7 8)]
                               #:do [(define dx0 (exact->inexact (+ (exact-round rx) dx-i)))
                                     (define dy0 (exact->inexact (+ (exact-round ry) dy-i)))]
-                              #:when (and (near-top-tile? dx0 dy0 3.2)
+                              #:when (and (near-top-tile? dx0 dy0 3.6)
                                           (footprints-disjoint? dx0 dy0 1.0 1.0 base-x base-y 2.5 2.5)
-                                          (footprint-buildable-at-height? dx0 dy0 1.0 1.0 w h bref href h-main #t)))
+                                          (strict-hg-footprint? dx0 dy0 1.0 1.0)))
                     (list dx0 dy0 (tangent-proj dx0 dy0))))
 
                 (define best-score -1e9)
@@ -536,50 +761,77 @@
                   (define left-depots
                     (filter (lambda (dc)
                               (match-define (list d1x d1y d1-proj) dc)
-                              (and (< d1-proj (- r-proj 0.3))
-                                   (<= (wall-dist2d d1x d1y bx by) 5.5)
-                                   (footprints-disjoint? d1x d1y 1.0 1.0 bx by 1.5 1.5)
-                                   (footprints-disjoint? d1x d1y 1.0 1.0 ax ay 1.0 1.0)))
+                              (and (< d1-proj (- r-proj 0.25))
+                                   (<= (wall-dist2d d1x d1y bx by) 5.6)
+                                   (footprints-disjoint? d1x d1y 1.0 1.0 bx by 1.5 1.5)))
                             depot-cands))
                   (define right-depots
                     (filter (lambda (dc)
                               (match-define (list d2x d2y d2-proj) dc)
-                              (and (> d2-proj (+ r-proj 0.3))
-                                   (<= (wall-dist2d d2x d2y bx by) 5.5)
-                                   (footprints-disjoint? d2x d2y 1.0 1.0 bx by 1.5 1.5)
-                                   (footprints-disjoint? d2x d2y 1.0 1.0 ax ay 1.0 1.0)))
+                              (and (> d2-proj (+ r-proj 0.25))
+                                   (<= (wall-dist2d d2x d2y bx by) 5.6)
+                                   (footprints-disjoint? d2x d2y 1.0 1.0 bx by 1.5 1.5)))
                             depot-cands))
                   (for* ([d1 (in-list left-depots)]
                          [d2 (in-list right-depots)])
                     (match-define (list d1x d1y _) d1)
                     (match-define (list d2x d2y _) d2)
                     (when (footprints-disjoint? d1x d1y 1.0 1.0 d2x d2y 1.0 1.0)
+                      (define addon-clear?
+                        (and addon-hg?
+                             (footprints-disjoint? d1x d1y 1.0 1.0 ax ay 1.0 1.0)
+                             (footprints-disjoint? d2x d2y 1.0 1.0 ax ay 1.0 1.0)))
+                      (define d1-touches-rax?
+                        (<= (footprints-touch-gap d1x d1y 1.0 1.0 bx by 1.5 1.5) 0.05))
+                      (define d2-touches-rax?
+                        (<= (footprints-touch-gap d2x d2y 1.0 1.0 bx by 1.5 1.5) 0.05))
+                      (define d1-touches-addon?
+                        (and addon-clear?
+                             (<= (footprints-touch-gap d1x d1y 1.0 1.0 ax ay 1.0 1.0) 0.05)))
+                      (define d2-touches-addon?
+                        (and addon-clear?
+                             (<= (footprints-touch-gap d2x d2y 1.0 1.0 ax ay 1.0 1.0) 0.05)))
                       (define bare-rects
                         (list (list d1x d1y 1.0 1.0)
                               (list bx by 1.5 1.5)
                               (list d2x d2y 1.0 1.0)))
-                      (define seals-bare? (not (bfs-reach? bare-rects)))
+                      ;; Edge/corner-flush bare wall: Depot1 + Barracks + Depot2 touch with zero gap
+                      ;; and seal the ramp immediately without waiting for an add-on (`#5119039` Pylon AIE).
+                      (define seals-bare?
+                        (and d1-touches-rax?
+                             d2-touches-rax?
+                             (seals-cleanly? bare-rects)))
                       (define seals-with-addon?
                         (and (not seals-bare?)
-                             addon-hg?
+                             addon-clear?
                              (>= rdx 0.0)
-                             (not (bfs-reach? (cons (list ax ay 1.0 1.0) bare-rects)))))
+                             (or d1-touches-rax? d1-touches-addon?)
+                             (or d2-touches-rax? d2-touches-addon?)
+                             (seals-cleanly? (cons (list ax ay 1.0 1.0) bare-rects))))
                       (when (or seals-bare? seals-with-addon?)
+                        (define edge-bonus
+                          (+ (if (footprints-share-edge? d1x d1y 1.0 1.0 bx by 1.5 1.5) 60.0 0.0)
+                             (if (footprints-share-edge? d2x d2y 1.0 1.0 bx by 1.5 1.5) 60.0 0.0)))
                         (define dist-pen
                           (+ (wall-dist2d bx by rx ry)
                              (* 0.65 (wall-dist2d d1x d1y rx ry))
                              (* 0.65 (wall-dist2d d2x d2y rx ry))))
+                        (define tier-bonus
+                          (cond
+                            [(and seals-bare? addon-clear?) 2000.0]
+                            [seals-bare?                    1200.0]
+                            [else                            400.0]))
                         (define sc
-                          (+ (if addon-hg? 1000.0 0.0)
-                             (if seals-bare? 500.0 0.0)
+                          (+ tier-bonus
+                             edge-bonus
                              (- (* 10.0 dist-pen))))
                         (when (> sc best-score)
                           (set! best-score sc)
-                          (set! best-sol (list d1x d1y d2x d2y bx by ax ay addon-hg? seals-with-addon?)))))))
+                          (set! best-sol (list d1x d1y d2x d2y bx by ax ay addon-clear? seals-with-addon?)))))))
 
                 (cond
                   [best-sol
-                   (match-define (list d1x d1y d2x d2y bx by ax ay _addon-hg? seals-with-addon?) best-sol)
+                   (match-define (list d1x d1y d2x d2y bx by ax ay addon-clear? seals-with-addon?) best-sol)
                    (define east-facing? (or (>= rdx 0.0) seals-with-addon?))
                    (define dy-tot (exact->inexact (- nat-y base-y)))
                    (define prod-x (snap-3x3-coord (if east-facing? (- base-x 7.5) (+ base-x 4.5))))
@@ -588,6 +840,7 @@
                                           'east-facing-ramp-addon-walls
                                           'west-facing-ramp-addon-inside)
                          'east-facing-ramp? east-facing?
+                         'addon-clear? addon-clear?
                          'ramp-x rx
                          'ramp-y ry
                          'ramp-dx rdx
@@ -605,7 +858,50 @@
 
 (define PROTOSS-MATCHUP-WALL-CACHE (make-hash))
 
-(define (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)
+;; Natural exit direction prior:
+;; Primarily points away from Main `(nx - mx, ny - my)` so vertical-mirror / pocket-natural maps
+;; (e.g. `Torches AIE`: Main `(124,159)`, Natural `(95.5,157.5)` West, Enemy `(124,48)` South)
+;; NEVER project back through the main cliff or sealed `UnbuildableBricksDestructible` pocket!
+;; Lightly blends enemy + map-center direction ONLY when `dot(natural - main, enemy - natural) >= -0.25`,
+;; after clamping out any component pointing backward toward Main.
+(define (compute-natural-exit-direction bx-f by-f nx-f ny-f ex-f ey-f [map-w 200.0] [map-h 200.0])
+  (define mdx (- nx-f bx-f))
+  (define mdy (- ny-f by-f))
+  (define mdist (sqrt (+ (* mdx mdx) (* mdy mdy))))
+  (define edx (- ex-f nx-f))
+  (define edy (- ey-f ny-f))
+  (define edist (max 1.0 (sqrt (+ (* edx edx) (* edy edy)))))
+  (define eux (/ edx edist))
+  (define euy (/ edy edist))
+  (cond
+    [(< mdist 1.0)
+     (values eux euy)]
+    [else
+     (define mux (/ mdx mdist))
+     (define muy (/ mdy mdist))
+     (define dot-me (+ (* mux eux) (* muy euy)))
+     (cond
+       [(< dot-me -0.25)
+        (values mux muy)]
+       [else
+        (define mcx (* 0.5 (exact->inexact map-w)))
+        (define mcy (* 0.5 (exact->inexact map-h)))
+        (define cdx (- mcx nx-f))
+        (define cdy (- mcy ny-f))
+        (define cdist (max 1.0 (sqrt (+ (* cdx cdx) (* cdy cdy)))))
+        (define h-raw-x (+ (* 0.75 eux) (* 0.25 (/ cdx cdist))))
+        (define h-raw-y (+ (* 0.75 euy) (* 0.25 (/ cdy cdist))))
+        (define h-back (min 0.0 (+ (* h-raw-x mux) (* h-raw-y muy))))
+        (define hx (- h-raw-x (* h-back mux)))
+        (define hy (- h-raw-y (* h-back muy)))
+        (define hmag (sqrt (+ (* hx hx) (* hy hy))))
+        (define rx (+ (* 0.72 mux) (if (> hmag 1e-6) (* 0.28 (/ hx hmag)) 0.0)))
+        (define ry (+ (* 0.72 muy) (if (> hmag 1e-6) (* 0.28 (/ hy hmag)) 0.0)))
+        (define rmag (max 1e-6 (sqrt (+ (* rx rx) (* ry ry)))))
+        (values (/ rx rmag) (/ ry rmag))])]))
+
+(define (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y
+                                               [map-w 200.0] [map-h 200.0])
   (define bx-f (exact->inexact base-x))
   (define by-f (exact->inexact base-y))
   (define nx-f (exact->inexact nat-x))
@@ -614,22 +910,19 @@
   (define ey-f (exact->inexact enemy-y))
   (cond
     [(eq? locus 'natural-choke)
-     (define edx (- ex-f nx-f))
-     (define edy (- ey-f ny-f))
-     (define edist (max 1.0 (sqrt (+ (* edx edx) (* edy edy)))))
-     (define eux (/ edx edist))
-     (define euy (/ edy edist))
+     (define-values (out-ux out-uy)
+       (compute-natural-exit-direction bx-f by-f nx-f ny-f ex-f ey-f map-w map-h))
      (cond
-       [(>= (abs euy) (abs eux))
-        (define sy (if (>= euy 0.0) 1.0 -1.0))
-        (define door-x (snap-3x3-coord (+ nx-f (* 2.5 eux))))
-        (define door-y (snap-3x3-coord (+ ny-f (* 9.0 sy))))
+       [(>= (abs out-uy) (abs out-ux))
+        (define sy (if (>= out-uy 0.0) 1.0 -1.0))
+        (define door-x (snap-3x3-coord (+ nx-f (* 9.0 out-ux))))
+        (define door-y (snap-3x3-coord (+ ny-f (* 9.0 out-uy))))
         (define s1 (cons (- door-x 2.0) door-y))
         (define s2 (cons (+ door-x 2.0) door-y))
         (define s3 (cons (+ door-x 5.0) door-y))
         (define px (snap-2x2-coord (+ door-x 1.5)))
         (define py (snap-2x2-coord (- door-y (* 3.5 sy))))
-        (define park-x (- door-x (* 2.2 eux)))
+        (define park-x (- door-x (* 2.2 out-ux)))
         (define park-y (- door-y (* 2.2 sy)))
         (hash 'locus 'natural-choke
               'door (cons door-x door-y)
@@ -642,16 +935,16 @@
               'slot-3 s3
               'grid-solved? #f)]
        [else
-        (define sx (if (>= eux 0.0) 1.0 -1.0))
-        (define door-x (snap-3x3-coord (+ nx-f (* 9.0 sx))))
-        (define door-y (snap-3x3-coord (+ ny-f (* 2.5 euy))))
+        (define sx (if (>= out-ux 0.0) 1.0 -1.0))
+        (define door-x (snap-3x3-coord (+ nx-f (* 9.0 out-ux))))
+        (define door-y (snap-3x3-coord (+ ny-f (* 9.0 out-uy))))
         (define s1 (cons door-x (- door-y 2.0)))
         (define s2 (cons door-x (+ door-y 2.0)))
-        (define s3 (cons door-x (+ door-y 5.0)))
+        (define s3 (cons door-x (if (>= out-uy 0.0) (+ door-y 5.0) (- door-y 5.0))))
         (define px (snap-2x2-coord (- door-x (* 3.5 sx))))
-        (define py (snap-2x2-coord (+ door-y 1.5)))
+        (define py (snap-2x2-coord (+ door-y (if (>= out-uy 0.0) 1.5 -1.5))))
         (define park-x (- door-x (* 2.2 sx)))
-        (define park-y (- door-y (* 2.2 euy)))
+        (define park-y (- door-y (* 2.2 out-uy)))
         (hash 'locus 'natural-choke
               'door (cons door-x door-y)
               'door-x door-x
@@ -706,6 +999,709 @@
               'slot-3 #f
               'grid-solved? #f)])]))
 
+;; Trace contiguous walkable + buildable natural exit chokes on `map-grids`:
+;; - Runs a 4-connected BFS outward from `(nx-f, ny-f)` without crossing steep cliffs or
+;;   re-entering the Main base plateau.
+;; - Back-propagates outer-map reachability (`dist >= 17`, Euclidean `>= 14.0` from Natural,
+;;   buildable outer ground, not behind Main) along shortest-path DAG edges, refusing to cross
+;;   flat-ground `placement_grid = 0` plugs (`UnbuildableBricksDestructible` / `UnbuildablePlates`).
+;; - Returns ranked `(list choke-x choke-y out-dx out-dy dst-x dst-y h-nat)` candidates.
+(define (find-natural-choke-candidates bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href)
+  (define b-ix (max 0 (min (sub1 w) (exact-floor bx-f))))
+  (define b-iy (max 0 (min (sub1 h) (exact-floor by-f))))
+  (define n-ix0 (max 0 (min (sub1 w) (exact-floor nx-f))))
+  (define n-iy0 (max 0 (min (sub1 h) (exact-floor ny-f))))
+  (define h-main (grid-height-val href b-ix b-iy 128.0))
+  (define h-nat  (grid-height-val href n-ix0 n-iy0 112.0))
+  (define mdist  (wall-dist2d bx-f by-f nx-f ny-f))
+  (define mux    (if (>= mdist 1.0) (/ (- nx-f bx-f) mdist) 1.0))
+  (define muy    (if (>= mdist 1.0) (/ (- ny-f by-f) mdist) 0.0))
+  (define-values (prior-ux prior-uy)
+    (compute-natural-exit-direction bx-f by-f nx-f ny-f ex-f ey-f w h))
+
+  (define win-r 28)
+  (define sx0 (max 0 (- (exact-round nx-f) win-r)))
+  (define sx1 (min w (+ (exact-round nx-f) win-r)))
+  (define sy0 (max 0 (- (exact-round ny-f) win-r)))
+  (define sy1 (min h (+ (exact-round ny-f) win-r)))
+  (define sw (max 1 (- sx1 sx0)))
+  (define sh (max 1 (- sy1 sy0)))
+  (define sn (* sw sh))
+  (define dist-v (make-vector sn -1))
+  (define flat-nat? (make-bytes sn 0))
+  (define qbuf (make-vector sn 0))
+
+  (define (main-side-cell? gx gy)
+    (define wx (+ gx 0.5))
+    (define wy (+ gy 0.5))
+    (define dm (wall-dist2d wx wy bx-f by-f))
+    (or (and (>= mdist 12.0) (<= dm 10.0))
+        (and (> (abs (- h-main h-nat)) 3.0)
+             (procedure? href)
+             (<= (abs (- (grid-height-val href gx gy h-nat) h-main)) 2.0)
+             (< dm (wall-dist2d wx wy nx-f ny-f)))))
+
+  (define seed-pt
+    (let ([slx (max 0 (min (sub1 sw) (- n-ix0 sx0)))]
+          [sly (max 0 (min (sub1 sh) (- n-iy0 sy0)))])
+      (if (grid-cell-positive? (pref (+ sx0 slx) (+ sy0 sly)))
+          (cons slx sly)
+          (for*/first ([r (in-range 1 5)]
+                       [dy-i (in-range (- r) (add1 r))]
+                       [dx-i (in-range (- r) (add1 r))]
+                       #:do [(define lx (+ slx dx-i))
+                             (define ly (+ sly dy-i))]
+                       #:when (and (>= lx 0) (< lx sw) (>= ly 0) (< ly sh)
+                                   (grid-cell-positive? (pref (+ sx0 lx) (+ sy0 ly)))))
+            (cons lx ly)))))
+
+  (cond
+    [(not seed-pt) '()]
+    [else
+     (define sidx (+ (* (cdr seed-pt) sw) (car seed-pt)))
+     (vector-set! dist-v sidx 0)
+     (bytes-set! flat-nat? sidx 1)
+     (vector-set! qbuf 0 sidx)
+     (define bfs-tail
+       (let loop ([head 0] [tail 1])
+         (if (>= head tail)
+             tail
+             (let* ([cur (vector-ref qbuf head)]
+                    [d0 (vector-ref dist-v cur)]
+                    [cy (quotient cur sw)]
+                    [cx (remainder cur sw)]
+                    [cgx (+ sx0 cx)]
+                    [cgy (+ sy0 cy)]
+                    [cur-th (grid-height-val href cgx cgy h-nat)]
+                    [cur-flat? (= (bytes-ref flat-nat? cur) 1)]
+                    [tail1 tail])
+               (when (< d0 34)
+                 (define-syntax-rule (step! nx ny)
+                   (when (and (>= nx 0) (< nx sw) (>= ny 0) (< ny sh))
+                     (define nidx (+ (* ny sw) nx))
+                     (define ngx (+ sx0 nx))
+                     (define ngy (+ sy0 ny))
+                     (when (and (= (vector-ref dist-v nidx) -1)
+                                (grid-cell-positive? (pref ngx ngy))
+                                (not (main-side-cell? ngx ngy)))
+                       (define nth (grid-height-val href ngx ngy h-nat))
+                       (when (or (not (procedure? href))
+                                 (<= (abs (- nth cur-th)) 16.5))
+                         (vector-set! dist-v nidx (add1 d0))
+                         (when (and cur-flat?
+                                    (or (not (procedure? href))
+                                        (<= (abs (- nth h-nat)) 1.75)))
+                           (bytes-set! flat-nat? nidx 1))
+                         (vector-set! qbuf tail1 nidx)
+                         (set! tail1 (add1 tail1))))))
+                 (step! (add1 cx) cy)
+                 (step! (sub1 cx) cy)
+                 (step! cx (add1 cy))
+                 (step! cx (sub1 cy)))
+               (loop (add1 head) tail1)))))
+
+     ;; Mark open outer-map cells (`dist >= 17`, outside natural basin, not tucked behind Main)
+     ;; and back-propagate `reaches-outer` without crossing flat-ground unbuildable bricks/plates.
+     (define reaches-outer (make-bytes sn 0))
+     (define next-out-idx (make-vector sn -1))
+     (for ([k (in-range bfs-tail)])
+       (define idx (vector-ref qbuf k))
+       (define d (vector-ref dist-v idx))
+       (when (>= d 17)
+         (define gx (+ sx0 (remainder idx sw)))
+         (define gy (+ sy0 (quotient idx sw)))
+         (define wx (+ gx 0.5))
+         (define wy (+ gy 0.5))
+         (when (and (>= (wall-dist2d wx wy nx-f ny-f) 13.5)
+                    (grid-cell-positive? (bref gx gy))
+                    (or (< mdist 10.0)
+                        (>= (wall-dist2d wx wy bx-f by-f) (- mdist 1.0))))
+           (bytes-set! reaches-outer idx 1)
+           (vector-set! next-out-idx idx idx))))
+
+     (for ([k (in-range (sub1 bfs-tail) -1 -1)])
+       (define u (vector-ref qbuf k))
+       (when (= (bytes-ref reaches-outer u) 0)
+         (define du (vector-ref dist-v u))
+         (define uy-l (quotient u sw))
+         (define ux-l (remainder u sw))
+         (define-syntax-rule (check-out! vx vy)
+           (when (and (= (bytes-ref reaches-outer u) 0)
+                      (>= vx 0) (< vx sw) (>= vy 0) (< vy sh))
+             (define v (+ (* vy sw) vx))
+             (when (and (= (vector-ref dist-v v) (add1 du))
+                        (= (bytes-ref reaches-outer v) 1))
+               (define vgx (+ sx0 vx))
+               (define vgy (+ sy0 vy))
+               (define vth (grid-height-val href vgx vgy h-nat))
+               ;; Reject flat-ground `placement_grid = 0` bricks/plates plugs (`#5119040` Torches AIE),
+               ;; while allowing genuine height-sloping natural ramps (including the top ramp lip tile).
+               (define genuine-ramp-slope?
+                 (and (procedure? href)
+                      (or (> (abs (- vth h-nat)) 1.75)
+                          (for*/or ([rdy-i (in-range -2 3)]
+                                    [rdx-i (in-range -2 3)]
+                                    #:do [(define rgx (+ vgx rdx-i))
+                                          (define rgy (+ vgy rdy-i))]
+                                    #:when (and (>= rgx 0) (< rgx w) (>= rgy 0) (< rgy h)
+                                                (grid-cell-positive? (pref rgx rgy))))
+                            (> (abs (- (grid-height-val href rgx rgy h-nat) h-nat)) 2.5)))))
+               (define flat-unbuildable-plug?
+                 (and (>= du 5)
+                      (not (grid-cell-positive? (bref vgx vgy)))
+                      (not genuine-ramp-slope?)))
+               (unless flat-unbuildable-plug?
+                 (bytes-set! reaches-outer u 1)
+                 (vector-set! next-out-idx u v)))))
+         (check-out! (add1 ux-l) uy-l)
+         (check-out! (sub1 ux-l) uy-l)
+         (check-out! ux-l (add1 uy-l))
+         (check-out! ux-l (sub1 uy-l))))
+
+     (define (walk-outward start-idx steps)
+       (let loop ([cur start-idx] [s 0])
+         (define nxt (vector-ref next-out-idx cur))
+         (if (or (>= s steps) (< nxt 0) (= nxt cur))
+             cur
+             (loop nxt (add1 s)))))
+
+     ;; Score walkable + buildable natural-height choke candidates along genuine exit corridors
+     (define scored-cands '())
+     (for ([k (in-range bfs-tail)])
+       (define idx (vector-ref qbuf k))
+       (define d (vector-ref dist-v idx))
+       (when (and (>= d 6) (<= d 15)
+                  (= (bytes-ref flat-nat? idx) 1)
+                  (= (bytes-ref reaches-outer idx) 1))
+         (define lx (remainder idx sw))
+         (define ly (quotient idx sw))
+         (define gx (+ sx0 lx))
+         (define gy (+ sy0 ly))
+         (define cx0 (+ gx 0.5))
+         (define cy0 (+ gy 0.5))
+         (when (and (grid-cell-positive? (bref gx gy))
+                    (>= (max (abs (- cx0 nx-f)) (abs (- cy0 ny-f))) 5.0)
+                    (or (< mdist 10.0)
+                        (and (>= (wall-dist2d cx0 cy0 bx-f by-f) (- mdist 1.0))
+                             (>= (+ (* (/ (- cx0 nx-f) (max 1.0 (wall-dist2d cx0 cy0 nx-f ny-f))) mux)
+                                    (* (/ (- cy0 ny-f) (max 1.0 (wall-dist2d cx0 cy0 nx-f ny-f))) muy))
+                                 -0.25))))
+           (define out-idx (walk-outward idx 7))
+           (define dst-wx (+ sx0 (remainder out-idx sw) 0.5))
+           (define dst-wy (+ sy0 (quotient out-idx sw) 0.5))
+           (when (>= (wall-dist2d dst-wx dst-wy cx0 cy0) 4.0)
+             (define fdx (- dst-wx nx-f))
+             (define fdy (- dst-wy ny-f))
+             (define fmag (max 1.0 (sqrt (+ (* fdx fdx) (* fdy fdy)))))
+             (define fl-ux (/ fdx fmag))
+             (define fl-uy (/ fdy fmag))
+             (define tx (- fl-uy))
+             (define ty fl-ux)
+             (define pos-span
+               (let sloop ([m 1])
+                 (define kx (exact-floor (+ cx0 (* m tx))))
+                 (define ky (exact-floor (+ cy0 (* m ty))))
+                 (if (and (<= m 14) (>= kx 0) (< kx w) (>= ky 0) (< ky h)
+                          (grid-cell-positive? (pref kx ky)))
+                     (sloop (add1 m))
+                     (sub1 m))))
+             (define neg-span
+               (let sloop ([m 1])
+                 (define kx (exact-floor (- cx0 (* m tx))))
+                 (define ky (exact-floor (- cy0 (* m ty))))
+                 (if (and (<= m 14) (>= kx 0) (< kx w) (>= ky 0) (< ky h)
+                          (grid-cell-positive? (pref kx ky)))
+                     (sloop (add1 m))
+                     (sub1 m))))
+             (define span (+ 1 pos-span neg-span))
+             (when (and (>= span 3) (<= span 13))
+               (define mid-cx (+ cx0 (* 0.5 (- pos-span neg-span) tx)))
+               (define mid-cy (+ cy0 (* 0.5 (- pos-span neg-span) ty)))
+               (define mid-ix (max 0 (min (sub1 w) (exact-floor mid-cx))))
+               (define mid-iy (max 0 (min (sub1 h) (exact-floor mid-cy))))
+               (when (and (grid-cell-positive? (pref mid-ix mid-iy))
+                          (>= (max (abs (- mid-cx nx-f)) (abs (- mid-cy ny-f))) 5.0))
+                 ;; Ensure adequate `placement-grid = #t` area around choke for 2x3x3 + Pylon
+                 (define buildable-cnt
+                   (for*/sum ([dy-i (in-range -3 4)]
+                              [dx-i (in-range -3 4)]
+                              #:do [(define bx-i (+ mid-ix dx-i))
+                                    (define by-i (+ mid-iy dy-i))]
+                              #:when (and (>= bx-i 0) (< bx-i w) (>= by-i 0) (< by-i h)
+                                          (grid-cell-positive? (bref bx-i by-i))
+                                          (or (not (procedure? href))
+                                              (<= (abs (- (grid-height-val href bx-i by-i h-nat) h-nat)) 1.75))))
+                     1))
+                 (when (>= buildable-cnt 12)
+                   (define dir-x (/ (- mid-cx nx-f) (max 1.0 (wall-dist2d mid-cx mid-cy nx-f ny-f))))
+                   (define dir-y (/ (- mid-cy ny-f) (max 1.0 (wall-dist2d mid-cx mid-cy nx-f ny-f))))
+                   (define align (+ (* dir-x prior-ux) (* dir-y prior-uy)))
+                   (define sc
+                     (+ (* -12.0 span)
+                        (* 25.0 align)
+                        (* -2.5 (abs (- d 9.0)))
+                        (* 0.4 (min 30 buildable-cnt))))
+                   (set! scored-cands
+                         (cons (list sc mid-cx mid-cy fl-ux fl-uy dst-wx dst-wy h-nat)
+                               scored-cands)))))))))
+
+     ;; Deduplicate spatially nearby centers, keeping up to top 3 distinct choke candidates
+     (define sorted (sort scored-cands > #:key car))
+     (let dedup ([rem sorted] [acc '()])
+       (cond
+         [(or (null? rem) (>= (length acc) 3)) (reverse acc)]
+         [else
+          (define c (car rem))
+          (define cx (second c))
+          (define cy (third c))
+          (if (ormap (lambda (prev) (<= (wall-dist2d cx cy (first prev) (second prev)) 3.0)) acc)
+              (dedup (cdr rem) acc)
+              (dedup (cdr rem) (cons (cdr c) acc)))]))]))
+
+;; Verify every returned Pylon (`2x2`), Gateway/Core (`3x3`), `1x1` doorway, and `door-park`
+;; is buildable/pathable on `map-grids` AND reachable from `(nx-f, ny-f)` (or `(bx-f, by-f)`
+;; for `'main-ramp`) within bounded 4-connected ground steps before and after building placement.
+(define (protoss-wall-valid-on-grids? wall bx-f by-f nx-f ny-f map-grids)
+  (define-values (grids-ok? w h pref bref href) (extract-map-grid-accessors map-grids))
+  (cond
+    [(not (and (hash? wall) grids-ok?)) #f]
+    [else
+     (define w-locus (hash-ref wall 'locus 'main-ramp))
+     (define pyl (hash-ref wall 'pylon #f))
+     (define s1  (hash-ref wall 'slot-1 #f))
+     (define s2  (hash-ref wall 'slot-2 #f))
+     (define s3  (hash-ref wall 'slot-3 #f))
+     (define door (hash-ref wall 'door #f))
+     (define park (hash-ref wall 'door-park #f))
+     (define (valid-pt? p)
+       (and (pair? p) (real? (car p)) (real? (cdr p))
+            (not (nan? (exact->inexact (car p))))
+            (not (infinite? (exact->inexact (car p))))
+            (not (nan? (exact->inexact (cdr p))))
+            (not (infinite? (exact->inexact (cdr p))))))
+     (and (valid-pt? pyl) (valid-pt? s1) (valid-pt? s2)
+          (or (not s3) (valid-pt? s3))
+          (valid-pt? door) (valid-pt? park)
+          (let* ([orig-x (if (eq? w-locus 'natural-choke) nx-f bx-f)]
+                 [orig-y (if (eq? w-locus 'natural-choke) ny-f by-f)]
+                 [max-steps (if (eq? w-locus 'natural-choke) 32 28)]
+                 [o-ix (max 0 (min (sub1 w) (exact-floor orig-x)))]
+                 [o-iy (max 0 (min (sub1 h) (exact-floor orig-y)))]
+                 [target-h (grid-height-val href o-ix o-iy 112.0)]
+                 [bldg-specs
+                  (append (list (list (car pyl) (cdr pyl) 1.0 1.0)
+                                (list (car s1)  (cdr s1)  1.5 1.5)
+                                (list (car s2)  (cdr s2)  1.5 1.5))
+                          (if s3 (list (list (car s3) (cdr s3) 1.5 1.5)) '()))]
+                 [slot-pts (append (list s1 s2) (if s3 (list s3) '()))]
+                 [door-ix (exact-floor (car door))]
+                 [door-iy (exact-floor (cdr door))]
+                 [park-ix (exact-floor (car park))]
+                 [park-iy (exact-floor (cdr park))])
+            (and (>= door-ix 0) (< door-ix w) (>= door-iy 0) (< door-iy h)
+                 (>= park-ix 0) (< park-ix w) (>= park-iy 0) (< park-iy h)
+                 (grid-cell-positive? (pref door-ix door-iy))
+                 (grid-cell-positive? (pref park-ix park-iy))
+                 ;; Every building footprint sits strictly on buildable + pathable flat ground
+                 (for/and ([sp (in-list bldg-specs)])
+                   (match-define (list cx cy hw hh) sp)
+                   (and (footprints-disjoint? cx cy hw hh bx-f by-f 2.5 2.5)
+                        (footprints-disjoint? cx cy hw hh nx-f ny-f 2.5 2.5)
+                        (footprints-disjoint? cx cy hw hh (car door) (cdr door) 0.5 0.5)
+                        (footprint-buildable-at-height? cx cy hw hh w h bref href target-h #t pref)))
+                 ;; Pairwise disjointness across all wall buildings
+                 (for*/and ([i (in-range (length bldg-specs))]
+                            [j (in-range (add1 i) (length bldg-specs))])
+                   (match-define (list x1 y1 hw1 hh1) (list-ref bldg-specs i))
+                   (match-define (list x2 y2 hw2 hh2) (list-ref bldg-specs j))
+                   (footprints-disjoint? x1 y1 hw1 hh1 x2 y2 hw2 hh2))
+                 ;; Pylon powers every 3x3 wall slot (`<= 6.5` tiles)
+                 (for/and ([s (in-list slot-pts)])
+                   (<= (wall-dist2d (car pyl) (cdr pyl) (car s) (cdr s)) 6.5))
+                 ;; Bounded ground BFS from `(orig-x, orig-y)` reaches `door`, `door-park`,
+                 ;; and a walkable perimeter tile of every building both before and after placement!
+                 (let* ([mid-wx (* 0.5 (+ orig-x (car door)))]
+                        [mid-wy (* 0.5 (+ orig-y (cdr door)))]
+                        [win-r 30]
+                        [wx0 (max 0 (- (exact-round mid-wx) win-r))]
+                        [wx1 (min w (+ (exact-round mid-wx) win-r))]
+                        [wy0 (max 0 (- (exact-round mid-wy) win-r))]
+                        [wy1 (min h (+ (exact-round mid-wy) win-r))]
+                        [ww (max 1 (- wx1 wx0))]
+                        [wh (max 1 (- wy1 wy0))]
+                        [wn (* ww wh)]
+                        [q (make-vector wn 0)])
+                   (define (run-bounded-bfs blocked-rects step-cap)
+                     (define dvec (make-vector wn -1))
+                     (for ([r (in-list blocked-rects)])
+                       (match-define (list rcx rcy rhw rhh) r)
+                       (define rx0 (max 0 (- (exact-round (- rcx rhw)) wx0)))
+                       (define rx1 (min ww (- (exact-round (+ rcx rhw)) wx0)))
+                       (define ry0 (max 0 (- (exact-round (- rcy rhh)) wy0)))
+                       (define ry1 (min wh (- (exact-round (+ rcy rhh)) wy0)))
+                       (for* ([ly (in-range ry0 ry1)]
+                              [lx (in-range rx0 rx1)])
+                         (vector-set! dvec (+ (* ly ww) lx) -2)))
+                     (define slx0 (max 0 (min (sub1 ww) (- o-ix wx0))))
+                     (define sly0 (max 0 (min (sub1 wh) (- o-iy wy0))))
+                     (define seed
+                       (if (and (= (vector-ref dvec (+ (* sly0 ww) slx0)) -1)
+                                (grid-cell-positive? (pref (+ wx0 slx0) (+ wy0 sly0))))
+                           (cons slx0 sly0)
+                           (for*/first ([rad (in-range 1 5)]
+                                        [dy-i (in-range (- rad) (add1 rad))]
+                                        [dx-i (in-range (- rad) (add1 rad))]
+                                        #:do [(define lx (+ slx0 dx-i))
+                                              (define ly (+ sly0 dy-i))]
+                                        #:when (and (>= lx 0) (< lx ww) (>= ly 0) (< ly wh)
+                                                    (= (vector-ref dvec (+ (* ly ww) lx)) -1)
+                                                    (grid-cell-positive? (pref (+ wx0 lx) (+ wy0 ly)))))
+                             (cons lx ly))))
+                     (when seed
+                       (define sidx (+ (* (cdr seed) ww) (car seed)))
+                       (vector-set! dvec sidx 0)
+                       (vector-set! q 0 sidx)
+                       (let loop ([head 0] [tail 1])
+                         (when (< head tail)
+                           (define cur (vector-ref q head))
+                           (define cd (vector-ref dvec cur))
+                           (define cy (quotient cur ww))
+                           (define cx (remainder cur ww))
+                           (define tail1 tail)
+                           (when (< cd step-cap)
+                             (define-syntax-rule (bstep! nx ny)
+                               (when (and (>= nx 0) (< nx ww) (>= ny 0) (< ny wh))
+                                 (define nidx (+ (* ny ww) nx))
+                                 (when (and (= (vector-ref dvec nidx) -1)
+                                            (grid-cell-positive? (pref (+ wx0 nx) (+ wy0 ny))))
+                                   (vector-set! dvec nidx (add1 cd))
+                                   (vector-set! q tail1 nidx)
+                                   (set! tail1 (add1 tail1)))))
+                             (bstep! (add1 cx) cy)
+                             (bstep! (sub1 cx) cy)
+                             (bstep! cx (add1 cy))
+                             (bstep! cx (sub1 cy)))
+                           (loop (add1 head) tail1))))
+                     dvec)
+
+                   (define (cell-reached? dvec gx gy)
+                     (define lx (- gx wx0))
+                     (define ly (- gy wy0))
+                     (and (>= lx 0) (< lx ww) (>= ly 0) (< ly wh)
+                          (>= (vector-ref dvec (+ (* ly ww) lx)) 0)))
+
+                   (define (footprint-perimeter-reached? dvec sp)
+                     (match-define (list cx cy hw hh) sp)
+                     (define x0 (exact-round (- cx hw)))
+                     (define x1 (exact-round (+ cx hw)))
+                     (define y0 (exact-round (- cy hh)))
+                     (define y1 (exact-round (+ cy hh)))
+                     (or (for/or ([ix (in-range x0 x1)])
+                           (or (cell-reached? dvec ix (sub1 y0))
+                               (cell-reached? dvec ix y1)))
+                         (for/or ([iy (in-range y0 y1)])
+                           (or (cell-reached? dvec (sub1 x0) iy)
+                               (cell-reached? dvec x1 iy)))))
+
+                   (define dvec-empty (run-bounded-bfs '() max-steps))
+                   (define dvec-built (run-bounded-bfs bldg-specs (+ max-steps 6)))
+                   (and (cell-reached? dvec-empty door-ix door-iy)
+                        (for/and ([sp (in-list bldg-specs)])
+                          (footprint-perimeter-reached? dvec-empty sp))
+                        (cell-reached? dvec-built door-ix door-iy)
+                        (cell-reached? dvec-built park-ix park-iy)
+                        (for/and ([sp (in-list bldg-specs)])
+                          (footprint-perimeter-reached? dvec-built sp)))))))]))
+
+(define (solve-protoss-wall-candidate-on-grids bx-f by-f nx-f ny-f target-locus
+                                               center-x center-y out-dx out-dy
+                                               src-fx src-fy dst-fx dst-fy target-h
+                                               w h pref bref href map-grids
+                                               [forbid-tiles-set (set)])
+  (define (outside-nexus-pads? cx cy hw hh)
+    (and (footprints-disjoint? cx cy hw hh bx-f by-f 2.5 2.5)
+         (footprints-disjoint? cx cy hw hh nx-f ny-f 2.5 2.5)
+         (or (not (eq? target-locus 'natural-choke))
+             (>= (max (abs (- cx nx-f)) (abs (- cy ny-f))) 4.5))))
+  (define (strict-slot-buildable? cx cy hw hh)
+    (and (footprint-buildable-at-height? cx cy hw hh w h bref href target-h #t pref)
+         (or (set-empty? forbid-tiles-set)
+             (let ([x0 (exact-round (- cx hw))]
+                   [x1 (exact-round (+ cx hw))]
+                   [y0 (exact-round (- cy hh))]
+                   [y1 (exact-round (+ cy hh))])
+               (for*/and ([ix (in-range x0 x1)]
+                          [iy (in-range y0 y1)])
+                 (not (set-member? forbid-tiles-set (cons ix iy))))))))
+  (define (src-cell-ok? ix iy)
+    (and (not (set-member? forbid-tiles-set (cons ix iy)))
+         (or (not (procedure? href))
+             (<= (abs (- (grid-height-val href ix iy target-h) target-h)) 2.0))))
+
+  (define bfs-ctx
+    (make-local-4conn-bfs center-x center-y src-fx src-fy dst-fx dst-fy w h pref
+                          #:snap-src-pred src-cell-ok?))
+  (cond
+    [(not (hash-ref bfs-ctx 'valid? #f)) #f]
+    [else
+     (define bfs-reach? (hash-ref bfs-ctx 'bfs-reachable?))
+     (define seals-cleanly? (hash-ref bfs-ctx 'seals-cleanly?))
+     (define win-x0 (hash-ref bfs-ctx 'win-x0))
+     (define win-y0 (hash-ref bfs-ctx 'win-y0))
+     (define src-pt (hash-ref bfs-ctx 'src-pt))
+     (define dst-pt (hash-ref bfs-ctx 'dst-pt))
+     (define slot3x3-cands
+       (for*/list ([dy-i (in-range -6 7)]
+                   [dx-i (in-range -6 7)]
+                   #:do [(define sx (+ (floor center-x) dx-i 0.5))
+                         (define sy (+ (floor center-y) dy-i 0.5))]
+                   #:when (and (<= (wall-dist2d sx sy center-x center-y) 6.2)
+                               (outside-nexus-pads? sx sy 1.5 1.5)
+                               (strict-slot-buildable? sx sy 1.5 1.5)))
+         (cons sx sy)))
+     (define door-cands
+       (for*/list ([dy-i (in-range -4 5)]
+                   [dx-i (in-range -4 5)]
+                   #:do [(define ix (+ (exact-floor center-x) dx-i))
+                         (define iy (+ (exact-floor center-y) dy-i))
+                         (define dx0 (+ ix 0.5))
+                         (define dy0 (+ iy 0.5))]
+                   #:when (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
+                               (<= (wall-dist2d dx0 dy0 center-x center-y) 4.5)
+                               (outside-nexus-pads? dx0 dy0 0.5 0.5)
+                               (not (set-member? forbid-tiles-set (cons ix iy)))
+                               (grid-cell-positive? (pref ix iy))))
+         (list dx0 dy0 (- ix win-x0) (- iy win-y0))))
+
+     (define (find-rear-pylon wall-slots door-x door-y dlx dly w-rects)
+       (define wcx (/ (for/sum ([s (in-list wall-slots)]) (car s)) (max 1 (length wall-slots))))
+       (define wcy (/ (for/sum ([s (in-list wall-slots)]) (cdr s)) (max 1 (length wall-slots))))
+       (define best-p #f)
+       (define best-psc -1e9)
+       (for* ([dy-i (in-range -6 7)]
+              [dx-i (in-range -6 7)])
+         (define px (exact->inexact (+ (exact-round wcx) dx-i)))
+         (define py (exact->inexact (+ (exact-round wcy) dy-i)))
+         (define rear-proj (- (+ (* (- px wcx) out-dx) (* (- py wcy) out-dy))))
+         (define rear-dist (wall-dist2d px py wcx wcy))
+         (when (and (>= rear-proj 1.5)
+                    (>= rear-dist 2.5)
+                    (<= rear-dist 5.5)
+                    (outside-nexus-pads? px py 1.0 1.0)
+                    (footprints-disjoint? px py 1.0 1.0 door-x door-y 0.5 0.5)
+                    (andmap (lambda (s)
+                              (and (footprints-disjoint? px py 1.0 1.0 (car s) (cdr s) 1.5 1.5)
+                                   (<= (wall-dist2d px py (car s) (cdr s)) 6.2)))
+                            wall-slots)
+                    (strict-slot-buildable? px py 1.0 1.0)
+                    ;; Ensure the rear Pylon does NOT block open-door transit!
+                    (let ([rects-with-pyl (cons (list px py 1.0 1.0) w-rects)])
+                      (and (bfs-reach? rects-with-pyl (car src-pt) (cdr src-pt) dlx dly)
+                           (bfs-reach? rects-with-pyl dlx dly (car dst-pt) (cdr dst-pt)))))
+           (define ideal-band? (and (>= rear-dist 3.2) (<= rear-dist 5.0)))
+           (define psc
+             (+ (if ideal-band? 200.0 0.0)
+                (* 10.0 rear-proj)
+                (- (* 4.0 (abs (- rear-dist 4.0))))))
+           (when (> psc best-psc)
+             (set! best-psc psc)
+             (set! best-p (cons px py)))))
+       best-p)
+
+     (define (compute-door-park door-x door-y all-rects)
+       (define raw-px (- door-x (* 2.2 out-dx)))
+       (define raw-py (- door-y (* 2.2 out-dy)))
+       (define (walkable-unblocked? wx wy)
+         (define ix (exact-floor wx))
+         (define iy (exact-floor wy))
+         (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
+              (grid-cell-positive? (pref ix iy))
+              (andmap (lambda (r)
+                        (footprints-disjoint? (+ ix 0.5) (+ iy 0.5) 0.5 0.5
+                                              (first r) (second r) (third r) (fourth r)))
+                      all-rects)))
+       (if (walkable-unblocked? raw-px raw-py)
+           (cons raw-px raw-py)
+           (or (for*/first ([r (in-list '(0.5 1.0 1.5 2.0))]
+                            [ang (in-list '(0.0 0.785 -0.785 1.57 -1.57 2.356 -2.356 3.14))]
+                            #:do [(define wx (+ raw-px (* r (cos ang))))
+                                  (define wy (+ raw-py (* r (sin ang))))]
+                            #:when (walkable-unblocked? wx wy))
+                 (cons wx wy))
+               (cons raw-px raw-py))))
+
+     ;; 1. Try 2x 3x3 slots + 1x1 doorway
+     (define best-wall #f)
+     (define best-wsc -1e9)
+     (for ([dc (in-list door-cands)])
+       (match-define (list door-x door-y dlx dly) dc)
+       (define near-s
+         (filter (lambda (s)
+                   (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
+                        (<= (wall-dist2d (car s) (cdr s) door-x door-y) 5.0)))
+                 slot3x3-cands))
+       (for* ([i (in-range (length near-s))]
+              [j (in-range (add1 i) (length near-s))])
+         (define s1 (list-ref near-s i))
+         (define s2 (list-ref near-s j))
+         (define s1-edge-door? (footprints-share-edge? (car s1) (cdr s1) 1.5 1.5 door-x door-y 0.5 0.5))
+         (define s2-edge-door? (footprints-share-edge? (car s2) (cdr s2) 1.5 1.5 door-x door-y 0.5 0.5))
+         (define s1-adj-door?  (<= (footprints-touch-gap (car s1) (cdr s1) 1.5 1.5 door-x door-y 0.5 0.5) 0.05))
+         (define s2-adj-door?  (<= (footprints-touch-gap (car s2) (cdr s2) 1.5 1.5 door-x door-y 0.5 0.5) 0.05))
+         (define s1-adj-s2?    (<= (footprints-touch-gap (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5) 0.05))
+         (when (and (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5)
+                    (or s1-edge-door? s2-edge-door?)
+                    (or (and s1-adj-door? s2-adj-door?)
+                        (and (or s1-adj-door? s2-adj-door?) s1-adj-s2?)))
+           (define w-rects
+             (list (list (car s1) (cdr s1) 1.5 1.5)
+                   (list (car s2) (cdr s2) 1.5 1.5)))
+           (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) w-rects))
+                      (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
+                      (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
+             (define pyl (find-rear-pylon (list s1 s2) door-x door-y dlx dly w-rects))
+             (when pyl
+               (define sandwich-bonus (if (and s1-edge-door? s2-edge-door?) 120.0 0.0))
+               (define sc
+                 (+ 500.0
+                    sandwich-bonus
+                    (- (* 8.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
+                                 (wall-dist2d (car s2) (cdr s2) center-x center-y)
+                                 (wall-dist2d door-x door-y center-x center-y))))))
+               (when (> sc best-wsc)
+                 (set! best-wsc sc)
+                 (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects))))))))
+
+     ;; 2. If 2x 3x3 did not seal (wide natural choke), try 3x 3x3 slots + 1x1 doorway
+     (when (not best-wall)
+       (for ([dc (in-list door-cands)])
+         (match-define (list door-x door-y dlx dly) dc)
+         (define adj-s
+           (filter (lambda (s)
+                     (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
+                          (footprints-share-edge? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)))
+                   slot3x3-cands))
+         (define other-s
+           (filter (lambda (s)
+                     (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
+                          (<= (wall-dist2d (car s) (cdr s) door-x door-y) 6.5)))
+                   slot3x3-cands))
+         (for* ([s1 (in-list adj-s)]
+                [i (in-range (length other-s))]
+                #:do [(define s2 (list-ref other-s i))]
+                #:when (and (not (equal? s1 s2))
+                            (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5))
+                [j (in-range (add1 i) (length other-s))]
+                #:do [(define s3 (list-ref other-s j))]
+                #:when (and (not (equal? s1 s3))
+                            (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)
+                            (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)
+                            ;; Connected chain: s2 and s3 each touch door or another 3x3 slot
+                            (or (<= (footprints-touch-gap (car s2) (cdr s2) 1.5 1.5 door-x door-y 0.5 0.5) 0.05)
+                                (<= (footprints-touch-gap (car s2) (cdr s2) 1.5 1.5 (car s1) (cdr s1) 1.5 1.5) 0.05)
+                                (<= (footprints-touch-gap (car s2) (cdr s2) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5) 0.05))
+                            (or (<= (footprints-touch-gap (car s3) (cdr s3) 1.5 1.5 door-x door-y 0.5 0.5) 0.05)
+                                (<= (footprints-touch-gap (car s3) (cdr s3) 1.5 1.5 (car s1) (cdr s1) 1.5 1.5) 0.05)
+                                (<= (footprints-touch-gap (car s3) (cdr s3) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5) 0.05))))
+           (define w-rects
+             (list (list (car s1) (cdr s1) 1.5 1.5)
+                   (list (car s2) (cdr s2) 1.5 1.5)
+                   (list (car s3) (cdr s3) 1.5 1.5)))
+           (when (and (seals-cleanly? (cons (list door-x door-y 0.5 0.5) w-rects))
+                      (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
+                      (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
+             (define pyl (find-rear-pylon (list s1 s2 s3) door-x door-y dlx dly w-rects))
+             (when pyl
+               (define sc
+                 (- 350.0
+                    (* 6.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
+                              (wall-dist2d (car s2) (cdr s2) center-x center-y)
+                              (wall-dist2d (car s3) (cdr s3) center-x center-y)))))
+               (when (> sc best-wsc)
+                 (set! best-wsc sc)
+                 (set! best-wall (list s1 s2 s3 door-x door-y pyl w-rects))))))))
+
+     (and best-wall
+          (let ()
+            (match-define (list s1 s2 s3 door-x door-y pyl w-rects) best-wall)
+            (define all-rects (cons (list (car pyl) (cdr pyl) 1.0 1.0) w-rects))
+            (define park (compute-door-park door-x door-y all-rects))
+            (define candidate-ht
+              (hash 'locus target-locus
+                    'door (cons door-x door-y)
+                    'door-x door-x
+                    'door-y door-y
+                    'door-park park
+                    'pylon pyl
+                    'slot-1 s1
+                    'slot-2 s2
+                    'slot-3 s3
+                    'grid-solved? #t))
+            (and (protoss-wall-valid-on-grids? candidate-ht bx-f by-f nx-f ny-f map-grids)
+                 candidate-ht)))]))
+
+(define (solve-protoss-main-ramp-on-grids bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href map-grids)
+  (define rgeom (find-main-ramp-geometry bx-f by-f nx-f ny-f map-grids))
+  (or (and (hash-ref rgeom 'grid-solved? #f)
+           (let* ([rx (hash-ref rgeom 'ramp-x)]
+                  [ry (hash-ref rgeom 'ramp-y)]
+                  [rdx (hash-ref rgeom 'ramp-dx)]
+                  [rdy (hash-ref rgeom 'ramp-dy)]
+                  [hg-src (hash-ref rgeom 'hg-src (cons (- rx (* 9.0 rdx)) (- ry (* 9.0 rdy))))]
+                  [lg-dst (hash-ref rgeom 'lg-dst (cons (+ rx (* 7.5 rdx)) (+ ry (* 7.5 rdy))))]
+                  [ramp-set (for/set ([rt (in-list (hash-ref rgeom 'ramp-tiles '()))]) rt)])
+             (solve-protoss-wall-candidate-on-grids
+              bx-f by-f nx-f ny-f 'main-ramp
+              rx ry rdx rdy
+              (car hg-src) (cdr hg-src)
+              (car lg-dst) (cdr lg-dst)
+              (hash-ref rgeom 'h-main)
+              w h pref bref href map-grids ramp-set)))
+      (let ([ana (solve-protoss-matchup-wall-analytical bx-f by-f nx-f ny-f 'main-ramp ex-f ey-f w h)])
+        (if (protoss-wall-valid-on-grids? ana bx-f by-f nx-f ny-f map-grids)
+            ana
+            ;; Last-resort grid-safe high-ground layout adjacent to Main Nexus when map has no standard ramp
+            (let* ([dx (- nx-f bx-f)]
+                   [dy (- ny-f by-f)]
+                   [dmag (max 1.0 (sqrt (+ (* dx dx) (* dy dy))))]
+                   [ux (/ dx dmag)]
+                   [uy (/ dy dmag)])
+              (or (for*/first ([dist-d (in-list '(7.0 8.5 6.0 10.0))]
+                               [lat-d (in-list '(0.0 2.5 -2.5 5.0 -5.0))]
+                               #:do [(define cx (+ bx-f (* dist-d ux) (* lat-d (- uy))))
+                                     (define cy (+ by-f (* dist-d uy) (* lat-d ux)))
+                                     (define door-x (snap-3x3-coord cx))
+                                     (define door-y (snap-3x3-coord cy))
+                                     (define cand
+                                       (if (>= (abs uy) (abs ux))
+                                           (let ([sy (if (>= uy 0.0) 1.0 -1.0)])
+                                             (hash 'locus 'main-ramp
+                                                   'door (cons door-x door-y)
+                                                   'door-x door-x
+                                                   'door-y door-y
+                                                   'door-park (cons (- door-x (* 2.0 ux)) (- door-y (* 2.0 sy)))
+                                                   'pylon (cons (snap-2x2-coord (- door-x 0.5))
+                                                                (snap-2x2-coord (- door-y (* 3.5 sy))))
+                                                   'slot-1 (cons (- door-x 2.0) door-y)
+                                                   'slot-2 (cons (+ door-x 2.0) door-y)
+                                                   'slot-3 #f
+                                                   'grid-solved? #f))
+                                           (let ([sx (if (>= ux 0.0) 1.0 -1.0)])
+                                             (hash 'locus 'main-ramp
+                                                   'door (cons door-x door-y)
+                                                   'door-x door-x
+                                                   'door-y door-y
+                                                   'door-park (cons (- door-x (* 2.0 sx)) (- door-y (* 2.0 uy)))
+                                                   'pylon (cons (snap-2x2-coord (- door-x (* 3.5 sx)))
+                                                                (snap-2x2-coord (- door-y 0.5)))
+                                                   'slot-1 (cons door-x (- door-y 2.0))
+                                                   'slot-2 (cons door-x (+ door-y 2.0))
+                                                   'slot-3 #f
+                                                   'grid-solved? #f))))]
+                               #:when (protoss-wall-valid-on-grids? cand bx-f by-f nx-f ny-f map-grids))
+                    cand)
+                  ana))))))
+
 (define (solve-protoss-matchup-wall base-x base-y nat-x nat-y enemy-race
                                     #:map-grids [map-grids #f]
                                     #:enemy-x [enemy-x 160.5]
@@ -724,283 +1720,36 @@
   (cond
     [(hash-ref PROTOSS-MATCHUP-WALL-CACHE cache-key #f) => values]
     [else
+     (define-values (grids-ok? w h pref bref href) (extract-map-grid-accessors map-grids))
      (define result
        (cond
-         [(not (and (hash? map-grids)
-                    (procedure? (hash-ref map-grids 'pathing-ref #f))
-                    (procedure? (hash-ref map-grids 'placement-ref #f))))
+         [(not grids-ok?)
           (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)]
          [else
-          (define w (exact-floor (exact->inexact (hash-ref map-grids 'width 256))))
-          (define h (exact-floor (exact->inexact (hash-ref map-grids 'height 256))))
-          (define pref (hash-ref map-grids 'pathing-ref))
-          (define bref (hash-ref map-grids 'placement-ref))
-          (define href (hash-ref map-grids 'height-ref #f))
           (define bx-f (exact->inexact base-x))
           (define by-f (exact->inexact base-y))
           (define nx-f (exact->inexact nat-x))
           (define ny-f (exact->inexact nat-y))
           (define ex-f (exact->inexact enemy-x))
           (define ey-f (exact->inexact enemy-y))
-          (define (outside-nexus-pads? cx cy hw hh)
-            (and (footprints-disjoint? cx cy hw hh bx-f by-f 2.5 2.5)
-                 (footprints-disjoint? cx cy hw hh nx-f ny-f 2.5 2.5)
-                 (or (not (eq? locus 'natural-choke))
-                     (>= (max (abs (- cx nx-f)) (abs (- cy ny-f))) 4.5))))
-
-          ;; Determine wall search center, inward anchor, outward direction, and target height
-          (define-values (solve-ok? center-x center-y out-dx out-dy anchor-x anchor-y target-h)
-            (cond
-              [(eq? locus 'main-ramp)
-               (define rgeom (find-main-ramp-geometry bx-f by-f nx-f ny-f map-grids))
-               (if (hash-ref rgeom 'grid-solved? #f)
-                   (values #t
-                           (hash-ref rgeom 'ramp-x)
-                           (hash-ref rgeom 'ramp-y)
-                           (hash-ref rgeom 'ramp-dx)
-                           (hash-ref rgeom 'ramp-dy)
-                           bx-f by-f
-                           (hash-ref rgeom 'h-main))
-                   (values #f 0.0 0.0 1.0 0.0 bx-f by-f 0.0))]
-              [else
-               (define edx (- ex-f nx-f))
-               (define edy (- ey-f ny-f))
-               (define edist (max 1.0 (sqrt (+ (* edx edx) (* edy edy)))))
-               (define eux (/ edx edist))
-               (define euy (/ edy edist))
-               (define n-ix (max 0 (min (sub1 (max 1 w)) (exact-floor nx-f))))
-               (define n-iy (max 0 (min (sub1 (max 1 h)) (exact-floor ny-f))))
-               (define h-nat (grid-height-val href n-ix n-iy 112.0))
-               ;; Scan outward 6.5..12.5 tiles from natural toward enemy for narrowest choke
-               (define best-choke #f)
-               (define best-span 999)
-               (for ([step-d (in-list '(7.0 8.0 9.0 10.0 11.0 6.5 12.0))])
-                 (define cx0 (+ nx-f (* step-d eux)))
-                 (define cy0 (+ ny-f (* step-d euy)))
-                 (when (>= (max (abs (- cx0 nx-f)) (abs (- cy0 ny-f))) 5.0)
-                   (define ix0 (max 0 (min (sub1 w) (exact-floor cx0))))
-                   (define iy0 (max 0 (min (sub1 h) (exact-floor cy0))))
-                   (when (grid-cell-positive? (pref ix0 iy0))
-                     ;; Measure perpendicular walkable span
-                     (define tx (- euy))
-                     (define ty eux)
-                     (define pos-span
-                       (let loop ([k 1])
-                         (define kx (exact-floor (+ cx0 (* k tx))))
-                         (define ky (exact-floor (+ cy0 (* k ty))))
-                         (if (and (<= k 10) (>= kx 0) (< kx w) (>= ky 0) (< ky h)
-                                  (grid-cell-positive? (pref kx ky)))
-                             (loop (add1 k))
-                             (sub1 k))))
-                     (define neg-span
-                       (let loop ([k 1])
-                         (define kx (exact-floor (- cx0 (* k tx))))
-                         (define ky (exact-floor (- cy0 (* k ty))))
-                         (if (and (<= k 10) (>= kx 0) (< kx w) (>= ky 0) (< ky h)
-                                  (grid-cell-positive? (pref kx ky)))
-                             (loop (add1 k))
-                             (sub1 k))))
-                     (define span (+ 1 pos-span neg-span))
-                     (when (and (<= span 10) (< span best-span))
-                       (set! best-span span)
-                       (set! best-choke
-                             (cons (+ cx0 (* 0.5 (- pos-span neg-span) tx))
-                                   (+ cy0 (* 0.5 (- pos-span neg-span) ty))))))))
-               (if best-choke
-                   (values #t (car best-choke) (cdr best-choke) eux euy nx-f ny-f h-nat)
-                   (values #f 0.0 0.0 eux euy nx-f ny-f h-nat))]))
-
           (cond
-            [(not solve-ok?)
-             (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)]
+            [(eq? locus 'main-ramp)
+             (solve-protoss-main-ramp-on-grids bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href map-grids)]
             [else
-             (define src-fx
-               (if (<= (wall-dist2d anchor-x anchor-y center-x center-y) 12.0)
-                   anchor-x
-                   (- center-x (* 6.5 out-dx))))
-             (define src-fy
-               (if (<= (wall-dist2d anchor-x anchor-y center-x center-y) 12.0)
-                   anchor-y
-                   (- center-y (* 6.5 out-dy))))
-             (define dst-fx (+ center-x (* 6.5 out-dx)))
-             (define dst-fy (+ center-y (* 6.5 out-dy)))
-             (define bfs-ctx (make-local-4conn-bfs center-x center-y src-fx src-fy dst-fx dst-fy w h pref))
-             (cond
-               [(not (hash-ref bfs-ctx 'valid? #f))
-                (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)]
-               [else
-                (define bfs-reach? (hash-ref bfs-ctx 'bfs-reachable?))
-                (define win-x0 (hash-ref bfs-ctx 'win-x0))
-                (define win-y0 (hash-ref bfs-ctx 'win-y0))
-                (define src-pt (hash-ref bfs-ctx 'src-pt))
-                (define dst-pt (hash-ref bfs-ctx 'dst-pt))
-                (define slot3x3-cands
-                  (for*/list ([dy-i (in-range -6 7)]
-                              [dx-i (in-range -6 7)]
-                              #:do [(define sx (+ (floor center-x) dx-i 0.5))
-                                    (define sy (+ (floor center-y) dy-i 0.5))]
-                              #:when (and (<= (wall-dist2d sx sy center-x center-y) 6.0)
-                                          (outside-nexus-pads? sx sy 1.5 1.5)
-                                          (footprint-buildable-at-height? sx sy 1.5 1.5 w h bref href target-h #t)))
-                    (cons sx sy)))
-                (define door-cands
-                  (for*/list ([dy-i (in-range -4 5)]
-                              [dx-i (in-range -4 5)]
-                              #:do [(define ix (+ (exact-floor center-x) dx-i))
-                                    (define iy (+ (exact-floor center-y) dy-i))
-                                    (define dx0 (+ ix 0.5))
-                                    (define dy0 (+ iy 0.5))]
-                              #:when (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
-                                          (<= (wall-dist2d dx0 dy0 center-x center-y) 4.2)
-                                          (outside-nexus-pads? dx0 dy0 0.5 0.5)
-                                          (grid-cell-positive? (pref ix iy))))
-                    (list dx0 dy0 (- ix win-x0) (- iy win-y0))))
-
-                (define (find-rear-pylon wall-slots door-x door-y)
-                  (define wcx (/ (for/sum ([s (in-list wall-slots)]) (car s)) (max 1 (length wall-slots))))
-                  (define wcy (/ (for/sum ([s (in-list wall-slots)]) (cdr s)) (max 1 (length wall-slots))))
-                  (define best-p #f)
-                  (define best-psc -1e9)
-                  (for* ([dy-i (in-range -6 7)]
-                         [dx-i (in-range -6 7)])
-                    (define px (exact->inexact (+ (exact-round wcx) dx-i)))
-                    (define py (exact->inexact (+ (exact-round wcy) dy-i)))
-                    (define rear-proj (- (+ (* (- px wcx) out-dx) (* (- py wcy) out-dy))))
-                    (define rear-dist (wall-dist2d px py wcx wcy))
-                    (when (and (>= rear-proj 2.0)
-                               (>= rear-dist 2.5)
-                               (<= rear-dist 5.5)
-                               (outside-nexus-pads? px py 1.0 1.0)
-                               (footprints-disjoint? px py 1.0 1.0 door-x door-y 0.5 0.5)
-                               (andmap (lambda (s)
-                                         (and (footprints-disjoint? px py 1.0 1.0 (car s) (cdr s) 1.5 1.5)
-                                              (<= (wall-dist2d px py (car s) (cdr s)) 6.2)))
-                                       wall-slots)
-                               (footprint-buildable-at-height? px py 1.0 1.0 w h bref href target-h #t))
-                      (define ideal-band? (and (>= rear-dist 3.5) (<= rear-dist 5.0)))
-                      (define psc
-                        (+ (if ideal-band? 200.0 0.0)
-                           (* 10.0 rear-proj)
-                           (- (* 4.0 (abs (- rear-dist 4.0))))))
-                      (when (> psc best-psc)
-                        (set! best-psc psc)
-                        (set! best-p (cons px py)))))
-                  best-p)
-
-                (define (compute-door-park door-x door-y wall-rects)
-                  (define raw-px (- door-x (* 2.2 out-dx)))
-                  (define raw-py (- door-y (* 2.2 out-dy)))
-                  (define (walkable-unblocked? wx wy)
-                    (define ix (exact-floor wx))
-                    (define iy (exact-floor wy))
-                    (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
-                         (grid-cell-positive? (pref ix iy))
-                         (andmap (lambda (r)
-                                   (footprints-disjoint? (+ ix 0.5) (+ iy 0.5) 0.5 0.5
-                                                         (first r) (second r) (third r) (fourth r)))
-                                 wall-rects)))
-                  (if (walkable-unblocked? raw-px raw-py)
-                      (cons raw-px raw-py)
-                      (or (for*/first ([r (in-list '(0.5 1.0 1.5))]
-                                       [ang (in-list '(0.0 0.785 -0.785 1.57 -1.57 3.14))]
-                                       #:do [(define wx (+ raw-px (* r (cos ang))))
-                                             (define wy (+ raw-py (* r (sin ang))))]
-                                       #:when (walkable-unblocked? wx wy))
-                            (cons wx wy))
-                          (cons raw-px raw-py))))
-
-                ;; 1. Try 2x 3x3 slots + 1x1 doorway
-                (define best-wall #f)
-                (define best-wsc -1e9)
-                (for ([dc (in-list door-cands)])
-                  (match-define (list door-x door-y dlx dly) dc)
-                  ;; Candidate 3x3 slots within 4.0 tiles of doorway (touching or near doorway)
-                  (define near-s
-                    (filter (lambda (s)
-                              (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
-                                   (<= (wall-dist2d (car s) (cdr s) door-x door-y) 5.0)))
-                            slot3x3-cands))
-                  (for* ([i (in-range (length near-s))]
-                         [j (in-range (add1 i) (length near-s))])
-                    (define s1 (list-ref near-s i))
-                    (define s2 (list-ref near-s j))
-                    (when (and (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5)
-                               (or (<= (max (abs (- (car s1) door-x)) (abs (- (cdr s1) door-y))) 2.05)
-                                   (<= (max (abs (- (car s2) door-x)) (abs (- (cdr s2) door-y))) 2.05)))
-                      (define w-rects
-                        (list (list (car s1) (cdr s1) 1.5 1.5)
-                              (list (car s2) (cdr s2) 1.5 1.5)))
-                      (when (and (not (bfs-reach? (cons (list door-x door-y 0.5 0.5) w-rects)))
-                                 (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
-                                 (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
-                        (define pyl (find-rear-pylon (list s1 s2) door-x door-y))
-                        (when pyl
-                          (define sc
-                            (- 500.0
-                               (* 8.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
-                                         (wall-dist2d (car s2) (cdr s2) center-x center-y)
-                                         (wall-dist2d door-x door-y center-x center-y)))))
-                          (when (> sc best-wsc)
-                            (set! best-wsc sc)
-                            (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects))))))))
-
-                ;; 2. If 2x 3x3 did not seal (wide natural choke), try 3x 3x3 slots + 1x1 doorway
-                (when (not best-wall)
-                  (for ([dc (in-list door-cands)])
-                    (match-define (list door-x door-y dlx dly) dc)
-                    (define adj-s
-                      (filter (lambda (s)
-                                (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
-                                     (<= (max (abs (- (car s) door-x)) (abs (- (cdr s) door-y))) 2.05)))
-                              slot3x3-cands))
-                    (define other-s
-                      (filter (lambda (s)
-                                (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5))
-                              slot3x3-cands))
-                    (for* ([s1 (in-list adj-s)]
-                           [i (in-range (length other-s))]
-                           #:do [(define s2 (list-ref other-s i))]
-                           #:when (and (not (equal? s1 s2))
-                                       (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s2) (cdr s2) 1.5 1.5))
-                           [j (in-range (add1 i) (length other-s))]
-                           #:do [(define s3 (list-ref other-s j))]
-                           #:when (and (not (equal? s1 s3))
-                                       (footprints-disjoint? (car s1) (cdr s1) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)
-                                       (footprints-disjoint? (car s2) (cdr s2) 1.5 1.5 (car s3) (cdr s3) 1.5 1.5)))
-                      (define w-rects
-                        (list (list (car s1) (cdr s1) 1.5 1.5)
-                              (list (car s2) (cdr s2) 1.5 1.5)
-                              (list (car s3) (cdr s3) 1.5 1.5)))
-                      (when (and (not (bfs-reach? (cons (list door-x door-y 0.5 0.5) w-rects)))
-                                 (bfs-reach? w-rects (car src-pt) (cdr src-pt) dlx dly)
-                                 (bfs-reach? w-rects dlx dly (car dst-pt) (cdr dst-pt)))
-                        (define pyl (find-rear-pylon (list s1 s2 s3) door-x door-y))
-                        (when pyl
-                          (define sc
-                            (- 350.0
-                               (* 6.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
-                                         (wall-dist2d (car s2) (cdr s2) center-x center-y)
-                                         (wall-dist2d (car s3) (cdr s3) center-x center-y)))))
-                          (when (> sc best-wsc)
-                            (set! best-wsc sc)
-                            (set! best-wall (list s1 s2 s3 door-x door-y pyl w-rects))))))))
-
-                (cond
-                  [best-wall
-                   (match-define (list s1 s2 s3 door-x door-y pyl w-rects) best-wall)
-                   (define park (compute-door-park door-x door-y w-rects))
-                   (hash 'locus locus
-                         'door (cons door-x door-y)
-                         'door-x door-x
-                         'door-y door-y
-                         'door-park park
-                         'pylon pyl
-                         'slot-1 s1
-                         'slot-2 s2
-                         'slot-3 s3
-                         'grid-solved? #t)]
-                  [else
-                   (solve-protoss-matchup-wall-analytical base-x base-y nat-x nat-y locus enemy-x enemy-y)])])])]))
+             ;; Try genuine walkable + buildable natural exit choke candidates first; if none yields
+             ;; a choke-sealing, buildable, bounded-ground-reachable `'natural-choke` wall,
+             ;; fall back cleanly to `'main-ramp`!
+             (define nat-cands
+               (find-natural-choke-candidates bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href))
+             (or (for/or ([nc (in-list nat-cands)])
+                   (match-define (list cx cy out-dx out-dy dst-x dst-y h-nat) nc)
+                   (solve-protoss-wall-candidate-on-grids
+                    bx-f by-f nx-f ny-f 'natural-choke
+                    cx cy out-dx out-dy
+                    nx-f ny-f dst-x dst-y h-nat
+                    w h pref bref href map-grids))
+                 (solve-protoss-main-ramp-on-grids
+                  bx-f by-f nx-f ny-f ex-f ey-f w h pref bref href map-grids))])]))
      (hash-set! PROTOSS-MATCHUP-WALL-CACHE cache-key result)
      result]))
 
@@ -3251,7 +4000,7 @@
            (emit! (list 'burrow-down uid 'infestor-stealth-neural)))
          (if (and (exact-integer? ctag) (> ctag 0))
              (emit! (list 'cast-spell uid 'neural-parasite ctag))
-             (emit! (list 'cast-spell uid 'neural-parasite cx cy)))]
+             (emit! (list 'cast-spell uid 'fungal-growth cx cy)))]
         ;; Within Fungal Growth range (<= 10.5) and energy >= 75 -> Unburrow (if needed) & cast Fungal Growth
         [(and (<= dist-e (+ SC2-INFESTOR-FUNGAL-CAST-RANGE 0.5))
               (>= energy SC2-INFESTOR-FUNGAL-ENERGY))

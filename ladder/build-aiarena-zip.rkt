@@ -51,11 +51,11 @@
 ;; AI Arena BotZip size limits:
 ;; - Standard tier max upload: 50 MiB (52,428,800 bytes)
 ;; - Bronze Patreon max upload: 100 MiB (104,857,600 bytes)
-;; - Strict repository safety budget: 25 MB (25,000,000 bytes) max, 3 MB (3,000,000 bytes) min
+;; - Strict repository safety budget: 32 MB (32,000,000 bytes) max, 3 MB (3,000,000 bytes) min
 ;; - True untethered Racket CS ELF (.rackboot + .rackprog, original-exe?=#t): >= 45 MB uncompressed
 (define AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024))
 (define AIARENA-BRONZE-MAX-ZIP-BYTES   (* 100 1024 1024))
-(define MAX-BOT-ZIP-SIZE-BYTES         25000000)
+(define MAX-BOT-ZIP-SIZE-BYTES         32000000)
 (define MIN-BOT-ZIP-SIZE-BYTES         3000000)
 (define MIN-STANDALONE-ELF-BYTES       45000000)
 
@@ -199,10 +199,21 @@
 (define (precompile-all-racket-zo!)
   (printf "[1/4] Precompiling Racket modules to .zo bytecode via compiler/cm...\n")
   (current-directory ROOT-DIR)
+  (define root-bstr (string->bytes/utf-8 (path->string ROOT-DIR)))
+  (for ([dname (in-list INCLUDE-DIRS)])
+    (define cdir (build-path ROOT-DIR dname "compiled"))
+    (when (directory-exists? cdir)
+      (for ([zf (in-directory cdir)])
+        (when (and (file-exists? zf)
+                   (string-suffix? (path->string zf) ".zo")
+                   (regexp-match-positions (regexp-quote root-bstr) (file->bytes zf)))
+          (delete-file zf)))))
   (define targets
     '("main.rkt"
       "compiler/syntax.rkt"
       "lib/sc2-game-constants.rkt"
+      "lib/sc2-typed-commands.rkt"
+      "lib/sc2-proto-wire-verifier.rkt"
       "lib/okasaki-sc.rkt"
       "lib/perception-grid.rkt"
       "lib/econ-ledger.rkt"
@@ -222,10 +233,12 @@
       "bots/Mothman-T.rkt"
       "bots/Mothman-P.rkt"
       "bots/Mothman-R.rkt"))
-  (for ([rel (in-list targets)])
-    (define p (build-path ROOT-DIR rel))
-    (when (file-exists? p)
-      (managed-compile-zo p)))
+  (parameterize ([current-directory-for-user ROOT-DIR]
+                 [current-write-relative-directory (cons ROOT-DIR ROOT-DIR)])
+    (for ([rel (in-list targets)])
+      (define p (build-path ROOT-DIR rel))
+      (when (file-exists? p)
+        (managed-compile-zo p))))
   (printf "  -> All .zo bytecode modules up to date.\n")
   #t)
 
@@ -243,22 +256,24 @@
   (current-directory ROOT-DIR)
   (define out-bin (build-path CACHE-DIR "mothman_standalone_elf"))
   (printf "  -> Compiling untethered standalone native Linux x86_64 ELF executable via compiler/embed (original-exe?=#t)...\n")
-  (create-embedding-executable
-   out-bin
-   #:aux (list (cons 'original-exe? #t)
-               (cons 'config-dir (string->path "etc")))
-   #:collects-path "collects"
-   #:modules (list (list #f (build-path ROOT-DIR "sim/racket-sc2-ladder-main.rkt") '(main))
-                   (list #f (build-path ROOT-DIR "bots/Mothman-Z.rkt"))
-                   (list #f (build-path ROOT-DIR "bots/Mothman-T.rkt"))
-                   (list #f (build-path ROOT-DIR "bots/Mothman-P.rkt"))
-                   (list #f (build-path ROOT-DIR "bots/Mothman-R.rkt"))
-                   (list #f (build-path ROOT-DIR "bots/Mothman.rkt")))
-   #:configure-via-first-module? #t
-   #:literal-expression
-   (parameterize ([current-namespace (make-base-namespace)])
-     (compile '(namespace-require '(submod 'racket-sc2-ladder-main main))))
-   #:cmdline '("-U" "--"))
+  (parameterize ([current-directory-for-user ROOT-DIR]
+                 [current-write-relative-directory (cons ROOT-DIR ROOT-DIR)])
+    (create-embedding-executable
+     out-bin
+     #:aux (list (cons 'original-exe? #t)
+                 (cons 'config-dir (string->path "etc")))
+     #:collects-path "collects"
+     #:modules (list (list #f (build-path ROOT-DIR "sim/racket-sc2-ladder-main.rkt") '(main))
+                     (list #f (build-path ROOT-DIR "bots/Mothman-Z.rkt"))
+                     (list #f (build-path ROOT-DIR "bots/Mothman-T.rkt"))
+                     (list #f (build-path ROOT-DIR "bots/Mothman-P.rkt"))
+                     (list #f (build-path ROOT-DIR "bots/Mothman-R.rkt"))
+                     (list #f (build-path ROOT-DIR "bots/Mothman.rkt")))
+     #:configure-via-first-module? #t
+     #:literal-expression
+     (parameterize ([current-namespace (make-base-namespace)])
+       (compile '(namespace-require '(submod 'racket-sc2-ladder-main main))))
+     #:cmdline '("-U" "--")))
   (unless (and (file-exists? out-bin)
                (>= (file-size out-bin) MIN-STANDALONE-ELF-BYTES))
     (error 'compile-standalone-racket-elf!

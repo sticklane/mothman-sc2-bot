@@ -30,10 +30,23 @@
          "../ladder/build-aiarena-zip.rkt"
          "../lib/priority-macro-brain.rkt"
          "../lib/pro-replay-starvation-audit.rkt"
+         "../lib/sc2-typed-commands.rkt"
          (only-in "../lib/sc2-protobuf-ws.rkt"
+                  sc2-ws-conn
+                  sc2-ws-close!
+                  mask-ws-payload
                   encode-int32
+                  encode-uint32
                   encode-bytes-field
                   encode-submessage-field
+                  decode-protobuf-message
+                  make-request-action
+                  encode-sc2-action
+                  legacy-wire-action->typed-sc2-action
+                  get-last-bot-action-rejects
+                  get-total-bot-action-reject-count
+                  get-total-wire-action-drop-count
+                  reset-typed-command-gate-stats!
                   sc2-point2d
                   sc2-point2d?
                   sc2-point2d-x
@@ -53,6 +66,7 @@
                   sc2-raw-unit-command-unit-tags
                   sc2-raw-camera-move
                   sc2-raw-camera-move?
+                  sc2-chat-action
                   sc2-ui-control-group
                   sc2-ui-control-group?
                   decode-image-grid-bytes
@@ -70,14 +84,19 @@
                   sc2-observation->runtime-obs-hash
                   result-enum->symbol
                   make-wire-apm-governor
-                  govern-sc2-wire-actions!)
+                  govern-sc2-wire-actions!
+                  make-request-step
+                  make-request-query-placement
+                  make-request-ping)
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
                   mpq-hash
                   parse-sc2-replay)
          (except-in "../lib/bot-crash-fuzzer.rkt"
                     compute-shadow-ledger
-                    step-zerospace-mastermind!))
+                    step-zerospace-mastermind!)
+         "../lib/sc2-proto-wire-verifier.rkt"
+         "../tools/fuzz-sc2-protobuf-output.rkt")
 
 (define total-assertions 0)
 (define suite-start-total-ms (current-inexact-monotonic-milliseconds))
@@ -3341,12 +3360,12 @@
 ;; 19. AI Arena BotZip Size Limit & Standalone Native ELF Binary Verification
 ;; =============================================================================
 
-(run-suite "19. AI Arena BotZip Size Limit (<= 25 MB / 50 MiB) & Standalone Native ELF Binary"
+(run-suite "19. AI Arena BotZip Size Limit (<= 32 MB / 50 MiB) & Standalone Native ELF Binary"
   ;; 1. Verify constants enforce a strict safety margin well below AI Arena's 50 MiB standard cap
   (assert-eq! AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024)
               "AI Arena standard tier max zip size must be 50 MiB (52,428,800 bytes)")
-  (assert-true! (<= MAX-BOT-ZIP-SIZE-BYTES (* 25 1000 1000))
-                "Repository BotZip safety limit must be <= 25 MB")
+  (assert-true! (<= MAX-BOT-ZIP-SIZE-BYTES (* 32 1000 1000))
+                "Repository BotZip safety limit must be <= 32 MB")
   (assert-true! (< MAX-BOT-ZIP-SIZE-BYTES AIARENA-STANDARD-MAX-ZIP-BYTES)
                 "MAX-BOT-ZIP-SIZE-BYTES must be strictly less than AIARENA-STANDARD-MAX-ZIP-BYTES")
 
@@ -3361,7 +3380,7 @@
                   (format "~a (~a bytes) must be >= ~a bytes (standalone ELF floor)"
                           zpath zsize MIN-BOT-ZIP-SIZE-BYTES))
     (assert-true! (<= zsize MAX-BOT-ZIP-SIZE-BYTES)
-                  (format "~a (~a bytes) must be <= ~a bytes (25 MB safety ceiling)"
+                  (format "~a (~a bytes) must be <= ~a bytes (32 MB safety ceiling)"
                           zpath zsize MAX-BOT-ZIP-SIZE-BYTES))
     (assert-true! (< zsize AIARENA-STANDARD-MAX-ZIP-BYTES)
                   (format "~a (~a bytes) must be < ~a bytes (50 MiB AI Arena limit)"
@@ -4524,25 +4543,84 @@
   ;; 26.3 12-Probe Worker Rush (Creepy_strategies), In-Base Proxy (Thssprtssbt),
   ;;      < 8 Worker Combat Priority & Safe Zerg Rebuild Anchor
   (define rt-wrush (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
-  ;; 12 Drones: #101 is critically wounded at 10 HP near incoming Probes; #102..#112 are healthy at 40 HP.
-  ;; 10 Enemy Probes at 15.5–21.5 tiles from (32.5, 32.5) (> 9.0 tiles!), including 6 stacked within 0.45 tiles
-  ;; so `counter-enemy-worker-drill` also triggers, with #901 having the lowest total HP+shield (8 HP, 0 shield).
-  (define rush-ally-drones
+  ;; (a) Early-warning phase: 10 Enemy Probes at x = 48.0..54.0 (15.5–21.5 tiles from TownHall 32.5, > 12.5 tiles!)
+  ;; Triggers macro alert (zero Drone/Extractor/Expand greed + mineral-walk disengage for 10 HP Drone #101)
+  ;; WITHOUT prematurely pulling healthy Drones off minerals!
+  (define rush-ally-drones-warn
     (cons (hash 'id 101 'type 'drone 'x 44.5 'y 32.5 'hp 10)
           (for/list ([i (in-range 1 12)])
             (hash 'id (+ 101 i) 'type 'drone 'x (+ 31.0 (* 0.4 i)) 'y 32.5 'hp 40))))
-  (define rush-enemy-probes
+  (define rush-enemy-probes-warn
     (append
      (list (hash 'id 901 'type 'probe 'x 48.0 'y 32.5 'hp 8 'shield 0))
-     ;; 6 stacked Probes at ~16.5 tiles from (32.5, 32.5)
      (for/list ([j (in-range 6)])
        (hash 'id (+ 902 j) 'type 'probe 'x (+ 49.0 (* 0.05 j)) 'y 32.5 'hp 20 'shield 20))
-     ;; 3 trailing Probes at 18.5–21.5 tiles from (32.5, 32.5)
      (list (hash 'id 908 'type 'probe 'x 51.0 'y 32.5 'hp 20 'shield 20)
            (hash 'id 909 'type 'probe 'x 52.5 'y 32.5 'hp 20 'shield 20)
            (hash 'id 910 'type 'probe 'x 54.0 'y 32.5 'hp 20 'shield 20))))
-  (define rush-obs
+  (define rush-obs-warn
     (hash 'frame 700 'minerals 100 'gas 0 'supply-used 12 'supply-cap 14 'supply-left 2
+          'mineral-harvesters 12 'vespene-harvesters 0
+          'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+          'mineral-patches (list (hash 'id 550 'x 26.5 'y 32.5))
+          'ally-units (append rush-ally-drones-warn
+                              (list (hash 'id 150 'type 'larva 'x 33.0 'y 33.0 'hp 25)
+                                    (hash 'id 160 'type 'overlord 'x 34.0 'y 34.0 'hp 200)))
+          'ally-buildings (list (hash 'id 201 'type 'hatchery 'x 32.5 'y 32.5
+                                      'hp 1500 'build-progress 1.0 'powered? #f))
+          'enemy-units rush-enemy-probes-warn
+          'enemy-buildings '()))
+  (define res-wrush-warn (step-live-bot-runtime! rt-wrush rush-obs-warn))
+  (define acts-wrush-warn
+    (append (hash-ref res-wrush-warn 'actions '())
+            (hash-ref res-wrush-warn 'mirror-actions '())))
+  (define friendly-drone-ids (for/list ([i (in-range 12)]) (+ 101 i)))
+
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-wrush-warn))
+                "Early-warning enemy Probes at x = 48.0..54.0 (15.5-21.5 tiles) must NOT prematurely pull workers off minerals")
+  (assert-true! (not (member '(train drone) acts-wrush-warn))
+                "Early-warning worker rush must freeze (train drone)")
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a)
+                                   (or (eq? (car a) 'expand)
+                                       (and (eq? (car a) 'build)
+                                            (pair? (cdr a))
+                                            (memq (cadr a) '(extractor hatchery))))))
+                            acts-wrush-warn))
+                "Early-warning worker rush must freeze (build extractor ...) and (expand ...)")
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (eq? (car a) 'mineral-walk)
+                              (pair? (cdr a))
+                              (let ([u (cadr a)])
+                                (if (list? u) (memv 101 u) (equal? u 101)))))
+                       acts-wrush-warn)
+                "Early-warning worker rush must disengage 10 HP Drone (#101) via (mineral-walk ...)")
+
+  ;; (b) Breach phase: 10 Enemy Probes breaching at x = 35.0..41.0 (<= 12.5 tiles from TownHall 32.5),
+  ;; with #901 at (35.0, 32.5) having lowest HP+shield (8 HP, 0 shield), 4 healthy far-patch miners (#102..#105)
+  ;; at (26.0..26.9, 32.5) (> 8 tiles from enemies), 7 frontline healthy Drones (#106..#112) at (32.6..35.0, 32.5),
+  ;; and wounded 10 HP Drone #101 at (35.5, 32.5).
+  (define rt-wrush-breach (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define rush-ally-drones
+    (append
+     (list (hash 'id 101 'type 'drone 'x 35.5 'y 32.5 'hp 10))
+     (for/list ([i (in-range 4)])
+       (hash 'id (+ 102 i) 'type 'drone 'x (+ 26.0 (* 0.3 i)) 'y 32.5 'hp 40))
+     (for/list ([k (in-range 7)])
+       (hash 'id (+ 106 k) 'type 'drone 'x (+ 32.6 (* 0.4 k)) 'y 32.5 'hp 40))))
+  (define rush-enemy-probes
+    (append
+     (list (hash 'id 901 'type 'probe 'x 35.0 'y 32.5 'hp 8 'shield 0))
+     ;; 6 stacked Probes at ~4.0 tiles from (32.5, 32.5)
+     (for/list ([j (in-range 6)])
+       (hash 'id (+ 902 j) 'type 'probe 'x (+ 36.5 (* 0.05 j)) 'y 32.5 'hp 20 'shield 20))
+     ;; 3 trailing Probes at 5.5–8.5 tiles from (32.5, 32.5)
+     (list (hash 'id 908 'type 'probe 'x 38.0 'y 32.5 'hp 20 'shield 20)
+           (hash 'id 909 'type 'probe 'x 39.5 'y 32.5 'hp 20 'shield 20)
+           (hash 'id 910 'type 'probe 'x 41.0 'y 32.5 'hp 20 'shield 20))))
+  (define rush-obs
+    (hash 'frame 720 'minerals 100 'gas 0 'supply-used 12 'supply-cap 14 'supply-left 2
           'mineral-harvesters 12 'vespene-harvesters 0
           'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
           'mineral-patches (list (hash 'id 550 'x 26.5 'y 32.5))
@@ -4553,23 +4631,35 @@
                                       'hp 1500 'build-progress 1.0 'powered? #f))
           'enemy-units rush-enemy-probes
           'enemy-buildings '()))
-  (define res-wrush (step-live-bot-runtime! rt-wrush rush-obs))
+  (define res-wrush (step-live-bot-runtime! rt-wrush-breach rush-obs))
   (define acts-wrush
     (append (hash-ref res-wrush 'actions '())
             (hash-ref res-wrush 'mirror-actions '())))
 
-  ;; 4-arg (pull-workers-attack pull-ids target-id tx ty) targeting lowest-HP enemy Probe #901
-  (define pull-act-wrush
-    (findf (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-wrush))
-  (assert-true! (and pull-act-wrush (= (length pull-act-wrush) 5))
-                "12-Probe worker rush must emit 4-arg (pull-workers-attack pull-ids target-id tx ty)")
-  (assert-eq! (third pull-act-wrush) 901
-              "pull-workers-attack must focus-fire the lowest-HP enemy Probe (#901)")
-  (assert-true! (not (memv 101 (second pull-act-wrush)))
+  ;; Distributed local 3-cap 4-arg (pull-workers-attack pull-ids target-id tx ty) groups
+  (define pull-acts-wrush
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-wrush))
+  (define pull-act-901
+    (findf (lambda (a) (and (= (length a) 5) (equal? (third a) 901))) pull-acts-wrush))
+  (define all-pulled-wids
+    (remove-duplicates (append* (map second pull-acts-wrush))))
+  (assert-true! (and (pair? pull-acts-wrush)
+                     (andmap (lambda (a) (= (length a) 5)) pull-acts-wrush))
+                "Breaching 10-Probe rush at x = 35.0..41.0 must emit 4-arg (pull-workers-attack pull-ids target-id tx ty)")
+  (assert-true! (and pull-act-901 (<= (length (second pull-act-901)) 3))
+                "pull-workers-attack must locally focus-fire lowest-HP Probe (#901) with <= 3 defenders (no conga-line)")
+  (assert-true! (andmap (lambda (a)
+                          (or (<= (third a) 0)
+                              (<= (length (second a)) 3)))
+                        pull-acts-wrush)
+                "Every unit-targeted pull-workers-attack group must obey the local 3-defender cap")
+  (assert-true! (not (memv 101 all-pulled-wids))
                 "Critically wounded 10 HP Drone (#101) must NOT be included in pull-workers-attack")
+  (assert-true! (>= (- 11 (length all-pulled-wids)) 3)
+                (format "Breach worker-rush defense must keep >= 3 far miners harvesting (pulled ~a of 11 healthy)"
+                        (length all-pulled-wids)))
 
   ;; ZERO passive (move ...) commands on friendly Drones
-  (define friendly-drone-ids (for/list ([i (in-range 12)]) (+ 101 i)))
   (assert-true! (not (ormap (lambda (a)
                               (and (pair? a)
                                    (eq? (car a) 'move)
@@ -4612,7 +4702,7 @@
                                              #:used-worker-tags rush-used-wtags))
   (assert-true! (set-member? rush-used-wtags 101)
                 "translate-bot-actions->sc2-raw-commands must populate #:used-worker-tags with mineral-walking Drone #101")
-  (for ([pulled-id (in-list (second pull-act-wrush))])
+  (for ([pulled-id (in-list all-pulled-wids)])
     (assert-true! (set-member? rush-used-wtags pulled-id)
                   (format "translate-bot-actions->sc2-raw-commands must populate #:used-worker-tags with pulled Drone #~a" pulled-id)))
 
@@ -4754,8 +4844,10 @@
                 (format "Harvest return ability ~a must canonicalize to 'harvest-return" rid)))
   (assert-eq! (sc2-canonical-order-ability 3691) (sc2-canonical-order-ability 1694)
               "Queen spawn creep tumor 3691 and 1694 must share canonical ability")
-  (assert-eq! (sc2-canonical-order-ability 3692) (sc2-canonical-order-ability 1733)
-              "Creep tumor spread 3692 and 1733 must share canonical ability")
+  (assert-eq! (sc2-canonical-order-ability 1662) (sc2-canonical-order-ability 1733)
+              "Queen/Tumor creep tumor 1662 and 1733 must share canonical ability")
+  (assert-true! (not (eq? (sc2-canonical-order-ability 3692) 'spawn-creep-tumor))
+                "3692 (RESEARCH_PROTOSSAIRARMOR) must NOT be misclassified as 'spawn-creep-tumor")
   (for ([lid (in-list '(3679 417 1522 452 485 518))])
     (assert-eq! (sc2-canonical-order-ability lid) 'lift
                 (format "Lift ability ~a must canonicalize to 'lift" lid)))
@@ -5934,6 +6026,714 @@
   (assert-eq! (list (result-enum->symbol 1) (result-enum->symbol 2) (result-enum->symbol 3) (result-enum->symbol 4))
               '(Victory Defeat Tie Undecided)
               "s2clientprotocol Result enum must map 1->Victory, 2->Defeat, 3->Tie, 4->Undecided"))
+
+;; =============================================================================
+;; Suite 28: Static Typed Command Witnesses, Live Loopback Expand, <5ms 16-Base
+;;           Cached Latency, PvZ/East-Ramp Walls, 15/15 Pylon Recovery & 0-Reject Pipeline
+;; =============================================================================
+(run-suite "28. Static Typed Command Witnesses, Loopback Expand, <5ms 16-Base Cache, Walls & 0-Reject Wire Pipeline"
+  (define (mk-s28-unit tag utype x y
+                       #:alliance [alliance 1]
+                       #:radius [radius 0.5]
+                       #:progress [progress 1.0]
+                       #:hp [hp 100.0]
+                       #:hp-max [hp-max 100.0]
+                       #:shield [shield 0.0]
+                       #:shield-max [shield-max 0.0]
+                       #:energy [energy 0.0]
+                       #:energy-max [energy-max 0.0]
+                       #:mins [mins 0]
+                       #:vesp [vesp 0]
+                       #:flying? [flying? #f]
+                       #:burrowed? [burrowed? #f]
+                       #:powered? [powered? #t]
+                       #:orders [orders '()]
+                       #:addon-tag [addon-tag 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 radius progress 0 #f #f #f
+              hp hp-max shield shield-max energy energy-max mins vesp
+              flying? burrowed? #f powered? #t orders addon-tag '()
+              0 0 0.0 0 0 0 0))
+
+  (define (mk-s28-obs loop units #:mins [mins 400] #:vesp [vesp 200] #:used [used 30] #:cap [cap 46])
+    (sc2-observation loop
+                     (sc2-player-common 1 mins vesp cap used 12 18 0 5 0 3)
+                     units
+                     '() '() #f '() '() '() '() '() '()))
+
+  ;; ---------------------------------------------------------------------------
+  ;; 28.1 Typed Racket Witness Enforcement, Wire Round-Trip & Rejection of Illegal Commands
+  ;; ---------------------------------------------------------------------------
+  (assert-true! (and (NoTargetAbility? (lookup-no-target-ability 32))
+                     (NoTargetAbility? (lookup-no-target-ability 3692))
+                     (not (lookup-point-target-ability 3692))
+                     (not (lookup-point-target-ability 197))
+                     (PointTargetAbility? (lookup-point-target-ability 1628))
+                     (PointTargetAbility? (lookup-point-target-ability 2146))
+                     (PointTargetAbility? (lookup-point-target-ability 1768))
+                     (PointTargetAbility? (lookup-point-target-ability 2545)))
+                "Ground-truth ability target-mode witnesses must enforce 32/3692=NoTarget, 1628/2146/1768/2545=PointTarget, 197=#f")
+
+  ;; Round-trip encode-typed-sc2-action -> decode-typed-sc2-action across all wire variants
+  (define tags-701 (make-non-empty-unit-tags '(701 702)))
+  (define pt-48-52 (make-world-point2d 48.5 52.5))
+  (assert-true! (and (NonEmptyUnitTags? tags-701) (WorldPoint2D? pt-48-52))
+                "make-non-empty-unit-tags and make-world-point2d must construct sealed witnesses")
+  (for ([t-act (in-list
+                (list (WireCmdNone (or (lookup-no-target-ability 388) (error "388")) tags-701 #f)
+                      (WireCmdPoint (or (lookup-point-target-ability 1628) (error "1628")) tags-701 pt-48-52 #t)
+                      (or (make-wire-cmd-unit (or (lookup-unit-target-ability 251) (error "251")) tags-701 8001 #f)
+                          (error "251u"))
+                      (or (make-wire-cmd-archon 701 702 #f) (error "1766"))
+                      (or (make-wire-camera-move 48.5 52.5 0.0) (error "cam"))
+                      (or (make-wire-chat #f "glhf") (error "chat"))))])
+    (define wire-b (encode-typed-sc2-action t-act))
+    (define dec-act (decode-typed-sc2-action wire-b))
+    (assert-true! (and (> (bytes-length wire-b) 0)
+                       (TypedSc2WireAction? dec-act)
+                       (equal? (encode-typed-sc2-action dec-act) wire-b))
+                  (format "encode-typed-sc2-action -> decode-typed-sc2-action must round-trip ~v" t-act)))
+
+  ;; Explicit rejection of illegal wire commands & illegal high-level S-expressions
+  (reset-typed-command-gate-stats!)
+  ;; 1. 320 (TERRANBUILD_REFINERY = UnitTarget) given Point2D
+  (assert-eq! (validate-legacy-wire-command 320 #t 40.5 42.5 0 '(501) #f) #f
+              "320 (Refinery) with Point2D must be rejected by validate-legacy-wire-command")
+  (assert-eq! (encode-sc2-action (sc2-raw-unit-command 320 (sc2-point2d 40.5 42.5) 0 '(501) #f)) #""
+              "encode-sc2-action must drop illegal 320 Refinery with Point2D")
+  ;; 2. 251 (EFFECT_INJECTLARVA = UnitTarget) given TargetNone
+  (assert-eq! (validate-legacy-wire-command 251 #f 0.0 0.0 0 '(501) #f) #f
+              "251 (Inject Larva) with TargetNone must be rejected")
+  (assert-eq! (encode-sc2-action (sc2-raw-unit-command 251 #f 0 '(501) #f)) #""
+              "encode-sc2-action must drop illegal 251 Inject with TargetNone")
+  ;; 3. 1766 (MORPH_ARCHON) with 1 tag or duplicate tags
+  (assert-eq! (make-wire-cmd-archon 501 501 #f) #f
+              "1766 (Archon) with duplicate Templar tag must be rejected")
+  (assert-eq! (validate-legacy-wire-command 1766 #f 0.0 0.0 0 '(501) #f) #f
+              "1766 (Archon) with only 1 unit tag must be rejected")
+  (assert-eq! (encode-sc2-action (sc2-raw-unit-command 1766 #f 0 '(501) #f)) #""
+              "encode-sc2-action must drop 1-tag Archon merge")
+  ;; 4. Empty unit_tags list (raw_affects_selection wipe bug)
+  (assert-eq! (make-non-empty-unit-tags '()) #f
+              "Empty unit_tags list must be unrepresentable in NonEmptyUnitTags")
+  (assert-eq! (validate-legacy-wire-command 23 #t 50.0 50.0 0 '() #f) #f
+              "Empty unit_tags wire command must be rejected")
+  (assert-eq! (encode-sc2-action (sc2-raw-unit-command 23 (sc2-point2d 50.0 50.0) 0 '() #f)) #""
+              "encode-sc2-action must drop empty unit_tags command")
+  ;; 5. NaN / Inf / out-of-bounds Point2D
+  (assert-eq! (make-world-point2d +nan.0 32.0) #f
+              "NaN coordinate must be rejected by make-world-point2d")
+  (assert-eq! (make-world-point2d +inf.0 32.0) #f
+              "Inf coordinate must be rejected by make-world-point2d")
+  (assert-eq! (validate-legacy-wire-command 16 #t +nan.0 32.0 0 '(501) #f) #f
+              "NaN point wire command must be rejected")
+  (assert-true! (>= (get-total-wire-action-drop-count) 4)
+                "Dropped illegal wire commands must increment wire-action-drop-count")
+  ;; 6. 1-arg 'emp-round & 2-coord 'neural-parasite S-expression rejections
+  (assert-true! (BotActionReject? (parse-bot-action-sexp '(cast-spell 701 emp-round 999)))
+                "1-arg (cast-spell uid emp-round eid) Self-EMP bug must be rejected as BotActionReject")
+  (assert-true! (BotActionReject? (parse-bot-action-sexp '(cast-spell 702 neural-parasite 55.0 60.0)))
+                "2-coord (cast-spell uid neural-parasite cx cy) must be rejected as BotActionReject")
+
+  ;; Translator fixes: Nydus Worm (1768 -> NydusNetwork 95 ONLY), EMP=1628, OracleRevelation=2146,
+  ;; deleted Case E TargetNone fallback, NeuralParasite=249 TargetUnit, and newly translated gameplay intents!
+  (define obs-trans-s28
+    (mk-s28-obs
+     2400
+     (list ;; Hatchery #700 (86), Idle Drone #710 (104), Ready NydusNetwork #711 (95)
+           (mk-s28-unit 700 86 32.5 32.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0)
+           (mk-s28-unit 710 104 34.5 32.5 #:hp 40.0 #:hp-max 40.0)
+           (mk-s28-unit 711 95 38.5 36.5 #:radius 1.5 #:hp 850.0 #:hp-max 850.0)
+           ;; Queen #712 (126), Burrowed Infestor #713 (127), Ghost #714 (50), Oracle #715 (495)
+           (mk-s28-unit 712 126 35.0 33.0 #:energy 75.0 #:energy-max 200.0)
+           (mk-s28-unit 713 127 52.0 58.0 #:burrowed? #t #:energy 125.0 #:energy-max 200.0)
+           (mk-s28-unit 714 50 50.0 58.0 #:energy 100.0 #:energy-max 200.0)
+           (mk-s28-unit 715 495 50.0 62.0 #:flying? #t #:energy 100.0 #:energy-max 200.0)
+           ;; Medivac #720 (54) + Marine #721 (48)
+           (mk-s28-unit 720 54 48.0 48.0 #:flying? #t #:hp 150.0 #:hp-max 150.0)
+           (mk-s28-unit 721 48 48.5 48.0 #:hp 45.0 #:hp-max 45.0)
+           ;; Sentry #730 (77) + Infestor #731 (111) + Stalker #740 (74)
+           (mk-s28-unit 730 77 46.0 50.0 #:energy 100.0 #:energy-max 200.0)
+           (mk-s28-unit 731 111 47.0 50.0 #:energy 125.0 #:energy-max 200.0)
+           (mk-s28-unit 740 74 44.0 46.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+           ;; Barracks #750 (21, with Reactor #760) + Factory #751 (27, no addon)
+           (mk-s28-unit 750 21 26.5 40.5 #:radius 1.5 #:addon-tag 760)
+           (mk-s28-unit 760 6 29.0 40.0 #:radius 1.0)
+           (mk-s28-unit 751 27 26.5 45.5 #:radius 1.5 #:addon-tag 0)
+           ;; Enemy SiegeTank #999 (33) + Destructible Rock / Enemy Blocker #998 (110)
+           (mk-s28-unit 999 33 55.0 60.0 #:alliance 4 #:hp 175.0 #:hp-max 175.0)
+           (mk-s28-unit 998 110 52.5 48.5 #:alliance 4 #:hp 145.0 #:hp-max 145.0))))
+  (define cmds-s28
+    (translate-bot-actions->sc2-raw-commands
+     '((build nydus-worm 95.0 105.0)
+       (cast-spell 714 emp-round 55.0 60.0)
+       (cast-spell 715 oracle-revelation 55.0 60.0)
+       (infestor-burrow-cast 713 neural-parasite 999)
+       (transport-juggle 720 721 46.0 46.0)
+       (clear-expansion-block 998 52.5 48.5)
+       (scout-sector 90.0 110.0)
+       (cast-protective-buff-aura guardian-shield 46.0 50.0 4.5)
+       (cast-protective-buff-aura microbial-shroud 47.0 50.0 3.5)
+       (high-ground-tactics hold-high-ground 44.0 48.0 #t)
+       (swap-addon 750 751)
+       ;; Also verify invalid 1-arg emp-round is filtered cleanly at high-level gate:
+       (cast-spell 714 emp-round 999))
+     obs-trans-s28))
+  (assert-eq! (length (get-last-bot-action-rejects)) 1
+              "High-level filter-valid-bot-actions gate must catch the single injected 1-arg emp-round reject")
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-ability-id c) 1768)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(711))
+                              (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+                       cmds-s28)
+                "Nydus Worm (1768) must be dispatched to NydusNetwork (#711, unit-type 95), NEVER Drone (#710)")
+  (assert-true! (not (ormap (lambda (c)
+                              (and (sc2-raw-unit-command? c)
+                                   (= (sc2-raw-unit-command-ability-id c) 1768)
+                                   (memv 710 (sc2-raw-unit-command-unit-tags c))))
+                            cmds-s28))
+                "Worker Drone (#710) must NEVER receive ability 1768 (BUILD_NYDUSWORM)")
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-ability-id c) 1628)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(714))
+                              (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+                       cmds-s28)
+                "Ghost emp-round must emit LotV EFFECT_EMP = 1628 PointTarget")
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-ability-id c) 2146)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(715))
+                              (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+                       cmds-s28)
+                "Oracle oracle-revelation must emit LotV EFFECT_ORACLEREVELATION = 2146 PointTarget (NOT 1632 TRAIN_QUEEN)")
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-ability-id c) 249)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(713))
+                              (= (sc2-raw-unit-command-target-unit-tag c) 999)
+                              (not (sc2-raw-unit-command-target-pos c))))
+                       cmds-s28)
+                "infestor-burrow-cast neural-parasite must emit 249 TargetUnit on #999 (never Point2D)")
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-ability-id c) 3668)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(720))
+                              (= (sc2-raw-unit-command-target-unit-tag c) 721)))
+                       cmds-s28)
+                "transport-juggle must emit LOAD_TRANSPORT (3668) TargetUnit on passenger #721")
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-ability-id c) 76)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(730))))
+                       cmds-s28)
+                "cast-protective-buff-aura on Sentry must emit GuardianShield (76)")
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-ability-id c) 2545)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(731))
+                              (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+                       cmds-s28)
+                "cast-protective-buff-aura on Infestor must emit MicrobialShroud (2545) PointTarget")
+  (assert-true! (and (ormap (lambda (c)
+                              (and (sc2-raw-unit-command? c)
+                                   (memv (sc2-raw-unit-command-ability-id c) '(452 3679))
+                                   (memv 750 (sc2-raw-unit-command-unit-tags c))))
+                            cmds-s28)
+                     (ormap (lambda (c)
+                              (and (sc2-raw-unit-command? c)
+                                   (memv (sc2-raw-unit-command-ability-id c) '(485 3679))
+                                   (memv 751 (sc2-raw-unit-command-unit-tags c))))
+                            cmds-s28))
+                "swap-addon must lift both grounded Barracks (#750) and Factory (#751) via LIFT (3679/452/485)")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 28.2 Full 8-Mineral + 2-Geyser Live Loopback ws-conn (expand ...) Test
+  ;;      & Cached 200x200 16-Base (< 5.0 ms/step) Latency
+  ;; ---------------------------------------------------------------------------
+  ;; Helper for full SC2 8-mineral (4 far + 4 close in L-arc) + 2-geyser base cluster around (px, py)
+  (define (mk-8m2g-cluster tag0 px py)
+    (append
+     ;; 4 far minerals + 4 close minerals West of (px, py) at legal >= 6.5 / >= 7.5 offsets
+     (list (mk-s28-unit (+ tag0 0) 341 (- px 7.5) (- py 3.5) #:alliance 3 #:radius 1.125 #:mins 1800)
+           (mk-s28-unit (+ tag0 1) 483 (- px 6.5) (- py 2.5) #:alliance 3 #:radius 1.125 #:mins 900)
+           (mk-s28-unit (+ tag0 2) 341 (- px 7.5) (- py 1.5) #:alliance 3 #:radius 1.125 #:mins 1800)
+           (mk-s28-unit (+ tag0 3) 483 (- px 6.5) (- py 0.5) #:alliance 3 #:radius 1.125 #:mins 900)
+           (mk-s28-unit (+ tag0 4) 483 (- px 6.5) (+ py 0.5) #:alliance 3 #:radius 1.125 #:mins 900)
+           (mk-s28-unit (+ tag0 5) 341 (- px 7.5) (+ py 1.5) #:alliance 3 #:radius 1.125 #:mins 1800)
+           (mk-s28-unit (+ tag0 6) 483 (- px 6.5) (+ py 2.5) #:alliance 3 #:radius 1.125 #:mins 900)
+           (mk-s28-unit (+ tag0 7) 341 (- px 7.5) (+ py 3.5) #:alliance 3 #:radius 1.125 #:mins 1800))
+     ;; 2 Vespene Geysers North & South of (px, py)
+     (list (mk-s28-unit (+ tag0 8) 342 px (- py 7.0) #:alliance 3 #:radius 1.5 #:vesp 2250)
+           (mk-s28-unit (+ tag0 9) 342 px (+ py 7.0) #:alliance 3 #:radius 1.5 #:vesp 2250))))
+
+  (define-values (c-in s-out) (make-pipe))
+  (define-values (s-in c-out) (make-pipe))
+  (define loop-ws (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c-in c-out #f 1))
+  (define query-batch-sizes '())
+  (define loop-srv-thd
+    (thread
+     (lambda ()
+       (let srv-loop ()
+         (define hdr2 (read-bytes 2 s-in))
+         (unless (eof-object? hdr2)
+           (define b0 (bytes-ref hdr2 0))
+           (define b1 (bytes-ref hdr2 1))
+           (define opcode (bitwise-and b0 #x0F))
+           (define masked? (not (zero? (bitwise-and b1 #x80))))
+           (define len7 (bitwise-and b1 #x7F))
+           (define plen
+             (cond [(< len7 126) len7]
+                   [(= len7 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                   [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+           (define mkey (if masked? (read-bytes 4 s-in) #f))
+           (define raw (read-bytes plen s-in))
+           (define payload (if masked? (mask-ws-payload raw mkey) raw))
+           (when (= opcode 2)
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (set! query-batch-sizes (cons (length p-items) query-batch-sizes))
+               ;; Reject candidate #0 (2 = CantBuildLocationInvalid) and accept candidate #1+ (1 = Success)
+               ;; so pad-candidates-for-base's octagon fallback candidates are verified end-to-end!
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([_it (in-list p-items)]
+                                   [idx (in-naturals)])
+                          (encode-submessage-field 3 (encode-int32 1 (if (= idx 0) 2 1))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (srv-loop)))))))
+
+  (define obs-loop-exp
+    (mk-s28-obs
+     1600
+     (append (list (mk-s28-unit 800 86 24.5 24.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0)
+                   (mk-s28-unit 801 104 26.5 24.5 #:hp 40.0 #:hp-max 40.0))
+             (mk-8m2g-cluster 8100 24.5 24.5)
+             (mk-8m2g-cluster 8200 24.5 56.5))))
+  (define cmds-loop-exp
+    (translate-bot-actions->sc2-raw-commands '((expand 24.5 56.5)) obs-loop-exp #:ws-conn loop-ws))
+  (close-output-port c-out)
+  (close-input-port c-in)
+  (thread-wait loop-srv-thd)
+  (define exp-hatch-cmd
+    (findf (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 1152)
+                  (equal? (sc2-raw-unit-command-unit-tags c) '(801))))
+           cmds-loop-exp))
+  (assert-true! (and (pair? query-batch-sizes) (>= (first query-batch-sizes) 2))
+                "Loopback ws-conn (expand ...) must send multi-candidate pad-candidates-for-base QueryPlacement batch")
+  (assert-true! (and exp-hatch-cmd
+                     (sc2-point2d? (sc2-raw-unit-command-target-pos exp-hatch-cmd))
+                     (let ([pt (sc2-raw-unit-command-target-pos exp-hatch-cmd)])
+                       (and (= (- (sc2-point2d-x pt) (floor (sc2-point2d-x pt))) 0.5)
+                            (= (- (sc2-point2d-y pt) (floor (sc2-point2d-y pt))) 0.5)
+                            (not (and (= (sc2-point2d-x pt) 24.5) (= (sc2-point2d-y pt) 56.5))))))
+                "Loopback ws-conn (expand ...) must pick confirmed (#2) half-integer 5x5 pad when #1 is rejected")
+
+  ;; Cached 200x200 16-base (obs + translate) latency assertion (< 5.0 ms/step)
+  (define g200-w 200)
+  (define g200-h 200)
+  (define g200-path (sc2-image-grid 8 g200-w g200-h (make-bytes (* g200-w g200-h) 1) #f #f))
+  (define g200-plac (sc2-image-grid 8 g200-w g200-h (make-bytes (* g200-w g200-h) 1) #f #f))
+  (define g200-hgt  (sc2-image-grid 8 g200-w g200-h (make-bytes (* g200-w g200-h) 128) #f #f))
+  (define g200-info
+    (sc2-game-info "Synthetic200x200-16Base" "" '() (cons g200-w g200-h) (list 0 0 g200-w g200-h)
+                   (list (sc2-point2d 24.5 24.5) (sc2-point2d 150.5 150.5))
+                   g200-path g200-hgt g200-plac))
+  (define bases-16-neutrals
+    (append*
+     (for*/list ([ix (in-range 4)]
+                 [iy (in-range 4)])
+       (mk-8m2g-cluster (+ 10000 (* 100 (+ (* ix 4) iy)))
+                        (+ 24.5 (* 42.0 ix))
+                        (+ 24.5 (* 42.0 iy))))))
+  (define units-16-base
+    (append (list (mk-s28-unit 900 86 24.5 24.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0))
+            (for/list ([i (in-range 16)])
+              (mk-s28-unit (+ 901 i) 104 (+ 22.0 (* 0.25 i)) 24.5 #:hp 40.0 #:hp-max 40.0))
+            (for/list ([z (in-range 8)])
+              (mk-s28-unit (+ 930 z) 105 (+ 40.0 (* 0.5 z)) 40.0 #:hp 35.0 #:hp-max 35.0))
+            (list (mk-s28-unit 9901 48 120.0 120.0 #:alliance 4 #:hp 45.0 #:hp-max 45.0))
+            bases-16-neutrals))
+  ;; Warm per-map cache on step 0
+  (void (sc2-observation->runtime-obs-hash (mk-s28-obs 400 units-16-base) #:game-info g200-info))
+  (define lat-t0 (current-inexact-monotonic-milliseconds))
+  (for ([step-k (in-range 1 9)])
+    (define obs-k (mk-s28-obs (* step-k 8) units-16-base))
+    (define rt-hash-k (sc2-observation->runtime-obs-hash obs-k #:game-info g200-info))
+    (assert-true! (>= (length (hash-ref rt-hash-k 'expansion-candidates '())) 14)
+                  "Cached 200x200 16-base converter must expose solved expansion-candidates")
+    (void (translate-bot-actions->sc2-raw-commands
+           '((train zergling) (attack-pos (930 931 932 933) 120.0 120.0))
+           obs-k
+           #:game-info g200-info)))
+  (define avg-16base-step-ms (/ (- (current-inexact-monotonic-milliseconds) lat-t0) 8.0))
+  (assert-true! (< avg-16base-step-ms 5.0)
+                (format "Cached 200x200 16-base (obs + translate) must run in < 5.0 ms/step, got ~a ms/step"
+                        avg-16base-step-ms))
+
+  ;; ---------------------------------------------------------------------------
+  ;; 28.3 Torches AIE PvZ Natural-Choke BFS Wall + Pylon AIE East-Ramp Wall
+  ;;      + 15/15 Supply-Lockout Emergency In-Main Pylon Recovery
+  ;; ---------------------------------------------------------------------------
+  ;; Build 96x96 Torches AIE-style PvZ natural-choke + ramp grid
+  (define w96 96)
+  (define h96 96)
+  (define pvz-path (make-bytes (* w96 h96) 0))
+  (define pvz-plac (make-bytes (* w96 h96) 0))
+  (define pvz-hgt  (make-bytes (* w96 h96) 112))
+  (for* ([ix (in-range 10 90)]
+         [iy (in-range 28 69)])
+    (cond
+      [(<= ix 35)
+       (bytes-set! pvz-path (+ ix (* iy w96)) 1)
+       (bytes-set! pvz-plac (+ ix (* iy w96)) 1)
+       (bytes-set! pvz-hgt  (+ ix (* iy w96)) 144)]
+      [(<= ix 38)
+       (bytes-set! pvz-hgt (+ ix (* iy w96)) 128)
+       (when (and (>= iy 46) (<= iy 50))
+         (bytes-set! pvz-path (+ ix (* iy w96)) 1)
+         (bytes-set! pvz-plac (+ ix (* iy w96)) 0))]
+      [(<= ix 59)
+       (bytes-set! pvz-path (+ ix (* iy w96)) 1)
+       (bytes-set! pvz-plac (+ ix (* iy w96)) 1)
+       (bytes-set! pvz-hgt  (+ ix (* iy w96)) 112)]
+      [(<= ix 62)
+       (bytes-set! pvz-hgt (+ ix (* iy w96)) 112)
+       (when (and (>= iy 45) (<= iy 51))
+         (bytes-set! pvz-path (+ ix (* iy w96)) 1)
+         (bytes-set! pvz-plac (+ ix (* iy w96)) 1))]
+      [else
+       (bytes-set! pvz-path (+ ix (* iy w96)) 1)
+       (bytes-set! pvz-plac (+ ix (* iy w96)) 1)
+       (bytes-set! pvz-hgt  (+ ix (* iy w96)) 112)]))
+  (define torches-pvz-grids
+    (hash 'width w96 'height h96
+          'pathing-ref (lambda (ix iy) (bytes-ref pvz-path (+ ix (* iy w96))))
+          'placement-ref (lambda (ix iy) (bytes-ref pvz-plac (+ ix (* iy w96))))
+          'height-ref (lambda (ix iy) (bytes-ref pvz-hgt (+ ix (* iy w96))))))
+  (define wall-torches-pvz
+    (solve-protoss-matchup-wall 24.5 48.5 52.5 48.5 'Zerg
+                                #:map-grids torches-pvz-grids
+                                #:enemy-x 84.5 #:enemy-y 48.5))
+  (assert-eq! (hash-ref wall-torches-pvz 'locus #f) 'natural-choke
+              "Torches AIE PvZ wall must solve at 'natural-choke")
+  (assert-eq! (hash-ref wall-torches-pvz 'grid-solved? #f) #t
+              "Torches AIE PvZ natural-choke wall must be grid-solved? = #t via BFS choke cut")
+  (define tpvz-s1 (hash-ref wall-torches-pvz 'slot-1))
+  (define tpvz-s2 (hash-ref wall-torches-pvz 'slot-2))
+  (define tpvz-pyl (hash-ref wall-torches-pvz 'pylon))
+  (define tpvz-door (hash-ref wall-torches-pvz 'door))
+  (assert-true! (and (pair? tpvz-s1) (pair? tpvz-s2) (pair? tpvz-pyl) (pair? tpvz-door)
+                     (> (car tpvz-pyl) 45.0)
+                     (not (aabb-overlaps? (car tpvz-s1) (cdr tpvz-s1) 1.5 1.5
+                                          (reserved-aabb (car tpvz-s2) (cdr tpvz-s2) 1.5 1.5 'wall-slot 0 0))))
+                "Torches AIE PvZ natural-choke wall must place disjoint 3x3 slots + rear Pylon + 1x1 door near choke")
+
+  ;; Pylon AIE East-facing main ramp wall (Main plateau [12..34]x[14..42] h=144 -> East ramp [35..38]x[26..30] h=128 -> Natural East (50.5, 28.5))
+  (define er-path (make-bytes (* w96 h96) 0))
+  (define er-plac (make-bytes (* w96 h96) 0))
+  (define er-hgt  (make-bytes (* w96 h96) 112))
+  (for* ([ix (in-range 12 88)]
+         [iy (in-range 14 43)])
+    (cond
+      [(<= ix 34)
+       (bytes-set! er-path (+ ix (* iy w96)) 1)
+       (bytes-set! er-plac (+ ix (* iy w96)) 1)
+       (bytes-set! er-hgt  (+ ix (* iy w96)) 144)]
+      [(<= ix 38)
+       (bytes-set! er-hgt (+ ix (* iy w96)) 128)
+       (when (and (>= iy 26) (<= iy 30))
+         (bytes-set! er-path (+ ix (* iy w96)) 1)
+         (bytes-set! er-plac (+ ix (* iy w96)) 0))]
+      [else
+       (bytes-set! er-path (+ ix (* iy w96)) 1)
+       (bytes-set! er-plac (+ ix (* iy w96)) 1)
+       (bytes-set! er-hgt  (+ ix (* iy w96)) 112)]))
+  (define pylon-east-ramp-grids
+    (hash 'width w96 'height h96
+          'pathing-ref (lambda (ix iy) (bytes-ref er-path (+ ix (* iy w96))))
+          'placement-ref (lambda (ix iy) (bytes-ref er-plac (+ ix (* iy w96))))
+          'height-ref (lambda (ix iy) (bytes-ref er-hgt (+ ix (* iy w96))))))
+  (define wall-pylon-east
+    (solve-protoss-matchup-wall 24.5 28.5 50.5 28.5 'Terran
+                                #:map-grids pylon-east-ramp-grids
+                                #:enemy-x 82.5 #:enemy-y 28.5))
+  (assert-eq! (hash-ref wall-pylon-east 'locus #f) 'main-ramp
+              "Pylon AIE East-ramp PvT wall must anchor at 'main-ramp")
+  (assert-eq! (hash-ref wall-pylon-east 'grid-solved? #f) #t
+              "Pylon AIE East-ramp wall must be grid-solved? = #t")
+  (define per-pyl (hash-ref wall-pylon-east 'pylon))
+  (define per-s1 (hash-ref wall-pylon-east 'slot-1))
+  (define per-s2 (hash-ref wall-pylon-east 'slot-2))
+  (assert-true! (and (pair? per-pyl) (pair? per-s1) (pair? per-s2)
+                     (< (car per-pyl) 35.0)
+                     (< (car per-s1) 35.0)
+                     (< (car per-s2) 35.0))
+                "Pylon AIE East-ramp wall slots and rear Pylon must sit on high-ground plateau (x < 35.0)")
+
+  ;; 15/15 Supply-Lockout Emergency In-Main Pylon Recovery (#5119040):
+  ;; At 15/15 supply-used/supply-cap (supply-left = 0) with 0 real Pylons in a live match vs Zerg,
+  ;; Protoss must bypass the distant natural-choke wall Pylon and place an emergency in-main Pylon near Nexus!
+  (define rt-p-15lock (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-p-15lock
+    (step-live-bot-runtime!
+     rt-p-15lock
+     (hash 'frame 420 'minerals 150 'gas 0 'supply-used 15 'supply-cap 15 'supply-left 0
+           'mineral-harvesters 15 'vespene-harvesters 0
+           'opponent-requested-race 'Zerg
+           'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+           'enemy-x 84.5 'enemy-y 48.5
+           'map-grids torches-pvz-grids
+           'mineral-patches (list (hash 'id 601 'x 18.0 'y 48.5))
+           'ally-units (for/list ([i (in-range 15)])
+                         (hash 'id (+ 8400 i) 'type 'probe 'x 22.0 'y 48.5 'hp 20 'shield 20))
+           'ally-buildings (list (hash 'id 8500 'type 'nexus 'x 24.5 'y 48.5
+                                       'hp 1000 'shield 1000 'build-progress 1.0 'powered? #f))
+           'enemy-units '()
+           'enemy-buildings '())))
+  (define pyl-15lock-act
+    (findf (lambda (a) (and (pair? a) (eq? (car a) 'build) (pair? (cdr a)) (eq? (cadr a) 'pylon)))
+           (hash-ref res-p-15lock 'actions '())))
+  (assert-true! (and pyl-15lock-act (= (length pyl-15lock-act) 4))
+                "Protoss at 15/15 supply lockout with 0 Pylons must immediately emit (build pylon x y)")
+  (assert-true! (<= (sqrt (+ (sqr (- (third pyl-15lock-act) 24.5))
+                             (sqr (- (fourth pyl-15lock-act) 48.5))))
+                    9.5)
+                (format "15/15 supply-lockout recovery Pylon must anchor open in-main near Nexus (24.5, 48.5), got ~v"
+                        pyl-15lock-act))
+
+  ;; ---------------------------------------------------------------------------
+  ;; 28.4 Multi-Race (Z, T, P, R) Live-Runtime -> filter-valid-bot-actions ->
+  ;;      translate-bot-actions->sc2-raw-commands -> encode-typed-sc2-action
+  ;;      Zero-Reject & 100% Typed Wire Verification
+  ;; ---------------------------------------------------------------------------
+  (reset-typed-command-gate-stats!)
+
+  (define z-pipe-obs-rt
+    (hash 'frame 3600 'minerals 500 'gas 350 'supply-used 76 'supply-cap 100 'supply-left 24
+          'mineral-harvesters 32 'vespene-harvesters 6
+          'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5 'enemy-x 144.5 'enemy-y 144.5
+          'ally-units (list (hash 'id 9101 'type 'drone 'x 33.5 'y 32.5 'hp 40)
+                            (hash 'id 9102 'type 'queen 'x 34.0 'y 33.0 'hp 175 'energy 75)
+                            (hash 'id 9103 'type 'roach 'x 80.0 'y 80.0 'hp 145)
+                            (hash 'id 9104 'type 'ravager 'x 81.0 'y 80.0 'hp 120)
+                            (hash 'id 9105 'type 'infestor 'x 79.0 'y 80.0 'hp 90 'energy 120)
+                            (hash 'id 9106 'type 'viper 'x 78.0 'y 80.0 'hp 150 'energy 125 'flying? #t))
+          'ally-buildings (list (hash 'id 9120 'type 'lair 'x 32.5 'y 32.5 'hp 2000 'build-progress 1.0)
+                                (hash 'id 9121 'type 'hatchery 'x 56.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 9122 'type 'spawning-pool 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0)
+                                (hash 'id 9123 'type 'roach-warren 'x 38.5 'y 36.5 'hp 850 'build-progress 1.0)
+                                (hash 'id 9124 'type 'infestation-pit 'x 40.5 'y 36.5 'hp 850 'build-progress 1.0)
+                                (hash 'id 9125 'type 'nydus-network 'x 42.5 'y 36.5 'hp 850 'build-progress 1.0))
+          'enemy-units (list (hash 'id 9801 'type 'siege-tank-sieged 'x 86.0 'y 84.0 'hp 175)
+                             (hash 'id 9802 'type 'marine 'x 85.0 'y 83.0 'hp 45)
+                             (hash 'id 9803 'type 'marine 'x 85.5 'y 83.5 'hp 45)
+                             (hash 'id 9804 'type 'marine 'x 86.0 'y 83.0 'hp 45))
+          'enemy-buildings (list (hash 'id 9810 'type 'command-center 'x 144.5 'y 144.5 'hp 1500))))
+  (define z-pipe-obs-wire
+    (mk-s28-obs 3600
+                (list (mk-s28-unit 9120 100 32.5 32.5 #:radius 2.75 #:hp 2000.0 #:hp-max 2000.0)
+                      (mk-s28-unit 9121 86 56.5 32.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0)
+                      (mk-s28-unit 9122 89 36.5 36.5 #:radius 1.5)
+                      (mk-s28-unit 9123 97 38.5 36.5 #:radius 1.5)
+                      (mk-s28-unit 9124 94 40.5 36.5 #:radius 1.5)
+                      (mk-s28-unit 9125 95 42.5 36.5 #:radius 1.5)
+                      (mk-s28-unit 9101 104 33.5 32.5 #:hp 40.0 #:hp-max 40.0)
+                      (mk-s28-unit 9102 126 34.0 33.0 #:hp 175.0 #:hp-max 175.0 #:energy 75.0 #:energy-max 200.0)
+                      (mk-s28-unit 9103 110 80.0 80.0 #:hp 145.0 #:hp-max 145.0)
+                      (mk-s28-unit 9104 688 81.0 80.0 #:hp 120.0 #:hp-max 120.0)
+                      (mk-s28-unit 9105 111 79.0 80.0 #:hp 90.0 #:hp-max 90.0 #:energy 120.0 #:energy-max 200.0)
+                      (mk-s28-unit 9106 499 78.0 80.0 #:flying? #t #:hp 150.0 #:hp-max 150.0 #:energy 125.0 #:energy-max 200.0)
+                      (mk-s28-unit 9130 151 33.0 31.0 #:hp 25.0 #:hp-max 25.0)
+                      (mk-s28-unit 9801 32 86.0 84.0 #:alliance 4 #:hp 175.0 #:hp-max 175.0)
+                      (mk-s28-unit 9802 48 85.0 83.0 #:alliance 4 #:hp 45.0 #:hp-max 45.0)
+                      (mk-s28-unit 9803 48 85.5 83.5 #:alliance 4 #:hp 45.0 #:hp-max 45.0)
+                      (mk-s28-unit 9804 48 86.0 83.0 #:alliance 4 #:hp 45.0 #:hp-max 45.0)
+                      (mk-s28-unit 9810 18 144.5 144.5 #:alliance 4 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0))))
+
+  (define t-pipe-obs-rt
+    (hash 'frame 3600 'minerals 450 'gas 300 'supply-used 78 'supply-cap 102 'supply-left 24
+          'mineral-harvesters 32 'vespene-harvesters 6
+          'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5 'enemy-x 144.5 'enemy-y 144.5
+          'ally-units (list (hash 'id 9201 'type 'scv 'x 33.5 'y 32.5 'hp 45)
+                            (hash 'id 9202 'type 'marine 'x 80.0 'y 80.0 'hp 45)
+                            (hash 'id 9203 'type 'marauder 'x 80.5 'y 80.0 'hp 125)
+                            (hash 'id 9204 'type 'ghost 'x 79.5 'y 80.0 'hp 100 'energy 100)
+                            (hash 'id 9205 'type 'siege-tank 'x 78.5 'y 80.0 'hp 175)
+                            (hash 'id 9206 'type 'medivac 'x 78.0 'y 80.0 'hp 150 'energy 80 'flying? #t))
+          'ally-buildings (list (hash 'id 9220 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'energy 75 'build-progress 1.0)
+                                (hash 'id 9221 'type 'orbital-command 'x 56.5 'y 32.5 'hp 1500 'energy 55 'build-progress 1.0)
+                                (hash 'id 9222 'type 'barracks 'x 38.5 'y 36.5 'hp 1000 'build-progress 1.0)
+                                (hash 'id 9223 'type 'factory 'x 42.5 'y 36.5 'hp 1250 'build-progress 1.0)
+                                (hash 'id 9224 'type 'starport 'x 46.5 'y 36.5 'hp 1300 'build-progress 1.0))
+          'enemy-units (list (hash 'id 9821 'type 'archon 'x 86.0 'y 84.0 'hp 10 'shield 350)
+                             (hash 'id 9822 'type 'high-templar 'x 86.5 'y 84.5 'hp 40 'shield 40 'energy 100)
+                             (hash 'id 9823 'type 'zealot 'x 84.0 'y 82.0 'hp 100 'shield 50))
+          'enemy-buildings (list (hash 'id 9830 'type 'nexus 'x 144.5 'y 144.5 'hp 1000 'shield 1000))))
+  (define t-pipe-obs-wire
+    (mk-s28-obs 3600
+                (list (mk-s28-unit 9220 132 32.5 32.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0 #:energy 75.0 #:energy-max 200.0)
+                      (mk-s28-unit 9221 132 56.5 32.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0 #:energy 55.0 #:energy-max 200.0)
+                      (mk-s28-unit 9222 21 38.5 36.5 #:radius 1.5)
+                      (mk-s28-unit 9223 27 42.5 36.5 #:radius 1.5)
+                      (mk-s28-unit 9224 28 46.5 36.5 #:radius 1.5)
+                      (mk-s28-unit 9201 45 33.5 32.5 #:hp 45.0 #:hp-max 45.0)
+                      (mk-s28-unit 9202 48 80.0 80.0 #:hp 45.0 #:hp-max 45.0)
+                      (mk-s28-unit 9203 51 80.5 80.0 #:hp 125.0 #:hp-max 125.0)
+                      (mk-s28-unit 9204 50 79.5 80.0 #:hp 100.0 #:hp-max 100.0 #:energy 100.0 #:energy-max 200.0)
+                      (mk-s28-unit 9205 33 78.5 80.0 #:hp 175.0 #:hp-max 175.0)
+                      (mk-s28-unit 9206 54 78.0 80.0 #:flying? #t #:hp 150.0 #:hp-max 150.0 #:energy 80.0 #:energy-max 200.0)
+                      (mk-s28-unit 9821 141 86.0 84.0 #:alliance 4 #:hp 10.0 #:hp-max 10.0 #:shield 350.0 #:shield-max 350.0)
+                      (mk-s28-unit 9822 75 86.5 84.5 #:alliance 4 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 100.0 #:energy-max 200.0)
+                      (mk-s28-unit 9823 73 84.0 82.0 #:alliance 4 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)
+                      (mk-s28-unit 9830 59 144.5 144.5 #:alliance 4 #:radius 2.75))))
+
+  (define p-pipe-obs-rt
+    (hash 'frame 3600 'minerals 450 'gas 300 'supply-used 78 'supply-cap 102 'supply-left 24
+          'mineral-harvesters 32 'vespene-harvesters 6
+          'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5 'enemy-x 144.5 'enemy-y 144.5
+          'ally-units (list (hash 'id 9301 'type 'probe 'x 33.5 'y 32.5 'hp 20 'shield 20)
+                            (hash 'id 9302 'type 'stalker 'x 80.0 'y 80.0 'hp 80 'shield 80)
+                            (hash 'id 9303 'type 'sentry 'x 79.5 'y 80.0 'hp 40 'shield 40 'energy 100)
+                            (hash 'id 9304 'type 'high-templar 'x 78.5 'y 80.0 'hp 40 'shield 40 'energy 120)
+                            (hash 'id 9305 'type 'oracle 'x 78.0 'y 82.0 'hp 100 'shield 60 'energy 90 'flying? #t))
+          'ally-buildings (list (hash 'id 9320 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'energy 60 'build-progress 1.0)
+                                (hash 'id 9321 'type 'nexus 'x 56.5 'y 32.5 'hp 1000 'shield 1000 'energy 60 'build-progress 1.0)
+                                (hash 'id 9322 'type 'pylon 'x 37.0 'y 36.0 'hp 200 'shield 200 'build-progress 1.0)
+                                (hash 'id 9323 'type 'gateway 'x 38.5 'y 36.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t)
+                                (hash 'id 9324 'type 'cybernetics-core 'x 41.5 'y 36.5 'hp 550 'shield 550 'build-progress 1.0 'powered? #t)
+                                (hash 'id 9325 'type 'robotics-facility 'x 44.5 'y 36.5 'hp 450 'shield 450 'build-progress 1.0 'powered? #t))
+          'enemy-units (list (hash 'id 9841 'type 'hydralisk 'x 85.0 'y 83.0 'hp 90)
+                             (hash 'id 9842 'type 'hydralisk 'x 85.5 'y 83.5 'hp 90)
+                             (hash 'id 9843 'type 'lurker-burrowed 'x 86.0 'y 84.0 'hp 200 'cloaked #t 'is-burrowed #t)
+                             (hash 'id 9844 'type 'infestor 'x 87.0 'y 84.0 'hp 90 'energy 100))
+          'enemy-buildings (list (hash 'id 9850 'type 'lair 'x 144.5 'y 144.5 'hp 2000))))
+  (define p-pipe-obs-wire
+    (mk-s28-obs 3600
+                (list (mk-s28-unit 9320 59 32.5 32.5 #:radius 2.75 #:energy 60.0 #:energy-max 200.0)
+                      (mk-s28-unit 9321 59 56.5 32.5 #:radius 2.75 #:energy 60.0 #:energy-max 200.0)
+                      (mk-s28-unit 9322 60 37.0 36.0 #:radius 1.0)
+                      (mk-s28-unit 9323 62 38.5 36.5 #:radius 1.5 #:powered? #t)
+                      (mk-s28-unit 9324 72 41.5 36.5 #:radius 1.5 #:powered? #t)
+                      (mk-s28-unit 9325 71 44.5 36.5 #:radius 1.5 #:powered? #t)
+                      (mk-s28-unit 9301 84 33.5 32.5 #:hp 20.0 #:hp-max 20.0 #:shield 20.0 #:shield-max 20.0)
+                      (mk-s28-unit 9302 74 80.0 80.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+                      (mk-s28-unit 9303 77 79.5 80.0 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 100.0 #:energy-max 200.0)
+                      (mk-s28-unit 9304 75 78.5 80.0 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 120.0 #:energy-max 200.0)
+                      (mk-s28-unit 9305 495 78.0 82.0 #:flying? #t #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 90.0 #:energy-max 200.0)
+                      (mk-s28-unit 9841 107 85.0 83.0 #:alliance 4 #:hp 90.0 #:hp-max 90.0)
+                      (mk-s28-unit 9842 107 85.5 83.5 #:alliance 4 #:hp 90.0 #:hp-max 90.0)
+                      (mk-s28-unit 9843 503 86.0 84.0 #:alliance 4 #:burrowed? #t #:hp 200.0 #:hp-max 200.0)
+                      (mk-s28-unit 9844 111 87.0 84.0 #:alliance 4 #:hp 90.0 #:hp-max 90.0 #:energy 100.0 #:energy-max 200.0)
+                      (mk-s28-unit 9850 100 144.5 144.5 #:alliance 4 #:radius 2.75))))
+
+  (define total-verified-wire-actions 0)
+  (for ([cfg (in-list (list (list 'Mothman-Z 'Zerg z-pipe-obs-rt z-pipe-obs-wire)
+                            (list 'Mothman-T 'Terran t-pipe-obs-rt t-pipe-obs-wire)
+                            (list 'Mothman-P 'Protoss p-pipe-obs-rt p-pipe-obs-wire)
+                            (list 'Mothman-R 'Random t-pipe-obs-rt t-pipe-obs-wire)
+                            (list 'Mothman-R 'Random p-pipe-obs-rt p-pipe-obs-wire)))])
+    (match-define (list bname brace obs-rt obs-w) cfg)
+    (define rt-inst (make-live-bot-runtime #:bot-name bname #:race brace))
+    (define step-res (step-live-bot-runtime! rt-inst obs-rt))
+    (define all-step-acts
+      (append (hash-ref step-res 'actions '())
+              (hash-ref step-res 'mirror-actions '())))
+    (define-values (valid-sexps rejects) (filter-valid-bot-actions all-step-acts))
+    (assert-eq! rejects '()
+                (format "~a (~a) live runtime must produce 0 BotActionRejects, got ~v"
+                        bname brace rejects))
+    (define wire-cmds (translate-bot-actions->sc2-raw-commands valid-sexps obs-w))
+    (assert-true! (pair? wire-cmds)
+                  (format "~a (~a) live runtime must translate > 0 wire commands" bname brace))
+    (for ([wc (in-list wire-cmds)])
+      (define typed-wc (legacy-wire-action->typed-sc2-action wc))
+      (assert-true! (TypedSc2WireAction? typed-wc)
+                    (format "~a (~a) wire command ~v must validate as TypedSc2WireAction" bname brace wc))
+      (define wb (encode-typed-sc2-action typed-wc))
+      (define rt-wc (decode-typed-sc2-action wb))
+      (assert-true! (and (> (bytes-length wb) 0)
+                         (TypedSc2WireAction? rt-wc)
+                         (equal? (encode-sc2-action wc) wb))
+                    (format "~a (~a) wire command ~v must serialize identically via encode-typed-sc2-action and round-trip"
+                            bname brace wc))
+      (set! total-verified-wire-actions (add1 total-verified-wire-actions)))
+    (define req-act-bytes (make-request-action wire-cmds #:id 42))
+    (assert-true! (> (bytes-length req-act-bytes) 0)
+                  (format "~a (~a) make-request-action must serialize non-empty RequestAction packet" bname brace)))
+
+  (assert-eq! (get-total-bot-action-reject-count) 0
+              "Multi-race (Z, T, P, R) live pipeline must finish with 0 total BotActionRejects")
+  (assert-eq! (get-total-wire-action-drop-count) 0
+              "Multi-race (Z, T, P, R) live pipeline must finish with 0 dropped wire commands")
+  (assert-true! (>= total-verified-wire-actions 15)
+                "Multi-race (Z, T, P, R) live pipeline must verify >= 15 TypedSc2WireAction wire packets"))
+
+;; =============================================================================
+;; Suite 29: Adversarial Protobuf Output Differential & Schema Fuzzer (3,000 cases)
+;; =============================================================================
+(run-suite "29.1 Protobuf Output Differential & Schema Fuzzer (3,000 cases across C1-C4 + Wire Verifier)"
+  ;; Direct wire-verifier sanity checks on clean vs hostile binary protos
+  (define-values (step-ok? step-dec) (verify-sc2-request-bytes (make-request-step 4 #:id 7)))
+  (assert-true! (and step-ok? (equal? step-dec '(request 12 7 (request-step 4))))
+                "verify-sc2-request-bytes must accept valid RequestStep")
+  (define-values (qp-ok? qp-dec)
+    (verify-sc2-request-bytes
+     (make-request-query-placement (list (list 1154 64.5 92.25 99)) #:id 8)))
+  (assert-true! (and qp-ok? (list? qp-dec) (eq? (car qp-dec) 'request) (= (cadr qp-dec) 14))
+                "verify-sc2-request-bytes must accept valid RequestQuery placement")
+  (define-values (empty-req-ok? _empty-reason) (verify-sc2-request-bytes #""))
+  (assert-true! (not empty-req-ok?)
+                "verify-sc2-request-bytes must reject empty Request (0 oneof fields)")
+  (define-values (dual-oneof-ok? _dual-reason)
+    (verify-sc2-request-bytes (bytes-append (make-request-step 2) (make-request-ping))))
+  (assert-true! (not dual-oneof-ok?)
+                "verify-sc2-request-bytes must reject Request with 2 oneof payloads")
+
+  ;; Deterministic 3,000-case slice across Campaigns 1-4 in < 300 ms
+  (define fuzz-sum
+    (run-protobuf-output-fuzz-campaigns
+     #:seed #x5C2F022026
+     #:c1-iters 1200
+     #:c2-iters 960
+     #:c3-steps 40
+     #:c4-iters 800
+     #:quiet? #t))
+  (assert-eq! (+ (proto-fuzz-summary-c1-cases fuzz-sum)
+                 (proto-fuzz-summary-c2-cases fuzz-sum)
+                 (proto-fuzz-summary-c3-steps fuzz-sum)
+                 (proto-fuzz-summary-c4-cases fuzz-sum))
+              3000
+              "Suite 29 must execute exact 3,000 deterministic fuzz cases across C1-C4")
+  (assert-true! (> (proto-fuzz-summary-c1-valid-frames fuzz-sum) 1000)
+                "Campaign 1 slice must verify > 1,000 non-empty valid Request/Action/Point wire frames")
+  (assert-eq! (proto-fuzz-summary-c3-brain-rejects fuzz-sum) 0
+              "Campaign 3 live Z/T/P/R chaos slice must emit 0 BotActionRejects")
+  (assert-eq! (proto-fuzz-summary-c3-wire-drops fuzz-sum) 0
+              "Campaign 3 live Z/T/P/R chaos slice must drop 0 wire commands")
+  (assert-true! (> (proto-fuzz-summary-c3-valid-requests fuzz-sum) 15)
+                "Campaign 3 live Z/T/P/R chaos slice must emit verified RequestAction frames")
+  (assert-eq! (proto-fuzz-summary-c4-rejected fuzz-sum) 800
+              "Campaign 4 negative binary mutation slice must reject 800/800 corrupted protos")
+  (assert-true! (< (proto-fuzz-summary-elapsed-ms fuzz-sum) 300.0)
+                (format "Suite 29 3,000-case fuzz slice must complete in < 300 ms, took ~a ms"
+                        (proto-fuzz-summary-elapsed-ms fuzz-sum))))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

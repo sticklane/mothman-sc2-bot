@@ -18,7 +18,8 @@
          racket/vector
          file/sha1
          net/base64
-         "sc2-game-constants.rkt")
+         "sc2-game-constants.rkt"
+         "sc2-typed-commands.rkt")
 
 (provide
  ;; RFC 6455 WebSocket Client
@@ -88,9 +89,11 @@
  make-request-ping
  encode-point2d
  encode-point3d
+ encode-point
  encode-action-raw-unit-command
  encode-action-raw-camera-move
  encode-action-ui-control-group
+ legacy-wire-action->typed-sc2-action
  encode-sc2-action
  decode-sc2-response
  decode-image-grid-bytes
@@ -132,6 +135,7 @@
  sc2-unit-is-vespene-geyser?
  sc2-unit-is-gas-building?
  sc2-townhall-resource-legal?
+ sc2-townhall-all-resources-legal?
  solve-exact-townhall-pad
  compute-ground-bfs-distances
  solve-all-map-expansion-bases
@@ -146,6 +150,10 @@
  pick-safe-mule-mineral-patch
  saturate-workers-and-gas-commands
  translate-bot-actions->sc2-raw-commands
+ get-last-bot-action-rejects
+ get-total-bot-action-reject-count
+ get-total-wire-action-drop-count
+ reset-typed-command-gate-stats!
  make-wire-apm-governor
  govern-sc2-wire-actions!)
 
@@ -356,21 +364,63 @@
       (close-output-port (sc2-ws-conn-out conn)))))
 
 (define (sc2-ws-rpc! conn request-bytes)
-  (sc2-ws-send-binary! conn request-bytes)
-  (define resp-bytes (sc2-ws-recv-binary! conn))
-  (if (eof-object? resp-bytes)
-      (sc2-response #f 'ended '("WebSocket EOF") #f #f #f #f #f #f '() #f #f '() #f)
-      (decode-sc2-response resp-bytes)))
+  (cond
+    [(or (not (bytes? request-bytes)) (zero? (bytes-length request-bytes)))
+     (sc2-response #f 'in-game '("Skipped empty request") #f #f #f #f #f #f '() #f #f '() #f)]
+    [else
+     (sc2-ws-send-binary! conn request-bytes)
+     (define resp-bytes (sc2-ws-recv-binary! conn))
+     (if (eof-object? resp-bytes)
+         (sc2-response #f 'ended '("WebSocket EOF") #f #f #f #f #f #f '() #f #f '() #f)
+         (decode-sc2-response resp-bytes))]))
 
 ;; =============================================================================
 ;; 2. Protobuf Wire Format Encoder & Decoder
 ;; =============================================================================
 
+(define SC2-PROTO-FLOAT32-MAX 3.4028234e38)
+
+(define (sanitize-uint64-wire n [default 0])
+  (cond
+    [(exact-integer? n)
+     (bitwise-and n #xFFFFFFFFFFFFFFFF)]
+    [(and (real? n) (not (nan? n)) (not (infinite? n)))
+     (bitwise-and (exact-round n) #xFFFFFFFFFFFFFFFF)]
+    [else default]))
+
+(define (sanitize-uint32-wire n [default 0])
+  (cond
+    [(exact-integer? n)
+     (bitwise-and n #xFFFFFFFF)]
+    [(and (real? n) (not (nan? n)) (not (infinite? n)))
+     (bitwise-and (exact-round n) #xFFFFFFFF)]
+    [else default]))
+
+(define (sanitize-int32-wire n [default 0])
+  (define raw
+    (cond
+      [(exact-integer? n) n]
+      [(and (real? n) (not (nan? n)) (not (infinite? n)))
+       (exact-round n)]
+      [else default]))
+  (define u32 (bitwise-and raw #xFFFFFFFF))
+  (if (>= u32 #x80000000)
+      (bitwise-ior u32 #xFFFFFFFF00000000)
+      u32))
+
+(define (sanitize-finite-float32 val [default 0.0])
+  (cond
+    [(and (real? val) (not (nan? val)) (not (infinite? val)))
+     (define f (real->double-flonum val))
+     (cond
+       [(> f SC2-PROTO-FLOAT32-MAX) SC2-PROTO-FLOAT32-MAX]
+       [(< f (- SC2-PROTO-FLOAT32-MAX)) (- SC2-PROTO-FLOAT32-MAX)]
+       [(= f 0.0) 0.0]
+       [else f])]
+    [else default]))
+
 (define (encode-varint n)
-  (define u
-    (if (< n 0)
-        (bitwise-and (exact-round n) #xFFFFFFFFFFFFFFFF)
-        (exact-round n)))
+  (define u (sanitize-uint64-wire n 0))
   (let loop ([val u]
              [acc '()])
     (define low7 (bitwise-and val #x7F))
@@ -386,35 +436,47 @@
              [acc 0])
     (when (>= idx len)
       (error 'decode-varint "Truncated varint at offset ~a (len ~a)" idx len))
+    (when (> shift 63)
+      (error 'decode-varint "Overlong varint (>10 bytes) at offset ~a" offset))
     (define b (bytes-ref bstr idx))
+    (when (and (= shift 63) (> b 1))
+      (error 'decode-varint "Varint overflows uint64 at offset ~a" offset))
     (define next-acc (bitwise-ior acc (arithmetic-shift (bitwise-and b #x7F) shift)))
     (if (zero? (bitwise-and b #x80))
         (values next-acc (add1 idx))
         (loop (add1 idx) (+ shift 7) next-acc))))
 
 (define (encode-tag field-number wire-type)
-  (encode-varint (bitwise-ior (arithmetic-shift field-number 3)
-                              (bitwise-and wire-type #x07))))
+  (define fn
+    (if (and (exact-integer? field-number) (<= 1 field-number #x1FFFFFFF))
+        field-number
+        1))
+  (define wt
+    (if (memv wire-type '(0 1 2 5))
+        wire-type
+        0))
+  (encode-varint (bitwise-ior (arithmetic-shift fn 3) wt)))
 
 (define encode-int32
   (case-lambda
-    [(val) (encode-varint val)]
+    [(val) (encode-varint (sanitize-int32-wire val 0))]
     [(field-number val)
-     (bytes-append (encode-tag field-number 0) (encode-varint val))]))
+     (bytes-append (encode-tag field-number 0)
+                   (encode-varint (sanitize-int32-wire val 0)))]))
 
 (define encode-uint32
   (case-lambda
-    [(val) (encode-varint (bitwise-and (exact-round val) #xFFFFFFFF))]
+    [(val) (encode-varint (sanitize-uint32-wire val 0))]
     [(field-number val)
      (bytes-append (encode-tag field-number 0)
-                   (encode-varint (bitwise-and (exact-round val) #xFFFFFFFF)))]))
+                   (encode-varint (sanitize-uint32-wire val 0)))]))
 
 (define encode-uint64
   (case-lambda
-    [(val) (encode-varint (bitwise-and (exact-round val) #xFFFFFFFFFFFFFFFF))]
+    [(val) (encode-varint (sanitize-uint64-wire val 0))]
     [(field-number val)
      (bytes-append (encode-tag field-number 0)
-                   (encode-varint (bitwise-and (exact-round val) #xFFFFFFFFFFFFFFFF)))]))
+                   (encode-varint (sanitize-uint64-wire val 0)))]))
 
 (define encode-bool
   (case-lambda
@@ -425,21 +487,23 @@
 (define encode-float32
   (case-lambda
     [(val)
-     (real->floating-point-bytes (exact->inexact val) 4 #f)]
+     (real->floating-point-bytes (sanitize-finite-float32 val 0.0) 4 #f)]
     [(field-number val)
      (bytes-append (encode-tag field-number 5)
-                   (real->floating-point-bytes (exact->inexact val) 4 #f))]))
+                   (real->floating-point-bytes (sanitize-finite-float32 val 0.0) 4 #f))]))
 
 (define (decode-float32 bstr [offset 0])
   (floating-point-bytes->real bstr #f offset (+ offset 4)))
 
 (define (encode-bytes-field field-number raw-bytes)
+  (define b (if (bytes? raw-bytes) raw-bytes #""))
   (bytes-append (encode-tag field-number 2)
-                (encode-varint (bytes-length raw-bytes))
-                raw-bytes))
+                (encode-varint (bytes-length b))
+                b))
 
 (define (encode-string-field field-number str)
-  (encode-bytes-field field-number (string->bytes/utf-8 (format "~a" str))))
+  (define s (if (string? str) str (format "~a" str)))
+  (encode-bytes-field field-number (string->bytes/utf-8 s)))
 
 (define (encode-submessage-field field-number submsg-bytes)
   (encode-bytes-field field-number submsg-bytes))
@@ -865,10 +929,12 @@
           (build-ultralisk-cavern 1159 #t)
           (build-nydus-network 1161 #t)
           (build-nydus-worm 1768 #t)
+          (build-nydus-canal 1768 #f)
           (build-spine-crawler 1166 #t)
           (build-spore-crawler 1167 #t)
           (build-creep-tumor 3691 #t)
           (build-creep-tumor-queen 1694 #t)
+          (spawn-creep-tumor-queen 1662 #t)
           (build-creep-tumor-tumor 1733 #t)
           ;; Terran Training
           (train-scv 524 #t)
@@ -997,6 +1063,7 @@
           (transfuse 1664 #f)
           (corrosive-bile 2338 #t)
           (fungal-growth 74 #t)
+          (microbial-shroud 2545 #t)
           (neural-parasite 249 #t)
           (abduct 2067 #t)
           (blinding-cloud 2063 #t)
@@ -1645,7 +1712,7 @@
 
 (define (race->sc2-enum r)
   (cond
-    [(exact-integer? r) r]
+    [(and (exact-integer? r) (<= 1 r 4)) r]
     [else
      (case (normalize-sc2-name->symbol r)
        [(terran) 1]
@@ -1664,7 +1731,7 @@
 
 (define (difficulty->sc2-enum d)
   (cond
-    [(exact-integer? d) d]
+    [(and (exact-integer? d) (<= 1 d 10)) d]
     [else
      (case (normalize-sc2-name->symbol d)
        [(veryeasy very-easy) 1]
@@ -1700,25 +1767,57 @@
 (define (wrap-sc2-request field-num submsg-bytes [req-id #f])
   (bytes-append
    (encode-submessage-field field-num submsg-bytes)
-   (if (exact-integer? req-id)
+   (if (and (exact-integer? req-id) (<= 0 req-id #xFFFFFFFF))
        (encode-uint32 97 req-id)
        #"")))
 
+(define (sanitize-world-coord v [default 0.0])
+  (cond
+    [(and (real? v) (not (nan? v)) (not (infinite? v)))
+     (define f (real->double-flonum v))
+     (cond
+       [(< f 0.0) 0.0]
+       [(> f 256.0) 256.0]
+       [(= f 0.0) 0.0]
+       [else f])]
+    [else default]))
+
+(define (valid-world-coord? v)
+  (and (real? v)
+       (not (nan? v))
+       (not (infinite? v))
+       (let ([f (real->double-flonum v)])
+         (and (>= f 0.0) (<= f 256.0)))))
+
+(define (valid-nonempty-utf8-str? s [max-bytes 256])
+  (and (string? s)
+       (let ([blen (bytes-length (string->bytes/utf-8 s))])
+         (and (> blen 0) (<= blen max-bytes)))))
+
+(define (valid-tcp-port? p)
+  (and (exact-integer? p) (<= 1 p 65535)))
+
 (define (encode-point2d x y)
-  (bytes-append (encode-float32 1 x)
-                (encode-float32 2 y)))
+  (bytes-append (encode-float32 1 (sanitize-world-coord x 0.0))
+                (encode-float32 2 (sanitize-world-coord y 0.0))))
 
 (define (encode-point3d x y [z 0.0])
-  (bytes-append (encode-float32 1 x)
-                (encode-float32 2 y)
-                (encode-float32 3 z)))
+  (bytes-append (encode-float32 1 (sanitize-world-coord x 0.0))
+                (encode-float32 2 (sanitize-world-coord y 0.0))
+                (encode-float32 3 (sanitize-finite-float32 z 0.0))))
+
+(define encode-point encode-point3d)
 
 (define (encode-player-setup type race [difficulty #f] [player-name #f])
+  (define eff-type
+    (if (and (exact-integer? type) (<= 1 type 3)) type 1))
   (bytes-append
-   (encode-int32 1 type)
+   (encode-int32 1 eff-type)
    (encode-int32 2 (race->sc2-enum race))
    (if difficulty (encode-int32 3 (difficulty->sc2-enum difficulty)) #"")
-   (if player-name (encode-string-field 4 player-name) #"")))
+   (if (valid-nonempty-utf8-str? player-name 256)
+       (encode-string-field 4 player-name)
+       #"")))
 
 (define (make-request-create-game #:map-path [map-path "Simple64.SC2Map"]
                                   #:battlenet-map-name [bnet-map #f]
@@ -1731,29 +1830,38 @@
                                   #:disable-fog? [disable-fog? #f]
                                   #:random-seed [random-seed #f]
                                   #:id [req-id #f])
+  (define eff-map-path
+    (if (valid-nonempty-utf8-str? map-path 260)
+        map-path
+        "Simple64.SC2Map"))
   (define map-data-bytes
     (if (and include-map-data? (string? map-path) (file-exists? map-path))
         (with-handlers ([exn:fail? (lambda (_e) #"")])
           (encode-bytes-field 7 (call-with-input-file map-path port->bytes)))
         #""))
   (define map-part
-    (if bnet-map
+    (if (valid-nonempty-utf8-str? bnet-map 260)
         (encode-string-field 2 bnet-map)
         (encode-submessage-field 1
-                                 (bytes-append (encode-string-field 1 map-path)
+                                 (bytes-append (encode-string-field 1 eff-map-path)
                                                map-data-bytes))))
-  (define setups-bytes
+  (define valid-custom-setups
     (if (and (list? player-setups) (not (null? player-setups)))
-        (apply bytes-append
-               (for/list ([ps (in-list player-setups)])
-                 (match ps
-                   [(list type race diff)
-                    (encode-submessage-field 3 (encode-player-setup type race diff))]
-                   [(list type race)
-                    (encode-submessage-field 3 (encode-player-setup type race))]
-                   [(? bytes? b)
-                    (encode-submessage-field 3 b)]
-                   [_ #""])))
+        (filter-map
+         (lambda (ps)
+           (match ps
+             [(list type race diff name)
+              (encode-submessage-field 3 (encode-player-setup type race diff name))]
+             [(list type race diff)
+              (encode-submessage-field 3 (encode-player-setup type race diff))]
+             [(list type race)
+              (encode-submessage-field 3 (encode-player-setup type race))]
+             [_ #f]))
+         player-setups)
+        '()))
+  (define setups-bytes
+    (if (not (null? valid-custom-setups))
+        (apply bytes-append valid-custom-setups)
         (bytes-append
          (encode-submessage-field 3 (encode-player-setup 1 our-race))
          (encode-submessage-field 3 (encode-player-setup 2 computer-race computer-difficulty)))))
@@ -1762,8 +1870,10 @@
      map-part
      setups-bytes
      (if disable-fog? (encode-bool 4 #t) #"")
-     (if (exact-integer? random-seed) (encode-uint32 5 random-seed) #"")
-     (encode-bool 6 realtime?)))
+     (if (and (exact-integer? random-seed) (<= 0 random-seed #xFFFFFFFF))
+         (encode-uint32 5 random-seed)
+         #"")
+     (encode-bool 6 (not (not realtime?)))))
   (wrap-sc2-request 1 body req-id))
 
 (define (encode-port-set game-port base-port)
@@ -1790,27 +1900,29 @@
   ;; raw_crop_to_playable_area=7, show_placeholders=8, show_burrowed_shadows=9
   (define iface-options
     (bytes-append
-     (encode-bool 1 raw?)
-     (encode-bool 2 score?)
-     (encode-bool 5 show-cloaked?)
-     (encode-bool 6 raw-affects-selection?)
-     (encode-bool 7 raw-crop-to-playable-area?)
-     (encode-bool 8 show-placeholders?)
-     (encode-bool 9 show-burrowed-shadows?)))
+     (encode-bool 1 (not (not raw?)))
+     (encode-bool 2 (not (not score?)))
+     (encode-bool 5 (not (not show-cloaked?)))
+     (encode-bool 6 (not (not raw-affects-selection?)))
+     (encode-bool 7 (not (not raw-crop-to-playable-area?)))
+     (encode-bool 8 (not (not show-placeholders?)))
+     (encode-bool 9 (not (not show-burrowed-shadows?)))))
   (define participant-part
-    (if (exact-integer? obs-id)
+    (if (and (exact-integer? obs-id) (<= 1 obs-id #xFFFFFFFF))
         (encode-uint32 2 obs-id)
         (encode-int32 1 (race->sc2-enum race))))
   (define server-ports-part
     (match server-ports
-      [(or (list gp bp) (cons (? real? gp) (? real? bp)))
+      [(or (list (? valid-tcp-port? gp) (? valid-tcp-port? bp))
+           (cons (? valid-tcp-port? gp) (? valid-tcp-port? bp)))
        (encode-submessage-field 4 (encode-port-set gp bp))]
       [_ #""]))
   (define client-ports-part
     (apply bytes-append
            (for/list ([cp (in-list (if (list? client-ports) client-ports '()))])
              (match cp
-               [(or (list gp bp) (cons (? real? gp) (? real? bp)))
+               [(or (list (? valid-tcp-port? gp) (? valid-tcp-port? bp))
+                    (cons (? valid-tcp-port? gp) (? valid-tcp-port? bp)))
                 (encode-submessage-field 5 (encode-port-set gp bp))]
                [_ #""]))))
   (define body
@@ -1819,9 +1931,9 @@
      (encode-submessage-field 3 iface-options)
      server-ports-part
      client-ports-part
-     (if (exact-integer? shared-port) (encode-int32 6 shared-port) #"")
-     (if player-name (encode-string-field 7 player-name) #"")
-     (if host-ip (encode-string-field 8 host-ip) #"")))
+     (if (valid-tcp-port? shared-port) (encode-int32 6 shared-port) #"")
+     (if (valid-nonempty-utf8-str? player-name 256) (encode-string-field 7 player-name) #"")
+     (if (valid-nonempty-utf8-str? host-ip 256) (encode-string-field 8 host-ip) #"")))
   (wrap-sc2-request 2 body req-id))
 
 (define (make-request-leave-game #:id [req-id #f])
@@ -1839,82 +1951,146 @@
   (define body
     (bytes-append
      (if disable-fog? (encode-bool 1 #t) #"")
-     (if (exact-integer? game-loop) (encode-uint32 2 game-loop) #"")))
+     (if (and (exact-integer? game-loop) (<= 0 game-loop #xFFFFFFFF))
+         (encode-uint32 2 game-loop)
+         #"")))
   (wrap-sc2-request 10 body req-id))
 
+(define (extract-nested-submsg-bytes action-bytes outer-fnum inner-fnum)
+  (with-handlers ([exn:fail? (lambda (_e) #"")])
+    (define top (decode-protobuf-message action-bytes))
+    (define outer (assoc outer-fnum top))
+    (if (and outer (= (second outer) 2))
+        (let* ([inner-fields (decode-protobuf-message (third outer))]
+               [inner (assoc inner-fnum inner-fields)])
+          (if (and inner (= (second inner) 2))
+              (third inner)
+              #""))
+        #"")))
+
 (define (encode-action-raw-unit-command cmd)
-  (match-define (sc2-raw-unit-command ab-id target-pos target-tag unit-tags queue?) cmd)
-  (define pos-part
-    (match target-pos
-      [(sc2-point2d x y) (encode-submessage-field 2 (encode-point2d x y))]
-      [(or (list x y) (cons (? real? x) (? real? y))) (encode-submessage-field 2 (encode-point2d x y))]
-      [_ #""]))
-  (define tag-part
-    (if (and (exact-integer? target-tag) (> target-tag 0))
-        (encode-uint64 3 target-tag)
-        #""))
-  (define units-part
-    (apply bytes-append
-           (for/list ([ut (in-list (if (list? unit-tags) unit-tags '()))]
-                      #:when (and (exact-integer? ut) (> ut 0)))
-             (encode-uint64 4 ut))))
-  (bytes-append
-   (encode-int32 1 ab-id)
-   pos-part
-   tag-part
-   units-part
-   (if queue? (encode-bool 5 #t) #"")))
+  (define typed (and (sc2-raw-unit-command? cmd)
+                     (legacy-wire-action->typed-sc2-action cmd)))
+  (if (and typed
+           (or (WireCmdNone? typed)
+               (WireCmdPoint? typed)
+               (WireCmdUnit? typed)
+               (WireCmdArchon? typed)))
+      (extract-nested-submsg-bytes (encode-typed-sc2-action typed) 1 1)
+      #""))
 
 (define (encode-action-raw-camera-move cm)
-  (match-define (sc2-raw-camera-move x y z) cm)
-  (encode-submessage-field 1 (encode-point3d x y z)))
+  (define typed (and (sc2-raw-camera-move? cm)
+                     (legacy-wire-action->typed-sc2-action cm)))
+  (if (and typed (WireCameraMove? typed))
+      (extract-nested-submsg-bytes (encode-typed-sc2-action typed) 1 2)
+      #""))
 
-;; ActionControlGroup (ui.proto):
-;;   field 1 = action (ControlGroupAction enum: 1=Recall, 2=Set, 3=Append, 4=SetAndSteal, 5=AppendAndSteal)
-;;   field 2 = control_group_index (uint32 0..9)
+;; ActionControlGroup (data/proto/ui.proto):
+;;   Action.action_ui = 4 (sc2api.proto:634)
+;;   ActionUI.control_group = 1 (ui.proto:79)
+;;   ActionControlGroup:
+;;     field 1 = action (ControlGroupAction enum: 1=Recall, 2=Set, 3=Append, 4=SetAndSteal, 5=AppendAndSteal)
+;;     field 2 = control_group_index (uint32 0..9)
 (define (encode-action-ui-control-group cg)
-  (match-define (sc2-ui-control-group act-enum grp-idx) cg)
-  (bytes-append
-   (encode-int32 1 act-enum)
-   (encode-uint32 2 (max 0 (min 9 grp-idx)))))
+  (match cg
+    [(sc2-ui-control-group (? exact-integer? act-enum) (? exact-integer? grp-idx))
+     #:when (and (<= 1 act-enum 5) (<= 0 grp-idx 9))
+     (bytes-append
+      (encode-int32 1 act-enum)
+      (encode-uint32 2 grp-idx))]
+    [_ #""]))
+
+(define SC2-TOTAL-WIRE-ACTION-DROP-COUNT (box 0))
+
+(define (get-total-wire-action-drop-count)
+  (unbox SC2-TOTAL-WIRE-ACTION-DROP-COUNT))
+
+(define (legacy-wire-action->typed-sc2-action act)
+  (cond
+    [(TypedSc2WireAction? act) act]
+    [(sc2-raw-unit-command? act)
+     (match-define (sc2-raw-unit-command ab-id target-pos target-tag unit-tags queue?) act)
+     (define-values (pos-mode px py)
+       (match target-pos
+         [(sc2-point2d (? real? x) (? real? y))
+          (values #t (real->double-flonum x) (real->double-flonum y))]
+         [(sc2-point3d (? real? x) (? real? y) _)
+          (values #t (real->double-flonum x) (real->double-flonum y))]
+         [(or (list (? real? x) (? real? y))
+              (cons (? real? x) (? real? y)))
+          (values #t (real->double-flonum x) (real->double-flonum y))]
+         [#f
+          (values #f 0.0 0.0)]
+         [_
+          (values 'invalid 0.0 0.0)]))
+     (define eff-tgt-tag (if (eq? target-tag #f) 0 target-tag))
+     (if (and (boolean? pos-mode)
+              (exact-integer? ab-id)
+              (exact-integer? eff-tgt-tag)
+              (list? unit-tags)
+              (pair? unit-tags)
+              (andmap exact-integer? unit-tags))
+         (validate-legacy-wire-command ab-id pos-mode px py eff-tgt-tag unit-tags (not (not queue?)))
+         #f)]
+    [(sc2-raw-camera-move? act)
+     (match-define (sc2-raw-camera-move x y z) act)
+     (and (real? x) (real? y) (real? z)
+          (make-wire-camera-move x y z))]
+    [(sc2-chat-action? act)
+     (match-define (sc2-chat-action chan msg) act)
+     (and (memv chan '(1 2))
+          (string? msg)
+          (make-wire-chat (= chan 2) msg))]
+    [(bytes? act)
+     (decode-typed-sc2-action act)]
+    [else #f]))
 
 (define (encode-sc2-action act)
   (cond
-    [(sc2-raw-unit-command? act)
-     (define uc-bytes (encode-action-raw-unit-command act))
-     (define action-raw-bytes (encode-submessage-field 1 uc-bytes))
-     (encode-submessage-field 1 action-raw-bytes)]
-    [(sc2-raw-camera-move? act)
-     (define cm-bytes (encode-action-raw-camera-move act))
-     (define action-raw-bytes (encode-submessage-field 2 cm-bytes))
-     (encode-submessage-field 1 action-raw-bytes)]
     [(sc2-ui-control-group? act)
-     ;; Action.action_ui (field 3) -> ActionUI.control_group (field 1) -> ActionControlGroup
+     ;; Action.action_ui (field 4 in sc2api.proto) -> ActionUI.control_group (field 1 in ui.proto) -> ActionControlGroup
      (define cg-bytes (encode-action-ui-control-group act))
-     (define action-ui-bytes (encode-submessage-field 1 cg-bytes))
-     (encode-submessage-field 3 action-ui-bytes)]
-    [(sc2-chat-action? act)
-     (match-define (sc2-chat-action chan msg) act)
-     (define chat-bytes
-       (bytes-append (encode-int32 1 chan)
-                     (encode-string-field 2 msg)))
-     (encode-submessage-field 6 chat-bytes)]
-    [(bytes? act) act]
-    [else #""]))
+     (cond
+       [(> (bytes-length cg-bytes) 0)
+        (encode-submessage-field 4 (encode-submessage-field 1 cg-bytes))]
+       [else
+        (set-box! SC2-TOTAL-WIRE-ACTION-DROP-COUNT
+                  (add1 (unbox SC2-TOTAL-WIRE-ACTION-DROP-COUNT)))
+        #""])]
+    [else
+     (define typed-act (legacy-wire-action->typed-sc2-action act))
+     (cond
+       [typed-act
+        (encode-typed-sc2-action typed-act)]
+       [else
+        (unless (or (eq? act #f)
+                    (and (bytes? act) (zero? (bytes-length act))))
+          (set-box! SC2-TOTAL-WIRE-ACTION-DROP-COUNT
+                    (add1 (unbox SC2-TOTAL-WIRE-ACTION-DROP-COUNT))))
+        #""])]))
 
 (define (make-request-action actions #:id [req-id #f])
   (define body
     (apply bytes-append
-           (for/list ([a (in-list actions)])
-             (define enc (encode-sc2-action a))
-             (if (zero? (bytes-length enc))
-                 #""
-                 (encode-submessage-field 1 enc)))))
-  (wrap-sc2-request 11 body req-id))
+           (for/list ([a (in-list (if (list? actions) actions '()))])
+             (define act-bs (encode-sc2-action a))
+             (if (> (bytes-length act-bs) 0)
+                 (encode-submessage-field 1 act-bs)
+                 #""))))
+  (if (> (bytes-length body) 0)
+      (wrap-sc2-request 11 body req-id)
+      #""))
 
-(define (make-request-step [count 4] #:count [kw-count #f] #:id [req-id #f])
-  (define c (or kw-count count 4))
-  (wrap-sc2-request 12 (encode-uint32 1 (max 1 c)) req-id))
+(define (make-request-step [count 'unset] #:count [kw-count 'unset] #:id [req-id #f])
+  (define eff-c
+    (cond
+      [(not (eq? kw-count 'unset))
+       (if (and (exact-integer? kw-count) (<= 1 kw-count 65535)) kw-count 1)]
+      [(not (eq? count 'unset))
+       (if (and (exact-integer? count) (<= 1 count 65535)) count 1)]
+      [else 4]))
+  (wrap-sc2-request 12 (encode-uint32 1 eff-c) req-id))
 
 (define (make-request-data #:ability-id? [ability-id? #t]
                            #:unit-type-id? [unit-type-id? #t]
@@ -1931,31 +2107,49 @@
      (if effect-id? (encode-bool 5 #t) #"")))
   (wrap-sc2-request 13 body req-id))
 
+(define (encode-valid-query-placement-item p)
+  (define parsed
+    (match p
+      [(sc2-query-placement ab x0 y0 ut) (list ab x0 y0 ut)]
+      [(list ab x0 y0 ut) (list ab x0 y0 ut)]
+      [(list ab x0 y0) (list ab x0 y0 #f)]
+      [_ #f]))
+  (and parsed
+       (match-let ([(list ab-id x y unit-tag) parsed])
+         (define valid-ab?
+           (and (exact-positive-integer? ab-id) (<= ab-id #x7FFFFFFF)))
+         (define valid-xy?
+           (and (valid-world-coord? x) (valid-world-coord? y)))
+         (define valid-tag?
+           (or (eq? unit-tag #f)
+               (and (exact-integer? unit-tag) (= unit-tag 0))
+               (and (exact-integer? unit-tag)
+                    (> unit-tag 0)
+                    (<= unit-tag #xFFFFFFFFFFFFFFFF))))
+         (and valid-ab? valid-xy? valid-tag?
+              (let ([sub
+                     (bytes-append
+                      (encode-int32 1 ab-id)
+                      (encode-submessage-field 2 (encode-point2d x y))
+                      (if (and (exact-integer? unit-tag) (> unit-tag 0))
+                          (encode-uint64 3 unit-tag)
+                          #""))])
+                ;; query.proto field 3 is `placements`
+                (encode-submessage-field 3 sub))))))
+
 (define (make-request-query-placement placements
                                       #:ignore-resource-requirements? [ignore-res? #f]
                                       #:id [req-id #f])
-  (define p-bytes
-    (apply bytes-append
-           (for/list ([p (in-list placements)])
-             (match-define (sc2-query-placement ab-id x y unit-tag)
-               (match p
-                 [(? sc2-query-placement? qp) qp]
-                 [(list ab x0 y0 ut) (sc2-query-placement ab x0 y0 ut)]
-                 [(list ab x0 y0) (sc2-query-placement ab x0 y0 0)]))
-             (define sub
-               (bytes-append
-                (encode-int32 1 ab-id)
-                (encode-submessage-field 2 (encode-point2d x y))
-                (if (and (exact-integer? unit-tag) (> unit-tag 0))
-                    (encode-uint64 3 unit-tag)
-                    #"")))
-             ;; query.proto field 3 is `placements`
-             (encode-submessage-field 3 sub))))
-  (define body
-    (bytes-append
-     p-bytes
-     (if ignore-res? (encode-bool 4 #t) #"")))
-  (wrap-sc2-request 14 body req-id))
+  (define valid-subs
+    (if (list? placements)
+        (filter-map encode-valid-query-placement-item placements)
+        '()))
+  (if (null? valid-subs)
+      #""
+      (let ([body (bytes-append
+                   (apply bytes-append valid-subs)
+                   (if ignore-res? (encode-bool 4 #t) #""))])
+        (wrap-sc2-request 14 body req-id))))
 
 (define (make-request-save-replay #:id [req-id #f])
   (wrap-sc2-request 15 #"" req-id))
@@ -2761,6 +2955,33 @@
     [else
      (values 0.0 0.0 1.0 0.5 #f)]))
 
+(define (sc2-townhall-all-resources-legal? cx cy res-items)
+  (for/and ([r (in-list (if (list? res-items) res-items '()))])
+    (define-values (rx ry hw-x hw-y _g?) (resource-item-xy-dims r))
+    (or (>= (abs (- cx rx)) 7.1)
+        (>= (abs (- cy ry)) 7.1)
+        (sc2-townhall-resource-legal? cx cy rx ry hw-x hw-y))))
+
+(define (image-grid-signature grid)
+  (and (sc2-image-grid? grid)
+       (let* ([bs (sc2-image-grid-data grid)]
+              [blen (if (bytes? bs) (bytes-length bs) 0)]
+              [stride (max 1 (quotient blen 32))]
+              [bhash
+               (if (<= blen 0)
+                   0
+                   (for/fold ([h blen])
+                             ([i (in-range 0 blen stride)])
+                     (bitwise-and #x3fffffff
+                                  (+ (* h 131) (bytes-ref bs i) i))))])
+         (list (sc2-image-grid-width grid)
+               (sc2-image-grid-height grid)
+               (sc2-image-grid-bits-per-pixel grid)
+               (sc2-image-grid-y-flip? grid)
+               (sc2-image-grid-lsb-first? grid)
+               blen
+               bhash))))
+
 (define (solve-exact-townhall-pad minerals-or-resources
                                   [geysers-or-placement '()]
                                   [opt-placement-or-height #f]
@@ -2849,9 +3070,7 @@
                             (ormap (lambda (rh) (<= (abs (- pad-h rh)) 6)) res-heights))))))
            (when height-ok?
              (define res-legal?
-               (for/and ([r (in-list local-res)])
-                 (define-values (rx ry hw-x hw-y _g?) (resource-item-xy-dims r))
-                 (sc2-townhall-resource-legal? cx cy rx ry hw-x hw-y)))
+               (sc2-townhall-all-resources-legal? cx cy local-res))
              (when res-legal?
                (define sum-min-d
                  (for/sum ([m (in-list comp-mins)])
@@ -2899,6 +3118,7 @@
                 (set! best dv))))
           (if (< best INF) (/ (exact->inexact best) 10.0) +inf.0)])])))
 
+(define SC2-PATHING-WALK-CACHE (make-hash))
 (define SC2-GROUND-BFS-CACHE (make-hash))
 
 (define (neutral-unit-is-pathing-blocker? u)
@@ -2925,29 +3145,53 @@
      (define h (sc2-image-grid-height pathing-grid))
      (define hix (max 0 (min (sub1 w) (if (exact-integer? home-x) home-x (inexact->exact (floor home-x))))))
      (define hiy (max 0 (min (sub1 h) (if (exact-integer? home-y) home-y (inexact->exact (floor home-y))))))
+     (define grid-sig (image-grid-signature pathing-grid))
+     ;; Hash blocker footprints by quantized map coordinates + kind (NOT ephemeral fogged snapshot unit tags!)
+     (define seen-blocker-cells (mutable-seteqv))
      (define blocker-sig
        (for/fold ([acc 0])
                  ([u (in-list neutral-units)]
                   #:when (and (sc2-unit? u) (neutral-unit-is-pathing-blocker? u)))
          (define p (sc2-unit-pos u))
-         (bitwise-xor acc
-                      (+ (* 1315423911 (sc2-unit-tag u))
-                         (* 2654435761 (inexact->exact (floor (sc2-point3d-x p))))
-                         (* 97531 (inexact->exact (floor (sc2-point3d-y p))))))))
-     (define cache-key (list (eq-hash-code pathing-grid)
-                             (sc2-image-grid-y-flip? pathing-grid)
-                             (sc2-image-grid-lsb-first? pathing-grid)
-                             hix hiy blocker-sig))
+         (define ux (sc2-point3d-x p))
+         (define uy (sc2-point3d-y p))
+         (define cell-k
+           (cond
+             [(sc2-unit-is-mineral-field? u)
+              (+ 1 (* 16 (+ (inexact->exact (round (* 2.0 ux)))
+                            (* 4096 (inexact->exact (floor uy))))))]
+             [(sc2-unit-is-vespene-geyser? u)
+              (+ 2 (* 16 (+ (inexact->exact (floor ux))
+                            (* 4096 (inexact->exact (floor uy))))))]
+             [else
+              (define rad (max 1 (min 4 (inexact->exact (floor (max 1.0 (sc2-unit-radius u)))))))
+              (+ 4 rad (* 16 (+ (inexact->exact (floor ux))
+                                (* 4096 (inexact->exact (floor uy))))))]))
+         (if (set-member? seen-blocker-cells cell-k)
+             acc
+             (begin
+               (set-add! seen-blocker-cells cell-k)
+               (bitwise-xor acc (bitwise-and #x3fffffff (* cell-k 26544357)) (set-count seen-blocker-cells))))))
+     (define cache-key (list grid-sig hix hiy blocker-sig))
      (cond
        [(hash-ref SC2-GROUND-BFS-CACHE cache-key #f) => values]
        [else
-        (when (> (hash-count SC2-GROUND-BFS-CACHE) 24)
+        (when (> (hash-count SC2-GROUND-BFS-CACHE) 32)
           (hash-clear! SC2-GROUND-BFS-CACHE))
         (define n (* w h))
-        (define walk (make-bytes n 0))
-        (for* ([y (in-range h)]
-               [x (in-range w)])
-          (bytes-set! walk (+ x (* y w)) (sc2-grid-ref pathing-grid x y)))
+        (define base-walk
+          (cond
+            [(hash-ref SC2-PATHING-WALK-CACHE grid-sig #f) => values]
+            [else
+             (when (> (hash-count SC2-PATHING-WALK-CACHE) 8)
+               (hash-clear! SC2-PATHING-WALK-CACHE))
+             (define bw (make-bytes n 0))
+             (for* ([y (in-range h)]
+                    [x (in-range w)])
+               (bytes-set! bw (+ x (* y w)) (sc2-grid-ref pathing-grid x y)))
+             (hash-set! SC2-PATHING-WALK-CACHE grid-sig bw)
+             bw]))
+        (define walk (bytes-copy base-walk))
         ;; Stamp alive neutral minerals (2x1), geysers (3x3), and destructible rock blockers
         (for ([u (in-list neutral-units)]
               #:when (and (sc2-unit? u) (neutral-unit-is-pathing-blocker? u)))
@@ -3034,10 +3278,72 @@
         (hash-set! SC2-GROUND-BFS-CACHE cache-key bfs-obj)
         bfs-obj])]))
 
+;; Bounded per-map canonical expansion pad cache:
+;; Canonical 5x5 TownHall pad coordinates `(exact-x, exact-y)` never move during a match;
+;; only each base's live mineral/geyser lists change as patches mine out.
+(define SC2-EXPANSION-BASES-CACHE (make-hash))
+
+(define (resource-unit-cell-key u kind-code)
+  (define p (sc2-unit-pos u))
+  (+ kind-code
+     (* 8 (+ (inexact->exact (round (* 2.0 (sc2-point3d-x p))))
+             (* 4096 (inexact->exact (round (* 2.0 (sc2-point3d-y p)))))))))
+
+(define (refresh-cached-expansion-bases cached-pads base-minerals geysers)
+  (define n-pads (length cached-pads))
+  (cond
+    [(zero? n-pads) '()]
+    [else
+     (define pad-vec (list->vector cached-pads))
+     (define mins-vec (make-vector n-pads '()))
+     (define geys-vec (make-vector n-pads '()))
+     (for ([m (in-list (reverse base-minerals))])
+       (define mp (sc2-unit-pos m))
+       (define mx (sc2-point3d-x mp))
+       (define my (sc2-point3d-y mp))
+       (define best-i #f)
+       (define best-d 11.5)
+       (for ([i (in-range n-pads)])
+         (define pad (vector-ref pad-vec i))
+         (define d (pt-dist mx my (sc2-point2d-x pad) (sc2-point2d-y pad)))
+         (when (<= d best-d)
+           (set! best-d d)
+           (set! best-i i)))
+       (when best-i
+         (vector-set! mins-vec best-i (cons m (vector-ref mins-vec best-i)))))
+     (for ([g (in-list (reverse geysers))])
+       (define gp (sc2-unit-pos g))
+       (define gx (sc2-point3d-x gp))
+       (define gy (sc2-point3d-y gp))
+       (define best-i #f)
+       (define best-d 12.0)
+       (for ([i (in-range n-pads)])
+         (define pad (vector-ref pad-vec i))
+         (define d (pt-dist gx gy (sc2-point2d-x pad) (sc2-point2d-y pad)))
+         (when (<= d best-d)
+           (set! best-d d)
+           (set! best-i i)))
+       (when best-i
+         (vector-set! geys-vec best-i (cons g (vector-ref geys-vec best-i)))))
+     (for/list ([i (in-range n-pads)]
+                #:when (let ([ms (vector-ref mins-vec i)]
+                             [gs (vector-ref geys-vec i)])
+                         (or (>= (length ms) 4)
+                             (and (pair? ms) (>= (length gs) 1))
+                             (>= (length gs) 2))))
+       (define pad (vector-ref pad-vec i))
+       (hash 'pad pad
+             'x (sc2-point2d-x pad)
+             'y (sc2-point2d-y pad)
+             'minerals (vector-ref mins-vec i)
+             'geysers (vector-ref geys-vec i)))]))
+
 ;; Connected-component resource clustering + exact 5x5 TownHall pad solver:
 ;; Filters mineral-wall blockers (`mineral-field-450`, `lab-mineral-field*`) and nubs (< 150 minerals),
 ;; builds transitive mineral components (center dist <= 5.2), attaches each geyser within 10.5 tiles
 ;; to its single nearest mineral component, and solves the exact 5x5 TownHall pad for each base.
+;; Memoizes solved canonical pads per map (keyed by StartRaw grid signature + fallback synthetic
+;; resource signature when `game-info = #f`) and refreshes live mineral/geyser counts in O(resources).
 (define (solve-all-map-expansion-bases neutral-units [game-info #f])
   (define base-minerals
     (filter (lambda (u)
@@ -3053,107 +3359,166 @@
                    (let ([vc (sc2-unit-vespene-contents u)])
                      (or (= vc 0) (> vc 0)))))
             neutral-units))
-  (define all-blocking-res
-    (filter (lambda (u)
-              (or (sc2-unit-is-mineral-field? u)
-                  (sc2-unit-is-vespene-geyser? u)))
-            neutral-units))
-  (define visited (mutable-seteqv))
-  (define raw-min-comps '())
-  (for ([m0 (in-list base-minerals)]
-        #:when (not (set-member? visited (sc2-unit-tag m0))))
-    (set-add! visited (sc2-unit-tag m0))
-    (define comp
-      (let bfs ([queue (list m0)]
-                [acc (list m0)])
-        (if (null? queue)
-            acc
-            (let* ([cur (car queue)]
-                   [cp (sc2-unit-pos cur)]
-                   [cx (sc2-point3d-x cp)]
-                   [cy (sc2-point3d-y cp)]
-                   [nbrs (filter (lambda (m)
-                                   (and (not (set-member? visited (sc2-unit-tag m)))
-                                        (let ([mp (sc2-unit-pos m)])
-                                          (<= (pt-dist cx cy (sc2-point3d-x mp) (sc2-point3d-y mp))
-                                              5.2))))
-                                 base-minerals)])
-              (for ([nb (in-list nbrs)])
-                (set-add! visited (sc2-unit-tag nb)))
-              (bfs (append (cdr queue) nbrs) (append nbrs acc))))))
-    (set! raw-min-comps (cons comp raw-min-comps)))
-  (define min-comps (reverse raw-min-comps))
-  (define comp-geysers-vec (make-vector (length min-comps) '()))
-  (for ([g (in-list geysers)])
-    (define gp (sc2-unit-pos g))
-    (define gx (sc2-point3d-x gp))
-    (define gy (sc2-point3d-y gp))
-    (define best-idx #f)
-    (define best-d 10.5)
-    (for ([comp (in-list min-comps)]
-          [idx (in-naturals 0)])
-      (for ([m (in-list comp)])
-        (define mp (sc2-unit-pos m))
-        (define d (pt-dist gx gy (sc2-point3d-x mp) (sc2-point3d-y mp)))
-        (when (<= d best-d)
-          (set! best-d d)
-          (set! best-idx idx))))
-    (when best-idx
-      (vector-set! comp-geysers-vec best-idx
-                   (cons g (vector-ref comp-geysers-vec best-idx)))))
-  (define pl-grid (and (sc2-game-info? game-info) (sc2-game-info-placement-grid game-info)))
-  (define th-grid (and (sc2-game-info? game-info) (sc2-game-info-terrain-height game-info)))
-  (define bases '())
-  (for ([comp-mins (in-list min-comps)]
-        [idx (in-naturals 0)])
-    (define c-geys (vector-ref comp-geysers-vec idx))
-    (when (or (>= (length c-geys) 1) (>= (length comp-mins) 4))
-      (define pad
-        (solve-exact-townhall-pad comp-mins c-geys pl-grid th-grid
-                                  #:all-resources all-blocking-res))
-      (when pad
-        (set! bases
-              (cons (hash 'pad pad
-                          'x (sc2-point2d-x pad)
-                          'y (sc2-point2d-y pad)
-                          'minerals comp-mins
-                          'geysers c-geys)
-                    bases)))))
-  ;; Also handle geyser-only bases when all minerals were mined out
-  (define attached-geyser-tags
-    (for*/seteqv ([idx (in-range (vector-length comp-geysers-vec))]
-                  [g (in-list (vector-ref comp-geysers-vec idx))])
-      (sc2-unit-tag g)))
-  (define orphan-geysers
-    (filter (lambda (g) (not (set-member? attached-geyser-tags (sc2-unit-tag g)))) geysers))
-  (when (>= (length orphan-geysers) 2)
-    (define visited-g (mutable-seteqv))
-    (for ([g0 (in-list orphan-geysers)]
-          #:when (not (set-member? visited-g (sc2-unit-tag g0))))
-      (define gp0 (sc2-unit-pos g0))
-      (define grp
-        (filter (lambda (g)
-                  (define gp (sc2-unit-pos g))
-                  (<= (pt-dist (sc2-point3d-x gp0) (sc2-point3d-y gp0)
-                               (sc2-point3d-x gp) (sc2-point3d-y gp))
-                      13.0))
-                orphan-geysers))
-      (for ([g (in-list grp)]) (set-add! visited-g (sc2-unit-tag g)))
-      (define pad
-        (solve-exact-townhall-pad '() grp pl-grid th-grid
-                                  #:all-resources all-blocking-res))
-      (when pad
-        (set! bases
-              (cons (hash 'pad pad
-                          'x (sc2-point2d-x pad)
-                          'y (sc2-point2d-y pad)
-                          'minerals '()
-                          'geysers grp)
-                    bases)))))
-  (reverse bases))
+  (cond
+    [(and (null? base-minerals) (null? geysers)) '()]
+    [else
+     (define all-blocking-res
+       (filter (lambda (u)
+                 (or (sc2-unit-is-mineral-field? u)
+                     (sc2-unit-is-vespene-geyser? u)))
+               neutral-units))
+     (define pl-grid (and (sc2-game-info? game-info) (sc2-game-info-placement-grid game-info)))
+     (define path-grid (and (sc2-game-info? game-info) (sc2-game-info-pathing-grid game-info)))
+     (define th-grid (and (sc2-game-info? game-info) (sc2-game-info-terrain-height game-info)))
+     (define static-grid-key
+       (and (or (sc2-image-grid? pl-grid)
+                (sc2-image-grid? path-grid)
+                (sc2-image-grid? th-grid))
+            (list 'start-raw-grids
+                  (if (sc2-game-info? game-info) (sc2-game-info-map-name game-info) #f)
+                  (image-grid-signature pl-grid)
+                  (image-grid-signature path-grid)
+                  (image-grid-signature th-grid))))
+     (define fallback-res-key
+       (and (not static-grid-key)
+            (let ([seen (mutable-seteqv)])
+              (define-values (xor-h sum-h)
+                (for/fold ([xh 0] [sh 0])
+                          ([u (in-list all-blocking-res)])
+                  (define k
+                    (resource-unit-cell-key
+                     u
+                     (cond
+                       [(sc2-unit-is-vespene-geyser? u) 2]
+                       [(memq u base-minerals) 1]
+                       [else 3])))
+                  (if (set-member? seen k)
+                      (values xh sh)
+                      (begin
+                        (set-add! seen k)
+                        (values (bitwise-xor xh (bitwise-and #x3fffffff (* k 26544357)))
+                                (bitwise-and #x3fffffff (+ sh k)))))))
+              (list 'synthetic-res (set-count seen) xor-h sum-h))))
+     (define cache-key (or static-grid-key fallback-res-key))
+     (define cached-entry (and cache-key (hash-ref SC2-EXPANSION-BASES-CACHE cache-key #f)))
+     (define cache-valid?
+       (and cached-entry
+            (let ([known-cells (cdr cached-entry)])
+              (and (for/and ([m (in-list base-minerals)])
+                     (set-member? known-cells (resource-unit-cell-key m 1)))
+                   (for/and ([g (in-list geysers)])
+                     (set-member? known-cells (resource-unit-cell-key g 2)))))))
+     (cond
+       [cache-valid?
+        (refresh-cached-expansion-bases (car cached-entry) base-minerals geysers)]
+       [else
+        (define visited (mutable-seteqv))
+        (define raw-min-comps '())
+        (for ([m0 (in-list base-minerals)]
+              #:when (not (set-member? visited (sc2-unit-tag m0))))
+          (set-add! visited (sc2-unit-tag m0))
+          (define comp
+            (let bfs ([queue (list m0)]
+                      [acc (list m0)])
+              (if (null? queue)
+                  acc
+                  (let* ([cur (car queue)]
+                         [cp (sc2-unit-pos cur)]
+                         [cx (sc2-point3d-x cp)]
+                         [cy (sc2-point3d-y cp)]
+                         [nbrs (filter (lambda (m)
+                                         (and (not (set-member? visited (sc2-unit-tag m)))
+                                              (let ([mp (sc2-unit-pos m)])
+                                                (<= (pt-dist cx cy (sc2-point3d-x mp) (sc2-point3d-y mp))
+                                                    5.2))))
+                                       base-minerals)])
+                    (for ([nb (in-list nbrs)])
+                      (set-add! visited (sc2-unit-tag nb)))
+                    (bfs (append (cdr queue) nbrs) (append nbrs acc))))))
+          (set! raw-min-comps (cons comp raw-min-comps)))
+        (define min-comps (reverse raw-min-comps))
+        (define comp-geysers-vec (make-vector (length min-comps) '()))
+        (for ([g (in-list geysers)])
+          (define gp (sc2-unit-pos g))
+          (define gx (sc2-point3d-x gp))
+          (define gy (sc2-point3d-y gp))
+          (define best-idx #f)
+          (define best-d 12.5)
+          (for ([comp (in-list min-comps)]
+                [idx (in-naturals 0)])
+            (for ([m (in-list comp)])
+              (define mp (sc2-unit-pos m))
+              (define d (pt-dist gx gy (sc2-point3d-x mp) (sc2-point3d-y mp)))
+              (when (<= d best-d)
+                (set! best-d d)
+                (set! best-idx idx))))
+          (when best-idx
+            (vector-set! comp-geysers-vec best-idx
+                         (cons g (vector-ref comp-geysers-vec best-idx)))))
+        (define bases '())
+        (for ([comp-mins (in-list min-comps)]
+              [idx (in-naturals 0)])
+          (define c-geys (vector-ref comp-geysers-vec idx))
+          (when (or (>= (length c-geys) 1) (>= (length comp-mins) 4))
+            (define pad
+              (solve-exact-townhall-pad comp-mins c-geys pl-grid th-grid
+                                        #:all-resources all-blocking-res))
+            (when pad
+              (set! bases
+                    (cons (hash 'pad pad
+                                'x (sc2-point2d-x pad)
+                                'y (sc2-point2d-y pad)
+                                'minerals comp-mins
+                                'geysers c-geys)
+                          bases)))))
+        ;; Also handle geyser-only bases when all minerals were mined out
+        (define attached-geyser-tags
+          (for*/seteqv ([idx (in-range (vector-length comp-geysers-vec))]
+                        [g (in-list (vector-ref comp-geysers-vec idx))])
+            (sc2-unit-tag g)))
+        (define orphan-geysers
+          (filter (lambda (g) (not (set-member? attached-geyser-tags (sc2-unit-tag g)))) geysers))
+        (when (>= (length orphan-geysers) 2)
+          (define visited-g (mutable-seteqv))
+          (for ([g0 (in-list orphan-geysers)]
+                #:when (not (set-member? visited-g (sc2-unit-tag g0))))
+            (define gp0 (sc2-unit-pos g0))
+            (define grp
+              (filter (lambda (g)
+                        (define gp (sc2-unit-pos g))
+                        (<= (pt-dist (sc2-point3d-x gp0) (sc2-point3d-y gp0)
+                                     (sc2-point3d-x gp) (sc2-point3d-y gp))
+                            13.0))
+                      orphan-geysers))
+            (for ([g (in-list grp)]) (set-add! visited-g (sc2-unit-tag g)))
+            (when (>= (length grp) 2)
+              (define pad
+                (solve-exact-townhall-pad '() grp pl-grid th-grid
+                                          #:all-resources all-blocking-res))
+              (when pad
+                (set! bases
+                      (cons (hash 'pad pad
+                                  'x (sc2-point2d-x pad)
+                                  'y (sc2-point2d-y pad)
+                                  'minerals '()
+                                  'geysers grp)
+                            bases))))))
+        (define ordered (reverse bases))
+        (when cache-key
+          (when (> (hash-count SC2-EXPANSION-BASES-CACHE) 16)
+            (hash-clear! SC2-EXPANSION-BASES-CACHE))
+          (define known-cells
+            (set-union
+             (for/seteqv ([m (in-list base-minerals)])
+               (resource-unit-cell-key m 1))
+             (for/seteqv ([g (in-list geysers)])
+               (resource-unit-cell-key g 2))))
+          (define pads (for/list ([b (in-list ordered)]) (hash-ref b 'pad)))
+          (hash-set! SC2-EXPANSION-BASES-CACHE cache-key (cons pads known-cells)))
+        ordered])]))
 
-(define (cluster-resource-centroids resources)
-  (define solved (solve-all-map-expansion-bases resources #f))
+(define (cluster-resource-centroids resources [game-info #f])
+  (define solved (solve-all-map-expansion-bases resources game-info))
   (cond
     [(not (null? solved))
      (for/list ([b (in-list solved)])
@@ -3263,7 +3628,9 @@
 (define (worker-build-order-stuck? w [cur-loop (unbox SC2-WARPGATE-LAST-LOOP)])
   (define entry (hash-ref SC2-WORKER-BUILD-ORDER-START (sc2-unit-tag w) #f))
   (and entry
-       (> (- cur-loop (second entry)) 112)))
+       (or (> (- cur-loop (second entry)) 112)
+           (and (>= (length entry) 8)
+                (> (- cur-loop (eighth entry)) 168)))))
 
 (define (sort-townhalls-main-first ths)
   (define anchor (unbox SC2-HOME-BASE-ANCHOR))
@@ -3368,6 +3735,7 @@
   (define live-resource-units
     (filter (lambda (u) (or (sc2-unit-is-mineral-field? u) (sc2-unit-is-vespene-geyser? u)))
             neutral-all))
+  (define solved-bases (solve-all-map-expansion-bases neutral-all game-info))
   (define raw-my-townhalls (filter sc2-unit-is-townhall? self-units))
   (when (and (= (length raw-my-townhalls) 1)
              (or (not (unbox SC2-HOME-BASE-ANCHOR))
@@ -3378,7 +3746,13 @@
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
   (when (not (null? live-resource-units))
-    (define live-clusters (cluster-resource-centroids live-resource-units))
+    (define live-clusters
+      (if (not (null? solved-bases))
+          (for/list ([b (in-list solved-bases)])
+            (list (hash-ref b 'x)
+                  (hash-ref b 'y)
+                  (append (hash-ref b 'minerals '()) (hash-ref b 'geysers '()))))
+          (cluster-resource-centroids live-resource-units game-info)))
     (when (> (length live-clusters) (length (unbox SC2-CACHED-MAP-BASE-CLUSTERS)))
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS live-clusters)))
   (define my-townhalls (sort-townhalls-main-first raw-my-townhalls))
@@ -3396,9 +3770,9 @@
   (define my-workers (filter sc2-unit-is-worker? self-units))
 
   ;; Update worker build-order movement/construction timestamps across ALL queued orders:
-  ;; A worker is NEVER stuck while it is actively moving (> 0.5 tiles) toward its build site
-  ;; or actively constructing a building (including Rich Vespene geysers); it only expires
-  ;; after standing still > 112 loops (~5s) without an under-construction footprint at the site.
+  ;; A worker is NEVER stuck while actively constructing or making real distance progress toward
+  ;; its build site; it expires after standing still > 112 loops (~5s) or pacing > 168 loops (~7.5s)
+  ;; without closing distance to `(tx, ty)`.
   (for ([w (in-list my-workers)])
     (define wtag (sc2-unit-tag w))
     (define build-ord
@@ -3419,6 +3793,7 @@
        (define tgt-tag (sc2-unit-order-target-unit-tag build-ord))
        (define tx (if (any-point? tpos) (any-point-x tpos) wx))
        (define ty (if (any-point? tpos) (any-point-y tpos) wy))
+       (define cur-dist (pt-dist wx wy tx ty))
        (define actively-constructing?
          (ormap (lambda (b)
                   (define bp (sc2-unit-pos b))
@@ -3431,14 +3806,27 @@
                            (<= (pt-dist wx wy (sc2-point3d-x bp) (sc2-point3d-y bp)) 6.0))))
                 self-units))
        (define prev (hash-ref SC2-WORKER-BUILD-ORDER-START wtag #f))
-       (if (or actively-constructing?
-               (not prev)
-               (< (length prev) 6)
-               (not (= (first prev) ab-id))
-               (> (pt-dist tx ty (third prev) (fourth prev)) 2.0)
-               (> (pt-dist wx wy (fifth prev) (sixth prev)) 0.5))
-           (hash-set! SC2-WORKER-BUILD-ORDER-START wtag (list ab-id cur-loop tx ty wx wy))
-           (void))]
+       (cond
+         [(or actively-constructing?
+              (not prev)
+              (< (length prev) 6)
+              (not (= (first prev) ab-id))
+              (> (pt-dist tx ty (third prev) (fourth prev)) 2.0))
+          (hash-set! SC2-WORKER-BUILD-ORDER-START wtag
+                     (list ab-id cur-loop tx ty wx wy cur-dist cur-loop))]
+         [else
+          (define moved? (> (pt-dist wx wy (fifth prev) (sixth prev)) 0.5))
+          (define prev-best-d (if (>= (length prev) 8) (seventh prev) cur-dist))
+          (define prev-best-l (if (>= (length prev) 8) (eighth prev) (second prev)))
+          (define closer? (< cur-dist (- prev-best-d 0.75)))
+          (hash-set! SC2-WORKER-BUILD-ORDER-START wtag
+                     (list ab-id
+                           (if moved? cur-loop (second prev))
+                           tx ty
+                           (if moved? wx (fifth prev))
+                           (if moved? wy (sixth prev))
+                           (if closer? cur-dist prev-best-d)
+                           (if closer? cur-loop prev-best-l)))])]
       [else
        (hash-remove! SC2-WORKER-BUILD-ORDER-START wtag)]))
 
@@ -3474,7 +3862,6 @@
   (define ux (/ dx d-norm))
   (define uy (/ dy d-norm))
   (define path-grid (and (sc2-game-info? game-info) (sc2-game-info-pathing-grid game-info)))
-  (define solved-bases (solve-all-map-expansion-bases neutral-all game-info))
   (define ordered-home-exps
     (order-expansions-from-origin solved-bases base-x base-y path-grid neutral-all))
   (define ordered-enemy-exps
@@ -4217,6 +4604,74 @@
   ;; All bot coordinates live in SC2 world space (0.0..256.0); clamp to playable bounds.
   (max SC2-MAP-SAFE-MIN-COORD (min SC2-MAP-SAFE-MAX-COORD v)))
 
+(define (static-footprint-placement-ok? pl-grid cx cy hw hh)
+  (cond
+    [(not (sc2-image-grid? pl-grid)) #t]
+    [else
+     (define gw (sc2-image-grid-width pl-grid))
+     (define gh (sc2-image-grid-height pl-grid))
+     (define-values (x0 x1)
+       (if (>= (abs (- hw (round hw))) 0.25)
+           (let ([ix (exact-floor cx)]
+                 [rx (inexact->exact (round (- hw 0.5)))])
+             (values (- ix rx) (+ ix rx)))
+           (let ([ix (inexact->exact (round cx))]
+                 [rx (max 1 (inexact->exact (round hw)))])
+             (values (- ix rx) (- (+ ix rx) 1)))))
+     (define-values (y0 y1)
+       (if (>= (abs (- hh (round hh))) 0.25)
+           (let ([iy (exact-floor cy)]
+                 [ry (inexact->exact (round (- hh 0.5)))])
+             (values (- iy ry) (+ iy ry)))
+           (let ([iy (inexact->exact (round cy))]
+                 [ry (max 1 (inexact->exact (round hh)))])
+             (values (- iy ry) (- (+ iy ry) 1)))))
+     (and (>= x0 0) (>= y0 0) (< x1 gw) (< y1 gh)
+          (for*/and ([ix (in-range x0 (add1 x1))]
+                     [iy (in-range y0 (add1 y1))])
+            (= (sc2-grid-ref pl-grid ix iy) 1)))]))
+
+(define (friendly-safe-base-anchor existing-units fallback-x fallback-y)
+  (define friendly-ths
+    (sort-townhalls-main-first
+     (filter (lambda (u)
+               (and (= (sc2-unit-alliance u) 1)
+                    (not (= (sc2-unit-display-type u) 4))
+                    (sc2-unit-is-townhall? u)
+                    (not (sc2-unit-is-flying u))))
+             existing-units)))
+  (cond
+    [(not (null? friendly-ths))
+     (define p (sc2-unit-pos (first friendly-ths)))
+     (cons (sc2-point3d-x p) (sc2-point3d-y p))]
+    [(unbox SC2-HOME-BASE-ANCHOR) => values]
+    [else (cons fallback-x fallback-y)]))
+
+(define (ground-reachability-checker game-info existing-units ref-x ref-y)
+  (define path-grid
+    (and (sc2-game-info? game-info)
+         (sc2-game-info-pathing-grid game-info)))
+  (cond
+    [(not (sc2-image-grid? path-grid)) #f]
+    [else
+     (define neutrals
+       (filter (lambda (u) (and (sc2-unit? u) (= (sc2-unit-alliance u) 3)))
+               existing-units))
+     (define bfs (compute-ground-bfs-distances path-grid ref-x ref-y neutrals))
+     (and bfs
+          (< (bfs ref-x ref-y 4) +inf.0)
+          bfs)]))
+
+(define (dedup-point2ds pts)
+  (define seen (make-hash))
+  (filter (lambda (pt)
+            (define k (cons (round (* 4.0 (sc2-point2d-x pt)))
+                            (round (* 4.0 (sc2-point2d-y pt)))))
+            (if (hash-has-key? seen k)
+                #f
+                (begin (hash-set! seen k #t) #t)))
+          pts))
+
 (define (collect-spiral-candidates anchor-x anchor-y existing-units
                                    #:min-spacing [min-spacing 3.5]
                                    #:max-radius [max-radius 14.0]
@@ -4239,6 +4694,13 @@
     (and (not is-creep-tumor?)
          (sc2-game-info? game-info)
          (sc2-game-info-placement-grid game-info)))
+  (define base-ref
+    (if (and (not is-creep-tumor?) (sc2-game-info? game-info))
+        (friendly-safe-base-anchor existing-units anchor-x anchor-y)
+        (cons anchor-x anchor-y)))
+  (define check-bfs
+    (and (not is-creep-tumor?)
+         (ground-reachability-checker game-info existing-units (car base-ref) (cdr base-ref))))
 
   ;; Collect in-transit worker build target points and existing + in-transit Terran East (+X) add-on footprints
   (define in-transit-build-pts
@@ -4273,9 +4735,10 @@
   (define (clear-spot? cx cy)
     (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
          (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
-         ;; Static placement_grid pre-filter when StartRaw grids are available
-         (or (not pl-grid)
-             (= (sc2-grid-ref pl-grid (exact-floor cx) (exact-floor cy)) 1))
+         ;; Static footprint placement_grid & ground-reachability pre-filter when StartRaw grids are available
+         (static-footprint-placement-ok? pl-grid cx cy cand-hw cand-hh)
+         (or (not check-bfs)
+             (< (check-bfs cx cy 4) +inf.0))
          ;; Expansion Pad Protection: non-TownHall structures/turrets/pylons/depots/tumors must stay >= 4.5 Chebyshev tiles off solved pads
          (or is-townhall-build?
              (for/and ([ep (in-list expansion-pads)])
@@ -4351,7 +4814,9 @@
                                           #:bldg-sym [bldg-sym #f]
                                           #:game-info [game-info #f])
   ;; For Terran production facilities (Barracks=321, Factory=328, Starport=329), also filter out
-  ;; candidates whose East (+X) add-on footprint at (cx + 2.5, cy - 0.5) collides with structures or reserved AABBs.
+  ;; candidates whose East (+X) add-on footprint at (cx + 2.5, cy - 0.5) collides with structures or reserved AABBs,
+  ;; EXCEPT when sealing the main-ramp wall with the 1st Barracks (`existing-rax == 0`), where an East-facing
+  ;; ramp slope overhangs `(+2.5, -0.5)` and `3x3` wall placement must seal the ramp!
   (define needs-terran-addon-clearance? (memv ab-id '(321 328 329)))
   (define ws-active? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
   (define canon-bldg
@@ -4369,9 +4834,51 @@
           [else #f])))
   (define-values (cand-hw cand-hh)
     (sc2-structure-half-dims (or canon-bldg 'barracks)))
+  (define is-townhall-build?
+    (and canon-bldg (set-member? SC2-TOWNHALL-STRUCTURE-SYMS canon-bldg)))
+  (define is-creep-tumor?
+    (memq canon-bldg '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+  (define requires-pylon-power?
+    (memq canon-bldg
+          '(gateway forge cybernetics-core photon-cannon shield-battery
+            twilight-council robotics-facility robotics-bay robotics-support-bay
+            stargate templar-archive templar-archives dark-shrine fleet-beacon)))
+  (define pl-grid
+    (and (not is-creep-tumor?)
+         (sc2-game-info? game-info)
+         (sc2-game-info-placement-grid game-info)))
+  (define anchors0
+    (if (and (list? anchor-points) (not (null? anchor-points)))
+        anchor-points
+        (list (cons anchor-x anchor-y))))
+  (define last-ap (last anchors0))
+  (define safe-base-anchor
+    (friendly-safe-base-anchor existing-units (car last-ap) (cdr last-ap)))
+  (define check-bfs
+    (and (not is-creep-tumor?)
+         (ground-reachability-checker game-info existing-units
+                                      (car safe-base-anchor) (cdr safe-base-anchor))))
+
+  ;; Count existing or in-transit friendly Barracks so ONLY the 1st Barracks (`existing-rax == 0`)
+  ;; may seal an East-facing ramp wall without East `(+2.5, -0.5)` add-on clearance.
+  (define existing-rax
+    (if (= ab-id 321)
+        (for/sum ([u (in-list existing-units)]
+                  #:when (and (= (sc2-unit-alliance u) 1)
+                              (not (= (sc2-unit-display-type u) 4))))
+          (define usym (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown))
+          (cond
+            [(memq usym '(barracks barracks-flying)) 1]
+            [(and (sc2-unit-is-worker? u)
+                  (not (worker-build-order-stuck? u))
+                  (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 321))
+                         (sc2-unit-orders u)))
+             1]
+            [else 0]))
+        0))
 
   ;; If this build specifically targets a reserved wall-slot AABB matching our footprint dims,
-  ;; try that exact wall-slot coordinate FIRST and exclude that specific slot from self-repulsion.
+  ;; exclude that slot (and its own paired `terran-addon-pad` AABB) from self-repulsion.
   (define matched-wall-slot
     (for/first ([b (in-list reserved-aabbs)]
                 #:when (and (reserved-aabb? b)
@@ -4382,8 +4889,109 @@
       b))
   (define eff-reserved-aabbs
     (if matched-wall-slot
-        (filter (lambda (b) (not (equal? b matched-wall-slot))) reserved-aabbs)
+        (let ([wx (reserved-aabb-cx matched-wall-slot)]
+              [wy (reserved-aabb-cy matched-wall-slot)])
+          (filter (lambda (b)
+                    (not (or (equal? b matched-wall-slot)
+                             (and needs-terran-addon-clearance?
+                                  (reserved-aabb? b)
+                                  (eq? (reserved-aabb-kind b) 'terran-addon-pad)
+                                  (<= (pt-dist (+ wx SC2-TERRAN-ADDON-OFFSET-X)
+                                               (+ wy SC2-TERRAN-ADDON-OFFSET-Y)
+                                               (reserved-aabb-cx b)
+                                               (reserved-aabb-cy b))
+                                      2.0)))))
+                  reserved-aabbs))
         reserved-aabbs))
+
+  (define wall-ref-x (if matched-wall-slot (reserved-aabb-cx matched-wall-slot) anchor-x))
+  (define wall-ref-y (if matched-wall-slot (reserved-aabb-cy matched-wall-slot) anchor-y))
+  (define matched-wall-slot-ok?
+    (and matched-wall-slot
+         (>= wall-ref-x SC2-MAP-PLAYABLE-MIN-COORD) (<= wall-ref-x SC2-MAP-PLAYABLE-MAX-COORD)
+         (>= wall-ref-y SC2-MAP-PLAYABLE-MIN-COORD) (<= wall-ref-y SC2-MAP-PLAYABLE-MAX-COORD)
+         (static-footprint-placement-ok? pl-grid wall-ref-x wall-ref-y cand-hw cand-hh)
+         (or (not check-bfs) (< (check-bfs wall-ref-x wall-ref-y 4) +inf.0))))
+
+  (define first-rax?
+    (and (= ab-id 321) (= existing-rax 0)))
+  (define east-addon-overhangs-terrain?
+    (and (sc2-image-grid? pl-grid)
+         (not (static-footprint-placement-ok?
+               pl-grid
+               (+ wall-ref-x SC2-TERRAN-ADDON-OFFSET-X)
+               (+ wall-ref-y SC2-TERRAN-ADDON-OFFSET-Y)
+               1.0 1.0))))
+  (define first-rax-allow-wall-3x3?
+    (and first-rax?
+         (or (and matched-wall-slot #t)
+             east-addon-overhangs-terrain?
+             (> (pt-dist wall-ref-x wall-ref-y
+                         (car safe-base-anchor) (cdr safe-base-anchor))
+                6.0))))
+
+  (define (wall-slot-3x3-spot-clear? cx cy)
+    (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
+         (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
+         (static-footprint-placement-ok? pl-grid cx cy cand-hw cand-hh)
+         (or (not check-bfs) (< (check-bfs cx cy 4) +inf.0))
+         (or is-townhall-build?
+             (for/and ([ep (in-list expansion-pads)])
+               (define px (if (pair? ep) (car ep) (any-point-x ep)))
+               (define py (if (pair? ep) (cdr ep) (any-point-y ep)))
+               (>= (max (abs (- cx px)) (abs (- cy py))) 4.5)))
+         (for/and ([b (in-list eff-reserved-aabbs)]
+                   #:when (and (reserved-aabb? b)
+                               (not (and first-rax-allow-wall-3x3?
+                                         (eq? (reserved-aabb-kind b) 'terran-addon-pad)))))
+           (not (aabb-overlaps? cx cy cand-hw cand-hh b)))
+         (for/and ([u (in-list existing-units)]
+                   #:when (or (sc2-unit-is-structure? u)
+                              (sc2-unit-is-mineral-field? u)
+                              (sc2-unit-is-vespene-geyser? u)))
+           (define p (sc2-unit-pos u))
+           (define ux (sc2-point3d-x p))
+           (define uy (sc2-point3d-y p))
+           (define usym (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown))
+           (define-values (u-hw u-hh)
+             (cond
+               [(sc2-unit-is-mineral-field? u) (values 1.0 0.5)]
+               [(sc2-unit-is-vespene-geyser? u) (values 1.5 1.5)]
+               [else (sc2-structure-half-dims usym)]))
+           (not (and (< (abs (- cx ux)) (- (+ cand-hw u-hw) 0.05))
+                     (< (abs (- cy uy)) (- (+ cand-hh u-hh) 0.05)))))
+         (for/and ([rp (in-list extra-reserved-points)]
+                   #:when (any-point? rp))
+           (> (pt-dist cx cy (any-point-x rp) (any-point-y rp)) 2.0))))
+
+  ;; Tight <= 2.5-tile grid-aligned candidates around wall slot for 1st Barracks / matched wall builds
+  (define wall-tight-cands
+    (if (or matched-wall-slot-ok? first-rax-allow-wall-3x3?)
+        (let* ([snap-base-x (if (>= (abs (- cand-hw (round cand-hw))) 0.25)
+                                (+ (floor wall-ref-x) 0.5)
+                                (exact->inexact (round wall-ref-x)))]
+               [snap-base-y (if (>= (abs (- cand-hh (round cand-hh))) 0.25)
+                                (+ (floor wall-ref-y) 0.5)
+                                (exact->inexact (round wall-ref-y)))]
+               [neighbors
+                (sort
+                 (for*/list ([dx (in-list '(-2.0 -1.0 0.0 1.0 2.0))]
+                             [dy (in-list '(-2.0 -1.0 0.0 1.0 2.0))]
+                             [px (in-value (+ snap-base-x dx))]
+                             [py (in-value (+ snap-base-y dy))]
+                             #:when (and (<= (pt-dist wall-ref-x wall-ref-y px py) 2.5)
+                                         (wall-slot-3x3-spot-clear? px py)))
+                   (sc2-point2d px py))
+                 <
+                 #:key (lambda (pt)
+                         (pt-dist wall-ref-x wall-ref-y
+                                  (sc2-point2d-x pt) (sc2-point2d-y pt))))]
+               [exact-list
+                (if (wall-slot-3x3-spot-clear? wall-ref-x wall-ref-y)
+                    (list (sc2-point2d wall-ref-x wall-ref-y))
+                    '())])
+          (dedup-point2ds (append exact-list neighbors)))
+        '()))
 
   (define (filter-addon-clear c-list)
     (filter (lambda (pt)
@@ -4391,6 +4999,7 @@
               (define ay (+ (sc2-point2d-y pt) SC2-TERRAN-ADDON-OFFSET-Y))
               (and (<= ax SC2-MAP-PLAYABLE-MAX-COORD)
                    (>= ay SC2-MAP-PLAYABLE-MIN-COORD)
+                   (static-footprint-placement-ok? pl-grid ax ay 1.0 1.0)
                    (for/and ([b (in-list eff-reserved-aabbs)]
                              #:when (reserved-aabb? b))
                      (not (aabb-overlaps? ax ay 1.0 1.0 b)))
@@ -4406,10 +5015,21 @@
                      (> (pt-dist ax ay (sc2-point3d-x p) (sc2-point3d-y p))
                         (+ SC2-ADDON-FOOTPRINT-HALF-SIZE (max 0.5 (sc2-unit-radius u)))))))
             c-list))
+
+  (define has-completed-pylon?
+    (and requires-pylon-power?
+         (ormap (lambda (u)
+                  (and (= (sc2-unit-alliance u) 1)
+                       (not (= (sc2-unit-display-type u) 4))
+                       (memq (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown)
+                             '(pylon pylon-overcharged warp-prism-phasing))
+                       (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                existing-units)))
   (define anchors
-    (if (and (list? anchor-points) (not (null? anchor-points)))
-        anchor-points
-        (list (cons anchor-x anchor-y))))
+    (if (and requires-pylon-power? has-completed-pylon?)
+        anchors0
+        (remove-duplicates (append anchors0 (list safe-base-anchor)))))
+
   (define spiral-cands
     (let ([all-pts
            (append*
@@ -4425,21 +5045,63 @@
                                          #:expansion-pads expansion-pads
                                          #:bldg-sym canon-bldg
                                          #:game-info game-info)))])
-      (take all-pts (min 96 (length all-pts)))))
+      (dedup-point2ds (take all-pts (min 96 (length all-pts))))))
+
   (define raw-cands
-    (if matched-wall-slot
-        (cons (sc2-point2d (reserved-aabb-cx matched-wall-slot)
-                           (reserved-aabb-cy matched-wall-slot))
-              spiral-cands)
-        spiral-cands))
+    (dedup-point2ds (append wall-tight-cands spiral-cands)))
   (define cands
-    (if needs-terran-addon-clearance?
-        (let ([addon-clear (filter-addon-clear raw-cands)])
-          (if (not (null? addon-clear)) addon-clear raw-cands))
-        raw-cands))
+    (cond
+      [first-rax-allow-wall-3x3?
+       (define addon-clear-rest (filter-addon-clear spiral-cands))
+       (dedup-point2ds
+        (append wall-tight-cands
+                (if (not (null? addon-clear-rest)) addon-clear-rest spiral-cands)))]
+      [needs-terran-addon-clearance?
+       (let ([addon-clear (filter-addon-clear raw-cands)])
+         (if (not (null? addon-clear)) addon-clear raw-cands))]
+      [else raw-cands]))
+
+  (define (near-base-emergency-cands)
+    (define em-anchor
+      (if (and requires-pylon-power? has-completed-pylon?)
+          (first anchors)
+          safe-base-anchor))
+    (collect-spiral-candidates (car em-anchor) (cdr em-anchor) existing-units
+                               #:min-spacing (min 2.5 min-spacing)
+                               #:max-radius 18.0
+                               #:step 1.0
+                               #:limit 64
+                               #:extra-reserved-points extra-reserved-points
+                               #:ws-active-placement? ws-active?
+                               #:reserved-aabbs '()
+                               #:expansion-pads expansion-pads
+                               #:bldg-sym canon-bldg
+                               #:game-info game-info))
+
   (cond
     [(null? cands)
-     (sc2-point2d anchor-x anchor-y)]
+     (define em-cands (near-base-emergency-cands))
+     (cond
+       [(and ws-active? (not (null? em-cands)))
+        (define q-items
+          (for/list ([pt (in-list em-cands)])
+            (sc2-query-placement ab-id (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
+        (define q-resp
+          (sc2-ws-rpc! ws-conn
+                       (make-request-query-placement q-items
+                                                     #:ignore-resource-requirements? #t)))
+        (define q-results (sc2-response-query-placements q-resp))
+        (or (for/first ([pt (in-list em-cands)]
+                        [res (in-list q-results)]
+                        #:when (= res 1))
+              pt)
+            (first em-cands))]
+       [(not (null? em-cands)) (first em-cands)]
+       [(and (static-footprint-placement-ok? pl-grid anchor-x anchor-y cand-hw cand-hh)
+             (or (not check-bfs) (< (check-bfs anchor-x anchor-y 4) +inf.0)))
+        (sc2-point2d anchor-x anchor-y)]
+       [else
+        (sc2-point2d (car safe-base-anchor) (cdr safe-base-anchor))])]
     [ws-active?
      (cond
        [needs-terran-addon-clearance?
@@ -4464,6 +5126,24 @@
         (define q-results (query-dual-batch cands))
         (cond
           [(>= (length q-results) (* 2 (length cands)))
+           (define wall-seal-pt
+             (and first-rax-allow-wall-3x3?
+                  (let ([valid-wall-pts
+                         (for/list ([pt (in-list cands)]
+                                    [idx (in-naturals 0)]
+                                    #:when (and (<= (pt-dist wall-ref-x wall-ref-y
+                                                             (sc2-point2d-x pt) (sc2-point2d-y pt))
+                                                    2.55)
+                                                (= (list-ref q-results (* 2 idx)) 1)))
+                           (cons pt (= (list-ref q-results (+ (* 2 idx) 1)) 1)))])
+                    (and (not (null? valid-wall-pts))
+                         (car (argmin (lambda (entry)
+                                        (define pt (car entry))
+                                        (define addon-ok? (cdr entry))
+                                        (- (* 10.0 (pt-dist wall-ref-x wall-ref-y
+                                                            (sc2-point2d-x pt) (sc2-point2d-y pt)))
+                                           (if addon-ok? 0.25 0.0)))
+                                      valid-wall-pts))))))
            (define both-valid-pt
              (for/first ([pt (in-list cands)]
                          [idx (in-naturals 0)]
@@ -4476,9 +5156,10 @@
                          #:when (= (list-ref q-results (* 2 idx)) 1))
                pt))
            (cond
+             [wall-seal-pt wall-seal-pt]
              [both-valid-pt both-valid-pt]
              [else
-              ;; Expand search radius across all anchors to find a spot where BOTH the 3x3 facility and East 2x2 add-on fit!
+              ;; Expand search radius across all anchors (including safe-base-anchor) to find a spot where BOTH 3x3 + East 2x2 add-on fit!
               (define wide-raw
                 (let ([pts
                        (append*
@@ -4494,7 +5175,7 @@
                                                      #:expansion-pads expansion-pads
                                                      #:bldg-sym canon-bldg
                                                      #:game-info game-info)))])
-                  (take pts (min 96 (length pts)))))
+                  (dedup-point2ds (take pts (min 96 (length pts))))))
               (define wide-cands
                 (let ([ac (filter-addon-clear wide-raw)])
                   (if (not (null? ac)) ac wide-raw)))
@@ -4514,13 +5195,29 @@
                                        #:when (= (list-ref w-res (* 2 idx)) 1))
                              pt))
                           (values #f #f)))))
-              (or wide-both main-valid-pt wide-main (first cands))])]
+              (or wide-both
+                  main-valid-pt
+                  wide-main
+                  (let ([em-cands (near-base-emergency-cands)])
+                    (and (not (null? em-cands))
+                         (let ([em-res (query-dual-batch em-cands)])
+                           (and (>= (length em-res) (* 2 (length em-cands)))
+                                (or (for/first ([pt (in-list em-cands)]
+                                                [idx (in-naturals 0)]
+                                                #:when (and (= (list-ref em-res (* 2 idx)) 1)
+                                                            (= (list-ref em-res (+ (* 2 idx) 1)) 1)))
+                                      pt)
+                                    (for/first ([pt (in-list em-cands)]
+                                                [idx (in-naturals 0)]
+                                                #:when (= (list-ref em-res (* 2 idx)) 1))
+                                      pt))))))
+                  (if (not (null? spiral-cands)) (first spiral-cands) (first cands)))])]
           [else
            (or (for/first ([pt (in-list cands)]
                            [res (in-list q-results)]
                            #:when (= res 1))
                  pt)
-               (first cands))])]
+               (if (not (null? spiral-cands)) (first spiral-cands) (first cands)))])]
        [else
         (define (query-single-batch batch)
           (define q-items
@@ -4551,10 +5248,13 @@
                                                   #:expansion-pads expansion-pads
                                                   #:bldg-sym canon-bldg
                                                   #:game-info game-info)))]
-                   [wide-cands (take wide-pts (min 96 (length wide-pts)))])
+                   [wide-cands (dedup-point2ds (take wide-pts (min 96 (length wide-pts))))])
               (and (not (null? wide-cands))
                    (query-single-batch wide-cands)))
-            (first cands))])]
+            (let ([em-cands (near-base-emergency-cands)])
+              (and (not (null? em-cands))
+                   (query-single-batch em-cands)))
+            (if (not (null? spiral-cands)) (first spiral-cands) (first cands)))])]
     [else
      (first cands)]))
 
@@ -4597,7 +5297,7 @@
     (if (not (null? solved-bases))
         (order-expansions-from-origin solved-bases home-x home-y path-grid neutral-units)
         ;; Minimal synthetic fallback if < 4 minerals and 0 geysers
-        (for/list ([c (in-list (cluster-resource-centroids all-blocking-res))]
+        (for/list ([c (in-list (cluster-resource-centroids all-blocking-res game-info))]
                    #:when (> (pt-dist home-x home-y (first c) (second c)) SC2-BASE-RESOURCE-RADIUS))
           (hash 'x (first c) 'y (second c) 'minerals (third c) 'geysers '()))))
 
@@ -4671,11 +5371,17 @@
         candidate-bases0))
 
   ;; Generate exact solved pad first, followed by tight legal 5x5 octagon half-tile offsets around (bx, by)
+  (define pl-grid (and (sc2-game-info? game-info) (sc2-game-info-placement-grid game-info)))
   (define (pad-candidates-for-base b)
     (define bx (hash-ref b 'x))
     (define by (hash-ref b 'y))
     (define exact-pt (sc2-point2d bx by))
-    (define nearby-legal
+    (define local-blocking-res
+      (filter (lambda (r)
+                (define p (sc2-unit-pos r))
+                (<= (pt-dist bx by (sc2-point3d-x p) (sc2-point3d-y p)) 20.0))
+              all-blocking-res))
+    (define raw-nearby-legal
       (sort
        (for*/list ([dx (in-range -4.0 4.1 1.0)]
                    [dy (in-range -4.0 4.1 1.0)]
@@ -4684,11 +5390,19 @@
                    [py (in-value (+ (floor by) 0.5 dy))]
                    #:when (and (>= px SC2-MAP-PLAYABLE-MIN-COORD) (<= px SC2-MAP-PLAYABLE-MAX-COORD)
                                (>= py SC2-MAP-PLAYABLE-MIN-COORD) (<= py SC2-MAP-PLAYABLE-MAX-COORD)
-                               (sc2-townhall-resource-legal? px py all-blocking-res)))
+                               (sc2-townhall-all-resources-legal? px py local-blocking-res)))
          (sc2-point2d px py))
        <
        #:key (lambda (pt) (pt-dist bx by (sc2-point2d-x pt) (sc2-point2d-y pt)))))
-    (if (sc2-townhall-resource-legal? bx by all-blocking-res)
+    (define nearby-legal
+      (if (sc2-image-grid? pl-grid)
+          (let ([grid-ok (filter (lambda (pt)
+                                   (static-footprint-placement-ok?
+                                    pl-grid (sc2-point2d-x pt) (sc2-point2d-y pt) 2.5 2.5))
+                                 raw-nearby-legal)])
+            (if (not (null? grid-ok)) grid-ok raw-nearby-legal))
+          raw-nearby-legal))
+    (if (sc2-townhall-all-resources-legal? bx by local-blocking-res)
         (cons exact-pt nearby-legal)
         (if (not (null? nearby-legal)) nearby-legal (list exact-pt))))
 
@@ -5492,8 +6206,21 @@
 (define SC2-LAST-KNOWN-ENEMY-POS (make-hasheqv))
 (define SC2-ENEMY-POS-LAST-LOOP (box 0))
 (define SC2-DEPOT-TOGGLE-COOLDOWN (make-hasheqv))
+(define SC2-LAST-BOT-ACTION-REJECTS (box '()))
+(define SC2-TOTAL-BOT-ACTION-REJECT-COUNT (box 0))
 
-(define (translate-bot-actions->sc2-raw-commands actions obs
+(define (get-last-bot-action-rejects)
+  (unbox SC2-LAST-BOT-ACTION-REJECTS))
+
+(define (get-total-bot-action-reject-count)
+  (unbox SC2-TOTAL-BOT-ACTION-REJECT-COUNT))
+
+(define (reset-typed-command-gate-stats!)
+  (set-box! SC2-LAST-BOT-ACTION-REJECTS '())
+  (set-box! SC2-TOTAL-BOT-ACTION-REJECT-COUNT 0)
+  (set-box! SC2-TOTAL-WIRE-ACTION-DROP-COUNT 0))
+
+(define (translate-bot-actions->sc2-raw-commands raw-actions obs
                                                  #:used-creep-tumors [used-tumors #f]
                                                  #:ws-conn [ws-conn #f]
                                                  #:enemy-base [enemy-base #f]
@@ -5502,10 +6229,83 @@
                                                  #:role-leases [role-leases #f]
                                                  #:reserved-aabbs [reserved-aabbs '()]
                                                  #:game-info [game-info #f])
+  (define-values (actions step-action-rejects)
+    (filter-valid-bot-actions (if (list? raw-actions) raw-actions '())))
+  (set-box! SC2-LAST-BOT-ACTION-REJECTS step-action-rejects)
+  (when (pair? step-action-rejects)
+    (set-box! SC2-TOTAL-BOT-ACTION-REJECT-COUNT
+              (+ (unbox SC2-TOTAL-BOT-ACTION-REJECT-COUNT) (length step-action-rejects))))
+  (define (finite-world-coord? v)
+    (and (real? v) (not (nan? v)) (not (infinite? v)) (>= v 0.0) (<= v 256.0)))
+  (define (finite-num? v)
+    (and (real? v) (not (nan? v)) (not (infinite? v))))
+  (define (valid-u64-tag? t)
+    (and (exact-integer? t) (> t 0) (<= t #xFFFFFFFFFFFFFFFF)))
+  (define (sanitize-obs-unit u)
+    (and (sc2-unit? u)
+         (valid-u64-tag? (sc2-unit-tag u))
+         (exact-integer? (sc2-unit-alliance u))
+         (exact-integer? (sc2-unit-display-type u))
+         (exact-nonnegative-integer? (sc2-unit-unit-type u))
+         (let ([p (sc2-unit-pos u)])
+           (and (sc2-point3d? p)
+                (finite-num? (sc2-point3d-x p))
+                (finite-num? (sc2-point3d-y p))
+                (let ([px (sc2-point3d-x p)]
+                      [py (sc2-point3d-y p)]
+                      [pz (sc2-point3d-z p)]
+                      [rad (sc2-unit-radius u)]
+                      [bp (sc2-unit-build-progress u)]
+                      [hp (sc2-unit-health u)]
+                      [sh (sc2-unit-shield u)]
+                      [en (sc2-unit-energy u)]
+                      [ords (sc2-unit-orders u)]
+                      [bIds (sc2-unit-buff-ids u)])
+                  (if (and (>= px 0.0) (<= px 256.0)
+                           (>= py 0.0) (<= py 256.0)
+                           (finite-num? pz)
+                           (finite-num? rad) (>= rad 0.0)
+                           (finite-num? bp)
+                           (finite-num? hp)
+                           (finite-num? sh)
+                           (finite-num? en)
+                           (list? ords) (andmap sc2-unit-order? ords)
+                           (list? bIds))
+                      u
+                      (struct-copy
+                       sc2-unit u
+                       [pos (sc2-point3d (max 0.0 (min 256.0 (exact->inexact px)))
+                                         (max 0.0 (min 256.0 (exact->inexact py)))
+                                         (if (finite-num? pz) (exact->inexact pz) 0.0))]
+                       [radius (if (and (finite-num? rad) (>= rad 0.0)) (exact->inexact rad) 0.5)]
+                       [build-progress (if (finite-num? bp) (max 0.0 (min 1.0 (exact->inexact bp))) 1.0)]
+                       [health (if (finite-num? hp) (max 0.0 (exact->inexact hp)) 1.0)]
+                       [shield (if (finite-num? sh) (max 0.0 (exact->inexact sh)) 0.0)]
+                       [energy (if (finite-num? en) (max 0.0 (exact->inexact en)) 0.0)]
+                       [orders (if (list? ords)
+                                   (filter (lambda (o)
+                                             (and (sc2-unit-order? o)
+                                                  (exact-integer? (sc2-unit-order-ability-id o))
+                                                  (exact-integer? (sc2-unit-order-target-unit-tag o))
+                                                  (let ([tp (sc2-unit-order-target-pos o)])
+                                                    (or (not tp)
+                                                        (and (sc2-point2d? tp)
+                                                             (finite-world-coord? (sc2-point2d-x tp))
+                                                             (finite-world-coord? (sc2-point2d-y tp)))
+                                                        (and (sc2-point3d? tp)
+                                                             (finite-world-coord? (sc2-point3d-x tp))
+                                                             (finite-world-coord? (sc2-point3d-y tp)))))))
+                                           ords)
+                                   '())]
+                       [buff-ids (if (list? bIds) (filter exact-integer? bIds) '())])))))))
   (define cur-loop
     (cond
-      [(sc2-observation? obs) (sc2-observation-game-loop obs)]
-      [(hash? obs) (let ([fr (hash-ref obs 'frame 0)]) (if (exact-integer? fr) fr 0))]
+      [(sc2-observation? obs)
+       (let ([gl (sc2-observation-game-loop obs)])
+         (if (and (exact-integer? gl) (>= gl 0)) gl 0))]
+      [(hash? obs)
+       (let ([fr (hash-ref obs 'frame 0)])
+         (if (and (exact-integer? fr) (>= fr 0)) fr 0))]
       [else 0]))
   (when (sc2-game-info? game-info)
     (set-box! SC2-ACTIVE-GAME-INFO game-info))
@@ -5522,14 +6322,31 @@
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
     (set-box! SC2-ENEMY-POS-LAST-LOOP cur-loop)
-    (for ([dtag (in-list (sc2-observation-dead-unit-tags obs))])
-      (hash-remove! SC2-LAST-KNOWN-ENEMY-POS dtag)))
-  (define units (if (sc2-observation? obs) (sc2-observation-units obs) '()))
-  (define power-sources (if (sc2-observation? obs) (sc2-observation-power-sources obs) '()))
+    (define raw-dead (sc2-observation-dead-unit-tags obs))
+    (when (list? raw-dead)
+      (for ([dtag (in-list raw-dead)]
+            #:when (valid-u64-tag? dtag))
+        (hash-remove! SC2-LAST-KNOWN-ENEMY-POS dtag))))
+  (define units
+    (if (and (sc2-observation? obs) (list? (sc2-observation-units obs)))
+        (filter-map sanitize-obs-unit (sc2-observation-units obs))
+        '()))
+  (define power-sources
+    (if (and (sc2-observation? obs) (list? (sc2-observation-power-sources obs)))
+        (filter (lambda (ps)
+                  (and (sc2-power-source? ps)
+                       (finite-num? (sc2-power-source-radius ps))
+                       (>= (sc2-power-source-radius ps) 0.0)
+                       (let ([p (sc2-power-source-pos ps)])
+                         (and (sc2-point3d? p)
+                              (finite-world-coord? (sc2-point3d-x p))
+                              (finite-world-coord? (sc2-point3d-y p))))))
+                (sc2-observation-power-sources obs))
+        '()))
   (define self-units
     (filter (lambda (u)
               (and (= (sc2-unit-alliance u) 1)
-                   (not (= (sc2-unit-display-type u) 4))))
+                  (not (= (sc2-unit-display-type u) 4))))
             units))
   (define enemy-units
     (filter (lambda (u)
@@ -5541,34 +6358,53 @@
   (define step-resource-units
     (filter (lambda (u) (or (sc2-unit-is-mineral-field? u) (sc2-unit-is-vespene-geyser? u)))
             neutral-units))
-  (when (not (null? step-resource-units))
-    (define step-clusters (cluster-resource-centroids step-resource-units))
-    (when (> (length step-clusters) (length (unbox SC2-CACHED-MAP-BASE-CLUSTERS)))
-      (set-box! SC2-CACHED-MAP-BASE-CLUSTERS step-clusters)))
+  (define solved-exp-bases
+    (if (not (null? neutral-units))
+        (solve-all-map-expansion-bases neutral-units eff-game-info)
+        '()))
+  (define all-expansion-pads
+    (for/list ([b (in-list solved-exp-bases)])
+      (cons (hash-ref b 'x) (hash-ref b 'y))))
+  (define step-clusters
+    (cond
+      [(not (null? solved-exp-bases))
+        (for/list ([b (in-list solved-exp-bases)])
+          (list (hash-ref b 'x)
+                (hash-ref b 'y)
+                (append (hash-ref b 'minerals '())
+                        (hash-ref b 'geysers '()))))]
+      [(not (null? step-resource-units))
+       (cluster-resource-centroids step-resource-units eff-game-info)]
+      [else '()]))
+  (when (> (length step-clusters) (length (unbox SC2-CACHED-MAP-BASE-CLUSTERS)))
+    (set-box! SC2-CACHED-MAP-BASE-CLUSTERS step-clusters))
   (define live-visible-enemy-tags (mutable-seteqv))
   (for ([eu (in-list enemy-units)])
     (define etag (sc2-unit-tag eu))
     (define ep (sc2-unit-pos eu))
-    (when (> etag 0)
+    (when (valid-u64-tag? etag)
       (hash-set! SC2-LAST-KNOWN-ENEMY-POS etag
                  (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))
       (when (and (= (sc2-unit-display-type eu) 1)
                  (> (+ (sc2-unit-health eu) (sc2-unit-shield eu)) 0.0))
         (set-add! live-visible-enemy-tags etag))))
   (when (hash? obs)
-    (for ([eh (in-list (append (hash-ref obs 'enemy-units '())
-                               (hash-ref obs 'enemy-buildings '())))]
+    (define raw-eh-units (hash-ref obs 'enemy-units '()))
+    (define raw-eh-bldgs (hash-ref obs 'enemy-buildings '()))
+    (for ([eh (in-list (append (if (list? raw-eh-units) raw-eh-units '())
+                               (if (list? raw-eh-bldgs) raw-eh-bldgs '())))]
           #:when (hash? eh))
       (define eid (hash-ref eh 'id 0))
-      (when (and (exact-integer? eid) (> eid 0))
+      (when (valid-u64-tag? eid)
         (define ex (hash-ref eh 'x #f))
         (define ey (hash-ref eh 'y #f))
-        (when (and (real? ex) (real? ey))
+        (when (and (finite-world-coord? ex) (finite-world-coord? ey))
           (hash-set! SC2-LAST-KNOWN-ENEMY-POS eid
                      (cons (exact->inexact ex) (exact->inexact ey))))
-        (when (and (> (hash-ref eh 'hp 1) 0)
+        (define ehp (hash-ref eh 'hp 1))
+        (when (and (finite-num? ehp) (> ehp 0)
                    (not (eq? (hash-ref eh 'snapshot? #f) #t))
-                   (= (hash-ref eh 'display-type 1) 1))
+                   (equal? (hash-ref eh 'display-type 1) 1))
           (set-add! live-visible-enemy-tags eid)))))
   ;; Purge stale remembered enemy coordinates once friendly vision covers their tile with no live unit present
   (when (not (null? self-units))
@@ -5594,26 +6430,21 @@
                  (hash-has-key? obs 'enemy-buildings)))))
   (define hash-mineral-patches
     (if (hash? obs)
-        (filter (lambda (m)
-                  (and (hash? m)
-                       (exact-integer? (hash-ref m 'id #f))
-                       (> (hash-ref m 'id 0) 0)))
-                (append (hash-ref obs 'mineral-patches '())
-                        (hash-ref obs 'mineral-fields '())))
+        (let ([mp1 (hash-ref obs 'mineral-patches '())]
+              [mp2 (hash-ref obs 'mineral-fields '())])
+          (filter (lambda (m)
+                    (and (hash? m)
+                         (valid-u64-tag? (hash-ref m 'id #f))))
+                  (append (if (list? mp1) mp1 '())
+                          (if (list? mp2) mp2 '()))))
         '()))
   (define hash-ally-by-id
     (if (hash? obs)
-        (for/hasheqv ([u (in-list (hash-ref obs 'ally-units '()))]
-                      #:when (and (hash? u) (exact-integer? (hash-ref u 'id #f))))
-          (values (hash-ref u 'id) u))
+        (let ([au (hash-ref obs 'ally-units '())])
+          (for/hasheqv ([u (in-list (if (list? au) au '()))]
+                        #:when (and (hash? u) (valid-u64-tag? (hash-ref u 'id #f))))
+            (values (hash-ref u 'id) u)))
         (hasheqv)))
-  (define solved-exp-bases
-    (if (not (null? neutral-units))
-        (solve-all-map-expansion-bases neutral-units eff-game-info)
-        '()))
-  (define all-expansion-pads
-    (for/list ([b (in-list solved-exp-bases)])
-      (cons (hash-ref b 'x) (hash-ref b 'y))))
   (define workers
     (filter (lambda (w)
               (and (sc2-unit-is-worker? w)
@@ -5726,10 +6557,7 @@
     (define-values (cx0 cy0 cx1 cy1) (playable-sweep-bounds))
     (define (clamp-x v) (max cx0 (min cx1 (exact->inexact v))))
     (define (clamp-y v) (max cy0 (min cy1 (exact->inexact v))))
-    (define live-clusters
-      (if (not (null? step-resource-units))
-          (cluster-resource-centroids step-resource-units)
-          '()))
+    (define live-clusters step-clusters)
     (define raw-clusters
       (append live-clusters (unbox SC2-CACHED-MAP-BASE-CLUSTERS)))
     (define sorted-clusters
@@ -6225,10 +7053,10 @@
   (define (priority-first-action? a)
     (and (pair? a)
          (memq (car a)
-               '(build expand resume-halted-building
-                 worker-scout overlord-scout periodic-scout
+               '(build build-nydus-worm expand resume-halted-building
+                 worker-scout overlord-scout periodic-scout scout-sector
                  mineral-harass worker-harass harass-workers
-                 patrol-block-expansion burrow-block
+                 patrol-block-expansion burrow-block clear-expansion-block
                  cast-deception-and-scout-spells
                  pull-workers-attack worker-drill-stack-attack mineral-walk))))
   (define (routine-harvest-action? a)
@@ -6326,6 +7154,40 @@
              home-y))
        (when ab-id
          (cond
+           ;; Nydus Worm / Canal (1768): MUST be cast by a completed allied Nydus Network (unit-type = 95), NEVER a worker!
+           [(memq norm '(nydus-worm nydus-canal build-nydus-worm))
+            (define nydus-net-tag
+              (or (for/first ([u (in-list self-units)]
+                              #:when (and (= (sc2-unit-unit-type u) 95)
+                                          (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                                          (not (set-member? used-producer-tags (sc2-unit-tag u)))))
+                    (sc2-unit-tag u))
+                  (and (hash? obs)
+                       (for/first ([b (in-list (hash-ref obs 'ally-buildings '()))]
+                                   #:when (and (hash? b)
+                                               (eq? (normalize-sc2-name->symbol (hash-ref b 'type 'unknown)) 'nydus-network)
+                                               (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                               (exact-integer? (hash-ref b 'id #f))
+                                               (> (hash-ref b 'id 0) 0)
+                                               (not (set-member? used-producer-tags (hash-ref b 'id)))))
+                         (hash-ref b 'id)))))
+            (when nydus-net-tag
+              (set-add! used-producer-tags nydus-net-tag)
+              (hash-set! used-producer-counts nydus-net-tag
+                         (add1 (hash-ref used-producer-counts nydus-net-tag 0)))
+              (define worm-pt
+                (find-verified-building-placement ws-conn 1768 req-x req-y units
+                                                  #:min-spacing 2.0
+                                                  #:max-radius 10.0
+                                                  #:step 1.0
+                                                  #:extra-reserved-points step-reserved-build-pts
+                                                  #:reserved-aabbs reserved-aabbs
+                                                  #:expansion-pads all-expansion-pads
+                                                  #:bldg-sym 'nydus-worm
+                                                  #:game-info eff-game-info))
+              (reserve-step-build-pt! worm-pt 1768)
+              (emit! (sc2-raw-unit-command 1768 worm-pt 0 (list nydus-net-tag) #f)))]
+
            ;; Morph-in-place townhall/spire upgrades (Lair, Hive, Greater Spire, Orbital, Planetary)
            [(memq norm '(lair hive greater-spire orbital-command planetary-fortress))
             (define src-types
@@ -6420,7 +7282,7 @@
                                                 #:reserved-aabbs reserved-aabbs
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym norm
-                                                #:game-info game-info))
+                                                #:game-info eff-game-info))
             (reserve-step-build-pt! place-pt ab-id)
             (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
             (when wtag
@@ -6443,7 +7305,7 @@
                                                 #:reserved-aabbs reserved-aabbs
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym norm
-                                                #:game-info game-info))
+                                                #:game-info eff-game-info))
             (reserve-step-build-pt! place-pt ab-id)
             (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
             (when wtag
@@ -6463,11 +7325,60 @@
                                                 #:reserved-aabbs reserved-aabbs
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym norm
-                                                #:game-info game-info))
+                                                #:game-info eff-game-info))
             (reserve-step-build-pt! place-pt ab-id)
             (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
             (when wtag
               (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))]))]
+
+      ;; 2b. Dedicated Nydus Worm intent: `(build-nydus-worm <x> <y>)` or `(build-nydus-worm <nydus-id> <x> <y>)`
+      [(or (list 'build-nydus-worm (? exact-integer? explicit-nid) (? real? raw-x) (? real? raw-y))
+           (and (list 'build-nydus-worm (? real? raw-x) (? real? raw-y))
+                (app (lambda (_) #f) explicit-nid)))
+       (define req-x (scale-bot-coord-to-world raw-x home-x))
+       (define req-y (scale-bot-coord-to-world raw-y home-y))
+       (define nydus-net-tag
+         (cond
+           [(and explicit-nid
+                 (> explicit-nid 0)
+                 (not (set-member? used-producer-tags explicit-nid))
+                 (let ([nu (hash-ref self-unit-by-tag explicit-nid #f)])
+                   (if nu
+                       (and (= (sc2-unit-unit-type nu) 95)
+                            (>= (sc2-unit-build-progress nu) SC2-BUILD-COMPLETE-PROGRESS))
+                       (null? self-units))))
+            explicit-nid]
+           [else
+            (or (for/first ([u (in-list self-units)]
+                            #:when (and (= (sc2-unit-unit-type u) 95)
+                                        (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                                        (not (set-member? used-producer-tags (sc2-unit-tag u)))))
+                  (sc2-unit-tag u))
+                (and (hash? obs)
+                     (for/first ([b (in-list (hash-ref obs 'ally-buildings '()))]
+                                 #:when (and (hash? b)
+                                             (eq? (normalize-sc2-name->symbol (hash-ref b 'type 'unknown)) 'nydus-network)
+                                             (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                             (exact-integer? (hash-ref b 'id #f))
+                                             (> (hash-ref b 'id 0) 0)
+                                             (not (set-member? used-producer-tags (hash-ref b 'id)))))
+                       (hash-ref b 'id))))]))
+       (when nydus-net-tag
+         (set-add! used-producer-tags nydus-net-tag)
+         (hash-set! used-producer-counts nydus-net-tag
+                    (add1 (hash-ref used-producer-counts nydus-net-tag 0)))
+         (define worm-pt
+           (find-verified-building-placement ws-conn 1768 req-x req-y units
+                                             #:min-spacing 2.0
+                                             #:max-radius 10.0
+                                             #:step 1.0
+                                             #:extra-reserved-points step-reserved-build-pts
+                                             #:reserved-aabbs reserved-aabbs
+                                             #:expansion-pads all-expansion-pads
+                                             #:bldg-sym 'nydus-worm
+                                             #:game-info eff-game-info))
+         (reserve-step-build-pt! worm-pt 1768)
+         (emit! (sc2-raw-unit-command 1768 worm-pt 0 (list nydus-net-tag) #f)))]
 
       ;; 3. Expand: `(expand <x> <y>)` or `(expand <th-sym> <x> <y>)`
       [(or (list 'expand _ _)
@@ -6493,7 +7404,7 @@
          (find-best-expansion-placement ws-conn th-ab home-x home-y units
                                         #:req-x req-x
                                         #:req-y req-y
-                                        #:game-info game-info
+                                        #:game-info eff-game-info
                                         #:remembered-enemies SC2-LAST-KNOWN-ENEMY-POS))
        (reserve-step-build-pt! exp-pt th-ab)
        (define wtag (pick-worker-near (sc2-point2d-x exp-pt) (sc2-point2d-y exp-pt)))
@@ -6530,7 +7441,7 @@
                                               #:reserved-aabbs reserved-aabbs
                                               #:expansion-pads all-expansion-pads
                                               #:bldg-sym norm-target
-                                              #:game-info game-info))
+                                              #:game-info eff-game-info))
           (reserve-step-build-pt! place-pt 1163)
           (define explicit-drone-tag
             (for/first ([t (in-list (if (list? uid) uid (list uid)))]
@@ -6549,11 +7460,12 @@
          [else
           (define ab-id (morph-symbol->ability-id norm-target))
           (define raw-uid-list
-            (filter (lambda (t)
-                      (and (exact-integer? t)
-                           (> t 0)
-                           (not (set-member? used-producer-tags t))))
-                    (if (list? uid) uid (list uid))))
+            (remove-duplicates
+             (filter (lambda (t)
+                       (and (exact-integer? t)
+                            (> t 0)
+                            (not (set-member? used-producer-tags t))))
+                     (if (list? uid) uid (list uid)))))
           (define uid-list
             (cond
               [(eq? norm-target 'archon)
@@ -6561,7 +7473,7 @@
                                        (and (not (set-member? used-producer-tags t))
                                             (not (memv t raw-uid-list))))
                                      (select-producer-tags-for-unit 'archon self-units enemy-units))]
-                      [combined (append raw-uid-list extra)])
+                      [combined (remove-duplicates (append raw-uid-list extra))])
                  (if (>= (length combined) 2) (take combined 2) '()))]
               [(and (not (null? self-units))
                     (memq norm-target '(lair hive greater-spire orbital-command planetary-fortress warp-gate warpgate)))
@@ -6601,7 +7513,7 @@
                                               #:reserved-aabbs reserved-aabbs
                                               #:expansion-pads all-expansion-pads
                                               #:bldg-sym norm-target
-                                              #:game-info game-info))
+                                              #:game-info eff-game-info))
           (reserve-step-build-pt! place-pt 1163)
           (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
           (when wtag
@@ -6609,8 +7521,9 @@
          [(eq? norm-target 'archon)
           (define ab-id (morph-symbol->ability-id norm-target))
           (define ptags
-            (filter (lambda (t) (not (set-member? used-producer-tags t)))
-                    (select-producer-tags-for-unit norm-target self-units enemy-units)))
+            (remove-duplicates
+             (filter (lambda (t) (not (set-member? used-producer-tags t)))
+                     (select-producer-tags-for-unit norm-target self-units enemy-units))))
           (when (and ab-id (>= (length ptags) 2))
             (define chosen2 (take ptags 2))
             (for ([t (in-list chosen2)])
@@ -6812,17 +7725,20 @@
 
       ;; 7. Queen Inject Larva: `(inject-larva <queen-id> <hatch-id>)`
       [(list 'inject-larva queen-id hatch-id)
-       (set-add! commanded-combat-tags queen-id)
-       (unless (unit-has-protected-order? queen-id)
-         (emit! (sc2-raw-unit-command 251 #f hatch-id (list queen-id) #f)))]
+       (when (and (exact-integer? queen-id) (> queen-id 0)
+                  (exact-integer? hatch-id) (> hatch-id 0))
+         (set-add! commanded-combat-tags queen-id)
+         (unless (unit-has-protected-order? queen-id)
+           (emit! (sc2-raw-unit-command 251 #f hatch-id (list queen-id) #f))))]
 
       ;; 8. Spells: `(cast <caster-id-or-ids> <spell-sym> ...)` or `(cast-spell <caster-id-or-ids> <spell-sym> ...)`
       ;;    Enforces canonical SC2 ability target mode (Target.None / Target.Point / Target.Unit)
       ;;    and verifies creep tumor placement & MULE mineral patch targets.
       [(list (or 'cast 'cast-spell) raw-caster-id spell-sym rest ...)
        (define caster-ids
-         (filter (lambda (t) (and (exact-integer? t) (> t 0)))
-                 (if (list? raw-caster-id) raw-caster-id (list raw-caster-id))))
+         (remove-duplicates
+          (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                  (if (list? raw-caster-id) raw-caster-id (list raw-caster-id)))))
        (when (not (null? caster-ids))
          (define caster-id (first caster-ids))
          (define norm-spell (normalize-sc2-name->symbol spell-sym))
@@ -6830,7 +7746,7 @@
          (define caster-utype (if caster-u (sc2-unit-unit-type caster-u) 0))
          (define ab-id
            (cond
-             [(memq norm-spell '(spread-creep-tumor spawn-creep-tumor))
+             [(memq norm-spell '(spread-creep-tumor spawn-creep-tumor build-creep-tumor))
               (if (and caster-u (memq (sc2-id->unit-symbol caster-utype)
                                       '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
                   1733  ;; BUILD_CREEPTUMOR_TUMOR (marked in used-tumors ONLY after verified placement!)
@@ -6861,11 +7777,14 @@
            (cond
              ;; Case A: Ability requires NO target (Stimpack, Guardian Shield, Siege/Unsiege, Burrow, Cloak, Build Interceptors, Pulsar Beam, etc.)
              [(set-member? SC2-NO-TARGET-ABILITY-IDS ab-id)
-              (emit! (sc2-raw-unit-command ab-id #f 0 caster-ids #f))]
+              (if (= ab-id 1766)
+                  (when (>= (length caster-ids) 2)
+                    (emit! (sc2-raw-unit-command 1766 #f 0 (take caster-ids 2) #f)))
+                  (emit! (sc2-raw-unit-command ab-id #f 0 caster-ids #f)))]
 
              ;; Case B: Creep Tumor placement (verified radial fan on Creep; never consume 1733 cooldown if unplaceable)
-             [(or (= ab-id 1694) (= ab-id 1733))
-              (unless (and (= ab-id 1694) (unit-has-protected-order? caster-id))
+             [(memv ab-id '(1662 1694 1733 3691))
+              (unless (and (memv ab-id '(1662 1694 3691)) (unit-has-protected-order? caster-id))
                 (define raw-x (if (>= (length rest) 2) (first rest) home-x))
                 (define raw-y (if (>= (length rest) 2) (second rest) home-y))
                 (define tx (scale-bot-coord-to-world raw-x home-x))
@@ -6968,12 +7887,30 @@
                  (when (> resolved-min-tag 0)
                    (emit! (sc2-raw-unit-command ab-id #f resolved-min-tag caster-ids #f)))])]
 
+             ;; Case C2: Nydus Worm (1768) -> must be cast ONLY by a completed Nydus Network (unit-type = 95), NEVER a worker
+             [(= ab-id 1768)
+              (define nydus-actor-id
+                (cond
+                  [(and caster-u (= caster-utype 95)) caster-id]
+                  [(not (null? self-units))
+                   (for/first ([u (in-list self-units)]
+                               #:when (and (= (sc2-unit-unit-type u) 95)
+                                           (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                                           (not (set-member? used-producer-tags (sc2-unit-tag u)))))
+                     (sc2-unit-tag u))]
+                  [else caster-id]))
+              (when (and nydus-actor-id (>= (length rest) 2)
+                         (real? (first rest)) (real? (second rest)))
+                (set-add! used-producer-tags nydus-actor-id)
+                (define tx (scale-bot-coord-to-world (first rest) home-x))
+                (define ty (scale-bot-coord-to-world (second rest) home-y))
+                (emit! (sc2-raw-unit-command 1768 (sc2-point2d tx ty) 0 (list nydus-actor-id) #f)))]
+
              ;; Case D: Point-target ability (Blink, Force Field, Psi Storm, Corrosive Bile, EMP, Scanner Sweep, Phase Shift, Purification Nova, Stasis Ward)
-             [(or (set-member? SC2-POINT-TARGET-ABILITY-IDS ab-id)
-                  (>= (length rest) 2))
+             [(set-member? SC2-POINT-TARGET-ABILITY-IDS ab-id)
               (define-values (tx ty)
                 (cond
-                  [(>= (length rest) 2)
+                  [(and (>= (length rest) 2) (real? (first rest)) (real? (second rest)))
                    (values (scale-bot-coord-to-world (first rest) home-x)
                            (scale-bot-coord-to-world (second rest) home-y))]
                   [(and (= (length rest) 1) (exact-integer? (first rest)))
@@ -6986,13 +7923,15 @@
                   [else (values home-x home-y)]))
               (emit! (sc2-raw-unit-command ab-id (sc2-point2d tx ty) 0 caster-ids #f))]
 
-             ;; Case E: Unit-target ability (Inject Larva, Chrono Boost, Transfusion, Feedback, Snipe, Yamato, Abduct, Widow Mine Attack, etc.)
-             [else
+             ;; Case E: Unit-target ability (Inject Larva, Chrono Boost, Transfusion, Feedback, Snipe, Yamato, Abduct, Neural Parasite, Repair, etc.)
+             ;;         NEVER fall back to TargetNone (0) — if target-id <= 0, drop cleanly!
+             [(set-member? SC2-UNIT-TARGET-ABILITY-IDS ab-id)
               (unless (and (= ab-id 251) (unit-has-protected-order? caster-id))
                 (define target-id (if (pair? rest) (first rest) 0))
-                (if (and (exact-integer? target-id) (> target-id 0))
-                    (emit! (sc2-raw-unit-command ab-id #f target-id caster-ids #f))
-                    (emit! (sc2-raw-unit-command ab-id #f 0 caster-ids #f))))])))]
+                (when (and (exact-integer? target-id) (> target-id 0))
+                  (emit! (sc2-raw-unit-command ab-id #f target-id caster-ids #f))))]
+
+             [else (void)])))]
 
       ;; 9. Anti-cheese & Pro-mechanics
       [(list 'pull-workers-attack worker-ids target-id raw-x raw-y)
@@ -7421,15 +8360,17 @@
                                                    (scale-bot-coord-to-world raw-y home-y))
                                       0 (list uid) #f)))]
 
-      [(list 'infestor-burrow-cast uid spell-sym raw-x raw-y)
-       (when (and (exact-integer? uid) (> uid 0))
-         (define ability-id
-           (case spell-sym
-             [(fungal-growth) 74]
-             [(neural-parasite) 249]
-             [else 74]))
+      [(list 'infestor-burrow-cast uid 'neural-parasite target-id)
+       (when (and (exact-integer? uid) (> uid 0)
+                  (exact-integer? target-id) (> target-id 0))
          (record-unit-used! uid)
-         (emit! (sc2-raw-unit-command ability-id
+         (emit! (sc2-raw-unit-command 249 #f target-id (list uid) #f)))]
+
+      [(list 'infestor-burrow-cast uid spell-sym (? real? raw-x) (? real? raw-y))
+       (when (and (exact-integer? uid) (> uid 0)
+                  (not (eq? spell-sym 'neural-parasite)))
+         (record-unit-used! uid)
+         (emit! (sc2-raw-unit-command 74
                                       (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
                                                    (scale-bot-coord-to-world raw-y home-y))
                                       0 (list uid) #f)))]
@@ -7526,7 +8467,7 @@
                                                 #:reserved-aabbs reserved-aabbs
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym 'barracks
-                                                #:game-info game-info)]
+                                                #:game-info eff-game-info)]
              [(eq? bsym 'factory-flying)
               (find-verified-building-placement ws-conn 328 lx0 ly0 units
                                                 #:min-spacing 3.0 #:max-radius 14.0 #:step 2.0
@@ -7534,7 +8475,7 @@
                                                 #:reserved-aabbs reserved-aabbs
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym 'factory
-                                                #:game-info game-info)]
+                                                #:game-info eff-game-info)]
              [(eq? bsym 'starport-flying)
               (find-verified-building-placement ws-conn 329 lx0 ly0 units
                                                 #:min-spacing 3.0 #:max-radius 14.0 #:step 2.0
@@ -7542,19 +8483,19 @@
                                                 #:reserved-aabbs reserved-aabbs
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym 'starport
-                                                #:game-info game-info)]
+                                                #:game-info eff-game-info)]
              [(memq bsym '(command-center-flying orbital-command-flying))
               (if (> (pt-dist home-x home-y lx0 ly0) SC2-BASE-RESOURCE-RADIUS)
                   (find-best-expansion-placement ws-conn 318 home-x home-y units
                                                  #:req-x lx0 #:req-y ly0
-                                                 #:game-info game-info
+                                                 #:game-info eff-game-info
                                                  #:remembered-enemies SC2-LAST-KNOWN-ENEMY-POS)
                   (find-verified-building-placement ws-conn 318 lx0 ly0 units
                                                     #:min-spacing 4.5 #:max-radius 12.0 #:step 1.0
                                                     #:extra-reserved-points step-reserved-build-pts
                                                     #:reserved-aabbs reserved-aabbs
                                                     #:bldg-sym 'command-center
-                                                    #:game-info game-info))]
+                                                    #:game-info eff-game-info))]
              [else (sc2-point2d lx0 ly0)]))
          (reserve-step-build-pt! land-pt (case bsym
                                            [(barracks-flying) 321]
@@ -7580,13 +8521,35 @@
                                                        (+ (exact->inexact addon-y) 0.5))
                                           0 (list land-bldg-id) #f))))]
 
+      [(list 'swap-addon lift-bldg-id land-bldg-id)
+       (when (and (exact-integer? lift-bldg-id) (> lift-bldg-id 0))
+         (emit! (sc2-raw-unit-command 3679 #f 0 (list lift-bldg-id) #f)))
+       (when (and (exact-integer? land-bldg-id) (> land-bldg-id 0))
+         (define lift-u (and (exact-integer? lift-bldg-id) (hash-ref self-unit-by-tag lift-bldg-id #f)))
+         (define land-u (hash-ref self-unit-by-tag land-bldg-id #f))
+         (define land-flying?
+           (and land-u
+                (or (sc2-unit-is-flying land-u)
+                    (memq (sc2-id->unit-symbol (sc2-unit-unit-type land-u))
+                          '(barracks-flying factory-flying starport-flying command-center-flying orbital-command-flying)))))
+         (cond
+           [(and land-flying? lift-u)
+            (define lp (sc2-unit-pos lift-u))
+            (emit! (sc2-raw-unit-command 3678
+                                         (sc2-point2d (sc2-point3d-x lp) (sc2-point3d-y lp))
+                                         0 (list land-bldg-id) #f))]
+           [else
+            (emit! (sc2-raw-unit-command 3679 #f 0 (list land-bldg-id) #f))]))]
+
       ;; 10. Spatial maneuvers: `(execute-spatial-maneuver <name> <x> <y>)` or `(mirror-spatial-maneuver ...)`
       ;;     Bug #11 fix: never overwrite units that already received individual micro orders in this step,
       ;;     exclude Queens and units currently engaged in local combat within 16 tiles of an enemy,
       ;;     and prevent 1-by-1 reinforcement streaming ("conga line of death") by requiring units near
       ;;     home (`<= 48` tiles) to gather into a wave of `>= SC2-ATTACK-WAVE-MIN-COMBAT-UNITS` before
       ;;     marching across the map.
-      [(list (or 'execute-spatial-maneuver 'mirror-spatial-maneuver) maneuver-sym raw-x raw-y)
+      [(or (list (or 'execute-spatial-maneuver 'mirror-spatial-maneuver) maneuver-sym raw-x raw-y)
+           (and (list 'execute-spatial-maneuver (? real? raw-x) (? real? raw-y) (? real? _) (? real? _))
+                (app (lambda (_) 'multiprong-rotate-and-pin) maneuver-sym)))
        (define tx0 (scale-bot-coord-to-world raw-x home-x))
        (define ty0 (scale-bot-coord-to-world raw-y home-y))
        (define targetable-enemies-now
@@ -7785,6 +8748,155 @@
              (define tags (claim-combat-tags-for-order! (list (sc2-unit-tag u)) 23 spt 0))
              (when (not (null? tags))
                (emit! (sc2-raw-unit-command 23 spt 0 tags #f))))))]
+
+      ;; 10c. Previously-dropped tactical & recon intents (clear-expansion-block, transport-juggle,
+      ;;      scout-sector, cast-protective-buff-aura, high-ground-tactics)
+      [(or (list 'clear-expansion-block (? exact-integer? opt-blk-eid) (? real? raw-x) (? real? raw-y))
+           (and (list 'clear-expansion-block (? real? raw-x) (? real? raw-y))
+                (app (lambda (_) 0) opt-blk-eid)))
+       (define tx (scale-bot-coord-to-world raw-x home-x))
+       (define ty (scale-bot-coord-to-world raw-y home-y))
+       (define uncommitted-combat
+         (let ([cands
+                (sort
+                 (filter (lambda (u)
+                           (and (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                                (not (memv (sc2-unit-unit-type u)
+                                           '(32 500 503 56 75 77 111 126 127 495 499)))))
+                         combat-units)
+                 <
+                 #:key (lambda (u)
+                         (let* ([up (sc2-unit-pos u)]
+                                [dx (- (sc2-point3d-x up) tx)]
+                                [dy (- (sc2-point3d-y up) ty)])
+                           (+ (* dx dx) (* dy dy)))))])
+           (take cands (min 4 (length cands)))))
+       (cond
+         [(not (null? uncommitted-combat))
+          (define valid-unit-tgt?
+            (and (> opt-blk-eid 0)
+                 (or (not enforce-live-enemy-tag-filter?)
+                     (set-member? live-visible-enemy-tags opt-blk-eid))))
+          (define eff-tgt-id (if valid-unit-tgt? opt-blk-eid 0))
+          (define tgt-pt (if valid-unit-tgt? #f (sc2-point2d tx ty)))
+          (define ctags
+            (claim-combat-tags-for-order! (map sc2-unit-tag uncommitted-combat) 23 tgt-pt eff-tgt-id))
+          (when (not (null? ctags))
+            (emit! (sc2-raw-unit-command 23 tgt-pt eff-tgt-id ctags #f)))]
+         [else
+          (define wtag (pick-worker-near tx ty))
+          (when wtag
+            (if (and (> opt-blk-eid 0)
+                     (or (not enforce-live-enemy-tag-filter?)
+                         (set-member? live-visible-enemy-tags opt-blk-eid)))
+                (emit! (sc2-raw-unit-command 23 #f opt-blk-eid (list wtag) #f))
+                (emit! (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 (list wtag) #f))))])]
+
+      [(list 'transport-juggle tr-id pass-ids (? real? raw-x) (? real? raw-y))
+       (when (and (exact-integer? tr-id) (> tr-id 0))
+         (define plist
+           (filter (lambda (t) (and (exact-integer? t) (> t 0) (not (= t tr-id))))
+                   (if (list? pass-ids) pass-ids (list pass-ids))))
+         (when (not (null? plist))
+           (record-unit-used! tr-id)
+           (for ([ptag (in-list plist)]
+                 [idx (in-naturals)])
+             (record-unit-used! ptag)
+             ;; LOAD_TRANSPORT (3668) is a UnitTargetAbility on the passenger unit tag
+             (emit! (sc2-raw-unit-command 3668 #f ptag (list tr-id) (> idx 0))))
+           (define tx (scale-bot-coord-to-world raw-x home-x))
+           (define ty (scale-bot-coord-to-world raw-y home-y))
+           (emit! (sc2-raw-unit-command 16 (sc2-point2d tx ty) 0 (list tr-id) #t))))]
+
+      [(list 'transport-juggle tr-id (? real? raw-x) (? real? raw-y))
+       (when (and (exact-integer? tr-id) (> tr-id 0))
+         (record-unit-used! tr-id)
+         (define tx (scale-bot-coord-to-world raw-x home-x))
+         (define ty (scale-bot-coord-to-world raw-y home-y))
+         ;; UNLOAD_ALL_AT (3669) is a PointTargetAbility at (tx, ty)
+         (emit! (sc2-raw-unit-command 3669 (sc2-point2d tx ty) 0 (list tr-id) #f)))]
+
+      [(or (list 'scout-sector _ (? real? raw-x) (? real? raw-y))
+           (list 'scout-sector (? real? raw-x) (? real? raw-y)))
+       (define tx (scale-bot-coord-to-world raw-x home-x))
+       (define ty (scale-bot-coord-to-world raw-y home-y))
+       (define target-pt (sc2-point2d tx ty))
+       (define idle-scout
+         (or (for/first ([u (in-list self-units)]
+                         #:when (and (memv (sc2-unit-unit-type u) '(82 129 12 13 14 15 16 17))
+                                     (null? (sc2-unit-orders u))
+                                     (not (set-member? commanded-combat-tags (sc2-unit-tag u)))))
+               u)
+             (and (< cur-loop 3600)
+                  (for/first ([u (in-list self-units)]
+                              #:when (and (= (sc2-unit-unit-type u) 106)
+                                          (null? (sc2-unit-orders u))
+                                          (not (set-member? commanded-combat-tags (sc2-unit-tag u)))))
+                    u))
+             (for/first ([u (in-list combat-units)]
+                         #:when (and (null? (sc2-unit-orders u))
+                                     (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                                     (not (memv (sc2-unit-unit-type u) '(32 126 500 503)))))
+               u)))
+       (when idle-scout
+         (define stag (sc2-unit-tag idle-scout))
+         (record-unit-used! stag)
+         (unless (unit-already-executing-order? stag 16 target-pt 0)
+           (emit! (sc2-raw-unit-command 16 target-pt 0 (list stag) #f))))]
+
+      [(list 'cast-protective-buff-aura aura-sym (? real? raw-x) (? real? raw-y) _)
+       (define norm-aura (normalize-sc2-name->symbol aura-sym))
+       (define tx (scale-bot-coord-to-world raw-x home-x))
+       (define ty (scale-bot-coord-to-world raw-y home-y))
+       (cond
+         [(eq? norm-aura 'guardian-shield)
+          (define sentry-u
+            (for/first ([u (in-list self-units)]
+                        #:when (and (= (sc2-unit-unit-type u) 77)
+                                    (>= (sc2-unit-energy u) 75.0)
+                                    (not (set-member? commanded-combat-tags (sc2-unit-tag u)))))
+              u))
+          (when sentry-u
+            (define stag (sc2-unit-tag sentry-u))
+            (record-unit-used! stag)
+            (emit! (sc2-raw-unit-command 76 #f 0 (list stag) #f)))]
+         [(eq? norm-aura 'microbial-shroud)
+          (define infestor-u
+            (for/first ([u (in-list self-units)]
+                        #:when (and (memv (sc2-unit-unit-type u) '(111 127))
+                                    (>= (sc2-unit-energy u) 75.0)
+                                    (not (set-member? commanded-combat-tags (sc2-unit-tag u)))))
+              u))
+          (when infestor-u
+            (define itag (sc2-unit-tag infestor-u))
+            (record-unit-used! itag)
+            (emit! (sc2-raw-unit-command 2545 (sc2-point2d tx ty) 0 (list itag) #f)))])]
+
+      [(list 'high-ground-tactics _ (? real? raw-x) (? real? raw-y) spot-flag)
+       (define tx (scale-bot-coord-to-world raw-x home-x))
+       (define ty (scale-bot-coord-to-world raw-y home-y))
+       (define target-pt (sc2-point2d tx ty))
+       (when spot-flag
+         (define air-spotter
+           (for/first ([u (in-list self-units)]
+                       #:when (and (sc2-unit-is-flying u)
+                                   (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                                   (null? (sc2-unit-orders u))))
+             u))
+         (when air-spotter
+           (define astag (sc2-unit-tag air-spotter))
+           (record-unit-used! astag)
+           (emit! (sc2-raw-unit-command 16 target-pt 0 (list astag) #f))))
+       (define hg-combat
+         (filter (lambda (u)
+                   (define up (sc2-unit-pos u))
+                   (and (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                        (not (memv (sc2-unit-unit-type u) '(32 126 500 503)))
+                        (<= (pt-dist tx ty (sc2-point3d-x up) (sc2-point3d-y up)) 22.0)))
+                 combat-units))
+       (define hg-tags (claim-combat-tags-for-order! (map sc2-unit-tag hg-combat) 23 target-pt 0))
+       (when (not (null? hg-tags))
+         (emit! (sc2-raw-unit-command 23 target-pt 0 hg-tags #f)))]
 
       ;; 11. Control Groups (`ActionUI.control_group` is a wire no-op in Raw mode!) & Camera Saccades
       [(list (or 'control-group-set 'control-group-append 'control-group-steal
@@ -8146,25 +9258,30 @@
                      '()))
 
 (define (wire-cmd-priority-tier cmd)
+  (define (ab-tier ab)
+    (cond
+      ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & defensive depot raise
+      [(memv ab '(32 314 380 3675 1442 3687 74 76 140 249 251 399 401
+                  1036 1526 1628 1664 2063 2067 2069 2073 2146 2338 2346 2505
+                  2542 2545 2714 3668 3669 3755 3757 142 3686 388 390 2095 2097 2108 2110
+                  403 405 2362 2364 558))
+       0]
+      ;; P3: Routine harvest / worker rebalance / depot lower
+      [(memv ab '(166 167 295 296 298 299 1183 1184 3666 3667 556))
+       3]
+      ;; P2: Combat attack, move, kite, hold-position, patrol, stop
+      [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 2099 3665 3674 3771 3793 3794 3795))
+       2]
+      ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE
+      [else 1]))
   (cond
-    [(sc2-raw-camera-move? cmd) 4]
-    [(sc2-raw-unit-command? cmd)
-     (define ab (sc2-raw-unit-command-ability-id cmd))
-     (cond
-       ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & defensive depot raise
-       [(memv ab '(314 380 3675 1442 3687 74 76 140 197 249 251 399 401
-                   1036 1628 1664 2063 2067 2069 2073 2146 2338 2346 2505
-                   2542 2714 3755 3757 142 3686 388 390 2095 2097 2108 2110
-                   403 405 2362 2364 558))
-        0]
-       ;; P3: Routine harvest / worker rebalance / depot lower
-       [(memv ab '(166 167 295 296 298 299 1183 1184 3666 3667 556))
-        3]
-       ;; P2: Combat attack, move, kite, hold-position, patrol, stop
-       [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 2099 3665 3674 3771 3793 3794 3795))
-        2]
-       ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE
-       [else 1])]
+    [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) 4]
+    [(sc2-raw-unit-command? cmd) (ab-tier (sc2-raw-unit-command-ability-id cmd))]
+    [(WireCmdNone? cmd) (ab-tier (NoTargetAbility-id (WireCmdNone-ability cmd)))]
+    [(WireCmdPoint? cmd) (ab-tier (PointTargetAbility-id (WireCmdPoint-ability cmd)))]
+    [(WireCmdUnit? cmd) (ab-tier (UnitTargetAbility-id (WireCmdUnit-ability cmd)))]
+    [(WireCmdArchon? cmd) 1]
+    [(WireToggleAutocast? cmd) 1]
     [else 4]))
 
 (define (chunk-tag-list tags max-chunk)

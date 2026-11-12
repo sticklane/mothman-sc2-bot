@@ -88,8 +88,10 @@
 (define WEAK-RT-TUMOR-STATE     (make-weak-hasheq))
 (define WEAK-RT-DOOR-STATE      (make-weak-hasheq))
 (define WEAK-RT-SPLASH-STATE    (make-weak-hasheq))
-(define WEAK-RT-WALL-AABBS-BOX  (make-weak-hasheq))
-(define WEAK-RT-ENEMY-RACE-BOX  (make-weak-hasheq))
+(define WEAK-RT-WALL-AABBS-BOX     (make-weak-hasheq))
+(define WEAK-RT-ENEMY-RACE-BOX     (make-weak-hasheq))
+(define WEAK-RT-WALL-STATE         (make-weak-hasheq))
+(define WEAK-RT-RUSH-DEFENSE-STATE (make-weak-hasheq))
 
 (define (rt-role-leases rt)
   (or (hash-ref WEAK-RT-ROLE-LEASES rt #f)
@@ -144,6 +146,18 @@
       (let ([b (box 'Unknown)])
         (hash-set! WEAK-RT-ENEMY-RACE-BOX rt b)
         b)))
+
+(define (rt-wall-state rt)
+  (or (hash-ref WEAK-RT-WALL-STATE rt #f)
+      (let ([ht (make-hasheq)])
+        (hash-set! WEAK-RT-WALL-STATE rt ht)
+        ht)))
+
+(define (rt-rush-defense-state rt)
+  (or (hash-ref WEAK-RT-RUSH-DEFENSE-STATE rt #f)
+      (let ([ht (make-hasheqv)])
+        (hash-set! WEAK-RT-RUSH-DEFENSE-STATE rt ht)
+        ht)))
 
 (define (worker-has-engine-build-order? w)
   (and (hash? w)
@@ -1435,10 +1449,39 @@
         in-base-proxy-detected?
         (and under-early-cheese? (< ally-combat-supply-early 6))))
 
+  ;; Early-warning worker-rush alert (`<= 32` tiles): immediately cancel any greedy in-progress
+  ;; natural fast-expand when we still lack a completed root combat facility and have < 4 army supply.
+  (when (and worker-rush-active?
+             (< ally-combat-supply-early 4)
+             (not (ormap (lambda (b)
+                           (and (hash? b)
+                                (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                (memq (sc2-canonical-structure-sym (unit-type-sym b))
+                                      '(spawning-pool barracks gateway warp-gate
+                                        spine-crawler photon-cannon bunker))))
+                         ally-bldgs)))
+    (for ([b (in-list ally-bldgs)])
+      (when (and (hash? b)
+                 (memq (sc2-canonical-structure-sym (unit-type-sym b))
+                       '(hatchery nexus command-center))
+                 (< (hash-ref b 'build-progress 1.0) 0.85)
+                 (> (dist2d base-x base-y (hash-ref b 'x base-x) (hash-ref b 'y base-y)) 8.0))
+        (define exp-bid (hash-ref b 'id 0))
+        (when (and (> exp-bid 0)
+                   (refractory-allow-action?! cd-tracker
+                                              (list 'cancel-greedy-expand exp-bid)
+                                              frame
+                                              96))
+          (emit! (list 'cancel exp-bid))))))
+
+  (define rush-def-st (rt-rush-defense-state rt))
+  (when (<= frame 4)
+    (hash-clear! rush-def-st))
   (define prev-rush-fighting-wids
     (let ([s (hash-ref prev-tel-early 'rush-fighting-worker-ids '())])
       (if (list? s) s '())))
   (define cur-rush-fighting-wids '())
+  (define cur-rush-disengaging-wids '())
   (define worker-pull-emitted-1ab? #f)
   (define non-builder-defense-workers
     (filter (lambda (w)
@@ -1446,25 +1489,57 @@
                    (not (order-ledger-unit-has-active-build? oledger-early (hash-ref w 'id 0) w))))
             workers))
 
-  ;; 1A. Per-Step Worker-Rush Focus-Fire Pull + Critically Wounded (<= 12 HP) Mineral-Walk Disengage
-  (when (and worker-rush-active?
+  ;; 1A. Worker-Rush Defense (`#5119038` & `#5119045`):
+  ;;     - Early-warning alert at <= 32.0 tiles (`worker-rush-active?`) triggers Pool/Zealot/Marine & stops expand.
+  ;;     - Physical worker pull ONLY when enemy workers are <= 12.5 tiles from TownHall OR <= 8.5 tiles from minerals.
+  ;;     - Keep >= 3 healthy far-patch miners whenever workers >= 7 and enemies are > 4.5 tiles from them
+  ;;       (or all-but-2 only when enemies are actively inside <= 7.5 tiles of TownHall/minerals).
+  ;;     - Partition defenders locally: max 3 defenders per enemy worker (lowest hp+shield within <= 2.5 tiles,
+  ;;       local nearest unassigned within <= 7.0 tiles, or Attack-Move to cluster), NEVER chasing > 14.0 tiles from TownHall.
+  ;;     - Bruised friendly workers (hp <= 12 or total hp+shield <= 12) mineral-walk disengage to far patch for 1.5s (34f).
+  (when (and (or worker-rush-active? (not (null? prev-rush-fighting-wids)))
              (not (null? non-builder-defense-workers)))
-    (define ew-cnt (max 1 (length enemy-rush-workers)))
-    (define ew-cx
-      (/ (for/sum ([ew (in-list enemy-rush-workers)]) (exact->inexact (hash-ref ew 'x base-x)))
-         ew-cnt))
-    (define ew-cy
-      (/ (for/sum ([ew (in-list enemy-rush-workers)]) (exact->inexact (hash-ref ew 'y base-y)))
-         ew-cnt))
+    (define ready-townhall-coords
+      (let ([pts (for/list ([b (in-list ally-bldgs)]
+                            #:when (and (hash? b)
+                                        (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                        (memq (sc2-canonical-structure-sym (unit-type-sym b))
+                                              '(hatchery lair hive nexus
+                                                command-center orbital-command planetary-fortress))))
+                   (cons (exact->inexact (hash-ref b 'x base-x))
+                         (exact->inexact (hash-ref b 'y base-y))))])
+        (if (null? pts)
+            (list (cons (exact->inexact base-x) (exact->inexact base-y)))
+            pts)))
+    (define (dist-to-owned-townhall x y)
+      (for/fold ([best +inf.0]) ([bc (in-list ready-townhall-coords)])
+        (min best (dist2d x y (car bc) (cdr bc)))))
     (define base-mineral-patches
       (filter (lambda (mp)
                 (and (hash? mp)
-                     (<= (dist2d base-x base-y
-                                 (hash-ref mp 'x base-x)
-                                 (hash-ref mp 'y base-y))
+                     (<= (dist-to-owned-townhall
+                          (hash-ref mp 'x base-x)
+                          (hash-ref mp 'y base-y))
                          14.0)))
               (let ([mps (hash-ref obs 'mineral-patches '())])
                 (if (list? mps) mps '()))))
+    (define (dist-to-mineral-line x y)
+      (if (null? base-mineral-patches)
+          +inf.0
+          (for/fold ([best +inf.0]) ([mp (in-list base-mineral-patches)])
+            (min best (dist2d x y (hash-ref mp 'x base-x) (hash-ref mp 'y base-y))))))
+
+    (define ew-cnt (max 1 (length enemy-rush-workers)))
+    (define ew-cx
+      (if (null? enemy-rush-workers)
+          (exact->inexact enemy-x)
+          (/ (for/sum ([ew (in-list enemy-rush-workers)]) (exact->inexact (hash-ref ew 'x base-x)))
+             ew-cnt)))
+    (define ew-cy
+      (if (null? enemy-rush-workers)
+          (exact->inexact enemy-y)
+          (/ (for/sum ([ew (in-list enemy-rush-workers)]) (exact->inexact (hash-ref ew 'y base-y)))
+             ew-cnt)))
     (define far-mp
       (and (not (null? base-mineral-patches))
            (argmax (lambda (mp)
@@ -1484,11 +1559,27 @@
           (safe-coord (hash-ref far-mp 'y base-y) base-y)
           (safe-coord (+ base-y (* 4.0 (/ fallback-dy fallback-d))) base-y)))
     (define far-patch-id
-      (if far-mp (safe-nonneg-int (hash-ref far-mp 'id 0) 0) 0))
+      (if far-mp
+          (safe-nonneg-int (hash-ref far-mp 'id 0) 0)
+          (safe-nonneg-int (hash-ref obs 'mineral-patch-id 0) 0)))
 
-    ;; Disengage critically wounded workers (whp <= 12 with an enemy within 6.0 tiles) EVERY step
+    ;; Physical pull trigger: <= 12.5 tiles from TownHall OR <= 8.5 tiles from mineral line,
+    ;; AND strictly within <= 14.0-tile TownHall chase leash!
+    (define worker-rush-engage-enemies
+      (if worker-rush-active?
+          (filter (lambda (ew)
+                    (define ex (hash-ref ew 'x 9999.0))
+                    (define ey (hash-ref ew 'y 9999.0))
+                    (and (<= (dist-to-owned-townhall ex ey) 14.0)
+                         (or (<= (dist-to-owned-townhall ex ey) 12.5)
+                             (<= (dist-to-mineral-line ex ey) 8.5))))
+                  enemy-rush-workers)
+          '()))
+
+    ;; 1.5s (34-frame) mineral-walk disengage for bruised friendly workers (hp <= 12 or total hp+shield <= 12)
     (for ([w (in-list non-builder-defense-workers)])
       (define wid (hash-ref w 'id 10))
+      (define raw-hp (hash-ref w 'hp SC2-DRONE-MAX-HP))
       (define whp (unit-total-hp-and-shield w))
       (define wx (hash-ref w 'x base-x))
       (define wy (hash-ref w 'y base-y))
@@ -1496,70 +1587,202 @@
         (ormap (lambda (e)
                  (<= (dist2d wx wy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 6.0))
                ground-enemy-units-for-cheese))
-      (when (and (<= whp SC2-FIGHTING-WORKER-DISENGAGE-HP)
+      (when (and (or (<= raw-hp 12)
+                     (<= whp SC2-FIGHTING-WORKER-DISENGAGE-HP))
                  enemy-within-6?)
+        (hash-set! rush-def-st wid (max (+ frame 34) (hash-ref rush-def-st wid 0))))
+      (define disengaging-now?
+        (< frame (hash-ref rush-def-st wid 0)))
+      (when disengaging-now?
+        (set! cur-rush-disengaging-wids (cons wid cur-rush-disengaging-wids))
         (if (> far-patch-id 0)
             (emit! (list 'mineral-walk wid far-patch-id far-px far-py))
             (emit! (list 'mineral-walk wid far-px far-py)))))
 
-    ;; Hysteresis: workers already fighting keep fighting while > 12 HP; newly pulled / recovering require >= 16 HP
-    (define healthy-rush-workers
-      (filter (lambda (w)
-                (define wid (hash-ref w 'id 10))
-                (define whp (unit-total-hp-and-shield w))
-                (if (memv wid prev-rush-fighting-wids)
-                    (> whp SC2-FIGHTING-WORKER-DISENGAGE-HP)
-                    (>= whp SC2-FIGHTING-WORKER-REENGAGE-HP)))
-              non-builder-defense-workers))
-    (define keep-mining-cnt
-      (cond
-        [(> (length healthy-rush-workers) (+ (length enemy-rush-workers) 3)) 2]
-        [(< (length enemy-rush-workers) 6)
-         (min 2 (max 0 (- (length healthy-rush-workers) (length enemy-rush-workers))))]
-        [else 0]))
-    ;; Sort closest to enemy rush centroid first so any left-behind miners are the farthest ones
-    (define sorted-healthy-rush-workers
-      (sort healthy-rush-workers
-            <
-            #:key (lambda (w)
-                    (dist2d ew-cx ew-cy (hash-ref w 'x base-x) (hash-ref w 'y base-y)))))
-    (define pulled-rush-workers
-      (take sorted-healthy-rush-workers
-            (max 0 (- (length sorted-healthy-rush-workers) keep-mining-cnt))))
-    (unless (null? pulled-rush-workers)
-      (define pull-ids (map (lambda (w) (hash-ref w 'id 10)) pulled-rush-workers))
-      (set! cur-rush-fighting-wids pull-ids)
-      (define pw-cnt (max 1 (length pulled-rush-workers)))
-      (define pull-cx
-        (/ (for/sum ([w (in-list pulled-rush-workers)]) (exact->inexact (hash-ref w 'x base-x)))
-           pw-cnt))
-      (define pull-cy
-        (/ (for/sum ([w (in-list pulled-rush-workers)]) (exact->inexact (hash-ref w 'y base-y)))
-           pw-cnt))
-      (define engaged-rush-enemies
-        (filter (lambda (ew)
-                  (define ex (hash-ref ew 'x ew-cx))
-                  (define ey (hash-ref ew 'y ew-cy))
-                  (ormap (lambda (pw)
-                           (<= (dist2d ex ey (hash-ref pw 'x pull-cx) (hash-ref pw 'y pull-cy)) 3.5))
-                         pulled-rush-workers))
-                enemy-rush-workers))
-      (define target-pool
-        (if (not (null? engaged-rush-enemies))
-            engaged-rush-enemies
-            enemy-rush-workers))
-      (define best-target
-        (argmin (lambda (ew)
-                  (define ex (hash-ref ew 'x ew-cx))
-                  (define ey (hash-ref ew 'y ew-cy))
-                  (+ (* 100.0 (unit-total-hp-and-shield ew))
-                     (dist2d pull-cx pull-cy ex ey)))
-                target-pool))
-      (define best-target-id (hash-ref best-target 'id 0))
-      (define tx (safe-coord (hash-ref best-target 'x ew-cx) base-x))
-      (define ty (safe-coord (hash-ref best-target 'y ew-cy) base-y))
-      (set! worker-pull-emitted-1ab? #t)
-      (emit! (list 'pull-workers-attack pull-ids best-target-id tx ty))))
+    (unless (null? worker-rush-engage-enemies)
+      (define (dist-to-nearest-engage-enemy wx wy)
+        (for/fold ([best +inf.0]) ([ew (in-list worker-rush-engage-enemies)])
+          (min best (dist2d wx wy (hash-ref ew 'x ew-cx) (hash-ref ew 'y ew-cy)))))
+
+      ;; Only workers inside the <= 14.0-tile TownHall leash and not disengaging are eligible to fight
+      (define healthy-rush-workers
+        (filter (lambda (w)
+                  (define wid (hash-ref w 'id 10))
+                  (define raw-hp (hash-ref w 'hp SC2-DRONE-MAX-HP))
+                  (define whp (unit-total-hp-and-shield w))
+                  (define wx (hash-ref w 'x base-x))
+                  (define wy (hash-ref w 'y base-y))
+                  (and (not (memv wid cur-rush-disengaging-wids))
+                       (<= (dist-to-owned-townhall wx wy) 14.0)
+                       (> raw-hp 12)
+                       (if (memv wid prev-rush-fighting-wids)
+                           (> whp SC2-FIGHTING-WORKER-DISENGAGE-HP)
+                           (>= whp SC2-FIGHTING-WORKER-REENGAGE-HP))))
+                non-builder-defense-workers))
+
+      ;; Sort farthest from engaging enemies first so kept miners are ALWAYS the safest far-patch workers
+      (define safest-first
+        (sort healthy-rush-workers
+              >
+              #:key (lambda (w)
+                      (dist-to-nearest-engage-enemy
+                       (hash-ref w 'x base-x)
+                       (hash-ref w 'y base-y)))))
+
+      (define unthreatened-miners-cnt
+        (count (lambda (w)
+                 (> (dist-to-nearest-engage-enemy
+                     (hash-ref w 'x base-x)
+                     (hash-ref w 'y base-y))
+                    4.5))
+               safest-first))
+      (define enemies-inside-7.5?
+        (ormap (lambda (ew)
+                 (define ex (hash-ref ew 'x 9999.0))
+                 (define ey (hash-ref ew 'y 9999.0))
+                 (or (<= (dist-to-owned-townhall ex ey) 7.5)
+                     (<= (dist-to-mineral-line ex ey) 7.5)))
+               worker-rush-engage-enemies))
+
+      (define total-w-cnt (length workers))
+      (define h-cnt (length safest-first))
+      (define e-cnt (length worker-rush-engage-enemies))
+      (define surplus-miners (max 0 (- h-cnt (+ e-cnt 2))))
+      (define keep-mining-cnt
+        (min h-cnt
+             (cond
+               [(and (>= total-w-cnt 7) (>= unthreatened-miners-cnt 3))
+                (max 3 surplus-miners)]
+               [enemies-inside-7.5?
+                (min 2 (max 0 (sub1 h-cnt)))]
+               [(>= total-w-cnt 7)
+                (max 3 surplus-miners)]
+               [else
+                (min 2 surplus-miners)])))
+
+      (define pulled-rush-workers
+        (drop safest-first keep-mining-cnt))
+
+      (unless (null? pulled-rush-workers)
+        (set! cur-rush-fighting-wids
+              (map (lambda (w) (hash-ref w 'id 10)) pulled-rush-workers))
+        ;; Compute clamped enemy cluster centroid inside our mineral line / main (<= 12.5 tiles from TownHall)
+        (define raw-cl-x
+          (/ (for/sum ([ew (in-list worker-rush-engage-enemies)])
+               (exact->inexact (hash-ref ew 'x base-x)))
+             e-cnt))
+        (define raw-cl-y
+          (/ (for/sum ([ew (in-list worker-rush-engage-enemies)])
+               (exact->inexact (hash-ref ew 'y base-y)))
+             e-cnt))
+        (define cl-dx (- raw-cl-x (exact->inexact base-x)))
+        (define cl-dy (- raw-cl-y (exact->inexact base-y)))
+        (define cl-d (sqrt (+ (* cl-dx cl-dx) (* cl-dy cl-dy))))
+        (define cl-x
+          (safe-coord (if (> cl-d 12.5) (+ base-x (* 12.5 (/ cl-dx cl-d))) raw-cl-x) base-x))
+        (define cl-y
+          (safe-coord (if (> cl-d 12.5) (+ base-y (* 12.5 (/ cl-dy cl-d))) raw-cl-y) base-y))
+
+        ;; Partition defenders per-worker locally (max 3 defenders per enemy worker; zero conga-line!):
+        (define target-cap 3)
+        (define assigned-target-counts (make-hasheqv))
+        (define worker-assignments (make-hasheqv))
+        (define frontline-first
+          (sort pulled-rush-workers
+                <
+                #:key (lambda (w)
+                        (dist-to-nearest-engage-enemy
+                         (hash-ref w 'x base-x)
+                         (hash-ref w 'y base-y)))))
+
+        ;; Pass 1: Immediate melee swing (<= 2.5 tiles of THAT defender), lowest (hp + shield)
+        (for ([w (in-list frontline-first)])
+          (define wid (hash-ref w 'id 10))
+          (define wx (hash-ref w 'x base-x))
+          (define wy (hash-ref w 'y base-y))
+          (define melee-cands
+            (filter (lambda (ew)
+                      (define eid (hash-ref ew 'id 0))
+                      (and (> eid 0)
+                           (< (hash-ref assigned-target-counts eid 0) target-cap)
+                           (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 2.5)))
+                    worker-rush-engage-enemies))
+          (unless (null? melee-cands)
+            (define chosen
+              (argmin (lambda (ew)
+                        (+ (* 100.0 (unit-total-hp-and-shield ew))
+                           (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y))))
+                      melee-cands))
+            (define cid (hash-ref chosen 'id 0))
+            (hash-update! assigned-target-counts cid add1 0)
+            (hash-set! worker-assignments wid
+                       (list cid
+                             (safe-coord (hash-ref chosen 'x cl-x) cl-x)
+                             (safe-coord (hash-ref chosen 'y cl-y) cl-y)))))
+
+        ;; Pass 2: Local unassigned chaser within <= 7.0 tiles (capped at 3), else Attack-Move (0, cl-x, cl-y)
+        (for ([w (in-list frontline-first)]
+              #:unless (hash-has-key? worker-assignments (hash-ref w 'id 10)))
+          (define wid (hash-ref w 'id 10))
+          (define wx (hash-ref w 'x base-x))
+          (define wy (hash-ref w 'y base-y))
+          (define local-cands
+            (filter (lambda (ew)
+                      (define eid (hash-ref ew 'id 0))
+                      (and (> eid 0)
+                           (< (hash-ref assigned-target-counts eid 0) target-cap)
+                           (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 7.0)))
+                    worker-rush-engage-enemies))
+          (cond
+            [(not (null? local-cands))
+             (define chosen
+               (argmin (lambda (ew)
+                         (+ (* 12.0 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)))
+                            (unit-total-hp-and-shield ew)))
+                       local-cands))
+             (define cid (hash-ref chosen 'id 0))
+             (hash-update! assigned-target-counts cid add1 0)
+             (hash-set! worker-assignments wid
+                        (list cid
+                              (safe-coord (hash-ref chosen 'x cl-x) cl-x)
+                              (safe-coord (hash-ref chosen 'y cl-y) cl-y)))]
+            [else
+             (hash-set! worker-assignments wid (list 0 cl-x cl-y))]))
+
+        ;; Emit grouped pull-workers-attack commands (unit-targeted groups + Attack-Move group)
+        (define target-order '())
+        (define target-groups (make-hasheqv))
+        (define target-coords (make-hasheqv))
+        (for ([w (in-list frontline-first)])
+          (define wid (hash-ref w 'id 10))
+          (define asgn (hash-ref worker-assignments wid #f))
+          (when asgn
+            (match-define (list tid tx ty) asgn)
+            (unless (hash-has-key? target-groups tid)
+              (set! target-order (cons tid target-order))
+              (hash-set! target-coords tid (cons tx ty)))
+            (hash-set! target-groups tid (cons wid (hash-ref target-groups tid '())))))
+        (set! worker-pull-emitted-1ab? #t)
+        (for ([tid (in-list (reverse target-order))])
+          (define wids (reverse (hash-ref target-groups tid '())))
+          (define tc (hash-ref target-coords tid (cons cl-x cl-y)))
+          (unless (null? wids)
+            (emit! (list 'pull-workers-attack wids tid (car tc) (cdr tc)))))))
+
+    ;; Immediately snap back to mining any previously-pulled worker (or worker outside 14.0-tile leash)
+    ;; when enemies kite out of the mineral line or that worker is assigned to keep mining!
+    (for ([w (in-list non-builder-defense-workers)])
+      (define wid (hash-ref w 'id 10))
+      (define wx (hash-ref w 'x base-x))
+      (define wy (hash-ref w 'y base-y))
+      (when (and (not (memv wid cur-rush-fighting-wids))
+                 (not (memv wid cur-rush-disengaging-wids))
+                 (or (memv wid prev-rush-fighting-wids)
+                     (and worker-rush-active?
+                          (> (dist-to-owned-townhall wx wy) 14.0))))
+        (if (> far-patch-id 0)
+            (emit! (list 'harvest-mineral wid far-patch-id))
+            (emit! (list 'mineral-walk wid far-px far-py))))))
 
   ;; 1B. Per-Step In-Base Proxy Defense (`Thssprtssbt` Pylon / Cannon / Bunker / Proxy Rax)
   (when (and in-base-proxy-detected?
@@ -2187,9 +2410,12 @@
       (emit! (list 'harvest-mineral (hash-ref (car harvest-workers-pool) 'id 10) patch-id)))
     (define idle-return-workers
       (filter (lambda (w)
+                (define wid (hash-ref w 'id 10))
                 (define wx (hash-ref w 'x base-x))
                 (define wy (hash-ref w 'y base-y))
-                (and (hash-has-key? w 'orders)
+                (and (not (memv wid cur-rush-fighting-wids))
+                     (not (memv wid cur-rush-disengaging-wids))
+                     (hash-has-key? w 'orders)
                      (let ([ords (hash-ref w 'orders '())])
                        (or (null? ords) (equal? ords '(idle))))
                      (not (ormap (lambda (e)
@@ -2801,9 +3027,45 @@
       [else SC2-MAX-PENDING-SUPPLY-LATE]))
   (define effective-supply-with-pending
     (+ supply-left (* SC2-SUPPLY-PER-PROVIDER pending-supply)))
+  (define wall-st (rt-wall-state rt))
+  (when (<= frame 4)
+    (hash-clear! wall-st))
+  (define real-pylon-count
+    (count (lambda (b)
+             (and (hash? b)
+                  (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'pylon)))
+           ally-bldgs))
+  (define real-depot-count
+    (count (lambda (b)
+             (and (hash? b)
+                  (memq (sc2-canonical-structure-sym (unit-type-sym b))
+                        '(supply-depot supply-depot-lowered))))
+           ally-bldgs))
+  (define real-supply-bldg-count
+    (case race
+      [(Protoss) real-pylon-count]
+      [(Terran) real-depot-count]
+      [else 0]))
+  (define any-worker-building-in-engine?
+    (ormap worker-has-engine-build-order? workers))
+  (define last-supply-issue-f (hash-ref wall-st 'supply-last-issue-frame #f))
+  (define stale-phantom-wall-supply?
+    (and live-game-obs?
+         (memq race '(Protoss Terran))
+         (= real-supply-bldg-count 0)
+         (not any-worker-building-in-engine?)
+         (exact-integer? last-supply-issue-f)
+         (>= (- frame last-supply-issue-f) 16)))
+  (when (and stale-phantom-wall-supply?
+             (> last-supply-issue-f (hash-ref wall-st 'supply-failure-counted-at -1)))
+    (hash-set! wall-st 'supply-failure-counted-at last-supply-issue-f)
+    (hash-set! wall-st 'wall-supply-failures
+               (add1 (hash-ref wall-st 'wall-supply-failures 0))))
   (define eff-pending-supply
-    (max pending-supply
-         (order-ledger-pending-count-for-type oledger supply-provider-sym frame)))
+    (if stale-phantom-wall-supply?
+        pending-supply
+        (max pending-supply
+             (order-ledger-pending-count-for-type oledger supply-provider-sym frame))))
   (define effective-supply-with-pending-ledger
     (+ supply-left (* SC2-SUPPLY-PER-PROVIDER eff-pending-supply)))
   (define protoss-pylon-count
@@ -2824,7 +3086,8 @@
          (<= eff-pending-supply 0)
          (or (and (= protoss-pylon-count 0)
                   (or (> (length ally-bldgs) 1)
-                      (>= supply-used 14)))
+                      (>= supply-used 14)
+                      (<= supply-left 0)))
              has-unpowered-bldg?)))
   (define terran-depot-count
     (count (lambda (t) (eq? t 'supply-depot)) bldg-types))
@@ -2836,12 +3099,15 @@
          (or (<= supply-cap (* 15 (max 1 active-bases)))
              (<= supply-left 0))
          (or (>= supply-used 13)
+             (<= supply-left 0)
              (> (length ally-bldgs) 1)
              (and live-game-obs? (>= minerals 100) (< frame 3000)))))
   (define need-supply?
     (and (< supply-cap SC2-MAX-SUPPLY)
          (< eff-pending-supply max-pending-supply)
-         (or (and supply-at-risk?
+         (or (and (<= eff-pending-supply 0)
+                  (or (<= supply-left 0) (>= supply-used supply-cap)))
+             (and supply-at-risk?
                   (or (<= eff-pending-supply 0) (hash-ref obs 'supply-at-risk #f))
                   (<= effective-supply-with-pending-ledger (+ supply-threshold SC2-SUPPLY-PER-PROVIDER)))
              (and (> (hash-ref pressure-metrics 'supply-hazard 0.0) 0.0)
@@ -2852,21 +3118,96 @@
   ;; Terrain-Solved Matchup Walling (`solve-terran-ramp-wall` & `solve-protoss-matchup-wall`)
   ;; + Reserved AABBs (`'wall-slot`, `'terran-addon-pad`, `'doorway-corridor`)
   (define terran-ramp-wall
-    (solve-terran-ramp-wall base-x base-y nat-x nat-y #:map-grids map-grids))
+    (if (eq? race 'Terran)
+        (let ([tkey (list base-x base-y nat-x nat-y (eq-hash-code map-grids))]
+              [cached (hash-ref wall-st 'cached-terran-wall #f)])
+          (if (and (pair? cached) (equal? (car cached) tkey))
+              (cdr cached)
+              (let ([res (solve-terran-ramp-wall base-x base-y nat-x nat-y #:map-grids map-grids)])
+                (hash-set! wall-st 'cached-terran-wall (cons tkey res))
+                res)))
+        (hash)))
   (define protoss-matchup-wall
     (if (eq? race 'Protoss)
-        (solve-protoss-matchup-wall base-x base-y nat-x nat-y effective-enemy-race
-                                    #:map-grids map-grids
-                                    #:enemy-x enemy-x
-                                    #:enemy-y enemy-y)
+        (let ([pkey (list base-x base-y nat-x nat-y effective-enemy-race enemy-x enemy-y (eq-hash-code map-grids))]
+              [cached (hash-ref wall-st 'cached-protoss-wall #f)])
+          (if (and (pair? cached) (equal? (car cached) pkey))
+              (cdr cached)
+              (let ([res (solve-protoss-matchup-wall base-x base-y nat-x nat-y effective-enemy-race
+                                                     #:map-grids map-grids
+                                                     #:enemy-x enemy-x
+                                                     #:enemy-y enemy-y)])
+                (hash-set! wall-st 'cached-protoss-wall (cons pkey res))
+                res)))
         (hash)))
+
+  ;; Track wall-placement retries/timeouts so a map-geometry wall edge case (#5119040)
+  ;; can NEVER permanently 15/15 brick the bot:
+  (define wall-supply-attempts (hash-ref wall-st 'wall-supply-attempts 0))
+  (define wall-supply-failures (hash-ref wall-st 'wall-supply-failures 0))
+  (define wall-supply-first-f (hash-ref wall-st 'wall-supply-first-frame #f))
+  (define bypass-wall-pylon?
+    (and (eq? race 'Protoss)
+         (= real-pylon-count 0)
+         (or (> wall-supply-failures 0)
+             (and (>= wall-supply-attempts 1)
+                  (exact-integer? wall-supply-first-f)
+                  (>= (- frame wall-supply-first-f) 24))
+             (and (> frame 650) (or (> wall-supply-attempts 0) live-game-obs?))
+             (and live-game-obs? (<= supply-left 0)))))
+  (define bypass-wall-depot1?
+    (and (eq? race 'Terran)
+         (= real-depot-count 0)
+         (or (> wall-supply-failures 0)
+             (and (>= wall-supply-attempts 1)
+                  (exact-integer? wall-supply-first-f)
+                  (>= (- frame wall-supply-first-f) 24))
+             (and (> frame 650) (or (> wall-supply-attempts 0) live-game-obs?))
+             (and live-game-obs? (<= supply-left 0)))))
+
+  ;; Compute an open in-main anchor near TownHall (`base-x, base-y`) stepping away from mineral patches
+  (define (emergency-inmain-supply-anchor retry-idx)
+    (define main-mps
+      (filter (lambda (mp)
+                (and (hash? mp)
+                     (<= (dist2d base-x base-y
+                                 (hash-ref mp 'x base-x)
+                                 (hash-ref mp 'y base-y))
+                         13.0)))
+              (let ([mps (hash-ref obs 'mineral-patches '())])
+                (if (list? mps) mps '()))))
+    (define-values (ux uy)
+      (cond
+        [(not (null? main-mps))
+         (define cnt (length main-mps))
+         (define mcx (/ (for/sum ([m (in-list main-mps)]) (exact->inexact (hash-ref m 'x base-x))) cnt))
+         (define mcy (/ (for/sum ([m (in-list main-mps)]) (exact->inexact (hash-ref m 'y base-y))) cnt))
+         (define dx (- (exact->inexact base-x) mcx))
+         (define dy (- (exact->inexact base-y) mcy))
+         (define d (max 0.5 (sqrt (+ (* dx dx) (* dy dy)))))
+         (values (/ dx d) (/ dy d))]
+        [else
+         (define dx (- (exact->inexact nat-x) (exact->inexact base-x)))
+         (define dy (- (exact->inexact nat-y) (exact->inexact base-y)))
+         (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+         (values (/ dx d) (/ dy d))]))
+    (define angle-offsets '#(0.0 0.55 -0.55 1.10 -1.10 1.65 -1.65))
+    (define ang (vector-ref angle-offsets (modulo (max 0 retry-idx) (vector-length angle-offsets))))
+    (define ca (cos ang))
+    (define sa (sin ang))
+    (define rx (- (* ux ca) (* uy sa)))
+    (define ry (+ (* ux sa) (* uy ca)))
+    (define rad (+ 5.5 (* 0.5 (quotient (max 0 retry-idx) (vector-length angle-offsets)))))
+    (values (safe-coord (+ base-x (* rad rx)) (+ base-x 4.5))
+            (safe-coord (+ base-y (* rad ry)) (+ base-y 4.5))))
+
   (define step-wall-aabbs
     (cond
       [(eq? race 'Terran)
        (filter values
-               (list (let ([p (hash-ref terran-ramp-wall 'depot-1 #f)])
+               (list (let ([p (and (not bypass-wall-depot1?) (hash-ref terran-ramp-wall 'depot-1 #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'wall-slot 0 0)))
-                     (let ([p (hash-ref terran-ramp-wall 'barracks #f)])
+                     (let ([p (and (not bypass-wall-depot1?) (hash-ref terran-ramp-wall 'barracks #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
                      (let ([p (hash-ref terran-ramp-wall 'depot-2 #f)])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'wall-slot 0 0)))
@@ -2874,17 +3215,17 @@
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'terran-addon-pad 0 0)))))]
       [(eq? race 'Protoss)
        (filter values
-               (list (let ([p (hash-ref protoss-matchup-wall 'pylon #f)])
+               (list (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'pylon #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.0 1.0 'wall-slot 0 0)))
-                     (let ([p (hash-ref protoss-matchup-wall 'slot-1 #f)])
+                     (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'slot-1 #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
-                     (let ([p (hash-ref protoss-matchup-wall 'slot-2 #f)])
+                     (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'slot-2 #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
-                     (let ([p (hash-ref protoss-matchup-wall 'slot-3 #f)])
+                     (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'slot-3 #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.5 1.5 'wall-slot 0 0)))
-                     (let ([p (hash-ref protoss-matchup-wall 'door #f)])
+                     (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'door #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.2 1.2 'doorway-corridor 0 0)))
-                     (let ([p (hash-ref protoss-matchup-wall 'door-park #f)])
+                     (let ([p (and (not bypass-wall-pylon?) (hash-ref protoss-matchup-wall 'door-park #f))])
                        (and (pair? p) (reserved-aabb (car p) (cdr p) 1.2 1.2 'doorway-corridor 0 0)))))]
       [else '()]))
   (set-box! (rt-wall-aabbs-box rt) step-wall-aabbs)
@@ -2914,21 +3255,26 @@
       [(Protoss)
        (define wall-pylon-pt
          (and allow-exact-wall-slot?
+              (not bypass-wall-pylon?)
               (= protoss-pylon-count 0)
               (not has-unpowered-bldg?)
               (hash-ref protoss-matchup-wall 'pylon #f)))
        (define use-exact-pylon? (pair? wall-pylon-pt))
+       (define inmain-retry-idx (hash-ref wall-st 'inmain-supply-attempts 0))
+       (define-values (em-px em-py) (emergency-inmain-supply-anchor inmain-retry-idx))
        (define raw-px
          (cond
-           [use-exact-pylon? (safe-coord (car wall-pylon-pt) (+ base-x 4.0))]
+           [use-exact-pylon? (safe-coord (car wall-pylon-pt) em-px)]
            [has-unpowered-bldg?
-            (safe-coord (+ (hash-ref unpowered-protoss-bldg 'x (+ base-x 4.0)) 2.5) (+ base-x 4.0))]
+            (safe-coord (+ (hash-ref unpowered-protoss-bldg 'x (+ base-x 4.0)) 2.5) em-px)]
+           [bypass-wall-pylon? em-px]
            [else (safe-coord (+ base-x 4.0 (* 2.5 (modulo protoss-pylon-count 4))))]))
        (define raw-py
          (cond
-           [use-exact-pylon? (safe-coord (cdr wall-pylon-pt) (+ base-y 4.0))]
+           [use-exact-pylon? (safe-coord (cdr wall-pylon-pt) em-py)]
            [has-unpowered-bldg?
-            (safe-coord (+ (hash-ref unpowered-protoss-bldg 'y (+ base-y 4.0)) 0.5) (+ base-y 4.0))]
+            (safe-coord (+ (hash-ref unpowered-protoss-bldg 'y (+ base-y 4.0)) 0.5) em-py)]
+           [bypass-wall-pylon? em-py]
            [else (safe-coord (+ base-y 4.0 (* 2.5 (quotient protoss-pylon-count 4))))]))
        (define-values (px py)
          (order-ledger-resolve-build-coords!
@@ -2938,6 +3284,15 @@
           #:reserved-aabbs (wall-aabbs-for-build use-exact-pylon?)))
        (define sx (safe-coord px raw-px))
        (define sy (safe-coord py raw-py))
+       (when (= real-pylon-count 0)
+         (hash-set! wall-st 'supply-last-issue-frame frame)
+         (cond
+           [use-exact-pylon?
+            (unless (hash-has-key? wall-st 'wall-supply-first-frame)
+              (hash-set! wall-st 'wall-supply-first-frame frame))
+            (hash-set! wall-st 'wall-supply-attempts (add1 wall-supply-attempts))]
+           [else
+            (hash-set! wall-st 'inmain-supply-attempts (add1 inmain-retry-idx))]))
        (emit! (list 'build 'pylon sx sy))
        (order-ledger-record-issued! oledger (+ 800000 (modulo frame 10000)) 'build 'pylon sx sy frame)
        (set! bldg-types (cons 'pylon bldg-types))
@@ -2950,18 +3305,24 @@
        (define wall-depot-entry
          (and allow-exact-wall-slot?
               (cond
-                [(= depot-count 0) (hash-ref terran-ramp-wall 'depot-1 #f)]
-                [(= depot-count 1) (hash-ref terran-ramp-wall 'depot-2 #f)]
+                [(and (= depot-count 0) (not bypass-wall-depot1?))
+                 (hash-ref terran-ramp-wall 'depot-1 #f)]
+                [(= depot-count 1)
+                 (hash-ref terran-ramp-wall 'depot-2 #f)]
                 [else #f])))
        (define use-exact-depot? (pair? wall-depot-entry))
+       (define inmain-retry-idx (hash-ref wall-st 'inmain-supply-attempts 0))
+       (define-values (em-dx em-dy) (emergency-inmain-supply-anchor inmain-retry-idx))
        (define raw-dx
-         (if use-exact-depot?
-             (safe-coord (car wall-depot-entry) (+ base-x 4.0))
-             (safe-coord (+ base-x 4.0 (* 2.5 (modulo depot-count 4))))))
+         (cond
+           [use-exact-depot? (safe-coord (car wall-depot-entry) em-dx)]
+           [(and (= depot-count 0) bypass-wall-depot1?) em-dx]
+           [else (safe-coord (+ base-x 4.0 (* 2.5 (modulo depot-count 4))))]))
        (define raw-dy
-         (if use-exact-depot?
-             (safe-coord (cdr wall-depot-entry) (- base-y 3.0))
-             (safe-coord (- base-y 3.0 (* 2.5 (quotient depot-count 4))))))
+         (cond
+           [use-exact-depot? (safe-coord (cdr wall-depot-entry) em-dy)]
+           [(and (= depot-count 0) bypass-wall-depot1?) em-dy]
+           [else (safe-coord (- base-y 3.0 (* 2.5 (quotient depot-count 4))))]))
        (define-values (dx dy)
          (order-ledger-resolve-build-coords!
           oledger 'supply-depot raw-dx raw-dy ally-bldgs frame 2.0
@@ -2970,6 +3331,15 @@
           #:reserved-aabbs (wall-aabbs-for-build use-exact-depot?)))
        (define sx (safe-coord dx raw-dx))
        (define sy (safe-coord dy raw-dy))
+       (when (= real-depot-count 0)
+         (hash-set! wall-st 'supply-last-issue-frame frame)
+         (cond
+           [use-exact-depot?
+            (unless (hash-has-key? wall-st 'wall-supply-first-frame)
+              (hash-set! wall-st 'wall-supply-first-frame frame))
+            (hash-set! wall-st 'wall-supply-attempts (add1 wall-supply-attempts))]
+           [else
+            (hash-set! wall-st 'inmain-supply-attempts (add1 inmain-retry-idx))]))
        (emit! (list 'build 'supply-depot sx sy))
        (order-ledger-record-issued! oledger (+ 800000 (modulo frame 10000)) 'build 'supply-depot sx sy frame)
        (set! bldg-types (cons 'supply-depot bldg-types))
@@ -2977,6 +3347,20 @@
        (set! pending-supply (add1 pending-supply))
        (set! eff-pending-supply (add1 eff-pending-supply))]
       [else (void)]))
+
+  (define hard-supply-lockout?
+    (and (< supply-cap SC2-MAX-SUPPLY)
+         (<= eff-pending-supply 0)
+         (or (<= supply-left 0)
+             (>= supply-used supply-cap)
+             (and (<= supply-left 1)
+                  (<= supply-cap (* 15 (max 1 active-bases)))
+                  (or (and (eq? race 'Protoss) (= real-pylon-count 0) (>= supply-used 14))
+                      (and (eq? race 'Terran) (= real-depot-count 0) (>= supply-used 14)))))))
+  (define hard-supply-lockout-reserve-min
+    (if hard-supply-lockout?
+        (sc2-min-cost supply-provider-sym)
+        0))
 
   (define reserve-supply-floor?
     (and (<= eff-pending-supply 0)
@@ -3296,6 +3680,14 @@
         (safe-nonneg-int (or live-gas-harvesters (hash-ref obs 'vespene-harvesters 0)) 0)
         (if (> gas 0) 3 0)))
 
+  (define eff-min-harvesters
+    (if live-obs-harvesters?
+        (max (safe-nonneg-int (hash-ref obs 'mineral-harvesters 0) 0)
+             (max 0 (- (length non-building-workers)
+                       (+ (length cur-rush-fighting-wids)
+                          (length cur-rush-disengaging-wids)))))
+        (and (= total-workers 0) 0)))
+
   (define macro-world
     (make-macro-world-state
      #:race race
@@ -3309,6 +3701,7 @@
      #:pending-supply eff-pending-supply
      #:workers total-workers
      #:active-bases active-bases
+     #:mineral-harvesters eff-min-harvesters
      #:gas-harvesters (and has-explicit-gas-harvesters? eff-gas-harvesters)
      #:ready-building-counts ready-bldg-counts
      #:total-building-counts total-bldg-counts
@@ -3350,6 +3743,12 @@
     (when (and (<= eff-gas-harvesters 0)
                (> bo-reserved-gas 0)
                (< gas bo-reserved-gas))
+      (set! bo-reserved-min 0)
+      (set! bo-reserved-gas 0))
+    (when (and (or (<= total-workers 0)
+                   (and (exact-integer? eff-min-harvesters) (<= eff-min-harvesters 0)))
+               (> bo-reserved-min 0)
+               (< minerals bo-reserved-min))
       (set! bo-reserved-min 0)
       (set! bo-reserved-gas 0)))
 
@@ -3454,11 +3853,16 @@
                      hatchery nexus command-center
                      warp-gate-research metabolic-boost stimpack lair)))))
   (define (non-combat-min-ok? cost [target-sym #f])
-    (>= (- minerals cost)
-        (cond
-          [(not urgent-combat-or-intel-need?) 0]
-          [(core-progression-exempt-from-surcharge? target-sym) basic-combat-min-floor]
-          [else 125])))
+    (define supply-lock-floor
+      (if (memq target-sym '(pylon supply-depot overlord))
+          0
+          hard-supply-lockout-reserve-min))
+    (and (>= (- minerals cost) supply-lock-floor)
+         (>= (- minerals cost)
+             (cond
+               [(not urgent-combat-or-intel-need?) 0]
+               [(core-progression-exempt-from-surcharge? target-sym) basic-combat-min-floor]
+               [else 125]))))
   (define (non-combat-gas-ok? cost [target-sym #f])
     (or (<= cost 0)
         (>= (- gas cost)
@@ -3540,8 +3944,10 @@
          (or (>= total-workers 12)
              (< live-army-supply 4))))
   (define crisis-freeze-expand-or-gas?
-    (and early-survival-crisis?
-         (< live-army-supply 6)))
+    (or (and early-survival-crisis?
+             (< live-army-supply 6))
+        (and hard-supply-lockout?
+             (< minerals (+ (sc2-min-cost supply-provider-sym) 75)))))
 
   (define (worker-army-curve-satisfied?)
     (or (not live-game?)
@@ -4114,10 +4520,34 @@
      ;; 4. Zerg Pro Build Order & 8-Geyser Scaling
      (when (and (not (building-present-or-pending? 'spawning-pool))
                 (save-cancel-rebuild-ready? 'spawning-pool 60)
-                (>= minerals (sc2-min-cost 'spawning-pool)))
+                (>= minerals (sc2-min-cost 'spawning-pool))
+                (>= (- minerals (sc2-min-cost 'spawning-pool)) hard-supply-lockout-reserve-min))
        (define-values (pool-ax pool-ay)
          (safe-zerg-build-anchor (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0))))
        (emit-build-verified! 'spawning-pool pool-ax pool-ay))
+
+     ;; Worker-Rush / Early Survival Crisis Immediate Spending:
+     ;; As soon as Spawning Pool is complete, spend 100M on Spine Crawler if minerals >= 200 (and >= 2 Drones),
+     ;; and immediately spend EVERY 50M + Larva on Zerglings ahead of Queen / Speed / Warren / Drones!
+     (when (and (or worker-rush-active? early-survival-crisis?)
+                (memq 'spawning-pool ready-bldg-types)
+                (< live-army-supply (max 8 (+ live-enemy-threat-supply 4))))
+       (when (and (>= minerals 200)
+                  (>= total-workers 2)
+                  (not (building-present-or-pending? 'spine-crawler))
+                  (save-cancel-rebuild-ready? 'spine-crawler 60))
+         (define-values (er-spine-x er-spine-y)
+           (if (<= (length hatcheries) 1)
+               (let* ([sdx (- nat-x base-x)]
+                      [sdy (- nat-y base-y)]
+                      [sd (max 1.0 (sqrt (+ (* sdx sdx) (* sdy sdy))))])
+                 (values (safe-coord (+ base-x (* 3.5 (/ sdx sd))) base-x)
+                         (safe-coord (+ base-y (* 3.5 (/ sdy sd))) base-y)))
+               (offset-defense-anchor nat-x nat-y 5.5)))
+         (emit-build-verified! 'spine-crawler er-spine-x er-spine-y 2.0))
+       (when (and (>= minerals (sc2-min-cost 'zergling))
+                  (or (>= total-workers 1) worker-rush-active?))
+         (try-train-unit! 'zergling 'larva 4 #:respect-bo-reserve? #f)))
 
      (define desired-extractors
        (if (and early-survival-crisis? (null? active-extractors))
@@ -4299,10 +4729,15 @@
        (emit-unit-morph-verified! 'ravager 'roach 1))
 
      (when (and (memq 'spawning-pool ready-bldg-types)
+                (>= total-workers 2)
                 (not (building-present-or-pending? 'spine-crawler))
                 (save-cancel-rebuild-ready? 'spine-crawler 60)
+                (>= (- minerals (sc2-min-cost 'spine-crawler)) hard-supply-lockout-reserve-min)
                 (or (and (or early-survival-crisis?
                              (and under-base-attack? (< live-army-supply 6)))
+                         (or (not worker-rush-active?)
+                             (>= minerals 200)
+                             (>= live-army-supply 4))
                          (>= minerals (sc2-min-cost 'spine-crawler)))
                     (and (not zerg-saving-for-expand?)
                          (>= minerals (+ (sc2-min-cost 'spine-crawler) (sc2-min-cost 'roach-warren)))
@@ -4928,17 +5363,45 @@
      ;; 4. Protoss Matchup-Wall & Pro Build-Order Sequencing:
      ;;    1st Gateway at wall `'slot-1` (early game only), CyberCore at `'slot-2` BEFORE 2nd Assimilator,
      ;;    optional `'slot-3` vs Zerg, and static defense offset >= 5.5 tiles off expansion pads!
+     (define first-ready-pylon
+       (findf (lambda (b)
+                (and (hash? b)
+                     (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'pylon)
+                     (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+              ally-bldgs))
+     (define (wall-slot-powered? slot-pt)
+       (and (pair? slot-pt)
+            (not bypass-wall-pylon?)
+            (or (not live-game-obs?)
+                (ormap (lambda (b)
+                         (and (hash? b)
+                              (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'pylon)
+                              (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                              (<= (dist2d (car slot-pt) (cdr slot-pt)
+                                          (hash-ref b 'x -999.0)
+                                          (hash-ref b 'y -999.0))
+                                  6.2)))
+                       ally-bldgs))))
+     (define inmain-powered-gx
+       (if first-ready-pylon
+           (safe-coord (+ (hash-ref first-ready-pylon 'x (+ base-x 4.0)) 2.5) (+ base-x 4.0))
+           (safe-coord (+ base-x 4.0))))
+     (define inmain-powered-gy
+       (if first-ready-pylon
+           (safe-coord (+ (hash-ref first-ready-pylon 'y (+ base-y 4.0)) 0.5) (+ base-y 4.0))
+           (safe-coord (+ base-y 4.0))))
      (when (and (null? gateways)
                 (or (not live-game-obs?) (memq 'pylon ready-bldg-types))
                 (not (building-present-or-pending? 'gateway))
-                (>= minerals (sc2-min-cost 'gateway)))
-       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (pair? wall-slot-1))
+                (>= minerals (sc2-min-cost 'gateway))
+                (>= (- minerals (sc2-min-cost 'gateway)) hard-supply-lockout-reserve-min))
+       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (wall-slot-powered? wall-slot-1))
            (emit-build-verified! 'gateway
-                                 (safe-coord (car wall-slot-1) (+ base-x 4.0))
-                                 (safe-coord (cdr wall-slot-1) (+ base-y 4.0))
+                                 (safe-coord (car wall-slot-1) inmain-powered-gx)
+                                 (safe-coord (cdr wall-slot-1) inmain-powered-gy)
                                  SC2-BUILD-SITE-MIN-CLEARANCE
                                  #:exact-wall-slot? #t)
-           (emit-build-verified! 'gateway (safe-coord (+ base-x 4.0)) (safe-coord (+ base-y 4.0)))))
+           (emit-build-verified! 'gateway inmain-powered-gx inmain-powered-gy)))
 
      ;; Emergency Shield Battery under early cheese / base attack once Cybernetics Core is ready
      ;; (offset >= 5.5 tiles off natural pad so it NEVER blocks expansion or doorway!)
@@ -4961,13 +5424,21 @@
                 (not (building-present-or-pending? 'cybernetics-core))
                 (>= minerals (sc2-min-cost 'cybernetics-core))
                 (non-combat-min-ok? (sc2-min-cost 'cybernetics-core) 'cybernetics-core))
-       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (pair? wall-slot-2))
+       (define inmain-cy-x
+         (if first-ready-pylon
+             (safe-coord (- (hash-ref first-ready-pylon 'x (+ base-x 6.0)) 2.5) (+ base-x 6.0))
+             (safe-coord (+ base-x 6.0))))
+       (define inmain-cy-y
+         (if first-ready-pylon
+             (safe-coord (+ (hash-ref first-ready-pylon 'y (+ base-y 4.0)) 2.0) (+ base-y 4.0))
+             (safe-coord (+ base-y 4.0))))
+       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (wall-slot-powered? wall-slot-2))
            (emit-build-verified! 'cybernetics-core
-                                 (safe-coord (car wall-slot-2) (+ base-x 6.0))
-                                 (safe-coord (cdr wall-slot-2) (+ base-y 4.0))
+                                 (safe-coord (car wall-slot-2) inmain-cy-x)
+                                 (safe-coord (cdr wall-slot-2) inmain-cy-y)
                                  SC2-BUILD-SITE-MIN-CLEARANCE
                                  #:exact-wall-slot? #t)
-           (emit-build-verified! 'cybernetics-core (safe-coord (+ base-x 6.0)) (safe-coord (+ base-y 4.0)))))
+           (emit-build-verified! 'cybernetics-core inmain-cy-x inmain-cy-y)))
 
      (define has-nat-nexus-or-pending?
        (or (>= (length nexuses) 2)
@@ -5758,12 +6229,17 @@
      (when (and (null? barracks-list)
                 (or (not live-game-obs?) (memq 'supply-depot ready-bldg-types))
                 (not (building-present-or-pending? 'barracks))
-                (>= minerals (sc2-min-cost 'barracks)))
-       (define wall-rax (and allow-exact-wall-slot? (<= (length ccs) 2) (hash-ref terran-ramp-wall 'barracks #f)))
+                (>= minerals (sc2-min-cost 'barracks))
+                (>= (- minerals (sc2-min-cost 'barracks)) hard-supply-lockout-reserve-min))
+       (define wall-rax
+         (and allow-exact-wall-slot?
+              (not bypass-wall-depot1?)
+              (<= (length ccs) 2)
+              (hash-ref terran-ramp-wall 'barracks #f)))
        (define rx0 (if (pair? wall-rax) (safe-coord (car wall-rax) (+ base-x 4.0)) (safe-coord (+ base-x 4.0))))
        (define ry0 (if (pair? wall-rax) (safe-coord (cdr wall-rax) (+ base-y 4.0)) (safe-coord (+ base-y 4.0))))
        (emit-build-verified! 'barracks rx0 ry0 SC2-BUILD-SITE-MIN-CLEARANCE
-                             #:exact-wall-slot? (and allow-exact-wall-slot? (<= (length ccs) 2) (pair? wall-rax))))
+                             #:exact-wall-slot? (and allow-exact-wall-slot? (not bypass-wall-depot1?) (<= (length ccs) 2) (pair? wall-rax))))
 
      (define desired-refineries
        (if (and early-survival-crisis? (null? active-refineries))
@@ -7773,16 +8249,22 @@
                                 (<= (dist2d ux uy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 9.5)))
                          enemy-units)))
            (cond
-             [consume-bldg
-              (emit! (list 'cast-spell uid 'viper-consume (hash-ref consume-bldg 'id 0)))]
-             [air-clump-tgt
-              (emit! (list 'cast-spell uid 'parasitic-bomb (hash-ref air-clump-tgt 'id 0)))]
+             [(and consume-bldg
+                   (exact-integer? (hash-ref consume-bldg 'id 0))
+                   (> (hash-ref consume-bldg 'id 0) 0))
+              (emit! (list 'cast-spell uid 'viper-consume (hash-ref consume-bldg 'id)))]
+             [(and air-clump-tgt
+                   (exact-integer? (hash-ref air-clump-tgt 'id 0))
+                   (> (hash-ref air-clump-tgt 'id 0) 0))
+              (emit! (list 'cast-spell uid 'parasitic-bomb (hash-ref air-clump-tgt 'id)))]
              [cloud-tgt
               (emit! (list 'cast-spell uid 'blinding-cloud
                            (safe-coord (hash-ref cloud-tgt 'x ex) ex)
                            (safe-coord (hash-ref cloud-tgt 'y ey) ey)))]
-             [abduct-tgt
-              (emit! (list 'cast-spell uid 'abduct (hash-ref abduct-tgt 'id 0)))]
+             [(and abduct-tgt
+                   (exact-integer? (hash-ref abduct-tgt 'id 0))
+                   (> (hash-ref abduct-tgt 'id 0) 0))
+              (emit! (list 'cast-spell uid 'abduct (hash-ref abduct-tgt 'id)))]
              [else
               (emit-caster-rear-leash!)])]
           [(infestor infestor-burrowed)
@@ -7837,8 +8319,10 @@
               (emit! (list 'cast-spell uid 'psi-storm
                            (safe-coord (hash-ref storm-tgt 'x ex) ex)
                            (safe-coord (hash-ref storm-tgt 'y ey) ey)))]
-             [feedback-tgt
-              (emit! (list 'cast-spell uid 'feedback (hash-ref feedback-tgt 'id 0)))]
+             [(and feedback-tgt
+                   (exact-integer? (hash-ref feedback-tgt 'id 0))
+                   (> (hash-ref feedback-tgt 'id 0) 0))
+              (emit! (list 'cast-spell uid 'feedback (hash-ref feedback-tgt 'id)))]
              [(< u-energy 50)
               (emit-caster-rear-leash!)]
              [else
@@ -7857,7 +8341,9 @@
              [(and (< u-hp 180) (>= frame jump-ready-f))
               (hash-set! splash-st (cons 'bc-jump-ready uid) (+ frame 2012))
               (emit! (list 'cast-spell uid 'tactical-jump base-x base-y))]
-             [yamato-tgt
+             [(and yamato-tgt
+                   (let ([ytid (hash-ref yamato-tgt 'id eid)])
+                     (and (exact-integer? ytid) (> ytid 0))))
               (hash-set! splash-st (cons 'bc-yamato-ready uid) (+ frame 1590))
               (emit! (list 'cast-spell uid 'yamato-cannon (hash-ref yamato-tgt 'id eid)))]
              [else
@@ -7974,14 +8460,19 @@
            (cond
              [(not live-obs?)
               (when (>= (hash-ref u 'energy 75) 75)
-                (emit! (list 'cast-spell uid 'emp-round eid))
-                (emit! (list 'cast-spell uid 'snipe eid)))
+                (emit! (list 'cast-spell uid 'emp-round
+                             (safe-coord ex base-x)
+                             (safe-coord ey base-y)))
+                (when (and (exact-integer? eid) (> eid 0))
+                  (emit! (list 'cast-spell uid 'snipe eid))))
               (emit-engage-or-rally!)]
              [emp-tgt
               (emit! (list 'cast-spell uid 'emp-round
                            (safe-coord (hash-ref emp-tgt 'x ex) ex)
                            (safe-coord (hash-ref emp-tgt 'y ey) ey)))]
-             [snipe-tgt
+             [(and snipe-tgt
+                   (let ([stid (hash-ref snipe-tgt 'id eid)])
+                     (and (exact-integer? stid) (> stid 0))))
               (emit! (list 'cast-spell uid 'snipe (hash-ref snipe-tgt 'id eid)))]
              [else
               (emit-engage-or-rally!)])]
