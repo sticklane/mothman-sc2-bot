@@ -351,7 +351,8 @@
                    (not (memq t '(command-center-flying orbital-command-flying
                                   barracks-flying factory-flying starport-flying
                                   spine-crawler-uprooted spore-crawler-uprooted)))
-                   (not (eq? (hash-ref b 'powered? #t) #f))
+                   (or (not (sc2-structure-requires-pylon-power? t))
+                       (not (eq? (hash-ref b 'powered? #t) #f)))
                    (or (set-member? group-tag-set id)
                        (memq t default-types-for-group))))
             ally-buildings))

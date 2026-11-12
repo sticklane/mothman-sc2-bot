@@ -1062,7 +1062,8 @@
     [(or (< prog SC2-BUILD-COMPLETE-PROGRESS)
          (hash-ref bldg-hash 'in-transit? #f)
          (hash-ref bldg-hash 'flying? #f)
-         (eq? (hash-ref bldg-hash 'powered? #t) #f))
+         (and (sc2-structure-requires-pylon-power? (hash-ref bldg-hash 'type 'unknown))
+              (eq? (hash-ref bldg-hash 'powered? #t) #f)))
      #t]
     [else
      (define order-cnt

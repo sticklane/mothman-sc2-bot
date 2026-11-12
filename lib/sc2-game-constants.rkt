@@ -167,6 +167,12 @@
 (define SC2-MACRO-EXPAND-FRAME-THRESHOLD   2200)
 (define SC2-EARLY-CHRONO-NEXUS-MAX-FRAME   1500)
 (define SC2-EARLY-CHRONO-MAX-WORKERS       18)
+(define SC2-WORKER-RUSH-DETECT-RADIUS      32.0)
+(define SC2-WORKER-RUSH-MIN-ENEMY-WORKERS  4)
+(define SC2-IN-BASE-PROXY-DETECT-RADIUS    35.0)
+(define SC2-IN-BASE-PROXY-MAX-FRAME        4704)
+(define SC2-FIGHTING-WORKER-DISENGAGE-HP   12)
+(define SC2-FIGHTING-WORKER-REENGAGE-HP    16)
 
 ;; -----------------------------------------------------------------------------
 ;; 4. Refractory Cooldowns & Spell Energy Costs (in SC2 Frames & Energy)
@@ -970,6 +976,15 @@
     [(command-center-flying)       'command-center]
     [(orbital-command-flying)      'orbital-command]
     [else                          sym]))
+
+(define SC2-PROTOSS-PYLON-POWERED-STRUCTURE-SYMS
+  '(gateway warp-gate warpgate cybernetics-core forge photon-cannon shield-battery
+    twilight-council robotics-facility robotics-bay robotics-support-bay
+    stargate fleet-beacon templar-archive templar-archives dark-shrine))
+
+(define (sc2-structure-requires-pylon-power? sym)
+  (not (not (memq (sc2-canonical-structure-sym sym)
+                  SC2-PROTOSS-PYLON-POWERED-STRUCTURE-SYMS))))
 
 (define (sc2-structure-equivalent-syms sym [include-free-addons? #f])
   (case sym

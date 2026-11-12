@@ -4262,6 +4262,417 @@
   (assert-eq! (length (sc2-raw-unit-command-unit-tags (car cmds-2ht))) 2
               "Archon morph wire command must carry exactly 2 Templar tags"))
 
+;; =============================================================================
+;; Suite 26: Live Protobuf is_powered, Tech Actuation & Worker-Rush/Anti-Proxy Defense
+;; =============================================================================
+(run-suite "26. Live Protobuf is_powered, Tech Actuation & Worker-Rush/Anti-Proxy Defense"
+  ;; 26.1 Live Protobuf `'powered? #f` Equivalence
+  (assert-eq! (sc2-structure-requires-pylon-power? 'gateway) #t
+              "Gateway must require Pylon power")
+  (for ([sym (in-list '(nexus pylon assimilator command-center orbital-command
+                        barracks hatchery lair spawning-pool))])
+    (assert-eq! (sc2-structure-requires-pylon-power? sym) #f
+                (format "~a must NOT require Pylon power" sym)))
+
+  (define cx-pow (make-human-cortex))
+  (define ol-pow (make-order-ledger))
+  (for ([spec (in-list (list (list 401 'nexus 4)
+                             (list 402 'command-center 4)
+                             (list 403 'hatchery 4)
+                             (list 404 'barracks 5)
+                             (list 405 'spawning-pool 7)))])
+    (define bid (first spec))
+    (define bsym (second spec))
+    (define grp (third spec))
+    (define bh (hash 'id bid 'type bsym 'x 32.5 'y 32.5 'hp 1000 'build-progress 1.0 'powered? #f))
+    (assert-eq! (order-ledger-facility-busy? ol-pow bh 100) #f
+                (format "order-ledger-facility-busy? must treat ~a with 'powered? #f as NOT busy" bsym))
+    (define cap-ht (cortex-production-group-capacity cx-pow (list bh) grp))
+    (assert-eq! (hash-ref cap-ht 'open-slot-count 0) 1
+                (format "cortex-production-group-capacity must report 1 open slot for ~a with 'powered? #f" bsym)))
+
+  (define gw-unpow-bh
+    (hash 'id 406 'type 'gateway 'x 36.5 'y 36.5 'hp 1000 'build-progress 1.0 'powered? #f))
+  (assert-eq! (order-ledger-facility-busy? ol-pow gw-unpow-bh 100) #t
+              "Unpowered Gateway ('powered? #f) must be treated as busy by order-ledger-facility-busy?")
+  (assert-eq! (hash-ref (cortex-production-group-capacity cx-pow (list gw-unpow-bh) 5) 'open-slot-count -1) 0
+              "Unpowered Gateway ('powered? #f) must report 0 open slots in cortex-production-group-capacity")
+
+  ;; Frame-0 Terran (12 SCVs, 50M, CommandCenter 'powered? #f) -> emits (train scv)
+  (define rt-f0-t (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-f0-t
+    (step-live-bot-runtime!
+     rt-f0-t
+     (hash 'frame 0 'minerals 50 'gas 0 'supply-used 12 'supply-cap 15 'supply-left 3
+           'mineral-harvesters 12 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units (for/list ([i (in-range 12)])
+                         (hash 'id (+ 10 i) 'type 'scv 'x 31.0 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5
+                                       'hp 1500 'build-progress 1.0 'powered? #f))
+           'enemy-units '())))
+  (assert-true! (member '(train scv) (hash-ref res-f0-t 'actions '()))
+                "Frame-0 Terran with CommandCenter 'powered? #f must emit (train scv)")
+
+  ;; Frame-0 Protoss (12 Probes, 50M, Nexus 'powered? #f) -> emits (train probe)
+  (define rt-f0-p (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-f0-p
+    (step-live-bot-runtime!
+     rt-f0-p
+     (hash 'frame 0 'minerals 50 'gas 0 'supply-used 12 'supply-cap 15 'supply-left 3
+           'mineral-harvesters 12 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units (for/list ([i (in-range 12)])
+                         (hash 'id (+ 10 i) 'type 'probe 'x 31.0 'y 32.5 'hp 40))
+           'ally-buildings (list (hash 'id 302 'type 'nexus 'x 32.5 'y 32.5
+                                       'hp 2000 'build-progress 1.0 'powered? #f))
+           'enemy-units '())))
+  (assert-true! (member '(train probe) (hash-ref res-f0-p 'actions '()))
+                "Frame-0 Protoss with Nexus 'powered? #f must emit (train probe)")
+
+  ;; Zerg (Hatchery + SpawningPool 'powered? #f, 200M/100G) -> trains queen, researches metabolic-boost, and morphs lair without stalling
+  (define zerg-base-workers
+    (append (for/list ([i (in-range 20)])
+              (hash 'id (+ 10 i) 'type 'drone 'x 31.0 'y 32.5 'hp 40))
+            (for/list ([k (in-range 3)])
+              (hash 'id (+ 50 k) 'type 'larva 'x 33.0 'y 33.0 'hp 25))
+            (for/list ([m (in-range 4)])
+              (hash 'id (+ 60 m) 'type 'overlord 'x 35.0 'y 35.0 'hp 200))))
+  (define zerg-4queens
+    (list (hash 'id 70 'type 'queen 'x 33.5 'y 32.5 'hp 175 'energy 20)
+          (hash 'id 71 'type 'queen 'x 57.5 'y 32.5 'hp 175 'energy 20)
+          (hash 'id 72 'type 'queen 'x 45.0 'y 32.5 'hp 175 'energy 20)
+          (hash 'id 73 'type 'queen 'x 46.0 'y 32.5 'hp 175 'energy 20)))
+  (define zerg-unpow-bldgs
+    (list (hash 'id 201 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0 'powered? #f)
+          (hash 'id 202 'type 'hatchery 'x 56.5 'y 32.5 'hp 1500 'build-progress 1.0 'powered? #f)
+          (hash 'id 203 'type 'spawning-pool 'x 36.5 'y 32.5 'hp 1000 'build-progress 1.0 'powered? #f)
+          (hash 'id 204 'type 'extractor 'x 32.5 'y 26.5 'hp 500 'build-progress 1.0 'powered? #f)
+          (hash 'id 205 'type 'extractor 'x 56.5 'y 26.5 'hp 500 'build-progress 1.0 'powered? #f)))
+  (define rt-z-queen (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-z-queen
+    (step-live-bot-runtime!
+     rt-z-queen
+     (hash 'frame 1400 'minerals 200 'gas 100 'supply-used 20 'supply-cap 46 'supply-left 26
+           'mineral-harvesters 17 'gas-harvesters 3
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units zerg-base-workers
+           'ally-buildings zerg-unpow-bldgs
+           'enemy-units '())))
+  (assert-true! (member '(train queen) (hash-ref res-z-queen 'actions '()))
+                "Zerg with Hatchery + SpawningPool 'powered? #f at 200M/100G (0 Queens) must train Queen")
+
+  (define rt-z-spd (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-z-spd
+    (step-live-bot-runtime!
+     rt-z-spd
+     (hash 'frame 1400 'minerals 200 'gas 100 'supply-used 28 'supply-cap 46 'supply-left 18
+           'mineral-harvesters 17 'gas-harvesters 3
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units (append zerg-base-workers zerg-4queens)
+           'ally-buildings zerg-unpow-bldgs
+           'enemy-units '())))
+  (assert-true! (member '(research metabolic-boost) (hash-ref res-z-spd 'actions '()))
+                "Zerg with SpawningPool 'powered? #f at 200M/100G must research metabolic-boost without researcher-slot stall")
+
+  (define rt-z-lair (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-z-lair
+    (step-live-bot-runtime!
+     rt-z-lair
+     (hash 'frame 2200 'minerals 200 'gas 100 'supply-used 30 'supply-cap 54 'supply-left 24
+           'mineral-harvesters 16 'gas-harvesters 6
+           'researched-upgrades '(metabolic-boost)
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units (append zerg-base-workers zerg-4queens)
+           'ally-buildings zerg-unpow-bldgs
+           'enemy-units '())))
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (eq? (car a) 'morph)
+                              (or (equal? a '(morph lair))
+                                  (and (= (length a) 3) (eq? (third a) 'lair)))))
+                       (hash-ref res-z-lair 'actions '()))
+                "Zerg with Hatchery + SpawningPool 'powered? #f at 200M/100G (speed done) must morph Lair")
+
+  ;; 26.2 Terran Opening SupplyDepot / Barracks Gate & Protoss Forge Non-Deadlock
+  (define rt-t-open (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-t-open
+    (step-live-bot-runtime!
+     rt-t-open
+     (hash 'frame 120 'minerals 150 'gas 0 'supply-used 12 'supply-cap 15 'supply-left 3
+           'mineral-harvesters 12 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units (for/list ([i (in-range 12)])
+                         (hash 'id (+ 10 i) 'type 'scv 'x 31.0 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5
+                                       'hp 1500 'build-progress 1.0 'powered? #f))
+           'enemy-units '())))
+  (define acts-t-open (hash-ref res-t-open 'actions '()))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'supply-depot)))
+                       acts-t-open)
+                "Terran at 12/15 supply with 150M and 0 depots must build SupplyDepot")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'barracks)))
+                            acts-t-open))
+                "Terran with 0 ready SupplyDepots must NOT emit doomed (build barracks ...)")
+
+  ;; Also verify even at 260M with an in-progress SupplyDepot (build-progress 0.5), Barracks waits for depot ready
+  (define rt-t-inprog-dep (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-t-inprog-dep
+    (step-live-bot-runtime!
+     rt-t-inprog-dep
+     (hash 'frame 300 'minerals 260 'gas 0 'supply-used 14 'supply-cap 15 'supply-left 1
+           'mineral-harvesters 14 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units (for/list ([i (in-range 14)])
+                         (hash 'id (+ 10 i) 'type 'scv 'x 31.0 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5
+                                       'hp 1500 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 305 'type 'supply-depot 'x 36.0 'y 30.0
+                                       'hp 200 'build-progress 0.5 'powered? #f))
+           'enemy-units '())))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'barracks)))
+                            (hash-ref res-t-inprog-dep 'actions '())))
+                "Terran with only an unfinished SupplyDepot (0.5) must NOT emit doomed (build barracks ...)")
+
+  ;; Protoss with 2 Nexuses, powered Gateways + CyberneticsCore (0 RoboticsFacility), 180M / 20G, wanting forge
+  (define p-forge-units
+    (append (for/list ([i (in-range 30)])
+              (hash 'id (+ 10 i) 'type 'probe 'x 31.0 'y 32.5 'hp 40))
+            (for/list ([k (in-range 5)])
+              (hash 'id (+ 70 k) 'type 'stalker 'x 48.0 'y 34.0 'hp 80 'shield 80))
+            (for/list ([k (in-range 4)])
+              (hash 'id (+ 80 k) 'type 'zealot 'x 50.0 'y 34.0 'hp 100 'shield 50))))
+  (define rt-p-forge (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-p-forge
+    (step-live-bot-runtime!
+     rt-p-forge
+     (hash 'frame 3600 'minerals 180 'gas 20 'supply-used 48 'supply-cap 62 'supply-left 14
+           'mineral-harvesters 28 'gas-harvesters 2
+           'researched-upgrades '(warp-gate-research)
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units p-forge-units
+           'ally-buildings (list (hash 'id 501 'type 'nexus 'x 32.5 'y 32.5 'hp 2000 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 502 'type 'nexus 'x 56.5 'y 32.5 'hp 2000 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 503 'type 'pylon 'x 36.0 'y 36.0 'hp 400 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 504 'type 'pylon 'x 42.0 'y 36.0 'hp 400 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 505 'type 'pylon 'x 48.0 'y 36.0 'hp 400 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 506 'type 'gateway 'x 37.5 'y 36.5 'hp 1000 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 510 'type 'gateway 'x 37.5 'y 40.5 'hp 1000 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 511 'type 'gateway 'x 44.5 'y 36.5 'hp 1000 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 512 'type 'gateway 'x 44.5 'y 40.5 'hp 1000 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 507 'type 'cybernetics-core 'x 41.5 'y 36.5 'hp 1100 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 508 'type 'assimilator 'x 32.5 'y 26.5 'hp 900 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 509 'type 'assimilator 'x 56.5 'y 26.5 'hp 900 'build-progress 1.0 'powered? #f))
+           'enemy-units '())))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'forge)))
+                       (hash-ref res-p-forge 'actions '()))
+                "Protoss on 2 Nexuses with powered Gateways + CyberneticsCore (0 Robo) at 180M/20G must build Forge without Robo deadlock")
+
+  ;; Also verify 1-Gateway + CyberneticsCore (0 Robo) at 180M/20G under cloak threat builds Forge immediately
+  (define rt-p-forge-det (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-p-forge-det
+    (step-live-bot-runtime!
+     rt-p-forge-det
+     (hash 'frame 2400 'minerals 180 'gas 20 'supply-used 34 'supply-cap 46 'supply-left 12
+           'mineral-harvesters 24 'gas-harvesters 6
+           'researched-upgrades '(warp-gate-research)
+           'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+           'ally-units p-forge-units
+           'ally-buildings (list (hash 'id 501 'type 'nexus 'x 32.5 'y 32.5 'hp 2000 'build-progress 1.0 'order-count 1 'powered? #f)
+                                 (hash 'id 502 'type 'nexus 'x 56.5 'y 32.5 'hp 2000 'build-progress 1.0 'order-count 1 'powered? #f)
+                                 (hash 'id 503 'type 'pylon 'x 36.0 'y 36.0 'hp 400 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 506 'type 'gateway 'x 37.5 'y 36.5 'hp 1000 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 507 'type 'cybernetics-core 'x 41.5 'y 36.5 'hp 1100 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 508 'type 'assimilator 'x 32.5 'y 26.5 'hp 900 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 509 'type 'assimilator 'x 56.5 'y 26.5 'hp 900 'build-progress 1.0 'powered? #f))
+           'enemy-units '()
+           'enemy-buildings (list (hash 'id 990 'type 'dark-shrine 'x 140.0 'y 140.0 'hp 500)))))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'forge)))
+                       (hash-ref res-p-forge-det 'actions '()))
+                "Protoss on 1 Gateway + CyberneticsCore (0 Robo) at 180M/20G facing DarkShrine must build Forge without Gateway preemption")
+
+  ;; 26.3 12-Probe Worker Rush (Creepy_strategies), In-Base Proxy (Thssprtssbt),
+  ;;      < 8 Worker Combat Priority & Safe Zerg Rebuild Anchor
+  (define rt-wrush (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  ;; 12 Drones: #101 is critically wounded at 10 HP near incoming Probes; #102..#112 are healthy at 40 HP.
+  ;; 10 Enemy Probes at 15.5–21.5 tiles from (32.5, 32.5) (> 9.0 tiles!), including 6 stacked within 0.45 tiles
+  ;; so `counter-enemy-worker-drill` also triggers, with #901 having the lowest total HP+shield (8 HP, 0 shield).
+  (define rush-ally-drones
+    (cons (hash 'id 101 'type 'drone 'x 44.5 'y 32.5 'hp 10)
+          (for/list ([i (in-range 1 12)])
+            (hash 'id (+ 101 i) 'type 'drone 'x (+ 31.0 (* 0.4 i)) 'y 32.5 'hp 40))))
+  (define rush-enemy-probes
+    (append
+     (list (hash 'id 901 'type 'probe 'x 48.0 'y 32.5 'hp 8 'shield 0))
+     ;; 6 stacked Probes at ~16.5 tiles from (32.5, 32.5)
+     (for/list ([j (in-range 6)])
+       (hash 'id (+ 902 j) 'type 'probe 'x (+ 49.0 (* 0.05 j)) 'y 32.5 'hp 20 'shield 20))
+     ;; 3 trailing Probes at 18.5–21.5 tiles from (32.5, 32.5)
+     (list (hash 'id 908 'type 'probe 'x 51.0 'y 32.5 'hp 20 'shield 20)
+           (hash 'id 909 'type 'probe 'x 52.5 'y 32.5 'hp 20 'shield 20)
+           (hash 'id 910 'type 'probe 'x 54.0 'y 32.5 'hp 20 'shield 20))))
+  (define rush-obs
+    (hash 'frame 700 'minerals 100 'gas 0 'supply-used 12 'supply-cap 14 'supply-left 2
+          'mineral-harvesters 12 'vespene-harvesters 0
+          'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+          'mineral-patches (list (hash 'id 550 'x 26.5 'y 32.5))
+          'ally-units (append rush-ally-drones
+                              (list (hash 'id 150 'type 'larva 'x 33.0 'y 33.0 'hp 25)
+                                    (hash 'id 160 'type 'overlord 'x 34.0 'y 34.0 'hp 200)))
+          'ally-buildings (list (hash 'id 201 'type 'hatchery 'x 32.5 'y 32.5
+                                      'hp 1500 'build-progress 1.0 'powered? #f))
+          'enemy-units rush-enemy-probes
+          'enemy-buildings '()))
+  (define res-wrush (step-live-bot-runtime! rt-wrush rush-obs))
+  (define acts-wrush
+    (append (hash-ref res-wrush 'actions '())
+            (hash-ref res-wrush 'mirror-actions '())))
+
+  ;; 4-arg (pull-workers-attack pull-ids target-id tx ty) targeting lowest-HP enemy Probe #901
+  (define pull-act-wrush
+    (findf (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-wrush))
+  (assert-true! (and pull-act-wrush (= (length pull-act-wrush) 5))
+                "12-Probe worker rush must emit 4-arg (pull-workers-attack pull-ids target-id tx ty)")
+  (assert-eq! (third pull-act-wrush) 901
+              "pull-workers-attack must focus-fire the lowest-HP enemy Probe (#901)")
+  (assert-true! (not (memv 101 (second pull-act-wrush)))
+                "Critically wounded 10 HP Drone (#101) must NOT be included in pull-workers-attack")
+
+  ;; ZERO passive (move ...) commands on friendly Drones
+  (define friendly-drone-ids (for/list ([i (in-range 12)]) (+ 101 i)))
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a)
+                                   (eq? (car a) 'move)
+                                   (pair? (cdr a))
+                                   (let ([u (cadr a)])
+                                     (if (list? u)
+                                         (ormap (lambda (id) (memv id friendly-drone-ids)) u)
+                                         (memv u friendly-drone-ids)))))
+                            acts-wrush))
+                "counter-enemy-worker-drill must emit ZERO passive (move ...) commands on friendly Drones during worker rush")
+
+  ;; Disengages the 10 HP (<= 12 HP) Drone (#101) via (mineral-walk ...)
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (eq? (car a) 'mineral-walk)
+                              (pair? (cdr a))
+                              (let ([u (cadr a)])
+                                (if (list? u) (memv 101 u) (equal? u 101)))))
+                       acts-wrush)
+                "10 HP Drone (#101) must disengage via (mineral-walk ...)")
+
+  ;; Emits ZERO (train drone), (build extractor ...), or (expand ...) during the rush
+  (assert-true! (not (member '(train drone) acts-wrush))
+                "Worker rush crisis must emit ZERO (train drone)")
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a)
+                                   (or (eq? (car a) 'expand)
+                                       (and (eq? (car a) 'build)
+                                            (pair? (cdr a))
+                                            (memq (cadr a) '(extractor hatchery))))))
+                            acts-wrush))
+                "Worker rush crisis must emit ZERO (build extractor ...) or (expand ...)")
+
+  ;; Passing emitted actions through translate-bot-actions->sc2-raw-commands populates #:used-worker-tags
+  ;; with BOTH the pulled healthy Drones AND the mineral-walking 10 HP Drone!
+  (define rush-used-wtags (mutable-seteqv))
+  (define _rush-wire-cmds
+    (translate-bot-actions->sc2-raw-commands acts-wrush
+                                             rush-obs
+                                             #:used-worker-tags rush-used-wtags))
+  (assert-true! (set-member? rush-used-wtags 101)
+                "translate-bot-actions->sc2-raw-commands must populate #:used-worker-tags with mineral-walking Drone #101")
+  (for ([pulled-id (in-list (second pull-act-wrush))])
+    (assert-true! (set-member? rush-used-wtags pulled-id)
+                  (format "translate-bot-actions->sc2-raw-commands must populate #:used-worker-tags with pulled Drone #~a" pulled-id)))
+
+  ;; At 6 surviving Drones + ready SpawningPool (50M/0G, 0 army supply, under-attack? = #t / 10 enemy Probes),
+  ;; step-priority-macro-brain schedules 'zergling and does NOT escrow-block on 'drone!
+  (define ws-6drone-rush
+    (make-macro-world-state
+     #:race 'Zerg #:enemy-race 'Protoss #:frame 1400
+     #:minerals 50 #:gas 0 #:supply-used 6 #:supply-cap 14
+     #:workers 6 #:active-bases 1 #:mineral-harvesters 6 #:gas-harvesters 0
+     #:ready-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
+     #:total-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
+     #:unit-counts (hasheq 'drone 6 'overlord 1)
+     #:open-facility-slots (hasheq 'larva 3 'townhall 1 'spawning-pool 1)
+     #:army-supply 0 #:enemy-threat-supply 10 #:under-attack? #t))
+  (define dec-6drone-rush (step-priority-macro-brain ws-6drone-rush))
+  (assert-true! (not (not (memq 'zergling (macro-brain-decision-scheduled-ids dec-6drone-rush))))
+                "At 6 surviving Drones + ready SpawningPool under worker rush, step-priority-macro-brain must schedule 'zergling")
+  (assert-true! (not (eq? (macro-brain-decision-saving-for dec-6drone-rush) 'drone))
+                "At 6 surviving Drones + ready SpawningPool under worker rush, step-priority-macro-brain must NOT escrow-block on 'drone")
+  (assert-true! (macro-brain-can-spend? dec-6drone-rush 'zergling 50 0 'combat-unit)
+                "macro-brain-can-spend? must allow 'zergling at 6 Drones / 50M under worker rush")
+
+  ;; In-Base Proxy (Thssprtssbt): Terran at frame 1000 (400M, 0 Barracks) with enemy proxy Pylon + warping PhotonCannon
+  ;; 6.0 tiles from natural (62.5, 32.5) and 24.0 tiles from main (32.5, 32.5)
+  (define rt-t-proxy (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-t-proxy
+    (step-live-bot-runtime!
+     rt-t-proxy
+     (hash 'frame 1000 'minerals 400 'gas 0 'supply-used 15 'supply-cap 23 'supply-left 8
+           'mineral-harvesters 15 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 62.5 'natural-y 32.5
+           'ally-units (for/list ([i (in-range 15)])
+                         (hash 'id (+ 210 i) 'type 'scv 'x 33.5 'y 32.5 'hp 45))
+           'ally-buildings (list (hash 'id 301 'type 'command-center 'x 32.5 'y 32.5
+                                       'hp 1500 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 302 'type 'supply-depot 'x 36.0 'y 30.0
+                                       'hp 400 'build-progress 1.0 'powered? #f))
+           'enemy-units '()
+           'enemy-buildings (list (hash 'id 950 'type 'pylon 'x 56.5 'y 32.5
+                                        'hp 200 'shield 200 'build-progress 1.0 'powered? #f)
+                                  (hash 'id 951 'type 'photon-cannon 'x 56.5 'y 34.0
+                                        'hp 80 'shield 80 'build-progress 0.4 'powered? #t)))))
+  (define acts-t-proxy (hash-ref res-t-proxy 'actions '()))
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a)
+                                   (or (eq? (car a) 'expand)
+                                       (and (eq? (car a) 'build)
+                                            (pair? (cdr a))
+                                            (eq? (cadr a) 'command-center)))))
+                            acts-t-proxy))
+                "Terran with 0 Barracks under proxy Pylon + warping Cannon near natural must NOT spend 400M on 2nd CommandCenter")
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (eq? (car a) 'pull-workers-attack)
+                              (= (length a) 5)
+                              (equal? (third a) 950)))
+                       acts-t-proxy)
+                "Terran must pull surplus SCVs to focus-fire the enemy proxy Pylon (#950) first")
+
+  ;; Safe Zerg Rebuild Anchor: SpawningPool lost, main Hatchery (30, 30) camped by 6 enemy Marines,
+  ;; 2nd Hatchery (80, 80) uncontested (250M) -> (build spawning-pool x y) anchors near (80, 80) (> 60.0), NOT (30, 30)!
+  (define rt-z-rebuild (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-z-rebuild
+    (step-live-bot-runtime!
+     rt-z-rebuild
+     (hash 'frame 2600 'minerals 250 'gas 50 'supply-used 24 'supply-cap 36 'supply-left 12
+           'mineral-harvesters 18 'gas-harvesters 0
+           'base-x 30.0 'base-y 30.0 'natural-x 80.0 'natural-y 80.0
+           'ally-units (append (for/list ([i (in-range 18)])
+                                 (hash 'id (+ 310 i) 'type 'drone 'x 79.0 'y 80.0 'hp 40))
+                               (list (hash 'id 350 'type 'overlord 'x 82.0 'y 82.0 'hp 200)
+                                     (hash 'id 351 'type 'overlord 'x 83.0 'y 82.0 'hp 200)))
+           'ally-buildings (list (hash 'id 401 'type 'hatchery 'x 30.0 'y 30.0
+                                       'hp 600 'build-progress 1.0 'powered? #f)
+                                 (hash 'id 402 'type 'hatchery 'x 80.0 'y 80.0
+                                       'hp 1500 'build-progress 1.0 'powered? #f))
+           'enemy-units (for/list ([m (in-range 6)])
+                          (hash 'id (+ 980 m) 'type 'marine 'x (+ 32.0 (* 0.5 m)) 'y 31.0 'hp 45))
+           'enemy-buildings '())))
+  (define pool-rebuild-act
+    (findf (lambda (a) (and (pair? a) (eq? (car a) 'build) (pair? (cdr a)) (eq? (cadr a) 'spawning-pool)))
+           (hash-ref res-z-rebuild 'actions '())))
+  (assert-true! (and pool-rebuild-act (= (length pool-rebuild-act) 4))
+                "Zerg losing SpawningPool with 250M must emit (build spawning-pool x y)")
+  (assert-true! (and (> (third pool-rebuild-act) 60.0)
+                     (> (fourth pool-rebuild-act) 60.0))
+                (format "Rebuilt SpawningPool must anchor near uncontested 2nd Hatchery (80,80), got ~v"
+                        pool-rebuild-act)))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")

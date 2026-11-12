@@ -2152,8 +2152,21 @@
         base-metrics))
 
   (define live-workers (safe-nonneg-int raw-workers 12))
+  (define root-combat-ready?
+    (case race
+      [(Zerg) (not (not (memq 'spawning-pool r-bldgs)))]
+      [(Terran) (not (not (memq 'barracks r-bldgs)))]
+      [else (or (not (not (memq 'gateway r-bldgs)))
+                (not (not (memq 'warp-gate r-bldgs))))]))
+  (define emergency-army-before-workers?
+    (and (or raw-under-attack? (> raw-enemy-threat-supply 0))
+         (< raw-army-supply 4)
+         root-combat-ready?
+         (>= live-workers 1)))
   (define worker-survival-crisis?
-    (and (hash? open-prod-slots) (< live-workers 6)))
+    (and (hash? open-prod-slots)
+         (< live-workers 6)
+         (not emergency-army-before-workers?)))
   (define escrow-ok?
     (and (not worker-survival-crisis?)
          (eq? (hash-ref metrics 'escrow-eligible? #f) #t)))
@@ -2192,7 +2205,10 @@
                                  #f
                                  blocking-allowed?)
                              metrics))
-    (if (and (eq? category 'worker) (hash? open-prod-slots) (< live-workers 8))
+    (if (and (eq? category 'worker)
+             (hash? open-prod-slots)
+             (< live-workers 8)
+             (not emergency-army-before-workers?))
         (struct-copy priority-candidate base-c
                      [utility-score (+ (priority-candidate-utility-score base-c)
                                        (* 120.0 (- 8.0 live-workers)))]
@@ -3736,8 +3752,11 @@
        (for/list ([b (in-list ally-bldgs)]
                   #:when (or (symbol? b)
                              (and (hash? b)
-                                  (let ([bp (hash-ref b 'build-progress 1.0)])
-                                    (or (not (real? bp)) (>= bp 0.99))))))
+                                  (let ([bp (hash-ref b 'build-progress 1.0)]
+                                        [bsym (extract-record-sym b)])
+                                    (and (or (not (real? bp)) (>= bp 0.99))
+                                         (or (not (sc2-structure-requires-pylon-power? bsym))
+                                             (not (eq? (hash-ref b 'powered? #t) #f))))))))
          (extract-record-sym b)))
      (define has-bldg-info? (not (null? ally-bldgs)))
      (define (bldg-ready-or-assumed? sym)

@@ -868,7 +868,7 @@
          (make-test-unit 913 48 1 61.0 60.0)
          (make-test-unit 914 48 1 61.5 60.0)
          ;; Enemy Roach (110, tag 999) far away at (120, 120)
-         (make-test-unit 999 110 2 120.0 120.0))))
+         (make-test-unit 999 110 4 120.0 120.0))))
 
 (define uu-cmds
   (translate-bot-actions->sc2-raw-commands
