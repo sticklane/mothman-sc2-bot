@@ -840,7 +840,8 @@
                    #:game-info game-info
                    #:our-player-id our-player-id
                    #:configured-race configured-race-sym
-                   #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)))
+                   #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
+                   #:defer-expansions? (and (= total-steps 0) (<= last-game-loop 4))))
                 (define t-obs-1 (current-inexact-monotonic-milliseconds))
 
                 (define actual-race (hash-ref obs-hash 'race 'Zerg))

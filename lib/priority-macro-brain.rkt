@@ -1489,16 +1489,7 @@
         (and (> gas-harvesters 0) (> ready-gas-bldgs 0))
         (and (> workers 3) (> ready-gas-bldgs 0))))
 
-  ;; Supply threshold: 1 at opening cap (< 20), 2 at 1-expand cap (< 26), 4->6 later
-  (define supply-buffer
-    (cond
-      [(< supply-cap 20) 1]
-      [(< supply-cap 26) 2]
-      [(>= supply-cap 60) 6]
-      [(>= supply-cap 36) 4]
-      [else 2]))
-
-  ;; Facility count for production scaling
+  ;; Facility count for production scaling (needed early to size dynamic supply lead-time buffer)
   (define prod-fac-count
     (case race
       [(Zerg) (+ (bldg-count-equivalent total-bldg-counts 'hatchery)
@@ -1510,6 +1501,22 @@
                (bldg-count-equivalent total-bldg-counts 'robotics-facility)
                (bldg-count-equivalent total-bldg-counts 'stargate))]))
   (define max-fac-count (max 2 (* 3 active-bases)))
+
+  ;; Supply threshold: scales with both supply-cap AND active production facilities so multi-Rax/Gate/Hatch
+  ;; cycles trigger Overlord/Depot/Pylon lead time BEFORE hitting 100% cap (`SUPPLY_BLOCKED` fix).
+  (define supply-buffer
+    (cond
+      [(< supply-cap 20) 1]
+      [(< supply-cap 26) 2]
+      [(>= supply-cap 66)
+       (if (hash? open-facility-slots)
+           (min 16 (max 6 (+ 3 (* 2 active-bases) prod-fac-count)))
+           6)]
+      [(>= supply-cap 36)
+       (if (hash? open-facility-slots)
+           (min 12 (max 4 (+ 2 (* 2 active-bases) (quotient prod-fac-count 2))))
+           4)]
+      [else 2]))
 
   (define base-metrics
     (compute-state-pressure-metrics
@@ -1616,11 +1623,16 @@
      #:nat-x nat-x #:nat-y nat-y
      #:third-x third-x #:third-y third-y))
 
+  (define max-crisis-pending-supply
+    (cond
+      [(< supply-left 0) 3]
+      [(and (hash? open-facility-slots) (or (>= supply-cap 66) (>= prod-fac-count 5))) 3]
+      [else 2]))
   (define supply-crisis?
     (or supply-lockout-active?
         (and (< supply-cap 200)
              (< (+ supply-cap (* 8 pending-supply)) 200)
-             (< pending-supply (if (< supply-left 0) 3 2))
+             (< pending-supply max-crisis-pending-supply)
              (or (and (= pending-supply 0) (<= supply-left supply-buffer))
                  (<= (+ supply-left (* 8 pending-supply)) (max 0 (quotient supply-buffer 2)))
                  (and (>= active-bases 3)
@@ -1700,6 +1712,14 @@
                                  (if (and (>= minerals 200) (>= gas 200)) 2 1)))
                          (list 'oracle)
                          '())
+                     (if (and (eq? race 'Terran)
+                              (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
+                              (< (unit-count-equivalent unit-counts 'medivac) 2)
+                              (>= (+ (unit-count-equivalent unit-counts 'marine)
+                                     (unit-count-equivalent unit-counts 'marauder))
+                                  6))
+                         (list 'medivac)
+                         '())
                      (if (and (= total-gas-bldgs 0)
                               (>= workers 14)
                               (not early-zero-army-attack?))
@@ -1738,9 +1758,19 @@
                        [utility-score (+ 300.0 (priority-candidate-utility-score raw-cand))])
           raw-cand)))
 
+  (define open-combat-fac-slots-cnt
+    (if (hash? open-facility-slots)
+        (for/sum ([k (in-list '(barracks factory starport gateway warp-gate robotics-facility stargate larva))])
+          (hash-ref open-facility-slots k 0))
+        99))
+
   (define worker-army-curve-ok?
     (or (not (hash? open-facility-slots))
         (< workers 24)
+        (and (not under-attack?)
+             (<= enemy-threat-supply 0)
+             (or (and (< workers (* 16 active-bases)) (>= minerals 200))
+                 (and (>= minerals 350) (<= open-combat-fac-slots-cnt 1))))
         (>= army-supply (required-army-supply-for-worker-growth workers enemy-threat-supply))))
 
   (define need-worker-saturation?
@@ -1839,6 +1869,16 @@
           (not supply-lockout-active?)
           (>= minerals (+ (sc2-min-cost race-supply-sym 100)
                           (priority-candidate-min-cost c)))))
+    (define 3rd-plus-expand-ready?
+      (or (not (eq? cat 'expansion))
+          (not (hash? open-facility-slots))
+          (< active-bases 2)
+          (and (not under-attack?)
+               (<= enemy-threat-supply 0)
+               (>= workers (if (eq? race 'Zerg) 24 28))
+               (or (eq? race 'Zerg)
+                   (>= army-supply (if (= active-bases 2) 10 16))
+                   (>= minerals 550)))))
     (and geyser-cap-ok?
          addon-slot-free-ok?
          (not redundant-scaling-fac-idle?)
@@ -1846,6 +1886,7 @@
          zerg-drone-sacrifice-ok?
          nat-reserve-allows-2nd-fac?
          supply-lockout-allows-expand?
+         3rd-plus-expand-ready?
          (cond
            [(ormap (lambda (r) (same-brain-sym? id r)) repaired-prereqs) #t]
            [(memq id emergency-rush-syms) #t]
@@ -2000,18 +2041,14 @@
 
         ;; Expansion candidate: high priority when active plan expansion goal or 1-base natural ready,
         ;; but NEVER blocks combat units when under-attack?, enemy-threat-supply > 0 (PV1/PV2/PV7),
-        ;; or when 2-base Terran/Protoss has < 12 army supply with open Barracks/Gateways at < 350M.
+        ;; or when 2-base Terran/Protoss lacks standing army (< 10 supply) below 550M (#5122353 fix).
         [(eq? cat 'expansion)
          (define premature-3rd-base-starving-army?
            (and (hash? open-facility-slots)
                 (>= active-bases 2)
                 (not (eq? race 'Zerg))
-                (< army-supply 12)
-                (> (+ (hash-ref open-facility-slots 'barracks 0)
-                      (hash-ref open-facility-slots 'gateway 0)
-                      (hash-ref open-facility-slots 'warp-gate 0))
-                   0)
-                (< minerals 350)))
+                (< army-supply 10)
+                (< minerals 550)))
          (define exp-ok?
            (and (or blk0 is-bo-goal? is-repaired? overdue-1base-expand?)
                 (not under-attack?)
@@ -2022,7 +2059,7 @@
                 has-mineral-income?))
          (define exp-u
            (cond
-             [(or under-attack? (> enemy-threat-supply 0)) (min u0 45.0)]
+             [(or under-attack? (> enemy-threat-supply 0) premature-3rd-base-starving-army?) (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
              [overdue-1base-expand? (max 490.0 plan-weight u0)]
              [(and is-bo-goal? exp-ok?) (max plan-weight 465.0 u0)]

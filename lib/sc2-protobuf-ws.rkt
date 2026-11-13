@@ -142,6 +142,8 @@
  order-expansions-from-origin
  sc2-observation->runtime-obs-hash
  sc2-observation->frame-state-sexp
+ enemy-structure-is-proxy?
+ placement-preserves-base-exit-and-spawn?
  collect-spiral-candidates
  find-spiral-building-placement
  find-verified-building-placement
@@ -3689,11 +3691,40 @@
            #:key (lambda (b)
                    (pt-dist origin-x origin-y (hash-ref b 'x) (hash-ref b 'y))))]))
 
+(define SC2-NON-PROXY-ENEMY-STRUCTURE-SYMS
+  '(creep-tumor
+    creep-tumor-burrowed
+    creep-tumor-queen
+    oracle-stasis-trap
+    stasis-ward
+    auto-turret
+    point-defense-drone
+    kd8-charge))
+
+;; Structural 3-Base Proxy Invariant:
+;; An observed enemy building is a proxy iff it is a real structure (excluding creep tumors / traps / turrets)
+;; and its position `(bx, by)` is NOT inside (`<= base-radius`, default 22.0 tiles) the opponent's
+;; `main`, `natural`, or `3rd` base location.
+(define (enemy-structure-is-proxy? bsym bx by
+                                   enemy-x enemy-y
+                                   enemy-nat-x enemy-nat-y
+                                   enemy-third-x enemy-third-y
+                                   [base-radius 22.0])
+  (define canon (sc2-canonical-structure-sym bsym))
+  (and (symbol? canon)
+       (not (memq canon SC2-NON-PROXY-ENEMY-STRUCTURE-SYMS))
+       (real? bx) (real? by)
+       (> (min (pt-dist bx by enemy-x enemy-y)
+               (pt-dist bx by enemy-nat-x enemy-nat-y)
+               (pt-dist bx by enemy-third-x enemy-third-y))
+          base-radius)))
+
 (define (sc2-observation->runtime-obs-hash obs
                                            #:game-info [game-info #f]
                                            #:our-player-id [our-player-id 1]
                                            #:configured-race [configured-race 'Random]
-                                           #:used-creep-tumors [used-tumors (seteqv)])
+                                           #:used-creep-tumors [used-tumors (seteqv)]
+                                           #:defer-expansions? [defer-expansions? #f])
   (define cur-loop (sc2-observation-game-loop obs))
   (when (sc2-game-info? game-info)
     (set-box! SC2-ACTIVE-GAME-INFO game-info))
@@ -3748,7 +3779,10 @@
   (define live-resource-units
     (filter (lambda (u) (or (sc2-unit-is-mineral-field? u) (sc2-unit-is-vespene-geyser? u)))
             neutral-all))
-  (define solved-bases (solve-all-map-expansion-bases neutral-all game-info))
+  (define solved-bases
+    (if defer-expansions?
+        '()
+        (solve-all-map-expansion-bases neutral-all game-info)))
   (define raw-my-townhalls (filter sc2-unit-is-townhall? self-units))
   (when (and (= (length raw-my-townhalls) 1)
              (or (not (unbox SC2-HOME-BASE-ANCHOR))
@@ -3758,7 +3792,7 @@
     (set-box! SC2-CLEARED-ENEMY-BASES '())
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
-  (when (not (null? live-resource-units))
+  (when (and (not defer-expansions?) (not (null? live-resource-units)))
     (define live-clusters
       (if (not (null? solved-bases))
           (for/list ([b (in-list solved-bases)])
@@ -3868,7 +3902,8 @@
       [else
        (values SC2-DEFAULT-ENEMY-BASE-X SC2-DEFAULT-ENEMY-BASE-Y)]))
 
-  ;; Exact 5x5 TownHall pads ordered by ground BFS distance from Main (and from Enemy Main)
+  ;; Exact 5x5 TownHall pads ordered by ground BFS distance from Main (and from Enemy Main);
+  ;; when `defer-expansions?` is `#t` on Frame 0, use O(1) vector fallbacks and solve on step 1!
   (define dx (- enemy-x base-x))
   (define dy (- enemy-y base-y))
   (define d-norm (max 1.0 (sqrt (+ (sqr dx) (sqr dy)))))
@@ -3876,9 +3911,13 @@
   (define uy (/ dy d-norm))
   (define path-grid (and (sc2-game-info? game-info) (sc2-game-info-pathing-grid game-info)))
   (define ordered-home-exps
-    (order-expansions-from-origin solved-bases base-x base-y path-grid neutral-all))
+    (if defer-expansions?
+        '()
+        (order-expansions-from-origin solved-bases base-x base-y path-grid neutral-all)))
   (define ordered-enemy-exps
-    (order-expansions-from-origin solved-bases enemy-x enemy-y path-grid neutral-all))
+    (if defer-expansions?
+        '()
+        (order-expansions-from-origin solved-bases enemy-x enemy-y path-grid neutral-all)))
   (define expansion-candidates
     (for/list ([b (in-list ordered-home-exps)])
       (cons (hash-ref b 'x) (hash-ref b 'y))))
@@ -4277,14 +4316,23 @@
     (for/list ([eb (in-list enemy-all)]
                #:when (sc2-unit-is-structure? eb))
       (define p (sc2-unit-pos eb))
+      (define ebx (sc2-point3d-x p))
+      (define eby (sc2-point3d-y p))
+      (define btype (sc2-id->unit-symbol (sc2-unit-unit-type eb)))
       (define disp-type (sc2-unit-display-type eb))
       (define cloak-st (sc2-unit-cloak eb))
       (define is-halluc? (sc2-unit-is-hallucination eb))
       (define is-burr? (sc2-unit-is-burrowed eb))
+      (define is-proxy?
+        (and (not is-halluc?)
+             (enemy-structure-is-proxy? btype ebx eby
+                                        enemy-x enemy-y
+                                        enemy-nat-x enemy-nat-y
+                                        enemy-third-x enemy-third-y)))
       (hash 'id (sc2-unit-tag eb)
-            'type (sc2-id->unit-symbol (sc2-unit-unit-type eb))
-            'x (sc2-point3d-x p)
-            'y (sc2-point3d-y p)
+            'type btype
+            'x ebx
+            'y eby
             'z (sc2-point3d-z p)
             'hp (max 1 (exact-round (sc2-unit-health eb)))
             'build-progress (max 0.0 (min 1.0 (sc2-unit-build-progress eb)))
@@ -4296,7 +4344,10 @@
             'burrowed is-burr?
             'is-hallucination is-halluc?
             'hallucination is-halluc?
+            'is-proxy? is-proxy?
             'engaged-target-tag (sc2-unit-engaged-target-tag eb))))
+  (define enemy-proxy-bldg-records
+    (filter (lambda (eb) (eq? (hash-ref eb 'is-proxy? #f) #t)) enemy-bldg-records))
 
   ;; Persistent effects
   (define effect-records
@@ -4531,6 +4582,7 @@
         'ally-buildings ally-bldg-records
         'enemy-units enemy-unit-records
         'enemy-buildings enemy-bldg-records
+        'enemy-proxy-buildings enemy-proxy-bldg-records
         'shimmer-and-burrow-ripples shimmer-and-burrow-ripples
         'free-addons free-addons
         'effects effect-records
@@ -4553,12 +4605,14 @@
                                            #:game-info [game-info #f]
                                            #:our-player-id [our-player-id 1]
                                            #:configured-race [configured-race 'Random]
-                                           #:used-creep-tumors [used-tumors (seteqv)])
+                                           #:used-creep-tumors [used-tumors (seteqv)]
+                                           #:defer-expansions? [defer-expansions? #f])
   (define h (sc2-observation->runtime-obs-hash obs
                                                #:game-info game-info
                                                #:our-player-id our-player-id
                                                #:configured-race configured-race
-                                               #:used-creep-tumors used-tumors))
+                                               #:used-creep-tumors used-tumors
+                                               #:defer-expansions? defer-expansions?))
   (list 'frame-state
         '#:frame (hash-ref h 'frame 0)
         '#:race (hash-ref h 'race 'Zerg)
@@ -4617,32 +4671,356 @@
   ;; All bot coordinates live in SC2 world space (0.0..256.0); clamp to playable bounds.
   (max SC2-MAP-SAFE-MIN-COORD (min SC2-MAP-SAFE-MAX-COORD v)))
 
+(define (footprint-tile-bounds cx cy hw hh)
+  (define-values (x0 x1)
+    (if (>= (abs (- hw (round hw))) 0.25)
+        (let ([ix (exact-floor cx)]
+              [rx (inexact->exact (round (- hw 0.5)))])
+          (values (- ix rx) (+ ix rx)))
+        (let ([ix (inexact->exact (round cx))]
+              [rx (max 1 (inexact->exact (round hw)))])
+          (values (- ix rx) (- (+ ix rx) 1)))))
+  (define-values (y0 y1)
+    (if (>= (abs (- hh (round hh))) 0.25)
+        (let ([iy (exact-floor cy)]
+              [ry (inexact->exact (round (- hh 0.5)))])
+          (values (- iy ry) (+ iy ry)))
+        (let ([iy (inexact->exact (round cy))]
+              [ry (max 1 (inexact->exact (round hh)))])
+          (values (- iy ry) (- (+ iy ry) 1)))))
+  (values x0 x1 y0 y1))
+
 (define (static-footprint-placement-ok? pl-grid cx cy hw hh)
   (cond
     [(not (sc2-image-grid? pl-grid)) #t]
     [else
      (define gw (sc2-image-grid-width pl-grid))
      (define gh (sc2-image-grid-height pl-grid))
-     (define-values (x0 x1)
-       (if (>= (abs (- hw (round hw))) 0.25)
-           (let ([ix (exact-floor cx)]
-                 [rx (inexact->exact (round (- hw 0.5)))])
-             (values (- ix rx) (+ ix rx)))
-           (let ([ix (inexact->exact (round cx))]
-                 [rx (max 1 (inexact->exact (round hw)))])
-             (values (- ix rx) (- (+ ix rx) 1)))))
-     (define-values (y0 y1)
-       (if (>= (abs (- hh (round hh))) 0.25)
-           (let ([iy (exact-floor cy)]
-                 [ry (inexact->exact (round (- hh 0.5)))])
-             (values (- iy ry) (+ iy ry)))
-           (let ([iy (inexact->exact (round cy))]
-                 [ry (max 1 (inexact->exact (round hh)))])
-             (values (- iy ry) (- (+ iy ry) 1)))))
+     (define-values (x0 x1 y0 y1) (footprint-tile-bounds cx cy hw hh))
      (and (>= x0 0) (>= y0 0) (< x1 gw) (< y1 gh)
           (for*/and ([ix (in-range x0 (add1 x1))]
                      [iy (in-range y0 (add1 y1))])
             (= (sc2-grid-ref pl-grid ix iy) 1)))]))
+
+(define (point-to-segment-dist px py ax ay bx by)
+  (define dx (- bx ax))
+  (define dy (- by ay))
+  (define len2 (+ (* dx dx) (* dy dy)))
+  (if (<= len2 1e-6)
+      (pt-dist px py ax ay)
+      (let ([t (max 0.0 (min 1.0 (/ (+ (* (- px ax) dx) (* (- py ay) dy)) len2)))])
+        (pt-dist px py (+ ax (* t dx)) (+ ay (* t dy))))))
+
+(define SC2-SPAWN-EXIT-PRODUCTION-SYMS
+  '(gateway warp-gate barracks factory starport robotics-facility))
+
+(define (has-adjacent-2x2-open-exit? x0 x1 y0 y1 open-cell? [reach-cell? #f])
+  (or
+   ;; North or South 2x2 exit block along `[x0 .. x1]`
+   (for*/or ([by (in-list (list (- y0 2) (+ y1 1)))]
+             [bx (in-range (sub1 x0) (add1 x1))])
+     (and (open-cell? bx by)
+          (open-cell? (add1 bx) by)
+          (open-cell? bx (add1 by))
+          (open-cell? (add1 bx) (add1 by))
+          (or (not reach-cell?) (reach-cell? bx by))))
+   ;; West or East 2x2 exit block along `[y0 .. y1]`
+   (for*/or ([bx (in-list (list (- x0 2) (+ x1 1)))]
+             [by (in-range (sub1 y0) (add1 y1))])
+     (and (open-cell? bx by)
+          (open-cell? (add1 bx) by)
+          (open-cell? bx (add1 by))
+          (open-cell? (add1 bx) (add1 by))
+          (or (not reach-cell?) (reach-cell? bx by))))))
+
+;; Precomputes mineral-lane segments, stamped pathing occupancy, and a baseline
+;; shortest-path witness from the friendly base anchor to an exterior open tile
+;; so spiral placement never:
+;;   (a) blocks worker mining lanes,
+;;   (b) traps spawned units (or building workers) in sealed cliff/mineral/building pockets, or
+;;   (c) walls off the base exit so ground units cannot get out of the base!
+(define (make-base-layout-safety-checker game-info existing-units base-x base-y check-bfs)
+  (define grounded-ths
+    (filter (lambda (u)
+              (and (sc2-unit? u)
+                   (= (sc2-unit-alliance u) 1)
+                   (not (= (sc2-unit-display-type u) 4))
+                   (sc2-unit-is-townhall? u)
+                   (not (sc2-unit-is-flying u))))
+            existing-units))
+  (define local-resources
+    (filter (lambda (u)
+              (and (sc2-unit? u)
+                   (or (sc2-unit-is-mineral-field? u)
+                       (sc2-unit-is-vespene-geyser? u))))
+            existing-units))
+  (define mining-segments
+    (for*/list ([th (in-list grounded-ths)]
+                [tp (in-value (sc2-unit-pos th))]
+                [tx (in-value (sc2-point3d-x tp))]
+                [ty (in-value (sc2-point3d-y tp))]
+                [res (in-list local-resources)]
+                [rp (in-value (sc2-unit-pos res))]
+                [rx (in-value (sc2-point3d-x rp))]
+                [ry (in-value (sc2-point3d-y rp))]
+                #:when (<= (pt-dist tx ty rx ry) 11.0))
+      (list (+ tx (* 0.28 (- rx tx)))
+            (+ ty (* 0.28 (- ry ty)))
+            (+ tx (* 0.82 (- rx tx)))
+            (+ ty (* 0.82 (- ry ty))))))
+
+  (define path-grid
+    (and (sc2-game-info? game-info)
+         (sc2-game-info-pathing-grid game-info)))
+  (cond
+    [(not (sc2-image-grid? path-grid))
+     (lambda (cx cy canon-bldg cand-hw cand-hh)
+       (define is-gas-bldg?
+         (memq canon-bldg '(extractor refinery assimilator extractor-rich refinery-rich assimilator-rich)))
+       (define is-static-def?
+         (memq canon-bldg '(spore-crawler missile-turret photon-cannon shield-battery spine-crawler bunker)))
+       (define lane-clear
+         (+ (max cand-hw cand-hh) (if is-static-def? 0.25 0.95)))
+       (or is-gas-bldg?
+           (for/and ([seg (in-list mining-segments)])
+             (>= (point-to-segment-dist cx cy (first seg) (second seg) (third seg) (fourth seg))
+                 lane-clear))))]
+    [else
+     (define gw (sc2-image-grid-width path-grid))
+     (define gh (sc2-image-grid-height path-grid))
+     (define blocked-grid (make-bytes (* gw gh) 0))
+     (for* ([iy (in-range gh)]
+            [ix (in-range gw)])
+       (when (= (sc2-grid-ref path-grid ix iy) 0)
+         (bytes-set! blocked-grid (+ ix (* iy gw)) 1)))
+
+     (define existing-prod-boxes '())
+     (for ([u (in-list existing-units)]
+           #:when (and (sc2-unit? u)
+                       (not (= (sc2-unit-display-type u) 4))
+                       (not (sc2-unit-is-flying u))))
+       (define usym (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown))
+       (define canon-u (sc2-canonical-structure-sym usym))
+       (define stamp?
+         (or (sc2-unit-is-mineral-field? u)
+             (sc2-unit-is-vespene-geyser? u)
+             (and (sc2-unit-is-structure? u)
+                  (not (memq usym '(supply-depot-lowered
+                                    creep-tumor creep-tumor-burrowed creep-tumor-queen))))))
+       (when stamp?
+         (define p (sc2-unit-pos u))
+         (define ux (sc2-point3d-x p))
+         (define uy (sc2-point3d-y p))
+         (define-values (uhw uhh)
+           (cond
+             [(sc2-unit-is-mineral-field? u) (values 1.0 0.5)]
+             [(sc2-unit-is-vespene-geyser? u) (values 1.5 1.5)]
+             [else (sc2-structure-half-dims canon-u)]))
+         (define-values (ux0 ux1 uy0 uy1) (footprint-tile-bounds ux uy uhw uhh))
+         (for* ([iy (in-range (max 0 uy0) (min gh (add1 uy1)))]
+                [ix (in-range (max 0 ux0) (min gw (add1 ux1)))])
+           (bytes-set! blocked-grid (+ ix (* iy gw)) 1))
+         (when (and (= (sc2-unit-alliance u) 1)
+                    (memq canon-u SC2-SPAWN-EXIT-PRODUCTION-SYMS))
+           (set! existing-prod-boxes
+                 (cons (list ux0 ux1 uy0 uy1 ux uy) existing-prod-boxes)))))
+
+     (define (base-open-cell? ix iy)
+       (and (>= ix 0) (< ix gw) (>= iy 0) (< iy gh)
+            (= (bytes-ref blocked-grid (+ ix (* iy gw))) 0)))
+     (define active-prod-boxes
+       (filter (lambda (pb)
+                 (has-adjacent-2x2-open-exit?
+                  (first pb) (second pb) (third pb) (fourth pb) base-open-cell?))
+               existing-prod-boxes))
+
+     ;; Find walkable interior seed `(sx, sy)` right beside `(base-x, base-y)` and run 1 bounded BFS
+     ;; to record a shortest-path witness to an exterior tile `>= 15` tiles away (`>= 8` on small test grids).
+     (define bx-i (max 0 (min (sub1 gw) (exact-floor base-x))))
+     (define by-i (max 0 (min (sub1 gh) (exact-floor base-y))))
+     (define start-cell
+       (let ([near
+              (sort
+               (for*/list ([dy (in-range -5 6)]
+                           [dx (in-range -5 6)]
+                           [ix (in-value (+ bx-i dx))]
+                           [iy (in-value (+ by-i dy))]
+                           #:when (base-open-cell? ix iy))
+                 (cons ix iy))
+               <
+               #:key (lambda (c) (+ (sqr (- (car c) bx-i)) (sqr (- (cdr c) by-i)))))])
+         (and (pair? near) (first near))))
+
+     (define win-r 34)
+     (define wx0 (max 0 (- bx-i win-r)))
+     (define wx1 (min (sub1 gw) (+ bx-i win-r)))
+     (define wy0 (max 0 (- by-i win-r)))
+     (define wy1 (min (sub1 gh) (+ by-i win-r)))
+     (define min-exit-dist (if (and (>= gw 48) (>= gh 48)) 15.0 8.5))
+     (define map-cx (* 0.5 gw))
+     (define map-cy (* 0.5 gh))
+
+     (define witness-mask (make-bytes (* gw gh) 0))
+     (define exit-cell
+       (and start-cell
+            (let* ([sx (car start-cell)]
+                   [sy (cdr start-cell)]
+                   [parent (make-vector (* gw gh) -1)]
+                   [q (make-vector (* (add1 (- wx1 wx0)) (add1 (- wy1 wy0))) 0)]
+                   [s-idx (+ sx (* sy gw))])
+              (vector-set! parent s-idx s-idx)
+              (vector-set! q 0 s-idx)
+              (define best-e #f)
+              (define best-score -1e9)
+              (let bfs-loop ([head 0] [tail 1])
+                (when (< head tail)
+                  (define cur (vector-ref q head))
+                  (define cx0 (remainder cur gw))
+                  (define cy0 (quotient cur gw))
+                  (define d-base (pt-dist (+ cx0 0.5) (+ cy0 0.5) base-x base-y))
+                  (when (and (>= d-base min-exit-dist) (<= d-base 30.0))
+                    ;; Prefer exterior tiles toward map center that also sit in an open 2x2 area
+                    (define center-gain (- (pt-dist base-x base-y map-cx map-cy)
+                                           (pt-dist (+ cx0 0.5) (+ cy0 0.5) map-cx map-cy)))
+                    (define open2x2-bonus
+                      (if (and (base-open-cell? (add1 cx0) cy0)
+                               (base-open-cell? cx0 (add1 cy0))
+                               (base-open-cell? (add1 cx0) (add1 cy0)))
+                          8.0
+                          0.0))
+                    (define sc (+ d-base (* 0.5 center-gain) open2x2-bonus))
+                    (when (> sc best-score)
+                      (set! best-score sc)
+                      (set! best-e (cons cx0 cy0))))
+                  (define next-tail
+                    (for/fold ([tl tail])
+                              ([dxy (in-list '((1 . 0) (-1 . 0) (0 . 1) (0 . -1)))])
+                      (define nx (+ cx0 (car dxy)))
+                      (define ny (+ cy0 (cdr dxy)))
+                      (define nidx (+ nx (* ny gw)))
+                      (if (and (>= nx wx0) (<= nx wx1)
+                               (>= ny wy0) (<= ny wy1)
+                               (= (bytes-ref blocked-grid nidx) 0)
+                               (= (vector-ref parent nidx) -1))
+                          (begin
+                            (vector-set! parent nidx cur)
+                            (vector-set! q tl nidx)
+                            (add1 tl))
+                          tl)))
+                  (bfs-loop (add1 head) next-tail)))
+              (when best-e
+                (let trace ([idx (+ (car best-e) (* (cdr best-e) gw))])
+                  (bytes-set! witness-mask idx 1)
+                  (define p (vector-ref parent idx))
+                  (when (and (>= p 0) (not (= p idx)))
+                    (trace p))))
+              best-e)))
+
+     (define (still-connected-to-exit? x0 x1 y0 y1 cand-open-cell?)
+       (cond
+         [(or (not start-cell) (not exit-cell)) #t]
+         [else
+          (define touches-witness?
+            (for*/or ([iy (in-range (max 0 y0) (min gh (add1 y1)))]
+                      [ix (in-range (max 0 x0) (min gw (add1 x1)))])
+              (= (bytes-ref witness-mask (+ ix (* iy gw))) 1)))
+          (if (not touches-witness?)
+              #t
+              (let* ([pick-near-open
+                      (lambda (ox oy max-r)
+                        (if (cand-open-cell? ox oy)
+                            (cons ox oy)
+                            (for*/first ([r (in-range 1 (add1 max-r))]
+                                         [dy (in-range (- r) (add1 r))]
+                                         [dx (in-range (- r) (add1 r))]
+                                         #:when (cand-open-cell? (+ ox dx) (+ oy dy)))
+                              (cons (+ ox dx) (+ oy dy)))))]
+                     [s-pt (pick-near-open (car start-cell) (cdr start-cell) 3)]
+                     [e-pt (pick-near-open (car exit-cell) (cdr exit-cell) 2)])
+                (and s-pt e-pt
+                     (let* ([vis (make-bytes (* gw gh) 0)]
+                            [q (make-vector (* (add1 (- wx1 wx0)) (add1 (- wy1 wy0))) 0)]
+                            [s-idx (+ (car s-pt) (* (cdr s-pt) gw))]
+                            [e-idx (+ (car e-pt) (* (cdr e-pt) gw))])
+                       (bytes-set! vis s-idx 1)
+                       (vector-set! q 0 s-idx)
+                       (let loop ([head 0] [tail 1])
+                         (cond
+                           [(>= head tail) #f]
+                           [(= (vector-ref q head) e-idx) #t]
+                           [else
+                            (define cur (vector-ref q head))
+                            (define cx0 (remainder cur gw))
+                            (define cy0 (quotient cur gw))
+                            (define next-tail
+                              (for/fold ([tl tail])
+                                        ([dxy (in-list '((1 . 0) (-1 . 0) (0 . 1) (0 . -1)))])
+                                (define nx (+ cx0 (car dxy)))
+                                (define ny (+ cy0 (cdr dxy)))
+                                (define nidx (+ nx (* ny gw)))
+                                (if (and (>= nx wx0) (<= nx wx1)
+                                         (>= ny wy0) (<= ny wy1)
+                                         (= (bytes-ref vis nidx) 0)
+                                         (cand-open-cell? nx ny))
+                                    (begin
+                                      (bytes-set! vis nidx 1)
+                                      (vector-set! q tl nidx)
+                                      (add1 tl))
+                                    tl)))
+                            (loop (add1 head) next-tail)]))))))]))
+
+     (lambda (cx cy canon-bldg cand-hw cand-hh)
+       (define is-gas-bldg?
+         (memq canon-bldg '(extractor refinery assimilator extractor-rich refinery-rich assimilator-rich)))
+       (define is-static-def?
+         (memq canon-bldg '(spore-crawler missile-turret photon-cannon shield-battery spine-crawler bunker)))
+       (define lane-clear
+         (+ (max cand-hw cand-hh) (if is-static-def? 0.25 0.95)))
+       (and (or is-gas-bldg?
+                (for/and ([seg (in-list mining-segments)])
+                  (>= (point-to-segment-dist cx cy (first seg) (second seg) (third seg) (fourth seg))
+                      lane-clear)))
+            (let-values ([(x0 x1 y0 y1) (footprint-tile-bounds cx cy cand-hw cand-hh)])
+              (define (cand-open-cell? ix iy)
+                (and (>= ix 0) (< ix gw) (>= iy 0) (< iy gh)
+                     (= (bytes-ref blocked-grid (+ ix (* iy gw))) 0)
+                     (not (and (>= ix x0) (<= ix x1) (>= iy y0) (<= iy y1)))))
+              (define (reach-2x2? bx by)
+                (or (not check-bfs)
+                    (< (check-bfs (+ bx 0.5) (+ by 0.5) 1) +inf.0)))
+              ;; 1. Spawn / worker pocket anti-trap check
+              (and (if (memq canon-bldg SC2-SPAWN-EXIT-PRODUCTION-SYMS)
+                       (has-adjacent-2x2-open-exit? x0 x1 y0 y1 cand-open-cell? reach-2x2?)
+                       (>= (for*/sum ([iy (in-range (sub1 y0) (+ y1 2))]
+                                      [ix (in-range (sub1 x0) (+ x1 2))]
+                                      #:when (and (not (and (>= ix x0) (<= ix x1) (>= iy y0) (<= iy y1)))
+                                                  (cand-open-cell? ix iy)
+                                                  (or (not check-bfs)
+                                                      (< (check-bfs (+ ix 0.5) (+ iy 0.5) 1) +inf.0))))
+                             1)
+                           3))
+                   ;; 2. Never seal off an existing nearby production facility's last 2x2 spawn exit
+                   (for/and ([pb (in-list active-prod-boxes)]
+                             #:when (<= (pt-dist cx cy (fifth pb) (sixth pb)) 7.5))
+                     (has-adjacent-2x2-open-exit?
+                      (first pb) (second pb) (third pb) (fourth pb) cand-open-cell?))
+                   ;; 3. Never wall off the ground exit corridor out of the base
+                   (still-connected-to-exit? x0 x1 y0 y1 cand-open-cell?)))))]))
+
+(define (placement-preserves-base-exit-and-spawn? cx cy bldg-sym existing-units
+                                                  #:game-info [game-info #f]
+                                                  #:base-x [base-x #f]
+                                                  #:base-y [base-y #f])
+  (define canon-bldg (sc2-canonical-structure-sym (or bldg-sym 'barracks)))
+  (define-values (cand-hw cand-hh) (sc2-structure-half-dims canon-bldg))
+  (define ref
+    (if (and (real? base-x) (real? base-y))
+        (cons base-x base-y)
+        (friendly-safe-base-anchor existing-units cx cy)))
+  (define check-bfs (ground-reachability-checker game-info existing-units (car ref) (cdr ref)))
+  (define safety-ok?
+    (make-base-layout-safety-checker game-info existing-units (car ref) (cdr ref) check-bfs))
+  (safety-ok? cx cy canon-bldg cand-hw cand-hh))
 
 (define (friendly-safe-base-anchor existing-units fallback-x fallback-y)
   (define friendly-ths
@@ -4714,6 +5092,10 @@
   (define check-bfs
     (and (not is-creep-tumor?)
          (ground-reachability-checker game-info existing-units (car base-ref) (cdr base-ref))))
+  (define layout-safety-ok?
+    (and (not is-townhall-build?)
+         (not is-creep-tumor?)
+         (make-base-layout-safety-checker game-info existing-units (car base-ref) (cdr base-ref) check-bfs)))
 
   ;; Collect in-transit worker build target points and existing + in-transit Terran East (+X) add-on footprints
   (define in-transit-build-pts
@@ -4752,6 +5134,8 @@
          (static-footprint-placement-ok? pl-grid cx cy cand-hw cand-hh)
          (or (not check-bfs)
              (< (check-bfs cx cy 4) +inf.0))
+         (or (not layout-safety-ok?)
+             (layout-safety-ok? cx cy (or canon-bldg 'barracks) cand-hw cand-hh))
          ;; Expansion Pad Protection: non-TownHall structures/turrets/pylons/depots/tumors must stay >= 4.5 Chebyshev tiles off solved pads
          (or is-townhall-build?
              (for/and ([ep (in-list expansion-pads)])

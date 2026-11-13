@@ -413,7 +413,14 @@
     "Gateway"
     "RoboticsFacility"
     "Stargate"
-    "SpawningPool"))
+    "SpawningPool"
+    "Pylon"
+    "PhotonCannon"
+    "Forge"
+    "Bunker"
+    "SpineCrawler"
+    "ShieldBattery"
+    "Hatchery"))
 
 ;; Approximate mineral+gas resource values for engagement clustering & ROI
 (define UNIT-RESOURCE-VALUE
@@ -639,6 +646,7 @@
   (define slot->pid (make-hasheqv))
   (define f0-rolled-race (make-hasheqv))
   (define start-xy (make-hasheqv))
+  (define f0-resource-pts '())
   (for ([ev (in-list tracker-events)]
         #:break (> (car ev) 0))
     (define ev-id (cadr ev))
@@ -656,13 +664,55 @@
          (define ut (bytes->utf8-clean (hash-ref payload 2 #"")))
          (define ux (hash-ref payload 5 0))
          (define uy (hash-ref payload 6 0))
-         (when (> cp 0)
-           (when (member ut '("Hatchery" "CommandCenter" "Nexus"))
-             (hash-set! start-xy cp (list ux uy)))
-           (cond
-             [(member ut '("Hatchery" "Drone")) (hash-set! f0-rolled-race cp "Zerg")]
-             [(member ut '("CommandCenter" "SCV")) (hash-set! f0-rolled-race cp "Terran")]
-             [(member ut '("Nexus" "Probe")) (hash-set! f0-rolled-race cp "Protoss")]))])))
+         (cond
+           [(= cp 0)
+            (when (or (string-contains? ut "Mineral")
+                      (string-contains? ut "Vespene")
+                      (string-contains? ut "Geyser"))
+              (set! f0-resource-pts (cons (cons (exact->inexact ux) (exact->inexact uy)) f0-resource-pts)))]
+           [(> cp 0)
+            (when (member ut '("Hatchery" "CommandCenter" "Nexus"))
+              (hash-set! start-xy cp (list ux uy)))
+            (cond
+              [(member ut '("Hatchery" "Drone")) (hash-set! f0-rolled-race cp "Zerg")]
+              [(member ut '("CommandCenter" "SCV")) (hash-set! f0-rolled-race cp "Terran")]
+              [(member ut '("Nexus" "Probe")) (hash-set! f0-rolled-race cp "Protoss")])])])))
+
+  ;; Cluster Frame-0 neutral resource patches/geysers into expansion base centroids (<= 14.0 tiles),
+  ;; then resolve each player's `{main, natural, 3rd}` base anchors for exact 3-base proxy detection.
+  (define solved-resource-base-centroids
+    (let loop ([rem (reverse f0-resource-pts)] [clusters '()])
+      (if (null? rem)
+          (map (lambda (cl)
+                 (define n (max 1 (length cl)))
+                 (cons (/ (for/sum ([pt (in-list cl)]) (car pt)) n)
+                       (/ (for/sum ([pt (in-list cl)]) (cdr pt)) n)))
+               clusters)
+          (let* ([pt (car rem)]
+                 [px (car pt)]
+                 [py (cdr pt)])
+            (let find-cl ([cs clusters] [acc '()])
+              (cond
+                [(null? cs)
+                 (loop (cdr rem) (cons (list pt) clusters))]
+                [else
+                 (define cl (car cs))
+                 (define cx (/ (for/sum ([q (in-list cl)]) (car q)) (length cl)))
+                 (define cy (/ (for/sum ([q (in-list cl)]) (cdr q)) (length cl)))
+                 (if (<= (sqrt (+ (sqr (- px cx)) (sqr (- py cy)))) 14.0)
+                     (loop (cdr rem) (append (reverse acc) (list (cons pt cl)) (cdr cs)))
+                     (find-cl (cdr cs) (cons cl acc)))]))))))
+
+  (define player-own-3-bases (make-hasheqv))
+  (for ([(pid sxy) (in-hash start-xy)])
+    (define sx (exact->inexact (first sxy)))
+    (define sy (exact->inexact (second sxy)))
+    (define sorted-centroids
+      (sort solved-resource-base-centroids
+            <
+            #:key (lambda (c) (sqrt (+ (sqr (- (car c) sx)) (sqr (- (cdr c) sy)))))))
+    (define top3 (take sorted-centroids (min 3 (length sorted-centroids))))
+    (hash-set! player-own-3-bases pid (cons (cons sx sy) top3)))
 
   (define players (make-hasheqv))
   (for ([p (in-list plist)]
@@ -741,13 +791,17 @@
              (hash-update! (hash-ref unit-inits p) u add1 0)
              (when (and (<= sec 240.0)
                         (member u PROXY-CANDIDATE-STRUCTURES)
-                        (hash-has-key? start-xy p))
-               (define sxy (hash-ref start-xy p))
-               (define dist (sqrt (+ (sqr (- ux (first sxy)))
-                                     (sqr (- uy (second sxy))))))
-               (when (> dist 50.0)
+                        (hash-has-key? player-own-3-bases p))
+               (define own-bases (hash-ref player-own-3-bases p))
+               (define min-own-base-dist
+                 (for/fold ([best +inf.0]) ([bc (in-list own-bases)])
+                   (min best (sqrt (+ (sqr (- ux (car bc)))
+                                      (sqr (- uy (cdr bc))))))))
+               ;; Proxy invariant: building NOT in player's own main, natural, or 3rd (> 22.0 tiles)
+               ;; (when synthetic replay has 0 map minerals, fallback requires > 22.0 tiles from start-xy).
+               (when (> min-own-base-dist 22.0)
                  (hash-update! mut-proxies p
-                               (lambda (lst) (cons (list (round1 sec) u (round1 dist)) lst))))))
+                               (lambda (lst) (cons (list (round1 sec) u (round1 min-own-base-dist)) lst))))))
            (when (and (> loop-gl 0) (member u TH-NAMES))
              (define label (if (= ev-id 6) (string-append "init:" u) u))
              (hash-update! mut-th p (lambda (lst) (cons (list (round1 sec) label) lst)))))]

@@ -24,7 +24,8 @@ pub const ENGAGEMENT_GAP_SECONDS: u32 = 12;
 pub const MAX_ENGAGEMENT_SECONDS: u32 = 60;
 pub const MIN_ENGAGEMENT_RESOURCES: u32 = 400;
 pub const FLOATING_THRESHOLD: i32 = 1000;
-pub const PROXY_DISTANCE: f32 = 50.0;
+/// Max radius around each of a player's own 3 bases (`main`, `natural`, `3rd`); structures beyond all 3 are proxies.
+pub const PROXY_DISTANCE: f32 = 22.0;
 pub const PROXY_MAX_SECONDS: u32 = 240;
 pub const SCOUT_DISTANCE: f32 = 30.0;
 pub const SNAPSHOT_SECONDS: u32 = 600;
@@ -66,6 +67,13 @@ const PROXY_STRUCTURES: &[&str] = &[
     "RoboticsFacility",
     "Stargate",
     "SpawningPool",
+    "Pylon",
+    "PhotonCannon",
+    "Forge",
+    "Bunker",
+    "SpineCrawler",
+    "ShieldBattery",
+    "Hatchery",
 ];
 const NOT_SCOUTS: &[&str] = &[
     "Larva",
@@ -1348,10 +1356,56 @@ pub fn analyze_replay_bytes(
                                 && PROXY_STRUCTURES.contains(&base.as_str())
                                 && let Some([sx, sy]) = p.start_xy
                             {
-                                let dist = ((x - sx).powi(2) + (y - sy).powi(2)).sqrt();
-                                if dist > PROXY_DISTANCE {
-                                    p.proxy_detected =
-                                        Some((round1(sec_f), base.clone(), round1(dist)));
+                                let mut clusters: Vec<Vec<[f32; 2]>> = Vec::new();
+                                for obj in &static_objects {
+                                    if obj.kind == 0 || obj.kind == 1 {
+                                        let mut placed = false;
+                                        for cl in &mut clusters {
+                                            let n = cl.len() as f32;
+                                            let cx = cl.iter().map(|q| q[0]).sum::<f32>() / n;
+                                            let cy = cl.iter().map(|q| q[1]).sum::<f32>() / n;
+                                            if ((obj.x - cx).powi(2) + (obj.y - cy).powi(2)).sqrt()
+                                                <= 14.0
+                                            {
+                                                cl.push([obj.x, obj.y]);
+                                                placed = true;
+                                                break;
+                                            }
+                                        }
+                                        if !placed {
+                                            clusters.push(vec![[obj.x, obj.y]]);
+                                        }
+                                    }
+                                }
+                                let mut centroids: Vec<[f32; 2]> = clusters
+                                    .into_iter()
+                                    .map(|cl| {
+                                        let n = cl.len().max(1) as f32;
+                                        [
+                                            cl.iter().map(|q| q[0]).sum::<f32>() / n,
+                                            cl.iter().map(|q| q[1]).sum::<f32>() / n,
+                                        ]
+                                    })
+                                    .collect();
+                                centroids.sort_by(|a, b| {
+                                    let da = (a[0] - sx).powi(2) + (a[1] - sy).powi(2);
+                                    let db = (b[0] - sx).powi(2) + (b[1] - sy).powi(2);
+                                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                let mut own_3_bases = vec![[sx, sy]];
+                                for c in centroids.into_iter().take(3) {
+                                    own_3_bases.push(c);
+                                }
+                                let min_own_base_dist = own_3_bases
+                                    .iter()
+                                    .map(|b| ((x - b[0]).powi(2) + (y - b[1]).powi(2)).sqrt())
+                                    .fold(f32::INFINITY, f32::min);
+                                if min_own_base_dist > PROXY_DISTANCE {
+                                    p.proxy_detected = Some((
+                                        round1(sec_f),
+                                        base.clone(),
+                                        round1(min_own_base_dist),
+                                    ));
                                 }
                             }
                         }

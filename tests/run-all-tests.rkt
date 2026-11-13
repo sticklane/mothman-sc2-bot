@@ -96,7 +96,9 @@
                   sc2-game-info-placement-grid
                   sc2-game-info-pathing-grid
                   collect-spiral-candidates
-                  find-verified-building-placement)
+                  find-verified-building-placement
+                  enemy-structure-is-proxy?
+                  placement-preserves-base-exit-and-spawn?)
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
                   mpq-hash
@@ -7070,9 +7072,11 @@
   (assert-true! (>= (length pulled-brawl-ids) 12)
                 (format "12-Probe mineral-line breach must pull >= 12 of 14 Probes simultaneously (pulled ~a)"
                         (length pulled-brawl-ids)))
-  (assert-true! (and (findf (lambda (a) (equal? (third a) 9700)) pulls-brawl)
-                     (andmap (lambda (a) (or (<= (third a) 0) (<= (length (second a)) 3))) pulls-brawl))
-                "Mineral-line brawl must focus wounded Probe #9700 while respecting <= 3 cap on unit-targeted groups")
+  (define group-9700 (findf (lambda (a) (equal? (third a) 9700)) pulls-brawl))
+  (assert-true! (and group-9700
+                     (<= (length (second group-9700)) 3)
+                     (andmap (lambda (a) (or (<= (third a) 0) (<= (length (second a)) 8))) pulls-brawl))
+                "Mineral-line brawl must cap overkill on 6-HP Probe #9700 at <= 3 while allowing up to 8 burst swings on 40-EHP stacked Probes")
   (assert-true! (not (ormap (lambda (a)
                               (and (pair? a)
                                    (eq? (car a) 'hold-position)
@@ -7180,6 +7184,203 @@
               "compute-turning-points must emit only >= 0.15 win-chance swings")
   (assert-eq! (hash-ref (first tps) 'delta_p1_chance) 0.43
               "Largest win-chance swing must rank first"))
+
+;; ============================================================================
+;; 32. Wave 3: Frame-0 Fast Path, Anti-Trap/Wall-Off Layouts, 3-Base Proxy & Priority Curves
+;; ============================================================================
+(run-suite "32. Frame-0 Fast Path, Anti-Trap/Wall-Off Layouts, 3-Base Proxy Detection & Counter-Compositions"
+  (define (mk-w3-unit tag utype alliance x y [min-c 0] [radius 0.5])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 10.0) 0.0 radius 1.0 0 #f #t #f
+              100.0 100.0 0.0 0.0 0.0 0.0 min-c 0
+              #f #f #f #t #f '() 0 '() 0 16 0.0 0 0 0 0))
+
+  ;; 32.1 Frame-0 #:defer-expansions? #t fast path + worker split vs Frame-4 solved expansions
+  (define f0-open-bytes (make-bytes (* 96 96) 1))
+  (define f0-grid (sc2-image-grid 8 96 96 f0-open-bytes #f #f))
+  (define f0-gi
+    (sc2-game-info "Wave3Map" "" '() '(96 96) '(4 4 92 92)
+                   (list (sc2-point2d 76.5 76.5))
+                   f0-grid #f f0-grid))
+  (define f0-units
+    (append
+     (list (mk-w3-unit 1001 86 1 20.5 20.5 0 2.75)) ;; Hatchery
+     (for/list ([i (in-range 12)])
+       (mk-w3-unit (+ 1100 i) 104 1 (+ 19.0 (* 0.25 i)) 18.0 0 0.375)) ;; 12 Drones
+     (for/list ([i (in-range 8)])
+       (mk-w3-unit (+ 2100 i) 341 3 (+ 15.0 (* 1.5 (modulo i 4))) (+ 14.5 (* 1.5 (quotient i 4))) 1500 1.0)) ;; Main minerals
+     (for/list ([i (in-range 8)])
+       (mk-w3-unit (+ 2200 i) 341 3 (+ 46.0 (* 1.5 (modulo i 4))) (+ 20.5 (* 1.5 (quotient i 4))) 1500 1.0)))) ;; Natural minerals
+  (define obs-f0
+    (sc2-observation 0 (sc2-player-common 1 50 0 14 12 0 12 0 0 0 3)
+                     f0-units '() '() (sc2-point3d 20.5 20.5 10.0) '() '() '() '() '() '()))
+  (define split-cmds-f0 (frame0-pro-worker-split-commands obs-f0))
+  (assert-true! (and (pair? split-cmds-f0) (<= (length split-cmds-f0) 8))
+                "Frame-0 pro worker split must immediately emit <= 8 coalesced HARVEST_GATHER commands")
+  (define h-f0-deferred
+    (sc2-observation->runtime-obs-hash obs-f0 #:game-info f0-gi #:defer-expansions? #t))
+  (assert-true! (null? (hash-ref h-f0-deferred 'expansion-candidates '()))
+                "Frame-0 #:defer-expansions? #t must skip heavy map-wide expansion pad solving")
+  (define obs-f4
+    (sc2-observation 4 (sc2-player-common 1 50 0 14 13 0 13 0 0 0 2)
+                     f0-units '() '() (sc2-point3d 20.5 20.5 10.0) '() '() '() '() '() '()))
+  (define h-f4-solved
+    (sc2-observation->runtime-obs-hash obs-f4 #:game-info f0-gi #:defer-expansions? #f))
+  (assert-true! (pair? (hash-ref h-f4-solved 'expansion-candidates '()))
+                "Frame-4 early downtime (#:defer-expansions? #f) must solve and populate expansion-candidates")
+
+  ;; 32.2 Exact 3-Base Proxy Detection (`not in opponent main or natural or 3rd`)
+  (assert-true! (not (enemy-structure-is-proxy? 'gateway 140.0 140.0 140.0 140.0 140.0 112.0 112.0 140.0))
+                "Building inside opponent main (<= 22 tiles) must NOT be classified as proxy")
+  (assert-true! (not (enemy-structure-is-proxy? 'barracks 138.0 114.0 140.0 140.0 140.0 112.0 112.0 140.0))
+                "Building inside opponent natural (<= 22 tiles) must NOT be classified as proxy")
+  (assert-true! (not (enemy-structure-is-proxy? 'hatchery 115.0 138.0 140.0 140.0 140.0 112.0 112.0 140.0))
+                "Building inside opponent 3rd base (<= 22 tiles) must NOT be classified as proxy")
+  (assert-true! (enemy-structure-is-proxy? 'barracks 88.0 88.0 140.0 140.0 140.0 112.0 112.0 140.0)
+                "Forward mid-map Barracks (> 22 tiles from opponent main/nat/3rd) MUST be classified as proxy")
+  (assert-true! (enemy-structure-is-proxy? 'pylon 56.0 32.0 140.0 140.0 140.0 112.0 112.0 140.0)
+                "Proxy Pylon near our natural (> 22 tiles from opponent main/nat/3rd) MUST be classified as proxy")
+  (assert-true! (not (enemy-structure-is-proxy? 'creep-tumor-burrowed 88.0 88.0 140.0 140.0 140.0 112.0 112.0 140.0))
+                "Creep Tumor must NOT be classified as a proxy building")
+
+  ;; Forward mid-map proxy (> 34 tiles from our bases, > 22 tiles from enemy's 3 bases):
+  ;; ZERO cross-map worker pull, unspoofed last-seen-main-frame, ShieldBattery + Stalker/Adept response!
+  (define rt-fwd-proxy (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-fwd-proxy
+    (step-live-bot-runtime!
+     rt-fwd-proxy
+     (hash 'frame 2100 'minerals 340 'gas 100 'supply-used 24 'supply-cap 31 'supply-left 7
+           'mineral-harvesters 18 'vespene-harvesters 3 'enemy-race 'Terran
+           'base-x 30.5 'base-y 30.5 'natural-x 56.5 'natural-y 30.5 'third-x 30.5 'third-y 58.5
+           'enemy-x 145.5 'enemy-y 145.5 'enemy-natural-x 119.5 'enemy-natural-y 145.5
+           'enemy-third-x 145.5 'enemy-third-y 117.5
+           'ally-units (for/list ([i (in-range 21)])
+                         (hash 'id (+ 8100 i) 'type 'probe 'x 30.5 'y 30.5 'hp 20 'shield 20))
+           'ally-buildings (list (hash 'id 8001 'type 'nexus 'x 30.5 'y 30.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8002 'type 'pylon 'x 35.0 'y 33.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8005 'type 'pylon 'x 35.0 'y 38.5 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8003 'type 'gateway 'x 36.5 'y 30.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #f 'order-count 0)
+                                 (hash 'id 8004 'type 'cybernetics-core 'x 36.5 'y 34.5 'hp 550 'shield 550
+                                       'build-progress 1.0 'powered? #t 'busy? #f 'order-count 0))
+           'enemy-units '()
+           'enemy-buildings (list (hash 'id 9910 'type 'barracks 'x 92.5 'y 92.5 'hp 1000 'build-progress 1.0)))))
+  (define acts-fwd-proxy (hash-ref res-fwd-proxy 'actions '()))
+  (define tel-fwd-proxy (live-bot-runtime-last-telemetry rt-fwd-proxy))
+  (assert-true! (<= (hash-ref tel-fwd-proxy 'last-seen-main-frame 0) 0)
+                "Forward mid-map proxy Barracks must NOT spoof last-seen-main-frame")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(pull-workers-attack clear-expansion-block))))
+                            acts-fwd-proxy))
+                "Forward proxy (> 34 tiles away) must NEVER pull workers across the map")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'shield-battery)))
+                       acts-fwd-proxy)
+                "Protoss with ready CyberCore must drop defensive ShieldBattery upon detecting forward proxy")
+  (assert-true! (or (member '(train stalker) acts-fwd-proxy)
+                    (member '(train adept) acts-fwd-proxy))
+                "Protoss facing forward Terran proxy must train ranged Stalker/Adept ahead of uncharged Zealot")
+
+  ;; 32.3 Anti-Trap & Anti-Wall-Off Building Layouts (`placement-preserves-base-exit-and-spawn?`)
+  ;; Build a 32x32 grid where Main (4..17, 4..20) exits ONLY through a 3-tile choke (x=18..20, y=10..12) to exterior (21..29, 4..28)
+  (define layout-path-bytes (make-bytes (* 32 32) 0))
+  (define layout-pl-bytes (make-bytes (* 32 32) 0))
+  (define (open-rect! x0 x1 y0 y1)
+    (for* ([iy (in-range y0 (add1 y1))]
+           [ix (in-range x0 (add1 x1))])
+      (bytes-set! layout-path-bytes (+ ix (* iy 32)) 1)
+      (bytes-set! layout-pl-bytes (+ ix (* iy 32)) 1)))
+  (open-rect! 4 17 4 20)   ;; Main interior
+  (open-rect! 18 20 10 12) ;; 3-tile-wide base exit corridor
+  (open-rect! 21 29 4 28)  ;; Exterior natural/map space
+  ;; Also carve a 3x3 cliff-surrounded pocket at (5..7, 23..25) with only a 1x1 doorway at (8, 24)
+  (open-rect! 5 7 23 25)
+  (open-rect! 8 8 24 24)
+  (define layout-pgrid (sc2-image-grid 8 32 32 layout-path-bytes #f #f))
+  (define layout-plgrid (sc2-image-grid 8 32 32 layout-pl-bytes #f #f))
+  (define layout-gi
+    (sc2-game-info "CorridorMap" "" '() '(32 32) '(2 2 30 30)
+                   (list (sc2-point2d 26.5 24.5))
+                   layout-pgrid #f layout-plgrid))
+  (define layout-units
+    (list (mk-w3-unit 3001 59 1 10.5 10.5 0 2.75)       ;; Nexus at (10.5, 10.5)
+          (mk-w3-unit 3010 341 3 10.0 4.5 1500 1.0)))   ;; Mineral field at (10.0, 4.5)
+  (assert-true! (not (placement-preserves-base-exit-and-spawn?
+                      19.5 11.5 'gateway layout-units #:game-info layout-gi #:base-x 10.5 #:base-y 10.5))
+                "Placing 3x3 Gateway in 3-wide base exit choke (19.5, 11.5) must be REJECTED (walls off base exit!)")
+  (assert-true! (not (placement-preserves-base-exit-and-spawn?
+                      6.5 24.5 'gateway layout-units #:game-info layout-gi #:base-x 10.5 #:base-y 10.5))
+                "Placing 3x3 Gateway in cliff pocket with no 2x2 spawn exit (6.5, 24.5) must be REJECTED (traps spawned units!)")
+  (assert-true! (not (placement-preserves-base-exit-and-spawn?
+                      10.0 7.0 'pylon layout-units #:game-info layout-gi #:base-x 10.5 #:base-y 10.5))
+                "Placing 2x2 Pylon directly inside worker mineral-mining lane (10.0, 7.0) must be REJECTED")
+  (assert-true! (placement-preserves-base-exit-and-spawn?
+                 14.5 16.5 'gateway layout-units #:game-info layout-gi #:base-x 10.5 #:base-y 10.5)
+                "Placing 3x3 Gateway in open main interior (14.5, 16.5) with 2x2 exit and clear base corridor must be ACCEPTED")
+
+  ;; 32.4 Counter-Compositions: PvZ Zergling Swarm (`Adept`+`Zealot` over `Stalker`) & Terran Priority `Medivac` + 2nd `Barracks-TechLab`
+  (define rt-pvz-swarm (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-pvz-swarm
+    (step-live-bot-runtime!
+     rt-pvz-swarm
+     (hash 'frame 3200 'minerals 260 'gas 75 'supply-used 34 'supply-cap 47 'supply-left 13
+           'mineral-harvesters 26 'vespene-harvesters 3 'enemy-race 'Zerg
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+           'ally-units (append (for/list ([i (in-range 26)])
+                                 (hash 'id (+ 8300 i) 'type 'probe 'x 32.5 'y 32.5 'hp 20 'shield 20))
+                               (for/list ([s (in-range 3)])
+                                 (hash 'id (+ 8400 s) 'type 'stalker 'x 54.0 'y 32.5 'hp 80 'shield 80)))
+           'ally-buildings (list (hash 'id 8201 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8202 'type 'nexus 'x 58.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8203 'type 'pylon 'x 36.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8204 'type 'cybernetics-core 'x 36.5 'y 38.5 'hp 550 'shield 550
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8205 'type 'gateway 'x 36.5 'y 32.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #f 'order-count 0)
+                                 (hash 'id 8206 'type 'gateway 'x 40.5 'y 32.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #f 'order-count 0))
+           'enemy-units (for/list ([z (in-range 10)])
+                          (hash 'id (+ 9800 z) 'type 'zergling 'x (+ 68.0 (* 0.5 z)) 'y 32.5 'hp 35))
+           'enemy-buildings '())))
+  (define acts-pvz-swarm (hash-ref res-pvz-swarm 'actions '()))
+  (assert-true! (or (member '(train adept) acts-pvz-swarm)
+                    (member '(train zealot) acts-pvz-swarm))
+                "PvZ facing >= 6 Zerglings must train Light-slaying Adepts and/or Zealots (#5122350 fix)")
+  (assert-true! (not (member '(train stalker) acts-pvz-swarm))
+                "PvZ facing pure Zergling flood with 3 Stalkers already out must cap Stalkers in favor of Adepts/Zealots")
+
+  (define rt-tvp-med (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-tvp-med
+    (step-live-bot-runtime!
+     rt-tvp-med
+     (hash 'frame 5200 'minerals 320 'gas 130 'supply-used 54 'supply-cap 70 'supply-left 16
+           'mineral-harvesters 34 'vespene-harvesters 6 'enemy-race 'Protoss
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5 'third-x 32.5 'third-y 62.5
+           'ally-units (append (for/list ([i (in-range 36)])
+                                 (hash 'id (+ 8500 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                               (for/list ([m (in-range 8)])
+                                 (hash 'id (+ 8600 m) 'type 'marine 'x 54.0 'y 32.5 'hp 45)))
+           'ally-buildings (list (hash 'id 8701 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 8702 'type 'orbital-command 'x 58.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 8703 'type 'barracks 'x 38.5 'y 32.5 'hp 1000 'build-progress 1.0
+                                       'addon 'tech-lab 'busy? #t 'order-count 1)
+                                 (hash 'id 8704 'type 'barracks-techlab 'x 41.0 'y 32.0 'hp 400 'build-progress 1.0
+                                       'busy? #t 'order-count 1)
+                                 (hash 'id 8705 'type 'barracks 'x 38.5 'y 36.5 'hp 1000 'build-progress 1.0
+                                       'busy? #f 'order-count 0)
+                                 (hash 'id 8706 'type 'barracks 'x 38.5 'y 40.5 'hp 1000 'build-progress 1.0
+                                       'busy? #f 'order-count 0)
+                                 (hash 'id 8707 'type 'factory 'x 44.5 'y 32.5 'hp 1250 'build-progress 1.0
+                                       'addon 'tech-lab 'busy? #f 'order-count 0)
+                                 (hash 'id 8708 'type 'factory-techlab 'x 47.0 'y 32.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 8709 'type 'starport 'x 44.5 'y 36.5 'hp 1300 'build-progress 1.0
+                                       'busy? #f 'order-count 0))
+           'enemy-units (list (hash 'id 9850 'type 'stalker 'x 110.0 'y 110.0 'hp 80 'shield 80))
+           'enemy-buildings '())))
+  (define acts-tvp-med (hash-ref res-tvp-med 'actions '()))
+  (assert-true! (member '(train medivac) acts-tvp-med)
+                "Terran with >= 6 bio units, 0 Medivacs, and 130G must prioritize Medivac before Factory drains 125G on Siege Tank (#5122349 fix)")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'barracks-techlab)))
+                       acts-tvp-med)
+                "Terran with 3 Barracks vs Protoss must build a 2nd Barracks-TechLab for Marauder scaling (#5122349 fix)"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
