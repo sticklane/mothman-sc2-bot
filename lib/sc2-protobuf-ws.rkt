@@ -6080,8 +6080,42 @@
 
   ;; 2. Assign 1 worker per step to under-saturated gas building, unified with 350G/600G float caps
   ;;    and graduated mineral-worker floor (0 gas -> >= 6 min workers, 1 gas -> >= 8, >= 2 gas -> >= 10).
+  ;;    During an early worker rush (`>= 5` enemy workers within 22 tiles of TownHall, `food-army < 4`),
+  ;;    evacuate gas geysers to minerals so workers never vanish inside Assimilators/Refineries/Extractors!
+  (define worker-rush-evacuate-gas?
+    (and (< cur-loop 3600)
+         (< (sc2-player-common-food-army pc) 4)
+         (not (null? ready-townhalls))
+         (>= (count (lambda (u)
+                      (and (= (sc2-unit-alliance u) 4)
+                           (sc2-unit-is-worker? u)
+                           (let ([up (sc2-unit-pos u)])
+                             (ormap (lambda (th)
+                                      (define tp (sc2-unit-pos th))
+                                      (<= (pt-dist (sc2-point3d-x up) (sc2-point3d-y up)
+                                                   (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                          22.0))
+                                    ready-townhalls))))
+                    units)
+             5)))
+  (when (and worker-rush-evacuate-gas? (not (null? owned-base-minerals)))
+    (for ([w (in-list workers)]
+          #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                      (ormap (lambda (o)
+                               (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
+                             (sc2-unit-orders w))))
+      (define wp (sc2-unit-pos w))
+      (define best-min
+        (argmin (lambda (m)
+                  (define mp (sc2-unit-pos m))
+                  (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
+                           (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                owned-base-minerals))
+      (issue-gather! w (sc2-unit-tag best-min))))
+
   (define gas-over-banked?
-    (or (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH)
+    (or worker-rush-evacuate-gas?
+        (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH)
              (< cur-min 250))
         (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
              (< cur-min 450))))

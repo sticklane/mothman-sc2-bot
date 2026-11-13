@@ -81,7 +81,7 @@
       [(Protoss) "ForgeFastExpand"]
       [else "RandomRollOpening"]))
 
-  (if (and (string? bot-rkt-path) (file-exists? bot-rkt-path))
+  (if (and (path-string? bot-rkt-path) (file-exists? bot-rkt-path))
       (with-handlers ([exn:fail? (lambda (_e) (values default-race default-posture))])
         (define content (file->string bot-rkt-path))
         (define r-match (regexp-match #rx"#:race[ \t]+'([A-Za-z-]+)" content))
@@ -98,7 +98,7 @@
     (if (and variant-name (string-ci=? variant-name "Creepy12ProbeRush"))
         (hasheq 'BotName "Creepy12ProbeRush"
                 'BotRace "Protoss"
-                'BotPath "")
+                'BotPath "bots/Mothman-P.rkt")
         (hasheq 'BotName (or variant-name "Mothman")
                 'BotRace "Random"
                 'BotPath "bots/Mothman.rkt")))
@@ -1148,7 +1148,12 @@
                 'peak_workers peak-workers
                 'peak_bases peak-bases
                 'peak_army_supply peak-army-supply
-                'saved_replay_path (or (and saved-replay-bytes save-replay-path) "")
+                'saved_replay_path
+                (if (and saved-replay-bytes (path-string? save-replay-path))
+                    (with-handlers ([exn:fail? (lambda (_e) (path->string (file-name-from-path save-replay-path)))])
+                      (path->string (find-relative-path (simple-form-path root-dir)
+                                                        (simple-form-path save-replay-path))))
+                    "")
                 'saved_replay_bytes (or saved-replay-bytes 0)))
       (append-native-telemetry! root-dir summary)
       summary)

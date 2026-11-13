@@ -2057,6 +2057,8 @@
            (and under-early-rush-crisis?
                 (not root-combat-facility-ready?)
                 (memq sym '(spawning-pool barracks gateway supply-depot pylon))
+                (or (memq sym '(supply-depot pylon))
+                    (= (bldg-count-equivalent total-bldg-counts sym) 0))
                 (memq sym emergency-rush-syms)))
          (define emergency-rush-def-boost?
            (and under-early-rush-crisis?

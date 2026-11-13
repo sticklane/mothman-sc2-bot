@@ -1588,8 +1588,17 @@
                   enemy-rush-workers)
           '()))
 
-    ;; 1.5s (34-frame) mineral-walk disengage for bruised friendly workers (total hp+shield <= 12).
-    ;; Uses total EHP (`whp`) so Protoss Probes (20 HP + 20 Shield) re-engage once shields regenerate!
+    ;; 1.5s (34-frame) mineral-walk disengage for bruised friendly workers.
+    ;; Uses total EHP (`whp`) so Protoss Probes (20 HP + 20 Shield) re-engage once shields regenerate,
+    ;; and raises disengage threshold to 15 EHP against >= 11-worker all-ins to prevent 4-Probe 1-volley kills!
+    (define eff-disengage-hp
+      (if (and worker-rush-active? (>= (length enemy-rush-workers) 11))
+          15
+          SC2-FIGHTING-WORKER-DISENGAGE-HP))
+    (define eff-reengage-hp
+      (if (and worker-rush-active? (>= (length enemy-rush-workers) 11))
+          18
+          SC2-FIGHTING-WORKER-REENGAGE-HP))
     (for ([w (in-list non-builder-defense-workers)])
       (define wid (hash-ref w 'id 10))
       (define whp (unit-total-hp-and-shield w))
@@ -1599,7 +1608,7 @@
         (ormap (lambda (e)
                  (<= (dist2d wx wy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 6.0))
                ground-enemy-units-for-cheese))
-      (when (and (<= whp SC2-FIGHTING-WORKER-DISENGAGE-HP)
+      (when (and (<= whp eff-disengage-hp)
                  enemy-within-6?)
         (hash-set! rush-def-st wid (max (+ frame 34) (hash-ref rush-def-st wid 0))))
       (define disengaging-now?
@@ -1625,8 +1634,8 @@
                   (and (not (memv wid cur-rush-disengaging-wids))
                        (<= (dist-to-owned-townhall wx wy) 10.5)
                        (if (memv wid prev-rush-fighting-wids)
-                           (> whp SC2-FIGHTING-WORKER-DISENGAGE-HP)
-                           (>= whp SC2-FIGHTING-WORKER-REENGAGE-HP))))
+                           (> whp eff-disengage-hp)
+                           (>= whp eff-reengage-hp))))
                 non-builder-defense-workers))
 
       ;; Sort farthest from engaging enemies first so kept miners are ALWAYS the safest far-patch workers
@@ -1659,18 +1668,12 @@
       (define eff-e-cnt (max e-cnt (length enemy-rush-workers)))
       (define all-hands-mineral-brawl?
         (and (>= eff-e-cnt 6)
-             (or (ormap (lambda (ew)
+             (or (>= eff-e-cnt 11)
+                 (ormap (lambda (ew)
                           (<= (dist-to-mineral-line (hash-ref ew 'x 9999.0)
                                                     (hash-ref ew 'y 9999.0))
                               5.5))
                         worker-rush-engage-enemies)
-                 (and (>= eff-e-cnt 11)
-                      (>= (count (lambda (ew)
-                                   (<= (dist-to-owned-townhall (hash-ref ew 'x 9999.0)
-                                                               (hash-ref ew 'y 9999.0))
-                                       5.5))
-                                 worker-rush-engage-enemies)
-                          4))
                  (ormap (lambda (b)
                           (and (hash? b)
                                (<= (dist-to-owned-townhall (hash-ref b 'x base-x)
@@ -4028,6 +4031,12 @@
   (define prio-saving-for-sym (macro-brain-decision-saving-for macro-decision))
   (define crisis-freeze-workers?
     (and early-survival-crisis?
+         (not (and (or worker-rush-active? (< total-workers 14))
+                   (or (< total-workers 10)
+                       (ormap (lambda (s) (memq s bldg-types))
+                              '(spawning-pool barracks gateway warp-gate)))
+                   (or (not can-train-basic-combat-now?)
+                       (>= (- minerals 50) basic-combat-min-floor))))
          (not (and (< total-workers 10)
                    (null? prod-facilities)
                    (< minerals 200)))
@@ -6068,6 +6077,8 @@
                        (min 70 (max target-workers protoss-ideal-worker-cap))
                        target-workers))
                 (or (member '(train probe) prio-scheduled-actions)
+                    worker-rush-active?
+                    (< total-workers 14)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
        (try-train-unit! 'probe 'townhall 4
                         #:respect-bo-reserve? (and live-game? (>= total-workers 24))))]
@@ -6923,6 +6934,8 @@
                        (min 70 (max target-workers terran-ideal-worker-cap))
                        target-workers))
                 (or (member '(train scv) prio-scheduled-actions)
+                    worker-rush-active?
+                    (< total-workers 14)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
        (try-train-unit! 'scv 'townhall 4
                         #:respect-bo-reserve? (and live-game? (>= total-workers 24))))]

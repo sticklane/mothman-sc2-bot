@@ -7074,7 +7074,30 @@
                                    (eq? (car a) 'hold-position)
                                    (equal? (second a) 7300)))
                             acts-p-brawl))
-                "Spawned Zealot #7300 must NEVER lock onto distant door-guard hold-position during an in-main worker rush (#5120546 fix)"))
+                "Spawned Zealot #7300 must NEVER lock onto distant door-guard hold-position during an in-main worker rush (#5120546 fix)")
+
+  ;; (c) While 1st Gateway is still warping in (build-progress 0.40) under a 12-Probe rush (minerals 140, 10 Probes),
+  ;;     2nd Gateway must NOT escrow 150M over replacement Probes and Nexus must train '(train probe)!
+  (define rt-p-warping-gw (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-p-warping-gw
+    (step-live-bot-runtime!
+     rt-p-warping-gw
+     (hash 'frame 1200 'minerals 140 'gas 0 'supply-used 10 'supply-cap 23 'supply-left 13
+           'mineral-harvesters 10 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+           'mineral-patches (list (hash 'id 550 'x 26.5 'y 32.5))
+           'ally-units (for/list ([i (in-range 10)])
+                         (hash 'id (+ 7400 i) 'type 'probe 'x (+ 27.5 (* 0.3 i)) 'y 32.5 'hp 20 'shield 20))
+           'ally-buildings (list (hash 'id 7001 'type 'nexus 'x 32.5 'y 32.5
+                                       'hp 1000 'max-hp 1000 'shield 1000 'max-shield 1000
+                                       'build-progress 1.0 'powered? #f 'busy? #f 'order-count 0)
+                                 (hash 'id 7002 'type 'pylon 'x 35.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 7003 'type 'gateway 'x 35.5 'y 32.5 'hp 200 'shield 200
+                                       'build-progress 0.40 'powered? #t))
+           'enemy-units brawl-12-probes
+           'enemy-buildings '())))
+  (assert-true! (member '(train probe) (hash-ref res-p-warping-gw 'actions '()))
+                "Protoss with warping-in 1st Gateway and 140M under 12-Probe rush must train replacement Probe without 2nd-Gateway escrow deadlock"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
