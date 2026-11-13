@@ -1380,6 +1380,7 @@
     [(inject-queen)     95]
     [(door-guard)       90]
     [(mule)             90]
+    [(evac)             85]
     [(cargo-returner)   80]
     [(detector-escort)  75]
     [(scout)            70]

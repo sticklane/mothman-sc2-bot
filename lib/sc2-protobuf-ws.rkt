@@ -147,6 +147,10 @@
  collect-spiral-candidates
  find-spiral-building-placement
  find-verified-building-placement
+ interleave-lists
+ SC2-PLACEMENT-NEG-COOLDOWN
+ SC2-WARPGATE-LAST-LOOP
+ SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
  select-producer-tags-for-unit
  frame0-pro-worker-split-commands
  pick-safe-mule-mineral-patch
@@ -3642,6 +3646,9 @@
 (define SC2-CACHED-MAP-BASE-CLUSTERS (box '()))
 (define SC2-CORNER-SCAN-LAST-LOOP (box -9999))
 (define SC2-ACTIVE-GAME-INFO (box #f))
+(define SC2-PLACEMENT-NEG-COOLDOWN (make-hash))
+(define SC2-PLACEMENT-CACHE-SIG (box #f))
+(define SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP (box -9999))
 
 (define (worker-build-order-stuck? w [cur-loop (unbox SC2-WARPGATE-LAST-LOOP)])
   (define entry (hash-ref SC2-WORKER-BUILD-ORDER-START (sc2-unit-tag w) #f))
@@ -3751,7 +3758,10 @@
     (set-box! SC2-CLEARED-ENEMY-BASES '())
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
     (set-box! SC2-CACHED-GROUND-BFS #f)
-    (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
+    (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999)
+    (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+    (set-box! SC2-PLACEMENT-CACHE-SIG #f)
+    (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999))
   (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
   (define pc (sc2-observation-player-common obs))
   (define units (sc2-observation-units obs))
@@ -4619,7 +4629,10 @@
         'ideal-gas-harvesters ideal-gas-harvesters
         'busy-facilities busy-facilities
         'busy-townhalls busy-townhalls
-        'army-supply (max 0 (sc2-player-common-food-army pc))))
+        'army-supply (max 0 (sc2-player-common-food-army pc))
+        'power-placement-failed?
+        (let ([fl (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP)])
+          (and (>= fl 0) (<= (- cur-loop fl) 96)))))
 
 (define (sc2-observation->frame-state-sexp obs
                                            #:game-info [game-info #f]
@@ -4815,11 +4828,18 @@
      (define wx1 (min (sub1 gw) (+ bx-i win-r)))
      (define wy0 (max 0 (- by-i win-r)))
      (define wy1 (min (sub1 gh) (+ by-i win-r)))
-     (define blocked-grid (make-bytes (* gw gh) 0))
+     (define ww (add1 (- wx1 wx0)))
+     (define wh (add1 (- wy1 wy0)))
+     (define wsize (* ww wh))
+     (define (in-win? ix iy)
+       (and (>= ix wx0) (<= ix wx1) (>= iy wy0) (<= iy wy1)))
+     (define (win-idx ix iy)
+       (+ (- ix wx0) (* (- iy wy0) ww)))
+     (define blocked-grid (make-bytes wsize 0))
      (for* ([iy (in-range wy0 (add1 wy1))]
             [ix (in-range wx0 (add1 wx1))])
        (when (= (sc2-grid-ref path-grid ix iy) 0)
-         (bytes-set! blocked-grid (+ ix (* iy gw)) 1)))
+         (bytes-set! blocked-grid (win-idx ix iy) 1)))
 
      (define existing-prod-boxes '())
      (for ([u (in-list existing-units)]
@@ -4844,9 +4864,9 @@
              [(sc2-unit-is-vespene-geyser? u) (values 1.5 1.5)]
              [else (sc2-structure-half-dims canon-u)]))
          (define-values (ux0 ux1 uy0 uy1) (footprint-tile-bounds ux uy uhw uhh))
-         (for* ([iy (in-range (max 0 uy0) (min gh (add1 uy1)))]
-                [ix (in-range (max 0 ux0) (min gw (add1 ux1)))])
-           (bytes-set! blocked-grid (+ ix (* iy gw)) 1))
+         (for* ([iy (in-range (max wy0 uy0) (min (add1 wy1) (add1 uy1)))]
+                [ix (in-range (max wx0 ux0) (min (add1 wx1) (add1 ux1)))])
+           (bytes-set! blocked-grid (win-idx ix iy) 1))
          (when (and (= (sc2-unit-alliance u) 1)
                     (memq canon-u SC2-SPAWN-EXIT-PRODUCTION-SYMS))
            (set! existing-prod-boxes
@@ -4854,8 +4874,8 @@
 
      (define (base-open-cell? ix iy)
        (and (>= ix 0) (< ix gw) (>= iy 0) (< iy gh)
-            (= (bytes-ref blocked-grid (+ ix (* iy gw))) 0)
-            (or (and (>= ix wx0) (<= ix wx1) (>= iy wy0) (<= iy wy1))
+            (if (in-win? ix iy)
+                (= (bytes-ref blocked-grid (win-idx ix iy)) 0)
                 (not (= (sc2-grid-ref path-grid ix iy) 0)))))
      (define active-prod-boxes
        (filter (lambda (pb)
@@ -4882,23 +4902,24 @@
      (define map-cx (* 0.5 gw))
      (define map-cy (* 0.5 gh))
 
-     (define witness-mask (make-bytes (* gw gh) 0))
+     (define witness-mask (make-bytes wsize 0))
      (define exit-cell
        (and start-cell
+            (in-win? (car start-cell) (cdr start-cell))
             (let* ([sx (car start-cell)]
                    [sy (cdr start-cell)]
-                   [parent (make-vector (* gw gh) -1)]
-                   [q (make-vector (* (add1 (- wx1 wx0)) (add1 (- wy1 wy0))) 0)]
-                   [s-idx (+ sx (* sy gw))])
-              (vector-set! parent s-idx s-idx)
-              (vector-set! q 0 s-idx)
+                   [parent (make-vector wsize -1)]
+                   [q (make-vector wsize 0)]
+                   [s-widx (win-idx sx sy)])
+              (vector-set! parent s-widx s-widx)
+              (vector-set! q 0 s-widx)
               (define best-e #f)
               (define best-score -1e9)
               (let bfs-loop ([head 0] [tail 1])
                 (when (< head tail)
                   (define cur (vector-ref q head))
-                  (define cx0 (remainder cur gw))
-                  (define cy0 (quotient cur gw))
+                  (define cx0 (+ wx0 (remainder cur ww)))
+                  (define cy0 (+ wy0 (quotient cur ww)))
                   (define d-base (pt-dist (+ cx0 0.5) (+ cy0 0.5) base-x base-y))
                   (when (and (>= d-base min-exit-dist) (<= d-base 30.0))
                     ;; Prefer exterior tiles toward map center that also sit in an open 2x2 area
@@ -4919,33 +4940,37 @@
                               ([dxy (in-list '((1 . 0) (-1 . 0) (0 . 1) (0 . -1)))])
                       (define nx (+ cx0 (car dxy)))
                       (define ny (+ cy0 (cdr dxy)))
-                      (define nidx (+ nx (* ny gw)))
-                      (if (and (>= nx wx0) (<= nx wx1)
-                               (>= ny wy0) (<= ny wy1)
-                               (= (bytes-ref blocked-grid nidx) 0)
-                               (= (vector-ref parent nidx) -1))
-                          (begin
-                            (vector-set! parent nidx cur)
-                            (vector-set! q tl nidx)
-                            (add1 tl))
+                      (if (in-win? nx ny)
+                          (let ([nidx (win-idx nx ny)])
+                            (if (and (= (bytes-ref blocked-grid nidx) 0)
+                                     (= (vector-ref parent nidx) -1))
+                                (begin
+                                  (vector-set! parent nidx cur)
+                                  (vector-set! q tl nidx)
+                                  (add1 tl))
+                                tl))
                           tl)))
                   (bfs-loop (add1 head) next-tail)))
               (when best-e
-                (let trace ([idx (+ (car best-e) (* (cdr best-e) gw))])
+                (let trace ([idx (win-idx (car best-e) (cdr best-e))])
                   (bytes-set! witness-mask idx 1)
                   (define p (vector-ref parent idx))
                   (when (and (>= p 0) (not (= p idx)))
                     (trace p))))
               best-e)))
 
+     ;; Reused across all candidate evaluations within this safety-checker instance
+     (define shared-vis (make-bytes wsize 0))
+     (define shared-vis-q (make-vector wsize 0))
+
      (define (still-connected-to-exit? x0 x1 y0 y1 cand-open-cell?)
        (cond
          [(or (not start-cell) (not exit-cell)) #t]
          [else
           (define touches-witness?
-            (for*/or ([iy (in-range (max 0 y0) (min gh (add1 y1)))]
-                      [ix (in-range (max 0 x0) (min gw (add1 x1)))])
-              (= (bytes-ref witness-mask (+ ix (* iy gw))) 1)))
+            (for*/or ([iy (in-range (max wy0 y0) (min (add1 wy1) (add1 y1)))]
+                      [ix (in-range (max wx0 x0) (min (add1 wx1) (add1 x1)))])
+              (= (bytes-ref witness-mask (win-idx ix iy)) 1)))
           (if (not touches-witness?)
               #t
               (let* ([pick-near-open
@@ -4960,36 +4985,37 @@
                      [s-pt (pick-near-open (car start-cell) (cdr start-cell) 3)]
                      [e-pt (pick-near-open (car exit-cell) (cdr exit-cell) 2)])
                 (and s-pt e-pt
-                     (let* ([vis (make-bytes (* gw gh) 0)]
-                            [q (make-vector (* (add1 (- wx1 wx0)) (add1 (- wy1 wy0))) 0)]
-                            [s-idx (+ (car s-pt) (* (cdr s-pt) gw))]
-                            [e-idx (+ (car e-pt) (* (cdr e-pt) gw))])
-                       (bytes-set! vis s-idx 1)
-                       (vector-set! q 0 s-idx)
-                       (let loop ([head 0] [tail 1])
-                         (cond
-                           [(>= head tail) #f]
-                           [(= (vector-ref q head) e-idx) #t]
-                           [else
-                            (define cur (vector-ref q head))
-                            (define cx0 (remainder cur gw))
-                            (define cy0 (quotient cur gw))
-                            (define next-tail
-                              (for/fold ([tl tail])
-                                        ([dxy (in-list '((1 . 0) (-1 . 0) (0 . 1) (0 . -1)))])
-                                (define nx (+ cx0 (car dxy)))
-                                (define ny (+ cy0 (cdr dxy)))
-                                (define nidx (+ nx (* ny gw)))
-                                (if (and (>= nx wx0) (<= nx wx1)
-                                         (>= ny wy0) (<= ny wy1)
-                                         (= (bytes-ref vis nidx) 0)
-                                         (cand-open-cell? nx ny))
-                                    (begin
-                                      (bytes-set! vis nidx 1)
-                                      (vector-set! q tl nidx)
-                                      (add1 tl))
-                                    tl)))
-                            (loop (add1 head) next-tail)]))))))]))
+                     (or (not (in-win? (car s-pt) (cdr s-pt)))
+                         (not (in-win? (car e-pt) (cdr e-pt)))
+                         (let* ([s-idx (win-idx (car s-pt) (cdr s-pt))]
+                                [e-idx (win-idx (car e-pt) (cdr e-pt))])
+                           (bytes-fill! shared-vis 0)
+                           (bytes-set! shared-vis s-idx 1)
+                           (vector-set! shared-vis-q 0 s-idx)
+                           (let loop ([head 0] [tail 1])
+                             (cond
+                               [(>= head tail) #f]
+                               [(= (vector-ref shared-vis-q head) e-idx) #t]
+                               [else
+                                (define cur (vector-ref shared-vis-q head))
+                                (define cx0 (+ wx0 (remainder cur ww)))
+                                (define cy0 (+ wy0 (quotient cur ww)))
+                                (define next-tail
+                                  (for/fold ([tl tail])
+                                            ([dxy (in-list '((1 . 0) (-1 . 0) (0 . 1) (0 . -1)))])
+                                    (define nx (+ cx0 (car dxy)))
+                                    (define ny (+ cy0 (cdr dxy)))
+                                    (if (in-win? nx ny)
+                                        (let ([nidx (win-idx nx ny)])
+                                          (if (and (= (bytes-ref shared-vis nidx) 0)
+                                                   (cand-open-cell? nx ny))
+                                              (begin
+                                                (bytes-set! shared-vis nidx 1)
+                                                (vector-set! shared-vis-q tl nidx)
+                                                (add1 tl))
+                                              tl))
+                                        tl)))
+                                (loop (add1 head) next-tail)])))))))]))
 
      (lambda (cx cy canon-bldg cand-hw cand-hh)
        (define is-gas-bldg?
@@ -5005,8 +5031,8 @@
             (let-values ([(x0 x1 y0 y1) (footprint-tile-bounds cx cy cand-hw cand-hh)])
               (define (cand-open-cell? ix iy)
                 (and (>= ix 0) (< ix gw) (>= iy 0) (< iy gh)
-                     (= (bytes-ref blocked-grid (+ ix (* iy gw))) 0)
-                     (or (and (>= ix wx0) (<= ix wx1) (>= iy wy0) (<= iy wy1))
+                     (if (in-win? ix iy)
+                         (= (bytes-ref blocked-grid (win-idx ix iy)) 0)
                          (not (= (sc2-grid-ref path-grid ix iy) 0)))
                      (not (and (>= ix x0) (<= ix x1) (>= iy y0) (<= iy y1)))))
               (define (reach-2x2? bx by)
@@ -5114,6 +5140,7 @@
                                    #:ws-active-placement? [ws-active-placement? #f]
                                    #:reserved-aabbs [reserved-aabbs '()]
                                    #:expansion-pads [expansion-pads '()]
+                                   #:min-pad-clearance [min-pad-clearance 4.5]
                                    #:bldg-sym [bldg-sym #f]
                                    #:game-info [game-info #f]
                                    #:check-bfs [pre-check-bfs 'auto]
@@ -5129,6 +5156,32 @@
     (and (not is-creep-tumor?)
          (sc2-game-info? game-info)
          (sc2-game-info-placement-grid game-info)))
+  (define-values (play-x0 play-y0 play-x1 play-y1)
+    (cond
+      [(sc2-game-info? game-info)
+       (define pa (sc2-game-info-playable-area game-info))
+       (define ms (sc2-game-info-map-size game-info))
+       (cond
+         [(hash? pa)
+          (values (max 1.0 (exact->inexact (hash-ref pa 'x0 SC2-MAP-PLAYABLE-MIN-COORD)))
+                  (max 1.0 (exact->inexact (hash-ref pa 'y0 SC2-MAP-PLAYABLE-MIN-COORD)))
+                  (exact->inexact (hash-ref pa 'x1 SC2-MAP-PLAYABLE-MAX-COORD))
+                  (exact->inexact (hash-ref pa 'y1 SC2-MAP-PLAYABLE-MAX-COORD)))]
+         [(and (list? pa) (>= (length pa) 4))
+          (values (max 1.0 (exact->inexact (first pa)))
+                  (max 1.0 (exact->inexact (second pa)))
+                  (exact->inexact (third pa))
+                  (exact->inexact (fourth pa)))]
+         [(pair? ms)
+          (values 2.0 2.0
+                  (exact->inexact (max 16 (- (car ms) 2)))
+                  (exact->inexact (max 16 (- (cdr ms) 2))))]
+         [else
+          (values SC2-MAP-PLAYABLE-MIN-COORD SC2-MAP-PLAYABLE-MIN-COORD
+                  SC2-MAP-PLAYABLE-MAX-COORD SC2-MAP-PLAYABLE-MAX-COORD)])]
+      [else
+       (values SC2-MAP-PLAYABLE-MIN-COORD SC2-MAP-PLAYABLE-MIN-COORD
+               SC2-MAP-PLAYABLE-MAX-COORD SC2-MAP-PLAYABLE-MAX-COORD)]))
   (define base-ref
     (if (and (not is-creep-tumor?) (sc2-game-info? game-info))
         (friendly-safe-base-anchor existing-units anchor-x anchor-y)
@@ -5176,20 +5229,20 @@
     (append extra-reserved-points in-transit-build-pts in-transit-terran-addon-pts terran-addon-pts))
 
   (define (clear-spot? cx cy)
-    (and (>= cx SC2-MAP-PLAYABLE-MIN-COORD) (<= cx SC2-MAP-PLAYABLE-MAX-COORD)
-         (>= cy SC2-MAP-PLAYABLE-MIN-COORD) (<= cy SC2-MAP-PLAYABLE-MAX-COORD)
+    (and (>= cx play-x0) (<= cx play-x1)
+         (>= cy play-y0) (<= cy play-y1)
          ;; Static footprint placement_grid & ground-reachability pre-filter when StartRaw grids are available
          (static-footprint-placement-ok? pl-grid cx cy cand-hw cand-hh)
          (or (not check-bfs)
              (< (check-bfs cx cy 4) +inf.0))
          (or (not layout-safety-ok?)
              (layout-safety-ok? cx cy (or canon-bldg 'barracks) cand-hw cand-hh))
-         ;; Expansion Pad Protection: non-TownHall structures/turrets/pylons/depots/tumors must stay >= 4.5 Chebyshev tiles off solved pads
+         ;; Expansion Pad Protection: non-TownHall structures must stay >= min-pad-clearance (default 4.5, tight creep 3.95/3.45) off solved pads
          (or is-townhall-build?
              (for/and ([ep (in-list expansion-pads)])
                (define px (if (pair? ep) (car ep) (any-point-x ep)))
                (define py (if (pair? ep) (cdr ep) (any-point-y ep)))
-               (>= (max (abs (- cx px)) (abs (- cy py))) 4.5)))
+               (>= (max (abs (- cx px)) (abs (- cy py))) min-pad-clearance)))
          ;; Reserved Chebyshev AABB exclusion (door gap, wall slots, ramp corridor, add-on footprints)
          (for/and ([b (in-list reserved-aabbs)]
                    #:when (reserved-aabb? b))
@@ -5268,6 +5321,13 @@
       (first cands)
       (sc2-point2d anchor-x anchor-y)))
 
+(define (interleave-lists xss)
+  (let loop ([qs (filter pair? xss)] [acc '()])
+    (if (null? qs)
+        (reverse acc)
+        (loop (for/list ([q (in-list qs)] #:when (pair? (cdr q))) (cdr q))
+              (foldl cons acc (map car qs))))))
+
 (define (find-verified-building-placement ws-conn ab-id anchor-x anchor-y existing-units
                                           #:min-spacing [min-spacing 3.5]
                                           #:max-radius [max-radius 14.0]
@@ -5297,6 +5357,40 @@
           [(329) 'starport]
           [(1694 1733) 'creep-tumor]
           [else #f])))
+  (define neg-cd-cur-loop (unbox SC2-WARPGATE-LAST-LOOP))
+  (define neg-cd-key
+    (and ws-active? canon-bldg
+         (list canon-bldg
+               (inexact->exact (round anchor-x))
+               (inexact->exact (round anchor-y)))))
+  (define neg-cd-hit?
+    (and ws-active?
+         neg-cd-key
+         (let ([cur-sig
+                (for/fold ([p 0] [th 0] [tm 0] #:result (list p th tm))
+                          ([u (in-list existing-units)]
+                           #:when (and (= (sc2-unit-alliance u) 1)
+                                       (not (= (sc2-unit-display-type u) 4))
+                                       (sc2-unit-is-structure? u)))
+                  (define usym (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown))
+                  (cond
+                    [(memq usym '(pylon pylon-overcharged warp-prism-phasing))
+                     (values (add1 p) th tm)]
+                    [(sc2-unit-is-townhall? u)
+                     (values p (add1 th) tm)]
+                    [(memq usym '(creep-tumor creep-tumor-burrowed creep-tumor-queen))
+                     (values p th (add1 tm))]
+                    [else (values p th tm)]))])
+           (unless (equal? cur-sig (unbox SC2-PLACEMENT-CACHE-SIG))
+             (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+             (set-box! SC2-PLACEMENT-CACHE-SIG cur-sig))
+           (let ([exp-loop (hash-ref SC2-PLACEMENT-NEG-COOLDOWN neg-cd-key #f)])
+             (and exp-loop
+                  (>= neg-cd-cur-loop exp-loop)
+                  (< (- neg-cd-cur-loop exp-loop) 32))))))
+  (if neg-cd-hit?
+      #f
+      (let ()
   (define-values (cand-hw cand-hh)
     (sc2-structure-half-dims (or canon-bldg 'barracks)))
   (define is-townhall-build?
@@ -5499,6 +5593,15 @@
     (set-member? SC2-TOWNHALL-STRUCTURE-SYMS canon-bldg))
   (define is-creep-tumor-target?
     (memq canon-bldg '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+  (define is-zerg-creep-bldg?
+    (memq canon-bldg
+          '(spawning-pool evolution-chamber roach-warren baneling-nest
+            hydralisk-den lurker-den lurker-den-mp spire infestation-pit
+            ultralisk-cavern nydus-network spine-crawler spore-crawler)))
+  (define tight-pad-clearance
+    (if is-zerg-creep-bldg?
+        (max 3.45 (- (+ 2.5 (max cand-hw cand-hh)) 0.05))
+        4.5))
   (define shared-base-ref
     (if (and (not is-creep-tumor-target?) (sc2-game-info? game-info))
         safe-base-anchor
@@ -5517,7 +5620,7 @@
 
   (define spiral-cands
     (let ([all-pts
-           (append*
+           (interleave-lists
             (for/list ([ap (in-list anchors)])
               (collect-spiral-candidates (car ap) (cdr ap) existing-units
                                          #:min-spacing min-spacing
@@ -5528,6 +5631,7 @@
                                          #:ws-active-placement? ws-active?
                                          #:reserved-aabbs eff-reserved-aabbs
                                          #:expansion-pads expansion-pads
+                                         #:min-pad-clearance 4.5
                                          #:bldg-sym canon-bldg
                                          #:game-info game-info
                                          #:check-bfs shared-check-bfs
@@ -5548,18 +5652,34 @@
          (if (not (null? addon-clear)) addon-clear raw-cands))]
       [else raw-cands]))
 
+  (define queried-keys (make-hash))
+  (define (pt-key pt)
+    (cons (round (* 4.0 (sc2-point2d-x pt)))
+          (round (* 4.0 (sc2-point2d-y pt)))))
+  (define (filter-unqueried pts)
+    (for/list ([pt (in-list (dedup-point2ds pts))]
+               #:unless (hash-has-key? queried-keys (pt-key pt)))
+      pt))
+
   (define (near-base-emergency-cands)
     (define em-anchors
       (if (null? anchors)
           (list safe-base-anchor)
           anchors))
     (define em-rad
-      (if (and requires-pylon-power? has-completed-pylon?) 6.5 18.0))
+      (cond
+        [(and requires-pylon-power? has-completed-pylon?) 6.5]
+        [is-zerg-creep-bldg? 8.5]
+        [else 18.0]))
+    (define em-spacing
+      (if is-zerg-creep-bldg?
+          (min 1.15 min-spacing)
+          (min 2.0 min-spacing)))
     (define raw-em
-      (append*
+      (interleave-lists
        (for/list ([ap (in-list em-anchors)])
          (collect-spiral-candidates (car ap) (cdr ap) existing-units
-                                    #:min-spacing (min 2.0 min-spacing)
+                                    #:min-spacing em-spacing
                                     #:max-radius em-rad
                                     #:step 1.0
                                     #:limit 64
@@ -5567,200 +5687,260 @@
                                     #:ws-active-placement? ws-active?
                                     #:reserved-aabbs '()
                                     #:expansion-pads expansion-pads
+                                    #:min-pad-clearance (if is-zerg-creep-bldg? tight-pad-clearance 4.5)
                                     #:bldg-sym canon-bldg
-                                    #:game-info #f))))
+                                    #:game-info #f
+                                    #:check-bfs #f
+                                    #:layout-safety-ok? #f))))
     (dedup-point2ds (take raw-em (min 96 (length raw-em)))))
 
-  (define (query-single-batch batch)
-    (define q-items
-      (for/list ([pt (in-list batch)])
-        (sc2-query-placement ab-id (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
-    (define q-resp
-      (sc2-ws-rpc! ws-conn
-                   (make-request-query-placement q-items
-                                                 #:ignore-resource-requirements? #t)))
-    (define q-results (sc2-response-query-placements q-resp))
+  (define (collect-creep-tight-cands max-r safety? gi?)
+    (define pts
+      (interleave-lists
+       (for/list ([ap (in-list anchors)])
+         (collect-spiral-candidates (car ap) (cdr ap) existing-units
+                                    #:min-spacing (min 1.15 min-spacing)
+                                    #:max-radius max-r
+                                    #:step 1.0
+                                    #:limit 64
+                                    #:extra-reserved-points extra-reserved-points
+                                    #:ws-active-placement? ws-active?
+                                    #:reserved-aabbs eff-reserved-aabbs
+                                    #:expansion-pads expansion-pads
+                                    #:min-pad-clearance tight-pad-clearance
+                                    #:bldg-sym canon-bldg
+                                    #:game-info (and gi? game-info)
+                                    #:check-bfs (and gi? shared-check-bfs)
+                                    #:layout-safety-ok? (and safety? shared-layout-safety-ok?)))))
+    (dedup-point2ds (take pts (min 96 (length pts)))))
+
+  (define (query-single-batch batch0)
+    (define batch (filter-unqueried batch0))
     (cond
-      [(and (null? q-results) (pair? batch)) (first batch)]
+      [(null? batch) #f]
       [else
-       (for/first ([pt (in-list batch)]
-                   [res (in-list q-results)]
-                   #:when (= res 1))
-         pt)]))
+       (for ([pt (in-list batch)])
+         (hash-set! queried-keys (pt-key pt) #t))
+       (define q-items
+         (for/list ([pt (in-list batch)])
+           (sc2-query-placement ab-id (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
+       (define q-resp
+         (sc2-ws-rpc! ws-conn
+                      (make-request-query-placement q-items
+                                                    #:ignore-resource-requirements? #t)))
+       (define q-results (sc2-response-query-placements q-resp))
+       (cond
+         [(and (null? q-results) (pair? batch)) (first batch)]
+         [else
+          (for/first ([pt (in-list batch)]
+                      [res (in-list q-results)]
+                      #:when (= res 1))
+            pt)])]))
 
-  (define (query-dual-batch batch)
-    (define q-items
-      (append*
-       (for/list ([pt (in-list batch)])
-         (define cx (sc2-point2d-x pt))
-         (define cy (sc2-point2d-y pt))
-         (list (sc2-query-placement ab-id cx cy 0)
-               (sc2-query-placement 319
-                                    (+ cx SC2-TERRAN-ADDON-OFFSET-X)
-                                    (+ cy SC2-TERRAN-ADDON-OFFSET-Y)
-                                    0)))))
-    (define q-resp
-      (sc2-ws-rpc! ws-conn
-                   (make-request-query-placement q-items
-                                                 #:ignore-resource-requirements? #t)))
-    (sc2-response-query-placements q-resp))
+  (define (query-creep-fallbacks-ws!)
+    (or (query-single-batch (collect-creep-tight-cands 8.5 #t #t))
+        (query-single-batch (collect-creep-tight-cands 8.5 #f #t))
+        (query-single-batch (collect-creep-tight-cands 16.0 #f #t))
+        (query-single-batch (near-base-emergency-cands))))
 
-  (cond
-    [(null? cands)
-     (define em-cands (near-base-emergency-cands))
-     (cond
-       [ws-active?
-        (and (not (null? em-cands))
-             (if needs-terran-addon-clearance?
-                 (let ([em-res (query-dual-batch em-cands)])
-                   (cond
-                     [(null? em-res) (first em-cands)]
-                     [(>= (length em-res) (* 2 (length em-cands)))
-                      (or (for/first ([pt (in-list em-cands)]
-                                      [idx (in-naturals 0)]
-                                      #:when (and (= (list-ref em-res (* 2 idx)) 1)
-                                                  (= (list-ref em-res (+ (* 2 idx) 1)) 1)))
-                            pt)
-                          (for/first ([pt (in-list em-cands)]
-                                      [idx (in-naturals 0)]
-                                      #:when (= (list-ref em-res (* 2 idx)) 1))
-                            pt))]
-                     [else
-                      (for/first ([pt (in-list em-cands)]
-                                  [res (in-list em-res)]
-                                  #:when (= res 1))
-                        pt)]))
-                 (query-single-batch em-cands)))]
-       [(not (null? em-cands)) (first em-cands)]
-       [(and (static-footprint-placement-ok? pl-grid anchor-x anchor-y cand-hw cand-hh)
-             (or (not check-bfs) (< (check-bfs anchor-x anchor-y 4) +inf.0)))
-        (sc2-point2d anchor-x anchor-y)]
-       [else
-        (sc2-point2d (car safe-base-anchor) (cdr safe-base-anchor))])]
-    [ws-active?
-     (cond
-       [needs-terran-addon-clearance?
-        ;; Dual QueryPlacement: verify both the 3x3 facility at (cx, cy) AND a 2x2 Supply Depot (319)
-        ;; at the East (+X) add-on slot (cx + 2.5, cy - 0.5) so add-ons are never blocked by terrain/walls!
-        (define q-results (query-dual-batch cands))
-        (cond
-          [(null? q-results) (first cands)]
-          [(>= (length q-results) (* 2 (length cands)))
-           (define wall-seal-pt
-             (and first-rax-allow-wall-3x3?
-                  (let ([valid-wall-pts
-                         (for/list ([pt (in-list cands)]
-                                    [idx (in-naturals 0)]
-                                    #:when (and (<= (pt-dist wall-ref-x wall-ref-y
-                                                             (sc2-point2d-x pt) (sc2-point2d-y pt))
-                                                    2.55)
-                                                (= (list-ref q-results (* 2 idx)) 1)))
-                           (cons pt (= (list-ref q-results (+ (* 2 idx) 1)) 1)))])
-                    (and (not (null? valid-wall-pts))
-                         (car (argmin (lambda (entry)
-                                        (define pt (car entry))
-                                        (define addon-ok? (cdr entry))
-                                        (- (* 10.0 (pt-dist wall-ref-x wall-ref-y
-                                                            (sc2-point2d-x pt) (sc2-point2d-y pt)))
-                                           (if addon-ok? 0.25 0.0)))
-                                      valid-wall-pts))))))
-           (define both-valid-pt
-             (for/first ([pt (in-list cands)]
-                         [idx (in-naturals 0)]
-                         #:when (and (= (list-ref q-results (* 2 idx)) 1)
-                                     (= (list-ref q-results (+ (* 2 idx) 1)) 1)))
-               pt))
-           (define main-valid-pt
-             (for/first ([pt (in-list cands)]
-                         [idx (in-naturals 0)]
-                         #:when (= (list-ref q-results (* 2 idx)) 1))
-               pt))
-           (cond
-             [wall-seal-pt wall-seal-pt]
-             [both-valid-pt both-valid-pt]
-             [else
-              ;; Expand search radius across all anchors (including safe-base-anchor) to find a spot where BOTH 3x3 + East 2x2 add-on fit!
-              (define wide-raw
-                (let ([pts
-                       (append*
-                        (for/list ([ap (in-list anchors)])
-                          (collect-spiral-candidates (car ap) (cdr ap) existing-units
-                                                     #:min-spacing min-spacing
-                                                     #:max-radius (max 18.0 (+ max-radius 4.0))
-                                                     #:step 1.0
-                                                     #:limit 64
-                                                     #:extra-reserved-points extra-reserved-points
-                                                     #:ws-active-placement? ws-active?
-                                                     #:reserved-aabbs eff-reserved-aabbs
-                                                     #:expansion-pads expansion-pads
-                                                     #:bldg-sym canon-bldg
-                                                     #:game-info game-info)))])
-                  (dedup-point2ds (take pts (min 96 (length pts))))))
-              (define wide-cands
-                (let ([ac (filter-addon-clear wide-raw)])
-                  (if (not (null? ac)) ac wide-raw)))
-              (define-values (wide-both wide-main)
-                (if (null? wide-cands)
-                    (values #f #f)
-                    (let ([w-res (query-dual-batch wide-cands)])
-                      (if (>= (length w-res) (* 2 (length wide-cands)))
-                          (values
-                           (for/first ([pt (in-list wide-cands)]
-                                       [idx (in-naturals 0)]
-                                       #:when (and (= (list-ref w-res (* 2 idx)) 1)
-                                                   (= (list-ref w-res (+ (* 2 idx) 1)) 1)))
-                             pt)
-                           (for/first ([pt (in-list wide-cands)]
-                                       [idx (in-naturals 0)]
-                                       #:when (= (list-ref w-res (* 2 idx)) 1))
-                             pt))
-                          (values #f #f)))))
-              (or wide-both
-                  main-valid-pt
-                  wide-main
-                  (let ([em-cands (near-base-emergency-cands)])
-                    (and (not (null? em-cands))
-                         (let ([em-res (query-dual-batch em-cands)])
-                           (and (>= (length em-res) (* 2 (length em-cands)))
-                                (or (for/first ([pt (in-list em-cands)]
-                                                [idx (in-naturals 0)]
-                                                #:when (and (= (list-ref em-res (* 2 idx)) 1)
-                                                            (= (list-ref em-res (+ (* 2 idx) 1)) 1)))
-                                      pt)
-                                    (for/first ([pt (in-list em-cands)]
-                                                [idx (in-naturals 0)]
-                                                #:when (= (list-ref em-res (* 2 idx)) 1))
-                                      pt)))))))])]
-          [else
-           (for/first ([pt (in-list cands)]
-                       [res (in-list q-results)]
-                       #:when (= res 1))
-             pt)])]
-       [else
-        (define verified-pt (query-single-batch cands))
-        (or verified-pt
-            (let* ([wide-pts
-                    (append*
-                     (for/list ([ap (in-list anchors)])
-                       (collect-spiral-candidates (car ap) (cdr ap) existing-units
-                                                  #:min-spacing min-spacing
-                                                  #:max-radius (max 18.0 (+ max-radius 4.0))
-                                                  #:step 1.0
-                                                  #:limit 64
-                                                  #:extra-reserved-points extra-reserved-points
-                                                  #:ws-active-placement? ws-active?
-                                                  #:reserved-aabbs eff-reserved-aabbs
-                                                  #:expansion-pads expansion-pads
-                                                  #:bldg-sym canon-bldg
-                                                  #:game-info game-info)))]
-                   [wide-cands (dedup-point2ds (take wide-pts (min 96 (length wide-pts))))])
-              (and (not (null? wide-cands))
-                   (query-single-batch wide-cands)))
-            (let ([em-cands (near-base-emergency-cands)])
+  (define (query-dual-batch batch0)
+    (define batch (filter-unqueried batch0))
+    (cond
+      [(null? batch) (values '() '())]
+      [else
+       (for ([pt (in-list batch)])
+         (hash-set! queried-keys (pt-key pt) #t))
+       (define q-items
+         (append*
+          (for/list ([pt (in-list batch)])
+            (define cx (sc2-point2d-x pt))
+            (define cy (sc2-point2d-y pt))
+            (list (sc2-query-placement ab-id cx cy 0)
+                  (sc2-query-placement 319
+                                       (+ cx SC2-TERRAN-ADDON-OFFSET-X)
+                                       (+ cy SC2-TERRAN-ADDON-OFFSET-Y)
+                                       0)))))
+       (define q-resp
+         (sc2-ws-rpc! ws-conn
+                      (make-request-query-placement q-items
+                                                    #:ignore-resource-requirements? #t)))
+       (values batch (sc2-response-query-placements q-resp))]))
+
+  (define resolved-pt
+    (cond
+      [(null? cands)
+       (define em-cands
+         (if is-zerg-creep-bldg?
+             (let ([t1 (collect-creep-tight-cands 8.5 #t #t)])
+               (if (pair? t1)
+                   t1
+                   (let ([t2 (collect-creep-tight-cands 8.5 #f #t)])
+                     (if (pair? t2) t2 (near-base-emergency-cands)))))
+             (near-base-emergency-cands)))
+       (cond
+         [ws-active?
+          (if is-zerg-creep-bldg?
+              (query-creep-fallbacks-ws!)
               (and (not (null? em-cands))
-                   (query-single-batch em-cands))))])]
-    [else
-     (first cands)]))
+                   (if needs-terran-addon-clearance?
+                       (let-values ([(em-q em-res) (query-dual-batch em-cands)])
+                         (cond
+                           [(null? em-q) #f]
+                           [(null? em-res) (first em-q)]
+                           [(>= (length em-res) (* 2 (length em-q)))
+                            (or (for/first ([pt (in-list em-q)]
+                                            [idx (in-naturals 0)]
+                                            #:when (and (= (list-ref em-res (* 2 idx)) 1)
+                                                        (= (list-ref em-res (+ (* 2 idx) 1)) 1)))
+                                  pt)
+                                (for/first ([pt (in-list em-q)]
+                                            [idx (in-naturals 0)]
+                                            #:when (= (list-ref em-res (* 2 idx)) 1))
+                                  pt))]
+                           [else
+                            (for/first ([pt (in-list em-q)]
+                                        [res (in-list em-res)]
+                                        #:when (= res 1))
+                              pt)]))
+                       (query-single-batch em-cands))))]
+         [(not (null? em-cands)) (first em-cands)]
+         [(and (static-footprint-placement-ok? pl-grid anchor-x anchor-y cand-hw cand-hh)
+               (or (not check-bfs) (< (check-bfs anchor-x anchor-y 4) +inf.0)))
+          (sc2-point2d anchor-x anchor-y)]
+         [else
+          (sc2-point2d (car safe-base-anchor) (cdr safe-base-anchor))])]
+      [ws-active?
+       (cond
+         [needs-terran-addon-clearance?
+          ;; Dual QueryPlacement: verify both the 3x3 facility at (cx, cy) AND a 2x2 Supply Depot (319)
+          ;; at the East (+X) add-on slot (cx + 2.5, cy - 0.5) so add-ons are never blocked by terrain/walls!
+          (define-values (cands-q q-results) (query-dual-batch cands))
+          (cond
+            [(null? cands-q) #f]
+            [(null? q-results) (first cands-q)]
+            [(>= (length q-results) (* 2 (length cands-q)))
+             (define wall-seal-pt
+               (and first-rax-allow-wall-3x3?
+                    (let ([valid-wall-pts
+                           (for/list ([pt (in-list cands-q)]
+                                      [idx (in-naturals 0)]
+                                      #:when (and (<= (pt-dist wall-ref-x wall-ref-y
+                                                               (sc2-point2d-x pt) (sc2-point2d-y pt))
+                                                      2.55)
+                                                  (= (list-ref q-results (* 2 idx)) 1)))
+                             (cons pt (= (list-ref q-results (+ (* 2 idx) 1)) 1)))])
+                      (and (not (null? valid-wall-pts))
+                           (car (argmin (lambda (entry)
+                                          (define pt (car entry))
+                                          (define addon-ok? (cdr entry))
+                                          (- (* 10.0 (pt-dist wall-ref-x wall-ref-y
+                                                              (sc2-point2d-x pt) (sc2-point2d-y pt)))
+                                             (if addon-ok? 0.25 0.0)))
+                                        valid-wall-pts))))))
+             (define both-valid-pt
+               (for/first ([pt (in-list cands-q)]
+                           [idx (in-naturals 0)]
+                           #:when (and (= (list-ref q-results (* 2 idx)) 1)
+                                       (= (list-ref q-results (+ (* 2 idx) 1)) 1)))
+                 pt))
+             (define main-valid-pt
+               (for/first ([pt (in-list cands-q)]
+                           [idx (in-naturals 0)]
+                           #:when (= (list-ref q-results (* 2 idx)) 1))
+                 pt))
+             (cond
+               [wall-seal-pt wall-seal-pt]
+               [both-valid-pt both-valid-pt]
+               [else
+                ;; Expand search radius across all anchors (including safe-base-anchor) to find a spot where BOTH 3x3 + East 2x2 add-on fit!
+                (define wide-raw
+                  (let ([pts
+                         (interleave-lists
+                          (for/list ([ap (in-list anchors)])
+                            (collect-spiral-candidates (car ap) (cdr ap) existing-units
+                                                       #:min-spacing min-spacing
+                                                       #:max-radius (max 18.0 (+ max-radius 4.0))
+                                                       #:step 1.0
+                                                       #:limit 64
+                                                       #:extra-reserved-points extra-reserved-points
+                                                       #:ws-active-placement? ws-active?
+                                                       #:reserved-aabbs eff-reserved-aabbs
+                                                       #:expansion-pads expansion-pads
+                                                       #:bldg-sym canon-bldg
+                                                       #:game-info game-info
+                                                       #:check-bfs shared-check-bfs
+                                                       #:layout-safety-ok? shared-layout-safety-ok?)))])
+                    (dedup-point2ds (take pts (min 96 (length pts))))))
+                (define wide-cands
+                  (let ([ac (filter-addon-clear wide-raw)])
+                    (if (not (null? ac)) ac wide-raw)))
+                (define-values (wide-both wide-main)
+                  (if (null? wide-cands)
+                      (values #f #f)
+                      (let-values ([(wide-q w-res) (query-dual-batch wide-cands)])
+                        (if (and (pair? wide-q) (>= (length w-res) (* 2 (length wide-q))))
+                            (values
+                             (for/first ([pt (in-list wide-q)]
+                                         [idx (in-naturals 0)]
+                                         #:when (and (= (list-ref w-res (* 2 idx)) 1)
+                                                     (= (list-ref w-res (+ (* 2 idx) 1)) 1)))
+                               pt)
+                             (for/first ([pt (in-list wide-q)]
+                                         [idx (in-naturals 0)]
+                                         #:when (= (list-ref w-res (* 2 idx)) 1))
+                               pt))
+                            (values #f #f)))))
+                (or wide-both
+                    main-valid-pt
+                    wide-main
+                    (let ([em-cands (near-base-emergency-cands)])
+                      (and (not (null? em-cands))
+                           (let-values ([(em-q em-res) (query-dual-batch em-cands)])
+                             (and (pair? em-q)
+                                  (>= (length em-res) (* 2 (length em-q)))
+                                  (or (for/first ([pt (in-list em-q)]
+                                                  [idx (in-naturals 0)]
+                                                  #:when (and (= (list-ref em-res (* 2 idx)) 1)
+                                                              (= (list-ref em-res (+ (* 2 idx) 1)) 1)))
+                                        pt)
+                                      (for/first ([pt (in-list em-q)]
+                                                  [idx (in-naturals 0)]
+                                                  #:when (= (list-ref em-res (* 2 idx)) 1))
+                                        pt)))))))] )]
+            [else
+             (for/first ([pt (in-list cands-q)]
+                         [res (in-list q-results)]
+                         #:when (= res 1))
+               pt)])]
+         [else
+          (define verified-pt (query-single-batch cands))
+          (or verified-pt
+              (and is-zerg-creep-bldg?
+                   (query-creep-fallbacks-ws!))
+              (let* ([wide-pts
+                      (interleave-lists
+                       (for/list ([ap (in-list anchors)])
+                         (collect-spiral-candidates (car ap) (cdr ap) existing-units
+                                                    #:min-spacing min-spacing
+                                                    #:max-radius (max 18.0 (+ max-radius 4.0))
+                                                    #:step 1.0
+                                                    #:limit 64
+                                                    #:extra-reserved-points extra-reserved-points
+                                                    #:ws-active-placement? ws-active?
+                                                    #:reserved-aabbs eff-reserved-aabbs
+                                                    #:expansion-pads expansion-pads
+                                                    #:bldg-sym canon-bldg
+                                                    #:game-info game-info
+                                                    #:check-bfs shared-check-bfs
+                                                    #:layout-safety-ok? shared-layout-safety-ok?)))]
+                     [wide-cands (dedup-point2ds (take wide-pts (min 96 (length wide-pts))))])
+                (query-single-batch wide-cands))
+              (query-single-batch (near-base-emergency-cands)))])]
+      [else
+       (first cands)]))
+  (when (and ws-active? neg-cd-key (not resolved-pt))
+    (hash-set! SC2-PLACEMENT-NEG-COOLDOWN neg-cd-key neg-cd-cur-loop))
+  resolved-pt)))
 
 (define (find-best-expansion-placement ws-conn th-ab home-x home-y units
                                        #:req-x [req-x #f]
@@ -7216,6 +7396,8 @@
       (match act
         [(list (or 'worker-scout 'worker-harass 'mineral-walk) (? exact-integer? wid) _ _)
          (set-add s wid)]
+        [(list 'mineral-walk (? exact-integer? wid) _ _ _)
+         (set-add s wid)]
         [(list 'mineral-harass (? exact-integer? wid) _ _ _ _)
          (set-add s wid)]
         [_ s])))
@@ -7849,11 +8031,19 @@
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym norm
                                                 #:game-info eff-game-info))
-            (when place-pt
-              (reserve-step-build-pt! place-pt ab-id)
-              (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
-              (when wtag
-                (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f))))]
+            (cond
+              [place-pt
+               (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+               (reserve-step-build-pt! place-pt ab-id)
+               (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
+               (when wtag
+                 (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))]
+              [(or (sc2-observation? obs)
+                   (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
+               (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
+                         (if (sc2-observation? obs)
+                             (sc2-observation-game-loop obs)
+                             (unbox SC2-WARPGATE-LAST-LOOP)))])]
 
            ;; Zerg structures requiring Creep (including Lurker Den built by Drone via 1163!)
            [(memq norm '(spawning-pool evolution-chamber roach-warren baneling-nest
@@ -7984,13 +8174,14 @@
                                         #:req-y req-y
                                         #:game-info eff-game-info
                                         #:remembered-enemies SC2-LAST-KNOWN-ENEMY-POS))
-       (reserve-step-build-pt! exp-pt th-ab)
-       (define wtag (pick-worker-near (sc2-point2d-x exp-pt) (sc2-point2d-y exp-pt)))
-       (when wtag
-         (set! active-friendly-th-build-pads
-               (cons (cons (sc2-point2d-x exp-pt) (sc2-point2d-y exp-pt))
-                     active-friendly-th-build-pads))
-         (emit! (sc2-raw-unit-command th-ab exp-pt 0 (list wtag) #f)))]
+       (when (sc2-point2d? exp-pt)
+         (reserve-step-build-pt! exp-pt th-ab)
+         (define wtag (pick-worker-near (sc2-point2d-x exp-pt) (sc2-point2d-y exp-pt)))
+         (when wtag
+           (set! active-friendly-th-build-pads
+                 (cons (cons (sc2-point2d-x exp-pt) (sc2-point2d-y exp-pt))
+                       active-friendly-th-build-pads))
+           (emit! (sc2-raw-unit-command th-ab exp-pt 0 (list wtag) #f))))]
 
       ;; 4. Research upgrade: `(research <upg-sym>)`
       [(list 'research upg-sym)

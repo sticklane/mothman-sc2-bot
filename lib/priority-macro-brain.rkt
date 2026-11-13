@@ -1157,7 +1157,10 @@
        (add-goal-spec! 'marine 'army-production 'train 6 495.0 'anti-air-response)
        (add-goal-spec! 'viking-fighter 'army-production 'train 2 490.0 'anti-air-response)]
       [(Protoss)
-       (add-goal-spec! 'stalker 'army-production 'train 4 495.0 'anti-air-response)]))
+       (add-goal-spec! 'stalker 'army-production 'train 6 495.0 'anti-air-response)
+       (add-goal-spec! 'blink 'tech-infrastructure 'research 1 492.0 'anti-air-response)
+       (add-goal-spec! 'stargate 'tech-infrastructure 'build 1 488.0 'anti-air-response)
+       (add-goal-spec! 'phoenix 'army-production 'train 4 491.0 'anti-air-response)]))
 
   (when requires-detection?
     (case race
@@ -2463,10 +2466,25 @@
   (define final-bo-goal-sym
     (and (pro-bo-goal? final-effective-bo-goal)
          (pro-bo-goal-target-sym final-effective-bo-goal)))
+  (define final-bo-sup-cost
+    (if (and (pro-bo-goal? final-effective-bo-goal)
+             (eq? (pro-bo-goal-kind final-effective-bo-goal) 'train))
+        (sc2-supply-cost final-bo-goal-sym 0)
+        0))
+  (define final-bo-eligible-for-saving-fallback?
+    (and has-mineral-income?
+         final-bo-goal-sym
+         (<= final-bo-sup-cost supply-left)
+         (not (and (memq final-bo-goal-sym '(hatchery nexus command-center))
+                   (hash? open-facility-slots)
+                   (>= active-bases 2)
+                   (not (eq? race 'Zerg))
+                   (< army-supply 10)
+                   (< minerals 550)))))
   (define saving-id
     (if reserved-cand
         (priority-candidate-id reserved-cand)
-        (or (and has-mineral-income? final-bo-goal-sym) 'none)))
+        (if final-bo-eligible-for-saving-fallback? final-bo-goal-sym 'none)))
   (define log-str
     (format-priority-schedule-log-line
      sched-result

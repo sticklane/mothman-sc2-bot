@@ -3345,10 +3345,10 @@
       (pro-bo-goal 'build 'assimilator 2 18 'pylon)
       (pro-bo-goal 'build 'cybernetics-core 1 19 'gateway)
       (pro-bo-goal 'build 'pylon 2 20 'cybernetics-core)
+      (pro-bo-goal 'research 'warp-gate-research 1 21 'cybernetics-core)
       (pro-bo-goal 'train 'stalker 2 21 'cybernetics-core)
-      (pro-bo-goal 'train 'sentry 1 23 'cybernetics-core)
-      (pro-bo-goal 'research 'warp-gate-research 1 23 'cybernetics-core)
-      (pro-bo-goal 'expand 'nexus 2 27 'cybernetics-core)
+      (pro-bo-goal 'expand 'nexus 2 26 'cybernetics-core)
+      (pro-bo-goal 'train 'sentry 1 28 'cybernetics-core)
       (pro-bo-goal 'build 'robotics-facility 1 29 'cybernetics-core)
       (pro-bo-goal 'build 'twilight-council 1 32 'cybernetics-core)
       (pro-bo-goal 'train 'immortal 1 34 'robotics-facility)
@@ -3490,6 +3490,8 @@
   (for ([g (in-list steps)]
         #:when (and (not (goal-satisfied? g))
                     (>= supply-used (pro-bo-goal-min-supply g))
+                    (not (and (eq? (pro-bo-goal-kind g) 'train)
+                              (>= supply-used (+ (pro-bo-goal-min-supply g) 12))))
                     (not (and (eq? race 'Protoss)
                               (not (eq? m-sym 'PvP))
                               (eq? (pro-bo-goal-target-sym g) 'assimilator)
@@ -3502,6 +3504,9 @@
     (define s-cost (if (eq? kind 'train) (sc2-supply-cost sym 0) 0))
     (define pre-ok? (prereq-ready? (pro-bo-goal-prereq-ready-sym g)))
     (cond
+      [(and (eq? kind 'train) (> s-cost rem-sup))
+       ;; Do not reserve or stall BO head on a supply-blocked unit step
+       (void)]
       [(and pre-ok?
             (>= (- rem-min res-min) m-cost)
             (>= (- rem-gas res-gas) g-cost)
