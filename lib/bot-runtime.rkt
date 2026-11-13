@@ -1796,11 +1796,20 @@
           (safe-coord (if (> cl-d 10.5) (+ base-x (* 10.5 (/ cl-dx cl-d))) raw-cl-x) base-x))
         (define cl-y
           (safe-coord (if (> cl-d 10.5) (+ base-y (* 10.5 (/ cl-dy cl-d))) raw-cl-y) base-y))
+        (define in-pack-engage-enemies
+          (let ([near-pack
+                 (filter (lambda (ew)
+                           (<= (dist2d cl-x cl-y
+                                       (hash-ref ew 'x cl-x)
+                                       (hash-ref ew 'y cl-y))
+                               3.5))
+                         worker-rush-engage-enemies)])
+            (if (null? near-pack) worker-rush-engage-enemies near-pack)))
         (define lowest-ehp-enemy
           (argmin (lambda (ew)
                     (+ (* 5.0 (unit-total-hp-and-shield ew))
                        (dist-to-owned-townhall (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y))))
-                  worker-rush-engage-enemies))
+                  in-pack-engage-enemies))
         (define focus-amove-x
           (if lowest-ehp-enemy
               (safe-coord (hash-ref lowest-ehp-enemy 'x cl-x) cl-x)
@@ -1881,20 +1890,22 @@
                              (safe-coord (hash-ref chosen 'x cl-x) cl-x)
                              (safe-coord (hash-ref chosen 'y cl-y) cl-y)))))
 
-        ;; Pass 2: Local unassigned chaser within <= 7.0 tiles (capped at <= 3 to prevent conga-lining),
-        ;; else Attack-Move (0, focus-amove-x, focus-amove-y) right onto the weakest Probe's tile!
+        ;; Pass 2: In live >= 6-worker brawls, workers outside Pass-1 melee reach use Attack-Move (0, focus-amove-x, focus-amove-y)
+        ;; so they swing immediately on contact and NEVER chase kiting equal-speed bait workers past frontline attackers!
         (for ([w (in-list frontline-first)]
               #:unless (hash-has-key? worker-assignments (hash-ref w 'id 10)))
           (define wid (hash-ref w 'id 10))
           (define wx (hash-ref w 'x base-x))
           (define wy (hash-ref w 'y base-y))
           (define local-cands
-            (filter (lambda (ew)
-                      (define eid (hash-ref ew 'id 0))
-                      (and (> eid 0)
-                           (< (hash-ref assigned-target-counts eid 0) (effective-chaser-cap ew))
-                           (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 7.0)))
-                    worker-rush-engage-enemies))
+            (if (and live-obs-harvesters? (>= e-cnt 6))
+                '()
+                (filter (lambda (ew)
+                          (define eid (hash-ref ew 'id 0))
+                          (and (> eid 0)
+                               (< (hash-ref assigned-target-counts eid 0) (effective-chaser-cap ew))
+                               (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 7.0)))
+                        worker-rush-engage-enemies)))
           (cond
             [(not (null? local-cands))
              (define chosen
