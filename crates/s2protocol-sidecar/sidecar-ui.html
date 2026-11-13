@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>s2protocol-rs Antigravity Sidecar — Enhanced Minimap &amp; High-APM Forensics</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased m-0 p-3 select-none">
+  <div class="max-w-[1440px] mx-auto space-y-3">
+    <!-- Top Header & Catalog Controls -->
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-2">
+          <span id="sseDot" class="inline-block w-2.5 h-2.5 rounded-full bg-[var(--warning)]"></span>
+          <span class="font-semibold text-sm tracking-tight">s2protocol-rs Sidecar</span>
+          <span id="connBadge" class="text-xs px-2 py-0.5 rounded border border-[var(--card-border)] text-[var(--muted-foreground)] font-mono">
+            Connecting :4322…
+          </span>
+        </div>
+        <select id="replaySelect" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs font-mono min-w-[290px] max-w-[460px]">
+        </select>
+        <label class="cursor-pointer bg-[var(--secondary)] text-[var(--secondary-foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs font-medium hover:opacity-90">
+          Upload .SC2Replay
+          <input id="fileUploadInput" type="file" accept=".SC2Replay" class="hidden" />
+        </label>
+      </div>
+      <div class="flex items-center gap-3 text-xs text-[var(--muted-foreground)] font-mono">
+        <span id="metaProtocol">Proto 75689</span>
+        <span>•</span>
+        <span id="metaMap">Map: —</span>
+        <span>•</span>
+        <span id="metaParseMs">Parse: —</span>
+      </div>
+    </div>
+
+    <!-- Live Frame Scoreboard Strip -->
+    <div id="scoreboardStrip" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-2.5 flex items-center justify-between gap-2">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#3b82f6"></span>
+            <span id="p1Title" class="font-semibold text-sm">Player 1</span>
+            <span id="p1ResultBadge" class="text-xs px-1.5 py-0.5 rounded border border-[var(--card-border)] font-mono">—</span>
+          </div>
+          <div id="p1CpmLine" class="text-xs text-[var(--muted-foreground)] font-mono mt-0.5">CPM: —</div>
+        </div>
+        <div id="p1LiveStats" class="grid grid-cols-4 gap-2 text-right font-mono text-xs tabular-nums"></div>
+      </div>
+
+      <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-2.5 flex items-center justify-between gap-2">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#ef4444"></span>
+            <span id="p2Title" class="font-semibold text-sm">Player 2</span>
+            <span id="p2ResultBadge" class="text-xs px-1.5 py-0.5 rounded border border-[var(--card-border)] font-mono">—</span>
+          </div>
+          <div id="p2CpmLine" class="text-xs text-[var(--muted-foreground)] font-mono mt-0.5">CPM: —</div>
+        </div>
+        <div id="p2LiveStats" class="grid grid-cols-4 gap-2 text-right font-mono text-xs tabular-nums"></div>
+      </div>
+    </div>
+
+    <!-- Main Workbench Grid: Enhanced Minimap (Left) + Forensics & Win-Chance (Right) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
+      <!-- Left 5 Cols: Engine-Free Enhanced Minimap -->
+      <div class="lg:col-span-5 bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2.5">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+            Enhanced Minimap State Machine
+          </div>
+          <div id="clockReadout" class="font-mono text-xs tabular-nums px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)]">
+            00:00 (f=0)
+          </div>
+        </div>
+
+        <!-- Layer Toggles -->
+        <div class="flex flex-wrap gap-1.5 text-xs">
+          <button data-layer="botFilter" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">BotFilter: ON</button>
+          <button data-layer="rays" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Cmd Rays</button>
+          <button data-layer="power" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Pylon 6.5r</button>
+          <button data-layer="creep" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Creep</button>
+          <button data-layer="cameras" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Cameras</button>
+          <button data-layer="heatmap" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Lethality Map</button>
+        </div>
+
+        <!-- Minimap Canvas Container -->
+        <div class="relative w-full aspect-square rounded border border-[var(--card-border)] overflow-hidden bg-[var(--background)]">
+          <canvas id="minimapCanvas" width="540" height="540" class="w-full h-full block cursor-crosshair"></canvas>
+          <div id="minimapTooltip" class="hidden pointer-events-none absolute z-10 px-2 py-1 rounded text-xs font-mono bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] shadow">
+          </div>
+        </div>
+
+        <!-- Transport & Timeline Scrubber -->
+        <div class="space-y-2 pt-1">
+          <input id="frameSlider" type="range" min="0" max="0" value="0" class="w-full accent-[var(--primary)] cursor-pointer" />
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-1.5">
+              <button id="prevFrameBtn" class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-xs font-mono hover:opacity-80">&larr;</button>
+              <button id="playPauseBtn" class="px-3 py-1 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-semibold hover:opacity-90">Play</button>
+              <button id="nextFrameBtn" class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-xs font-mono hover:opacity-80">&rarr;</button>
+            </div>
+            <div class="flex items-center gap-1 text-xs font-mono">
+              <span class="text-[var(--muted-foreground)]">Speed:</span>
+              <button data-speed="1" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">1x</button>
+              <button data-speed="2" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">2x</button>
+              <button data-speed="4" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">4x</button>
+              <button data-speed="8" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">8x</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Turning Point & Battle Quick-Jump Pills -->
+        <div class="border-t border-[var(--card-border)] pt-2 space-y-1">
+          <div class="text-xs text-[var(--muted-foreground)] font-medium">Jump to Turning Points &amp; Major Battles:</div>
+          <div id="jumpPills" class="flex flex-wrap gap-1.5 text-xs"></div>
+        </div>
+      </div>
+
+      <!-- Right 7 Cols: Win-Chance Curve + [SCBOT_PRIORITY] + Forensic Tabs -->
+      <div class="lg:col-span-7 space-y-3">
+        <!-- Calibrated 4-Factor Logistic Win-Chance Curve -->
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+              Swarmy Logistic Win-Chance Curve (Army • Income • Workers • Trades)
+            </div>
+            <div id="winChanceReadout" class="text-xs font-mono text-[var(--muted-foreground)]">
+              Click chart to scrub timeline
+            </div>
+          </div>
+          <div class="w-full h-[132px] rounded border border-[var(--card-border)] bg-[var(--background)] overflow-hidden">
+            <canvas id="winChanceCanvas" width="760" height="132" class="w-full h-full block cursor-pointer"></canvas>
+          </div>
+        </div>
+
+        <!-- Frame-Synchronized [SCBOT_PRIORITY] Braun-Heap Inspector -->
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+              Frame-Synchronized [SCBOT_PRIORITY] Escrow &amp; Latency
+            </span>
+            <span id="prioMeta" class="text-xs font-mono text-[var(--muted-foreground)]">No match_log.zip snapshot</span>
+          </div>
+          <div id="prioGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
+            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">saving_for: <span id="prioSaving">—</span></div>
+            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">approved: <span id="prioApproved">—</span></div>
+            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">escrow_queue: <span id="prioEscrow">—</span></div>
+            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">blocked: <span id="prioBlocked">—</span></div>
+          </div>
+        </div>
+
+        <!-- Forensic Diagnostic Banners -->
+        <div id="findingsBanner" class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-1.5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+            Automated Wire &amp; State-Machine Findings
+          </div>
+          <div id="findingsList" class="space-y-1 text-xs font-mono"></div>
+        </div>
+
+        <!-- Multi-Tab Deep Forensics -->
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-3">
+          <div class="flex flex-wrap gap-1.5 border-b border-[var(--card-border)] pb-2 text-xs font-medium">
+            <button data-tab="wire" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">1. Wire Build vs Init vs Done</button>
+            <button data-tab="lessons" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">2. Costed Lessons &amp; Idle Prod</button>
+            <button data-tab="combat" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">3. Unit ROI &amp; Engagements</button>
+            <button data-tab="decisions" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">4. Counter-Choices &amp; APM</button>
+          </div>
+          <div id="tabContent" class="text-xs space-y-3 max-h-[410px] overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Compact embedded real-match snapshot so standalone file:// viewing works even if :4322 is stopped.
+    const EMBEDDED_FALLBACK = {
+      catalog: [
+        {
+          id: "5122350",
+          file_name: "5122350_Mothman-P_vs_sludgement2-revived.SC2Replay",
+          map_name: "Persephone AIE",
+          p1_name: "Mothman-P", p1_race: "Protoss", p1_result: "Loss",
+          p2_name: "sludgement2-revived", p2_race: "Zerg", p2_result: "Win",
+          protocol_version: 75689, has_priority_log: true
+        },
+        {
+          id: "5122349",
+          file_name: "5122349_Mothman-T_vs_Thssprtssbt.SC2Replay",
+          map_name: "Torches AIE",
+          p1_name: "Mothman-T", p1_race: "Terran", p1_result: "Loss",
+          p2_name: "Thssprtssbt", p2_race: "Protoss", p2_result: "Win",
+          protocol_version: 75689, has_priority_log: true
+        }
+      ],
+      replays: {
+        "5122350": {
+          replay_id: "5122350",
+          file_name: "5122350_Mothman-P_vs_sludgement2-revived.SC2Replay",
+          protocol_version: 75689,
+          map_name: "Persephone AIE",
+          map_width: 152, map_height: 152,
+          total_loops: 9856, duration_sec: 440.0, sample_interval_loops: 110, parse_elapsed_ms: 142.4,
+          players: [
+            {
+              pid: 1, name: "Mothman-P", declared_race: "Protoss", actual_race: "Protoss", result: "Loss",
+              start_xy: [36.5, 36.5], opening_tech: ["Gateway", "CyberneticsCore", "ShieldBattery", "RoboticsFacility"],
+              raw_commands: 217, macro_filtered_commands: 135, raw_cpm: 29.6, macro_cpm: 18.4, move_attack_spam_pct: 37.7,
+              worker_thrash_events: 0, control_groups_used: [], control_group_assigns: 0, control_group_recalls_per_min: 0, camera_moves_per_min: 18.2,
+              top_abilities: [["Train.Probe", 29], ["ChronoBoostEnergyCost.Execute", 11], ["Train.Stalker", 8], ["Build.Pylon", 5], ["Train.Zealot", 5], ["Train.Immortal", 2]],
+              supply_blocked_seconds: 14, floating_seconds: 62, avg_unspent: 640, avg_income: 1080, mining_seconds_lost: 245.0,
+              resources_lost: 4125, resources_killed: 1375, injects: 0, chrono_boosts: 11, mules: 0, creep_tumors_placed: 0, creep_tumors_cleared_by_enemy: 0,
+              first_scout: [14.2, "Probe"], proxy_detected: null, bases_lost: [[388.4, "Nexus killed by Zergling"], [436.2, "Nexus killed by Ravager"]],
+              wire_actuation_audit: [
+                { structure: "Pylon", wire_build_cmds: 5, unit_init_count: 5, unit_done_count: 5, canceled_or_sniped: 0, first_wire_sec: 18.5, first_init_sec: 20.1, sample_target_xy: [41.0, 39.0], status: "OK" },
+                { structure: "Gateway", wire_build_cmds: 2, unit_init_count: 2, unit_done_count: 1, canceled_or_sniped: 1, first_wire_sec: 39.0, first_init_sec: 41.2, sample_target_xy: [43.5, 40.5], status: "OK" },
+                { structure: "CyberneticsCore", wire_build_cmds: 1, unit_init_count: 1, unit_done_count: 1, canceled_or_sniped: 0, first_wire_sec: 92.4, first_init_sec: 94.0, sample_target_xy: [40.5, 42.5], status: "OK" },
+                { structure: "Nexus", wire_build_cmds: 1, unit_init_count: 1, unit_done_count: 1, canceled_or_sniped: 0, first_wire_sec: 108.0, first_init_sec: 110.3, sample_target_xy: [62.5, 38.5], status: "OK" },
+                { structure: "RoboticsFacility", wire_build_cmds: 1, unit_init_count: 1, unit_done_count: 1, canceled_or_sniped: 0, first_wire_sec: 168.0, first_init_sec: 170.1, sample_target_xy: [38.5, 43.5], status: "OK" }
+              ],
+              production_idle: [
+                { structure: "Gateway", facilities: 2, idle_seconds: 128 },
+                { structure: "Nexus", facilities: 2, idle_seconds: 69 },
+                { structure: "RoboticsFacility", facilities: 1, idle_seconds: 36 }
+              ],
+              ability_efficiency: [{ ability: "Chrono Boost", caster: "Nexus", uses_until_10m: 11, possible_until_10m: 12.4, efficiency_pct: 88.7 }],
+              unit_effectiveness: [
+                { unit: "Zealot", produced: 5, lost: 5, kills: 14, value_killed: 525, unit_cost: 100, roi: 1.05 },
+                { unit: "Stalker", produced: 8, lost: 8, kills: 11, value_killed: 550, unit_cost: 175, roi: 0.39 },
+                { unit: "Immortal", produced: 2, lost: 2, kills: 3, value_killed: 300, unit_cost: 375, roi: 0.40 }
+              ],
+              killed_by: [["Zergling", 21], ["Roach", 6], ["Ravager", 4]],
+              good_decisions: 3, even_decisions: 4,
+              bad_decisions: [
+                { sec: 248.0, unit: "Stalker", score: -0.56, strong_vs: "", weak_vs: "10xZergling" },
+                { sec: 312.5, unit: "Immortal", score: -0.30, strong_vs: "4xRoach", weak_vs: "14xZergling" }
+              ],
+              lessons: [
+                { title: "Unfavorable engagement", detail: "Lost 2750 vs 625 killed at 352s (61.2, 42.8)", mineral_equiv_cost: 2125, at_sec: 352 },
+                { title: "Idle production", detail: "233s total facility idle (worst: Gateway 128s)", mineral_equiv_cost: 466, at_sec: null },
+                { title: "Supply blocked", detail: "14s capped below 200 supply", mineral_equiv_cost: 141, at_sec: null }
+              ]
+            },
+            {
+              pid: 2, name: "sludgement2-revived", declared_race: "Zerg", actual_race: "Zerg", result: "Win",
+              start_xy: [115.5, 115.5], opening_tech: ["SpawningPool", "RoachWarren", "Lair"],
+              raw_commands: 2504, macro_filtered_commands: 387, raw_cpm: 341.5, macro_cpm: 52.8, move_attack_spam_pct: 84.5,
+              worker_thrash_events: 0, control_groups_used: [1, 2, 4], control_group_assigns: 48, control_group_recalls_per_min: 19.4, camera_moves_per_min: 0,
+              top_abilities: [["MorphZerglingToBaneling", 0], ["SpawnLarva.Execute", 24], ["Build.CreepTumor", 17], ["Train.Zergling", 46], ["Train.Roach", 14]],
+              supply_blocked_seconds: 8, floating_seconds: 12, avg_unspent: 390, avg_income: 1690, mining_seconds_lost: 54.0,
+              resources_lost: 1375, resources_killed: 4125, injects: 24, chrono_boosts: 0, mules: 0, creep_tumors_placed: 18, creep_tumors_cleared_by_enemy: 1,
+              first_scout: [1.2, "Overlord"], proxy_detected: null, bases_lost: [],
+              wire_actuation_audit: [
+                { structure: "SpawningPool", wire_build_cmds: 1, unit_init_count: 1, unit_done_count: 1, canceled_or_sniped: 0, first_wire_sec: 48.2, first_init_sec: 50.0, sample_target_xy: [111.5, 112.5], status: "OK" },
+                { structure: "CreepTumor", wire_build_cmds: 17, unit_init_count: 18, unit_done_count: 17, canceled_or_sniped: 1, first_wire_sec: 132.0, first_init_sec: 132.4, sample_target_xy: [98.5, 99.5], status: "OK" }
+              ],
+              production_idle: [],
+              ability_efficiency: [{ ability: "Inject Larva", caster: "Queen", uses_until_10m: 24, possible_until_10m: 26.0, efficiency_pct: 92.3 }],
+              unit_effectiveness: [
+                { unit: "Zergling", produced: 92, lost: 34, kills: 19, value_killed: 2450, unit_cost: 25, roi: 1.07 },
+                { unit: "Roach", produced: 14, lost: 4, kills: 9, value_killed: 1675, unit_cost: 100, roi: 1.20 }
+              ],
+              killed_by: [["Zealot", 14], ["Stalker", 11]],
+              good_decisions: 18, even_decisions: 6, bad_decisions: [], lessons: []
+            }
+          ],
+          win_chance_curve: [
+            { sec: 120, p1_chance: 0.51, army_term: 0.02, income_term: 0.01, workers_term: 0.01, trades_term: 0.0 },
+            { sec: 180, p1_chance: 0.48, army_term: -0.04, income_term: -0.03, workers_term: 0.0, trades_term: 0.0 },
+            { sec: 240, p1_chance: 0.42, army_term: -0.14, income_term: -0.11, workers_term: -0.06, trades_term: -0.02 },
+            { sec: 300, p1_chance: 0.34, army_term: -0.26, income_term: -0.22, workers_term: -0.12, trades_term: -0.06 },
+            { sec: 360, p1_chance: 0.14, army_term: -0.78, income_term: -0.45, workers_term: -0.28, trades_term: -0.31 },
+            { sec: 420, p1_chance: 0.05, army_term: -1.35, income_term: -0.82, workers_term: -0.55, trades_term: -0.48 }
+          ],
+          turning_points: [
+            { start_sec: 300, end_sec: 360, delta_p1_chance: -0.20, summary: "P1 lost 2750 (5xStalker,1xNexus) vs P2 lost 625 (17xZergling) near (61.2, 42.8)" }
+          ],
+          engagements: [
+            { start_sec: 342, end_sec: 388, center_x: 61.2, center_y: 42.8, p1_lost_resources: 2750, p2_lost_resources: 625, p1_mining_sec_lost: 152.8, p2_mining_sec_lost: 22.2, p1_units_lost: "1xNexus,5xStalker,3xZealot", p2_units_lost: "17xZergling,2xRoach" }
+          ],
+          findings: [
+            "[COUNTER_MISMATCH] Mothman-P trained Stalker/Immortal (-0.56 score) against 14xZergling swarm; needs Charge Zealot / Archon / Adept splash."
+          ],
+          static_objects: [
+            { x: 31.5, y: 34.5, kind: 0, name: "MineralField" }, { x: 33.5, y: 31.5, kind: 1, name: "VespeneGeyser" },
+            { x: 58.5, y: 36.5, kind: 0, name: "MineralField" }, { x: 120.5, y: 117.5, kind: 0, name: "MineralField" }
+          ],
+          death_heatmap: [{ x: 62, y: 42, count: 28, value: 3375 }, { x: 38, y: 38, count: 14, value: 1850 }],
+          siege_spots: [],
+          frames: [
+            {
+              game_loop: 0, sec: 0,
+              units: [
+                { x: 36.5, y: 36.5, owner: 1, kind: 2, r: 2.5, init: false, name: "Nexus" },
+                { x: 33.5, y: 35.5, owner: 1, kind: 0, r: 0.5, init: false, name: "Probe" },
+                { x: 115.5, y: 115.5, owner: 2, kind: 2, r: 2.5, init: false, name: "Hatchery" },
+                { x: 118.0, y: 116.5, owner: 2, kind: 0, r: 0.5, init: false, name: "Drone" }
+              ],
+              rays: [], deaths: [], cameras: [[36.5, 36.5], [115.5, 115.5]], creep: [[115.5, 115.5]], pylons: [],
+              p1_stats: { minerals: 50, vespene: 0, min_rate: 0, gas_rate: 0, workers: 12, food_used: 12, food_made: 15, army_value: 0, killed_value: 0 },
+              p2_stats: { minerals: 50, vespene: 0, min_rate: 0, gas_rate: 0, workers: 12, food_used: 12, food_made: 14, army_value: 0, killed_value: 0 },
+              priority_idx: 0
+            },
+            {
+              game_loop: 4480, sec: 200.0,
+              units: [
+                { x: 36.5, y: 36.5, owner: 1, kind: 2, r: 2.5, init: false, name: "Nexus" },
+                { x: 62.5, y: 38.5, owner: 1, kind: 2, r: 2.5, init: false, name: "Nexus" },
+                { x: 43.5, y: 40.5, owner: 1, kind: 3, r: 1.5, init: false, name: "Gateway" },
+                { x: 40.5, y: 42.5, owner: 1, kind: 3, r: 1.5, init: false, name: "CyberneticsCore" },
+                { x: 38.5, y: 43.5, owner: 1, kind: 3, r: 1.5, init: false, name: "RoboticsFacility" },
+                { x: 56.0, y: 42.0, owner: 1, kind: 1, r: 0.8, init: false, name: "Stalker" },
+                { x: 58.0, y: 43.0, owner: 1, kind: 1, r: 0.9, init: false, name: "Immortal" },
+                { x: 115.5, y: 115.5, owner: 2, kind: 2, r: 2.5, init: false, name: "Lair" },
+                { x: 92.5, y: 112.5, owner: 2, kind: 2, r: 2.5, init: false, name: "Hatchery" },
+                { x: 74.0, y: 66.0, owner: 2, kind: 1, r: 0.6, init: false, name: "Zergling" },
+                { x: 76.0, y: 68.0, owner: 2, kind: 1, r: 0.8, init: false, name: "Roach" }
+              ],
+              rays: [
+                { ox: 56.0, oy: 42.0, tx: 74.0, ty: 66.0, owner: 1, kind: 2, label: "Blink.Execute" },
+                { ox: 74.0, oy: 66.0, tx: 62.5, ty: 38.5, owner: 2, kind: 0, label: "attack.Execute" }
+              ],
+              deaths: [], cameras: [[58.0, 40.0], [115.5, 115.5]],
+              creep: [[115.5, 115.5], [92.5, 112.5], [88.0, 96.0]],
+              pylons: [[41.0, 39.0, 1], [60.0, 41.0, 1]],
+              p1_stats: { minerals: 320, vespene: 180, min_rate: 920, gas_rate: 240, workers: 34, food_used: 56, food_made: 62, army_value: 1450, killed_value: 350 },
+              p2_stats: { minerals: 210, vespene: 90, min_rate: 1380, gas_rate: 310, workers: 44, food_used: 78, food_made: 90, army_value: 2350, killed_value: 600 },
+              priority_idx: 1
+            },
+            {
+              game_loop: 7885, sec: 352.0,
+              units: [
+                { x: 36.5, y: 36.5, owner: 1, kind: 2, r: 2.5, init: false, name: "Nexus" },
+                { x: 62.5, y: 38.5, owner: 1, kind: 2, r: 2.5, init: false, name: "Nexus" },
+                { x: 60.5, y: 41.5, owner: 1, kind: 1, r: 0.8, init: false, name: "Stalker" },
+                { x: 62.0, y: 42.5, owner: 2, kind: 1, r: 0.6, init: false, name: "Zergling" },
+                { x: 63.5, y: 43.0, owner: 2, kind: 1, r: 0.8, init: false, name: "Ravager" }
+              ],
+              rays: [{ ox: 63.5, oy: 43.0, tx: 62.5, ty: 38.5, owner: 2, kind: 2, label: "CorrosiveBile.Execute" }],
+              deaths: [{ x: 61.2, y: 42.8, owner: 1, unit: "Immortal", killer: "Zergling" }],
+              cameras: [[62.5, 38.5], [62.5, 38.5]],
+              creep: [[115.5, 115.5], [92.5, 112.5], [80.0, 82.0]],
+              pylons: [[41.0, 39.0, 1]],
+              p1_stats: { minerals: 780, vespene: 410, min_rate: 610, gas_rate: 180, workers: 24, food_used: 38, food_made: 46, army_value: 650, killed_value: 1125 },
+              p2_stats: { minerals: 340, vespene: 150, min_rate: 1620, gas_rate: 380, workers: 51, food_used: 104, food_made: 114, army_value: 3100, killed_value: 3350 },
+              priority_idx: 2
+            }
+          ],
+          priority_snapshots: [
+            { frame: 224, sec: 10.0, race: "Protoss", bank: "110M/0G", sup: "14/15", bo: "opening", saving_for: "pylon@120", approved: "(probe pylon)", escrow_queue: "()", blocked: "()", step_ms: 0.8 },
+            { frame: 4480, sec: 200.0, race: "Protoss", bank: "320M/180G", sup: "56/62", bo: "done", saving_for: "immortal@96", approved: "(probe stalker)", escrow_queue: "(immortal:275M/100G)", blocked: "()", step_ms: 1.3 },
+            { frame: 7885, sec: 352.0, race: "Protoss", bank: "780M/410G", sup: "38/46", bo: "done", saving_for: "none", approved: "(zealot stalker pylon)", escrow_queue: "()", blocked: "(colossus:no-robotics-bay)", step_ms: 1.6 }
+          ]
+        }
+      }
+    };
+
+    const API_BASE = window.location.port === "4322"
+      ? window.location.origin
+      : "http://127.0.0.1:4322";
+
+    const state = {
+      connected: false,
+      catalog: [...EMBEDDED_FALLBACK.catalog],
+      cache: { ...EMBEDDED_FALLBACK.replays },
+      current: EMBEDDED_FALLBACK.replays["5122350"],
+      frameIdx: 0,
+      playing: false,
+      speed: 2,
+      activeTab: "wire",
+      highlightXY: null,
+      layers: {
+        botFilter: true,
+        rays: true,
+        power: true,
+        creep: true,
+        cameras: false,
+        heatmap: true
+      }
+    };
+
+    const minimapCanvas = document.getElementById("minimapCanvas");
+    const minimapCtx = minimapCanvas.getContext("2d");
+    const winCanvas = document.getElementById("winChanceCanvas");
+    const winCtx = winCanvas.getContext("2d");
+
+    function fmtClock(sec) {
+      const s = Math.max(0, Math.floor(sec || 0));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+    }
+
+    function escapeHtml(raw) {
+      return String(raw ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function themePalette() {
+      const isLight = document.documentElement.classList.contains("light");
+      return {
+        isLight,
+        mapBg: isLight ? "#f1f5f9" : "#0b1120",
+        gridLine: isLight ? "rgba(15,23,42,0.07)" : "rgba(148,163,184,0.09)",
+        mineral: isLight ? "#0284c7" : "#38bdf8",
+        geyser: isLight ? "#15803d" : "#4ade80",
+        p1: "#3b82f6",
+        p2: "#ef4444",
+        creep: isLight ? "rgba(147,51,234,0.16)" : "rgba(168,85,247,0.22)",
+        pylon: isLight ? "rgba(14,165,233,0.20)" : "rgba(56,189,248,0.20)",
+        text: isLight ? "#0f172a" : "#e2e8f0",
+        muted: isLight ? "#64748b" : "#94a3b8"
+      };
+    }
+
+    function mapToCanvas(x, y, mapW, mapH, size) {
+      const pad = 16;
+      const usable = size - pad * 2;
+      const scale = usable / Math.max(mapW || 152, mapH || 152, 1);
+      return [
+        pad + x * scale,
+        size - pad - y * scale,
+        scale
+      ];
+    }
+
+    function canvasToMap(cx, cy, mapW, mapH, size) {
+      const pad = 16;
+      const usable = size - pad * 2;
+      const scale = usable / Math.max(mapW || 152, mapH || 152, 1);
+      return [
+        (cx - pad) / scale,
+        (size - pad - cy) / scale
+      ];
+    }
+
+    function syncLayerButtons() {
+      document.querySelectorAll(".layer-btn").forEach((btn) => {
+        const key = btn.dataset.layer;
+        const on = state.layers[key];
+        if (key === "botFilter") {
+          btn.textContent = on ? "BotFilter: Macro" : "BotFilter: Raw APM";
+        }
+        btn.style.opacity = on ? "1" : "0.52";
+        btn.style.borderColor = on ? "var(--primary)" : "var(--border)";
+      });
+      document.querySelectorAll(".speed-btn").forEach((btn) => {
+        const active = Number(btn.dataset.speed) === state.speed;
+        btn.style.borderColor = active ? "var(--primary)" : "var(--border)";
+        btn.style.fontWeight = active ? "700" : "400";
+      });
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        const active = btn.dataset.tab === state.activeTab;
+        btn.style.borderColor = active ? "var(--primary)" : "var(--border)";
+        btn.style.background = active ? "var(--background)" : "transparent";
+      });
+    }
+
+    function populateCatalogSelect() {
+      const sel = document.getElementById("replaySelect");
+      const curId = state.current?.replay_id;
+      sel.innerHTML = "";
+      for (const item of state.catalog) {
+        const opt = document.createElement("option");
+        opt.value = item.id;
+        const prioTag = item.has_priority_log ? " [Prio]" : "";
+        opt.textContent = `#${item.id} | ${item.p1_name} (${item.p1_race[0] || "?"}:${item.p1_result}) vs ${item.p2_name} (${item.p2_race[0] || "?"}) — ${item.map_name}${prioTag}`;
+        if (item.id === curId) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+
+    async function selectReplayById(id) {
+      if (!id) return;
+      state.playing = false;
+      document.getElementById("playPauseBtn").textContent = "Play";
+      state.highlightXY = null;
+      if (state.cache[id]) {
+        state.current = state.cache[id];
+        state.frameIdx = 0;
+        renderAll();
+        return;
+      }
+      try {
+        document.getElementById("metaParseMs").textContent = "Parsing via s2protocol…";
+        const resp = await fetch(`${API_BASE}/api/replay/${encodeURIComponent(id)}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const bundle = await resp.json();
+        state.cache[id] = bundle;
+        state.current = bundle;
+        state.frameIdx = 0;
+        renderAll();
+      } catch (err) {
+        document.getElementById("metaParseMs").textContent = `Load error: ${err.message}`;
+      }
+    }
+
+    function renderScoreboardAndPriority() {
+      const b = state.current;
+      if (!b) return;
+      const frames = b.frames || [];
+      const frame = frames[Math.min(state.frameIdx, Math.max(0, frames.length - 1))];
+
+      document.getElementById("metaProtocol").textContent = `Proto ${b.protocol_version}`;
+      document.getElementById("metaMap").textContent = `${b.map_name} (${b.map_width}x${b.map_height})`;
+      document.getElementById("metaParseMs").textContent = `Parsed in ${b.parse_elapsed_ms} ms`;
+
+      const slider = document.getElementById("frameSlider");
+      slider.max = Math.max(0, frames.length - 1);
+      slider.value = state.frameIdx;
+
+      if (frame) {
+        document.getElementById("clockReadout").textContent = `${fmtClock(frame.sec)} (f=${frame.game_loop})`;
+      }
+
+      const p1 = b.players?.[0];
+      const p2 = b.players?.[1];
+      const fillPlayer = (p, stats, prefix) => {
+        if (!p) return;
+        document.getElementById(`${prefix}Title`).textContent = `${p.name} (${p.actual_race})`;
+        const badge = document.getElementById(`${prefix}ResultBadge`);
+        badge.textContent = p.result;
+        badge.style.color = p.result === "Win" ? "var(--success)" : (p.result === "Loss" ? "var(--error)" : "var(--muted-foreground)");
+        document.getElementById(`${prefix}CpmLine`).textContent =
+          `Raw ${p.raw_cpm} CPM • Macro ${p.macro_cpm} CPM (${p.move_attack_spam_pct}% micro spam)`;
+        const st = stats || { minerals: 0, vespene: 0, min_rate: 0, gas_rate: 0, workers: 0, food_used: 0, food_made: 0, army_value: 0 };
+        document.getElementById(`${prefix}LiveStats`).innerHTML = `
+          <div><div class="text-[var(--muted-foreground)]">Bank</div><div>${st.minerals}M / ${st.vespene}G</div></div>
+          <div><div class="text-[var(--muted-foreground)]">Income</div><div>${st.min_rate + st.gas_rate}/m</div></div>
+          <div><div class="text-[var(--muted-foreground)]">Supply</div><div>${st.food_used}/${st.food_made} (${st.workers}W)</div></div>
+          <div><div class="text-[var(--muted-foreground)]">Army</div><div>${st.army_value}</div></div>
+        `;
+      };
+      fillPlayer(p1, frame?.p1_stats, "p1");
+      fillPlayer(p2, frame?.p2_stats, "p2");
+
+      // [SCBOT_PRIORITY] synchronized frame readout
+      const snaps = b.priority_snapshots || [];
+      const pIdx = frame?.priority_idx;
+      if (snaps.length > 0 && pIdx != null && snaps[pIdx]) {
+        const s = snaps[pIdx];
+        document.getElementById("prioMeta").textContent = `f=${s.frame} (${fmtClock(s.sec)}) • step_ms=${s.step_ms}ms • bank=${s.bank}`;
+        document.getElementById("prioSaving").textContent = s.saving_for || "none";
+        document.getElementById("prioApproved").textContent = s.approved || "()";
+        document.getElementById("prioEscrow").textContent = s.escrow_queue || "()";
+        document.getElementById("prioBlocked").textContent = s.blocked || "()";
+      } else {
+        document.getElementById("prioMeta").textContent = "No [SCBOT_PRIORITY] log attached to this replay";
+        document.getElementById("prioSaving").textContent = "—";
+        document.getElementById("prioApproved").textContent = "—";
+        document.getElementById("prioEscrow").textContent = "—";
+        document.getElementById("prioBlocked").textContent = "—";
+      }
+    }
+
+    function renderMinimap() {
+      const b = state.current;
+      if (!b) return;
+      const pal = themePalette();
+      const size = minimapCanvas.width;
+      const mapW = b.map_width || 152;
+      const mapH = b.map_height || 152;
+      const frames = b.frames || [];
+      const frame = frames[Math.min(state.frameIdx, Math.max(0, frames.length - 1))];
+
+      minimapCtx.clearRect(0, 0, size, size);
+      minimapCtx.fillStyle = pal.mapBg;
+      minimapCtx.fillRect(0, 0, size, size);
+
+      // Subtle tile grid (every 16 tiles)
+      minimapCtx.strokeStyle = pal.gridLine;
+      minimapCtx.lineWidth = 1;
+      for (let gx = 0; gx <= mapW; gx += 16) {
+        const [cx] = mapToCanvas(gx, 0, mapW, mapH, size);
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(cx, 16);
+        minimapCtx.lineTo(cx, size - 16);
+        minimapCtx.stroke();
+      }
+      for (let gy = 0; gy <= mapH; gy += 16) {
+        const [, cy] = mapToCanvas(0, gy, mapW, mapH, size);
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(16, cy);
+        minimapCtx.lineTo(size - 16, cy);
+        minimapCtx.stroke();
+      }
+
+      // Death & Siege-Spot Lethality Heatmap
+      if (state.layers.heatmap && b.death_heatmap?.length) {
+        const maxVal = Math.max(500, ...b.death_heatmap.map((c) => c.value));
+        for (const cell of b.death_heatmap) {
+          const [cx, cy, scale] = mapToCanvas(cell.x, cell.y, mapW, mapH, size);
+          const intensity = Math.min(1, cell.value / maxVal);
+          const r = Math.max(6, 4.2 * scale);
+          const grad = minimapCtx.createRadialGradient(cx, cy, 1, cx, cy, r * 1.6);
+          grad.addColorStop(0, `rgba(249,115,22,${(0.12 + 0.36 * intensity).toFixed(2)})`);
+          grad.addColorStop(1, "rgba(249,115,22,0)");
+          minimapCtx.fillStyle = grad;
+          minimapCtx.beginPath();
+          minimapCtx.arc(cx, cy, r * 1.6, 0, Math.PI * 2);
+          minimapCtx.fill();
+        }
+        for (const s of b.siege_spots || []) {
+          const [cx, cy] = mapToCanvas(s.x, s.y, mapW, mapH, size);
+          minimapCtx.strokeStyle = "#facc15";
+          minimapCtx.lineWidth = 1.5;
+          minimapCtx.strokeRect(cx - 5, cy - 5, 10, 10);
+        }
+      }
+
+      // Static mineral & vespene nodes
+      for (const obj of b.static_objects || []) {
+        const [cx, cy] = mapToCanvas(obj.x, obj.y, mapW, mapH, size);
+        if (obj.kind === 0) {
+          minimapCtx.fillStyle = pal.mineral;
+          minimapCtx.fillRect(cx - 2, cy - 2, 4, 4);
+        } else if (obj.kind === 1) {
+          minimapCtx.fillStyle = pal.geyser;
+          minimapCtx.fillRect(cx - 2.5, cy - 2.5, 5, 5);
+        } else {
+          minimapCtx.fillStyle = pal.muted;
+          minimapCtx.fillRect(cx - 2, cy - 2, 4, 4);
+        }
+      }
+
+      if (!frame) return;
+
+      // Zerg Creep union
+      if (state.layers.creep && frame.creep?.length) {
+        minimapCtx.fillStyle = pal.creep;
+        for (const [x, y] of frame.creep) {
+          const [cx, cy, scale] = mapToCanvas(x, y, mapW, mapH, size);
+          minimapCtx.beginPath();
+          minimapCtx.arc(cx, cy, 9.5 * scale, 0, Math.PI * 2);
+          minimapCtx.fill();
+        }
+      }
+
+      // Protoss Pylon 6.5-tile Power Matrix
+      if (state.layers.power && frame.pylons?.length) {
+        for (const [x, y] of frame.pylons) {
+          const [cx, cy, scale] = mapToCanvas(x, y, mapW, mapH, size);
+          minimapCtx.fillStyle = pal.pylon;
+          minimapCtx.strokeStyle = "rgba(56,189,248,0.55)";
+          minimapCtx.lineWidth = 1;
+          minimapCtx.beginPath();
+          minimapCtx.arc(cx, cy, 6.5 * scale, 0, Math.PI * 2);
+          minimapCtx.fill();
+          minimapCtx.stroke();
+        }
+      }
+
+      // Units & structures
+      for (const u of frame.units || []) {
+        const [cx, cy, scale] = mapToCanvas(u.x, u.y, mapW, mapH, size);
+        const color = u.owner === 1 ? pal.p1 : pal.p2;
+        const rad = Math.max(2.2, u.r * scale * 1.25);
+
+        minimapCtx.save();
+        if (u.init) {
+          minimapCtx.globalAlpha = 0.55;
+          minimapCtx.setLineDash([2, 2]);
+        }
+        minimapCtx.fillStyle = color;
+        minimapCtx.strokeStyle = pal.isLight ? "#0f172a" : "#f8fafc";
+        minimapCtx.lineWidth = u.kind >= 2 ? 1.2 : 0.7;
+
+        if (u.kind === 2) {
+          // TownHall square
+          const s = Math.max(7, rad * 1.7);
+          minimapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
+          minimapCtx.strokeRect(cx - s / 2, cy - s / 2, s, s);
+        } else if (u.kind === 3 || u.kind === 4) {
+          // Tech / Production / Defense diamond
+          const s = Math.max(4.5, rad * 1.35);
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(cx, cy - s);
+          minimapCtx.lineTo(cx + s, cy);
+          minimapCtx.lineTo(cx, cy + s);
+          minimapCtx.lineTo(cx - s, cy);
+          minimapCtx.closePath();
+          minimapCtx.fill();
+          minimapCtx.stroke();
+        } else {
+          // Worker (small) or Army (scaled circle)
+          const ur = u.kind === 0 ? 2.1 : Math.max(3.0, rad);
+          minimapCtx.beginPath();
+          minimapCtx.arc(cx, cy, ur, 0, Math.PI * 2);
+          minimapCtx.fill();
+          if (u.kind === 1) minimapCtx.stroke();
+        }
+        minimapCtx.restore();
+      }
+
+      // Active Command Rays (with BotFilter toggle!)
+      if (state.layers.rays && frame.rays?.length) {
+        for (const r of frame.rays) {
+          if (state.layers.botFilter && (r.kind === 0 || r.kind === 3)) continue;
+          const [ox, oy] = mapToCanvas(r.ox, r.oy, mapW, mapH, size);
+          const [tx, ty] = mapToCanvas(r.tx, r.ty, mapW, mapH, size);
+          minimapCtx.save();
+          minimapCtx.strokeStyle = r.kind === 1 ? "#22c55e" : (r.kind === 2 ? "#f59e0b" : (r.owner === 1 ? "#60a5fa" : "#f87171"));
+          minimapCtx.lineWidth = r.kind >= 1 ? 1.8 : 1.0;
+          if (r.kind === 0) minimapCtx.setLineDash([3, 3]);
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(ox, oy);
+          minimapCtx.lineTo(tx, ty);
+          minimapCtx.stroke();
+          minimapCtx.fillStyle = minimapCtx.strokeStyle;
+          minimapCtx.beginPath();
+          minimapCtx.arc(tx, ty, 2.5, 0, Math.PI * 2);
+          minimapCtx.fill();
+          minimapCtx.restore();
+        }
+      }
+
+      // Recent Deaths (X markers)
+      for (const d of frame.deaths || []) {
+        const [cx, cy] = mapToCanvas(d.x, d.y, mapW, mapH, size);
+        minimapCtx.strokeStyle = d.owner === 1 ? "#93c5fd" : "#fca5a5";
+        minimapCtx.lineWidth = 2;
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(cx - 4, cy - 4);
+        minimapCtx.lineTo(cx + 4, cy + 4);
+        minimapCtx.moveTo(cx + 4, cy - 4);
+        minimapCtx.lineTo(cx - 4, cy + 4);
+        minimapCtx.stroke();
+      }
+
+      // Player Camera Viewports
+      if (state.layers.cameras && frame.cameras) {
+        frame.cameras.forEach(([camX, camY], idx) => {
+          if (!camX && !camY) return;
+          const [cx, cy, scale] = mapToCanvas(camX, camY, mapW, mapH, size);
+          const w = 28 * scale;
+          const h = 18 * scale;
+          minimapCtx.save();
+          minimapCtx.strokeStyle = idx === 0 ? "#60a5fa" : "#f87171";
+          minimapCtx.setLineDash([4, 3]);
+          minimapCtx.lineWidth = 1.3;
+          minimapCtx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+          minimapCtx.restore();
+        });
+      }
+
+      // Highlighted target coordinate (from clicking a Wire Build row or Engagement)
+      if (state.highlightXY) {
+        const [hx, hy] = mapToCanvas(state.highlightXY[0], state.highlightXY[1], mapW, mapH, size);
+        minimapCtx.strokeStyle = "#eab308";
+        minimapCtx.lineWidth = 2.2;
+        minimapCtx.beginPath();
+        minimapCtx.arc(hx, hy, 11, 0, Math.PI * 2);
+        minimapCtx.stroke();
+      }
+    }
+
+    function renderWinChanceChart() {
+      const b = state.current;
+      if (!b) return;
+      const pal = themePalette();
+      const w = winCanvas.width;
+      const h = winCanvas.height;
+      winCtx.clearRect(0, 0, w, h);
+
+      const curve = b.win_chance_curve || [];
+      const dur = Math.max(b.duration_sec || 1, 60);
+      const padL = 36, padR = 14, padT = 12, padB = 20;
+      const plotW = w - padL - padR;
+      const plotH = h - padT - padB;
+
+      // Midline 50%
+      winCtx.strokeStyle = pal.gridLine;
+      winCtx.lineWidth = 1;
+      winCtx.beginPath();
+      winCtx.moveTo(padL, padT + plotH / 2);
+      winCtx.lineTo(w - padR, padT + plotH / 2);
+      winCtx.stroke();
+
+      winCtx.fillStyle = pal.muted;
+      winCtx.font = "11px monospace";
+      winCtx.fillText("P1", 6, padT + 10);
+      winCtx.fillText("50%", 4, padT + plotH / 2 + 4);
+      winCtx.fillText("P2", 6, padT + plotH);
+
+      // Turning point shaded bands
+      for (const tp of b.turning_points || []) {
+        const x0 = padL + (tp.start_sec / dur) * plotW;
+        const x1 = padL + (tp.end_sec / dur) * plotW;
+        winCtx.fillStyle = tp.delta_p1_chance >= 0 ? "rgba(59,130,246,0.14)" : "rgba(239,68,68,0.14)";
+        winCtx.fillRect(x0, padT, Math.max(4, x1 - x0), plotH);
+      }
+
+      if (curve.length > 0) {
+        winCtx.strokeStyle = pal.p1;
+        winCtx.lineWidth = 2.2;
+        winCtx.beginPath();
+        curve.forEach((pt, idx) => {
+          const x = padL + (pt.sec / dur) * plotW;
+          const y = padT + (1 - pt.p1_chance) * plotH;
+          if (idx === 0) winCtx.moveTo(x, y);
+          else winCtx.lineTo(x, y);
+        });
+        winCtx.stroke();
+      }
+
+      // Current scrubber vertical cursor
+      const frame = b.frames?.[state.frameIdx];
+      if (frame) {
+        const cx = padL + Math.min(1, frame.sec / dur) * plotW;
+        winCtx.strokeStyle = "#eab308";
+        winCtx.lineWidth = 1.6;
+        winCtx.beginPath();
+        winCtx.moveTo(cx, padT);
+        winCtx.lineTo(cx, padT + plotH);
+        winCtx.stroke();
+
+        // Nearest win-chance sample readout
+        if (curve.length > 0) {
+          let best = curve[0];
+          for (const c of curve) {
+            if (Math.abs(c.sec - frame.sec) < Math.abs(best.sec - frame.sec)) best = c;
+          }
+          document.getElementById("winChanceReadout").textContent =
+            `@${fmtClock(best.sec)} P1=${Math.round(best.p1_chance * 100)}% (army=${best.army_term} inc=${best.income_term} wrk=${best.workers_term} trd=${best.trades_term})`;
+        }
+      }
+    }
+
+    function jumpToSec(targetSec, xy) {
+      const frames = state.current?.frames || [];
+      if (!frames.length) return;
+      let bestIdx = 0;
+      for (let i = 0; i < frames.length; i++) {
+        if (Math.abs(frames[i].sec - targetSec) < Math.abs(frames[bestIdx].sec - targetSec)) {
+          bestIdx = i;
+        }
+      }
+      state.frameIdx = bestIdx;
+      state.highlightXY = xy || null;
+      renderScoreboardAndPriority();
+      renderMinimap();
+      renderWinChanceChart();
+    }
+
+    function renderJumpPillsAndFindings() {
+      const b = state.current;
+      if (!b) return;
+      const pillsEl = document.getElementById("jumpPills");
+      const items = [];
+      for (const tp of b.turning_points || []) {
+        const sign = tp.delta_p1_chance > 0 ? "+" : "";
+        items.push({
+          label: `TP ${fmtClock(tp.start_sec)} (${sign}${Math.round(tp.delta_p1_chance * 100)}%)`,
+          sec: tp.end_sec,
+          xy: null
+        });
+      }
+      for (const eng of (b.engagements || []).slice(0, 6)) {
+        items.push({
+          label: `Battle ${fmtClock(eng.start_sec)} (-${eng.p1_lost_resources}/-${eng.p2_lost_resources})`,
+          sec: eng.start_sec,
+          xy: [eng.center_x, eng.center_y]
+        });
+      }
+      if (!items.length) {
+        pillsEl.innerHTML = `<span class="text-[var(--muted-foreground)]">No >=400-resource engagements or >=15% swings</span>`;
+      } else {
+        pillsEl.innerHTML = items.map((it, idx) =>
+          `<button data-jidx="${idx}" class="jump-pill px-2 py-0.5 rounded border border-[var(--card-border)] bg-[var(--background)] font-mono hover:opacity-80">${escapeHtml(it.label)}</button>`
+        ).join("");
+        pillsEl.querySelectorAll(".jump-pill").forEach((btn) => {
+          const it = items[Number(btn.dataset.jidx)];
+          btn.addEventListener("click", () => jumpToSec(it.sec, it.xy));
+        });
+      }
+
+      const fl = document.getElementById("findingsList");
+      const findings = b.findings || [];
+      if (!findings.length) {
+        fl.innerHTML = `<div class="text-[var(--success)]">✓ 0 dropped wire Build.* commands • 0 canceled tech structures</div>`;
+      } else {
+        fl.innerHTML = findings.map((f) =>
+          `<div class="text-[var(--warning)]">• ${escapeHtml(f)}</div>`
+        ).join("");
+      }
+    }
+
+    function renderActiveTab() {
+      const b = state.current;
+      const el = document.getElementById("tabContent");
+      if (!b || !b.players) {
+        el.innerHTML = "";
+        return;
+      }
+
+      if (state.activeTab === "wire") {
+        el.innerHTML = b.players.map((p) => {
+          const rows = (p.wire_actuation_audit || []).map((r) => {
+            const bad = r.status !== "OK";
+            const xyStr = r.sample_target_xy ? `(${r.sample_target_xy[0]}, ${r.sample_target_xy[1]})` : "—";
+            const dataAttr = r.sample_target_xy
+              ? `data-sec="${r.first_wire_sec || 0}" data-x="${r.sample_target_xy[0]}" data-y="${r.sample_target_xy[1]}"`
+              : "";
+            return `<tr class="border-t border-[var(--card-border)] hover:opacity-85 cursor-pointer wire-row" ${dataAttr}>
+              <td class="py-1 font-semibold">${escapeHtml(r.structure)}</td>
+              <td class="py-1 text-right font-mono">${r.wire_build_cmds}</td>
+              <td class="py-1 text-right font-mono">${r.unit_init_count}</td>
+              <td class="py-1 text-right font-mono">${r.unit_done_count}</td>
+              <td class="py-1 text-right font-mono">${r.first_wire_sec != null ? fmtClock(r.first_wire_sec) : "—"}</td>
+              <td class="py-1 text-right font-mono">${xyStr}</td>
+              <td class="py-1 text-right font-mono ${bad ? "text-[var(--error)] font-bold" : "text-[var(--success)]"}">${escapeHtml(r.status)}</td>
+            </tr>`;
+          }).join("");
+          return `<div class="space-y-1">
+            <div class="font-semibold">P${p.pid} ${escapeHtml(p.name)} (${escapeHtml(p.actual_race)}) — Wire Thrash: ${p.worker_thrash_events}</div>
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="text-[var(--muted-foreground)]">
+                  <th class="pb-1">Structure</th>
+                  <th class="pb-1 text-right">Wire Cmd</th>
+                  <th class="pb-1 text-right">SUnitInit</th>
+                  <th class="pb-1 text-right">SUnitDone</th>
+                  <th class="pb-1 text-right">1st Wire</th>
+                  <th class="pb-1 text-right">Target XY</th>
+                  <th class="pb-1 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody>${rows || `<tr><td colspan="7" class="py-1 text-[var(--muted-foreground)]">No structures recorded</td></tr>`}</tbody>
+            </table>
+          </div>`;
+        }).join(`<hr class="border-[var(--card-border)]" />`);
+
+        el.querySelectorAll(".wire-row").forEach((tr) => {
+          if (tr.dataset.x) {
+            tr.addEventListener("click", () => {
+              jumpToSec(Number(tr.dataset.sec || 0), [Number(tr.dataset.x), Number(tr.dataset.y)]);
+            });
+          }
+        });
+        return;
+      }
+
+      if (state.activeTab === "lessons") {
+        el.innerHTML = b.players.map((p) => {
+          const lessonsHtml = (p.lessons || []).map((l) =>
+            `<div class="flex items-center justify-between gap-2 py-1 border-b border-[var(--card-border)]">
+              <div><span class="font-semibold">${escapeHtml(l.title)}:</span> <span class="text-[var(--muted-foreground)]">${escapeHtml(l.detail)}</span></div>
+              <span class="font-mono text-[var(--warning)] whitespace-nowrap">~${l.mineral_equiv_cost} min</span>
+            </div>`
+          ).join("") || `<div class="text-[var(--muted-foreground)]">No major >=100-mineral macro leaks flagged.</div>`;
+
+          const idleHtml = (p.production_idle || []).map((r) =>
+            `<span class="px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)] font-mono">${escapeHtml(r.structure)} (${r.facilities}x): ${r.idle_seconds}s idle</span>`
+          ).join(" ");
+
+          const effHtml = (p.ability_efficiency || []).map((e) =>
+            `<span class="px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)] font-mono">${escapeHtml(e.ability)}: ${e.uses_until_10m}/${e.possible_until_10m} (${e.efficiency_pct}%)</span>`
+          ).join(" ");
+
+          return `<div class="space-y-2">
+            <div class="font-semibold">P${p.pid} ${escapeHtml(p.name)} — SupplyBlocked: ${p.supply_blocked_seconds}s • Floating(&gt;1k): ${p.floating_seconds}s • AvgUnspent: ${p.avg_unspent}</div>
+            <div>${lessonsHtml}</div>
+            <div class="flex flex-wrap gap-1.5">${idleHtml} ${effHtml}</div>
+          </div>`;
+        }).join(`<hr class="border-[var(--card-border)]" />`);
+        return;
+      }
+
+      if (state.activeTab === "combat") {
+        const roiHtml = b.players.map((p) => {
+          const rows = (p.unit_effectiveness || []).slice(0, 8).map((u) =>
+            `<tr class="border-t border-[var(--card-border)]">
+              <td class="py-1 font-medium">${escapeHtml(u.unit)}</td>
+              <td class="py-1 text-right font-mono">${u.produced}</td>
+              <td class="py-1 text-right font-mono">${u.lost}</td>
+              <td class="py-1 text-right font-mono">${u.kills}</td>
+              <td class="py-1 text-right font-mono">${u.value_killed}</td>
+              <td class="py-1 text-right font-mono ${u.roi >= 1.0 ? "text-[var(--success)]" : "text-[var(--muted-foreground)]"}">${u.roi}x</td>
+            </tr>`
+          ).join("");
+          const kb = (p.killed_by || []).slice(0, 6).map(([k, n]) => `${n}x by ${k}`).join(", ") || "None";
+          return `<div class="space-y-1">
+            <div class="font-semibold">P${p.pid} ${escapeHtml(p.name)} — Lost ${p.resources_lost} (${p.mining_seconds_lost} mining-s) • Killed ${p.resources_killed}</div>
+            <div class="text-[var(--muted-foreground)] font-mono">Killed by (morph-filtered): ${escapeHtml(kb)}</div>
+            <table class="w-full text-left border-collapse">
+              <thead><tr class="text-[var(--muted-foreground)]"><th>Unit</th><th class="text-right">Made</th><th class="text-right">Lost</th><th class="text-right">Kills</th><th class="text-right">ValKilled</th><th class="text-right">ROI</th></tr></thead>
+              <tbody>${rows || `<tr><td colspan="6" class="text-[var(--muted-foreground)] py-1">No combat units produced</td></tr>`}</tbody>
+            </table>
+          </div>`;
+        }).join(`<hr class="border-[var(--card-border)]" />`);
+        el.innerHTML = roiHtml;
+        return;
+      }
+
+      if (state.activeTab === "decisions") {
+        el.innerHTML = b.players.map((p) => {
+          const badRows = (p.bad_decisions || []).slice(0, 8).map((d) =>
+            `<div class="font-mono text-[var(--error)]">@${fmtClock(d.sec)} trained ${escapeHtml(d.unit)} (score=${d.score}) weak vs [${escapeHtml(d.weak_vs)}]</div>`
+          ).join("") || `<div class="text-[var(--success)] font-mono">0 countered unit choices flagged</div>`;
+          const abil = (p.top_abilities || []).slice(0, 8).map(([a, c]) => `${a}:${c}`).join(" • ");
+          return `<div class="space-y-1.5">
+            <div class="font-semibold">P${p.pid} ${escapeHtml(p.name)} — Counter Choices: ${p.good_decisions} good / ${p.even_decisions} even / ${(p.bad_decisions || []).length} bad</div>
+            <div class="text-[var(--muted-foreground)] font-mono">Opening Tech: ${(p.opening_tech || []).join(" → ") || "None"} | Creep: ${p.creep_tumors_placed} placed (${p.creep_tumors_cleared_by_enemy} cleared)</div>
+            <div class="text-[var(--muted-foreground)] font-mono">ControlGroups: [${(p.control_groups_used || []).join(",")}] (${p.control_group_recalls_per_min}/m) • Cam: ${p.camera_moves_per_min}/m</div>
+            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] font-mono">${escapeHtml(abil || "No macro abilities")}</div>
+            <div class="space-y-0.5">${badRows}</div>
+          </div>`;
+        }).join(`<hr class="border-[var(--card-border)]" />`);
+      }
+    }
+
+    function renderAll() {
+      syncLayerButtons();
+      populateCatalogSelect();
+      renderScoreboardAndPriority();
+      renderMinimap();
+      renderWinChanceChart();
+      renderJumpPillsAndFindings();
+      renderActiveTab();
+    }
+
+    // Event Listeners
+    document.getElementById("replaySelect").addEventListener("change", (e) => {
+      selectReplayById(e.target.value);
+    });
+
+    document.getElementById("frameSlider").addEventListener("input", (e) => {
+      state.frameIdx = Number(e.target.value);
+      renderScoreboardAndPriority();
+      renderMinimap();
+      renderWinChanceChart();
+    });
+
+    document.getElementById("playPauseBtn").addEventListener("click", () => {
+      state.playing = !state.playing;
+      document.getElementById("playPauseBtn").textContent = state.playing ? "Pause" : "Play";
+    });
+
+    document.getElementById("prevFrameBtn").addEventListener("click", () => {
+      state.playing = false;
+      document.getElementById("playPauseBtn").textContent = "Play";
+      state.frameIdx = Math.max(0, state.frameIdx - 1);
+      renderScoreboardAndPriority();
+      renderMinimap();
+      renderWinChanceChart();
+    });
+
+    document.getElementById("nextFrameBtn").addEventListener("click", () => {
+      state.playing = false;
+      document.getElementById("playPauseBtn").textContent = "Play";
+      const maxIdx = Math.max(0, (state.current?.frames?.length || 1) - 1);
+      state.frameIdx = Math.min(maxIdx, state.frameIdx + 1);
+      renderScoreboardAndPriority();
+      renderMinimap();
+      renderWinChanceChart();
+    });
+
+    document.querySelectorAll(".layer-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.layer;
+        state.layers[k] = !state.layers[k];
+        syncLayerButtons();
+        renderMinimap();
+      });
+    });
+
+    document.querySelectorAll(".speed-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.speed = Number(btn.dataset.speed);
+        syncLayerButtons();
+      });
+    });
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.activeTab = btn.dataset.tab;
+        syncLayerButtons();
+        renderActiveTab();
+      });
+    });
+
+    // Click Win-Chance Chart to scrub
+    winCanvas.addEventListener("click", (e) => {
+      const rect = winCanvas.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * winCanvas.width;
+      const padL = 36, padR = 14;
+      const frac = Math.max(0, Math.min(1, (x - padL) / (winCanvas.width - padL - padR)));
+      jumpToSec(frac * (state.current?.duration_sec || 0), null);
+    });
+
+    // Hover Tooltip on Minimap
+    minimapCanvas.addEventListener("mousemove", (e) => {
+      const b = state.current;
+      const frame = b?.frames?.[state.frameIdx];
+      const tip = document.getElementById("minimapTooltip");
+      if (!b || !frame) return;
+      const rect = minimapCanvas.getBoundingClientRect();
+      const cx = ((e.clientX - rect.left) / rect.width) * minimapCanvas.width;
+      const cy = ((e.clientY - rect.top) / rect.height) * minimapCanvas.height;
+      const [mx, my] = canvasToMap(cx, cy, b.map_width || 152, b.map_height || 152, minimapCanvas.width);
+
+      let nearest = null;
+      let bestDist = 3.2;
+      for (const u of frame.units || []) {
+        const d = Math.hypot(u.x - mx, u.y - my);
+        if (d < bestDist) {
+          bestDist = d;
+          nearest = u;
+        }
+      }
+      tip.classList.remove("hidden");
+      tip.style.left = `${Math.min(rect.width - 170, Math.max(6, e.clientX - rect.left + 10))}px`;
+      tip.style.top = `${Math.max(6, e.clientY - rect.top - 28)}px`;
+      if (nearest) {
+        tip.textContent = `P${nearest.owner} ${nearest.name}${nearest.init ? " [init]" : ""} (${nearest.x}, ${nearest.y})`;
+      } else {
+        tip.textContent = `Map (${mx.toFixed(1)}, ${my.toFixed(1)})`;
+      }
+    });
+    minimapCanvas.addEventListener("mouseleave", () => {
+      document.getElementById("minimapTooltip").classList.add("hidden");
+    });
+
+    // Upload .SC2Replay directly to Rust sidecar in-memory analyzer
+    document.getElementById("fileUploadInput").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        document.getElementById("metaParseMs").textContent = `Uploading ${file.name}…`;
+        const buf = await file.arrayBuffer();
+        const resp = await fetch(`${API_BASE}/api/analyze-bytes?name=${encodeURIComponent(file.name)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: buf
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const bundle = await resp.json();
+        state.cache[bundle.replay_id] = bundle;
+        if (!state.catalog.some((c) => c.id === bundle.replay_id)) {
+          state.catalog.unshift({
+            id: bundle.replay_id,
+            file_name: bundle.file_name,
+            map_name: bundle.map_name,
+            p1_name: bundle.players?.[0]?.name || "P1",
+            p1_race: bundle.players?.[0]?.actual_race || "?",
+            p1_result: bundle.players?.[0]?.result || "?",
+            p2_name: bundle.players?.[1]?.name || "P2",
+            p2_race: bundle.players?.[1]?.actual_race || "?",
+            p2_result: bundle.players?.[1]?.result || "?",
+            protocol_version: bundle.protocol_version,
+            has_priority_log: false
+          });
+        }
+        state.current = bundle;
+        state.frameIdx = 0;
+        renderAll();
+      } catch (err) {
+        document.getElementById("metaParseMs").textContent = `Upload requires :4322 sidecar (${err.message})`;
+      }
+    });
+
+    // Playback Loop
+    setInterval(() => {
+      if (!state.playing || !state.current?.frames?.length) return;
+      const maxIdx = state.current.frames.length - 1;
+      if (state.frameIdx >= maxIdx) {
+        state.playing = false;
+        document.getElementById("playPauseBtn").textContent = "Play";
+        return;
+      }
+      state.frameIdx = Math.min(maxIdx, state.frameIdx + state.speed);
+      renderScoreboardAndPriority();
+      renderMinimap();
+      renderWinChanceChart();
+    }, 110);
+
+    // Live Theme Sync
+    window.addEventListener("themechange", () => {
+      renderMinimap();
+      renderWinChanceChart();
+    });
+
+    // Connect to Live Rust Sidecar (:4322) + SSE
+    async function connectSidecar() {
+      try {
+        const [stResp, catResp] = await Promise.all([
+          fetch(`${API_BASE}/api/status`),
+          fetch(`${API_BASE}/api/catalog`)
+        ]);
+        if (!stResp.ok || !catResp.ok) throw new Error("Sidecar unreachable");
+        const st = await stResp.json();
+        const cat = await catResp.json();
+        state.connected = true;
+        if (Array.isArray(cat) && cat.length > 0) {
+          state.catalog = cat;
+        }
+        document.getElementById("sseDot").style.background = "var(--success)";
+        document.getElementById("connBadge").textContent =
+          `Live :4322 • ${state.catalog.length} replays • s2protocol ${st.s2protocol_version}`;
+        populateCatalogSelect();
+        if (state.catalog.length > 0) {
+          await selectReplayById(state.catalog[0].id);
+        }
+
+        const es = new EventSource(`${API_BASE}/api/events`);
+        es.addEventListener("catalog-updated", async () => {
+          const r = await fetch(`${API_BASE}/api/catalog`);
+          if (r.ok) {
+            state.catalog = await r.json();
+            document.getElementById("connBadge").textContent =
+              `Live :4322 • ${state.catalog.length} replays • SSE synced`;
+            populateCatalogSelect();
+          }
+        });
+      } catch (_e) {
+        document.getElementById("sseDot").style.background = "var(--warning)";
+        document.getElementById("connBadge").textContent = "Offline Snapshot (start :4322 for 75+ replays)";
+        renderAll();
+      }
+    }
+
+    renderAll();
+    connectSidecar();
+  </script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+[package]
+name = "s2protocol-sidecar"
+version = "0.1.0"
+edition = "2024"
+description = "Antigravity live HTTP/SSE + CLI sidecar for sebosp/s2protocol-rs: high-APM AI Arena minimal state machine, enhanced minimap timeline, and Swarmy forensic analytics"
+license = "MIT"
+
+[[bin]]
+name = "s2protocol-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+s2protocol = "5.1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+flate2 = "1.1"
+sha2 = "0.10"

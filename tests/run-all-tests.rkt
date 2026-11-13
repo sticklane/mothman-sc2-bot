@@ -100,7 +100,11 @@
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
                   mpq-hash
-                  parse-sc2-replay)
+                  parse-sc2-replay
+                  is-morph-death?
+                  compute-swarmy-win-chance
+                  compute-turning-points
+                  cluster-combat-engagements)
          (except-in "../lib/bot-crash-fuzzer.rkt"
                     compute-shadow-ledger
                     step-zerospace-mastermind!)
@@ -7098,6 +7102,84 @@
            'enemy-buildings '())))
   (assert-true! (member '(train probe) (hash-ref res-p-warping-gw 'actions '()))
                 "Protoss with warping-in 1st Gateway and 140M under 12-Probe rush must train replacement Probe without 2nd-Gateway escrow deadlock"))
+
+;; ============================================================================
+;; 31. s2protocol-rs & Swarmy Replay Forensics (Morph Filter, Win-Chance & Battles)
+;; ============================================================================
+(run-suite "31. s2protocol-rs & Swarmy Replay Forensics (Morph Filter, Win-Chance & Battles)"
+  ;; (a) Morph-death filter prevents Drone -> Structure and Templar -> Archon false-positive casualties
+  (assert-true! (is-morph-death? "Drone" #f)
+                "Drone death with killerPlayerId=#f must be classified as morph into structure")
+  (assert-true! (is-morph-death? "HighTemplar" #f)
+                "HighTemplar death with killerPlayerId=#f must be classified as Archon merge")
+  (assert-true! (is-morph-death? "DarkTemplar" #f)
+                "DarkTemplar death with killerPlayerId=#f must be classified as Archon merge")
+  (assert-eq! (is-morph-death? "Drone" 2) #f
+              "Drone killed by enemy player 2 is a real casualty, not a morph")
+  (assert-eq! (is-morph-death? "Marine" #f) #f
+              "Non-morphing unit death without killerPlayerId is not a morph")
+
+  ;; (b) Swarmy 4-factor logistic win-chance curve (symmetry + monotonic advantage)
+  (define wc-even
+    (compute-swarmy-win-chance 300
+                               #:p1-army 1200 #:p2-army 1200
+                               #:p1-income 1400 #:p2-income 1400
+                               #:p1-workers 48 #:p2-workers 48
+                               #:p1-killed 600 #:p2-killed 600))
+  (assert-eq! wc-even 0.5
+              "Symmetric army/income/workers/trades must yield exact 0.500 win chance")
+  (define wc-p1-lead
+    (compute-swarmy-win-chance 600
+                               #:p1-army 3800 #:p2-army 800
+                               #:p1-income 2500 #:p2-income 1100
+                               #:p1-workers 68 #:p2-workers 34
+                               #:p1-killed 3200 #:p2-killed 900))
+  (define wc-p2-lead
+    (compute-swarmy-win-chance 600
+                               #:p1-army 800 #:p2-army 3800
+                               #:p1-income 1100 #:p2-income 2500
+                               #:p1-workers 34 #:p2-workers 68
+                               #:p1-killed 900 #:p2-killed 3200))
+  (assert-true! (> wc-p1-lead 0.85)
+                (format "Decisive P1 macro+army+trade lead at 10m must exceed 0.85 win chance (got ~a)" wc-p1-lead))
+  (assert-true! (< (abs (- (+ wc-p1-lead wc-p2-lead) 1.0)) 0.002)
+                "Swarmy logistic win-chance curve must be antisymmetric (P1 + P2 == 1.0)")
+
+  ;; (c) Combat engagement clustering (<= 12s gap, <= 60s span, >= 400 resource threshold)
+  (define sample-deaths
+    (list
+     ;; Minor 100-cost skirmish at 90s -> filtered out (< 400)
+     (list 90.0 1 "Zergling" 40 40 25)
+     (list 92.0 2 "Probe" 42 40 50)
+     ;; Major battle 180s..191s (total 650 >= 400) -> 1 engagement
+     (list 180.0 1 "Stalker" 80 80 175)
+     (list 184.5 1 "Stalker" 82 80 175)
+     (list 191.0 2 "Roach" 84 80 100)
+     (list 195.0 2 "Ravager" 82 80 200)
+     ;; Separate battle >12s later at 220s..224s (total 500 >= 400) -> 2nd engagement
+     (list 220.0 1 "Immortal" 100 60 375)
+     (list 224.0 2 "Hydralisk" 102 60 150)))
+  (define clustered (cluster-combat-engagements sample-deaths))
+  (assert-eq! (length clustered) 2
+              "cluster-combat-engagements must drop <400 skirmishes and split >12s gaps into 2 battles")
+  (assert-eq! (hash-ref (first clustered) 'p1_lost) 350
+              "First clustered battle P1 resource loss")
+  (assert-eq! (hash-ref (first clustered) 'p2_lost) 300
+              "First clustered battle P2 resource loss")
+  (assert-eq! (hash-ref (second clustered) 'p1_lost) 375
+              "Second clustered battle P1 resource loss")
+
+  ;; (d) Turning-point detector (>= 0.15 swing sorted by magnitude)
+  (define tps
+    (compute-turning-points
+     (list (hasheq 'sec 120 'p1_chance 0.50)
+           (hasheq 'sec 180 'p1_chance 0.54) ; +0.04 noise -> ignored
+           (hasheq 'sec 240 'p1_chance 0.28) ; -0.26 swing -> #2
+           (hasheq 'sec 300 'p1_chance 0.71)))) ; +0.43 swing -> #1
+  (assert-eq! (length tps) 2
+              "compute-turning-points must emit only >= 0.15 win-chance swings")
+  (assert-eq! (hash-ref (first tps) 'delta_p1_chance) 0.43
+              "Largest win-chance swing must rank first"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

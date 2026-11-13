@@ -1,4 +1,5 @@
 crates/okasaki-quantum-circuits/target/
+crates/s2protocol-sidecar/target/
 __pycache__/
 compiled/
 sc-bot/external_bots/

@@ -33,6 +33,10 @@
          decode-versioned
          decode-tracker-stream
          parse-sc2-replay
+         is-morph-death?
+         compute-swarmy-win-chance
+         compute-turning-points
+         cluster-combat-engagements
          TH-NAMES
          TECH-MORPH-NAMES
          NON-COMBAT-DEATHS)
@@ -381,10 +385,195 @@
 (define NON-COMBAT-DEATHS
   '("Larva"
     "Egg"
+    "BanelingCocoon"
+    "RavagerCocoon"
+    "LurkerMPEgg"
+    "BroodLordCocoon"
+    "OverlordCocoon"
+    "TransportOverlordCocoon"
     "MULE"
     "CreepTumor"
     "CreepTumorBurrowed"
-    "CreepTumorQueen"))
+    "CreepTumorQueen"
+    "Broodling"
+    "Interceptor"
+    "AutoTurret"
+    "PointDefenseDrone"
+    "Changeling"
+    "ChangelingZealot"
+    "ChangelingMarine"
+    "ChangelingMarineShield"
+    "ChangelingZergling"
+    "ChangelingZerglingWings"))
+
+(define PROXY-CANDIDATE-STRUCTURES
+  '("Barracks"
+    "Factory"
+    "Starport"
+    "Gateway"
+    "RoboticsFacility"
+    "Stargate"
+    "SpawningPool"))
+
+;; Approximate mineral+gas resource values for engagement clustering & ROI
+(define UNIT-RESOURCE-VALUE
+  (hash "Drone" 50 "SCV" 50 "Probe" 50
+        "Zergling" 25 "Baneling" 50 "Queen" 150 "Roach" 100 "Ravager" 200
+        "Hydralisk" 150 "LurkerMP" 300 "Mutalisk" 200 "Corruptor" 250
+        "Infestor" 250 "SwarmHostMP" 200 "Ultralisk" 475 "Viper" 300 "BroodLord" 550
+        "Overlord" 100 "Overseer" 200 "SpawningPool" 200 "RoachWarren" 150
+        "BanelingNest" 150 "Hatchery" 300 "Lair" 550 "Hive" 900 "SpineCrawler" 100 "SporeCrawler" 75
+        "Marine" 50 "Marauder" 125 "Reaper" 100 "Ghost" 275 "Hellion" 100 "HellionTank" 100
+        "WidowMine" 100 "SiegeTank" 275 "SiegeTankSieged" 275 "Cyclone" 225 "Thor" 500 "ThorAP" 500
+        "VikingFighter" 225 "VikingAssault" 225 "Medivac" 200 "Liberator" 300 "LiberatorAG" 300
+        "Banshee" 250 "Raven" 250 "Battlecruiser" 700
+        "CommandCenter" 400 "OrbitalCommand" 550 "PlanetaryFortress" 650
+        "Barracks" 150 "Factory" 250 "Starport" 250 "Bunker" 100 "SupplyDepot" 100 "SupplyDepotLowered" 100
+        "Zealot" 100 "Stalker" 175 "Sentry" 150 "Adept" 125 "HighTemplar" 200 "DarkTemplar" 250
+        "Archon" 400 "Observer" 100 "WarpPrism" 250 "Immortal" 375 "Colossus" 500 "Disruptor" 300
+        "Phoenix" 250 "VoidRay" 400 "Oracle" 300 "Tempest" 425 "Carrier" 600 "Mothership" 700
+        "Nexus" 400 "Pylon" 100 "Gateway" 150 "WarpGate" 150 "CyberneticsCore" 150
+        "Forge" 150 "PhotonCannon" 150 "ShieldBattery" 100 "RoboticsFacility" 250 "Stargate" 300))
+
+;; Swarmy's `is_morph_death` filter: in SC2 tracker streams, a Drone morphing into a
+;; structure or HT/DT merging into an Archon emits SUnitDiedEvent with killerPlayerId = #f.
+(define (is-morph-death? unit-name killer-pid)
+  (and (not killer-pid)
+       (not (not (member unit-name '("Drone" "HighTemplar" "DarkTemplar"))))))
+
+(define (base-tracker-unit-name u)
+  (cond
+    [(string=? u "SiegeTankSieged") "SiegeTank"]
+    [(string=? u "VikingAssault") "VikingFighter"]
+    [(string=? u "LiberatorAG") "Liberator"]
+    [(string=? u "ThorAP") "Thor"]
+    [(string=? u "WarpPrismPhasing") "WarpPrism"]
+    [(string=? u "SupplyDepotLowered") "SupplyDepot"]
+    [(string=? u "WarpGate") "Gateway"]
+    [(and (string-suffix? u "Burrowed")
+          (not (string-prefix? u "CreepTumor")))
+     (substring u 0 (- (string-length u) 8))]
+    [else u]))
+
+;; Swarmy's calibrated 4-factor logistic win-chance coefficients `[army income workers trades]`
+(define SWARMY-WIN-COEFFS
+  '((3.0  0.231 0.761 0.454 3.786)
+    (5.0  0.224 1.215 0.738 2.724)
+    (7.0  0.501 1.024 1.202 2.429)
+    (9.0  1.017 0.910 1.704 2.616)
+    (11.0 1.546 1.290 1.829 2.969)
+    (13.0 1.738 1.502 1.684 3.238)
+    (15.0 1.878 1.540 1.590 3.732)
+    (17.0 1.855 1.633 1.443 4.344)
+    (19.0 1.692 1.194 1.461 4.017)
+    (21.0 1.892 1.489 1.104 3.615)
+    (23.0 2.047 1.415 1.198 3.651)
+    (25.0 1.154 0.731 0.914 2.923)))
+
+(define (interp-win-coeffs minute)
+  (cond
+    [(<= minute 3.0) (cdr (first SWARMY-WIN-COEFFS))]
+    [(>= minute 25.0) (cdr (last SWARMY-WIN-COEFFS))]
+    [else
+     (let loop ([ prev (first SWARMY-WIN-COEFFS)]
+                [rest (cdr SWARMY-WIN-COEFFS)])
+       (cond
+         [(null? rest) (cdr prev)]
+         [(<= minute (car (car rest)))
+          (define m0 (car prev))
+          (define m1 (car (car rest)))
+          (define w (/ (- minute m0) (- m1 m0)))
+          (for/list ([c0 (in-list (cdr prev))]
+                     [c1 (in-list (cdr (car rest)))])
+            (+ c0 (* w (- c1 c0))))]
+         [else (loop (car rest) (cdr rest))]))]))
+
+(define (round3 x)
+  (/ (round (* 1000.0 (exact->inexact x))) 1000.0))
+
+(define (compute-swarmy-win-chance sec
+                                   #:p1-army p1-army #:p2-army p2-army
+                                   #:p1-income p1-inc #:p2-income p2-inc
+                                   #:p1-workers p1-wrk #:p2-workers p2-wrk
+                                   #:p1-killed p1-kil #:p2-killed p2-kil)
+  (define minute (/ (max 0.0 (- (exact->inexact sec) 30.0)) 60.0))
+  (define coeffs (interp-win-coeffs minute))
+  (define c-army (first coeffs))
+  (define c-inc (second coeffs))
+  (define c-wrk (third coeffs))
+  (define c-trd (fourth coeffs))
+  (define (log-ratio a b off)
+    (log (/ (+ (max 0.0 (exact->inexact a)) off)
+            (+ (max 0.0 (exact->inexact b)) off))))
+  (define k-denom (+ (max 0.0 (exact->inexact p1-kil))
+                     (max 0.0 (exact->inexact p2-kil))
+                     1000.0))
+  (define log-odds
+    (+ (* c-army (log-ratio p1-army p2-army 200.0))
+       (* c-inc  (log-ratio p1-inc  p2-inc  100.0))
+       (* c-wrk  (log-ratio p1-wrk  p2-wrk  5.0))
+       (* c-trd  (/ (- (max 0.0 (exact->inexact p1-kil))
+                       (max 0.0 (exact->inexact p2-kil)))
+                    k-denom))))
+  (round3 (/ 1.0 (+ 1.0 (exp (- log-odds))))))
+
+(define (cluster-combat-engagements raw-deaths)
+  ;; Each element of `raw-deaths` is `(list sec owner-pid unit x y cost)` sorted by `sec`
+  (define groups
+    (for/fold ([gs '()]) ([d (in-list raw-deaths)])
+      (define sec (first d))
+      (cond
+        [(null? gs) (list (list d))]
+        [else
+         (define cur (car gs))
+         (define last-sec (first (car cur)))
+         (define first-sec (first (last cur)))
+         (if (and (<= (- sec last-sec) 12.0)
+                  (<= (- sec first-sec) 60.0))
+             (cons (cons d cur) (cdr gs))
+             (cons (list d) gs))])))
+  (filter
+   values
+   (for/list ([rev-g (in-list (reverse groups))])
+     (define g (reverse rev-g))
+     (define total-cost (for/sum ([d (in-list g)]) (sixth d)))
+     (and (>= total-cost 400)
+          (let* ([n (max 1 (length g))]
+                 [cx (round1 (/ (for/sum ([d (in-list g)]) (fourth d)) n))]
+                 [cy (round1 (/ (for/sum ([d (in-list g)]) (fifth d)) n))]
+                 [p1-lost (for/sum ([d (in-list g)] #:when (= (second d) 1)) (sixth d))]
+                 [p2-lost (for/sum ([d (in-list g)] #:when (= (second d) 2)) (sixth d))])
+            (hasheq 'start_sec (round1 (first (first g)))
+                    'end_sec (round1 (first (last g)))
+                    'center_x cx
+                    'center_y cy
+                    'p1_lost p1-lost
+                    'p2_lost p2-lost))))))
+
+(define (compute-turning-points win-curve)
+  ;; `win-curve` is a list of `(hasheq 'sec s 'p1_chance p)`
+  (define vec (list->vector win-curve))
+  (define n (vector-length vec))
+  (cond
+    [(<= n 1) '()]
+    [else
+     (define candidates
+       (for/list ([i (in-range 1 n)]
+                  #:when (>= (abs (- (hash-ref (vector-ref vec i) 'p1_chance)
+                                     (hash-ref (vector-ref vec (sub1 i)) 'p1_chance)))
+                             0.15))
+         (define prev (vector-ref vec (sub1 i)))
+         (define cur (vector-ref vec i))
+         (hasheq 'start_sec (hash-ref prev 'sec)
+                 'end_sec (hash-ref cur 'sec)
+                 'delta_p1_chance
+                 (round3 (- (hash-ref cur 'p1_chance)
+                            (hash-ref prev 'p1_chance))))))
+     (take (sort candidates
+                 (lambda (a b)
+                   (> (abs (hash-ref a 'delta_p1_chance))
+                      (abs (hash-ref b 'delta_p1_chance)))))
+           (min 3 (length candidates)))]))
 
 (define (round1 x)
   (/ (round (* 10.0 (exact->inexact x))) 10.0))
@@ -446,9 +635,10 @@
 
   (define tracker-events (decode-tracker-stream (hash-ref mpq "replay.tracker.events")))
 
-  ;; Map slot -> tracker player_id and detect Frame-0 actual rolled race
+  ;; Map slot -> tracker player_id, detect Frame-0 rolled race, and capture start TownHall (x, y)
   (define slot->pid (make-hasheqv))
   (define f0-rolled-race (make-hasheqv))
+  (define start-xy (make-hasheqv))
   (for ([ev (in-list tracker-events)]
         #:break (> (car ev) 0))
     (define ev-id (cadr ev))
@@ -464,7 +654,11 @@
         [(= ev-id 1) ; SUnitBornEvent at gl=0
          (define cp (hash-ref payload 3 0))
          (define ut (bytes->utf8-clean (hash-ref payload 2 #"")))
+         (define ux (hash-ref payload 5 0))
+         (define uy (hash-ref payload 6 0))
          (when (> cp 0)
+           (when (member ut '("Hatchery" "CommandCenter" "Nexus"))
+             (hash-set! start-xy cp (list ux uy)))
            (cond
              [(member ut '("Hatchery" "Drone")) (hash-set! f0-rolled-race cp "Zerg")]
              [(member ut '("CommandCenter" "SCV")) (hash-set! f0-rolled-race cp "Terran")]
@@ -498,20 +692,26 @@
                          'result "Unknown"))))
 
   (define born (hash 1 (make-hash) 2 (make-hash)))
-  (define upgrades (hash 1 '() 2 '()))
-  (define townhall-timings (hash 1 '() 2 '()))
-  (define tech-morphs (hash 1 '() 2 '()))
+  (define unit-inits (hash 1 (make-hash) 2 (make-hash)))
+  (define unit-dones (hash 1 (make-hash) 2 (make-hash)))
+  (define killed-by (hash 1 (make-hash) 2 (make-hash)))
   (define stats-by-min (hash 1 (make-hasheqv) 2 (make-hasheqv)))
   (define supply-blocked-steps (make-hasheqv '((1 . 0) (2 . 0))))
   (define total-stat-events (make-hasheqv '((1 . 0) (2 . 0))))
+  (define creep-placed (make-hasheqv '((1 . 0) (2 . 0))))
+  (define creep-cleared (make-hasheqv '((1 . 0) (2 . 0))))
   (define unit-owner (make-hasheqv))
   (define unit-type (make-hasheqv))
+  (define unit-was-init (make-hasheqv))
   (define deaths-by-min (hash 1 (make-hash) 2 (make-hash)))
   (define max-tracker-loop 0)
 
   (define mut-upgrades (make-hasheqv '((1 . ()) (2 . ()))))
   (define mut-th (make-hasheqv '((1 . ()) (2 . ()))))
   (define mut-morphs (make-hasheqv '((1 . ()) (2 . ()))))
+  (define mut-proxies (make-hasheqv '((1 . ()) (2 . ()))))
+  (define mut-bases-lost (make-hasheqv '((1 . ()) (2 . ()))))
+  (define raw-deaths-rev '())
 
   (for ([ev (in-list tracker-events)])
     (define loop-gl (car ev))
@@ -527,13 +727,37 @@
                                   (hash-ref payload 1 0)))
          (define p (hash-ref payload 3 0))
          (define u (bytes->utf8-clean (hash-ref payload 2 #"")))
+         (define ux (hash-ref payload 5 0))
+         (define uy (hash-ref payload 6 0))
          (hash-set! unit-owner tag p)
          (hash-set! unit-type tag u)
+         (when (= ev-id 6)
+           (hash-set! unit-was-init tag #t))
          (when (memv p '(1 2))
            (hash-update! (hash-ref born p) u add1 0)
+           (when (and (= ev-id 1) (string=? u "CreepTumorBurrowed"))
+             (hash-update! creep-placed p add1 0))
+           (when (= ev-id 6)
+             (hash-update! (hash-ref unit-inits p) u add1 0)
+             (when (and (<= sec 240.0)
+                        (member u PROXY-CANDIDATE-STRUCTURES)
+                        (hash-has-key? start-xy p))
+               (define sxy (hash-ref start-xy p))
+               (define dist (sqrt (+ (sqr (- ux (first sxy)))
+                                     (sqr (- uy (second sxy))))))
+               (when (> dist 50.0)
+                 (hash-update! mut-proxies p
+                               (lambda (lst) (cons (list (round1 sec) u (round1 dist)) lst))))))
            (when (and (> loop-gl 0) (member u TH-NAMES))
              (define label (if (= ev-id 6) (string-append "init:" u) u))
              (hash-update! mut-th p (lambda (lst) (cons (list (round1 sec) label) lst)))))]
+        [(7) ; SUnitDoneEvent (construction completed)
+         (define tag (bitwise-ior (arithmetic-shift (hash-ref payload 0 0) 18)
+                                  (hash-ref payload 1 0)))
+         (define p (hash-ref unit-owner tag #f))
+         (define u (hash-ref unit-type tag #f))
+         (when (and (memv p '(1 2)) (string? u) (hash-ref unit-was-init tag #f))
+           (hash-update! (hash-ref unit-dones p) u add1 0))]
         [(3) ; SUnitOwnerChangeEvent
          (define tag (bitwise-ior (arithmetic-shift (hash-ref payload 0 0) 18)
                                   (hash-ref payload 1 0)))
@@ -546,16 +770,46 @@
          (define p (hash-ref unit-owner tag #f))
          (when (not (string=? u ""))
            (hash-set! unit-type tag u))
+         (when (and (memv p '(1 2)) (string=? u "CreepTumorBurrowed"))
+           (hash-update! creep-placed p add1 0))
          (when (and (memv p '(1 2)) (> loop-gl 0) (member u TECH-MORPH-NAMES))
            (hash-update! mut-morphs p (lambda (lst) (cons (list (round1 sec) u) lst))))]
-        [(2) ; SUnitDiedEvent
+        [(2) ; SUnitDiedEvent (0=tagIdx, 1=tagRec, 2=killerPid, 3=x, 4=y, 5=killerTagIdx, 6=killerTagRec)
          (define tag (bitwise-ior (arithmetic-shift (hash-ref payload 0 0) 18)
                                   (hash-ref payload 1 0)))
          (define p (hash-ref unit-owner tag #f))
          (define u (hash-ref unit-type tag "?"))
-         (when (and (memv p '(1 2)) (not (member u NON-COMBAT-DEATHS)))
+         (define killer-pid (hash-ref payload 2 #f))
+         (define dx (hash-ref payload 3 0))
+         (define dy (hash-ref payload 4 0))
+         (define k-idx (hash-ref payload 5 #f))
+         (define k-rec (hash-ref payload 6 #f))
+         (define killer-tag
+           (and (exact-integer? k-idx)
+                (exact-integer? k-rec)
+                (bitwise-ior (arithmetic-shift k-idx 18) k-rec)))
+         (define killer-unit
+           (if killer-tag
+               (base-tracker-unit-name (hash-ref unit-type killer-tag "Unknown"))
+               (if killer-pid "Unknown" "Canceled/Environment")))
+         (when (and (memv p '(1 2))
+                    (string=? u "CreepTumorBurrowed")
+                    (equal? killer-pid (if (= p 1) 2 1)))
+           (hash-update! creep-cleared p add1 0))
+         (when (and (memv p '(1 2))
+                    (not (member u NON-COMBAT-DEATHS))
+                    (not (is-morph-death? u killer-pid)))
            (define m (exact-floor (/ sec 60.0)))
-           (hash-update! (hash-ref deaths-by-min p) (cons m u) add1 0))]
+           (hash-update! (hash-ref deaths-by-min p) (cons m u) add1 0)
+           (when killer-pid
+             (hash-update! (hash-ref killed-by p) killer-unit add1 0))
+           (when (member u TH-NAMES)
+             (hash-update! mut-bases-lost p
+                           (lambda (lst) (cons (list (round1 sec) u killer-unit) lst))))
+           (define u-base (base-tracker-unit-name u))
+           (define res-cost (hash-ref UNIT-RESOURCE-VALUE u-base 0))
+           (when (> res-cost 0)
+             (set! raw-deaths-rev (cons (list sec p u-base dx dy res-cost) raw-deaths-rev))))]
         [(5) ; SUpgradeEvent
          (define p (hash-ref payload 0 0))
          (define upg (bytes->utf8-clean (hash-ref payload 1 #"")))
@@ -597,6 +851,43 @@
                      'killed_gas (+ (hash-ref st 26 0) (hash-ref st 27 0) (hash-ref st 28 0))))
            (hash-set! (hash-ref stats-by-min p) minute snap))])))
 
+  ;; Compute incomplete/canceled/sniped structures (`init > done`) per player
+  (define (incomplete-for p)
+    (define inits-h (hash-ref unit-inits p))
+    (define dones-h (hash-ref unit-dones p))
+    (sort
+     (for/list ([(u ic) (in-hash inits-h)]
+                #:when (> ic (hash-ref dones-h u 0)))
+       (list u ic (hash-ref dones-h u 0)))
+     (lambda (a b) (string<? (car a) (car b)))))
+
+  ;; Compute minute-by-minute Swarmy logistic win-chance curve (minutes >= 2)
+  (define s1-mins (hash-ref stats-by-min 1))
+  (define s2-mins (hash-ref stats-by-min 2))
+  (define shared-mins
+    (sort (filter (lambda (m) (and (>= m 2) (hash-has-key? s2-mins m)))
+                  (hash-keys s1-mins))
+          <))
+  (define win-chance-curve
+    (for/list ([m (in-list shared-mins)])
+      (define a (hash-ref s1-mins m))
+      (define b (hash-ref s2-mins m))
+      (define p1c
+        (compute-swarmy-win-chance
+         (* m 60)
+         #:p1-army (+ (hash-ref a 'army_min 0) (hash-ref a 'army_gas 0))
+         #:p2-army (+ (hash-ref b 'army_min 0) (hash-ref b 'army_gas 0))
+         #:p1-income (+ (hash-ref a 'min_rate 0) (hash-ref a 'gas_rate 0))
+         #:p2-income (+ (hash-ref b 'min_rate 0) (hash-ref b 'gas_rate 0))
+         #:p1-workers (hash-ref a 'workers 0)
+         #:p2-workers (hash-ref b 'workers 0)
+         #:p1-killed (+ (hash-ref a 'killed_min 0) (hash-ref a 'killed_gas 0))
+         #:p2-killed (+ (hash-ref b 'killed_min 0) (hash-ref b 'killed_gas 0))))
+      (hasheq 'sec (* m 60) 'p1_chance p1c)))
+
+  (define engagements (cluster-combat-engagements (reverse raw-deaths-rev)))
+  (define turning-points (compute-turning-points win-chance-curve))
+
   (define final-loops (max header-loops max-tracker-loop))
   (define duration-sec (round1 (/ final-loops 22.4)))
 
@@ -606,7 +897,24 @@
           'duration_sec duration-sec
           'map_name map-name
           'players players
+          'start_xy start-xy
           'born born
+          'unit_inits unit-inits
+          'unit_dones unit-dones
+          'incomplete_structures (hasheqv 1 (incomplete-for 1)
+                                          2 (incomplete-for 2))
+          'proxy_structures (hasheqv 1 (reverse (hash-ref mut-proxies 1))
+                                     2 (reverse (hash-ref mut-proxies 2)))
+          'bases_lost (hasheqv 1 (reverse (hash-ref mut-bases-lost 1))
+                               2 (reverse (hash-ref mut-bases-lost 2)))
+          'killed_by killed-by
+          'creep_tumors (hasheqv 1 (hasheq 'placed (hash-ref creep-placed 1)
+                                           'cleared (hash-ref creep-cleared 1))
+                                 2 (hasheq 'placed (hash-ref creep-placed 2)
+                                           'cleared (hash-ref creep-cleared 2)))
+          'engagements engagements
+          'win_chance_curve win-chance-curve
+          'turning_points turning-points
           'townhall_timings (hasheqv 1 (reverse (hash-ref mut-th 1))
                                      2 (reverse (hash-ref mut-th 2)))
           'tech_morphs (hasheqv 1 (reverse (hash-ref mut-morphs 1))

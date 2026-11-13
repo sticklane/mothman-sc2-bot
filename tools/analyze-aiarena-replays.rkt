@@ -36,9 +36,11 @@
 (provide DEFAULT-TOKEN
          BOT-IDS
          KNOWN-BOT-NAMES
+         SIDECAR-BIN
          parse-bot-filter
          parse-match-ids-str
          parse-match-log-zip
+         invoke-s2protocol-sidecar-summary
          analyze-single-match-forensics
          fetch-aiarena-matches!
          run-aiarena-forensic-analysis!)
@@ -46,6 +48,8 @@
 (define-runtime-path TOOLS-DIR ".")
 (define ROOT-DIR (simplify-path (build-path TOOLS-DIR "..")))
 (define DEFAULT-CACHE-DIR (build-path ROOT-DIR "replays" "aiarena_live_cache"))
+(define SIDECAR-BIN
+  (build-path ROOT-DIR "crates" "s2protocol-sidecar" "target" "release" "s2protocol-sidecar"))
 
 (define TOKEN-FILE (build-path (find-system-path 'home-dir) ".gemini" "aiarena_token"))
 
@@ -557,10 +561,28 @@
     "Larva" "Egg" "MULE" "CreepTumor" "CreepTumorBurrowed" "CreepTumorQueen"
     "Broodling" "Interceptor" "InvisibleTargetDummy"))
 
+(define (invoke-s2protocol-sidecar-summary rep-path)
+  (and rep-path
+       (file-exists? rep-path)
+       (file-exists? SIDECAR-BIN)
+       (with-handlers ([exn:fail? (lambda (_e) #f)])
+         (define rep-str (if (path? rep-path) (path->string rep-path) rep-path))
+         (define err-out (open-output-string))
+         (define json-str
+           (parameterize ([current-error-port err-out])
+             (with-output-to-string
+               (lambda ()
+                 (system* SIDECAR-BIN "--analyze" rep-str "--summary-only")))))
+         (define trimmed (string-trim json-str))
+         (and (not (string=? trimmed ""))
+              (string-prefix? trimmed "{")
+              (string->jsexpr trimmed)))))
+
 (define (analyze-single-match-forensics #:match-id match-id-str
                                         #:replay-path [rep-path #f]
                                         #:log-zip-path [log-zip-path #f]
                                         #:meta [meta (hasheq)]
+                                        #:with-sidecar? [with-sidecar? #f]
                                         #:quiet? [quiet? #f])
   (define log-info (parse-match-log-zip log-zip-path))
   (define prio (hash-ref log-info 'priority_audit (hasheq)))
@@ -767,6 +789,64 @@
        (add-finding! (format "SUPPLY_BLOCKED: Supply-blocked on ~a/~a tracker stat snapshots."
                              sb-our tot-stat-our)))
 
+     (define our-incomplete (hash-ref (hash-ref rep-data 'incomplete_structures (hasheqv)) our-pid '()))
+     (define opp-incomplete (hash-ref (hash-ref rep-data 'incomplete_structures (hasheqv)) opp-pid '()))
+     (define our-proxies (hash-ref (hash-ref rep-data 'proxy_structures (hasheqv)) our-pid '()))
+     (define opp-proxies (hash-ref (hash-ref rep-data 'proxy_structures (hasheqv)) opp-pid '()))
+     (define our-bases-lost (hash-ref (hash-ref rep-data 'bases_lost (hasheqv)) our-pid '()))
+     (define opp-bases-lost (hash-ref (hash-ref rep-data 'bases_lost (hasheqv)) opp-pid '()))
+     (define our-killed-by
+       (top-k-counts (hash-ref (hash-ref rep-data 'killed_by (hasheqv)) our-pid (hasheq)) 8))
+     (define opp-killed-by
+       (top-k-counts (hash-ref (hash-ref rep-data 'killed_by (hasheqv)) opp-pid (hasheq)) 8))
+     (define our-creep
+       (hash-ref (hash-ref rep-data 'creep_tumors (hasheqv)) our-pid (hasheq 'placed 0 'cleared 0)))
+     (define engagements (hash-ref rep-data 'engagements '()))
+     (define win-chance-curve (hash-ref rep-data 'win_chance_curve '()))
+     (define turning-points (hash-ref rep-data 'turning_points '()))
+
+     (define sidecar-bundle
+       (and with-sidecar? (invoke-s2protocol-sidecar-summary rep-path)))
+     (define our-sidecar
+       (and (hash? sidecar-bundle)
+            (for/first ([pl (in-list (hash-ref sidecar-bundle 'players '()))]
+                        #:when (and (hash? pl) (= (hash-ref pl 'pid 0) our-pid)))
+              pl)))
+     (define opp-sidecar
+       (and (hash? sidecar-bundle)
+            (for/first ([pl (in-list (hash-ref sidecar-bundle 'players '()))]
+                        #:when (and (hash? pl) (= (hash-ref pl 'pid 0) opp-pid)))
+              pl)))
+
+     (when (pair? our-incomplete)
+       (add-finding! (format "INCOMPLETE_STRUCTURES: Initiated > completed structures (canceled/sniped/unfinished): ~s"
+                             our-incomplete)))
+     (when (pair? opp-proxies)
+       (add-finding! (format "ENEMY_PROXY_DETECTED: Early enemy proxy structure(s) >50 tiles from enemy main: ~s"
+                             opp-proxies)))
+     (when (pair? our-bases-lost)
+       (add-finding! (format "BASES_LOST: TownHall(s) destroyed: ~s" our-bases-lost)))
+
+     (when (hash? our-sidecar)
+       (for ([row (in-list (hash-ref our-sidecar 'wire_actuation_audit '()))]
+             #:when (and (hash? row)
+                         (string=? (format "~a" (hash-ref row 'status "OK")) "WIRE_DROPPED")))
+         (add-finding! (format "WIRE_BUILD_DROPPED: Issued ~ax Build.~a on wire with 0 SUnitInit!"
+                               (hash-ref row 'wire_build_cmds 0)
+                               (hash-ref row 'structure "?"))))
+       (when (>= (hash-ref our-sidecar 'worker_thrash_events 0) 5)
+         (add-finding! (format "WORKER_BUILD_THRASH: ~a rapid duplicate/conflicting build commands on wire."
+                               (hash-ref our-sidecar 'worker_thrash_events 0))))
+       (define bad-decs (hash-ref our-sidecar 'bad_decisions '()))
+       (when (pair? bad-decs)
+         (define bd0 (car bad-decs))
+         (add-finding! (format "COUNTER_UNIT_MISMATCH: ~a unfavorable unit choice(s) vs enemy army (first: ~a @ ~as, score=~a, weak_vs=~a)."
+                               (length bad-decs)
+                               (hash-ref bd0 'unit "?")
+                               (hash-ref bd0 'sec 0)
+                               (round2 (hash-ref bd0 'score 0.0))
+                               (hash-ref bd0 'weak_vs "")))))
+
      (define final-findings (reverse findings))
 
      (unless quiet?
@@ -798,6 +878,39 @@
        (printf "  Peak Economy:     Workers=~a vs ~a | PeakArmyVal=~a vs ~a | MaxFloat=~aM/~aG | SupplyBlocked=~a/~a\n"
                max-our-workers max-opp-workers max-our-army max-opp-army
                max-our-min-below-max max-our-gas sb-our tot-stat-our)
+       (printf "  Swarmy Tracker:   Incomplete=~s | OppProxies=~s | BasesLost=~s | KilledBy=~s | Battles=~a | Swings=~a\n"
+               our-incomplete opp-proxies our-bases-lost our-killed-by
+               (length engagements) (length turning-points))
+       (when (hash? our-sidecar)
+         (printf "  s2protocol-rs:    Us CPM=~a (macro=~a, spam=~a%, thrash=~a) vs Opp CPM=~a (macro=~a, spam=~a%) | Choices(good=~a even=~a bad=~a)\n"
+                 (hash-ref our-sidecar 'raw_cpm 0.0)
+                 (hash-ref our-sidecar 'macro_cpm 0.0)
+                 (hash-ref our-sidecar 'move_attack_spam_pct 0.0)
+                 (hash-ref our-sidecar 'worker_thrash_events 0)
+                 (if (hash? opp-sidecar) (hash-ref opp-sidecar 'raw_cpm 0.0) 0.0)
+                 (if (hash? opp-sidecar) (hash-ref opp-sidecar 'macro_cpm 0.0) 0.0)
+                 (if (hash? opp-sidecar) (hash-ref opp-sidecar 'move_attack_spam_pct 0.0) 0.0)
+                 (hash-ref our-sidecar 'good_decisions 0)
+                 (hash-ref our-sidecar 'even_decisions 0)
+                 (length (hash-ref our-sidecar 'bad_decisions '())))
+         (define wire-rows (hash-ref our-sidecar 'wire_actuation_audit '()))
+         (when (pair? wire-rows)
+           (printf "    wire_audit:     ~s\n"
+                   (for/list ([r (in-list wire-rows)])
+                     (format "~a(wire=~a,init=~a,done=~a,~a)"
+                             (hash-ref r 'structure "?")
+                             (hash-ref r 'wire_build_cmds 0)
+                             (hash-ref r 'unit_init_count 0)
+                             (hash-ref r 'unit_done_count 0)
+                             (hash-ref r 'status "?")))))
+         (define lessons (hash-ref our-sidecar 'lessons '()))
+         (when (pair? lessons)
+           (printf "    costed_lessons: ~s\n"
+                   (for/list ([ls (in-list (take lessons (min 4 (length lessons))))])
+                     (format "~a (~aM): ~a"
+                             (hash-ref ls 'title "?")
+                             (hash-ref ls 'mineral_equiv_cost 0)
+                             (hash-ref ls 'detail ""))))))
        (when (hash-ref log-info 'log_exists #f)
          (printf "  Match-Log Audit:  prio_snaps=~a active_escrow=~a | step_ms(avg=~a p50=~a p95=~a max=~a) | action_errs=~a stderr_exns=~a\n"
                  (hash-ref prio 'snapshots 0)
@@ -885,6 +998,19 @@
              'opp_upgrades opp-upg
              'our_units_born (filtered-born our-born-map)
              'opp_units_born (filtered-born opp-born-map)
+             'our_incomplete_structures our-incomplete
+             'opp_incomplete_structures opp-incomplete
+             'our_proxy_structures our-proxies
+             'opp_proxy_structures opp-proxies
+             'our_bases_lost our-bases-lost
+             'opp_bases_lost opp-bases-lost
+             'our_killed_by our-killed-by
+             'opp_killed_by opp-killed-by
+             'our_creep_tumors our-creep
+             'engagements engagements
+             'win_chance_curve win-chance-curve
+             'turning_points turning-points
+             'sidecar_summary (or sidecar-bundle (hasheq))
              'max_our_workers max-our-workers
              'max_opp_workers max-opp-workers
              'max_our_minerals_float max-our-min-below-max
@@ -916,6 +1042,7 @@
                                         #:limit [limit #f]
                                         #:json-out [json-out #f]
                                         #:token [token DEFAULT-TOKEN]
+                                        #:with-sidecar? [with-sidecar? #f]
                                         #:quiet? [quiet? #f])
   (define out-dir (if (path? dir-in) dir-in (string->path dir-in)))
   (make-directory* out-dir)
@@ -999,12 +1126,14 @@
                                        #:replay-path rp
                                        #:log-zip-path (and (file-exists? lp) lp)
                                        #:meta meta
+                                       #:with-sidecar? with-sidecar?
                                        #:quiet? quiet?))
      (if (and (null? explicit-match-ids) (not since-match))
          (for/list ([rp (in-list (reverse standalone-replays))])
            (define fn (path->string (file-name-from-path rp)))
            (analyze-single-match-forensics #:match-id fn
                                            #:replay-path rp
+                                           #:with-sidecar? with-sidecar?
                                            #:quiet? quiet?))
          '())))
 
@@ -1065,6 +1194,7 @@
 
 (module+ main
   (define do-fetch? #f)
+  (define use-sidecar? #f)
   (define match-ids-str #f)
   (define since-match-num #f)
   (define bots-filter-str #f)
@@ -1077,6 +1207,8 @@
    #:once-each
    [("--fetch") "Download replays, match_log.zip, and API metadata from AI Arena"
                 (set! do-fetch? #t)]
+   [("--with-sidecar") "Enrich replay forensics via Rust crates/s2protocol-sidecar (GameEvents + BalanceData)"
+                       (set! use-sidecar? #t)]
    [("--match-ids") ids "Comma-separated match IDs (e.g. 5117325,5117326)"
                     (set! match-ids-str ids)]
    [("--since-match") sm "Analyze matches with numeric ID >= <ID> (e.g. 5115348)"
@@ -1098,4 +1230,5 @@
     #:since-match since-match-num
     #:bot-ids (and bots-filter-str (parse-bot-filter bots-filter-str))
     #:limit limit-num
-    #:json-out json-out-str)))
+    #:json-out json-out-str
+    #:with-sidecar? use-sidecar?)))
