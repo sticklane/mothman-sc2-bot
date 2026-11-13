@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "jsnes": "^2.1.0",
-    "pngjs": "^7.0.0"
-  }
-}
