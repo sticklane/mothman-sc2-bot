@@ -8619,6 +8619,134 @@
                        (not (unit-leased-above? (rt-role-leases rt-evac-def) 19821 'harvester 3200)))
                   "Oracle with >= 2 nearby AA defenders (Stalkers) must NOT trigger unnecessary worker evacuation"))
 
+(run-suite
+ "36. Wave 6 Track 1: Worker-Rush Focus-Fire, Disengage & Mixed Probe+Zealot Micro"
+   (define base-mp (hash 'id 20550 'type 'mineral-field 'x 26.5 'y 32.5))
+   (define base-nexus (hash 'id 20001 'type 'nexus 'x 32.5 'y 32.5
+                            'hp 1000 'max-hp 1000 'shield 1000 'max-shield 1000
+                            'build-progress 1.0 'powered? #f))
+
+   ;; 36.1 Bruised-worker disengage (<= 20 EHP / Probe shield <= 2 & hp < 20), +45f cooldown, <= 10 HP override
+   (define rt-dis (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+   (define (mk-dis-obs frame p1-hp p1-sh)
+     (hash 'frame frame 'minerals 100 'gas 0 'supply-used 14 'supply-cap 15 'supply-left 1
+           'mineral-harvesters 12 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+           'mineral-patches (list base-mp)
+           'ally-units (cons (hash 'id 20101 'type 'probe 'x 34.5 'y 32.5 'hp p1-hp 'shield p1-sh)
+                             (for/list ([i (in-range 1 12)])
+                               (hash 'id (+ 20101 i) 'type 'probe 'x (+ 27.0 (* 0.4 i)) 'y 32.5 'hp 20 'shield 20)))
+           'ally-buildings (list base-nexus)
+           'enemy-units (for/list ([j (in-range 8)])
+                          (hash 'id (+ 20901 j) 'type 'probe 'x (+ 35.5 (* 0.2 j)) 'y 32.5 'hp 20 'shield 20))
+           'enemy-buildings '()))
+   ;; Frame 700: Probe #20101 at 19 HP + 1 Shield (20 EHP) disengages via mineral-walk
+   (define acts-dis-1 (hash-ref (step-live-bot-runtime! rt-dis (mk-dis-obs 700 19 1)) 'actions '()))
+   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk) (equal? (second a) 20101)))
+                        acts-dis-1)
+                 "Probe at 19 HP + 1 Shield (<= 20 EHP) must disengage via mineral-walk")
+   ;; Frame 730 (inside +45f cooldown [724..745]): at 15 HP (> 10), does NOT re-trigger mineral-walk
+   (define acts-dis-mid (hash-ref (step-live-bot-runtime! rt-dis (mk-dis-obs 730 15 0)) 'actions '()))
+   (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk) (equal? (second a) 20101)))
+                             acts-dis-mid))
+                 "Probe at 15 HP during post-slide cooldown [724..745) must not re-trigger mineral-walk")
+   ;; Frame 732 (still < 745): at 10 HP (<= 10), immediate re-disengage override triggers mineral-walk!
+   (define acts-dis-low (hash-ref (step-live-bot-runtime! rt-dis (mk-dis-obs 732 10 0)) 'actions '()))
+   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk) (equal? (second a) 20101)))
+                        acts-dis-low)
+                 "Critically bruised Probe at <= 10 HP must override cooldown and immediately re-disengage")
+   ;; Frame 778 (>= 732 + 45 = 777, well before old +92f = 824): Probe at 18 HP re-disengages
+   (define acts-dis-cd (hash-ref (step-live-bot-runtime! rt-dis (mk-dis-obs 778 18 0)) 'actions '()))
+   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk) (equal? (second a) 20101)))
+                        acts-dis-cd)
+                 "Bruised Probe at 18 HP must re-disengage after 45-frame cooldown (before old 92-frame lockout)")
+
+   ;; 36.2 Pass-2 targeted focus-fire in live >= 6-worker brawl (no blind Attack-Move spread)
+   (define rt-p2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+   (define p2-ally-probes
+     (for/list ([i (in-range 12)])
+       ;; Placed 4.5-5.5 tiles from enemy Probes at x=34.0..35.0 so Pass-2 handles them
+       (hash 'id (+ 21101 i) 'type 'probe 'x (+ 28.5 (* 0.1 i)) 'y 32.5 'hp 20 'shield 20)))
+   (define p2-enemy-probes
+     (cons (hash 'id 21901 'type 'probe 'x 34.0 'y 32.5 'hp 10 'shield 0)
+           (for/list ([j (in-range 1 10)])
+             (hash 'id (+ 21901 j) 'type 'probe 'x (+ 34.2 (* 0.15 j)) 'y 32.5 'hp 20 'shield 20))))
+   (define acts-p2
+     (hash-ref (step-live-bot-runtime!
+                rt-p2
+                (hash 'frame 800 'minerals 100 'gas 0 'supply-used 12 'supply-cap 15 'supply-left 3
+                      'mineral-harvesters 12 'vespene-harvesters 0
+                      'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+                      'mineral-patches (list base-mp)
+                      'ally-units p2-ally-probes
+                      'ally-buildings (list base-nexus)
+                      'enemy-units p2-enemy-probes
+                      'enemy-buildings '()))
+               'actions '()))
+   (define pulls-p2
+     (filter (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-p2))
+   (assert-true! (and (pair? pulls-p2)
+                      (ormap (lambda (a) (equal? (third a) 21901)) pulls-p2))
+                 "Pass-2 in live >= 6-worker brawl must focus-fire lowest-EHP enemy Probe #21901 by unit ID")
+   (assert-true! (not (ormap (lambda (a) (= (third a) 0)) pulls-p2))
+                 "Pass-2 workers within 6.0 tiles must use unit-targeted focus-fire instead of blind Attack-Move (tid=0)")
+
+   ;; 36.3 14-frame hysteresis prevents snap-back when enemies step just outside 7.0 tiles
+   (define rt-hys (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+   (define (mk-hys-obs frame enemy-x)
+     (hash 'frame frame 'minerals 100 'gas 0 'supply-used 12 'supply-cap 15 'supply-left 3
+           'mineral-harvesters 12 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+           'mineral-patches (list base-mp)
+           'ally-units (for/list ([i (in-range 12)])
+                         (hash 'id (+ 22101 i) 'type 'probe 'x (+ 31.0 (* 0.2 i)) 'y 32.5 'hp 20 'shield 20))
+           'ally-buildings (list base-nexus)
+           'enemy-units (for/list ([j (in-range 10)])
+                          (hash 'id (+ 22901 j) 'type 'probe 'x (+ enemy-x (* 0.05 j)) 'y 32.5 'hp 20 'shield 20))
+           'enemy-buildings '()))
+   ;; Frame 900: enemy at 6.5 tiles (x=39.0) -> pull-workers-attack
+   (define acts-hys-1 (hash-ref (step-live-bot-runtime! rt-hys (mk-hys-obs 900 39.0)) 'actions '()))
+   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-hys-1)
+                 "Enemies inside 7.0 tiles (x=39.0) must trigger pull-workers-attack")
+   ;; Frame 908 (8 frames later): enemy kites to 7.8 tiles (x=40.3, > 7.0, <= 8.5) -> stays engaged, zero harvest-mineral snap-back
+   (define acts-hys-2 (hash-ref (step-live-bot-runtime! rt-hys (mk-hys-obs 908 40.3)) 'actions '()))
+   (assert-true! (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-hys-2)
+                      (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-mineral))) acts-hys-2)))
+                 "Within 14-frame hysteresis, enemies kiting to 7.8 tiles must not snap defenders back to harvest-mineral")
+   ;; Frame 920 (20 frames later): enemy still outside 7.0 tiles (at 9.0 tiles, x=41.5) -> hysteresis expires, snaps back to harvest-mineral
+   (define acts-hys-3 (hash-ref (step-live-bot-runtime! rt-hys (mk-hys-obs 920 41.5)) 'actions '()))
+   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-mineral))) acts-hys-3)
+                 "After 14-frame hysteresis expires, defenders must snap back to harvest-mineral")
+
+   ;; 36.4 Mixed Probe+Zealot rush: Probes avoid Zealots via mineral-walk and focus enemy Probes
+   (define rt-mix (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+   (define mix-far-mp (hash 'id 23551 'type 'mineral-field 'x 26.5 'y 38.0))
+   (define mix-obs
+     (hash 'frame 1400 'minerals 100 'gas 0 'supply-used 16 'supply-cap 23 'supply-left 7
+           'mineral-harvesters 12 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+           'mineral-patches (list base-mp mix-far-mp)
+           'ally-units (append
+                        (list (hash 'id 23101 'type 'probe 'x 34.0 'y 32.5 'hp 20 'shield 20) ;; right next to enemy Zealot!
+                              (hash 'id 23300 'type 'zealot 'x 33.5 'y 32.5 'hp 100 'shield 50))
+                        (for/list ([i (in-range 1 12)])
+                          (hash 'id (+ 23101 i) 'type 'probe 'x (+ 27.5 (* 0.3 i)) 'y 35.5 'hp 20 'shield 20)))
+           'ally-buildings (list base-nexus)
+           'enemy-units (append
+                         (list (hash 'id 23950 'type 'zealot 'x 35.0 'y 32.5 'hp 100 'shield 50))
+                         (for/list ([j (in-range 6)])
+                           (hash 'id (+ 23901 j) 'type 'probe 'x (+ 29.0 (* 0.2 j)) 'y 36.5 'hp 20 'shield 20)))
+           'enemy-buildings '()))
+   (define acts-mix (hash-ref (step-live-bot-runtime! rt-mix mix-obs) 'actions '()))
+   (define pulls-mix (filter (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-mix))
+   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk) (equal? (second a) 23101)))
+                        acts-mix)
+                 "Probe #23101 adjacent to enemy Zealot in mixed rush must mineral-walk away")
+   (assert-true! (not (ormap (lambda (a) (or (= (third a) 23950) (= (third a) 0))) pulls-mix))
+                 "Mixed Probe+Zealot rush must NEVER target enemy Zealot (#23950) or emit blind Attack-Move (tid=0) for Probes")
+   (assert-true! (ormap (lambda (a) (and (>= (third a) 23901) (<= (third a) 23906))) pulls-mix)
+                 "Mixed Probe+Zealot rush must prioritize pulling Probes onto enemy Probes away from the Zealot"))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")
