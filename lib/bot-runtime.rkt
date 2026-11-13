@@ -3229,6 +3229,17 @@
              (and (<= real-pylon-count 4)
                   (>= frame 2500)
                   (>= minerals 450)))))
+  (define safe-inmain-pylon-count
+    (if (eq? race 'Protoss)
+        (count (lambda (b)
+                 (and (hash? b)
+                      (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'pylon)
+                      (<= (dist2d base-x base-y
+                                  (hash-ref b 'x -999.0)
+                                  (hash-ref b 'y -999.0))
+                          10.5)))
+               ally-bldgs)
+        0))
   (define protoss-emergency-pylon?
     (and (eq? race 'Protoss)
          (not (null? workers))
@@ -3237,6 +3248,9 @@
                   (or (> (length ally-bldgs) 1)
                       (>= supply-used 14)
                       (<= supply-left 0)))
+             (and live-game-obs?
+                  (or worker-rush-active? in-base-proxy-detected?)
+                  (= safe-inmain-pylon-count 0))
              has-unpowered-bldg?
              protoss-power-grid-saturated?)))
   (define terran-depot-count
@@ -3305,15 +3319,15 @@
   (define wall-supply-first-f (hash-ref wall-st 'wall-supply-first-frame #f))
   (define bypass-wall-pylon?
     (and (eq? race 'Protoss)
-         (= real-pylon-count 0)
-         (or worker-rush-active?
-             in-base-proxy-detected?
-             (> wall-supply-failures 0)
-             (and (>= wall-supply-attempts 1)
-                  (exact-integer? wall-supply-first-f)
-                  (>= (- frame wall-supply-first-f) 24))
-             (and (> frame 650) (or (> wall-supply-attempts 0) live-game-obs?))
-             (and live-game-obs? (<= supply-left 0)))))
+         (or (and (or worker-rush-active? in-base-proxy-detected?)
+                  (= safe-inmain-pylon-count 0))
+             (and (= real-pylon-count 0)
+                  (or (> wall-supply-failures 0)
+                      (and (>= wall-supply-attempts 1)
+                           (exact-integer? wall-supply-first-f)
+                           (>= (- frame wall-supply-first-f) 24))
+                      (and (> frame 650) (or (> wall-supply-attempts 0) live-game-obs?))
+                      (and live-game-obs? (<= supply-left 0)))))))
   (define bypass-wall-depot1?
     (and (eq? race 'Terran)
          (= real-depot-count 0)
@@ -5610,7 +5624,13 @@
        (findf (lambda (b)
                 (and (hash? b)
                      (eq? (sc2-canonical-structure-sym (unit-type-sym b)) 'pylon)
-                     (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+                     (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                     (or (not live-game-obs?)
+                         (not (or worker-rush-active? in-base-proxy-detected?))
+                         (<= (dist2d base-x base-y
+                                     (hash-ref b 'x -999.0)
+                                     (hash-ref b 'y -999.0))
+                             10.5))))
               ally-bldgs))
      (define (wall-slot-powered? slot-pt)
        (and (pair? slot-pt)
@@ -5634,7 +5654,7 @@
            (safe-coord (+ (hash-ref first-ready-pylon 'y (+ base-y 4.0)) 0.5) (+ base-y 4.0))
            (safe-coord (+ base-y 4.0))))
      (when (and (null? gateways)
-                (or (not live-game-obs?) (memq 'pylon ready-bldg-types))
+                (or (not live-game-obs?) (not (not first-ready-pylon)))
                 (not (building-present-or-pending? 'gateway))
                 (>= minerals (sc2-min-cost 'gateway))
                 (>= (- minerals (sc2-min-cost 'gateway)) hard-supply-lockout-reserve-min))
