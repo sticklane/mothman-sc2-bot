@@ -20,4 +20,5 @@ replays/local_real_matches/*_priority.log
 replays/local_real_matches/*_stdout.log
 replays/local_real_matches/*_stderr.log
 replays/aiarena_live_cache/
-
+/stdout.log
+/stderr.log

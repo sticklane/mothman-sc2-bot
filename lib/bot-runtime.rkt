@@ -1618,23 +1618,28 @@
           (safe-nonneg-int (hash-ref far-mp 'id 0) 0)
           (safe-nonneg-int (hash-ref obs 'mineral-patch-id 0) 0)))
 
-    ;; Physical pull trigger: ONLY once rush workers enter <= 9.0 tiles of TownHall,
-    ;; <= 6.5 tiles of mineral line, or <= 4.5 tiles of an in-main friendly structure
-    ;; (strictly within <= 10.5-tile TownHall chase leash so we NEVER trickle-feed workers to the ramp!).
+    ;; Physical pull trigger: ONLY once rush workers enter <= 9.0 tiles of TownHall (<= 7.0 vs >= 8-worker all-ins
+    ;; with 0 combat units so workers NEVER conga-line single-file out to an 8.8-tile ramp Pylon!),
+    ;; <= 6.5 tiles of mineral line, or <= 4.5 tiles of an in-main friendly structure.
+    (define heavy-worker-allin-no-army?
+      (and (>= (length enemy-rush-workers) 8)
+           (null? ally-combat-units)))
+    (define rush-th-pull-rad (if heavy-worker-allin-no-army? 7.0 9.0))
+    (define rush-bldg-th-rad (if heavy-worker-allin-no-army? 6.8 9.5))
     (define worker-rush-engage-enemies
       (if worker-rush-active?
           (filter (lambda (ew)
                     (define ex (hash-ref ew 'x 9999.0))
                     (define ey (hash-ref ew 'y 9999.0))
                     (and (<= (dist-to-owned-townhall ex ey) 10.5)
-                         (or (<= (dist-to-owned-townhall ex ey) 9.0)
+                         (or (<= (dist-to-owned-townhall ex ey) rush-th-pull-rad)
                              (<= (dist-to-mineral-line ex ey) 6.5)
                              (ormap (lambda (b)
                                       (and (hash? b)
                                            (<= (dist-to-owned-townhall
                                                 (hash-ref b 'x base-x)
                                                 (hash-ref b 'y base-y))
-                                               9.5)
+                                               rush-bldg-th-rad)
                                            (<= (dist2d ex ey
                                                        (hash-ref b 'x base-x)
                                                        (hash-ref b 'y base-y))
@@ -1643,31 +1648,37 @@
                   enemy-rush-workers)
           '()))
 
-    ;; 1.5s (34-frame) mineral-walk disengage for bruised friendly workers.
-    ;; Uses total EHP (`whp`) so Protoss Probes (20 HP + 20 Shield) re-engage once shields regenerate,
-    ;; and raises disengage threshold to 15 EHP against >= 11-worker all-ins to prevent 4-Probe 1-volley kills!
+    ;; 1.1s (24-frame) mineral-walk slide + 3.0s (68-frame) post-slide fighting cooldown for bruised workers.
+    ;; Prevents infinite mineral-walk lock inside a 6-tile mineral line and allows Protoss Probes (7s shield delay)
+    ;; and Terran SCVs (0 HP regen) to rejoin the surround once enemy focus fire switches off them!
     (define eff-disengage-hp
       (if (and worker-rush-active? (>= (length enemy-rush-workers) 11))
-          15
+          14
           SC2-FIGHTING-WORKER-DISENGAGE-HP))
     (define eff-reengage-hp
-      (if (and worker-rush-active? (>= (length enemy-rush-workers) 11))
-          18
+      (if (and worker-rush-active? (>= (length enemy-rush-workers) 8))
+          6
           SC2-FIGHTING-WORKER-REENGAGE-HP))
     (for ([w (in-list non-builder-defense-workers)])
       (define wid (hash-ref w 'id 10))
       (define whp (unit-total-hp-and-shield w))
       (define wx (hash-ref w 'x base-x))
       (define wy (hash-ref w 'y base-y))
-      (define enemy-within-6?
+      (define entry (hash-ref rush-def-st wid #f))
+      (define prev-dis-until (cond [(pair? entry) (car entry)] [(exact-integer? entry) entry] [else 0]))
+      (define prev-cd-until  (cond [(pair? entry) (cdr entry)] [(exact-integer? entry) entry] [else 0]))
+      (define enemy-close?
         (ormap (lambda (e)
                  (<= (dist2d wx wy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 6.0))
                ground-enemy-units-for-cheese))
       (when (and (<= whp eff-disengage-hp)
-                 enemy-within-6?)
-        (hash-set! rush-def-st wid (max (+ frame 34) (hash-ref rush-def-st wid 0))))
+                 enemy-close?
+                 (>= frame prev-cd-until))
+        (set! prev-dis-until (+ frame 24))
+        (set! prev-cd-until  (+ frame 92))
+        (hash-set! rush-def-st wid (cons prev-dis-until prev-cd-until)))
       (define disengaging-now?
-        (< frame (hash-ref rush-def-st wid 0)))
+        (< frame prev-dis-until))
       (when disengaging-now?
         (set! cur-rush-disengaging-wids (cons wid cur-rush-disengaging-wids))
         (if (> far-patch-id 0)
@@ -1686,11 +1697,15 @@
                   (define whp (unit-total-hp-and-shield w))
                   (define wx (hash-ref w 'x base-x))
                   (define wy (hash-ref w 'y base-y))
+                  (define entry (hash-ref rush-def-st wid #f))
+                  (define in-post-slide-window?
+                    (and (pair? entry) (>= frame (car entry)) (< frame (cdr entry))))
                   (and (not (memv wid cur-rush-disengaging-wids))
                        (<= (dist-to-owned-townhall wx wy) 10.5)
-                       (if (memv wid prev-rush-fighting-wids)
-                           (> whp eff-disengage-hp)
-                           (>= whp eff-reengage-hp))))
+                       (cond
+                         [in-post-slide-window? (> whp 5)]
+                         [(memv wid prev-rush-fighting-wids) (> whp eff-disengage-hp)]
+                         [else (>= whp eff-reengage-hp)])))
                 non-builder-defense-workers))
 
       ;; Sort farthest from engaging enemies first so kept miners are ALWAYS the safest far-patch workers
@@ -3324,7 +3339,7 @@
                       (<= (dist2d base-x base-y
                                   (hash-ref b 'x -999.0)
                                   (hash-ref b 'y -999.0))
-                          10.5)))
+                          7.5)))
                ally-bldgs)
         0))
   (define protoss-emergency-pylon?
@@ -5729,7 +5744,7 @@
                          (<= (dist2d base-x base-y
                                      (hash-ref b 'x -999.0)
                                      (hash-ref b 'y -999.0))
-                             10.5))))
+                             7.5))))
               ally-bldgs))
      (define (wall-slot-powered? slot-pt)
        (and (pair? slot-pt)
