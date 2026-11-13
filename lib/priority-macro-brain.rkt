@@ -1530,7 +1530,10 @@
      #:workers workers
      #:target-workers target-workers
      #:active-bases active-bases
-     #:desired-bases (if (>= effective-phase-supply 44) 3 2)
+     #:desired-bases (cond [(>= effective-phase-supply 108) 5]
+                           [(>= effective-phase-supply 64) 4]
+                           [(>= effective-phase-supply 40) 3]
+                           [else 2])
      #:production-facilities (max 1 prod-fac-count)
      #:max-facilities max-fac-count
      #:army-supply army-supply
@@ -1601,8 +1604,9 @@
      #:workers workers
      #:target-workers (min 70 target-workers)
      #:active-bases active-bases
-     #:desired-bases (cond [(>= effective-phase-supply 76) 4]
-                           [(>= effective-phase-supply 44) 3]
+     #:desired-bases (cond [(>= effective-phase-supply 108) 5]
+                           [(>= effective-phase-supply 64) 4]
+                           [(>= effective-phase-supply 40) 3]
                            [else 2])
      #:production-facilities (max 1 prod-fac-count)
      #:max-facilities max-fac-count
@@ -1707,10 +1711,18 @@
                          (list 'overseer)
                          '())
                      (if (and (eq? race 'Protoss)
-                              (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0)
-                              (< (unit-count-equivalent unit-counts 'oracle)
-                                 (if (and (>= minerals 200) (>= gas 200)) 2 1)))
-                         (list 'oracle)
+                              (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0))
+                         (cond
+                           [(and requires-anti-air?
+                                 (< (unit-count-equivalent unit-counts 'phoenix) 10))
+                            (list 'phoenix)]
+                           [(and (not requires-anti-air?)
+                                 (or (not (hash? open-facility-slots))
+                                     (< army-supply 30))
+                                 (< (unit-count-equivalent unit-counts 'oracle)
+                                    (if (and (>= minerals 200) (>= gas 200)) 2 1)))
+                            (list 'oracle)]
+                           [else '()])
                          '())
                      (if (and (eq? race 'Terran)
                               (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
@@ -1722,7 +1734,13 @@
                          '())
                      (if (and (= total-gas-bldgs 0)
                               (>= workers 14)
-                              (not early-zero-army-attack?))
+                              (not early-zero-army-attack?)
+                              (or (not (hash? open-facility-slots))
+                                  (eq? race 'Zerg)
+                                  (and (eq? race 'Terran)
+                                       (> (bldg-count-equivalent total-bldg-counts 'barracks) 0))
+                                  (and (eq? race 'Protoss)
+                                       (> (bldg-count-equivalent total-bldg-counts 'gateway) 0))))
                          (list gas-bldg-sym)
                          '())))
      eq?))
@@ -1769,7 +1787,7 @@
         (< workers 24)
         (and (not under-attack?)
              (<= enemy-threat-supply 0)
-             (or (and (< workers (* 16 active-bases)) (>= minerals 200))
+             (or (and (< workers (min 66 (* 20 active-bases))) (>= minerals 150))
                  (and (>= minerals 350) (<= open-combat-fac-slots-cnt 1))))
         (>= army-supply (required-army-supply-for-worker-growth workers enemy-threat-supply))))
 
@@ -1815,6 +1833,14 @@
                  (< cur-gas-bldgs (* 2 active-bases))
                  (>= workers (min-workers-for-next-gas-bldg cur-gas-bldgs))
                  (not early-zero-army-attack?)
+                 (or (not (hash? open-facility-slots))
+                     (> cur-gas-bldgs 0)
+                     (and bo-goal-sym (same-brain-sym? id bo-goal-sym))
+                     (eq? id 'extractor)
+                     (and (eq? id 'refinery)
+                          (> (bldg-count-equivalent total-bldg-counts 'barracks) 0))
+                     (and (eq? id 'assimilator)
+                          (> (bldg-count-equivalent total-bldg-counts 'gateway) 0)))
                  (or (not (hash? open-facility-slots))
                      (= cur-gas-bldgs 0)
                      (< gas 250))))))
@@ -1904,7 +1930,8 @@
             (and (not under-attack?)
                  (or overdue-1base-expand?
                      (and (< active-bases
-                             (cond [(>= effective-phase-supply 76) 4]
+                             (cond [(>= effective-phase-supply 108) 5]
+                                   [(>= effective-phase-supply 64) 4]
                                    [(>= effective-phase-supply 30) 3]
                                    [else 2]))
                           (>= workers (if (= active-bases 1)
@@ -1927,6 +1954,8 @@
                     (< (unit-count-equivalent unit-counts 'overseer) desired-overseer-cnt))]
               [(memq id '(viking viking-fighter corruptor phoenix))
                (and blk0
+                    (or (not (eq? id 'phoenix))
+                        (< (unit-count-equivalent unit-counts 'phoenix) 10))
                     (or requires-anti-air?
                         (not (hash? open-facility-slots))
                         (and bo-goal-sym (same-brain-sym? id bo-goal-sym))))]

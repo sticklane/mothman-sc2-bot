@@ -98,7 +98,10 @@
                   collect-spiral-candidates
                   find-verified-building-placement
                   enemy-structure-is-proxy?
-                  placement-preserves-base-exit-and-spawn?)
+                  placement-preserves-base-exit-and-spawn?
+                  mark-urgent-survival-cmd!
+                  urgent-survival-cmd?
+                  wire-cmd-priority-tier)
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
                   mpq-hash
@@ -7381,6 +7384,337 @@
   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'barracks-techlab)))
                        acts-tvp-med)
                 "Terran with 3 Barracks vs Protoss must build a 2nd Barracks-TechLab for Marauder scaling (#5122349 fix)"))
+
+;; ============================================================================
+;; 33. Wave 4: Scout Mineral-Walk Home on Worker Rush, P0 Survival Governor,
+;;             Multi-Pylon Placement Perf, Moving-Templar Archon & Macro Fixes
+;; ============================================================================
+(run-suite "33. Scout Mineral-Walk Home on Worker Rush, P0 Survival Governor, Placement Perf & Archon/Macro Fixes"
+  (define (mk-w4-unit tag utype alliance x y
+                      #:hp [hp 100.0] #:shield [sh 0.0] #:energy [en 0.0]
+                      #:min-c [min-c 0] #:radius [radius 0.5] #:orders [orders '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 10.0) 0.0 radius 1.0 0 #f #t #f
+              hp hp sh sh en (if (> en 0.0) 200.0 0.0) min-c 0
+              #f #f #f #t #f orders 0 '() 0 16 0.0 0 0 0 0))
+
+  ;; 33.1 Scout worker encountering an early worker rush MUST immediately mineral-walk home (zero engagement!)
+  (define rt-scout-rush (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define base-probes-14
+    (for/list ([i (in-range 14)])
+      (hash 'id (+ 9100 i) 'type 'probe 'x 31.0 'y 32.5 'hp 20 'shield 20)))
+  (define res-sr-open
+    (step-live-bot-runtime!
+     rt-scout-rush
+     (hash 'frame 320 'minerals 100 'gas 0 'supply-used 14 'supply-cap 15 'supply-left 1
+           'mineral-harvesters 14 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5 'enemy-x 160.5 'enemy-y 160.5
+           'ally-units base-probes-14
+           'ally-buildings (list (hash 'id 9001 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 9002 'type 'pylon 'x 36.0 'y 36.0 'hp 200 'shield 200 'build-progress 1.0))
+           'enemy-units '())))
+  (define sr-id (hash-ref (live-bot-runtime-last-telemetry rt-scout-rush) 'scout-worker-id #f))
+  (assert-true! (exact-integer? sr-id) "Opening Protoss runtime must latch scout-worker-id")
+
+  ;; Mid-map encounter at (85.0, 85.0) against 6 oncoming enemy rush Probes -> immediate mineral-walk home!
+  (define probes-scout-midmap
+    (for/list ([p (in-list base-probes-14)])
+      (if (= (hash-ref p 'id) sr-id)
+          (hash 'id sr-id 'type 'probe 'x 85.0 'y 85.0 'hp 20 'shield 20)
+          p)))
+  (define oncoming-6-probes
+    (for/list ([i (in-range 6)])
+      (hash 'id (+ 9900 i) 'type 'probe 'x (+ 88.0 (* 0.3 i)) 'y 85.0 'hp 20 'shield 20)))
+  (define res-sr-contact
+    (step-live-bot-runtime!
+     rt-scout-rush
+     (hash 'frame 520 'minerals 100 'gas 0 'supply-used 14 'supply-cap 23 'supply-left 9
+           'mineral-harvesters 13 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5 'enemy-x 160.5 'enemy-y 160.5
+           'ally-units probes-scout-midmap
+           'ally-buildings (list (hash 'id 9001 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 9002 'type 'pylon 'x 36.0 'y 36.0 'hp 200 'shield 200 'build-progress 1.0))
+           'enemy-units oncoming-6-probes)))
+  (define acts-sr-contact
+    (append (hash-ref res-sr-contact 'actions '())
+            (hash-ref res-sr-contact 'mirror-actions '())))
+  (assert-true! (member (list 'mineral-walk sr-id 32.5 32.5) acts-sr-contact)
+                "Scout worker encountering oncoming early worker rush must immediately emit (mineral-walk sw-id base-x base-y)")
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a)
+                                   (or (and (memq (car a) '(worker-scout worker-harass mineral-harass attack attack-unit move))
+                                            (or (equal? (second a) sr-id)
+                                                (and (list? (second a)) (memv sr-id (second a)))))
+                                       (and (eq? (car a) 'pull-workers-attack)
+                                            (list? (second a))
+                                            (memv sr-id (second a))))))
+                            acts-sr-contact))
+                "Retreating scout worker must NEVER emit scout, harass, move, or attack orders against the worker rush")
+
+  ;; Even when oncoming rush leaves fog-of-war on the next step while scout is still returning at (55.0, 55.0),
+  ;; aborted-rush? latch keeps scout mineral-walking home without turning back around!
+  (define probes-scout-returning
+    (for/list ([p (in-list base-probes-14)])
+      (if (= (hash-ref p 'id) sr-id)
+          (hash 'id sr-id 'type 'probe 'x 55.0 'y 55.0 'hp 20 'shield 20)
+          p)))
+  (define res-sr-latch
+    (step-live-bot-runtime!
+     rt-scout-rush
+     (hash 'frame 580 'minerals 100 'gas 0 'supply-used 14 'supply-cap 23 'supply-left 9
+           'mineral-harvesters 13 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5 'enemy-x 160.5 'enemy-y 160.5
+           'ally-units probes-scout-returning
+           'ally-buildings (list (hash 'id 9001 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 9002 'type 'pylon 'x 36.0 'y 36.0 'hp 200 'shield 200 'build-progress 1.0))
+           'enemy-units '())))
+  (assert-true! (member (list 'mineral-walk sr-id 32.5 32.5) (hash-ref res-sr-latch 'actions '()))
+                "Latched rush-aborted scout must keep mineral-walking home across fog-of-war until <= 8 tiles from main")
+
+  ;; 3 chasing enemy workers within 5.5 tiles (below global 4-worker threshold) also trigger immediate mineral-walk home!
+  (define rt-scout-3chase (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (void
+   (step-live-bot-runtime!
+    rt-scout-3chase
+    (hash 'frame 320 'minerals 100 'gas 0 'supply-used 14 'supply-cap 15 'supply-left 1
+          'mineral-harvesters 14 'vespene-harvesters 0
+          'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5 'enemy-x 160.5 'enemy-y 160.5
+          'ally-units base-probes-14
+          'ally-buildings (list (hash 'id 9001 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                (hash 'id 9002 'type 'pylon 'x 36.0 'y 36.0 'hp 200 'shield 200 'build-progress 1.0))
+          'enemy-units '())))
+  (define sc3-id (hash-ref (live-bot-runtime-last-telemetry rt-scout-3chase) 'scout-worker-id #f))
+  (define res-sc3
+    (step-live-bot-runtime!
+     rt-scout-3chase
+     (hash 'frame 480 'minerals 100 'gas 0 'supply-used 14 'supply-cap 23 'supply-left 9
+           'mineral-harvesters 13 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5 'enemy-x 160.5 'enemy-y 160.5
+           'ally-units (for/list ([p (in-list base-probes-14)])
+                         (if (= (hash-ref p 'id) sc3-id)
+                             (hash 'id sc3-id 'type 'probe 'x 120.0 'y 120.0 'hp 20 'shield 20)
+                             p))
+           'ally-buildings (list (hash 'id 9001 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 9002 'type 'pylon 'x 36.0 'y 36.0 'hp 200 'shield 200 'build-progress 1.0))
+           'enemy-units (list (hash 'id 9931 'type 'scv 'x 123.0 'y 120.0 'hp 45)
+                              (hash 'id 9932 'type 'scv 'x 123.5 'y 120.5 'hp 45)
+                              (hash 'id 9933 'type 'scv 'x 124.0 'y 119.5 'hp 45)))))
+  (assert-true! (member (list 'mineral-walk sc3-id 32.5 32.5) (hash-ref res-sc3 'actions '()))
+                "Scout surrounded/chased by >= 3 enemy workers outside enemy main must immediately mineral-walk home")
+
+  ;; 33.2 Urgent survival `mineral-walk` wire priority (`P0`) preserved across coalescer & APM governor
+  (define mw-obs
+    (sc2-observation
+     640
+     (sc2-player-common 1 100 0 23 14 0 14 0 0 0 0)
+     (list (mk-w4-unit 9001 59 1 32.5 32.5 #:hp 1000.0 #:shield 1000.0 #:radius 2.75)
+           (mk-w4-unit 701 84 1 30.0 32.5 #:hp 8.0 #:shield 0.0 #:radius 0.375)
+           (mk-w4-unit 702 84 1 30.4 32.5 #:hp 10.0 #:shield 0.0 #:radius 0.375)
+           (mk-w4-unit 703 84 1 34.0 32.5 #:hp 20.0 #:shield 20.0 #:radius 0.375)
+           (mk-w4-unit 550 341 3 26.5 32.5 #:min-c 1500 #:radius 1.0)
+           (mk-w4-unit 551 341 3 26.5 35.5 #:min-c 1500 #:radius 1.0))
+     '() '() (sc2-point3d 32.5 32.5 10.0) '() '() '() '() '() '()))
+  (define mw-raw-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((mineral-walk 701 550 26.5 32.5)
+       (mineral-walk 702 550 26.5 32.5)
+       (harvest-mineral 703 551))
+     mw-obs))
+  (define mw-surv-cmd
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 550)))
+           mw-raw-cmds))
+  (define mw-rout-cmd
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 551)))
+           mw-raw-cmds))
+  (assert-true! (and mw-surv-cmd (urgent-survival-cmd? mw-surv-cmd) (= (wire-cmd-priority-tier mw-surv-cmd) 0))
+                "Coalesced mineral-walk command must retain urgent-survival-cmd?=#t and Tier P0 (0)")
+  (assert-true! (and mw-rout-cmd (not (urgent-survival-cmd? mw-rout-cmd)) (= (wire-cmd-priority-tier mw-rout-cmd) 3))
+                "Routine harvest-mineral command must remain Tier P3 (3)")
+  (define test-gov (make-wire-apm-governor))
+  ;; Drain governor from 24.0 tokens down to P2 floor (4.0 tokens) at loop 640
+  (void
+   (govern-sc2-wire-actions!
+    test-gov
+    (for/list ([i (in-range 10)])
+      (sc2-raw-unit-command 16 (sc2-point2d (+ 40.0 i) 40.0) 0 (list (+ 900 i)) #f))
+    640))
+  (define gov-out
+    (govern-sc2-wire-actions! test-gov (list mw-rout-cmd mw-surv-cmd) 640))
+  (assert-true! (ormap (lambda (c)
+                         (and (sc2-raw-unit-command? c)
+                              (= (sc2-raw-unit-command-target-unit-tag c) 550)
+                              (equal? (sc2-raw-unit-command-unit-tags c) '(701 702))))
+                       gov-out)
+                "APM governor at 4.0 tokens must emit P0 survival mineral-walk command for '(701 702)")
+  (assert-true! (not (ormap (lambda (c)
+                              (and (sc2-raw-unit-command? c)
+                                   (= (sc2-raw-unit-command-target-unit-tag c) 551)))
+                            gov-out))
+                "APM governor at 4.0 tokens (< 8.0 P3 floor) must throttle routine P3 harvest-mineral command")
+
+  ;; 33.3 Multi-Pylon `find-verified-building-placement` performance (< 50 ms on 200x200 grid with 8 Pylons)
+  (define g200-bytes (make-bytes (* 200 200) 1))
+  (define g200-img (sc2-image-grid 8 200 200 g200-bytes #f #f))
+  (define g200-info
+    (sc2-game-info "PerfGrid200" "" '() '(200 200) '(8 8 192 192)
+                   (list (sc2-point2d 160.5 160.5))
+                   g200-img #f g200-img))
+  (define eight-pylon-anchors
+    (for/list ([i (in-range 8)])
+      (cons (+ 34.0 (* 5.0 (modulo i 4)))
+            (+ 34.0 (* 5.0 (quotient i 4))))))
+  (define eight-pylon-units
+    (cons (mk-w4-unit 8001 59 1 30.5 30.5 #:radius 2.75)
+          (for/list ([ap (in-list eight-pylon-anchors)] [i (in-naturals)])
+            (mk-w4-unit (+ 8010 i) 60 1 (car ap) (cdr ap) #:radius 1.0))))
+  (define t0-pl (current-inexact-monotonic-milliseconds))
+  (define gw-pt
+    (find-verified-building-placement #f 883 34.0 34.0 eight-pylon-units
+                                      #:anchor-points eight-pylon-anchors
+                                      #:bldg-sym 'gateway
+                                      #:game-info g200-info))
+  (define dt-pl (- (current-inexact-monotonic-milliseconds) t0-pl))
+  (assert-true! (sc2-point2d? gw-pt)
+                "find-verified-building-placement must find a valid 3x3 Gateway placement across 8 Pylons")
+  (assert-true! (< dt-pl 60.0)
+                (format "8-Pylon 200x200 placement must finish in < 60 ms (took ~a ms; #5122389 590ms spike fix)" dt-pl))
+
+  ;; 33.4 Moving-Templar `Archon` fusion & >= 3 Mutalisk Storm-reserve override (#5122388 fix)
+  (define moving-spent-ht-1
+    (mk-w4-unit 8201 75 1 60.0 60.0 #:hp 40.0 #:shield 40.0 #:energy 25.0
+                #:orders (list (sc2-unit-order 23 #f 0 0.0))))
+  (define moving-spent-ht-2
+    (mk-w4-unit 8202 75 1 61.0 60.0 #:hp 40.0 #:shield 40.0 #:energy 30.0
+                #:orders (list (sc2-unit-order 16 (sc2-point2d 65.0 60.0) 0 0.0))))
+  (assert-eq! (sort (select-producer-tags-for-unit 'archon (list moving-spent-ht-1 moving-spent-ht-2)) <)
+              '(8201 8202)
+              "Moving/attacking spent High Templars (n-orders = 1) MUST be selected for Archon fusion (#5122388 fix)")
+  (define moving-storm-ht-1
+    (mk-w4-unit 8203 75 1 60.0 62.0 #:hp 40.0 #:shield 40.0 #:energy 90.0
+                #:orders (list (sc2-unit-order 23 #f 0 0.0))))
+  (define moving-storm-ht-2
+    (mk-w4-unit 8204 75 1 61.0 62.0 #:hp 40.0 #:shield 40.0 #:energy 85.0
+                #:orders (list (sc2-unit-order 23 #f 0 0.0))))
+  (define three-enemy-mutas
+    (for/list ([i (in-range 3)])
+      (mk-w4-unit (+ 9800 i) 108 4 (+ 68.0 i) 62.0 #:hp 120.0)))
+  (assert-eq! (sort (select-producer-tags-for-unit 'archon
+                                                   (list moving-storm-ht-1 moving-storm-ht-2)
+                                                   three-enemy-mutas)
+                    <)
+              '(8203 8204)
+              "Facing >= 3 enemy Mutalisks, >= 75-energy High Templars must override Storm reserve and fuse into AA Archon")
+
+  ;; 33.5 Protoss 2-base PvZ Sentry unblock (only 2 Stalkers < 4, 340M/220G), Phoenix-over-Oracle vs AA, & Zerg Pool >= 72% rush bank
+  (define rt-p-sentry (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-p-sentry
+    (step-live-bot-runtime!
+     rt-p-sentry
+     (hash 'frame 2400 'minerals 340 'gas 220 'supply-used 34 'supply-cap 55 'supply-left 21
+           'mineral-harvesters 22 'vespene-harvesters 6 'enemy-race 'Zerg
+           'researched-upgrades '(warp-gate-research charge blink)
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+           'ally-units (append (for/list ([i (in-range 26)])
+                                 (hash 'id (+ 8400 i) 'type 'probe 'x 32.5 'y 32.5 'hp 20 'shield 20))
+                               (list (hash 'id 8450 'type 'stalker 'x 54.0 'y 32.5 'hp 80 'shield 80)
+                                     (hash 'id 8451 'type 'stalker 'x 55.0 'y 32.5 'hp 80 'shield 80)))
+           'ally-buildings (list (hash 'id 8301 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8305 'type 'nexus 'x 58.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8302 'type 'pylon 'x 36.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8306 'type 'pylon 'x 54.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8309 'type 'pylon 'x 40.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8310 'type 'pylon 'x 44.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8307 'type 'assimilator 'x 28.5 'y 35.5 'hp 450 'shield 450 'build-progress 1.0)
+                                 (hash 'id 8308 'type 'assimilator 'x 28.5 'y 29.5 'hp 450 'shield 450 'build-progress 1.0)
+                                 (hash 'id 8303 'type 'gateway 'x 36.5 'y 32.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #f 'order-count 0)
+                                 (hash 'id 8320 'type 'gateway 'x 36.5 'y 36.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8323 'type 'gateway 'x 36.5 'y 40.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8304 'type 'cybernetics-core 'x 40.5 'y 32.5 'hp 550 'shield 550
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8321 'type 'twilight-council 'x 40.5 'y 36.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8322 'type 'robotics-facility 'x 44.5 'y 32.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1))
+           'enemy-units '())))
+  (assert-true! (member '(train sentry) (hash-ref res-p-sentry 'actions '()))
+                "Protoss on 2 bases with 340M/220G and only 2 Stalkers (< 4) must train Sentry without deadlocking (#5122382/#5122388 fix)")
+
+  (define rt-p-phx (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-p-phx
+    (step-live-bot-runtime!
+     rt-p-phx
+     (hash 'frame 4800 'minerals 360 'gas 180 'supply-used 52 'supply-cap 70 'supply-left 18
+           'mineral-harvesters 32 'vespene-harvesters 6 'enemy-race 'Zerg
+           'researched-upgrades '(warp-gate-research)
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+           'ally-units (append (for/list ([i (in-range 34)])
+                                 (hash 'id (+ 8500 i) 'type 'probe 'x 32.5 'y 32.5 'hp 20 'shield 20))
+                               (for/list ([s (in-range 4)])
+                                 (hash 'id (+ 8550 s) 'type 'stalker 'x 54.0 'y 32.5 'hp 80 'shield 80)))
+           'ally-buildings (list (hash 'id 8311 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8312 'type 'nexus 'x 58.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8313 'type 'pylon 'x 36.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8316 'type 'assimilator 'x 28.5 'y 35.5 'hp 450 'shield 450 'build-progress 1.0)
+                                 (hash 'id 8317 'type 'assimilator 'x 28.5 'y 29.5 'hp 450 'shield 450 'build-progress 1.0)
+                                 (hash 'id 8318 'type 'gateway 'x 36.5 'y 32.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8314 'type 'cybernetics-core 'x 40.5 'y 32.5 'hp 550 'shield 550
+                                       'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8315 'type 'stargate 'x 40.5 'y 36.5 'hp 600 'shield 600
+                                       'build-progress 1.0 'powered? #t 'busy? #f 'order-count 0))
+           'enemy-units (for/list ([m (in-range 4)])
+                          (hash 'id (+ 9820 m) 'type 'mutalisk 'x (+ 90.0 m) 'y 90.0 'hp 120)))))
+  (define acts-p-phx (hash-ref res-p-phx 'actions '()))
+  (assert-true! (and (member '(train phoenix) acts-p-phx)
+                     (not (member '(train oracle) acts-p-phx)))
+                "Protoss Stargate facing Mutalisks must train Phoenix ahead of VoidRay and NEVER train Oracle (#5122388 fix)")
+
+  (define rt-z-poolbank (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-z-poolbank
+    (step-live-bot-runtime!
+     rt-z-poolbank
+     (hash 'frame 920 'minerals 100 'gas 0 'supply-used 13 'supply-cap 14 'supply-left 1
+           'mineral-harvesters 12 'vespene-harvesters 0 'enemy-race 'Protoss
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+           'ally-units (append (for/list ([i (in-range 12)])
+                                 (hash 'id (+ 8600 i) 'type 'drone 'x 30.0 'y 32.5 'hp 40))
+                               (list (hash 'id 8650 'type 'overlord 'x 34.0 'y 34.0 'hp 200)
+                                     (hash 'id 8660 'type 'larva 'x 33.0 'y 31.0 'hp 25)
+                                     (hash 'id 8661 'type 'larva 'x 33.5 'y 31.0 'hp 25)))
+           'ally-buildings (list (hash 'id 8690 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 8691 'type 'spawning-pool 'x 36.5 'y 32.5 'hp 800 'build-progress 0.80))
+           'enemy-units (for/list ([p (in-range 8)])
+                          (hash 'id (+ 9860 p) 'type 'probe 'x (+ 43.0 (* 0.2 p)) 'y 32.5 'hp 20 'shield 20)))))
+  (assert-true! (not (member '(train drone) (hash-ref res-z-poolbank 'actions '())))
+                "Zerg under worker rush with SpawningPool >= 72% complete and < 200M must bank larvae/minerals for Zerglings (#5122384 fix)")
+
+  ;; 33.6 28.0-tile natural-wall non-proxy & post-2:30 (frame > 3360) enemy 4th-base TownHall non-proxy
+  (assert-true! (not (enemy-structure-is-proxy? 'forge 140.0 115.5 140.0 140.0 112.0 140.0 140.0 84.0))
+                "Enemy natural-wall Forge at 24.5 tiles from enemy main (<= 28.0) must NOT be misclassified as proxy")
+  (define post230-obs
+    (sc2-observation
+     4000
+     (sc2-player-common 1 300 100 54 44 0 38 0 0 0 0)
+     (list (mk-w4-unit 8801 59 1 32.5 32.5 #:radius 2.75)
+           ;; Enemy main Nexus at (140, 140)
+           (mk-w4-unit 9980 59 4 140.0 140.0 #:radius 2.75)
+           ;; Distant 4th-base enemy Nexus (> 28 tiles from main/nat/3rd) at loop 4000 (> 3360) -> NOT a proxy!
+           (mk-w4-unit 9981 59 4 80.0 140.0 #:radius 2.75)
+           ;; Forward mid-map enemy Barracks (> 28 tiles from main/nat/3rd) -> IS a proxy!
+           (mk-w4-unit 9982 21 4 88.0 88.0 #:radius 1.75))
+     '() '() (sc2-point3d 32.5 32.5 10.0) '() '() '() '() '() '()))
+  (define post230-h
+    (sc2-observation->runtime-obs-hash post230-obs #:defer-expansions? #t))
+  (define post230-ebldgs (hash-ref post230-h 'enemy-buildings '()))
+  (define eb-nexus (findf (lambda (b) (= (hash-ref b 'id 0) 9981)) post230-ebldgs))
+  (define eb-rax   (findf (lambda (b) (= (hash-ref b 'id 0) 9982)) post230-ebldgs))
+  (assert-eq! (hash-ref eb-nexus 'is-proxy? 'missing) #f
+              "Post-2:30 (loop > 3360) enemy 4th-base Nexus expansion must NOT be flagged as proxy (#5122382/#5122389 fix)")
+  (assert-eq! (hash-ref eb-rax 'is-proxy? 'missing) #t
+              "Forward mid-map enemy Barracks (> 28 tiles from enemy bases) must still be flagged as proxy"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

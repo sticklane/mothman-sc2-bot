@@ -790,6 +790,7 @@
            (when (= ev-id 6)
              (hash-update! (hash-ref unit-inits p) u add1 0)
              (when (and (<= sec 240.0)
+                        (not (and (> sec 150.0) (member u TH-NAMES)))
                         (member u PROXY-CANDIDATE-STRUCTURES)
                         (hash-has-key? player-own-3-bases p))
                (define own-bases (hash-ref player-own-3-bases p))
@@ -797,9 +798,9 @@
                  (for/fold ([best +inf.0]) ([bc (in-list own-bases)])
                    (min best (sqrt (+ (sqr (- ux (car bc)))
                                       (sqr (- uy (cdr bc))))))))
-               ;; Proxy invariant: building NOT in player's own main, natural, or 3rd (> 22.0 tiles)
-               ;; (when synthetic replay has 0 map minerals, fallback requires > 22.0 tiles from start-xy).
-               (when (> min-own-base-dist 22.0)
+               ;; Proxy invariant: building NOT in player's own main, natural, or 3rd (> 28.0 tiles)
+               ;; (when synthetic replay has 0 map minerals, fallback requires > 28.0 tiles from start-xy).
+               (when (> min-own-base-dist 28.0)
                  (hash-update! mut-proxies p
                                (lambda (lst) (cons (list (round1 sec) u (round1 min-own-base-dist)) lst))))))
            (when (and (> loop-gl 0) (member u TH-NAMES))

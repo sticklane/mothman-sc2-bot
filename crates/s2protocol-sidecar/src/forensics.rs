@@ -25,7 +25,7 @@ pub const MAX_ENGAGEMENT_SECONDS: u32 = 60;
 pub const MIN_ENGAGEMENT_RESOURCES: u32 = 400;
 pub const FLOATING_THRESHOLD: i32 = 1000;
 /// Max radius around each of a player's own 3 bases (`main`, `natural`, `3rd`); structures beyond all 3 are proxies.
-pub const PROXY_DISTANCE: f32 = 22.0;
+pub const PROXY_DISTANCE: f32 = 28.0;
 pub const PROXY_MAX_SECONDS: u32 = 240;
 pub const SCOUT_DISTANCE: f32 = 30.0;
 pub const SNAPSHOT_SECONDS: u32 = 600;
@@ -1353,6 +1353,7 @@ pub fn analyze_replay_bytes(
                             }
                             if p.proxy_detected.is_none()
                                 && sec_u <= PROXY_MAX_SECONDS
+                                && !(sec_u > 150 && EXPANSION_TOWNHALLS.contains(&base.as_str()))
                                 && PROXY_STRUCTURES.contains(&base.as_str())
                                 && let Some([sx, sy]) = p.start_xy
                             {
