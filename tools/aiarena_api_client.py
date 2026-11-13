@@ -20,7 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-DEFAULT_TOKEN = os.environ.get("AIARENA_API_TOKEN", "717fa15cc782b2432c2fe14da6d92c202dfe6c96")
+DEFAULT_TOKEN = os.environ.get("AIARENA_API_TOKEN", "")
 USER_ID = 3871
 COMPETITION_ID = 38  # Sc2 AI Arena 2026 Season 2
 

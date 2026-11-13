@@ -21,10 +21,7 @@ from typing import Any, Dict, List
 import mpyq
 from s2protocol import versions
 
-DEFAULT_TOKEN = os.environ.get(
-    "AIARENA_API_TOKEN",
-    "717fa15cc782b2432c2fe14da6d92c202dfe6c96",
-)
+DEFAULT_TOKEN = os.environ.get("AIARENA_API_TOKEN", "")
 BOT_IDS = {
     1457: "Mothman-R",
     1458: "Mothman-Z",

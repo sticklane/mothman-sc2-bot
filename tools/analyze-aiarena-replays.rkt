@@ -58,7 +58,7 @@
       (and (file-exists? TOKEN-FILE)
            (let ([t (string-trim (file->string TOKEN-FILE))])
              (and (not (string=? t "")) t)))
-      "717fa15cc782b2432c2fe14da6d92c202dfe6c96"))
+      ""))
 
 (define BOT-IDS
   (hasheqv 1457 "Mothman-R"
