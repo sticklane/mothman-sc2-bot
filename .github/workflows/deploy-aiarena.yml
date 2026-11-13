@@ -42,7 +42,6 @@ jobs:
           import sys
 
           BOT_MAP = {
-              "ladder/Mothman-R.zip": (1457, "Mothman-R"),
               "ladder/Mothman-Z.zip": (1458, "Mothman-Z"),
               "ladder/Mothman-T.zip": (1459, "Mothman-T"),
               "ladder/Mothman-P.zip": (1460, "Mothman-P"),
