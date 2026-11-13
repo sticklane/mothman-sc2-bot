@@ -1563,23 +1563,35 @@
           (safe-nonneg-int (hash-ref far-mp 'id 0) 0)
           (safe-nonneg-int (hash-ref obs 'mineral-patch-id 0) 0)))
 
-    ;; Physical pull trigger: <= 12.5 tiles from TownHall OR <= 8.5 tiles from mineral line,
-    ;; AND strictly within <= 14.0-tile TownHall chase leash!
+    ;; Physical pull trigger: ONLY once rush workers enter <= 9.0 tiles of TownHall,
+    ;; <= 6.5 tiles of mineral line, or <= 4.5 tiles of an in-main friendly structure
+    ;; (strictly within <= 10.5-tile TownHall chase leash so we NEVER trickle-feed workers to the ramp!).
     (define worker-rush-engage-enemies
       (if worker-rush-active?
           (filter (lambda (ew)
                     (define ex (hash-ref ew 'x 9999.0))
                     (define ey (hash-ref ew 'y 9999.0))
-                    (and (<= (dist-to-owned-townhall ex ey) 14.0)
-                         (or (<= (dist-to-owned-townhall ex ey) 12.5)
-                             (<= (dist-to-mineral-line ex ey) 8.5))))
+                    (and (<= (dist-to-owned-townhall ex ey) 10.5)
+                         (or (<= (dist-to-owned-townhall ex ey) 9.0)
+                             (<= (dist-to-mineral-line ex ey) 6.5)
+                             (ormap (lambda (b)
+                                      (and (hash? b)
+                                           (<= (dist-to-owned-townhall
+                                                (hash-ref b 'x base-x)
+                                                (hash-ref b 'y base-y))
+                                               9.5)
+                                           (<= (dist2d ex ey
+                                                       (hash-ref b 'x base-x)
+                                                       (hash-ref b 'y base-y))
+                                               4.5)))
+                                    ally-bldgs))))
                   enemy-rush-workers)
           '()))
 
-    ;; 1.5s (34-frame) mineral-walk disengage for bruised friendly workers (hp <= 12 or total hp+shield <= 12)
+    ;; 1.5s (34-frame) mineral-walk disengage for bruised friendly workers (total hp+shield <= 12).
+    ;; Uses total EHP (`whp`) so Protoss Probes (20 HP + 20 Shield) re-engage once shields regenerate!
     (for ([w (in-list non-builder-defense-workers)])
       (define wid (hash-ref w 'id 10))
-      (define raw-hp (hash-ref w 'hp SC2-DRONE-MAX-HP))
       (define whp (unit-total-hp-and-shield w))
       (define wx (hash-ref w 'x base-x))
       (define wy (hash-ref w 'y base-y))
@@ -1587,8 +1599,7 @@
         (ormap (lambda (e)
                  (<= (dist2d wx wy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 6.0))
                ground-enemy-units-for-cheese))
-      (when (and (or (<= raw-hp 12)
-                     (<= whp SC2-FIGHTING-WORKER-DISENGAGE-HP))
+      (when (and (<= whp SC2-FIGHTING-WORKER-DISENGAGE-HP)
                  enemy-within-6?)
         (hash-set! rush-def-st wid (max (+ frame 34) (hash-ref rush-def-st wid 0))))
       (define disengaging-now?
@@ -1604,17 +1615,15 @@
         (for/fold ([best +inf.0]) ([ew (in-list worker-rush-engage-enemies)])
           (min best (dist2d wx wy (hash-ref ew 'x ew-cx) (hash-ref ew 'y ew-cy)))))
 
-      ;; Only workers inside the <= 14.0-tile TownHall leash and not disengaging are eligible to fight
+      ;; Only workers inside the <= 10.5-tile TownHall leash and not disengaging are eligible to fight
       (define healthy-rush-workers
         (filter (lambda (w)
                   (define wid (hash-ref w 'id 10))
-                  (define raw-hp (hash-ref w 'hp SC2-DRONE-MAX-HP))
                   (define whp (unit-total-hp-and-shield w))
                   (define wx (hash-ref w 'x base-x))
                   (define wy (hash-ref w 'y base-y))
                   (and (not (memv wid cur-rush-disengaging-wids))
-                       (<= (dist-to-owned-townhall wx wy) 14.0)
-                       (> raw-hp 12)
+                       (<= (dist-to-owned-townhall wx wy) 10.5)
                        (if (memv wid prev-rush-fighting-wids)
                            (> whp SC2-FIGHTING-WORKER-DISENGAGE-HP)
                            (>= whp SC2-FIGHTING-WORKER-REENGAGE-HP))))
@@ -1647,10 +1656,42 @@
       (define total-w-cnt (length workers))
       (define h-cnt (length safest-first))
       (define e-cnt (length worker-rush-engage-enemies))
-      (define surplus-miners (max 0 (- h-cnt (+ e-cnt 2))))
+      (define eff-e-cnt (max e-cnt (length enemy-rush-workers)))
+      (define all-hands-mineral-brawl?
+        (and (>= eff-e-cnt 6)
+             (or (ormap (lambda (ew)
+                          (<= (dist-to-mineral-line (hash-ref ew 'x 9999.0)
+                                                    (hash-ref ew 'y 9999.0))
+                              5.5))
+                        worker-rush-engage-enemies)
+                 (and (>= eff-e-cnt 11)
+                      (>= (count (lambda (ew)
+                                   (<= (dist-to-owned-townhall (hash-ref ew 'x 9999.0)
+                                                               (hash-ref ew 'y 9999.0))
+                                       5.5))
+                                 worker-rush-engage-enemies)
+                          4))
+                 (ormap (lambda (b)
+                          (and (hash? b)
+                               (<= (dist-to-owned-townhall (hash-ref b 'x base-x)
+                                                           (hash-ref b 'y base-y))
+                                   9.5)
+                               (let* ([b-hp (hash-ref b 'hp 1500)]
+                                      [b-max-hp (hash-ref b 'max-hp b-hp)]
+                                      [b-sh (hash-ref b 'shield 0)]
+                                      [b-max-sh (hash-ref b 'max-shield b-sh)]
+                                      [tot-max (+ b-max-hp b-max-sh)])
+                                 (and (> tot-max 0)
+                                      (< (+ b-hp b-sh) (* 0.96 tot-max))))))
+                        ally-bldgs))))
+      (define surplus-miners (max 0 (- h-cnt (+ eff-e-cnt 2))))
       (define keep-mining-cnt
         (min h-cnt
              (cond
+               [all-hands-mineral-brawl?
+                (if (> h-cnt (+ eff-e-cnt 2))
+                    (min 2 (- h-cnt (+ eff-e-cnt 1)))
+                    (if (> h-cnt 2) 1 0))]
                [(and (>= total-w-cnt 7) (>= unthreatened-miners-cnt 3))
                 (max 3 surplus-miners)]
                [enemies-inside-7.5?
@@ -1666,7 +1707,7 @@
       (unless (null? pulled-rush-workers)
         (set! cur-rush-fighting-wids
               (map (lambda (w) (hash-ref w 'id 10)) pulled-rush-workers))
-        ;; Compute clamped enemy cluster centroid inside our mineral line / main (<= 12.5 tiles from TownHall)
+        ;; Compute clamped enemy cluster centroid inside our mineral line / main (<= 10.5 tiles from TownHall)
         (define raw-cl-x
           (/ (for/sum ([ew (in-list worker-rush-engage-enemies)])
                (exact->inexact (hash-ref ew 'x base-x)))
@@ -1679,9 +1720,22 @@
         (define cl-dy (- raw-cl-y (exact->inexact base-y)))
         (define cl-d (sqrt (+ (* cl-dx cl-dx) (* cl-dy cl-dy))))
         (define cl-x
-          (safe-coord (if (> cl-d 12.5) (+ base-x (* 12.5 (/ cl-dx cl-d))) raw-cl-x) base-x))
+          (safe-coord (if (> cl-d 10.5) (+ base-x (* 10.5 (/ cl-dx cl-d))) raw-cl-x) base-x))
         (define cl-y
-          (safe-coord (if (> cl-d 12.5) (+ base-y (* 12.5 (/ cl-dy cl-d))) raw-cl-y) base-y))
+          (safe-coord (if (> cl-d 10.5) (+ base-y (* 10.5 (/ cl-dy cl-d))) raw-cl-y) base-y))
+        (define lowest-ehp-enemy
+          (argmin (lambda (ew)
+                    (+ (* 5.0 (unit-total-hp-and-shield ew))
+                       (dist-to-owned-townhall (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y))))
+                  worker-rush-engage-enemies))
+        (define focus-amove-x
+          (if lowest-ehp-enemy
+              (safe-coord (hash-ref lowest-ehp-enemy 'x cl-x) cl-x)
+              cl-x))
+        (define focus-amove-y
+          (if lowest-ehp-enemy
+              (safe-coord (hash-ref lowest-ehp-enemy 'y cl-y) cl-y)
+              cl-y))
 
         ;; Partition defenders per-worker locally (max 3 defenders per enemy worker; zero conga-line!):
         (define target-cap 3)
@@ -1720,7 +1774,8 @@
                              (safe-coord (hash-ref chosen 'x cl-x) cl-x)
                              (safe-coord (hash-ref chosen 'y cl-y) cl-y)))))
 
-        ;; Pass 2: Local unassigned chaser within <= 7.0 tiles (capped at 3), else Attack-Move (0, cl-x, cl-y)
+        ;; Pass 2: Local unassigned chaser within <= 7.0 tiles (capped at 3, prioritizing wounded Probes),
+        ;; else Attack-Move (0, focus-amove-x, focus-amove-y) right onto the weakest Probe's tile!
         (for ([w (in-list frontline-first)]
               #:unless (hash-has-key? worker-assignments (hash-ref w 'id 10)))
           (define wid (hash-ref w 'id 10))
@@ -1737,8 +1792,8 @@
             [(not (null? local-cands))
              (define chosen
                (argmin (lambda (ew)
-                         (+ (* 12.0 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)))
-                            (unit-total-hp-and-shield ew)))
+                         (+ (* 2.5 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)))
+                            (* 5.0 (unit-total-hp-and-shield ew))))
                        local-cands))
              (define cid (hash-ref chosen 'id 0))
              (hash-update! assigned-target-counts cid add1 0)
@@ -1747,7 +1802,7 @@
                               (safe-coord (hash-ref chosen 'x cl-x) cl-x)
                               (safe-coord (hash-ref chosen 'y cl-y) cl-y)))]
             [else
-             (hash-set! worker-assignments wid (list 0 cl-x cl-y))]))
+             (hash-set! worker-assignments wid (list 0 focus-amove-x focus-amove-y))]))
 
         ;; Emit grouped pull-workers-attack commands (unit-targeted groups + Attack-Move group)
         (define target-order '())
@@ -1765,11 +1820,11 @@
         (set! worker-pull-emitted-1ab? #t)
         (for ([tid (in-list (reverse target-order))])
           (define wids (reverse (hash-ref target-groups tid '())))
-          (define tc (hash-ref target-coords tid (cons cl-x cl-y)))
+          (define tc (hash-ref target-coords tid (cons focus-amove-x focus-amove-y)))
           (unless (null? wids)
             (emit! (list 'pull-workers-attack wids tid (car tc) (cdr tc)))))))
 
-    ;; Immediately snap back to mining any previously-pulled worker (or worker outside 14.0-tile leash)
+    ;; Immediately snap back to mining any previously-pulled worker (or worker outside 10.5-tile leash)
     ;; when enemies kite out of the mineral line or that worker is assigned to keep mining!
     (for ([w (in-list non-builder-defense-workers)])
       (define wid (hash-ref w 'id 10))
@@ -1779,7 +1834,7 @@
                  (not (memv wid cur-rush-disengaging-wids))
                  (or (memv wid prev-rush-fighting-wids)
                      (and worker-rush-active?
-                          (> (dist-to-owned-townhall wx wy) 14.0))))
+                          (> (dist-to-owned-townhall wx wy) 10.5))))
         (if (> far-patch-id 0)
             (emit! (list 'harvest-mineral wid far-patch-id))
             (emit! (list 'mineral-walk wid far-px far-py))))))
@@ -3080,6 +3135,24 @@
                        (eq? (hash-ref b 'powered? #t) #f)))
                 ally-bldgs)))
   (define has-unpowered-bldg? (not (not unpowered-protoss-bldg)))
+  (define powered-protoss-bldg-count
+    (if (eq? race 'Protoss)
+        (count (lambda (b)
+                 (and (hash? b)
+                      (sc2-structure-requires-pylon-power?
+                       (sc2-canonical-structure-sym (unit-type-sym b)))))
+               ally-bldgs)
+        0))
+  (define protoss-power-grid-saturated?
+    (and live-game-obs?
+         (>= real-pylon-count 1)
+         (< real-pylon-count 10)
+         (<= supply-left 16)
+         (>= minerals 300)
+         (or (>= powered-protoss-bldg-count (* 3 real-pylon-count))
+             (and (<= real-pylon-count 4)
+                  (>= frame 2500)
+                  (>= minerals 450)))))
   (define protoss-emergency-pylon?
     (and (eq? race 'Protoss)
          (not (null? workers))
@@ -3088,7 +3161,8 @@
                   (or (> (length ally-bldgs) 1)
                       (>= supply-used 14)
                       (<= supply-left 0)))
-             has-unpowered-bldg?)))
+             has-unpowered-bldg?
+             protoss-power-grid-saturated?)))
   (define terran-depot-count
     (count (lambda (t) (eq? t 'supply-depot)) bldg-types))
   (define terran-emergency-depot?
@@ -3149,7 +3223,9 @@
   (define bypass-wall-pylon?
     (and (eq? race 'Protoss)
          (= real-pylon-count 0)
-         (or (> wall-supply-failures 0)
+         (or worker-rush-active?
+             in-base-proxy-detected?
+             (> wall-supply-failures 0)
              (and (>= wall-supply-attempts 1)
                   (exact-integer? wall-supply-first-f)
                   (>= (- frame wall-supply-first-f) 24))
@@ -3158,7 +3234,9 @@
   (define bypass-wall-depot1?
     (and (eq? race 'Terran)
          (= real-depot-count 0)
-         (or (> wall-supply-failures 0)
+         (or worker-rush-active?
+             in-base-proxy-detected?
+             (> wall-supply-failures 0)
              (and (>= wall-supply-attempts 1)
                   (exact-integer? wall-supply-first-f)
                   (>= (- frame wall-supply-first-f) 24))
@@ -3262,12 +3340,19 @@
        (define use-exact-pylon? (pair? wall-pylon-pt))
        (define inmain-retry-idx (hash-ref wall-st 'inmain-supply-attempts 0))
        (define-values (em-px em-py) (emergency-inmain-supply-anchor inmain-retry-idx))
+       (define use-nat-pylon-anchor?
+         (and live-game-obs?
+              (>= active-bases 2)
+              (>= protoss-pylon-count 2)
+              (odd? protoss-pylon-count)))
        (define raw-px
          (cond
            [use-exact-pylon? (safe-coord (car wall-pylon-pt) em-px)]
            [has-unpowered-bldg?
             (safe-coord (+ (hash-ref unpowered-protoss-bldg 'x (+ base-x 4.0)) 2.5) em-px)]
            [bypass-wall-pylon? em-px]
+           [use-nat-pylon-anchor?
+            (safe-coord (+ nat-x 4.5 (* 2.0 (modulo (quotient protoss-pylon-count 2) 3))) (+ base-x 4.0))]
            [else (safe-coord (+ base-x 4.0 (* 2.5 (modulo protoss-pylon-count 4))))]))
        (define raw-py
          (cond
@@ -3275,6 +3360,8 @@
            [has-unpowered-bldg?
             (safe-coord (+ (hash-ref unpowered-protoss-bldg 'y (+ base-y 4.0)) 0.5) em-py)]
            [bypass-wall-pylon? em-py]
+           [use-nat-pylon-anchor?
+            (safe-coord (+ nat-y 4.5 (* 2.0 (quotient protoss-pylon-count 6))) (+ base-y 4.0))]
            [else (safe-coord (+ base-y 4.0 (* 2.5 (quotient protoss-pylon-count 4))))]))
        (define-values (px py)
          (order-ledger-resolve-build-coords!
@@ -3844,14 +3931,17 @@
   (define (core-progression-exempt-from-surcharge? target-sym)
     (and target-sym
          (not under-base-attack?)
-         (<= live-enemy-threat-supply 0)
-         (or (eq? target-sym bo-goal-sym)
-             (eq? target-sym active-escrow-sym)
-             (memq target-sym
-                   '(spawning-pool cybernetics-core roach-warren queen
-                     orbital-command barracks-techlab factory
-                     hatchery nexus command-center
-                     warp-gate-research metabolic-boost stimpack lair)))))
+         (or (memq target-sym
+                   '(spawning-pool cybernetics-core forge
+                     orbital-command barracks-techlab factory starport engineering-bay
+                     robotics-facility twilight-council))
+             (and (<= live-enemy-threat-supply 0)
+                  (or (eq? target-sym bo-goal-sym)
+                      (eq? target-sym active-escrow-sym)
+                      (memq target-sym
+                            '(roach-warren queen
+                              hatchery nexus command-center
+                              warp-gate-research metabolic-boost stimpack lair)))))))
   (define (non-combat-min-ok? cost [target-sym #f])
     (define supply-lock-floor
       (if (memq target-sym '(pylon supply-depot overlord))
@@ -4484,6 +4574,7 @@
      (when (and (>= minerals (sc2-min-cost 'hatchery))
                 (non-combat-min-ok? (sc2-min-cost 'hatchery) 'hatchery)
                 (not blocked-nat-expanded-early?)
+                (not worker-rush-active?)
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
                 (not crisis-freeze-expand-or-gas?)
@@ -4494,6 +4585,7 @@
                          (>= eff-phase-supply 30)
                          (memq 'spawning-pool ready-bldg-types))
                     (and (< (length hatcheries) desired-bases)
+                         (memq 'spawning-pool bldg-types)
                          (or (not (and endgame-corner-hunt?
                                        (< (+ (unit-count 'mutalisk) (unit-count 'corruptor)) 2)))
                              (>= (- minerals (sc2-min-cost 'hatchery)) 150))
@@ -5247,6 +5339,20 @@
         (cortex-steal-control-group! cortex 2 (list dg-id))]
        [(and live-game?
              (pair? wall-door-pt)
+             (not worker-rush-active?)
+             (not in-base-proxy-detected?)
+             (not (ormap (lambda (e)
+                           (and (not (or (eq? (hash-ref e 'is-flying #f) #t)
+                                         (eq? (hash-ref e 'flying? #f) #t)))
+                                (<= (dist2d base-x base-y
+                                            (hash-ref e 'x 9999.0)
+                                            (hash-ref e 'y 9999.0))
+                                    12.0)
+                                (> (dist2d (car wall-door-pt) (cdr wall-door-pt)
+                                           (hash-ref e 'x 9999.0)
+                                           (hash-ref e 'y 9999.0))
+                                   3.5)))
+                         enemy-units))
              (not (null? door-guards))
              (or (memq 'gateway bldg-types) (memq 'warp-gate bldg-types)))
         (define door-x (safe-coord (car wall-door-pt) nat-x))
@@ -5395,7 +5501,13 @@
                 (not (building-present-or-pending? 'gateway))
                 (>= minerals (sc2-min-cost 'gateway))
                 (>= (- minerals (sc2-min-cost 'gateway)) hard-supply-lockout-reserve-min))
-       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (wall-slot-powered? wall-slot-1))
+       (if (and allow-exact-wall-slot?
+                (not worker-rush-active?)
+                (not in-base-proxy-detected?)
+                (< frame 2200)
+                (< cur-escrow-age-frames 64)
+                (<= (length nexuses) 2)
+                (wall-slot-powered? wall-slot-1))
            (emit-build-verified! 'gateway
                                  (safe-coord (car wall-slot-1) inmain-powered-gx)
                                  (safe-coord (cdr wall-slot-1) inmain-powered-gy)
@@ -5432,7 +5544,13 @@
          (if first-ready-pylon
              (safe-coord (+ (hash-ref first-ready-pylon 'y (+ base-y 4.0)) 2.0) (+ base-y 4.0))
              (safe-coord (+ base-y 4.0))))
-       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (wall-slot-powered? wall-slot-2))
+       (if (and allow-exact-wall-slot?
+                (not worker-rush-active?)
+                (not in-base-proxy-detected?)
+                (< frame 2200)
+                (< cur-escrow-age-frames 64)
+                (<= (length nexuses) 2)
+                (wall-slot-powered? wall-slot-2))
            (emit-build-verified! 'cybernetics-core
                                  (safe-coord (car wall-slot-2) inmain-cy-x)
                                  (safe-coord (cdr wall-slot-2) inmain-cy-y)
@@ -5684,7 +5802,14 @@
                     (sc2-min-cost 'gateway))
                 (non-combat-min-ok? (sc2-min-cost 'gateway)))
        (define gw-idx (length gateways))
-       (if (and allow-exact-wall-slot? (<= (length nexuses) 2) (= gw-idx 1) (pair? wall-slot-3))
+       (if (and allow-exact-wall-slot?
+                (not worker-rush-active?)
+                (not in-base-proxy-detected?)
+                (< frame 2600)
+                (< cur-escrow-age-frames 64)
+                (<= (length nexuses) 2)
+                (= gw-idx 1)
+                (wall-slot-powered? wall-slot-3))
            (emit-build-verified! 'gateway
                                  (safe-coord (car wall-slot-3) (+ base-x 7.5))
                                  (safe-coord (cdr wall-slot-3) (+ base-y 4.0))
@@ -6302,6 +6427,12 @@
        (spend-resources-and-supply! (sc2-min-cost 'barracks-techlab) (sc2-gas-cost 'barracks-techlab) 0))
 
      ;; Research Stimpack -> Combat Shield -> Concussive Shells at Barracks Tech Lab (Group 7)
+     ;; Once Factory is ready in live games, let 1st Starport claim its 150M/100G before secondary TechLab upgrades!
+     (define holding-for-first-starport?
+       (and live-game?
+            (memq 'factory ready-bldg-types)
+            (not terran-saving-for-expand?)
+            (not (building-present-or-pending? 'starport))))
      (when (and (memq 'barracks-techlab ready-bldg-types)
                 (not urgent-combat-or-intel-need?))
        (cond
@@ -6310,10 +6441,16 @@
                      (>= gas (sc2-gas-cost 'stimpack)))
             (emit-research-verified! 'stimpack))]
          [(upgrade-needed? 'combat-shield)
-          (when (and (>= minerals (sc2-min-cost 'combat-shield))
+          (when (and (or (not holding-for-first-starport?)
+                         (and (>= (- minerals (sc2-min-cost 'combat-shield)) (sc2-min-cost 'starport))
+                              (>= (- gas (sc2-gas-cost 'combat-shield)) (sc2-gas-cost 'starport))))
+                     (>= minerals (sc2-min-cost 'combat-shield))
                      (>= gas (sc2-gas-cost 'combat-shield)))
             (emit-research-verified! 'combat-shield))]
          [(and (upgrade-needed? 'concussive-shells)
+               (or (not holding-for-first-starport?)
+                   (and (>= (- minerals (sc2-min-cost 'concussive-shells)) (sc2-min-cost 'starport))
+                        (>= (- gas (sc2-gas-cost 'concussive-shells)) (sc2-gas-cost 'starport))))
                (or (not live-game?)
                    (>= (- minerals (sc2-min-cost 'concussive-shells)) bo-reserved-min))
                (>= minerals (sc2-min-cost 'concussive-shells))
@@ -6340,6 +6477,19 @@
                              (safe-coord (+ base-x (* (add1 fac-idx) SC2-TERRAN-FACILITY-STEP-X)))
                              (safe-coord (+ base-y SC2-TERRAN-FACILITY-STEP-Y))))
 
+     ;; 1st Starport unlocks Medivac/Viking/Raven progression and runs BEFORE 3rd+ Barracks / FactoryTechLab!
+     (when (and (or (not terran-saving-for-expand?) endgame-corner-hunt?)
+                (memq 'factory ready-bldg-types)
+                (not (building-present-or-pending? 'starport))
+                (>= minerals (sc2-min-cost 'starport))
+                (>= gas (sc2-gas-cost 'starport))
+                (or endgame-corner-hunt?
+                    (and (non-combat-min-ok? (sc2-min-cost 'starport) 'starport)
+                         (non-combat-gas-ok? (sc2-gas-cost 'starport) 'starport))))
+       (emit-build-verified! 'starport
+                             (safe-coord (+ base-x SC2-TERRAN-FACILITY-STEP-X))
+                             (safe-coord (+ base-y (* 2.0 SC2-TERRAN-FACILITY-STEP-Y)))))
+
      (define terran-ideal-worker-cap
        (min 70 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length ccs)))))
      (define terran-worker-min-floor
@@ -6354,7 +6504,7 @@
                 (not terran-saving-for-orbital?))
            (sc2-min-cost 'scv)
            0))
-     (define desired-barracks
+     (define raw-desired-barracks
        (min SC2-MAX-PRODUCTION-FACILITIES
             (max 1 (if (>= (+ (length ccs) pending-cc-count) SC2-MIN-DESIRED-BASES)
                        (* SC2-TERRAN-FACILITIES-PER-BASE (max (length ccs) (+ (length ccs) pending-cc-count)))
@@ -6364,6 +6514,18 @@
                                     (>= (- minerals reserved-expansion-minerals) (sc2-min-cost 'barracks))))
                            2
                            1)))))
+     (define desired-barracks
+       (cond
+         [(not live-game?) raw-desired-barracks]
+         [(and (not (memq 'factory bldg-types))
+               (not (and (< (length active-refineries) 1) (>= minerals 450))))
+          (min 2 raw-desired-barracks)]
+         [(and (not (memq 'starport bldg-types))
+               (< minerals 500))
+          (min 2 raw-desired-barracks)]
+         [(< minerals 1000)
+          (min 8 raw-desired-barracks)]
+         [else raw-desired-barracks]))
      (when (and (not terran-saving-for-expand?)
                 (can-spend-by-priority? 'barracks 'production-scaling)
                 (>= (length barracks-list) 1)
@@ -6385,10 +6547,15 @@
 
      ;; Build Barracks Reactor on 2nd+ grounded bare Barracks for double Marine production
      (define bare-rax-for-rx (grounded-bare-facility 'barracks))
+     (define cur-rax-reactor-cnt
+       (+ (count (lambda (t) (memq t '(barracks-reactor reactor))) bldg-types)
+          (order-ledger-pending-count-for-type oledger 'barracks-reactor frame)))
      (when (and (not terran-saving-for-expand?)
                 (>= (length barracks-list) 2)
                 bare-rax-for-rx
-                (not (building-present-or-pending? 'barracks-reactor #t))
+                (if (and live-game? (memq 'factory bldg-types) (>= (length barracks-list) 3))
+                    (< cur-rax-reactor-cnt (max 1 (- (length barracks-list) 1)))
+                    (not (building-present-or-pending? 'barracks-reactor #t)))
                 (or (not live-game?) (> (hash-ref open-prod-slots 'barracks 0) 0))
                 (>= minerals (sc2-min-cost 'barracks-reactor))
                 (>= gas (sc2-gas-cost 'barracks-reactor))
@@ -6444,15 +6611,8 @@
        (spend-resources-and-supply! (sc2-min-cost 'factory-reactor) (sc2-gas-cost 'factory-reactor) 0))
 
      (when (and (or (not terran-saving-for-expand?) endgame-corner-hunt?)
-                (or (not urgent-combat-or-intel-need?) endgame-corner-hunt?)
-                (memq 'factory ready-bldg-types)
-                (>= minerals (sc2-min-cost 'starport)))
-       (when (and (not (building-present-or-pending? 'starport))
-                  (>= minerals (sc2-min-cost 'starport))
-                  (>= gas (sc2-gas-cost 'starport)))
-         (emit-build-verified! 'starport
-                               (safe-coord (+ base-x SC2-TERRAN-FACILITY-STEP-X))
-                               (safe-coord (+ base-y (* 2.0 SC2-TERRAN-FACILITY-STEP-Y)))))
+                (or (not urgent-combat-or-intel-need?) endgame-corner-hunt? (>= minerals 400))
+                (memq 'factory ready-bldg-types))
        (when (and (not (building-present-or-pending? 'armory))
                   (or (not live-game?)
                       (and (memq 'engineering-bay bldg-types)
@@ -6475,11 +6635,18 @@
            (enemy-tech-observation-requires-anti-air? tech-obs)))
 
      (when (and (not terran-saving-for-expand?)
-                (or (not urgent-combat-or-intel-need?) need-emergency-ebay-or-turret?)
+                (or (not urgent-combat-or-intel-need?)
+                    need-emergency-ebay-or-turret?
+                    (and (non-combat-min-ok? (sc2-min-cost 'engineering-bay) 'engineering-bay)
+                         (>= minerals 250)))
                 (or need-emergency-ebay-or-turret?
                     (plan-wants-now? 'engineering-bay)
                     (plan-wants-now? 'missile-turret)
-                    (memq 'starport ready-bldg-types))
+                    (memq 'starport ready-bldg-types)
+                    (and live-game?
+                         (>= (length ccs) 2)
+                         (memq 'factory ready-bldg-types)
+                         (>= eff-phase-supply 40)))
                 (>= minerals (sc2-min-cost 'engineering-bay)))
        (when (and (not (building-present-or-pending? 'engineering-bay))
                   (>= (- minerals (if need-emergency-ebay-or-turret? 0 terran-worker-min-floor))
@@ -6500,9 +6667,37 @@
              (emit-build-verified! 'missile-turret (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0)))
              (emit! (list 'build 'missile-turret (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0)))))))
 
+     ;; Engineering Bay +1/+1 -> +3/+3 and Armory vehicle upgrades fire independently of Starport readiness
+     (when (and (not terran-saving-for-expand?)
+                (or (not urgent-combat-or-intel-need?) (>= minerals 300)))
+       (when (memq 'engineering-bay ready-bldg-types)
+         (cond
+           [(upgrade-needed? 'terran-infantry-weapons-1)
+            (emit-research-verified! 'terran-infantry-weapons-1)]
+           [(upgrade-needed? 'terran-infantry-armor-1)
+            (emit-research-verified! 'terran-infantry-armor-1)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-weapons-2))
+            (emit-research-verified! 'terran-infantry-weapons-2)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-armor-2))
+            (emit-research-verified! 'terran-infantry-armor-2)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-weapons-3))
+            (emit-research-verified! 'terran-infantry-weapons-3)]
+           [(and (memq 'armory ready-bldg-types)
+                 (upgrade-needed? 'terran-infantry-armor-3))
+            (emit-research-verified! 'terran-infantry-armor-3)]))
+       (when (memq 'armory ready-bldg-types)
+         (cond
+           [(upgrade-needed? 'terran-vehicle-weapons-1)
+            (emit-research-verified! 'terran-vehicle-weapons-1)]
+           [(upgrade-needed? 'terran-vehicle-and-ship-plating-1)
+            (emit-research-verified! 'terran-vehicle-and-ship-plating-1)])))
+
      (define bare-sp-for-addon (grounded-bare-facility 'starport))
      (when (and (or (not terran-saving-for-expand?) endgame-corner-hunt?)
-                (or (not urgent-combat-or-intel-need?) endgame-corner-hunt?)
+                (or (not urgent-combat-or-intel-need?) endgame-corner-hunt? (>= minerals 300))
                 (memq 'starport ready-bldg-types))
        (cond
          [(and bare-sp-for-addon
@@ -6543,30 +6738,6 @@
           (set! bldg-types (cons 'starport-reactor bldg-types))
           (hash-set! open-prod-slots 'starport (max 0 (sub1 (hash-ref open-prod-slots 'starport 0))))
           (spend-resources-and-supply! (sc2-min-cost 'starport-reactor) (sc2-gas-cost 'starport-reactor) 0)])
-       (when (memq 'engineering-bay ready-bldg-types)
-         (cond
-           [(upgrade-needed? 'terran-infantry-weapons-1)
-            (emit-research-verified! 'terran-infantry-weapons-1)]
-           [(upgrade-needed? 'terran-infantry-armor-1)
-            (emit-research-verified! 'terran-infantry-armor-1)]
-           [(and (memq 'armory ready-bldg-types)
-                 (upgrade-needed? 'terran-infantry-weapons-2))
-            (emit-research-verified! 'terran-infantry-weapons-2)]
-           [(and (memq 'armory ready-bldg-types)
-                 (upgrade-needed? 'terran-infantry-armor-2))
-            (emit-research-verified! 'terran-infantry-armor-2)]
-           [(and (memq 'armory ready-bldg-types)
-                 (upgrade-needed? 'terran-infantry-weapons-3))
-            (emit-research-verified! 'terran-infantry-weapons-3)]
-           [(and (memq 'armory ready-bldg-types)
-                 (upgrade-needed? 'terran-infantry-armor-3))
-            (emit-research-verified! 'terran-infantry-armor-3)]))
-       (when (memq 'armory ready-bldg-types)
-         (cond
-           [(upgrade-needed? 'terran-vehicle-weapons-1)
-            (emit-research-verified! 'terran-vehicle-weapons-1)]
-           [(upgrade-needed? 'terran-vehicle-and-ship-plating-1)
-            (emit-research-verified! 'terran-vehicle-and-ship-plating-1)]))
        (when (and (memq 'starport-techlab ready-bldg-types)
                   (or (not live-game?)
                       (plan-wants-now? 'banshee-cloak)

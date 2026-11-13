@@ -4349,9 +4349,13 @@
 
      ;; Donor eligibility:
      ;; - Must be complete (`build-progress >= 0.999`), grounded, idle, and NOT on `448`-loop cooldown.
-     ;; - Never strip `factory-techlab` off a `Factory` (needed for SiegeTank/Thor production & upgrades)
-     ;;   unless `allow-factory-techlab-strip?` is explicitly `#t`; `Barracks` add-on swaps remain allowed!
+     ;; - Never strip `factory-techlab` off a `Factory` unless `allow-factory-techlab-strip?` is `#t`.
+     ;; - In live games (`mineral-harvesters` present), never strip `barracks-techlab` off a `Barracks`
+     ;;   (needed for Stimpack/CombatShield/ConcussiveShells & Marauders); only swap `Reactor`s!
      (define allow-fac-tl-strip? (eq? (hash-ref sanitized-obs 'allow-factory-techlab-strip? #f) #t))
+     (define allow-rax-tl-strip?
+       (or (eq? (hash-ref sanitized-obs 'allow-barracks-techlab-strip? #f) #t)
+           (not (hash-has-key? sanitized-obs 'mineral-harvesters))))
      (define donor-rax-or-fac
        (findf (lambda (b)
                 (define bid (hash-ref b 'id 0))
@@ -4362,9 +4366,13 @@
                      (bldg-has-addon? b)
                      (not (hash-ref b 'busy? #f))
                      (not (bldg-on-relift-cooldown? bid))
-                     (or (eq? btype 'barracks)
-                         allow-fac-tl-strip?
-                         (memq (bldg-attached-addon-sym b) '(factory-reactor reactor)))))
+                     (cond
+                       [(eq? btype 'barracks)
+                        (or allow-rax-tl-strip?
+                            (memq (bldg-attached-addon-sym b) '(barracks-reactor reactor)))]
+                       [else
+                        (or allow-fac-tl-strip?
+                            (memq (bldg-attached-addon-sym b) '(factory-reactor reactor)))])))
               ally-bldgs))
 
      (define donor-land-actions
@@ -4420,8 +4428,9 @@
                (define ay (exact->inexact (hash-ref addon 'y 31.5)))
                (claim-addon-for-bldg! addon ax ay rid)
                (list (list 'terran-addon-swap 0 rid ax ay)))]
-         ;; Case 2: Active pro swap (`frame >= SC2-TERRAN-FIRST-ADDON-SWAP-FRAME`)
+         ;; Case 2: Active pro swap (`frame >= SC2-TERRAN-FIRST-ADDON-SWAP-FRAME`), only when no free add-ons exist
          [(and (null? donor-land-actions)
+               (null? free-addons)
                bare-fac-or-port
                donor-rax-or-fac
                (not (eq? (hash-ref bare-fac-or-port 'type 'unknown)

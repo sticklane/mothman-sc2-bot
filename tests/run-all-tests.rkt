@@ -87,7 +87,16 @@
                   govern-sc2-wire-actions!
                   make-request-step
                   make-request-query-placement
-                  make-request-ping)
+                  make-request-ping
+                  encode-float32
+                  decode-sc2-response
+                  sc2-response-game-info
+                  sc2-image-grid-y-flip?
+                  sc2-image-grid-lsb-first?
+                  sc2-game-info-placement-grid
+                  sc2-game-info-pathing-grid
+                  collect-spiral-candidates
+                  find-verified-building-placement)
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
                   mpq-hash
@@ -6734,6 +6743,338 @@
   (assert-true! (< (proto-fuzz-summary-elapsed-ms fuzz-sum) 300.0)
                 (format "Suite 29 3,000-case fuzz slice must complete in < 300 ms, took ~a ms"
                         (proto-fuzz-summary-elapsed-ms fuzz-sum))))
+
+;; ============================================================================
+;; 30. Post-31ec9b5 AI Arena Forensics (#5120539-#5120546):
+;;     Bugs A/B/C/D Regression Suite (Grid Calibration, 2x2/3x3 Snapping,
+;;     #f Placement Lease Guard, Z/P/T Tech Progression & 12-Probe Rush Hold)
+;; ============================================================================
+(run-suite "30. Post-31ec9b5 Forensics: Grid Orientation, 2x2/3x3 Snapping, Z/P/T Tech & 12-Probe Rush"
+  ;; 30.1 Bugs A/B/C: StartRaw 1-bpp y-flip=#t grid calibration when start_locations has
+  ;;      placement_grid=1 AND pathing_grid=0 on the 5x5 TownHall pad (Magannatha/Pylon AIE)
+  (define gw30 176)
+  (define gh30 176)
+  (define (mk-1bpp-grid-proto set-bit?)
+    (define nbytes (quotient (* gw30 gh30) 8))
+    (define bstr (make-bytes nbytes 0))
+    ;; Encode with y-flip=#t (row = gh30 - 1 - iy) and MSB-first (lsb-first=#f)
+    (for* ([iy (in-range gh30)]
+           [ix (in-range gw30)]
+           #:when (set-bit? ix iy))
+      (define row (- gh30 1 iy))
+      (define bit-idx (+ (* row gw30) ix))
+      (define byte-idx (quotient bit-idx 8))
+      (define bit-off (- 7 (modulo bit-idx 8)))
+      (bytes-set! bstr byte-idx
+                  (bitwise-ior (bytes-ref bstr byte-idx)
+                               (arithmetic-shift 1 bit-off))))
+    (encode-submessage-field
+     1 ;; dummy wrapper stripped by caller
+     (bytes-append (encode-int32 1 1)
+                   (encode-submessage-field 2 (bytes-append (encode-int32 1 gw30) (encode-int32 2 gh30)))
+                   (encode-bytes-field 3 bstr))))
+  (define (strip-tag1 b)
+    (third (first (decode-protobuf-message b))))
+  ;; Main plateau [128..152] x [28..48] is buildable & walkable EXCEPT 5x5 TownHall pad [139..143] x [36..40]
+  ;; where pathing_grid=0; meanwhile the unflipped mirror [128..152] x [127..147] has ambient walkable grass
+  ;; around (141, 137) so naive pathing_grid 1-bit maximization at start_locations would invert y-flip!
+  (define plac-img-b
+    (strip-tag1
+     (mk-1bpp-grid-proto
+      (lambda (ix iy)
+        (and (>= ix 128) (<= ix 152) (>= iy 28) (<= iy 48))))))
+  (define path-img-b
+    (strip-tag1
+     (mk-1bpp-grid-proto
+      (lambda (ix iy)
+        (or (and (>= ix 128) (<= ix 152) (>= iy 28) (<= iy 48)
+                 (not (and (>= ix 139) (<= ix 143) (>= iy 36) (<= iy 40))))
+            ;; Unflipped mirror has 1s on [139..143] x [135..139] that previously tricked pathing_grid!
+            (and (>= ix 139) (<= ix 143) (>= iy 135) (<= iy 139)))))))
+  (define start-pt-b
+    (bytes-append (encode-float32 1 141.5) (encode-float32 2 38.5)))
+  (define start-raw-b
+    (bytes-append
+     (encode-submessage-field 1 (bytes-append (encode-int32 1 gw30) (encode-int32 2 gh30)))
+     (encode-submessage-field 2 path-img-b)
+     (encode-submessage-field 4 plac-img-b)
+     (encode-submessage-field 6 start-pt-b)))
+  (define resp-ginfo-b
+    (bytes-append
+     (encode-submessage-field 9 (encode-submessage-field 4 start-raw-b))
+     (encode-int32 99 3)))
+  (define ginfo30 (sc2-response-game-info (decode-sc2-response resp-ginfo-b)))
+  (assert-true! (and (sc2-image-grid-y-flip? (sc2-game-info-placement-grid ginfo30))
+                     (sc2-image-grid-y-flip? (sc2-game-info-pathing-grid ginfo30))
+                     (eq? (sc2-image-grid-lsb-first? (sc2-game-info-placement-grid ginfo30))
+                          (sc2-image-grid-lsb-first? (sc2-game-info-pathing-grid ginfo30))))
+                "pathing-grid must inherit calibrated orientation from placement-grid instead of inverting on TownHall pathing_grid=0 pads")
+  (assert-eq! (sc2-grid-ref (sc2-game-info-pathing-grid ginfo30) 135 38) 1
+              "Main plateau tile (135, 38) adjacent to TownHall (141.5, 38.5) must decode as walkable (1)")
+  (define bfs30
+    (compute-ground-bfs-distances (sc2-game-info-pathing-grid ginfo30) 141.5 38.5))
+  (assert-true! (and bfs30 (< (bfs30 133.5 38.5) 16.0))
+                "compute-ground-bfs-distances must escape friendly 5x5 TownHall pathing_grid=0 pad (< 16 tiles, not +inf.0)")
+
+  ;; 30.2 Bugs A/B/C: 3x3 (.5) & 2x2 (.0) spiral snapping + QueryPlacement=#f worker-lease guard
+  (define cy-cands
+    (collect-spiral-candidates 138.0 34.0 '() #:min-spacing 2.0 #:max-radius 8.0 #:step 1.0 #:bldg-sym 'cybernetics-core))
+  (define py-cands
+    (collect-spiral-candidates 141.5 38.5 '() #:min-spacing 2.0 #:max-radius 8.0 #:step 1.0 #:bldg-sym 'pylon))
+  (define pool-cands
+    (collect-spiral-candidates 141.5 38.5 '() #:min-spacing 2.0 #:max-radius 8.0 #:step 1.0 #:bldg-sym 'spawning-pool))
+  (assert-true! (and (pair? cy-cands)
+                     (for/and ([pt (in-list cy-cands)])
+                       (and (= (- (sc2-point2d-x pt) (floor (sc2-point2d-x pt))) 0.5)
+                            (= (- (sc2-point2d-y pt) (floor (sc2-point2d-y pt))) 0.5))))
+                "3x3 CyberneticsCore candidates around integer Pylon (138.0, 34.0) must snap strictly to .5 centers")
+  (assert-true! (and (pair? pool-cands)
+                     (for/and ([pt (in-list pool-cands)])
+                       (and (= (- (sc2-point2d-x pt) (floor (sc2-point2d-x pt))) 0.5)
+                            (= (- (sc2-point2d-y pt) (floor (sc2-point2d-y pt))) 0.5))))
+                "3x3 SpawningPool candidates around (141.5, 38.5) must snap strictly to .5 centers")
+  (assert-true! (and (pair? py-cands)
+                     (for/and ([pt (in-list py-cands)])
+                       (and (= (- (sc2-point2d-x pt) (floor (sc2-point2d-x pt))) 0.0)
+                            (= (- (sc2-point2d-y pt) (floor (sc2-point2d-y pt))) 0.0))))
+                "2x2 Pylon candidates around half-integer TownHall (141.5, 38.5) must snap strictly to .0 centers")
+
+  ;; Loopback ws-conn returning all 2 (CantBuildLocationInvalid): must return #f, emit 0 build cmds, and lease 0 workers!
+  (define-values (c30-in s30-out) (make-pipe))
+  (define-values (s30-in c30-out) (make-pipe))
+  (define ws30-reject (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c30-in c30-out #f 1))
+  (define srv30-thd
+    (thread
+     (lambda ()
+       (let lp ()
+         (define hdr2 (read-bytes 2 s30-in))
+         (unless (eof-object? hdr2)
+           (define b0 (bytes-ref hdr2 0))
+           (define b1 (bytes-ref hdr2 1))
+           (define opcode (bitwise-and b0 #x0F))
+           (define masked? (not (zero? (bitwise-and b1 #x80))))
+           (define len7 (bitwise-and b1 #x7F))
+           (define plen
+             (cond [(< len7 126) len7]
+                   [(= len7 126) (integer-bytes->integer (read-bytes 2 s30-in) #f #t)]
+                   [else (integer-bytes->integer (read-bytes 8 s30-in) #f #t)]))
+           (define mkey (if masked? (read-bytes 4 s30-in) #f))
+           (define raw (read-bytes plen s30-in))
+           (define payload (if masked? (mask-ws-payload raw mkey) raw))
+           (when (= opcode 2)
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([_it (in-list p-items)])
+                          (encode-submessage-field 3 (encode-int32 1 2)))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s30-out)
+               (write-bytes resp s30-out)
+               (flush-output s30-out))
+             (lp)))))))
+  (define leases30 (make-hasheqv))
+  (define obs30-z
+    (sc2-observation
+     1200
+     (sc2-player-common 1 300 0 22 16 0 16 0 0 0 0)
+     (list (sc2-unit 1 1 9001 86 1 (sc2-point3d 141.5 38.5 10.0) 0.0 2.75 1.0 0 #f #f #f
+                     1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 16 0.0 0 0 0 0)
+           (sc2-unit 1 1 9002 104 1 (sc2-point3d 139.5 38.5 10.0) 0.0 0.375 1.0 0 #f #f #f
+                     40.0 40.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 0))
+     '() '() #f '() '() '() '() '() '()))
+  (define cmds30-rej
+    (translate-bot-actions->sc2-raw-commands
+     '((build spawning-pool 137.5 38.5))
+     obs30-z
+     #:ws-conn ws30-reject
+     #:role-leases leases30))
+  (close-output-port c30-out)
+  (close-input-port c30-in)
+  (thread-wait srv30-thd)
+  (assert-eq! (length (filter (lambda (c)
+                                (and (sc2-raw-unit-command? c)
+                                     (= (sc2-raw-unit-command-ability-id c) 1155)))
+                              cmds30-rej))
+              0
+              "All-rejected QueryPlacement must NOT emit unverified TownHall-center BUILD_SPAWNINGPOOL (1155)")
+  (assert-true! (not (unit-leased-above? leases30 9002 'harvester 1200))
+                "Failed QueryPlacement (#f) must NOT leak a 224-loop 'builder lease onto Drone #9002")
+
+  ;; 30.3 Bug C: Terran Add-On Swap Cap, 100G Starport Surcharge Exemption & Pre-Starport EngineeringBay +1
+  (define live-addon-obs-techlab
+    (hash 'frame 5000 'race 'Terran 'minerals 400 'gas 200 'mineral-harvesters 28
+          'ally-buildings (list (hash 'id 401 'type 'barracks 'x 40.5 'y 40.5 'addon 'barracks-techlab
+                                      'build-progress 1.0 'busy? #f)
+                                (hash 'id 402 'type 'factory 'x 40.5 'y 45.5 'addon 'none
+                                      'build-progress 1.0 'busy? #f))
+          'free-addons '()))
+  (assert-eq! (plan-terran-addon-swap live-addon-obs-techlab) '()
+              "Live games must NEVER strip barracks-techlab off Barracks (preserving Stim/CombatShield & avoiding TechLab spam)")
+  (define live-addon-obs-free
+    (hash 'frame 5000 'race 'Terran 'minerals 400 'gas 200 'mineral-harvesters 28
+          'ally-buildings (list (hash 'id 401 'type 'barracks 'x 40.5 'y 40.5 'addon 'barracks-reactor
+                                      'build-progress 1.0 'busy? #f)
+                                (hash 'id 402 'type 'factory 'x 40.5 'y 45.5 'addon 'none
+                                      'build-progress 1.0 'busy? #f))
+          'free-addons (list (hash 'id 499 'type 'reactor 'x 46.0 'y 40.0))))
+  (assert-eq! (plan-terran-addon-swap live-addon-obs-free) '()
+              "plan-terran-addon-swap must NOT lift another donor while unattached free-addons already sit on the ground")
+
+  (define rt-t-sp (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-t-sp
+    (step-live-bot-runtime!
+     rt-t-sp
+     (hash 'frame 5400 'minerals 220 'gas 110 'supply-used 42 'supply-cap 62 'supply-left 20
+           'mineral-harvesters 28 'vespene-harvesters 6 'enemy-race 'Protoss
+           'researched-upgrades '(stimpack)
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+           'ally-units (append (for/list ([i (in-range 34)])
+                                 (hash 'id (+ 5100 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                               (for/list ([m (in-range 6)])
+                                 (hash 'id (+ 5200 m) 'type 'marine 'x 54.0 'y 32.5 'hp 45)))
+           'ally-buildings (list (hash 'id 5301 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 5302 'type 'orbital-command 'x 58.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 5303 'type 'supply-depot 'x 36.0 'y 36.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 5310 'type 'refinery 'x 29.5 'y 35.5 'hp 500 'build-progress 1.0 'vespene-contents 1200)
+                                 (hash 'id 5311 'type 'refinery 'x 29.5 'y 29.5 'hp 500 'build-progress 1.0 'vespene-contents 1200)
+                                 (hash 'id 5312 'type 'bunker 'x 53.0 'y 32.5 'hp 400 'build-progress 1.0)
+                                 (hash 'id 5304 'type 'barracks 'x 38.5 'y 32.5 'hp 1000 'build-progress 1.0
+                                       'addon 'techlab 'busy? #t 'order-count 1)
+                                 (hash 'id 5305 'type 'barracks-techlab 'x 41.0 'y 32.0 'hp 400 'build-progress 1.0
+                                       'busy? #f 'order-count 0)
+                                 (hash 'id 5306 'type 'barracks 'x 38.5 'y 36.5 'hp 1000 'build-progress 1.0
+                                       'addon 'reactor 'busy? #t 'order-count 2)
+                                 (hash 'id 5307 'type 'barracks-reactor 'x 41.0 'y 36.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 5308 'type 'factory 'x 44.5 'y 32.5 'hp 1250 'build-progress 1.0
+                                       'busy? #f 'order-count 0)
+                                 (hash 'id 5309 'type 'engineering-bay 'x 34.5 'y 28.5 'hp 850 'build-progress 1.0
+                                       'busy? #f 'order-count 0))
+           ;; Distant enemy army (>40 tiles away: not under-base-attack?, but live-enemy-threat-supply > 0!)
+           'enemy-units (list (hash 'id 9501 'type 'stalker 'x 120.0 'y 120.0 'hp 80 'shield 80)
+                              (hash 'id 9502 'type 'stalker 'x 121.0 'y 120.0 'hp 80 'shield 80)
+                              (hash 'id 9503 'type 'zealot 'x 122.0 'y 120.0 'hp 100 'shield 50)))))
+  (define acts-t-sp (hash-ref res-t-sp 'actions '()))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'starport))) acts-t-sp)
+                "Terran with ready Factory and 220M/110G (<150G surcharge) must immediately build 1st Starport (#5120540 fix)")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'barracks))) acts-t-sp))
+                "Terran with 2 Barracks and 0 Starports must NOT spam 3rd+ Barracks before Starport (#5119235 fix)")
+
+  (define rt-t-upg (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-t-upg
+    (step-live-bot-runtime!
+     rt-t-upg
+     (hash 'frame 5600 'minerals 200 'gas 200 'supply-used 46 'supply-cap 62 'supply-left 16
+           'mineral-harvesters 30 'vespene-harvesters 6 'enemy-race 'Zerg
+           'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+           'ally-units (append (for/list ([i (in-range 34)])
+                                 (hash 'id (+ 6100 i) 'type 'scv 'x 32.5 'y 32.5 'hp 45))
+                               (for/list ([m (in-range 12)])
+                                 (hash 'id (+ 6200 m) 'type 'marine 'x 54.0 'y 32.5 'hp 45)))
+           'ally-buildings (list (hash 'id 6301 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 6302 'type 'orbital-command 'x 58.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 6304 'type 'barracks 'x 38.5 'y 32.5 'hp 1000 'build-progress 1.0
+                                       'busy? #t 'order-count 1)
+                                 (hash 'id 6308 'type 'factory 'x 44.5 'y 32.5 'hp 1250 'build-progress 1.0
+                                       'busy? #t 'order-count 1)
+                                 (hash 'id 6309 'type 'engineering-bay 'x 34.5 'y 28.5 'hp 850 'build-progress 1.0
+                                       'busy? #f 'order-count 0))
+           'enemy-units '())))
+  (assert-true! (ormap (lambda (a) (equal? a '(research terran-infantry-weapons-1)))
+                       (hash-ref res-t-upg 'actions '()))
+                "EngineeringBay must start +1 Infantry Weapons without waiting for a Starport to exist")
+
+  ;; 30.4 Bug D: 12-Probe Worker-Rush Defense (#5120539 & #5120546 vs Creepy_strategies)
+  ;; (a) 12 Probes holding at ramp (11.5 tiles from TownHall, 17.5 tiles from minerals):
+  ;;     NO trickle worker pull, Protoss places 1st Pylon in-main near Nexus!
+  (define rt-p-ramp (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define ramp-12-probes
+    (for/list ([i (in-range 12)])
+      (hash 'id (+ 9600 i) 'type 'probe 'x (+ 44.0 (* 0.1 i)) 'y 32.5 'hp 20 'shield 20)))
+  (define res-p-ramp
+    (step-live-bot-runtime!
+     rt-p-ramp
+     (hash 'frame 620 'minerals 120 'gas 0 'supply-used 14 'supply-cap 15 'supply-left 1
+           'mineral-harvesters 14 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+           'mineral-patches (list (hash 'id 550 'x 26.5 'y 32.5))
+           'ally-units (for/list ([i (in-range 14)])
+                         (hash 'id (+ 7100 i) 'type 'probe 'x (+ 27.5 (* 0.3 i)) 'y 32.5 'hp 20 'shield 20))
+           'ally-buildings (list (hash 'id 7001 'type 'nexus 'x 32.5 'y 32.5
+                                       'hp 1000 'max-hp 1000 'shield 1000 'max-shield 1000
+                                       'build-progress 1.0 'powered? #f))
+           'enemy-units ramp-12-probes
+           'enemy-buildings '())))
+  (define acts-p-ramp (hash-ref res-p-ramp 'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-p-ramp))
+                "12 enemy Probes at ramp (11.5 tiles from TownHall) must NOT bait trickle worker pulls (#5120539/#5120546 fix)")
+  (define pylon-act-ramp
+    (findf (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'pylon))) acts-p-ramp))
+  (assert-true! (and pylon-act-ramp
+                     (<= (sqrt (+ (sqr (- (third pylon-act-ramp) 32.5))
+                                  (sqr (- (fourth pylon-act-ramp) 32.5))))
+                         9.0))
+                "Under worker-rush-active?, Protoss 1st Pylon must anchor safely in-main <= 9 tiles from Nexus (never natural wall)")
+
+  ;; (b) 12 Probes breaching mineral line (<= 5.5 tiles from patch (26.5, 32.5)), with wounded #9700 (6 HP, 0 Shield),
+  ;;     shield-regenerated friendly Probe #7200 (10 HP + 20 Shield = 30 EHP), and spawned Zealot #7300:
+  (define rt-p-brawl (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define brawl-12-probes
+    (cons (hash 'id 9700 'type 'probe 'x 30.0 'y 32.5 'hp 6 'shield 0)
+          (for/list ([i (in-range 11)])
+            (hash 'id (+ 9701 i) 'type 'probe 'x (+ 29.0 (* 0.2 i)) 'y 33.0 'hp 20 'shield 20))))
+  (define brawl-ally-probes
+    (cons (hash 'id 7200 'type 'probe 'x 29.5 'y 32.5 'hp 10 'shield 20) ;; 30 EHP shield-regenerated Probe!
+          (for/list ([i (in-range 13)])
+            (hash 'id (+ 7201 i) 'type 'probe 'x (+ 27.0 (* 0.35 i)) 'y 32.5 'hp 20 'shield 20))))
+  (define res-p-brawl
+    (step-live-bot-runtime!
+     rt-p-brawl
+     (hash 'frame 1950 'minerals 100 'gas 0 'supply-used 16 'supply-cap 23 'supply-left 7
+           'mineral-harvesters 14 'vespene-harvesters 0
+           'base-x 32.5 'base-y 32.5 'natural-x 60.5 'natural-y 32.5
+           'mineral-patches (list (hash 'id 550 'x 26.5 'y 32.5))
+           'ally-units (append brawl-ally-probes
+                               (list (hash 'id 7300 'type 'zealot 'x 34.0 'y 32.5 'hp 100 'shield 50)))
+           'ally-buildings (list (hash 'id 7001 'type 'nexus 'x 32.5 'y 32.5
+                                       'hp 1000 'max-hp 1000 'shield 900 'max-shield 1000
+                                       'build-progress 1.0 'powered? #f)
+                                 (hash 'id 7002 'type 'pylon 'x 35.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 7003 'type 'gateway 'x 35.5 'y 32.5 'hp 500 'shield 500
+                                       'build-progress 1.0 'powered? #t))
+           'enemy-units brawl-12-probes
+           'enemy-buildings '())))
+  (define acts-p-brawl
+    (append (hash-ref res-p-brawl 'actions '())
+            (hash-ref res-p-brawl 'mirror-actions '())))
+  (define pulls-brawl
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-p-brawl))
+  (define pulled-brawl-ids
+    (remove-duplicates (append* (map second pulls-brawl))))
+  (assert-true! (memv 7200 pulled-brawl-ids)
+                "Shield-regenerated Protoss Probe #7200 (10 HP + 20 Shield = 30 EHP) must re-engage in worker-rush defense")
+  (assert-true! (>= (length pulled-brawl-ids) 12)
+                (format "12-Probe mineral-line breach must pull >= 12 of 14 Probes simultaneously (pulled ~a)"
+                        (length pulled-brawl-ids)))
+  (assert-true! (and (findf (lambda (a) (equal? (third a) 9700)) pulls-brawl)
+                     (andmap (lambda (a) (or (<= (third a) 0) (<= (length (second a)) 3))) pulls-brawl))
+                "Mineral-line brawl must focus wounded Probe #9700 while respecting <= 3 cap on unit-targeted groups")
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a)
+                                   (eq? (car a) 'hold-position)
+                                   (equal? (second a) 7300)))
+                            acts-p-brawl))
+                "Spawned Zealot #7300 must NEVER lock onto distant door-guard hold-position during an in-main worker rush (#5120546 fix)"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
