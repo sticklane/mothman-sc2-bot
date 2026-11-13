@@ -12,6 +12,9 @@ replays/*_mirror_perspective_audit.json
 downloaded_bots/
 replays/local_real_matches/tmp_sc2_*
 replays/local_real_matches/.active_locks/
+replays/local_real_matches/.sc2_racket_slot_*.lock
+replays/local_real_matches/*.SC2Replay
+replays/local_real_matches/*_priority.log
 replays/local_real_matches/*_stdout.log
 replays/local_real_matches/*_stderr.log
 replays/aiarena_live_cache/

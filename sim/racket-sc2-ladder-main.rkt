@@ -67,7 +67,8 @@
       [(or (string-suffix? name-up "-P")
            (string-contains? name-up "PROTOSS")
            (string-contains? name-up "KHALAI")
-           (string-contains? name-up "CARRIER"))
+           (string-contains? name-up "CARRIER")
+           (string-contains? name-up "CREEPY12PROBERUSH"))
        "Protoss"]
       [(or (string-suffix? name-up "-R")
            (string-contains? name-up "MOTHMAN"))
@@ -94,18 +95,24 @@
 (define (load-bot-config [variant-name #f] #:root-dir [root-dir (current-directory)])
   (define cfg-path (build-path root-dir "config.json"))
   (define fallback
-    (hasheq 'BotName (or variant-name "Mothman")
-            'BotRace "Random"
-            'BotPath "bots/Mothman.rkt"))
-  (if (file-exists? cfg-path)
-      (with-handlers ([exn:fail? (lambda (_e) fallback)])
-        (define raw (call-with-input-file cfg-path read-json))
-        (define variants (hash-ref raw 'Variants (hasheq)))
-        (define var-sym (and variant-name (string->symbol variant-name)))
-        (if (and var-sym (hash? variants) (hash-has-key? variants var-sym))
-            (hash-ref variants var-sym)
-            raw))
-      fallback))
+    (if (and variant-name (string-ci=? variant-name "Creepy12ProbeRush"))
+        (hasheq 'BotName "Creepy12ProbeRush"
+                'BotRace "Protoss"
+                'BotPath "")
+        (hasheq 'BotName (or variant-name "Mothman")
+                'BotRace "Random"
+                'BotPath "bots/Mothman.rkt")))
+  (if (and variant-name (string-ci=? variant-name "Creepy12ProbeRush"))
+      fallback
+      (if (file-exists? cfg-path)
+          (with-handlers ([exn:fail? (lambda (_e) fallback)])
+            (define raw (call-with-input-file cfg-path read-json))
+            (define variants (hash-ref raw 'Variants (hasheq)))
+            (define var-sym (and variant-name (string->symbol variant-name)))
+            (if (and var-sym (hash? variants) (hash-has-key? variants var-sym))
+                (hash-ref variants var-sym)
+                raw))
+          fallback)))
 
 (define (compute-ladder-port-config start-port)
   (if (and (exact-integer? start-port) (> start-port 0))
@@ -129,13 +136,14 @@
   (define candidates
     (filter values
             (list (getenv "SC2PATH")
+                  "/home/antigravity/sc2_local/StarCraftII"
                   "/home/antigravity/sc2_headless/StarCraftII"
                   "/home/antigravity/StarCraftII"
                   (path->string (build-path (find-system-path 'home-dir) "StarCraftII")))))
   (or (for/first ([c (in-list candidates)]
                   #:when (directory-exists? c))
         c)
-      (or (getenv "SC2PATH") "/home/antigravity/sc2_headless/StarCraftII")))
+      (or (getenv "SC2PATH") "/home/antigravity/sc2_local/StarCraftII")))
 
 (define (find-sc2-x64-binary [sc2-root (find-sc2-root)])
   (define versions-dir (build-path sc2-root "Versions"))
@@ -854,70 +862,203 @@
                                                           (not (= (sc2-unit-display-type u) 4))))
                                                    (sc2-observation-units obs))))))
 
-                ;; Step cognitive architecture (primary actions first so individual unit micro
-                ;; populates commanded-combat-tags before any global spatial maneuver)
-                (define step-res (step-live-bot-runtime! runtime obs-hash))
-                (define t-rt-1 (current-inexact-monotonic-milliseconds))
-                (define step-tel (hash-ref step-res 'telemetry (hash)))
-                (define prio-sum (hash-ref step-tel 'priority-summary (hash)))
-                (define prio-line (hash-ref step-tel 'priority-log-line ""))
-                (define cur-saving-for (hash-ref prio-sum 'saving-for 'none))
-                (set! max-intel-staleness-frames
-                      (max max-intel-staleness-frames (hash-ref step-tel 'intel-staleness-frames 0)))
-                (set! max-escrow-age-frames
-                      (max max-escrow-age-frames (hash-ref step-tel 'escrow-age-frames 0)))
-                (set! peak-remembered-threat
-                      (max peak-remembered-threat (hash-ref step-tel 'remembered-enemy-threat-supply 0)))
+                (define-values (raw-cmds prio-line cur-saving-for t-rt-1 t-tr-1)
+                  (cond
+                    [(string-ci=? bot-name "Creepy12ProbeRush")
+                     (define pc0 (sc2-observation-player-common obs))
+                     (define units0 (sc2-observation-units obs))
+                     (define our-nexus
+                       (for/first ([u (in-list units0)]
+                                   #:when (and (= (sc2-unit-alliance u) 1)
+                                               (sc2-unit-is-townhall? u)))
+                         u))
+                     (define our-probes
+                       (filter (lambda (u)
+                                 (and (= (sc2-unit-alliance u) 1)
+                                      (sc2-unit-is-worker? u)))
+                               units0))
+                     (define our-pylons
+                       (filter (lambda (u)
+                                 (and (= (sc2-unit-alliance u) 1)
+                                      (= (sc2-unit-unit-type u) 60)))
+                               units0))
+                     (define enemy-ground
+                       (filter (lambda (u)
+                                 (and (= (sc2-unit-alliance u) 4)
+                                      (= (sc2-unit-display-type u) 1)
+                                      (not (sc2-unit-is-flying u))))
+                               units0))
+                     (define home-x (if our-nexus (sc2-point3d-x (sc2-unit-pos our-nexus)) 32.0))
+                     (define home-y (if our-nexus (sc2-point3d-y (sc2-unit-pos our-nexus)) 32.0))
+                     (define starts
+                       (if (sc2-game-info? game-info)
+                           (sc2-game-info-start-locations game-info)
+                           '()))
+                     (define enemy-start-pt
+                       (if (pair? starts)
+                           (argmax (lambda (pt)
+                                     (define dx (- (sc2-point2d-x pt) home-x))
+                                     (define dy (- (sc2-point2d-y pt) home-y))
+                                     (+ (* dx dx) (* dy dy)))
+                                   starts)
+                           (sc2-point2d 140.0 140.0)))
+                     (define cmds '())
+                     (when (and our-nexus
+                                (>= (sc2-player-common-minerals pc0) 50)
+                                (< (sc2-player-common-food-workers pc0) 15)
+                                (< (sc2-player-common-food-used pc0) (sc2-player-common-food-cap pc0))
+                                (null? (sc2-unit-orders our-nexus)))
+                       (set! cmds
+                             (cons (sc2-raw-unit-command 1006 #f #f (list (sc2-unit-tag our-nexus)) #f)
+                                   cmds)))
+                     (define pylon-builder-tag #f)
+                     (when (and our-nexus
+                                (null? our-pylons)
+                                (pair? our-probes)
+                                (>= (sc2-player-common-minerals pc0) 100)
+                                (>= (sc2-player-common-food-used pc0) 14))
+                       (define bprobe
+                         (argmin (lambda (p)
+                                   (define dx (- (sc2-point3d-x (sc2-unit-pos p)) home-x))
+                                   (define dy (- (sc2-point3d-y (sc2-unit-pos p)) home-y))
+                                   (+ (* dx dx) (* dy dy)))
+                                 our-probes))
+                       (set! pylon-builder-tag (sc2-unit-tag bprobe))
+                       (set! cmds
+                             (cons (sc2-raw-unit-command
+                                    881
+                                    (sc2-point2d (exact->inexact (+ (floor home-x) 5.0))
+                                                 (exact->inexact (floor home-y)))
+                                    #f
+                                    (list pylon-builder-tag)
+                                    #f)
+                                   cmds)))
+                     (define rush-probes
+                       (filter (lambda (p) (not (equal? (sc2-unit-tag p) pylon-builder-tag)))
+                               our-probes))
+                     (define-values (hurt-probes healthy-probes)
+                       (partition (lambda (p)
+                                    (and (<= (sc2-unit-shield p) 0.0)
+                                         (< (sc2-unit-health p) 16.0)))
+                                  rush-probes))
+                     (for ([hp (in-list hurt-probes)])
+                       (define px (sc2-point3d-x (sc2-unit-pos hp)))
+                       (define py (sc2-point3d-y (sc2-unit-pos hp)))
+                       (define dx (- home-x px))
+                       (define dy (- home-y py))
+                       (define d (max 0.001 (sqrt (+ (* dx dx) (* dy dy)))))
+                       (set! cmds
+                             (cons (sc2-raw-unit-command
+                                    16
+                                    (sc2-point2d (+ px (* 4.5 (/ dx d)))
+                                                 (+ py (* 4.5 (/ dy d))))
+                                    #f
+                                    (list (sc2-unit-tag hp))
+                                    #f)
+                                   cmds)))
+                     (when (pair? healthy-probes)
+                       (define n-hp (length healthy-probes))
+                       (define cx (/ (for/sum ([p (in-list healthy-probes)]) (sc2-point3d-x (sc2-unit-pos p))) n-hp))
+                       (define cy (/ (for/sum ([p (in-list healthy-probes)]) (sc2-point3d-y (sc2-unit-pos p))) n-hp))
+                       (define (dist-c e)
+                         (define dx (- (sc2-point3d-x (sc2-unit-pos e)) cx))
+                         (define dy (- (sc2-point3d-y (sc2-unit-pos e)) cy))
+                         (sqrt (+ (* dx dx) (* dy dy))))
+                       (define nearby-mobile
+                         (filter (lambda (e)
+                                   (and (not (sc2-unit-is-structure? e))
+                                        (<= (dist-c e) 9.5)))
+                                 enemy-ground))
+                       (define nearby-any
+                         (filter (lambda (e) (<= (dist-c e) 16.0)) enemy-ground))
+                       (define h-tags (map sc2-unit-tag healthy-probes))
+                       (cond
+                         [(pair? nearby-mobile)
+                          (define tgt
+                            (argmin (lambda (e)
+                                      (+ (* 3.0 (+ (sc2-unit-health e) (sc2-unit-shield e)))
+                                         (dist-c e)))
+                                    nearby-mobile))
+                          (set! cmds
+                                (cons (sc2-raw-unit-command 23 #f (sc2-unit-tag tgt) h-tags #f)
+                                      cmds))]
+                         [(pair? nearby-any)
+                          (define tgt (argmin dist-c nearby-any))
+                          (set! cmds
+                                (cons (sc2-raw-unit-command 23 #f (sc2-unit-tag tgt) h-tags #f)
+                                      cmds))]
+                         [else
+                          (set! cmds
+                                (cons (sc2-raw-unit-command 23 enemy-start-pt #f h-tags #f)
+                                      cmds))]))
+                     (define now-ms (current-inexact-monotonic-milliseconds))
+                     (values (reverse cmds) "" 'none now-ms now-ms)]
+                    [else
+                     ;; Step cognitive architecture (primary actions first so individual unit micro
+                     ;; populates commanded-combat-tags before any global spatial maneuver)
+                     (define step-res (step-live-bot-runtime! runtime obs-hash))
+                     (define rt1 (current-inexact-monotonic-milliseconds))
+                     (define step-tel (hash-ref step-res 'telemetry (hash)))
+                     (define prio-sum (hash-ref step-tel 'priority-summary (hash)))
+                     (define pline (hash-ref step-tel 'priority-log-line ""))
+                     (define csaving (hash-ref prio-sum 'saving-for 'none))
+                     (set! max-intel-staleness-frames
+                           (max max-intel-staleness-frames (hash-ref step-tel 'intel-staleness-frames 0)))
+                     (set! max-escrow-age-frames
+                           (max max-escrow-age-frames (hash-ref step-tel 'escrow-age-frames 0)))
+                     (set! peak-remembered-threat
+                           (max peak-remembered-threat (hash-ref step-tel 'remembered-enemy-threat-supply 0)))
 
-                (define bot-actions
-                  (append (hash-ref step-res 'actions '())
-                          (hash-ref step-res 'mirror-actions '())))
+                     (define bot-actions
+                       (append (hash-ref step-res 'actions '())
+                               (hash-ref step-res 'mirror-actions '())))
 
-                (for ([ba (in-list bot-actions)])
-                  (when (pair? ba)
-                    (case (car ba)
-                      [(worker-scout overlord-scout periodic-scout scout scout-sector)
-                       (set! scout-cmds-emitted (add1 scout-cmds-emitted))]
-                      [(mineral-harass harass-workers worker-harass harass)
-                       (set! harass-cmds-emitted (add1 harass-cmds-emitted))])))
+                     (for ([ba (in-list bot-actions)])
+                       (when (pair? ba)
+                         (case (car ba)
+                           [(worker-scout overlord-scout periodic-scout scout scout-sector)
+                            (set! scout-cmds-emitted (add1 scout-cmds-emitted))]
+                           [(mineral-harass harass-workers worker-harass harass)
+                            (set! harass-cmds-emitted (add1 harass-cmds-emitted))])))
 
-                ;; Translate S-expression actions + frame-0 pro worker split + automatic worker/gas saturation
-                (define commanded-workers (mutable-seteqv))
-                (define split-cmds
-                  (if (and (not frame0-split-done?) (<= last-game-loop 8))
-                      (let ([sc (frame0-pro-worker-split-commands obs)])
-                        (when (pair? sc)
-                          (set! frame0-split-done? #t)
-                          (for ([c (in-list sc)]
-                                #:when (sc2-raw-unit-command? c))
-                            (for ([wt (in-list (sc2-raw-unit-command-unit-tags c))])
-                              (set-add! commanded-workers wt))))
-                        sc)
-                      '()))
-                (define step-role-leases (hash-ref step-res 'role-leases #f))
-                (define step-reserved-aabbs (hash-ref step-res 'wall-reserved-aabbs '()))
-                (define action-cmds
-                  (translate-bot-actions->sc2-raw-commands
-                   bot-actions
-                   obs
-                   #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
-                   #:ws-conn conn
-                   #:enemy-base (hash-ref obs-hash 'enemy-base #f)
-                   #:commanded-workers commanded-workers
-                   #:role-leases step-role-leases
-                   #:reserved-aabbs step-reserved-aabbs
-                   #:game-info game-info))
-                (define sat-cmds
-                  (saturate-workers-and-gas-commands
-                   obs
-                   #:excluded-worker-tags commanded-workers
-                   #:role-leases step-role-leases
-                   #:reserved-aabbs step-reserved-aabbs
-                   #:game-info game-info))
-                (define raw-cmds0 (append split-cmds action-cmds sat-cmds))
-                (define raw-cmds
-                  (govern-sc2-wire-actions! wire-apm-gov raw-cmds0 last-game-loop obs))
-                (define t-tr-1 (current-inexact-monotonic-milliseconds))
+                     ;; Translate S-expression actions + frame-0 pro worker split + automatic worker/gas saturation
+                     (define commanded-workers (mutable-seteqv))
+                     (define split-cmds
+                       (if (and (not frame0-split-done?) (<= last-game-loop 8))
+                           (let ([sc (frame0-pro-worker-split-commands obs)])
+                             (when (pair? sc)
+                               (set! frame0-split-done? #t)
+                               (for ([c (in-list sc)]
+                                     #:when (sc2-raw-unit-command? c))
+                                 (for ([wt (in-list (sc2-raw-unit-command-unit-tags c))])
+                                   (set-add! commanded-workers wt))))
+                             sc)
+                           '()))
+                     (define step-role-leases (hash-ref step-res 'role-leases #f))
+                     (define step-reserved-aabbs (hash-ref step-res 'wall-reserved-aabbs '()))
+                     (define action-cmds
+                       (translate-bot-actions->sc2-raw-commands
+                        bot-actions
+                        obs
+                        #:used-creep-tumors (live-bot-runtime-used-creep-tumors runtime)
+                        #:ws-conn conn
+                        #:enemy-base (hash-ref obs-hash 'enemy-base #f)
+                        #:commanded-workers commanded-workers
+                        #:role-leases step-role-leases
+                        #:reserved-aabbs step-reserved-aabbs
+                        #:game-info game-info))
+                     (define sat-cmds
+                       (saturate-workers-and-gas-commands
+                        obs
+                        #:excluded-worker-tags commanded-workers
+                        #:role-leases step-role-leases
+                        #:reserved-aabbs step-reserved-aabbs
+                        #:game-info game-info))
+                     (define raw-cmds0 (append split-cmds action-cmds sat-cmds))
+                     (define rcmds
+                       (govern-sc2-wire-actions! wire-apm-gov raw-cmds0 last-game-loop obs))
+                     (define tr1 (current-inexact-monotonic-milliseconds))
+                     (values rcmds pline csaving rt1 tr1)]))
 
                 (define step-ms (- t-tr-1 t-step-0))
                 (set! step-total-ms-list (cons step-ms step-total-ms-list))

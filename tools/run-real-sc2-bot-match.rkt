@@ -36,6 +36,8 @@
 (define REPO-ROOT (simplify-path (build-path TOOLS-DIR "..")))
 (define SC2-ROOT
   (or (getenv "SC2PATH")
+      (and (directory-exists? "/home/antigravity/sc2_local/StarCraftII/SC2Data")
+           "/home/antigravity/sc2_local/StarCraftII")
       "/home/antigravity/sc2_headless/StarCraftII"))
 (define SC2-BIN
   (build-path SC2-ROOT "Versions" "Base75689" "SC2_x64"))
@@ -61,9 +63,29 @@
            (string->number (getenv "SC2_MAX_CONCURRENT_MATCHES")))
       1))
 
-;; Downloaded AI Arena Opponent Specifications
+;; Downloaded AI Arena & Pure-Racket Opponent Specifications
 (define OPPONENT-SPECS
-  (hash "who"
+  (hash "Creepy12ProbeRush"
+        (hash 'race "Protoss"
+              'type 'racket
+              'dir REPO-ROOT
+              'exec "Creepy12ProbeRush")
+        "Mothman-Z"
+        (hash 'race "Zerg"
+              'type 'racket
+              'dir REPO-ROOT
+              'exec "Mothman-Z")
+        "Mothman-T"
+        (hash 'race "Terran"
+              'type 'racket
+              'dir REPO-ROOT
+              'exec "Mothman-T")
+        "Mothman-P"
+        (hash 'race "Protoss"
+              'type 'racket
+              'dir REPO-ROOT
+              'exec "Mothman-P")
+        "who"
         (hash 'race "Random"
               'type 'python
               'dir (build-path DOWNLOADED-BOTS-DIR "who")
@@ -356,6 +378,20 @@
                         [current-environment-variables opp-env]
                         [current-subprocess-custodian-mode 'kill])
            (cond
+             [(eq? opp-type 'racket)
+              (define-values (bp2 _bo2 bi2 _be2)
+                (subprocess opp-out-port #f opp-err-port
+                            RACKET-BIN
+                            (path->string (build-path REPO-ROOT "sim" "racket-sc2-ladder-main.rkt"))
+                            "--BotName" opp-exec
+                            "--GamePort" (number->string game-port-2)
+                            "--StartPort" (number->string start-port)
+                            "--LadderServer" "127.0.0.1"
+                            "--OpponentId" our-bot
+                            "--max-loops" (number->string max-loops)
+                            "--step-size" (number->string step-size)))
+              (close-output-port bi2)
+              (set! bot-p2 bp2)]
              [(eq? opp-type 'cpplinux)
               (define-values (bp2 _bo2 bi2 _be2)
                 (subprocess opp-out-port #f opp-err-port
