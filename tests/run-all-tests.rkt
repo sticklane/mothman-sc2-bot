@@ -56,6 +56,7 @@
                   sc2-unit
                   sc2-player-common
                   sc2-observation
+                  sc2-power-source
                   sc2-image-grid
                   sc2-game-info
                   sc2-raw-unit-command
@@ -8618,6 +8619,112 @@
     (assert-true! (and (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk))) acts-evac-def))
                        (not (unit-leased-above? (rt-role-leases rt-evac-def) 19821 'harvester 3200)))
                   "Oracle with >= 2 nearby AA defenders (Stalkers) must NOT trigger unnecessary worker evacuation"))
+
+  (run-suite "36. Wave 6 Track 2: Protoss Early Gateway Placement, Anchor Preservation, Lockout Fallback & Early Pylon"
+    (define (clear-oledger36! ol)
+      (hash-clear! (in-progress-order-ledger-unit-orders ol))
+      (hash-clear! (in-progress-order-ledger-type-order-counts ol))
+      (set-in-progress-order-ledger-reserved-sites! ol '()))
+    ;; 36.1 Primary anchor preservation in sc2-protobuf-ws.rkt:
+    ;; Powered wall-slot (44.5, 36.5) with Pylon at (41.0, 34.0) and wall-slot AABB at (44.5, 36.5)
+    ;; must place Gateway at (44.5, 36.5) instead of overwriting anchor with Pylon's (41.0, 34.0).
+    (define obs36-gw
+      (sc2-observation
+       550
+       (sc2-player-common 1 200 0 16 23 0 16 0 0 0 0)
+       (list (sc2-unit 1 1 20001 59 1 (sc2-point3d 32.5 32.5 10.0) 0.0 2.5 1.0 0 #f #f #f
+                       1000.0 1000.0 1000.0 1000.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 16 0.0 0 0 0 0)
+             (sc2-unit 1 1 20002 60 1 (sc2-point3d 41.0 34.0 10.0) 0.0 1.0 1.0 0 #f #f #f
+                       200.0 200.0 200.0 200.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 0)
+             (sc2-unit 1 1 20003 84 1 (sc2-point3d 42.0 35.0 10.0) 0.0 0.375 1.0 0 #f #f #f
+                       20.0 20.0 20.0 20.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 0))
+       '()
+       (list (sc2-power-source (sc2-point3d 41.0 34.0 10.0) 6.5 20002))
+       #f '() '() '() '() '() '()))
+    (define cmds36-gw
+      (translate-bot-actions->sc2-raw-commands
+       '((build gateway 44.5 36.5))
+       obs36-gw
+       #:reserved-aabbs (list (reserved-aabb 44.5 36.5 1.5 1.5 'wall-slot 0 0))))
+    (define gw-cmd36
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883)))
+             cmds36-gw))
+    (assert-true! (and (sc2-raw-unit-command? gw-cmd36)
+                       (sc2-point2d? (sc2-raw-unit-command-target-pos gw-cmd36))
+                       (< (abs (- (sc2-point2d-x (sc2-raw-unit-command-target-pos gw-cmd36)) 44.5)) 0.1)
+                       (< (abs (- (sc2-point2d-y (sc2-raw-unit-command-target-pos gw-cmd36)) 36.5)) 0.1))
+                  "Powered wall-slot (44.5, 36.5) must preserve req-x/req-y as primary anchor and strip wall-slot AABB")
+
+    ;; 36.2 power-placement-failed? immediate fallback & 16-frame oledger fallback to inmain-powered-gx/gy
+    (define (mk-p-gw-obs frm #:power-fail? [pf? #f] #:pylon-x [px 43.0] #:pylon-y [py 32.5]
+                           #:enemy-probes [ep-cnt 0])
+      (hash 'frame frm 'minerals 280 'gas 0 'supply-used 15 'supply-cap 31 'supply-left 16
+            'mineral-harvesters 15 'vespene-harvesters 0 'enemy-race 'Protoss
+            'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+            'power-placement-failed? pf?
+            'ally-units (for/list ([i (in-range 15)])
+                          (hash 'id (+ 20100 i) 'type 'probe 'x 30.0 'y 32.5 'hp 20 'shield 20))
+            'ally-buildings (list (hash 'id 20181 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                  (hash 'id 20182 'type 'pylon 'x px 'y py 'hp 200 'shield 200 'build-progress 1.0))
+            'enemy-units (for/list ([i (in-range ep-cnt)])
+                           (hash 'id (+ 20200 i) 'type 'probe 'x (+ 31.0 (* 0.4 i)) 'y 32.5 'hp 20 'shield 20))))
+
+    (define rt36-pf (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+    (define acts36-pf1 (hash-ref (step-live-bot-runtime! rt36-pf (mk-p-gw-obs 550)) 'actions '()))
+    (define gw-act36-pf1 (findf (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'gateway))) acts36-pf1))
+    (assert-true! (and gw-act36-pf1
+                       (< (abs (- (third gw-act36-pf1) 40.5)) 0.1)
+                       (< (abs (- (fourth gw-act36-pf1) 30.5)) 0.1))
+                  "Step 1 must try exact wall-slot-1 (40.5, 30.5) for 1st Gateway")
+    (clear-oledger36! (live-bot-runtime-order-ledger rt36-pf))
+    (define acts36-pf2 (hash-ref (step-live-bot-runtime! rt36-pf (mk-p-gw-obs 551 #:power-fail? #t)) 'actions '()))
+    (define gw-act36-pf2 (findf (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'gateway))) acts36-pf2))
+    (assert-true! (and gw-act36-pf2
+                       (>= (+ (abs (- (third gw-act36-pf2) 40.5))
+                              (abs (- (fourth gw-act36-pf2) 30.5)))
+                           1.0)
+                       (<= (sqrt (+ (sqr (- (third gw-act36-pf2) 43.0))
+                                    (sqr (- (fourth gw-act36-pf2) 32.5))))
+                           6.2))
+                  "power-placement-failed? #t must clear 56f lock and immediately retry Gateway in Pylon power field")
+
+    (define rt36-16f (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+    (void (step-live-bot-runtime! rt36-16f (mk-p-gw-obs 550)))
+    (clear-oledger36! (live-bot-runtime-order-ledger rt36-16f))
+    (define acts36-16f (hash-ref (step-live-bot-runtime! rt36-16f (mk-p-gw-obs 566 #:power-fail? #f)) 'actions '()))
+    (define gw-act36-16f (findf (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'gateway))) acts36-16f))
+    (assert-true! (and gw-act36-16f
+                       (>= (+ (abs (- (third gw-act36-16f) 40.5))
+                              (abs (- (fourth gw-act36-16f) 30.5)))
+                           1.0)
+                       (<= (sqrt (+ (sqr (- (third gw-act36-16f) 43.0))
+                                    (sqr (- (fourth gw-act36-16f) 32.5))))
+                           6.2))
+                  "No active Gateway build order in oledger after 16 frames must clear 56f lock and retry in Pylon power field")
+
+    ;; 36.3 first-ready-pylon alignment under worker-rush-active? when frame > 500
+    (define rt36-rush (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+    (define acts36-rush
+      (hash-ref (step-live-bot-runtime! rt36-rush (mk-p-gw-obs 550 #:pylon-x 42.5 #:pylon-y 32.5 #:enemy-probes 6))
+                'actions '()))
+    (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'gateway))) acts36-rush)
+                  "Under worker-rush-active? at frame > 500, any ready Pylon (> 7.5 tiles) must allow placing 1st Gateway")
+
+    ;; 36.4 Earlier 1st Pylon (supply-used >= 13 or minerals >= 100 at frame < 3000)
+    (define rt36-py13 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+    (define acts36-py13
+      (hash-ref (step-live-bot-runtime!
+                 rt36-py13
+                 (hash 'frame 300 'minerals 105 'gas 0 'supply-used 13 'supply-cap 15 'supply-left 2
+                       'mineral-harvesters 13 'vespene-harvesters 0 'enemy-race 'Protoss
+                       'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+                       'ally-units (for/list ([i (in-range 13)])
+                                     (hash 'id (+ 20300 i) 'type 'probe 'x 30.0 'y 32.5 'hp 20 'shield 20))
+                       'ally-buildings (list (hash 'id 20381 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0))
+                       'enemy-units '()))
+                'actions '()))
+    (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'pylon))) acts36-py13)
+                  "Protoss emergency Pylon must trigger at supply-used >= 13 / minerals >= 100 (< frame 3000)"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
