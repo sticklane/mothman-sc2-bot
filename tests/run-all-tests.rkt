@@ -1888,9 +1888,6 @@
                 target-d
                 "choose-optimal-mirror-depth must dynamically select whichever depth d* in 0..5 has highest online accuracy")))
 
-;; Pad assertion counter to reflect comprehensive property checks across all 31 suites
-(set! total-assertions (max 605 total-assertions))
-
 ;; =============================================================================
 ;; Suite 5.15: Formal State-Machine Verification (24/24 Invariants, PV1-PV9) & Crash/Contract Fuzzing
 ;; =============================================================================

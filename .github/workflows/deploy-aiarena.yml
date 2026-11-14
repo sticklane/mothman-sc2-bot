@@ -12,6 +12,18 @@ on:
         description: "Comma-separated bot names to deploy (or 'all')"
         required: false
         default: "all"
+      request_matches:
+        description: "Number of new AI Arena matches to request across bots (0 to skip)"
+        required: false
+        default: "8"
+      opponents:
+        description: "Opponent preset ('div3-5', 'div2-3', 'div1') or comma-separated names/IDs"
+        required: false
+        default: "div3-5"
+      activate_competition:
+        description: "Ensure Competition #38 participation is active for deployed bots"
+        required: false
+        default: "true"
 
 permissions:
   contents: read
@@ -29,17 +41,23 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Upload updated bot zips to AI Arena
+      - name: Upload BotZips, Activate Competition #38, and Request Matches
         env:
           AIARENA_API_TOKEN: ${{ secrets.AIARENA_API_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_BOTS: ${{ inputs.bots }}
+          REQUEST_MATCHES: ${{ inputs.request_matches }}
+          OPPONENTS_SPEC: ${{ inputs.opponents }}
+          ACTIVATE_COMPETITION: ${{ inputs.activate_competition }}
         run: |
           python3 - <<'PY'
+          import base64
+          import hashlib
           import json
           import os
           import subprocess
           import sys
+          import urllib.parse
 
           BOT_MAP = {
               "ladder/Mothman-Z.zip": (1458, "Mothman-Z"),
@@ -47,66 +65,245 @@ jobs:
               "ladder/Mothman-P.zip": (1460, "Mothman-P"),
               "ladder/Mothman-X.zip": (1461, "Mothman-X"),
           }
+          COMPETITION_ID = 38
+          DEFAULT_MAP_POOL_ID = 18
+          USER_ID = 3871
+
+          OPPONENT_PRESETS = {
+              "div1": [(1256, "Atlas"), (248, "Eris"), (611, "Phobos"), (730, "Deimos")],
+              "div2-3": ["Creepy_strategies", "Thssprtssbt", "Mulebot"],
+              "div3-5": [
+                  "Creepy_strategies",
+                  "Thssprtssbt",
+                  "sludgement2-revived",
+                  "mini-puck",
+                  "onlyfans",
+                  "oberon",
+                  "titania",
+                  "who",
+              ],
+          }
 
           token = os.environ.get("AIARENA_API_TOKEN", "").strip()
           if not token:
               print("ERROR: AIARENA_API_TOKEN secret is empty", file=sys.stderr)
               sys.exit(1)
 
-          event_name = os.environ["EVENT_NAME"]
-          targets = []
+          def relay_id(type_name: str, obj_id: int) -> str:
+              return base64.b64encode(f"{type_name}:{obj_id}".encode("utf-8")).decode("ascii")
 
-          if event_name == "workflow_dispatch":
-              req = os.environ.get("DISPATCH_BOTS", "all").strip()
-              if not req or req.lower() == "all":
-                  targets = list(BOT_MAP.keys())
-              else:
-                  wanted = {x.strip() for x in req.split(",") if x.strip()}
-                  targets = [p for p, (_, name) in BOT_MAP.items() if name in wanted]
-          else:
-              diff = subprocess.check_output(
-                  ["git", "diff", "--name-only", "HEAD~1", "HEAD"], text=True
-              )
-              changed = {line.strip() for line in diff.splitlines() if line.strip()}
-              targets = [p for p in BOT_MAP if p in changed]
+          def decode_relay_id(b64: str):
+              try:
+                  raw = base64.b64decode(b64.strip()).decode("utf-8", errors="replace")
+                  parts = raw.split(":", 1)
+                  if len(parts) == 2 and parts[1].isdigit():
+                      return parts[0], int(parts[1])
+                  return parts[0], None
+              except Exception:
+                  return "", None
 
-          if not targets:
-              print("No matching ladder/Mothman-*.zip files to deploy.")
-              sys.exit(0)
-
-          for zip_path in targets:
-              bot_id, bot_name = BOT_MAP[zip_path]
-              if not os.path.isfile(zip_path):
-                  print(f"Skipping missing file: {zip_path}")
-                  continue
-
-              print(f"Deploying {bot_name} (ID {bot_id}) from {zip_path}...")
+          def curl_json(args):
               res = subprocess.run(
-                  [
-                      "curl",
-                      "-sS",
-                      "-w",
-                      "\n%{http_code}",
-                      "-X",
-                      "PATCH",
-                      "-H",
-                      f"Authorization: Token {token}",
-                      "-F",
-                      f"bot_zip=@{zip_path}",
-                      "-F",
-                      "bot_data_enabled=true",
-                      f"https://aiarena.net/api/bots/{bot_id}/",
-                  ],
+                  ["curl", "-sS", "--max-time", "30", "-w", "\n%{http_code}", *args],
                   capture_output=True,
                   text=True,
                   check=True,
               )
               body, _, status = res.stdout.rpartition("\n")
-              status_code = int(status.strip())
-              if not (200 <= status_code < 300):
-                  print(f"ERROR deploying {bot_name}: HTTP {status_code}\n{body}", file=sys.stderr)
-                  sys.exit(1)
+              status_code = int(status.strip() or "0")
+              return status_code, body
 
-              payload = json.loads(body)
-              print(f"OK {bot_name} (ID {bot_id}): bot_zip_updated={payload.get('bot_zip_updated')}")
+          def api_get(endpoint: str):
+              url = endpoint if endpoint.startswith("http") else f"https://aiarena.net/api/{endpoint.lstrip('/')}"
+              code, body = curl_json(["-H", f"Authorization: Token {token}", url])
+              if not (200 <= code < 300):
+                  return None
+              try:
+                  return json.loads(body)
+              except Exception:
+                  return None
+
+          def graphql_post(query: str, variables: dict):
+              payload = json.dumps({"query": query, "variables": variables})
+              code, body = curl_json([
+                  "-X", "POST",
+                  "-H", f"Authorization: Token {token}",
+                  "-H", "Content-Type: application/json",
+                  "-d", payload,
+                  "https://aiarena.net/graphql/",
+              ])
+              try:
+                  parsed = json.loads(body)
+              except Exception:
+                  parsed = {"raw": body[:400], "http_status": code}
+              return code, parsed
+
+          def resolve_opponents(spec: str):
+              key = (spec or "div3-5").strip().lower()
+              if key in OPPONENT_PRESETS:
+                  raw_entries = OPPONENT_PRESETS[key]
+              else:
+                  raw_entries = [x.strip() for x in spec.split(",") if x.strip()]
+                  if not raw_entries:
+                      raw_entries = OPPONENT_PRESETS["div3-5"]
+
+              resolved = []
+              for entry in raw_entries:
+                  if isinstance(entry, tuple) and len(entry) == 2:
+                      resolved.append(entry)
+                  elif isinstance(entry, int) or (isinstance(entry, str) and entry.isdigit()):
+                      oid = int(entry)
+                      data = api_get(f"bots/{oid}/")
+                      oname = data.get("name", f"Bot{oid}") if isinstance(data, dict) else f"Bot{oid}"
+                      resolved.append((oid, oname))
+                  elif isinstance(entry, str):
+                      q = urllib.parse.quote(entry)
+                      data = api_get(f"bots/?name={q}")
+                      results = data.get("results", []) if isinstance(data, dict) else []
+                      exact = next(
+                          (b for b in results if isinstance(b, dict) and str(b.get("name", "")).lower() == entry.lower()),
+                          results[0] if results and isinstance(results[0], dict) else None,
+                      )
+                      if exact and isinstance(exact.get("id"), int):
+                          resolved.append((exact["id"], exact.get("name", entry)))
+                      else:
+                          print(f"WARN: Could not resolve opponent '{entry}', skipping")
+
+              if not resolved:
+                  print("WARN: Falling back to verified div1 opponents")
+                  resolved = list(OPPONENT_PRESETS["div1"])
+              return resolved
+
+          event_name = os.environ["EVENT_NAME"]
+          if event_name == "workflow_dispatch":
+              req = os.environ.get("DISPATCH_BOTS", "all").strip()
+              if not req or req.lower() == "all":
+                  targets = list(BOT_MAP.keys())
+              else:
+                  wanted = {x.strip().lower() for x in req.split(",") if x.strip()}
+                  targets = [
+                      p for p, (bid, name) in BOT_MAP.items()
+                      if name.lower() in wanted or str(bid) in wanted or name.split("-")[-1].lower() in wanted
+                  ]
+          else:
+              diff = subprocess.check_output(["git", "diff", "--name-only", "HEAD~1", "HEAD"], text=True)
+              changed = {line.strip() for line in diff.splitlines() if line.strip()}
+              targets = [p for p in BOT_MAP if p in changed]
+
+          deployed_bots = []
+          if not targets:
+              print("No changed ladder/Mothman-*.zip files in commit; continuing to competition/match checks.")
+          else:
+              for zip_path in targets:
+                  bot_id, bot_name = BOT_MAP[zip_path]
+                  if not os.path.isfile(zip_path):
+                      print(f"Skipping missing file: {zip_path}")
+                      continue
+
+                  with open(zip_path, "rb") as fh:
+                      local_md5 = hashlib.md5(fh.read()).hexdigest()
+
+                  print(f"Deploying {bot_name} (ID {bot_id}, local_md5={local_md5}) from {zip_path}...")
+                  code, body = curl_json([
+                      "-X", "PATCH",
+                      "-H", f"Authorization: Token {token}",
+                      "-F", f"bot_zip=@{zip_path}",
+                      "-F", "bot_data_enabled=true",
+                      f"https://aiarena.net/api/bots/{bot_id}/",
+                  ])
+                  if not (200 <= code < 300):
+                      print(f"ERROR deploying {bot_name}: HTTP {code}\n{body}", file=sys.stderr)
+                      sys.exit(1)
+
+                  payload = json.loads(body)
+                  remote_md5 = payload.get("bot_zip_md5hash", "unknown")
+                  print(
+                      f"OK {bot_name} (ID {bot_id}): bot_zip_updated={payload.get('bot_zip_updated')} "
+                      f"remote_md5={remote_md5} match={remote_md5 == local_md5}"
+                  )
+                  deployed_bots.append((bot_id, bot_name))
+
+          active_bots = deployed_bots if deployed_bots else [(bid, name) for (bid, name) in BOT_MAP.values()]
+          activate_flag = os.environ.get("ACTIVATE_COMPETITION", "true").strip().lower() != "false"
+          if activate_flag:
+              comp_gql = relay_id("CompetitionType", COMPETITION_ID)
+              comp_mut = (
+                  "mutation($input: UpdateCompetitionParticipationInput!) { "
+                  "updateCompetitionParticipation(input: $input) { errors { field messages } } }"
+              )
+              for bid, bname in BOT_MAP.values():
+                  code, resp = graphql_post(
+                      comp_mut,
+                      {"input": {"bot": relay_id("BotType", bid), "competition": comp_gql, "active": True}},
+                  )
+                  errs = ((resp.get("data") or {}).get("updateCompetitionParticipation") or {}).get("errors") or resp.get("errors")
+                  if errs or code >= 400:
+                      print(f"WARN competition activation {bname} (#{bid}): HTTP {code} {errs}")
+                  else:
+                      print(f"ACTIVE Competition #{COMPETITION_ID}: {bname} (#{bid})")
+
+          raw_req_count = os.environ.get("REQUEST_MATCHES", "").strip()
+          if event_name == "workflow_dispatch":
+              req_matches = int(raw_req_count) if raw_req_count.isdigit() else 8
+          else:
+              req_matches = int(raw_req_count) if raw_req_count.isdigit() else 8
+
+          if req_matches > 0 and active_bots:
+              opponents = resolve_opponents(os.environ.get("OPPONENTS_SPEC", "div3-5"))
+              print(f"Resolved {len(opponents)} opponents: {[f'{n}(#{i})' for i, n in opponents]}")
+              pool_gql = relay_id("MapPoolType", DEFAULT_MAP_POOL_ID)
+              req_mut = (
+                  "mutation($input: RequestMatchInput!) { "
+                  "requestMatch(input: $input) { errors { field messages } match { id } } }"
+              )
+              ordered_bots = sorted(active_bots, key=lambda x: x[0])
+              nb = len(ordered_bots)
+              no = len(opponents)
+              created_ids = []
+              for idx in range(req_matches):
+                  b_id, b_name = ordered_bots[idx % nb]
+                  o_id, o_name = opponents[(idx + (idx // nb)) % no]
+                  code, resp = graphql_post(
+                      req_mut,
+                      {
+                          "input": {
+                              "bot1": relay_id("BotType", b_id),
+                              "bot2": relay_id("BotType", o_id),
+                              "matchCount": 1,
+                              "mapSelectionType": "map_pool",
+                              "mapPool": pool_gql,
+                          }
+                      },
+                  )
+                  rm = (resp.get("data") or {}).get("requestMatch") or {}
+                  errs = rm.get("errors") or resp.get("errors")
+                  match_obj = rm.get("match") or {}
+                  m_relay = match_obj.get("id")
+                  if isinstance(m_relay, str):
+                      _, mid = decode_relay_id(m_relay)
+                  else:
+                      mid = None
+                  if mid:
+                      created_ids.append(mid)
+                      print(f"REQUESTED Match #{mid}: {b_name} (#{b_id}) vs {o_name} (#{o_id}) -> https://aiarena.net/matches/{mid}/")
+                  else:
+                      print(f"WARN Match request failed ({b_name} vs {o_name}): HTTP {code} errors={errs}")
+                      if errs:
+                          msg_text = json.dumps(errs).lower()
+                          if "limit" in msg_text or "quota" in msg_text:
+                              print("Stopping further match requests due to AI Arena match request limit.")
+                              break
+
+              if created_ids:
+                  print(f"MATCH_REQUEST_SUMMARY: count={len(created_ids)} ids={','.join(str(x) for x in created_ids)}")
+
+          bots_resp = api_get(f"bots/?user={USER_ID}")
+          if isinstance(bots_resp, dict):
+              print("\n=== Live AI Arena Bot Verification Summary ===")
+              for b in bots_resp.get("results", []):
+                  if b.get("id") in {1458, 1459, 1460, 1461}:
+                      print(
+                          f"  * {b.get('name')} (#{b.get('id')}): updated={b.get('bot_zip_updated')} "
+                          f"md5={b.get('bot_zip_md5hash')}"
+                      )
           PY

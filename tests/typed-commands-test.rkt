@@ -1,6 +1,9 @@
 #lang typed/racket/base
 
-(require "../lib/sc2-typed-commands.rkt")
+(require "../lib/sc2-typed-commands.rkt"
+         racket/runtime-path)
+
+(define-runtime-path tc-lib-runtime-path "../lib/sc2-typed-commands.rkt")
 
 ;; =============================================================================
 ;; tests/typed-commands-test.rkt
@@ -468,9 +471,9 @@
 
 (let ()
   (define tc-lib-path : Path
-    (if (file-exists? "lib/sc2-typed-commands.rkt")
-        (path->complete-path (string->path "lib/sc2-typed-commands.rkt"))
-        (path->complete-path (string->path "../lib/sc2-typed-commands.rkt"))))
+    (if (path? tc-lib-runtime-path)
+        (path->complete-path tc-lib-runtime-path)
+        (path->complete-path (string->path (format "~a" tc-lib-runtime-path)))))
   (define req-spec : Any (list 'file (path->string tc-lib-path)))
   (define sub-ns : Namespace (make-base-namespace))
 

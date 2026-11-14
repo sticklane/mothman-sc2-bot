@@ -2503,7 +2503,16 @@
                (and (combat-unit-record? e)
                     (<= (dist2d px py (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) radius)))
              enemy-units))
-    (or camp-bldg? (>= camp-combat-cnt 2)))
+    (define ally-near-cnt
+      (count (lambda (a)
+               (<= (dist2d px py (hash-ref a 'x base-x) (hash-ref a 'y base-y)) 14.0))
+             ally-combat-units))
+    (or camp-bldg?
+        (>= camp-combat-cnt 2)
+        (and live-obs-harvesters?
+             (>= camp-combat-cnt 1)
+             (< ally-near-cnt camp-combat-cnt)
+             (<= (length ally-combat-units) 2))))
 
   (define nat-block-thresh SC2-NATURAL-BLOCK-RADIUS)
   (define natural-blockers
@@ -2551,6 +2560,11 @@
                   (and (not (pad-already-owned? px py))
                        (or (not natural-blocked?)
                            (> (dist2d px py nat-x nat-y) 7.0))
+                       (or (not live-obs-harvesters?)
+                           (>= active-bases 4)
+                           (not (and (< (dist2d px py enemy-x enemy-y) 42.0)
+                                     (> (dist2d px py base-x base-y)
+                                        (dist2d px py enemy-x enemy-y)))))
                        (not (pad-camped-by-enemy? px py 11.5))))
                 cand-pts))
        (if chosen
@@ -2562,11 +2576,14 @@
         (ormap (lambda (b) (eq? (hash-ref b 'under-attack #f) #t)) ally-bldgs)
         (ormap (lambda (e)
                  (and (combat-unit-record? e)
-                      (<= (min (dist2d base-x base-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
-                               (if (>= active-bases 2)
-                                   (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
-                                   +inf.0))
-                          28.0)))
+                      (or (<= (min (dist2d base-x base-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                                   (if (>= active-bases 2)
+                                       (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                                       +inf.0))
+                              28.0)
+                          (and live-obs-harvesters?
+                               (<= (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                                   16.0)))))
                enemy-units)))
   (define blocked-nat-expanded-early? #f)
   (when (and natural-blocked?
@@ -3553,12 +3570,12 @@
 
   (define live-game-obs? live-obs-harvesters?)
   (define supply-threshold
-    (cond [(and live-game-obs? (< supply-cap 20)) 1]
-          [(and live-game-obs? (< supply-cap 26)) 2]
-          [(and live-game-obs? (< supply-cap 36)) 5]
+    (cond [(and live-game-obs? (< supply-cap 20)) 2]
+          [(and live-game-obs? (< supply-cap 26)) 4]
+          [(and live-game-obs? (< supply-cap 36)) 6]
           [live-game-obs?
            (if (< supply-cap 66)
-               (min 12 (+ 2 (* 2 active-bases) (max 0 (- (length prod-facilities) 1))))
+               (min 14 (+ 3 (* 2 active-bases) (quotient (length prod-facilities) 2)))
                (min 18 (max SC2-MID-SUPPLY-BUFFER
                             (+ 3 (* 2 active-bases) (length prod-facilities)))))]
           [(>= supply-cap SC2-MID-SUPPLY-CAP-THRESHOLD) SC2-MID-SUPPLY-BUFFER]
@@ -7769,8 +7786,18 @@
        (or (>= cur-rax-techlab-cnt desired-rax-techlabs)
            (and (= desired-rax-techlabs 1)
                 (building-present-or-pending? 'barracks-techlab #t))))
+     (define (facility-safe-for-addon? fac)
+       (or (not live-game?)
+           (let ([fx (hash-ref fac 'x base-x)]
+                 [fy (hash-ref fac 'y base-y)])
+             (and (not (eq? (hash-ref fac 'under-attack #f) #t))
+                  (not (ormap (lambda (e)
+                                (and (combat-unit-record? e)
+                                     (<= (dist2d fx fy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 10.0)))
+                              enemy-units))))))
      (define bare-rax-for-tl (grounded-bare-facility 'barracks))
      (when (and bare-rax-for-tl
+                (facility-safe-for-addon? bare-rax-for-tl)
                 (not terran-saving-for-expand?)
                 (not has-rax-techlab?)
                 (or (= cur-rax-techlab-cnt 0)
@@ -7921,6 +7948,7 @@
      (when (and (not terran-saving-for-expand?)
                 (>= (length barracks-list) 2)
                 bare-rax-for-rx
+                (facility-safe-for-addon? bare-rax-for-rx)
                 (starport-escrow-ok? (sc2-min-cost 'barracks-reactor) (sc2-gas-cost 'barracks-reactor))
                 (if (and live-game? (memq 'factory bldg-types) (>= (length barracks-list) 3))
                     (< cur-rax-reactor-cnt (max 1 (- (length barracks-list) desired-rax-techlabs)))
@@ -7945,6 +7973,7 @@
      (define bare-fac-for-tl (grounded-bare-facility 'factory))
      (when (and (not terran-saving-for-expand?)
                 bare-fac-for-tl
+                (facility-safe-for-addon? bare-fac-for-tl)
                 (starport-escrow-ok? (sc2-min-cost 'factory-techlab) (sc2-gas-cost 'factory-techlab))
                 (or (not has-fac-techlab-any?) (>= (length factories-list) 2))
                 (or (not live-game?) (> (hash-ref open-prod-slots 'factory 0) 0))
@@ -7967,6 +7996,7 @@
      (define bare-fac-for-rx (grounded-bare-facility 'factory))
      (when (and (not terran-saving-for-expand?)
                 bare-fac-for-rx
+                (facility-safe-for-addon? bare-fac-for-rx)
                 has-fac-techlab-any?
                 (plan-wants-now? 'factory-reactor)
                 (not (building-present-or-pending? 'factory-reactor #t))

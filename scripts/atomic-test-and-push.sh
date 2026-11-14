@@ -87,12 +87,14 @@ if [[ "${REBUILD_ZIPS}" -eq 1 ]]; then
   racket ladder/build-aiarena-zip.rkt --all-races
 fi
 
-echo "[2/4] Running #lang sc-bot test suite..."
+echo "[2/4] Running #lang sc-bot test suite + protobuf & typed-commands suites..."
 if [[ "${FULL_TESTS}" -eq 1 ]]; then
   racket tests/run-all-tests.rkt --full
 else
   racket tests/run-all-tests.rkt
 fi
+racket tests/sc2-protobuf-ws-test.rkt
+racket tests/typed-commands-test.rkt
 
 echo "[3/4] Configuring anonymized git identity & staging verified changes..."
 git config user.name "anonymous"
