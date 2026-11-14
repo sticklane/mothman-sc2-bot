@@ -8619,6 +8619,111 @@
                        (not (unit-leased-above? (rt-role-leases rt-evac-def) 19821 'harvester 3200)))
                   "Oracle with >= 2 nearby AA defenders (Stalkers) must NOT trigger unnecessary worker evacuation"))
 
+  ;; =========================================================================
+  ;; SUITE 36: Wave 6 Track 4 - Zerg 35-Drone Cap, Supply Blocks & Mothman-R Cleanup
+  ;; =========================================================================
+  (run-suite "36. Wave 6 Track 4: Zerg Drone Saturation, Pending Overlord Discount & Mothman-R Cleanup"
+    ;; 36.1 Smoothed worker-growth curve & worker utility floor under passive threat
+    (assert-true! (<= (required-army-supply-for-worker-growth 35 0.0) 8.0)
+                  "At 35 workers in peace, required-army-supply-for-worker-growth must not cliff-jump to 14.0")
+    (define pm-z-passive
+      (compute-state-pressure-metrics
+       #:race 'Zerg #:frame 5400 #:minerals 120 #:gas 40
+       #:supply-left 14 #:supply-cap 62 #:pending-supply 0
+       #:workers 35 #:target-workers 66 #:active-bases 4 #:desired-bases 4
+       #:production-facilities 4 #:max-facilities 8
+       #:army-supply 8.0 #:enemy-threat-supply 6.0 #:under-attack? #f))
+    (define c-z-drone-u
+      (compute-candidate-marginal-utility
+       (priority-candidate 'drone 'worker '(train drone) 50 0 1 0.0 'normal #f)
+       pm-z-passive))
+    (assert-true! (>= c-z-drone-u 60.0)
+                  (format "Zerg worker utility on 4 bases at 35 Drones with passive threat must stay >= 60.0 (got ~a)"
+                          c-z-drone-u))
+
+    ;; 36.2 4-Hatchery Zerg at 35 Drones, 4 Queens, passive Marines across map -> trains Drone (not 5th Queen / stall)
+    (define rt-z35 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+    (define res-z35
+      (step-live-bot-runtime!
+       rt-z35
+       (hash 'frame 5600 'minerals 200 'gas 40 'supply-used 48 'supply-cap 66 'supply-left 18
+             'mineral-harvesters 31 'vespene-harvesters 4 'enemy-race 'Terran
+             'researched-upgrades '(metabolic-boost zergling-movementspeed)
+             'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+             'ally-units (append (for/list ([i (in-range 35)])
+                                   (hash 'id (+ 21100 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                                 (for/list ([q (in-range 4)])
+                                   (hash 'id (+ 21200 q) 'type 'queen 'x (+ 32.5 (* 10 q)) 'y 32.5 'hp 175 'energy 10))
+                                 (for/list ([ov (in-range 5)])
+                                   (hash 'id (+ 21250 ov) 'type 'overlord 'x 34.0 'y 34.0 'hp 200))
+                                 (list (hash 'id 21260 'type 'overseer 'x 34.0 'y 34.0 'hp 200))
+                                 (for/list ([z (in-range 8)])
+                                   (hash 'id (+ 21300 z) 'type 'zergling 'x 50.0 'y 32.5 'hp 35))
+                                 (list (hash 'id 21401 'type 'roach 'x 51.0 'y 32.5 'hp 145)
+                                       (hash 'id 21402 'type 'roach 'x 52.0 'y 32.5 'hp 145)
+                                       (hash 'id 21501 'type 'larva 'x 33.0 'y 31.0 'hp 25)
+                                       (hash 'id 21502 'type 'larva 'x 33.5 'y 31.0 'hp 25)))
+             'ally-buildings (list (hash 'id 21001 'type 'lair 'x 32.5 'y 32.5 'hp 2000 'build-progress 1.0)
+                                   (hash 'id 21002 'type 'hatchery 'x 58.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                   (hash 'id 21003 'type 'hatchery 'x 84.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                   (hash 'id 21004 'type 'hatchery 'x 32.5 'y 62.5 'hp 1500 'build-progress 1.0)
+                                   (hash 'id 21005 'type 'spawning-pool 'x 36.5 'y 32.5 'hp 1000 'build-progress 1.0)
+                                   (hash 'id 21006 'type 'roach-warren 'x 40.5 'y 32.5 'hp 850 'build-progress 1.0)
+                                   (hash 'id 21007 'type 'extractor 'x 29.5 'y 35.5 'hp 500 'build-progress 1.0 'vespene-contents 1200)
+                                   (hash 'id 21008 'type 'extractor 'x 29.5 'y 29.5 'hp 500 'build-progress 1.0 'vespene-contents 1200)
+                                   (hash 'id 21009 'type 'extractor 'x 55.5 'y 35.5 'hp 500 'build-progress 1.0 'vespene-contents 1200)
+                                   (hash 'id 21010 'type 'baneling-nest 'x 40.5 'y 36.5 'hp 850 'build-progress 1.0)
+                                   (hash 'id 21011 'type 'evolution-chamber 'x 36.5 'y 28.5 'hp 750 'build-progress 1.0))
+             'enemy-units (for/list ([m (in-range 6)])
+                            (hash 'id (+ 21900 m) 'type 'marine 'x 130.0 'y 130.0 'hp 45)))))
+    (define acts-z35 (hash-ref res-z35 'actions '()))
+    (assert-true! (member '(train drone) acts-z35)
+                  "4-Hatchery Zerg at 35 Drones, 4 Queens & passive enemy threat must continue training Drones")
+    (assert-true! (not (member '(train queen) acts-z35))
+                  "4-Hatchery Zerg with 4 Queens & 35 Drones must defer 5th Queen below Drone saturation")
+
+    ;; 36.3 Discounted pending Overlords & 2nd Overlord emission on >= 3 Hatcheries
+    (define pm-z-ov
+      (compute-state-pressure-metrics
+       #:race 'Zerg #:frame 5800 #:minerals 150 #:gas 40
+       #:supply-left 4 #:supply-cap 54 #:pending-supply 1
+       #:workers 38 #:target-workers 66 #:active-bases 4 #:desired-bases 4
+       #:production-facilities 4 #:max-facilities 8
+       #:army-supply 12.0 #:enemy-threat-supply 0.0 #:under-attack? #f
+       #:supply-buffer 10.0))
+    (assert-true! (> (hash-ref pm-z-ov 'supply-hazard 0.0) 0.0)
+                  "On 4 Hatcheries with supply-left=4 and pending-supply=1, Zerg supply-hazard must stay > 0.0")
+    (define rt-z-ov2 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+    (define acts-z-ov2
+      (hash-ref (step-live-bot-runtime!
+                 rt-z-ov2
+                 (hash 'frame 5800 'minerals 150 'gas 40 'supply-used 50 'supply-cap 54 'supply-left 4
+                       'pending-supply 1
+                       'mineral-harvesters 34 'vespene-harvesters 4 'enemy-race 'Terran
+                       'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+                       'ally-units (append (for/list ([i (in-range 38)])
+                                             (hash 'id (+ 22100 i) 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                                           (for/list ([q (in-range 4)])
+                                             (hash 'id (+ 22200 q) 'type 'queen 'x 32.5 'y 32.5 'hp 175))
+                                           (list (hash 'id 22301 'type 'overlord 'x 34.0 'y 34.0 'hp 200)
+                                                 (hash 'id 22302 'type 'larva 'x 33.0 'y 31.0 'hp 25)))
+                       'ally-buildings (list (hash 'id 22001 'type 'lair 'x 32.5 'y 32.5 'hp 2000 'build-progress 1.0)
+                                             (hash 'id 22002 'type 'hatchery 'x 58.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                             (hash 'id 22003 'type 'hatchery 'x 84.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                             (hash 'id 22004 'type 'hatchery 'x 32.5 'y 62.5 'hp 1500 'build-progress 1.0)
+                                             (hash 'id 22005 'type 'spawning-pool 'x 36.5 'y 32.5 'hp 1000 'build-progress 1.0))
+                       'enemy-units '()))
+                'actions '()))
+    (assert-true! (member '(train overlord) acts-z-ov2)
+                  "4-Hatchery Zerg at supply-left=4 with 1 pending Overlord must queue a 2nd Overlord")
+
+    ;; 36.4 Retired legacy Mothman / Mothman-R build variants
+    (define variant-names (map first VARIANTS))
+    (assert-true! (and (not (member "Mothman" variant-names))
+                       (not (member "Mothman-R" variant-names))
+                       (equal? variant-names '("Mothman-X" "Mothman-Z" "Mothman-T" "Mothman-P")))
+                  (format "VARIANTS must exclude retired Mothman and Mothman-R (got ~a)" variant-names)))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")

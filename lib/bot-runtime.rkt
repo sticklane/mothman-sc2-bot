@@ -3494,13 +3494,18 @@
     (cond
       [(and live-game-obs? (>= supply-cap 100) (<= supply-left 10)) 4]
       [(and live-game-obs? (or (>= supply-cap 66) (>= (length prod-facilities) 5)) (<= supply-left 10)) 3]
+      [(and live-game-obs? (eq? race 'Zerg) (>= active-bases 3) (<= supply-left (max 10 supply-threshold))) 3]
       [(and live-game-obs? (>= supply-cap 36)) 2]
       [(and (< supply-cap SC2-MID-SUPPLY-CAP-THRESHOLD)
             (> supply-left 2))
        SC2-MAX-PENDING-SUPPLY-EARLY]
       [else SC2-MAX-PENDING-SUPPLY-LATE]))
+  (define supply-credit-per-pending
+    (if (and live-game-obs? (eq? race 'Zerg) (>= supply-cap 28))
+        4
+        SC2-SUPPLY-PER-PROVIDER))
   (define effective-supply-with-pending
-    (+ supply-left (* SC2-SUPPLY-PER-PROVIDER pending-supply)))
+    (+ supply-left (* supply-credit-per-pending pending-supply)))
   (define wall-st (rt-wall-state rt))
   (when (<= frame 4)
     (hash-clear! wall-st))
@@ -3541,7 +3546,7 @@
         (max pending-supply
              (order-ledger-pending-count-for-type oledger supply-provider-sym frame))))
   (define effective-supply-with-pending-ledger
-    (+ supply-left (* SC2-SUPPLY-PER-PROVIDER eff-pending-supply)))
+    (+ supply-left (* supply-credit-per-pending eff-pending-supply)))
   (define protoss-pylon-count
     (count (lambda (t) (eq? t 'pylon)) bldg-types))
   (define unpowered-protoss-bldg
@@ -3917,10 +3922,13 @@
          (eq? race 'Zerg)
          (not zerg-emergency-rush-lings?)
          (< supply-cap SC2-MAX-SUPPLY)
-         (<= eff-pending-supply 0)
          (>= supply-used 14)
-         (or supply-at-risk?
-             (<= supply-left (if (< supply-cap 20) 1 (min 4 supply-threshold))))))
+         (or (and (<= eff-pending-supply 0)
+                  (or supply-at-risk?
+                      (<= supply-left (if (< supply-cap 20) 1 supply-threshold))))
+             (and (>= active-bases 3)
+                  (= eff-pending-supply 1)
+                  (<= supply-left 4)))))
 
   (define reserve-supply-floor?
     (and (not zerg-emergency-rush-lings?)
@@ -4654,6 +4662,11 @@
   (define (worker-army-curve-satisfied?)
     (or (not live-game?)
         (< total-workers 24)
+        (and (eq? race 'Zerg)
+             (not under-base-attack?)
+             (>= active-bases 3)
+             (< total-workers 55)
+             (>= live-army-supply 4.0))
         (and (not under-base-attack?)
              (<= live-enemy-threat-supply 0)
              (or (and (< total-workers (min 66 (* 20 active-bases))) (>= minerals 150))
@@ -5760,8 +5773,15 @@
      ;; 5. Zerg Worker Saturation Priority (`70` cap + army-supply curve gate) vs Combat Unit Training
      (define zerg-ideal-worker-cap
        (min 70 (* SC2-IDEAL-WORKERS-PER-BASE (max 1 (length hatcheries)))))
+     (define zerg-3base-interleave-drone-ok?
+       (and (not under-base-attack?)
+            (>= (length hatcheries) 3)
+            (< total-workers 55)
+            (>= live-army-supply 4.0)))
      (define zerg-drone-priority?
        (and (not crisis-freeze-workers?)
+            (not zerg-holding-for-aa-spire?)
+            (not zerg-holding-for-aa-corruptor?)
             (worker-army-curve-satisfied?)
             (or (not zerg-saving-for-expand?)
                 (and (< total-workers 16) (< minerals 250)))
@@ -5771,6 +5791,7 @@
             (< total-workers (min 70 (max target-workers zerg-ideal-worker-cap)))
             (or (not live-game?)
                 (and (not under-base-attack?) (<= live-enemy-threat-supply 0))
+                zerg-3base-interleave-drone-ok?
                 (< total-workers 19)
                 (not (memq 'spawning-pool ready-bldg-types))
                 (>= (length ally-combat-units) 4)
@@ -5778,11 +5799,14 @@
             (>= minerals (sc2-min-cost 'drone))
             (can-spend-supply? (sc2-supply-cost 'drone))
             (not under-early-cheese?)
-            (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.75)))
+            (< (hash-ref pressure-metrics 'threat-pressure 0.0)
+               (if zerg-3base-interleave-drone-ok? 2.0 0.75))))
      (when zerg-drone-priority?
-       (try-train-unit! 'drone 'larva 4
+       (try-train-unit! 'drone 'larva (if (and (> live-enemy-threat-supply 0) (>= total-workers 24)) 1 4)
                         #:respect-bo-reserve?
                         (and live-game?
+                             (or (not zerg-3base-interleave-drone-ok?)
+                                 (enemy-tech-observation-requires-anti-air? tech-obs))
                              (or (>= total-workers 24)
                                  (>= total-workers zerg-ideal-worker-cap)
                                  (and (>= total-workers 16)

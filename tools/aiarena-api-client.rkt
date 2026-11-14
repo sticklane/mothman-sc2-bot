@@ -262,8 +262,6 @@
   (printf "============================================================================\n")
   (printf "  Uploading Mothman BotZip Packages to AI Arena (`https://aiarena.net`)\n")
   (printf "============================================================================\n")
-  ;; Keep legacy Python Mothman-R (#1457) paused
-  (void (set-competition-active! 1457 #f token))
   (for ([row (in-list MOTHMAN-BOT-UPLOADS)])
     (match-define (list bid bname zfile) row)
     (when (set-member? want-set bid)

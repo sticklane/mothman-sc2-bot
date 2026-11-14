@@ -1653,15 +1653,20 @@
     (if (and override-supply-buffer (real? override-supply-buffer) (not (nan? override-supply-buffer)))
         (max 1.0 (exact->inexact override-supply-buffer))
         (+ 2.0 (* 0.06 (exact->inexact supply-cap)))))
+  (define pending-credit-per-unit
+    (if (eq? race 'Zerg) 4.0 8.0))
   (define eff-supply
-    (+ (exact->inexact supply-left) (* 8.0 (exact->inexact pending-supply))))
+    (+ (exact->inexact supply-left) (* pending-credit-per-unit (exact->inexact pending-supply))))
   (define raw-supply-hazard
     (/ (max 0.0 (- supply-buffer eff-supply))
        (max 1.0 supply-buffer)))
   (define supply-hazard
     (cond
       [(>= supply-cap 200) 0.0]
-      [(and (> pending-supply 0) (not supply-at-risk?)) 0.0]
+      [(and (> pending-supply 0)
+            (not supply-at-risk?)
+            (not (and (eq? race 'Zerg) (>= active-bases 3) (<= pending-supply 1))))
+       0.0]
       [(and supply-at-risk?
             (< pending-supply 2)
             (<= eff-supply (+ supply-buffer 6.0)))
@@ -1873,6 +1878,7 @@
   (define worker-saturation-gap (safe-real (hash-ref m 'worker-saturation-gap 0.5) 0.5))
   (define facility-scaling-pressure (safe-real (hash-ref m 'facility-scaling-pressure 0.2) 0.2))
   (define expansion-desire (safe-real (hash-ref m 'expansion-desire 0.0) 0.0))
+  (define workers (safe-nonneg-int (hash-ref m 'workers 12) 12))
   (define active-bases (max 1 (safe-nonneg-int (hash-ref m 'active-bases 1) 1)))
   (define escrow-eligible? (eq? (hash-ref m 'escrow-eligible? #f) #t))
   (define requires-anti-air? (eq? (hash-ref m 'requires-anti-air? #f) #t))
@@ -2024,9 +2030,14 @@
      (+ 116.0 gas-tech-bonus (* 45.0 (min 3.0 facility-scaling-pressure)) pv5-boost bo-head-boost)]
 
     [(worker)
-     (if under-threat?
-         (* 42.0 worker-saturation-gap)
-         (+ 35.0 (* 52.0 worker-saturation-gap)))]
+     (define base-worker-u
+       (if under-threat?
+           (* 42.0 worker-saturation-gap)
+           (+ 35.0 (* 52.0 worker-saturation-gap))))
+     (if (and (not under-attack?)
+              (< workers (min 66 (* 16 active-bases))))
+         (max 60.0 base-worker-u)
+         base-worker-u)]
 
     [(expansion)
      (cond
@@ -2173,9 +2184,16 @@
     (and (hash? open-prod-slots)
          (>= active-bases 3)
          (or (>= live-workers 50) (>= sup-used 90))))
+  (define zerg-3base-interleave-ok?
+    (and (eq? race 'Zerg)
+         (>= active-bases 3)
+         (< live-workers 55)
+         (not raw-under-attack?)
+         (>= army-val 4.0)))
   (define worker-curve-ok?
     (or (not (hash? open-prod-slots))
         (< live-workers 24)
+        zerg-3base-interleave-ok?
         (>= army-val (required-army-supply-for-worker-growth live-workers threat-val))))
   (define emergency-army-before-workers?
     (and (or raw-under-attack? (> threat-val 0.0))

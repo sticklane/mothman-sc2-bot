@@ -1101,9 +1101,13 @@
   (when (and (eq? race 'Zerg)
              (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
              (< cur-queens desired-queens))
+    (define queen-drone-sat-defer?
+      (and (< workers (min 60 (* 16 active-bases)))
+           (>= cur-queens active-bases)))
     (add-goal-spec! 'queen 'economy-expansion 'train desired-queens
                     (cond
                       [(and (or under-attack? (> enemy-threat-supply 2)) (< army-supply 4)) 80.0]
+                      [queen-drone-sat-defer? 120.0]
                       [(and live-slots? peaceful? (< cur-queens active-bases)) 445.0]
                       [(and live-slots? peaceful?) 428.0]
                       [else 230.0])
@@ -1785,9 +1789,24 @@
           (hash-ref open-facility-slots k 0))
         99))
 
+  (define zerg-passive-sat-ok?
+    (and (eq? race 'Zerg)
+         (not under-attack?)
+         (< workers (min 60 (* 16 active-bases)))
+         (or (<= enemy-threat-supply 0)
+             (>= army-supply (if (>= active-bases 3) 4 6)))))
+
+  (define zerg-3base-interleave-ok?
+    (and (eq? race 'Zerg)
+         (not under-attack?)
+         (>= active-bases 3)
+         (< workers 55)
+         (>= army-supply 4)))
+
   (define worker-army-curve-ok?
     (or (not (hash? open-facility-slots))
         (< workers 24)
+        zerg-3base-interleave-ok?
         (and (not under-attack?)
              (<= enemy-threat-supply 0)
              (or (and (< workers (min 66 (* 20 active-bases))) (>= minerals 150))
@@ -1796,7 +1815,7 @@
 
   (define need-worker-saturation?
     (and (not under-attack?)
-         (<= enemy-threat-supply 0)
+         (or (<= enemy-threat-supply 0) zerg-passive-sat-ok?)
          worker-army-curve-ok?
          (< workers (min 70 (max target-workers (* 22 active-bases))))))
 
@@ -2055,12 +2074,17 @@
               plan-weight]
              [(and need-worker-saturation?
                    (< workers sat-target))
-              430.0]
+              (if (<= enemy-threat-supply 0) 430.0 220.0)]
              [else 0.0]))
-         (define raw-worker-u
+         (define raw-worker-u0
            (if (>= workers 70)
                25.0
                (max w-plan-boost (+ u0 emergency-worker-boost))))
+         (define raw-worker-u
+           (if (and (not under-attack?)
+                    (< workers (min 66 (* 16 active-bases))))
+               (max 60.0 raw-worker-u0)
+               raw-worker-u0))
          (struct-copy priority-candidate c
                       [utility-score (cond
                                        [(>= workers 70) 25.0]
@@ -2112,10 +2136,14 @@
            (and (eq? sym 'queen)
                 (or under-attack? (> enemy-threat-supply 2))
                 (< army-supply 4)))
+         (define queen-sat-cap
+           (if (< workers (min 60 (* 16 active-bases)))
+               active-bases
+               (min max-queens (add1 active-bases))))
          (define inject-queen-boost?
            (and (eq? sym 'queen)
                 (not queen-defer-for-first-lings?)
-                (< cur-queens (min max-queens (add1 active-bases)))
+                (< cur-queens queen-sat-cap)
                 (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)))
          (define proactive-overseer-boost?
            (and (eq? sym 'overseer)
