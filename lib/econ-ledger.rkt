@@ -6,6 +6,7 @@
          racket/string
          racket/runtime-path
          "../compiler/syntax.rkt"
+         "sc2-common.rkt"
          "sc2-game-constants.rkt"
          "okasaki-sc.rkt")
 
@@ -231,22 +232,9 @@
 
 ;; =============================================================================
 ;; 3. BOSS Branch-and-Bound Goal Synthesis
+;; (Shared `finite-real?`, `safe-real`, `safe-exact-int`, `safe-nonneg-int`,
+;;  `safe-list` imported from `sc2-common.rkt`.)
 ;; =============================================================================
-
-(define (finite-real? v)
-  (and (number? v) (real? v) (not (nan? v)) (not (infinite? v))))
-
-(define (safe-real v [default 0.0])
-  (if (finite-real? v) (exact->inexact v) default))
-
-(define (safe-exact-int v [default 0])
-  (if (finite-real? v) (exact-round v) default))
-
-(define (safe-nonneg-int v [default 0])
-  (max 0 (safe-exact-int v default)))
-
-(define (safe-list v)
-  (if (list? v) v '()))
 
 (struct boss-plan (race goal-units steps makespan-frames total-minerals total-gas)
   #:transparent)

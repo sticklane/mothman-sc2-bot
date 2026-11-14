@@ -248,87 +248,62 @@
 ;; 3. Geometry Submessage Verifiers (`Point2D`, `Point`)
 ;; =============================================================================
 
-(define (verify-sc2-point2d-bytes bs)
+;; Shared decoder/verifier for `Point2D` (x, y) and `Point` (x, y, optional z).
+(define (verify-sc2-point-coords bs allow-z?
+                                 missing-err bounds-err bad-wt-err
+                                 dup-x-err dup-y-err dup-z-err unknown-err)
   (define-values (ok? fields) (parse-wire-bytes bs))
   (cond
     [(not ok?) (values #f fields)]
     [else
      (let loop ([fs fields]
-                [has-x? #f]
-                [x 0.0]
-                [has-y? #f]
-                [y 0.0])
+                [has-x? #f] [x 0.0]
+                [has-y? #f] [y 0.0]
+                [has-z? #f] [z 0.0])
        (cond
          [(null? fs)
           (cond
             [(or (not has-x?) (not has-y?))
-             (values #f 'point2d-missing-coord)]
+             (values #f missing-err)]
             [(or (not (in-world-bounds? x)) (not (in-world-bounds? y)))
-             (values #f 'point2d-out-of-bounds-or-nonfinite)]
-            [else
-             (values #t (list 'point2d x y))])]
-         [else
-          (define f (car fs))
-          (define fn (raw-wire-field-num f))
-          (define wt (raw-wire-field-wtype f))
-          (cond
-            [(not (= wt 5))
-             (values #f 'point2d-bad-wire-type)]
-            [(= fn 1)
-             (if has-x?
-                 (values #f 'point2d-duplicate-x)
-                 (loop (cdr fs) #t (decode-ieee754-f32-le (raw-wire-field-val f)) has-y? y))]
-            [(= fn 2)
-             (if has-y?
-                 (values #f 'point2d-duplicate-y)
-                 (loop (cdr fs) has-x? x #t (decode-ieee754-f32-le (raw-wire-field-val f))))]
-            [else
-             (values #f 'point2d-unknown-field)])]))]))
-
-(define (verify-sc2-point-bytes bs)
-  (define-values (ok? fields) (parse-wire-bytes bs))
-  (cond
-    [(not ok?) (values #f fields)]
-    [else
-     (let loop ([fs fields]
-                [has-x? #f]
-                [x 0.0]
-                [has-y? #f]
-                [y 0.0]
-                [has-z? #f]
-                [z 0.0])
-       (cond
-         [(null? fs)
-          (cond
-            [(or (not has-x?) (not has-y?))
-             (values #f 'point-missing-xy)]
-            [(or (not (in-world-bounds? x)) (not (in-world-bounds? y)))
-             (values #f 'point-xy-out-of-bounds-or-nonfinite)]
-            [(and has-z? (not (finite-real? z)))
+             (values #f bounds-err)]
+            [(and allow-z? has-z? (not (finite-real? z)))
              (values #f 'point-z-nonfinite)]
             [else
-             (values #t (list 'point x y z))])]
+             (values #t (if allow-z? (list 'point x y z) (list 'point2d x y)))])]
          [else
           (define f (car fs))
           (define fn (raw-wire-field-num f))
           (define wt (raw-wire-field-wtype f))
           (cond
             [(not (= wt 5))
-             (values #f 'point-bad-wire-type)]
+             (values #f bad-wt-err)]
             [(= fn 1)
              (if has-x?
-                 (values #f 'point-duplicate-x)
+                 (values #f dup-x-err)
                  (loop (cdr fs) #t (decode-ieee754-f32-le (raw-wire-field-val f)) has-y? y has-z? z))]
             [(= fn 2)
              (if has-y?
-                 (values #f 'point-duplicate-y)
+                 (values #f dup-y-err)
                  (loop (cdr fs) has-x? x #t (decode-ieee754-f32-le (raw-wire-field-val f)) has-z? z))]
-            [(= fn 3)
+            [(and allow-z? (= fn 3))
              (if has-z?
-                 (values #f 'point-duplicate-z)
+                 (values #f dup-z-err)
                  (loop (cdr fs) has-x? x has-y? y #t (decode-ieee754-f32-le (raw-wire-field-val f))))]
             [else
-             (values #f 'point-unknown-field)])]))]))
+             (values #f unknown-err)])]))]))
+
+(define (verify-sc2-point2d-bytes bs)
+  (verify-sc2-point-coords bs #f
+                           'point2d-missing-coord 'point2d-out-of-bounds-or-nonfinite
+                           'point2d-bad-wire-type 'point2d-duplicate-x
+                           'point2d-duplicate-y #f 'point2d-unknown-field))
+
+(define (verify-sc2-point-bytes bs)
+  (verify-sc2-point-coords bs #t
+                           'point-missing-xy 'point-xy-out-of-bounds-or-nonfinite
+                           'point-bad-wire-type 'point-duplicate-x
+                           'point-duplicate-y 'point-duplicate-z 'point-unknown-field))
 
 ;; =============================================================================
 ;; 4. `Action` Submessage Verifiers (`raw.proto`, `ui.proto`, `sc2api.proto`)
@@ -762,51 +737,37 @@
             [else
              (values #f 'request-observation-unknown-or-bad-field)])]))]))
 
-(define (verify-request-data-bytes bs)
+;; Shared verifier for messages consisting solely of unique boolean (0/1) varint flags.
+(define (verify-bool-flag-fields bs max-field allowed-field? ok-sym err-sym)
   (define-values (ok? fields) (parse-wire-bytes bs))
   (cond
     [(not ok?) (values #f fields)]
     [else
-     (define seen (make-vector 6 #f))
+     (define seen (make-vector (add1 max-field) #f))
      (let loop ([fs fields])
        (cond
-         [(null? fs) (values #t 'request-data)]
+         [(null? fs) (values #t ok-sym)]
          [else
           (define f (car fs))
           (define fn (raw-wire-field-num f))
           (define wt (raw-wire-field-wtype f))
           (define v (raw-wire-field-val f))
-          (if (and (<= 1 fn 5)
+          (if (and (allowed-field? fn)
                    (= wt 0)
                    (not (vector-ref seen fn))
                    (or (= v 0) (= v 1)))
               (begin
                 (vector-set! seen fn #t)
                 (loop (cdr fs)))
-              (values #f 'request-data-unknown-or-bad-field))]))]))
+              (values #f err-sym))]))]))
+
+(define (verify-request-data-bytes bs)
+  (verify-bool-flag-fields bs 5 (lambda (fn) (<= 1 fn 5))
+                           'request-data 'request-data-unknown-or-bad-field))
 
 (define (verify-interface-options-bytes bs)
-  (define-values (ok? fields) (parse-wire-bytes bs))
-  (cond
-    [(not ok?) (values #f fields)]
-    [else
-     (define seen (make-vector 10 #f))
-     (let loop ([fs fields])
-       (cond
-         [(null? fs) (values #t 'interface-options)]
-         [else
-          (define f (car fs))
-          (define fn (raw-wire-field-num f))
-          (define wt (raw-wire-field-wtype f))
-          (define v (raw-wire-field-val f))
-          (if (and (memv fn '(1 2 5 6 7 8 9))
-                   (= wt 0)
-                   (not (vector-ref seen fn))
-                   (or (= v 0) (= v 1)))
-              (begin
-                (vector-set! seen fn #t)
-                (loop (cdr fs)))
-              (values #f 'interface-options-unknown-or-bad-field))]))]))
+  (verify-bool-flag-fields bs 9 (lambda (fn) (and (memv fn '(1 2 5 6 7 8 9)) #t))
+                           'interface-options 'interface-options-unknown-or-bad-field))
 
 (define (verify-port-set-bytes bs)
   (define-values (ok? fields) (parse-wire-bytes bs))

@@ -5,6 +5,7 @@
          racket/set
          racket/math
          "../compiler/syntax.rkt"
+         "sc2-common.rkt"
          "sc2-game-constants.rkt"
          "perception-grid.rkt"
          "econ-ledger.rkt"
@@ -73,92 +74,27 @@
 ;; Per-runtime weak map caching last-known `(cons x y)` coordinates for enemy UnitTags
 ;; so stale/dead/snapshot target tags (`ActionResult=207 Error_CantTargetThatUnit`) downgrade
 ;; cleanly to `(attack-pos uid last-x last-y)` instead of failing in SC2!
-(define WEAK-RT-ENEMY-POS-CACHE (make-weak-hasheq))
+;; Per-runtime weak-hash state accessors preserving `(struct live-bot-runtime ...)`
+;; positional arity while lazily initializing each per-instance container.
+(define-syntax-rule (define-rt-weak-state accessor-name init-expr)
+  (define accessor-name
+    (let ([tbl (make-weak-hasheq)])
+      (lambda (rt)
+        (hash-ref! tbl rt (lambda () init-expr))))))
 
-(define (rt-enemy-pos-cache rt)
-  (or (hash-ref WEAK-RT-ENEMY-POS-CACHE rt #f)
-      (let ([ht (make-hasheqv)])
-        (hash-set! WEAK-RT-ENEMY-POS-CACHE rt ht)
-        ht)))
+(define-rt-weak-state rt-enemy-pos-cache (make-hasheqv))
 
-;; Per-runtime weak-hash tables preserving `(struct live-bot-runtime ...)` positional arity:
-(define WEAK-RT-ROLE-LEASES     (make-weak-hasheq))
-(define WEAK-RT-BISTABLE-STATES (make-weak-hasheq))
-(define WEAK-RT-SCOUT-STATE     (make-weak-hasheq))
-(define WEAK-RT-SPOTTER-LINGS   (make-weak-hasheq))
-(define WEAK-RT-TUMOR-STATE     (make-weak-hasheq))
-(define WEAK-RT-DOOR-STATE      (make-weak-hasheq))
-(define WEAK-RT-SPLASH-STATE    (make-weak-hasheq))
-(define WEAK-RT-WALL-AABBS-BOX     (make-weak-hasheq))
-(define WEAK-RT-ENEMY-RACE-BOX     (make-weak-hasheq))
-(define WEAK-RT-WALL-STATE         (make-weak-hasheq))
-(define WEAK-RT-RUSH-DEFENSE-STATE (make-weak-hasheq))
-
-(define (rt-role-leases rt)
-  (or (hash-ref WEAK-RT-ROLE-LEASES rt #f)
-      (let ([ht (make-hasheqv)])
-        (hash-set! WEAK-RT-ROLE-LEASES rt ht)
-        ht)))
-
-(define (rt-bistable-states rt)
-  (or (hash-ref WEAK-RT-BISTABLE-STATES rt #f)
-      (let ([ht (make-hash)])
-        (hash-set! WEAK-RT-BISTABLE-STATES rt ht)
-        ht)))
-
-(define (rt-scout-state rt)
-  (or (hash-ref WEAK-RT-SCOUT-STATE rt #f)
-      (let ([ht (make-hasheq)])
-        (hash-set! WEAK-RT-SCOUT-STATE rt ht)
-        ht)))
-
-(define (rt-spotter-lings rt)
-  (or (hash-ref WEAK-RT-SPOTTER-LINGS rt #f)
-      (let ([ht (make-hasheq)])
-        (hash-set! WEAK-RT-SPOTTER-LINGS rt ht)
-        ht)))
-
-(define (rt-tumor-state rt)
-  (or (hash-ref WEAK-RT-TUMOR-STATE rt #f)
-      (let ([ht (make-hasheqv)])
-        (hash-set! WEAK-RT-TUMOR-STATE rt ht)
-        ht)))
-
-(define (rt-door-state rt)
-  (or (hash-ref WEAK-RT-DOOR-STATE rt #f)
-      (let ([ht (make-hasheq)])
-        (hash-set! WEAK-RT-DOOR-STATE rt ht)
-        ht)))
-
-(define (rt-splash-state rt)
-  (or (hash-ref WEAK-RT-SPLASH-STATE rt #f)
-      (let ([ht (make-hash)])
-        (hash-set! WEAK-RT-SPLASH-STATE rt ht)
-        ht)))
-
-(define (rt-wall-aabbs-box rt)
-  (or (hash-ref WEAK-RT-WALL-AABBS-BOX rt #f)
-      (let ([b (box '())])
-        (hash-set! WEAK-RT-WALL-AABBS-BOX rt b)
-        b)))
-
-(define (rt-enemy-race-box rt)
-  (or (hash-ref WEAK-RT-ENEMY-RACE-BOX rt #f)
-      (let ([b (box 'Unknown)])
-        (hash-set! WEAK-RT-ENEMY-RACE-BOX rt b)
-        b)))
-
-(define (rt-wall-state rt)
-  (or (hash-ref WEAK-RT-WALL-STATE rt #f)
-      (let ([ht (make-hasheq)])
-        (hash-set! WEAK-RT-WALL-STATE rt ht)
-        ht)))
-
-(define (rt-rush-defense-state rt)
-  (or (hash-ref WEAK-RT-RUSH-DEFENSE-STATE rt #f)
-      (let ([ht (make-hasheqv)])
-        (hash-set! WEAK-RT-RUSH-DEFENSE-STATE rt ht)
-        ht)))
+(define-rt-weak-state rt-role-leases        (make-hasheqv))
+(define-rt-weak-state rt-bistable-states    (make-hash))
+(define-rt-weak-state rt-scout-state        (make-hasheq))
+(define-rt-weak-state rt-spotter-lings      (make-hasheq))
+(define-rt-weak-state rt-tumor-state        (make-hasheqv))
+(define-rt-weak-state rt-door-state         (make-hasheq))
+(define-rt-weak-state rt-splash-state       (make-hash))
+(define-rt-weak-state rt-wall-aabbs-box     (box '()))
+(define-rt-weak-state rt-enemy-race-box     (box 'Unknown))
+(define-rt-weak-state rt-wall-state         (make-hasheq))
+(define-rt-weak-state rt-rush-defense-state (make-hasheqv))
 
 (define (worker-has-engine-build-order? w)
   (and (hash? w)
@@ -415,19 +351,8 @@
 
 ;; =============================================================================
 ;; Total Numeric, Coordinate, and Observation Sanitizers
+;; (Shared numeric helpers imported from `sc2-common.rkt`.)
 ;; =============================================================================
-
-(define (finite-real? v)
-  (and (number? v) (real? v) (not (nan? v)) (not (infinite? v))))
-
-(define (safe-finite-real v [default 0.0])
-  (if (finite-real? v) (exact->inexact v) default))
-
-(define (safe-exact-int v [default 0])
-  (if (finite-real? v) (exact-round v) default))
-
-(define (safe-nonneg-int v [default 0])
-  (max 0 (safe-exact-int v default)))
 
 (define MAP-MAX-COORD 256.0)
 
