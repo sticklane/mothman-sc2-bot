@@ -385,29 +385,27 @@
   (when (< id SC2-ABILITY-TABLE-SIZE)
     (vector-set! AUTOCAST-ABILITY-VEC id (raw-AutocastAbility id))))
 
+(: lookup-ability-vec (All (T) (-> (Vectorof (Option T)) Integer (Option T))))
+(define (lookup-ability-vec vec id)
+  (if (and (> id 0) (< id SC2-ABILITY-TABLE-SIZE))
+      (vector-ref vec id)
+      #f))
+
 (: lookup-no-target-ability (-> Integer (Option NoTargetAbility)))
 (define (lookup-no-target-ability id)
-  (if (and (> id 0) (< id SC2-ABILITY-TABLE-SIZE))
-      (vector-ref NO-TARGET-ABILITY-VEC id)
-      #f))
+  (lookup-ability-vec NO-TARGET-ABILITY-VEC id))
 
 (: lookup-point-target-ability (-> Integer (Option PointTargetAbility)))
 (define (lookup-point-target-ability id)
-  (if (and (> id 0) (< id SC2-ABILITY-TABLE-SIZE))
-      (vector-ref POINT-TARGET-ABILITY-VEC id)
-      #f))
+  (lookup-ability-vec POINT-TARGET-ABILITY-VEC id))
 
 (: lookup-unit-target-ability (-> Integer (Option UnitTargetAbility)))
 (define (lookup-unit-target-ability id)
-  (if (and (> id 0) (< id SC2-ABILITY-TABLE-SIZE))
-      (vector-ref UNIT-TARGET-ABILITY-VEC id)
-      #f))
+  (lookup-ability-vec UNIT-TARGET-ABILITY-VEC id))
 
 (: lookup-autocast-ability (-> Integer (Option AutocastAbility)))
 (define (lookup-autocast-ability id)
-  (if (and (> id 0) (< id SC2-ABILITY-TABLE-SIZE))
-      (vector-ref AUTOCAST-ABILITY-VEC id)
-      #f))
+  (lookup-ability-vec AUTOCAST-ABILITY-VEC id))
 
 (: canonicalize-harvest-return-ability-id (-> Integer Integer))
 (define (canonicalize-harvest-return-ability-id ab-id)
@@ -731,40 +729,11 @@
 (define (decode-float32-le b4)
   (real->double-flonum (floating-point-bytes->real b4 #f 0 4)))
 
-(: decode-point2d-bytes (-> Bytes (Option WorldPoint2D)))
-(define (decode-point2d-bytes bstr)
+(: decode-point-fields (-> Bytes Boolean (Values (Option Flonum) (Option Flonum) (Option Flonum) Boolean)))
+(define (decode-point-fields bstr allow-z?)
   (define fields (decode-pb-fields bstr))
   (cond
-    [(not fields) #f]
-    [else
-     (define x-box : (Option Flonum) #f)
-     (define y-box : (Option Flonum) #f)
-     (define bad? : Boolean #f)
-     (for ([f (in-list fields)])
-       (cond
-         [(PbFixed32Field? f)
-          (case (PbFixed32Field-field f)
-            [(1)
-             (if x-box
-                 (set! bad? #t)
-                 (set! x-box (decode-float32-le (PbFixed32Field-data f))))]
-            [(2)
-             (if y-box
-                 (set! bad? #t)
-                 (set! y-box (decode-float32-le (PbFixed32Field-data f))))]
-            [else (set! bad? #t)])]
-         [else (set! bad? #t)]))
-     (define xv x-box)
-     (define yv y-box)
-     (if (and (not bad?) xv yv)
-         (make-world-point2d xv yv)
-         #f)]))
-
-(: decode-point3d-bytes (-> Bytes (Option (Pairof WorldPoint2D Flonum))))
-(define (decode-point3d-bytes bstr)
-  (define fields (decode-pb-fields bstr))
-  (cond
-    [(not fields) #f]
+    [(not fields) (values #f #f #f #t)]
     [else
      (define x-box : (Option Flonum) #f)
      (define y-box : (Option Flonum) #f)
@@ -783,18 +752,28 @@
                  (set! bad? #t)
                  (set! y-box (decode-float32-le (PbFixed32Field-data f))))]
             [(3)
-             (if z-box
+             (if (or (not allow-z?) z-box)
                  (set! bad? #t)
                  (set! z-box (decode-float32-le (PbFixed32Field-data f))))]
             [else (set! bad? #t)])]
          [else (set! bad? #t)]))
-     (define xv x-box)
-     (define yv y-box)
-     (define zv (or z-box 0.0))
-     (define pt (if (and (not bad?) xv yv) (make-world-point2d xv yv) #f))
-     (if (and pt (not (nan? zv)) (not (infinite? zv)) (<= (abs zv) SC2-MAX-FLOAT32-ABS))
-         (cons pt (canonicalize-zero-flonum zv))
-         #f)]))
+     (values x-box y-box z-box bad?)]))
+
+(: decode-point2d-bytes (-> Bytes (Option WorldPoint2D)))
+(define (decode-point2d-bytes bstr)
+  (define-values (xv yv _zv bad?) (decode-point-fields bstr #f))
+  (if (and (not bad?) xv yv)
+      (make-world-point2d xv yv)
+      #f))
+
+(: decode-point3d-bytes (-> Bytes (Option (Pairof WorldPoint2D Flonum))))
+(define (decode-point3d-bytes bstr)
+  (define-values (xv yv z-box bad?) (decode-point-fields bstr #t))
+  (define zv (or z-box 0.0))
+  (define pt (if (and (not bad?) xv yv) (make-world-point2d xv yv) #f))
+  (if (and pt (not (nan? zv)) (not (infinite? zv)) (<= (abs zv) SC2-MAX-FLOAT32-ABS))
+      (cons pt (canonicalize-zero-flonum zv))
+      #f))
 
 (: unique-positive-tags? (-> (Listof Integer) Boolean))
 (define (unique-positive-tags? xs)

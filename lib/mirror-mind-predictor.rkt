@@ -37,6 +37,7 @@
          racket/match
          racket/math
          racket/set
+         "sc2-common.rkt"
          "sc2-game-constants.rkt"
          "zerospace-mastermind.rkt")
 
@@ -217,32 +218,11 @@
   (define t (if (hash? u) (hash-ref u 'type 'unknown) 'unknown))
   (if (symbol? t) t (string->symbol (format "~a" t))))
 
-(define (finite-real? v)
-  (and (real? v) (not (nan? v)) (not (infinite? v))))
-
-(define (safe-real v [fallback 0.0])
-  (cond
-    [(finite-real? v) (exact->inexact v)]
-    [(finite-real? fallback) (exact->inexact fallback)]
-    [else 0.0]))
-
-(define (safe-int v [fallback 0])
-  (cond
-    [(finite-real? v) (exact-round v)]
-    [(finite-real? fallback) (exact-round fallback)]
-    [else 0]))
-
 (define (safe-frame f)
   (max 0 (safe-int f 0)))
 
 (define (safe-coord v [fallback 160])
   (safe-int v fallback))
-
-(define (safe-list xs)
-  (if (list? xs) xs '()))
-
-(define (safe-hash-list xs)
-  (if (list? xs) (filter hash? xs) '()))
 
 (define (dist2d x1 y1 x2 y2)
   (define sx1 (safe-real x1 32.0))

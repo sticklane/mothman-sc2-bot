@@ -2214,25 +2214,8 @@
     [else
      (error 'decode-protobuf-message "Unsupported protobuf wire-type ~a" wire-type)]))
 
-(define (decode-point2d-bytes bstr [start 0] [end (bytes-length bstr)])
-  (define x #f)
-  (define y #f)
-  (let loop ([pos start])
-    (when (< pos end)
-      (define-values (tag next-pos) (decode-varint bstr pos))
-      (define field-num (arithmetic-shift tag -3))
-      (define wire-type (bitwise-and tag #x07))
-      (cond
-        [(and (= wire-type 5) (<= (+ next-pos 4) end))
-         (case field-num
-           [(1) (unless x (set! x (decode-float32 bstr next-pos)))]
-           [(2) (unless y (set! y (decode-float32 bstr next-pos)))])
-         (loop (+ next-pos 4))]
-        [else
-         (loop (skip-protobuf-wire-value bstr wire-type next-pos end))])))
-  (sc2-point2d (or x 0.0) (or y 0.0)))
-
-(define (decode-point3d-bytes bstr [start 0] [end (bytes-length bstr)])
+;; Shared decoder for Point2D (fields 1, 2) and Point (fields 1, 2, 3).
+(define (decode-point-coords bstr start end allow-z?)
   (define x #f)
   (define y #f)
   (define z #f)
@@ -2246,11 +2229,19 @@
          (case field-num
            [(1) (unless x (set! x (decode-float32 bstr next-pos)))]
            [(2) (unless y (set! y (decode-float32 bstr next-pos)))]
-           [(3) (unless z (set! z (decode-float32 bstr next-pos)))])
+           [(3) (when (and allow-z? (not z)) (set! z (decode-float32 bstr next-pos)))])
          (loop (+ next-pos 4))]
         [else
          (loop (skip-protobuf-wire-value bstr wire-type next-pos end))])))
-  (sc2-point3d (or x 0.0) (or y 0.0) (or z 0.0)))
+  (values (or x 0.0) (or y 0.0) (or z 0.0)))
+
+(define (decode-point2d-bytes bstr [start 0] [end (bytes-length bstr)])
+  (define-values (x y _z) (decode-point-coords bstr start end #f))
+  (sc2-point2d x y))
+
+(define (decode-point3d-bytes bstr [start 0] [end (bytes-length bstr)])
+  (define-values (x y z) (decode-point-coords bstr start end #t))
+  (sc2-point3d x y z))
 
 (define (decode-unit-order-bytes bstr [start 0] [end (bytes-length bstr)])
   (define ab-id #f)

@@ -22,6 +22,7 @@
          racket/set
          racket/math
          racket/runtime-path
+         "sc2-common.rkt"
          "bot-runtime.rkt"
          "econ-ledger.rkt"
          "mirror-mind-predictor.rkt"
@@ -566,9 +567,6 @@
 (define VALID-MORPH-SET (list->seteq SC2-LOTV-VALID-MORPH-SYMS))
 (define FLYING-SCOUT-SET (list->seteq FLYING-NONCOMBAT-SCOUT-SYMS))
 (define ALL-AIR-SET (list->seteq ALL-AIR-UNIT-SYMS))
-
-(define (finite-real? v)
-  (and (real? v) (not (nan? v)) (not (infinite? v))))
 
 (define (safe-dist2d x1 y1 x2 y2)
   (if (and (finite-real? x1) (finite-real? y1) (finite-real? x2) (finite-real? y2))
