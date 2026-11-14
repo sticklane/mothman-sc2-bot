@@ -3254,22 +3254,11 @@
   (define enemy-det? (tactical-arena-enemy-has-detection? arena))
   (define our-z (exact->inexact (tactical-arena-our-z arena)))
   (define enemy-z (exact->inexact (tactical-arena-enemy-z arena)))
-  (define enemy-stasis-pts
-    (append
-     (for/list ([e (in-list sim-enemies)]
-                #:when (and (> (tactical-sim-unit-hp e) 0.0)
-                            (memq (tactical-sim-unit-type e) '(oracle-stasis-trap stasis-ward))))
-       (cons (tactical-sim-unit-x e) (tactical-sim-unit-y e)))
-     (for/list ([eb (in-list (tactical-arena-enemy-structures arena))]
-                #:when (and (hash? eb)
-                            (memq (hash-ref eb 'type #f) '(oracle-stasis-trap stasis-ward))))
-       (cons (exact->inexact (hash-ref eb 'x 999.0))
-             (exact->inexact (hash-ref eb 'y 999.0))))))
   (define ally-worker-count
-    (count (lambda (a)
-             (and (> (tactical-sim-unit-hp a) 0.0)
-                  (memq (tactical-sim-unit-type a) '(scv probe drone))))
-           sim-allies))
+    (for/sum ([a (in-list sim-allies)]
+              #:when (and (> (tactical-sim-unit-hp a) 0.0)
+                          (memq (tactical-sim-unit-type a) '(scv probe drone))))
+      1))
 
   ;; Activate cloak on CloakHarassWorkers if unit can cloak and has energy >= 25
   (when (eq? our-action 'CloakHarassWorkers)
@@ -3279,15 +3268,23 @@
       (set-tactical-sim-unit-cloaked?! a #t)))
 
   ;; Decrement reinforcement ETAs and weapon cooldowns
-  (for ([u (in-list (append sim-allies sim-enemies))])
+  (define (tick-unit-cooldowns! u)
     (when (> (tactical-sim-unit-eta-sec u) 0.0)
       (set-tactical-sim-unit-eta-sec! u (max 0.0 (- (tactical-sim-unit-eta-sec u) dt))))
     (when (> (tactical-sim-unit-weapon-cooldown u) 0.0)
       (set-tactical-sim-unit-weapon-cooldown! u (max 0.0 (- (tactical-sim-unit-weapon-cooldown u) dt)))))
+  (for-each tick-unit-cooldowns! sim-allies)
+  (for-each tick-unit-cooldowns! sim-enemies)
 
   ;; Oracle Stasis Ward hazard penalty: penalize CommitFocusFire / KiteForwardChase when an enemy
   ;; stasis trap is within 4.5 tiles of friendly short-range units, rewarding StutterKiteBack / FlankSurround
-  (when (not (null? enemy-stasis-pts))
+  (when (and (memq our-action '(CommitFocusFire KiteForwardChase HoldChoke))
+             (or (for/or ([e (in-list sim-enemies)])
+                   (and (> (tactical-sim-unit-hp e) 0.0)
+                        (memq (tactical-sim-unit-type e) '(oracle-stasis-trap stasis-ward))))
+                 (for/or ([eb (in-list (tactical-arena-enemy-structures arena))])
+                   (and (hash? eb)
+                        (memq (hash-ref eb 'type #f) '(oracle-stasis-trap stasis-ward))))))
     (for ([a (in-list sim-allies)]
           #:when (and (> (tactical-sim-unit-hp a) 0.0)
                       (not (tactical-sim-unit-flying? a))
@@ -3295,10 +3292,18 @@
       (define ax (tactical-sim-unit-x a))
       (define ay (tactical-sim-unit-y a))
       (define near-trap?
-        (ormap (lambda (pt)
-                 (<= (dist2d ax ay (car pt) (cdr pt)) 4.5))
-               enemy-stasis-pts))
-      (when (and near-trap? (memq our-action '(CommitFocusFire KiteForwardChase HoldChoke)))
+        (or (for/or ([e (in-list sim-enemies)])
+              (and (> (tactical-sim-unit-hp e) 0.0)
+                   (memq (tactical-sim-unit-type e) '(oracle-stasis-trap stasis-ward))
+                   (<= (dist2d ax ay (tactical-sim-unit-x e) (tactical-sim-unit-y e)) 4.5)))
+            (for/or ([eb (in-list (tactical-arena-enemy-structures arena))])
+              (and (hash? eb)
+                   (memq (hash-ref eb 'type #f) '(oracle-stasis-trap stasis-ward))
+                   (<= (dist2d ax ay
+                               (exact->inexact (hash-ref eb 'x 999.0))
+                               (exact->inexact (hash-ref eb 'y 999.0)))
+                       4.5)))))
+      (when near-trap?
         (set-tactical-sim-unit-hp! a (max 1.0 (- (tactical-sim-unit-hp a) (* 18.0 dt)))))))
 
   ;; Step movement & weapon fire for one side against the other

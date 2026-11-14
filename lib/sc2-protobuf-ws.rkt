@@ -573,10 +573,12 @@
           (loop rest acc)])])))
 
 (define (protobuf-fields->hash fields)
-  (define h (make-hash))
+  (define h (make-hasheqv))
   (for ([entry (in-list fields)])
     (match-define (list fnum wtype val) entry)
-    (hash-update! h fnum (lambda (prev) (append prev (list (cons wtype val)))) '()))
+    (hash-update! h fnum (lambda (prev) (cons (cons wtype val) prev)) '()))
+  (for ([(k v) (in-hash h)])
+    (hash-set! h k (reverse v)))
   h)
 
 (define (field-first-varint fields target-fnum [default #f])
@@ -1510,11 +1512,35 @@
   (match-define (list sym id prim?) entry)
   (register-id-pair! SC2-EFFECT-SYM->ID SC2-EFFECT-ID->SYM sym id #:primary? prim?))
 
+(define ABILITY-CACHE-MISS (gensym 'ability-cache-miss))
+(define NORMALIZE-SYM-CACHE (make-hasheq))
+(define TRAIN-ABILITY-CACHE (make-hasheq))
+(define BUILD-ABILITY-CACHE (make-hasheq))
+(define RESEARCH-ABILITY-CACHE (make-hasheq))
+(define MORPH-ABILITY-CACHE (make-hasheq))
+(define SPELL-ABILITY-CACHE (make-hasheq))
+
+(define-syntax-rule (with-symbol-cache cache key-expr body ...)
+  (let ([k key-expr])
+    (if (symbol? k)
+        (let ([cached (hash-ref cache k ABILITY-CACHE-MISS)])
+          (if (eq? cached ABILITY-CACHE-MISS)
+              (let ([res (let () body ...)])
+                (hash-set! cache k res)
+                res)
+              cached))
+        (let () body ...))))
+
 (define (normalize-sc2-name->symbol v)
   (cond
     [(symbol? v)
-     (string->symbol
-      (string-replace (string-downcase (symbol->string v)) "_" "-"))]
+     (let ([cached (hash-ref NORMALIZE-SYM-CACHE v ABILITY-CACHE-MISS)])
+       (if (eq? cached ABILITY-CACHE-MISS)
+           (let ([res (string->symbol
+                       (string-replace (string-downcase (symbol->string v)) "_" "-"))])
+             (hash-set! NORMALIZE-SYM-CACHE v res)
+             res)
+           cached))]
     [(string? v)
      (string->symbol
       (string-replace (string-downcase (string-trim v)) "_" "-"))]
@@ -1533,39 +1559,44 @@
   (hash-ref SC2-ABILITY-ID->SYM id default))
 
 (define (train-symbol->ability-id unit-sym)
-  (define norm (normalize-sc2-name->symbol unit-sym))
-  (define prefixed (string->symbol (format "train-~a" norm)))
-  (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
-      (hash-ref SC2-ABILITY-SYM->ID norm #f)
-      (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "morph-~a" norm)) #f)))
+  (with-symbol-cache TRAIN-ABILITY-CACHE unit-sym
+    (define norm (normalize-sc2-name->symbol unit-sym))
+    (define prefixed (string->symbol (format "train-~a" norm)))
+    (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
+        (hash-ref SC2-ABILITY-SYM->ID norm #f)
+        (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "morph-~a" norm)) #f))))
 
 (define (build-symbol->ability-id bldg-sym)
-  (define norm (normalize-sc2-name->symbol bldg-sym))
-  (define prefixed (string->symbol (format "build-~a" norm)))
-  (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
-      (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "morph-~a" norm)) #f)
-      (hash-ref SC2-ABILITY-SYM->ID norm #f)))
+  (with-symbol-cache BUILD-ABILITY-CACHE bldg-sym
+    (define norm (normalize-sc2-name->symbol bldg-sym))
+    (define prefixed (string->symbol (format "build-~a" norm)))
+    (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
+        (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "morph-~a" norm)) #f)
+        (hash-ref SC2-ABILITY-SYM->ID norm #f))))
 
 (define (research-symbol->ability-id upg-sym)
-  (define norm (normalize-sc2-name->symbol upg-sym))
-  (define prefixed (string->symbol (format "research-~a" norm)))
-  (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
-      (hash-ref SC2-ABILITY-SYM->ID norm #f)))
+  (with-symbol-cache RESEARCH-ABILITY-CACHE upg-sym
+    (define norm (normalize-sc2-name->symbol upg-sym))
+    (define prefixed (string->symbol (format "research-~a" norm)))
+    (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
+        (hash-ref SC2-ABILITY-SYM->ID norm #f))))
 
 (define (morph-symbol->ability-id target-sym)
-  (define norm (normalize-sc2-name->symbol target-sym))
-  (cond
-    [(memq norm '(lurker-den lurker-den-mp)) 1163]
-    [else
-     (define prefixed (string->symbol (format "morph-~a" norm)))
-     (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
-         (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "build-~a" norm)) #f)
-         (hash-ref SC2-ABILITY-SYM->ID norm #f))]))
+  (with-symbol-cache MORPH-ABILITY-CACHE target-sym
+    (define norm (normalize-sc2-name->symbol target-sym))
+    (cond
+      [(memq norm '(lurker-den lurker-den-mp)) 1163]
+      [else
+       (define prefixed (string->symbol (format "morph-~a" norm)))
+       (or (hash-ref SC2-ABILITY-SYM->ID prefixed #f)
+           (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "build-~a" norm)) #f)
+           (hash-ref SC2-ABILITY-SYM->ID norm #f))])))
 
 (define (spell-symbol->ability-id spell-sym)
-  (define norm (normalize-sc2-name->symbol spell-sym))
-  (or (hash-ref SC2-ABILITY-SYM->ID norm #f)
-      (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "effect-~a" norm)) #f)))
+  (with-symbol-cache SPELL-ABILITY-CACHE spell-sym
+    (define norm (normalize-sc2-name->symbol spell-sym))
+    (or (hash-ref SC2-ABILITY-SYM->ID norm #f)
+        (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "effect-~a" norm)) #f))))
 
 (define (upgrade-symbol->sc2-id upg-sym [default 0])
   (hash-ref SC2-UPGRADE-SYM->ID (normalize-sc2-name->symbol upg-sym) default))
@@ -2724,7 +2755,13 @@
       (define name (sc2-data-entry-name e))
       (when (and (> id 0) (not (string=? name "")))
         (register-id-pair! SC2-EFFECT-SYM->ID SC2-EFFECT-ID->SYM
-                           (normalize-sc2-name->symbol name) id #:primary? #f)))))
+                           (normalize-sc2-name->symbol name) id #:primary? #f)))
+    (hash-clear! NORMALIZE-SYM-CACHE)
+    (hash-clear! TRAIN-ABILITY-CACHE)
+    (hash-clear! BUILD-ABILITY-CACHE)
+    (hash-clear! RESEARCH-ABILITY-CACHE)
+    (hash-clear! MORPH-ABILITY-CACHE)
+    (hash-clear! SPELL-ABILITY-CACHE)))
 
 (define (decode-sc2-response bstr)
   (define fields (decode-protobuf-message bstr))
@@ -3783,20 +3820,34 @@
                         'height-ref (lambda (ix iy) (sc2-grid-ref thg ix iy))))))))
 
   ;; Filter out DisplayType.Placeholder (= 4) ghosts whose unset build_progress defaults to 1.0!
-  (define self-units
-    (filter (lambda (u) (and (= (sc2-unit-alliance u) 1)
-                             (not (= (sc2-unit-display-type u) 4))))
-            units))
-  (define enemy-all
-    (filter (lambda (u) (and (= (sc2-unit-alliance u) 4)
-                             (not (= (sc2-unit-display-type u) 4))))
-            units))
-  (define neutral-all (filter (lambda (u) (= (sc2-unit-alliance u) 3)) units))
+  (define-values (self-units enemy-all neutral-all)
+    (let-values ([(su ea na)
+                  (for/fold ([su '()] [ea '()] [na '()])
+                            ([u (in-list units)])
+                    (define al (sc2-unit-alliance u))
+                    (cond
+                      [(and (= al 1) (not (= (sc2-unit-display-type u) 4)))
+                       (values (cons u su) ea na)]
+                      [(and (= al 4) (not (= (sc2-unit-display-type u) 4)))
+                       (values su (cons u ea) na)]
+                      [(= al 3)
+                       (values su ea (cons u na))]
+                      [else
+                       (values su ea na)]))])
+      (values (reverse su) (reverse ea) (reverse na))))
 
-  (define mineral-fields (filter sc2-unit-is-mineral-field? neutral-all))
-  (define live-resource-units
-    (filter (lambda (u) (or (sc2-unit-is-mineral-field? u) (sc2-unit-is-vespene-geyser? u)))
-            neutral-all))
+  (define-values (mineral-fields live-resource-units)
+    (let-values ([(mf lru)
+                  (for/fold ([mf '()] [lru '()])
+                            ([u (in-list neutral-all)])
+                    (cond
+                      [(sc2-unit-is-mineral-field? u)
+                       (values (cons u mf) (cons u lru))]
+                      [(sc2-unit-is-vespene-geyser? u)
+                       (values mf (cons u lru))]
+                      [else
+                       (values mf lru)]))])
+      (values (reverse mf) (reverse lru))))
   (define solved-bases
     (if defer-expansions?
         '()
@@ -4148,6 +4199,7 @@
                      'y ty
                      'z wz
                      'hp SC2-PYLON-HULL-MAX-HP
+                     'max-hp (max 500 SC2-PYLON-HULL-MAX-HP)
                      'hp-pct 1.0
                      'build-progress SC2-IN-TRANSIT-BUILD-PROGRESS
                      'vespene-contents 2250
@@ -4350,12 +4402,18 @@
                                         enemy-x enemy-y
                                         enemy-nat-x enemy-nat-y
                                         enemy-third-x enemy-third-y)))
+      (define eb-hp (max 1 (exact-round (sc2-unit-health eb))))
+      (define eb-raw-max (exact-round (sc2-unit-health-max eb)))
+      (define eb-max-hp (if (> eb-raw-max 0) eb-raw-max (max 500 eb-hp)))
+      (define eb-hp-pct (max 0.0 (min 1.0 (/ (exact->inexact eb-hp) (exact->inexact eb-max-hp)))))
       (hash 'id (sc2-unit-tag eb)
             'type btype
             'x ebx
             'y eby
             'z (sc2-point3d-z p)
-            'hp (max 1 (exact-round (sc2-unit-health eb)))
+            'hp eb-hp
+            'max-hp eb-max-hp
+            'hp-pct eb-hp-pct
             'build-progress (max 0.0 (min 1.0 (sc2-unit-build-progress eb)))
             'display-type disp-type
             'snapshot? (not (= disp-type 1))
@@ -4563,16 +4621,22 @@
     (for/sum ([b (in-list in-transit-bldg-records)])
       (sc2-gas-cost (hash-ref b 'type 'pylon) 0)))
 
-  (define supply-cap (min SC2-MAX-SUPPLY (max 0 (sc2-player-common-food-cap pc))))
-  (define supply-used (max 0 (sc2-player-common-food-used pc)))
+  (define clean-loop
+    (if (exact-integer? cur-loop)
+        (max 0 cur-loop)
+        (max 0 (inexact->exact (floor cur-loop)))))
+  (define clean-minerals (max 0 (exact-round (- (sc2-player-common-minerals pc) in-transit-min-cost))))
+  (define clean-gas (max 0 (exact-round (- (sc2-player-common-vespene pc) in-transit-gas-cost))))
+  (define supply-cap (min SC2-MAX-SUPPLY (max 0 (exact-round (sc2-player-common-food-cap pc)))))
+  (define supply-used (max 0 (exact-round (sc2-player-common-food-used pc))))
   (define supply-left (max 0 (- supply-cap supply-used)))
 
-  (hash 'frame cur-loop
+  (hash 'frame clean-loop
         'race actual-race
         'opponent-requested-race opponent-requested-race
         'map-grids map-grids
-        'minerals (max 0 (- (sc2-player-common-minerals pc) in-transit-min-cost))
-        'gas (max 0 (- (sc2-player-common-vespene pc) in-transit-gas-cost))
+        'minerals clean-minerals
+        'gas clean-gas
         'supply-used supply-used
         'supply-cap supply-cap
         'supply-left supply-left
@@ -4592,6 +4656,10 @@
         'enemy-base (list enemy-x enemy-y)
         'enemy-natural-x enemy-nat-x
         'enemy-natural-y enemy-nat-y
+        'enemy-expand-x enemy-nat-x
+        'enemy-exp-x enemy-nat-x
+        'enemy-expand-y enemy-nat-y
+        'enemy-exp-y enemy-nat-y
         'enemy-third-x enemy-third-x
         'enemy-third-y enemy-third-y
         'enemy-fourth-x enemy-fourth-x
@@ -4620,10 +4688,14 @@
         'ideal-gas-harvesters ideal-gas-harvesters
         'busy-facilities busy-facilities
         'busy-townhalls busy-townhalls
-        'army-supply (max 0 (sc2-player-common-food-army pc))
+        'enemy-workers-killed 0
+        'visible-sectors '(0 1 2 3)
+        'nuke-alert #f
+        'army-supply (max 0 (exact-round (sc2-player-common-food-army pc)))
         'power-placement-failed?
         (let ([fl (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP)])
-          (and (>= fl 0) (<= (- cur-loop fl) 96)))))
+          (and (>= fl 0) (<= (- cur-loop fl) 96)))
+        '__sanitized? #t))
 
 (define (sc2-observation->frame-state-sexp obs
                                            #:game-info [game-info #f]

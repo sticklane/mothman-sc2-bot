@@ -172,6 +172,9 @@
     interceptor auto-turret point-defense-drone raven-repair-drone
     adept-phase-shift disruptor-phased))
 
+(define WORKER-AND-NONCOMBAT-SYM-SET
+  (list->seteq WORKER-AND-NONCOMBAT-SYMS))
+
 (define PRO-CHRONO-11-STRUCTURES
   '(robotics-facility
     stargate
@@ -365,6 +368,9 @@
     adept-phase-shift disruptor-phased kd8-charge parasitic-bomb-dummy
     oracle-stasis-trap stasis-ward force-field broodling-escort))
 
+(define NON-COMBAT-AND-SCOUT-ENEMY-SYM-SET
+  (list->seteq NON-COMBAT-AND-SCOUT-ENEMY-SYMS))
+
 (define NON-WORKER-PULL-ENEMY-UNIT-SYMS
   (append NON-COMBAT-AND-SCOUT-ENEMY-SYMS
           '(mutalisk corruptor brood-lord broodlord viper
@@ -373,18 +379,112 @@
             viking viking-fighter medivac liberator liberator-ag banshee raven
             battlecruiser point-defense-drone)))
 
+(define NON-WORKER-PULL-ENEMY-UNIT-SYM-SET
+  (list->seteq NON-WORKER-PULL-ENEMY-UNIT-SYMS))
+
 (define (combat-unit-record? u)
   (and (hash? u)
        (let ([t (unit-type-sym u)])
-         (and (not (memq t WORKER-AND-NONCOMBAT-SYMS))
-              (not (memq t NON-COMBAT-AND-SCOUT-ENEMY-SYMS))
+         (and (not (set-member? WORKER-AND-NONCOMBAT-SYM-SET t))
+              (not (set-member? NON-COMBAT-AND-SCOUT-ENEMY-SYM-SET t))
               (not (sc2-non-combat-or-summon-sym? t))
               (not (eq? (hash-ref u 'is-hallucination #f) #t))
               (not (eq? (hash-ref u 'hallucination #f) #t))
               (not (eq? (hash-ref u 'hallucination? #f) #t))))))
 
+;; Private sentinel distinguishing an absent optional hash key from an explicit #f value.
+(define SANITIZE-MISSING (string->uninterned-symbol "sanitize-missing"))
+
+(define (sanitized-pos-int? v)
+  (and (exact-integer? v) (>= v 1)))
+
+(define (sanitized-nonneg-int? v)
+  (and (exact-integer? v) (>= v 0)))
+
+(define (sanitized-nonneg-inexact? v)
+  (and (finite-real? v)
+       (inexact? v)
+       (>= v 0.0)))
+
+(define (sanitized-unit-interval? v)
+  (and (sanitized-nonneg-inexact? v) (<= v 1.0)))
+
+(define (sanitized-tile-coord? v)
+  (if (exact-integer? v)
+      (and (>= v 0) (<= v 256))
+      (and (sanitized-nonneg-inexact? v)
+           (<= v 256.0)
+           (= v (/ (round (* v 2.0)) 2.0)))))
+
+(define (sanitized-opt-key? h k pred?)
+  (define v (hash-ref h k SANITIZE-MISSING))
+  (or (eq? v SANITIZE-MISSING) (pred? v)))
+
+;; Fast-path check: returns #t when immutable unit hash `u` already satisfies all sanitized invariants.
+(define (already-sanitized-unit-record? u)
+  (and (hash? u)
+       (immutable? u)
+       (sanitized-nonneg-int? (hash-ref u 'id #f))
+       (symbol? (hash-ref u 'type #f))
+       (sanitized-tile-coord? (hash-ref u 'x #f))
+       (sanitized-tile-coord? (hash-ref u 'y #f))
+       (sanitized-pos-int? (hash-ref u 'hp #f))
+       (sanitized-opt-key? u 'max-hp sanitized-pos-int?)
+       (sanitized-opt-key? u 'hp-pct sanitized-unit-interval?)
+       (sanitized-opt-key? u 'shield sanitized-nonneg-int?)
+       (sanitized-opt-key? u 'energy sanitized-nonneg-int?)
+       (sanitized-opt-key? u 'dps sanitized-nonneg-int?)
+       (sanitized-opt-key? u 'z exact-integer?)
+       (sanitized-opt-key? u 'speed sanitized-nonneg-inexact?)
+       (sanitized-opt-key? u 'atk-upg sanitized-nonneg-int?)
+       (sanitized-opt-key? u 'arm-upg sanitized-nonneg-int?)
+       (sanitized-opt-key? u 'shd-upg sanitized-nonneg-int?)
+       (sanitized-opt-key? u 'damage-rate-ratio sanitized-nonneg-inexact?)
+       (sanitized-opt-key? u 'damage-taken-multiplier sanitized-nonneg-inexact?)))
+
+;; Fast-path check: returns #t when immutable building hash `b` already satisfies unit + building invariants.
+(define (already-sanitized-bldg-record? b)
+  (and (already-sanitized-unit-record? b)
+       (sanitized-pos-int? (hash-ref b 'max-hp #f))
+       (sanitized-unit-interval? (hash-ref b 'hp-pct #f))
+       (sanitized-unit-interval? (hash-ref b 'build-progress #f))
+       (sanitized-opt-key? b 'ideal-harvesters sanitized-nonneg-int?)
+       (sanitized-opt-key? b 'assigned-harvesters sanitized-nonneg-int?)))
+
+(define (sanitize-opt-nonneg-0 v) (safe-nonneg-int v 0))
+(define (sanitize-opt-nonneg-12 v) (safe-nonneg-int v 12))
+(define (sanitize-opt-nonneg-16 v) (safe-nonneg-int v 16))
+(define (sanitize-opt-exact-10 v) (safe-exact-int v 10))
+(define (sanitize-opt-unit-interval-1 v) (max 0.0 (min 1.0 (safe-finite-real v 1.0))))
+(define (sanitize-opt-nonneg-real-1 v) (max 0.0 (safe-finite-real v 1.0)))
+(define (sanitize-opt-nonneg-real-3 v) (max 0.0 (safe-finite-real v 3.0)))
+
+(define UNIT-OPT-SANITIZERS
+  (list (cons 'hp-pct sanitize-opt-unit-interval-1)
+        (cons 'shield sanitize-opt-nonneg-0)
+        (cons 'energy sanitize-opt-nonneg-0)
+        (cons 'dps sanitize-opt-nonneg-12)
+        (cons 'z sanitize-opt-exact-10)
+        (cons 'speed sanitize-opt-nonneg-real-3)
+        (cons 'atk-upg sanitize-opt-nonneg-0)
+        (cons 'arm-upg sanitize-opt-nonneg-0)
+        (cons 'shd-upg sanitize-opt-nonneg-0)
+        (cons 'damage-rate-ratio sanitize-opt-nonneg-real-1)
+        (cons 'damage-taken-multiplier sanitize-opt-nonneg-real-1)))
+
+;; Updates optional key `k` in `h` only when present and changed after running `sanitizer`.
+(define (sanitize-optional-key h k sanitizer)
+  (define old-v (hash-ref h k SANITIZE-MISSING))
+  (if (eq? old-v SANITIZE-MISSING)
+      h
+      (let ([new-v (sanitizer old-v)])
+        (if (equal? new-v old-v)
+            h
+            (hash-set h k new-v)))))
+
 (define (sanitize-unit-record u [default-x 32.5] [default-y 32.5])
   (cond
+    [(already-sanitized-unit-record? u) u]
     [(hash? u)
      (define base-h (if (immutable? u) u (for/hash ([(k v) (in-hash u)]) (values k v))))
      (define id (safe-nonneg-int (hash-ref base-h 'id 101) 101))
@@ -392,61 +492,29 @@
      (define x (safe-coord (hash-ref base-h 'x default-x) default-x))
      (define y (safe-coord (hash-ref base-h 'y default-y) default-y))
      (define hp (max 1 (safe-nonneg-int (hash-ref base-h 'hp 45) 45)))
-     (define h1 (hash-set* base-h 'id id 'type utype 'x x 'y y 'hp hp))
+     (define h1
+       (if (and (equal? id (hash-ref base-h 'id SANITIZE-MISSING))
+                (equal? utype (hash-ref base-h 'type SANITIZE-MISSING))
+                (equal? x (hash-ref base-h 'x SANITIZE-MISSING))
+                (equal? y (hash-ref base-h 'y SANITIZE-MISSING))
+                (equal? hp (hash-ref base-h 'hp SANITIZE-MISSING)))
+           base-h
+           (hash-set* base-h 'id id 'type utype 'x x 'y y 'hp hp)))
      (define h2
-       (if (hash-has-key? h1 'max-hp)
-           (hash-set h1 'max-hp (max 1 (safe-nonneg-int (hash-ref h1 'max-hp hp) hp)))
-           h1))
-     (define h3
-       (if (hash-has-key? h2 'hp-pct)
-           (hash-set h2 'hp-pct (max 0.0 (min 1.0 (safe-finite-real (hash-ref h2 'hp-pct 1.0) 1.0))))
-           h2))
-     (define h4
-       (if (hash-has-key? h3 'shield)
-           (hash-set h3 'shield (safe-nonneg-int (hash-ref h3 'shield 0) 0))
-           h3))
-     (define h5
-       (if (hash-has-key? h4 'energy)
-           (hash-set h4 'energy (safe-nonneg-int (hash-ref h4 'energy 0) 0))
-           h4))
-     (define h6
-       (if (hash-has-key? h5 'dps)
-           (hash-set h5 'dps (safe-nonneg-int (hash-ref h5 'dps 12) 12))
-           h5))
-     (define h7
-       (if (hash-has-key? h6 'z)
-           (hash-set h6 'z (safe-exact-int (hash-ref h6 'z 10) 10))
-           h6))
-     (define h8
-       (if (hash-has-key? h7 'speed)
-           (hash-set h7 'speed (max 0.0 (safe-finite-real (hash-ref h7 'speed 3.0) 3.0)))
-           h7))
-     (define h9
-       (if (hash-has-key? h8 'atk-upg)
-           (hash-set h8 'atk-upg (safe-nonneg-int (hash-ref h8 'atk-upg 0) 0))
-           h8))
-     (define h10
-       (if (hash-has-key? h9 'arm-upg)
-           (hash-set h9 'arm-upg (safe-nonneg-int (hash-ref h9 'arm-upg 0) 0))
-           h9))
-     (define h11
-       (if (hash-has-key? h10 'shd-upg)
-           (hash-set h10 'shd-upg (safe-nonneg-int (hash-ref h10 'shd-upg 0) 0))
-           h10))
-     (define h12
-       (if (hash-has-key? h11 'damage-rate-ratio)
-           (hash-set h11 'damage-rate-ratio (max 0.0 (safe-finite-real (hash-ref h11 'damage-rate-ratio 1.0) 1.0)))
-           h11))
-     (define h13
-       (if (hash-has-key? h12 'damage-taken-multiplier)
-           (hash-set h12 'damage-taken-multiplier (max 0.0 (safe-finite-real (hash-ref h12 'damage-taken-multiplier 1.0) 1.0)))
-           h12))
-     h13]
+       (let ([old-mhp (hash-ref h1 'max-hp SANITIZE-MISSING)])
+         (if (eq? old-mhp SANITIZE-MISSING)
+             h1
+             (let ([new-mhp (max 1 (safe-nonneg-int old-mhp hp))])
+               (if (equal? new-mhp old-mhp) h1 (hash-set h1 'max-hp new-mhp))))))
+     (for/fold ([acc h2])
+               ([spec (in-list UNIT-OPT-SANITIZERS)])
+       (sanitize-optional-key acc (car spec) (cdr spec)))]
     [else
      (hash 'id 101 'type 'zergling 'x default-x 'y default-y 'hp 35)]))
 
 (define (sanitize-bldg-record b [default-x 32.5] [default-y 32.5])
   (cond
+    [(already-sanitized-bldg-record? b) b]
     [(hash? b)
      (define u-san (sanitize-unit-record b default-x default-y))
      (define hp (hash-ref u-san 'hp 500))
@@ -456,19 +524,16 @@
      (define prog
        (max 0.0 (min 1.0 (safe-finite-real (hash-ref u-san 'build-progress (if (hash-ref u-san 'under-construction #f) 0.5 1.0)) 1.0))))
      (define b1
-       (hash-set* u-san
-                  'max-hp max-hp
-                  'hp-pct hp-pct
-                  'build-progress prog))
-     (define b2
-       (if (hash-has-key? b1 'ideal-harvesters)
-           (hash-set b1 'ideal-harvesters (safe-nonneg-int (hash-ref b1 'ideal-harvesters 16) 16))
-           b1))
-     (define b3
-       (if (hash-has-key? b2 'assigned-harvesters)
-           (hash-set b2 'assigned-harvesters (safe-nonneg-int (hash-ref b2 'assigned-harvesters 16) 16))
-           b2))
-     b3]
+       (if (and (equal? max-hp (hash-ref u-san 'max-hp SANITIZE-MISSING))
+                (equal? hp-pct (hash-ref u-san 'hp-pct SANITIZE-MISSING))
+                (equal? prog (hash-ref u-san 'build-progress SANITIZE-MISSING)))
+           u-san
+           (hash-set* u-san
+                      'max-hp max-hp
+                      'hp-pct hp-pct
+                      'build-progress prog)))
+     (define b2 (sanitize-optional-key b1 'ideal-harvesters sanitize-opt-nonneg-16))
+     (sanitize-optional-key b2 'assigned-harvesters sanitize-opt-nonneg-16)]
     [else
      (hash 'id 201 'type 'hatchery 'x default-x 'y default-y 'hp 1500 'max-hp 1500 'hp-pct 1.0 'build-progress 1.0)]))
 
@@ -745,7 +810,7 @@
                        [ex (safe-coord (hash-ref e 'x nat-x) nat-x)]
                        [ey (safe-coord (hash-ref e 'y nat-y) nat-y)])
                    (define scout-or-dummy?
-                     (or (memq t NON-COMBAT-AND-SCOUT-ENEMY-SYMS)
+                     (or (set-member? NON-COMBAT-AND-SCOUT-ENEMY-SYM-SET t)
                          (sc2-non-combat-or-summon-sym? t)
                          (eq? (hash-ref e 'changeling? #f) #t)
                          (eq? (hash-ref e 'is-hallucination #f) #t)
@@ -1132,7 +1197,7 @@
           (ormap (lambda (e)
                    (define et (unit-type-sym e))
                    (and (sc2-enemy-unit-targetable? et)
-                        (not (memq et NON-COMBAT-AND-SCOUT-ENEMY-SYMS))
+                        (not (set-member? NON-COMBAT-AND-SCOUT-ENEMY-SYM-SET et))
                         (<= (dist2d bx by (hash-ref e 'x 9999) (hash-ref e 'y 9999))
                             SC2-BLDG-UNDER-ATTACK-RADIUS)))
                  enemy-units)))
@@ -1279,7 +1344,7 @@
 
   (define ground-enemy-units-for-cheese
     (filter (lambda (e)
-              (and (not (memq (unit-type-sym e) NON-WORKER-PULL-ENEMY-UNIT-SYMS))
+              (and (not (set-member? NON-WORKER-PULL-ENEMY-UNIT-SYM-SET (unit-type-sym e)))
                    (not (eq? (hash-ref e 'changeling? #f) #t))
                    (not (eq? (hash-ref e 'hallucination? #f) #t))
                    (not (eq? (hash-ref e 'hallucination #f) #t))
@@ -10446,6 +10511,8 @@
     (if (and (max-supply-plan? cur-msp) (max-supply-plan-active? cur-msp))
         (max-supply-plan-combined-actions cur-msp)
         '()))
+  (define accepted-set (list->set accepted))
+  (define msp-action-set (and (pair? msp-set) (list->set msp-set)))
   (define preserved-tactical-directives
     (append
      (filter (lambda (a)
@@ -10468,8 +10535,8 @@
                              (>= (length a) 3)
                              (memq (third a)
                                    '(inject-larva battery-overcharge lift)))
-                        (not (not (member a msp-set))))
-                    (not (member a accepted))))
+                        (and msp-action-set (set-member? msp-action-set a)))
+                    (not (set-member? accepted-set a))))
              econ-acts)
      (filter (lambda (a)
                (and (pair? a)
@@ -10493,7 +10560,7 @@
                             infestor-burrow-cast
                             blind-skillshot-shimmer
                             emergency-detector-response))
-                    (not (member a accepted))))
+                    (not (set-member? accepted-set a))))
              tactic-acts)))
 
   (define cortex (live-bot-runtime-cortex rt))

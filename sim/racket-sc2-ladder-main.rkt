@@ -29,6 +29,7 @@
          racket/system
          racket/tcp
          json
+         "../lib/sc2-common.rkt"
          "../lib/bot-runtime.rkt"
          "../lib/sc2-protobuf-ws.rkt")
 
@@ -857,11 +858,11 @@
                 (set! peak-army-supply (max peak-army-supply (sc2-player-common-food-army pc)))
                 (set! peak-bases
                       (max peak-bases
-                           (length (filter sc2-unit-is-townhall?
-                                           (filter (lambda (u)
-                                                     (and (= (sc2-unit-alliance u) 1)
-                                                          (not (= (sc2-unit-display-type u) 4))))
-                                                   (sc2-observation-units obs))))))
+                           (for/sum ([u (in-list (sc2-observation-units obs))]
+                                     #:when (and (= (sc2-unit-alliance u) 1)
+                                                 (not (= (sc2-unit-display-type u) 4))
+                                                 (sc2-unit-is-townhall? u)))
+                             1)))
 
                 (define-values (raw-cmds prio-line cur-saving-for t-rt-1 t-tr-1)
                   (cond
@@ -1075,7 +1076,7 @@
                   (set! priority-logs-emitted (add1 priority-logs-emitted))
                   (fprintf (current-error-port) "~a step_ms=~a\n"
                            prio-line
-                           (/ (round (* 100.0 step-ms)) 100.0))
+                           (round2 step-ms))
                   (flush-output (current-error-port)))
 
                 (when (not (null? raw-cmds))
@@ -1103,7 +1104,6 @@
 
       (define sorted-step-ms (sort step-total-ms-list <))
       (define n-steps (max 1 (length sorted-step-ms)))
-      (define (round2 v) (/ (round (* 100.0 v)) 100.0))
       (define avg-step-ms (round2 (/ (apply + sorted-step-ms) n-steps)))
       (define p95-step-ms
         (if (null? sorted-step-ms)
