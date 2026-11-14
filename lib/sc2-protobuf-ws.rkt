@@ -8010,18 +8010,47 @@
            [(memq norm '(gateway forge cybernetics-core photon-cannon shield-battery
                          twilight-council robotics-facility robotics-bay robotics-support-bay
                          stargate templar-archive templar-archives dark-shrine fleet-beacon))
-            (define-values (px py) (pylon-power-anchor req-x req-y))
-            (define place-pt
-              (find-verified-building-placement ws-conn ab-id px py units
+            (define pylon-anchors (pylon-power-anchors req-x req-y))
+            (define-values (px py)
+              (values (caar pylon-anchors) (cdar pylon-anchors)))
+            (define req-powered?
+              (or (for/or ([ps (in-list power-sources)])
+                    (define p (sc2-power-source-pos ps))
+                    (<= (pt-dist req-x req-y (sc2-point3d-x p) (sc2-point3d-y p))
+                        (max 6.2 (sc2-power-source-radius ps))))
+                  (for/or ([ap (in-list pylon-anchors)])
+                    (<= (pt-dist req-x req-y (car ap) (cdr ap)) 6.2))))
+            (define primary-x (if req-powered? req-x px))
+            (define primary-y (if req-powered? req-y py))
+            (define eff-anchors
+              (if req-powered?
+                  (remove-duplicates (cons (cons req-x req-y) pylon-anchors))
+                  pylon-anchors))
+            (define place-pt0
+              (find-verified-building-placement ws-conn ab-id primary-x primary-y units
                                                 #:min-spacing 2.0
                                                 #:max-radius 6.5
                                                 #:step 1.0
                                                 #:extra-reserved-points step-reserved-build-pts
-                                                #:anchor-points (pylon-power-anchors req-x req-y)
+                                                #:anchor-points eff-anchors
                                                 #:reserved-aabbs reserved-aabbs
                                                 #:expansion-pads all-expansion-pads
                                                 #:bldg-sym norm
                                                 #:game-info eff-game-info))
+            (define place-pt
+              (or place-pt0
+                  (and req-powered?
+                       (not (and (= req-x px) (= req-y py)))
+                       (find-verified-building-placement ws-conn ab-id px py units
+                                                         #:min-spacing 2.0
+                                                         #:max-radius 6.5
+                                                         #:step 1.0
+                                                         #:extra-reserved-points step-reserved-build-pts
+                                                         #:anchor-points pylon-anchors
+                                                         #:reserved-aabbs reserved-aabbs
+                                                         #:expansion-pads all-expansion-pads
+                                                         #:bldg-sym norm
+                                                         #:game-info eff-game-info))))
             (cond
               [place-pt
                (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
