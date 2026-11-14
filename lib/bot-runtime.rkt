@@ -1558,7 +1558,7 @@
     (define rush-th-pull-rad (if heavy-worker-allin-no-army? 7.0 9.0))
     (define rush-bldg-th-rad (if heavy-worker-allin-no-army? 6.8 9.5))
     (define rush-chase-leash-rad (if heavy-worker-allin-no-army? 8.5 10.5))
-    (define worker-rush-engage-enemies
+    (define primary-engage-enemies
       (if worker-rush-active?
           (filter (lambda (ew)
                     (define ex (hash-ref ew 'x 9999.0))
@@ -1579,13 +1579,70 @@
                                     ally-bldgs))))
                   enemy-rush-workers)
           '()))
+    (unless (null? primary-engage-enemies)
+      (hash-set! rush-def-st 'last-rush-engage-frame frame))
+    (define last-engage-frame (hash-ref rush-def-st 'last-rush-engage-frame -9999))
+    ;; 14-frame hysteresis prevents ping-ponging between fighting and mining when enemy workers
+    ;; step just outside `rush-th-pull-rad` (7.0 tiles).
+    (define in-engage-hysteresis?
+      (and worker-rush-active?
+           (not (null? prev-rush-fighting-wids))
+           (<= (- frame last-engage-frame) 14)))
+    (define worker-rush-engage-enemies
+      (cond
+        [(not (null? primary-engage-enemies)) primary-engage-enemies]
+        [in-engage-hysteresis?
+         (filter (lambda (ew)
+                   (<= (dist-to-owned-townhall
+                        (hash-ref ew 'x 9999.0)
+                        (hash-ref ew 'y 9999.0))
+                       rush-chase-leash-rad))
+                 enemy-rush-workers)]
+        [else '()]))
 
-    ;; 1.1s (24-frame) mineral-walk slide + 3.0s (68-frame) post-slide fighting cooldown for bruised workers.
-    ;; Prevents infinite mineral-walk lock inside a 6-tile mineral line and allows Protoss Probes (7s shield delay)
-    ;; and Terran SCVs (0 HP regen) to rejoin the surround once enemy focus fire switches off them!
+    ;; Mixed Probe+Zealot / worker+combat rush detection near main mineral line
+    (define enemy-combat-near-main
+      (filter (lambda (e)
+                (and (not (memq (unit-type-sym e) '(probe scv drone)))
+                     (or (combat-unit-record? e)
+                         (memq (sc2-canonical-unit-sym (unit-type-sym e))
+                               '(zealot zergling adept stalker marine reaper hellion hellbat roach marauder)))
+                     (let ([ex (hash-ref e 'x 9999.0)]
+                           [ey (hash-ref e 'y 9999.0)])
+                       (or (<= (dist-to-owned-townhall ex ey) 11.0)
+                           (<= (dist-to-mineral-line ex ey) 8.5)))))
+              ground-enemy-units-for-cheese))
+    (define mixed-worker-combat-rush?
+      (and (not (null? enemy-combat-near-main))
+           (not (null? enemy-rush-workers))))
+    (define safe-evac-mp
+      (if (and (not (null? enemy-combat-near-main))
+               (not (null? base-mineral-patches)))
+          (argmax (lambda (mp)
+                    (define mpx (hash-ref mp 'x base-x))
+                    (define mpy (hash-ref mp 'y base-y))
+                    (for/fold ([best +inf.0]) ([ec (in-list enemy-combat-near-main)])
+                      (min best (dist2d mpx mpy (hash-ref ec 'x 9999.0) (hash-ref ec 'y 9999.0)))))
+                  base-mineral-patches)
+          far-mp))
+    (define evac-patch-id
+      (if safe-evac-mp
+          (safe-nonneg-int (hash-ref safe-evac-mp 'id 0) 0)
+          far-patch-id))
+    (define evac-px
+      (if safe-evac-mp
+          (safe-coord (hash-ref safe-evac-mp 'x far-px) far-px)
+          far-px))
+    (define evac-py
+      (if safe-evac-mp
+          (safe-coord (hash-ref safe-evac-mp 'y far-py) far-py)
+          far-py))
+
+    ;; 1.1s (24-frame) mineral-walk slide + 21-frame post-slide cooldown (`+45` total) for bruised workers,
+    ;; with `<= 20` EHP (or Probe `shield <= 2` and `hp < 20`) threshold and immediate `<= 10` HP override.
     (define eff-disengage-hp
-      (if (and worker-rush-active? (>= (length enemy-rush-workers) 11))
-          14
+      (if worker-rush-active?
+          20
           SC2-FIGHTING-WORKER-DISENGAGE-HP))
     (define eff-reengage-hp
       (if (and worker-rush-active? (>= (length enemy-rush-workers) 8))
@@ -1603,19 +1660,40 @@
         (ormap (lambda (e)
                  (<= (dist2d wx wy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 6.0))
                ground-enemy-units-for-cheese))
-      (when (and (<= whp eff-disengage-hp)
+      (define probe-shield-depleted?
+        (and worker-rush-active?
+             (eq? (unit-type-sym w) 'probe)
+             (<= (hash-ref w 'shield 0) 2)
+             (< (hash-ref w 'hp 20) 20)))
+      (define needs-disengage?
+        (or (<= whp eff-disengage-hp)
+            probe-shield-depleted?))
+      (when (and needs-disengage?
                  enemy-close?
-                 (>= frame prev-cd-until))
+                 (or (>= frame prev-cd-until)
+                     (and (<= whp 10)
+                          (>= frame prev-dis-until))))
         (set! prev-dis-until (+ frame 24))
-        (set! prev-cd-until  (+ frame 92))
+        (set! prev-cd-until  (+ frame 45))
         (hash-set! rush-def-st wid (cons prev-dis-until prev-cd-until)))
+      (define near-enemy-combat?
+        (and mixed-worker-combat-rush?
+             (ormap (lambda (ec)
+                      (<= (dist2d wx wy (hash-ref ec 'x 9999.0) (hash-ref ec 'y 9999.0)) 3.8))
+                    enemy-combat-near-main)))
+      (define cornered-at-evac?
+        (and (<= (dist2d wx wy evac-px evac-py) 2.0)
+             (<= (for/fold ([best +inf.0]) ([ec (in-list enemy-combat-near-main)])
+                   (min best (dist2d evac-px evac-py (hash-ref ec 'x 9999.0) (hash-ref ec 'y 9999.0))))
+                 3.8)))
       (define disengaging-now?
-        (< frame prev-dis-until))
+        (or (< frame prev-dis-until)
+            (and near-enemy-combat? (not cornered-at-evac?))))
       (when disengaging-now?
         (set! cur-rush-disengaging-wids (cons wid cur-rush-disengaging-wids))
-        (if (> far-patch-id 0)
-            (emit! (list 'mineral-walk wid far-patch-id far-px far-py))
-            (emit! (list 'mineral-walk wid far-px far-py)))))
+        (if (> evac-patch-id 0)
+            (emit! (list 'mineral-walk wid evac-patch-id evac-px evac-py))
+            (emit! (list 'mineral-walk wid evac-px evac-py)))))
 
     (unless (null? worker-rush-engage-enemies)
       (define (dist-to-nearest-engage-enemy wx wy)
@@ -1801,6 +1879,33 @@
                          (hash-ref w 'x base-x)
                          (hash-ref w 'y base-y)))))
 
+        (define (enemy-worker-safe-from-combat? ew)
+          (or (not mixed-worker-combat-rush?)
+              (let ([ex (hash-ref ew 'x cl-x)]
+                    [ey (hash-ref ew 'y cl-y)])
+                (andmap (lambda (ec)
+                          (> (dist2d ex ey (hash-ref ec 'x 9999.0) (hash-ref ec 'y 9999.0)) 2.5))
+                        enemy-combat-near-main))))
+        (define safe-engage-workers
+          (let ([safe (filter enemy-worker-safe-from-combat? worker-rush-engage-enemies)])
+            (if (null? safe) worker-rush-engage-enemies safe)))
+        (define (non-retreating-engage-worker? ew)
+          (define ex (hash-ref ew 'x cl-x))
+          (define ey (hash-ref ew 'y cl-y))
+          (or (<= (dist-to-owned-townhall ex ey) rush-th-pull-rad)
+              (<= (dist-to-mineral-line ex ey) 6.5)
+              (ormap (lambda (b)
+                       (and (hash? b)
+                            (<= (dist-to-owned-townhall
+                                 (hash-ref b 'x base-x)
+                                 (hash-ref b 'y base-y))
+                                rush-bldg-th-rad)
+                            (<= (dist2d ex ey
+                                        (hash-ref b 'x base-x)
+                                        (hash-ref b 'y base-y))
+                                4.5)))
+                     ally-bldgs)))
+
         ;; Pass 1: Immediate melee swing (<= 2.5 tiles normally, <= 3.2 tiles on primary mineral-line focus target in live games), lowest (hp + shield)
         (for ([w (in-list frontline-first)])
           (define wid (hash-ref w 'id 10))
@@ -1820,7 +1925,7 @@
                       (and (> eid 0)
                            (< (hash-ref assigned-target-counts eid 0) (effective-melee-cap ew))
                            (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) reach)))
-                    worker-rush-engage-enemies))
+                    safe-engage-workers))
           (unless (null? melee-cands)
             (define chosen
               (argmin (lambda (ew)
@@ -1834,28 +1939,31 @@
                              (safe-coord (hash-ref chosen 'x cl-x) cl-x)
                              (safe-coord (hash-ref chosen 'y cl-y) cl-y)))))
 
-        ;; Pass 2: In live >= 6-worker brawls, workers outside Pass-1 melee reach use Attack-Move (0, focus-amove-x, focus-amove-y)
-        ;; so they swing immediately on contact and NEVER chase kiting equal-speed bait workers past frontline attackers!
+        ;; Pass 2: Targeted focus-fire within 4.5-6.0 tiles (7.0 for < 6 workers) onto the lowest (hp + shield)
+        ;; non-retreating enemy worker (capped at `effective-chaser-cap`), avoiding blind Attack-Move spread
+        ;; and avoiding pulling Probes into enemy Zealots during mixed rushes.
+        (define pass2-reach (if (>= e-cnt 6) 6.0 7.0))
         (for ([w (in-list frontline-first)]
               #:unless (hash-has-key? worker-assignments (hash-ref w 'id 10)))
           (define wid (hash-ref w 'id 10))
           (define wx (hash-ref w 'x base-x))
           (define wy (hash-ref w 'y base-y))
+          (define raw-local-cands
+            (filter (lambda (ew)
+                      (define eid (hash-ref ew 'id 0))
+                      (and (> eid 0)
+                           (< (hash-ref assigned-target-counts eid 0) (effective-chaser-cap ew))
+                           (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) pass2-reach)))
+                    safe-engage-workers))
           (define local-cands
-            (if (and live-obs-harvesters? (>= e-cnt 6))
-                '()
-                (filter (lambda (ew)
-                          (define eid (hash-ref ew 'id 0))
-                          (and (> eid 0)
-                               (< (hash-ref assigned-target-counts eid 0) (effective-chaser-cap ew))
-                               (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 7.0)))
-                        worker-rush-engage-enemies)))
+            (let ([non-ret (filter non-retreating-engage-worker? raw-local-cands)])
+              (if (null? non-ret) raw-local-cands non-ret)))
           (cond
             [(not (null? local-cands))
              (define chosen
                (argmin (lambda (ew)
-                         (+ (* 2.5 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)))
-                            (* 5.0 (unit-total-hp-and-shield ew))))
+                         (+ (* 5.0 (unit-total-hp-and-shield ew))
+                            (* 2.5 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)))))
                        local-cands))
              (define cid (hash-ref chosen 'id 0))
              (hash-update! assigned-target-counts cid add1 0)
@@ -1863,6 +1971,18 @@
                         (list cid
                               (safe-coord (hash-ref chosen 'x cl-x) cl-x)
                               (safe-coord (hash-ref chosen 'y cl-y) cl-y)))]
+            [mixed-worker-combat-rush?
+             (define safe-fallback
+               (let ([cand (findf (lambda (ew)
+                                    (and (> (hash-ref ew 'id 0) 0)
+                                         (enemy-worker-safe-from-combat? ew)))
+                                  safe-engage-workers)])
+                 cand))
+             (when safe-fallback
+               (hash-set! worker-assignments wid
+                          (list (hash-ref safe-fallback 'id 0)
+                                (safe-coord (hash-ref safe-fallback 'x cl-x) cl-x)
+                                (safe-coord (hash-ref safe-fallback 'y cl-y) cl-y))))]
             [else
              (hash-set! worker-assignments wid (list 0 focus-amove-x focus-amove-y))]))
 
@@ -1886,8 +2006,23 @@
           (unless (null? wids)
             (emit! (list 'pull-workers-attack wids tid (car tc) (cdr tc)))))))
 
-    ;; Immediately snap back to mining any previously-pulled worker (or worker outside `rush-chase-leash-rad`)
-    ;; when enemies kite out of the mineral line or that worker is assigned to keep mining!
+    ;; During the 14-frame hysteresis window, keep previously-pulled defenders (within leash and not disengaging)
+    ;; from immediately snapping back to mining if enemy workers momentarily kite outside `rush-chase-leash-rad`.
+    (when (and (null? worker-rush-engage-enemies)
+               in-engage-hysteresis?)
+      (set! cur-rush-fighting-wids
+            (for/list ([w (in-list non-builder-defense-workers)]
+                       #:when (let ([wid (hash-ref w 'id 10)])
+                                (and (memv wid prev-rush-fighting-wids)
+                                     (not (memv wid cur-rush-disengaging-wids))
+                                     (<= (dist-to-owned-townhall
+                                          (hash-ref w 'x base-x)
+                                          (hash-ref w 'y base-y))
+                                         rush-chase-leash-rad))))
+              (hash-ref w 'id 10))))
+
+    ;; Snap back to mining any previously-pulled worker (or worker outside `rush-chase-leash-rad`)
+    ;; once hysteresis expires or that worker is assigned to keep mining!
     (for ([w (in-list non-builder-defense-workers)])
       (define wid (hash-ref w 'id 10))
       (define wx (hash-ref w 'x base-x))
@@ -2031,11 +2166,24 @@
         [(not (null? enemy-rush-workers)) enemy-rush-workers]
         [else in-base-proxy-structures]))
     (when (not (null? fallback-threats))
-      (define threat (car fallback-threats))
+      (define fallback-worker-threats
+        (filter (lambda (e) (memq (unit-type-sym e) '(probe scv drone))) fallback-threats))
+      (define threat
+        (if (not (null? fallback-worker-threats))
+            (car fallback-worker-threats)
+            (car fallback-threats)))
+      (define threat-is-combat-unit?
+        (and (combat-unit-record? threat)
+             (not (memq (unit-type-sym threat) '(probe scv drone)))))
+      (define skip-suicidal-combat-pull?
+        (and threat-is-combat-unit?
+             (or (not (null? ally-combat-units))
+                 (and live-obs-harvesters?
+                      (eq? (sc2-canonical-unit-sym (unit-type-sym threat)) 'zealot)))))
       (define tx (hash-ref threat 'x (safe-coord (+ base-x 5.0))))
       (define ty (hash-ref threat 'y (safe-coord (+ base-y 5.0))))
       (define drill-patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
-      (unless (null? pull-ids)
+      (unless (or (null? pull-ids) skip-suicidal-combat-pull?)
         (unless worker-pull-emitted-1ab?
           (if live-obs-harvesters?
               (emit! (list 'pull-workers-attack pull-ids (hash-ref threat 'id 0) tx ty))
