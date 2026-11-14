@@ -3531,7 +3531,29 @@
        (unless first-blocked-head
          (set! first-blocked-head g))]))
 
-  (define active-head (or first-ready-head first-blocked-head))
+  (define raw-active-head (or first-ready-head first-blocked-head))
+  ;; Resolve 'train goals whose structure prerequisite has 0 total buildings (e.g. immortal -> robotics-facility)
+  ;; so saving_for / bo-goal-sym points to the missing prerequisite and escrows its resources.
+  (define active-head
+    (if (and (pro-bo-goal? raw-active-head)
+             (eq? (pro-bo-goal-kind raw-active-head) 'train)
+             (pro-bo-goal-prereq-ready-sym raw-active-head)
+             (= (count-total-bldg (pro-bo-goal-prereq-ready-sym raw-active-head)) 0))
+        (let* ([prereq-sym (pro-bo-goal-prereq-ready-sym raw-active-head)]
+               [prereq-step (findf (lambda (s)
+                                     (and (memq (pro-bo-goal-kind s) '(build expand morph))
+                                          (eq? (pro-bo-goal-target-sym s) prereq-sym)))
+                                   steps)])
+          (or prereq-step
+              (pro-bo-goal 'build prereq-sym 1 (pro-bo-goal-min-supply raw-active-head) #f)))
+        raw-active-head))
+  (when (and (not (eq? active-head raw-active-head))
+             (pro-bo-goal? active-head)
+             (= res-min 0)
+             (= res-gas 0)
+             (prereq-ready? (pro-bo-goal-prereq-ready-sym active-head)))
+    (set! res-min (sc2-min-cost (pro-bo-goal-target-sym active-head)))
+    (set! res-gas (sc2-gas-cost (pro-bo-goal-target-sym active-head))))
   (pro-bo-eval-result m-sym
                       active-head
                       (reverse ready-acts)

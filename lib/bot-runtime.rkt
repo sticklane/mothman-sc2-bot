@@ -4524,18 +4524,21 @@
         0))
   (define (core-progression-exempt-from-surcharge? target-sym)
     (and target-sym
-         (not under-base-attack?)
-         (or (memq target-sym
-                   '(spawning-pool cybernetics-core forge
-                     orbital-command barracks-techlab factory starport engineering-bay
-                     robotics-facility twilight-council))
-             (and (<= live-enemy-threat-supply 0)
-                  (or (eq? target-sym bo-goal-sym)
-                      (eq? target-sym active-escrow-sym)
-                      (memq target-sym
-                            '(roach-warren queen
-                              hatchery nexus command-center
-                              warp-gate-research metabolic-boost stimpack lair)))))))
+         (or (and (eq? target-sym 'robotics-facility)
+                  (= (sc2-count-equivalent-structures total-bldg-counts 'robotics-facility #f) 0)
+                  (>= supply-used 30))
+             (and (not under-base-attack?)
+                  (or (memq target-sym
+                            '(spawning-pool cybernetics-core forge
+                              orbital-command barracks-techlab factory starport engineering-bay
+                              robotics-facility twilight-council))
+                      (and (<= live-enemy-threat-supply 0)
+                           (or (eq? target-sym bo-goal-sym)
+                               (eq? target-sym active-escrow-sym)
+                               (memq target-sym
+                                     '(roach-warren queen
+                                       hatchery nexus command-center
+                                       warp-gate-research metabolic-boost stimpack lair)))))))))
   (define (non-combat-min-ok? cost [target-sym #f])
     (define supply-lock-floor
       (cond
@@ -4679,6 +4682,16 @@
      #:bo-reserved-gas bo-reserved-gas))
   (define prio-log-line (macro-brain-decision-log-line macro-decision))
 
+  (define protoss-pending-robo-gas-reserve
+    (if (and (eq? race 'Protoss)
+             (= (sc2-count-equivalent-structures total-bldg-counts 'robotics-facility #f) 0)
+             (> (sc2-count-equivalent-structures ready-bldg-counts 'cybernetics-core #f) 0)
+             (>= supply-used 34)
+             (>= (length ally-combat-units) 4)
+             (not (and under-base-attack?
+                       (enemy-tech-observation-requires-anti-air? tech-obs))))
+        (sc2-gas-cost 'robotics-facility)
+        0))
   (define (can-spend-by-priority? id-sym [cat-sym 'combat-unit])
     (define m-cost (sc2-min-cost id-sym))
     (define g-cost (sc2-gas-cost id-sym))
@@ -4696,6 +4709,7 @@
              (>= minerals m-cost)
              (>= gas g-cost))
         (and (eq? cat-sym 'combat-unit)
+             (>= (- gas g-cost) (if (> g-cost 0) protoss-pending-robo-gas-reserve 0))
              (or under-base-attack?
                  (> live-enemy-threat-supply 0)
                  escrow-suppressed-active?
@@ -6423,8 +6437,14 @@
                     (and (protoss-colossus-escrow-ok? (sc2-min-cost 'robotics-facility) (sc2-gas-cost 'robotics-facility))
                          (or (>= minerals 550)
                              (can-spend-by-priority? 'robotics-facility 'production-scaling))))
-                (aa-stargate-min-ok? (sc2-min-cost 'robotics-facility))
-                (aa-stargate-gas-ok? (sc2-gas-cost 'robotics-facility))
+                (or (and (= cur-robo-cnt 0)
+                         (not (or enemy-air-raiders?
+                                  (ormap (lambda (e)
+                                           (or (eq? (hash-ref e 'flying? #f) #t)
+                                               (eq? (hash-ref e 'is-flying #f) #t)))
+                                         enemy-units))))
+                    (and (aa-stargate-min-ok? (sc2-min-cost 'robotics-facility))
+                         (aa-stargate-gas-ok? (sc2-gas-cost 'robotics-facility))))
                 (non-combat-min-ok? (sc2-min-cost 'robotics-facility) 'robotics-facility)
                 (non-combat-gas-ok? (sc2-gas-cost 'robotics-facility) 'robotics-facility))
        (emit-build-verified! 'robotics-facility
@@ -6962,10 +6982,12 @@
 
      ;; Protoss Gateway / WarpGate Unit Training (Group 5), governed by `can-spend-by-priority?`
      (define (gateway-unit-colossus-ok? u-sym)
-       (or urgent-combat-or-intel-need?
-           under-base-attack?
-           (and (eq? u-sym 'zealot) (>= minerals 400))
-           (protoss-colossus-escrow-ok? (sc2-min-cost u-sym) (sc2-gas-cost u-sym))))
+       (and (or (<= (sc2-gas-cost u-sym) 0)
+                (>= (- gas (sc2-gas-cost u-sym)) protoss-pending-robo-gas-reserve))
+            (or urgent-combat-or-intel-need?
+                under-base-attack?
+                (and (eq? u-sym 'zealot) (>= minerals 400))
+                (protoss-colossus-escrow-ok? (sc2-min-cost u-sym) (sc2-gas-cost u-sym)))))
      (when (and (not protoss-saving-for-expand?)
                 (can-spend-supply? (sc2-supply-cost 'zealot)))
        (cond
@@ -7065,6 +7087,8 @@
              (when (and (gateway-unit-colossus-ok? 'zealot)
                         (can-spend-by-priority? 'zealot 'combat-unit)
                         (or (< gas (sc2-gas-cost 'stalker))
+                            (and (> protoss-pending-robo-gas-reserve 0)
+                                 (< (- gas protoss-pending-robo-gas-reserve) (sc2-gas-cost 'stalker)))
                             (>= minerals 225)
                             (and urgent-combat-or-intel-need? (< minerals (sc2-min-cost 'stalker)))
                             (and (memq 'charge researched-upgs)

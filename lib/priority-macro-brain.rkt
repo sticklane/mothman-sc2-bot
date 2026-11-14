@@ -1443,7 +1443,7 @@
                 (not (and (eq? gsym 'queen)
                           (or under-attack? (> enemy-threat-supply 2))
                           (< army-supply 4)))))))
-  (define effective-bo-goal
+  (define raw-effective-bo-goal
     (cond
       [(and top-plan-node
             (lookup-sc2-tech-node (plan-goal-node-next-action-sym top-plan-node)))
@@ -1457,6 +1457,26 @@
                          (and (pair? p-list) (first p-list))))]
       [(bo-fallback-goal-allowed? bo-raw-goal) bo-raw-goal]
       [else #f]))
+  (define effective-bo-goal
+    (if (and (pro-bo-goal? raw-effective-bo-goal)
+             (eq? (pro-bo-goal-kind raw-effective-bo-goal) 'train))
+        (let* ([g-sym (pro-bo-goal-target-sym raw-effective-bo-goal)]
+               [g-node (lookup-sc2-tech-node g-sym)]
+               [prereq-sym (or (pro-bo-goal-prereq-ready-sym raw-effective-bo-goal)
+                               (and g-node
+                                    (pair? (sc2-tech-node-prereqs g-node))
+                                    (first (sc2-tech-node-prereqs g-node))))])
+          (if (and prereq-sym
+                   (= (bldg-count-equivalent total-bldg-counts prereq-sym) 0))
+              (let* ([p-node (lookup-sc2-tech-node prereq-sym)]
+                     [p-prereqs (and p-node (sc2-tech-node-prereqs p-node))])
+                (pro-bo-goal (if (and p-node (eq? (sc2-tech-node-kind p-node) 'morph)) 'morph 'build)
+                             prereq-sym
+                             1
+                             (pro-bo-goal-min-supply raw-effective-bo-goal)
+                             (and (pair? p-prereqs) (first p-prereqs))))
+              raw-effective-bo-goal))
+        raw-effective-bo-goal))
 
   (define bo-goal-sym
     (and (pro-bo-goal? effective-bo-goal)
@@ -2206,7 +2226,11 @@
                (eq? cat 'combat-unit)
                (eq? cat 'supply)
                is-repaired?
-               answers-aa-or-det?))
+               answers-aa-or-det?
+               (and (eq? sym 'robotics-facility)
+                    (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
+                    (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+                    (>= workers 20))))
          (define secondary-starving-primary-slots?
            (and (hash? open-facility-slots)
                 (eq? cat 'combat-unit)
