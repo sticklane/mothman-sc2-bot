@@ -1573,8 +1573,9 @@
        (cond
          [(< total-workers 26) 0.0]
          [(< total-workers 34) 4.0]
-         [(< total-workers 44) 14.0]
-         [(< total-workers 54) 26.0]
-         [(< total-workers 64) 40.0]
-         [else 54.0])))
+         [(< total-workers 40) 8.0]
+         [(< total-workers 46) 12.0]
+         [(< total-workers 54) 18.0]
+         [(< total-workers 64) 32.0]
+         [else 48.0])))
 

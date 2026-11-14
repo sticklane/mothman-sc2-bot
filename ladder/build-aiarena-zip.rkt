@@ -4,12 +4,10 @@
 ;; Pure-Racket AI Arena BotZip Builder (`ladder/build-aiarena-zip.rkt`)
 ;;
 ;; Builds AI Arena ladder-ready .zip archives in 100% pure Racket:
-;;   - ladder/Mothman.zip
 ;;   - ladder/Mothman-X.zip (Random)
 ;;   - ladder/Mothman-Z.zip (Zerg)
 ;;   - ladder/Mothman-T.zip (Terran)
 ;;   - ladder/Mothman-P.zip (Protoss)
-;;   - ladder/Mothman-R.zip (Random)
 ;;
 ;; 1. Precompiles all `#lang sc-bot` and Racket runtime modules to `.zo` bytecode
 ;;    via `compiler/cm` (`managed-compile-zo`).
@@ -63,12 +61,10 @@
 (define INCLUDE-TOP-FILES '("run.py" "main.rkt" "info.rkt" "data/pro_build_orders.sexp"))
 
 (define VARIANTS
-  '(("Mothman"   "Random"  "bots/Mothman.rkt")
-    ("Mothman-X" "Random"  "bots/Mothman-R.rkt")
+  '(("Mothman-X" "Random"  "bots/Mothman-R.rkt")
     ("Mothman-Z" "Zerg"    "bots/Mothman-Z.rkt")
     ("Mothman-T" "Terran"  "bots/Mothman-T.rkt")
-    ("Mothman-P" "Protoss" "bots/Mothman-P.rkt")
-    ("Mothman-R" "Random"  "bots/Mothman-R.rkt")))
+    ("Mothman-P" "Protoss" "bots/Mothman-P.rkt")))
 
 ;; -----------------------------------------------------------------------------
 ;; 1. IEEE 802.3 CRC-32 & Pure-Racket PKZIP Archive Writer
@@ -431,6 +427,6 @@
   (command-line
    #:program "build-aiarena-zip.rkt"
    #:once-each
-   [("--all-races") "Build all race-specific zips plus Mothman.zip" (void)]
+   [("--all-races") "Build all active race-specific zips (Mothman-X/Z/T/P)" (void)]
    [("--variant") v "Build a single variant only" (set! target-variant v)])
   (void (build-all-aiarena-zips! target-variant)))
