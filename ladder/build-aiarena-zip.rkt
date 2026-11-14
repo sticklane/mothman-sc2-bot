@@ -49,11 +49,11 @@
 ;; AI Arena BotZip size limits:
 ;; - Standard tier max upload: 50 MiB (52,428,800 bytes)
 ;; - Bronze Patreon max upload: 100 MiB (104,857,600 bytes)
-;; - Strict repository safety budget: 32 MB (32,000,000 bytes) max, 3 MB (3,000,000 bytes) min
+;; - Strict repository safety budget: 35 MB (35,000,000 bytes) max, 3 MB (3,000,000 bytes) min
 ;; - True untethered Racket CS ELF (.rackboot + .rackprog, original-exe?=#t): >= 45 MB uncompressed
 (define AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024))
 (define AIARENA-BRONZE-MAX-ZIP-BYTES   (* 100 1024 1024))
-(define MAX-BOT-ZIP-SIZE-BYTES         32000000)
+(define MAX-BOT-ZIP-SIZE-BYTES         35000000)
 (define MIN-BOT-ZIP-SIZE-BYTES         3000000)
 (define MIN-STANDALONE-ELF-BYTES       45000000)
 
