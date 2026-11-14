@@ -21,6 +21,7 @@
          racket/port
          racket/file
          json
+         "../lib/sc2-common.rkt"
          "../lib/mirror-mind-predictor.rkt"
          "../lib/econ-ledger.rkt"
          "../lib/bot-runtime.rkt"
@@ -71,12 +72,6 @@
          (cons 'causal-weighted (make-hash (map (lambda (k) (cons k 0.0)) D-KEYS)))
          (cons 'transition-pivot (make-hash (map (lambda (k) (cons k 0.0)) D-KEYS)))
          (cons 'counter-payoff (make-hash (map (lambda (k) (cons k 0.0)) D-KEYS))))))
-
-(define (round1 x)
-  (/ (round (* 10.0 (exact->inexact x))) 10.0))
-
-(define (round2 x)
-  (/ (round (* 100.0 (exact->inexact x))) 100.0))
 
 (define (evaluate-corpus-sexp sexp-path)
   (define cohorts (make-hash))
@@ -183,7 +178,7 @@
                           [age-s (max 0.0 (/ (- frame most-recent-gl) 22.4))]
                           [v-eff (/ (enemy-army-reachability-model-effective-move-speed reach-model) 8.0)]
                           [cone-r (+ 22.0 (* v-eff (min 40.0 (+ age-s 8.0))))]
-                          [dist (sqrt (+ (sqr (- tcx scx)) (sqr (- tcy scy))))])
+                          [dist (dist2d scx scy tcx tcy)])
                      (<= dist cone-r))
                    #f))
 

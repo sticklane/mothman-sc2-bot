@@ -5,6 +5,7 @@
          racket/math
          racket/set
          racket/string
+         "sc2-common.rkt"
          "sc2-game-constants.rkt")
 
 (provide
@@ -120,10 +121,6 @@
 
 (define (snap-2x2-coord c)
   (exact->inexact (round (exact->inexact c))))
-
-(define (wall-dist2d x1 y1 x2 y2)
-  (sqrt (+ (sqr (- (exact->inexact x2) (exact->inexact x1)))
-           (sqr (- (exact->inexact y2) (exact->inexact y1))))))
 
 (define (grid-cell-positive? v)
   (cond
@@ -476,7 +473,7 @@
                       #:when (and (grid-cell-positive? (pref ix iy))
                                   (not (grid-cell-positive? (bref ix iy)))
                                   (or (not seed-pt) (borders-hg-plateau? ix iy))
-                                  (<= (wall-dist2d (+ ix 0.5) (+ iy 0.5) bx-f by-f) 24.0)))
+                                  (<= (dist2d (+ ix 0.5) (+ iy 0.5) bx-f by-f) 24.0)))
             (cons ix iy))]))
      ;; Focus on the ramp cluster exiting the Main plateau along the shortest corridor toward Natural
      (define nearest-ramp-seed
@@ -488,12 +485,12 @@
                                      (max 0 (vector-ref b-dist (+ (* ly sw) lx)))
                                      30))
                       (+ (* 0.6 bd)
-                         (* 0.4 (wall-dist2d (+ (car pt) 0.5) (+ (cdr pt) 0.5) mid-x mid-y))))
+                         (* 0.4 (dist2d (+ (car pt) 0.5) (+ (cdr pt) 0.5) mid-x mid-y))))
                     raw-ramp-candidates)))
      (define ramp-tiles
        (if nearest-ramp-seed
            (filter (lambda (pt)
-                     (<= (wall-dist2d (car pt) (cdr pt)
+                     (<= (dist2d (car pt) (cdr pt)
                                       (car nearest-ramp-seed) (cdr nearest-ramp-seed))
                          8.5))
                    raw-ramp-candidates)
@@ -531,8 +528,8 @@
         ;; Select an interior high-ground anchor >= 7.5 tiles behind ramp so candidate wall footprints
         ;; never step onto `src-pt`, and a low-ground exit >= 5.5 tiles past the ramp.
         (define hg-src
-          (or (and (>= (wall-dist2d bx-f by-f rx ry) 7.5)
-                   (<= (wall-dist2d bx-f by-f rx ry) 18.0)
+          (or (and (>= (dist2d bx-f by-f rx ry) 7.5)
+                   (<= (dist2d bx-f by-f rx ry) 18.0)
                    (cons (+ b-ix 0.5) (+ b-iy 0.5)))
               (let ([best-hg #f]
                     [best-hg-sc -1e9])
@@ -541,9 +538,9 @@
                        #:when (= (bytes-ref hg-plat (+ (* ly sw) lx)) 1))
                   (define wx (+ sx0 lx 0.5))
                   (define wy (+ sy0 ly 0.5))
-                  (define dr (wall-dist2d wx wy rx ry))
+                  (define dr (dist2d wx wy rx ry))
                   (when (and (>= dr 7.5) (<= dr 14.5))
-                    (define sc (- 50.0 (abs (- dr 9.5)) (* 0.25 (wall-dist2d wx wy bx-f by-f))))
+                    (define sc (- 50.0 (abs (- dr 9.5)) (* 0.25 (dist2d wx wy bx-f by-f))))
                     (when (> sc best-hg-sc)
                       (set! best-hg-sc sc)
                       (set! best-hg (cons wx wy)))))
@@ -566,7 +563,7 @@
                              (<= (abs (- (grid-height-val href gx gy h-nat) h-nat)) 2.0)))
                 (define wx (+ gx 0.5))
                 (define wy (+ gy 0.5))
-                (define dr (wall-dist2d wx wy rx ry))
+                (define dr (dist2d wx wy rx ry))
                 (define proj (+ (* (- wx rx) rdx) (* (- wy ry) rdy)))
                 (when (and (>= dr 5.5) (<= dr 13.5) (>= proj 2.5))
                   (define sc (+ (if (grid-cell-positive? (bref gx gy)) 20.0 0.0)
@@ -718,7 +715,7 @@
                            (not (set-member? ramp-tile-set (cons ix iy)))))))
                 (define (near-top-tile? cx cy max-d)
                   (ormap (lambda (pt)
-                           (<= (wall-dist2d cx cy (+ (car pt) 0.5) (+ (cdr pt) 0.5)) max-d))
+                           (<= (dist2d cx cy (+ (car pt) 0.5) (+ (cdr pt) 0.5)) max-d))
                          top-tiles))
                 (define tang-x (- rdy))
                 (define tang-y rdx)
@@ -762,14 +759,14 @@
                     (filter (lambda (dc)
                               (match-define (list d1x d1y d1-proj) dc)
                               (and (< d1-proj (- r-proj 0.25))
-                                   (<= (wall-dist2d d1x d1y bx by) 5.6)
+                                   (<= (dist2d d1x d1y bx by) 5.6)
                                    (footprints-disjoint? d1x d1y 1.0 1.0 bx by 1.5 1.5)))
                             depot-cands))
                   (define right-depots
                     (filter (lambda (dc)
                               (match-define (list d2x d2y d2-proj) dc)
                               (and (> d2-proj (+ r-proj 0.25))
-                                   (<= (wall-dist2d d2x d2y bx by) 5.6)
+                                   (<= (dist2d d2x d2y bx by) 5.6)
                                    (footprints-disjoint? d2x d2y 1.0 1.0 bx by 1.5 1.5)))
                             depot-cands))
                   (for* ([d1 (in-list left-depots)]
@@ -813,9 +810,9 @@
                           (+ (if (footprints-share-edge? d1x d1y 1.0 1.0 bx by 1.5 1.5) 60.0 0.0)
                              (if (footprints-share-edge? d2x d2y 1.0 1.0 bx by 1.5 1.5) 60.0 0.0)))
                         (define dist-pen
-                          (+ (wall-dist2d bx by rx ry)
-                             (* 0.65 (wall-dist2d d1x d1y rx ry))
-                             (* 0.65 (wall-dist2d d2x d2y rx ry))))
+                          (+ (dist2d bx by rx ry)
+                             (* 0.65 (dist2d d1x d1y rx ry))
+                             (* 0.65 (dist2d d2x d2y rx ry))))
                         (define tier-bonus
                           (cond
                             [(and seals-bare? addon-clear?) 2000.0]
@@ -1013,7 +1010,7 @@
   (define n-iy0 (max 0 (min (sub1 h) (exact-floor ny-f))))
   (define h-main (grid-height-val href b-ix b-iy 128.0))
   (define h-nat  (grid-height-val href n-ix0 n-iy0 112.0))
-  (define mdist  (wall-dist2d bx-f by-f nx-f ny-f))
+  (define mdist  (dist2d bx-f by-f nx-f ny-f))
   (define mux    (if (>= mdist 1.0) (/ (- nx-f bx-f) mdist) 1.0))
   (define muy    (if (>= mdist 1.0) (/ (- ny-f by-f) mdist) 0.0))
   (define-values (prior-ux prior-uy)
@@ -1034,12 +1031,12 @@
   (define (main-side-cell? gx gy)
     (define wx (+ gx 0.5))
     (define wy (+ gy 0.5))
-    (define dm (wall-dist2d wx wy bx-f by-f))
+    (define dm (dist2d wx wy bx-f by-f))
     (or (and (>= mdist 12.0) (<= dm 10.0))
         (and (> (abs (- h-main h-nat)) 3.0)
              (procedure? href)
              (<= (abs (- (grid-height-val href gx gy h-nat) h-main)) 2.0)
-             (< dm (wall-dist2d wx wy nx-f ny-f)))))
+             (< dm (dist2d wx wy nx-f ny-f)))))
 
   (define seed-pt
     (let ([slx (max 0 (min (sub1 sw) (- n-ix0 sx0)))]
@@ -1112,10 +1109,10 @@
          (define gy (+ sy0 (quotient idx sw)))
          (define wx (+ gx 0.5))
          (define wy (+ gy 0.5))
-         (when (and (>= (wall-dist2d wx wy nx-f ny-f) 13.5)
+         (when (and (>= (dist2d wx wy nx-f ny-f) 13.5)
                     (grid-cell-positive? (bref gx gy))
                     (or (< mdist 10.0)
-                        (>= (wall-dist2d wx wy bx-f by-f) (- mdist 1.0))))
+                        (>= (dist2d wx wy bx-f by-f) (- mdist 1.0))))
            (bytes-set! reaches-outer idx 1)
            (vector-set! next-out-idx idx idx))))
 
@@ -1182,14 +1179,14 @@
          (when (and (grid-cell-positive? (bref gx gy))
                     (>= (max (abs (- cx0 nx-f)) (abs (- cy0 ny-f))) 5.0)
                     (or (< mdist 10.0)
-                        (and (>= (wall-dist2d cx0 cy0 bx-f by-f) (- mdist 1.0))
-                             (>= (+ (* (/ (- cx0 nx-f) (max 1.0 (wall-dist2d cx0 cy0 nx-f ny-f))) mux)
-                                    (* (/ (- cy0 ny-f) (max 1.0 (wall-dist2d cx0 cy0 nx-f ny-f))) muy))
+                        (and (>= (dist2d cx0 cy0 bx-f by-f) (- mdist 1.0))
+                             (>= (+ (* (/ (- cx0 nx-f) (max 1.0 (dist2d cx0 cy0 nx-f ny-f))) mux)
+                                    (* (/ (- cy0 ny-f) (max 1.0 (dist2d cx0 cy0 nx-f ny-f))) muy))
                                  -0.25))))
            (define out-idx (walk-outward idx 7))
            (define dst-wx (+ sx0 (remainder out-idx sw) 0.5))
            (define dst-wy (+ sy0 (quotient out-idx sw) 0.5))
-           (when (>= (wall-dist2d dst-wx dst-wy cx0 cy0) 4.0)
+           (when (>= (dist2d dst-wx dst-wy cx0 cy0) 4.0)
              (define fdx (- dst-wx nx-f))
              (define fdy (- dst-wy ny-f))
              (define fmag (max 1.0 (sqrt (+ (* fdx fdx) (* fdy fdy)))))
@@ -1233,8 +1230,8 @@
                                               (<= (abs (- (grid-height-val href bx-i by-i h-nat) h-nat)) 1.75))))
                      1))
                  (when (>= buildable-cnt 12)
-                   (define dir-x (/ (- mid-cx nx-f) (max 1.0 (wall-dist2d mid-cx mid-cy nx-f ny-f))))
-                   (define dir-y (/ (- mid-cy ny-f) (max 1.0 (wall-dist2d mid-cx mid-cy nx-f ny-f))))
+                   (define dir-x (/ (- mid-cx nx-f) (max 1.0 (dist2d mid-cx mid-cy nx-f ny-f))))
+                   (define dir-y (/ (- mid-cy ny-f) (max 1.0 (dist2d mid-cx mid-cy nx-f ny-f))))
                    (define align (+ (* dir-x prior-ux) (* dir-y prior-uy)))
                    (define sc
                      (+ (* -12.0 span)
@@ -1254,7 +1251,7 @@
           (define c (car rem))
           (define cx (second c))
           (define cy (third c))
-          (if (ormap (lambda (prev) (<= (wall-dist2d cx cy (first prev) (second prev)) 3.0)) acc)
+          (if (ormap (lambda (prev) (<= (dist2d cx cy (first prev) (second prev)) 3.0)) acc)
               (dedup (cdr rem) acc)
               (dedup (cdr rem) (cons (cdr c) acc)))]))]))
 
@@ -1274,11 +1271,7 @@
      (define door (hash-ref wall 'door #f))
      (define park (hash-ref wall 'door-park #f))
      (define (valid-pt? p)
-       (and (pair? p) (real? (car p)) (real? (cdr p))
-            (not (nan? (exact->inexact (car p))))
-            (not (infinite? (exact->inexact (car p))))
-            (not (nan? (exact->inexact (cdr p))))
-            (not (infinite? (exact->inexact (cdr p))))))
+       (and (pair? p) (finite-real? (car p)) (finite-real? (cdr p))))
      (and (valid-pt? pyl) (valid-pt? s1) (valid-pt? s2)
           (or (not s3) (valid-pt? s3))
           (valid-pt? door) (valid-pt? park)
@@ -1317,7 +1310,7 @@
                    (footprints-disjoint? x1 y1 hw1 hh1 x2 y2 hw2 hh2))
                  ;; Pylon powers every 3x3 wall slot (`<= 6.5` tiles)
                  (for/and ([s (in-list slot-pts)])
-                   (<= (wall-dist2d (car pyl) (cdr pyl) (car s) (cdr s)) 6.5))
+                   (<= (dist2d (car pyl) (cdr pyl) (car s) (cdr s)) 6.5))
                  ;; Bounded ground BFS from `(orig-x, orig-y)` reaches `door`, `door-park`,
                  ;; and a walkable perimeter tile of every building both before and after placement!
                  (let* ([mid-wx (* 0.5 (+ orig-x (car door)))]
@@ -1455,7 +1448,7 @@
                    [dx-i (in-range -6 7)]
                    #:do [(define sx (+ (floor center-x) dx-i 0.5))
                          (define sy (+ (floor center-y) dy-i 0.5))]
-                   #:when (and (<= (wall-dist2d sx sy center-x center-y) 6.2)
+                   #:when (and (<= (dist2d sx sy center-x center-y) 6.2)
                                (outside-nexus-pads? sx sy 1.5 1.5)
                                (strict-slot-buildable? sx sy 1.5 1.5)))
          (cons sx sy)))
@@ -1467,7 +1460,7 @@
                          (define dx0 (+ ix 0.5))
                          (define dy0 (+ iy 0.5))]
                    #:when (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
-                               (<= (wall-dist2d dx0 dy0 center-x center-y) 4.5)
+                               (<= (dist2d dx0 dy0 center-x center-y) 4.5)
                                (outside-nexus-pads? dx0 dy0 0.5 0.5)
                                (not (set-member? forbid-tiles-set (cons ix iy)))
                                (grid-cell-positive? (pref ix iy))))
@@ -1483,7 +1476,7 @@
          (define px (exact->inexact (+ (exact-round wcx) dx-i)))
          (define py (exact->inexact (+ (exact-round wcy) dy-i)))
          (define rear-proj (- (+ (* (- px wcx) out-dx) (* (- py wcy) out-dy))))
-         (define rear-dist (wall-dist2d px py wcx wcy))
+         (define rear-dist (dist2d px py wcx wcy))
          (when (and (>= rear-proj 1.5)
                     (>= rear-dist 2.5)
                     (<= rear-dist 5.5)
@@ -1491,7 +1484,7 @@
                     (footprints-disjoint? px py 1.0 1.0 door-x door-y 0.5 0.5)
                     (andmap (lambda (s)
                               (and (footprints-disjoint? px py 1.0 1.0 (car s) (cdr s) 1.5 1.5)
-                                   (<= (wall-dist2d px py (car s) (cdr s)) 6.2)))
+                                   (<= (dist2d px py (car s) (cdr s)) 6.2)))
                             wall-slots)
                     (strict-slot-buildable? px py 1.0 1.0)
                     ;; Ensure the rear Pylon does NOT block open-door transit!
@@ -1538,7 +1531,7 @@
        (define near-s
          (filter (lambda (s)
                    (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
-                        (<= (wall-dist2d (car s) (cdr s) door-x door-y) 5.0)))
+                        (<= (dist2d (car s) (cdr s) door-x door-y) 5.0)))
                  slot3x3-cands))
        (for* ([i (in-range (length near-s))]
               [j (in-range (add1 i) (length near-s))])
@@ -1565,9 +1558,9 @@
                (define sc
                  (+ 500.0
                     sandwich-bonus
-                    (- (* 8.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
-                                 (wall-dist2d (car s2) (cdr s2) center-x center-y)
-                                 (wall-dist2d door-x door-y center-x center-y))))))
+                    (- (* 8.0 (+ (dist2d (car s1) (cdr s1) center-x center-y)
+                                 (dist2d (car s2) (cdr s2) center-x center-y)
+                                 (dist2d door-x door-y center-x center-y))))))
                (when (> sc best-wsc)
                  (set! best-wsc sc)
                  (set! best-wall (list s1 s2 #f door-x door-y pyl w-rects))))))))
@@ -1584,7 +1577,7 @@
          (define other-s
            (filter (lambda (s)
                      (and (footprints-disjoint? (car s) (cdr s) 1.5 1.5 door-x door-y 0.5 0.5)
-                          (<= (wall-dist2d (car s) (cdr s) door-x door-y) 6.5)))
+                          (<= (dist2d (car s) (cdr s) door-x door-y) 6.5)))
                    slot3x3-cands))
          (for* ([s1 (in-list adj-s)]
                 [i (in-range (length other-s))]
@@ -1614,9 +1607,9 @@
              (when pyl
                (define sc
                  (- 350.0
-                    (* 6.0 (+ (wall-dist2d (car s1) (cdr s1) center-x center-y)
-                              (wall-dist2d (car s2) (cdr s2) center-x center-y)
-                              (wall-dist2d (car s3) (cdr s3) center-x center-y)))))
+                    (* 6.0 (+ (dist2d (car s1) (cdr s1) center-x center-y)
+                              (dist2d (car s2) (cdr s2) center-x center-y)
+                              (dist2d (car s3) (cdr s3) center-x center-y)))))
                (when (> sc best-wsc)
                  (set! best-wsc sc)
                  (set! best-wall (list s1 s2 s3 door-x door-y pyl w-rects))))))))
@@ -2010,7 +2003,7 @@
          (if has-attacker-pos?
              (let* ([ex (if (fap-unit? e) (fap-unit-x e) (hash-ref e 'x ax))]
                     [ey (if (fap-unit? e) (fap-unit-y e) (hash-ref e 'y ay))]
-                    [dist (sqrt (+ (sqr (- ex ax)) (sqr (- ey ay))))]
+                    [dist (dist2d ax ay ex ey)]
                     [excess (max 0.0 (- dist (max 1.0 (exact->inexact arange))))])
                (/ 1.0 (+ 1.0 (* 0.25 excess))))
              1.0))
@@ -2163,10 +2156,6 @@
 
 (define (make-order-ledger)
   (in-progress-order-ledger (make-hasheqv) (make-hasheq) '() (mutable-seteqv)))
-
-(define (dist2d-pts x1 y1 x2 y2)
-  (sqrt (+ (sqr (- (exact->inexact x2) (exact->inexact x1)))
-           (sqr (- (exact->inexact y2) (exact->inexact y1))))))
 
 (define KNOWN-BUILDING-ORDER-SYMS
   '(command-center orbital-command planetary-fortress supply-depot refinery
@@ -2380,9 +2369,9 @@
                (and (or in-tr? inc?)
                     (cond
                       [(and (real? o-tx) (real? o-ty) (real? bx) (real? by))
-                       (<= (dist2d-pts o-tx o-ty bx by) 4.0)]
+                       (<= (dist2d o-tx o-ty bx by) 4.0)]
                       [(and (real? ux) (real? uy) (real? bx) (real? by))
-                       (<= (dist2d-pts ux uy bx by) 4.0)]
+                       (<= (dist2d ux uy bx by) 4.0)]
                       [(not (and (real? bx) (real? by)))
                        #t]
                       [(and (>= uid 800000) (not (and (real? o-tx) (real? o-ty))))
@@ -2540,7 +2529,7 @@
          (ormap (lambda (b)
                   (and (hash? b)
                        (sc2-structure-matches-target? (hash-ref b 'type #f) bsym)
-                       (<= (dist2d-pts sx sy (hash-ref b 'x 0.0) (hash-ref b 'y 0.0))
+                       (<= (dist2d sx sy (hash-ref b 'x 0.0) (hash-ref b 'y 0.0))
                            SC2-BUILD-SITE-MIN-CLEARANCE)))
                 ally-bldgs))
        (and (not materialized?)
@@ -2738,15 +2727,15 @@
       (and (memq kind '(move kite retreat mineral-walk))
            (eq? u-canon 'move)
            (real? tx) (real? ty) (real? u-tx) (real? u-ty)
-           (<= (dist2d-pts tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
+           (<= (dist2d tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
       (and (eq? kind 'attack-pos)
            (eq? u-canon 'attack)
            (real? tx) (real? ty) (real? u-tx) (real? u-ty)
-           (<= (dist2d-pts tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
+           (<= (dist2d tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
       (and (eq? kind 'patrol)
            (eq? u-canon 'patrol)
            (real? tx) (real? ty) (real? u-tx) (real? u-ty)
-           (<= (dist2d-pts tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
+           (<= (dist2d tx ty u-tx u-ty) SC2-ORDER-EQUIV-DIST-TOLERANCE))
       (and (eq? kind 'hold-position)
            (eq? u-canon 'hold-position))
       (and (eq? kind 'stop)
@@ -2762,7 +2751,7 @@
       (and (memq kind '(land land-building))
            (eq? u-canon 'land)
            (or (not (and (real? tx) (real? ty) (real? u-tx) (real? u-ty)))
-               (<= (dist2d-pts tx ty u-tx u-ty) 1.0)))
+               (<= (dist2d tx ty u-tx u-ty) 1.0)))
       (and (eq? kind 'burrow-down)
            (eq? u-canon 'burrow-down))
       (and (eq? kind 'burrow-up)
@@ -2787,7 +2776,7 @@
                     (real? tx) (real? ty)
                     (real? (tracked-order-target-x tord))
                     (real? (tracked-order-target-y tord))
-                    (<= (dist2d-pts tx ty
+                    (<= (dist2d tx ty
                                     (tracked-order-target-x tord)
                                     (tracked-order-target-y tord))
                         1.0))
@@ -2796,7 +2785,7 @@
                     (real? tx) (real? ty)
                     (real? (tracked-order-target-x tord))
                     (real? (tracked-order-target-y tord))
-                    (<= (dist2d-pts tx ty
+                    (<= (dist2d tx ty
                                     (tracked-order-target-x tord)
                                     (tracked-order-target-y tord))
                         SC2-ORDER-EQUIV-DIST-TOLERANCE)))))]))
@@ -3157,7 +3146,7 @@
            (cons u
                  (for/list ([v (in-list combat-allies)]
                             #:when (and (not (set-member? visited (hash-ref v 'id 0)))
-                                        (<= (dist2d-pts ux uy (hash-ref v 'x ux) (hash-ref v 'y uy))
+                                        (<= (dist2d ux uy (hash-ref v 'x ux) (hash-ref v 'y uy))
                                             SC2-TACTICAL-ARENA-CLUSTER-RADIUS)))
                    (set-add! visited (hash-ref v 'id 0))
                    v)))
@@ -3170,12 +3159,12 @@
        (define cy (/ (for/sum ([u (in-list sq)]) (exact->inexact (hash-ref u 'y 32.5))) n))
        (define local-enemies
          (filter (lambda (e)
-                   (<= (dist2d-pts cx cy (hash-ref e 'x 999.0) (hash-ref e 'y 999.0))
+                   (<= (dist2d cx cy (hash-ref e 'x 999.0) (hash-ref e 'y 999.0))
                        SC2-TACTICAL-ARENA-ENGAGE-RADIUS))
                  enemy-units))
        (define local-enemy-bldgs
          (filter (lambda (eb)
-                   (<= (dist2d-pts cx cy (hash-ref eb 'x 999.0) (hash-ref eb 'y 999.0))
+                   (<= (dist2d cx cy (hash-ref eb 'x 999.0) (hash-ref eb 'y 999.0))
                        SC2-TACTICAL-ARENA-ENGAGE-RADIUS))
                  enemy-bldgs))
        (when (or (not (null? local-enemies)) (not (null? local-enemy-bldgs)))
@@ -3183,18 +3172,18 @@
            (filter (lambda (e) (memq (hash-ref e 'type #f) '(scv probe drone))) local-enemies))
          (define reinf-allies
            (for/list ([u (in-list combat-allies)]
-                      #:when (let ([d (dist2d-pts cx cy (hash-ref u 'x cx) (hash-ref u 'y cy))])
+                      #:when (let ([d (dist2d cx cy (hash-ref u 'x cx) (hash-ref u 'y cy))])
                                (and (> d SC2-TACTICAL-ARENA-CLUSTER-RADIUS)
                                     (<= d SC2-TACTICAL-REINFORCE-RADIUS))))
-             (define d (dist2d-pts cx cy (hash-ref u 'x cx) (hash-ref u 'y cy)))
+             (define d (dist2d cx cy (hash-ref u 'x cx) (hash-ref u 'y cy)))
              (define spd (max 2.0 (hash-ref (sc2-unit-combat-stats (hash-ref u 'type 'marine)) 'speed 3.15)))
              (unit-hash->tactical-sim-unit u 'ally #:eta-sec (/ (- d 6.0) spd))))
          (define reinf-enemies
            (for/list ([e (in-list enemy-units)]
-                      #:when (let ([d (dist2d-pts cx cy (hash-ref e 'x cx) (hash-ref e 'y cy))])
+                      #:when (let ([d (dist2d cx cy (hash-ref e 'x cx) (hash-ref e 'y cy))])
                                (and (> d SC2-TACTICAL-ARENA-ENGAGE-RADIUS)
                                     (<= d SC2-TACTICAL-REINFORCE-RADIUS))))
-             (define d (dist2d-pts cx cy (hash-ref e 'x cx) (hash-ref e 'y cy)))
+             (define d (dist2d cx cy (hash-ref e 'x cx) (hash-ref e 'y cy)))
              (define spd (max 2.0 (hash-ref (sc2-unit-combat-stats (hash-ref e 'type 'marine)) 'speed 3.15)))
              (unit-hash->tactical-sim-unit e 'enemy #:eta-sec (/ (- d 6.0) spd))))
          (define ally-det?
@@ -3307,7 +3296,7 @@
       (define ay (tactical-sim-unit-y a))
       (define near-trap?
         (ormap (lambda (pt)
-                 (<= (dist2d-pts ax ay (car pt) (cdr pt)) 4.5))
+                 (<= (dist2d ax ay (car pt) (cdr pt)) 4.5))
                enemy-stasis-pts))
       (when (and near-trap? (memq our-action '(CommitFocusFire KiteForwardChase HoldChoke)))
         (set-tactical-sim-unit-hp! a (max 1.0 (- (tactical-sim-unit-hp a) (* 18.0 dt)))))))
@@ -3341,12 +3330,12 @@
            (if (not (null? workers))
                (argmin (lambda (w) (+ (tactical-sim-unit-hp w) (tactical-sim-unit-shield w))) workers)
                (argmin (lambda (o)
-                         (dist2d-pts (tactical-sim-unit-x u) (tactical-sim-unit-y u)
+                         (dist2d (tactical-sim-unit-x u) (tactical-sim-unit-y u)
                                      (tactical-sim-unit-x o) (tactical-sim-unit-y o)))
                        valid-targets))]
           [(or (eq? action 'CommitFocusFire) (eq? action 'KiteForwardChase))
            (argmax (lambda (o)
-                     (define d (max 1.0 (dist2d-pts (tactical-sim-unit-x u) (tactical-sim-unit-y u)
+                     (define d (max 1.0 (dist2d (tactical-sim-unit-x u) (tactical-sim-unit-y u)
                                                     (tactical-sim-unit-x o) (tactical-sim-unit-y o))))
                      (/ (+ 5.0 (tactical-sim-unit-ground-dps o) (tactical-sim-unit-air-dps o))
                         (* (+ (tactical-sim-unit-hp o) (tactical-sim-unit-shield o))
@@ -3354,7 +3343,7 @@
                    valid-targets)]
           [else
            (argmin (lambda (o)
-                     (dist2d-pts (tactical-sim-unit-x u) (tactical-sim-unit-y u)
+                     (dist2d (tactical-sim-unit-x u) (tactical-sim-unit-y u)
                                  (tactical-sim-unit-x o) (tactical-sim-unit-y o)))
                    valid-targets)]))
 
@@ -3408,7 +3397,7 @@
            (define splash-mult (if (eq? action 'FlankSurround) 0.25 0.50))
            (for ([adj (in-list valid-targets)]
                  #:when (and (not (eq? adj target))
-                             (<= (dist2d-pts tx ty (tactical-sim-unit-x adj) (tactical-sim-unit-y adj))
+                             (<= (dist2d tx ty (tactical-sim-unit-x adj) (tactical-sim-unit-y adj))
                                  (tactical-sim-unit-splash-radius u))))
              (set-tactical-sim-unit-hp! adj (- (tactical-sim-unit-hp adj) (* splash-mult eff-dmg)))))
          (set-tactical-sim-unit-weapon-cooldown! u (tactical-sim-unit-weapon-period u))
@@ -3770,7 +3759,7 @@
                      (let ([e (car rem)])
                        (if (> (sim-unit-weapon-dps-vs su e) 0.0)
                            (let* ([etype (tactical-sim-unit-type e)]
-                                  [d (max 1.0 (dist2d-pts ux uy (tactical-sim-unit-x e) (tactical-sim-unit-y e)))]
+                                  [d (max 1.0 (dist2d ux uy (tactical-sim-unit-x e) (tactical-sim-unit-y e)))]
                                   [det? (or (memq etype SC2-MOBILE-DETECTOR-SYMS)
                                             (memq etype SC2-STATIC-DETECTOR-SYMS))]
                                   [chg? (memq etype SC2-CHANGELING-UNIT-SYMS)]
@@ -3827,7 +3816,7 @@
                   (emit! (list 'attack-unit uid eid)))])]
 
             [(HoldChoke)
-             (define dist-to-nat (dist2d-pts ux uy nat-x nat-y))
+             (define dist-to-nat (dist2d ux uy nat-x nat-y))
              (if (<= dist-to-nat 3.5)
                  (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'hold-position 0 nat-x nat-y frame))
                    (when (and ledger record-ledger?)
@@ -3894,13 +3883,13 @@
       (define nearest-e
         (and (not (null? enemy-units))
              (argmin (lambda (e)
-                       (dist2d-pts ux uy
+                       (dist2d ux uy
                                    (exact->inexact (hash-ref e 'x 160))
                                    (exact->inexact (hash-ref e 'y 160))))
                      enemy-units)))
       (define dist-e
         (if nearest-e
-            (dist2d-pts ux uy
+            (dist2d ux uy
                         (exact->inexact (hash-ref nearest-e 'x 160))
                         (exact->inexact (hash-ref nearest-e 'y 160)))
             999.0))
@@ -3969,18 +3958,18 @@
     (define nearest-e
       (and (not (null? enemy-units))
            (argmin (lambda (e)
-                     (dist2d-pts ux uy
+                     (dist2d ux uy
                                  (exact->inexact (hash-ref e 'x 160))
                                  (exact->inexact (hash-ref e 'y 160))))
                    enemy-units)))
     (when nearest-e
       (define ex (exact-round (hash-ref nearest-e 'x 160)))
       (define ey (exact-round (hash-ref nearest-e 'y 160)))
-      (define dist-e (dist2d-pts ux uy (exact->inexact ex) (exact->inexact ey)))
+      (define dist-e (dist2d ux uy (exact->inexact ex) (exact->inexact ey)))
       (define capital-target
         (findf (lambda (e)
                  (and (memq (hash-ref e 'type 'unknown) capital-syms)
-                      (<= (dist2d-pts ux uy
+                      (<= (dist2d ux uy
                                       (exact->inexact (hash-ref e 'x 160))
                                       (exact->inexact (hash-ref e 'y 160)))
                           (+ SC2-INFESTOR-NEURAL-CAST-RANGE 2.0))))
@@ -4081,7 +4070,7 @@
                        (and (not (memq ut '(scv probe drone drone-burrowed)))
                             (not (sc2-non-combat-or-summon-sym? ut))
                             (not (hash-ref u 'is-hallucination #f))
-                            (<= (dist2d-pts (exact->inexact (hash-ref u 'x 999.0))
+                            (<= (dist2d (exact->inexact (hash-ref u 'x 999.0))
                                             (exact->inexact (hash-ref u 'y 999.0))
                                             tx-f ty-f)
                                 13.0)))))
@@ -4090,7 +4079,7 @@
        (or (ormap (lambda (u)
                     (and (hash? u)
                          (eq? (hash-ref u 'type 'unknown) 'raven)
-                         (<= (dist2d-pts (exact->inexact (hash-ref u 'x 999.0))
+                         (<= (dist2d (exact->inexact (hash-ref u 'x 999.0))
                                          (exact->inexact (hash-ref u 'y 999.0))
                                          tx-f ty-f)
                              10.0)))
@@ -4099,7 +4088,7 @@
                     (and (hash? b)
                          (eq? (hash-ref b 'type 'unknown) 'missile-turret)
                          (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
-                         (<= (dist2d-pts (exact->inexact (hash-ref b 'x 999.0))
+                         (<= (dist2d (exact->inexact (hash-ref b 'x 999.0))
                                          (exact->inexact (hash-ref b 'y 999.0))
                                          tx-f ty-f)
                              10.0)))
@@ -4159,7 +4148,7 @@
              (and (not (sc2-non-combat-or-summon-sym? et))
                   (not (memq et '(larva egg drone probe scv drone-burrowed)))
                   (not (hash-ref e 'is-hallucination #f))
-                  (<= (dist2d-pts base-x base-y
+                  (<= (dist2d base-x base-y
                                   (exact->inexact (hash-ref e 'x 999.0))
                                   (exact->inexact (hash-ref e 'y 999.0)))
                       18.0)))
@@ -4198,7 +4187,7 @@
            (let ([bx (exact->inexact (hash-ref b 'x 0.0))]
                  [by (exact->inexact (hash-ref b 'y 0.0))])
              (ormap (lambda (ad)
-                      (<= (dist2d-pts (+ bx SC2-TERRAN-ADDON-OFFSET-X)
+                      (<= (dist2d (+ bx SC2-TERRAN-ADDON-OFFSET-X)
                                       (+ by SC2-TERRAN-ADDON-OFFSET-Y)
                                       (exact->inexact (hash-ref ad 'x 9999.0))
                                       (exact->inexact (hash-ref ad 'y 9999.0)))
@@ -4220,7 +4209,7 @@
              (define by (exact->inexact (hash-ref b 'y 0.0)))
              (define near-ad
                (findf (lambda (ad)
-                        (<= (dist2d-pts (+ bx SC2-TERRAN-ADDON-OFFSET-X)
+                        (<= (dist2d (+ bx SC2-TERRAN-ADDON-OFFSET-X)
                                         (+ by SC2-TERRAN-ADDON-OFFSET-Y)
                                         (exact->inexact (hash-ref ad 'x 9999.0))
                                         (exact->inexact (hash-ref ad 'y 9999.0)))
@@ -4247,7 +4236,7 @@
        (when (or (and (> frame 0) (>= frame exp-f))
                  (not db)
                  (and (not (bldg-is-flying-prod? db))
-                      (<= (dist2d-pts (exact->inexact (hash-ref db 'x 0.0))
+                      (<= (dist2d (exact->inexact (hash-ref db 'x 0.0))
                                       (exact->inexact (hash-ref db 'y 0.0))
                                       pad-x pad-y)
                           1.5)))
@@ -4273,7 +4262,7 @@
      (define (bldg-donated-addon? bid ax ay)
        (define dentry (hash-ref TERRAN-DONOR-OFFSET-PAD bid #f))
        (and dentry
-            (<= (dist2d-pts ax ay (fifth dentry) (sixth dentry)) 2.0)))
+            (<= (dist2d ax ay (fifth dentry) (sixth dentry)) 2.0)))
 
      (define (addon-available-for-bldg? ad bid)
        (define ax (exact->inexact (hash-ref ad 'x 34.5)))
@@ -4300,7 +4289,7 @@
                       (not (ormap (lambda (b)
                                     (and (memq (hash-ref b 'type 'unknown) '(barracks factory starport))
                                          (not (bldg-is-flying-prod? b))
-                                         (<= (dist2d-pts (- ax SC2-TERRAN-ADDON-OFFSET-X)
+                                         (<= (dist2d (- ax SC2-TERRAN-ADDON-OFFSET-X)
                                                          (+ ay (- SC2-TERRAN-ADDON-OFFSET-Y))
                                                          (exact->inexact (hash-ref b 'x 9999.0))
                                                          (exact->inexact (hash-ref b 'y 9999.0)))
@@ -4444,7 +4433,7 @@
           (define ay (exact->inexact (hash-ref donor-rax-or-fac 'addon-y (- dy 0.5))))
           (define donor-ad
             (findf (lambda (ad)
-                     (<= (dist2d-pts ax ay
+                     (<= (dist2d ax ay
                                      (exact->inexact (hash-ref ad 'x 9999.0))
                                      (exact->inexact (hash-ref ad 'y 9999.0)))
                          1.25))

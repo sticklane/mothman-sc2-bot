@@ -31,6 +31,7 @@
          file/md5
          net/base64
          json
+         "../lib/sc2-common.rkt"
          "../ladder/build-aiarena-zip.rkt"
          "analyze-aiarena-replays.rkt")
 
@@ -75,9 +76,6 @@
           "oberon"
           "titania"
           "who")))
-
-(define (jnull->false v)
-  (if (or (eq? v 'null) (not v)) #f v))
 
 (define (relay-global-id type-name id-num)
   (define raw (string->bytes/utf-8 (format "~a:~a" type-name id-num)))
@@ -193,7 +191,7 @@
 (define (patch-bot-zip! bot-id bot-name zip-path [token DEFAULT-TOKEN])
   (validate-bot-zip-archive! zip-path #:bot-name bot-name)
   (define local-md5 (bytes->string/utf-8 (call-with-input-file zip-path md5)))
-  (define sz-mb (/ (round (* 100.0 (/ (file-size zip-path) (* 1024.0 1024.0)))) 100.0))
+  (define sz-mb (round2 (/ (file-size zip-path) (* 1024.0 1024.0))))
   (printf "  [UPLOAD] Uploading ~a (~a MB, md5=~a) -> Bot #~a (~a)...\n"
           (path->string zip-path) sz-mb local-md5 bot-id bot-name)
   (flush-output)
@@ -359,7 +357,7 @@
       (define step-s (jnull->false (hash-ref p 'avg_step_time #f)))
       (define step-str
         (if (real? step-s)
-            (format "~ams" (/ (round (* 100000.0 step-s)) 100.0))
+            (format "~ams" (round2 (* 1000.0 step-s)))
             "N/A"))
       (printf "      - Match #~a (https://aiarena.net/matches/~a/): status=~a cause=~a elo_chg=~a step=~a\n"
               mid mid (or res "QUEUED/IN_PROGRESS") (or cause "-") (or elo-chg 0) step-str))))

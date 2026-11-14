@@ -28,6 +28,7 @@
          racket/path
          racket/runtime-path
          json
+         "../lib/sc2-common.rkt"
          "../lib/bot-runtime.rkt"
          "../lib/econ-ledger.rkt"
          "../lib/mirror-mind-predictor.rkt"
@@ -78,12 +79,6 @@
 (define AIARENA-MATCH-IDS
   (append (range 5105059 5105067)
           (range 5105068 5105084)))
-
-(define (round1 x)
-  (/ (round (* 10.0 (exact->inexact x))) 10.0))
-
-(define (round2 x)
-  (/ (round (* 100.0 (exact->inexact x))) 100.0))
 
 ;; Global accumulator tables
 (define total-actions-validated 0)

@@ -294,9 +294,7 @@
 (define (evaluate-random-stealth-harass-plan configured-race actual-race frame-num)
   (define is-random? (member configured-race '(Random random "Random" "random")))
   (define r-sym (normalize-race-sym actual-race))
-  (define fn (if (and (number? frame-num) (real? frame-num) (not (nan? frame-num)) (not (infinite? frame-num)))
-                 (max 0 (exact-round frame-num))
-                 0))
+  (define fn (safe-nonneg-int frame-num 0))
   (cond
     [(not is-random?)
      (random-stealth-harass-plan #f r-sym 'standard-known-race 'none #f #f #f #f '() 28)]
@@ -351,37 +349,10 @@
 
 ;; =============================================================================
 ;; Total Numeric, Coordinate, and Observation Sanitizers
-;; (Shared numeric helpers imported from `sc2-common.rkt`.)
+;; (Shared helpers imported from `sc2-common.rkt`.)
 ;; =============================================================================
 
-(define MAP-MAX-COORD 256.0)
-
-(define (safe-coord v [default 32.5])
-  (define raw (if (finite-real? v) v default))
-  (define clamped (max 0.0 (min MAP-MAX-COORD (exact->inexact raw))))
-  (define half-rounded (/ (round (* clamped 2.0)) 2.0))
-  (if (and (exact-integer? raw) (= clamped (exact->inexact (exact-round half-rounded))))
-      (exact-round half-rounded)
-      half-rounded))
-
-(define (dist2d x1 y1 x2 y2)
-  (define sx1 (safe-finite-real x1 0.0))
-  (define sy1 (safe-finite-real y1 0.0))
-  (define sx2 (safe-finite-real x2 0.0))
-  (define sy2 (safe-finite-real y2 0.0))
-  (sqrt (+ (sqr (- sx2 sx1)) (sqr (- sy2 sy1)))))
-
-(define (unit-type-sym u)
-  (cond
-    [(hash? u)
-     (define raw (hash-ref u 'type 'unknown))
-     (cond
-       [(symbol? raw) raw]
-       [(string? raw) (string->symbol (string-downcase raw))]
-       [else 'unknown])]
-    [(symbol? u) u]
-    [(string? u) (string->symbol (string-downcase u))]
-    [else 'unknown]))
+(define safe-coord safe-tile-coord)
 
 (define NON-COMBAT-AND-SCOUT-ENEMY-SYMS
   '(overlord overseer observer overlord-transport overseer-siege-mode observer-siege-mode
@@ -587,8 +558,8 @@
                            '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
                      (let ([bx (safe-coord (hash-ref b 'x base-x) base-x)]
                            [by (safe-coord (hash-ref b 'y base-y) base-y)])
-                       (and (> (sqrt (+ (sqr (- bx base-x)) (sqr (- by base-y)))) 7.0)
-                            (> (sqrt (+ (sqr (- bx nat-x)) (sqr (- by nat-y)))) 7.0)))))
+                       (and (> (dist2d bx by base-x base-y) 7.0)
+                            (> (dist2d bx by nat-x nat-y) 7.0)))))
               ally-buildings))
      (define eff-default-third-x
        (if owned-third-th

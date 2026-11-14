@@ -37,7 +37,7 @@
          racket/match
          racket/math
          racket/set
-         "sc2-common.rkt"
+         (rename-in "sc2-common.rkt" [dist2d common-dist2d])
          "sc2-game-constants.rkt"
          "zerospace-mastermind.rkt")
 
@@ -214,22 +214,14 @@
 (define (unit-resource-cost unit-sym)
   (hash-ref UNIT-COST-TABLE unit-sym (cons 100 25)))
 
-(define (unit-type-sym u)
-  (define t (if (hash? u) (hash-ref u 'type 'unknown) 'unknown))
-  (if (symbol? t) t (string->symbol (format "~a" t))))
-
 (define (safe-frame f)
-  (max 0 (safe-int f 0)))
+  (safe-nonneg-int f 0))
 
 (define (safe-coord v [fallback 160])
   (safe-int v fallback))
 
 (define (dist2d x1 y1 x2 y2)
-  (define sx1 (safe-real x1 32.0))
-  (define sy1 (safe-real y1 32.0))
-  (define sx2 (safe-real x2 160.0))
-  (define sy2 (safe-real y2 160.0))
-  (sqrt (+ (sqr (- sx2 sx1)) (sqr (- sy2 sy1)))))
+  (common-dist2d x1 y1 x2 y2 32.0 160.0))
 
 ;; =============================================================================
 ;; 2. Structs for Shadow Economy, Action Lens, Depth Nodes & Mirror-Mind State

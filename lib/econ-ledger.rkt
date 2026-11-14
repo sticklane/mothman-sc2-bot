@@ -329,10 +329,7 @@
   #:mutable
   #:transparent)
 
-(define (safe-ledger-int v [default 0])
-  (if (and (number? v) (real? v) (not (nan? v)) (not (infinite? v)))
-      (max 0 (exact-round v))
-      default))
+(define safe-ledger-int safe-nonneg-int)
 
 (define (make-symbiotic-ledger [minerals 500] [gas 200] [supply 10])
   (symbiotic-ledger (safe-ledger-int minerals 500)
@@ -2056,14 +2053,6 @@
       [else              'background-economy]))
   (priority-candidate id category action min-cost gas-cost supply-cost score tier blk-bool))
 
-(define (safe-tile-coord v [default 32.5])
-  (define raw (if (and (number? v) (real? v) (not (nan? v)) (not (infinite? v))) v default))
-  (define clamped (max 0.0 (min 256.0 (exact->inexact raw))))
-  (define half-rounded (/ (round (* clamped 2.0)) 2.0))
-  (if (and (exact-integer? raw) (= clamped (exact->inexact (exact-round half-rounded))))
-      (exact-round half-rounded)
-      half-rounded))
-
 (define (generate-race-priority-candidates
          #:race [raw-race 'Zerg]
          #:frame [raw-frame 0]
@@ -3060,7 +3049,7 @@
                      (hash 'rank (priority-decision-entry-rank d)
                            'id (priority-decision-entry-id d)
                            'category (priority-decision-entry-category d)
-                           'utility (/ (round (* 10.0 (priority-decision-entry-utility-score d))) 10.0)
+                           'utility (round1 (priority-decision-entry-utility-score d))
                            'min-cost (priority-decision-entry-min-cost d)
                            'gas-cost (priority-decision-entry-gas-cost d)
                            'blocking? (priority-decision-entry-blocking-allowed? d)
@@ -3093,14 +3082,14 @@
                #:when (eq? (priority-decision-entry-outcome d) 'scheduled))
       (format "~a@~a"
               (priority-decision-entry-id d)
-              (/ (round (* 10.0 (priority-decision-entry-utility-score d))) 10.0))))
+              (round1 (priority-decision-entry-utility-score d)))))
   (define blocked-strs
     (for/list ([d (in-list trace)]
                #:when (memq (priority-decision-entry-outcome d) '(blocked-by-escrow escrowed-saving)))
       (format "~a(~a,u=~a,floor=~aM)"
               (priority-decision-entry-id d)
               (priority-decision-entry-outcome d)
-              (/ (round (* 10.0 (priority-decision-entry-utility-score d))) 10.0)
+              (round1 (priority-decision-entry-utility-score d))
               (priority-decision-entry-applicable-min-floor d))))
   (format "[SCBOT_PRIORITY] f=~a race=~a bank=~aM/~aG sup=~a/~a bo=~a saving_for=~a(floor=~aM/~aG) sched=(~a) escrow_queue=(~a)"
           frame race minerals gas supply-used supply-cap
@@ -4009,16 +3998,7 @@
           (>= (car sp) (safe-nonneg-int min-cost 0))
           (>= (cdr sp) (safe-nonneg-int gas-cost 0)))]))
 
-(define (extract-record-sym rec)
-  (cond
-    [(hash? rec)
-     (define t (hash-ref rec 'type 'unknown))
-     (cond
-       [(symbol? t) t]
-       [(string? t) (string->symbol (string-downcase t))]
-       [else 'unknown])]
-    [(symbol? rec) rec]
-    [else 'unknown]))
+(define extract-record-sym unit-type-sym)
 
 (define (evaluate-max-supply-manager
          #:race [raw-race 'Zerg]

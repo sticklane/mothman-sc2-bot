@@ -355,7 +355,7 @@
       }
     };
 
-    const API_BASE = window.location.port === "4322"
+    const API_BASE = window.location.protocol.startsWith("http")
       ? window.location.origin
       : "http://127.0.0.1:4322";
 

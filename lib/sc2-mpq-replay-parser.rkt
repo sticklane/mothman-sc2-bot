@@ -22,7 +22,8 @@
          racket/path
          racket/port
          racket/string
-         file/gunzip)
+         file/gunzip
+         "sc2-common.rkt")
 
 (provide STORM-CRYPT
          mpq-hash
@@ -582,9 +583,6 @@
                       (abs (hash-ref b 'delta_p1_chance)))))
            (min 3 (length candidates)))]))
 
-(define (round1 x)
-  (/ (round (* 10.0 (exact->inexact x))) 10.0))
-
 (define (bytes->utf8-clean v [fallback ""])
   (cond
     [(bytes? v) (bytes->string/utf-8 v #\?)]
@@ -699,7 +697,7 @@
                  (define cl (car cs))
                  (define cx (/ (for/sum ([q (in-list cl)]) (car q)) (length cl)))
                  (define cy (/ (for/sum ([q (in-list cl)]) (cdr q)) (length cl)))
-                 (if (<= (sqrt (+ (sqr (- px cx)) (sqr (- py cy)))) 14.0)
+                 (if (<= (dist2d px py cx cy) 14.0)
                      (loop (cdr rem) (append (reverse acc) (list (cons pt cl)) (cdr cs)))
                      (find-cl (cdr cs) (cons cl acc)))]))))))
 
@@ -710,7 +708,7 @@
     (define sorted-centroids
       (sort solved-resource-base-centroids
             <
-            #:key (lambda (c) (sqrt (+ (sqr (- (car c) sx)) (sqr (- (cdr c) sy)))))))
+            #:key (lambda (c) (dist2d (car c) (cdr c) sx sy))))
     (define top3 (take sorted-centroids (min 3 (length sorted-centroids))))
     (hash-set! player-own-3-bases pid (cons (cons sx sy) top3)))
 
@@ -796,8 +794,7 @@
                (define own-bases (hash-ref player-own-3-bases p))
                (define min-own-base-dist
                  (for/fold ([best +inf.0]) ([bc (in-list own-bases)])
-                   (min best (sqrt (+ (sqr (- ux (car bc)))
-                                      (sqr (- uy (cdr bc))))))))
+                   (min best (dist2d ux uy (car bc) (cdr bc)))))
                ;; Proxy invariant: building NOT in player's own main, natural, or 3rd (> 28.0 tiles)
                ;; (when synthetic replay has 0 map minerals, fallback requires > 28.0 tiles from start-xy).
                (when (> min-own-base-dist 28.0)

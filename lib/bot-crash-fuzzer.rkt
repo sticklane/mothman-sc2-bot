@@ -568,22 +568,10 @@
 (define FLYING-SCOUT-SET (list->seteq FLYING-NONCOMBAT-SCOUT-SYMS))
 (define ALL-AIR-SET (list->seteq ALL-AIR-UNIT-SYMS))
 
-(define (safe-dist2d x1 y1 x2 y2)
-  (if (and (finite-real? x1) (finite-real? y1) (finite-real? x2) (finite-real? y2))
-      (sqrt (+ (sqr (- x2 x1)) (sqr (- y2 y1))))
-      99999.0))
-
 (define (extract-unit-type-sym u)
-  (cond
-    [(hash? u)
-     (define raw (hash-ref u 'type 'unknown))
-     (cond
-       [(symbol? raw) raw]
-       [(string? raw) (string->symbol (string-downcase raw))]
-       [else 'unknown])]
-    [(and (list? u) (>= (length u) 2) (symbol? (second u)))
-     (second u)]
-    [else 'unknown]))
+  (if (and (list? u) (>= (length u) 2) (symbol? (second u)))
+      (second u)
+      (unit-type-sym u)))
 
 (define (extract-coord u key fallback)
   (cond

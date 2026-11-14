@@ -13,589 +13,57 @@
 //!    - `--batch-dir <dir> [--limit N] [--summary-only] [--out <file.json>]`
 //!    - `--export-ui-bundle <out.json> [--dirs d1,d2] [--ids id1,id2] [--limit 5] [--max-frames 140]`
 
+mod analytics;
+mod balance;
 mod forensics;
+mod models;
+mod priority_log;
+mod server;
 
-use forensics::{
-    ReplaySidecarBundle, analyze_replay_bytes, balance_units_db, clean_player_name,
-    read_priority_snapshots_for_replay,
-};
-use s2protocol::basic_replay_data::SC2ReplayBasicData;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+pub use forensics::*;
+pub use server::analyze_replay_file;
+
+use server::{default_repo_root, epoch_now_sec, run_server, scan_catalog};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, mpsc};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CatalogEntry {
-    pub id: String,
-    pub file_name: String,
-    pub source_dir: String,
-    pub size_bytes: u64,
-    pub modified_epoch_sec: u64,
-    pub map_name: String,
-    pub p1_name: String,
-    pub p1_race: String,
-    pub p1_result: String,
-    pub p2_name: String,
-    pub p2_race: String,
-    pub p2_result: String,
-    pub protocol_version: u32,
-    pub has_priority_log: bool,
-    #[serde(skip)]
-    pub full_path: PathBuf,
+fn resolve_default_port_from(primary: Option<&str>, secondary: Option<&str>) -> u16 {
+    [primary, secondary]
+        .into_iter()
+        .flatten()
+        .find_map(|v| v.trim().parse::<u16>().ok())
+        .unwrap_or(4322)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UiPreloadBundle {
-    pub generated_at_epoch_sec: u64,
-    pub s2protocol_version: String,
-    pub catalog: Vec<CatalogEntry>,
-    pub replays: BTreeMap<String, ReplaySidecarBundle>,
+fn resolve_default_port() -> u16 {
+    let p = std::env::var("ANTIGRAVITY_SIDECAR_WEB_PORT").ok();
+    let s = std::env::var("PORT").ok();
+    resolve_default_port_from(p.as_deref(), s.as_deref())
 }
 
-struct SidecarState {
-    started_at: Instant,
-    watch_dirs: Vec<PathBuf>,
-    ui_html_path: PathBuf,
-    balance_versions: Vec<u32>,
-    catalog: RwLock<Vec<CatalogEntry>>,
-    replay_cache: RwLock<HashMap<String, Arc<String>>>,
-    sse_clients: Mutex<Vec<mpsc::Sender<String>>>,
-    requests_served: AtomicU64,
+fn default_watch_dirs(root: &Path) -> Vec<PathBuf> {
+    vec![
+        root.join("replays/aiarena_matches"),
+        root.join("replays/aiarena_live_cache"),
+        root.join("replays/local_real_matches"),
+        root.join("replays"),
+    ]
 }
 
-fn epoch_now_sec() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-fn replay_id_from_path(path: &Path) -> String {
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("replay");
-    let first = stem.split('_').next().unwrap_or(stem);
-    if !first.is_empty() && first.chars().all(|c| c.is_ascii_digit()) {
-        first.to_string()
-    } else {
-        stem.chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect()
-    }
-}
-
-fn has_companion_priority_log(replay_path: &Path) -> bool {
-    let stem = replay_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default();
-    let parent = replay_path.parent().unwrap_or_else(|| Path::new("."));
-    if parent.join(format!("{stem}_priority.log")).exists()
-        || parent.join(format!("{stem}_stdout.log")).exists()
-    {
-        return true;
-    }
-    if let Some(id) = stem.split('_').next()
-        && !id.is_empty()
-        && id.chars().all(|c| c.is_ascii_digit())
-    {
-        return parent.join(format!("{id}_match_log.zip")).exists();
-    }
-    false
-}
-
-fn inspect_catalog_entry(path: &Path) -> Option<CatalogEntry> {
-    if path.extension().and_then(|e| e.to_str()) != Some("SC2Replay") {
-        return None;
-    }
-    let meta = std::fs::metadata(path).ok()?;
-    if meta.len() == 0 {
-        return None;
-    }
-    let modified_epoch_sec = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let file_name = path.file_name()?.to_string_lossy().to_string();
-    let source_dir = path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "replays".to_string());
-    let id = replay_id_from_path(path);
-    let bytes = std::fs::read(path).ok()?;
-    let basic = SC2ReplayBasicData::from_bytes(&file_name, 0, &bytes).ok()?;
-    let p1 = basic.details.player_list.first();
-    let p2 = basic.details.player_list.get(1);
-    Some(CatalogEntry {
-        id,
-        file_name,
-        source_dir,
-        size_bytes: meta.len(),
-        modified_epoch_sec,
-        map_name: basic.details.title,
-        p1_name: p1.map(|p| clean_player_name(&p.name)).unwrap_or_default(),
-        p1_race: p1
-            .map(|p| forensics::normalize_race(&p.race))
-            .unwrap_or_default(),
-        p1_result: p1
-            .map(|p| format!("{:?}", p.result).trim_matches('"').to_string())
-            .unwrap_or_default(),
-        p2_name: p2.map(|p| clean_player_name(&p.name)).unwrap_or_default(),
-        p2_race: p2
-            .map(|p| forensics::normalize_race(&p.race))
-            .unwrap_or_default(),
-        p2_result: p2
-            .map(|p| format!("{:?}", p.result).trim_matches('"').to_string())
-            .unwrap_or_default(),
-        protocol_version: basic.init_data.version,
-        has_priority_log: has_companion_priority_log(path),
-        full_path: path.to_path_buf(),
-    })
-}
-
-fn scan_catalog(dirs: &[PathBuf]) -> Vec<CatalogEntry> {
-    let mut by_id: BTreeMap<String, CatalogEntry> = BTreeMap::new();
-    for dir in dirs {
-        let Ok(rd) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if let Some(cat) = inspect_catalog_entry(&path) {
-                let replace = by_id
-                    .get(&cat.id)
-                    .is_none_or(|prev| cat.modified_epoch_sec >= prev.modified_epoch_sec);
-                if replace {
-                    by_id.insert(cat.id.clone(), cat);
-                }
-            }
-        }
-    }
-    let mut list: Vec<CatalogEntry> = by_id.into_values().collect();
-    list.sort_by(|a, b| {
-        let an = a.id.parse::<u64>().ok();
-        let bn = b.id.parse::<u64>().ok();
-        match (bn, an) {
-            (Some(x), Some(y)) => x.cmp(&y),
-            _ => b
-                .modified_epoch_sec
-                .cmp(&a.modified_epoch_sec)
-                .then_with(|| b.id.cmp(&a.id)),
-        }
-    });
-    list
-}
-
-pub fn analyze_replay_file(
-    path: &Path,
-    max_frames: usize,
-    summary_only: bool,
-) -> Result<ReplaySidecarBundle, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| format!("Failed to read replay {}: {e}", path.display()))?;
-    let file_name = path
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_else(|| "replay.SC2Replay".to_string());
-    let id = replay_id_from_path(path);
-    let prio = read_priority_snapshots_for_replay(path);
-    let mut bundle = analyze_replay_bytes(&id, &file_name, &bytes, prio, max_frames)?;
-    if summary_only {
-        bundle.frames.clear();
-        bundle.static_objects.clear();
-        bundle.priority_snapshots.clear();
-    }
-    Ok(bundle)
-}
-
-fn default_repo_root() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if cwd.join("replays").is_dir() {
-        return cwd;
-    }
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(root) = manifest.parent().and_then(|p| p.parent())
-        && root.join("replays").is_dir()
-    {
-        return root.to_path_buf();
-    }
-    cwd
-}
-
-fn broadcast_sse(state: &SidecarState, event_name: &str, payload_json: &str) {
-    let msg = format!("event: {event_name}\ndata: {payload_json}\n\n");
-    if let Ok(mut clients) = state.sse_clients.lock() {
-        clients.retain(|tx| tx.send(msg.clone()).is_ok());
-    }
-}
-
-fn write_http_response(
-    stream: &mut TcpStream,
-    status: &str,
-    content_type: &str,
-    body: &[u8],
-) -> std::io::Result<()> {
-    let header = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(header.as_bytes())?;
-    stream.write_all(body)?;
-    stream.flush()
-}
-
-fn url_decode_simple(raw: &str) -> String {
-    let mut out = Vec::with_capacity(raw.len());
-    let bytes = raw.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3])
-            && let Ok(val) = u8::from_str_radix(hex, 16)
-        {
-            out.push(val);
-            i += 3;
-            continue;
-        } else if bytes[i] == b'+' {
-            out.push(b' ');
+fn resolve_ui_html_path(root: &Path, ui_arg: Option<String>) -> PathBuf {
+    ui_arg.map(PathBuf::from).unwrap_or_else(|| {
+        let nested = root.join("crates/s2protocol-sidecar/sidecar-ui.html");
+        if nested.exists() {
+            nested
         } else {
-            out.push(bytes[i]);
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).to_string()
-}
-
-fn handle_client(mut stream: TcpStream, state: Arc<SidecarState>) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
-    let Ok(cloned) = stream.try_clone() else {
-        return;
-    };
-    let mut reader = BufReader::new(cloned);
-    let mut req_line = String::new();
-    if reader.read_line(&mut req_line).unwrap_or(0) == 0 {
-        return;
-    }
-    let parts: Vec<&str> = req_line.trim_end().split_whitespace().collect();
-    if parts.len() < 2 {
-        return;
-    }
-    let method = parts[0];
-    let full_target = parts[1];
-    let (path, query) = full_target
-        .split_once('?')
-        .unwrap_or((full_target, ""));
-
-    let mut content_length: usize = 0;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).unwrap_or(0) == 0 {
-            break;
-        }
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some((k, v)) = trimmed.split_once(':')
-            && k.trim().eq_ignore_ascii_case("content-length")
-        {
-            content_length = v.trim().parse().unwrap_or(0);
-        }
-    }
-
-    state.requests_served.fetch_add(1, Ordering::Relaxed);
-
-    if method == "OPTIONS" {
-        let _ = write_http_response(&mut stream, "204 No Content", "text/plain", b"");
-        return;
-    }
-
-    if method == "GET" && path == "/api/events" {
-        let _ = stream.set_read_timeout(None);
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-        let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
-        if stream.write_all(header.as_bytes()).is_err() {
-            return;
-        }
-        let cat_len = state.catalog.read().map(|c| c.len()).unwrap_or(0);
-        let hello = format!(
-            "event: connected\ndata: {{\"ok\":true,\"catalog_count\":{cat_len}}}\n\n"
-        );
-        if stream.write_all(hello.as_bytes()).is_err() || stream.flush().is_err() {
-            return;
-        }
-        let (tx, rx) = mpsc::channel::<String>();
-        if let Ok(mut clients) = state.sse_clients.lock() {
-            clients.push(tx);
-        }
-        while let Ok(msg) = rx.recv() {
-            if stream.write_all(msg.as_bytes()).is_err() || stream.flush().is_err() {
-                break;
+            let local = root.join("sidecar-ui.html");
+            if local.exists() {
+                local
+            } else {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecar-ui.html")
             }
         }
-        return;
-    }
-
-    if method == "GET" && (path == "/" || path == "/sidecar" || path == "/index.html") {
-        match std::fs::read(&state.ui_html_path) {
-            Ok(html) => {
-                let _ = write_http_response(
-                    &mut stream,
-                    "200 OK",
-                    "text/html; charset=utf-8",
-                    &html,
-                );
-            }
-            Err(e) => {
-                let msg = format!("sidecar-ui.html not found ({e})");
-                let _ = write_http_response(
-                    &mut stream,
-                    "404 Not Found",
-                    "text/plain; charset=utf-8",
-                    msg.as_bytes(),
-                );
-            }
-        }
-        return;
-    }
-
-    if method == "GET" && path == "/api/status" {
-        let cat_count = state.catalog.read().map(|c| c.len()).unwrap_or(0);
-        let cached_count = state.replay_cache.read().map(|c| c.len()).unwrap_or(0);
-        let sse_count = state.sse_clients.lock().map(|c| c.len()).unwrap_or(0);
-        let status_json = serde_json::json!({
-            "ok": true,
-            "service": "s2protocol-sidecar",
-            "s2protocol_version": "5.1.0",
-            "ai_arena_75689_supported": state.balance_versions.contains(&75689),
-            "balance_versions": state.balance_versions,
-            "uptime_sec": state.started_at.elapsed().as_secs(),
-            "catalog_count": cat_count,
-            "cached_replays": cached_count,
-            "sse_clients": sse_count,
-            "requests_served": state.requests_served.load(Ordering::Relaxed),
-            "watched_dirs": state.watch_dirs.iter().map(|d| d.file_name().unwrap_or_default().to_string_lossy().to_string()).collect::<Vec<_>>(),
-        });
-        let body = serde_json::to_vec(&status_json).unwrap_or_default();
-        let _ = write_http_response(&mut stream, "200 OK", "application/json", &body);
-        return;
-    }
-
-    if method == "GET" && path == "/api/catalog" {
-        let list = state.catalog.read().map(|c| c.clone()).unwrap_or_default();
-        let body = serde_json::to_vec(&list).unwrap_or_default();
-        let _ = write_http_response(&mut stream, "200 OK", "application/json", &body);
-        return;
-    }
-
-    if method == "GET"
-        && let Some(raw_id) = path.strip_prefix("/api/replay/")
-    {
-        let id = url_decode_simple(raw_id);
-        if let Ok(cache) = state.replay_cache.read()
-            && let Some(cached_json) = cache.get(&id)
-        {
-            let _ = write_http_response(
-                &mut stream,
-                "200 OK",
-                "application/json",
-                cached_json.as_bytes(),
-            );
-            return;
-        }
-
-        let found_path = state.catalog.read().ok().and_then(|cat| {
-            cat.iter()
-                .find(|e| e.id == id || e.file_name == id)
-                .map(|e| (e.id.clone(), e.full_path.clone()))
-        });
-        let Some((canon_id, full_path)) = found_path else {
-            let err = serde_json::json!({ "ok": false, "error": format!("Replay '{id}' not found in catalog") });
-            let _ = write_http_response(
-                &mut stream,
-                "404 Not Found",
-                "application/json",
-                err.to_string().as_bytes(),
-            );
-            return;
-        };
-
-        match analyze_replay_file(&full_path, 260, false) {
-            Ok(bundle) => {
-                let json_str = Arc::new(serde_json::to_string(&bundle).unwrap_or_default());
-                if let Ok(mut cache) = state.replay_cache.write() {
-                    cache.insert(canon_id, Arc::clone(&json_str));
-                }
-                let _ = write_http_response(
-                    &mut stream,
-                    "200 OK",
-                    "application/json",
-                    json_str.as_bytes(),
-                );
-            }
-            Err(e) => {
-                let err = serde_json::json!({ "ok": false, "error": e });
-                let _ = write_http_response(
-                    &mut stream,
-                    "500 Internal Server Error",
-                    "application/json",
-                    err.to_string().as_bytes(),
-                );
-            }
-        }
-        return;
-    }
-
-    if method == "POST" && path == "/api/analyze-bytes" {
-        if content_length == 0 || content_length > 25 * 1024 * 1024 {
-            let err = serde_json::json!({ "ok": false, "error": "Invalid replay upload size (must be >0 and <=25MB)" });
-            let _ = write_http_response(
-                &mut stream,
-                "400 Bad Request",
-                "application/json",
-                err.to_string().as_bytes(),
-            );
-            return;
-        }
-        let mut body_bytes = vec![0u8; content_length];
-        if reader.read_exact(&mut body_bytes).is_err() {
-            let err = serde_json::json!({ "ok": false, "error": "Failed reading uploaded replay bytes" });
-            let _ = write_http_response(
-                &mut stream,
-                "400 Bad Request",
-                "application/json",
-                err.to_string().as_bytes(),
-            );
-            return;
-        }
-        let file_name = query
-            .split('&')
-            .find_map(|kv| kv.strip_prefix("name="))
-            .map(url_decode_simple)
-            .unwrap_or_else(|| format!("uploaded_{}.SC2Replay", epoch_now_sec()));
-        let id = replay_id_from_path(Path::new(&file_name));
-        match analyze_replay_bytes(&id, &file_name, &body_bytes, vec![], 260) {
-            Ok(bundle) => {
-                let json_str = Arc::new(serde_json::to_string(&bundle).unwrap_or_default());
-                if let Ok(mut cache) = state.replay_cache.write() {
-                    cache.insert(id.clone(), Arc::clone(&json_str));
-                }
-                let _ = write_http_response(
-                    &mut stream,
-                    "200 OK",
-                    "application/json",
-                    json_str.as_bytes(),
-                );
-            }
-            Err(e) => {
-                let err = serde_json::json!({ "ok": false, "error": e });
-                let _ = write_http_response(
-                    &mut stream,
-                    "422 Unprocessable Entity",
-                    "application/json",
-                    err.to_string().as_bytes(),
-                );
-            }
-        }
-        return;
-    }
-
-    let err = serde_json::json!({ "ok": false, "error": format!("Unknown route: {method} {path}") });
-    let _ = write_http_response(
-        &mut stream,
-        "404 Not Found",
-        "application/json",
-        err.to_string().as_bytes(),
-    );
-}
-
-fn run_server(host: &str, port: u16, watch_dirs: Vec<PathBuf>, ui_html_path: PathBuf) -> Result<(), String> {
-    let db = balance_units_db()?;
-    let mut balance_versions: Vec<u32> = db.keys().copied().collect();
-    balance_versions.sort_unstable();
-
-    let initial_catalog = scan_catalog(&watch_dirs);
-    let state = Arc::new(SidecarState {
-        started_at: Instant::now(),
-        watch_dirs: watch_dirs.clone(),
-        ui_html_path,
-        balance_versions,
-        catalog: RwLock::new(initial_catalog.clone()),
-        replay_cache: RwLock::new(HashMap::new()),
-        sse_clients: Mutex::new(Vec::new()),
-        requests_served: AtomicU64::new(0),
-    });
-
-    let addr = format!("{host}:{port}");
-    let listener = TcpListener::bind(&addr)
-        .map_err(|e| format!("Failed binding {addr}: {e}"))?;
-    eprintln!(
-        "[s2protocol-sidecar] Listening on http://{addr} | catalog={} replays | protocol 75689 ready",
-        initial_catalog.len()
-    );
-
-    // Background directory watcher + SSE heartbeat thread
-    let watcher_state = Arc::clone(&state);
-    std::thread::spawn(move || {
-        let mut tick = 0u64;
-        loop {
-            std::thread::sleep(Duration::from_secs(4));
-            tick += 1;
-            let updated = scan_catalog(&watcher_state.watch_dirs);
-            let changed = watcher_state
-                .catalog
-                .read()
-                .map(|old| {
-                    old.len() != updated.len()
-                        || old.first().map(|e| (&e.id, e.modified_epoch_sec))
-                            != updated.first().map(|e| (&e.id, e.modified_epoch_sec))
-                })
-                .unwrap_or(false);
-            if changed {
-                let count = updated.len();
-                let newest = updated.first().map(|e| e.id.clone()).unwrap_or_default();
-                if let Ok(mut w) = watcher_state.catalog.write() {
-                    *w = updated;
-                }
-                let payload = serde_json::json!({
-                    "catalog_count": count,
-                    "newest_id": newest,
-                    "epoch_sec": epoch_now_sec()
-                });
-                broadcast_sse(&watcher_state, "catalog-updated", &payload.to_string());
-            } else if tick % 3 == 0 {
-                let payload = serde_json::json!({
-                    "uptime_sec": watcher_state.started_at.elapsed().as_secs(),
-                    "epoch_sec": epoch_now_sec()
-                });
-                broadcast_sse(&watcher_state, "heartbeat", &payload.to_string());
-            }
-        }
-    });
-
-    for incoming in listener.incoming() {
-        if let Ok(stream) = incoming {
-            let st = Arc::clone(&state);
-            std::thread::spawn(move || handle_client(stream, st));
-        }
-    }
-    Ok(())
+    })
 }
 
 fn print_usage() {
@@ -619,7 +87,7 @@ fn main() {
     let mut target_path = String::new();
     let mut out_path: Option<String> = None;
     let mut host = "127.0.0.1".to_string();
-    let mut port: u16 = 4322;
+    let mut port: u16 = resolve_default_port();
     let mut dirs_arg: Option<String> = None;
     let mut ids_arg: Option<String> = None;
     let mut ui_arg: Option<String> = None;
@@ -653,10 +121,7 @@ fn main() {
             }
             "--port" => {
                 i += 1;
-                port = args
-                    .get(i)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(4322);
+                port = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(port);
             }
             "--dirs" => {
                 i += 1;
@@ -683,10 +148,7 @@ fn main() {
             }
             "--limit" => {
                 i += 1;
-                limit = args
-                    .get(i)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(20);
+                limit = args.get(i).and_then(|s| s.parse().ok()).unwrap_or(20);
             }
             "--summary-only" => summary_only = true,
             "--pretty" => pretty = true,
@@ -698,14 +160,9 @@ fn main() {
     let root = default_repo_root();
     let watch_dirs: Vec<PathBuf> = match dirs_arg {
         Some(raw) => raw.split(',').map(PathBuf::from).collect(),
-        None => vec![
-            root.join("replays/aiarena_live_cache"),
-            root.join("replays/local_real_matches"),
-        ],
+        None => default_watch_dirs(&root),
     };
-    let ui_html_path = ui_arg
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("crates/s2protocol-sidecar/sidecar-ui.html"));
+    let ui_html_path = resolve_ui_html_path(&root, ui_arg);
 
     match mode {
         "analyze" => {
@@ -814,7 +271,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forensics::{is_morph_death, normalize_race, parse_priority_log_lines};
+    use forensics::{
+        compute_turning_points, format_counts_map, has_companion_priority_log, is_morph_death,
+        normalize_race, parse_priority_log_lines, read_priority_snapshots_for_replay,
+        win_chance_coeffs,
+    };
 
     #[test]
     fn test_clean_player_name_and_race() {
@@ -851,6 +312,84 @@ mod tests {
     }
 
     #[test]
+    fn test_priority_logs_dir_discovery_with_temp_files() {
+        let uniq = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let base_dir = std::env::temp_dir().join(format!(
+            "s2protocol_sidecar_prio_test_{}_{}",
+            std::process::id(),
+            uniq
+        ));
+        let prio_dir = base_dir.join("priority-logs");
+        std::fs::create_dir_all(&prio_dir).unwrap();
+
+        let replay_match = base_dir.join("Mothman-P-test.SC2Replay");
+        let replay_plain = base_dir.join("Mothman-X-test.SC2Replay");
+        let replay_none = base_dir.join("Mothman-Missing.SC2Replay");
+        std::fs::write(&replay_match, b"dummy").unwrap();
+        std::fs::write(&replay_plain, b"dummy").unwrap();
+        std::fs::write(&replay_none, b"dummy").unwrap();
+
+        std::fs::write(
+            prio_dir.join("Mothman-P-test-match.log"),
+            "[SCBOT_PRIORITY] f=112 race=Protoss bank=150M/0G sup=14/15 bo=pylon saving_for=none sched=(probe@90.0) escrow_queue=() step_ms=2.1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            prio_dir.join("Mothman-X-test.log"),
+            "[SCBOT_PRIORITY] f=224 race=Zerg bank=200M/0G sup=15/16 bo=done saving_for=none approved=(drone) escrow_queue=() blocked=() step_ms=1.2ms\n",
+        )
+        .unwrap();
+
+        assert!(has_companion_priority_log(&replay_match));
+        assert!(has_companion_priority_log(&replay_plain));
+        assert!(!has_companion_priority_log(&replay_none));
+
+        let p_snaps = read_priority_snapshots_for_replay(&replay_match);
+        assert_eq!(p_snaps.len(), 1);
+        assert_eq!(p_snaps[0].frame, 112);
+        assert_eq!(p_snaps[0].race, "Protoss");
+        assert_eq!(p_snaps[0].approved, "(probe@90.0)");
+
+        let x_snaps = read_priority_snapshots_for_replay(&replay_plain);
+        assert_eq!(x_snaps.len(), 1);
+        assert_eq!(x_snaps[0].frame, 224);
+        assert_eq!(x_snaps[0].race, "Zerg");
+
+        assert!(read_priority_snapshots_for_replay(&replay_none).is_empty());
+
+        let _ = std::fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_module_boundary_reexports_and_helpers() {
+        // Verify balance + analytics + models re-exports via `forensics` and `crate::*`
+        assert_eq!(forensics::base_unit_name("SiegeTankSieged"), "SiegeTank");
+        let coeffs = win_chance_coeffs(3.0);
+        assert!((coeffs[0] - 0.231).abs() < 1e-4);
+
+        let mut counts = BTreeMap::new();
+        counts.insert("Zealot".to_string(), 3);
+        counts.insert("Stalker".to_string(), 2);
+        assert_eq!(format_counts_map(&counts), "2xStalker,3xZealot");
+
+        assert!(compute_turning_points(&[], &[]).is_empty());
+        assert_eq!(resolve_default_port_from(Some("8080"), Some("9000")), 8080);
+        assert_eq!(resolve_default_port_from(Some("bad"), Some("5050")), 5050);
+        assert_eq!(resolve_default_port_from(None, None), 4322);
+
+        let root = Path::new("/example/repo");
+        let dirs = default_watch_dirs(root);
+        assert_eq!(dirs.len(), 4);
+        assert_eq!(dirs[0], root.join("replays/aiarena_matches"));
+        assert_eq!(dirs[1], root.join("replays/aiarena_live_cache"));
+        assert_eq!(dirs[2], root.join("replays/local_real_matches"));
+        assert_eq!(dirs[3], root.join("replays"));
+    }
+
+    #[test]
     fn test_balance_db_includes_ai_arena_75689() {
         let db = balance_units_db().expect("embedded BalanceData must load");
         assert!(
@@ -862,14 +401,19 @@ mod tests {
     #[test]
     fn test_real_replay_state_machine_if_present() {
         let root = default_repo_root();
-        let cache_dir = root.join("replays/aiarena_live_cache");
-        let cat = scan_catalog(&[cache_dir]);
+        let cat = scan_catalog(&default_watch_dirs(&root));
         if let Some(first) = cat.first() {
             let bundle = analyze_replay_file(&first.full_path, 90, false)
                 .expect("Real AI Arena replay must parse cleanly");
             assert_eq!(bundle.players.len(), 2);
             assert!(!bundle.frames.is_empty());
             assert!(bundle.protocol_version > 0);
+        }
+        let top_replay = root.join("replays/Mothman-P-full.SC2Replay");
+        if top_replay.exists() {
+            assert!(has_companion_priority_log(&top_replay));
+            let snaps = read_priority_snapshots_for_replay(&top_replay);
+            assert!(!snaps.is_empty());
         }
     }
 }

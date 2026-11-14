@@ -31,6 +31,7 @@
          racket/system
          file/unzip
          json
+         "../lib/sc2-common.rkt"
          "../lib/sc2-mpq-replay-parser.rkt")
 
 (provide DEFAULT-TOKEN
@@ -78,15 +79,6 @@
      (248  . "Eris")
      (611  . "Phobos")
      (730  . "Deimos"))))
-
-(define (round1 x)
-  (/ (round (* 10.0 (exact->inexact x))) 10.0))
-
-(define (round2 x)
-  (/ (round (* 100.0 (exact->inexact x))) 100.0))
-
-(define (jnull->false v)
-  (if (or (eq? v 'null) (not v)) #f v))
 
 (define (safe-filename-token s)
   (define cleaned (regexp-replace* #rx"[^A-Za-z0-9._-]+" (format "~a" s) "_"))
