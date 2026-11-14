@@ -1529,21 +1529,24 @@
                (bldg-count-equivalent total-bldg-counts 'stargate))]))
   (define max-fac-count (max 2 (* 3 active-bases)))
 
-  ;; Supply threshold: scales with both supply-cap AND active production facilities so multi-Rax/Gate/Hatch
-  ;; cycles trigger Overlord/Depot/Pylon lead time BEFORE hitting 100% cap (`SUPPLY_BLOCKED` fix).
+  ;; Supply threshold: continuously coupled to active bases, production facilities & worker saturation
+  ;; so multi-Rax/Gate/Hatch cycles trigger Overlord/Depot/Pylon lead time BEFORE hitting 100% cap.
   (define supply-buffer
-    (cond
-      [(< supply-cap 20) 1]
-      [(< supply-cap 26) 2]
-      [(>= supply-cap 66)
-       (if (hash? open-facility-slots)
-           (min 16 (max 6 (+ 3 (* 2 active-bases) prod-fac-count)))
-           6)]
-      [(>= supply-cap 36)
-       (if (hash? open-facility-slots)
-           (min 12 (max 4 (+ 2 (* 2 active-bases) (quotient prod-fac-count 2))))
-           4)]
-      [else 2]))
+    (if (hash? open-facility-slots)
+        (compute-production-coupled-supply-buffer
+         #:active-bases active-bases
+         #:production-facilities prod-fac-count
+         #:workers workers
+         #:target-workers target-workers
+         #:min-buffer 1
+         #:max-buffer 16)
+        (compute-production-coupled-supply-buffer
+         #:active-bases active-bases
+         #:production-facilities (min 2 prod-fac-count)
+         #:workers workers
+         #:target-workers target-workers
+         #:min-buffer 1
+         #:max-buffer 6)))
 
   (define base-metrics
     (compute-state-pressure-metrics

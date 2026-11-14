@@ -10,13 +10,16 @@
 ;;   - ladder/Mothman-P.zip (Protoss)
 ;;
 ;; 1. Precompiles all `#lang sc-bot` and Racket runtime modules to `.zo` bytecode
-;;    via `compiler/cm` (`managed-compile-zo`).
-;; 2. Compiles `ladder/cpplinux_launcher.cpp` into a stripped Linux x86_64 ELF
-;;    launcher (`<BotName>`) via `system*` (`g++ -O2 -s -std=c++17`).
-;; 3. Writes standard PKZIP archives directly in pure Racket (`file/gzip` deflate
-;;    for source/bytecode + `ZIP_STORED` for `racket_runtime.tar.xz`) with Unix
-;;    `0755` executable attributes on `<BotName>` and `run.py` — without touching
-;;    `/tmp` or `/var/tmp` or invoking Python.
+;;    via `compiler/cm` (`managed-compile-zo`) inside the hermetic portable
+;;    Racket 8.16 (`GLIBC_2.14`) runtime unpacked from
+;;    `ladder/.cache/racket_runtime.tar.xz`.
+;; 2. Embeds the compiled bytecode and `.rackboot` image into a path-independent,
+;;    untethered standalone Linux x86_64 ELF (`ladder/.cache/mothman_standalone_elf`)
+;;    with zero `GLIBC > 2.14`, `libxxhash`, `liblz4`, `libtinfo`, or `/home/` leaks.
+;; 3. Executes a local headless SC2 WebSocket + Protobuf initialization check
+;;    (`verify-standalone-elf-headless-init!`) against the standalone ELF before
+;;    writing the standard PKZIP archives (`file/gzip` deflate) with `0755` Unix
+;;    executable permissions on `<BotName>` and `run.py`.
 ;; =============================================================================
 
 (require racket/bytes
@@ -30,8 +33,11 @@
          racket/system
          compiler/cm
          compiler/embed
+         compiler/find-exe
+         setup/dirs
          file/gzip
-         json)
+         json
+         "../sim/racket-sc2-ladder-main.rkt")
 
 (provide AIARENA-STANDARD-MAX-ZIP-BYTES
          AIARENA-BRONZE-MAX-ZIP-BYTES
@@ -39,12 +45,20 @@
          MIN-BOT-ZIP-SIZE-BYTES
          MIN-STANDALONE-ELF-BYTES
          VARIANTS
+         ensure-portable-racket-815-runtime!
+         verify-standalone-elf-headless-init!
          validate-bot-zip-archive!
          build-all-aiarena-zips!)
 
 (define-runtime-path LADDER-DIR ".")
 (define ROOT-DIR (simplify-path (build-path LADDER-DIR "..")))
 (define CACHE-DIR (build-path LADDER-DIR ".cache"))
+(define PORTABLE-RUNTIME-DIR (build-path CACHE-DIR "racket_runtime"))
+(define PORTABLE-RACKET-BIN  (build-path PORTABLE-RUNTIME-DIR "bin" "racket"))
+(define PORTABLE-RUNTIME-TAR (build-path CACHE-DIR "racket_runtime.tar.xz"))
+(define PORTABLE-ETC-DIR     (build-path CACHE-DIR "portable-etc"))
+(define WORKSPACE-CODE-DIRS
+  '("compiled" "sc-bot" "compiler" "lib" "sim" "bots" "ffi" "ladder" "tools"))
 
 ;; AI Arena BotZip size limits:
 ;; - Standard tier max upload: 50 MiB (52,428,800 bytes)
@@ -189,21 +203,75 @@
       (write-u16le 0 out))))
 
 ;; -----------------------------------------------------------------------------
-;; 2. Precompile `.zo` Bytecode
+;; 2. Hermetic Portable Racket 8.16 Runtime & Clean `.zo` Bytecode Compilation
 ;; -----------------------------------------------------------------------------
 
+(define (clean-compiled-zo-tree!)
+  ;; Purge .zo/.dep files outside ladder/.cache only when they contain hardcoded
+  ;; host paths (`/home/` or `/Users/`), keeping clean incremental bytecode caches intact.
+  (for ([entry (in-list WORKSPACE-CODE-DIRS)])
+    (define p (build-path ROOT-DIR entry))
+    (cond
+      [(equal? entry "compiled")
+       (when (directory-exists? p)
+         (delete-directory/files p))]
+      [(directory-exists? p)
+       (for ([sub (in-directory
+                   p
+                   (lambda (dir)
+                     (define bn (file-name-from-path dir))
+                     (not (equal? (and bn (path->string bn)) ".cache"))))])
+         (when (file-exists? sub)
+           (define s (path->string sub))
+           (when (and (string-contains? s "/compiled/")
+                      (or (string-suffix? s ".zo")
+                          (string-suffix? s ".dep"))
+                      (regexp-match? #rx#"/(?:home|Users)/" (file->bytes sub)))
+             (delete-file sub))))])))
+
+(define (ensure-portable-racket-815-runtime!)
+  (unless (file-exists? PORTABLE-RACKET-BIN)
+    (unless (file-exists? PORTABLE-RUNTIME-TAR)
+      (error 'ensure-portable-racket-815-runtime!
+             "Missing bundled portable Racket archive: ~a"
+             PORTABLE-RUNTIME-TAR))
+    (define tar-exe (find-executable-path "tar"))
+    (unless tar-exe
+      (error 'ensure-portable-racket-815-runtime! "Could not locate 'tar' executable"))
+    (printf "[0/5] Unpacking bundled portable Racket 8.16 runtime (~a)...\n"
+            (path->string PORTABLE-RUNTIME-TAR))
+    (unless (system* tar-exe "-xf" (path->string PORTABLE-RUNTIME-TAR)
+                     "-C" (path->string CACHE-DIR))
+      (error 'ensure-portable-racket-815-runtime!
+             "Failed to unpack ~a into ~a"
+             PORTABLE-RUNTIME-TAR CACHE-DIR))
+    (unless (file-exists? PORTABLE-RACKET-BIN)
+      (error 'ensure-portable-racket-815-runtime!
+             "Unpacked archive did not produce ~a"
+             PORTABLE-RACKET-BIN)))
+  (with-handlers ([exn:fail? void])
+    (file-or-directory-permissions PORTABLE-RACKET-BIN #o755))
+  (make-directory* PORTABLE-ETC-DIR)
+  (define host-cfg-file (build-path (find-config-dir) "config.rktd"))
+  (define host-cfg
+    (if (file-exists? host-cfg-file)
+        (let ([v (call-with-input-file host-cfg-file read)])
+          (if (hash? v) v (hash)))
+        (hash)))
+  (define updated-cfg
+    (hash-set host-cfg 'bin-dir (path->string (simplify-path (build-path PORTABLE-RUNTIME-DIR "bin")))))
+  (call-with-output-file (build-path PORTABLE-ETC-DIR "config.rktd")
+    #:exists 'replace
+    (lambda (out)
+      (write updated-cfg out)
+      (newline out)))
+  PORTABLE-RACKET-BIN)
+
 (define (precompile-all-racket-zo!)
-  (printf "[1/4] Precompiling Racket modules to .zo bytecode via compiler/cm...\n")
+  (printf "[1/5] Precompiling Racket modules to .zo bytecode via compiler/cm (Racket ~a)...\n"
+          (version))
   (current-directory ROOT-DIR)
-  (define root-bstr (string->bytes/utf-8 (path->string ROOT-DIR)))
-  (for ([dname (in-list INCLUDE-DIRS)])
-    (define cdir (build-path ROOT-DIR dname "compiled"))
-    (when (directory-exists? cdir)
-      (for ([zf (in-directory cdir)])
-        (when (and (file-exists? zf)
-                   (string-suffix? (path->string zf) ".zo")
-                   (regexp-match-positions (regexp-quote root-bstr) (file->bytes zf)))
-          (delete-file zf)))))
+  (clean-compiled-zo-tree!)
   (define targets
     '("main.rkt"
       "compiler/syntax.rkt"
@@ -247,36 +315,148 @@
 ;;     executable instead of a `starter` wrapper that looks for a host `racket`.
 ;; -----------------------------------------------------------------------------
 
+(define (resolve-host-racket-bin)
+  (define exec-f (find-system-path 'exec-file))
+  (or (and (absolute-path? exec-f) (file-exists? exec-f) exec-f)
+      (find-executable-path exec-f)
+      (find-executable-path "racket")
+      (string->path "/usr/bin/racket")))
+
 (define (compile-standalone-racket-elf!)
   (make-directory* CACHE-DIR)
   (current-directory ROOT-DIR)
   (define out-bin (build-path CACHE-DIR "mothman_standalone_elf"))
-  (printf "  -> Compiling untethered standalone native Linux x86_64 ELF executable via compiler/embed (original-exe?=#t)...\n")
-  (parameterize ([current-directory-for-user ROOT-DIR]
-                 [current-write-relative-directory (cons ROOT-DIR ROOT-DIR)])
-    (create-embedding-executable
-     out-bin
-     #:aux (list (cons 'original-exe? #t)
-                 (cons 'config-dir (string->path "etc")))
-     #:collects-path "collects"
-     #:modules (list (list #f (build-path ROOT-DIR "sim/racket-sc2-ladder-main.rkt") '(main))
-                     (list #f (build-path ROOT-DIR "bots/Mothman-Z.rkt"))
-                     (list #f (build-path ROOT-DIR "bots/Mothman-T.rkt"))
-                     (list #f (build-path ROOT-DIR "bots/Mothman-P.rkt"))
-                     (list #f (build-path ROOT-DIR "bots/Mothman-R.rkt"))
-                     (list #f (build-path ROOT-DIR "bots/Mothman.rkt")))
-     #:configure-via-first-module? #t
-     #:literal-expression
-     (parameterize ([current-namespace (make-base-namespace)])
-       (compile '(namespace-require '(submod 'racket-sc2-ladder-main main))))
-     #:cmdline '("-U" "--")))
-  (unless (and (file-exists? out-bin)
-               (>= (file-size out-bin) MIN-STANDALONE-ELF-BYTES))
+  (printf "[2/5] Compiling untethered standalone native Linux x86_64 ELF via compiler/embed (Racket ~a)...\n"
+          (version))
+  ;; Invoke compiler/embed in a fresh subprocess so preloaded Typed Racket modules
+  ;; in this builder process cannot trigger `(submod prims-contract.rkt forms)` redefinition.
+  (define root-str (path->string (simplify-path ROOT-DIR)))
+  (define out-str (path->string (simplify-path out-bin)))
+  (define embed-expr
+    `(begin
+       (require compiler/embed)
+       (define d (simplify-path (string->path ,root-str)))
+       (parameterize ([current-directory d]
+                      [current-directory-for-user d]
+                      [current-write-relative-directory (cons d d)])
+         (create-embedding-executable
+          (string->path ,out-str)
+          #:aux (list (cons 'original-exe? #t)
+                      (cons 'config-dir (string->path "etc")))
+          #:collects-path "collects"
+          #:modules (list (list #f "sim/racket-sc2-ladder-main.rkt" '(main))
+                          (list #f "bots/Mothman-Z.rkt")
+                          (list #f "bots/Mothman-T.rkt")
+                          (list #f "bots/Mothman-P.rkt")
+                          (list #f "bots/Mothman-R.rkt")
+                          (list #f "bots/Mothman.rkt"))
+          #:configure-via-first-module? #t
+          #:literal-expression
+          (parameterize ([current-namespace (make-base-namespace)])
+            (compile '(namespace-require '(submod 'racket-sc2-ladder-main main))))
+          #:cmdline '("-U" "--")))))
+  (unless (parameterize ([current-directory ROOT-DIR])
+            (system* (resolve-host-racket-bin) "-e" (format "~s" embed-expr)))
     (error 'compile-standalone-racket-elf!
-           "Failed to build untethered standalone ELF executable ~a (>= ~a bytes required)"
-           out-bin MIN-STANDALONE-ELF-BYTES))
+           "Subprocess compiler/embed failed for ~a"
+           out-str))
+  (validate-elf-portability! (file->bytes out-bin) "mothman_standalone_elf" out-bin)
   (file-or-directory-permissions out-bin #o755)
   out-bin)
+
+;; -----------------------------------------------------------------------------
+;; 2c. Headless Bot Initialization Verification (`verify-standalone-elf-headless-init!`)
+;;     Launches the built standalone ELF in an isolated AI-Arena-like working
+;;     directory against `start-embedded-sc2-protobuf-server!` over WebSocket
+;;     and verifies full runtime initialization and stepping (`steps_executed >= 1`).
+;; -----------------------------------------------------------------------------
+
+(define (verify-standalone-elf-headless-init! elf-path)
+  (printf "[3/5] Running headless initialization verification on ~a...\n"
+          (path->string elf-path))
+  (define probe-dir (build-path CACHE-DIR "init_probe"))
+  (define probe-bin (build-path probe-dir "Mothman-Z"))
+  (define probe-cfg (build-path probe-dir "config.json"))
+  (define probe-bo  (build-path probe-dir "data" "pro_build_orders.sexp"))
+  (define src-bo    (build-path ROOT-DIR "data" "pro_build_orders.sexp"))
+  (define port (pick-free-local-port))
+  (define srv #f)
+  (dynamic-wind
+    (lambda ()
+      (when (directory-exists? probe-dir)
+        (delete-directory/files probe-dir))
+      (make-directory* (build-path probe-dir "data"))
+      (copy-file elf-path probe-bin #t)
+      (file-or-directory-permissions probe-bin #o755)
+      (call-with-output-file probe-cfg
+        #:exists 'replace
+        (lambda (out)
+          (display "{\n  \"BotName\": \"Mothman-Z\",\n  \"BotRace\": \"Zerg\",\n  \"BotPath\": \"bots/Mothman-Z.rkt\"\n}\n"
+                   out)))
+      (call-with-output-file (build-path probe-dir "data" "mirror_mind_opponents.json")
+        #:exists 'replace
+        (lambda (out)
+          (display "{\n  \"bot_name\": \"Mothman-Z\",\n  \"opponents\": {}\n}\n" out)))
+      (when (file-exists? src-bo)
+        (copy-file src-bo probe-bo #t))
+      (set! srv (start-embedded-sc2-protobuf-server!
+                 port #:our-race "Zerg" #:computer-race "Protoss")))
+    (lambda ()
+      (define-values (proc stdout-in stdin-out stderr-in)
+        (parameterize ([current-directory probe-dir])
+          (subprocess #f #f #f
+                      probe-bin
+                      "--GamePort" (number->string port)
+                      "--StartPort" (number->string port)
+                      "--LadderServer" "127.0.0.1"
+                      "--OpponentId" "headless_init_verify"
+                      "--max-loops" "16")))
+      (close-output-port stdin-out)
+      (define err-box (box ""))
+      (define err-thd
+        (thread (lambda ()
+                  (set-box! err-box (port->string stderr-in)))))
+      (define out-str (port->string stdout-in))
+      (thread-wait err-thd)
+      (define err-str (unbox err-box))
+      (close-input-port stdout-in)
+      (close-input-port stderr-in)
+      (define wait-thd (thread (lambda () (subprocess-wait proc))))
+      (unless (sync/timeout 25 wait-thd)
+        (with-handlers ([exn:fail? void]) (subprocess-kill proc #t))
+        (error 'verify-standalone-elf-headless-init!
+               "Standalone ELF timed out after 25s during headless initialization!\nstdout:\n~a\nstderr:\n~a"
+               out-str err-str))
+      (define rc (subprocess-status proc))
+      (unless (zero? rc)
+        (error 'verify-standalone-elf-headless-init!
+               "Standalone ELF exited with code ~a during headless initialization!\nstdout:\n~a\nstderr:\n~a"
+               rc out-str err-str))
+      (define summary
+        (for/or ([line (in-list (reverse (string-split out-str "\n")))])
+          (define trimmed (string-trim line))
+          (and (string-prefix? trimmed "{")
+               (with-handlers ([exn:fail? (lambda (_e) #f)])
+                 (string->jsexpr trimmed)))))
+      (unless (and (hash? summary)
+                   (equal? (hash-ref summary 'status #f) "MATCH_COMPLETED")
+                   (>= (hash-ref summary 'steps_executed 0) 1))
+        (error 'verify-standalone-elf-headless-init!
+               "Standalone ELF failed headless initialization handshake!\nstdout:\n~a\nstderr:\n~a"
+               out-str err-str))
+      (printf "  -> Headless init verified: status=~a, steps=~a, game_loops=~a, engine=~a\n"
+              (hash-ref summary 'status)
+              (hash-ref summary 'steps_executed)
+              (hash-ref summary 'game_loops)
+              (hash-ref summary 'engine))
+      summary)
+    (lambda ()
+      (when (hash? srv)
+        (define stop! (hash-ref srv 'stop! #f))
+        (when (procedure? stop!) (stop!)))
+      (with-handlers ([exn:fail? void])
+        (when (directory-exists? probe-dir)
+          (delete-directory/files probe-dir))))))
 
 ;; -----------------------------------------------------------------------------
 ;; 3. Collect Common Files, Validate Size/Binary Bounds & Build Each Variant Zip
@@ -284,6 +464,24 @@
 
 (define (bytes-contains-subbytes? haystack needle)
   (not (not (regexp-match-positions (regexp-quote needle) haystack))))
+
+(define (validate-elf-portability! elf-bytes bot-name [artifact-label elf-bytes])
+  (unless (and (>= (bytes-length elf-bytes) MIN-STANDALONE-ELF-BYTES)
+               (bytes=? (subbytes elf-bytes 0 4) #"\x7fELF")
+               (bytes-contains-subbytes? elf-bytes #".rackboot")
+               (bytes-contains-subbytes? elf-bytes #".rackprog")
+               (not (bytes-contains-subbytes? elf-bytes #"cOnFiG:"))
+               (not (bytes-contains-subbytes? elf-bytes #"failed to start "))
+               (not (bytes-contains-subbytes? elf-bytes #"coLLECTs dIRECTORy:/home/"))
+               (not (bytes-contains-subbytes? elf-bytes #"coNFIg dIRECTORy:/home/"))
+               (not (regexp-match? #rx#"GLIBC_2\\.(?:1[5-9]|[2-9][0-9])" elf-bytes))
+               (not (bytes-contains-subbytes? elf-bytes #"libxxhash.so"))
+               (not (bytes-contains-subbytes? elf-bytes #"liblz4.so"))
+               (not (bytes-contains-subbytes? elf-bytes #"libtinfo.so"))
+               (not (bytes-contains-subbytes? elf-bytes #"/home/")))
+    (error 'validate-bot-zip-archive!
+           "Artifact ~a executable ~a is not a portable untethered Racket CS ELF binary (max GLIBC_2.14, .rackboot + .rackprog, no libxxhash/liblz4/libtinfo or /home/ paths)"
+           artifact-label bot-name)))
 
 (define (validate-bot-zip-archive! zip-path
                                    #:bot-name [bot-name #f]
@@ -307,17 +505,7 @@
            "BotZip ~a (~a bytes) is smaller than minimum standalone ELF archive floor (~a bytes)"
            zip-path sz min-bytes))
   (when elf-bytes
-    (unless (and (>= (bytes-length elf-bytes) MIN-STANDALONE-ELF-BYTES)
-                 (bytes=? (subbytes elf-bytes 0 4) #"\x7fELF")
-                 (bytes-contains-subbytes? elf-bytes #".rackboot")
-                 (bytes-contains-subbytes? elf-bytes #".rackprog")
-                 (not (bytes-contains-subbytes? elf-bytes #"cOnFiG:"))
-                 (not (bytes-contains-subbytes? elf-bytes #"failed to start "))
-                 (not (bytes-contains-subbytes? elf-bytes #"coLLECTs dIRECTORy:/home/"))
-                 (not (bytes-contains-subbytes? elf-bytes #"coNFIg dIRECTORy:/home/")))
-      (error 'validate-bot-zip-archive!
-             "BotZip ~a executable ~a is not an untethered standalone Racket CS ELF binary (.rackboot + .rackprog with no starter/host paths)"
-             zip-path bot-name)))
+    (validate-elf-portability! elf-bytes bot-name zip-path))
   (for ([ename (in-list entry-names)])
     (when (or (string-suffix? ename ".zip")
               (string-suffix? ename ".SC2Replay")
@@ -403,24 +591,67 @@
         'standalone_elf_bytes (bytes-length elf-bstr)
         'cpplinux_binary_included #t))
 
+(define (binary-non-portable? path-or-false)
+  (define b (and path-or-false (file-exists? path-or-false) (file->bytes path-or-false)))
+  (or (not b)
+      (regexp-match? #rx#"GLIBC_2\\.(?:1[5-9]|[2-9][0-9])" b)
+      (bytes-contains-subbytes? b #"libxxhash.so")
+      (bytes-contains-subbytes? b #"liblz4.so")))
+
+(define (host-non-portable-racket?)
+  (define target-exe
+    (with-handlers ([exn:fail? (lambda (_e) #f)])
+      (find-exe #:cross? #t #:untethered? #t #f 'cs)))
+  (binary-non-portable? target-exe))
+
 (define (build-all-aiarena-zips! [target-variant #f])
-  (precompile-all-racket-zo!)
-  (printf "[2/4] Building standalone native ELF + AI Arena BotZip archives in pure Racket...\n")
-  (define elf-path (compile-standalone-racket-elf!))
-  (define elf-bstr (file->bytes elf-path))
-  (define shared-entries (collect-shared-tree-entries))
   (define selected-variants
     (if target-variant
         (filter (lambda (row) (equal? (first row) target-variant)) VARIANTS)
         VARIANTS))
-  (define results
-    (for/list ([row (in-list selected-variants)])
-      (build-variant-zip! (first row) (second row) (third row) elf-bstr shared-entries)))
-  (printf "[3/4] Verified ~a AI Arena BotZip archives (all <= ~a MB limit).\n"
-          (length results)
-          (/ MAX-BOT-ZIP-SIZE-BYTES 1000000.0))
-  (printf "[4/4] Done.\n")
-  results)
+  (cond
+    [(host-non-portable-racket?)
+     (void (ensure-portable-racket-815-runtime!))
+     (define script-path (path->string (build-path LADDER-DIR "build-aiarena-zip.rkt")))
+     (define host-racket-bin (resolve-host-racket-bin))
+     (define cli-args
+       (cons script-path
+             (if target-variant
+                 (list "--variant" target-variant)
+                 (list "--all-races"))))
+     (putenv "PLTCONFIGDIR" (path->string (simplify-path PORTABLE-ETC-DIR)))
+     (printf "[0/5] Re-launching BotZip build with PLTCONFIGDIR=~a targeting portable Racket 8.16...\n"
+             (getenv "PLTCONFIGDIR"))
+     (unless (apply system* host-racket-bin cli-args)
+       (error 'build-all-aiarena-zips!
+              "Portable Racket 8.16 BotZip build failed (exit non-zero)"))
+     (define elf-bytes-len (file-size (build-path CACHE-DIR "mothman_standalone_elf")))
+     (for/list ([row (in-list selected-variants)])
+       (define bname (first row))
+       (define zpath (build-path LADDER-DIR (format "~a.zip" bname)))
+       (define sz (file-size zpath))
+       (hash 'bot_name bname
+             'race (second row)
+             'bot_path (third row)
+             'zip_path (path->string zpath)
+             'size_bytes sz
+             'size_mb (/ (round (* 100.0 (/ sz (* 1024.0 1024.0)))) 100.0)
+             'standalone_elf_bytes elf-bytes-len
+             'cpplinux_binary_included #t))]
+    [else
+     (precompile-all-racket-zo!)
+     (define elf-path (compile-standalone-racket-elf!))
+     (verify-standalone-elf-headless-init! elf-path)
+     (printf "[4/5] Building AI Arena BotZip archives in pure Racket...\n")
+     (define elf-bstr (file->bytes elf-path))
+     (define shared-entries (collect-shared-tree-entries))
+     (define results
+       (for/list ([row (in-list selected-variants)])
+         (build-variant-zip! (first row) (second row) (third row) elf-bstr shared-entries)))
+     (printf "[5/5] Verified ~a AI Arena BotZip archives (all <= ~a MB limit) + headless init OK.\n"
+             (length results)
+             (/ MAX-BOT-ZIP-SIZE-BYTES 1000000.0))
+     results]))
 
 (module+ main
   (define target-variant #f)

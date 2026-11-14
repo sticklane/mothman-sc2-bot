@@ -67,6 +67,37 @@
 (define SC2-CRITICAL-LOW-SUPPLY            2)
 (define SC2-PENDING-SUPPLY-CREDIT          2)
 
+;; Continuous production-and-build-coupled supply lead-time buffer:
+;; Estimates expected supply consumption during one supply-provider build cycle (~18s)
+;; directly from active bases (worker production) and active production structures
+;; (combat unit production), scaled smoothly by worker economy saturation without
+;; arbitrary supply-cap breakpoints.
+(define (compute-production-coupled-supply-buffer
+         #:active-bases [raw-bases 1]
+         #:production-facilities [raw-facilities 0]
+         #:workers [raw-workers 12]
+         #:target-workers [raw-target-workers 44]
+         #:min-buffer [min-buf 2]
+         #:max-buffer [max-buf 18])
+  (define bases (max 1 (exact-round raw-bases)))
+  (define facilities (max 0 (exact-round raw-facilities)))
+  (define workers (max 0 (exact-round raw-workers)))
+  (define target-workers (max 12 (exact-round raw-target-workers)))
+  (define econ-ramp
+    (min 1.0 (max 0.0 (/ (exact->inexact (- workers 13)) 15.0))))
+  (define worker-sat-factor
+    (if (< workers target-workers) 1.0 0.5))
+  (define townhall-burn
+    (* 2.0 (exact->inexact bases) worker-sat-factor (+ 0.25 (* 0.75 econ-ramp))))
+  (define effective-combat-facilities
+    (max 0 (- facilities (if (= bases 1) 1 0))))
+  (define facility-burn
+    (* 1.15 (exact->inexact (+ (* 0.5 (min 1 facilities)) effective-combat-facilities))
+       (+ 0.20 (* 0.80 econ-ramp))))
+  (define raw-buf
+    (exact-round (+ 0.65 townhall-burn facility-burn)))
+  (max min-buf (min max-buf raw-buf)))
+
 ;; -----------------------------------------------------------------------------
 ;; 2. Economy, Worker Saturation & Expansion Constants
 ;; -----------------------------------------------------------------------------

@@ -69,7 +69,9 @@
  rt-tumor-state
  rt-door-state
  rt-splash-state
- rt-wall-state)
+ rt-wall-state
+ bayesian-posterior-from-likelihoods
+ compute-bayesian-pad-camped-posterior)
 
 ;; Per-runtime weak map caching last-known `(cons x y)` coordinates for enemy UnitTags
 ;; so stale/dead/snapshot target tags (`ActionResult=207 Error_CantTargetThatUnit`) downgrade
@@ -2489,7 +2491,16 @@
   ;; or >= 2 enemy combat units camp within 11.5 tiles of `(nat-x, nat-y)`, and redirect
   ;; expansions to the next uncamped BFS base instead of disabling expansion!
   ;; ---------------------------------------------------------------------------
-  (define (pad-camped-by-enemy? px py [radius 11.5])
+  (define mmstate-pad (live-bot-runtime-mirror-mind rt))
+  (define mmstate-rush-post
+    (let ([ar (and mmstate-pad (mirror-mind-state-last-action-reading mmstate-pad))]
+          [hyp (and mmstate-pad (mirror-mind-state-strategic-hypothesis mmstate-pad))])
+      (if (or (and ar (action-lens-reading-proxy-or-rush-detected? ar))
+              (memq hyp '(proxy-production-or-all-in rush early-aggression)))
+          0.65
+          0.12)))
+
+  (define (pad-camped-posterior px py [radius 11.5])
     (define camp-bldg?
       (ormap (lambda (eb)
                (define canon (sc2-canonical-structure-sym (unit-type-sym eb)))
@@ -2507,12 +2518,18 @@
       (count (lambda (a)
                (<= (dist2d px py (hash-ref a 'x base-x) (hash-ref a 'y base-y)) 14.0))
              ally-combat-units))
-    (or camp-bldg?
-        (>= camp-combat-cnt 2)
-        (and live-obs-harvesters?
-             (>= camp-combat-cnt 1)
-             (< ally-near-cnt camp-combat-cnt)
-             (<= (length ally-combat-units) 2))))
+    (compute-bayesian-pad-camped-posterior
+     #:camp-building-observed? camp-bldg?
+     #:enemy-combat-count camp-combat-cnt
+     #:ally-defender-count ally-near-cnt
+     #:total-ally-combat-count (length ally-combat-units)
+     #:live-obs? live-obs-harvesters?
+     #:dist-to-our-base (dist2d px py base-x base-y)
+     #:dist-to-enemy-base (dist2d px py enemy-x enemy-y)
+     #:rush-posterior mmstate-rush-post))
+
+  (define (pad-camped-by-enemy? px py [radius 11.5])
+    (>= (pad-camped-posterior px py radius) 0.55))
 
   (define nat-block-thresh SC2-NATURAL-BLOCK-RADIUS)
   (define natural-blockers
@@ -2553,20 +2570,28 @@
        (define cand-pts
          (append (filter-map pad->xy expansion-pads)
                  (list (cons third-x third-y))))
+       (define valid-pts
+         (filter (lambda (pt)
+                   (define px (car pt))
+                   (define py (cdr pt))
+                   (and (not (pad-already-owned? px py))
+                        (or (not natural-blocked?)
+                            (> (dist2d px py nat-x nat-y) 7.0))
+                        (or (not live-obs-harvesters?)
+                            (>= active-bases 4)
+                            (not (and (< (dist2d px py enemy-x enemy-y) 42.0)
+                                      (> (dist2d px py base-x base-y)
+                                         (dist2d px py enemy-x enemy-y)))))
+                        (not (pad-camped-by-enemy? px py 11.5))))
+                 cand-pts))
        (define chosen
-         (findf (lambda (pt)
-                  (define px (car pt))
-                  (define py (cdr pt))
-                  (and (not (pad-already-owned? px py))
-                       (or (not natural-blocked?)
-                           (> (dist2d px py nat-x nat-y) 7.0))
-                       (or (not live-obs-harvesters?)
-                           (>= active-bases 4)
-                           (not (and (< (dist2d px py enemy-x enemy-y) 42.0)
-                                     (> (dist2d px py base-x base-y)
-                                        (dist2d px py enemy-x enemy-y)))))
-                       (not (pad-camped-by-enemy? px py 11.5))))
-                cand-pts))
+         (or (findf (lambda (pt)
+                      (< (pad-camped-posterior (car pt) (cdr pt) 11.5) 0.30))
+                    valid-pts)
+             (and (pair? valid-pts)
+                  (argmin (lambda (pt)
+                            (pad-camped-posterior (car pt) (cdr pt) 11.5))
+                          valid-pts))))
        (if chosen
            (values (car chosen) (cdr chosen))
            (values #f #f))]))
@@ -3570,17 +3595,18 @@
 
   (define live-game-obs? live-obs-harvesters?)
   (define supply-threshold
-    (cond [(and live-game-obs? (< supply-cap 20)) 2]
-          [(and live-game-obs? (< supply-cap 26)) 4]
-          [(and live-game-obs? (< supply-cap 36)) 6]
-          [live-game-obs?
-           (if (< supply-cap 66)
-               (min 14 (+ 3 (* 2 active-bases) (quotient (length prod-facilities) 2)))
-               (min 18 (max SC2-MID-SUPPLY-BUFFER
-                            (+ 3 (* 2 active-bases) (length prod-facilities)))))]
-          [(>= supply-cap SC2-MID-SUPPLY-CAP-THRESHOLD) SC2-MID-SUPPLY-BUFFER]
-          [(>= supply-cap SC2-EARLY-SUPPLY-CAP-THRESHOLD) SC2-EARLY-SUPPLY-BUFFER]
-          [else SC2-BASE-SUPPLY-BUFFER]))
+    (cond
+      [live-game-obs?
+       (compute-production-coupled-supply-buffer
+        #:active-bases active-bases
+        #:production-facilities (length prod-facilities)
+        #:workers total-workers
+        #:target-workers target-workers
+        #:min-buffer 2
+        #:max-buffer 18)]
+      [(>= supply-cap SC2-MID-SUPPLY-CAP-THRESHOLD) SC2-MID-SUPPLY-BUFFER]
+      [(>= supply-cap SC2-EARLY-SUPPLY-CAP-THRESHOLD) SC2-EARLY-SUPPLY-BUFFER]
+      [else SC2-BASE-SUPPLY-BUFFER]))
 
   (define active-intel-method
     (select-intel-gathering-method
@@ -3618,10 +3644,15 @@
      #:supply-buffer (and live-game-obs? supply-threshold)))
   (define max-pending-supply
     (cond
-      [(and live-game-obs? (>= supply-cap 100) (<= supply-left 10)) 4]
-      [(and live-game-obs? (or (>= supply-cap 66) (>= (length prod-facilities) 5)) (<= supply-left 10)) 3]
-      [(and live-game-obs? (eq? race 'Zerg) (>= active-bases 3) (<= supply-left (max 10 supply-threshold))) 3]
-      [(and live-game-obs? (>= supply-cap 36)) 2]
+      [live-game-obs?
+       (define cycle-providers
+         (exact-ceiling (/ (exact->inexact (+ supply-threshold (if (<= supply-left 4) 4 0)))
+                           (exact->inexact SC2-SUPPLY-PER-PROVIDER))))
+       (max 1 (min 4 (if (and (eq? race 'Zerg)
+                              (>= active-bases 3)
+                              (<= supply-left (max 10 supply-threshold)))
+                         (max 3 cycle-providers)
+                         cycle-providers)))]
       [(and (< supply-cap SC2-MID-SUPPLY-CAP-THRESHOLD)
             (> supply-left 2))
        SC2-MAX-PENDING-SUPPLY-EARLY]
@@ -4052,7 +4083,7 @@
          (>= supply-used 14)
          (or (and (<= eff-pending-supply 0)
                   (or supply-at-risk?
-                      (<= supply-left (if (< supply-cap 20) 1 supply-threshold))))
+                      (<= supply-left (if (and (<= active-bases 1) (<= (length prod-facilities) 1) (<= total-workers 15)) 1 supply-threshold))))
              (and (>= active-bases 3)
                   (= eff-pending-supply 1)
                   (<= supply-left 4)))))

@@ -4,9 +4,10 @@ __pycache__/
 compiled/
 sc-bot/external_bots/
 sc-bot/replays/
-sc-bot/ladder/.cache/
+ladder/.cache/racket_runtime/
+ladder/.cache/portable-bin/
+ladder/.cache/portable-etc/
 sc-bot/LingLover
-!sc-bot/ladder/*.zip
 
 replays/corpus_checkpoints.sexp
 replays/*_mirror_perspective_audit.json

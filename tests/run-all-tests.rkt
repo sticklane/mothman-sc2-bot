@@ -9370,6 +9370,83 @@
                             out-40-gov))
                 "Routine Tier 4 camera move must still be dropped at dloop=6 and tokens < 10.0"))
 
+;; =============================================================================
+;; Suite 41: General Bayesian Inference & Production-Coupled Supply Buffer
+;; =============================================================================
+(run-suite "41. General Bayesian Inference & Production-Coupled Supply Buffer"
+  ;; 41.1 Generic Bayesian likelihood updater
+  (assert-true! (< (abs (- (bayesian-posterior-from-likelihoods 0.20 '((#f . 10.0))) 0.20)) 1e-6)
+                "bayesian-posterior-from-likelihoods with no active evidence must preserve prior")
+  (assert-true! (>= (bayesian-posterior-from-likelihoods 0.12 '((#t . 14.0))) 0.55)
+                "bayesian-posterior-from-likelihoods with LR=14.0 on 0.12 prior must exceed 0.55")
+
+  ;; 41.2 Pad-camped Bayesian posterior from hard observational inputs
+  (define p-pad-clear
+    (compute-bayesian-pad-camped-posterior
+     #:camp-building-observed? #f
+     #:enemy-combat-count 0
+     #:ally-defender-count 2
+     #:total-ally-combat-count 6
+     #:live-obs? #t))
+  (assert-true! (< p-pad-clear 0.15)
+                (format "Clear expansion pad with defenders must have posterior < 0.15 (got ~a)" p-pad-clear))
+
+  (define p-pad-cannon
+    (compute-bayesian-pad-camped-posterior
+     #:camp-building-observed? #t
+     #:enemy-combat-count 0
+     #:ally-defender-count 0
+     #:live-obs? #t))
+  (assert-true! (>= p-pad-cannon 0.55)
+                (format "Expansion pad with observed enemy static defense/base must have posterior >= 0.55 (got ~a)" p-pad-cannon))
+
+  (define p-pad-2units
+    (compute-bayesian-pad-camped-posterior
+     #:camp-building-observed? #f
+     #:enemy-combat-count 2
+     #:ally-defender-count 1
+     #:total-ally-combat-count 4
+     #:live-obs? #t))
+  (assert-true! (>= p-pad-2units 0.55)
+                (format "Expansion pad with >= 2 enemy combat units must have posterior >= 0.55 (got ~a)" p-pad-2units))
+
+  (define p-pad-1unit-unescorted
+    (compute-bayesian-pad-camped-posterior
+     #:camp-building-observed? #f
+     #:enemy-combat-count 1
+     #:ally-defender-count 0
+     #:total-ally-combat-count 1
+     #:live-obs? #t))
+  (assert-true! (>= p-pad-1unit-unescorted 0.55)
+                (format "Live pad with 1 enemy combat unit and no defenders/army must have posterior >= 0.55 (got ~a)" p-pad-1unit-unescorted))
+
+  (define p-pad-1unit-defended
+    (compute-bayesian-pad-camped-posterior
+     #:camp-building-observed? #f
+     #:enemy-combat-count 1
+     #:ally-defender-count 4
+     #:total-ally-combat-count 8
+     #:live-obs? #t))
+  (assert-true! (< p-pad-1unit-defended 0.55)
+                (format "Well-defended pad with 1 transient enemy must remain < 0.55 (got ~a)" p-pad-1unit-defended))
+
+  ;; 41.3 Smooth production-and-build-coupled supply curve (monotonic with production/workers)
+  (define sb-open-1base
+    (compute-production-coupled-supply-buffer #:active-bases 1 #:production-facilities 1 #:workers 12 #:target-workers 44))
+  (define sb-early-nat
+    (compute-production-coupled-supply-buffer #:active-bases 2 #:production-facilities 2 #:workers 22 #:target-workers 44))
+  (define sb-mid-4base
+    (compute-production-coupled-supply-buffer #:active-bases 4 #:production-facilities 4 #:workers 35 #:target-workers 66))
+  (define sb-late-max
+    (compute-production-coupled-supply-buffer #:active-bases 4 #:production-facilities 8 #:workers 66 #:target-workers 66))
+  (assert-true! (and (<= 2 sb-open-1base)
+                     (<= sb-open-1base sb-early-nat)
+                     (< sb-early-nat sb-mid-4base)
+                     (<= sb-mid-4base sb-late-max)
+                     (<= sb-late-max 18))
+                (format "Supply buffer must scale monotonically with production (~a <= ~a < ~a <= ~a <= 18)"
+                        sb-open-1base sb-early-nat sb-mid-4base sb-late-max)))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")

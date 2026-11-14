@@ -65,7 +65,9 @@
          project-self-build-order-tree
          project-opponent-build-order-tree
          compute-bayesian-bluff-posterior
+         bayesian-posterior-from-likelihoods
          compute-bayesian-strategic-posteriors
+         compute-bayesian-pad-camped-posterior
          horizon-sec->optimal-cognitive-depth
          horizon-sec->calibrated-certainty
          predict-multi-horizon-snapshots
@@ -2173,6 +2175,30 @@
    (prepare-opponent-bo-tree-context raw-obs #:enemy-race kw-race #:mstate mstate)
    h-sec))
 
+;; General Bayesian odds-ratio update over a list of `(cons evidence-active? likelihood-ratio)` pairs.
+;; Takes a prior probability P(H) in (0, 1) and multiplies the prior odds P(H)/(1 - P(H))
+;; by each active positive/negative likelihood ratio, returning the calibrated posterior in [0.01, 0.99].
+(define (bayesian-posterior-from-likelihoods raw-prior evidence-likelihood-pairs
+                                             #:any-evidence? [any-evidence-override 'auto]
+                                             #:max-prior [raw-max-prior 0.99])
+  (define max-p (max 0.01 (min 0.99 (exact->inexact raw-max-prior))))
+  (define prior (max 0.01 (min max-p (safe-real raw-prior 0.10))))
+  (define active-pairs
+    (filter (lambda (p) (and (pair? p) (car p) (real? (cdr p)) (> (cdr p) 0.0)))
+            evidence-likelihood-pairs))
+  (define has-ev?
+    (if (eq? any-evidence-override 'auto)
+        (not (null? active-pairs))
+        (and any-evidence-override #t)))
+  (cond
+    [(not has-ev?) (exact->inexact prior)]
+    [else
+     (define odds
+       (for/fold ([o (/ prior (- 1.0 prior))])
+                 ([p (in-list active-pairs)])
+         (* o (exact->inexact (cdr p)))))
+     (exact->inexact (max 0.01 (min 0.99 (/ odds (+ 1.0 odds)))))]))
+
 ;; Bayesian Bluff Posterior P(bluff | E) with base-rate prior P_0(bluff) = 0.08
 (define (compute-bayesian-bluff-posterior
          [raw-enemy-units '()]
@@ -2207,14 +2233,6 @@
           (values eu eb to given-ledger))))
 
   (define prior (max 0.01 (min 0.45 (safe-real raw-prior 0.08))))
-  (when (and (null? enemy-units) (null? enemy-bldgs) (not given-tech-obs) (not given-ledger)
-             (not given-branch) (eq? given-confirmed? 'auto)
-             (null? kw-fake-builds) (null? kw-fake-build-bluffs)
-             (not kw-res-cancel-status) (not kw-halluc-bait?)
-             (null? kw-idle-bluffs) (not kw-rem-gas) (not kw-rem-gas2)
-             (not kw-active-res-cnt) (not kw-res-under-atk?))
-    (set! prior (exact->inexact prior)))
-  (define odds (/ prior (- 1.0 prior)))
   (define struct-act (analyze-enemy-structure-activity-and-bluffs enemy-bldgs))
   (define fake-builds
     (remove-duplicates
@@ -2301,44 +2319,49 @@
         (> rem-gas 0.0)
         res-under-atk?))
 
-  ;; Apply positive likelihood ratios
-  (when (and any-evidence? (not res-under-atk?))
-    (when (not (null? fake-builds))
-      (set! odds (* odds 18.0)))
-    (when (eq? res-cancel-status 'fake-research-bluff-canceled)
-      (set! odds (* odds 15.0)))
-    (when (and combat-hallucination-bait? (not has-confirming-evidence?))
-      (set! odds (* odds 15.0)))
+  (define idle-or-branch-lr
     (cond
       [(and (not (null? explicit-idle-tech-bldgs))
             (not has-confirming-evidence?)
             (>= rem-gas 225.0))
-       (set! odds (* odds (if eff-scouted-us? 16.5 15.2)))]
+       (if eff-scouted-us? 16.5 15.2)]
       [(and has-candidate-tech-branch?
             (not has-confirming-evidence?)
             (>= rem-gas 320.0))
-       (set! odds (* odds 14.8))]
+       14.8]
       [(and has-candidate-tech-branch?
             (not has-confirming-evidence?)
             (>= rem-gas 225.0))
-       (set! odds (* odds 2.5))]))
+       2.5]
+      [else #f]))
 
-  ;; Apply negative likelihood ratios (confirming real commitment)
-  (when (and any-evidence? (not (null? active-res)))
-    (set! odds (* odds 0.08)))
-  (when (and any-evidence?
-             (or (not (null? previews))
-                 (and has-confirming-evidence? (null? fake-builds)
-                      (not (eq? res-cancel-status 'fake-research-bluff-canceled)))))
-    (set! odds (* odds 0.10)))
-  (when (and any-evidence?
-             (or res-under-atk?
-                 (eq? res-cancel-status 'emergency-research-canceled-under-attack)
-                 (eq? res-cancel-status 'research-forced-cancel-under-attack)))
-    (set! odds (* odds 0.12)))
-
-  (define post (if any-evidence? (/ odds (+ 1.0 odds)) prior))
-  (exact->inexact (max 0.01 (min 0.99 post))))
+  (bayesian-posterior-from-likelihoods
+   prior
+   #:any-evidence? any-evidence?
+   #:max-prior 0.45
+   (list
+    ;; Positive likelihood ratios (bluff / feint indicators)
+    (cons (and any-evidence? (not res-under-atk?) (not (null? fake-builds)))
+          18.0)
+    (cons (and any-evidence? (not res-under-atk?) (eq? res-cancel-status 'fake-research-bluff-canceled))
+          15.0)
+    (cons (and any-evidence? (not res-under-atk?) combat-hallucination-bait? (not has-confirming-evidence?))
+          15.0)
+    (cons (and any-evidence? (not res-under-atk?) idle-or-branch-lr)
+          (or idle-or-branch-lr 1.0))
+    ;; Negative likelihood ratios (confirming real commitment)
+    (cons (and any-evidence? (not (null? active-res)))
+          0.08)
+    (cons (and any-evidence?
+               (or (not (null? previews))
+                   (and has-confirming-evidence? (null? fake-builds)
+                        (not (eq? res-cancel-status 'fake-research-bluff-canceled)))))
+          0.10)
+    (cons (and any-evidence?
+               (or res-under-atk?
+                   (eq? res-cancel-status 'emergency-research-canceled-under-attack)
+                   (eq? res-cancel-status 'research-forced-cancel-under-attack)))
+          0.12))))
 
 ;; Compute full Bayesian Strategic Priors & Posteriors over bluff, feint, rush,
 ;; hidden expansion, tech switch, and build-order tree branches.
@@ -2404,46 +2427,45 @@
   (define combat-cnt (count enemy-combat-unit? enemy-units))
 
   ;; Feint posterior: base prior 0.10
-  (define feint-odds (/ 0.10 0.90))
-  (when (and reading (action-lens-reading-feint-or-poke-detected? reading))
-    (set! feint-odds (* feint-odds 8.5)))
-  (when (and (>= combat-cnt 1) (<= combat-cnt 3) (>= rem-gas 180.0))
-    (set! feint-odds (* feint-odds 3.2)))
-  (when (>= bluff-post 0.55)
-    (set! feint-odds (* feint-odds 2.5)))
-  (define feint-post (exact->inexact (max 0.01 (min 0.99 (/ feint-odds (+ 1.0 feint-odds))))))
+  (define feint-post
+    (bayesian-posterior-from-likelihoods
+     0.10
+     #:any-evidence? #t
+     (list
+      (cons (and reading (action-lens-reading-feint-or-poke-detected? reading)) 8.5)
+      (cons (and (>= combat-cnt 1) (<= combat-cnt 3) (>= rem-gas 180.0)) 3.2)
+      (cons (>= bluff-post 0.55) 2.5))))
 
   ;; Rush posterior: base prior 0.12
-  (define rush-odds (/ 0.12 0.88))
-  (when (and reading (action-lens-reading-proxy-or-rush-detected? reading))
-    (set! rush-odds (* rush-odds 12.0)))
-  (when (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'proxy-production-or-all-in)
-    (set! rush-odds (* rush-odds 6.0)))
-  (when (and (<= frame 2688) (>= combat-cnt 4))
-    (set! rush-odds (* rush-odds 4.0)))
-  (when (>= (shadow-ledger-predicted-enemy-bases ledger) 3)
-    (set! rush-odds (* rush-odds 0.15)))
-  (define rush-post (exact->inexact (max 0.01 (min 0.99 (/ rush-odds (+ 1.0 rush-odds))))))
+  (define rush-post
+    (bayesian-posterior-from-likelihoods
+     0.12
+     #:any-evidence? #t
+     (list
+      (cons (and reading (action-lens-reading-proxy-or-rush-detected? reading)) 12.0)
+      (cons (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'proxy-production-or-all-in) 6.0)
+      (cons (and (<= frame 2688) (>= combat-cnt 4)) 4.0)
+      (cons (>= (shadow-ledger-predicted-enemy-bases ledger) 3) 0.15))))
 
   ;; Hidden expansion posterior: base prior 0.14
-  (define exp-odds (/ 0.14 0.86))
-  (when (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-expansion-or-macro-boom)
-    (set! exp-odds (* exp-odds 7.5)))
-  (when (and (>= rem-min 400.0) (<= combat-cnt 3))
-    (set! exp-odds (* exp-odds 3.5)))
-  (when (>= rush-post 0.60)
-    (set! exp-odds (* exp-odds 0.20)))
-  (define hidden-expand-post (exact->inexact (max 0.01 (min 0.99 (/ exp-odds (+ 1.0 exp-odds))))))
+  (define hidden-expand-post
+    (bayesian-posterior-from-likelihoods
+     0.14
+     #:any-evidence? #t
+     (list
+      (cons (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-expansion-or-macro-boom) 7.5)
+      (cons (and (>= rem-min 400.0) (<= combat-cnt 3)) 3.5)
+      (cons (>= rush-post 0.60) 0.20))))
 
   ;; Tech-switch posterior: base prior 0.15
-  (define switch-odds (/ 0.15 0.85))
-  (when (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-air-or-cloak-tech-switch)
-    (set! switch-odds (* switch-odds 6.5)))
-  (when (>= rem-gas 200.0)
-    (set! switch-odds (* switch-odds 2.8)))
-  (when (>= bluff-post 0.55)
-    (set! switch-odds (* switch-odds 3.5)))
-  (define tech-switch-post (exact->inexact (max 0.01 (min 0.99 (/ switch-odds (+ 1.0 switch-odds))))))
+  (define tech-switch-post
+    (bayesian-posterior-from-likelihoods
+     0.15
+     #:any-evidence? #t
+     (list
+      (cons (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-air-or-cloak-tech-switch) 6.5)
+      (cons (>= rem-gas 200.0) 2.8)
+      (cons (>= bluff-post 0.55) 3.5))))
 
   (define opp-proj
     (project-opponent-build-order-tree obs horizon-sec
@@ -2457,6 +2479,56 @@
    hidden-expand-post
    tech-switch-post
    (build-order-tree-projection-branch-posteriors opp-proj)))
+
+;; Compute calibrated Bayesian posterior P(pad-camped | observations, strategic-priors) in [0.01, 0.99]
+;; from hard observational inputs (enemy static defense/townhall on pad, enemy combat unit count
+;; within radius, local friendly combat defenders, live-game harvester flag, map geometry, and
+;; optional mirror-mind strategic rush/feint posteriors).
+(define (compute-bayesian-pad-camped-posterior
+         #:camp-building-observed? [camp-bldg? #f]
+         #:enemy-combat-count [raw-enemy-cnt 0]
+         #:ally-defender-count [raw-ally-near-cnt 0]
+         #:total-ally-combat-count [raw-total-ally-cnt 0]
+         #:live-obs? [live-obs? #f]
+         #:dist-to-our-base [raw-dist-base 30.0]
+         #:dist-to-enemy-base [raw-dist-enemy 90.0]
+         #:rush-posterior [raw-rush-post 0.12]
+         #:prior [raw-prior 0.12])
+  (define enemy-cnt (max 0 (safe-int raw-enemy-cnt 0)))
+  (define ally-near-cnt (max 0 (safe-int raw-ally-near-cnt 0)))
+  (define total-ally-cnt (max 0 (safe-int raw-total-ally-cnt 0)))
+  (define dist-base (max 1.0 (safe-real raw-dist-base 30.0)))
+  (define dist-enemy (max 1.0 (safe-real raw-dist-enemy 90.0)))
+  (define rush-post (max 0.01 (min 0.99 (safe-real raw-rush-post 0.12))))
+  (define multi-enemy-lr
+    (if (>= enemy-cnt 2)
+        (* 14.0 (expt 1.5 (min 4 (- enemy-cnt 2))))
+        1.0))
+  (bayesian-posterior-from-likelihoods
+   raw-prior
+   (list
+    ;; 1. Hard observation: enemy static defense or townhall structure on pad
+    (cons camp-bldg? 25.0)
+    ;; 2. Hard observation: >= 2 enemy combat units camping the pad radius
+    (cons (>= enemy-cnt 2) multi-enemy-lr)
+    ;; 3. Hard observation: 1 enemy combat unit on pad in live game with no local escort
+    (cons (and live-obs?
+               (= enemy-cnt 1)
+               (< ally-near-cnt enemy-cnt)
+               (<= total-ally-cnt 2))
+          11.0)
+    ;; 4. Hard observation: 1 enemy combat unit on pad when defenders ARE available (contested/transient)
+    (cons (and (= enemy-cnt 1)
+               (not (and live-obs?
+                         (< ally-near-cnt enemy-cnt)
+                         (<= total-ally-cnt 2))))
+          2.0)
+    ;; 5. Strategic & spatial coupling: pad is on enemy side of map while opponent rush posterior is high
+    (cons (and live-obs? (< dist-enemy dist-base) (>= rush-post 0.55) (>= enemy-cnt 1))
+          1.8)
+    ;; 6. Negative evidence: no enemy building or combat unit observed and friendly defenders control the area
+    (cons (and (not camp-bldg?) (= enemy-cnt 0) (>= ally-near-cnt 1))
+          0.20))))
 
 ;; =============================================================================
 ;; 2d. Zero-Sum Opportunity-Cost / Negative Exclusion & Bayesian Bluff Detector
