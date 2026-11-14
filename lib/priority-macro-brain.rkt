@@ -950,6 +950,24 @@
 
   (define effective-phase-supply (max supply-used peak-supply-reached))
   (define all-upgs (remove-duplicates (append researched-upgrades pending-upgrades) eq?))
+  (define has-robo? (> (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0))
+  (define has-ready-armory? (> (bldg-count-equivalent ready-bldg-counts 'armory) 0))
+  (define enemy-cap-air? (protoss-enemy-capital-air? enemy-u-counts))
+  (define enemy-cap-air-ground-aa? (terran-enemy-capital-air-with-ground-aa? enemy-u-counts))
+  (define desired-thors (terran-desired-thor-cap enemy-u-counts))
+  (define air-fleet-cnt (terran-air-fleet-count unit-counts))
+  (define ship-weap-due?
+    (terran-ship-weapons-due? race air-fleet-cnt has-ready-armory? all-upgs))
+  (define crisis-defer?
+    (crisis-defense-tech-defer-active? under-attack? army-supply enemy-threat-supply workers))
+  (define severe-crisis-static-def?
+    (and crisis-defer?
+         (or (>= army-supply 4) (>= minerals 200))
+         (or (< workers 32)
+             (< army-supply (* 0.8 enemy-threat-supply))
+             (< army-supply 16))))
+  (define defer-stargate?
+    (or has-robo? (and (not requires-anti-air?) (not enemy-cap-air?))))
   (define live-slots? (hash? open-facility-slots))
   (define peaceful? (and (not under-attack?) (<= enemy-threat-supply 0)))
   (define early-zero-army-attack?
@@ -998,13 +1016,20 @@
   (define-values (elapsed-sec steps-so-far due-upgs due-units due-timing-goals)
     (collect-due-bo-context race enemy-race frame effective-phase-supply))
   (define repaired-prereqs
-    (find-all-broken-tech-dependencies
-     race ready-bldg-counts total-bldg-counts
-     #:active-goals (append steps-so-far due-timing-goals)))
+    (filter (lambda (sym)
+              (not (crisis-deferred-sym? (normalize-brain-sym sym) crisis-defer?
+                                         #:defer-stargate? defer-stargate?
+                                         #:keep-ship-weapons? ship-weap-due?)))
+            (find-all-broken-tech-dependencies
+             race ready-bldg-counts total-bldg-counts
+             #:active-goals (append steps-so-far due-timing-goals))))
 
   (define raw-goal-specs '())
   (define (add-goal-spec! id track kind target-count weight reason)
-    (when (lookup-sc2-tech-node id)
+    (when (and (lookup-sc2-tech-node id)
+               (not (crisis-deferred-sym? (normalize-brain-sym id) crisis-defer?
+                                          #:defer-stargate? defer-stargate?
+                                          #:keep-ship-weapons? ship-weap-due?)))
       (set! raw-goal-specs
             (cons (list id track kind target-count weight reason)
                   raw-goal-specs))))
@@ -1305,7 +1330,6 @@
               (and (not requires-anti-air?) (= air-combat-cnt 0))))
         (not requires-anti-air?)))
 
-  (define enemy-cap-air? (protoss-enemy-capital-air? enemy-u-counts))
   (define terran-need-ghost? (terran-enemy-needs-ghost? enemy-u-counts))
   (define terran-need-lib? (terran-enemy-needs-liberator? enemy-u-counts))
   (define desired-rax-tl
@@ -1385,7 +1409,61 @@
     (when (and (>= active-bases 3)
                terran-need-lib?
                (> (bldg-count-equivalent ready-bldg-counts 'starport) 0))
-      (add-goal-spec! 'liberator 'army-production 'train desired-libs 474.0 't3-liberator-counter)))
+      (add-goal-spec! 'liberator 'army-production 'train desired-libs 474.0 't3-liberator-counter))
+    ;; [NOTE-R4-B] Anti-Capital-Air (`tempest`, `carrier`, `battlecruiser`, `brood-lord`):
+    ;; boost Armory + Thors (< 5-6) alongside Viking-Fighter, plus `+1` Ship Weapons when air fleet >= 4.
+    (when (and enemy-cap-air?
+               (or enemy-cap-air-ground-aa?
+                   (> (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)))
+      (when (and (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
+                 (= (bldg-count-equivalent total-bldg-counts 'armory) 0))
+        (add-goal-spec! 'armory 'tech-infrastructure 'build 1
+                        (if enemy-cap-air-ground-aa? 494.0 486.0)
+                        'anti-capital-air))
+      (when (and (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
+                 (< (unit-count-equivalent unit-counts 'viking-fighter) 6))
+        (add-goal-spec! 'viking-fighter 'army-production 'train 6 492.0 'anti-capital-air)))
+    (when (and enemy-cap-air?
+               (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+               (> (bldg-count-equivalent ready-bldg-counts 'armory) 0)
+               (< (unit-count-equivalent unit-counts 'thor) desired-thors))
+      (add-goal-spec! 'thor 'army-production 'train desired-thors
+                      (if enemy-cap-air-ground-aa? 495.0 494.0)
+                      'anti-capital-air))
+    (when ship-weap-due?
+      (add-goal-spec! 'terran-ship-weapons-1 'tech-infrastructure 'research 1 492.5 'anti-capital-air)))
+
+  ;; [NOTE-R4-A] Base-Defense Crisis: focus all resources/larva/production on immediate defenders.
+  (when crisis-defer?
+    (case race
+      [(Zerg)
+       (when (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (add-goal-spec! 'queen 'army-production 'train (min SC2-MAX-QUEENS-CAP (+ active-bases 2)) 468.0 'crisis-defense)
+         (when (and severe-crisis-static-def? (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 2))
+           (add-goal-spec! 'spine-crawler 'survival-supply 'build 2 470.0 'crisis-defense)))
+       (when (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
+         (add-goal-spec! 'roach 'army-production 'train 16 471.0 'crisis-defense)
+         (when (> (unit-count-equivalent unit-counts 'roach) 0)
+           (add-goal-spec! 'ravager 'army-production 'morph (min 6 (unit-count-equivalent unit-counts 'roach)) 469.0 'crisis-defense)))]
+      [(Protoss)
+       (when (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+         (add-goal-spec! 'stalker 'army-production 'train 14 471.0 'crisis-defense)
+         (when (and severe-crisis-static-def? (< (bldg-count-equivalent total-bldg-counts 'shield-battery) 2))
+           (add-goal-spec! 'shield-battery 'survival-supply 'build 2 469.0 'crisis-defense)))
+       (when (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
+         (add-goal-spec! 'immortal 'army-production 'train 6 472.0 'crisis-defense))
+       (when (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                   (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)
+         (add-goal-spec! 'zealot 'army-production 'train 12 466.0 'crisis-defense))]
+      [(Terran)
+       (when (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+         (add-goal-spec! 'siege-tank 'army-production 'train 8 471.0 'crisis-defense))
+       (when (> (bldg-count-equivalent ready-bldg-counts 'barracks-techlab) 0)
+         (add-goal-spec! 'marauder 'army-production 'train 10 469.0 'crisis-defense))
+       (when (and severe-crisis-static-def?
+                  (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+                  (< (bldg-count-equivalent total-bldg-counts 'bunker) 2))
+         (add-goal-spec! 'bunker 'survival-supply 'build 2 468.0 'crisis-defense))]))
 
   ;; Protoss Anti-Capital-Air (`tempest`, `carrier`, `battlecruiser`, `brood-lord`) & 4th Nexus at >=54 Probes (`#5122493`).
   (when (eq? race 'Protoss)
@@ -1475,7 +1553,7 @@
          (add-goal-spec! 'starport-techlab 'tech-infrastructure 'addon 1 462.0 't3-endgame-tech)
          (add-goal-spec! 'fusion-core 'tech-infrastructure 'build 1 464.0 't3-endgame-tech))
        (when (> (bldg-count-equivalent ready-bldg-counts 'armory) 0)
-         (add-goal-spec! 'thor 'army-production 'train (if (>= active-bases 4) 4 2) 462.0 't3-endgame-army)
+         (add-goal-spec! 'thor 'army-production 'train (max desired-thors (if (>= active-bases 4) 4 2)) 462.0 't3-endgame-army)
          (add-goal-spec! 'terran-infantry-weapons-2 'tech-infrastructure 'research 1 456.0 't3-endgame-tech)
          (add-goal-spec! 'terran-infantry-armor-2 'tech-infrastructure 'research 1 454.0 't3-endgame-tech))
        (when (> (bldg-count-equivalent ready-bldg-counts 'fusion-core) 0)
@@ -1554,7 +1632,18 @@
         [else base-node])))
 
   (define active-nodes
-    (filter (lambda (n) (not (eq? (plan-goal-node-status n) 'satisfied)))
+    (filter (lambda (n)
+              (and (not (eq? (plan-goal-node-status n) 'satisfied))
+                   (not (crisis-deferred-sym?
+                         (normalize-brain-sym (plan-goal-node-id n))
+                         crisis-defer?
+                         #:defer-stargate? defer-stargate?
+                         #:keep-ship-weapons? ship-weap-due?))
+                   (not (crisis-deferred-sym?
+                         (normalize-brain-sym (plan-goal-node-next-action-sym n))
+                         crisis-defer?
+                         #:defer-stargate? defer-stargate?
+                         #:keep-ship-weapons? ship-weap-due?))))
             all-nodes))
 
   (define in-prog-syms
@@ -1657,10 +1746,33 @@
                           all-due-goals)])
           (and hit (pro-bo-goal-target-sec hit)))
         0.0))
+  (define has-robo? (> (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0))
+  (define has-armory? (> (bldg-count-equivalent total-bldg-counts 'armory) 0))
+  (define has-ready-armory? (> (bldg-count-equivalent ready-bldg-counts 'armory) 0))
+  (define enemy-cap-air? (protoss-enemy-capital-air? enemy-u-counts))
+  (define enemy-cap-air-ground-aa? (terran-enemy-capital-air-with-ground-aa? enemy-u-counts))
+  (define desired-thors (terran-desired-thor-cap enemy-u-counts))
+  (define air-fleet-cnt (terran-air-fleet-count unit-counts))
+  (define ship-weap-due?
+    (terran-ship-weapons-due? race air-fleet-cnt has-ready-armory? all-upgs))
+  (define crisis-defer?
+    (crisis-defense-tech-defer-active? under-attack? army-supply enemy-threat-supply workers))
+  (define severe-crisis-static-def?
+    (and crisis-defer?
+         (or (>= army-supply 4) (>= minerals 200))
+         (or (< workers 32)
+             (< army-supply (* 0.8 enemy-threat-supply))
+             (< army-supply 16))))
+  (define defer-stargate?
+    (or has-robo? (and (not requires-anti-air?) (not enemy-cap-air?))))
   (define repaired-prereqs
-    (find-all-broken-tech-dependencies
-     race ready-bldg-counts total-bldg-counts
-     #:active-goals all-due-goals))
+    (filter (lambda (sym)
+              (not (crisis-deferred-sym? (normalize-brain-sym sym) crisis-defer?
+                                         #:defer-stargate? defer-stargate?
+                                         #:keep-ship-weapons? ship-weap-due?)))
+            (find-all-broken-tech-dependencies
+             race ready-bldg-counts total-bldg-counts
+             #:active-goals all-due-goals)))
 
   ;; Derive top actionable goal from the Dynamic Plan (translating any blocked goal
   ;; directly into its ready `next-action-sym` instead of stalling on a static queue head!)
@@ -1706,7 +1818,10 @@
   (define (bo-fallback-goal-allowed? g)
     (and (pro-bo-goal? g)
          (let ([gsym (pro-bo-goal-target-sym g)])
-           (and (not (and supply-lockout-active?
+           (and (not (crisis-deferred-sym? (normalize-brain-sym gsym) crisis-defer?
+                                           #:defer-stargate? defer-stargate?
+                                           #:keep-ship-weapons? ship-weap-due?))
+                (not (and supply-lockout-active?
                           (memq gsym '(extractor refinery assimilator
                                        hatchery nexus command-center))))
                 (or (not (memq gsym '(extractor refinery assimilator)))
@@ -1859,10 +1974,16 @@
      #:requires-anti-air? requires-anti-air?
      #:army-supply army-supply
      #:enemy-threat-supply enemy-threat-supply
+     #:workers workers
      #:has-barracks-techlab? (> (bldg-count-equivalent ready-bldg-counts 'barracks-techlab) 0)
      #:has-twilight-or-charge? (or (> (bldg-count-equivalent ready-bldg-counts 'twilight-council) 0)
                                    (memq 'charge all-upgs))
      #:has-hydralisk-den? (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+     #:has-robo? has-robo?
+     #:has-armory? has-armory?
+     #:crisis-defense-defer? crisis-defer?
+     #:enemy-capital-air-ground-aa? enemy-cap-air-ground-aa?
+     #:terran-ship-weapons-due? ship-weap-due?
      #:stalker-count (unit-count-equivalent unit-counts 'stalker)
      #:roach-count (unit-count-equivalent unit-counts 'roach)
      #:enemy-unit-counts enemy-u-counts
@@ -1909,7 +2030,6 @@
 
   (define desired-overseer-cnt
     (if (or (>= army-supply 40) requires-detection?) 2 1))
-  (define enemy-cap-air? (protoss-enemy-capital-air? enemy-u-counts))
   (define terran-need-ghost? (terran-enemy-needs-ghost? enemy-u-counts))
   (define terran-need-lib? (terran-enemy-needs-liberator? enemy-u-counts))
   (define desired-rax-tl
@@ -2038,10 +2158,76 @@
                (and s
                     (not (ormap (lambda (eid) (same-brain-sym? eid s)) existing-ids))
                     (lookup-sc2-tech-node s)
+                    (not (crisis-deferred-sym? (normalize-brain-sym s) crisis-defer?
+                                               #:defer-stargate? defer-stargate?
+                                               #:keep-ship-weapons? ship-weap-due?))
                     (not (sc2-tech-already-satisfied? s total-bldg-counts researched-upgrades pending-upgrades
                                                       (goal-target-count-for s)))))
              (append (if supply-crisis? (list race-supply-sym) '())
                      emergency-rush-syms
+                     (if crisis-defer?
+                         (case race
+                           [(Zerg)
+                            (append
+                             (if (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+                                 (append '(queen)
+                                         (if (and severe-crisis-static-def?
+                                                  (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 2))
+                                             '(spine-crawler)
+                                             '()))
+                                 '())
+                             (if (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
+                                 (if (> (unit-count-equivalent unit-counts 'roach) 0)
+                                     '(roach ravager)
+                                     '(roach))
+                                 '()))]
+                           [(Protoss)
+                            (append
+                             (if (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+                                 (if (and severe-crisis-static-def?
+                                          (< (bldg-count-equivalent total-bldg-counts 'shield-battery) 2))
+                                     '(stalker shield-battery)
+                                     '(stalker))
+                                 '())
+                             (if (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
+                                 '(immortal)
+                                 '())
+                             (if (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                                       (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)
+                                 '(zealot)
+                                 '()))]
+                           [else
+                            (append
+                             (if (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+                                 '(siege-tank)
+                                 '())
+                             (if (> (bldg-count-equivalent ready-bldg-counts 'barracks-techlab) 0)
+                                 '(marauder)
+                                 '())
+                             (if (and severe-crisis-static-def?
+                                      (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+                                      (< (bldg-count-equivalent total-bldg-counts 'bunker) 2))
+                                 '(bunker)
+                                 '()))])
+                         '())
+                     (if (and (eq? race 'Terran)
+                              enemy-cap-air?
+                              (or enemy-cap-air-ground-aa?
+                                  (> (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0))
+                              (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
+                              (= (bldg-count-equivalent total-bldg-counts 'armory) 0))
+                         '(armory)
+                         '())
+                     (if (and (eq? race 'Terran)
+                              enemy-cap-air?
+                              (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+                              has-ready-armory?
+                              (< (unit-count-equivalent unit-counts 'thor) desired-thors))
+                         '(thor)
+                         '())
+                     (if ship-weap-due?
+                         '(terran-ship-weapons-1)
+                         '())
                      (if overdue-1base-expand? (list race-expand-sym) '())
                      repaired-prereqs
                      plan-translated-syms
@@ -2250,6 +2436,11 @@
       (or (not (hash? open-facility-slots))
           (not (memq id '(armory ghost-academy fusion-core ultralisk-cavern templar-archive dark-shrine)))
           (ormap (lambda (r) (same-brain-sym? id r)) repaired-prereqs)
+          (and (eq? id 'armory)
+               (eq? race 'Terran)
+               enemy-cap-air?
+               (or enemy-cap-air-ground-aa?
+                   (> (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)))
           (and (eq? id 'ghost-academy) (>= active-bases 3) terran-need-ghost?)
           (>= army-supply 18)
           (and (memq id '(templar-archive dark-shrine ultralisk-cavern fusion-core))
@@ -2320,6 +2511,10 @@
          supply-lockout-allows-expand?
          3rd-plus-expand-ready?
          (cond
+           [(crisis-deferred-sym? csym crisis-defer?
+                                  #:defer-stargate? defer-stargate?
+                                  #:keep-ship-weapons? ship-weap-due?)
+            #f]
            [(and (memq id SC2-SINGLETON-TECH-BUILDINGS)
                  (> (bldg-count-equivalent total-bldg-counts id) 0))
             #f]
@@ -2402,7 +2597,8 @@
                     (< (bldg-count-equivalent total-bldg-counts id) 1))]
               [(memq id '(shield-battery spine-crawler bunker))
                (and (or under-attack? (> enemy-threat-supply 0))
-                    (< (bldg-count-equivalent total-bldg-counts id) 1))]
+                    (< (bldg-count-equivalent total-bldg-counts id)
+                       (if severe-crisis-static-def? 2 1)))]
               [else blk0])]
            [(eq? cat 'production-scaling)
             (cond
@@ -2717,7 +2913,14 @@
                 requires-detection?)
                (and (eq? race 'Terran)
                     (or (and (memq (normalize-brain-sym sym) '(ghost ghost-academy)) terran-need-ghost?)
-                        (and (eq? (normalize-brain-sym sym) 'liberator) terran-need-lib?)))
+                        (and (eq? (normalize-brain-sym sym) 'liberator) terran-need-lib?)
+                        (and (eq? (normalize-brain-sym sym) 'armory)
+                             enemy-cap-air?
+                             (or enemy-cap-air-ground-aa?
+                                 (> (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)))
+                        (and (eq? (normalize-brain-sym sym) 'terran-ship-weapons-1)
+                             ship-weap-due?)
+                        (and (eq? (normalize-brain-sym sym) 'thor) enemy-cap-air?)))
                proactive-overseer-boost?
                emergency-rush-root-boost?
                emergency-rush-def-boost?))
@@ -2783,7 +2986,10 @@
                        (eq? cat 'combat-unit)
                        answers-aa-or-det?
                        (memq (normalize-brain-sym sym) '(baneling lurker ultralisk brood-lord))))
-              (max plan-weight (if (and bo-goal-sym (same-brain-sym? sym bo-goal-sym)) (+ 200.0 u0) 0.0) 465.0)]
+              (max plan-weight
+                   (if answers-aa-or-det? u-after-gas-lock 0.0)
+                   (if (and bo-goal-sym (same-brain-sym? sym bo-goal-sym)) (+ 200.0 u0) 0.0)
+                   465.0)]
              [(and effective-bo-goal?
                    (not under-attack?)
                    (<= enemy-threat-supply (* 0.65 (max 1 army-supply)))
@@ -2909,6 +3115,10 @@
          (< (+ (unit-count-equivalent unit-counts 'liberator)
                (hash-ref seen-unit-counts 'liberator 0))
             desired-libs)]
+        [(thor)
+         (< (+ (unit-count-equivalent unit-counts 'thor)
+               (hash-ref seen-unit-counts 'thor 0))
+            (if enemy-cap-air? desired-thors 4))]
         [else #t]))
 
     ;; Check tech prerequisite readiness & open producer slot
@@ -2965,7 +3175,7 @@
                  (memq csym SC2-DUAL-CAP-TECH-BUILDINGS)
                  (memq csym '(extractor refinery assimilator barracks-techlab factory factory-techlab)))
          (hash-update! seen-tech-counts csym add1 0))
-       (when (memq csym '(sentry lurker baneling zergling ghost liberator))
+       (when (memq csym '(sentry lurker baneling zergling ghost liberator thor))
          (hash-update! seen-unit-counts csym add1 0))
        (when (memq pslot UNIT-MORPH-SOURCE-SLOTS)
          (hash-update! used-morph-slots pslot

@@ -804,10 +804,19 @@
                   (lambda () (hash 'id uid 'type utype 'x ux 'y uy 'weapon-cooldown w-cd))))
       (define in-swing?
         (and ledger (order-ledger-unit-in-attack-swing? ledger u-hash frame)))
+      (define u-ab-id
+        (let ([raw-id (hash-ref u-hash 'order-ability-id 0)])
+          (if (exact-integer? raw-id) raw-id 0)))
+      (define channel-or-morph-locked?
+        (or (and (> u-ab-id 0)
+                 (memq (sc2-order-protection-class u-ab-id) '(channel morph cast-walk)))
+            (and (hash-ref u-hash 'snipe-channel-locked? #f) #t)
+            (memq utype '(medivac warp-prism warp-prism-phasing overlord-transport))))
 
       ;; Trigger Banshee cloak when researched (or in synthetic test without researched-upgrades key),
       ;; facing anti-air without detection, and energy >= 25
       (when (and (eq? utype 'banshee)
+                 (not channel-or-morph-locked?)
                  has-banshee-cloak?
                  (not (tactical-sim-unit-cloaked? su))
                  (>= (tactical-sim-unit-energy su) SC2-BANSHEE-CLOAK-MIN-ENERGY)
@@ -815,7 +824,7 @@
                      (and enemy-has-aa? (not (tactical-arena-enemy-has-detection? arena)))))
         (emit! (list 'cast-spell uid 'cloak-banshee)))
 
-      (unless in-swing?
+      (unless (or in-swing? channel-or-morph-locked?)
         (define target-su
           (cond
             [(and (eq? committed-act 'CloakHarassWorkers)

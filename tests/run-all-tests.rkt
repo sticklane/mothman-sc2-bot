@@ -10283,6 +10283,1057 @@
   (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'expand))) z4-exp-acts)))
                 "[UNCOVERED-Z4] 3-base Zerg with >=900M & >=38 workers must emit 4th Hatchery expand during light skirmish"))
 
+;; =============================================================================
+;; Suite 44: Round 4 Crisis Tech/Upgrade Deferral ([NOTE-R4-A]) & Viking Tether / High-Impact Thor ([NOTE-R4-B])
+;; =============================================================================
+(run-suite "44. Round 4 Crisis Deferral & Anti-Capital-Air Safeguards ([NOTE-R4-A], [NOTE-R4-B])"
+  ;; 44.1 Shared Round-4 Predicate & Counter Helpers
+  (assert-true! (crisis-defense-tech-defer-active? #t 10.0 14.0 36)
+                "under-attack? + army < threat must activate crisis tech/upgrade deferral")
+  (assert-true! (crisis-defense-tech-defer-active? #t 20.0 16.0 24)
+                "under-attack? + workers < 32 must activate crisis tech/upgrade deferral")
+  (assert-true! (not (crisis-defense-tech-defer-active? #t 36.0 20.0 40))
+                "under-attack? with workers >= 32 and army >= threat must NOT trigger crisis deferral")
+  (assert-true! (not (crisis-defense-tech-defer-active? #f 10.0 14.0 20))
+                "non-attack low army/workers must NOT trigger crisis deferral")
+  (for ([sym (in-list '(glial-reconstitution centrifical-hooks centrifugal-hooks grooved-spines muscular-augments
+                        burrow tunneling-claws zerg-missile-weapons-1 zerg-ground-armor-1
+                        psi-storm extended-thermal-lance protoss-ground-weapons-1 protoss-ground-armor-1
+                        banshee-cloak cloaking-field personal-cloaking terran-infantry-weapons-1
+                        lair hive infestation-pit spire greater-spire templar-archive templar-archives
+                        fleet-beacon fusion-core))])
+    (assert-true! (crisis-deferred-sym? sym #t)
+                  (format "~a must be deferred during active crisis defense" sym)))
+  (assert-true! (crisis-deferred-sym? 'stargate #t #:defer-stargate? #t))
+  (assert-true! (not (crisis-deferred-sym? 'stargate #t #:defer-stargate? #f)))
+  (for ([sym (in-list '(roach ravager queen spine-crawler immortal stalker zealot shield-battery
+                        marauder siege-tank bunker ghost-academy roach-warren robotics-facility spawning-pool))])
+    (assert-true! (not (crisis-deferred-sym? sym #t #:defer-stargate? #t))
+                  (format "Immediate crisis defender/prereq ~a must NOT be deferred" sym)))
+  (assert-eq! (terran-enemy-ground-aa-count (hash 'stalker 6 'hydralisk 2 'zealot 5)) 8)
+  (assert-true! (terran-enemy-capital-air-with-ground-aa? (hash 'tempest 2 'stalker 6)))
+  (assert-eq! (terran-desired-thor-cap (hash 'tempest 2)) 5)
+  (assert-eq! (terran-desired-thor-cap (hash 'tempest 2 'stalker 6)) 6)
+  (assert-eq! (terran-desired-thor-cap (hash 'stalker 6)) 0)
+  (assert-eq! (terran-air-fleet-count (hash 'viking-fighter 2 'liberator 1 'battlecruiser 1)) 4)
+  (assert-true! (terran-ship-weapons-due? 'Terran 4 #t '()))
+  (assert-true! (not (terran-ship-weapons-due? 'Terran 3 #t '())))
+  (assert-true! (not (terran-ship-weapons-due? 'Terran 4 #t '(terran-ship-weapons-1))))
+
+  ;; 44.2 [NOTE-R4-A] Macro/Brain Crisis Upgrade & Tech Deferral (Zerg / Protoss / Terran)
+  (define ids-r4-z-crisis
+    (macro-brain-decision-scheduled-ids
+     (step-priority-macro-brain
+      (make-macro-world-state
+       #:race 'Zerg #:enemy-race 'Protoss #:frame 4800
+       #:minerals 500 #:gas 350 #:supply-used 46 #:supply-cap 74 #:workers 26 #:active-bases 2
+       #:army-supply 10 #:enemy-threat-supply 18 #:under-attack? #t
+       #:ready-building-counts (hash 'hatchery 2 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 3)
+       #:total-building-counts (hash 'hatchery 2 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 3)
+       #:unit-counts (hash 'drone 26 'roach 4 'zergling 4 'queen 2)
+       #:researched-upgrades '(metabolic-boost)
+       #:open-facility-slots (hash 'larva 5 'townhall 2 'hatchery 2 'evolution-chamber 1 'roach-warren 1)))))
+  (define z-r4-crisis-cands
+    (map priority-candidate-id
+         (generate-race-priority-candidates
+          #:race 'Zerg #:enemy-race 'Terran #:frame 6000
+          #:minerals 500 #:gas 350 #:supply-left 20 #:supply-cap 90 #:workers 28 #:active-bases 2
+          #:army-supply 12 #:enemy-threat-supply 22 #:under-attack? #t
+          #:researched-upgrades '(metabolic-boost)
+          #:ally-buildings '(hatchery lair spawning-pool roach-warren baneling-nest hydralisk-den evolution-chamber)
+          #:ready-buildings '(hatchery lair spawning-pool roach-warren baneling-nest hydralisk-den evolution-chamber)
+          #:ally-units (append (make-list 28 'drone) (make-list 4 'roach))
+          #:open-prod-slots (hash 'larva 5 'roach-warren 1 'baneling-nest 1 'hydralisk-den 1 'evolution-chamber 1))))
+  (define z-r4-calm-cands
+    (map priority-candidate-id
+         (generate-race-priority-candidates
+          #:race 'Zerg #:enemy-race 'Terran #:frame 6000
+          #:minerals 500 #:gas 350 #:supply-left 20 #:supply-cap 90 #:workers 42 #:active-bases 3
+          #:army-supply 30 #:enemy-threat-supply 0 #:under-attack? #f
+          #:researched-upgrades '(metabolic-boost)
+          #:ally-buildings '(hatchery lair spawning-pool roach-warren evolution-chamber)
+          #:ready-buildings '(hatchery lair spawning-pool roach-warren evolution-chamber)
+          #:ally-units (append (make-list 42 'drone) (make-list 6 'roach))
+          #:open-prod-slots (hash 'larva 5 'roach-warren 1 'evolution-chamber 1))))
+  (for ([bad (in-list '(lair hive infestation-pit spire greater-spire glial-reconstitution centrifical-hooks
+                        grooved-spines muscular-augments burrow tunneling-claws zerg-missile-weapons-1 zerg-ground-armor-1))])
+    (assert-true! (and (not (memq bad ids-r4-z-crisis))
+                       (not (memq bad z-r4-crisis-cands)))
+                  (format "[NOTE-R4-A] Zerg crisis must defer ~a" bad)))
+  (assert-true! (or (memq 'roach ids-r4-z-crisis)
+                    (memq 'ravager ids-r4-z-crisis)
+                    (memq 'spine-crawler ids-r4-z-crisis))
+                "[NOTE-R4-A] Zerg crisis must schedule immediate roach/ravager/spine-crawler defenders")
+  (assert-true! (not (not (memq 'glial-reconstitution z-r4-calm-cands)))
+                "[NOTE-R4-A] Calm Zerg macro must retain glial-reconstitution")
+
+  (define ids-r4-p-crisis
+    (macro-brain-decision-scheduled-ids
+     (step-priority-macro-brain
+      (make-macro-world-state
+       #:race 'Protoss #:enemy-race 'Zerg #:frame 6500
+       #:minerals 550 #:gas 350 #:supply-used 62 #:supply-cap 90 #:workers 28 #:active-bases 2
+       #:army-supply 14 #:enemy-threat-supply 26 #:under-attack? #t #:requires-anti-air? #f
+       #:ready-building-counts (hash 'nexus 2 'pylon 6 'gateway 4 'cybernetics-core 1
+                                     'robotics-facility 1 'robotics-bay 1 'twilight-council 1
+                                     'templar-archive 1 'forge 1 'assimilator 4)
+       #:total-building-counts (hash 'nexus 2 'pylon 6 'gateway 4 'cybernetics-core 1
+                                     'robotics-facility 1 'robotics-bay 1 'twilight-council 1
+                                     'templar-archive 1 'forge 1 'assimilator 4)
+       #:unit-counts (hash 'probe 28 'stalker 4 'colossus 1)
+       #:open-facility-slots (hash 'townhall 2 'gateway 3 'robotics-facility 1
+                                   'robotics-bay 1 'templar-archive 1 'forge 1 'cybernetics-core 1)))))
+  (for ([bad (in-list '(stargate fleet-beacon psi-storm extended-thermal-lance
+                        protoss-ground-weapons-1 protoss-ground-armor-1))])
+    (assert-true! (not (memq bad ids-r4-p-crisis))
+                  (format "[NOTE-R4-A] Protoss Robo crisis must defer ~a" bad)))
+  (assert-true! (or (memq 'immortal ids-r4-p-crisis)
+                    (memq 'stalker ids-r4-p-crisis)
+                    (memq 'shield-battery ids-r4-p-crisis))
+                "[NOTE-R4-A] Protoss Robo crisis must schedule immortal/stalker/shield-battery defenders")
+
+  (define ids-r4-t-crisis
+    (macro-brain-decision-scheduled-ids
+     (step-priority-macro-brain
+      (make-macro-world-state
+       #:race 'Terran #:enemy-race 'Protoss #:frame 6000
+       #:minerals 550 #:gas 350 #:supply-used 52 #:supply-cap 80 #:workers 24 #:active-bases 2
+       #:army-supply 12 #:enemy-threat-supply 22 #:under-attack? #t
+       #:ready-building-counts (hash 'command-center 2 'supply-depot 6 'refinery 4
+                                     'barracks 3 'barracks-techlab 2 'factory 1 'factory-techlab 1
+                                     'starport 1 'starport-techlab 1 'engineering-bay 1 'ghost-academy 1)
+       #:total-building-counts (hash 'command-center 2 'supply-depot 6 'refinery 4
+                                     'barracks 3 'barracks-techlab 2 'factory 1 'factory-techlab 1
+                                     'starport 1 'starport-techlab 1 'engineering-bay 1 'ghost-academy 1)
+       #:unit-counts (hash 'scv 24 'marauder 2 'siege-tank 1 'banshee 1)
+       #:open-facility-slots (hash 'townhall 2 'barracks 2 'factory 1 'starport 1
+                                   'starport-techlab 1 'engineering-bay 1 'ghost-academy 1)))))
+  (for ([bad (in-list '(fusion-core banshee-cloak personal-cloaking terran-infantry-weapons-1 terran-infantry-armor-1))])
+    (assert-true! (not (memq bad ids-r4-t-crisis))
+                  (format "[NOTE-R4-A] Terran crisis must defer ~a" bad)))
+  (assert-true! (or (memq 'siege-tank ids-r4-t-crisis)
+                    (memq 'marauder ids-r4-t-crisis)
+                    (memq 'bunker ids-r4-t-crisis))
+                "[NOTE-R4-A] Terran crisis must schedule siege-tank/marauder/bunker defenders")
+
+  ;; 44.3 [NOTE-R4-A] Live `step-live-bot-runtime!` Crisis Deferral & Emergency Production (Zerg / Protoss / Terran)
+  (define r4-live-z-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+      (hash 'frame 4800 'minerals 500 'gas 350 'supply-used 38 'supply-cap 60 'supply-left 22
+            'mineral-harvesters 24 'vespene-harvesters 4 'enemy-race 'Protoss
+            'researched-upgrades '(metabolic-boost)
+            'base-x 28.5 'base-y 32.5 'natural-x 48.5 'natural-y 32.5
+            'ally-units (append (for/list ([i (in-range 24)])
+                                  (hash 'id (+ 1100 i) 'type 'drone 'x 28.5 'y 32.5 'hp 40))
+                                (for/list ([i (in-range 4)])
+                                  (hash 'id (+ 1200 i) 'type 'larva 'x 28.5 'y 32.5 'hp 25))
+                                (list (hash 'id 1301 'type 'roach 'x 46.0 'y 32.5 'hp 145)
+                                      (hash 'id 1302 'type 'roach 'x 46.5 'y 32.5 'hp 145)))
+            'ally-buildings (list (hash 'id 1401 'type 'hatchery 'x 28.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                  (hash 'id 1402 'type 'hatchery 'x 48.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                  (hash 'id 1403 'type 'spawning-pool 'x 32.5 'y 30.5 'hp 1000 'build-progress 1.0)
+                                  (hash 'id 1404 'type 'roach-warren 'x 32.5 'y 26.5 'hp 850 'build-progress 1.0)
+                                  (hash 'id 1405 'type 'evolution-chamber 'x 28.5 'y 28.5 'hp 750 'build-progress 1.0))
+            'enemy-units (for/list ([i (in-range 10)])
+                           (hash 'id (+ 9100 i) 'type 'stalker 'x 50.0 'y 32.5 'hp 80 'shields 80))))
+     'actions '()))
+  (assert-true! (and (not (member '(research glial-reconstitution) r4-live-z-acts))
+                     (not (member '(research zerg-missile-weapons-1) r4-live-z-acts))
+                     (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(build morph))
+                                                  (memq (second a) '(lair hive infestation-pit spire))))
+                                 r4-live-z-acts)))
+                "Live Zerg crisis must suppress lair/infestation-pit/spire & non-essential research")
+  (assert-true! (and (or (member '(train roach) r4-live-z-acts) (member '(morph ravager) r4-live-z-acts))
+                     (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'spine-crawler)))
+                                      r4-live-z-acts))))
+                "Live Zerg crisis must boost roach/ravager + spine-crawler emergency defense")
+
+  (define r4-live-p-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
+      (hash 'frame 6500 'minerals 550 'gas 350 'supply-used 42 'supply-cap 70 'supply-left 28
+            'mineral-harvesters 24 'vespene-harvesters 4 'enemy-race 'Zerg
+            'researched-upgrades '(warp-gate-research)
+            'base-x 24.5 'base-y 40.5 'natural-x 42.5 'natural-y 40.5
+            'ally-units (append (for/list ([i (in-range 26)])
+                                  (hash 'id (+ 2100 i) 'type 'probe 'x 24.5 'y 40.5 'hp 20 'shields 20))
+                                (list (hash 'id 2201 'type 'colossus 'x 40.0 'y 40.5 'hp 200 'shields 150)))
+            'ally-buildings (list (hash 'id 2301 'type 'nexus 'x 24.5 'y 40.5 'hp 1000 'shields 1000 'build-progress 1.0)
+                                  (hash 'id 2302 'type 'nexus 'x 42.5 'y 40.5 'hp 1000 'shields 1000 'build-progress 1.0)
+                                  (hash 'id 2303 'type 'cybernetics-core 'x 28.5 'y 40.5 'hp 550 'shields 550 'build-progress 1.0)
+                                  (hash 'id 2304 'type 'gateway 'x 28.5 'y 44.5 'hp 500 'shields 500 'build-progress 1.0)
+                                  (hash 'id 2305 'type 'robotics-facility 'x 22.5 'y 41.5 'hp 450 'shields 450 'build-progress 1.0)
+                                  (hash 'id 2306 'type 'robotics-bay 'x 22.5 'y 44.5 'hp 500 'shields 500 'build-progress 1.0)
+                                  (hash 'id 2307 'type 'twilight-council 'x 28.5 'y 36.5 'hp 500 'shields 500 'build-progress 1.0)
+                                  (hash 'id 2308 'type 'forge 'x 26.5 'y 38.5 'hp 400 'shields 400 'build-progress 1.0)
+                                  (hash 'id 2309 'type 'templar-archive 'x 20.5 'y 38.5 'hp 500 'shields 500 'build-progress 1.0))
+            'enemy-units (for/list ([i (in-range 12)])
+                           (hash 'id (+ 9200 i) 'type 'roach 'x 44.0 'y 40.5 'hp 145))))
+     'actions '()))
+  (assert-true! (and (not (member '(research psi-storm) r4-live-p-acts))
+                     (not (member '(research extended-thermal-lance) r4-live-p-acts))
+                     (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build)
+                                                  (memq (second a) '(stargate templar-archive fleet-beacon))))
+                                 r4-live-p-acts)))
+                "Live Protoss crisis must suppress psi-storm/extended-thermal-lance/stargate/fleet-beacon")
+  (assert-true! (or (member '(train zealot) r4-live-p-acts)
+                    (member '(train stalker) r4-live-p-acts)
+                    (member '(train immortal) r4-live-p-acts))
+                "Live Protoss crisis must immediately train gateway/robo defenders")
+
+  (define r4-live-t-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+      (hash 'frame 6000 'minerals 550 'gas 350 'supply-used 42 'supply-cap 70 'supply-left 28
+            'mineral-harvesters 24 'vespene-harvesters 6 'enemy-race 'Protoss
+            'researched-upgrades '(stimpack combat-shield)
+            'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+            'ally-units (append (for/list ([i (in-range 24)])
+                                  (hash 'id (+ 3100 i) 'type 'scv 'x 24.5 'y 48.5 'hp 45))
+                                (list (hash 'id 3201 'type 'banshee 'x 48.0 'y 48.5 'hp 140)
+                                      (hash 'id 3202 'type 'marine 'x 48.0 'y 48.5 'hp 45)))
+            'ally-buildings (list (hash 'id 3301 'type 'orbital-command 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                  (hash 'id 3302 'type 'orbital-command 'x 52.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                  (hash 'id 3303 'type 'barracks 'x 30.5 'y 46.5 'hp 1000 'build-progress 1.0 'addon 'techlab)
+                                  (hash 'id 3304 'type 'barracks-techlab 'x 33.0 'y 46.0 'hp 400 'build-progress 1.0)
+                                  (hash 'id 3305 'type 'factory 'x 28.5 'y 42.5 'hp 1250 'build-progress 1.0 'addon 'techlab)
+                                  (hash 'id 3306 'type 'factory-techlab 'x 31.0 'y 42.0 'hp 400 'build-progress 1.0)
+                                  (hash 'id 3307 'type 'starport 'x 28.5 'y 52.5 'hp 1300 'build-progress 1.0 'addon 'techlab)
+                                  (hash 'id 3308 'type 'starport-techlab 'x 31.0 'y 52.0 'hp 400 'build-progress 1.0))
+            'enemy-units (for/list ([i (in-range 8)])
+                           (hash 'id (+ 9300 i) 'type 'stalker 'x 55.0 'y 48.5 'hp 80 'shields 80))))
+     'actions '()))
+  (assert-true! (and (not (member '(research banshee-cloak) r4-live-t-acts))
+                     (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'fusion-core)))
+                                 r4-live-t-acts)))
+                "Live Terran crisis must suppress banshee-cloak & fusion-core")
+  (assert-true! (and (member '(train siege-tank) r4-live-t-acts)
+                     (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'bunker)))
+                                      r4-live-t-acts))))
+                "Live Terran crisis must prioritize siege-tank & bunker defense")
+
+  ;; 44.4 [NOTE-R4-B] Macro/Live TvP Viking Anti-Stalker Tether, Thor < 5/6 + High-Impact (2362) & Ship Weapons 1
+  (define ids-tvp-armory
+    (macro-brain-decision-scheduled-ids
+     (step-priority-macro-brain
+      (make-macro-world-state
+       #:race 'Terran #:enemy-race 'Protoss #:frame 8400
+       #:minerals 600 #:gas 400 #:supply-used 88 #:supply-cap 120 #:workers 44 #:active-bases 3
+       #:army-supply 24 #:enemy-threat-supply 26 #:under-attack? #t #:requires-anti-air? #t
+       #:ready-building-counts (hash 'command-center 3 'supply-depot 11 'refinery 6
+                                     'barracks 4 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1)
+       #:total-building-counts (hash 'command-center 3 'supply-depot 11 'refinery 6
+                                     'barracks 4 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1)
+       #:unit-counts (hash 'scv 44 'marine 10 'marauder 4 'viking-fighter 2)
+       #:enemy-unit-counts (hash 'tempest 4 'stalker 8)
+       #:open-facility-slots (hash 'townhall 3 'barracks 3 'factory 1 'starport 1)))))
+  (assert-true! (and (memq 'armory ids-tvp-armory) (memq 'viking-fighter ids-tvp-armory))
+                "[NOTE-R4-B] TvP facing Tempest+Stalkers must schedule armory + viking-fighter")
+  (define (mk-tvp-thor-ws thors fleet enemies #:researched [upgs '()])
+    (make-macro-world-state
+     #:race 'Terran #:enemy-race 'Protoss #:frame 9000
+     #:minerals 700 #:gas 500 #:supply-used 108 #:supply-cap 140 #:workers 48 #:active-bases 3
+     #:army-supply 38 #:enemy-threat-supply 28 #:requires-anti-air? #t
+     #:ready-building-counts (hash 'command-center 3 'supply-depot 14 'refinery 6
+                                   'barracks 4 'factory 2 'factory-techlab 2 'armory 1 'starport 1)
+     #:total-building-counts (hash 'command-center 3 'supply-depot 14 'refinery 6
+                                   'barracks 4 'factory 2 'factory-techlab 2 'armory 1 'starport 1)
+     #:unit-counts (hash 'scv 48 'thor thors 'viking-fighter (car fleet) 'liberator (cadr fleet) 'battlecruiser (caddr fleet))
+     #:researched-upgrades upgs
+     #:enemy-unit-counts enemies
+     #:open-facility-slots (hash 'townhall 3 'barracks 3 'factory 2 'starport 1 'armory 1)))
+  (define ids-tvp-thor2
+    (macro-brain-decision-scheduled-ids (step-priority-macro-brain (mk-tvp-thor-ws 2 '(2 1 1) (hash 'tempest 4)))))
+  (assert-true! (and (memq 'thor ids-tvp-thor2) (memq 'terran-ship-weapons-1 ids-tvp-thor2))
+                "[NOTE-R4-B] Macro brain must schedule thor (< 5) and terran-ship-weapons-1 (air fleet >= 4)")
+  (assert-true! (not (memq 'thor (macro-brain-decision-scheduled-ids
+                                  (step-priority-macro-brain
+                                   (mk-tvp-thor-ws 5 '(2 1 0) (hash 'tempest 4) #:researched '(terran-ship-weapons-1)))))))
+  (assert-true! (not (not (memq 'thor (macro-brain-decision-scheduled-ids
+                                       (step-priority-macro-brain
+                                        (mk-tvp-thor-ws 5 '(2 1 0) (hash 'tempest 4 'stalker 8) #:researched '(terran-ship-weapons-1)))))))
+                "[NOTE-R4-B] Macro brain must scale Thor cap to 6 when >= 6 Stalkers screen Tempests")
+  (assert-true! (not (memq 'terran-ship-weapons-1
+                           (macro-brain-decision-scheduled-ids
+                            (step-priority-macro-brain (mk-tvp-thor-ws 5 '(2 1 0) (hash 'tempest 4)))))))
+
+  ;; Live runtime Viking anti-Stalker tether vs ground-supported engage + Thor train (<5) + High-Impact (2362) + Ship Weapons 1
+  (define (mk-r4b-live-obs thor-cnt vik-x #:upgs [upgs '(stimpack combat-shield terran-infantry-weapons-1)])
+    (hash 'frame 9000 'minerals 1400 'gas 1000 'supply-used 110 'supply-cap 160 'supply-left 50
+          'mineral-harvesters 48 'vespene-harvesters 8 'enemy-race 'Protoss
+          'researched-upgrades upgs
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (append (for/list ([i (in-range 48)])
+                                (hash 'id (+ 4100 i) 'type 'scv 'x 24.5 'y 48.5 'hp 45))
+                              (for/list ([i (in-range thor-cnt)])
+                                (hash 'id (+ 4250 i) 'type 'thor 'x 64.5 'y 64.5 'hp 400))
+                              (list (hash 'id 4201 'type 'marine 'x 64.0 'y 64.0 'hp 45)
+                                    (hash 'id 4202 'type 'marauder 'x 65.0 'y 64.0 'hp 125)
+                                    (hash 'id 4211 'type 'viking-fighter 'x vik-x 'y 64.0 'hp 135)
+                                    (hash 'id 4212 'type 'viking-fighter 'x (- vik-x 0.5) 'y 65.0 'hp 135)
+                                    (hash 'id 4213 'type 'viking-fighter 'x (+ vik-x 0.5) 'y 63.0 'hp 135)
+                                    (hash 'id 4214 'type 'liberator 'x 66.0 'y 64.0 'hp 180)))
+          'ally-buildings (list (hash 'id 4301 'type 'orbital-command 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 4302 'type 'orbital-command 'x 52.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 4303 'type 'orbital-command 'x 40.5 'y 72.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 4304 'type 'factory 'x 28.5 'y 42.5 'hp 1250 'build-progress 1.0 'addon 'techlab)
+                                (hash 'id 4305 'type 'factory-techlab 'x 31.0 'y 42.0 'hp 400 'build-progress 1.0)
+                                (hash 'id 4306 'type 'armory 'x 20.5 'y 44.5 'hp 750 'build-progress 1.0)
+                                (hash 'id 4310 'type 'starport 'x 28.5 'y 52.5 'hp 1300 'build-progress 1.0 'addon 'reactor))
+          'enemy-units (list (hash 'id 9401 'type 'tempest 'x 83.0 'y 64.0 'hp 200 'shields 100)
+                             (hash 'id 9402 'type 'stalker 'x 82.0 'y 63.0 'hp 80 'shields 80)
+                             (hash 'id 9403 'type 'stalker 'x 82.0 'y 64.0 'hp 80 'shields 80)
+                             (hash 'id 9404 'type 'stalker 'x 82.0 'y 65.0 'hp 80 'shields 80))))
+  (define r4b-tether-acts
+    (hash-ref (step-live-bot-runtime! (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+                                      (mk-r4b-live-obs 2 78.0))
+              'actions '()))
+  (define vik-kites
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'kite) (member (second a) '(4211 4212 4213))))
+            r4b-tether-acts))
+  (assert-eq! (length vik-kites) 3
+              "[NOTE-R4-B] Vikings >4.5 tiles ahead of ground centroid facing >=3 Stalkers must tether back with kite")
+  (assert-true! (andmap (lambda (k) (< (third k) 78.0)) vik-kites)
+                "[NOTE-R4-B] Viking tether target x must pull back toward ground anchor")
+  (assert-true! (not (not (member '(train thor) r4b-tether-acts)))
+                "[NOTE-R4-B] Live Terran facing Tempest with Armory+FactoryTL (<5 Thors) must train Thor")
+  (assert-true! (not (not (member '(research terran-ship-weapons-1) r4b-tether-acts)))
+                "[NOTE-R4-B] Live Terran with >=4 air fleet & Armory must research terran-ship-weapons-1")
+  (assert-true! (not (not (member '(cast-spell 4250 morph-thor-high-impact 4250) r4b-tether-acts)))
+                "[NOTE-R4-B] Live Thor facing Tempest must emit morph-thor-high-impact")
+
+  (define r4b-supported-acts
+    (hash-ref (step-live-bot-runtime! (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+                                      (mk-r4b-live-obs 5 67.0))
+              'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite) (equal? (second a) 4211)))
+                            r4b-supported-acts))
+                "[NOTE-R4-B] Ground-supported Viking (<=4.5 tiles from ground army) must not tether-retreat")
+  (assert-true! (not (member '(train thor) r4b-supported-acts))
+                "[NOTE-R4-B] Live Terran must cap Thor training once count reaches 5")
+
+  ;; Wire verification: High-Impact Payload Ability ID 2362
+  (define r4b-wire-obs
+    (sc2-observation 9000 (sc2-player-common 1 900 600 110 160 48 20 0 1 0 3)
+                     (list (sc2-unit 1 1 4250 52 1 (sc2-point3d 64.5 64.5 8.0) 0.0 1.2 1.0 0 #f #f #f
+                                     400.0 400.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 0))
+                     '() '() #f '() '() '() '() '() '()))
+  (define r4b-wire-cmds
+    (translate-bot-actions->sc2-raw-commands '((cast-spell 4250 morph-thor-high-impact 4250)) r4b-wire-obs))
+  (assert-eq! (map sc2-raw-unit-command-ability-id (filter sc2-raw-unit-command? r4b-wire-cmds))
+              '(2362)
+              "[NOTE-R4-B] morph-thor-high-impact must translate to SC2 ability ID 2362"))
+
+;; =============================================================================
+;; Suite 45: Unit Modes, Transports, Cyclone/Marauder/Viking & Pro Spellcaster Patterns
+;; =============================================================================
+(run-suite "45. Unit Modes, Transports, Cyclone/Marauder/Viking & Pro Spellcaster Patterns"
+  ;; ---------------------------------------------------------------------------
+  ;; 45.1 Thor (52<->691): High-Impact (2362), Explosive Hold (2364), 224f Hysteresis & Guards
+  ;; ---------------------------------------------------------------------------
+  (define um-tr (make-unit-mode-tracker))
+  (define thor-explosive (hash 'id 45001 'type 'thor 'x 50.0 'y 50.0 'hp 400 'max-hp 400 'under-fire? #f))
+  (define tempest-e (list (hash 'id 45101 'type 'tempest 'x 59.0 'y 50.0 'hp 200 'shields 100 'flying? #t)))
+  (sync-unit-mode-tracker! um-tr (list thor-explosive) tempest-e 1000)
+  (define thor-hi-dirs (plan-thor-modes (list thor-explosive) tempest-e #:tracker um-tr #:current-frame 1000))
+  (assert-eq! (length thor-hi-dirs) 1 "Thor (52) facing Tempest must emit 1 mode directive")
+  (assert-eq! (unit-mode-directive-ability (car thor-hi-dirs)) 'morph-thor-high-impact
+              "Thor facing Tempest must choose morph-thor-high-impact (2362)")
+  (assert-eq! (unit-mode-directive-ability-id (car thor-hi-dirs)) 2362
+              "Thor High-Impact ability ID must be 2362")
+
+  ;; 224f dwell hysteresis: switching back inside < 224f must be suppressed
+  (define thor-ap (hash 'id 45001 'type 'thor-ap 'x 50.0 'y 50.0 'hp 400 'max-hp 400 'under-fire? #f))
+  (define muta-3
+    (list (hash 'id 45102 'type 'mutalisk 'x 58.0 'y 50.0 'hp 120 'flying? #t)
+          (hash 'id 45103 'type 'mutalisk 'x 58.5 'y 50.8 'hp 120 'flying? #t)
+          (hash 'id 45104 'type 'mutalisk 'x 59.0 'y 49.2 'hp 120 'flying? #t)))
+  (assert-eq! (plan-thor-modes (list thor-ap) muta-3 #:tracker um-tr #:current-frame 1100) '()
+              "Thor 224f dwell hysteresis must block re-morph at delta=100f")
+  (define thor-exp-dirs (plan-thor-modes (list thor-ap) muta-3 #:tracker um-tr #:current-frame 1230))
+  (assert-eq! (length thor-exp-dirs) 1 "Thor AP vs >=3 Mutalisks must morph back after >=224f dwell")
+  (assert-eq! (unit-mode-directive-ability (car thor-exp-dirs)) 'morph-thor-explosive
+              "Thor AP vs >=3 Mutalisks must choose morph-thor-explosive (2364)")
+  (assert-eq! (unit-mode-directive-ability-id (car thor-exp-dirs)) 2364
+              "Thor Explosive ability ID must be 2364")
+
+  ;; Safety guards: <35% HP under-fire & melee Zergling proximity block morph
+  (define thor-low (hash 'id 45002 'type 'thor 'x 50.0 'y 50.0 'hp 120 'max-hp 400 'under-fire? #t))
+  (assert-true! (not (thor-morph-safe? thor-low tempest-e #:under-fire? #t))
+                "Thor <35% HP under fire must fail thor-morph-safe?")
+  (assert-eq! (plan-thor-modes (list thor-low) tempest-e #:current-frame 1500) '()
+              "Thor <35% HP under fire must suppress mode morph")
+  (define thor-melee-threat
+    (append (for/list ([i (in-range 8)])
+              (hash 'id (+ 45105 i) 'type 'zergling 'x 52.0 'y (+ 48.0 (* 0.4 i)) 'hp 35))
+            tempest-e))
+  (assert-true! (not (thor-morph-safe? (hash 'id 45003 'type 'thor 'x 50.0 'y 50.0 'hp 400 'max-hp 400)
+                                       thor-melee-threat #:under-fire? #f))
+                "Nearby melee Zergling swarm (>=8 within safety radius) must block Thor mode morph")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 45.2 Hellion <-> Hellbat (53<->484): Armory gate, <=18.0 pre-engage & >=176f commit
+  ;; ---------------------------------------------------------------------------
+  (define hellion1 (hash 'id 45010 'type 'hellion 'x 50.0 'y 50.0 'hp 90 'max-hp 90))
+  (define lings-near
+    (list (hash 'id 45110 'type 'zergling 'x 64.0 'y 50.0 'hp 35)
+          (hash 'id 45112 'type 'zergling 'x 64.5 'y 50.5 'hp 35)
+          (hash 'id 45113 'type 'zergling 'x 64.2 'y 49.5 'hp 35)))
+  (assert-eq! (plan-hellion-modes (list hellion1) lings-near #:current-frame 2000 #:armory-ready? #f) '()
+              "Hellion->Hellbat morph must stay disabled without Armory")
+  (define hb-tr (make-unit-mode-tracker))
+  (sync-unit-mode-tracker! hb-tr (list hellion1) lings-near 2000)
+  (define hb-dirs (plan-hellion-modes (list hellion1) lings-near #:tracker hb-tr #:current-frame 2000 #:armory-ready? #t))
+  (assert-eq! (length hb-dirs) 1 "Hellion <=18.0 tiles w/ Armory facing >=3 squad must morph Hellbat")
+  (assert-eq! (unit-mode-directive-ability (car hb-dirs)) 'morph-hellbat
+              "Hellion pre-engage must emit morph-hellbat (1998)")
+  (assert-eq! (unit-mode-directive-ability-id (car hb-dirs)) 1998
+              "Hellbat morph ability ID must be 1998")
+
+  ;; Unmorph guard: blocked < 176f OR while threats <= 22.0; allowed after >=176f & 0 enemies <=22.0
+  (define hellbat1 (hash 'id 45010 'type 'hellbat 'x 50.0 'y 50.0 'hp 135 'max-hp 135))
+  (assert-eq! (plan-hellion-modes (list hellbat1) '() #:tracker hb-tr #:current-frame 2100 #:armory-ready? #t) '()
+              "Hellbat unmorph must wait >=176f min commit dwell (blocked at delta=100f)")
+  (assert-eq! (plan-hellion-modes (list hellbat1)
+                                  (list (hash 'id 45111 'type 'roach 'x 69.0 'y 50.0 'hp 145))
+                                  #:tracker hb-tr #:current-frame 2180 #:armory-ready? #t)
+              '()
+              "Hellbat must NOT unmorph while ground threats remain within <=22.0 tiles")
+  (define hb-unmorph
+    (plan-hellion-modes (list hellbat1) '() #:tracker hb-tr #:current-frame 2180 #:armory-ready? #t))
+  (assert-eq! (length hb-unmorph) 1 "Hellbat must unmorph after >=176f & 0 threats <=22.0")
+  (assert-eq! (unit-mode-directive-ability (car hb-unmorph)) 'morph-hellion
+              "Hellbat unmorph must emit morph-hellion (1978)")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 45.3 Viking (35<->34): Safe Cleanup Landing (403) & Immediate Lift-Off (405)
+  ;; ---------------------------------------------------------------------------
+  (define vik-tr (make-unit-mode-tracker))
+  (define vik-assault0 (hash 'id 45020 'type 'viking-assault 'x 50.0 'y 50.0 'hp 135 'max-hp 135 'flying? #f))
+  (define vik-fly (hash 'id 45020 'type 'viking-fighter 'x 50.0 'y 50.0 'hp 135 'max-hp 135 'flying? #t))
+  (define vik-cleanup-allies
+    (list vik-fly
+          (hash 'id 45022 'type 'marauder 'x 51.0 'y 50.0 'hp 125 'max-hp 125)
+          (hash 'id 45023 'type 'marauder 'x 51.0 'y 51.0 'hp 125 'max-hp 125)
+          (hash 'id 45024 'type 'marine 'x 51.5 'y 50.5 'hp 45 'max-hp 45)))
+  (define ground+obs
+    (list (hash 'id 45120 'type 'stalker 'x 56.0 'y 50.0 'hp 80 'shields 80)
+          (hash 'id 45121 'type 'observer 'x 57.0 'y 51.0 'hp 40 'shields 20 'flying? #t)
+          (hash 'id 45122 'type 'overlord 'x 58.0 'y 52.0 'hp 200 'flying? #t)))
+  (sync-unit-mode-tracker! vik-tr (list vik-assault0) ground+obs 2900 #:track-air-memory? #t)
+  (sync-unit-mode-tracker! vik-tr vik-cleanup-allies ground+obs 3000 #:track-air-memory? #t)
+  (assert-eq! (plan-viking-modes vik-cleanup-allies ground+obs #:tracker vik-tr #:current-frame 3050) '()
+              "Viking must hold Fighter mode before >=135f dwell (delta=50f)")
+  ;; Fresh combat air within 22.0 blocks landing (and sets air memory)
+  (define air-mem-tr (make-unit-mode-tracker))
+  (sync-unit-mode-tracker! air-mem-tr vik-cleanup-allies
+                           (list (hash 'id 45123 'type 'void-ray 'x 64.0 'y 50.0 'hp 150 'shields 100 'flying? #t))
+                           3000 #:track-air-memory? #t)
+  (assert-eq! (plan-viking-modes vik-cleanup-allies ground+obs #:tracker air-mem-tr #:current-frame 3145) '()
+              "Recent enemy combat air memory must block Viking landing even after 135f")
+  (sync-unit-mode-tracker! vik-tr vik-cleanup-allies ground+obs 3145 #:track-air-memory? #t)
+  (define vik-land (plan-viking-modes vik-cleanup-allies ground+obs #:tracker vik-tr #:current-frame 3145))
+  (assert-eq! (length vik-land) 1 "Viking >=135f facing only ground + Observer/Overlord must land (403)")
+  (assert-eq! (unit-mode-directive-ability (car vik-land)) 'morph-viking-assault
+              "Viking landing must emit morph-viking-assault (403)")
+
+  ;; Immediate lift-off (405) triggers on combat air/Colossus <=25.0, <55% HP, or Tank/Lurker/Baneling <=9.5
+  (define vik-gnd-ok (hash 'id 45020 'type 'viking-assault 'x 50.0 'y 50.0 'hp 135 'max-hp 135 'flying? #f))
+  (define vik-lift-air
+    (plan-viking-modes (list vik-gnd-ok)
+                       (list (hash 'id 45124 'type 'colossus 'x 62.0 'y 50.0 'hp 200 'shields 150))
+                       #:tracker vik-tr #:current-frame 3220))
+  (assert-eq! (unit-mode-directive-ability (car vik-lift-air)) 'morph-viking-fighter
+              "Landed Viking must lift off (405) when Colossus enters <=15.0 emergency radius after >=64f")
+  (define vik-gnd-low (hash 'id 45021 'type 'viking-assault 'x 50.0 'y 50.0 'hp 60 'max-hp 135 'flying? #f))
+  (assert-eq! (unit-mode-directive-ability
+               (car (plan-viking-modes (list vik-gnd-low) ground+obs #:current-frame 3220)))
+              'morph-viking-fighter
+              "Landed Viking <55% HP must lift off (405)")
+  (define vik-lift-bane
+    (plan-viking-modes (list vik-gnd-ok)
+                       (list (hash 'id 45125 'type 'baneling 'x 55.0 'y 50.0 'hp 30))
+                       #:tracker vik-tr #:current-frame 3220))
+  (assert-eq! (unit-mode-directive-ability (car vik-lift-bane)) 'morph-viking-fighter
+              "Landed Viking near Baneling (<=9.5) must lift off (405)")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 45.4 Cyclone (692) Lock On (2350) Priority & [8.5..13.5] Tether Kiting
+  ;; ---------------------------------------------------------------------------
+  (define cyc-tr (make-unit-mode-tracker))
+  (define cyc1 (hash 'id 45030 'type 'cyclone 'x 50.0 'y 50.0 'hp 120 'max-hp 120))
+  (define cyc2 (hash 'id 45031 'type 'cyclone 'x 50.0 'y 52.0 'hp 120 'max-hp 120))
+  (define cyc-enemies
+    (list (hash 'id 45130 'type 'zergling 'x 55.0 'y 50.0 'hp 35)
+          (hash 'id 45131 'type 'stalker 'x 55.2 'y 50.5 'hp 80 'shields 80)
+          (hash 'id 45132 'type 'immortal 'x 55.5 'y 51.5 'hp 200 'shields 100)
+          (hash 'id 45133 'type 'warp-prism 'x 56.0 'y 51.5 'hp 80 'shields 100 'flying? #t)))
+  (define cyc-lock-dirs (plan-cyclone-micro (list cyc1 cyc2) cyc-enemies #:tracker cyc-tr #:current-frame 4000))
+  (assert-eq! (length cyc-lock-dirs) 2 "Two Cyclones should emit two Lock On directives")
+  (assert-eq! (unit-mode-directive-target-tag (car cyc-lock-dirs)) 45133
+              "Cyclone 1 must prioritize Warp Prism over Immortal/Stalker/Zergling")
+  (assert-eq! (unit-mode-directive-ability-id (car cyc-lock-dirs)) 2350
+              "Cyclone Lock On ability ID must be 2350")
+  (assert-eq! (unit-mode-directive-target-tag (cadr cyc-lock-dirs)) 45132
+              "Cyclone 2 must de-conflict onto Immortal instead of Zergling")
+
+  ;; Tether kiting (<9.0 backs out toward home; >12.8 steps in so 15.0 tether never breaks)
+  (define cyc-too-close (hash 'id 45030 'type 'cyclone 'x 52.0 'y 50.0 'hp 120 'buffs '(lock-on)))
+  (define k-back (plan-cyclone-micro (list cyc-too-close)
+                                     (list (hash 'id 45133 'type 'warp-prism 'x 58.0 'y 50.0 'hp 80 'shields 100 'flying? #t))
+                                     #:tracker cyc-tr #:current-frame 4020 #:home-x 24.5 #:home-y 48.5))
+  (assert-true! (and (= (length k-back) 1)
+                     (eq? (unit-mode-directive-action (car k-back)) 'kite)
+                     (< (unit-mode-directive-tx (car k-back)) 52.0))
+                "Locked Cyclone <9.0 tiles (6.0) must kite away toward home")
+  (define cyc-too-far (hash 'id 45030 'type 'cyclone 'x 50.0 'y 50.0 'hp 120 'buffs '(lock-on)))
+  (define k-in (plan-cyclone-micro (list cyc-too-far)
+                                   (list (hash 'id 45133 'type 'warp-prism 'x 64.0 'y 50.0 'hp 80 'shields 100 'flying? #t))
+                                   #:tracker cyc-tr #:current-frame 4025 #:home-x 24.5 #:home-y 48.5))
+  (assert-true! (and (= (length k-in) 1)
+                     (eq? (unit-mode-directive-action (car k-in)) 'move)
+                     (> (unit-mode-directive-tx (car k-in)) 50.0))
+                "Locked Cyclone >12.8 tiles (14.0) must step in to preserve 15.0 tether")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 45.5 Marauder (51) Concussive Shells (32f) Spread & <=35 HP Lethal Finish
+  ;; ---------------------------------------------------------------------------
+  (define mar-tr (make-unit-mode-tracker))
+  (define marauders3
+    (list (hash 'id 45040 'type 'marauder 'x 50.0 'y 50.0 'hp 125)
+          (hash 'id 45041 'type 'marauder 'x 50.0 'y 51.0 'hp 125)
+          (hash 'id 45042 'type 'marauder 'x 50.0 'y 52.0 'hp 125)))
+  (define bio3
+    (list (hash 'id 45140 'type 'stalker 'x 55.0 'y 50.0 'hp 80 'shields 80)
+          (hash 'id 45141 'type 'roach 'x 55.5 'y 51.0 'hp 145)
+          (hash 'id 45142 'type 'adept 'x 55.2 'y 52.0 'hp 70 'shields 70)))
+  (define mar-orders (plan-marauder-concussive-targets marauders3 bio3 #:tracker mar-tr #:current-frame 4500))
+  (assert-eq! (length (remove-duplicates (map marauder-target-order-target-tag mar-orders))) 3
+              "3 Marauders must spread Concussive Shells across 3 distinct unslowed enemies in 1 frame")
+  ;; Lethal <= 35 EHP exception overrides slowed tracker
+  (define mar-lethal
+    (plan-marauder-concussive-targets
+     (list (hash 'id 45040 'type 'marauder 'x 50.0 'y 50.0 'hp 125))
+     (list (hash 'id 45140 'type 'stalker 'x 55.0 'y 50.0 'hp 25 'shields 5)
+           (hash 'id 45143 'type 'roach 'x 55.0 'y 51.0 'hp 145))
+     #:tracker mar-tr #:current-frame 4505))
+  (assert-true! (and (= (length mar-lethal) 1)
+                     (= (marauder-target-order-target-tag (car mar-lethal)) 45140)
+                     (marauder-target-order-lethal-finish? (car mar-lethal)))
+                "Marauder must take lethal <=35 EHP finish even on recently slowed target")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 45.6 Transports: Save-Pickup, Moving Self-Drop, 672f Ceiling, Prism & Dropperlord
+  ;; ---------------------------------------------------------------------------
+  (define tr-tr (make-transport-tracker))
+  ;; (a) Save-pickup on cooldown Disruptor & bruised Immortal
+  (define prism-pick (hash 'id 45050 'type 'warp-prism 'x 50.0 'y 50.0 'hp 80 'shields 100 'flying? #t 'passengers '()))
+  (define cd-disruptor (hash 'id 45051 'type 'disruptor 'x 53.0 'y 50.0 'hp 100 'shields 100 'nova-ready? #f 'nova-cooldown 180))
+  (define stalker-threat (hash 'id 45150 'type 'stalker 'x 59.0 'y 50.0 'hp 80 'shields 80))
+  (define pick-dirs (plan-transport-fleet-micro (list prism-pick cd-disruptor) (list stalker-threat)
+                                                #:tracker tr-tr #:current-frame 5000 #:warp-in-complete? #t))
+  (assert-true! (and (= (length pick-dirs) 1)
+                     (eq? (transport-directive-action (car pick-dirs)) 'load-unit)
+                     (member 45051 (transport-directive-passenger-tags (car pick-dirs)))
+                     #t)
+                "WarpPrism within 5.0 tiles must save-pickup on-cooldown Disruptor near threat")
+  (define bruised-imm (hash 'id 45059 'type 'immortal 'x 53.0 'y 50.0 'hp 60 'max-hp 200 'shields 20 'max-shields 100))
+  (define imm-pick-dirs
+    (plan-transport-fleet-micro (list (hash 'id 45060 'type 'warp-prism 'x 50.0 'y 50.0 'hp 80 'shields 100 'flying? #t 'passengers '())
+                                      bruised-imm)
+                                (list stalker-threat)
+                                #:tracker (make-transport-tracker) #:current-frame 5000 #:warp-in-complete? #t))
+  (assert-true! (and (= (length imm-pick-dirs) 1)
+                     (eq? (transport-directive-action (car imm-pick-dirs)) 'load-unit)
+                     (member 45059 (transport-directive-passenger-tags (car imm-pick-dirs)))
+                     #t)
+                "WarpPrism must save-pickup bruised <42% HP+shield Immortal")
+
+  ;; (b) Moving self-drop after >=18f carry dwell & transport-drop-moving wire mapping
+  (define mv-medivac (hash 'id 45052 'type 'medivac 'x 60.0 'y 50.0 'hp 150 'max-hp 150 'flying? #t
+                           'vx 2.5 'vy 0.0
+                           'passengers (list (hash 'id 45053 'type 'siege-tank 'hp 175 'max-hp 175))))
+  (sync-transport-tracker! tr-tr (list mv-medivac) 5000)
+  (define mv-drop (plan-transport-fleet-micro (list mv-medivac) '()
+                                              #:tracker tr-tr #:current-frame 5025 #:home-x 24.5 #:home-y 48.5))
+  (assert-eq! (transport-directive-action (car mv-drop)) 'transport-drop-moving
+              "Moving Medivac >=18f dwell over safe ground must emit transport-drop-moving")
+  (assert-eq! (transport-directive-target-tag (car mv-drop)) 45052
+              "Moving self-drop must target transport's own tag")
+  (assert-eq! (transport-directive->sexp (car mv-drop)) '(transport-drop-moving 45052 45052)
+              "Moving self-drop S-exp must target own transport tag")
+
+  ;; (c) 672f stuck-cargo ceiling forces unload
+  (define stuck-medivac (hash 'id 45054 'type 'medivac 'x 35.0 'y 50.0 'hp 150 'max-hp 150 'flying? #t
+                              'passengers (list (hash 'id 45055 'type 'marine 'hp 45 'max-hp 45))))
+  (sync-transport-tracker! tr-tr (list stuck-medivac) 100)
+  (define stuck-drop (plan-transport-fleet-micro (list stuck-medivac) '()
+                                                 #:tracker tr-tr #:current-frame 780 #:home-x 24.5 #:home-y 48.5))
+  (assert-true! (and (= (length stuck-drop) 1)
+                     (memq (transport-directive-action (car stuck-drop))
+                           '(transport-drop-moving transport-drop-point))
+                     #t)
+                "672f stuck-cargo ceiling must force cargo unload")
+
+  ;; (d) WarpPrism Phasing (140f min dwell / 208f cycle / 160f cooldown) & OverlordTransport (2708)
+  (define wp-tr (make-transport-tracker))
+  (define wp-mob (hash 'id 45056 'type 'warp-prism 'x 50.0 'y 50.0 'hp 80 'shields 100 'flying? #t 'passengers '()))
+  (define wp-army (list wp-mob (hash 'id 45057 'type 'stalker 'x 52.0 'y 50.0 'hp 80 'shields 80)))
+  (define wp-p1 (plan-transport-fleet-micro wp-army '() #:tracker wp-tr #:current-frame 6000
+                                            #:warp-in-requested? #t #:warp-in-complete? #f))
+  (assert-eq! (transport-directive-ability (car wp-p1)) 'morph-warp-prism-phasing
+              "Mobile WarpPrism ready for warp-in must emit morph-warp-prism-phasing (1528)")
+  (define wp-phasing (hash 'id 45056 'type 'warp-prism-phasing 'x 50.0 'y 50.0 'hp 80 'shields 100 'flying? #t 'passengers '()))
+  (define wp-army2 (list wp-phasing (hash 'id 45057 'type 'stalker 'x 52.0 'y 50.0 'hp 80 'shields 80)))
+  (assert-eq! (plan-transport-fleet-micro wp-army2 '() #:tracker wp-tr #:current-frame 6100
+                                          #:warp-in-requested? #f #:warp-in-complete? #t)
+              '()
+              "Phased WarpPrism must obey 140f minimum phasing dwell before unphasing (blocked at 100f)")
+  (define wp-p2 (plan-transport-fleet-micro wp-army2 '() #:tracker wp-tr #:current-frame 6215
+                                            #:warp-in-requested? #f #:warp-in-complete? #t))
+  (assert-eq! (transport-directive-ability (car wp-p2)) 'morph-warp-prism-transport
+              "Phased WarpPrism after >=208f warp cycle must emit morph-warp-prism-transport (1530)")
+  (assert-true! (not (should-morph-overlord-transport? #f 24.0 0))
+                "OverlordTransport (2708) must be rejected without completed Lair/Hive")
+  (assert-true! (should-morph-overlord-transport? #t 20.0 0)
+                "OverlordTransport (2708) must be eligible w/ Lair + >=16 combat supply")
+  (define ovi-morph-dirs
+    (plan-overlord-transport-morphs (list (hash 'id 45058 'type 'overlord 'x 30.0 'y 50.0 'hp 200 'flying? #t))
+                                    '() #:lair-or-hive-ready? #t #:combat-supply 20.0 #:active-dropperlords 0))
+  (assert-true! (and (= (length ovi-morph-dirs) 1)
+                     (= (transport-directive-ability-id (car ovi-morph-dirs)) 2708))
+                "OverlordTransport planner must emit morph-overlord-transport (2708)")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 45.7 All 3 Races #115 Pro Spellcasters & delta-f=0 Claims + Disruptor Stagger
+  ;; ---------------------------------------------------------------------------
+  (define sp-claims (make-spell-claims))
+  ;; Zerg: Queen Transfuse + Tumor, Ravager Fungal->Bile + ForceField shatter, Infestor 2x Fungal dedup + <70 retreat, Viper, Corruptor
+  (define z-dirs
+    (plan-zerg-spellcaster-micro
+     (list (hash 'id 45201 'type 'queen 'x 30.0 'y 50.0 'hp 175 'max-hp 175 'energy 60)
+           (hash 'id 45202 'type 'ultralisk 'x 33.0 'y 50.0 'hp 200 'max-hp 500)
+           (hash 'id 45203 'type 'queen 'x 26.0 'y 40.0 'hp 175 'max-hp 175 'energy 50)
+           (hash 'id 45204 'type 'ravager 'x 50.0 'y 50.0 'hp 120 'max-hp 120)
+           (hash 'id 45205 'type 'infestor 'x 50.0 'y 54.0 'hp 90 'energy 100)
+           (hash 'id 45206 'type 'infestor 'x 51.0 'y 54.0 'hp 90 'energy 100)
+           (hash 'id 45207 'type 'infestor 'x 52.0 'y 55.0 'hp 90 'energy 40)
+           (hash 'id 45208 'type 'viper 'x 48.0 'y 50.0 'hp 150 'energy 120 'flying? #t)
+           (hash 'id 45209 'type 'viper 'x 22.0 'y 22.0 'hp 150 'energy 35 'flying? #t)
+           (hash 'id 45210 'type 'roach 'x 47.0 'y 50.0 'hp 145)
+           (hash 'id 45211 'type 'roach 'x 47.0 'y 51.0 'hp 145)
+           (hash 'id 45212 'type 'hydralisk 'x 46.5 'y 50.0 'hp 90)
+           (hash 'id 45213 'type 'hydralisk 'x 46.5 'y 51.0 'hp 90)
+           (hash 'id 45214 'type 'corruptor 'x 80.0 'y 50.0 'hp 200 'flying? #t))
+     (list (hash 'id 45301 'type 'marine 'x 56.0 'y 50.0 'hp 45 'buffs '(fungal-growth))
+           (hash 'id 45302 'type 'marine 'x 56.5 'y 50.2 'hp 45)
+           (hash 'id 45303 'type 'siege-tank-sieged 'x 56.0 'y 55.0 'hp 175)
+           (hash 'id 45304 'type 'marauder 'x 56.8 'y 55.2 'hp 125))
+     #:claims sp-claims #:current-frame 7000 #:home-x 24.5 #:home-y 48.5 #:enemy-base-x 110.0 #:enemy-base-y 100.0
+     #:ally-buildings (list (hash 'id 45250 'type 'evolution-chamber 'x 25.0 'y 22.0 'hp 750 'max-hp 750))
+     #:enemy-buildings (list (hash 'id 45350 'type 'command-center 'x 84.0 'y 50.0 'hp 1500))
+     #:effects (list (hash 'type 'force-field 'x 55.0 'y 48.0 'friendly? #f))))
+  (assert-true! (and (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45201) (eq? (spell-directive-ability d) 'transfusion))) z-dirs)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45203) (eq? (spell-directive-ability d) 'spawn-creep-tumor))) z-dirs)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45204) (eq? (spell-directive-ability d) 'corrosive-bile))) z-dirs)
+                     (= (length (filter (lambda (d) (eq? (spell-directive-ability d) 'fungal-growth)) z-dirs)) 1)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45207) (eq? (spell-directive-ability d) 'move))) z-dirs)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45208) (eq? (spell-directive-ability d) 'blinding-cloud))) z-dirs)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45209) (eq? (spell-directive-ability d) 'viper-consume))) z-dirs)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45214) (eq? (spell-directive-ability d) 'caustic-spray))) z-dirs))
+                "Zerg spellcasters: Queen/Ravager/Infestor (delta-f=0 Fungal + <70 retreat)/Viper (Cloud+Consume)/Corruptor")
+
+  ;; Viper Parasitic Bomb skips when 824 dummy present + Abduct w/ >=4 allies
+  (define z-viper-abduct
+    (plan-zerg-spellcaster-micro
+     (list (hash 'id 45220 'type 'viper 'x 50.0 'y 50.0 'hp 150 'energy 130 'flying? #t)
+           (hash 'id 45221 'type 'roach 'x 48.0 'y 50.0 'hp 145)
+           (hash 'id 45222 'type 'roach 'x 48.5 'y 51.0 'hp 145)
+           (hash 'id 45223 'type 'hydralisk 'x 49.0 'y 49.0 'hp 90)
+           (hash 'id 45224 'type 'hydralisk 'x 49.0 'y 51.0 'hp 90))
+     (list (hash 'id 45310 'type 'colossus 'x 57.0 'y 50.0 'hp 200 'shields 150)
+           (hash 'id 45311 'type 'void-ray 'x 56.0 'y 49.0 'hp 150 'shields 100 'flying? #t)
+           (hash 'id 45312 'type 'void-ray 'x 56.5 'y 50.5 'hp 150 'shields 100 'flying? #t)
+           (hash 'id 45313 'type 'void-ray 'x 57.0 'y 51.0 'hp 150 'shields 100 'flying? #t)
+           (hash 'id 45314 'type 'parasitic-bomb-dummy 'x 56.5 'y 50.0 'hp 1))
+     #:claims (make-spell-claims) #:current-frame 7050))
+  (assert-true! (and (ormap (lambda (d) (eq? (spell-directive-ability d) 'abduct)) z-viper-abduct)
+                     (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'parasitic-bomb)) z-viper-abduct)))
+                "Viper must Abduct Colossus into >=4 allies and skip Parasitic Bomb when 824 dummy active")
+
+  ;; Terran: Ghost EMP delta-f=0, >4.5 Snipe + 34f lockout, Cloak detector guard, Raven Matrix, BC Yamato cap & <32% Jump
+  (define t-claims (make-spell-claims))
+  (define t-dirs
+    (plan-terran-spellcaster-micro
+     (list (hash 'id 45401 'type 'ghost 'x 50.0 'y 50.0 'hp 100 'energy 100)
+           (hash 'id 45402 'type 'ghost 'x 51.0 'y 50.0 'hp 100 'energy 100)
+           (hash 'id 45403 'type 'ghost 'x 50.0 'y 70.0 'hp 100 'energy 70)
+           (hash 'id 45404 'type 'ghost 'x 50.0 'y 90.0 'hp 100 'energy 60)
+           (hash 'id 45405 'type 'raven 'x 50.0 'y 110.0 'hp 140 'energy 80 'flying? #t)
+           (hash 'id 45406 'type 'battlecruiser 'x 50.0 'y 130.0 'hp 550 'max-hp 550 'flying? #t)
+           (hash 'id 45407 'type 'battlecruiser 'x 52.0 'y 130.0 'hp 550 'max-hp 550 'flying? #t)
+           (hash 'id 45408 'type 'battlecruiser 'x 50.0 'y 145.0 'hp 140 'max-hp 550 'flying? #t))
+     (list (hash 'id 45501 'type 'high-templar 'x 58.0 'y 50.0 'hp 40 'shields 40 'energy 100)
+           (hash 'id 45502 'type 'archon 'x 58.5 'y 50.2 'hp 10 'shields 350)
+           (hash 'id 45503 'type 'lurker-burrowed 'x 57.0 'y 70.0 'hp 200)
+           (hash 'id 45504 'type 'zergling 'x 53.0 'y 90.0 'hp 35)
+           (hash 'id 45505 'type 'colossus 'x 57.0 'y 110.0 'hp 200 'shields 150)
+           (hash 'id 45506 'type 'tempest 'x 57.0 'y 130.0 'hp 140 'shields 60 'flying? #t))
+     #:claims t-claims #:current-frame 7200 #:yamato-researched? #t #:home-x 20.0 #:home-y 20.0))
+  (assert-eq! (length (filter (lambda (d) (eq? (spell-directive-ability d) 'emp-round)) t-dirs)) 1
+              "Ghost EMP delta-f=0 claim must deduplicate 2 Ghosts on same shielded cluster")
+  (assert-true! (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45403) (eq? (spell-directive-ability d) 'steady-targeting))) t-dirs)
+                "Ghost >4.5 tiles from Lurker must emit steady-targeting")
+  (assert-true! (snipe-channel-locked? t-claims 45403 7215)
+                "Ghost must stay locked during 34f Snipe channel (+15f)")
+  (assert-true! (not (snipe-channel-locked? t-claims 45403 7240))
+                "Ghost Snipe 34f channel lock must expire by +40f")
+  (assert-true! (not (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45404) (eq? (spell-directive-ability d) 'steady-targeting))) t-dirs))
+                "Ghost with enemy <4.5 tiles must not Snipe")
+  (assert-true! (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45404) (eq? (spell-directive-ability d) 'cloak-ghost))) t-dirs)
+                "Safe uncloaked Ghost with no enemy detector <11.0 must emit cloak-ghost")
+  (assert-true! (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'cloak-ghost))
+                            (plan-terran-spellcaster-micro
+                             (list (hash 'id 45404 'type 'ghost 'x 50.0 'y 90.0 'hp 100 'energy 60))
+                             (list (hash 'id 45504 'type 'zergling 'x 53.0 'y 90.0 'hp 35)
+                                   (hash 'id 45509 'type 'observer 'x 55.0 'y 90.0 'hp 40 'shields 20 'flying? #t))
+                             #:claims (make-spell-claims) #:current-frame 7250)))
+                "Enemy detector within <11.0 tiles must block Ghost cloak")
+  (assert-true! (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45405) (eq? (spell-directive-ability d) 'interference-matrix))) t-dirs)
+                "Raven must cast Interference Matrix on Colossus")
+  (assert-eq! (length (filter (lambda (d) (eq? (spell-directive-ability d) 'yamato-cannon)) t-dirs)) 1
+              "Battlecruiser ceil(200/240)=1 claim cap must prevent 2nd BC double-Yamato on 200 EHP Tempest")
+  (assert-eq! (length (filter (lambda (d) (eq? (spell-directive-ability d) 'yamato-cannon))
+                              (plan-terran-spellcaster-micro
+                               (list (hash 'id 45416 'type 'battlecruiser 'x 50.0 'y 130.0 'hp 550 'max-hp 550 'flying? #t)
+                                     (hash 'id 45417 'type 'battlecruiser 'x 52.0 'y 130.0 'hp 550 'max-hp 550 'flying? #t))
+                               (list (hash 'id 45516 'type 'carrier 'x 57.0 'y 130.0 'hp 300 'shields 150 'flying? #t))
+                               #:claims (make-spell-claims) #:current-frame 7260 #:yamato-researched? #t)))
+              2
+              "Two Battlecruisers must share ceil(450/240)=2 Yamato claims against 450 EHP Carrier")
+  (assert-true! (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45408) (eq? (spell-directive-ability d) 'tactical-jump))) t-dirs)
+                "Battlecruiser <32% HP must emit emergency tactical-jump home")
+
+  ;; Protoss: Sentry (GS + non-trapping FF w/ >=27f stagger + 4:00 Phoenix), HT (Storm delta-f=0 + dry Archon), Oracle ([P0] + >=60f Pulsar)
+  (define p-claims (make-spell-claims))
+  (define p-dirs1
+    (plan-protoss-spellcaster-micro
+     (list (hash 'id 45601 'type 'sentry 'x 50.0 'y 50.0 'hp 40 'shields 40 'energy 130)
+           (hash 'id 45602 'type 'stalker 'x 48.0 'y 50.0 'hp 80 'shields 80)
+           (hash 'id 45603 'type 'zealot 'x 49.0 'y 51.0 'hp 100 'shields 50)
+           (hash 'id 45604 'type 'sentry 'x 22.0 'y 22.0 'hp 40 'shields 40 'energy 80)
+           (hash 'id 45605 'type 'high-templar 'x 50.0 'y 70.0 'hp 40 'shields 40 'energy 100)
+           (hash 'id 45606 'type 'high-templar 'x 51.0 'y 70.0 'hp 40 'shields 40 'energy 100)
+           (hash 'id 45607 'type 'high-templar 'x 24.0 'y 24.0 'hp 40 'shields 40 'energy 10)
+           (hash 'id 45608 'type 'high-templar 'x 26.0 'y 24.0 'hp 40 'shields 40 'energy 15)
+           (hash 'id 45609 'type 'oracle 'x 80.0 'y 50.0 'hp 100 'shields 60 'energy 60 'flying? #t))
+     (list (hash 'id 45701 'type 'stalker 'x 56.0 'y 50.0 'hp 80 'shields 80)
+           (hash 'id 45702 'type 'stalker 'x 56.0 'y 51.0 'hp 80 'shields 80)
+           (hash 'id 45703 'type 'marine 'x 56.0 'y 70.0 'hp 45)
+           (hash 'id 45704 'type 'marine 'x 56.5 'y 70.5 'hp 45)
+           (hash 'id 45705 'type 'scv 'x 82.0 'y 50.0 'hp 45)
+           (hash 'id 45706 'type 'scv 'x 82.5 'y 50.5 'hp 45))
+     #:claims p-claims #:current-frame 5400 #:psi-storm-researched? #t #:home-x 20.0 #:home-y 20.0))
+  (assert-true! (and (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45601) (eq? (spell-directive-ability d) 'guardian-shield))) p-dirs1)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45604) (eq? (spell-directive-ability d) 'hallucination-phoenix))) p-dirs1)
+                     (= (length (filter (lambda (d) (eq? (spell-directive-ability d) 'psi-storm)) p-dirs1)) 1)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45607) (equal? (spell-directive->sexp d) '(morph (45607 45608) archon)))) p-dirs1)
+                     (= (length (filter (lambda (d) (= (spell-directive-caster-tag d) 45609)) p-dirs1)) 1)
+                     (ormap (lambda (d) (and (= (spell-directive-caster-tag d) 45609) (eq? (spell-directive-ability d) 'pulsar-beam-on))) p-dirs1))
+                "Protoss spellcasters: Sentry GS + 4:00 Phoenix, HT delta-f=0 Storm + dry Archon merge, Oracle 1-cmd mutex + Pulsar ON")
+
+  ;; Oracle >= 60f Pulsar Beam dwell + Sentry non-trapping Force Field
+  (define p-oracle-short
+    (plan-protoss-spellcaster-micro
+     (list (hash 'id 45609 'type 'oracle 'x 80.0 'y 50.0 'hp 100 'shields 60 'energy 10 'flying? #t 'pulsar-beam-on? #t))
+     '() #:claims p-claims #:current-frame 5430))
+  (assert-eq! p-oracle-short '() "Oracle Pulsar Beam must NOT cancel before >=60f dwell")
+  (define p-oracle-off
+    (plan-protoss-spellcaster-micro
+     (list (hash 'id 45609 'type 'oracle 'x 80.0 'y 50.0 'hp 100 'shields 60 'energy 10 'flying? #t 'pulsar-beam-on? #t))
+     '() #:claims p-claims #:current-frame 5470))
+  (assert-true! (and (= (length p-oracle-off) 1)
+                     (eq? (spell-directive-ability (car p-oracle-off)) 'pulsar-beam-off))
+                "Oracle Pulsar Beam turns OFF after >=60f dwell when low energy/no targets")
+  (define p-ff-dirs
+    (plan-protoss-spellcaster-micro
+     (list (hash 'id 45610 'type 'sentry 'x 50.0 'y 50.0 'hp 40 'shields 40 'energy 80 'buffs '(guardian-shield)))
+     (list (hash 'id 45710 'type 'zealot 'x 57.0 'y 50.0 'hp 100 'shields 50)
+           (hash 'id 45711 'type 'zealot 'x 57.5 'y 50.5 'hp 100 'shields 50)
+           (hash 'id 45712 'type 'zealot 'x 57.5 'y 49.5 'hp 100 'shields 50)
+           (hash 'id 45713 'type 'zealot 'x 58.0 'y 50.0 'hp 100 'shields 50))
+     #:claims (make-spell-claims) #:current-frame 5600))
+  (assert-true! (and (= (length p-ff-dirs) 1)
+                     (eq? (spell-directive-ability (car p-ff-dirs)) 'force-field))
+                "Sentry must cast non-trapping Force Field against >=4 melee cluster")
+
+  ;; Disruptor 28-32f army-wide Nova stagger gate
+  (define dis-claims (make-spell-claims))
+  (assert-true! (disruptor-nova-stagger-ready? dis-claims 5000 31 #:commit? #t)
+                "1st Disruptor Nova at frame 5000 must pass stagger gate")
+  (assert-true! (not (disruptor-nova-stagger-ready? dis-claims 5015 31 #:commit? #t))
+                "2nd Disruptor Nova at frame 5015 (delta=15 < 31) must be held")
+  (assert-true! (disruptor-nova-stagger-ready? dis-claims 5031 31 #:commit? #t)
+                "2nd Disruptor Nova at frame 5031 (delta=31) must pass stagger gate")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 45.8 End-to-End Live-Runtime + Wire Smoke Verification (step-live-bot-runtime!)
+  ;; ---------------------------------------------------------------------------
+  (reset-typed-command-gate-stats!)
+  (define (mk-w45-wire-u tag utype x y #:hp [hp 150.0] #:max-hp [mhp hp] #:sh [sh 0.0] #:msh [msh sh] #:en [en 0.0] #:all [all 1] #:fly? [fly? #f])
+    (sc2-unit 1 all tag utype (if (= all 1) 1 2) (sc2-point3d x y 8.0) 0.0 0.75 1.0 0 #f #f #f
+              hp mhp sh msh en (if (> en 0.0) 200.0 0.0) 0 0 fly? #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 0))
+
+  ;; Terran live+wire: Thor 2362, Hellion 1998, Cyclone 2350, Ghost EMP 1628 & Snipe 2714, Raven 3747, Medivac moving self-drop 396
+  (define rt-t45 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define (mk-t45-obs frame)
+    (hash 'frame frame 'minerals 1400 'gas 1000 'supply-used 110 'supply-cap 160 'supply-left 50
+          'mineral-harvesters 48 'vespene-harvesters 8 'enemy-race 'Protoss 'armory-ready? #t
+          'researched-upgrades '(stimpack combat-shield concussive-shells weapon-refit)
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (append
+                       (for/list ([i (in-range 40)]) (hash 'id (+ 46100 i) 'type 'scv 'x 24.5 'y 48.5 'hp 45))
+                       (list (hash 'id 46201 'type 'thor 'x 64.0 'y 64.0 'hp 400 'max-hp 400)
+                             (hash 'id 46202 'type 'hellion 'x 64.0 'y 62.0 'hp 90 'max-hp 90)
+                             (hash 'id 46203 'type 'cyclone 'x 64.0 'y 66.0 'hp 120 'max-hp 120)
+                             (hash 'id 46204 'type 'ghost 'x 63.0 'y 80.0 'hp 100 'energy 100)
+                             (hash 'id 46205 'type 'ghost 'x 63.0 'y 96.0 'hp 100 'energy 100)
+                             (hash 'id 46206 'type 'raven 'x 64.0 'y 110.0 'hp 140 'energy 100 'flying? #t)
+                             (hash 'id 46209 'type 'battlecruiser 'x 64.0 'y 126.0 'hp 550 'max-hp 550 'flying? #t)
+                             (hash 'id 46207 'type 'medivac 'x 35.0 'y 48.5 'hp 150 'max-hp 150 'flying? #t
+                                   'vx 2.0 'vy 0.0
+                                   'passengers (list (hash 'id 46208 'type 'marauder 'hp 125 'max-hp 125)))))
+          'ally-buildings (list (hash 'id 46301 'type 'orbital-command 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 46302 'type 'armory 'x 21.5 'y 46.5 'hp 750 'build-progress 1.0))
+          'enemy-units (list (hash 'id 46401 'type 'tempest 'x 73.0 'y 64.0 'hp 200 'shields 100 'flying? #t)
+                             (hash 'id 46402 'type 'zealot 'x 70.0 'y 62.0 'hp 100 'shields 50)
+                             (hash 'id 46412 'type 'zealot 'x 70.5 'y 62.4 'hp 100 'shields 50)
+                             (hash 'id 46413 'type 'zealot 'x 70.2 'y 61.6 'hp 100 'shields 50)
+                             (hash 'id 46403 'type 'warp-prism 'x 70.0 'y 66.0 'hp 80 'shields 100 'flying? #t)
+                             (hash 'id 46404 'type 'high-templar 'x 71.0 'y 80.0 'hp 40 'shields 40 'energy 100)
+                             (hash 'id 46405 'type 'archon 'x 71.5 'y 80.2 'hp 10 'shields 350)
+                             (hash 'id 46406 'type 'lurker-burrowed 'x 70.0 'y 96.0 'hp 200)
+                             (hash 'id 46407 'type 'colossus 'x 71.0 'y 110.0 'hp 200 'shields 150)
+                             (hash 'id 46408 'type 'carrier 'x 71.0 'y 126.0 'hp 300 'shields 150 'flying? #t))))
+  (define t45-acts1 (hash-ref (step-live-bot-runtime! rt-t45 (mk-t45-obs 9000)) 'actions '()))
+  (define t45-acts2 (hash-ref (step-live-bot-runtime! rt-t45 (mk-t45-obs 9024)) 'actions '()))
+  (define t45-wire-units
+    (list (mk-w45-wire-u 46201 52 64.0 64.0 #:hp 400.0)
+          (mk-w45-wire-u 46202 53 64.0 62.0 #:hp 90.0)
+          (mk-w45-wire-u 46203 692 64.0 66.0 #:hp 120.0)
+          (mk-w45-wire-u 46204 50 63.0 80.0 #:hp 100.0 #:en 100.0)
+          (mk-w45-wire-u 46205 50 63.0 96.0 #:hp 100.0 #:en 100.0)
+          (mk-w45-wire-u 46206 56 64.0 110.0 #:hp 140.0 #:en 100.0 #:fly? #t)
+          (mk-w45-wire-u 46209 57 64.0 126.0 #:hp 550.0 #:fly? #t)
+          (mk-w45-wire-u 46207 54 35.0 48.5 #:hp 150.0 #:fly? #t)
+          (mk-w45-wire-u 46401 496 73.0 64.0 #:hp 200.0 #:sh 100.0 #:all 4 #:fly? #t)
+          (mk-w45-wire-u 46403 81 70.0 66.0 #:hp 80.0 #:sh 100.0 #:all 4 #:fly? #t)
+          (mk-w45-wire-u 46406 503 70.0 96.0 #:hp 200.0 #:all 4)
+          (mk-w45-wire-u 46407 4 71.0 110.0 #:hp 200.0 #:sh 150.0 #:all 4)
+          (mk-w45-wire-u 46408 79 71.0 126.0 #:hp 300.0 #:sh 150.0 #:all 4 #:fly? #t)))
+  (define (mk-t45-wire-obs f)
+    (sc2-observation f (sc2-player-common 1 1400 1000 110 160 40 20 0 1 0 2)
+                     t45-wire-units '() '() #f '() '() '() '() '() '()))
+  (define t45-cmds1 (filter sc2-raw-unit-command? (translate-bot-actions->sc2-raw-commands t45-acts1 (mk-t45-wire-obs 9000))))
+  (define t45-cmds2 (filter sc2-raw-unit-command? (translate-bot-actions->sc2-raw-commands t45-acts2 (mk-t45-wire-obs 9024))))
+  (define t45-ab-ids (map sc2-raw-unit-command-ability-id t45-cmds1))
+  (assert-true! (and (memv 2362 t45-ab-ids) #t) "Terran live+wire must emit Thor High-Impact (2362)")
+  (assert-true! (and (memv 1998 t45-ab-ids) #t) "Terran live+wire must emit Hellbat morph (1998)")
+  (assert-true! (and (memv 2350 t45-ab-ids) #t) "Terran live+wire must emit Cyclone Lock On (2350)")
+  (assert-true! (and (memv 1628 t45-ab-ids) #t) "Terran live+wire must emit Ghost EMP (1628)")
+  (assert-true! (and (memv 2714 t45-ab-ids) #t) "Terran live+wire must emit Ghost Snipe (2714)")
+  (assert-true! (and (memv 3747 t45-ab-ids) #t) "Terran live+wire must emit Raven Interference Matrix (3747)")
+  (assert-true! (and (memv 401 t45-ab-ids) #t)  "Terran live+wire must emit Battlecruiser Yamato (401)")
+  (assert-true! (ormap (lambda (c)
+                         (and (= (sc2-raw-unit-command-ability-id c) 396)
+                              (= (sc2-raw-unit-command-target-unit-tag c) 46207)
+                              (not (sc2-raw-unit-command-target-pos c))))
+                       t45-cmds2)
+                "Medivac moving self-drop must emit wire ability 396 on transport's own UnitTag (#f pos)")
+
+  ;; Thor Explosive (2364) + Viking safe cleanup (403) in live+wire
+  (define rt-t45-v (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define (mk-t45-vik-obs frame)
+    (hash 'frame frame 'minerals 900 'gas 500 'supply-used 70 'supply-cap 120 'supply-left 50
+          'mineral-harvesters 24 'vespene-harvesters 6 'enemy-race 'Protoss
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (list (hash 'id 46251 'type 'viking-fighter 'x 64.0 'y 64.0 'hp 135 'max-hp 135 'flying? #t)
+                            (hash 'id 46252 'type 'marauder 'x 64.0 'y 63.0 'hp 125 'max-hp 125)
+                            (hash 'id 46253 'type 'marauder 'x 64.0 'y 65.0 'hp 125 'max-hp 125)
+                            (hash 'id 46254 'type 'marine 'x 63.5 'y 64.0 'hp 45 'max-hp 45))
+          'ally-buildings (list (hash 'id 46351 'type 'orbital-command 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0))
+          'enemy-units (list (hash 'id 46451 'type 'stalker 'x 70.0 'y 64.0 'hp 80 'shields 80)
+                             (hash 'id 46452 'type 'observer 'x 71.0 'y 65.0 'hp 40 'shields 20 'flying? #t))))
+  (define t45v-acts (hash-ref (step-live-bot-runtime! rt-t45-v (mk-t45-vik-obs 9000)) 'actions '()))
+  (define t45v-cmds
+    (filter sc2-raw-unit-command?
+            (translate-bot-actions->sc2-raw-commands
+             t45v-acts
+             (sc2-observation 9000 (sc2-player-common 1 900 500 70 120 24 10 0 1 0 1)
+                              (list (mk-w45-wire-u 46251 35 64.0 64.0 #:hp 135.0 #:fly? #t))
+                              '() '() #f '() '() '() '() '() '()))))
+  (assert-true! (and (memv 403 (map sc2-raw-unit-command-ability-id t45v-cmds)) #t)
+                "Viking cleanup facing only Stalker + Observer must emit wire ability 403")
+  (define t45-exp-acts
+    (hash-ref (step-live-bot-runtime!
+               (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+               (hash 'frame 9000 'minerals 900 'gas 500 'supply-used 70 'supply-cap 120 'supply-left 50
+                     'mineral-harvesters 24 'vespene-harvesters 6 'enemy-race 'Zerg
+                     'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+                     'ally-units (list (hash 'id 46261 'type 'thor-ap 'x 64.0 'y 64.0 'hp 400 'max-hp 400))
+                     'ally-buildings (list (hash 'id 46361 'type 'orbital-command 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0))
+                     'enemy-units (list (hash 'id 46461 'type 'mutalisk 'x 70.0 'y 64.0 'hp 120 'flying? #t)
+                                        (hash 'id 46462 'type 'mutalisk 'x 70.5 'y 64.5 'hp 120 'flying? #t)
+                                        (hash 'id 46463 'type 'mutalisk 'x 71.0 'y 63.5 'hp 120 'flying? #t)
+                                        (hash 'id 46464 'type 'mutalisk 'x 71.5 'y 64.0 'hp 120 'flying? #t))))
+              'actions '()))
+  (define t45-exp-cmds
+    (filter sc2-raw-unit-command?
+            (translate-bot-actions->sc2-raw-commands
+             t45-exp-acts
+             (sc2-observation 9000 (sc2-player-common 1 900 500 70 120 24 10 0 1 0 1)
+                              (list (mk-w45-wire-u 46261 691 64.0 64.0 #:hp 400.0))
+                              '() '() #f '() '() '() '() '() '()))))
+  (assert-true! (and (memv 2364 (map sc2-raw-unit-command-ability-id t45-exp-cmds)) #t)
+                "Thor AP facing 4 Mutalisks in live runtime must emit wire ability 2364")
+
+  ;; Zerg live+wire: OverlordTransport (2708), Overlord self-drop (1408), Infestor Fungal (74), Viper Abduct (2067)
+  (define rt-z45 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define (mk-z45-obs frame)
+    (hash 'frame frame 'minerals 900 'gas 500 'supply-used 70 'supply-cap 110 'supply-left 40
+          'mineral-harvesters 28 'vespene-harvesters 6 'enemy-race 'Protoss
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (append
+                       (for/list ([i (in-range 4)])
+                         (hash 'id (+ 47100 i) 'type 'roach 'x 61.0 'y (+ 59.0 (* 0.5 i)) 'hp 145 'max-hp 145))
+                       (for/list ([i (in-range 4 8)])
+                         (hash 'id (+ 47100 i) 'type 'roach 'x 60.0 'y (+ 84.0 (* 0.5 (- i 4))) 'hp 145 'max-hp 145))
+                       (list (hash 'id 47201 'type 'overlord 'x 30.0 'y 48.5 'hp 200 'max-hp 200 'flying? #t)
+                             (hash 'id 47202 'type 'overlord-transport 'x 58.0 'y 68.0 'hp 200 'max-hp 200 'flying? #t
+                                   'vx 1.8 'vy 0.0
+                                   'passengers (list (hash 'id 47203 'type 'roach 'hp 145 'max-hp 145)))
+                             (hash 'id 47204 'type 'infestor 'x 62.0 'y 64.0 'hp 90 'energy 140)
+                             (hash 'id 47205 'type 'viper 'x 62.0 'y 85.0 'hp 150 'energy 100 'flying? #t)))
+          'ally-buildings (list (hash 'id 47301 'type 'lair 'x 24.5 'y 48.5 'hp 2000 'build-progress 1.0))
+          'enemy-units (list (hash 'id 47401 'type 'stalker 'x 70.0 'y 64.0 'hp 80 'shields 80)
+                             (hash 'id 47402 'type 'stalker 'x 70.5 'y 64.5 'hp 80 'shields 80)
+                             (hash 'id 47403 'type 'colossus 'x 70.0 'y 85.0 'hp 200 'shields 150))))
+  (define z45-acts1 (hash-ref (step-live-bot-runtime! rt-z45 (mk-z45-obs 9000)) 'actions '()))
+  (define z45-acts2 (hash-ref (step-live-bot-runtime! rt-z45 (mk-z45-obs 9024)) 'actions '()))
+  (define z45-wire-units
+    (list (mk-w45-wire-u 47201 106 30.0 48.5 #:hp 200.0 #:fly? #t)
+          (mk-w45-wire-u 47202 893 58.0 68.0 #:hp 200.0 #:fly? #t)
+          (mk-w45-wire-u 47204 111 62.0 64.0 #:hp 90.0 #:en 140.0)
+          (mk-w45-wire-u 47205 499 62.0 85.0 #:hp 150.0 #:en 100.0 #:fly? #t)
+          (mk-w45-wire-u 47403 4 70.0 85.0 #:hp 200.0 #:sh 150.0 #:all 4)))
+  (define (mk-z45-wire-obs f)
+    (sc2-observation f (sc2-player-common 1 900 500 70 110 28 16 0 2 0 1)
+                     z45-wire-units '() '() #f '() '() '() '() '() '()))
+  (define z45-cmds1 (filter sc2-raw-unit-command? (translate-bot-actions->sc2-raw-commands z45-acts1 (mk-z45-wire-obs 9000))))
+  (define z45-cmds2 (filter sc2-raw-unit-command? (translate-bot-actions->sc2-raw-commands z45-acts2 (mk-z45-wire-obs 9024))))
+  (define z45-ab-ids (map sc2-raw-unit-command-ability-id z45-cmds1))
+  (assert-true! (and (memv 2708 z45-ab-ids) #t) "Zerg live+wire must emit OverlordTransport morph (2708)")
+  (assert-true! (and (memv 74 z45-ab-ids) #t)   "Zerg live+wire must emit Infestor Fungal Growth (74)")
+  (assert-true! (and (memv 2067 z45-ab-ids) #t) "Zerg live+wire must emit Viper Abduct (2067)")
+  (assert-true! (ormap (lambda (c)
+                         (and (= (sc2-raw-unit-command-ability-id c) 1408)
+                              (= (sc2-raw-unit-command-target-unit-tag c) 47202)
+                              (not (sc2-raw-unit-command-target-pos c))))
+                       z45-cmds2)
+                "OverlordTransport moving self-drop must emit wire ability 1408 on own UnitTag (#f pos)")
+
+  ;; Protoss live+wire: WarpPrism phasing (1528), Storm (1036), dry-HT Archon (1766), Guardian Shield (76), Oracle Beam (2375)
+  (define rt-p45 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define p45-obs
+    (hash 'frame 9000 'minerals 900 'gas 500 'supply-used 80 'supply-cap 120 'supply-left 40
+          'mineral-harvesters 28 'vespene-harvesters 6 'enemy-race 'Terran 'warp-in-complete? #f
+          'researched-upgrades '(psi-storm)
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (list (hash 'id 48201 'type 'warp-prism 'x 58.5 'y 63.0 'hp 80 'shields 100 'flying? #t)
+                            (hash 'id 48202 'type 'high-templar 'x 63.0 'y 76.0 'hp 40 'shields 40 'energy 100)
+                            (hash 'id 48203 'type 'oracle 'x 64.0 'y 90.0 'hp 100 'shields 60 'energy 60 'flying? #t)
+                            (hash 'id 48204 'type 'sentry 'x 63.0 'y 63.0 'hp 40 'shields 40 'energy 80)
+                            (hash 'id 48205 'type 'stalker 'x 61.5 'y 63.0 'hp 80 'shields 80)
+                            (hash 'id 48206 'type 'zealot 'x 62.0 'y 62.5 'hp 100 'shields 50)
+                            (hash 'id 48207 'type 'high-templar 'x 24.0 'y 48.5 'hp 40 'shields 40 'energy 10)
+                            (hash 'id 48208 'type 'high-templar 'x 25.5 'y 48.5 'hp 40 'shields 40 'energy 15))
+          'ally-buildings (list (hash 'id 48301 'type 'nexus 'x 24.5 'y 48.5 'hp 1000 'shields 1000 'build-progress 1.0))
+          'enemy-units (list (hash 'id 48405 'type 'stalker 'x 70.0 'y 63.0 'hp 80 'shields 80)
+                             (hash 'id 48406 'type 'stalker 'x 70.5 'y 63.5 'hp 80 'shields 80)
+                             (hash 'id 48401 'type 'marine 'x 70.0 'y 76.0 'hp 45)
+                             (hash 'id 48402 'type 'marine 'x 70.5 'y 76.5 'hp 45)
+                             (hash 'id 48403 'type 'scv 'x 66.0 'y 90.0 'hp 45)
+                             (hash 'id 48404 'type 'scv 'x 66.5 'y 90.5 'hp 45))))
+  (define p45-acts (hash-ref (step-live-bot-runtime! rt-p45 p45-obs) 'actions '()))
+  (define p45-cmds
+    (filter sc2-raw-unit-command?
+            (translate-bot-actions->sc2-raw-commands
+             p45-acts
+             (sc2-observation 9000 (sc2-player-common 1 900 500 80 120 28 16 0 2 0 1)
+                              (list (mk-w45-wire-u 48201 81 58.5 63.0 #:hp 80.0 #:sh 100.0 #:fly? #t)
+                                    (mk-w45-wire-u 48202 75 63.0 76.0 #:hp 40.0 #:sh 40.0 #:en 100.0)
+                                    (mk-w45-wire-u 48203 495 64.0 90.0 #:hp 100.0 #:sh 60.0 #:en 60.0 #:fly? #t)
+                                    (mk-w45-wire-u 48204 77 63.0 63.0 #:hp 40.0 #:sh 40.0 #:en 80.0)
+                                    (mk-w45-wire-u 48207 75 24.0 48.5 #:hp 40.0 #:sh 40.0 #:en 10.0)
+                                    (mk-w45-wire-u 48208 75 25.5 48.5 #:hp 40.0 #:sh 40.0 #:en 15.0))
+                              '() '() #f '() '() '() '() '() '()))))
+  (define p45-ab-ids (map sc2-raw-unit-command-ability-id p45-cmds))
+  (assert-true! (and (memv 1528 p45-ab-ids) #t) "Protoss live+wire must emit WarpPrism Phasing (1528)")
+  (assert-true! (and (memv 1036 p45-ab-ids) #t) "Protoss live+wire must emit HighTemplar Psi Storm (1036)")
+  (assert-true! (and (memv 1766 p45-ab-ids) #t) "Protoss live+wire must emit dry-HT Archon Merge (1766)")
+  (assert-true! (and (memv 76 p45-ab-ids) #t)   "Protoss live+wire must emit Sentry Guardian Shield (76)")
+  (assert-true! (and (memv 2375 p45-ab-ids) #t) "Protoss live+wire must emit Oracle Pulsar Beam ON (2375)")
+
+  ;; WarpPrism moving self-drop (913) + Disruptor stagger & frame rewind auto-reset
+  (define rt-p45-drop (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define (mk-p45-drop-obs frame)
+    (hash 'frame frame 'minerals 900 'gas 500 'supply-used 80 'supply-cap 120 'supply-left 40
+          'mineral-harvesters 28 'vespene-harvesters 6 'enemy-race 'Terran
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (list (hash 'id 48251 'type 'warp-prism 'x 60.0 'y 64.5 'hp 80 'shields 100 'flying? #t
+                                  'vx 2.5 'vy 0.0
+                                  'passengers (list (hash 'id 48252 'type 'immortal 'hp 200 'shields 100)))
+                            (hash 'id 48253 'type 'disruptor 'x 64.0 'y 64.0 'hp 100 'shields 100)
+                            (hash 'id 48254 'type 'disruptor 'x 64.0 'y 68.0 'hp 100 'shields 100))
+          'ally-buildings (list (hash 'id 48351 'type 'nexus 'x 24.5 'y 48.5 'hp 1000 'shields 1000 'build-progress 1.0))
+          'enemy-units (list (hash 'id 48451 'type 'stalker 'x 71.0 'y 64.0 'hp 80 'shields 80)
+                             (hash 'id 48452 'type 'stalker 'x 71.5 'y 64.5 'hp 80 'shields 80)
+                             (hash 'id 48453 'type 'stalker 'x 71.0 'y 68.0 'hp 80 'shields 80)
+                             (hash 'id 48454 'type 'stalker 'x 71.5 'y 68.5 'hp 80 'shields 80))))
+  (define d-step1 (hash-ref (step-live-bot-runtime! rt-p45-drop (mk-p45-drop-obs 9000)) 'actions '()))
+  (assert-eq! (length (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'purification-nova))) d-step1))
+              1
+              "Disruptor army stagger must emit at most 1 Nova per 31f window")
+  (define d-step2 (hash-ref (step-live-bot-runtime! rt-p45-drop (mk-p45-drop-obs 9020)) 'actions '()))
+  (define p45d-cmds
+    (filter sc2-raw-unit-command?
+            (translate-bot-actions->sc2-raw-commands
+             d-step2
+             (sc2-observation 9020 (sc2-player-common 1 900 500 80 120 28 16 0 2 0 1)
+                              (list (mk-w45-wire-u 48251 81 60.0 64.5 #:hp 80.0 #:sh 100.0 #:fly? #t))
+                              '() '() #f '() '() '() '() '() '()))))
+  (assert-true! (ormap (lambda (c)
+                         (and (= (sc2-raw-unit-command-ability-id c) 913)
+                              (= (sc2-raw-unit-command-target-unit-tag c) 48251)
+                              (not (sc2-raw-unit-command-target-pos c))))
+                       p45d-cmds)
+                "WarpPrism moving self-drop must emit wire ability 913 on own UnitTag (#f pos)")
+  (assert-eq! (length (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'purification-nova))) d-step2))
+              0
+              "2nd Disruptor at +20f (<31f) must remain staggered")
+  ;; Frame rewind (< 9020 -> 100) must invoke reset-wave3-tactical-state! & re-enable Nova immediately
+  (define d-rewind (hash-ref (step-live-bot-runtime! rt-p45-drop (mk-p45-drop-obs 100)) 'actions '()))
+  (assert-eq! (length (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'purification-nova))) d-rewind))
+              1
+              "Frame rewind in step-live-bot-runtime! must reset Wave 3 stagger tracker cleanly")
+
+  (assert-eq! (get-total-bot-action-reject-count) 0
+              "All Suite 45 Wave 2-3 wire translations must pass typed command gate with 0 rejects"))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")

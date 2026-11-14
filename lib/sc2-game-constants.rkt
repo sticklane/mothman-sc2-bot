@@ -650,7 +650,15 @@
    'blinding-cloud       2063
    'parasitic-bomb       2542
    'viper-consume        2073
-   'spawn-changeling     181))
+   'spawn-changeling     181
+   'caustic-spray        2324
+   'cloak-ghost          382
+   'decloak-ghost        383
+   'hallucination-phoenix 154
+   'hallucination-archon 146
+   'pulsar-beam-on       2375
+   'pulsar-beam-off      2376
+   'lock-on              2350))
 
 (: SC2-NO-TARGET-ABILITY-IDS (Setof Integer))
 (define SC2-NO-TARGET-ABILITY-IDS
@@ -659,6 +667,8 @@
      181   ;; SPAWNCHANGELING_SPAWNCHANGELING
      253   ;; EFFECT_STIM_MARAUDER
      380   ;; EFFECT_STIM_MARINE
+     382   ;; BEHAVIOR_CLOAKON_GHOST
+     383   ;; BEHAVIOR_CLOAKOFF_GHOST
      388   ;; SIEGEMODE_SIEGEMODE
      390   ;; UNSIEGE_UNSIEGE
      392   ;; BEHAVIOR_CLOAKON_BANSHEE
@@ -750,6 +760,7 @@
      2069  ;; VIPERCONSUMESTRUCTURE
      2073  ;; VIPERCONSUME_VIPERCONSUME
      2324  ;; EFFECT_CAUSTICSPRAY
+     2350  ;; EFFECT_LOCKON
      2542  ;; EFFECT_PARASITICBOMB
      2714  ;; EFFECT_GHOSTSNIPE (Steady Targeting)
      3685  ;; EFFECT_REPAIR

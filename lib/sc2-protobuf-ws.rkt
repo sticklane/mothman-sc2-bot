@@ -990,7 +990,9 @@
           (morph-liberator-ag 2558 #t)
           (morph-liberator-aa 2560 #t)
           (morph-thor-high-impact 2362 #t)
+          (morph-thor-high-impact-mode 2362 #f)
           (morph-thor-explosive 2364 #t)
+          (morph-thor-explosive-mode 2364 #f)
           (morph-supply-depot-lower 556 #t)
           (morph-supply-depot-raise 558 #t)
           (burrow-widow-mine 2095 #t)
@@ -1113,14 +1115,19 @@
           (stim-marine 380 #t)
           (stim-marauder 253 #t)
           (medivac-boost 2116 #t)
+          (lock-on 2350 #t)
           (heal 386 #t)
           (emp-round 1628 #t)
           (emp 1628 #f)
           (steady-targeting 2714 #t)
           (snipe 2714 #f)
+          (cloak-ghost 382 #t)
+          (decloak-ghost 383 #t)
           (cloak-banshee 392 #t)
           (decloak-banshee 393 #t)
           (yamato-cannon 401 #t)
+          (yamato-gun 401 #f)
+          (yamato 401 #f)
           (tactical-jump 2358 #t)
           (kd8-charge 2588 #t)
           (interference-matrix 3747 #t)
@@ -1128,6 +1135,11 @@
           (auto-turret 349 #t)
           (repair 3685 #t)
           (salvage 32 #t)
+          (load-transport 3668 #t)
+          (unload-all-at 3669 #t)
+          (medivac-unload-all-at 396 #t)
+          (warp-prism-unload-all-at 913 #t)
+          (overlord-unload-all-at 1408 #t)
           (chrono-boost 3755 #t)
           (chronoboost 3755 #f)
           (battery-overcharge 4107 #t)
@@ -1139,6 +1151,7 @@
           (force-field 1526 #t)
           (guardian-shield 76 #t)
           (hallucination-phoenix 154 #t)
+          (hallucination-archon 146 #t)
           (psi-storm 1036 #t)
           (psistorm 1036 #f)
           (feedback 140 #t)
@@ -1307,6 +1320,12 @@
           (research-air-armor-3 1567 #f)))])
   (match-define (list sym id prim?) entry)
   (register-id-pair! SC2-ABILITY-SYM->ID SC2-ABILITY-ID->SYM sym id #:primary? prim?))
+
+;; Decode-only variant ability ID aliases observed in `#115` pro-replay telemetry
+;; (preserve canonical outbound IDs 2545 / 349 in SC2-ABILITY-SYM->ID).
+(hash-set! SC2-ABILITY-ID->SYM 3807 'microbial-shroud)
+(hash-set! SC2-ABILITY-ID->SYM 3829 'microbial-shroud)
+(hash-set! SC2-ABILITY-ID->SYM 379 'auto-turret)
 
 ;; Populate Canonical UpgradeId Table
 (for ([entry
@@ -9044,7 +9063,10 @@
            (define off-gcd-buff?
              (memq norm-spell
                    '(stimpack stim stim-marine stim-marauder
-                     cloak-banshee medivac-boost immortal-barrier prismatic-alignment
+                     cloak-banshee cloak-ghost decloak-ghost
+                     medivac-boost guardian-shield
+                     hallucination-phoenix hallucination-archon
+                     immortal-barrier prismatic-alignment
                      build-interceptors pulsar-beam pulsar-beam-on pulsar-beam-off)))
            (unless off-gcd-buff?
              (for ([cid (in-list caster-ids)])
@@ -10069,19 +10091,38 @@
 
       [(list 'transport-juggle tr-id pass-ids (? real? raw-x) (? real? raw-y))
        (when (and (exact-integer? tr-id) (> tr-id 0))
-         (define plist
-           (filter (lambda (t) (and (exact-integer? t) (> t 0) (not (= t tr-id))))
-                   (if (list? pass-ids) pass-ids (list pass-ids))))
-         (when (not (null? plist))
-           (record-unit-used! tr-id)
-           (for ([ptag (in-list plist)]
-                 [idx (in-naturals)])
-             (record-unit-used! ptag)
-             ;; LOAD_TRANSPORT (3668) is a UnitTargetAbility on the passenger unit tag
-             (emit! (sc2-raw-unit-command 3668 #f ptag (list tr-id) (> idx 0))))
-           (define tx (scale-bot-coord-to-world raw-x home-x))
-           (define ty (scale-bot-coord-to-world raw-y home-y))
-           (emit! (sc2-raw-unit-command 16 (sc2-point2d tx ty) 0 (list tr-id) #t))))]
+         (define self-drop?
+           (or (equal? pass-ids tr-id)
+               (and (list? pass-ids)
+                    (= (length pass-ids) 1)
+                    (equal? (car pass-ids) tr-id))))
+         (cond
+           [self-drop?
+            (record-unit-used! tr-id)
+            (define tr-u (hash-ref self-unit-by-tag tr-id #f))
+            (define tr-utype (if tr-u (sc2-unit-unit-type tr-u) 0))
+            (define unload-ab-id
+              (cond
+                [(= tr-utype 54) 396]
+                [(or (= tr-utype 81) (= tr-utype 136)) 913]
+                [(= tr-utype 893) 1408]
+                [else 3669]))
+            ;; Moving self-drop: UnloadAllAt targeting the transport's own UnitTag (#f pos)
+            (emit! (sc2-raw-unit-command unload-ab-id #f tr-id (list tr-id) #f))]
+           [else
+            (define plist
+              (filter (lambda (t) (and (exact-integer? t) (> t 0) (not (= t tr-id))))
+                      (if (list? pass-ids) pass-ids (list pass-ids))))
+            (when (not (null? plist))
+              (record-unit-used! tr-id)
+              (for ([ptag (in-list plist)]
+                    [idx (in-naturals)])
+                (record-unit-used! ptag)
+                ;; LOAD_TRANSPORT (3668) is a UnitTargetAbility on the passenger unit tag
+                (emit! (sc2-raw-unit-command 3668 #f ptag (list tr-id) (> idx 0))))
+              (define tx (scale-bot-coord-to-world raw-x home-x))
+              (define ty (scale-bot-coord-to-world raw-y home-y))
+              (emit! (sc2-raw-unit-command 16 (sc2-point2d tx ty) 0 (list tr-id) #t)))]))]
 
       [(list 'transport-juggle tr-id (? real? raw-x) (? real? raw-y))
        (when (and (exact-integer? tr-id) (> tr-id 0))
@@ -10090,6 +10131,30 @@
          (define ty (scale-bot-coord-to-world raw-y home-y))
          ;; UNLOAD_ALL_AT (3669) is a PointTargetAbility at (tx, ty)
          (emit! (sc2-raw-unit-command 3669 (sc2-point2d tx ty) 0 (list tr-id) #f)))]
+
+      [(list* 'transport-drop-moving tr-id maybe-tgt)
+       (when (and (exact-integer? tr-id) (> tr-id 0))
+         (define tgt-id (and (pair? maybe-tgt) (car maybe-tgt)))
+         (record-unit-used! tr-id)
+         (define tr-u (hash-ref self-unit-by-tag tr-id #f))
+         (define tr-utype (if tr-u (sc2-unit-unit-type tr-u) 0))
+         (define unload-ab-id
+           (cond
+             [(= tr-utype 54) 396]
+             [(or (= tr-utype 81) (= tr-utype 136)) 913]
+             [(= tr-utype 893) 1408]
+             [else 3669]))
+         (define eff-tgt
+           (if (and (exact-integer? tgt-id) (> tgt-id 0)) tgt-id tr-id))
+         (emit! (sc2-raw-unit-command unload-ab-id #f eff-tgt (list tr-id) #f)))]
+
+      [(or (list* 'transport-pickup tr-id ptag _rest)
+           (list* 'load tr-id ptag _rest))
+       (when (and (exact-integer? tr-id) (> tr-id 0)
+                  (exact-integer? ptag) (> ptag 0) (not (= ptag tr-id)))
+         (record-unit-used! tr-id)
+         (record-unit-used! ptag)
+         (emit! (sc2-raw-unit-command 3668 #f ptag (list tr-id) #f)))]
 
       [(or (list 'scout-sector _ (? real? raw-x) (? real? raw-y))
            (list 'scout-sector (? real? raw-x) (? real? raw-y)))
@@ -10565,9 +10630,9 @@
   (define (ab-tier ab)
     (cond
       ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & depot raise/lower
-      [(memv ab '(32 314 380 3675 1442 3687 74 76 140 249 251 399 401
-                  1036 1526 1628 1664 2063 2067 2069 2073 2146 2338 2346 2505
-                  2542 2545 2714 3668 3669 3755 3757 142 3686 388 390 2095 2097 2108 2110
+      [(memv ab '(32 314 349 380 382 383 396 913 1408 3675 1442 3687 74 76 140 249 251 399 401
+                  1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146 2324 2338 2346 2350 2358 2375 2376 2505
+                  2542 2545 2714 3668 3669 3747 3753 3755 3757 142 3686 388 390 2095 2097 2108 2110
                   403 405 2362 2364 556 558))
        0]
       ;; P3: Routine harvest / worker rebalance

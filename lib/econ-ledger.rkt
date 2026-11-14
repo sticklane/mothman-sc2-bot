@@ -125,6 +125,17 @@
  terran-desired-liberator-cap
  protoss-enemy-capital-air?
  protoss-4th-nexus-due?
+ CRISIS-DEFENDER-SYMS
+ CRISIS-DEFERRED-UPGRADE-SYMS
+ CRISIS-DEFERRED-TECH-SYMS
+ TERRAN-GROUND-AA-SCREEN-ENEMY-SYMS
+ crisis-defense-tech-defer-active?
+ crisis-deferred-sym?
+ terran-enemy-ground-aa-count
+ terran-enemy-capital-air-with-ground-aa?
+ terran-desired-thor-cap
+ terran-air-fleet-count
+ terran-ship-weapons-due?
  enrich-priority-metrics
  compute-state-pressure-metrics
  compute-candidate-marginal-utility
@@ -1992,6 +2003,96 @@
     [(>= bases 4) 5]
     [else 3]))
 
+(define CRISIS-DEFENDER-SYMS
+  '(roach ravager queen spine-crawler
+    immortal stalker zealot shield-battery
+    marauder siege-tank bunker))
+
+(define CRISIS-DEFERRED-UPGRADE-SYMS
+  '(glial-reconstitution
+    centrifical-hooks centrifugal-hooks
+    grooved-spines muscular-augments
+    burrow tunneling-claws
+    pathogen-glands neural-parasite chitinous-plating anabolic-synthesis zergling-attackspeed
+    zerg-melee-weapons-1 zerg-melee-weapons-2 zerg-melee-weapons-3 melee-attacks-1
+    zerg-missile-weapons-1 zerg-missile-weapons-2 zerg-missile-weapons-3 missile-attacks-1
+    zerg-ground-armor-1 zerg-ground-armor-2 zerg-ground-armor-3 ground-carapace-1 zerg-ground-carapace-1
+    zerg-ground-armors-1 zerg-ground-armors-2 zerg-ground-armors-3
+    zerg-flyer-weapons-1 zerg-flyer-armor-1 zerg-flyer-armors-1
+    psi-storm psionic-storm
+    extended-thermal-lance
+    resonating-glaives gravitic-booster gravitic-boosters gravitic-drive
+    protoss-ground-weapons-1 protoss-ground-weapons-2 protoss-ground-weapons-3 ground-weapons-1
+    protoss-ground-armor-1 protoss-ground-armor-2 protoss-ground-armor-3 ground-armor-1
+    protoss-ground-armors-1 protoss-ground-armors-2 protoss-ground-armors-3
+    protoss-shields-1 protoss-air-weapons-1 protoss-air-armor-1 protoss-air-armors-1
+    banshee-cloak cloaking-field banshee-cloaking-field
+    personal-cloaking
+    drilling-claws smart-servos advanced-ballistics weapon-refit hyperflight-rotors
+    terran-infantry-weapons-1 terran-infantry-weapons-2 terran-infantry-weapons-3 infantry-weapons-1
+    terran-infantry-armor-1 terran-infantry-armor-2 terran-infantry-armor-3 infantry-armor-1
+    terran-infantry-armors-1 terran-infantry-armors-2 terran-infantry-armors-3
+    terran-vehicle-weapons-1 terran-vehicle-weapons-2 terran-vehicle-weapons-3 vehicle-weapons-1
+    terran-vehicle-and-ship-plating-1 terran-vehicle-and-ship-armors-1
+    terran-ship-weapons-1 terran-ship-weapons-2 terran-ship-weapons-3))
+
+(define CRISIS-DEFERRED-TECH-SYMS
+  '(lair hive infestation-pit spire greater-spire ultralisk-cavern
+    templar-archive templar-archives fleet-beacon dark-shrine robotics-bay
+    fusion-core))
+
+(define TERRAN-GROUND-AA-SCREEN-ENEMY-SYMS
+  '(stalker hydralisk))
+
+(define (crisis-defense-tech-defer-active? under-attack? army-supply enemy-threat-supply [workers 44])
+  (and (eq? under-attack? #t)
+       (let ([army (safe-real army-supply 0.0)]
+             [threat (safe-real enemy-threat-supply 0.0)]
+             [w (safe-nonneg-int workers 44)])
+         (or (< army threat) (< w 32)))))
+
+(define (crisis-deferred-sym? sym crisis-defer?
+                              #:defer-stargate? [defer-stargate? #f]
+                              #:keep-ship-weapons? [keep-ship-weapons? #f])
+  (and (eq? crisis-defer? #t)
+       (or (and (not (and keep-ship-weapons? (eq? sym 'terran-ship-weapons-1)))
+                (not (not (memq sym CRISIS-DEFERRED-UPGRADE-SYMS))))
+           (not (not (memq sym CRISIS-DEFERRED-TECH-SYMS)))
+           (and defer-stargate? (eq? sym 'stargate)))))
+
+(define (terran-enemy-ground-aa-count enemy-u-counts)
+  (if (hash? enemy-u-counts)
+      (+ (safe-nonneg-int (hash-ref enemy-u-counts 'stalker 0) 0)
+         (safe-nonneg-int (hash-ref enemy-u-counts 'hydralisk 0) 0))
+      0))
+
+(define (terran-enemy-capital-air-with-ground-aa? enemy-u-counts)
+  (and (protoss-enemy-capital-air? enemy-u-counts)
+       (>= (terran-enemy-ground-aa-count enemy-u-counts) 6)))
+
+(define (terran-desired-thor-cap enemy-u-counts)
+  (cond
+    [(terran-enemy-capital-air-with-ground-aa? enemy-u-counts) 6]
+    [(protoss-enemy-capital-air? enemy-u-counts) 5]
+    [else 0]))
+
+(define (terran-air-fleet-count units-or-hash)
+  (define air-syms '(viking-fighter viking viking-assault liberator liberator-ag battlecruiser))
+  (cond
+    [(hash? units-or-hash)
+     (for/sum ([s (in-list air-syms)])
+       (safe-nonneg-int (hash-ref units-or-hash s 0) 0))]
+    [(list? units-or-hash)
+     (count (lambda (u) (not (not (memq u air-syms)))) units-or-hash)]
+    [else 0]))
+
+(define (terran-ship-weapons-due? race air-fleet-cnt has-ready-armory? upgs)
+  (and (eq? race 'Terran)
+       (eq? has-ready-armory? #t)
+       (>= (safe-nonneg-int air-fleet-cnt 0) 4)
+       (list? upgs)
+       (not (memq 'terran-ship-weapons-1 upgs))))
+
 (define (protoss-enemy-capital-air? enemy-u-counts)
   (enemy-counts-have-any? enemy-u-counts PROTOSS-CAPITAL-AIR-ENEMY-SYMS))
 
@@ -2013,9 +2114,15 @@
          #:requires-anti-air? [raw-requires-anti-air? #f]
          #:army-supply [raw-army-supply 0.0]
          #:enemy-threat-supply [raw-enemy-threat-supply 0.0]
+         #:workers [raw-workers 44]
          #:has-barracks-techlab? [has-rax-tl? #f]
          #:has-twilight-or-charge? [has-twilight-or-charge? #f]
          #:has-hydralisk-den? [has-hydralisk-den? #f]
+         #:has-robo? [has-robo? #f]
+         #:has-armory? [has-armory? #f]
+         #:crisis-defense-defer? [raw-crisis-defer? 'auto]
+         #:enemy-capital-air-ground-aa? [raw-cap-air-ground-aa? 'auto]
+         #:terran-ship-weapons-due? [ship-weap-due? #f]
          #:stalker-count [stalker-count 0]
          #:roach-count [roach-count 0]
          #:enemy-unit-counts [enemy-u-counts #f]
@@ -2034,9 +2141,23 @@
          [m (hash-set m 'has-hydralisk-den? (not (not has-hydralisk-den?)))]
          [m (hash-set m 'stalker-count (safe-nonneg-int stalker-count 0))]
          [m (hash-set m 'roach-count (safe-nonneg-int roach-count 0))]
+         [crisis-defer?
+          (if (eq? raw-crisis-defer? 'auto)
+              (crisis-defense-tech-defer-active?
+               raw-under-attack? raw-army-supply raw-enemy-threat-supply raw-workers)
+              (eq? raw-crisis-defer? #t))]
+         [cap-air-ground-aa?
+          (if (eq? raw-cap-air-ground-aa? 'auto)
+              (terran-enemy-capital-air-with-ground-aa? enemy-u-counts)
+              (eq? raw-cap-air-ground-aa? #t))]
          [m (hash-set m 'enemy-capital-air? (protoss-enemy-capital-air? enemy-u-counts))]
          [m (hash-set m 'enemy-needs-ghost? (terran-enemy-needs-ghost? enemy-u-counts))]
-         [m (hash-set m 'enemy-needs-liberator? (terran-enemy-needs-liberator? enemy-u-counts))])
+         [m (hash-set m 'enemy-needs-liberator? (terran-enemy-needs-liberator? enemy-u-counts))]
+         [m (hash-set m 'has-robo? (eq? has-robo? #t))]
+         [m (hash-set m 'has-armory? (eq? has-armory? #t))]
+         [m (hash-set m 'crisis-defense-defer? crisis-defer?)]
+         [m (hash-set m 'enemy-capital-air-ground-aa? cap-air-ground-aa?)]
+         [m (hash-set m 'terran-ship-weapons-due? (eq? ship-weap-due? #t))])
     (if bo-goal-sym
         (hash-set m 'bo-goal-sym bo-goal-sym)
         m)))
@@ -2069,8 +2190,13 @@
   (define pvz-stalker-count (safe-nonneg-int (hash-ref m 'stalker-count 0) 0))
   (define roach-cnt (safe-nonneg-int (hash-ref m 'roach-count 0) 0))
   (define enemy-capital-air? (eq? (hash-ref m 'enemy-capital-air? #f) #t))
+  (define enemy-cap-air-ground-aa? (eq? (hash-ref m 'enemy-capital-air-ground-aa? #f) #t))
   (define enemy-needs-ghost? (eq? (hash-ref m 'enemy-needs-ghost? #f) #t))
   (define enemy-needs-liberator? (eq? (hash-ref m 'enemy-needs-liberator? #f) #t))
+  (define has-robo? (eq? (hash-ref m 'has-robo? #f) #t))
+  (define has-armory? (eq? (hash-ref m 'has-armory? #f) #t))
+  (define crisis-defer? (eq? (hash-ref m 'crisis-defense-defer? #f) #t))
+  (define ship-weapons-due? (eq? (hash-ref m 'terran-ship-weapons-due? #f) #t))
   (define gas-imbalance (safe-real (hash-ref m 'gas-imbalance 0.0) 0.0))
   (define worker-saturation-gap (safe-real (hash-ref m 'worker-saturation-gap 0.5) 0.5))
   (define facility-scaling-pressure (safe-real (hash-ref m 'facility-scaling-pressure 0.2) 0.2))
@@ -2081,6 +2207,20 @@
   (define requires-anti-air? (eq? (hash-ref m 'requires-anti-air? #f) #t))
   (define requires-detection? (eq? (hash-ref m 'requires-detection? #f) #t))
   (define bo-goal-sym (hash-ref m 'bo-goal-sym #f))
+  (define defer-stargate-here?
+    (or has-robo? (and (not requires-anti-air?) (not enemy-capital-air?))))
+  (define crisis-deferred-here?
+    (crisis-deferred-sym? id crisis-defer?
+                          #:defer-stargate? defer-stargate-here?
+                          #:keep-ship-weapons? ship-weapons-due?))
+  (define crisis-defender-here?
+    (and crisis-defer? (>= workers 8) (not (not (memq id CRISIS-DEFENDER-SYMS)))))
+  (define severe-crisis-static-def?
+    (and crisis-defer?
+         (or (>= army-supply 4.0) (>= minerals 200))
+         (or (< workers 32)
+             (< army-supply (* 0.8 enemy-threat-supply))
+             (< army-supply 16.0))))
 
   (define under-threat?
     (or under-attack?
@@ -2166,7 +2306,21 @@
           (+ 28.0 (* 12.0 (min 4.0 threat-pressure)))]
          [else
           (* 8.0 (min 3.0 threat-pressure))]))
-     (+ (if active-counter-need? 138.0 118.0) pv5-boost intel-gathering-boost threat-boost counter-matchup-adj bo-head-boost)]
+     (define counter-crisis-adj
+       (if (and crisis-defender-here?
+                (or severe-crisis-static-def?
+                    (not (memq id '(spine-crawler shield-battery bunker)))))
+           (if (memq id '(spine-crawler shield-battery bunker)) 85.0 45.0)
+           0.0))
+     (define raw-counter-u
+       (+ (if active-counter-need? 138.0 118.0) pv5-boost intel-gathering-boost threat-boost counter-matchup-adj counter-crisis-adj bo-head-boost))
+     (cond
+       [crisis-deferred-here? 5.0]
+       [(and (memq id '(spine-crawler shield-battery bunker))
+             (< army-supply 4.0)
+             (< minerals 200))
+        (min 120.0 raw-counter-u)]
+       [else raw-counter-u])]
 
     [(combat-unit)
      (define gas-unit?
@@ -2246,8 +2400,16 @@
             0.0)
         (if (and (eq? m-race 'Zerg) (memq id '(ultralisk brood-lord)) (memq m-enemy-race '(Terran Protoss)))
             12.0
+            0.0)
+        (if (and (eq? m-race 'Terran) (memq id '(thor thor-ap)) enemy-capital-air?)
+            (if enemy-cap-air-ground-aa? 135.0 105.0)
+            0.0)
+        (if crisis-defender-here?
+            (if (and (eq? id 'zealot) (eq? m-race 'Protoss) (>= gas 100)) 30.0 65.0)
             0.0)))
-     (+ base-combat threat-boost gas-sink-adj matchup-unit-adj pv5-boost intel-gathering-boost bo-head-boost)]
+     (if crisis-deferred-here?
+         5.0
+         (+ base-combat threat-boost gas-sink-adj matchup-unit-adj pv5-boost intel-gathering-boost bo-head-boost))]
 
     [(tech-upgrade)
      (define outnumbered-by-threat?
@@ -2269,9 +2431,16 @@
                (* 15.0 (min 2.0 gas-imbalance)))))
      (define tech-matchup-adj
        (+ (if (and (eq? m-race 'Terran) (eq? id 'ghost-academy) (or enemy-needs-ghost? (eq? m-enemy-race 'Zerg))) 38.0 0.0)
+          (if (and (eq? m-race 'Terran) (eq? id 'armory) enemy-capital-air?
+                   (or enemy-cap-air-ground-aa? has-armory? (>= gas 80)))
+              (if enemy-cap-air-ground-aa? 95.0 60.0)
+              0.0)
+          (if (and (eq? m-race 'Terran) (eq? id 'terran-ship-weapons-1) ship-weapons-due?) 90.0 0.0)
           (if (and (eq? m-race 'Protoss) enemy-capital-air? (eq? id 'fleet-beacon)) 45.0 0.0)))
      (define eff-bo-boost (if outnumbered-by-threat? 0.0 bo-head-boost))
-     (+ 145.0 gas-ready-boost threat-research-boost gas-sink-boost tech-matchup-adj pv5-boost eff-bo-boost)]
+     (if crisis-deferred-here?
+         5.0
+         (+ 145.0 gas-ready-boost threat-research-boost gas-sink-boost tech-matchup-adj pv5-boost eff-bo-boost))]
 
     [(production-scaling)
      (define gas-tech-bonus
@@ -2415,8 +2584,29 @@
           (or (> ground-cnt 0)
               (and (not raw-requires-anti-air?) (= air-combat-cnt 0))))
         (not raw-requires-anti-air?)))
+  (define live-workers (safe-nonneg-int raw-workers 12))
+  (define has-robo? (> (bldg-eq-count 'robotics-facility) 0))
+  (define has-armory? (> (bldg-eq-count 'armory) 0))
+  (define has-ready-armory? (> (ready-bldg-eq-count 'armory) 0))
   (define units (if (list? ally-units) ally-units '()))
   (define bo-goal-sym (and (pro-bo-goal? bo-active-goal) (pro-bo-goal-target-sym bo-active-goal)))
+  (define crisis-defer?
+    (crisis-defense-tech-defer-active?
+     raw-under-attack? raw-army-supply raw-enemy-threat-supply live-workers))
+  (define defer-stargate?
+    (or has-robo? (and (not raw-requires-anti-air?) (not enemy-cap-air?))))
+  (define enemy-cap-air-ground-aa?
+    (terran-enemy-capital-air-with-ground-aa? enemy-u-counts))
+  (define desired-thor-cap (terran-desired-thor-cap enemy-u-counts))
+  (define air-fleet-cnt (terran-air-fleet-count units))
+  (define ship-weap-due?
+    (terran-ship-weapons-due? race air-fleet-cnt has-ready-armory? upgs))
+  (define severe-crisis-static-def?
+    (and crisis-defer?
+         (or (>= (safe-real raw-army-supply 0.0) 4.0) (>= (safe-nonneg-int raw-minerals 0) 200))
+         (or (< live-workers 32)
+             (< (safe-real raw-army-supply 0.0) (* 0.8 (safe-real raw-enemy-threat-supply 0.0)))
+             (< (safe-real raw-army-supply 0.0) 16.0))))
 
   (define base-metrics
     (compute-state-pressure-metrics
@@ -2456,17 +2646,22 @@
      #:requires-anti-air? raw-requires-anti-air?
      #:army-supply raw-army-supply
      #:enemy-threat-supply raw-enemy-threat-supply
+     #:workers live-workers
      #:has-barracks-techlab? (or (memq 'barracks-techlab r-bldgs)
                                  (memq 'barracks-tech-lab r-bldgs))
      #:has-twilight-or-charge? (or (memq 'twilight-council r-bldgs)
                                    (memq 'charge upgs))
      #:has-hydralisk-den? (memq 'hydralisk-den r-bldgs)
+     #:has-robo? has-robo?
+     #:has-armory? has-armory?
+     #:crisis-defense-defer? crisis-defer?
+     #:enemy-capital-air-ground-aa? enemy-cap-air-ground-aa?
+     #:terran-ship-weapons-due? ship-weap-due?
      #:stalker-count (count (lambda (u) (eq? u 'stalker)) units)
      #:roach-count (count (lambda (u) (eq? u 'roach)) units)
      #:enemy-unit-counts enemy-u-counts
      #:bo-goal-sym bo-goal-sym))
 
-  (define live-workers (safe-nonneg-int raw-workers 12))
   (define frame-val (safe-nonneg-int raw-frame 0))
   (define min-val (safe-nonneg-int raw-minerals 0))
   (define sup-used
@@ -2643,17 +2838,17 @@
      (define cur-overseers (count (lambda (u) (memq u '(overseer overseer-siege-mode overlord-cocoon))) units))
      (define want-overseers (if (or (>= army-val 40.0) raw-requires-detection?) 2 1))
      (define zerg-rush-cands
-       (if under-early-rush-crisis?
+       (if (or under-early-rush-crisis? severe-crisis-static-def?)
            (append
-            (if (not (memq 'spawning-pool bldgs))
+            (if (and under-early-rush-crisis? (not (memq 'spawning-pool bldgs)))
                 (list (boost-cand 'spawning-pool 'production-scaling
                                   (list 'build 'spawning-pool (safe-tile-coord (+ base-x 3.5)) (safe-tile-coord (- base-y 3.5)))
                                   #t 500.0))
                 '())
-            (if (and root-combat-ready? (not (memq 'spine-crawler bldgs)))
+            (if (and root-combat-ready? (< (bldg-eq-count 'spine-crawler) (if severe-crisis-static-def? 2 1)))
                 (list (boost-cand 'spine-crawler 'counter-tech
                                   (list 'build 'spine-crawler (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (- base-y 3.0)))
-                                  #t 260.0))
+                                  #t (if under-early-rush-crisis? 260.0 165.0)))
                 '()))
            '()))
      (define zerg-pit-spire-army-ok?
@@ -2664,9 +2859,10 @@
        (count (lambda (u) (memq u '(corruptor brood-lord broodlord brood-lord-cocoon))) units))
      (define zerg-t3-cands
        (append
-        ;; Emergency AA Spire remains permitted when `raw-requires-anti-air?` is #t even before T3 army threshold,
-        ;; whereas normal `infestation-pit` and `spire` stay gated until >= 3 active bases and >= 28 army supply.
-        (if (and has-lair-or-hive?
+        ;; Emergency AA Spire remains permitted when `raw-requires-anti-air?` is #t even before T3 army threshold
+        ;; unless base-defense crisis tech deferral is active; normal `infestation-pit` and `spire` wait for 3 bases + 28 army.
+        (if (and (not crisis-defer?)
+                 has-lair-or-hive?
                  (= (bldg-eq-count 'infestation-pit) 0)
                  (or zerg-pit-spire-army-ok?
                      raw-requires-anti-air?
@@ -2675,7 +2871,8 @@
                               (list 'build 'infestation-pit (safe-tile-coord (+ base-x 5.5)) (safe-tile-coord (- base-y 4.5)))
                               #t 145.0))
             '())
-        (if (and has-lair-or-hive?
+        (if (and (not crisis-defer?)
+                 has-lair-or-hive?
                  (= (bldg-eq-count 'spire) 0)
                  (or zerg-pit-spire-army-ok? raw-requires-anti-air?))
             (list (boost-cand 'spire 'tech-upgrade
@@ -2700,7 +2897,7 @@
                  (< (count (lambda (u) (memq u '(brood-lord broodlord brood-lord-cocoon))) units) 6))
             (list (boost-cand 'brood-lord 'combat-unit '(morph brood-lord) #t 160.0))
             '())
-        (if t3-endgame?
+        (if (and t3-endgame? (not crisis-defer?))
             (append
              (if (and (memq 'lair r-bldgs) (memq 'infestation-pit r-bldgs) (= (bldg-eq-count 'hive) 0))
                  (list (boost-cand 'hive 'tech-upgrade '(morph hive) #t 165.0))
@@ -2730,8 +2927,16 @@
      (define cur-hydras (count (lambda (u) (memq u '(hydralisk hydralisk-burrowed))) units))
      (define cur-lurkers
        (count (lambda (u) (memq u '(lurker lurker-burrowed lurker-mp lurker-mp-burrowed lurker-egg lurker-mp-egg))) units))
+     (define cur-ravagers
+       (count (lambda (u) (memq u '(ravager ravager-cocoon))) units))
      (define zerg-morph-cands
        (append
+        (if (and crisis-defer?
+                 (> (ready-bldg-eq-count 'roach-warren) 0)
+                 (> cur-roaches 0)
+                 (< cur-ravagers (min 6 cur-roaches)))
+            (list (boost-cand 'ravager 'combat-unit '(morph ravager) #t 145.0))
+            '())
         (if (and (> (ready-bldg-eq-count 'baneling-nest) 0)
                  (>= cur-zerglings 8)
                  enemy-ground-army?
@@ -2769,8 +2974,10 @@
       (if (or (not (hash? open-prod-slots)) (< cur-zerglings ling-cap))
           (list (cand 'zergling 'combat-unit '(train zergling) (facility-slot-open? 'larva 'spawning-pool)))
           '())
+      (if (crisis-deferred-sym? upg-sym crisis-defer?)
+          '()
+          (list (cand upg-sym 'tech-upgrade (list 'research upg-sym) zerg-upg-ready?)))
       (list
-       (cand upg-sym 'tech-upgrade (list 'research upg-sym) zerg-upg-ready?)
        (cand 'roach-warren 'production-scaling (list 'build 'roach-warren (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (- base-y 4.0)))
              (if (hash? open-prod-slots) (and (memq 'spawning-pool r-bldgs) (= (bldg-eq-count 'roach-warren) 0)) #t))
        (cand 'drone 'worker '(train drone) #f)
@@ -2805,19 +3012,21 @@
                    (if t3-endgame? 6 3))
                 #t)))
      (define protoss-rush-cands
-       (if under-early-rush-crisis?
+       (if (or under-early-rush-crisis? severe-crisis-static-def?)
            (append
-            (if (and (memq 'pylon r-bldgs) (= (bldg-eq-count 'gateway) 0))
+            (if (and under-early-rush-crisis? (memq 'pylon r-bldgs) (= (bldg-eq-count 'gateway) 0))
                 (list (boost-cand 'gateway 'production-scaling
                                   (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
                                   #t 500.0))
                 '())
-            (if (and (memq 'cybernetics-core r-bldgs) (= (bldg-eq-count 'shield-battery) 0))
+            (if (and (memq 'cybernetics-core r-bldgs)
+                     (< (bldg-eq-count 'shield-battery) (if severe-crisis-static-def? 2 1)))
                 (list (boost-cand 'shield-battery 'counter-tech
                                   (list 'build 'shield-battery (safe-tile-coord (+ base-x 3.0)) (safe-tile-coord (+ base-y 3.0)))
-                                  #t 260.0))
+                                  #t (if under-early-rush-crisis? 260.0 165.0)))
                 '())
-            (if (and (memq 'cybernetics-core r-bldgs)
+            (if (and under-early-rush-crisis?
+                     (memq 'cybernetics-core r-bldgs)
                      (facility-slot-open? 'gateway 'cybernetics-core))
                 (list (boost-cand 'stalker 'combat-unit '(train stalker) #t 280.0)
                       (boost-cand 'adept 'combat-unit '(train adept) #t 240.0))
@@ -2864,7 +3073,8 @@
             (list (boost-cand 'tempest 'combat-unit '(train tempest) #t
                               (if enemy-cap-air? 170.0 145.0)))
             '())
-        (if (and (or enemy-cap-air?
+        (if (and (not (crisis-deferred-sym? 'stargate crisis-defer? #:defer-stargate? defer-stargate?))
+                 (or enemy-cap-air?
                      (and t3-endgame?
                           (>= active-bases 4)
                           (not (and (<= active-bases 2)
@@ -2878,14 +3088,15 @@
                               (list 'build 'stargate (safe-tile-coord (+ base-x 5.5)) (safe-tile-coord (+ base-y 5.5)))
                               #t (if enemy-cap-air? 160.0 140.0)))
             '())
-        (if (and (or enemy-cap-air? (and t3-endgame? (>= active-bases 4)))
+        (if (and (not crisis-defer?)
+                 (or enemy-cap-air? (and t3-endgame? (>= active-bases 4)))
                  (memq 'stargate r-bldgs)
                  (= (bldg-eq-count 'fleet-beacon) 0))
             (list (boost-cand 'fleet-beacon 'tech-upgrade
                               (list 'build 'fleet-beacon (safe-tile-coord (- base-x 6.5)) (safe-tile-coord (+ base-y 5.5)))
                               #t (if enemy-cap-air? 160.0 150.0)))
             '())
-        (if t3-endgame?
+        (if (and t3-endgame? (not crisis-defer?))
             (append
              (if (and (memq 'robotics-facility r-bldgs) (= (bldg-eq-count 'robotics-bay) 0))
                  (list (boost-cand 'robotics-bay 'tech-upgrade
@@ -2925,19 +3136,23 @@
                    (if enemy-cap-air? 155.0 0.0))
        (cand 'immortal 'combat-unit '(train immortal) robo-open?)
        (cand 'zealot 'combat-unit '(train zealot)
-             (facility-slot-open? 'gateway))
-       (cand upg-sym 'tech-upgrade (list 'research upg-sym)
-             (if (hash? open-prod-slots)
-                 (case upg-sym
-                   [(warp-gate-research) (not (not (memq 'cybernetics-core r-bldgs)))]
-                   [(charge blink) (not (not (memq 'twilight-council r-bldgs)))]
-                   [(extended-thermal-lance) (and has-robo-bay? has-colossus?)]
-                   [(psi-storm) has-templar-arch?]
-                   [(protoss-ground-weapons-2 protoss-ground-armor-2)
-                    (and (not (not (memq 'forge r-bldgs)))
-                         (not (not (memq 'twilight-council r-bldgs))))]
-                   [else (not (not (memq 'forge r-bldgs)))])
-                 #t))
+             (facility-slot-open? 'gateway)))
+      (if (crisis-deferred-sym? upg-sym crisis-defer?)
+          '()
+          (list
+           (cand upg-sym 'tech-upgrade (list 'research upg-sym)
+                 (if (hash? open-prod-slots)
+                     (case upg-sym
+                       [(warp-gate-research) (not (not (memq 'cybernetics-core r-bldgs)))]
+                       [(charge blink) (not (not (memq 'twilight-council r-bldgs)))]
+                       [(extended-thermal-lance) (and has-robo-bay? has-colossus?)]
+                       [(psi-storm) has-templar-arch?]
+                       [(protoss-ground-weapons-2 protoss-ground-armor-2)
+                        (and (not (not (memq 'forge r-bldgs)))
+                             (not (not (memq 'twilight-council r-bldgs))))]
+                       [else (not (not (memq 'forge r-bldgs)))])
+                     #t))))
+      (list
        (cand 'gateway 'production-scaling (list 'build 'gateway (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
              (if (hash? open-prod-slots)
                  (let ([cur-gates (bldg-eq-count 'gateway)]
@@ -2990,17 +3205,17 @@
            (memq 'factory-techlab bldgs)
            (memq 'factory-tech-lab bldgs)))
      (define terran-rush-cands
-       (if under-early-rush-crisis?
+       (if (or under-early-rush-crisis? severe-crisis-static-def?)
            (append
-            (if (and (memq 'supply-depot r-bldgs) (not (memq 'barracks bldgs)))
+            (if (and under-early-rush-crisis? (memq 'supply-depot r-bldgs) (not (memq 'barracks bldgs)))
                 (list (boost-cand 'barracks 'production-scaling
                                   (list 'build 'barracks (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
                                   #t 500.0))
                 '())
-            (if (and root-combat-ready? (not (memq 'bunker bldgs)))
+            (if (and root-combat-ready? (< (bldg-eq-count 'bunker) (if severe-crisis-static-def? 2 1)))
                 (list (boost-cand 'bunker 'counter-tech
                                   (list 'build 'bunker (safe-tile-coord (+ base-x 3.5)) (safe-tile-coord (- base-y 3.0)))
-                                  #t 260.0))
+                                  #t (if under-early-rush-crisis? 260.0 165.0)))
                 '()))
            '()))
      (define desired-rax-tl
@@ -3055,6 +3270,30 @@
                  (< (count (lambda (u) (eq? u 'ghost)) units) desired-ghost-cap))
             (list (boost-cand 'ghost 'combat-unit '(train ghost) #t 155.0))
             '())
+        ;; [NOTE-R4-B] Anti-Capital-Air (`tempest`, `carrier`, `battlecruiser`, `brood-lord`):
+        ;; unlock Armory + Thors (< 5-6) outside `t3-endgame?`, plus `+1` Ship Weapons when air fleet >= 4.
+        (if (and (memq 'factory r-bldgs)
+                 (= (bldg-eq-count 'armory) 0)
+                 enemy-cap-air?
+                 (or enemy-cap-air-ground-aa? has-fac-tl-any?))
+            (list (boost-cand 'armory 'tech-upgrade
+                              (list 'build 'armory (safe-tile-coord (+ base-x 6.5)) (safe-tile-coord (- base-y 4.5)))
+                              #t (if enemy-cap-air-ground-aa? 185.0 165.0)))
+            '())
+        (if (and (facility-slot-open? 'factory 'armory)
+                 has-fac-tl?
+                 enemy-cap-air?
+                 (< (count (lambda (u) (memq u '(thor thor-ap))) units) desired-thor-cap))
+            (list (boost-cand 'thor 'combat-unit '(train thor) #t
+                              (if enemy-cap-air-ground-aa? 180.0 160.0)))
+            '())
+        (if (and ship-weap-due?
+                 (not (crisis-deferred-sym? 'terran-ship-weapons-1 crisis-defer? #:keep-ship-weapons? #t))
+                 (or (not (hash? open-prod-slots))
+                     (> (hash-ref open-prod-slots 'armory 1) 0)))
+            (list (boost-cand 'terran-ship-weapons-1 'tech-upgrade '(research terran-ship-weapons-1)
+                              #t 175.0))
+            '())
         (if t3-endgame?
             (append
              (if (and (memq 'factory r-bldgs) (not (memq 'armory bldgs)))
@@ -3062,7 +3301,7 @@
                                    (list 'build 'armory (safe-tile-coord (+ base-x 6.5)) (safe-tile-coord (- base-y 4.5)))
                                    #t 150.0))
                  '())
-             (if (and (memq 'starport r-bldgs) (= (bldg-eq-count 'fusion-core) 0))
+             (if (and (not crisis-defer?) (memq 'starport r-bldgs) (= (bldg-eq-count 'fusion-core) 0))
                  (list (boost-cand 'fusion-core 'tech-upgrade
                                    (list 'build 'fusion-core (safe-tile-coord (- base-x 5.5)) (safe-tile-coord (+ base-y 4.5)))
                                    #t 145.0))
@@ -3073,7 +3312,7 @@
                  '())
              (if (and (facility-slot-open? 'factory 'armory)
                       has-fac-tl?
-                      (< (count (lambda (u) (memq u '(thor thor-ap))) units) 4))
+                      (< (count (lambda (u) (memq u '(thor thor-ap))) units) (max 4 desired-thor-cap)))
                  (list (boost-cand 'thor 'combat-unit '(train thor) #t 150.0))
                  '())
              (if (and (>= active-bases 4)
@@ -3106,19 +3345,23 @@
        (cand 'siege-tank 'combat-unit '(train siege-tank)
              (if (hash? open-prod-slots) (and (facility-slot-open? 'factory 'factory) has-fac-tl?) #t))
        (cand 'marine 'combat-unit '(train marine)
-             (facility-slot-open? 'barracks 'barracks))
-       (cand upg-sym 'tech-upgrade (list 'research upg-sym)
-             (if (hash? open-prod-slots)
-                 (case upg-sym
-                   [(stimpack combat-shield concussive-shells) has-rax-tl?]
-                   [(terran-infantry-weapons-2 terran-infantry-armor-2 terran-infantry-weapons-3)
-                    (and (not (not (memq 'engineering-bay r-bldgs)))
-                         (not (not (memq 'armory r-bldgs))))]
-                   [(advanced-ballistics) (and has-fusion-core? has-port-tl?)]
-                   [(weapon-refit) has-fusion-core?]
-                   [(banshee-cloak) has-port-tl?]
-                   [else (not (not (memq 'engineering-bay r-bldgs)))])
-                 #t))
+             (facility-slot-open? 'barracks 'barracks)))
+      (if (crisis-deferred-sym? upg-sym crisis-defer?)
+          '()
+          (list
+           (cand upg-sym 'tech-upgrade (list 'research upg-sym)
+                 (if (hash? open-prod-slots)
+                     (case upg-sym
+                       [(stimpack combat-shield concussive-shells) has-rax-tl?]
+                       [(terran-infantry-weapons-2 terran-infantry-armor-2 terran-infantry-weapons-3)
+                        (and (not (not (memq 'engineering-bay r-bldgs)))
+                             (not (not (memq 'armory r-bldgs))))]
+                       [(advanced-ballistics) (and has-fusion-core? has-port-tl?)]
+                       [(weapon-refit) has-fusion-core?]
+                       [(banshee-cloak) has-port-tl?]
+                       [else (not (not (memq 'engineering-bay r-bldgs)))])
+                     #t))))
+      (list
        (cand 'barracks 'production-scaling (list 'build 'barracks (safe-tile-coord (+ base-x 4.0)) (safe-tile-coord (+ base-y 4.0)))
              (if (hash? open-prod-slots)
                  (let ([cur-rax (bldg-eq-count 'barracks)]
