@@ -657,6 +657,18 @@
                                             #:map-name resolved-map))
      (hash-set (hash-set srv 'resolved-map resolved-map) 'sc2-bin #f)]))
 
+(define (state-log->jsexpr v)
+  (cond
+    [(or (boolean? v) (exact-integer? v) (inexact-real? v) (string? v)) v]
+    [(real? v) (exact->inexact v)]
+    [(symbol? v) (symbol->string v)]
+    [(list? v) (map state-log->jsexpr v)]
+    [(hash? v)
+     (for/hasheq ([(k val) (in-hash v)])
+       (values (if (symbol? k) k (string->symbol (format "~a" k)))
+               (state-log->jsexpr val)))]
+    [else (format "~a" v)]))
+
 (define (append-native-telemetry! root-dir summary-hash)
   (with-handlers ([exn:fail? void])
     (define data-dir (build-path root-dir "data"))
@@ -784,6 +796,8 @@
       (define last-game-loop 0)
       (define last-logged-saving-for #f)
       (define priority-logs-emitted 0)
+      (define state-logs-emitted 0)
+      (define last-state-log #f)
       (define scout-cmds-emitted 0)
       (define harass-cmds-emitted 0)
       (define max-intel-staleness-frames 0)
@@ -864,7 +878,7 @@
                                                  (sc2-unit-is-townhall? u)))
                              1)))
 
-                (define-values (raw-cmds prio-line cur-saving-for t-rt-1 t-tr-1)
+                (define-values (raw-cmds prio-line cur-saving-for state-line state-log t-rt-1 t-tr-1)
                   (cond
                     [(string-ci=? bot-name "Creepy12ProbeRush")
                      (define pc0 (sc2-observation-player-common obs))
@@ -994,7 +1008,7 @@
                                 (cons (sc2-raw-unit-command 23 enemy-start-pt #f h-tags #f)
                                       cmds))]))
                      (define now-ms (current-inexact-monotonic-milliseconds))
-                     (values (reverse cmds) "" 'none now-ms now-ms)]
+                     (values (reverse cmds) "" 'none "" #f now-ms now-ms)]
                     [else
                      ;; Step cognitive architecture (primary actions first so individual unit micro
                      ;; populates commanded-combat-tags before any global spatial maneuver)
@@ -1004,6 +1018,8 @@
                      (define prio-sum (hash-ref step-tel 'priority-summary (hash)))
                      (define pline (hash-ref step-tel 'priority-log-line ""))
                      (define csaving (hash-ref prio-sum 'saving-for 'none))
+                     (define sline (hash-ref step-tel 'state-log-line ""))
+                     (define slog (hash-ref step-tel 'state-log #f))
                      (set! max-intel-staleness-frames
                            (max max-intel-staleness-frames (hash-ref step-tel 'intel-staleness-frames 0)))
                      (set! max-escrow-age-frames
@@ -1060,7 +1076,7 @@
                      (define rcmds
                        (govern-sc2-wire-actions! wire-apm-gov raw-cmds0 last-game-loop obs))
                      (define tr1 (current-inexact-monotonic-milliseconds))
-                     (values rcmds pline csaving rt1 tr1)]))
+                     (values rcmds pline csaving sline slog rt1 tr1)]))
 
                 (define step-ms (- t-tr-1 t-step-0))
                 (set! step-total-ms-list (cons step-ms step-total-ms-list))
@@ -1076,6 +1092,16 @@
                   (set! priority-logs-emitted (add1 priority-logs-emitted))
                   (fprintf (current-error-port) "~a step_ms=~a\n"
                            prio-line
+                           (round2 step-ms))
+                  (flush-output (current-error-port)))
+
+                (when (hash? state-log)
+                  (set! last-state-log state-log))
+                (when (and (string? state-line)
+                           (not (string=? state-line "")))
+                  (set! state-logs-emitted (add1 state-logs-emitted))
+                  (fprintf (current-error-port) "~a step_ms=~a\n"
+                           state-line
                            (round2 step-ms))
                   (flush-output (current-error-port)))
 
@@ -1134,6 +1160,10 @@
                 'steps_executed total-steps
                 'commands_sent total-raw-cmds-sent
                 'priority_logs_emitted priority-logs-emitted
+                'state_logs_emitted state-logs-emitted
+                'last_state_log (if (hash? last-state-log)
+                                    (state-log->jsexpr last-state-log)
+                                    'null)
                 'scout_commands_emitted scout-cmds-emitted
                 'harass_commands_emitted harass-cmds-emitted
                 'enemy_first_seen_loop (or enemy-first-seen-loop -1)

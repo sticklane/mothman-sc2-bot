@@ -10,25 +10,29 @@
          racket/string
          racket/system
          "../compiler/syntax.rkt"
-         "../lib/okasaki-sc.rkt"
+         "../lib/sc2-types.rkt"
          "../lib/sc2-game-constants.rkt"
+         "../lib/sc2-bayesian.rkt"
+         (except-in "../lib/sc2-geometry.rkt" aabb-overlaps?)
+         "../lib/sc2-pathing.rkt"
+         "../lib/sc2-placement.rkt"
+         "../lib/sc2-combat-eval.rkt"
+         "../lib/sc2-logging.rkt"
+         "../lib/build-orders.rkt"
          "../lib/perception-grid.rkt"
          "../lib/econ-ledger.rkt"
          "../lib/tactics-sim.rkt"
          "../lib/human-cortex.rkt"
-         "../lib/zerospace-mastermind.rkt"
          "../lib/mirror-mind-predictor.rkt"
+         "../lib/priority-macro-brain.rkt"
          "../lib/bot-runtime.rkt"
-         "../examples/zerg-overmind-12hatch.rkt"
-         "../examples/protoss-stardust-ffe.rkt"
-         "../examples/terran-pluto-siege-ghost.rkt"
-         "../examples/random-chameleon-allrace.rkt"
-         "../sim/openbw_ffi_bridge.rkt"
-         "../sim/deterministic-sc-sim.rkt"
+         "../bots/Mothman-Z.rkt"
+         "../bots/Mothman-P.rkt"
+         "../bots/Mothman-T.rkt"
+         "../bots/Mothman-R.rkt"
          "../tools/sc2-replay-decompiler.rkt"
          "../lib/state-machine-verifier.rkt"
          "../ladder/build-aiarena-zip.rkt"
-         "../lib/priority-macro-brain.rkt"
          "../lib/pro-replay-starvation-audit.rkt"
          "../lib/sc2-typed-commands.rkt"
          (only-in "../lib/sc2-protobuf-ws.rkt"
@@ -159,31 +163,24 @@
 (printf "============================================================================\n\n")
 
 ;; =============================================================================
-;; 1.1 Okasaki-Gill Canonical Crit-Bit Trie
+;; 1.1 Morton 2D Encoding & Persistent Perception Grid Crit-Bit Query
 ;; =============================================================================
-(run-suite "1.1 Okasaki-Gill Canonical Crit-Bit Trie: History Independence & Morton 2D Range Query"
-  (define pts '((10 20 u1) (35 42 u2) (60 70 u3) (102 112 u4) (61 71 u5) (8 9 u6)))
-  (define t-forward
-    (for/fold ([t critbit-empty]) ([p (in-list pts)])
-      (critbit-insert t (morton-encode-2d (first p) (second p)) (third p))))
-  (define t-reverse
-    (for/fold ([t critbit-empty]) ([p (in-list (reverse pts))])
-      (critbit-insert t (morton-encode-2d (first p) (second p)) (third p))))
-  ;; History independence: exact same canonical tree structure regardless of insertion order!
-  (assert-eq! t-forward t-reverse "Crit-Bit Trie canonical history independence")
-  (assert-eq! (critbit-size t-forward) 6)
+(run-suite "1.1 Morton 2D Encoding & Persistent Perception Grid Crit-Bit Query"
+  (define pts '((10 20 101) (35 42 102) (60 70 103) (102 112 104) (61 71 105) (8 9 106)))
   (for ([p (in-list pts)])
     (define k (morton-encode-2d (first p) (second p)))
-    (assert-eq! (critbit-lookup t-forward k) (third p))
     (define-values (dx dy) (morton-decode-2d k))
     (assert-eq! dx (first p))
     (assert-eq! dy (second p)))
-  (define in-box (critbit-range-2d t-forward 58 68 65 75))
+  (define pg (make-perception-grid))
+  (define entries
+    (for/list ([p (in-list pts)])
+      (unit-entry (third p) 'marine 10 45 50 (first p) (second p))))
+  (define pg1 (perception-grid-ingest-frame! pg 1 '() entries))
+  (define in-box (perception-grid-query-box pg1 'enemy 58 68 65 75))
   (assert-eq! (length in-box) 2)
-  (assert-true! (and (memq 'u3 in-box) (memq 'u5 in-box)))
-  (define t-del (critbit-delete t-forward (morton-encode-2d 60 70)))
-  (assert-eq! (critbit-size t-del) 5)
-  (assert-eq! (critbit-lookup t-del (morton-encode-2d 60 70)) #f))
+  (define in-box-ids (map unit-entry-id in-box))
+  (assert-true! (and (member 103 in-box-ids) (member 105 in-box-ids))))
 
 ;; =============================================================================
 ;; 1.2 Hinze-Paterson 2-3 Monoidal Finger Tree
@@ -225,35 +222,23 @@
   (assert-eq! (zipper-index z-rb) 0))
 
 ;; =============================================================================
-;; 1.4 Pointerless/Functional Braun Tree
+;; 1.4 Persistent Perception Grid: Choke Zipper, Frame History SBRL & Threat PQ
 ;; =============================================================================
-(run-suite "1.4 Pointerless/Functional Braun Tree: Priority Queue, Okasaki diff Size & fold-braun"
-  (define keys '(42 15 88 7 23 19 64 3 99 51 12 31))
-  (define bt
-    (for/fold ([t braun-empty]) ([k (in-list keys)])
-      (braun-insert t k (format "val-~a" k))))
-  (assert-eq! (braun-size bt) 12)
-  (assert-eq! (car (braun-min bt)) 3)
-  (define sorted-pairs (braun->sorted-list bt))
-  (assert-eq! (map car sorted-pairs) (sort keys <))
-  (define key-sum (fold-braun (lambda (k _v acc) (+ k acc)) 0 bt))
-  (assert-eq! key-sum (apply + keys)))
-
-;; =============================================================================
-;; 1.5 Skew-Binary Random-Access List
-;; =============================================================================
-(run-suite "1.5 Skew-Binary Random-Access List: O(1) Frame Snapshots & O(log N) Lookup/Update"
-  (define s0
-    (for/fold ([s sbral-empty]) ([i (in-range 32)])
-      (sbral-cons (* i 10) s)))
-  (assert-eq! (sbral-length s0) 32)
-  (assert-eq! (sbral-head s0) 310)
-  (assert-eq! (sbral-ref s0 0) 310)
-  (assert-eq! (sbral-ref s0 31) 0)
-  (define s1 (sbral-set s0 15 9999))
-  (assert-eq! (sbral-ref s1 15) 9999)
-  (assert-eq! (sbral-ref s0 15) 160) ;; persistent O(1) snapshot unaffected!
-  (assert-eq! (length (sbral->list s1)) 32))
+(run-suite "1.4 Persistent Perception Grid: Choke Zipper, Frame History SBRL & Threat PQ"
+  (define pg (make-perception-grid))
+  (define cz (perception-grid-get-choke-zipper pg))
+  (assert-true! (huet-zipper? cz))
+  (assert-true! (choke-point? (choke->choke-point (zipper-focus cz))))
+  (perception-grid-ingest-frame! pg 100
+                                 (list (unit-entry 1 'roach 16 145 100 32 32))
+                                 (list (unit-entry 2 'stalker 13 160 175 90 90)))
+  (perception-grid-ingest-frame! pg 200
+                                 (list (unit-entry 1 'roach 16 145 100 33 33))
+                                 (list (unit-entry 2 'stalker 13 160 175 88 88)))
+  (define hist (perception-grid-history->list (perception-grid-snapshot-history pg)))
+  (assert-eq! (length hist) 2)
+  (assert-eq! (hash-ref (first hist) 'frame) 200)
+  (assert-eq! (hash-ref (second hist) 'frame) 100))
 
 ;; =============================================================================
 ;; 2.1 CapUnit 5-Element Capability Semiring & 7-Component sc-grade Algebra
@@ -300,9 +285,9 @@
 (run-suite "2.3 3-Span Provenance Resugaring (0 Gensym Leaks), Chordal Coloring & Auto-Repair"
   (define raw-pspan
     (make-provenance-span
-     "examples/zerg-overmind-12hatch.rkt:24:2"
+     "bots/Mothman-Z.rkt:24:2"
      "compiler/syntax.rkt:def-posture"
-     "examples/zerg-overmind-12hatch.rkt:31:0"
+     "bots/Mothman-Z.rkt:31:0"
      '(seq>> (train drone_104) (build spawning-pool_209) (morph tmp$lair))))
   (assert-true! (verify-zero-gensym-leaks? raw-pspan))
   (define resugared (resugar-macro-step raw-pspan))
@@ -424,9 +409,9 @@
   (assert-eq! (classify-player-fingerprint 410 36.0 52.0) 'Clem))
 
 ;; =============================================================================
-;; 4.1 Example Bots Compile & Pass All Coeffect-Effect Grades
+;; 4.1 Race Bot Specs Compile & Pass All Coeffect-Effect Grades
 ;; =============================================================================
-(run-suite "4.1 Example Bots Compile & Pass All Coeffect-Effect Grades"
+(run-suite "4.1 Race Bot Specs Compile & Pass All Coeffect-Effect Grades"
   (define budget (sc-grade 'Many 1000 1000 30 40 'saccade 'diffusion-prior))
   (for ([b (in-list (list zerg-overmind-12hatch-bot
                           protoss-stardust-ffe-bot
@@ -434,35 +419,6 @@
                           random-chameleon-allrace-bot))])
     (assert-true! (bot-spec? b))
     (assert-true! (check-bot-grade! (bot-spec-grade b) budget (bot-spec-name b)))))
-
-;; =============================================================================
-;; 4.2 - 4.4 Simulated Matches 1, 2, 3
-;; =============================================================================
-(run-suite "4.2 Simulated Match 1: Zerg Overmind 12-Hatch vs. Protoss Stardust FFE (FAIL_OK -> REC_OK -> FULL_WIN_OK)"
-  (define m1 (simulate-sc-match 'ZvP))
-  (assert-eq! (hash-ref m1 'posture-trace)
-              '(Macro12Hatch CrisisZealotRush SunkenLairRecovery MutaLurkerContain SwarmVictory))
-  (assert-eq! (hash-ref m1 'stages) '(FAIL_OK REC_OK FULL_WIN_OK)))
-
-(run-suite "4.3 Simulated Match 2: Protoss Stardust FFE vs. Terran Pluto Siege/Ghost (FAIL_OK -> REC_OK -> FULL_WIN_OK)"
-  (define m2 (simulate-sc-match 'PvT))
-  (assert-eq! (hash-ref m2 'posture-trace)
-              '(ForgeFastExpand CrisisZerglingFlood CannonWallRecovery DragoonReaverVanguard ProtossArmadaVictory))
-  (assert-eq! (hash-ref m2 'stages) '(FAIL_OK REC_OK FULL_WIN_OK)))
-
-(run-suite "4.4 Simulated Match 3: Terran Pluto Siege/Ghost vs. Zerg Overmind 12-Hatch (FAIL_OK -> REC_OK -> FULL_WIN_OK)"
-  (define m3 (simulate-sc-match 'TvZ))
-  (assert-eq! (hash-ref m3 'posture-trace)
-              '(OneRaxFE CrisisEarlyBust BunkerSiegeRecovery VesselGhostPush TerranDominionVictory))
-  (assert-eq! (hash-ref m3 'stages) '(FAIL_OK REC_OK FULL_WIN_OK)))
-
-;; =============================================================================
-;; 4.5 Native C FFI (`libbw_bridge.so`) & Python `sc2_burny_bridge.py` Wire Protocol Round-Trip
-;; =============================================================================
-(run-suite "4.5 Native C FFI (`libbw_bridge.so`) & Python `sc2_burny_bridge.py` Wire Protocol Round-Trip"
-  (define rt-res (bw-wire-sexp-roundtrip '((train zergling) (build spawning-pool 36 36) (expand 50 56))))
-  (assert-true! (hash-ref rt-res 'roundtrip-exact?))
-  (assert-true! (> (bw-ffi-step-frame 10 200 50) 0)))
 
 ;; =============================================================================
 ;; 5.1 7-Year (2019-2026) Pro Tournament Cortex Calibration & Statistical Fidelity
@@ -486,14 +442,6 @@
                                               #:race 'Zerg))
   (assert-true! (hash-ref dec 'grade-valid?))
   (assert-true! (verify-decompiled-replay-convergence dec)))
-
-;; =============================================================================
-;; 5.3 Multi-Map 7-Year Pro Meta Tournament Bracket Runner (7 Classic Maps)
-;; =============================================================================
-(run-suite "5.3 Multi-Map 7-Year Pro Meta Tournament Bracket Runner (7 Classic Maps, FAIL_OK -> REC_OK -> FULL_WIN_OK)"
-  (define bracket (run-7map-pro-meta-bracket))
-  (assert-eq! (hash-ref bracket 'total-maps) 7)
-  (assert-true! (hash-ref bracket 'all-passed?)))
 
 ;; =============================================================================
 ;; 5.4 Empirical 502-Replay (2019-2026) S-Expr Dataset & Live Headless SC2_x64 .SC2Replay Verification
@@ -537,9 +485,9 @@
   (assert-true! (sc-grade? synth-grade)))
 
 ;; =============================================================================
-;; 5.6 ZeroSpace 3-Layer Mastermind, Lanchester Snowball, Plausible Counter Tree, Ability Limiter & PDA
+;; 5.6 SC2 Combat Evaluation, Lanchester Snowball, Plausible Counter Tree, Ability Limiter & PDA
 ;; =============================================================================
-(run-suite "5.6 ZeroSpace 3-Layer Mastermind, Lanchester Snowball, Plausible Counter Tree, Ability Limiter & PDA Diagnostics"
+(run-suite "5.6 SC2 Combat Evaluation, Lanchester Snowball, Plausible Counter Tree, Ability Limiter & PDA Diagnostics"
   (assert-true! (> (lanchester-snowball-advantage 400 200) 0))
   (define comp (evaluate-compounding-ledger #:self-workers 22 #:enemy-workers 14 #:self-bases 3 #:enemy-bases 2 #:fap-score 20))
   (assert-eq! (hash-ref comp 'dominant-driver) 'economic-compounding-snowball)
@@ -2282,7 +2230,7 @@
 (run-suite "5.16 Empirical 1,798-Replay Pro Build-Order Executor, Diagonal Ramp Wall Non-Overlap & Save-Cancel Safety"
   ;; 1. Empirical Pro Build-Order DB loaded from 1,798 pro replays across all 9 matchups
   (assert-true! (and (pair? PRO-BUILD-ORDER-DB) (eq? (first PRO-BUILD-ORDER-DB) 'pro-build-order-database))
-                "PRO-BUILD-ORDER-DB must be loaded from data/pro_build_orders.sexp")
+                "PRO-BUILD-ORDER-DB must expose the typed pro-build-order-database registry")
   (for ([matchup (in-list '(ZvZ ZvT ZvP TvZ TvT TvP PvZ PvT PvP))])
     (define steps (pro-build-order-steps-for-matchup matchup))
     (assert-true! (>= (length steps) 15)
@@ -9446,6 +9394,210 @@
                      (<= sb-late-max 18))
                 (format "Supply buffer must scale monotonically with production (~a <= ~a < ~a <= ~a <= 18)"
                         sb-open-1base sb-early-nat sb-mid-4base sb-late-max)))
+
+;; =============================================================================
+;; Suite 42: Modular Typed Racket Domain Libraries (Types, Bayesian, Build Orders,
+;;           Geometry, Pathing, Placement, Combat Eval, Tactics & Logging)
+;; =============================================================================
+(run-suite "42. Modular Typed Racket Domain Libraries & Per-Tactic Submodules"
+  ;; 42.1 lib/sc2-types.rkt: normalizers, pro-bo-goal-target, clamp-prob, SupplyCurvePoint fractional
+  (assert-eq! (normalize-race "terran") 'Terran)
+  (assert-eq! (normalize-race 'random) 'Random)
+  (assert-eq! (normalize-known-race 'random) 'Zerg)
+  (assert-eq! (resolve-matchup-symbol "Protoss" "zerg") 'PvZ)
+  (assert-eq! (pro-bo-goal-target (pro-bo-goal 'build 'gateway 1 16 'pylon)) 'gateway)
+  (assert-eq! (clamp-prob -0.5 0.05) 0.05)
+  (assert-eq! (clamp-prob 1.5 0.05) 0.95)
+  (define frac-curve-pt '(5 . (44.5 . 23.5)))
+  (assert-eq! (car frac-curve-pt) 5)
+  (assert-true! (< (abs (- (cadr frac-curve-pt) 44.5)) 1e-6))
+  (assert-true! (< (abs (- (cddr frac-curve-pt) 23.5)) 1e-6))
+
+  ;; 42.2 lib/sc2-bayesian.rkt: odds/log-odds roundtrip, likelihoods, categorical, hellinger, signals
+  (for ([p (in-list '(0.08 0.25 0.50 0.85))])
+    (assert-true! (< (abs (- (odds->prob (prob->odds p)) p)) 1e-9))
+    (assert-true! (< (abs (- (log-odds->prob (prob->log-odds p)) p)) 1e-9)))
+  (assert-true! (> (bayesian-posterior-from-likelihoods 0.15 '((#t . 10.0))) 0.60))
+  (define cat-post
+    (bayesian-categorical-posterior (hasheq 'ling-bane 3.0 'roach-ravager 1.0)
+                                    #:dirichlet-alpha 0.25))
+  (assert-true! (< (abs (- (+ (hash-ref cat-post 'ling-bane)
+                              (hash-ref cat-post 'roach-ravager))
+                           1.0))
+                   1e-6))
+  (assert-true! (> (hash-ref cat-post 'ling-bane) (hash-ref cat-post 'roach-ravager)))
+  (assert-true! (< (hellinger-distance '(0.5 0.5) '(0.5 0.5)) 1e-9))
+  (assert-true! (> (hellinger-distance '(1.0 0.0) '(0.0 1.0)) 0.99))
+  (define bluff-fake (evaluate-bluff-posterior-from-signals #:fake-build-count 1 #:has-confirming-evidence? #f))
+  (define bluff-real (evaluate-bluff-posterior-from-signals #:active-research-count 1 #:has-confirming-evidence? #t))
+  (assert-true! (> bluff-fake 0.55))
+  (assert-true! (< bluff-real 0.05))
+  (define strat-p
+    (evaluate-strategic-posteriors-from-signals
+     #:bluff-prior 0.08
+     #:bluff-posterior bluff-fake
+     #:frame 1800
+     #:combat-count 5
+     #:unaccounted-minerals 200
+     #:unaccounted-gas 200
+     #:dark-matter-hypothesis 'proxy-production-or-all-in
+     #:predicted-enemy-bases 1
+     #:feint-or-poke-detected? #t
+     #:proxy-or-rush-detected? #t
+     #:branch-posteriors (hasheq 'early-rush 0.75)))
+  (assert-true! (bayesian-strategic-priors? strat-p))
+  (assert-true! (> (bayesian-strategic-priors-rush-posterior strat-p) 0.70))
+  (assert-true! (> (bayesian-strategic-priors-feint-posterior strat-p) 0.50))
+
+  ;; 42.3 lib/build-orders.rkt (+ lib/build-orders/*.rkt): 9 specs, 7-min curve, 3 race trees
+  (assert-eq! (length ALL-BUILD-ORDER-SPECS) 9)
+  (for ([m (in-list '(ZvZ ZvT ZvP TvZ TvT TvP PvZ PvT PvP))])
+    (define spec (lookup-build-order-for-matchup m))
+    (assert-eq! (build-order-spec-matchup spec) m)
+    (assert-true! (>= (length (build-order-spec-steps spec)) 15))
+    (assert-eq! (length (build-order-spec-supply-curve spec)) 7))
+  ;; Minute 5 of ZvT uses fractional SupplyCurvePoint (44.5 . 23.5) -> rounds 23.5 army to 24
+  (define-values (zvt-m5-w zvt-m5-a)
+    (pro-supply-curve-target 'Zerg 'Terran (exact-round (* 270.0 22.4)) 3))
+  (assert-eq! zvt-m5-w 66)
+  (assert-eq! zvt-m5-a 24)
+  (define-values (zvt-m7-w zvt-m7-a)
+    (pro-supply-curve-target 'Zerg 'Terran (exact-round (* 390.0 22.4)) 3))
+  (assert-true! (>= zvt-m7-w 66))
+  (assert-eq! zvt-m7-a 38)
+  (assert-eq! (length ZERG-BUILD-ORDER-TREE) 13)
+  (assert-eq! (length TERRAN-BUILD-ORDER-TREE) 12)
+  (assert-eq! (length PROTOSS-BUILD-ORDER-TREE) 10)
+  (for ([r (in-list '(Zerg Terran Protoss))])
+    (define tree (lookup-race-build-order-tree r))
+    (define idx-tbl (lookup-race-bo-node-by-id r))
+    (assert-eq! (hash-count idx-tbl) (length tree)))
+
+  ;; 42.4 lib/sc2-geometry.rkt, lib/sc2-pathing.rkt, lib/sc2-placement.rkt
+  (assert-true! (< (abs (- (dist-2d (point2d 0.0 0.0) (point2d 3.0 4.0)) 5.0)) 1e-6))
+  (assert-eq! (dist-sq-2d 0 0 3 4) 25.0)
+  (assert-eq! (chebyshev-dist-2d 1 2 4 8) 6.0)
+  (assert-eq! (manhattan-dist-2d 1 2 4 8) 9.0)
+  (assert-eq! (snap-2x2-coord 34.4) 34.0)
+  (assert-eq! (snap-3x3-coord 34.4) 34.5)
+  (assert-eq! (quantize-cell-2.5 5.1) 5.0)
+  (define cen2 (centroid-2d (list (point2d 0.0 0.0) (point2d 4.0 6.0))))
+  (assert-true! (and (= (point2d-x cen2) 2.0) (= (point2d-y cen2) 3.0)))
+  (assert-true! (aabb2d-overlaps? (aabb2d 10.0 10.0 1.5 1.5) (aabb2d 11.0 11.0 1.0 1.0)))
+  (assert-true! (footprint-overlaps? 10.0 10.0 'barracks 11.5 11.0 'supply-depot))
+  (define-values (def-ax def-ay) (offset-defense-anchor 32.0 32.0 80.0 80.0 5.0))
+  (assert-true! (and (> def-ax 32.0) (> def-ay 32.0)))
+  (define wall-grid (lambda (x y) (and (<= 0 x 15) (<= 0 y 15) (not (and (= x 5) (<= 2 y 12))))))
+  (define bfs-g (compute-bfs-distance-grid 16 16 wall-grid 10 8))
+  (assert-true! (bfs-distance-grid? bfs-g))
+  (assert-eq! (bfs-distance-at bfs-g 10 8) 0)
+  (assert-true! (> (bfs-distance-at bfs-g 2 8) 50))
+  (define flow-pt (compute-flow-field-step bfs-g 2.0 8.0))
+  (assert-true! (and (point2d? flow-pt)
+                     (or (not (= (point2d-x flow-pt) 2.0))
+                         (not (= (point2d-y flow-pt) 8.0)))))
+  (define surround-pts (compute-concave-surround-arc 50.0 50.0 6.0 5))
+  (assert-eq! (length surround-pts) 5)
+  (assert-true! (andmap point2d? surround-pts))
+  (define-values (sp-x sp-y)
+    (solve-spiral-placement 'barracks 40.0 40.0
+                            #:ally-bldgs (list (hash 'type 'supply-depot 'x 40.0 'y 40.0))))
+  (assert-true! (or (not (= sp-x 40.5)) (not (= sp-y 40.5))))
+  (define-values (unc-x unc-y)
+    (select-uncamped-expansion-pad
+     '((45.0 45.0) (60.5 40.5))
+     #t
+     #:enemy-units (list (hash 'type 'marine 'x 45.0 'y 45.0)
+                         (hash 'type 'marine 'x 46.0 'y 45.0))
+     #:live-obs? #t))
+  (assert-true! (and (= unc-x 60.5) (= unc-y 40.5)))
+
+  ;; 42.5 lib/sc2-combat-eval.rkt + lib/tactics/*.rkt
+  (assert-true! (> (lanchester-snowball-advantage 500 250) 0.0))
+  (assert-eq! (classify-enemy-archetype '(lurker hydralisk)) 'lurker-contain)
+  (assert-eq! (classify-enemy-archetype '(siege-tank hellion)) 'mech-siege)
+  (assert-eq! (classify-enemy-archetype '(marine marauder medivac)) 'bio-ball)
+  (define lim42 (make-ability-cast-limiter #:max-per-frame 1 #:refractory-frames 24))
+  (define-values (kept42 throttled42)
+    (throttle-ability-casts! lim42
+                             '((cast-spell 10 blink 12 12)
+                               (cast-spell 11 blink 13 13)
+                               (cast-spell 120 inject-larva 101))
+                             200))
+  (assert-eq! throttled42 1)
+  (assert-eq! (length kept42) 2)
+  (define fap-v
+    (fap-simulate-combat
+     (list (make-fap-unit 1 #:hp 120 #:dps 22 #:cost 125))
+     (list (make-fap-unit 2 #:hp 45 #:dps 8 #:cost 50))
+     6))
+  (assert-true! (> fap-v 0))
+  (define burrow-acts
+    (execute-roach-tunneling-burrow-micro
+     (hash 'researched-upgrades '(burrow tunneling-claws)
+           'base-x 32 'base-y 32
+           'ally-units (list (hash 'id 1 'type 'roach 'hp 40 'max-hp 145 'x 60.0 'y 60.0))
+           'enemy-units (list (hash 'id 9 'type 'stalker 'x 65.0 'y 60.0)))))
+  (assert-true! (pair? (assq 'burrow-down burrow-acts)))
+  (assert-true! (pair? (assq 'roach-tunnel-move burrow-acts)))
+  (define shim-acts
+    (execute-shimmer-and-burrow-ripple-response
+     (hash 'ally-units (list (hash 'id 7 'type 'ravager 'x 50.0 'y 50.0))
+           'ally-buildings (list (hash 'id 8 'type 'orbital-command 'energy 75.0))
+           'enemy-units (list (hash 'id 99 'type 'dark-templar 'cloak-state 2 'x 55.0 'y 55.0)))))
+  (assert-true! (pair? (assq 'emergency-detector-response shim-acts)))
+  (assert-true! (pair? (assq 'blind-skillshot-shimmer shim-acts)))
+  (define swap-acts
+    (plan-terran-addon-swap
+     (hash 'frame (+ SC2-TERRAN-FIRST-ADDON-SWAP-FRAME 100)
+           'base-x 32.0 'base-y 32.0
+           'allow-barracks-techlab-strip? #t
+           'ally-buildings
+           (list (hash 'id 1 'type 'barracks 'x 40.0 'y 40.0 'add-on-tag 2 'build-progress 1.0)
+                 (hash 'id 2 'type 'barracks-techlab 'x 42.5 'y 39.5 'build-progress 1.0)
+                 (hash 'id 3 'type 'factory 'x 48.0 'y 40.0 'build-progress 1.0))
+           'enemy-units '())))
+  (assert-true! (and (pair? swap-acts) (eq? (caar swap-acts) 'terran-addon-swap)))
+
+  ;; 42.6 lib/sc2-logging.rkt: cadence, record extraction, [SCBOT_STATE] line & hash roundtrip
+  (assert-true! (should-emit-step-log? 0 64 #f))
+  (assert-true! (not (should-emit-step-log? 65 64 #f)))
+  (assert-true! (should-emit-step-log? 128 64 #f))
+  (define log-rec
+    (extract-bot-step-log-record
+     (hash 'frame 672 'race 'Terran 'enemy-race 'Protoss 'posture 'timing-push
+           'personality 'aggressive 'enemy-archetype 'stalker-colossus
+           'win-prob 0.64 'confidence 0.81)
+     (pro-bo-eval-result 'TvP (pro-bo-goal 'train 'overlord 2 13 #f) '() 0 0 22 1)
+     (hash 'combat-posture 'engage 'snowball-adv 1.35 'retreat-sector 4 'issued-orders 14)))
+  (define log-line (format-bot-step-log-line log-rec))
+  (assert-true! (string-prefix? log-line "[SCBOT_STATE] f=672 matchup=TvP"))
+  (assert-true! (string-contains? log-line "bayesian=("))
+  (assert-true! (string-contains? log-line "goal=train/overlord("))
+  (define log-ht (bot-step-log-record->hash log-rec))
+  (assert-eq! (hash-ref log-ht 'frame) 672)
+  (assert-eq! (hash-ref log-ht 'matchup) 'TvP)
+  (assert-eq! (hash-ref (hash-ref log-ht 'tactics) 'issued-orders) 14)
+
+  ;; End-to-end runtime wiring in step-live-bot-runtime!
+  (define rt-log (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-log0
+    (step-live-bot-runtime! rt-log
+                            (hash 'frame 0 'minerals 50 'gas 0 'supply-used 12 'supply-cap 14
+                                  'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                                  'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+                                  'enemy-units '())))
+  (define tel-log0 (hash-ref res-log0 'telemetry))
+  (assert-true! (hash? (hash-ref tel-log0 'state-log)))
+  (assert-true! (string-prefix? (hash-ref tel-log0 'state-log-line) "[SCBOT_STATE] f=0 "))
+  (define res-log22
+    (step-live-bot-runtime! rt-log
+                            (hash 'frame 22 'minerals 100 'gas 0 'supply-used 12 'supply-cap 14
+                                  'ally-units (list (hash 'id 10 'type 'drone 'x 32.5 'y 32.5 'hp 40))
+                                  'ally-buildings (list (hash 'id 101 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500))
+                                  'enemy-units '())))
+  (assert-true! (string-prefix? (hash-ref (hash-ref res-log22 'telemetry) 'state-log-line)
+                                "[SCBOT_STATE] f=22 ")))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

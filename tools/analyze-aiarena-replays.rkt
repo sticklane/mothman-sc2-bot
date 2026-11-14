@@ -59,6 +59,16 @@
       (and (file-exists? TOKEN-FILE)
            (let ([t (string-trim (file->string TOKEN-FILE))])
              (and (not (string=? t "")) t)))
+      (with-handlers ([exn:fail? (lambda (_e) #f)])
+        (define op-bin (find-executable-path "op"))
+        (and op-bin
+             (let ([out (string-trim
+                         (with-output-to-string
+                           (lambda ()
+                             (parameterize ([current-error-port (open-output-nowhere)])
+                               (system* op-bin "item" "get" "44bfhvsnhhhdsw4ggwur3ya2he"
+                                        "--fields" "credential" "--reveal")))))])
+               (and (not (string=? out "")) out))))
       ""))
 
 (define BOT-IDS

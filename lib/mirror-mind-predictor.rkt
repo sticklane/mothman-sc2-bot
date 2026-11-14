@@ -38,8 +38,11 @@
          racket/math
          racket/set
          (rename-in "sc2-common.rkt" [dist2d common-dist2d])
+         (only-in "sc2-types.rkt" normalize-known-race)
+         "build-orders.rkt"
+         "sc2-bayesian.rkt"
          "sc2-game-constants.rkt"
-         "zerospace-mastermind.rkt")
+         "sc2-combat-eval.rkt")
 
 (provide (struct-out shadow-ledger)
          (struct-out enemy-tech-observation)
@@ -60,7 +63,14 @@
          MIRROR-HORIZON-SNAPSHOTS-SEC
          MIRROR-HORIZON-SNAPSHOTS-FRAMES
          make-mirror-mind-state
+         ZERG-BUILD-ORDER-TREE
+         TERRAN-BUILD-ORDER-TREE
+         PROTOSS-BUILD-ORDER-TREE
+         ZERG-BO-NODE-BY-ID
+         TERRAN-BO-NODE-BY-ID
+         PROTOSS-BO-NODE-BY-ID
          lookup-race-build-order-tree
+         lookup-race-bo-node-by-id
          project-player-onto-build-order-tree
          project-self-build-order-tree
          project-opponent-build-order-tree
@@ -374,24 +384,7 @@
    allow-posture-override?)  ; boolean: ALWAYS #f (depth never overrides SC2 macro/snowball posture)
   #:transparent)
 
-;; Canonical Build-Order Tree Node in T_R (shared structural space for self and opponent)
-(struct build-order-tree-node
-  (id
-   race
-   parent-id
-   children-ids
-   path-buildings
-   step-buildings
-   unlocked-units
-   unlocked-upgrades
-   archetype
-   min-frame
-   min-gas-bldgs
-   step-min-cost
-   step-gas-cost
-   step-build-frames
-   prior-weight)
-  #:transparent)
+;; Canonical `build-order-tree-node` struct is imported from `lib/build-orders.rkt` (`lib/sc2-types.rkt`).
 
 ;; Projection of a player (self or opponent) onto the Race Build-Order Tree Space T_R
 (struct build-order-tree-projection
@@ -407,16 +400,7 @@
    recommended-next-build-step)
   #:transparent)
 
-;; Bayesian Strategic Priors & Posteriors (replacing hard boolean bluff flags)
-(struct bayesian-strategic-priors
-  (bluff-prior
-   bluff-posterior
-   feint-posterior
-   rush-posterior
-   hidden-expand-posterior
-   tech-switch-posterior
-   branch-posteriors)
-  #:transparent)
+;; `bayesian-strategic-priors` is provided by `lib/sc2-types.rkt` / `lib/sc2-bayesian.rkt`.
 
 ;; Multi-Horizon Future Snapshot Forecast (15s / 30s / 45s / 60s / 75s / 90s / 105s / 130s)
 (define MIRROR-HORIZON-SNAPSHOTS-SEC '(15 30 45 60 75 90 105 130))
@@ -1382,257 +1366,8 @@
 
 ;; =============================================================================
 ;; 2c. Build-Order Tree Space (T_R) for Self & Opponent + Bayesian Priors
+;;     (Canonical trees & lookup tables imported/re-exported from `lib/build-orders.rkt`)
 ;; =============================================================================
-
-(define ZERG-BUILD-ORDER-TREE
-  (list
-   (build-order-tree-node
-    'zerg-root-hatchery 'Zerg #f
-    '(zerg-spawning-pool zerg-hatch-first-pool)
-    '(hatchery) '(hatchery)
-    '(drone overlord zergling) '()
-    'early-rush 0 0 300 0 0 0.08)
-   (build-order-tree-node
-    'zerg-spawning-pool 'Zerg 'zerg-root-hatchery
-    '(zerg-hatch-first-pool zerg-baneling-nest zerg-roach-warren)
-    '(hatchery spawning-pool) '(spawning-pool)
-    '(zergling queen) '(zergling-movementspeed)
-    'early-rush 400 0 200 0 720 0.16)
-   (build-order-tree-node
-    'zerg-hatch-first-pool 'Zerg 'zerg-spawning-pool
-    '(zerg-baneling-nest zerg-roach-warren zerg-lair-tech)
-    '(hatchery spawning-pool extractor) '(hatchery extractor)
-    '(zergling queen) '(zergling-movementspeed burrow)
-    'ling-bane-hydra 750 1 325 0 960 0.18)
-   (build-order-tree-node
-    'zerg-baneling-nest 'Zerg 'zerg-spawning-pool
-    '(zerg-lair-tech)
-    '(hatchery spawning-pool extractor baneling-nest) '(baneling-nest)
-    '(baneling zergling queen) '(zergling-movementspeed centrifical-hooks)
-    'ling-bane-hydra 1350 1 100 50 672 0.14)
-   (build-order-tree-node
-    'zerg-roach-warren 'Zerg 'zerg-spawning-pool
-    '(zerg-lair-tech)
-    '(hatchery spawning-pool extractor roach-warren) '(roach-warren)
-    '(roach ravager zergling queen) '(glial-reconstitution burrow)
-    'roach-ravager 1400 1 150 0 605 0.20)
-   (build-order-tree-node
-    'zerg-lair-tech 'Zerg 'zerg-roach-warren
-    '(zerg-hydralisk-den zerg-spire-muta zerg-infestation-pit)
-    '(hatchery spawning-pool extractor roach-warren lair) '(lair)
-    '(overseer roach ravager zergling queen) '(glial-reconstitution pneumatized-carapace)
-    'roach-ravager 2400 2 150 100 896 0.16)
-   (build-order-tree-node
-    'zerg-hydralisk-den 'Zerg 'zerg-lair-tech
-    '(zerg-lurker-den zerg-hive-tech)
-    '(hatchery spawning-pool extractor lair hydralisk-den) '(hydralisk-den)
-    '(hydralisk roach ravager zergling) '(grooved-spines muscular-augments)
-    'ling-bane-hydra 3200 2 100 100 650 0.16)
-   (build-order-tree-node
-    'zerg-spire-muta 'Zerg 'zerg-lair-tech
-    '(zerg-hive-tech zerg-greater-spire-broodlord)
-    '(hatchery spawning-pool extractor lair spire) '(spire)
-    '(mutalisk corruptor zergling baneling) '(zerg-flyer-weapons-1 zerg-flyer-armor-1)
-    'muta-flock 3300 2 200 200 960 0.12)
-   (build-order-tree-node
-    'zerg-lurker-den 'Zerg 'zerg-hydralisk-den
-    '(zerg-hive-tech)
-    '(hatchery spawning-pool extractor lair hydralisk-den lurker-den) '(lurker-den)
-    '(lurker hydralisk roach ravager) '(adaptive-talons seismic-spines)
-    'ling-bane-hydra 4200 3 100 150 896 0.10)
-   (build-order-tree-node
-    'zerg-infestation-pit 'Zerg 'zerg-lair-tech
-    '(zerg-hive-tech)
-    '(hatchery spawning-pool extractor lair infestation-pit) '(infestation-pit)
-    '(infestor swarm-host roach hydralisk) '(pathogen-glands neural-parasite)
-    'ling-bane-hydra 4100 3 100 100 806 0.07)
-   (build-order-tree-node
-    'zerg-hive-tech 'Zerg 'zerg-infestation-pit
-    '(zerg-ultralisk-cavern zerg-greater-spire-broodlord)
-    '(hatchery spawning-pool extractor lair infestation-pit hive) '(hive)
-    '(viper hydralisk lurker infestor) '(adrenal-glands zerg-melee-weapons-3)
-    'ling-bane-hydra 5400 4 200 150 960 0.06)
-   (build-order-tree-node
-    'zerg-ultralisk-cavern 'Zerg 'zerg-hive-tech
-    '()
-    '(hatchery spawning-pool extractor lair infestation-pit hive ultralisk-cavern) '(ultralisk-cavern)
-    '(ultralisk zergling baneling corruptor viper) '(chitinous-plating anabolic-synthesis)
-    'ling-bane-hydra 6200 4 150 200 896 0.05)
-   (build-order-tree-node
-    'zerg-greater-spire-broodlord 'Zerg 'zerg-hive-tech
-    '()
-    '(hatchery spawning-pool extractor lair infestation-pit hive spire greater-spire) '(greater-spire)
-    '(brood-lord corruptor mutalisk viper) '(zerg-flyer-weapons-3)
-    'muta-flock 6400 4 100 150 960 0.05)))
-
-(define TERRAN-BUILD-ORDER-TREE
-  (list
-   (build-order-tree-node
-    'terran-root-cc 'Terran #f
-    '(terran-barracks-open)
-    '(command-center supply-depot) '(command-center supply-depot)
-    '(scv marine) '()
-    'early-rush 0 0 500 0 0 0.08)
-   (build-order-tree-node
-    'terran-barracks-open 'Terran 'terran-root-cc
-    '(terran-reaper-expand terran-bio-techlab-stim terran-factory-tech)
-    '(command-center supply-depot barracks refinery) '(barracks refinery)
-    '(marine reaper) '()
-    'bio-ball 480 1 225 0 720 0.18)
-   (build-order-tree-node
-    'terran-reaper-expand 'Terran 'terran-barracks-open
-    '(terran-bio-techlab-stim terran-factory-tech)
-    '(command-center orbital-command supply-depot barracks barracks-reactor refinery) '(orbital-command barracks-reactor)
-    '(marine reaper) '()
-    'bio-ball 1050 1 200 50 672 0.18)
-   (build-order-tree-node
-    'terran-bio-techlab-stim 'Terran 'terran-barracks-open
-    '(terran-factory-tech terran-starport-medivac-bio)
-    '(command-center orbital-command supply-depot barracks barracks-techlab refinery engineering-bay) '(barracks-techlab engineering-bay)
-    '(marauder marine) '(stimpack combat-shield concussive-shells)
-    'bio-ball 1500 1 175 25 650 0.22)
-   (build-order-tree-node
-    'terran-factory-tech 'Terran 'terran-barracks-open
-    '(terran-factory-siege-tank terran-starport-medivac-bio terran-starport-cloak-banshee)
-    '(command-center orbital-command supply-depot barracks factory refinery) '(factory)
-    '(hellion widow-mine marine) '(drilling-claws infernal-pre-igniter)
-    'mech-siege 1800 1 150 100 720 0.16)
-   (build-order-tree-node
-    'terran-factory-siege-tank 'Terran 'terran-factory-tech
-    '(terran-armory-heavy-mech terran-starport-medivac-bio terran-starport-viking-liberator)
-    '(command-center orbital-command supply-depot barracks factory factory-techlab refinery) '(factory-techlab)
-    '(siege-tank cyclone hellion marine marauder) '(siege-mode)
-    'mech-siege 2350 2 50 25 403 0.18)
-   (build-order-tree-node
-    'terran-starport-medivac-bio 'Terran 'terran-factory-tech
-    '(terran-starport-viking-liberator terran-ghost-academy-late)
-    '(command-center orbital-command supply-depot barracks barracks-techlab factory starport refinery) '(starport)
-    '(medivac marauder marine siege-tank widow-mine) '(stimpack combat-shield)
-    'bio-ball 2650 2 150 100 672 0.18)
-   (build-order-tree-node
-    'terran-starport-cloak-banshee 'Terran 'terran-factory-tech
-    '(terran-fusion-battlecruiser terran-starport-viking-liberator)
-    '(command-center orbital-command supply-depot barracks factory starport starport-techlab refinery) '(starport starport-techlab)
-    '(banshee raven viking hellion) '(cloaking-field)
-    'sky-toss 2750 2 200 125 784 0.10)
-   (build-order-tree-node
-    'terran-starport-viking-liberator 'Terran 'terran-starport-medivac-bio
-    '(terran-fusion-battlecruiser terran-armory-heavy-mech)
-    '(command-center orbital-command supply-depot barracks factory starport refinery) '(starport)
-    '(viking liberator medivac siege-tank marauder) '(advanced-ballistics)
-    'sky-toss 3400 2 150 100 672 0.10)
-   (build-order-tree-node
-    'terran-armory-heavy-mech 'Terran 'terran-factory-siege-tank
-    '(terran-fusion-battlecruiser)
-    '(command-center orbital-command supply-depot barracks factory factory-techlab armory refinery) '(armory)
-    '(thor siege-tank hellbat cyclone) '(terran-vehicle-weapons-1 terran-vehicle-and-ship-plating-1)
-    'mech-siege 3600 3 150 100 806 0.10)
-   (build-order-tree-node
-    'terran-ghost-academy-late 'Terran 'terran-starport-medivac-bio
-    '()
-    '(command-center orbital-command supply-depot barracks barracks-techlab factory starport ghost-academy refinery) '(ghost-academy)
-    '(ghost marauder marine medivac liberator) '(personal-cloaking)
-    'bio-ball 4400 3 150 50 650 0.06)
-   (build-order-tree-node
-    'terran-fusion-battlecruiser 'Terran 'terran-starport-cloak-banshee
-    '()
-    '(command-center orbital-command supply-depot barracks factory starport starport-techlab fusion-core refinery) '(fusion-core)
-    '(battlecruiser viking liberator siege-tank) '(weapon-refit)
-    'sky-toss 4600 3 150 150 896 0.06)))
-
-(define PROTOSS-BUILD-ORDER-TREE
-  (list
-   (build-order-tree-node
-    'protoss-root-nexus 'Protoss #f
-    '(protoss-gateway-open)
-    '(nexus pylon) '(nexus pylon)
-    '(probe zealot) '()
-    'early-rush 0 0 500 0 0 0.08)
-   (build-order-tree-node
-    'protoss-gateway-open 'Protoss 'protoss-root-nexus
-    '(protoss-cybernetics-core)
-    '(nexus pylon gateway assimilator) '(gateway assimilator)
-    '(zealot) '()
-    'early-rush 480 1 225 0 720 0.15)
-   (build-order-tree-node
-    'protoss-cybernetics-core 'Protoss 'protoss-gateway-open
-    '(protoss-twilight-council protoss-robotics-facility protoss-stargate-air)
-    '(nexus pylon gateway cybernetics-core assimilator) '(cybernetics-core)
-    '(stalker adept sentry zealot) '(warp-gate-research)
-    'stalker-colossus 1050 1 150 0 672 0.22)
-   (build-order-tree-node
-    'protoss-twilight-council 'Protoss 'protoss-cybernetics-core
-    '(protoss-templar-archive-archon protoss-dark-shrine-dt protoss-robotics-facility)
-    '(nexus pylon gateway cybernetics-core twilight-council assimilator) '(twilight-council)
-    '(stalker adept zealot sentry) '(blink charge resonating-glaives)
-    'stalker-colossus 2000 2 150 100 672 0.16)
-   (build-order-tree-node
-    'protoss-robotics-facility 'Protoss 'protoss-cybernetics-core
-    '(protoss-robotics-bay-colossus protoss-twilight-council)
-    '(nexus pylon gateway cybernetics-core robotics-facility assimilator) '(robotics-facility)
-    '(immortal observer warp-prism stalker zealot) '(gravitic-boosters)
-    'stalker-colossus 2000 2 150 100 720 0.18)
-   (build-order-tree-node
-    'protoss-stargate-air 'Protoss 'protoss-cybernetics-core
-    '(protoss-fleet-beacon-carrier protoss-robotics-facility)
-    '(nexus pylon gateway cybernetics-core stargate assimilator) '(stargate)
-    '(void-ray oracle phoenix stalker adept) '(protoss-air-weapons-1)
-    'sky-toss 2000 2 150 150 750 0.14)
-   (build-order-tree-node
-    'protoss-templar-archive-archon 'Protoss 'protoss-twilight-council
-    '(protoss-robotics-bay-colossus)
-    '(nexus pylon gateway cybernetics-core twilight-council templar-archive assimilator) '(templar-archive)
-    '(archon high-templar zealot stalker immortal) '(psi-storm-tech charge)
-    'stalker-colossus 3200 3 150 200 672 0.12)
-   (build-order-tree-node
-    'protoss-dark-shrine-dt 'Protoss 'protoss-twilight-council
-    '(protoss-templar-archive-archon)
-    '(nexus pylon gateway cybernetics-core twilight-council dark-shrine assimilator) '(dark-shrine)
-    '(dark-templar archon stalker zealot) '(shadow-stride)
-    'stalker-colossus 3100 2 150 150 896 0.07)
-   (build-order-tree-node
-    'protoss-robotics-bay-colossus 'Protoss 'protoss-robotics-facility
-    '(protoss-templar-archive-archon)
-    '(nexus pylon gateway cybernetics-core robotics-facility robotics-bay assimilator) '(robotics-bay)
-    '(colossus disruptor immortal stalker sentry) '(extended-thermal-lance)
-    'stalker-colossus 3300 3 150 150 784 0.14)
-   (build-order-tree-node
-    'protoss-fleet-beacon-carrier 'Protoss 'protoss-stargate-air
-    '()
-    '(nexus pylon gateway cybernetics-core stargate fleet-beacon assimilator) '(fleet-beacon)
-    '(carrier tempest void-ray oracle mothership) '(anion-pulse-crystals)
-    'sky-toss 4300 3 300 200 840 0.08)))
-
-(define (normalize-race-sym r)
-  (case r
-    [(Zerg zerg)       'Zerg]
-    [(Terran terran)   'Terran]
-    [(Protoss protoss) 'Protoss]
-    [else              'Zerg]))
-
-(define (lookup-race-build-order-tree race-sym)
-  (case (normalize-race-sym race-sym)
-    [(Zerg)    ZERG-BUILD-ORDER-TREE]
-    [(Terran)  TERRAN-BUILD-ORDER-TREE]
-    [(Protoss) PROTOSS-BUILD-ORDER-TREE]
-    [else      ZERG-BUILD-ORDER-TREE]))
-
-(define ZERG-BO-NODE-BY-ID
-  (for/hash ([n (in-list ZERG-BUILD-ORDER-TREE)])
-    (values (build-order-tree-node-id n) n)))
-(define TERRAN-BO-NODE-BY-ID
-  (for/hash ([n (in-list TERRAN-BUILD-ORDER-TREE)])
-    (values (build-order-tree-node-id n) n)))
-(define PROTOSS-BO-NODE-BY-ID
-  (for/hash ([n (in-list PROTOSS-BUILD-ORDER-TREE)])
-    (values (build-order-tree-node-id n) n)))
-
-(define (lookup-race-bo-node-by-id race-sym)
-  (case (normalize-race-sym race-sym)
-    [(Zerg)    ZERG-BO-NODE-BY-ID]
-    [(Terran)  TERRAN-BO-NODE-BY-ID]
-    [(Protoss) PROTOSS-BO-NODE-BY-ID]
-    [else      ZERG-BO-NODE-BY-ID]))
 
 (define (extract-clean-unit-syms raw-units)
   (cond
@@ -1703,7 +1438,7 @@
          #:observed-upgrades [kw-upgrades '()]
          #:crippled-buildings [crippled-buildings '()]
          #:excluded-buildings [excluded-buildings '()])
-  (define norm-race (normalize-race-sym race))
+  (define norm-race (normalize-known-race race))
   (define tree (lookup-race-build-order-tree norm-race))
   (define node-by-id (lookup-race-bo-node-by-id norm-race))
   (define frame (safe-frame raw-frame))
@@ -1866,11 +1601,8 @@
          (* time-factor gas-factor)]))
     (hash-set! raw-weights nid (max 1e-6 (* base-w timing-gas-lr))))
 
-  (define total-w
-    (max 1e-6 (for/sum ([(_k v) (in-hash raw-weights)]) v)))
   (define branch-posteriors
-    (for/hash ([(k v) (in-hash raw-weights)])
-      (values k (exact->inexact (/ v total-w)))))
+    (bayesian-categorical-posterior raw-weights))
 
   ;; Select active-node-id: highest-posterior confirmed node (or root / highest-posterior node if none confirmed)
   (define root-id (build-order-tree-node-id (first tree)))
@@ -2065,7 +1797,7 @@
             infestation-pit ultralisk-cavern greater-spire extractor)
            'Zerg]
           [else #f]))
-      (normalize-race-sym fallback-race)))
+      (normalize-known-race fallback-race)))
 
 (define (prepare-self-bo-tree-context raw-obs
                                       #:race [kw-race #f]
@@ -2175,29 +1907,8 @@
    (prepare-opponent-bo-tree-context raw-obs #:enemy-race kw-race #:mstate mstate)
    h-sec))
 
-;; General Bayesian odds-ratio update over a list of `(cons evidence-active? likelihood-ratio)` pairs.
-;; Takes a prior probability P(H) in (0, 1) and multiplies the prior odds P(H)/(1 - P(H))
-;; by each active positive/negative likelihood ratio, returning the calibrated posterior in [0.01, 0.99].
-(define (bayesian-posterior-from-likelihoods raw-prior evidence-likelihood-pairs
-                                             #:any-evidence? [any-evidence-override 'auto]
-                                             #:max-prior [raw-max-prior 0.99])
-  (define max-p (max 0.01 (min 0.99 (exact->inexact raw-max-prior))))
-  (define prior (max 0.01 (min max-p (safe-real raw-prior 0.10))))
-  (define active-pairs
-    (filter (lambda (p) (and (pair? p) (car p) (real? (cdr p)) (> (cdr p) 0.0)))
-            evidence-likelihood-pairs))
-  (define has-ev?
-    (if (eq? any-evidence-override 'auto)
-        (not (null? active-pairs))
-        (and any-evidence-override #t)))
-  (cond
-    [(not has-ev?) (exact->inexact prior)]
-    [else
-     (define odds
-       (for/fold ([o (/ prior (- 1.0 prior))])
-                 ([p (in-list active-pairs)])
-         (* o (exact->inexact (cdr p)))))
-     (exact->inexact (max 0.01 (min 0.99 (/ odds (+ 1.0 odds)))))]))
+;; `bayesian-posterior-from-likelihoods` and `compute-bayesian-pad-camped-posterior`
+;; are provided by `lib/sc2-bayesian.rkt`.
 
 ;; Bayesian Bluff Posterior P(bluff | E) with base-rate prior P_0(bluff) = 0.08
 (define (compute-bayesian-bluff-posterior
@@ -2232,7 +1943,6 @@
                [to (or given-tech-obs (infer-enemy-implied-tech-and-upgrades eu eb))])
           (values eu eb to given-ledger))))
 
-  (define prior (max 0.01 (min 0.45 (safe-real raw-prior 0.08))))
   (define struct-act (analyze-enemy-structure-activity-and-bluffs enemy-bldgs))
   (define fake-builds
     (remove-duplicates
@@ -2309,59 +2019,19 @@
         (not (eq? given-branch 'uncommitted))
         (or (not (null? enemy-bldgs)) (not (null? explicit-idle-tech-bldgs)))))
 
-  (define any-evidence?
-    (or (not (null? fake-builds))
-        (not (eq? res-cancel-status 'none))
-        combat-hallucination-bait?
-        (not (null? explicit-idle-tech-bldgs))
-        has-candidate-tech-branch?
-        has-confirming-evidence?
-        (> rem-gas 0.0)
-        res-under-atk?))
-
-  (define idle-or-branch-lr
-    (cond
-      [(and (not (null? explicit-idle-tech-bldgs))
-            (not has-confirming-evidence?)
-            (>= rem-gas 225.0))
-       (if eff-scouted-us? 16.5 15.2)]
-      [(and has-candidate-tech-branch?
-            (not has-confirming-evidence?)
-            (>= rem-gas 320.0))
-       14.8]
-      [(and has-candidate-tech-branch?
-            (not has-confirming-evidence?)
-            (>= rem-gas 225.0))
-       2.5]
-      [else #f]))
-
-  (bayesian-posterior-from-likelihoods
-   prior
-   #:any-evidence? any-evidence?
-   #:max-prior 0.45
-   (list
-    ;; Positive likelihood ratios (bluff / feint indicators)
-    (cons (and any-evidence? (not res-under-atk?) (not (null? fake-builds)))
-          18.0)
-    (cons (and any-evidence? (not res-under-atk?) (eq? res-cancel-status 'fake-research-bluff-canceled))
-          15.0)
-    (cons (and any-evidence? (not res-under-atk?) combat-hallucination-bait? (not has-confirming-evidence?))
-          15.0)
-    (cons (and any-evidence? (not res-under-atk?) idle-or-branch-lr)
-          (or idle-or-branch-lr 1.0))
-    ;; Negative likelihood ratios (confirming real commitment)
-    (cons (and any-evidence? (not (null? active-res)))
-          0.08)
-    (cons (and any-evidence?
-               (or (not (null? previews))
-                   (and has-confirming-evidence? (null? fake-builds)
-                        (not (eq? res-cancel-status 'fake-research-bluff-canceled)))))
-          0.10)
-    (cons (and any-evidence?
-               (or res-under-atk?
-                   (eq? res-cancel-status 'emergency-research-canceled-under-attack)
-                   (eq? res-cancel-status 'research-forced-cancel-under-attack)))
-          0.12))))
+  (evaluate-bluff-posterior-from-signals
+   #:prior (safe-real raw-prior 0.08)
+   #:fake-build-count (length fake-builds)
+   #:res-cancel-status (if (symbol? res-cancel-status) res-cancel-status 'none)
+   #:research-under-attack? (and res-under-atk? #t)
+   #:combat-hallucination-bait? (and combat-hallucination-bait? #t)
+   #:explicit-idle-bluff-count (length explicit-idle-tech-bldgs)
+   #:active-research-count (length active-res)
+   #:preview-count (length previews)
+   #:has-confirming-evidence? (and has-confirming-evidence? #t)
+   #:has-candidate-tech-branch? (and has-candidate-tech-branch? #t)
+   #:remaining-gas rem-gas
+   #:enemy-scouted-us? (and eff-scouted-us? #t)))
 
 ;; Compute full Bayesian Strategic Priors & Posteriors over bluff, feint, rush,
 ;; hidden expansion, tech switch, and build-order tree branches.
@@ -2383,7 +2053,6 @@
   (define-values (obs mstate pos-tech-obs pos-ledger)
     (cond
       [(and (number? raw-obs-or-mstate) (symbol? maybe-obs-or-mstate))
-       ;; Called as (compute-bayesian-strategic-posteriors frame enemy-race enemy-units enemy-bldgs tech-obs ledger ...)
        (values (hash 'frame raw-obs-or-mstate
                      'enemy-race maybe-obs-or-mstate
                      'enemy-units (or arg3 '())
@@ -2425,110 +2094,22 @@
   (define rem-min (safe-real (shadow-ledger-unaccounted-minerals ledger) 0.0))
   (define rem-gas (safe-real (shadow-ledger-unaccounted-gas ledger) 0.0))
   (define combat-cnt (count enemy-combat-unit? enemy-units))
-
-  ;; Feint posterior: base prior 0.10
-  (define feint-post
-    (bayesian-posterior-from-likelihoods
-     0.10
-     #:any-evidence? #t
-     (list
-      (cons (and reading (action-lens-reading-feint-or-poke-detected? reading)) 8.5)
-      (cons (and (>= combat-cnt 1) (<= combat-cnt 3) (>= rem-gas 180.0)) 3.2)
-      (cons (>= bluff-post 0.55) 2.5))))
-
-  ;; Rush posterior: base prior 0.12
-  (define rush-post
-    (bayesian-posterior-from-likelihoods
-     0.12
-     #:any-evidence? #t
-     (list
-      (cons (and reading (action-lens-reading-proxy-or-rush-detected? reading)) 12.0)
-      (cons (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'proxy-production-or-all-in) 6.0)
-      (cons (and (<= frame 2688) (>= combat-cnt 4)) 4.0)
-      (cons (>= (shadow-ledger-predicted-enemy-bases ledger) 3) 0.15))))
-
-  ;; Hidden expansion posterior: base prior 0.14
-  (define hidden-expand-post
-    (bayesian-posterior-from-likelihoods
-     0.14
-     #:any-evidence? #t
-     (list
-      (cons (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-expansion-or-macro-boom) 7.5)
-      (cons (and (>= rem-min 400.0) (<= combat-cnt 3)) 3.5)
-      (cons (>= rush-post 0.60) 0.20))))
-
-  ;; Tech-switch posterior: base prior 0.15
-  (define tech-switch-post
-    (bayesian-posterior-from-likelihoods
-     0.15
-     #:any-evidence? #t
-     (list
-      (cons (eq? (shadow-ledger-dark-matter-hypothesis ledger) 'hidden-air-or-cloak-tech-switch) 6.5)
-      (cons (>= rem-gas 200.0) 2.8)
-      (cons (>= bluff-post 0.55) 3.5))))
-
   (define opp-proj
     (project-opponent-build-order-tree obs horizon-sec
                                        #:enemy-race (or kw-enemy-race (hash-ref obs 'enemy-race #f))
                                        #:mstate mstate))
-  (bayesian-strategic-priors
-   bluff-prior
-   bluff-post
-   feint-post
-   rush-post
-   hidden-expand-post
-   tech-switch-post
-   (build-order-tree-projection-branch-posteriors opp-proj)))
-
-;; Compute calibrated Bayesian posterior P(pad-camped | observations, strategic-priors) in [0.01, 0.99]
-;; from hard observational inputs (enemy static defense/townhall on pad, enemy combat unit count
-;; within radius, local friendly combat defenders, live-game harvester flag, map geometry, and
-;; optional mirror-mind strategic rush/feint posteriors).
-(define (compute-bayesian-pad-camped-posterior
-         #:camp-building-observed? [camp-bldg? #f]
-         #:enemy-combat-count [raw-enemy-cnt 0]
-         #:ally-defender-count [raw-ally-near-cnt 0]
-         #:total-ally-combat-count [raw-total-ally-cnt 0]
-         #:live-obs? [live-obs? #f]
-         #:dist-to-our-base [raw-dist-base 30.0]
-         #:dist-to-enemy-base [raw-dist-enemy 90.0]
-         #:rush-posterior [raw-rush-post 0.12]
-         #:prior [raw-prior 0.12])
-  (define enemy-cnt (max 0 (safe-int raw-enemy-cnt 0)))
-  (define ally-near-cnt (max 0 (safe-int raw-ally-near-cnt 0)))
-  (define total-ally-cnt (max 0 (safe-int raw-total-ally-cnt 0)))
-  (define dist-base (max 1.0 (safe-real raw-dist-base 30.0)))
-  (define dist-enemy (max 1.0 (safe-real raw-dist-enemy 90.0)))
-  (define rush-post (max 0.01 (min 0.99 (safe-real raw-rush-post 0.12))))
-  (define multi-enemy-lr
-    (if (>= enemy-cnt 2)
-        (* 14.0 (expt 1.5 (min 4 (- enemy-cnt 2))))
-        1.0))
-  (bayesian-posterior-from-likelihoods
-   raw-prior
-   (list
-    ;; 1. Hard observation: enemy static defense or townhall structure on pad
-    (cons camp-bldg? 25.0)
-    ;; 2. Hard observation: >= 2 enemy combat units camping the pad radius
-    (cons (>= enemy-cnt 2) multi-enemy-lr)
-    ;; 3. Hard observation: 1 enemy combat unit on pad in live game with no local escort
-    (cons (and live-obs?
-               (= enemy-cnt 1)
-               (< ally-near-cnt enemy-cnt)
-               (<= total-ally-cnt 2))
-          11.0)
-    ;; 4. Hard observation: 1 enemy combat unit on pad when defenders ARE available (contested/transient)
-    (cons (and (= enemy-cnt 1)
-               (not (and live-obs?
-                         (< ally-near-cnt enemy-cnt)
-                         (<= total-ally-cnt 2))))
-          2.0)
-    ;; 5. Strategic & spatial coupling: pad is on enemy side of map while opponent rush posterior is high
-    (cons (and live-obs? (< dist-enemy dist-base) (>= rush-post 0.55) (>= enemy-cnt 1))
-          1.8)
-    ;; 6. Negative evidence: no enemy building or combat unit observed and friendly defenders control the area
-    (cons (and (not camp-bldg?) (= enemy-cnt 0) (>= ally-near-cnt 1))
-          0.20))))
+  (evaluate-strategic-posteriors-from-signals
+   #:bluff-prior bluff-prior
+   #:bluff-posterior bluff-post
+   #:frame frame
+   #:combat-count combat-cnt
+   #:unaccounted-minerals rem-min
+   #:unaccounted-gas rem-gas
+   #:dark-matter-hypothesis (shadow-ledger-dark-matter-hypothesis ledger)
+   #:predicted-enemy-bases (shadow-ledger-predicted-enemy-bases ledger)
+   #:feint-or-poke-detected? (and reading (action-lens-reading-feint-or-poke-detected? reading) #t)
+   #:proxy-or-rush-detected? (and reading (action-lens-reading-proxy-or-rush-detected? reading) #t)
+   #:branch-posteriors (build-order-tree-projection-branch-posteriors opp-proj)))
 
 ;; =============================================================================
 ;; 2d. Zero-Sum Opportunity-Cost / Negative Exclusion & Bayesian Bluff Detector
@@ -4301,8 +3882,8 @@
     (if (mirror-mind-state? maybe-mstate)
         maybe-mstate
         (make-mirror-mind-state
-         #:our-race (normalize-race-sym (hash-ref obs 'race (hash-ref obs 'our-race 'Zerg)))
-         #:enemy-race (normalize-race-sym (hash-ref obs 'enemy-race 'Protoss))
+         #:our-race (normalize-known-race (hash-ref obs 'race (hash-ref obs 'our-race 'Zerg)))
+         #:enemy-race (normalize-known-race (hash-ref obs 'enemy-race 'Protoss))
          #:depth 2)))
   (define our-race (mirror-mind-state-our-race mstate))
   (define enemy-race (mirror-mind-state-enemy-race mstate))
@@ -4445,8 +4026,8 @@
       (define cur-enemy (safe-hash-list (hash-ref obs 'enemy-units '())))
       (define mm
         (make-mirror-mind-state
-         #:our-race (normalize-race-sym (hash-ref obs 'race (hash-ref obs 'our-race 'Zerg)))
-         #:enemy-race (normalize-race-sym (hash-ref obs 'enemy-race 'Protoss))
+         #:our-race (normalize-known-race (hash-ref obs 'race (hash-ref obs 'our-race 'Zerg)))
+         #:enemy-race (normalize-known-race (hash-ref obs 'enemy-race 'Protoss))
          #:depth 2))
       (define snaps (predict-multi-horizon-snapshots obs mm (list h-sec)))
       (define snap (first snaps))

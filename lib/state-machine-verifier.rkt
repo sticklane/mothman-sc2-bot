@@ -29,7 +29,7 @@
          "econ-ledger.rkt"
          "priority-macro-brain.rkt"
          "sc2-protobuf-ws.rkt"
-         "zerospace-mastermind.rkt")
+         "sc2-combat-eval.rkt")
 
 (provide (struct-out verification-check-result)
          (struct-out state-machine-verification-report)

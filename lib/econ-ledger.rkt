@@ -7,8 +7,21 @@
          racket/runtime-path
          "../compiler/syntax.rkt"
          "sc2-common.rkt"
+         (only-in "sc2-types.rkt"
+                  pro-bo-eval-result
+                  struct:pro-bo-eval-result
+                  pro-bo-eval-result?
+                  pro-bo-eval-result-matchup
+                  pro-bo-eval-result-active-goal
+                  pro-bo-eval-result-ready-actions
+                  pro-bo-eval-result-reserved-minerals
+                  pro-bo-eval-result-reserved-gas
+                  pro-bo-eval-result-target-workers
+                  pro-bo-eval-result-target-army-supply
+                  normalize-known-race
+                  resolve-matchup-symbol)
          "sc2-game-constants.rkt"
-         "okasaki-sc.rkt")
+         "build-orders.rkt")
 
 (provide
  ;; Build-Order Combinators & Locutus Worker Chaining
@@ -69,8 +82,7 @@
  (struct-out guns-vs-butter-ppf)
  evaluate-guns-vs-butter-ppf
 
- ;; Marginal-Utility Prioritization & Braun-Heap Resource Scheduler (PV1-PV9)
- braun-extract-min
+ ;; Marginal-Utility Prioritization & Resource Scheduler (PV1-PV9)
  (struct-out priority-candidate)
  (struct-out priority-decision-entry)
  (struct-out priority-schedule-result)
@@ -91,9 +103,11 @@
  refractory-allow-action?!
 
  ;; Empirical Pro Replay Build-Order Database & Goal-Queue Executor
+ ;; (Canonical definitions in `lib/sc2-types.rkt` and `lib/build-orders.rkt`)
  PRO-BUILD-ORDER-DB
  (struct-out pro-bo-goal)
  (struct-out pro-bo-eval-result)
+ find-matchup-entry
  select-pro-build-order
  pro-build-order-steps-for-matchup
  pro-supply-curve-target
@@ -1358,20 +1372,8 @@
 ;; 9. Marginal-Utility Prioritization & Braun-Heap Resource Scheduler (PV1-PV6)
 ;; =============================================================================
 
-(define (normalize-ledger-race r)
-  (case r
-    [(Zerg zerg "Zerg" "zerg") 'Zerg]
-    [(Protoss protoss "Protoss" "protoss") 'Protoss]
-    [(Terran terran "Terran" "terran") 'Terran]
-    [else 'Zerg]))
-
-;; Wrapper around okasaki-sc's braun-min + braun-delete-min
-(define (braun-extract-min t)
-  (if (braun-empty? t)
-      (values #f braun-empty)
-      (let ([kv (braun-min t)])
-        (values (if (pair? kv) (cdr kv) kv)
-                (braun-delete-min t)))))
+;; Canonical race normalization lives in `lib/sc2-types.rkt`.
+(define normalize-ledger-race normalize-known-race)
 
 ;; Category is one of:
 ;;   'supply | 'combat-unit | 'counter-tech | 'production-scaling
@@ -2726,9 +2728,8 @@
                             '(tech-upgrade counter-tech production-scaling combat-unit)))
       (min acc (safe-real (priority-candidate-utility-score c) 100.0))))
 
-  (define heap
-    (for/fold ([h braun-empty])
-              ([c (in-list cands)]
+  (define keyed-cands
+    (for/list ([c (in-list cands)]
                [idx (in-naturals)])
       (define raw-u (safe-real (priority-candidate-utility-score c) 0.0))
       (define eff-u
@@ -2738,16 +2739,11 @@
                  (not (infinite? min-non-exp-utility)))
             (min raw-u (- min-non-exp-utility 1.0))
             raw-u))
-      (define key (+ (- eff-u) (* 1e-7 idx)))
-      (braun-insert h key c)))
+      (cons (+ (- eff-u) (* 1e-7 idx)) c)))
 
-  ;; Extract candidates in descending utility order via braun-extract-min
+  ;; Sort candidates in descending utility order (tie-breaking by index)
   (define sorted-cands
-    (let loop ([h heap] [acc '()])
-      (if (braun-empty? h)
-          (reverse acc)
-          (let-values ([(top rest-h) (braun-extract-min h)])
-            (loop rest-h (cons top acc))))))
+    (map cdr (sort keyed-cands < #:key car)))
 
   ;; Track category -> max utility-score map & candidate id -> utility map
   (define cat-utils0
@@ -3100,286 +3096,9 @@
 
 ;; =============================================================================
 ;; 10. Empirical Pro Replay Build-Order Database & Goal-Queue Executor
-;;     Loaded from `data/pro_build_orders.sexp` (mined from 1,798 LotV replays)
+;;     (Canonical DB, structs, supply curve, and matchup specs imported and
+;;      re-exported from `lib/sc2-types.rkt` and `lib/build-orders.rkt`)
 ;; =============================================================================
-
-(require (for-syntax racket/base racket/path))
-
-(define-syntax (compile-time-pro-build-order-db stx)
-  (define src (syntax-source stx))
-  (define src-dir (if (path? src) (or (path-only src) (current-directory)) (current-directory)))
-  (define p (simplify-path (build-path src-dir ".." "data" "pro_build_orders.sexp")))
-  (define db
-    (with-handlers ([exn:fail? (lambda (_) #f)])
-      (and (file-exists? p) (with-input-from-file p read))))
-  #`'#,db)
-
-(define COMPILED-PRO-BUILD-ORDER-DB (compile-time-pro-build-order-db))
-
-(define PRO-BUILD-ORDER-DB
-  (or COMPILED-PRO-BUILD-ORDER-DB
-      (with-handlers ([exn:fail? (lambda (_) '(pro-build-order-database (matchups)))])
-        (cond
-          [(file-exists? "data/pro_build_orders.sexp")
-           (with-input-from-file "data/pro_build_orders.sexp" read)]
-          [else '(pro-build-order-database (matchups))]))))
-
-(struct pro-bo-goal
-  (kind              ;; 'build | 'expand | 'morph | 'train | 'research
-   target-sym        ;; canonical symbol (e.g. 'spawning-pool, 'factory, 'cybernetics-core)
-   target-count      ;; cumulative count required to satisfy this step
-   min-supply        ;; minimum supply-used before triggering this step
-   prereq-ready-sym) ;; prerequisite structure symbol that must be ready (build-progress >= 1.0), or #f
-  #:transparent)
-
-(struct pro-bo-eval-result
-  (matchup
-   active-goal
-   ready-actions
-   reserved-minerals
-   reserved-gas
-   target-workers
-   target-army-supply)
-  #:transparent)
-
-(define (resolve-matchup-symbol race [enemy-race 'Unknown])
-  (if (memq race '(ZvZ ZvT ZvP TvZ TvT TvP PvZ PvT PvP))
-      race
-      (let ([r (normalize-ledger-race race)]
-            [er (case enemy-race
-                  [(Zerg zerg "Zerg" "zerg") 'Zerg]
-                  [(Terran terran "Terran" "terran") 'Terran]
-                  [(Protoss protoss "Protoss" "protoss") 'Protoss]
-                  [else 'Unknown])])
-        (case r
-          [(Zerg)
-           (case er
-             [(Zerg) 'ZvZ]
-             [(Terran) 'ZvT]
-             [(Protoss) 'ZvP]
-             [else 'ZvT])]
-          [(Terran)
-           (case er
-             [(Zerg) 'TvZ]
-             [(Terran) 'TvT]
-             [(Protoss) 'TvP]
-             [else 'TvZ])]
-          [else ;; Protoss
-           (case er
-             [(Zerg) 'PvZ]
-             [(Terran) 'PvT]
-             [(Protoss) 'PvP]
-             [else 'PvT])]))))
-
-(define (find-matchup-entry matchup-sym)
-  (define matchups-sec
-    (and (pair? PRO-BUILD-ORDER-DB)
-         (assq 'matchups (cdr PRO-BUILD-ORDER-DB))))
-  (and matchups-sec
-       (for/first ([m (in-list (cdr matchups-sec))]
-                   #:when (and (pair? m)
-                               (eq? (first m) 'matchup)
-                               (pair? (cdr m))
-                               (eq? (second m) matchup-sym)))
-         m)))
-
-(define (select-pro-build-order race [enemy-race 'Unknown])
-  (define m-sym (resolve-matchup-symbol race enemy-race))
-  (or (find-matchup-entry m-sym)
-      (list 'matchup m-sym)))
-
-;; Interpolates the empirical pro winning worker & army supply curve for (race, enemy-race, frame)
-(define (pro-supply-curve-target race [enemy-race 'Unknown] [raw-frame 0] [raw-active-bases 1])
-  (define frame (safe-nonneg-int raw-frame 0))
-  (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
-  (define sec (/ (exact->inexact frame) 22.4))
-  (define m-entry (select-pro-build-order race enemy-race))
-  (define curve-sec
-    (and (list? m-entry)
-         (for/first ([sub (in-list (cddr m-entry))]
-                     #:when (and (pair? sub) (eq? (first sub) 'winning-worker-to-army-supply-curve)))
-           (cdr sub))))
-  ;; Extract minute -> (workers, army-supply) points or use canonical empirical curve
-  (define minute-idx (max 1 (min 7 (add1 (exact-floor (/ sec 60.0))))))
-  (define row
-    (and curve-sec
-         (for/first ([r (in-list curve-sec)]
-                     #:when (and (pair? r)
-                                 (eq? (first r) 'minute)
-                                 (pair? (cdr r))
-                                 (= (safe-exact-int (second r) 0) minute-idx)))
-           r)))
-  (define (row-field sym default)
-    (if (and row (list? row))
-        (let ([kv (for/first ([x (in-list (cddr row))]
-                              #:when (and (pair? x) (eq? (first x) sym) (pair? (cdr x))))
-                    (second x))])
-          (if kv (safe-real kv default) default))
-        default))
-  (define curve-workers
-    (exact-round (row-field 'workers (* 22.0 (min 4 active-bases)))))
-  (define curve-army
-    (exact-round (row-field 'army-supply (max 2.0 (* 8.0 minute-idx)))))
-  (define base-scaled-workers
-    (min 70 (max 22 (* 22 (min 4 active-bases)) curve-workers)))
-  (values base-scaled-workers curve-army))
-
-;; Canonical goal-count sequence per matchup derived from `data/pro_build_orders.sexp`
-(define (pro-build-order-steps-for-matchup race [enemy-race 'Unknown])
-  (define m-sym (resolve-matchup-symbol race enemy-race))
-  (case m-sym
-    [(ZvZ)
-     (list
-      (pro-bo-goal 'train 'overlord 2 13 #f)
-      (pro-bo-goal 'expand 'hatchery 2 16 #f)
-      (pro-bo-goal 'build 'extractor 1 17 #f)
-      (pro-bo-goal 'build 'spawning-pool 1 17 #f)
-      (pro-bo-goal 'train 'overlord 3 19 #f)
-      (pro-bo-goal 'train 'queen 2 20 'spawning-pool)
-      (pro-bo-goal 'train 'zergling 6 20 'spawning-pool)
-      (pro-bo-goal 'research 'metabolic-boost 1 22 'spawning-pool)
-      (pro-bo-goal 'build 'baneling-nest 1 28 'spawning-pool)
-      (pro-bo-goal 'expand 'hatchery 3 30 'spawning-pool)
-      (pro-bo-goal 'build 'roach-warren 1 36 'spawning-pool)
-      (pro-bo-goal 'build 'extractor 2 38 'spawning-pool)
-      (pro-bo-goal 'morph 'lair 1 44 'spawning-pool)
-      (pro-bo-goal 'build 'evolution-chamber 1 46 'spawning-pool)
-      (pro-bo-goal 'build 'extractor 3 50 'lair)
-      (pro-bo-goal 'research 'glial-reconstitution 1 52 'lair)
-      (pro-bo-goal 'research 'zerg-missile-weapons-1 1 54 'evolution-chamber)
-      (pro-bo-goal 'research 'burrow 1 58 'hatchery)
-      (pro-bo-goal 'build 'hydralisk-den 1 62 'lair))]
-
-    [(ZvT ZvP)
-     (list
-      (pro-bo-goal 'train 'overlord 2 13 #f)
-      (pro-bo-goal 'expand 'hatchery 2 16 #f)
-      (pro-bo-goal 'build 'extractor 1 17 #f)
-      (pro-bo-goal 'build 'spawning-pool 1 17 #f)
-      (pro-bo-goal 'train 'overlord 3 19 #f)
-      (pro-bo-goal 'train 'queen 2 20 'spawning-pool)
-      (pro-bo-goal 'train 'zergling 4 20 'spawning-pool)
-      (pro-bo-goal 'research 'metabolic-boost 1 22 'spawning-pool)
-      (pro-bo-goal 'expand 'hatchery 3 30 'spawning-pool)
-      (pro-bo-goal 'train 'queen 3 32 'spawning-pool)
-      (pro-bo-goal 'build 'roach-warren 1 36 'spawning-pool)
-      (pro-bo-goal 'build 'baneling-nest 1 38 'spawning-pool)
-      (pro-bo-goal 'build 'extractor 2 40 'spawning-pool)
-      (pro-bo-goal 'build 'extractor 3 44 'spawning-pool)
-      (pro-bo-goal 'morph 'lair 1 46 'spawning-pool)
-      (pro-bo-goal 'build 'evolution-chamber 1 48 'spawning-pool)
-      (pro-bo-goal 'research 'glial-reconstitution 1 54 'lair)
-      (pro-bo-goal 'research 'centrifical-hooks 1 56 'lair)
-      (pro-bo-goal 'research 'zerg-missile-weapons-1 1 58 'evolution-chamber)
-      (pro-bo-goal 'build 'hydralisk-den 1 62 'lair)
-      (pro-bo-goal 'build 'extractor 4 64 'lair)
-      (pro-bo-goal 'research 'grooved-spines 1 68 'hydralisk-den))]
-
-    [(TvT)
-     (list
-      (pro-bo-goal 'build 'supply-depot 1 14 #f)
-      (pro-bo-goal 'build 'barracks 1 15 'supply-depot)
-      (pro-bo-goal 'build 'refinery 1 15 'supply-depot)
-      (pro-bo-goal 'build 'refinery 2 17 'barracks)
-      (pro-bo-goal 'morph 'orbital-command 1 19 'barracks)
-      (pro-bo-goal 'build 'factory 1 20 'barracks)
-      (pro-bo-goal 'expand 'command-center 2 21 'barracks)
-      (pro-bo-goal 'build 'supply-depot 2 22 'barracks)
-      (pro-bo-goal 'build 'factory-techlab 1 23 'factory)
-      (pro-bo-goal 'build 'starport 1 24 'factory)
-      (pro-bo-goal 'train 'siege-tank 1 26 'factory-techlab)
-      (pro-bo-goal 'train 'viking-fighter 1 28 'starport)
-      (pro-bo-goal 'morph 'orbital-command 2 29 'barracks)
-      (pro-bo-goal 'build 'starport-techlab 1 30 'starport)
-      (pro-bo-goal 'train 'raven 1 32 'starport-techlab)
-      (pro-bo-goal 'build 'barracks 2 34 'barracks)
-      (pro-bo-goal 'build 'barracks-techlab 1 36 'barracks)
-      (pro-bo-goal 'research 'stimpack 1 38 'barracks-techlab)
-      (pro-bo-goal 'build 'barracks 3 40 'barracks)
-      (pro-bo-goal 'build 'barracks-reactor 1 42 'barracks)
-      (pro-bo-goal 'research 'combat-shield 1 44 'barracks-techlab)
-      (pro-bo-goal 'build 'engineering-bay 1 46 'barracks)
-      (pro-bo-goal 'build 'refinery 3 48 'factory)
-      (pro-bo-goal 'research 'terran-infantry-weapons-1 1 50 'engineering-bay)
-      (pro-bo-goal 'expand 'command-center 3 54 'starport)
-      (pro-bo-goal 'build 'armory 1 58 'factory))]
-
-    [(TvZ TvP)
-     (list
-      (pro-bo-goal 'build 'supply-depot 1 14 #f)
-      (pro-bo-goal 'build 'barracks 1 16 'supply-depot)
-      (pro-bo-goal 'build 'refinery 1 16 'supply-depot)
-      (pro-bo-goal 'morph 'orbital-command 1 19 'barracks)
-      (pro-bo-goal 'expand 'command-center 2 20 #f)
-      (pro-bo-goal 'build 'supply-depot 2 21 'barracks)
-      (pro-bo-goal 'build 'barracks-techlab 1 21 'barracks)
-      (pro-bo-goal 'build 'factory 1 21 'barracks)
-      (pro-bo-goal 'research 'stimpack 1 21 'barracks-techlab)
-      (pro-bo-goal 'build 'refinery 2 22 'barracks)
-      (pro-bo-goal 'morph 'orbital-command 2 26 'barracks)
-      (pro-bo-goal 'build 'starport 1 28 'factory)
-      (pro-bo-goal 'build 'factory-techlab 1 30 'factory)
-      (pro-bo-goal 'build 'barracks 2 32 'barracks)
-      (pro-bo-goal 'build 'barracks 3 36 'barracks)
-      (pro-bo-goal 'build 'barracks-reactor 1 36 'barracks)
-      (pro-bo-goal 'build 'starport-reactor 1 38 'starport)
-      (pro-bo-goal 'research 'combat-shield 1 40 'barracks-techlab)
-      (pro-bo-goal 'build 'engineering-bay 1 44 'barracks)
-      (pro-bo-goal 'build 'refinery 3 46 'factory)
-      (pro-bo-goal 'research 'terran-infantry-weapons-1 1 48 'engineering-bay)
-      (pro-bo-goal 'expand 'command-center 3 52 'starport)
-      (pro-bo-goal 'research 'concussive-shells 1 56 'barracks-techlab)
-      (pro-bo-goal 'build 'armory 1 60 'factory))]
-
-    [(PvP)
-     (list
-      (pro-bo-goal 'build 'pylon 1 14 #f)
-      (pro-bo-goal 'build 'gateway 1 16 'pylon)
-      (pro-bo-goal 'build 'assimilator 1 16 'pylon)
-      (pro-bo-goal 'build 'gateway 2 17 'pylon)
-      (pro-bo-goal 'build 'assimilator 2 18 'pylon)
-      (pro-bo-goal 'build 'cybernetics-core 1 19 'gateway)
-      (pro-bo-goal 'build 'pylon 2 20 'cybernetics-core)
-      (pro-bo-goal 'research 'warp-gate-research 1 21 'cybernetics-core)
-      (pro-bo-goal 'train 'stalker 2 21 'cybernetics-core)
-      (pro-bo-goal 'expand 'nexus 2 26 'cybernetics-core)
-      (pro-bo-goal 'train 'sentry 1 28 'cybernetics-core)
-      (pro-bo-goal 'build 'robotics-facility 1 29 'cybernetics-core)
-      (pro-bo-goal 'build 'twilight-council 1 32 'cybernetics-core)
-      (pro-bo-goal 'train 'immortal 1 34 'robotics-facility)
-      (pro-bo-goal 'train 'observer 1 36 'robotics-facility)
-      (pro-bo-goal 'build 'gateway 3 38 'cybernetics-core)
-      (pro-bo-goal 'research 'blink 1 40 'twilight-council)
-      (pro-bo-goal 'build 'assimilator 3 44 'robotics-facility)
-      (pro-bo-goal 'build 'forge 1 48 'cybernetics-core)
-      (pro-bo-goal 'research 'protoss-ground-weapons-1 1 52 'forge)
-      (pro-bo-goal 'build 'robotics-bay 1 56 'robotics-facility)
-      (pro-bo-goal 'expand 'nexus 3 60 'robotics-facility))]
-
-    [else ;; PvZ, PvT, PvR (19-Nexus safe macro opening)
-     (list
-      (pro-bo-goal 'build 'pylon 1 14 #f)
-      (pro-bo-goal 'build 'gateway 1 16 'pylon)
-      (pro-bo-goal 'build 'assimilator 1 16 'pylon)
-      (pro-bo-goal 'expand 'nexus 2 19 #f)
-      (pro-bo-goal 'build 'cybernetics-core 1 19 'gateway)
-      (pro-bo-goal 'build 'assimilator 2 21 'cybernetics-core)
-      (pro-bo-goal 'build 'pylon 2 21 'cybernetics-core)
-      (pro-bo-goal 'research 'warp-gate-research 1 22 'cybernetics-core)
-      (pro-bo-goal 'train 'stalker 2 23 'cybernetics-core)
-      (pro-bo-goal 'build 'robotics-facility 1 26 'cybernetics-core)
-      (pro-bo-goal 'build 'twilight-council 1 28 'cybernetics-core)
-      (pro-bo-goal 'build 'gateway 2 30 'cybernetics-core)
-      (pro-bo-goal 'build 'gateway 3 32 'cybernetics-core)
-      (pro-bo-goal 'train 'immortal 1 34 'robotics-facility)
-      (pro-bo-goal 'train 'observer 1 36 'robotics-facility)
-      (pro-bo-goal 'research 'charge 1 38 'twilight-council)
-      (pro-bo-goal 'build 'assimilator 3 42 'robotics-facility)
-      (pro-bo-goal 'build 'forge 1 48 'cybernetics-core)
-      (pro-bo-goal 'research 'protoss-ground-weapons-1 1 52 'forge)
-      (pro-bo-goal 'build 'robotics-bay 1 56 'robotics-facility)
-      (pro-bo-goal 'expand 'nexus 3 60 'robotics-facility)
-      (pro-bo-goal 'research 'extended-thermal-lance 1 64 'robotics-bay))]))
 
 (define (evaluate-build-order-next-step
          #:race [raw-race 'Zerg]
@@ -3552,9 +3271,9 @@
   (pro-bo-eval-result m-sym
                       active-head
                       (reverse ready-acts)
-                      res-min
-                      res-gas
-                      target-workers
+                      (safe-nonneg-int res-min 0)
+                      (safe-nonneg-int res-gas 0)
+                      (safe-nonneg-int target-workers 22)
                       target-army))
 
 ;; =============================================================================

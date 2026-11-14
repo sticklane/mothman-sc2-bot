@@ -4,8 +4,9 @@
          racket/match
          racket/math
          racket/string
+         "sc2-common.rkt"
          "sc2-game-constants.rkt"
-         "okasaki-sc.rkt"
+         "build-orders.rkt"
          "econ-ledger.rkt")
 
 (provide
@@ -1456,7 +1457,7 @@
             (define p-list (sc2-tech-node-prereqs node))
             (pro-bo-goal (if (eq? (sc2-tech-node-kind node) 'addon) 'build (sc2-tech-node-kind node))
                          next-sym
-                         (plan-goal-node-target-count top-plan-node)
+                         (max 1 (safe-exact-int (plan-goal-node-target-count top-plan-node) 1))
                          0
                          (and (pair? p-list) (first p-list))))]
       [(bo-fallback-goal-allowed? bo-raw-goal) bo-raw-goal]
@@ -2340,20 +2341,15 @@
                    (begin (hash-set! seen-ids cid #t) #t)))
             (sort all-adjusted-cands > #:key priority-candidate-utility-score)))
 
-  ;; Insert into Okasaki Braun heap by descending utility
-  (define heap
-    (for/fold ([h braun-empty])
-              ([c (in-list active-cands)]
+  ;; Sort candidates in descending utility order (tie-breaking by index)
+  (define keyed-cands
+    (for/list ([c (in-list active-cands)]
                [idx (in-naturals)])
       (define u (priority-candidate-utility-score c))
-      (braun-insert h (+ (- u) (* 1e-7 idx)) c)))
+      (cons (+ (- u) (* 1e-7 idx)) c)))
 
   (define sorted-cands
-    (let loop ([h heap] [acc '()])
-      (if (braun-empty? h)
-          (reverse acc)
-          (let-values ([(top rest-h) (braun-extract-min h)])
-            (loop rest-h (cons top acc))))))
+    (map cdr (sort keyed-cands < #:key car)))
 
   ;; Mutable simulation ledger for this frame's scheduling pass
   (define rem-min minerals)

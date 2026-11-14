@@ -5,7 +5,7 @@
 ;; (`tools/evaluate-replays-racket.rkt`)
 ;;
 ;; Evaluates the ACTUAL Racket `#lang sc-bot` brain (`lib/mirror-mind-predictor.rkt`,
-;; `lib/econ-ledger.rkt`, `lib/bot-runtime.rkt`, `lib/zerospace-mastermind.rkt`)
+;; `lib/econ-ledger.rkt`, `lib/bot-runtime.rkt`, `lib/sc2-combat-eval.rkt`)
 ;; across the unpacked `.SC2Replay` corpus checkpoints (`replays/corpus_checkpoints.sexp`).
 ;;
 ;; All brain modeling, Shadow Economy inference, Implied Tech & Zero-Sum Exclusions,
@@ -25,7 +25,7 @@
          "../lib/mirror-mind-predictor.rkt"
          "../lib/econ-ledger.rkt"
          "../lib/bot-runtime.rkt"
-         "../lib/zerospace-mastermind.rkt")
+         "../lib/sc2-combat-eval.rkt")
 
 (define D-KEYS '(0 1 2 3 4 5 d*))
 
@@ -315,7 +315,7 @@
 
   (define all-cb (hash-ref cohorts "all"))
   (define summary
-    (hash 'evaluated_by "Pure Racket #lang sc-bot Brain (lib/mirror-mind-predictor.rkt + lib/zerospace-mastermind.rkt)"
+    (hash 'evaluated_by "Pure Racket #lang sc-bot Brain (lib/mirror-mind-predictor.rkt + lib/sc2-combat-eval.rkt)"
           'total_replays_evaluated (hash-count (hash-ref all-cb 'replays))
           'total_perspective_checkpoints (hash-ref all-cb 'evals)
           'total_transition_checkpoints (hash-ref all-cb 'transitions)

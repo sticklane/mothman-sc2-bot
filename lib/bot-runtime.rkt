@@ -5,13 +5,20 @@
          racket/set
          racket/math
          "../compiler/syntax.rkt"
+         (only-in "sc2-types.rkt" normalize-race normalize-known-race resolve-matchup-symbol)
          "sc2-common.rkt"
+         "sc2-bayesian.rkt"
          "sc2-game-constants.rkt"
+         (prefix-in geo: (except-in "sc2-geometry.rkt" aabb-overlaps?))
+         (prefix-in pathing: "sc2-pathing.rkt")
+         (prefix-in placement: "sc2-placement.rkt")
+         (prefix-in combat: "sc2-combat-eval.rkt")
+         (only-in "build-orders.rkt" lookup-build-order-for-matchup)
+         "sc2-logging.rkt"
          "perception-grid.rkt"
          "econ-ledger.rkt"
          "tactics-sim.rkt"
          "human-cortex.rkt"
-         "zerospace-mastermind.rkt"
          "mirror-mind-predictor.rkt"
          "priority-macro-brain.rkt")
 
@@ -231,13 +238,7 @@
     [(Terran terran)   CLEM-TEMPO-MULTITASK-PERSONALITY]
     [else              CLEM-TEMPO-MULTITASK-PERSONALITY]))
 
-(define (normalize-race-sym r)
-  (case r
-    [(Zerg zerg "Zerg" "zerg") 'Zerg]
-    [(Protoss protoss "Protoss" "protoss") 'Protoss]
-    [(Terran terran "Terran" "terran") 'Terran]
-    [(Random random "Random" "random") 'Random]
-    [else 'Zerg]))
+(define normalize-race-sym normalize-race)
 
 (define (make-live-bot-runtime #:bot-name [bot-name 'mothman-bot]
                                #:race [race 'Zerg]
@@ -1106,27 +1107,8 @@
   ;; Offset static defense (Spine/Spore/Cannon/Battery/Bunker) & forward anchors >= 5.0 tiles
   ;; away from `(nat-x, nat-y)` and `(third-x, third-y)` toward `(enemy-x, enemy-y)`
   (define (offset-defense-anchor anchor-x anchor-y [min-dist 5.5])
-    (define ax (exact->inexact anchor-x))
-    (define ay (exact->inexact anchor-y))
-    (define dx (- (exact->inexact enemy-x) ax))
-    (define dy (- (exact->inexact enemy-y) ay))
-    (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
-    (define eff-d (max 5.0 (exact->inexact min-dist)))
-    (define cx0 (+ ax (* eff-d (/ dx d))))
-    (define cy0 (+ ay (* eff-d (/ dy d))))
-    (define-values (cx2 cy2)
-      (for/fold ([rx cx0] [ry cy0])
-                ([pad (in-list (list (cons nat-x nat-y) (cons third-x third-y)))])
-        (define px (exact->inexact (car pad)))
-        (define py (exact->inexact (cdr pad)))
-        (if (< (dist2d rx ry px py) 5.0)
-            (let* ([pdx (- (exact->inexact enemy-x) px)]
-                   [pdy (- (exact->inexact enemy-y) py)]
-                   [plen (max 1.0 (sqrt (+ (* pdx pdx) (* pdy pdy))))])
-              (values (+ px (* 5.5 (/ pdx plen)))
-                      (+ py (* 5.5 (/ pdy plen)))))
-            (values rx ry))))
-    (values (safe-coord cx2 anchor-x) (safe-coord cy2 anchor-y)))
+    (geo:offset-defense-anchor anchor-x anchor-y enemy-x enemy-y min-dist
+                               (list (cons nat-x nat-y) (cons third-x third-y))))
 
   ;; Sticky scouted enemy race resolution (`!= 'Unknown` and `!= 'Random` -> sticky race,
   ;; else `(hash-ref obs 'opponent-requested-race 'Random)`)
@@ -2543,58 +2525,27 @@
              (< frame 2500)
              (not (null? natural-blockers)))))
 
-  (define (pad->xy p)
-    (cond
-      [(and (pair? p) (real? (car p)) (real? (cdr p)))
-       (cons (safe-coord (car p) third-x) (safe-coord (cdr p) third-y))]
-      [(and (pair? p) (real? (car p)) (pair? (cdr p)) (real? (cadr p)))
-       (cons (safe-coord (car p) third-x) (safe-coord (cadr p) third-y))]
-      [(hash? p)
-       (cons (safe-coord (hash-ref p 'x third-x) third-x)
-             (safe-coord (hash-ref p 'y third-y) third-y))]
-      [else #f]))
-
-  (define (pad-already-owned? px py)
-    (or (<= (dist2d px py base-x base-y) 7.0)
-        (ormap (lambda (th)
-                 (<= (dist2d px py (hash-ref th 'x base-x) (hash-ref th 'y base-y)) 7.0))
-               townhalls)))
-
   (define (select-uncamped-expansion-pad [prefer-natural? #f])
-    (cond
-      [(and prefer-natural?
-            (not natural-blocked?)
-            (not (pad-already-owned? nat-x nat-y)))
-       (values nat-x nat-y)]
-      [else
-       (define cand-pts
-         (append (filter-map pad->xy expansion-pads)
-                 (list (cons third-x third-y))))
-       (define valid-pts
-         (filter (lambda (pt)
-                   (define px (car pt))
-                   (define py (cdr pt))
-                   (and (not (pad-already-owned? px py))
-                        (or (not natural-blocked?)
-                            (> (dist2d px py nat-x nat-y) 7.0))
-                        (or (not live-obs-harvesters?)
-                            (>= active-bases 4)
-                            (not (and (< (dist2d px py enemy-x enemy-y) 42.0)
-                                      (> (dist2d px py base-x base-y)
-                                         (dist2d px py enemy-x enemy-y)))))
-                        (not (pad-camped-by-enemy? px py 11.5))))
-                 cand-pts))
-       (define chosen
-         (or (findf (lambda (pt)
-                      (< (pad-camped-posterior (car pt) (cdr pt) 11.5) 0.30))
-                    valid-pts)
-             (and (pair? valid-pts)
-                  (argmin (lambda (pt)
-                            (pad-camped-posterior (car pt) (cdr pt) 11.5))
-                          valid-pts))))
-       (if chosen
-           (values (car chosen) (cdr chosen))
-           (values #f #f))]))
+    (placement:select-uncamped-expansion-pad
+     expansion-pads
+     prefer-natural?
+     #:base-x base-x
+     #:base-y base-y
+     #:nat-x nat-x
+     #:nat-y nat-y
+     #:third-x third-x
+     #:third-y third-y
+     #:enemy-x enemy-x
+     #:enemy-y enemy-y
+     #:townhalls townhalls
+     #:enemy-units enemy-units
+     #:enemy-bldgs enemy-bldgs
+     #:ally-combat-units ally-combat-units
+     #:natural-blocked? natural-blocked?
+     #:live-obs? live-obs-harvesters?
+     #:active-bases active-bases
+     #:frame frame
+     #:rush-posterior mmstate-rush-post))
 
   (define early-base-under-attack?
     (or early-survival-crisis?
@@ -8552,6 +8503,11 @@
    (hash-set* (if (hash? prev-tel) prev-tel (hash))
               'priority-summary prio-summary
               'priority-log-line prio-log-line
+              'effective-enemy-race effective-enemy-race
+              'pad-camped-posterior (pad-camped-posterior nat-x nat-y 11.5)
+              'bo-active-goal bo-active-goal
+              'target-workers target-workers
+              'target-army-supply (pro-bo-eval-result-target-army-supply bo-eval)
               'bank-target bank-target
               'goal-stream-allocation goal-stream-alloc
               'decoupled-stream-spendable stream-spendable-ht
@@ -8740,10 +8696,7 @@
     (set! actions (cons act actions)))
 
   (define (quantize-cell-2.5 v fallback)
-    (define sv (safe-coord v fallback))
-    (if live-tactics-obs?
-        (safe-coord (* 2.5 (round (/ sv 2.5))) fallback)
-        sv))
+    (geo:quantize-cell-2.5 v (if (real? fallback) fallback 32.5) live-tactics-obs?))
 
   ;; ---------------------------------------------------------------------------
   ;; Zerg Zergling Spotter Scouts (Up to 3 Map Watch Posts, 0-APM Hold Until Needed)
@@ -10858,7 +10811,7 @@
     (let ([t (live-bot-runtime-last-telemetry rt)])
       (if (hash? t) t (hash))))
   (define step-wall-aabbs (unbox (rt-wall-aabbs-box rt)))
-  (define telemetry
+  (define telemetry0
     (hash-set* last-tel-ht
                'posture (live-bot-runtime-posture rt)
                'actual-race (live-bot-runtime-actual-race rt)
@@ -10969,7 +10922,6 @@
                                 [else 'UNKNOWN]))
                'pda-bucket (diagnose-bot-anomaly pda)))
 
-  (set-live-bot-runtime-last-telemetry! rt telemetry)
   (define rt-pos-cache (rt-enemy-pos-cache rt))
   (define final-actions
     (sanitize-stale-target-actions
@@ -10978,6 +10930,136 @@
      #:pos-cache rt-pos-cache))
   (define final-mirror-actions
     (sanitize-stale-target-actions mirror-acts obs #:pos-cache rt-pos-cache))
+
+  ;; Structured step state log (`lib/sc2-logging.rkt`)
+  (define step-frame (safe-nonneg-int (hash-ref obs 'frame 0) 0))
+  (define step-our-race (live-bot-runtime-actual-race rt))
+  (define step-enemy-race
+    (let ([tel-er (hash-ref telemetry0 'effective-enemy-race #f)]
+          [box-er (unbox (rt-enemy-race-box rt))])
+      (cond
+        [(memq tel-er '(Zerg Terran Protoss)) tel-er]
+        [(memq box-er '(Zerg Terran Protoss)) box-er]
+        [else (hash-ref obs 'enemy-race (hash-ref obs 'opponent-requested-race 'Random))])))
+  (define step-matchup (resolve-matchup-symbol step-our-race step-enemy-race))
+  (define mmact (mirror-mind-state-last-action-reading mmstate))
+  (define enemy-units-obs (hash-ref obs 'enemy-units '()))
+  (define enemy-bldgs-obs (hash-ref obs 'enemy-buildings '()))
+  (define ally-units-obs (hash-ref obs 'ally-units '()))
+  (define combat-enemy-cnt
+    (count (lambda (e) (and (hash? e) (combat-unit-record? e))) enemy-units-obs))
+  (define bluff-post
+    (compute-bayesian-bluff-posterior
+     enemy-units-obs
+     enemy-bldgs-obs
+     mmtech
+     mmledger
+     #:prior 0.08
+     #:opponent-scouted-us? (or (mirror-mind-state-ever-scouted-by-enemy? mmstate)
+                                (and mmact (action-lens-reading-opponent-scouted-us? mmact) #t))))
+  (define bayes-priors
+    (evaluate-strategic-posteriors-from-signals
+     #:bluff-prior 0.08
+     #:bluff-posterior bluff-post
+     #:frame step-frame
+     #:combat-count combat-enemy-cnt
+     #:unaccounted-minerals (if (shadow-ledger? mmledger) (safe-finite-real (shadow-ledger-unaccounted-minerals mmledger) 0.0) 0.0)
+     #:unaccounted-gas (if (shadow-ledger? mmledger) (safe-finite-real (shadow-ledger-unaccounted-gas mmledger) 0.0) 0.0)
+     #:dark-matter-hypothesis (if (shadow-ledger? mmledger) (shadow-ledger-dark-matter-hypothesis mmledger) 'accounted-visible-macro)
+     #:predicted-enemy-bases (if (shadow-ledger? mmledger) (safe-nonneg-int (shadow-ledger-predicted-enemy-bases mmledger) 1) 1)
+     #:feint-or-poke-detected? (and mmact (action-lens-reading-feint-or-poke-detected? mmact) #t)
+     #:proxy-or-rush-detected? (and mmact (action-lens-reading-proxy-or-rush-detected? mmact) #t)
+     #:branch-posteriors (hash)))
+  (define self-army-val
+    (max 0.0 (safe-finite-real (hash-ref obs 'army-supply
+                                         (count (lambda (u) (and (hash? u) (combat-unit-record? u))) ally-units-obs))
+                               0.0)))
+  (define enemy-army-val
+    (max 0.0 (safe-finite-real (hash-ref obs 'enemy-threat-supply combat-enemy-cnt) 0.0)))
+  (define win-prob-est
+    (max 0.0 (min 1.0 (/ 1.0 (+ 1.0 (exp (* -0.025 (safe-finite-real fap-score 0.0))))))))
+  (define snowball-adv
+    (/ (lanchester-snowball-advantage self-army-val enemy-army-val) 20.0))
+  (define prio-sum (hash-ref telemetry0 'priority-summary (hash)))
+  (define escrow-blocked-ids
+    (filter-map (lambda (d)
+                  (and (hash? d)
+                       (memq (hash-ref d 'outcome 'none) '(blocked-by-escrow escrowed-saving))
+                       (hash-ref d 'id #f)))
+                (hash-ref prio-sum 'decisions '())))
+  (define burrowed-cnt
+    (count (lambda (u)
+             (and (hash? u)
+                  (or (eq? (hash-ref u 'burrowed #f) #t)
+                      (eq? (hash-ref u 'is-burrowed #f) #t)
+                      (memq (unit-type-sym u)
+                            '(roach-burrowed infestor-burrowed lurker-burrowed lurker-mp-burrowed
+                              zergling-burrowed baneling-burrowed drone-burrowed queen-burrowed
+                              widow-mine-burrowed)))))
+           ally-units-obs))
+  (define shimmer-cnt
+    (count (lambda (a)
+             (and (pair? a)
+                  (memq (car a) '(blind-skillshot-shimmer emergency-detector-response))))
+           tactic-acts))
+  (define addon-cnt
+    (count (lambda (a) (and (pair? a) (eq? (car a) 'terran-addon-swap))) econ-acts))
+  (define state-rec
+    (extract-bot-step-log-record
+     (hash 'frame step-frame
+           'race step-our-race
+           'enemy-race step-enemy-race
+           'matchup step-matchup
+           'posture (live-bot-runtime-posture rt)
+           'personality (hash-ref telemetry0 'personality 'default)
+           'enemy-archetype (mastermind-state-enemy-archetype mstate)
+           'win-prob win-prob-est
+           'confidence (mirror-mind-state-overall-accuracy mmstate)
+           'bluff-posterior (bayesian-strategic-priors-bluff-posterior bayes-priors)
+           'rush-posterior (bayesian-strategic-priors-rush-posterior bayes-priors)
+           'hidden-expand-posterior (bayesian-strategic-priors-hidden-expand-posterior bayes-priors)
+           'tech-switch-posterior (bayesian-strategic-priors-tech-switch-posterior bayes-priors)
+           'pad-camped-posterior (hash-ref telemetry0 'pad-camped-posterior 0.0))
+     (hash 'active-bo-goal (hash-ref telemetry0 'bo-active-goal #f)
+           'saving-for (hash-ref prio-sum 'saving-for 'none)
+           'reserved-min-floor (hash-ref prio-sum 'reserved-min-floor 0)
+           'reserved-gas-floor (hash-ref prio-sum 'reserved-gas-floor 0)
+           'target-workers (hash-ref telemetry0 'target-workers 0)
+           'target-army-supply (hash-ref telemetry0 'target-army-supply 0)
+           'scheduled-ids (hash-ref prio-sum 'scheduled-ids '())
+           'escrow-blocked-ids escrow-blocked-ids)
+     (hash 'combat-posture (hash-ref telemetry0 'fap-posture 'hold)
+           'snowball-adv snowball-adv
+           'retreat-sector (best-retreat-sector (live-bot-runtime-perception rt))
+           'burrowed-count burrowed-cnt
+           'shimmer-alerts shimmer-cnt
+           'swapped-addons addon-cnt
+           'issued-orders (length final-actions))))
+  (define prev-state-log (hash-ref last-tel-ht 'state-log #f))
+  (define prev-mind-posture
+    (and (hash? prev-state-log)
+         (let ([m (hash-ref prev-state-log 'mind #f)])
+           (and (hash? m) (hash-ref m 'posture #f)))))
+  (define prev-goal-sym
+    (and (hash? prev-state-log)
+         (let ([g (hash-ref prev-state-log 'goals #f)])
+           (and (hash? g) (hash-ref g 'active-bo-goal-sym #f)))))
+  (define state-changed?
+    (or (not (hash? prev-state-log))
+        (not (eq? prev-mind-posture (bot-mind-log-snapshot-posture (bot-step-log-record-mind state-rec))))
+        (not (eq? prev-goal-sym (bot-goal-log-snapshot-active-bo-goal-sym (bot-step-log-record-goals state-rec))))))
+  (define emit-state-log?
+    (should-emit-step-log? step-frame 22 state-changed?))
+  (define state-log-hash (bot-step-log-record->hash state-rec))
+  (define state-log-line
+    (if emit-state-log?
+        (format-bot-step-log-line state-rec)
+        ""))
+  (define telemetry
+    (hash-set* telemetry0
+               'state-log state-log-hash
+               'state-log-line state-log-line))
+  (set-live-bot-runtime-last-telemetry! rt telemetry)
   (hash 'actions final-actions
         'mirror-actions final-mirror-actions
         'telemetry telemetry

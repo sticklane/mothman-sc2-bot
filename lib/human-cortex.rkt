@@ -4,6 +4,7 @@
          racket/list
          racket/set
          racket/math
+         "sc2-bayesian.rkt"
          "sc2-game-constants.rkt")
 
 (provide
@@ -1443,13 +1444,7 @@
        (define fb (/ (count (lambda (v) (<= v x)) sb) nb))
        (max max-d (abs (- fa fb))))]))
 
-;; Hellinger distance between two discrete probability distributions P and Q
-(define (hellinger-distance dist-p dist-q)
-  (define sum-sq
-    (for/sum ([p (in-list dist-p)]
-              [q (in-list dist-q)])
-      (sqr (- (sqrt (max 0.0 p)) (sqrt (max 0.0 q))))))
-  (* (/ 1.0 (sqrt 2.0)) (sqrt sum-sq)))
+;; `hellinger-distance` is provided by `lib/sc2-bayesian.rkt`.
 
 (define (calibrate-cortex-from-corpus player-name [replays-count 502])
   (define base (get-pro-cortex-profile player-name))

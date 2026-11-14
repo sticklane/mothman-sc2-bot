@@ -14,7 +14,7 @@
 ;;      `choose-optimal-mirror-depth` (`lib/mirror-mind-predictor.rkt`)
 ;;   4. `evaluate-coupled-macro-governor`, `evaluate-adaptive-build-and-tech-plan`,
 ;;      `evaluate-guns-vs-butter-ppf`, `compute-optimal-gas-workers` (`lib/econ-ledger.rkt`)
-;;   5. `step-zerospace-mastermind!` (`lib/zerospace-mastermind.rkt`)
+;;   5. `step-double-reaction!` (`lib/sc2-combat-eval.rkt`)
 ;; =============================================================================
 
 (require racket/match
@@ -26,7 +26,7 @@
          "bot-runtime.rkt"
          "econ-ledger.rkt"
          "mirror-mind-predictor.rkt"
-         "zerospace-mastermind.rkt")
+         "sc2-combat-eval.rkt")
 
 (provide
  ;; Contract Tables & Constants
@@ -78,7 +78,6 @@
  print-fuzz-campaign-report)
 
 (define-runtime-path mirror-mind-mod-path "mirror-mind-predictor.rkt")
-(define-runtime-path mastermind-mod-path "zerospace-mastermind.rkt")
 
 ;; Support both `compute-shadow-ledger` and `compute-opponent-shadow-ledger`
 (define compute-shadow-ledger
@@ -86,42 +85,38 @@
                     (dynamic-require mirror-mind-mod-path 'compute-shadow-ledger))])
     (or exported compute-opponent-shadow-ledger)))
 
-;; Support both `step-zerospace-mastermind!` and `step-double-reaction!`
-(define step-zerospace-mastermind!
-  (let ([exported (with-handlers ([exn:fail? (lambda (_e) #f)])
-                    (dynamic-require mastermind-mod-path 'step-zerospace-mastermind!))])
-    (or exported
-        (lambda (mstate
-                 [obs #f]
-                 #:fap-score [fap-score 0]
-                 #:enemy-units [enemy-units '()]
-                 #:ally-buildings [ally-buildings '()]
-                 #:self-workers [self-workers 16]
-                 #:enemy-workers [enemy-workers 16]
-                 #:self-army [self-army 200]
-                 #:enemy-army [enemy-army 200])
-          (if (hash? obs)
-              (let ([eu (hash-ref obs 'enemy-units enemy-units)]
-                    [ab (map (lambda (b)
-                               (if (hash? b) (hash-ref b 'type 'unknown) b))
-                             (hash-ref obs 'ally-buildings ally-buildings))]
-                    [au (hash-ref obs 'ally-units '())])
-                (step-double-reaction! mstate
-                                       #:fap-score (hash-ref obs 'fap-score fap-score)
-                                       #:enemy-units eu
-                                       #:ally-buildings ab
-                                       #:self-workers (max 1 (length au))
-                                       #:enemy-workers enemy-workers
-                                       #:self-army (* 50 (length au))
-                                       #:enemy-army (* 50 (length eu))))
-              (step-double-reaction! mstate
-                                     #:fap-score fap-score
-                                     #:enemy-units enemy-units
-                                     #:ally-buildings ally-buildings
-                                     #:self-workers self-workers
-                                     #:enemy-workers enemy-workers
-                                     #:self-army self-army
-                                     #:enemy-army enemy-army))))))
+;; Support both `step-double-reaction!` (`lib/sc2-combat-eval.rkt`) and legacy 2-arg call
+(define (step-zerospace-mastermind! mstate
+                                    [obs #f]
+                                    #:fap-score [fap-score 0]
+                                    #:enemy-units [enemy-units '()]
+                                    #:ally-buildings [ally-buildings '()]
+                                    #:self-workers [self-workers 16]
+                                    #:enemy-workers [enemy-workers 16]
+                                    #:self-army [self-army 200]
+                                    #:enemy-army [enemy-army 200])
+  (if (hash? obs)
+      (let ([eu (hash-ref obs 'enemy-units enemy-units)]
+            [ab (map (lambda (b)
+                       (if (hash? b) (hash-ref b 'type 'unknown) b))
+                     (hash-ref obs 'ally-buildings ally-buildings))]
+            [au (hash-ref obs 'ally-units '())])
+        (step-double-reaction! mstate
+                               #:fap-score (hash-ref obs 'fap-score fap-score)
+                               #:enemy-units eu
+                               #:ally-buildings ab
+                               #:self-workers (max 1 (length au))
+                               #:enemy-workers enemy-workers
+                               #:self-army (* 50 (length au))
+                               #:enemy-army (* 50 (length eu))))
+      (step-double-reaction! mstate
+                             #:fap-score fap-score
+                             #:enemy-units enemy-units
+                             #:ally-buildings ally-buildings
+                             #:self-workers self-workers
+                             #:enemy-workers enemy-workers
+                             #:self-army self-army
+                             #:enemy-army enemy-army)))
 
 ;; =============================================================================
 ;; 1. SC2 LotV Actuator Grammar & Symbol Contract Tables
@@ -1551,7 +1546,7 @@
 
   (values crashes contract-violations checks))
 
-;; Target 5: `step-zerospace-mastermind!` (`lib/zerospace-mastermind.rkt`)
+;; Target 5: `step-double-reaction!` (`lib/sc2-combat-eval.rkt`)
 (define (fuzz-zerospace-mastermind-suite! mstate obs prng)
   (define crashes '())
   (define contract-violations '())
@@ -1564,7 +1559,7 @@
 
   (with-handlers ([exn:fail?
                    (lambda (e)
-                     (set! crashes (cons (list 'step-zerospace-mastermind! (exn-message e) obs) crashes)))])
+                     (set! crashes (cons (list 'step-double-reaction! (exn-message e) obs) crashes)))])
     (set! checks (add1 checks))
     (cond
       [(procedure-arity-includes? step-zerospace-mastermind! 2)

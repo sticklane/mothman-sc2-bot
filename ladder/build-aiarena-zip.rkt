@@ -72,7 +72,7 @@
 (define MIN-STANDALONE-ELF-BYTES       45000000)
 
 (define INCLUDE-DIRS '("sc-bot" "compiler" "lib" "sim" "bots" "ffi"))
-(define INCLUDE-TOP-FILES '("run.py" "main.rkt" "info.rkt" "data/pro_build_orders.sexp"))
+(define INCLUDE-TOP-FILES '("run.py" "main.rkt" "info.rkt"))
 
 (define VARIANTS
   '(("Mothman-X" "Random"  "bots/Mothman-R.rkt")
@@ -267,43 +267,79 @@
       (newline out)))
   PORTABLE-RACKET-BIN)
 
+(define (discover-sorted-sub-rkt-relpaths subdir)
+  (define d (build-path ROOT-DIR subdir))
+  (if (directory-exists? d)
+      (sort
+       (for/list ([p (in-directory d)]
+                  #:when (and (file-exists? p)
+                              (let ([s (path->string p)])
+                                (and (string-suffix? s ".rkt")
+                                     (not (string-contains? s "/compiled/"))))))
+         (path->string (find-relative-path ROOT-DIR p)))
+       string<?)
+      '()))
+
 (define (precompile-all-racket-zo!)
   (printf "[1/5] Precompiling Racket modules to .zo bytecode via compiler/cm (Racket ~a)...\n"
           (version))
   (current-directory ROOT-DIR)
   (clean-compiled-zo-tree!)
-  (define targets
-    '("main.rkt"
-      "compiler/syntax.rkt"
-      "lib/sc2-game-constants.rkt"
-      "lib/sc2-typed-commands.rkt"
-      "lib/sc2-proto-wire-verifier.rkt"
-      "lib/okasaki-sc.rkt"
-      "lib/perception-grid.rkt"
-      "lib/econ-ledger.rkt"
-      "lib/build-orders.rkt"
-      "lib/tactics-sim.rkt"
-      "lib/human-cortex.rkt"
-      "lib/zerospace-mastermind.rkt"
-      "lib/mirror-mind-predictor.rkt"
-      "lib/bot-runtime.rkt"
-      "lib/state-machine-verifier.rkt"
-      "lib/bot-crash-fuzzer.rkt"
-      "lib/sc2-protobuf-ws.rkt"
-      "sim/racket_sc2_ipc_bot.rkt"
-      "sim/racket-sc2-ladder-main.rkt"
-      "bots/Mothman.rkt"
-      "bots/Mothman-Z.rkt"
-      "bots/Mothman-T.rkt"
-      "bots/Mothman-P.rkt"
-      "bots/Mothman-R.rkt"))
+  (define build-order-subfiles (discover-sorted-sub-rkt-relpaths "lib/build-orders"))
+  (define tactic-subfiles (discover-sorted-sub-rkt-relpaths "lib/tactics"))
+  (define lib-all-subfiles (discover-sorted-sub-rkt-relpaths "lib"))
+  (define ordered-core-targets
+    (append
+     '("main.rkt"
+       "compiler/syntax.rkt"
+       ;; Layer 0
+       "lib/sc2-types.rkt"
+       "lib/sc2-common.rkt"
+       "lib/sc2-game-constants.rkt")
+     ;; Layer 1
+     build-order-subfiles
+     '("lib/build-orders.rkt"
+       "lib/sc2-bayesian.rkt"
+       "lib/sc2-geometry.rkt"
+       "lib/sc2-pathing.rkt"
+       "lib/sc2-logging.rkt"
+       "lib/sc2-proto-wire-verifier.rkt"
+       "lib/sc2-typed-commands.rkt"
+       ;; Layer 2
+       "lib/perception-grid.rkt"
+       "lib/sc2-placement.rkt"
+       "lib/sc2-combat-eval.rkt")
+     tactic-subfiles
+     '(;; Layer 3
+       "lib/econ-ledger.rkt"
+       "lib/priority-macro-brain.rkt"
+       "lib/mirror-mind-predictor.rkt"
+       "lib/human-cortex.rkt"
+       "lib/tactics-sim.rkt"
+       ;; Layer 4 + tooling/runtime libraries
+       "lib/sc2-mpq-replay-parser.rkt"
+       "lib/pro-replay-starvation-audit.rkt"
+       "lib/bot-runtime.rkt"
+       "lib/state-machine-verifier.rkt"
+       "lib/bot-crash-fuzzer.rkt"
+       "lib/sc2-protobuf-ws.rkt")
+     ;; Ensure any future lib/ submodules are also compiled
+     lib-all-subfiles
+     '("sim/racket_sc2_ipc_bot.rkt"
+       "sim/racket-sc2-ladder-main.rkt"
+       "bots/Mothman.rkt"
+       "bots/Mothman-Z.rkt"
+       "bots/Mothman-T.rkt"
+       "bots/Mothman-P.rkt"
+       "bots/Mothman-R.rkt")))
+  (define targets (remove-duplicates ordered-core-targets string=?))
   (parameterize ([current-directory-for-user ROOT-DIR]
                  [current-write-relative-directory (cons ROOT-DIR ROOT-DIR)])
     (for ([rel (in-list targets)])
       (define p (build-path ROOT-DIR rel))
       (when (file-exists? p)
         (managed-compile-zo p))))
-  (printf "  -> All .zo bytecode modules up to date.\n")
+  (printf "  -> All .zo bytecode modules up to date (~a targets).\n" (length targets))
   #t)
 
 ;; -----------------------------------------------------------------------------
@@ -377,8 +413,6 @@
   (define probe-dir (build-path CACHE-DIR "init_probe"))
   (define probe-bin (build-path probe-dir "Mothman-Z"))
   (define probe-cfg (build-path probe-dir "config.json"))
-  (define probe-bo  (build-path probe-dir "data" "pro_build_orders.sexp"))
-  (define src-bo    (build-path ROOT-DIR "data" "pro_build_orders.sexp"))
   (define port (pick-free-local-port))
   (define srv #f)
   (dynamic-wind
@@ -397,8 +431,6 @@
         #:exists 'replace
         (lambda (out)
           (display "{\n  \"bot_name\": \"Mothman-Z\",\n  \"opponents\": {}\n}\n" out)))
-      (when (file-exists? src-bo)
-        (copy-file src-bo probe-bo #t))
       (set! srv (start-embedded-sc2-protobuf-server!
                  port #:our-race "Zerg" #:computer-race "Protoss")))
     (lambda ()
@@ -530,7 +562,7 @@
       (define mode (if (equal? top-f "run.py") #o100755 #o100644))
       (add-spec! top-f (file->bytes p) #f mode)))
 
-  ;; Source & bytecode directories (excluding lakefillq* compiler research files)
+  ;; Source files (excluding compiled/ bytecode caches, lakefillq*, and offline-only audit/fuzzer modules)
   (for ([dname (in-list INCLUDE-DIRS)])
     (define dpath (build-path ROOT-DIR dname))
     (when (directory-exists? dpath)
@@ -538,6 +570,7 @@
         (when (file-exists? p)
           (define rel (path->string (find-relative-path ROOT-DIR p)))
           (unless (or (string-contains? rel "__pycache__")
+                      (string-contains? rel "/compiled/")
                       (string-contains? rel "/.git/")
                       (string-suffix? rel ".pyc")
                       (string-suffix? rel ".o")
@@ -545,10 +578,14 @@
                       (string-suffix? rel ".SC2Replay")
                       (string-suffix? rel ".tar.xz")
                       (string-prefix? rel "compiler/lakefillq")
-                      ;; In `sc-bot/`, only pack `sc-bot/main.rkt` and `sc-bot/compiled/*`
+                      (member rel
+                              '("lib/bot-crash-fuzzer.rkt"
+                                "lib/state-machine-verifier.rkt"
+                                "lib/sc2-mpq-replay-parser.rkt"
+                                "lib/pro-replay-starvation-audit.rkt"))
+                      ;; In `sc-bot/`, only pack `sc-bot/main.rkt`
                       (and (string-prefix? rel "sc-bot/")
-                           (not (equal? rel "sc-bot/main.rkt"))
-                           (not (string-prefix? rel "sc-bot/compiled/"))))
+                           (not (equal? rel "sc-bot/main.rkt"))))
             (define store? (string-suffix? rel ".so"))
             (add-spec! rel (file->bytes p) store? #o100644))))))
 

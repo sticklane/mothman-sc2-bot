@@ -1,4 +1,4 @@
-#lang racket/base
+#lang typed/racket/base
 
 ;; =============================================================================
 ;; `lib/sc2-game-constants.rkt`
@@ -13,7 +13,33 @@
 (require racket/list
          racket/match
          racket/math
-         racket/set)
+         typed/racket/unsafe
+         (except-in racket/set set-member? set-mutable? set-add!)
+         "sc2-types.rkt")
+
+(unsafe-require/typed racket/set
+  [set-mutable? (-> Any Boolean)]
+  [set-member? (-> Any Any Boolean)]
+  [set-add! (-> Any Any Void)])
+
+(module dispatch-dyn racket/base
+  (provide call-1-or-2 call-2-or-3 dyn-hash-set!)
+  (define (call-1-or-2 p a f)
+    (if (procedure-arity-includes? p 2) (p a f) (p a)))
+  (define (call-2-or-3 p a b f)
+    (if (procedure-arity-includes? p 3) (p a b f) (p a b)))
+  (define (dyn-hash-set! h k v)
+    (when (and (hash? h) (not (immutable? h)))
+      (hash-set! h k v))))
+
+(define-type Cb12 (U (-> Any Any) (-> Any Integer Any)))
+(define-type Cb23 (U (-> Any Any Any) (-> Any Any Integer Any)))
+(define-type CombatStatTable (Immutable-HashTable Symbol (U Real Boolean Symbol)))
+
+(unsafe-require/typed (submod "." dispatch-dyn)
+  [call-1-or-2 (-> Cb12 Any Integer Any)]
+  [call-2-or-3 (-> Cb23 Any Any Integer Any)]
+  [dyn-hash-set! (-> Any Any Any Void)])
 
 (provide (all-defined-out))
 
@@ -22,8 +48,9 @@
 ;; -----------------------------------------------------------------------------
 (define SC2-FASTER-FPS                     22.4)
 (define SC2-FRAMES-PER-SECOND-INT          22)
+(: SC2-SECONDS->FRAMES (-> Real Integer))
 (define SC2-SECONDS->FRAMES
-  (lambda (sec) ( exact-round (* sec SC2-FASTER-FPS))))
+  (lambda (sec) (exact-round (* sec SC2-FASTER-FPS))))
 
 (define SC2-MAP-MIN-COORD                  0.0)
 (define SC2-MAP-MAX-COORD                  256.0)
@@ -72,6 +99,15 @@
 ;; directly from active bases (worker production) and active production structures
 ;; (combat unit production), scaled smoothly by worker economy saturation without
 ;; arbitrary supply-cap breakpoints.
+(: compute-production-coupled-supply-buffer
+   (->* ()
+        (#:active-bases Real
+         #:production-facilities Real
+         #:workers Real
+         #:target-workers Real
+         #:min-buffer Integer
+         #:max-buffer Integer)
+        Integer))
 (define (compute-production-coupled-supply-buffer
          #:active-bases [raw-bases 1]
          #:production-facilities [raw-facilities 0]
@@ -84,15 +120,15 @@
   (define workers (max 0 (exact-round raw-workers)))
   (define target-workers (max 12 (exact-round raw-target-workers)))
   (define econ-ramp
-    (min 1.0 (max 0.0 (/ (exact->inexact (- workers 13)) 15.0))))
+    (min 1.0 (max 0.0 (/ (->float (- workers 13)) 15.0))))
   (define worker-sat-factor
     (if (< workers target-workers) 1.0 0.5))
   (define townhall-burn
-    (* 2.0 (exact->inexact bases) worker-sat-factor (+ 0.25 (* 0.75 econ-ramp))))
+    (* 2.0 (->float bases) worker-sat-factor (+ 0.25 (* 0.75 econ-ramp))))
   (define effective-combat-facilities
     (max 0 (- facilities (if (= bases 1) 1 0))))
   (define facility-burn
-    (* 1.15 (exact->inexact (+ (* 0.5 (min 1 facilities)) effective-combat-facilities))
+    (* 1.15 (->float (+ (* 0.5 (min 1 facilities)) effective-combat-facilities))
        (+ 0.20 (* 0.80 econ-ramp))))
   (define raw-buf
     (exact-round (+ 0.65 townhall-burn facility-burn)))
@@ -229,6 +265,7 @@
 ;; 5. Canonical SC2 LotV Unit, Structure & Upgrade Cost Catalog
 ;; -----------------------------------------------------------------------------
 ;; Each entry maps symbol -> (list minerals gas supply)
+(: SC2-LOTV-COST-TABLE (Immutable-HashTable Symbol (List Integer Integer Integer)))
 (define SC2-LOTV-COST-TABLE
   (hasheq
    ;; Workers & Supply
@@ -520,29 +557,34 @@
    'point-defense-drone      '(0 0 0)
    'advanced-ballistics      '(150 150 0)))
 
+(: sc2-min-cost (->* (Any) (Integer) Integer))
 (define (sc2-min-cost sym [default 50])
-  (match (hash-ref SC2-LOTV-COST-TABLE sym #f)
+  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
     [(list m _ _) m]
     [_ default]))
 
+(: sc2-gas-cost (->* (Any) (Integer) Integer))
 (define (sc2-gas-cost sym [default 0])
-  (match (hash-ref SC2-LOTV-COST-TABLE sym #f)
+  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
     [(list _ g _) g]
     [_ default]))
 
+(: sc2-supply-cost (->* (Any) (Integer) Integer))
 (define (sc2-supply-cost sym [default 1])
-  (match (hash-ref SC2-LOTV-COST-TABLE sym #f)
+  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
     [(list _ _ s) s]
     [_ default]))
 
+(: sc2-can-afford? (->* (Any Real Real) (Real) Boolean))
 (define (sc2-can-afford? sym minerals gas [supply-left 200])
-  (match (hash-ref SC2-LOTV-COST-TABLE sym #f)
+  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
     [(list m g s)
      (and (>= minerals m)
           (>= gas g)
           (or (<= s 0) (>= supply-left s)))]
     [_ #f]))
 
+(: sc2-race-townhall-min-cost (-> Any Integer))
 (define (sc2-race-townhall-min-cost race)
   (case race
     [(Zerg)    (sc2-min-cost 'hatchery)]
@@ -562,6 +604,7 @@
 ;;   - `oracle-revelation` = `2146` (`EFFECT_ORACLEREVELATION`, PointTarget; `1632` is `TRAIN_QUEEN`!)
 ;;   - `microbial-shroud` = `2545` (`EFFECT_MICROBIALSHROUD`, PointTarget)
 ;;   - `guardian-shield` = `76` (`GUARDIANSHIELD_GUARDIANSHIELD`, NoTarget)
+(: SC2-SPELL-ABILITY-IDS (Immutable-HashTable Symbol Integer))
 (define SC2-SPELL-ABILITY-IDS
   (hasheq
    'emp-round            1628
@@ -609,6 +652,7 @@
    'viper-consume        2073
    'spawn-changeling     181))
 
+(: SC2-NO-TARGET-ABILITY-IDS (Setof Integer))
 (define SC2-NO-TARGET-ABILITY-IDS
   (list->seteqv
    '(32    ;; EFFECT_SALVAGE
@@ -659,6 +703,7 @@
      1042  ;; BUILD_INTERCEPTORS
      )))
 
+(: SC2-POINT-TARGET-ABILITY-IDS (Setof Integer))
 (define SC2-POINT-TARGET-ABILITY-IDS
   (list->seteqv
    '(74    ;; FUNGALGROWTH_FUNGALGROWTH
@@ -688,6 +733,7 @@
      3757  ;; EFFECT_MASSRECALL_NEXUS
      )))
 
+(: SC2-UNIT-TARGET-ABILITY-IDS (Setof Integer))
 (define SC2-UNIT-TARGET-ABILITY-IDS
   (list->seteqv
    '(140   ;; FEEDBACK_FEEDBACK
@@ -773,6 +819,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 8. Canonical SC2 LotV Unit Combat & Kinematic Stats Table
 ;; -----------------------------------------------------------------------------
+(: SC2-UNIT-COMBAT-STATS-TABLE (Immutable-HashTable Symbol CombatStatTable))
 (define SC2-UNIT-COMBAT-STATS-TABLE
   (hasheq
    ;; Workers
@@ -875,28 +922,40 @@
     'point-defense-drone (hasheq 'max-hp 50 'max-shield 0  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 0.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.5)
     'auto-turret       (hasheq 'max-hp 150 'max-shield 0   'armor 1 'speed 0.0  'ground-dps 31.5 'air-dps 31.5 'ground-range 6.0  'air-range 6.0  'weapon-period 0.57  'damage-point 0.05 'splash-radius 0.0  'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.75)))
 
+(: DEFAULT-UNIT-COMBAT-STATS CombatStatTable)
+(define DEFAULT-UNIT-COMBAT-STATS
+  (hasheq 'max-hp 80 'max-shield 0 'armor 0 'speed 3.15
+          'ground-dps 10.0 'air-dps 0.0 'ground-range 5.0 'air-range 0.0
+          'weapon-period 1.0 'damage-point 0.10 'splash-radius 0.0
+          'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5))
+
+(: sc2-unit-combat-stats (-> Any CombatStatTable))
 (define (sc2-unit-combat-stats sym)
-  (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym
-            (lambda ()
-              (hasheq 'max-hp 80 'max-shield 0 'armor 0 'speed 3.15
-                      'ground-dps 10.0 'air-dps 0.0 'ground-range 5.0 'air-range 0.0
-                      'weapon-period 1.0 'damage-point 0.10 'splash-radius 0.0
-                      'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5))))
+  (if (symbol? sym)
+      (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym (lambda () DEFAULT-UNIT-COMBAT-STATS))
+      DEFAULT-UNIT-COMBAT-STATS))
 
+(: sc2-unit-can-attack-air? (-> Any Boolean))
 (define (sc2-unit-can-attack-air? sym)
-  (> (hash-ref (sc2-unit-combat-stats sym) 'air-dps 0.0) 0.0))
+  (define v (hash-ref (sc2-unit-combat-stats sym) 'air-dps (lambda () 0.0)))
+  (and (real? v) (> v 0.0)))
 
+(: sc2-unit-can-attack-ground? (-> Any Boolean))
 (define (sc2-unit-can-attack-ground? sym)
-  (> (hash-ref (sc2-unit-combat-stats sym) 'ground-dps 0.0) 0.0))
+  (define v (hash-ref (sc2-unit-combat-stats sym) 'ground-dps (lambda () 0.0)))
+  (and (real? v) (> v 0.0)))
 
+(: sc2-unit-is-detector-sym? (-> Any Boolean))
 (define (sc2-unit-is-detector-sym? sym)
-  (eq? (hash-ref (sc2-unit-combat-stats sym) 'detector? #f) #t))
+  (eq? (hash-ref (sc2-unit-combat-stats sym) 'detector? (lambda () #f)) #t))
 
+(: sc2-unit-is-flying-sym? (-> Any Boolean))
 (define (sc2-unit-is-flying-sym? sym)
-  (eq? (hash-ref (sc2-unit-combat-stats sym) 'flying? #f) #t))
+  (eq? (hash-ref (sc2-unit-combat-stats sym) 'flying? (lambda () #f)) #t))
 
 ;; Invulnerable shades, phased projectiles, eggs/larvae, and decoys that should
 ;; never be selected as primary combat attack targets:
+(: SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS (Listof Symbol))
 (define SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS
   '(adept-phase-shift
     disruptor-phased
@@ -915,6 +974,7 @@
 
 ;; Non-combat scouts, summoned minions/interceptors, and untargetable units that
 ;; should be heavily de-prioritized in favor of parent Carriers / Brood Lords / real threats:
+(: SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS (Listof Symbol))
 (define SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS
   '(adept-phase-shift
     disruptor-phased
@@ -941,6 +1001,7 @@
     observer
     observer-siege-mode))
 
+(: SC2-ALL-STRUCTURE-SYMS (Listof Symbol))
 (define SC2-ALL-STRUCTURE-SYMS
   '(hatchery lair hive extractor extractor-rich spawning-pool roach-warren baneling-nest
     evolution-chamber hydralisk-den lurker-den lurker-den-mp spire greater-spire
@@ -963,6 +1024,7 @@
     tech-lab techlab reactor))
 
 ;; Terran units that strictly require a completed TechLab attached to their producer:
+(: SC2-TECHLAB-REQUIRED-UNIT-SYMS (Listof Symbol))
 (define SC2-TECHLAB-REQUIRED-UNIT-SYMS
   '(marauder
     ghost
@@ -972,26 +1034,30 @@
     raven
     battlecruiser))
 
+(: sc2-unit-requires-techlab? (-> Any Boolean))
 (define (sc2-unit-requires-techlab? sym)
-  (and (memq sym SC2-TECHLAB-REQUIRED-UNIT-SYMS) #t))
+  (and (symbol? sym) (memq sym SC2-TECHLAB-REQUIRED-UNIT-SYMS) #t))
 
+(: sc2-enemy-unit-targetable? (-> Any Boolean))
 (define (sc2-enemy-unit-targetable? e)
   (cond
     [(hash? e)
-     (and (not (memq (hash-ref e 'type 'unknown) SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS))
-          (not (eq? (hash-ref e 'hallucination #f) #t)))]
+     (define ty (hash-ref e 'type (lambda () 'unknown)))
+     (and (not (and (symbol? ty) (memq ty SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS)))
+          (not (eq? (hash-ref e 'hallucination (lambda () #f)) #t)))]
     [(symbol? e)
      (not (memq e SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS))]
     [else #t]))
 
+(: sc2-attacker-can-hit-enemy? (->* (Any Any) (Any) Boolean))
 (define (sc2-attacker-can-hit-enemy? attacker-sym e [enemy-flying-override #f])
   (define eflying?
     (cond
       [(hash? e)
-       (or (eq? (hash-ref e 'flying #f) #t)
-           (eq? (hash-ref e 'flying? #f) #t)
-           (eq? (hash-ref e 'is-flying #f) #t)
-           (sc2-unit-is-flying-sym? (hash-ref e 'type 'marine)))]
+       (or (eq? (hash-ref e 'flying (lambda () #f)) #t)
+           (eq? (hash-ref e 'flying? (lambda () #f)) #t)
+           (eq? (hash-ref e 'is-flying (lambda () #f)) #t)
+           (sc2-unit-is-flying-sym? (hash-ref e 'type (lambda () 'marine))))]
       [(symbol? e)
        (or (eq? enemy-flying-override #t)
            (sc2-unit-is-flying-sym? e))]
@@ -1012,13 +1078,17 @@
 (define SC2-DETECTOR-SNIPE-PRIORITY-BONUS         3.5)
 (define SC2-POST-SNIPE-STEALTH-UNLOCK-FRAMES      1344)   ;; 60.0s at 22.4 fps
 (define SC2-POST-SNIPE-EXPECTED-DAMAGE-RES        651.0)
+(: SC2-MOBILE-DETECTOR-SYMS (Listof Symbol))
 (define SC2-MOBILE-DETECTOR-SYMS
   '(observer observer-siege-mode overseer overseer-siege-mode raven))
+(: SC2-STATIC-DETECTOR-SYMS (Listof Symbol))
 (define SC2-STATIC-DETECTOR-SYMS
   '(missile-turret photon-cannon spore-crawler))
+(: SC2-CHANGELING-UNIT-SYMS (Listof Symbol))
 (define SC2-CHANGELING-UNIT-SYMS
   '(changeling changeling-zealot changeling-marine-shield
     changeling-marine changeling-zergling-wings changeling-zergling))
+(: SC2-CLOAKED-OR-BURROW-STEALTH-SYMS (Listof Symbol))
 (define SC2-CLOAKED-OR-BURROW-STEALTH-SYMS
   '(banshee dark-templar ghost mothership lurker lurker-mp lurker-burrowed
     lurker-mp-burrowed roach-burrowed infestor infestor-burrowed
@@ -1037,6 +1107,7 @@
 ;; Subtle burrowed-movement ripple & cloaked shimmer detection (`display_type = Hidden (2)`):
 (define SC2-SHIMMER-DISPLAY-TYPE-HIDDEN           2)
 (define SC2-BURROW-RIPPLE-MIN-SPEED               0.15)
+(: SC2-BLIND-AOE-SKILLSHOT-SPELLS (Listof Symbol))
 (define SC2-BLIND-AOE-SKILLSHOT-SPELLS
   '(corrosive-bile psi-storm fungal-growth purification-nova emp-round scanner-sweep oracle-revelation))
 
@@ -1058,202 +1129,224 @@
 ;; Single source of truth for SC2 structure/unit state transitions, flying/lowered/
 ;; uprooted/rich/overcharged variants, morphed tech structures, and spelling aliases.
 
+(: sc2-canonical-structure-sym (-> Any Symbol))
 (define (sc2-canonical-structure-sym sym)
-  (case sym
-    [(warpgate)                    'warp-gate]
-    [(robotics-support-bay)        'robotics-bay]
-    [(templar-archives)            'templar-archive]
-    [(lurker-den-mp)               'lurker-den]
-    [(barracks-tech-lab)           'barracks-techlab]
-    [(factory-tech-lab)            'factory-techlab]
-    [(starport-tech-lab)           'starport-techlab]
-    [(techlab)                     'tech-lab]
-    [(pylon-overcharged)           'pylon]
-    [(supply-depot-lowered)        'supply-depot]
-    [(extractor-rich)              'extractor]
-    [(refinery-rich)               'refinery]
-    [(assimilator-rich)            'assimilator]
-    [(spine-crawler-uprooted)      'spine-crawler]
-    [(spore-crawler-uprooted)      'spore-crawler]
-    [(barracks-flying)             'barracks]
-    [(factory-flying)              'factory]
-    [(starport-flying)             'starport]
-    [(command-center-flying)       'command-center]
-    [(orbital-command-flying)      'orbital-command]
-    [else                          sym]))
+  (if (not (symbol? sym))
+      'unknown
+      (case sym
+        [(warpgate)                    'warp-gate]
+        [(robotics-support-bay)        'robotics-bay]
+        [(templar-archives)            'templar-archive]
+        [(lurker-den-mp)               'lurker-den]
+        [(barracks-tech-lab)           'barracks-techlab]
+        [(factory-tech-lab)            'factory-techlab]
+        [(starport-tech-lab)           'starport-techlab]
+        [(techlab)                     'tech-lab]
+        [(pylon-overcharged)           'pylon]
+        [(supply-depot-lowered)        'supply-depot]
+        [(extractor-rich)              'extractor]
+        [(refinery-rich)               'refinery]
+        [(assimilator-rich)            'assimilator]
+        [(spine-crawler-uprooted)      'spine-crawler]
+        [(spore-crawler-uprooted)      'spore-crawler]
+        [(barracks-flying)             'barracks]
+        [(factory-flying)              'factory]
+        [(starport-flying)             'starport]
+        [(command-center-flying)       'command-center]
+        [(orbital-command-flying)      'orbital-command]
+        [else                          sym])))
 
+(: SC2-PROTOSS-PYLON-POWERED-STRUCTURE-SYMS (Listof Symbol))
 (define SC2-PROTOSS-PYLON-POWERED-STRUCTURE-SYMS
   '(gateway warp-gate warpgate cybernetics-core forge photon-cannon shield-battery
     twilight-council robotics-facility robotics-bay robotics-support-bay
     stargate fleet-beacon templar-archive templar-archives dark-shrine))
 
+(: sc2-structure-requires-pylon-power? (-> Any Boolean))
 (define (sc2-structure-requires-pylon-power? sym)
   (not (not (memq (sc2-canonical-structure-sym sym)
                   SC2-PROTOSS-PYLON-POWERED-STRUCTURE-SYMS))))
 
+(: sc2-structure-equivalent-syms (->* (Any) (Boolean) (Listof Symbol)))
 (define (sc2-structure-equivalent-syms sym [include-free-addons? #f])
-  (case sym
-    [(hatchery)
-     '(hatchery lair hive)]
-    [(lair)
-     '(lair hive)]
-    [(hive)
-     '(hive)]
-    [(spire)
-     '(spire greater-spire)]
-    [(greater-spire)
-     '(greater-spire)]
-    [(lurker-den lurker-den-mp)
-     '(lurker-den lurker-den-mp)]
-    [(extractor extractor-rich)
-     '(extractor extractor-rich)]
-    [(spine-crawler spine-crawler-uprooted)
-     '(spine-crawler spine-crawler-uprooted)]
-    [(spore-crawler spore-crawler-uprooted)
-     '(spore-crawler spore-crawler-uprooted)]
-    [(nydus-worm nydus-canal)
-     '(nydus-worm nydus-canal)]
-    [(gateway)
-     '(gateway warp-gate warpgate)]
-    [(warp-gate warpgate)
-     '(warp-gate warpgate)]
-    [(pylon pylon-overcharged)
-     '(pylon pylon-overcharged)]
-    [(assimilator assimilator-rich)
-     '(assimilator assimilator-rich)]
-    [(robotics-bay robotics-support-bay)
-     '(robotics-bay robotics-support-bay)]
-    [(templar-archive templar-archives)
-     '(templar-archive templar-archives)]
-    [(command-center command-center-flying)
-     '(command-center command-center-flying orbital-command orbital-command-flying planetary-fortress)]
-    [(orbital-command orbital-command-flying)
-     '(orbital-command orbital-command-flying)]
-    [(supply-depot supply-depot-lowered)
-     '(supply-depot supply-depot-lowered)]
-    [(refinery refinery-rich)
-     '(refinery refinery-rich)]
-    [(barracks barracks-flying)
-     '(barracks barracks-flying)]
-    [(factory factory-flying)
-     '(factory factory-flying)]
-    [(starport starport-flying)
-     '(starport starport-flying)]
-    [(barracks-techlab barracks-tech-lab)
-     (if include-free-addons?
-         '(barracks-techlab barracks-tech-lab tech-lab techlab)
-         '(barracks-techlab barracks-tech-lab))]
-    [(factory-techlab factory-tech-lab)
-     (if include-free-addons?
-         '(factory-techlab factory-tech-lab tech-lab techlab)
-         '(factory-techlab factory-tech-lab))]
-    [(starport-techlab starport-tech-lab)
-     (if include-free-addons?
-         '(starport-techlab starport-tech-lab tech-lab techlab)
-         '(starport-techlab starport-tech-lab))]
-    [(barracks-reactor)
-     (if include-free-addons?
-         '(barracks-reactor reactor)
-         '(barracks-reactor))]
-    [(factory-reactor)
-     (if include-free-addons?
-         '(factory-reactor reactor)
-         '(factory-reactor))]
-    [(starport-reactor)
-     (if include-free-addons?
-         '(starport-reactor reactor)
-         '(starport-reactor))]
-    [(tech-lab techlab)
-     '(tech-lab techlab)]
-    [else
-     (list sym)]))
+  (if (not (symbol? sym))
+      '()
+      (case sym
+        [(hatchery)
+         '(hatchery lair hive)]
+        [(lair)
+         '(lair hive)]
+        [(hive)
+         '(hive)]
+        [(spire)
+         '(spire greater-spire)]
+        [(greater-spire)
+         '(greater-spire)]
+        [(lurker-den lurker-den-mp)
+         '(lurker-den lurker-den-mp)]
+        [(extractor extractor-rich)
+         '(extractor extractor-rich)]
+        [(spine-crawler spine-crawler-uprooted)
+         '(spine-crawler spine-crawler-uprooted)]
+        [(spore-crawler spore-crawler-uprooted)
+         '(spore-crawler spore-crawler-uprooted)]
+        [(nydus-worm nydus-canal)
+         '(nydus-worm nydus-canal)]
+        [(gateway)
+         '(gateway warp-gate warpgate)]
+        [(warp-gate warpgate)
+         '(warp-gate warpgate)]
+        [(pylon pylon-overcharged)
+         '(pylon pylon-overcharged)]
+        [(assimilator assimilator-rich)
+         '(assimilator assimilator-rich)]
+        [(robotics-bay robotics-support-bay)
+         '(robotics-bay robotics-support-bay)]
+        [(templar-archive templar-archives)
+         '(templar-archive templar-archives)]
+        [(command-center command-center-flying)
+         '(command-center command-center-flying orbital-command orbital-command-flying planetary-fortress)]
+        [(orbital-command orbital-command-flying)
+         '(orbital-command orbital-command-flying)]
+        [(supply-depot supply-depot-lowered)
+         '(supply-depot supply-depot-lowered)]
+        [(refinery refinery-rich)
+         '(refinery refinery-rich)]
+        [(barracks barracks-flying)
+         '(barracks barracks-flying)]
+        [(factory factory-flying)
+         '(factory factory-flying)]
+        [(starport starport-flying)
+         '(starport starport-flying)]
+        [(barracks-techlab barracks-tech-lab)
+         (if include-free-addons?
+             '(barracks-techlab barracks-tech-lab tech-lab techlab)
+             '(barracks-techlab barracks-tech-lab))]
+        [(factory-techlab factory-tech-lab)
+         (if include-free-addons?
+             '(factory-techlab factory-tech-lab tech-lab techlab)
+             '(factory-techlab factory-tech-lab))]
+        [(starport-techlab starport-tech-lab)
+         (if include-free-addons?
+             '(starport-techlab starport-tech-lab tech-lab techlab)
+             '(starport-techlab starport-tech-lab))]
+        [(barracks-reactor)
+         (if include-free-addons?
+             '(barracks-reactor reactor)
+             '(barracks-reactor))]
+        [(factory-reactor)
+         (if include-free-addons?
+             '(factory-reactor reactor)
+             '(factory-reactor))]
+        [(starport-reactor)
+         (if include-free-addons?
+             '(starport-reactor reactor)
+             '(starport-reactor))]
+        [(tech-lab techlab)
+         '(tech-lab techlab)]
+        [else
+         (list sym)])))
 
+(: sc2-structure-matches-target? (->* (Any Any) (Boolean) Boolean))
 (define (sc2-structure-matches-target? actual-sym target-sym [include-free-addons? #f])
-  (and (memq actual-sym (sc2-structure-equivalent-syms target-sym include-free-addons?)) #t))
+  (and (symbol? actual-sym)
+       (memq actual-sym (sc2-structure-equivalent-syms target-sym include-free-addons?))
+       #t))
 
+(: sc2-count-equivalent-structures (->* (Any Any) (Boolean) Integer))
 (define (sc2-count-equivalent-structures counts-hash sym [include-free-addons? #f])
-  (for/sum ([s (in-list (remove-duplicates (sc2-structure-equivalent-syms sym include-free-addons?) eq?))])
-    (hash-ref counts-hash s 0)))
+  (if (hash? counts-hash)
+      (for/sum ([s (in-list (remove-duplicates (sc2-structure-equivalent-syms sym include-free-addons?) eq?))])
+        (define v (hash-ref counts-hash s (lambda () 0)))
+        (if (exact-integer? v) v 0))
+      0))
 
+(: sc2-canonical-unit-sym (-> Any Symbol))
 (define (sc2-canonical-unit-sym sym)
-  (case sym
-    [(viking-fighter viking-assault)   'viking]
-    [(siege-tank-sieged)               'siege-tank]
-    [(widow-mine-burrowed)             'widow-mine]
-    [(thor-ap)                         'thor]
-    [(liberator-ag)                    'liberator]
-    [(lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg) 'lurker]
-    [(baneling-burrowed baneling-cocoon) 'baneling]
-    [(ravager-cocoon ravager-burrowed) 'ravager]
-    [(broodlord brood-lord-cocoon)     'brood-lord]
-    [(overlord-cocoon overseer-siege-mode) 'overseer]
-    [(overlord-transport transport-overlord-cocoon) 'overlord]
-    [(roach-burrowed)                  'roach]
-    [(zergling-burrowed)               'zergling]
-    [(hydralisk-burrowed)              'hydralisk]
-    [(infestor-burrowed)               'infestor]
-    [(swarm-host-burrowed swarmhost)   'swarm-host]
-    [(ultralisk-burrowed)              'ultralisk]
-    [(queen-burrowed)                  'queen]
-    [(drone-burrowed)                  'drone]
-    [(observer-siege-mode)             'observer]
-    [(warp-prism-phasing)              'warp-prism]
-    [(voidray)                         'void-ray]
-    [else                              sym]))
+  (if (not (symbol? sym))
+      'unknown
+      (case sym
+        [(viking-fighter viking-assault)   'viking]
+        [(siege-tank-sieged)               'siege-tank]
+        [(widow-mine-burrowed)             'widow-mine]
+        [(thor-ap)                         'thor]
+        [(liberator-ag)                    'liberator]
+        [(lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg) 'lurker]
+        [(baneling-burrowed baneling-cocoon) 'baneling]
+        [(ravager-cocoon ravager-burrowed) 'ravager]
+        [(broodlord brood-lord-cocoon)     'brood-lord]
+        [(overlord-cocoon overseer-siege-mode) 'overseer]
+        [(overlord-transport transport-overlord-cocoon) 'overlord]
+        [(roach-burrowed)                  'roach]
+        [(zergling-burrowed)               'zergling]
+        [(hydralisk-burrowed)              'hydralisk]
+        [(infestor-burrowed)               'infestor]
+        [(swarm-host-burrowed swarmhost)   'swarm-host]
+        [(ultralisk-burrowed)              'ultralisk]
+        [(queen-burrowed)                  'queen]
+        [(drone-burrowed)                  'drone]
+        [(observer-siege-mode)             'observer]
+        [(warp-prism-phasing)              'warp-prism]
+        [(voidray)                         'void-ray]
+        [else                              sym])))
 
+(: sc2-unit-equivalent-syms (-> Any (Listof Symbol)))
 (define (sc2-unit-equivalent-syms sym)
-  (case sym
-    [(viking viking-fighter viking-assault)
-     '(viking viking-fighter viking-assault)]
-    [(siege-tank siege-tank-sieged)
-     '(siege-tank siege-tank-sieged)]
-    [(widow-mine widow-mine-burrowed)
-     '(widow-mine widow-mine-burrowed)]
-    [(thor thor-ap)
-     '(thor thor-ap)]
-    [(liberator liberator-ag)
-     '(liberator liberator-ag)]
-    [(hellion hellbat)
-     (list sym)]
-    [(lurker lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg)
-     '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg)]
-    [(roach roach-burrowed)
-     '(roach roach-burrowed)]
-    [(zergling zergling-burrowed)
-     '(zergling zergling-burrowed)]
-    [(baneling baneling-burrowed baneling-cocoon)
-     '(baneling baneling-burrowed baneling-cocoon)]
-    [(ravager ravager-burrowed ravager-cocoon)
-     '(ravager ravager-burrowed ravager-cocoon)]
-    [(hydralisk hydralisk-burrowed)
-     '(hydralisk hydralisk-burrowed)]
-    [(infestor infestor-burrowed)
-     '(infestor infestor-burrowed)]
-    [(swarm-host swarm-host-burrowed swarmhost)
-     '(swarm-host swarm-host-burrowed swarmhost)]
-    [(ultralisk ultralisk-burrowed)
-     '(ultralisk ultralisk-burrowed)]
-    [(queen queen-burrowed)
-     '(queen queen-burrowed)]
-    [(drone drone-burrowed)
-     '(drone drone-burrowed)]
-    [(brood-lord broodlord brood-lord-cocoon)
-     '(brood-lord broodlord brood-lord-cocoon)]
-    [(overlord overlord-transport transport-overlord-cocoon)
-     '(overlord overlord-transport transport-overlord-cocoon)]
-    [(overseer overseer-siege-mode overlord-cocoon)
-     '(overseer overseer-siege-mode overlord-cocoon)]
-    [(observer observer-siege-mode)
-     '(observer observer-siege-mode)]
-    [(warp-prism warp-prism-phasing)
-     '(warp-prism warp-prism-phasing)]
-    [(void-ray voidray)
-     '(void-ray voidray)]
-    [else
-     (list sym)]))
+  (if (not (symbol? sym))
+      '()
+      (case sym
+        [(viking viking-fighter viking-assault)
+         '(viking viking-fighter viking-assault)]
+        [(siege-tank siege-tank-sieged)
+         '(siege-tank siege-tank-sieged)]
+        [(widow-mine widow-mine-burrowed)
+         '(widow-mine widow-mine-burrowed)]
+        [(thor thor-ap)
+         '(thor thor-ap)]
+        [(liberator liberator-ag)
+         '(liberator liberator-ag)]
+        [(hellion hellbat)
+         (list sym)]
+        [(lurker lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg)
+         '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg)]
+        [(roach roach-burrowed)
+         '(roach roach-burrowed)]
+        [(zergling zergling-burrowed)
+         '(zergling zergling-burrowed)]
+        [(baneling baneling-burrowed baneling-cocoon)
+         '(baneling baneling-burrowed baneling-cocoon)]
+        [(ravager ravager-burrowed ravager-cocoon)
+         '(ravager ravager-burrowed ravager-cocoon)]
+        [(hydralisk hydralisk-burrowed)
+         '(hydralisk hydralisk-burrowed)]
+        [(infestor infestor-burrowed)
+         '(infestor infestor-burrowed)]
+        [(swarm-host swarm-host-burrowed swarmhost)
+         '(swarm-host swarm-host-burrowed swarmhost)]
+        [(ultralisk ultralisk-burrowed)
+         '(ultralisk ultralisk-burrowed)]
+        [(queen queen-burrowed)
+         '(queen queen-burrowed)]
+        [(drone drone-burrowed)
+         '(drone drone-burrowed)]
+        [(brood-lord broodlord brood-lord-cocoon)
+         '(brood-lord broodlord brood-lord-cocoon)]
+        [(overlord overlord-transport transport-overlord-cocoon)
+         '(overlord overlord-transport transport-overlord-cocoon)]
+        [(overseer overseer-siege-mode overlord-cocoon)
+         '(overseer overseer-siege-mode overlord-cocoon)]
+        [(observer observer-siege-mode)
+         '(observer observer-siege-mode)]
+        [(warp-prism warp-prism-phasing)
+         '(warp-prism warp-prism-phasing)]
+        [(void-ray voidray)
+         '(void-ray voidray)]
+        [else
+         (list sym)])))
 
 ;; True for 3x3 and 5x5 SC2 structures whose footprint centers snap to (x.5, y.5)
 ;; rather than 2x2 integer centers (x.0, y.0).
+(: SC2-2X2-STRUCTURE-SYMS (Listof Symbol))
 (define SC2-2X2-STRUCTURE-SYMS
   '(supply-depot supply-depot-lowered missile-turret sensor-tower
     pylon pylon-overcharged photon-cannon shield-battery dark-shrine oracle-stasis-trap
@@ -1264,6 +1357,7 @@
     starport-techlab starport-tech-lab starport-reactor
     tech-lab techlab reactor))
 
+(: SC2-TOWNHALL-STRUCTURE-SYMS (Listof Symbol))
 (define SC2-TOWNHALL-STRUCTURE-SYMS
   '(hatchery lair hive
     nexus
@@ -1271,8 +1365,10 @@
     orbital-command orbital-command-flying
     planetary-fortress))
 
+(: sc2-odd-footprint-structure? (-> Any Boolean))
 (define (sc2-odd-footprint-structure? sym)
-  (and (memq sym SC2-ALL-STRUCTURE-SYMS)
+  (and (symbol? sym)
+       (memq sym SC2-ALL-STRUCTURE-SYMS)
        (not (memq sym SC2-2X2-STRUCTURE-SYMS))
        #t))
 
@@ -1282,6 +1378,7 @@
 ;; -----------------------------------------------------------------------------
 
 ;; Canonical mapping from generic/smart vs race-specific Unit.orders ability IDs.
+(: sc2-canonical-order-ability (-> Any Any))
 (define (sc2-canonical-order-ability ab-id)
   (case ab-id
     [(166 295 298 1183 3666) 'harvest-gather]
@@ -1309,12 +1406,9 @@
     [else                    ab-id]))
 
 ;; Protected Unit.orders classes that must not be overwritten by generic army/idle commands:
-;;   'morph       — unit/structure morphs (Baneling/Ravager/BroodLord/Overseer/Archon/Lair/Hive/Lurker/etc.)
-;;   'channel     — channeled abilities (Yamato/TacticalJump/Snipe/Neural/Graviton/Consume/Recall/etc.)
-;;   'mode-switch — siege/unsiege, burrow/unburrow, lift/land, uproot/root, fighter/assault, depot raise/lower
-;;   'cast-walk   — walk-to-cast spells (Inject, CreepTumor, Transfusion, EMP, Storm, Feedback, Fungal, Bile, etc.)
+(: SC2-PROTECTED-ORDER-CLASS-TABLE (Immutable-HashTable Integer Symbol))
 (define SC2-PROTECTED-ORDER-CLASS-TABLE
-  (let ([ht (make-hasheqv)])
+  (let ([ht : (Mutable-HashTable Integer Symbol) (make-hasheqv)])
     (for ([id (in-list '(80 2330 2332 1372 1448 2708 1766 1216 1218 1220 1516 1450 1518))])
       (hash-set! ht id 'morph))
     (for ([id (in-list '(401 2358 2714 249 173 2073 2069 2324 258 3757 142 3686))])
@@ -1331,11 +1425,12 @@
     (for ([id (in-list '(251 1662 1694 3691 1733 1664 1628 1036 140 74 3763
                          2338 2346 2067 2063 2542 2545 3747 3753 181 2505 1526))])
       (hash-set! ht id 'cast-walk))
-    (for/hasheqv ([(k v) (in-hash ht)])
+    (for/hasheqv : (Immutable-HashTable Integer Symbol) ([(k v) (in-hash ht)])
       (values k v))))
 
+(: sc2-order-protection-class (-> Any (Option Symbol)))
 (define (sc2-order-protection-class ab-id)
-  (or (hash-ref SC2-PROTECTED-ORDER-CLASS-TABLE ab-id #f)
+  (or (and (exact-integer? ab-id) (hash-ref SC2-PROTECTED-ORDER-CLASS-TABLE ab-id (lambda () #f)))
       (case (sc2-canonical-order-ability ab-id)
         [(burrow-down burrow-up lift land uproot root) 'mode-switch]
         [(spawn-creep-tumor) 'cast-walk]
@@ -1343,6 +1438,7 @@
         [else #f])))
 
 ;; Non-combat morphing cocoons/eggs, temporary summons, wards, scouts, and auxiliary transports.
+(: SC2-COCOON-AND-EGG-SYMS (Listof Symbol))
 (define SC2-COCOON-AND-EGG-SYMS
   '(larva
     egg
@@ -1355,6 +1451,7 @@
     lurker-egg
     lurker-mp-egg))
 
+(: SC2-NON-ARMY-SUMMON-AND-AUX-SYMS (Listof Symbol))
 (define SC2-NON-ARMY-SUMMON-AND-AUX-SYMS
   (append
    SC2-COCOON-AND-EGG-SYMS
@@ -1389,9 +1486,11 @@
      warp-prism-phasing
      broodling-escort)))
 
+(: SC2-NON-ARMY-SUMMON-AND-AUX-SET (Setof Symbol))
 (define SC2-NON-ARMY-SUMMON-AND-AUX-SET
   (list->seteq SC2-NON-ARMY-SUMMON-AND-AUX-SYMS))
 
+(: sc2-non-combat-or-summon-sym? (-> Any Boolean))
 (define (sc2-non-combat-or-summon-sym? sym)
   (and (symbol? sym)
        (or (set-member? SC2-NON-ARMY-SUMMON-AND-AUX-SET sym)
@@ -1403,8 +1502,16 @@
        #t))
 
 ;; Unit Role-Lease Registry
-(struct unit-role-lease (role priority target-id target-x target-y expires-frame) #:transparent)
+(struct unit-role-lease
+  ([role : Symbol]
+   [priority : Integer]
+   [target-id : Any]
+   [target-x : Float]
+   [target-y : Float]
+   [expires-frame : Integer])
+  #:transparent)
 
+(: role-lease-priority (-> Any Integer))
 (define (role-lease-priority role)
   (case role
     [(builder)         100]
@@ -1421,11 +1528,15 @@
     [(harvester)        10]
     [else                0]))
 
+(: acquire-unit-lease!
+   (->* (Any Any Symbol Integer Integer)
+        (#:target-id Any #:x Real #:y Real)
+        Boolean))
 (define (acquire-unit-lease! lease-ht uid role frame ttl #:target-id [tid 0] #:x [tx 0.0] #:y [ty 0.0])
   (cond
-    [(and (hash? lease-ht) (not (immutable? lease-ht)) (integer? uid) (> uid 0))
+    [(and (hash? lease-ht) (not (immutable? lease-ht)) (exact-integer? uid) (> uid 0))
      (define new-prio (role-lease-priority role))
-     (define existing (hash-ref lease-ht uid #f))
+     (define existing (hash-ref lease-ht uid (lambda () #f)))
      (cond
        [(or (not (unit-role-lease? existing))
             (<= (unit-role-lease-expires-frame existing) frame)
@@ -1434,45 +1545,56 @@
           (unit-role-lease role
                            new-prio
                            tid
-                           (exact->inexact tx)
-                           (exact->inexact ty)
+                           (->float tx)
+                           (->float ty)
                            (+ frame (max 1 ttl))))
-        (hash-set! lease-ht uid lease)
+        (dyn-hash-set! lease-ht uid lease)
         #t]
        [else #f])]
     [else #f]))
 
+(: unit-leased-above? (-> Any Any Any Integer Boolean))
 (define (unit-leased-above? lease-ht uid caller-role frame)
   (and (hash? lease-ht)
        uid
-       (let ([existing (hash-ref lease-ht uid #f)])
+       (let ([existing (hash-ref lease-ht uid (lambda () #f))])
          (and (unit-role-lease? existing)
               (> (unit-role-lease-expires-frame existing) frame)
               (> (unit-role-lease-priority existing) (role-lease-priority caller-role))
               #t))))
 
+(: leased-tags-above (-> Any Any Integer (Setof Integer)))
 (define (leased-tags-above lease-ht caller-role frame)
   (cond
     [(hash? lease-ht)
      (define caller-prio (role-lease-priority caller-role))
-     (for/fold ([acc (seteqv)])
+     (for/fold ([acc : (Setof Integer) (ann (seteqv) (Setof Integer))])
                ([(uid lease) (in-hash lease-ht)])
-       (if (and (unit-role-lease? lease)
+       (if (and (exact-integer? uid)
+                (unit-role-lease? lease)
                 (> (unit-role-lease-expires-frame lease) frame)
                 (> (unit-role-lease-priority lease) caller-prio))
            (set-add acc uid)
            acc))]
-    [else (seteqv)]))
+    [else (ann (seteqv) (Setof Integer))]))
 
 ;; Bistable Hysteresis Controller (Schmitt trigger + minimum dwell + re-entry cooldown)
-(struct bistable-state (active? changed-frame cooldown-until-frame) #:transparent)
+(struct bistable-state
+  ([active? : Boolean]
+   [changed-frame : Integer]
+   [cooldown-until-frame : Integer])
+  #:transparent)
 
+(: bistable-hysteresis-step
+   (->* (Any Any Integer #:enter? Boolean #:exit? Boolean)
+        (#:min-dwell-loops Integer #:cooldown-loops Integer)
+        Boolean))
 (define (bistable-hysteresis-step state-ht key frame
                                   #:enter? enter-now?
                                   #:exit? exit-now?
                                   #:min-dwell-loops [min-dwell 44]
                                   #:cooldown-loops [cooldown 22])
-  (define raw-prev (and (hash? state-ht) (hash-ref state-ht key #f)))
+  (define raw-prev (and (hash? state-ht) (hash-ref state-ht key (lambda () #f))))
   (define prev
     (if (and (bistable-state? raw-prev)
              (>= frame (bistable-state-changed-frame raw-prev)))
@@ -1491,20 +1613,30 @@
            (bistable-state #t frame (bistable-state-cooldown-until-frame prev))
            prev)]))
   (when (and (hash? state-ht) (not (immutable? state-ht)))
-    (hash-set! state-ht key next))
+    (dyn-hash-set! state-ht key next))
   (bistable-state-active? next))
 
 ;; Chebyshev / Axis-Aligned Bounding Box Reserved Spatial Footprint
-(struct reserved-aabb (cx cy half-w half-h kind owner-tag expires-frame) #:transparent)
+(struct reserved-aabb
+  ([cx : Float]
+   [cy : Float]
+   [half-w : Float]
+   [half-h : Float]
+   [kind : Symbol]
+   [owner-tag : Any]
+   [expires-frame : Integer])
+  #:transparent)
 
+(: aabb-overlaps? (-> Real Real Real Real Any Boolean))
 (define (aabb-overlaps? cx1 cy1 hw1 hh1 b)
   (and (reserved-aabb? b)
-       (< (abs (- (exact->inexact cx1) (exact->inexact (reserved-aabb-cx b))))
-          (- (+ (exact->inexact hw1) (exact->inexact (reserved-aabb-half-w b))) 1e-6))
-       (< (abs (- (exact->inexact cy1) (exact->inexact (reserved-aabb-cy b))))
-          (- (+ (exact->inexact hh1) (exact->inexact (reserved-aabb-half-h b))) 1e-6))
+       (< (abs (- (->float cx1) (->float (reserved-aabb-cx b))))
+          (- (+ (->float hw1) (->float (reserved-aabb-half-w b))) 1e-6))
+       (< (abs (- (->float cy1) (->float (reserved-aabb-cy b))))
+          (- (+ (->float hh1) (->float (reserved-aabb-half-h b))) 1e-6))
        #t))
 
+(: sc2-structure-half-dims (-> Any (Values Float Float)))
 (define (sc2-structure-half-dims bldg-sym)
   (define canon (sc2-canonical-structure-sym bldg-sym))
   (cond
@@ -1518,25 +1650,40 @@
      (values 1.5 1.5)]))
 
 ;; Generalized 1-to-1 Macro Energy Dispatcher
+(: dispatch-macro-energy!
+   (->* ((Listof Any)
+         (Listof Any)
+         Integer
+         Any
+         #:min-energy Real
+         #:valid-pair? Cb23
+         #:score-pair Cb23
+         #:emit-cast! Cb23)
+        (#:valid-caster? Cb12)
+        (Listof Any)))
 (define (dispatch-macro-energy! casters
                                 candidates
                                 frame
                                 claimed-targets-set
                                 #:min-energy min-energy
-                                #:valid-caster? [valid-caster? (lambda (_c) #t)]
+                                #:valid-caster? [valid-caster? (lambda ([_c : Any]) #t)]
                                 #:valid-pair? valid-pair?
                                 #:score-pair score-pair
                                 #:emit-cast! emit-cast!)
-  (define local-claimed-casters (mutable-set))
-  (define local-claimed-targets (mutable-set))
+  (define local-claimed-casters : (Mutable-HashTable Any Boolean) (make-hash))
+  (define local-claimed-targets : (Mutable-HashTable Any Boolean) (make-hash))
+  (: entity-key (-> Any Any))
   (define (entity-key x)
     (cond
-      [(hash? x) (or (hash-ref x 'id #f) (hash-ref x 'tag #f) x)]
+      [(hash? x) (or (hash-ref x 'id (lambda () #f))
+                     (hash-ref x 'tag (lambda () #f))
+                     x)]
       [else x]))
+  (: target-claimed? (-> Any Any Boolean))
   (define (target-claimed? tkey raw-cand)
-    (or (set-member? local-claimed-targets tkey)
+    (or (hash-has-key? local-claimed-targets tkey)
         (cond
-          [(and (set-mutable? claimed-targets-set))
+          [(set-mutable? claimed-targets-set)
            (or (set-member? claimed-targets-set tkey)
                (set-member? claimed-targets-set raw-cand))]
           [(set? claimed-targets-set)
@@ -1546,61 +1693,59 @@
            (or (hash-has-key? claimed-targets-set tkey)
                (hash-has-key? claimed-targets-set raw-cand))]
           [else #f])))
+  (: claim-target! (-> Any Void))
   (define (claim-target! tkey)
-    (set-add! local-claimed-targets tkey)
+    (hash-set! local-claimed-targets tkey #t)
     (cond
       [(set-mutable? claimed-targets-set)
        (set-add! claimed-targets-set tkey)]
       [(and (hash? claimed-targets-set) (not (immutable? claimed-targets-set)))
-       (hash-set! claimed-targets-set tkey frame)]
+       (dyn-hash-set! claimed-targets-set tkey frame)]
       [else (void)]))
-  (define eligible-casters
-    (for/list ([c (in-list casters)]
+  (define eligible-casters : (Listof Any)
+    (for/list : (Listof Any)
+              ([c (in-list casters)]
                #:when (and (or (not (hash? c))
-                               (>= (hash-ref c 'energy 0.0) min-energy))
-                           (if (procedure-arity-includes? valid-caster? 2)
-                               (valid-caster? c frame)
-                               (valid-caster? c))))
+                               (let ([en (hash-ref c 'energy (lambda () 0.0))])
+                                 (and (real? en) (>= en min-energy))))
+                           (and (call-1-or-2 valid-caster? c frame) #t)))
       c))
-  (define scored-pairs
-    (for*/fold ([acc '()])
+  (define scored-pairs : (Listof (Vector Float Any Any Any Any))
+    (for*/fold ([acc : (Listof (Vector Float Any Any Any Any)) '()])
                ([c (in-list eligible-casters)]
                 [cand (in-list candidates)])
       (define tkey (entity-key cand))
       (if (and (not (target-claimed? tkey cand))
-               (if (procedure-arity-includes? valid-pair? 3)
-                   (valid-pair? c cand frame)
-                   (valid-pair? c cand)))
-          (let ([sc (if (procedure-arity-includes? score-pair 3)
-                        (score-pair c cand frame)
-                        (score-pair c cand))])
-            (if (and (real? sc) (not (nan? sc)))
-                (cons (vector (exact->inexact sc) c cand (entity-key c) tkey) acc)
+               (and (call-2-or-3 valid-pair? c cand frame) #t))
+          (let ([sc (call-2-or-3 score-pair c cand frame)])
+            (if (and (real? sc) (not (nan? sc)) (not (infinite? sc)))
+                (cons (vector (->float sc) c cand (entity-key c) tkey) acc)
                 acc))
           acc)))
-  (define sorted-pairs
-    (sort scored-pairs > #:key (lambda (v) (vector-ref v 0))))
-  (define emitted '())
+  (define sorted-pairs : (Listof (Vector Float Any Any Any Any))
+    (sort scored-pairs
+          (lambda ([a : (Vector Float Any Any Any Any)]
+                   [b : (Vector Float Any Any Any Any)])
+            (> (vector-ref a 0) (vector-ref b 0)))))
+  (define emitted : (Listof Any) '())
   (for ([v (in-list sorted-pairs)])
     (define c (vector-ref v 1))
     (define cand (vector-ref v 2))
     (define ckey (vector-ref v 3))
     (define tkey (vector-ref v 4))
-    (unless (or (set-member? local-claimed-casters ckey)
+    (unless (or (hash-has-key? local-claimed-casters ckey)
                 (target-claimed? tkey cand))
-      (set-add! local-claimed-casters ckey)
+      (hash-set! local-claimed-casters ckey #t)
       (claim-target! tkey)
-      (define res
-        (if (procedure-arity-includes? emit-cast! 3)
-            (emit-cast! c cand frame)
-            (emit-cast! c cand)))
+      (define res (call-2-or-3 emit-cast! c cand frame))
       (when (and res (not (void? res)))
         (set! emitted (cons res emitted)))))
   (reverse emitted))
 
 ;; Midgame Economy-to-Army Curve (prevents pure-drone / pure-probe greed deaths vs pushes)
+(: required-army-supply-for-worker-growth (->* (Real) (Real) Float))
 (define (required-army-supply-for-worker-growth total-workers [enemy-threat-supply 0.0])
-  (max (* 0.85 (exact->inexact enemy-threat-supply))
+  (max (* 0.85 (->float enemy-threat-supply))
        (cond
          [(< total-workers 26) 0.0]
          [(< total-workers 34) 4.0]

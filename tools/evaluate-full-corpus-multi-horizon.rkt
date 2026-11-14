@@ -29,7 +29,7 @@
          "../lib/mirror-mind-predictor.rkt"
          "../lib/econ-ledger.rkt"
          "../lib/bot-runtime.rkt"
-         "../lib/zerospace-mastermind.rkt")
+         "../lib/sc2-combat-eval.rkt")
 
 (define HORIZONS '(15 30 45 60 75 90 105 130))
 (define D-KEYS '(0 1 2 3 4 5 d* tree_bayesian))

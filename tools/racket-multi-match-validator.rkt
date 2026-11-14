@@ -32,10 +32,9 @@
          "../lib/bot-runtime.rkt"
          "../lib/econ-ledger.rkt"
          "../lib/mirror-mind-predictor.rkt"
-         "../lib/zerospace-mastermind.rkt"
+         "../lib/sc2-combat-eval.rkt"
          (except-in "../lib/bot-crash-fuzzer.rkt"
-                    compute-shadow-ledger
-                    step-zerospace-mastermind!))
+                    compute-shadow-ledger))
 
 (define-runtime-path TOOLS-DIR ".")
 (define ROOT-DIR (simplify-path (build-path TOOLS-DIR "..")))

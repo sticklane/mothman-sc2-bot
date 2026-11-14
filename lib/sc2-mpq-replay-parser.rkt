@@ -23,6 +23,7 @@
          racket/port
          racket/string
          file/gunzip
+         "sc2-bayesian.rkt"
          "sc2-common.rkt")
 
 (provide STORM-CRYPT
@@ -523,7 +524,7 @@
        (* c-trd  (/ (- (max 0.0 (exact->inexact p1-kil))
                        (max 0.0 (exact->inexact p2-kil)))
                     k-denom))))
-  (round3 (/ 1.0 (+ 1.0 (exp (- log-odds))))))
+  (round3 (log-odds->prob log-odds)))
 
 (define (cluster-combat-engagements raw-deaths)
   ;; Each element of `raw-deaths` is `(list sec owner-pid unit x y cost)` sorted by `sec`
