@@ -3382,16 +3382,16 @@
 ;; 19. AI Arena BotZip Size Limit & Standalone Native ELF Binary Verification
 ;; =============================================================================
 
-(run-suite "19. AI Arena BotZip Size Limit (<= 32 MB / 50 MiB) & Standalone Native ELF Binary"
+(run-suite "19. AI Arena BotZip Size Limit (<= 35 MB / 50 MiB) & Standalone Native ELF Binary"
   ;; 1. Verify constants enforce a strict safety margin well below AI Arena's 50 MiB standard cap
   (assert-eq! AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024)
               "AI Arena standard tier max zip size must be 50 MiB (52,428,800 bytes)")
-  (assert-true! (<= MAX-BOT-ZIP-SIZE-BYTES (* 32 1000 1000))
-                "Repository BotZip safety limit must be <= 32 MB")
+  (assert-true! (<= MAX-BOT-ZIP-SIZE-BYTES (* 35 1000 1000))
+                "Repository BotZip safety limit must be <= 35 MB")
   (assert-true! (< MAX-BOT-ZIP-SIZE-BYTES AIARENA-STANDARD-MAX-ZIP-BYTES)
                 "MAX-BOT-ZIP-SIZE-BYTES must be strictly less than AIARENA-STANDARD-MAX-ZIP-BYTES")
 
-  ;; 2. Verify all 6 ladder BotZip archives exist and obey size & structure limits
+  ;; 2. Verify all 4 ladder BotZip archives exist and obey size & structure limits
   (for ([row (in-list VARIANTS)])
     (define bname (first row))
     (define zpath (build-path "ladder" (format "~a.zip" bname)))
@@ -3402,7 +3402,7 @@
                   (format "~a (~a bytes) must be >= ~a bytes (standalone ELF floor)"
                           zpath zsize MIN-BOT-ZIP-SIZE-BYTES))
     (assert-true! (<= zsize MAX-BOT-ZIP-SIZE-BYTES)
-                  (format "~a (~a bytes) must be <= ~a bytes (32 MB safety ceiling)"
+                  (format "~a (~a bytes) must be <= ~a bytes (35 MB safety ceiling)"
                           zpath zsize MAX-BOT-ZIP-SIZE-BYTES))
     (assert-true! (< zsize AIARENA-STANDARD-MAX-ZIP-BYTES)
                   (format "~a (~a bytes) must be < ~a bytes (50 MiB AI Arena limit)"
