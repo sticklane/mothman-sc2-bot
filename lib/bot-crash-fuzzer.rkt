@@ -45,7 +45,7 @@
 
  ;; Dynamic / Compatibility Target Wrappers
  compute-shadow-ledger
- step-zerospace-mastermind!
+ step-sc2-mastermind!
 
  ;; Contract Validator & Result Struct
  (struct-out action-contract-result)
@@ -69,7 +69,7 @@
  fuzz-step-live-bot-runtime!
  fuzz-mirror-mind-suite!
  fuzz-econ-ledger-suite!
- fuzz-zerospace-mastermind-suite!
+ fuzz-sc2-mastermind-suite!
 
  ;; Campaign Runner & Report Struct
  (struct-out fuzz-campaign-report)
@@ -85,16 +85,16 @@
                     (dynamic-require mirror-mind-mod-path 'compute-shadow-ledger))])
     (or exported compute-opponent-shadow-ledger)))
 
-;; Support both `step-double-reaction!` (`lib/sc2-combat-eval.rkt`) and legacy 2-arg call
-(define (step-zerospace-mastermind! mstate
-                                    [obs #f]
-                                    #:fap-score [fap-score 0]
-                                    #:enemy-units [enemy-units '()]
-                                    #:ally-buildings [ally-buildings '()]
-                                    #:self-workers [self-workers 16]
-                                    #:enemy-workers [enemy-workers 16]
-                                    #:self-army [self-army 200]
-                                    #:enemy-army [enemy-army 200])
+;; SC2 Mastermind adapter wrapping `step-double-reaction!` (`lib/sc2-combat-eval.rkt`)
+(define (step-sc2-mastermind! mstate
+                              [obs #f]
+                              #:fap-score [fap-score 0]
+                              #:enemy-units [enemy-units '()]
+                              #:ally-buildings [ally-buildings '()]
+                              #:self-workers [self-workers 16]
+                              #:enemy-workers [enemy-workers 16]
+                              #:self-army [self-army 200]
+                              #:enemy-army [enemy-army 200])
   (if (hash? obs)
       (let ([eu (hash-ref obs 'enemy-units enemy-units)]
             [ab (map (lambda (b)
@@ -1546,8 +1546,8 @@
 
   (values crashes contract-violations checks))
 
-;; Target 5: `step-double-reaction!` (`lib/sc2-combat-eval.rkt`)
-(define (fuzz-zerospace-mastermind-suite! mstate obs prng)
+;; Target 5: SC2 Mastermind (`step-double-reaction!` in `lib/sc2-combat-eval.rkt`)
+(define (fuzz-sc2-mastermind-suite! mstate obs prng)
   (define crashes '())
   (define contract-violations '())
   (define checks 0)
@@ -1562,17 +1562,17 @@
                      (set! crashes (cons (list 'step-double-reaction! (exn-message e) obs) crashes)))])
     (set! checks (add1 checks))
     (cond
-      [(procedure-arity-includes? step-zerospace-mastermind! 2)
-       (step-zerospace-mastermind! mstate obs)]
+      [(procedure-arity-includes? step-sc2-mastermind! 2)
+       (step-sc2-mastermind! mstate obs)]
       [else
-       (step-zerospace-mastermind! mstate
-                                   #:fap-score (- (prng 100) 50)
-                                   #:enemy-units (if (list? enemy-units) enemy-units '())
-                                   #:ally-buildings ally-bldgs
-                                   #:self-workers (prng 80)
-                                   #:enemy-workers (prng 80)
-                                   #:self-army (* 50 (prng 40))
-                                   #:enemy-army (* 50 (prng 40)))]))
+       (step-sc2-mastermind! mstate
+                             #:fap-score (- (prng 100) 50)
+                             #:enemy-units (if (list? enemy-units) enemy-units '())
+                             #:ally-buildings ally-bldgs
+                             #:self-workers (prng 80)
+                             #:enemy-workers (prng 80)
+                             #:self-army (* 50 (prng 40))
+                             #:enemy-army (* 50 (prng 40)))]))
 
   (values crashes contract-violations checks))
 
@@ -1665,7 +1665,7 @@
        (define-values (c2 v2 k2) (fuzz-step-live-bot-runtime! rt obs))
        (define-values (c3 v3 k3) (fuzz-mirror-mind-suite! mmstate obs prng))
        (define-values (c4 v4 k4) (fuzz-econ-ledger-suite! obs prng))
-       (define-values (c5 v5 k5) (fuzz-zerospace-mastermind-suite! mstate obs prng))
+       (define-values (c5 v5 k5) (fuzz-sc2-mastermind-suite! mstate obs prng))
        (set! total-checks (+ total-checks k1 k2 k3 k4 k5))
        (record-crashes! (append c1 c2 c3 c4 c5))
        (record-violations! (append v1 v2 v3 v4 v5))]
@@ -1680,7 +1680,7 @@
        (define-values (c2 v2 k2) (fuzz-step-live-bot-runtime! rt obs))
        (define-values (c3 v3 k3) (fuzz-mirror-mind-suite! mmstate obs prng))
        (define-values (c4 v4 k4) (fuzz-econ-ledger-suite! obs prng))
-       (define-values (c5 v5 k5) (fuzz-zerospace-mastermind-suite! mstate obs prng))
+       (define-values (c5 v5 k5) (fuzz-sc2-mastermind-suite! mstate obs prng))
        (set! total-checks (+ total-checks k1 k2 k3 k4 k5))
        (record-crashes! (append c1 c2 c3 c4 c5))
        (record-violations! (append v1 v2 v3 v4 v5))]
@@ -1702,7 +1702,7 @@
        (define-values (c2 v2 k2) (fuzz-step-live-bot-runtime! rt obs))
        (define-values (c3 v3 k3) (fuzz-mirror-mind-suite! mmstate obs prng))
        (define-values (c4 v4 k4) (fuzz-econ-ledger-suite! obs prng))
-       (define-values (c5 v5 k5) (fuzz-zerospace-mastermind-suite! mstate obs prng))
+       (define-values (c5 v5 k5) (fuzz-sc2-mastermind-suite! mstate obs prng))
        (set! total-checks (+ total-checks k2 k3 k4 k5))
        (record-crashes! (append c2 c3 c4 c5))
        (record-violations! (append v2 v3 v4 v5))]))

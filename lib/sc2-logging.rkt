@@ -42,6 +42,7 @@
   ([active-bo-goal-sym : Symbol]
    [active-bo-goal-kind : Symbol]
    [active-bo-target-count : Nonnegative-Integer]
+   [active-bo-target-sec : Float]
    [reserved-minerals : Nonnegative-Integer]
    [reserved-gas : Nonnegative-Integer]
    [target-workers : Nonnegative-Integer]
@@ -155,6 +156,7 @@
       (if (pro-bo-goal? ag) (pro-bo-goal-target-sym ag) 'none)
       (if (pro-bo-goal? ag) (pro-bo-goal-kind ag) 'none)
       (if (pro-bo-goal? ag) (pro-bo-goal-target-count ag) 0)
+      (if (pro-bo-goal? ag) (safe-finite-real (pro-bo-goal-target-sec ag) 0.0) 0.0)
       (pro-bo-eval-result-reserved-minerals src)
       (pro-bo-eval-result-reserved-gas src)
       (pro-bo-eval-result-target-workers src)
@@ -166,10 +168,15 @@
      (define def-sym : Symbol (if (pro-bo-goal? raw-ag) (pro-bo-goal-target-sym raw-ag) 'none))
      (define def-kind : Symbol (if (pro-bo-goal? raw-ag) (pro-bo-goal-kind raw-ag) 'none))
      (define def-cnt : Nonnegative-Integer (if (pro-bo-goal? raw-ag) (pro-bo-goal-target-count raw-ag) 0))
+     (define def-sec : Float
+       (if (pro-bo-goal? raw-ag)
+           (safe-finite-real (pro-bo-goal-target-sec raw-ag) 0.0)
+           0.0))
      (bot-goal-log-snapshot
       (safe-sym (hget* src '(active-bo-goal-sym bo-goal-sym saving-for) def-sym) def-sym)
       (safe-sym (hget* src '(active-bo-goal-kind bo-goal-kind) def-kind) def-kind)
       (safe-nonneg-int (hget* src '(active-bo-target-count bo-target-count) def-cnt) def-cnt)
+      (safe-finite-real (hget* src '(active-bo-target-sec bo-target-sec target-sec) def-sec) def-sec)
       (safe-nonneg-int (hget* src '(reserved-minerals reserved-min-floor) 0) 0)
       (safe-nonneg-int (hget* src '(reserved-gas reserved-gas-floor) 0) 0)
       (safe-nonneg-int (hget* src '(target-workers) 0) 0)
@@ -239,7 +246,12 @@
   (define t (bot-step-log-record-tactics rec))
   (define sched-str
     (string-join (map symbol->string (bot-goal-log-snapshot-scheduled-ids g)) ","))
-  (format "[SCBOT_STATE] f=~a matchup=~a posture=~a pers=~a arch=~a win=~a conf=~a bayesian=(bluff=~a,rush=~a,hexp=~a,tsw=~a,camp=~a) goal=~a/~a(escrow=~aM/~aG,w=~a,army=~a) sched=(~a) tactics=(pos=~a,adv=~a,sec=~a,orders=~a)"
+  (define target-sec (bot-goal-log-snapshot-active-bo-target-sec g))
+  (define timing-tag
+    (if (> target-sec 0.0)
+        (format "@~as" (round1 target-sec))
+        ""))
+  (format "[SCBOT_STATE] f=~a matchup=~a posture=~a pers=~a arch=~a win=~a conf=~a bayesian=(bluff=~a,rush=~a,hexp=~a,tsw=~a,camp=~a) goal=~a/~a~a(escrow=~aM/~aG,w=~a,army=~a) sched=(~a) tactics=(pos=~a,adv=~a,sec=~a,orders=~a)"
           (bot-mind-log-snapshot-frame m)
           (bot-mind-log-snapshot-matchup m)
           (bot-mind-log-snapshot-posture m)
@@ -254,6 +266,7 @@
           (fmt2 (bot-mind-log-snapshot-pad-camped-posterior m))
           (bot-goal-log-snapshot-active-bo-goal-kind g)
           (bot-goal-log-snapshot-active-bo-goal-sym g)
+          timing-tag
           (bot-goal-log-snapshot-reserved-minerals g)
           (bot-goal-log-snapshot-reserved-gas g)
           (bot-goal-log-snapshot-target-workers g)
@@ -290,6 +303,7 @@
      'active-bo-goal-sym (bot-goal-log-snapshot-active-bo-goal-sym g)
      'active-bo-goal-kind (bot-goal-log-snapshot-active-bo-goal-kind g)
      'active-bo-target-count (bot-goal-log-snapshot-active-bo-target-count g)
+     'active-bo-target-sec (bot-goal-log-snapshot-active-bo-target-sec g)
      'reserved-minerals (bot-goal-log-snapshot-reserved-minerals g)
      'reserved-gas (bot-goal-log-snapshot-reserved-gas g)
      'target-workers (bot-goal-log-snapshot-target-workers g)

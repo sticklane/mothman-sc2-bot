@@ -49,8 +49,8 @@ Layer 0 (Typed Domain Types, Wire Witnesses & LotV Game Constants)
 *Note on the `sc2-combat-eval.rkt` <-> `perception-grid.rkt` dependency:* `lib/sc2-combat-eval.rkt` imports only `combat-measure` (and its struct predicate/accessors) via `(only-in "perception-grid.rkt" ...)`, while `lib/perception-grid.rkt` depends only on `sc2-types.rkt`, `sc2-bayesian.rkt`, and `sc2-pathing.rkt`. The module graph remains strictly acyclic.
 
 Supporting audit, verification, tooling, and packaging modules sit alongside Layers 3–4 without adding cycles into Layers 0–2:
-- Verification & audits: `lib/state-machine-verifier.rkt`, `lib/bot-crash-fuzzer.rkt`, `lib/pro-replay-starvation-audit.rkt`, `lib/sc2-proto-wire-verifier.rkt`, `lib/sc2-mpq-replay-parser.rkt`.
-- DSL compiler & tooling: `compiler/syntax.rkt` (`#lang sc-bot` posture/state-machine/coeffect-grade syntax), `tools/*.rkt`, `ladder/build-aiarena-zip.rkt`.
+- Verification & audits: `lib/state-machine-verifier.rkt`, `lib/bot-crash-fuzzer.rkt` (including `step-sc2-mastermind!` and `fuzz-sc2-mastermind-suite!`), `lib/pro-replay-starvation-audit.rkt`, `lib/sc2-proto-wire-verifier.rkt`, `lib/sc2-mpq-replay-parser.rkt`.
+- DSL compiler, tooling & ladder packaging: `compiler/syntax.rkt` (`#lang sc-bot` posture/state-machine/coeffect-grade syntax), `tools/*.rkt`, `ladder/build-aiarena-zip.rkt` (builds only the 4 active ladder archives `ladder/Mothman-{X,Z,T,P}.zip` plus `ladder/.cache/mothman_standalone_elf`; legacy `Mothman.zip` and `Mothman-R.zip` are retired).
 
 ---
 
@@ -83,19 +83,19 @@ All build orders and opponent tech-progression trees live as standalone `#lang t
 
 ### Matchup Build Specifications (9 files)
 
-Each matchup module exports a single `build-order-spec` struct (`matchup`, `race`, `name`, `archetype`, `description`, `steps` as `(Listof pro-bo-goal)`, and 7-minute empirical `supply-curve` checkpoints as `(Listof SupplyCurvePoint)` where each entry is `(minute . (workers . army-supply))` supporting fractional `Real` checkpoints):
+Each matchup module exports a single 9-field `build-order-spec` struct (`matchup`, `race`, `name`, `archetype`, `description`, `steps` as `(Listof pro-bo-goal)`, 7-minute empirical `supply-curve` checkpoints as `(Listof SupplyCurvePoint)` where each entry is `(minute . (workers . army-supply))` supporting fractional `Real` checkpoints, `unit-timings` as `(Listof pro-unit-timing)`, and `upgrade-timings` as `(Listof pro-upgrade-timing)`):
 
-| Matchup | File | Exported Binding | Build Steps |
-| :--- | :--- | :--- | :---: |
-| `ZvZ` | `lib/build-orders/zvz-16-hatch-pool-bane.rkt` | `ZvZ-BUILD-ORDER` | 19 |
-| `ZvT` | `lib/build-orders/zvt-16-hatch-macro-roach-ravager.rkt` | `ZvT-BUILD-ORDER` | 22 |
-| `ZvP` | `lib/build-orders/zvp-16-hatch-3-base-roach-hydra.rkt` | `ZvP-BUILD-ORDER` | 22 |
-| `TvZ` | `lib/build-orders/tvz-reaper-fe-1-1-1-hellion-banshee.rkt` | `TvZ-BUILD-ORDER` | 24 |
-| `TvT` | `lib/build-orders/tvt-reaper-fe-double-gas-raven-tank.rkt` | `TvT-BUILD-ORDER` | 26 |
-| `TvP` | `lib/build-orders/tvp-reaper-fe-3-rax-stim-medivac.rkt` | `TvP-BUILD-ORDER` | 24 |
-| `PvZ` | `lib/build-orders/pvz-1-gate-fe-stargate-oracle-archon.rkt` | `PvZ-BUILD-ORDER` | 22 |
-| `PvT` | `lib/build-orders/pvt-1-gate-fe-blink-robo-colossus.rkt` | `PvT-BUILD-ORDER` | 22 |
-| `PvP` | `lib/build-orders/pvp-2-gate-cyber-expand-blink-immortal.rkt` | `PvP-BUILD-ORDER` | 22 |
+| Matchup | File | Exported Binding | Build Steps | Unit Timings | Upgrade Timings |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| `ZvZ` | `lib/build-orders/zvz-16-hatch-pool-bane.rkt` | `ZvZ-BUILD-ORDER` | 19 | 9 | 6 |
+| `ZvT` | `lib/build-orders/zvt-16-hatch-macro-roach-ravager.rkt` | `ZvT-BUILD-ORDER` | 22 | 9 | 6 |
+| `ZvP` | `lib/build-orders/zvp-16-hatch-3-base-roach-hydra.rkt` | `ZvP-BUILD-ORDER` | 22 | 8 | 6 |
+| `TvZ` | `lib/build-orders/tvz-reaper-fe-1-1-1-hellion-banshee.rkt` | `TvZ-BUILD-ORDER` | 24 | 8 | 6 |
+| `TvT` | `lib/build-orders/tvt-reaper-fe-double-gas-raven-tank.rkt` | `TvT-BUILD-ORDER` | 26 | 9 | 4 |
+| `TvP` | `lib/build-orders/tvp-reaper-fe-3-rax-stim-medivac.rkt` | `TvP-BUILD-ORDER` | 24 | 9 | 6 |
+| `PvZ` | `lib/build-orders/pvz-1-gate-fe-stargate-oracle-archon.rkt` | `PvZ-BUILD-ORDER` | 22 | 8 | 6 |
+| `PvT` | `lib/build-orders/pvt-1-gate-fe-blink-robo-colossus.rkt` | `PvT-BUILD-ORDER` | 22 | 8 | 6 |
+| `PvP` | `lib/build-orders/pvp-2-gate-cyber-expand-blink-immortal.rkt` | `PvP-BUILD-ORDER` | 22 | 7 | 4 |
 
 ### Race Tech-Progression Trees (3 files)
 
@@ -107,19 +107,25 @@ Opponent scouting and `mirror-mind-predictor.rkt` tech inference use three DAGs 
 
 ### How Engineers Review, Edit, and Access Builds
 
-1. To modify an opening or supply curve, edit the corresponding file in `lib/build-orders/` (`pro-bo-goal` entries follow `(pro-bo-goal kind target-sym target-count min-supply prereq-ready-sym)` where `kind` is `'build`, `'expand`, `'morph`, `'train`, or `'research`).
+1. To modify an opening, timing benchmark, or supply curve, edit the corresponding file in `lib/build-orders/`:
+   - `pro-bo-goal` uses 6 fields `(pro-bo-goal kind target-sym target-count min-supply prereq-ready-sym target-sec)` where `kind` is `'build`, `'expand`, `'morph`, `'train`, or `'research` and `target-sec` is the empirical LotV Faster-speed target clock time in seconds (`22.4` frames/sec; `make-pro-bo-goal` defaults `target-sec` to `0.0`).
+   - `pro-unit-timing` uses `(pro-unit-timing unit-sym target-count min-supply target-sec prereq-ready-sym)` for cumulative unit count benchmarks.
+   - `pro-upgrade-timing` uses `(pro-upgrade-timing upgrade-sym start-sec complete-sec min-supply prereq-ready-sym)` for research start/completion benchmarks (`lib/sc2-types.rkt` and `lib/sc2-common.rkt` both export `pro-unit-timing` and `pro-upgrade-timing`).
 2. `lib/build-orders.rkt` aggregates all 9 specs into `ALL-BUILD-ORDER-SPECS` and exposes:
    - Typed lookup & step accessors: `lookup-build-order-for-matchup`, `pro-build-order-steps-for-matchup`, `pro-supply-curve-target`.
+   - Typed timing helpers: `pro-unit-timings-for-matchup`, `pro-upgrade-timings-for-matchup`, `due-pro-unit-timings` (at `frame = 0` checks `supply-used >= min-supply`; at `frame > 0` activates within a `15.0`s lookahead or when `supply-used >= min-supply` within a `30.0`s lead window of `target-sec`, expiring after `target-sec + late-window-sec` [default `180.0`s] or past `target-sec + 60.0`s once `supply-used >= min-supply + 16`), `due-pro-upgrade-timings` (at `frame = 0` checks `supply-used >= min-supply`; at `frame > 0` activates within `15.0`s of `start-sec` or when `supply-used >= min-supply` within a `30.0`s lead window, expiring after `complete-sec + late-window-sec` [default `240.0`s]), `pro-unit-timing->bo-goal`, `pro-upgrade-timing->bo-goal`.
    - Indexed tech-tree lookups: `ZERG-BO-NODE-BY-ID`, `TERRAN-BO-NODE-BY-ID`, `PROTOSS-BO-NODE-BY-ID`, `lookup-race-build-order-tree`, `lookup-race-bo-node-by-id`.
-   - Backward-compatible S-expression view: `PRO-BUILD-ORDER-DB`, `find-matchup-entry`, and `select-pro-build-order` synthesized directly from `ALL-BUILD-ORDER-SPECS`.
-3. `lib/econ-ledger.rkt` and `lib/mirror-mind-predictor.rkt` re-export these single-source bindings from `lib/build-orders.rkt` and `lib/sc2-types.rkt`, eliminating duplicated build-order and tech-tree tables.
+   - Backward-compatible S-expression view: `PRO-BUILD-ORDER-DB`, `find-matchup-entry`, and `select-pro-build-order` synthesized directly from `ALL-BUILD-ORDER-SPECS` (including step `(sec ...)`, `(unit-timings ...)`, and `(upgrade-timings ...)`).
+3. `lib/econ-ledger.rkt`, `lib/priority-macro-brain.rkt`, and `lib/mirror-mind-predictor.rkt` consume these single-source bindings (`lib/econ-ledger.rkt` re-exports `pro-bo-goal`, `make-pro-bo-goal`, `pro-unit-timing`, `pro-upgrade-timing`, and the `pro-*-timings*` helpers):
+   - **`lib/econ-ledger.rkt` (`evaluate-build-order-next-step`)**: activates canonical steps when `supply-used >= min-supply` OR (at `frame > 0` with `target-sec > 0.0`) `elapsed-sec >= target-sec`, appending `due-pro-upgrade-timings` and `due-pro-unit-timings` at `frame > 0`.
+   - **`lib/priority-macro-brain.rkt` (`collect-due-bo-context`, `step-priority-macro-brain`)**: combines supply-due and clock-due (`frame / 22.4`) steps with Track 2c timing urgency plans (`'timing-upgrade-plan` at utility `460.0` once `elapsed-sec >= start-sec` or `438.0` in 15s lookahead, damped by `under-sat-econ?` to `428.0`/`422.0` and `140.0` under non-defensive attack; `'timing-unit-plan` at `436.0` once `elapsed-sec >= target-sec` when saturated or `424.0` in lookahead / `under-sat-econ?`, `420.0` when non-peaceful, with `queen-sat-defer?` clamping excess Queens to `120.0` and `queen-defer?` to `80.0` across Track 2/2c), feeds all clock-due goals into `find-all-broken-tech-dependencies`, and preserves `pro-bo-goal-target-sec` via `lookup-timing-sec-for-sym`.
 
 ---
 
 ## 4. Spatial, Pathing, Placement & Perception Stack + Bayesian Inference
 
 ### `lib/sc2-types.rkt` & `lib/sc2-common.rkt` (Layer 0)
-Defines canonical `Race`, `KnownRace`, `MatchupSym`, `SupplyCurvePoint`, `point2d`, `aabb2d`, race/matchup normalizers (`normalize-race`, `normalize-known-race`, `resolve-matchup-symbol`), and total safe coercion helpers (`safe-real`, `safe-exact-int`, `safe-nonneg-int`, `clamp-prob`, `dist2d`).
+Defines canonical `Race`, `KnownRace`, `MatchupSym`, `SupplyCurvePoint`, `point2d`, `aabb2d`, 6-field `pro-bo-goal` (with `target-sec` + `make-pro-bo-goal`), `pro-unit-timing`, `pro-upgrade-timing`, 9-field `build-order-spec`, race/matchup normalizers (`normalize-race`, `normalize-known-race`, `resolve-matchup-symbol`), and total safe coercion helpers (`safe-real`, `safe-exact-int`, `safe-nonneg-int`, `clamp-prob`, `dist2d`). (`lib/sc2-common.rkt` re-exports the total helpers plus `pro-unit-timing` and `pro-upgrade-timing`.)
 
 ### `lib/sc2-bayesian.rkt` (Layer 1 — Bayesian Inference)
 Single source of truth for all probabilistic updating and divergence calculations:
@@ -177,16 +183,16 @@ Typed combat engine covering:
 `lib/sc2-logging.rkt` provides typed structured observability over every decision step:
 - **Snapshot Structs**:
   - `bot-mind-log-snapshot`: `frame`, `race`, `enemy-race`, `matchup`, `posture`, `personality`, `enemy-archetype`, `win-prob`, `confidence`, `bluff-posterior`, `rush-posterior`, `hidden-expand-posterior`, `tech-switch-posterior`, `pad-camped-posterior`.
-  - `bot-goal-log-snapshot`: `active-bo-goal-sym`, `active-bo-goal-kind`, `active-bo-target-count`, `reserved-minerals`, `reserved-gas`, `target-workers`, `target-army-supply`, `scheduled-ids`, `escrow-blocked-ids`.
+  - `bot-goal-log-snapshot`: `active-bo-goal-sym`, `active-bo-goal-kind`, `active-bo-target-count`, `active-bo-target-sec` (`Float`), `reserved-minerals`, `reserved-gas`, `target-workers`, `target-army-supply`, `scheduled-ids`, `escrow-blocked-ids`.
   - `bot-tactics-log-snapshot`: `combat-posture`, `snowball-adv`, `retreat-sector`, `burrowed-count`, `shimmer-alerts`, `swapped-addons`, `issued-orders`.
   - `bot-step-log-record`: aggregates `(mind goals tactics)`.
 - **Cadence, Extraction, Formatting & Serialization**:
   - `should-emit-step-log?` (`frame interval changed?` -> emits on frame `<= 1`, state change, or `(remainder frame interval) = 0`).
-  - `extract-bot-step-log-record` safely coerces arbitrary mind/goal/tactics hashes or `pro-bo-eval-result` structs into a validated `bot-step-log-record`.
-  - `bot-step-log-record->hash` serializes nested `'frame`, `'matchup`, `'mind`, `'goals`, and `'tactics` hashes for telemetry streams.
-  - `format-bot-step-log-line` emits canonical single-line `[SCBOT_STATE]` diagnostics:
+  - `extract-bot-step-log-record` safely coerces arbitrary mind/goal/tactics hashes or `pro-bo-eval-result` structs into a validated `bot-step-log-record` (extracting `pro-bo-goal-target-sec` into `active-bo-target-sec`).
+  - `bot-step-log-record->hash` serializes nested `'frame`, `'matchup`, `'mind`, `'goals` (including `'active-bo-target-sec`), and `'tactics` hashes for telemetry streams.
+  - `format-bot-step-log-line` emits canonical single-line `[SCBOT_STATE]` diagnostics (`goal=<kind>/<sym>@<sec>s(escrow=...)` when `active-bo-target-sec > 0.0`, or `goal=<kind>/<sym>(escrow=...)` when `<= 0.0`):
     ```text
-    [SCBOT_STATE] f=672 matchup=TvP posture=timing-push pers=aggressive arch=stalker-colossus win=0.64 conf=0.81 bayesian=(bluff=0.12,rush=0.25,hexp=0.09,tsw=0.18,camp=0.04) goal=train/overlord(escrow=0M/0G,w=22,army=1) sched=() tactics=(pos=engage,adv=1.35,sec=4,orders=14)
+    [SCBOT_STATE] f=672 matchup=TvP posture=timing-push pers=aggressive arch=stalker-colossus win=0.64 conf=0.81 bayesian=(bluff=0.12,rush=0.25,hexp=0.09,tsw=0.18,camp=0.04) goal=research/stimpack@308.0s(escrow=100M/100G,w=44,army=20) sched=() tactics=(pos=engage,adv=1.35,sec=4,orders=14)
     ```
 - **Live Runtime & Ladder Wiring**:
   - `lib/bot-runtime.rkt` (`step-live-bot-runtime!`) extracts a `bot-step-log-record` on every step, attaches `'state-log` (`bot-step-log-record->hash`) in telemetry, and sets `'state-log-line` when `(should-emit-step-log? step-frame 22 state-changed?)` holds (`""` otherwise; no stdout prints).

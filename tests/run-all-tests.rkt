@@ -125,8 +125,7 @@
                   compute-turning-points
                   cluster-combat-engagements)
          (except-in "../lib/bot-crash-fuzzer.rkt"
-                    compute-shadow-ledger
-                    step-zerospace-mastermind!)
+                    compute-shadow-ledger)
          "../lib/sc2-proto-wire-verifier.rkt"
          "../tools/fuzz-sc2-protobuf-output.rkt")
 
@@ -2068,7 +2067,39 @@
   (assert-eq! (fuzz-campaign-report-total-contract-violations fuzz-rep) 0
               "Contract fuzzer must encounter 0 SC2 LotV contract violations")
   (assert-true! (fuzz-campaign-report-passed? fuzz-rep)
-                "Fuzz campaign report must pass with 0 crashes and 0 contract violations"))
+                "Fuzz campaign report must pass with 0 crashes and 0 contract violations")
+
+  ;; Direct checks on renamed SC2 Mastermind fuzzer exports (`step-sc2-mastermind!` & `fuzz-sc2-mastermind-suite!`)
+  (define mm-obs-ret
+    (step-sc2-mastermind! (make-mastermind-state 'Zerg)
+                          (hash 'fap-score -25
+                                'enemy-units '(lurker hydralisk)
+                                'ally-buildings (list (hash 'type 'hydralisk-den) 'spire)
+                                'ally-units (list (hash 'type 'roach)))))
+  (assert-true! (mastermind-state? mm-obs-ret))
+  (assert-eq! (mastermind-state-enemy-archetype mm-obs-ret) 'lurker-contain)
+  (assert-eq! (mastermind-state-directive mm-obs-ret) 'retreat-and-regroup)
+
+  (define mm-kw-ret
+    (step-sc2-mastermind! (make-mastermind-state 'Terran MARV-MACRO-OPEN-PERSONALITY)
+                          #:fap-score 20
+                          #:enemy-units '(marine marauder medivac)
+                          #:ally-buildings '(barracks factory starport)
+                          #:self-workers 45
+                          #:enemy-workers 40
+                          #:self-army 1800
+                          #:enemy-army 1200))
+  (assert-true! (mastermind-state? mm-kw-ret))
+  (assert-eq! (mastermind-state-enemy-archetype mm-kw-ret) 'bio-ball)
+
+  (define-values (mm-fuzz-crashes mm-fuzz-viols mm-fuzz-checks)
+    (fuzz-sc2-mastermind-suite!
+     (make-mastermind-state 'Protoss CLEM-TEMPO-MULTITASK-PERSONALITY)
+     (hash 'enemy-units '(stalker sentry) 'ally-buildings '(gateway robotics-facility))
+     (make-deterministic-prng 424242)))
+  (assert-eq! mm-fuzz-crashes '())
+  (assert-eq! mm-fuzz-viols '())
+  (assert-eq! mm-fuzz-checks 1))
 
 ;; =============================================================================
 ;; 5.15 Multi-Depth Mirrored Tactical Micro Brain, In-Progress Order Ledger,
@@ -9405,7 +9436,22 @@
   (assert-eq! (normalize-race 'random) 'Random)
   (assert-eq! (normalize-known-race 'random) 'Zerg)
   (assert-eq! (resolve-matchup-symbol "Protoss" "zerg") 'PvZ)
-  (assert-eq! (pro-bo-goal-target (pro-bo-goal 'build 'gateway 1 16 'pylon)) 'gateway)
+  (define g42-1 (pro-bo-goal 'build 'gateway 1 16 'pylon 38.0))
+  (assert-eq! (pro-bo-goal-target g42-1) 'gateway)
+  (assert-eq! (pro-bo-goal-target-sec g42-1) 38.0)
+  (define g42-def (make-pro-bo-goal 'build 'spawning-pool 1 16 'hatchery))
+  (assert-eq! (pro-bo-goal-target-sec g42-def) 0.0)
+  (define g42-timed (make-pro-bo-goal 'build 'spawning-pool 1 16 'hatchery 48.0))
+  (assert-eq! (pro-bo-goal-target-sec g42-timed) 48.0)
+  (define ut42 (pro-unit-timing 'reaper 1 20 86.9 'barracks))
+  (assert-true! (pro-unit-timing? ut42))
+  (assert-eq! (pro-unit-timing-unit-sym ut42) 'reaper)
+  (assert-eq! (pro-unit-timing-target-sec ut42) 86.9)
+  (define up42 (pro-upgrade-timing 'stimpack 308.0 408.0 65 'barracks-techlab))
+  (assert-true! (pro-upgrade-timing? up42))
+  (assert-eq! (pro-upgrade-timing-upgrade-sym up42) 'stimpack)
+  (assert-eq! (pro-upgrade-timing-start-sec up42) 308.0)
+  (assert-eq! (pro-upgrade-timing-complete-sec up42) 408.0)
   (assert-eq! (clamp-prob -0.5 0.05) 0.05)
   (assert-eq! (clamp-prob 1.5 0.05) 0.95)
   (define frac-curve-pt '(5 . (44.5 . 23.5)))
@@ -9449,13 +9495,112 @@
   (assert-true! (> (bayesian-strategic-priors-rush-posterior strat-p) 0.70))
   (assert-true! (> (bayesian-strategic-priors-feint-posterior strat-p) 0.50))
 
-  ;; 42.3 lib/build-orders.rkt (+ lib/build-orders/*.rkt): 9 specs, 7-min curve, 3 race trees
+  ;; 42.3 lib/build-orders.rkt (+ lib/build-orders/*.rkt): 9 specs, clock timings, 7-min curve, 3 race trees
   (assert-eq! (length ALL-BUILD-ORDER-SPECS) 9)
   (for ([m (in-list '(ZvZ ZvT ZvP TvZ TvT TvP PvZ PvT PvP))])
     (define spec (lookup-build-order-for-matchup m))
     (assert-eq! (build-order-spec-matchup spec) m)
     (assert-true! (>= (length (build-order-spec-steps spec)) 15))
-    (assert-eq! (length (build-order-spec-supply-curve spec)) 7))
+    (assert-true! (andmap (lambda (g) (> (pro-bo-goal-target-sec g) 0.0))
+                          (build-order-spec-steps spec)))
+    (assert-eq! (length (build-order-spec-supply-curve spec)) 7)
+    (define uts (build-order-spec-unit-timings spec))
+    (define ups (build-order-spec-upgrade-timings spec))
+    (assert-true! (>= (length uts) 6))
+    (assert-true! (andmap (lambda (ut)
+                            (and (pro-unit-timing? ut)
+                                 (>= (pro-unit-timing-target-count ut) 1)
+                                 (> (pro-unit-timing-target-sec ut) 0.0)))
+                          uts))
+    (assert-true! (>= (length ups) 4))
+    (assert-true! (andmap (lambda (up)
+                            (and (pro-upgrade-timing? up)
+                                 (> (pro-upgrade-timing-start-sec up) 0.0)
+                                 (< (pro-upgrade-timing-start-sec up)
+                                    (pro-upgrade-timing-complete-sec up))))
+                          ups))
+    (define sexp (find-matchup-entry m))
+    (assert-true! (and (pair? sexp)
+                       (pair? (assq 'steps (cddr sexp)))
+                       (pair? (assq 'unit-timings (cddr sexp)))
+                       (pair? (assq 'upgrade-timings (cddr sexp)))
+                       (pair? (assq 'sec (cdr (second (assq 'steps (cddr sexp)))))))))
+  (assert-eq! (length (pro-unit-timings-for-matchup 'Terran 'Protoss)) 9)
+  (assert-eq! (length (pro-upgrade-timings-for-matchup 'Terran 'Protoss)) 6)
+  (assert-true! (pair? (assq 'unit-timings (cddr (select-pro-build-order 'Terran 'Protoss)))))
+  (assert-true! (pair? (assq 'matchups (cdr PRO-BUILD-ORDER-DB))))
+
+  ;; Clock-due triggers (`frame > 0`, 15s lookahead even when `supply-used < min-supply`) + expiration
+  (define tvp-units-early (due-pro-unit-timings 'Terran 'Protoss (exact-round (* 60.0 22.4)) 12))
+  (assert-true! (not (ormap (lambda (ut) (eq? (pro-unit-timing-unit-sym ut) 'reaper)) tvp-units-early)))
+  (define tvp-units-lookahead (due-pro-unit-timings 'Terran 'Protoss (exact-round (* 73.0 22.4)) 12))
+  (assert-true! (not (not (ormap (lambda (ut) (eq? (pro-unit-timing-unit-sym ut) 'reaper)) tvp-units-lookahead))))
+  (define tvp-units-expired (due-pro-unit-timings 'Terran 'Protoss (exact-round (* 270.0 22.4)) 12))
+  (assert-true! (not (ormap (lambda (ut) (eq? (pro-unit-timing-unit-sym ut) 'reaper)) tvp-units-expired)))
+
+  (define tvp-upgs-early (due-pro-upgrade-timings 'Terran 'Protoss (exact-round (* 200.0 22.4)) 16))
+  (assert-true! (not (ormap (lambda (up) (eq? (pro-upgrade-timing-upgrade-sym up) 'banshee-cloak)) tvp-upgs-early)))
+  (define tvp-upgs-lookahead (due-pro-upgrade-timings 'Terran 'Protoss (exact-round (* 246.0 22.4)) 16))
+  (define banshee-up
+    (findf (lambda (up) (eq? (pro-upgrade-timing-upgrade-sym up) 'banshee-cloak)) tvp-upgs-lookahead))
+  (assert-true! (pro-upgrade-timing? banshee-up))
+  (define banshee-goal (pro-upgrade-timing->bo-goal banshee-up))
+  (assert-eq! (pro-bo-goal-kind banshee-goal) 'research)
+  (assert-eq! (pro-bo-goal-target-sym banshee-goal) 'banshee-cloak)
+  (assert-eq! (pro-bo-goal-target-sec banshee-goal) 259.1)
+  (define reaper-goal (pro-unit-timing->bo-goal (car tvp-units-lookahead)))
+  (assert-eq! (pro-bo-goal-kind reaper-goal) 'train)
+  (assert-eq! (pro-bo-goal-target-sym reaper-goal) 'reaper)
+  (define tvp-upgs-expired (due-pro-upgrade-timings 'Terran 'Protoss (exact-round (* 590.0 22.4)) 16))
+  (assert-true! (not (ormap (lambda (up) (eq? (pro-upgrade-timing-upgrade-sym up) 'banshee-cloak)) tvp-upgs-expired)))
+
+  ;; Clock-driven `evaluate-build-order-next-step` & `step-priority-macro-brain` at `frame > 0`, low supply
+  (define tvp-clock-bldgs
+    (hash 'command-center 1 'orbital-command 2 'supply-depot 3 'refinery 3
+          'barracks 3 'barracks-techlab 1 'barracks-reactor 1
+          'factory 1 'factory-techlab 1 'starport 1 'starport-techlab 1 'starport-reactor 1
+          'engineering-bay 1))
+  (define bo-clock-eval
+    (evaluate-build-order-next-step
+     #:race 'Terran
+     #:enemy-race 'Protoss
+     #:frame 6200
+     #:minerals 600
+     #:gas 400
+     #:supply-used 12
+     #:supply-left 10
+     #:active-bases 2
+     #:ready-building-counts tvp-clock-bldgs
+     #:total-building-counts tvp-clock-bldgs
+     #:unit-counts (hash 'scv 12)))
+  (assert-true! (not (not (member '(research banshee-cloak) (pro-bo-eval-result-ready-actions bo-clock-eval)))))
+
+  (define brain-clock-state
+    (make-macro-world-state
+     #:race 'Terran
+     #:enemy-race 'Protoss
+     #:frame 6200
+     #:minerals 600
+     #:gas 400
+     #:supply-used 12
+     #:supply-cap 30
+     #:supply-left 18
+     #:workers 12
+     #:active-bases 2
+     #:ready-building-counts tvp-clock-bldgs
+     #:total-building-counts tvp-clock-bldgs
+     #:unit-counts (hash 'scv 12)
+     #:open-facility-slots (hash 'command-center 1 'barracks 2 'barracks-techlab 1 'factory-techlab 1 'starport 1 'starport-techlab 1)))
+  (define brain-clock-dec (step-priority-macro-brain brain-clock-state))
+  (define brain-clock-ids (macro-brain-decision-scheduled-ids brain-clock-dec))
+  (assert-true! (not (not (memq 'banshee-cloak brain-clock-ids)))
+                (format "Expected clock-due 'banshee-cloak in scheduled-ids at frame=6200, got ~a" brain-clock-ids))
+  (assert-true! (not (not (ormap (lambda (s) (memq s '(marine siege-tank medivac cyclone))) brain-clock-ids)))
+                (format "Expected clock-due timed Terran unit in scheduled-ids at frame=6200, got ~a" brain-clock-ids))
+  (define brain-clock-bo-g (macro-brain-decision-bo-active-goal brain-clock-dec))
+  (assert-true! (and (pro-bo-goal? brain-clock-bo-g)
+                     (> (pro-bo-goal-target-sec brain-clock-bo-g) 0.0)))
+
   ;; Minute 5 of ZvT uses fractional SupplyCurvePoint (44.5 . 23.5) -> rounds 23.5 army to 24
   (define-values (zvt-m5-w zvt-m5-a)
     (pro-supply-curve-target 'Zerg 'Terran (exact-round (* 270.0 22.4)) 3))
@@ -9568,7 +9713,7 @@
      (hash 'frame 672 'race 'Terran 'enemy-race 'Protoss 'posture 'timing-push
            'personality 'aggressive 'enemy-archetype 'stalker-colossus
            'win-prob 0.64 'confidence 0.81)
-     (pro-bo-eval-result 'TvP (pro-bo-goal 'train 'overlord 2 13 #f) '() 0 0 22 1)
+     (pro-bo-eval-result 'TvP (pro-bo-goal 'train 'overlord 2 13 #f 0.0) '() 0 0 22 1)
      (hash 'combat-posture 'engage 'snowball-adv 1.35 'retreat-sector 4 'issued-orders 14)))
   (define log-line (format-bot-step-log-line log-rec))
   (assert-true! (string-prefix? log-line "[SCBOT_STATE] f=672 matchup=TvP"))
@@ -9577,7 +9722,20 @@
   (define log-ht (bot-step-log-record->hash log-rec))
   (assert-eq! (hash-ref log-ht 'frame) 672)
   (assert-eq! (hash-ref log-ht 'matchup) 'TvP)
+  (assert-eq! (hash-ref (hash-ref log-ht 'goals) 'active-bo-target-sec) 0.0)
   (assert-eq! (hash-ref (hash-ref log-ht 'tactics) 'issued-orders) 14)
+
+  (define log-rec-timed
+    (extract-bot-step-log-record
+     (hash 'frame 2900 'race 'Terran 'enemy-race 'Protoss 'posture 'timing-push
+           'personality 'aggressive 'enemy-archetype 'blink-stalker
+           'win-prob 0.61 'confidence 0.78)
+     (pro-bo-eval-result 'TvP (pro-bo-goal 'research 'stimpack 1 21 'barracks-techlab 308.0) '() 100 100 44 20)
+     (hash 'combat-posture 'hold 'snowball-adv 1.10 'retreat-sector 2 'issued-orders 9)))
+  (define log-line-timed (format-bot-step-log-line log-rec-timed))
+  (assert-true! (string-contains? log-line-timed "goal=research/stimpack@308.0s(escrow=100M/100G"))
+  (define log-ht-timed (bot-step-log-record->hash log-rec-timed))
+  (assert-true! (< (abs (- (hash-ref (hash-ref log-ht-timed 'goals) 'active-bo-target-sec) 308.0)) 1e-6))
 
   ;; End-to-end runtime wiring in step-live-bot-runtime!
   (define rt-log (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))

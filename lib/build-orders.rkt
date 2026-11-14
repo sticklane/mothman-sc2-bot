@@ -27,6 +27,9 @@
 (provide
  (struct-out pro-bo-goal)
  pro-bo-goal-target
+ make-pro-bo-goal
+ (struct-out pro-unit-timing)
+ (struct-out pro-upgrade-timing)
  (struct-out build-order-spec)
  (struct-out build-order-tree-node)
  ALL-BUILD-ORDER-SPECS
@@ -41,6 +44,12 @@
  PvP-BUILD-ORDER
  lookup-build-order-for-matchup
  pro-build-order-steps-for-matchup
+ pro-unit-timings-for-matchup
+ pro-upgrade-timings-for-matchup
+ due-pro-unit-timings
+ due-pro-upgrade-timings
+ pro-unit-timing->bo-goal
+ pro-upgrade-timing->bo-goal
  pro-supply-curve-target
  PRO-BUILD-ORDER-DB
  find-matchup-entry
@@ -86,6 +95,86 @@
 (define (pro-build-order-steps-for-matchup race [enemy-race 'Unknown])
   (build-order-spec-steps (lookup-build-order-for-matchup race enemy-race)))
 
+(: pro-unit-timings-for-matchup (->* (Any) (Any) (Listof pro-unit-timing)))
+(define (pro-unit-timings-for-matchup race [enemy-race 'Unknown])
+  (build-order-spec-unit-timings (lookup-build-order-for-matchup race enemy-race)))
+
+(: pro-upgrade-timings-for-matchup (->* (Any) (Any) (Listof pro-upgrade-timing)))
+(define (pro-upgrade-timings-for-matchup race [enemy-race 'Unknown])
+  (build-order-spec-upgrade-timings (lookup-build-order-for-matchup race enemy-race)))
+
+(: due-pro-unit-timings (->* (Any Any Any Any) (Real) (Listof pro-unit-timing)))
+(define (due-pro-unit-timings race enemy-race raw-frame raw-supply-used [late-window-sec 180.0])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define supply-used (safe-nonneg-int raw-supply-used 0))
+  (define elapsed-sec (/ (->float frame) 22.4))
+  (define w (max 0.0 (->float late-window-sec)))
+  (filter
+   (lambda ([ut : pro-unit-timing])
+     (define tsec (->float (pro-unit-timing-target-sec ut)))
+     (define min-sup (pro-unit-timing-min-supply ut))
+     ;; Retire early opening unit benchmarks once both clock (+60s) and supply (+16)
+     ;; have moved well past the benchmark checkpoint.
+     (define opening-passed?
+       (and (> frame 0)
+            (> elapsed-sec (+ tsec 60.0))
+            (>= supply-used (+ min-sup 16))))
+     (define not-stale?
+       (or (= frame 0)
+           (and (<= elapsed-sec (+ tsec w))
+                (not opening-passed?))))
+     (and not-stale?
+          (or (and (= frame 0) (>= supply-used min-sup))
+              (and (> frame 0)
+                   (or (>= (+ elapsed-sec 15.0) tsec)
+                       ;; When frame > 0, allow supply-triggered early activation only
+                       ;; within a 30s lead window before target-sec.
+                       (and (>= supply-used min-sup)
+                            (>= (+ elapsed-sec 30.0) tsec)))))))
+   (pro-unit-timings-for-matchup race enemy-race)))
+
+(: due-pro-upgrade-timings (->* (Any Any Any Any) (Real) (Listof pro-upgrade-timing)))
+(define (due-pro-upgrade-timings race enemy-race raw-frame raw-supply-used [late-window-sec 240.0])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define supply-used (safe-nonneg-int raw-supply-used 0))
+  (define elapsed-sec (/ (->float frame) 22.4))
+  (define w (max 0.0 (->float late-window-sec)))
+  (filter
+   (lambda ([up : pro-upgrade-timing])
+     (define ssec (->float (pro-upgrade-timing-start-sec up)))
+     (define csec (max ssec (->float (pro-upgrade-timing-complete-sec up))))
+     (define min-sup (pro-upgrade-timing-min-supply up))
+     (define not-stale?
+       (or (= frame 0)
+           (<= elapsed-sec (+ csec w))))
+     (and not-stale?
+          (or (and (= frame 0) (>= supply-used min-sup))
+              (and (> frame 0)
+                   (or (>= (+ elapsed-sec 15.0) ssec)
+                       ;; When frame > 0, keep supply-triggered upgrades within 30s of start-sec
+                       ;; so high early supply does not fire 4+ min upgrades 60-90s ahead of time.
+                       (and (>= supply-used min-sup)
+                            (>= (+ elapsed-sec 30.0) ssec)))))))
+   (pro-upgrade-timings-for-matchup race enemy-race)))
+
+(: pro-unit-timing->bo-goal (-> pro-unit-timing pro-bo-goal))
+(define (pro-unit-timing->bo-goal ut)
+  (pro-bo-goal 'train
+               (pro-unit-timing-unit-sym ut)
+               (pro-unit-timing-target-count ut)
+               (pro-unit-timing-min-supply ut)
+               (pro-unit-timing-prereq-ready-sym ut)
+               (pro-unit-timing-target-sec ut)))
+
+(: pro-upgrade-timing->bo-goal (-> pro-upgrade-timing pro-bo-goal))
+(define (pro-upgrade-timing->bo-goal up)
+  (pro-bo-goal 'research
+               (pro-upgrade-timing-upgrade-sym up)
+               1
+               (pro-upgrade-timing-min-supply up)
+               (pro-upgrade-timing-prereq-ready-sym up)
+               (pro-upgrade-timing-start-sec up)))
+
 (: pro-supply-curve-target (->* (Any) (Any Any Any) (Values Integer Integer)))
 (define (pro-supply-curve-target race [enemy-race 'Unknown] [raw-frame 0] [raw-active-bases 1])
   (define frame (safe-nonneg-int raw-frame 0))
@@ -116,11 +205,39 @@
               (list 'sec (* m 60))
               (list 'workers w)
               (list 'army-supply a)))))
+  (define step-rows : (Listof Any)
+    (for/list ([g : pro-bo-goal (in-list (build-order-spec-steps spec))])
+      (list 'step
+            (list 'kind (pro-bo-goal-kind g))
+            (list 'target (pro-bo-goal-target-sym g))
+            (list 'count (pro-bo-goal-target-count g))
+            (list 'supply (pro-bo-goal-min-supply g))
+            (list 'sec (pro-bo-goal-target-sec g))
+            (list 'prereq (pro-bo-goal-prereq-ready-sym g)))))
+  (define unit-rows : (Listof Any)
+    (for/list ([ut : pro-unit-timing (in-list (build-order-spec-unit-timings spec))])
+      (list 'unit-timing
+            (list 'unit (pro-unit-timing-unit-sym ut))
+            (list 'count (pro-unit-timing-target-count ut))
+            (list 'supply (pro-unit-timing-min-supply ut))
+            (list 'sec (pro-unit-timing-target-sec ut))
+            (list 'prereq (pro-unit-timing-prereq-ready-sym ut)))))
+  (define upg-rows : (Listof Any)
+    (for/list ([up : pro-upgrade-timing (in-list (build-order-spec-upgrade-timings spec))])
+      (list 'upgrade-timing
+            (list 'upgrade (pro-upgrade-timing-upgrade-sym up))
+            (list 'start-sec (pro-upgrade-timing-start-sec up))
+            (list 'complete-sec (pro-upgrade-timing-complete-sec up))
+            (list 'supply (pro-upgrade-timing-min-supply up))
+            (list 'prereq (pro-upgrade-timing-prereq-ready-sym up)))))
   (list 'matchup
         (build-order-spec-matchup spec)
         (list 'name (build-order-spec-name spec))
         (list 'archetype (build-order-spec-archetype spec))
-        (cons 'winning-worker-to-army-supply-curve curve-rows)))
+        (cons 'winning-worker-to-army-supply-curve curve-rows)
+        (cons 'steps step-rows)
+        (cons 'unit-timings unit-rows)
+        (cons 'upgrade-timings upg-rows)))
 
 (: PRO-BUILD-ORDER-DB (Listof Any))
 (define PRO-BUILD-ORDER-DB

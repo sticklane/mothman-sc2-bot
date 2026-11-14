@@ -264,6 +264,7 @@
     [(factory-tech-lab)                            'factory-techlab]
     [(starport-tech-lab)                           'starport-techlab]
     [(zergling-movementspeed)                      'metabolic-boost]
+    [(cloaking-field)                              'banshee-cloak]
     [(adrenal-glands)                              'zergling-attackspeed]
     [(warpgate-research)                           'warp-gate-research]
     [(melee-attacks-1)                             'zerg-melee-weapons-1]
@@ -426,7 +427,10 @@
          (not (not (memq csym pending-upgs)))
          (and (eq? csym 'metabolic-boost)
               (or (not (not (memq 'zergling-movementspeed researched-upgs)))
-                  (not (not (memq 'zergling-movementspeed pending-upgs))))))]
+                  (not (not (memq 'zergling-movementspeed pending-upgs)))))
+         (and (eq? csym 'banshee-cloak)
+              (or (not (not (memq 'cloaking-field researched-upgs)))
+                  (not (not (memq 'cloaking-field pending-upgs))))))]
     [(sc2-tech-node-unique? node)
      (>= (bldg-count-equivalent total-bldg-counts (sc2-tech-node-id node))
          (max 1 target-count))]
@@ -798,7 +802,7 @@
   (define current-ready
     (cond
       [(eq? kind 'research)
-       (if (or (memq cid researched-upgrades) (memq id researched-upgrades)) 1 0)]
+       (if (sc2-tech-already-satisfied? cid (hash) researched-upgrades '() 1) 1 0)]
       [(or (eq? kind 'train) unit-morph?)
        (unit-count-equivalent unit-counts cid)]
       [else
@@ -806,12 +810,7 @@
   (define current-total
     (cond
       [(eq? kind 'research)
-       (if (or (memq cid researched-upgrades)
-               (memq id researched-upgrades)
-               (memq cid pending-upgrades)
-               (memq id pending-upgrades))
-           1
-           0)]
+       (if (sc2-tech-already-satisfied? cid (hash) researched-upgrades pending-upgrades 1) 1 0)]
       [(or (eq? kind 'train) unit-morph?)
        (unit-count-equivalent unit-counts cid)]
       [else
@@ -875,6 +874,31 @@
     [(= cur-gas-bldgs 2) 26]
     [else (+ 18 (* 8 cur-gas-bldgs))]))
 
+;; Filters build-order steps by `effective-phase-supply` and, when `frame > 0`,
+;; elapsed Faster clock time (`elapsed-sec >= target-sec`), plus due empirical
+;; unit and upgrade timings (`frame > 0`).
+(define (collect-due-bo-context race enemy-race frame effective-phase-supply)
+  (define elapsed-sec (/ (exact->inexact frame) 22.4))
+  (define steps-so-far
+    (filter (lambda (g)
+              (or (>= effective-phase-supply (pro-bo-goal-min-supply g))
+                  (and (> frame 0)
+                       (> (exact->inexact (pro-bo-goal-target-sec g)) 0.0)
+                       (>= elapsed-sec (exact->inexact (pro-bo-goal-target-sec g))))))
+            (pro-build-order-steps-for-matchup race enemy-race)))
+  (define due-upgs
+    (if (> frame 0)
+        (due-pro-upgrade-timings race enemy-race frame effective-phase-supply)
+        '()))
+  (define due-units
+    (if (> frame 0)
+        (due-pro-unit-timings race enemy-race frame effective-phase-supply)
+        '()))
+  (define due-timing-goals
+    (append (map pro-upgrade-timing->bo-goal due-upgs)
+            (map pro-unit-timing->bo-goal due-units)))
+  (values elapsed-sec steps-so-far due-upgs due-units due-timing-goals))
+
 ;; Synthesizes the live 5-track `dynamic-macro-plan` from `macro-world-state` on every frame.
 (define (synthesize-dynamic-macro-plan state)
   (match-define (macro-world-state
@@ -937,13 +961,12 @@
       [(Terran) (bldg-count-equivalent total-bldg-counts 'command-center)]
       [else (bldg-count-equivalent total-bldg-counts 'nexus)]))
 
-  (define steps-so-far
-    (filter (lambda (g) (>= effective-phase-supply (pro-bo-goal-min-supply g)))
-            (pro-build-order-steps-for-matchup race enemy-race)))
+  (define-values (elapsed-sec steps-so-far due-upgs due-units due-timing-goals)
+    (collect-due-bo-context race enemy-race frame effective-phase-supply))
   (define repaired-prereqs
     (find-all-broken-tech-dependencies
      race ready-bldg-counts total-bldg-counts
-     #:active-goals steps-so-far))
+     #:active-goals (append steps-so-far due-timing-goals)))
 
   (define raw-goal-specs '())
   (define (add-goal-spec! id track kind target-count weight reason)
@@ -1002,8 +1025,10 @@
 
   ;; Track 2 & 3 & 4: Evaluate ALL eligible Matchup Plan Milestones concurrently (not a FIFO queue!)
   (define macro-step-rank 0)
+  (define seen-step-keys (make-hash))
   (for ([g (in-list steps-so-far)])
-    (match-define (pro-bo-goal kind sym tgt-cnt min-sup _) g)
+    (match-define (pro-bo-goal kind sym tgt-cnt min-sup _ _tgt-sec) g)
+    (hash-set! seen-step-keys (cons kind (normalize-brain-sym sym)) #t)
     (define addon-occupies-facility?
       (and live-slots?
            (facility-addon-slot-occupied? sym ready-bldg-counts total-bldg-counts #:min-ready-floor 1)))
@@ -1074,10 +1099,15 @@
          (set! macro-step-rank (add1 macro-step-rank))
          (add-goal-spec! sym 'tech-infrastructure kind tgt-cnt tech-w 'macro-tech-plan)]
         [(eq? kind 'train)
+         (define cur-queens (unit-count-equivalent unit-counts 'queen))
          (define queen-defer?
            (and (eq? sym 'queen)
                 (or under-attack? (> enemy-threat-supply 2))
                 (< army-supply 4)))
+         (define queen-sat-defer?
+           (and (eq? sym 'queen)
+                (< workers (min 60 (* 16 active-bases)))
+                (>= cur-queens active-bases)))
          (define gas-locked-0g?
            (and live-slots?
                 peaceful?
@@ -1091,10 +1121,65 @@
          (define train-w
            (cond
              [queen-defer? 80.0]
+             [queen-sat-defer? 120.0]
              [(or gas-locked-0g? past-opening-window?) 390.0]
              [peaceful? 466.0]
              [else 420.0]))
          (add-goal-spec! sym 'army-production 'train tgt-cnt train-w 'army-milestone-plan)])))
+
+  ;; Track 2c: Empirical Pro Upgrade & Unit Clock Timings (`frame > 0`)
+  (define under-sat-econ?
+    (and peaceful?
+         (< workers (min 36 (* 16 active-bases)))))
+  (when (> frame 0)
+    (for ([up (in-list due-upgs)])
+      (define sym (pro-upgrade-timing-upgrade-sym up))
+      (define ssec (exact->inexact (pro-upgrade-timing-start-sec up)))
+      (unless (or (hash-has-key? seen-step-keys (cons 'research (normalize-brain-sym sym)))
+                  (sc2-tech-already-satisfied? sym total-bldg-counts researched-upgrades pending-upgrades 1))
+        (define non-defensive-under-attack?
+          (and live-slots?
+               (not peaceful?)
+               root-combat-facility-ready?
+               (not (is-aa-or-detection-answer? sym requires-anti-air? requires-detection?))
+               (or under-attack? (< army-supply (+ enemy-threat-supply 6)))))
+        (define upg-w
+          (cond
+            [non-defensive-under-attack? 140.0]
+            [(>= elapsed-sec ssec) (if under-sat-econ? 428.0 460.0)]
+            [else (if under-sat-econ? 422.0 438.0)]))
+        (add-goal-spec! sym 'tech-infrastructure 'research 1 upg-w 'timing-upgrade-plan)))
+    (for ([ut (in-list due-units)])
+      (define sym (pro-unit-timing-unit-sym ut))
+      (define tgt-cnt (pro-unit-timing-target-count ut))
+      (define min-sup (pro-unit-timing-min-supply ut))
+      (define tsec (exact->inexact (pro-unit-timing-target-sec ut)))
+      (define cur-cnt (unit-count-equivalent unit-counts sym))
+      (unless (or (< tgt-cnt 1)
+                  (>= cur-cnt tgt-cnt)
+                  (hash-has-key? seen-step-keys (cons 'train (normalize-brain-sym sym)))
+                  (and (eq? sym 'overlord) (> effective-phase-supply (+ min-sup 12))))
+        (define queen-defer?
+          (and (eq? sym 'queen)
+               (or under-attack? (> enemy-threat-supply 2))
+               (< army-supply 4)))
+        (define queen-sat-defer?
+          (and (eq? sym 'queen)
+               (< workers (min 60 (* 16 active-bases)))
+               (>= (unit-count-equivalent unit-counts 'queen) active-bases)))
+        (define past-unit-window?
+          (and (> effective-phase-supply (+ min-sup 12))
+               (or (>= cur-cnt 1)
+                   (memq sym '(reaper adept)))))
+        (unless past-unit-window?
+          (define unit-w
+            (cond
+              [queen-defer? 80.0]
+              [queen-sat-defer? 120.0]
+              [(not peaceful?) 420.0]
+              [(and (>= elapsed-sec tsec) (not under-sat-econ?)) 436.0]
+              [else 424.0]))
+          (add-goal-spec! sym 'army-production 'train tgt-cnt unit-w 'timing-unit-plan)))))
 
   ;; Track 2b: Zerg Per-Base + Creep/Defense Queen Engine (capped at SC2-MAX-QUEENS-CAP = 8)
   (define cur-queens (unit-count-equivalent unit-counts 'queen))
@@ -1385,13 +1470,24 @@
   (define plan-next-actions-ht (dynamic-macro-plan-translated-next-actions dyn-plan))
 
   ;; 2. Self-Healing Tech Prerequisite DAG Check:
-  (define steps-so-far
-    (filter (lambda (g) (>= effective-phase-supply (pro-bo-goal-min-supply g)))
-            (pro-build-order-steps-for-matchup race enemy-race)))
+  (define-values (elapsed-sec steps-so-far due-upgs due-units due-timing-goals)
+    (collect-due-bo-context race enemy-race frame effective-phase-supply))
+  (define all-due-goals
+    (append (if bo-raw-goal (list bo-raw-goal) '())
+            steps-so-far
+            due-timing-goals))
+  (define (lookup-timing-sec-for-sym sym)
+    (or (let ([hit (findf (lambda (g)
+                            (and (pro-bo-goal? g)
+                                 (same-brain-sym? (pro-bo-goal-target-sym g) sym)
+                                 (> (exact->inexact (pro-bo-goal-target-sec g)) 0.0)))
+                          all-due-goals)])
+          (and hit (pro-bo-goal-target-sec hit)))
+        0.0))
   (define repaired-prereqs
     (find-all-broken-tech-dependencies
      race ready-bldg-counts total-bldg-counts
-     #:active-goals (if bo-raw-goal (cons bo-raw-goal steps-so-far) steps-so-far)))
+     #:active-goals all-due-goals))
 
   ;; Derive top actionable goal from the Dynamic Plan (translating any blocked goal
   ;; directly into its ready `next-action-sym` instead of stalling on a static queue head!)
@@ -1459,7 +1555,8 @@
                          next-sym
                          (max 1 (safe-exact-int (plan-goal-node-target-count top-plan-node) 1))
                          0
-                         (and (pair? p-list) (first p-list))))]
+                         (and (pair? p-list) (first p-list))
+                         (lookup-timing-sec-for-sym next-sym)))]
       [(bo-fallback-goal-allowed? bo-raw-goal) bo-raw-goal]
       [else #f]))
   (define effective-bo-goal
@@ -1479,7 +1576,8 @@
                              prereq-sym
                              1
                              (pro-bo-goal-min-supply raw-effective-bo-goal)
-                             (and (pair? p-prereqs) (first p-prereqs))))
+                             (and (pair? p-prereqs) (first p-prereqs))
+                             (pro-bo-goal-target-sec raw-effective-bo-goal)))
               raw-effective-bo-goal))
         raw-effective-bo-goal))
 
@@ -1492,7 +1590,7 @@
   (define (goal-target-count-for sym)
     (define csym (normalize-brain-sym sym))
     (define from-bo
-      (for/fold ([mx 1]) ([g (in-list (if bo-raw-goal (cons bo-raw-goal steps-so-far) steps-so-far))])
+      (for/fold ([mx 1]) ([g (in-list all-due-goals)])
         (if (and (pro-bo-goal? g)
                  (same-brain-sym? (pro-bo-goal-target-sym g) csym))
             (max mx (pro-bo-goal-target-count g))
@@ -1967,7 +2065,16 @@
                 (and (or (and bo-goal-sym (same-brain-sym? id bo-goal-sym)) plan-node)
                      (<= pending-supply 0)))]
            [(and bo-goal-sym (same-brain-sym? id bo-goal-sym)) #t]
-           [(and plan-node (>= (plan-goal-node-priority-weight plan-node) 440.0)) #t]
+           [(and plan-node
+                 (or (>= (plan-goal-node-priority-weight plan-node) 440.0)
+                     (and (memq (plan-goal-node-reason plan-node) '(timing-upgrade-plan timing-unit-plan))
+                          (>= (plan-goal-node-priority-weight plan-node) 420.0)
+                          (or (not (eq? cat 'combat-unit))
+                              (< army-supply 8)
+                              under-attack?
+                              (> enemy-threat-supply 0)
+                              (>= workers (min 24 (* 11 active-bases)))))))
+            #t]
            [(eq? cat 'worker)
             (if (hash? open-facility-slots)
                 (< workers (min 70 (max target-workers (* 22 active-bases))))
@@ -2057,7 +2164,17 @@
         (or (hash-ref plan-next-actions-ht sym #f)
             (hash-ref plan-next-actions-ht (normalize-brain-sym sym) #f)))
       (define plan-weight (if plan-node (plan-goal-node-priority-weight plan-node) 0.0))
-      (define is-plan-milestone? (and plan-node (>= plan-weight 440.0)))
+      (define plan-reason (and plan-node (plan-goal-node-reason plan-node)))
+      (define is-timing-plan?
+        (not (not (memq plan-reason '(timing-upgrade-plan timing-unit-plan)))))
+      (define under-sat-peaceful-econ?
+        (and (not under-attack?)
+             (<= enemy-threat-supply 0)
+             (< workers (min 36 (* 16 active-bases)))))
+      (define is-plan-milestone?
+        (and plan-node
+             (not is-timing-plan?)
+             (>= plan-weight 440.0)))
       (define is-bo-goal?
         (or (and bo-goal-sym (same-brain-sym? sym bo-goal-sym))
             is-plan-milestone?))
@@ -2292,6 +2409,9 @@
                 (not (and (memq sym '(spine-crawler bunker shield-battery))
                           (< army-supply 4)
                           (< minerals 200)))
+                (not (and is-timing-plan?
+                          under-sat-peaceful-econ?
+                          (not (and bo-goal-sym (same-brain-sym? sym bo-goal-sym)))))
                 (cand-can-escrow? sym)
                 (> workers 0)))
          (define boosted-u
@@ -2310,6 +2430,10 @@
                    (or (and (not under-attack?) (<= enemy-threat-supply 0))
                        answers-aa-or-det?))
               (max plan-weight (if (and bo-goal-sym (same-brain-sym? sym bo-goal-sym)) (+ 200.0 u0) 0.0) 465.0)]
+             [(and is-timing-plan?
+                   (or (and (not under-attack?) (<= enemy-threat-supply 0))
+                       answers-aa-or-det?))
+              (max plan-weight u-after-gas-lock)]
              [gas-unlock-tech-boost? (max plan-weight 445.0 u0)]
              [inject-queen-boost?
               (if (and (hash? open-facility-slots) (not under-attack?) (<= enemy-threat-supply 0))
@@ -3185,7 +3309,7 @@
   ;; Check which build-order structural/upgrade goals are satisfied at the end of recovery
   (define unsatisfied
     (filter (lambda (g)
-              (match-define (pro-bo-goal kind sym tgt-cnt _ _) g)
+              (match-define (pro-bo-goal kind sym tgt-cnt _ _ _) g)
               (case kind
                 [(build expand morph)
                  (< (bldg-count-equivalent tb sym) tgt-cnt)]

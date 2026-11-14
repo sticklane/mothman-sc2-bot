@@ -25,6 +25,9 @@
  (struct-out aabb2d)
  (struct-out pro-bo-goal)
  pro-bo-goal-target
+ make-pro-bo-goal
+ (struct-out pro-unit-timing)
+ (struct-out pro-upgrade-timing)
  (struct-out pro-bo-eval-result)
  (struct-out build-order-spec)
  (struct-out build-order-tree-node)
@@ -87,12 +90,33 @@
    [target-sym : Symbol]        ;; canonical symbol (e.g. 'spawning-pool, 'factory, 'cybernetics-core)
    [target-count : Positive-Integer]
    [min-supply : Nonnegative-Integer]
-   [prereq-ready-sym : (Option Symbol)])
+   [prereq-ready-sym : (Option Symbol)]
+   [target-sec : Real])         ;; empirical LotV Faster-speed target clock time in seconds (0.0 when unset)
   #:transparent)
 
 (: pro-bo-goal-target (-> pro-bo-goal Symbol))
 (define (pro-bo-goal-target g)
   (pro-bo-goal-target-sym g))
+
+(: make-pro-bo-goal (->* (Symbol Symbol Positive-Integer Nonnegative-Integer (Option Symbol)) (Real) pro-bo-goal))
+(define (make-pro-bo-goal kind target-sym target-count min-supply prereq-ready-sym [target-sec 0.0])
+  (pro-bo-goal kind target-sym target-count min-supply prereq-ready-sym target-sec))
+
+(struct pro-unit-timing
+  ([unit-sym : Symbol]
+   [target-count : Positive-Integer]
+   [min-supply : Nonnegative-Integer]
+   [target-sec : Real]
+   [prereq-ready-sym : (Option Symbol)])
+  #:transparent)
+
+(struct pro-upgrade-timing
+  ([upgrade-sym : Symbol]
+   [start-sec : Real]
+   [complete-sec : Real]
+   [min-supply : Nonnegative-Integer]
+   [prereq-ready-sym : (Option Symbol)])
+  #:transparent)
 
 (struct pro-bo-eval-result
   ([matchup : Symbol]
@@ -111,7 +135,9 @@
    [archetype : Symbol]
    [description : String]
    [steps : (Listof pro-bo-goal)]
-   [supply-curve : (Listof SupplyCurvePoint)])
+   [supply-curve : (Listof SupplyCurvePoint)]
+   [unit-timings : (Listof pro-unit-timing)]
+   [upgrade-timings : (Listof pro-upgrade-timing)])
   #:transparent)
 
 (struct build-order-tree-node

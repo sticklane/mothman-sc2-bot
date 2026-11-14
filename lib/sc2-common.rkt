@@ -8,6 +8,8 @@
 (require "sc2-types.rkt")
 
 (provide
+ (struct-out pro-unit-timing)
+ (struct-out pro-upgrade-timing)
  finite-real?
  safe-finite-real
  safe-real

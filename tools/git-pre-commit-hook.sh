@@ -22,7 +22,7 @@ fi
 CHANGED_BOT_FILES="$(git diff --cached --name-only | grep -E '^sc-bot/(bots|lib|compiler|sc-bot|sim|ffi|run\.py|main\.rkt|info\.rkt|config\.json)' || true)"
 
 if [[ -n "${CHANGED_BOT_FILES}" ]]; then
-    for z in Mothman.zip Mothman-X.zip Mothman-R.zip Mothman-Z.zip Mothman-T.zip Mothman-P.zip; do
+    for z in Mothman-X.zip Mothman-Z.zip Mothman-T.zip Mothman-P.zip; do
         if [[ -f "${SC_BOT_DIR}/ladder/${z}" ]]; then
             git add -f "${SC_BOT_DIR}/ladder/${z}"
         fi

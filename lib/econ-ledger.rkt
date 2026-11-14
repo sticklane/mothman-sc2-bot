@@ -6,7 +6,23 @@
          racket/string
          racket/runtime-path
          "../compiler/syntax.rkt"
-         "sc2-common.rkt"
+         (except-in "sc2-common.rkt"
+                    pro-unit-timing
+                    struct:pro-unit-timing
+                    pro-unit-timing?
+                    pro-unit-timing-unit-sym
+                    pro-unit-timing-target-count
+                    pro-unit-timing-min-supply
+                    pro-unit-timing-target-sec
+                    pro-unit-timing-prereq-ready-sym
+                    pro-upgrade-timing
+                    struct:pro-upgrade-timing
+                    pro-upgrade-timing?
+                    pro-upgrade-timing-upgrade-sym
+                    pro-upgrade-timing-start-sec
+                    pro-upgrade-timing-complete-sec
+                    pro-upgrade-timing-min-supply
+                    pro-upgrade-timing-prereq-ready-sym)
          (only-in "sc2-types.rkt"
                   pro-bo-eval-result
                   struct:pro-bo-eval-result
@@ -106,10 +122,17 @@
  ;; (Canonical definitions in `lib/sc2-types.rkt` and `lib/build-orders.rkt`)
  PRO-BUILD-ORDER-DB
  (struct-out pro-bo-goal)
+ make-pro-bo-goal
+ (struct-out pro-unit-timing)
+ (struct-out pro-upgrade-timing)
  (struct-out pro-bo-eval-result)
  find-matchup-entry
  select-pro-build-order
  pro-build-order-steps-for-matchup
+ pro-unit-timings-for-matchup
+ pro-upgrade-timings-for-matchup
+ due-pro-unit-timings
+ due-pro-upgrade-timings
  pro-supply-curve-target
  evaluate-build-order-next-step
  compute-natural-expansion-mineral-reserve
@@ -3122,6 +3145,8 @@
          #:third-y [raw-third-y 40.5])
   (define race (normalize-ledger-race raw-race))
   (define m-sym (resolve-matchup-symbol race enemy-race))
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define elapsed-sec (/ (exact->inexact frame) 22.4))
   (define supply-used (safe-nonneg-int raw-supply-used 12))
   (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
   (define base-x (safe-tile-coord raw-base-x 32.5))
@@ -3131,7 +3156,7 @@
   (define third-x (safe-tile-coord raw-third-x 60.5))
   (define third-y (safe-tile-coord raw-third-y 40.5))
   (define-values (target-workers target-army)
-    (pro-supply-curve-target race enemy-race raw-frame active-bases))
+    (pro-supply-curve-target race enemy-race frame active-bases))
 
   (define all-upgs
     (append (if (list? researched-upgrades) researched-upgrades '())
@@ -3145,7 +3170,7 @@
         (> (sc2-count-equivalent-structures ready-bldg-counts prereq-sym #f) 0)))
 
   (define (goal-satisfied? g)
-    (match-define (pro-bo-goal kind sym tgt-cnt _ _) g)
+    (match-define (pro-bo-goal kind sym tgt-cnt _ _ _) g)
     (case kind
       [(build expand morph)
        (>= (count-total-bldg sym) tgt-cnt)]
@@ -3160,12 +3185,13 @@
            [(metabolic-boost zergling-movementspeed) '(metabolic-boost zergling-movementspeed)]
            [(centrifical-hooks centrifugal-hooks) '(centrifical-hooks centrifugal-hooks)]
            [(warp-gate-research warpgate) '(warp-gate-research warpgate)]
+           [(banshee-cloak cloaking-field) '(banshee-cloak cloaking-field)]
            [else (list sym)]))
        (ormap (lambda (u) (not (not (memq u all-upgs)))) upg-syms)]
       [else #t]))
 
   (define (goal->action g)
-    (match-define (pro-bo-goal kind sym tgt-cnt _ _) g)
+    (match-define (pro-bo-goal kind sym tgt-cnt _ _ _) g)
     (case kind
       [(expand)
        (define ex (if (>= tgt-cnt 3) third-x nat-x))
@@ -3191,59 +3217,91 @@
       [else
        (list 'build sym)]))
 
+  (define (goal-due? g)
+    (define min-sup (pro-bo-goal-min-supply g))
+    (define tgt-sec (exact->inexact (pro-bo-goal-target-sec g)))
+    (or (>= supply-used min-sup)
+        (and (> frame 0)
+             (> tgt-sec 0.0)
+             (>= elapsed-sec tgt-sec))))
+
+  (define (goal-eligible-now? g)
+    (and (not (goal-satisfied? g))
+         (goal-due? g)
+         (not (and (eq? (pro-bo-goal-kind g) 'train)
+                   (>= supply-used (+ (pro-bo-goal-min-supply g) 12))))
+         (not (and (eq? race 'Protoss)
+                   (not (eq? m-sym 'PvP))
+                   (eq? (pro-bo-goal-target-sym g) 'assimilator)
+                   (>= (pro-bo-goal-target-count g) 2)
+                   (< (count-total-bldg 'nexus) 2)))))
+
   (define steps (pro-build-order-steps-for-matchup race enemy-race))
+  (define extra-timing-goals
+    (if (> frame 0)
+        (append
+         (map pro-upgrade-timing->bo-goal
+              (due-pro-upgrade-timings race enemy-race frame supply-used))
+         (map pro-unit-timing->bo-goal
+              (due-pro-unit-timings race enemy-race frame supply-used)))
+        '()))
   (define rem-min (safe-nonneg-int raw-minerals 0))
   (define rem-gas (safe-nonneg-int raw-gas 0))
   (define rem-sup (max 0 (safe-exact-int raw-supply-left 0)))
   (define ready-acts '())
+  (define queued-keys (make-hash))
   (define first-ready-head #f)
   (define first-blocked-head #f)
   (define res-min 0)
   (define res-gas 0)
 
-  (for ([g (in-list steps)]
-        #:when (and (not (goal-satisfied? g))
-                    (>= supply-used (pro-bo-goal-min-supply g))
-                    (not (and (eq? (pro-bo-goal-kind g) 'train)
-                              (>= supply-used (+ (pro-bo-goal-min-supply g) 12))))
-                    (not (and (eq? race 'Protoss)
-                              (not (eq? m-sym 'PvP))
-                              (eq? (pro-bo-goal-target-sym g) 'assimilator)
-                              (>= (pro-bo-goal-target-count g) 2)
-                              (< (count-total-bldg 'nexus) 2)))))
+  (define (process-bo-goal! g)
     (define sym (pro-bo-goal-target-sym g))
     (define kind (pro-bo-goal-kind g))
-    (define m-cost (sc2-min-cost sym))
-    (define g-cost (sc2-gas-cost sym))
-    (define s-cost (if (eq? kind 'train) (sc2-supply-cost sym 0) 0))
-    (define pre-ok? (prereq-ready? (pro-bo-goal-prereq-ready-sym g)))
-    (cond
-      [(and (eq? kind 'train) (> s-cost rem-sup))
-       ;; Do not reserve or stall BO head on a supply-blocked unit step
-       (void)]
-      [(and pre-ok?
-            (>= (- rem-min res-min) m-cost)
-            (>= (- rem-gas res-gas) g-cost)
-            (or (<= s-cost 0) (>= rem-sup s-cost))
-            ;; Only emit at most 2 build/research/expand actions per frame from BO queue
-            (< (length ready-acts) 2))
-       (set! rem-min (- rem-min m-cost))
-       (set! rem-gas (- rem-gas g-cost))
-       (set! rem-sup (- rem-sup s-cost))
-       (set! ready-acts (cons (goal->action g) ready-acts))
-       (unless first-ready-head (set! first-ready-head g))]
-      [pre-ok?
-       ;; Prerequisite is ready, but waiting on resources -> reserve minerals/gas for first waiting ready step
-       (unless first-ready-head
-         (set! first-ready-head g)
-         (when (memq kind '(build expand morph research train))
-           (set! res-min m-cost)
-           (set! res-gas g-cost)))]
-      [else
-       ;; Prerequisite building is still under construction -> do NOT emit or block worker production;
-       ;; only record fallback head if no prerequisite-ready step exists.
-       (unless first-blocked-head
-         (set! first-blocked-head g))]))
+    (define gkey (cons kind sym))
+    (unless (hash-has-key? queued-keys gkey)
+      (define m-cost (sc2-min-cost sym))
+      (define g-cost (sc2-gas-cost sym))
+      (define s-cost (if (eq? kind 'train) (sc2-supply-cost sym 0) 0))
+      (define pre-ok? (prereq-ready? (pro-bo-goal-prereq-ready-sym g)))
+      (cond
+        [(and (eq? kind 'train) (> s-cost rem-sup))
+         ;; Do not reserve or stall BO head on a supply-blocked unit step
+         (void)]
+        [(and pre-ok?
+              (>= (- rem-min res-min) m-cost)
+              (>= (- rem-gas res-gas) g-cost)
+              (or (<= s-cost 0) (>= rem-sup s-cost))
+              ;; Only emit at most 2 build/research/expand actions per frame from BO queue
+              (< (length ready-acts) 2))
+         (set! rem-min (- rem-min m-cost))
+         (set! rem-gas (- rem-gas g-cost))
+         (set! rem-sup (- rem-sup s-cost))
+         (hash-set! queued-keys gkey #t)
+         (set! ready-acts (cons (goal->action g) ready-acts))
+         (unless first-ready-head (set! first-ready-head g))]
+        [pre-ok?
+         ;; Prerequisite is ready, but waiting on resources -> reserve minerals/gas for first waiting ready step
+         (unless first-ready-head
+           (set! first-ready-head g)
+           (when (memq kind '(build expand morph research train))
+             (set! res-min m-cost)
+             (set! res-gas g-cost)))]
+        [else
+         ;; Prerequisite building is still under construction -> do NOT emit or block worker production;
+         ;; only record fallback head if no prerequisite-ready step exists.
+         (unless first-blocked-head
+           (set! first-blocked-head g))])))
+
+  (for ([g (in-list steps)]
+        #:when (goal-eligible-now? g))
+    (process-bo-goal! g))
+
+  (for ([g (in-list extra-timing-goals)]
+        #:when (and (not (goal-satisfied? g))
+                    (not (and (eq? (pro-bo-goal-kind g) 'train)
+                              (>= supply-used (+ (pro-bo-goal-min-supply g) 12))))))
+    (process-bo-goal! g))
 
   (define raw-active-head (or first-ready-head first-blocked-head))
   ;; Resolve 'train goals whose structure prerequisite has 0 total buildings (e.g. immortal -> robotics-facility)
@@ -3259,7 +3317,10 @@
                                           (eq? (pro-bo-goal-target-sym s) prereq-sym)))
                                    steps)])
           (or prereq-step
-              (pro-bo-goal 'build prereq-sym 1 (pro-bo-goal-min-supply raw-active-head) #f)))
+              (pro-bo-goal 'build prereq-sym 1
+                           (pro-bo-goal-min-supply raw-active-head)
+                           #f
+                           (pro-bo-goal-target-sec raw-active-head))))
         raw-active-head))
   (when (and (not (eq? active-head raw-active-head))
              (pro-bo-goal? active-head)
