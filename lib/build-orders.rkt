@@ -42,9 +42,20 @@
  PvZ-BUILD-ORDER
  PvT-BUILD-ORDER
  PvP-BUILD-ORDER
+ ZvZ-UNIT-BENCHMARKS
+ ZvT-UNIT-BENCHMARKS
+ ZvP-UNIT-BENCHMARKS
+ TvZ-UNIT-BENCHMARKS
+ TvT-UNIT-BENCHMARKS
+ TvP-UNIT-BENCHMARKS
+ PvZ-UNIT-BENCHMARKS
+ PvT-UNIT-BENCHMARKS
+ PvP-UNIT-BENCHMARKS
  lookup-build-order-for-matchup
  pro-build-order-steps-for-matchup
  pro-unit-timings-for-matchup
+ pro-unit-benchmark-timings-for-matchup
+ pro-unit-benchmarks-at-frame
  pro-upgrade-timings-for-matchup
  due-pro-unit-timings
  due-pro-upgrade-timings
@@ -80,6 +91,21 @@
    PvT-BUILD-ORDER
    PvP-BUILD-ORDER))
 
+(: UNIT-BENCHMARKS-BY-MATCHUP (HashTable MatchupSym (Listof pro-unit-timing)))
+(define UNIT-BENCHMARKS-BY-MATCHUP
+  (make-immutable-hasheq
+   (ann
+    (list (cons 'ZvZ ZvZ-UNIT-BENCHMARKS)
+          (cons 'ZvT ZvT-UNIT-BENCHMARKS)
+          (cons 'ZvP ZvP-UNIT-BENCHMARKS)
+          (cons 'TvZ TvZ-UNIT-BENCHMARKS)
+          (cons 'TvT TvT-UNIT-BENCHMARKS)
+          (cons 'TvP TvP-UNIT-BENCHMARKS)
+          (cons 'PvZ PvZ-UNIT-BENCHMARKS)
+          (cons 'PvT PvT-UNIT-BENCHMARKS)
+          (cons 'PvP PvP-UNIT-BENCHMARKS))
+    (Listof (Pairof MatchupSym (Listof pro-unit-timing))))))
+
 (: BUILD-ORDER-BY-MATCHUP (HashTable MatchupSym build-order-spec))
 (define BUILD-ORDER-BY-MATCHUP
   (for/hash : (HashTable MatchupSym build-order-spec)
@@ -98,6 +124,43 @@
 (: pro-unit-timings-for-matchup (->* (Any) (Any) (Listof pro-unit-timing)))
 (define (pro-unit-timings-for-matchup race [enemy-race 'Unknown])
   (build-order-spec-unit-timings (lookup-build-order-for-matchup race enemy-race)))
+
+(: pro-unit-benchmark-timings-for-matchup (->* (Any) (Any) (Listof pro-unit-timing)))
+(define (pro-unit-benchmark-timings-for-matchup race [enemy-race 'Unknown])
+  (define m-sym (resolve-matchup-symbol race enemy-race))
+  (hash-ref UNIT-BENCHMARKS-BY-MATCHUP m-sym (lambda () ZvT-UNIT-BENCHMARKS)))
+
+(: pro-unit-benchmarks-at-frame (->* (Any Any Any) (Any) (HashTable Symbol Integer)))
+(define (pro-unit-benchmarks-at-frame race enemy-race raw-frame [raw-active-bases 1])
+  (define frame (safe-nonneg-int raw-frame 0))
+  (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
+  (define elapsed-sec (/ (->float frame) 22.4))
+  (define eff-sec (if (= frame 0) 0.0 (+ elapsed-sec 15.0)))
+  (define base-mult : Float
+    (cond
+      [(>= active-bases 5) 1.35]
+      [(= active-bases 4) 1.20]
+      [else 1.0]))
+  (define entries
+    (append (pro-unit-timings-for-matchup race enemy-race)
+            (pro-unit-benchmark-timings-for-matchup race enemy-race)))
+  (define tbl : (HashTable Symbol Integer) (make-hasheq))
+  (for ([ut : pro-unit-timing (in-list entries)])
+    (define tsec (->float (pro-unit-timing-target-sec ut)))
+    (when (<= tsec eff-sec)
+      (define sym (pro-unit-timing-unit-sym ut))
+      (define raw-cnt (pro-unit-timing-target-count ut))
+      (define scalable?
+        (not (memq sym '(overlord overseer overlord-transport raven observer warp-prism oracle sentry reaper viper))))
+      (define scaled-cnt : Integer
+        (if (and scalable? (> base-mult 1.0))
+            (max raw-cnt (exact-round (* (->float raw-cnt) base-mult)))
+            raw-cnt))
+      (define prev (hash-ref tbl sym (lambda () 0)))
+      (when (> scaled-cnt prev)
+        (hash-set! tbl sym scaled-cnt))))
+  (for/hash : (HashTable Symbol Integer) ([(k v) (in-hash tbl)])
+    (values k v)))
 
 (: pro-upgrade-timings-for-matchup (->* (Any) (Any) (Listof pro-upgrade-timing)))
 (define (pro-upgrade-timings-for-matchup race [enemy-race 'Unknown])

@@ -8,7 +8,8 @@
 
 (require "../sc2-types.rkt")
 
-(provide TvT-BUILD-ORDER)
+(provide TvT-BUILD-ORDER
+         TvT-UNIT-BENCHMARKS)
 
 (: TvT-BUILD-ORDER build-order-spec)
 (define TvT-BUILD-ORDER
@@ -73,3 +74,32 @@
     (pro-upgrade-timing 'terran-infantry-weapons-1 331.6 445.6 67 'engineering-bay)  ;; 5:32 -> 7:26
     (pro-upgrade-timing 'combat-shield             350.1 429.1 73 'barracks-techlab) ;; 5:50 -> 7:09
     (pro-upgrade-timing 'terran-infantry-armor-1   370.9 485.0 90 'engineering-bay)))) ;; 6:11 -> 8:05
+
+;; Full 1..8+ min pro unit composition benchmarks (TvT) covering core, harass, drops & casters.
+(: TvT-UNIT-BENCHMARKS (Listof pro-unit-timing))
+(define TvT-UNIT-BENCHMARKS
+  (list
+   (pro-unit-timing 'reaper         1 20  99.5 'barracks)
+   (pro-unit-timing 'cyclone        1 28 175.0 'factory-techlab)
+   (pro-unit-timing 'hellion        2 34 205.0 'factory)
+   (pro-unit-timing 'widow-mine     2 39 223.9 'factory)
+   (pro-unit-timing 'medivac        1 41 226.0 'starport)
+   (pro-unit-timing 'marine         6 40 229.1 'barracks)
+   (pro-unit-timing 'viking-fighter 2 44 248.0 'starport)
+   (pro-unit-timing 'raven          1 46 265.0 'starport-techlab)
+   (pro-unit-timing 'marine        14 55 281.3 'barracks)
+   (pro-unit-timing 'siege-tank     1 61 306.7 'factory-techlab)
+   (pro-unit-timing 'siege-tank     2 76 358.3 'factory-techlab)
+   (pro-unit-timing 'marauder       4 82 375.0 'barracks-techlab)
+   (pro-unit-timing 'medivac        3 88 395.0 'starport)
+   (pro-unit-timing 'viking-fighter 5 94 410.0 'starport)
+   (pro-unit-timing 'siege-tank     5 108 450.0 'factory-techlab)
+   (pro-unit-timing 'marine        24 116 465.0 'barracks)
+   (pro-unit-timing 'marauder       7 122 475.0 'barracks-techlab)
+   (pro-unit-timing 'viking-fighter 8 128 485.0 'starport)
+   (pro-unit-timing 'cyclone        3 132 490.0 'factory-techlab)
+   (pro-unit-timing 'raven          2 136 495.0 'starport-techlab)
+   (pro-unit-timing 'thor           2 142 500.0 'armory)
+   (pro-unit-timing 'widow-mine     4 144 502.0 'factory)
+   (pro-unit-timing 'hellion        4 146 505.0 'factory)
+   (pro-unit-timing 'ghost          2 150 510.0 'ghost-academy)))

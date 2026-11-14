@@ -5,7 +5,23 @@
 ;; =============================================================================
 
 (require racket/string
+         typed/racket/unsafe
          "sc2-types.rkt")
+
+(module exp-meta-ops racket/base
+  (provide record-exp-meta!
+           lookup-exp-meta)
+  (define exp-meta-table (make-weak-hasheq))
+  (define (record-exp-meta! rec meta)
+    (when (hash? meta)
+      (hash-set! exp-meta-table rec meta))
+    rec)
+  (define (lookup-exp-meta rec)
+    (hash-ref exp-meta-table rec #f)))
+
+(unsafe-require/typed 'exp-meta-ops
+                      [record-exp-meta! (-> Any (Option (Immutable-HashTable Symbol Any)) Any)]
+                      [lookup-exp-meta (-> Any (Option (Immutable-HashTable Symbol Any)))])
 
 (provide
  (struct-out bot-mind-log-snapshot)
@@ -13,6 +29,7 @@
  (struct-out bot-tactics-log-snapshot)
  (struct-out bot-step-log-record)
  should-emit-step-log?
+ extract-experiment-log-tag
  extract-bot-step-log-record
  format-bot-step-log-line
  bot-step-log-record->hash)
@@ -209,6 +226,85 @@
       (and (> interval 0)
            (= (remainder frame interval) 0))))
 
+(: rx-group-str (-> (Pairof String (Listof (Option String))) Natural String))
+(define (rx-group-str m idx)
+  (define xs : (Listof (Option String)) m)
+  (if (< idx (length xs))
+      (or (list-ref xs idx) "")
+      ""))
+
+(: valid-exp-id-sym (-> Any (Option Symbol)))
+(define (valid-exp-id-sym v)
+  (cond
+    [(symbol? v)
+     (if (memq v (ann '(#f unknown none ||) (Listof Any))) #f v)]
+    [(string? v)
+     (define t (string-trim v))
+     (if (or (string=? t "")
+             (string=? t "unknown")
+             (string=? t "none"))
+         #f
+         (string->symbol t))]
+    [else #f]))
+
+(: extract-experiment-log-tag (-> Any (U False (Immutable-HashTable Symbol Any))))
+(define (extract-experiment-log-tag raw)
+  (cond
+    [(bot-step-log-record? raw)
+     (lookup-exp-meta raw)]
+    [(string? raw)
+     (define m1
+       (regexp-match #px"\\[EXP:([^|\\]]+)\\|race:([^|\\]]+)\\|matchup:([^|\\]]+)\\|spot:([0-9]+):([^|\\]]+)\\|p:([0-9.]+)%\\]"
+                     raw))
+     (cond
+       [m1
+        (define id-sym (valid-exp-id-sym (rx-group-str m1 1)))
+        (and id-sym
+             (let ([sp-n (string->number (rx-group-str m1 4))]
+                   [pct-n (string->number (rx-group-str m1 6))])
+               (hasheq 'experiment-id id-sym
+                       'race (normalize-known-race (rx-group-str m1 2))
+                       'matchup (safe-sym (rx-group-str m1 3) 'unknown)
+                       'experiment-spot-idx (safe-nonneg-int sp-n 0)
+                       'spot-label (safe-sym (rx-group-str m1 5) 'default)
+                       'probability-pct (safe-finite-real pct-n 0.0))))]
+       [else
+        (define m2 (regexp-match #px"(?:^|\\s)exp=([A-Za-z0-9_.-]+)@spot([0-9]+)" raw))
+        (and m2
+             (let ([id-sym (valid-exp-id-sym (rx-group-str m2 1))]
+                   [sp-n (string->number (rx-group-str m2 2))])
+               (and id-sym
+                    (hasheq 'experiment-id id-sym
+                            'experiment-spot-idx (safe-nonneg-int sp-n 0)))))])]
+    [(hash? raw)
+     (define direct-id
+       (valid-exp-id-sym
+        (hget* raw '(experiment-id experiment_id exp-id exp_id) #f)))
+     (cond
+       [direct-id
+        (define spot-raw
+          (hget* raw '(experiment-spot-idx experiment_spot_idx spot-idx spot_idx) 0))
+        (define spot-n
+          (cond
+            [(exact-nonnegative-integer? spot-raw) spot-raw]
+            [(real? spot-raw) (safe-nonneg-int spot-raw 0)]
+            [(string? spot-raw) (safe-nonneg-int (string->number (string-trim spot-raw)) 0)]
+            [else 0]))
+        (define lbl (hget* raw '(experiment-spot-label experiment_spot_label spot-label spot_label) #f))
+        (define base-ht : (Immutable-HashTable Symbol Any)
+          (hasheq 'experiment-id direct-id
+                  'experiment-spot-idx spot-n))
+        (if (or (symbol? lbl) (and (string? lbl) (> (string-length (string-trim lbl)) 0)))
+            (hash-set base-ht 'spot-label (safe-sym lbl 'default))
+            base-ht)]
+       [else
+        (or (let ([sub (hget* raw '(experiment experiment-selection experiment_selection) #f)])
+              (and sub (extract-experiment-log-tag sub)))
+            (let ([tag-str (hget* raw '(experiment-tag experiment_tag exp-tag log-tag tag) #f)])
+              (and (string? tag-str) (extract-experiment-log-tag tag-str)))
+            #f)])]
+    [else #f]))
+
 (: extract-bot-step-log-record (->* () (Any Any Any) bot-step-log-record))
 (define (extract-bot-step-log-record [raw-mind #f] [raw-goals #f] [raw-tactics #f])
   (if (and (bot-step-log-record? raw-mind)
@@ -223,11 +319,20 @@
                            raw-mind)]
              [tac-src (or raw-tactics
                           (and (hash? raw-mind) (hash-ref raw-mind 'tactics (lambda () #f)))
-                          raw-mind)])
-        (bot-step-log-record
-         (extract-mind-snapshot mind-src)
-         (extract-goal-snapshot goal-src)
-         (extract-tactics-snapshot tac-src)))))
+                          raw-mind)]
+             [exp-meta (or (extract-experiment-log-tag raw-mind)
+                           (extract-experiment-log-tag raw-goals)
+                           (extract-experiment-log-tag raw-tactics)
+                           (extract-experiment-log-tag mind-src)
+                           (extract-experiment-log-tag goal-src)
+                           (extract-experiment-log-tag tac-src))]
+             [rec (bot-step-log-record
+                   (extract-mind-snapshot mind-src)
+                   (extract-goal-snapshot goal-src)
+                   (extract-tactics-snapshot tac-src))])
+        (when exp-meta
+          (record-exp-meta! rec exp-meta))
+        rec)))
 
 (: fmt2 (-> Float String))
 (define (fmt2 x)
@@ -251,7 +356,14 @@
     (if (> target-sec 0.0)
         (format "@~as" (round1 target-sec))
         ""))
-  (format "[SCBOT_STATE] f=~a matchup=~a posture=~a pers=~a arch=~a win=~a conf=~a bayesian=(bluff=~a,rush=~a,hexp=~a,tsw=~a,camp=~a) goal=~a/~a~a(escrow=~aM/~aG,w=~a,army=~a) sched=(~a) tactics=(pos=~a,adv=~a,sec=~a,orders=~a)"
+  (define exp-meta (lookup-exp-meta rec))
+  (define exp-tag
+    (if exp-meta
+        (format " exp=~a@spot~a"
+                (hash-ref exp-meta 'experiment-id (lambda () 'unknown))
+                (hash-ref exp-meta 'experiment-spot-idx (lambda () 0)))
+        ""))
+  (format "[SCBOT_STATE] f=~a matchup=~a posture=~a pers=~a arch=~a win=~a conf=~a bayesian=(bluff=~a,rush=~a,hexp=~a,tsw=~a,camp=~a) goal=~a/~a~a(escrow=~aM/~aG,w=~a,army=~a) sched=(~a) tactics=(pos=~a,adv=~a,sec=~a,orders=~a)~a"
           (bot-mind-log-snapshot-frame m)
           (bot-mind-log-snapshot-matchup m)
           (bot-mind-log-snapshot-posture m)
@@ -275,7 +387,8 @@
           (bot-tactics-log-snapshot-combat-posture t)
           (fmt2 (bot-tactics-log-snapshot-snowball-adv t))
           (bot-tactics-log-snapshot-retreat-sector t)
-          (bot-tactics-log-snapshot-issued-orders t)))
+          (bot-tactics-log-snapshot-issued-orders t)
+          exp-tag))
 
 (: bot-step-log-record->hash (-> bot-step-log-record (HashTable Symbol Any)))
 (define (bot-step-log-record->hash rec)
@@ -319,9 +432,20 @@
      'shimmer-alerts (bot-tactics-log-snapshot-shimmer-alerts t)
      'swapped-addons (bot-tactics-log-snapshot-swapped-addons t)
      'issued-orders (bot-tactics-log-snapshot-issued-orders t)))
-  ((inst hash Symbol Any)
-   'frame (bot-mind-log-snapshot-frame m)
-   'matchup (bot-mind-log-snapshot-matchup m)
-   'mind mind-ht
-   'goals goals-ht
-   'tactics tactics-ht))
+  (define base-ht : (HashTable Symbol Any)
+    ((inst hash Symbol Any)
+     'frame (bot-mind-log-snapshot-frame m)
+     'matchup (bot-mind-log-snapshot-matchup m)
+     'mind mind-ht
+     'goals goals-ht
+     'tactics tactics-ht))
+  (define exp-meta (lookup-exp-meta rec))
+  (if exp-meta
+      (let* ([ht1 (hash-set base-ht 'experiment-id
+                            (hash-ref exp-meta 'experiment-id (lambda () 'unknown)))]
+             [ht2 (hash-set ht1 'experiment-spot-idx
+                            (hash-ref exp-meta 'experiment-spot-idx (lambda () 0)))])
+        (if (hash-has-key? exp-meta 'spot-label)
+            (hash-set ht2 'experiment-spot-label (hash-ref exp-meta 'spot-label (lambda () 'default)))
+            ht2))
+      base-ht))

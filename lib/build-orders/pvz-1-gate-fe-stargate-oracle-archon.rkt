@@ -8,7 +8,8 @@
 
 (require "../sc2-types.rkt")
 
-(provide PvZ-BUILD-ORDER)
+(provide PvZ-BUILD-ORDER
+         PvZ-UNIT-BENCHMARKS)
 
 (: PvZ-BUILD-ORDER build-order-spec)
 (define PvZ-BUILD-ORDER
@@ -70,3 +71,32 @@
     (pro-upgrade-timing 'blink                    318.6 439.6 70 'twilight-council) ;; 5:19 -> 7:20
     (pro-upgrade-timing 'protoss-ground-weapons-1 336.9 450.9 80 'forge)            ;; 5:37 -> 7:31
     (pro-upgrade-timing 'psi-storm                382.4 461.4 90 'templar-archive)))) ;; 6:22 -> 7:41
+
+;; Full 1..8+ min pro unit composition benchmarks (PvZ) covering core, harass, drops & casters.
+(: PvZ-UNIT-BENCHMARKS (Listof pro-unit-timing))
+(define PvZ-UNIT-BENCHMARKS
+  (list
+   (pro-unit-timing 'adept        2 28 140.6 'cybernetics-core)
+   (pro-unit-timing 'stalker      1 33 165.7 'cybernetics-core)
+   (pro-unit-timing 'oracle       1 38 205.0 'stargate)
+   (pro-unit-timing 'warp-prism   1 42 219.2 'robotics-facility)
+   (pro-unit-timing 'sentry       2 50 265.0 'cybernetics-core)
+   (pro-unit-timing 'observer     1 60 312.9 'robotics-facility)
+   (pro-unit-timing 'archon       2 67 318.0 'templar-archive)
+   (pro-unit-timing 'immortal     1 64 322.4 'robotics-facility)
+   (pro-unit-timing 'oracle       2 68 335.0 'stargate)
+   (pro-unit-timing 'zealot       6 74 355.0 'gateway)
+   (pro-unit-timing 'sentry       3 78 366.0 'cybernetics-core)
+   (pro-unit-timing 'colossus     1 84 385.0 'robotics-bay)
+   (pro-unit-timing 'immortal     4 97 405.9 'robotics-facility)
+   (pro-unit-timing 'high-templar 2 104 425.0 'templar-archive)
+   (pro-unit-timing 'stalker      8 110 445.0 'cybernetics-core)
+   (pro-unit-timing 'zealot      14 118 460.0 'gateway)
+   (pro-unit-timing 'adept        4 122 465.0 'cybernetics-core)
+   (pro-unit-timing 'colossus     3 128 475.0 'robotics-bay)
+   (pro-unit-timing 'immortal     6 134 485.0 'robotics-facility)
+   (pro-unit-timing 'archon       5 140 492.0 'templar-archive)
+   (pro-unit-timing 'high-templar 5 144 498.0 'templar-archive)
+   (pro-unit-timing 'disruptor    2 148 502.0 'robotics-bay)
+   (pro-unit-timing 'observer     2 150 505.0 'robotics-facility)
+   (pro-unit-timing 'warp-prism   2 154 510.0 'robotics-facility)))

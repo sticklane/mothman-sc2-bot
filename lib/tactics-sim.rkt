@@ -18,7 +18,19 @@
          "tactics/disruptor-micro.rkt"
          "tactics/pro-spellcaster-micro.rkt"
          "tactics/unit-mode-micro.rkt"
-         "tactics/transport-drop-micro.rkt")
+         "tactics/transport-drop-micro.rkt"
+         "situational-counter-planner.rkt"
+         "tactics/creep-and-changeling-tactics.rkt"
+         "tactics/wall-and-block-tactics.rkt"
+         (except-in "tactics/multitask-harass-and-proxy.rkt"
+                    MORPH-VIKING-ASSAULT-ABILITY-ID
+                    MORPH-VIKING-FIGHTER-ABILITY-ID)
+         "tactics/map-elements-and-experiments.rkt"
+         (except-in "tactics/static-defense-and-nydus-tactics.rkt"
+                    NEXUS-ENERGY-RECHARGE-ABILITY-ID
+                    SHIELD-BATTERY-RECHARGE-ABILITY-ID
+                    SHIELD-BATTERY-RESTORE-LEGACY-ID
+                    LOCUST-SWOOP-ABILITY-ID))
 
 (provide
  (all-from-out "sc2-geometry.rkt")
@@ -33,4 +45,10 @@
  (all-from-out "tactics/disruptor-micro.rkt")
  (all-from-out "tactics/pro-spellcaster-micro.rkt")
  (all-from-out "tactics/unit-mode-micro.rkt")
- (all-from-out "tactics/transport-drop-micro.rkt"))
+ (all-from-out "tactics/transport-drop-micro.rkt")
+ (all-from-out "situational-counter-planner.rkt")
+ (all-from-out "tactics/creep-and-changeling-tactics.rkt")
+ (all-from-out "tactics/wall-and-block-tactics.rkt")
+ (all-from-out "tactics/multitask-harass-and-proxy.rkt")
+ (all-from-out "tactics/map-elements-and-experiments.rkt")
+ (all-from-out "tactics/static-defense-and-nydus-tactics.rkt"))

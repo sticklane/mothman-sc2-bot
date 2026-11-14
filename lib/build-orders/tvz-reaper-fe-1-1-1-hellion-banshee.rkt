@@ -8,7 +8,8 @@
 
 (require "../sc2-types.rkt")
 
-(provide TvZ-BUILD-ORDER)
+(provide TvZ-BUILD-ORDER
+         TvZ-UNIT-BENCHMARKS)
 
 (: TvZ-BUILD-ORDER build-order-spec)
 (define TvZ-BUILD-ORDER
@@ -72,3 +73,32 @@
     (pro-upgrade-timing 'terran-infantry-armor-1   319.9 433.9 63 'engineering-bay)  ;; 5:20 -> 7:14
     (pro-upgrade-timing 'combat-shield             366.5 445.5 84 'barracks-techlab) ;; 6:07 -> 7:26
     (pro-upgrade-timing 'terran-infantry-weapons-2 388.7 524.7 94 'engineering-bay)))) ;; 6:29 -> 8:45
+
+;; Full 1..8+ min pro unit composition benchmarks (TvZ) covering core, harass, drops & casters.
+(: TvZ-UNIT-BENCHMARKS (Listof pro-unit-timing))
+(define TvZ-UNIT-BENCHMARKS
+  (list
+   (pro-unit-timing 'reaper         1 20  91.7 'barracks)
+   (pro-unit-timing 'marine         2 25 162.2 'barracks)
+   (pro-unit-timing 'widow-mine     1 31 170.8 'factory)
+   (pro-unit-timing 'medivac        1 35 198.6 'starport)
+   (pro-unit-timing 'marine         6 36 201.2 'barracks)
+   (pro-unit-timing 'hellion        4 53 246.1 'factory)
+   (pro-unit-timing 'raven          1 57 250.4 'starport-techlab)
+   (pro-unit-timing 'cyclone        1 60 270.0 'factory-techlab)
+   (pro-unit-timing 'widow-mine     3 66 300.0 'factory)
+   (pro-unit-timing 'siege-tank     2 70 325.0 'factory-techlab)
+   (pro-unit-timing 'medivac        2 74 335.0 'starport)
+   (pro-unit-timing 'marine        14 76 361.2 'barracks)
+   (pro-unit-timing 'marauder       4 84 375.0 'barracks-techlab)
+   (pro-unit-timing 'viking-fighter 2 90 390.0 'starport)
+   (pro-unit-timing 'hellion        6 96 410.0 'factory)
+   (pro-unit-timing 'medivac        4 108 440.0 'starport)
+   (pro-unit-timing 'marine        26 118 460.0 'barracks)
+   (pro-unit-timing 'siege-tank     5 124 470.0 'factory-techlab)
+   (pro-unit-timing 'marauder       8 130 480.0 'barracks-techlab)
+   (pro-unit-timing 'widow-mine     5 134 485.0 'factory)
+   (pro-unit-timing 'viking-fighter 4 138 490.0 'starport)
+   (pro-unit-timing 'thor           2 144 495.0 'armory)
+   (pro-unit-timing 'raven          2 146 500.0 'starport-techlab)
+   (pro-unit-timing 'ghost          3 152 510.0 'ghost-academy)))

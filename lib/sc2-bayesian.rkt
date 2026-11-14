@@ -30,6 +30,9 @@
  hellinger-distance
  fow-ghost-step-diffusion!
  compute-bayesian-pad-camped-posterior
+ compute-bayesian-unwalled-opponent-posterior
+ compute-bayesian-proxy-all-in-posterior
+ compute-bayesian-multi-prong-window-posterior
  evaluate-bluff-posterior-from-signals
  evaluate-strategic-posteriors-from-signals)
 
@@ -416,3 +419,129 @@
    hidden-expand-post
    tech-switch-post
    branch-posteriors))
+
+;; Computes P(opponent front ramp/natural is unwalled or open | E) in [0.01, 0.99],
+;; enabling probabilistic punish/flood gates without brittle hard-coded thresholds.
+(: compute-bayesian-unwalled-opponent-posterior
+   (->* ()
+        (#:prior Any
+         #:wall-structure-count Any
+         #:lowered-depot-count Any
+         #:door-gap-units Any
+         #:scouted-choke? Any
+         #:enemy-race Any
+         #:frame Any
+         #:static-defense-count Any)
+        Float))
+(define (compute-bayesian-unwalled-opponent-posterior
+         #:prior [raw-prior 0.25]
+         #:wall-structure-count [raw-wall-cnt 0]
+         #:lowered-depot-count [raw-lowered-cnt 0]
+         #:door-gap-units [raw-gap 0]
+         #:scouted-choke? [scouted-choke? #f]
+         #:enemy-race [enemy-race 'Unknown]
+         #:frame [raw-frame 0]
+         #:static-defense-count [raw-static-cnt 0])
+  (define wall-cnt (max 0 (safe-exact-int raw-wall-cnt 0)))
+  (define lowered-cnt (max 0 (safe-exact-int raw-lowered-cnt 0)))
+  (define gap-units (max 0 (safe-exact-int raw-gap 0)))
+  (define frame (max 0 (safe-exact-int raw-frame 0)))
+  (define static-cnt (max 0 (safe-exact-int raw-static-cnt 0)))
+  (define scouted? (and scouted-choke? #t))
+  (define zerg-race? (memq enemy-race '(Zerg zerg ZERG)))
+  (bayesian-posterior-from-likelihoods
+   raw-prior
+   (list
+    (cons (and scouted? (= wall-cnt 0) (>= frame 1568)) (if zerg-race? 4.0 12.0))
+    (cons (and scouted? (= wall-cnt 1) (= lowered-cnt 0) (>= frame 1568)) 5.5)
+    (cons (> lowered-cnt 0) 9.0)
+    (cons (> gap-units 0) 4.0)
+    (cons (and (not scouted?) (< frame 1568)) 0.45)
+    (cons (and (>= wall-cnt 2) (= lowered-cnt 0) (= gap-units 0)) 0.06)
+    (cons (>= static-cnt 1) 0.35))))
+
+;; Computes P(enemy is executing an off-path proxy all-in | E) in [0.01, 0.99].
+(: compute-bayesian-proxy-all-in-posterior
+   (->* ()
+        (#:prior Any
+         #:home-production-count Any
+         #:expected-home-production Any
+         #:enemy-natural-taken? Any
+         #:scouted-enemy-main? Any
+         #:enemy-gas-count Any
+         #:frame Any
+         #:proxy-bldg-spotted? Any
+         #:early-enemy-combat-count Any
+         #:enemy-worker-deficit? Any)
+        Float))
+(define (compute-bayesian-proxy-all-in-posterior
+         #:prior [raw-prior 0.10]
+         #:home-production-count [raw-home-prod 1]
+         #:expected-home-production [raw-exp-prod 1]
+         #:enemy-natural-taken? [nat-taken? #f]
+         #:scouted-enemy-main? [scouted-main? #f]
+         #:enemy-gas-count [raw-gas-cnt 1]
+         #:frame [raw-frame 2400]
+         #:proxy-bldg-spotted? [proxy-spotted? #f]
+         #:early-enemy-combat-count [raw-early-combat 0]
+         #:enemy-worker-deficit? [worker-deficit? #f])
+  (define home-prod (max 0 (safe-exact-int raw-home-prod 1)))
+  (define exp-prod (max 0 (safe-exact-int raw-exp-prod 1)))
+  (define gas-cnt (max 0 (safe-exact-int raw-gas-cnt 1)))
+  (define frame (max 0 (safe-exact-int raw-frame 2400)))
+  (define early-combat (max 0 (safe-exact-int raw-early-combat 0)))
+  (define scouted? (and scouted-main? #t))
+  (define nat? (and nat-taken? #t))
+  (bayesian-posterior-from-likelihoods
+   raw-prior
+   (list
+    (cons (and proxy-spotted? #t) 25.0)
+    (cons (and scouted? (< home-prod exp-prod) (not nat?) (>= frame 1800)) 9.5)
+    (cons (and scouted? (= home-prod 0) (not nat?) (>= frame 2000)) 6.5)
+    (cons (and scouted? (>= gas-cnt 2) (= home-prod 0)) 3.2)
+    (cons (and worker-deficit? #t) 2.4)
+    (cons (and (>= early-combat 2) (<= frame 3600)) 3.5)
+    (cons nat? 0.15)
+    (cons (and scouted? (>= home-prod (+ exp-prod 1))) 0.18))))
+
+;; Computes P(multi-prong harass / runby / drop window is favorable | E) in [0.01, 0.99].
+(: compute-bayesian-multi-prong-window-posterior
+   (->* ()
+        (#:prior Any
+         #:enemy-army-dist-from-home Any
+         #:enemy-unwalled? Any
+         #:active-air-harass? Any
+         #:unprotected-mineral-lines Any
+         #:unused-harass-supply-ready? Any
+         #:under-heavy-home-attack? Any
+         #:enemy-static-defense-count Any
+         #:opponent-attention-load Any)
+        Float))
+(define (compute-bayesian-multi-prong-window-posterior
+         #:prior [raw-prior 0.18]
+         #:enemy-army-dist-from-home [raw-enemy-dist 10.0]
+         #:enemy-unwalled? [enemy-unwalled? #f]
+         #:active-air-harass? [active-air-harass? #f]
+         #:unprotected-mineral-lines [raw-unprot-bases 0]
+         #:unused-harass-supply-ready? [harass-ready? #f]
+         #:under-heavy-home-attack? [under-home-atk? #f]
+         #:enemy-static-defense-count [raw-enemy-static 0]
+         #:opponent-attention-load [raw-attn-load 0.0])
+  (define enemy-dist (max 0.0 (safe-real raw-enemy-dist 10.0)))
+  (define unprot-bases (max 0 (safe-exact-int raw-unprot-bases 0)))
+  (define enemy-static (max 0 (safe-exact-int raw-enemy-static 0)))
+  (define attn-load (clamp-real (safe-real raw-attn-load 0.0) 0.0 1.0))
+  (define unwalled? (and enemy-unwalled? #t))
+  (define air-harass? (and active-air-harass? #t))
+  (bayesian-posterior-from-likelihoods
+   raw-prior
+   (list
+    (cons (>= enemy-dist 22.0) 6.0)
+    (cons unwalled? 4.5)
+    (cons air-harass? 3.8)
+    (cons (>= unprot-bases 1) (* 2.5 (->float (min 3 unprot-bases))))
+    (cons (>= attn-load 0.5) 2.2)
+    (cons (and harass-ready? #t) 1.6)
+    (cons (and under-home-atk? #t) 0.25)
+    (cons (>= enemy-static 3) 0.30)
+    (cons (and (< enemy-dist 14.0) (not unwalled?) (not air-harass?)) 0.35))))

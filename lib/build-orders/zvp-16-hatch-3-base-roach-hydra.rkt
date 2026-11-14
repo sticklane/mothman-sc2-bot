@@ -8,7 +8,8 @@
 
 (require "../sc2-types.rkt")
 
-(provide ZvP-BUILD-ORDER)
+(provide ZvP-BUILD-ORDER
+         ZvP-UNIT-BENCHMARKS)
 
 (: ZvP-BUILD-ORDER build-order-spec)
 (define ZvP-BUILD-ORDER
@@ -70,3 +71,30 @@
     (pro-upgrade-timing 'glial-reconstitution   341.7 420.7 86 'roach-warren)      ;; 5:42 -> 7:01
     (pro-upgrade-timing 'zerg-missile-weapons-1 365.6 479.6 94 'evolution-chamber) ;; 6:06 -> 8:00
     (pro-upgrade-timing 'grooved-spines         388.8 438.8 96 'hydralisk-den))))    ;; 6:29 -> 7:19
+
+;; Full 1..8+ min pro unit composition benchmarks (ZvP) covering core, harass, drops & casters.
+(: ZvP-UNIT-BENCHMARKS (Listof pro-unit-timing))
+(define ZvP-UNIT-BENCHMARKS
+  (list
+   (pro-unit-timing 'overlord           2 13  12.4 #f)
+   (pro-unit-timing 'zergling           4 25 139.4 'spawning-pool)
+   (pro-unit-timing 'queen              2 27 151.4 'spawning-pool)
+   (pro-unit-timing 'queen              3 41 214.3 'spawning-pool)
+   (pro-unit-timing 'overlord-transport 1 54 255.0 'lair)
+   (pro-unit-timing 'zergling           8 56 256.5 'spawning-pool)
+   (pro-unit-timing 'queen              4 59 264.3 'spawning-pool)
+   (pro-unit-timing 'roach              7 85 326.1 'roach-warren)
+   (pro-unit-timing 'overseer           2 86 332.3 'lair)
+   (pro-unit-timing 'baneling           4 88 345.0 'baneling-nest)
+   (pro-unit-timing 'ravager            3 92 365.0 'roach-warren)
+   (pro-unit-timing 'overlord-transport 2 94 375.0 'lair)
+   (pro-unit-timing 'hydralisk          8 98 400.0 'hydralisk-den)
+   (pro-unit-timing 'roach             12 106 420.0 'roach-warren)
+   (pro-unit-timing 'lurker-mp          3 116 450.0 'lurker-den)
+   (pro-unit-timing 'zergling          20 122 465.0 'spawning-pool)
+   (pro-unit-timing 'baneling           8 126 470.0 'baneling-nest)
+   (pro-unit-timing 'hydralisk         16 132 480.0 'hydralisk-den)
+   (pro-unit-timing 'ravager            6 138 490.0 'roach-warren)
+   (pro-unit-timing 'lurker-mp          6 144 495.0 'lurker-den)
+   (pro-unit-timing 'overseer           3 148 500.0 'lair)
+   (pro-unit-timing 'viper              3 154 510.0 'hive)))

@@ -8,7 +8,8 @@
 
 (require "../sc2-types.rkt")
 
-(provide ZvZ-BUILD-ORDER)
+(provide ZvZ-BUILD-ORDER
+         ZvZ-UNIT-BENCHMARKS)
 
 (: ZvZ-BUILD-ORDER build-order-spec)
 (define ZvZ-BUILD-ORDER
@@ -68,3 +69,32 @@
     (pro-upgrade-timing 'centrifical-hooks      323.0 402.0 67 'baneling-nest)     ;; 5:23 -> 6:42
     (pro-upgrade-timing 'glial-reconstitution   340.4 419.5 74 'roach-warren)      ;; 5:40 -> 7:00
     (pro-upgrade-timing 'burrow                 356.8 427.8 70 'hatchery))))        ;; 5:57 -> 7:08
+
+;; Full 1..8+ min pro unit composition benchmarks (ZvZ) covering core, harass, drops & casters.
+(: ZvZ-UNIT-BENCHMARKS (Listof pro-unit-timing))
+(define ZvZ-UNIT-BENCHMARKS
+  (list
+   (pro-unit-timing 'overlord           2 13  13.0 #f)
+   (pro-unit-timing 'queen              2 22 122.1 'spawning-pool)
+   (pro-unit-timing 'zergling           6 24 140.0 'spawning-pool)
+   (pro-unit-timing 'queen              3 41 202.6 'spawning-pool)
+   (pro-unit-timing 'baneling           4 36 206.0 'baneling-nest)
+   (pro-unit-timing 'overlord-transport 1 48 255.0 'lair)
+   (pro-unit-timing 'queen              4 54 273.6 'spawning-pool)
+   (pro-unit-timing 'zergling          16 54 280.0 'spawning-pool)
+   (pro-unit-timing 'roach              4 55 316.3 'roach-warren)
+   (pro-unit-timing 'overseer           1 58 330.0 'lair)
+   (pro-unit-timing 'ravager            2 68 345.5 'roach-warren)
+   (pro-unit-timing 'overlord-transport 2 76 375.0 'lair)
+   (pro-unit-timing 'roach             10 82 390.0 'roach-warren)
+   (pro-unit-timing 'baneling           8 86 400.0 'baneling-nest)
+   (pro-unit-timing 'hydralisk          6 94 415.0 'hydralisk-den)
+   (pro-unit-timing 'overseer           2 96 420.0 'lair)
+   (pro-unit-timing 'ravager            4 104 445.0 'roach-warren)
+   (pro-unit-timing 'lurker-mp          2 112 455.0 'lurker-den)
+   (pro-unit-timing 'roach             16 120 470.0 'roach-warren)
+   (pro-unit-timing 'hydralisk         12 128 480.0 'hydralisk-den)
+   (pro-unit-timing 'zergling          28 134 485.0 'spawning-pool)
+   (pro-unit-timing 'lurker-mp          5 142 495.0 'lurker-den)
+   (pro-unit-timing 'overseer           3 145 500.0 'lair)
+   (pro-unit-timing 'viper              2 152 510.0 'hive)))

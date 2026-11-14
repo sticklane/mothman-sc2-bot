@@ -33,6 +33,8 @@
 (require racket/list
          racket/math
          racket/set
+         racket/flonum
+         racket/fixnum
          typed/racket/unsafe
          "../sc2-types.rkt"
          "../sc2-geometry.rkt"
@@ -40,18 +42,356 @@
 
 ;; Safe bridge for inspecting heterogeneous untyped/mutable/immutable unit hashes.
 (module dyn-hash-ops racket/base
+  (require racket/flonum
+           racket/fixnum)
   (provide dyn-hash-ref
-           dyn-hash-has-key?)
+           dyn-hash-has-key?
+           fast-units-have-disruptor-or-nova?
+           fast-unit-nova-eval-raw
+           fast-hash-disruptor-kind
+           fast-extract-disruptor-entities
+           fast-compute-army-anchor-raw
+           fast-nearest-kite-threats
+           fast-flvec-pick-best-nova-target)
   (define (dyn-hash-ref h k default)
     (if (hash? h)
-        (hash-ref h k (lambda () default))
+        (if (procedure? default)
+            (hash-ref h k (lambda () default))
+            (hash-ref h k default))
         default))
   (define (dyn-hash-has-key? h k)
-    (and (hash? h) (hash-has-key? h k))))
+    (and (hash? h) (hash-has-key? h k)))
+  (define (fast-units-have-disruptor-or-nova? units)
+    (for/or ([u (in-list units)])
+      (and (hash? u)
+           (let ([t (hash-ref u 'type #f)])
+             (cond
+               [(or (eq? t 'disruptor) (eq? t 'disruptor-phased)) #t]
+               [(and (symbol? t) (not (eq? t 'unknown)))
+                (not (not (memq t '(Disruptor DisruptorPhased disruptor_phased
+                                     Disruptor_Phased DISRUPTOR DISRUPTOR-PHASED DISRUPTOR_PHASED))))]
+               [else #t])))))
+  (define (safe-fl v def)
+    (if (rational? v)
+        (real->double-flonum v)
+        def))
+  (define (safe-int v def)
+    (cond
+      [(exact-integer? v) v]
+      [(rational? v)
+       (inexact->exact (truncate v))]
+      [else def]))
+  (define (fast-unit-nova-eval-raw u)
+    (cond
+      [(not (hash? u))
+       (values #f 'unknown 0 0.0 0.0 0.0 0.0 0.0)]
+      [(or (eq? (hash-ref u 'hallucination #f) #t)
+           (eq? (hash-ref u 'flying #f) #t)
+           (eq? (hash-ref u 'flying? #f) #t)
+           (eq? (hash-ref u 'is-flying #f) #t)
+           (eq? (hash-ref u 'is_flying #f) #t)
+           (eq? (hash-ref u 'is-building #f) #t)
+           (eq? (hash-ref u 'building? #f) #t)
+           (eq? (hash-ref u 'is-structure #f) #t))
+       (values #f 'unknown 0 0.0 0.0 0.0 0.0 0.0)]
+      [else
+       (define has-hp? (hash-has-key? u 'hp))
+       (define has-health? (hash-has-key? u 'health))
+       (define has-sh? (hash-has-key? u 'shield))
+       (define has-shs? (hash-has-key? u 'shields))
+       (define hp-alive
+         (cond
+           [has-hp? (max 0.0 (safe-fl (hash-ref u 'hp 0.0) 0.0))]
+           [has-health? (max 0.0 (safe-fl (hash-ref u 'health 0.0) 0.0))]
+           [else 0.0]))
+       (define sh-alive
+         (cond
+           [has-sh? (max 0.0 (safe-fl (hash-ref u 'shield 0.0) 0.0))]
+           [has-shs? (max 0.0 (safe-fl (hash-ref u 'shields 0.0) 0.0))]
+           [else 0.0]))
+       (define alive?
+         (if (or has-hp? has-health? has-sh? has-shs?)
+             (> (+ hp-alive sh-alive) 0.0)
+             #t))
+       (if (not alive?)
+           (values #f 'unknown 0 0.0 0.0 0.0 0.0 0.0)
+           (let* ([t (hash-ref u 'type 'unknown)]
+                  [ut (if (symbol? t) t 'unknown)]
+                  [uid-t (safe-int (hash-ref u 'unit_type 0) 0)]
+                  [ux (safe-fl (hash-ref u 'x 0.0) 0.0)]
+                  [uy (safe-fl (hash-ref u 'y 0.0) 0.0)]
+                  [hp (if (or has-hp? has-health?) hp-alive 80.0)]
+                  [raw-r (hash-ref u 'radius #f)]
+                  [rad (if (rational? raw-r)
+                           (max 0.0 (min 0.65 (real->double-flonum raw-r)))
+                           0.0)])
+             (values #t ut uid-t ux uy hp sh-alive rad)))]))
+
+  ;; Returns 'disruptor, 'disruptor-phased, #f (definitely neither), or 'check (needs canonical fallback).
+  (define (fast-hash-disruptor-kind u)
+    (cond
+      [(not (hash? u)) #f]
+      [else
+       (define t (hash-ref u 'type #f))
+       (cond
+         [(eq? t 'disruptor) 'disruptor]
+         [(eq? t 'disruptor-phased) 'disruptor-phased]
+         [(and (symbol? t)
+               (not (eq? t 'unknown))
+               (not (memq t '(Disruptor DisruptorPhased disruptor_phased
+                                         Disruptor_Phased DISRUPTOR DISRUPTOR-PHASED DISRUPTOR_PHASED))))
+          (define uid-t (safe-int (hash-ref u 'unit_type 0) 0))
+          (cond
+            [(= uid-t 694) 'disruptor]
+            [(= uid-t 733) 'disruptor-phased]
+            [else #f])]
+         [else 'check])]))
+
+  (define (fast-extract-disruptor-entities units)
+    (let loop ([us units] [casters '()] [novas '()] [checks '()])
+      (cond
+        [(null? us)
+         (values (reverse casters) (reverse novas) (reverse checks))]
+        [else
+         (define u (car us))
+         (define kind (fast-hash-disruptor-kind u))
+         (cond
+           [(eq? kind 'disruptor) (loop (cdr us) (cons u casters) novas checks)]
+           [(eq? kind 'disruptor-phased) (loop (cdr us) casters (cons u novas) checks)]
+           [(eq? kind 'check) (loop (cdr us) casters novas (cons u checks))]
+           [else (loop (cdr us) casters novas checks)])])))
+
+  (define (fast-unit-alive? u)
+    (define hp-v (hash-ref u 'hp #f))
+    (cond
+      [(and (rational? hp-v) (> hp-v 0.0)) #t]
+      [else
+       (define hl-v (if (eq? hp-v #f) (hash-ref u 'health #f) #f))
+       (define sh-v (hash-ref u 'shield #f))
+       (define shs-v (if (eq? sh-v #f) (hash-ref u 'shields #f) #f))
+       (if (or (not (eq? hp-v #f)) (not (eq? hl-v #f))
+               (not (eq? sh-v #f)) (not (eq? shs-v #f)))
+           (> (+ (max 0.0 (safe-fl (or hp-v hl-v 0.0) 0.0))
+                 (max 0.0 (safe-fl (or sh-v shs-v 0.0) 0.0)))
+              0.0)
+           #t)]))
+
+  (define (fast-compute-army-anchor-raw ally-units anchor-cache)
+    (let loop ([us ally-units] [sx 0.0] [sy 0.0] [cnt 0] [fallback '()])
+      (cond
+        [(null? us) (values sx sy cnt fallback)]
+        [else
+         (define u (car us))
+         (if (and (hash? u) (fast-unit-alive? u))
+             (let* ([t (hash-ref u 'type #f)]
+                    [cls (if (symbol? t) (hash-ref anchor-cache t #f) #f)])
+               (cond
+                 [(not cls)
+                  (loop (cdr us) sx sy cnt (cons u fallback))]
+                 [(eq? cls 'skip)
+                  (loop (cdr us) sx sy cnt fallback)]
+                 [(or (eq? (hash-ref u 'is-building #f) #t)
+                      (eq? (hash-ref u 'building? #f) #t)
+                      (eq? (hash-ref u 'is-structure #f) #t)
+                      (let ([uid-t (hash-ref u 'unit_type #f)])
+                        (and (exact-integer? uid-t) (or (= uid-t 694) (= uid-t 733)))))
+                  (loop (cdr us) sx sy cnt fallback)]
+                 [else
+                  (loop (cdr us)
+                        (fl+ sx (safe-fl (hash-ref u 'x 0.0) 0.0))
+                        (fl+ sy (safe-fl (hash-ref u 'y 0.0) 0.0))
+                        (fx+ cnt 1)
+                        fallback)]))
+             (loop (cdr us) sx sy cnt fallback))])))
+
+  (define (fast-nearest-kite-threats enemy-units cxs cys k)
+    (define min-xs (make-flvector k 0.0))
+    (define min-ys (make-flvector k 0.0))
+    (define min-d2s (make-flvector k +inf.0))
+    (define threat-cnt 0)
+    (for ([e (in-list enemy-units)])
+      (when (and (hash? e)
+                 (not (eq? (hash-ref e 'hallucination #f) #t)))
+        (define t (hash-ref e 'type #f))
+        (define is-nova?
+          (or (eq? t 'disruptor-phased)
+              (and (symbol? t)
+                   (memq t '(DisruptorPhased disruptor_phased Disruptor_Phased DISRUPTOR-PHASED DISRUPTOR_PHASED)))
+              (let ([uid-t (hash-ref e 'unit_type #f)])
+                (and (exact-integer? uid-t) (= uid-t 733)))))
+        (when (and (not is-nova?) (fast-unit-alive? e))
+          (define ex (safe-fl (hash-ref e 'x 0.0) 0.0))
+          (define ey (safe-fl (hash-ref e 'y 0.0) 0.0))
+          (set! threat-cnt (fx+ threat-cnt 1))
+          (let loop-j ([j 0])
+            (when (fx< j k)
+              (define dx (fl- (flvector-ref cxs j) ex))
+              (define dy (fl- (flvector-ref cys j) ey))
+              (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+              (when (fl< d2 (flvector-ref min-d2s j))
+                (flvector-set! min-d2s j d2)
+                (flvector-set! min-xs j ex)
+                (flvector-set! min-ys j ey))
+              (loop-j (fx+ j 1)))))))
+    (values min-xs min-ys min-d2s threat-cnt))
+
+  (define (fast-flvec-pick-best-nova-target
+           e-cnt near-cnt exv eyv ehrv ehr2v ecv
+           a-hit-cnt a-cnt axv ayv ahrv ahr2v acv
+           res-cnt rxv ryv
+           ox oy max-r dec-d pmin pmax)
+    (define max-r2 (fl* max-r max-r))
+    (define dec2 (fl* dec-d dec-d))
+    (define has-res? (fx> res-cnt 0))
+    (define seen (make-hasheqv))
+    (define found? #f)
+    (define best-x 0.0)
+    (define best-y 0.0)
+    (define best-net -999999.0)
+    (define best-ehits 0)
+    (define best-ahits 0)
+    (define best-eraw 0.0)
+    (define best-apen 0.0)
+    (define best-od2 +inf.0)
+
+    (define (score-and-update! cx cy od2)
+      (define clear?
+        (if has-res?
+            (let rloop ([r 0])
+              (cond
+                [(fx>= r res-cnt) #t]
+                [else
+                 (define rdx (fl- cx (flvector-ref rxv r)))
+                 (define rdy (fl- cy (flvector-ref ryv r)))
+                 (if (fl>= (fl+ (fl* rdx rdx) (fl* rdy rdy)) dec2)
+                     (rloop (fx+ r 1))
+                     #f)]))
+            #t))
+      (when clear?
+        (define eraw 0.0)
+        (define ehits 0)
+        (let eloop ([i 0])
+          (when (fx< i e-cnt)
+            (define hr (flvector-ref ehrv i))
+            (define dx (flabs (fl- cx (flvector-ref exv i))))
+            (when (fl<= dx hr)
+              (define dy (flabs (fl- cy (flvector-ref eyv i))))
+              (when (and (fl<= dy hr)
+                         (fl<= (fl+ (fl* dx dx) (fl* dy dy)) (flvector-ref ehr2v i)))
+                (set! eraw (fl+ eraw (flvector-ref ecv i)))
+                (set! ehits (fx+ ehits 1))))
+            (eloop (fx+ i 1))))
+        (define apen 0.0)
+        (define ahits 0)
+        (let aloop ([i 0])
+          (when (fx< i a-hit-cnt)
+            (define hr (flvector-ref ahrv i))
+            (define dx (flabs (fl- cx (flvector-ref axv i))))
+            (when (fl<= dx hr)
+              (define dy (flabs (fl- cy (flvector-ref ayv i))))
+              (when (and (fl<= dy hr)
+                         (fl<= (fl+ (fl* dx dx) (fl* dy dy)) (flvector-ref ahr2v i)))
+                (set! apen (fl+ apen (flvector-ref acv i)))
+                (set! ahits (fx+ ahits 1))))
+            (aloop (fx+ i 1))))
+        (define net (fl- eraw apen))
+        (when (or (not found?)
+                  (fl> net best-net)
+                  (and (fl= net best-net) (fl< od2 best-od2)))
+          (set! found? #t)
+          (set! best-x cx)
+          (set! best-y cy)
+          (set! best-net net)
+          (set! best-ehits ehits)
+          (set! best-ahits ahits)
+          (set! best-eraw eraw)
+          (set! best-apen apen)
+          (set! best-od2 od2))))
+
+    (define (try-cand! raw-x raw-y)
+      (define cx (flmin pmax (flmax pmin raw-x)))
+      (define cy (flmin pmax (flmax pmin raw-y)))
+      (define dx (fl- ox cx))
+      (define dy (fl- oy cy))
+      (define od2 (fl+ (fl* dx dx) (fl* dy dy)))
+      (when (fl<= od2 max-r2)
+        (define qx (inexact->exact (flround (fl* cx 2.0))))
+        (define qy (inexact->exact (flround (fl* cy 2.0))))
+        (define key (+ (* qx 4096) qy))
+        (unless (hash-ref seen key #f)
+          (hash-set! seen key #t)
+          (score-and-update! cx cy od2))))
+
+    (let loop-i ([i 0])
+      (when (fx< i near-cnt)
+        (define x1 (flvector-ref exv i))
+        (define y1 (flvector-ref eyv i))
+        (try-cand! x1 y1)
+        (define sx 0.0)
+        (define sy 0.0)
+        (define cnt 0)
+        (let loop-j ([j 0])
+          (when (fx< j near-cnt)
+            (define x2 (flvector-ref exv j))
+            (define y2 (flvector-ref eyv j))
+            (define dx (flabs (fl- x1 x2)))
+            (define dy (flabs (fl- y1 y2)))
+            (when (and (fl<= dx 3.05) (fl<= dy 3.05))
+              (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+              (when (fl<= d2 9.3025)
+                (set! sx (fl+ sx x2))
+                (set! sy (fl+ sy y2))
+                (set! cnt (fx+ cnt 1))
+                (when (and (fx> j i) (fl> d2 0.01))
+                  (try-cand! (fl* 0.5 (fl+ x1 x2)) (fl* 0.5 (fl+ y1 y2))))))
+            (loop-j (fx+ j 1))))
+        (when (fx> cnt 1)
+          (define fcnt (->fl cnt))
+          (try-cand! (fl/ sx fcnt) (fl/ sy fcnt)))
+        (when (fx> a-cnt 0)
+          (define acx 0.0)
+          (define acy 0.0)
+          (define acnt 0)
+          (let loop-a ([a 0])
+            (when (fx< a a-cnt)
+              (define axu (flvector-ref axv a))
+              (define ayu (flvector-ref ayv a))
+              (define dx (fl- x1 axu))
+              (define dy (fl- y1 ayu))
+              (when (and (fl<= (flabs dx) 3.5)
+                         (fl<= (flabs dy) 3.5)
+                         (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 12.25))
+                (set! acx (fl+ acx axu))
+                (set! acy (fl+ acy ayu))
+                (set! acnt (fx+ acnt 1)))
+              (loop-a (fx+ a 1))))
+          (when (fx> acnt 0)
+            (define facnt (->fl acnt))
+            (define away-x (fl- x1 (fl/ acx facnt)))
+            (define away-y (fl- y1 (fl/ acy facnt)))
+            (define mag2 (fl+ (fl* away-x away-x) (fl* away-y away-y)))
+            (when (fl> mag2 0.0025)
+              (define mag (flsqrt mag2))
+              (try-cand! (fl+ x1 (fl* 1.15 (fl/ away-x mag)))
+                         (fl+ y1 (fl* 1.15 (fl/ away-y mag)))))))
+        (loop-i (fx+ i 1))))
+    (values found? best-x best-y best-net best-ehits best-ahits best-eraw best-apen)))
 
 (unsafe-require/typed (submod "." dyn-hash-ops)
   [dyn-hash-ref (-> Any Any Any Any)]
-  [dyn-hash-has-key? (-> Any Any Boolean)])
+  [dyn-hash-has-key? (-> Any Any Boolean)]
+  [fast-units-have-disruptor-or-nova? (-> (Listof Any) Boolean)]
+  [fast-unit-nova-eval-raw (-> Any (Values Boolean Symbol Integer Float Float Float Float Float))]
+  [fast-hash-disruptor-kind (-> Any (U Boolean Symbol))]
+  [fast-extract-disruptor-entities (-> (Listof Any) (Values (Listof Any) (Listof Any) (Listof Any)))]
+  [fast-compute-army-anchor-raw (-> (Listof Any) (HashTable Symbol Symbol) (Values Float Float Fixnum (Listof Any)))]
+  [fast-nearest-kite-threats (-> (Listof Any) FlVector FlVector Fixnum (Values FlVector FlVector FlVector Fixnum))]
+  [fast-flvec-pick-best-nova-target
+   (-> Fixnum Fixnum FlVector FlVector FlVector FlVector FlVector
+       Fixnum Fixnum FlVector FlVector FlVector FlVector FlVector
+       Fixnum FlVector FlVector
+       Float Float Float Float Float Float
+       (Values Boolean Float Float Float Integer Integer Float Float))])
 
 (provide
  ;; LotV Disruptor & Purification Nova constants
@@ -479,11 +819,16 @@
     [(symbol? u) (eq? (sc2-canonical-unit-sym u) 'disruptor-phased)]
     [(exact-integer? u) (= u DISRUPTOR-PHASED-UNIT-TYPE-ID)]
     [(hash? u)
-     (define ut (unit-type-sym u))
-     (define uid-type (safe-exact-int (dyn-hash-ref u 'unit_type 0) 0))
-     (not (not (or (eq? ut 'disruptor-phased)
-                   (eq? (sc2-canonical-unit-sym ut) 'disruptor-phased)
-                   (= uid-type DISRUPTOR-PHASED-UNIT-TYPE-ID))))]
+     (define kind (fast-hash-disruptor-kind u))
+     (cond
+       [(eq? kind 'disruptor-phased) #t]
+       [(not (eq? kind 'check)) #f]
+       [else
+        (define ut (unit-type-sym u))
+        (define uid-type (safe-exact-int (dyn-hash-ref u 'unit_type 0) 0))
+        (not (not (or (eq? ut 'disruptor-phased)
+                      (eq? (sc2-canonical-unit-sym ut) 'disruptor-phased)
+                      (= uid-type DISRUPTOR-PHASED-UNIT-TYPE-ID))))])]
     [else #f]))
 
 ;; Identify Protoss Disruptor caster units (`694`), which have NO auto-attack weapon.
@@ -492,8 +837,69 @@
   (cond
     [(symbol? u) (eq? (sc2-canonical-unit-sym u) 'disruptor)]
     [(exact-integer? u) (= u DISRUPTOR-UNIT-TYPE-ID)]
-    [(hash? u) (eq? (resolved-unit-type u) 'disruptor)]
+    [(hash? u)
+     (define kind (fast-hash-disruptor-kind u))
+     (cond
+       [(eq? kind 'disruptor) #t]
+       [(not (eq? kind 'check)) #f]
+       [else (eq? (resolved-unit-type u) 'disruptor)])]
     [else #f]))
+
+;; Fast zero-allocation predicate matching both `'disruptor` (694) and `'disruptor-phased` (733).
+(: fast-disruptor-or-nova? (-> Any Boolean))
+(define (fast-disruptor-or-nova? u)
+  (define kind (fast-hash-disruptor-kind u))
+  (cond
+    [(or (eq? kind 'disruptor) (eq? kind 'disruptor-phased)) #t]
+    [(not (eq? kind 'check)) #f]
+    [else (or (disruptor-caster-unit? u) (purification-nova-unit? u))]))
+
+(: extract-disruptor-casters+novas (-> (Listof Any) (Values (Listof Any) (Listof Any))))
+(define (extract-disruptor-casters+novas units)
+  (define-values (casters novas checks) (fast-extract-disruptor-entities units))
+  (if (null? checks)
+      (values casters novas)
+      (values (append casters (filter disruptor-caster-unit? checks))
+              (append novas (filter purification-nova-unit? checks)))))
+
+;; Filter `units` to those within Euclidean `radius` (e.g. 15.0 tiles) of any reference unit in `refs`.
+(: filter-units-within-range (-> (Listof Any) (Listof Any) Float (Listof Any)))
+(define (filter-units-within-range units refs radius)
+  (if (or (null? refs) (null? units))
+      '()
+      (let ([ref-pts : (Listof (Pairof Float Float))
+                     (for/list : (Listof (Pairof Float Float)) ([r (in-list refs)])
+                       (cons (unit-x r) (unit-y r)))]
+            [r2 (* radius radius)])
+        (filter (lambda ([u : Any])
+                  (and (hash? u)
+                       (let ([ux (unit-x u)]
+                             [uy (unit-y u)])
+                         (for/or : Boolean ([pt (in-list ref-pts)])
+                           (define dx (- ux (car pt)))
+                           (define dy (- uy (cdr pt)))
+                           (and (<= (abs dx) radius)
+                                (<= (abs dy) radius)
+                                (<= (+ (* dx dx) (* dy dy)) r2))))))
+                units))))
+
+(: internal-skip-sync? (Parameterof Boolean))
+(define internal-skip-sync? (make-parameter #f))
+
+(: internal-ally-casters (Parameterof (Option (Listof Any))))
+(define internal-ally-casters (make-parameter #f))
+
+(: internal-ally-novas (Parameterof (Option (Listof Any))))
+(define internal-ally-novas (make-parameter #f))
+
+(: internal-enemy-casters (Parameterof (Option (Listof Any))))
+(define internal-enemy-casters (make-parameter #f))
+
+(: internal-enemy-novas (Parameterof (Option (Listof Any))))
+(define internal-enemy-novas (make-parameter #f))
+
+(: CANONICAL-ANCHOR-CLASS-CACHE (HashTable Symbol Symbol))
+(define CANONICAL-ANCHOR-CLASS-CACHE (make-hasheq))
 
 ;; Return #t iff `u` is a living, non-hallucination ground non-structure unit
 ;; susceptible to Purification Nova splash damage.
@@ -540,6 +946,109 @@
   (define kill-mult (if (<= ehp nova-dmg) 1.15 0.85))
   (* unit-val frac kill-mult))
 
+(struct nova-eval-unit
+  ([x : Float]
+   [y : Float]
+   [hit-r : Float]
+   [hit-r2 : Float]
+   [contrib : Float])
+  #:transparent)
+
+(: precompute-nova-eval-units
+   (-> (Listof Any) (Listof (Pairof Float Float)) Float Boolean (Listof nova-eval-unit)))
+(define (precompute-nova-eval-units units ref-pts search-radius ally?)
+  (if (or (null? units) (null? ref-pts))
+      '()
+      (let ([sr2 (* search-radius search-radius)]
+            [extra-r (if ally? 0.25 0.0)]
+            [mult (if ally? 2.0 1.0)])
+        (for/fold ([acc : (Listof nova-eval-unit) '()])
+                  ([u (in-list units)])
+          (define-values (ok? raw-ut uid-type ux uy hp sh rad)
+            (fast-unit-nova-eval-raw u))
+          (cond
+            [(not ok?) acc]
+            [(not (for/or : Boolean ([rp (in-list ref-pts)])
+                    (define dx (- ux (car rp)))
+                    (define dy (- uy (cdr rp)))
+                    (and (<= (abs dx) search-radius)
+                         (<= (abs dy) search-radius)
+                         (<= (+ (* dx dx) (* dy dy)) sr2))))
+             acc]
+            [else
+             (define ut : Symbol
+               (cond
+                 [(not (eq? raw-ut 'unknown)) (sc2-canonical-unit-sym raw-ut)]
+                 [(= uid-type DISRUPTOR-UNIT-TYPE-ID) 'disruptor]
+                 [(= uid-type DISRUPTOR-PHASED-UNIT-TYPE-ID) 'disruptor-phased]
+                 [(= uid-type 74) 'stalker]
+                 [else 'unknown]))
+             (cond
+               [(or (eq? ut 'disruptor-phased)
+                    (= uid-type DISRUPTOR-PHASED-UNIT-TYPE-ID)
+                    (memq ut SC2-UNTARGETABLE-OR-DECOY-UNIT-SYMS)
+                    (sc2-unit-is-flying-sym? ut)
+                    (memq ut SC2-ALL-STRUCTURE-SYMS)
+                    (memq ut '(auto-turret point-defense-drone interceptor)))
+                acc]
+               [else
+                (define min-c (sc2-min-cost ut 50))
+                (define gas-c (sc2-gas-cost ut 0))
+                (define base (+ (->float min-c) (* 1.25 (->float gas-c))))
+                (define tier-mult (if (memq ut DISRUPTOR-HIGH-VALUE-SYMS) 1.15 1.0))
+                (define uval (* base tier-mult))
+                (define ehp (+ hp sh))
+                (define nova-dmg
+                  (if (> sh 0.0)
+                      (+ DISRUPTOR-NOVA-BASE-DAMAGE DISRUPTOR-NOVA-SHIELD-BONUS)
+                      DISRUPTOR-NOVA-BASE-DAMAGE))
+                (define frac (if (> ehp 0.0) (min 1.0 (/ nova-dmg ehp)) 1.0))
+                (define kill-mult (if (<= ehp nova-dmg) 1.15 0.85))
+                (define contrib (* mult (* uval frac kill-mult)))
+                (define hr (+ DISRUPTOR-NOVA-SPLASH-RADIUS (+ rad extra-r)))
+                (cons (nova-eval-unit ux uy hr (* hr hr) contrib) acc)])])))))
+
+(: filter-nova-eval-units-within (-> (Listof nova-eval-unit) Float Float Float (Listof nova-eval-unit)))
+(define (filter-nova-eval-units-within evals ox oy max-r)
+  (define r2 (* max-r max-r))
+  (for/list : (Listof nova-eval-unit) ([eu (in-list evals)]
+                                        #:when (let ([dx (- ox (nova-eval-unit-x eu))]
+                                                     [dy (- oy (nova-eval-unit-y eu))])
+                                                 (and (<= (abs dx) max-r)
+                                                      (<= (abs dy) max-r)
+                                                      (<= (+ (* dx dx) (* dy dy)) r2))))
+    eu))
+
+(: score-nova-eval-impact (-> Float Float (Listof nova-eval-unit) (Listof nova-eval-unit) nova-impact-score))
+(define (score-nova-eval-impact ftx fty eval-enemies eval-allies)
+  (define-values (enemy-raw enemy-hits)
+    (for/fold ([acc : Float 0.0]
+               [hits : Integer 0])
+              ([eu (in-list eval-enemies)])
+      (define dx (abs (- ftx (nova-eval-unit-x eu))))
+      (define hr (nova-eval-unit-hit-r eu))
+      (if (<= dx hr)
+          (let ([dy (abs (- fty (nova-eval-unit-y eu)))])
+            (if (and (<= dy hr)
+                     (<= (+ (* dx dx) (* dy dy)) (nova-eval-unit-hit-r2 eu)))
+                (values (+ acc (nova-eval-unit-contrib eu)) (+ hits 1))
+                (values acc hits)))
+          (values acc hits))))
+  (define-values (ally-pen ally-hits)
+    (for/fold ([acc : Float 0.0]
+               [hits : Integer 0])
+              ([au (in-list eval-allies)])
+      (define dx (abs (- ftx (nova-eval-unit-x au))))
+      (define hr (nova-eval-unit-hit-r au))
+      (if (<= dx hr)
+          (let ([dy (abs (- fty (nova-eval-unit-y au)))])
+            (if (and (<= dy hr)
+                     (<= (+ (* dx dx) (* dy dy)) (nova-eval-unit-hit-r2 au)))
+                (values (+ acc (nova-eval-unit-contrib au)) (+ hits 1))
+                (values acc hits)))
+          (values acc hits))))
+  (nova-impact-score (- enemy-raw ally-pen) enemy-hits ally-hits enemy-raw ally-pen))
+
 ;; Score placing a Purification Nova detonation at `(tx, ty)` against
 ;; ground-vulnerable `enemy-units` and `ally-units` within splash radius `1.5`.
 (: score-purification-nova-impact (-> Real Real (Listof Any) (Listof Any) nova-impact-score))
@@ -551,9 +1060,12 @@
                [hits : Integer 0])
               ([e (in-list enemy-units)]
                #:when (ground-nova-vulnerable-unit? e))
-      (define d (dist-2d ftx fty (unit-x e) (unit-y e)))
-      (define hit-r (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus e 0.0)))
-      (if (<= d hit-r)
+      (define ex (unit-x e))
+      (define ey (unit-y e))
+      (if (and (<= (abs (- ftx ex)) 2.5)
+               (<= (abs (- fty ey)) 2.5)
+               (<= (dist-2d ftx fty ex ey)
+                   (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus e 0.0))))
           (let* ([uval (unit-nova-replacement-value e)]
                  [contrib (effective-nova-damage-fraction e uval)])
             (values (+ acc contrib) (+ hits 1)))
@@ -564,9 +1076,12 @@
                [hits : Integer 0])
               ([a (in-list ally-units)]
                #:when (ground-nova-vulnerable-unit? a))
-      (define d (dist-2d ftx fty (unit-x a) (unit-y a)))
-      (define hit-r (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus a 0.25)))
-      (if (<= d hit-r)
+      (define ax (unit-x a))
+      (define ay (unit-y a))
+      (if (and (<= (abs (- ftx ax)) 2.5)
+               (<= (abs (- fty ay)) 2.5)
+               (<= (dist-2d ftx fty ax ay)
+                   (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus a 0.25))))
           (let* ([uval (unit-nova-replacement-value a)]
                  [loss (effective-nova-damage-fraction a uval)])
             (values (+ acc (* 2.0 loss)) (+ hits 1)))
@@ -575,38 +1090,44 @@
 
 ;; Generate candidate detonation points covering exact unit positions, 2-unit
 ;; midpoints (catching pairs <= 3.0 apart), local neighborhood centroids, and
-;; ally-avoiding outer offsets.
-(: generate-nova-candidate-points (-> (Listof Any) (Listof Any) Float Float Float (Listof point2d)))
-(define (generate-nova-candidate-points enemies allies origin-x origin-y max-range)
-  (define near-enemies : (Listof Any)
-    (let ([filtered
-           (filter (lambda ([e : Any])
-                     (<= (dist-2d origin-x origin-y (unit-x e) (unit-y e))
-                         (+ max-range 2.5)))
-                   enemies)])
+;; ally-avoiding outer offsets (deduplicated on a 0.25-tile grid).
+(: generate-nova-candidate-points/eval
+   (-> (Listof nova-eval-unit) (Listof nova-eval-unit) Float Float Float (Listof point2d)))
+(define (generate-nova-candidate-points/eval eval-enemies eval-allies origin-x origin-y max-range)
+  (define e-lim (+ max-range 2.5))
+  (define a-lim (+ max-range 5.0))
+  (define near-enemies : (Listof nova-eval-unit)
+    (let ([filtered (filter-nova-eval-units-within eval-enemies origin-x origin-y e-lim)])
       (if (> (length filtered) 40)
           (take (sort filtered
-                      (lambda ([a : Any] [b : Any])
-                        (< (dist-sq-2d origin-x origin-y (unit-x a) (unit-y a))
-                           (dist-sq-2d origin-x origin-y (unit-x b) (unit-y b)))))
+                      (lambda ([a : nova-eval-unit] [b : nova-eval-unit])
+                        (< (dist-sq-2d origin-x origin-y (nova-eval-unit-x a) (nova-eval-unit-y a))
+                           (dist-sq-2d origin-x origin-y (nova-eval-unit-x b) (nova-eval-unit-y b)))))
                 40)
           filtered)))
-  (define near-allies : (Listof Any)
-    (filter (lambda ([a : Any])
-              (and (ground-nova-vulnerable-unit? a)
-                   (<= (dist-2d origin-x origin-y (unit-x a) (unit-y a))
-                       (+ max-range 5.0))))
-            allies))
+  (define near-allies : (Listof nova-eval-unit)
+    (filter-nova-eval-units-within eval-allies origin-x origin-y a-lim))
+  (define max-r2 (* max-range max-range))
+  (define seen : (HashTable Integer Boolean) (make-hasheqv))
   (define raw-pts : (Listof point2d) '())
   (: add-pt! (-> Real Real Void))
   (define (add-pt! x y)
     (define cp (clamp-to-playable x y))
-    (when (<= (dist-2d origin-x origin-y (point2d-x cp) (point2d-y cp)) max-range)
-      (set! raw-pts (cons cp raw-pts))))
+    (define cpx (point2d-x cp))
+    (define cpy (point2d-y cp))
+    (define dx (- origin-x cpx))
+    (define dy (- origin-y cpy))
+    (when (<= (+ (* dx dx) (* dy dy)) max-r2)
+      (define key : Integer
+        (+ (* (exact-round (* cpx 4.0)) 4096)
+           (exact-round (* cpy 4.0))))
+      (unless (hash-ref seen key #f)
+        (hash-set! seen key #t)
+        (set! raw-pts (cons cp raw-pts)))))
 
   (for ([e1 (in-list near-enemies)])
-    (define x1 (unit-x e1))
-    (define y1 (unit-y e1))
+    (define x1 (nova-eval-unit-x e1))
+    (define y1 (nova-eval-unit-y e1))
     (add-pt! x1 y1)
     ;; Neighborhood centroid & pair midpoints within 2*radius (~3.05 tiles)
     (define-values (sx sy cnt)
@@ -614,14 +1135,18 @@
                  [ay : Float 0.0]
                  [c : Integer 0])
                 ([e2 (in-list near-enemies)])
-        (define x2 (unit-x e2))
-        (define y2 (unit-y e2))
-        (define d (dist-2d x1 y1 x2 y2))
-        (if (<= d 3.05)
-            (begin
-              (when (> d 0.1)
-                (add-pt! (* 0.5 (+ x1 x2)) (* 0.5 (+ y1 y2))))
-              (values (+ ax x2) (+ ay y2) (+ c 1)))
+        (define x2 (nova-eval-unit-x e2))
+        (define y2 (nova-eval-unit-y e2))
+        (define dx (abs (- x1 x2)))
+        (define dy (abs (- y1 y2)))
+        (if (and (<= dx 3.05) (<= dy 3.05))
+            (let ([d2 (+ (* dx dx) (* dy dy))])
+              (if (<= d2 9.3025)
+                  (begin
+                    (when (> d2 0.01)
+                      (add-pt! (* 0.5 (+ x1 x2)) (* 0.5 (+ y1 y2))))
+                    (values (+ ax x2) (+ ay y2) (+ c 1)))
+                  (values ax ay c)))
             (values ax ay c))))
     (when (> cnt 1)
       (add-pt! (/ sx (->float cnt)) (/ sy (->float cnt))))
@@ -632,9 +1157,11 @@
                    [ay : Float 0.0]
                    [c : Integer 0])
                   ([a (in-list near-allies)])
-          (define axu (unit-x a))
-          (define ayu (unit-y a))
-          (if (<= (dist-2d x1 y1 axu ayu) 3.5)
+          (define axu (nova-eval-unit-x a))
+          (define ayu (nova-eval-unit-y a))
+          (define dx (abs (- x1 axu)))
+          (define dy (abs (- y1 ayu)))
+          (if (and (<= dx 3.5) (<= dy 3.5) (<= (+ (* dx dx) (* dy dy)) 12.25))
               (values (+ ax axu) (+ ay ayu) (+ c 1))
               (values ax ay c))))
       (when (> acnt 0)
@@ -645,33 +1172,113 @@
           (add-pt! (+ x1 (* 1.15 ux)) (+ y1 (* 1.15 uy)))))))
   raw-pts)
 
+(: generate-nova-candidate-points (-> (Listof Any) (Listof Any) Float Float Float (Listof point2d)))
+(define (generate-nova-candidate-points enemies allies origin-x origin-y max-range)
+  (define refs (list (cons origin-x origin-y)))
+  (define eval-e (precompute-nova-eval-units enemies refs (+ max-range 2.5) #f))
+  (define eval-a (precompute-nova-eval-units allies refs (+ max-range 5.0) #t))
+  (generate-nova-candidate-points/eval eval-e eval-a origin-x origin-y max-range))
+
+(: pick-best-nova-target/eval
+   (-> (Listof nova-eval-unit) (Listof nova-eval-unit) Float Float Float (Listof point2d) Float
+       (Values (Option point2d) nova-impact-score)))
+(define (pick-best-nova-target/eval eval-enemies eval-allies origin-x origin-y max-range reserved-pts deconflict-dist)
+  (define local-enemies (filter-nova-eval-units-within eval-enemies origin-x origin-y (+ max-range 2.5)))
+  (if (null? local-enemies)
+      (values #f (nova-impact-score -999999.0 0 0 0.0 0.0))
+      (let ()
+        (define e-cnt : Integer (length local-enemies))
+        (define ordered-enemies : (Listof nova-eval-unit)
+          (if (> e-cnt 40)
+              (sort local-enemies
+                    (lambda ([a : nova-eval-unit] [b : nova-eval-unit])
+                      (< (dist-sq-2d origin-x origin-y (nova-eval-unit-x a) (nova-eval-unit-y a))
+                         (dist-sq-2d origin-x origin-y (nova-eval-unit-x b) (nova-eval-unit-y b)))))
+              local-enemies))
+        (define e-fx : Fixnum (assert e-cnt fixnum?))
+        (define near-fx : Fixnum (fxmin 40 e-fx))
+        (define exv (make-flvector e-fx 0.0))
+        (define eyv (make-flvector e-fx 0.0))
+        (define ehrv (make-flvector e-fx 0.0))
+        (define ehr2v (make-flvector e-fx 0.0))
+        (define ecv (make-flvector e-fx 0.0))
+        (let eloop ([es ordered-enemies] [i : Fixnum 0])
+          (unless (null? es)
+            (define eu (car es))
+            (flvector-set! exv i (nova-eval-unit-x eu))
+            (flvector-set! eyv i (nova-eval-unit-y eu))
+            (flvector-set! ehrv i (nova-eval-unit-hit-r eu))
+            (flvector-set! ehr2v i (nova-eval-unit-hit-r2 eu))
+            (flvector-set! ecv i (nova-eval-unit-contrib eu))
+            (eloop (cdr es) (fx+ i 1))))
+
+        (define hit-lim (+ max-range 2.5))
+        (define hit-lim2 (* hit-lim hit-lim))
+        (define all-lim (+ max-range 5.0))
+        (define all-lim2 (* all-lim all-lim))
+        (define-values (hit-allies outer-allies)
+          (for/fold ([hs : (Listof nova-eval-unit) '()]
+                     [os : (Listof nova-eval-unit) '()])
+                    ([au (in-list eval-allies)])
+            (define dx (- origin-x (nova-eval-unit-x au)))
+            (define dy (- origin-y (nova-eval-unit-y au)))
+            (if (and (<= (abs dx) all-lim) (<= (abs dy) all-lim))
+                (let ([d2 (+ (* dx dx) (* dy dy))])
+                  (cond
+                    [(<= d2 hit-lim2) (values (cons au hs) os)]
+                    [(<= d2 all-lim2) (values hs (cons au os))]
+                    [else (values hs os)]))
+                (values hs os))))
+        (define a-hit-fx : Fixnum (assert (length hit-allies) fixnum?))
+        (define a-fx : Fixnum (fx+ a-hit-fx (assert (length outer-allies) fixnum?)))
+        (define axv (make-flvector a-fx 0.0))
+        (define ayv (make-flvector a-fx 0.0))
+        (define ahrv (make-flvector a-fx 0.0))
+        (define ahr2v (make-flvector a-fx 0.0))
+        (define acv (make-flvector a-fx 0.0))
+        (let aloop ([as hit-allies] [i : Fixnum 0] [in-hit? #t])
+          (cond
+            [(not (null? as))
+             (define au (car as))
+             (flvector-set! axv i (nova-eval-unit-x au))
+             (flvector-set! ayv i (nova-eval-unit-y au))
+             (flvector-set! ahrv i (nova-eval-unit-hit-r au))
+             (flvector-set! ahr2v i (nova-eval-unit-hit-r2 au))
+             (flvector-set! acv i (nova-eval-unit-contrib au))
+             (aloop (cdr as) (fx+ i 1) in-hit?)]
+            [(and in-hit? (pair? outer-allies))
+             (aloop outer-allies i #f)]
+            [else (void)]))
+
+        (define res-fx : Fixnum (assert (length reserved-pts) fixnum?))
+        (define rxv (make-flvector res-fx 0.0))
+        (define ryv (make-flvector res-fx 0.0))
+        (let rloop ([rs reserved-pts] [i : Fixnum 0])
+          (unless (null? rs)
+            (define rp (car rs))
+            (flvector-set! rxv i (point2d-x rp))
+            (flvector-set! ryv i (point2d-y rp))
+            (rloop (cdr rs) (fx+ i 1))))
+
+        (define-values (found? bx by bnet behits bahits beraw bapen)
+          (fast-flvec-pick-best-nova-target
+           e-fx near-fx exv eyv ehrv ehr2v ecv
+           a-hit-fx a-fx axv ayv ahrv ahr2v acv
+           res-fx rxv ryv
+           origin-x origin-y max-range deconflict-dist
+           (->float SC2-MAP-PLAYABLE-MIN-COORD)
+           (->float SC2-MAP-PLAYABLE-MAX-COORD)))
+        (values (and found? (point2d bx by))
+                (nova-impact-score bnet behits bahits beraw bapen)))))
+
 (: pick-best-nova-target
    (-> (Listof Any) (Listof Any) Float Float Float (Listof point2d) Float
        (Values (Option point2d) nova-impact-score)))
 (define (pick-best-nova-target ground-enemies ground-allies origin-x origin-y max-range reserved-pts deconflict-dist)
-  (define candidates (generate-nova-candidate-points ground-enemies ground-allies origin-x origin-y max-range))
-  (define best-pt : (Option point2d) #f)
-  (define best-sc : nova-impact-score (nova-impact-score -999999.0 0 0 0.0 0.0))
-  (for ([pt (in-list candidates)])
-    (define px (point2d-x pt))
-    (define py (point2d-y pt))
-    (define clear?
-      (for/and : Boolean ([rp (in-list reserved-pts)])
-        (>= (dist-2d px py (point2d-x rp) (point2d-y rp)) deconflict-dist)))
-    (when clear?
-      (define sc (score-purification-nova-impact px py ground-enemies ground-allies))
-      (define cur-best best-pt)
-      (define better? : Boolean
-        (if cur-best
-            (or (> (nova-impact-score-net-score sc) (nova-impact-score-net-score best-sc))
-                (and (= (nova-impact-score-net-score sc) (nova-impact-score-net-score best-sc))
-                     (< (dist-sq-2d origin-x origin-y px py)
-                        (dist-sq-2d origin-x origin-y (point2d-x cur-best) (point2d-y cur-best)))))
-            #t))
-      (when better?
-        (set! best-pt pt)
-        (set! best-sc sc))))
-  (values best-pt best-sc))
+  (define refs (list (cons origin-x origin-y)))
+  (define eval-e (precompute-nova-eval-units ground-enemies refs (+ max-range 2.5) #f))
+  (define eval-a (precompute-nova-eval-units ground-allies refs (+ max-range 5.0) #t))
+  (pick-best-nova-target/eval eval-e eval-a origin-x origin-y max-range reserved-pts deconflict-dist))
 
 ;; =============================================================================
 ;; Tracker State Synchronization (Velocities, Parent Matching, Cooldowns)
@@ -684,11 +1291,23 @@
   (define enemy-cd-ht (disruptor-tactical-tracker-enemy-casters tr))
   (define friendly-cd-ht (disruptor-tactical-tracker-friendly-casters tr))
 
+  (define-values (ally-casters ally-novas)
+    (let ([pc (internal-ally-casters)]
+          [pn (internal-ally-novas)])
+      (if (and pc pn)
+          (values pc pn)
+          (extract-disruptor-casters+novas ally-units))))
+  (define-values (enemy-casters enemy-novas)
+    (let ([pc (internal-enemy-casters)]
+          [pn (internal-enemy-novas)])
+      (if (and pc pn)
+          (values pc pn)
+          (extract-disruptor-casters+novas enemy-units))))
+
   ;; Helper to update a faction's Nova positions/velocities and discover new spawns.
   (: update-nova-list! (-> (Listof Any) (Listof Any) Boolean Void))
-  (define (update-nova-list! units casters friendly?)
-    (for ([u (in-list units)]
-          #:when (and (hash? u) (purification-nova-unit? u)))
+  (define (update-nova-list! novas casters friendly?)
+    (for ([u (in-list novas)])
       (define ntag (unit-tag-int u))
       (define nx (unit-x u))
       (define ny (unit-y u))
@@ -745,51 +1364,53 @@
                             ntag
                             expire-f))))))))
 
-  (define ally-casters (filter (lambda ([u : Any]) (and (hash? u) (disruptor-caster-unit? u))) ally-units))
-  (define enemy-casters (filter (lambda ([u : Any]) (and (hash? u) (disruptor-caster-unit? u))) enemy-units))
-  (update-nova-list! ally-units ally-casters #t)
-  (update-nova-list! enemy-units enemy-casters #f)
+  (unless (null? ally-novas)
+    (update-nova-list! ally-novas ally-casters #t))
+  (unless (null? enemy-novas)
+    (update-nova-list! enemy-novas enemy-casters #f))
 
   ;; Clear expired active-nova links if Nova vanished or expired
   (define live-enemy-nova-tags : (Setof Integer)
-    (list->set
-     (for/list : (Listof Integer)
-               ([u (in-list enemy-units)]
-                #:when (and (hash? u) (purification-nova-unit? u)))
-       (unit-tag-int u))))
-  (for ([ec (in-list enemy-casters)])
-    (define etag (unit-tag-int ec))
-    (define cst (hash-ref enemy-cd-ht etag (lambda () #f)))
-    (when (and cst (> (caster-cooldown-state-active-nova-tag cst) 0))
-      (define ant (caster-cooldown-state-active-nova-tag cst))
-      (when (or (not (set-member? live-enemy-nova-tags ant))
-                (> current-frame (caster-cooldown-state-nova-expire-frame cst)))
+    (if (null? enemy-novas)
+        (set)
+        (list->set
+         (for/list : (Listof Integer) ([u (in-list enemy-novas)])
+           (unit-tag-int u)))))
+  (unless (null? enemy-casters)
+    (for ([ec (in-list enemy-casters)])
+      (define etag (unit-tag-int ec))
+      (define cst (hash-ref enemy-cd-ht etag (lambda () #f)))
+      (when (and cst (> (caster-cooldown-state-active-nova-tag cst) 0))
+        (define ant (caster-cooldown-state-active-nova-tag cst))
+        (when (or (not (set-member? live-enemy-nova-tags ant))
+                  (> current-frame (caster-cooldown-state-nova-expire-frame cst)))
+          (hash-set! enemy-cd-ht etag
+                     (caster-cooldown-state
+                      (caster-cooldown-state-cooldown-until-frame cst)
+                      0
+                      0))))
+      ;; Also honor explicit unit order 2346 or explicit cooldown on hash
+      (when (and (explicit-nova-order? ec)
+                 (or (not cst) (<= (caster-cooldown-state-cooldown-until-frame cst) current-frame)))
         (hash-set! enemy-cd-ht etag
                    (caster-cooldown-state
-                    (caster-cooldown-state-cooldown-until-frame cst)
-                    0
-                    0))))
-    ;; Also honor explicit unit order 2346 or explicit cooldown on hash
-    (when (and (explicit-nova-order? ec)
-               (or (not cst) (<= (caster-cooldown-state-cooldown-until-frame cst) current-frame)))
-      (hash-set! enemy-cd-ht etag
-                 (caster-cooldown-state
-                  (+ current-frame DISRUPTOR-NOVA-COOLDOWN-FRAMES)
-                  (if cst (caster-cooldown-state-active-nova-tag cst) -1)
-                  (+ current-frame DISRUPTOR-NOVA-LIFETIME-FRAMES)))))
+                    (+ current-frame DISRUPTOR-NOVA-COOLDOWN-FRAMES)
+                    (if cst (caster-cooldown-state-active-nova-tag cst) -1)
+                    (+ current-frame DISRUPTOR-NOVA-LIFETIME-FRAMES))))))
 
   ;; Prune dead/expired Novas from nova-table
-  (define live-all-novas : (Setof Integer)
-    (set-union
-     live-enemy-nova-tags
-     (list->set
-      (for/list : (Listof Integer)
-                ([u (in-list ally-units)]
-                 #:when (and (hash? u) (purification-nova-unit? u)))
-        (unit-tag-int u)))))
-  (for ([k (in-list (hash-keys nova-ht))])
-    (unless (set-member? live-all-novas k)
-      (hash-remove! nova-ht k))))
+  (unless (zero? (hash-count nova-ht))
+    (define live-all-novas : (Setof Integer)
+      (if (null? ally-novas)
+          live-enemy-nova-tags
+          (set-union
+           live-enemy-nova-tags
+           (list->set
+            (for/list : (Listof Integer) ([u (in-list ally-novas)])
+              (unit-tag-int u))))))
+    (for ([k (in-list (hash-keys nova-ht))])
+      (unless (set-member? live-all-novas k)
+        (hash-remove! nova-ht k)))))
 
 ;; =============================================================================
 ;; 1. Offensive Cast Planning (`plan-disruptor-nova-casts`)
@@ -830,57 +1451,74 @@
                                    #:min-worthwhile-score [min-score-arg DISRUPTOR-MIN-WORTHWHILE-SCORE]
                                    #:max-reach [max-reach-arg DISRUPTOR-MAX-REACH-RANGE]
                                    #:deconflict-dist [deconflict-arg DISRUPTOR-VOLLEY-DECONFLICT-DIST])
-  (when tr
+  (plan-disruptor-nova-casts-core ally-units enemy-units tr current-frame
+                                  min-score-arg max-reach-arg deconflict-arg #t))
+
+(: plan-disruptor-nova-casts-core
+   (-> (Listof Any) (Listof Any) (Option disruptor-tactical-tracker) Integer
+       Real Real Real Boolean (Listof nova-cast-plan)))
+(define (plan-disruptor-nova-casts-core ally-units enemy-units tr current-frame
+                                        min-score-arg max-reach-arg deconflict-arg sync?)
+  (when (and tr sync?)
     (sync-tracker-state! tr ally-units enemy-units current-frame))
-  (define min-score (->float min-score-arg))
-  (define max-reach (->float max-reach-arg))
-  (define deconflict (->float deconflict-arg))
-  (define ground-enemies (filter-targetable-ground-units enemy-units))
-  (define ground-allies (filter-targetable-ground-units ally-units))
-  (if (null? ground-enemies)
+  (define-values (ally-casters ally-novas)
+    (let ([pc (internal-ally-casters)]
+          [pn (internal-ally-novas)])
+      (if (and pc pn)
+          (values pc pn)
+          (extract-disruptor-casters+novas ally-units))))
+  (define ready-casters : (Listof Any)
+    (filter (lambda ([u : Any])
+              (and (unit-alive? u)
+                   (not (caster-on-cooldown? u tr current-frame))))
+            ally-casters))
+  (if (null? ready-casters)
       '()
       (let ()
-        ;; Reserve positions of live friendly Novas + active channeling orders
-        (define reserved-pts : (Listof point2d)
-          (append
-           (for/list : (Listof point2d) ([u (in-list ally-units)]
-                                         #:when (and (hash? u) (purification-nova-unit? u)))
-             (point2d (unit-x u) (unit-y u)))
-           (for/fold ([pts : (Listof point2d) '()])
-                     ([u (in-list ally-units)]
-                      #:when (and (hash? u) (disruptor-caster-unit? u) (explicit-nova-order? u)))
-             (define op (explicit-order-target-point u))
-             (if op (cons op pts) pts))))
-        (define ready-casters : (Listof Any)
-          (filter (lambda ([u : Any])
-                    (and (hash? u)
-                         (disruptor-caster-unit? u)
-                         (unit-alive? u)
-                         (not (caster-on-cooldown? u tr current-frame))))
-                  ally-units))
-        (define plans : (Listof nova-cast-plan) '())
-        (for ([c (in-list ready-casters)])
-          (define cid (unit-tag-int c))
-          (define cx (unit-x c))
-          (define cy (unit-y c))
-          (define-values (best-pt sc)
-            (pick-best-nova-target ground-enemies ground-allies cx cy max-reach reserved-pts deconflict))
-          (when (and best-pt
-                     (> (nova-impact-score-enemy-hits sc) 0)
-                     (>= (nova-impact-score-net-score sc) min-score))
-            (define tx (point2d-x best-pt))
-            (define ty (point2d-y best-pt))
-            (set! reserved-pts (cons best-pt reserved-pts))
-            (set! plans (cons (nova-cast-plan cid tx ty
-                                              (nova-impact-score-net-score sc)
-                                              (nova-impact-score-enemy-hits sc)
-                                              (nova-impact-score-ally-hits sc))
-                              plans))
-            (when tr
-              (hash-set! (disruptor-tactical-tracker-friendly-casters tr)
-                         cid
-                         (+ current-frame DISRUPTOR-NOVA-COOLDOWN-FRAMES)))))
-        (reverse plans))))
+        (define min-score (->float min-score-arg))
+        (define max-reach (->float max-reach-arg))
+        (define deconflict (->float deconflict-arg))
+        (define caster-refs : (Listof (Pairof Float Float))
+          (for/list : (Listof (Pairof Float Float)) ([c (in-list ready-casters)])
+            (cons (unit-x c) (unit-y c))))
+        (define eval-enemies (precompute-nova-eval-units enemy-units caster-refs (+ max-reach 2.5) #f))
+        (if (null? eval-enemies)
+            '()
+            (let ()
+              (define eval-allies (precompute-nova-eval-units ally-units caster-refs (+ max-reach 5.0) #t))
+              ;; Reserve positions of live friendly Novas + active channeling orders
+              (define reserved-pts : (Listof point2d)
+                (append
+                 (for/list : (Listof point2d) ([u (in-list ally-novas)])
+                   (point2d (unit-x u) (unit-y u)))
+                 (for/fold ([pts : (Listof point2d) '()])
+                           ([u (in-list ally-casters)]
+                            #:when (explicit-nova-order? u))
+                   (define op (explicit-order-target-point u))
+                   (if op (cons op pts) pts))))
+              (define plans : (Listof nova-cast-plan) '())
+              (for ([c (in-list ready-casters)])
+                (define cid (unit-tag-int c))
+                (define cx (unit-x c))
+                (define cy (unit-y c))
+                (define-values (best-pt sc)
+                  (pick-best-nova-target/eval eval-enemies eval-allies cx cy max-reach reserved-pts deconflict))
+                (when (and best-pt
+                           (> (nova-impact-score-enemy-hits sc) 0)
+                           (>= (nova-impact-score-net-score sc) min-score))
+                  (define tx (point2d-x best-pt))
+                  (define ty (point2d-y best-pt))
+                  (set! reserved-pts (cons best-pt reserved-pts))
+                  (set! plans (cons (nova-cast-plan cid tx ty
+                                                    (nova-impact-score-net-score sc)
+                                                    (nova-impact-score-enemy-hits sc)
+                                                    (nova-impact-score-ally-hits sc))
+                                    plans))
+                  (when tr
+                    (hash-set! (disruptor-tactical-tracker-friendly-casters tr)
+                               cid
+                               (+ current-frame DISRUPTOR-NOVA-COOLDOWN-FRAMES)))))
+              (reverse plans))))))
 
 ;; =============================================================================
 ;; 2. Live Friendly Purification Nova Steering (`steer-purification-novas`)
@@ -897,15 +1535,36 @@
 (define (steer-purification-novas ally-units enemy-units
                                   #:tracker [tr #f]
                                   #:current-frame [current-frame 0])
-  (when tr
+  (steer-purification-novas-core ally-units enemy-units tr current-frame #t))
+
+(: steer-purification-novas-core
+   (-> (Listof Any) (Listof Any) (Option disruptor-tactical-tracker) Integer Boolean
+       (Listof nova-steer-order)))
+(define (steer-purification-novas-core ally-units enemy-units tr current-frame sync?)
+  (when (and tr sync?)
     (sync-tracker-state! tr ally-units enemy-units current-frame))
-  (define ground-enemies (filter-targetable-ground-units enemy-units))
-  (define ground-allies (filter-targetable-ground-units ally-units))
   (define friendly-novas : (Listof Any)
-    (filter (lambda ([u : Any]) (and (hash? u) (purification-nova-unit? u))) ally-units))
+    (or (internal-ally-novas)
+        (let-values ([(_c n) (extract-disruptor-casters+novas ally-units)])
+          n)))
   (if (null? friendly-novas)
       '()
       (let ()
+        (define nova-refs : (Listof (Pairof Float Float))
+          (for/list : (Listof (Pairof Float Float)) ([n (in-list friendly-novas)])
+            (cons (unit-x n) (unit-y n))))
+        (define max-reach-bound
+          (+ DISRUPTOR-NOVA-SPLASH-RADIUS
+             (* (->float DISRUPTOR-NOVA-LIFETIME-FRAMES) DISRUPTOR-NOVA-SPEED-PER-FRAME)))
+        (define eval-enemies (precompute-nova-eval-units enemy-units nova-refs (+ max-reach-bound 2.5) #f))
+        (define eval-allies (precompute-nova-eval-units ally-units nova-refs (+ max-reach-bound 5.0) #t))
+        (define lazy-ground-enemies : (Option (Listof Any)) #f)
+        (: get-ground-enemies (-> (Listof Any)))
+        (define (get-ground-enemies)
+          (or lazy-ground-enemies
+              (let ([ge (filter-targetable-ground-units enemy-units)])
+                (set! lazy-ground-enemies ge)
+                ge)))
         (define claimed-targets : (Listof point2d) '())
         (define orders : (Listof nova-steer-order) '())
         (for ([n (in-list friendly-novas)])
@@ -931,16 +1590,16 @@
             (+ DISRUPTOR-NOVA-SPLASH-RADIUS
                (* (->float rem-frames) DISRUPTOR-NOVA-SPEED-PER-FRAME)))
           (define-values (best-pt sc)
-            (if (null? ground-enemies)
+            (if (null? eval-enemies)
                 (values #f (nova-impact-score -1.0 0 0 0.0 0.0))
                 (let ()
                   ;; Try de-conflicted reachable clusters first
                   (define-values (pt1 sc1)
-                    (pick-best-nova-target ground-enemies ground-allies nx ny travel-reach claimed-targets 3.2))
+                    (pick-best-nova-target/eval eval-enemies eval-allies nx ny travel-reach claimed-targets 3.2))
                   (if (and pt1 (> (nova-impact-score-enemy-hits sc1) 0))
                       (values pt1 sc1)
                       ;; Fallback without de-confliction if only 1 enemy cluster exists
-                      (pick-best-nova-target ground-enemies ground-allies nx ny travel-reach '() 0.0)))))
+                      (pick-best-nova-target/eval eval-enemies eval-allies nx ny travel-reach '() 0.0)))))
           (cond
             [(and best-pt
                   (> (nova-impact-score-enemy-hits sc) 0)
@@ -954,10 +1613,8 @@
              ;; If only friendly units are near the live Nova (avoid friendly fire!) or
              ;; enemies are slightly beyond remaining reach, steer away from ally cluster.
              (define near-ally-pts : (Listof point2d)
-               (for/list : (Listof point2d) ([a (in-list ground-allies)]
-                                             #:when (<= (dist-2d nx ny (unit-x a) (unit-y a))
-                                                        (+ travel-reach 2.5)))
-                 (point2d (unit-x a) (unit-y a))))
+               (for/list : (Listof point2d) ([a (in-list (filter-nova-eval-units-within eval-allies nx ny (+ travel-reach 2.5)))])
+                 (point2d (nova-eval-unit-x a) (nova-eval-unit-y a))))
              (cond
                [(pair? near-ally-pts)
                 (define ac (centroid-2d near-ally-pts))
@@ -966,8 +1623,9 @@
                                  SC2-MAP-PLAYABLE-MIN-COORD SC2-MAP-PLAYABLE-MAX-COORD))
                 (set! orders (cons (nova-steer-order nid (point2d-x away-pt) (point2d-y away-pt) 0.0 0)
                                    orders))]
-               [(pair? ground-enemies)
+               [(pair? (get-ground-enemies))
                 ;; Lunge toward nearest ground enemy if strictly beyond current travel reach
+                (define ground-enemies (get-ground-enemies))
                 (define-values (nearest-e _bd)
                   (for/fold ([best : Any (car ground-enemies)]
                              [bd : Float (dist-2d nx ny (unit-x (car ground-enemies)) (unit-y (car ground-enemies)))])
@@ -986,18 +1644,31 @@
 
 (: compute-friendly-army-anchor (-> (Listof Any) Float Float point2d))
 (define (compute-friendly-army-anchor ally-units home-x home-y)
-  (define escort-pts : (Listof point2d)
-    (for/list : (Listof point2d)
-              ([u (in-list ally-units)]
-               #:when (and (hash? u)
-                           (unit-alive? u)
-                           (not (purification-nova-unit? u))
-                           (not (disruptor-caster-unit? u))
-                           (not (unit-is-structure? u))
-                           (not (memq (resolved-unit-type u) '(probe scv drone mule observer)))))
-      (point2d (unit-x u) (unit-y u))))
-  (if (pair? escort-pts)
-      (centroid-2d escort-pts)
+  (define-values (sx sy cnt fallback)
+    (fast-compute-army-anchor-raw ally-units CANONICAL-ANCHOR-CLASS-CACHE))
+  (define tot-x : Float sx)
+  (define tot-y : Float sy)
+  (define tot-n : Fixnum cnt)
+  (unless (null? fallback)
+    (for ([u (in-list fallback)])
+      (define ut-raw (dyn-hash-ref u 'type #f))
+      (define cs (resolved-unit-type u))
+      (define skip? : Boolean
+        (or (purification-nova-unit? u)
+            (disruptor-caster-unit? u)
+            (unit-is-structure? u)
+            (not (not (memq cs '(probe scv drone mule observer))))))
+      (when (and (symbol? ut-raw) (not (eq? ut-raw 'unknown)))
+        (unless (or (eq? (dyn-hash-ref u 'is-building #f) #t)
+                    (eq? (dyn-hash-ref u 'building? #f) #t)
+                    (eq? (dyn-hash-ref u 'is-structure #f) #t))
+          (hash-set! CANONICAL-ANCHOR-CLASS-CACHE ut-raw (if skip? 'skip 'keep))))
+      (unless skip?
+        (set! tot-x (fl+ tot-x (unit-x u)))
+        (set! tot-y (fl+ tot-y (unit-y u)))
+        (set! tot-n (fx+ tot-n 1)))))
+  (if (fx> tot-n 0)
+      (point2d (fl/ tot-x (->fl tot-n)) (fl/ tot-y (->fl tot-n)))
       (point2d home-x home-y)))
 
 ;; Position friendly weaponless Disruptors (`694`) cleanly:
@@ -1021,60 +1692,80 @@
                                 #:home-y [home-y-arg 32.0]
                                 #:exclude-tags [exclude-tags '()]
                                 #:emit-hold? [emit-hold? #f])
-  (when tr
+  (kite-disruptor-casters-core ally-units enemy-units tr current-frame
+                               home-x-arg home-y-arg exclude-tags emit-hold? #t))
+
+(: kite-disruptor-casters-core
+   (-> (Listof Any) (Listof Any) (Option disruptor-tactical-tracker) Integer
+       Real Real (Listof Integer) Boolean Boolean (Listof disruptor-kite-order)))
+(define (kite-disruptor-casters-core ally-units enemy-units tr current-frame
+                                     home-x-arg home-y-arg exclude-tags emit-hold? sync?)
+  (when (and tr sync? (not (internal-skip-sync?)))
     (sync-tracker-state! tr ally-units enemy-units current-frame))
-  (define home-x (->float home-x-arg))
-  (define home-y (->float home-y-arg))
-  (define valid-threats : (Listof Any)
-    (filter (lambda ([e : Any])
-              (and (hash? e)
-                   (not (purification-nova-unit? e))
-                   (unit-alive? e)
-                   (not (eq? (dyn-hash-ref e 'hallucination #f) #t))))
-            enemy-units))
+  (define raw-casters : (Listof Any)
+    (or (internal-ally-casters)
+        (let-values ([(cs _n) (extract-disruptor-casters+novas ally-units)])
+          cs)))
   (define casters : (Listof Any)
     (filter (lambda ([u : Any])
-              (and (hash? u)
-                   (disruptor-caster-unit? u)
-                   (unit-alive? u)
+              (and (unit-alive? u)
                    (not (memv (unit-tag-int u) exclude-tags))))
-            ally-units))
-  (if (or (null? casters) (null? valid-threats))
+            raw-casters))
+  (if (null? casters)
       '()
       (let ()
-        (define anchor (compute-friendly-army-anchor ally-units home-x home-y))
-        (define ax (point2d-x anchor))
-        (define ay (point2d-y anchor))
+        (define home-x (->float home-x-arg))
+        (define home-y (->float home-y-arg))
+        (define k : Fixnum (length casters))
+        (define cids : (Vectorof Integer) (make-vector k 0))
+        (define cxs : FlVector (make-flvector k 0.0))
+        (define cys : FlVector (make-flvector k 0.0))
+        (let fill ([cs casters] [idx : Fixnum 0])
+          (unless (null? cs)
+            (define c (car cs))
+            (vector-set! cids idx (unit-tag-int c))
+            (flvector-set! cxs idx (unit-x c))
+            (flvector-set! cys idx (unit-y c))
+            (fill (cdr cs) (fx+ idx 1))))
+        (define-values (th-xs th-ys th-d2s th-cnt)
+          (fast-nearest-kite-threats enemy-units cxs cys k))
+        (if (fx= th-cnt 0)
+            '()
+            (let ()
+        (define lazy-anchor : (Option point2d) #f)
+        (: get-anchor (-> point2d))
+        (define (get-anchor)
+          (or lazy-anchor
+              (let ([a (compute-friendly-army-anchor ally-units home-x home-y)])
+                (set! lazy-anchor a)
+                a)))
         (define orders : (Listof disruptor-kite-order) '())
-        (for ([c (in-list casters)])
-          (define cid (unit-tag-int c))
-          (define cx (unit-x c))
-          (define cy (unit-y c))
-          ;; Nearest threatening enemy (never Nova)
-          (define-values (near-e min-d)
-            (for/fold ([best-e : Any (car valid-threats)]
-                       [best-d : Float 999999.0])
-                      ([e (in-list valid-threats)])
-              (define d (dist-2d cx cy (unit-x e) (unit-y e)))
-              (if (< d best-d) (values e d) (values best-e best-d))))
-          (define ex (unit-x near-e))
-          (define ey (unit-y near-e))
+        (for ([c (in-list casters)]
+              [idx (in-range k)])
+          (define cid (vector-ref cids idx))
+          (define cx (flvector-ref cxs idx))
+          (define cy (flvector-ref cys idx))
+          (define ex (flvector-ref th-xs idx))
+          (define ey (flvector-ref th-ys idx))
+          (define best-d2 (flvector-ref th-d2s idx))
+          (define min-d : Float (assert (sqrt (max 0.0 best-d2)) flonum?))
           (define on-cd? (caster-on-cooldown? c tr current-frame))
           (define state-sym : Symbol (if on-cd? 'on-cooldown 'ready))
           (define min-band (if on-cd? DISRUPTOR-RETREAT-MIN-DIST DISRUPTOR-STANDOFF-MIN-DIST))
           (define max-band (if on-cd? DISRUPTOR-RETREAT-MAX-DIST DISRUPTOR-STANDOFF-MAX-DIST))
           (define desired-d (* 0.5 (+ min-band max-band))) ; 11.25 ready / 14.0 cooldown
 
-          ;; Unit away-from-enemy vector, blended lightly toward army/home when retreating
-          (define-values (awx awy amag) (unit-vec-2d (- cx ex) (- cy ey)))
-          (define-values (hmx hmy hmag) (unit-vec-2d (- home-x cx) (- home-y cy)))
-          (define-values (acx acy acmag) (unit-vec-2d (- ax cx) (- ay cy)))
-          (define base-vx (if (> amag 0.05) awx (if (> hmag 0.05) hmx -1.0)))
-          (define base-vy (if (> amag 0.05) awy (if (> hmag 0.05) hmy 0.0)))
-
           (cond
             ;; Too close -> retreat to exact desired standoff / cooldown distance
             [(< min-d min-band)
+             (define anchor (get-anchor))
+             (define ax (point2d-x anchor))
+             (define ay (point2d-y anchor))
+             (define-values (awx awy amag) (unit-vec-2d (- cx ex) (- cy ey)))
+             (define-values (hmx hmy hmag) (unit-vec-2d (- home-x cx) (- home-y cy)))
+             (define-values (acx acy acmag) (unit-vec-2d (- ax cx) (- ay cy)))
+             (define base-vx (if (> amag 0.05) awx (if (> hmag 0.05) hmx -1.0)))
+             (define base-vy (if (> amag 0.05) awy (if (> hmag 0.05) hmy 0.0)))
              (define-values (rx ry rmag)
                (unit-vec-2d (+ (* 0.85 base-vx) (* 0.15 (if (> acmag 0.05) acx hmx)))
                             (+ (* 0.85 base-vy) (* 0.15 (if (> acmag 0.05) acy hmy)))))
@@ -1087,13 +1778,23 @@
                                 orders))]
             ;; Ready caster too far from enemy fight -> move up ONLY to 11.25 standoff (never attack-unit!)
             [(and (not on-cd?) (> min-d max-band) (<= min-d 30.0))
+             (define-values (awx awy amag) (unit-vec-2d (- cx ex) (- cy ey)))
+             (define-values (hmx hmy hmag) (unit-vec-2d (- home-x cx) (- home-y cy)))
+             (define base-vx (if (> amag 0.05) awx (if (> hmag 0.05) hmx -1.0)))
+             (define base-vy (if (> amag 0.05) awy (if (> hmag 0.05) hmy 0.0)))
              (define tgt (clamp-to-playable (+ ex (* desired-d base-vx))
                                             (+ ey (* desired-d base-vy))))
              (set! orders (cons (disruptor-kite-order cid 'move (point2d-x tgt) (point2d-y tgt)
                                                       min-d 'ready 'standoff-approach)
                                 orders))]
             ;; On-cooldown caster way behind friendly army (> 17.5 from threat): escort behind anchor at >= 14.0
-            [(and on-cd? (> min-d 17.5) (< (dist-2d ex ey ax ay) (- min-d 2.0)))
+            [(and on-cd? (> min-d 17.5)
+                  (let ([anchor (get-anchor)])
+                    (< (dist-2d ex ey (point2d-x anchor) (point2d-y anchor)) (- min-d 2.0))))
+             (define-values (awx awy amag) (unit-vec-2d (- cx ex) (- cy ey)))
+             (define-values (hmx hmy hmag) (unit-vec-2d (- home-x cx) (- home-y cy)))
+             (define base-vx (if (> amag 0.05) awx (if (> hmag 0.05) hmx -1.0)))
+             (define base-vy (if (> amag 0.05) awy (if (> hmag 0.05) hmy 0.0)))
              (define tgt (clamp-to-playable (+ ex (* desired-d base-vx))
                                             (+ ey (* desired-d base-vy))))
              (set! orders (cons (disruptor-kite-order cid 'move (point2d-x tgt) (point2d-y tgt)
@@ -1102,7 +1803,7 @@
             [emit-hold?
              (set! orders (cons (disruptor-kite-order cid 'move cx cy min-d state-sym 'hold-standoff)
                                 orders))]))
-        (reverse orders))))
+        (reverse orders))))))
 
 ;; =============================================================================
 ;; 4. Defensive Anti-Nova Scatter, Emergency Stalker Blink, & Pre-Split
@@ -1244,23 +1945,35 @@
                                  #:blink-researched? [blink-researched? #t]
                                  #:home-x [home-x-arg 32.0]
                                  #:home-y [home-y-arg 32.0])
-  (when tr
+  (when (and tr (not (internal-skip-sync?)))
     (sync-tracker-state! tr ally-units enemy-units current-frame))
+  (define-values (all-enemy-casters enemy-novas)
+    (let ([pc (internal-enemy-casters)]
+          [pn (internal-enemy-novas)])
+      (if (and pc pn)
+          (values pc pn)
+          (extract-disruptor-casters+novas enemy-units))))
+  (define ready-enemy-casters : (Listof Any)
+    (if (null? all-enemy-casters)
+        '()
+        (filter (lambda ([e : Any])
+                  (and (unit-alive? e)
+                       (or (not tr)
+                           (<= (disruptor-tracker-enemy-cooldown tr (unit-tag-int e) current-frame) 0))
+                       (<= (safe-exact-int (dyn-hash-ref e 'nova-cooldown 0) 0) 0)))
+                all-enemy-casters)))
+  (define threat-refs : (Listof Any)
+    (if (and (null? enemy-novas) (null? ready-enemy-casters))
+        '()
+        (append enemy-novas ready-enemy-casters)))
   (define home-x (->float home-x-arg))
   (define home-y (->float home-y-arg))
   ;; Never scatter air units or `disruptor-phased` Novas or buildings!
-  (define ground-allies (filter-targetable-ground-units ally-units))
-  (define enemy-novas : (Listof Any)
-    (filter (lambda ([e : Any]) (and (hash? e) (purification-nova-unit? e))) enemy-units))
-  (define ready-enemy-casters : (Listof Any)
-    (filter (lambda ([e : Any])
-              (and (hash? e)
-                   (disruptor-caster-unit? e)
-                   (unit-alive? e)
-                   (or (not tr)
-                       (<= (disruptor-tracker-enemy-cooldown tr (unit-tag-int e) current-frame) 0))
-                   (<= (safe-exact-int (dyn-hash-ref e 'nova-cooldown 0) 0) 0)))
-            enemy-units))
+  (define ground-allies : (Listof Any)
+    (if (null? threat-refs)
+        '()
+        (filter-targetable-ground-units
+         (filter-units-within-range ally-units threat-refs 15.0))))
 
   (if (or (null? ground-allies)
           (and (null? enemy-novas) (null? ready-enemy-casters)))
@@ -1428,21 +2141,26 @@
 (define (evaluate-disruptor-snipe-and-cooldowns ally-units enemy-units
                                                 #:tracker [tr #f]
                                                 #:current-frame [current-frame 0])
-  (when tr
+  (when (and tr (not (internal-skip-sync?)))
     (sync-tracker-state! tr ally-units enemy-units current-frame))
+  (define-values (raw-enemy-casters enemy-novas)
+    (let ([pc (internal-enemy-casters)]
+          [pn (internal-enemy-novas)])
+      (if (and pc pn)
+          (values pc pn)
+          (extract-disruptor-casters+novas enemy-units))))
   (define enemy-casters : (Listof Any)
-    (filter (lambda ([e : Any]) (and (hash? e) (disruptor-caster-unit? e) (unit-alive? e)))
-            enemy-units))
-  (define enemy-novas : (Listof Any)
-    (filter (lambda ([e : Any]) (and (hash? e) (purification-nova-unit? e))) enemy-units))
+    (filter (lambda ([e : Any]) (unit-alive? e)) raw-enemy-casters))
   (define friendly-shooters : (Listof Any)
-    (filter (lambda ([a : Any])
-              (and (hash? a)
-                   (unit-alive? a)
-                   (not (purification-nova-unit? a))
-                   (not (disruptor-caster-unit? a))
-                   (not (memq (resolved-unit-type a) '(probe scv drone mule observer)))))
-            ally-units))
+    (if (null? enemy-casters)
+        '()
+        (filter (lambda ([a : Any])
+                  (and (hash? a)
+                       (unit-alive? a)
+                       (not (purification-nova-unit? a))
+                       (not (disruptor-caster-unit? a))
+                       (not (memq (resolved-unit-type a) '(probe scv drone mule observer)))))
+                (filter-units-within-range ally-units enemy-casters 15.0))))
 
   (for/list : (Listof disruptor-snipe-eval) ([ed (in-list enemy-casters)])
     (define etag (unit-tag-int ed))
@@ -1539,74 +2257,106 @@
                                         #:blink-researched? [blink-researched? #t]
                                         #:home-x [home-x 32.0]
                                         #:home-y [home-y 32.0])
-  (define tr (or tr-arg (make-disruptor-tactical-tracker)))
-  (sync-tracker-state! tr ally-units enemy-units current-frame)
+  (define-values (ally-casters ally-novas)
+    (if (fast-units-have-disruptor-or-nova? ally-units)
+        (extract-disruptor-casters+novas ally-units)
+        (values '() '())))
+  (define-values (enemy-casters enemy-novas)
+    (if (fast-units-have-disruptor-or-nova? enemy-units)
+        (extract-disruptor-casters+novas enemy-units)
+        (values '() '())))
+  (define has-ally-d-or-n? : Boolean (or (pair? ally-casters) (pair? ally-novas)))
+  (define has-enemy-d-or-n? : Boolean (or (pair? enemy-casters) (pair? enemy-novas)))
+  (define has-active-novas? : Boolean
+    (and tr-arg
+         (> (hash-count (disruptor-tactical-tracker-nova-table tr-arg)) 0)))
+  (cond
+    [(and (not has-ally-d-or-n?)
+          (not has-enemy-d-or-n?)
+          (not has-active-novas?))
+     '()]
+    [else
+     (define tr (or tr-arg (make-disruptor-tactical-tracker)))
+     (parameterize ([internal-ally-casters ally-casters]
+                    [internal-ally-novas ally-novas]
+                    [internal-enemy-casters enemy-casters]
+                    [internal-enemy-novas enemy-novas]
+                    [internal-skip-sync? #t])
+       (sync-tracker-state! tr ally-units enemy-units current-frame)
+       (define nova-active?
+         (> (hash-count (disruptor-tactical-tracker-nova-table tr)) 0))
 
-  (define cast-plans
-    (plan-disruptor-nova-casts ally-units enemy-units
-                               #:tracker tr
-                               #:current-frame current-frame))
-  (define cast-tags (map nova-cast-plan-caster-tag cast-plans))
+       (define cast-plans : (Listof nova-cast-plan)
+         (if has-ally-d-or-n?
+             (plan-disruptor-nova-casts-core ally-units enemy-units tr current-frame
+                                             DISRUPTOR-MIN-WORTHWHILE-SCORE
+                                             DISRUPTOR-MAX-REACH-RANGE
+                                             DISRUPTOR-VOLLEY-DECONFLICT-DIST
+                                             #f)
+             '()))
+       (define cast-tags (map nova-cast-plan-caster-tag cast-plans))
 
-  (define steer-orders
-    (steer-purification-novas ally-units enemy-units
-                              #:tracker tr
-                              #:current-frame current-frame))
-  (define kite-orders
-    (kite-disruptor-casters ally-units enemy-units
-                            #:tracker tr
-                            #:current-frame current-frame
-                            #:home-x home-x
-                            #:home-y home-y
-                            #:exclude-tags cast-tags))
-  (define dodge-orders
-    (plan-anti-nova-scatter ally-units enemy-units
-                            #:tracker tr
-                            #:current-frame current-frame
-                            #:blink-researched? blink-researched?
-                            #:home-x home-x
-                            #:home-y home-y))
-  (define snipe-evals
-    (evaluate-disruptor-snipe-and-cooldowns ally-units enemy-units
-                                            #:tracker tr
-                                            #:current-frame current-frame))
+       (define steer-orders : (Listof nova-steer-order)
+         (if (or has-ally-d-or-n? nova-active?)
+             (steer-purification-novas-core ally-units enemy-units tr current-frame #f)
+             '()))
+       (define kite-orders : (Listof disruptor-kite-order)
+         (if has-ally-d-or-n?
+             (kite-disruptor-casters-core ally-units enemy-units tr current-frame
+                                          home-x home-y cast-tags #f #f)
+             '()))
+       (define-values (dodge-orders snipe-evals)
+         (if (or has-enemy-d-or-n? nova-active?)
+             (values
+              (plan-anti-nova-scatter ally-units enemy-units
+                                      #:tracker tr
+                                      #:current-frame current-frame
+                                      #:blink-researched? blink-researched?
+                                      #:home-x home-x
+                                      #:home-y home-y)
+              (evaluate-disruptor-snipe-and-cooldowns ally-units enemy-units
+                                                      #:tracker tr
+                                                      #:current-frame current-frame))
+             (values '() '())))
 
-  ;; Defensive dodges take priority over snipe attacks if the same unit is listed in both
-  (define dodging-tags : (Setof Integer)
-    (list->set
-     (for/list : (Listof Integer) ([d (in-list dodge-orders)])
-       (anti-nova-dodge-order-unit-tag d))))
+       ;; Defensive dodges take priority over snipe attacks if the same unit is listed in both
+       (define dodging-tags : (Setof Integer)
+         (if (null? dodge-orders)
+             (set)
+             (list->set
+              (for/list : (Listof Integer) ([d (in-list dodge-orders)])
+                (anti-nova-dodge-order-unit-tag d)))))
 
-  (define actions : (Listof (Listof Any)) '())
-  (: emit! (-> (Listof Any) Void))
-  (define (emit! a) (set! actions (cons a actions)))
+       (define actions : (Listof (Listof Any)) '())
+       (: emit! (-> (Listof Any) Void))
+       (define (emit! a) (set! actions (cons a actions)))
 
-  (for ([cp (in-list cast-plans)])
-    (emit! (list 'purification-nova
-                 (nova-cast-plan-caster-tag cp)
-                 (nova-cast-plan-tx cp)
-                 (nova-cast-plan-ty cp))))
-  (for ([so (in-list steer-orders)])
-    (emit! (list 'move
-                 (nova-steer-order-nova-tag so)
-                 (nova-steer-order-tx so)
-                 (nova-steer-order-ty so))))
-  (for ([ko (in-list kite-orders)]
-        #:when (not (set-member? dodging-tags (disruptor-kite-order-unit-tag ko))))
-    (emit! (list (disruptor-kite-order-action ko)
-                 (disruptor-kite-order-unit-tag ko)
-                 (disruptor-kite-order-tx ko)
-                 (disruptor-kite-order-ty ko))))
-  (for ([do (in-list dodge-orders)])
-    (emit! (list (anti-nova-dodge-order-action do)
-                 (anti-nova-dodge-order-unit-tag do)
-                 (anti-nova-dodge-order-tx do)
-                 (anti-nova-dodge-order-ty do))))
-  (for ([se (in-list snipe-evals)]
-        #:when (disruptor-snipe-eval-snipe-feasible? se))
-    (define etag (disruptor-snipe-eval-enemy-tag se))
-    (for ([att-id (in-list (disruptor-snipe-eval-attacker-tags se))]
-          #:when (not (set-member? dodging-tags att-id)))
-      (emit! (list 'attack-unit att-id etag))))
+       (for ([cp (in-list cast-plans)])
+         (emit! (list 'purification-nova
+                      (nova-cast-plan-caster-tag cp)
+                      (nova-cast-plan-tx cp)
+                      (nova-cast-plan-ty cp))))
+       (for ([so (in-list steer-orders)])
+         (emit! (list 'move
+                      (nova-steer-order-nova-tag so)
+                      (nova-steer-order-tx so)
+                      (nova-steer-order-ty so))))
+       (for ([ko (in-list kite-orders)]
+             #:when (not (set-member? dodging-tags (disruptor-kite-order-unit-tag ko))))
+         (emit! (list (disruptor-kite-order-action ko)
+                      (disruptor-kite-order-unit-tag ko)
+                      (disruptor-kite-order-tx ko)
+                      (disruptor-kite-order-ty ko))))
+       (for ([do (in-list dodge-orders)])
+         (emit! (list (anti-nova-dodge-order-action do)
+                      (anti-nova-dodge-order-unit-tag do)
+                      (anti-nova-dodge-order-tx do)
+                      (anti-nova-dodge-order-ty do))))
+       (for ([se (in-list snipe-evals)]
+             #:when (disruptor-snipe-eval-snipe-feasible? se))
+         (define etag (disruptor-snipe-eval-enemy-tag se))
+         (for ([att-id (in-list (disruptor-snipe-eval-attacker-tags se))]
+               #:when (not (set-member? dodging-tags att-id)))
+           (emit! (list 'attack-unit att-id etag))))
 
-  (reverse actions))
+       (reverse actions))]))

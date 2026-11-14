@@ -59,6 +59,8 @@
                   sc2-point3d
                   sc2-unit-order
                   sc2-unit
+                  sc2-unit?
+                  sc2-unit-tag
                   sc2-player-common
                   sc2-observation
                   sc2-power-source
@@ -116,7 +118,9 @@
                   framing-camera-cmd?
                   friendly-unit-on-depot-footprint?
                   friendly-unit-requesting-depot-transit?
-                  wire-cmd-priority-tier)
+                  wire-cmd-priority-tier
+                  worker-carrying-cargo?
+                  pick-far-patch-scout-worker)
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
                   mpq-hash
@@ -10222,8 +10226,10 @@
   (assert-true! (zerg-worker-army-floor-ok? 'Zerg 'Terran 55 34.0))
   (assert-eq! (zergling-target-cap 200 (hash 'siege-tank 4)) 20
               "Siege Tank/splash enemy must cap non-banked Zerglings at 20")
-  (assert-true! (> (zergling-target-cap 1600 (hash 'siege-tank 4)) 100)
-                "1500+ mineral bank unlocks Zergling mineral dump")
+  (assert-true! (> (zergling-target-cap 1600 (hash 'marine 10)) 100)
+                "1500+ mineral bank unlocks Zergling mineral dump against non-siege armies")
+  (assert-true! (<= (zergling-target-cap 1600 (hash 'siege-tank 4)) 32)
+                "[Gap G2] Siege Tank/splash enemy keeps Zergling cap <= 32 even with 1500+ mineral bank")
   (assert-eq! (terran-desired-barracks-techlabs 'Terran 'Terran 5) 3
               "[UNCOVERED-T1] TvT on 5+ Barracks must scale to >= 3 Barracks TechLabs")
   (assert-eq! (terran-desired-factories 'Terran 'Terran 2 72) 2
@@ -11333,6 +11339,547 @@
 
   (assert-eq! (get-total-bot-action-reject-count) 0
               "All Suite 45 Wave 2-3 wire translations must pass typed command gate with 0 rejects"))
+
+;; ============================================================================
+;; 46. Wave 2A Spatial/Micro: Smart Banelings, Splash Avoidance, Far-Patch Worker & Protoss 2x3x3+1x1 Natural Wall
+;; ============================================================================
+(run-suite "46. Wave 2A Spatial/Micro: Smart Banelings, Splash Avoidance, Far-Patch Worker & Protoss 2x3x3+1x1 Natural Wall"
+  ;; --------------------------------------------------------------------------
+  ;; 46.1 Smart Baneling Rolling/Targeting (`plan-baneling-move-past-and-light-clump-detonate`)
+  ;; --------------------------------------------------------------------------
+  ;; (a) Hold off against pure Armored/Massive screen (`marauder`, `immortal`, `siege-tank-sieged`)
+  (define b46-armored-screen-only
+    (plan-baneling-move-past-and-light-clump-detonate
+     (list (hash 'tag 46001 'type 'baneling 'x 20.0 'y 20.0 'hp 30)
+           (hash 'tag 46002 'type 'baneling 'x 20.8 'y 20.2 'hp 30))
+     (list (hash 'tag 46101 'type 'marauder 'x 23.0 'y 20.0 'hp 125)
+           (hash 'tag 46102 'type 'immortal 'x 23.5 'y 21.0 'hp 200 'shield 100)
+           (hash 'tag 46103 'type 'siege-tank-sieged 'x 24.5 'y 20.0 'hp 175))
+     #:home-x 10.0 #:home-y 20.0))
+  (assert-eq! (length b46-armored-screen-only) 2
+              "Two Banelings near Armored/Massive screen with no light clumps must each emit hold-off directive")
+  (assert-true! (andmap (lambda (d)
+                          (and (harass-directive? d)
+                               (eq? (harass-directive-action d) 'move)
+                               (eq? (harass-directive-reason d) 'baneling-avoid-armored-waste)
+                               (eq? (harass-directive-meta d) 'baneling-hold-off-inefficient-armored)))
+                        b46-armored-screen-only)
+                "Banelings near only Armored/Massive targets must emit 'baneling-hold-off-inefficient-armored 'move directives")
+
+  ;; (b) Front Armored Marauders + Rear Light Marines clump -> roll past Marauders without exploding on them
+  (define b46-move-past
+    (plan-baneling-move-past-and-light-clump-detonate
+     (list (hash 'tag 46011 'type 'baneling 'x 20.0 'y 20.0 'hp 30)
+           (hash 'tag 46012 'type 'baneling 'x 20.5 'y 20.5 'hp 30))
+     (list (hash 'tag 46111 'type 'marauder 'x 23.0 'y 20.0 'hp 125)
+           (hash 'tag 46112 'type 'marauder 'x 23.2 'y 20.8 'hp 125)
+           (hash 'tag 46113 'type 'marine 'x 31.0 'y 20.0 'hp 45)
+           (hash 'tag 46114 'type 'marine 'x 31.4 'y 20.2 'hp 45)
+           (hash 'tag 46115 'type 'marine 'x 31.2 'y 20.6 'hp 45)
+           (hash 'tag 46116 'type 'marine 'x 31.5 'y 20.5 'hp 45))
+     #:home-x 10.0 #:home-y 20.0))
+  (assert-eq! (length b46-move-past) 2 "Move-past scenario produces 2 Baneling directives")
+  (assert-true! (andmap (lambda (d)
+                          (and (eq? (harass-directive-action d) 'move)
+                               (not (eq? (harass-directive-action d) 'baneling-explode))
+                               (> (harass-directive-tx d) 23.0)))
+                        b46-move-past)
+                "Banelings behind Armored screen must move past toward rear Marine clump without wasting detonation on Marauders")
+
+  ;; (c) Exact-lethal `needed-banes` cap prevents over-detonating (`6` Banelings vs `4` Marines `45 HP` -> `needed = 2`)
+  (define b46-six-banes
+    (for/list ([i (in-range 6)])
+      (hash 'tag (+ 46020 i) 'type 'baneling
+            'x (+ 30.2 (* 0.15 (modulo i 3)))
+            'y (+ 20.1 (* 0.15 (quotient i 3)))
+            'hp 30)))
+  (define b46-four-marines
+    (list (hash 'tag 46121 'type 'marine 'x 30.0 'y 20.0 'hp 45)
+          (hash 'tag 46122 'type 'marine 'x 30.4 'y 20.0 'hp 45)
+          (hash 'tag 46123 'type 'marine 'x 30.0 'y 20.4 'hp 45)
+          (hash 'tag 46124 'type 'marine 'x 30.4 'y 20.4 'hp 45)))
+  (define b46-single-clump-dirs
+    (plan-baneling-move-past-and-light-clump-detonate b46-six-banes b46-four-marines #:home-x 10.0 #:home-y 20.0))
+  (define b46-det-single
+    (filter (lambda (d) (eq? (harass-directive-action d) 'baneling-explode)) b46-single-clump-dirs))
+  (define b46-res-single
+    (filter (lambda (d)
+              (and (eq? (harass-directive-action d) 'move)
+                   (eq? (harass-directive-meta d) 'baneling-reserve-no-overcommit)))
+            b46-single-clump-dirs))
+  (assert-true! (and (>= (length b46-det-single) 1) (<= (length b46-det-single) 2))
+                "Exact-lethal cap must allow at most 2 Banelings to explode on 4x 45-HP Marines (not all 6)")
+  (assert-true! (andmap (lambda (d) (eq? (harass-directive-reason d) 'baneling-light-clump-detonate))
+                        b46-det-single)
+                "Detonating Banelings must cite 'baneling-light-clump-detonate")
+  (assert-eq! (length b46-res-single) (- 6 (length b46-det-single))
+              "Remaining Banelings after exact-lethal quota filled must pull back as 'baneling-reserve-no-overcommit")
+
+  ;; Same 6 Banelings with a secondary Probe clump at (40, 20): overflow Banelings route to secondary clump
+  (define b46-two-clump-dirs
+    (plan-baneling-move-past-and-light-clump-detonate
+     b46-six-banes
+     (append b46-four-marines
+             (list (hash 'tag 46131 'type 'probe 'x 40.0 'y 20.0 'hp 20 'shield 20)
+                   (hash 'tag 46132 'type 'probe 'x 40.5 'y 20.2 'hp 20 'shield 20)
+                   (hash 'tag 46133 'type 'probe 'x 40.3 'y 19.7 'hp 20 'shield 20)))
+     #:home-x 10.0 #:home-y 20.0))
+  (define b46-det-two
+    (filter (lambda (d) (eq? (harass-directive-action d) 'baneling-explode)) b46-two-clump-dirs))
+  (define b46-roll-to-2nd
+    (filter (lambda (d)
+              (and (eq? (harass-directive-action d) 'move)
+                   (> (harass-directive-tx d) 35.0)))
+            b46-two-clump-dirs))
+  (assert-true! (<= (length b46-det-two) 2)
+                "Primary clump detonation count stays <= 2 even when a secondary clump exists")
+  (assert-true! (>= (length b46-roll-to-2nd) 1)
+                "Unneeded Banelings must roll toward unclaimed secondary Probe clump at x=40")
+
+  ;; (d) Burrowed Baneling (`115` / 'baneling-burrowed) landmine: explode on clustered light workers, NOT lone armored Immortal
+  (define b46-landmine-workers
+    (plan-baneling-move-past-and-light-clump-detonate
+     (list (hash 'tag 46041 'type 'baneling-burrowed 'x 50.0 'y 50.0 'hp 30))
+     (list (hash 'tag 46141 'type 'probe 'x 50.3 'y 50.0 'hp 20 'shield 20)
+           (hash 'tag 46142 'type 'probe 'x 50.0 'y 50.4 'hp 20 'shield 20)
+           (hash 'tag 46143 'type 'probe 'x 49.7 'y 50.2 'hp 20 'shield 20))))
+  (define b46-landmine-immortal
+    (plan-baneling-move-past-and-light-clump-detonate
+     (list (hash 'tag 46042 'type 'baneling-burrowed 'x 50.0 'y 50.0 'hp 30))
+     (list (hash 'tag 46144 'type 'immortal 'x 50.2 'y 50.0 'hp 200 'shield 100))))
+  (assert-true! (and (= (length b46-landmine-workers) 1)
+                     (eq? (harass-directive-action (car b46-landmine-workers)) 'baneling-explode))
+                "Burrowed Baneling landmine must detonate ('baneling-explode) when Probe clump enters trigger radius")
+  (assert-true! (null? (filter (lambda (d) (eq? (harass-directive-action d) 'baneling-explode))
+                               b46-landmine-immortal))
+                "Burrowed Baneling landmine must NOT detonate on lone Armored Immortal")
+
+  ;; --------------------------------------------------------------------------
+  ;; 46.2 Anti-Splash & Lurker Linear-Spine Avoidance (`plan-avoid-siege-tank-and-lurker-splash-zones`)
+  ;; --------------------------------------------------------------------------
+  (define (w46-find-cmd cmds uid)
+    (findf (lambda (c) (equal? (hash-ref c 'unit-id #f) uid)) cmds))
+  (define (w46-d2 x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+
+  ;; (a) Burrowed Lurker 10.0-tile linear spine + 1.6-tile neighbor splash + second Lurker side tie-breaker
+  (define l46-cmds
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hash 'unit-id 46201 'type 'roach     'x 26.0 'y 20.0)
+           (hash 'unit-id 46202 'type 'hydralisk 'x 28.0 'y 20.8)
+           (hash 'unit-id 46203 'type 'roach     'x 28.0 'y 21.5)
+           (hash 'unit-id 46204 'type 'zergling  'x 45.0 'y 20.0)
+           (hash 'unit-id 46205 'type 'mutalisk  'x 26.0 'y 20.0 'is-flying? #t))
+     (list (hash 'unit-id 46301 'type 'lurker-burrowed 'x 20.0 'y 20.0)
+           (hash 'unit-id 46302 'type 'lurker-burrowed 'x 25.0 'y 25.0))
+     #:home-x 10.0 #:home-y 10.0))
+  (define l46-c1 (w46-find-cmd l46-cmds 46201))
+  (define l46-c2 (w46-find-cmd l46-cmds 46202))
+  (define l46-c3 (w46-find-cmd l46-cmds 46203))
+  (assert-true! (and l46-c1 l46-c2 l46-c3)
+                "Allies along Lurker 10.0-tile spine ray + 1.6-tile neighbor must receive perpendicular dodge")
+  (assert-true! (not (w46-find-cmd l46-cmds 46204))
+                "Far ground unit beyond Lurker spine corridor must not dodge")
+  (assert-true! (not (w46-find-cmd l46-cmds 46205))
+                "Flying Mutalisk above Lurker spines must not dodge ground splash")
+  (assert-eq! (hash-ref l46-c1 'action #f) 'move "Lurker splash dodge emits 'move action")
+  (assert-eq! (hash-ref l46-c1 'role #f) 'avoid-lurker-linear-spine-splash
+              "Lurker spine dodge sets role 'avoid-lurker-linear-spine-splash")
+  (assert-eq! (hash-ref l46-c1 'reason #f) 'step-perpendicular-out-of-lurker-spines
+              "Lurker spine dodge sets reason 'step-perpendicular-out-of-lurker-spines")
+  (assert-true! (< (abs (- (w46-d2 26.0 20.0 (hash-ref l46-c1 'target-x) (hash-ref l46-c1 'target-y)) 2.5)) 1e-6)
+                "Perpendicular Lurker spine dodge must step exactly 2.5 tiles")
+  (assert-true! (< (hash-ref l46-c1 'target-y) 18.0)
+                "Perpendicular step must pick -y side away from second Lurker at +y")
+
+  ;; Unburrowed Lurker without burrow intent vs with burrow intent vs active `'lurker-spines` effect
+  (define l46-ally (list (hash 'unit-id 46211 'type 'roach 'x 19.0 'y 10.0)))
+  (assert-eq! (plan-avoid-siege-tank-and-lurker-splash-zones
+               l46-ally (list (hash 'type 'lurker 'x 10.0 'y 10.0)))
+              '()
+              "Unburrowed Lurker without burrow-intent? must not trigger spine dodge")
+  (define l46-intent
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     l46-ally (list (hash 'type 'lurker 'x 10.0 'y 10.0 'burrow-intent? #t))))
+  (assert-true! (and (= (length l46-intent) 1)
+                     (eq? (hash-ref (car l46-intent) 'role #f) 'avoid-lurker-linear-spine-splash))
+                "Unburrowed Lurker with burrow-intent? <= 9.5 tiles must trigger perpendicular spine dodge")
+  (define l46-eff
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     l46-ally '()
+     #:effects (list (hash 'type 'lurker-spines 'x 10.0 'y 10.0 'target-x 20.0 'target-y 10.0))))
+  (assert-true! (and (= (length l46-eff) 1)
+                     (eq? (hash-ref (car l46-eff) 'role #f) 'avoid-lurker-linear-spine-splash))
+                "Active 'lurker-spines effect ray must trigger 'avoid-lurker-linear-spine-splash")
+
+  ;; (b) Siege Tank deadzone dive ([2.0, 3.8] -> < 2.0 min-range) + lateral split ((3.8, 13.5] w/ neighbor <= 1.85)
+  (define t46-tank (list (hash 'type 'siege-tank-sieged 'x 50.0 'y 50.0)))
+  (for ([ut (in-list '(zergling zealot ultralisk hellion-tank roach immortal stalker marine marauder))]
+        [idx (in-naturals)])
+    (define cmds
+      (plan-avoid-siege-tank-and-lurker-splash-zones
+       (list (hash 'unit-id (+ 46400 idx) 'type ut 'x 53.0 'y 50.0))
+       t46-tank))
+    (assert-eq! (length cmds) 1 (format "~a in [2.0, 3.8] band of sieged Tank must deadzone dive" ut))
+    (assert-eq! (hash-ref (car cmds) 'role #f) 'siege-tank-deadzone-dive
+                "Deadzone dive role must be 'siege-tank-deadzone-dive")
+    (assert-eq! (hash-ref (car cmds) 'reason #f) 'enter-siege-tank-min-range-deadzone
+                "Deadzone dive reason must be 'enter-siege-tank-min-range-deadzone")
+    (assert-true! (< (w46-d2 50.0 50.0 (hash-ref (car cmds) 'target-x) (hash-ref (car cmds) 'target-y)) 2.0)
+                  "Deadzone dive target must lie strictly inside < 2.0-tile Tank minimum range"))
+  (assert-eq! (plan-avoid-siege-tank-and-lurker-splash-zones
+               (list (hash 'unit-id 46450 'type 'hydralisk 'x 53.0 'y 50.0))
+               t46-tank)
+              '()
+              "Hydralisk in [2.0, 3.8] band is excluded from close Tank deadzone dive")
+
+  ;; Lateral split inside (3.8, 13.5] tiles when clustered <= 1.85 tiles vs isolated at d=10
+  (define t46-split-cmds
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hash 'unit-id 46501 'type 'marine 'x 58.0 'y 50.0)
+           (hash 'unit-id 46502 'type 'marine 'x 58.0 'y 51.2)
+           (hash 'unit-id 46503 'type 'marine 'x 58.0 'y 60.0))
+     t46-tank))
+  (define t46-s1 (w46-find-cmd t46-split-cmds 46501))
+  (define t46-s2 (w46-find-cmd t46-split-cmds 46502))
+  (assert-true! (and t46-s1 t46-s2 (not (w46-find-cmd t46-split-cmds 46503)))
+                "Clustered Marines inside (3.8, 13.5] Tank range must split laterally while isolated Marine stays put")
+  (assert-eq! (hash-ref t46-s1 'role #f) 'avoid-siege-tank-splash-split
+              "Tank splash split role must be 'avoid-siege-tank-splash-split")
+  (assert-true! (and (< (hash-ref t46-s1 'target-y) 49.0) (> (hash-ref t46-s2 'target-y) 52.2))
+                "Clustered pair must split in opposite lateral directions perpendicular to Tank ray")
+
+  ;; AoE hazards (`'corrosive-bile`, `'psionic-storm`, `'nuke`)
+  (define aoe46-cmds
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hash 'unit-id 46511 'type 'zergling 'x 20.2 'y 20.0)
+           (hash 'unit-id 46512 'type 'roach    'x 40.5 'y 40.0)
+           (hash 'unit-id 46513 'type 'marine   'x 71.0 'y 70.0))
+     '()
+     #:effects (list (hash 'type 'corrosive-bile 'x 20.0 'y 20.0 'radius 0.5)
+                     (hash 'type 'psionic-storm  'x 40.0 'y 40.0 'radius 1.5)
+                     (hash 'type 'nuke           'x 70.0 'y 70.0 'radius 8.0))))
+  (assert-eq! (length aoe46-cmds) 3
+              "Units inside Corrosive Bile, Psi Storm, and Nuke AoE zones must each emit a move dodge")
+
+  ;; --------------------------------------------------------------------------
+  ;; 46.3 Far-Mineral-Patch Non-Carrying Scout Worker Selection
+  ;; --------------------------------------------------------------------------
+  ;; Carrying detectors across flags, buff IDs (271/273), and return-cargo order IDs
+  (assert-true! (worker-carrying-minerals-or-gas? (hash 'id 1 'carrying-minerals? #t))
+                "worker-carrying-minerals-or-gas? detects 'carrying-minerals? #t")
+  (assert-true! (worker-carrying-minerals-or-gas? (hash 'id 2 'buff-ids '(271)))
+                "worker-carrying-minerals-or-gas? detects mineral carry buff 271")
+  (assert-true! (worker-carrying-minerals-or-gas? (hash 'id 3 'order-ability-id 3667))
+                "worker-carrying-minerals-or-gas? detects harvest-return ability 3667")
+  (assert-true! (not (worker-carrying-minerals-or-gas? (hash 'id 4 'x 22.0 'y 32.5 'buff-ids '() 'order-ability-id 295)))
+                "Non-carrying worker mining on patch must return #f from worker-carrying-minerals-or-gas?")
+
+  ;; Runtime hash selection (`select-far-mineral-patch-non-carrying-worker`): avoids carrying & close workers
+  (define m46-patches
+    (list (hash 'id 46601 'x 26.5 'y 32.5) ;; close (6.0t)
+          (hash 'id 46602 'x 22.5 'y 32.5))) ;; far (10.0t)
+  (define w46-runtime-pool
+    (list (hash 'id 46611 'type 'probe 'x 22.7 'y 32.5 'carrying-minerals? #t 'order-target-id 46602) ;; far but carrying!
+          (hash 'id 46612 'type 'probe 'x 26.3 'y 32.5 'buff-ids '() 'order-target-id 46601)          ;; close non-carrying
+          (hash 'id 46613 'type 'probe 'x 22.6 'y 32.7 'buff-ids '() 'order-target-id 46602)))        ;; far non-carrying!
+  (define picked46-rt
+    (select-far-mineral-patch-non-carrying-worker w46-runtime-pool 32.5 32.5 m46-patches))
+  (assert-eq! (and (hash? picked46-rt) (hash-ref picked46-rt 'id #f)) 46613
+              "select-far-mineral-patch-non-carrying-worker must skip carrying far worker #46611 & close #46612 and pick #46613")
+
+  ;; All-carrying safe fallback returns a valid worker hash rather than #f
+  (define picked46-fallback
+    (select-far-mineral-patch-non-carrying-worker
+     (list (hash 'id 46621 'type 'probe 'x 26.3 'y 32.5 'carrying-minerals? #t)
+           (hash 'id 46622 'type 'probe 'x 22.6 'y 32.5 'buff-ids '(271)))
+     32.5 32.5 m46-patches))
+  (assert-true! (hash? picked46-fallback)
+                "All-carrying worker pool still returns a fallback worker instead of failing")
+
+  ;; Wire `sc2-unit` struct carrying & far-patch scout worker selection (`worker-carrying-cargo?` + `pick-far-patch-scout-worker`)
+  (define (mk-w46-wire-u tag ut x y #:all [all 1] #:hp [hp 40.0] #:buffs [buffs '()] #:orders [orders '()] #:mc [mc 0])
+    (sc2-unit 1 all tag ut (if (= all 1) 1 0) (sc2-point3d x y 10.0) 0.0 0.5 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mc 0 #f #f #f #f #f orders 0 buffs 0 0 0.0 0 0 0 0))
+  (define w46-wire-th   (list (mk-w46-wire-u 46700 59  32.5 32.5 #:all 1 #:hp 1000.0))) ;; Nexus (59)
+  (define w46-wire-mins (list (mk-w46-wire-u 46701 341 26.5 32.5 #:all 3 #:mc 1200)     ;; Close mineral-field (341)
+                              (mk-w46-wire-u 46702 341 22.0 32.5 #:all 3 #:mc 1200)))   ;; Far mineral-field (10.5t)
+  (define w46-p-carry-buff (mk-w46-wire-u 46711 84 22.2 32.5 #:buffs '(271)))
+  (define w46-p-carry-ord  (mk-w46-wire-u 46712 84 22.4 32.5 #:orders (list (sc2-unit-order 299 #f 46700 0.0))))
+  (define w46-p-close      (mk-w46-wire-u 46713 84 26.3 32.5 #:orders (list (sc2-unit-order 298 #f 46701 0.0))))
+  (define w46-p-far-free   (mk-w46-wire-u 46714 84 22.1 32.8 #:orders (list (sc2-unit-order 298 #f 46702 0.0))))
+  (assert-true! (and (worker-carrying-cargo? w46-p-carry-buff)
+                     (worker-carrying-cargo? w46-p-carry-ord)
+                     (not (worker-carrying-cargo? w46-p-close))
+                     (not (worker-carrying-cargo? w46-p-far-free)))
+                "worker-carrying-cargo? must distinguish carry buff 271 / return order 299 from non-carrying Probes")
+  (define picked46-wire
+    (pick-far-patch-scout-worker (list w46-p-carry-buff w46-p-carry-ord w46-p-close w46-p-far-free)
+                                 w46-wire-th w46-wire-mins))
+  (assert-eq! (and (sc2-unit? picked46-wire) (sc2-unit-tag picked46-wire)) 46714
+              "pick-far-patch-scout-worker must bypass carrying probes & close probe to select far non-carrying Probe #46714")
+
+  ;; --------------------------------------------------------------------------
+  ;; 46.4 Protoss Natural Wall-In (`2x 3x3` + `1x1` Doorway, `'slot-3 #f`)
+  ;; --------------------------------------------------------------------------
+  (define (w46-make-synth-choke w h cy0 cy1 gx0 gx1)
+    (hash 'width w 'height h
+          'pathing-ref
+          (lambda (ix iy)
+            (cond
+              [(or (< ix 2) (>= ix (- w 2)) (< iy 2) (>= iy (- h 2))) 0]
+              [(and (>= iy cy0) (< iy cy1)) (if (and (>= ix gx0) (< ix gx1)) 1 0)]
+              [else 1]))
+          'placement-ref
+          (lambda (ix iy)
+            (cond
+              [(or (< ix 2) (>= ix (- w 2)) (< iy 2) (>= iy (- h 2))) 0]
+              [(and (>= iy cy0) (< iy cy1)) (if (and (>= ix gx0) (< ix gx1)) 1 0)]
+              [else 1]))
+          'height-ref (lambda (_ix _iy) 112.0)))
+  (define (w46-assert-nat-wall! label w grids)
+    (assert-true! (hash? w) (format "~a must return wall hash" label))
+    (assert-eq! (hash-ref w 'locus #f) 'natural-choke (format "~a must anchor at 'natural-choke" label))
+    (assert-eq! (hash-ref w 'slot-3 'unset) #f (format "~a 2x3x3+1x1 natural wall must set 'slot-3 to #f" label))
+    (assert-true! (and (pair? (hash-ref w 'slot-1 #f))
+                       (pair? (hash-ref w 'slot-2 #f))
+                       (pair? (hash-ref w 'door #f))
+                       (pair? (hash-ref w 'pylon #f)))
+                  (format "~a must provide slot-1, slot-2, door, and pylon coordinates" label))
+    (when grids
+      (assert-true! (protoss-wall-valid-on-grids? w 20.5 14.5 36.5 34.5 grids)
+                    (format "~a must pass protoss-wall-valid-on-grids?" label))))
+
+  ;; Analytical & forced-natural checks (while unforced PvT keeps 'main-ramp)
+  (w46-assert-nat-wall!
+   "analytical-PvZ"
+   (solve-protoss-matchup-wall 20.5 14.5 36.5 34.5 'Zerg #:enemy-x 110.5 #:enemy-y 110.5)
+   #f)
+  (assert-eq! (hash-ref (solve-protoss-matchup-wall 20.5 14.5 36.5 34.5 'Terran #:enemy-x 110.5 #:enemy-y 110.5)
+                        'locus #f)
+              'main-ramp
+              "Unforced PvT must preserve 'main-ramp locus")
+  (w46-assert-nat-wall!
+   "analytical-forced-nat"
+   (solve-protoss-matchup-wall 20.5 14.5 36.5 34.5 'Terran
+                               #:enemy-x 110.5 #:enemy-y 110.5 #:force-natural-choke? #t)
+   #f)
+
+  ;; Synthetic choke widths covering Sub-pass 1a (6-7t), 1b Pylon-in-wall (8t), 1c wide (10t) + grid #:force-natural-choke?
+  (for ([cw (in-list '(6 7))])
+    (define g-std (w46-make-synth-choke 96 96 42 46 35 (+ 35 cw)))
+    (w46-assert-nat-wall!
+     (format "synth-choke-~a" cw)
+     (solve-protoss-matchup-wall 20.5 14.5 36.5 34.5 'Zerg #:map-grids g-std #:enemy-x 80.5 #:enemy-y 80.5)
+     g-std))
+  (for ([cw (in-list '(6 8 10))])
+    (define g-deep (w46-make-synth-choke 96 96 40 56 36 (+ 36 cw)))
+    (w46-assert-nat-wall!
+     (format "deep-corridor-~a" cw)
+     (solve-protoss-matchup-wall 20.5 14.5 36.5 34.5 'Zerg #:map-grids g-deep #:enemy-x 41.0 #:enemy-y 85.5)
+     g-deep))
+  (define g46-forced-grid (w46-make-synth-choke 96 96 40 56 36 42))
+  (w46-assert-nat-wall!
+   "grid-forced-natural-PvT"
+   (solve-protoss-matchup-wall 20.5 14.5 36.5 34.5 'Terran
+                               #:map-grids g46-forced-grid
+                               #:enemy-x 41.0 #:enemy-y 85.5
+                               #:force-natural-choke? #t)
+   g46-forced-grid))
+
+;; ============================================================================
+;; 47. Wave 2A Macro & Planning: Zerg Creep Tumors, Creeping Queens & BO Timing Plans
+;; ============================================================================
+(run-suite "47. Wave 2A Macro & Planning: Zerg Creep Tumors, Creeping Queens & BO Timing Plans"
+  ;; --------------------------------------------------------------------------
+  ;; 47.1 Zerg Queen Targets, Creep Sustainability & BO/Macro Brain Creep Directives
+  ;; --------------------------------------------------------------------------
+  (assert-eq! (desired-zerg-queen-count 1) 2 "1-base Zerg must target >= 2 Queens (1 inject + 1 creeping)")
+  (assert-eq! (zerg-queen-target 2) 4 "2-base Zerg (zerg-queen-target alias) must target 4 Queens")
+  (assert-eq! (desired-zerg-queen-count 3) 6 "3-base Zerg must target 6 Queens (inject + dedicated creepers)")
+  (assert-eq! (desired-zerg-queen-count 2 #t) 5 "2-base Zerg vs Stargate threat boosts Queen target to 5")
+
+  ;; `creep-self-sustaining?` requires `(min 6 (* 2 bases))` active tumors
+  (assert-true! (and (not (creep-self-sustaining? 1 1))
+                     (creep-self-sustaining? 2 1)
+                     (not (creep-self-sustaining? 3 2))
+                     (creep-self-sustaining? 4 2)
+                     (not (creep-self-sustaining? 5 3))
+                     (creep-self-sustaining? 6 3)
+                     (creep-self-sustaining? 6 4))
+                "creep-self-sustaining? must threshold cleanly at (min 6 (* 2 active-bases))")
+
+  ;; Zerg build-order queue injects `'spawn-creep-tumor` / `'creeping-queen` until self-sustaining
+  (define z47-bo-need-creep
+    (evaluate-build-order-next-step
+     #:race 'Zerg #:enemy-race 'Terran #:frame 3000
+     #:minerals 50 #:gas 0 #:supply-used 22 #:supply-left 8 #:active-bases 2
+     #:ready-building-counts (hash 'hatchery 2 'spawning-pool 1)
+     #:total-building-counts (hash 'hatchery 2 'spawning-pool 1)
+     #:unit-counts (hash 'drone 19 'queen 2 'overlord 3)
+     #:base-x 32.5 #:base-y 32.5 #:nat-x 52.5 #:nat-y 48.5))
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'spawn-creep-tumor)))
+                       (pro-bo-eval-result-ready-actions z47-bo-need-creep))
+                "Zerg BO next-step must emit (spawn-creep-tumor nat-x nat-y) when tumors < (min 6 (* 2 bases))")
+
+  ;; Priority Macro Brain emits `'spawn-creep-tumor` at 540.0 when below threshold, suppresses once self-sustaining
+  (define z47-brain-need
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 3000
+      #:minerals 100 #:gas 0 #:supply-used 28 #:supply-cap 36 #:supply-left 8
+      #:workers 22 #:active-bases 2
+      #:ready-building-counts (hash 'hatchery 2 'spawning-pool 1)
+      #:total-building-counts (hash 'hatchery 2 'spawning-pool 1)
+      #:unit-counts (hash 'drone 22 'queen 2 'overlord 4)
+      #:nat-x 52.5 #:nat-y 48.5)))
+  (define z47-sched-need (macro-brain-decision-priority-schedule z47-brain-need))
+  (define z47-cats-need (priority-schedule-result-category-utilities z47-sched-need))
+  (assert-true! (ormap (lambda (a) (equal? a '(spawn-creep-tumor 52.5 48.5)))
+                       (macro-brain-decision-scheduled-actions z47-brain-need))
+                "step-priority-macro-brain must emit high-priority '(spawn-creep-tumor nat-x nat-y) when creep is below threshold")
+  (assert-eq! (hash-ref z47-cats-need 'creep-self-sustaining? #t) #f
+              "Macro brain telemetry must mark 'creep-self-sustaining? = #f with 0 tumors on 2 bases")
+
+  (define z47-brain-done
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 4500
+      #:minerals 100 #:gas 0 #:supply-used 36 #:supply-cap 44 #:supply-left 8
+      #:workers 30 #:active-bases 2
+      #:ready-building-counts (hash 'hatchery 2 'spawning-pool 1 'creep-tumor-burrowed 4)
+      #:total-building-counts (hash 'hatchery 2 'spawning-pool 1 'creep-tumor-burrowed 4)
+      #:unit-counts (hash 'drone 30 'queen 4 'overlord 5)
+      #:nat-x 52.5 #:nat-y 48.5)))
+  (define z47-cats-done
+    (priority-schedule-result-category-utilities (macro-brain-decision-priority-schedule z47-brain-done)))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'spawn-creep-tumor)))
+                            (macro-brain-decision-scheduled-actions z47-brain-done)))
+                "step-priority-macro-brain must stop emitting 'spawn-creep-tumor once active tumors reach 2*bases (4)")
+  (assert-eq! (hash-ref z47-cats-done 'creep-self-sustaining? #f) #t
+              "Macro brain telemetry must report 'creep-self-sustaining? = #t at 4 tumors on 2 bases")
+
+  ;; --------------------------------------------------------------------------
+  ;; 47.2 Build-Order Tactical Execution & Timing-Attack Plans (All 9 Matchups + Dispositions)
+  ;; --------------------------------------------------------------------------
+  (for ([m-spec (in-list '((Protoss Zerg PvZ) (Protoss Terran PvT) (Protoss Protoss PvP)
+                           (Terran Protoss TvP) (Terran Zerg TvZ) (Terran Terran TvT)
+                           (Zerg Zerg ZvZ) (Zerg Terran ZvT) (Zerg Protoss ZvP)))])
+    (define r (first m-spec))
+    (define er (second m-spec))
+    (define m-sym (third m-spec))
+    (define phases (pro-tactical-phases-for-matchup r er))
+    (assert-true! (and (pair? phases)
+                       (andmap (lambda (p)
+                                 (and (bo-tactical-phase-plan? p)
+                                      (eq? (bo-tactical-phase-plan-matchup p) m-sym)
+                                      (<= (bo-tactical-phase-plan-window-start-sec p)
+                                          (bo-tactical-phase-plan-window-hit-sec p))
+                                      (< (bo-tactical-phase-plan-window-hit-sec p)
+                                         (bo-tactical-phase-plan-window-expire-sec p))
+                                      (pair? (bo-tactical-phase-plan-micro-directives p))
+                                      (pair? (bo-tactical-phase-plan-active-tactics p))))
+                               phases))
+                  (format "Matchup ~a must have valid tactical phase plans in PRO-BO-TACTICAL-PHASE-PLANS" m-sym)))
+
+  ;; (a) Accumulate -> Pre-position (upgrade >= 0.80 & lead window) -> Commit -> Bypass Fortified Choke -> Abort/Pivot
+  (define pvz-accum
+    (evaluate-build-order-tactical-plan
+     #:race 'Protoss #:enemy-race 'Zerg #:frame 6500 #:supply-used 48
+     #:unit-counts (hash 'adept 3 'warp-prism 1)
+     #:pending-upgrades '(resonating-glaives) #:in-progress-upgrade-progress 0.40
+     #:lanchester-ratio 1.15))
+  (assert-eq! (bo-active-tactical-plan-disposition pvz-accum) 'accumulate-for-timing
+              "Incomplete trigger Adepts (3/6) must stay in 'accumulate-for-timing")
+  (assert-eq! (bo-active-tactical-plan-judgment-reason pvz-accum) 'accumulating-trigger-units
+              "Incomplete trigger units must report 'accumulating-trigger-units")
+
+  (define pvz-prepos-upg
+    (evaluate-build-order-tactical-plan
+     #:race 'Protoss #:enemy-race 'Zerg #:frame 7600 #:supply-used 54
+     #:unit-counts (hash 'adept 6 'warp-prism 1)
+     #:pending-upgrades '(resonating-glaives) #:in-progress-upgrade-progress 0.85
+     #:lanchester-ratio 1.10))
+  (assert-eq! (bo-active-tactical-plan-disposition pvz-prepos-upg) 'pre-position-march-out
+              "Units ready + Resonating Glaives >= 0.80 progress must emit 'pre-position-march-out")
+  (assert-eq! (bo-active-tactical-plan-judgment-reason pvz-prepos-upg) 'upgrade-near-completion-pre-position
+              "Upgrade >= 0.80 pre-position must cite 'upgrade-near-completion-pre-position")
+
+  (define pvz-prepos-lead
+    (evaluate-build-order-tactical-plan
+     #:race 'Protoss #:enemy-race 'Zerg #:frame (inexact->exact (round (* 350.0 22.4))) #:supply-used 56
+     #:unit-counts (hash 'adept 6 'warp-prism 1)
+     #:pending-upgrades '(resonating-glaives) #:in-progress-upgrade-progress 0.50
+     #:lanchester-ratio 1.10))
+  (assert-eq! (bo-active-tactical-plan-disposition pvz-prepos-lead) 'pre-position-march-out
+              "Within 15.0s pre-position lead window [345s, 360s) must emit 'pre-position-march-out")
+  (assert-eq! (bo-active-tactical-plan-judgment-reason pvz-prepos-lead) 'pre-position-before-window-hit
+              "Lead-window march-out must cite 'pre-position-before-window-hit")
+
+  (define pvz-commit
+    (evaluate-build-order-tactical-plan
+     #:race 'Protoss #:enemy-race 'Zerg #:frame (inexact->exact (round (* 362.0 22.4))) #:supply-used 58
+     #:unit-counts (hash 'adept 6 'warp-prism 1)
+     #:researched-upgrades '(resonating-glaives)
+     #:lanchester-ratio 1.15))
+  (assert-eq! (bo-active-tactical-plan-disposition pvz-commit) 'execute-timing-attack-commit
+              "Full Adepts + Warp Prism + Resonating Glaives at window hit must commit timing attack")
+  (assert-eq! (bo-active-tactical-plan-judgment-reason pvz-commit) 'timing-spike-units-and-upgrades-ready
+              "Committed spike must cite 'timing-spike-units-and-upgrades-ready")
+
+  (define pvz-bypass
+    (evaluate-build-order-tactical-plan
+     #:race 'Protoss #:enemy-race 'Zerg #:frame (inexact->exact (round (* 365.0 22.4))) #:supply-used 58
+     #:unit-counts (hash 'adept 6 'warp-prism 1)
+     #:researched-upgrades '(resonating-glaives)
+     #:enemy-unit-counts (hash 'drone 20 'roach 4)
+     #:enemy-building-counts (hash 'spine-crawler 3)
+     #:lanchester-ratio 1.10
+     #:enemy-main-x 142.0 #:enemy-main-y 138.0 #:enemy-nat-x 118.0 #:enemy-nat-y 124.0))
+  (assert-eq! (bo-active-tactical-plan-disposition pvz-bypass) 'execute-timing-bypass-harass-fork
+              "Fortified choke (>= 2 spine-crawlers) with vulnerable Drones must trigger 'execute-timing-bypass-harass-fork")
+  (assert-true! (and (= (bo-active-tactical-plan-primary-target-x pvz-bypass) 118.0)
+                     (= (bo-active-tactical-plan-secondary-fork-x pvz-bypass) 142.0))
+                "Bypass mineral fork targets enemy natural (primary) and enemy main (secondary fork)")
+
+  (define pvz-abort-expired
+    (evaluate-build-order-tactical-plan
+     #:race 'Protoss #:enemy-race 'Zerg #:frame (inexact->exact (round (* 460.0 22.4))) #:supply-used 60
+     #:unit-counts (hash 'adept 6 'warp-prism 1)
+     #:researched-upgrades '(resonating-glaives)
+     #:lanchester-ratio 1.05))
+  (assert-eq! (bo-active-tactical-plan-disposition pvz-abort-expired) 'abort-timing-and-pivot-macro
+              "Expired Glaive Adept window (> 450s) must abort timing and pivot macro")
+  (assert-eq! (bo-active-tactical-plan-judgment-reason pvz-abort-expired) 'timing-window-expired
+              "Expired window must cite 'timing-window-expired")
+  (assert-eq! (bo-active-tactical-plan-post-window-transition pvz-abort-expired) 'pvz-colossus-charge-immortal-push
+              "PvZ expired Glaive Adept plan must specify transition to 'pvz-colossus-charge-immortal-push")
+
+  (define pvz-abort-home
+    (evaluate-build-order-tactical-plan
+     #:race 'Protoss #:enemy-race 'Zerg #:frame 7800 #:supply-used 50
+     #:unit-counts (hash 'adept 6 'warp-prism 1)
+     #:researched-upgrades '(resonating-glaives)
+     #:under-attack? #t #:lanchester-ratio 0.65))
+  (assert-eq! (bo-active-tactical-plan-disposition pvz-abort-home) 'abort-timing-and-pivot-macro
+              "Severe home attack (< 0.80 ratio) must trigger 'abort-timing-and-pivot-macro")
+  (assert-eq! (bo-active-tactical-plan-judgment-reason pvz-abort-home) 'severe-home-attack-abort
+              "Severe home attack must cite 'severe-home-attack-abort")
+
+  ;; (b) ZvP 3-base timing contain & third-base denial vs fortified natural choke (locked-down mineral lines)
+  (define zvp-contain
+    (evaluate-build-order-tactical-plan
+     #:race 'Zerg #:enemy-race 'Protoss #:frame (inexact->exact (round (* 465.0 22.4))) #:supply-used 110
+     #:unit-counts (hash 'roach 8 'hydralisk 6 'lurker 2)
+     #:researched-upgrades '(grooved-spines)
+     #:enemy-unit-counts (hash 'stalker 8 'probe 16)
+     #:enemy-building-counts (hash 'shield-battery 2 'photon-cannon 3)
+     #:lanchester-ratio 1.05
+     #:enemy-third-x 102.0 #:enemy-third-y 128.0))
+  (assert-eq! (bo-active-tactical-plan-disposition zvp-contain) 'contain-and-deny-third
+              "Fortified natural + cannon-defended mineral lines on ZvP 3-base denial must emit 'contain-and-deny-third")
+  (assert-eq! (bo-active-tactical-plan-primary-target-x zvp-contain) 102.0
+              "ZvP third-base containment must anchor primary target at enemy third base"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

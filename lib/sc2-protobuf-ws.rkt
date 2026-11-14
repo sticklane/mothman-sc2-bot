@@ -20,6 +20,8 @@
          net/base64
          "sc2-game-constants.rkt"
          "sc2-typed-commands.rkt"
+         (only-in "sc2-placement.rkt"
+                  compute-pro-speed-mining-contact-point)
          (only-in "sc2-common.rkt"
                   SC2-SINGLETON-TECH-BUILDINGS
                   SC2-DUAL-CAP-TECH-BUILDINGS))
@@ -157,6 +159,8 @@
  select-producer-tags-for-unit
  frame0-pro-worker-split-commands
  pick-safe-mule-mineral-patch
+ worker-carrying-cargo?
+ pick-far-patch-scout-worker
  saturate-workers-and-gas-commands
  translate-bot-actions->sc2-raw-commands
  get-last-bot-action-rejects
@@ -1167,6 +1171,46 @@
           (oracle-stasis-ward 2505 #f)
           (build-stasis-trap 2505 #f)
           (build-interceptors 1042 #t)
+          (overlord-generate-creep 1882 #t)
+          (generate-creep 1882 #f)
+          (time-warp 2244 #t)
+          (nexus-mass-recall 3757 #f)
+          (mothership-mass-recall 2368 #t)
+          (nexus-energy-recharge 4126 #t)
+          (energy-recharge 4126 #f)
+          (shield-battery-recharge 4113 #t)
+          (shield-battery-restore 4113 #f)
+          (shield-battery-restore-legacy 3751 #t)
+          (bunker-load 407 #t)
+          (bunker-unload 408 #t)
+          (nydus-load 1437 #t)
+          (nydus-unload 1438 #t)
+          (nydus-worm-load 2370 #t)
+          (nydus-worm-unload 2371 #t)
+          (effect-repair 316 #t)
+          (repair-scv 316 #f)
+          (salvage-bunker 32 #f)
+          (spine-crawler-uproot 1725 #t)
+          (spine-crawler-root 1729 #t)
+          (spore-crawler-uproot 1727 #t)
+          (spore-crawler-root 1731 #t)
+          (uproot 3681 #t)
+          (root 3680 #t)
+          (baneling-explode 42 #t)
+          (widow-mine-attack 2099 #t)
+          (widow-mine-retarget 2099 #f)
+          (spawn-locusts-flying 2704 #t)
+          (swarm-host-spawn-locusts 2704 #f)
+          (locust-swoop 2706 #t)
+          (cancel-adept-phase-shift 2594 #t)
+          (cancel-phase-shift 2594 #f)
+          (cancel-adept-shade 2546 #t)
+          (cancel-build 314 #f)
+          (cancel-building 314 #f)
+          (shadow-stride 2700 #t)
+          (morph-observer-mode 3739 #t)
+          (morph-overseer-mode 3743 #t)
+          (morph-oversight-mode 3745 #t)
           ;; Research Abilities
           (research-zergling-movementspeed 1253 #t)
           (research-metabolic-boost 1253 #f)
@@ -1622,7 +1666,8 @@
   (with-symbol-cache SPELL-ABILITY-CACHE spell-sym
     (define norm (normalize-sc2-name->symbol spell-sym))
     (or (hash-ref SC2-ABILITY-SYM->ID norm #f)
-        (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "effect-~a" norm)) #f))))
+        (hash-ref SC2-ABILITY-SYM->ID (string->symbol (format "effect-~a" norm)) #f)
+        (hash-ref SC2-SPELL-ABILITY-IDS norm #f))))
 
 (define (upgrade-symbol->sc2-id upg-sym [default 0])
   (hash-ref SC2-UPGRADE-SYM->ID (normalize-sc2-name->symbol upg-sym) default))
@@ -3692,6 +3737,100 @@
                           (* 0.002 (if (= mc 0) 1500 mc))))
                      safe-live-mins)))])]))
 
+(define (worker-carrying-cargo? w)
+  (cond
+    [(sc2-unit? w)
+     (or (ormap (lambda (bid) (memv bid '(271 272 273 274 275 276)))
+                (sc2-unit-buff-ids w))
+         (and (pair? (sc2-unit-orders w))
+              (let* ([o (first (sc2-unit-orders w))]
+                     [ab (sc2-unit-order-ability-id o)]
+                     [csym (sc2-canonical-order-ability ab)])
+                (or (memq csym '(harvest-return harvest-return-drone harvest-return-scv harvest-return-probe))
+                    (memv ab '(296 299 1184 3667))))))]
+    [(hash? w)
+     (or (eq? (hash-ref w 'carrying-cargo? #f) #t)
+         (eq? (hash-ref w 'has-cargo? #f) #t)
+         (ormap (lambda (bid) (memv bid '(271 272 273 274 275 276)))
+                (hash-ref w 'buff-ids '()))
+         (memq (hash-ref w 'order-ability #f)
+               '(harvest-return harvest-return-drone harvest-return-scv harvest-return-probe)))]
+    [else #f]))
+
+(define (pick-far-patch-scout-worker workers townhalls mineral-patches)
+  (define (u-xy u)
+    (cond
+      [(sc2-unit? u)
+       (define p (sc2-unit-pos u))
+       (values (any-point-x p) (if (sc2-point3d? p) (sc2-point3d-y p) (if (sc2-point2d? p) (sc2-point2d-y p) 0.0)))]
+      [(hash? u)
+       (values (exact->inexact (hash-ref u 'x 0.0))
+               (exact->inexact (hash-ref u 'y 0.0)))]
+      [else (values 0.0 0.0)]))
+  (define (u-tag u)
+    (cond
+      [(sc2-unit? u) (sc2-unit-tag u)]
+      [(hash? u) (hash-ref u 'tag (hash-ref u 'id 0))]
+      [else 0]))
+  (define (u-target-tag u)
+    (cond
+      [(sc2-unit? u)
+       (define os (sc2-unit-orders u))
+       (if (pair? os) (sc2-unit-order-target-unit-tag (first os)) 0)]
+      [(hash? u) (hash-ref u 'order-target-tag 0)]
+      [else 0]))
+  (define (nearest-th-dist x y)
+    (if (null? townhalls)
+        9.0
+        (for/fold ([bd +inf.0]) ([th (in-list townhalls)])
+          (define-values (tx ty) (u-xy th))
+          (min bd (pt-dist x y tx ty)))))
+  (cond
+    [(or (not (list? workers)) (null? workers)) #f]
+    [else
+     (define clean (filter (lambda (w) (not (worker-carrying-cargo? w))) workers))
+     (define cand-workers (if (pair? clean) clean workers))
+     (define scored-patches
+       (for/list ([m (in-list (if (list? mineral-patches) mineral-patches '()))])
+         (define-values (mx my) (u-xy m))
+         (list m (u-tag m) mx my (nearest-th-dist mx my))))
+     (define in-band-patches
+       (filter (lambda (p) (<= 6.5 (fifth p) 13.5)) scored-patches))
+     (define far-patches
+       (cond
+         [(pair? in-band-patches)
+          (define max-d (apply max (map fifth in-band-patches)))
+          (define outer (filter (lambda (p) (>= (fifth p) (- max-d 0.75))) in-band-patches))
+          (if (pair? outer) outer in-band-patches)]
+         [(pair? scored-patches)
+          (define max-d (apply max (map fifth scored-patches)))
+          (filter (lambda (p) (>= (fifth p) (- max-d 0.75))) scored-patches)]
+         [else '()]))
+     (define far-patch-tags (list->seteqv (map second far-patches)))
+     (define-values (best-w _best-score)
+       (for/fold ([bw #f] [bsc -inf.0]) ([w (in-list cand-workers)])
+         (define-values (wx wy) (u-xy w))
+         (define wtgt (u-target-tag w))
+         (define th-d (nearest-th-dist wx wy))
+         (define min-far-d
+           (if (null? far-patches)
+               th-d
+               (for/fold ([md +inf.0]) ([p (in-list far-patches)])
+                 (min md (pt-dist wx wy (third p) (fourth p))))))
+         (define on-far-tag? (and (> wtgt 0) (set-member? far-patch-tags wtgt)))
+         (define near-far-patch? (and (pair? far-patches) (<= min-far-d 2.5)))
+         (define in-far-band? (<= 6.5 th-d 13.5))
+         ;; Higher score is better: mining/near a far patch beats inner patch; within band [6.5,13.5] farther beats closer.
+         (define sc
+           (+ (if on-far-tag? 1000.0 0.0)
+              (if near-far-patch? (- 400.0 (* 10.0 min-far-d)) 0.0)
+              (if in-far-band? (* 5.0 th-d) (- th-d))
+              (if (pair? far-patches) (- (* 2.0 min-far-d)) 0.0)))
+         (if (or (not bw) (> sc bsc))
+             (values w sc)
+             (values bw bsc))))
+     best-w]))
+
 (define SC2-WARPGATE-LAST-LOOP (box 0))
 (define SC2-WARPGATE-COOLDOWN-UNTIL (make-hasheqv))
 (define SC2-WORKER-BUILD-ORDER-START (make-hasheqv))
@@ -4619,10 +4758,25 @@
   (define mineral-patch-records
     (for/list ([m (in-list mineral-fields)])
       (define mp (sc2-unit-pos m))
+      (define mtype (sc2-unit-unit-type m))
       (hash 'id (sc2-unit-tag m)
+            'type (sc2-id->unit-symbol mtype 'mineral-field)
+            'unit-type-id mtype
             'x (sc2-point3d-x mp)
             'y (sc2-point3d-y mp)
             'minerals (sc2-unit-mineral-contents m))))
+
+  (define geyser-records
+    (for/list ([u (in-list live-resource-units)]
+               #:when (sc2-unit-is-vespene-geyser? u))
+      (define gp (sc2-unit-pos u))
+      (define gtype (sc2-unit-unit-type u))
+      (hash 'id (sc2-unit-tag u)
+            'type (sc2-id->unit-symbol gtype 'vespene-geyser)
+            'unit-type-id gtype
+            'x (sc2-point3d-x gp)
+            'y (sc2-point3d-y gp)
+            'vespene-contents (sc2-unit-vespene-contents u))))
 
   ;; Harvester & depletion metrics (deduct stasis-frozen workers from active mineral-harvesters
   ;; so the economy layer immediately trains/transfers replacement workers during a 21.4s stasis freeze!)
@@ -4728,6 +4882,7 @@
         'enemy-fourth-y enemy-fourth-y
         'mineral-patch-id closest-mineral-patch-id
         'mineral-patches mineral-patch-records
+        'geysers geyser-records
         'ally-units ally-unit-records
         'ally-creep-tumors ally-creep-tumor-records
         'ally-buildings ally-bldg-records
@@ -6605,10 +6760,21 @@
 ;; Exact Frame-0 Pro Worker Split (`4x2` close patches + `4x1` far patches):
 ;; Solves exact minimum-sum-Euclidean-distance worker-to-mineral-slot bipartite matching
 ;; and emits `<= 8` coalesced `HARVEST_GATHER (3666)` wire commands on the opening frame.
+(define SC2-WORKER-ASSIGN-LAST-LOOP (box 0))
+(define SC2-WORKER-PATCH-ASSIGNMENT (make-hasheqv))
+(define SC2-WORKER-ANTIBOUNCE-COOLDOWN (make-hasheqv))
+(define SC2-WORKER-SPEEDMINE-COOLDOWN (make-hasheqv))
+
 (define (frame0-pro-worker-split-commands obs)
   (cond
     [(not (sc2-observation? obs)) '()]
     [else
+     (define obs-loop (sc2-observation-game-loop obs))
+     (when (or (<= obs-loop 8) (< obs-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP)))
+       (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
+       (hash-clear! SC2-WORKER-ANTIBOUNCE-COOLDOWN)
+       (hash-clear! SC2-WORKER-SPEEDMINE-COOLDOWN))
+     (set-box! SC2-WORKER-ASSIGN-LAST-LOOP obs-loop)
      (define units (sc2-observation-units obs))
      (define self-units
        (filter (lambda (u) (and (= (sc2-unit-alliance u) 1)
@@ -6738,13 +6904,15 @@
            (for ([i (in-range n)])
              (define wtag (sc2-unit-tag (vector-ref workers-vec i)))
              (define ptag (sc2-unit-tag (vector-ref slots-vec (vector-ref assign-vec i))))
+             (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag ptag)
              (hash-set! by-patch ptag (cons wtag (hash-ref by-patch ptag '()))))
            (filter-map
             (lambda (m)
               (define ptag (sc2-unit-tag m))
               (define wtags (reverse (hash-ref by-patch ptag '())))
               (and (pair? wtags)
-                   (sc2-raw-unit-command 3666 #f ptag wtags #f)))
+                   (mark-urgent-survival-cmd!
+                    (sc2-raw-unit-command 3666 #f ptag wtags #f))))
             base-mins)])])]))
 
 (define SC2-WORKER-TRANSFER-LAST-LOOP (box 0))
@@ -6760,6 +6928,11 @@
   (when (or (<= cur-loop 8) (< cur-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP)))
     (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL))
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
+  (when (< cur-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP))
+    (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
+    (hash-clear! SC2-WORKER-ANTIBOUNCE-COOLDOWN)
+    (hash-clear! SC2-WORKER-SPEEDMINE-COOLDOWN))
+  (set-box! SC2-WORKER-ASSIGN-LAST-LOOP cur-loop)
 
   (define pc (sc2-observation-player-common obs))
   (define cur-min (sc2-player-common-minerals pc))
@@ -6872,8 +7045,56 @@
     (set! cmds
           (cons (sc2-raw-unit-command 3666 #f target-tag (list (sc2-unit-tag w)) #f)
                 cmds)))
+  (define (worker-carrying-gas? w)
+    (or (ormap (lambda (bid) (memv bid '(273 274 275)))
+               (sc2-unit-buff-ids w))
+        (ormap (lambda (o)
+                 (and (eq? (sc2-canonical-order-ability (sc2-unit-order-ability-id o))
+                           'harvest-return)
+                      (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o))))
+               (sc2-unit-orders w))))
+  (define (worker-carrying-mineral? w)
+    (and (not (worker-carrying-gas? w))
+         (or (ormap (lambda (bid) (memv bid '(271 272)))
+                    (sc2-unit-buff-ids w))
+             (ormap (lambda (o)
+                      (eq? (sc2-canonical-order-ability (sc2-unit-order-ability-id o))
+                           'harvest-return))
+                    (sc2-unit-orders w)))))
+  (define owned-min-by-tag
+    (for/hasheqv ([m (in-list owned-base-minerals)])
+      (values (sc2-unit-tag m) m)))
+  (define min-th-dist
+    (for/hasheqv ([m (in-list owned-base-minerals)])
+      (define mp (sc2-unit-pos m))
+      (define mx (sc2-point3d-x mp))
+      (define my (sc2-point3d-y mp))
+      (define th-d
+        (if (null? ready-townhalls)
+            0.0
+            (apply min
+                   (map (lambda (th)
+                          (define tp (sc2-unit-pos th))
+                          (pt-dist (sc2-point3d-x tp) (sc2-point3d-y tp) mx my))
+                        ready-townhalls))))
+      (values (sc2-unit-tag m) th-d)))
+  (define patch-worker-counts (make-hasheqv))
+  (for ([w (in-list workers)])
+    (define wtag (sc2-unit-tag w))
+    (define ord-tgt
+      (for/first ([o (in-list (sc2-unit-orders w))]
+                  #:when (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
+                              (hash-has-key? owned-min-by-tag (sc2-unit-order-target-unit-tag o))))
+        (sc2-unit-order-target-unit-tag o)))
+    (define eff-tgt
+      (or ord-tgt
+          (let ([a (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)])
+            (and a (hash-has-key? owned-min-by-tag a) a))))
+    (when eff-tgt
+      (hash-set! patch-worker-counts eff-tgt (add1 (hash-ref patch-worker-counts eff-tgt 0)))))
 
-  ;; 1. Send idle workers to mineral patches at under-saturated owned TownHalls first, or closest owned mineral patch;
+  ;; 1. Send idle workers to mineral patches at under-saturated owned TownHalls first
+  ;;    using capacity-aware per-patch pairing (<= 2 workers/patch, close patches first);
   ;;    if no owned mineral patches exist, cancel any expired stuck build order via Stop (3665).
   (cond
     [(and (not (null? idle-workers)) (not (null? owned-base-minerals)))
@@ -6881,16 +7102,34 @@
        (if (not (null? under-townhalls))
            (minerals-near-townhall (first under-townhalls))
            owned-base-minerals))
+     (define sorted-cand-mins
+       (sort candidate-mins < #:key (lambda (m) (hash-ref min-th-dist (sc2-unit-tag m) 999.0))))
      (for ([w (in-list idle-workers)]
            #:when (not (worker-returning-cargo? w)))
+       (define wtag (sc2-unit-tag w))
        (define wp (sc2-unit-pos w))
+       (define wx (sc2-point3d-x wp))
+       (define wy (sc2-point3d-y wp))
+       (define under2-mins
+         (filter (lambda (m) (< (hash-ref patch-worker-counts (sc2-unit-tag m) 0) 2))
+                 sorted-cand-mins))
        (define best-min
-         (argmin (lambda (m)
-                   (define mp (sc2-unit-pos m))
-                   (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
-                            (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                 candidate-mins))
-       (issue-gather! w (sc2-unit-tag best-min)))]
+         (if (pair? under2-mins)
+             (argmin (lambda (m)
+                       (define mtag (sc2-unit-tag m))
+                       (define mp (sc2-unit-pos m))
+                       (+ (* 100.0 (exact->inexact (hash-ref patch-worker-counts mtag 0)))
+                          (* 2.0 (hash-ref min-th-dist mtag 0.0))
+                          (* 0.1 (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
+                     under2-mins)
+             (argmin (lambda (m)
+                       (define mp (sc2-unit-pos m))
+                       (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                     sorted-cand-mins)))
+       (define bmtag (sc2-unit-tag best-min))
+       (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
+       (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
+       (issue-gather! w bmtag))]
     [(and (not (null? idle-workers)) (null? owned-base-minerals))
      (for ([w (in-list idle-workers)]
            #:when (worker-build-order-stuck? w cur-loop))
@@ -6898,6 +7137,35 @@
        (set! cmds
              (cons (sc2-raw-unit-command 3665 #f 0 (list (sc2-unit-tag w)) #f)
                    cmds)))])
+
+  ;; 1b. Opening Anti-Bounce Close-Patch Lock (`cur-loop <= 336`):
+  ;;     Prevent SC2 auto-bounce from kicking Frame-0 workers off their assigned close patch.
+  (when (and (> cur-loop 4) (<= cur-loop 336) (not (null? owned-base-minerals)))
+    (for ([w (in-list workers)]
+          #:when (let ([wtag (sc2-unit-tag w)])
+                   (and (not (set-member? commanded-this-frame wtag))
+                        (not (worker-returning-cargo? w))
+                        (>= cur-loop (hash-ref SC2-WORKER-ANTIBOUNCE-COOLDOWN wtag 0)))))
+      (define wtag (sc2-unit-tag w))
+      (define assigned-ptag (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f))
+      (when (and assigned-ptag (hash-has-key? owned-min-by-tag assigned-ptag))
+        (define active-tgt
+          (for/first ([o (in-list (sc2-unit-orders w))]
+                      #:when (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666)))
+            (sc2-unit-order-target-unit-tag o)))
+        (when (and active-tgt
+                   (> active-tgt 0)
+                   (not (= active-tgt assigned-ptag))
+                   (hash-has-key? owned-min-by-tag active-tgt)
+                   (or (< (hash-ref min-th-dist assigned-ptag 999.0)
+                          (- (hash-ref min-th-dist active-tgt 0.0) 0.25))
+                       (> (hash-ref patch-worker-counts active-tgt 0) 2)))
+          (hash-set! SC2-WORKER-ANTIBOUNCE-COOLDOWN wtag (+ cur-loop 12))
+          (set-add! commanded-this-frame wtag)
+          (set! cmds
+                (cons (mark-urgent-survival-cmd!
+                       (sc2-raw-unit-command 3666 #f assigned-ptag (list wtag) #f))
+                      cmds))))))
 
   ;; 2. Assign 1 worker per step to under-saturated gas building, unified with 350G/600G float caps
   ;;    and graduated mineral-worker floor (0 gas -> >= 6 min workers, 1 gas -> >= 8, >= 2 gas -> >= 10).
@@ -7095,6 +7363,86 @@
         (set! cmds
               (cons (sc2-raw-unit-command 3666 #f (sc2-unit-tag best-m) (list (sc2-unit-tag u)) #f)
                     cmds)))))
+
+  ;; 4b. Deceleration-Bypass Speed-Mining (`8 < cur-loop <= 2688`):
+  ;;     At most 2 workers per step, >= 24-loop cooldown, skipped during worker rush and never on gas workers.
+  (when (and (> cur-loop 8)
+             (<= cur-loop 2688)
+             (not worker-rush-evacuate-gas?)
+             (not (null? ready-townhalls))
+             (>= (length owned-base-minerals) 4))
+    (define speedmine-count 0)
+    (for ([w (in-list workers)]
+          #:break (>= speedmine-count 2)
+          #:when (let ([wtag (sc2-unit-tag w)]
+                       [ords (sc2-unit-orders w)])
+                   (and (not (set-member? commanded-this-frame wtag))
+                        (>= cur-loop (hash-ref SC2-WORKER-SPEEDMINE-COOLDOWN wtag 0))
+                        (= (length ords) 1)
+                        (not (worker-carrying-gas? w)))))
+      (define wtag (sc2-unit-tag w))
+      (define wp (sc2-unit-pos w))
+      (define wx (sc2-point3d-x wp))
+      (define wy (sc2-point3d-y wp))
+      (define ord0 (first (sc2-unit-orders w)))
+      (define ab0 (sc2-unit-order-ability-id ord0))
+      (define tgt0 (sc2-unit-order-target-unit-tag ord0))
+      (cond
+        [(worker-carrying-mineral? w)
+         (define near-th
+           (argmin (lambda (th)
+                     (define tp (sc2-unit-pos th))
+                     (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp)))
+                   ready-townhalls))
+         (define tp (sc2-unit-pos near-th))
+         (define thx (sc2-point3d-x tp))
+         (define thy (sc2-point3d-y tp))
+         (define d-th (pt-dist wx wy thx thy))
+         (when (and (>= d-th 3.4) (<= d-th 5.2))
+           (define src-m
+             (or (let ([atag (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)])
+                   (and atag (hash-ref owned-min-by-tag atag #f)))
+                 (let ([local-ms (minerals-near-townhall near-th)])
+                   (and (pair? local-ms)
+                        (argmin (lambda (m)
+                                  (define mp (sc2-unit-pos m))
+                                  (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                                local-ms)))))
+           (when src-m
+             (define mp (sc2-unit-pos src-m))
+             (define-values (_ax _ay ret-x ret-y)
+               (compute-pro-speed-mining-contact-point (sc2-point3d-x mp) (sc2-point3d-y mp) thx thy))
+             (when (>= (pt-dist wx wy ret-x ret-y) 0.45)
+               (hash-set! SC2-WORKER-SPEEDMINE-COOLDOWN wtag (+ cur-loop 24))
+               (set-add! commanded-this-frame wtag)
+               (set! speedmine-count (add1 speedmine-count))
+               (define move-cmd (sc2-raw-unit-command 16 (sc2-point2d ret-x ret-y) 0 (list wtag) #f))
+               (define ret-cmd (sc2-raw-unit-command 3667 #f 0 (list wtag) #t))
+               (set! cmds (cons ret-cmd (cons move-cmd cmds))))))]
+        [(and (memv ab0 '(166 295 298 1183 3666))
+              (hash-has-key? owned-min-by-tag tgt0)
+              (<= (hash-ref patch-worker-counts tgt0 0) 2))
+         (define m (hash-ref owned-min-by-tag tgt0))
+         (define mp (sc2-unit-pos m))
+         (define mx (sc2-point3d-x mp))
+         (define my (sc2-point3d-y mp))
+         (define d-min (pt-dist wx wy mx my))
+         (when (and (>= d-min 1.3) (<= d-min 2.8))
+           (define near-th
+             (argmin (lambda (th)
+                       (define tp (sc2-unit-pos th))
+                       (pt-dist mx my (sc2-point3d-x tp) (sc2-point3d-y tp)))
+                     ready-townhalls))
+           (define tp (sc2-unit-pos near-th))
+           (define-values (app-x app-y _rx _ry)
+             (compute-pro-speed-mining-contact-point mx my (sc2-point3d-x tp) (sc2-point3d-y tp)))
+           (when (>= (pt-dist wx wy app-x app-y) 0.35)
+             (hash-set! SC2-WORKER-SPEEDMINE-COOLDOWN wtag (+ cur-loop 24))
+             (set-add! commanded-this-frame wtag)
+             (set! speedmine-count (add1 speedmine-count))
+             (define move-cmd (sc2-raw-unit-command 16 (sc2-point2d app-x app-y) 0 (list wtag) #f))
+             (define gath-cmd (sc2-raw-unit-command 3666 #f tgt0 (list wtag) #t))
+             (set! cmds (cons gath-cmd (cons move-cmd cmds)))))])))
 
   (reverse cmds))
 
@@ -7745,14 +8093,6 @@
                  #:when (sc2-unit-is-gas-building? u))
       (sc2-unit-tag u)))
 
-  (define (worker-carrying-cargo? w)
-    (or (ormap (lambda (bid) (memv bid '(271 272 273 274 275)))
-               (sc2-unit-buff-ids w))
-        (and (pair? (sc2-unit-orders w))
-             (eq? (sc2-canonical-order-ability
-                   (sc2-unit-order-ability-id (first (sc2-unit-orders w))))
-                  'harvest-return))))
-
   (define (worker-is-gas-harvester? w)
     (ormap (lambda (o)
              (set-member? gas-bldg-tags-set (sc2-unit-order-target-unit-tag o)))
@@ -7775,7 +8115,7 @@
                      (or (<= (pt-dist home-x home-y wx wy) 28.0)
                          (<= (pt-dist tx ty wx wy) 24.0))))
               workers))
-    (define pool
+    (define raw-pool
       (if (not (null? non-scout-avail))
           non-scout-avail
           (filter (lambda (w)
@@ -7787,6 +8127,10 @@
                          (not (and (hash? role-leases)
                                    (unit-leased-above? role-leases wtag 'door-guard cur-loop)))))
                   workers)))
+    (define non-carrying-pool
+      (filter (lambda (w) (not (worker-carrying-cargo? w))) raw-pool))
+    (define pool
+      (if (null? non-carrying-pool) raw-pool non-carrying-pool))
     (if (null? pool)
         #f
         (let ([chosen
@@ -7795,7 +8139,7 @@
                           (define wp (sc2-unit-pos w))
                           (+ (pt-dist tx ty (sc2-point3d-x wp) (sc2-point3d-y wp))
                              (if (null? (sc2-unit-orders w)) 0.0 4.0)
-                             (if (worker-carrying-cargo? w) 25.0 0.0)
+                             (if (worker-carrying-cargo? w) 5000.0 0.0)
                              (if (worker-is-gas-harvester? w) 12.0 0.0)))
                         pool))])
           (record-worker-used! chosen #t)
@@ -8249,6 +8593,8 @@
     (and (pair? a)
          (memq (car a)
                '(build build-nydus-worm expand resume-halted-building
+                 push-probe-with-building cancel cancel-building salvage salvage-bunker bunker-load
+                 baneling-explode
                  worker-scout overlord-scout periodic-scout scout-sector
                  mineral-harass worker-harass harass-workers
                  patrol-block-expansion burrow-block clear-expansion-block
@@ -8864,7 +9210,7 @@
           (when (not (null? tag-list))
             (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f)))])]
 
-      [(list 'focus-fire uid target-id rest ...)
+      [(list (or 'focus-fire 'cannon-focus-fire) uid target-id rest ...)
        #:when (and (or (exact-integer? uid) (list? uid)) (exact-integer? target-id))
        (cond
          [(or (not enforce-live-enemy-tag-filter?)
@@ -9016,6 +9362,206 @@
       [(list (or 'cancel 'cancel-building) uid)
        #:when (exact-integer? uid)
        (emit! (sc2-raw-unit-command 314 #f 0 (list uid) #f))]
+
+      [(list 'patrol uid raw-x raw-y)
+       (when (and (real? raw-x) (real? raw-y))
+         (define tx (scale-bot-coord-to-world raw-x home-x))
+         (define ty (scale-bot-coord-to-world raw-y home-y))
+         (define target-pt (sc2-point2d tx ty))
+         (define tag-list (claim-combat-tags-for-order! uid 17 target-pt 0))
+         (when (not (null? tag-list))
+           (emit! (sc2-raw-unit-command 17 target-pt 0 tag-list #f))))]
+
+      [(list 'baneling-explode raw-uid)
+       (define blist
+         (remove-duplicates
+          (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                  (if (list? raw-uid) raw-uid (list raw-uid)))))
+       (when (not (null? blist))
+         (for ([t (in-list blist)])
+           (set-add! commanded-combat-tags t))
+         (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 42 #f 0 blist #f))))]
+
+      [(list 'widow-mine-retarget uid target-id)
+       (when (and (exact-integer? uid) (> uid 0)
+                  (exact-integer? target-id) (> target-id 0)
+                  (or (not enforce-live-enemy-tag-filter?)
+                      (set-member? live-visible-enemy-tags target-id)))
+         (set-add! commanded-combat-tags uid)
+         (unless (unit-already-executing-order? uid 2099 #f target-id)
+           (emit! (sc2-raw-unit-command 2099 #f target-id (list uid) #f))))]
+
+      [(list 'purification-nova uid raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0) (real? raw-x) (real? raw-y))
+         (define u (hash-ref self-unit-by-tag uid #f))
+         (define phased? (and u (= (sc2-unit-unit-type u) 733)))
+         (define ab-id (if phased? 16 2346))
+         (define tx (scale-bot-coord-to-world raw-x home-x))
+         (define ty (scale-bot-coord-to-world raw-y home-y))
+         (define target-pt (sc2-point2d tx ty))
+         (unless phased?
+           (set-add! commanded-combat-tags uid))
+         (unless (unit-already-executing-order? uid ab-id target-pt 0)
+           (emit! (sc2-raw-unit-command ab-id target-pt 0 (list uid) #f))))]
+
+      [(list 'locust-swoop uid raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0) (real? raw-x) (real? raw-y))
+         (define tx (scale-bot-coord-to-world raw-x home-x))
+         (define ty (scale-bot-coord-to-world raw-y home-y))
+         (define target-pt (sc2-point2d tx ty))
+         (set-add! commanded-combat-tags uid)
+         (unless (unit-already-executing-order? uid 2706 target-pt 0)
+           (emit! (sc2-raw-unit-command 2706 target-pt 0 (list uid) #f))))]
+
+      [(list (or 'salvage 'salvage-bunker) bid)
+       (when (and (exact-integer? bid) (> bid 0))
+         (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 32 #f 0 (list bid) #f))))]
+
+      [(list 'repair scv-id target-id)
+       (when (and (exact-integer? scv-id) (> scv-id 0)
+                  (exact-integer? target-id) (> target-id 0))
+         (record-worker-used! scv-id)
+         (unless (unit-already-executing-order? scv-id 3685 #f target-id)
+           (emit! (sc2-raw-unit-command 3685 #f target-id (list scv-id) #f))))]
+
+      [(list (or 'shield-battery-restore 'shield-battery-recharge) bat-id target-id)
+       (when (and (exact-integer? bat-id) (> bat-id 0)
+                  (exact-integer? target-id) (> target-id 0))
+         (unless (unit-already-executing-order? bat-id 4113 #f target-id)
+           (emit! (sc2-raw-unit-command 4113 #f target-id (list bat-id) #f))))]
+
+      [(list 'bunker-load bid uid)
+       (when (and (exact-integer? bid) (> bid 0)
+                  (exact-integer? uid) (> uid 0)
+                  (not (= bid uid)))
+         (record-unit-used! uid)
+         (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 407 #f uid (list bid) #f))))]
+
+      [(list 'bunker-unload bid _ ...)
+       (when (and (exact-integer? bid) (> bid 0))
+         (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 408 #f 0 (list bid) #f))))]
+
+      [(list 'nydus-load net-id uid)
+       (when (and (exact-integer? net-id) (> net-id 0)
+                  (exact-integer? uid) (> uid 0)
+                  (not (= net-id uid)))
+         (define net-u (hash-ref self-unit-by-tag net-id #f))
+         (define ab-id (if (and net-u (= (sc2-unit-unit-type net-u) 142)) 2370 1437))
+         (record-unit-used! uid)
+         (emit! (sc2-raw-unit-command ab-id #f uid (list net-id) #f)))]
+
+      [(list 'nydus-unload net-id _ ...)
+       (when (and (exact-integer? net-id) (> net-id 0))
+         (define net-u (hash-ref self-unit-by-tag net-id #f))
+         (define ab-id (if (and net-u (= (sc2-unit-unit-type net-u) 142)) 2371 1438))
+         (emit! (sc2-raw-unit-command ab-id #f 0 (list net-id) #f)))]
+
+      [(or (list* 'load-unit tr-id ptag _rest)
+           (list* 'load-transport tr-id ptag _rest))
+       (when (and (exact-integer? tr-id) (> tr-id 0)
+                  (exact-integer? ptag) (> ptag 0)
+                  (not (= ptag tr-id)))
+         (record-unit-used! tr-id)
+         (record-unit-used! ptag)
+         (emit! (sc2-raw-unit-command 3668 #f ptag (list tr-id) #f)))]
+
+      [(list* (or 'unload-unit 'unload-all-at) tr-id rest)
+       (when (and (exact-integer? tr-id) (> tr-id 0))
+         (record-unit-used! tr-id)
+         (define tr-u (hash-ref self-unit-by-tag tr-id #f))
+         (define tr-utype (if tr-u (sc2-unit-unit-type tr-u) 0))
+         (define unload-ab-id
+           (cond
+             [(= tr-utype 54) 396]
+             [(or (= tr-utype 81) (= tr-utype 136)) 913]
+             [(= tr-utype 893) 1408]
+             [else 3669]))
+         (if (and (>= (length rest) 2) (real? (first rest)) (real? (second rest)))
+             (emit! (sc2-raw-unit-command
+                     unload-ab-id
+                     (sc2-point2d (scale-bot-coord-to-world (first rest) home-x)
+                                  (scale-bot-coord-to-world (second rest) home-y))
+                     0 (list tr-id) #f))
+             (emit! (sc2-raw-unit-command unload-ab-id #f tr-id (list tr-id) #f))))]
+
+      [(list 'spine-crawler-uproot uid)
+       (when (and (exact-integer? uid) (> uid 0))
+         (emit! (sc2-raw-unit-command 1725 #f 0 (list uid) #f)))]
+
+      [(list 'spore-crawler-uproot uid)
+       (when (and (exact-integer? uid) (> uid 0))
+         (emit! (sc2-raw-unit-command 1727 #f 0 (list uid) #f)))]
+
+      [(list 'uproot uid)
+       (when (and (exact-integer? uid) (> uid 0))
+         (define u (hash-ref self-unit-by-tag uid #f))
+         (define ab-id
+           (case (and u (sc2-unit-unit-type u))
+             [(98 139) 1725]
+             [(99 140) 1727]
+             [else 3681]))
+         (emit! (sc2-raw-unit-command ab-id #f 0 (list uid) #f)))]
+
+      [(list 'spine-crawler-root uid raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0) (real? raw-x) (real? raw-y))
+         (emit! (sc2-raw-unit-command
+                 1729
+                 (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                              (scale-bot-coord-to-world raw-y home-y))
+                 0 (list uid) #f)))]
+
+      [(list 'spore-crawler-root uid raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0) (real? raw-x) (real? raw-y))
+         (emit! (sc2-raw-unit-command
+                 1731
+                 (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                              (scale-bot-coord-to-world raw-y home-y))
+                 0 (list uid) #f)))]
+
+      [(list 'root uid raw-x raw-y)
+       (when (and (exact-integer? uid) (> uid 0) (real? raw-x) (real? raw-y))
+         (define u (hash-ref self-unit-by-tag uid #f))
+         (define ab-id
+           (case (and u (sc2-unit-unit-type u))
+             [(98 139) 1729]
+             [(99 140) 1731]
+             [else 3680]))
+         (emit! (sc2-raw-unit-command
+                 ab-id
+                 (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                              (scale-bot-coord-to-world raw-y home-y))
+                 0 (list uid) #f)))]
+
+      [(list 'push-probe-with-building pid bldg-sym raw-wx raw-wy raw-sx raw-sy)
+       (when (and (exact-integer? pid) (> pid 0)
+                  (real? raw-wx) (real? raw-wy) (real? raw-sx) (real? raw-sy))
+         (define norm (normalize-sc2-name->symbol bldg-sym))
+         (define ab-id (or (build-symbol->ability-id norm) 881))
+         (define wx (scale-bot-coord-to-world raw-wx home-x))
+         (define wy (scale-bot-coord-to-world raw-wy home-y))
+         (define sx (scale-bot-coord-to-world raw-sx home-x))
+         (define sy (scale-bot-coord-to-world raw-sy home-y))
+         (define u (hash-ref self-unit-by-tag pid #f))
+         (unless (or (set-member? used-worker-tags pid)
+                     (set-member? builder-worker-tags pid)
+                     (and u (worker-has-build-order? u)))
+           (record-worker-used! pid)
+           (set-add! builder-worker-tags pid)
+           (record-step-built-structure! norm)
+           (define bpt (sc2-point2d wx wy))
+           (reserve-step-build-pt! bpt ab-id)
+           (define d-bldg
+             (if u
+                 (let ([up (sc2-unit-pos u)])
+                   (pt-dist wx wy (sc2-point3d-x up) (sc2-point3d-y up)))
+                 0.0))
+           (cond
+             [(< d-bldg 1.5)
+              (emit! (mark-urgent-survival-cmd!
+                      (sc2-raw-unit-command 16 (sc2-point2d sx sy) 0 (list pid) #f)))
+              (emit! (sc2-raw-unit-command ab-id bpt 0 (list pid) #t))]
+             [else
+              (emit! (sc2-raw-unit-command ab-id bpt 0 (list pid) #f))])))]
 
       ;; 7. Queen Inject Larva: `(inject-larva <queen-id> <hatch-id>)`
       [(list 'inject-larva queen-id hatch-id)
@@ -9291,6 +9837,7 @@
        (define strike-wids '())
        (for ([wid (in-list wlist)])
          (record-worker-used! wid)
+         (set-add! commanded-combat-tags wid)
          (define-values (wx wy)
            (cond
              [(hash-ref self-unit-by-tag wid #f)
@@ -9306,11 +9853,14 @@
              (set! drill-wids (cons wid drill-wids))
              (set! strike-wids (cons wid strike-wids))))
        (when (not (null? drill-wids))
-         (emit! (sc2-raw-unit-command 3666 #f eff-patch-id (reverse drill-wids) #f)))
+         (emit! (mark-urgent-survival-cmd!
+                 (sc2-raw-unit-command 3666 #f eff-patch-id (reverse drill-wids) #f))))
        (when (not (null? strike-wids))
          (if (and (exact-integer? target-id) (> target-id 0))
-             (emit! (sc2-raw-unit-command 23 #f target-id (reverse strike-wids) #f))
-             (emit! (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 (reverse strike-wids) #f))))]
+             (emit! (mark-urgent-survival-cmd!
+                     (sc2-raw-unit-command 23 #f target-id (reverse strike-wids) #f)))
+             (emit! (mark-urgent-survival-cmd!
+                     (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 (reverse strike-wids) #f)))))]
 
       [(list 'harvest-mineral wid patch-id)
        (define wlist
@@ -9598,8 +10148,28 @@
                  'trigger-stasis-ward-single-unit
                  'counter-enemy-worker-drill
                  'stasis-worker-stoppage-compensation
-                 'return-workers-to-gather) _ ...)
+                 'return-workers-to-gather
+                 'printf-high-ground-vision-probe
+                 'printf-lg-pylon-hg-cannon
+                 'printf-rewall-1hex-back
+                 'printf-3pylon-ramp-block
+                 'printf-assimilator-wedge
+                 'printf-robo-immortal-prism-contain
+                 'printf-stargate-tempest-battery-contain
+                 'printf-battery-contain-leash
+                 'printf-prism-contain-pickup
+                 'printf-multi-probe-chase
+                 'printf-abort-walled-cannon-pull) _ ...)
        (void)]
+
+      [(list 'swap-bunker-builder-scv low-scv fresh-scv bnk-id)
+       (when (and (exact-integer? low-scv) (> low-scv 0))
+         (record-worker-used! low-scv)
+         (emit! (sc2-raw-unit-command 16 (sc2-point2d home-x home-y) 0 (list low-scv) #f)))
+       (when (and (exact-integer? fresh-scv) (> fresh-scv 0)
+                  (exact-integer? bnk-id) (> bnk-id 0))
+         (record-worker-used! fresh-scv)
+         (emit! (sc2-raw-unit-command 1 #f bnk-id (list fresh-scv) #f)))]
 
       [(list 'resume-halted-building scv-id bldg-id)
        (record-worker-used! scv-id)
@@ -10599,9 +11169,9 @@
 
 (define SC2-FASTER-LOOPS-PER-MINUTE 1344.0)
 (define SC2-WIRE-COALESCABLE-ABILITIES
-  (seteqv 16 17 18 23 76 171 380 388 390 556 558 1036 1042 1442 1526
-          2095 2097 2108 2110 2328 2338 2346 2375 2393
-          3661 3662 3665 3666 3667 3674 3675 3687))
+  (seteqv 16 17 18 23 42 76 171 380 388 390 556 558 1036 1042 1442 1526
+          1725 1727 1729 1731 1882 2095 2097 2108 2110 2244 2328 2338 2346 2375 2393 2706
+          3661 3662 3665 3666 3667 3674 3675 3680 3681 3687))
 
 (struct wire-apm-governor
   (target-apm
@@ -10630,10 +11200,12 @@
   (define (ab-tier ab)
     (cond
       ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & depot raise/lower
-      [(memv ab '(32 314 349 380 382 383 396 913 1408 3675 1442 3687 74 76 140 249 251 399 401
-                  1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146 2324 2338 2346 2350 2358 2375 2376 2505
-                  2542 2545 2714 3668 3669 3747 3753 3755 3757 142 3686 388 390 2095 2097 2108 2110
-                  403 405 2362 2364 556 558))
+      [(memv ab '(32 42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1882 2244
+                  2368 2370 2371 2546 2594 2706 3675 1442 3687 74 76 140 249 251 399 401
+                  1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146
+                  2324 2338 2346 2350 2358 2375 2376 2505 2542 2545 2714 3668 3669
+                  3747 3751 3753 3755 3757 4107 4113 4126 142 3686 388 390
+                  2095 2097 2108 2110 403 405 2362 2364 556 558))
        0]
       ;; P3: Routine harvest / worker rebalance
       [(memv ab '(166 167 295 296 298 299 1183 1184 3666 3667))
@@ -10647,7 +11219,11 @@
     [(framing-camera-cmd? cmd) 1]
     [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) 4]
     [(urgent-survival-cmd? cmd) 0]
-    [(sc2-raw-unit-command? cmd) (ab-tier (sc2-raw-unit-command-ability-id cmd))]
+    [(sc2-raw-unit-command? cmd)
+     (define ab (sc2-raw-unit-command-ability-id cmd))
+     (if (and (sc2-raw-unit-command-queue? cmd) (memv ab '(3666 3667)))
+         2
+         (ab-tier ab))]
     [(WireCmdNone? cmd) (ab-tier (NoTargetAbility-id (WireCmdNone-ability cmd)))]
     [(WireCmdPoint? cmd) (ab-tier (PointTargetAbility-id (WireCmdPoint-ability cmd)))]
     [(WireCmdUnit? cmd) (ab-tier (UnitTargetAbility-id (WireCmdUnit-ability cmd)))]
@@ -10827,11 +11403,19 @@
   (define rem-headroom rolling-headroom)
   (define cur-sel (wire-apm-governor-last-selected-tags gov))
   (define new-events '())
+  (define (opening-worker-split-cmd? c)
+    (and (<= cur-loop 12)
+         (sc2-raw-unit-command? c)
+         (= (sc2-raw-unit-command-ability-id c) 3666)))
+  (define (eff-cmd-tier c)
+    (if (opening-worker-split-cmd? c)
+        0
+        (wire-cmd-priority-tier c)))
   (define emitted '())
   (define emitted-set (make-hasheq))
   (define (tier-token-floor tier cmd)
     (case tier
-      [(0)  (if (urgent-survival-cmd? cmd) -4.0 -1.0)]
+      [(0)  (if (or (urgent-survival-cmd? cmd) (opening-worker-split-cmd? cmd)) -4.0 -1.0)]
       [(1)  2.0]  ;; P1 macro leaves >= 2 tokens for P0
       [(2)  4.0]  ;; P2 combat leaves >= 4 tokens for P0/P1
       [(3)  8.0]  ;; P3 harvest/lower leaves >= 8 tokens for P0/P1/P2
@@ -10894,14 +11478,14 @@
             [(sc2-raw-unit-command? chosen)
              (set! cur-sel (sc2-raw-unit-command-unit-tags chosen))
              (set-wire-apm-governor-last-selected-tags! gov cur-sel)])
-          (when (= (wire-cmd-priority-tier chosen) 2)
+          (when (= (eff-cmd-tier chosen) 2)
             (hash-set! SC2-GOV-LAST-P2-LOOP gov cur-loop))
           (hash-set! emitted-set chosen #t)
           (set! emitted (cons chosen emitted)))
         (tier-loop rest-rem (if did-emit? (add1 emitted-here) emitted-here)))))
 
   (define (cmds-for-tier tier)
-    (filter (lambda (c) (= (wire-cmd-priority-tier c) tier)) coalesced))
+    (filter (lambda (c) (= (eff-cmd-tier c) tier)) coalesced))
 
   ;; Run P0 urgent survival/spells first.
   (run-cmd-list! (cmds-for-tier 0)

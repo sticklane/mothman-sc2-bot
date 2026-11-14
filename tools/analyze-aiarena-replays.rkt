@@ -45,6 +45,8 @@
          compute-matchup-code
          parse-matchup-filter
          summarize-reports-by-matchup
+         extract-experiment-meta-from-record
+         summarize-experiments-from-telemetry
          parse-match-log-zip
          invoke-s2protocol-sidecar-summary
          analyze-single-match-forensics
@@ -597,6 +599,263 @@
           'race_rows race-rows
           'matchup_rows matchup-rows))
 
+(define (normalize-exp-id-str v)
+  (cond
+    [(or (not v) (eq? v 'null)) #f]
+    [(symbol? v)
+     (let ([s (string-trim (symbol->string v))])
+       (if (or (string=? s "") (string-ci=? s "unknown") (string-ci=? s "none")) #f s))]
+    [(string? v)
+     (let ([s (string-trim v)])
+       (if (or (string=? s "") (string-ci=? s "unknown") (string-ci=? s "none")) #f s))]
+    [else #f]))
+
+(define (parse-nonneg-spot-idx v [default 0])
+  (cond
+    [(exact-nonnegative-integer? v) v]
+    [(real? v) (max 0 (inexact->exact (truncate v)))]
+    [(string? v)
+     (let ([n (string->number (string-trim v))])
+       (if (real? n) (max 0 (inexact->exact (truncate n))) default))]
+    [else default]))
+
+(define (parse-exp-meta-from-line line)
+  (and (string? line)
+       (let ([m1 (regexp-match
+                  #px"\\[EXP:([^|\\]]+)\\|race:([^|\\]]+)\\|matchup:([^|\\]]+)\\|spot:([0-9]+):([^|\\]]+)\\|p:([0-9.]+)%\\]"
+                  line)])
+         (cond
+           [m1
+            (define exp-id (normalize-exp-id-str (list-ref m1 1)))
+            (and exp-id
+                 (hasheq 'experiment_id exp-id
+                         'race (normalize-race-short (list-ref m1 2))
+                         'matchup (string-trim (list-ref m1 3))
+                         'experiment_spot_idx (parse-nonneg-spot-idx (list-ref m1 4) 0)
+                         'experiment_spot_label (string-trim (list-ref m1 5))
+                         'probability_pct (or (string->number (list-ref m1 6)) 0.0)))]
+           [else
+            (define m2 (regexp-match #px"(?:^|\\s)exp=([A-Za-z0-9_.-]+)@spot([0-9]+)" line))
+            (and m2
+                 (let ([exp-id (normalize-exp-id-str (cadr m2))])
+                   (and exp-id
+                        (hasheq 'experiment_id exp-id
+                                'experiment_spot_idx (parse-nonneg-spot-idx (caddr m2) 0)))))]))))
+
+(define (hget-any ht keys [default #f])
+  (if (hash? ht)
+      (let loop ([ks keys])
+        (cond
+          [(null? ks) default]
+          [(hash-has-key? ht (car ks)) (hash-ref ht (car ks))]
+          [else (loop (cdr ks))]))
+      default))
+
+(define (extract-experiment-meta-from-record rec)
+  (cond
+    [(string? rec)
+     (or (parse-exp-meta-from-line rec)
+         (hasheq 'experiment_id "baseline" 'experiment_spot_idx 0 'experiment_spot_label "default"))]
+    [(hash? rec)
+     (define direct-id
+       (normalize-exp-id-str
+        (hget-any rec '(experiment_id experiment-id exp_id exp-id) #f)))
+     (define direct-spot
+       (parse-nonneg-spot-idx
+        (hget-any rec '(experiment_spot_idx experiment-spot-idx spot_idx spot-idx) 0)
+        0))
+     (define direct-label
+       (let ([lbl (hget-any rec '(experiment_spot_label experiment-spot-label spot_label spot-label) #f)])
+         (and lbl (not (eq? lbl 'null)) (string-trim (format "~a" lbl)))))
+     (or (and direct-id
+              (let ([base (hasheq 'experiment_id direct-id
+                                  'experiment_spot_idx direct-spot)])
+                (if (and direct-label (not (string=? direct-label "")))
+                    (hash-set base 'experiment_spot_label direct-label)
+                    base)))
+         (for/or ([sub-key (in-list '(native_summary log_forensics schema2_summary experiment experiment_selection))])
+           (define sub (hash-ref rec sub-key #f))
+           (and (hash? sub)
+                (let ([sub-id (normalize-exp-id-str
+                               (hget-any sub '(experiment_id experiment-id exp_id exp-id) #f))])
+                  (and sub-id
+                       (hasheq 'experiment_id sub-id
+                               'experiment_spot_idx
+                               (parse-nonneg-spot-idx
+                                (hget-any sub '(experiment_spot_idx experiment-spot-idx spot_idx spot-idx) 0)
+                                0))))))
+         (for/or ([str-k (in-list '(experiment_tag experiment-tag exp_tag log_line line raw_line))])
+           (define s (hash-ref rec str-k #f))
+           (and (string? s) (parse-exp-meta-from-line s)))
+         (let ([tags (hash-ref rec 'tags '())])
+           (and (list? tags)
+                (for/or ([t (in-list tags)])
+                  (and (string? t) (parse-exp-meta-from-line t)))))
+         (let ([lf (hash-ref rec 'log_forensics #f)])
+           (and (hash? lf)
+                (list? (hash-ref lf 'tags '()))
+                (for/or ([t (in-list (hash-ref lf 'tags '()))])
+                  (and (string? t) (parse-exp-meta-from-line t)))))
+         (hasheq 'experiment_id "baseline" 'experiment_spot_idx 0 'experiment_spot_label "default"))]
+    [else
+     (hasheq 'experiment_id "baseline" 'experiment_spot_idx 0 'experiment_spot_label "default")]))
+
+(define (parse-telemetry-text raw-txt)
+  (define txt (string-trim raw-txt))
+  (if (string=? txt "")
+      '()
+      (with-handlers ([exn:fail?
+                       (lambda (_)
+                         (for/fold ([acc '()])
+                                   ([raw-ln (in-list (string-split txt "\n"))])
+                           (define ln (string-trim raw-ln))
+                           (cond
+                             [(string=? ln "") acc]
+                             [(string-prefix? ln "{")
+                              (with-handlers ([exn:fail? (lambda (_) acc)])
+                                (cons (string->jsexpr ln) acc))]
+                             [(string-prefix? ln "[SCBOT_TELEMETRY]")
+                              (with-handlers ([exn:fail? (lambda (_) acc)])
+                                (cons (string->jsexpr (string-trim (substring ln 17))) acc))]
+                             [(parse-exp-meta-from-line ln)
+                              => (lambda (m) (cons m acc))]
+                             [else acc])))])
+        (define parsed (call-with-input-string txt read-json))
+        (coerce-telemetry-records parsed))))
+
+(define (coerce-telemetry-records raw-input)
+  (cond
+    [(list? raw-input) raw-input]
+    [(hash? raw-input)
+     (or (let ([v (hash-ref raw-input 'reports #f)]) (and (list? v) v))
+         (let ([v (hash-ref raw-input 'records #f)]) (and (list? v) v))
+         (list raw-input))]
+    [(or (path? raw-input) (string? raw-input))
+     (define p
+       (and (or (path? raw-input)
+                (and (<= (string-length raw-input) 4096)
+                     (not (string-contains? raw-input "\n"))))
+            (if (path? raw-input) raw-input (string->path raw-input))))
+     (cond
+       [(and p (file-exists? p))
+        (parse-telemetry-text (file->string p))]
+       [(and (string? raw-input)
+             (or (string-contains? raw-input "\n")
+                 (string-contains? raw-input "[EXP:")
+                 (string-contains? raw-input "exp=")
+                 (string-prefix? (string-trim raw-input) "{")
+                 (string-prefix? (string-trim raw-input) "[")))
+        (parse-telemetry-text raw-input)]
+       [else '()])]
+    [else '()]))
+
+(define (summarize-experiments-from-telemetry raw-input)
+  (define records (coerce-telemetry-records raw-input))
+  (define buckets (make-hash))
+  (for ([rec (in-list records)]
+        #:when (hash? rec))
+    (define meta (extract-experiment-meta-from-record rec))
+    (define exp-id (hash-ref meta 'experiment_id "baseline"))
+    (define spot-idx (hash-ref meta 'experiment_spot_idx 0))
+    (define raw-race
+      (hget-any rec '(race our_race_short our_race our-race) #f))
+    (define raw-matchup
+      (let ([m (hget-any rec '(matchup matchup_code) #f)])
+        (if (and m (not (eq? m 'null)) (not (string=? (string-trim (format "~a" m)) "")))
+            (format "~a" m)
+            #f)))
+    (define race-str
+      (cond
+        [(and raw-race (not (eq? raw-race 'null)))
+         (define r (normalize-race-short (format "~a" raw-race)))
+         (if (string=? r "?")
+             (or (hash-ref meta 'race #f) "?")
+             r)]
+        [(hash-ref meta 'race #f) => values]
+        [(and raw-matchup (regexp-match #rx"^([ZTP])[vV]" raw-matchup))
+         => cadr]
+        [else (report-our-race-short rec)]))
+    (define matchup-str
+      (cond
+        [raw-matchup raw-matchup]
+        [(hash-ref meta 'matchup #f) => values]
+        [(and (hash-has-key? rec 'opp_race) (not (string=? race-str "?")))
+         (compute-matchup-code race-str (format "~a" (hash-ref rec 'opp_race "Unknown")))]
+        [else "Unknown"]))
+    (define res-str
+      (string-upcase (format "~a" (hget-any rec '(result outcome status) "UNKNOWN"))))
+    (define wk
+      (let ([v (hget-any rec '(worker_kills worker-kills workers_killed opp_workers_killed) 0)])
+        (if (real? v) (exact->inexact v) 0.0)))
+    (define sd
+      (let ([v (hget-any rec '(supply_delta supply-delta max_supply_delta) #f)])
+        (if (real? v)
+            (exact->inexact v)
+            (let ([os (hget-any rec '(our_supply our-supply) #f)]
+                  [es (hget-any rec '(opp_supply opp-supply) #f)])
+              (if (and (real? os) (real? es))
+                  (exact->inexact (- os es))
+                  0.0)))))
+    (define elo
+      (let ([v (hget-any rec '(elo_change elo-change) 0)])
+        (if (real? v) v 0)))
+    (define bkey (list race-str matchup-str exp-id spot-idx))
+    (define vec
+      (hash-ref! buckets bkey
+                 (lambda () (vector 0 0 0 0 0.0 0.0 0))))
+    (vector-set! vec 0 (+ (vector-ref vec 0) 1))
+    (cond
+      [(string=? res-str "WIN")  (vector-set! vec 1 (+ (vector-ref vec 1) 1))]
+      [(string=? res-str "LOSS") (vector-set! vec 2 (+ (vector-ref vec 2) 1))]
+      [(string=? res-str "TIE")  (vector-set! vec 3 (+ (vector-ref vec 3) 1))]
+      [else (void)])
+    (vector-set! vec 4 (+ (vector-ref vec 4) wk))
+    (vector-set! vec 5 (+ (vector-ref vec 5) sd))
+    (vector-set! vec 6 (+ (vector-ref vec 6) elo)))
+
+  (define sorted-keys
+    (sort (hash-keys buckets)
+          (lambda (a b)
+            (string<? (format "~a|~a|~a|~a" (car a) (cadr a) (caddr a) (cadddr a))
+                      (format "~a|~a|~a|~a" (car b) (cadr b) (caddr b) (cadddr b))))))
+
+  (define rows
+    (for/list ([k (in-list sorted-keys)])
+      (define vec (hash-ref buckets k))
+      (define g (vector-ref vec 0))
+      (define w (vector-ref vec 1))
+      (define l (vector-ref vec 2))
+      (define t (vector-ref vec 3))
+      (define dec (+ w l t))
+      (define wr-pct (calc-wr-pct w l t))
+      (define wr (if (> dec 0) (round2 (/ (exact->inexact w) dec)) 0.0))
+      (define mean-wk (if (> g 0) (round2 (/ (vector-ref vec 4) g)) 0.0))
+      (define mean-sd (if (> g 0) (round2 (/ (vector-ref vec 5) g)) 0.0))
+      (define kstr (format "~a|~a|~a|~a" (car k) (cadr k) (caddr k) (cadddr k)))
+      (hasheq 'key kstr
+              'race (car k)
+              'matchup (cadr k)
+              'experiment_id (caddr k)
+              'experiment_spot_idx (cadddr k)
+              'games g
+              'wins w
+              'losses l
+              'ties t
+              'other (- g dec)
+              'win_rate_pct wr-pct
+              'win_rate wr
+              'mean_worker_kills mean-wk
+              'mean_supply_delta mean-sd
+              'net_elo_delta (vector-ref vec 6))))
+
+  (define by-exp-ht
+    (for/hasheq ([row (in-list rows)])
+      (values (string->symbol (hash-ref row 'key)) row)))
+
+  (hasheq 'total_records (length records)
+          'experiment_rows rows
+          'by_experiment by-exp-ht))
+
 (define (extract-paren-items line key-prefix)
   ;; Extracts space-separated tokens inside `key=(...)`
   (define pat (regexp (string-append (regexp-quote key-prefix) "\\(([^)]*)\\)")))
@@ -610,6 +869,18 @@
   (define tags '())
   (define telemetry-events '())
   (define native-summary #f)
+  (define exp-id #f)
+  (define exp-spot-idx 0)
+  (define exp-spot-label #f)
+  (define (maybe-capture-exp-meta! m)
+    (when (hash? m)
+      (define mid (normalize-exp-id-str (hget-any m '(experiment_id experiment-id) #f)))
+      (when mid
+        (set! exp-id mid)
+        (set! exp-spot-idx (parse-nonneg-spot-idx (hget-any m '(experiment_spot_idx experiment-spot-idx spot_idx) 0) exp-spot-idx))
+        (let ([lbl (hget-any m '(experiment_spot_label experiment-spot-label spot_label) #f)])
+          (when (and lbl (not (eq? lbl 'null)))
+            (set! exp-spot-label (format "~a" lbl)))))))
   (define prio-step-ms '())
   (define saving-for-counts (make-hash))
   (define escrow-item-counts (make-hash))
@@ -686,18 +957,24 @@
                       (unless (string=? line "")
                         (scan-action-errors! line)
                         (cond
+                          [(parse-exp-meta-from-line line)
+                           => maybe-capture-exp-meta!])
+                        (cond
                           [(string-prefix? line "Tag:")
                            (set! tags (cons (string-trim (substring line 4)) tags))]
                           [(string-prefix? line "[SCBOT_TELEMETRY]")
                            (define js-str (string-trim (substring line 17)))
                            (with-handlers ([exn:fail? void])
-                             (set! telemetry-events (cons (string->jsexpr js-str) telemetry-events)))]
+                             (define ev (string->jsexpr js-str))
+                             (maybe-capture-exp-meta! ev)
+                             (set! telemetry-events (cons ev telemetry-events)))]
                           [(string-contains? line "[SCBOT_PRIORITY]")
                            (scan-priority-line! line)]
                           [(and (string-prefix? line "{") (string-suffix? line "}"))
                            (with-handlers ([exn:fail? void])
                              (define js (string->jsexpr line))
                              (when (and (hash? js) (hash-has-key? js 'status))
+                               (maybe-capture-exp-meta! js)
                                (set! native-summary js)))])))]
                    [(string=? entry-name "stderr.log")
                     (for ([raw-line (in-list (string-split txt "\n"))])
@@ -748,6 +1025,9 @@
 
   (hasheq 'log_exists (and zip-path (file-exists? zip-path) #t)
           'tags (reverse tags)
+          'experiment_id (or exp-id "baseline")
+          'experiment_spot_idx exp-spot-idx
+          'experiment_spot_label (or exp-spot-label "default")
           'telemetry_event_count (length telemetry-events)
           'schema2_summary schema2-summary
           'native_summary (or native-summary (hasheq))
@@ -872,6 +1152,11 @@
              'opp_race_short opp-race-short
              'opp_declared_race opp-decl-race
              'matchup matchup-code
+             'experiment_id (hash-ref log-info 'experiment_id "baseline")
+             'experiment_spot_idx (hash-ref log-info 'experiment_spot_idx 0)
+             'experiment_spot_label (hash-ref log-info 'experiment_spot_label "default")
+             'worker_kills 0
+             'supply_delta 0
              'vs_random_declared vs-random-declared?
              'is_self_play is-self-play?
              'elo_change elo-delta
@@ -986,6 +1271,20 @@
          (max mx (+ (hash-ref s 'army_min 0) (hash-ref s 'army_gas 0)))))
 
      (define sb-our (hash-ref (hash-ref rep-data 'supply_blocked_steps) our-pid 0))
+     (define worker-kills
+       (for/sum ([(k c) (in-hash opp-deaths)]
+                 #:when (member (cdr k) '("Drone" "SCV" "Probe")))
+         c))
+     (define final-min-key
+       (let ([ks (sort (remove-duplicates (append (hash-keys our-stats) (hash-keys opp-stats))) <)])
+         (and (pair? ks) (last ks))))
+     (define supply-delta
+       (if final-min-key
+           (let ([os (hash-ref our-stats final-min-key (hasheq))]
+                 [es (hash-ref opp-stats final-min-key (hasheq))])
+             (- (hash-ref os 'food_used 0)
+                (hash-ref es 'food_used 0)))
+           0))
      (define tot-stat-our (max 1 (hash-ref (hash-ref rep-data 'total_stat_events) our-pid 1)))
 
      (define our-born-map (hash-ref (hash-ref rep-data 'born) our-pid))
@@ -1297,6 +1596,11 @@
              'opp_race_short opp-race-short
              'opp_declared_race opp-decl-race
              'matchup matchup-code
+             'experiment_id (hash-ref log-info 'experiment_id "baseline")
+             'experiment_spot_idx (hash-ref log-info 'experiment_spot_idx 0)
+             'experiment_spot_label (hash-ref log-info 'experiment_spot_label "default")
+             'worker_kills worker-kills
+             'supply_delta supply-delta
              'vs_random_declared vs-random-declared?
              'is_self_play is-self-play?
              'our_killed_resources our-killed-res
@@ -1489,8 +1793,9 @@
         (filter (lambda (r) (matchup-matches-filter? r eff-matchup-filter)) raw-reports)
         raw-reports))
 
-  ;; Aggregate Per-Bot, Per-Race & 9-Matchup Rollups
+  ;; Aggregate Per-Bot, Per-Race & 9-Matchup Rollups + Experiment Slices
   (define matchup-summary (summarize-reports-by-matchup reports))
+  (define experiment-summary (summarize-experiments-from-telemetry reports))
   (define overall-bucket (hash-ref matchup-summary 'overall))
   (define finding-freq (make-hash))
   (define by-bot (make-hash))
@@ -1520,6 +1825,7 @@
   (call-with-output-file out-json-path #:exists 'replace
     (lambda (out)
       (write-json (hasheq 'matchup_summary matchup-summary
+                          'experiment_summary experiment-summary
                           'reports reports)
                   out)))
 
@@ -1612,9 +1918,26 @@
               (~a (if (> n-m 0) (hash-ref mb 'avg_supply_blocked_snapshots 0.0) "-") #:min-width 5)
               (~a (if (> n-m 0) (hash-ref mb 'avg_combat_roi 0.0) "-") #:min-width 6)
               (format-bucket-top-tags mb)))
+    (define exp-rows (hash-ref experiment-summary 'experiment_rows '()))
+    (when (ormap (lambda (er) (not (string=? (hash-ref er 'experiment_id "baseline") "baseline")))
+                 exp-rows)
+      (printf "  5. Strategy Experiment Slices:\n")
+      (for ([er (in-list exp-rows)])
+        (printf "     * ~a [spot ~a] (~a / ~a): ~aW-~aL-~aT (~a% WR) | MeanWK=~a | MeanSupDelta=~a | ELO=~a\n"
+                (hash-ref er 'experiment_id "baseline")
+                (hash-ref er 'experiment_spot_idx 0)
+                (hash-ref er 'race "?")
+                (hash-ref er 'matchup "?")
+                (hash-ref er 'wins 0)
+                (hash-ref er 'losses 0)
+                (hash-ref er 'ties 0)
+                (hash-ref er 'win_rate_pct 0.0)
+                (hash-ref er 'mean_worker_kills 0.0)
+                (hash-ref er 'mean_supply_delta 0.0)
+                (format-signed-elo (hash-ref er 'net_elo_delta 0)))))
     (when (> (hash-count finding-freq) 0)
       (printf "  Top Root-Cause Finding Frequencies: ~s\n" (top-k-counts finding-freq 12)))
-    (printf "[OK] Wrote ~a forensic match report(s) + matchup_summary to ~a\n"
+    (printf "[OK] Wrote ~a forensic match report(s) + matchup_summary + experiment_summary to ~a\n"
             (length reports)
             (path->string out-json-path)))
 

@@ -187,6 +187,7 @@
     cancel
     cancel-building
     resume-halted-building
+    repair
     lift-building
     land-building
     swap-addon
@@ -250,6 +251,19 @@
     infestor-burrow-cast
     blind-skillshot-shimmer
     emergency-detector-response
+    printf-high-ground-vision-probe
+    printf-lg-pylon-hg-cannon
+    printf-rewall-1hex-back
+    printf-3pylon-ramp-block
+    printf-assimilator-wedge
+    cannon-focus-fire
+    printf-robo-immortal-prism-contain
+    printf-stargate-tempest-battery-contain
+    printf-battery-contain-leash
+    printf-prism-contain-pickup
+    printf-multi-probe-chase
+    printf-abort-walled-cannon-pull
+    swap-bunker-builder-scv
     team-chat
     chat
     log

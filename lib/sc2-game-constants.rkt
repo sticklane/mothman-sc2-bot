@@ -658,14 +658,67 @@
    'hallucination-archon 146
    'pulsar-beam-on       2375
    'pulsar-beam-off      2376
-   'lock-on              2350))
+   'lock-on              2350
+   ;; Wave 1 / 1.5 / 1C / 1D / 1E / 2A Canonical Spells & Tactical Abilities
+   'spawn-locusts        1990
+   'spawn-locusts-legacy 2704
+   'locust-swoop         2706
+   'overlord-generate-creep 1882
+   'generate-creep       1882
+   'time-warp            2244
+   'nexus-mass-recall    3757
+   'mothership-mass-recall 2368
+   'energy-recharge      4126
+   'nexus-energy-recharge 4126
+   'shield-battery-recharge 4113
+   'shield-battery-restore 4113
+   'shield-battery-restore-legacy 3751
+   'bunker-load          407
+   'bunker-unload        408
+   'nydus-load           1437
+   'nydus-unload         1438
+   'nydus-worm-load      2370
+   'nydus-worm-unload    2371
+   'effect-repair        316
+   'repair               3685
+   'spine-crawler-uproot 1725
+   'spine-crawler-root   1729
+   'spore-crawler-uproot 1727
+   'spore-crawler-root   1731
+   'uproot               3681
+   'root                 3680
+   'baneling-explode     42
+   'widow-mine-attack    2099
+   'widow-mine-retarget  2099
+   'cancel-adept-phase-shift 2594
+   'cancel-phase-shift   2594
+   'cancel-build         314
+   'cancel-building      314
+   'burrow-down          3661
+   'burrow-up            3662
+   'hold-position        18
+   'shadow-stride        2700
+   'siege-mode           388
+   'unsiege              390
+   'unsiege-mode         390
+   'morph-overseer-mode  3743
+   'morph-oversight-mode 3745
+   'morph-observer-mode  3739
+   'morph-observer-siege-mode 3741
+   'morph-supply-depot-lower 556
+   'morph-supply-depot-raise 558
+   'morph-warp-prism-phasing 1528
+   'morph-warp-prism-transport 1530))
 
 (: SC2-NO-TARGET-ABILITY-IDS (Setof Integer))
 (define SC2-NO-TARGET-ABILITY-IDS
   (list->seteqv
-   '(32    ;; EFFECT_SALVAGE
+   '(18    ;; HOLDPOSITION
+     32    ;; EFFECT_SALVAGE
+     42    ;; EXPLODE_EXPLODE (Baneling Explode)
      181   ;; SPAWNCHANGELING_SPAWNCHANGELING
      253   ;; EFFECT_STIM_MARAUDER
+     314   ;; CANCEL_BUILDINPROGRESS
      380   ;; EFFECT_STIM_MARINE
      382   ;; BEHAVIOR_CLOAKON_GHOST
      383   ;; BEHAVIOR_CLOAKOFF_GHOST
@@ -675,14 +728,19 @@
      393   ;; BEHAVIOR_CLOAKOFF_BANSHEE
      403   ;; MORPH_VIKINGASSAULTMODE
      405   ;; MORPH_VIKINGFIGHTERMODE
+     408   ;; UNLOADALL_BUNKER
      76    ;; GUARDIANSHIELD_GUARDIANSHIELD
      154   ;; HALLUCINATION_PHOENIX
      146   ;; HALLUCINATION_ARCHON
      1372  ;; MORPH_BROODLORD
+     1438  ;; UNLOADALL_NYDUSNETWORK
      1448  ;; MORPH_OVERSEER
      1518  ;; MORPH_WARPGATE
      1520  ;; MORPH_GATEWAY
+     1725  ;; SPINECRAWLERUPROOT_SPINECRAWLERUPROOT
+     1727  ;; SPORECRAWLERUPROOT_SPORECRAWLERUPROOT
      1766  ;; MORPH_ARCHON
+     1882  ;; BEHAVIOR_GENERATECREEPON (Overlord Generate Creep)
      1978  ;; MORPH_HELLION
      1998  ;; MORPH_HELLBAT
      2095  ;; BURROWDOWN_WIDOWMINE
@@ -693,17 +751,23 @@
      2328  ;; EFFECT_IMMORTALBARRIER
      2362  ;; MORPH_THORHIGHIMPACTMODE
      2364  ;; MORPH_THOREXPLOSIVEMODE
+     2371  ;; UNLOADALL_NYDUSWORM
      2375  ;; BEHAVIOR_PULSARBEAMON
      2376  ;; BEHAVIOR_PULSARBEAMOFF
      2393  ;; EFFECT_VOIDRAYPRISMATICALIGNMENT
+     2546  ;; CANCEL_ADEPTPHASESHIFT (raw replay variant)
      2560  ;; MORPH_LIBERATORAAMODE
+     2594  ;; CANCEL_ADEPTPHASESHIFT
      2708  ;; MORPH_OVERLORDTRANSPORT
      556   ;; MORPH_SUPPLYDEPOT_LOWER
      558   ;; MORPH_SUPPLYDEPOT_RAISE
+     3659  ;; CANCEL
      3661  ;; BURROWDOWN
      3662  ;; BURROWUP
+     3671  ;; CANCEL_LAST
      3675  ;; EFFECT_STIM
      3679  ;; LIFT
+     3681  ;; UPROOT
      3739  ;; MORPH_OBSERVERMODE
      3741  ;; MORPH_OBSERVERSIEGEMODE
      3743  ;; MORPH_OVERSEERMODE
@@ -724,20 +788,28 @@
      1526  ;; FORCEFIELD_FORCEFIELD
      1628  ;; EMP_EMP
      1694  ;; BUILD_CREEPTUMOR_QUEEN
+     1729  ;; SPINECRAWLERROOT_SPINECRAWLERROOT
+     1731  ;; SPORECRAWLERROOT_SPORECRAWLERROOT
      1733  ;; BUILD_CREEPTUMOR_TUMOR
      1768  ;; BUILD_NYDUSWORM
      1990  ;; EFFECT_SPAWNLOCUSTS
      2063  ;; BLINDINGCLOUD_BLINDINGCLOUD
      2146  ;; ORACLEREVELATION_ORACLEREVELATION
+     2244  ;; TIMEWARP_TIMEWARP
      2338  ;; EFFECT_CORROSIVEBILE
      2346  ;; EFFECT_PURIFICATIONNOVA
      2358  ;; EFFECT_TACTICALJUMP
+     2368  ;; EFFECT_MASSRECALL_MOTHERSHIP
      2505  ;; BUILD_STASISTRAP
      2544  ;; EFFECT_ADEPTPHASESHIFT
      2545  ;; EFFECT_MICROBIALSHROUD
      2558  ;; MORPH_LIBERATORAGMODE
      2588  ;; KD8CHARGE_KD8CHARGE
+     2700  ;; EFFECT_SHADOWSTRIDE
+     2704  ;; EFFECT_SPAWNLOCUSTS (legacy alias)
+     2706  ;; LOCUSTMPFLYINGSWOOPATTACK
      3678  ;; LAND
+     3680  ;; ROOT
      3687  ;; EFFECT_BLINK
      3691  ;; BUILD_CREEPTUMOR
      3757  ;; EFFECT_MASSRECALL_NEXUS
@@ -752,22 +824,31 @@
      249   ;; NEURALPARASITE_NEURALPARASITE
      251   ;; EFFECT_INJECTLARVA
      255   ;; EFFECT_SUPPLYDROP
+     316   ;; EFFECT_REPAIR_SCV
      386   ;; EFFECT_HEAL
      401   ;; YAMATO_YAMATOGUN
+     407   ;; LOAD_BUNKER
+     1437  ;; LOAD_NYDUSNETWORK
      1664  ;; TRANSFUSION_TRANSFUSION
      1825  ;; CONTAMINATE_CONTAMINATE
      2067  ;; EFFECT_ABDUCT
      2069  ;; VIPERCONSUMESTRUCTURE
      2073  ;; VIPERCONSUME_VIPERCONSUME
+     2099  ;; WIDOWMINEATTACK_WIDOWMINEATTACK
      2324  ;; EFFECT_CAUSTICSPRAY
      2350  ;; EFFECT_LOCKON
+     2370  ;; LOAD_NYDUSWORM
      2542  ;; EFFECT_PARASITICBOMB
      2714  ;; EFFECT_GHOSTSNIPE (Steady Targeting)
+     3668  ;; LOAD_ALL (Transport pickup)
      3685  ;; EFFECT_REPAIR
      3747  ;; EFFECT_INTERFERENCEMATRIX
+     3751  ;; SHIELD_BATTERY_RESTORE (legacy alias)
      3753  ;; EFFECT_ANTIARMORMISSILE
      3755  ;; EFFECT_CHRONOBOOSTENERGYCOST
      4107  ;; BATTERYOVERCHARGE_BATTERYOVERCHARGE
+     4113  ;; SHIELDBATTERYRECHARGEEX5
+     4126  ;; ENERGYRECHARGE_ENERGYRECHARGE
      )))
 
 ;; -----------------------------------------------------------------------------
@@ -941,28 +1022,60 @@
           'flying? #f 'detector? #f 'can-cloak? #f 'radius 0.5))
 
 (: sc2-unit-combat-stats (-> Any CombatStatTable))
-(define (sc2-unit-combat-stats sym)
-  (if (symbol? sym)
-      (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym (lambda () DEFAULT-UNIT-COMBAT-STATS))
-      DEFAULT-UNIT-COMBAT-STATS))
+(define sc2-unit-combat-stats
+  (let ([default-thunk : (-> CombatStatTable) (lambda () DEFAULT-UNIT-COMBAT-STATS)])
+    (lambda (sym)
+      (if (symbol? sym)
+          (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym default-thunk)
+          DEFAULT-UNIT-COMBAT-STATS))))
 
 (: sc2-unit-can-attack-air? (-> Any Boolean))
-(define (sc2-unit-can-attack-air? sym)
-  (define v (hash-ref (sc2-unit-combat-stats sym) 'air-dps (lambda () 0.0)))
-  (and (real? v) (> v 0.0)))
+(define sc2-unit-can-attack-air?
+  (let ([false-thunk : (-> Boolean) (lambda () #f)]
+        [zero-thunk : (-> Real) (lambda () 0.0)]
+        [ht : (Immutable-HashTable Symbol Boolean)
+            (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                        ([(k stats) (in-hash SC2-UNIT-COMBAT-STATS-TABLE)]
+                         #:when (let ([v (hash-ref stats 'air-dps (lambda () 0.0))])
+                                  (and (real? v) (> v 0.0))))
+              (values k #t))])
+    (void zero-thunk)
+    (lambda (sym)
+      (and (symbol? sym) (hash-ref ht sym false-thunk)))))
 
 (: sc2-unit-can-attack-ground? (-> Any Boolean))
-(define (sc2-unit-can-attack-ground? sym)
-  (define v (hash-ref (sc2-unit-combat-stats sym) 'ground-dps (lambda () 0.0)))
-  (and (real? v) (> v 0.0)))
+(define sc2-unit-can-attack-ground?
+  (let ([false-thunk : (-> Boolean) (lambda () #f)]
+        [ht : (Immutable-HashTable Symbol Boolean)
+            (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                        ([(k stats) (in-hash SC2-UNIT-COMBAT-STATS-TABLE)]
+                         #:unless (let ([v (hash-ref stats 'ground-dps (lambda () 0.0))])
+                                    (and (real? v) (> v 0.0))))
+              (values k #t))])
+    (lambda (sym)
+      (not (and (symbol? sym) (hash-ref ht sym false-thunk))))))
 
 (: sc2-unit-is-detector-sym? (-> Any Boolean))
-(define (sc2-unit-is-detector-sym? sym)
-  (eq? (hash-ref (sc2-unit-combat-stats sym) 'detector? (lambda () #f)) #t))
+(define sc2-unit-is-detector-sym?
+  (let ([false-thunk : (-> Boolean) (lambda () #f)]
+        [ht : (Immutable-HashTable Symbol Boolean)
+            (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                        ([(k stats) (in-hash SC2-UNIT-COMBAT-STATS-TABLE)]
+                         #:when (eq? (hash-ref stats 'detector? (lambda () #f)) #t))
+              (values k #t))])
+    (lambda (sym)
+      (and (symbol? sym) (hash-ref ht sym false-thunk)))))
 
 (: sc2-unit-is-flying-sym? (-> Any Boolean))
-(define (sc2-unit-is-flying-sym? sym)
-  (eq? (hash-ref (sc2-unit-combat-stats sym) 'flying? (lambda () #f)) #t))
+(define sc2-unit-is-flying-sym?
+  (let ([false-thunk : (-> Boolean) (lambda () #f)]
+        [ht : (Immutable-HashTable Symbol Boolean)
+            (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                        ([(k stats) (in-hash SC2-UNIT-COMBAT-STATS-TABLE)]
+                         #:when (eq? (hash-ref stats 'flying? (lambda () #f)) #t))
+              (values k #t))])
+    (lambda (sym)
+      (and (symbol? sym) (hash-ref ht sym false-thunk)))))
 
 ;; Invulnerable shades, phased projectiles, eggs/larvae, and decoys that should
 ;; never be selected as primary combat attack targets:
@@ -1174,9 +1287,15 @@
     stargate fleet-beacon templar-archive templar-archives dark-shrine))
 
 (: sc2-structure-requires-pylon-power? (-> Any Boolean))
-(define (sc2-structure-requires-pylon-power? sym)
-  (not (not (memq (sc2-canonical-structure-sym sym)
-                  SC2-PROTOSS-PYLON-POWERED-STRUCTURE-SYMS))))
+(define sc2-structure-requires-pylon-power?
+  (let ([false-thunk : (-> Boolean) (lambda () #f)]
+        [ht : (Immutable-HashTable Symbol Boolean)
+            (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                        ([s (in-list SC2-PROTOSS-PYLON-POWERED-STRUCTURE-SYMS)])
+              (values s #t))])
+    (lambda (sym)
+      (and (symbol? sym)
+           (hash-ref ht (sc2-canonical-structure-sym sym) false-thunk)))))
 
 (: sc2-structure-equivalent-syms (->* (Any) (Boolean) (Listof Symbol)))
 (define (sc2-structure-equivalent-syms sym [include-free-addons? #f])
@@ -1259,47 +1378,93 @@
          (list sym)])))
 
 (: sc2-structure-matches-target? (->* (Any Any) (Boolean) Boolean))
-(define (sc2-structure-matches-target? actual-sym target-sym [include-free-addons? #f])
-  (and (symbol? actual-sym)
-       (memq actual-sym (sc2-structure-equivalent-syms target-sym include-free-addons?))
-       #t))
+(define sc2-structure-matches-target?
+  (let* ([false-thunk : (-> Boolean) (lambda () #f)]
+         [empty-ht : (Immutable-HashTable Symbol Boolean) (hasheq)]
+         [empty-thunk : (-> (Immutable-HashTable Symbol Boolean)) (lambda () empty-ht)]
+         [build-equiv-map : (-> Boolean (Immutable-HashTable Symbol (Immutable-HashTable Symbol Boolean)))
+                          (lambda (addons?)
+                            (define base-ht : (Mutable-HashTable Symbol (Immutable-HashTable Symbol Boolean))
+                              (make-hasheq))
+                            (for ([target (in-list SC2-ALL-STRUCTURE-SYMS)])
+                              (define eqs (sc2-structure-equivalent-syms target addons?))
+                              (when (pair? (cdr eqs))
+                                (hash-set! base-ht target
+                                           (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                                                       ([s (in-list eqs)])
+                                             (values s #t)))))
+                            (for/hasheq : (Immutable-HashTable Symbol (Immutable-HashTable Symbol Boolean))
+                                        ([(k v) (in-hash base-ht)])
+                              (values k v)))]
+         [map-no-addons : (Immutable-HashTable Symbol (Immutable-HashTable Symbol Boolean))
+                        (build-equiv-map #f)]
+         [map-with-addons : (Immutable-HashTable Symbol (Immutable-HashTable Symbol Boolean))
+                          (build-equiv-map #t)])
+    (lambda (actual-sym target-sym [include-free-addons? #f])
+      (and (symbol? actual-sym)
+           (or (eq? actual-sym target-sym)
+               (and (symbol? target-sym)
+                    (let ([sub (hash-ref (if include-free-addons? map-with-addons map-no-addons)
+                                         target-sym
+                                         empty-thunk)])
+                      (hash-ref sub actual-sym false-thunk))))))))
 
 (: sc2-count-equivalent-structures (->* (Any Any) (Boolean) Integer))
 (define (sc2-count-equivalent-structures counts-hash sym [include-free-addons? #f])
   (if (hash? counts-hash)
-      (for/sum ([s (in-list (remove-duplicates (sc2-structure-equivalent-syms sym include-free-addons?) eq?))])
+      (for/sum ([s (in-list (sc2-structure-equivalent-syms sym include-free-addons?))])
         (define v (hash-ref counts-hash s (lambda () 0)))
         (if (exact-integer? v) v 0))
       0))
+
+(define CANONICAL-MISS-SENTINEL : Symbol
+  (string->uninterned-symbol "sc2-canon-miss"))
+
+(: canon-miss-thunk (-> Symbol))
+(define (canon-miss-thunk) CANONICAL-MISS-SENTINEL)
+
+(define CANONICAL-UNIT-SYM-HT : (Immutable-HashTable Symbol Symbol)
+  (hasheq
+   'viking-fighter             'viking
+   'viking-assault             'viking
+   'siege-tank-sieged          'siege-tank
+   'widow-mine-burrowed        'widow-mine
+   'thor-ap                    'thor
+   'liberator-ag               'liberator
+   'lurker-mp                  'lurker
+   'lurker-burrowed            'lurker
+   'lurker-mp-burrowed         'lurker
+   'lurker-egg                 'lurker
+   'lurker-mp-egg              'lurker
+   'baneling-burrowed          'baneling
+   'baneling-cocoon            'baneling
+   'ravager-cocoon             'ravager
+   'ravager-burrowed           'ravager
+   'broodlord                  'brood-lord
+   'brood-lord-cocoon          'brood-lord
+   'overlord-cocoon            'overseer
+   'overseer-siege-mode        'overseer
+   'overlord-transport         'overlord
+   'transport-overlord-cocoon  'overlord
+   'roach-burrowed             'roach
+   'zergling-burrowed          'zergling
+   'hydralisk-burrowed         'hydralisk
+   'infestor-burrowed          'infestor
+   'swarm-host-burrowed        'swarm-host
+   'swarmhost                  'swarm-host
+   'ultralisk-burrowed         'ultralisk
+   'queen-burrowed             'queen
+   'drone-burrowed             'drone
+   'observer-siege-mode        'observer
+   'warp-prism-phasing         'warp-prism
+   'voidray                    'void-ray))
 
 (: sc2-canonical-unit-sym (-> Any Symbol))
 (define (sc2-canonical-unit-sym sym)
   (if (not (symbol? sym))
       'unknown
-      (case sym
-        [(viking-fighter viking-assault)   'viking]
-        [(siege-tank-sieged)               'siege-tank]
-        [(widow-mine-burrowed)             'widow-mine]
-        [(thor-ap)                         'thor]
-        [(liberator-ag)                    'liberator]
-        [(lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg) 'lurker]
-        [(baneling-burrowed baneling-cocoon) 'baneling]
-        [(ravager-cocoon ravager-burrowed) 'ravager]
-        [(broodlord brood-lord-cocoon)     'brood-lord]
-        [(overlord-cocoon overseer-siege-mode) 'overseer]
-        [(overlord-transport transport-overlord-cocoon) 'overlord]
-        [(roach-burrowed)                  'roach]
-        [(zergling-burrowed)               'zergling]
-        [(hydralisk-burrowed)              'hydralisk]
-        [(infestor-burrowed)               'infestor]
-        [(swarm-host-burrowed swarmhost)   'swarm-host]
-        [(ultralisk-burrowed)              'ultralisk]
-        [(queen-burrowed)                  'queen]
-        [(drone-burrowed)                  'drone]
-        [(observer-siege-mode)             'observer]
-        [(warp-prism-phasing)              'warp-prism]
-        [(voidray)                         'void-ray]
-        [else                              sym])))
+      (let ([hit (hash-ref CANONICAL-UNIT-SYM-HT sym canon-miss-thunk)])
+        (if (eq? hit CANONICAL-MISS-SENTINEL) sym hit))))
 
 (: sc2-unit-equivalent-syms (-> Any (Listof Symbol)))
 (define (sc2-unit-equivalent-syms sym)
@@ -1377,11 +1542,15 @@
     planetary-fortress))
 
 (: sc2-odd-footprint-structure? (-> Any Boolean))
-(define (sc2-odd-footprint-structure? sym)
-  (and (symbol? sym)
-       (memq sym SC2-ALL-STRUCTURE-SYMS)
-       (not (memq sym SC2-2X2-STRUCTURE-SYMS))
-       #t))
+(define sc2-odd-footprint-structure?
+  (let ([false-thunk : (-> Boolean) (lambda () #f)]
+        [ht : (Immutable-HashTable Symbol Boolean)
+            (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                        ([s (in-list SC2-ALL-STRUCTURE-SYMS)]
+                         #:unless (memq s SC2-2X2-STRUCTURE-SYMS))
+              (values s #t))])
+    (lambda (sym)
+      (and (symbol? sym) (hash-ref ht sym false-thunk)))))
 
 ;; -----------------------------------------------------------------------------
 ;; 11. Generalized Cross-Cutting Ontology, Order Protection, Role-Lease Registry,
@@ -1390,31 +1559,42 @@
 
 ;; Canonical mapping from generic/smart vs race-specific Unit.orders ability IDs.
 (: sc2-canonical-order-ability (-> Any Any))
-(define (sc2-canonical-order-ability ab-id)
-  (case ab-id
-    [(166 295 298 1183 3666) 'harvest-gather]
-    [(167 296 299 1184 3667) 'harvest-return]
-    [(168 316 3685)          'repair]
-    [(16 19 20 3794)         'move]
-    [(17 3795)               'patrol]
-    [(18 3793)               'hold-position]
-    [(4 5 6 7 3665)          'stop]
-    [(23 24 25 2099 3674 3771) 'attack]
-    [(417 452 485 518 1522 3679) 'lift]
-    [(419 520 522 554 1524 3678) 'land]
-    [(421 454 487 3682)      'build-techlab]
-    [(422 455 488 3683)      'build-reactor]
-    [(1374 1378 1382 1386 1390 1433 1444 1512 2014 2095 2108 2340 3661) 'burrow-down]
-    [(1376 1380 1384 1388 1392 1435 1446 1514 2016 2097 2110 2342 3662) 'burrow-up]
-    [(1394 1396 3680)        'uproot]
-    [(1398 1400 3681)        'root]
-    [(1662 1694 1733 3691)   'spawn-creep-tumor]
-    [(253 380 3675)          'stim]
-    [(1442 3687)             'blink]
-    [(142 3686 3757)         'mass-recall]
-    [(1163 2112)             'build-lurker-den]
-    [(895 1909)              'build-shield-battery]
-    [else                    ab-id]))
+(define sc2-canonical-order-ability
+  (let* ([miss : Symbol (gensym 'sc2-order-ability-miss)]
+         [miss-thunk : (-> Symbol) (lambda () miss)]
+         [pairs : (Listof (Pair (Listof Integer) Symbol))
+                '(((166 295 298 1183 3666) . harvest-gather)
+                  ((167 296 299 1184 3667) . harvest-return)
+                  ((168 316 3685)          . repair)
+                  ((16 19 20 3794)         . move)
+                  ((17 3795)               . patrol)
+                  ((18 3793)               . hold-position)
+                  ((4 5 6 7 3665)          . stop)
+                  ((23 24 25 2099 3674 3771) . attack)
+                  ((417 452 485 518 1522 3679) . lift)
+                  ((419 520 522 554 1524 3678) . land)
+                  ((421 454 487 3682)      . build-techlab)
+                  ((422 455 488 3683)      . build-reactor)
+                  ((1374 1378 1382 1386 1390 1433 1444 1512 2014 2095 2108 2340 3661) . burrow-down)
+                  ((1376 1380 1384 1388 1392 1435 1446 1514 2016 2097 2110 2342 3662) . burrow-up)
+                  ((1394 1396 3680)        . uproot)
+                  ((1398 1400 3681)        . root)
+                  ((1662 1694 1733 3691)   . spawn-creep-tumor)
+                  ((253 380 3675)          . stim)
+                  ((1442 3687)             . blink)
+                  ((142 3686 3757)         . mass-recall)
+                  ((1163 2112)             . build-lurker-den)
+                  ((895 1909)              . build-shield-battery))]
+         [ht : (Immutable-HashTable Integer Symbol)
+             (for*/hasheqv : (Immutable-HashTable Integer Symbol)
+                           ([grp (in-list pairs)]
+                            [id (in-list (car grp))])
+               (values id (cdr grp)))])
+    (lambda (ab-id)
+      (if (exact-integer? ab-id)
+          (let ([hit (hash-ref ht ab-id miss-thunk)])
+            (if (eq? hit miss) ab-id hit))
+          ab-id))))
 
 ;; Protected Unit.orders classes that must not be overwritten by generic army/idle commands:
 (: SC2-PROTECTED-ORDER-CLASS-TABLE (Immutable-HashTable Integer Symbol))
@@ -1440,13 +1620,19 @@
       (values k v))))
 
 (: sc2-order-protection-class (-> Any (Option Symbol)))
-(define (sc2-order-protection-class ab-id)
-  (or (and (exact-integer? ab-id) (hash-ref SC2-PROTECTED-ORDER-CLASS-TABLE ab-id (lambda () #f)))
-      (case (sc2-canonical-order-ability ab-id)
-        [(burrow-down burrow-up lift land uproot root) 'mode-switch]
-        [(spawn-creep-tumor) 'cast-walk]
-        [(mass-recall) 'channel]
-        [else #f])))
+(define sc2-order-protection-class
+  (let ([false-thunk : (-> False) (lambda () #f)])
+    (lambda (ab-id)
+      (cond
+        [(exact-integer? ab-id)
+         (hash-ref SC2-PROTECTED-ORDER-CLASS-TABLE ab-id false-thunk)]
+        [(symbol? ab-id)
+         (case ab-id
+           [(burrow-down burrow-up lift land uproot root) 'mode-switch]
+           [(spawn-creep-tumor) 'cast-walk]
+           [(mass-recall) 'channel]
+           [else #f])]
+        [else #f]))))
 
 ;; Non-combat morphing cocoons/eggs, temporary summons, wards, scouts, and auxiliary transports.
 (: SC2-COCOON-AND-EGG-SYMS (Listof Symbol))
@@ -1502,15 +1688,37 @@
   (list->seteq SC2-NON-ARMY-SUMMON-AND-AUX-SYMS))
 
 (: sc2-non-combat-or-summon-sym? (-> Any Boolean))
-(define (sc2-non-combat-or-summon-sym? sym)
-  (and (symbol? sym)
-       (or (set-member? SC2-NON-ARMY-SUMMON-AND-AUX-SET sym)
-           (let ([s (symbol->string sym)])
-             (or (regexp-match? #rx"^changeling" s)
-                 (regexp-match? #rx"^creep-tumor" s)
-                 (regexp-match? #rx"-cocoon$" s)
-                 (regexp-match? #rx"-egg$" s))))
-       #t))
+(define sc2-non-combat-or-summon-sym?
+  (let* ([miss : Symbol 'sc2-non-combat-miss]
+         [miss-thunk : (-> Symbol) (lambda () miss)]
+         [aux-ht : (Immutable-HashTable Symbol Boolean)
+                 (for/hasheq : (Immutable-HashTable Symbol Boolean)
+                             ([s (in-list SC2-NON-ARMY-SUMMON-AND-AUX-SYMS)])
+                   (values s #t))]
+         [compute : (-> Symbol Boolean)
+                  (lambda (sym)
+                    (or (hash-has-key? aux-ht sym)
+                        (let ([s (symbol->string sym)])
+                          (or (regexp-match? #rx"^changeling" s)
+                              (regexp-match? #rx"^creep-tumor" s)
+                              (regexp-match? #rx"-cocoon$" s)
+                              (regexp-match? #rx"-egg$" s)))))]
+         [cache : (Mutable-HashTable Symbol Boolean) (make-hasheq)])
+    (for ([s (in-list SC2-NON-ARMY-SUMMON-AND-AUX-SYMS)])
+      (hash-set! cache s #t))
+    (for ([(s _) (in-hash SC2-UNIT-COMBAT-STATS-TABLE)])
+      (unless (hash-has-key? cache s)
+        (hash-set! cache s (compute s))))
+    (lambda (sym)
+      (if (symbol? sym)
+          (let ([hit (hash-ref cache sym miss-thunk)])
+            (if (boolean? hit)
+                hit
+                (let ([res (compute sym)])
+                  (when (< (hash-count cache) 4096)
+                    (hash-set! cache sym res))
+                  res)))
+          #f))))
 
 ;; Unit Role-Lease Registry
 (struct unit-role-lease

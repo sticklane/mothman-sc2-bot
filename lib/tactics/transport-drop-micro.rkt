@@ -40,17 +40,66 @@
 ;; Safe dynamic hash boundary for untyped observation hashes (`sc2-unit` / `hasheq`).
 (module dyn-hash-ops racket/base
   (provide dyn-hash-ref
-           dyn-hash-has-key?)
+           dyn-hash-has-key?
+           dyn-u-raw-type
+           dyn-u-raw-tag
+           dyn-u-x
+           dyn-u-y
+           dyn-u-alive-fast)
   (define (dyn-hash-ref h k default)
     (if (hash? h)
         (hash-ref h k (lambda () default))
         default))
   (define (dyn-hash-has-key? h k)
-    (and (hash? h) (hash-has-key? h k))))
+    (and (hash? h) (hash-has-key? h k)))
+  (define (dyn-u-raw-type u)
+    (if (hash? u)
+        (or (hash-ref u 'unit-type #f)
+            (hash-ref u 'unit_type #f)
+            (hash-ref u 'type #f))
+        #f))
+  (define (dyn-u-raw-tag u)
+    (if (hash? u)
+        (or (hash-ref u 'tag #f)
+            (hash-ref u 'id 0))
+        0))
+  (define (to-fl v default)
+    (cond
+      [(flonum? v) (if (< -inf.0 v +inf.0) v default)]
+      [(and (real? v) (< -inf.0 v +inf.0)) (exact->inexact v)]
+      [else default]))
+  (define (dyn-u-x u)
+    (if (hash? u) (to-fl (hash-ref u 'x 0.0) 0.0) 0.0))
+  (define (dyn-u-y u)
+    (if (hash? u) (to-fl (hash-ref u 'y 0.0) 0.0) 0.0))
+  (define (dyn-u-alive-fast u)
+    (cond
+      [(not (hash? u)) 'false]
+      [else
+       (define hpv (hash-ref u 'hp #f))
+       (cond
+         [(and (real? hpv) (< 0.0 hpv +inf.0)) 'true]
+         [(and (not hpv) (not (hash-has-key? u 'hp)))
+          (define hv (hash-ref u 'health #f))
+          (cond
+            [(and (real? hv) (< 0.0 hv +inf.0)) 'true]
+            [(or hv
+                 (hash-has-key? u 'health)
+                 (hash-has-key? u 'hull-hp)
+                 (hash-has-key? u 'shield)
+                 (hash-has-key? u 'shields))
+             'check-ehp]
+            [else 'true])]
+         [else 'check-ehp])])))
 
 (unsafe-require/typed (submod "." dyn-hash-ops)
   [dyn-hash-ref (-> Any Any Any Any)]
-  [dyn-hash-has-key? (-> Any Any Boolean)])
+  [dyn-hash-has-key? (-> Any Any Boolean)]
+  [dyn-u-raw-type (-> Any Any)]
+  [dyn-u-raw-tag (-> Any Any)]
+  [dyn-u-x (-> Any Float)]
+  [dyn-u-y (-> Any Float)]
+  [dyn-u-alive-fast (-> Any Symbol)])
 
 (provide
  ;; Canonical Unit Type & Ability Constants
@@ -122,17 +171,30 @@
  overlord-transport-eligible?
  should-morph-overlord-transport?
 
- ;; Single-Transport & Fleet Planners
- evaluate-save-pickup
- evaluate-transport-drop
- evaluate-warp-prism-phasing
- evaluate-transport-micro
- plan-transport-fleet-micro
- plan-overlord-transport-morphs
+  ;; Single-Transport & Fleet Planners
+  evaluate-save-pickup
+  evaluate-transport-drop
+  evaluate-warp-prism-phasing
+  evaluate-transport-micro
+  plan-transport-fleet-micro
+  plan-overlord-transport-morphs
 
- ;; S-Expression Orchestrator
- transport-directive->sexp
- step-transport-drop-micro!)
+  ;; Wave 1C Multi-Angle Mini Overlord Drops & Counter-Drop Defense
+  MINI-DROP-MAX-ACTIVE-COUNT
+  MINI-DROP-CARGO-MIN
+  MINI-DROP-CARGO-MAX
+  DROP-LOADED-FOCUS-FIRE-BONUS
+  COUNTER-DROP-DEFENSE-POWER-MULT
+  COUNTER-DROP-MAX-ARMY-PULL-FRACTION
+  (struct-out counter-drop-order)
+  (struct-out counter-drop-plan)
+  plan-multi-angle-mini-overlord-drops
+  plan-counter-drop-defense
+  counter-drop-plan->sexps
+
+  ;; S-Expression Orchestrator
+  transport-directive->sexp
+  step-transport-drop-micro!)
 
 ;; =============================================================================
 ;; Constants (LotV Balance / Empirical `#115` Calibration at 22.4 fps)
@@ -437,12 +499,7 @@
     [(symbol? u) u]
     [(exact-integer? u) (id->transport-unit-sym u)]
     [(hash? u)
-     (define raw-ut
-       (cond
-         [(dyn-hash-has-key? u 'unit-type) (dyn-hash-ref u 'unit-type #f)]
-         [(dyn-hash-has-key? u 'unit_type) (dyn-hash-ref u 'unit_type #f)]
-         [(dyn-hash-has-key? u 'type)      (dyn-hash-ref u 'type #f)]
-         [else #f]))
+     (define raw-ut (dyn-u-raw-type u))
      (cond
        [(symbol? raw-ut) raw-ut]
        [(exact-integer? raw-ut)
@@ -456,23 +513,23 @@
   (cond
     [(transport-unit-input? u) (transport-unit-input-tag u)]
     [(hash? u)
-     (define t (dyn-hash-ref u 'tag #f))
+     (define t (dyn-u-raw-tag u))
      (if (exact-integer? t)
          t
-         (safe-exact-int (dyn-hash-ref u 'id 0) 0))]
+         (safe-exact-int t 0))]
     [else 0]))
 
 (: u-x (-> Any Float))
 (define (u-x u)
   (if (transport-unit-input? u)
       (transport-unit-input-x u)
-      (safe-finite-real (dyn-hash-ref u 'x 0.0) 0.0)))
+      (dyn-u-x u)))
 
 (: u-y (-> Any Float))
 (define (u-y u)
   (if (transport-unit-input? u)
       (transport-unit-input-y u)
-      (safe-finite-real (dyn-hash-ref u 'y 0.0) 0.0)))
+      (dyn-u-y u)))
 
 (: u-hp (-> Any Float Float))
 (define (u-hp u default)
@@ -482,6 +539,17 @@
     [(dyn-hash-has-key? u 'health) (max 0.0 (safe-finite-real (dyn-hash-ref u 'health default) default))]
     [else default]))
 
+(define *transport-combat-stats-cache* :
+  (Mutable-HashTable Symbol (Immutable-HashTable Symbol (U Real Boolean Symbol)))
+  (make-hasheq))
+
+(: cached-unit-combat-stats (-> Symbol (Immutable-HashTable Symbol (U Real Boolean Symbol))))
+(define (cached-unit-combat-stats sym)
+  (or (hash-ref *transport-combat-stats-cache* sym (lambda () #f))
+      (let ([st (sc2-unit-combat-stats sym)])
+        (hash-set! *transport-combat-stats-cache* sym st)
+        st)))
+
 (: u-max-hp (-> Any Float Float))
 (define (u-max-hp u default)
   (cond
@@ -489,7 +557,7 @@
     [(dyn-hash-has-key? u 'max-hp) (max 1.0 (safe-finite-real (dyn-hash-ref u 'max-hp default) default))]
     [(dyn-hash-has-key? u 'health-max) (max 1.0 (safe-finite-real (dyn-hash-ref u 'health-max default) default))]
     [else
-     (define stats (sc2-unit-combat-stats (exact-unit-type u)))
+     (define stats (cached-unit-combat-stats (exact-unit-type u)))
      (max 1.0 (safe-finite-real (hash-ref stats 'max-hp (lambda () default)) default))]))
 
 (: u-shield (-> Any Float Float))
@@ -507,7 +575,7 @@
     [(dyn-hash-has-key? u 'max-shield) (max 0.0 (safe-finite-real (dyn-hash-ref u 'max-shield default) default))]
     [(dyn-hash-has-key? u 'shield-max) (max 0.0 (safe-finite-real (dyn-hash-ref u 'shield-max default) default))]
     [else
-     (define stats (sc2-unit-combat-stats (exact-unit-type u)))
+     (define stats (cached-unit-combat-stats (exact-unit-type u)))
      (max 0.0 (safe-finite-real (hash-ref stats 'max-shield (lambda () default)) default))]))
 
 (: u-total-ehp (-> Any Float))
@@ -523,43 +591,45 @@
             (u-shield u 0.0)))]
     [else
      (define ut (exact-unit-type u))
-     (define stats (sc2-unit-combat-stats ut))
+     (define stats (cached-unit-combat-stats ut))
      (define def-hp (safe-finite-real (hash-ref stats 'max-hp (lambda () 100.0)) 100.0))
      (define def-sh (safe-finite-real (hash-ref stats 'max-shield (lambda () 0.0)) 0.0))
      (+ (u-hp u def-hp) (u-shield u def-sh))]))
 
 (: u-hp-ratio (-> Any Float))
 (define (u-hp-ratio u)
-  (define ut (exact-unit-type u))
-  (define stats (sc2-unit-combat-stats ut))
-  (define def-hp (safe-finite-real (hash-ref stats 'max-hp (lambda () 100.0)) 100.0))
-  (define def-sh (safe-finite-real (hash-ref stats 'max-shield (lambda () 0.0)) 0.0))
-  (define cur (u-total-ehp u))
-  (define tot
-    (cond
-      [(transport-unit-input? u)
-       (max 1.0 (+ (max 1.0 (transport-unit-input-max-hp u))
-                   (max 0.0 (transport-unit-input-max-shield u))))]
-      [(dyn-hash-has-key? u 'hull-hp)
-       (if (or (dyn-hash-has-key? u 'max-hp)
-               (dyn-hash-has-key? u 'health-max))
-           (max 1.0 (u-max-hp u (+ def-hp def-sh)))
-           (max 1.0 (+ def-hp def-sh)))]
-      [else
-       (max 1.0 (+ (u-max-hp u def-hp) (u-max-shield u def-sh)))]))
-  (clamp-prob (/ cur tot)))
+  (cond
+    [(transport-unit-input? u)
+     (define cur (+ (max 0.0 (transport-unit-input-hp u))
+                    (max 0.0 (transport-unit-input-shield u))))
+     (define tot (max 1.0 (+ (max 1.0 (transport-unit-input-max-hp u))
+                             (max 0.0 (transport-unit-input-max-shield u)))))
+     (clamp-prob (/ cur tot))]
+    [else
+     (define ut (exact-unit-type u))
+     (define stats (cached-unit-combat-stats ut))
+     (define def-hp (safe-finite-real (hash-ref stats 'max-hp (lambda () 100.0)) 100.0))
+     (define def-sh (safe-finite-real (hash-ref stats 'max-shield (lambda () 0.0)) 0.0))
+     (define cur (u-total-ehp u))
+     (define tot
+       (cond
+         [(dyn-hash-has-key? u 'hull-hp)
+          (if (or (dyn-hash-has-key? u 'max-hp)
+                  (dyn-hash-has-key? u 'health-max))
+              (max 1.0 (u-max-hp u (+ def-hp def-sh)))
+              (max 1.0 (+ def-hp def-sh)))]
+         [else
+          (max 1.0 (+ (u-max-hp u def-hp) (u-max-shield u def-sh)))]))
+     (clamp-prob (/ cur tot))]))
 
 (: u-alive? (-> Any Boolean))
 (define (u-alive? u)
-  (cond
-    [(transport-unit-input? u) (> (+ (transport-unit-input-hp u) (transport-unit-input-shield u)) 0.0)]
-    [(or (dyn-hash-has-key? u 'hp)
-         (dyn-hash-has-key? u 'health)
-         (dyn-hash-has-key? u 'hull-hp)
-         (dyn-hash-has-key? u 'shield)
-         (dyn-hash-has-key? u 'shields))
-     (> (u-total-ehp u) 0.0)]
-    [else #t]))
+  (if (transport-unit-input? u)
+      (> (+ (transport-unit-input-hp u) (transport-unit-input-shield u)) 0.0)
+      (case (dyn-u-alive-fast u)
+        [(true) #t]
+        [(false) #f]
+        [else (> (u-total-ehp u) 0.0)])))
 
 (: u-flying? (-> Any Boolean))
 (define (u-flying? u)
@@ -596,7 +666,7 @@
 (: u-weapon-range (-> Any Float))
 (define (u-weapon-range u)
   (define ut (exact-unit-type u))
-  (define stats (sc2-unit-combat-stats ut))
+  (define stats (cached-unit-combat-stats ut))
   (max (safe-finite-real (hash-ref stats 'ground-range (lambda () 0.0)) 0.0)
        (safe-finite-real (hash-ref stats 'air-range (lambda () 0.0)) 0.0)))
 
@@ -754,48 +824,49 @@
   (define phase-tbl (transport-tracker-prism-phases tr))
   (define boost-tbl (transport-tracker-medivac-last-boost tr))
 
-  (for ([a (in-list ally-units)]
-        #:when (u-alive? a))
-    (define tag (u-tag a))
+  (for ([a (in-list ally-units)])
     (define ut (exact-unit-type a))
-    (when (and (> tag 0) (transport-unit-sym? ut))
-      (define ptags (extract-passenger-tags a))
-      (define cargo-used (u-cargo-space-taken a))
-      (for ([ptag (in-list ptags)])
-        (hash-set! active-passengers ptag #t)
-        (unless (hash-has-key? p-tbl ptag)
-          (hash-set! p-tbl ptag current-frame)))
-      (if (or (pair? ptags) (> cargo-used 0))
-          (unless (hash-has-key? c-tbl tag)
-            (define earliest-p
-              (for/fold ([best : Integer current-frame]) ([pt (in-list ptags)])
-                (min best (hash-ref p-tbl pt (lambda () current-frame)))))
-            (hash-set! c-tbl tag earliest-p))
-          (hash-remove! c-tbl tag))
-      (when (memq ut '(warp-prism warp-prism-phasing))
-        (define phasing-now? (eq? ut 'warp-prism-phasing))
-        (define prev (hash-ref phase-tbl tag (lambda () #f)))
-        (cond
-          [(not prev)
-           (hash-set! phase-tbl tag
-                      (if phasing-now?
-                          (prism-phase-rec current-frame -10000 #t)
-                          (prism-phase-rec -10000 -10000 #f)))]
-          [(and phasing-now? (not (prism-phase-rec-phasing? prev)))
-           (hash-set! phase-tbl tag
-                      (prism-phase-rec current-frame (prism-phase-rec-last-unphase-frame prev) #t))]
-          [(and (not phasing-now?) (prism-phase-rec-phasing? prev))
-           (hash-set! phase-tbl tag
-                      (prism-phase-rec (prism-phase-rec-phase-start-frame prev) current-frame #f))]))))
+    (when (and (transport-unit-sym? ut) (u-alive? a))
+      (define tag (u-tag a))
+      (when (> tag 0)
+        (define ptags (extract-passenger-tags a))
+        (define cargo-used (u-cargo-space-taken a))
+        (for ([ptag (in-list ptags)])
+          (hash-set! active-passengers ptag #t)
+          (unless (hash-has-key? p-tbl ptag)
+            (hash-set! p-tbl ptag current-frame)))
+        (if (or (pair? ptags) (> cargo-used 0))
+            (unless (hash-has-key? c-tbl tag)
+              (define earliest-p
+                (for/fold ([best : Integer current-frame]) ([pt (in-list ptags)])
+                  (min best (hash-ref p-tbl pt (lambda () current-frame)))))
+              (hash-set! c-tbl tag earliest-p))
+            (hash-remove! c-tbl tag))
+        (when (memq ut '(warp-prism warp-prism-phasing))
+          (define phasing-now? (eq? ut 'warp-prism-phasing))
+          (define prev (hash-ref phase-tbl tag (lambda () #f)))
+          (cond
+            [(not prev)
+             (hash-set! phase-tbl tag
+                        (if phasing-now?
+                            (prism-phase-rec current-frame -10000 #t)
+                            (prism-phase-rec -10000 -10000 #f)))]
+            [(and phasing-now? (not (prism-phase-rec-phasing? prev)))
+             (hash-set! phase-tbl tag
+                        (prism-phase-rec current-frame (prism-phase-rec-last-unphase-frame prev) #t))]
+            [(and (not phasing-now?) (prism-phase-rec-phasing? prev))
+             (hash-set! phase-tbl tag
+                        (prism-phase-rec (prism-phase-rec-phase-start-frame prev) current-frame #f))])))))
 
   ;; Remove unloaded/dead passengers from pickup table & dead transports from tracker tables
-  (define stale-p
-    (for/list : (Listof Integer) ([pt (in-hash-keys p-tbl)]
-                                  #:when (or (not (hash-has-key? active-passengers pt))
-                                             (memv pt dead-tags)))
-      pt))
-  (for ([pt (in-list stale-p)])
-    (hash-remove! p-tbl pt))
+  (unless (hash-empty? p-tbl)
+    (define stale-p
+      (for/list : (Listof Integer) ([pt (in-hash-keys p-tbl)]
+                                    #:when (or (not (hash-has-key? active-passengers pt))
+                                               (memv pt dead-tags)))
+        pt))
+    (for ([pt (in-list stale-p)])
+      (hash-remove! p-tbl pt)))
   (for ([dt (in-list dead-tags)])
     (hash-remove! c-tbl dt)
     (hash-remove! phase-tbl dt)
@@ -810,7 +881,7 @@
 (define (collect-active-danger-zones enemy-units effects current-frame)
   (define from-novas
     (for/fold ([acc : (Listof danger-zone) '()]) ([e (in-list enemy-units)])
-      (if (and (u-alive? e) (eq? (exact-unit-type e) 'disruptor-phased))
+      (if (and (eq? (exact-unit-type e) 'disruptor-phased) (u-alive? e))
           (cons (danger-zone 'purification-nova (u-x e) (u-y e) 2.25 (+ current-frame 47)) acc)
           acc)))
   (for/fold ([acc : (Listof danger-zone) from-novas]) ([ef (in-list effects)])
@@ -873,37 +944,195 @@
     (<= (dist-2d fx fy (danger-zone-x dz) (danger-zone-y dz))
         (+ (danger-zone-radius dz) fm))))
 
+(struct tr-enemy-rec
+  ([x : Float]
+   [y : Float]
+   [combat? : Boolean]
+   [gdps>0? : Boolean]
+   [geff-r : Float]
+   [geff-r2 : Float]
+   [adps>0? : Boolean]
+   [aeff-r : Float]
+   [aeff-r2 : Float]))
+
+(struct tr-save-cand
+  ([u : Any]
+   [tag : Integer]
+   [ut : Symbol]
+   [sz : Integer]
+   [x : Float]
+   [y : Float]
+   [in-aoe? : Boolean]
+   [score : Float]))
+
+(define current-fleet-enemy-recs : (Parameterof (Option (Listof tr-enemy-rec)))
+  (make-parameter #f))
+(define current-fleet-save-cands : (Parameterof (Option (Listof tr-save-cand)))
+  (make-parameter #f))
+
+(: build-fleet-enemy-recs (-> (Listof Any) (Listof tr-enemy-rec)))
+(define (build-fleet-enemy-recs enemy-units)
+  (for/list : (Listof tr-enemy-rec)
+            ([e (in-list enemy-units)]
+             #:when (u-alive? e))
+    (define et (exact-unit-type e))
+    (define stats (cached-unit-combat-stats et))
+    (define gdps (safe-finite-real (hash-ref stats 'ground-dps (lambda () 0.0)) 0.0))
+    (define adps (safe-finite-real (hash-ref stats 'air-dps (lambda () 0.0)) 0.0))
+    (define grng (if (> gdps 0.0)
+                     (+ (max 1.5 (safe-finite-real (hash-ref stats 'ground-range (lambda () 0.0)) 0.0)) 0.75)
+                     0.0))
+    (define arng (if (> adps 0.0)
+                     (+ (max 1.5 (safe-finite-real (hash-ref stats 'air-range (lambda () 0.0)) 0.0)) 0.75)
+                     0.0))
+    (tr-enemy-rec (u-x e)
+                  (u-y e)
+                  (not (memq et '(larva egg observer overlord changeling)))
+                  (> gdps 0.0) grng (* grng grng)
+                  (> adps 0.0) arng (* arng arng))))
+
 ;; Counts living enemy attackers currently within effective weapon reach of unit `u`.
 (: count-attackers-in-range (-> Any (Listof Any) Integer))
 (define (count-attackers-in-range u enemy-units)
   (define ux (u-x u))
   (define uy (u-y u))
   (define u-air? (u-flying? u))
-  (for/sum : Integer ([e (in-list enemy-units)]
-                      #:when (u-alive? e))
-    (define et (exact-unit-type e))
-    (define stats (sc2-unit-combat-stats et))
-    (define dps-key (if u-air? 'air-dps 'ground-dps))
-    (define rng-key (if u-air? 'air-range 'ground-range))
-    (define dps (safe-finite-real (hash-ref stats dps-key (lambda () 0.0)) 0.0))
-    (define rng (safe-finite-real (hash-ref stats rng-key (lambda () 0.0)) 0.0))
-    (define d (dist-2d ux uy (u-x e) (u-y e)))
-    (if (and (> dps 0.0) (<= d (+ (max 1.5 rng) 0.75))) 1 0)))
+  (define pre-e (current-fleet-enemy-recs))
+  (cond
+    [pre-e
+     (for/sum : Integer ([r (in-list pre-e)])
+       (define ok? (if u-air? (tr-enemy-rec-adps>0? r) (tr-enemy-rec-gdps>0? r)))
+       (if (not ok?)
+           0
+           (let ([eff-rng (if u-air? (tr-enemy-rec-aeff-r r) (tr-enemy-rec-geff-r r))]
+                 [eff-r2 (if u-air? (tr-enemy-rec-aeff-r2 r) (tr-enemy-rec-geff-r2 r))]
+                 [dx (- ux (tr-enemy-rec-x r))]
+                 [dy (- uy (tr-enemy-rec-y r))])
+             (if (and (<= (abs dx) eff-rng)
+                      (<= (abs dy) eff-rng)
+                      (<= (+ (* dx dx) (* dy dy)) eff-r2))
+                 1
+                 0))))]
+    [else
+     (define dps-key (if u-air? 'air-dps 'ground-dps))
+     (define rng-key (if u-air? 'air-range 'ground-range))
+     (for/sum : Integer ([e (in-list enemy-units)]
+                         #:when (u-alive? e))
+       (define et (exact-unit-type e))
+       (define stats (cached-unit-combat-stats et))
+       (define dps (safe-finite-real (hash-ref stats dps-key (lambda () 0.0)) 0.0))
+       (if (<= dps 0.0)
+           0
+           (let* ([rng (safe-finite-real (hash-ref stats rng-key (lambda () 0.0)) 0.0)]
+                  [eff-rng (+ (max 1.5 rng) 0.75)]
+                  [dx (- ux (u-x e))]
+                  [dy (- uy (u-y e))])
+             (if (and (<= (abs dx) eff-rng)
+                      (<= (abs dy) eff-rng)
+                      (<= (+ (* dx dx) (* dy dy)) (* eff-rng eff-rng)))
+                 1
+                 0))))]))
 
 (: nearest-enemy-combat-dist (-> Real Real (Listof Any) Float))
 (define (nearest-enemy-combat-dist x y enemy-units)
   (define fx (->float x))
   (define fy (->float y))
-  (for/fold ([best : Float +inf.0]) ([e (in-list enemy-units)]
-                                     #:when (u-alive? e))
-    (define et (exact-unit-type e))
-    (if (memq et '(larva egg observer overlord changeling))
-        best
-        (min best (dist-2d fx fy (u-x e) (u-y e))))))
+  (define pre-e (current-fleet-enemy-recs))
+  (define best-d2 : Float
+    (cond
+      [pre-e
+       (for/fold ([best : Float +inf.0])
+                 ([r (in-list pre-e)]
+                  #:when (tr-enemy-rec-combat? r))
+         (define dx (- fx (tr-enemy-rec-x r)))
+         (define dy (- fy (tr-enemy-rec-y r)))
+         (min best (+ (* dx dx) (* dy dy))))]
+      [else
+       (for/fold ([best : Float +inf.0])
+                 ([e (in-list enemy-units)]
+                  #:when (u-alive? e))
+         (define et (exact-unit-type e))
+         (if (memq et '(larva egg observer overlord changeling))
+             best
+             (let ([dx (- fx (u-x e))]
+                   [dy (- fy (u-y e))])
+               (min best (+ (* dx dx) (* dy dy))))))]))
+  (if (infinite? best-d2) +inf.0 (->float (sqrt (max 0.0 best-d2)))))
 
 ;; =============================================================================
 ;; 1. Combat Save-Pickup Priority & Execution
 ;; =============================================================================
+
+(: ally-base-save-priority (-> Any Symbol Integer (Listof Any) (Listof danger-zone) (Values Float Boolean)))
+(define (ally-base-save-priority ally-u ut sz enemy-units zones)
+  (define has-zones? (pair? zones))
+  (define high-val? (not (not (memq ut SAVE-HIGH-VALUE-SYMS))))
+  (define is-disr? (eq? ut 'disruptor))
+  (cond
+    [(or (and (not has-zones?) (not is-disr?) (not high-val?))
+         (> sz TRANSPORT-MAX-CARGO-CAPACITY)
+         (memq ut '(siege-tank-sieged lurker-burrowed larva egg))
+         (not (u-alive? ally-u)))
+     (values 0.0 #f)]
+    [else
+     (define ux (u-x ally-u))
+     (define uy (u-y ally-u))
+     (define in-aoe? (and has-zones? (point-in-danger-zones? ux uy zones 0.35)))
+     (define disruptor-cd-danger?
+       (and is-disr?
+            (not (u-nova-ready? ally-u))
+            (<= (nearest-enemy-combat-dist ux uy enemy-units) 9.0)))
+     (cond
+       [(not (or in-aoe? disruptor-cd-danger? high-val?))
+        (values 0.0 #f)]
+       [else
+        (define hp-rat (if (or in-aoe? disruptor-cd-danger?) 1.0 (u-hp-ratio ally-u)))
+        (define need-rescue?
+          (or in-aoe?
+              disruptor-cd-danger?
+              (and high-val? (< hp-rat SAVE-UNDER-FIRE-HP-RATIO))))
+        (cond
+          [(or (not need-rescue?)
+               (u-flying? ally-u)
+               (u-structure? ally-u))
+           (values 0.0 #f)]
+          [else
+           (define bruised?
+             (and high-val?
+                  (let ([r (if (or in-aoe? disruptor-cd-danger?) (u-hp-ratio ally-u) hp-rat)])
+                    (or (< r SAVE-BRUISED-HP-RATIO)
+                        (and (< r SAVE-UNDER-FIRE-HP-RATIO)
+                             (>= (count-attackers-in-range ally-u enemy-units) 2))))))
+           (if (or in-aoe? disruptor-cd-danger? bruised?)
+               (let* ([r (if (or in-aoe? disruptor-cd-danger?) (u-hp-ratio ally-u) hp-rat)]
+                      [value-bonus (exact->inexact (max 50 (+ (sc2-min-cost ut) (sc2-gas-cost ut))))])
+                 (values (+ (if in-aoe? 1500.0 0.0)
+                            (if disruptor-cd-danger? 1100.0 0.0)
+                            (if bruised? (* 900.0 (- 1.0 r)) 0.0)
+                            (* 0.5 value-bonus))
+                         in-aoe?))
+               (values 0.0 #f))])])]))
+
+(: build-fleet-save-cands (-> (Listof Any) (Listof Any) (Listof danger-zone) (Listof tr-save-cand)))
+(define (build-fleet-save-cands ally-units enemy-units zones)
+  (define has-zones? (pair? zones))
+  (for/fold ([acc : (Listof tr-save-cand) '()] #:result (reverse acc))
+            ([a (in-list ally-units)])
+    (define ut (exact-unit-type a))
+    (cond
+      [(and (not has-zones?)
+            (not (eq? ut 'disruptor))
+            (not (memq ut SAVE-HIGH-VALUE-SYMS)))
+       acc]
+      [else
+       (define sz (unit-cargo-size ut))
+       (define-values (sc in-aoe?) (ally-base-save-priority a ut sz enemy-units zones))
+       (if (> sc 0.0)
+           (let ([atag (u-tag a)])
+             (if (> atag 0)
+                 (cons (tr-save-cand a atag ut sz (u-x a) (u-y a) in-aoe? sc) acc)
+                 acc))
+           acc)])))
 
 ;; Scores a friendly unit's save-pickup urgency (<= 0.0 if rescue is not warranted).
 (: save-pickup-candidate-priority
@@ -912,92 +1141,102 @@
   (define ut (exact-unit-type ally-u))
   (define sz (unit-cargo-size ut))
   (cond
-    [(or (not (u-alive? ally-u))
-         (u-flying? ally-u)
-         (u-structure? ally-u)
-         (> sz cargo-free)
-         (not (transport-race-accepts-unit? tr-sym ut))
-         (memq ut '(siege-tank-sieged lurker-burrowed larva egg)))
+    [(or (> sz cargo-free)
+         (not (transport-race-accepts-unit? tr-sym ut)))
      0.0]
     [else
-     (define ux (u-x ally-u))
-     (define uy (u-y ally-u))
-     (define in-aoe? (point-in-danger-zones? ux uy zones 0.35))
-     (define hp-rat (u-hp-ratio ally-u))
-     (define attackers (count-attackers-in-range ally-u enemy-units))
-     (define disruptor-cd-danger?
-       (and (eq? ut 'disruptor)
-            (not (u-nova-ready? ally-u))
-            (<= (nearest-enemy-combat-dist ux uy enemy-units) 9.0)))
-     (define high-val? (not (not (memq ut SAVE-HIGH-VALUE-SYMS))))
-     (define bruised?
-       (and high-val?
-            (or (< hp-rat SAVE-BRUISED-HP-RATIO)
-                (and (< hp-rat SAVE-UNDER-FIRE-HP-RATIO) (>= attackers 2)))))
-     (cond
-       [(or in-aoe? disruptor-cd-danger? bruised?)
-        (define value-bonus
-          (exact->inexact (max 50 (+ (sc2-min-cost ut) (sc2-gas-cost ut)))))
-        (+ (if in-aoe? 1500.0 0.0)
-           (if disruptor-cd-danger? 1100.0 0.0)
-           (if bruised? (* 900.0 (- 1.0 hp-rat)) 0.0)
-           (* 0.5 value-bonus))]
-       [else 0.0])]))
+     (define-values (sc _in-aoe?) (ally-base-save-priority ally-u ut sz enemy-units zones))
+     sc]))
 
 (: find-save-pickup-target
    (-> Any Symbol (Listof Any) (Listof Any) (Listof danger-zone) (Values (Option Any) Symbol)))
 (define (find-save-pickup-target tr-u tr-sym ally-units enemy-units zones)
-  (define tx (u-x tr-u))
-  (define ty (u-y tr-u))
-  (define tr-tag (u-tag tr-u))
   (define cargo-used (u-cargo-space-taken tr-u))
   (define cargo-free (max 0 (- TRANSPORT-MAX-CARGO-CAPACITY cargo-used)))
-  (define carried-tags : (Listof Integer) (extract-passenger-tags tr-u))
-  (for/fold ([best : (Option Any) #f]
-             [best-sc : Float 0.0]
-             #:result
-             (if best
-                 (let ([reason
-                        (cond
-                          [(point-in-danger-zones? (u-x best) (u-y best) zones 0.35)
-                           'save-pickup-aoe-danger-zone]
-                          [(eq? (exact-unit-type best) 'disruptor)
-                           'save-pickup-disruptor-nova-cooldown]
-                          [else
-                           'save-pickup-bruised-high-value])])
-                   (values best reason))
-                 (values #f 'none)))
-            ([a (in-list ally-units)])
-    (define atag (u-tag a))
-    (if (or (<= atag 0)
-            (= atag tr-tag)
-            (memv atag carried-tags)
-            (> (dist-2d tx ty (u-x a) (u-y a)) TRANSPORT-SAVE-SEARCH-RADIUS))
-        (values best best-sc)
-        (let ([sc (save-pickup-candidate-priority tr-sym a enemy-units zones cargo-free)])
-          (if (> sc best-sc)
-              (values a sc)
-              (values best best-sc))))))
+  (define pre-cands (current-fleet-save-cands))
+  (cond
+    [(<= cargo-free 0) (values #f 'none)]
+    [pre-cands
+     (if (null? pre-cands)
+         (values #f 'none)
+         (let ([tx (u-x tr-u)]
+               [ty (u-y tr-u)]
+               [tr-tag (u-tag tr-u)]
+               [carried-tags : (Listof Integer) (extract-passenger-tags tr-u)]
+               [r2 (* TRANSPORT-SAVE-SEARCH-RADIUS TRANSPORT-SAVE-SEARCH-RADIUS)])
+           (for/fold ([best : (Option Any) #f]
+                      [best-sc : Float 0.0]
+                      [best-ut : Symbol 'unknown]
+                      [best-aoe? : Boolean #f]
+                      #:result
+                      (if best
+                          (values best
+                                  (cond
+                                    [best-aoe? 'save-pickup-aoe-danger-zone]
+                                    [(eq? best-ut 'disruptor) 'save-pickup-disruptor-nova-cooldown]
+                                    [else 'save-pickup-bruised-high-value]))
+                          (values #f 'none)))
+                     ([c (in-list pre-cands)])
+             (define atag (tr-save-cand-tag c))
+             (define sc (tr-save-cand-score c))
+             (if (and (> sc best-sc)
+                      (not (= atag tr-tag))
+                      (not (memv atag carried-tags))
+                      (<= (tr-save-cand-sz c) cargo-free)
+                      (transport-race-accepts-unit? tr-sym (tr-save-cand-ut c)))
+                 (let ([dx (- tx (tr-save-cand-x c))]
+                       [dy (- ty (tr-save-cand-y c))])
+                   (if (and (<= (abs dx) TRANSPORT-SAVE-SEARCH-RADIUS)
+                            (<= (abs dy) TRANSPORT-SAVE-SEARCH-RADIUS)
+                            (<= (+ (* dx dx) (* dy dy)) r2))
+                       (values (tr-save-cand-u c) sc (tr-save-cand-ut c) (tr-save-cand-in-aoe? c))
+                       (values best best-sc best-ut best-aoe?)))
+                 (values best best-sc best-ut best-aoe?)))))]
+    [else
+     (define tx (u-x tr-u))
+     (define ty (u-y tr-u))
+     (define tr-tag (u-tag tr-u))
+     (define carried-tags : (Listof Integer) (extract-passenger-tags tr-u))
+     (for/fold ([best : (Option Any) #f]
+                [best-sc : Float 0.0]
+                #:result
+                (if best
+                    (let ([reason
+                           (cond
+                             [(point-in-danger-zones? (u-x best) (u-y best) zones 0.35)
+                              'save-pickup-aoe-danger-zone]
+                             [(eq? (exact-unit-type best) 'disruptor)
+                              'save-pickup-disruptor-nova-cooldown]
+                             [else
+                              'save-pickup-bruised-high-value])])
+                      (values best reason))
+                    (values #f 'none)))
+               ([a (in-list ally-units)])
+       (define atag (u-tag a))
+       (if (or (<= atag 0)
+               (= atag tr-tag)
+               (memv atag carried-tags))
+           (values best best-sc)
+           (let ([ax (u-x a)]
+                 [ay (u-y a)])
+             (if (or (> (abs (- tx ax)) TRANSPORT-SAVE-SEARCH-RADIUS)
+                     (> (abs (- ty ay)) TRANSPORT-SAVE-SEARCH-RADIUS)
+                     (> (dist-2d tx ty ax ay) TRANSPORT-SAVE-SEARCH-RADIUS))
+                 (values best best-sc)
+                 (let ([sc (save-pickup-candidate-priority tr-sym a enemy-units zones cargo-free)])
+                   (if (> sc best-sc)
+                       (values a sc)
+                       (values best best-sc)))))))]))
 
-;; Evaluates combat save-pickup for a transport (`5.0` WarpPrism vs `1.5` Medivac/Dropperlord).
-(: evaluate-save-pickup
-   (->* (Any (Listof Any) (Listof Any))
-        (#:tracker (Option transport-tracker)
-         #:current-frame Integer
-         #:danger-zones (Listof danger-zone)
-         #:effects (Listof Any))
-        (Option transport-directive)))
-(define (evaluate-save-pickup tr-u ally-units enemy-units
-                              #:tracker [tr #f]
-                              #:current-frame [current-frame 0]
-                              #:danger-zones [explicit-zones '()]
-                              #:effects [effects '()])
+(: evaluate-save-pickup/zones
+   (-> Any (Listof Any) (Listof Any) (Option transport-tracker) Integer (Listof danger-zone)
+       (Option transport-directive)))
+(define (evaluate-save-pickup/zones tr-u ally-units enemy-units tr current-frame zones)
   (define tr-sym (exact-unit-type tr-u))
   (define tr-tag (u-tag tr-u))
   (cond
     [(or (not (u-alive? tr-u)) (not (transport-unit-sym? tr-sym))) #f]
     [else
-     (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
      (define-values (victim reason) (find-save-pickup-target tr-u tr-sym ally-units enemy-units zones))
      (cond
        [(not victim) #f]
@@ -1030,21 +1269,37 @@
            (transport-directive tr-tag tr-sym 'approach-save-pickup 'move
                                 16 vtag (list vtag) vx vy reason)])])]))
 
+;; Evaluates combat save-pickup for a transport (`5.0` WarpPrism vs `1.5` Medivac/Dropperlord).
+(: evaluate-save-pickup
+   (->* (Any (Listof Any) (Listof Any))
+        (#:tracker (Option transport-tracker)
+         #:current-frame Integer
+         #:danger-zones (Listof danger-zone)
+         #:effects (Listof Any))
+        (Option transport-directive)))
+(define (evaluate-save-pickup tr-u ally-units enemy-units
+                              #:tracker [tr #f]
+                              #:current-frame [current-frame 0]
+                              #:danger-zones [explicit-zones '()]
+                              #:effects [effects '()])
+  (define tr-sym (exact-unit-type tr-u))
+  (cond
+    [(or (not (u-alive? tr-u)) (not (transport-unit-sym? tr-sym))) #f]
+    [else
+     (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
+     (evaluate-save-pickup/zones tr-u ally-units enemy-units tr current-frame zones)]))
+
 ;; =============================================================================
 ;; 2. Safe Rear-Offset Drop, Pro Moving Self-Drop (`#115`) & 672f Ceiling
 ;; =============================================================================
 
-(: compute-ally-front-anchor (-> (Listof Any) (Listof Any) Real Real (Values Float Float)))
-(define (compute-ally-front-anchor ally-units enemy-units fallback-x fallback-y)
-  (define-values (ecount ex-sum ey-sum)
-    (for/fold ([n : Integer 0] [sx : Float 0.0] [sy : Float 0.0])
-              ([e (in-list enemy-units)] #:when (u-alive? e))
-      (values (add1 n) (+ sx (u-x e)) (+ sy (u-y e)))))
-  (define-values (ecx ecy)
-    (if (> ecount 0)
-        (values (/ ex-sum (->float ecount)) (/ ey-sum (->float ecount)))
-        (values (+ (->float fallback-x) 40.0) (+ (->float fallback-y) 40.0))))
-  ;; Pick friendly combat centroid weighted or nearest ground combat front if available
+(define current-fleet-front-xy : (Parameterof (Option (Pairof Float Float)))
+  (make-parameter #f))
+(define current-fleet-safe-drop : (Parameterof (Option point2d))
+  (make-parameter #f))
+
+(: compute-ally-ground-anchor (-> (Listof Any) (Option (Pairof Float Float))))
+(define (compute-ally-ground-anchor ally-units)
   (define-values (acount ax-sum ay-sum)
     (for/fold ([n : Integer 0] [sx : Float 0.0] [sy : Float 0.0])
               ([a (in-list ally-units)]
@@ -1054,7 +1309,14 @@
                            (not (transport-unit-sym? (exact-unit-type a)))))
       (values (add1 n) (+ sx (u-x a)) (+ sy (u-y a)))))
   (if (> acount 0)
-      (values (/ ax-sum (->float acount)) (/ ay-sum (->float acount)))
+      (cons (/ ax-sum (->float acount)) (/ ay-sum (->float acount)))
+      #f))
+
+(: compute-ally-front-anchor (-> (Listof Any) (Listof Any) Real Real (Values Float Float)))
+(define (compute-ally-front-anchor ally-units enemy-units fallback-x fallback-y)
+  (define anchor (compute-ally-ground-anchor ally-units))
+  (if anchor
+      (values (car anchor) (cdr anchor))
       (values (->float fallback-x) (->float fallback-y))))
 
 ;; Computes a safe drop point `3.5..5.0` tiles behind `front` toward `(home-x, home-y)`
@@ -1104,30 +1366,13 @@
         [else (loop (cdr pts))])))
   (or best-safe fallback-safe (first candidate-points)))
 
-;; Evaluates cargo dwell, `<25%` dump, `672f` ceiling, Medivac Boost->Unload (`16f-36f`),
-;; moving self-drops (`'transport-drop-moving`), and safe `[3.5..5.0]`-tile rear-offset drops.
-(: evaluate-transport-drop
-   (->* (Any (Listof Any) (Listof Any))
-        (#:tracker (Option transport-tracker)
-         #:current-frame Integer
-         #:home-x Real
-         #:home-y Real
-         #:front-x (Option Real)
-         #:front-y (Option Real)
-         #:danger-zones (Listof danger-zone)
-         #:effects (Listof Any)
-         #:prefer-moving-drop? Boolean)
-        (Option transport-directive)))
-(define (evaluate-transport-drop tr-u ally-units enemy-units
-                                 #:tracker [tr #f]
-                                 #:current-frame [current-frame 0]
-                                 #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
-                                 #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
-                                 #:front-x [front-x-arg #f]
-                                 #:front-y [front-y-arg #f]
-                                 #:danger-zones [explicit-zones '()]
-                                 #:effects [effects '()]
-                                 #:prefer-moving-drop? [prefer-moving-drop? #f])
+(: evaluate-transport-drop/zones
+   (-> Any (Listof Any) (Listof Any) (Option transport-tracker) Integer Real Real
+       (Option Real) (Option Real) (Listof danger-zone) Boolean
+       (Option transport-directive)))
+(define (evaluate-transport-drop/zones tr-u ally-units enemy-units
+                                       tr current-frame home-x home-y
+                                       front-x-arg front-y-arg zones prefer-moving-drop?)
   (define tr-sym (exact-unit-type tr-u))
   (define tr-tag (u-tag tr-u))
   (define ptags (extract-passenger-tags tr-u))
@@ -1141,17 +1386,27 @@
      (define tx (u-x tr-u))
      (define ty (u-y tr-u))
      (define hp-rat (u-hp-ratio tr-u))
-     (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
      (define ground-ok? (u-ground-safe? tr-u))
      (define pos-safe? (and ground-ok? (not (point-in-danger-zones? tx ty zones 0.35))))
      (define carry-dwell
        (if tr
            (transport-tracker-carry-dwell-frames tr tr-tag ptags current-frame)
            MIN-CARRY-DWELL-FRAMES))
-     (define-values (fx0 fy0) (compute-ally-front-anchor ally-units enemy-units tx ty))
+     (define pre-front (if (and (not front-x-arg) (not front-y-arg))
+                           (current-fleet-front-xy)
+                           #f))
+     (define-values (fx0 fy0)
+       (if pre-front
+           (values (car pre-front) (cdr pre-front))
+           (compute-ally-front-anchor ally-units enemy-units tx ty)))
      (define front-x (if front-x-arg (->float front-x-arg) fx0))
      (define front-y (if front-y-arg (->float front-y-arg) fy0))
-     (define safe-pt (compute-safe-rear-drop-point front-x front-y home-x home-y zones enemy-units))
+     (define pre-safe (if (and (not front-x-arg) (not front-y-arg))
+                          (current-fleet-safe-drop)
+                          #f))
+     (define safe-pt
+       (or pre-safe
+           (compute-safe-rear-drop-point front-x front-y home-x home-y zones enemy-units)))
      (define sx (point2d-x safe-pt))
      (define sy (point2d-y safe-pt))
      (define unload-ab-id (transport-unload-ability-id tr-sym))
@@ -1223,29 +1478,54 @@
         (transport-directive tr-tag tr-sym 'move-to-drop 'move
                              16 tr-tag ptags sx sy 'transit-safe-rear-drop)])]))
 
+;; Evaluates cargo dwell, `<25%` dump, `672f` ceiling, Medivac Boost->Unload (`16f-36f`),
+;; moving self-drops (`'transport-drop-moving`), and safe `[3.5..5.0]`-tile rear-offset drops.
+(: evaluate-transport-drop
+   (->* (Any (Listof Any) (Listof Any))
+        (#:tracker (Option transport-tracker)
+         #:current-frame Integer
+         #:home-x Real
+         #:home-y Real
+         #:front-x (Option Real)
+         #:front-y (Option Real)
+         #:danger-zones (Listof danger-zone)
+         #:effects (Listof Any)
+         #:prefer-moving-drop? Boolean)
+        (Option transport-directive)))
+(define (evaluate-transport-drop tr-u ally-units enemy-units
+                                 #:tracker [tr #f]
+                                 #:current-frame [current-frame 0]
+                                 #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
+                                 #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
+                                 #:front-x [front-x-arg #f]
+                                 #:front-y [front-y-arg #f]
+                                 #:danger-zones [explicit-zones '()]
+                                 #:effects [effects '()]
+                                 #:prefer-moving-drop? [prefer-moving-drop? #f])
+  (define tr-sym (exact-unit-type tr-u))
+  (define ptags (extract-passenger-tags tr-u))
+  (define cargo-used (u-cargo-space-taken tr-u))
+  (cond
+    [(or (not (u-alive? tr-u))
+         (not (transport-unit-sym? tr-sym))
+         (and (null? ptags) (<= cargo-used 0)))
+     #f]
+    [else
+     (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
+     (evaluate-transport-drop/zones tr-u ally-units enemy-units tr current-frame
+                                    home-x home-y front-x-arg front-y-arg zones prefer-moving-drop?)]))
+
 ;; =============================================================================
 ;; 3. WarpPrism Phasing Management (`1528` <-> `1530`)
 ;; =============================================================================
 
-;; Evaluates WarpPrism phasing (`1528`) / unphasing (`1530`) using `#115` dwells:
-;; min dwell `140f`, target warp-cycle `208f`, rephase cooldown `160f`, plus immediate
-;; unphase on `<10.0`-tile threat, `<65%` HP+shield, army `>9.0` away, or emergency save.
-(: evaluate-warp-prism-phasing
-   (->* (Any (Listof Any) (Listof Any))
-        (#:tracker (Option transport-tracker)
-         #:current-frame Integer
-         #:danger-zones (Listof danger-zone)
-         #:effects (Listof Any)
-         #:warp-in-complete? Boolean
-         #:warp-in-requested? Boolean)
-        (Option transport-directive)))
-(define (evaluate-warp-prism-phasing prism-u ally-units enemy-units
-                                     #:tracker [tr #f]
-                                     #:current-frame [current-frame 0]
-                                     #:danger-zones [explicit-zones '()]
-                                     #:effects [effects '()]
-                                     #:warp-in-complete? [warp-in-complete? #f]
-                                     #:warp-in-requested? [warp-in-requested? #t])
+(: evaluate-warp-prism-phasing/zones
+   (-> Any (Listof Any) (Listof Any) (Option transport-tracker) Integer (Listof danger-zone)
+       Boolean Boolean Boolean
+       (Option transport-directive)))
+(define (evaluate-warp-prism-phasing/zones prism-u ally-units enemy-units
+                                           tr current-frame zones
+                                           warp-in-complete? warp-in-requested? check-emergency-save?)
   (define ut (exact-unit-type prism-u))
   (define tag (u-tag prism-u))
   (cond
@@ -1257,36 +1537,36 @@
      (define py (u-y prism-u))
      (define hp-rat (u-hp-ratio prism-u))
      (define is-phasing? (eq? ut 'warp-prism-phasing))
-     (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
-     (define near-enemy-d (nearest-enemy-combat-dist px py enemy-units))
-     (define-values (has-army? acx acy)
-       (for/fold ([sx : Float 0.0] [sy : Float 0.0] [n : Integer 0]
-                  #:result (if (> n 0)
-                               (values #t (/ sx (->float n)) (/ sy (->float n)))
-                               (values #f 0.0 0.0)))
-                 ([a (in-list ally-units)]
-                  #:when (and (u-alive? a)
-                              (not (u-flying? a))
-                              (not (u-structure? a))
-                              (not (memq (exact-unit-type a) '(probe)))))
-         (values (+ sx (u-x a)) (+ sy (u-y a)) (add1 n))))
-     (define army-dist (if has-army? (dist-2d px py acx acy) 0.0))
-     (define-values (emergency-victim _why)
-       (find-save-pickup-target prism-u ut ally-units enemy-units zones))
      (define phase-tbl (and tr (transport-tracker-prism-phases tr)))
-
      (cond
        [is-phasing?
         (define phase-dwell
           (if tr (transport-tracker-prism-phase-dwell tr tag current-frame) WARP-PRISM-TARGET-WARP-CYCLE-FRAMES))
+        (define-values (emergency-victim _why)
+          (if check-emergency-save?
+              (find-save-pickup-target prism-u ut ally-units enemy-units zones)
+              (values #f 'none)))
         (define immediate-reason : (Option Symbol)
           (cond
-            [emergency-victim                               'warp-prism-unphase-emergency-save]
-            [(< hp-rat WARP-PRISM-UNPHASE-HP-RATIO)         'warp-prism-unphase-low-hp]
-            [(< near-enemy-d WARP-PRISM-THREAT-UNPHASE-RADIUS) 'warp-prism-unphase-threat-close]
-            [(and has-army? (> army-dist WARP-PRISM-ARMY-LEASH-RADIUS))
-             'warp-prism-unphase-army-far]
-            [else #f]))
+            [emergency-victim                         'warp-prism-unphase-emergency-save]
+            [(< hp-rat WARP-PRISM-UNPHASE-HP-RATIO)   'warp-prism-unphase-low-hp]
+            [(< (nearest-enemy-combat-dist px py enemy-units) WARP-PRISM-THREAT-UNPHASE-RADIUS)
+             'warp-prism-unphase-threat-close]
+            [else
+             (define-values (has-army? acx acy)
+               (for/fold ([sx : Float 0.0] [sy : Float 0.0] [n : Integer 0]
+                          #:result (if (> n 0)
+                                       (values #t (/ sx (->float n)) (/ sy (->float n)))
+                                       (values #f 0.0 0.0)))
+                         ([a (in-list ally-units)]
+                          #:when (and (u-alive? a)
+                                      (not (u-flying? a))
+                                      (not (u-structure? a))
+                                      (not (memq (exact-unit-type a) '(probe)))))
+                 (values (+ sx (u-x a)) (+ sy (u-y a)) (add1 n))))
+             (if (and has-army? (> (dist-2d px py acx acy) WARP-PRISM-ARMY-LEASH-RADIUS))
+                 'warp-prism-unphase-army-far
+                 #f)]))
         (define cycle-reason : (Option Symbol)
           (cond
             [immediate-reason immediate-reason]
@@ -1311,26 +1591,77 @@
                                   (<= (u-cargo-space-taken prism-u) 0)))
         (define rephase-cd
           (if tr (transport-tracker-prism-rephase-cooldown tr tag current-frame) 0))
-        (define safe-to-phase?
-          (and cargo-empty?
-               (not emergency-victim)
-               (zero? rephase-cd)
-               (>= hp-rat WARP-PRISM-UNPHASE-HP-RATIO)
-               (>= near-enemy-d WARP-PRISM-THREAT-UNPHASE-RADIUS)
-               (not (point-in-danger-zones? px py zones 0.75))
-               (or warp-in-requested? (and has-army? (<= army-dist WARP-PRISM-ARMY-LEASH-RADIUS)))))
-        (if safe-to-phase?
-            (begin
-              (when phase-tbl
-                (define prev (hash-ref phase-tbl tag (lambda () #f)))
-                (hash-set! phase-tbl tag
-                           (prism-phase-rec current-frame
-                                            (if prev (prism-phase-rec-last-unphase-frame prev) -10000)
-                                            #t)))
-              (transport-directive tag ut 'morph-warp-prism-phasing 'morph-warp-prism-phasing
-                                   MORPH-WARP-PRISM-PHASING-ABILITY-ID tag '() px py
-                                   'warp-prism-phase-for-warp-cycle))
-            #f)])]))
+        (cond
+          [(or (not cargo-empty?)
+               (not (zero? rephase-cd))
+               (< hp-rat WARP-PRISM-UNPHASE-HP-RATIO)
+               (and (pair? zones) (point-in-danger-zones? px py zones 0.75)))
+           #f]
+          [else
+           (define-values (emergency-victim _why)
+             (if check-emergency-save?
+                 (find-save-pickup-target prism-u ut ally-units enemy-units zones)
+                 (values #f 'none)))
+           (cond
+             [emergency-victim #f]
+             [(< (nearest-enemy-combat-dist px py enemy-units) WARP-PRISM-THREAT-UNPHASE-RADIUS) #f]
+             [else
+              (define army-ok?
+                (if warp-in-requested?
+                    #t
+                    (let-values ([(has-army? acx acy)
+                                  (for/fold ([sx : Float 0.0] [sy : Float 0.0] [n : Integer 0]
+                                             #:result (if (> n 0)
+                                                          (values #t (/ sx (->float n)) (/ sy (->float n)))
+                                                          (values #f 0.0 0.0)))
+                                            ([a (in-list ally-units)]
+                                             #:when (and (u-alive? a)
+                                                         (not (u-flying? a))
+                                                         (not (u-structure? a))
+                                                         (not (memq (exact-unit-type a) '(probe)))))
+                                    (values (+ sx (u-x a)) (+ sy (u-y a)) (add1 n)))])
+                      (and has-army? (<= (dist-2d px py acx acy) WARP-PRISM-ARMY-LEASH-RADIUS)))))
+              (if army-ok?
+                  (begin
+                    (when phase-tbl
+                      (define prev (hash-ref phase-tbl tag (lambda () #f)))
+                      (hash-set! phase-tbl tag
+                                 (prism-phase-rec current-frame
+                                                  (if prev (prism-phase-rec-last-unphase-frame prev) -10000)
+                                                  #t)))
+                    (transport-directive tag ut 'morph-warp-prism-phasing 'morph-warp-prism-phasing
+                                         MORPH-WARP-PRISM-PHASING-ABILITY-ID tag '() px py
+                                         'warp-prism-phase-for-warp-cycle))
+                  #f)])])])]))
+
+;; Evaluates WarpPrism phasing (`1528`) / unphasing (`1530`) using `#115` dwells:
+;; min dwell `140f`, target warp-cycle `208f`, rephase cooldown `160f`, plus immediate
+;; unphase on `<10.0`-tile threat, `<65%` HP+shield, army `>9.0` away, or emergency save.
+(: evaluate-warp-prism-phasing
+   (->* (Any (Listof Any) (Listof Any))
+        (#:tracker (Option transport-tracker)
+         #:current-frame Integer
+         #:danger-zones (Listof danger-zone)
+         #:effects (Listof Any)
+         #:warp-in-complete? Boolean
+         #:warp-in-requested? Boolean)
+        (Option transport-directive)))
+(define (evaluate-warp-prism-phasing prism-u ally-units enemy-units
+                                     #:tracker [tr #f]
+                                     #:current-frame [current-frame 0]
+                                     #:danger-zones [explicit-zones '()]
+                                     #:effects [effects '()]
+                                     #:warp-in-complete? [warp-in-complete? #f]
+                                     #:warp-in-requested? [warp-in-requested? #t])
+  (define ut (exact-unit-type prism-u))
+  (cond
+    [(or (not (u-alive? prism-u))
+         (not (memq ut '(warp-prism warp-prism-phasing))))
+     #f]
+    [else
+     (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
+     (evaluate-warp-prism-phasing/zones prism-u ally-units enemy-units tr current-frame zones
+                                        warp-in-complete? warp-in-requested? #t)]))
 
 ;; =============================================================================
 ;; 4. OverlordTransport Eligibility (`'morph-overlord-transport` `2708`)
@@ -1382,24 +1713,48 @@
      (define sup (or kw-supply pos-supply 0.0))
      (define act (or kw-active pos-active 0))
      (overlord-transport-eligible? lair-ok? sup act)]
+    [(eq? kw-lair #f) #f]
+    [(let ([act-ov (or kw-active pos-active)])
+       (and act-ov (>= act-ov DROPPERLORD-MAX-ACTIVE-COUNT)))
+     #f]
+    [(let ([sup-ov (or kw-supply pos-supply)])
+       (and sup-ov (< (->float sup-ov) (->float DROPPERLORD-MIN-COMBAT-SUPPLY))))
+     #f]
     [else
-     (define lair-ok?
-       (if (eq? kw-lair 'auto)
-           (for/or : Boolean ([a (in-list ally-or-lair)])
-             (and (u-alive? a)
-                  (memq (exact-unit-type a) '(lair hive))
-                  (u-completed? a)))
-           (not (not kw-lair))))
-     (define sup
-       (or kw-supply pos-supply (overlord-drop-combat-supply ally-or-lair)))
-     (define act
-       (or kw-active
-           pos-active
-           (for/sum : Integer ([a (in-list ally-or-lair)]
-                               #:when (and (u-alive? a)
-                                           (memq (exact-unit-type a)
-                                                 '(overlord-transport transport-overlord-cocoon))))
-             1)))
+     (define need-lair? (eq? kw-lair 'auto))
+     (define need-sup? (not (or kw-supply pos-supply)))
+     (define need-act? (not (or kw-active pos-active)))
+     (define init-lair? (if need-lair? #f (not (not kw-lair))))
+     (define init-sup : Float (if need-sup? 0.0 (->float (or kw-supply pos-supply 0.0))))
+     (define init-act : Integer (if need-act? 0 (or kw-active pos-active 0)))
+     (define-values (lair-ok? sup act)
+       (for/fold ([l-ok? : Boolean init-lair?]
+                  [s : Float init-sup]
+                  [ac : Integer init-act])
+                 ([a (in-list ally-or-lair)]
+                  #:when (u-alive? a))
+         (define ut (exact-unit-type a))
+         (define next-l?
+           (if (and need-lair? (not l-ok?) (memq ut '(lair hive)) (u-completed? a))
+               #t
+               l-ok?))
+         (define next-s
+           (if need-sup?
+               (+ s
+                  (case ut
+                    [(roach roach-burrowed)                             2.0]
+                    [(hydralisk hydralisk-burrowed)                     2.0]
+                    [(lurker lurker-burrowed lurker-mp lurker-mp-burrowed
+                      lurker-egg lurker-mp-egg)                         3.0]
+                    [(queen queen-burrowed)                             2.0]
+                    [(baneling baneling-burrowed baneling-cocoon)       0.5]
+                    [else                                               0.0]))
+               s))
+         (define next-ac
+           (if (and need-act? (memq ut '(overlord-transport transport-overlord-cocoon)))
+               (add1 ac)
+               ac))
+         (values next-l? next-s next-ac)))
      (overlord-transport-eligible? lair-ok? sup act)]))
 
 ;; Selects up to 1 Overlord to morph into `'overlord-transport` (`2708`) when eligible.
@@ -1413,39 +1768,620 @@
                                         #:lair-or-hive-ready? [kw-lair 'auto]
                                         #:combat-supply [kw-supply #f]
                                         #:active-dropperlords [kw-active #f])
-  (if (not (should-morph-overlord-transport? ally-units
-                                             #:lair-or-hive-ready? kw-lair
-                                             #:combat-supply kw-supply
-                                             #:active-dropperlords kw-active))
-      '()
-      (let ([best-ovi
-             (for/fold ([best : (Option Any) #f]
-                        [best-safe : Float -1.0]
-                        #:result best)
-                       ([a (in-list ally-units)]
-                        #:when (and (u-alive? a)
-                                    (eq? (exact-unit-type a) 'overlord)
-                                    (> (u-tag a) 0)))
-               (define safety-d (nearest-enemy-combat-dist (u-x a) (u-y a) enemy-units))
-               (if (> safety-d best-safe)
-                   (values a safety-d)
-                   (values best best-safe)))])
-        (if best-ovi
-            (let ([otag (u-tag best-ovi)])
-              (list (transport-directive otag 'overlord 'cast-spell 'morph-overlord-transport
-                                         MORPH-OVERLORD-TRANSPORT-ABILITY-ID otag '()
-                                         (u-x best-ovi) (u-y best-ovi)
-                                         'dropperlord-midgame-mobility)))
-            '()))))
+  (cond
+    [(or (eq? kw-lair #f)
+         (and kw-active (>= kw-active DROPPERLORD-MAX-ACTIVE-COUNT))
+         (and kw-supply (< (->float kw-supply) (->float DROPPERLORD-MIN-COMBAT-SUPPLY))))
+     '()]
+    [else
+     (define need-lair? (eq? kw-lair 'auto))
+     (define need-sup? (not kw-supply))
+     (define need-act? (not kw-active))
+     (define init-lair? (if need-lair? #f (not (not kw-lair))))
+     (define init-sup : Float (if need-sup? 0.0 (->float (or kw-supply 0.0))))
+     (define init-act : Integer (if need-act? 0 (or kw-active 0)))
+     (define-values (lair-ok? sup act overlords)
+       (for/fold ([l-ok? : Boolean init-lair?]
+                  [s : Float init-sup]
+                  [ac : Integer init-act]
+                  [ovis : (Listof Any) '()])
+                 ([a (in-list ally-units)]
+                  #:when (u-alive? a))
+         (define ut (exact-unit-type a))
+         (define next-l?
+           (if (and need-lair? (not l-ok?) (memq ut '(lair hive)) (u-completed? a))
+               #t
+               l-ok?))
+         (define next-s
+           (if need-sup?
+               (+ s
+                  (case ut
+                    [(roach roach-burrowed)                             2.0]
+                    [(hydralisk hydralisk-burrowed)                     2.0]
+                    [(lurker lurker-burrowed lurker-mp lurker-mp-burrowed
+                      lurker-egg lurker-mp-egg)                         3.0]
+                    [(queen queen-burrowed)                             2.0]
+                    [(baneling baneling-burrowed baneling-cocoon)       0.5]
+                    [else                                               0.0]))
+               s))
+         (define next-ac
+           (if (and need-act? (memq ut '(overlord-transport transport-overlord-cocoon)))
+               (add1 ac)
+               ac))
+         (define next-ovis
+           (if (and (eq? ut 'overlord) (> (u-tag a) 0))
+               (cons a ovis)
+               ovis))
+         (values next-l? next-s next-ac next-ovis)))
+     (if (and (pair? overlords) (overlord-transport-eligible? lair-ok? sup act))
+         (let ([best-ovi
+                (for/fold ([best : (Option Any) #f]
+                           [best-safe : Float -1.0]
+                           #:result best)
+                          ([a (in-list overlords)])
+                  (define safety-d (nearest-enemy-combat-dist (u-x a) (u-y a) enemy-units))
+                  (if (> safety-d best-safe)
+                      (values a safety-d)
+                      (values best best-safe)))])
+           (if best-ovi
+               (let ([otag (u-tag best-ovi)])
+                 (list (transport-directive otag 'overlord 'cast-spell 'morph-overlord-transport
+                                            MORPH-OVERLORD-TRANSPORT-ABILITY-ID otag '()
+                                            (u-x best-ovi) (u-y best-ovi)
+                                            'dropperlord-midgame-mobility)))
+               '()))
+         '())]))
 
 ;; =============================================================================
-;; 5. Unified Single-Transport, Fleet & S-Expression Orchestrator
+;; 5. Multi-Angle Mini Overlord Drops (`893`) & Counter-Drop Defense (Wave 1C)
+;; =============================================================================
+
+(: MINI-DROP-MAX-ACTIVE-COUNT Integer)
+(define MINI-DROP-MAX-ACTIVE-COUNT 3)
+
+(: MINI-DROP-CARGO-MIN Integer)
+(define MINI-DROP-CARGO-MIN 4)
+
+(: MINI-DROP-CARGO-MAX Integer)
+(define MINI-DROP-CARGO-MAX 8)
+
+(: DROP-LOADED-FOCUS-FIRE-BONUS Float)
+(define DROP-LOADED-FOCUS-FIRE-BONUS 50.0)
+
+(: COUNTER-DROP-DEFENSE-POWER-MULT Float)
+(define COUNTER-DROP-DEFENSE-POWER-MULT 1.25)
+
+(: COUNTER-DROP-MAX-ARMY-PULL-FRACTION Float)
+(define COUNTER-DROP-MAX-ARMY-PULL-FRACTION 0.35)
+
+;; Single unit defense assignment against an incoming or unloaded enemy drop.
+(struct counter-drop-order
+  ([unit-tag : Integer]
+   [unit-type : Symbol]
+   [action : Symbol]
+   [target-tag : Integer]
+   [tx : Float]
+   [ty : Float]
+   [priority : Float]
+   [assigned-drop-tag : Integer]
+   [reason : Symbol])
+  #:transparent)
+
+;; Summary plan for proportional anti-drop interception & base defense split.
+(struct counter-drop-plan
+  ([enemy-drops-detected : Integer]
+   [drop-combat-power : Float]
+   [required-defense-power : Float]
+   [assigned-defense-power : Float]
+   [max-army-pull-power : Float]
+   [total-army-power : Float]
+   [orders : (Listof counter-drop-order)]
+   [worker-pull-orders : (Listof counter-drop-order)])
+  #:transparent)
+
+(: anti-air-defender-sym? (-> Symbol Boolean))
+(define (anti-air-defender-sym? sym)
+  (not (not (memq sym
+                  '(marine stalker phoenix viking viking-fighter cyclone
+                    hydralisk queen mutalisk corruptor archon ghost thor thor-ap
+                    void-ray voidray spore-crawler missile-turret photon-cannon
+                    bunker liberator-aa)))))
+
+(: drop-unit-combat-power (-> Any Float))
+(define (drop-unit-combat-power u)
+  (define ut (exact-unit-type u))
+  (define stats (cached-unit-combat-stats ut))
+  (define gdps (safe-finite-real (hash-ref stats 'ground-dps (lambda () 0.0)) 0.0))
+  (define adps (safe-finite-real (hash-ref stats 'air-dps (lambda () 0.0)) 0.0))
+  (define max-dps (max gdps adps))
+  (define ehp (u-total-ehp u))
+  (cond
+    [(and (> max-dps 0.0) (not (memq ut '(scv probe drone mule))))
+     (max 8.0 (->float (sqrt (max 0.0 (* ehp max-dps)))))]
+    [(transport-unit-sym? ut)
+     (define cargo (u-cargo-space-taken u))
+     ;; Active drop transport with cargo carries lethal raiding potential even before unload
+     (+ 16.0 (* 12.0 (->float (max 2 cargo))))]
+    [else 10.0]))
+
+(: unit-loaded-transport? (-> Any Boolean))
+(define (unit-loaded-transport? tr-u)
+  (or (> (u-cargo-space-taken tr-u) 0)
+      (not (null? (extract-passenger-tags tr-u)))
+      (eq? (dyn-hash-ref tr-u 'loaded? #f) #t)
+      (eq? (dyn-hash-ref tr-u 'has-cargo? #f) #t)))
+
+(: infer-enemy-drop-mineral-targets (-> (Listof Any) Real Real (Option Real) (Option Real) (Listof (Pair Float Float))))
+(define (infer-enemy-drop-mineral-targets enemy-units home-x home-y enemy-main-x enemy-main-y)
+  (define fh-x (->float home-x))
+  (define fh-y (->float home-y))
+  (define townhalls
+    (sort
+     (for/list : (Listof Any) ([e (in-list enemy-units)]
+                               #:when (and (u-alive? e)
+                                           (memq (exact-unit-type e)
+                                                 '(nexus command-center orbital-command
+                                                   planetary-fortress hatchery lair hive))))
+       e)
+     (lambda ([a : Any] [b : Any])
+       (> (dist-2d fh-x fh-y (u-x a) (u-y a))
+          (dist-2d fh-x fh-y (u-x b) (u-y b))))))
+  (cond
+    [(>= (length townhalls) 2)
+     (for/list : (Listof (Pair Float Float)) ([th (in-list (take townhalls (min 3 (length townhalls))))])
+       (cons (u-x th) (u-y th)))]
+    [(or (= (length townhalls) 1) (and enemy-main-x enemy-main-y))
+     (define mx (if (pair? townhalls) (u-x (car townhalls)) (->float (or enemy-main-x 130.0))))
+     (define my (if (pair? townhalls) (u-y (car townhalls)) (->float (or enemy-main-y 130.0))))
+     (define dx (- fh-x mx))
+     (define dy (- fh-y my))
+     (define n (max 1e-4 (dist-2d 0.0 0.0 dx dy)))
+     (define ux (/ dx n))
+     (define uy (/ dy n))
+     ;; Main, opposite-flank 3rd, and natural along home-enemy vectors
+     (define third-pt (clamp-playable-pt (+ mx (* 30.0 (- uy))) (+ my (* 30.0 ux))))
+     (define nat-pt (clamp-playable-pt (+ mx (* 28.0 ux)) (+ my (* 28.0 uy))))
+     (list (cons mx my)
+           (cons (point2d-x third-pt) (point2d-y third-pt))
+           (cons (point2d-x nat-pt) (point2d-y nat-pt)))]
+    [else
+     (define gx (max 40.0 (min (- SC2-MAP-PLAYABLE-MAX-COORD 20.0) (- 200.0 fh-x))))
+     (define gy (max 40.0 (min (- SC2-MAP-PLAYABLE-MAX-COORD 20.0) (- 200.0 fh-y))))
+     (define third-pt (clamp-playable-pt (- gx 26.0) gy))
+     (define nat-pt (clamp-playable-pt gx (- gy 26.0)))
+     (list (cons gx gy)
+           (cons (point2d-x third-pt) (point2d-y third-pt))
+           (cons (point2d-x nat-pt) (point2d-y nat-pt)))]))
+
+(: peripheral-edge-waypoint (-> Float Float Float Float Integer Float Float (Pair Float Float)))
+(define (peripheral-edge-waypoint hx hy tx ty side-sign map-w map-h)
+  (define dx (- tx hx))
+  (define dy (- ty hy))
+  (define d (max 1e-4 (dist-2d 0.0 0.0 dx dy)))
+  ;; Perpendicular lateral vector: +1 -> left normal, -1 -> right normal
+  (define nx (* (->float side-sign) (/ (- dy) d)))
+  (define ny (* (->float side-sign) (/ dx d)))
+  (define mid-x (* 0.5 (+ hx tx)))
+  (define mid-y (* 0.5 (+ hy ty)))
+  (define push-dist (max 44.0 (* 0.48 (min map-w map-h))))
+  (define min-c (+ SC2-MAP-PLAYABLE-MIN-COORD 8.0))
+  (define max-x (- (max 80.0 map-w) 8.0))
+  (define max-y (- (max 80.0 map-h) 8.0))
+  (define wx (max min-c (min max-x (+ mid-x (* push-dist nx)))))
+  (define wy (max min-c (min max-y (+ mid-y (* push-dist ny)))))
+  (cons wx wy))
+
+(: mini-drop-cargo-eligible-weight (-> Symbol Integer))
+(define (mini-drop-cargo-eligible-weight sym)
+  (case sym
+    [(zergling)              1]
+    [(baneling)              2]
+    [(roach)                 2]
+    [(hydralisk)             2]
+    [(ravager)               4]
+    [else                    0]))
+
+(: select-compact-mini-drop-cargo
+   (-> Float Float (Listof Any) (Mutable-HashTable Integer Boolean) (Values (Listof Integer) Integer Float Float)))
+(define (select-compact-mini-drop-cargo ox oy ally-units used-tags)
+  (define candidates
+    (sort
+     (for/list : (Listof Any) ([a (in-list ally-units)]
+                               #:when (and (u-alive? a)
+                                           (> (u-tag a) 0)
+                                           (not (hash-has-key? used-tags (u-tag a)))
+                                           (> (mini-drop-cargo-eligible-weight (exact-unit-type a)) 0)
+                                           (<= (dist-2d ox oy (u-x a) (u-y a)) 28.0)))
+       a)
+     (lambda ([a : Any] [b : Any])
+       (define wa (mini-drop-cargo-eligible-weight (exact-unit-type a)))
+       (define wb (mini-drop-cargo-eligible-weight (exact-unit-type b)))
+       (define da (- (dist-2d ox oy (u-x a) (u-y a)) (if (eq? (exact-unit-type a) 'baneling) 3.0 0.0)))
+       (define db (- (dist-2d ox oy (u-x b) (u-y b)) (if (eq? (exact-unit-type b) 'baneling) 3.0 0.0)))
+       (if (not (= da db)) (< da db) (< wa wb)))))
+  (define-values (chosen slots sx sy cnt)
+    (for/fold ([acc : (Listof Integer) '()]
+               [used : Integer 0]
+               [sum-x : Float 0.0]
+               [sum-y : Float 0.0]
+               [n : Integer 0])
+              ([c (in-list candidates)])
+      (define w (mini-drop-cargo-eligible-weight (exact-unit-type c)))
+      (define ct (u-tag c))
+      (if (<= (+ used w) MINI-DROP-CARGO-MAX)
+          (begin
+            (hash-set! used-tags ct #t)
+            (values (cons ct acc) (+ used w) (+ sum-x (u-x c)) (+ sum-y (u-y c)) (add1 n)))
+          (values acc used sum-x sum-y n))))
+  (if (> cnt 0)
+      (values (reverse chosen) slots (/ sx (->float cnt)) (/ sy (->float cnt)))
+      (values '() 0 ox oy)))
+
+;; Plans `1–3` independent compact `overlord-transport` (`893`) drops carrying `4–8` cargo
+;; (`4` Lings / `2` Banes / `2` Roaches) along opposite left/right peripheral map edges
+;; into enemy main and 3rd/natural mineral lines simultaneously.
+(: plan-multi-angle-mini-overlord-drops
+   (->* ((Listof Any) (Listof Any))
+        (#:tracker (Option transport-tracker)
+         #:current-frame Integer
+         #:home-x Real
+         #:home-y Real
+         #:enemy-main-x (Option Real)
+         #:enemy-main-y (Option Real)
+         #:enemy-targets (Listof (Pair Real Real))
+         #:map-width Real
+         #:map-height Real
+         #:max-drops Integer
+         #:lair-or-hive-ready? (U Boolean 'auto))
+        (Listof transport-directive)))
+(define (plan-multi-angle-mini-overlord-drops ally-units enemy-units
+                                              #:tracker [_tr #f]
+                                              #:current-frame [_current-frame 0]
+                                              #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
+                                              #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
+                                              #:enemy-main-x [enemy-main-x #f]
+                                              #:enemy-main-y [enemy-main-y #f]
+                                              #:enemy-targets [explicit-targets '()]
+                                              #:map-width [map-width SC2-MAP-PLAYABLE-MAX-COORD]
+                                              #:map-height [map-height SC2-MAP-PLAYABLE-MAX-COORD]
+                                              #:max-drops [max-drops MINI-DROP-MAX-ACTIVE-COUNT]
+                                              #:lair-or-hive-ready? [kw-lair 'auto])
+  (define cap-drops (max 1 (min MINI-DROP-MAX-ACTIVE-COUNT max-drops)))
+  (define fh-x (->float home-x))
+  (define fh-y (->float home-y))
+  (define fmw (->float map-width))
+  (define fmh (->float map-height))
+  (define raw-targets : (Listof (Pair Float Float))
+    (if (pair? explicit-targets)
+        (for/list : (Listof (Pair Float Float)) ([p (in-list explicit-targets)])
+          (cons (->float (car p)) (->float (cdr p))))
+        (infer-enemy-drop-mineral-targets enemy-units fh-x fh-y enemy-main-x enemy-main-y)))
+  (define all-dropperlords
+    (sort
+     (for/list : (Listof Any) ([a (in-list ally-units)]
+                               #:when (and (u-alive? a)
+                                           (eq? (exact-unit-type a) 'overlord-transport)
+                                           (> (u-tag a) 0)))
+       a)
+     (lambda ([a : Any] [b : Any])
+       (> (u-cargo-space-taken a) (u-cargo-space-taken b)))))
+  (define dropperlords
+    (take all-dropperlords (min cap-drops (length all-dropperlords))))
+  (define used-cargo : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+  (define n-tgts (max 1 (length raw-targets)))
+  (define active-dirs
+    (for/fold ([acc : (Listof transport-directive) '()]
+               #:result (reverse acc))
+              ([dl (in-list dropperlords)]
+               [idx (in-naturals)])
+      (define dtag (u-tag dl))
+      (define dx (u-x dl))
+      (define dy (u-y dl))
+      (define cargo (u-cargo-space-taken dl))
+      (define tgt-pair (list-ref raw-targets (modulo idx n-tgts)))
+      (define tx (car tgt-pair))
+      (define ty (cdr tgt-pair))
+      ;; Odd/even indices strictly alternate opposite left (+1) and right (-1) peripheral edges
+      (define edge-side (if (even? idx) 1 -1))
+      (define edge-lbl (if (= edge-side 1) 'left-edge 'right-edge))
+      (define edge-pt (peripheral-edge-waypoint fh-x fh-y tx ty edge-side fmw fmh))
+      (define wx (car edge-pt))
+      (define wy (cdr edge-pt))
+      (define d-target (dist-2d dx dy tx ty))
+      (define d-edge (dist-2d dx dy wx wy))
+      (define d-home-to-dl (dist-2d fh-x fh-y dx dy))
+      (define d-home-to-edge (dist-2d fh-x fh-y wx wy))
+      (define dir
+        (cond
+          ;; Loaded (`>= 4` cargo or already deep near enemy line) -> fly via peripheral edge & unload
+          [(or (>= cargo MINI-DROP-CARGO-MIN)
+               (and (> cargo 0) (< d-target 26.0)))
+           (cond
+             [(<= d-target 5.5)
+              (transport-directive dtag 'overlord-transport 'transport-drop-point
+                                   'unload-all-at OVERLORD-UNLOAD-ALL-AT-ABILITY-ID
+                                   dtag (extract-passenger-tags dl) tx ty
+                                   (if (= edge-side 1)
+                                       'mini-dropperlord-unload-left-edge
+                                       'mini-dropperlord-unload-right-edge))]
+             ;; Route along assigned peripheral edge waypoint before cutting inward to mineral line
+             [(and (> d-edge 10.0) (< d-home-to-dl (+ d-home-to-edge 8.0)) (> d-target 22.0))
+              (transport-directive dtag 'overlord-transport 'move-to-drop 'move 16
+                                   dtag (extract-passenger-tags dl) wx wy
+                                   (if (eq? edge-lbl 'left-edge)
+                                       'mini-dropperlord-route-left-edge
+                                       'mini-dropperlord-route-right-edge))]
+             [else
+              (transport-directive dtag 'overlord-transport 'move-to-drop 'move 16
+                                   dtag (extract-passenger-tags dl) tx ty
+                                   (if (eq? edge-lbl 'left-edge)
+                                       'mini-dropperlord-inward-left-angle
+                                       'mini-dropperlord-inward-right-angle))])]
+          ;; Empty / < 4 cargo -> load compact 4-8 cargo slice (4 Lings / 2 Banes / 2 Roaches)
+          [else
+           (define-values (ptags _slots cx cy)
+             (select-compact-mini-drop-cargo dx dy ally-units used-cargo))
+           (cond
+             [(pair? ptags)
+              (define d-cargo (dist-2d dx dy cx cy))
+              (if (<= d-cargo 2.5)
+                  (transport-directive dtag 'overlord-transport 'load-unit 'load-transport
+                                       LOAD-TRANSPORT-ABILITY-ID (car ptags) ptags cx cy
+                                       'mini-dropperlord-load-compact-cargo)
+                  (transport-directive dtag 'overlord-transport 'approach-save-pickup 'move 16
+                                       (car ptags) ptags cx cy
+                                       'mini-dropperlord-stage-for-cargo))]
+             [else
+              (transport-directive dtag 'overlord-transport 'hold-and-reposition 'move 16
+                                   dtag '() dx dy 'mini-dropperlord-await-cargo)])]))
+      (cons dir acc)))
+  ;; Morph additional Dropperlords up to `cap-drops` (`<= 3`) when Lair/Hive + >= 16 supply ready
+  (define active-cnt (length dropperlords))
+  (define lair-ok?
+    (if (eq? kw-lair 'auto)
+        (for/or : Boolean ([a (in-list ally-units)])
+          (and (u-alive? a) (memq (exact-unit-type a) '(lair hive)) (u-completed? a)))
+        (not (not kw-lair))))
+  (define morph-dirs : (Listof transport-directive)
+    (if (and lair-ok?
+             (< active-cnt cap-drops)
+             (>= (overlord-drop-combat-supply ally-units) (->float DROPPERLORD-MIN-COMBAT-SUPPLY)))
+        (let ([needed (- cap-drops active-cnt)]
+              [candidates
+               (sort
+                (for/list : (Listof Any) ([a (in-list ally-units)]
+                                          #:when (and (u-alive? a)
+                                                      (eq? (exact-unit-type a) 'overlord)
+                                                      (> (u-tag a) 0)))
+                  a)
+                (lambda ([a : Any] [b : Any])
+                  (> (nearest-enemy-combat-dist (u-x a) (u-y a) enemy-units)
+                     (nearest-enemy-combat-dist (u-x b) (u-y b) enemy-units))))])
+          (for/list : (Listof transport-directive) ([ovi (in-list (take candidates (min needed (length candidates))))])
+            (define otag (u-tag ovi))
+            (transport-directive otag 'overlord 'cast-spell 'morph-overlord-transport
+                                 MORPH-OVERLORD-TRANSPORT-ABILITY-ID otag '()
+                                 (u-x ovi) (u-y ovi) 'mini-dropperlord-morph)))
+        '()))
+  (append active-dirs morph-dirs))
+
+;; Prioritizes anti-air focus-fire on incoming loaded enemy drops (`medivac`, `warp-prism`,
+;; `overlord-transport`, `+50` bonus when loaded) and computes a proportional local defense split
+;; (`1.25x` drop combat power, capped by `max-army-pull-fraction` so a mini-drop never pulls our
+;; entire front-line army away).
+(: plan-counter-drop-defense
+   (->* ((Listof Any) (Listof Any))
+        (#:home-x Real
+         #:home-y Real
+         #:base-points (Listof (Pair Real Real))
+         #:max-army-pull-fraction Real
+         #:defense-power-multiplier Real)
+        counter-drop-plan))
+(define (plan-counter-drop-defense ally-units enemy-units
+                                   #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
+                                   #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
+                                   #:base-points [explicit-bases '()]
+                                   #:max-army-pull-fraction [max-pull-frac COUNTER-DROP-MAX-ARMY-PULL-FRACTION]
+                                   #:defense-power-multiplier [pwr-mult COUNTER-DROP-DEFENSE-POWER-MULT])
+  (define fh-x (->float home-x))
+  (define fh-y (->float home-y))
+  (define bases : (Listof (Pair Float Float))
+    (let ([discovered
+           (for/list : (Listof (Pair Float Float))
+                     ([a (in-list ally-units)]
+                      #:when (and (u-alive? a)
+                                  (memq (exact-unit-type a)
+                                        '(nexus command-center orbital-command
+                                          planetary-fortress hatchery lair hive))))
+             (cons (u-x a) (u-y a)))])
+      (cond
+        [(pair? explicit-bases)
+         (for/list : (Listof (Pair Float Float)) ([p (in-list explicit-bases)])
+           (cons (->float (car p)) (->float (cdr p))))]
+        [(pair? discovered) discovered]
+        [else (list (cons fh-x fh-y))])))
+  (: near-our-base? (-> Float Float Boolean))
+  (define (near-our-base? ux uy)
+    (for/or : Boolean ([b (in-list bases)])
+      (<= (dist-2d ux uy (car b) (cdr b)) 20.0)))
+  (define enemy-drop-transports
+    (for/list : (Listof Any) ([e (in-list enemy-units)]
+                              #:when (and (u-alive? e)
+                                          (> (u-tag e) 0)
+                                          (transport-unit-sym? (exact-unit-type e))
+                                          (near-our-base? (u-x e) (u-y e))))
+      e))
+  (define unloaded-raiders
+    (for/list : (Listof Any) ([e (in-list enemy-units)]
+                              #:when (and (u-alive? e)
+                                          (> (u-tag e) 0)
+                                          (not (u-structure? e))
+                                          (not (transport-unit-sym? (exact-unit-type e)))
+                                          (near-our-base? (u-x e) (u-y e))))
+      e))
+  (define drop-power : Float
+    (+ (for/fold ([acc : Float 0.0]) ([tr (in-list enemy-drop-transports)])
+         (+ acc (drop-unit-combat-power tr)))
+       (for/fold ([acc : Float 0.0]) ([r (in-list unloaded-raiders)])
+         (+ acc (drop-unit-combat-power r)))))
+  (define friendly-combat
+    (for/list : (Listof Any) ([a (in-list ally-units)]
+                              #:when (and (u-alive? a)
+                                          (> (u-tag a) 0)
+                                          (not (u-structure? a))
+                                          (not (memq (exact-unit-type a)
+                                                     '(scv probe drone mule larva egg overlord
+                                                       observer changeling)))))
+      a))
+  (define total-army-power
+    (for/fold ([acc : Float 0.0]) ([a (in-list friendly-combat)])
+      (+ acc (drop-unit-combat-power a))))
+  (define req-power (max 0.0 (* (->float pwr-mult) drop-power)))
+  (define cap-frac (max 0.15 (min 0.75 (->float max-pull-frac))))
+  (define max-pull-power
+    (if (zero? total-army-power)
+        0.0
+        (min req-power (max 24.0 (* cap-frac total-army-power)))))
+  (cond
+    [(and (null? enemy-drop-transports) (null? unloaded-raiders))
+     (counter-drop-plan 0 0.0 0.0 0.0 max-pull-power total-army-power '() '())]
+    [else
+     ;; Focus target priority: loaded enemy transport gets +50.0 bonus before unload!
+     (: threat-prio (-> Any Float))
+     (define (threat-prio e)
+       (+ (if (and (transport-unit-sym? (exact-unit-type e))
+                   (unit-loaded-transport? e))
+              DROP-LOADED-FOCUS-FIRE-BONUS
+              0.0)
+          (drop-unit-combat-power e)))
+     (define sorted-threats
+       (sort (append enemy-drop-transports unloaded-raiders)
+             (lambda ([a : Any] [b : Any]) (> (threat-prio a) (threat-prio b)))))
+     (define primary-threat (car sorted-threats))
+     (define primary-tag (u-tag primary-threat))
+     (define ptx (u-x primary-threat))
+     (define pty (u-y primary-threat))
+     ;; Prefer nearest local/base defenders first so distant front-line main army stays put
+     (: defender-cost (-> Any Float))
+     (define (defender-cost a)
+       (+ (dist-2d (u-x a) (u-y a) ptx pty)
+          (if (anti-air-defender-sym? (exact-unit-type a)) -6.0 0.0)
+          (if (near-our-base? (u-x a) (u-y a)) -12.0 18.0)))
+     (define sorted-defenders
+       (sort friendly-combat
+             (lambda ([a : Any] [b : Any]) (< (defender-cost a) (defender-cost b)))))
+     (define-values (rev-orders assigned-power)
+       (for/fold ([orders : (Listof counter-drop-order) '()]
+                  [acc-pwr : Float 0.0])
+                 ([a (in-list sorted-defenders)])
+         (define a-pwr (drop-unit-combat-power a))
+         (if (or (>= acc-pwr max-pull-power)
+                 (and (pair? orders)
+                      (> (+ acc-pwr a-pwr) (* 1.05 max-pull-power))))
+             (values orders acc-pwr)
+             (let* ([atag (u-tag a)]
+                    [at (exact-unit-type a)]
+                    [aa? (anti-air-defender-sym? at)]
+                    [best-tgt
+                     (or (and aa?
+                              (for/fold ([bt : (Option Any) #f]
+                                         [bsc : Float -1e9]
+                                         #:result bt)
+                                        ([e (in-list enemy-drop-transports)])
+                                (define loaded? (unit-loaded-transport? e))
+                                (define sc (+ (if loaded? DROP-LOADED-FOCUS-FIRE-BONUS 15.0)
+                                              (- (* 0.5 (dist-2d (u-x a) (u-y a) (u-x e) (u-y e))))))
+                                (if (> sc bsc) (values e sc) (values bt bsc))))
+                         (and (pair? unloaded-raiders) (not (u-flying? (car unloaded-raiders)))
+                              (car unloaded-raiders))
+                         primary-threat)]
+                    [loaded-drop? (and (transport-unit-sym? (exact-unit-type best-tgt))
+                                       (unit-loaded-transport? best-tgt))]
+                    [prio (+ (drop-unit-combat-power best-tgt)
+                             (if loaded-drop? DROP-LOADED-FOCUS-FIRE-BONUS 0.0))]
+                    [reason : Symbol
+                      (cond
+                        [(and aa? loaded-drop?) 'aa-focus-loaded-drop-before-unload]
+                        [(and aa? (transport-unit-sym? (exact-unit-type best-tgt)))
+                         'aa-focus-enemy-transport]
+                        [else 'proportional-drop-defense-split])]
+                    [ord (counter-drop-order atag at 'attack-unit (u-tag best-tgt)
+                                             (u-x best-tgt) (u-y best-tgt)
+                                             prio primary-tag reason)])
+               (values (cons ord orders) (+ acc-pwr a-pwr))))))
+     ;; Worker evasion away from landing zone if threat landed right inside mineral line
+     (define worker-pulls
+       (for/list : (Listof counter-drop-order)
+                 ([a (in-list ally-units)]
+                  #:when (and (u-alive? a)
+                              (> (u-tag a) 0)
+                              (memq (exact-unit-type a) '(scv probe drone))
+                              (<= (dist-2d (u-x a) (u-y a) ptx pty) 6.5)))
+         (define wx (u-x a))
+         (define wy (u-y a))
+         (define dx (- wx ptx))
+         (define dy (- wy pty))
+         (define d (max 1e-4 (dist-2d 0.0 0.0 dx dy)))
+         (define safe-pt (clamp-playable-pt (+ ptx (* 7.5 (/ dx d))) (+ pty (* 7.5 (/ dy d)))))
+         (counter-drop-order (u-tag a) (exact-unit-type a) 'move primary-tag
+                             (point2d-x safe-pt) (point2d-y safe-pt)
+                             30.0 primary-tag 'evacuate-workers-from-drop)))
+     (counter-drop-plan (length enemy-drop-transports)
+                        drop-power
+                        req-power
+                        assigned-power
+                        max-pull-power
+                        total-army-power
+                        (reverse rev-orders)
+                        worker-pulls)]))
+
+(: counter-drop-plan->sexps (-> counter-drop-plan (Listof (Listof Any))))
+(define (counter-drop-plan->sexps plan)
+  (append
+   (for/list : (Listof (Listof Any)) ([ord (in-list (counter-drop-plan-orders plan))])
+     (if (> (counter-drop-order-target-tag ord) 0)
+         (list 'focus-fire
+               (counter-drop-order-unit-tag ord)
+               (counter-drop-order-target-tag ord)
+               (counter-drop-order-tx ord)
+               (counter-drop-order-ty ord))
+         (list 'attack-pos
+               (counter-drop-order-unit-tag ord)
+               (counter-drop-order-tx ord)
+               (counter-drop-order-ty ord))))
+   (for/list : (Listof (Listof Any)) ([wp (in-list (counter-drop-plan-worker-pull-orders plan))])
+     (list 'move
+           (counter-drop-order-unit-tag wp)
+           (counter-drop-order-tx wp)
+           (counter-drop-order-ty wp)))))
+
+;; =============================================================================
+;; 6. Unified Single-Transport, Fleet & S-Expression Orchestrator
 ;; =============================================================================
 
 ;; Evaluates one transport unit's highest-priority tactical action this frame:
 ;;   1) Carried cargo drop/hold (`<25%` dump, `672f` ceiling, `>=18f` drop vs hold),
 ;;   2) Combat save-pickup (`9.0`-tile scan, `5.0`/`1.5` pickup range, emergency unphase),
 ;;   3) WarpPrism phasing cycle (`140f`/`208f`/`160f`).
+(: evaluate-transport-micro/zones
+   (-> Any (Listof Any) (Listof Any) (Option transport-tracker) Integer Real Real
+       (Listof danger-zone) Boolean Boolean Boolean
+       (Option transport-directive)))
+(define (evaluate-transport-micro/zones tr-u ally-units enemy-units
+                                        tr current-frame home-x home-y
+                                        zones prefer-moving-drop?
+                                        warp-in-complete? warp-in-requested?)
+  (or (evaluate-transport-drop/zones tr-u ally-units enemy-units
+                                      tr current-frame home-x home-y
+                                      #f #f zones prefer-moving-drop?)
+      (evaluate-save-pickup/zones tr-u ally-units enemy-units
+                                  tr current-frame zones)
+      (and (memq (exact-unit-type tr-u) '(warp-prism warp-prism-phasing))
+           ;; `evaluate-save-pickup/zones` just checked save targets; skip re-scanning on `#f`
+           (evaluate-warp-prism-phasing/zones tr-u ally-units enemy-units
+                                              tr current-frame zones
+                                              warp-in-complete? warp-in-requested? #f))))
+
 (: evaluate-transport-micro
    (->* (Any (Listof Any) (Listof Any))
         (#:tracker (Option transport-tracker)
@@ -1468,27 +2404,74 @@
                                   #:prefer-moving-drop? [prefer-moving-drop? #f]
                                   #:warp-in-complete? [warp-in-complete? #f]
                                   #:warp-in-requested? [warp-in-requested? #t])
-  (or (evaluate-transport-drop tr-u ally-units enemy-units
-                               #:tracker tr
-                               #:current-frame current-frame
-                               #:home-x home-x
-                               #:home-y home-y
-                               #:danger-zones explicit-zones
-                               #:effects effects
-                               #:prefer-moving-drop? prefer-moving-drop?)
-      (evaluate-save-pickup tr-u ally-units enemy-units
-                            #:tracker tr
-                            #:current-frame current-frame
-                            #:danger-zones explicit-zones
-                            #:effects effects)
-      (and (memq (exact-unit-type tr-u) '(warp-prism warp-prism-phasing))
-           (evaluate-warp-prism-phasing tr-u ally-units enemy-units
-                                        #:tracker tr
-                                        #:current-frame current-frame
-                                        #:danger-zones explicit-zones
-                                        #:effects effects
-                                        #:warp-in-complete? warp-in-complete?
-                                        #:warp-in-requested? warp-in-requested?))))
+  (define tr-sym (exact-unit-type tr-u))
+  (cond
+    [(or (not (u-alive? tr-u)) (not (transport-unit-sym? tr-sym))) #f]
+    [else
+     (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
+     (evaluate-transport-micro/zones tr-u ally-units enemy-units tr current-frame
+                                     home-x home-y zones prefer-moving-drop?
+                                     warp-in-complete? warp-in-requested?)]))
+
+(: plan-transport-fleet-micro/synced
+   (-> (Listof Any) (Listof Any) transport-tracker Integer Real Real
+       (Listof danger-zone) (Listof Any) Boolean Boolean Boolean
+       (U Boolean 'auto) (Option Real) (Option Integer)
+       (Listof transport-directive)))
+(define (plan-transport-fleet-micro/synced ally-units enemy-units tr current-frame
+                                           home-x home-y explicit-zones effects
+                                           prefer-moving-drop? warp-in-complete? warp-in-requested?
+                                           kw-lair kw-supply kw-active)
+  (define-values (transports has-overlord?)
+    (for/fold ([trs : (Listof Any) '()]
+               [has-ovi? : Boolean #f]
+               #:result (values (reverse trs) has-ovi?))
+              ([a (in-list ally-units)])
+      (define ut (exact-unit-type a))
+      (cond
+        [(and (transport-unit-sym? ut) (u-alive? a))
+         (values (cons a trs) has-ovi?)]
+        [(and (eq? ut 'overlord) (not has-ovi?) (u-alive? a) (> (u-tag a) 0))
+         (values trs #t)]
+        [else (values trs has-ovi?)])))
+  (define tr-dirs
+    (if (null? transports)
+        '()
+        (let* ([zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame))]
+               [e-recs (build-fleet-enemy-recs enemy-units)]
+               [s-cands (parameterize ([current-fleet-enemy-recs e-recs])
+                          (build-fleet-save-cands ally-units enemy-units zones))]
+               [any-loaded?
+                (for/or : Boolean ([t (in-list transports)])
+                  (or (pair? (extract-passenger-tags t))
+                      (> (u-cargo-space-taken t) 0)))]
+               [shared-front (if any-loaded? (compute-ally-ground-anchor ally-units) #f)]
+               [shared-safe
+                (if shared-front
+                    (parameterize ([current-fleet-enemy-recs e-recs])
+                      (compute-safe-rear-drop-point
+                       (car shared-front) (cdr shared-front)
+                       home-x home-y zones enemy-units))
+                    #f)])
+          (parameterize ([current-fleet-enemy-recs e-recs]
+                         [current-fleet-save-cands s-cands]
+                         [current-fleet-front-xy shared-front]
+                         [current-fleet-safe-drop shared-safe])
+            (for/fold ([acc : (Listof transport-directive) '()] #:result (reverse acc))
+                      ([a (in-list transports)])
+              (define d (evaluate-transport-micro/zones a ally-units enemy-units
+                                                        tr current-frame home-x home-y
+                                                        zones prefer-moving-drop?
+                                                        warp-in-complete? warp-in-requested?))
+              (if d (cons d acc) acc))))))
+  (define ovi-dirs
+    (if has-overlord?
+        (plan-overlord-transport-morphs ally-units enemy-units
+                                        #:lair-or-hive-ready? kw-lair
+                                        #:combat-supply kw-supply
+                                        #:active-dropperlords kw-active)
+        '()))
+  (if (null? ovi-dirs) tr-dirs (append tr-dirs ovi-dirs)))
 
 ;; Plans tactical micro directives across all friendly transports (plus eligible Overlord morph).
 (: plan-transport-fleet-micro
@@ -1521,27 +2504,10 @@
                                     #:active-dropperlords [kw-active #f])
   (define tr (or tr-arg (make-transport-tracker)))
   (sync-transport-tracker! tr ally-units current-frame)
-  (define tr-dirs
-    (for/fold ([acc : (Listof transport-directive) '()] #:result (reverse acc))
-              ([a (in-list ally-units)]
-               #:when (and (u-alive? a) (transport-unit-sym? (exact-unit-type a))))
-      (define d (evaluate-transport-micro a ally-units enemy-units
-                                          #:tracker tr
-                                          #:current-frame current-frame
-                                          #:home-x home-x
-                                          #:home-y home-y
-                                          #:danger-zones explicit-zones
-                                          #:effects effects
-                                          #:prefer-moving-drop? prefer-moving-drop?
-                                          #:warp-in-complete? warp-in-complete?
-                                          #:warp-in-requested? warp-in-requested?))
-      (if d (cons d acc) acc)))
-  (define ovi-dirs
-    (plan-overlord-transport-morphs ally-units enemy-units
-                                    #:lair-or-hive-ready? kw-lair
-                                    #:combat-supply kw-supply
-                                    #:active-dropperlords kw-active))
-  (append tr-dirs ovi-dirs))
+  (plan-transport-fleet-micro/synced ally-units enemy-units tr current-frame
+                                     home-x home-y explicit-zones effects
+                                     prefer-moving-drop? warp-in-complete? warp-in-requested?
+                                     kw-lair kw-supply kw-active))
 
 ;; Converts a `transport-directive` into a runtime-compatible S-expression command.
 (: transport-directive->sexp (-> transport-directive (Listof Any)))
@@ -1602,16 +2568,7 @@
   (define tr (or tr-arg (make-transport-tracker)))
   (sync-transport-tracker! tr ally-units current-frame #:dead-tags dead-tags)
   (map transport-directive->sexp
-       (plan-transport-fleet-micro ally-units enemy-units
-                                   #:tracker tr
-                                   #:current-frame current-frame
-                                   #:home-x home-x
-                                   #:home-y home-y
-                                   #:danger-zones explicit-zones
-                                   #:effects effects
-                                   #:prefer-moving-drop? prefer-moving-drop?
-                                   #:warp-in-complete? warp-in-complete?
-                                   #:warp-in-requested? warp-in-requested?
-                                   #:lair-or-hive-ready? kw-lair
-                                   #:combat-supply kw-supply
-                                   #:active-dropperlords kw-active)))
+       (plan-transport-fleet-micro/synced ally-units enemy-units tr current-frame
+                                          home-x home-y explicit-zones effects
+                                          prefer-moving-drop? warp-in-complete? warp-in-requested?
+                                          kw-lair kw-supply kw-active)))

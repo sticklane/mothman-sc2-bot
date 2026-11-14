@@ -24,6 +24,8 @@
  (struct-out dynamic-macro-plan)
  (struct-out macro-world-state)
  (struct-out macro-brain-decision)
+ macro-world-state-enemy-unit-counts
+ macro-world-state-enemy-building-counts
  translate-goal-to-next-action
  synthesize-dynamic-macro-plan
  macro-brain-decision-dynamic-plan
@@ -31,6 +33,13 @@
  obs-hash->macro-world-state
  step-priority-macro-brain
  macro-brain-can-spend?
+ zerg-queen-target
+ creep-self-sustaining?
+ (struct-out bo-tactical-phase-plan)
+ (struct-out bo-active-tactical-plan)
+ PRO-BO-TACTICAL-PHASE-PLANS
+ pro-tactical-phases-for-matchup
+ evaluate-build-order-tactical-plan
 
  ;; 3. Fast Standalone Macro Simulator & Chaos Monkey Engine
  (struct-out macro-sim-task)
@@ -87,6 +96,7 @@
    (sc2-tech-node 'baneling            'Zerg 'morph    'combat-unit         25  25 0 0  320 'zergling          '(baneling-nest)                    #f)
    (sc2-tech-node 'lair                'Zerg 'morph    'tech-upgrade       150 100 0 0 1280 'townhall          '(spawning-pool)                    #t)
    (sc2-tech-node 'overseer            'Zerg 'morph    'counter-tech        50  50 0 0  270 'overlord          '(lair)                             #f)
+   (sc2-tech-node 'overlord-transport  'Zerg 'morph    'combat-unit         25  25 0 0  270 'overlord          '(lair)                             #f)
    (sc2-tech-node 'hydralisk-den       'Zerg 'build    'counter-tech       100 100 0 0  640 'worker            '(lair)                             #t)
    (sc2-tech-node 'hydralisk           'Zerg 'train    'combat-unit        100  50 2 0  540 'larva             '(hydralisk-den)                    #f)
    (sc2-tech-node 'lurker-den          'Zerg 'build    'counter-tech       100 150 0 0 1288 'worker            '(hydralisk-den lair)               #t)
@@ -247,58 +257,110 @@
     (values (sc2-tech-node-id n) n)))
 
 ;; Normalizes unit, structure, add-on, and upgrade aliases onto SC2-TECH-GRAPH node IDs.
+(define *brain-sym-norm-ht*
+  (hasheq
+   'viking                    'viking-fighter
+   'viking-assault            'viking-fighter
+   'siege-tank-sieged         'siege-tank
+   'widow-mine-burrowed       'widow-mine
+   'thor-ap                   'thor
+   'liberator-ag              'liberator
+   'broodlord                 'brood-lord
+   'voidray                   'void-ray
+   'lurker-mp                 'lurker
+   'lurker-burrowed           'lurker
+   'lurker-mp-burrowed        'lurker
+   'overseer-siege-mode       'overseer
+   'overlord-cocoon           'overseer
+   'transport-overlord-cocoon 'overlord-transport
+   'lurker-den-mp             'lurker-den
+   'robotics-support-bay      'robotics-bay
+   'templar-archives          'templar-archive
+   'barracks-tech-lab         'barracks-techlab
+   'factory-tech-lab          'factory-techlab
+   'starport-tech-lab         'starport-techlab
+   'zergling-movementspeed    'metabolic-boost
+   'centrifugal-hooks         'centrifical-hooks
+   'cloaking-field            'banshee-cloak
+   'adrenal-glands            'zergling-attackspeed
+   'warpgate-research         'warp-gate-research
+   'melee-attacks-1           'zerg-melee-weapons-1
+   'melee-attacks-2           'zerg-melee-weapons-2
+   'melee-attacks-3           'zerg-melee-weapons-3
+   'missile-attacks-1         'zerg-missile-weapons-1
+   'missile-attacks-2         'zerg-missile-weapons-2
+   'missile-attacks-3         'zerg-missile-weapons-3
+   'ground-carapace-1         'zerg-ground-armor-1
+   'ground-carapace-2         'zerg-ground-armor-2
+   'ground-carapace-3         'zerg-ground-armor-3
+   'infantry-weapons-1        'terran-infantry-weapons-1
+   'infantry-weapons-2        'terran-infantry-weapons-2
+   'infantry-weapons-3        'terran-infantry-weapons-3
+   'infantry-armor-1          'terran-infantry-armor-1
+   'infantry-armor-2          'terran-infantry-armor-2
+   'infantry-armor-3          'terran-infantry-armor-3
+   'ground-weapons-1          'protoss-ground-weapons-1
+   'ground-weapons-2          'protoss-ground-weapons-2
+   'ground-weapons-3          'protoss-ground-weapons-3
+   'ground-armor-1            'protoss-ground-armor-1
+   'ground-armor-2            'protoss-ground-armor-2
+   'ground-armor-3            'protoss-ground-armor-3
+   'shields-1                 'protoss-shields-1
+   'creeping-queen            'queen))
+
 (define (normalize-brain-sym sym)
-  (case sym
-    [(viking viking-assault)                       'viking-fighter]
-    [(siege-tank-sieged)                           'siege-tank]
-    [(widow-mine-burrowed)                         'widow-mine]
-    [(thor-ap)                                     'thor]
-    [(liberator-ag)                                'liberator]
-    [(broodlord)                                   'brood-lord]
-    [(voidray)                                     'void-ray]
-    [(lurker-mp lurker-burrowed lurker-mp-burrowed) 'lurker]
-    [(lurker-den-mp)                               'lurker-den]
-    [(robotics-support-bay)                        'robotics-bay]
-    [(templar-archives)                            'templar-archive]
-    [(barracks-tech-lab)                           'barracks-techlab]
-    [(factory-tech-lab)                            'factory-techlab]
-    [(starport-tech-lab)                           'starport-techlab]
-    [(zergling-movementspeed)                      'metabolic-boost]
-    [(cloaking-field)                              'banshee-cloak]
-    [(adrenal-glands)                              'zergling-attackspeed]
-    [(warpgate-research)                           'warp-gate-research]
-    [(melee-attacks-1)                             'zerg-melee-weapons-1]
-    [(melee-attacks-2)                             'zerg-melee-weapons-2]
-    [(melee-attacks-3)                             'zerg-melee-weapons-3]
-    [(missile-attacks-1)                           'zerg-missile-weapons-1]
-    [(missile-attacks-2)                           'zerg-missile-weapons-2]
-    [(missile-attacks-3)                           'zerg-missile-weapons-3]
-    [(ground-carapace-1)                           'zerg-ground-armor-1]
-    [(ground-carapace-2)                           'zerg-ground-armor-2]
-    [(ground-carapace-3)                           'zerg-ground-armor-3]
-    [(infantry-weapons-1)                          'terran-infantry-weapons-1]
-    [(infantry-weapons-2)                          'terran-infantry-weapons-2]
-    [(infantry-weapons-3)                          'terran-infantry-weapons-3]
-    [(infantry-armor-1)                            'terran-infantry-armor-1]
-    [(infantry-armor-2)                            'terran-infantry-armor-2]
-    [(infantry-armor-3)                            'terran-infantry-armor-3]
-    [(ground-weapons-1)                            'protoss-ground-weapons-1]
-    [(ground-weapons-2)                            'protoss-ground-weapons-2]
-    [(ground-weapons-3)                            'protoss-ground-weapons-3]
-    [(ground-armor-1)                              'protoss-ground-armor-1]
-    [(ground-armor-2)                              'protoss-ground-armor-2]
-    [(ground-armor-3)                              'protoss-ground-armor-3]
-    [(shields-1)                                   'protoss-shields-1]
-    [else                                          sym]))
+  (hash-ref *brain-sym-norm-ht* sym sym))
+
+(define (creep-self-sustaining? active-creep-tumors active-bases)
+  (define tumors
+    (if (real? active-creep-tumors)
+        (max 0 (inexact->exact (floor active-creep-tumors)))
+        0))
+  (define bases
+    (if (real? active-bases)
+        (max 1 (inexact->exact (floor active-bases)))
+        1))
+  (>= tumors (min 6 (* 2 bases))))
 
 (define (same-brain-sym? a b)
   (and (symbol? a)
        (symbol? b)
-       (eq? (normalize-brain-sym a) (normalize-brain-sym b))))
+       (eq? (hash-ref *brain-sym-norm-ht* a a)
+            (hash-ref *brain-sym-norm-ht* b b))))
+
+(define *tech-node-cache* (make-hasheq))
 
 (define (lookup-sc2-tech-node sym)
   (and (symbol? sym)
-       (hash-ref SC2-TECH-GRAPH (normalize-brain-sym sym) #f)))
+       (let ([hit (hash-ref *tech-node-cache* sym 'miss)])
+         (if (eq? hit 'miss)
+             (let ([v (hash-ref SC2-TECH-GRAPH (hash-ref *brain-sym-norm-ht* sym sym) #f)])
+               (hash-set! *tech-node-cache* sym v)
+               v)
+             hit))))
+
+(define current-ready-bldg-cache (make-parameter #f))
+(define current-total-bldg-cache (make-parameter #f))
+(define current-unit-count-cache (make-parameter #f))
+
+(define *struct-equiv-syms-cache* (make-hasheq))
+
+(define (cached-struct-equiv-syms sym)
+  (or (hash-ref *struct-equiv-syms-cache* sym #f)
+      (let ([lst (sc2-structure-equivalent-syms sym #f)])
+        (hash-set! *struct-equiv-syms-cache* sym lst)
+        lst)))
+
+(define (sum-equiv-bldg-ht ht sym)
+  (if (hash? ht)
+      (let ([syms (cached-struct-equiv-syms sym)])
+        (if (and (pair? syms) (null? (cdr syms)))
+            (let ([v (hash-ref ht (car syms) 0)])
+              (if (exact-integer? v) v 0))
+            (for/sum ([s (in-list syms)])
+              (define v (hash-ref ht s 0))
+              (if (exact-integer? v) v 0))))
+      0))
 
 ;; Delegates structure equivalence (morphs, flying Terran buildings, lowered depots,
 ;; rich geysers, uprooted crawlers, overcharged pylons, LotV structure aliases) to
@@ -306,61 +368,120 @@
 ;; add-ons never falsely satisfy attached TechLab/Reactor prerequisites and
 ;; `starport-techlab` is never double-counted as `starport-reactor`.
 (define (bldg-count-equivalent ht sym)
-  (sc2-count-equivalent-structures ht sym #f))
+  (define rc (current-ready-bldg-cache))
+  (cond
+    [(and rc (eq? ht (car rc)) (symbol? sym))
+     (define cht (cdr rc))
+     (or (hash-ref cht sym #f)
+         (let ([v (sum-equiv-bldg-ht ht sym)])
+           (hash-set! cht sym v)
+           v))]
+    [else
+     (define tc (current-total-bldg-cache))
+     (cond
+       [(and tc (eq? ht (car tc)) (symbol? sym))
+        (define cht (cdr tc))
+        (or (hash-ref cht sym #f)
+            (let ([v (sum-equiv-bldg-ht ht sym)])
+              (hash-set! cht sym v)
+              v))]
+       [else
+        (sum-equiv-bldg-ht ht sym)])]))
 
 ;; Counts equivalent unit modes (fighter/assault, tank/sieged, burrowed, phasing, transport).
+(define *unit-equiv-syms-cache* (make-hasheq))
+
+(define (cached-unit-equiv-syms sym)
+  (or (hash-ref *unit-equiv-syms-cache* sym #f)
+      (let ([lst (remove-duplicates (sc2-unit-equivalent-syms sym) eq?)])
+        (hash-set! *unit-equiv-syms-cache* sym lst)
+        lst)))
+
+(define (unit-count-equivalent-uncached ht sym)
+  (define syms (cached-unit-equiv-syms sym))
+  (cond
+    [(null? syms) 0]
+    [(null? (cdr syms)) (hash-ref ht (car syms) 0)]
+    [else (for/sum ([s (in-list syms)]) (hash-ref ht s 0))]))
+
 (define (unit-count-equivalent ht sym)
-  (for/sum ([s (in-list (remove-duplicates (sc2-unit-equivalent-syms sym) eq?))])
-    (hash-ref ht s 0)))
+  (define uc (current-unit-count-cache))
+  (if (and uc (eq? ht (car uc)) (symbol? sym))
+      (let ([cht (cdr uc)])
+        (or (hash-ref cht sym #f)
+            (let ([v (unit-count-equivalent-uncached ht sym)])
+              (hash-set! cht sym v)
+              v)))
+      (unit-count-equivalent-uncached ht sym)))
+
+(define (addon-parent-facility sym)
+  (case (normalize-brain-sym sym)
+    [(barracks-techlab barracks-reactor) 'barracks]
+    [(factory-techlab factory-reactor)   'factory]
+    [(starport-techlab starport-reactor) 'starport]
+    [else #f]))
+
+(define (parent-attached-addon-count parent-fac bldg-counts)
+  (case parent-fac
+    [(barracks)
+     (+ (bldg-count-equivalent bldg-counts 'barracks-techlab)
+        (bldg-count-equivalent bldg-counts 'barracks-reactor))]
+    [(factory)
+     (+ (bldg-count-equivalent bldg-counts 'factory-techlab)
+        (bldg-count-equivalent bldg-counts 'factory-reactor))]
+    [(starport)
+     (+ (bldg-count-equivalent bldg-counts 'starport-techlab)
+        (bldg-count-equivalent bldg-counts 'starport-reactor))]
+    [else 0]))
+
+(define (terr-free-addons-saturate-all-facilities? total-bldg-counts)
+  (define free-addons
+    (+ (hash-ref total-bldg-counts 'tech-lab 0)
+       (hash-ref total-bldg-counts 'techlab 0)
+       (hash-ref total-bldg-counts 'reactor 0)))
+  (if (<= free-addons 0)
+      #f
+      (let ([total-attached-addons
+             (+ (parent-attached-addon-count 'barracks total-bldg-counts)
+                (parent-attached-addon-count 'factory total-bldg-counts)
+                (parent-attached-addon-count 'starport total-bldg-counts))]
+            [total-terr-facilities
+             (+ (bldg-count-equivalent total-bldg-counts 'barracks)
+                (bldg-count-equivalent total-bldg-counts 'factory)
+                (bldg-count-equivalent total-bldg-counts 'starport))])
+        (and (> total-terr-facilities 0)
+             (>= (+ free-addons total-attached-addons) total-terr-facilities)))))
+
+;; Returns #f if `sym` is not a Terran add-on, or one of:
+;; - 'ready-slot-free    : at least one ready parent facility has a free add-on slot right now
+;; - 'parent-in-progress : ready parents are occupied, but an under-construction parent has a free slot
+;; - 'needs-new-parent   : all existing+pending parent facilities are occupied; another parent is needed
+(define (addon-parent-slot-state sym ready-bldg-counts total-bldg-counts)
+  (define parent-fac (addon-parent-facility sym))
+  (cond
+    [(not parent-fac) #f]
+    [(terr-free-addons-saturate-all-facilities? total-bldg-counts) 'needs-new-parent]
+    [else
+     (define ready-facs (bldg-count-equivalent ready-bldg-counts parent-fac))
+     (define total-facs (bldg-count-equivalent total-bldg-counts parent-fac))
+     (define fac-addons (parent-attached-addon-count parent-fac total-bldg-counts))
+     (cond
+       [(> ready-facs fac-addons) 'ready-slot-free]
+       [(> total-facs fac-addons) 'parent-in-progress]
+       [else 'needs-new-parent])]))
 
 ;; Checks whether all ready facilities of the parent type for `sym` already have
 ;; attached add-ons (or all Terran facilities on map are saturated by attached + free add-ons).
 (define (facility-addon-slot-occupied? sym ready-bldg-counts total-bldg-counts
                                        #:min-ready-floor [min-ready-floor 0])
-  (define csym (normalize-brain-sym sym))
-  (define parent-fac
-    (case csym
-      [(barracks-techlab barracks-reactor) 'barracks]
-      [(factory-techlab factory-reactor)   'factory]
-      [(starport-techlab starport-reactor) 'starport]
-      [else #f]))
+  (define parent-fac (addon-parent-facility sym))
   (cond
     [(not parent-fac) #f]
     [else
      (define ready-facs (bldg-count-equivalent ready-bldg-counts parent-fac))
-     (define fac-addons
-       (case parent-fac
-         [(barracks)
-          (+ (bldg-count-equivalent total-bldg-counts 'barracks-techlab)
-             (bldg-count-equivalent total-bldg-counts 'barracks-reactor))]
-         [(factory)
-          (+ (bldg-count-equivalent total-bldg-counts 'factory-techlab)
-             (bldg-count-equivalent total-bldg-counts 'factory-reactor))]
-         [(starport)
-          (+ (bldg-count-equivalent total-bldg-counts 'starport-techlab)
-             (bldg-count-equivalent total-bldg-counts 'starport-reactor))]
-         [else 0]))
-     (define free-addons
-       (+ (hash-ref total-bldg-counts 'tech-lab 0)
-          (hash-ref total-bldg-counts 'techlab 0)
-          (hash-ref total-bldg-counts 'reactor 0)))
-     (define total-attached-addons
-       (+ (bldg-count-equivalent total-bldg-counts 'barracks-techlab)
-          (bldg-count-equivalent total-bldg-counts 'barracks-reactor)
-          (bldg-count-equivalent total-bldg-counts 'factory-techlab)
-          (bldg-count-equivalent total-bldg-counts 'factory-reactor)
-          (bldg-count-equivalent total-bldg-counts 'starport-techlab)
-          (bldg-count-equivalent total-bldg-counts 'starport-reactor)))
-     (define total-terr-facilities
-       (+ (bldg-count-equivalent total-bldg-counts 'barracks)
-          (bldg-count-equivalent total-bldg-counts 'factory)
-          (bldg-count-equivalent total-bldg-counts 'starport)))
-     (define all-terr-slots-saturated-with-free?
-       (and (> free-addons 0)
-            (> total-terr-facilities 0)
-            (>= (+ free-addons total-attached-addons) total-terr-facilities)))
+     (define fac-addons (parent-attached-addon-count parent-fac total-bldg-counts))
      (or (>= fac-addons (max min-ready-floor ready-facs))
-         all-terr-slots-saturated-with-free?)]))
+         (terr-free-addons-saturate-all-facilities? total-bldg-counts))]))
 
 ;; Distinguishes genuine anti-air vs detection vs static ground-defense responses under attack
 ;; so non-defensive tech/upgrades never starve combat units during an active enemy attack.
@@ -368,7 +489,7 @@
   (define csym (normalize-brain-sym sym))
   (or (memq csym '(spine-crawler bunker shield-battery planetary-fortress))
       (and requires-anti-air?
-           (memq csym '(queen spore-crawler hydralisk-den hydralisk spire corruptor mutalisk
+           (memq csym '(queen spore-crawler lair hydralisk-den hydralisk spire corruptor mutalisk zerg-flyer-armor-1
                         marine missile-turret engineering-bay viking-fighter starport thor cyclone
                         stalker cybernetics-core photon-cannon stargate fleet-beacon phoenix void-ray tempest)))
       (and requires-detection?
@@ -383,10 +504,24 @@
 (define UNIT-MORPH-SOURCE-SLOTS
   '(zergling hydralisk roach corruptor overlord high-templar))
 
+;; Plain morph-source unit count so `'overlord-transport` never masks or satisfies `'overlord` morph capacity.
+(define (morph-source-unit-count unit-counts slot-sym)
+  (if (eq? slot-sym 'overlord)
+      (hash-ref unit-counts 'overlord 0)
+      (unit-count-equivalent unit-counts slot-sym)))
+
+;; Goal count accessor: keeps `'overlord-transport` separate from plain Overlords.
+(define (unit-count-for-goal unit-counts sym)
+  (define csym (normalize-brain-sym sym))
+  (if (eq? csym 'overlord-transport)
+      (+ (hash-ref unit-counts 'overlord-transport 0)
+         (hash-ref unit-counts 'transport-overlord-cocoon 0))
+      (unit-count-equivalent unit-counts sym)))
+
 (define (unit-morph-slot-ready? slot-sym unit-counts [used-counts #f])
   (define needed (if (eq? slot-sym 'high-templar) 2 1))
   (define avail
-    (- (unit-count-equivalent unit-counts slot-sym)
+    (- (morph-source-unit-count unit-counts slot-sym)
        (if used-counts (hash-ref used-counts slot-sym 0) 0)))
   (>= avail needed))
 
@@ -418,12 +553,9 @@
             [(eq? csym 'archon)
              (>= (unit-count-equivalent unit-counts 'high-templar) 2)]
             [else
-             (> (unit-count-equivalent unit-counts pslot) 0)])]
+             (> (morph-source-unit-count unit-counts pslot) 0)])]
          [else #t]))
      (and prereqs-ok? morph-source-ok?)]))
-
-(define (desired-zerg-queen-count active-bases)
-  (min SC2-MAX-QUEENS-CAP (+ active-bases (if (>= active-bases 2) 2 1))))
 
 (define (sc2-tech-already-satisfied? sym total-bldg-counts researched-upgs pending-upgs [target-count 1])
   (define node (lookup-sc2-tech-node sym))
@@ -432,15 +564,9 @@
     [(eq? (sc2-tech-node-kind node) 'research)
      (define csym (sc2-tech-node-id node))
      (or (not (not (memq sym researched-upgs)))
-         (not (not (memq csym researched-upgs)))
          (not (not (memq sym pending-upgs)))
-         (not (not (memq csym pending-upgs)))
-         (and (eq? csym 'metabolic-boost)
-              (or (not (not (memq 'zergling-movementspeed researched-upgs)))
-                  (not (not (memq 'zergling-movementspeed pending-upgs)))))
-         (and (eq? csym 'banshee-cloak)
-              (or (not (not (memq 'cloaking-field researched-upgs)))
-                  (not (not (memq 'cloaking-field pending-upgs))))))]
+         (has-upgrade-sym? csym researched-upgs)
+         (has-upgrade-sym? csym pending-upgs))]
     [(sc2-tech-node-unique? node)
      (>= (bldg-count-equivalent total-bldg-counts (sc2-tech-node-id node))
          (max 1 target-count))]
@@ -449,7 +575,9 @@
 ;; Walks the SC2-TECH-GRAPH recursively to find the earliest missing prerequisite
 ;; structure/add-on that is neither ready nor currently under construction (`total-bldg-counts == 0`).
 ;; Returns an ordered list of missing prerequisite symbols (from root prerequisite to immediate prerequisite).
-(define (resolve-missing-prereq-chain sym ready-bldg-counts total-bldg-counts [visited '()])
+(define (resolve-missing-prereq-chain sym ready-bldg-counts total-bldg-counts
+                                     [visited '()]
+                                     #:expand-occupied-addons? [expand-occupied-addons? #t])
   (define csym (normalize-brain-sym sym))
   (define node (lookup-sc2-tech-node csym))
   (cond
@@ -460,15 +588,30 @@
       (apply append
              (for/list ([p (in-list (sc2-tech-node-prereqs node))])
                (cond
+                 [(and expand-occupied-addons?
+                       (eq? p (addon-parent-facility csym))
+                       (= (bldg-count-equivalent total-bldg-counts csym) 0))
+                  ;; Missing Terran add-on needs an open parent slot; surface parent if all slots are full.
+                  (case (addon-parent-slot-state csym ready-bldg-counts total-bldg-counts)
+                    [(ready-slot-free) '()]
+                    [(parent-in-progress)
+                     (resolve-missing-prereq-chain p ready-bldg-counts total-bldg-counts next-vis
+                                                   #:expand-occupied-addons? expand-occupied-addons?)]
+                    [else
+                     (append (resolve-missing-prereq-chain p ready-bldg-counts total-bldg-counts next-vis
+                                                           #:expand-occupied-addons? expand-occupied-addons?)
+                             (list p))])]
                  [(single-prereq-ready? ready-bldg-counts p)
                   '()]
                  [(> (bldg-count-equivalent total-bldg-counts p) 0)
                   ;; Prerequisite is already under construction / morphing; wait for it to finish
                   ;; unless IT has a broken upstream prerequisite
-                  (resolve-missing-prereq-chain p ready-bldg-counts total-bldg-counts next-vis)]
+                  (resolve-missing-prereq-chain p ready-bldg-counts total-bldg-counts next-vis
+                                                #:expand-occupied-addons? expand-occupied-addons?)]
                  [else
                   ;; Prerequisite is completely missing (never built or destroyed by Chaos Monkey)!
-                  (append (resolve-missing-prereq-chain p ready-bldg-counts total-bldg-counts next-vis)
+                  (append (resolve-missing-prereq-chain p ready-bldg-counts total-bldg-counts next-vis
+                                                        #:expand-occupied-addons? expand-occupied-addons?)
                           (list p))])))
       eq?)]))
 
@@ -476,6 +619,14 @@
 ;; any broken tech tree dependencies (e.g., Lair exists or Roach Warren exists, but Spawning Pool
 ;; was destroyed; or Cybernetics Core exists, but Gateway or Pylon was destroyed; or Factory
 ;; exists, but Barracks or Supply Depot was destroyed).
+(define *tech-build-node-ids-by-race*
+  (for/hasheq ([r (in-list '(Zerg Terran Protoss))])
+    (values r
+            (for/list ([n (in-list SC2-TECH-NODES-LIST)]
+                       #:when (and (eq? (sc2-tech-node-race n) r)
+                                   (memq (sc2-tech-node-kind n) '(build expand morph addon))))
+              (sc2-tech-node-id n)))))
+
 (define (find-all-broken-tech-dependencies race ready-bldg-counts total-bldg-counts
                                            #:active-goals [active-goals '()])
   (define r-sym
@@ -483,27 +634,31 @@
       [(Zerg zerg ZvZ ZvT ZvP) 'Zerg]
       [(Terran terran TvZ TvT TvP) 'Terran]
       [else 'Protoss]))
-  ;; 1. Check any structure currently owned by the player whose upstream prerequisite was destroyed
-  (define owned-syms
-    (for/list ([n (in-list SC2-TECH-NODES-LIST)]
-               #:when (and (eq? (sc2-tech-node-race n) r-sym)
-                           (memq (sc2-tech-node-kind n) '(build expand morph addon))
-                           (> (bldg-count-equivalent total-bldg-counts (sc2-tech-node-id n)) 0)))
-      (sc2-tech-node-id n)))
-  ;; 2. Check all active build-order goal symbols
-  (define goal-syms
-    (filter symbol?
-            (map (lambda (g)
-                   (cond
-                     [(pro-bo-goal? g) (pro-bo-goal-target-sym g)]
-                     [(symbol? g) g]
-                     [else #f]))
-                 active-goals)))
-  (remove-duplicates
-   (apply append
-          (for/list ([sym (in-list (append owned-syms goal-syms))])
-            (resolve-missing-prereq-chain sym ready-bldg-counts total-bldg-counts)))
-   eq?))
+  (define (compute)
+    ;; 1. Check any structure currently owned by the player whose upstream prerequisite was destroyed
+    (define race-node-ids (hash-ref *tech-build-node-ids-by-race* r-sym '()))
+    (define owned-syms
+      (for/list ([nid (in-list race-node-ids)]
+                 #:when (> (bldg-count-equivalent total-bldg-counts nid) 0))
+        nid))
+    ;; 2. Check all active build-order goal symbols
+    (define goal-syms
+      (for/fold ([acc '()] #:result (reverse acc)) ([g (in-list active-goals)])
+        (cond
+          [(pro-bo-goal? g) (cons (pro-bo-goal-target-sym g) acc)]
+          [(symbol? g) (cons g acc)]
+          [else acc])))
+    (remove-duplicates
+     (apply append
+            (for/list ([sym (in-list (append owned-syms goal-syms))])
+              (resolve-missing-prereq-chain sym ready-bldg-counts total-bldg-counts
+                                            #:expand-occupied-addons? #f)))
+     eq?))
+  (if (and (current-ready-bldg-cache) (current-total-bldg-cache))
+      (compute)
+      (parameterize ([current-ready-bldg-cache (cons ready-bldg-counts (make-hasheq))]
+                     [current-total-bldg-cache (cons total-bldg-counts (make-hasheq))])
+        (compute))))
 
 ;; =============================================================================
 ;; 2. Decoupled Macro World State & Priority Macro Brain
@@ -558,9 +713,13 @@
   #:transparent)
 
 (define macro-world-state-enemy-units-table (make-weak-hasheq))
+(define macro-world-state-enemy-buildings-table (make-weak-hasheq))
 
 (define (macro-world-state-enemy-unit-counts ws)
   (hash-ref macro-world-state-enemy-units-table ws #f))
+
+(define (macro-world-state-enemy-building-counts ws)
+  (hash-ref macro-world-state-enemy-buildings-table ws #f))
 
 (define (make-macro-world-state
          #:race [race 'Zerg]
@@ -590,6 +749,7 @@
          #:supply-at-risk? [supply-at-risk? #f]
          #:peak-supply-reached [peak-supply-reached supply-used]
          #:enemy-unit-counts [enemy-unit-counts #f]
+         #:enemy-building-counts [enemy-building-counts #f]
          #:base-x [base-x 32.5]
          #:base-y [base-y 32.5]
          #:nat-x [nat-x 50.5]
@@ -636,6 +796,8 @@
      (exact->inexact third-y)))
   (when (hash? enemy-unit-counts)
     (hash-set! macro-world-state-enemy-units-table ws enemy-unit-counts))
+  (when (hash? enemy-building-counts)
+    (hash-set! macro-world-state-enemy-buildings-table ws enemy-building-counts))
   ws)
 
 ;; Extracts a pure `macro-world-state` from a runtime observation hash (`obs`).
@@ -650,6 +812,7 @@
   (define ally-units (hash-ref obs 'ally-units '()))
   (define ally-bldgs (hash-ref obs 'ally-buildings '()))
   (define enemy-units (hash-ref obs 'enemy-units '()))
+  (define enemy-bldgs (hash-ref obs 'enemy-buildings '()))
   (define ready-bldgs
     (filter (lambda (b)
               (and (>= (hash-ref b 'build-progress 1.0) 0.999)
@@ -696,10 +859,15 @@
     (for/fold ([ht (hasheq)])
               ([eu (in-list enemy-units)])
       (hash-update ht (unit-type-sym eu) add1 0)))
+  (define enemy-b-counts
+    (for/fold ([ht (hasheq)])
+              ([eb (in-list enemy-bldgs)])
+      (hash-update ht (unit-type-sym eb) add1 0)))
   (make-macro-world-state
    #:race race
    #:enemy-race (hash-ref obs 'enemy-race 'Unknown)
    #:enemy-unit-counts enemy-u-counts
+   #:enemy-building-counts enemy-b-counts
    #:frame (hash-ref obs 'frame 0)
    #:minerals (hash-ref obs 'minerals 50)
    #:gas (hash-ref obs 'gas 0)
@@ -739,7 +907,7 @@
                     (memq (hash-ref eb 'type 'unknown)
                           '(command-center-flying orbital-command-flying
                             barracks-flying factory-flying starport-flying))))
-              (hash-ref obs 'enemy-buildings '())))
+              enemy-bldgs))
    #:requires-detection?
    (not (null? (filter (lambda (e)
                          (or (hash-ref e 'cloaked #f)
@@ -829,13 +997,13 @@
   (define cid (normalize-brain-sym id))
   (define unit-morph?
     (and (eq? kind 'morph)
-         (memq cid '(ravager baneling lurker brood-lord overseer archon))))
+         (memq cid '(ravager baneling lurker brood-lord overseer overlord-transport archon))))
   (define current-ready
     (cond
       [(eq? kind 'research)
        (if (sc2-tech-already-satisfied? cid (hash) researched-upgrades '() 1) 1 0)]
       [(or (eq? kind 'train) unit-morph?)
-       (unit-count-equivalent unit-counts cid)]
+       (unit-count-for-goal unit-counts cid)]
       [else
        (bldg-count-equivalent ready-bldg-counts cid)]))
   (define current-total
@@ -843,7 +1011,7 @@
       [(eq? kind 'research)
        (if (sc2-tech-already-satisfied? cid (hash) researched-upgrades pending-upgrades 1) 1 0)]
       [(or (eq? kind 'train) unit-morph?)
-       (unit-count-equivalent unit-counts cid)]
+       (unit-count-for-goal unit-counts cid)]
       [else
        (bldg-count-equivalent total-bldg-counts cid)]))
 
@@ -862,18 +1030,31 @@
            (values 'needs-prereq (first missing-up))
            (values 'in-progress #f))]
 
-      ;; 3. Goal has all prerequisites ready right now -> translates directly to `cid`!
-      [(sc2-tech-prereqs-ready? cid ready-bldg-counts unit-counts)
+      ;; 3. Goal has all prerequisites (and open add-on parent slot, if add-on) ready right now -> `cid`!
+      [(let ([cid-slot-st (addon-parent-slot-state cid ready-bldg-counts total-bldg-counts)])
+         (and (sc2-tech-prereqs-ready? cid ready-bldg-counts unit-counts)
+              (or (not cid-slot-st) (eq? cid-slot-st 'ready-slot-free))))
        (values 'actionable-now cid)]
 
       ;; 4. Goal is missing one or more prerequisites -> resolve via backward-chaining over SC2-TECH-GRAPH
       [else
+       (define cid-slot-st (addon-parent-slot-state cid ready-bldg-counts total-bldg-counts))
+       (define cid-parent-fac (addon-parent-facility cid))
        (define missing-chain
-         (resolve-missing-prereq-chain cid ready-bldg-counts total-bldg-counts))
+         (cond
+           [(and cid-parent-fac (eq? cid-slot-st 'needs-new-parent))
+            (append (resolve-missing-prereq-chain cid-parent-fac ready-bldg-counts total-bldg-counts)
+                    (list cid-parent-fac))]
+           [(and cid-parent-fac (eq? cid-slot-st 'parent-in-progress))
+            (resolve-missing-prereq-chain cid-parent-fac ready-bldg-counts total-bldg-counts)]
+           [else
+            (resolve-missing-prereq-chain cid ready-bldg-counts total-bldg-counts)]))
        (cond
          [(pair? missing-chain)
           (define root-missing (first missing-chain))
-          (if (sc2-tech-prereqs-ready? root-missing ready-bldg-counts unit-counts)
+          (define root-slot-st (addon-parent-slot-state root-missing ready-bldg-counts total-bldg-counts))
+          (if (and (sc2-tech-prereqs-ready? root-missing ready-bldg-counts unit-counts)
+                   (or (not root-slot-st) (eq? root-slot-st 'ready-slot-free)))
               (values 'needs-prereq root-missing)
               (values 'waiting-on-in-progress-prereq #f))]
          [unit-morph?
@@ -887,7 +1068,7 @@
           (define min-src-needed (if (eq? cid 'archon) 2 1))
           (if (and struct-prereqs-ready?
                    src-sym
-                   (< (unit-count-equivalent unit-counts src-sym) min-src-needed)
+                   (< (morph-source-unit-count unit-counts src-sym) min-src-needed)
                    (sc2-tech-prereqs-ready? src-sym ready-bldg-counts unit-counts))
               (values 'needs-prereq src-sym)
               (values 'waiting-on-in-progress-prereq #f))]
@@ -930,11 +1111,28 @@
             (map pro-unit-timing->bo-goal due-units)))
   (values elapsed-sec steps-so-far due-upgs due-units due-timing-goals))
 
-;; Synthesizes the live 5-track `dynamic-macro-plan` from `macro-world-state` on every frame.
-(define (synthesize-dynamic-macro-plan state #:enemy-unit-counts [override-enemy-unit-counts #f])
+(struct dyn-plan-ctx
+  (all-upgs benchmark-targets
+   has-robo? has-ready-armory? enemy-cap-air? enemy-cap-air-ground-aa?
+   desired-thors air-fleet-cnt ship-weap-due?
+   zvp-stargate-threat? keep-spire-aa? aa-effective? pvt-fast-kiter-threat? tvp-cannon-contain?
+   desired-spores has-lair-or-hive-ready? desired-overseers desired-droppers
+   gas-bldg-sym total-gas-bldgs suppress-tvp-extra-rax?
+   crisis-defer? severe-crisis-static-def? defer-stargate?
+   early-zero-army-attack? root-combat-facility-ready? under-early-rush-crisis?
+   supply-sym hard-supply-block? zero-supply-provider-lockout? supply-lockout-active?
+   total-townhalls steps-so-far due-timing-goals repaired-prereqs))
+
+;; Synthesizes the live 5-track `dynamic-macro-plan` plus reusable per-step context.
+(define (synthesize-dynamic-macro-plan/ctx state
+                                         #:enemy-unit-counts [override-enemy-unit-counts #f]
+                                         #:enemy-building-counts [override-enemy-building-counts #f])
   (define enemy-u-counts
     (or (and (hash? override-enemy-unit-counts) override-enemy-unit-counts)
         (macro-world-state-enemy-unit-counts state)))
+  (define enemy-b-counts
+    (or (and (hash? override-enemy-building-counts) override-enemy-building-counts)
+        (macro-world-state-enemy-building-counts state)))
   (match-define (macro-world-state
                  race enemy-race frame minerals gas
                  supply-used supply-cap supply-left pending-supply
@@ -950,6 +1148,8 @@
 
   (define effective-phase-supply (max supply-used peak-supply-reached))
   (define all-upgs (remove-duplicates (append researched-upgrades pending-upgrades) eq?))
+  (define benchmark-targets
+    (normalized-pro-unit-benchmarks race enemy-race frame active-bases))
   (define has-robo? (> (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0))
   (define has-ready-armory? (> (bldg-count-equivalent ready-bldg-counts 'armory) 0))
   (define enemy-cap-air? (protoss-enemy-capital-air? enemy-u-counts))
@@ -958,6 +1158,49 @@
   (define air-fleet-cnt (terran-air-fleet-count unit-counts))
   (define ship-weap-due?
     (terran-ship-weapons-due? race air-fleet-cnt has-ready-armory? all-upgs))
+  (define zvp-stargate-threat?
+    (and (eq? race 'Zerg)
+         (zerg-enemy-stargate-air-threat? enemy-u-counts enemy-b-counts enemy-race requires-anti-air?)))
+  (define keep-spire-aa?
+    (and (eq? race 'Zerg)
+         (zerg-enemy-air-spire-needed? enemy-u-counts enemy-b-counts enemy-race requires-anti-air?)))
+  (define aa-effective?
+    (or requires-anti-air?
+        zvp-stargate-threat?
+        (and (eq? race 'Zerg) (or keep-spire-aa? enemy-cap-air?))))
+  (define pvt-fast-kiter-threat?
+    (and (eq? race 'Protoss)
+         (eq? enemy-race 'Terran)
+         (protoss-enemy-fast-kiter-threat? enemy-u-counts)))
+  (define tvp-cannon-contain?
+    (terran-enemy-cannon-contain? race enemy-race enemy-u-counts enemy-b-counts))
+  (define desired-spores
+    (if (eq? race 'Zerg)
+        (desired-zerg-spore-count active-bases enemy-u-counts enemy-b-counts enemy-race
+                                  requires-anti-air? requires-detection?)
+        0))
+  (define has-lair-or-hive-ready?
+    (or (> (bldg-count-equivalent ready-bldg-counts 'lair) 0)
+        (> (bldg-count-equivalent ready-bldg-counts 'hive) 0)))
+  (define desired-overseers
+    (if (eq? race 'Zerg)
+        (desired-zerg-overseer-count active-bases army-supply has-lair-or-hive-ready? requires-detection?)
+        0))
+  (define desired-droppers
+    (if (eq? race 'Zerg)
+        (desired-zerg-overlord-transport-count active-bases army-supply workers has-lair-or-hive-ready? under-attack?)
+        0))
+  (define gas-bldg-sym
+    (case race [(Zerg) 'extractor] [(Terran) 'refinery] [else 'assimilator]))
+  (define total-gas-bldgs (bldg-count-equivalent total-bldg-counts gas-bldg-sym))
+  (define suppress-tvp-extra-rax?
+    (suppress-terran-extra-barracks-for-tvp-factory?
+     race enemy-race
+     (bldg-count-equivalent total-bldg-counts 'barracks)
+     (bldg-count-equivalent total-bldg-counts 'factory)
+     (unit-count-equivalent unit-counts 'siege-tank)
+     minerals frame total-gas-bldgs gas
+     enemy-u-counts enemy-b-counts))
   (define crisis-defer?
     (crisis-defense-tech-defer-active? under-attack? army-supply enemy-threat-supply workers))
   (define severe-crisis-static-def?
@@ -1019,17 +1262,31 @@
     (filter (lambda (sym)
               (not (crisis-deferred-sym? (normalize-brain-sym sym) crisis-defer?
                                          #:defer-stargate? defer-stargate?
-                                         #:keep-ship-weapons? ship-weap-due?)))
+                                         #:keep-ship-weapons? ship-weap-due?
+                                         #:keep-spire-aa? keep-spire-aa?)))
             (find-all-broken-tech-dependencies
              race ready-bldg-counts total-bldg-counts
-             #:active-goals (append steps-so-far due-timing-goals))))
+             #:active-goals steps-so-far)))
+  (define ctx-out
+    (dyn-plan-ctx
+     all-upgs benchmark-targets
+     has-robo? has-ready-armory? enemy-cap-air? enemy-cap-air-ground-aa?
+     desired-thors air-fleet-cnt ship-weap-due?
+     zvp-stargate-threat? keep-spire-aa? aa-effective? pvt-fast-kiter-threat? tvp-cannon-contain?
+     desired-spores has-lair-or-hive-ready? desired-overseers desired-droppers
+     gas-bldg-sym total-gas-bldgs suppress-tvp-extra-rax?
+     crisis-defer? severe-crisis-static-def? defer-stargate?
+     early-zero-army-attack? root-combat-facility-ready? under-early-rush-crisis?
+     plan-supply-sym hard-supply-block? zero-supply-provider-lockout? supply-lockout-active?
+     plan-total-townhalls steps-so-far due-timing-goals repaired-prereqs))
 
   (define raw-goal-specs '())
   (define (add-goal-spec! id track kind target-count weight reason)
     (when (and (lookup-sc2-tech-node id)
                (not (crisis-deferred-sym? (normalize-brain-sym id) crisis-defer?
                                           #:defer-stargate? defer-stargate?
-                                          #:keep-ship-weapons? ship-weap-due?)))
+                                          #:keep-ship-weapons? ship-weap-due?
+                                          #:keep-spire-aa? keep-spire-aa?)))
       (set! raw-goal-specs
             (cons (list id track kind target-count weight reason)
                   raw-goal-specs))))
@@ -1070,7 +1327,8 @@
               (begin
                 (add-goal-spec! 'stalker 'survival-supply 'train 4 555.0 'emergency-rush-defense)
                 (add-goal-spec! 'adept 'survival-supply 'train 2 545.0 'emergency-rush-defense)
-                (add-goal-spec! 'zealot 'survival-supply 'train 2 530.0 'emergency-rush-defense)
+                (unless pvt-fast-kiter-threat?
+                  (add-goal-spec! 'zealot 'survival-supply 'train 2 530.0 'emergency-rush-defense))
                 (add-goal-spec! 'shield-battery 'survival-supply 'build 1 520.0 'emergency-rush-defense))
               (add-goal-spec! 'zealot 'survival-supply 'train 4 540.0 'emergency-rush-defense))])]))
 
@@ -1092,9 +1350,6 @@
   (for ([g (in-list steps-so-far)])
     (match-define (pro-bo-goal kind sym tgt-cnt min-sup _ _tgt-sec) g)
     (hash-set! seen-step-keys (cons kind (normalize-brain-sym sym)) #t)
-    (define addon-occupies-facility?
-      (and live-slots?
-           (facility-addon-slot-occupied? sym ready-bldg-counts total-bldg-counts #:min-ready-floor 1)))
     (define redundant-scaling-fac-with-idle-slots?
       (and live-slots?
            (< minerals 300)
@@ -1124,17 +1379,28 @@
                  (and supply-lockout-active?
                       (< minerals (+ (sc2-min-cost plan-supply-sym 100) (sc2-min-cost sym 75))))
                  protoss-1base-2nd-gas-capped?
-                 (and live-slots? (> cur-gb 0) (>= gas 250))))))
+                 (and live-slots?
+                      (> cur-gb 0)
+                      (>= gas (if (and (>= cur-gb 2) (>= workers 36)) 550 250)))))))
     (define late-tech-deferred-by-low-army?
       (and live-slots?
            (memq sym '(armory ghost-academy))
            (< army-supply 18)
            (not (>= active-bases 3))
            (not (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs))))
-    (unless (or addon-occupies-facility?
-                redundant-scaling-fac-with-idle-slots?
+    (define suppressed-extra-tvp-rax?
+      (and suppress-tvp-extra-rax?
+           (eq? sym 'barracks)
+           (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)))
+    (define suppressed-kiter-zealot?
+      (and pvt-fast-kiter-threat?
+           (eq? sym 'zealot)
+           (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)))
+    (unless (or redundant-scaling-fac-with-idle-slots?
                 extra-geyser-deferred-by-gas-bank?
-                late-tech-deferred-by-low-army?)
+                late-tech-deferred-by-low-army?
+                suppressed-extra-tvp-rax?
+                suppressed-kiter-zealot?)
       (cond
         [(eq? kind 'expand)
          (define exp-w
@@ -1142,7 +1408,7 @@
              [(and supply-lockout-active?
                    (< minerals (+ (sc2-min-cost plan-supply-sym 100) (sc2-min-cost sym 300))))
               25.0]
-             [peaceful? (- 476.0 (* 3.0 macro-step-rank))]
+             [peaceful? (max 466.0 (- 476.0 (* 2.0 macro-step-rank)))]
              [else 42.0]))
          (set! macro-step-rank (add1 macro-step-rank))
          (add-goal-spec! sym 'economy-expansion 'expand tgt-cnt exp-w 'expansion-plan)]
@@ -1153,7 +1419,7 @@
                 root-combat-facility-ready?
                 (not (is-aa-or-detection-answer?
                       sym
-                      (or requires-anti-air?
+                      (or aa-effective?
                           (and (eq? race 'Protoss) (protoss-enemy-capital-air? enemy-u-counts)))
                       requires-detection?))
                 (or (and (eq? kind 'research)
@@ -1161,10 +1427,18 @@
                     (memq sym '(lair hive spire greater-spire infestation-pit ultralisk-cavern evolution-chamber
                                 engineering-bay armory ghost-academy fusion-core
                                 twilight-council forge robotics-bay fleet-beacon templar-archive dark-shrine)))))
+         (define addon-ready-free?
+           (and (addon-parent-facility sym)
+                peaceful?
+                (>= workers 20)
+                (not non-defensive-tech-under-attack?)
+                (eq? (addon-parent-slot-state sym ready-bldg-counts total-bldg-counts)
+                     'ready-slot-free)))
          (define tech-w
-           (if non-defensive-tech-under-attack?
-               140.0
-               (max 442.0 (- 476.0 (* 3.5 macro-step-rank)))))
+           (cond
+             [non-defensive-tech-under-attack? 140.0]
+             [addon-ready-free? (max 478.0 (- 476.0 (* 3.5 macro-step-rank)))]
+             [else (max 442.0 (- 476.0 (* 3.5 macro-step-rank)))]))
          (set! macro-step-rank (add1 macro-step-rank))
          (add-goal-spec! sym 'tech-infrastructure kind tgt-cnt tech-w 'macro-tech-plan)]
         [(eq? kind 'train)
@@ -1175,7 +1449,8 @@
                 (< army-supply 4)))
          (define queen-sat-defer?
            (and (eq? sym 'queen)
-                (< workers (min 60 (* 16 active-bases)))
+                (not (or zvp-stargate-threat? enemy-cap-air?))
+                (< workers (min 42 (* 14 active-bases)))
                 (>= cur-queens active-bases)))
          (define gas-locked-0g?
            (and live-slots?
@@ -1200,21 +1475,40 @@
   (define under-sat-econ?
     (and peaceful?
          (< workers (min 36 (* 16 active-bases)))))
+  (define (timing-goal-needs-extra-occupied-parent? sym)
+    (define prereqs-ready? (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts))
+    (and (not prereqs-ready?)
+         (not (and requires-detection? (eq? (normalize-brain-sym sym) 'raven)))
+         (let ([chain (resolve-missing-prereq-chain sym ready-bldg-counts total-bldg-counts)])
+           (and (pair? chain)
+                (let ([first-m (first chain)])
+                  (and (memq first-m '(barracks factory starport))
+                       (> (bldg-count-equivalent total-bldg-counts first-m) 0)
+                       (let* ([nd (lookup-sc2-tech-node sym)]
+                              [ps (if nd (sc2-tech-node-prereqs nd) '())])
+                         (not (ormap (lambda (psym)
+                                       (define npsym (normalize-brain-sym psym))
+                                       (or (hash-has-key? seen-step-keys (cons 'build npsym))
+                                           (hash-has-key? seen-step-keys (cons 'addon npsym))))
+                                     ps)))))))))
   (when (> frame 0)
     (for ([up (in-list due-upgs)])
       (define sym (pro-upgrade-timing-upgrade-sym up))
       (define ssec (exact->inexact (pro-upgrade-timing-start-sec up)))
       (unless (or (hash-has-key? seen-step-keys (cons 'research (normalize-brain-sym sym)))
-                  (sc2-tech-already-satisfied? sym total-bldg-counts researched-upgrades pending-upgrades 1))
+                  (sc2-tech-already-satisfied? sym total-bldg-counts researched-upgrades pending-upgrades 1)
+                  (timing-goal-needs-extra-occupied-parent? sym))
+        (define timing-prereqs-ready? (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts))
         (define non-defensive-under-attack?
           (and live-slots?
                (not peaceful?)
                root-combat-facility-ready?
-               (not (is-aa-or-detection-answer? sym requires-anti-air? requires-detection?))
+               (not (is-aa-or-detection-answer? sym aa-effective? requires-detection?))
                (or under-attack? (< army-supply (+ enemy-threat-supply 6)))))
         (define upg-w
           (cond
             [non-defensive-under-attack? 140.0]
+            [(not timing-prereqs-ready?) (if under-sat-econ? 422.0 430.0)]
             [(>= elapsed-sec ssec) (if under-sat-econ? 428.0 460.0)]
             [else (if under-sat-econ? 422.0 438.0)]))
         (add-goal-spec! sym 'tech-infrastructure 'research 1 upg-w 'timing-upgrade-plan)))
@@ -1227,14 +1521,20 @@
       (unless (or (< tgt-cnt 1)
                   (>= cur-cnt tgt-cnt)
                   (hash-has-key? seen-step-keys (cons 'train (normalize-brain-sym sym)))
+                  (timing-goal-needs-extra-occupied-parent? sym)
+                  (and pvt-fast-kiter-threat?
+                       (eq? sym 'zealot)
+                       (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
                   (and (eq? sym 'overlord) (> effective-phase-supply (+ min-sup 12))))
+        (define timing-prereqs-ready? (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts))
         (define queen-defer?
           (and (eq? sym 'queen)
                (or under-attack? (> enemy-threat-supply 2))
                (< army-supply 4)))
         (define queen-sat-defer?
           (and (eq? sym 'queen)
-               (< workers (min 60 (* 16 active-bases)))
+               (not (or zvp-stargate-threat? enemy-cap-air?))
+               (< workers (min 42 (* 14 active-bases)))
                (>= (unit-count-equivalent unit-counts 'queen) active-bases)))
         (define past-unit-window?
           (and (> effective-phase-supply (+ min-sup 12))
@@ -1246,25 +1546,32 @@
               [queen-defer? 80.0]
               [queen-sat-defer? 120.0]
               [(not peaceful?) 420.0]
+              [(not timing-prereqs-ready?) (if under-sat-econ? 422.0 430.0)]
               [(and (>= elapsed-sec tsec) (not under-sat-econ?)) 436.0]
               [else 424.0]))
           (add-goal-spec! sym 'army-production 'train tgt-cnt unit-w 'timing-unit-plan)))))
 
   ;; Track 2b: Zerg Per-Base + Creep/Defense Queen Engine (capped at SC2-MAX-QUEENS-CAP = 8)
   (define cur-queens (unit-count-equivalent unit-counts 'queen))
-  (define desired-queens (desired-zerg-queen-count active-bases))
+  (define early-aggro? (or under-attack? (> enemy-threat-supply 0)))
+  (define desired-queens
+    (if (and (eq? race 'Zerg) enemy-cap-air?)
+        SC2-MAX-QUEENS-CAP
+        (desired-zerg-queen-count active-bases zvp-stargate-threat? early-aggro?)))
   (when (and (eq? race 'Zerg)
              (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
              (< cur-queens desired-queens))
     (define queen-drone-sat-defer?
-      (and (< workers (min 60 (* 16 active-bases)))
+      (and (not (or zvp-stargate-threat? enemy-cap-air?))
+           (< workers (min 42 (* 14 active-bases)))
            (>= cur-queens active-bases)))
     (add-goal-spec! 'queen 'economy-expansion 'train desired-queens
                     (cond
                       [(and (or under-attack? (> enemy-threat-supply 2)) (< army-supply 4)) 80.0]
+                      [(or zvp-stargate-threat? enemy-cap-air?) 495.0]
                       [queen-drone-sat-defer? 120.0]
                       [(and live-slots? peaceful? (< cur-queens active-bases)) 445.0]
-                      [(and live-slots? peaceful?) 428.0]
+                      [(and live-slots? peaceful?) 432.0]
                       [else 230.0])
                     'larva-inject-engine))
 
@@ -1272,7 +1579,9 @@
   (when (and live-slots? peaceful? (>= gas 80))
     (case race
       [(Zerg)
-       (when (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+       (when (and (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+                  (= (bldg-count-equivalent total-bldg-counts 'lair) 0)
+                  (= (bldg-count-equivalent total-bldg-counts 'hive) 0))
          (add-goal-spec! 'roach-warren 'tech-infrastructure 'build 1 455.0 'gas-unlock-tech))
        (when (and (>= gas 100)
                   (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
@@ -1295,17 +1604,22 @@
                   (= (bldg-count-equivalent total-bldg-counts 'starport) 0))
          (add-goal-spec! 'starport 'tech-infrastructure 'build 1 450.0 'gas-unlock-tech))]))
 
-  ;; Track 5: Dynamic Counter-Tech & Proactive Intel/Detection Goals
-  (define has-lair-or-hive-ready?
-    (or (> (bldg-count-equivalent ready-bldg-counts 'lair) 0)
-        (> (bldg-count-equivalent ready-bldg-counts 'hive) 0)))
+  ;; Track 5: Dynamic Counter-Tech & Proactive Intel/Detection/Harass Goals
   (when (and (eq? race 'Zerg) has-lair-or-hive-ready?)
-    (define desired-overseers (if (or (>= army-supply 40) requires-detection?) 2 1))
     (define cur-overseers (unit-count-equivalent unit-counts 'overseer))
-    (when (< cur-overseers desired-overseers)
+    (when (and (> desired-overseers 0) (< cur-overseers desired-overseers))
       (add-goal-spec! 'overseer 'intel-recon 'morph desired-overseers
-                      (if (= cur-overseers 0) 488.0 446.0)
-                      'proactive-overseer-detection)))
+                      (cond
+                        [(= cur-overseers 0) 488.0]
+                        [requires-detection? 478.0]
+                        [else 456.0])
+                      'proactive-overseer-detection))
+    (define cur-droppers (unit-count-for-goal unit-counts 'overlord-transport))
+    (when (and (> desired-droppers 0)
+               (< cur-droppers desired-droppers)
+               (> (morph-source-unit-count unit-counts 'overlord) 0))
+      (add-goal-spec! 'overlord-transport 'army-production 'morph desired-droppers
+                      454.0 'proactive-dropperlord-harass)))
 
   (define enemy-ground-army?
     (if (and (hash? enemy-u-counts) (> (hash-count enemy-u-counts) 0))
@@ -1360,6 +1674,74 @@
       (add-goal-spec! 'lurker 'army-production 'morph 10
                       (if (< cur-lurkers 4) 476.0 456.0)
                       'proactive-lurker-morph))
+    ;; Proactive Zerg burrow, tunneling-claws, and centrifical-hooks timings.
+    (define has-t3-hive-tech?
+      (and (> (bldg-count-equivalent ready-bldg-counts 'hive) 0)
+           (or (> (bldg-count-equivalent ready-bldg-counts 'ultralisk-cavern) 0)
+               (> (bldg-count-equivalent ready-bldg-counts 'greater-spire) 0))))
+    (define has-burrow-play-unit?
+      (or (>= (unit-count-equivalent unit-counts 'roach) 2)
+          (>= (unit-count-equivalent unit-counts 'infestor) 1)
+          (>= (unit-count-equivalent unit-counts 'lurker) 1)
+          (> (bldg-count-equivalent ready-bldg-counts 'lurker-den) 0)))
+    (when (and (not crisis-defer?)
+               peaceful?
+               (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+               (>= effective-phase-supply 28)
+               (or (not has-t3-hive-tech?) has-burrow-play-unit?)
+               (or (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
+                   has-burrow-play-unit?)
+               (or (has-upgrade-sym? 'metabolic-boost all-upgs)
+                   (>= gas 100))
+               (not (sc2-tech-already-satisfied? 'burrow total-bldg-counts researched-upgrades pending-upgrades 1)))
+      (add-goal-spec! 'burrow 'tech-infrastructure 'research 1 462.0 'proactive-burrow-tech))
+    (when (and (not crisis-defer?)
+               has-lair-or-hive-ready?
+               (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
+               (>= (unit-count-equivalent unit-counts 'roach) 4)
+               (not (sc2-tech-already-satisfied? 'tunneling-claws total-bldg-counts researched-upgrades pending-upgrades 1)))
+      (add-goal-spec! 'tunneling-claws 'tech-infrastructure 'research 1 464.0 'roach-burrow-micro-tech))
+    (when (and has-lair-or-hive-ready?
+               (> (bldg-count-equivalent ready-bldg-counts 'baneling-nest) 0)
+               (>= (+ cur-zerglings cur-banelings) 6)
+               (not (sc2-tech-already-satisfied? 'centrifical-hooks total-bldg-counts researched-upgrades pending-upgrades 1)))
+      (add-goal-spec! 'centrifical-hooks 'tech-infrastructure 'research 1 468.0 'baneling-speed-timing))
+    ;; [ISSUE-R5-3] ZvP Stargate / Phoenix / Oracle -> 1 Spore Crawler per base + Hydralisk/Queen AA.
+    (when (and (> desired-spores 0)
+               (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+               (< (bldg-count-equivalent total-bldg-counts 'spore-crawler) desired-spores))
+      (add-goal-spec! 'spore-crawler 'intel-recon 'build desired-spores
+                      (if (or zvp-stargate-threat? enemy-cap-air?) 496.0 490.0)
+                      'stargate-mineral-line-spore))
+    (when zvp-stargate-threat?
+      (when (< cur-queens desired-queens)
+        (add-goal-spec! 'queen 'survival-supply 'train desired-queens 496.0 'zvp-stargate-aa-response))
+      (when (and has-lair-or-hive-ready?
+                 (= (bldg-count-equivalent total-bldg-counts 'hydralisk-den) 0))
+        (add-goal-spec! 'hydralisk-den 'tech-infrastructure 'build 1 488.0 'zvp-stargate-aa-response))
+      (when (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+        (add-goal-spec! 'hydralisk 'army-production 'train 8 492.0 'zvp-stargate-aa-response)))
+    ;; Anti-Capital-Air (`battlecruiser`, `carrier`, `tempest`, `brood-lord`): ramp Queens to 8,
+    ;; unlock Lair -> Spire -> Corruptors (14..20) + Flyer Armor, and backup Hydralisks (#156 G1).
+    (when enemy-cap-air?
+      (define zerg-cap-air-corruptors
+        (zerg-enemy-capital-air-corruptor-cap enemy-u-counts requires-anti-air? enemy-race))
+      (when (< cur-queens desired-queens)
+        (add-goal-spec! 'queen 'survival-supply 'train desired-queens 497.0 'anti-capital-air))
+      (when (and (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+                 (= (bldg-count-equivalent total-bldg-counts 'spire) 0)
+                 (= (bldg-count-equivalent total-bldg-counts 'greater-spire) 0))
+        (add-goal-spec! 'spire 'tech-infrastructure 'build 1 495.0 'anti-capital-air))
+      (when (and (or (> (bldg-count-equivalent ready-bldg-counts 'spire) 0)
+                     (> (bldg-count-equivalent ready-bldg-counts 'greater-spire) 0))
+                 (< (unit-count-equivalent unit-counts 'corruptor) zerg-cap-air-corruptors))
+        (add-goal-spec! 'corruptor 'army-production 'train zerg-cap-air-corruptors 494.0 'anti-capital-air))
+      (when (and (or (> (bldg-count-equivalent ready-bldg-counts 'spire) 0)
+                     (> (bldg-count-equivalent ready-bldg-counts 'greater-spire) 0))
+                 (not (sc2-tech-already-satisfied? 'zerg-flyer-armor-1 total-bldg-counts researched-upgrades pending-upgrades 1)))
+        (add-goal-spec! 'zerg-flyer-armor-1 'tech-infrastructure 'research 1 490.0 'anti-capital-air))
+      (when (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+        (add-goal-spec! 'hydralisk 'army-production 'train 12 486.0 'anti-capital-air)))
     ;; Keep Roach (< 16) active as mineral-sink ground core when minerals >= 300.
     (when (and (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
                (>= minerals 300)
@@ -1380,6 +1762,30 @@
   ;; TvT scaling (`barracks-techlab`, 2nd `factory`, `marauder`, `siege-tank`, `medivac`, `viking-fighter`)
   ;; and ready-tech / enemy-triggered Ghost & Liberator counters (`#5123417`, `#5123667`, `#5123937`).
   (when (eq? race 'Terran)
+    ;; [ISSUE-R5-1] TvP Cannon Contain Break & Early Factory/Tank Progression
+    (when (or tvp-cannon-contain?
+              (and (eq? enemy-race 'Protoss)
+                   (> (bldg-count-equivalent total-bldg-counts 'barracks) 0)
+                   (or (> total-gas-bldgs 0) (>= gas 50) (>= frame 1800))))
+      (when (= (bldg-count-equivalent total-bldg-counts 'factory) 0)
+        (add-goal-spec! 'factory 'tech-infrastructure 'build 1
+                        (if tvp-cannon-contain? 495.0 476.0)
+                        'tvp-cannon-contain-break))
+      (when (and (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
+                 (= (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)
+                 (not (facility-addon-slot-occupied? 'factory-techlab ready-bldg-counts total-bldg-counts #:min-ready-floor 1)))
+        (add-goal-spec! 'factory-techlab 'tech-infrastructure 'addon 1
+                        (if tvp-cannon-contain? 494.0 475.0)
+                        'tvp-cannon-contain-break))
+      (when (and (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+                 (< (unit-count-equivalent unit-counts 'siege-tank) (if tvp-cannon-contain? 3 2)))
+        (add-goal-spec! 'siege-tank 'army-production 'train (if tvp-cannon-contain? 3 2)
+                        (if tvp-cannon-contain? 496.0 474.0)
+                        'tvp-cannon-contain-break))
+      (when (and tvp-cannon-contain?
+                 (> (bldg-count-equivalent ready-bldg-counts 'barracks-techlab) 0)
+                 (not (sc2-tech-already-satisfied? 'concussive-shells total-bldg-counts researched-upgrades pending-upgrades 1)))
+        (add-goal-spec! 'concussive-shells 'tech-infrastructure 'research 1 478.0 'tvp-cannon-contain-break)))
     (when (and (memq enemy-race '(Terran Protoss))
                (< (bldg-count-equivalent total-bldg-counts 'barracks-techlab) desired-rax-tl)
                (not (facility-addon-slot-occupied? 'barracks-techlab ready-bldg-counts total-bldg-counts #:min-ready-floor 1)))
@@ -1410,6 +1816,32 @@
                terran-need-lib?
                (> (bldg-count-equivalent ready-bldg-counts 'starport) 0))
       (add-goal-spec! 'liberator 'army-production 'train desired-libs 474.0 't3-liberator-counter))
+    ;; Proactive Widow Mine, Raven, and Viking multi-task/control production when facilities are ready
+    (when (and (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
+               (or (memq enemy-race '(Protoss Zerg)) (>= active-bases 2))
+               (< (unit-count-equivalent unit-counts 'widow-mine) (if (>= active-bases 2) 3 1)))
+      (add-goal-spec! 'widow-mine 'army-production 'train (if (>= active-bases 2) 3 1)
+                      462.0 'proactive-widow-mine-harass))
+    (when (and (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
+               (> (bldg-count-equivalent ready-bldg-counts 'starport-techlab) 0)
+               (< (unit-count-equivalent unit-counts 'raven) (if (or requires-detection? (>= active-bases 2)) 2 1)))
+      (add-goal-spec! 'raven 'intel-recon 'train (if (or requires-detection? (>= active-bases 2)) 2 1)
+                      (if requires-detection? 496.0 462.0)
+                      'proactive-raven-intel))
+    (when (and (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
+               (< (unit-count-equivalent unit-counts 'medivac) 2)
+               (>= (+ (unit-count-equivalent unit-counts 'marine)
+                      (unit-count-equivalent unit-counts 'marauder))
+                   6))
+      (add-goal-spec! 'medivac 'army-production 'train 2 464.0 'proactive-bio-medivac))
+    (when (and (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
+               (or requires-anti-air? enemy-cap-air? (memq enemy-race '(Protoss Terran)))
+               (< (unit-count-equivalent unit-counts 'viking-fighter)
+                  (if (or requires-anti-air? enemy-cap-air?) 6 2)))
+      (add-goal-spec! 'viking-fighter 'army-production 'train
+                      (if (or requires-anti-air? enemy-cap-air?) 6 2)
+                      (if (or requires-anti-air? enemy-cap-air?) 492.0 458.0)
+                      'proactive-viking-control))
     ;; [NOTE-R4-B] Anti-Capital-Air (`tempest`, `carrier`, `battlecruiser`, `brood-lord`):
     ;; boost Armory + Thors (< 5-6) alongside Viking-Fighter, plus `+1` Ship Weapons when air fleet >= 4.
     (when (and enemy-cap-air?
@@ -1465,13 +1897,31 @@
                   (< (bldg-count-equivalent total-bldg-counts 'bunker) 2))
          (add-goal-spec! 'bunker 'survival-supply 'build 2 468.0 'crisis-defense))]))
 
-  ;; Protoss Anti-Capital-Air (`tempest`, `carrier`, `battlecruiser`, `brood-lord`) & 4th Nexus at >=54 Probes (`#5122493`).
+  ;; Protoss Anti-Capital-Air (`tempest`, `carrier`, `battlecruiser`, `brood-lord`),
+  ;; [ISSUE-R5-2] PvT fast-kiter counter, proactive Adept/Oracle harass, & 4th Nexus.
   (when (eq? race 'Protoss)
+    (when (and pvt-fast-kiter-threat?
+               (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
+      (add-goal-spec! 'stalker 'army-production 'train 8 492.0 'pvt-fast-kiter-counter)
+      (add-goal-spec! 'adept 'army-production 'train 4 486.0 'pvt-fast-kiter-counter)
+      (add-goal-spec! 'shield-battery 'survival-supply 'build 2 484.0 'pvt-fast-kiter-counter))
+    (when (and (not pvt-fast-kiter-threat?)
+               (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+               (< army-supply 24)
+               (< (unit-count-equivalent unit-counts 'adept) 2))
+      (add-goal-spec! 'adept 'army-production 'train 2 458.0 'proactive-adept-harass))
+    (when (and (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0)
+               (not enemy-cap-air?)
+               (< (unit-count-equivalent unit-counts 'oracle)
+                  (if (and (>= minerals 200) (>= gas 200)) 2 1)))
+      (add-goal-spec! 'oracle 'army-production 'train
+                      (if (and (>= minerals 200) (>= gas 200)) 2 1)
+                      466.0 'proactive-oracle-harass))
     (when enemy-cap-air?
       (add-goal-spec! 'stalker 'army-production 'train 12 496.0 'anti-capital-air)
       (add-goal-spec! 'stargate 'tech-infrastructure 'build 1 494.0 'anti-capital-air)
       (when (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0)
-        (add-goal-spec! 'void-ray 'army-production 'train 6 495.0 'anti-capital-air)
+        (add-goal-spec! 'void-ray 'army-production 'train 8 495.0 'anti-capital-air)
         (add-goal-spec! 'fleet-beacon 'tech-infrastructure 'build 1 492.0 'anti-capital-air))
       (when (> (bldg-count-equivalent ready-bldg-counts 'fleet-beacon) 0)
         (add-goal-spec! 'tempest 'army-production 'train 6 497.0 'anti-capital-air)))
@@ -1483,7 +1933,7 @@
   (when requires-anti-air?
     (case race
       [(Zerg)
-       (add-goal-spec! 'queen 'survival-supply 'train (min SC2-MAX-QUEENS-CAP (+ active-bases 2)) 495.0 'anti-air-response)
+       (add-goal-spec! 'queen 'survival-supply 'train (desired-zerg-queen-count active-bases #t) 495.0 'anti-air-response)
        (add-goal-spec! 'hydralisk 'army-production 'train 4 490.0 'anti-air-response)]
       [(Terran)
        (add-goal-spec! 'marine 'army-production 'train 6 495.0 'anti-air-response)
@@ -1492,13 +1942,13 @@
        (add-goal-spec! 'stalker 'army-production 'train 6 495.0 'anti-air-response)
        (add-goal-spec! 'blink 'tech-infrastructure 'research 1 492.0 'anti-air-response)
        (add-goal-spec! 'stargate 'tech-infrastructure 'build 1 488.0 'anti-air-response)
-       (add-goal-spec! 'phoenix 'army-production 'train 4 491.0 'anti-air-response)]))
+       (add-goal-spec! 'phoenix 'army-production 'train 10 491.0 'anti-air-response)]))
 
   (when requires-detection?
     (case race
       [(Zerg)
-       (add-goal-spec! 'spore-crawler 'intel-recon 'build 1 495.0 'detection-response)
-       (add-goal-spec! 'overseer 'intel-recon 'morph (if (>= army-supply 40) 2 1) 492.0 'detection-response)]
+       (add-goal-spec! 'spore-crawler 'intel-recon 'build (max 1 desired-spores) 495.0 'detection-response)
+       (add-goal-spec! 'overseer 'intel-recon 'morph (max 1 desired-overseers) 492.0 'detection-response)]
       [(Terran)
        (add-goal-spec! 'missile-turret 'intel-recon 'build 1 495.0 'detection-response)
        (when (and (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
@@ -1517,7 +1967,7 @@
   (define zerg-pit-spire-army-ok?
     (and (>= active-bases 3) (>= army-supply 28)))
   (define corruptor-cap
-    (sc2-zerg-corruptor-target-cap enemy-u-counts requires-anti-air? enemy-race))
+    (zerg-enemy-capital-air-corruptor-cap enemy-u-counts requires-anti-air? enemy-race))
   (define t3-endgame-window?
     (and (>= active-bases 3)
          (or (>= workers 50) (>= effective-phase-supply 90))
@@ -1536,7 +1986,8 @@
        (when (> (bldg-count-equivalent ready-bldg-counts 'infestation-pit) 0)
          (add-goal-spec! 'infestor 'army-production 'train (if (>= supply-used 140) 2 1) 448.0 't3-endgame-army))
        (when (or (and zerg-pit-spire-army-ok? (or (>= workers 56) (>= effective-phase-supply 110)))
-                 requires-anti-air?)
+                 requires-anti-air?
+                 enemy-cap-air?)
          (add-goal-spec! 'spire 'tech-infrastructure 'build 1 464.0 't3-endgame-tech)
          (when (and (> (bldg-count-equivalent ready-bldg-counts 'spire) 0)
                     (> corruptor-cap 0))
@@ -1550,7 +2001,15 @@
        (when (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
          (add-goal-spec! 'medivac 'army-production 'train (if (>= supply-used 130) 6 4) 466.0 't3-endgame-army)
          (add-goal-spec! 'liberator 'army-production 'train desired-libs 464.0 't3-endgame-army)
-         (add-goal-spec! 'starport-techlab 'tech-infrastructure 'addon 1 462.0 't3-endgame-tech)
+         (define bo-needs-starport-reactor?
+           (ormap (lambda (g)
+                    (and (pro-bo-goal? g)
+                         (eq? (normalize-brain-sym (pro-bo-goal-target-sym g)) 'starport-reactor)
+                         (< (bldg-count-equivalent total-bldg-counts 'starport-reactor)
+                            (max 1 (pro-bo-goal-target-count g)))))
+                  steps-so-far))
+         (unless bo-needs-starport-reactor?
+           (add-goal-spec! 'starport-techlab 'tech-infrastructure 'addon 1 462.0 't3-endgame-tech))
          (add-goal-spec! 'fusion-core 'tech-infrastructure 'build 1 464.0 't3-endgame-tech))
        (when (> (bldg-count-equivalent ready-bldg-counts 'armory) 0)
          (add-goal-spec! 'thor 'army-production 'train (max desired-thors (if (>= active-bases 4) 4 2)) 462.0 't3-endgame-army)
@@ -1589,6 +2048,35 @@
            (add-goal-spec! 'tempest 'army-production 'train (if (>= active-bases 4) 3 2) 464.0 't3-endgame-army)
            (when (>= active-bases 4)
              (add-goal-spec! 'carrier 'army-production 'train (if (>= supply-used 150) 5 3) 468.0 't3-endgame-army))))]))
+
+  ;; Track 7: Pro Replay Unit Composition Benchmarks (`build-orders.rkt` cumulative median counts)
+  (when (> frame 0)
+    (define sat-econ-lagging?
+      (and peaceful? (< workers (min 36 (* 16 active-bases)))))
+    (for ([kv (in-list (sort (hash->list benchmark-targets)
+                             string<?
+                             #:key (lambda (p) (symbol->string (car p)))))])
+      (define sym (normalize-brain-sym (car kv)))
+      (define tgt-cnt (cdr kv))
+      (define node (lookup-sc2-tech-node sym))
+      (when (and node
+                 (eq? (sc2-tech-node-race node) race)
+                 (> tgt-cnt 0)
+                 (not (memq sym '(overlord overseer overlord-transport drone scv probe)))
+                 (not (and pvt-fast-kiter-threat?
+                           (eq? sym 'zealot)
+                           (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)))
+                 (not (hash-has-key? seen-step-keys (cons (sc2-tech-node-kind node) sym)))
+                 (< (unit-count-for-goal unit-counts sym) tgt-cnt)
+                 (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts))
+        (define def-ratio (compute-benchmark-deficit-ratio sym benchmark-targets unit-counts))
+        (when (> def-ratio 0.0)
+          (define bench-w
+            (cond
+              [crisis-defer? 466.0]
+              [sat-econ-lagging? (+ 405.0 (* 10.0 def-ratio))]
+              [else (+ 422.0 (* 16.0 def-ratio))]))
+          (add-goal-spec! sym 'army-production (sc2-tech-node-kind node) tgt-cnt bench-w 'benchmark-unit-plan)))))
 
   (define all-nodes
     (for/list ([spec (in-list (reverse raw-goal-specs))])
@@ -1638,12 +2126,14 @@
                          (normalize-brain-sym (plan-goal-node-id n))
                          crisis-defer?
                          #:defer-stargate? defer-stargate?
-                         #:keep-ship-weapons? ship-weap-due?))
+                         #:keep-ship-weapons? ship-weap-due?
+                         #:keep-spire-aa? keep-spire-aa?))
                    (not (crisis-deferred-sym?
                          (normalize-brain-sym (plan-goal-node-next-action-sym n))
                          crisis-defer?
                          #:defer-stargate? defer-stargate?
-                         #:keep-ship-weapons? ship-weap-due?))))
+                         #:keep-ship-weapons? ship-weap-due?
+                         #:keep-spire-aa? keep-spire-aa?))))
             all-nodes))
 
   (define in-prog-syms
@@ -1669,10 +2159,32 @@
           (hash-set ht act-sym n)
           ht)))
 
-  (dynamic-macro-plan
-   race frame effective-phase-supply
-   all-nodes active-nodes actionable-nodes
-   translated-map in-prog-syms))
+  (values
+   (dynamic-macro-plan
+    race frame effective-phase-supply
+    all-nodes active-nodes actionable-nodes
+    translated-map in-prog-syms)
+   ctx-out))
+
+;; Synthesizes the live 5-track `dynamic-macro-plan` from `macro-world-state` on every frame.
+(define (synthesize-dynamic-macro-plan state
+                                     #:enemy-unit-counts [override-enemy-unit-counts #f]
+                                     #:enemy-building-counts [override-enemy-building-counts #f])
+  (define rbc (macro-world-state-ready-building-counts state))
+  (define tbc (macro-world-state-total-building-counts state))
+  (define uc (macro-world-state-unit-counts state))
+  (define-values (dp _ctx)
+    (if (current-ready-bldg-cache)
+        (synthesize-dynamic-macro-plan/ctx state
+                                           #:enemy-unit-counts override-enemy-unit-counts
+                                           #:enemy-building-counts override-enemy-building-counts)
+        (parameterize ([current-ready-bldg-cache (cons rbc (make-hasheq))]
+                       [current-total-bldg-cache (cons tbc (make-hasheq))]
+                       [current-unit-count-cache (cons uc (make-hasheq))])
+          (synthesize-dynamic-macro-plan/ctx state
+                                             #:enemy-unit-counts override-enemy-unit-counts
+                                             #:enemy-building-counts override-enemy-building-counts))))
+  dp)
 
 (define (macro-brain-decision-dynamic-plan decision)
   (define sched (macro-brain-decision-priority-schedule decision))
@@ -1684,10 +2196,15 @@
 ;; concrete ready next-actions, self-heals broken/deleted prerequisite chains,
 ;; checks income feasibility for mineral & gas escrows, and runs the Okasaki Braun-heap
 ;; scheduler with dual-resource (mineral + gas) and facility-slot reservations.
-(define (step-priority-macro-brain state #:enemy-unit-counts [override-enemy-unit-counts #f])
+(define (step-priority-macro-brain state
+                                   #:enemy-unit-counts [override-enemy-unit-counts #f]
+                                   #:enemy-building-counts [override-enemy-building-counts #f])
   (define enemy-u-counts
     (or (and (hash? override-enemy-unit-counts) override-enemy-unit-counts)
         (macro-world-state-enemy-unit-counts state)))
+  (define enemy-b-counts
+    (or (and (hash? override-enemy-building-counts) override-enemy-building-counts)
+        (macro-world-state-enemy-building-counts state)))
   (match-define (macro-world-state
                  race enemy-race frame minerals gas
                  supply-used supply-cap supply-left pending-supply
@@ -1701,117 +2218,181 @@
                  base-x base-y nat-x nat-y third-x third-y)
     state)
 
-  (define effective-phase-supply (max supply-used peak-supply-reached))
-  (define all-upgs (remove-duplicates (append researched-upgrades pending-upgrades) eq?))
+  (parameterize ([current-ready-bldg-cache (cons ready-bldg-counts (make-hasheq))]
+                 [current-total-bldg-cache (cons total-bldg-counts (make-hasheq))]
+                 [current-unit-count-cache (cons unit-counts (make-hasheq))])
+    (define effective-phase-supply (max supply-used peak-supply-reached))
 
-  ;; 1. Evaluate pro supply curve targets & synthesize live Dynamic Macro Plan
-  (define bo-eval
-    (evaluate-build-order-next-step
-     #:race race
-     #:enemy-race enemy-race
-     #:frame frame
-     #:minerals minerals
-     #:gas gas
-     #:supply-used effective-phase-supply
-     #:supply-left (max 0 supply-left)
-     #:active-bases active-bases
-     #:ready-building-counts ready-bldg-counts
-     #:total-building-counts total-bldg-counts
-     #:unit-counts unit-counts
-     #:researched-upgrades researched-upgrades
-     #:pending-upgrades pending-upgrades
-     #:base-x base-x #:base-y base-y
-     #:nat-x nat-x #:nat-y nat-y
-     #:third-x third-x #:third-y third-y))
+    ;; 1. Evaluate pro supply curve targets & synthesize live Dynamic Macro Plan
+    (define bo-eval
+      (evaluate-build-order-next-step
+       #:race race
+       #:enemy-race enemy-race
+       #:frame frame
+       #:minerals minerals
+       #:gas gas
+       #:supply-used effective-phase-supply
+       #:supply-left (max 0 supply-left)
+       #:active-bases active-bases
+       #:ready-building-counts ready-bldg-counts
+       #:total-building-counts total-bldg-counts
+       #:unit-counts unit-counts
+       #:researched-upgrades researched-upgrades
+       #:pending-upgrades pending-upgrades
+       #:base-x base-x #:base-y base-y
+       #:nat-x nat-x #:nat-y nat-y
+       #:third-x third-x #:third-y third-y))
 
-  (define bo-raw-goal (pro-bo-eval-result-active-goal bo-eval))
-  (define target-workers (pro-bo-eval-result-target-workers bo-eval))
-  (define dyn-plan (synthesize-dynamic-macro-plan state #:enemy-unit-counts enemy-u-counts))
-  (define plan-active-nodes (dynamic-macro-plan-active-goals dyn-plan))
-  (define plan-actionable-nodes (dynamic-macro-plan-actionable-goals dyn-plan))
-  (define plan-next-actions-ht (dynamic-macro-plan-translated-next-actions dyn-plan))
+    (define bo-raw-goal (pro-bo-eval-result-active-goal bo-eval))
+    (define target-workers (pro-bo-eval-result-target-workers bo-eval))
+    (define-values (dyn-plan dp-ctx)
+      (synthesize-dynamic-macro-plan/ctx state
+                                         #:enemy-unit-counts enemy-u-counts
+                                         #:enemy-building-counts enemy-b-counts))
+    (define plan-active-nodes (dynamic-macro-plan-active-goals dyn-plan))
+    (define plan-actionable-nodes (dynamic-macro-plan-actionable-goals dyn-plan))
+    (define plan-next-actions-ht (dynamic-macro-plan-translated-next-actions dyn-plan))
 
-  ;; 2. Self-Healing Tech Prerequisite DAG Check:
-  (define-values (elapsed-sec steps-so-far due-upgs due-units due-timing-goals)
-    (collect-due-bo-context race enemy-race frame effective-phase-supply))
-  (define all-due-goals
-    (append (if bo-raw-goal (list bo-raw-goal) '())
-            steps-so-far
-            due-timing-goals))
-  (define (lookup-timing-sec-for-sym sym)
-    (or (let ([hit (findf (lambda (g)
-                            (and (pro-bo-goal? g)
-                                 (same-brain-sym? (pro-bo-goal-target-sym g) sym)
-                                 (> (exact->inexact (pro-bo-goal-target-sec g)) 0.0)))
-                          all-due-goals)])
-          (and hit (pro-bo-goal-target-sec hit)))
-        0.0))
-  (define has-robo? (> (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0))
-  (define has-armory? (> (bldg-count-equivalent total-bldg-counts 'armory) 0))
-  (define has-ready-armory? (> (bldg-count-equivalent ready-bldg-counts 'armory) 0))
-  (define enemy-cap-air? (protoss-enemy-capital-air? enemy-u-counts))
-  (define enemy-cap-air-ground-aa? (terran-enemy-capital-air-with-ground-aa? enemy-u-counts))
-  (define desired-thors (terran-desired-thor-cap enemy-u-counts))
-  (define air-fleet-cnt (terran-air-fleet-count unit-counts))
-  (define ship-weap-due?
-    (terran-ship-weapons-due? race air-fleet-cnt has-ready-armory? all-upgs))
-  (define crisis-defer?
-    (crisis-defense-tech-defer-active? under-attack? army-supply enemy-threat-supply workers))
-  (define severe-crisis-static-def?
-    (and crisis-defer?
-         (or (>= army-supply 4) (>= minerals 200))
-         (or (< workers 32)
-             (< army-supply (* 0.8 enemy-threat-supply))
-             (< army-supply 16))))
-  (define defer-stargate?
-    (or has-robo? (and (not requires-anti-air?) (not enemy-cap-air?))))
-  (define repaired-prereqs
-    (filter (lambda (sym)
-              (not (crisis-deferred-sym? (normalize-brain-sym sym) crisis-defer?
-                                         #:defer-stargate? defer-stargate?
-                                         #:keep-ship-weapons? ship-weap-due?)))
-            (find-all-broken-tech-dependencies
-             race ready-bldg-counts total-bldg-counts
-             #:active-goals all-due-goals)))
+    ;; Unpack reusable per-step context from synthesize-dynamic-macro-plan/ctx
+    (define all-upgs (dyn-plan-ctx-all-upgs dp-ctx))
+    (define benchmark-targets (dyn-plan-ctx-benchmark-targets dp-ctx))
+    (define has-robo? (dyn-plan-ctx-has-robo? dp-ctx))
+    (define has-ready-armory? (dyn-plan-ctx-has-ready-armory? dp-ctx))
+    (define enemy-cap-air? (dyn-plan-ctx-enemy-cap-air? dp-ctx))
+    (define enemy-cap-air-ground-aa? (dyn-plan-ctx-enemy-cap-air-ground-aa? dp-ctx))
+    (define desired-thors (dyn-plan-ctx-desired-thors dp-ctx))
+    (define air-fleet-cnt (dyn-plan-ctx-air-fleet-cnt dp-ctx))
+    (define ship-weap-due? (dyn-plan-ctx-ship-weap-due? dp-ctx))
+    (define zvp-stargate-threat? (dyn-plan-ctx-zvp-stargate-threat? dp-ctx))
+    (define keep-spire-aa? (dyn-plan-ctx-keep-spire-aa? dp-ctx))
+    (define aa-effective? (dyn-plan-ctx-aa-effective? dp-ctx))
+    (define pvt-fast-kiter-threat? (dyn-plan-ctx-pvt-fast-kiter-threat? dp-ctx))
+    (define tvp-cannon-contain? (dyn-plan-ctx-tvp-cannon-contain? dp-ctx))
+    (define desired-spores (dyn-plan-ctx-desired-spores dp-ctx))
+    (define has-lair-or-hive-ready? (dyn-plan-ctx-has-lair-or-hive-ready? dp-ctx))
+    (define desired-overseer-cnt (dyn-plan-ctx-desired-overseers dp-ctx))
+    (define desired-dropper-cnt (dyn-plan-ctx-desired-droppers dp-ctx))
+    (define gas-bldg-sym (dyn-plan-ctx-gas-bldg-sym dp-ctx))
+    (define total-gas-bldgs (dyn-plan-ctx-total-gas-bldgs dp-ctx))
+    (define suppress-tvp-extra-rax? (dyn-plan-ctx-suppress-tvp-extra-rax? dp-ctx))
+    (define crisis-defer? (dyn-plan-ctx-crisis-defer? dp-ctx))
+    (define severe-crisis-static-def? (dyn-plan-ctx-severe-crisis-static-def? dp-ctx))
+    (define defer-stargate? (dyn-plan-ctx-defer-stargate? dp-ctx))
+    (define early-zero-army-attack? (dyn-plan-ctx-early-zero-army-attack? dp-ctx))
+    (define root-combat-facility-ready? (dyn-plan-ctx-root-combat-facility-ready? dp-ctx))
+    (define under-early-rush-crisis? (dyn-plan-ctx-under-early-rush-crisis? dp-ctx))
+    (define race-supply-sym (dyn-plan-ctx-supply-sym dp-ctx))
+    (define hard-supply-block? (dyn-plan-ctx-hard-supply-block? dp-ctx))
+    (define zero-supply-provider-lockout? (dyn-plan-ctx-zero-supply-provider-lockout? dp-ctx))
+    (define supply-lockout-active? (dyn-plan-ctx-supply-lockout-active? dp-ctx))
+    (define total-townhalls-incl-pending (dyn-plan-ctx-total-townhalls dp-ctx))
+    (define steps-so-far (dyn-plan-ctx-steps-so-far dp-ctx))
+    (define due-timing-goals (dyn-plan-ctx-due-timing-goals dp-ctx))
 
-  ;; Derive top actionable goal from the Dynamic Plan (translating any blocked goal
-  ;; directly into its ready `next-action-sym` instead of stalling on a static queue head!)
-  (define early-zero-army-attack?
-    (and (or under-attack? (> enemy-threat-supply 0))
-         (= army-supply 0)))
-  (define root-combat-facility-ready?
-    (case race
-      [(Zerg) (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)]
-      [(Terran) (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)]
-      [else (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
-                  (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)]))
-  (define race-supply-sym
-    (case race [(Zerg) 'overlord] [(Terran) 'supply-depot] [else 'pylon]))
-  (define hard-supply-block?
-    (and (< supply-cap 200)
-         (<= pending-supply 0)
-         (or (<= supply-left 0)
-             (>= supply-used supply-cap))))
-  (define zero-supply-provider-lockout?
-    (and (< supply-cap 200)
-         (<= pending-supply 0)
-         (<= supply-left 1)
-         (<= supply-cap (* 15 (max 1 active-bases)))
-         (or (and (eq? race 'Protoss)
-                  (= (bldg-count-equivalent total-bldg-counts 'pylon) 0)
-                  (>= supply-used 14))
-             (and (eq? race 'Terran)
-                  (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0)
-                  (>= supply-used 14)))))
-  (define supply-lockout-active?
-    (or hard-supply-block? zero-supply-provider-lockout?))
-  (define emergency-army-before-workers?
-    (and (or under-attack? (> enemy-threat-supply 0))
-         (< army-supply (if (and (< frame 3000) (>= enemy-threat-supply 4))
-                            (max 8 (+ enemy-threat-supply 4))
-                            4))
-         root-combat-facility-ready?
-         (>= workers 1)))
+    ;; 2. Self-Healing Tech Prerequisite DAG Check & O(1) due-goal tables:
+    (define all-due-goals
+      (append (if bo-raw-goal (list bo-raw-goal) '())
+              steps-so-far
+              due-timing-goals))
+    (define timing-sec-ht (make-hasheq))
+    (define goal-target-count-ht (make-hasheq))
+    (for ([g (in-list all-due-goals)]
+          #:when (pro-bo-goal? g))
+      (define key (normalize-brain-sym (pro-bo-goal-target-sym g)))
+      (define tsec (pro-bo-goal-target-sec g))
+      (when (and (> (exact->inexact tsec) 0.0)
+                 (not (hash-has-key? timing-sec-ht key)))
+        (hash-set! timing-sec-ht key tsec))
+      (hash-set! goal-target-count-ht key
+                 (max (hash-ref goal-target-count-ht key 1)
+                      (pro-bo-goal-target-count g))))
+    (for ([n (in-list plan-active-nodes)])
+      (define key (normalize-brain-sym (plan-goal-node-id n)))
+      (hash-set! goal-target-count-ht key
+                 (max (hash-ref goal-target-count-ht key 1)
+                      (plan-goal-node-target-count n)))
+      (define next-act (plan-goal-node-next-action-sym n))
+      (define defer-extra-addon-parent?
+        (and (hash? open-facility-slots)
+             (< minerals 250)
+             (or (< army-supply 10)
+                 (and (< army-supply 16)
+                      (>= (+ (hash-ref open-facility-slots 'barracks 0)
+                             (hash-ref open-facility-slots 'gateway 0)
+                             (hash-ref open-facility-slots 'warp-gate 0))
+                          2)))))
+      (when (and (eq? (plan-goal-node-status n) 'needs-prereq)
+                 (symbol? next-act)
+                 (memq next-act '(barracks factory starport))
+                 (> (bldg-count-equivalent total-bldg-counts next-act) 0)
+                 (not defer-extra-addon-parent?))
+        ;; Allow building an additional parent facility when existing parents' add-on slots are full,
+        ;; unless primary army production is starved under a tight mineral bank (< 250M).
+        (define needed-facs (add1 (bldg-count-equivalent total-bldg-counts next-act)))
+        (hash-set! goal-target-count-ht next-act
+                   (max (hash-ref goal-target-count-ht next-act 1) needed-facs))))
+    (define (lookup-timing-sec-for-sym sym)
+      (hash-ref timing-sec-ht (normalize-brain-sym sym) 0.0))
+    (define (goal-target-count-for sym)
+      (hash-ref goal-target-count-ht (normalize-brain-sym sym) 1))
+
+    (define has-armory? (> (bldg-count-equivalent total-bldg-counts 'armory) 0))
+    (define tvp-worker-recovery?
+      (worker-recovery-after-cannon-or-contain?
+       race enemy-race workers active-bases army-supply under-attack?
+       enemy-threat-supply enemy-u-counts enemy-b-counts))
+    (define early-aggro? (or under-attack? (> enemy-threat-supply 0) under-early-rush-crisis?))
+    (define desired-queens
+      (if (and (eq? race 'Zerg) enemy-cap-air?)
+          SC2-MAX-QUEENS-CAP
+          (desired-zerg-queen-count active-bases zvp-stargate-threat? early-aggro?)))
+    (define ready-gas-bldgs (bldg-count-equivalent ready-bldg-counts gas-bldg-sym))
+    (define repaired-prereqs
+      (let ([plan-repaired (dyn-plan-ctx-repaired-prereqs dp-ctx)])
+        (if (or (not bo-raw-goal)
+                (memq bo-raw-goal steps-so-far)
+                (memq bo-raw-goal due-timing-goals))
+            plan-repaired
+            (let ([bo-repaired
+                   (filter (lambda (sym)
+                             (not (crisis-deferred-sym? (normalize-brain-sym sym) crisis-defer?
+                                                        #:defer-stargate? defer-stargate?
+                                                        #:keep-ship-weapons? ship-weap-due?
+                                                        #:keep-spire-aa? keep-spire-aa?)))
+                           (find-all-broken-tech-dependencies
+                            race ready-bldg-counts total-bldg-counts
+                            #:active-goals (list bo-raw-goal)))])
+              (if (or (null? bo-repaired)
+                      (andmap (lambda (s)
+                                (ormap (lambda (r) (same-brain-sym? s r)) plan-repaired))
+                              bo-repaired))
+                  plan-repaired
+                  (filter (lambda (sym)
+                            (not (crisis-deferred-sym? (normalize-brain-sym sym) crisis-defer?
+                                                       #:defer-stargate? defer-stargate?
+                                                       #:keep-ship-weapons? ship-weap-due?
+                                                       #:keep-spire-aa? keep-spire-aa?)))
+                          (find-all-broken-tech-dependencies
+                           race ready-bldg-counts total-bldg-counts
+                           #:active-goals (cons bo-raw-goal steps-so-far))))))))
+    (define repaired-prereq-set (make-hasheq))
+    (for ([r (in-list repaired-prereqs)]
+          #:when (symbol? r))
+      (hash-set! repaired-prereq-set (normalize-brain-sym r) #t))
+    (define (is-repaired-prereq? sym)
+      (and (symbol? sym)
+           (hash-ref repaired-prereq-set (normalize-brain-sym sym) #f)))
+
+    ;; Derive top actionable goal from the Dynamic Plan (translating any blocked goal
+    ;; directly into its ready `next-action-sym` instead of stalling on a static queue head!)
+    (define emergency-army-before-workers?
+      (and (not tvp-worker-recovery?)
+           (or under-attack? (> enemy-threat-supply 0))
+           (< army-supply (if (and (< frame 3000) (>= enemy-threat-supply 4))
+                              (max 8 (+ enemy-threat-supply 4))
+                              4))
+           root-combat-facility-ready?
+           (>= workers 1)))
   (define top-plan-node
     (and (pair? plan-actionable-nodes)
          (first plan-actionable-nodes)))
@@ -1820,7 +2401,8 @@
          (let ([gsym (pro-bo-goal-target-sym g)])
            (and (not (crisis-deferred-sym? (normalize-brain-sym gsym) crisis-defer?
                                            #:defer-stargate? defer-stargate?
-                                           #:keep-ship-weapons? ship-weap-due?))
+                                           #:keep-ship-weapons? ship-weap-due?
+                                           #:keep-spire-aa? keep-spire-aa?))
                 (not (and supply-lockout-active?
                           (memq gsym '(extractor refinery assimilator
                                        hatchery nexus command-center))))
@@ -1873,26 +2455,7 @@
     (and (pro-bo-goal? effective-bo-goal)
          (pro-bo-goal-target-sym effective-bo-goal)))
 
-  ;; Compute explicit multi-instance target count when an active BO/plan goal requests > 1
-  ;; of a structure (e.g. 2nd Forge/Evo/EngBay/Factory/Starport/Robo/Stargate), defaulting to 1.
-  (define (goal-target-count-for sym)
-    (define csym (normalize-brain-sym sym))
-    (define from-bo
-      (for/fold ([mx 1]) ([g (in-list all-due-goals)])
-        (if (and (pro-bo-goal? g)
-                 (same-brain-sym? (pro-bo-goal-target-sym g) csym))
-            (max mx (pro-bo-goal-target-count g))
-            mx)))
-    (for/fold ([mx from-bo]) ([n (in-list plan-active-nodes)])
-      (if (same-brain-sym? (plan-goal-node-id n) csym)
-          (max mx (plan-goal-node-target-count n))
-          mx)))
-
   ;; 3. Income Feasibility & Anti-Starvation Diagnostics:
-  (define gas-bldg-sym
-    (case race [(Zerg) 'extractor] [(Terran) 'refinery] [else 'assimilator]))
-  (define ready-gas-bldgs (bldg-count-equivalent ready-bldg-counts gas-bldg-sym))
-  (define total-gas-bldgs (bldg-count-equivalent total-bldg-counts gas-bldg-sym))
   (define has-mineral-income?
     (and (> workers 0)
          (if (exact-integer? mineral-harvesters)
@@ -1987,6 +2550,9 @@
      #:stalker-count (unit-count-equivalent unit-counts 'stalker)
      #:roach-count (unit-count-equivalent unit-counts 'roach)
      #:enemy-unit-counts enemy-u-counts
+     #:enemy-building-counts enemy-b-counts
+     #:benchmark-targets benchmark-targets
+     #:unit-counts unit-counts
      #:bo-goal-sym bo-goal-sym))
 
   ;; Check if a producer facility/research slot is open
@@ -1998,38 +2564,52 @@
       [(not (hash? open-facility-slots)) #t]
       [else (> (hash-ref open-facility-slots slot-sym 0) 0)]))
 
+  (define prereqs-ready-cache (make-hasheq))
+  (define (step-prereqs-ready? sym)
+    (if (symbol? sym)
+        (hash-ref! prereqs-ready-cache sym
+                   (lambda () (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts)))
+        (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts)))
+
+  (define already-satisfied-cache (make-hasheq))
+  (define (step-already-satisfied? sym)
+    (if (symbol? sym)
+        (hash-ref! already-satisfied-cache sym
+                   (lambda ()
+                     (sc2-tech-already-satisfied? sym total-bldg-counts researched-upgrades pending-upgrades
+                                                   (goal-target-count-for sym))))
+        (sc2-tech-already-satisfied? sym total-bldg-counts researched-upgrades pending-upgrades
+                                     (goal-target-count-for sym))))
+
+  (define feasible-cache (make-hasheq))
   (define (cand-feasible-now? sym)
-    (define node (lookup-sc2-tech-node sym))
-    (cond
-      [(not node) #t]
-      [(sc2-tech-already-satisfied? sym total-bldg-counts researched-upgrades pending-upgrades
-                                    (goal-target-count-for sym)) #f]
-      [(not (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts)) #f]
-      [else (slot-available? (sc2-tech-node-producer-slot node))]))
+    (define (compute)
+      (define node (lookup-sc2-tech-node sym))
+      (cond
+        [(not node) #t]
+        [(step-already-satisfied? sym) #f]
+        [(not (step-prereqs-ready? sym)) #f]
+        [else (slot-available? (sc2-tech-node-producer-slot node))]))
+    (if (symbol? sym)
+        (hash-ref! feasible-cache sym compute)
+        (compute)))
 
+  (define can-escrow-cache (make-hasheq))
   (define (cand-can-escrow? sym)
-    (define node (lookup-sc2-tech-node sym))
-    (and node
-         (not (sc2-tech-already-satisfied? sym total-bldg-counts researched-upgrades pending-upgrades
-                                           (goal-target-count-for sym)))
-         (sc2-tech-prereqs-ready? sym ready-bldg-counts unit-counts)
-         (or (>= workers 6)
-             (and emergency-army-before-workers?
-                  (eq? (sc2-tech-node-category node) 'combat-unit)))
-         (or (>= minerals (sc2-tech-node-min-cost node)) has-mineral-income?)
-         (or (>= gas (sc2-tech-node-gas-cost node)) has-gas-income?)))
+    (define (compute)
+      (define node (lookup-sc2-tech-node sym))
+      (and node
+           (or (>= workers 6)
+               (and emergency-army-before-workers?
+                    (eq? (sc2-tech-node-category node) 'combat-unit)))
+           (or (>= minerals (sc2-tech-node-min-cost node)) has-mineral-income?)
+           (or (>= gas (sc2-tech-node-gas-cost node)) has-gas-income?)
+           (not (step-already-satisfied? sym))
+           (step-prereqs-ready? sym)))
+    (if (symbol? sym)
+        (hash-ref! can-escrow-cache sym compute)
+        (compute)))
 
-  (define under-early-rush-crisis?
-    (and (< frame 3000)
-         (or under-attack? (>= enemy-threat-supply 4))))
-
-  (define has-lair-or-hive-ready?
-    (> (+ (bldg-count-equivalent ready-bldg-counts 'lair)
-          (bldg-count-equivalent ready-bldg-counts 'hive))
-       0))
-
-  (define desired-overseer-cnt
-    (if (or (>= army-supply 40) requires-detection?) 2 1))
   (define terran-need-ghost? (terran-enemy-needs-ghost? enemy-u-counts))
   (define terran-need-lib? (terran-enemy-needs-liberator? enemy-u-counts))
   (define desired-rax-tl
@@ -2070,14 +2650,19 @@
      #:requires-detection? requires-detection?
      #:supply-at-risk? (or supply-at-risk? (< supply-left 0) supply-lockout-active?)
      #:supply-buffer supply-buffer
-     #:ally-buildings (counts-hash->symbol-list total-bldg-counts)
-     #:ready-buildings (counts-hash->symbol-list ready-bldg-counts)
-     #:ally-units (counts-hash->symbol-list unit-counts)
+     #:ally-buildings '()
+     #:ready-buildings '()
+     #:ally-units '()
      #:researched-upgrades all-upgs
      #:open-prod-slots open-facility-slots
      #:bo-active-goal effective-bo-goal
      #:enemy-race enemy-race
      #:enemy-unit-counts enemy-u-counts
+     #:enemy-building-counts enemy-b-counts
+     #:benchmark-targets benchmark-targets
+     #:unit-counts unit-counts
+     #:total-building-counts total-bldg-counts
+     #:ready-building-counts ready-bldg-counts
      #:base-x base-x #:base-y base-y
      #:nat-x nat-x #:nat-y nat-y
      #:third-x third-x #:third-y third-y))
@@ -2097,12 +2682,6 @@
                  (and (>= active-bases 3)
                       (>= minerals 400)
                       (<= (+ supply-left (* 8 pending-supply)) (max 8 supply-buffer)))))))
-
-  (define total-townhalls-incl-pending
-    (case race
-      [(Zerg) (bldg-count-equivalent total-bldg-counts 'hatchery)]
-      [(Terran) (bldg-count-equivalent total-bldg-counts 'command-center)]
-      [else (bldg-count-equivalent total-bldg-counts 'nexus)]))
 
   (define overdue-1base-expand?
     (and (>= minerals 400)
@@ -2141,28 +2720,35 @@
                [else
                 (let ([need-sb? (< (bldg-count-equivalent total-bldg-counts 'shield-battery) 1)])
                   (if (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
-                      (if need-sb?
-                          '(stalker adept shield-battery zealot)
-                          '(stalker adept zealot))
+                      (if pvt-fast-kiter-threat?
+                          (if need-sb?
+                              '(stalker adept shield-battery)
+                              '(stalker adept))
+                          (if need-sb?
+                              '(stalker adept shield-battery zealot)
+                              '(stalker adept zealot)))
                       (if need-sb?
                           '(zealot shield-battery)
                           '(zealot))))])
              '()))
         '()))
 
-  (define existing-ids (map priority-candidate-id raw-cands))
+  (define existing-id-norms-ht
+    (for/fold ([ht (hasheq)]) ([eid (in-list (map priority-candidate-id raw-cands))])
+      (if (symbol? eid) (hash-set ht (normalize-brain-sym eid) #t) ht)))
   (define plan-translated-syms (map plan-goal-node-next-action-sym plan-actionable-nodes))
   (define extra-syms
     (remove-duplicates
      (filter (lambda (s)
                (and s
-                    (not (ormap (lambda (eid) (same-brain-sym? eid s)) existing-ids))
+                    (symbol? s)
+                    (not (hash-has-key? existing-id-norms-ht (normalize-brain-sym s)))
                     (lookup-sc2-tech-node s)
                     (not (crisis-deferred-sym? (normalize-brain-sym s) crisis-defer?
                                                #:defer-stargate? defer-stargate?
-                                               #:keep-ship-weapons? ship-weap-due?))
-                    (not (sc2-tech-already-satisfied? s total-bldg-counts researched-upgrades pending-upgrades
-                                                      (goal-target-count-for s)))))
+                                               #:keep-ship-weapons? ship-weap-due?
+                                               #:keep-spire-aa? keep-spire-aa?))
+                    (not (step-already-satisfied? s))))
              (append (if supply-crisis? (list race-supply-sym) '())
                      emergency-rush-syms
                      (if crisis-defer?
@@ -2192,8 +2778,9 @@
                              (if (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
                                  '(immortal)
                                  '())
-                             (if (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
-                                       (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)
+                             (if (and (not pvt-fast-kiter-threat?)
+                                      (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                                            (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0))
                                  '(zealot)
                                  '()))]
                            [else
@@ -2209,6 +2796,30 @@
                                       (< (bldg-count-equivalent total-bldg-counts 'bunker) 2))
                                  '(bunker)
                                  '()))])
+                         '())
+                     (if (and (eq? race 'Zerg) enemy-cap-air?)
+                         (append
+                          (if (and (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+                                   (< (unit-count-equivalent unit-counts 'queen) desired-queens))
+                              '(queen)
+                              '())
+                          (if (and has-lair-or-hive-ready?
+                                   (= (bldg-count-equivalent total-bldg-counts 'spire) 0)
+                                   (= (bldg-count-equivalent total-bldg-counts 'greater-spire) 0))
+                              '(spire)
+                              '())
+                          (if (or (> (bldg-count-equivalent ready-bldg-counts 'spire) 0)
+                                  (> (bldg-count-equivalent ready-bldg-counts 'greater-spire) 0))
+                              (append
+                               (if (< (unit-count-equivalent unit-counts 'corruptor)
+                                      (zerg-enemy-capital-air-corruptor-cap enemy-u-counts requires-anti-air? enemy-race))
+                                   '(corruptor)
+                                   '())
+                               '(zerg-flyer-armor-1))
+                              '())
+                          (if (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+                              '(hydralisk)
+                              '()))
                          '())
                      (if (and (eq? race 'Terran)
                               enemy-cap-air?
@@ -2232,49 +2843,6 @@
                      repaired-prereqs
                      plan-translated-syms
                      (if bo-goal-sym (list bo-goal-sym) '())
-                     (if (and (eq? race 'Zerg)
-                              (or has-lair-or-hive-ready? requires-detection?)
-                              (< (unit-count-equivalent unit-counts 'overseer) desired-overseer-cnt))
-                         (list 'overseer)
-                         '())
-                     (if (and (eq? race 'Protoss)
-                              (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0))
-                         (append
-                          (if enemy-cap-air?
-                              (append
-                               (if (= (bldg-count-equivalent total-bldg-counts 'fleet-beacon) 0)
-                                   '(fleet-beacon)
-                                   '())
-                               (if (and (> (bldg-count-equivalent ready-bldg-counts 'fleet-beacon) 0)
-                                        (< (unit-count-equivalent unit-counts 'tempest) 6))
-                                   '(tempest)
-                                   '())
-                               (if (< (unit-count-equivalent unit-counts 'void-ray) 8)
-                                   '(void-ray)
-                                   '()))
-                              '())
-                          (cond
-                            [(and requires-anti-air?
-                                  (not enemy-cap-air?)
-                                  (< (unit-count-equivalent unit-counts 'phoenix) 10))
-                             '(phoenix)]
-                            [(and (not requires-anti-air?)
-                                  (not enemy-cap-air?)
-                                  (or (not (hash? open-facility-slots))
-                                      (< army-supply 30))
-                                  (< (unit-count-equivalent unit-counts 'oracle)
-                                     (if (and (>= minerals 200) (>= gas 200)) 2 1)))
-                             '(oracle)]
-                            [else '()]))
-                         '())
-                     (if (and (eq? race 'Terran)
-                              (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
-                              (< (unit-count-equivalent unit-counts 'medivac) 2)
-                              (>= (+ (unit-count-equivalent unit-counts 'marine)
-                                     (unit-count-equivalent unit-counts 'marauder))
-                                  6))
-                         (list 'medivac)
-                         '())
                      (if (and (= total-gas-bldgs 0)
                               (gas-building-cap-ok? total-gas-bldgs active-bases)
                               (>= workers 14)
@@ -2315,7 +2883,7 @@
                                 (sc2-tech-node-supply-cost node)
                                 (cand-can-escrow? csym)
                                 metrics))
-      (if (ormap (lambda (r) (same-brain-sym? csym r)) repaired-prereqs)
+      (if (is-repaired-prereq? csym)
           (struct-copy priority-candidate raw-cand
                        [utility-score (+ 300.0 (priority-candidate-utility-score raw-cand))])
           raw-cand)))
@@ -2343,13 +2911,14 @@
          (>= army-supply 4)))
 
   (define passive-sat-ok?
-    (and (not under-attack?)
-         zerg-army-step-ok?
-         (or (<= enemy-threat-supply 0)
-             zerg-passive-sat-ok?
-             (and (< workers (min 44 (* 22 active-bases)))
-                  (< enemy-threat-supply 18)
-                  (<= enemy-threat-supply (* 1.65 (max 6 army-supply)))))))
+    (or tvp-worker-recovery?
+        (and (not under-attack?)
+             zerg-army-step-ok?
+             (or (<= enemy-threat-supply 0)
+                 zerg-passive-sat-ok?
+                 (and (< workers (min 44 (* 22 active-bases)))
+                      (< enemy-threat-supply 18)
+                      (<= enemy-threat-supply (* 1.65 (max 6 army-supply))))))))
 
   (define worker-army-curve-ok?
     (or (not (hash? open-facility-slots))
@@ -2417,7 +2986,7 @@
                           (> (bldg-count-equivalent total-bldg-counts 'gateway) 0)))
                  (or (not (hash? open-facility-slots))
                      (= cur-gas-bldgs 0)
-                     (< gas 250))))))
+                     (< gas (if (and (>= cur-gas-bldgs 2) (>= workers 36)) 550 250)))))))
     (define addon-slot-free-ok?
       (or (not (hash? open-facility-slots))
           (not (facility-addon-slot-occupied? id ready-bldg-counts total-bldg-counts #:min-ready-floor 0))))
@@ -2435,7 +3004,7 @@
     (define late-tech-army-ok?
       (or (not (hash? open-facility-slots))
           (not (memq id '(armory ghost-academy fusion-core ultralisk-cavern templar-archive dark-shrine)))
-          (ormap (lambda (r) (same-brain-sym? id r)) repaired-prereqs)
+          (is-repaired-prereq? id)
           (and (eq? id 'armory)
                (eq? race 'Terran)
                enemy-cap-air?
@@ -2493,6 +3062,14 @@
                    (>= army-supply (if (= active-bases 2) 12 16))
                    (>= minerals 550)))))
     (define csym (normalize-brain-sym id))
+    (define suppressed-kiter-zealot?
+      (and pvt-fast-kiter-threat?
+           (eq? csym 'zealot)
+           (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)))
+    (define suppressed-tvp-extra-rax?
+      (and suppress-tvp-extra-rax?
+           (eq? csym 'barracks)
+           (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)))
     (define sentry-cap-ok?
       (or (not (eq? csym 'sentry))
           (< (unit-count-equivalent unit-counts 'sentry)
@@ -2500,7 +3077,9 @@
     (define research-unit-prereq-ok?
       (or (not (eq? csym 'extended-thermal-lance))
           (>= (unit-count-equivalent unit-counts 'colossus) 1)))
-    (and geyser-cap-ok?
+    (and (not suppressed-kiter-zealot?)
+         (not suppressed-tvp-extra-rax?)
+         geyser-cap-ok?
          sentry-cap-ok?
          research-unit-prereq-ok?
          addon-slot-free-ok?
@@ -2513,7 +3092,8 @@
          (cond
            [(crisis-deferred-sym? csym crisis-defer?
                                   #:defer-stargate? defer-stargate?
-                                  #:keep-ship-weapons? ship-weap-due?)
+                                  #:keep-ship-weapons? ship-weap-due?
+                                  #:keep-spire-aa? keep-spire-aa?)
             #f]
            [(and (memq id SC2-SINGLETON-TECH-BUILDINGS)
                  (> (bldg-count-equivalent total-bldg-counts id) 0))
@@ -2525,6 +3105,7 @@
                  (memq id '(infestation-pit spire))
                  (not (or requires-anti-air?
                           requires-detection?
+                          (and (eq? id 'spire) (or keep-spire-aa? enemy-cap-air?))
                           (and (>= active-bases 3) (>= army-supply 28)))))
             #f]
            [(and (eq? race 'Protoss)
@@ -2534,7 +3115,7 @@
                  (> (bldg-count-equivalent total-bldg-counts 'twilight-council) 0)
                  (not (or requires-anti-air? requires-detection? enemy-cap-air?)))
             #f]
-           [(ormap (lambda (r) (same-brain-sym? id r)) repaired-prereqs)
+           [(is-repaired-prereq? id)
             (not (and (memq id SC2-SINGLETON-TECH-BUILDINGS)
                       (> (bldg-count-equivalent total-bldg-counts id) 0)))]
            [(memq id emergency-rush-syms) #t]
@@ -2545,7 +3126,7 @@
            [(and bo-goal-sym (same-brain-sym? id bo-goal-sym)) #t]
            [(and plan-node
                  (or (>= (plan-goal-node-priority-weight plan-node) 440.0)
-                     (and (memq (plan-goal-node-reason plan-node) '(timing-upgrade-plan timing-unit-plan))
+                     (and (memq (plan-goal-node-reason plan-node) '(timing-upgrade-plan timing-unit-plan benchmark-unit-plan))
                           (>= (plan-goal-node-priority-weight plan-node) 420.0)
                           (or (not (eq? cat 'combat-unit))
                               (< army-supply 8)
@@ -2554,10 +3135,11 @@
                               (>= workers (min 24 (* 11 active-bases)))))))
             #t]
            [(eq? cat 'worker)
-            (if (hash? open-facility-slots)
-                (and zerg-army-step-ok?
-                     (< workers (min 70 (max target-workers (* 22 active-bases)))))
-                (< workers (min 80 (max target-workers (* 20 active-bases)))))]
+            (or tvp-worker-recovery?
+                (if (hash? open-facility-slots)
+                    (and zerg-army-step-ok?
+                         (< workers (min 70 (max target-workers (* 22 active-bases)))))
+                    (< workers (min 80 (max target-workers (* 20 active-bases))))))]
            [(eq? cat 'expansion)
             (and (not under-attack?)
                  (or overdue-1base-expand?
@@ -2574,26 +3156,33 @@
             (cond
               [(memq id '(queen observer))
                (define cur-cnt (unit-count-equivalent unit-counts id))
-               (define max-cnt (if (eq? id 'queen) (desired-zerg-queen-count active-bases) 1))
+               (define max-cnt (if (eq? id 'queen) desired-queens 1))
                (and blk0 (< cur-cnt max-cnt))]
               [(eq? id 'raven)
                (and blk0
                     (or requires-detection?
                         (and bo-goal-sym (same-brain-sym? id bo-goal-sym))
                         (and plan-node (>= (plan-goal-node-priority-weight plan-node) 440.0)))
-                    (< (unit-count-equivalent unit-counts 'raven) 1))]
+                    (< (unit-count-equivalent unit-counts 'raven)
+                       (if (or requires-detection? (>= active-bases 2)) 2 1)))]
               [(eq? id 'overseer)
                (and (or requires-detection? has-lair-or-hive-ready?)
-                    (< (unit-count-equivalent unit-counts 'overseer) desired-overseer-cnt))]
+                    (< (unit-count-equivalent unit-counts 'overseer) (max 1 desired-overseer-cnt)))]
               [(memq id '(viking viking-fighter corruptor phoenix))
                (and blk0
                     (or (not (eq? id 'phoenix))
                         (< (unit-count-equivalent unit-counts 'phoenix) 10))
-                    (or requires-anti-air?
+                    (or aa-effective?
+                        enemy-cap-air?
+                        keep-spire-aa?
                         (not (hash? open-facility-slots))
                         (and bo-goal-sym (same-brain-sym? id bo-goal-sym))))]
-              [(memq id '(spore-crawler photon-cannon missile-turret))
-               (and (or requires-anti-air? requires-detection?)
+              [(eq? id 'spore-crawler)
+               (and (or aa-effective? requires-detection? enemy-cap-air? keep-spire-aa?)
+                    (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
+                       (max 1 desired-spores)))]
+              [(memq id '(photon-cannon missile-turret))
+               (and (or aa-effective? requires-detection?)
                     (< (bldg-count-equivalent total-bldg-counts id) 1))]
               [(memq id '(shield-battery spine-crawler bunker))
                (and (or under-attack? (> enemy-threat-supply 0))
@@ -2635,7 +3224,8 @@
               [(eq? id 'barracks-techlab)
                (< (bldg-count-equivalent total-bldg-counts 'barracks-techlab) desired-rax-tl)]
               [(eq? id 'factory)
-               (< (bldg-count-equivalent total-bldg-counts 'factory) desired-factories)]
+               (< (bldg-count-equivalent total-bldg-counts 'factory)
+                  (max desired-factories (goal-target-count-for 'factory)))]
               [(memq id '(extractor refinery assimilator))
                (define cur-gas-bldgs (bldg-count-equivalent total-bldg-counts id))
                (and (not protoss-1base-2nd-gas-capped?)
@@ -2646,9 +3236,11 @@
            [(eq? cat 'combat-unit)
             (and (or blk0
                      (and emergency-army-before-workers?
-                          (sc2-tech-prereqs-ready? id ready-bldg-counts unit-counts)
+                          (step-prereqs-ready? id)
                           (slot-available? (if node (sc2-tech-node-producer-slot node) 'worker))))
                  (< supply-used 196)
+                 (or (not (eq? csym 'overlord-transport))
+                     (< (unit-count-for-goal unit-counts 'overlord-transport) desired-dropper-cnt))
                  (or (not (hash? open-facility-slots))
                      (not (eq? csym 'zergling))
                      (< (unit-count-equivalent unit-counts 'zergling)
@@ -2668,7 +3260,7 @@
       (define blk0 (priority-candidate-blocking-allowed? c))
       (define node (lookup-sc2-tech-node sym))
       (define is-repaired-raw?
-        (not (not (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs))))
+        (is-repaired-prereq? sym))
       (define is-repaired?
         (and is-repaired-raw?
              (or (not (hash? open-facility-slots))
@@ -2681,7 +3273,7 @@
       (define plan-weight (if plan-node (plan-goal-node-priority-weight plan-node) 0.0))
       (define plan-reason (and plan-node (plan-goal-node-reason plan-node)))
       (define is-timing-plan?
-        (not (not (memq plan-reason '(timing-upgrade-plan timing-unit-plan)))))
+        (not (not (memq plan-reason '(timing-upgrade-plan timing-unit-plan benchmark-unit-plan)))))
       (define under-sat-peaceful-econ?
         (and (not under-attack?)
              (<= enemy-threat-supply 0)
@@ -2724,6 +3316,8 @@
            (cond
              [emergency-army-before-workers? 0.0]
              [(>= workers 70) 0.0]
+             [(and tvp-worker-recovery? (< workers 20)) 525.0]
+             [(and tvp-worker-recovery? (< workers (min 36 (* 22 active-bases)))) 482.0]
              [(and (< workers (if (eq? race 'Zerg) 14 16))
                    (not under-attack?)
                    (<= enemy-threat-supply 0))
@@ -2753,7 +3347,8 @@
                                        [(not worker-army-curve-ok?) (min 105.0 raw-worker-u)]
                                        [else raw-worker-u])]
                       [blocking-allowed? (and (not emergency-army-before-workers?)
-                                              (< workers 8)
+                                              (or (< workers 8)
+                                                  (and tvp-worker-recovery? (< workers 20)))
                                               has-mineral-income?)])]
 
         ;; Expansion candidate: high priority when active plan expansion goal or 1-base natural ready,
@@ -2814,15 +3409,16 @@
                 (* 21 active-bases)
                 (* 16 active-bases)))
          (define cur-queens (unit-count-equivalent unit-counts 'queen))
-         (define max-queens (desired-zerg-queen-count active-bases))
+         (define max-queens desired-queens)
          (define queen-defer-for-first-lings?
            (and (eq? sym 'queen)
                 (or under-attack? (> enemy-threat-supply 2))
                 (< army-supply 4)))
          (define queen-sat-cap
-           (if (< workers (min 60 (* 16 active-bases)))
+           (if (and (not (or zvp-stargate-threat? enemy-cap-air? early-aggro?))
+                    (< workers (if (>= active-bases 2) 18 14)))
                active-bases
-               (min max-queens (add1 active-bases))))
+               max-queens))
          (define inject-queen-boost?
            (and (eq? sym 'queen)
                 (not queen-defer-for-first-lings?)
@@ -2832,7 +3428,7 @@
            (and (eq? sym 'overseer)
                 has-lair-or-hive-ready?
                 (< (unit-count-equivalent unit-counts 'overseer)
-                   (if requires-detection? 2 1))))
+                   (max 1 desired-overseer-cnt))))
          (define emergency-rush-root-boost?
            (and under-early-rush-crisis?
                 (not root-combat-facility-ready?)
@@ -2889,10 +3485,17 @@
            (if mineral-only-gas-locked?
                (/ u0 (+ 1.0 (expt (/ (exact->inexact gas) 100.0) 2)))
                u0))
+         (define colossus-unlock-needed?
+           (and (eq? race 'Protoss)
+                (eq? sym 'colossus)
+                (= (unit-count-equivalent unit-counts 'colossus) 0)
+                (> (bldg-count-equivalent ready-bldg-counts 'robotics-bay) 0)
+                (not (step-already-satisfied? 'extended-thermal-lance))))
          (define combat-escrow-ok?
            (and (not (and mineral-only-gas-locked? (>= army-supply 4)))
                 (or (not (eq? cat 'combat-unit))
                     effective-bo-goal?
+                    colossus-unlock-needed?
                     under-attack?
                     (> enemy-threat-supply 0)
                     (and (>= frame 1800) (< army-supply 6))
@@ -2905,14 +3508,18 @@
                     (not (eq? sym 'queen))
                     inject-queen-boost?
                     effective-bo-goal?
-                    requires-anti-air?)))
+                    requires-anti-air?
+                    keep-spire-aa?
+                    enemy-cap-air?)))
          (define answers-aa-or-det?
            (or (is-aa-or-detection-answer?
                 sym
-                (or requires-anti-air? (and (eq? race 'Protoss) enemy-cap-air?))
+                (or aa-effective? (and (eq? race 'Protoss) enemy-cap-air?))
                 requires-detection?)
                (and (eq? race 'Terran)
-                    (or (and (memq (normalize-brain-sym sym) '(ghost ghost-academy)) terran-need-ghost?)
+                    (or (and tvp-cannon-contain?
+                             (memq (normalize-brain-sym sym) '(factory factory-techlab siege-tank concussive-shells)))
+                        (and (memq (normalize-brain-sym sym) '(ghost ghost-academy)) terran-need-ghost?)
                         (and (eq? (normalize-brain-sym sym) 'liberator) terran-need-lib?)
                         (and (eq? (normalize-brain-sym sym) 'armory)
                              enemy-cap-air?
@@ -2946,10 +3553,48 @@
                        (hash-ref open-facility-slots 'barracks 0))
                     2)
                 (< minerals (- (priority-candidate-min-cost c) 75))))
+         (define worker-recovery-target
+           (cond
+             [(eq? cat 'tech-upgrade) (min 22 (* 11 active-bases))]
+             [(memq plan-reason '(tvt-rax-techlab-scaling tvt-mech-scaling tvt-bio-tank
+                                  proactive-widow-mine-harass proactive-bio-medivac proactive-raven-intel))
+              40]
+             [else (min 44 (* 22 active-bases))]))
+         (define tvt-optional-scaling-defer?
+           (and (memq plan-reason '(tvt-rax-techlab-scaling tvt-mech-scaling tvt-bio-tank
+                                   proactive-widow-mine-harass proactive-bio-medivac proactive-raven-intel))
+                (not requires-anti-air?)
+                (not (and bo-goal-sym (same-brain-sym? sym bo-goal-sym)))
+                (> (if (memq cat '(combat-unit counter-tech))
+                       (unit-count-equivalent unit-counts sym)
+                       (bldg-count-equivalent total-bldg-counts sym))
+                   0)))
+         (define unique-bo-unit-ready?
+           (and (memq race '(Terran Protoss))
+                (eq? cat 'combat-unit)
+                (>= workers 22)
+                (= (unit-count-equivalent unit-counts sym) 0)
+                (or (and bo-goal-sym (same-brain-sym? sym bo-goal-sym))
+                    colossus-unlock-needed?)))
+         (define defer-for-worker-recovery?
+           (and (hash? open-facility-slots)
+                (not under-attack?)
+                (<= enemy-threat-supply 0)
+                (>= army-supply 6)
+                (< workers worker-recovery-target)
+                (or (and (memq cat '(combat-unit tech-upgrade))
+                         (not is-repaired?)
+                         (not answers-aa-or-det?)
+                         (not unique-bo-unit-ready?)
+                         (not (eq? sym 'orbital-command))
+                         (not (and (eq? sym 'queen) inject-queen-boost?)))
+                    tvt-optional-scaling-defer?)))
          (define can-esc?
            (and (not queen-defer-for-first-lings?)
+                (not defer-for-worker-recovery?)
                 (or blk0
                     effective-bo-goal?
+                    colossus-unlock-needed?
                     is-repaired?
                     inject-queen-boost?
                     proactive-overseer-boost?
@@ -2979,7 +3624,10 @@
               (if (and (< army-supply 4) (< minerals 200))
                   (min 390.0 u-after-gas-lock)
                   (max 515.0 (+ 200.0 u0)))]
+             [(and effective-bo-goal? (eq? plan-reason 'anti-capital-air))
+              (max plan-weight (+ 650.0 u0) 930.0)]
              [is-repaired? (max (+ 380.0 u0) 520.0)]
+             [defer-for-worker-recovery? (min 425.0 u-after-gas-lock)]
              [proactive-overseer-boost? (max 475.0 (+ 140.0 u0))]
              [(and effective-bo-goal?
                    (or (and (not under-attack?) (<= enemy-threat-supply 0))
@@ -2997,6 +3645,7 @@
               ;; Light non-attack threat should not drop matchup scaling behind generic upgrades while
               ;; staying strictly below boosted combat units (465+) and keeping `can-esc?` gated above.
               (max 420.0 u-after-gas-lock)]
+             [colossus-unlock-needed? (max plan-weight 465.0 u0)]
              [(and is-timing-plan?
                    (or (and (not under-attack?) (<= enemy-threat-supply 0))
                        answers-aa-or-det?))
@@ -3026,23 +3675,17 @@
               (define id (priority-candidate-id c))
               (define cid (normalize-brain-sym id))
               (and (not (hash-has-key? seen-ids cid))
-                   (not (sc2-tech-already-satisfied?
-                         cid total-bldg-counts researched-upgrades pending-upgrades
-                         (goal-target-count-for cid)))
+                   (not (step-already-satisfied? cid))
                    (begin (hash-set! seen-ids cid #t) #t)))
             (sort all-adjusted-cands > #:key priority-candidate-utility-score)))
 
-  ;; Sort candidates in descending utility order (tie-breaking by index)
-  (define keyed-cands
-    (for/list ([c (in-list active-cands)]
-               [idx (in-naturals)])
-      (define u (priority-candidate-utility-score c))
-      (cons (+ (- u) (* 1e-7 idx)) c)))
-
-  (define sorted-cands
-    (map cdr (sort keyed-cands < #:key car)))
+  (define sorted-cands active-cands)
 
   ;; Mutable simulation ledger for this frame's scheduling pass
+  (define desired-corruptor-cap
+    (if (eq? race 'Zerg)
+        (zerg-enemy-capital-air-corruptor-cap enemy-u-counts requires-anti-air? enemy-race)
+        0))
   (define rem-min minerals)
   (define rem-gas gas)
   (define rem-sup (max 0 supply-left))
@@ -3056,6 +3699,7 @@
   (define used-morph-slots (make-hasheq))
   (define worker-build-escrowed? #f)
   (define min-floor 0)
+  (define min-floor-for-worker 0)
   (define gas-floor 0)
   (define scheduled-cands '())
   (define reserved-cand #f)
@@ -3090,10 +3734,31 @@
         [(eq? csym 'barracks-techlab)
          (< (+ existing-tech-cnt sched-tech-cnt) desired-rax-tl)]
         [(eq? csym 'factory)
-         (< (+ existing-tech-cnt sched-tech-cnt) desired-factories)]
+         (< (+ existing-tech-cnt sched-tech-cnt)
+            (max desired-factories (goal-target-count-for 'factory)))]
+        [(eq? csym 'spore-crawler)
+         (< (+ existing-tech-cnt sched-tech-cnt) (max 1 desired-spores))]
         [else #t]))
     (define unit-cap-ok?
       (case csym
+        [(queen)
+         (< (+ (unit-count-equivalent unit-counts 'queen)
+               (hash-ref seen-unit-counts 'queen 0))
+            desired-queens)]
+        [(corruptor)
+         (let ([tgt (max desired-corruptor-cap (goal-target-count-for 'corruptor))])
+           (or (<= tgt 0)
+               (< (+ (unit-count-equivalent unit-counts 'corruptor)
+                     (hash-ref seen-unit-counts 'corruptor 0))
+                  tgt)))]
+        [(overseer)
+         (< (+ (unit-count-equivalent unit-counts 'overseer)
+               (hash-ref seen-unit-counts 'overseer 0))
+            (max 1 desired-overseer-cnt))]
+        [(overlord-transport)
+         (< (+ (unit-count-for-goal unit-counts 'overlord-transport)
+               (hash-ref seen-unit-counts 'overlord-transport 0))
+            desired-dropper-cnt)]
         [(sentry)
          (< (+ (unit-count-equivalent unit-counts 'sentry)
                (hash-ref seen-unit-counts 'sentry 0))
@@ -3123,7 +3788,7 @@
 
     ;; Check tech prerequisite readiness & open producer slot
     (define prereq-ok?
-      (and (sc2-tech-prereqs-ready? id ready-bldg-counts unit-counts)
+      (and (step-prereqs-ready? id)
            (or (not (eq? csym 'extended-thermal-lance))
                (>= (unit-count-equivalent unit-counts 'colossus) 1))))
     (define slot-ok?
@@ -3157,6 +3822,7 @@
       (cond
         [(eq? cat 'supply) 0]
         [(and high-bank-tech-unlock? (memq cat '(combat-unit worker))) 0]
+        [(eq? cat 'worker) min-floor-for-worker]
         [else min-floor]))
     (define app-gas-floor
       (cond
@@ -3173,9 +3839,9 @@
        (set! rem-sup (- rem-sup s-cost))
        (when (or (memq csym SC2-SINGLETON-TECH-BUILDINGS)
                  (memq csym SC2-DUAL-CAP-TECH-BUILDINGS)
-                 (memq csym '(extractor refinery assimilator barracks-techlab factory factory-techlab)))
+                 (memq csym '(extractor refinery assimilator barracks-techlab factory factory-techlab spore-crawler)))
          (hash-update! seen-tech-counts csym add1 0))
-       (when (memq csym '(sentry lurker baneling zergling ghost liberator thor))
+       (when (memq csym '(queen corruptor overseer overlord-transport sentry lurker baneling zergling ghost liberator thor))
          (hash-update! seen-unit-counts csym add1 0))
        (when (memq pslot UNIT-MORPH-SOURCE-SLOTS)
          (hash-update! used-morph-slots pslot
@@ -3211,6 +3877,8 @@
                 (< rem-gas (- g-cost 40))))
          (define min-escrow-amt (if pure-gas-starved? 0 m-cost))
          (set! min-floor (max min-floor min-escrow-amt))
+         (unless (and (> g-cost 0) (< rem-gas (- g-cost 40)))
+           (set! min-floor-for-worker (max min-floor-for-worker min-escrow-amt)))
          (when (> g-cost 0)
            (set! gas-floor (max gas-floor g-cost)))
          (when (and (eq? pslot 'worker) (> min-escrow-amt 0))
@@ -3248,35 +3916,95 @@
     (set! min-floor 0)
     (set! gas-floor 0))
 
-  (define final-cands (reverse scheduled-cands))
+  (define (tumor-direct-count sym)
+    (max (if (hash? total-bldg-counts) (hash-ref total-bldg-counts sym 0) 0)
+         (if (hash? ready-bldg-counts) (hash-ref ready-bldg-counts sym 0) 0)
+         (if (hash? unit-counts) (hash-ref unit-counts sym 0) 0)))
+  (define active-creep-tumors
+    (if (eq? race 'Zerg)
+        (+ (tumor-direct-count 'creep-tumor)
+           (tumor-direct-count 'creep-tumor-burrowed)
+           (tumor-direct-count 'creep-tumor-queen))
+        0))
+  (define creep-self-sustaining-now?
+    (or (not (eq? race 'Zerg))
+        (creep-self-sustaining? active-creep-tumors active-bases)))
+  (define cur-queen-total
+    (if (eq? race 'Zerg) (unit-count-equivalent unit-counts 'queen) 0))
+  (define emit-creep-tumor-directive?
+    (and (eq? race 'Zerg)
+         (not creep-self-sustaining-now?)
+         (>= cur-queen-total 1)))
+  (define creep-cand
+    (and emit-creep-tumor-directive?
+         (priority-candidate 'spawn-creep-tumor
+                             'macro-creep
+                             (list 'spawn-creep-tumor nat-x nat-y)
+                             0 0 0
+                             540.0
+                             'high-priority
+                             #f)))
+  (define raw-final-cands (reverse scheduled-cands))
+  (define final-cands
+    (if creep-cand
+        (append raw-final-cands (list creep-cand))
+        raw-final-cands))
   (define final-actions (map priority-candidate-action final-cands))
   (define final-ids (map priority-candidate-id final-cands))
-  (define final-trace (reverse decision-entries))
+  (define final-trace
+    (let ([base-trace (reverse decision-entries)])
+      (if creep-cand
+          (append base-trace
+                  (list (priority-decision-entry
+                         1
+                         'spawn-creep-tumor
+                         'macro-creep
+                         (priority-candidate-action creep-cand)
+                         0 0 0 540.0 #f 'scheduled 0 0 #f)))
+          base-trace)))
   (define final-escrowed (reverse escrowed-entries))
-  (define base-cand-utils
-    (for/fold ([ht (hash)]) ([c (in-list (append raw-cands extra-cands))])
-      (define cid (priority-candidate-id c))
-      (define base-u (min 120.0 (priority-candidate-utility-score c)))
-      (hash-set (hash-set ht cid base-u)
-                (normalize-brain-sym cid)
-                base-u)))
-  (define cand-utils
-    (for/fold ([ht base-cand-utils]) ([c (in-list sorted-cands)])
-      (define cid (priority-candidate-id c))
-      (hash-set (hash-set ht cid (priority-candidate-utility-score c))
-                (normalize-brain-sym cid)
-                (priority-candidate-utility-score c))))
+  (define cand-utils-mut (make-hasheq))
+  (for ([c (in-list raw-cands)])
+    (define cid (priority-candidate-id c))
+    (define ncid (normalize-brain-sym cid))
+    (define base-u (min 120.0 (priority-candidate-utility-score c)))
+    (hash-set! cand-utils-mut cid base-u)
+    (unless (eq? ncid cid)
+      (hash-set! cand-utils-mut ncid base-u)))
+  (for ([c (in-list extra-cands)])
+    (define cid (priority-candidate-id c))
+    (define ncid (normalize-brain-sym cid))
+    (define base-u (min 120.0 (priority-candidate-utility-score c)))
+    (hash-set! cand-utils-mut cid base-u)
+    (unless (eq? ncid cid)
+      (hash-set! cand-utils-mut ncid base-u)))
+  (for ([c (in-list sorted-cands)])
+    (define cid (priority-candidate-id c))
+    (define ncid (normalize-brain-sym cid))
+    (define u (priority-candidate-utility-score c))
+    (hash-set! cand-utils-mut cid u)
+    (unless (eq? ncid cid)
+      (hash-set! cand-utils-mut ncid u)))
+  (when creep-cand
+    (hash-set! cand-utils-mut 'spawn-creep-tumor 540.0)
+    (hash-set! cand-utils-mut 'creep-tumor 540.0))
+  (define cand-utils (make-immutable-hasheq (hash->list cand-utils-mut)))
   (define cat-utils
-    (for/fold ([ht (hash 'decision-trace final-trace
-                         'escrowed-entries final-escrowed
-                         'candidate-utilities cand-utils
-                         'reserved-min-floor min-floor
-                         'reserved-gas-floor gas-floor
-                         'dynamic-plan dyn-plan)])
-              ([c (in-list sorted-cands)])
-      (define cat (priority-candidate-category c))
-      (define u (priority-candidate-utility-score c))
-      (hash-set ht cat (max u (hash-ref ht cat -inf.0)))))
+    (let ([ht (make-hasheq)])
+      (hash-set! ht 'decision-trace final-trace)
+      (hash-set! ht 'escrowed-entries final-escrowed)
+      (hash-set! ht 'candidate-utilities cand-utils)
+      (hash-set! ht 'reserved-min-floor min-floor)
+      (hash-set! ht 'reserved-gas-floor gas-floor)
+      (hash-set! ht 'dynamic-plan dyn-plan)
+      (hash-set! ht 'active-creep-tumors active-creep-tumors)
+      (hash-set! ht 'creep-self-sustaining? creep-self-sustaining-now?)
+      (for ([c (in-list sorted-cands)])
+        (define cat (priority-candidate-category c))
+        (define u (priority-candidate-utility-score c))
+        (when (> u (hash-ref ht cat -inf.0))
+          (hash-set! ht cat u)))
+      (make-immutable-hasheq (hash->list ht))))
 
   (define sched-result
     (priority-schedule-result final-actions
@@ -3351,7 +4079,7 @@
    final-effective-bo-goal
    repaired-prereqs
    sched-result
-   log-str))
+   log-str)))
 
 (define (macro-brain-can-spend? decision id-sym cur-min cur-gas [cat-sym 'combat-unit])
   (define norm-id (normalize-brain-sym id-sym))

@@ -77,14 +77,21 @@
   (define ally-bldgs : (Listof Any) (if (list? bldg-raw) bldg-raw '()))
   (define enemy-units : (Listof Any) (if (list? enemy-raw) enemy-raw '()))
   (define explicit-ripples : (Listof Any) (if (list? ripple-raw) ripple-raw '()))
-  (define shimmer-targets : (Listof Any)
-    (append
-     (filter hash? explicit-ripples)
-     (filter shimmer-target-unit? enemy-units)))
+  (define first-shimmer : Any
+    (or (let loop : Any ([rs : (Listof Any) explicit-ripples])
+          (cond
+            [(null? rs) #f]
+            [(hash? (car rs)) (car rs)]
+            [else (loop (cdr rs))]))
+        (let loop : Any ([es : (Listof Any) enemy-units])
+          (cond
+            [(null? es) #f]
+            [(shimmer-target-unit? (car es)) (car es)]
+            [else (loop (cdr es))]))))
   (cond
-    [(null? shimmer-targets) '()]
+    [(not first-shimmer) '()]
     [else
-     (define tgt (car shimmer-targets))
+     (define tgt : Any first-shimmer)
      (define tx (safe-exact-int (dyn-hash-ref tgt 'x 160) 160))
      (define ty (safe-exact-int (dyn-hash-ref tgt 'y 160) 160))
      (define tx-f (->float tx))

@@ -46,18 +46,142 @@
 
 ;; Safe bridge for inspecting heterogeneous untyped/mutable/immutable hashes.
 (module dyn-hash-ops racket/base
+  (require racket/flonum
+           racket/string)
   (provide dyn-hash-ref
-           dyn-hash-has-key?)
+           dyn-hash-has-key?
+           dyn-u-raw-type
+           dyn-u-raw-tag
+           dyn-u-x
+           dyn-u-y
+           dyn-u-energy
+           dyn-u-shields
+           dyn-u-has-buff?
+           dyn-u-flying-flag
+           dyn-u-hallucination-flag
+           dyn-units-xy-batch)
   (define (dyn-hash-ref h k default)
     (if (hash? h)
         (hash-ref h k (lambda () default))
         default))
   (define (dyn-hash-has-key? h k)
-    (and (hash? h) (hash-has-key? h k))))
+    (and (hash? h) (hash-has-key? h k)))
+  (define (dyn-u-raw-type u)
+    (if (hash? u)
+        (let ([v (hash-ref u 'type 'unknown)])
+          (cond
+            [(symbol? v) v]
+            [(string? v)
+             (let ([t (string-trim v)])
+               (if (zero? (string-length t)) 'unknown (string->symbol (string-downcase t))))]
+            [else 'unknown]))
+        'unknown))
+  (define (dyn-u-raw-tag u)
+    (if (hash? u)
+        (let ([tid (hash-ref u 'id #f)])
+          (cond
+            [(and (exact-integer? tid) (> tid 0)) tid]
+            [else
+             (let ([t2 (hash-ref u 'tag 0)])
+               (cond
+                 [(exact-integer? t2) t2]
+                 [(and (real? t2) (< -inf.0 t2 +inf.0)) (inexact->exact (round t2))]
+                 [else 0]))]))
+        0))
+  (define (to-fl v default)
+    (cond
+      [(flonum? v) (if (and (< -inf.0 v +inf.0)) v default)]
+      [(and (real? v) (< -inf.0 v +inf.0)) (exact->inexact v)]
+      [else default]))
+  (define (dyn-u-x u)
+    (if (hash? u) (to-fl (hash-ref u 'x 0.0) 0.0) 0.0))
+  (define (dyn-u-y u)
+    (if (hash? u) (to-fl (hash-ref u 'y 0.0) 0.0) 0.0))
+  (define (dyn-u-energy u)
+    (if (hash? u) (to-fl (hash-ref u 'energy 0.0) 0.0) 0.0))
+  (define (dyn-u-shields u)
+    (if (hash? u)
+        (let ([s1 (hash-ref u 'shield #f)])
+          (if (not (eq? s1 #f))
+              (to-fl s1 0.0)
+              (to-fl (hash-ref u 'shields 0.0) 0.0)))
+        0.0))
+  (define (buff-match? b target)
+    (cond
+      [(eq? b target) #t]
+      [(exact-integer? b)
+       (case b
+         [(17) (eq? target 'fungal-growth)]
+         [(18) (eq? target 'guardian-shield)]
+         [(22) (eq? target 'neural-parasite)]
+         [(28) (eq? target 'transfusion)]
+         [(49) (eq? target 'oracle-revelation)]
+         [(56) (eq? target 'oracle-weapon)]
+         [(83) (eq? target 'blinding-cloud)]
+         [(132) (eq? target 'parasitic-bomb)]
+         [else #f])]
+      [(string? b)
+       (let ([t (string-trim b)])
+         (and (not (zero? (string-length t)))
+              (eq? (string->symbol (string-downcase t)) target)))]
+      [else #f]))
+  (define (dyn-u-has-buff? u target)
+    (if (hash? u)
+        (let ([raw (hash-ref u 'buffs '())])
+          (cond
+            [(null? raw) #f]
+            [(list? raw)
+             (let loop ([rem raw])
+               (and (pair? rem)
+                    (or (buff-match? (car rem) target)
+                        (loop (cdr rem)))))]
+            [(vector? raw)
+             (let ([n (vector-length raw)])
+               (let loop ([i 0])
+                 (and (< i n)
+                      (or (buff-match? (vector-ref raw i) target)
+                          (loop (+ i 1))))))]
+            [else #f]))
+        #f))
+  (define (dyn-u-flying-flag u)
+    (and (hash? u)
+         (or (eq? (hash-ref u 'flying? #f) #t)
+             (eq? (hash-ref u 'is-flying #f) #t))))
+  (define (dyn-u-hallucination-flag u)
+    (and (hash? u)
+         (or (eq? (hash-ref u 'is-hallucination #f) #t)
+             (eq? (hash-ref u 'hallucination #f) #t))))
+  (define (dyn-units-xy-batch units)
+    (define max-n (length units))
+    (define xs (make-flvector max-n 0.0))
+    (define ys (make-flvector max-n 0.0))
+    (define us (make-vector max-n #f))
+    (let loop ([rem units] [k 0])
+      (cond
+        [(null? rem) (values xs ys us k)]
+        [else
+         (define u (car rem))
+         (if (hash? u)
+             (begin
+               (flvector-set! xs k (to-fl (hash-ref u 'x 0.0) 0.0))
+               (flvector-set! ys k (to-fl (hash-ref u 'y 0.0) 0.0))
+               (vector-set! us k u)
+               (loop (cdr rem) (+ k 1)))
+             (loop (cdr rem) k))]))))
 
 (unsafe-require/typed (submod "." dyn-hash-ops)
   [dyn-hash-ref (-> Any Any Any Any)]
-  [dyn-hash-has-key? (-> Any Any Boolean)])
+  [dyn-hash-has-key? (-> Any Any Boolean)]
+  [dyn-u-raw-type (-> Any Symbol)]
+  [dyn-u-raw-tag (-> Any Integer)]
+  [dyn-u-x (-> Any Float)]
+  [dyn-u-y (-> Any Float)]
+  [dyn-u-energy (-> Any Float)]
+  [dyn-u-shields (-> Any Float)]
+  [dyn-u-has-buff? (-> Any Symbol Boolean)]
+  [dyn-u-flying-flag (-> Any Boolean)]
+  [dyn-u-hallucination-flag (-> Any Boolean)]
+  [dyn-units-xy-batch (-> (Listof Any) (Values FlVector FlVector (Vectorof Any) Integer))])
 
 (provide
  ;; Pro-calibrated constants
@@ -102,7 +226,10 @@
  (struct-out point-claim)
  (struct-out unit-claim)
  (struct-out spell-claims)
+ (struct-out spell-tactic-mode)
  make-spell-claims
+ SPELL-ABILITY-3-TACTICS-CATALOG
+ spell-ability-3-tactics
 
  ;; Claim, lockout & stagger primitives
  prune-spell-claims!
@@ -248,6 +375,413 @@
    (make-hasheqv)
    (make-hasheqv)))
 
+;; Explicit pro-replay-calibrated tactical mode entry for each caster and spell ability.
+(struct spell-tactic-mode
+  ([caster-type : Symbol]
+   [ability : Symbol]
+   [ability-id : Integer]
+   [mode-id : Symbol]
+   [summary : String]
+   [pro-trigger : String])
+  #:transparent)
+
+;; 3 pro-replay-supported tactical modes per spell ability across all Z/T/P spellcasters.
+(: SPELL-ABILITY-3-TACTICS-CATALOG (Listof spell-tactic-mode))
+(define SPELL-ABILITY-3-TACTICS-CATALOG
+  (list
+   ;; ZERG: Queen (Inject 251, Creep Tumor 1694, Transfusion 1664)
+   (spell-tactic-mode 'queen 'inject-larva 251 'queen-inject-cycle
+                      "Maintain 29s Inject Larva cadence on active Hatcheries without inject buff"
+                      "en>=25 & in inject-queen-tags & townhall<=11.0 unbuffed")
+   (spell-tactic-mode 'queen 'inject-larva 251 'queen-inject-banked-double
+                      "Dump banked >=50 energy onto auxiliary macro Hatcheries post-engage"
+                      "en>=50 & no urgent Transfuse & inject-target open")
+   (spell-tactic-mode 'queen 'inject-larva 251 'queen-inject-before-creep
+                      "Prioritize Inject ahead of Creep Tumor for designated inject Queens"
+                      "tag in inject-queen-tags")
+   (spell-tactic-mode 'queen 'spawn-creep-tumor 1694 'queen-tumor-highway
+                      "Extend primary main->nat->3rd->enemy highway tumor 3.0-4.8 tiles out"
+                      "en>=tumor-min & no enemy<14.0 & no tumor<2.8")
+   (spell-tactic-mode 'queen 'spawn-creep-tumor 1694 'queen-tumor-connect-bases
+                      "Bridge natural-to-third/fourth creep gaps so defensive Queens stay mobile"
+                      "peaceful off-inject macro queen")
+   (spell-tactic-mode 'queen 'spawn-creep-tumor 1694 'queen-tumor-anti-drop-edge
+                      "Seed perimeter drop-warning tumors along exposed main/natural cliff lines"
+                      "2+ bases & perimeter creep deficit")
+   (spell-tactic-mode 'queen 'transfusion 1664 'queen-transfuse-brood-queen-anchor
+                      "Save sister Queens, Ravagers, Lurkers, and Spines/Spores <65% HP"
+                      "en>=50 & ally<=7.0 missing>=65 hp & hp-ratio<0.65")
+   (spell-tactic-mode 'queen 'transfusion 1664 'queen-transfuse-ultralisk-tank
+                      "Sustain frontline Ultralisk/BroodLord/Corruptor anchors with claim dedup"
+                      "frontline capital/tank ally injured")
+   (spell-tactic-mode 'queen 'transfusion 1664 'queen-transfuse-hatch-save
+                      "Emergency Transfuse on targeted Hatchery/Lair/Hive under timing push"
+                      "ally townhall hp-ratio<0.65")
+
+   ;; ZERG: Overseer (Contaminate 1825/182, Oversight 3745/1912, SpawnChangeling 181)
+   (spell-tactic-mode 'overseer 'contaminate 1825 'overseer-contaminate-upgrade-tech
+                      "Freeze active enemy upgrade lab (Twilight/Forge/Ebay/Armory/Cyber) for 30s"
+                      "en>=125 & enemy upgrade/tech building<=7.0")
+   (spell-tactic-mode 'overseer 'contaminate 1825 'overseer-contaminate-prod-bottleneck
+                      "Halt enemy Stargate/Robotics/Starport/Factory production before timing"
+                      "en>=125 & enemy tech production<=7.0")
+   (spell-tactic-mode 'overseer 'contaminate 1825 'overseer-contaminate-threat-delay
+                      "Contaminate Gateway/Barracks/Hatchery during enemy all-in rally"
+                      "en>=125 & enemy production<=7.0")
+   (spell-tactic-mode 'overseer 'morph-oversight-mode 3745 'overseer-oversight-ring-watch
+                      "Anchor Oversight +50% vision over dead-air/drop approach when AA is absent"
+                      "safe>11.0 from enemy AA & stationary spot")
+   (spell-tactic-mode 'overseer 'morph-oversight-mode 3745 'overseer-oversight-burrow-guard
+                      "Hold Oversight over friendly base/choke against DT, Banshee, or burrow ambushes"
+                      "home/choke oversight-desired?")
+   (spell-tactic-mode 'overseer 'morph-oversight-mode 3745 'overseer-unmorph-mobile-follow
+                      "Exit Oversight back to mobile Overseer when AA closes <10.5 tiles"
+                      "overseer-siege-mode & enemy AA<=10.5")
+   (spell-tactic-mode 'overseer 'spawn-changeling 181 'overseer-changeling-ramp-block
+                      "Drop Changeling near enemy ramp/choke for HoldPosition body-blocking"
+                      "en>=50 & en<125 or outside Contaminate range")
+   (spell-tactic-mode 'overseer 'spawn-changeling 181 'overseer-changeling-shot-bait
+                      "Spawn Changeling forward to absorb opening SiegeTank/Immortal/Stalker shots"
+                      "en>=50 & combat skirmish nearby")
+   (spell-tactic-mode 'overseer 'spawn-changeling 181 'overseer-changeling-tech-scout
+                      "Maintain continuous zero-cooldown Changeling scouting on >=50 energy"
+                      "en>=50")
+
+   ;; ZERG: Ravager (Corrosive Bile 2338)
+   (spell-tactic-mode 'ravager 'corrosive-bile 2338 'ravager-fungal-bile-combo
+                      "Drop Corrosive Bile directly onto Fungal-Growth-rooted clusters (60 guaranteed dmg)"
+                      "bile ready & enemy has fungal-growth<=9.0")
+   (spell-tactic-mode 'ravager 'corrosive-bile 2338 'ravager-force-field-shatter
+                      "Immediately shatter enemy Force Fields blocking army advance"
+                      "bile ready & enemy force-field<=9.0")
+   (spell-tactic-mode 'ravager 'corrosive-bile 2338 'ravager-siege-static-bile
+                      "Target immobile SiegeTankSieged, LiberatorAG, LurkerBurrowed, Cannon, Battery, Bunker"
+                      "bile ready & immobile target or >=2 clump<=9.0")
+
+   ;; ZERG: Infestor (Fungal Growth 74, Neural Parasite 249, Microbial Shroud 2545/3821)
+   (spell-tactic-mode 'infestor 'fungal-growth 74 'infestor-fungal-kite-root
+                      "Lead velocity 0.5 tiles onto >=2 unbuffed Bio/Ling/Air targets with delta-f=0 claim"
+                      "en>=75 & >=2 unbuffed enemies r=2.25")
+   (spell-tactic-mode 'infestor 'fungal-growth 74 'infestor-fungal-air-clump
+                      "Pin harassing Phoenix/Mutalisk/Medivac/Banshee flocks to force engagements"
+                      "en>=75 & air harass pack")
+   (spell-tactic-mode 'infestor 'fungal-growth 74 'infestor-fungal-reveal-cloaked
+                      "Reveal and slow cloaked Ghost/Banshee/DT/burrowed clusters"
+                      "en>=75 & unrevealed enemy cluster")
+   (spell-tactic-mode 'infestor 'neural-parasite 249 'infestor-neural-capital-tank
+                      "Neural high-value Thor/Colossus/Carrier/BC/Immortal behind >=4 combat allies"
+                      "en>=100 & >=4 allies<=11.0 & target<=9.0")
+   (spell-tactic-mode 'infestor 'neural-parasite 249 'infestor-neural-burst-divert
+                      "Steal enemy HighTemplar/Ghost/Viper to turn spells back on opponent"
+                      "en>=100 & >=4 allies<=11.0")
+   (spell-tactic-mode 'infestor 'neural-parasite 249 'infestor-burrowed-neural-ambush
+                      "Channel safe Neural Parasite while burrowed behind front line"
+                      "infestor-burrowed & en>=100")
+   (spell-tactic-mode 'infestor 'microbial-shroud 2545 'infestor-shroud-anti-carrier-tempest
+                      "Blanket >=3 ground combat units under >=3 enemy air threats (-50% air-to-ground dmg)"
+                      "en>=75 & >=3 air enemies<=14.0 & >=3 ground allies")
+   (spell-tactic-mode 'infestor 'microbial-shroud 2545 'infestor-shroud-vs-liberator-banshee
+                      "Shield Hydralisk/Queen/Lurker core trading upward vs Carrier/Tempest/Banshee"
+                      "en>=75 & r=3.5 unclaimed")
+   (spell-tactic-mode 'infestor 'microbial-shroud 2545 'infestor-shroud-retreat-cover
+                      "Deploy protective Shroud when <70 energy Infestor retreats out of air threat"
+                      "fallback when en<70 & threat<=12.0")
+
+   ;; ZERG: Viper (Blinding Cloud 2063, Abduct 2067, Parasitic Bomb 2542 + Consume 2069)
+   (spell-tactic-mode 'viper 'blinding-cloud 2063 'viper-cloud-ranged-ball
+                      "Blind >=2 unclouded ground ranged attackers within 11.0 tiles"
+                      "en>=100 & >=2 ranged enemies r=2.0")
+   (spell-tactic-mode 'viper 'blinding-cloud 2063 'viper-cloud-static-bunker
+                      "Neutralize Bunkers, Planetary Fortresses, Cannons, and Siege Tanks during siege"
+                      "en>=100 & static/siege line")
+   (spell-tactic-mode 'viper 'blinding-cloud 2063 'viper-cloud-choke-deny
+                      "Seal enemy choke ranged fire while Zergling/Roach closes distance"
+                      "en>=100 & choke skirmish")
+   (spell-tactic-mode 'viper 'abduct 2067 'viper-abduct-siege-colossus
+                      "Abduct SiegeTankSieged/Colossus/Thor/Lurker/Tempest into >=4 friendly allies"
+                      "en>=75 & >=4 allies<=7.0 & priority target<=9.0")
+   (spell-tactic-mode 'viper 'abduct 2067 'viper-abduct-carrier-bc
+                      "Pick off exposed Carrier/Battlecruiser/Mothership sequentially with 1/target claim"
+                      "en>=75 & >=4 allies<=7.0")
+   (spell-tactic-mode 'viper 'abduct 2067 'viper-abduct-spellcaster-pick
+                      "Pull isolated Ghost/HighTemplar/Immortal out of protective wall"
+                      "en>=75 & >=4 allies<=7.0")
+   (spell-tactic-mode 'viper 'parasitic-bomb 2542 'viper-pbomb-air-flock
+                      "Tag >=3 enemy air units skipping when 824 dummy or active bomb within 4.0 tiles"
+                      "en>=125 & >=3 air enemies & no 824 dummy")
+   (spell-tactic-mode 'viper 'parasitic-bomb 2542 'viper-pbomb-medivac-drop
+                      "Punish bunched Medivacs, Vikings, Void Rays, or Phoenixes"
+                      "en>=125 & air flock<=8.0")
+   (spell-tactic-mode 'viper 'viper-consume 2069 'viper-safe-consume-regen
+                      "Retreat outside 12.0 enemy threat when energy<60 and Consume >450 HP Zerg building"
+                      "en<60 & 0 enemies<=12.0 & bldg hp>450")
+
+   ;; ZERG: Corruptor (2324), SwarmHost (1990), Lurker (2108/2110)
+   (spell-tactic-mode 'corruptor 'caustic-spray 2324 'corruptor-spray-exposed-townhall
+                      "Channel Caustic Spray on unguarded CommandCenter/Nexus/Hatchery (0 AA <=11.0)"
+                      "0 AA/air threat<=11.0 & townhall<=6.0")
+   (spell-tactic-mode 'corruptor 'caustic-spray 2324 'corruptor-spray-pf-sniper
+                      "Burn down Planetary Fortress / high-HP townhall once air is clear"
+                      "0 AA/air threat<=11.0 & high-HP townhall")
+   (spell-tactic-mode 'corruptor 'caustic-spray 2324 'corruptor-spray-hit-and-abort
+                      "Refuse or abort Spray immediately whenever enemy AA/air enters <=11.0 tiles"
+                      "enemy AA/air threat<=11.0 -> abort")
+   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 1990 'swarm-host-locust-wave-base
+                      "Launch off-cooldown Locust wave onto enemy mineral line or 3rd from 16-24 tiles"
+                      "locusts ready & target<=24.0 unclaimed")
+   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 1990 'swarm-host-locust-tank-breaker
+                      "Drop Locusts onto sieged Tanks/Immortals/Colossi before main ground engage"
+                      "locusts ready & high-value mech/robo clump")
+   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 1990 'swarm-host-nydus-kite-cycle
+                      "Stagger Swarm Host casts across r=4.0 zones and retreat on cooldown"
+                      "locust claim radius=4.0")
+   (spell-tactic-mode 'lurker-mp 'burrow-lurker 2108 'lurker-burrow-choke-siege
+                      "Burrow Lurker within 9.2 tiles of enemy ground targets for instant spine splash"
+                      "unburrowed & ground enemy<=9.5")
+   (spell-tactic-mode 'lurker-mp 'burrow-lurker 2108 'lurker-burrow-creep-anchor
+                      "Lock Lurker behind Roach/Hydra wall before melee/Bio engage lands"
+                      "unburrowed & frontline threats<=9.5")
+   (spell-tactic-mode 'lurker-mp 'unburrow-lurker 2110 'lurker-unburrow-reposition
+                      "Unburrow when 0 ground threats <=13.0 tiles after idle or dodging Nova/Storm/Bile"
+                      "lurker-burrowed & (idle>=24f no enemy<=13.0 or hazard<=3.5)")
+
+   ;; TERRAN: Ghost (EMP 1628, Snipe 2714, Cloak 382)
+   (spell-tactic-mode 'ghost 'emp-round 1628 'ghost-emp-shield-caster-cluster
+                      "EMP >=180 shields or HT/Archon/Sentry/Oracle/Infestor/Viper cluster (r=2.0 dedup)"
+                      "en>=75 & >=180 shields or priority caster")
+   (spell-tactic-mode 'ghost 'emp-round 1628 'ghost-emp-anti-cloaked-reveal
+                      "Strip cloak & energy off enemy Banshees, DTs, or flanking Ghosts"
+                      "en>=75 & caster/cloak cluster")
+   (spell-tactic-mode 'ghost 'emp-round 1628 'ghost-emp-pre-engage-opener
+                      "Fire lead EMP at 10.0 range prior to main Bio Stim crash"
+                      "en>=75 & enemy<=10.0 unclaimed")
+   (spell-tactic-mode 'ghost 'steady-targeting 2714 'ghost-snipe-capital-bio
+                      "Channel 34f Snipe on Ultralisk/BroodLord/Lurker/Viper/Infestor when 0 threats <4.5"
+                      "en>=50 & 0 enemies<4.5 & target<=10.0")
+   (spell-tactic-mode 'ghost 'steady-targeting 2714 'ghost-snipe-high-hp-zero-overkill
+                      "Distribute ceil(HP/170) Snipe claims cleanly across multiple Ghosts"
+                      "multi-Ghost HP-capped claim")
+   (spell-tactic-mode 'ghost 'steady-targeting 2714 'ghost-snipe-safety-abort
+                      "Suppress Snipe whenever any enemy closes inside 4.5 tiles to prevent interruption"
+                      "enemy<4.5 -> forbid snipe")
+   (spell-tactic-mode 'ghost 'cloak-ghost 382 'ghost-cloak-combat-safety
+                      "Cloak at >=50 energy within 10.0 tiles when 0 enemy detectors <11.0 tiles"
+                      "en>=50 & enemy<=10.0 & 0 detectors<11.0")
+   (spell-tactic-mode 'ghost 'cloak-ghost 382 'ghost-cloak-nuke-infiltration
+                      "Remain cloaked during flank positioning outside enemy static/mobile detection"
+                      "detector-free flank")
+   (spell-tactic-mode 'ghost 'cloak-ghost 382 'ghost-cloak-save-emp
+                      "Withhold Cloak when enemy Observer/Overseer/Raven/Turret is within 11.0 tiles"
+                      "detector<11.0 -> skip cloak")
+
+   ;; TERRAN: Raven (Interference Matrix 3747, Anti-Armor Missile 3753, Auto-Turret 349)
+   (spell-tactic-mode 'raven 'interference-matrix 3747 'raven-matrix-siege-colossus
+                      "Disable SiegeTank/Colossus/Thor/Carrier/Immortal/Tempest/Raven/Infestor 1/target"
+                      "en>=75 & high-value unit<=9.0")
+   (spell-tactic-mode 'raven 'interference-matrix 3747 'raven-matrix-spellcaster-shutoff
+                      "Lock HighTemplar/Viper/Oracle before AoE or Storm launches"
+                      "en>=75 & enemy caster<=9.0")
+   (spell-tactic-mode 'raven 'interference-matrix 3747 'raven-matrix-tvt-tank-opener
+                      "Shut down lead TvT Siege Tank before Marine/Tank push connects"
+                      "en>=75 & siege-tank<=9.0")
+   (spell-tactic-mode 'raven 'anti-armor-missile 3753 'raven-aam-bio-armor-shred
+                      "Apply -3 armor Anti-Armor Missile to >=5 enemy clump when >=6 allies <11.0 firing"
+                      "en>=75 & >=5 enemies r=2.88 & >=6 allies")
+   (spell-tactic-mode 'raven 'anti-armor-missile 3753 'raven-aam-mech-air-splash
+                      "Shred armor on bunched Mutalisk/Viking/Roach/Stalker balls with point dedup"
+                      "en>=75 & unclaimed clump")
+   (spell-tactic-mode 'raven 'anti-armor-missile 3753 'raven-aam-hold-vs-skirmish
+                      "Conserve 75 energy for Matrix/Turret when <5 targets or <6 firing allies"
+                      "insufficient clump or firing allies")
+   (spell-tactic-mode 'raven 'auto-turret 349 'raven-turret-worker-harass
+                      "Drop Auto-Turret into enemy mineral line prioritizing SCV/Probe/Drone targets"
+                      "en>=50 & worker/light<=8.0")
+   (spell-tactic-mode 'raven 'auto-turret 349 'raven-turret-melee-zone
+                      "Place Auto-Turret to block charging Zerglings/Zealots/Adepts"
+                      "en>=50 & >=2 enemies r=3.5")
+   (spell-tactic-mode 'raven 'auto-turret 349 'raven-turret-vision-tank
+                      "Deploy Auto-Turret forward as disposable high-DPS decoy during skirmish"
+                      "en>=50 & point claim free")
+
+   ;; TERRAN: Medivac (2116/386), Cyclone (2350), Battlecruiser (401/2358)
+   (spell-tactic-mode 'medivac 'medivac-boost 2116 'medivac-boost-loaded-drop
+                      "Fire Ignite Afterburners carrying bio cargo toward peripheral mineral drop"
+                      "boost ready & cargo-count>0")
+   (spell-tactic-mode 'medivac 'medivac-boost 2116 'medivac-boost-rescue-evac
+                      "Boost injured Medivac (<45% HP) away from pursuing anti-air / casters"
+                      "boost ready & hp-ratio<0.45 & enemy<=9.0")
+   (spell-tactic-mode 'medivac 'medivac-boost 2116 'medivac-boost-tempo-reinforce
+                      "Accelerate empty/full Medivac reinforcement back across long map lanes"
+                      "boost ready & cargo>0 or threat")
+   (spell-tactic-mode 'medivac 'heal 386 'medivac-heal-injured-bio
+                      "Explicitly heal lowest-HP Marine/Marauder/Ghost/Reaper/SCV/Hellbat (<92% HP <=5.5)"
+                      "bio ally<=5.5 missing hp")
+   (spell-tactic-mode 'medivac 'heal 386 'medivac-heal-stim-recovery
+                      "Top off Stim-damaged bio ball right before or between kite volleys"
+                      "injured marine/marauder<=5.5")
+   (spell-tactic-mode 'medivac 'heal 386 'medivac-retreat-low-hp-empty
+                      "Pull critically damaged Medivac (<45% HP) safely behind army"
+                      "hp-ratio<0.45 & boost on cd & enemy<=9.0")
+   (spell-tactic-mode 'cyclone 'lock-on 2350 'cyclone-lock-on-high-value
+                      "Lock-On Stalker/VoidRay/Oracle/WarpPrism/Medivac/Roach/Ravager <=7.5 (1/target)"
+                      "lock-on ready & priority unit<=7.5")
+   (spell-tactic-mode 'cyclone 'lock-on 2350 'cyclone-lock-on-kite-tether
+                      "Keep 9.0-14.5 tile kite separation while Lock-On channels full 6s burst"
+                      "tethered target locked")
+   (spell-tactic-mode 'cyclone 'lock-on 2350 'cyclone-lock-on-air-zone
+                      "Snap-Lock invading Oracle, Banshee, Liberator, or Warp Prism immediately"
+                      "air harasser<=7.5")
+   (spell-tactic-mode 'battlecruiser 'yamato-cannon 401 'bc-yamato-snipe
+                      "Distribute ceil(HP/240) Yamato claims across Carrier/Tempest/Colossus/Thor/BC"
+                      "yamato ready & high-value unit<=10.0")
+   (spell-tactic-mode 'battlecruiser 'yamato-cannon 401 'bc-yamato-static-aa-clear
+                      "Delete defensive MissileTurret/Spore/Cannon/Viking threat protecting mineral line"
+                      "yamato ready & heavy AA<=10.0")
+   (spell-tactic-mode 'battlecruiser 'yamato-cannon 401 'bc-yamato-reserve-jump-escape
+                      "Always prioritize Emergency Jump at <32% HP over firing Yamato"
+                      "hp-ratio<0.32 -> jump first")
+   (spell-tactic-mode 'battlecruiser 'tactical-jump 2358 'bc-emergency-tactical-jump
+                      "Tactical Jump to home repair anchor whenever HP falls <32% >12 tiles from home"
+                      "jump ready & hp-ratio<0.32 & dist-home>12")
+   (spell-tactic-mode 'battlecruiser 'tactical-jump 2358 'bc-tactical-jump-backstab
+                      "Jump healthy BC (>=85% HP, no threat <16) onto isolated remote enemy worker cluster"
+                      "jump ready & hp>=85% & isolated remote target>25")
+   (spell-tactic-mode 'battlecruiser 'tactical-jump 2358 'bc-tactical-jump-reinforce-def
+                      "Teleport across map directly to defend home base vs all-in"
+                      "emergency home jump")
+
+   ;; PROTOSS: HighTemplar (Psi Storm 1036, Feedback 140)
+   (spell-tactic-mode 'high-templar 'psi-storm 1036 'ht-psi-storm-bio-clump
+                      "Lead 0.25-tile Storm onto >=2 bio/hydra/ling clump with <=1 ally in 1.5 tiles"
+                      "en>=75 & >=2 enemies & <=1 ally in 1.5")
+   (spell-tactic-mode 'high-templar 'psi-storm 1036 'ht-psi-storm-emp-counter
+                      "Cast max-range 9.0 Storm immediately before Ghost EMP/Viper closes"
+                      "en>=75 & unclaimed r=2.0 storm")
+   (spell-tactic-mode 'high-templar 'psi-storm 1036 'ht-psi-storm-dry-archon-merge
+                      "Pair dry HTs (<50 energy) into instant Archon merge or safe back-kite"
+                      "2 dry HTs<=20.0")
+   (spell-tactic-mode 'high-templar 'feedback 140 'ht-feedback-medivac-viper
+                      "Feedback >=50-energy Ghost/Viper/Infestor/Medivac/Raven/Oracle/Sentry (1/target)"
+                      "en>=50 & high-energy enemy caster<=10.0")
+   (spell-tactic-mode 'high-templar 'feedback 140 'ht-feedback-bc-ghost-shutoff
+                      "Strip energy from incoming Ghosts/Ravens/Queens before spells cast"
+                      "en>=50 & caster priority")
+   (spell-tactic-mode 'high-templar 'feedback 140 'ht-feedback-defend-warp-prism
+                      "Counter-snipe dropping Medivacs/WarpPrisms/Vipers behind natural"
+                      "en>=50 & medivac/caster<=10.0")
+
+   ;; PROTOSS: Sentry (Guardian Shield 76, Force Field 1526, Hallucination 154/bait)
+   (spell-tactic-mode 'sentry 'guardian-shield 76 'sentry-guardian-shield-ranged-fight
+                      "Activate GS with >=3 combat allies <4.5 facing >=2 ranged enemies <10 (246f claim)"
+                      "en>=75 & >=3 allies<=4.5 & >=2 ranged<=10")
+   (spell-tactic-mode 'sentry 'guardian-shield 76 'sentry-gs-timing-push
+                      "Open main army clash with Guardian Shield -2 ranged damage aura"
+                      "unbuffed sentry & ranged engage")
+   (spell-tactic-mode 'sentry 'guardian-shield 76 'sentry-gs-hold-vs-melee
+                      "Hold GS energy vs pure melee charges until Force Field is spent"
+                      "<2 ranged enemies")
+   (spell-tactic-mode 'sentry 'force-field 1526 'sentry-force-field-split-army
+                      "Bisect >=4 melee enemies >=27f after GS with zero non-flying allies <1.8 tiles"
+                      "en>=50 & >=27f post-GS & 0 allies<1.8")
+   (spell-tactic-mode 'sentry 'force-field 1526 'sentry-force-field-ramp-lock
+                      "Block ramp/choke vs Baneling/Zealot/Zergling floods"
+                      "en>=50 & melee cluster<=10.5")
+   (spell-tactic-mode 'sentry 'force-field 1526 'sentry-force-field-retreat-wall
+                      "Slice pursuing ground pack cleanly without trapping friendly units"
+                      "ally-trapped?=#f & no existing force-field")
+   (spell-tactic-mode 'sentry 'hallucination-phoenix 154 'sentry-hallucination-phoenix-scout
+                      "Spawn safe Hallucination Phoenix scout in 4:00-4:15 pro window (900f cooldown)"
+                      "en>=75 & safe & frame<=7200")
+   (spell-tactic-mode 'sentry 'hallucination-archon 156 'sentry-hallucination-colossus-tank
+                      "Spawn Hallucination Archon frontline damage sponge during >=125 energy clash"
+                      "en>=125 & engaged?")
+   (spell-tactic-mode 'sentry 'hallucination-zealot 164 'sentry-hallucination-bait-fire
+                      "Spawn cheap Hallucination Zealot/bait when engaged near WidowMines/SiegeTanks"
+                      "en>=75 & <125 & high-burst siege/mine<=11.0")
+
+   ;; PROTOSS: Oracle (2375/2146/2505), Phoenix (173/176), Disruptor (2346)
+   (spell-tactic-mode 'oracle 'pulsar-beam 2375 'oracle-pulsar-beam-workers
+                      "Enable Pulsar Beam >=40 en & >=35 sh vs >=2 light/workers <5 with >=60f dwell"
+                      "en>=40 & sh>=35 & >=2 light/worker<=5.0")
+   (spell-tactic-mode 'oracle 'pulsar-beam 2375 'oracle-pulsar-beam-ling-defense
+                      "Melts early Zergling/Zealot runbys inside natural wall behind batteries"
+                      "en>=40 & >=2 light attackers<=5.0")
+   (spell-tactic-mode 'oracle 'pulsar-beam 2375 'oracle-pulsar-beam-dwell-off
+                      "Hold beam ON >=60f (111f 0-target) then switch OFF preserving Revelation energy"
+                      "dwell>=60 & (en<15 or sh<25 or 0-tgt>=111f)")
+   (spell-tactic-mode 'oracle 'oracle-revelation 2146 'oracle-revelation-stealth-reveal
+                      "Cast Revelation immediately onto cloaked/burrowed Banshee/Ghost/DT/Lurker/Mine"
+                      "beam OFF & en>=25 & unrevealed stealth<=10.5")
+   (spell-tactic-mode 'oracle 'oracle-revelation 2146 'oracle-revelation-army-tag
+                      "Tag enemy siege/HT ball ahead of friendly High Templars for long-range Storm"
+                      "beam OFF & en>=25 & HT within 16.0")
+   (spell-tactic-mode 'oracle 'oracle-revelation 2146 'oracle-revelation-kiting-vision
+                      "Maintain continuous vision on kited Mech/Lurker army before Tempest volleys"
+                      "r=6.0 ttl=448 claim dedup")
+   (spell-tactic-mode 'oracle 'stasis-ward 2505 'oracle-stasis-ward-choke
+                      "Plant Stasis Ward on choke points or natural ramp when beam OFF & >=55 energy"
+                      "beam OFF & en>=55 & safe site<=8.0")
+   (spell-tactic-mode 'oracle 'stasis-ward 2505 'oracle-stasis-mineral-trap
+                      "Seed behind enemy mineral line to freeze pulling SCVs/Drones/Probes"
+                      "beam OFF & en>=55 & safe behind line")
+   (spell-tactic-mode 'oracle 'stasis-ward 2505 'oracle-stasis-defensive-ramp
+                      "Anchor home natural/3rd choke against multi-prong Ling/Bane/Hellion drops"
+                      "safe from existing ward<4.5 & enemy<4.5")
+   (spell-tactic-mode 'phoenix 'graviton-beam 173 'phoenix-graviton-lift-siege-lurker
+                      "Lift Sieged Tank, Lurker, Disruptor, Swarm Host, or Immortal (>=50 en, 1/target)"
+                      "en>=50 & priority ground<=5.5 & safe AA ratio")
+   (spell-tactic-mode 'phoenix 'graviton-beam 173 'phoenix-graviton-worker-pick
+                      "Lift exposed Queen or Probes/SCVs/Drones while sister Phoenixes focus-fire"
+                      "en>=50 & worker/queen<=5.5 & wingman ready")
+   (spell-tactic-mode 'phoenix 'graviton-beam 173 'phoenix-graviton-abort-vs-aa
+                      "Refuse risky Graviton channel if solo Phoenix faces >=2 anti-air threats <8.0"
+                      "solo phoenix vs >=2 AA<=8.0 -> skip lift")
+   (spell-tactic-mode 'disruptor 'purification-nova 2346 'disruptor-nova-stagger-clump
+                      "Fire Purification Nova onto >=2 ground clump honoring >=28-32f (`31f`) stagger gate"
+                      "nova ready & stagger-ready? & >=2 ground clump<=12.5")
+   (spell-tactic-mode 'disruptor 'purification-nova 2346 'disruptor-nova-siege-zone
+                      "Snipe immobile SiegeTankSieged/LurkerBurrowed/Colossus/Marauder clusters"
+                      "nova ready & high-value ground<=12.5")
+   (spell-tactic-mode 'disruptor 'purification-nova 2346 'disruptor-nova-zone-choke-retreat
+                      "Hold staggered second Nova ready to zone enemy follow-up while Stalkers kite"
+                      "disruptor-nova-stagger-ready? commit=#t")))
+
+(: normalize-tactic-lookup-sym (-> Symbol Symbol))
+(define (normalize-tactic-lookup-sym sym)
+  (case sym
+    [(swarm-host) 'swarm-host-mp]
+    [(lurker lurker-burrowed lurker-mp-burrowed) 'lurker-mp]
+    [(overseer-siege-mode) 'overseer]
+    [(infestor-burrowed) 'infestor]
+    [(transfuse) 'transfusion]
+    [(revelation) 'oracle-revelation]
+    [(emp) 'emp-round]
+    [(snipe) 'steady-targeting]
+    [(yamato yamato-gun) 'yamato-cannon]
+    [(consume) 'viper-consume]
+    [(oversight) 'morph-oversight-mode]
+    [(inject) 'inject-larva]
+    [(creep-tumor) 'spawn-creep-tumor]
+    [(fungal) 'fungal-growth]
+    [(neural) 'neural-parasite]
+    [(shroud) 'microbial-shroud]
+    [(ghost-cloak) 'cloak-ghost]
+    [(ignite-afterburners) 'medivac-boost]
+    [else sym]))
+
+;; Lookup all 3 pro-replay tactical modes for a caster (`'overseer`, `'phoenix`, ...)
+;; or a spell ability (`'contaminate`, `'graviton-beam`, `'purification-nova`, ...).
+(: spell-ability-3-tactics (-> Symbol (Listof spell-tactic-mode)))
+(define (spell-ability-3-tactics caster-or-ability)
+  (define k (normalize-tactic-lookup-sym caster-or-ability))
+  (filter (lambda ([m : spell-tactic-mode])
+            (or (eq? (spell-tactic-mode-caster-type m) k)
+                (eq? (spell-tactic-mode-ability m) k)
+                (and (eq? k 'hallucination)
+                     (not (not (memq (spell-tactic-mode-ability m)
+                                     '(hallucination-phoenix hallucination-archon hallucination-zealot)))))))
+          SPELL-ABILITY-3-TACTICS-CATALOG))
+
 ;; -----------------------------------------------------------------------------
 ;; 3. Internal Math, Normalization & Safe Unit Hash Inspectors
 ;; -----------------------------------------------------------------------------
@@ -311,13 +845,78 @@
             ([u (in-list units)])
     (+ tot (fn u))))
 
+(struct spell-xy-index
+  ([xs : FlVector]
+   [ys : FlVector]
+   [us : (Vectorof Any)]
+   [n : Integer]))
+
+(define current-spell-xy-table : (Parameterof (Option (HashTable Any spell-xy-index)))
+  (make-parameter #f))
+
+(: list-at-least-8? (-> (Listof Any) Boolean))
+(define (list-at-least-8? lst)
+  (let ([p lst])
+    (and (pair? p)
+         (let ([p1 (cdr p)])
+           (and (pair? p1)
+                (let ([p2 (cdr p1)])
+                  (and (pair? p2)
+                       (let ([p3 (cdr p2)])
+                         (and (pair? p3)
+                              (let ([p4 (cdr p3)])
+                                (and (pair? p4)
+                                     (let ([p5 (cdr p4)])
+                                       (and (pair? p5)
+                                            (let ([p6 (cdr p5)])
+                                              (and (pair? p6)
+                                                   (pair? (cdr p6)))))))))))))))))
+
+(: get-spell-xy-index (-> (Listof Any) (Option spell-xy-index)))
+(define (get-spell-xy-index units)
+  (define tbl (current-spell-xy-table))
+  (cond
+    [(or (not tbl) (not (list-at-least-8? units))) #f]
+    [else
+     (or (hash-ref tbl units (lambda () #f))
+         (let-values ([(xs ys us n) (dyn-units-xy-batch units)])
+           (define idx (spell-xy-index xs ys us n))
+           (hash-set! tbl units idx)
+           idx))]))
+
 (: sum-hp-within (-> (Listof Any) Float Float Float Float))
 (define (sum-hp-within units cx cy rad)
-  (for/fold ([tot : Float 0.0])
-            ([e (in-list units)])
-    (if (and (hash? e) (<= (dist2 cx cy (uh-x e) (uh-y e)) rad))
-        (+ tot (uh-total-hp e))
-        tot)))
+  (if (< rad 0.0)
+      0.0
+      (let ([r2 (* rad rad)]
+            [idx (get-spell-xy-index units)])
+        (if idx
+            (let ([xs (spell-xy-index-xs idx)]
+                  [ys (spell-xy-index-ys idx)]
+                  [us (spell-xy-index-us idx)]
+                  [n (spell-xy-index-n idx)])
+              (for/fold ([tot : Float 0.0])
+                        ([i (in-range n)])
+                (define dx (- cx (flvector-ref xs i)))
+                (if (<= (flabs dx) rad)
+                    (let ([dy (- cy (flvector-ref ys i))])
+                      (if (and (<= (flabs dy) rad)
+                               (<= (+ (* dx dx) (* dy dy)) r2))
+                          (+ tot (uh-total-hp (vector-ref us i)))
+                          tot))
+                    tot)))
+            (for/fold ([tot : Float 0.0])
+                      ([e (in-list units)])
+              (if (hash? e)
+                  (let ([dx (- cx (uh-x e))])
+                    (if (<= (flabs dx) rad)
+                        (let ([dy (- cy (uh-y e))])
+                          (if (and (<= (flabs dy) rad)
+                                   (<= (+ (* dx dx) (* dy dy)) r2))
+                              (+ tot (uh-total-hp e))
+                              tot))
+                        tot))
+                  tot))))))
 
 (: canonical-spell-key (-> Symbol Symbol))
 (define (canonical-spell-key ab)
@@ -349,24 +948,29 @@
 
 (: uh-tag (-> Any Integer))
 (define (uh-tag u)
-  (define tid (safe-int (dyn-hash-ref u 'id 0) 0))
-  (if (> tid 0) tid (safe-int (dyn-hash-ref u 'tag 0) 0)))
+  (dyn-u-raw-tag u))
+
+(define *spell-canon-sym-cache* : (Mutable-HashTable Symbol Symbol) (make-hasheq))
 
 (: uh-type (-> Any Symbol))
 (define (uh-type u)
-  (sc2-canonical-unit-sym (safe-sym (dyn-hash-ref u 'type 'unknown) 'unknown)))
+  (define raw (dyn-u-raw-type u))
+  (or (hash-ref *spell-canon-sym-cache* raw (lambda () #f))
+      (let ([canon (sc2-canonical-unit-sym raw)])
+        (hash-set! *spell-canon-sym-cache* raw canon)
+        canon)))
 
 (: uh-raw-type (-> Any Symbol))
 (define (uh-raw-type u)
-  (safe-sym (dyn-hash-ref u 'type 'unknown) 'unknown))
+  (dyn-u-raw-type u))
 
 (: uh-x (-> Any Float))
 (define (uh-x u)
-  (safe-fl (dyn-hash-ref u 'x 0.0) 0.0))
+  (dyn-u-x u))
 
 (: uh-y (-> Any Float))
 (define (uh-y u)
-  (safe-fl (dyn-hash-ref u 'y 0.0) 0.0))
+  (dyn-u-y u))
 
 (: uh-vx (-> Any Float))
 (define (uh-vx u)
@@ -378,39 +982,49 @@
 
 (: uh-energy (-> Any Float))
 (define (uh-energy u)
-  (safe-fl (dyn-hash-ref u 'energy 0.0) 0.0))
+  (dyn-u-energy u))
 
 (: uh-shields (-> Any Float))
 (define (uh-shields u)
-  (if (dyn-hash-has-key? u 'shield)
-      (safe-fl (dyn-hash-ref u 'shield 0.0) 0.0)
-      (safe-fl (dyn-hash-ref u 'shields 0.0) 0.0)))
+  (dyn-u-shields u))
 
 ;; Extract total current HP (hull + shields) supporting both live combined
 ;; `sc2-protobuf-ws` hashes (`'hull-hp` + combined `'hp`) and synthetic split hashes.
+(define *spell-combat-stats-cache* :
+  (Mutable-HashTable Symbol (Immutable-HashTable Symbol (U Real Boolean Symbol)))
+  (make-hasheq))
+
+(: cached-unit-combat-stats (-> Symbol (Immutable-HashTable Symbol (U Real Boolean Symbol))))
+(define (cached-unit-combat-stats sym)
+  (or (hash-ref *spell-combat-stats-cache* sym (lambda () #f))
+      (let ([st (sc2-unit-combat-stats sym)])
+        (hash-set! *spell-combat-stats-cache* sym st)
+        st)))
+
 (: uh-total-hp (-> Any Float))
 (define (uh-total-hp u)
-  (define stats (sc2-unit-combat-stats (uh-type u)))
-  (define t-hull (safe-fl (hash-ref stats 'max-hp (lambda () 0.0)) 0.0))
-  (define sh (uh-shields u))
   (cond
     [(dyn-hash-has-key? u 'hull-hp)
      (if (dyn-hash-has-key? u 'hp)
          (safe-fl (dyn-hash-ref u 'hp 0.0) 0.0)
-         (+ (safe-fl (dyn-hash-ref u 'hull-hp 0.0) 0.0) sh))]
+         (+ (safe-fl (dyn-hash-ref u 'hull-hp 0.0) 0.0) (uh-shields u)))]
     [else
      (define raw-hp (safe-fl (dyn-hash-ref u 'hp 0.0) 0.0))
-     (define has-max? (dyn-hash-has-key? u 'max-hp))
-     (define raw-max (safe-fl (dyn-hash-ref u 'max-hp 0.0) 0.0))
-     (define already-combined?
-       (and (> sh 0.0)
-            (or (and (> t-hull 0.0) (> raw-hp (+ t-hull 0.5)))
-                (and (<= t-hull 0.0) has-max? (> raw-max (+ sh 0.5)) (>= raw-hp sh)))))
-     (if already-combined? raw-hp (+ raw-hp sh))]))
+     (define sh (uh-shields u))
+     (if (<= sh 0.0)
+         raw-hp
+         (let* ([stats (cached-unit-combat-stats (uh-type u))]
+                [t-hull (safe-fl (hash-ref stats 'max-hp (lambda () 0.0)) 0.0)]
+                [has-max? (dyn-hash-has-key? u 'max-hp)]
+                [raw-max (if has-max? (safe-fl (dyn-hash-ref u 'max-hp 0.0) 0.0) 0.0)]
+                [already-combined?
+                 (or (and (> t-hull 0.0) (> raw-hp (+ t-hull 0.5)))
+                     (and (<= t-hull 0.0) has-max? (> raw-max (+ sh 0.5)) (>= raw-hp sh)))])
+           (if already-combined? raw-hp (+ raw-hp sh))))]))
 
 (: uh-max-total-hp (-> Any Float))
 (define (uh-max-total-hp u)
-  (define stats (sc2-unit-combat-stats (uh-type u)))
+  (define stats (cached-unit-combat-stats (uh-type u)))
   (define t-hull (safe-fl (hash-ref stats 'max-hp (lambda () 0.0)) 0.0))
   (define t-shield (safe-fl (hash-ref stats 'max-shield (lambda () 0.0)) 0.0))
   (define table-tot (+ t-hull t-shield))
@@ -471,7 +1085,7 @@
 
 (: uh-has-buff? (-> Any Symbol Boolean))
 (define (uh-has-buff? u target-buff)
-  (and (memq target-buff (uh-buffs u)) #t))
+  (dyn-u-has-buff? u target-buff))
 
 (: uh-cloaked? (-> Any Boolean))
 (define (uh-cloaked? u)
@@ -494,14 +1108,29 @@
 
 (: uh-hallucination? (-> Any Boolean))
 (define (uh-hallucination? u)
-  (or (eq? (dyn-hash-ref u 'is-hallucination #f) #t)
-      (eq? (dyn-hash-ref u 'hallucination #f) #t)))
+  (dyn-u-hallucination-flag u))
+
+(: current-spell-flying-cache (Parameterof (Option (HashTable Any Symbol))))
+(define current-spell-flying-cache (make-parameter #f))
 
 (: uh-flying? (-> Any Boolean))
 (define (uh-flying? u)
-  (or (eq? (dyn-hash-ref u 'flying? #f) #t)
-      (eq? (dyn-hash-ref u 'is-flying #f) #t)
-      (sc2-unit-is-flying-sym? (uh-type u))))
+  (define ht (current-spell-flying-cache))
+  (cond
+    [ht
+     (define cached (hash-ref ht u #f))
+     (cond
+       [(eq? cached 'yes) #t]
+       [(eq? cached 'no) #f]
+       [else
+        (define res
+          (or (dyn-u-flying-flag u)
+              (sc2-unit-is-flying-sym? (uh-type u))))
+        (hash-set! ht u (if res 'yes 'no))
+        res])]
+    [else
+     (or (dyn-u-flying-flag u)
+         (sc2-unit-is-flying-sym? (uh-type u)))]))
 
 (: uh-detector? (-> Any Boolean))
 (define (uh-detector? u)
@@ -898,19 +1527,118 @@
 
 (: count-units-within (-> (Listof Any) Float Float Float (-> Any Boolean) Integer))
 (define (count-units-within units cx cy radius pred)
-  (for/sum : Integer ([u (in-list units)])
-    (if (and (hash? u)
-             (<= (dist2 cx cy (uh-x u) (uh-y u)) radius)
-             (pred u))
-        1
-        0)))
+  (cond
+    [(or (< radius 0.0) (null? units)) 0]
+    [else
+     (define r2 (* radius radius))
+     (define idx (get-spell-xy-index units))
+     (if idx
+         (let ([xs (spell-xy-index-xs idx)]
+               [ys (spell-xy-index-ys idx)]
+               [us (spell-xy-index-us idx)]
+               [n (spell-xy-index-n idx)])
+           (for/sum : Integer ([i (in-range n)])
+             (define dx (- cx (flvector-ref xs i)))
+             (if (<= (flabs dx) radius)
+                 (let ([dy (- cy (flvector-ref ys i))])
+                   (if (and (<= (flabs dy) radius)
+                            (<= (+ (* dx dx) (* dy dy)) r2)
+                            (pred (vector-ref us i)))
+                       1
+                       0))
+                 0)))
+         (for/sum : Integer ([u (in-list units)])
+           (if (hash? u)
+               (let ([dx (- cx (uh-x u))])
+                 (if (<= (flabs dx) radius)
+                     (let ([dy (- cy (uh-y u))])
+                       (if (and (<= (flabs dy) radius)
+                                (<= (+ (* dx dx) (* dy dy)) r2)
+                                (pred u))
+                           1
+                           0))
+                     0))
+               0)))]))
 
 (: any-unit-within? (-> (Listof Any) Float Float Float (-> Any Boolean) Boolean))
 (define (any-unit-within? units cx cy radius pred)
-  (for/or : Boolean ([u (in-list units)])
-    (and (hash? u)
-         (<= (dist2 cx cy (uh-x u) (uh-y u)) radius)
-         (pred u))))
+  (cond
+    [(or (< radius 0.0) (null? units)) #f]
+    [else
+     (define r2 (* radius radius))
+     (define idx (get-spell-xy-index units))
+     (if idx
+         (let ([xs (spell-xy-index-xs idx)]
+               [ys (spell-xy-index-ys idx)]
+               [us (spell-xy-index-us idx)]
+               [n (spell-xy-index-n idx)])
+           (let loop : Boolean ([i : Integer 0])
+             (cond
+               [(>= i n) #f]
+               [else
+                (define dx (- cx (flvector-ref xs i)))
+                (if (<= (flabs dx) radius)
+                    (let ([dy (- cy (flvector-ref ys i))])
+                      (if (and (<= (flabs dy) radius)
+                               (<= (+ (* dx dx) (* dy dy)) r2)
+                               (pred (vector-ref us i)))
+                          #t
+                          (loop (+ i 1))))
+                    (loop (+ i 1)))])))
+         (for/or : Boolean ([u (in-list units)])
+           (and (hash? u)
+                (let ([dx (- cx (uh-x u))])
+                  (and (<= (flabs dx) radius)
+                       (let ([dy (- cy (uh-y u))])
+                         (and (<= (flabs dy) radius)
+                              (<= (+ (* dx dx) (* dy dy)) r2)
+                              (pred u))))))))]))
+
+(: count-within-at-most? (-> (Listof Any) Float Float Float Integer (-> Any Boolean) Boolean))
+(define (count-within-at-most? units cx cy radius limit pred)
+  (cond
+    [(< radius 0.0) (>= limit 0)]
+    [(< limit 0) #f]
+    [(null? units) #t]
+    [else
+     (define r2 (* radius radius))
+     (define idx (get-spell-xy-index units))
+     (if idx
+         (let ([xs (spell-xy-index-xs idx)]
+               [ys (spell-xy-index-ys idx)]
+               [us (spell-xy-index-us idx)]
+               [n (spell-xy-index-n idx)])
+           (let loop : Boolean ([i : Integer 0] [cnt : Integer 0])
+             (cond
+               [(>= i n) #t]
+               [else
+                (define dx (- cx (flvector-ref xs i)))
+                (if (<= (flabs dx) radius)
+                    (let ([dy (- cy (flvector-ref ys i))])
+                      (if (and (<= (flabs dy) radius)
+                               (<= (+ (* dx dx) (* dy dy)) r2)
+                               (pred (vector-ref us i)))
+                          (let ([nxt (+ cnt 1)])
+                            (if (> nxt limit) #f (loop (+ i 1) nxt)))
+                          (loop (+ i 1) cnt)))
+                    (loop (+ i 1) cnt))])))
+         (let loop : Boolean ([rem : (Listof Any) units] [cnt : Integer 0])
+           (cond
+             [(null? rem) #t]
+             [else
+              (define u (car rem))
+              (if (hash? u)
+                  (let ([dx (- cx (uh-x u))])
+                    (if (<= (flabs dx) radius)
+                        (let ([dy (- cy (uh-y u))])
+                          (if (and (<= (flabs dy) radius)
+                                   (<= (+ (* dx dx) (* dy dy)) r2)
+                                   (pred u))
+                              (let ([nxt (+ cnt 1)])
+                                (if (> nxt limit) #f (loop (cdr rem) nxt)))
+                              (loop (cdr rem) cnt)))
+                        (loop (cdr rem) cnt)))
+                  (loop (cdr rem) cnt))])))]))
 
 (: count-all-allies-within (-> (Listof Any) (Listof Any) Float Float Float (-> Any Boolean) Integer))
 (define (count-all-allies-within units bldgs cx cy radius pred)
@@ -919,11 +1647,11 @@
 
 (: enemy-ground-range (-> Any Float))
 (define (enemy-ground-range u)
-  (safe-fl (hash-ref (sc2-unit-combat-stats (uh-type u)) 'ground-range (lambda () 0.0)) 0.0))
+  (safe-fl (hash-ref (cached-unit-combat-stats (uh-type u)) 'ground-range (lambda () 0.0)) 0.0))
 
 (: enemy-ranged-threat? (-> Any Boolean))
 (define (enemy-ranged-threat? u)
-  (define st (sc2-unit-combat-stats (uh-type u)))
+  (define st (cached-unit-combat-stats (uh-type u)))
   (define gr (safe-fl (hash-ref st 'ground-range (lambda () 0.0)) 0.0))
   (define ar (safe-fl (hash-ref st 'air-range (lambda () 0.0)) 0.0))
   (or (>= gr 2.0) (>= ar 2.0)))
@@ -994,49 +1722,133 @@
 ;; within `cast-range` of `(caster-x, caster-y)`, aggregating nearby enemies
 ;; within `aoe-radius`, applying optional velocity lead (`max-lead`), and calling
 ;; `score-fn : (cluster-cx cluster-cy cluster-members -> Float)`.
+(struct cluster-pt ([x : Float] [y : Float] [vx : Float] [vy : Float] [u : Any]))
+
 (: best-enemy-cluster
    (-> Float Float Float (Listof Any) Float Float (-> Float Float (Listof Any) Float)
        (Values Boolean Float Float Float)))
 (define (best-enemy-cluster caster-x caster-y cast-range enemies aoe-radius max-lead score-fn)
-  (define-values (found? bx by bs)
-    (for/fold ([f? : Boolean #f]
-               [best-x : Float 0.0]
-               [best-y : Float 0.0]
-               [best-s : Float 0.0])
-              ([seed (in-list enemies)]
-               #:when (and (hash? seed)
-                           (sc2-enemy-unit-targetable? seed)
-                           (<= (dist2 caster-x caster-y (uh-x seed) (uh-y seed)) cast-range)))
-      (define sx (uh-x seed))
-      (define sy (uh-y seed))
-      (define cluster
-        (for/list : (Listof Any)
-                  ([e (in-list enemies)]
-                   #:when (and (hash? e)
-                               (sc2-enemy-unit-targetable? e)
-                               (<= (dist2 sx sy (uh-x e) (uh-y e)) aoe-radius)))
-          e))
-      (define-values (cx cy vx vy cnt) (centroid-and-velocity cluster))
-      (cond
-        [(= cnt 0) (values f? best-x best-y best-s)]
-        [else
-         (define-values (lx ly)
-           (if (<= max-lead 0.0)
-               (values cx cy)
-               (let ([spd2 (+ (* vx vx) (* vy vy))])
-                 (if (<= spd2 0.0625)
-                     (values cx cy)
-                     (let* ([spd (flsqrt spd2)]
-                            [lead (min max-lead (* 0.25 spd))])
-                       (values (clamp-coord (+ cx (* lead (/ vx spd))))
-                               (clamp-coord (+ cy (* lead (/ vy spd))))))))))
-         (define sc (if (<= (dist2 caster-x caster-y lx ly) cast-range)
-                        (score-fn lx ly cluster)
-                        0.0))
-         (if (> sc best-s)
-             (values #t lx ly sc)
-             (values f? best-x best-y best-s))])))
-  (values found? bx by bs))
+  (cond
+    [(or (< cast-range 0.0) (< aoe-radius 0.0) (null? enemies))
+     (values #f 0.0 0.0 0.0)]
+    [else
+     (define r-outer (+ cast-range aoe-radius 1e-6))
+     (define r-outer-sq (* r-outer r-outer))
+     (define cast-r2 (* cast-range cast-range))
+     (define aoe-r2 (* aoe-radius aoe-radius))
+     (define idx (get-spell-xy-index enemies))
+     (define-values (nearby seeds)
+       (if idx
+           (let ([xs (spell-xy-index-xs idx)]
+                 [ys (spell-xy-index-ys idx)]
+                 [us (spell-xy-index-us idx)]
+                 [n (spell-xy-index-n idx)])
+             (for/fold ([nb : (Listof cluster-pt) '()]
+                        [sd : (Listof cluster-pt) '()]
+                        #:result (values nb (reverse sd)))
+                       ([i (in-range n)])
+               (define ex (flvector-ref xs i))
+               (define dx (- caster-x ex))
+               (if (<= (flabs dx) r-outer)
+                   (let* ([ey (flvector-ref ys i)]
+                          [dy (- caster-y ey)])
+                     (if (<= (flabs dy) r-outer)
+                         (let ([d2 (+ (* dx dx) (* dy dy))])
+                           (if (<= d2 r-outer-sq)
+                               (let ([e (vector-ref us i)])
+                                 (if (sc2-enemy-unit-targetable? e)
+                                     (let ([pt (cluster-pt ex ey (uh-vx e) (uh-vy e) e)])
+                                       (values (cons pt nb)
+                                               (if (and (<= (flabs dx) cast-range)
+                                                        (<= (flabs dy) cast-range)
+                                                        (<= d2 cast-r2))
+                                                   (cons pt sd)
+                                                   sd)))
+                                     (values nb sd)))
+                               (values nb sd)))
+                         (values nb sd)))
+                   (values nb sd))))
+           (for/fold ([nb : (Listof cluster-pt) '()]
+                      [sd : (Listof cluster-pt) '()]
+                      #:result (values nb (reverse sd)))
+                     ([e (in-list enemies)]
+                      #:when (hash? e))
+             (define ex (uh-x e))
+             (define dx (- caster-x ex))
+             (if (<= (flabs dx) r-outer)
+                 (let* ([ey (uh-y e)]
+                        [dy (- caster-y ey)])
+                   (if (<= (flabs dy) r-outer)
+                       (let ([d2 (+ (* dx dx) (* dy dy))])
+                         (if (and (<= d2 r-outer-sq)
+                                  (sc2-enemy-unit-targetable? e))
+                             (let ([pt (cluster-pt ex ey (uh-vx e) (uh-vy e) e)])
+                               (values (cons pt nb)
+                                       (if (and (<= (flabs dx) cast-range)
+                                                (<= (flabs dy) cast-range)
+                                                (<= d2 cast-r2))
+                                           (cons pt sd)
+                                           sd)))
+                             (values nb sd)))
+                       (values nb sd)))
+                 (values nb sd)))))
+     (if (null? seeds)
+         (values #f 0.0 0.0 0.0)
+         (for/fold ([f? : Boolean #f]
+                    [best-x : Float 0.0]
+                    [best-y : Float 0.0]
+                    [best-s : Float 0.0])
+                   ([s (in-list seeds)])
+           (define sx (cluster-pt-x s))
+           (define sy (cluster-pt-y s))
+           (define-values (cluster ax ay avx avy cnt)
+             (for/fold ([cl : (Listof Any) '()]
+                        [sx-acc : Float 0.0]
+                        [sy-acc : Float 0.0]
+                        [svx-acc : Float 0.0]
+                        [svy-acc : Float 0.0]
+                        [n : Integer 0])
+                       ([p (in-list nearby)])
+               (define px (cluster-pt-x p))
+               (define py (cluster-pt-y p))
+               (define dx (- sx px))
+               (define dy (- sy py))
+               (if (and (<= (abs dx) aoe-radius)
+                        (<= (abs dy) aoe-radius)
+                        (<= (+ (* dx dx) (* dy dy)) aoe-r2))
+                   (values (cons (cluster-pt-u p) cl)
+                           (+ sx-acc px)
+                           (+ sy-acc py)
+                           (+ svx-acc (cluster-pt-vx p))
+                           (+ svy-acc (cluster-pt-vy p))
+                           (+ n 1))
+                   (values cl sx-acc sy-acc svx-acc svy-acc n))))
+           (cond
+             [(= cnt 0) (values f? best-x best-y best-s)]
+             [else
+              (define fn (->float cnt))
+              (define cx (/ ax fn))
+              (define cy (/ ay fn))
+              (define vx (/ avx fn))
+              (define vy (/ avy fn))
+              (define-values (lx ly)
+                (if (<= max-lead 0.0)
+                    (values cx cy)
+                    (let ([spd2 (+ (* vx vx) (* vy vy))])
+                      (if (<= spd2 0.0625)
+                          (values cx cy)
+                          (let* ([spd (flsqrt spd2)]
+                                 [lead (min max-lead (* 0.25 spd))])
+                            (values (clamp-coord (+ cx (* lead (/ vx spd))))
+                                    (clamp-coord (+ cy (* lead (/ vy spd))))))))))
+              (define ldx (- caster-x lx))
+              (define ldy (- caster-y ly))
+              (define sc (if (<= (+ (* ldx ldx) (* ldy ldy)) cast-r2)
+                             (score-fn lx ly cluster)
+                             0.0))
+              (if (> sc best-s)
+                  (values #t lx ly sc)
+                  (values f? best-x best-y best-s))])))]))
 
 (: effect-type (-> Any Symbol))
 (define (effect-type eff)
@@ -1067,18 +1879,53 @@
    (-> Float Float Float (Listof Any) (-> Any Boolean) (-> Any Float)
        (Values Boolean Any Float)))
 (define (best-unit-target cx cy cast-range candidates pred weight-fn)
-  (for/fold ([found? : Boolean #f]
-             [best-u : Any #f]
-             [best-w : Float 0.0])
-            ([u (in-list candidates)]
-             #:when (and (hash? u)
-                         (> (uh-tag u) 0)
-                         (<= (dist2 cx cy (uh-x u) (uh-y u)) cast-range)
-                         (pred u)))
-    (define w (weight-fn u))
-    (if (> w best-w)
-        (values #t u w)
-        (values found? best-u best-w))))
+  (cond
+    [(or (< cast-range 0.0) (null? candidates))
+     (values #f #f 0.0)]
+    [else
+     (define r2 (* cast-range cast-range))
+     (define idx (get-spell-xy-index candidates))
+     (if idx
+         (let ([xs (spell-xy-index-xs idx)]
+               [ys (spell-xy-index-ys idx)]
+               [us (spell-xy-index-us idx)]
+               [n (spell-xy-index-n idx)])
+           (for/fold ([found? : Boolean #f]
+                      [best-u : Any #f]
+                      [best-w : Float 0.0])
+                     ([i (in-range n)])
+             (define dx (- cx (flvector-ref xs i)))
+             (if (<= (flabs dx) cast-range)
+                 (let ([dy (- cy (flvector-ref ys i))])
+                   (if (and (<= (flabs dy) cast-range)
+                            (<= (+ (* dx dx) (* dy dy)) r2))
+                       (let ([u (vector-ref us i)])
+                         (if (and (> (uh-tag u) 0) (pred u))
+                             (let ([w (weight-fn u)])
+                               (if (> w best-w)
+                                   (values #t u w)
+                                   (values found? best-u best-w)))
+                             (values found? best-u best-w)))
+                       (values found? best-u best-w)))
+                 (values found? best-u best-w))))
+         (for/fold ([found? : Boolean #f]
+                    [best-u : Any #f]
+                    [best-w : Float 0.0])
+                   ([u (in-list candidates)]
+                    #:when (hash? u))
+           (define dx (- cx (uh-x u)))
+           (if (<= (flabs dx) cast-range)
+               (let ([dy (- cy (uh-y u))])
+                 (if (and (<= (flabs dy) cast-range)
+                          (<= (+ (* dx dx) (* dy dy)) r2)
+                          (> (uh-tag u) 0)
+                          (pred u))
+                     (let ([w (weight-fn u)])
+                       (if (> w best-w)
+                           (values #t u w)
+                           (values found? best-u best-w)))
+                     (values found? best-u best-w)))
+               (values found? best-u best-w))))]))
 
 ;; -----------------------------------------------------------------------------
 ;; 6. Zerg Spellcaster Patterns (Queen, Ravager, Infestor, Viper, Corruptor)
@@ -1216,42 +2063,34 @@
     [(memq t '(extractor extractor-rich)) (+ 80.0 (* 0.05 hp))]
     [else 0.0]))
 
-;; Plan #115-calibrated Zerg spellcaster micro (`queen`, `ravager`, `infestor`,
-;; `viper`, `corruptor`) while preserving delta-f = 0 invariants via `claims`.
-(: plan-zerg-spellcaster-micro
-   (->* ((Listof Any) (Listof Any))
-        (#:claims spell-claims
-         #:current-frame Integer
-         #:ally-buildings (Listof Any)
-         #:enemy-buildings (Listof Any)
-         #:effects (Listof Any)
-         #:home-x Float
-         #:home-y Float
-         #:enemy-base-x Float
-         #:enemy-base-y Float
-         #:inject-queen-tags (Listof Integer)
-         #:exclude-tags (Listof Integer))
-        (Listof spell-directive)))
-(define (plan-zerg-spellcaster-micro
-         ally-units enemy-units
-         #:claims [claims (make-spell-claims)]
-         #:current-frame [current-frame 0]
-         #:ally-buildings [ally-buildings '()]
-         #:enemy-buildings [enemy-buildings '()]
-         #:effects [effects '()]
-         #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
-         #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
-         #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
-         #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
-         #:inject-queen-tags [inject-queen-tags '()]
-         #:exclude-tags [exclude-tags '()])
-  (define all-enemies (append enemy-units enemy-buildings))
-  (define all-allies (append ally-units ally-buildings))
+(define ZERG-CASTER-SYMS : (Listof Symbol)
+  '(queen ravager infestor infestor-burrowed viper corruptor
+    overseer overseer-siege-mode swarm-host swarm-host-mp
+    lurker lurker-mp lurker-burrowed lurker-mp-burrowed))
+
+(define TERRAN-CASTER-SYMS : (Listof Symbol)
+  '(ghost raven battlecruiser medivac cyclone))
+
+(define PROTOSS-CASTER-SYMS : (Listof Symbol)
+  '(sentry high-templar oracle phoenix disruptor))
+
+(: run-zerg-spellcaster-micro
+   (-> (Listof Any) (Listof Any) (Listof Any) spell-claims Integer
+       (Listof Any) (Listof Any) (Listof Any) Float Float Float Float
+       (Listof Integer) (Listof Integer)
+       (Listof spell-directive)))
+(define (run-zerg-spellcaster-micro
+         caster-units ally-units enemy-units
+         claims current-frame ally-buildings enemy-buildings effects
+         home-x home-y enemy-base-x enemy-base-y
+         inject-queen-tags exclude-tags)
+  (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
+  (define all-allies (if (null? ally-buildings) ally-units (append ally-units ally-buildings)))
 
   (define-values (dirs-rev _)
     (for/fold ([acc : (Listof spell-directive) '()]
                [used-tags : (Listof Integer) exclude-tags])
-              ([u (in-list ally-units)])
+              ([u (in-list caster-units)])
       (define tag (if (hash? u) (uh-tag u) 0))
       (define sym (if (hash? u) (uh-type u) 'unknown))
       (cond
@@ -1288,11 +2127,28 @@
                                    (spell-directive tag 'queen 'transfusion 'unit ttag
                                                     (uh-x tgt) (uh-y tgt) 'queen-transfuse)))))))
               (or transfuse-d
+                  ;; 2. Inject Larva for designated inject Queens when energy >= 25.0
+                  (and (not (not (memv tag inject-queen-tags)))
+                       (>= en 25.0)
+                       (let-values ([(ok? th _w)
+                                     (best-unit-target
+                                      ux uy 11.0 ally-buildings
+                                      (lambda ([b : Any])
+                                        (and (memq (uh-type b) SC2-TOWNHALL-STRUCTURE-SYMS)
+                                             (not (uh-has-buff? b 'queen-spawn-larva-timer))
+                                             (= (spell-unit-claim-count claims 'inject-larva (uh-tag b) current-frame) 0)))
+                                      (lambda ([b : Any])
+                                        (- 100.0 (dist2 ux uy (uh-x b) (uh-y b)))))])
+                         (and ok?
+                              (let ([btag (uh-tag th)])
+                                (and (spell-claim-unit?! claims 'inject-larva btag current-frame 64 #:caster-tag tag)
+                                     (spell-directive tag 'queen 'inject-larva 'unit btag
+                                                      (uh-x th) (uh-y th) 'queen-inject-larva))))))
+                  ;; 3. Creep Tumor spread (only off-inject or >= 100 energy, safe > 14 tiles)
                   (let* ([inject? (and (memv tag inject-queen-tags) #t)]
-                         [tumor-en-min (if inject? 100.0 (->float SC2-QUEEN-TUMOR-ENERGY))]
-                         [safe? (not (any-unit-within? all-enemies ux uy 14.0 sc2-enemy-unit-targetable?))])
+                         [tumor-en-min (if inject? 100.0 (->float SC2-QUEEN-TUMOR-ENERGY))])
                     (and (>= en tumor-en-min)
-                         safe?
+                         (not (any-unit-within? all-enemies ux uy 14.0 sc2-enemy-unit-targetable?))
                          (let* ([dx (- enemy-base-x ux)]
                                 [dy (- enemy-base-y uy)]
                                 [dlen (max 0.01 (flsqrt (+ (* dx dx) (* dy dy))))]
@@ -1551,7 +2407,6 @@
              [(corruptor)
               (cond
                 [(spellcaster-channel-protected? u) #f]
-                [(any-unit-within? all-enemies ux uy 11.0 enemy-anti-air-or-air-threat?) #f]
                 [else
                  (let-values ([(ok? th _w)
                                (best-unit-target
@@ -1559,14 +2414,154 @@
                                 (lambda ([e : Any]) (and (memq (uh-type e) SC2-TOWNHALL-STRUCTURE-SYMS) #t))
                                 (lambda ([e : Any]) (uh-total-hp e)))])
                    (and ok?
+                        (not (any-unit-within? all-enemies ux uy 11.0 enemy-anti-air-or-air-threat?))
                         (spell-directive tag 'corruptor 'caustic-spray 'unit (uh-tag th)
                                          (uh-x th) (uh-y th) 'corruptor-caustic-spray)))])]
+
+             ;; --- OVERSEER (Contaminate 1825/182, SpawnChangeling 181, Oversight 3745/1912) ---
+             [(overseer overseer-siege-mode)
+              (define aa-near? (any-unit-within? all-enemies ux uy 10.8 enemy-anti-air-or-air-threat?))
+              (define oversight-wanted? (eq? (dyn-hash-ref u 'oversight-desired? #f) #t))
+              (: contam-weight (-> Any Float))
+              (define (contam-weight b)
+                (define bt (uh-type b))
+                (cond
+                  [(memq bt '(twilight-council forge cybernetics-core robotics-bay templar-archive
+                              fleet-beacon dark-shrine engineering-bay armory fusion-core
+                              ghost-academy barracks-techlab factory-techlab starport-techlab
+                              evolution-chamber spire greater-spire infestation-pit baneling-nest
+                              roach-warren spawning-pool hydralisk-den lurker-den lurker-den-mp))
+                   160.0]
+                  [(memq bt '(robotics-facility stargate starport factory gateway warp-gate barracks))
+                   125.0]
+                  [(memq bt SC2-TOWNHALL-STRUCTURE-SYMS) 90.0]
+                  [else 0.0]))
+              (cond
+                [(and (eq? sym 'overseer-siege-mode) aa-near?)
+                 (spell-directive tag sym 'morph-overseer-mode 'none 0 ux uy 'overseer-unmorph-mobile-follow)]
+                [else
+                 (or
+                  (and oversight-wanted?
+                       (eq? sym 'overseer)
+                       (not aa-near?)
+                       (spell-directive tag sym 'morph-oversight-mode 'none 0 ux uy 'overseer-oversight-ring-watch))
+                  ;; 1. Contaminate enemy upgrade / tech / production building (`en >= 125`, range `7.0`)
+                  (and (>= en 125.0)
+                       (let-values ([(ok? tgt _w)
+                                     (best-unit-target
+                                      ux uy 7.0 enemy-buildings
+                                      (lambda ([b : Any])
+                                        (and (> (contam-weight b) 0.0)
+                                             (not (uh-has-buff? b 'contaminate))
+                                             (= (spell-unit-claim-count claims 'contaminate (uh-tag b) current-frame) 0)))
+                                      contam-weight)])
+                         (and ok?
+                              (let ([btag (uh-tag tgt)])
+                                (and (spell-claim-unit?! claims 'contaminate btag current-frame 64 #:caster-tag tag)
+                                     (spell-directive tag sym 'contaminate 'unit btag
+                                                      (uh-x tgt) (uh-y tgt) 'overseer-contaminate-upgrade-tech))))))
+                  ;; 2. Spawn Changeling (`en >= 50`)
+                  (and (>= en 50.0)
+                       (spell-claim-unit?! claims 'spawn-changeling tag current-frame 16 #:caster-tag tag)
+                       (spell-directive tag sym 'spawn-changeling 'none 0 ux uy 'overseer-changeling-ramp-block))
+                  ;; 3. Oversight static vision anchor when `< 50` energy and safe from AA
+                  (and (eq? sym 'overseer)
+                       (not aa-near?)
+                       (> (dist2 ux uy home-x home-y) 8.0)
+                       (spell-directive tag sym 'morph-oversight-mode 'none 0 ux uy 'overseer-oversight-ring-watch)))])]
+
+             ;; --- SWARM HOST (Spawn Locusts 1990) ---
+             [(swarm-host swarm-host-mp)
+              (define ready?
+                (and (not (spellcaster-channel-protected? u))
+                     (not (eq? (dyn-hash-ref u 'locusts-ready? #t) #f))
+                     (<= (safe-int (dyn-hash-ref u 'spawn-locusts-cooldown 0) 0) 0)))
+              (and ready?
+                   (let-values ([(ok? lx ly _s)
+                                 (best-enemy-cluster
+                                  ux uy 24.0 all-enemies 4.0 0.0
+                                  (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
+                                    (if (spell-point-claimed? claims 'spawn-locusts cx cy 4.0 current-frame)
+                                        0.0
+                                        (+ (* 20.0 (->float (length cl)))
+                                           (* 0.05 (sum-units-fl cl uh-total-hp))))))])
+                     (and ok?
+                          (spell-claim-point?! claims 'spawn-locusts lx ly 4.0 current-frame 32)
+                          (spell-directive tag sym 'spawn-locusts 'point 0 lx ly 'swarm-host-locust-wave-base))))]
+
+             ;; --- LURKER (Burrow 2108 / Unburrow 2110) ---
+             [(lurker lurker-mp lurker-burrowed lurker-mp-burrowed)
+              (: ground-enemy? (-> Any Boolean))
+              (define (ground-enemy? e)
+                (and (sc2-enemy-unit-targetable? e) (not (uh-flying? e))))
+              (cond
+                [(memq sym '(lurker lurker-mp))
+                 (and (not (spellcaster-channel-protected? u))
+                      (any-unit-within? enemy-units ux uy 9.5 ground-enemy?)
+                      (spell-directive tag sym 'burrow-lurker 'none 0 ux uy 'lurker-burrow-choke-siege))]
+                [else
+                 (define hazard?
+                   (or (any-effect-within? effects 'purification-nova ux uy 3.5 (lambda ([_ef : Any]) #t))
+                       (any-effect-within? effects 'psi-storm ux uy 3.0 (lambda ([_ef : Any]) #t))
+                       (any-effect-within? effects 'corrosive-bile ux uy 2.5 (lambda ([_ef : Any]) #t))))
+                 (define idle-frames (safe-int (dyn-hash-ref u 'burrowed-idle-frames 0) 0))
+                 (and (or hazard?
+                          (and (>= idle-frames 24)
+                               (not (any-unit-within? enemy-units ux uy 13.0 ground-enemy?))))
+                      (spell-directive tag sym 'unburrow-lurker 'none 0 ux uy 'lurker-unburrow-reposition))])]
 
              [else #f]))
          (if dir
              (values (cons dir acc) (cons tag used-tags))
              (values acc used-tags))])))
   (reverse dirs-rev))
+
+;; Plan #115-calibrated Zerg spellcaster micro (`queen`, `ravager`, `infestor`,
+;; `viper`, `corruptor`) while preserving delta-f = 0 invariants via `claims`.
+(: plan-zerg-spellcaster-micro
+   (->* ((Listof Any) (Listof Any))
+        (#:claims spell-claims
+         #:current-frame Integer
+         #:ally-buildings (Listof Any)
+         #:enemy-buildings (Listof Any)
+         #:effects (Listof Any)
+         #:home-x Float
+         #:home-y Float
+         #:enemy-base-x Float
+         #:enemy-base-y Float
+         #:inject-queen-tags (Listof Integer)
+         #:exclude-tags (Listof Integer))
+        (Listof spell-directive)))
+(define (plan-zerg-spellcaster-micro
+         ally-units enemy-units
+         #:claims [claims (make-spell-claims)]
+         #:current-frame [current-frame 0]
+         #:ally-buildings [ally-buildings '()]
+         #:enemy-buildings [enemy-buildings '()]
+         #:effects [effects '()]
+         #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
+         #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
+         #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
+         #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
+         #:inject-queen-tags [inject-queen-tags '()]
+         #:exclude-tags [exclude-tags '()])
+  (define casters
+    (for/fold ([acc : (Listof Any) '()] #:result (reverse acc))
+              ([u (in-list ally-units)]
+               #:when (hash? u))
+      (define sym (uh-type u))
+      (if (memq sym ZERG-CASTER-SYMS)
+          (let ([t (uh-tag u)])
+            (if (and (> t 0) (not (memv t exclude-tags)))
+                (cons u acc)
+                acc))
+          acc)))
+  (if (null? casters)
+      '()
+      (run-zerg-spellcaster-micro
+       casters ally-units enemy-units claims current-frame
+       ally-buildings enemy-buildings effects home-x home-y
+       enemy-base-x enemy-base-y inject-queen-tags exclude-tags)))
 
 ;; -----------------------------------------------------------------------------
 ;; 7. Terran Spellcaster Patterns (Ghost, Raven, Battlecruiser)
@@ -1630,40 +2625,22 @@
           (for/or : Boolean ([up (in-list upgrades)])
             (eq? (safe-sym up 'unknown) target-sym)))))
 
-;; Plan #115-calibrated Terran spellcaster micro (`ghost`, `raven`, `battlecruiser`)
-;; enforcing Ghost `34f` Snipe channel lockout, close-range `<4.5` guard, and detector Cloak check.
-(: plan-terran-spellcaster-micro
-   (->* ((Listof Any) (Listof Any))
-        (#:claims spell-claims
-         #:current-frame Integer
-         #:ally-buildings (Listof Any)
-         #:enemy-buildings (Listof Any)
-         #:effects (Listof Any)
-         #:researched-upgrades (Listof Any)
-         #:yamato-researched? Boolean
-         #:home-x Float
-         #:home-y Float
-         #:exclude-tags (Listof Integer))
-        (Listof spell-directive)))
-(define (plan-terran-spellcaster-micro
-         ally-units enemy-units
-         #:claims [claims (make-spell-claims)]
-         #:current-frame [current-frame 0]
-         #:ally-buildings [ally-buildings '()]
-         #:enemy-buildings [enemy-buildings '()]
-         #:effects [_effects '()]
-         #:researched-upgrades [researched-upgrades '()]
-         #:yamato-researched? [yamato-researched? #t]
-         #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
-         #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
-         #:exclude-tags [exclude-tags '()])
-  (define all-enemies (append enemy-units enemy-buildings))
+(: run-terran-spellcaster-micro
+   (-> (Listof Any) (Listof Any) (Listof Any) spell-claims Integer
+       (Listof Any) (Listof Any) (Listof Any) (Listof Any) Boolean Float Float
+       (Listof Integer)
+       (Listof spell-directive)))
+(define (run-terran-spellcaster-micro
+         caster-units ally-units enemy-units
+         claims current-frame ally-buildings enemy-buildings _effects
+         researched-upgrades yamato-researched? home-x home-y exclude-tags)
+  (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
   (define yamato-ok? (terran-upgrade-ready? researched-upgrades 'weapon-refit yamato-researched?))
 
   (define-values (dirs-rev _)
     (for/fold ([acc : (Listof spell-directive) '()]
                [used-tags : (Listof Integer) exclude-tags])
-              ([u (in-list ally-units)])
+              ([u (in-list caster-units)])
       (define tag (if (hash? u) (uh-tag u) 0))
       (define sym (if (hash? u) (uh-type u) 'unknown))
       (cond
@@ -1819,13 +2796,145 @@
                               (spell-claim-unit?! claims 'yamato-cannon (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
                                                   #:caster-tag tag #:target-hp (uh-total-hp tgt))
                               (spell-directive tag 'battlecruiser 'yamato-cannon 'unit (uh-tag tgt)
-                                               (uh-x tgt) (uh-y tgt) 'bc-yamato-snipe)))))])]
+                                               (uh-x tgt) (uh-y tgt) 'bc-yamato-snipe))))
+                  ;; 3. Offensive Tactical Jump onto undefended remote worker line when healthy (>=85% HP, no threat <16)
+                  (and jump-ready?
+                       (>= (uh-hp-ratio u) 0.85)
+                       (not (any-unit-within? all-enemies ux uy 16.0 sc2-enemy-unit-targetable?))
+                       (let-values ([(ok? jx jy _s)
+                                     (best-enemy-cluster
+                                      ux uy 220.0 enemy-units 4.0 0.0
+                                      (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
+                                        (define workers
+                                          (for/sum : Integer ([e (in-list cl)])
+                                            (if (memq (uh-type e) '(scv probe drone)) 1 0)))
+                                        (if (and (>= workers 3)
+                                                 (> (dist2 ux uy cx cy) 25.0)
+                                                 (not (any-unit-within? all-enemies cx cy 11.0 enemy-anti-air-or-air-threat?))
+                                                 (not (spell-point-claimed? claims 'tactical-jump cx cy 6.0 current-frame)))
+                                            (->float workers)
+                                            0.0)))])
+                         (and ok?
+                              (spell-claim-point?! claims 'tactical-jump jx jy 6.0 current-frame 64)
+                              (spell-directive tag 'battlecruiser 'tactical-jump 'point 0 jx jy
+                                               'bc-tactical-jump-backstab)))))])]
+
+             ;; --- MEDIVAC (Boost 2116 / Heal 386 / Low-HP Retreat) ---
+             [(medivac)
+              (define boost-ready?
+                (and (not (eq? (dyn-hash-ref u 'boost-ready? #t) #f))
+                     (<= (safe-int (dyn-hash-ref u 'boost-cooldown 0) 0) 0)))
+              (define cargo-cnt (safe-int (dyn-hash-ref u 'cargo-count 0) 0))
+              (define hp-rat (uh-hp-ratio u))
+              (define danger-near? (any-unit-within? all-enemies ux uy 9.5 enemy-anti-air-or-air-threat?))
+              (or
+               (and boost-ready?
+                    (or (> cargo-cnt 0)
+                        (and (< hp-rat 0.45) danger-near?))
+                    (spell-directive tag 'medivac 'medivac-boost 'none 0 ux uy
+                                     (if (> cargo-cnt 0) 'medivac-boost-loaded-drop 'medivac-boost-rescue-evac)))
+               (and (< hp-rat 0.45)
+                    (= cargo-cnt 0)
+                    danger-near?
+                    (let-values ([(rx ry) (safe-retreat-point ux uy all-enemies home-x home-y 9.0)])
+                      (spell-directive tag 'medivac 'move 'kite 0 rx ry 'medivac-retreat-low-hp-empty)))
+               (let-values ([(ok? tgt _w)
+                             (best-unit-target
+                              ux uy 5.5 ally-units
+                              (lambda ([a : Any])
+                                (and (not (= (uh-tag a) tag))
+                                     (not (uh-hallucination? a))
+                                     (memq (uh-type a) '(marine marauder reaper ghost hellbat scv))
+                                     (< (uh-hp-ratio a) 0.92)))
+                              (lambda ([a : Any])
+                                (+ (* 100.0 (- 1.0 (uh-hp-ratio a)))
+                                   (case (uh-type a) [(ghost) 25.0] [(marauder) 15.0] [(marine) 12.0] [else 5.0]))))])
+                 (and ok?
+                      (let ([ttag (uh-tag tgt)])
+                        (and (spell-claim-unit?! claims 'heal ttag current-frame 16 #:caster-tag tag #:max-casters 2)
+                             (spell-directive tag 'medivac 'heal 'unit ttag
+                                              (uh-x tgt) (uh-y tgt) 'medivac-heal-injured-bio))))))]
+
+             ;; --- CYCLONE (Lock-On 2350) ---
+             [(cyclone)
+              (define lock-ready?
+                (and (not (spellcaster-channel-protected? u))
+                     (not (eq? (dyn-hash-ref u 'lock-on-ready? #t) #f))
+                     (<= (safe-int (dyn-hash-ref u 'lock-on-cooldown 0) 0) 0)))
+              (: cyclone-lock-weight (-> Any Float))
+              (define (cyclone-lock-weight e)
+                (case (uh-type e)
+                  [(oracle warp-prism warp-prism-phasing medivac banshee liberator) 140.0]
+                  [(void-ray phoenix tempest battlecruiser carrier corruptor overlord-transport overseer) 130.0]
+                  [(stalker immortal ravager roach siege-tank colossus cyclone) 110.0]
+                  [else (if (sc2-enemy-unit-targetable? e) 60.0 0.0)]))
+              (and lock-ready?
+                   (let-values ([(ok? tgt _w)
+                                 (best-unit-target
+                                  ux uy 7.5 enemy-units
+                                  (lambda ([e : Any])
+                                    (and (sc2-enemy-unit-targetable? e)
+                                         (not (uh-hallucination? e))
+                                         (not (uh-has-buff? e 'lock-on))
+                                         (= (spell-unit-claim-count claims 'lock-on (uh-tag e) current-frame) 0)
+                                         (> (cyclone-lock-weight e) 0.0)))
+                                  cyclone-lock-weight)])
+                     (and ok?
+                          (let ([ttag (uh-tag tgt)])
+                            (and (spell-claim-unit?! claims 'lock-on ttag current-frame 36 #:caster-tag tag #:max-casters 1)
+                                 (spell-directive tag 'cyclone 'lock-on 'unit ttag
+                                                  (uh-x tgt) (uh-y tgt) 'cyclone-lock-on-high-value))))))]
 
              [else #f]))
          (if dir
              (values (cons dir acc) (cons tag used-tags))
              (values acc used-tags))])))
   (reverse dirs-rev))
+
+;; Plan #115-calibrated Terran spellcaster micro (`ghost`, `raven`, `battlecruiser`)
+;; enforcing Ghost `34f` Snipe channel lockout, close-range `<4.5` guard, and detector Cloak check.
+(: plan-terran-spellcaster-micro
+   (->* ((Listof Any) (Listof Any))
+        (#:claims spell-claims
+         #:current-frame Integer
+         #:ally-buildings (Listof Any)
+         #:enemy-buildings (Listof Any)
+         #:effects (Listof Any)
+         #:researched-upgrades (Listof Any)
+         #:yamato-researched? Boolean
+         #:home-x Float
+         #:home-y Float
+         #:exclude-tags (Listof Integer))
+        (Listof spell-directive)))
+(define (plan-terran-spellcaster-micro
+         ally-units enemy-units
+         #:claims [claims (make-spell-claims)]
+         #:current-frame [current-frame 0]
+         #:ally-buildings [ally-buildings '()]
+         #:enemy-buildings [enemy-buildings '()]
+         #:effects [effects '()]
+         #:researched-upgrades [researched-upgrades '()]
+         #:yamato-researched? [yamato-researched? #t]
+         #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
+         #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
+         #:exclude-tags [exclude-tags '()])
+  (define casters
+    (for/fold ([acc : (Listof Any) '()] #:result (reverse acc))
+              ([u (in-list ally-units)]
+               #:when (hash? u))
+      (define sym (uh-type u))
+      (if (memq sym TERRAN-CASTER-SYMS)
+          (let ([t (uh-tag u)])
+            (if (and (> t 0) (not (memv t exclude-tags)))
+                (cons u acc)
+                acc))
+          acc)))
+  (if (null? casters)
+      '()
+      (run-terran-spellcaster-micro
+       casters ally-units enemy-units claims current-frame
+       ally-buildings enemy-buildings effects researched-upgrades
+       yamato-researched? home-x home-y exclude-tags)))
 
 ;; -----------------------------------------------------------------------------
 ;; 8. Protoss Spellcaster Patterns (Sentry, High Templar, Oracle)
@@ -1885,63 +2994,41 @@
        (< (uh-energy u) 50.0)
        (not (spellcaster-channel-protected? u))))
 
-;; Plan #115-calibrated Protoss spellcaster micro (`sentry`, `high-templar`, `oracle`)
-;; enforcing Sentry `246f` GS / `~27f` Force Field stagger / `<1.8` ally trap guard,
-;; HT `<=1` FF / Feedback priority / paired dry-HT `morph-archon`, and Oracle `[P0]`
-;; strict 1-command-per-frame mutex + `>=60f` Pulsar Beam dwell.
-(: plan-protoss-spellcaster-micro
-   (->* ((Listof Any) (Listof Any))
-        (#:claims spell-claims
-         #:current-frame Integer
-         #:ally-buildings (Listof Any)
-         #:enemy-buildings (Listof Any)
-         #:effects (Listof Any)
-         #:researched-upgrades (Listof Any)
-         #:psi-storm-researched? Boolean
-         #:home-x Float
-         #:home-y Float
-         #:natural-x Float
-         #:natural-y Float
-         #:enemy-base-x Float
-         #:enemy-base-y Float
-         #:choke-points (Listof (Pairof Real Real))
-         #:exclude-tags (Listof Integer))
-        (Listof spell-directive)))
-(define (plan-protoss-spellcaster-micro
-         ally-units enemy-units
-         #:claims [claims (make-spell-claims)]
-         #:current-frame [current-frame 0]
-         #:ally-buildings [ally-buildings '()]
-         #:enemy-buildings [enemy-buildings '()]
-         #:effects [effects '()]
-         #:researched-upgrades [researched-upgrades '()]
-         #:psi-storm-researched? [psi-storm-researched? #t]
-         #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
-         #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
-         #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
-         #:natural-y [natural-y SC2-DEFAULT-NATURAL-Y]
-         #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
-         #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
-         #:choke-points [choke-points '()]
-         #:exclude-tags [exclude-tags '()])
-  (define all-enemies (append enemy-units enemy-buildings))
-  (define all-allies (append ally-units ally-buildings))
+(: run-protoss-spellcaster-micro
+   (-> (Listof Any) (Listof Any) (Listof Any) (Listof Any)
+       spell-claims Integer (Listof Any) (Listof Any) (Listof Any) (Listof Any)
+       Boolean Float Float Float Float Float Float (Listof (Pairof Real Real)) (Listof Integer)
+       (Listof spell-directive)))
+(define (run-protoss-spellcaster-micro
+         caster-units friendly-hts ally-units enemy-units
+         claims current-frame ally-buildings enemy-buildings effects
+         researched-upgrades psi-storm-researched?
+         home-x home-y natural-x natural-y enemy-base-x enemy-base-y
+         choke-points exclude-tags)
+  (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
+  (define all-allies (if (null? ally-buildings) ally-units (append ally-units ally-buildings)))
   (define storm-ok?
     (or psi-storm-researched?
         (for/or : Boolean ([up (in-list researched-upgrades)])
           (and (memq (safe-sym up 'unknown) '(psi-storm psistorm psi-storm-tech psistorm-tech psionic-storm)) #t))))
 
-  ;; Pre-collect friendly High Templar positions for Oracle Revelation support
-  (define friendly-hts : (Listof Any)
-    (for/list ([a (in-list ally-units)]
-               #:when (and (hash? a) (eq? (uh-type a) 'high-templar)))
-      a))
+  ;; Per-step cache for unit total-hp lookups during cluster scoring
+  (define protoss-hp-cache : (Mutable-HashTable Integer Float) (make-hasheqv))
+  (: protoss-cached-hp (-> Any Float))
+  (define (protoss-cached-hp e)
+    (define t (uh-tag e))
+    (if (> t 0)
+        (or (hash-ref protoss-hp-cache t (lambda () #f))
+            (let ([v (uh-total-hp e)])
+              (hash-set! protoss-hp-cache t v)
+              v))
+        (uh-total-hp e)))
 
   ;; Phase A: Per-unit primary spell actions (`sentry`, `high-templar` Storm/Feedback, `oracle`)
   (define-values (dirs-rev used-tags)
     (for/fold ([acc : (Listof spell-directive) '()]
                [used : (Listof Integer) exclude-tags])
-              ([u (in-list ally-units)])
+              ([u (in-list caster-units)])
       (define tag (if (hash? u) (uh-tag u) 0))
       (define sym (if (hash? u) (uh-type u) 'unknown))
       (cond
@@ -1994,29 +3081,35 @@
                                     (spell-claim-point?! claims 'force-field fx fy FORCE-FIELD-CLAIM-RADIUS current-frame FORCE-FIELD-CLAIM-TTL)
                                     (spell-directive tag 'sentry 'force-field 'point 0 fx fy 'sentry-force-field)))))))
                ;; 3. Hallucination Phoenix (~4:00-4:15 early scout, `88.6%`) / Archon surplus tank
-               (let* ([scout-window? (and (>= current-frame 4480) (<= current-frame 7000))]
-                      [no-recent-phoenix?
-                       (> (- current-frame (spell-claims-last-hallucination-phoenix-frame claims)) 900)]
-                      [safe? (not (any-unit-within? all-enemies ux uy 10.0 sc2-enemy-unit-targetable?))]
-                      [engaged? (any-unit-within? enemy-units ux uy 10.0 sc2-enemy-unit-targetable?)])
-                 (cond
-                   [(and (>= en 75.0)
-                         scout-window?
-                         safe?
-                         no-recent-phoenix?)
-                    (set-spell-claims-last-hallucination-phoenix-frame! claims current-frame)
-                    (spell-directive tag 'sentry 'hallucination-phoenix 'none 0 ux uy 'sentry-hallucination-phoenix-scout)]
-                   [(and (>= en 125.0)
-                         engaged?
-                         (spell-claim-unit?! claims 'hallucination-archon tag current-frame 24 #:caster-tag tag))
-                    (spell-directive tag 'sentry 'hallucination-archon 'none 0 ux uy 'sentry-hallucination-archon-tank)]
-                   [(and (>= en 75.0)
-                         safe?
-                         no-recent-phoenix?
-                         (<= current-frame 7200))
-                    (set-spell-claims-last-hallucination-phoenix-frame! claims current-frame)
-                    (spell-directive tag 'sentry 'hallucination-phoenix 'none 0 ux uy 'sentry-hallucination-phoenix-scout)]
-                   [else #f])))]
+               (and (>= en 75.0)
+                    (let* ([scout-window? (and (>= current-frame 4480) (<= current-frame 7000))]
+                           [no-recent-phoenix?
+                            (> (- current-frame (spell-claims-last-hallucination-phoenix-frame claims)) 900)])
+                      (cond
+                        [(and scout-window?
+                              no-recent-phoenix?
+                              (not (any-unit-within? all-enemies ux uy 10.0 sc2-enemy-unit-targetable?)))
+                         (set-spell-claims-last-hallucination-phoenix-frame! claims current-frame)
+                         (spell-directive tag 'sentry 'hallucination-phoenix 'none 0 ux uy 'sentry-hallucination-phoenix-scout)]
+                        [(and (>= en 125.0)
+                              (any-unit-within? enemy-units ux uy 10.0 sc2-enemy-unit-targetable?)
+                              (spell-claim-unit?! claims 'hallucination-archon tag current-frame 24 #:caster-tag tag))
+                         (spell-directive tag 'sentry 'hallucination-archon 'none 0 ux uy 'sentry-hallucination-archon-tank)]
+                        [(and (<= current-frame 7200)
+                              no-recent-phoenix?
+                              (not (any-unit-within? all-enemies ux uy 10.0 sc2-enemy-unit-targetable?)))
+                         (set-spell-claims-last-hallucination-phoenix-frame! claims current-frame)
+                         (spell-directive tag 'sentry 'hallucination-phoenix 'none 0 ux uy 'sentry-hallucination-phoenix-scout)]
+                        [(and (any-unit-within? enemy-units ux uy 10.0 sc2-enemy-unit-targetable?)
+                              (any-unit-within?
+                               enemy-units ux uy 11.0
+                               (lambda ([e : Any])
+                                 (and (memq (uh-type e) '(widow-mine widow-mine-burrowed siege-tank siege-tank-sieged
+                                                          immortal lurker-burrowed lurker-mp-burrowed disruptor))
+                                      #t)))
+                              (spell-claim-unit?! claims 'hallucination-zealot tag current-frame 24 #:caster-tag tag))
+                         (spell-directive tag 'sentry 'hallucination-zealot 'none 0 ux uy 'sentry-hallucination-bait-fire)]
+                        [else #f]))))]
 
              ;; --- HIGH TEMPLAR (Primary spells: Storm & Feedback) ---
              [(high-templar)
@@ -2031,14 +3124,14 @@
                                      (best-enemy-cluster
                                       ux uy 9.0 enemy-units 2.0 0.25
                                       (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
-                                        (define ally-in-1.5
-                                          (count-units-within ally-units cx cy 1.5
-                                                              (lambda ([a : Any]) (not (uh-hallucination? a)))))
-                                        (if (and (>= (length cl) 2)
-                                                 (<= ally-in-1.5 1)
-                                                 (not (spell-point-claimed? claims 'psi-storm cx cy PSI-STORM-CLAIM-RADIUS current-frame)))
-                                            (+ (* 35.0 (->float (length cl)))
-                                               (* 0.08 (sum-units-fl cl uh-total-hp)))
+                                        (define n-cl (length cl))
+                                        (if (and (>= n-cl 2)
+                                                 (not (spell-point-claimed? claims 'psi-storm cx cy PSI-STORM-CLAIM-RADIUS current-frame))
+                                                 (count-within-at-most?
+                                                  ally-units cx cy 1.5 1
+                                                  (lambda ([a : Any]) (not (uh-hallucination? a)))))
+                                            (+ (* 35.0 (->float n-cl))
+                                               (* 0.08 (sum-units-fl cl protoss-cached-hp)))
                                             0.0)))])
                          (and ok?
                               (spell-claim-point?! claims 'psi-storm sx sy PSI-STORM-CLAIM-RADIUS current-frame PSI-STORM-CLAIM-TTL)
@@ -2061,15 +3154,14 @@
              ;; --- ORACLE (#115 [P0] Strict 1-command-per-frame mutex + >=60f Pulsar dwell) ---
              [(oracle)
               (define-values (beam-on? dwell) (oracle-pulsar-beam-active? claims u current-frame))
-              (define near-enemy-cnt (count-units-within all-enemies ux uy 8.0 sc2-enemy-unit-targetable?))
               (cond
                 ;; When Pulsar Beam is ON: ONLY permit OFF after >= 60f minimum dwell
                 [beam-on?
                  (and (>= dwell ORACLE-PULSAR-BEAM-MIN-DWELL-FRAMES)
                       (or (< en 15.0)
                           (< sh 25.0)
-                          (and (= near-enemy-cnt 0)
-                               (>= dwell ORACLE-PULSAR-BEAM-ZERO-TARGET-DWELL-FRAMES)))
+                          (and (>= dwell ORACLE-PULSAR-BEAM-ZERO-TARGET-DWELL-FRAMES)
+                               (= (count-units-within all-enemies ux uy 8.0 sc2-enemy-unit-targetable?) 0)))
                       (begin
                         (hash-remove! (spell-claims-oracle-beam-start claims) tag)
                         (spell-directive tag 'oracle 'pulsar-beam-off 'none 0 ux uy
@@ -2164,6 +3256,77 @@
                                  (spell-directive tag 'oracle 'stasis-ward 'point 0
                                                   (car chosen) (cdr chosen) 'oracle-stasis-ward)))))])]
 
+             ;; --- PHOENIX (Graviton Beam 173/176) ---
+             [(phoenix)
+              (define ally-air-cnt
+                (count-units-within ally-units ux uy 9.0
+                                    (lambda ([a : Any]) (and (uh-flying? a) (unit-combat-relevant? a)))))
+              (define enemy-aa-cnt (count-units-within all-enemies ux uy 8.5 enemy-anti-air-or-air-threat?))
+              (define safe-lift? (or (>= ally-air-cnt 2) (< enemy-aa-cnt 2)))
+              (: phoenix-lift-weight (-> Any Float))
+              (define (phoenix-lift-weight e)
+                (if (or (uh-flying? e) (not (sc2-enemy-unit-targetable? e)) (uh-hallucination? e))
+                    0.0
+                    (case (uh-type e)
+                      [(siege-tank-sieged siege-tank) 150.0]
+                      [(lurker lurker-mp lurker-burrowed lurker-mp-burrowed disruptor) 140.0]
+                      [(immortal high-templar ghost infestor infestor-burrowed ravager) 130.0]
+                      [(queen swarm-host swarm-host-mp cyclone) 115.0]
+                      [(scv probe drone) 95.0]
+                      [else 0.0])))
+              (and (>= en 50.0)
+                   (not (spellcaster-channel-protected? u))
+                   safe-lift?
+                   (let-values ([(ok? tgt _w)
+                                 (best-unit-target
+                                  ux uy 5.5 enemy-units
+                                  (lambda ([e : Any])
+                                    (and (> (phoenix-lift-weight e) 0.0)
+                                         (not (uh-has-buff? e 'graviton-beam))
+                                         (= (spell-unit-claim-count claims 'graviton-beam (uh-tag e) current-frame) 0)))
+                                  phoenix-lift-weight)])
+                     (and ok?
+                          (let ([ttag (uh-tag tgt)])
+                            (and (spell-claim-unit?! claims 'graviton-beam ttag current-frame 36 #:caster-tag tag #:max-casters 1)
+                                 (spell-directive tag 'phoenix 'graviton-beam 'unit ttag
+                                                  (uh-x tgt) (uh-y tgt) 'phoenix-graviton-lift-siege-lurker))))))]
+
+             ;; --- DISRUPTOR (Purification Nova 2346 w/ 28-32f `31f` stagger gate) ---
+             [(disruptor)
+              (define nova-ready?
+                (and (not (spellcaster-channel-protected? u))
+                     (not (eq? (dyn-hash-ref u 'nova-ready? #t) #f))
+                     (<= (safe-int (dyn-hash-ref u 'nova-cooldown 0) 0) 0)))
+              (and nova-ready?
+                   (disruptor-nova-stagger-ready? claims current-frame DISRUPTOR-NOVA-STAGGER-DEFAULT-FRAMES #:commit? #f)
+                   (let-values ([(ok? nx ny _s)
+                                     (best-enemy-cluster
+                                  ux uy 12.5 enemy-units 1.5 0.25
+                                  (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
+                                    (define ground-cl
+                                      (for/list : (Listof Any) ([e (in-list cl)]
+                                                                #:when (not (uh-flying? e)))
+                                        e))
+                                    (define n-gr (length ground-cl))
+                                    (define hv?
+                                      (and (< n-gr 2)
+                                           (for/or : Boolean ([e (in-list ground-cl)])
+                                             (and (memq (uh-type e) '(siege-tank-sieged lurker-burrowed lurker-mp-burrowed colossus ravager marauder stalker))
+                                                  #t))))
+                                    (if (and (or (>= n-gr 2) hv?)
+                                             (not (spell-point-claimed? claims 'purification-nova cx cy 2.0 current-frame))
+                                             (count-within-at-most?
+                                              ally-units cx cy 1.5 1
+                                              (lambda ([a : Any]) (and (not (uh-flying? a)) (not (uh-hallucination? a))))))
+                                        (+ (* 40.0 (->float n-gr))
+                                           (* 0.1 (sum-units-fl ground-cl protoss-cached-hp)))
+                                        0.0)))])
+                     (and ok?
+                          (disruptor-nova-stagger-ready? claims current-frame DISRUPTOR-NOVA-STAGGER-DEFAULT-FRAMES #:commit? #t)
+                          (spell-claim-point?! claims 'purification-nova nx ny 2.0 current-frame 31)
+                          (spell-directive tag 'disruptor 'purification-nova 'point 0 nx ny
+                                           'disruptor-nova-stagger-clump))))]
+
              [else #f]))
          (if dir
              (values (cons dir acc) (cons tag used))
@@ -2171,63 +3334,127 @@
 
   ;; Phase B: Post-storm dry High Templars (< 50 energy) -> Archon pair merge vs unpaired kite
   (define dry-hts : (Listof Any)
-    (for/list ([u (in-list ally-units)]
-               #:when (and (ht-dry-for-archon? u)
-                           (not (memv (uh-tag u) used-tags))))
-      u))
+    (if (null? friendly-hts)
+        '()
+        (for/list ([u (in-list friendly-hts)]
+                   #:when (and (ht-dry-for-archon? u)
+                               (not (memv (uh-tag u) used-tags))))
+          u)))
 
-  (define-values (final-rev _paired)
-    (let loop : (Values (Listof spell-directive) (Listof Integer))
-         ([rem : (Listof Any) dry-hts]
-          [acc : (Listof spell-directive) dirs-rev]
-          [seen : (Listof Integer) used-tags])
-      (cond
-        [(null? rem) (values acc seen)]
-        [else
-         (define ht1 (car rem))
-         (define t1 (uh-tag ht1))
-         (cond
-           [(memv t1 seen) (loop (cdr rem) acc seen)]
-           [else
-            (define x1 (uh-x ht1))
-            (define y1 (uh-y ht1))
-            ;; Find closest dry HT partner within 20.0 tiles
-            (define-values (partner _best-d)
-              (for/fold ([best : Any #f]
-                         [bd : Float 20.001])
-                        ([cand (in-list (cdr rem))])
-                (define ctag (uh-tag cand))
-                (if (memv ctag seen)
-                    (values best bd)
-                    (let ([d (dist2 x1 y1 (uh-x cand) (uh-y cand))])
-                      (if (< d bd)
-                          (values cand d)
-                          (values best bd))))))
-            (cond
-              [(hash? partner)
-               (define t2 (uh-tag partner))
-               (define mx (* 0.5 (+ x1 (uh-x partner))))
-               (define my (* 0.5 (+ y1 (uh-y partner))))
-               (hash-set! (spell-claims-ht-merge-lock-until claims) t1 (+ current-frame HT-POST-STORM-ARCHON-MERGE-WINDOW-FRAMES))
-               (hash-set! (spell-claims-ht-merge-lock-until claims) t2 (+ current-frame HT-POST-STORM-ARCHON-MERGE-WINDOW-FRAMES))
-               (loop (cdr rem)
-                     (cons (spell-directive t1 'high-templar 'morph-archon 'pair t2 mx my
-                                            'ht-post-storm-archon-merge)
-                           acc)
-                     (cons t1 (cons t2 seen)))]
-              [else
-               ;; Unpaired dry HT: only kite if not inside an active merge lock and threatened
-               (define merge-until (hash-ref (spell-claims-ht-merge-lock-until claims) t1 (lambda () -1)))
-               (define threatened? (any-unit-within? all-enemies x1 y1 10.0 sc2-enemy-unit-targetable?))
-               (if (and (>= current-frame merge-until) threatened?)
-                   (let-values ([(rx ry) (safe-retreat-point x1 y1 all-enemies home-x home-y 8.0)])
-                     (loop (cdr rem)
-                           (cons (spell-directive t1 'high-templar 'move 'kite 0 rx ry
-                                                  'ht-unpaired-dry-kite)
-                                 acc)
-                           (cons t1 seen)))
-                   (loop (cdr rem) acc (cons t1 seen)))])])])))
-  (reverse final-rev))
+  (if (null? dry-hts)
+      (reverse dirs-rev)
+      (let-values ([(final-rev _paired)
+                    (let loop : (Values (Listof spell-directive) (Listof Integer))
+                         ([rem : (Listof Any) dry-hts]
+                          [acc : (Listof spell-directive) dirs-rev]
+                          [seen : (Listof Integer) used-tags])
+                      (cond
+                        [(null? rem) (values acc seen)]
+                        [else
+                         (define ht1 (car rem))
+                         (define t1 (uh-tag ht1))
+                         (cond
+                           [(memv t1 seen) (loop (cdr rem) acc seen)]
+                           [else
+                            (define x1 (uh-x ht1))
+                            (define y1 (uh-y ht1))
+                            ;; Find closest dry HT partner within 20.0 tiles
+                            (define-values (partner _best-d)
+                              (for/fold ([best : Any #f]
+                                         [bd : Float 20.001])
+                                        ([cand (in-list (cdr rem))])
+                                (define ctag (uh-tag cand))
+                                (if (memv ctag seen)
+                                    (values best bd)
+                                    (let ([d (dist2 x1 y1 (uh-x cand) (uh-y cand))])
+                                      (if (< d bd)
+                                          (values cand d)
+                                          (values best bd))))))
+                            (cond
+                              [(hash? partner)
+                               (define t2 (uh-tag partner))
+                               (define mx (* 0.5 (+ x1 (uh-x partner))))
+                               (define my (* 0.5 (+ y1 (uh-y partner))))
+                               (hash-set! (spell-claims-ht-merge-lock-until claims) t1 (+ current-frame HT-POST-STORM-ARCHON-MERGE-WINDOW-FRAMES))
+                               (hash-set! (spell-claims-ht-merge-lock-until claims) t2 (+ current-frame HT-POST-STORM-ARCHON-MERGE-WINDOW-FRAMES))
+                               (loop (cdr rem)
+                                     (cons (spell-directive t1 'high-templar 'morph-archon 'pair t2 mx my
+                                                            'ht-post-storm-archon-merge)
+                                           acc)
+                                     (cons t1 (cons t2 seen)))]
+                              [else
+                               ;; Unpaired dry HT: only kite if not inside an active merge lock and threatened
+                               (define merge-until (hash-ref (spell-claims-ht-merge-lock-until claims) t1 (lambda () -1)))
+                               (define threatened? (any-unit-within? all-enemies x1 y1 10.0 sc2-enemy-unit-targetable?))
+                               (if (and (>= current-frame merge-until) threatened?)
+                                   (let-values ([(rx ry) (safe-retreat-point x1 y1 all-enemies home-x home-y 8.0)])
+                                     (loop (cdr rem)
+                                           (cons (spell-directive t1 'high-templar 'move 'kite 0 rx ry
+                                                                  'ht-unpaired-dry-kite)
+                                                 acc)
+                                           (cons t1 seen)))
+                                   (loop (cdr rem) acc (cons t1 seen)))])])]))])
+        (reverse final-rev))))
+
+;; Plan #115-calibrated Protoss spellcaster micro (`sentry`, `high-templar`, `oracle`)
+;; enforcing Sentry `246f` GS / `~27f` Force Field stagger / `<1.8` ally trap guard,
+;; HT `<=1` FF / Feedback priority / paired dry-HT `morph-archon`, and Oracle `[P0]`
+;; strict 1-command-per-frame mutex + `>=60f` Pulsar Beam dwell.
+(: plan-protoss-spellcaster-micro
+   (->* ((Listof Any) (Listof Any))
+        (#:claims spell-claims
+         #:current-frame Integer
+         #:ally-buildings (Listof Any)
+         #:enemy-buildings (Listof Any)
+         #:effects (Listof Any)
+         #:researched-upgrades (Listof Any)
+         #:psi-storm-researched? Boolean
+         #:home-x Float
+         #:home-y Float
+         #:natural-x Float
+         #:natural-y Float
+         #:enemy-base-x Float
+         #:enemy-base-y Float
+         #:choke-points (Listof (Pairof Real Real))
+         #:exclude-tags (Listof Integer))
+        (Listof spell-directive)))
+(define (plan-protoss-spellcaster-micro
+         ally-units enemy-units
+         #:claims [claims (make-spell-claims)]
+         #:current-frame [current-frame 0]
+         #:ally-buildings [ally-buildings '()]
+         #:enemy-buildings [enemy-buildings '()]
+         #:effects [effects '()]
+         #:researched-upgrades [researched-upgrades '()]
+         #:psi-storm-researched? [psi-storm-researched? #t]
+         #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
+         #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
+         #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
+         #:natural-y [natural-y SC2-DEFAULT-NATURAL-Y]
+         #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
+         #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
+         #:choke-points [choke-points '()]
+         #:exclude-tags [exclude-tags '()])
+  (define-values (casters friendly-hts)
+    (for/fold ([cs : (Listof Any) '()]
+               [hts : (Listof Any) '()]
+               #:result (values (reverse cs) (reverse hts)))
+              ([u (in-list ally-units)]
+               #:when (hash? u))
+      (define sym (uh-type u))
+      (define next-hts (if (eq? sym 'high-templar) (cons u hts) hts))
+      (if (memq sym PROTOSS-CASTER-SYMS)
+          (let ([t (uh-tag u)])
+            (values (if (and (> t 0) (not (memv t exclude-tags))) (cons u cs) cs)
+                    next-hts))
+          (values cs next-hts))))
+  (if (null? casters)
+      '()
+      (run-protoss-spellcaster-micro
+       casters friendly-hts ally-units enemy-units claims current-frame
+       ally-buildings enemy-buildings effects researched-upgrades psi-storm-researched?
+       home-x home-y natural-x natural-y enemy-base-x enemy-base-y
+       choke-points exclude-tags)))
 
 ;; -----------------------------------------------------------------------------
 ;; 9. Unified Multi-Race Spellcaster Entrypoints
@@ -2275,49 +3502,60 @@
          #:choke-points [choke-points '()]
          #:exclude-tags [exclude-tags '()])
   (prune-spell-claims! claims current-frame)
-  (append
-   (plan-zerg-spellcaster-micro
-    ally-units enemy-units
-    #:claims claims
-    #:current-frame current-frame
-    #:ally-buildings ally-buildings
-    #:enemy-buildings enemy-buildings
-    #:effects effects
-    #:home-x home-x
-    #:home-y home-y
-    #:enemy-base-x enemy-base-x
-    #:enemy-base-y enemy-base-y
-    #:inject-queen-tags inject-queen-tags
-    #:exclude-tags exclude-tags)
-   (plan-terran-spellcaster-micro
-    ally-units enemy-units
-    #:claims claims
-    #:current-frame current-frame
-    #:ally-buildings ally-buildings
-    #:enemy-buildings enemy-buildings
-    #:effects effects
-    #:researched-upgrades researched-upgrades
-    #:yamato-researched? yamato-researched?
-    #:home-x home-x
-    #:home-y home-y
-    #:exclude-tags exclude-tags)
-   (plan-protoss-spellcaster-micro
-    ally-units enemy-units
-    #:claims claims
-    #:current-frame current-frame
-    #:ally-buildings ally-buildings
-    #:enemy-buildings enemy-buildings
-    #:effects effects
-    #:researched-upgrades researched-upgrades
-    #:psi-storm-researched? psi-storm-researched?
-    #:home-x home-x
-    #:home-y home-y
-    #:natural-x natural-x
-    #:natural-y natural-y
-    #:enemy-base-x enemy-base-x
-    #:enemy-base-y enemy-base-y
-    #:choke-points choke-points
-    #:exclude-tags exclude-tags)))
+  (define-values (z-casters t-casters p-casters p-hts)
+    (for/fold ([zs : (Listof Any) '()]
+               [ts : (Listof Any) '()]
+               [ps : (Listof Any) '()]
+               [hts : (Listof Any) '()]
+               #:result (values (reverse zs) (reverse ts) (reverse ps) (reverse hts)))
+              ([u (in-list ally-units)]
+               #:when (hash? u))
+      (define sym (uh-type u))
+      (cond
+        [(memq sym ZERG-CASTER-SYMS)
+         (define t (uh-tag u))
+         (values (if (and (> t 0) (not (memv t exclude-tags))) (cons u zs) zs) ts ps hts)]
+        [(memq sym TERRAN-CASTER-SYMS)
+         (define t (uh-tag u))
+         (values zs (if (and (> t 0) (not (memv t exclude-tags))) (cons u ts) ts) ps hts)]
+        [(memq sym PROTOSS-CASTER-SYMS)
+         (define t (uh-tag u))
+         (define next-hts (if (eq? sym 'high-templar) (cons u hts) hts))
+         (values zs ts (if (and (> t 0) (not (memv t exclude-tags))) (cons u ps) ps) next-hts)]
+        [else
+         (values zs ts ps hts)])))
+  (cond
+    [(and (null? z-casters) (null? t-casters) (null? p-casters)) '()]
+    [else
+     (parameterize ([current-spell-xy-table
+                     (or (current-spell-xy-table) ((inst make-hasheq Any spell-xy-index)))])
+       (define-values (z-dirs t-dirs p-dirs)
+         (parameterize ([current-spell-flying-cache ((inst make-hasheq Any Symbol))])
+           (values
+            (if (null? z-casters)
+                '()
+                (run-zerg-spellcaster-micro
+                 z-casters ally-units enemy-units claims current-frame
+                 ally-buildings enemy-buildings effects home-x home-y
+                 enemy-base-x enemy-base-y inject-queen-tags exclude-tags))
+            (if (null? t-casters)
+                '()
+                (run-terran-spellcaster-micro
+                 t-casters ally-units enemy-units claims current-frame
+                 ally-buildings enemy-buildings effects researched-upgrades
+                 yamato-researched? home-x home-y exclude-tags))
+            (if (null? p-casters)
+                '()
+                (run-protoss-spellcaster-micro
+                 p-casters p-hts ally-units enemy-units claims current-frame
+                 ally-buildings enemy-buildings effects researched-upgrades psi-storm-researched?
+                 home-x home-y natural-x natural-y enemy-base-x enemy-base-y
+                 choke-points exclude-tags)))))
+       (cond
+         [(and (null? z-dirs) (null? t-dirs)) p-dirs]
+         [(and (null? t-dirs) (null? p-dirs)) z-dirs]
+         [(and (null? z-dirs) (null? p-dirs)) t-dirs]
+         [else (append z-dirs t-dirs p-dirs)]))]))
 
 ;; Convenience wrapper returning `sc2-typed-commands`-ready S-expression commands.
 (: step-pro-spellcaster-sexps!

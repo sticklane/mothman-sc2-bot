@@ -345,11 +345,14 @@
       half-rounded))
 
 ;; Total symbol extractor for unit hashes, symbols, or strings.
+(: unknown-sym-thunk (-> Symbol))
+(define (unknown-sym-thunk) 'unknown)
+
 (: unit-type-sym (-> Any Symbol))
 (define (unit-type-sym u)
   (cond
     [(hash? u)
-     (define raw (hash-ref u 'type (lambda () 'unknown)))
+     (define raw (hash-ref u 'type unknown-sym-thunk))
      (cond
        [(symbol? raw) raw]
        [(string? raw) (string->symbol (string-downcase raw))]

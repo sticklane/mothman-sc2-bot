@@ -276,7 +276,7 @@
 ;; Strictly `NoTarget` abilities (excludes `1766` MORPH_ARCHON which requires `WireCmdArchon`)
 (define STRICT-NO-TARGET-IDS : (Listof Positive-Integer)
   '(;; Stop / Hold / Return Cargo / Cancel / Salvage / LoadAll / UnloadAll
-    4 11 18 32
+    4 11 18 32 42
     167 296 299 1184 3667
     304 306 308 310 312 314
     408 413 416
@@ -285,10 +285,10 @@
     1217 1219 1221 1373 1411 1412 1438 1449 1451
     1517 1519 1521 1529 1531
     1623 1624 1626 1685 1686
-    1724 1726 1728 1730 1732 1763 1798
+    1724 1726 1728 1730 1732 1763 1798 1882
     2051 2052 2075 2096 2107 2109 2113
     2331 2333 2354 2363 2365 2371
-    2535 2594 2596 2709 2715
+    2535 2546 2594 2596 2709 2715
     3659 3663 3664 3665 3671 3688 3689 3707 3793
     4114 4122 4128 4130
     ;; Zerg Training (Larva + Queen 1632) & NoTarget Morphs
@@ -342,7 +342,7 @@
     1413 1414 1416 1417 1418 1419
     ;; Point-Target Active Spells & Area Effects
     74 142 349 399 1036 1442 1526 1622 1628 1764 1990
-    2063 2146 2338 2346 2358 2368 2505 2544 2545 2558 2588 2698 2700
+    2063 2146 2244 2338 2346 2358 2368 2505 2544 2545 2558 2588 2698 2700 2704 2706
     3684 3686 3687 3757))
 
 ;; Dual-mode `PointOrUnit` (`SMART 1`, `MOVE 16/3794`, `PATROL 17/3795`, `ATTACK 23/24/25/3674`, Rallies, UnloadAllAt)
@@ -1686,6 +1686,19 @@
      (morph-observer-siege-mode . (morph-observer-siege-mode . 3741))
      (morph-overseer-mode . (morph-overseer-mode . 3743))
      (morph-oversight-mode . (morph-oversight-mode . 3745))
+     (overlord-generate-creep . (overlord-generate-creep . 1882))
+     (generate-creep . (overlord-generate-creep . 1882))
+     (baneling-explode . (baneling-explode . 42))
+     (salvage-bunker . (salvage . 32))
+     (bunker-unload . (bunker-unload . 408))
+     (nydus-unload . (nydus-unload . 1438))
+     (nydus-worm-unload . (nydus-worm-unload . 2371))
+     (spine-crawler-uproot . (spine-crawler-uproot . 1725))
+     (spore-crawler-uproot . (spore-crawler-uproot . 1727))
+     (uproot . (uproot . 3681))
+     (cancel-build . (cancel-build . 314))
+     (cancel-building . (cancel-build . 314))
+     (hold-position . (hold-position . 18))
      (cancel-phase-shift . (cancel-adept-phase-shift . 2594))
      (cancel-adept-phase-shift . (cancel-adept-phase-shift . 2594)))))
 
@@ -1708,6 +1721,7 @@
      (stasis-ward . (stasis-ward . 2505))
      (oracle-stasis-ward . (stasis-ward . 2505))
      (build-stasis-trap . (stasis-ward . 2505))
+     (time-warp . (time-warp . 2244))
      (mass-recall . (mass-recall . 3757))
      (nexus-mass-recall . (mass-recall . 3757))
      (mothership-mass-recall . (mothership-mass-recall . 2368))
@@ -1716,10 +1730,15 @@
      (corrosive-bile . (corrosive-bile . 2338))
      (blinding-cloud . (blinding-cloud . 2063))
      (spawn-locusts . (spawn-locusts . 1990))
+     (spawn-locusts-legacy . (spawn-locusts . 1990))
+     (locust-swoop . (locust-swoop . 2706))
      (spawn-creep-tumor . (spawn-creep-tumor . 1694))
      (spread-creep-tumor . (spread-creep-tumor . 1733))
      (build-creep-tumor . (build-creep-tumor . 3691))
      (build-nydus-worm . (build-nydus-worm . 1768))
+     (spine-crawler-root . (spine-crawler-root . 1729))
+     (spore-crawler-root . (spore-crawler-root . 1731))
+     (root . (root . 3680))
      (scanner-sweep . (scanner-sweep . 399))
      (scan . (scanner-sweep . 399))
      (tactical-jump . (tactical-jump . 2358))
@@ -1749,6 +1768,10 @@
      (supply-drop . (supply-drop . 255))
      (heal . (heal . 386))
      (repair . (repair . 3685))
+     (effect-repair . (repair . 3685))
+     (bunker-load . (bunker-load . 407))
+     (nydus-load . (nydus-load . 1437))
+     (nydus-worm-load . (nydus-worm-load . 2370))
      (steady-targeting . (steady-targeting . 2714))
      (snipe . (steady-targeting . 2714))
      (yamato-cannon . (yamato-cannon . 401))
@@ -1757,9 +1780,15 @@
      (anti-armor-missile . (anti-armor-missile . 3753))
      (lock-on . (lock-on . 2350))
      (widow-mine-attack . (widow-mine-attack . 2099))
+     (widow-mine-retarget . (widow-mine-attack . 2099))
      (chrono-boost . (chrono-boost . 3755))
      (chronoboost . (chrono-boost . 3755))
      (battery-overcharge . (battery-overcharge . 4107))
+     (energy-recharge . (nexus-energy-recharge . 4126))
+     (nexus-energy-recharge . (nexus-energy-recharge . 4126))
+     (shield-battery-recharge . (shield-battery-recharge . 4113))
+     (shield-battery-restore . (shield-battery-recharge . 4113))
+     (shield-battery-restore-legacy . (shield-battery-restore-legacy . 3751))
      (feedback . (feedback . 140))
      (graviton-beam . (graviton-beam . 173))
      (charge . (charge . 1819)))))
@@ -1815,6 +1844,21 @@
      (wall-off-natural . #t)
      (door-unit-hold . #t)
      (door-unit-open . #t)
+     (swarm-host-stagger-spawn . #t)
+     (swarm-host-triangulated-hideout . #t)
+     (air-route-blind-spot-bypass . #t)
+     (counter-kite-battery-overcharge . #t)
+     (printf-high-ground-vision-probe . #t)
+     (printf-lg-pylon-hg-cannon . #t)
+     (printf-rewall-1hex-back . #t)
+     (printf-3pylon-ramp-block . #t)
+     (printf-assimilator-wedge . #t)
+     (printf-robo-immortal-prism-contain . #t)
+     (printf-stargate-tempest-battery-contain . #t)
+     (printf-battery-contain-leash . #t)
+     (printf-prism-contain-pickup . #t)
+     (printf-multi-probe-chase . #t)
+     (printf-abort-walled-cannon-pull . #t)
      (chat . #t)
      (team-chat . #t)
      (log . #t)
@@ -1825,6 +1869,7 @@
    '((move . #t)
      (kite . #t)
      (retreat . #t)
+     (patrol . #t)
      (worker-harass . #t)
      (multi-prong-drop . #t)
      (worker-scout . #t)
@@ -2111,7 +2156,7 @@
              [else (BotAttackPos 'attack-pos actors pt)])]
           [else (BotActionReject 'invalid-attack-arity raw)])]
 
-       [(eq? head 'focus-fire)
+       [(or (eq? head 'focus-fire) (eq? head 'cannon-focus-fire))
         (cond
           [(= nargs 2)
            (define actors (extract-actor-tags (car args)))
@@ -2119,8 +2164,8 @@
            (cond
              [(not actors) (BotActionReject 'invalid-actor-tags raw)]
              [(not tgt) (BotActionReject 'invalid-target-unit-tag raw)]
-             [else (BotAttackUnit 'focus-fire actors tgt #f)])]
-          [(= nargs 4)
+             [else (BotAttackUnit head actors tgt #f)])]
+          [(and (eq? head 'focus-fire) (= nargs 4))
            (define actors (extract-actor-tags (car args)))
            (define tgt (extract-unit-tag (cadr args)))
            (define fb (extract-world-point2d (caddr args) (cadddr args)))
@@ -2130,6 +2175,19 @@
              [(not fb) (BotActionReject 'invalid-world-point raw)]
              [else (BotAttackUnit 'focus-fire actors tgt fb)])]
           [else (BotActionReject 'invalid-focus-fire-arity raw)])]
+
+       [(eq? head 'swap-bunker-builder-scv)
+        (cond
+          [(not (= nargs 3)) (BotActionReject 'invalid-maneuver-arity raw)]
+          [else
+           (define low-scv (extract-unit-tag (car args)))
+           (define fresh-scv (extract-unit-tag (cadr args)))
+           (define bnk-id (extract-unit-tag (caddr args)))
+           (cond
+             [(or (not low-scv) (not fresh-scv)) (BotActionReject 'invalid-actor-tags raw)]
+             [(not bnk-id) (BotActionReject 'invalid-target-unit-tag raw)]
+             [(= low-scv fresh-scv) (BotActionReject 'duplicate-actor-tags raw)]
+             [else (BotTacticalManeuver 'swap-bunker-builder-scv #f (list low-scv fresh-scv bnk-id))])])]
 
        ;; 8. Attack Position (`attack-pos`, `harass-workers`)
        [(or (eq? head 'attack-pos) (eq? head 'harass-workers))
@@ -2275,7 +2333,7 @@
              [(or (not pt1) (not pt2)) (BotActionReject 'invalid-world-point raw)]
              [else (BotWorkerMechanic 'mineral-harass workers #f #f pt1 pt2)])])]
 
-       ;; 13. Transport Juggle / Load / Unload
+       ;; 13. Transport Juggle / Pickup / Load / Unload / Bunker / Nydus
        [(eq? head 'transport-juggle)
         (cond
           [(= nargs 4)
@@ -2295,6 +2353,101 @@
              [(not pt) (BotActionReject 'invalid-world-point raw)]
              [else (BotTransportAction 'transport-juggle tr-id #f pt)])]
           [else (BotActionReject 'invalid-transport-arity raw)])]
+
+       [(memq head '(transport-pickup load load-unit bunker-load nydus-load))
+        (cond
+          [(not (= nargs 2)) (BotActionReject 'invalid-transport-arity raw)]
+          [else
+           (define tr-id (extract-unit-tag (car args)))
+           (define pass (extract-actor-tags (cadr args)))
+           (cond
+             [(not tr-id) (BotActionReject 'invalid-transport-tag raw)]
+             [(not pass) (BotActionReject 'invalid-actor-tags raw)]
+             [else (BotTransportAction head tr-id pass #f)])])]
+
+       [(memq head '(bunker-unload nydus-unload unload-unit transport-drop-moving))
+        (cond
+          [(or (< nargs 1) (> nargs 2)) (BotActionReject 'invalid-transport-arity raw)]
+          [else
+           (define tr-id (extract-unit-tag (car args)))
+           (define opt-pass (if (= nargs 2) (extract-actor-tags (cadr args)) #f))
+           (cond
+             [(not tr-id) (BotActionReject 'invalid-transport-tag raw)]
+             [(and (= nargs 2) (not opt-pass)) (BotActionReject 'invalid-actor-tags raw)]
+             [else (BotTransportAction head tr-id opt-pass #f)])])]
+
+       ;; 13b. Standalone Self/Point/Unit Tactical Abilities (`baneling-explode`, `salvage`,
+       ;;      `purification-nova`, `locust-swoop`, `repair`, `widow-mine-retarget`,
+       ;;      `shield-battery-restore`, `uproot`/`root`, `push-probe-with-building`)
+       [(memq head '(baneling-explode salvage salvage-bunker spine-crawler-uproot spore-crawler-uproot uproot))
+        (cond
+          [(not (= nargs 1)) (BotActionReject 'invalid-mode-arity raw)]
+          [else
+           (define actors (extract-actor-tags (car args)))
+           (define ab-id : Positive-Integer
+             (cond
+               [(eq? head 'baneling-explode) 42]
+               [(or (eq? head 'salvage) (eq? head 'salvage-bunker)) 32]
+               [(eq? head 'spine-crawler-uproot) 1725]
+               [(eq? head 'spore-crawler-uproot) 1727]
+               [else 3681]))
+           (define ab (lookup-no-target-ability ab-id))
+           (if (and actors ab)
+               (BotModeSwitch head actors ab)
+               (BotActionReject 'invalid-actor-tags raw))])]
+
+       [(memq head '(purification-nova locust-swoop spine-crawler-root spore-crawler-root root))
+        (cond
+          [(not (= nargs 3)) (BotActionReject 'point-spell-requires-xy raw)]
+          [else
+           (define actors (extract-actor-tags (car args)))
+           (define pt (extract-world-point2d (cadr args) (caddr args)))
+           (define ab-id : Positive-Integer
+             (cond
+               [(eq? head 'purification-nova) 2346]
+               [(eq? head 'locust-swoop) 2706]
+               [(eq? head 'spine-crawler-root) 1729]
+               [(eq? head 'spore-crawler-root) 1731]
+               [else 3680]))
+           (define pab (lookup-point-target-ability ab-id))
+           (cond
+             [(not actors) (BotActionReject 'invalid-actor-tags raw)]
+             [(not pt) (BotActionReject 'invalid-world-point raw)]
+             [(not pab) (BotActionReject 'internal-ability-missing raw)]
+             [else (BotCastPoint actors head pab pt)])])]
+
+       [(memq head '(repair widow-mine-retarget shield-battery-restore shield-battery-recharge))
+        (cond
+          [(not (= nargs 2)) (BotActionReject 'unit-spell-requires-unit-tag raw)]
+          [else
+           (define actors (extract-actor-tags (car args)))
+           (define tgt (extract-unit-tag (cadr args)))
+           (define ab-id : Positive-Integer
+             (cond
+               [(eq? head 'repair) 3685]
+               [(eq? head 'widow-mine-retarget) 2099]
+               [else 4113]))
+           (define uab (lookup-unit-target-ability ab-id))
+           (cond
+             [(not actors) (BotActionReject 'invalid-actor-tags raw)]
+             [(not tgt) (BotActionReject 'invalid-target-unit-tag raw)]
+             [(not uab) (BotActionReject 'internal-ability-missing raw)]
+             [else (BotCastUnit actors head uab tgt)])])]
+
+       [(eq? head 'push-probe-with-building)
+        (cond
+          [(not (= nargs 6)) (BotActionReject 'invalid-maneuver-arity raw)]
+          [else
+           (define pid (extract-unit-tag (car args)))
+           (define bsym (extract-norm-symbol (cadr args)))
+           (define wpt (extract-world-point2d (caddr args) (cadddr args)))
+           (define rest4 (cddddr args))
+           (define spt (extract-world-point2d (car rest4) (cadr rest4)))
+           (cond
+             [(not pid) (BotActionReject 'invalid-actor-tags raw)]
+             [(not bsym) (BotActionReject 'invalid-build-symbol raw)]
+             [(not (and wpt spt)) (BotActionReject 'invalid-world-point raw)]
+             [else (BotTacticalManeuver 'push-probe-with-building wpt args)])])]
 
        ;; 14. Terran Addon Swap (`terran-addon-swap` & legacy `swap-addon`)
        [(eq? head 'terran-addon-swap)
@@ -2628,6 +2781,10 @@
               (actors->sexp-arg pass)
               (WorldPoint2D-x pt)
               (WorldPoint2D-y pt))]
+       [pass
+        (list (BotTransportAction-kind act)
+              (BotTransportAction-transport act)
+              (actors->sexp-arg pass))]
        [pt
         (list (BotTransportAction-kind act)
               (BotTransportAction-transport act)

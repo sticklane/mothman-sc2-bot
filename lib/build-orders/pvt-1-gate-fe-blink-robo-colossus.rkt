@@ -8,7 +8,8 @@
 
 (require "../sc2-types.rkt")
 
-(provide PvT-BUILD-ORDER)
+(provide PvT-BUILD-ORDER
+         PvT-UNIT-BENCHMARKS)
 
 (: PvT-BUILD-ORDER build-order-spec)
 (define PvT-BUILD-ORDER
@@ -70,3 +71,32 @@
     (pro-upgrade-timing 'psi-storm                355.4 434.4 64 'templar-archive)  ;; 5:55 -> 7:14
     (pro-upgrade-timing 'protoss-ground-weapons-1 358.7 472.7 73 'forge)            ;; 5:59 -> 7:53
     (pro-upgrade-timing 'extended-thermal-lance   361.4 461.4 91 'robotics-bay))))  ;; 6:01 -> 7:41
+
+;; Full 1..8+ min pro unit composition benchmarks (PvT) covering core, harass, drops & casters.
+(: PvT-UNIT-BENCHMARKS (Listof pro-unit-timing))
+(define PvT-UNIT-BENCHMARKS
+  (list
+   (pro-unit-timing 'adept        1 23 108.3 'cybernetics-core)
+   (pro-unit-timing 'stalker      2 31 152.4 'cybernetics-core)
+   (pro-unit-timing 'oracle       1 42 225.0 'stargate)
+   (pro-unit-timing 'warp-prism   1 46 250.0 'robotics-facility)
+   (pro-unit-timing 'observer     1 50 285.0 'robotics-facility)
+   (pro-unit-timing 'sentry       2 56 298.4 'cybernetics-core)
+   (pro-unit-timing 'stalker      5 58 298.6 'cybernetics-core)
+   (pro-unit-timing 'immortal     1 62 310.0 'robotics-facility)
+   (pro-unit-timing 'stalker      9 69 326.5 'cybernetics-core)
+   (pro-unit-timing 'zealot       4 77 346.1 'gateway)
+   (pro-unit-timing 'colossus     1 84 370.0 'robotics-bay)
+   (pro-unit-timing 'zealot      12 95 382.4 'gateway)
+   (pro-unit-timing 'high-templar 2 104 415.0 'templar-archive)
+   (pro-unit-timing 'disruptor    1 110 435.0 'robotics-bay)
+   (pro-unit-timing 'stalker     14 118 455.0 'cybernetics-core)
+   (pro-unit-timing 'zealot      16 124 465.0 'gateway)
+   (pro-unit-timing 'colossus     3 130 475.0 'robotics-bay)
+   (pro-unit-timing 'immortal     4 134 482.0 'robotics-facility)
+   (pro-unit-timing 'high-templar 5 140 490.0 'templar-archive)
+   (pro-unit-timing 'archon       3 144 495.0 'templar-archive)
+   (pro-unit-timing 'disruptor    3 148 500.0 'robotics-bay)
+   (pro-unit-timing 'observer     3 150 503.0 'robotics-facility)
+   (pro-unit-timing 'adept        4 152 505.0 'cybernetics-core)
+   (pro-unit-timing 'warp-prism   2 154 510.0 'robotics-facility)))
