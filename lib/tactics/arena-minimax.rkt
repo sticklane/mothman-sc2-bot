@@ -138,6 +138,7 @@
 
 (define (unit-hash->tactical-sim-unit u [side 'ally] #:eta-sec [eta-sec 0.0])
   (define utype (hash-ref u 'type 'marine))
+  (define weaponless-disruptor? (memq utype '(disruptor disruptor-phased)))
   (define stats (sc2-unit-combat-stats utype))
   (define m-cost (sc2-min-cost utype 50))
   (define g-cost (sc2-gas-cost utype 0))
@@ -154,10 +155,10 @@
    shd
    (exact->inexact (hash-ref stats 'armor 0))
    (exact->inexact (hash-ref u 'speed (hash-ref stats 'speed 3.15)))
-   (exact->inexact (hash-ref stats 'ground-dps 10.0))
-   (exact->inexact (hash-ref stats 'air-dps 0.0))
-   (exact->inexact (hash-ref stats 'ground-range 5.0))
-   (exact->inexact (hash-ref stats 'air-range 0.0))
+   (if weaponless-disruptor? 0.0 (exact->inexact (hash-ref stats 'ground-dps 10.0)))
+   (if weaponless-disruptor? 0.0 (exact->inexact (hash-ref stats 'air-dps 0.0)))
+   (if weaponless-disruptor? 0.0 (exact->inexact (hash-ref stats 'ground-range 5.0)))
+   (if weaponless-disruptor? 0.0 (exact->inexact (hash-ref stats 'air-range 0.0)))
    (max 0.16 (exact->inexact (hash-ref stats 'weapon-period 1.0)))
    (exact->inexact (hash-ref stats 'damage-point 0.10))
    (max 0.0 (exact->inexact (hash-ref u 'weapon-cooldown 0.0)))
@@ -182,12 +183,16 @@
                                  #:our-z [our-z 10]
                                  #:enemy-z [enemy-z 10])
   (define enemy-units
-    (filter sc2-enemy-unit-targetable? raw-enemy-units))
+    (filter (lambda (e)
+              (and (hash? e)
+                   (not (eq? (hash-ref e 'type #f) 'disruptor-phased))
+                   (sc2-enemy-unit-targetable? e)))
+            raw-enemy-units))
   (define combat-allies
     (filter (lambda (u)
               (and (hash? u)
                    (not (memq (hash-ref u 'type #f)
-                              '(drone scv probe larva egg overlord mule)))))
+                              '(drone scv probe larva egg overlord mule disruptor-phased)))))
             ally-units))
   (cond
     [(or (null? combat-allies) (and (null? enemy-units) (null? enemy-bldgs)))
@@ -773,7 +778,10 @@
                 decisions))
 
     ;; Translate winning arena micro action into per-unit commands with cooldown & order-equivalence gating
-    (define arena-enemies (tactical-arena-enemy-units arena))
+    (define arena-enemies
+      (filter (lambda (e)
+                (not (eq? (tactical-sim-unit-type e) 'disruptor-phased)))
+              (tactical-arena-enemy-units arena)))
     (define arena-workers (tactical-arena-enemy-workers arena))
     (define enemy-has-aa?
       (ormap (lambda (e) (> (tactical-sim-unit-air-dps e) 0.0)) arena-enemies))
@@ -859,7 +867,14 @@
              ;; Phase-locked stutter-step micro:
              ;; - Weapon on cooldown (> 0.15s) and not suicide Baneling: glide to standoff kite vector
              ;; - Weapon ready (<= 0.15s) or Baneling: fire/advance at high-priority target
+             ;; - Weaponless Disruptor never issues attack-unit
              (cond
+               [(memq utype '(disruptor disruptor-phased))
+                (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
+                (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
+                  (when (and ledger record-ledger?)
+                    (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
+                  (emit! (list 'kite uid kx ky)))]
                [(and (not (eq? utype 'baneling))
                      (> w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH))
                 (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
@@ -874,22 +889,24 @@
                   (emit! (list 'attack-unit uid eid)))])]
 
             [(HoldChoke)
-             (define dist-to-nat (dist2d ux uy nat-x nat-y))
-             (if (<= dist-to-nat 3.5)
-                 (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'hold-position 0 nat-x nat-y frame))
-                   (when (and ledger record-ledger?)
-                     (order-ledger-record-issued! ledger uid 'hold-position 'hold-position #:frame frame))
-                   (emit! (list 'hold-position uid nat-x nat-y)))
-                 (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
-                   (when (and ledger record-ledger?)
-                     (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
-                   (emit! (list 'attack-unit uid eid))))]
+             (unless (memq utype '(disruptor disruptor-phased))
+               (define dist-to-nat (dist2d ux uy nat-x nat-y))
+               (if (<= dist-to-nat 3.5)
+                   (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'hold-position 0 nat-x nat-y frame))
+                     (when (and ledger record-ledger?)
+                       (order-ledger-record-issued! ledger uid 'hold-position 'hold-position #:frame frame))
+                     (emit! (list 'hold-position uid nat-x nat-y)))
+                   (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
+                     (when (and ledger record-ledger?)
+                       (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
+                     (emit! (list 'attack-unit uid eid)))))]
 
             [else ;; CommitFocusFire, KiteForwardChase, FlankSurround
-             (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
-               (when (and ledger record-ledger?)
-                 (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
-               (emit! (list 'attack-unit uid eid)))])))))
+             (unless (memq utype '(disruptor disruptor-phased))
+               (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
+                 (when (and ledger record-ledger?)
+                   (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
+                 (emit! (list 'attack-unit uid eid))))])))))
 
   (set-tactical-mirror-brain-last-decisions! brain (reverse decisions))
   (values (reverse actions) committed-tags (reverse decisions)))

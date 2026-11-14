@@ -24,4 +24,7 @@
  safe-tile-coord
  unit-type-sym
  safe-list
- safe-hash-list)
+ safe-hash-list
+ SC2-SINGLETON-TECH-BUILDINGS
+ SC2-DUAL-CAP-TECH-BUILDINGS
+ sc2-zerg-corruptor-target-cap)

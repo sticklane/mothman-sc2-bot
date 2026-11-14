@@ -38,8 +38,13 @@
          BOT-IDS
          KNOWN-BOT-NAMES
          SIDECAR-BIN
+         CANONICAL-MATCHUPS
          parse-bot-filter
          parse-match-ids-str
+         normalize-race-short
+         compute-matchup-code
+         parse-matchup-filter
+         summarize-reports-by-matchup
          parse-match-log-zip
          invoke-s2protocol-sidecar-summary
          analyze-single-match-forensics
@@ -128,6 +133,96 @@
                 (map (lambda (s) (string->number (string-trim s)))
                      (string-split ids-str ","))))
        <)))
+
+(define CANONICAL-MATCHUPS
+  '("ZvZ" "ZvT" "ZvP" "TvZ" "TvT" "TvP" "PvZ" "PvT" "PvP"))
+
+(define CANONICAL-RACES '("Z" "T" "P"))
+
+(define (race-short->full r)
+  (case r
+    [("Z") "Zerg"]
+    [("T") "Terran"]
+    [("P") "Protoss"]
+    [("R") "Random"]
+    [else "Unknown"]))
+
+(define (normalize-race-short race-val)
+  (define s
+    (cond
+      [(string? race-val) (string-downcase (string-trim race-val))]
+      [(symbol? race-val) (string-downcase (symbol->string race-val))]
+      [else ""]))
+  (case s
+    [("z" "zerg") "Z"]
+    [("t" "terran") "T"]
+    [("p" "protoss") "P"]
+    [("r" "random") "R"]
+    [else "Unknown"]))
+
+(define (infer-bot-race-short bot-name)
+  (define s (if (string? bot-name) (string-upcase (string-trim bot-name)) ""))
+  (cond
+    [(string-suffix? s "-Z") "Z"]
+    [(string-suffix? s "-T") "T"]
+    [(string-suffix? s "-P") "P"]
+    [else "Unknown"]))
+
+(define (compute-matchup-code our-race opp-race)
+  (define a (normalize-race-short our-race))
+  (define b (normalize-race-short opp-race))
+  (if (and (member a CANONICAL-RACES) (member b CANONICAL-RACES))
+      (string-append a "v" b)
+      "Unknown"))
+
+(define (parse-matchup-filter m-str)
+  (cond
+    [(or (not m-str)
+         (string=? (string-trim m-str) "")
+         (string-ci=? (string-trim m-str) "all"))
+     #f]
+    [else
+     (define tokens
+       (filter (lambda (s) (not (string=? s "")))
+               (map string-trim (string-split m-str ","))))
+     (remove-duplicates
+      (apply append
+             (for/list ([tok (in-list tokens)])
+               (define low (string-downcase tok))
+               (cond
+                 [(member low '("z" "zerg" "zv*")) '("ZvZ" "ZvT" "ZvP")]
+                 [(member low '("t" "terran" "tv*")) '("TvZ" "TvT" "TvP")]
+                 [(member low '("p" "protoss" "pv*")) '("PvZ" "PvT" "PvP")]
+                 [(member low '("*vz" "vz")) '("ZvZ" "TvZ" "PvZ")]
+                 [(member low '("*vt" "vt")) '("ZvT" "TvT" "PvT")]
+                 [(member low '("*vp" "vp")) '("ZvP" "TvP" "PvP")]
+                 [(string=? low "unknown") '("Unknown")]
+                 [(regexp-match #rx"^([ztp])v([ztp])$" low)
+                  => (lambda (m)
+                       (list (string-append (string-upcase (cadr m))
+                                            "v"
+                                            (string-upcase (caddr m)))))]
+                 [else '()]))))]))
+
+(define (matchup-matches-filter? report matchup-filter)
+  (or (not matchup-filter)
+      (member (hash-ref report 'matchup "Unknown") matchup-filter)))
+
+(define (bot-is-self-play? name [bot-id 0])
+  (define n-low (if (string? name) (string-downcase (string-trim name)) ""))
+  (or (string-prefix? n-low "mothman")
+      (and (exact-positive-integer? bot-id)
+           (hash-has-key? BOT-IDS bot-id))))
+
+(define (rep-filename-vs-random? rep-path)
+  (and rep-path
+       (let* ([p (if (path? rep-path) rep-path (string->path (format "~a" rep-path)))]
+              [fn (string-downcase (path->string (file-name-from-path p)))])
+         (regexp-match? #px"_vs_.*(?:_random|\\(random\\)|\\[r\\])" fn))))
+
+(define (extract-finding-tag f)
+  (define s (if (string? f) (string-trim f) (format "~a" f)))
+  (car (string-split s ":")))
 
 ;; -----------------------------------------------------------------------------
 ;; 2. HTTP / AI Arena REST Helpers (`curl`)
@@ -380,6 +475,128 @@
   (for/list ([p (in-list (take pairs (min k (length pairs))))])
     (list (format "~a" (car p)) (cdr p))))
 
+(define (mean-real-field reports field [rounder round2])
+  (define vals
+    (for/list ([r (in-list reports)]
+               #:when (real? (hash-ref r field #f)))
+      (exact->inexact (hash-ref r field))))
+  (if (null? vals)
+      0.0
+      (rounder (/ (apply + vals) (length vals)))))
+
+(define (tally-wlt reports)
+  (for/fold ([w 0] [l 0] [t 0] [o 0])
+            ([r (in-list reports)])
+    (define res (string-upcase (format "~a" (hash-ref r 'result "UNKNOWN"))))
+    (cond
+      [(string=? res "WIN")  (values (add1 w) l t o)]
+      [(string=? res "LOSS") (values w (add1 l) t o)]
+      [(string=? res "TIE")  (values w l (add1 t) o)]
+      [else                  (values w l t (add1 o))])))
+
+(define (calc-wr-pct w l t)
+  (define dec (+ w l t))
+  (if (> dec 0)
+      (round1 (* 100.0 (/ (exact->inexact w) dec)))
+      0.0))
+
+(define (sum-elo-delta reports)
+  (for/sum ([r (in-list reports)])
+    (define d (hash-ref r 'elo_change 0))
+    (if (real? d) d 0)))
+
+(define (aggregate-report-bucket key-str label-str group-reports)
+  (define-values (w l t o) (tally-wlt group-reports))
+  (define ext-reps (filter (lambda (r) (not (hash-ref r 'is_self_play #f))) group-reports))
+  (define self-reps (filter (lambda (r) (hash-ref r 'is_self_play #f)) group-reports))
+  (define-values (ew el et eo) (tally-wlt ext-reps))
+  (define-values (sw sl st so) (tally-wlt self-reps))
+  (define tag-freq (make-hash))
+  (for ([r (in-list group-reports)])
+    (for ([f (in-list (hash-ref r 'findings '()))])
+      (hash-update! tag-freq (extract-finding-tag f) add1 0)))
+  (define vs-rnd
+    (count (lambda (r) (and (hash-ref r 'vs_random_declared #f) #t)) group-reports))
+  (hasheq 'key key-str
+          'label label-str
+          'matches (length group-reports)
+          'wins w
+          'losses l
+          'ties t
+          'other o
+          'win_rate_pct (calc-wr-pct w l t)
+          'ext_matches (length ext-reps)
+          'ext_wins ew
+          'ext_losses el
+          'ext_ties et
+          'ext_other eo
+          'ext_win_rate_pct (calc-wr-pct ew el et)
+          'self_matches (length self-reps)
+          'self_wins sw
+          'self_losses sl
+          'self_ties st
+          'self_other so
+          'vs_random_matches vs-rnd
+          'net_elo_delta (sum-elo-delta group-reports)
+          'ext_elo_delta (sum-elo-delta ext-reps)
+          'avg_peak_workers (mean-real-field group-reports 'max_our_workers round1)
+          'avg_max_mineral_float (mean-real-field group-reports 'max_our_minerals_float round1)
+          'avg_supply_blocked_snapshots (mean-real-field group-reports 'supply_blocked_snapshots round2)
+          'avg_combat_roi (mean-real-field group-reports 'combat_roi round2)
+          'top_finding_tags (top-k-counts tag-freq 3)))
+
+(define (report-matchup-code r)
+  (define m (hash-ref r 'matchup #f))
+  (if (and (string? m) (not (string=? m "")))
+      m
+      (compute-matchup-code (hash-ref r 'our_race "Unknown")
+                            (hash-ref r 'opp_race "Unknown"))))
+
+(define (report-our-race-short r)
+  (define rs (hash-ref r 'our_race_short #f))
+  (if (and (string? rs) (member rs CANONICAL-RACES))
+      rs
+      (let ([from-r (normalize-race-short (hash-ref r 'our_race "Unknown"))])
+        (if (member from-r CANONICAL-RACES)
+            from-r
+            (infer-bot-race-short (hash-ref r 'our_bot ""))))))
+
+(define (summarize-reports-by-matchup reports)
+  (define overall-bucket (aggregate-report-bucket "All" "Overall" reports))
+  (define matchup-rows
+    (for/list ([mu (in-list CANONICAL-MATCHUPS)])
+      (aggregate-report-bucket
+       mu mu (filter (lambda (r) (string=? (report-matchup-code r) mu)) reports))))
+  (define unk-matchup-reps
+    (filter (lambda (r) (not (member (report-matchup-code r) CANONICAL-MATCHUPS))) reports))
+  (define by-matchup-ht
+    (for/fold ([h (for/hasheq ([row (in-list matchup-rows)])
+                    (values (string->symbol (hash-ref row 'key)) row))])
+              ([extras (in-list (if (null? unk-matchup-reps)
+                                    '()
+                                    (list (aggregate-report-bucket "Unknown" "Unknown" unk-matchup-reps))))])
+      (hash-set h (string->symbol (hash-ref extras 'key)) extras)))
+  (define race-rows
+    (for/list ([rs (in-list CANONICAL-RACES)])
+      (aggregate-report-bucket
+       rs (race-short->full rs)
+       (filter (lambda (r) (string=? (report-our-race-short r) rs)) reports))))
+  (define unk-race-reps
+    (filter (lambda (r) (not (member (report-our-race-short r) CANONICAL-RACES))) reports))
+  (define by-race-ht
+    (for/fold ([h (for/hasheq ([row (in-list race-rows)])
+                    (values (string->symbol (hash-ref row 'key)) row))])
+              ([extras (in-list (if (null? unk-race-reps)
+                                    '()
+                                    (list (aggregate-report-bucket "Unknown" "Unknown" unk-race-reps))))])
+      (hash-set h (string->symbol (hash-ref extras 'key)) extras)))
+  (hasheq 'total_matches (length reports)
+          'overall overall-bucket
+          'by_race by-race-ht
+          'by_matchup by-matchup-ht
+          'race_rows race-rows
+          'matchup_rows matchup-rows))
+
 (define (extract-paren-items line key-prefix)
   ;; Extracts space-separated tokens inside `key=(...)`
   (define pat (regexp (string-append (regexp-quote key-prefix) "\\(([^)]*)\\)")))
@@ -604,6 +821,20 @@
      ;; Match without .SC2Replay (Queued, In-Progress, or Crash/InitFailure)
      (define our-name (hash-ref meta 'our_bot_name "Mothman"))
      (define opp-name (hash-ref meta 'opp_bot_name "Opponent"))
+     (define our-race-short
+       (let ([mr (normalize-race-short (hash-ref meta 'our_race ""))])
+         (if (member mr CANONICAL-RACES) mr (infer-bot-race-short our-name))))
+     (define opp-race-short
+       (let ([mr (normalize-race-short (hash-ref meta 'opp_race ""))])
+         (if (member mr CANONICAL-RACES) mr "Unknown")))
+     (define matchup-code (compute-matchup-code our-race-short opp-race-short))
+     (define opp-decl-race (or (jnull->false (hash-ref meta 'opp_declared_race #f)) "Unknown"))
+     (define vs-random-declared?
+       (not (not (or (string=? (normalize-race-short opp-decl-race) "R")
+                     (rep-filename-vs-random? rep-path)))))
+     (define is-self-play?
+       (not (not (bot-is-self-play? opp-name (hash-ref meta 'opp_bot_id 0)))))
+     (define elo-delta (or (jnull->false (hash-ref meta 'elo_change #f)) 0))
      (define api-res (hash-ref meta 'result "unknown"))
      (define api-cause (hash-ref meta 'result_cause ""))
      (define api-type (hash-ref meta 'result_type ""))
@@ -621,8 +852,9 @@
 
      (unless quiet?
        (printf "==================================================================================================\n")
-       (printf "MATCH #~a | Status: ~a (cause=~a, type=~a) | ~a vs ~a (NO REPLAY FILE)\n"
-               match-id-str (string-upcase (format "~a" api-res)) api-cause api-type our-name opp-name)
+       (printf "MATCH #~a [~a | ~a] | Status: ~a (cause=~a, type=~a) | ~a vs ~a (NO REPLAY FILE)\n"
+               match-id-str matchup-code (if is-self-play? "Self" "Ext")
+               (string-upcase (format "~a" api-res)) api-cause api-type our-name opp-name)
        (when (> (hash-ref log-info 'stderr_exception_count 0) 0)
          (printf "  Stderr Exceptions (~a):\n" (hash-ref log-info 'stderr_exception_count 0))
          (for ([ln (in-list (hash-ref log-info 'stderr_exception_samples '()))])
@@ -634,6 +866,18 @@
              'has_replay #f
              'our_bot our-name
              'opp_bot opp-name
+             'our_race (race-short->full our-race-short)
+             'opp_race (race-short->full opp-race-short)
+             'our_race_short our-race-short
+             'opp_race_short opp-race-short
+             'opp_declared_race opp-decl-race
+             'matchup matchup-code
+             'vs_random_declared vs-random-declared?
+             'is_self_play is-self-play?
+             'elo_change elo-delta
+             'our_killed_resources 0
+             'our_lost_resources 0
+             'combat_roi 'null
              'result api-res
              'result_cause api-cause
              'result_type api-type
@@ -670,8 +914,29 @@
              (hash-ref opp-p 'name "Opponent"))))
 
      (define our-decl-race (hash-ref our-p 'declared_race "Unknown"))
-     (define our-actual-race (hash-ref our-p 'actual_race "Unknown"))
+     (define our-actual-race
+       (let ([r (hash-ref our-p 'actual_race "Unknown")])
+         (if (member (normalize-race-short r) CANONICAL-RACES)
+             r
+             (let ([inf (infer-bot-race-short our-name)])
+               (if (member inf CANONICAL-RACES) (race-short->full inf) r)))))
      (define opp-actual-race (hash-ref opp-p 'actual_race "Unknown"))
+     (define opp-decl-race
+       (let ([m-od (jnull->false (hash-ref meta 'opp_declared_race #f))])
+         (if (and (or (string? m-od) (symbol? m-od))
+                  (not (string=? (format "~a" m-od) ""))
+                  (not (string-ci=? (format "~a" m-od) "Unknown")))
+             (format "~a" m-od)
+             (hash-ref opp-p 'declared_race "Unknown"))))
+     (define our-race-short (normalize-race-short our-actual-race))
+     (define opp-race-short (normalize-race-short opp-actual-race))
+     (define matchup-code (compute-matchup-code our-race-short opp-race-short))
+     (define vs-random-declared?
+       (not (not (or (string=? (normalize-race-short opp-decl-race) "R")
+                     (rep-filename-vs-random? rep-path)))))
+     (define is-self-play?
+       (not (not (or (bot-is-self-play? opp-name (hash-ref meta 'opp_bot_id 0))
+                     (bot-is-self-play? (hash-ref opp-p 'name "") 0)))))
 
      (define api-res (hash-ref meta 'result ""))
      (define effective-result
@@ -850,11 +1115,43 @@
                                (hash-ref bd0 'weak_vs "")))))
 
      (define final-findings (reverse findings))
+     (define schema2-sum (hash-ref log-info 'schema2_summary (hasheq)))
+     (define stats-killed
+       (for/fold ([mx 0]) ([s (in-hash-values our-stats)])
+         (max mx (+ (hash-ref s 'killed_min 0) (hash-ref s 'killed_gas 0)))))
+     (define stats-lost
+       (for/fold ([mx 0]) ([s (in-hash-values our-stats)])
+         (max mx (+ (hash-ref s 'lost_min 0) (hash-ref s 'lost_gas 0)))))
+     (define sc-killed (and (hash? our-sidecar) (jnull->false (hash-ref our-sidecar 'resources_killed #f))))
+     (define sc-lost (and (hash? our-sidecar) (jnull->false (hash-ref our-sidecar 'resources_lost #f))))
+     (define s2-killed (+ (hash-ref schema2-sum 'enemy_lost_minerals 0)
+                          (hash-ref schema2-sum 'enemy_lost_gas 0)))
+     (define s2-lost (+ (hash-ref schema2-sum 'our_lost_minerals 0)
+                        (hash-ref schema2-sum 'our_lost_gas 0)))
+     (define-values (res-avail? our-killed-res our-lost-res)
+       (cond
+         [(and (not (hash-empty? our-stats)) (or (> stats-killed 0) (> stats-lost 0)))
+          (values #t stats-killed stats-lost)]
+         [(and (real? sc-killed) (real? sc-lost) (or (> sc-killed 0) (> sc-lost 0)))
+          (values #t sc-killed sc-lost)]
+         [(or (> s2-killed 0) (> s2-lost 0))
+          (values #t s2-killed s2-lost)]
+         [else (values #f 0 0)]))
+     (define combat-roi
+       (cond
+         [(not res-avail?) 'null]
+         [(> our-lost-res 0) (round2 (/ (exact->inexact our-killed-res)
+                                        (exact->inexact our-lost-res)))]
+         [(> our-killed-res 0) (round2 (min 10.0 (/ (exact->inexact our-killed-res) 100.0)))]
+         [else 'null]))
 
      (unless quiet?
        (printf "==================================================================================================\n")
-       (printf "MATCH #~a | ~a (cause=~a, elo=~a) | Map: ~a | Dur: ~as (~a loops) | API step=~ams\n"
+       (printf "MATCH #~a [~a | ~a~a] | ~a (cause=~a, elo=~a) | Map: ~a | Dur: ~as (~a loops) | API step=~ams\n"
                match-id-str
+               matchup-code
+               (if is-self-play? "Self" "Ext")
+               (if vs-random-declared? ",vsR" "")
                effective-result
                (if (string=? api-cause "") "replay" api-cause)
                elo-delta
@@ -870,16 +1167,20 @@
                    our-actual-race)
                opp-pid
                opp-name
-               opp-actual-race)
+               (if vs-random-declared?
+                   (format "Random->~a" opp-actual-race)
+                   opp-actual-race))
        (printf "  Expansions (>0s): Us=~s | Morphs=~s || Opp=~s | OppMorphs=~s\n"
                our-th our-morphs opp-th opp-morphs)
        (printf "  Upgrades:         Us=~s || Opp=~s\n" our-upg opp-upg)
        (printf "  Units/Bldgs Born: Us=~s || Opp=~s\n"
                (filtered-born our-born-map)
                (filtered-born opp-born-map))
-       (printf "  Peak Economy:     Workers=~a vs ~a | PeakArmyVal=~a vs ~a | MaxFloat=~aM/~aG | SupplyBlocked=~a/~a\n"
+       (printf "  Peak Economy:     Workers=~a vs ~a | PeakArmyVal=~a vs ~a | MaxFloat=~aM/~aG | SupplyBlocked=~a/~a | CombatROI=~a (~aK/~aL)\n"
                max-our-workers max-opp-workers max-our-army max-opp-army
-               max-our-min-below-max max-our-gas sb-our tot-stat-our)
+               max-our-min-below-max max-our-gas sb-our tot-stat-our
+               (if (real? combat-roi) combat-roi "N/A")
+               our-killed-res our-lost-res)
        (printf "  Swarmy Tracker:   Incomplete=~s | OppProxies=~s | BasesLost=~s | KilledBy=~s | Battles=~a | Swings=~a\n"
                our-incomplete opp-proxies our-bases-lost our-killed-by
                (length engagements) (length turning-points))
@@ -992,6 +1293,15 @@
              'our_declared_race our-decl-race
              'our_race our-actual-race
              'opp_race opp-actual-race
+             'our_race_short our-race-short
+             'opp_race_short opp-race-short
+             'opp_declared_race opp-decl-race
+             'matchup matchup-code
+             'vs_random_declared vs-random-declared?
+             'is_self_play is-self-play?
+             'our_killed_resources our-killed-res
+             'our_lost_resources our-lost-res
+             'combat_roi combat-roi
              'our_expansions our-th
              'opp_expansions opp-th
              'our_tech_morphs our-morphs
@@ -1021,7 +1331,7 @@
              'max_opp_army_value max-opp-army
              'supply_blocked_snapshots sb-our
              'tags (hash-ref log-info 'tags '())
-             'schema2_summary (hash-ref log-info 'schema2_summary (hasheq))
+             'schema2_summary schema2-sum
              'native_summary native-sum
              'priority_audit prio
              'action_errors (hash-ref log-info 'action_errors '())
@@ -1036,11 +1346,24 @@
   (define m (regexp-match #rx"^([0-9]+)_" filename))
   (and m (string->number (cadr m))))
 
+(define (format-bucket-top-tags bucket)
+  (define tags (hash-ref bucket 'top_finding_tags '()))
+  (if (null? tags)
+      "(none)"
+      (string-join
+       (for/list ([t (in-list tags)])
+         (format "~a(~a)" (car t) (cadr t)))
+       ", ")))
+
+(define (format-signed-elo n)
+  (if (>= n 0) (format "+~a" n) (format "~a" n)))
+
 (define (run-aiarena-forensic-analysis! #:dir [dir-in DEFAULT-CACHE-DIR]
                                         #:fetch? [fetch? #f]
                                         #:match-ids [explicit-match-ids '()]
                                         #:since-match [since-match #f]
                                         #:bot-ids [bot-ids #f]
+                                        #:matchup-filter [matchup-filter #f]
                                         #:limit [limit #f]
                                         #:json-out [json-out #f]
                                         #:token [token DEFAULT-TOKEN]
@@ -1050,6 +1373,11 @@
   (make-directory* out-dir)
   (define active-bots (or bot-ids '(1458 1459 1460 1461)))
   (define bot-filter-active? (and bot-ids #t))
+  (define eff-matchup-filter
+    (cond
+      [(string? matchup-filter) (parse-matchup-filter matchup-filter)]
+      [(list? matchup-filter) matchup-filter]
+      [else #f]))
 
   (when fetch?
     (fetch-aiarena-matches! out-dir
@@ -1117,48 +1445,70 @@
         (take-right filtered-mids-2 limit)
         filtered-mids-2))
 
-  (define reports
+  (define (analyze-and-filter-report thunk)
+    (cond
+      [(or quiet? (not eff-matchup-filter))
+       (thunk #t)]
+      [else
+       (define buf (open-output-string))
+       (define rep
+         (parameterize ([current-output-port buf])
+           (thunk #f)))
+       (when (matchup-matches-filter? rep eff-matchup-filter)
+         (display (get-output-string buf)))
+       rep]))
+
+  (define raw-reports
     (append
      (for/list ([mid (in-list final-mids)])
        (define mid-str (number->string mid))
        (define rp (hash-ref replay-by-id mid #f))
        (define lp (build-path out-dir (format "~a_match_log.zip" mid)))
        (define meta (hash-ref meta-by-id mid (hasheq)))
-       (analyze-single-match-forensics #:match-id mid-str
-                                       #:replay-path rp
-                                       #:log-zip-path (and (file-exists? lp) lp)
-                                       #:meta meta
-                                       #:with-sidecar? with-sidecar?
-                                       #:quiet? quiet?))
+       (analyze-and-filter-report
+        (lambda (direct-print?)
+          (analyze-single-match-forensics #:match-id mid-str
+                                          #:replay-path rp
+                                          #:log-zip-path (and (file-exists? lp) lp)
+                                          #:meta meta
+                                          #:with-sidecar? with-sidecar?
+                                          #:quiet? (and quiet? direct-print?)))))
      (if (and (null? explicit-match-ids) (not since-match))
          (for/list ([rp (in-list (reverse standalone-replays))])
            (define fn (path->string (file-name-from-path rp)))
-           (analyze-single-match-forensics #:match-id fn
-                                           #:replay-path rp
-                                           #:with-sidecar? with-sidecar?
-                                           #:quiet? quiet?))
+           (analyze-and-filter-report
+            (lambda (direct-print?)
+              (analyze-single-match-forensics #:match-id fn
+                                              #:replay-path rp
+                                              #:with-sidecar? with-sidecar?
+                                              #:quiet? (and quiet? direct-print?)))))
          '())))
 
-  ;; Aggregate Win/Loss/Finding Rollup
-  (define wins 0)
-  (define losses 0)
-  (define ties 0)
-  (define other 0)
+  (define reports
+    (if eff-matchup-filter
+        (filter (lambda (r) (matchup-matches-filter? r eff-matchup-filter)) raw-reports)
+        raw-reports))
+
+  ;; Aggregate Per-Bot, Per-Race & 9-Matchup Rollups
+  (define matchup-summary (summarize-reports-by-matchup reports))
+  (define overall-bucket (hash-ref matchup-summary 'overall))
   (define finding-freq (make-hash))
   (define by-bot (make-hash))
 
   (for ([r (in-list reports)])
     (define res (string-upcase (format "~a" (hash-ref r 'result "UNKNOWN"))))
     (define bname (hash-ref r 'our_bot "Mothman"))
-    (define brec (hash-ref! by-bot bname (lambda () (make-hasheq '((w . 0) (l . 0) (t . 0) (o . 0))))))
+    (define brec (hash-ref! by-bot bname (lambda () (make-hasheq '((w . 0) (l . 0) (t . 0) (o . 0) (elo . 0))))))
     (cond
-      [(string=? res "WIN")  (set! wins (add1 wins))   (hash-update! brec 'w add1 0)]
-      [(string=? res "LOSS") (set! losses (add1 losses)) (hash-update! brec 'l add1 0)]
-      [(string=? res "TIE")  (set! ties (add1 ties))   (hash-update! brec 't add1 0)]
-      [else                  (set! other (add1 other)) (hash-update! brec 'o add1 0)])
+      [(string=? res "WIN")  (hash-update! brec 'w add1 0)]
+      [(string=? res "LOSS") (hash-update! brec 'l add1 0)]
+      [(string=? res "TIE")  (hash-update! brec 't add1 0)]
+      [else                  (hash-update! brec 'o add1 0)])
+    (let ([ed (hash-ref r 'elo_change 0)])
+      (when (real? ed)
+        (hash-update! brec 'elo (lambda (prev) (+ prev ed)) 0)))
     (for ([f (in-list (hash-ref r 'findings '()))])
-      (define tag (car (string-split f ":")))
-      (hash-update! finding-freq tag add1 0)))
+      (hash-update! finding-freq (extract-finding-tag f) add1 0)))
 
   (define out-json-path
     (cond
@@ -1168,23 +1518,103 @@
 
   (make-directory* (or (path-only out-json-path) out-dir))
   (call-with-output-file out-json-path #:exists 'replace
-    (lambda (out) (write-json reports out)))
+    (lambda (out)
+      (write-json (hasheq 'matchup_summary matchup-summary
+                          'reports reports)
+                  out)))
 
   (unless quiet?
+    (define ov-w (hash-ref overall-bucket 'wins 0))
+    (define ov-l (hash-ref overall-bucket 'losses 0))
+    (define ov-t (hash-ref overall-bucket 'ties 0))
+    (define ov-o (hash-ref overall-bucket 'other 0))
+    (define ov-wr (hash-ref overall-bucket 'win_rate_pct 0.0))
+    (define ov-elo (hash-ref overall-bucket 'net_elo_delta 0))
+    (define ex-w (hash-ref overall-bucket 'ext_wins 0))
+    (define ex-l (hash-ref overall-bucket 'ext_losses 0))
+    (define ex-t (hash-ref overall-bucket 'ext_ties 0))
+    (define ex-wr (hash-ref overall-bucket 'ext_win_rate_pct 0.0))
+    (define ex-elo (hash-ref overall-bucket 'ext_elo_delta 0))
+    (define sf-w (hash-ref overall-bucket 'self_wins 0))
+    (define sf-l (hash-ref overall-bucket 'self_losses 0))
+    (define sf-t (hash-ref overall-bucket 'self_ties 0))
     (printf "\n==================================================================================================\n")
-    (printf "FORENSIC ROLLUP (~a matches) | Record: ~aW - ~aL - ~aT (~a pending/other)\n"
-            (length reports) wins losses ties other)
+    (printf "FORENSIC ROLLUP (~a matches~a)\n"
+            (length reports)
+            (if eff-matchup-filter (format ", matchup=~a" (string-join eff-matchup-filter ",")) ""))
+    (printf "  1. Overall:       ~aW - ~aL - ~aT (~a% WR, Net ELO ~a, ~a pending) | Ext-Only: ~aW - ~aL - ~aT (~a% WR, Ext ELO ~a) | Self-Play: ~aW - ~aL - ~aT\n"
+            ov-w ov-l ov-t ov-wr (format-signed-elo ov-elo) ov-o
+            ex-w ex-l ex-t ex-wr (format-signed-elo ex-elo)
+            sf-w sf-l sf-t)
+    (printf "  2. Per-Bot Record:\n")
     (for ([bname (in-list (sort (hash-keys by-bot) string<?))])
       (define br (hash-ref by-bot bname))
-      (printf "  * ~a: ~aW - ~aL - ~aT~a\n"
-              bname
+      (printf "     * ~a: ~aW - ~aL - ~aT (ELO ~a)~a\n"
+              (~a bname #:min-width 10)
               (hash-ref br 'w 0)
               (hash-ref br 'l 0)
               (hash-ref br 't 0)
+              (format-signed-elo (hash-ref br 'elo 0))
               (if (> (hash-ref br 'o 0) 0) (format " (~a pending)" (hash-ref br 'o 0)) "")))
+    (printf "  3. Per-Race Rollup (Dedicated + Mothman-X Rolled):\n")
+    (for ([rb (in-list (hash-ref matchup-summary 'race_rows '()))])
+      (define n-m (hash-ref rb 'matches 0))
+      (printf "     * ~a: Ext ~aW-~aL-~aT (~a% WR) | Self ~aW-~aL-~aT | NetELO ~a (Ext ~a) | AvgPkW=~a | AvgMaxFloat=~aM | AvgSB=~a | AvgROI=~a | Top: ~a\n"
+              (~a (hash-ref rb 'label "?") #:min-width 7)
+              (hash-ref rb 'ext_wins 0)
+              (hash-ref rb 'ext_losses 0)
+              (hash-ref rb 'ext_ties 0)
+              (if (> n-m 0) (hash-ref rb 'ext_win_rate_pct 0.0) "-")
+              (hash-ref rb 'self_wins 0)
+              (hash-ref rb 'self_losses 0)
+              (hash-ref rb 'self_ties 0)
+              (format-signed-elo (hash-ref rb 'net_elo_delta 0))
+              (format-signed-elo (hash-ref rb 'ext_elo_delta 0))
+              (if (> n-m 0) (hash-ref rb 'avg_peak_workers 0.0) "-")
+              (if (> n-m 0) (hash-ref rb 'avg_max_mineral_float 0.0) "-")
+              (if (> n-m 0) (hash-ref rb 'avg_supply_blocked_snapshots 0.0) "-")
+              (if (> n-m 0) (hash-ref rb 'avg_combat_roi 0.0) "-")
+              (format-bucket-top-tags rb)))
+    (printf "  4. 9-Matchup Diagnostic Table:\n")
+    (printf "     Matchup | Ext W-L-T (WR%)      | Self W-L | Net/Ext ELO | AvgPkW | AvgMaxFloat | AvgSB | AvgROI | Top Finding Tags\n")
+    (printf "     --------+----------------------+----------+-------------+--------+-------------+-------+--------+-----------------------------------------\n")
+    (for ([mb (in-list (hash-ref matchup-summary 'matchup_rows '()))])
+      (define n-m (hash-ref mb 'matches 0))
+      (define ext-col
+        (format "~a-~a-~a (~a%)"
+                (hash-ref mb 'ext_wins 0)
+                (hash-ref mb 'ext_losses 0)
+                (hash-ref mb 'ext_ties 0)
+                (if (> (+ (hash-ref mb 'ext_wins 0)
+                          (hash-ref mb 'ext_losses 0)
+                          (hash-ref mb 'ext_ties 0))
+                       0)
+                    (hash-ref mb 'ext_win_rate_pct 0.0)
+                    "0.0")))
+      (define self-col
+        (format "~a-~a~a"
+                (hash-ref mb 'self_wins 0)
+                (hash-ref mb 'self_losses 0)
+                (if (> (hash-ref mb 'self_ties 0) 0)
+                    (format "-~a" (hash-ref mb 'self_ties 0))
+                    "")))
+      (define elo-col
+        (format "~a/~a"
+                (format-signed-elo (hash-ref mb 'net_elo_delta 0))
+                (format-signed-elo (hash-ref mb 'ext_elo_delta 0))))
+      (printf "     ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+              (~a (hash-ref mb 'key "?") #:min-width 7)
+              (~a ext-col #:min-width 20)
+              (~a self-col #:min-width 8)
+              (~a elo-col #:min-width 11)
+              (~a (if (> n-m 0) (hash-ref mb 'avg_peak_workers 0.0) "-") #:min-width 6)
+              (~a (if (> n-m 0) (format "~aM" (hash-ref mb 'avg_max_mineral_float 0.0)) "-") #:min-width 11)
+              (~a (if (> n-m 0) (hash-ref mb 'avg_supply_blocked_snapshots 0.0) "-") #:min-width 5)
+              (~a (if (> n-m 0) (hash-ref mb 'avg_combat_roi 0.0) "-") #:min-width 6)
+              (format-bucket-top-tags mb)))
     (when (> (hash-count finding-freq) 0)
       (printf "  Top Root-Cause Finding Frequencies: ~s\n" (top-k-counts finding-freq 12)))
-    (printf "[OK] Wrote ~a forensic match report(s) to ~a\n"
+    (printf "[OK] Wrote ~a forensic match report(s) + matchup_summary to ~a\n"
             (length reports)
             (path->string out-json-path)))
 
@@ -1200,6 +1630,7 @@
   (define match-ids-str #f)
   (define since-match-num #f)
   (define bots-filter-str #f)
+  (define matchup-filter-str #f)
   (define limit-num #f)
   (define cache-dir-str (path->string DEFAULT-CACHE-DIR))
   (define json-out-str #f)
@@ -1217,6 +1648,8 @@
                       (set! since-match-num (string->number sm))]
    [("--bots" "--bot") bf "Comma-separated bot filter: Z,T,P,X,R or bot IDs"
                        (set! bots-filter-str bf)]
+   [("--matchup" "--matchups") mf "Comma-separated matchup filter (e.g. TvP,ZvT or T for all Tv*, Z for Zv*)"
+                               (set! matchup-filter-str mf)]
    [("--limit") lim "Max recent matches to fetch/analyze"
                 (set! limit-num (string->number lim))]
    [("--dir") d "Cache directory for replays and match logs (default: replays/aiarena_live_cache)"
@@ -1231,6 +1664,7 @@
     #:match-ids (parse-match-ids-str match-ids-str)
     #:since-match since-match-num
     #:bot-ids (and bots-filter-str (parse-bot-filter bots-filter-str))
+    #:matchup-filter (parse-matchup-filter matchup-filter-str)
     #:limit limit-num
     #:json-out json-out-str
     #:with-sidecar? use-sidecar?)))

@@ -30,6 +30,7 @@ Layer 2 (Perception Grid, Placement Solvers & Per-Tactic Modules)
   lib/tactics/zerg-burrow-micro.rkt [TR] -> sc2-types, sc2-game-constants, sc2-combat-eval
   lib/tactics/stealth-shimmer-response.rkt [TR] -> sc2-types, sc2-game-constants
   lib/tactics/terran-addon-swap.rkt -> sc2-common, sc2-game-constants
+  lib/tactics/disruptor-micro.rkt [TR] -> sc2-types, sc2-geometry, sc2-game-constants
         ^
 Layer 1 (Typed Domain Libraries & Build Orders)
   lib/sc2-combat-eval.rkt [TR] -> sc2-types, sc2-game-constants, sc2-pathing (compute-concave-arc), perception-grid (combat-measure)
@@ -50,7 +51,7 @@ Layer 0 (Typed Domain Types, Wire Witnesses & LotV Game Constants)
 
 Supporting audit, verification, tooling, and packaging modules sit alongside Layers 3–4 without adding cycles into Layers 0–2:
 - Verification & audits: `lib/state-machine-verifier.rkt`, `lib/bot-crash-fuzzer.rkt` (including `step-sc2-mastermind!` and `fuzz-sc2-mastermind-suite!`), `lib/pro-replay-starvation-audit.rkt`, `lib/sc2-proto-wire-verifier.rkt`, `lib/sc2-mpq-replay-parser.rkt`.
-- DSL compiler, tooling & ladder packaging: `compiler/syntax.rkt` (`#lang sc-bot` posture/state-machine/coeffect-grade syntax), `tools/*.rkt`, `ladder/build-aiarena-zip.rkt` (builds only the 4 active ladder archives `ladder/Mothman-{X,Z,T,P}.zip` plus `ladder/.cache/mothman_standalone_elf`; legacy `Mothman.zip` and `Mothman-R.zip` are retired).
+- DSL compiler, tooling & ladder packaging: `compiler/syntax.rkt` (`#lang sc-bot` posture/state-machine/coeffect-grade syntax), `tools/*.rkt` (including `tools/analyze-aiarena-replays.rkt` with canonical 9-matchup `ZvZ`–`PvP` telemetry & `--matchup` filtering), `ladder/build-aiarena-zip.rkt` (builds only the 4 active ladder archives `ladder/Mothman-{X,Z,T,P}.zip` plus `ladder/.cache/mothman_standalone_elf`; legacy `Mothman.zip` and `Mothman-R.zip` are retired).
 
 ---
 
@@ -59,7 +60,7 @@ Supporting audit, verification, tooling, and packaging modules sit alongside Lay
 Mixing `#lang typed/racket/base` libraries with untyped `#lang racket/base` callers introduces specific contract boundary rules that the codebase handles uniformly:
 
 1. **Untyped Observation/Unit Hash Access (`typed/racket/unsafe` + `dyn-hash-ops`)**:
-   Typed Racket's `hash/c` contract cannot cleanly wrap arbitrary untyped mutable/immutable hashes when passing heterogeneous observation payloads across module boundaries. Typed modules (`lib/sc2-combat-eval.rkt`, `lib/tactics/zerg-burrow-micro.rkt`, `lib/tactics/stealth-shimmer-response.rkt`, and `lib/sc2-game-constants.rkt`) therefore isolate dynamic hash operations inside a local `(module dyn-hash-ops racket/base ...)` submodule (`dyn-hash-ref`, `dyn-hash-has-key?`, `dyn-hash-set!`) imported through `unsafe-require/typed` with total `Any` signatures. Callers still receive deterministic fallback coercion through `lib/sc2-types.rkt` helpers (`safe-real`, `safe-exact-int`, `safe-nonneg-int`).
+   Typed Racket's `hash/c` contract cannot cleanly wrap arbitrary untyped mutable/immutable hashes when passing heterogeneous observation payloads across module boundaries. Typed modules (`lib/sc2-combat-eval.rkt`, `lib/tactics/zerg-burrow-micro.rkt`, `lib/tactics/stealth-shimmer-response.rkt`, `lib/tactics/disruptor-micro.rkt`, and `lib/sc2-game-constants.rkt`) therefore isolate dynamic hash operations inside a local `(module dyn-hash-ops racket/base ...)` submodule (`dyn-hash-ref`, `dyn-hash-has-key?`, `dyn-hash-set!`) imported through `unsafe-require/typed` with total `Any` signatures. Callers still receive deterministic fallback coercion through `lib/sc2-types.rkt` helpers (`safe-real`, `safe-exact-int`, `safe-nonneg-int`).
 
 2. **Higher-Order Callback & Grid Accessor Wrapping**:
    When untyped code passes procedures into Typed Racket (for example, map grid lookup callbacks or variable-arity frame hooks), exporting/importing raw `Any` function values can fail higher-order chaperone checks.
@@ -174,7 +175,8 @@ Typed combat engine covering:
 - `lib/tactics/zerg-burrow-micro.rkt`: Tunneling Claws Roach regen & escape (`execute-roach-tunneling-burrow-micro`), Infestor burrow-cast micro (`execute-infestor-burrow-cast-micro`), `lurker-burrow-action`, `drone-evade-burrow-action`.
 - `lib/tactics/stealth-shimmer-response.rkt`: hidden/cloaked shimmer and burrow-ripple detection (`shimmer-target-unit?`, `mobile-or-static-detector-nearby?`, `execute-shimmer-and-burrow-ripple-response` emitting AoE skillshots or a single highest-energy Orbital Command `scanner-sweep`).
 - `lib/tactics/terran-addon-swap.rkt`: lift-off & add-on swap planner (`plan-terran-addon-swap`) enforcing a `448`-frame relift cooldown, 1-to-1 claim lock, donor landing offset `(donor-x, donor-y + 4.0)`, and an `18.0`-tile enemy threat abort guard.
-- `lib/tactics-sim.rkt`: unified `#lang racket/base` facade re-exporting `(except-in "sc2-geometry.rkt" aabb-overlaps?)`, `sc2-pathing.rkt`, `sc2-placement.rkt`, `sc2-combat-eval.rkt`, and all 5 `lib/tactics/*.rkt` modules.
+- `lib/tactics/disruptor-micro.rkt`: pure `#lang typed/racket/base` Protoss Disruptor (`694`) & Purification Nova (`733` / Ability `2346`) micro engine (`plan-disruptor-nova-casts` with `145 (+55 shield)` scoring, `2.0x` friendly-fire avoidance, `>= 4.0`-tile volley de-confliction; `steer-purification-novas` homing; weaponless `kite-disruptor-casters` standoff/retreat; `plan-anti-nova-scatter` velocity-ray split & emergency Blink `< 2.75`; `evaluate-disruptor-snipe-and-cooldowns` `480`-frame tracker; unified `step-disruptor-tactical-micro!`).
+- `lib/tactics-sim.rkt`: unified `#lang racket/base` facade re-exporting `(except-in "sc2-geometry.rkt" aabb-overlaps?)`, `sc2-pathing.rkt`, `sc2-placement.rkt`, `sc2-combat-eval.rkt`, and all 6 `lib/tactics/*.rkt` modules.
 
 ---
 

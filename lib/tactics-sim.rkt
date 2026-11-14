@@ -14,7 +14,8 @@
          "tactics/arena-minimax.rkt"
          "tactics/zerg-burrow-micro.rkt"
          "tactics/stealth-shimmer-response.rkt"
-         "tactics/terran-addon-swap.rkt")
+         "tactics/terran-addon-swap.rkt"
+         "tactics/disruptor-micro.rkt")
 
 (provide
  (all-from-out "sc2-geometry.rkt")
@@ -25,4 +26,5 @@
  (all-from-out "tactics/arena-minimax.rkt")
  (all-from-out "tactics/zerg-burrow-micro.rkt")
  (all-from-out "tactics/stealth-shimmer-response.rkt")
- (all-from-out "tactics/terran-addon-swap.rkt"))
+ (all-from-out "tactics/terran-addon-swap.rkt")
+ (all-from-out "tactics/disruptor-micro.rkt"))

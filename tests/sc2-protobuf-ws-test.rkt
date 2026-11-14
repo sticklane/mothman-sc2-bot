@@ -397,9 +397,16 @@
                    bug9-cmds))
 
 ;; Bug #10: Commanded builder worker is excluded from saturate-workers-and-gas-commands
+;; (decoded-obs already has completed SpawningPool 101, so building EvolutionChamber 90 exercises worker exclusion
+;;  while verifying duplicate singleton SpawningPool wire builds are blocked!)
+(define bug10-dup-pool-cmds
+  (translate-bot-actions->sc2-raw-commands '((build spawning-pool 36.0 36.0))
+                                           decoded-obs))
+(check-true "bug10-duplicate-singleton-spawning-pool-blocked"
+            (null? bug10-dup-pool-cmds))
 (define bug10-commanded (mutable-set))
 (define _bug10-build-cmds
-  (translate-bot-actions->sc2-raw-commands '((build spawning-pool 36.0 36.0))
+  (translate-bot-actions->sc2-raw-commands '((build evolution-chamber 36.0 36.0))
                                            decoded-obs
                                            #:commanded-workers bug10-commanded))
 (check-true "bug10-builder-worker-recorded-in-commanded-set"
@@ -880,16 +887,17 @@
          ;; Enemy Roach (110, tag 999) far away at (120, 120)
          (make-test-unit 999 110 4 120.0 120.0))))
 
-(define uu-cmds
+(define unseen-lurker-build-obs
+  (make-test-obs
+   2400 400 300
+   (list (make-test-unit 900 86 1 32.0 32.0)
+         (make-test-unit 901 104 1 34.0 32.0)
+         (make-test-unit 902 91 1 36.0 34.0))))
+
+(define uu-build-cmds
   (translate-bot-actions->sc2-raw-commands
-   '((build lurker-den 37.0 35.0)
-     (research seismic-spines)
-     (cast-spell 903 build-interceptors 903)
-     (attack-unit 911 999)
-     (attack-unit 912 999)
-     (attack-unit 913 999)
-     (attack-unit 914 999))
-   unseen-units-obs))
+   '((build lurker-den 37.0 35.0))
+   unseen-lurker-build-obs))
 
 (check-true "lurker-den-built-by-drone-901-at-point-1163"
             (ormap (lambda (c)
@@ -897,7 +905,28 @@
                           (= (sc2-raw-unit-command-ability-id c) 1163)
                           (equal? (sc2-raw-unit-command-unit-tags c) '(901))
                           (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
-                   uu-cmds))
+                   uu-build-cmds))
+
+(define uu-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((research seismic-spines)
+     (cast-spell 903 build-interceptors 903)
+     (attack-unit 911 999)
+     (attack-unit 912 999)
+     (attack-unit 913 999)
+     (attack-unit 914 999))
+   unseen-units-obs))
+
+(define uu-dup-lurker-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((build lurker-den 37.0 35.0))
+   unseen-units-obs))
+(check-true "duplicate-singleton-lurker-den-blocked"
+            (not (ormap (lambda (c)
+                          (and (sc2-raw-unit-command? c)
+                               (= (sc2-raw-unit-command-ability-id c) 1163)))
+                        uu-dup-lurker-cmds)))
+
 (check-true "seismic-spines-researched-at-lurker-den-902-ability-3710"
             (ormap (lambda (c)
                      (and (sc2-raw-unit-command? c)

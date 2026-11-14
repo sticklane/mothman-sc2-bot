@@ -1101,29 +1101,91 @@
           (set-add s uid)
           s)))
 
-  ;; 1. Coalesce per-unit commands sharing the same equivalence key
+  ;; 1. Coalesce per-unit commands sharing the same equivalence key, keeping spatial
+  ;;    movement/kite/attack-pos/retreat groups within <= 20.0 tiles so distant
+  ;;    units (e.g. retreating Overlords) are never dropped from viewport box selection.
+  (define COALESCE-MAX-UNIT-SPAN 20.0)
+  (define uid->pos (make-hasheqv))
+  (for ([u (in-list ally-units)] #:when (hash? u))
+    (define uid (hash-ref u 'id #f))
+    (define ux (hash-ref u 'x #f))
+    (define uy (hash-ref u 'y #f))
+    (when (and (exact-integer? uid) (real? ux) (real? uy))
+      (hash-set! uid->pos uid (cons (exact->inexact ux) (exact->inexact uy)))))
+  (define (spatial-coalesce-op? op)
+    (memq op '(attack-pos move kite retreat)))
+  (define (pos-dist2d p1 p2)
+    (sqrt (+ (sqr (- (car p1) (car p2)))
+             (sqr (- (cdr p1) (cdr p2))))))
+  (define (spatial-cluster-fits? c-pts pos)
+    (or (not pos)
+        (for/and ([p (in-list c-pts)])
+          (<= (pos-dist2d p pos) COALESCE-MAX-UNIT-SPAN))))
+
   (define key->uids (make-hash))
   (define key->template (make-hash))
-  (for ([act (in-list candidate-actions)])
-    (define k (unit-command-coalesce-key act))
-    (when k
-      (unless (hash-has-key? key->template k)
-        (hash-set! key->template k act))
-      (hash-set! key->uids k
-                 (append (hash-ref key->uids k '()) (extract-action-uids act)))))
+  (define key->clusters (make-hash))
+  (define next-cluster-id 0)
+  (define action-bucket-seq
+    (for/list ([act (in-list candidate-actions)])
+      (define k (unit-command-coalesce-key act))
+      (cond
+        [(not k) (cons #f act)]
+        [(not (spatial-coalesce-op? (car act)))
+         (unless (hash-has-key? key->template k)
+           (hash-set! key->template k act))
+         (hash-set! key->uids k
+                    (append (hash-ref key->uids k '()) (extract-action-uids act)))
+         (cons k act)]
+        [else
+         (define act-buckets '())
+         (for ([uid (in-list (extract-action-uids act))])
+           (define pos (hash-ref uid->pos uid #f))
+           (define clusters (hash-ref key->clusters k '()))
+           (define matched
+             (for/first ([cl (in-list clusters)]
+                         #:when (spatial-cluster-fits? (unbox (car cl)) pos))
+               cl))
+           (define bkey
+             (cond
+               [matched
+                (when pos
+                  (set-box! (car matched) (cons pos (unbox (car matched)))))
+                (cdr matched)]
+               [else
+                (define nk (list 'spatial-bucket next-cluster-id k))
+                (set! next-cluster-id (add1 next-cluster-id))
+                (hash-set! key->clusters k
+                           (append clusters (list (cons (box (if pos (list pos) '())) nk))))
+                nk]))
+           (unless (hash-has-key? key->template bkey)
+             (hash-set! key->template bkey (rebuild-coalesced-action act (list uid))))
+           (hash-set! key->uids bkey (append (hash-ref key->uids bkey '()) (list uid)))
+           (unless (member bkey act-buckets)
+             (set! act-buckets (append act-buckets (list bkey)))))
+         (cons 'multi-buckets act-buckets)])))
 
   (define emitted-keys (mutable-set))
   (define coalesced-list '())
-  (for ([act (in-list candidate-actions)])
-    (define k (unit-command-coalesce-key act))
+  (for ([entry (in-list action-bucket-seq)])
+    (define tag (car entry))
+    (define payload (cdr entry))
     (cond
-      [(not k)
-       (set! coalesced-list (cons act coalesced-list))]
-      [(not (set-member? emitted-keys k))
-       (set-add! emitted-keys k)
-       (define uids (remove-duplicates (hash-ref key->uids k '())))
+      [(not tag)
+       (set! coalesced-list (cons payload coalesced-list))]
+      [(eq? tag 'multi-buckets)
+       (for ([bk (in-list payload)])
+         (unless (set-member? emitted-keys bk)
+           (set-add! emitted-keys bk)
+           (define uids (remove-duplicates (hash-ref key->uids bk '())))
+           (set! coalesced-list
+                 (cons (rebuild-coalesced-action (hash-ref key->template bk) uids)
+                       coalesced-list))))]
+      [(not (set-member? emitted-keys tag))
+       (set-add! emitted-keys tag)
+       (define uids (remove-duplicates (hash-ref key->uids tag '())))
        (set! coalesced-list
-             (cons (rebuild-coalesced-action (hash-ref key->template k act) uids)
+             (cons (rebuild-coalesced-action (hash-ref key->template tag payload) uids)
                    coalesced-list))]))
   (define ordered-coalesced (reverse coalesced-list))
 

@@ -7,6 +7,7 @@
          racket/file
          racket/path
          racket/port
+         racket/runtime-path
          racket/string
          racket/system
          "../compiler/syntax.rkt"
@@ -128,6 +129,8 @@
                     compute-shadow-ledger)
          "../lib/sc2-proto-wire-verifier.rkt"
          "../tools/fuzz-sc2-protobuf-output.rkt")
+
+(define-runtime-path analyze-replays-path "../tools/analyze-aiarena-replays.rkt")
 
 (define total-assertions 0)
 (define suite-start-total-ms (current-inexact-monotonic-milliseconds))
@@ -9080,19 +9083,32 @@
   (assert-eq! (wire-cmd-priority-tier (sc2-raw-unit-command 558 #f 0 '(4201) #f)) 0
               "Supply Depot Raise (558) must be Tier 0 (P0)")
 
-  ;; Reset wire state with low loop=2: enemy at 8.0 tiles (> 5.5) + friendly unit <= 3.5 requesting transit -> lower (556)
-  (define dep-lower-units
+  ;; Fast-breach <= 17.0 guard: raised depot (19) with enemy Zergling (105) at 8.0 tiles
+  ;; stays RAISED (no Lower 556) even when a friendly Marine requests transit; once the enemy
+  ;; clears beyond 17.0 tiles (18.5 tiles at loop=3), Lower (556) fires.
+  (define dep-hold-units
     (list (mk-s40-unit 4201 19 35.0 46.0 #:radius 1.25 #:hp 400.0 #:hp-max 400.0)
           (mk-s40-unit 4210 48 33.0 46.0
                        #:orders (list (sc2-unit-order 16 (sc2-point3d 45.0 46.0 8.0) 0 0.0)))
           (mk-s40-unit 9210 105 43.0 46.0 #:alliance 4 #:hp 35.0 #:hp-max 35.0)))
-  (assert-true! (friendly-unit-requesting-depot-transit? 35.0 46.0 dep-lower-units)
+  (assert-true! (friendly-unit-requesting-depot-transit? 35.0 46.0 dep-hold-units)
                 "Moving Marine within 3.5 tiles of depot must register as requesting depot transit")
+  (define cmds-40-hold-raised
+    (translate-bot-actions->sc2-raw-commands '() (mk-s40-obs 2 dep-hold-units)))
+  (assert-true! (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 556)))
+                            cmds-40-hold-raised))
+                "Raised depot (19) with enemy Zergling at 8.0 tiles (<= 17.0) must stay raised despite friendly transit")
+
+  (define dep-lower-units
+    (list (mk-s40-unit 4201 19 35.0 46.0 #:radius 1.25 #:hp 400.0 #:hp-max 400.0)
+          (mk-s40-unit 4210 48 33.0 46.0
+                       #:orders (list (sc2-unit-order 16 (sc2-point3d 45.0 46.0 8.0) 0 0.0)))
+          (mk-s40-unit 9210 105 53.5 46.0 #:alliance 4 #:hp 35.0 #:hp-max 35.0)))
   (define cmds-40-lower
-    (translate-bot-actions->sc2-raw-commands '() (mk-s40-obs 2 dep-lower-units)))
+    (translate-bot-actions->sc2-raw-commands '() (mk-s40-obs 3 dep-lower-units)))
   (assert-true! (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 556)))
                        cmds-40-lower)
-                "Raised depot (19) with enemy at 8.0 tiles (> 5.5) and transiting friendly unit <= 3.5 must emit Lower (556)")
+                "Raised depot (19) with enemy Zergling at 18.5 tiles (> 17.0) and transiting friendly unit <= 3.5 must emit Lower (556)")
 
   ;; Lowered depot refuses to Raise (558) while a friendly ground unit stands on 2x2 footprint (max(|dx|,|dy|) <= 1.3)
   (define dep-block-units
@@ -9756,6 +9772,516 @@
                                   'enemy-units '())))
   (assert-true! (string-prefix? (hash-ref (hash-ref res-log22 'telemetry) 'state-log-line)
                                 "[SCBOT_STATE] f=22 ")))
+
+;; =============================================================================
+;; Suite 43: Disruptor/Nova Micro, Round 1-3 Macro/Micro Fixes & 9-Matchup Replay Diagnostics
+;; =============================================================================
+(run-suite "43. Disruptor/Nova Micro, Macro/Micro Regression Fixes & 9-Matchup Replay Diagnostics"
+  ;; 43.1 Disruptor (694) & Purification Nova (733 / Ability 2346) Micro
+  (assert-eq! DISRUPTOR-UNIT-TYPE-ID 694)
+  (assert-eq! DISRUPTOR-PHASED-UNIT-TYPE-ID 733)
+  (assert-eq! PURIFICATION-NOVA-ABILITY-ID 2346)
+  (assert-true! (= (hash-ref (sc2-unit-combat-stats 'disruptor) 'ground-dps 0.0) 0.0)
+                "Weaponless Disruptor ground-dps must remain 0.0")
+  (define enemy-nova-hash (hash 'id 9199 'type 'disruptor-phased 'x 35.0 'y 45.0 'hp 100.0))
+  (assert-true! (purification-nova-unit? enemy-nova-hash)
+                "Enemy disruptor-phased must be recognized as Purification Nova")
+  (assert-true! (not (sc2-enemy-unit-targetable? enemy-nova-hash))
+                "Invulnerable enemy disruptor-phased must be excluded by sc2-enemy-unit-targetable?")
+
+  ;; +55 shield splash value vs 2.0x friendly-fire penalty gate
+  (define stalker-cluster
+    (list (hash 'id 9001 'type 'stalker 'x 50.0 'y 40.0 'hp 80.0 'shields 80.0)
+          (hash 'id 9002 'type 'stalker 'x 50.6 'y 40.3 'hp 80.0 'shields 80.0)))
+  (define friendly-splash-marines
+    (list (hash 'id 8001 'type 'marine 'x 50.0 'y 40.2 'hp 45.0)
+          (hash 'id 8002 'type 'marine 'x 50.2 'y 39.8 'hp 45.0)
+          (hash 'id 8003 'type 'marine 'x 49.8 'y 40.1 'hp 45.0)
+          (hash 'id 8004 'type 'marine 'x 50.4 'y 40.1 'hp 45.0)))
+  (define sc-clean (score-purification-nova-impact 50.2 40.1 stalker-cluster '()))
+  (define sc-ff (score-purification-nova-impact 50.2 40.1 stalker-cluster friendly-splash-marines))
+  (assert-true! (> (nova-impact-score-net-score sc-clean) DISRUPTOR-MIN-WORTHWHILE-SCORE)
+                "Dual Stalker Nova splash (+55 shield bonus) must clear DISRUPTOR-MIN-WORTHWHILE-SCORE")
+  (assert-true! (< (nova-impact-score-net-score sc-ff) 0.0)
+                "2.0x friendly-fire splash penalty must reject casting onto own Marines")
+
+  ;; >= 4.0-tile volley de-confliction across 2 ready Disruptors
+  (define two-casters
+    (list (hash 'id 8010 'type 'disruptor 'x 40.0 'y 40.0 'hp 100.0 'shields 100.0)
+          (hash 'id 8011 'type 'disruptor 'x 41.0 'y 40.0 'hp 100.0 'shields 100.0)))
+  (define two-enemy-clusters
+    (append stalker-cluster
+            (list (hash 'id 9003 'type 'stalker 'x 50.0 'y 48.0 'hp 80.0 'shields 80.0)
+                  (hash 'id 9004 'type 'stalker 'x 50.5 'y 48.2 'hp 80.0 'shields 80.0))))
+  (define two-plans (plan-disruptor-nova-casts two-casters two-enemy-clusters))
+  (assert-eq! (length two-plans) 2
+              "Two Disruptors vs two separated enemy clusters must emit 2 distinct Nova casts")
+  (define plan-sep
+    (sqrt (+ (sqr (- (nova-cast-plan-tx (first two-plans)) (nova-cast-plan-tx (second two-plans))))
+             (sqr (- (nova-cast-plan-ty (first two-plans)) (nova-cast-plan-ty (second two-plans)))))))
+  (assert-true! (>= plan-sep DISRUPTOR-VOLLEY-DECONFLICT-DIST)
+                "Concurrent Nova cast targets must be de-conflicted by >= 4.0 tiles")
+  (define one-cluster-plans (plan-disruptor-nova-casts two-casters stalker-cluster))
+  (assert-eq! (length one-cluster-plans) 1
+              "Second Disruptor must hold Nova instead of double-splashing single cluster")
+
+  ;; Weaponless caster retreat (no suicide attack-unit) + live step-live-bot-runtime! Nova steering
+  (define kite-close
+    (kite-disruptor-casters
+     (list (hash 'id 8020 'type 'disruptor 'x 42.0 'y 40.0 'hp 100.0 'shields 100.0))
+     (list (hash 'id 9010 'type 'zergling 'x 46.5 'y 40.0 'hp 35.0))
+     #:home-x 24.0 #:home-y 40.0))
+  (assert-true! (and (pair? kite-close)
+                     (andmap (lambda (o) (eq? (disruptor-kite-order-action o) 'move)) kite-close))
+                "Threatened weaponless Disruptor must emit move retreat/standoff, never attack-unit")
+
+  (define rt-dis (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-dis
+    (step-live-bot-runtime!
+     rt-dis
+     (hash 'frame 6800 'minerals 250 'gas 200 'supply-used 64 'supply-cap 78 'supply-left 14
+           'mineral-harvesters 36 'vespene-harvesters 6 'enemy-race 'Protoss
+           'base-x 24.5 'base-y 40.5 'natural-x 38.5 'natural-y 40.5
+           'ally-units (list (hash 'id 8101 'type 'disruptor 'x 40.0 'y 40.0 'hp 100.0 'shields 100.0)
+                             (hash 'id 8102 'type 'disruptor-phased 'x 38.0 'y 55.0 'hp 100.0)
+                             (hash 'id 8103 'type 'stalker 'x 42.0 'y 40.0 'hp 80.0 'shields 80.0))
+           'ally-buildings (list (hash 'id 8100 'type 'nexus 'x 24.5 'y 40.5 'hp 1000 'shields 1000 'build-progress 1.0)
+                                 (hash 'id 8109 'type 'robotics-bay 'x 26.5 'y 42.5 'hp 500 'shields 500 'build-progress 1.0))
+           'enemy-units (list (hash 'id 9101 'type 'stalker 'x 51.0 'y 40.0 'hp 80.0 'shields 80.0)
+                              (hash 'id 9102 'type 'stalker 'x 51.4 'y 40.4 'hp 80.0 'shields 80.0)
+                              (hash 'id 9103 'type 'stalker 'x 51.0 'y 39.6 'hp 80.0 'shields 80.0)
+                              (hash 'id 9104 'type 'adept 'x 40.0 'y 57.5 'hp 70.0 'shields 70.0)
+                              (hash 'id 9105 'type 'adept 'x 40.4 'y 57.5 'hp 70.0 'shields 70.0)
+                              (hash 'id 9199 'type 'disruptor-phased 'x 28.0 'y 28.0 'hp 100.0)))))
+  (define dis-acts (hash-ref res-dis 'actions '()))
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell)
+                                                  (equal? (second a) 8101)
+                                                  (eq? (third a) 'purification-nova)))
+                                 dis-acts)))
+                "Live Mothman-P step must emit Purification Nova cast for ready Disruptor")
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (equal? (second a) 8102)))
+                                 dis-acts)))
+                "Live Mothman-P step must steer active disruptor-phased (733) toward enemy cluster")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit)
+                                             (or (equal? (second a) 8101) (equal? (third a) 9199))))
+                            dis-acts))
+                "Live Mothman-P must never issue attack-unit for weaponless Disruptor or onto invulnerable Nova")
+  (assert-true! (null? (plan-disruptor-nova-casts
+                        (list (hash 'id 8101 'type 'disruptor 'x 40.0 'y 40.0 'hp 100.0 'shields 100.0)
+                              (hash 'id 8102 'type 'disruptor-phased 'x 48.0 'y 40.0 'hp 100.0))
+                        (list (hash 'id 9101 'type 'stalker 'x 51.0 'y 40.0 'hp 80.0 'shields 80.0)
+                              (hash 'id 9102 'type 'stalker 'x 51.4 'y 40.4 'hp 80.0 'shields 80.0))))
+                "Volley deconfliction must suppress overlapping 2nd Nova cast when live Nova already covers cluster")
+
+  ;; Anti-Nova scatter + emergency full-HP Stalker Blink (< 2.75) + 480-frame cooldown / active-cast snipe
+  (define dis-tr (make-disruptor-tactical-tracker))
+  (define dodge-allies
+    (append
+     (list (hash 'id 8201 'type 'stalker 'x 47.5 'y 40.0 'hp 80.0 'shields 80.0))
+     (for/list ([i (in-range 14)])
+       (hash 'id (+ 8202 i) 'type 'marine
+             'x (+ 46.2 (* 0.15 (modulo i 5)))
+             'y (+ 39.0 (* 0.5 (quotient i 5)))
+             'hp 45.0))))
+  (define dodge-enemies-f1
+    (list (hash 'id 9201 'type 'disruptor 'x 50.0 'y 40.0 'hp 100.0 'shields 100.0)
+          (hash 'id 9202 'type 'disruptor-phased 'x 52.0 'y 40.0 'hp 100.0)))
+  (define dodge-enemies-f2
+    (list (hash 'id 9201 'type 'disruptor 'x 50.0 'y 40.0 'hp 100.0 'shields 100.0)
+          (hash 'id 9202 'type 'disruptor-phased 'x 49.6 'y 40.0 'hp 100.0)))
+  (void (plan-anti-nova-scatter dodge-allies dodge-enemies-f1 #:tracker dis-tr #:current-frame 100 #:blink-researched? #t))
+  (define dodge-orders-f2
+    (plan-anti-nova-scatter dodge-allies dodge-enemies-f2 #:tracker dis-tr #:current-frame 101 #:blink-researched? #t))
+  (assert-true! (not (not (ormap (lambda (d) (and (= (anti-nova-dodge-order-unit-tag d) 8201)
+                                                  (eq? (anti-nova-dodge-order-action d) 'blink)))
+                                 dodge-orders-f2)))
+                "Full-HP Stalker within 2.75 tiles of incoming enemy Nova must execute emergency Blink")
+  (assert-true! (not (not (ormap (lambda (d) (and (= (anti-nova-dodge-order-unit-tag d) 8202)
+                                                  (eq? (anti-nova-dodge-order-action d) 'split)))
+                                 dodge-orders-f2)))
+                "Marine inside Nova threat zone/cone must receive radial/perpendicular scatter split")
+  (define snipe-now
+    (evaluate-disruptor-snipe-and-cooldowns dodge-allies dodge-enemies-f2 #:tracker dis-tr #:current-frame 101))
+  (assert-true! (and (= (length snipe-now) 1)
+                     (eq? (disruptor-snipe-eval-state (car snipe-now)) 'active-casting)
+                     (disruptor-snipe-eval-snipe-feasible? (car snipe-now)))
+                "Active-casting enemy Disruptor in lethal range must flag snipe-feasible? = #t")
+  (define snipe-cd
+    (evaluate-disruptor-snipe-and-cooldowns
+     dodge-allies
+     (list (hash 'id 9201 'type 'disruptor 'x 50.0 'y 40.0 'hp 100.0 'shields 100.0))
+     #:tracker dis-tr #:current-frame 155))
+  (assert-true! (and (= (length snipe-cd) 1)
+                     (eq? (disruptor-snipe-eval-state (car snipe-cd)) 'on-cooldown)
+                     (> (disruptor-snipe-eval-cooldown-remaining (car snipe-cd)) 400))
+                "Enemy Disruptor after Nova expiry must remain on ~480-frame cooldown tracker")
+
+  ;; 43.2 Zerg Fixes (Escrow Bypass >= 600M, Singleton Dedup, Corruptor Cap, Morphs, Creep/Overlord)
+  (define ws-z-singleton
+    (make-macro-world-state
+     #:race 'Zerg #:enemy-race 'Terran #:frame 6500
+     #:minerals 680 #:gas 10 #:supply-used 46 #:supply-cap 58 #:workers 36 #:active-bases 3
+     #:ready-building-counts (hash 'hatchery 2 'lair 1 'spawning-pool 1 'evolution-chamber 2 'roach-warren 1)
+     #:total-building-counts (hash 'hatchery 2 'lair 1 'spawning-pool 1 'evolution-chamber 2 'roach-warren 1)
+     #:unit-counts (hash 'drone 36 'zergling 8 'queen 4)
+     #:open-facility-slots (hash 'larva 3 'spawning-pool 1 'evolution-chamber 2 'lair 1)))
+  (define dec-z-hi (step-priority-macro-brain ws-z-singleton))
+  (define z-hi-ids (macro-brain-decision-scheduled-ids dec-z-hi))
+  (assert-true! (and (not (memq 'spawning-pool z-hi-ids))
+                     (not (memq 'evolution-chamber z-hi-ids)))
+                "Singleton/dual-cap tech dedup must block 2nd Spawning Pool or 3rd Evolution Chamber")
+  (assert-eq! (macro-brain-decision-reserved-min-floor dec-z-hi) 0
+              "High mineral bank >= 600M with supply >= 2 must skip locking mineral tech escrow")
+
+  ;; Corruptor cap + mirror-mind transport exclusion
+  (assert-eq! (sc2-zerg-corruptor-target-cap (hash 'marine 14 'marauder 4 'medivac 2) #t 'Terran) 0
+              "Medivac-only Bio must keep sc2-zerg-corruptor-target-cap at 0")
+  (assert-eq! (sc2-zerg-corruptor-target-cap (hash 'mutalisk 2) #t 'Zerg) 4)
+  (assert-eq! (sc2-zerg-corruptor-target-cap (hash 'battlecruiser 1) #t 'Terran) 8)
+  (define mm-medivac
+    (infer-enemy-implied-tech-and-upgrades
+     (list (hash 'id 9301 'type 'medivac 'x 80.0 'y 80.0 'hp 150 'flying? #t))
+     '()))
+  (assert-true! (not (enemy-tech-observation-requires-anti-air? mm-medivac))
+                "Mirror-mind must exclude pure transport Medivac from requires-anti-air?")
+  (define mm-banshee
+    (infer-enemy-implied-tech-and-upgrades
+     (list (hash 'id 9302 'type 'banshee 'x 80.0 'y 80.0 'hp 140 'flying? #t))
+     '()))
+  (assert-true! (enemy-tech-observation-requires-anti-air? mm-banshee)
+                "Mirror-mind must flag combat air Banshee as requires-anti-air?")
+
+  ;; Baneling (>= 8 Lings) & Lurker (>= 2 Hydras) morph candidates in econ-ledger
+  (define z-morph-cands
+    (generate-race-priority-candidates
+     #:race 'Zerg #:frame 7200 #:minerals 300 #:gas 300 #:supply-left 10 #:supply-cap 90
+     #:workers 50 #:active-bases 3 #:desired-bases 3 #:production-facilities 3 #:max-facilities 6
+     #:army-supply 34.0 #:enemy-threat-supply 12.0
+     #:ally-buildings '(hatchery hatchery lair spawning-pool baneling-nest hydralisk-den lurker-den)
+     #:ready-buildings '(hatchery hatchery lair spawning-pool baneling-nest hydralisk-den lurker-den)
+     #:ally-units (append (make-list 8 'zergling) (make-list 2 'hydralisk) (make-list 3 'queen))
+     #:open-prod-slots (hash 'larva 3 'zergling 8 'hydralisk 2)
+     #:enemy-race 'Terran
+     #:enemy-unit-counts (hash 'marine 12)))
+  (assert-true! (and (ormap (lambda (c) (equal? (priority-candidate-action c) '(morph baneling))) z-morph-cands)
+                     (ormap (lambda (c) (equal? (priority-candidate-action c) '(morph lurker))) z-morph-cands))
+                "Zerg morph planner must emit (morph baneling) at >=8 lings and (morph lurker) at >=2 hydras")
+
+  ;; Queen creep tumor placement + non-scout Overlord safe parking
+  (define rt-z43 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define res-z43
+    (step-live-bot-runtime!
+     rt-z43
+     (hash 'frame 3200 'minerals 200 'gas 50 'supply-used 38 'supply-cap 52 'supply-left 14
+           'mineral-harvesters 28 'vespene-harvesters 4 'enemy-race 'Terran
+           'base-x 28.5 'base-y 32.5 'natural-x 48.5 'natural-y 32.5
+           'ally-units (list (hash 'id 2001 'type 'queen 'x 29.0 'y 32.0 'hp 175 'energy 55)
+                             (hash 'id 2002 'type 'overlord 'x 31.0 'y 32.0 'hp 200)
+                             (hash 'id 2003 'type 'overlord 'x 112.0 'y 110.0 'hp 200))
+           'ally-buildings (list (hash 'id 2100 'type 'hatchery 'x 28.5 'y 32.5 'hp 1500 'build-progress 1.0
+                                       'queen-spawn-larva-timer 24)
+                                 (hash 'id 2101 'type 'spawning-pool 'x 32.5 'y 30.5 'hp 1000 'build-progress 1.0))
+           'enemy-units (list (hash 'id 9401 'type 'marine 'x 114.0 'y 112.0 'hp 45)))))
+  (define z43-acts (hash-ref res-z43 'actions '()))
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell)
+                                                  (equal? (second a) 2001)
+                                                  (eq? (third a) 'spawn-creep-tumor)))
+                                 z43-acts)))
+                "Surplus-energy (55) Queen near injected Hatchery must cast spawn-creep-tumor")
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite) (equal? (second a) 2003)))
+                                 z43-acts)))
+                "Forward unsafe non-scout Overlord must emit retreat kite back behind main mineral line")
+
+  ;; 43.3 Protoss Fixes (PvR->PvP, 2-base 44-Probe/3rd Nexus/PvZ comp, Sentry cap, Thermal Lance guard)
+  (assert-eq! (resolve-matchup-symbol 'Protoss 'Random) 'PvP
+              "Protoss vs Random (PvR) must route to PvP")
+  (assert-eq! (car (select-pro-build-order 'Protoss 'Random))
+              (car (select-pro-build-order 'Protoss 'Protoss)))
+  (define ws-p2b
+    (make-macro-world-state
+     #:race 'Protoss #:enemy-race 'Protoss #:frame 6400
+     #:minerals 450 #:gas 250 #:supply-used 52 #:supply-cap 66 #:workers 36 #:active-bases 2
+     #:ready-building-counts (hash 'nexus 2 'pylon 5 'gateway 3 'cybernetics-core 1
+                                   'robotics-facility 1 'robotics-bay 1 'twilight-council 1 'forge 1)
+     #:unit-counts (hash 'probe 36 'stalker 8 'sentry 2)
+     #:open-facility-slots (hash 'nexus 2 'gateway 3 'robotics-facility 1 'robotics-bay 1)))
+  (define p2b-ids (macro-brain-decision-scheduled-ids (step-priority-macro-brain ws-p2b)))
+  (assert-true! (not (memq 'sentry p2b-ids))
+                "Sentry cap (<= 2 below 4 bases) must suppress 3rd Sentry")
+  (assert-true! (not (memq 'extended-thermal-lance p2b-ids))
+                "Extended Thermal Lance must be blocked when Colossus count is 0")
+  (define ws-p4b
+    (make-macro-world-state
+     #:race 'Protoss #:enemy-race 'Terran #:frame 8500
+     #:minerals 900 #:gas 500 #:supply-used 110 #:supply-cap 130 #:workers 66 #:active-bases 4
+     #:ready-building-counts (hash 'nexus 4 'pylon 10 'gateway 6 'cybernetics-core 1
+                                   'forge 1 'twilight-council 1 'templar-archive 1 'assimilator 8
+                                   'robotics-facility 1 'robotics-bay 1)
+     #:unit-counts (hash 'probe 66 'stalker 14 'sentry 2 'colossus 1)
+     #:open-facility-slots (hash 'gateway 4 'robotics-facility 1 'robotics-bay 1)))
+  (define p4b-ids (macro-brain-decision-scheduled-ids (step-priority-macro-brain ws-p4b)))
+  (assert-true! (not (not (memq 'extended-thermal-lance p4b-ids)))
+                "Extended Thermal Lance must unlock once Colossus >= 1")
+
+  ;; Live Protoss: ExtendedThermalLance block without Colossus vs unlock with Colossus + PvZ ling-swarm Adept/Zealot
+  (define (mk-p-live-obs fr units bldgs enemies #:min [m 900] #:gas [g 800])
+    (hash 'frame fr 'minerals m 'gas g 'supply-used 54 'supply-cap 78 'supply-left 24
+          'mineral-harvesters 32 'vespene-harvesters 6 'enemy-race 'Zerg
+          'researched-upgrades '(warp-gate-research)
+          'base-x 24.5 'base-y 40.5 'natural-x 42.5 'natural-y 40.5
+          'ally-units units 'ally-buildings bldgs 'enemy-units enemies))
+  (define p-live-bldgs
+    (list (hash 'id 7100 'type 'nexus 'x 24.5 'y 40.5 'hp 1000 'shields 1000 'build-progress 1.0)
+          (hash 'id 7101 'type 'nexus 'x 42.5 'y 40.5 'hp 1000 'shields 1000 'build-progress 1.0)
+          (hash 'id 7102 'type 'cybernetics-core 'x 28.5 'y 40.5 'hp 550 'shields 550 'build-progress 1.0)
+          (hash 'id 7103 'type 'gateway 'x 28.5 'y 44.5 'hp 500 'shields 500 'build-progress 1.0)
+          (hash 'id 7104 'type 'robotics-bay 'x 22.5 'y 44.5 'hp 500 'shields 500 'build-progress 1.0)
+          (hash 'id 7105 'type 'robotics-facility 'x 22.5 'y 41.5 'hp 450 'shields 450 'build-progress 1.0
+                'orders (list (hash 'ability-id 999)))
+          (hash 'id 7106 'type 'forge 'x 26.5 'y 38.5 'hp 400 'shields 400 'build-progress 1.0)
+          (hash 'id 7107 'type 'assimilator 'x 21.5 'y 36.5 'hp 450 'shields 450 'build-progress 1.0 'vespene-contents 1500)))
+  (define rt-p-etl (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-p-no-col
+    (hash-ref (step-live-bot-runtime!
+               rt-p-etl
+               (mk-p-live-obs 7200
+                              (list (hash 'id 7201 'type 'stalker 'x 42.0 'y 40.0 'hp 80 'shields 80))
+                              p-live-bldgs
+                              (for/list ([i (in-range 8)])
+                                (hash 'id (+ 9500 i) 'type 'zergling 'x 60.0 'y 40.0 'hp 35))))
+              'actions '()))
+  (assert-true! (not (member '(research extended-thermal-lance) acts-p-no-col))
+                "Live Mothman-P must not research ExtendedThermalLance with 0 Colossi")
+  (assert-true! (or (member '(train adept) acts-p-no-col)
+                    (member '(train zealot) acts-p-no-col))
+                "Live PvZ facing Zergling flood must train Adept or Zealot counter")
+  (define rt-p-etl-col (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-p-with-col
+    (hash-ref (step-live-bot-runtime!
+               rt-p-etl-col
+               (mk-p-live-obs 7240
+                              (list (hash 'id 7202 'type 'colossus 'x 42.0 'y 40.0 'hp 200 'shields 150))
+                              p-live-bldgs
+                              '()))
+              'actions '()))
+  (assert-true! (not (not (member '(research extended-thermal-lance) acts-p-with-col)))
+                "Live Mothman-P must emit (research extended-thermal-lance) once Colossus >= 1")
+
+  ;; 43.4 Terran Fixes (Depot 14/16 raise, TechLab Marauder reservation, BansheeCloak/StarportReactor, Quiet midgame) + Cortex Span
+  (define (mk-s43-unit tag utype x y #:alliance [alliance 1] #:hp [hp 45.0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 0.5 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 0))
+  (define (mk-s43-obs loop units)
+    (sc2-observation loop (sc2-player-common 1 200 100 38 24 10 14 0 5 0 3)
+                     units '() '() #f '() '() '() '() '() '()))
+  (define dep-fast-raise
+    (translate-bot-actions->sc2-raw-commands
+     '() (mk-s43-obs 200 (list (mk-s43-unit 4301 47 35.0 46.0 #:hp 400.0)
+                               (mk-s43-unit 9301 105 50.5 46.0 #:alliance 4 #:hp 35.0)))))
+  (assert-true! (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 558)))
+                       dep-fast-raise)
+                "Lowered depot (47) must Raise (558) when fast Zergling reaches 15.5 tiles (<= 16.0)")
+  (define dep-slow-stay
+    (translate-bot-actions->sc2-raw-commands
+     '() (mk-s43-obs 201 (list (mk-s43-unit 4302 47 75.0 46.0 #:hp 400.0)
+                               (mk-s43-unit 9302 48 90.5 46.0 #:alliance 4 #:hp 45.0)))))
+  (assert-true! (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 558)))
+                            dep-slow-stay))
+                "Lowered depot (47) must stay open when slower Marine is 15.5 tiles (> 14.0) away")
+  (define dep-slow-raise
+    (translate-bot-actions->sc2-raw-commands
+     '() (mk-s43-obs 202 (list (mk-s43-unit 4302 47 75.0 46.0 #:hp 400.0)
+                               (mk-s43-unit 9302 48 88.5 46.0 #:alliance 4 #:hp 45.0)))))
+  (assert-true! (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 558)))
+                       dep-slow-raise)
+                "Lowered depot (47) must Raise (558) once Marine closes to 13.5 tiles (<= 14.0)")
+
+  ;; Live Terran: BansheeCloak guard, 1st-Starport Reactor priority, BarracksTechLab Marauder reserve, Quiet Midgame
+  (define rt-t43 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-t43-quiet
+    (step-live-bot-runtime!
+     rt-t43
+     (hash 'frame 6720 'minerals 380 'gas 200 'supply-used 46 'supply-cap 70 'supply-left 24
+           'mineral-harvesters 30 'vespene-harvesters 6 'enemy-race 'Protoss
+           'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+           'ally-units (append (for/list ([i (in-range 12)])
+                                 (hash 'id (+ 3100 i) 'type 'marine 'x 40.0 'y 48.0 'hp 45))
+                               (list (hash 'id 3150 'type 'scv 'x 24.0 'y 48.0 'hp 45)))
+           'ally-buildings (list (hash 'id 3001 'type 'orbital-command 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 3002 'type 'orbital-command 'x 52.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 3003 'type 'barracks 'x 30.5 'y 46.5 'hp 1000 'build-progress 1.0 'addon 'techlab)
+                                 (hash 'id 3004 'type 'barracks-techlab 'x 33.0 'y 46.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 3005 'type 'starport 'x 28.5 'y 52.5 'hp 1300 'build-progress 1.0)
+                                 (hash 'id 3006 'type 'starport-techlab 'x 31.0 'y 52.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 3007 'type 'factory 'x 28.5 'y 44.5 'hp 1250 'build-progress 1.0 'addon 'techlab))
+           'enemy-units '())))
+  (define t43-acts (hash-ref res-t43-quiet 'actions '()))
+  (assert-true! (not (member '(research banshee-cloak) t43-acts))
+                "[NEW-T1] Live Mothman-T must not research banshee-cloak when Banshee count is 0")
+  (assert-true! (or (member '(train marine) t43-acts)
+                    (member '(train marauder) t43-acts)
+                    (member '(train siege-tank) t43-acts)
+                    (member '(train medivac) t43-acts)
+                    (member '(train scv) t43-acts))
+                "[NEW-T2] Quiet mid-game 2-base Terran must maintain active production instead of 0-APM freeze")
+
+  (define rt-t43-sp (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-t43-sp
+    (step-live-bot-runtime!
+     rt-t43-sp
+     (hash 'frame 5000 'minerals 650 'gas 350 'supply-used 40 'supply-cap 54 'supply-left 14
+           'mineral-harvesters 24 'vespene-harvesters 6 'enemy-race 'Protoss
+           'researched-upgrades '(stimpack combat-shield)
+           'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+           'ally-units (list (hash 'id 3201 'type 'marine 'x 36.0 'y 48.0 'hp 45)
+                             (hash 'id 3202 'type 'scv 'x 25.0 'y 48.0 'hp 45))
+           'ally-buildings (list (hash 'id 3210 'type 'orbital-command 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 3211 'type 'orbital-command 'x 52.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                 (hash 'id 3212 'type 'barracks 'x 30.5 'y 46.5 'hp 1000 'build-progress 1.0 'addon 'techlab)
+                                 (hash 'id 3213 'type 'barracks-techlab 'x 33.0 'y 46.0 'hp 400 'build-progress 1.0)
+                                 (hash 'id 3214 'type 'starport 'x 28.5 'y 52.5 'hp 1300 'build-progress 1.0)
+                                 (hash 'id 3215 'type 'factory 'x 28.5 'y 42.5 'hp 1250 'build-progress 1.0 'addon 'techlab)
+                                 (hash 'id 3216 'type 'factory-techlab 'x 31.0 'y 42.0 'hp 400 'build-progress 1.0))
+           'enemy-units (list (hash 'id 9550 'type 'stalker 'x 90.0 'y 90.0 'hp 80 'shields 80)))))
+  (define t43-sp-acts (hash-ref res-t43-sp 'actions '()))
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build)
+                                                  (eq? (second a) 'starport-reactor)))
+                                 t43-sp-acts)))
+                "1st bare Starport without Banshee/Raven demand must prioritize Starport Reactor")
+  (assert-true! (not (not (member '(train marauder) t43-sp-acts)))
+                "TechLab Barracks facing Stalker must train Marauder instead of consuming slot with Marine")
+
+  ;; human-cortex 20.0-tile spatial span prevents merging units > 20 tiles apart into one box selection
+  (define hc (make-human-cortex))
+  (define far-move-units
+    (list (hash 'id 5501 'type 'overlord 'x 20.0 'y 20.0 'hp 200)
+          (hash 'id 5502 'type 'overlord 'x 65.0 'y 20.0 'hp 200)))
+  (define compiled-far
+    (cortex-collapse-and-compile-selections!
+     hc
+     '((move 5501 30.0 30.0) (move 5502 30.0 30.0))
+     far-move-units))
+  (define move-cmds-far
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'move))) compiled-far))
+  (assert-eq! (length move-cmds-far) 2
+              "human-cortex <= 20.0-tile span must keep units 45 tiles apart in separate move clusters")
+
+  ;; 43.5 Per-Matchup Replay Diagnostics (`tools/analyze-aiarena-replays.rkt`)
+  (parameterize ([current-environment-variables
+                  (let ([env (environment-variables-copy (current-environment-variables))])
+                    (unless (or (environment-variables-ref env #"AIARENA_API_TOKEN")
+                                (file-exists? (build-path (find-system-path 'home-dir)
+                                                          ".gemini" "aiarena_token")))
+                      (environment-variables-set! env #"AIARENA_API_TOKEN" #"test-token"))
+                    env)])
+    (define canon-mu (dynamic-require analyze-replays-path 'CANONICAL-MATCHUPS))
+    (define calc-mu (dynamic-require analyze-replays-path 'compute-matchup-code))
+    (define parse-mf (dynamic-require analyze-replays-path 'parse-matchup-filter))
+    (define summarize-mu (dynamic-require analyze-replays-path 'summarize-reports-by-matchup))
+    (assert-eq! canon-mu '("ZvZ" "ZvT" "ZvP" "TvZ" "TvT" "TvP" "PvZ" "PvT" "PvP"))
+    (assert-eq! (calc-mu "Zerg" "Protoss") "ZvP")
+    (assert-eq! (calc-mu "Terran" "Zerg") "TvZ")
+    (assert-eq! (parse-mf "z,pvp") '("ZvZ" "ZvT" "ZvP" "PvP"))
+    (define synth-reports
+      (append
+       (for/list ([pair (in-list '(("Zerg" "Zerg") ("Zerg" "Terran") ("Zerg" "Protoss")
+                                   ("Terran" "Zerg") ("Terran" "Terran") ("Terran" "Protoss")
+                                   ("Protoss" "Zerg") ("Protoss" "Terran") ("Protoss" "Protoss")))])
+         (hasheq 'our_bot (case (car pair) [("Zerg") "Mothman-Z"] [("Terran") "Mothman-T"] [else "Mothman-P"])
+                 'our_race (car pair) 'opp_race (cadr pair)
+                 'result "WIN" 'is_self_play #f 'elo_change 10 'findings '()))
+       (list (hasheq 'our_bot "Mothman-X" 'our_race "Protoss" 'opp_race "Zerg"
+                     'result "WIN" 'is_self_play #f 'vs_random_declared #f 'elo_change 12 'findings '())
+             (hasheq 'our_bot "Mothman-P" 'our_race "Protoss" 'opp_race "Zerg"
+                     'result "LOSS" 'is_self_play #t 'vs_random_declared #f 'elo_change -8 'findings '()))))
+    (define summary-ht (summarize-mu synth-reports))
+    (assert-eq! (hash-ref summary-ht 'total_matches) 11)
+    (define by-mu (hash-ref summary-ht 'by_matchup))
+    (define by-race (hash-ref summary-ht 'by_race))
+    (assert-eq! (hash-count by-mu) 9
+                "summarize-reports-by-matchup must cover all 9 canonical matchups")
+    (define pvz-row (hash-ref by-mu 'PvZ))
+    (assert-eq! (hash-ref pvz-row 'matches) 3)
+    (assert-eq! (hash-ref pvz-row 'ext_matches) 2)
+    (assert-eq! (hash-ref pvz-row 'ext_wins) 2)
+    (assert-eq! (hash-ref pvz-row 'self_matches) 1)
+    (assert-eq! (hash-ref pvz-row 'self_losses) 1)
+    (assert-true! (< (abs (- (hash-ref pvz-row 'ext_win_rate_pct) 100.0)) 1e-6))
+    (define p-race-row (hash-ref by-race 'P))
+    (assert-eq! (hash-ref p-race-row 'matches) 5
+                "Mothman-X rolled Protoss must bucket under Protoss ('P) race summary"))
+
+  ;; 43.6 Round 3 Zerg / Terran / Protoss Matchup Fixes ([UNCOVERED-Z1..Z4], [UNCOVERED-T1..T3], PvP Air/4th)
+  (assert-eq! (gas-building-cap 3) 6)
+  (assert-true! (gas-building-cap-ok? 5 3))
+  (assert-true! (not (gas-building-cap-ok? 6 3))
+                "Gas extractor/refinery/assimilator cap must strictly stop at 2 per base")
+  (assert-true! (not (zerg-worker-army-floor-ok? 'Zerg 'Terran 55 30.0))
+                "Stepped Zerg army floor must pause >54 Drones until army supply >= 34")
+  (assert-true! (zerg-worker-army-floor-ok? 'Zerg 'Terran 55 34.0))
+  (assert-eq! (zergling-target-cap 200 (hash 'siege-tank 4)) 20
+              "Siege Tank/splash enemy must cap non-banked Zerglings at 20")
+  (assert-true! (> (zergling-target-cap 1600 (hash 'siege-tank 4)) 100)
+                "1500+ mineral bank unlocks Zergling mineral dump")
+  (assert-eq! (terran-desired-barracks-techlabs 'Terran 'Terran 5) 3
+              "[UNCOVERED-T1] TvT on 5+ Barracks must scale to >= 3 Barracks TechLabs")
+  (assert-eq! (terran-desired-factories 'Terran 'Terran 2 72) 2
+              "[UNCOVERED-T1] TvT on >= 2 bases & >= 68 supply must unlock 2nd Factory")
+  (assert-true! (terran-enemy-needs-ghost? (hash 'infestor 2 'high-templar 2)))
+  (assert-true! (terran-enemy-needs-liberator? (hash 'lurker 4 'colossus 2)))
+  (assert-eq! (terran-desired-ghost-cap 3 120 'Zerg (hash 'infestor 2)) 10)
+  (assert-eq! (terran-desired-liberator-cap 4 (hash 'lurker 4)) 8)
+  (assert-true! (protoss-enemy-capital-air? (hash 'tempest 3 'carrier 2)))
+  (assert-true! (protoss-4th-nexus-due? 'Protoss 3 54 20.0 400 #f)
+                "Protoss on 3 bases with >= 54 Probes must unlock 4th Nexus")
+
+  ;; Live runtime [UNCOVERED-T2] completed proxy cannon suppression + [UNCOVERED-Z4] >=900M 4th hatch overflow
+  (define (mk-t2-cannon-obs prog)
+    (hash 'frame 3100 'minerals 200 'gas 0 'supply-used 20 'supply-cap 31 'supply-left 11
+          'mineral-harvesters 16 'vespene-harvesters 0 'enemy-race 'Protoss
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (for/list ([i (in-range 16)])
+                        (hash 'id (+ 6001 i) 'type 'scv 'x (+ 20.0 (* 0.3 i)) 'y 48.5 'hp 45))
+          'ally-buildings (list (hash 'id 6100 'type 'command-center 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 6101 'type 'barracks 'x 30.5 'y 46.5 'hp 1000 'build-progress 1.0))
+          'enemy-buildings (list (hash 'id 9601 'type 'pylon 'x 32.0 'y 48.5 'hp 200 'shields 200 'build-progress 1.0)
+                                 (hash 'id 9602 'type 'photon-cannon 'x 33.5 'y 48.5 'hp 150 'shields 150 'build-progress prog))))
+  (define t2-wip-acts
+    (hash-ref (step-live-bot-runtime! (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+                                      (mk-t2-cannon-obs 0.4))
+              'actions '()))
+  (define t2-done-acts
+    (hash-ref (step-live-bot-runtime! (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+                                      (mk-t2-cannon-obs 1.0))
+              'actions '()))
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) t2-wip-acts)))
+                "[UNCOVERED-T2] In-progress proxy cannon (0.4) must trigger worker pull")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) t2-done-acts))
+                "[UNCOVERED-T2] Completed powered proxy cannon (1.0) must stop worker pull")
+
+  (define z4-exp-acts
+    (hash-ref (step-live-bot-runtime!
+               (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+               (hash 'frame 9200 'minerals 950 'gas 120 'supply-used 74 'supply-cap 100 'supply-left 26
+                     'mineral-harvesters 42 'vespene-harvesters 6 'enemy-race 'Terran
+                     'base-x 28.5 'base-y 32.5 'natural-x 48.5 'natural-y 32.5
+                     'expansion-candidates (list (cons 72.5 52.5))
+                     'ally-units (append (for/list ([i (in-range 42)])
+                                           (hash 'id (+ 2400 i) 'type 'drone 'x 30.0 'y 33.0 'hp 40))
+                                         (for/list ([i (in-range 12)])
+                                           (hash 'id (+ 2510 i) 'type 'roach 'x 48.0 'y 35.0 'hp 145)))
+                     'ally-buildings (list (hash 'id 2601 'type 'hatchery 'x 28.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                           (hash 'id 2602 'type 'hatchery 'x 48.5 'y 32.5 'hp 1500 'build-progress 1.0)
+                                           (hash 'id 2603 'type 'hatchery 'x 34.5 'y 66.5 'hp 1500 'build-progress 1.0)
+                                           (hash 'id 2604 'type 'spawning-pool 'x 32.5 'y 30.5 'hp 1000 'build-progress 1.0)
+                                           (hash 'id 2605 'type 'roach-warren 'x 32.5 'y 25.5 'hp 850 'build-progress 1.0)
+                                           (hash 'id 2606 'type 'evolution-chamber 'x 28.5 'y 28.5 'hp 750 'build-progress 1.0))
+                     'enemy-units (list (hash 'id 9701 'type 'marine 'x 56.0 'y 36.0 'hp 45)
+                                        (hash 'id 9702 'type 'marine 'x 56.5 'y 36.5 'hp 45))))
+              'actions '()))
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'expand))) z4-exp-acts)))
+                "[UNCOVERED-Z4] 3-base Zerg with >=900M & >=38 workers must emit 4th Hatchery expand during light skirmish"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

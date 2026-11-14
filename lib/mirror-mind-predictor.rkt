@@ -901,8 +901,9 @@
   ;; unit mobility, speed upgrades, Stimpack, Blink, Medivac/Warp-Prism boost, or Nydus/Recall)
   (define has-transport-or-air?
     (ormap (lambda (t)
-             (memq t '(medivac warp-prism mutalisk phoenix oracle banshee viking-fighter
-                       corruptor void-raynydus-worm nydus-canal)))
+             (memq t '(medivac warp-prism warp-prism-phasing overlord-transport
+                       mutalisk phoenix oracle banshee viking-fighter
+                       corruptor void-ray nydus-worm nydus-canal)))
            enemy-types))
   (define has-speed-upgrade?
     (or (ormap (lambda (u)
@@ -1026,6 +1027,7 @@
   (define max-shd 0)
   (define req-det? #f)
   (define req-aa? #f)
+  (define non-transport-starport-evidence? #f)
 
   (define (add-hist-bldg! b)
     (unless (memq b historical-bldgs)
@@ -1079,6 +1081,9 @@
        (for ([p '(spawning-pool lair extractor)])
          (add-post-bldg! p))]
       [else
+       (when (and (not (eq? utype 'medivac))
+                  (memq 'starport (implied-prereqs-for-sym utype)))
+         (set! non-transport-starport-evidence? #t))
        (for ([p (in-list (implied-prereqs-for-sym utype))])
          (if pre-existing?
              (add-hist-bldg! p)
@@ -1087,6 +1092,8 @@
   (for ([b (in-list enemy-bldgs)]
         #:unless (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
     (define btype (unit-type-sym b))
+    (when (memq btype '(starport starport-flying starport-techlab starport-tech-lab starport-reactor fusion-core))
+      (set! non-transport-starport-evidence? #t))
     (add-post-bldg! btype)
     (for ([p (in-list (implied-prereqs-for-sym btype))])
       (add-post-bldg! p))
@@ -1249,13 +1256,19 @@
               (memq utype '(dark-templar banshee ghost mothership lurker lurker-mp widow-mine widowmine observer)))
       (set! req-det? #t))
 
-    ;; Air threat trigger (unit type OR explicit flying? / flying / is-flying flag)
-    (when (or (hash-ref u 'flying? #f)
-              (hash-ref u 'flying #f)
-              (hash-ref u 'is-flying #f)
-              (memq utype '(mutalisk corruptor brood-lord broodlord viper
-                            viking viking-fighter medivac liberator banshee raven battlecruiser
-                            phoenix oracle void-ray voidray carrier tempest mothership)))
+    ;; Air threat trigger (unit type OR explicit flying? / flying / is-flying flag,
+    ;; reserving requires-anti-air? for actual air combat threats / Colossus and
+    ;; excluding pure non-combat transports Medivac / Warp Prism / Overlord Transport).
+    (define pure-transport-unit?
+      (memq utype '(medivac warp-prism warp-prism-phasing overlord-transport)))
+    (when (and (not pure-transport-unit?)
+               (or (hash-ref u 'flying? #f)
+                   (hash-ref u 'flying #f)
+                   (hash-ref u 'is-flying #f)
+                   (memq utype '(mutalisk corruptor brood-lord broodlord viper
+                                 viking viking-fighter liberator banshee raven battlecruiser
+                                 phoenix oracle void-ray voidray carrier tempest mothership
+                                 colossus))))
       (set! req-aa? #t)))
 
   ;; 3. Inspect enemy buildings for active research, Chrono Boost, & implied detection/anti-air
@@ -1323,7 +1336,8 @@
   (for ([b (in-list active-implied-bldgs)])
     (when (memq b '(dark-shrine ghost-academy lurker-den lurker-den-mp starport-techlab))
       (set! req-det? #t))
-    (when (memq b '(spire greater-spire starport fusion-core stargate fleet-beacon))
+    (when (or (memq b '(spire greater-spire fusion-core stargate fleet-beacon starport-techlab))
+              (and (eq? b 'starport) non-transport-starport-evidence?))
       (set! req-aa? #t)))
 
   ;; 5. Compute enemy upgrade advantage & sunk implied tech resource spend

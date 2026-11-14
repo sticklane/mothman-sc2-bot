@@ -54,7 +54,10 @@
  safe-tile-coord
  unit-type-sym
  safe-list
- safe-hash-list)
+ safe-hash-list
+ SC2-SINGLETON-TECH-BUILDINGS
+ SC2-DUAL-CAP-TECH-BUILDINGS
+ sc2-zerg-corruptor-target-cap)
 
 ;; -----------------------------------------------------------------------------
 ;; 1. Core Domain Types
@@ -223,6 +226,8 @@
                        (equal? enemy-race "Terran") (equal? enemy-race "terran")) 'Terran]
                   [(or (eq? enemy-race 'Protoss) (eq? enemy-race 'protoss)
                        (equal? enemy-race "Protoss") (equal? enemy-race "protoss")) 'Protoss]
+                  [(or (eq? enemy-race 'Random) (eq? enemy-race 'random)
+                       (equal? enemy-race "Random") (equal? enemy-race "random")) 'Random]
                   [else 'Unknown])])
         (case r
           [(Zerg)
@@ -241,7 +246,7 @@
            (case er
              [(Zerg) 'PvZ]
              [(Terran) 'PvT]
-             [(Protoss) 'PvP]
+             [(Protoss Random) 'PvP]
              [else 'PvT])]))))
 
 ;; -----------------------------------------------------------------------------
@@ -362,3 +367,56 @@
 (: safe-hash-list (-> Any (Listof HashTableTop)))
 (define (safe-hash-list xs)
   (if (list? xs) (filter hash? xs) '()))
+
+;; Strict singleton tech structures (`existing + pending + scheduled == 0` required to build/morph).
+(: SC2-SINGLETON-TECH-BUILDINGS (Listof Symbol))
+(define SC2-SINGLETON-TECH-BUILDINGS
+  '(spawning-pool baneling-nest roach-warren hydralisk-den lurker-den lurker-den-mp
+    infestation-pit spire greater-spire ultralisk-cavern
+    cybernetics-core twilight-council robotics-bay robotics-support-bay
+    templar-archive templar-archives
+    dark-shrine fleet-beacon ghost-academy fusion-core))
+
+;; Upgrade structures strictly capped at `<= 2` (`existing + pending + scheduled < 2`).
+(: SC2-DUAL-CAP-TECH-BUILDINGS (Listof Symbol))
+(define SC2-DUAL-CAP-TECH-BUILDINGS
+  '(evolution-chamber forge engineering-bay armory))
+
+;; Computes the Zerg Corruptor macro count cap from known enemy unit counts and AA flags.
+;; Suppresses Corruptors against confirmed Medivac-only Bio and caps unconfirmed AA at <= 4,
+;; scaling up to 8 only against heavy/capital air or >= 2 Colossi.
+(: sc2-zerg-corruptor-target-cap (->* (Any Boolean) (Any) Nonnegative-Integer))
+(define (sc2-zerg-corruptor-target-cap enemy-unit-counts requires-anti-air? [_enemy-race 'Unknown])
+  (define ht (if (hash? enemy-unit-counts) enemy-unit-counts #f))
+  (cond
+    [(not ht)
+     (if requires-anti-air? 4 0)]
+    [else
+     (define (ecount [syms : (Listof Symbol)]) : Nonnegative-Integer
+       (for/sum : Nonnegative-Integer ([s : Symbol (in-list syms)])
+         (safe-nonneg-int (hash-ref ht s (lambda () 0)) 0)))
+     (define heavy-or-capital-air?
+       (or (>= (ecount '(battlecruiser tempest carrier void-ray voidray
+                         brood-lord broodlord mothership)) 1)
+           (>= (ecount '(liberator liberator-ag)) 3)
+           (>= (ecount '(banshee)) 3)
+           (>= (ecount '(mutalisk)) 5)
+           (>= (ecount '(phoenix)) 4)
+           (>= (ecount '(viking viking-fighter viking-assault)) 4)
+           (>= (ecount '(corruptor)) 3)
+           (>= (ecount '(oracle)) 2)
+           (>= (ecount '(colossus)) 2)))
+     (define light-air-threat?
+       (or (>= (ecount '(liberator liberator-ag banshee oracle phoenix mutalisk
+                         corruptor colossus warp-prism warp-prism-phasing
+                         raven interceptor)) 1)
+           (>= (ecount '(viking viking-fighter viking-assault)) 2)))
+     (define total-known-enemies
+       (for/sum : Nonnegative-Integer ([v : Any (in-list (hash-values ht))])
+         (safe-nonneg-int v 0)))
+     (cond
+       [heavy-or-capital-air? 8]
+       [light-air-threat? 4]
+       [(> total-known-enemies 0) 0]
+       [requires-anti-air? 4]
+       [else 0])]))

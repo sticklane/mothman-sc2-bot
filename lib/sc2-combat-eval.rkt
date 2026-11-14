@@ -336,15 +336,15 @@
    'Zerg
    'zergling
    (list (counter-branch 'standard-macro   'roach     'zergling '(roach-warren)               150)
-         (counter-branch 'bio-ball         'baneling  'zergling '(spawning-pool baneling-nest) 150)
+         (counter-branch 'bio-ball         'baneling  'hydralisk '(spawning-pool baneling-nest) 150)
          (counter-branch 'zealot-rush      'roach     'zergling '(roach-warren)               150)
          (counter-branch 'mech-siege       'ravager   'roach    '(roach-warren)               150)
-         (counter-branch 'air-fleet        'corruptor 'queen    '(lair spire)                 350)
-         (counter-branch 'lurker-contain   'mutalisk  'roach    '(lair spire)                 400)
+         (counter-branch 'air-fleet        'corruptor 'hydralisk '(lair spire)                350)
+         (counter-branch 'lurker-contain   'hydralisk 'ravager  '(lair hydralisk-den)         250)
          (counter-branch 'roach-ravager    'hydralisk 'roach    '(lair hydralisk-den)         250)
-         (counter-branch 'ling-bane-hydra  'roach     'baneling '(roach-warren)               150)
-         (counter-branch 'stalker-colossus 'hydralisk 'roach    '(lair hydralisk-den)         250)
-         (counter-branch 'sky-toss         'hydralisk 'queen    '(lair hydralisk-den)         250)
+         (counter-branch 'ling-bane-hydra  'baneling  'roach    '(spawning-pool baneling-nest) 150)
+         (counter-branch 'stalker-colossus 'hydralisk 'lurker   '(lair hydralisk-den)         250)
+         (counter-branch 'sky-toss         'hydralisk 'corruptor '(lair hydralisk-den)        250)
          (counter-branch 'muta-flock       'hydralisk 'queen    '(lair hydralisk-den)         250)
          (counter-branch 'early-rush       'roach     'zergling '(roach-warren)               150))))
 
@@ -354,18 +354,18 @@
    'PROTOSS-COUNTER-TREE
    'Protoss
    'zealot
-   (list (counter-branch 'standard-macro   'stalker  'zealot  '(cybernetics-core)                   150)
-         (counter-branch 'zergling-flood   'zealot   'stalker '(gateway)                            150)
-         (counter-branch 'roach-ravager    'immortal 'stalker '(cybernetics-core robotics-facility) 350)
-         (counter-branch 'lurker-contain   'immortal 'zealot  '(cybernetics-core robotics-facility) 350)
-         (counter-branch 'bio-ball         'colossus 'stalker '(robotics-facility robotics-bay)     500)
-         (counter-branch 'air-fleet        'stalker  'archon  '(cybernetics-core)                   150)
-         (counter-branch 'mech-siege       'immortal 'stalker '(cybernetics-core robotics-facility) 350)
-         (counter-branch 'stalker-colossus 'immortal 'stalker '(cybernetics-core robotics-facility) 350)
-         (counter-branch 'sky-toss         'stalker  'archon  '(cybernetics-core)                   150)
-         (counter-branch 'muta-flock       'phoenix  'stalker '(cybernetics-core stargate)          300)
-         (counter-branch 'ling-bane-hydra  'colossus 'adept   '(robotics-facility robotics-bay)     500)
-         (counter-branch 'early-rush       'stalker  'zealot  '(cybernetics-core)                   150))))
+   (list (counter-branch 'standard-macro   'zealot   'immortal '(gateway)                           150)
+         (counter-branch 'zergling-flood   'zealot   'adept    '(gateway)                           150)
+         (counter-branch 'roach-ravager    'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
+         (counter-branch 'lurker-contain   'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
+         (counter-branch 'bio-ball         'colossus 'stalker  '(robotics-facility robotics-bay)    500)
+         (counter-branch 'air-fleet        'stalker  'archon   '(cybernetics-core)                  150)
+         (counter-branch 'mech-siege       'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
+         (counter-branch 'stalker-colossus 'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
+         (counter-branch 'sky-toss         'stalker  'archon   '(cybernetics-core)                  150)
+         (counter-branch 'muta-flock       'phoenix  'archon   '(cybernetics-core stargate)         300)
+         (counter-branch 'ling-bane-hydra  'colossus 'zealot   '(robotics-facility robotics-bay)    500)
+         (counter-branch 'early-rush       'zealot   'stalker  '(gateway)                           150))))
 
 (: TERRAN-COUNTER-TREE plausible-counter-tree)
 (define TERRAN-COUNTER-TREE
@@ -375,13 +375,13 @@
    'marine
    (list (counter-branch 'standard-macro   'siege-tank 'marauder '(factory)          250)
          (counter-branch 'zergling-flood   'widow-mine 'hellion  '(factory)          200)
-         (counter-branch 'roach-ravager    'marauder   'marine   '(barracks-techlab) 100)
-         (counter-branch 'lurker-contain   'siege-tank 'marine   '(factory)          250)
-         (counter-branch 'protoss-deathball 'ghost     'marauder '(barracks-techlab) 300)
+         (counter-branch 'roach-ravager    'marauder   'siege-tank '(barracks-techlab) 100)
+         (counter-branch 'lurker-contain   'siege-tank 'marauder '(factory)          250)
+         (counter-branch 'protoss-deathball 'marauder  'viking   '(barracks-techlab) 200)
          (counter-branch 'air-fleet        'viking     'marine   '(starport)         250)
          (counter-branch 'bio-ball         'siege-tank 'marauder '(factory)          250)
          (counter-branch 'mech-siege       'siege-tank 'marauder '(factory)          250)
-         (counter-branch 'stalker-colossus 'marauder   'marine   '(barracks-techlab) 100)
+         (counter-branch 'stalker-colossus 'marauder   'viking   '(barracks-techlab) 100)
          (counter-branch 'sky-toss         'viking     'marine   '(starport)         250)
          (counter-branch 'muta-flock       'thor       'marine   '(factory armory)   300)
          (counter-branch 'ling-bane-hydra  'siege-tank 'hellion  '(factory)          250)
@@ -403,20 +403,29 @@
       (if (symbol? e)
           e
           (symbol-or-default (dyn-hash-ref e 'type 'unknown) 'unknown))))
+  (define bio-cnt : Integer
+    (count (lambda ([t : Symbol]) (not (not (memq t '(marine marauder medivac))))) types))
+  (define cap-air-cnt : Integer
+    (count (lambda ([t : Symbol])
+             (not (not (memq t '(mutalisk void-ray voidray carrier tempest battlecruiser corruptor brood-lord broodlord)))))
+           types))
+  (define viking-cnt : Integer
+    (count (lambda ([t : Symbol]) (not (not (memq t '(viking viking-fighter))))) types))
   (cond
     [(or (memq 'lurker types) (memq 'lurker-burrowed types) (memq 'lurker-mp-burrowed types))
      'lurker-contain]
-    [(or (memq 'mutalisk types) (memq 'void-ray types) (memq 'carrier types)
-         (memq 'battlecruiser types) (memq 'viking types) (memq 'corruptor types))
+    [(or (> cap-air-cnt 0)
+         (and (> viking-cnt 0)
+              (or (< bio-cnt 5) (>= viking-cnt 3))))
      'air-fleet]
     [(>= (count (lambda ([t : Symbol]) (eq? t 'zergling)) types) 6)
      'zergling-flood]
     [(or (memq 'siege-tank types) (memq 'siege-tank-sieged types)) 'mech-siege]
     [(or (memq 'roach types) (memq 'ravager types)) 'roach-ravager]
-    [(>= (count (lambda ([t : Symbol]) (not (not (memq t '(marine marauder medivac))))) types) 5)
+    [(>= bio-cnt 5)
      'bio-ball]
     [(or (memq 'oracle types) (memq 'phoenix types) (memq 'banshee types)
-         (memq 'liberator types) (memq 'tempest types))
+         (memq 'liberator types) (memq 'liberator-ag types))
      'sky-toss]
     [(or (memq 'colossus types) (memq 'immortal types) (memq 'archon types)
          (memq 'disruptor types) (memq 'high-templar types) (memq 'stalker types))
@@ -426,7 +435,7 @@
      'mech-siege]
     [(or (memq 'hydralisk types) (memq 'baneling types))
      'ling-bane-hydra]
-    [(or (memq 'marauder types) (memq 'reaper types) (memq 'ghost types) (memq 'marine types))
+    [(or (memq 'marauder types) (memq 'reaper types) (memq 'ghost types) (memq 'marine types) (memq 'medivac types))
      'bio-ball]
     [(or (memq 'zealot types) (memq 'adept types) (memq 'sentry types) (memq 'dark-templar types))
      'stalker-colossus]
