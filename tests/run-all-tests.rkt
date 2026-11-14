@@ -8620,7 +8620,6 @@
                        (not (unit-leased-above? (rt-role-leases rt-evac-def) 19821 'harvester 3200)))
                   "Oracle with >= 2 nearby AA defenders (Stalkers) must NOT trigger unnecessary worker evacuation"))
 
-<<<<<<< HEAD
 (run-suite
  "36. Wave 6 Track 1: Worker-Rush Focus-Fire, Disengage & Mixed Probe+Zealot Micro"
    (define base-mp (hash 'id 20550 'type 'mineral-field 'x 26.5 'y 32.5))
@@ -8748,8 +8747,7 @@
                  "Mixed Probe+Zealot rush must NEVER target enemy Zealot (#23950) or emit blind Attack-Move (tid=0) for Probes")
    (assert-true! (ormap (lambda (a) (and (>= (third a) 23901) (<= (third a) 23906))) pulls-mix)
                  "Mixed Probe+Zealot rush must prioritize pulling Probes onto enemy Probes away from the Zealot"))
-=======
-  (run-suite "36. Wave 6 Track 2: Protoss Early Gateway Placement, Anchor Preservation, Lockout Fallback & Early Pylon"
+  (run-suite "37. Wave 6 Track 2: Protoss Early Gateway Placement, Anchor Preservation, Lockout Fallback & Early Pylon"
     (define (clear-oledger36! ol)
       (hash-clear! (in-progress-order-ledger-unit-orders ol))
       (hash-clear! (in-progress-order-ledger-type-order-counts ol))
@@ -8854,7 +8852,120 @@
                 'actions '()))
     (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'pylon))) acts36-py13)
                   "Protoss emergency Pylon must trigger at supply-used >= 13 / minerals >= 100 (< frame 3000)"))
->>>>>>> wave6-track2
+(run-suite
+ "38. Wave 6 Track 3: Protoss Robo Prerequisite Escrow, Surcharge Exemption & Gas Reserve"
+   ;; 36.1 Unbuilt-prerequisite resolution:
+   ;;      At supply-used=34 with 0 robotics-facility, evaluate-build-order-next-step and step-priority-macro-brain
+   ;;      must resolve saving_for / bo-goal to 'robotics-facility (never 'immortal) and escrow 150M/100G.
+   (define bo-eval-robo
+     (evaluate-build-order-next-step
+      #:race 'Protoss
+      #:enemy-race 'Protoss
+      #:frame 3600
+      #:minerals 100
+      #:gas 50
+      #:supply-used 34
+      #:supply-left 12
+      #:active-bases 2
+      #:ready-building-counts (hash 'nexus 2 'pylon 2 'gateway 2 'assimilator 2 'cybernetics-core 1)
+      #:total-building-counts (hash 'nexus 2 'pylon 2 'gateway 2 'assimilator 2 'cybernetics-core 1)
+      #:unit-counts (hash 'probe 22 'stalker 2 'sentry 1)
+      #:researched-upgrades '(warp-gate-research)))
+   (define bo-goal-robo (pro-bo-eval-result-active-goal bo-eval-robo))
+   (assert-true! (and (pro-bo-goal? bo-goal-robo)
+                      (eq? (pro-bo-goal-target-sym bo-goal-robo) 'robotics-facility))
+                 "evaluate-build-order-next-step must resolve to robotics-facility when 0 robo built at 34 supply")
+   (assert-true! (not (and (pro-bo-goal? bo-goal-robo)
+                           (eq? (pro-bo-goal-target-sym bo-goal-robo) 'immortal)))
+                 "evaluate-build-order-next-step must never select immortal when robotics-facility == 0")
+
+   ;; 36.2 tech-under-attack-escrow-ok? exempts 1st robotics-facility when cybernetics-core is ready and workers >= 20
+   (define p-robo-under-attack-state
+     (make-macro-world-state
+      #:race 'Protoss
+      #:enemy-race 'Protoss
+      #:frame 3600
+      #:minerals 110
+      #:gas 60
+      #:supply-used 34
+      #:supply-cap 46
+      #:supply-left 12
+      #:workers 22
+      #:mineral-harvesters 16
+      #:gas-harvesters 6
+      #:army-supply 8
+      #:active-bases 2
+      #:under-attack? #t
+      #:enemy-threat-supply 6
+      #:open-facility-slots (hash 'gateway 0)
+      #:ready-building-counts (hash 'nexus 2 'pylon 2 'gateway 2 'assimilator 2 'cybernetics-core 1)
+      #:total-building-counts (hash 'nexus 2 'pylon 2 'gateway 2 'assimilator 2 'cybernetics-core 1)
+      #:unit-counts (hash 'probe 22 'stalker 3 'sentry 1 'zealot 1)
+      #:researched-upgrades '(warp-gate-research)))
+   (define p-robo-dec (step-priority-macro-brain p-robo-under-attack-state))
+   (assert-eq! (macro-brain-decision-saving-for p-robo-dec) 'robotics-facility
+               "1st robotics-facility must be escrowed under attack when cybernetics-core is ready and workers >= 20")
+   (assert-true! (>= (macro-brain-decision-reserved-gas-floor p-robo-dec) 100)
+                 "1st robotics-facility escrow under attack must reserve >= 100G")
+   (assert-true! (not (eq? (macro-brain-decision-saving-for p-robo-dec) 'immortal))
+                 "saving_for must never be immortal when robotics-facility == 0")
+
+   ;; 36.3 Pending Robo 100G reserve blocks Stalker gas drain when supply >= 34, cyber ready, ally-combat-units >= 4
+   (define rt-robo-reserve (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+   (define acts-robo-reserve
+     (hash-ref (step-live-bot-runtime!
+                rt-robo-reserve
+                (hash 'frame 3600 'minerals 140 'gas 75 'supply-used 34 'supply-cap 46 'supply-left 12
+                      'mineral-harvesters 16 'vespene-harvesters 6 'enemy-race 'Protoss
+                      'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+                      'ally-units (list (hash 'id 20101 'type 'probe 'x 27.5 'y 32.5 'hp 20 'shield 20)
+                                        (hash 'id 20102 'type 'stalker 'x 40.0 'y 32.5 'hp 80 'shield 80)
+                                        (hash 'id 20103 'type 'stalker 'x 41.0 'y 32.5 'hp 80 'shield 80)
+                                        (hash 'id 20104 'type 'zealot 'x 42.0 'y 32.5 'hp 100 'shield 50)
+                                        (hash 'id 20105 'type 'zealot 'x 43.0 'y 32.5 'hp 100 'shield 50))
+                      'ally-buildings (list (hash 'id 20201 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                            (hash 'id 20202 'type 'nexus 'x 58.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                            (hash 'id 20203 'type 'pylon 'x 36.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20204 'type 'gateway 'x 38.0 'y 35.0 'hp 500 'shield 500 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20205 'type 'cybernetics-core 'x 35.0 'y 38.0 'hp 550 'shield 550 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20206 'type 'assimilator 'x 29.0 'y 38.0 'hp 450 'shield 450 'build-progress 1.0)
+                                            (hash 'id 20207 'type 'assimilator 'x 36.0 'y 27.0 'hp 450 'shield 450 'build-progress 1.0))
+                      'enemy-units (list (hash 'id 20301 'type 'stalker 'x 75.0 'y 75.0 'hp 80 'shield 80))))
+               'actions '()))
+   (assert-true! (not (ormap (lambda (a) (equal? a '(train stalker))) acts-robo-reserve))
+                 "At 140M/75G with 0 robo, cyber ready, supply >= 34, 4 combat units, Stalker must NOT drain gas needed for Robo")
+
+   ;; 36.4 1st robotics-facility surcharge exemption & aa-stargate-gas-ok? exemption when no enemy air threat is present
+   (define rt-robo-build (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+   (define acts-robo-build
+     (hash-ref (step-live-bot-runtime!
+                rt-robo-build
+                (hash 'frame 3600 'minerals 275 'gas 105 'supply-used 34 'supply-cap 54 'supply-left 20
+                      'mineral-harvesters 16 'vespene-harvesters 6 'enemy-race 'Protoss
+                      'researched-upgrades '(warp-gate-research)
+                      'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
+                      'ally-units (list (hash 'id 20401 'type 'probe 'x 27.5 'y 32.5 'hp 20 'shield 20)
+                                        (hash 'id 20402 'type 'stalker 'x 40.0 'y 32.5 'hp 80 'shield 80)
+                                        (hash 'id 20403 'type 'stalker 'x 41.0 'y 32.5 'hp 80 'shield 80)
+                                        (hash 'id 20404 'type 'zealot 'x 42.0 'y 32.5 'hp 100 'shield 50)
+                                        (hash 'id 20405 'type 'zealot 'x 43.0 'y 32.5 'hp 100 'shield 50))
+                      'ally-buildings (list (hash 'id 20501 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                            (hash 'id 20502 'type 'nexus 'x 58.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                            (hash 'id 20503 'type 'pylon 'x 36.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20509 'type 'pylon 'x 55.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20512 'type 'pylon 'x 52.0 'y 38.0 'hp 200 'shield 200 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20504 'type 'gateway 'x 38.0 'y 35.0 'hp 500 'shield 500 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20510 'type 'gateway 'x 41.0 'y 35.0 'hp 500 'shield 500 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20505 'type 'cybernetics-core 'x 35.0 'y 38.0 'hp 550 'shield 550 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20506 'type 'stargate 'x 35.0 'y 42.0 'hp 600 'shield 600 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20511 'type 'shield-battery 'x 55.0 'y 32.5 'hp 200 'shield 200 'build-progress 1.0 'is-powered #t)
+                                            (hash 'id 20507 'type 'assimilator 'x 29.0 'y 38.0 'hp 450 'shield 450 'build-progress 1.0)
+                                            (hash 'id 20508 'type 'assimilator 'x 36.0 'y 27.0 'hp 450 'shield 450 'build-progress 1.0))
+                      'enemy-units (list (hash 'id 20601 'type 'zealot 'x 35.0 'y 34.0 'hp 100 'shield 50))))
+               'actions '()))
+   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'robotics-facility)))
+                        acts-robo-build)
+                 "1st robotics-facility at 165M/105G, supply=34 must build without 275M/150G surcharge or stargate AA gas block"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
