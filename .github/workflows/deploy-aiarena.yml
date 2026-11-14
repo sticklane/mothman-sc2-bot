@@ -216,6 +216,8 @@ jobs:
                       sys.exit(1)
 
                   payload = json.loads(body)
+                  if "bot_zip_md5hash" not in payload or not payload.get("bot_zip_updated"):
+                      payload = api_get(f"bots/{bot_id}/") or payload
                   remote_md5 = payload.get("bot_zip_md5hash", "unknown")
                   print(
                       f"OK {bot_name} (ID {bot_id}): bot_zip_updated={payload.get('bot_zip_updated')} "
@@ -277,17 +279,26 @@ jobs:
                   )
                   rm = (resp.get("data") or {}).get("requestMatch") or {}
                   errs = rm.get("errors") or resp.get("errors")
-                  match_obj = rm.get("match") or {}
-                  m_relay = match_obj.get("id")
-                  if isinstance(m_relay, str):
-                      _, mid = decode_relay_id(m_relay)
+                  raw_match = rm.get("match")
+                  if isinstance(raw_match, list):
+                      match_objs = [m for m in raw_match if isinstance(m, dict)]
+                  elif isinstance(raw_match, dict):
+                      match_objs = [raw_match]
                   else:
-                      mid = None
-                  if mid:
-                      created_ids.append(mid)
-                      print(f"REQUESTED Match #{mid}: {b_name} (#{b_id}) vs {o_name} (#{o_id}) -> https://aiarena.net/matches/{mid}/")
+                      match_objs = []
+                  mids = []
+                  for mo in match_objs:
+                      m_relay = mo.get("id")
+                      if isinstance(m_relay, str):
+                          _, mid = decode_relay_id(m_relay)
+                          if mid:
+                              mids.append(mid)
+                  if mids:
+                      for mid in mids:
+                          created_ids.append(mid)
+                          print(f"REQUESTED Match #{mid}: {b_name} (#{b_id}) vs {o_name} (#{o_id}) -> https://aiarena.net/matches/{mid}/")
                   else:
-                      print(f"WARN Match request failed ({b_name} vs {o_name}): HTTP {code} errors={errs}")
+                      print(f"WARN Match request failed ({b_name} vs {o_name}): HTTP {code} match={raw_match!r} errors={errs}")
                       if errs:
                           msg_text = json.dumps(errs).lower()
                           if "limit" in msg_text or "quota" in msg_text:
