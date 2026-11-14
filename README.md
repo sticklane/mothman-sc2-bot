@@ -45,6 +45,37 @@ Live HTTP/SSE server (`http://127.0.0.1:4322/`) and CLI analyzer powered by `s2p
 
 ---
 
+## How the Bot Works: 5-Layer Per-Step Runtime Pipeline
+
+On every StarCraft II game step (driven natively by [`sim/racket-sc2-ladder-main.rkt`](sim/racket-sc2-ladder-main.rkt)), observations flow from Blizzard's Protobuf WebSocket API through the 5-layer Racket cognitive pipeline (`step-live-bot-runtime!`) and back out through the priority-tiered wire governor:
+
+```mermaid
+flowchart LR
+    WS_IN["1. SC2 WebSocket Ingress (sc2-protobuf-ws.rkt: decode-sc2-response, unit tag index)"] --> L1["2. Spatial Perception (perception-grid.rkt & okasaki-sc.rkt: crit-bit tries, zippers, FoW)"]
+    L1 --> L2["3. Macro & Economy (priority-macro-brain.rkt & econ-ledger.rkt: Braun heap, escrow, saturation)"]
+    L2 --> L34["4. Tactics, Walls & Doors (tactics-sim.rkt & bot-runtime.rkt: Baba CSP, FAP, HoldPosition & Depot doors)"]
+    L34 --> L5["5. Human Cortex & Wire Governor (human-cortex.rkt & govern-sc2-wire-actions!: camera framing, CGs, APM cap)"]
+    L5 --> WS_OUT["6. SC2 Wire Egress (sc2-protobuf-ws.rkt: 556/558 P0 doors, P1 framing cams, encode-sc2-action)"]
+```
+
+1. **Wire Ingress & Tactical Translation (`lib/sc2-protobuf-ws.rkt`)**:
+   - `decode-sc2-response` unpacks raw protobuf `ResponseObservation` frames (game loop, units, orders, upgrades, power sources, active camera position, dead tags) into `sc2-observation`, while `sc2-observation->runtime-obs-hash` normalizes worker/facility counts, live unit-tag lookups, and base anchors for the runtime layers.
+   - On egress, `translate-bot-actions->sc2-raw-commands` validates typed actions against live unit tags, evaluates Terran Supply Depot auto-raise (`558`) and auto-lower (`556`) hysteresis (`<= 10.0` raise vs. `> 14.5` or transit lower) guarded by `friendly-unit-on-depot-footprint?` and `friendly-unit-requesting-depot-transit?` with both promoted to `P0` in `wire-cmd-priority-tier`, and tracks `SC2-CONTROL-GROUPED-TAGS` (`0–7`) so commands targeting un-control-grouped units outside the viewport prepend a `Tier 1` framing `sc2-raw-camera-move`.
+2. **Spatial Perception & Functional Indexing (`lib/perception-grid.rkt` & `lib/okasaki-sc.rkt`)**:
+   - `step-layer1-perception!` ingests allied and enemy unit snapshots into Morton 2D Z-order `critbit-range-2d` spatial tries (`okasaki-sc.rkt`), 2–3 monoidal combat finger trees (`split-by-dps`), and persistent skew-binary frame histories.
+   - `lakefill-choke-decomposition` and `huet-zipper` model base/natural/third ramp chokes with $O(1)$ rollback, while `fow-ghost-step-diffusion!` and `best-retreat-sector` track sector threat weights and FoW persistence.
+3. **Priority Macro, Tech DAG & Escrow Economy (`lib/priority-macro-brain.rkt` & `lib/econ-ledger.rkt`)**:
+   - `step-layer1b-mastermind!`, `step-layer1c-mirror-mind!`, and `step-layer2-economy!` build a decoupled `macro-world-state` via `obs-hash->macro-world-state` and run `step-priority-macro-brain` over `SC2-TECH-GRAPH` (checking prerequisites via `resolve-missing-prereq-chain`).
+   - Pointerless Braun priority queues (`braun-insert`) rank competing spending goals alongside symbiotic escrow reservations (`make-symbiotic-ledger`, `ledger-reserve!`, `ledger-preempt-for-crisis!`) and `macro-brain-can-spend?` locks, while `evaluate-coupled-macro-governor` balances expansion timing, worker saturation (`22`/base), and multi-stream mineral/gas/supply budgets.
+4. **Tactics, Ramp Walling & Front-Door Guards (`lib/tactics-sim.rkt` & `lib/bot-runtime.rkt`)**:
+   - `step-layer3-and-4-tactics!` runs Baba CSP and terrain-grid wall solvers (`solve-terran-ramp-wall`, `solve-protoss-matchup-wall`) verified against ramp pathing/placement/height grids, `fap-posture-with-hysteresis` for engagement posture stability, `purplewave-traffic-retreat` for choke-aware disengages, and `in-progress-order-ledger` to avoid canceling in-flight build orders.
+   - Protoss `HoldPosition` doorway micro (`rt-door-state`: `'open`/`'closed`) parts its Zealot/Stalker wall guard for transiting workers or `>= 1` trapped combat unit when enemies are `> 6.5` tiles away, nudges idle trapped units across the opening, and re-seals immediately; Terran doorway tracking (`rt-door-state`) monitors `supply-depot`/`supply-depot-lowered` transitions and emits unstick `move` pathing after `>= 2` trapped frames.
+5. **Human-Cortex Framing & Wire APM Governor (`lib/human-cortex.rkt` & `govern-sc2-wire-actions!`)**:
+   - `step-layer5-human-cortex!` models human attention with `fitts-saccade-ms` camera fixations and `in-camera-viewport?` gating: `action-requires-camera-focus` emits `(move-camera fx fy)` immediately before spatial builds or un-control-grouped unit commands outside the current viewport, while `compile-optimal-unit-selection!` only recalls a control group when all desired unit IDs belong to it.
+   - `step-pro-human-camera-and-apm-governor!` filters runtime directives, and `govern-sc2-wire-actions!` enforces the rolling 60-second replay APM/token cap (`target-apm`/`hard-cap-apm`), coalesces compatible multi-tag unit commands, keeps `P0` depot/survival actions unthrottled, prioritizes framing camera moves at `Tier 1` with a `6`-loop cooldown for `> 10.0`-tile jumps (`28` loops for routine `Tier 4` moves), and preserves camera-before-command ordering before `encode-sc2-action` transmits bytes on the wire.
+
+---
+
 ## Pure-Racket Tooling Policy (`AGENTS.md`)
 
 All bot logic, MPQ/`.SC2Replay` analysis, AI Arena API tools, and test scripts in this repository follow a **strict 100% Pure-Racket policy** (no `python3` or new `*.py` scripts for analysis or tooling). Canonical CLI tools live in [`tools/`](tools/):

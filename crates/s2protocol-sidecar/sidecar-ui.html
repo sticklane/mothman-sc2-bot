@@ -3,52 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>s2protocol-rs Antigravity Sidecar — Enhanced Minimap &amp; High-APM Forensics</title>
+  <title>s2protocol-sidecar — Match Replay &amp; Telemetry</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <script src="/preload.js" onerror="window.__sidecarPreloadMissing=true"></script>
   <style>
     :root {
-      --background: #0f172a;
-      --foreground: #e2e8f0;
-      --card: #111c33;
-      --border: #293548;
-      --card-border: #1e293b;
+      --background: #121316;
+      --foreground: #f3f4f6;
+      --card: #18191d;
+      --border: #272930;
+      --card-border: #22242a;
       --primary: #3b82f6;
       --primary-foreground: #ffffff;
-      --secondary: #1e293b;
-      --secondary-foreground: #e2e8f0;
-      --muted-foreground: #94a3b8;
+      --secondary: #22242a;
+      --secondary-foreground: #f3f4f6;
+      --muted-foreground: #9ca3af;
       --success: #22c55e;
       --warning: #f59e0b;
       --error: #ef4444;
     }
     html.light {
-      --background: #f8fafc;
-      --foreground: #0f172a;
+      --background: #f8f9fa;
+      --foreground: #111827;
       --card: #ffffff;
-      --border: #cbd5e1;
-      --card-border: #e2e8f0;
+      --border: #e5e7eb;
+      --card-border: #f1f5f9;
       --primary: #2563eb;
       --primary-foreground: #ffffff;
-      --secondary: #f1f5f9;
-      --secondary-foreground: #0f172a;
-      --muted-foreground: #64748b;
+      --secondary: #f3f4f6;
+      --secondary-foreground: #111827;
+      --muted-foreground: #6b7280;
       --success: #16a34a;
       --warning: #d97706;
       --error: #dc2626;
     }
   </style>
 </head>
-<body class="bg-[var(--background)] text-[var(--foreground)] antialiased m-0 p-3 select-none">
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased m-0 p-3 select-none font-sans">
   <div class="max-w-[1440px] mx-auto space-y-3">
     <!-- Top Header & Catalog Controls -->
     <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2.5 flex-wrap">
           <div class="flex items-center gap-2">
-            <span id="sseDot" class="inline-block w-2.5 h-2.5 rounded-full bg-[var(--warning)]"></span>
-            <span class="font-semibold text-sm tracking-tight">s2protocol-rs Sidecar</span>
-            <span id="connBadge" class="text-xs px-2 py-0.5 rounded border border-[var(--card-border)] text-[var(--muted-foreground)] font-mono">
+            <span id="sseDot" class="inline-block w-2 h-2 rounded-full bg-[var(--warning)]"></span>
+            <span class="font-medium text-sm tracking-tight">s2protocol-sidecar</span>
+            <span id="connBadge" class="text-xs px-2 py-0.5 rounded border border-[var(--card-border)] text-[var(--muted-foreground)] font-mono tabular-nums">
               Connecting :4322…
             </span>
           </div>
@@ -56,71 +56,125 @@
             Upload .SC2Replay
             <input id="fileUploadInput" type="file" accept=".SC2Replay" class="hidden" />
           </label>
-          <button id="sendAgentBtn" class="bg-[var(--primary)] text-[var(--primary-foreground)] rounded px-2.5 py-1 text-xs font-semibold hover:opacity-90" title="Send current frame forensics to Antigravity Agent or clipboard">
+          <button id="sendAgentBtn" class="bg-[var(--primary)] text-[var(--primary-foreground)] rounded px-2.5 py-1 text-xs font-medium hover:opacity-90" title="Send current frame forensics to Antigravity Agent or clipboard">
             Send Frame to Agent
           </button>
-          <span id="agentToast" class="text-xs font-mono text-[var(--success)] hidden"></span>
+          <span id="agentToast" class="text-xs font-mono tabular-nums text-[var(--success)] hidden"></span>
         </div>
-        <div class="flex items-center gap-3 text-xs text-[var(--muted-foreground)] font-mono">
+        <div class="flex items-center gap-2.5 text-xs text-[var(--muted-foreground)] font-mono tabular-nums">
           <span id="metaProtocol">Proto 75689</span>
           <span>•</span>
           <span id="metaMap">Map: —</span>
           <span>•</span>
-          <span id="metaParseMs">Parse: —</span>
+          <span id="metaParseMs">—</span>
         </div>
       </div>
-      <div class="flex flex-wrap items-center gap-2 pt-1 border-t border-[var(--card-border)]">
-        <div class="flex items-center gap-1 text-xs font-mono">
+      <div class="flex flex-wrap items-center gap-2 pt-1.5 border-t border-[var(--card-border)]">
+        <div class="flex items-center gap-1 text-xs font-medium">
           <button data-filter="all" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">All</button>
           <button data-filter="Terran" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">Terran</button>
           <button data-filter="Protoss" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">Protoss</button>
           <button data-filter="Zerg" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">Zerg</button>
-          <button data-filter="prio" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">&#9889; Prio</button>
+          <button data-filter="prio" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">Priority</button>
         </div>
-        <input id="catalogSearch" type="text" placeholder="Search ID, player, map…" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-0.5 text-xs font-mono w-[190px]" />
-        <select id="replaySelect" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs font-mono flex-1 min-w-[260px] max-w-[640px]">
+        <input id="catalogSearch" type="text" placeholder="Search ID, player, map…" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-0.5 text-xs w-[190px]" />
+        <select id="replaySelect" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs flex-1 min-w-[260px] max-w-[640px]">
         </select>
-        <span id="catalogCountBadge" class="text-xs font-mono text-[var(--muted-foreground)]"></span>
+        <span id="catalogCountBadge" class="text-xs font-mono tabular-nums text-[var(--muted-foreground)]"></span>
       </div>
     </div>
 
     <!-- Live Frame Scoreboard Strip -->
     <div id="scoreboardStrip" class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-2.5 flex items-center justify-between gap-2">
-        <div>
+        <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#3b82f6"></span>
-            <span id="p1Title" class="font-semibold text-sm">Player 1</span>
-            <span id="p1ResultBadge" class="text-xs px-1.5 py-0.5 rounded border border-[var(--card-border)] font-mono">—</span>
+            <span class="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style="background:#3b82f6"></span>
+            <span id="p1Title" class="font-medium text-sm truncate">Player 1</span>
+            <span id="p1ResultBadge" class="text-xs px-1.5 py-0.5 rounded border border-[var(--card-border)] font-mono tabular-nums">—</span>
           </div>
-          <div id="p1CpmLine" class="text-xs text-[var(--muted-foreground)] font-mono mt-0.5">CPM: —</div>
+          <div id="p1CpmLine" class="text-xs text-[var(--muted-foreground)] font-mono tabular-nums mt-0.5">-- • --</div>
         </div>
-        <div id="p1LiveStats" class="grid grid-cols-4 gap-2 text-right font-mono text-xs tabular-nums"></div>
+        <div id="p1LiveStats" class="grid grid-cols-4 gap-3 text-right text-xs"></div>
       </div>
 
       <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-2.5 flex items-center justify-between gap-2">
-        <div>
+        <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:#ef4444"></span>
-            <span id="p2Title" class="font-semibold text-sm">Player 2</span>
-            <span id="p2ResultBadge" class="text-xs px-1.5 py-0.5 rounded border border-[var(--card-border)] font-mono">—</span>
+            <span class="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style="background:#ef4444"></span>
+            <span id="p2Title" class="font-medium text-sm truncate">Player 2</span>
+            <span id="p2ResultBadge" class="text-xs px-1.5 py-0.5 rounded border border-[var(--card-border)] font-mono tabular-nums">—</span>
           </div>
-          <div id="p2CpmLine" class="text-xs text-[var(--muted-foreground)] font-mono mt-0.5">CPM: —</div>
+          <div id="p2CpmLine" class="text-xs text-[var(--muted-foreground)] font-mono tabular-nums mt-0.5">-- • --</div>
         </div>
-        <div id="p2LiveStats" class="grid grid-cols-4 gap-2 text-right font-mono text-xs tabular-nums"></div>
+        <div id="p2LiveStats" class="grid grid-cols-4 gap-3 text-right text-xs"></div>
       </div>
     </div>
 
-    <!-- Main Workbench Grid: Top-Left SC2 Leader Panel + Minimap (Left) | Forensics & Win-Chance (Right) -->
+    <!-- Balanced 2-Column Studio Workbench: Minimap (Left) | Leader Panel + Win Prob + Diagnostics (Right) -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
-      <!-- Left 5 Cols: Native SC2 Observer Leader Panel + Enhanced Minimap -->
-      <div class="lg:col-span-5 space-y-3">
-        <!-- StarCraft II Observer Leader Panel Dropdown (D / U / G / V / L / N) -->
-        <div id="leaderPanel" class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-2.5 space-y-2">
+      <!-- Left 6 Cols: Minimap -->
+      <div class="lg:col-span-6 space-y-3">
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2.5">
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-1.5">
-              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Leader Panel</span>
-              <select id="leaderTab" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 text-xs font-mono">
+            <div class="text-xs font-medium text-[var(--foreground)]">Minimap</div>
+            <div id="clockReadout" class="font-mono text-xs tabular-nums px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)] text-[var(--muted-foreground)]">
+              00:00 (f=0)
+            </div>
+          </div>
+
+          <!-- Layer Toggles -->
+          <div class="flex flex-wrap gap-1.5 text-xs font-medium">
+            <button data-layer="botFilter" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Macro Cmds</button>
+            <button data-layer="rays" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Cmd Rays</button>
+            <button data-layer="power" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Power</button>
+            <button data-layer="creep" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Creep</button>
+            <button data-layer="cameras" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Cameras</button>
+            <button data-layer="heatmap" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Deaths</button>
+          </div>
+
+          <!-- Minimap Canvas Container -->
+          <div class="relative w-full aspect-square rounded border border-[var(--card-border)] overflow-hidden bg-[var(--background)]">
+            <canvas id="minimapCanvas" width="540" height="540" class="w-full h-full block cursor-crosshair"></canvas>
+            <div id="minimapTooltip" class="hidden pointer-events-none absolute z-10 px-2 py-1 rounded text-xs font-mono tabular-nums bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] shadow">
+            </div>
+          </div>
+
+          <!-- Transport & Timeline Scrubber -->
+          <div class="space-y-2 pt-1">
+            <input id="frameSlider" type="range" min="0" max="0" value="0" class="w-full accent-[var(--primary)] cursor-pointer" />
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-1.5">
+                <button id="prevFrameBtn" class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-xs font-mono hover:opacity-80">&larr;</button>
+                <button id="playPauseBtn" class="px-3 py-1 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-medium hover:opacity-90">Play</button>
+                <button id="nextFrameBtn" class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-xs font-mono hover:opacity-80">&rarr;</button>
+              </div>
+              <div class="flex items-center gap-1 text-xs">
+                <span class="text-[var(--muted-foreground)] font-medium mr-0.5">Speed</span>
+                <button data-speed="0.5" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)] font-mono tabular-nums">0.5x</button>
+                <button data-speed="1" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)] font-mono tabular-nums">1x</button>
+                <button data-speed="2" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)] font-mono tabular-nums">2x</button>
+                <button data-speed="4" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)] font-mono tabular-nums">4x</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Key Moments / Battle Jump Pills -->
+          <div class="border-t border-[var(--card-border)] pt-2 space-y-1">
+            <div class="text-xs text-[var(--muted-foreground)] font-medium">Key Moments</div>
+            <div id="jumpPills" class="flex flex-wrap gap-1.5 text-xs"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right 6 Cols: Leader Panel + Win Probability + Diagnostics & Match Tables + Collapsed Debug -->
+      <div class="lg:col-span-6 space-y-3">
+        <!-- StarCraft II Observer Leader Panel Dropdown (D / U / G / V / L / N) -->
+        <div id="leaderPanel" class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-medium text-[var(--foreground)]">Leader Panel</span>
+              <select id="leaderTab" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-0.5 text-xs font-medium">
                 <option value="D">Production (D)</option>
                 <option value="U">Active Units (U)</option>
                 <option value="G">Upgrades (G)</option>
@@ -138,123 +192,67 @@
               <button data-leader="N" class="leader-tab-btn px-1.5 py-0.5 rounded border border-[var(--border)]" title="Collapse [N]">N</button>
             </div>
           </div>
-          <div id="leaderPanelBody" class="grid grid-cols-2 gap-2 max-h-[195px] overflow-y-auto pr-0.5">
+          <div id="leaderPanelBody" class="grid grid-cols-2 gap-2.5 max-h-[260px] overflow-y-auto pr-0.5">
             <div class="space-y-1 min-w-0">
-              <div id="leaderP1Head" class="text-[11px] font-mono font-semibold truncate border-b border-[var(--card-border)] pb-0.5" style="color:#60a5fa">P1</div>
+              <div id="leaderP1Head" class="text-xs font-medium truncate border-b border-[var(--card-border)] pb-0.5" style="color:#60a5fa">P1</div>
               <div id="leaderP1List" class="space-y-1"></div>
             </div>
             <div class="space-y-1 min-w-0">
-              <div id="leaderP2Head" class="text-[11px] font-mono font-semibold truncate border-b border-[var(--card-border)] pb-0.5" style="color:#f87171">P2</div>
+              <div id="leaderP2Head" class="text-xs font-medium truncate border-b border-[var(--card-border)] pb-0.5" style="color:#f87171">P2</div>
               <div id="leaderP2List" class="space-y-1"></div>
             </div>
           </div>
         </div>
 
-        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2.5">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-            Enhanced Minimap State Machine
-          </div>
-          <div id="clockReadout" class="font-mono text-xs tabular-nums px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)]">
-            00:00 (f=0)
-          </div>
-        </div>
-
-        <!-- Layer Toggles -->
-        <div class="flex flex-wrap gap-1.5 text-xs">
-          <button data-layer="botFilter" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">BotFilter: ON</button>
-          <button data-layer="rays" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Cmd Rays</button>
-          <button data-layer="power" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Pylon 6.5r</button>
-          <button data-layer="creep" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Creep</button>
-          <button data-layer="cameras" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Cameras</button>
-          <button data-layer="heatmap" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)] font-mono">Lethality Map</button>
-        </div>
-
-        <!-- Minimap Canvas Container -->
-        <div class="relative w-full aspect-square rounded border border-[var(--card-border)] overflow-hidden bg-[var(--background)]">
-          <canvas id="minimapCanvas" width="540" height="540" class="w-full h-full block cursor-crosshair"></canvas>
-          <div id="minimapTooltip" class="hidden pointer-events-none absolute z-10 px-2 py-1 rounded text-xs font-mono bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] shadow">
-          </div>
-        </div>
-
-        <!-- Transport & Timeline Scrubber -->
-        <div class="space-y-2 pt-1">
-          <input id="frameSlider" type="range" min="0" max="0" value="0" class="w-full accent-[var(--primary)] cursor-pointer" />
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-1.5">
-              <button id="prevFrameBtn" class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-xs font-mono hover:opacity-80">&larr;</button>
-              <button id="playPauseBtn" class="px-3 py-1 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-semibold hover:opacity-90">Play</button>
-              <button id="nextFrameBtn" class="px-2 py-1 rounded border border-[var(--border)] bg-[var(--background)] text-xs font-mono hover:opacity-80">&rarr;</button>
-            </div>
-            <div class="flex items-center gap-1 text-xs font-mono">
-              <span class="text-[var(--muted-foreground)]">Speed:</span>
-              <button data-speed="0.5" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">0.5x</button>
-              <button data-speed="1" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">1x</button>
-              <button data-speed="2" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">2x</button>
-              <button data-speed="4" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">4x</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Turning Point & Battle Quick-Jump Pills -->
-        <div class="border-t border-[var(--card-border)] pt-2 space-y-1">
-          <div class="text-xs text-[var(--muted-foreground)] font-medium">Jump to Turning Points &amp; Major Battles:</div>
-          <div id="jumpPills" class="flex flex-wrap gap-1.5 text-xs"></div>
-        </div>
-        </div>
-      </div>
-
-      <!-- Right 7 Cols: Win-Chance Curve + [SCBOT_PRIORITY] + Forensic Tabs -->
-      <div class="lg:col-span-7 space-y-3">
-        <!-- Calibrated 4-Factor Logistic Win-Chance Curve -->
+        <!-- Win Probability -->
         <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-              Swarmy Logistic Win-Chance Curve (Army • Income • Workers • Trades)
-            </div>
-            <div id="winChanceReadout" class="text-xs font-mono text-[var(--muted-foreground)]">
-              Click chart to scrub timeline
+            <div class="text-xs font-medium text-[var(--foreground)]">Win Probability</div>
+            <div id="winChanceReadout" class="text-xs font-mono tabular-nums text-[var(--muted-foreground)]">
+              Click chart to scrub
             </div>
           </div>
-          <div class="w-full h-[132px] rounded border border-[var(--card-border)] bg-[var(--background)] overflow-hidden">
-            <canvas id="winChanceCanvas" width="760" height="132" class="w-full h-full block cursor-pointer"></canvas>
+          <div class="w-full h-[110px] rounded border border-[var(--card-border)] bg-[var(--background)] overflow-hidden">
+            <canvas id="winChanceCanvas" width="760" height="110" class="w-full h-full block cursor-pointer"></canvas>
           </div>
         </div>
 
-        <!-- Frame-Synchronized [SCBOT_PRIORITY] Braun-Heap Inspector -->
-        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-1.5">
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-              Frame-Synchronized [SCBOT_PRIORITY] Escrow &amp; Latency
-            </span>
-            <span id="prioMeta" class="text-xs font-mono text-[var(--muted-foreground)]">No match_log.zip snapshot</span>
+        <!-- Diagnostics & Match Tables -->
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2.5">
+          <div class="flex items-center justify-between gap-2 flex-wrap border-b border-[var(--card-border)] pb-2">
+            <div class="text-xs font-medium text-[var(--foreground)]">Diagnostics &amp; Match Tables</div>
+            <div class="flex flex-wrap gap-1.5 text-xs font-medium">
+              <button data-tab="wire" class="tab-btn px-2 py-0.5 rounded border border-[var(--border)]">1. Build Audit</button>
+              <button data-tab="lessons" class="tab-btn px-2 py-0.5 rounded border border-[var(--border)]">2. Idle &amp; Lessons</button>
+              <button data-tab="combat" class="tab-btn px-2 py-0.5 rounded border border-[var(--border)]">3. Units &amp; ROI</button>
+              <button data-tab="decisions" class="tab-btn px-2 py-0.5 rounded border border-[var(--border)]">4. Decisions &amp; APM</button>
+            </div>
           </div>
-          <div id="prioGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
-            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">saving_for: <span id="prioSaving">—</span></div>
-            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">approved: <span id="prioApproved">—</span></div>
-            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">escrow_queue: <span id="prioEscrow">—</span></div>
-            <div class="p-2 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">blocked: <span id="prioBlocked">—</span></div>
-          </div>
+          <div id="tabContent" class="text-xs space-y-3 max-h-[340px] overflow-y-auto pr-1"></div>
         </div>
 
-        <!-- Forensic Diagnostic Banners -->
-        <div id="findingsBanner" class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-1.5">
-          <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-            Automated Wire &amp; State-Machine Findings
+        <!-- Collapsed Debug Dump: Priority Queue & Wire Alerts -->
+        <details class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-2.5 text-xs">
+          <summary class="cursor-pointer font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] select-none">Bot Priority Queue &amp; Wire Alerts</summary>
+          <div class="mt-2.5 space-y-2.5">
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium text-[var(--foreground)]">[SCBOT_PRIORITY] Snapshot</span>
+                <span id="prioMeta" class="text-[11px] font-mono tabular-nums text-[var(--muted-foreground)]">No match_log.zip snapshot</span>
+              </div>
+              <div id="prioGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs font-mono">
+                <div class="p-1.5 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">saving_for: <span id="prioSaving">—</span></div>
+                <div class="p-1.5 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">approved: <span id="prioApproved">—</span></div>
+                <div class="p-1.5 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">escrow_queue: <span id="prioEscrow">—</span></div>
+                <div class="p-1.5 rounded bg-[var(--background)] border border-[var(--card-border)] truncate">blocked: <span id="prioBlocked">—</span></div>
+              </div>
+            </div>
+            <div id="findingsBanner" class="border-t border-[var(--card-border)] pt-2 space-y-1">
+              <div class="font-medium text-[var(--foreground)]">Wire &amp; State-Machine Alerts</div>
+              <div id="findingsList" class="space-y-1 text-xs font-mono"></div>
+            </div>
           </div>
-          <div id="findingsList" class="space-y-1 text-xs font-mono"></div>
-        </div>
-
-        <!-- Multi-Tab Deep Forensics -->
-        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-3">
-          <div class="flex flex-wrap gap-1.5 border-b border-[var(--card-border)] pb-2 text-xs font-medium">
-            <button data-tab="wire" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">1. Wire Build vs Init vs Done</button>
-            <button data-tab="lessons" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">2. Costed Lessons &amp; Idle Prod</button>
-            <button data-tab="combat" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">3. Unit ROI &amp; Engagements</button>
-            <button data-tab="decisions" class="tab-btn px-2.5 py-1 rounded border border-[var(--border)]">4. Counter-Choices &amp; APM</button>
-          </div>
-          <div id="tabContent" class="text-xs space-y-3 max-h-[410px] overflow-y-auto pr-1"></div>
-        </div>
+        </details>
       </div>
     </div>
   </div>
@@ -471,7 +469,7 @@
         dpr: 1,
         minimapSize: 540,
         winW: 760,
-        winH: 132
+        winH: 110
       },
       staticMapCanvas: document.createElement("canvas"),
       staticMapKey: ""
@@ -496,19 +494,25 @@
     function createStatCells(containerId) {
       const container = document.getElementById(containerId);
       container.innerHTML = "";
-      const labels = ["Bank", "Income", "Supply", "Army"];
+      const labels = [
+        { key: "bank", text: "Min / Gas" },
+        { key: "income", text: "Income" },
+        { key: "supply", text: "Supply" },
+        { key: "army", text: "Army" }
+      ];
       const valueEls = {};
       for (const lbl of labels) {
         const wrap = document.createElement("div");
         const head = document.createElement("div");
-        head.className = "text-[var(--muted-foreground)]";
-        head.textContent = lbl;
+        head.className = "text-[11px] font-medium text-[var(--muted-foreground)]";
+        head.textContent = lbl.text;
         const val = document.createElement("div");
+        val.className = "font-mono tabular-nums";
         val.textContent = "—";
         wrap.appendChild(head);
         wrap.appendChild(val);
         container.appendChild(wrap);
-        valueEls[lbl.toLowerCase()] = val;
+        valueEls[lbl.key] = val;
       }
       return valueEls;
     }
@@ -559,7 +563,7 @@
 
       const wRect = winCanvas.getBoundingClientRect();
       const wW = Math.max(300, Math.round(wRect.width || 760));
-      const wH = Math.max(100, Math.round(wRect.height || 132));
+      const wH = Math.max(96, Math.round(wRect.height || 110));
       const wPx = Math.round(wW * dpr);
       const hPx = Math.round(wH * dpr);
       if (winCanvas.width !== wPx || winCanvas.height !== hPx || state.canvas.dpr !== dpr) {
@@ -603,16 +607,16 @@
       const isLight = document.documentElement.classList.contains("light");
       return {
         isLight,
-        mapBg: isLight ? "#f1f5f9" : "#0b1120",
-        gridLine: isLight ? "rgba(15,23,42,0.07)" : "rgba(148,163,184,0.09)",
+        mapBg: isLight ? "#f3f4f6" : "#111317",
+        gridLine: isLight ? "rgba(17,24,39,0.06)" : "rgba(255,255,255,0.05)",
         mineral: isLight ? "#0284c7" : "#38bdf8",
         geyser: isLight ? "#15803d" : "#4ade80",
         p1: "#3b82f6",
         p2: "#ef4444",
-        creep: isLight ? "rgba(147,51,234,0.16)" : "rgba(168,85,247,0.22)",
-        pylon: isLight ? "rgba(14,165,233,0.20)" : "rgba(56,189,248,0.20)",
-        text: isLight ? "#0f172a" : "#e2e8f0",
-        muted: isLight ? "#64748b" : "#94a3b8"
+        creep: isLight ? "rgba(147,51,234,0.12)" : "rgba(168,85,247,0.16)",
+        pylon: isLight ? "rgba(14,165,233,0.14)" : "rgba(56,189,248,0.14)",
+        text: isLight ? "#111827" : "#f3f4f6",
+        muted: isLight ? "#6b7280" : "#9ca3af"
       };
     }
 
@@ -642,7 +646,7 @@
         const key = btn.dataset.layer;
         const on = state.layers[key];
         if (key === "botFilter") {
-          btn.textContent = on ? "BotFilter: Macro" : "BotFilter: Raw APM";
+          btn.textContent = on ? "Macro Cmds" : "Raw Cmds";
         }
         btn.style.opacity = on ? "1" : "0.52";
         btn.style.borderColor = on ? "var(--primary)" : "var(--border)";
@@ -743,7 +747,7 @@
 
       setText(UI.metaProtocol, `Proto ${b.protocol_version}`);
       setText(UI.metaMap, `${b.map_name} (${b.map_width}x${b.map_height})`);
-      setText(UI.metaParseMs, `Parsed in ${b.parse_elapsed_ms} ms`);
+      setText(UI.metaParseMs, `${b.parse_elapsed_ms} ms`);
 
       const maxIdx = Math.max(0, frames.length - 1);
       if (Number(UI.frameSlider.max) !== maxIdx) UI.frameSlider.max = maxIdx;
@@ -763,9 +767,12 @@
           ? "var(--success)"
           : (String(p.result || "").startsWith("Loss") ? "var(--error)" : "var(--muted-foreground)");
         if (els.badge.style.color !== resColor) els.badge.style.color = resColor;
-        setText(els.cpmLine, `Raw ${p.raw_cpm} CPM • Macro ${p.macro_cpm} CPM (${p.move_attack_spam_pct}% micro spam)`);
+        const apmArr = frame?.apm?.[p.pid - 1];
+        const dispApm = apmArr ? apmArr[1] : Math.round(p.raw_cpm || 0);
+        const dispEpm = apmArr ? apmArr[2] : Math.round(p.macro_cpm || 0);
+        setText(els.cpmLine, `${dispApm} APM • ${dispEpm} EPM`);
         const st = stats || { minerals: 0, vespene: 0, min_rate: 0, gas_rate: 0, workers: 0, food_used: 0, food_made: 0, army_value: 0 };
-        setText(els.cells.bank, `${st.minerals}M / ${st.vespene}G`);
+        setText(els.cells.bank, `${st.minerals} / ${st.vespene}`);
         setText(els.cells.income, `${st.min_rate + st.gas_rate}/m`);
         setText(els.cells.supply, `${st.food_used}/${st.food_made} (${st.workers}W)`);
         setText(els.cells.army, `${st.army_value}`);
@@ -884,17 +891,17 @@
 
     function createLeaderRowEl() {
       const row = document.createElement("div");
-      row.className = "leader-row rounded px-1.5 py-0.5 bg-[var(--background)] border border-[var(--card-border)] text-[11px] font-mono select-none";
+      row.className = "leader-row rounded px-1.5 py-0.5 bg-[var(--background)] border border-[var(--card-border)] text-xs select-none";
       const top = document.createElement("div");
       top.className = "flex items-center justify-between gap-1.5";
       const left = document.createElement("div");
       left.className = "flex items-center gap-1 min-w-0";
       const badge = document.createElement("span");
-      badge.className = "shrink-0 px-1 rounded text-[10px] font-semibold border border-[var(--card-border)]";
+      badge.className = "shrink-0 px-1 rounded text-[10px] font-mono tabular-nums font-semibold border border-[var(--card-border)]";
       const label = document.createElement("span");
-      label.className = "truncate text-[var(--foreground)]";
+      label.className = "truncate text-xs text-[var(--foreground)]";
       const meta = document.createElement("span");
-      meta.className = "shrink-0 text-[10px] text-[var(--muted-foreground)] tabular-nums";
+      meta.className = "shrink-0 text-[11px] font-mono tabular-nums text-[var(--muted-foreground)]";
       left.appendChild(badge);
       left.appendChild(label);
       top.appendChild(left);
@@ -1202,20 +1209,18 @@
       staticMapCtx.strokeStyle = pal.isLight ? "rgba(15,23,42,0.16)" : "rgba(148,163,184,0.18)";
       staticMapCtx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0);
 
-      // Death & Siege-Spot Lethality Heatmap
+      // Death & Siege-Spot Lethality Heatmap (crisp sharp cells, no glowing blobs)
       if (state.layers.heatmap && b.death_heatmap?.length) {
         const maxVal = Math.max(500, ...b.death_heatmap.map((c) => c.value));
         for (const cell of b.death_heatmap) {
           const [cx, cy, scale] = mapToCanvas(cell.x, cell.y, mapW, mapH, size);
           const intensity = Math.min(1, cell.value / maxVal);
-          const r = Math.max(6, 4.2 * scale);
-          const grad = staticMapCtx.createRadialGradient(cx, cy, 1, cx, cy, r * 1.6);
-          grad.addColorStop(0, `rgba(249,115,22,${(0.12 + 0.36 * intensity).toFixed(2)})`);
-          grad.addColorStop(1, "rgba(249,115,22,0)");
-          staticMapCtx.fillStyle = grad;
-          staticMapCtx.beginPath();
-          staticMapCtx.arc(cx, cy, r * 1.6, 0, Math.PI * 2);
-          staticMapCtx.fill();
+          const sz = Math.max(5, 3.0 * scale);
+          staticMapCtx.fillStyle = `rgba(249,115,22,${(0.10 + 0.24 * intensity).toFixed(2)})`;
+          staticMapCtx.fillRect(cx - sz / 2, cy - sz / 2, sz, sz);
+          staticMapCtx.strokeStyle = `rgba(249,115,22,${(0.24 + 0.36 * intensity).toFixed(2)})`;
+          staticMapCtx.lineWidth = 1;
+          staticMapCtx.strokeRect(cx - sz / 2, cy - sz / 2, sz, sz);
         }
         for (const s of b.siege_spots || []) {
           const [cx, cy] = mapToCanvas(s.x, s.y, mapW, mapH, size);
@@ -1503,7 +1508,7 @@
           }
           setText(
             UI.winChanceReadout,
-            `@${fmtClock(best.sec)} P1=${Math.round(best.p1_chance * 100)}% (army=${best.army_term} inc=${best.income_term} wrk=${best.workers_term} trd=${best.trades_term})`
+            `@${fmtClock(best.sec)} • P1 ${Math.round(best.p1_chance * 100)}%`
           );
         }
       }
