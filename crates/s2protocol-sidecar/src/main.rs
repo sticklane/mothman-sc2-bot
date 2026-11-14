@@ -19,9 +19,11 @@ mod forensics;
 mod models;
 mod priority_log;
 mod server;
+mod terrain;
 
 pub use forensics::*;
 pub use server::analyze_replay_file;
+pub use terrain::*;
 
 use server::{default_repo_root, epoch_now_sec, run_server, scan_catalog};
 use std::collections::BTreeMap;
@@ -91,7 +93,7 @@ fn main() {
     let mut dirs_arg: Option<String> = None;
     let mut ids_arg: Option<String> = None;
     let mut ui_arg: Option<String> = None;
-    let mut max_frames: usize = 240;
+    let mut max_frames: usize = 480;
     let mut limit: usize = 20;
     let mut summary_only = false;
     let mut pretty = false;
@@ -144,7 +146,7 @@ fn main() {
                 max_frames = args
                     .get(i)
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(240);
+                    .unwrap_or(480);
             }
             "--limit" => {
                 i += 1;
@@ -511,7 +513,8 @@ mod tests {
         let r511 = root.join("replays/aiarena_matches/5110180_Mothman-T_vs_Opponent.SC2Replay");
         if r511.exists() {
             let b = analyze_replay_file(&r511, 180, false).expect("5110180 should parse");
-            assert!(b.frames[0].units.len() >= 40);
+            // Expect >= 24 real starting entities (workers + townhalls) now that dummy Beacon* units are filtered.
+            assert!(b.frames[0].units.len() >= 24);
             assert_eq!(Some(b.frames[0].cameras[0]), b.players[0].start_xy);
             assert_eq!(Some(b.frames[0].cameras[1]), b.players[1].start_xy);
             let has_raised = b
@@ -635,6 +638,60 @@ mod tests {
             assert!(
                 b.production_spans.iter().any(|s| !s.approx),
                 "Mothman-P-full should include exact UnitInit/Cmd spans"
+            );
+        }
+    }
+
+    #[test]
+    fn test_terrain_and_fine_unit_tracking_if_present() {
+        let root = default_repo_root();
+        let r511 = root.join("replays/aiarena_matches/5110180_Mothman-T_vs_Opponent.SC2Replay");
+        if r511.exists() {
+            let b = analyze_replay_file(&r511, 320, false).expect("5110180 should parse");
+            let terrain = b.terrain.as_ref().expect("terrain overlay should be present");
+            assert_eq!(terrain.source, "inferred");
+            assert!(
+                !terrain.base_plateaus.is_empty(),
+                "5110180 should infer base plateaus from mineral clusters"
+            );
+            assert!(
+                b.frames.len() > 260,
+                "5110180 should support higher-cadence sampling (>260 frames, got {})",
+                b.frames.len()
+            );
+            let mut saw_tagged = false;
+            for f in &b.frames {
+                for u in &f.units {
+                    assert!(
+                        !u.name.starts_with("Beacon"),
+                        "Beacon unit {} should be filtered from tracked frames",
+                        u.name
+                    );
+                    if u.tag > 0 {
+                        saw_tagged = true;
+                    }
+                }
+            }
+            assert!(saw_tagged, "tracked units should expose stable non-zero tags");
+        }
+    }
+
+    #[test]
+    fn test_ui_terrain_and_tracking_markers() {
+        let html = include_str!("../sidecar-ui.html");
+        for needle in [
+            "id=\"terrainBadge\"",
+            "id=\"trackedUnitChip\"",
+            "id=\"zoomResetBtn\"",
+            "id=\"minimapExpandBtn\"",
+            "data-layer=\"terrain\"",
+            "data-layer=\"trails\"",
+            "ensureTerrainRaster",
+            "applyMinimapLayout",
+        ] {
+            assert!(
+                html.contains(needle),
+                "sidecar-ui.html missing expected Terrain/Tracking marker: {needle}"
             );
         }
     }

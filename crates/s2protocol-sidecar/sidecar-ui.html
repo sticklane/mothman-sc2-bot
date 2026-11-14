@@ -111,20 +111,40 @@
       </div>
     </div>
 
-    <!-- Balanced 2-Column Studio Workbench: Minimap (Left) | Leader Panel + Win Prob + Diagnostics (Right) -->
+    <!-- Balanced 2-Column Studio Workbench: Large Interactive Minimap (Left) | Leader Panel + Win Prob + Diagnostics (Right) -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
-      <!-- Left 6 Cols: Minimap -->
-      <div class="lg:col-span-6 space-y-3">
+      <!-- Left 7 Cols: Larger Interactive Terrain & Tracking Minimap -->
+      <div id="minimapColumn" class="lg:col-span-7 space-y-3">
         <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2.5">
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="text-xs font-medium text-[var(--foreground)]">Minimap</div>
-            <div id="clockReadout" class="font-mono text-xs tabular-nums px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)] text-[var(--muted-foreground)]">
-              00:00 (f=0)
+            <div class="flex items-center gap-2 flex-wrap">
+              <div class="text-xs font-medium text-[var(--foreground)]">Minimap</div>
+              <span id="terrainBadge" class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)] text-[var(--muted-foreground)]">
+                Geo
+              </span>
+              <button id="trackedUnitChip" class="hidden text-[11px] font-mono px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--primary)] text-[var(--foreground)] hover:opacity-80" title="Click to clear tracked unit (Esc)">
+                Track
+              </button>
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <div class="inline-flex items-center rounded border border-[var(--border)] bg-[var(--background)] text-[11px] font-mono tabular-nums overflow-hidden">
+                <button id="zoomOutBtn" class="px-1.5 py-0.5 hover:opacity-80" title="Zoom Out">-</button>
+                <button id="zoomResetBtn" class="px-2 py-0.5 border-x border-[var(--card-border)] hover:opacity-80" title="Reset Zoom & Pan (R)">1.0x</button>
+                <button id="zoomInBtn" class="px-1.5 py-0.5 hover:opacity-80" title="Zoom In">+</button>
+              </div>
+              <button id="minimapExpandBtn" class="px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--background)] text-[11px] font-medium hover:opacity-80" title="Toggle Expanded Minimap (F)">
+                Expand (F)
+              </button>
+              <div id="clockReadout" class="font-mono text-xs tabular-nums px-2 py-0.5 rounded bg-[var(--background)] border border-[var(--card-border)] text-[var(--muted-foreground)]">
+                00:00 (f=0)
+              </div>
             </div>
           </div>
 
           <!-- Layer Toggles -->
           <div class="flex flex-wrap gap-1.5 text-xs font-medium">
+            <button data-layer="terrain" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Terrain</button>
+            <button data-layer="trails" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Trails</button>
             <button data-layer="botFilter" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Macro Cmds</button>
             <button data-layer="rays" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Cmd Rays</button>
             <button data-layer="power" class="layer-btn px-2 py-0.5 rounded border border-[var(--border)]">Power</button>
@@ -135,8 +155,11 @@
 
           <!-- Minimap Canvas Container -->
           <div class="relative w-full aspect-square rounded border border-[var(--card-border)] overflow-hidden bg-[var(--background)]">
-            <canvas id="minimapCanvas" width="540" height="540" class="w-full h-full block cursor-crosshair"></canvas>
+            <canvas id="minimapCanvas" width="760" height="760" class="w-full h-full block cursor-crosshair"></canvas>
             <div id="minimapTooltip" class="hidden pointer-events-none absolute z-10 px-2 py-1 rounded text-xs font-mono tabular-nums bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] shadow">
+            </div>
+            <div class="pointer-events-none absolute bottom-1.5 left-2 text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--card)]/80 text-[var(--muted-foreground)] border border-[var(--card-border)]">
+              Wheel: zoom • Drag: pan • Click unit: track tag • F: expand • R: reset
             </div>
           </div>
 
@@ -167,8 +190,8 @@
         </div>
       </div>
 
-      <!-- Right 6 Cols: Leader Panel + Win Probability + Diagnostics & Match Tables + Collapsed Debug -->
-      <div class="lg:col-span-6 space-y-3">
+      <!-- Right 5 Cols: Leader Panel + Win Probability + Diagnostics & Match Tables + Collapsed Debug -->
+      <div id="sidePanelColumn" class="lg:col-span-5 space-y-3">
         <!-- StarCraft II Observer Leader Panel Dropdown (D / U / G / V / L / N) -->
         <div id="leaderPanel" class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
           <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -456,8 +479,18 @@
       speed: 1,
       activeTab: "wire",
       leaderTab: "D",
+      expanded: false,
+      interpAlpha: 0,
+      trackedTag: null,
       highlightXY: null,
+      viewport: {
+        zoom: 1,
+        panX: 0,
+        panY: 0
+      },
       layers: {
+        terrain: true,
+        trails: true,
         botFilter: true,
         rays: true,
         power: true,
@@ -467,14 +500,18 @@
       },
       canvas: {
         dpr: 1,
-        minimapSize: 540,
+        minimapSize: 760,
         winW: 760,
         winH: 110
       },
       staticMapCanvas: document.createElement("canvas"),
-      staticMapKey: ""
+      staticMapKey: "",
+      terrainRasterCanvas: document.createElement("canvas"),
+      terrainRasterKey: "",
+      terrainImgCache: new Map()
     };
     const staticMapCtx = state.staticMapCanvas.getContext("2d");
+    const terrainRasterCtx = state.terrainRasterCanvas.getContext("2d");
 
     const minimapCanvas = document.getElementById("minimapCanvas");
     const minimapCtx = minimapCanvas.getContext("2d");
@@ -551,7 +588,7 @@
     function syncCanvasDpr() {
       const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
       const mRect = minimapCanvas.getBoundingClientRect();
-      const mSize = Math.max(320, Math.round(mRect.width || 540));
+      const mSize = Math.max(320, Math.round(mRect.width || 760));
       const mPx = Math.round(mSize * dpr);
       if (minimapCanvas.width !== mPx || minimapCanvas.height !== mPx || state.canvas.dpr !== dpr) {
         minimapCanvas.width = mPx;
@@ -620,25 +657,137 @@
       };
     }
 
+    function getMapFocusAndScale(mapW, mapH, size) {
+      const mw = mapW || 152;
+      const mh = mapH || 152;
+      const pad = 14;
+      const usable = Math.max(64, size - pad * 2);
+      const baseScale = usable / Math.max(mw, mh, 1);
+      const zoom = state.viewport?.zoom || 1;
+      const scale = baseScale * zoom;
+      const focusX = mw * 0.5 + (state.viewport?.panX || 0);
+      const focusY = mh * 0.5 + (state.viewport?.panY || 0);
+      return { mw, mh, baseScale, scale, focusX, focusY };
+    }
+
     function mapToCanvas(x, y, mapW, mapH, size) {
-      const pad = 16;
-      const usable = size - pad * 2;
-      const scale = usable / Math.max(mapW || 152, mapH || 152, 1);
+      const { scale, focusX, focusY } = getMapFocusAndScale(mapW, mapH, size);
       return [
-        pad + x * scale,
-        size - pad - y * scale,
+        size * 0.5 + (x - focusX) * scale,
+        size * 0.5 - (y - focusY) * scale,
         scale
       ];
     }
 
     function canvasToMap(cx, cy, mapW, mapH, size) {
-      const pad = 16;
-      const usable = size - pad * 2;
-      const scale = usable / Math.max(mapW || 152, mapH || 152, 1);
+      const { scale, focusX, focusY } = getMapFocusAndScale(mapW, mapH, size);
       return [
-        (cx - pad) / scale,
-        (size - pad - cy) / scale
+        focusX + (cx - size * 0.5) / scale,
+        focusY - (cy - size * 0.5) / scale
       ];
+    }
+
+    function clampViewportPan(mapW, mapH) {
+      if ((state.viewport.zoom || 1) <= 1.01) {
+        state.viewport.zoom = 1;
+        state.viewport.panX = 0;
+        state.viewport.panY = 0;
+        return;
+      }
+      const maxPanX = (mapW || 152) * 0.48;
+      const maxPanY = (mapH || 152) * 0.48;
+      state.viewport.panX = Math.max(-maxPanX, Math.min(maxPanX, state.viewport.panX));
+      state.viewport.panY = Math.max(-maxPanY, Math.min(maxPanY, state.viewport.panY));
+    }
+
+    function updateZoomReadout() {
+      const zr = document.getElementById("zoomResetBtn");
+      if (zr) zr.textContent = `${(state.viewport.zoom || 1).toFixed(1)}x`;
+    }
+
+    function resetViewport() {
+      state.viewport.zoom = 1;
+      state.viewport.panX = 0;
+      state.viewport.panY = 0;
+      state.staticMapKey = "";
+      updateZoomReadout();
+      renderMinimap();
+    }
+
+    function setZoomAnchored(nextZoom, cx, cy) {
+      const b = state.current;
+      const size = state.canvas.minimapSize || 760;
+      const mapW = b?.map_width || 152;
+      const mapH = b?.map_height || 152;
+      const clampedZoom = Math.max(1, Math.min(6, nextZoom));
+      const anchorX = cx != null ? cx : size * 0.5;
+      const anchorY = cy != null ? cy : size * 0.5;
+      const [mx, my] = canvasToMap(anchorX, anchorY, mapW, mapH, size);
+
+      state.viewport.zoom = clampedZoom;
+      const { baseScale } = getMapFocusAndScale(mapW, mapH, size);
+      const nextScale = baseScale * clampedZoom;
+      const nextFocusX = mx - (anchorX - size * 0.5) / nextScale;
+      const nextFocusY = my + (anchorY - size * 0.5) / nextScale;
+      state.viewport.panX = nextFocusX - mapW * 0.5;
+      state.viewport.panY = nextFocusY - mapH * 0.5;
+      clampViewportPan(mapW, mapH);
+      state.staticMapKey = "";
+      updateZoomReadout();
+      renderMinimap();
+    }
+
+    function updateTrackedChip() {
+      const chip = document.getElementById("trackedUnitChip");
+      if (!chip) return;
+      if (!state.trackedTag) {
+        chip.classList.add("hidden");
+        return;
+      }
+      const frame = state.current?.frames?.[state.frameIdx];
+      const u = (frame?.units || []).find((it) => it.tag === state.trackedTag);
+      chip.classList.remove("hidden");
+      if (u) {
+        chip.textContent = `P${u.owner} ${formatUnitLabel(u)} #${u.tag} (${u.x}, ${u.y}) ×`;
+      } else {
+        chip.textContent = `Unit #${state.trackedTag} (not in frame) ×`;
+      }
+    }
+
+    function applyMinimapLayout() {
+      const left = document.getElementById("minimapColumn");
+      const right = document.getElementById("sidePanelColumn");
+      const btn = document.getElementById("minimapExpandBtn");
+      if (left && right) {
+        left.className = state.expanded
+          ? "lg:col-span-12 max-w-[920px] mx-auto w-full space-y-3"
+          : "lg:col-span-7 space-y-3";
+        right.className = state.expanded
+          ? "lg:col-span-12 space-y-3"
+          : "lg:col-span-5 space-y-3";
+      }
+      if (btn) btn.textContent = state.expanded ? "Dock (F)" : "Expand (F)";
+      state.staticMapKey = "";
+      syncCanvasDpr();
+      renderMinimap();
+    }
+
+    function updateTerrainBadge(b) {
+      const badge = document.getElementById("terrainBadge");
+      if (!badge) return;
+      const t = b?.terrain;
+      if (!t) {
+        badge.textContent = "Grid Only";
+        return;
+      }
+      if (t.source === "mpq_s2ma") {
+        badge.textContent = `MPQ Terrain (${t.width}×${t.height})`;
+      } else if (t.source === "local_sc2map") {
+        badge.textContent = `.SC2Map (${t.width}×${t.height})`;
+      } else {
+        const pCount = t.base_plateaus?.length || 0;
+        badge.textContent = `Inferred Geo (${pCount} plateaus)`;
+      }
     }
 
     function syncLayerButtons() {
@@ -651,6 +800,7 @@
         btn.style.opacity = on ? "1" : "0.52";
         btn.style.borderColor = on ? "var(--primary)" : "var(--border)";
       });
+      updateZoomReadout();
       document.querySelectorAll(".speed-btn").forEach((btn) => {
         const active = Number(btn.dataset.speed) === state.speed;
         btn.style.borderColor = active ? "var(--primary)" : "var(--border)";
@@ -716,6 +866,10 @@
       state.playing = false;
       setText(UI.playPauseBtn, "Play");
       state.highlightXY = null;
+      state.trackedTag = null;
+      state.interpAlpha = 0;
+      state.viewport = { zoom: 1, panX: 0, panY: 0 };
+      state.staticMapKey = "";
       if (UI.replaySelect.value !== id && Array.from(UI.replaySelect.options).some((o) => o.value === id)) {
         UI.replaySelect.value = id;
       }
@@ -1025,6 +1179,7 @@
         for (const u of frame?.units || []) {
           if (u.owner !== pid || u.init) continue;
           if (u.kind !== 0 && u.kind !== 1) continue;
+          if (u.name && u.name.startsWith("Beacon")) continue;
           if (u.kind === 0) workers += 1;
           else army += 1;
           const cname = canonicalLeaderUnit(u.name);
@@ -1169,10 +1324,98 @@
       renderLeaderList(UI.leaderP2List, p2Res.rows, pal.p2);
     }
 
+    function getTerrainImg(b64) {
+      if (!b64) return null;
+      let img = state.terrainImgCache.get(b64);
+      if (!img) {
+        img = new Image();
+        img.onload = () => {
+          state.staticMapKey = "";
+          renderMinimap();
+        };
+        img.src = `data:image/png;base64,${b64}`;
+        state.terrainImgCache.set(b64, img);
+      }
+      return img.complete && img.naturalWidth > 0 ? img : null;
+    }
+
+    function ensureTerrainRaster(b, pal) {
+      const t = b?.terrain;
+      if (!t || !t.heights?.length || !t.width || !t.height) return null;
+      const key = `${b.replay_id}|${pal.isLight}|${t.width}|${t.height}`;
+      if (state.terrainRasterKey === key) return state.terrainRasterCanvas;
+
+      const w = t.width;
+      const h = t.height;
+      state.terrainRasterCanvas.width = w;
+      state.terrainRasterCanvas.height = h;
+      const imgData = terrainRasterCtx.createImageData(w, h);
+      const data = imgData.data;
+
+      let minH = 255;
+      let maxH = 0;
+      for (let i = 0; i < t.heights.length; i++) {
+        if (t.heights[i] < minH) minH = t.heights[i];
+        if (t.heights[i] > maxH) maxH = t.heights[i];
+      }
+      const span = Math.max(1, maxH - minH);
+
+      for (let py = 0; py < h; py++) {
+        const row = h - 1 - py;
+        for (let col = 0; col < w; col++) {
+          const idx = row * w + col;
+          const hv = t.heights[idx];
+          const norm = (hv - minH) / span;
+          const hR = col + 1 < w ? t.heights[row * w + col + 1] : hv;
+          const hD = row > 0 ? t.heights[(row - 1) * w + col] : hv;
+          const cliffDrop = hv > hR || hv > hD;
+          const cliffRise = hv < hR || hv < hD;
+
+          let r, g, bl;
+          if (pal.isLight) {
+            const base = 196 + Math.round(norm * 52);
+            r = base - 8;
+            g = base - 2;
+            bl = base + 4;
+            if (cliffDrop || cliffRise) {
+              r -= 36;
+              g -= 32;
+              bl -= 26;
+            }
+          } else {
+            r = 16 + Math.round(norm * 36);
+            g = 22 + Math.round(norm * 44);
+            bl = 30 + Math.round(norm * 52);
+            if (cliffDrop) {
+              r = Math.max(8, r - 12);
+              g = Math.max(10, g - 12);
+              bl = Math.max(14, bl - 12);
+            } else if (cliffRise) {
+              r = Math.min(255, r + 16);
+              g = Math.min(255, g + 18);
+              bl = Math.min(255, bl + 20);
+            }
+          }
+          const p = (py * w + col) * 4;
+          data[p] = r;
+          data[p + 1] = g;
+          data[p + 2] = bl;
+          data[p + 3] = 255;
+        }
+      }
+      terrainRasterCtx.putImageData(imgData, 0, 0);
+      state.terrainRasterKey = key;
+      return state.terrainRasterCanvas;
+    }
+
     function ensureStaticMap(b, pal, size, dpr) {
       const mapW = b.map_width || 152;
       const mapH = b.map_height || 152;
-      const key = `${b.replay_id}|${mapW}|${mapH}|${state.layers.heatmap}|${pal.isLight}|${size}|${dpr}`;
+      const tImg = state.layers.terrain ? getTerrainImg(b.terrain?.minimap_png_b64) : null;
+      const zoom = state.viewport?.zoom || 1;
+      const panX = state.viewport?.panX || 0;
+      const panY = state.viewport?.panY || 0;
+      const key = `${b.replay_id}|${mapW}|${mapH}|${state.layers.terrain}|${state.layers.heatmap}|${pal.isLight}|${size}|${dpr}|${zoom.toFixed(3)}|${panX.toFixed(2)}|${panY.toFixed(2)}|${tImg ? 1 : 0}`;
       if (state.staticMapKey === key) return state.staticMapCanvas;
 
       const px = Math.round(size * dpr);
@@ -1185,35 +1428,102 @@
       staticMapCtx.fillStyle = pal.mapBg;
       staticMapCtx.fillRect(0, 0, size, size);
 
-      // Subtle tile grid (every 16 tiles)
+      const [bx0, by1] = mapToCanvas(0, 0, mapW, mapH, size);
+      const [bx1, by0, scale] = mapToCanvas(mapW, mapH, mapW, mapH, size);
+
+      // Terrain Layer: MPQ Minimap.tga + T3HeightMap relief + Playable Geometry
+      const t = b.terrain;
+      if (state.layers.terrain && t) {
+        const pb = t.playable_bounds || [0, 0, mapW, mapH];
+        const [px0, pyBottom] = mapToCanvas(pb[0], pb[1], mapW, mapH, size);
+        const [px1, pyTop] = mapToCanvas(pb[2], pb[3], mapW, mapH, size);
+        const pw = Math.max(1, px1 - px0);
+        const ph = Math.max(1, pyBottom - pyTop);
+
+        const hCanvas = ensureTerrainRaster(b, pal);
+        if (tImg) {
+          staticMapCtx.save();
+          staticMapCtx.globalAlpha = pal.isLight ? 0.56 : 0.72;
+          staticMapCtx.imageSmoothingEnabled = true;
+          staticMapCtx.drawImage(tImg, px0, pyTop, pw, ph);
+          if (hCanvas) {
+            staticMapCtx.globalAlpha = 0.24;
+            staticMapCtx.imageSmoothingEnabled = false;
+            staticMapCtx.drawImage(hCanvas, px0, pyTop, pw, ph);
+          }
+          staticMapCtx.restore();
+        } else if (hCanvas) {
+          staticMapCtx.save();
+          staticMapCtx.globalAlpha = 0.92;
+          staticMapCtx.imageSmoothingEnabled = false;
+          staticMapCtx.drawImage(hCanvas, px0, pyTop, pw, ph);
+          staticMapCtx.restore();
+        }
+
+        // Base plateau contours (inferred high-ground mineral/gas rings)
+        if (t.base_plateaus?.length) {
+          const isInferred = !tImg && !hCanvas;
+          staticMapCtx.save();
+          for (const [cxw, cyw, rTiles] of t.base_plateaus) {
+            const [pcx, pcy] = mapToCanvas(cxw, cyw, mapW, mapH, size);
+            const pr = Math.max(8, rTiles * scale);
+            if (isInferred) {
+              staticMapCtx.fillStyle = pal.isLight ? "rgba(100,116,139,0.11)" : "rgba(148,163,184,0.11)";
+              staticMapCtx.beginPath();
+              staticMapCtx.arc(pcx, pcy, pr, 0, Math.PI * 2);
+              staticMapCtx.fill();
+            }
+            staticMapCtx.strokeStyle = isInferred
+              ? (pal.isLight ? "rgba(71,85,105,0.28)" : "rgba(148,163,184,0.24)")
+              : "rgba(148,163,184,0.12)";
+            staticMapCtx.lineWidth = 1;
+            staticMapCtx.setLineDash([4, 3]);
+            staticMapCtx.beginPath();
+            staticMapCtx.arc(pcx, pcy, pr, 0, Math.PI * 2);
+            staticMapCtx.stroke();
+          }
+          staticMapCtx.restore();
+        }
+
+        // Playable boundary outline
+        staticMapCtx.strokeStyle = pal.isLight ? "rgba(15,23,42,0.24)" : "rgba(148,163,184,0.26)";
+        staticMapCtx.lineWidth = 1;
+        staticMapCtx.strokeRect(px0, pyTop, pw, ph);
+      }
+
+      // Clipped Coordinate Grid (every 16 tiles, panning/zooming with viewport)
+      staticMapCtx.save();
+      staticMapCtx.beginPath();
+      staticMapCtx.rect(bx0, by0, bx1 - bx0, by1 - by0);
+      staticMapCtx.clip();
       staticMapCtx.strokeStyle = pal.gridLine;
       staticMapCtx.lineWidth = 1;
       for (let gx = 0; gx <= mapW; gx += 16) {
         const [cx] = mapToCanvas(gx, 0, mapW, mapH, size);
         staticMapCtx.beginPath();
-        staticMapCtx.moveTo(cx, 16);
-        staticMapCtx.lineTo(cx, size - 16);
+        staticMapCtx.moveTo(cx, by0);
+        staticMapCtx.lineTo(cx, by1);
         staticMapCtx.stroke();
       }
       for (let gy = 0; gy <= mapH; gy += 16) {
         const [, cy] = mapToCanvas(0, gy, mapW, mapH, size);
         staticMapCtx.beginPath();
-        staticMapCtx.moveTo(16, cy);
-        staticMapCtx.lineTo(size - 16, cy);
+        staticMapCtx.moveTo(bx0, cy);
+        staticMapCtx.lineTo(bx1, cy);
         staticMapCtx.stroke();
       }
+      staticMapCtx.restore();
 
       // Map bounds outline
-      const [bx0, by1] = mapToCanvas(0, 0, mapW, mapH, size);
-      const [bx1, by0] = mapToCanvas(mapW, mapH, mapW, mapH, size);
       staticMapCtx.strokeStyle = pal.isLight ? "rgba(15,23,42,0.16)" : "rgba(148,163,184,0.18)";
+      staticMapCtx.lineWidth = 1;
       staticMapCtx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0);
 
       // Death & Siege-Spot Lethality Heatmap (crisp sharp cells, no glowing blobs)
       if (state.layers.heatmap && b.death_heatmap?.length) {
         const maxVal = Math.max(500, ...b.death_heatmap.map((c) => c.value));
         for (const cell of b.death_heatmap) {
-          const [cx, cy, scale] = mapToCanvas(cell.x, cell.y, mapW, mapH, size);
+          const [cx, cy] = mapToCanvas(cell.x, cell.y, mapW, mapH, size);
           const intensity = Math.min(1, cell.value / maxVal);
           const sz = Math.max(5, 3.0 * scale);
           staticMapCtx.fillStyle = `rgba(249,115,22,${(0.10 + 0.24 * intensity).toFixed(2)})`;
@@ -1230,18 +1540,50 @@
         }
       }
 
-      // Static mineral & vespene nodes
+      // Static mineral, vespene, destructible rocks, and Xel'Naga watchtowers
+      const nodeBoost = Math.min(1.8, Math.sqrt(zoom));
       for (const obj of b.static_objects || []) {
         const [cx, cy] = mapToCanvas(obj.x, obj.y, mapW, mapH, size);
         if (obj.kind === 0) {
+          const s = 4 * nodeBoost;
           staticMapCtx.fillStyle = pal.mineral;
-          staticMapCtx.fillRect(cx - 2, cy - 2, 4, 4);
+          staticMapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
         } else if (obj.kind === 1) {
+          const s = 5 * nodeBoost;
           staticMapCtx.fillStyle = pal.geyser;
-          staticMapCtx.fillRect(cx - 2.5, cy - 2.5, 5, 5);
-        } else {
-          staticMapCtx.fillStyle = pal.muted;
-          staticMapCtx.fillRect(cx - 2, cy - 2, 4, 4);
+          staticMapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
+        } else if (obj.kind === 2) {
+          // Destructible Rocks / Collapsible Towers
+          const s = 3.2 * nodeBoost;
+          staticMapCtx.save();
+          staticMapCtx.fillStyle = "rgba(180,83,9,0.55)";
+          staticMapCtx.strokeStyle = "rgba(245,158,11,0.75)";
+          staticMapCtx.lineWidth = 1;
+          staticMapCtx.fillRect(cx - s, cy - s, s * 2, s * 2);
+          staticMapCtx.strokeRect(cx - s, cy - s, s * 2, s * 2);
+          staticMapCtx.restore();
+        } else if (obj.kind === 3) {
+          // Xel'Naga WatchTower + 22-tile vision ring
+          staticMapCtx.save();
+          if (state.layers.terrain) {
+            staticMapCtx.strokeStyle = "rgba(250,204,21,0.16)";
+            staticMapCtx.lineWidth = 1;
+            staticMapCtx.setLineDash([4, 4]);
+            staticMapCtx.beginPath();
+            staticMapCtx.arc(cx, cy, 22 * scale, 0, Math.PI * 2);
+            staticMapCtx.stroke();
+            staticMapCtx.setLineDash([]);
+          }
+          const s = 4.2 * nodeBoost;
+          staticMapCtx.fillStyle = "#facc15";
+          staticMapCtx.beginPath();
+          staticMapCtx.moveTo(cx, cy - s);
+          staticMapCtx.lineTo(cx + s, cy);
+          staticMapCtx.lineTo(cx, cy + s);
+          staticMapCtx.lineTo(cx - s, cy);
+          staticMapCtx.closePath();
+          staticMapCtx.fill();
+          staticMapCtx.restore();
         }
       }
 
@@ -1258,13 +1600,25 @@
       const mapW = b.map_width || 152;
       const mapH = b.map_height || 152;
       const frames = b.frames || [];
-      const frame = frames[Math.min(state.frameIdx, Math.max(0, frames.length - 1))];
+      const fIdx = Math.min(state.frameIdx, Math.max(0, frames.length - 1));
+      const frame = frames[fIdx];
+      const nextFrame = fIdx + 1 < frames.length ? frames[fIdx + 1] : null;
+      const alpha = state.playing ? Math.max(0, Math.min(1, state.interpAlpha || 0)) : 0;
+      const zoom = state.viewport?.zoom || 1;
+      const zoomSqrt = Math.sqrt(zoom);
 
       const staticBg = ensureStaticMap(b, pal, size, state.canvas.dpr);
       minimapCtx.clearRect(0, 0, size, size);
       minimapCtx.drawImage(staticBg, 0, 0, size, size);
 
       if (!frame) return;
+
+      const nextTagPos = new Map();
+      if (alpha > 0.005 && nextFrame?.units?.length) {
+        for (const nu of nextFrame.units) {
+          if (nu.tag > 0) nextTagPos.set(nu.tag, nu);
+        }
+      }
 
       // Zerg Creep union
       if (state.layers.creep && frame.creep?.length) {
@@ -1291,11 +1645,93 @@
         }
       }
 
-      // Units & structures (preserving Depot raised/lowered & sieged/burrowed states)
+      // Per-tag Directional Motion Trails across recent frames
+      if (state.layers.trails && fIdx > 0) {
+        const trailTags = new Map();
+        const lookback = 7;
+        const startIdx = Math.max(0, fIdx - lookback);
+        for (let fi = startIdx; fi <= fIdx; fi++) {
+          const fr = frames[fi];
+          if (!fr?.units) continue;
+          for (const u of fr.units) {
+            if (!u.tag || u.kind > 1) continue;
+            let pts = trailTags.get(u.tag);
+            if (!pts) {
+              pts = [];
+              trailTags.set(u.tag, pts);
+            }
+            pts.push({ x: u.x, y: u.y, owner: u.owner, fi });
+          }
+        }
+        for (const [tag, pts] of trailTags.entries()) {
+          if (pts.length < 2) continue;
+          const first = pts[0];
+          const last = pts[pts.length - 1];
+          const totalDist = Math.hypot(last.x - first.x, last.y - first.y);
+          if (totalDist < 0.35 && tag !== state.trackedTag) continue;
+          if (totalDist > 36) continue;
+          const isTracked = tag === state.trackedTag;
+          minimapCtx.save();
+          minimapCtx.strokeStyle = isTracked
+            ? "#facc15"
+            : (last.owner === 1 ? "rgba(96,165,250,0.48)" : "rgba(248,113,113,0.48)");
+          minimapCtx.lineWidth = isTracked ? 2.4 : Math.max(1.0, 1.15 * zoomSqrt * 0.75);
+          minimapCtx.beginPath();
+          let started = false;
+          for (let pIdx = 0; pIdx < pts.length; pIdx++) {
+            const pt = pts[pIdx];
+            if (pIdx > 0 && Math.hypot(pt.x - pts[pIdx - 1].x, pt.y - pts[pIdx - 1].y) > 22) {
+              started = false;
+              continue;
+            }
+            const [cx, cy] = mapToCanvas(pt.x, pt.y, mapW, mapH, size);
+            if (!started) {
+              minimapCtx.moveTo(cx, cy);
+              started = true;
+            } else {
+              minimapCtx.lineTo(cx, cy);
+            }
+          }
+          minimapCtx.stroke();
+          minimapCtx.restore();
+        }
+      }
+
+      // Extended Future/Past Trajectory Window for Click-Tracked Unit Tag
+      if (state.trackedTag) {
+        const wStart = Math.max(0, fIdx - 24);
+        const wEnd = Math.min(frames.length - 1, fIdx + 16);
+        const trackPts = [];
+        for (let fi = wStart; fi <= wEnd; fi++) {
+          const found = frames[fi]?.units?.find((it) => it.tag === state.trackedTag);
+          if (found) trackPts.push({ x: found.x, y: found.y, fi });
+        }
+        if (trackPts.length >= 2) {
+          minimapCtx.save();
+          minimapCtx.strokeStyle = "rgba(250,204,21,0.75)";
+          minimapCtx.lineWidth = 2.0;
+          minimapCtx.setLineDash([4, 3]);
+          minimapCtx.beginPath();
+          for (let i = 0; i < trackPts.length; i++) {
+            const [cx, cy] = mapToCanvas(trackPts[i].x, trackPts[i].y, mapW, mapH, size);
+            if (i === 0) minimapCtx.moveTo(cx, cy);
+            else minimapCtx.lineTo(cx, cy);
+          }
+          minimapCtx.stroke();
+          minimapCtx.restore();
+        }
+      }
+
+      // Units & structures (interpolated per tag, zoomed clarity, Depot raised/lowered & sieged/burrowed states)
       for (const u of frame.units || []) {
-        const [cx, cy, scale] = mapToCanvas(u.x, u.y, mapW, mapH, size);
+        const nu = alpha > 0.005 && u.tag > 0 ? nextTagPos.get(u.tag) : null;
+        const interpOk = nu && Math.hypot(nu.x - u.x, nu.y - u.y) < 18;
+        const ux = interpOk ? u.x + (nu.x - u.x) * alpha : u.x;
+        const uy = interpOk ? u.y + (nu.y - u.y) * alpha : u.y;
+        const [cx, cy, scale] = mapToCanvas(ux, uy, mapW, mapH, size);
         const color = u.owner === 1 ? pal.p1 : pal.p2;
-        const rad = Math.max(2.2, u.r * scale * 1.25);
+        const rad = Math.max(2.0, u.r * scale * (zoom > 1.5 ? 1.05 : 1.18));
+        const isTracked = state.trackedTag && u.tag === state.trackedTag;
 
         minimapCtx.save();
         if (u.init) {
@@ -1303,35 +1739,35 @@
           minimapCtx.setLineDash([2, 2]);
         }
         minimapCtx.fillStyle = color;
-        minimapCtx.strokeStyle = pal.isLight ? "#0f172a" : "#f8fafc";
-        minimapCtx.lineWidth = u.kind >= 2 ? 1.2 : 0.7;
+        minimapCtx.strokeStyle = isTracked ? "#facc15" : (pal.isLight ? "#0f172a" : "#f8fafc");
+        minimapCtx.lineWidth = isTracked ? 2.2 : (u.kind >= 2 ? 1.2 : 0.75);
 
         if (u.name === "SupplyDepot") {
-          const s = Math.max(6.0, rad * 1.45);
+          const s = Math.max(5.8 * zoomSqrt, rad * 1.45);
           minimapCtx.fillStyle = color;
           minimapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
-          minimapCtx.strokeStyle = "#fb923c";
+          minimapCtx.strokeStyle = isTracked ? "#facc15" : "#fb923c";
           minimapCtx.lineWidth = 1.9;
           minimapCtx.strokeRect(cx - s / 2, cy - s / 2, s, s);
         } else if (u.name === "SupplyDepotLowered") {
-          const s = Math.max(6.0, rad * 1.45);
+          const s = Math.max(5.8 * zoomSqrt, rad * 1.45);
           minimapCtx.save();
           minimapCtx.globalAlpha = u.init ? 0.18 : 0.25;
           minimapCtx.fillStyle = color;
           minimapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
           minimapCtx.restore();
           minimapCtx.setLineDash([2, 2]);
-          minimapCtx.strokeStyle = u.owner === 1 ? "#93c5fd" : "#fca5a5";
+          minimapCtx.strokeStyle = isTracked ? "#facc15" : (u.owner === 1 ? "#93c5fd" : "#fca5a5");
           minimapCtx.lineWidth = 1.3;
           minimapCtx.strokeRect(cx - s / 2, cy - s / 2, s, s);
         } else if (u.kind === 2) {
           // TownHall square
-          const s = Math.max(7, rad * 1.7);
+          const s = Math.max(7 * zoomSqrt, rad * 1.65);
           minimapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
           minimapCtx.strokeRect(cx - s / 2, cy - s / 2, s, s);
         } else if (u.kind === 3 || u.kind === 4) {
           // Tech / Production / Defense diamond
-          const s = Math.max(4.5, rad * 1.35);
+          const s = Math.max(4.2 * zoomSqrt, rad * 1.3);
           minimapCtx.beginPath();
           minimapCtx.moveTo(cx, cy - s);
           minimapCtx.lineTo(cx + s, cy);
@@ -1341,12 +1777,12 @@
           minimapCtx.fill();
           minimapCtx.stroke();
         } else {
-          // Worker (small) or Army (scaled circle + special stance indicators)
-          const ur = u.kind === 0 ? 2.1 : Math.max(3.0, rad);
+          // Worker or Army (scaled circle + special stance indicators + zoomed label)
+          const ur = u.kind === 0 ? Math.max(1.9, u.r * scale * 0.92) : Math.max(2.6 * zoomSqrt * 0.85, rad);
           minimapCtx.beginPath();
           minimapCtx.arc(cx, cy, ur, 0, Math.PI * 2);
           minimapCtx.fill();
-          if (u.kind === 1) minimapCtx.stroke();
+          if (u.kind === 1 || isTracked) minimapCtx.stroke();
           if (u.name === "SiegeTankSieged" || u.name === "LiberatorAG") {
             minimapCtx.strokeStyle = "#facc15";
             minimapCtx.lineWidth = 1.2;
@@ -1361,6 +1797,19 @@
             minimapCtx.arc(cx, cy, ur + 2.4, 0, Math.PI * 2);
             minimapCtx.stroke();
           }
+          if (isTracked || (zoom >= 2.6 && u.kind === 1)) {
+            minimapCtx.font = isTracked ? "bold 10px monospace" : "9px monospace";
+            minimapCtx.fillStyle = isTracked ? "#facc15" : pal.text;
+            minimapCtx.fillText(isTracked ? `${u.name} #${u.tag}` : u.name.slice(0, 6), cx + ur + 2.5, cy + 3);
+          }
+        }
+
+        if (isTracked) {
+          minimapCtx.strokeStyle = "#facc15";
+          minimapCtx.lineWidth = 1.8;
+          minimapCtx.beginPath();
+          minimapCtx.arc(cx, cy, Math.max(8, rad * 1.9), 0, Math.PI * 2);
+          minimapCtx.stroke();
         }
         minimapCtx.restore();
       }
@@ -1698,12 +2147,14 @@
     function renderFrame() {
       renderScoreboardAndPriority();
       renderLeaderPanel();
+      updateTrackedChip();
       renderMinimap();
       renderWinChanceChart();
     }
 
     function renderAll() {
       syncLayerButtons();
+      updateTerrainBadge(state.current);
       renderFrame();
       renderJumpPillsAndFindings();
       renderActiveTab();
@@ -1711,6 +2162,7 @@
 
     function setPlaying(nextPlaying) {
       state.playing = nextPlaying;
+      if (!nextPlaying) state.interpAlpha = 0;
       setText(UI.playPauseBtn, state.playing ? "Pause" : "Play");
       if (state.playing) {
         lastTickMs = performance.now();
@@ -1721,6 +2173,7 @@
     function stepFrames(delta) {
       const maxIdx = Math.max(0, (state.current?.frames?.length || 1) - 1);
       setPlaying(false);
+      state.interpAlpha = 0;
       state.frameIdx = Math.max(0, Math.min(maxIdx, state.frameIdx + delta));
       renderFrame();
     }
@@ -1877,7 +2330,30 @@
       });
     }
 
-    // Keyboard shortcuts (Space, Left/Right, Shift+Left/Right, C, H, D/U/G/V/L/N)
+    // Zoom, Expand & Tracked Tag Buttons
+    const zoomOutBtn = document.getElementById("zoomOutBtn");
+    const zoomInBtn = document.getElementById("zoomInBtn");
+    const zoomResetBtn = document.getElementById("zoomResetBtn");
+    const minimapExpandBtn = document.getElementById("minimapExpandBtn");
+    const trackedUnitChip = document.getElementById("trackedUnitChip");
+    if (zoomOutBtn) zoomOutBtn.addEventListener("click", () => setZoomAnchored((state.viewport.zoom || 1) / 1.35));
+    if (zoomInBtn) zoomInBtn.addEventListener("click", () => setZoomAnchored((state.viewport.zoom || 1) * 1.35));
+    if (zoomResetBtn) zoomResetBtn.addEventListener("click", resetViewport);
+    if (minimapExpandBtn) {
+      minimapExpandBtn.addEventListener("click", () => {
+        state.expanded = !state.expanded;
+        applyMinimapLayout();
+      });
+    }
+    if (trackedUnitChip) {
+      trackedUnitChip.addEventListener("click", () => {
+        state.trackedTag = null;
+        updateTrackedChip();
+        renderMinimap();
+      });
+    }
+
+    // Keyboard shortcuts (Space, Left/Right, Shift+Left/Right, C, H, F, R, Esc, D/U/G/V/L/N)
     window.addEventListener("keydown", (e) => {
       const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : "";
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -1899,6 +2375,18 @@
         state.layers.heatmap = !state.layers.heatmap;
         syncLayerButtons();
         renderMinimap();
+      } else if (e.code === "KeyF") {
+        state.expanded = !state.expanded;
+        applyMinimapLayout();
+      } else if (e.code === "KeyR") {
+        resetViewport();
+      } else if (e.code === "Escape") {
+        if (state.trackedTag || state.highlightXY) {
+          state.trackedTag = null;
+          state.highlightXY = null;
+          updateTrackedChip();
+          renderMinimap();
+        }
       } else if (e.code === "KeyD") {
         setLeaderTab("D");
       } else if (e.code === "KeyU") {
@@ -1924,19 +2412,17 @@
       jumpToSec(frac * (state.current?.duration_sec || 0), null);
     });
 
-    // Hover Tooltip on Minimap
-    minimapCanvas.addEventListener("mousemove", (e) => {
+    // Interactive Pan, Wheel Zoom, Unit Tag Click-to-Track, and Hover Tooltip on Minimap
+    function findNearestUnitAtClient(clientX, clientY) {
       const b = state.current;
       const frame = b?.frames?.[state.frameIdx];
-      const tip = document.getElementById("minimapTooltip");
-      if (!b || !frame) return;
+      if (!b || !frame) return { nearest: null, mx: 0, my: 0, cx: 0, cy: 0, rect: null };
       const rect = minimapCanvas.getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      const cy = e.clientY - rect.top;
+      const cx = clientX - rect.left;
+      const cy = clientY - rect.top;
       const [mx, my] = canvasToMap(cx, cy, b.map_width || 152, b.map_height || 152, rect.width || state.canvas.minimapSize);
-
       let nearest = null;
-      let bestDist = 3.2;
+      let bestDist = 3.5 / Math.max(1, state.viewport.zoom || 1);
       for (const u of frame.units || []) {
         const d = Math.hypot(u.x - mx, u.y - my);
         if (d < bestDist) {
@@ -1944,11 +2430,81 @@
           nearest = u;
         }
       }
+      return { nearest, mx, my, cx, cy, rect };
+    }
+
+    let minimapPanDrag = null;
+    minimapCanvas.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || !state.current) return;
+      minimapPanDrag = {
+        startX: e.clientX,
+        startY: e.clientY,
+        origPanX: state.viewport.panX || 0,
+        origPanY: state.viewport.panY || 0,
+        moved: false
+      };
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!minimapPanDrag || !state.current) return;
+      const dx = e.clientX - minimapPanDrag.startX;
+      const dy = e.clientY - minimapPanDrag.startY;
+      if (Math.hypot(dx, dy) > 4) minimapPanDrag.moved = true;
+      if (!minimapPanDrag.moved || (state.viewport.zoom || 1) <= 1.01) return;
+      const b = state.current;
+      const rect = minimapCanvas.getBoundingClientRect();
+      const size = rect.width || state.canvas.minimapSize;
+      const { scale } = getMapFocusAndScale(b.map_width, b.map_height, size);
+      state.viewport.panX = minimapPanDrag.origPanX - dx / scale;
+      state.viewport.panY = minimapPanDrag.origPanY + dy / scale;
+      clampViewportPan(b.map_width, b.map_height);
+      state.staticMapKey = "";
+      renderMinimap();
+    });
+
+    window.addEventListener("mouseup", (e) => {
+      if (!minimapPanDrag) return;
+      const wasDrag = minimapPanDrag;
+      minimapPanDrag = null;
+      if (wasDrag.moved || !state.current) return;
+      const rect = minimapCanvas.getBoundingClientRect();
+      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+      const { nearest } = findNearestUnitAtClient(e.clientX, e.clientY);
+      if (nearest && nearest.tag > 0) {
+        state.trackedTag = state.trackedTag === nearest.tag ? null : nearest.tag;
+        state.highlightXY = null;
+      } else if (state.trackedTag || state.highlightXY) {
+        state.trackedTag = null;
+        state.highlightXY = null;
+      }
+      updateTrackedChip();
+      renderMinimap();
+    });
+
+    minimapCanvas.addEventListener("wheel", (e) => {
+      if (!state.current) return;
+      e.preventDefault();
+      const rect = minimapCanvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.22 : 1 / 1.22;
+      setZoomAnchored((state.viewport.zoom || 1) * factor, cx, cy);
+    }, { passive: false });
+
+    minimapCanvas.addEventListener("mousemove", (e) => {
+      const tip = document.getElementById("minimapTooltip");
+      if (minimapPanDrag?.moved) {
+        tip.classList.add("hidden");
+        return;
+      }
+      const { nearest, mx, my, cx, cy, rect } = findNearestUnitAtClient(e.clientX, e.clientY);
+      if (!rect) return;
       tip.classList.remove("hidden");
-      tip.style.left = `${Math.min(rect.width - 210, Math.max(6, cx + 10))}px`;
+      tip.style.left = `${Math.min(rect.width - 230, Math.max(6, cx + 10))}px`;
       tip.style.top = `${Math.max(6, cy - 28)}px`;
       if (nearest) {
-        tip.textContent = `P${nearest.owner} ${formatUnitLabel(nearest)}${nearest.init ? " [init]" : ""} (${nearest.x}, ${nearest.y})`;
+        const tagStr = nearest.tag > 0 ? ` #${nearest.tag}` : "";
+        tip.textContent = `P${nearest.owner} ${formatUnitLabel(nearest)}${tagStr}${nearest.init ? " [init]" : ""} (${nearest.x}, ${nearest.y})`;
       } else {
         tip.textContent = `Map (${mx.toFixed(1)}, ${my.toFixed(1)})`;
       }
@@ -1989,6 +2545,11 @@
         }
         state.current = bundle;
         state.frameIdx = 0;
+        state.trackedTag = null;
+        state.highlightXY = null;
+        state.interpAlpha = 0;
+        state.viewport = { zoom: 1, panX: 0, panY: 0 };
+        state.staticMapKey = "";
         populateCatalogSelect();
         renderAll();
       } catch (err) {
@@ -1996,7 +2557,7 @@
       }
     });
 
-    // Delta-time requestAnimationFrame Playback Loop
+    // Delta-time requestAnimationFrame Playback Loop with 60fps per-tag position interpolation
     let lastTickMs = performance.now();
     let accumMs = 0;
     const BASE_FRAME_MS = 110;
@@ -2007,24 +2568,31 @@
         accumMs += dt;
         const interval = BASE_FRAME_MS / Math.max(0.25, state.speed || 1);
         const steps = Math.floor(accumMs / interval);
+        const maxIdx = state.current.frames.length - 1;
         if (steps > 0) {
           accumMs -= steps * interval;
-          const maxIdx = state.current.frames.length - 1;
           if (state.frameIdx >= maxIdx) {
+            state.interpAlpha = 0;
             setPlaying(false);
           } else {
             const nextIdx = Math.min(maxIdx, state.frameIdx + steps);
-            if (nextIdx !== state.frameIdx) {
-              state.frameIdx = nextIdx;
-              renderFrame();
-            }
+            const moved = nextIdx !== state.frameIdx;
+            if (moved) state.frameIdx = nextIdx;
+            state.interpAlpha = state.frameIdx < maxIdx ? Math.min(0.999, accumMs / interval) : 0;
+            if (moved) renderFrame();
             if (state.frameIdx >= maxIdx) {
+              state.interpAlpha = 0;
               setPlaying(false);
+              renderMinimap();
             }
           }
+        } else if (state.frameIdx < maxIdx) {
+          state.interpAlpha = Math.min(0.999, accumMs / interval);
+          renderMinimap();
         }
       } else {
         lastTickMs = now;
+        state.interpAlpha = 0;
       }
       requestAnimationFrame(playbackRaf);
     }

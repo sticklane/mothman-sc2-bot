@@ -1,8 +1,9 @@
 //! Replay catalog scanning, single-file analysis, and live HTTP/SSE sidecar server.
 
 use crate::forensics::{
-    CatalogEntry, ReplaySidecarBundle, analyze_replay_bytes, balance_units_db, clean_player_name,
-    has_companion_priority_log, normalize_race, read_priority_snapshots_for_replay,
+    CatalogEntry, ReplaySidecarBundle, analyze_replay_bytes_with_options, balance_units_db,
+    clean_player_name, has_companion_priority_log, normalize_race,
+    read_priority_snapshots_for_replay,
 };
 use s2protocol::basic_replay_data::SC2ReplayBasicData;
 use std::collections::{BTreeMap, HashMap};
@@ -147,12 +148,24 @@ pub fn analyze_replay_file(
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_else(|| "replay.SC2Replay".to_string());
     let id = replay_id_from_path(path);
-    let prio = read_priority_snapshots_for_replay(path);
-    let mut bundle = analyze_replay_bytes(&id, &file_name, &bytes, prio, max_frames)?;
+    let prio = if summary_only {
+        Vec::new()
+    } else {
+        read_priority_snapshots_for_replay(path)
+    };
+    let mut bundle = analyze_replay_bytes_with_options(
+        &id,
+        &file_name,
+        &bytes,
+        prio,
+        max_frames,
+        !summary_only,
+    )?;
     if summary_only {
         bundle.frames.clear();
         bundle.static_objects.clear();
         bundle.priority_snapshots.clear();
+        bundle.terrain = None;
     }
     Ok(bundle)
 }
@@ -367,7 +380,7 @@ pub fn handle_client(mut stream: TcpStream, state: Arc<SidecarState>) {
             return;
         };
 
-        match analyze_replay_file(&full_path, 260, false) {
+        match analyze_replay_file(&full_path, 600, false) {
             Ok(bundle) => {
                 let json_str = Arc::new(serde_json::to_string(&bundle).unwrap_or_default());
                 if let Ok(mut cache) = state.replay_cache.write() {
@@ -422,7 +435,7 @@ pub fn handle_client(mut stream: TcpStream, state: Arc<SidecarState>) {
             .map(url_decode_simple)
             .unwrap_or_else(|| format!("uploaded_{}.SC2Replay", epoch_now_sec()));
         let id = replay_id_from_path(Path::new(&file_name));
-        match analyze_replay_bytes(&id, &file_name, &body_bytes, vec![], 260) {
+        match analyze_replay_bytes_with_options(&id, &file_name, &body_bytes, vec![], 600, true) {
             Ok(bundle) => {
                 let json_str = Arc::new(serde_json::to_string(&bundle).unwrap_or_default());
                 if let Ok(mut cache) = state.replay_cache.write() {

@@ -194,7 +194,7 @@ fn snapshot_frame(
         if !u.is_init && base == "Pylon" {
             pylons.push([x, y, owner as f32]);
         }
-        if u.name.starts_with("CreepTumor") {
+        if u.name.starts_with("CreepTumor") || u.name.starts_with("Beacon") {
             continue;
         }
         let kind = if WORKERS.contains(&base) {
@@ -222,6 +222,7 @@ fn snapshot_frame(
             base
         };
         units.push(MinimapUnit {
+            tag: u.tag_index,
             x,
             y,
             owner,
@@ -1647,12 +1648,13 @@ pub(crate) fn infer_undecided_results(
     ));
 }
 
-pub fn analyze_replay_bytes(
+pub fn analyze_replay_bytes_with_options(
     replay_id: &str,
     file_name: &str,
     bytes: &[u8],
     priority_snapshots: Vec<PriorityLogSnapshot>,
     max_timeline_frames: usize,
+    include_terrain: bool,
 ) -> Result<ReplaySidecarBundle, String> {
     let t0 = std::time::Instant::now();
     let db = balance_units_db()?;
@@ -1885,6 +1887,16 @@ pub fn analyze_replay_bytes(
 
     let death_heatmap = to_sorted_heatmap(ctx.death_cells);
     let siege_spots = to_sorted_heatmap(ctx.siege_cells);
+    let terrain = if include_terrain {
+        Some(crate::terrain::extract_terrain_overlay(
+            &basic_data,
+            &ctx.static_objects,
+            map_w,
+            map_h,
+        ))
+    } else {
+        None
+    };
 
     Ok(ReplaySidecarBundle {
         replay_id: replay_id.to_string(),
@@ -1911,7 +1923,25 @@ pub fn analyze_replay_bytes(
         upgrade_events: ctx.upgrade_events,
         production_spans: ctx.production_spans,
         death_log,
+        terrain,
     })
+}
+
+pub fn analyze_replay_bytes(
+    replay_id: &str,
+    file_name: &str,
+    bytes: &[u8],
+    priority_snapshots: Vec<PriorityLogSnapshot>,
+    max_timeline_frames: usize,
+) -> Result<ReplaySidecarBundle, String> {
+    analyze_replay_bytes_with_options(
+        replay_id,
+        file_name,
+        bytes,
+        priority_snapshots,
+        max_timeline_frames,
+        true,
+    )
 }
 
 fn finalize_open_production_spans(ctx: &mut ReplayAnalysisCtx<'_>, duration_sec: f32) {

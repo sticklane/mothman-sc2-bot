@@ -1,5 +1,6 @@
 //! Serializable data models and internal accumulator structures for `s2protocol-sidecar`.
 
+use crate::terrain::TerrainOverlay;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -191,6 +192,8 @@ pub struct StaticMapObject {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinimapUnit {
+    #[serde(default)]
+    pub tag: u32,
     pub x: f32,
     pub y: f32,
     pub owner: u8,
@@ -353,6 +356,8 @@ pub struct ReplaySidecarBundle {
     pub upgrade_events: Vec<UpgradeEventRecord>,
     pub production_spans: Vec<ProductionSpan>,
     pub death_log: Vec<DeathTimelineEvent>,
+    #[serde(default)]
+    pub terrain: Option<TerrainOverlay>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
