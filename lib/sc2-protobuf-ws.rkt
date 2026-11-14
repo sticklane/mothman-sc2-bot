@@ -162,6 +162,10 @@
  reset-typed-command-gate-stats!
  mark-urgent-survival-cmd!
  urgent-survival-cmd?
+ mark-framing-camera-cmd!
+ framing-camera-cmd?
+ friendly-unit-on-depot-footprint?
+ friendly-unit-requesting-depot-transit?
  wire-cmd-priority-tier
  make-wire-apm-governor
  govern-sc2-wire-actions!)
@@ -3752,6 +3756,19 @@
   (and (sc2-raw-unit-command? cmd)
        (eq? (hash-ref SC2-URGENT-SURVIVAL-CMDS cmd #f) #t)))
 
+(define SC2-FRAMING-CAMERA-CMDS (make-weak-hasheq))
+(define (mark-framing-camera-cmd! cmd [jump-dist #f])
+  (when (sc2-raw-camera-move? cmd)
+    (hash-set! SC2-FRAMING-CAMERA-CMDS cmd
+               (if (and (real? jump-dist) (not (nan? jump-dist)) (not (infinite? jump-dist)))
+                   (exact->inexact jump-dist)
+                   #t)))
+  cmd)
+(define (framing-camera-cmd? cmd)
+  (and (sc2-raw-camera-move? cmd)
+       (not (not (hash-ref SC2-FRAMING-CAMERA-CMDS cmd #f)))))
+(define SC2-CMD-FRAMING-CAM (make-weak-hasheq))
+
 ;; Structural 3-Base Proxy Invariant:
 ;; An observed enemy building is a proxy iff it is a real structure (excluding creep tumors / traps / turrets)
 ;; and its position `(bx, by)` is NOT inside (`<= base-radius`, default 28.0 tiles) the opponent's
@@ -7014,8 +7031,75 @@
 (define SC2-LAST-KNOWN-ENEMY-POS (make-hasheqv))
 (define SC2-ENEMY-POS-LAST-LOOP (box 0))
 (define SC2-DEPOT-TOGGLE-COOLDOWN (make-hasheqv))
+(define SC2-CONTROL-GROUPED-TAGS (box (hasheqv)))
+(define SC2-GOV-LAST-CAM-X (box #f))
+(define SC2-GOV-LAST-CAM-Y (box #f))
+(define SC2-TRANS-LAST-CAM-X (box #f))
+(define SC2-TRANS-LAST-CAM-Y (box #f))
+(define SC2-TRANS-LAST-CAM-LOOP (box -1000))
 (define SC2-LAST-BOT-ACTION-REJECTS (box '()))
 (define SC2-TOTAL-BOT-ACTION-REJECT-COUNT (box 0))
+
+(define (friendly-unit-on-depot-footprint? dx dy self-units)
+  (for/or ([u (in-list self-units)])
+    (and (not (sc2-unit-is-structure? u))
+         (not (sc2-unit-is-flying u))
+         (let ([up (sc2-unit-pos u)])
+           (and (<= (abs (- (sc2-point3d-x up) dx)) 1.40)
+                (<= (abs (- (sc2-point3d-y up) dy)) 1.40))))))
+
+(define (friendly-unit-requesting-depot-transit? dx dy self-units
+                                                 [builder-worker-tags (seteqv)]
+                                                 [commanded-combat-tags (seteqv)])
+  (define unit-pos-by-tag
+    (for/hasheqv ([u (in-list self-units)])
+      (define p (sc2-unit-pos u))
+      (values (sc2-unit-tag u) (cons (sc2-point3d-x p) (sc2-point3d-y p)))))
+  (define (unit-active-non-hold-worker-transit? u ux uy)
+    (define ords (sc2-unit-orders u))
+    (and (pair? ords)
+         (let* ([o (car ords)]
+                [ab (sc2-unit-order-ability-id o)]
+                [tp (sc2-unit-order-target-pos o)]
+                [tt (sc2-unit-order-target-unit-tag o)]
+                [is-transit-ab?
+                 (or (memv ab '(16 23 295 296 298 299 1183 1184 3666 3667))
+                     (eq? (sc2-order-protection-class (sc2-canonical-order-ability ab))
+                          'build-structure)
+                     (worker-has-build-order? u))])
+           (and (not (= ab 18))
+                is-transit-ab?
+                (let-values ([(tx ty)
+                              (cond
+                                [(any-point? tp) (values (any-point-x tp) (any-point-y tp))]
+                                [(and (> tt 0) (hash-has-key? unit-pos-by-tag tt))
+                                 (let ([p (hash-ref unit-pos-by-tag tt)])
+                                   (values (car p) (cdr p)))]
+                                [else (values #f #f)])])
+                  (or (not (and tx ty))
+                      (> (pt-dist ux uy tx ty) 2.0)
+                      (< (+ (* (- tx dx) (- ux dx))
+                            (* (- ty dy) (- uy dy)))
+                         0.0)))))))
+  (for/or ([u (in-list self-units)])
+    (and (not (sc2-unit-is-structure? u))
+         (not (sc2-unit-is-flying u))
+         (let* ([up (sc2-unit-pos u)]
+                [ux (sc2-point3d-x up)]
+                [uy (sc2-point3d-y up)]
+                [utag (sc2-unit-tag u)]
+                [ords (sc2-unit-orders u)])
+           (and (<= (pt-dist ux uy dx dy) 4.2)
+                (or (and (<= (abs (- ux dx)) 1.45)
+                         (<= (abs (- uy dy)) 1.45))
+                    (and (sc2-unit-is-worker? u)
+                         (or (set-member? builder-worker-tags utag)
+                             (worker-has-build-order? u)
+                             (unit-active-non-hold-worker-transit? u ux uy)))
+                    (and (or (set-member? commanded-combat-tags utag)
+                             (pair? ords))
+                         (or (null? ords)
+                             (not (= (sc2-unit-order-ability-id (car ords)) 18))))))))))
 
 (define (get-last-bot-action-rejects)
   (unbox SC2-LAST-BOT-ACTION-REJECTS))
@@ -7126,6 +7210,12 @@
               (and (<= cur-loop 8) (> (unbox SC2-ENEMY-POS-LAST-LOOP) 8)))
       (hash-clear! SC2-LAST-KNOWN-ENEMY-POS)
       (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
+      (set-box! SC2-CONTROL-GROUPED-TAGS (hasheqv))
+      (set-box! SC2-GOV-LAST-CAM-X #f)
+      (set-box! SC2-GOV-LAST-CAM-Y #f)
+      (set-box! SC2-TRANS-LAST-CAM-X #f)
+      (set-box! SC2-TRANS-LAST-CAM-Y #f)
+      (set-box! SC2-TRANS-LAST-CAM-LOOP -1000)
       (set-box! SC2-CLEARED-ENEMY-BASES '())
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
@@ -7745,9 +7835,110 @@
                         (not (unit-already-executing-order? t ab-id target-pt target-unit-id))))
       t))
 
+  (define (control-grouped-tag? tag)
+    (define ht (unbox SC2-CONTROL-GROUPED-TAGS))
+    (for/or ([g (in-range 0 8)])
+      (set-member? (hash-ref ht g (seteqv)) tag)))
+  (define (update-control-grouped-tags! op g raw-tags)
+    (when (exact-integer? g)
+      (define tags
+        (for/list ([t (in-list (if (list? raw-tags) raw-tags (list raw-tags)))]
+                   #:when (and (exact-integer? t) (> t 0)))
+          t))
+      (define tset (list->seteqv tags))
+      (define cur (unbox SC2-CONTROL-GROUPED-TAGS))
+      (case op
+        [(control-group-set)
+         (set-box! SC2-CONTROL-GROUPED-TAGS (hash-set cur g tset))]
+        [(control-group-append)
+         (set-box! SC2-CONTROL-GROUPED-TAGS
+                   (hash-set cur g (set-union (hash-ref cur g (seteqv)) tset)))]
+        [(control-group-steal)
+         (define stripped
+           (for/hasheqv ([(kg vs) (in-hash cur)])
+             (values kg (if (= kg g) tset (set-subtract vs tset)))))
+         (set-box! SC2-CONTROL-GROUPED-TAGS (hash-set stripped g tset))]
+        [(control-group-append-steal)
+         (define merged (set-union (hash-ref cur g (seteqv)) tset))
+         (define stripped
+           (for/hasheqv ([(kg vs) (in-hash cur)])
+             (values kg (if (= kg g) merged (set-subtract vs tset)))))
+         (set-box! SC2-CONTROL-GROUPED-TAGS (hash-set stripped g merged))]
+        [else (void)])))
   (define raw-cmds '())
+  (define (maybe-emit-framing-cam-before! cmd)
+    (when (sc2-raw-unit-command? cmd)
+      (define ab (sc2-raw-unit-command-ability-id cmd))
+      (define macro-ab?
+        (memv ab '(314 556 558 1216 1218 1450 1452 1518 1520 1768 3678 3679)))
+      (define ungrouped-tag
+        (and (not macro-ab?)
+             (for/or ([t (in-list (sc2-raw-unit-command-unit-tags cmd))])
+               (and (not (control-grouped-tag? t))
+                    (let ([u (hash-ref self-unit-by-tag t #f)])
+                      (if u
+                          (and (not (sc2-unit-is-structure? u)) t)
+                          (and (sc2-raw-unit-command-target-pos cmd) t)))))))
+      (when ungrouped-tag
+        (define focus-pt
+          (let ([u (hash-ref self-unit-by-tag ungrouped-tag #f)])
+            (cond
+              [u
+               (let ([p (sc2-unit-pos u)])
+                 (cons (sc2-point3d-x p) (sc2-point3d-y p)))]
+              [(any-point? (sc2-raw-unit-command-target-pos cmd))
+               (let ([tp (sc2-raw-unit-command-target-pos cmd)])
+                 (cons (any-point-x tp) (any-point-y tp)))]
+              [else #f])))
+        (when focus-pt
+          (define fx (car focus-pt))
+          (define fy (cdr focus-pt))
+          (define obs-cam-pt
+            (let ([cam (and (sc2-observation? obs) (sc2-observation-camera obs))])
+              (and (sc2-point3d? cam)
+                   (finite-world-coord? (sc2-point3d-x cam))
+                   (finite-world-coord? (sc2-point3d-y cam))
+                   (or (> (sc2-point3d-x cam) 0.5) (> (sc2-point3d-y cam) 0.5))
+                   (cons (exact->inexact (sc2-point3d-x cam))
+                         (exact->inexact (sc2-point3d-y cam))))))
+          (define ref-cam-pt
+            (cond
+              [(pair? last-cam-pt) last-cam-pt]
+              [(and (real? (unbox SC2-TRANS-LAST-CAM-X))
+                    (real? (unbox SC2-TRANS-LAST-CAM-Y))
+                    (<= (- cur-loop (unbox SC2-TRANS-LAST-CAM-LOOP)) 6))
+               (cons (unbox SC2-TRANS-LAST-CAM-X) (unbox SC2-TRANS-LAST-CAM-Y))]
+              [(and (real? (unbox SC2-GOV-LAST-CAM-X))
+                    (real? (unbox SC2-GOV-LAST-CAM-Y)))
+               (cons (unbox SC2-GOV-LAST-CAM-X) (unbox SC2-GOV-LAST-CAM-Y))]
+              [obs-cam-pt obs-cam-pt]
+              [(and (real? (unbox SC2-TRANS-LAST-CAM-X))
+                    (real? (unbox SC2-TRANS-LAST-CAM-Y)))
+               (cons (unbox SC2-TRANS-LAST-CAM-X) (unbox SC2-TRANS-LAST-CAM-Y))]
+              [(not (null? townhalls)) (cons home-x home-y)]
+              [else #f]))
+          (define ref-cam-x (and ref-cam-pt (car ref-cam-pt)))
+          (define ref-cam-y (and ref-cam-pt (cdr ref-cam-pt)))
+          (when (and ref-cam-x
+                     ref-cam-y
+                     (or (> (abs (- fx ref-cam-x)) 12.0)
+                         (> (abs (- fy ref-cam-y)) 9.0)))
+            (define jump-from-gov
+              (if (and (real? (unbox SC2-GOV-LAST-CAM-X))
+                       (real? (unbox SC2-GOV-LAST-CAM-Y)))
+                  (pt-dist fx fy (unbox SC2-GOV-LAST-CAM-X) (unbox SC2-GOV-LAST-CAM-Y))
+                  (pt-dist fx fy ref-cam-x ref-cam-y)))
+            (define cam-cmd
+              (mark-framing-camera-cmd! (sc2-raw-camera-move fx fy 0.0) jump-from-gov))
+            (hash-set! SC2-CMD-FRAMING-CAM cmd cam-cmd)
+            (set! last-cam-pt (cons fx fy))
+            (set-box! SC2-TRANS-LAST-CAM-X fx)
+            (set-box! SC2-TRANS-LAST-CAM-Y fy)
+            (set-box! SC2-TRANS-LAST-CAM-LOOP cur-loop)
+            (set! raw-cmds (cons cam-cmd raw-cmds)))))))
   (define (emit! cmd)
     (when cmd
+      (maybe-emit-framing-cam-before! cmd)
       (set! raw-cmds (cons cmd raw-cmds))))
 
   (define (maybe-emit-corner-scan! corner-pts)
@@ -7853,6 +8044,9 @@
               (> (pt-dist cx cy (car last-cam-pt) (cdr last-cam-pt))
                  SC2-CAMERA-MOVE-DEDUP-DIST))
       (set! last-cam-pt (cons cx cy))
+      (set-box! SC2-TRANS-LAST-CAM-X cx)
+      (set-box! SC2-TRANS-LAST-CAM-Y cy)
+      (set-box! SC2-TRANS-LAST-CAM-LOOP cur-loop)
       (emit! (sc2-raw-camera-move cx cy 0.0))))
 
   ;; Partition actions so that:
@@ -9766,8 +9960,12 @@
          (emit! (sc2-raw-unit-command 23 target-pt 0 hg-tags #f)))]
 
       ;; 11. Control Groups (`ActionUI.control_group` is a wire no-op in Raw mode!) & Camera Saccades
-      [(list (or 'control-group-set 'control-group-append 'control-group-steal
-                 'control-group-append-steal 'control-group-recall) _ ...)
+      [(list (and op (or 'control-group-set 'control-group-append 'control-group-steal
+                         'control-group-append-steal))
+             (? exact-integer? g) raw-tags _ ...)
+       (update-control-grouped-tags! op g raw-tags)
+       (void)]
+      [(list 'control-group-recall _ ...)
        (void)]
 
       [(list 'camera-focus _ raw-x raw-y)
@@ -9835,28 +10033,30 @@
     (when (and (or (= utype 19) (= utype 47)) ;; 19 = SupplyDepot (raised), 47 = SupplyDepotLowered
                (>= cur-loop (hash-ref SC2-DEPOT-TOGGLE-COOLDOWN utag 0)))
       (define dp (sc2-unit-pos u))
-      (define enemy-ground-within-raise?
-        (ormap (lambda (e)
-                 (and (not (sc2-unit-is-flying e))
-                      (let ([ep (sc2-unit-pos e)])
-                        (<= (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
-                                     (sc2-point3d-x ep) (sc2-point3d-y ep))
-                            10.5))))
-               enemy-units))
-      (define enemy-ground-within-keep-up?
-        (ormap (lambda (e)
-                 (and (not (sc2-unit-is-flying e))
-                      (let ([ep (sc2-unit-pos e)])
-                        (<= (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
-                                     (sc2-point3d-x ep) (sc2-point3d-y ep))
-                            14.5))))
-               enemy-units))
+      (define dx (sc2-point3d-x dp))
+      (define dy (sc2-point3d-y dp))
+      (define min-ground-enemy-dist
+        (for/fold ([best +inf.0])
+                  ([e (in-list enemy-units)]
+                   #:when (not (sc2-unit-is-flying e)))
+          (define ep (sc2-unit-pos e))
+          (min best (pt-dist dx dy (sc2-point3d-x ep) (sc2-point3d-y ep)))))
+      (define friendly-on-footprint?
+        (friendly-unit-on-depot-footprint? dx dy self-units))
+      (define friendly-transit?
+        (friendly-unit-requesting-depot-transit?
+         dx dy self-units builder-worker-tags commanded-combat-tags))
       (cond
-        [(and (= utype 19) (not enemy-ground-within-keep-up?))
-         (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN utag (+ cur-loop 32))
+        [(and (= utype 19)
+              (or (> min-ground-enemy-dist 14.5)
+                  (and friendly-transit? (> min-ground-enemy-dist 5.5))))
+         (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN utag (+ cur-loop (if friendly-transit? 16 36)))
          (emit! (sc2-raw-unit-command 556 #f 0 (list utag) #f))] ;; MORPH_SUPPLYDEPOT_LOWER
-        [(and (= utype 47) enemy-ground-within-raise?)
-         (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN utag (+ cur-loop 32))
+        [(and (= utype 47)
+              (<= min-ground-enemy-dist 10.0)
+              (not friendly-on-footprint?)
+              (or (<= min-ground-enemy-dist 5.5) (not friendly-transit?)))
+         (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN utag (+ cur-loop (if (<= min-ground-enemy-dist 5.5) 16 36)))
          (emit! (sc2-raw-unit-command 558 #f 0 (list utag) #f))])) ;; MORPH_SUPPLYDEPOT_RAISE
     ;; Automatically unsiege idle `siege-tank-sieged` (32) only when no enemy unit/structure is within 15.5 tiles
     (when (and (= utype 32)
@@ -10086,11 +10286,16 @@
                 (define urgent?
                   (or (urgent-survival-cmd? c)
                       (ormap urgent-survival-cmd? matching)))
+                (define paired-cam
+                  (or (hash-ref SC2-CMD-FRAMING-CAM c #f)
+                      (ormap (lambda (m) (hash-ref SC2-CMD-FRAMING-CAM m #f)) matching)))
                 (define merged-tags
                   (remove-duplicates
                    (append (sc2-raw-unit-command-unit-tags c)
                            (append* (map sc2-raw-unit-command-unit-tags matching)))))
                 (define mcmd (sc2-raw-unit-command ab tp tu merged-tags q?))
+                (when paired-cam
+                  (hash-set! SC2-CMD-FRAMING-CAM mcmd paired-cam))
                 (coalesce-loop others
                                (cons (if urgent? (mark-urgent-survival-cmd! mcmd) mcmd) acc)))
               (coalesce-loop (cdr rem) (cons c acc)))))))
@@ -10131,14 +10336,14 @@
 (define (wire-cmd-priority-tier cmd)
   (define (ab-tier ab)
     (cond
-      ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & defensive depot raise
+      ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & depot raise/lower
       [(memv ab '(32 314 380 3675 1442 3687 74 76 140 249 251 399 401
                   1036 1526 1628 1664 2063 2067 2069 2073 2146 2338 2346 2505
                   2542 2545 2714 3668 3669 3755 3757 142 3686 388 390 2095 2097 2108 2110
-                  403 405 2362 2364 558))
+                  403 405 2362 2364 556 558))
        0]
-      ;; P3: Routine harvest / worker rebalance / depot lower
-      [(memv ab '(166 167 295 296 298 299 1183 1184 3666 3667 556))
+      ;; P3: Routine harvest / worker rebalance
+      [(memv ab '(166 167 295 296 298 299 1183 1184 3666 3667))
        3]
       ;; P2: Combat attack, move, kite, hold-position, patrol, stop
       [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 2099 3665 3674 3771 3793 3794 3795))
@@ -10146,6 +10351,7 @@
       ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE
       [else 1]))
   (cond
+    [(framing-camera-cmd? cmd) 1]
     [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) 4]
     [(urgent-survival-cmd? cmd) 0]
     [(sc2-raw-unit-command? cmd) (ab-tier (sc2-raw-unit-command-ability-id cmd))]
@@ -10174,7 +10380,9 @@
     (set-wire-apm-governor-last-loop! gov -1)
     (set-wire-apm-governor-last-cam-loop! gov -1000)
     (set-wire-apm-governor-last-selected-tags! gov #f)
-    (set-wire-apm-governor-rolling-events! gov '()))
+    (set-wire-apm-governor-rolling-events! gov '())
+    (set-box! SC2-GOV-LAST-CAM-X #f)
+    (set-box! SC2-GOV-LAST-CAM-Y #f))
 
   ;; 1. Refill token bucket purely from game-loop delta (22.4 loops/sec = 1344 loops/min)
   (define prev-loop (wire-apm-governor-last-loop gov))
@@ -10199,23 +10407,57 @@
   (define rolling-headroom
     (max 0.0 (- (wire-apm-governor-hard-cap-apm gov) (exact->inexact rolling-used))))
 
-  ;; 3. Strip Raw-mode no-op UI control-group commands, rate-limit camera moves (<= 1 per 28 loops),
+  ;; 3. Strip Raw-mode no-op UI control-group commands, rate-limit camera moves
+  ;;    (>= 28 loops routine, >= 6 loops for framing camera moves jumping > 10.0 tiles),
   ;;    coalesce compatible unit commands, canonicalize sorted tag lists, and chunk to <= 64 tags.
-  (define cam-allowed? (>= (- cur-loop (wire-apm-governor-last-cam-loop gov)) 28))
+  (define (cam-cmd-cooldown-ok? c)
+    (define dloop (- cur-loop (wire-apm-governor-last-cam-loop gov)))
+    (define gov-cx (unbox SC2-GOV-LAST-CAM-X))
+    (define gov-cy (unbox SC2-GOV-LAST-CAM-Y))
+    (define jump-dist
+      (cond
+        [(and (real? gov-cx) (real? gov-cy))
+         (pt-dist (sc2-raw-camera-move-x c)
+                  (sc2-raw-camera-move-y c)
+                  gov-cx
+                  gov-cy)]
+        [(real? (hash-ref SC2-FRAMING-CAMERA-CMDS c #f))
+         (hash-ref SC2-FRAMING-CAMERA-CMDS c)]
+        [else 0.0]))
+    (define needed-cd
+      (if (and (framing-camera-cmd? c) (> jump-dist 10.0)) 6 28))
+    (>= dloop needed-cd))
+  (define raw-cmd-list (if (list? raw-cmds) raw-cmds '()))
+  (define has-allowed-framing-cam?
+    (for/or ([c (in-list raw-cmd-list)])
+      (and (framing-camera-cmd? c) (cam-cmd-cooldown-ok? c))))
   (define cam-seen? #f)
   (define filtered0
-    (for/list ([c (in-list (if (list? raw-cmds) raw-cmds '()))]
+    (for/list ([c (in-list raw-cmd-list)]
                #:when (cond
                         [(sc2-ui-control-group? c) #f]
                         [(sc2-chat-action? c) #t]
                         [(sc2-raw-camera-move? c)
-                         (if (and cam-allowed? (not cam-seen?))
+                         (define framing? (framing-camera-cmd? c))
+                         (if (and (not cam-seen?)
+                                  (cam-cmd-cooldown-ok? c)
+                                  (or framing? (not has-allowed-framing-cam?)))
                              (begin (set! cam-seen? #t) #t)
                              #f)]
                         [(sc2-raw-unit-command? c)
                          (pair? (sc2-raw-unit-command-unit-tags c))]
                         [else #f]))
       c))
+
+  ;; Link any immediately preceding framing camera move to its target unit command if unlinked
+  (let link-loop ([rem filtered0] [prev #f])
+    (unless (null? rem)
+      (define cur (car rem))
+      (when (and (sc2-raw-unit-command? cur)
+                 (framing-camera-cmd? prev)
+                 (not (hash-ref SC2-CMD-FRAMING-CAM cur #f)))
+        (hash-set! SC2-CMD-FRAMING-CAM cur prev))
+      (link-loop (cdr rem) cur)))
 
   (define coalesced
     (let loop ([rem filtered0] [acc '()])
@@ -10240,6 +10482,9 @@
                   (define urgent?
                     (or (urgent-survival-cmd? c)
                         (ormap urgent-survival-cmd? matching)))
+                  (define paired-cam
+                    (or (hash-ref SC2-CMD-FRAMING-CAM c #f)
+                        (ormap (lambda (m) (hash-ref SC2-CMD-FRAMING-CAM m #f)) matching)))
                   (define merged-tags
                     (sort (remove-duplicates
                            (append (sc2-raw-unit-command-unit-tags c)
@@ -10250,10 +10495,13 @@
                         (append (reverse
                                  (for/list ([ch (in-list chunks)])
                                    (define cc (sc2-raw-unit-command ab tp tu ch q?))
+                                   (when paired-cam
+                                     (hash-set! SC2-CMD-FRAMING-CAM cc paired-cam))
                                    (if urgent? (mark-urgent-survival-cmd! cc) cc)))
                                 acc)))
                 (if (sc2-raw-unit-command? c)
                     (let* ([urgent? (urgent-survival-cmd? c)]
+                           [paired-cam (hash-ref SC2-CMD-FRAMING-CAM c #f)]
                            [canon-tags (sort (remove-duplicates (sc2-raw-unit-command-unit-tags c)) <)]
                            [chunks (chunk-tag-list canon-tags 64)])
                       (loop (cdr rem)
@@ -10266,6 +10514,8 @@
                                           (sc2-raw-unit-command-target-unit-tag c)
                                           ch
                                           (sc2-raw-unit-command-queue? c)))
+                                       (when paired-cam
+                                         (hash-set! SC2-CMD-FRAMING-CAM cc paired-cam))
                                        (if urgent? (mark-urgent-survival-cmd! cc) cc)))
                                     acc)))
                     (loop (cdr rem) (cons c acc))))))))
@@ -10339,7 +10589,9 @@
             (set! new-events (cons (cons cur-loop ev-cost) new-events)))
           (cond
             [(sc2-raw-camera-move? chosen)
-             (set-wire-apm-governor-last-cam-loop! gov cur-loop)]
+             (set-wire-apm-governor-last-cam-loop! gov cur-loop)
+             (set-box! SC2-GOV-LAST-CAM-X (sc2-raw-camera-move-x chosen))
+             (set-box! SC2-GOV-LAST-CAM-Y (sc2-raw-camera-move-y chosen))]
             [(sc2-raw-unit-command? chosen)
              (set! cur-sel (sc2-raw-unit-command-unit-tags chosen))
              (set-wire-apm-governor-last-selected-tags! gov cur-sel)])
@@ -10351,4 +10603,30 @@
      gov
      (append (reverse new-events) (wire-apm-governor-rolling-events gov))))
 
-  (reverse emitted))
+  ;; Preserve ordering so each emitted framing camera move immediately precedes the unit command it frames.
+  (define chron (reverse emitted))
+  (define emitted-framing-cams
+    (for/hasheq ([uc (in-list chron)]
+                 #:do [(define fc (and (sc2-raw-unit-command? uc)
+                                       (hash-ref SC2-CMD-FRAMING-CAM uc #f)))]
+                 #:when (and fc (memq fc chron)))
+      (values fc #t)))
+  (cond
+    [(zero? (hash-count emitted-framing-cams)) chron]
+    [else
+     (define placed-cams (make-hasheq))
+     (for/fold ([acc '()] #:result (reverse acc))
+               ([c (in-list chron)])
+       (cond
+         [(and (framing-camera-cmd? c) (hash-has-key? emitted-framing-cams c))
+          acc]
+         [(and (sc2-raw-unit-command? c)
+               (let ([fc (hash-ref SC2-CMD-FRAMING-CAM c #f)])
+                 (and fc
+                      (hash-has-key? emitted-framing-cams fc)
+                      (not (hash-has-key? placed-cams fc))
+                      fc)))
+          => (lambda (fc)
+               (hash-set! placed-cams fc #t)
+               (cons c (cons fc acc)))]
+         [else (cons c acc)]))]))

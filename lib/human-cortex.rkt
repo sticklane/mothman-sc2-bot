@@ -18,6 +18,7 @@
  fitts-saccade-ms
  fitts-saccade-frames
  cortex-move-camera!
+ action-requires-camera-focus
  action-priority
  cortex-filter-actions!
 
@@ -773,7 +774,9 @@
        (define cg-ids
          (filter (lambda (id) (hash-has-key? unit-by-id id))
                  (cortex-get-control-group cortex g)))
-       (when (not (null? cg-ids))
+       (define all-desired-in-cg?
+         (andmap (lambda (id) (not (not (memv id cg-ids)))) desired-list))
+       (when (and all-desired-in-cg? (not (null? cg-ids)))
          (define cg-recs (ids->records cg-ids))
          ;; 2a. Direct Control Group Recall (1 APM)
          (define valid-cg (selection-valid-and-covers? cg-ids 0.75))
@@ -1203,6 +1206,93 @@
 ;; =============================================================================
 ;; Action Prioritization & Viewport / Token-Bucket Filtering
 ;; =============================================================================
+
+;; Determine whether an action targets an un-control-grouped unit or spatial map
+;; location that requires camera framing, returning `(cons cx cy)` or `#f`.
+(define (action-requires-camera-focus act all-cgroup-member-ids unit-pos-by-id home-x home-y)
+  (define (in-cgroup? uid)
+    (cond
+      [(set? all-cgroup-member-ids) (set-member? all-cgroup-member-ids uid)]
+      [(list? all-cgroup-member-ids) (not (not (memv uid all-cgroup-member-ids)))]
+      [(hash? all-cgroup-member-ids) (hash-has-key? all-cgroup-member-ids uid)]
+      [else #f]))
+  (define (extract-ids raw)
+    (filter (lambda (id) (and (exact-integer? id) (> id 0)))
+            (if (list? raw) raw (list raw))))
+  (define (lookup-pos uid)
+    (and (hash? unit-pos-by-id)
+         (exact-integer? uid)
+         (let ([p (hash-ref unit-pos-by-id uid #f)])
+           (and (pair? p) (real? (car p)) (real? (cdr p))
+                (cons (exact->inexact (car p)) (exact->inexact (cdr p)))))))
+  (define (ungrouped-unit-pos raw-uids [fb-pos #f])
+    (define uids (extract-ids raw-uids))
+    (define ungrouped-id
+      (for/first ([id (in-list uids)]
+                  #:when (not (in-cgroup? id)))
+        id))
+    (and ungrouped-id
+         (or (lookup-pos ungrouped-id)
+             (for/or ([id (in-list uids)]) (lookup-pos id))
+             fb-pos)))
+  (define (first-real-pair xs)
+    (let loop ([rem xs])
+      (cond
+        [(not (pair? rem)) #f]
+        [(and (real? (car rem)) (pair? (cdr rem)) (real? (cadr rem)))
+         (cons (exact->inexact (car rem)) (exact->inexact (cadr rem)))]
+        [else (loop (cdr rem))])))
+  (match act
+    [(list (or 'move-camera 'camera-focus 'camera-bookmark-save 'camera-bookmark-jump
+               'control-group-set 'control-group-append 'control-group-steal
+               'control-group-append-steal 'control-group-recall
+               'select-box 'select-click 'select-ctrl-type 'deselect-ctrl-type
+               'human-apm-discipline 'train 'train-unit 'research 'posture-transition)
+           _ ...)
+     #f]
+    [(list 'build _ (? real? x) (? real? y) _ ...)
+     (cons (exact->inexact x) (exact->inexact y))]
+    [(list 'build _ _ (? real? x) (? real? y) _ ...)
+     (cons (exact->inexact x) (exact->inexact y))]
+    [(list 'expand (? real? x) (? real? y) _ ...)
+     (cons (exact->inexact x) (exact->inexact y))]
+    [(list 'expand _ (? real? x) (? real? y) _ ...)
+     (cons (exact->inexact x) (exact->inexact y))]
+    [(list 'build-nydus-worm (? real? x) (? real? y) _ ...)
+     (cons (exact->inexact x) (exact->inexact y))]
+    [(list 'build-nydus-worm _ (? real? x) (? real? y) _ ...)
+     (cons (exact->inexact x) (exact->inexact y))]
+    [(list (or 'scout-sector 'clear-expansion-block) rest ...)
+     (first-real-pair rest)]
+    [(list (or 'worker-scout 'overlord-scout 'periodic-scout
+               'patrol-block-expansion 'burrow-block)
+           raw-uid rest ...)
+     (define pt (first-real-pair rest))
+     (define uids (extract-ids raw-uid))
+     (if (null? uids)
+         pt
+         (ungrouped-unit-pos uids pt))]
+    [(list (or 'cast 'cast-spell) raw-uid _spell args ...)
+     (define pt
+       (or (first-real-pair args)
+           (and (pair? args) (exact-integer? (car args)) (lookup-pos (car args)))))
+     (ungrouped-unit-pos raw-uid pt)]
+    [(list (or 'inject-larva 'harvest-mineral 'harvest-gas
+               'rebalance-gas-to-minerals 'resume-halted-building
+               'attack 'attack-unit 'focus-fire)
+           raw-uid target-id _ ...)
+     (ungrouped-unit-pos raw-uid (or (lookup-pos target-id)
+                                     (cons (exact->inexact home-x) (exact->inexact home-y))))]
+    [(list (or 'move 'kite 'retreat 'hold-position 'attack-pos
+               'mineral-walk 'worker-harass 'mineral-harass 'multi-prong-drop
+               'pull-workers-attack 'worker-drill-stack-attack 'harass-workers
+               'burrow-down 'burrow-up 'roach-tunnel-move 'infestor-burrow-move
+               'infestor-burrow-cast 'blind-skillshot-shimmer
+               'land-building 'transport-juggle 'snipe-enemy-changeling
+               'morph 'cancel 'cancel-building)
+           raw-uid rest ...)
+     (ungrouped-unit-pos raw-uid (first-real-pair rest))]
+    [_ #f]))
 
 (define (ui-or-framing-action? act)
   (match act

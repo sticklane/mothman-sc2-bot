@@ -5,32 +5,82 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>s2protocol-rs Antigravity Sidecar — Enhanced Minimap &amp; High-APM Forensics</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <script src="/preload.js" onerror="window.__sidecarPreloadMissing=true"></script>
+  <style>
+    :root {
+      --background: #0f172a;
+      --foreground: #e2e8f0;
+      --card: #111c33;
+      --border: #293548;
+      --card-border: #1e293b;
+      --primary: #3b82f6;
+      --primary-foreground: #ffffff;
+      --secondary: #1e293b;
+      --secondary-foreground: #e2e8f0;
+      --muted-foreground: #94a3b8;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    html.light {
+      --background: #f8fafc;
+      --foreground: #0f172a;
+      --card: #ffffff;
+      --border: #cbd5e1;
+      --card-border: #e2e8f0;
+      --primary: #2563eb;
+      --primary-foreground: #ffffff;
+      --secondary: #f1f5f9;
+      --secondary-foreground: #0f172a;
+      --muted-foreground: #64748b;
+      --success: #16a34a;
+      --warning: #d97706;
+      --error: #dc2626;
+    }
+  </style>
 </head>
 <body class="bg-[var(--background)] text-[var(--foreground)] antialiased m-0 p-3 select-none">
   <div class="max-w-[1440px] mx-auto space-y-3">
     <!-- Top Header & Catalog Controls -->
-    <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3 flex-wrap">
-        <div class="flex items-center gap-2">
-          <span id="sseDot" class="inline-block w-2.5 h-2.5 rounded-full bg-[var(--warning)]"></span>
-          <span class="font-semibold text-sm tracking-tight">s2protocol-rs Sidecar</span>
-          <span id="connBadge" class="text-xs px-2 py-0.5 rounded border border-[var(--card-border)] text-[var(--muted-foreground)] font-mono">
-            Connecting :4322…
-          </span>
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <div class="flex items-center gap-2">
+            <span id="sseDot" class="inline-block w-2.5 h-2.5 rounded-full bg-[var(--warning)]"></span>
+            <span class="font-semibold text-sm tracking-tight">s2protocol-rs Sidecar</span>
+            <span id="connBadge" class="text-xs px-2 py-0.5 rounded border border-[var(--card-border)] text-[var(--muted-foreground)] font-mono">
+              Connecting :4322…
+            </span>
+          </div>
+          <label class="cursor-pointer bg-[var(--secondary)] text-[var(--secondary-foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs font-medium hover:opacity-90">
+            Upload .SC2Replay
+            <input id="fileUploadInput" type="file" accept=".SC2Replay" class="hidden" />
+          </label>
+          <button id="sendAgentBtn" class="bg-[var(--primary)] text-[var(--primary-foreground)] rounded px-2.5 py-1 text-xs font-semibold hover:opacity-90" title="Send current frame forensics to Antigravity Agent or clipboard">
+            Send Frame to Agent
+          </button>
+          <span id="agentToast" class="text-xs font-mono text-[var(--success)] hidden"></span>
         </div>
-        <select id="replaySelect" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs font-mono min-w-[290px] max-w-[460px]">
-        </select>
-        <label class="cursor-pointer bg-[var(--secondary)] text-[var(--secondary-foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs font-medium hover:opacity-90">
-          Upload .SC2Replay
-          <input id="fileUploadInput" type="file" accept=".SC2Replay" class="hidden" />
-        </label>
+        <div class="flex items-center gap-3 text-xs text-[var(--muted-foreground)] font-mono">
+          <span id="metaProtocol">Proto 75689</span>
+          <span>•</span>
+          <span id="metaMap">Map: —</span>
+          <span>•</span>
+          <span id="metaParseMs">Parse: —</span>
+        </div>
       </div>
-      <div class="flex items-center gap-3 text-xs text-[var(--muted-foreground)] font-mono">
-        <span id="metaProtocol">Proto 75689</span>
-        <span>•</span>
-        <span id="metaMap">Map: —</span>
-        <span>•</span>
-        <span id="metaParseMs">Parse: —</span>
+      <div class="flex flex-wrap items-center gap-2 pt-1 border-t border-[var(--card-border)]">
+        <div class="flex items-center gap-1 text-xs font-mono">
+          <button data-filter="all" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">All</button>
+          <button data-filter="Terran" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">Terran</button>
+          <button data-filter="Protoss" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">Protoss</button>
+          <button data-filter="Zerg" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">Zerg</button>
+          <button data-filter="prio" class="catalog-filter-btn px-2 py-0.5 rounded border border-[var(--border)]">&#9889; Prio</button>
+        </div>
+        <input id="catalogSearch" type="text" placeholder="Search ID, player, map…" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-0.5 text-xs font-mono w-[190px]" />
+        <select id="replaySelect" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2.5 py-1 text-xs font-mono flex-1 min-w-[260px] max-w-[640px]">
+        </select>
+        <span id="catalogCountBadge" class="text-xs font-mono text-[var(--muted-foreground)]"></span>
       </div>
     </div>
 
@@ -61,10 +111,46 @@
       </div>
     </div>
 
-    <!-- Main Workbench Grid: Enhanced Minimap (Left) + Forensics & Win-Chance (Right) -->
+    <!-- Main Workbench Grid: Top-Left SC2 Leader Panel + Minimap (Left) | Forensics & Win-Chance (Right) -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
-      <!-- Left 5 Cols: Engine-Free Enhanced Minimap -->
-      <div class="lg:col-span-5 bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2.5">
+      <!-- Left 5 Cols: Native SC2 Observer Leader Panel + Enhanced Minimap -->
+      <div class="lg:col-span-5 space-y-3">
+        <!-- StarCraft II Observer Leader Panel Dropdown (D / U / G / V / L / N) -->
+        <div id="leaderPanel" class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-2.5 space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-1.5">
+              <span class="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">Leader Panel</span>
+              <select id="leaderTab" class="bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 text-xs font-mono">
+                <option value="D">Production (D)</option>
+                <option value="U">Active Units (U)</option>
+                <option value="G">Upgrades (G)</option>
+                <option value="V">APM / EPM (V)</option>
+                <option value="L">Units Lost (L)</option>
+                <option value="N">Collapsed (N)</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-1 text-[11px] font-mono">
+              <button data-leader="D" class="leader-tab-btn px-1.5 py-0.5 rounded border border-[var(--border)]" title="Production [D]">D</button>
+              <button data-leader="U" class="leader-tab-btn px-1.5 py-0.5 rounded border border-[var(--border)]" title="Active Units [U]">U</button>
+              <button data-leader="G" class="leader-tab-btn px-1.5 py-0.5 rounded border border-[var(--border)]" title="Upgrades & Research [G]">G</button>
+              <button data-leader="V" class="leader-tab-btn px-1.5 py-0.5 rounded border border-[var(--border)]" title="APM / EPM [V]">V</button>
+              <button data-leader="L" class="leader-tab-btn px-1.5 py-0.5 rounded border border-[var(--border)]" title="Units Lost [L]">L</button>
+              <button data-leader="N" class="leader-tab-btn px-1.5 py-0.5 rounded border border-[var(--border)]" title="Collapse [N]">N</button>
+            </div>
+          </div>
+          <div id="leaderPanelBody" class="grid grid-cols-2 gap-2 max-h-[195px] overflow-y-auto pr-0.5">
+            <div class="space-y-1 min-w-0">
+              <div id="leaderP1Head" class="text-[11px] font-mono font-semibold truncate border-b border-[var(--card-border)] pb-0.5" style="color:#60a5fa">P1</div>
+              <div id="leaderP1List" class="space-y-1"></div>
+            </div>
+            <div class="space-y-1 min-w-0">
+              <div id="leaderP2Head" class="text-[11px] font-mono font-semibold truncate border-b border-[var(--card-border)] pb-0.5" style="color:#f87171">P2</div>
+              <div id="leaderP2List" class="space-y-1"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-lg p-3 space-y-2.5">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <div class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
             Enhanced Minimap State Machine
@@ -102,10 +188,10 @@
             </div>
             <div class="flex items-center gap-1 text-xs font-mono">
               <span class="text-[var(--muted-foreground)]">Speed:</span>
+              <button data-speed="0.5" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">0.5x</button>
               <button data-speed="1" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">1x</button>
               <button data-speed="2" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">2x</button>
               <button data-speed="4" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">4x</button>
-              <button data-speed="8" class="speed-btn px-1.5 py-0.5 rounded border border-[var(--border)]">8x</button>
             </div>
           </div>
         </div>
@@ -114,6 +200,7 @@
         <div class="border-t border-[var(--card-border)] pt-2 space-y-1">
           <div class="text-xs text-[var(--muted-foreground)] font-medium">Jump to Turning Points &amp; Major Battles:</div>
           <div id="jumpPills" class="flex flex-wrap gap-1.5 text-xs"></div>
+        </div>
         </div>
       </div>
 
@@ -362,27 +449,128 @@
     const state = {
       connected: false,
       catalog: [...EMBEDDED_FALLBACK.catalog],
+      catalogFilter: "all",
+      catalogQuery: "",
       cache: { ...EMBEDDED_FALLBACK.replays },
       current: EMBEDDED_FALLBACK.replays["5122350"],
       frameIdx: 0,
       playing: false,
-      speed: 2,
+      speed: 1,
       activeTab: "wire",
+      leaderTab: "D",
       highlightXY: null,
       layers: {
         botFilter: true,
         rays: true,
         power: true,
         creep: true,
-        cameras: false,
+        cameras: true,
         heatmap: true
-      }
+      },
+      canvas: {
+        dpr: 1,
+        minimapSize: 540,
+        winW: 760,
+        winH: 132
+      },
+      staticMapCanvas: document.createElement("canvas"),
+      staticMapKey: ""
     };
+    const staticMapCtx = state.staticMapCanvas.getContext("2d");
 
     const minimapCanvas = document.getElementById("minimapCanvas");
     const minimapCtx = minimapCanvas.getContext("2d");
     const winCanvas = document.getElementById("winChanceCanvas");
     const winCtx = winCanvas.getContext("2d");
+
+    const DOM_TEXT_CACHE = new WeakMap();
+    function setText(el, val) {
+      if (!el) return;
+      const str = String(val ?? "");
+      if (DOM_TEXT_CACHE.get(el) !== str) {
+        DOM_TEXT_CACHE.set(el, str);
+        el.textContent = str;
+      }
+    }
+
+    function createStatCells(containerId) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = "";
+      const labels = ["Bank", "Income", "Supply", "Army"];
+      const valueEls = {};
+      for (const lbl of labels) {
+        const wrap = document.createElement("div");
+        const head = document.createElement("div");
+        head.className = "text-[var(--muted-foreground)]";
+        head.textContent = lbl;
+        const val = document.createElement("div");
+        val.textContent = "—";
+        wrap.appendChild(head);
+        wrap.appendChild(val);
+        container.appendChild(wrap);
+        valueEls[lbl.toLowerCase()] = val;
+      }
+      return valueEls;
+    }
+
+    const UI = {
+      metaProtocol: document.getElementById("metaProtocol"),
+      metaMap: document.getElementById("metaMap"),
+      metaParseMs: document.getElementById("metaParseMs"),
+      frameSlider: document.getElementById("frameSlider"),
+      clockReadout: document.getElementById("clockReadout"),
+      playPauseBtn: document.getElementById("playPauseBtn"),
+      replaySelect: document.getElementById("replaySelect"),
+      catalogCountBadge: document.getElementById("catalogCountBadge"),
+      winChanceReadout: document.getElementById("winChanceReadout"),
+      prioMeta: document.getElementById("prioMeta"),
+      prioSaving: document.getElementById("prioSaving"),
+      prioApproved: document.getElementById("prioApproved"),
+      prioEscrow: document.getElementById("prioEscrow"),
+      prioBlocked: document.getElementById("prioBlocked"),
+      p1Title: document.getElementById("p1Title"),
+      p1Badge: document.getElementById("p1ResultBadge"),
+      p1CpmLine: document.getElementById("p1CpmLine"),
+      p1Stats: createStatCells("p1LiveStats"),
+      p2Title: document.getElementById("p2Title"),
+      p2Badge: document.getElementById("p2ResultBadge"),
+      p2CpmLine: document.getElementById("p2CpmLine"),
+      p2Stats: createStatCells("p2LiveStats"),
+      leaderTabSelect: document.getElementById("leaderTab"),
+      leaderPanelBody: document.getElementById("leaderPanelBody"),
+      leaderP1Head: document.getElementById("leaderP1Head"),
+      leaderP1List: document.getElementById("leaderP1List"),
+      leaderP2Head: document.getElementById("leaderP2Head"),
+      leaderP2List: document.getElementById("leaderP2List")
+    };
+
+    function syncCanvasDpr() {
+      const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+      const mRect = minimapCanvas.getBoundingClientRect();
+      const mSize = Math.max(320, Math.round(mRect.width || 540));
+      const mPx = Math.round(mSize * dpr);
+      if (minimapCanvas.width !== mPx || minimapCanvas.height !== mPx || state.canvas.dpr !== dpr) {
+        minimapCanvas.width = mPx;
+        minimapCanvas.height = mPx;
+        minimapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        state.canvas.minimapSize = mSize;
+        state.staticMapKey = "";
+      }
+
+      const wRect = winCanvas.getBoundingClientRect();
+      const wW = Math.max(300, Math.round(wRect.width || 760));
+      const wH = Math.max(100, Math.round(wRect.height || 132));
+      const wPx = Math.round(wW * dpr);
+      const hPx = Math.round(wH * dpr);
+      if (winCanvas.width !== wPx || winCanvas.height !== hPx || state.canvas.dpr !== dpr) {
+        winCanvas.width = wPx;
+        winCanvas.height = hPx;
+        winCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        state.canvas.winW = wW;
+        state.canvas.winH = wH;
+      }
+      state.canvas.dpr = dpr;
+    }
 
     function fmtClock(sec) {
       const s = Math.max(0, Math.floor(sec || 0));
@@ -397,6 +585,18 @@
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
+    }
+
+    function formatUnitLabel(u) {
+      switch (u.name) {
+        case "SupplyDepot": return "SupplyDepot (RAISED - CLOSED DOOR)";
+        case "SupplyDepotLowered": return "SupplyDepotLowered (LOWERED - OPEN DOOR)";
+        case "SiegeTankSieged": return "SiegeTank [SIEGED]";
+        case "WidowMineBurrowed": return "WidowMine [BURROWED]";
+        case "LurkerMPBurrowed": return "Lurker [BURROWED]";
+        case "LiberatorAG": return "Liberator [DEFENDER ZONE]";
+        default: return u.name;
+      }
     }
 
     function themePalette() {
@@ -457,27 +657,64 @@
         btn.style.borderColor = active ? "var(--primary)" : "var(--border)";
         btn.style.background = active ? "var(--background)" : "transparent";
       });
+      document.querySelectorAll(".catalog-filter-btn").forEach((btn) => {
+        const active = btn.dataset.filter === state.catalogFilter;
+        btn.style.borderColor = active ? "var(--primary)" : "var(--border)";
+        btn.style.background = active ? "var(--background)" : "transparent";
+        btn.style.fontWeight = active ? "700" : "400";
+      });
+      if (UI.leaderTabSelect && UI.leaderTabSelect.value !== state.leaderTab) {
+        UI.leaderTabSelect.value = state.leaderTab;
+      }
+      document.querySelectorAll(".leader-tab-btn").forEach((btn) => {
+        const active = btn.dataset.leader === state.leaderTab;
+        btn.style.borderColor = active ? "var(--primary)" : "var(--border)";
+        btn.style.background = active ? "var(--background)" : "transparent";
+        btn.style.fontWeight = active ? "700" : "400";
+      });
+    }
+
+    function filteredCatalog() {
+      const f = state.catalogFilter;
+      const q = state.catalogQuery.trim().toLowerCase();
+      return state.catalog.filter((item) => {
+        if (f === "prio" && !item.has_priority_log) return false;
+        if ((f === "Terran" || f === "Protoss" || f === "Zerg") && item.p1_race !== f && item.p2_race !== f) {
+          return false;
+        }
+        if (q) {
+          const hay = `${item.id} ${item.file_name} ${item.p1_name} ${item.p2_name} ${item.map_name}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
     }
 
     function populateCatalogSelect() {
-      const sel = document.getElementById("replaySelect");
+      const sel = UI.replaySelect;
       const curId = state.current?.replay_id;
-      sel.innerHTML = "";
-      for (const item of state.catalog) {
+      const list = filteredCatalog();
+      const frag = document.createDocumentFragment();
+      for (const item of list) {
         const opt = document.createElement("option");
         opt.value = item.id;
         const prioTag = item.has_priority_log ? " [Prio]" : "";
         opt.textContent = `#${item.id} | ${item.p1_name} (${item.p1_race[0] || "?"}:${item.p1_result}) vs ${item.p2_name} (${item.p2_race[0] || "?"}) — ${item.map_name}${prioTag}`;
         if (item.id === curId) opt.selected = true;
-        sel.appendChild(opt);
+        frag.appendChild(opt);
       }
+      sel.replaceChildren(frag);
+      setText(UI.catalogCountBadge, `${list.length}/${state.catalog.length} shown`);
     }
 
     async function selectReplayById(id) {
       if (!id) return;
       state.playing = false;
-      document.getElementById("playPauseBtn").textContent = "Play";
+      setText(UI.playPauseBtn, "Play");
       state.highlightXY = null;
+      if (UI.replaySelect.value !== id && Array.from(UI.replaySelect.options).some((o) => o.value === id)) {
+        UI.replaySelect.value = id;
+      }
       if (state.cache[id]) {
         state.current = state.cache[id];
         state.frameIdx = 0;
@@ -485,7 +722,7 @@
         return;
       }
       try {
-        document.getElementById("metaParseMs").textContent = "Parsing via s2protocol…";
+        setText(UI.metaParseMs, "Parsing via s2protocol…");
         const resp = await fetch(`${API_BASE}/api/replay/${encodeURIComponent(id)}`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const bundle = await resp.json();
@@ -494,7 +731,7 @@
         state.frameIdx = 0;
         renderAll();
       } catch (err) {
-        document.getElementById("metaParseMs").textContent = `Load error: ${err.message}`;
+        setText(UI.metaParseMs, `Load error: ${err.message}`);
       }
     }
 
@@ -504,89 +741,466 @@
       const frames = b.frames || [];
       const frame = frames[Math.min(state.frameIdx, Math.max(0, frames.length - 1))];
 
-      document.getElementById("metaProtocol").textContent = `Proto ${b.protocol_version}`;
-      document.getElementById("metaMap").textContent = `${b.map_name} (${b.map_width}x${b.map_height})`;
-      document.getElementById("metaParseMs").textContent = `Parsed in ${b.parse_elapsed_ms} ms`;
+      setText(UI.metaProtocol, `Proto ${b.protocol_version}`);
+      setText(UI.metaMap, `${b.map_name} (${b.map_width}x${b.map_height})`);
+      setText(UI.metaParseMs, `Parsed in ${b.parse_elapsed_ms} ms`);
 
-      const slider = document.getElementById("frameSlider");
-      slider.max = Math.max(0, frames.length - 1);
-      slider.value = state.frameIdx;
+      const maxIdx = Math.max(0, frames.length - 1);
+      if (Number(UI.frameSlider.max) !== maxIdx) UI.frameSlider.max = maxIdx;
+      if (Number(UI.frameSlider.value) !== state.frameIdx) UI.frameSlider.value = state.frameIdx;
 
       if (frame) {
-        document.getElementById("clockReadout").textContent = `${fmtClock(frame.sec)} (f=${frame.game_loop})`;
+        setText(UI.clockReadout, `${fmtClock(frame.sec)} (f=${frame.game_loop})`);
       }
 
       const p1 = b.players?.[0];
       const p2 = b.players?.[1];
-      const fillPlayer = (p, stats, prefix) => {
+      const fillPlayer = (p, stats, els) => {
         if (!p) return;
-        document.getElementById(`${prefix}Title`).textContent = `${p.name} (${p.actual_race})`;
-        const badge = document.getElementById(`${prefix}ResultBadge`);
-        badge.textContent = p.result;
-        badge.style.color = p.result === "Win" ? "var(--success)" : (p.result === "Loss" ? "var(--error)" : "var(--muted-foreground)");
-        document.getElementById(`${prefix}CpmLine`).textContent =
-          `Raw ${p.raw_cpm} CPM • Macro ${p.macro_cpm} CPM (${p.move_attack_spam_pct}% micro spam)`;
+        setText(els.title, `${p.name} (${p.actual_race})`);
+        setText(els.badge, p.result);
+        const resColor = String(p.result || "").startsWith("Win")
+          ? "var(--success)"
+          : (String(p.result || "").startsWith("Loss") ? "var(--error)" : "var(--muted-foreground)");
+        if (els.badge.style.color !== resColor) els.badge.style.color = resColor;
+        setText(els.cpmLine, `Raw ${p.raw_cpm} CPM • Macro ${p.macro_cpm} CPM (${p.move_attack_spam_pct}% micro spam)`);
         const st = stats || { minerals: 0, vespene: 0, min_rate: 0, gas_rate: 0, workers: 0, food_used: 0, food_made: 0, army_value: 0 };
-        document.getElementById(`${prefix}LiveStats`).innerHTML = `
-          <div><div class="text-[var(--muted-foreground)]">Bank</div><div>${st.minerals}M / ${st.vespene}G</div></div>
-          <div><div class="text-[var(--muted-foreground)]">Income</div><div>${st.min_rate + st.gas_rate}/m</div></div>
-          <div><div class="text-[var(--muted-foreground)]">Supply</div><div>${st.food_used}/${st.food_made} (${st.workers}W)</div></div>
-          <div><div class="text-[var(--muted-foreground)]">Army</div><div>${st.army_value}</div></div>
-        `;
+        setText(els.cells.bank, `${st.minerals}M / ${st.vespene}G`);
+        setText(els.cells.income, `${st.min_rate + st.gas_rate}/m`);
+        setText(els.cells.supply, `${st.food_used}/${st.food_made} (${st.workers}W)`);
+        setText(els.cells.army, `${st.army_value}`);
       };
-      fillPlayer(p1, frame?.p1_stats, "p1");
-      fillPlayer(p2, frame?.p2_stats, "p2");
+      fillPlayer(p1, frame?.p1_stats, { title: UI.p1Title, badge: UI.p1Badge, cpmLine: UI.p1CpmLine, cells: UI.p1Stats });
+      fillPlayer(p2, frame?.p2_stats, { title: UI.p2Title, badge: UI.p2Badge, cpmLine: UI.p2CpmLine, cells: UI.p2Stats });
 
       // [SCBOT_PRIORITY] synchronized frame readout
       const snaps = b.priority_snapshots || [];
       const pIdx = frame?.priority_idx;
       if (snaps.length > 0 && pIdx != null && snaps[pIdx]) {
         const s = snaps[pIdx];
-        document.getElementById("prioMeta").textContent = `f=${s.frame} (${fmtClock(s.sec)}) • step_ms=${s.step_ms}ms • bank=${s.bank}`;
-        document.getElementById("prioSaving").textContent = s.saving_for || "none";
-        document.getElementById("prioApproved").textContent = s.approved || "()";
-        document.getElementById("prioEscrow").textContent = s.escrow_queue || "()";
-        document.getElementById("prioBlocked").textContent = s.blocked || "()";
+        setText(UI.prioMeta, `f=${s.frame} (${fmtClock(s.sec)}) • step_ms=${s.step_ms}ms • bank=${s.bank}`);
+        setText(UI.prioSaving, s.saving_for || "none");
+        setText(UI.prioApproved, s.approved || "()");
+        setText(UI.prioEscrow, s.escrow_queue || "()");
+        setText(UI.prioBlocked, s.blocked || "()");
       } else {
-        document.getElementById("prioMeta").textContent = "No [SCBOT_PRIORITY] log attached to this replay";
-        document.getElementById("prioSaving").textContent = "—";
-        document.getElementById("prioApproved").textContent = "—";
-        document.getElementById("prioEscrow").textContent = "—";
-        document.getElementById("prioBlocked").textContent = "—";
+        setText(UI.prioMeta, "No [SCBOT_PRIORITY] log attached to this replay");
+        setText(UI.prioSaving, "—");
+        setText(UI.prioApproved, "—");
+        setText(UI.prioEscrow, "—");
+        setText(UI.prioBlocked, "—");
       }
     }
 
-    function renderMinimap() {
+    const LEADER_UNIT_ALIASES = {
+      SupplyDepotLowered: "SupplyDepot",
+      SiegeTankSieged: "SiegeTank",
+      VikingAssault: "Viking",
+      VikingFighter: "Viking",
+      WidowMineBurrowed: "WidowMine",
+      HellionTank: "Hellbat",
+      LiberatorAG: "Liberator",
+      ThorAP: "Thor",
+      WarpPrismPhasing: "WarpPrism",
+      ObserverSiegeMode: "Observer",
+      OverseerSiegeMode: "Overseer",
+      ZerglingBurrowed: "Zergling",
+      BanelingBurrowed: "Baneling",
+      RoachBurrowed: "Roach",
+      RavagerBurrowed: "Ravager",
+      HydraliskBurrowed: "Hydralisk",
+      LurkerMPBurrowed: "Lurker",
+      LurkerMP: "Lurker",
+      InfestorBurrowed: "Infestor",
+      SwarmHostBurrowedMP: "SwarmHost",
+      SwarmHostMP: "SwarmHost",
+      UltraliskBurrowed: "Ultralisk",
+      QueenBurrowed: "Queen",
+      DroneBurrowed: "Drone"
+    };
+
+    function canonicalLeaderUnit(name) {
+      return LEADER_UNIT_ALIASES[name] || String(name || "Unknown");
+    }
+
+    const UPGRADE_DISPLAY_MAP = {
+      WarpGateResearch: "Warp Gate",
+      BlinkTech: "Blink",
+      Charge: "Charge",
+      ExtendedThermalLance: "Thermal Lance",
+      PsiStormTech: "Psionic Storm",
+      DarkTemplarBlinkUpgrade: "Shadow Stride",
+      PhoenixRangeUpgrade: "Anion Pulse-Crystals",
+      AdeptPiercingAttack: "Resonating Glaives",
+      HighTemplarKhaydarinAmulet: "Khaydarin Amulet",
+      ObserverGraviticBooster: "Gravitic Boosters",
+      WarpPrismSpeedUpgrade: "Gravitic Drive",
+      Stimpack: "Stimpack",
+      ShieldWall: "Combat Shield",
+      PunisherGrenades: "Concussive Shells",
+      PersonalCloaking: "Personal Cloaking",
+      BansheeCloak: "Cloaking Field",
+      BansheeSpeed: "Hyperflight Rotors",
+      RavenCorvidReactor: "Corvid Reactor",
+      CycloneLockOnDamageUpgrade: "Mag-Field Accelerator",
+      DrillClaws: "Drilling Claws",
+      SmartServos: "Smart Servos",
+      LiberatorAGRangeUpgrade: "Advanced Ballistics",
+      HiSecAutoTracking: "Hi-Sec Auto Tracking",
+      TerranBuildingArmor: "Neosteel Armor",
+      zerglingmovementspeed: "Metabolic Boost",
+      zerglingattackspeed: "Adrenal Glands",
+      GlialReconstitution: "Glial Reconstitution",
+      TunnelingClaws: "Tunneling Claws",
+      EvolveMuscularAugments: "Muscular Augments",
+      EvolveGroovedSpines: "Grooved Spines",
+      CentrificalHooks: "Centrifugal Hooks",
+      ChitinousPlating: "Chitinous Plating",
+      AnabolicSynthesis: "Anabolic Synthesis",
+      overlordspeed: "Pneumatized Carapace",
+      Burrow: "Burrow"
+    };
+
+    function formatUpgradeDisplay(raw) {
+      const s = String(raw || "");
+      const lvlMatch = s.match(/^(.*)Level([123])$/i);
+      if (lvlMatch) {
+        const lvl = lvlMatch[2];
+        const base = lvlMatch[1]
+          .replace(/^(Terran|Protoss|Zerg)/, "")
+          .replace(/Weapons?/i, " Wep")
+          .replace(/Armors?/i, " Arm")
+          .replace(/ShipAndVehicle/i, "Mech/Air")
+          .replace(/Vehicle/i, "Mech")
+          .replace(/Ship/i, "Air")
+          .replace(/Infantry/i, "Bio")
+          .replace(/Shields?/i, "Shields")
+          .replace(/\s+/g, " ")
+          .trim();
+        return { badge: `+${lvl}`, label: base || s };
+      }
+      return { badge: "TECH", label: UPGRADE_DISPLAY_MAP[s] || s };
+    }
+
+    function createLeaderRowEl() {
+      const row = document.createElement("div");
+      row.className = "leader-row rounded px-1.5 py-0.5 bg-[var(--background)] border border-[var(--card-border)] text-[11px] font-mono select-none";
+      const top = document.createElement("div");
+      top.className = "flex items-center justify-between gap-1.5";
+      const left = document.createElement("div");
+      left.className = "flex items-center gap-1 min-w-0";
+      const badge = document.createElement("span");
+      badge.className = "shrink-0 px-1 rounded text-[10px] font-semibold border border-[var(--card-border)]";
+      const label = document.createElement("span");
+      label.className = "truncate text-[var(--foreground)]";
+      const meta = document.createElement("span");
+      meta.className = "shrink-0 text-[10px] text-[var(--muted-foreground)] tabular-nums";
+      left.appendChild(badge);
+      left.appendChild(label);
+      top.appendChild(left);
+      top.appendChild(meta);
+      const barWrap = document.createElement("div");
+      barWrap.className = "mt-0.5 h-1 rounded-full bg-[var(--card-border)] overflow-hidden";
+      const barFill = document.createElement("div");
+      barFill.className = "h-full rounded-full";
+      barWrap.appendChild(barFill);
+      row.appendChild(top);
+      row.appendChild(barWrap);
+      row._badge = badge;
+      row._label = label;
+      row._meta = meta;
+      row._barWrap = barWrap;
+      row._barFill = barFill;
+      row._xy = null;
+      return row;
+    }
+
+    function renderLeaderList(listEl, rows, color) {
+      if (!listEl) return;
+      const items = rows.length ? rows : [{ badge: "", label: "None", meta: "—", progress: null, xy: null, muted: true }];
+      while (listEl.children.length < items.length) {
+        listEl.appendChild(createLeaderRowEl());
+      }
+      for (let i = 0; i < listEl.children.length; i++) {
+        const row = listEl.children[i];
+        if (i >= items.length) {
+          if (row.style.display !== "none") row.style.display = "none";
+          continue;
+        }
+        if (row.style.display !== "") row.style.display = "";
+        const item = items[i];
+        const bText = item.badge || "";
+        setText(row._badge, bText);
+        if (bText) {
+          if (row._badge.style.display !== "") row._badge.style.display = "";
+          const bColor = item.badgeColor || color;
+          if (row._badge.style.color !== bColor) row._badge.style.color = bColor;
+        } else if (row._badge.style.display !== "none") {
+          row._badge.style.display = "none";
+        }
+        setText(row._label, item.label || "");
+        const lOpacity = item.muted ? "0.6" : "1";
+        if (row._label.style.opacity !== lOpacity) row._label.style.opacity = lOpacity;
+        setText(row._meta, item.meta || "");
+        if (item.progress != null) {
+          if (row._barWrap.style.display !== "") row._barWrap.style.display = "";
+          const pct = `${Math.max(3, Math.min(100, Math.round(item.progress * 100)))}%`;
+          if (row._barFill.style.width !== pct) row._barFill.style.width = pct;
+          if (row._barFill.style.backgroundColor !== color) row._barFill.style.backgroundColor = color;
+        } else if (row._barWrap.style.display !== "none") {
+          row._barWrap.style.display = "none";
+        }
+        row._xy = item.xy || null;
+        const cur = row._xy ? "pointer" : "default";
+        if (row.style.cursor !== cur) row.style.cursor = cur;
+        const tip = row._xy ? "Click to ping on minimap" : (item.title || "");
+        if (row.title !== tip) row.title = tip;
+      }
+    }
+
+    function buildLeaderRowsForPlayer(b, frame, pid, tab, color) {
+      const p = b.players?.[pid - 1];
+      const pName = p?.name || `P${pid}`;
+      const sec = frame?.sec ?? 0;
+
+      if (tab === "D") {
+        const grouped = new Map();
+        let activeCount = 0;
+        for (const s of b.production_spans || []) {
+          if (s.owner !== pid) continue;
+          if (s.start_sec <= sec + 0.25 && sec <= s.end_sec + 0.25) {
+            activeCount += 1;
+            const key = `${s.kind}|${s.name}`;
+            const prog = Math.max(0.03, Math.min(1.0, (sec - s.start_sec) / Math.max(0.5, s.full_sec || 1)));
+            const rem = Math.max(0, s.end_sec - sec);
+            const cur = grouped.get(key);
+            if (!cur) {
+              grouped.set(key, {
+                kind: s.kind,
+                name: s.kind === "upgrade" ? formatUpgradeDisplay(s.name).label : canonicalLeaderUnit(s.name),
+                count: 1,
+                progress: prog,
+                remSec: rem,
+                exact: !s.approx,
+                xy: s.x != null && s.y != null ? [s.x, s.y] : null
+              });
+            } else {
+              cur.count += 1;
+              if (prog > cur.progress) cur.progress = prog;
+              if (rem < cur.remSec) cur.remSec = rem;
+              if (!s.approx) cur.exact = true;
+              if (!cur.xy && s.x != null && s.y != null) cur.xy = [s.x, s.y];
+            }
+          }
+        }
+        const entries = Array.from(grouped.values()).sort((a, b2) => (b2.progress - a.progress) || a.name.localeCompare(b2.name));
+        const rows = entries.map((e) => {
+          const kindTag = e.kind === "building" ? "BLDG" : (e.kind === "upgrade" ? "TECH" : "UNIT");
+          return {
+            badge: `${kindTag} ${e.exact ? "EXACT" : "EST"}`,
+            badgeColor: e.exact ? color : "var(--muted-foreground)",
+            label: e.count > 1 ? `${e.name} x${e.count}` : e.name,
+            meta: e.remSec > 0 ? `~${Math.ceil(e.remSec)}s` : "done",
+            progress: e.progress,
+            xy: e.xy
+          };
+        });
+        return {
+          head: `P${pid} ${pName} • ${activeCount > 0 ? `${activeCount} active` : "idle"}`,
+          rows
+        };
+      }
+
+      if (tab === "U") {
+        const counts = new Map();
+        let workers = 0;
+        let army = 0;
+        for (const u of frame?.units || []) {
+          if (u.owner !== pid || u.init) continue;
+          if (u.kind !== 0 && u.kind !== 1) continue;
+          if (u.kind === 0) workers += 1;
+          else army += 1;
+          const cname = canonicalLeaderUnit(u.name);
+          const cur = counts.get(cname);
+          if (!cur) {
+            counts.set(cname, { name: cname, count: 1, isWorker: u.kind === 0, xy: [u.x, u.y] });
+          } else {
+            cur.count += 1;
+          }
+        }
+        const rows = Array.from(counts.values())
+          .sort((a, b2) => (b2.count - a.count) || a.name.localeCompare(b2.name))
+          .map((e) => ({
+            badge: e.isWorker ? "WRK" : "ARMY",
+            label: e.name,
+            meta: `x${e.count}`,
+            progress: null,
+            xy: e.xy
+          }));
+        return {
+          head: `P${pid} ${pName} • ${workers + army} (${workers}W/${army}A)`,
+          rows
+        };
+      }
+
+      if (tab === "G") {
+        const doneEvents = (b.upgrade_events || []).filter((u) => u.owner === pid && u.sec <= sec + 0.05);
+        const doneNames = new Set(doneEvents.map((u) => u.name));
+        const activeRes = [];
+        for (const s of b.production_spans || []) {
+          if (s.owner !== pid || s.kind !== "upgrade" || doneNames.has(s.name)) continue;
+          if (s.start_sec <= sec + 0.25 && sec <= s.end_sec + 0.25) {
+            const disp = formatUpgradeDisplay(s.name);
+            const rem = Math.max(0, s.end_sec - sec);
+            activeRes.push({
+              badge: `RES ${disp.badge === "TECH" ? "" : disp.badge}`.trim(),
+              label: disp.label,
+              meta: `~${Math.ceil(rem)}s`,
+              progress: Math.max(0.03, Math.min(1.0, (sec - s.start_sec) / Math.max(0.5, s.full_sec || 1))),
+              xy: s.x != null && s.y != null ? [s.x, s.y] : null
+            });
+          }
+        }
+        const doneRows = [];
+        const seenDone = new Set();
+        for (let i = doneEvents.length - 1; i >= 0; i--) {
+          const ev = doneEvents[i];
+          if (seenDone.has(ev.name)) continue;
+          seenDone.add(ev.name);
+          const disp = formatUpgradeDisplay(ev.name);
+          doneRows.push({
+            badge: disp.badge,
+            badgeColor: disp.badge.startsWith("+") ? "var(--success)" : color,
+            label: disp.label,
+            meta: `@${fmtClock(ev.sec)}`,
+            progress: null,
+            xy: null
+          });
+        }
+        return {
+          head: `P${pid} ${pName} • ${doneRows.length} done${activeRes.length ? ` (+${activeRes.length})` : ""}`,
+          rows: [...activeRes, ...doneRows]
+        };
+      }
+
+      if (tab === "V") {
+        const apmArr = frame?.apm?.[pid - 1] || [0, 0, 0];
+        const curApm = apmArr[0] || 0;
+        const avgApm = apmArr[1] || 0;
+        const avgEpm = apmArr[2] || 0;
+        const rows = [
+          { badge: "22s", label: "Current APM", meta: `${curApm}`, progress: null, xy: null },
+          { badge: "AVG", label: "Average APM", meta: `${avgApm}`, progress: null, xy: null },
+          { badge: "EPM", label: "Effective APM", meta: `${avgEpm}`, progress: null, xy: null },
+          { badge: "CPM", label: "Raw / Macro", meta: `${p?.raw_cpm ?? 0} / ${p?.macro_cpm ?? 0}`, progress: null, xy: null },
+          { badge: "BOT", label: "Move/Atk Spam", meta: `${p?.move_attack_spam_pct ?? 0}%`, progress: null, xy: null },
+          { badge: "CAM", label: "CGs / Cam/m", meta: `${p?.control_group_recalls_per_min ?? 0} / ${p?.camera_moves_per_min ?? 0}`, progress: null, xy: null }
+        ];
+        return {
+          head: `P${pid} ${pName} • ${curApm} APM`,
+          rows
+        };
+      }
+
+      if (tab === "L") {
+        const grouped = new Map();
+        let totalCount = 0;
+        let totalCost = 0;
+        for (const d of b.death_log || []) {
+          if (d.owner !== pid || d.sec > sec + 0.05) continue;
+          totalCount += 1;
+          totalCost += d.cost || 0;
+          const cname = canonicalLeaderUnit(d.unit);
+          const cur = grouped.get(cname);
+          if (!cur) {
+            grouped.set(cname, { name: cname, count: 1, cost: d.cost || 0, xy: [d.x, d.y] });
+          } else {
+            cur.count += 1;
+            cur.cost += d.cost || 0;
+            cur.xy = [d.x, d.y];
+          }
+        }
+        const rows = Array.from(grouped.values())
+          .sort((a, b2) => (b2.cost - a.cost) || (b2.count - a.count) || a.name.localeCompare(b2.name))
+          .map((e) => ({
+            badge: `x${e.count}`,
+            label: e.name,
+            meta: `${e.cost} res`,
+            progress: null,
+            xy: e.xy
+          }));
+        return {
+          head: `P${pid} ${pName} • ${totalCount} (${totalCost} res)`,
+          rows
+        };
+      }
+
+      return { head: `P${pid} ${pName}`, rows: [] };
+    }
+
+    function renderLeaderPanel() {
       const b = state.current;
-      if (!b) return;
-      const pal = themePalette();
-      const size = minimapCanvas.width;
-      const mapW = b.map_width || 152;
-      const mapH = b.map_height || 152;
+      if (!b || !UI.leaderPanelBody) return;
+      const tab = state.leaderTab || "D";
+      if (tab === "N") {
+        if (UI.leaderPanelBody.style.display !== "none") {
+          UI.leaderPanelBody.style.display = "none";
+        }
+        return;
+      }
+      if (UI.leaderPanelBody.style.display !== "") {
+        UI.leaderPanelBody.style.display = "";
+      }
       const frames = b.frames || [];
       const frame = frames[Math.min(state.frameIdx, Math.max(0, frames.length - 1))];
+      const pal = themePalette();
+      const p1Res = buildLeaderRowsForPlayer(b, frame, 1, tab, pal.p1);
+      const p2Res = buildLeaderRowsForPlayer(b, frame, 2, tab, pal.p2);
+      setText(UI.leaderP1Head, p1Res.head);
+      setText(UI.leaderP2Head, p2Res.head);
+      renderLeaderList(UI.leaderP1List, p1Res.rows, pal.p1);
+      renderLeaderList(UI.leaderP2List, p2Res.rows, pal.p2);
+    }
 
-      minimapCtx.clearRect(0, 0, size, size);
-      minimapCtx.fillStyle = pal.mapBg;
-      minimapCtx.fillRect(0, 0, size, size);
+    function ensureStaticMap(b, pal, size, dpr) {
+      const mapW = b.map_width || 152;
+      const mapH = b.map_height || 152;
+      const key = `${b.replay_id}|${mapW}|${mapH}|${state.layers.heatmap}|${pal.isLight}|${size}|${dpr}`;
+      if (state.staticMapKey === key) return state.staticMapCanvas;
+
+      const px = Math.round(size * dpr);
+      if (state.staticMapCanvas.width !== px || state.staticMapCanvas.height !== px) {
+        state.staticMapCanvas.width = px;
+        state.staticMapCanvas.height = px;
+      }
+      staticMapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      staticMapCtx.clearRect(0, 0, size, size);
+      staticMapCtx.fillStyle = pal.mapBg;
+      staticMapCtx.fillRect(0, 0, size, size);
 
       // Subtle tile grid (every 16 tiles)
-      minimapCtx.strokeStyle = pal.gridLine;
-      minimapCtx.lineWidth = 1;
+      staticMapCtx.strokeStyle = pal.gridLine;
+      staticMapCtx.lineWidth = 1;
       for (let gx = 0; gx <= mapW; gx += 16) {
         const [cx] = mapToCanvas(gx, 0, mapW, mapH, size);
-        minimapCtx.beginPath();
-        minimapCtx.moveTo(cx, 16);
-        minimapCtx.lineTo(cx, size - 16);
-        minimapCtx.stroke();
+        staticMapCtx.beginPath();
+        staticMapCtx.moveTo(cx, 16);
+        staticMapCtx.lineTo(cx, size - 16);
+        staticMapCtx.stroke();
       }
       for (let gy = 0; gy <= mapH; gy += 16) {
         const [, cy] = mapToCanvas(0, gy, mapW, mapH, size);
-        minimapCtx.beginPath();
-        minimapCtx.moveTo(16, cy);
-        minimapCtx.lineTo(size - 16, cy);
-        minimapCtx.stroke();
+        staticMapCtx.beginPath();
+        staticMapCtx.moveTo(16, cy);
+        staticMapCtx.lineTo(size - 16, cy);
+        staticMapCtx.stroke();
       }
+
+      // Map bounds outline
+      const [bx0, by1] = mapToCanvas(0, 0, mapW, mapH, size);
+      const [bx1, by0] = mapToCanvas(mapW, mapH, mapW, mapH, size);
+      staticMapCtx.strokeStyle = pal.isLight ? "rgba(15,23,42,0.16)" : "rgba(148,163,184,0.18)";
+      staticMapCtx.strokeRect(bx0, by0, bx1 - bx0, by1 - by0);
 
       // Death & Siege-Spot Lethality Heatmap
       if (state.layers.heatmap && b.death_heatmap?.length) {
@@ -595,19 +1209,19 @@
           const [cx, cy, scale] = mapToCanvas(cell.x, cell.y, mapW, mapH, size);
           const intensity = Math.min(1, cell.value / maxVal);
           const r = Math.max(6, 4.2 * scale);
-          const grad = minimapCtx.createRadialGradient(cx, cy, 1, cx, cy, r * 1.6);
+          const grad = staticMapCtx.createRadialGradient(cx, cy, 1, cx, cy, r * 1.6);
           grad.addColorStop(0, `rgba(249,115,22,${(0.12 + 0.36 * intensity).toFixed(2)})`);
           grad.addColorStop(1, "rgba(249,115,22,0)");
-          minimapCtx.fillStyle = grad;
-          minimapCtx.beginPath();
-          minimapCtx.arc(cx, cy, r * 1.6, 0, Math.PI * 2);
-          minimapCtx.fill();
+          staticMapCtx.fillStyle = grad;
+          staticMapCtx.beginPath();
+          staticMapCtx.arc(cx, cy, r * 1.6, 0, Math.PI * 2);
+          staticMapCtx.fill();
         }
         for (const s of b.siege_spots || []) {
           const [cx, cy] = mapToCanvas(s.x, s.y, mapW, mapH, size);
-          minimapCtx.strokeStyle = "#facc15";
-          minimapCtx.lineWidth = 1.5;
-          minimapCtx.strokeRect(cx - 5, cy - 5, 10, 10);
+          staticMapCtx.strokeStyle = "#facc15";
+          staticMapCtx.lineWidth = 1.5;
+          staticMapCtx.strokeRect(cx - 5, cy - 5, 10, 10);
         }
       }
 
@@ -615,16 +1229,35 @@
       for (const obj of b.static_objects || []) {
         const [cx, cy] = mapToCanvas(obj.x, obj.y, mapW, mapH, size);
         if (obj.kind === 0) {
-          minimapCtx.fillStyle = pal.mineral;
-          minimapCtx.fillRect(cx - 2, cy - 2, 4, 4);
+          staticMapCtx.fillStyle = pal.mineral;
+          staticMapCtx.fillRect(cx - 2, cy - 2, 4, 4);
         } else if (obj.kind === 1) {
-          minimapCtx.fillStyle = pal.geyser;
-          minimapCtx.fillRect(cx - 2.5, cy - 2.5, 5, 5);
+          staticMapCtx.fillStyle = pal.geyser;
+          staticMapCtx.fillRect(cx - 2.5, cy - 2.5, 5, 5);
         } else {
-          minimapCtx.fillStyle = pal.muted;
-          minimapCtx.fillRect(cx - 2, cy - 2, 4, 4);
+          staticMapCtx.fillStyle = pal.muted;
+          staticMapCtx.fillRect(cx - 2, cy - 2, 4, 4);
         }
       }
+
+      state.staticMapKey = key;
+      return state.staticMapCanvas;
+    }
+
+    function renderMinimap() {
+      const b = state.current;
+      if (!b) return;
+      syncCanvasDpr();
+      const pal = themePalette();
+      const size = state.canvas.minimapSize;
+      const mapW = b.map_width || 152;
+      const mapH = b.map_height || 152;
+      const frames = b.frames || [];
+      const frame = frames[Math.min(state.frameIdx, Math.max(0, frames.length - 1))];
+
+      const staticBg = ensureStaticMap(b, pal, size, state.canvas.dpr);
+      minimapCtx.clearRect(0, 0, size, size);
+      minimapCtx.drawImage(staticBg, 0, 0, size, size);
 
       if (!frame) return;
 
@@ -653,7 +1286,7 @@
         }
       }
 
-      // Units & structures
+      // Units & structures (preserving Depot raised/lowered & sieged/burrowed states)
       for (const u of frame.units || []) {
         const [cx, cy, scale] = mapToCanvas(u.x, u.y, mapW, mapH, size);
         const color = u.owner === 1 ? pal.p1 : pal.p2;
@@ -668,7 +1301,25 @@
         minimapCtx.strokeStyle = pal.isLight ? "#0f172a" : "#f8fafc";
         minimapCtx.lineWidth = u.kind >= 2 ? 1.2 : 0.7;
 
-        if (u.kind === 2) {
+        if (u.name === "SupplyDepot") {
+          const s = Math.max(6.0, rad * 1.45);
+          minimapCtx.fillStyle = color;
+          minimapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
+          minimapCtx.strokeStyle = "#fb923c";
+          minimapCtx.lineWidth = 1.9;
+          minimapCtx.strokeRect(cx - s / 2, cy - s / 2, s, s);
+        } else if (u.name === "SupplyDepotLowered") {
+          const s = Math.max(6.0, rad * 1.45);
+          minimapCtx.save();
+          minimapCtx.globalAlpha = u.init ? 0.18 : 0.25;
+          minimapCtx.fillStyle = color;
+          minimapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
+          minimapCtx.restore();
+          minimapCtx.setLineDash([2, 2]);
+          minimapCtx.strokeStyle = u.owner === 1 ? "#93c5fd" : "#fca5a5";
+          minimapCtx.lineWidth = 1.3;
+          minimapCtx.strokeRect(cx - s / 2, cy - s / 2, s, s);
+        } else if (u.kind === 2) {
           // TownHall square
           const s = Math.max(7, rad * 1.7);
           minimapCtx.fillRect(cx - s / 2, cy - s / 2, s, s);
@@ -685,12 +1336,26 @@
           minimapCtx.fill();
           minimapCtx.stroke();
         } else {
-          // Worker (small) or Army (scaled circle)
+          // Worker (small) or Army (scaled circle + special stance indicators)
           const ur = u.kind === 0 ? 2.1 : Math.max(3.0, rad);
           minimapCtx.beginPath();
           minimapCtx.arc(cx, cy, ur, 0, Math.PI * 2);
           minimapCtx.fill();
           if (u.kind === 1) minimapCtx.stroke();
+          if (u.name === "SiegeTankSieged" || u.name === "LiberatorAG") {
+            minimapCtx.strokeStyle = "#facc15";
+            minimapCtx.lineWidth = 1.2;
+            minimapCtx.beginPath();
+            minimapCtx.arc(cx, cy, ur + 3.0, 0, Math.PI * 2);
+            minimapCtx.stroke();
+          } else if (u.name === "WidowMineBurrowed" || u.name === "LurkerMPBurrowed") {
+            minimapCtx.setLineDash([2, 2]);
+            minimapCtx.strokeStyle = "#e879f9";
+            minimapCtx.lineWidth = 1.1;
+            minimapCtx.beginPath();
+            minimapCtx.arc(cx, cy, ur + 2.4, 0, Math.PI * 2);
+            minimapCtx.stroke();
+          }
         }
         minimapCtx.restore();
       }
@@ -730,18 +1395,30 @@
         minimapCtx.stroke();
       }
 
-      // Player Camera Viewports
+      // Player Camera Viewports (crisp ~24x18 tile boxes + crosshairs + label)
       if (state.layers.cameras && frame.cameras) {
         frame.cameras.forEach(([camX, camY], idx) => {
-          if (!camX && !camY) return;
+          if (camX <= 0 && camY <= 0) return;
           const [cx, cy, scale] = mapToCanvas(camX, camY, mapW, mapH, size);
-          const w = 28 * scale;
+          const w = 24 * scale;
           const h = 18 * scale;
+          const strokeCol = idx === 0 ? "#60a5fa" : "#f87171";
+          const fillCol = idx === 0 ? "rgba(96,165,250,0.08)" : "rgba(248,113,113,0.08)";
           minimapCtx.save();
-          minimapCtx.strokeStyle = idx === 0 ? "#60a5fa" : "#f87171";
-          minimapCtx.setLineDash([4, 3]);
-          minimapCtx.lineWidth = 1.3;
+          minimapCtx.fillStyle = fillCol;
+          minimapCtx.fillRect(cx - w / 2, cy - h / 2, w, h);
+          minimapCtx.strokeStyle = strokeCol;
+          minimapCtx.lineWidth = 1.5;
           minimapCtx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+          minimapCtx.beginPath();
+          minimapCtx.moveTo(cx - 3.5, cy);
+          minimapCtx.lineTo(cx + 3.5, cy);
+          minimapCtx.moveTo(cx, cy - 3.5);
+          minimapCtx.lineTo(cx, cy + 3.5);
+          minimapCtx.stroke();
+          minimapCtx.font = "bold 9px monospace";
+          minimapCtx.fillStyle = strokeCol;
+          minimapCtx.fillText(`P${idx + 1} CAM`, cx - w / 2 + 2, Math.max(10, cy - h / 2 - 3));
           minimapCtx.restore();
         });
       }
@@ -760,9 +1437,10 @@
     function renderWinChanceChart() {
       const b = state.current;
       if (!b) return;
+      syncCanvasDpr();
       const pal = themePalette();
-      const w = winCanvas.width;
-      const h = winCanvas.height;
+      const w = state.canvas.winW;
+      const h = state.canvas.winH;
       winCtx.clearRect(0, 0, w, h);
 
       const curve = b.win_chance_curve || [];
@@ -823,8 +1501,10 @@
           for (const c of curve) {
             if (Math.abs(c.sec - frame.sec) < Math.abs(best.sec - frame.sec)) best = c;
           }
-          document.getElementById("winChanceReadout").textContent =
-            `@${fmtClock(best.sec)} P1=${Math.round(best.p1_chance * 100)}% (army=${best.army_term} inc=${best.income_term} wrk=${best.workers_term} trd=${best.trades_term})`;
+          setText(
+            UI.winChanceReadout,
+            `@${fmtClock(best.sec)} P1=${Math.round(best.p1_chance * 100)}% (army=${best.army_term} inc=${best.income_term} wrk=${best.workers_term} trd=${best.trades_term})`
+          );
         }
       }
     }
@@ -840,9 +1520,7 @@
       }
       state.frameIdx = bestIdx;
       state.highlightXY = xy || null;
-      renderScoreboardAndPriority();
-      renderMinimap();
-      renderWinChanceChart();
+      renderFrame();
     }
 
     function renderJumpPillsAndFindings() {
@@ -1012,51 +1690,134 @@
       }
     }
 
-    function renderAll() {
-      syncLayerButtons();
-      populateCatalogSelect();
+    function renderFrame() {
       renderScoreboardAndPriority();
+      renderLeaderPanel();
       renderMinimap();
       renderWinChanceChart();
+    }
+
+    function renderAll() {
+      syncLayerButtons();
+      renderFrame();
       renderJumpPillsAndFindings();
       renderActiveTab();
     }
 
+    function setPlaying(nextPlaying) {
+      state.playing = nextPlaying;
+      setText(UI.playPauseBtn, state.playing ? "Pause" : "Play");
+      if (state.playing) {
+        lastTickMs = performance.now();
+        accumMs = 0;
+      }
+    }
+
+    function stepFrames(delta) {
+      const maxIdx = Math.max(0, (state.current?.frames?.length || 1) - 1);
+      setPlaying(false);
+      state.frameIdx = Math.max(0, Math.min(maxIdx, state.frameIdx + delta));
+      renderFrame();
+    }
+
+    function buildAgentFrameSummary() {
+      const b = state.current;
+      if (!b) return "No replay loaded.";
+      const frames = b.frames || [];
+      const frame = frames[Math.min(state.frameIdx, Math.max(0, frames.length - 1))];
+      const p1 = b.players?.[0];
+      const p2 = b.players?.[1];
+      const lines = [
+        `SC2 Replay Frame Analysis — #${b.replay_id} (${b.file_name})`,
+        `Map: ${b.map_name} (${b.map_width}x${b.map_height}) | Duration: ${fmtClock(b.duration_sec)}`,
+      ];
+      if (p1 && p2) {
+        lines.push(`Matchup: P1 ${p1.name} (${p1.actual_race}, ${p1.result}) vs P2 ${p2.name} (${p2.actual_race}, ${p2.result})`);
+      }
+      if (frame) {
+        const s1 = frame.p1_stats || {};
+        const s2 = frame.p2_stats || {};
+        lines.push(`Timestamp: ${fmtClock(frame.sec)} (loop ${frame.game_loop}, frame ${state.frameIdx}/${Math.max(0, frames.length - 1)})`);
+        lines.push(`P1 Live: ${s1.minerals ?? 0}M/${s1.vespene ?? 0}G, inc=${(s1.min_rate ?? 0) + (s1.gas_rate ?? 0)}/m, sup=${s1.food_used ?? 0}/${s1.food_made ?? 0} (${s1.workers ?? 0}W), army=${s1.army_value ?? 0}, cam=${JSON.stringify(frame.cameras?.[0] || [])}`);
+        lines.push(`P2 Live: ${s2.minerals ?? 0}M/${s2.vespene ?? 0}G, inc=${(s2.min_rate ?? 0) + (s2.gas_rate ?? 0)}/m, sup=${s2.food_used ?? 0}/${s2.food_made ?? 0} (${s2.workers ?? 0}W), army=${s2.army_value ?? 0}, cam=${JSON.stringify(frame.cameras?.[1] || [])}`);
+        const raisedDepots = (frame.units || []).filter((u) => u.name === "SupplyDepot").length;
+        const loweredDepots = (frame.units || []).filter((u) => u.name === "SupplyDepotLowered").length;
+        if (raisedDepots > 0 || loweredDepots > 0) {
+          lines.push(`Depot/Wall State: ${raisedDepots} raised (closed), ${loweredDepots} lowered (open)`);
+        }
+        const snaps = b.priority_snapshots || [];
+        if (frame.priority_idx != null && snaps[frame.priority_idx]) {
+          const ps = snaps[frame.priority_idx];
+          lines.push(`[SCBOT_PRIORITY] f=${ps.frame} (${ps.step_ms}ms) saving=${ps.saving_for || "none"} | approved=${ps.approved} | blocked=${ps.blocked}`);
+        }
+      }
+      if ((b.findings || []).length) {
+        lines.push(`Findings: ${b.findings.slice(0, 4).join(" ; ")}`);
+      }
+      return lines.join("\n");
+    }
+
+    function showAgentToast(msg) {
+      const toast = document.getElementById("agentToast");
+      toast.textContent = msg;
+      toast.classList.remove("hidden");
+      clearTimeout(toast._hideTimer);
+      toast._hideTimer = setTimeout(() => toast.classList.add("hidden"), 2600);
+    }
+
     // Event Listeners
-    document.getElementById("replaySelect").addEventListener("change", (e) => {
+    UI.replaySelect.addEventListener("change", (e) => {
       selectReplayById(e.target.value);
     });
 
-    document.getElementById("frameSlider").addEventListener("input", (e) => {
+    document.querySelectorAll(".catalog-filter-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.catalogFilter = btn.dataset.filter;
+        syncLayerButtons();
+        populateCatalogSelect();
+      });
+    });
+
+    document.getElementById("catalogSearch").addEventListener("input", (e) => {
+      state.catalogQuery = e.target.value || "";
+      populateCatalogSelect();
+    });
+
+    document.getElementById("sendAgentBtn").addEventListener("click", async () => {
+      const payload = buildAgentFrameSummary();
+      try {
+        if (window.sidecar?.agent?.sendMessage) {
+          await window.sidecar.agent.sendMessage(payload);
+          showAgentToast("Sent frame summary to Agent");
+          return;
+        }
+      } catch (_err) {
+        // Fallback to clipboard below
+      }
+      try {
+        await navigator.clipboard.writeText(payload);
+        showAgentToast("Copied frame summary to clipboard");
+      } catch (_err) {
+        showAgentToast("Frame summary logged to console");
+        console.log(payload);
+      }
+    });
+
+    UI.frameSlider.addEventListener("input", (e) => {
       state.frameIdx = Number(e.target.value);
-      renderScoreboardAndPriority();
-      renderMinimap();
-      renderWinChanceChart();
+      renderFrame();
     });
 
-    document.getElementById("playPauseBtn").addEventListener("click", () => {
-      state.playing = !state.playing;
-      document.getElementById("playPauseBtn").textContent = state.playing ? "Pause" : "Play";
-    });
-
-    document.getElementById("prevFrameBtn").addEventListener("click", () => {
-      state.playing = false;
-      document.getElementById("playPauseBtn").textContent = "Play";
-      state.frameIdx = Math.max(0, state.frameIdx - 1);
-      renderScoreboardAndPriority();
-      renderMinimap();
-      renderWinChanceChart();
-    });
-
-    document.getElementById("nextFrameBtn").addEventListener("click", () => {
-      state.playing = false;
-      document.getElementById("playPauseBtn").textContent = "Play";
+    UI.playPauseBtn.addEventListener("click", () => {
       const maxIdx = Math.max(0, (state.current?.frames?.length || 1) - 1);
-      state.frameIdx = Math.min(maxIdx, state.frameIdx + 1);
-      renderScoreboardAndPriority();
-      renderMinimap();
-      renderWinChanceChart();
+      if (!state.playing && state.frameIdx >= maxIdx) {
+        state.frameIdx = 0;
+      }
+      setPlaying(!state.playing);
     });
+
+    document.getElementById("prevFrameBtn").addEventListener("click", () => stepFrames(-1));
+    document.getElementById("nextFrameBtn").addEventListener("click", () => stepFrames(1));
 
     document.querySelectorAll(".layer-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1082,12 +1843,79 @@
       });
     });
 
+    function setLeaderTab(tab) {
+      if (!tab) return;
+      state.leaderTab = tab;
+      syncLayerButtons();
+      renderLeaderPanel();
+    }
+
+    if (UI.leaderTabSelect) {
+      UI.leaderTabSelect.addEventListener("change", (e) => {
+        setLeaderTab(e.target.value);
+      });
+    }
+
+    document.querySelectorAll(".leader-tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setLeaderTab(btn.dataset.leader);
+      });
+    });
+
+    if (UI.leaderPanelBody) {
+      UI.leaderPanelBody.addEventListener("click", (e) => {
+        const row = e.target.closest(".leader-row");
+        if (row && row._xy) {
+          state.highlightXY = row._xy;
+          renderMinimap();
+        }
+      });
+    }
+
+    // Keyboard shortcuts (Space, Left/Right, Shift+Left/Right, C, H, D/U/G/V/L/N)
+    window.addEventListener("keydown", (e) => {
+      const tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        UI.playPauseBtn.click();
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        stepFrames(e.shiftKey ? -10 : -1);
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        stepFrames(e.shiftKey ? 10 : 1);
+      } else if (e.code === "KeyC") {
+        state.layers.cameras = !state.layers.cameras;
+        syncLayerButtons();
+        renderMinimap();
+      } else if (e.code === "KeyH") {
+        state.layers.heatmap = !state.layers.heatmap;
+        syncLayerButtons();
+        renderMinimap();
+      } else if (e.code === "KeyD") {
+        setLeaderTab("D");
+      } else if (e.code === "KeyU") {
+        setLeaderTab("U");
+      } else if (e.code === "KeyG") {
+        setLeaderTab("G");
+      } else if (e.code === "KeyV") {
+        setLeaderTab("V");
+      } else if (e.code === "KeyL") {
+        setLeaderTab("L");
+      } else if (e.code === "KeyN") {
+        setLeaderTab("N");
+      }
+    });
+
     // Click Win-Chance Chart to scrub
     winCanvas.addEventListener("click", (e) => {
       const rect = winCanvas.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * winCanvas.width;
+      const x = e.clientX - rect.left;
       const padL = 36, padR = 14;
-      const frac = Math.max(0, Math.min(1, (x - padL) / (winCanvas.width - padL - padR)));
+      const w = rect.width || state.canvas.winW;
+      const frac = Math.max(0, Math.min(1, (x - padL) / Math.max(1, w - padL - padR)));
       jumpToSec(frac * (state.current?.duration_sec || 0), null);
     });
 
@@ -1098,9 +1926,9 @@
       const tip = document.getElementById("minimapTooltip");
       if (!b || !frame) return;
       const rect = minimapCanvas.getBoundingClientRect();
-      const cx = ((e.clientX - rect.left) / rect.width) * minimapCanvas.width;
-      const cy = ((e.clientY - rect.top) / rect.height) * minimapCanvas.height;
-      const [mx, my] = canvasToMap(cx, cy, b.map_width || 152, b.map_height || 152, minimapCanvas.width);
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const [mx, my] = canvasToMap(cx, cy, b.map_width || 152, b.map_height || 152, rect.width || state.canvas.minimapSize);
 
       let nearest = null;
       let bestDist = 3.2;
@@ -1112,10 +1940,10 @@
         }
       }
       tip.classList.remove("hidden");
-      tip.style.left = `${Math.min(rect.width - 170, Math.max(6, e.clientX - rect.left + 10))}px`;
-      tip.style.top = `${Math.max(6, e.clientY - rect.top - 28)}px`;
+      tip.style.left = `${Math.min(rect.width - 210, Math.max(6, cx + 10))}px`;
+      tip.style.top = `${Math.max(6, cy - 28)}px`;
       if (nearest) {
-        tip.textContent = `P${nearest.owner} ${nearest.name}${nearest.init ? " [init]" : ""} (${nearest.x}, ${nearest.y})`;
+        tip.textContent = `P${nearest.owner} ${formatUnitLabel(nearest)}${nearest.init ? " [init]" : ""} (${nearest.x}, ${nearest.y})`;
       } else {
         tip.textContent = `Map (${mx.toFixed(1)}, ${my.toFixed(1)})`;
       }
@@ -1129,7 +1957,7 @@
       const file = e.target.files?.[0];
       if (!file) return;
       try {
-        document.getElementById("metaParseMs").textContent = `Uploading ${file.name}…`;
+        setText(UI.metaParseMs, `Uploading ${file.name}…`);
         const buf = await file.arrayBuffer();
         const resp = await fetch(`${API_BASE}/api/analyze-bytes?name=${encodeURIComponent(file.name)}`, {
           method: "POST",
@@ -1156,32 +1984,68 @@
         }
         state.current = bundle;
         state.frameIdx = 0;
+        populateCatalogSelect();
         renderAll();
       } catch (err) {
-        document.getElementById("metaParseMs").textContent = `Upload requires :4322 sidecar (${err.message})`;
+        setText(UI.metaParseMs, `Upload requires :4322 sidecar (${err.message})`);
       }
     });
 
-    // Playback Loop
-    setInterval(() => {
-      if (!state.playing || !state.current?.frames?.length) return;
-      const maxIdx = state.current.frames.length - 1;
-      if (state.frameIdx >= maxIdx) {
-        state.playing = false;
-        document.getElementById("playPauseBtn").textContent = "Play";
-        return;
+    // Delta-time requestAnimationFrame Playback Loop
+    let lastTickMs = performance.now();
+    let accumMs = 0;
+    const BASE_FRAME_MS = 110;
+    function playbackRaf(now) {
+      if (state.playing && state.current?.frames?.length) {
+        const dt = Math.min(250, Math.max(0, now - lastTickMs));
+        lastTickMs = now;
+        accumMs += dt;
+        const interval = BASE_FRAME_MS / Math.max(0.25, state.speed || 1);
+        const steps = Math.floor(accumMs / interval);
+        if (steps > 0) {
+          accumMs -= steps * interval;
+          const maxIdx = state.current.frames.length - 1;
+          if (state.frameIdx >= maxIdx) {
+            setPlaying(false);
+          } else {
+            const nextIdx = Math.min(maxIdx, state.frameIdx + steps);
+            if (nextIdx !== state.frameIdx) {
+              state.frameIdx = nextIdx;
+              renderFrame();
+            }
+            if (state.frameIdx >= maxIdx) {
+              setPlaying(false);
+            }
+          }
+        }
+      } else {
+        lastTickMs = now;
       }
-      state.frameIdx = Math.min(maxIdx, state.frameIdx + state.speed);
-      renderScoreboardAndPriority();
-      renderMinimap();
-      renderWinChanceChart();
-    }, 110);
+      requestAnimationFrame(playbackRaf);
+    }
+    requestAnimationFrame(playbackRaf);
 
-    // Live Theme Sync
+    // Live Theme & Resize Sync
     window.addEventListener("themechange", () => {
+      state.staticMapKey = "";
       renderMinimap();
       renderWinChanceChart();
     });
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        syncCanvasDpr();
+        renderMinimap();
+        renderWinChanceChart();
+      });
+      ro.observe(minimapCanvas);
+      ro.observe(winCanvas);
+    } else {
+      window.addEventListener("resize", () => {
+        syncCanvasDpr();
+        renderMinimap();
+        renderWinChanceChart();
+      });
+    }
 
     // Connect to Live Rust Sidecar (:4322) + SSE
     async function connectSidecar() {
@@ -1217,11 +2081,13 @@
         });
       } catch (_e) {
         document.getElementById("sseDot").style.background = "var(--warning)";
-        document.getElementById("connBadge").textContent = "Offline Snapshot (start :4322 for 75+ replays)";
+        document.getElementById("connBadge").textContent = "Offline Snapshot (start :4322 for 100+ replays)";
+        populateCatalogSelect();
         renderAll();
       }
     }
 
+    populateCatalogSelect();
     renderAll();
     connectSidecar();
   </script>

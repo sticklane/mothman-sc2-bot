@@ -252,6 +252,42 @@ impl Default for FramePlayerStat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpgradeEventRecord {
+    pub game_loop: i64,
+    pub sec: f32,
+    pub owner: u8,
+    pub name: String,
+    pub count: i32,
+}
+
+pub type UpgradeTimelineEvent = UpgradeEventRecord;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProductionSpan {
+    pub owner: u8,
+    /// "building" | "unit" | "upgrade"
+    pub kind: String,
+    pub name: String,
+    pub start_sec: f32,
+    pub end_sec: f32,
+    /// Expected full build/research duration in Faster seconds (for accurate % when unfinished/canceled).
+    pub full_sec: f32,
+    pub approx: bool,
+    pub x: Option<f32>,
+    pub y: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeathTimelineEvent {
+    pub sec: f32,
+    pub owner: u8,
+    pub unit: String,
+    pub cost: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinimapFrame {
     pub game_loop: i64,
     pub sec: f32,
@@ -263,6 +299,8 @@ pub struct MinimapFrame {
     pub pylons: Vec<[f32; 3]>,
     pub p1_stats: FramePlayerStat,
     pub p2_stats: FramePlayerStat,
+    /// Per player (`[P1, P2]`): `[current_apm_22s, avg_apm, avg_epm]`.
+    pub apm: [[u16; 3]; 2],
     pub priority_idx: Option<usize>,
 }
 
@@ -312,6 +350,9 @@ pub struct ReplaySidecarBundle {
     pub siege_spots: Vec<HeatmapCell>,
     pub frames: Vec<MinimapFrame>,
     pub priority_snapshots: Vec<PriorityLogSnapshot>,
+    pub upgrade_events: Vec<UpgradeEventRecord>,
+    pub production_spans: Vec<ProductionSpan>,
+    pub death_log: Vec<DeathTimelineEvent>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -359,6 +400,7 @@ pub(crate) struct PerPlayerAcc {
     pub(crate) resources_killed: u32,
     pub(crate) raw_commands: u32,
     pub(crate) macro_filtered_commands: u32,
+    pub(crate) recent_cmd_loops: std::collections::VecDeque<i64>,
     pub(crate) worker_thrash_events: u32,
     pub(crate) last_worker_build_loop: HashMap<u32, i64>,
     pub(crate) control_groups: BTreeSet<u8>,

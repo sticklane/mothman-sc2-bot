@@ -67,6 +67,8 @@
                   sc2-raw-unit-command-unit-tags
                   sc2-raw-camera-move
                   sc2-raw-camera-move?
+                  sc2-raw-camera-move-x
+                  sc2-raw-camera-move-y
                   sc2-chat-action
                   sc2-ui-control-group
                   sc2-ui-control-group?
@@ -105,6 +107,10 @@
                   placement-preserves-base-exit-and-spawn?
                   mark-urgent-survival-cmd!
                   urgent-survival-cmd?
+                  mark-framing-camera-cmd!
+                  framing-camera-cmd?
+                  friendly-unit-on-depot-footprint?
+                  friendly-unit-requesting-depot-transit?
                   wire-cmd-priority-tier)
          (only-in "../lib/sc2-mpq-replay-parser.rkt"
                   STORM-CRYPT
@@ -352,9 +358,9 @@
   (assert-true! (ledger-verify-invariant? ledger)))
 
 ;; =============================================================================
-;; 3.3 Lakefill + Zipper-Cut, Baba Wall-In Solver, FRACTRAN Bitmask VM, FAP Hysteresis & Traffic Retreat
+;; 3.3 Lakefill + Zipper-Cut, Baba Wall-In Solver, FAP Hysteresis & Traffic Retreat
 ;; =============================================================================
-(run-suite "3.3 Lakefill + Zipper-Cut, Baba Wall-In Solver, FRACTRAN Bitmask VM, FAP Hysteresis & Traffic Retreat"
+(run-suite "3.3 Lakefill + Zipper-Cut, Baba Wall-In Solver, FAP Hysteresis & Traffic Retreat"
   (define decomp (lakefill-choke-decomposition 200 200 '((38 . 42) (50 . 56))))
   (assert-eq! (length (hash-ref decomp 'chokes)) 3)
   (define ffe-wall (solve-choke-wall-in 30 30 9 PROTOSS-FFE-BUILDINGS))
@@ -367,9 +373,6 @@
   (assert-true! (wall-solution-zergling-tight-ref terran-wall9))
   (assert-true! (wall-solution-valid-ref terran-wall10))
   (assert-true! (wall-solution-zergling-tight-ref terran-wall10))
-  ;; FRACTRAN VM
-  (define ftrace (fractran-run 2 10))
-  (assert-true! (>= (length ftrace) 5))
   ;; FAP Hysteresis: no thrashing inside [-15, +25]
   (assert-eq! (fap-posture-with-hysteresis -20 'hold) 'retreat)
   (assert-eq! (fap-posture-with-hysteresis 10 'retreat) 'retreat)
@@ -4948,7 +4951,7 @@
              (sc2-raw-unit-command 3666 #f 501 (list (+ 101 (modulo step-idx 12))) #f)
              (sc2-raw-unit-command 3666 #f 502 (list (+ 121 (modulo step-idx 12))) #f)
              (sc2-raw-unit-command 3666 #f 503 (list (+ 141 (modulo step-idx 12))) #f)
-             (sc2-raw-unit-command 556 #f 0 (list (+ 400 (modulo step-idx 4))) #f))))
+             (sc2-raw-unit-command 298 #f 504 (list (+ 400 (modulo step-idx 4))) #f))))
     (define out-cmds (govern-sc2-wire-actions! gov raw-batch gl))
     (for ([c (in-list out-cmds)])
       (cond
@@ -9070,6 +9073,305 @@
                        (not (member "Mothman-R" variant-names))
                        (equal? variant-names '("Mothman-X" "Mothman-Z" "Mothman-T" "Mothman-P")))
                   (format "VARIANTS must exclude retired Mothman and Mothman-R (got ~a)" variant-names)))
+
+;; =============================================================================
+;; Suite 40: Terran Depot Front-Door, Protoss Wall Door-Guard & Framing Camera
+;; =============================================================================
+(run-suite "40. Terran Supply Depot Door, Protoss HoldPosition Door-Guard & Framing Camera"
+  (define (s40-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-s40-unit tag utype x y
+                       #:alliance [alliance 1]
+                       #:radius [radius 0.5]
+                       #:hp [hp 45.0]
+                       #:hp-max [hp-max 45.0]
+                       #:flying? [flying? #f]
+                       #:orders [orders '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 radius 1.0 0 #f #f #f
+              hp hp-max 0.0 0.0 0.0 0.0 0 0
+              flying? #f #f #t #t orders 0 '()
+              0 0 0.0 0 0 0 0))
+  (define (mk-s40-obs loop units #:cam [cam #f])
+    (sc2-observation loop
+                     (sc2-player-common 1 200 100 38 24 10 14 0 5 0 3)
+                     units
+                     '() '() cam '() '() '() '() '() '()))
+
+  ;; 40.1 Terran Supply Depot Front-Door Management (1A)
+  (assert-eq! (wire-cmd-priority-tier (sc2-raw-unit-command 556 #f 0 '(4201) #f)) 0
+              "Supply Depot Lower (556) must be Tier 0 (P0) alongside Raise (558)")
+  (assert-eq! (wire-cmd-priority-tier (sc2-raw-unit-command 558 #f 0 '(4201) #f)) 0
+              "Supply Depot Raise (558) must be Tier 0 (P0)")
+
+  ;; Reset wire state with low loop=2: enemy at 8.0 tiles (> 5.5) + friendly unit <= 3.5 requesting transit -> lower (556)
+  (define dep-lower-units
+    (list (mk-s40-unit 4201 19 35.0 46.0 #:radius 1.25 #:hp 400.0 #:hp-max 400.0)
+          (mk-s40-unit 4210 48 33.0 46.0
+                       #:orders (list (sc2-unit-order 16 (sc2-point3d 45.0 46.0 8.0) 0 0.0)))
+          (mk-s40-unit 9210 105 43.0 46.0 #:alliance 4 #:hp 35.0 #:hp-max 35.0)))
+  (assert-true! (friendly-unit-requesting-depot-transit? 35.0 46.0 dep-lower-units)
+                "Moving Marine within 3.5 tiles of depot must register as requesting depot transit")
+  (define cmds-40-lower
+    (translate-bot-actions->sc2-raw-commands '() (mk-s40-obs 2 dep-lower-units)))
+  (assert-true! (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 556)))
+                       cmds-40-lower)
+                "Raised depot (19) with enemy at 8.0 tiles (> 5.5) and transiting friendly unit <= 3.5 must emit Lower (556)")
+
+  ;; Lowered depot refuses to Raise (558) while a friendly ground unit stands on 2x2 footprint (max(|dx|,|dy|) <= 1.3)
+  (define dep-block-units
+    (list (mk-s40-unit 4202 47 35.0 46.0 #:radius 1.25 #:hp 400.0 #:hp-max 400.0)
+          (mk-s40-unit 4211 45 36.2 47.2)
+          (mk-s40-unit 9211 105 39.0 46.0 #:alliance 4 #:hp 35.0 #:hp-max 35.0)))
+  (assert-true! (friendly-unit-on-depot-footprint? 35.0 46.0 dep-block-units)
+                "SCV at (36.2, 47.2) relative to depot (35.0, 46.0) must be detected on depot footprint")
+  (define cmds-40-blocked
+    (translate-bot-actions->sc2-raw-commands '() (mk-s40-obs 42 dep-block-units)))
+  (assert-true! (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 558)))
+                            cmds-40-blocked))
+                "Lowered depot (47) must refuse to Raise (558) while a friendly ground unit stands on footprint")
+
+  ;; Once footprint clears and enemy is at 4.0 tiles (<= 5.5), emergency Raise (558) fires immediately
+  (define dep-clear-units
+    (list (mk-s40-unit 4202 47 35.0 46.0 #:radius 1.25 #:hp 400.0 #:hp-max 400.0)
+          (mk-s40-unit 4211 45 30.0 46.0)
+          (mk-s40-unit 9211 105 39.0 46.0 #:alliance 4 #:hp 35.0 #:hp-max 35.0)))
+  (define cmds-40-clear-raise
+    (translate-bot-actions->sc2-raw-commands '() (mk-s40-obs 43 dep-clear-units)))
+  (assert-true! (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 558)))
+                       cmds-40-clear-raise)
+                "Lowered depot (47) must Raise (558) once friendly unit clears footprint and enemy <= 5.5")
+
+  ;; Terran rt-door-state tracking & unstick move after >= 2 stuck steps
+  (define rt-t40 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define (terran-door-obs fr depot-type marine-order-ab)
+    (hash 'frame fr 'minerals 100 'gas 0 'supply-used 20 'supply-cap 23 'supply-left 3
+          'mineral-harvesters 16 'gas-harvesters 0 'enemy-race 'Zerg
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+          'ally-units (list (hash 'id 4221 'type 'marine 'x 33.0 'y 46.0 'hp 45 'order-ability-id marine-order-ab 'order-count (if (= marine-order-ab 0) 0 1)))
+          'ally-buildings (list (hash 'id 4200 'type 'command-center 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                (hash 'id 4220 'type depot-type 'x 35.0 'y 46.0 'hp 400 'build-progress 1.0))
+          'enemy-units '()))
+  (void (step-live-bot-runtime! rt-t40 (terran-door-obs 1000 'supply-depot 16)))
+  (define res-t40-2 (step-live-bot-runtime! rt-t40 (terran-door-obs 1008 'supply-depot 16)))
+  (assert-eq! (hash-ref (rt-door-state rt-t40) 'state #f) 'closed
+              "Terran raised front depot with stuck Marine must track rt-door-state = 'closed")
+  (assert-true! (and (member 4221 (hash-ref (rt-door-state rt-t40) 'transiting-tags '()))
+                     (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (equal? (second a) 4221)))
+                            (hash-ref res-t40-2 'actions '())))
+                "Terran Marine stuck <= 3.5 tiles near raised depot for >= 2 steps must get unstick move")
+  (void (step-live-bot-runtime! rt-t40 (terran-door-obs 1016 'supply-depot-lowered 0)))
+  (assert-eq! (hash-ref (rt-door-state rt-t40) 'state #f) 'open
+              "Terran lowered front depot with no stuck units must track rt-door-state = 'open")
+
+  ;; 40.2 Protoss HoldPosition Wall Door-Guard Management (1B)
+  (define r40w 96)
+  (define r40h 96)
+  (define r40-path (make-bytes (* r40w r40h) 0))
+  (define r40-plac (make-bytes (* r40w r40h) 0))
+  (define r40-hgt  (make-bytes (* r40w r40h) 112))
+  (for* ([ix (in-range 10 91)]
+         [iy (in-range 28 69)])
+    (cond
+      [(<= ix 35)
+       (bytes-set! r40-path (+ ix (* iy r40w)) 1)
+       (bytes-set! r40-plac (+ ix (* iy r40w)) 1)
+       (bytes-set! r40-hgt  (+ ix (* iy r40w)) 144)]
+      [(<= ix 38)
+       (bytes-set! r40-hgt (+ ix (* iy r40w)) 128)
+       (when (and (>= iy 46) (<= iy 50))
+         (bytes-set! r40-path (+ ix (* iy r40w)) 1))]
+      [(<= ix 59)
+       (bytes-set! r40-path (+ ix (* iy r40w)) 1)
+       (bytes-set! r40-plac (+ ix (* iy r40w)) 1)
+       (bytes-set! r40-hgt  (+ ix (* iy r40w)) 112)]
+      [(<= ix 62)
+       (bytes-set! r40-hgt (+ ix (* iy r40w)) 112)
+       (when (and (>= iy 45) (<= iy 51))
+         (bytes-set! r40-path (+ ix (* iy r40w)) 1)
+         (bytes-set! r40-plac (+ ix (* iy r40w)) 1))]
+      [else
+       (bytes-set! r40-path (+ ix (* iy r40w)) 1)
+       (bytes-set! r40-plac (+ ix (* iy r40w)) 1)
+       (bytes-set! r40-hgt  (+ ix (* iy r40w)) 112)]))
+  (define r40-grids
+    (hash 'width r40w 'height r40h
+          'pathing-ref (lambda (ix iy) (bytes-ref r40-path (+ ix (* iy r40w))))
+          'placement-ref (lambda (ix iy) (bytes-ref r40-plac (+ ix (* iy r40w))))
+          'height-ref (lambda (ix iy) (bytes-ref r40-hgt (+ ix (* iy r40w))))))
+  (define pw40 (solve-protoss-matchup-wall 24.5 48.5 52.5 48.5 'Zerg
+                                           #:map-grids r40-grids #:enemy-x 84.5 #:enemy-y 48.5))
+  (define d40-pt (hash-ref pw40 'door))
+  (define p40-pt (hash-ref pw40 'door-park))
+  (define pw40-bldgs
+    (list (hash 'id 4501 'type 'nexus 'x 24.5 'y 48.5 'hp 2000 'build-progress 1.0 'powered? #f)
+          (hash 'id 4502 'type 'nexus 'x 52.5 'y 48.5 'hp 2000 'build-progress 1.0 'powered? #f)
+          (hash 'id 4503 'type 'pylon 'x (car (hash-ref pw40 'pylon)) 'y (cdr (hash-ref pw40 'pylon)) 'hp 400 'build-progress 1.0 'powered? #f)
+          (hash 'id 4504 'type 'gateway 'x (car (hash-ref pw40 'slot-1)) 'y (cdr (hash-ref pw40 'slot-1)) 'hp 1000 'build-progress 1.0 'powered? #t)
+          (hash 'id 4505 'type 'cybernetics-core 'x (car (hash-ref pw40 'slot-2)) 'y (cdr (hash-ref pw40 'slot-2)) 'hp 1100 'build-progress 1.0 'powered? #t)))
+  (define rt-p40 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define (protoss-door-obs fr units enemies)
+    (hash 'frame fr 'minerals 50 'gas 50 'supply-used 28 'supply-cap 38 'supply-left 10
+          'mineral-harvesters 20 'gas-harvesters 3 'enemy-race 'Zerg
+          'map-grids r40-grids
+          'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5 'enemy-x 84.5 'enemy-y 48.5
+          'ally-units units 'ally-buildings pw40-bldgs 'enemy-units enemies))
+
+  ;; 1 trapped idle combat unit on main side + enemy at 9.0 tiles (> 6.5) -> open, park, and nudge trapped unit
+  (define res-p40-army
+    (step-live-bot-runtime!
+     rt-p40
+     (protoss-door-obs
+      2200
+      (list (hash 'id 4601 'type 'probe 'x 23.0 'y 48.5 'hp 40)
+            (hash 'id 4610 'type 'zealot 'x (car d40-pt) 'y (cdr d40-pt) 'hp 100 'shield 50 'order-ability-id 18)
+            (hash 'id 4620 'type 'stalker 'x (- (car d40-pt) 2.2) 'y (cdr d40-pt) 'hp 80 'shield 80 'order-count 0 'order-ability-id 0))
+      (list (hash 'id 9401 'type 'zergling 'x (+ (car d40-pt) 9.0) 'y (cdr d40-pt) 'hp 35)))))
+  (assert-eq! (hash-ref (rt-door-state rt-p40) 'state #f) 'open
+              "Protoss door guard must open ('open) for 1 trapped/transiting combat unit when enemy > 6.5 tiles")
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a) (eq? (car a) 'move) (equal? (second a) 4610)
+                              (<= (s40-dist (third a) (fourth a) (car p40-pt) (cdr p40-pt)) 0.5)))
+                       (hash-ref res-p40-army 'actions '()))
+                "Protoss door guard Zealot (#4610) must move to (park-x, park-y) when 1 combat unit needs transit")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (equal? (second a) 4620)))
+                       (hash-ref res-p40-army 'actions '()))
+                "Trapped idle Stalker (#4620) within 3.2 tiles of closed door must be nudged across doorway")
+
+  ;; Re-seal immediately once cleared
+  (define res-p40-clear
+    (step-live-bot-runtime!
+     rt-p40
+     (protoss-door-obs
+      2216
+      (list (hash 'id 4601 'type 'probe 'x 23.0 'y 48.5 'hp 40)
+            (hash 'id 4610 'type 'zealot 'x (car p40-pt) 'y (cdr p40-pt) 'hp 100 'shield 50 'order-ability-id 0))
+      '())))
+  (assert-eq! (hash-ref (rt-door-state rt-p40) 'state #f) 'closed
+              "Protoss door guard must re-seal ('closed) immediately once doorway clears")
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a) (eq? (car a) 'hold-position) (equal? (second a) 4610)))
+                       (hash-ref res-p40-clear 'actions '()))
+                "Protoss door guard Zealot (#4610) must re-seal with (hold-position gid door-x door-y)")
+
+  ;; Scout probe requesting transit (> 6.5 enemy dist) opens door; enemy <= 6.5 forces immediate re-seal
+  (hash-set! (rt-scout-state rt-p40) 'scout-id 4601)
+  (define res-p40-scout
+    (step-live-bot-runtime!
+     rt-p40
+     (protoss-door-obs
+      2224
+      (list (hash 'id 4601 'type 'probe 'x (+ (car d40-pt) 1.5) 'y (cdr d40-pt) 'hp 40)
+            (hash 'id 4610 'type 'zealot 'x (car d40-pt) 'y (cdr d40-pt) 'hp 100 'shield 50 'order-ability-id 18))
+      (list (hash 'id 9402 'type 'zergling 'x (+ (car d40-pt) 8.5) 'y (cdr d40-pt) 'hp 35)))))
+  (assert-eq! (hash-ref (rt-door-state rt-p40) 'state #f) 'open
+              "Protoss door guard must open ('open) for transiting scout Probe when enemy > 6.5 tiles")
+  (define res-p40-danger
+    (step-live-bot-runtime!
+     rt-p40
+     (protoss-door-obs
+      2232
+      (list (hash 'id 4601 'type 'probe 'x (+ (car d40-pt) 1.5) 'y (cdr d40-pt) 'hp 40)
+            (hash 'id 4610 'type 'zealot 'x (car p40-pt) 'y (cdr p40-pt) 'hp 100 'shield 50 'order-ability-id 0))
+      (list (hash 'id 9402 'type 'zergling 'x (+ (car d40-pt) 5.5) 'y (cdr d40-pt) 'hp 35)))))
+  (assert-eq! (hash-ref (rt-door-state rt-p40) 'state #f) 'closed
+              "Protoss door guard must force re-seal ('closed) when enemy closes to <= 6.5 tiles")
+  (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'hold-position) (equal? (second a) 4610)))
+                       (hash-ref res-p40-danger 'actions '()))
+                "Protoss door guard Zealot (#4610) must emit (hold-position) immediately when enemy <= 6.5 tiles")
+
+  ;; 40.3 Camera Management on Un-Control-Grouped Units (1C)
+  (define rt-c40 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define ctx-c40 (live-bot-runtime-cortex rt-c40))
+  (cortex-set-control-group! ctx-c40 1 '(701))
+  (cortex-move-camera! ctx-c40 32.5 32.5)
+  (define c40-units
+    (list (hash 'id 701 'type 'zealot 'x 34.0 'y 34.0 'hp 100)
+          (hash 'id 702 'type 'probe 'x 120.0 'y 118.0 'hp 40)))
+  (define c40-pos-map (hasheqv 701 '(34.0 . 34.0) 702 '(120.0 . 118.0)))
+  (assert-eq! (action-requires-camera-focus '(attack-pos 701 36.0 36.0) (seteqv 701) c40-pos-map 32.5 32.5)
+              #f
+              "Command to control-grouped unit (#701) must NOT force camera focus switch")
+  (assert-eq! (action-requires-camera-focus '(move 702 124.0 120.0) (seteqv 701) c40-pos-map 32.5 32.5)
+              '(120.0 . 118.0)
+              "Command to un-control-grouped unit (#702) must return unit focus coords for camera framing")
+  (define-values (c40-mixed-sel _c40-realized)
+    (compile-optimal-unit-selection! ctx-c40 '(701 702) c40-units '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'control-group-recall))) c40-mixed-sel))
+                "compile-optimal-unit-selection! must NOT emit control-group-recall when desired list contains ungrouped unit #702")
+  (define-values (c40-accepted _c40-drop _c40-sthr)
+    (step-layer5-human-cortex!
+     rt-c40
+     '((move 702 124.0 120.0))
+     (hash 'frame 400 'base-x 32.5 'base-y 32.5 'natural-x 52.5 'natural-y 32.5
+           'ally-units c40-units 'ally-buildings '() 'enemy-units '())))
+  (define c40-cam-idx
+    (index-where c40-accepted (lambda (a) (and (pair? a) (eq? (car a) 'move-camera)))))
+  (define c40-mov-idx
+    (index-where c40-accepted (lambda (a) (and (pair? a) (eq? (car a) 'move) (equal? (second a) 702)))))
+  (assert-true! (and c40-cam-idx c40-mov-idx (< c40-cam-idx c40-mov-idx))
+                "step-layer5-human-cortex! must emit (move-camera ...) BEFORE ungrouped (move 702 ...) outside viewport")
+
+  ;; Wire translator + governor framing camera move, Tier 1 preservation, and 6-loop large jump cooldown
+  (define obs-c40-wire
+    (mk-s40-obs 2
+                (list (mk-s40-unit 8001 59 32.5 32.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0)
+                      (mk-s40-unit 8101 73 95.0 95.0 #:hp 100.0 #:hp-max 100.0)
+                      (mk-s40-unit 8102 73 98.0 95.0 #:hp 100.0 #:hp-max 100.0))
+                #:cam (sc2-point3d 32.5 32.5 0.0)))
+  (define cmds-c40-wire
+    (translate-bot-actions->sc2-raw-commands
+     '((control-group-set 1 (8102))
+       (attack-pos 8101 98.0 98.0))
+     obs-c40-wire))
+  (define cam-idx-w
+    (index-where cmds-c40-wire
+                 (lambda (c) (and (framing-camera-cmd? c)
+                                  (<= (s40-dist (sc2-raw-camera-move-x c) (sc2-raw-camera-move-y c) 95.0 95.0) 1.0)))))
+  (define atk-idx-w
+    (index-where cmds-c40-wire
+                 (lambda (c) (and (sc2-raw-unit-command? c)
+                                  (= (sc2-raw-unit-command-ability-id c) 23)
+                                  (memv 8101 (sc2-raw-unit-command-unit-tags c))))))
+  (assert-true! (and cam-idx-w atk-idx-w (< cam-idx-w atk-idx-w))
+                "Wire translator must emit framing sc2-raw-camera-move BEFORE command to ungrouped unit #8101")
+  (define obs-c40-grp
+    (mk-s40-obs 14
+                (list (mk-s40-unit 8001 59 32.5 32.5 #:radius 2.75 #:hp 1500.0 #:hp-max 1500.0)
+                      (mk-s40-unit 8101 73 95.0 95.0 #:hp 100.0 #:hp-max 100.0)
+                      (mk-s40-unit 8102 73 140.0 140.0 #:hp 100.0 #:hp-max 100.0))
+                #:cam (sc2-point3d 32.5 32.5 0.0)))
+  (define cmds-c40-grp
+    (translate-bot-actions->sc2-raw-commands '((attack-pos 8102 142.0 142.0)) obs-c40-grp))
+  (assert-true! (not (ormap framing-camera-cmd? cmds-c40-grp))
+                "Wire translator must NOT emit framing sc2-raw-camera-move for control-grouped unit #8102")
+  (assert-eq! (wire-cmd-priority-tier (list-ref cmds-c40-wire cam-idx-w)) 1
+              "Framing sc2-raw-camera-move must have priority Tier 1 (P1), not Tier 4")
+  (assert-eq! (wire-cmd-priority-tier (sc2-raw-camera-move 50.0 50.0 0.0)) 4
+              "Routine non-framing sc2-raw-camera-move must remain priority Tier 4 (P4)")
+
+  (define gov40 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (void (govern-sc2-wire-actions! gov40 (list (sc2-raw-camera-move 32.5 32.5 0.0)) 99))
+  (define p0-burn-40
+    (for/list ([i (in-range 8)])
+      (sc2-raw-unit-command 251 #f 3001 (list (+ 8500 i)) #f)))
+  (void (govern-sc2-wire-actions! gov40 p0-burn-40 100)) ;; tokens now ~8.5 (< 10.0 floor for Tier 4)
+  (define frame-cam-40 (mark-framing-camera-cmd! (sc2-raw-camera-move 95.0 95.0 0.0) 88.4))
+  (define target-uc-40 (sc2-raw-unit-command 23 (sc2-point2d 98.0 98.0) 0 '(8101) #f))
+  (define out-40-gov
+    (govern-sc2-wire-actions!
+     gov40
+     (list (sc2-raw-camera-move 120.0 120.0 0.0) frame-cam-40 target-uc-40)
+     105)) ;; dloop = 105 - 99 = 6 loops
+  (define gov-cam-idx (index-where out-40-gov framing-camera-cmd?))
+  (define gov-uc-idx
+    (index-where out-40-gov
+                 (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23)))))
+  (assert-true! (and gov-cam-idx gov-uc-idx (< gov-cam-idx gov-uc-idx))
+                "Governor must keep framing sc2-raw-camera-move at 6-loop cooldown & <10 tokens immediately before target unit command")
+  (assert-true! (not (ormap (lambda (c) (and (sc2-raw-camera-move? c) (not (framing-camera-cmd? c))))
+                            out-40-gov))
+                "Routine Tier 4 camera move must still be dropped at dloop=6 and tokens < 10.0"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

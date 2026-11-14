@@ -4,9 +4,11 @@ use crate::models::UnitCostInfo;
 use s2protocol::game_events::{
     MultiVersionedBalanceUnits, VersionedBalanceUnits, read_balance_data_from_included_assets,
 };
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 pub const GAME_LOOPS_PER_SECOND: f64 = 22.4;
+pub const APM_WINDOW_LOOPS: i64 = 492;
 pub const NORMAL_SECONDS_PER_FASTER_SECOND: f32 = 1.4;
 pub const DEATH_VISIBLE_LOOPS: i64 = 112;
 pub const COMMAND_VISIBLE_LOOPS: i64 = 56;
@@ -243,4 +245,91 @@ pub fn is_structure_unit(balance: &VersionedBalanceUnits, name: &str) -> bool {
 
 pub fn is_morph_death(name: &str, has_killer: bool) -> bool {
     !has_killer && MORPH_SOURCES.contains(&base_unit_name(name))
+}
+
+#[derive(Debug, Default)]
+pub struct BalanceResearchIndex {
+    pub duration_by_name: HashMap<String, f32>,
+    pub canonical_by_lower: HashMap<String, String>,
+    pub by_abil_link: HashMap<u16, (String, f32)>,
+}
+
+pub fn build_research_index(balance: &VersionedBalanceUnits) -> BalanceResearchIndex {
+    let mut idx = BalanceResearchIndex::default();
+    let mut insert = |id: &str, meta_name: &str, time_normal: Option<f32>| {
+        let faster = time_normal.unwrap_or(0.0) / NORMAL_SECONDS_PER_FASTER_SECOND;
+        if faster <= 0.0 || id.is_empty() {
+            return;
+        }
+        idx.duration_by_name.entry(id.to_string()).or_insert(faster);
+        idx.canonical_by_lower
+            .entry(id.to_lowercase())
+            .or_insert_with(|| id.to_string());
+        if !meta_name.is_empty() {
+            idx.duration_by_name
+                .entry(meta_name.to_string())
+                .or_insert(faster);
+            idx.canonical_by_lower
+                .entry(meta_name.to_lowercase())
+                .or_insert_with(|| id.to_string());
+        }
+    };
+
+    for unit in balance.values() {
+        if let Some(researches) = &unit.researches {
+            for r in &researches.inner {
+                let faster = r.cost.time.unwrap_or(0.0) / NORMAL_SECONDS_PER_FASTER_SECOND;
+                insert(&r.id, &r.meta.name, r.cost.time);
+                if faster > 0.0 && r.ability > 0 {
+                    idx.by_abil_link
+                        .entry(r.ability)
+                        .or_insert_with(|| (r.id.clone(), faster));
+                }
+            }
+        }
+        for upg in &unit.upgrades.inner {
+            for lvl in &upg.levels {
+                insert(&lvl.id, &lvl.meta.name, lvl.cost.time);
+            }
+        }
+    }
+    idx
+}
+
+pub fn lookup_upgrade_duration_sec(idx: &BalanceResearchIndex, name: &str) -> f32 {
+    if let Some(&dur) = idx.duration_by_name.get(name) {
+        return dur;
+    }
+    if let Some(canon) = idx.canonical_by_lower.get(&name.to_lowercase())
+        && let Some(&dur) = idx.duration_by_name.get(canon)
+    {
+        return dur;
+    }
+    match name {
+        "WarpGateResearch" => 100.0,
+        "Stimpack" => 100.0,
+        "ShieldWall" => 79.0,
+        "PunisherGrenades" => 43.0,
+        "Zerglingmovementspeed" => 79.0,
+        "Charge" | "BlinkTech" | "PsionicStormTech" | "ExtendedThermalLance" => 100.0,
+        _ if name.ends_with("Level1") => 114.0,
+        _ if name.ends_with("Level2") => 136.0,
+        _ if name.ends_with("Level3") => 157.0,
+        _ => 79.0,
+    }
+}
+
+pub fn extract_train_target_name(ability: &str) -> Option<&str> {
+    let (_, target) = ability.split_once("Train.")?;
+    (!target.is_empty()).then_some(target)
+}
+
+pub fn extract_research_target_name(ability: &str) -> Option<&str> {
+    if let Some((_, target)) = ability.split_once("Research.") {
+        return (!target.is_empty()).then_some(target);
+    }
+    if let Some((_, target)) = ability.split_once("Upgrade.") {
+        return (!target.is_empty()).then_some(target);
+    }
+    None
 }

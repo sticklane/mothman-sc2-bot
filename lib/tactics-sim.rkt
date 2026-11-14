@@ -23,13 +23,6 @@
  wall-solution-max-gap-ref
  wall-solution-placements-ref
 
- ;; FRACTRAN Bitmask VM
- TACTICAL-FRACTRAN-PROGRAM
- make-fractran-vm
- fractran-step
- fractran-run
- fractran-bitmask-step
-
  ;; FAP (Fast Approximated Pathfinder / Combat Evaluator) + Hysteresis
  (struct-out fap-unit)
  make-fap-unit
@@ -1826,61 +1819,6 @@
 
 (define (wall-solution-placements-ref sol)
   (if (hash? sol) (hash-ref sol 'placements '()) (wall-solution-placements sol)))
-
-;; =============================================================================
-;; 2. FRACTRAN Bitmask VM (Zero-Allocation Tactical Rule Evaluator)
-;; =============================================================================
-
-;; Fractions (num . den) over prime registers OR bitmask rules (req-mask clear-mask set-mask)
-(define TACTICAL-FRACTRAN-PROGRAM
-  (list
-   ;; (numerator . denominator)
-   (cons 17 91)
-   (cons 78 85)
-   (cons 19 51)
-   (cons 23 38)
-   (cons 29 33)
-   (cons 77 29)
-   (cons 95 23)
-   (cons 77 19)
-   (cons 1 17)
-   (cons 11 13)
-   (cons 13 11)
-   (cons 15 2)
-   (cons 1 7)
-   (cons 55 1)))
-
-(define (make-fractran-vm [rules TACTICAL-FRACTRAN-PROGRAM])
-  rules)
-
-(define (fractran-step state [rules TACTICAL-FRACTRAN-PROGRAM])
-  (let loop ([rs rules])
-    (match rs
-      ['() #f]
-      [(cons (cons num den) rest)
-       (define prod (* state num))
-       (if (zero? (remainder prod den))
-           (quotient prod den)
-           (loop rest))])))
-
-(define (fractran-run initial-state [max-steps 32] [rules TACTICAL-FRACTRAN-PROGRAM])
-  (let loop ([cur initial-state] [step 0] [trace (list initial-state)])
-    (if (>= step max-steps)
-        (reverse trace)
-        (let ([next (fractran-step cur rules)])
-          (if next
-              (loop next (add1 step) (cons next trace))
-              (reverse trace))))))
-
-;; Bitmask fast-path: rule = (list required-bits clear-bits set-bits)
-(define (fractran-bitmask-step bitmask rules)
-  (let loop ([rs rules])
-    (match rs
-      ['() bitmask]
-      [(cons (list req clr set-b) rest)
-       (if (= (bitwise-and bitmask req) req)
-           (bitwise-ior (bitwise-and bitmask (bitwise-not clr)) set-b)
-           (loop rest))])))
 
 ;; =============================================================================
 ;; 3. FAP (Fast Approximated Pathfinder / Combat Evaluator) + Hysteresis

@@ -6241,39 +6241,104 @@
                        (map (lambda (e)
                               (dist2d door-x door-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)))
                             enemy-units))))
-          (define builder-transiting-door?
+          (define townhall-pts
+            (if (null? nexuses)
+                (list (cons base-x base-y))
+                (map (lambda (b)
+                       (cons (hash-ref b 'x base-x) (hash-ref b 'y base-y)))
+                     nexuses)))
+          (define (dist-to-nearest-th wx wy)
+            (apply min
+                   (map (lambda (pt) (dist2d wx wy (car pt) (cdr pt)))
+                        townhall-pts)))
+          (define active-scout-id (hash-ref (rt-scout-state rt) 'scout-id #f))
+          (define (worker-scout-leased? wid)
+            (let ([l (and (hash? leases) (hash-ref leases wid #f))])
+              (and (unit-role-lease? l)
+                   (> (unit-role-lease-expires-frame l) frame)
+                   (eq? (unit-role-lease-role l) 'scout))))
+          (define worker-transiting-door?
             (ormap (lambda (w)
                      (define wid (hash-ref w 'id 0))
-                     (and (or (order-ledger-unit-has-active-build? oledger wid w)
-                              (worker-has-engine-build-order? w))
-                          (<= (dist2d door-x door-y (hash-ref w 'x base-x) (hash-ref w 'y base-y)) 3.2)))
+                     (define wx (hash-ref w 'x base-x))
+                     (define wy (hash-ref w 'y base-y))
+                     (define dw (dist2d door-x door-y wx wy))
+                     (define oc (hash-ref w 'order-count 0))
+                     (define oab (hash-ref w 'order-ability-id 0))
+                     (and (<= dw 4.0)
+                          (or (eq? (hash-ref w 'has-build-order? #f) #t)
+                              (order-ledger-unit-has-active-build? oledger wid w)
+                              (worker-has-engine-build-order? w)
+                              (and active-scout-id (equal? wid active-scout-id))
+                              (worker-scout-leased? wid)
+                              (and (= oc 0) (<= dw 2.8))
+                              (and (> oc 0)
+                                   (not (= oab 18))
+                                   (<= dw 3.5)
+                                   (> (dist-to-nearest-th wx wy) 4.5)))))
                    workers))
-          (define moving-army-near-door
+          (define base-door-dx (- base-x door-x))
+          (define base-door-dy (- base-y door-y))
+          (define out-norm (max 1.0 (dist2d base-x base-y door-x door-y)))
+          (define out-ux (/ (- door-x base-x) out-norm))
+          (define out-uy (/ (- door-y base-y) out-norm))
+          (define trapped-idle-army-units
+            (filter (lambda (u)
+                      (define uid (hash-ref u 'id 0))
+                      (define ux (hash-ref u 'x base-x))
+                      (define uy (hash-ref u 'y base-y))
+                      (define on-main-side?
+                        (>= (+ (* (- ux door-x) base-door-dx)
+                               (* (- uy door-y) base-door-dy))
+                            0.0))
+                      (and (not (equal? uid gid))
+                           (combat-unit-record? u)
+                           (not (or (eq? (hash-ref u 'is-flying #f) #t)
+                                    (eq? (hash-ref u 'flying? #f) #t)))
+                           (= (hash-ref u 'order-count 0) 0)
+                           (<= (dist2d door-x door-y ux uy) 3.2)
+                           on-main-side?))
+                    ally-units))
+          (define transiting-army-near-door
             (count (lambda (u)
                      (define uid (hash-ref u 'id 0))
+                     (define ux (hash-ref u 'x base-x))
+                     (define uy (hash-ref u 'y base-y))
+                     (define on-main-side?
+                       (>= (+ (* (- ux door-x) base-door-dx)
+                              (* (- uy door-y) base-door-dy))
+                           0.0))
                      (and (not (equal? uid gid))
                           (combat-unit-record? u)
                           (not (or (eq? (hash-ref u 'is-flying #f) #t)
                                    (eq? (hash-ref u 'flying? #f) #t)))
-                          (> (hash-ref u 'order-count 0) 0)
-                          (not (= (hash-ref u 'order-ability-id 0) 18))
-                          (<= (dist2d door-x door-y (hash-ref u 'x base-x) (hash-ref u 'y base-y)) 3.2)))
+                          (<= (dist2d door-x door-y ux uy) 4.0)
+                          (or (and (> (hash-ref u 'order-count 0) 0)
+                                   (not (= (hash-ref u 'order-ability-id 0) 18)))
+                              (and (= (hash-ref u 'order-count 0) 0)
+                                   (<= (dist2d door-x door-y ux uy) 3.2)
+                                   on-main-side?))))
                    ally-units))
-          (define transit-needed? (or builder-transiting-door? (>= moving-army-near-door 3)))
-          (define cur-open-until (hash-ref door-st 'open-until-frame 0))
+          (define transit-needed?
+            (and (or worker-transiting-door? (>= transiting-army-near-door 1))
+                 (> nearest-enemy-to-door 6.5)))
           (cond
-            [(and (> nearest-enemy-to-door 10.5) transit-needed?)
+            [transit-needed?
+             (hash-set! door-st 'state 'open)
              (hash-set! door-st 'open-until-frame (+ frame 24))
              (when (or (> (dist2d gx gy park-x park-y) 1.0)
                        (= (hash-ref chosen-guard 'order-ability-id 0) 18))
                (emit! (list 'move gid park-x park-y))
-               (order-ledger-record-issued! oledger gid 'move 'door-park park-x park-y frame))]
-            [(and (< frame cur-open-until)
-                  (> nearest-enemy-to-door 9.5)
-                  transit-needed?)
-             (void)]
+               (order-ledger-record-issued! oledger gid 'move 'door-park park-x park-y frame))
+             (define nudge-x (safe-coord (+ door-x (* 4.5 out-ux)) nat-x))
+             (define nudge-y (safe-coord (+ door-y (* 4.5 out-uy)) nat-y))
+             (for ([tu (in-list trapped-idle-army-units)])
+               (define tid (hash-ref tu 'id 0))
+               (emit! (list 'move tid nudge-x nudge-y))
+               (order-ledger-record-issued! oledger tid 'move 'door-unstick nudge-x nudge-y frame))]
             [else
              (hash-set! door-st 'open-until-frame 0)
+             (hash-set! door-st 'state 'closed)
              (when (or (> (dist2d gx gy door-x door-y) 0.85)
                        (not (= (hash-ref chosen-guard 'order-ability-id 0) 18)))
                (emit! (list 'hold-position gid door-x door-y))
@@ -8284,7 +8349,95 @@
                     (< total-workers 14)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
        (try-train-unit! 'scv 'townhall 4
-                        #:respect-bo-reserve? (and live-game? (>= total-workers 24))))]
+                        #:respect-bo-reserve? (and live-game? (>= total-workers 24))))
+
+     ;; Terran Supply Depot Front-Door State Tracking & Unstick Transit Pathing
+     (define depot-bldgs
+       (filter (lambda (b)
+                 (memq (unit-type-sym b) '(supply-depot supply-depot-lowered)))
+               ally-bldgs))
+     (when (not (null? depot-bldgs))
+       (define door-st (rt-door-state rt))
+       (define stuck-tbl (hash-ref! door-st 'terran-stuck-counts (lambda () (make-hasheqv))))
+       (define wall-dep1 (and (hash? terran-ramp-wall) (hash-ref terran-ramp-wall 'depot-1 #f)))
+       (define wall-dep2 (and (hash? terran-ramp-wall) (hash-ref terran-ramp-wall 'depot-2 #f)))
+       (define (wall-depot? d)
+         (define dx (hash-ref d 'x base-x))
+         (define dy (hash-ref d 'y base-y))
+         (or (and (pair? wall-dep1) (<= (dist2d dx dy (car wall-dep1) (cdr wall-dep1)) 6.0))
+             (and (pair? wall-dep2) (<= (dist2d dx dy (car wall-dep2) (cdr wall-dep2)) 6.0))
+             (not (or (pair? wall-dep1) (pair? wall-dep2)))))
+       (define front-depots
+         (let ([wd (filter wall-depot? depot-bldgs)])
+           (if (null? wd) depot-bldgs wd)))
+       (define raised-depots
+         (filter (lambda (d) (eq? (unit-type-sym d) 'supply-depot)) front-depots))
+       (define lowered-depots
+         (filter (lambda (d) (eq? (unit-type-sym d) 'supply-depot-lowered)) front-depots))
+       (define ground-allies
+         (filter (lambda (u)
+                   (and (exact-integer? (hash-ref u 'id #f))
+                        (> (hash-ref u 'id 0) 0)
+                        (not (or (eq? (hash-ref u 'is-flying #f) #t)
+                                 (eq? (hash-ref u 'flying? #f) #t)))))
+                 ally-units))
+       (define transiting-tags
+         (remove-duplicates
+          (for/list ([u (in-list ground-allies)]
+                     #:when (let ([ux (hash-ref u 'x base-x)]
+                                  [uy (hash-ref u 'y base-y)])
+                              (ormap (lambda (d)
+                                       (<= (dist2d ux uy (hash-ref d 'x base-x) (hash-ref d 'y base-y)) 4.2))
+                                     front-depots)))
+            (hash-ref u 'id))))
+       (define active-stuck-tags (mutable-seteqv))
+       (for ([u (in-list ground-allies)])
+         (define uid (hash-ref u 'id))
+         (define ux (hash-ref u 'x base-x))
+         (define uy (hash-ref u 'y base-y))
+         (define near-raised
+           (for/first ([d (in-list raised-depots)]
+                       #:when (<= (dist2d ux uy (hash-ref d 'x base-x) (hash-ref d 'y base-y)) 3.5))
+             d))
+         (when (and near-raised
+                    (not (= (hash-ref u 'order-ability-id 0) 18)))
+           (define dx (hash-ref near-raised 'x base-x))
+           (define dy (hash-ref near-raised 'y base-y))
+           (define enemy-ground-near?
+             (ormap (lambda (e)
+                      (and (not (or (eq? (hash-ref e 'is-flying #f) #t)
+                                    (eq? (hash-ref e 'flying? #f) #t)))
+                           (<= (dist2d dx dy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 5.5)))
+                    enemy-units))
+           (unless enemy-ground-near?
+             (set-add! active-stuck-tags uid)
+             (define cnt (add1 (hash-ref stuck-tbl uid 0)))
+             (hash-set! stuck-tbl uid cnt)
+             (when (>= cnt 2)
+               (define on-base-side? (<= (dist2d ux uy base-x base-y) (dist2d dx dy base-x base-y)))
+               (define-values (tx ty)
+                 (if on-base-side?
+                     (let* ([vx (- nat-x dx)]
+                            [vy (- nat-y dy)]
+                            [vn (max 1.0 (sqrt (+ (* vx vx) (* vy vy))))])
+                       (values (safe-coord (+ dx (* 4.5 (/ vx vn))) nat-x)
+                               (safe-coord (+ dy (* 4.5 (/ vy vn))) nat-y)))
+                     (let* ([vx (- base-x dx)]
+                            [vy (- base-y dy)]
+                            [vn (max 1.0 (sqrt (+ (* vx vx) (* vy vy))))])
+                       (values (safe-coord (+ dx (* 4.5 (/ vx vn))) base-x)
+                               (safe-coord (+ dy (* 4.5 (/ vy vn))) base-y)))))
+               (emit! (list 'move uid tx ty))
+               (order-ledger-record-issued! oledger uid 'move 'depot-unstick tx ty frame)))))
+       (for ([k (in-list (hash-keys stuck-tbl))])
+         (unless (set-member? active-stuck-tags k)
+           (hash-remove! stuck-tbl k)))
+       (hash-set! door-st 'transiting-tags transiting-tags)
+       (hash-set! door-st 'state
+                  (cond
+                    [(and (not (null? lowered-depots)) (null? raised-depots)) 'open]
+                    [(and (not (null? lowered-depots)) (= (set-count active-stuck-tags) 0)) 'open]
+                    [else 'closed])))]
 
     [else (void)])
 
@@ -10305,10 +10458,77 @@
   (define-values (unthrottled-actions spell-throttled)
     (throttle-ability-casts! limiter raw-actions frame))
 
-  ;; 2. Check if camera needs to saccade to combat/target focal point
+  ;; 2. Selection & Control-Group Compiler + Per-Action Camera Framing for Un-Grouped Units
+  (define base-x (hash-ref obs 'base-x 32.5))
+  (define base-y (hash-ref obs 'base-y 32.5))
+  (define ally-units (hash-ref obs 'ally-units '()))
+  (define ally-bldgs (hash-ref obs 'ally-buildings '()))
+  (define all-cgroup-member-ids
+    (for/fold ([acc (seteqv)]) ([g (in-range 1 7)])
+      (for/fold ([s acc]) ([uid (in-list (cortex-get-control-group cortex g))])
+        (if (exact-integer? uid) (set-add s uid) s))))
+  (define unit-pos-by-id
+    (for/hasheqv ([r (in-list (append ally-units ally-bldgs))]
+                  #:when (and (hash? r)
+                              (exact-integer? (hash-ref r 'id #f))
+                              (real? (hash-ref r 'x #f))
+                              (real? (hash-ref r 'y #f))))
+      (values (hash-ref r 'id)
+              (cons (exact->inexact (hash-ref r 'x))
+                    (exact->inexact (hash-ref r 'y))))))
+
+  (define selection-compiled-actions
+    (if (or (hash-has-key? raw-obs 'mineral-harvesters)
+            (hash-ref raw-obs 'compile-human-selections? #f))
+        (cortex-collapse-and-compile-selections!
+         cortex
+         unthrottled-actions
+         ally-units
+         ally-bldgs)
+        unthrottled-actions))
+
+  (define cam-moved? #f)
+  (define framed-actions
+    (let loop ([rem selection-compiled-actions]
+               [cx (human-cortex-cam-x cortex)]
+               [cy (human-cortex-cam-y cortex)]
+               [acc '()])
+      (cond
+        [(null? rem) (reverse acc)]
+        [else
+         (define act (car rem))
+         (define-values (next-cx next-cy new-acc)
+           (match act
+             [(list 'move-camera (? real? mx) (? real? my))
+              (set! cam-moved? #t)
+              (cortex-move-camera! cortex (exact->inexact mx) (exact->inexact my))
+              (values (exact->inexact mx) (exact->inexact my) (cons act acc))]
+             [(list 'camera-focus _ (? real? mx) (? real? my))
+              (set! cam-moved? #t)
+              (cortex-move-camera! cortex (exact->inexact mx) (exact->inexact my))
+              (values (exact->inexact mx) (exact->inexact my) (cons act acc))]
+             [(list 'camera-focus (? real? mx) (? real? my))
+              (set! cam-moved? #t)
+              (cortex-move-camera! cortex (exact->inexact mx) (exact->inexact my))
+              (values (exact->inexact mx) (exact->inexact my) (cons act acc))]
+             [_
+              (define focus
+                (action-requires-camera-focus act all-cgroup-member-ids unit-pos-by-id base-x base-y))
+              (if (and (pair? focus)
+                       (not (in-camera-viewport? cx cy (car focus) (cdr focus))))
+                  (let ([fx (safe-coord (car focus) cx)]
+                        [fy (safe-coord (cdr focus) cy)])
+                    (set! cam-moved? #t)
+                    (cortex-move-camera! cortex fx fy)
+                    (values fx fy (cons act (cons (list 'move-camera fx fy) acc))))
+                  (values cx cy (cons act acc)))]))
+         (loop (cdr rem) next-cx next-cy new-acc)])))
+
+  ;; Fallback enemy focal check only when no per-action camera framing occurred
   (define enemy-units (hash-ref obs 'enemy-units '()))
   (define cam-actions
     (cond
+      [cam-moved? '()]
       [(and (not (null? enemy-units))
             (not (in-camera-viewport? (human-cortex-cam-x cortex)
                                       (human-cortex-cam-y cortex)
@@ -10324,22 +10544,7 @@
                             (human-cortex-cam-y cortex))
        '()]))
 
-  ;; 3. Optimal Human Selection & Control-Group Compiler:
-  ;;    Coalesce per-unit commands into multi-tag squad orders and compile raw desired
-  ;;    unit selections into minimal-APM combinations of `control-group-recall`,
-  ;;    on-screen `select-box`, `select-ctrl-type`, `deselect-ctrl-type`, and on-the-fly
-  ;;    control-group updates.
-  (define selection-compiled-actions
-    (if (or (hash-has-key? raw-obs 'mineral-harvesters)
-            (hash-ref raw-obs 'compile-human-selections? #f))
-        (cortex-collapse-and-compile-selections!
-         cortex
-         unthrottled-actions
-         (hash-ref obs 'ally-units '())
-         (hash-ref obs 'ally-buildings '()))
-        unthrottled-actions))
-
-  (define combined (append cam-actions selection-compiled-actions))
+  (define combined (append cam-actions framed-actions))
   (define-values (accepted dropped)
     (cortex-filter-actions! cortex combined))
   (values accepted dropped spell-throttled))

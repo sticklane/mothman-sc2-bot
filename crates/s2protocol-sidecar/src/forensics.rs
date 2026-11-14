@@ -13,18 +13,46 @@ use s2protocol::game_events::{
 };
 use s2protocol::state::SC2UnitCmdData;
 use s2protocol::tracker_events::{
-    ReplayTrackerEvent, UnitBornEvent, UnitDiedEvent, UnitInitEvent, UnitTypeChangeEvent,
+    ReplayTrackerEvent, UnitBornEvent, UnitDiedEvent, UnitDoneEvent, UnitInitEvent,
+    UnitTypeChangeEvent, UpgradeEvent,
 };
 use s2protocol::{SC2EventIterator, SC2EventType, SC2ReplayState, SC2Unit, UnitChangeHint};
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+
+struct ActiveProdSpan {
+    pid: u8,
+    kind: &'static str,
+    name: String,
+    start_sec: f32,
+    full_sec: f32,
+    x: f32,
+    y: f32,
+}
+
+struct PendingCmdSpan {
+    pid: u8,
+    name: String,
+    start_sec: f32,
+    dur_sec: f32,
+    xy: Option<[f32; 2]>,
+}
 
 struct ReplayAnalysisCtx<'a> {
     protocol_version: u32,
     patch_balance: &'a VersionedBalanceUnits,
+    research_index: BalanceResearchIndex,
     players: HashMap<u8, PerPlayerAcc>,
     user_id_to_pid: HashMap<i64, u8>,
     static_objects: Vec<StaticMapObject>,
     static_tags: BTreeSet<u32>,
+    born_counted_tags: HashSet<u32>,
+    init_creators: HashMap<u32, (u32, String)>,
+    active_inits: HashMap<u32, ActiveProdSpan>,
+    active_morphs: HashMap<u32, ActiveProdSpan>,
+    pending_research_cmds: HashMap<u32, PendingCmdSpan>,
+    pending_train_cmds: HashMap<u32, PendingCmdSpan>,
+    upgrade_events: Vec<UpgradeEventRecord>,
+    production_spans: Vec<ProductionSpan>,
     scored_tags: HashMap<u32, String>,
     active_rays: VecDeque<(i64, MinimapRay)>,
     recent_deaths: VecDeque<(i64, MinimapDeath)>,
@@ -107,10 +135,37 @@ fn find_priority_idx(priority_snapshots: &[PriorityLogSnapshot], gl: i64) -> Opt
     }
 }
 
+fn compute_player_apm(p: &mut PerPlayerAcc, gl: i64) -> [u16; 3] {
+    while p
+        .recent_cmd_loops
+        .front()
+        .is_some_and(|&t| t + APM_WINDOW_LOOPS < gl)
+    {
+        p.recent_cmd_loops.pop_front();
+    }
+    if gl < 22 {
+        return [0, 0, 0];
+    }
+    let cur_window_sec = (gl.clamp(112, APM_WINDOW_LOOPS) as f64) / GAME_LOOPS_PER_SECOND;
+    let cur_apm = ((p.recent_cmd_loops.len() as f64 * 60.0 / cur_window_sec).round() as u32)
+        .min(u16::MAX as u32) as u16;
+    let elapsed_min = (gl as f64 / GAME_LOOPS_PER_SECOND) / 60.0;
+    let (avg_apm, avg_epm) = if elapsed_min <= 0.001 {
+        (0, 0)
+    } else {
+        (
+            ((p.raw_commands as f64 / elapsed_min).round() as u32).min(u16::MAX as u32) as u16,
+            ((p.macro_filtered_commands as f64 / elapsed_min).round() as u32)
+                .min(u16::MAX as u32) as u16,
+        )
+    };
+    [cur_apm, avg_apm, avg_epm]
+}
+
 fn snapshot_frame(
     gl: i64,
     state: &SC2ReplayState,
-    ctx: &ReplayAnalysisCtx<'_>,
+    ctx: &mut ReplayAnalysisCtx<'_>,
     priority_snapshots: &[PriorityLogSnapshot],
 ) -> MinimapFrame {
     let mut units = Vec::new();
@@ -153,6 +208,19 @@ fn snapshot_frame(
         } else {
             1
         };
+        let display_name = if matches!(
+            u.name.as_str(),
+            "SupplyDepot"
+                | "SupplyDepotLowered"
+                | "SiegeTankSieged"
+                | "WidowMineBurrowed"
+                | "LurkerMPBurrowed"
+                | "LiberatorAG"
+        ) {
+            u.name.as_str()
+        } else {
+            base
+        };
         units.push(MinimapUnit {
             x,
             y,
@@ -160,7 +228,7 @@ fn snapshot_frame(
             kind,
             r: round1(u.radius.clamp(0.4, 2.8)),
             init: u.is_init,
-            name: base.to_string(),
+            name: display_name.to_string(),
         });
     }
 
@@ -168,8 +236,30 @@ fn snapshot_frame(
     let deaths = ctx.recent_deaths.iter().map(|(_, d)| d.clone()).collect();
     let p1 = ctx.players.get(&1);
     let p2 = ctx.players.get(&2);
-    let cam1 = p1.map(|p| p.camera_xy).unwrap_or([0.0, 0.0]);
-    let cam2 = p2.map(|p| p.camera_xy).unwrap_or([0.0, 0.0]);
+    let cam_or_start = |p: Option<&PerPlayerAcc>| -> [f32; 2] {
+        p.map(|acc| {
+            if acc.camera_moves == 0 && acc.camera_xy == [0.0, 0.0] {
+                acc.start_xy.unwrap_or([0.0, 0.0])
+            } else {
+                acc.camera_xy
+            }
+        })
+        .unwrap_or([0.0, 0.0])
+    };
+    let cam1 = cam_or_start(p1);
+    let cam2 = cam_or_start(p2);
+    let p1_stats = p1.map(|p| p.last_stats.clone()).unwrap_or_default();
+    let p2_stats = p2.map(|p| p.last_stats.clone()).unwrap_or_default();
+    let apm1 = ctx
+        .players
+        .get_mut(&1)
+        .map(|p| compute_player_apm(p, gl))
+        .unwrap_or([0; 3]);
+    let apm2 = ctx
+        .players
+        .get_mut(&2)
+        .map(|p| compute_player_apm(p, gl))
+        .unwrap_or([0; 3]);
     MinimapFrame {
         game_loop: gl,
         sec: round1(gl as f32 / GAME_LOOPS_PER_SECOND as f32),
@@ -179,8 +269,9 @@ fn snapshot_frame(
         cameras: [cam1, cam2],
         creep,
         pylons,
-        p1_stats: p1.map(|p| p.last_stats.clone()).unwrap_or_default(),
-        p2_stats: p2.map(|p| p.last_stats.clone()).unwrap_or_default(),
+        p1_stats,
+        p2_stats,
+        apm: [apm1, apm2],
         priority_idx: find_priority_idx(priority_snapshots, gl),
     }
 }
@@ -328,7 +419,9 @@ fn handle_unit_born(
             p.actual_race = r.to_string();
             if EXPANSION_TOWNHALLS.contains(&ub.unit_type_name.as_str()) {
                 p.start_xy = Some([round1(x), round1(y)]);
-                p.camera_xy = [round1(x), round1(y)];
+                if p.camera_moves == 0 {
+                    p.camera_xy = [round1(x), round1(y)];
+                }
             }
         }
         return;
@@ -344,9 +437,42 @@ fn handle_unit_born(
         return;
     }
 
+    ctx.born_counted_tags.insert(ub.unit_tag_index);
+    let is_struct = is_structure_unit(ctx.patch_balance, &base);
+    if !is_struct {
+        let btime = lookup_unit_cost(ctx.patch_balance, &base)
+            .time_faster_sec
+            .max(2.0);
+        let mut start_sec = (sec_f - btime).max(0.0);
+        let mut approx = true;
+        if let UnitChangeHint::Registered {
+            creator: Some(creator),
+            ..
+        } = change_hint
+            && let Some(pcmd) = ctx.pending_train_cmds.get(&creator.tag_index)
+            && base_unit_name(&pcmd.name) == base
+            && sec_f >= pcmd.start_sec
+            && (sec_f - pcmd.start_sec) <= btime * 1.35
+        {
+            start_sec = pcmd.start_sec;
+            approx = false;
+            ctx.pending_train_cmds.remove(&creator.tag_index);
+        }
+        ctx.production_spans.push(ProductionSpan {
+            owner: pid,
+            kind: "unit".to_string(),
+            name: base.clone(),
+            start_sec: round1(start_sec),
+            end_sec: round1(sec_f),
+            full_sec: round1((sec_f - start_sec).max(btime).max(1.0)),
+            approx,
+            x: Some(round1(x)),
+            y: Some(round1(y)),
+        });
+    }
     if let Some(p) = ctx.players.get_mut(&pid) {
         *p.produced.entry(base.clone()).or_default() += 1;
-        if is_structure_unit(ctx.patch_balance, &base) {
+        if is_struct {
             *p.unit_dones.entry(base.clone()).or_default() += 1;
         }
         if let UnitChangeHint::Registered {
@@ -354,28 +480,49 @@ fn handle_unit_born(
             ..
         } = change_hint
         {
-            let cbase = base_unit_name(&creator.name).to_string();
-            if PRODUCTION_STRUCTURES.contains(&cbase.as_str()) {
-                let btime = lookup_unit_cost(ctx.patch_balance, &base).time_faster_sec as u32;
-                let started = sec_u.saturating_sub(btime);
-                let prev = p
-                    .prod_last_finish
-                    .insert(creator.tag_index, (cbase.clone(), sec_u));
-                let entry = p.prod_idle.entry(cbase).or_default();
-                match prev {
-                    Some((_, fin)) => {
-                        entry.1 +=
-                            idle_gap_excluding_supply_full(fin, started, &p.supply_full_intervals);
-                    }
-                    None => entry.0 += 1,
-                }
-            }
+            record_prod_idle(
+                p,
+                ctx.patch_balance,
+                &base,
+                creator.tag_index,
+                &creator.name,
+                sec_u,
+            );
         }
     }
     evaluate_and_record_unit_choice(ctx, sc2_state, ub.unit_tag_index, pid, &base, sec_f);
 }
 
-fn handle_unit_init(ctx: &mut ReplayAnalysisCtx<'_>, sec_f: f32, sec_u: u32, ui: &UnitInitEvent) {
+fn record_prod_idle(
+    p: &mut PerPlayerAcc,
+    patch_balance: &VersionedBalanceUnits,
+    base: &str,
+    creator_tag: u32,
+    creator_name: &str,
+    sec_u: u32,
+) {
+    let cbase = base_unit_name(creator_name).to_string();
+    if PRODUCTION_STRUCTURES.contains(&cbase.as_str()) {
+        let btime = lookup_unit_cost(patch_balance, base).time_faster_sec as u32;
+        let started = sec_u.saturating_sub(btime);
+        let prev = p.prod_last_finish.insert(creator_tag, (cbase.clone(), sec_u));
+        let entry = p.prod_idle.entry(cbase).or_default();
+        match prev {
+            Some((_, fin)) => {
+                entry.1 += idle_gap_excluding_supply_full(fin, started, &p.supply_full_intervals);
+            }
+            None => entry.0 += 1,
+        }
+    }
+}
+
+fn handle_unit_init(
+    ctx: &mut ReplayAnalysisCtx<'_>,
+    sec_f: f32,
+    sec_u: u32,
+    ui: &UnitInitEvent,
+    change_hint: &UnitChangeHint,
+) {
     if ui.control_player_id != 1 && ui.control_player_id != 2 {
         return;
     }
@@ -383,6 +530,36 @@ fn handle_unit_init(ctx: &mut ReplayAnalysisCtx<'_>, sec_f: f32, sec_u: u32, ui:
     let base = base_unit_name(&ui.unit_type_name).to_string();
     let x = ui.x as f32;
     let y = ui.y as f32;
+    let is_struct = is_structure_unit(ctx.patch_balance, &base);
+    let mut from_warpgate = false;
+    if let UnitChangeHint::Registered {
+        creator: Some(creator),
+        ..
+    } = change_hint
+    {
+        from_warpgate = creator.name == "WarpGate";
+        ctx.init_creators
+            .insert(ui.unit_tag_index, (creator.tag_index, creator.name.clone()));
+    }
+    let expected_sec = if from_warpgate {
+        3.6
+    } else {
+        lookup_unit_cost(ctx.patch_balance, &base)
+            .time_faster_sec
+            .max(2.0)
+    };
+    ctx.active_inits.insert(
+        ui.unit_tag_index,
+        ActiveProdSpan {
+            pid,
+            kind: if is_struct { "building" } else { "unit" },
+            name: base.clone(),
+            start_sec: sec_f,
+            full_sec: expected_sec,
+            x: round1(x),
+            y: round1(y),
+        },
+    );
     let Some(p) = ctx.players.get_mut(&pid) else {
         return;
     };
@@ -413,6 +590,64 @@ fn handle_unit_init(ctx: &mut ReplayAnalysisCtx<'_>, sec_f: f32, sec_u: u32, ui:
     }
 }
 
+fn handle_unit_done(
+    ctx: &mut ReplayAnalysisCtx<'_>,
+    sec_f: f32,
+    sec_u: u32,
+    ud: &UnitDoneEvent,
+    change_hint: &UnitChangeHint,
+    sc2_state: &SC2ReplayState,
+) {
+    let init_creator = ctx.init_creators.remove(&ud.unit_tag_index);
+    if let Some(act) = ctx.active_inits.remove(&ud.unit_tag_index) {
+        let end_sec = round1(sec_f.max(act.start_sec + 0.2));
+        ctx.production_spans.push(ProductionSpan {
+            owner: act.pid,
+            kind: act.kind.to_string(),
+            name: act.name,
+            start_sec: round1(act.start_sec),
+            end_sec,
+            full_sec: round1((sec_f - act.start_sec).max(0.5)),
+            approx: false,
+            x: Some(act.x),
+            y: Some(act.y),
+        });
+    }
+    let Some(u) = sc2_state.units.get(&ud.unit_tag_index) else {
+        return;
+    };
+    let Some(pid) = u.user_id.filter(|&p| p == 1 || p == 2) else {
+        return;
+    };
+    let base = base_unit_name(&u.name).to_string();
+    let newly_counted = ctx.born_counted_tags.insert(ud.unit_tag_index);
+    let creator_info = init_creator.or_else(|| {
+        if let UnitChangeHint::Registered {
+            creator: Some(creator),
+            ..
+        } = change_hint
+        {
+            Some((creator.tag_index, creator.name.clone()))
+        } else {
+            None
+        }
+    });
+    let has_cost = has_resource_cost(ctx.patch_balance, &base);
+    let is_struct = is_structure_unit(ctx.patch_balance, &base);
+    if let Some(p) = ctx.players.get_mut(&pid) {
+        *p.unit_dones.entry(base.clone()).or_default() += 1;
+        if newly_counted && has_cost {
+            *p.produced.entry(base.clone()).or_default() += 1;
+            if !is_struct && let Some((ctag, cname)) = creator_info {
+                record_prod_idle(p, ctx.patch_balance, &base, ctag, &cname, sec_u);
+            }
+        }
+    }
+    if newly_counted && has_cost && !is_struct {
+        evaluate_and_record_unit_choice(ctx, sc2_state, ud.unit_tag_index, pid, &base, sec_f);
+    }
+}
+
 fn handle_unit_type_change(
     ctx: &mut ReplayAnalysisCtx<'_>,
     sec_f: f32,
@@ -435,6 +670,32 @@ fn handle_unit_type_change(
         return;
     }
     let mname = utc.unit_type_name.as_str();
+    let cocoon_target = match mname {
+        "BanelingCocoon" => Some("Baneling"),
+        "RavagerCocoon" => Some("Ravager"),
+        "LurkerMPEgg" => Some("LurkerMP"),
+        "BroodLordCocoon" => Some("BroodLord"),
+        "OverlordCocoon" => Some("Overseer"),
+        _ => None,
+    };
+    if let Some(target_name) = cocoon_target {
+        let dur = lookup_unit_cost(ctx.patch_balance, target_name)
+            .time_faster_sec
+            .max(2.0);
+        ctx.active_morphs.insert(
+            utc.unit_tag_index,
+            ActiveProdSpan {
+                pid,
+                kind: "unit",
+                name: target_name.to_string(),
+                start_sec: sec_f,
+                full_sec: dur,
+                x: round1(u.pos.x()),
+                y: round1(u.pos.y()),
+            },
+        );
+        return;
+    }
     let is_morphed_tech_struct = matches!(
         mname,
         "Lair" | "Hive" | "GreaterSpire" | "OrbitalCommand" | "PlanetaryFortress"
@@ -444,6 +705,20 @@ fn handle_unit_type_change(
         "Baneling" | "Ravager" | "LurkerMP" | "BroodLord" | "Overseer"
     );
     if is_morphed_tech_struct {
+        let btime = lookup_unit_cost(ctx.patch_balance, mname)
+            .time_faster_sec
+            .max(15.0);
+        ctx.production_spans.push(ProductionSpan {
+            owner: pid,
+            kind: "building".to_string(),
+            name: mname.to_string(),
+            start_sec: round1((sec_f - btime).max(0.0)),
+            end_sec: round1(sec_f),
+            full_sec: round1(btime),
+            approx: true,
+            x: Some(round1(u.pos.x())),
+            y: Some(round1(u.pos.y())),
+        });
         if let Some(p) = ctx.players.get_mut(&pid) {
             let entry = p.unit_inits.entry(mname.to_string()).or_default();
             entry.0 += 1;
@@ -458,6 +733,19 @@ fn handle_unit_type_change(
         }
     } else if is_morphed_unit {
         let base = base_unit_name(mname).to_string();
+        if let Some(act) = ctx.active_morphs.remove(&utc.unit_tag_index) {
+            ctx.production_spans.push(ProductionSpan {
+                owner: pid,
+                kind: "unit".to_string(),
+                name: base.clone(),
+                start_sec: round1(act.start_sec),
+                end_sec: round1(sec_f.max(act.start_sec + 0.5)),
+                full_sec: round1((sec_f - act.start_sec).max(0.5)),
+                approx: false,
+                x: Some(round1(u.pos.x())),
+                y: Some(round1(u.pos.y())),
+            });
+        }
         if let Some(p) = ctx.players.get_mut(&pid) {
             *p.produced.entry(base.clone()).or_default() += 1;
         }
@@ -473,6 +761,45 @@ fn handle_unit_died(
     ud: &UnitDiedEvent,
     change_hint: &UnitChangeHint,
 ) {
+    for act in [
+        ctx.active_inits.remove(&ud.unit_tag_index),
+        ctx.active_morphs.remove(&ud.unit_tag_index),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if sec_f > act.start_sec {
+            ctx.production_spans.push(ProductionSpan {
+                owner: act.pid,
+                kind: act.kind.to_string(),
+                name: act.name,
+                start_sec: round1(act.start_sec),
+                end_sec: round1(sec_f),
+                full_sec: round1(act.full_sec.max(sec_f - act.start_sec)),
+                approx: false,
+                x: Some(act.x),
+                y: Some(act.y),
+            });
+        }
+    }
+    ctx.pending_train_cmds.remove(&ud.unit_tag_index);
+    if let Some(cmd) = ctx.pending_research_cmds.remove(&ud.unit_tag_index)
+        && sec_f > cmd.start_sec
+        && sec_f < cmd.start_sec + cmd.dur_sec
+    {
+        ctx.production_spans.push(ProductionSpan {
+            owner: cmd.pid,
+            kind: "upgrade".to_string(),
+            name: cmd.name,
+            start_sec: round1(cmd.start_sec),
+            end_sec: round1(sec_f),
+            full_sec: round1(cmd.dur_sec.max(1.0)),
+            approx: true,
+            x: cmd.xy.map(|p| p[0]),
+            y: cmd.xy.map(|p| p[1]),
+        });
+    }
+
     let UnitChangeHint::Unregistered { killer, killed } = change_hint else {
         return;
     };
@@ -576,6 +903,68 @@ fn handle_unit_died(
     ));
 }
 
+fn handle_upgrade_event(ctx: &mut ReplayAnalysisCtx<'_>, gl: i64, sec_f: f32, up: &UpgradeEvent) {
+    if (up.player_id != 1 && up.player_id != 2)
+        || up.count <= 0
+        || up.upgrade_type_name.is_empty()
+        || up.upgrade_type_name.starts_with("Spray")
+        || up.upgrade_type_name.starts_with("Reward")
+    {
+        return;
+    }
+    let pid = up.player_id;
+    let uname = up.upgrade_type_name.clone();
+    ctx.upgrade_events.push(UpgradeEventRecord {
+        game_loop: gl,
+        sec: round1(sec_f),
+        owner: pid,
+        name: uname.clone(),
+        count: up.count,
+    });
+
+    let matched_tag = ctx
+        .pending_research_cmds
+        .iter()
+        .filter(|(_, cmd)| {
+            cmd.pid == pid && sec_f >= cmd.start_sec && cmd.name.eq_ignore_ascii_case(&uname)
+        })
+        .min_by(|(_, a), (_, b)| {
+            a.start_sec
+                .partial_cmp(&b.start_sec)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(&tag, _)| tag);
+
+    if let Some(tag) = matched_tag
+        && let Some(cmd) = ctx.pending_research_cmds.remove(&tag)
+    {
+        ctx.production_spans.push(ProductionSpan {
+            owner: pid,
+            kind: "upgrade".to_string(),
+            name: uname,
+            start_sec: round1(cmd.start_sec),
+            end_sec: round1(sec_f.max(cmd.start_sec + 0.5)),
+            full_sec: round1((sec_f - cmd.start_sec).max(1.0)),
+            approx: false,
+            x: cmd.xy.map(|p| p[0]),
+            y: cmd.xy.map(|p| p[1]),
+        });
+    } else {
+        let dur = lookup_upgrade_duration_sec(&ctx.research_index, &uname).max(5.0);
+        ctx.production_spans.push(ProductionSpan {
+            owner: pid,
+            kind: "upgrade".to_string(),
+            name: uname,
+            start_sec: round1((sec_f - dur).max(0.0)),
+            end_sec: round1(sec_f),
+            full_sec: round1(dur),
+            approx: true,
+            x: None,
+            y: None,
+        });
+    }
+}
+
 fn handle_tracker_event(
     ctx: &mut ReplayAnalysisCtx<'_>,
     gl: i64,
@@ -599,24 +988,18 @@ fn handle_tracker_event(
         ReplayTrackerEvent::UnitBorn(ub) => {
             handle_unit_born(ctx, gl, sec_f, sec_u, ub, change_hint, sc2_state);
         }
-        ReplayTrackerEvent::UnitInit(ui) => handle_unit_init(ctx, sec_f, sec_u, ui),
+        ReplayTrackerEvent::UnitInit(ui) => handle_unit_init(ctx, sec_f, sec_u, ui, change_hint),
         ReplayTrackerEvent::UnitDone(ud) => {
-            if let Some(u) = sc2_state.units.get(&ud.unit_tag_index)
-                && let Some(pid) = u.user_id
-                && (pid == 1 || pid == 2)
-            {
-                let base = base_unit_name(&u.name).to_string();
-                if let Some(p) = ctx.players.get_mut(&pid) {
-                    *p.unit_dones.entry(base.clone()).or_default() += 1;
-                    *p.produced.entry(base).or_default() += 1;
-                }
-            }
+            handle_unit_done(ctx, sec_f, sec_u, ud, change_hint, sc2_state);
         }
         ReplayTrackerEvent::UnitTypeChange(utc) => {
             handle_unit_type_change(ctx, sec_f, utc, sc2_state);
         }
         ReplayTrackerEvent::UnitDied(ud) => {
             handle_unit_died(ctx, gl, sec_f, sec_u, ud, change_hint);
+        }
+        ReplayTrackerEvent::Upgrade(up) => {
+            handle_upgrade_event(ctx, gl, sec_f, up);
         }
         ReplayTrackerEvent::PlayerStats(ps) => {
             if ps.player_id != 1 && ps.player_id != 2 {
@@ -774,6 +1157,14 @@ fn handle_game_event(
 
             if let Some(p) = ctx.players.get_mut(&pid) {
                 p.raw_commands += 1;
+                p.recent_cmd_loops.push_back(gl);
+                while p
+                    .recent_cmd_loops
+                    .front()
+                    .is_some_and(|&t| t + APM_WINDOW_LOOPS < gl)
+                {
+                    p.recent_cmd_loops.pop_front();
+                }
                 if !is_spam && enriched_cmd.m_abil.is_some() {
                     p.macro_filtered_commands += 1;
                 }
@@ -855,6 +1246,65 @@ fn handle_game_event(
                                 },
                             ));
                         }
+                    }
+                }
+            }
+            if let UnitChangeHint::Abilities { units, .. } = change_hint {
+                if let Some(unit_target) = extract_train_target_name(ability) {
+                    let base_t = base_unit_name(unit_target);
+                    if !is_structure_unit(ctx.patch_balance, base_t) {
+                        let dur = lookup_unit_cost(ctx.patch_balance, base_t).time_faster_sec;
+                        if dur > 0.0
+                            && let Some(fac) = units
+                                .iter()
+                                .find(|u| PRODUCTION_STRUCTURES.contains(&base_unit_name(&u.name)))
+                        {
+                            let entry = ctx.pending_train_cmds.get(&fac.tag_index);
+                            if entry.is_none_or(|e| sec_f > e.start_sec + e.dur_sec * 1.2) {
+                                ctx.pending_train_cmds.insert(
+                                    fac.tag_index,
+                                    PendingCmdSpan {
+                                        pid,
+                                        name: base_t.to_string(),
+                                        start_sec: sec_f,
+                                        dur_sec: dur,
+                                        xy: Some([round1(fac.pos.x()), round1(fac.pos.y())]),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+                let res_opt = extract_research_target_name(ability)
+                    .map(|n| {
+                        (
+                            n.to_string(),
+                            lookup_upgrade_duration_sec(&ctx.research_index, n),
+                        )
+                    })
+                    .or_else(|| {
+                        ctx.research_index
+                            .by_abil_link
+                            .get(&abil_link)
+                            .map(|(n, d)| (n.clone(), *d))
+                    });
+                if let Some((rname, rdur)) = res_opt
+                    && let Some(fac) = units
+                        .iter()
+                        .find(|u| is_structure_unit(ctx.patch_balance, &u.name))
+                {
+                    let entry = ctx.pending_research_cmds.get(&fac.tag_index);
+                    if entry.is_none_or(|e| sec_f > e.start_sec + e.dur_sec * 1.15) {
+                        ctx.pending_research_cmds.insert(
+                            fac.tag_index,
+                            PendingCmdSpan {
+                                pid,
+                                name: rname,
+                                start_sec: sec_f,
+                                dur_sec: rdur,
+                                xy: Some([round1(fac.pos.x()), round1(fac.pos.y())]),
+                            },
+                        );
                     }
                 }
             }
@@ -1104,6 +1554,99 @@ fn to_sorted_heatmap(cells: HashMap<(u32, u32), (u32, u32)>) -> Vec<HeatmapCell>
     heatmap
 }
 
+fn is_undecided_result(res: &str) -> bool {
+    matches!(res, "" | "Undecided" | "Unknown")
+}
+
+pub(crate) fn infer_undecided_results(
+    players: &mut HashMap<u8, PerPlayerAcc>,
+    p1_surviving_structures: usize,
+    p2_surviving_structures: usize,
+    final_p1_chance: Option<f32>,
+    findings: &mut Vec<String>,
+) {
+    let p1_res = players.get(&1).map(|p| p.result.clone()).unwrap_or_default();
+    let p2_res = players.get(&2).map(|p| p.result.clone()).unwrap_or_default();
+    let p1_und = is_undecided_result(&p1_res);
+    let p2_und = is_undecided_result(&p2_res);
+    if !p1_und && !p2_und {
+        return;
+    }
+
+    let (winner_pid, reason) = if p1_und != p2_und {
+        if p1_res == "Win" || p2_res == "Loss" {
+            (Some(1u8), "mirroring opponent's recorded result".to_string())
+        } else if p2_res == "Win" || p1_res == "Loss" {
+            (Some(2u8), "mirroring opponent's recorded result".to_string())
+        } else {
+            (None, String::new())
+        }
+    } else if p1_surviving_structures == 0 && p2_surviving_structures > 0 {
+        (
+            Some(2u8),
+            format!(
+                "0 surviving P1 structures vs {} P2 structures",
+                p2_surviving_structures
+            ),
+        )
+    } else if p2_surviving_structures == 0 && p1_surviving_structures > 0 {
+        (
+            Some(1u8),
+            format!(
+                "{} surviving P1 structures vs 0 P2 structures",
+                p1_surviving_structures
+            ),
+        )
+    } else if let Some(p1_chance) = final_p1_chance {
+        if p1_chance >= 0.85 {
+            (
+                Some(1u8),
+                format!("final win probability {:.1}% >= 85%", p1_chance * 100.0),
+            )
+        } else if p1_chance <= 0.15 {
+            (
+                Some(2u8),
+                format!(
+                    "final win probability P1 {:.1}% <= 15% (P2 {:.1}%)",
+                    p1_chance * 100.0,
+                    (1.0 - p1_chance) * 100.0
+                ),
+            )
+        } else {
+            (None, String::new())
+        }
+    } else {
+        (None, String::new())
+    };
+
+    let Some(win_pid) = winner_pid else {
+        return;
+    };
+    let lose_pid = if win_pid == 1 { 2 } else { 1 };
+    if let Some(pw) = players.get_mut(&win_pid)
+        && is_undecided_result(&pw.result)
+    {
+        pw.result = "Win*".to_string();
+    }
+    if let Some(pl) = players.get_mut(&lose_pid)
+        && is_undecided_result(&pl.result)
+    {
+        pl.result = "Loss*".to_string();
+    }
+    let wname = players
+        .get(&win_pid)
+        .map(|p| p.name.as_str())
+        .unwrap_or("Winner");
+    let lname = players
+        .get(&lose_pid)
+        .map(|p| p.name.as_str())
+        .unwrap_or("Loser");
+    findings.push(format!(
+        "Match result inferred (*): {} Win* vs {} Loss* ({}; replay header reported Undecided/Unknown).",
+        wname, lname, reason
+    ));
+}
+
 pub fn analyze_replay_bytes(
     replay_id: &str,
     file_name: &str,
@@ -1140,10 +1683,19 @@ pub fn analyze_replay_bytes(
     let mut ctx = ReplayAnalysisCtx {
         protocol_version,
         patch_balance,
+        research_index: build_research_index(patch_balance),
         players: init_players(&basic_data),
         user_id_to_pid: HashMap::new(),
         static_objects: Vec::new(),
         static_tags: BTreeSet::new(),
+        born_counted_tags: HashSet::new(),
+        init_creators: HashMap::new(),
+        active_inits: HashMap::new(),
+        active_morphs: HashMap::new(),
+        pending_research_cmds: HashMap::new(),
+        pending_train_cmds: HashMap::new(),
+        upgrade_events: Vec::new(),
+        production_spans: Vec::new(),
         scored_tags: HashMap::new(),
         active_rays: VecDeque::new(),
         recent_deaths: VecDeque::new(),
@@ -1165,11 +1717,21 @@ pub fn analyze_replay_bytes(
             SC2EventType::Game { game_loop, .. } => *game_loop,
         };
 
+        if frames.is_empty() && gl > 0 {
+            frames.push(snapshot_frame(
+                0,
+                &iter.sc2_state,
+                &mut ctx,
+                &priority_snapshots,
+            ));
+            next_frame_loop = sample_interval_loops;
+        }
+
         while gl > next_frame_loop && !frames.is_empty() {
             frames.push(snapshot_frame(
                 next_frame_loop,
                 &iter.sc2_state,
-                &ctx,
+                &mut ctx,
                 &priority_snapshots,
             ));
             next_frame_loop += sample_interval_loops;
@@ -1229,18 +1791,22 @@ pub fn analyze_replay_bytes(
                 );
             }
         }
+    }
 
-        if frames.is_empty() && gl == 0 {
-            frames.push(snapshot_frame(0, &iter.sc2_state, &ctx, &priority_snapshots));
-            next_frame_loop = sample_interval_loops;
-        }
+    if frames.is_empty() {
+        frames.push(snapshot_frame(
+            0,
+            &iter.sc2_state,
+            &mut ctx,
+            &priority_snapshots,
+        ));
     }
 
     // Push final end-of-game frame
     frames.push(snapshot_frame(
         max_loop,
         &iter.sc2_state,
-        &ctx,
+        &mut ctx,
         &priority_snapshots,
     ));
 
@@ -1257,6 +1823,58 @@ pub fn analyze_replay_bytes(
     let mut findings: Vec<String> = Vec::new();
     let duration_sec = round1(max_loop as f32 / GAME_LOOPS_PER_SECOND as f32);
     let game_mins = (duration_sec / 60.0).max(1.0);
+
+    finalize_open_production_spans(&mut ctx, duration_sec);
+    ctx.upgrade_events
+        .sort_by(|a, b| a.game_loop.cmp(&b.game_loop).then(a.owner.cmp(&b.owner)));
+    ctx.production_spans.sort_by(|a, b| {
+        a.start_sec
+            .partial_cmp(&b.start_sec)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.owner.cmp(&b.owner))
+            .then(a.name.cmp(&b.name))
+    });
+    let death_log: Vec<DeathTimelineEvent> = ctx
+        .raw_deaths
+        .iter()
+        .map(|d| DeathTimelineEvent {
+            sec: d.sec as f32,
+            owner: d.owner_pid,
+            unit: d.unit.clone(),
+            cost: d.cost,
+            x: d.x,
+            y: d.y,
+        })
+        .collect();
+
+    let mut surviving_structures = [0usize; 3];
+    for u in iter.sc2_state.units.values() {
+        if !u.is_init
+            && !u.name.starts_with("CreepTumor")
+            && let Some(pid) = u.user_id
+            && (pid == 1 || pid == 2)
+            && is_structure_unit(patch_balance, &u.name)
+        {
+            surviving_structures[pid as usize] += 1;
+        }
+    }
+    let final_p1_chance = win_chance_curve.last().map(|s| s.p1_chance).or_else(|| {
+        let s1 = ctx.players.get(&1).map(|p| p.side_stats).unwrap_or_default();
+        let s2 = ctx.players.get(&2).map(|p| p.side_stats).unwrap_or_default();
+        if s1.army + s1.income + s2.army + s2.income > 0 {
+            Some(compute_win_chance(duration_sec.max(1.0) as u32, &s1, &s2).p1_chance)
+        } else {
+            None
+        }
+    });
+    infer_undecided_results(
+        &mut ctx.players,
+        surviving_structures[1],
+        surviving_structures[2],
+        final_p1_chance,
+        &mut findings,
+    );
+
     let player_reports = build_player_reports(
         &mut ctx.players,
         &engagements,
@@ -1290,5 +1908,57 @@ pub fn analyze_replay_bytes(
         siege_spots,
         frames,
         priority_snapshots,
+        upgrade_events: ctx.upgrade_events,
+        production_spans: ctx.production_spans,
+        death_log,
     })
+}
+
+fn finalize_open_production_spans(ctx: &mut ReplayAnalysisCtx<'_>, duration_sec: f32) {
+    let end_sentinel = round1(duration_sec + 0.1);
+    for (_, act) in ctx.active_inits.drain().chain(ctx.active_morphs.drain()) {
+        if duration_sec >= act.start_sec {
+            ctx.production_spans.push(ProductionSpan {
+                owner: act.pid,
+                kind: act.kind.to_string(),
+                name: act.name,
+                start_sec: round1(act.start_sec),
+                end_sec: end_sentinel,
+                full_sec: round1(act.full_sec.max(1.0)),
+                approx: false,
+                x: Some(act.x),
+                y: Some(act.y),
+            });
+        }
+    }
+    for (_, cmd) in ctx.pending_research_cmds.drain() {
+        if duration_sec >= cmd.start_sec && duration_sec <= cmd.start_sec + cmd.dur_sec * 1.15 {
+            ctx.production_spans.push(ProductionSpan {
+                owner: cmd.pid,
+                kind: "upgrade".to_string(),
+                name: cmd.name,
+                start_sec: round1(cmd.start_sec),
+                end_sec: end_sentinel,
+                full_sec: round1(cmd.dur_sec.max(1.0)),
+                approx: true,
+                x: cmd.xy.map(|p| p[0]),
+                y: cmd.xy.map(|p| p[1]),
+            });
+        }
+    }
+    for (_, cmd) in ctx.pending_train_cmds.drain() {
+        if duration_sec >= cmd.start_sec && duration_sec <= cmd.start_sec + cmd.dur_sec * 1.15 {
+            ctx.production_spans.push(ProductionSpan {
+                owner: cmd.pid,
+                kind: "unit".to_string(),
+                name: cmd.name,
+                start_sec: round1(cmd.start_sec),
+                end_sec: end_sentinel,
+                full_sec: round1(cmd.dur_sec.max(1.0)),
+                approx: true,
+                x: cmd.xy.map(|p| p[0]),
+                y: cmd.xy.map(|p| p[1]),
+            });
+        }
+    }
 }

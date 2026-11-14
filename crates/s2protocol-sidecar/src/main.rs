@@ -272,10 +272,12 @@ fn main() {
 mod tests {
     use super::*;
     use forensics::{
-        compute_turning_points, format_counts_map, has_companion_priority_log, is_morph_death,
-        normalize_race, parse_priority_log_lines, read_priority_snapshots_for_replay,
-        win_chance_coeffs,
+        compute_turning_points, format_counts_map, has_companion_priority_log,
+        infer_undecided_results, is_morph_death, normalize_race, parse_priority_log_lines,
+        read_priority_snapshots_for_replay, win_chance_coeffs,
     };
+    use models::PerPlayerAcc;
+    use std::collections::HashMap;
 
     #[test]
     fn test_clean_player_name_and_race() {
@@ -414,6 +416,226 @@ mod tests {
             assert!(has_companion_priority_log(&top_replay));
             let snaps = read_priority_snapshots_for_replay(&top_replay);
             assert!(!snaps.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_infer_undecided_results_paths() {
+        let mk_players = |r1: &str, r2: &str| -> HashMap<u8, PerPlayerAcc> {
+            let mut m = HashMap::new();
+            m.insert(
+                1,
+                PerPlayerAcc {
+                    pid: 1,
+                    name: "Alpha".to_string(),
+                    result: r1.to_string(),
+                    ..Default::default()
+                },
+            );
+            m.insert(
+                2,
+                PerPlayerAcc {
+                    pid: 2,
+                    name: "Beta".to_string(),
+                    result: r2.to_string(),
+                    ..Default::default()
+                },
+            );
+            m
+        };
+
+        // 1) Surviving structures decides 0 vs >0
+        let mut p = mk_players("Undecided", "Undecided");
+        let mut f = Vec::new();
+        infer_undecided_results(&mut p, 0, 5, Some(0.5), &mut f);
+        assert_eq!(p[&1].result, "Loss*");
+        assert_eq!(p[&2].result, "Win*");
+        assert_eq!(f.len(), 1);
+
+        // 2) Final win probability <= 0.15 or >= 0.85 decides when both have structures
+        let mut p2 = mk_players("Unknown", "Undecided");
+        let mut f2 = Vec::new();
+        infer_undecided_results(&mut p2, 6, 8, Some(0.148), &mut f2);
+        assert_eq!(p2[&1].result, "Loss*");
+        assert_eq!(p2[&2].result, "Win*");
+
+        let mut p3 = mk_players("Undecided", "Undecided");
+        let mut f3 = Vec::new();
+        infer_undecided_results(&mut p3, 6, 8, Some(0.89), &mut f3);
+        assert_eq!(p3[&1].result, "Win*");
+        assert_eq!(p3[&2].result, "Loss*");
+
+        // 3) Ambiguous stays Undecided
+        let mut p4 = mk_players("Undecided", "Undecided");
+        let mut f4 = Vec::new();
+        infer_undecided_results(&mut p4, 4, 4, Some(0.51), &mut f4);
+        assert_eq!(p4[&1].result, "Undecided");
+        assert_eq!(p4[&2].result, "Undecided");
+        assert!(f4.is_empty());
+
+        // 4) Explicitly decided results are preserved untouched
+        let mut p5 = mk_players("Win", "Loss");
+        let mut f5 = Vec::new();
+        infer_undecided_results(&mut p5, 0, 5, Some(0.10), &mut f5);
+        assert_eq!(p5[&1].result, "Win");
+        assert_eq!(p5[&2].result, "Loss");
+        assert!(f5.is_empty());
+    }
+
+    #[test]
+    fn test_ui_html_contains_round3_features() {
+        let html = include_str!("../sidecar-ui.html");
+        for needle in [
+            "/preload.js",
+            "sendAgentBtn",
+            "catalogSearch",
+            "catalog-filter-btn",
+            "SupplyDepotLowered",
+            "SiegeTankSieged",
+            "requestAnimationFrame",
+            "staticMapCanvas",
+            "devicePixelRatio",
+            "cameras: true",
+            "window.sidecar?.agent?.sendMessage",
+        ] {
+            assert!(
+                html.contains(needle),
+                "sidecar-ui.html missing expected Round 3 feature marker: {needle}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_round3_local_replays_forensics_if_present() {
+        let root = default_repo_root();
+        let r511 = root.join("replays/aiarena_matches/5110180_Mothman-T_vs_Opponent.SC2Replay");
+        if r511.exists() {
+            let b = analyze_replay_file(&r511, 180, false).expect("5110180 should parse");
+            assert!(b.frames[0].units.len() >= 40);
+            assert_eq!(Some(b.frames[0].cameras[0]), b.players[0].start_xy);
+            assert_eq!(Some(b.frames[0].cameras[1]), b.players[1].start_xy);
+            let has_raised = b
+                .frames
+                .iter()
+                .any(|f| f.units.iter().any(|u| u.name == "SupplyDepot"));
+            let has_lowered = b
+                .frames
+                .iter()
+                .any(|f| f.units.iter().any(|u| u.name == "SupplyDepotLowered"));
+            assert!(
+                has_raised && has_lowered,
+                "5110180 must preserve raised SupplyDepot and SupplyDepotLowered"
+            );
+        }
+
+        let r1794 = root.join(
+            "replays/local_real_matches/1794277094_Mothman-T_vs_Thssprtssbt_TritonLE.SC2Replay",
+        );
+        if r1794.exists() {
+            let b = analyze_replay_file(&r1794, 120, false).expect("1794277094 should parse");
+            assert_eq!(b.players[0].result, "Loss*");
+            assert_eq!(b.players[1].result, "Win*");
+            assert!(b.findings.iter().any(|f| f.contains("Win*")));
+        }
+
+        let r_pfull = root.join("replays/Mothman-P-full.SC2Replay");
+        if r_pfull.exists() {
+            let b = analyze_replay_file(&r_pfull, 120, false).expect("Mothman-P-full should parse");
+            assert_eq!(Some(b.frames[0].cameras[0]), b.players[0].start_xy);
+            assert_eq!(Some(b.frames[0].cameras[1]), b.players[1].start_xy);
+            assert!(b.players[0].good_decisions + b.players[0].even_decisions > 0);
+            assert!(
+                b.players[0]
+                    .production_idle
+                    .iter()
+                    .any(|r| r.structure == "Gateway")
+            );
+        }
+    }
+
+    #[test]
+    fn test_research_index_and_target_extractors() {
+        let bal = closest_patch_balance(93272).expect("balance db for 93272");
+        let idx = build_research_index(bal);
+        assert!(lookup_upgrade_duration_sec(&idx, "WarpGateResearch") > 50.0);
+        assert!(lookup_upgrade_duration_sec(&idx, "Stimpack") > 50.0);
+        assert!(lookup_upgrade_duration_sec(&idx, "TerranInfantryWeaponsLevel1") > 80.0);
+        assert_eq!(
+            extract_train_target_name("BarracksTrain.Marine"),
+            Some("Marine")
+        );
+        assert_eq!(extract_train_target_name("Train."), None);
+        assert_eq!(
+            extract_research_target_name("CyberneticsCoreResearch.WarpGateResearch"),
+            Some("WarpGateResearch")
+        );
+        assert_eq!(
+            extract_research_target_name("EngineeringBayUpgrade.TerranInfantryWeaponsLevel1"),
+            Some("TerranInfantryWeaponsLevel1")
+        );
+        assert_eq!(extract_research_target_name("Move"), None);
+    }
+
+    #[test]
+    fn test_ui_leader_panel_markers() {
+        let html = include_str!("../sidecar-ui.html");
+        for needle in [
+            "id=\"leaderPanel\"",
+            "id=\"leaderTab\"",
+            "id=\"leaderPanelBody\"",
+            "leaderTab: \"D\"",
+            "renderLeaderPanel",
+            "LEADER_UNIT_ALIASES",
+            "formatUpgradeDisplay",
+            "Production (D)",
+            "Active Units (U)",
+            "Upgrades (G)",
+            "APM / EPM (V)",
+            "Units Lost (L)",
+            "Collapsed (N)",
+        ] {
+            assert!(
+                html.contains(needle),
+                "sidecar-ui.html missing expected Leader Panel marker: {needle}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_leader_panel_replay_telemetry_if_present() {
+        let root = default_repo_root();
+        let r511 = root.join("replays/aiarena_matches/5110180_Mothman-T_vs_Opponent.SC2Replay");
+        if r511.exists() {
+            let b = analyze_replay_file(&r511, 180, false).expect("5110180 should parse");
+            assert!(!b.upgrade_events.is_empty(), "5110180 should record upgrades");
+            assert!(!b.production_spans.is_empty(), "5110180 should track production spans");
+            assert!(!b.death_log.is_empty(), "5110180 should record cumulative deaths");
+            let mid = b.frames.len() / 2;
+            assert!(
+                b.frames[mid].apm[0][1] > 0 || b.frames[mid].apm[1][1] > 0,
+                "5110180 midpoint frame should carry non-zero APM"
+            );
+        }
+
+        let r_pfull = root.join("replays/Mothman-P-full.SC2Replay");
+        if r_pfull.exists() {
+            let b = analyze_replay_file(&r_pfull, 120, false).expect("Mothman-P-full should parse");
+            assert!(
+                b.upgrade_events.iter().any(|u| u.name == "WarpGateResearch"),
+                "Mothman-P-full should detect WarpGateResearch completion"
+            );
+            assert!(
+                b.upgrade_events.iter().any(|u| u.name == "Charge"),
+                "Mothman-P-full should detect Charge completion"
+            );
+            assert!(
+                b.production_spans.iter().any(|s| s.kind == "upgrade"),
+                "Mothman-P-full should include research spans"
+            );
+            assert!(
+                b.production_spans.iter().any(|s| !s.approx),
+                "Mothman-P-full should include exact UnitInit/Cmd spans"
+            );
         }
     }
 }
