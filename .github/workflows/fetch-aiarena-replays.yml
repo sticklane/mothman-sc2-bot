@@ -31,13 +31,12 @@ jobs:
         run: |
           mkdir -p out_replays
           python3 - <<'PY'
-          import concurrent.futures
           import json
           import os
           import re
           import subprocess
           import sys
-          import threading
+          import time
 
           BOT_IDS = {
               1457: "Mothman-R",
@@ -68,44 +67,86 @@ jobs:
 
           def api_get(url):
               full_url = url if url.startswith("http") else f"https://aiarena.net/api/{url.lstrip('/')}"
-              res = subprocess.run(
-                  [
-                      "curl", "-sL", "--max-time", "25",
-                      "-H", f"Authorization: Token {token}",
-                      "-H", "User-Agent: mothman-racket-forensics/3.0",
-                      full_url,
-                  ],
-                  capture_output=True,
-                  text=True,
-              )
-              if res.returncode != 0 or not res.stdout.strip():
-                  return None
-              try:
-                  return json.loads(res.stdout)
-              except Exception:
-                  return None
+              for attempt in range(6):
+                  time.sleep(0.35)
+                  res = subprocess.run(
+                      [
+                          "curl", "-sL", "--max-time", "25",
+                          "-w", "\n%{http_code}",
+                          "-H", f"Authorization: Token {token}",
+                          "-H", "User-Agent: mothman-racket-forensics/3.0",
+                          full_url,
+                      ],
+                      capture_output=True,
+                      text=True,
+                  )
+                  if res.returncode != 0:
+                      wait_s = 2.5 * (attempt + 1)
+                      print(f"  [WARN] curl rc={res.returncode} for {full_url}; retrying in {wait_s:.1f}s", file=sys.stderr)
+                      time.sleep(wait_s)
+                      continue
+                  body, _, status_str = res.stdout.rpartition("\n")
+                  http_code = int(status_str.strip()) if status_str.strip().isdigit() else 0
+                  data = None
+                  if body.strip():
+                      try:
+                          data = json.loads(body)
+                      except Exception:
+                          data = None
+                  detail = str(data.get("detail", "")) if isinstance(data, dict) else ""
+                  if http_code == 429 or http_code >= 500 or "throttled" in detail.lower():
+                      m = re.search(r"Expected available in (\d+(?:\.\d+)?) seconds", detail)
+                      wait_s = (float(m.group(1)) + 0.5) if m else min(20.0, 2.5 * (attempt + 1))
+                      print(
+                          f"  [RATE_LIMIT] HTTP {http_code} on {full_url}; retrying in {wait_s:.1f}s ({detail})",
+                          file=sys.stderr,
+                      )
+                      time.sleep(wait_s)
+                      continue
+                  if http_code < 200 or http_code >= 300:
+                      print(f"  [WARN] HTTP {http_code} on {full_url}: {body[:200]}", file=sys.stderr)
+                      return None
+                  return data
+              print(f"  [ERROR] Exhausted retries for {full_url}", file=sys.stderr)
+              return None
 
           def download_file(url, dest_path):
               if not url:
                   return False
               part_path = dest_path + ".part"
-              cmd = [
-                  "curl", "-sfL", "--max-time", "30",
-                  "-H", "User-Agent: mothman-racket-forensics/3.0",
-                  "-o", part_path,
-              ]
-              if "aiarena.net" in url:
-                  cmd.extend(["-H", f"Authorization: Token {token}"])
-              cmd.append(url)
-              res = subprocess.run(cmd, capture_output=True)
-              if res.returncode == 0 and os.path.isfile(part_path) and os.path.getsize(part_path) > 0:
-                  os.replace(part_path, dest_path)
-                  return True
-              if os.path.isfile(part_path):
-                  os.remove(part_path)
+              for attempt in range(4):
+                  time.sleep(0.25)
+                  cmd = [
+                      "curl", "-sL", "--max-time", "45",
+                      "-w", "%{http_code}",
+                      "-H", "User-Agent: mothman-racket-forensics/3.0",
+                      "-o", part_path,
+                  ]
+                  if "aiarena.net" in url:
+                      cmd.extend(["-H", f"Authorization: Token {token}"])
+                  cmd.append(url)
+                  res = subprocess.run(cmd, capture_output=True, text=True)
+                  http_code = int(res.stdout.strip()) if res.stdout.strip().isdigit() else 0
+                  if res.returncode == 0 and 200 <= http_code < 300 and os.path.isfile(part_path) and os.path.getsize(part_path) > 0:
+                      os.replace(part_path, dest_path)
+                      return True
+                  if os.path.isfile(part_path):
+                      os.remove(part_path)
+                  if http_code in (429, 500, 502, 503, 504) or res.returncode != 0:
+                      wait_s = min(20.0, 2.5 * (attempt + 1))
+                      print(
+                          f"  [WARN] Download HTTP {http_code} (rc={res.returncode}) for {dest_path}; retrying in {wait_s:.1f}s",
+                          file=sys.stderr,
+                      )
+                      time.sleep(wait_s)
+                      continue
+                  print(f"  [WARN] Download HTTP {http_code} failed for {url}", file=sys.stderr)
+                  return False
               return False
 
-          # 1. Live Bot & Competition Status
+          # 1. Live Bot & Competition Status (cache match-participations per bot for step 2)
+          per_bot_limit = min(100, max(limit * 2, 40) if since_match is not None else max(limit * 2, 20))
+          mp_cache = {}
           status_lines = [
               "============================================================================",
               f"  AI Arena Live Bot & Match Status (User #{USER_ID}, Competition #{COMPETITION_ID})",
@@ -129,8 +170,9 @@ jobs:
                   f"  * {bname} (#{bid}, {btype}) | active={active} elo={elo if elo is not None else 'N/A'} "
                   f"div={div_num if div_num is not None else 'N/A'} | updated={zupd} md5={zmd5}"
               )
-              mp_resp = api_get(f"match-participations/?bot={bid}&ordering=-match&limit=5")
+              mp_resp = api_get(f"match-participations/?bot={bid}&ordering=-match&limit={per_bot_limit}")
               mp_list = mp_resp.get("results", []) if isinstance(mp_resp, dict) else []
+              mp_cache[bid] = mp_list
               for p in mp_list[:5]:
                   mid = p.get("match")
                   res = p.get("result") or "QUEUED/IN_PROGRESS"
@@ -148,14 +190,18 @@ jobs:
           with open(os.path.join(OUT_DIR, "live_status.txt"), "w", encoding="utf-8") as fh:
               fh.write(status_text)
 
-          # 2. Discover recent match IDs across Mothman bots
-          per_bot_limit = max(limit, 40) if since_match is not None else limit
+          # 2. Discover recent COMPLETED match IDs across Mothman bots using cached participations
           mids_set = set()
           for bid in QUERY_BOT_IDS:
-              resp = api_get(f"match-participations/?bot={bid}&ordering=-match&limit={per_bot_limit}")
-              rows = resp.get("results", []) if isinstance(resp, dict) else []
-              for r in rows:
-                  mid = r.get("match") if isinstance(r, dict) else None
+              if bid not in mp_cache:
+                  resp = api_get(f"match-participations/?bot={bid}&ordering=-match&limit={per_bot_limit}")
+                  mp_cache[bid] = resp.get("results", []) if isinstance(resp, dict) else []
+              for r in mp_cache[bid]:
+                  if not isinstance(r, dict):
+                      continue
+                  if r.get("result") not in ("win", "loss", "tie") and not r.get("match_log"):
+                      continue
+                  mid = r.get("match")
                   if isinstance(mid, int) and mid > 0:
                       mids_set.add(mid)
 
@@ -165,22 +211,19 @@ jobs:
           else:
               selected_mids = all_mids[-limit:]
 
-          print(f"[FETCH] Downloading {len(selected_mids)} AI Arena match(es): {selected_mids}")
+          print(f"[FETCH] Downloading {len(selected_mids)} completed AI Arena match(es): {selected_mids}")
 
-          name_lock = threading.Lock()
           known_names = dict(BOT_IDS)
 
           def resolve_bot_name(bot_id):
               if not isinstance(bot_id, int) or bot_id <= 0:
                   return "Opponent"
-              with name_lock:
-                  if bot_id in known_names:
-                      return known_names[bot_id]
+              if bot_id in known_names:
+                  return known_names[bot_id]
               resp = api_get(f"bots/{bot_id}/")
               bname = resp.get("name") if isinstance(resp, dict) else None
               final_name = bname if isinstance(bname, str) and bname else f"Bot{bot_id}"
-              with name_lock:
-                  known_names[bot_id] = final_name
+              known_names[bot_id] = final_name
               return final_name
 
           def fetch_match(mid):
@@ -225,6 +268,10 @@ jobs:
                   "replay_url": r0.get("replay_file") or "",
                   "created": r0.get("created") or "",
               }
+              if not (our_bid or meta["replay_url"] or meta["match_log_url"]):
+                  print(f"  [WARN] Match #{mid}: skipping empty/unpopulated API response", file=sys.stderr)
+                  return
+
               meta_path = os.path.join(OUT_DIR, f"{mid}_meta.json")
               with open(meta_path, "w", encoding="utf-8") as fh:
                   json.dump(meta, fh)
@@ -243,8 +290,8 @@ jobs:
                   f"cause={meta['result_cause']} elo={meta['elo_change']} | replay={rep_ok} log={log_ok}"
               )
 
-          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-              list(pool.map(fetch_match, selected_mids))
+          for mid in selected_mids:
+              fetch_match(mid)
 
           with open(os.path.join(OUT_DIR, "bot_names_cache.json"), "w", encoding="utf-8") as fh:
               json.dump({str(k): v for k, v in known_names.items()}, fh)
